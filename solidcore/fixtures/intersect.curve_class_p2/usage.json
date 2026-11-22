@@ -1,0 +1,47 @@
+{ "cases": [
+  { "name": "face_grid_reset_crv_on_surf",
+    "upstream_ref": "source/SMLib/src/SmFaceGrid.cpp:136 (ReSet(pCurveOnSurf, &sIvl, pIsoCurve, sZoneTol3d, .., FALSE, TRUE, pSupportSurf))",
+    "inputs": {
+      "objects": [
+        { "bsurf": { "net": [[[0,0,0,-1.7976931348623157e308],[0,1,0.2,-1.7976931348623157e308]],[[1,0,0.1,-1.7976931348623157e308],[1,1,0.3,-1.7976931348623157e308]]], "p": 1, "q": 1, "u": [0,0,1,1], "v": [0,0,1,1] } },
+        { "curve": { "bspline": { "dim": 2, "cpts": [[0.0,0.5,1.7976931348623157e308,-1.7976931348623157e308],[1.0,0.5,1.7976931348623157e308,-1.7976931348623157e308]], "p": 1, "u": [0,0,1,1] } } },
+        { "curve": { "line": { "p": [0,0,0], "v": [1,0,0], "domain": [0,1] } } }
+      ],
+      "cos": [[1, 0]],
+      "cc": [
+        { "curve": 2, "tol": 1e-5, "ivls": [ { "a": 0, "b": 1, "pcs": [ {"class":100,"obj":null,"t":0,"gap":0}, {"class":100,"obj":null,"t":0,"gap":0}, {"class":100,"obj":null,"t":0,"gap":0} ] } ] },
+        { "curve": null, "tol": 1e-5, "ivls": [] }
+      ],
+      "ops": [
+        { "op": "reset", "t": 0, "r": { "curve": 3, "ivl": [0, 1], "uv": 1, "tol": 1e-5, "owned": false, "current": true, "s1": 0, "s2": null, "uv2": null, "ti": null } },
+        { "op": "min_uv", "t": 0, "j": 0, "uv": [9, 9] },
+        { "op": "max_uv", "t": 0, "j": 0, "uv": [9, 9] },
+        { "op": "crv_loc", "t": 0, "j": 1 },
+        { "op": "edit_max", "t": 0, "j": 0, "param": 0.5, "collapse": true },
+        { "op": "insert", "t": 0, "j": 1, "ivl": { "a": 0.5, "b": 1, "pcs": [ {"class":106,"obj":1,"t":0.5,"gap":0}, {"class":100,"obj":null,"t":0,"gap":0}, {"class":100,"obj":null,"t":0,"gap":0} ] } },
+        { "op": "min_uv", "t": 0, "j": 1, "uv": [9, 9] }
+      ]
+    } },
+  { "name": "line_seg_squeeze_connect",
+    "upstream_ref": "source/SMLib/src/SmLineSegClass.cpp:913 (ConnectIntervals(lMin, SM_PIP_END, FALSE)), :1332 (.., TRUE)",
+    "inputs": {
+      "objects": [ { "curve": { "line": { "p": [0,0,0], "v": [2,1,0], "domain": [0,1] } } } ],
+      "cc": [
+        { "curve": 0, "tol": 1e-5, "ivls": [
+          { "a": 0, "b": 0.3, "pcs": [ {"class":106,"obj":0,"t":0,"gap":0}, {"class":100,"obj":null,"t":0,"gap":0}, {"class":106,"obj":0,"t":0.3,"gap":0} ] },
+          { "a": 0.3, "b": 0.3000001, "pcs": [ {"class":106,"obj":0,"t":0.3,"gap":0}, {"class":110,"obj":null,"t":0,"gap":0}, {"class":106,"obj":0,"t":0.3,"gap":1e-7} ] },
+          { "a": 0.3000001, "b": 1, "pcs": [ {"class":106,"obj":0,"t":0.3,"gap":1e-7}, {"class":100,"obj":null,"t":0,"gap":0}, {"class":106,"obj":0,"t":1,"gap":0} ] } ] },
+        { "curve": 0, "tol": 1e-5, "ivls": [
+          { "a": 0, "b": 0.5, "pcs": [ {"class":100,"obj":null,"t":0,"gap":0}, {"class":100,"obj":null,"t":0,"gap":0}, {"class":100,"obj":null,"t":0,"gap":0} ] },
+          { "a": 0.5, "b": 1, "pcs": [ {"class":100,"obj":null,"t":0,"gap":0}, {"class":100,"obj":null,"t":0,"gap":0}, {"class":100,"obj":null,"t":0,"gap":0} ] } ] }
+      ],
+      "ops": [
+        { "op": "connect", "t": 0, "j": 1, "end": 3, "allow": false },
+        { "op": "connect", "t": 1, "j": 1, "end": 3, "allow": false },
+        { "op": "connect", "t": 1, "j": 0, "end": 1, "allow": true },
+        { "op": "update_pc", "t": 0, "j": 1, "tol": 1e-5, "pc": {"class":106,"obj":0,"t":0.3,"gap":0} },
+        { "op": "obj_tol", "t": 0, "j": 1 },
+        { "op": "assign", "t": 1 }
+      ]
+    } }
+] }

@@ -16,9 +16,9 @@ use serde_json::{Value, json};
 use solidcore_record::{Vec2, Vec3};
 
 use crate::SolveApp;
-use crate::theme::Tokens;
 use crate::tools::Tool;
 use crate::viewport::{Hit, Proj, pick_3d};
+use solidcraft_theme::Tokens;
 
 thread_local! {
     /// Points of the curve being drawn in 3D (with the tool they belong to).
@@ -36,8 +36,10 @@ const ARROW: f32 = 60.0;
 
 /// Is the sketch being edited a 3D sketch?
 pub fn active(app: &SolveApp) -> bool {
-    let st = crate::open_meshing::session_world(&app.session);
-    app.session.active_sketch.and_then(|s| st.sketch(s)).is_some_and(|ss| ss.sketch.view.three_d)
+    // Asked at every frame: with no sketch open (a joint drag runs only then), the world is not
+    // asked for, which would place a drag's frame, every moved body again (#6325).
+    let Some(sketch) = app.session.active_sketch else { return false };
+    crate::open_meshing::session_world(&app.session).sketch(sketch).is_some_and(|ss| ss.sketch.view.three_d)
 }
 
 fn takes(cmd: &str) -> bool {
@@ -90,12 +92,14 @@ pub fn point_at(app: &SolveApp, proj: &Proj, pos: Pos2) -> Option<(Vec3, &'stati
     let (o, d) = proj.ray(pos);
     for h in pick_3d(app, proj, pos) {
         match h {
+            Hit::SketchPoint3d { at, .. } => return Some((at, "Pt")),
             Hit::SketchPoint { sketch, at, .. } => {
                 if let Some(source) = st.sketch(sketch) {
                     return Some((source.plane.to_world(at), "Pt"));
                 }
             }
             Hit::Vertex { point, .. } => return Some((point, "Vertex")),
+            Hit::PointCloudPoint { point, .. } => return Some((point, "Cloud")),
             Hit::Edge { body, index, .. } => {
                 let ws = crate::open_meshing::session_world(&app.session);
                 let m = ws.body(&body)?.mesh();
@@ -256,7 +260,7 @@ pub fn preview(app: &SolveApp, t: &Tool, painter: &egui::Painter, proj: &Proj) -
                 s + vec2(10.0, -14.0),
                 egui::Align2::LEFT_BOTTOM,
                 label,
-                egui::FontId::proportional(crate::theme::Tokens::get().font_micro),
+                egui::FontId::proportional(solidcraft_theme::Tokens::get().font_micro),
                 tk.text,
             );
         }
@@ -264,7 +268,7 @@ pub fn preview(app: &SolveApp, t: &Tool, painter: &egui::Painter, proj: &Proj) -
             crate::tool_cursor::readout_at(painter, proj.rect, s),
             egui::Align2::LEFT_TOP,
             format!("{}, {}, {}", crate::prefs::show_mm(app, h.x, 1), crate::prefs::show_mm(app, h.y, 1), crate::prefs::show_mm(app, h.z, 1)),
-            egui::FontId::proportional(crate::theme::Tokens::get().font_small),
+            egui::FontId::proportional(solidcraft_theme::Tokens::get().font_small),
             tk.text_dim,
         );
     }

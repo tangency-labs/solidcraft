@@ -1,4 +1,11 @@
-//! Contract and result types for `assembly.bom` in `cmd/bom.rs` (#11075).
+//! Contracts and result types for the commands in `cmd/bom.rs`: `assembly.bom` (#11075), and
+//! `component.metadata` and `component.metadata.set` (#12609).
+//!
+//! The part property handlers read their parameters from the raw JSON, so each key here reads as
+//! its handler reads it and fails with the handler's message. A `component` the handlers refuse
+//! when it is left out is optional in the type and required in the schema, so that the handler's
+//! message, not the check's "is required", is what a caller sees. Whether a component exists
+//! (and that the root is not one `component.metadata.set` changes) stays the handler's to check.
 
 use std::borrow::Cow;
 use std::collections::BTreeMap;
@@ -6,13 +13,318 @@ use std::collections::BTreeMap;
 use schemars::{JsonSchema, Schema, SchemaGenerator, json_schema};
 use serde::de::Error as _;
 use serde::{Deserialize, Deserializer, Serialize};
-use serde_json::Value;
+use serde_json::{Map, Value};
+use solidcraft_doc::BomType;
+use solidcraft_doc::bom::View;
+use solidcraft_doc::metadata::MAX_KEYS;
 
 use super::check::whole;
+use super::motion::require;
+use super::types::{IdOrName, present};
+
+/// Let one occurrence count as another bill of materials type in every bill of materials, in
+/// place of its component's, or as its component again. An occurrence inside a subassembly
+/// belongs to its definition, so the type holds wherever the subassembly is placed. One undo step.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[schemars(deny_unknown_fields)]
+pub struct OccurrenceBomTypeParams {
+    /// The occurrence: its id, or its name.
+    pub occurrence: IdOrName,
+    /// Its placement, checked when given: the occurrence ids from the design down to it.
+    #[serde(default, deserialize_with = "present", skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "OccurrencePath")]
+    pub path: Option<OccurrencePath>,
+    /// The type it counts as, or `same_as_component` (or null) for its component's.
+    #[serde(deserialize_with = "bom_type")]
+    #[schemars(schema_with = "bom_type_schema")]
+    pub bom_type: Option<BomType>,
+}
+
+/// An occurrence path, read by the handlers' own reader.
+#[derive(Debug)]
+pub struct OccurrencePath(pub Vec<u64>);
+
+impl<'de> Deserialize<'de> for OccurrencePath {
+    fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        crate::cmd::path_ids(&Value::deserialize(d)?).map(OccurrencePath).map_err(|e| D::Error::custom(whole(e)))
+    }
+}
+
+impl JsonSchema for OccurrencePath {
+    fn schema_name() -> Cow<'static, str> {
+        "OccurrencePath".into()
+    }
+    fn json_schema(_: &mut SchemaGenerator) -> Schema {
+        json_schema!({
+            "description": "Occurrence ids from the design down to the placement.",
+            "type": "array",
+            "items": {"type": "integer", "minimum": 0},
+            "minItems": 1,
+            "maxItems": solidcraft_doc::MAX_PLACEMENT_DEPTH
+        })
+    }
+}
+
+/// `bom_type`, read by the handler's own reader.
+fn bom_type<'de, D: Deserializer<'de>>(d: D) -> Result<Option<BomType>, D::Error> {
+    crate::cmd::occurrence_bom_type(Some(&Value::deserialize(d)?)).map_err(|e| D::Error::custom(whole(e)))
+}
+
+/// The five types' words, `same_as_component`, or null.
+fn bom_type_schema(_: &mut SchemaGenerator) -> Schema {
+    let mut words: Vec<Value> = BomType::ALL.iter().map(|t| Value::from(t.as_str())).collect();
+    words.push(Value::from(crate::cmd::SAME_AS_COMPONENT));
+    json_schema!({
+        "description": "normal, phantom, reference, purchased or inseparable; same_as_component or null: the component's.",
+        "anyOf": [{"type": "string", "enum": words}, {"type": "null"}]
+    })
+}
+
+/// What `occurrence.bom_type` returns.
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct OccurrenceBomTypeResult {
+    /// The occurrence's id.
+    pub occurrence: u64,
+    /// Its own type now, or `same_as_component`.
+    pub bom_type: String,
+    /// The type it counts as: its own, else its component's.
+    pub effective: String,
+    /// Whether this call changed it (an undo step).
+    pub changed: bool,
+    /// In the warn parameter-check mode: what the call's parameters got wrong.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub param_warnings: Vec<String>,
+}
+
+/// A component's id or name, as `component_id` in the handlers reads it: anything else, `null`
+/// included, is refused with the handler's message.
+fn component_key<'de, D: Deserializer<'de>>(d: D) -> Result<Option<String>, D::Error> {
+    match Value::deserialize(d)? {
+        Value::Number(n) => Ok(Some(n.to_string())),
+        Value::String(s) => Ok(Some(s)),
+        _ => Err(D::Error::custom(whole("`component` must be a component id or name"))),
+    }
+}
+
+fn component_required(schema: &mut Schema) {
+    require(schema, "component");
+}
+
+fn component_id_schema(_: &mut SchemaGenerator) -> Schema {
+    json_schema!({"description": "The component, by id or name (0 or \"root\": the design itself).", "type": ["number", "string"]})
+}
+
+fn text_or_null_schema(_: &mut SchemaGenerator) -> Schema {
+    json_schema!({"type": ["string", "null"]})
+}
+
+/// Read the part properties of a component, or of the design itself (`0` or `root`): part
+/// number, description, revision, bill of materials type, the `metadata` object as saved and the
+/// free properties.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[schemars(deny_unknown_fields, transform = component_required)]
+pub struct ComponentMetadataParams {
+    #[serde(default, deserialize_with = "component_key", skip_serializing_if = "Option::is_none")]
+    #[schemars(schema_with = "component_id_schema")]
+    pub component: Option<String>,
+}
+
+/// What `component.metadata` returns.
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct ComponentMetadataResult {
+    /// The component, by id (0: the design).
+    pub component: u64,
+    /// Its name (the design's name for 0).
+    pub name: String,
+    /// The part number, or null when it has none.
+    pub part_number: Option<String>,
+    /// The description, or null when it has none.
+    pub description: Option<String>,
+    /// The revision, or null when it has none.
+    pub revision: Option<String>,
+    /// `normal`, `phantom`, `reference`, `purchased` or `inseparable`. Not given for the design.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub bom_type: Option<String>,
+    /// Its static material (what its bill of materials rows say it is made of), or null when it
+    /// has none. Not given for the design.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub material: Option<Option<String>>,
+    /// What one placement means in a bill of materials, as an expression, or null when it has
+    /// none (one piece). Not given for the design.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub bom_quantity: Option<Option<String>>,
+    /// Whether it is virtual: no geometry, listed in bills of materials. Not given for the design.
+    #[serde(rename = "virtual", skip_serializing_if = "Option::is_none")]
+    pub r#virtual: Option<bool>,
+    /// The metadata object as saved, other tools' keys included.
+    pub metadata: Map<String, Value>,
+    /// The free properties, `{name: text}`. Empty for the design.
+    pub properties: BTreeMap<String, String>,
+    /// In the warn parameter-check mode: what the call's parameters got wrong.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub param_warnings: Vec<String>,
+}
+
+/// An object, as `component.metadata.set` reads `values` and `properties`: an object of at
+/// most 256 entries, with the handler's messages for anything else (`null` included). Each
+/// entry's value is left to the handler, which has its own message for each.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Entries(pub Map<String, Value>);
+
+fn entries<'de, D: Deserializer<'de>>(d: D, key: &str, what: &str, shape: &str) -> Result<Option<Entries>, D::Error> {
+    match Value::deserialize(d)? {
+        Value::Object(v) if v.len() <= MAX_KEYS => Ok(Some(Entries(v))),
+        Value::Object(_) => Err(D::Error::custom(whole(format!("`{key}` can hold at most {MAX_KEYS} {what}")))),
+        _ => Err(D::Error::custom(whole(format!("`{key}` must be an object: {shape}")))),
+    }
+}
+
+fn values<'de, D: Deserializer<'de>>(d: D) -> Result<Option<Entries>, D::Error> {
+    entries(d, "values", "keys", "{key: value, …}")
+}
+
+fn free_properties<'de, D: Deserializer<'de>>(d: D) -> Result<Option<Entries>, D::Error> {
+    entries(d, "properties", "names", "{name: text, …}")
+}
+
+fn values_schema(_: &mut SchemaGenerator) -> Schema {
+    json_schema!({
+        "description": "Several properties at once, {key: value, …}, at most 256 keys: SolidCraft's keys (the ones `document.metadata`'s `properties` lists) and `bom_type`, which take text, or a reverse-DNS key such as `com.example.tool`, which takes an object. Each key reads its value as the parameter of the same name does (`part_number`, `bom_type`, …): for a text key, empty text or null removes it; for `bom_type` it means `normal`.",
+        "type": "object",
+        "maxProperties": MAX_KEYS
+    })
+}
+
+fn properties_schema(_: &mut SchemaGenerator) -> Schema {
+    json_schema!({
+        "description": "Free properties, {name: text, …}, at most 256 names (a name is 1 to 128 bytes of text without control characters; a number or boolean is kept as its text). Empty text or null removes a property.",
+        "type": "object",
+        "maxProperties": MAX_KEYS,
+        "additionalProperties": {"type": ["string", "number", "boolean", "null"]}
+    })
+}
+
+// Deserialize is written out below rather than derived: the handler reads the other keys only for
+// a component that is not the design, so for `0` or `root` they are neither read nor checked.
+/// Change a component's part properties in one undo step (all or nothing): `part_number`,
+/// `description`, `revision` and `bom_type`, `values` for several keys at once (also another
+/// tool's reverse-DNS keys), and `properties` for free properties. Not the design's own
+/// (`document.metadata.set`). Give at least one of them. A change that sets what is already
+/// there makes no undo step.
+#[derive(Debug, JsonSchema)]
+#[schemars(deny_unknown_fields, transform = component_required)]
+pub struct ComponentMetadataSetParams {
+    #[serde(default, deserialize_with = "component_key", skip_serializing_if = "Option::is_none")]
+    #[schemars(schema_with = "component_id_schema")]
+    pub component: Option<String>,
+    /// The part number: text of at most 4096 bytes. Empty text or null removes it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[schemars(schema_with = "text_or_null_schema")]
+    pub part_number: Option<Value>,
+    /// The description: text of at most 4096 bytes. Empty text or null removes it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[schemars(schema_with = "text_or_null_schema")]
+    pub description: Option<Value>,
+    /// The revision: text of at most 4096 bytes. Empty text or null removes it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[schemars(schema_with = "text_or_null_schema")]
+    pub revision: Option<Value>,
+    /// How the component counts in the bill of materials: `normal`, `phantom`, `reference`,
+    /// `purchased` or `inseparable`. Empty text or null: `normal`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[schemars(schema_with = "text_or_null_schema")]
+    pub bom_type: Option<Value>,
+    /// A static material: what its bill of materials rows say it is made of, in place of its
+    /// bodies' materials (the mass stays). Empty text or null clears it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[schemars(schema_with = "text_or_null_schema")]
+    pub material: Option<Value>,
+    /// What one placement means in a bill of materials, as an expression: a number of pieces
+    /// (`4`) or a length (`2.5 m`), above 0. Empty text or null removes it (one piece).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[schemars(schema_with = "text_or_null_schema")]
+    pub bom_quantity: Option<Value>,
+    /// A component with no geometry (grease, a label): it can't be the active component or hold
+    /// bodies, sketches or components.
+    #[serde(default, rename = "virtual", skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "Option<bool>")]
+    pub r#virtual: Option<Value>,
+    #[serde(default, deserialize_with = "values", skip_serializing_if = "Option::is_none")]
+    #[schemars(schema_with = "values_schema")]
+    pub values: Option<Entries>,
+    #[serde(default, deserialize_with = "free_properties", skip_serializing_if = "Option::is_none")]
+    #[schemars(schema_with = "properties_schema")]
+    pub properties: Option<Entries>,
+}
+
+impl<'de> Deserialize<'de> for ComponentMetadataSetParams {
+    fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        let p = Map::<String, Value>::deserialize(d)?;
+        set_form(&p).map_err(D::Error::custom)
+    }
+}
+
+/// A key's value through its reader, or `None` when the key is left out.
+fn key_with<'a, T>(
+    p: &'a Map<String, Value>,
+    key: &str,
+    read: impl FnOnce(&'a Value) -> Result<Option<T>, serde_json::Error>,
+) -> Result<Option<T>, serde_json::Error> {
+    p.get(key).map_or(Ok(None), read)
+}
+
+/// The keys `component.metadata.set`'s handler reads, in its order: the component, and for any
+/// but the design (`0`, `root` in any case), the text keys, `values` and then `properties`.
+fn set_form(p: &Map<String, Value>) -> Result<ComponentMetadataSetParams, serde_json::Error> {
+    let component = key_with(p, "component", component_key)?;
+    let mut form = ComponentMetadataSetParams {
+        component,
+        part_number: None,
+        description: None,
+        revision: None,
+        bom_type: None,
+        material: None,
+        bom_quantity: None,
+        r#virtual: None,
+        values: None,
+        properties: None,
+    };
+    if form.component.as_deref().is_some_and(|c| c == "0" || c.eq_ignore_ascii_case("root")) {
+        return Ok(form);
+    }
+    form.values = key_with(p, "values", values)?;
+    form.part_number = p.get("part_number").cloned();
+    form.description = p.get("description").cloned();
+    form.revision = p.get("revision").cloned();
+    form.bom_type = p.get("bom_type").cloned();
+    form.material = p.get("material").cloned();
+    form.bom_quantity = p.get("bom_quantity").cloned();
+    form.r#virtual = p.get("virtual").cloned();
+    form.properties = key_with(p, "properties", free_properties)?;
+    Ok(form)
+}
+
+/// What `component.metadata.set` returns.
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct ComponentMetadataSetResult {
+    /// The component, by id.
+    pub component: u64,
+    /// Its metadata object after the change.
+    pub metadata: Map<String, Value>,
+    /// Its free properties after the change.
+    pub properties: BTreeMap<String, String>,
+    /// What changed: the keys whose value changed, and `properties.<name>` for each free
+    /// property. Empty when nothing did (and then nothing was added to undo).
+    pub changed: Vec<String>,
+    /// In the warn parameter-check mode: what the call's parameters got wrong.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub param_warnings: Vec<String>,
+}
 
 /// The bill of materials below a component: its parts, counted through subassemblies, by part
-/// number. Each component's bom type counts: a phantom has no row (what it holds counts where it
-/// is placed), a reference counts nowhere, and a purchased or inseparable component is one row.
+/// number. Each placement counts as its occurrence's bom type, else its component's: a phantom has
+/// no row (what it holds counts where it is placed), a reference counts nowhere, and a purchased or
+/// inseparable component is one row.
 #[derive(Debug, Deserialize, JsonSchema)]
 #[schemars(deny_unknown_fields)]
 pub struct BomParams {
@@ -21,16 +333,27 @@ pub struct BomParams {
     #[schemars(schema_with = "component_schema")]
     pub component: Option<String>,
     /// `flat` (the default): every part at any depth, counted through its subassemblies; `top`:
-    /// the component's direct children, subassemblies as one row each.
+    /// the component's direct children, subassemblies as one row each; `all`: as top, each
+    /// subassembly's own rows listed after it, to any depth.
     #[serde(default, deserialize_with = "levels")]
     #[schemars(schema_with = "levels_schema")]
     pub levels: Option<String>,
+    /// In all levels, a purchased part's contents listed under it too (default false).
+    #[serde(default, deserialize_with = "show_purchased_contents")]
+    pub show_purchased_contents: Option<bool>,
+    /// A part a configuration switches off (no bodies, a suppressed feature of its own) listed as
+    /// placed (default false: it counts nowhere).
+    #[serde(default, deserialize_with = "show_suppressed_parts")]
+    pub show_suppressed_parts: Option<bool>,
     #[serde(default)]
     pub group_by: Option<BomGroupBy>,
     /// A component with a part number is one row, the parts placed inside it listed under it as
     /// `children` rather than as rows of their own (default false).
     #[serde(default, deserialize_with = "group_children")]
     pub group_children: Option<bool>,
+    /// Measure each part: `mass_g` on its row, and `total_mass_g` (default false).
+    #[serde(default, deserialize_with = "mass")]
+    pub mass: Option<bool>,
     /// Also write the bill of materials to this `.csv` or `.json` file (children as items 1.1,
     /// 1.2…).
     #[serde(default)]
@@ -54,26 +377,44 @@ fn component_schema(_: &mut SchemaGenerator) -> Schema {
     json_schema!({"type": ["number", "string", "null"]})
 }
 
-/// `flat` or `top`, with the handler's message; `null` is `flat`.
+/// A view's word, with the handler's message; `null` is the default view.
 fn levels<'de, D: Deserializer<'de>>(d: D) -> Result<Option<String>, D::Error> {
     match Value::deserialize(d)? {
         Value::Null => Ok(None),
-        Value::String(l) if l == "flat" || l == "top" => Ok(Some(l)),
-        _ => Err(D::Error::custom(whole("`levels` is flat or top"))),
+        Value::String(l) if View::parse(&l).is_some() => Ok(Some(l)),
+        _ => Err(D::Error::custom(whole(format!("`levels` is {}", View::ALL.map(View::as_str).join(" or "))))),
     }
 }
 
 fn levels_schema(_: &mut SchemaGenerator) -> Schema {
-    json_schema!({"enum": ["flat", "top", null]})
+    let mut words: Vec<Value> = View::ALL.iter().map(|v| Value::from(v.as_str())).collect();
+    words.push(Value::Null);
+    json_schema!({"enum": words})
 }
 
 /// `true` or `false`, with the handler's message; `null` is `false`.
-fn group_children<'de, D: Deserializer<'de>>(d: D) -> Result<Option<bool>, D::Error> {
+fn flag<'de, D: Deserializer<'de>>(d: D, key: &str) -> Result<Option<bool>, D::Error> {
     match Value::deserialize(d)? {
         Value::Null => Ok(None),
         Value::Bool(b) => Ok(Some(b)),
-        _ => Err(D::Error::custom(whole("`group_children` is true or false"))),
+        _ => Err(D::Error::custom(whole(format!("`{key}` is true or false")))),
     }
+}
+
+fn group_children<'de, D: Deserializer<'de>>(d: D) -> Result<Option<bool>, D::Error> {
+    flag(d, "group_children")
+}
+
+fn mass<'de, D: Deserializer<'de>>(d: D) -> Result<Option<bool>, D::Error> {
+    flag(d, "mass")
+}
+
+fn show_purchased_contents<'de, D: Deserializer<'de>>(d: D) -> Result<Option<bool>, D::Error> {
+    flag(d, "show_purchased_contents")
+}
+
+fn show_suppressed_parts<'de, D: Deserializer<'de>>(d: D) -> Result<Option<bool>, D::Error> {
+    flag(d, "show_suppressed_parts")
 }
 
 /// What makes two components one row: `part_number` (the default; components without a part
@@ -121,21 +462,30 @@ impl JsonSchema for BomGroupBy {
 pub struct Bom {
     /// The component listed, by id (0: the design).
     pub component: u64,
-    /// `flat` or `top`.
+    /// `flat`, `top` or `all`.
     pub levels: String,
     /// `["part_number"]` or `["definition"]`.
     pub group_by: Vec<String>,
     pub group_children: bool,
+    pub show_purchased_contents: bool,
+    pub show_suppressed_parts: bool,
+    pub mass: bool,
     /// With `path`: the file written.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub path: Option<String>,
     /// With `path`: `csv` or `json`.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub format: Option<String>,
-    /// The rows, by part number; rows without one after them, by name.
+    /// The rows, by part number; rows without one after them, by name. In a numbered view each
+    /// level goes by item number; in all levels each row is followed by the rows under it.
     pub rows: Vec<BomRow>,
     /// How many occurrences the rows count, children included.
     pub total_occurrences: u64,
+    /// With `mass`: what the assembly weighs, in grams; null when unknown.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub total_mass_g: Option<Option<f64>>,
+    /// Whether the view's item numbers are saved.
+    pub numbered: bool,
     /// In the warn parameter-check mode: what the call's parameters got wrong.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub param_warnings: Vec<String>,
@@ -144,40 +494,61 @@ pub struct Bom {
 /// One row of a bill of materials.
 #[derive(Debug, Serialize, JsonSchema)]
 pub struct BomRow {
-    /// Its number, from 1.
-    pub item: usize,
+    /// Its number: from 1 at the top level, and as text such as `2.1` under another row.
+    #[schemars(schema_with = "item_schema")]
+    pub item: Value,
     pub part_number: String,
     pub description: String,
     pub revision: String,
-    /// `normal`, `purchased` or `inseparable`.
+    /// `normal`, `phantom`, `purchased` or `inseparable`.
     pub bom_type: String,
     /// How many are placed.
     pub count: u64,
     /// The components' names, `; ` between them.
     pub definition: String,
-    /// The components' ids.
-    pub components: Vec<u64>,
-    /// Their free properties, by name.
-    pub properties: BTreeMap<String, String>,
-    /// With `group_children`: the parts placed inside it.
+    /// The physical materials of the definitions' own bodies, `; ` between them.
+    pub material: String,
+    /// Under another row: how many are in one of that row's component.
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub children: Option<Vec<BomChild>>,
+    pub each: Option<u64>,
+    /// At the top level: the components' ids.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub components: Option<Vec<u64>>,
+    /// At the top level: their free properties, by name.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub properties: Option<BTreeMap<String, String>>,
+    /// With `mass`: what one of the row's parts weighs, in grams; null when unknown.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub mass_g: Option<Option<f64>>,
+    /// When its definitions have a `bom_quantity`: what its placements add up to; null with
+    /// `quantity_unknown`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub quantity: Option<Option<f64>>,
+    /// `pieces` or `mm`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub quantity_unit: Option<String>,
+    /// `mixed` (pieces and a length) or `invalid` (a quantity that no longer evaluates).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub quantity_unknown: Option<String>,
+    /// In a numbered view, its number isn't saved yet.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub provisional: Option<bool>,
+    /// A renumber keeps its number.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub locked: Option<bool>,
+    /// Another row at its level has its number.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub duplicate: Option<bool>,
+    /// The values typed in for the component, shown in place of the worked-out ones.
+    #[serde(rename = "static", skip_serializing_if = "Option::is_none")]
+    pub statics: Option<Vec<String>>,
+    /// The parts placed inside it, listed under it.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub children: Option<Vec<BomRow>>,
 }
 
-/// A part placed inside a row's component, with `group_children`.
-#[derive(Debug, Serialize, JsonSchema)]
-pub struct BomChild {
-    /// Its number under its row, such as `2.1`.
-    pub item: String,
-    pub part_number: String,
-    pub description: String,
-    pub revision: String,
-    pub bom_type: String,
-    /// How many are in one of the row's component.
-    pub each: u64,
-    /// How many in all.
-    pub count: u64,
-    pub definition: String,
+fn item_schema(_: &mut SchemaGenerator) -> Schema {
+    json_schema!({"type": ["integer", "string"]})
 }
 
 #[cfg(test)]

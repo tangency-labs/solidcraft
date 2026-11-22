@@ -1,0 +1,164 @@
+{
+ "cases": [
+  {
+   "name": "ub215_partial_torus_tiny_circle_tiny_turn",
+   "inputs": {
+    "expected_rejection": true,
+    "op": 3,
+    "data": [0.0, 1e-06, 1e-06, 30.0, 30.0000000000001, 9.156379209174137, -8.265571696094371, 9.187968366457618, 1.0, 0.3822658777827509, 0.0, 0.0, 1.0, -0.307584645643617]
+   }
+  },
+  {
+   "name": "ub215_partial_torus_tiny_circle_far_origin",
+   "inputs": {
+    "expected_rejection": true,
+    "op": 3,
+    "data": [0.0, 0.01, 1e-06, 0.0, 359.0, -7665.418823876078, 6586.981678642605, 8967.753165417136, 1.0, 0.27316665091502534, 0.0, 0.0, 1.0, 0.4722750374207537]
+   }
+  },
+  {
+   "name": "ub215_partial_cone_top_line_9e-6",
+   "inputs": {
+    "expected_rejection": true,
+    "op": 1,
+    "data": [0.0, 1.0, 1.0, 9e-06, 0.0, 90.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0, 0.0]
+   }
+  },
+  {
+   "name": "ub215_partial_cone_apex_top_line_1e-6",
+   "inputs": {
+    "expected_rejection": true,
+    "op": 1,
+    "data": [0.0, 0.001, 0.0, 1e-06, -45.0, 314.0, 139.94306325294593, 331.6284794155677, 22.641998033520405, 1.0, 0.28673202905877526, 0.0, 0.0, 1.0, 0.02064721918462098]
+   }
+  },
+  {
+   "name": "hang35_near_full_sphere_1e-5",
+   "inputs": {
+    "expected_rejection": true,
+    "op": 2,
+    "data": [0.0, 1e-05, 30.0, 390.0000000036, -9.027018926001224e-06, 2.2606184288592225e-06, 4.033056063134217e-06, 0.0, 0.0, 1.0, 1.0, 0.0, 0.0]
+   }
+  },
+  {
+   "name": "hang35_full_torus_1e-5",
+   "inputs": {
+    "expected_rejection": true,
+    "op": 3,
+    "data": [0.0, 1e-05, 1e-05, 0.0, 360.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0, 0.0]
+   }
+  },
+  {
+   "name": "ub50_taper_two_identical_lines",
+   "inputs": {
+    "expected_rejection": true,
+    "op": 8,
+    "data": [0, 1.0, 5.0, 3, 0, 0, 1, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 1, 0, 0]
+   }
+  },
+  {
+   "name": "ub50_taper_line_and_its_reverse",
+   "inputs": {
+    "expected_rejection": true,
+    "op": 8,
+    "data": [0, 1.0, 5.0, 3, 0, 0, 1, 0, 0, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 0, 0]
+   }
+  },
+  {
+   "name": "ub50_taper_two_identical_arcs",
+   "inputs": {
+    "expected_rejection": true,
+    "op": 8,
+    "data": [0, 1.0, 5.0, 3, 0, 0, 1, 0, 1, 0, 0, 0, 1.0, 0, 180, 1, 0, 0, 0, 1.0, 0, 180]
+   }
+  },
+  {
+   "name": "ub50_taper_line_back_through_the_last_mid",
+   "inputs": {
+    "expected_rejection": true,
+    "op": 8,
+    "data": [0, 1.0, 5.0, 3, 0, 0, -1, 0, 0, 0, 0, 0, 3e-05, 0, 0, 0, 3e-05, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 0, 0]
+   }
+  },
+  {
+   "name": "ub50_taper_second_pass_line_and_reverse_apart_down",
+   "inputs": {
+    "expected_rejection": true,
+    "op": 8,
+    "data": [0, 1.0, 5.0, 3, 0, 0, -1, 0, 0, 0, 1, 0, 0, 0, 0, 0, 1, 1, 0, 0, 1, 0, 0, 0, 1, 0, 1, 1, 0]
+   }
+  },
+  {
+   "name": "ub50_taper_second_pass_short_link_up",
+   "inputs": {
+    "expected_rejection": true,
+    "op": 8,
+    "data": [0, 1.0, 5.0, 3, 0, 0, 1, 0, 0, 3e-05, 0, 0, 0, 0, 0, 0, 3e-05, 0, 0, 0, 0.5, 0, 0, 0, 0.5, 0, 0, 0, 0]
+   }
+  },
+  {
+   "name": "ub50_taper_end_cap_offsets_of_a_loop_enclosing_nothing",
+   "inputs": {
+    "expected_rejection": true,
+    "op": 8,
+    "data": [1.0, 100.0, -24.89625914511591, 3.0, 0.0, 0.0, -1.0, 1.0, 0.0, 0.0, 0.0, 0.0, 4.9999999999999996e-05, 0.0, 0.0, 0.0, 4.9999999999999996e-05, 0.0, 0.0, 100.0, 0.0, 0.0, 0.0, 100.0, 0.0, 0.0, 0.0, 0.0, 0.0]
+   }
+  },
+  {
+   "name": "ub50_taper_second_pass_half_circle_both_chords_down",
+   "inputs": {
+    "expected_rejection": true,
+    "op": 8,
+    "data": [0, 1.0, 5.0, 3, 0, 0, -1, 0, 1, 0, 0, 0, 1, 0, 180, 0, 1, 0, 0, -1, 0, 0, 0, -1, 0, 0, 1, 0, 0]
+   }
+  },
+  {
+   "name": "ub50_taper_end_cap_sliver_down",
+   "inputs": {
+    "expected_rejection": true,
+    "op": 8,
+    "data": [0, 1.0, -24.9, 2, 0, 0, -1, 0, 0, 0, 0, 0, 0.001, 0, 0, 0, 0.001, 0, 0, 100, 0.0001, 0, 0, 100, 0.0001, 0, 0, 0, 0]
+   }
+  },
+  {
+   "name": "ub247_taper_start_cap_tail_into_square_fuzz00880",
+   "inputs": {
+    "expected_rejection": true,
+    "op": 8,
+    "data": [0, 1.0, 5.0, 3, 0, 0, 1, 0, 0, 0, 43, 0, 1, 0, 0, 0, 1, 0, 0, 1, 1, 0, 0, 1, 1, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0]
+   }
+  },
+  {
+   "name": "ub247_taper_start_cap_tail_short_of_corner_up",
+   "inputs": {
+    "expected_rejection": true,
+    "op": 8,
+    "data": [0, 1.0, 5.0, 1, 0, 0, 1, 0, 0, 0, 10, 0, 1.001, 0, 0, 0, 1, 0, 0, 1, 1, 0, 0, 1, 1, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0]
+   }
+  },
+  {
+   "name": "ub247_taper_start_cap_two_squares_at_a_corner",
+   "inputs": {
+    "expected_rejection": true,
+    "op": 8,
+    "data": [0, 1.0, 5.0, 3, 0, 0, 0, 0, 0, 1, 0, 0, 1, 1, 0, 0, 1, 1, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 2, 1, 0, 2, 2, 0, 0, 2, 2, 0, 1, 2, 0, 0, 1, 2, 0, 1, 1, 0, 0, 1, 1, 0, 2, 1, 0]
+   }
+  },
+  {
+   "name": "ub247_taper_start_cap_spike_from_corner_down",
+   "inputs": {
+    "expected_rejection": true,
+    "op": 8,
+    "data": [0, 1.0, 5.0, 1, 0, 0, -1, 0, 0, 1, 0, 0, 1, 1, 0, 0, 1, 1, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0.3, 0.6, 0]
+   }
+  },
+  {
+   "name": "ub247_taper_start_cap_half_circle_across_a_side",
+   "inputs": {
+    "expected_rejection": true,
+    "op": 8,
+    "data": [0, 1.0, 5.0, 3, 0, 0, 1, 0, 0, 1, 0, 0, 1, 1, 0, 0, 1, 1, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 1, 0.5, 0, 0, 0.5, 180, 360]
+   }
+  }
+ ]
+}

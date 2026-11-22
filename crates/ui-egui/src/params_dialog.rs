@@ -7,7 +7,8 @@
 //! (`expr.evaluate`) with a live model preview; Enter or leaving the field applies them.
 //! With "Apply each change as you leave its field" off (a remembered preference, #9279), they
 //! wait instead, without a preview, until Apply or OK sets them in one `parameters.change`.
-//! Escape closes the window and discards pending edits and their preview.
+//! Escape closes the window and discards pending edits and their preview; Cancel and Escape also
+//! put back the expressions applied live since the dialog opened, in one undo step (#15377).
 //! Import and export go through `parameters.import` / `parameters.export`.
 //!
 //! [`complete`] adds suggestions (parameters, functions, units) under any expression box: the
@@ -19,7 +20,7 @@ use std::sync::Arc;
 use serde_json::{Value, json};
 
 use crate::SolveApp;
-use crate::ui_kit::{self, Column};
+use crate::ui_kit;
 
 /// What Import reads. The picker must list them: on macOS, files of a type no filter names
 /// can't be picked (#3216).
@@ -37,6 +38,13 @@ pub struct ParamsDialog {
     reset_scroll: bool,
     /// Expressions being edited, by parameter name.
     pub editing: std::collections::BTreeMap<String, String>,
+    /// Expressions applied live since the dialog opened (#15377), by parameter name: the one the
+    /// parameter had before the first, and the one the design listed right after the last, read
+    /// before anything else can change it. Cancel and Escape put the first back.
+    applied: std::collections::BTreeMap<String, (String, String)>,
+    /// Expressions applied and still computing off the window thread, by parameter name: their
+    /// rows show them until the change is in.
+    pub(crate) applying: std::collections::BTreeMap<String, String>,
     /// Comments being edited, by parameter name.
     pub comments: std::collections::BTreeMap<String, String>,
     /// A parameter being renamed: (old name, new name).
@@ -52,8 +60,21 @@ pub struct ParamsDialog {
     pub new_comment: String,
     /// The last error from an action in the dialog.
     pub error: Option<String>,
+    /// Why adding the add row's draft was refused, kept while the draft and the design document
+    /// stay.
+    new_refused: Option<NewRefused>,
     /// The expression edit to preview: (name, expression).
     pub preview: Option<(String, String)>,
+    /// Whether an expression box set the preview this frame (else it ends with the edit).
+    previewing: bool,
+    /// Which opening of the window this is: each section's grid keeps its cursor and edit under
+    /// it, so a window opened again starts clean.
+    opening: u64,
+    /// The sections whose grids were drawn, so closing the window forgets their state.
+    grids: Vec<String>,
+    /// The cell being typed in (section, parameter, column) and the draft it held before, which
+    /// is what the cell holds until the edit commits: `editing` and `comments` show the typing.
+    typing: Option<(String, String, usize, Option<String>)>,
     /// The rows as the engine listed them at one revision of the design (#2723): listing
     /// evaluates every parameter, so it happens when the design changes, not every frame.
     listed: Option<(u64, Arc<Vec<Row>>)>,
@@ -85,7 +106,22 @@ impl ParamsDialog {
     /// The add row starts blank, its expression too (#2919): a value put there for the user was
     /// almost never the one wanted, and had to be erased first.
     pub fn new() -> Self {
-        ParamsDialog { reset_scroll: true, ..Default::default() }
+        static OPENINGS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+        let opening = OPENINGS.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        ParamsDialog { reset_scroll: true, opening, ..Default::default() }
+    }
+
+    /// Forget the grids' cursors and open edits, as the window closes.
+    fn forget_grids(&self, ctx: &egui::Context) {
+        for salt in &self.grids {
+            ui_kit::Grid::forget(ctx, grid_state(self, salt));
+        }
+    }
+
+    /// What the window's banner says: the last action's message, else why the add row's draft
+    /// was refused.
+    pub fn banner(&self) -> Option<&str> {
+        self.error.as_deref().or(self.new_refused.as_ref().map(|r| r.error.as_str()))
     }
     /// The command the live preview should run (a valid expression being edited).
     pub fn preview_commands(&self) -> Option<Vec<(String, Value)>> {
@@ -113,13 +149,15 @@ struct Row {
 impl Row {
     /// Whether the Filter box's text (lower case) is in the row's name, expression, text,
     /// comment or group. The expression lets a parameter's name find every one that uses it
-    /// (#9706).
+    /// (#9706). The name also matches by the starts of its words, in order: `toodia` finds
+    /// `tooth_outward_flange_diameter` (#11978).
     fn matches(&self, filter: &str) -> bool {
         filter.is_empty()
             || [&self.name, &self.expression, &self.comment, &self.group]
                 .into_iter()
                 .chain(self.text.as_ref())
                 .any(|field| field.to_ascii_lowercase().contains(filter))
+            || solidcraft_engine::doc::name_words_match(&self.name, filter)
     }
 }
 
@@ -193,7 +231,14 @@ pub(crate) fn cancel_on_escape(app: &mut SolveApp, ctx: &egui::Context) -> bool 
         i.raw.events.retain(|event| !matches!(event, egui::Event::Key { key: egui::Key::Escape, modifiers, .. } if modifiers.matches_logically(egui::Modifiers::NONE)));
     });
     // Dropping the dialog discards every draft. The regular preview update clears its scene.
-    app.params = None;
+    // What was applied live goes back first; a refused put-back keeps the dialog open to say so.
+    if let Some(mut d) = app.params.take() {
+        if revert_applied(app, &mut d) {
+            d.forget_grids(ctx);
+        } else {
+            app.params = Some(d);
+        }
+    }
     app.esc_handled = true;
     true
 }
@@ -207,6 +252,19 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
         publish(app, ctx);
     }
     let Some(mut d) = app.params.take() else { return };
+    forget_refused_add(app, &mut d);
+    if !d.applying.is_empty() && app.computing_since().is_none() && app.deferred_queue.is_empty() {
+        // A live edit computed off the window thread (#6777) is in now; what the design lists for
+        // it is what Cancel later checks is still there (#15377), as `apply_grid` read it too early.
+        let listed = rows(app);
+        for name in std::mem::take(&mut d.applying).into_keys() {
+            if let Some(entry) = d.applied.get_mut(&name)
+                && let Some(now) = listed.iter().find(|l| l.name == name)
+            {
+                entry.1 = now.expression.clone();
+            }
+        }
+    }
     d.sort = ctx.data_mut(|m| m.get_persisted(sort_id())).unwrap_or_default();
     let sort = d.sort;
     ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Enter));
@@ -215,18 +273,15 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
         app.params = Some(d);
         return;
     }
-    let palette = app.viewport.palette_rect.filter(|r| r.is_finite() && r.is_positive());
-    let side =
-        if palette.is_some() && crate::sketch_palette::fits_beside_a_dialog(app, ctx) { crate::frame::Side::Left } else { crate::frame::Side::Right };
-    let top = crate::shell::panel_top(app, viewport, viewport.bottom(), side);
-    let docked = egui::pos2(side.anchor_x(viewport), top);
+    let side = crate::frame::Side::Right;
+    let (_, docked) = crate::shell::floating_editor_anchor(app, ctx);
     let moved = crate::frame::dock_offset(ctx, "PARAMETERS");
     let drag_bounds = crate::shell::tool_drag_rect(app, viewport);
     let anchor = crate::frame::offset_anchor(docked, moved, drag_bounds, side);
-    let title = crate::i18n::tr_label("Parameters");
+    let title = solidcraft_ui_text::tr_label("Parameters");
     let panel = ui_kit::Panel::new(
         title,
-        egui::Id::new("sc_params_dialog"),
+        egui::Id::unique("sc_params_dialog"),
         anchor,
         drag_bounds,
         side,
@@ -235,12 +290,12 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
     .wide()
     .body_rows(16.0)
     .reset_scroll(d.reset_scroll);
-    let panel = if side == crate::frame::Side::Left {
-        let available = palette.map_or(viewport.width(), |r| (r.left() - viewport.left() - crate::theme::Tokens::get().space_8).max(0.0));
-        panel.width((crate::theme::Tokens::get().form_card_width * 3.0).min(available))
-    } else {
-        panel
-    };
+    // A width or body height the user dragged the card to replaces that default; each axis stays
+    // automatic until the user drags it (review of #13422).
+    let (chosen_width, chosen_height) = (SIZE.width(ctx), SIZE.height(ctx));
+    let width = chosen_width.map_or(solidcraft_theme::Tokens::get().form_card_width * 3.0, |w| w.max(crate::frame::DIALOG_MIN_W));
+    let panel = panel.body_height(chosen_height);
+    let panel = panel.width(width.min((docked.x - drag_bounds.left()).max(crate::frame::DIALOG_MIN_W)));
     let all = if let Some((_, rows)) = d.listed.as_ref().filter(|(rev, _)| *rev == app.session.revision) {
         rows.clone()
     } else {
@@ -252,7 +307,9 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
     let mut outcome = (false, ui_kit::Action::None);
     let live = app.preferences.parameters_apply_live;
     let held_status = if live { None } else { held_status(held(&d, &all).len()) };
-    panel.window(ctx).show(ctx, |ui| {
+    let mut resize = crate::card_resize::Resize::None;
+    d.previewing = false;
+    let shown = panel.window(ctx).show(ctx, |ui| {
         outcome = panel.feature(
             ui,
             ui_kit::FeatureOptions {
@@ -274,7 +331,7 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
                 });
                 ui.horizontal_wrapped(|ui| {
                     if ui_kit::icon_label_button(ui, "Import…", "import_tray", true, false)
-                        .backing_on_hover_text(crate::i18n::tr_label("CSV or JSON: updates existing parameters, adds new ones"))
+                        .backing_on_hover_text(solidcraft_ui_text::tr_label("CSV or JSON: updates existing parameters, adds new ones"))
                         .clicked()
                     {
                         app.pick_open_command("parameters.import", json!({}), IMPORT_TYPES);
@@ -285,7 +342,7 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
                         }
                     }
                 });
-                if let Some(error) = &d.error {
+                if let Some(error) = d.banner() {
                     ui_kit::text(ui, error, ui_kit::Text::Error("parameters_error"));
                 }
                 let filter = d.filter.to_ascii_lowercase();
@@ -295,8 +352,8 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
                 let name_floor = visible
                     .iter()
                     .map(|r| ui_kit::ContentWidth::name(ui, &r.name))
-                    .fold(crate::theme::Tokens::get().form_label_width, f32::max)
-                    .min(crate::theme::Tokens::get().form_card_width);
+                    .fold(solidcraft_theme::Tokens::get().form_label_width, f32::max)
+                    .min(solidcraft_theme::Tokens::get().form_card_width);
                 let Sections { favorites, users, groups } = sections(&visible, d.sort);
                 if !favorites.is_empty() {
                     ui_kit::section_count(ui, "favorites", "Favorites", true, Some(favorites.len()), |ui| {
@@ -308,7 +365,7 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
                 });
                 ui_kit::section(ui, "models", "Model Parameters", true, |ui| {
                     ui.scope(|ui| {
-                        ui.spacing_mut().indent = crate::theme::Tokens::get().space_14;
+                        ui.spacing_mut().indent = solidcraft_theme::Tokens::get().space_14;
                         ui.indent("model_groups", |ui| {
                             let layout = GroupLayout {
                                 revision: app.session.revision,
@@ -318,7 +375,7 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
                                 style: ui.style().clone(),
                                 font: app.applied_ui_font.clone(),
                                 system_fonts: app.applied_system_fonts,
-                                language: crate::i18n::language(),
+                                language: solidcraft_ui_text::language(),
                             };
                             if d.group_layout.as_ref() != Some(&layout) {
                                 d.group_sizes.clear();
@@ -337,12 +394,17 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
                 ui_kit::ComputeStatus { text: held_status, busy: false, applying: false }
             },
         );
+        resize = SIZE.edges(ui, side, panel.last_body_scrollbar(ui.ctx()));
         d.reset_scroll = false;
     });
+    SIZE.apply(ctx, resize, shown.as_ref().map(|r| r.response.rect), panel.last_body_height(ctx), viewport);
     // Held edits (#9279) are set by Apply and OK; Cancel, the close button and Escape drop them.
+    // Cancel and Escape also put back what was applied live (#15377); the close button keeps it,
+    // as closing the window the usual way never loses an edit.
     let (closed, action) = outcome;
     let applied = live || !matches!(action, ui_kit::Action::Ok | ui_kit::Action::Apply) || apply_held(app, &mut d, &all);
-    let close = closed || action == ui_kit::Action::Cancel || (action == ui_kit::Action::Ok && applied);
+    let cancelled = action == ui_kit::Action::Cancel && revert_applied(app, &mut d);
+    let close = closed || cancelled || (action == ui_kit::Action::Ok && applied);
     // Each cell owns fresh Enter from raw events. The panel itself must not submit on
     // Enter in the filter or with unrelated focus (the legacy editor left those alone), but
     // the filter, rename and comment fields still see Enter first to give up focus.
@@ -356,14 +418,28 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
         let chosen = d.sort;
         ctx.data_mut(|m| m.insert_persisted(sort_id(), chosen));
     }
-    if !close {
+    // The preview lasts while its expression is being edited.
+    if !d.previewing {
+        d.preview = None;
+    }
+    if close {
+        d.forget_grids(ctx);
+    } else {
         app.params = Some(d);
     }
 }
 
 /// Where the chosen order is kept: egui's persisted memory, like a section's open state.
 fn sort_id() -> egui::Id {
-    egui::Id::new("sc_params_sort")
+    egui::Id::unique("sc_params_sort")
+}
+
+/// Where the card's dragged width and body height are kept, and the names its edges publish.
+const SIZE: crate::card_resize::CardSize = crate::card_resize::CardSize { width: "sc_params_width", height: "sc_params_height", handle: "params" };
+
+/// Where the column widths the user dragged are kept, shared by every section's table.
+fn columns_id() -> egui::Id {
+    egui::Id::unique("sc_params_columns")
 }
 
 /// The dialog's sections, each in the chosen order.
@@ -457,190 +533,510 @@ fn new_check(app: &mut SolveApp, d: &mut ParamsDialog, unit: &str) -> Result<Str
     r
 }
 
-fn table(app: &mut SolveApp, ui: &mut egui::Ui, d: &mut ParamsDialog, rows: &[&Row], salt: &str, name_floor: f32) {
-    let units: Vec<_> = UNITS.iter().map(|unit| unit_label(unit)).collect();
-    // Name keeps a larger share and a shared content floor so long identifiers stay readable
-    // and every section's columns line up (#8533, #8551 review). Full window/column resize is #5097.
-    let columns = [
-        Column::new("", 0.0).min_content_width(crate::theme::Tokens::get().space_24 * 3.0),
-        Column::new("Name", 2.0).flex().min_content_width(name_floor),
-        Column::new("Unit", 0.65).min_content_width(
-            ui_kit::ContentWidth::dropdown(ui, &units).max(crate::theme::Tokens::get().space_24 * 3.0 + crate::theme::Tokens::get().space_6),
-        ),
-        Column::new("Expression", 1.5).flex(),
-        Column::new("Value", 1.1).flex(),
-        Column::new("Comment", 1.0).flex(),
-        Column::new("Actions", 0.0).icon_only().min_content_width(ui_kit::table_row_height()),
-    ];
-    // An expression being edited may open over the cells to its right, up to the table's edge.
-    let right = ui.max_rect().right().min(ui.clip_rect().right());
-    ui_kit::table_custom(ui, salt, &columns, crate::i18n::tr("manage.empty"), |ui, table| {
-        // The Name heading sorts every section at once, each inside itself (#8563).
-        table.headers(ui, |ui, index| {
-            if index != 1 {
-                return false;
+/// The columns of every section's grid, in order.
+const STAR: usize = 0;
+const NAME: usize = 1;
+const UNIT: usize = 2;
+const EXPRESSION: usize = 3;
+const VALUE: usize = 4;
+const COMMENT: usize = 5;
+
+/// One section's parameters as a [`ui_kit::Grid`]: the cells show the design (or an edit held for
+/// Apply), and each gesture on them comes back as one edit list, applied as one undo step.
+struct ParamGrid<'a> {
+    app: &'a mut SolveApp,
+    d: &'a mut ParamsDialog,
+    rows: &'a [&'a Row],
+    salt: &'a str,
+    name_floor: f32,
+    unit_width: f32,
+    /// How far right an expression being edited may open (#9358).
+    right: f32,
+    /// The live check of each row's held or typed expression that differs from the design's.
+    live: std::collections::HashMap<String, Result<String, String>>,
+}
+
+impl ParamGrid<'_> {
+    fn row(&self, row: usize) -> Option<&Row> {
+        self.rows.get(row).copied()
+    }
+
+    /// The expression a row shows: an edit held for Apply or being typed, else one still being
+    /// applied, else the design's.
+    fn expression<'r>(&'r self, r: &'r Row) -> &'r str {
+        self.d.editing.get(&r.name).or_else(|| self.d.applying.get(&r.name)).map_or(r.expression.as_str(), String::as_str)
+    }
+
+    /// What the cell being typed in holds until its edit commits: the draft it had before (an edit
+    /// held for Apply), else the design's.
+    fn before_typing<'r>(&'r self, r: &'r Row, col: usize) -> Option<&'r str> {
+        let (salt, name, typed, before) = self.d.typing.as_ref()?;
+        if salt != self.salt || *name != r.name || *typed != col {
+            return None;
+        }
+        Some(before.as_deref().unwrap_or(if col == COMMENT { r.comment.as_str() } else { r.expression.as_str() }))
+    }
+
+    /// The Value column: the live check of an edited expression, the row's error, or its value.
+    fn shown(&self, r: &Row) -> (String, bool) {
+        match (self.live.get(&r.name), &r.error) {
+            (Some(Err(message)), _) | (None, Some(message)) => (message.clone(), true),
+            (Some(Ok(value)), _) => (value.clone(), false),
+            (None, None) => (show_value(r), false),
+        }
+    }
+}
+
+impl ui_kit::GridSource for ParamGrid<'_> {
+    fn columns(&self) -> Vec<ui_kit::GridColumn> {
+        use ui_kit::{CellKind, GridColumn};
+        let t = solidcraft_theme::Tokens::get();
+        let units = UNITS.iter().map(|u| unit_label(u).to_owned()).collect();
+        // Name keeps a larger share and a shared content floor so long identifiers stay readable
+        // and every section's columns line up (#8533, #8551 review).
+        vec![
+            GridColumn::new("favorite", "", 0.0, CellKind::Custom).min_content_width(t.space_24 * 3.0),
+            GridColumn::new("name", "Name", 2.0, CellKind::Text).flex().min_content_width(self.name_floor),
+            GridColumn::new("unit", "Unit", 0.65, CellKind::Choice(units)).min_content_width(self.unit_width),
+            GridColumn::new("expression", "Expression", 1.5, CellKind::Expression).flex().edit_on_click(),
+            GridColumn::new("value", "Value", 1.1, CellKind::ReadOnly).flex(),
+            GridColumn::new("comment", "Comment", 1.0, CellKind::Text).flex().edit_on_click(),
+            GridColumn::new("actions", "Actions", 0.0, CellKind::Custom).icon_only().min_content_width(ui_kit::table_row_height()),
+        ]
+    }
+
+    fn row_count(&self) -> usize {
+        self.rows.len()
+    }
+
+    fn row_key(&self, row: usize) -> std::borrow::Cow<'_, str> {
+        self.row(row).map_or(std::borrow::Cow::Borrowed(""), |r| std::borrow::Cow::Borrowed(r.name.as_str()))
+    }
+
+    fn text(&self, row: usize, col: usize) -> std::borrow::Cow<'_, str> {
+        use std::borrow::Cow;
+        let Some(r) = self.row(row) else { return Cow::Borrowed("") };
+        if let Some(before) = self.before_typing(r, col) {
+            return Cow::Borrowed(before);
+        }
+        match col {
+            STAR => Cow::Borrowed(if r.favorite { "★" } else { "" }),
+            NAME => Cow::Borrowed(&r.name),
+            UNIT => Cow::Borrowed(unit_label(&r.unit)),
+            EXPRESSION => Cow::Borrowed(self.expression(r)),
+            VALUE => Cow::Owned(self.shown(r).0),
+            COMMENT => Cow::Borrowed(self.d.comments.get(&r.name).unwrap_or(&r.comment)),
+            _ => Cow::Borrowed(""),
+        }
+    }
+
+    fn kind(&self, row: usize, col: usize) -> Option<ui_kit::CellKind> {
+        // A model parameter's unit is the dimension's: shown, not chosen.
+        (col == UNIT && self.row(row).is_some_and(|r| r.source != "user")).then_some(ui_kit::CellKind::ReadOnly)
+    }
+
+    fn message(&self, row: usize, col: usize) -> Option<(std::borrow::Cow<'_, str>, bool)> {
+        let r = self.row(row)?;
+        let (shown, error) = self.shown(r);
+        (col == EXPRESSION && error).then_some((std::borrow::Cow::Owned(shown), true))
+    }
+
+    fn set_cell(&mut self, row: usize, col: usize, text: &str) -> Result<(), String> {
+        let Some(r) = self.row(row) else { return Err(String::new()) };
+        match col {
+            NAME if text.trim().is_empty() => Err(solidcraft_ui_text::tr("parameters.grid_name_required").to_owned()),
+            UNIT => unit_from(text).map(|_| ()),
+            // Applied as you go, an expression is checked before it is handed back, so a wrong one
+            // keeps its box open; held for Apply, it is checked when it is held (#9279).
+            EXPRESSION if self.app.preferences.parameters_apply_live => {
+                let unit = r.unit.clone();
+                check(self.app, text, &unit).map(|_| ())
             }
-            let response = ui_kit::sort_header(ui, "Name", &mut d.sort);
-            crate::scenario::publish_handle(&format!("params:sort:{salt}"), response.rect.center());
-            true
-        });
-        for (index, r) in rows.iter().enumerate() {
-            // Skip cells outside the clip while preserving the table's row geometry (#2723).
-            // Drafts remain live until their edits have been committed.
-            let busy =
-                d.editing.contains_key(&r.name) || d.comments.contains_key(&r.name) || d.renaming.as_ref().is_some_and(|(old, _)| *old == r.name);
-            table.row_visible(ui, &r.name, false, busy, |row| {
-                row.cell(|ui| {
+            _ => Ok(()),
+        }
+    }
+
+    fn add_row(&self) -> Option<std::borrow::Cow<'_, str>> {
+        (self.salt == "user").then_some(std::borrow::Cow::Borrowed("Add parameter"))
+    }
+
+    fn header(&mut self, ui: &mut egui::Ui, col: usize) -> bool {
+        // The Name heading sorts every section at once, each inside itself (#8563).
+        if col != NAME {
+            return false;
+        }
+        let response = ui_kit::sort_header(ui, "Name", &mut self.d.sort);
+        crate::scenario::publish_handle(&format!("params:sort:{}", self.salt), response.rect.center());
+        true
+    }
+
+    fn draw(&mut self, ui: &mut egui::Ui, row: usize, col: usize) -> Option<egui::Response> {
+        let rows = self.rows;
+        let r = *rows.get(row)?;
+        match col {
+            STAR => Some(
+                ui.horizontal(|ui| {
                     let star = if r.favorite { "★" } else { "☆" };
                     ui.spacing_mut().item_spacing.x = 0.0;
                     let favorite = ui_kit::compact_button(ui, star, "Favourite", true, r.favorite);
                     crate::scenario::publish_handle(&format!("param:star:{}", r.name), favorite.rect.center());
                     if favorite.clicked() {
-                        d.error = app.run("parameters.favorite", json!({"name": r.name, "favorite": !r.favorite})).err();
+                        self.d.error = self.app.run("parameters.favorite", json!({"name": r.name, "favorite": !r.favorite})).err();
                     }
-                    if salt == "user" {
+                    if self.salt == "user" {
                         // A sorted list doesn't show the stored order, so moving a row in it
                         // would jump to a place nobody sees; moving waits for the listed order.
-                        let listed = d.sort == ui_kit::Sort::Listed;
+                        let listed = self.d.sort == ui_kit::Sort::Listed;
                         for (glyph, tip, neighbour, side) in [
-                            (ui_kit::MOVE_UP, "Move up", index.checked_sub(1).and_then(|i| rows.get(i)), "before"),
-                            (ui_kit::MOVE_DOWN, "Move down", rows.get(index + 1), "after"),
+                            (ui_kit::MOVE_UP, "Move up", row.checked_sub(1).and_then(|i| rows.get(i)), "before"),
+                            (ui_kit::MOVE_DOWN, "Move down", rows.get(row + 1), "after"),
                         ] {
                             let response = ui_kit::compact_button(ui, glyph, tip, listed && neighbour.is_some(), false);
                             crate::scenario::publish_handle(&format!("param:{side}:{}", r.name), response.rect.center());
                             if response.clicked()
                                 && let Some(neighbour) = neighbour
                             {
-                                d.error = app.run("parameters.move", json!({"name":r.name, side:neighbour.name})).err();
+                                self.d.error = self.app.run("parameters.move", json!({"name": r.name, side: neighbour.name})).err();
                             }
                         }
                     }
-                });
-                let renaming_here = d.rename_table == salt;
-                row.cell(|ui| match &mut d.renaming {
-                    Some((old, new)) if *old == r.name && renaming_here => {
-                        let id = ui.make_persistent_id(("rename", salt, &r.name));
-                        let focused = ui.memory(|m| m.has_focus(id) || m.had_focus_last_frame(id));
-                        let response = ui_kit::cell_editor(ui, id, new, "Name", false);
-                        let entered = enter_for(ui, focused);
-                        if response.lost_focus() || entered {
-                            let (old, new) = (old.clone(), new.trim().to_owned());
-                            if !new.is_empty() && new != old {
-                                d.error = app.run("parameters.rename", json!({"name":old,"new_name":new})).err();
-                            }
-                            d.renaming = None;
-                        } else if !response.has_focus() {
-                            response.request_focus();
-                        }
-                    }
-                    _ => {
-                        let rename = crate::i18n::tr_label("Double-click to rename");
-                        // Keep long identifiers readable (#8533) without stacking the cell's own tooltip.
-                        let response = ui_kit::name_cell_with_hint(ui, &r.name, false, rename);
-                        crate::scenario::publish_handle(&format!("param:name:{}", r.name), response.rect.center());
-                        if response.double_clicked() {
-                            d.renaming = Some((r.name.clone(), r.name.clone()));
-                            d.rename_table = salt.to_string();
-                        }
-                    }
-                });
-                row.cell(|ui| {
-                    if r.source == "user" {
-                        let mut selected = UNITS.iter().position(|u| *u == r.unit).unwrap_or(0);
-                        let before = selected;
-                        ui_kit::dropdown(ui, &format!("punit:{salt}:{}", r.name), &mut selected, &units);
-                        if selected != before
-                            && let Some(unit) = UNITS.get(selected)
-                        {
-                            d.error = app.run("parameters.change", json!({"name":r.name,"expression":r.expression,"unit":unit})).err();
-                        }
-                    } else {
-                        ui_kit::text(ui, unit_label(&r.unit), ui_kit::Text::MonoCell);
-                    }
-                });
-                let mut expression = d.editing.get(&r.name).cloned().unwrap_or_else(|| r.expression.clone());
-                let live = (expression != r.expression).then(|| check(app, &expression, &r.unit));
-                let invalid = matches!(live, Some(Err(_))) || (live.is_none() && r.error.is_some());
+                    favorite
+                })
+                .inner,
+            ),
+            NAME => {
+                // Keep long identifiers readable (#8533) without stacking the cell's own tooltip.
+                let response = ui_kit::name_cell_with_hint(ui, &r.name, false, solidcraft_ui_text::tr_label("Double-click to rename"));
+                crate::scenario::publish_handle(&format!("param:name:{}", r.name), response.rect.center());
+                Some(response)
+            }
+            UNIT if r.source != "user" => Some(ui_kit::text(ui, unit_label(&r.unit), ui_kit::Text::MonoCell)),
+            VALUE => {
+                let (shown, error) = self.shown(r);
+                Some(ui_kit::text(ui, &shown, ui_kit::Text::Value(&format!("value:{}", r.name), error)).backing_on_hover_text(&shown))
+            }
+            ACTIONS if r.source == "user" => {
+                let response = ui_kit::bin_button(ui, "Delete");
+                if response.clicked() {
+                    self.d.error = self.app.run("parameters.delete", json!({"name": r.name})).err();
+                }
+                Some(response)
+            }
+            _ => None,
+        }
+    }
+
+    fn editor(&mut self, ui: &mut egui::Ui, row: usize, col: usize, id: egui::Id, text: &mut String) -> ui_kit::CellEditor {
+        let Some(r) = self.row(row).cloned() else {
+            return ui_kit::CellEditor { response: ui_kit::cell_editor(ui, id, text, "", false), taken: false };
+        };
+        match col {
+            EXPRESSION => {
+                let live = (*text != r.expression).then(|| check(self.app, text, &r.unit));
                 let (shown, error) = match (&live, &r.error) {
                     (Some(Err(message)), _) | (None, Some(message)) => (message.clone(), true),
                     (Some(Ok(value)), _) => (value.clone(), false),
-                    (None, None) => (show_value(r), false),
+                    (None, None) => (show_value(&r), false),
                 };
-                row.cell(|ui| {
-                    let id = ui.make_persistent_id(("pexpr", salt, &r.name));
-                    let focused = ui.memory(|m| m.has_focus(id) || m.had_focus_last_frame(id));
-                    let response = ui_kit::wide_cell_editor(ui, id, &mut expression, "Expression", invalid, right, (&shown, error));
-                    crate::scenario::publish_target_as(&format!("param:{}", r.name), &format!("param:{}", r.name), response.rect);
-                    if salt == "fav" {
-                        crate::scenario::publish_handle(&format!("param:favorite:{}", r.name), response.rect.center());
+                let response = ui_kit::wide_cell_editor(ui, id, text, "Expression", error, self.right, (&shown, error));
+                let taken = complete(ui, &response, text);
+                // Held edits (#9279) preview nothing: the preview is a rebuild too.
+                if self.app.preferences.parameters_apply_live && response.has_focus() && matches!(live, Some(Ok(_))) {
+                    self.d.preview = Some((r.name.clone(), text.clone()));
+                }
+                self.d.previewing |= self.d.preview.as_ref().is_some_and(|(name, _)| *name == r.name);
+                ui_kit::CellEditor { response, taken }
+            }
+            NAME => ui_kit::CellEditor { response: ui_kit::cell_editor(ui, id, text, "Name", false), taken: false },
+            _ => ui_kit::CellEditor { response: ui_kit::cell_editor(ui, id, text, "Comment", false), taken: false },
+        }
+    }
+
+    fn drawn(&mut self, _ui: &egui::Ui, row: usize, col: usize, response: &egui::Response, _editing: bool) {
+        let Some(r) = self.row(row) else { return };
+        // The handles the scenarios click, as when every cell was an open box.
+        match col {
+            EXPRESSION => {
+                crate::scenario::publish_target_as(&format!("param:{}", r.name), &format!("param:{}", r.name), response.rect);
+                if self.salt == "fav" {
+                    crate::scenario::publish_handle(&format!("param:favorite:{}", r.name), response.rect.center());
+                }
+            }
+            COMMENT => crate::scenario::publish_handle(&format!("param:comment:{}", r.name), response.rect.center()),
+            _ => {}
+        }
+    }
+}
+
+const ACTIONS: usize = 6;
+
+/// The unit a Unit cell's text names: its label ("none" for no unit) or the unit itself.
+fn unit_from(text: &str) -> Result<&'static str, String> {
+    let text = text.trim();
+    UNITS
+        .iter()
+        .copied()
+        .find(|u| *u == text || unit_label(u) == text)
+        .ok_or_else(|| solidcraft_ui_text::format("parameters.grid_unknown_unit", &[("unit", text)]))
+}
+
+/// The grid state of section `salt` in this opening of the window: a new opening starts clean.
+fn grid_state(d: &ParamsDialog, salt: &str) -> egui::Id {
+    egui::Id::unique(("sc_params_grid", d.opening, salt))
+}
+
+/// One section's grid of parameter rows with its sortable, resizable headings and add row.
+/// `salt` keeps each section's widgets apart; `name_floor` is the shared Name column minimum.
+fn table(app: &mut SolveApp, ui: &mut egui::Ui, d: &mut ParamsDialog, rows: &[&Row], salt: &str, name_floor: f32) {
+    let t = solidcraft_theme::Tokens::get();
+    let units: Vec<_> = UNITS.iter().map(|unit| unit_label(unit)).collect();
+    let unit_width = ui_kit::ContentWidth::dropdown(ui, &units).max(t.space_24 * 3.0 + t.space_6);
+    // An expression being edited may open over the cells to its right, up to the table's edge.
+    let right = ui.max_rect().right().min(ui.clip_rect().right());
+    let state = grid_state(d, salt);
+    if !d.grids.iter().any(|g| g == salt) {
+        d.grids.push(salt.to_owned());
+    }
+    let mut live = std::collections::HashMap::new();
+    for r in rows {
+        if let Some(edited) = d.editing.get(&r.name).filter(|e| **e != r.expression) {
+            let edited = edited.clone();
+            live.insert(r.name.clone(), check(app, &edited, &r.unit));
+        }
+    }
+    let mut grid = ParamGrid { app, d, rows, salt, name_floor, unit_width, right, live };
+    let out = ui_kit::Grid::new(salt).state(state).empty(solidcraft_ui_text::tr("manage.empty")).resizable(columns_id()).show_with(
+        ui,
+        &mut grid,
+        |ui, table, grid| {
+            if grid.salt == "user" && grid.d.adding {
+                let right = grid.right;
+                ui.push_id("parameter_draft", |ui| add_row(grid.app, ui, table, grid.d, right));
+            }
+        },
+    );
+    if out.add_row {
+        d.adding = true;
+        d.focus_new = true;
+    }
+    apply_grid(app, ui.ctx(), d, rows, salt, out);
+}
+
+/// Mirror the edit being typed into the dialog's drafts, then apply one gesture's edits as one
+/// undo step: expressions in one `parameters.change` (or held for Apply), then units, comments,
+/// renames and pasted new rows.
+fn apply_grid(app: &mut SolveApp, ctx: &egui::Context, d: &mut ParamsDialog, rows: &[&Row], salt: &str, out: ui_kit::GridOutput) {
+    let find = |name: &str| rows.iter().copied().find(|r| r.name == name);
+    let typing_here = d.typing.as_ref().is_some_and(|(s, ..)| s == salt);
+    match &out.editing {
+        Some((name, col, _)) if matches!(*col, EXPRESSION | COMMENT) => {
+            let same = d.typing.as_ref().is_some_and(|(s, n, c, _)| s == salt && n == name && c == col);
+            if !same {
+                let before = if *col == COMMENT { d.comments.get(name) } else { d.editing.get(name) }.cloned();
+                d.typing = Some((salt.to_owned(), name.clone(), *col, before));
+            }
+        }
+        _ if typing_here => d.typing = None,
+        _ => {}
+    }
+    match &out.editing {
+        Some((name, EXPRESSION, text)) => {
+            d.editing.insert(name.clone(), text.clone());
+        }
+        Some((name, COMMENT, text)) => {
+            d.comments.insert(name.clone(), text.clone());
+        }
+        Some((name, NAME, text)) => {
+            d.renaming = Some((name.clone(), text.clone()));
+            d.rename_table = salt.to_owned();
+        }
+        _ => {}
+    }
+    if d.rename_table == salt && !matches!(out.editing, Some((_, NAME, _))) {
+        d.renaming = None;
+    }
+    if let Some((name, col)) = &out.cancelled {
+        // Back to the draft the cell held before the edit, if any.
+        let before = d.typing.take().filter(|(s, n, c, _)| s == salt && n == name && c == col).and_then(|(.., before)| before);
+        let drafts = match *col {
+            EXPRESSION => Some(&mut d.editing),
+            COMMENT => Some(&mut d.comments),
+            _ => None,
+        };
+        if let Some(drafts) = drafts {
+            match before {
+                Some(before) => drafts.insert(name.clone(), before),
+                None => drafts.remove(name),
+            };
+        }
+    }
+    if let Some(message) = out.refused {
+        d.error = Some(message);
+    }
+    if let Some(notice) = out.notice {
+        d.error = Some(notice);
+    }
+    if out.edits.is_empty() {
+        return;
+    }
+    let live = app.preferences.parameters_apply_live;
+    let mut changes = serde_json::Map::new();
+    let mut steps: Vec<(&str, Value)> = Vec::new();
+    let mut renames: Vec<(&str, Value)> = Vec::new();
+    let mut new_rows: std::collections::BTreeMap<usize, [String; 4]> = Default::default();
+    let mut held_error = None;
+    let mut comments = Vec::new();
+    for edit in &out.edits {
+        let text = edit.text();
+        match edit.row() {
+            ui_kit::RowRef::New(n) => {
+                if let Some(slot) = [NAME, UNIT, EXPRESSION, COMMENT].iter().position(|c| *c == edit.col())
+                    && let Some(cell) = new_rows.entry(*n).or_default().get_mut(slot)
+                {
+                    *cell = text.to_owned();
+                }
+            }
+            ui_kit::RowRef::Existing(name) => {
+                let Some(r) = find(name) else { continue };
+                match edit.col() {
+                    EXPRESSION if !live => {
+                        // Kept in `editing` for Apply or OK, checked now (#9279).
+                        held_error = held_error.or(check(app, text, &r.unit).err());
+                        d.editing.insert(r.name.clone(), text.to_owned());
                     }
-                    let completed = complete(ui, &response, &mut expression);
-                    if response.changed() || completed {
-                        d.editing.insert(r.name.clone(), expression.clone());
+                    EXPRESSION => {
+                        changes.insert(r.name.clone(), json!(text));
                     }
-                    // Held edits (#9279) preview nothing: the preview is a rebuild too.
-                    let apply_live = app.preferences.parameters_apply_live;
-                    if apply_live && response.has_focus() && matches!(live, Some(Ok(_))) {
-                        d.preview = Some((r.name.clone(), expression.clone()));
-                    }
-                    let entered = !completed && enter_for(ui, focused);
-                    if !completed && (response.lost_focus() || entered) {
-                        d.preview = None;
-                        if expression != r.expression && !apply_live {
-                            // Kept in `editing` for Apply or OK, checked now.
-                            d.error = check(app, &expression, &r.unit).err();
-                        } else if expression != r.expression {
-                            d.error = check(app, &expression, &r.unit)
-                                .and_then(|_| app.run("parameters.change", json!({"name":r.name,"expression":expression})))
-                                .err();
-                            if d.error.is_none() {
-                                d.editing.remove(&r.name);
-                            }
-                        } else {
-                            d.editing.remove(&r.name);
+                    UNIT => {
+                        if let Ok(unit) = unit_from(text) {
+                            steps.push(("parameters.change", json!({"name": r.name, "expression": r.expression, "unit": unit})));
                         }
                     }
-                });
-                row.cell(|ui| {
-                    ui_kit::text(ui, &shown, ui_kit::Text::Value(&format!("value:{}", r.name), error)).backing_on_hover_text(&shown);
-                });
-                row.cell(|ui| {
-                    let mut comment = d.comments.get(&r.name).cloned().unwrap_or_else(|| r.comment.clone());
-                    let id = ui.make_persistent_id(("comment", &r.name));
-                    let focused = ui.memory(|m| m.has_focus(id) || m.had_focus_last_frame(id));
-                    let response = ui_kit::cell_editor(ui, id, &mut comment, "Comment", false);
-                    let entered = enter_for(ui, focused);
-                    if response.changed() {
-                        d.comments.insert(r.name.clone(), comment.clone());
+                    COMMENT => {
+                        steps.push(("parameters.comment", json!({"name": r.name, "comment": text})));
+                        comments.push(r.name.clone());
                     }
-                    if response.lost_focus() || entered {
-                        if comment != r.comment {
-                            d.error = app.run("parameters.comment", json!({"name":r.name,"comment":comment})).err();
+                    NAME => {
+                        let new = text.trim();
+                        if !new.is_empty() && new != r.name {
+                            renames.push(("parameters.rename", json!({"name": r.name, "new_name": new})));
                         }
-                        d.comments.remove(&r.name);
                     }
-                });
-                row.cell(|ui| {
-                    if r.source == "user" && ui_kit::bin_button(ui, "Delete").clicked() {
-                        d.error = app.run("parameters.delete", json!({"name":r.name})).err();
-                    }
-                });
-            });
-        }
-        if salt == "user" {
-            if d.adding {
-                ui.push_id("parameter_draft", |ui| add_row(app, ui, table, d, right));
-            }
-            if table.add_prompt(ui, "Add parameter", "Add parameter").clicked() {
-                d.adding = true;
-                d.focus_new = true;
+                    _ => {}
+                }
             }
         }
-    });
+    }
+    let applied: Vec<String> = changes.keys().cloned().collect();
+    // Expressions by their names as they are now, so they go before the renames.
+    let mut all: Vec<(&str, Value)> = Vec::new();
+    match changes.len() {
+        0 => {}
+        1 => {
+            if let Some((name, expression)) = changes.into_iter().next() {
+                all.push(("parameters.change", json!({"name": name, "expression": expression})));
+            }
+        }
+        _ => all.push(("parameters.change", json!({"changes": changes}))),
+    }
+    all.extend(steps);
+    all.extend(renames);
+    let unit = UNITS.get(d.new_unit).copied().unwrap_or("mm");
+    for [name, unit_text, expression, comment] in new_rows.into_values() {
+        if name.trim().is_empty() || expression.trim().is_empty() {
+            let message = solidcraft_ui_text::tr("parameters.grid_new_needs").to_owned();
+            ui_kit::Grid::refuse(ctx, grid_state(d, salt), &message);
+            d.error = Some(message);
+            return;
+        }
+        let unit = if unit_text.trim().is_empty() { Ok(unit) } else { unit_from(&unit_text) };
+        let unit = unit.unwrap_or("mm");
+        all.push(("parameters.add", json!({"name": name.trim(), "expression": expression, "unit": unit, "comment": comment})));
+    }
+    if all.is_empty() {
+        // Held edits only: the message is the check's.
+        d.error = held_error;
+        return;
+    }
+    let ran = match all.as_slice() {
+        [("parameters.change", params)] => change(app, d, params.clone()),
+        _ => run_as_one(app, &all),
+    };
+    match ran {
+        Ok(()) => {
+            d.error = held_error;
+            // Listed once, right after the edit, before anything else can change it (#15377).
+            let listed = if applied.is_empty() { Vec::new() } else { self::rows(app) };
+            for name in applied {
+                d.editing.remove(&name);
+                // The first live edit keeps the expression to put back (#15377); the design may
+                // write the edit differently (`30` becomes `30 mm`), so what it lists now is what
+                // Cancel later checks is still there.
+                if let Some(r) = find(&name)
+                    && let Some(now) = listed.iter().find(|l| l.name == name)
+                {
+                    d.applied.entry(name).or_insert_with(|| (r.expression.clone(), String::new())).1 = now.expression.clone();
+                }
+            }
+            for name in comments {
+                d.comments.remove(&name);
+            }
+        }
+        Err(error) => {
+            d.error = Some(error.clone());
+            ui_kit::Grid::refuse(ctx, grid_state(d, salt), &error);
+        }
+    }
+}
+
+/// Run a `parameters.change` as the timeline's commands run (#6777): a rebuild that takes a while
+/// computes off the window thread, which goes on drawing meanwhile, and its rows show the
+/// expressions being applied until the change is in.
+fn change(app: &mut SolveApp, d: &mut ParamsDialog, params: Value) -> Result<(), String> {
+    let applying: Vec<(String, String)> = match (params.get("name").and_then(Value::as_str), params.get("expression").and_then(Value::as_str)) {
+        (Some(name), Some(expression)) => vec![(name.to_owned(), expression.to_owned())],
+        _ => params
+            .get("changes")
+            .and_then(Value::as_object)
+            .map(|changes| changes.iter().filter_map(|(name, e)| Some((name.clone(), e.as_str()?.to_owned()))).collect())
+            .unwrap_or_default(),
+    };
+    app.run_heavy("parameters.change", params)?;
+    if app.computing_since().is_some() || !app.deferred_queue.is_empty() {
+        d.applying.extend(applying);
+    }
+    Ok(())
+}
+
+/// Run `steps` as one gesture: all of them or none, and one undo step for all. A refused step
+/// takes back the ones before it; afterwards only the design before the first step stays in the
+/// undo history, so one Undo takes the whole paste or fill back.
+fn run_as_one(app: &mut SolveApp, steps: &[(&str, Value)]) -> Result<(), String> {
+    let before = app.session.doc.clone();
+    let undo = app.session.undo.len();
+    for (index, (command, params)) in steps.iter().enumerate() {
+        if let Err(error) = app.run(command, params.clone()) {
+            if index > 0 {
+                while app.session.undo.len() > undo && !Arc::ptr_eq(&app.session.doc, &before) {
+                    if app.run("edit.undo", json!({})).is_err() {
+                        break;
+                    }
+                }
+                app.session.redo.clear();
+            }
+            return Err(error);
+        }
+    }
+    if steps.len() > 1
+        && let Some(first) = app.session.undo.iter().rposition(|s| Arc::ptr_eq(&s.doc, &before))
+    {
+        app.session.undo.truncate(first + 1);
+    }
+    Ok(())
 }
 
 fn unit_label(u: &str) -> &str {
-    if u.is_empty() { crate::i18n::tr_label("none") } else { u }
+    if u.is_empty() { solidcraft_ui_text::tr_label("none") } else { u }
 }
 
 /// Only a fresh Enter in this field submits; held keys and unrelated focus do not.
@@ -665,15 +1061,15 @@ fn held(d: &ParamsDialog, rows: &[Row]) -> serde_json::Map<String, Value> {
 
 /// The hint at the top of the dialog: when edits apply, as the check box under it says.
 fn hint(live: bool) -> &'static str {
-    crate::i18n::tr(if live { "manage.parameters_hint" } else { "parameters.held_hint" })
+    solidcraft_ui_text::tr(if live { "manage.parameters_hint" } else { "parameters.held_hint" })
 }
 
 /// The footer's note of the edits waiting for Apply, if any.
 fn held_status(count: usize) -> Option<String> {
     match count {
         0 => None,
-        1 => Some(crate::i18n::tr("parameters.held_one").to_string()),
-        n => Some(crate::i18n::format("parameters.held", &[("count", &n.to_string())])),
+        1 => Some(solidcraft_ui_text::tr("parameters.held_one").to_string()),
+        n => Some(solidcraft_ui_text::format("parameters.held", &[("count", &n.to_string())])),
     }
 }
 
@@ -687,7 +1083,7 @@ fn apply_held(app: &mut SolveApp, d: &mut ParamsDialog, rows: &[Row]) -> bool {
         Some((name, expression)) if changes.len() == 1 => json!({"name": name, "expression": expression}),
         Some(_) => json!({"changes": changes}),
     };
-    d.error = app.run("parameters.change", params).err();
+    d.error = change(app, d, params).err();
     if d.error.is_some() {
         return false;
     }
@@ -697,14 +1093,88 @@ fn apply_held(app: &mut SolveApp, d: &mut ParamsDialog, rows: &[Row]) -> bool {
     true
 }
 
+/// Put back the expressions applied live since the dialog opened (#15377): one
+/// `parameters.change`, so the design rebuilds once and one undo (or redo) covers them. A
+/// parameter changed since by something else (an agent, an undo) or gone (renamed, deleted) is
+/// left as it is. False, with the error shown, when the put-back is refused; what to put back is kept for the next try.
+/// An edit still computing off the window thread (#6777) is not in the design yet: its put-back
+/// waits its turn behind it.
+fn revert_applied(app: &mut SolveApp, d: &mut ParamsDialog) -> bool {
+    if d.applied.is_empty() {
+        return true;
+    }
+    let now = rows(app);
+    let changes: serde_json::Map<String, Value> = d
+        .applied
+        .iter()
+        .filter_map(|(name, (before, listed))| {
+            let current = &now.iter().find(|r| r.name == *name)?.expression;
+            (d.applying.contains_key(name) || (listed == current && current != before)).then(|| (name.clone(), json!(before)))
+        })
+        .collect();
+    if !changes.is_empty() {
+        let params = json!({"changes": changes});
+        d.error = if d.applying.is_empty() { app.run("parameters.change", params) } else { app.run_heavy("parameters.change", params) }.err();
+        if d.error.is_some() {
+            return false;
+        }
+    }
+    d.applied.clear();
+    true
+}
+
 /// "Apply each change as you leave its field", remembered across sessions (#9279). Turning it
 /// back on applies what was waiting.
 fn apply_live_checkbox(app: &mut SolveApp, ui: &mut egui::Ui, d: &mut ParamsDialog, rows: &[Row]) {
-    let response = ui_kit::checkbox(ui, crate::i18n::tr("parameters.apply_live"), &mut app.preferences.parameters_apply_live)
-        .backing_on_hover_text(crate::i18n::tr("parameters.apply_live_tip"));
+    let response = ui_kit::checkbox(ui, solidcraft_ui_text::tr("parameters.apply_live"), &mut app.preferences.parameters_apply_live)
+        .backing_on_hover_text(solidcraft_ui_text::tr("parameters.apply_live_tip"));
     crate::scenario::publish_handle("params:apply_live", response.rect.center());
     if response.changed() && app.preferences.parameters_apply_live {
         apply_held(app, d, rows);
+    }
+}
+
+/// The add row's draft (name, unit, expression, comment) an add was refused with, the design
+/// document the refusal was about, and the message. The message is about that draft in that
+/// design, as a dialog's refused OK is about its inputs and the design (#641): once either
+/// changes, the message goes and the expression cell's own live check says what is wrong now, if
+/// anything. A design change replaces the session's document (`Session::execute` keeps the one a
+/// command started from, so an edit lands at a new address, and a refused command puts the old
+/// one back); a selection or display change keeps it, though it moves the session's revision.
+/// The row edits' messages live in `ParamsDialog::error`, apart from this one, so neither can
+/// be taken for the other.
+#[derive(Debug)]
+struct NewRefused {
+    draft: (String, usize, String, String),
+    doc: Arc<solidcraft_engine::doc::Document>,
+    error: String,
+}
+
+impl NewRefused {
+    /// Whether the add row still holds the draft the refusal was about.
+    fn same_draft(&self, d: &ParamsDialog) -> bool {
+        self.draft.0 == d.new_name && self.draft.1 == d.new_unit && self.draft.2 == d.new_expr && self.draft.3 == d.new_comment
+    }
+}
+
+fn new_draft(d: &ParamsDialog) -> (String, usize, String, String) {
+    (d.new_name.clone(), d.new_unit, d.new_expr.clone(), d.new_comment.clone())
+}
+
+/// Show why the add was refused, for as long as the draft and the design stay as they are. It
+/// takes the banner from an earlier action's message, as every action's result does.
+fn refuse_add(app: &SolveApp, d: &mut ParamsDialog, error: String) {
+    d.new_refused = Some(NewRefused { draft: new_draft(d), doc: app.session.doc.clone(), error });
+    d.error = None;
+}
+
+/// A refused add's message gives way once its draft changes or the design document is another
+/// one (the design document the refusal was about; a selection or display change keeps it).
+fn forget_refused_add(app: &SolveApp, d: &mut ParamsDialog) {
+    if let Some(was) = &d.new_refused
+        && (!Arc::ptr_eq(&was.doc, &app.session.doc) || !was.same_draft(d))
+    {
+        d.new_refused = None;
     }
 }
 
@@ -724,7 +1194,6 @@ fn add_row(app: &mut SolveApp, ui: &mut egui::Ui, table: &mut ui_kit::Table<'_>,
         row.cell(|_| {});
         row.cell(|ui| {
             let response = ui_kit::cell_editor(ui, name_id, &mut d.new_name, "new parameter", false);
-            select_all_on_tab(ui, &response, &d.new_name);
             crate::scenario::publish_handle("param:new:name", response.rect.center());
             if d.focus_new {
                 response.request_focus();
@@ -748,7 +1217,6 @@ fn add_row(app: &mut SolveApp, ui: &mut egui::Ui, table: &mut ui_kit::Table<'_>,
         };
         row.cell(|ui| {
             let response = ui_kit::wide_cell_editor(ui, expr_id, &mut d.new_expr, "Expression", invalid, right, (&value, invalid));
-            select_all_on_tab(ui, &response, &d.new_expr);
             crate::scenario::publish_handle("param:new:expression", response.rect.center());
             let completed = complete(ui, &response, &mut d.new_expr);
             submit = !completed && enter_for(ui, focused_id.is_some());
@@ -759,7 +1227,6 @@ fn add_row(app: &mut SolveApp, ui: &mut egui::Ui, table: &mut ui_kit::Table<'_>,
         });
         row.cell(|ui| {
             let response = ui_kit::cell_editor(ui, comment_id, &mut d.new_comment, "Comment", false);
-            select_all_on_tab(ui, &response, &d.new_comment);
             crate::scenario::publish_handle("param:new:comment", response.rect.center());
             left |= response.lost_focus();
             submit |= enter_for(ui, focused_id.is_some());
@@ -767,6 +1234,7 @@ fn add_row(app: &mut SolveApp, ui: &mut egui::Ui, table: &mut ui_kit::Table<'_>,
         row.cell(|ui| {
             let response = ui_kit::bin_button(ui, "Delete");
             row_ids.push(response.id);
+            crate::scenario::publish_handle("param:new:delete", response.rect.center());
             left |= response.lost_focus();
             discard = response.clicked();
         });
@@ -804,7 +1272,7 @@ fn add_row(app: &mut SolveApp, ui: &mut egui::Ui, table: &mut ui_kit::Table<'_>,
             return;
         }
         if let Err(error) = live {
-            d.error = Some(error);
+            refuse_add(app, d, error);
             if let Some(id) = focused_id {
                 ui.memory_mut(|m| m.request_focus(id));
             }
@@ -821,7 +1289,7 @@ fn add_row(app: &mut SolveApp, ui: &mut egui::Ui, table: &mut ui_kit::Table<'_>,
                 d.focus_new = submit;
             }
             Err(error) => {
-                d.error = Some(error);
+                refuse_add(app, d, error);
                 // Enter stays in the field that was submitted. A click into another cell
                 // has to keep that cell, or an invalid name cannot be corrected (#3965).
                 if submit && let Some(id) = focused_id {
@@ -830,19 +1298,6 @@ fn add_row(app: &mut SolveApp, ui: &mut egui::Ui, table: &mut ui_kit::Table<'_>,
             }
         }
     }
-}
-
-/// A box of the add row entered with Tab selects its text, so typing replaces it (#2919); a click
-/// puts the caret where it clicks, as anywhere else. The parameters' own boxes keep the caret at
-/// the end, where an edit of the value usually starts.
-fn select_all_on_tab(ui: &egui::Ui, resp: &egui::Response, text: &str) {
-    if !resp.gained_focus() || ui.input(|i| i.pointer.any_down() || i.pointer.any_released()) {
-        return;
-    }
-    let n = text.chars().count();
-    let mut state = egui::text_edit::TextEditState::load(ui.ctx(), resp.id).unwrap_or_default();
-    state.cursor.set_char_range(Some(egui::text_selection::CCursorRange::two(egui::text::CCursor::new(0), egui::text::CCursor::new(n))));
-    state.store(ui.ctx(), resp.id);
 }
 
 /// A completion offered under an expression box.
@@ -862,7 +1317,7 @@ struct Cache {
 }
 
 fn cache_id() -> egui::Id {
-    egui::Id::new("sc_param_completions")
+    egui::Id::unique("sc_param_completions")
 }
 
 /// Keep the completion list (parameters, functions, constants, units) for this revision of the
@@ -924,9 +1379,19 @@ pub(crate) fn suggestions_for(ctx: &egui::Context, word: &str, explicit: bool) -
     let offered = |s: &&Suggestion| (explicit || s.text.trim_end_matches('(') != word) && !(exact && s.kind == "unit");
     let starts = |s: &&Suggestion| s.text.to_ascii_lowercase().starts_with(&w);
     // A parameter is also offered for a word anywhere in its name (`side` finds
-    // `cab_side_thickness`, #2757), after the names that start with it.
-    let within = |s: &&Suggestion| !exact && s.kind == "parameter" && !starts(s) && s.text.to_ascii_lowercase().contains(&w);
-    all.iter().filter(|s| starts(s) && offered(s)).chain(all.iter().filter(|s| within(s) && offered(s))).take(8).cloned().collect()
+    // `cab_side_thickness`, #2757), after the names that start with it, and then by the starts
+    // of its words in order (`toodia` finds `tooth_outward_flange_diameter`, #11978). That last
+    // group comes after the others, so it never pushes an earlier match out of the eight.
+    let parameter = |s: &&Suggestion| !exact && s.kind == "parameter" && !starts(s);
+    let within = |s: &&Suggestion| parameter(s) && s.text.to_ascii_lowercase().contains(&w);
+    let words = |s: &&Suggestion| parameter(s) && !within(s) && solidcraft_engine::doc::name_words_match(&s.text, word);
+    all.iter()
+        .filter(|s| starts(s) && offered(s))
+        .chain(all.iter().filter(|s| within(s) && offered(s)))
+        .chain(all.iter().filter(|s| words(s) && offered(s)))
+        .take(8)
+        .cloned()
+        .collect()
 }
 
 /// The named parameters, in the order the list offers them (favourites and the design's own
@@ -954,12 +1419,113 @@ pub(crate) fn unit_token(ctx: &egui::Context, word: &str) -> bool {
 /// number in it with Up/Down or the wheel (`value_step`, #2320).
 /// Returns true when either changed the text; callers must not submit that frame.
 pub fn complete(ui: &mut egui::Ui, resp: &egui::Response, text: &mut String) -> bool {
-    crate::expression_complete::complete(ui, resp, text) || crate::value_step::step(ui, resp, text)
+    let changed = crate::expression_complete::complete(ui, resp, text) || crate::value_step::step(ui, resp, text);
+    ui_kit::note_numeric_edit(ui, resp, Some(text), resp.changed(), changed);
+    changed
+}
+
+/// SolidCraft's expression language for the kit's value fields: literals and units as
+/// `doc::expr` reads them, completion and stepping by [`complete`].
+pub(crate) struct DocExpressions;
+
+impl ui_kit::Expressions for DocExpressions {
+    fn is_literal(&self, text: &str) -> bool {
+        solidcraft_engine::doc::expr::is_literal(text)
+    }
+
+    fn is_unit(&self, unit: &str) -> bool {
+        solidcraft_engine::doc::expr::unit_info(unit).is_some()
+    }
+
+    fn unit_is_prefix(&self, unit: &str) -> bool {
+        let unit = if unit == "μ" { "µ" } else { unit };
+        !unit.is_empty() && solidcraft_engine::doc::expr::UNITS.iter().any(|(name, _, _)| *name != unit && name.starts_with(unit))
+    }
+
+    fn complete(&self, ui: &mut egui::Ui, response: &egui::Response, text: &mut String) -> bool {
+        complete(ui, response, text)
+    }
+
+    fn unit_scale(&self, units: &str) -> (f64, &'static str) {
+        crate::prefs::unit_scale(units)
+    }
+
+    fn length_number(&self, mm: f64, unit: &str, decimals: u8) -> String {
+        crate::prefs::length_number(mm, unit, decimals)
+    }
+
+    fn parse_length_mm(&self, text: &str, scale: f64) -> Option<f64> {
+        crate::prefs::parse_length_mm(text, scale)
+    }
+
+    fn scrub_step(&self, unit: &str, half_height_mm: Option<f64>, current_value: f64) -> f64 {
+        match solidcraft_engine::doc::expr::unit_info(unit) {
+            Some((solidcraft_engine::doc::expr::Kind::Angle, _)) => {
+                if unit.trim().eq_ignore_ascii_case("rad") {
+                    0.01
+                } else {
+                    1.0
+                }
+            }
+            Some((solidcraft_engine::doc::expr::Kind::Length, scale)) if scale > 0.0 => {
+                let hh_mm = half_height_mm.unwrap_or(100.0);
+                let hh_unit = hh_mm / scale;
+                ui_kit::snap_to_125((hh_unit * 0.001).max(1e-9))
+            }
+            _ => ui_kit::scrub_step(current_value),
+        }
+    }
+}
+
+/// Give the kit's value fields in `ctx` SolidCraft's expressions, unless they have them already.
+/// The app calls this at the start of each frame entry point, so every context it draws into has them.
+pub(crate) fn install_expressions(ctx: &egui::Context) {
+    if ui_kit::expressions(ctx).is_none() {
+        ui_kit::install_expressions(ctx, Arc::new(DocExpressions));
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn numeric_field_waits_for_unit_completion() {
+        let ctx = crate::fonts::test_context();
+        install_expressions(&ctx);
+        let mut value = String::new();
+        let mut id = egui::Id::NULL;
+        let mut draw = |time, text: &str| {
+            let events = if text.is_empty() { vec![] } else { vec![egui::Event::Text(text.into())] };
+            let mut ready = true;
+            let output = ui_kit::test_support::raw_frame(&ctx, egui::RawInput { time: Some(time), events, ..Default::default() }, |ui| {
+                id = ui_kit::checked_field(ui, &mut value, "", false).1.id;
+                ready = ui_kit::numeric_preview_ready(ui.ctx());
+            });
+            ctx.memory_mut(|m| m.request_focus(id));
+            (value.clone(), ready, output)
+        };
+        draw(0.0, "");
+        assert_eq!(draw(0.01, "2").0, "2", "a complete number updates immediately");
+        let (text, ready, output) = draw(0.02, "m");
+        assert_eq!(text, "2m", "completion and caret handling retain the draft");
+        assert!(!ready, "m may still become mm or mil; do not preview two metres");
+        assert!(ui_kit::test_support::text_shapes(&output).any(|s| s.galley.text() == "2m"), "the draft remains visible");
+        let (text, ready, _) = draw(0.03, "m");
+        assert_eq!(text, "2mm");
+        assert!(ready, "a completed unit updates immediately");
+    }
+
+    #[test]
+    fn numeric_unit_prefixes_follow_the_expression_languages_units() {
+        let host: &dyn ui_kit::Expressions = &DocExpressions;
+        for unit in ["m", "mi", "i", "in", "r", "µ", "μ"] {
+            assert!(host.unit_is_prefix(unit), "{unit}");
+        }
+        for unit in ["", "mm", "cm", "rad", "inch", "R"] {
+            assert!(!host.unit_is_prefix(unit), "{unit}");
+        }
+    }
 
     #[test]
     fn parameter_names_show_one_tooltip_and_only_repeat_clipped_names() {
@@ -1000,7 +1566,7 @@ mod tests {
                 for shape in &h.shapes {
                     text_in(&shape.shape, tooltips[0], &mut texts);
                 }
-                let hint = crate::i18n::tr_label("Double-click to rename");
+                let hint = solidcraft_ui_text::tr_label("Double-click to rename");
                 let expected = if name == "rip_length" { hint.to_owned() } else { format!("{name}\n{hint}") };
                 assert_eq!(texts, [expected], "only a clipped name needs repeating");
                 h.step(&json!({"click":{"handle":format!("param:name:{name}")},"double":true})).unwrap();
@@ -1161,15 +1727,21 @@ mod tests {
         escape_closed(&mut h, &before, "10 mm");
     }
 
+    /// #3399, #15377: Escape drops what is being typed and puts back an edit already applied, in
+    /// one undo step.
     #[test]
-    fn escape_keeps_previously_committed_parameter_edit() {
+    fn escape_drops_the_typed_value_and_puts_back_a_previously_committed_parameter_edit() {
         let mut h = escape_dialog();
         escape_type(&mut h, "param:width", "20 mm");
         h.step(&json!({"key":"Enter"})).unwrap();
         assert_eq!(h.app.session.doc.param("width").unwrap().expr, "20 mm");
-        let before = escape_state(&h);
+        let undo = h.app.session.undo.len();
         escape_type(&mut h, "param:width", "30 mm");
-        escape_closed(&mut h, &before, "20 mm");
+        escape_key(&mut h, true);
+        assert!(h.app.params.is_none(), "the first Escape press closes Parameters");
+        assert_eq!(h.app.session.doc.param("width").unwrap().expr, "10 mm", "30 mm is never applied and 20 mm goes back");
+        assert_eq!(h.app.session.undo.len(), undo + 1, "one step puts the edit back");
+        escape_key(&mut h, false);
     }
 
     #[test]
@@ -1198,7 +1770,7 @@ mod tests {
         assert!(crate::keymap::capturing(&h.app));
         escape_key(&mut h, true);
         assert!(!crate::keymap::capturing(&h.app));
-        assert!(h.app.prefs_window.open && h.app.params.is_some(), "Escape cancels only shortcut capture");
+        assert!(h.app.prefs_window.shell.open && h.app.params.is_some(), "Escape cancels only shortcut capture");
         assert_eq!(escape_state(&h), before);
     }
 
@@ -1245,6 +1817,126 @@ mod tests {
         assert_eq!((expression(&h, "w").as_str(), expression(&h, "h").as_str()), ("10 mm", "20 mm"), "one undo takes both back");
     }
 
+    /// #15377: the box of `held_dialog`, the dialog open with live updates on (the default).
+    fn live_dialog() -> crate::scenario::Harness {
+        let mut h = held_dialog();
+        h.app.preferences.parameters_apply_live = true;
+        h.frames(2);
+        h
+    }
+
+    fn reopen(h: &mut crate::scenario::Harness) {
+        h.step(&json!({"start":"parameters.change"})).unwrap();
+        h.frames(2);
+    }
+
+    #[test]
+    fn live_edits_are_put_back_by_cancel_or_escape_in_one_undo_step_and_kept_by_ok_or_the_close_button() {
+        let mut h = live_dialog();
+        let undo = h.app.session.undo.len();
+        hold(&mut h, "w", "30 mm");
+        hold(&mut h, "h", "w * 2");
+        hold(&mut h, "w", "35 mm");
+        assert_eq!((expression(&h, "w").as_str(), expression(&h, "h").as_str()), ("35 mm", "w * 2"), "live edits apply as each field is left");
+        h.step(&json!({"click":{"handle":"dialog:Cancel"}})).unwrap();
+        assert!(h.app.params.is_none(), "Cancel closes the dialog");
+        assert_eq!((expression(&h, "w").as_str(), expression(&h, "h").as_str()), ("10 mm", "20 mm"), "Cancel puts back what the dialog opened with");
+        assert_eq!(h.app.session.undo.len(), undo + 4, "three live edits, then one step that puts both parameters back");
+        h.app.run("edit.undo", json!({})).unwrap();
+        assert_eq!((expression(&h, "w").as_str(), expression(&h, "h").as_str()), ("35 mm", "w * 2"), "one undo brings the edits back");
+        h.app.run("edit.redo", json!({})).unwrap();
+
+        reopen(&mut h);
+        hold(&mut h, "w", "30 mm");
+        escape_key(&mut h, true);
+        escape_key(&mut h, false);
+        assert!(h.app.params.is_none());
+        assert_eq!(expression(&h, "w"), "10 mm", "Escape puts live edits back");
+
+        reopen(&mut h);
+        escape_type(&mut h, "param:w", "30 mm");
+        h.step(&json!({"click":{"handle":"dialog:Cancel"}})).unwrap();
+        assert!(h.app.params.is_none());
+        assert_eq!(expression(&h, "w"), "10 mm", "an edit applied by the Cancel click that leaves its field goes back too");
+
+        reopen(&mut h);
+        hold(&mut h, "w", "30 mm");
+        h.step(&json!({"click":{"handle":"dialog:OK"}})).unwrap();
+        assert!(h.app.params.is_none());
+        assert_eq!(expression(&h, "w"), "30 mm", "OK keeps live edits");
+
+        reopen(&mut h);
+        hold(&mut h, "w", "40 mm");
+        h.step(&json!({"click":{"handle":"params:close"}})).unwrap();
+        assert!(h.app.params.is_none());
+        assert_eq!(expression(&h, "w"), "40 mm", "the close button only closes, keeping live edits");
+    }
+
+    #[test]
+    fn cancel_leaves_a_parameter_changed_elsewhere() {
+        let mut h = live_dialog();
+        hold(&mut h, "w", "30 mm");
+        hold(&mut h, "h", "25 mm");
+        h.frames(1);
+        // An agent changes `w` while the dialog is open: Cancel must not undo that.
+        h.app.run("parameters.change", json!({"name":"w","expression":"40 mm"})).unwrap();
+        h.frames(1);
+        h.step(&json!({"click":{"handle":"dialog:Cancel"}})).unwrap();
+        assert_eq!((expression(&h, "w").as_str(), expression(&h, "h").as_str()), ("40 mm", "20 mm"), "only the dialog's own edit goes back");
+    }
+
+    /// An agent can change a parameter between the frame that applies a live edit and the next
+    /// one that lists the rows: Escape and Cancel leave the agent's expression (#15377 review).
+    #[test]
+    fn cancel_and_escape_leave_a_change_made_before_the_rows_are_listed_again() {
+        for escape in [true, false] {
+            let mut h = live_dialog();
+            escape_type(&mut h, "param:w", "30 mm");
+            // Enter applies the edit in this one frame; nothing lists the rows after it.
+            h.app.synthetic.push(egui::Event::Key {
+                key: egui::Key::Enter,
+                physical_key: None,
+                pressed: true,
+                repeat: false,
+                modifiers: egui::Modifiers::NONE,
+            });
+            h.frame();
+            assert_eq!(expression(&h, "w"), "30 mm", "Enter applied the edit live");
+            h.app.run("parameters.change", json!({"name":"w","expression":"40 mm"})).unwrap();
+            if escape {
+                escape_key(&mut h, true);
+                escape_key(&mut h, false);
+            } else {
+                h.step(&json!({"click":{"handle":"dialog:Cancel"}})).unwrap();
+            }
+            assert!(h.app.params.is_none(), "escape {escape}: the dialog closes");
+            assert_eq!(expression(&h, "w"), "40 mm", "escape {escape}: the agent's change stays");
+        }
+    }
+
+    /// A refused put-back keeps the dialog open with its error, and the next Cancel tries again
+    /// (#15377 review).
+    #[test]
+    fn a_refused_put_back_is_tried_again_by_the_next_cancel() {
+        let mut h = live_dialog();
+        h.app.run("parameters.add", json!({"name":"k","expression":"5 mm"})).unwrap();
+        h.app.run("parameters.change", json!({"name":"w","expression":"k * 2"})).unwrap();
+        h.frames(2);
+        hold(&mut h, "w", "30 mm");
+        assert_eq!(expression(&h, "w"), "30 mm");
+        // Without `k`, `k * 2` can't go back.
+        h.app.run("parameters.delete", json!({"name":"k"})).unwrap();
+        h.frames(1);
+        h.step(&json!({"click":{"handle":"dialog:Cancel"}})).unwrap();
+        assert!(h.app.params.as_ref().is_some_and(|d| d.error.is_some()), "the refused put-back keeps the dialog open with its error");
+        assert_eq!(expression(&h, "w"), "30 mm");
+        h.app.run("parameters.add", json!({"name":"k","expression":"5 mm"})).unwrap();
+        h.frames(1);
+        h.step(&json!({"click":{"handle":"dialog:Cancel"}})).unwrap();
+        assert!(h.app.params.is_none(), "the second Cancel puts it back and closes");
+        assert_eq!(expression(&h, "w"), "k * 2");
+    }
+
     #[test]
     fn held_edits_go_in_with_ok_and_are_dropped_by_cancel_or_escape() {
         let mut h = held_dialog();
@@ -1283,9 +1975,10 @@ mod tests {
 
     #[test]
     fn the_apply_live_choice_is_remembered_and_turning_it_on_applies_what_waits() {
+        crate::i18n::install();
         assert!(crate::prefs::Prefs::default().parameters_apply_live, "live updates stay the default");
         // The hint above the check box says when edits apply, whichever way it is set.
-        assert_eq!(hint(true), crate::i18n::tr("manage.parameters_hint"));
+        assert_eq!(hint(true), solidcraft_ui_text::tr("manage.parameters_hint"));
         assert_ne!(hint(false), hint(true));
         assert!(hint(false).contains("Apply") && !hint(false).contains("leaving"), "{}", hint(false));
         let mut h = held_dialog();
@@ -1346,13 +2039,21 @@ mod tests {
     fn a_parameter_is_offered_for_any_part_of_its_name() {
         let ctx = egui::Context::default();
         let mut app = SolveApp::new(solidcraft_engine::Session::default(), Default::default());
-        for (name, e) in [("cab_side_thickness", "18 mm"), ("sides", "4")] {
+        for (name, e) in [("cab_side_thickness", "18 mm"), ("sides", "4"), ("inner_diameter", "6 mm")] {
             let _ = app.run("parameters.add", json!({"name": name, "expression": e}));
         }
+        // A favourite is listed first in the cache, but a match by word starts alone still
+        // comes after every name that contains the word (#11978).
+        let _ = app.run("parameters.favorite", json!({"name": "inner_diameter", "favorite": true}));
         publish(&mut app, &ctx);
         let texts = |w: &str| suggestions(&ctx, w).into_iter().map(|s| s.text).collect::<Vec<_>>();
         assert_eq!(texts("side"), ["sides", "cab_side_thickness"]);
         assert_eq!(texts("Thick"), ["cab_side_thickness"]);
+        // #11978: the starts of the name's words, in order.
+        assert_eq!(texts("cabthi"), ["cab_side_thickness"]);
+        assert_eq!(texts("sidthi"), ["cab_side_thickness"]);
+        assert!(texts("thicab").is_empty());
+        assert_eq!(texts("id"), ["cab_side_thickness", "sides", "inner_diameter"]);
         assert!(!texts("in").iter().any(|t| t == "sin("), "functions match from the start");
     }
 
@@ -1430,7 +2131,242 @@ mod tests {
         assert_eq!(h.app.params.as_ref().unwrap().new_unit, 1);
         h.step(&json!({"click": {"handle": "dialog:Filter"}})).unwrap();
         assert_eq!(h.app.session.doc.param("width").unwrap().unit, "cm");
-        assert!(h.app.params.as_ref().unwrap().error.is_none());
+        assert!(h.app.params.as_ref().unwrap().banner().is_none());
+    }
+
+    /// A refused add's message is about the draft it ran with: correcting the draft takes the
+    /// message away before any second Enter, for a refused `parameters.add` and for the
+    /// expression's own live check alike.
+    #[test]
+    fn correcting_a_refused_new_parameter_clears_its_error() {
+        let mut h = crate::scenario::Harness::new();
+        h.app.home.open = false;
+        h.app.run("parameters.add", json!({"name": "width", "expression": "10 mm"})).unwrap();
+        h.step(&json!({"start": "parameters.change"})).unwrap();
+        h.step(&json!({"click": {"handle": "dialog:table:user:add"}})).unwrap();
+        h.step(&json!({"text": "width"})).unwrap();
+        h.step(&json!({"click": {"handle": "param:new:expression"}})).unwrap();
+        h.step(&json!({"text": "25 mm"})).unwrap();
+        h.step(&json!({"key": "Enter"})).unwrap();
+        h.frames(2);
+        let error = h.app.params.as_ref().unwrap().banner().map(str::to_owned);
+        assert!(error.as_deref().is_some_and(|e| e.contains("already a parameter")), "a taken name is refused: {error:?}");
+        h.step(&json!({"click": {"handle": "param:new:name"}})).unwrap();
+        h.step(&json!({"text": "2"})).unwrap();
+        h.frames(2);
+        let d = h.app.params.as_ref().unwrap();
+        assert_eq!(d.new_name, "width2");
+        assert_eq!(d.banner(), None, "the message was about the name `width`, which is gone");
+        // The expression's live check: Enter on an unfinished expression shows it in the banner,
+        // and correcting the expression takes it away.
+        h.step(&json!({"click": {"handle": "param:new:expression"}})).unwrap();
+        h.step(&json!({"key": "A", "cmd": true})).unwrap();
+        h.step(&json!({"text": "10 +"})).unwrap();
+        h.step(&json!({"key": "Enter"})).unwrap();
+        h.frames(2);
+        let error = h.app.params.as_ref().unwrap().banner().map(str::to_owned);
+        assert!(error.is_some(), "an unfinished expression is refused: {error:?}");
+        assert!(h.app.session.doc.param("width2").is_none());
+        h.step(&json!({"click": {"handle": "param:new:expression"}})).unwrap();
+        h.step(&json!({"key": "A", "cmd": true})).unwrap();
+        h.step(&json!({"text": "10 + 5"})).unwrap();
+        h.frames(2);
+        assert_eq!(h.app.params.as_ref().unwrap().banner(), None, "the message was about `10 +`, which is gone");
+        h.step(&json!({"key": "Enter"})).unwrap();
+        h.frames(2);
+        assert_eq!(h.app.session.doc.param("width2").unwrap().expr, "10 + 5");
+    }
+
+    /// The dialog with `width` and `depth` saved, and the add row holding the draft `width`,
+    /// `25 mm`, not yet submitted.
+    fn taken_name_draft() -> crate::scenario::Harness {
+        let mut h = crate::scenario::Harness::new();
+        h.app.home.open = false;
+        h.app.run("parameters.add", json!({"name": "width", "expression": "10 mm"})).unwrap();
+        h.app.run("parameters.add", json!({"name": "depth", "expression": "5 mm"})).unwrap();
+        h.step(&json!({"start": "parameters.change"})).unwrap();
+        h.step(&json!({"click": {"handle": "dialog:table:user:add"}})).unwrap();
+        h.step(&json!({"text": "width"})).unwrap();
+        h.step(&json!({"click": {"handle": "param:new:expression"}})).unwrap();
+        h.step(&json!({"text": "25 mm"})).unwrap();
+        h
+    }
+
+    fn banner(h: &crate::scenario::Harness) -> Option<String> {
+        h.app.params.as_ref().unwrap().banner().map(str::to_owned)
+    }
+
+    #[test]
+    fn discarding_a_refused_new_parameter_takes_its_message_away() {
+        let mut h = taken_name_draft();
+        h.step(&json!({"key": "Enter"})).unwrap();
+        h.frames(2);
+        assert!(banner(&h).is_some_and(|e| e.contains("already a parameter")), "{:?}", banner(&h));
+        h.step(&json!({"click": {"handle": "param:new:delete"}})).unwrap();
+        h.frames(2);
+        let d = h.app.params.as_ref().unwrap();
+        assert!(!d.adding && d.new_name.is_empty(), "the row is gone");
+        assert_eq!(d.banner(), None, "and its message with it");
+    }
+
+    #[test]
+    fn a_new_parameter_refused_on_leaving_the_row_clears_its_message_when_corrected() {
+        let mut h = taken_name_draft();
+        h.step(&json!({"click": {"handle": "dialog:Filter"}})).unwrap();
+        h.frames(2);
+        assert!(banner(&h).is_some_and(|e| e.contains("already a parameter")), "{:?}", banner(&h));
+        assert_eq!(h.app.session.doc.param("width").unwrap().expr, "10 mm", "nothing was added or changed");
+        h.step(&json!({"click": {"handle": "param:new:name"}})).unwrap();
+        h.step(&json!({"text": "2"})).unwrap();
+        h.frames(2);
+        assert_eq!(h.app.params.as_ref().unwrap().new_name, "width2");
+        assert_eq!(banner(&h), None, "the message was about the name `width`, which is gone");
+    }
+
+    /// A design change can make a refused draft fine (here `width` is removed by a command, as an
+    /// agent or Undo would): the message goes with the design it was about, and Enter adds.
+    #[test]
+    fn a_refused_new_parameter_is_checked_again_when_the_design_changes() {
+        let mut h = taken_name_draft();
+        h.step(&json!({"key": "Enter"})).unwrap();
+        h.frames(2);
+        assert!(banner(&h).is_some_and(|e| e.contains("already a parameter")), "{:?}", banner(&h));
+        let doc = h.app.session.doc.clone();
+        h.app.run("parameters.delete", json!({"name": "width"})).unwrap();
+        h.frames(2);
+        assert!(!Arc::ptr_eq(&doc, &h.app.session.doc), "a design change replaces the session's document");
+        assert_eq!(banner(&h), None, "the message was about a design that had `width`");
+        h.step(&json!({"key": "Enter"})).unwrap();
+        h.frames(2);
+        assert_eq!(h.app.session.doc.param("width").unwrap().expr, "25 mm");
+    }
+
+    /// A row's own refusal with the very same words (renaming `depth` to the taken `width`) is
+    /// not the add row's: it leaves the add row's refusal in place (the refused command puts the
+    /// document it started from back), and correcting the draft leaves the rename's message
+    /// where it is. A rename's message clears only through a rename that succeeds, which changes
+    /// the design, so the refusal showing again once a row's message is cleared is in
+    /// `the_banner_shows_the_newer_of_a_rows_message_and_the_add_rows_refusal`.
+    #[test]
+    fn correcting_a_refused_new_parameter_keeps_a_rows_message() {
+        let mut h = taken_name_draft();
+        h.step(&json!({"key": "Enter"})).unwrap();
+        h.frames(2);
+        assert!(banner(&h).is_some_and(|e| e.contains("already a parameter")), "{:?}", banner(&h));
+        let (doc, revision) = (h.app.session.doc.clone(), h.app.session.revision);
+        // Let the clicks that filled the draft age, or egui counts the double-click as a triple.
+        h.frames(30);
+        h.run(&json!([{"click": {"handle": "param:name:depth"}, "double": true}, {"key": "A", "cmd": true}, {"text": "width"}])).unwrap();
+        assert!(h.app.params.as_ref().unwrap().renaming.is_some(), "double click enters rename mode");
+        // The rename commits when its box loses the focus, here to the add row's name box.
+        h.step(&json!({"click": {"handle": "param:new:name"}})).unwrap();
+        h.frames(2);
+        let d = h.app.params.as_ref().unwrap();
+        assert!(d.error.as_deref().is_some_and(|e| e.contains("already a parameter `width`")), "the rename is refused: {:?}", d.error);
+        assert_ne!(revision, h.app.session.revision, "a refused rename restores the design and refreshes it, which moves the revision");
+        assert!(Arc::ptr_eq(&doc, &h.app.session.doc), "but the restore puts the document the rename started from back");
+        assert!(d.new_refused.is_some(), "so the draft's own refusal stays, under the rename's message");
+        assert_eq!(h.app.session.doc.param("depth").unwrap().expr, "5 mm");
+        h.step(&json!({"text": "2"})).unwrap();
+        h.frames(2);
+        let d = h.app.params.as_ref().unwrap();
+        assert_eq!(d.new_name, "width2");
+        assert!(d.new_refused.is_none(), "the draft's own refusal goes with the draft");
+        assert!(d.error.as_deref().is_some_and(|e| e.contains("already a parameter `width`")), "the rename's message stays: {:?}", d.error);
+        assert_eq!(d.banner(), d.error.as_deref(), "and is what the banner shows");
+    }
+
+    /// A click on a body in the viewport selects it (`select.set`), which moves the session's
+    /// revision but not the design: the message is about the draft in the design, so it stays.
+    #[test]
+    fn selecting_a_body_keeps_a_refused_new_parameters_message() {
+        let mut h = taken_name_draft();
+        h.app.run("solid.box", json!({"length": 10, "width": 20, "height": 30})).unwrap();
+        h.step(&json!({"key": "Enter"})).unwrap();
+        h.frames(2);
+        assert_eq!(banner(&h).as_deref(), Some("there is already a parameter `width`"));
+        let (doc, revision) = (h.app.session.doc.clone(), h.app.session.revision);
+        h.app.run("select.set", json!({"items": [solidcraft_engine::Sel::Body { name: "Body1".into() }]})).unwrap();
+        h.frames(2);
+        assert_eq!(h.app.session.selection.len(), 1, "the body is selected");
+        assert_ne!(revision, h.app.session.revision, "a selection moves the revision");
+        assert!(Arc::ptr_eq(&doc, &h.app.session.doc), "and leaves the document alone");
+        assert_eq!(banner(&h).as_deref(), Some("there is already a parameter `width`"), "so the message stays");
+        assert!(h.app.params.as_ref().unwrap().new_refused.is_some());
+    }
+
+    /// A unit or comment edit changes the draft the message was about, so the message goes with
+    /// it, although neither cures a taken name: Enter checks again and says so again.
+    #[test]
+    fn a_unit_or_comment_edit_on_a_refused_new_parameter_clears_its_message() {
+        let mut h = taken_name_draft();
+        h.step(&json!({"key": "Enter"})).unwrap();
+        h.frames(2);
+        assert_eq!(banner(&h).as_deref(), Some("there is already a parameter `width`"));
+        h.step(&json!({"click": {"handle": "param:new:unit"}})).unwrap();
+        h.step(&json!({"click": {"handle": "dialog:Unit:cm"}})).unwrap();
+        h.frames(2);
+        assert_eq!(h.app.params.as_ref().unwrap().new_unit, 1);
+        assert_eq!(banner(&h), None, "the message was about the draft in mm");
+        // The unit menu holds the focus after a pick; Enter submits from one of the row's boxes.
+        h.step(&json!({"click": {"handle": "param:new:expression"}})).unwrap();
+        h.step(&json!({"key": "Enter"})).unwrap();
+        h.frames(2);
+        assert_eq!(banner(&h).as_deref(), Some("there is already a parameter `width`"), "Enter checks the draft again");
+        h.step(&json!({"click": {"handle": "param:new:comment"}})).unwrap();
+        h.step(&json!({"text": "Overall width"})).unwrap();
+        h.frames(2);
+        assert_eq!(h.app.params.as_ref().unwrap().new_comment, "Overall width");
+        assert_eq!(banner(&h), None, "the message was about the draft without a comment");
+        h.step(&json!({"key": "Enter"})).unwrap();
+        h.frames(2);
+        assert_eq!(banner(&h).as_deref(), Some("there is already a parameter `width`"), "Enter checks the draft again");
+        assert_eq!(h.app.session.doc.param("width").unwrap().expr, "10 mm", "nothing was added");
+    }
+
+    /// With a row's message and the add row's refusal both alive, the banner shows the newer one.
+    /// A row's expression that fails its check runs no design-changing command, so the document
+    /// stays and the add row's refusal stays with it, under the row's message; once the row is
+    /// corrected, the refusal shows again with no new Enter; and a refusal after a row's message
+    /// takes the banner back, as any action's result did. The edits are held (#9279): in the live
+    /// mode a row's message clears only through a `parameters.change` that succeeds, which changes
+    /// the design and drops the refusal too. The draft's expression is unfinished, so leaving the
+    /// add row attempts nothing (a valid draft is attempted on every click outside the row).
+    #[test]
+    fn the_banner_shows_the_newer_of_a_rows_message_and_the_add_rows_refusal() {
+        let mut h = crate::scenario::Harness::new();
+        h.app.home.open = false;
+        h.app.preferences.parameters_apply_live = false;
+        h.app.run("parameters.add", json!({"name": "depth", "expression": "5 mm"})).unwrap();
+        h.step(&json!({"start": "parameters.change"})).unwrap();
+        h.step(&json!({"click": {"handle": "dialog:table:user:add"}})).unwrap();
+        h.step(&json!({"text": "height"})).unwrap();
+        h.step(&json!({"click": {"handle": "param:new:expression"}})).unwrap();
+        h.step(&json!({"text": "10 +"})).unwrap();
+        h.step(&json!({"key": "Enter"})).unwrap();
+        h.frames(2);
+        let refusal = banner(&h).expect("an unfinished expression is refused");
+        assert!(h.app.session.doc.param("height").is_none(), "nothing was added");
+        let doc = h.app.session.doc.clone();
+        h.run(&json!([{"click": {"handle": "param:depth"}}, {"key": "A", "cmd": true}, {"text": "missing + 1 mm"}, {"key": "Enter"}])).unwrap();
+        h.frames(2);
+        assert_eq!(banner(&h).as_deref(), Some("unknown parameter `missing`"), "the row's message is the newer one");
+        assert!(h.app.params.as_ref().unwrap().new_refused.is_some(), "the add row's refusal is alive under it");
+        assert!(Arc::ptr_eq(&doc, &h.app.session.doc), "a failed check leaves the document alone");
+        h.run(&json!([{"click": {"handle": "param:depth"}}, {"key": "A", "cmd": true}, {"text": "6 mm"}, {"key": "Enter"}])).unwrap();
+        h.frames(2);
+        assert_eq!(banner(&h).as_deref(), Some(refusal.as_str()), "the correction clears the row's message and the refusal shows again, no Enter");
+        assert_eq!(h.app.params.as_ref().unwrap().editing.get("depth").map(String::as_str), Some("6 mm"), "the held edit waits for Apply");
+        assert!(Arc::ptr_eq(&doc, &h.app.session.doc), "and the design is as it was");
+        h.run(&json!([{"click": {"handle": "param:depth"}}, {"key": "A", "cmd": true}, {"text": "missing + 1 mm"}, {"key": "Enter"}])).unwrap();
+        h.frames(2);
+        assert_eq!(banner(&h).as_deref(), Some("unknown parameter `missing`"), "the row's message is the newer one again");
+        h.step(&json!({"click": {"handle": "param:new:expression"}})).unwrap();
+        h.step(&json!({"key": "Enter"})).unwrap();
+        h.frames(2);
+        assert_eq!(banner(&h).as_deref(), Some(refusal.as_str()), "the add row's refusal is the newer one");
+        assert_eq!(h.app.params.as_ref().unwrap().editing.get("depth").map(String::as_str), Some("missing + 1 mm"), "the row's edit is kept");
+        assert_eq!(h.app.session.doc.param("depth").unwrap().expr, "5 mm");
     }
 
     /// #8563: sorting orders each section, and each model group, by itself.
@@ -1481,19 +2417,29 @@ mod tests {
     }
 
     /// #9706: the Filter box reads expressions too, so a parameter's name lists every parameter
-    /// that uses it, and a value finds the parameter that holds it.
+    /// that uses it, and a value finds the parameter that holds it. #11978: the starts of a
+    /// name's words, in order, find it.
     #[test]
     fn the_filter_lists_the_parameters_that_use_a_name() {
         let mut h = crate::scenario::Harness::new();
         h.app.home.open = false;
         h.call("ui.resize", json!({"width": 1600, "height": 1400}));
-        for (name, expression) in [("width", "40 mm"), ("height", "width * 2"), ("depth", "5 mm")] {
+        for (name, expression) in [("width", "40 mm"), ("height", "width * 2"), ("depth", "5 mm"), ("tooth_outward_flange_diameter", "8 mm")] {
             h.app.run("parameters.add", json!({"name": name, "expression": expression})).unwrap();
         }
         h.app.start("parameters.change");
         h.frames(6);
-        let all = ["width", "height", "depth"];
-        for (filter, expected) in [("width", vec!["width", "height"]), ("WIDTH *", vec!["height"]), ("5 mm", vec!["depth"]), ("", all.to_vec())] {
+        let all = ["width", "height", "depth", "tooth_outward_flange_diameter"];
+        let tooth = vec!["tooth_outward_flange_diameter"];
+        for (filter, expected) in [
+            ("width", vec!["width", "height"]),
+            ("WIDTH *", vec!["height"]),
+            ("5 mm", vec!["depth"]),
+            ("toodia", tooth.clone()),
+            ("OutDia", tooth.clone()),
+            ("diatoo", vec![]),
+            ("", all.to_vec()),
+        ] {
             h.app.params.as_mut().unwrap().filter = filter.into();
             h.frames(4);
             let shown: Vec<&str> = all.into_iter().filter(|n| crate::scenario::rect_of(&format!("dialog:table:user:{n}")).is_some()).collect();
@@ -1681,7 +2627,7 @@ mod tests {
         h.step(&json!({"key": "Enter"})).unwrap();
         h.frames(2);
         assert!(h.app.session.doc.params.iter().all(|p| p.name != "width"), "no expression: nothing added");
-        assert_eq!(h.app.params.as_ref().unwrap().error, None, "and nothing wrong is said");
+        assert_eq!(h.app.params.as_ref().unwrap().banner(), None, "and nothing wrong is said");
         h.step(&json!({"text": "25 mm"})).unwrap();
         assert_eq!(h.app.params.as_ref().unwrap().new_expr, "25 mm", "Enter went on to the expression");
         h.step(&json!({"key": "Enter"})).unwrap();
@@ -1697,6 +2643,91 @@ mod tests {
         h.step(&json!({"key": "Tab"})).unwrap();
         h.step(&json!({"text": "2"})).unwrap();
         assert_eq!(h.app.params.as_ref().unwrap().new_expr, "2", "Tab selected the expression, typing replaced it");
+    }
+
+    /// Enter commits a cell and moves to the cell below in the same column, its text selected;
+    /// Shift+Enter moves up; in the last row Enter only commits; a click keeps the caret.
+    #[test]
+    fn enter_moves_down_a_column_and_shift_enter_up() {
+        let mut h = crate::scenario::Harness::new();
+        h.app.home.open = false;
+        for (name, expression) in [("a", "1 mm"), ("b", "2 mm"), ("c", "3 mm")] {
+            h.app.run("parameters.add", json!({"name":name,"expression":expression,"comment":format!("note {name}")})).unwrap();
+        }
+        h.step(&json!({"start":"parameters.change"})).unwrap();
+        h.frames(3);
+        let expr = |h: &crate::scenario::Harness, name: &str| h.app.session.doc.param(name).map(|p| p.expr.clone()).unwrap_or_default();
+        let comment = |h: &crate::scenario::Harness, name: &str| h.app.session.doc.param(name).map(|p| p.comment.clone()).unwrap_or_default();
+        h.run(&json!([{"click":{"handle":"param:a"}}, {"key":"A","cmd":true}, {"text":"10 mm"}, {"key":"Enter"}])).unwrap();
+        h.frames(2);
+        assert_eq!(expr(&h, "a"), "10 mm", "Enter commits the cell");
+        h.run(&json!([{"text":"20 mm"}, {"key":"Enter"}])).unwrap();
+        h.frames(2);
+        assert_eq!(expr(&h, "b"), "20 mm", "and the cell below took the keyboard with its text selected");
+        h.run(&json!([{"text":"30 mm"}, {"key":"Enter"}])).unwrap();
+        h.frames(2);
+        assert_eq!(expr(&h, "c"), "30 mm");
+        h.run(&json!([{"click":{"handle":"param:c"}}, {"key":"A","cmd":true}, {"text":"31 mm"}, {"key":"Enter","shift":true}])).unwrap();
+        h.frames(2);
+        assert_eq!(expr(&h, "c"), "31 mm", "Shift+Enter commits too");
+        h.run(&json!([{"text":"21 mm"}, {"key":"Enter","shift":true}])).unwrap();
+        h.frames(2);
+        assert_eq!(expr(&h, "b"), "21 mm", "Shift+Enter moved up the column");
+        h.run(&json!([{"text":"11 mm"}, {"key":"Enter"}])).unwrap();
+        h.frames(2);
+        assert_eq!(expr(&h, "a"), "11 mm");
+        // The comment column moves the same way, and Escape still discards the edit it is in.
+        h.run(&json!([{"click":{"handle":"param:comment:a"}}, {"key":"A","cmd":true}, {"text":"first"}, {"key":"Enter"}])).unwrap();
+        h.frames(2);
+        h.run(&json!([{"text":"second"}])).unwrap();
+        h.frames(1);
+        assert_eq!(comment(&h, "a"), "first");
+        assert_eq!(h.app.params.as_ref().and_then(|d| d.comments.get("b").cloned()).as_deref(), Some("second"), "typing replaced b's comment");
+        h.step(&json!({"key":"Escape"})).unwrap();
+        h.frames(2);
+        assert_eq!(comment(&h, "b"), "note b", "Escape discards the edit");
+    }
+
+    /// A block pasted from a spreadsheet (Excel's tab-separated text) over Expression, Value and
+    /// Comment goes in as one gesture: one undo step takes all of it back. The read-only Value
+    /// column keeps its text.
+    #[test]
+    fn a_pasted_block_is_one_undo_step() {
+        let mut h = crate::scenario::Harness::new();
+        h.app.home.open = false;
+        for (name, expression) in [("a", "1 mm"), ("b", "2 mm"), ("c", "3 mm")] {
+            h.app.run("parameters.add", json!({"name": name, "expression": expression})).unwrap();
+        }
+        h.step(&json!({"start": "parameters.change"})).unwrap();
+        h.frames(3);
+        // The cursor on a's expression without editing it: click its Value, then Left.
+        h.run(&json!([{"click": {"handle": "grid:user:a:value"}}])).unwrap();
+        let state = grid_state(h.app.params.as_ref().unwrap(), "user");
+        h.run(&json!([{"key": "ArrowLeft"}])).unwrap();
+        assert!(h.app.params.as_ref().unwrap().editing.is_empty(), "the cursor moved; nothing is edited");
+        assert_eq!(ui_kit::Grid::selection(&h.ctx, state), Some((0, 0, EXPRESSION, EXPRESSION)), "the cursor is on a's expression");
+        assert!(h.ctx.memory(|m| m.focused()).is_some_and(|f| f == state.with("focus")), "and the grid has the keyboard");
+        let undo = h.app.session.undo.len();
+        h.app.synthetic.push(egui::Event::Paste("20 mm\tignored\tfirst\r\n30 mm\tignored\tsecond\r\n".into()));
+        h.frames(3);
+        let param = |h: &crate::scenario::Harness, name: &str| {
+            let p = h.app.session.doc.param(name).unwrap();
+            (p.expr.clone(), p.comment.clone())
+        };
+        assert_eq!(param(&h, "a"), ("20 mm".into(), "first".into()));
+        assert_eq!(param(&h, "b"), ("30 mm".into(), "second".into()));
+        assert_eq!(param(&h, "c"), ("3 mm".into(), String::new()), "the block ends at b");
+        assert_eq!(h.app.session.undo.len(), undo + 1, "one paste, one undo step");
+        assert!(h.app.params.as_ref().unwrap().error.is_none());
+        h.app.run("edit.undo", json!({})).unwrap();
+        h.frames(2);
+        assert_eq!(param(&h, "a"), ("1 mm".into(), String::new()));
+        assert_eq!(param(&h, "b"), ("2 mm".into(), String::new()), "one undo takes the whole paste back");
+        // Ctrl+D fills a's expression down to b and c, again as one step.
+        h.run(&json!([{"click": {"handle": "grid:user:a:value"}}, {"key": "ArrowLeft"}, {"key": "ArrowDown", "shift": true}, {"key": "ArrowDown", "shift": true}, {"key": "D", "cmd": true}])).unwrap();
+        h.frames(2);
+        assert_eq!((param(&h, "b").0, param(&h, "c").0), ("1 mm".into(), "1 mm".into()));
+        assert_eq!(h.app.session.undo.len(), undo + 1, "the fill is one step too (the paste was undone)");
     }
 
     /// An open window lists and checks once per revision of the design, not once per frame
@@ -1828,8 +2859,9 @@ mod tests {
         assert!(wide.width() > cell.width() * 1.5, "the edited formula opens wide: {wide:?} vs {cell:?}");
         assert!((wide.left() - cell.left()).abs() < 1.0, "it opens from its own cell: {wide:?} vs {cell:?}");
 
-        // The open field wraps, so the end of the text is Ctrl+End.
-        h.run(&json!([{"key":"End","cmd":true}, {"text":" * 2"}, {"key":"Enter"}])).unwrap();
+        // The open field wraps, so the end of the text is Command+Down. Not Ctrl+End:
+        // egui ignores that on macOS, and the typed tail would land where the click put the cursor.
+        h.run(&json!([{"key":"ArrowDown","cmd":true,"ctrl":false}, {"text":" * 2"}, {"key":"Enter"}])).unwrap();
         h.frames(2);
         assert_eq!(h.app.session.doc.param("length").unwrap().expr, format!("{long} * 2"));
         let after = crate::scenario::rect_of("param:length").unwrap();

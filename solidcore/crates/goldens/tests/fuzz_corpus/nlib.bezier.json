@@ -1,0 +1,8 @@
+{
+  "unit": "nlib.bezier",
+  "cases": [
+    {"name": "fuzz00168_ffi_rejected_bad_index_count_9223372036854776000", "origin": "fuzz-out/n2000/nlib.bezier/fuzz00168.json (panic: rust: capacity overflow)", "cpp": "harness: ffi rejected: bad index/count 9223372036854776000 (max 1000)", "rust": "ok", "inputs": {"op": "reduce_coefs", "p": 9223372036854775807}},
+    {"name": "fuzz01249_g_too_short", "origin": "fuzz-out/n2000/nlib.bezier/fuzz01249.json (panic: rust: capacity overflow)", "cpp": "harness: g too short", "rust": "ok", "inputs": {"e": 5, "f": [-7.51, 0.0, -0.0, 6.37], "g": [0.0], "op": "func_func", "p": 3, "pre": false, "q": 9223372036854775807, "s": 0}},
+    {"name": "fuzz01913_f_too_short", "origin": "fuzz-out/n2000/nlib.bezier/fuzz01913.json (crash: rust: killed by signal 6 (memory allocation of 34359738376 bytes failed))", "cpp": "harness: f too short", "rust": "ok", "inputs": {"e": 3, "f": [0.0], "g": [-4.3e-07], "op": "func_func", "p": 4294967296, "pre": false, "q": 0, "s": 0}}
+  ]
+}

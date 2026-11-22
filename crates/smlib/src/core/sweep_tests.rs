@@ -149,13 +149,27 @@ fn case(name: &str) -> Case {
             c(Op::Extrude(disc(), Z, 10.0, theta, DraftCorner::default(), true), Expect::Volume(frustum(PI * 25.0, PI * r2 * r2, 10.0)))
         }
         // A strip 2 wide leaning in 10° over 10: the long walls meet across the short ones
-        // (10 tan 10° > 1) before the far end.
+        // (10 tan 10° > 1) before the far end, and the section closes there along its ridge:
+        // the hip roof, ∫ (a - 2tz)(b - 2tz) dz to z* = b / 2t, V = b² (3a - b) / 12t.
         "extrude_draft_wall_closes" => c(
             Op::Extrude(
                 polygon(&[[0.0, 0.0, 0.0], [20.0, 0.0, 0.0], [20.0, 2.0, 0.0], [0.0, 2.0, 0.0]]),
                 Z,
                 10.0,
                 10f64.to_radians(),
+                DraftCorner::Curvature,
+                true,
+            ),
+            Expect::Volume(4.0 * (3.0 * 20.0 - 2.0) / (12.0 * 10f64.to_radians().tan())),
+        ),
+        // The same strip leaning in so that its long walls meet just at the far end
+        // (10 tan θ = 1): the far end would pinch to the ridge, so it is refused.
+        "extrude_draft_ridge_on_far_end" => c(
+            Op::Extrude(
+                polygon(&[[0.0, 0.0, 0.0], [20.0, 0.0, 0.0], [20.0, 2.0, 0.0], [0.0, 2.0, 0.0]]),
+                Z,
+                10.0,
+                0.1f64.atan(),
                 DraftCorner::Curvature,
                 true,
             ),
@@ -299,8 +313,8 @@ fn on_core(op: &Op) -> crate::Result<Body> {
         Op::Loft(s, d, cap) => loft(s, *d, *cap),
         Op::LoftToPoint(s, apex) => loft_to_point(s, *apex),
         Op::Stations(p, s, e) => sweep_stations(p, s, *e),
-        Op::Screw(p, o, a, pitch, turns, tol) => screw_sweep(p, *o, *a, *pitch, *turns, None, *tol),
-        Op::ScrewRadial(p, o, a, pitch, turns, law, tol) => screw_sweep(p, *o, *a, *pitch, *turns, Some(law), *tol),
+        Op::Screw(p, o, a, pitch, turns, tol) => screw_sweep(p, *o, *a, *pitch, *turns, None, *tol, false),
+        Op::ScrewRadial(p, o, a, pitch, turns, law, tol) => screw_sweep(p, *o, *a, *pitch, *turns, Some(law), *tol, false),
     }
 }
 
@@ -347,7 +361,7 @@ fn solidcore_case(name: &'static str) -> Got {
             let size = if sheet { area(&body, 1e-8) } else { volume(&body, 1e-8) }.unwrap_or_else(|e| panic!("{name}: size: {e}"));
             let n = counts(&body).unwrap();
             let (rec, _) = native(&to_arrays(&body).unwrap()).unwrap_or_else(|e| panic!("{name}: record: {e:?}"));
-            solidcraft_geom::brep::check::validate(&rec).unwrap_or_else(|e| panic!("{name}: record: {e}"));
+            solidcore_ops::record_check::validate(&rec).unwrap_or_else(|e| panic!("{name}: record: {e}"));
             bounds(&body).unwrap();
             Measured { size, counts: n, kinds: kinds(&rec) }
         });
@@ -379,6 +393,7 @@ cases!(
     extrude_square_drafted_curvature,
     extrude_circle_drafted,
     extrude_draft_wall_closes,
+    extrude_draft_ridge_on_far_end,
     revolve_rectangle_full,
     revolve_rectangle_quarter,
     sweep_circle_straight,
@@ -598,14 +613,26 @@ fn hostile_arguments_are_refused() {
     assert_eq!(loft(std::slice::from_ref(&sq), 1, true).err(), Some(Error::Argument), "one section");
     assert_eq!(loft(&[sq.clone(), sq.clone()], 4, true).err(), Some(Error::Argument), "degree 4");
     assert_eq!(loft_to_point(&sq, [0.5, 0.5, 0.0]).err(), Some(Error::Argument), "apex in the base's plane");
-    assert_eq!(loft_to_point(&[circle([0.0; 3], Z, [1.0, 0.0, 0.0], 1.0)], Z).err(), Some(Error::Argument), "not lines");
+    // A circle lofts to a point above it: the cone, pi r^2 h / 3 (#11216); in its plane it is refused.
+    let cone = loft_to_point(&[circle([0.0; 3], Z, [1.0, 0.0, 0.0], 1.0)], Z).unwrap_or_else(|e| panic!("circle base: {e:?}"));
+    let v = volume(&cone, 1e-8).unwrap();
+    assert!((v - PI / 3.0).abs() < 1e-6 * PI, "circle base: {v}");
+    assert_eq!(
+        loft_to_point(&[circle([0.0; 3], Z, [1.0, 0.0, 0.0], 1.0)], [0.5, 0.0, 0.0]).err(),
+        Some(Error::Argument),
+        "circle, apex in its plane"
+    );
     let flat = Affine { m: [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 0.0]], t: [0.0; 3] };
     assert_eq!(sweep_stations(&sq, &[translate([0.0; 3]), flat], Ends::Capped).err(), Some(Error::Argument), "a singular map");
     assert_eq!(sweep_stations(&sq, &[translate([0.0; 3])], Ends::Capped).err(), Some(Error::Argument), "one station");
-    assert_eq!(screw_sweep(&sq, [0.0; 3], Z, 0.0, 1.0, None, 1e-3).err(), Some(Error::Argument), "no pitch");
-    assert_eq!(screw_sweep(&sq, [0.0; 3], Z, 1.0, 300.0, None, 1e-3).err(), Some(Error::Argument), "too many turns");
-    assert_eq!(screw_sweep(&sq, [0.0; 3], Z, 1.0, 1.0, Some(&[(0.5, 0.0), (0.2, 0.0)]), 1e-3).err(), Some(Error::Argument), "a law going back");
-    assert_eq!(screw_sweep(&sq, [0.0; 3], Z, 1.0, 1.0, Some(&[]), 1e-3).err(), Some(Error::Argument), "an empty law");
+    assert_eq!(screw_sweep(&sq, [0.0; 3], Z, 0.0, 1.0, None, 1e-3, false).err(), Some(Error::Argument), "no pitch");
+    assert_eq!(screw_sweep(&sq, [0.0; 3], Z, 1.0, 300.0, None, 1e-3, false).err(), Some(Error::Argument), "too many turns");
+    assert_eq!(
+        screw_sweep(&sq, [0.0; 3], Z, 1.0, 1.0, Some(&[(0.5, 0.0), (0.2, 0.0)]), 1e-3, false).err(),
+        Some(Error::Argument),
+        "a law going back"
+    );
+    assert_eq!(screw_sweep(&sq, [0.0; 3], Z, 1.0, 1.0, Some(&[]), 1e-3, false).err(), Some(Error::Argument), "an empty law");
     let b = make_box([0.0; 3], [1.0; 3]).unwrap();
     assert_eq!(project_curves(&b, [0.5; 3], 0.01, &sq, [0.0; 3], 1e-6).err(), Some(Error::Argument), "no direction");
     assert_eq!(project_curves(&b, [0.5; 3], 0.0, &sq, Z, 1e-6).err(), Some(Error::Argument), "no pick tolerance");

@@ -4,5 +4,5 @@
  "source": "invariants",
  "method": "the cut cannot find its sketch there: the move breaks a feature that worked and is refused",
  "outcome": "refused",
- "refusal": "moving Notch there breaks Notch"
+ "refusal": "breaks Notch"
 }

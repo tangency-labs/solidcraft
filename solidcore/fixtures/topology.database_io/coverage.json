@@ -1,0 +1,181 @@
+{
+ "cases": [
+  {
+   "name": "extract_double_exponent_1e5_2p5E3_7e0",
+   "upstream_ref": "libstdc++ std::istream >> double via source/SMLib/src/SmDatabaseIO.cpp (exponent without sign) (coverage: topology/database_io.rs:578)",
+   "inputs": {
+    "source": "bytes",
+    "file_type": 0,
+    "text": "1e5 2.5E3 7e0\n",
+    "ops": [
+     [
+      "extract_double",
+      0
+     ],
+     [
+      "extract_double",
+      0
+     ],
+     [
+      "extract_double",
+      0
+     ],
+     [
+      "info",
+      0
+     ]
+    ]
+   }
+  },
+  {
+   "name": "extract_double_exponent_m3p25e12x",
+   "upstream_ref": "libstdc++ std::istream >> double via source/SMLib/src/SmDatabaseIO.cpp (exponent without sign) (coverage: topology/database_io.rs:578)",
+   "inputs": {
+    "source": "bytes",
+    "file_type": 0,
+    "text": "-3.25e12x\n",
+    "ops": [
+     [
+      "extract_double",
+      0
+     ],
+     [
+      "extract_double",
+      0
+     ],
+     [
+      "extract_double",
+      0
+     ],
+     [
+      "info",
+      0
+     ]
+    ]
+   }
+  },
+  {
+   "name": "extract_double_exponent_6E_4",
+   "upstream_ref": "libstdc++ std::istream >> double via source/SMLib/src/SmDatabaseIO.cpp (exponent without sign) (coverage: topology/database_io.rs:578)",
+   "inputs": {
+    "source": "bytes",
+    "file_type": 0,
+    "text": "6E 4\n",
+    "ops": [
+     [
+      "extract_double",
+      0
+     ],
+     [
+      "extract_double",
+      0
+     ],
+     [
+      "extract_double",
+      0
+     ],
+     [
+      "info",
+      0
+     ]
+    ]
+   }
+  },
+  {
+   "name": "extract_double_exponent_1pe7_p5e2",
+   "upstream_ref": "libstdc++ std::istream >> double via source/SMLib/src/SmDatabaseIO.cpp (exponent without sign) (coverage: topology/database_io.rs:578)",
+   "inputs": {
+    "source": "bytes",
+    "file_type": 0,
+    "text": "1.e7 .5e2\n",
+    "ops": [
+     [
+      "extract_double",
+      0
+     ],
+     [
+      "extract_double",
+      0
+     ],
+     [
+      "extract_double",
+      0
+     ],
+     [
+      "info",
+      0
+     ]
+    ]
+   }
+  },
+  {
+   "name": "extract_word_at_end_6",
+   "upstream_ref": "source/SMLib/src/SmDatabaseIO.cpp (word extraction at end of input fails the stream) (coverage: topology/database_io.rs:388)",
+   "inputs": {
+    "source": "bytes",
+    "file_type": 0,
+    "text": "abc   ",
+    "ops": [
+     [
+      "extract_word",
+      0
+     ],
+     [
+      "extract_word",
+      0
+     ],
+     [
+      "info",
+      0
+     ]
+    ]
+   }
+  },
+  {
+   "name": "extract_word_at_end_0",
+   "upstream_ref": "source/SMLib/src/SmDatabaseIO.cpp (word extraction at end of input fails the stream) (coverage: topology/database_io.rs:388)",
+   "inputs": {
+    "source": "bytes",
+    "file_type": 0,
+    "text": "",
+    "ops": [
+     [
+      "extract_word",
+      0
+     ],
+     [
+      "extract_word",
+      0
+     ],
+     [
+      "info",
+      0
+     ]
+    ]
+   }
+  },
+  {
+   "name": "extract_word_at_end_5",
+   "upstream_ref": "source/SMLib/src/SmDatabaseIO.cpp (word extraction at end of input fails the stream) (coverage: topology/database_io.rs:388)",
+   "inputs": {
+    "source": "bytes",
+    "file_type": 0,
+    "text": "  \n  ",
+    "ops": [
+     [
+      "extract_word",
+      0
+     ],
+     [
+      "extract_word",
+      0
+     ],
+     [
+      "info",
+      0
+     ]
+    ]
+   }
+  }
+ ]
+}

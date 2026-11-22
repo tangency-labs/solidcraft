@@ -1,0 +1,45 @@
+{
+  "area": "history",
+  "bodies": {},
+  "calls": [],
+  "case": "cov-timeline-move-many-folder-into-itself-refused",
+  "expected": {
+    "method": "a folder cannot hold itself",
+    "outcome": "refused",
+    "refusal": "a folder cannot be moved into itself or one of its descendants",
+    "source": "invariants",
+    "sources": [],
+    "what": "timeline.move_many of a folder into itself"
+  },
+  "expressible": false,
+  "operation_expressible": false,
+  "outcome": {
+    "engine_error": "step 7 (timeline.move_many): invalid parameters for `timeline.move_many`: a folder cannot be moved into itself or one of its descendants",
+    "ran": false
+  },
+  "result": [],
+  "rig": {
+    "error": null,
+    "known_failing": null,
+    "measured": null,
+    "refused_with": "step 7 (timeline.move_many): invalid parameters for `timeline.move_many`: a folder cannot be moved into itself or one of its descendants",
+    "status": "pass"
+  },
+  "sources": [],
+  "traced_ops": [
+    "extrude",
+    "extrude",
+    "copy",
+    "copy",
+    "copy",
+    "copy",
+    "tagged",
+    "tagged",
+    "boolean"
+  ],
+  "ungraded": [],
+  "what": "timeline.move_many of a folder into itself",
+  "why_not": [
+    "the failure is SolidCraft's, not a kernel operation's: step 7 (timeline.move_many): invalid parameters for `timeline.move_many`: a folder cannot be moved into itself or one of its descendants"
+  ]
+}

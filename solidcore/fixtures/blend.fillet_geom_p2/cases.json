@@ -1,0 +1,6236 @@
+{
+ "cases": [
+  {
+   "name": "plane_plane_line",
+   "upstream_ref": "source/SMLib/src/SmFilletGeom.cpp",
+   "inputs": {
+    "query": {
+     "q": "srf_srf",
+     "s1": {
+      "analytic": {
+       "kind": "plane",
+       "origin": [
+        0,
+        0,
+        0
+       ],
+       "x_axis": [
+        1,
+        0,
+        0
+       ],
+       "y_axis": [
+        0,
+        1,
+        0
+       ],
+       "uv_scale": [
+        1.0,
+        1.0
+       ],
+       "domain": [
+        [
+         -2,
+         -2
+        ],
+        [
+         2,
+         2
+        ]
+       ],
+       "make_nurb": true
+      }
+     },
+     "s2": {
+      "analytic": {
+       "kind": "plane",
+       "origin": [
+        0,
+        0,
+        0
+       ],
+       "x_axis": [
+        1,
+        0,
+        0
+       ],
+       "y_axis": [
+        0,
+        0,
+        1
+       ],
+       "uv_scale": [
+        1.0,
+        1.0
+       ],
+       "domain": [
+        [
+         -2,
+         -2
+        ],
+        [
+         2,
+         2
+        ]
+       ],
+       "make_nurb": true
+      }
+     },
+     "tol": 1e-06,
+     "ang": 0.5235987755982988
+    }
+   }
+  },
+  {
+   "name": "plane_plane_line_points",
+   "upstream_ref": "source/SMLib/src/SmFilletGeom.cpp",
+   "inputs": {
+    "query": {
+     "q": "srf_srf",
+     "s1": {
+      "analytic": {
+       "kind": "plane",
+       "origin": [
+        0,
+        0,
+        0
+       ],
+       "x_axis": [
+        1,
+        0,
+        0
+       ],
+       "y_axis": [
+        0,
+        1,
+        0
+       ],
+       "uv_scale": [
+        1.0,
+        1.0
+       ],
+       "domain": [
+        [
+         -2,
+         -2
+        ],
+        [
+         2,
+         2
+        ]
+       ],
+       "make_nurb": true
+      }
+     },
+     "s2": {
+      "analytic": {
+       "kind": "plane",
+       "origin": [
+        0,
+        0,
+        0
+       ],
+       "x_axis": [
+        1,
+        0,
+        0
+       ],
+       "y_axis": [
+        0,
+        0,
+        1
+       ],
+       "uv_scale": [
+        1.0,
+        1.0
+       ],
+       "domain": [
+        [
+         -2,
+         -2
+        ],
+        [
+         2,
+         2
+        ]
+       ],
+       "make_nurb": true
+      }
+     },
+     "tol": 1e-06,
+     "ang": 0.5235987755982988,
+     "start": [
+      -1,
+      0,
+      0
+     ],
+     "end": [
+      1,
+      0,
+      0
+     ],
+     "dir": [
+      1,
+      0,
+      0
+     ]
+    }
+   }
+  },
+  {
+   "name": "plane_plane_line_points_reversed",
+   "upstream_ref": "source/SMLib/src/SmFilletGeom.cpp",
+   "inputs": {
+    "query": {
+     "q": "srf_srf",
+     "s1": {
+      "analytic": {
+       "kind": "plane",
+       "origin": [
+        0,
+        0,
+        0
+       ],
+       "x_axis": [
+        1,
+        0,
+        0
+       ],
+       "y_axis": [
+        0,
+        1,
+        0
+       ],
+       "uv_scale": [
+        1.0,
+        1.0
+       ],
+       "domain": [
+        [
+         -2,
+         -2
+        ],
+        [
+         2,
+         2
+        ]
+       ],
+       "make_nurb": true
+      }
+     },
+     "s2": {
+      "analytic": {
+       "kind": "plane",
+       "origin": [
+        0,
+        0,
+        0
+       ],
+       "x_axis": [
+        1,
+        0,
+        0
+       ],
+       "y_axis": [
+        0,
+        0,
+        1
+       ],
+       "uv_scale": [
+        1.0,
+        1.0
+       ],
+       "domain": [
+        [
+         -2,
+         -2
+        ],
+        [
+         2,
+         2
+        ]
+       ],
+       "make_nurb": true
+      }
+     },
+     "tol": 1e-06,
+     "ang": 0.5235987755982988,
+     "start": [
+      1,
+      0,
+      0
+     ],
+     "end": [
+      -1,
+      0,
+      0
+     ],
+     "dir": [
+      -1,
+      0,
+      0
+     ]
+    }
+   }
+  },
+  {
+   "name": "plane_plane_line_start_only",
+   "upstream_ref": "source/SMLib/src/SmFilletGeom.cpp",
+   "inputs": {
+    "query": {
+     "q": "srf_srf",
+     "s1": {
+      "analytic": {
+       "kind": "plane",
+       "origin": [
+        0,
+        0,
+        0
+       ],
+       "x_axis": [
+        1,
+        0,
+        0
+       ],
+       "y_axis": [
+        0,
+        1,
+        0
+       ],
+       "uv_scale": [
+        1.0,
+        1.0
+       ],
+       "domain": [
+        [
+         -2,
+         -2
+        ],
+        [
+         2,
+         2
+        ]
+       ],
+       "make_nurb": true
+      }
+     },
+     "s2": {
+      "analytic": {
+       "kind": "plane",
+       "origin": [
+        0,
+        0,
+        0
+       ],
+       "x_axis": [
+        1,
+        0,
+        0
+       ],
+       "y_axis": [
+        0,
+        0,
+        1
+       ],
+       "uv_scale": [
+        1.0,
+        1.0
+       ],
+       "domain": [
+        [
+         -2,
+         -2
+        ],
+        [
+         2,
+         2
+        ]
+       ],
+       "make_nurb": true
+      }
+     },
+     "tol": 1e-06,
+     "ang": 0.5235987755982988,
+     "start": [
+      0.5,
+      0,
+      0
+     ],
+     "dir": [
+      1,
+      0,
+      0
+     ]
+    }
+   }
+  },
+  {
+   "name": "plane_plane_line_end_off",
+   "upstream_ref": "source/SMLib/src/SmFilletGeom.cpp",
+   "inputs": {
+    "query": {
+     "q": "srf_srf",
+     "s1": {
+      "analytic": {
+       "kind": "plane",
+       "origin": [
+        0,
+        0,
+        0
+       ],
+       "x_axis": [
+        1,
+        0,
+        0
+       ],
+       "y_axis": [
+        0,
+        1,
+        0
+       ],
+       "uv_scale": [
+        1.0,
+        1.0
+       ],
+       "domain": [
+        [
+         -2,
+         -2
+        ],
+        [
+         2,
+         2
+        ]
+       ],
+       "make_nurb": true
+      }
+     },
+     "s2": {
+      "analytic": {
+       "kind": "plane",
+       "origin": [
+        0,
+        0,
+        0
+       ],
+       "x_axis": [
+        1,
+        0,
+        0
+       ],
+       "y_axis": [
+        0,
+        0,
+        1
+       ],
+       "uv_scale": [
+        1.0,
+        1.0
+       ],
+       "domain": [
+        [
+         -2,
+         -2
+        ],
+        [
+         2,
+         2
+        ]
+       ],
+       "make_nurb": true
+      }
+     },
+     "tol": 1e-06,
+     "ang": 0.5235987755982988,
+     "start": [
+      -1,
+      0,
+      0
+     ],
+     "end": [
+      1,
+      0.5,
+      0
+     ],
+     "dir": [
+      1,
+      0,
+      0
+     ]
+    }
+   }
+  },
+  {
+   "name": "plane_plane_line_start_off_tol",
+   "upstream_ref": "source/SMLib/src/SmFilletGeom.cpp",
+   "inputs": {
+    "query": {
+     "q": "srf_srf",
+     "s1": {
+      "analytic": {
+       "kind": "plane",
+       "origin": [
+        0,
+        0,
+        0
+       ],
+       "x_axis": [
+        1,
+        0,
+        0
+       ],
+       "y_axis": [
+        0,
+        1,
+        0
+       ],
+       "uv_scale": [
+        1.0,
+        1.0
+       ],
+       "domain": [
+        [
+         -2,
+         -2
+        ],
+        [
+         2,
+         2
+        ]
+       ],
+       "make_nurb": true
+      }
+     },
+     "s2": {
+      "analytic": {
+       "kind": "plane",
+       "origin": [
+        0,
+        0,
+        0
+       ],
+       "x_axis": [
+        1,
+        0,
+        0
+       ],
+       "y_axis": [
+        0,
+        0,
+        1
+       ],
+       "uv_scale": [
+        1.0,
+        1.0
+       ],
+       "domain": [
+        [
+         -2,
+         -2
+        ],
+        [
+         2,
+         2
+        ]
+       ],
+       "make_nurb": true
+      }
+     },
+     "tol": 1e-06,
+     "ang": 0.5235987755982988,
+     "start": [
+      -1,
+      5e-07,
+      0
+     ],
+     "end": [
+      1,
+      0,
+      0
+     ],
+     "dir": [
+      1,
+      0,
+      0
+     ]
+    }
+   }
+  },
+  {
+   "name": "plane_plane_line_coincident_points",
+   "upstream_ref": "source/SMLib/src/SmFilletGeom.cpp",
+   "inputs": {
+    "query": {
+     "q": "srf_srf",
+     "s1": {
+      "analytic": {
+       "kind": "plane",
+       "origin": [
+        0,
+        0,
+        0
+       ],
+       "x_axis": [
+        1,
+        0,
+        0
+       ],
+       "y_axis": [
+        0,
+        1,
+        0
+       ],
+       "uv_scale": [
+        1.0,
+        1.0
+       ],
+       "domain": [
+        [
+         -2,
+         -2
+        ],
+        [
+         2,
+         2
+        ]
+       ],
+       "make_nurb": true
+      }
+     },
+     "s2": {
+      "analytic": {
+       "kind": "plane",
+       "origin": [
+        0,
+        0,
+        0
+       ],
+       "x_axis": [
+        1,
+        0,
+        0
+       ],
+       "y_axis": [
+        0,
+        0,
+        1
+       ],
+       "uv_scale": [
+        1.0,
+        1.0
+       ],
+       "domain": [
+        [
+         -2,
+         -2
+        ],
+        [
+         2,
+         2
+        ]
+       ],
+       "make_nurb": true
+      }
+     },
+     "tol": 1e-06,
+     "ang": 0.5235987755982988,
+     "start": [
+      0.3,
+      0,
+      0
+     ],
+     "end": [
+      0.3,
+      0,
+      0
+     ],
+     "dir": [
+      1,
+      0,
+      0
+     ]
+    }
+   }
+  },
+  {
+   "name": "plane_plane_line_ref",
+   "upstream_ref": "source/SMLib/src/SmFilletGeom.cpp",
+   "inputs": {
+    "query": {
+     "q": "srf_srf",
+     "s1": {
+      "analytic": {
+       "kind": "plane",
+       "origin": [
+        0,
+        0,
+        0
+       ],
+       "x_axis": [
+        1,
+        0,
+        0
+       ],
+       "y_axis": [
+        0,
+        1,
+        0
+       ],
+       "uv_scale": [
+        1.0,
+        1.0
+       ],
+       "domain": [
+        [
+         -2,
+         -2
+        ],
+        [
+         2,
+         2
+        ]
+       ],
+       "make_nurb": true
+      }
+     },
+     "s2": {
+      "analytic": {
+       "kind": "plane",
+       "origin": [
+        0,
+        0,
+        0
+       ],
+       "x_axis": [
+        1,
+        0,
+        0
+       ],
+       "y_axis": [
+        0,
+        0,
+        1
+       ],
+       "uv_scale": [
+        1.0,
+        1.0
+       ],
+       "domain": [
+        [
+         -2,
+         -2
+        ],
+        [
+         2,
+         2
+        ]
+       ],
+       "make_nurb": true
+      }
+     },
+     "tol": 1e-06,
+     "ang": 0.5235987755982988,
+     "ref_point": [
+      0,
+      0,
+      5
+     ]
+    }
+   }
+  },
+  {
+   "name": "plane_plane_line_skip",
+   "upstream_ref": "source/SMLib/src/SmFilletGeom.cpp",
+   "inputs": {
+    "query": {
+     "q": "srf_srf",
+     "s1": {
+      "analytic": {
+       "kind": "plane",
+       "origin": [
+        0,
+        0,
+        0
+       ],
+       "x_axis": [
+        1,
+        0,
+        0
+       ],
+       "y_axis": [
+        0,
+        1,
+        0
+       ],
+       "uv_scale": [
+        1.0,
+        1.0
+       ],
+       "domain": [
+        [
+         -2,
+         -2
+        ],
+        [
+         2,
+         2
+        ]
+       ],
+       "make_nurb": true
+      }
+     },
+     "s2": {
+      "analytic": {
+       "kind": "plane",
+       "origin": [
+        0,
+        0,
+        0
+       ],
+       "x_axis": [
+        1,
+        0,
+        0
+       ],
+       "y_axis": [
+        0,
+        0,
+        1
+       ],
+       "uv_scale": [
+        1.0,
+        1.0
+       ],
+       "domain": [
+        [
+         -2,
+         -2
+        ],
+        [
+         2,
+         2
+        ]
+       ],
+       "make_nurb": true
+      }
+     },
+     "tol": 1e-06,
+     "ang": 0.5235987755982988,
+     "start": [
+      -1,
+      0,
+      0
+     ],
+     "end": [
+      1,
+      0,
+      0
+     ],
+     "dir": [
+      1,
+      0,
+      0
+     ],
+     "skip": true
+    }
+   }
+  },
+  {
+   "name": "plane_plane_line_tiny_tol",
+   "upstream_ref": "source/SMLib/src/SmFilletGeom.cpp",
+   "inputs": {
+    "query": {
+     "q": "srf_srf",
+     "s1": {
+      "analytic": {
+       "kind": "plane",
+       "origin": [
+        0,
+        0,
+        0
+       ],
+       "x_axis": [
+        1,
+        0,
+        0
+       ],
+       "y_axis": [
+        0,
+        1,
+        0
+       ],
+       "uv_scale": [
+        1.0,
+        1.0
+       ],
+       "domain": [
+        [
+         -2,
+         -2
+        ],
+        [
+         2,
+         2
+        ]
+       ],
+       "make_nurb": true
+      }
+     },
+     "s2": {
+      "analytic": {
+       "kind": "plane",
+       "origin": [
+        0,
+        0,
+        0
+       ],
+       "x_axis": [
+        1,
+        0,
+        0
+       ],
+       "y_axis": [
+        0,
+        0,
+        1
+       ],
+       "uv_scale": [
+        1.0,
+        1.0
+       ],
+       "domain": [
+        [
+         -2,
+         -2
+        ],
+        [
+         2,
+         2
+        ]
+       ],
+       "make_nurb": true
+      }
+     },
+     "tol": 1e-12,
+     "ang": 0.5235987755982988,
+     "start": [
+      -1,
+      0,
+      0
+     ],
+     "end": [
+      1,
+      0,
+      0
+     ]
+    }
+   }
+  },
+  {
+   "name": "plane_plane_line_neg_tol",
+   "upstream_ref": "source/SMLib/src/SmFilletGeom.cpp",
+   "inputs": {
+    "query": {
+     "q": "srf_srf",
+     "s1": {
+      "analytic": {
+       "kind": "plane",
+       "origin": [
+        0,
+        0,
+        0
+       ],
+       "x_axis": [
+        1,
+        0,
+        0
+       ],
+       "y_axis": [
+        0,
+        1,
+        0
+       ],
+       "uv_scale": [
+        1.0,
+        1.0
+       ],
+       "domain": [
+        [
+         -2,
+         -2
+        ],
+        [
+         2,
+         2
+        ]
+       ],
+       "make_nurb": true
+      }
+     },
+     "s2": {
+      "analytic": {
+       "kind": "plane",
+       "origin": [
+        0,
+        0,
+        0
+       ],
+       "x_axis": [
+        1,
+        0,
+        0
+       ],
+       "y_axis": [
+        0,
+        0,
+        1
+       ],
+       "uv_scale": [
+        1.0,
+        1.0
+       ],
+       "domain": [
+        [
+         -2,
+         -2
+        ],
+        [
+         2,
+         2
+        ]
+       ],
+       "make_nurb": true
+      }
+     },
+     "tol": -1e-06,
+     "ang": 0.5235987755982988,
+     "start": [
+      -1,
+      0,
+      0
+     ],
+     "end": [
+      1,
+      0,
+      0
+     ]
+    }
+   }
+  },
+  {
+   "name": "plane_plane_line_zero_dir",
+   "upstream_ref": "source/SMLib/src/SmFilletGeom.cpp",
+   "inputs": {
+    "query": {
+     "q": "srf_srf",
+     "s1": {
+      "analytic": {
+       "kind": "plane",
+       "origin": [
+        0,
+        0,
+        0
+       ],
+       "x_axis": [
+        1,
+        0,
+        0
+       ],
+       "y_axis": [
+        0,
+        1,
+        0
+       ],
+       "uv_scale": [
+        1.0,
+        1.0
+       ],
+       "domain": [
+        [
+         -2,
+         -2
+        ],
+        [
+         2,
+         2
+        ]
+       ],
+       "make_nurb": true
+      }
+     },
+     "s2": {
+      "analytic": {
+       "kind": "plane",
+       "origin": [
+        0,
+        0,
+        0
+       ],
+       "x_axis": [
+        1,
+        0,
+        0
+       ],
+       "y_axis": [
+        0,
+        0,
+        1
+       ],
+       "uv_scale": [
+        1.0,
+        1.0
+       ],
+       "domain": [
+        [
+         -2,
+         -2
+        ],
+        [
+         2,
+         2
+        ]
+       ],
+       "make_nurb": true
+      }
+     },
+     "tol": 1e-06,
+     "ang": 0.5235987755982988,
+     "start": [
+      -1,
+      0,
+      0
+     ],
+     "end": [
+      1,
+      0,
+      0
+     ],
+     "dir": [
+      0,
+      0,
+      0
+     ]
+    }
+   }
+  },
+  {
+   "name": "plane_plane_huge",
+   "upstream_ref": "source/SMLib/src/SmFilletGeom.cpp",
+   "inputs": {
+    "query": {
+     "q": "srf_srf",
+     "s1": {
+      "analytic": {
+       "kind": "plane",
+       "origin": [
+        0,
+        0,
+        0
+       ],
+       "x_axis": [
+        1,
+        0,
+        0
+       ],
+       "y_axis": [
+        0,
+        1,
+        0
+       ],
+       "uv_scale": [
+        1000000.0,
+        1000000.0
+       ],
+       "domain": [
+        [
+         -2,
+         -2
+        ],
+        [
+         2,
+         2
+        ]
+       ],
+       "make_nurb": true
+      }
+     },
+     "s2": {
+      "analytic": {
+       "kind": "plane",
+       "origin": [
+        0,
+        0,
+        0
+       ],
+       "x_axis": [
+        1,
+        0,
+        0
+       ],
+       "y_axis": [
+        0,
+        0,
+        1
+       ],
+       "uv_scale": [
+        1000000.0,
+        1000000.0
+       ],
+       "domain": [
+        [
+         -2,
+         -2
+        ],
+        [
+         2,
+         2
+        ]
+       ],
+       "make_nurb": true
+      }
+     },
+     "tol": 1.0,
+     "ang": 0.5235987755982988,
+     "start": [
+      -1000000.0,
+      0,
+      0
+     ],
+     "end": [
+      1000000.0,
+      0,
+      0
+     ]
+    }
+   }
+  },
+  {
+   "name": "plane_plane_tiny",
+   "upstream_ref": "source/SMLib/src/SmFilletGeom.cpp",
+   "inputs": {
+    "query": {
+     "q": "srf_srf",
+     "s1": {
+      "analytic": {
+       "kind": "plane",
+       "origin": [
+        0,
+        0,
+        0
+       ],
+       "x_axis": [
+        1,
+        0,
+        0
+       ],
+       "y_axis": [
+        0,
+        1,
+        0
+       ],
+       "uv_scale": [
+        1e-06,
+        1e-06
+       ],
+       "domain": [
+        [
+         -2,
+         -2
+        ],
+        [
+         2,
+         2
+        ]
+       ],
+       "make_nurb": true
+      }
+     },
+     "s2": {
+      "analytic": {
+       "kind": "plane",
+       "origin": [
+        0,
+        0,
+        0
+       ],
+       "x_axis": [
+        1,
+        0,
+        0
+       ],
+       "y_axis": [
+        0,
+        0,
+        1
+       ],
+       "uv_scale": [
+        1e-06,
+        1e-06
+       ],
+       "domain": [
+        [
+         -2,
+         -2
+        ],
+        [
+         2,
+         2
+        ]
+       ],
+       "make_nurb": true
+      }
+     },
+     "tol": 1e-12,
+     "ang": 0.5235987755982988,
+     "start": [
+      -1e-06,
+      0,
+      0
+     ],
+     "end": [
+      1e-06,
+      0,
+      0
+     ]
+    }
+   }
+  },
+  {
+   "name": "plane_plane_oblique",
+   "upstream_ref": "source/SMLib/src/SmFilletGeom.cpp",
+   "inputs": {
+    "query": {
+     "q": "srf_srf",
+     "s1": {
+      "analytic": {
+       "kind": "plane",
+       "origin": [
+        0,
+        0,
+        0
+       ],
+       "x_axis": [
+        1,
+        0,
+        0
+       ],
+       "y_axis": [
+        0,
+        1,
+        0
+       ],
+       "uv_scale": [
+        1.0,
+        1.0
+       ],
+       "domain": [
+        [
+         -2,
+         -2
+        ],
+        [
+         2,
+         2
+        ]
+       ],
+       "make_nurb": true
+      }
+     },
+     "s2": {
+      "analytic": {
+       "kind": "plane",
+       "origin": [
+        0,
+        0,
+        0.3
+       ],
+       "x_axis": [
+        0.6,
+        0,
+        0.8
+       ],
+       "y_axis": [
+        0,
+        1,
+        0
+       ],
+       "uv_scale": [
+        1.0,
+        1.0
+       ],
+       "domain": [
+        [
+         -2,
+         -2
+        ],
+        [
+         2,
+         2
+        ]
+       ],
+       "make_nurb": true
+      }
+     },
+     "tol": 1e-06,
+     "ang": 0.5235987755982988,
+     "start": [
+      -0.375,
+      -1,
+      0
+     ],
+     "end": [
+      -0.375,
+      1,
+      0
+     ]
+    }
+   }
+  },
+  {
+   "name": "plane_plane_parallel",
+   "upstream_ref": "source/SMLib/src/SmFilletGeom.cpp",
+   "inputs": {
+    "query": {
+     "q": "srf_srf",
+     "s1": {
+      "analytic": {
+       "kind": "plane",
+       "origin": [
+        0,
+        0,
+        0
+       ],
+       "x_axis": [
+        1,
+        0,
+        0
+       ],
+       "y_axis": [
+        0,
+        1,
+        0
+       ],
+       "uv_scale": [
+        1.0,
+        1.0
+       ],
+       "domain": [
+        [
+         -2,
+         -2
+        ],
+        [
+         2,
+         2
+        ]
+       ],
+       "make_nurb": true
+      }
+     },
+     "s2": {
+      "analytic": {
+       "kind": "plane",
+       "origin": [
+        0,
+        0,
+        1
+       ],
+       "x_axis": [
+        1,
+        0,
+        0
+       ],
+       "y_axis": [
+        0,
+        1,
+        0
+       ],
+       "uv_scale": [
+        1.0,
+        1.0
+       ],
+       "domain": [
+        [
+         -2,
+         -2
+        ],
+        [
+         2,
+         2
+        ]
+       ],
+       "make_nurb": true
+      }
+     },
+     "tol": 1e-06,
+     "ang": 0.5235987755982988
+    }
+   }
+  },
+  {
+   "name": "plane_plane_coincident",
+   "upstream_ref": "source/SMLib/src/SmFilletGeom.cpp",
+   "inputs": {
+    "query": {
+     "q": "srf_srf",
+     "s1": {
+      "analytic": {
+       "kind": "plane",
+       "origin": [
+        0,
+        0,
+        0
+       ],
+       "x_axis": [
+        1,
+        0,
+        0
+       ],
+       "y_axis": [
+        0,
+        1,
+        0
+       ],
+       "uv_scale": [
+        1.0,
+        1.0
+       ],
+       "domain": [
+        [
+         -2,
+         -2
+        ],
+        [
+         2,
+         2
+        ]
+       ],
+       "make_nurb": true
+      }
+     },
+     "s2": {
+      "analytic": {
+       "kind": "plane",
+       "origin": [
+        0,
+        0,
+        0
+       ],
+       "x_axis": [
+        0,
+        1,
+        0
+       ],
+       "y_axis": [
+        1,
+        0,
+        0
+       ],
+       "uv_scale": [
+        1.0,
+        1.0
+       ],
+       "domain": [
+        [
+         -2,
+         -2
+        ],
+        [
+         2,
+         2
+        ]
+       ],
+       "make_nurb": true
+      }
+     },
+     "tol": 1e-06,
+     "ang": 0.5235987755982988
+    }
+   }
+  },
+  {
+   "name": "plane_plane_coincident_no_nurb",
+   "upstream_ref": "source/SMLib/src/SmFilletGeom.cpp",
+   "inputs": {
+    "query": {
+     "q": "srf_srf",
+     "s1": {
+      "analytic": {
+       "kind": "plane",
+       "origin": [
+        0,
+        0,
+        0
+       ],
+       "x_axis": [
+        1,
+        0,
+        0
+       ],
+       "y_axis": [
+        0,
+        1,
+        0
+       ],
+       "uv_scale": [
+        1.0,
+        1.0
+       ],
+       "domain": [
+        [
+         -2,
+         -2
+        ],
+        [
+         2,
+         2
+        ]
+       ],
+       "make_nurb": true
+      }
+     },
+     "s2": {
+      "analytic": {
+       "kind": "plane",
+       "origin": [
+        0,
+        0,
+        0
+       ],
+       "x_axis": [
+        0,
+        1,
+        0
+       ],
+       "y_axis": [
+        1,
+        0,
+        0
+       ],
+       "uv_scale": [
+        1.0,
+        1.0
+       ],
+       "domain": [
+        [
+         -2,
+         -2
+        ],
+        [
+         2,
+         2
+        ]
+       ],
+       "make_nurb": false
+      }
+     },
+     "tol": 1e-06,
+     "ang": 0.5235987755982988
+    }
+   }
+  },
+  {
+   "name": "plane_plane_disjoint_domains",
+   "upstream_ref": "source/SMLib/src/SmFilletGeom.cpp",
+   "inputs": {
+    "query": {
+     "q": "srf_srf",
+     "s1": {
+      "analytic": {
+       "kind": "plane",
+       "origin": [
+        0,
+        0,
+        0
+       ],
+       "x_axis": [
+        1,
+        0,
+        0
+       ],
+       "y_axis": [
+        0,
+        1,
+        0
+       ],
+       "uv_scale": [
+        1.0,
+        1.0
+       ],
+       "domain": [
+        [
+         -2,
+         -2
+        ],
+        [
+         2,
+         2
+        ]
+       ],
+       "make_nurb": true
+      }
+     },
+     "s2": {
+      "analytic": {
+       "kind": "plane",
+       "origin": [
+        10,
+        0,
+        0
+       ],
+       "x_axis": [
+        1,
+        0,
+        0
+       ],
+       "y_axis": [
+        0,
+        0,
+        1
+       ],
+       "uv_scale": [
+        1.0,
+        1.0
+       ],
+       "domain": [
+        [
+         -2,
+         -2
+        ],
+        [
+         2,
+         2
+        ]
+       ],
+       "make_nurb": true
+      }
+     },
+     "tol": 1e-06,
+     "ang": 0.5235987755982988
+    }
+   }
+  },
+  {
+   "name": "cylinder_plane_circle",
+   "upstream_ref": "source/SMLib/src/SmFilletGeom.cpp",
+   "inputs": {
+    "query": {
+     "q": "srf_srf",
+     "s1": {
+      "analytic": {
+       "kind": "revolution",
+       "a": [
+        1,
+        0,
+        0
+       ],
+       "b": [
+        1,
+        0,
+        2
+       ],
+       "axis_point": [
+        0,
+        0,
+        0
+       ],
+       "axis_dir": [
+        0,
+        0,
+        1
+       ],
+       "swap": false
+      }
+     },
+     "s2": {
+      "analytic": {
+       "kind": "plane",
+       "origin": [
+        0,
+        0,
+        1
+       ],
+       "x_axis": [
+        1,
+        0,
+        0
+       ],
+       "y_axis": [
+        0,
+        1,
+        0
+       ],
+       "uv_scale": [
+        1.0,
+        1.0
+       ],
+       "domain": [
+        [
+         -2,
+         -2
+        ],
+        [
+         2,
+         2
+        ]
+       ],
+       "make_nurb": true
+      }
+     },
+     "tol": 1e-06,
+     "ang": 0.5235987755982988
+    }
+   }
+  },
+  {
+   "name": "cylinder_plane_circle_points",
+   "upstream_ref": "source/SMLib/src/SmFilletGeom.cpp",
+   "inputs": {
+    "query": {
+     "q": "srf_srf",
+     "s1": {
+      "analytic": {
+       "kind": "revolution",
+       "a": [
+        1,
+        0,
+        0
+       ],
+       "b": [
+        1,
+        0,
+        2
+       ],
+       "axis_point": [
+        0,
+        0,
+        0
+       ],
+       "axis_dir": [
+        0,
+        0,
+        1
+       ],
+       "swap": false
+      }
+     },
+     "s2": {
+      "analytic": {
+       "kind": "plane",
+       "origin": [
+        0,
+        0,
+        1
+       ],
+       "x_axis": [
+        1,
+        0,
+        0
+       ],
+       "y_axis": [
+        0,
+        1,
+        0
+       ],
+       "uv_scale": [
+        1.0,
+        1.0
+       ],
+       "domain": [
+        [
+         -2,
+         -2
+        ],
+        [
+         2,
+         2
+        ]
+       ],
+       "make_nurb": true
+      }
+     },
+     "tol": 1e-06,
+     "ang": 0.5235987755982988,
+     "start": [
+      1,
+      0,
+      1
+     ],
+     "end": [
+      0,
+      1,
+      1
+     ],
+     "dir": [
+      0,
+      1,
+      0
+     ]
+    }
+   }
+  },
+  {
+   "name": "plane_cylinder_circle",
+   "upstream_ref": "source/SMLib/src/SmFilletGeom.cpp",
+   "inputs": {
+    "query": {
+     "q": "srf_srf",
+     "s1": {
+      "analytic": {
+       "kind": "plane",
+       "origin": [
+        0,
+        0,
+        1
+       ],
+       "x_axis": [
+        1,
+        0,
+        0
+       ],
+       "y_axis": [
+        0,
+        1,
+        0
+       ],
+       "uv_scale": [
+        1.0,
+        1.0
+       ],
+       "domain": [
+        [
+         -2,
+         -2
+        ],
+        [
+         2,
+         2
+        ]
+       ],
+       "make_nurb": true
+      }
+     },
+     "s2": {
+      "analytic": {
+       "kind": "revolution",
+       "a": [
+        1,
+        0,
+        0
+       ],
+       "b": [
+        1,
+        0,
+        2
+       ],
+       "axis_point": [
+        0,
+        0,
+        0
+       ],
+       "axis_dir": [
+        0,
+        0,
+        1
+       ],
+       "swap": false
+      }
+     },
+     "tol": 1e-06,
+     "ang": 0.5235987755982988
+    }
+   }
+  },
+  {
+   "name": "cylinder_plane_lines_ref",
+   "upstream_ref": "source/SMLib/src/SmFilletGeom.cpp",
+   "inputs": {
+    "query": {
+     "q": "srf_srf",
+     "s1": {
+      "analytic": {
+       "kind": "revolution",
+       "a": [
+        1,
+        0,
+        0
+       ],
+       "b": [
+        1,
+        0,
+        2
+       ],
+       "axis_point": [
+        0,
+        0,
+        0
+       ],
+       "axis_dir": [
+        0,
+        0,
+        1
+       ],
+       "swap": false
+      }
+     },
+     "s2": {
+      "analytic": {
+       "kind": "plane",
+       "origin": [
+        0.5,
+        0,
+        1
+       ],
+       "x_axis": [
+        0,
+        1,
+        0
+       ],
+       "y_axis": [
+        0,
+        0,
+        1
+       ],
+       "uv_scale": [
+        1.0,
+        1.0
+       ],
+       "domain": [
+        [
+         -2,
+         -2
+        ],
+        [
+         2,
+         2
+        ]
+       ],
+       "make_nurb": true
+      }
+     },
+     "tol": 1e-06,
+     "ang": 0.5235987755982988,
+     "ref_point": [
+      0.5,
+      0.9,
+      1
+     ]
+    }
+   }
+  },
+  {
+   "name": "cylinder_plane_ellipse",
+   "upstream_ref": "source/SMLib/src/SmFilletGeom.cpp",
+   "inputs": {
+    "query": {
+     "q": "srf_srf",
+     "s1": {
+      "analytic": {
+       "kind": "revolution",
+       "a": [
+        1,
+        0,
+        0
+       ],
+       "b": [
+        1,
+        0,
+        2
+       ],
+       "axis_point": [
+        0,
+        0,
+        0
+       ],
+       "axis_dir": [
+        0,
+        0,
+        1
+       ],
+       "swap": false
+      }
+     },
+     "s2": {
+      "analytic": {
+       "kind": "plane",
+       "origin": [
+        0,
+        0,
+        1
+       ],
+       "x_axis": [
+        0.8,
+        0,
+        0.6
+       ],
+       "y_axis": [
+        0,
+        1,
+        0
+       ],
+       "uv_scale": [
+        1.0,
+        1.0
+       ],
+       "domain": [
+        [
+         -2,
+         -2
+        ],
+        [
+         2,
+         2
+        ]
+       ],
+       "make_nurb": true
+      }
+     },
+     "tol": 1e-06,
+     "ang": 0.5235987755982988
+    }
+   }
+  },
+  {
+   "name": "cone_plane_circle",
+   "upstream_ref": "source/SMLib/src/SmFilletGeom.cpp",
+   "inputs": {
+    "query": {
+     "q": "srf_srf",
+     "s1": {
+      "analytic": {
+       "kind": "revolution",
+       "a": [
+        1,
+        0,
+        0
+       ],
+       "b": [
+        0.5,
+        0,
+        2
+       ],
+       "axis_point": [
+        0,
+        0,
+        0
+       ],
+       "axis_dir": [
+        0,
+        0,
+        1
+       ],
+       "swap": false
+      }
+     },
+     "s2": {
+      "analytic": {
+       "kind": "plane",
+       "origin": [
+        0,
+        0,
+        1
+       ],
+       "x_axis": [
+        1,
+        0,
+        0
+       ],
+       "y_axis": [
+        0,
+        1,
+        0
+       ],
+       "uv_scale": [
+        1.0,
+        1.0
+       ],
+       "domain": [
+        [
+         -2,
+         -2
+        ],
+        [
+         2,
+         2
+        ]
+       ],
+       "make_nurb": true
+      }
+     },
+     "tol": 1e-06,
+     "ang": 0.5235987755982988
+    }
+   }
+  },
+  {
+   "name": "cylinder_swapped_plane",
+   "upstream_ref": "source/SMLib/src/SmFilletGeom.cpp",
+   "inputs": {
+    "query": {
+     "q": "srf_srf",
+     "s1": {
+      "analytic": {
+       "kind": "revolution",
+       "a": [
+        1,
+        0,
+        0
+       ],
+       "b": [
+        1,
+        0,
+        2
+       ],
+       "axis_point": [
+        0,
+        0,
+        0
+       ],
+       "axis_dir": [
+        0,
+        0,
+        1
+       ],
+       "swap": true
+      }
+     },
+     "s2": {
+      "analytic": {
+       "kind": "plane",
+       "origin": [
+        0,
+        0,
+        1
+       ],
+       "x_axis": [
+        1,
+        0,
+        0
+       ],
+       "y_axis": [
+        0,
+        1,
+        0
+       ],
+       "uv_scale": [
+        1.0,
+        1.0
+       ],
+       "domain": [
+        [
+         -2,
+         -2
+        ],
+        [
+         2,
+         2
+        ]
+       ],
+       "make_nurb": true
+      }
+     },
+     "tol": 1e-06,
+     "ang": 0.5235987755982988
+    }
+   }
+  },
+  {
+   "name": "bspline_bspline_wall",
+   "upstream_ref": "source/SMLib/src/SmFilletGeom.cpp",
+   "inputs": {
+    "query": {
+     "q": "srf_srf",
+     "s1": {
+      "b_spline": {
+       "net": [
+        [
+         [
+          0,
+          0,
+          0,
+          -1.7976931348623157e+308
+         ],
+         [
+          0,
+          1,
+          0,
+          -1.7976931348623157e+308
+         ]
+        ],
+        [
+         [
+          1,
+          0,
+          0,
+          -1.7976931348623157e+308
+         ],
+         [
+          1,
+          1,
+          0,
+          -1.7976931348623157e+308
+         ]
+        ]
+       ],
+       "p": 1,
+       "q": 1,
+       "u": [
+        0,
+        0,
+        1,
+        1
+       ],
+       "v": [
+        0,
+        0,
+        1,
+        1
+       ]
+      }
+     },
+     "s2": {
+      "b_spline": {
+       "net": [
+        [
+         [
+          0.5,
+          -0.2,
+          -0.5,
+          -1.7976931348623157e+308
+         ],
+         [
+          0.5,
+          -0.2,
+          0.5,
+          -1.7976931348623157e+308
+         ]
+        ],
+        [
+         [
+          0.5,
+          1.2,
+          -0.5,
+          -1.7976931348623157e+308
+         ],
+         [
+          0.5,
+          1.2,
+          0.5,
+          -1.7976931348623157e+308
+         ]
+        ]
+       ],
+       "p": 1,
+       "q": 1,
+       "u": [
+        0,
+        0,
+        1,
+        1
+       ],
+       "v": [
+        0,
+        0,
+        1,
+        1
+       ]
+      }
+     },
+     "tol": 1e-06,
+     "ang": 0.5235987755982988
+    }
+   }
+  },
+  {
+   "name": "bspline_bspline_wall_points",
+   "upstream_ref": "source/SMLib/src/SmFilletGeom.cpp",
+   "inputs": {
+    "query": {
+     "q": "srf_srf",
+     "s1": {
+      "b_spline": {
+       "net": [
+        [
+         [
+          0,
+          0,
+          0,
+          -1.7976931348623157e+308
+         ],
+         [
+          0,
+          1,
+          0,
+          -1.7976931348623157e+308
+         ]
+        ],
+        [
+         [
+          1,
+          0,
+          0,
+          -1.7976931348623157e+308
+         ],
+         [
+          1,
+          1,
+          0,
+          -1.7976931348623157e+308
+         ]
+        ]
+       ],
+       "p": 1,
+       "q": 1,
+       "u": [
+        0,
+        0,
+        1,
+        1
+       ],
+       "v": [
+        0,
+        0,
+        1,
+        1
+       ]
+      }
+     },
+     "s2": {
+      "b_spline": {
+       "net": [
+        [
+         [
+          0.5,
+          -0.2,
+          -0.5,
+          -1.7976931348623157e+308
+         ],
+         [
+          0.5,
+          -0.2,
+          0.5,
+          -1.7976931348623157e+308
+         ]
+        ],
+        [
+         [
+          0.5,
+          1.2,
+          -0.5,
+          -1.7976931348623157e+308
+         ],
+         [
+          0.5,
+          1.2,
+          0.5,
+          -1.7976931348623157e+308
+         ]
+        ]
+       ],
+       "p": 1,
+       "q": 1,
+       "u": [
+        0,
+        0,
+        1,
+        1
+       ],
+       "v": [
+        0,
+        0,
+        1,
+        1
+       ]
+      }
+     },
+     "tol": 1e-06,
+     "ang": 0.5235987755982988,
+     "start": [
+      0.5,
+      0.1,
+      0
+     ],
+     "end": [
+      0.5,
+      0.9,
+      0
+     ],
+     "skip": true
+    }
+   }
+  },
+  {
+   "name": "bspline_bspline_wall_points_reversed",
+   "upstream_ref": "source/SMLib/src/SmFilletGeom.cpp",
+   "inputs": {
+    "query": {
+     "q": "srf_srf",
+     "s1": {
+      "b_spline": {
+       "net": [
+        [
+         [
+          0,
+          0,
+          0,
+          -1.7976931348623157e+308
+         ],
+         [
+          0,
+          1,
+          0,
+          -1.7976931348623157e+308
+         ]
+        ],
+        [
+         [
+          1,
+          0,
+          0,
+          -1.7976931348623157e+308
+         ],
+         [
+          1,
+          1,
+          0,
+          -1.7976931348623157e+308
+         ]
+        ]
+       ],
+       "p": 1,
+       "q": 1,
+       "u": [
+        0,
+        0,
+        1,
+        1
+       ],
+       "v": [
+        0,
+        0,
+        1,
+        1
+       ]
+      }
+     },
+     "s2": {
+      "b_spline": {
+       "net": [
+        [
+         [
+          0.5,
+          -0.2,
+          -0.5,
+          -1.7976931348623157e+308
+         ],
+         [
+          0.5,
+          -0.2,
+          0.5,
+          -1.7976931348623157e+308
+         ]
+        ],
+        [
+         [
+          0.5,
+          1.2,
+          -0.5,
+          -1.7976931348623157e+308
+         ],
+         [
+          0.5,
+          1.2,
+          0.5,
+          -1.7976931348623157e+308
+         ]
+        ]
+       ],
+       "p": 1,
+       "q": 1,
+       "u": [
+        0,
+        0,
+        1,
+        1
+       ],
+       "v": [
+        0,
+        0,
+        1,
+        1
+       ]
+      }
+     },
+     "tol": 1e-06,
+     "ang": 0.5235987755982988,
+     "start": [
+      0.5,
+      0.9,
+      0
+     ],
+     "end": [
+      0.5,
+      0.1,
+      0
+     ],
+     "skip": true
+    }
+   }
+  },
+  {
+   "name": "bspline_bspline_wall_ref",
+   "upstream_ref": "source/SMLib/src/SmFilletGeom.cpp",
+   "inputs": {
+    "query": {
+     "q": "srf_srf",
+     "s1": {
+      "b_spline": {
+       "net": [
+        [
+         [
+          0,
+          0,
+          0,
+          -1.7976931348623157e+308
+         ],
+         [
+          0,
+          1,
+          0,
+          -1.7976931348623157e+308
+         ]
+        ],
+        [
+         [
+          1,
+          0,
+          0,
+          -1.7976931348623157e+308
+         ],
+         [
+          1,
+          1,
+          0,
+          -1.7976931348623157e+308
+         ]
+        ]
+       ],
+       "p": 1,
+       "q": 1,
+       "u": [
+        0,
+        0,
+        1,
+        1
+       ],
+       "v": [
+        0,
+        0,
+        1,
+        1
+       ]
+      }
+     },
+     "s2": {
+      "b_spline": {
+       "net": [
+        [
+         [
+          0.5,
+          -0.2,
+          -0.5,
+          -1.7976931348623157e+308
+         ],
+         [
+          0.5,
+          -0.2,
+          0.5,
+          -1.7976931348623157e+308
+         ]
+        ],
+        [
+         [
+          0.5,
+          1.2,
+          -0.5,
+          -1.7976931348623157e+308
+         ],
+         [
+          0.5,
+          1.2,
+          0.5,
+          -1.7976931348623157e+308
+         ]
+        ]
+       ],
+       "p": 1,
+       "q": 1,
+       "u": [
+        0,
+        0,
+        1,
+        1
+       ],
+       "v": [
+        0,
+        0,
+        1,
+        1
+       ]
+      }
+     },
+     "tol": 1e-06,
+     "ang": 0.5235987755982988,
+     "ref_point": [
+      0.5,
+      0.5,
+      3
+     ]
+    }
+   }
+  },
+  {
+   "name": "bspline_bspline_tilt",
+   "upstream_ref": "source/SMLib/src/SmFilletGeom.cpp",
+   "inputs": {
+    "query": {
+     "q": "srf_srf",
+     "s1": {
+      "b_spline": {
+       "net": [
+        [
+         [
+          0,
+          0,
+          0,
+          -1.7976931348623157e+308
+         ],
+         [
+          0,
+          1,
+          0,
+          -1.7976931348623157e+308
+         ]
+        ],
+        [
+         [
+          1,
+          0,
+          0,
+          -1.7976931348623157e+308
+         ],
+         [
+          1,
+          1,
+          0,
+          -1.7976931348623157e+308
+         ]
+        ]
+       ],
+       "p": 1,
+       "q": 1,
+       "u": [
+        0,
+        0,
+        1,
+        1
+       ],
+       "v": [
+        0,
+        0,
+        1,
+        1
+       ]
+      }
+     },
+     "s2": {
+      "b_spline": {
+       "net": [
+        [
+         [
+          0,
+          0,
+          -0.4,
+          -1.7976931348623157e+308
+         ],
+         [
+          0,
+          1,
+          -0.4,
+          -1.7976931348623157e+308
+         ]
+        ],
+        [
+         [
+          1,
+          0,
+          0.4,
+          -1.7976931348623157e+308
+         ],
+         [
+          1,
+          1,
+          0.4,
+          -1.7976931348623157e+308
+         ]
+        ]
+       ],
+       "p": 1,
+       "q": 1,
+       "u": [
+        0,
+        0,
+        1,
+        1
+       ],
+       "v": [
+        0,
+        0,
+        1,
+        1
+       ]
+      }
+     },
+     "tol": 1e-06,
+     "ang": 0.5235987755982988
+    }
+   }
+  },
+  {
+   "name": "bspline_bspline_parallel",
+   "upstream_ref": "source/SMLib/src/SmFilletGeom.cpp",
+   "inputs": {
+    "query": {
+     "q": "srf_srf",
+     "s1": {
+      "b_spline": {
+       "net": [
+        [
+         [
+          0,
+          0,
+          0,
+          -1.7976931348623157e+308
+         ],
+         [
+          0,
+          1,
+          0,
+          -1.7976931348623157e+308
+         ]
+        ],
+        [
+         [
+          1,
+          0,
+          0,
+          -1.7976931348623157e+308
+         ],
+         [
+          1,
+          1,
+          0,
+          -1.7976931348623157e+308
+         ]
+        ]
+       ],
+       "p": 1,
+       "q": 1,
+       "u": [
+        0,
+        0,
+        1,
+        1
+       ],
+       "v": [
+        0,
+        0,
+        1,
+        1
+       ]
+      }
+     },
+     "s2": {
+      "b_spline": {
+       "net": [
+        [
+         [
+          0,
+          0,
+          1,
+          -1.7976931348623157e+308
+         ],
+         [
+          0,
+          1,
+          1,
+          -1.7976931348623157e+308
+         ]
+        ],
+        [
+         [
+          1,
+          0,
+          1,
+          -1.7976931348623157e+308
+         ],
+         [
+          1,
+          1,
+          1,
+          -1.7976931348623157e+308
+         ]
+        ]
+       ],
+       "p": 1,
+       "q": 1,
+       "u": [
+        0,
+        0,
+        1,
+        1
+       ],
+       "v": [
+        0,
+        0,
+        1,
+        1
+       ]
+      }
+     },
+     "tol": 1e-06,
+     "ang": 0.5235987755982988
+    }
+   }
+  },
+  {
+   "name": "bspline_plane",
+   "upstream_ref": "source/SMLib/src/SmFilletGeom.cpp",
+   "inputs": {
+    "query": {
+     "q": "srf_srf",
+     "s1": {
+      "b_spline": {
+       "net": [
+        [
+         [
+          0,
+          0,
+          0,
+          -1.7976931348623157e+308
+         ],
+         [
+          0,
+          1,
+          0,
+          -1.7976931348623157e+308
+         ]
+        ],
+        [
+         [
+          1,
+          0,
+          0,
+          -1.7976931348623157e+308
+         ],
+         [
+          1,
+          1,
+          0,
+          -1.7976931348623157e+308
+         ]
+        ]
+       ],
+       "p": 1,
+       "q": 1,
+       "u": [
+        0,
+        0,
+        1,
+        1
+       ],
+       "v": [
+        0,
+        0,
+        1,
+        1
+       ]
+      }
+     },
+     "s2": {
+      "analytic": {
+       "kind": "plane",
+       "origin": [
+        0.5,
+        0.5,
+        0
+       ],
+       "x_axis": [
+        0,
+        1,
+        0
+       ],
+       "y_axis": [
+        0,
+        0,
+        1
+       ],
+       "uv_scale": [
+        1.0,
+        1.0
+       ],
+       "domain": [
+        [
+         -2,
+         -2
+        ],
+        [
+         2,
+         2
+        ]
+       ],
+       "make_nurb": true
+      }
+     },
+     "tol": 1e-06,
+     "ang": 0.5235987755982988
+    }
+   }
+  },
+  {
+   "name": "rail_rail_plane_square",
+   "upstream_ref": "source/SMLib/src/SmFilletGeom.cpp",
+   "inputs": {
+    "model": {
+     "vertices": [
+      {
+       "point": [
+        0,
+        0,
+        0
+       ],
+       "vtype": 3,
+       "status": 0,
+       "corner": -1,
+       "uv": [
+        0,
+        0
+       ]
+      },
+      {
+       "point": [
+        1,
+        0,
+        0
+       ],
+       "vtype": 3,
+       "status": 0,
+       "corner": -1,
+       "uv": [
+        1,
+        0
+       ]
+      },
+      {
+       "point": [
+        0,
+        1,
+        0
+       ],
+       "vtype": 3,
+       "status": 0,
+       "corner": -1,
+       "uv": [
+        0,
+        1
+       ]
+      },
+      {
+       "point": [
+        1,
+        1,
+        0
+       ],
+       "vtype": 3,
+       "status": 0,
+       "corner": -1,
+       "uv": [
+        1,
+        1
+       ]
+      }
+     ],
+     "edges": [
+      {
+       "vs": 0,
+       "ve": 1,
+       "etype": 11,
+       "status": 0,
+       "corner": -1,
+       "eus": [
+        {
+         "geom": -1
+        },
+        {
+         "geom": -1
+        }
+       ]
+      },
+      {
+       "vs": 2,
+       "ve": 0,
+       "etype": 9,
+       "status": 0,
+       "corner": -1,
+       "curve": {
+        "dim": 3,
+        "cpts": [
+         [
+          0,
+          1,
+          0,
+          -1.7976931348623157e+308
+         ],
+         [
+          0,
+          0,
+          0,
+          -1.7976931348623157e+308
+         ]
+        ],
+        "p": 1,
+        "u": [
+         0,
+         0,
+         1,
+         1
+        ]
+       },
+       "interval": [
+        0,
+        1
+       ],
+       "eus": [
+        {
+         "geom": -1
+        },
+        {
+         "geom": -1,
+         "uv_curve": {
+          "dim": 2,
+          "cpts": [
+           [
+            0,
+            1,
+            0.0,
+            -1.7976931348623157e+308
+           ],
+           [
+            0,
+            0,
+            0.0,
+            -1.7976931348623157e+308
+           ]
+          ],
+          "p": 1,
+          "u": [
+           0,
+           0,
+           1,
+           1
+          ]
+         }
+        }
+       ]
+      },
+      {
+       "vs": 3,
+       "ve": 1,
+       "etype": 9,
+       "status": 0,
+       "corner": -1,
+       "curve": {
+        "dim": 3,
+        "cpts": [
+         [
+          1,
+          1,
+          0,
+          -1.7976931348623157e+308
+         ],
+         [
+          1,
+          0,
+          0,
+          -1.7976931348623157e+308
+         ]
+        ],
+        "p": 1,
+        "u": [
+         0,
+         0,
+         1,
+         1
+        ]
+       },
+       "interval": [
+        0,
+        1
+       ],
+       "eus": [
+        {
+         "geom": -1
+        },
+        {
+         "geom": -1,
+         "uv_curve": {
+          "dim": 2,
+          "cpts": [
+           [
+            1,
+            1,
+            0.0,
+            -1.7976931348623157e+308
+           ],
+           [
+            1,
+            0,
+            0.0,
+            -1.7976931348623157e+308
+           ]
+          ],
+          "p": 1,
+          "u": [
+           0,
+           0,
+           1,
+           1
+          ]
+         }
+        }
+       ]
+      }
+     ]
+    },
+    "query": {
+     "q": "rail_rail",
+     "e": 0,
+     "face_tol": 1e-06,
+     "face": {
+      "analytic": {
+       "kind": "plane",
+       "origin": [
+        0,
+        0,
+        0
+       ],
+       "x_axis": [
+        1,
+        0,
+        0
+       ],
+       "y_axis": [
+        0,
+        1,
+        0
+       ],
+       "uv_scale": [
+        1.0,
+        1.0
+       ],
+       "domain": [
+        [
+         -10,
+         -10
+        ],
+        [
+         10,
+         10
+        ]
+       ],
+       "make_nurb": true
+      }
+     }
+    }
+   }
+  },
+  {
+   "name": "rail_rail_plane_square_flipped_rail",
+   "upstream_ref": "source/SMLib/src/SmFilletGeom.cpp",
+   "inputs": {
+    "model": {
+     "vertices": [
+      {
+       "point": [
+        0,
+        0,
+        0
+       ],
+       "vtype": 3,
+       "status": 0,
+       "corner": -1,
+       "uv": [
+        0,
+        0
+       ]
+      },
+      {
+       "point": [
+        1,
+        0,
+        0
+       ],
+       "vtype": 3,
+       "status": 0,
+       "corner": -1,
+       "uv": [
+        1,
+        0
+       ]
+      },
+      {
+       "point": [
+        0,
+        1,
+        0
+       ],
+       "vtype": 3,
+       "status": 0,
+       "corner": -1,
+       "uv": [
+        0,
+        1
+       ]
+      },
+      {
+       "point": [
+        1,
+        1,
+        0
+       ],
+       "vtype": 3,
+       "status": 0,
+       "corner": -1,
+       "uv": [
+        1,
+        1
+       ]
+      }
+     ],
+     "edges": [
+      {
+       "vs": 0,
+       "ve": 1,
+       "etype": 11,
+       "status": 0,
+       "corner": -1,
+       "eus": [
+        {
+         "geom": -1
+        },
+        {
+         "geom": -1
+        }
+       ]
+      },
+      {
+       "vs": 0,
+       "ve": 2,
+       "etype": 9,
+       "status": 0,
+       "corner": -1,
+       "curve": {
+        "dim": 3,
+        "cpts": [
+         [
+          0,
+          0,
+          0,
+          -1.7976931348623157e+308
+         ],
+         [
+          0,
+          1,
+          0,
+          -1.7976931348623157e+308
+         ]
+        ],
+        "p": 1,
+        "u": [
+         0,
+         0,
+         1,
+         1
+        ]
+       },
+       "interval": [
+        0,
+        1
+       ],
+       "eus": [
+        {
+         "geom": -1
+        },
+        {
+         "geom": -1,
+         "uv_curve": {
+          "dim": 2,
+          "cpts": [
+           [
+            0,
+            0,
+            0.0,
+            -1.7976931348623157e+308
+           ],
+           [
+            0,
+            1,
+            0.0,
+            -1.7976931348623157e+308
+           ]
+          ],
+          "p": 1,
+          "u": [
+           0,
+           0,
+           1,
+           1
+          ]
+         }
+        }
+       ]
+      },
+      {
+       "vs": 3,
+       "ve": 1,
+       "etype": 9,
+       "status": 0,
+       "corner": -1,
+       "curve": {
+        "dim": 3,
+        "cpts": [
+         [
+          1,
+          1,
+          0,
+          -1.7976931348623157e+308
+         ],
+         [
+          1,
+          0,
+          0,
+          -1.7976931348623157e+308
+         ]
+        ],
+        "p": 1,
+        "u": [
+         0,
+         0,
+         1,
+         1
+        ]
+       },
+       "interval": [
+        0,
+        1
+       ],
+       "eus": [
+        {
+         "geom": -1
+        },
+        {
+         "geom": -1,
+         "uv_curve": {
+          "dim": 2,
+          "cpts": [
+           [
+            1,
+            1,
+            0.0,
+            -1.7976931348623157e+308
+           ],
+           [
+            1,
+            0,
+            0.0,
+            -1.7976931348623157e+308
+           ]
+          ],
+          "p": 1,
+          "u": [
+           0,
+           0,
+           1,
+           1
+          ]
+         }
+        }
+       ]
+      }
+     ]
+    },
+    "query": {
+     "q": "rail_rail",
+     "e": 0,
+     "face_tol": 1e-06,
+     "face": {
+      "analytic": {
+       "kind": "plane",
+       "origin": [
+        0,
+        0,
+        0
+       ],
+       "x_axis": [
+        1,
+        0,
+        0
+       ],
+       "y_axis": [
+        0,
+        1,
+        0
+       ],
+       "uv_scale": [
+        1.0,
+        1.0
+       ],
+       "domain": [
+        [
+         -10,
+         -10
+        ],
+        [
+         10,
+         10
+        ]
+       ],
+       "make_nurb": true
+      }
+     }
+    }
+   }
+  },
+  {
+   "name": "rail_rail_plane_not_mate",
+   "upstream_ref": "source/SMLib/src/SmFilletGeom.cpp",
+   "inputs": {
+    "model": {
+     "vertices": [
+      {
+       "point": [
+        0,
+        0,
+        0
+       ],
+       "vtype": 9,
+       "status": 0,
+       "corner": -1,
+       "uv": [
+        0,
+        0
+       ]
+      },
+      {
+       "point": [
+        1,
+        0,
+        0
+       ],
+       "vtype": 3,
+       "status": 0,
+       "corner": -1,
+       "uv": [
+        1,
+        0
+       ]
+      },
+      {
+       "point": [
+        0,
+        1,
+        0
+       ],
+       "vtype": 3,
+       "status": 0,
+       "corner": -1,
+       "uv": [
+        0,
+        1
+       ]
+      },
+      {
+       "point": [
+        1,
+        1,
+        0
+       ],
+       "vtype": 3,
+       "status": 0,
+       "corner": -1,
+       "uv": [
+        1,
+        1
+       ]
+      }
+     ],
+     "edges": [
+      {
+       "vs": 0,
+       "ve": 1,
+       "etype": 11,
+       "status": 0,
+       "corner": -1,
+       "eus": [
+        {
+         "geom": -1
+        },
+        {
+         "geom": -1
+        }
+       ]
+      },
+      {
+       "vs": 2,
+       "ve": 0,
+       "etype": 9,
+       "status": 0,
+       "corner": -1,
+       "curve": {
+        "dim": 3,
+        "cpts": [
+         [
+          0,
+          1,
+          0,
+          -1.7976931348623157e+308
+         ],
+         [
+          0,
+          0,
+          0,
+          -1.7976931348623157e+308
+         ]
+        ],
+        "p": 1,
+        "u": [
+         0,
+         0,
+         1,
+         1
+        ]
+       },
+       "interval": [
+        0,
+        1
+       ],
+       "eus": [
+        {
+         "geom": -1
+        },
+        {
+         "geom": -1,
+         "uv_curve": {
+          "dim": 2,
+          "cpts": [
+           [
+            0,
+            1,
+            0.0,
+            -1.7976931348623157e+308
+           ],
+           [
+            0,
+            0,
+            0.0,
+            -1.7976931348623157e+308
+           ]
+          ],
+          "p": 1,
+          "u": [
+           0,
+           0,
+           1,
+           1
+          ]
+         }
+        }
+       ]
+      },
+      {
+       "vs": 3,
+       "ve": 1,
+       "etype": 9,
+       "status": 0,
+       "corner": -1,
+       "curve": {
+        "dim": 3,
+        "cpts": [
+         [
+          1,
+          1,
+          0,
+          -1.7976931348623157e+308
+         ],
+         [
+          1,
+          0,
+          0,
+          -1.7976931348623157e+308
+         ]
+        ],
+        "p": 1,
+        "u": [
+         0,
+         0,
+         1,
+         1
+        ]
+       },
+       "interval": [
+        0,
+        1
+       ],
+       "eus": [
+        {
+         "geom": -1
+        },
+        {
+         "geom": -1,
+         "uv_curve": {
+          "dim": 2,
+          "cpts": [
+           [
+            1,
+            1,
+            0.0,
+            -1.7976931348623157e+308
+           ],
+           [
+            1,
+            0,
+            0.0,
+            -1.7976931348623157e+308
+           ]
+          ],
+          "p": 1,
+          "u": [
+           0,
+           0,
+           1,
+           1
+          ]
+         }
+        }
+       ]
+      }
+     ]
+    },
+    "query": {
+     "q": "rail_rail",
+     "e": 0,
+     "face_tol": 1e-06,
+     "face": {
+      "analytic": {
+       "kind": "plane",
+       "origin": [
+        0,
+        0,
+        0
+       ],
+       "x_axis": [
+        1,
+        0,
+        0
+       ],
+       "y_axis": [
+        0,
+        1,
+        0
+       ],
+       "uv_scale": [
+        1.0,
+        1.0
+       ],
+       "domain": [
+        [
+         -10,
+         -10
+        ],
+        [
+         10,
+         10
+        ]
+       ],
+       "make_nurb": true
+      }
+     }
+    }
+   }
+  },
+  {
+   "name": "rail_rail_plane_no_uv",
+   "upstream_ref": "source/SMLib/src/SmFilletGeom.cpp",
+   "inputs": {
+    "model": {
+     "vertices": [
+      {
+       "point": [
+        0,
+        0,
+        0
+       ],
+       "vtype": 3,
+       "status": 0,
+       "corner": -1,
+       "uv": [
+        0,
+        0
+       ]
+      },
+      {
+       "point": [
+        1,
+        0,
+        0
+       ],
+       "vtype": 3,
+       "status": 0,
+       "corner": -1,
+       "uv": [
+        1,
+        0
+       ]
+      },
+      {
+       "point": [
+        0,
+        1,
+        0
+       ],
+       "vtype": 3,
+       "status": 0,
+       "corner": -1,
+       "uv": [
+        0,
+        1
+       ]
+      },
+      {
+       "point": [
+        1,
+        1,
+        0
+       ],
+       "vtype": 3,
+       "status": 0,
+       "corner": -1,
+       "uv": [
+        1,
+        1
+       ]
+      }
+     ],
+     "edges": [
+      {
+       "vs": 0,
+       "ve": 1,
+       "etype": 11,
+       "status": 0,
+       "corner": -1,
+       "eus": [
+        {
+         "geom": -1
+        },
+        {
+         "geom": -1
+        }
+       ]
+      },
+      {
+       "vs": 2,
+       "ve": 0,
+       "etype": 9,
+       "status": 0,
+       "corner": -1,
+       "curve": {
+        "dim": 3,
+        "cpts": [
+         [
+          0,
+          1,
+          0,
+          -1.7976931348623157e+308
+         ],
+         [
+          0,
+          0,
+          0,
+          -1.7976931348623157e+308
+         ]
+        ],
+        "p": 1,
+        "u": [
+         0,
+         0,
+         1,
+         1
+        ]
+       },
+       "interval": [
+        0,
+        1
+       ],
+       "eus": [
+        {
+         "geom": -1
+        },
+        {
+         "geom": -1
+        }
+       ]
+      },
+      {
+       "vs": 3,
+       "ve": 1,
+       "etype": 9,
+       "status": 0,
+       "corner": -1,
+       "curve": {
+        "dim": 3,
+        "cpts": [
+         [
+          1,
+          1,
+          0,
+          -1.7976931348623157e+308
+         ],
+         [
+          1,
+          0,
+          0,
+          -1.7976931348623157e+308
+         ]
+        ],
+        "p": 1,
+        "u": [
+         0,
+         0,
+         1,
+         1
+        ]
+       },
+       "interval": [
+        0,
+        1
+       ],
+       "eus": [
+        {
+         "geom": -1
+        },
+        {
+         "geom": -1
+        }
+       ]
+      }
+     ]
+    },
+    "query": {
+     "q": "rail_rail",
+     "e": 0,
+     "face_tol": 1e-06,
+     "face": {
+      "analytic": {
+       "kind": "plane",
+       "origin": [
+        0,
+        0,
+        0
+       ],
+       "x_axis": [
+        1,
+        0,
+        0
+       ],
+       "y_axis": [
+        0,
+        1,
+        0
+       ],
+       "uv_scale": [
+        1.0,
+        1.0
+       ],
+       "domain": [
+        [
+         -10,
+         -10
+        ],
+        [
+         10,
+         10
+        ]
+       ],
+       "make_nurb": true
+      }
+     }
+    }
+   }
+  },
+  {
+   "name": "rail_rail_plane_slanted_rails",
+   "upstream_ref": "source/SMLib/src/SmFilletGeom.cpp",
+   "inputs": {
+    "model": {
+     "vertices": [
+      {
+       "point": [
+        0,
+        0,
+        0
+       ],
+       "vtype": 3,
+       "status": 0,
+       "corner": -1,
+       "uv": [
+        0,
+        0
+       ]
+      },
+      {
+       "point": [
+        1,
+        0,
+        0
+       ],
+       "vtype": 3,
+       "status": 0,
+       "corner": -1,
+       "uv": [
+        1,
+        0
+       ]
+      },
+      {
+       "point": [
+        -0.5,
+        1,
+        0
+       ],
+       "vtype": 3,
+       "status": 0,
+       "corner": -1,
+       "uv": [
+        -0.5,
+        1
+       ]
+      },
+      {
+       "point": [
+        1.5,
+        1,
+        0
+       ],
+       "vtype": 3,
+       "status": 0,
+       "corner": -1,
+       "uv": [
+        1.5,
+        1
+       ]
+      }
+     ],
+     "edges": [
+      {
+       "vs": 0,
+       "ve": 1,
+       "etype": 11,
+       "status": 0,
+       "corner": -1,
+       "eus": [
+        {
+         "geom": -1
+        },
+        {
+         "geom": -1
+        }
+       ]
+      },
+      {
+       "vs": 2,
+       "ve": 0,
+       "etype": 9,
+       "status": 0,
+       "corner": -1,
+       "curve": {
+        "dim": 3,
+        "cpts": [
+         [
+          -0.5,
+          1,
+          0,
+          -1.7976931348623157e+308
+         ],
+         [
+          0,
+          0,
+          0,
+          -1.7976931348623157e+308
+         ]
+        ],
+        "p": 1,
+        "u": [
+         0,
+         0,
+         1,
+         1
+        ]
+       },
+       "interval": [
+        0,
+        1
+       ],
+       "eus": [
+        {
+         "geom": -1
+        },
+        {
+         "geom": -1,
+         "uv_curve": {
+          "dim": 2,
+          "cpts": [
+           [
+            -0.5,
+            1,
+            0.0,
+            -1.7976931348623157e+308
+           ],
+           [
+            0,
+            0,
+            0.0,
+            -1.7976931348623157e+308
+           ]
+          ],
+          "p": 1,
+          "u": [
+           0,
+           0,
+           1,
+           1
+          ]
+         }
+        }
+       ]
+      },
+      {
+       "vs": 3,
+       "ve": 1,
+       "etype": 9,
+       "status": 0,
+       "corner": -1,
+       "curve": {
+        "dim": 3,
+        "cpts": [
+         [
+          1.5,
+          1,
+          0,
+          -1.7976931348623157e+308
+         ],
+         [
+          1,
+          0,
+          0,
+          -1.7976931348623157e+308
+         ]
+        ],
+        "p": 1,
+        "u": [
+         0,
+         0,
+         1,
+         1
+        ]
+       },
+       "interval": [
+        0,
+        1
+       ],
+       "eus": [
+        {
+         "geom": -1
+        },
+        {
+         "geom": -1,
+         "uv_curve": {
+          "dim": 2,
+          "cpts": [
+           [
+            1.5,
+            1,
+            0.0,
+            -1.7976931348623157e+308
+           ],
+           [
+            1,
+            0,
+            0.0,
+            -1.7976931348623157e+308
+           ]
+          ],
+          "p": 1,
+          "u": [
+           0,
+           0,
+           1,
+           1
+          ]
+         }
+        }
+       ]
+      }
+     ]
+    },
+    "query": {
+     "q": "rail_rail",
+     "e": 0,
+     "face_tol": 1e-06,
+     "face": {
+      "analytic": {
+       "kind": "plane",
+       "origin": [
+        0,
+        0,
+        0
+       ],
+       "x_axis": [
+        1,
+        0,
+        0
+       ],
+       "y_axis": [
+        0,
+        1,
+        0
+       ],
+       "uv_scale": [
+        1.0,
+        1.0
+       ],
+       "domain": [
+        [
+         -10,
+         -10
+        ],
+        [
+         10,
+         10
+        ]
+       ],
+       "make_nurb": true
+      }
+     }
+    }
+   }
+  },
+  {
+   "name": "rail_rail_plane_zero_tol",
+   "upstream_ref": "source/SMLib/src/SmFilletGeom.cpp",
+   "inputs": {
+    "model": {
+     "vertices": [
+      {
+       "point": [
+        0,
+        0,
+        0
+       ],
+       "vtype": 3,
+       "status": 0,
+       "corner": -1,
+       "uv": [
+        0,
+        0
+       ]
+      },
+      {
+       "point": [
+        1,
+        0,
+        0
+       ],
+       "vtype": 3,
+       "status": 0,
+       "corner": -1,
+       "uv": [
+        1,
+        0
+       ]
+      },
+      {
+       "point": [
+        0,
+        1,
+        0
+       ],
+       "vtype": 3,
+       "status": 0,
+       "corner": -1,
+       "uv": [
+        0,
+        1
+       ]
+      },
+      {
+       "point": [
+        1,
+        1,
+        0
+       ],
+       "vtype": 3,
+       "status": 0,
+       "corner": -1,
+       "uv": [
+        1,
+        1
+       ]
+      }
+     ],
+     "edges": [
+      {
+       "vs": 0,
+       "ve": 1,
+       "etype": 11,
+       "status": 0,
+       "corner": -1,
+       "eus": [
+        {
+         "geom": -1
+        },
+        {
+         "geom": -1
+        }
+       ]
+      },
+      {
+       "vs": 2,
+       "ve": 0,
+       "etype": 9,
+       "status": 0,
+       "corner": -1,
+       "curve": {
+        "dim": 3,
+        "cpts": [
+         [
+          0,
+          1,
+          0,
+          -1.7976931348623157e+308
+         ],
+         [
+          0,
+          0,
+          0,
+          -1.7976931348623157e+308
+         ]
+        ],
+        "p": 1,
+        "u": [
+         0,
+         0,
+         1,
+         1
+        ]
+       },
+       "interval": [
+        0,
+        1
+       ],
+       "eus": [
+        {
+         "geom": -1
+        },
+        {
+         "geom": -1,
+         "uv_curve": {
+          "dim": 2,
+          "cpts": [
+           [
+            0,
+            1,
+            0.0,
+            -1.7976931348623157e+308
+           ],
+           [
+            0,
+            0,
+            0.0,
+            -1.7976931348623157e+308
+           ]
+          ],
+          "p": 1,
+          "u": [
+           0,
+           0,
+           1,
+           1
+          ]
+         }
+        }
+       ]
+      },
+      {
+       "vs": 3,
+       "ve": 1,
+       "etype": 9,
+       "status": 0,
+       "corner": -1,
+       "curve": {
+        "dim": 3,
+        "cpts": [
+         [
+          1,
+          1,
+          0,
+          -1.7976931348623157e+308
+         ],
+         [
+          1,
+          0,
+          0,
+          -1.7976931348623157e+308
+         ]
+        ],
+        "p": 1,
+        "u": [
+         0,
+         0,
+         1,
+         1
+        ]
+       },
+       "interval": [
+        0,
+        1
+       ],
+       "eus": [
+        {
+         "geom": -1
+        },
+        {
+         "geom": -1,
+         "uv_curve": {
+          "dim": 2,
+          "cpts": [
+           [
+            1,
+            1,
+            0.0,
+            -1.7976931348623157e+308
+           ],
+           [
+            1,
+            0,
+            0.0,
+            -1.7976931348623157e+308
+           ]
+          ],
+          "p": 1,
+          "u": [
+           0,
+           0,
+           1,
+           1
+          ]
+         }
+        }
+       ]
+      }
+     ]
+    },
+    "query": {
+     "q": "rail_rail",
+     "e": 0,
+     "face_tol": 0.0,
+     "face": {
+      "analytic": {
+       "kind": "plane",
+       "origin": [
+        0,
+        0,
+        0
+       ],
+       "x_axis": [
+        1,
+        0,
+        0
+       ],
+       "y_axis": [
+        0,
+        1,
+        0
+       ],
+       "uv_scale": [
+        1.0,
+        1.0
+       ],
+       "domain": [
+        [
+         -10,
+         -10
+        ],
+        [
+         10,
+         10
+        ]
+       ],
+       "make_nurb": true
+      }
+     }
+    }
+   }
+  },
+  {
+   "name": "rail_rail_plane_small_domain",
+   "upstream_ref": "source/SMLib/src/SmFilletGeom.cpp",
+   "inputs": {
+    "model": {
+     "vertices": [
+      {
+       "point": [
+        0,
+        0,
+        0
+       ],
+       "vtype": 3,
+       "status": 0,
+       "corner": -1,
+       "uv": [
+        0,
+        0
+       ]
+      },
+      {
+       "point": [
+        1,
+        0,
+        0
+       ],
+       "vtype": 3,
+       "status": 0,
+       "corner": -1,
+       "uv": [
+        1,
+        0
+       ]
+      },
+      {
+       "point": [
+        0,
+        1,
+        0
+       ],
+       "vtype": 3,
+       "status": 0,
+       "corner": -1,
+       "uv": [
+        0,
+        1
+       ]
+      },
+      {
+       "point": [
+        1,
+        1,
+        0
+       ],
+       "vtype": 3,
+       "status": 0,
+       "corner": -1,
+       "uv": [
+        1,
+        1
+       ]
+      }
+     ],
+     "edges": [
+      {
+       "vs": 0,
+       "ve": 1,
+       "etype": 11,
+       "status": 0,
+       "corner": -1,
+       "eus": [
+        {
+         "geom": -1
+        },
+        {
+         "geom": -1
+        }
+       ]
+      },
+      {
+       "vs": 2,
+       "ve": 0,
+       "etype": 9,
+       "status": 0,
+       "corner": -1,
+       "curve": {
+        "dim": 3,
+        "cpts": [
+         [
+          0,
+          1,
+          0,
+          -1.7976931348623157e+308
+         ],
+         [
+          0,
+          0,
+          0,
+          -1.7976931348623157e+308
+         ]
+        ],
+        "p": 1,
+        "u": [
+         0,
+         0,
+         1,
+         1
+        ]
+       },
+       "interval": [
+        0,
+        1
+       ],
+       "eus": [
+        {
+         "geom": -1
+        },
+        {
+         "geom": -1,
+         "uv_curve": {
+          "dim": 2,
+          "cpts": [
+           [
+            0,
+            1,
+            0.0,
+            -1.7976931348623157e+308
+           ],
+           [
+            0,
+            0,
+            0.0,
+            -1.7976931348623157e+308
+           ]
+          ],
+          "p": 1,
+          "u": [
+           0,
+           0,
+           1,
+           1
+          ]
+         }
+        }
+       ]
+      },
+      {
+       "vs": 3,
+       "ve": 1,
+       "etype": 9,
+       "status": 0,
+       "corner": -1,
+       "curve": {
+        "dim": 3,
+        "cpts": [
+         [
+          1,
+          1,
+          0,
+          -1.7976931348623157e+308
+         ],
+         [
+          1,
+          0,
+          0,
+          -1.7976931348623157e+308
+         ]
+        ],
+        "p": 1,
+        "u": [
+         0,
+         0,
+         1,
+         1
+        ]
+       },
+       "interval": [
+        0,
+        1
+       ],
+       "eus": [
+        {
+         "geom": -1
+        },
+        {
+         "geom": -1,
+         "uv_curve": {
+          "dim": 2,
+          "cpts": [
+           [
+            1,
+            1,
+            0.0,
+            -1.7976931348623157e+308
+           ],
+           [
+            1,
+            0,
+            0.0,
+            -1.7976931348623157e+308
+           ]
+          ],
+          "p": 1,
+          "u": [
+           0,
+           0,
+           1,
+           1
+          ]
+         }
+        }
+       ]
+      }
+     ]
+    },
+    "query": {
+     "q": "rail_rail",
+     "e": 0,
+     "face_tol": 1e-06,
+     "face": {
+      "analytic": {
+       "kind": "plane",
+       "origin": [
+        0,
+        0,
+        0
+       ],
+       "x_axis": [
+        1,
+        0,
+        0
+       ],
+       "y_axis": [
+        0,
+        1,
+        0
+       ],
+       "uv_scale": [
+        1.0,
+        1.0
+       ],
+       "domain": [
+        [
+         -0.5,
+         -0.5
+        ],
+        [
+         1.5,
+         1.5
+        ]
+       ],
+       "make_nurb": true
+      }
+     }
+    }
+   }
+  },
+  {
+   "name": "rail_rail_no_face",
+   "upstream_ref": "source/SMLib/src/SmFilletGeom.cpp",
+   "inputs": {
+    "model": {
+     "vertices": [
+      {
+       "point": [
+        0,
+        0,
+        0
+       ],
+       "vtype": 3,
+       "status": 0,
+       "corner": -1,
+       "uv": [
+        0,
+        0
+       ]
+      },
+      {
+       "point": [
+        1,
+        0,
+        0
+       ],
+       "vtype": 3,
+       "status": 0,
+       "corner": -1,
+       "uv": [
+        1,
+        0
+       ]
+      },
+      {
+       "point": [
+        0,
+        1,
+        0
+       ],
+       "vtype": 3,
+       "status": 0,
+       "corner": -1,
+       "uv": [
+        0,
+        1
+       ]
+      },
+      {
+       "point": [
+        1,
+        1,
+        0
+       ],
+       "vtype": 3,
+       "status": 0,
+       "corner": -1,
+       "uv": [
+        1,
+        1
+       ]
+      }
+     ],
+     "edges": [
+      {
+       "vs": 0,
+       "ve": 1,
+       "etype": 11,
+       "status": 0,
+       "corner": -1,
+       "eus": [
+        {
+         "geom": -1
+        },
+        {
+         "geom": -1
+        }
+       ]
+      },
+      {
+       "vs": 2,
+       "ve": 0,
+       "etype": 9,
+       "status": 0,
+       "corner": -1,
+       "curve": {
+        "dim": 3,
+        "cpts": [
+         [
+          0,
+          1,
+          0,
+          -1.7976931348623157e+308
+         ],
+         [
+          0,
+          0,
+          0,
+          -1.7976931348623157e+308
+         ]
+        ],
+        "p": 1,
+        "u": [
+         0,
+         0,
+         1,
+         1
+        ]
+       },
+       "interval": [
+        0,
+        1
+       ],
+       "eus": [
+        {
+         "geom": -1
+        },
+        {
+         "geom": -1,
+         "uv_curve": {
+          "dim": 2,
+          "cpts": [
+           [
+            0,
+            1,
+            0.0,
+            -1.7976931348623157e+308
+           ],
+           [
+            0,
+            0,
+            0.0,
+            -1.7976931348623157e+308
+           ]
+          ],
+          "p": 1,
+          "u": [
+           0,
+           0,
+           1,
+           1
+          ]
+         }
+        }
+       ]
+      },
+      {
+       "vs": 3,
+       "ve": 1,
+       "etype": 9,
+       "status": 0,
+       "corner": -1,
+       "curve": {
+        "dim": 3,
+        "cpts": [
+         [
+          1,
+          1,
+          0,
+          -1.7976931348623157e+308
+         ],
+         [
+          1,
+          0,
+          0,
+          -1.7976931348623157e+308
+         ]
+        ],
+        "p": 1,
+        "u": [
+         0,
+         0,
+         1,
+         1
+        ]
+       },
+       "interval": [
+        0,
+        1
+       ],
+       "eus": [
+        {
+         "geom": -1
+        },
+        {
+         "geom": -1,
+         "uv_curve": {
+          "dim": 2,
+          "cpts": [
+           [
+            1,
+            1,
+            0.0,
+            -1.7976931348623157e+308
+           ],
+           [
+            1,
+            0,
+            0.0,
+            -1.7976931348623157e+308
+           ]
+          ],
+          "p": 1,
+          "u": [
+           0,
+           0,
+           1,
+           1
+          ]
+         }
+        }
+       ]
+      }
+     ]
+    },
+    "query": {
+     "q": "rail_rail",
+     "e": 0,
+     "face_tol": 1e-06
+    }
+   }
+  },
+  {
+   "name": "rail_rail_bspline_uv",
+   "upstream_ref": "source/SMLib/src/SmFilletGeom.cpp",
+   "inputs": {
+    "model": {
+     "vertices": [
+      {
+       "point": [
+        0.2,
+        0.2,
+        0
+       ],
+       "vtype": 3,
+       "status": 0,
+       "corner": -1,
+       "uv": [
+        0.2,
+        0.2
+       ]
+      },
+      {
+       "point": [
+        0.8,
+        0.2,
+        0
+       ],
+       "vtype": 3,
+       "status": 0,
+       "corner": -1,
+       "uv": [
+        0.8,
+        0.2
+       ]
+      },
+      {
+       "point": [
+        0.2,
+        0.8,
+        0
+       ],
+       "vtype": 3,
+       "status": 0,
+       "corner": -1,
+       "uv": [
+        0.2,
+        0.8
+       ]
+      },
+      {
+       "point": [
+        0.8,
+        0.8,
+        0
+       ],
+       "vtype": 3,
+       "status": 0,
+       "corner": -1,
+       "uv": [
+        0.8,
+        0.8
+       ]
+      }
+     ],
+     "edges": [
+      {
+       "vs": 0,
+       "ve": 1,
+       "etype": 11,
+       "status": 0,
+       "corner": -1,
+       "eus": [
+        {
+         "geom": -1
+        },
+        {
+         "geom": -1
+        }
+       ]
+      },
+      {
+       "vs": 2,
+       "ve": 0,
+       "etype": 9,
+       "status": 0,
+       "corner": -1,
+       "curve": {
+        "dim": 3,
+        "cpts": [
+         [
+          0.2,
+          0.8,
+          0,
+          -1.7976931348623157e+308
+         ],
+         [
+          0.2,
+          0.2,
+          0,
+          -1.7976931348623157e+308
+         ]
+        ],
+        "p": 1,
+        "u": [
+         0,
+         0,
+         1,
+         1
+        ]
+       },
+       "interval": [
+        0,
+        1
+       ],
+       "eus": [
+        {
+         "geom": -1
+        },
+        {
+         "geom": -1,
+         "uv_curve": {
+          "dim": 2,
+          "cpts": [
+           [
+            0.2,
+            0.8,
+            0.0,
+            -1.7976931348623157e+308
+           ],
+           [
+            0.2,
+            0.2,
+            0.0,
+            -1.7976931348623157e+308
+           ]
+          ],
+          "p": 1,
+          "u": [
+           0,
+           0,
+           1,
+           1
+          ]
+         }
+        }
+       ]
+      },
+      {
+       "vs": 3,
+       "ve": 1,
+       "etype": 9,
+       "status": 0,
+       "corner": -1,
+       "curve": {
+        "dim": 3,
+        "cpts": [
+         [
+          0.8,
+          0.8,
+          0,
+          -1.7976931348623157e+308
+         ],
+         [
+          0.8,
+          0.2,
+          0,
+          -1.7976931348623157e+308
+         ]
+        ],
+        "p": 1,
+        "u": [
+         0,
+         0,
+         1,
+         1
+        ]
+       },
+       "interval": [
+        0,
+        1
+       ],
+       "eus": [
+        {
+         "geom": -1
+        },
+        {
+         "geom": -1,
+         "uv_curve": {
+          "dim": 2,
+          "cpts": [
+           [
+            0.8,
+            0.8,
+            0.0,
+            -1.7976931348623157e+308
+           ],
+           [
+            0.8,
+            0.2,
+            0.0,
+            -1.7976931348623157e+308
+           ]
+          ],
+          "p": 1,
+          "u": [
+           0,
+           0,
+           1,
+           1
+          ]
+         }
+        }
+       ]
+      }
+     ]
+    },
+    "query": {
+     "q": "rail_rail",
+     "e": 0,
+     "face_tol": 1e-06,
+     "face": {
+      "b_spline": {
+       "net": [
+        [
+         [
+          0,
+          0,
+          0,
+          -1.7976931348623157e+308
+         ],
+         [
+          0,
+          1,
+          0,
+          -1.7976931348623157e+308
+         ]
+        ],
+        [
+         [
+          1,
+          0,
+          0,
+          -1.7976931348623157e+308
+         ],
+         [
+          1,
+          1,
+          0,
+          -1.7976931348623157e+308
+         ]
+        ]
+       ],
+       "p": 1,
+       "q": 1,
+       "u": [
+        0,
+        0,
+        1,
+        1
+       ],
+       "v": [
+        0,
+        0,
+        1,
+        1
+       ]
+      }
+     }
+    }
+   }
+  },
+  {
+   "name": "rail_rail_bspline_3d",
+   "upstream_ref": "source/SMLib/src/SmFilletGeom.cpp",
+   "inputs": {
+    "model": {
+     "vertices": [
+      {
+       "point": [
+        0.2,
+        0.2,
+        0
+       ],
+       "vtype": 0,
+       "status": 0,
+       "corner": -1,
+       "uv": [
+        0.2,
+        0.2
+       ]
+      },
+      {
+       "point": [
+        0.8,
+        0.2,
+        0
+       ],
+       "vtype": 3,
+       "status": 0,
+       "corner": -1,
+       "uv": [
+        0.8,
+        0.2
+       ]
+      },
+      {
+       "point": [
+        0.2,
+        0.8,
+        0
+       ],
+       "vtype": 3,
+       "status": 0,
+       "corner": -1,
+       "uv": [
+        0.2,
+        0.8
+       ]
+      },
+      {
+       "point": [
+        0.8,
+        0.8,
+        0
+       ],
+       "vtype": 3,
+       "status": 0,
+       "corner": -1,
+       "uv": [
+        0.8,
+        0.8
+       ]
+      }
+     ],
+     "edges": [
+      {
+       "vs": 0,
+       "ve": 1,
+       "etype": 11,
+       "status": 0,
+       "corner": -1,
+       "eus": [
+        {
+         "geom": -1
+        },
+        {
+         "geom": -1
+        }
+       ]
+      },
+      {
+       "vs": 2,
+       "ve": 0,
+       "etype": 9,
+       "status": 0,
+       "corner": -1,
+       "curve": {
+        "dim": 3,
+        "cpts": [
+         [
+          0.2,
+          0.8,
+          0,
+          -1.7976931348623157e+308
+         ],
+         [
+          0.2,
+          0.2,
+          0,
+          -1.7976931348623157e+308
+         ]
+        ],
+        "p": 1,
+        "u": [
+         0,
+         0,
+         1,
+         1
+        ]
+       },
+       "interval": [
+        0,
+        1
+       ],
+       "eus": [
+        {
+         "geom": -1
+        },
+        {
+         "geom": -1,
+         "uv_curve": {
+          "dim": 2,
+          "cpts": [
+           [
+            0.2,
+            0.8,
+            0.0,
+            -1.7976931348623157e+308
+           ],
+           [
+            0.2,
+            0.2,
+            0.0,
+            -1.7976931348623157e+308
+           ]
+          ],
+          "p": 1,
+          "u": [
+           0,
+           0,
+           1,
+           1
+          ]
+         }
+        }
+       ]
+      },
+      {
+       "vs": 3,
+       "ve": 1,
+       "etype": 9,
+       "status": 0,
+       "corner": -1,
+       "curve": {
+        "dim": 3,
+        "cpts": [
+         [
+          0.8,
+          0.8,
+          0,
+          -1.7976931348623157e+308
+         ],
+         [
+          0.8,
+          0.2,
+          0,
+          -1.7976931348623157e+308
+         ]
+        ],
+        "p": 1,
+        "u": [
+         0,
+         0,
+         1,
+         1
+        ]
+       },
+       "interval": [
+        0,
+        1
+       ],
+       "eus": [
+        {
+         "geom": -1
+        },
+        {
+         "geom": -1,
+         "uv_curve": {
+          "dim": 2,
+          "cpts": [
+           [
+            0.8,
+            0.8,
+            0.0,
+            -1.7976931348623157e+308
+           ],
+           [
+            0.8,
+            0.2,
+            0.0,
+            -1.7976931348623157e+308
+           ]
+          ],
+          "p": 1,
+          "u": [
+           0,
+           0,
+           1,
+           1
+          ]
+         }
+        }
+       ]
+      }
+     ]
+    },
+    "query": {
+     "q": "rail_rail",
+     "e": 0,
+     "face_tol": 1e-06,
+     "face": {
+      "b_spline": {
+       "net": [
+        [
+         [
+          0,
+          0,
+          -0.4,
+          -1.7976931348623157e+308
+         ],
+         [
+          0,
+          1,
+          -0.4,
+          -1.7976931348623157e+308
+         ]
+        ],
+        [
+         [
+          1,
+          0,
+          0.4,
+          -1.7976931348623157e+308
+         ],
+         [
+          1,
+          1,
+          0.4,
+          -1.7976931348623157e+308
+         ]
+        ]
+       ],
+       "p": 1,
+       "q": 1,
+       "u": [
+        0,
+        0,
+        1,
+        1
+       ],
+       "v": [
+        0,
+        0,
+        1,
+        1
+       ]
+      }
+     }
+    }
+   }
+  },
+  {
+   "name": "split_face_other_face",
+   "upstream_ref": "source/SMLib/src/SmFilletGeom.cpp",
+   "inputs": {
+    "model": {
+     "faces": [
+      {
+       "net": [
+        [
+         [
+          0,
+          0,
+          0,
+          -1.7976931348623157e+308
+         ],
+         [
+          0,
+          1,
+          0,
+          -1.7976931348623157e+308
+         ]
+        ],
+        [
+         [
+          1,
+          0,
+          0,
+          -1.7976931348623157e+308
+         ],
+         [
+          1,
+          1,
+          0,
+          -1.7976931348623157e+308
+         ]
+        ]
+       ],
+       "p": 1,
+       "q": 1,
+       "u": [
+        0,
+        0,
+        1,
+        1
+       ],
+       "v": [
+        0,
+        0,
+        1,
+        1
+       ]
+      },
+      {
+       "net": [
+        [
+         [
+          0,
+          0,
+          0,
+          -1.7976931348623157e+308
+         ],
+         [
+          0,
+          1,
+          0,
+          -1.7976931348623157e+308
+         ]
+        ],
+        [
+         [
+          1,
+          0,
+          0,
+          -1.7976931348623157e+308
+         ],
+         [
+          1,
+          1,
+          0,
+          -1.7976931348623157e+308
+         ]
+        ]
+       ],
+       "p": 1,
+       "q": 1,
+       "u": [
+        0,
+        0,
+        1,
+        1
+       ],
+       "v": [
+        0,
+        0,
+        1,
+        1
+       ]
+      },
+      {
+       "net": [
+        [
+         [
+          0,
+          0,
+          0,
+          -1.7976931348623157e+308
+         ],
+         [
+          0,
+          1,
+          0,
+          -1.7976931348623157e+308
+         ]
+        ],
+        [
+         [
+          1,
+          0,
+          0,
+          -1.7976931348623157e+308
+         ],
+         [
+          1,
+          1,
+          0,
+          -1.7976931348623157e+308
+         ]
+        ]
+       ],
+       "p": 1,
+       "q": 1,
+       "u": [
+        0,
+        0,
+        1,
+        1
+       ],
+       "v": [
+        0,
+        0,
+        1,
+        1
+       ]
+      }
+     ],
+     "vertices": [
+      {
+       "point": [
+        0,
+        0,
+        0
+       ],
+       "vtype": 3,
+       "status": 0,
+       "corner": -1,
+       "uv": [
+        0,
+        0
+       ]
+      },
+      {
+       "point": [
+        1,
+        0,
+        0
+       ],
+       "vtype": 3,
+       "status": 0,
+       "corner": -1,
+       "uv": [
+        1,
+        0
+       ]
+      }
+     ],
+     "edges": [
+      {
+       "vs": 0,
+       "ve": 1,
+       "etype": 9,
+       "status": 0,
+       "corner": -1,
+       "eus": [
+        {
+         "geom": -1
+        },
+        {
+         "geom": -1
+        }
+       ]
+      }
+     ]
+    },
+    "query": {
+     "q": "split_face",
+     "e": 0,
+     "set": 0,
+     "f1": 1,
+     "f2": 2
+    }
+   }
+  },
+  {
+   "name": "split_face_unset",
+   "upstream_ref": "source/SMLib/src/SmFilletGeom.cpp",
+   "inputs": {
+    "model": {
+     "faces": [
+      {
+       "net": [
+        [
+         [
+          0,
+          0,
+          0,
+          -1.7976931348623157e+308
+         ],
+         [
+          0,
+          1,
+          0,
+          -1.7976931348623157e+308
+         ]
+        ],
+        [
+         [
+          1,
+          0,
+          0,
+          -1.7976931348623157e+308
+         ],
+         [
+          1,
+          1,
+          0,
+          -1.7976931348623157e+308
+         ]
+        ]
+       ],
+       "p": 1,
+       "q": 1,
+       "u": [
+        0,
+        0,
+        1,
+        1
+       ],
+       "v": [
+        0,
+        0,
+        1,
+        1
+       ]
+      },
+      {
+       "net": [
+        [
+         [
+          0,
+          0,
+          0,
+          -1.7976931348623157e+308
+         ],
+         [
+          0,
+          1,
+          0,
+          -1.7976931348623157e+308
+         ]
+        ],
+        [
+         [
+          1,
+          0,
+          0,
+          -1.7976931348623157e+308
+         ],
+         [
+          1,
+          1,
+          0,
+          -1.7976931348623157e+308
+         ]
+        ]
+       ],
+       "p": 1,
+       "q": 1,
+       "u": [
+        0,
+        0,
+        1,
+        1
+       ],
+       "v": [
+        0,
+        0,
+        1,
+        1
+       ]
+      },
+      {
+       "net": [
+        [
+         [
+          0,
+          0,
+          0,
+          -1.7976931348623157e+308
+         ],
+         [
+          0,
+          1,
+          0,
+          -1.7976931348623157e+308
+         ]
+        ],
+        [
+         [
+          1,
+          0,
+          0,
+          -1.7976931348623157e+308
+         ],
+         [
+          1,
+          1,
+          0,
+          -1.7976931348623157e+308
+         ]
+        ]
+       ],
+       "p": 1,
+       "q": 1,
+       "u": [
+        0,
+        0,
+        1,
+        1
+       ],
+       "v": [
+        0,
+        0,
+        1,
+        1
+       ]
+      }
+     ],
+     "vertices": [
+      {
+       "point": [
+        0,
+        0,
+        0
+       ],
+       "vtype": 3,
+       "status": 0,
+       "corner": -1,
+       "uv": [
+        0,
+        0
+       ]
+      },
+      {
+       "point": [
+        1,
+        0,
+        0
+       ],
+       "vtype": 3,
+       "status": 0,
+       "corner": -1,
+       "uv": [
+        1,
+        0
+       ]
+      }
+     ],
+     "edges": [
+      {
+       "vs": 0,
+       "ve": 1,
+       "etype": 9,
+       "status": 0,
+       "corner": -1,
+       "eus": [
+        {
+         "geom": -1
+        },
+        {
+         "geom": -1
+        }
+       ]
+      }
+     ]
+    },
+    "query": {
+     "q": "split_face",
+     "e": 0,
+     "set": -1,
+     "f1": 1,
+     "f2": 2
+    }
+   }
+  },
+  {
+   "name": "split_face_null_new",
+   "upstream_ref": "source/SMLib/src/SmFilletGeom.cpp",
+   "inputs": {
+    "model": {
+     "faces": [
+      {
+       "net": [
+        [
+         [
+          0,
+          0,
+          0,
+          -1.7976931348623157e+308
+         ],
+         [
+          0,
+          1,
+          0,
+          -1.7976931348623157e+308
+         ]
+        ],
+        [
+         [
+          1,
+          0,
+          0,
+          -1.7976931348623157e+308
+         ],
+         [
+          1,
+          1,
+          0,
+          -1.7976931348623157e+308
+         ]
+        ]
+       ],
+       "p": 1,
+       "q": 1,
+       "u": [
+        0,
+        0,
+        1,
+        1
+       ],
+       "v": [
+        0,
+        0,
+        1,
+        1
+       ]
+      },
+      {
+       "net": [
+        [
+         [
+          0,
+          0,
+          0,
+          -1.7976931348623157e+308
+         ],
+         [
+          0,
+          1,
+          0,
+          -1.7976931348623157e+308
+         ]
+        ],
+        [
+         [
+          1,
+          0,
+          0,
+          -1.7976931348623157e+308
+         ],
+         [
+          1,
+          1,
+          0,
+          -1.7976931348623157e+308
+         ]
+        ]
+       ],
+       "p": 1,
+       "q": 1,
+       "u": [
+        0,
+        0,
+        1,
+        1
+       ],
+       "v": [
+        0,
+        0,
+        1,
+        1
+       ]
+      },
+      {
+       "net": [
+        [
+         [
+          0,
+          0,
+          0,
+          -1.7976931348623157e+308
+         ],
+         [
+          0,
+          1,
+          0,
+          -1.7976931348623157e+308
+         ]
+        ],
+        [
+         [
+          1,
+          0,
+          0,
+          -1.7976931348623157e+308
+         ],
+         [
+          1,
+          1,
+          0,
+          -1.7976931348623157e+308
+         ]
+        ]
+       ],
+       "p": 1,
+       "q": 1,
+       "u": [
+        0,
+        0,
+        1,
+        1
+       ],
+       "v": [
+        0,
+        0,
+        1,
+        1
+       ]
+      }
+     ],
+     "vertices": [
+      {
+       "point": [
+        0,
+        0,
+        0
+       ],
+       "vtype": 3,
+       "status": 0,
+       "corner": -1,
+       "uv": [
+        0,
+        0
+       ]
+      },
+      {
+       "point": [
+        1,
+        0,
+        0
+       ],
+       "vtype": 3,
+       "status": 0,
+       "corner": -1,
+       "uv": [
+        1,
+        0
+       ]
+      }
+     ],
+     "edges": [
+      {
+       "vs": 0,
+       "ve": 1,
+       "etype": 9,
+       "status": 0,
+       "corner": -1,
+       "eus": [
+        {
+         "geom": -1
+        },
+        {
+         "geom": -1
+        }
+       ]
+      }
+     ]
+    },
+    "query": {
+     "q": "split_face",
+     "e": 0,
+     "set": 0,
+     "f1": 2,
+     "f2": -1
+    }
+   }
+  },
+  {
+   "name": "rail_int_rail_without_corner",
+   "upstream_ref": "source/SMLib/src/SmFilletGeom.cpp",
+   "inputs": {
+    "model": {
+     "vertices": [
+      {
+       "point": [
+        1,
+        2,
+        3
+       ],
+       "vtype": 3,
+       "status": 0,
+       "corner": -1,
+       "uv": [
+        0,
+        0
+       ]
+      }
+     ],
+     "edges": []
+    },
+    "query": {
+     "q": "rail_int_rail",
+     "v": 0
+    }
+   }
+  },
+  {
+   "name": "rail_int_edgeuse_without_corner",
+   "upstream_ref": "source/SMLib/src/SmFilletGeom.cpp",
+   "inputs": {
+    "model": {
+     "vertices": [
+      {
+       "point": [
+        1,
+        2,
+        3
+       ],
+       "vtype": 3,
+       "status": 0,
+       "corner": -1,
+       "uv": [
+        0,
+        0
+       ]
+      }
+     ],
+     "edges": []
+    },
+    "query": {
+     "q": "rail_int_edgeuse",
+     "v": 0
+    }
+   }
+  },
+  {
+   "name": "cross_section_without_corner",
+   "upstream_ref": "source/SMLib/src/SmFilletGeom.cpp",
+   "inputs": {
+    "model": {
+     "vertices": [
+      {
+       "point": [
+        1,
+        2,
+        3
+       ],
+       "vtype": 3,
+       "status": 0,
+       "corner": -1,
+       "uv": [
+        0,
+        0
+       ]
+      }
+     ],
+     "edges": []
+    },
+    "query": {
+     "q": "cross_section",
+     "v": 0
+    }
+   }
+  },
+  {
+   "name": "set_back_without_corner",
+   "upstream_ref": "source/SMLib/src/SmFilletGeom.cpp",
+   "inputs": {
+    "model": {
+     "vertices": [
+      {
+       "point": [
+        1,
+        2,
+        3
+       ],
+       "vtype": 3,
+       "status": 0,
+       "corner": -1,
+       "uv": [
+        0,
+        0
+       ]
+      }
+     ],
+     "edges": []
+    },
+    "query": {
+     "q": "set_back",
+     "v": 0
+    }
+   }
+  }
+ ]
+}

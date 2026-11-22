@@ -1,0 +1,2109 @@
+{
+ "cases": [
+  {
+   "name": "line_info",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:4582 (CreateLineSegment (0,0,0)-(1,0,0))",
+   "inputs": {
+    "op": "info",
+    "types": [
+     14053,
+     14001,
+     14033,
+     10001
+    ],
+    "civ": {
+     "curve": {
+      "bspline": {
+       "dim": 3,
+       "cpts": [
+        [
+         0,
+         0,
+         0,
+         -1.7976931348623157e+308
+        ],
+        [
+         1,
+         0,
+         0,
+         -1.7976931348623157e+308
+        ]
+       ],
+       "p": 1,
+       "u": [
+        0,
+        0,
+        1,
+        1
+       ]
+      }
+     },
+     "in_param": true,
+     "copy": 0,
+     "owner": 1
+    }
+   }
+  },
+  {
+   "name": "line_info_copy_both",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:4582 (CreateLineSegment (0,0,0)-(1,0,0))",
+   "inputs": {
+    "op": "info",
+    "types": [
+     14053,
+     14001,
+     14033,
+     10001
+    ],
+    "civ": {
+     "curve": {
+      "bspline": {
+       "dim": 3,
+       "cpts": [
+        [
+         0,
+         0,
+         0,
+         -1.7976931348623157e+308
+        ],
+        [
+         1,
+         0,
+         0,
+         -1.7976931348623157e+308
+        ]
+       ],
+       "p": 1,
+       "u": [
+        0,
+        0,
+        1,
+        1
+       ]
+      }
+     },
+     "in_param": false,
+     "copy": 3,
+     "owner": 0
+    }
+   }
+  },
+  {
+   "name": "cubic_info_srfinvolume",
+   "upstream_ref": "source/SMLib/src/SmSrfInVolume.cpp:1219 (SmCrvInVolume(*pBSC, bInParamSpace, vol, 0, 1))",
+   "inputs": {
+    "op": "info",
+    "types": [
+     14053,
+     14001,
+     14033,
+     10001
+    ],
+    "civ": {
+     "curve": {
+      "bspline": {
+       "dim": 3,
+       "cpts": [
+        [
+         0,
+         0,
+         0,
+         -1.7976931348623157e+308
+        ],
+        [
+         1,
+         1,
+         0,
+         -1.7976931348623157e+308
+        ],
+        [
+         2,
+         -1,
+         0,
+         -1.7976931348623157e+308
+        ],
+        [
+         3,
+         0.5,
+         1,
+         -1.7976931348623157e+308
+        ],
+        [
+         4,
+         0,
+         0,
+         -1.7976931348623157e+308
+        ]
+       ],
+       "p": 3,
+       "u": [
+        0,
+        0,
+        0,
+        0,
+        0.5,
+        1,
+        1,
+        1,
+        1
+       ]
+      }
+     },
+     "in_param": true,
+     "copy": 0,
+     "owner": 1
+    }
+   }
+  },
+  {
+   "name": "cubic_eval_d3",
+   "upstream_ref": "source/SMLib/src/SmSrfInVolume.cpp:1219 (SmCrvInVolume(*pBSC, bInParamSpace, vol, 0, 1))",
+   "inputs": {
+    "op": "eval",
+    "t": 0.3,
+    "n": 3,
+    "left": true,
+    "nonzero": true,
+    "civ": {
+     "curve": {
+      "bspline": {
+       "dim": 3,
+       "cpts": [
+        [
+         0,
+         0,
+         0,
+         -1.7976931348623157e+308
+        ],
+        [
+         1,
+         1,
+         0,
+         -1.7976931348623157e+308
+        ],
+        [
+         2,
+         -1,
+         0,
+         -1.7976931348623157e+308
+        ],
+        [
+         3,
+         0.5,
+         1,
+         -1.7976931348623157e+308
+        ],
+        [
+         4,
+         0,
+         0,
+         -1.7976931348623157e+308
+        ]
+       ],
+       "p": 3,
+       "u": [
+        0,
+        0,
+        0,
+        0,
+        0.5,
+        1,
+        1,
+        1,
+        1
+       ]
+      }
+     },
+     "in_param": true,
+     "copy": 0,
+     "owner": 1
+    }
+   }
+  },
+  {
+   "name": "cubic_eval_point",
+   "upstream_ref": "source/SMLib/src/SmSrfInVolume.cpp:1219 (SmCrvInVolume(*pBSC, bInParamSpace, vol, 0, 1))",
+   "inputs": {
+    "op": "eval_point",
+    "t": 0.75,
+    "civ": {
+     "curve": {
+      "bspline": {
+       "dim": 3,
+       "cpts": [
+        [
+         0,
+         0,
+         0,
+         -1.7976931348623157e+308
+        ],
+        [
+         1,
+         1,
+         0,
+         -1.7976931348623157e+308
+        ],
+        [
+         2,
+         -1,
+         0,
+         -1.7976931348623157e+308
+        ],
+        [
+         3,
+         0.5,
+         1,
+         -1.7976931348623157e+308
+        ],
+        [
+         4,
+         0,
+         0,
+         -1.7976931348623157e+308
+        ]
+       ],
+       "p": 3,
+       "u": [
+        0,
+        0,
+        0,
+        0,
+        0.5,
+        1,
+        1,
+        1,
+        1
+       ]
+      }
+     },
+     "in_param": false,
+     "copy": 0,
+     "owner": 1
+    }
+   }
+  },
+  {
+   "name": "cubic_knots_uncached",
+   "upstream_ref": "source/SMLib/src/SmSrfInVolume.cpp:1219 (SmCrvInVolume(*pBSC, bInParamSpace, vol, 0, 1))",
+   "inputs": {
+    "op": "knots",
+    "ivl": null,
+    "want": true,
+    "civ": {
+     "curve": {
+      "bspline": {
+       "dim": 3,
+       "cpts": [
+        [
+         0,
+         0,
+         0,
+         -1.7976931348623157e+308
+        ],
+        [
+         1,
+         1,
+         0,
+         -1.7976931348623157e+308
+        ],
+        [
+         2,
+         -1,
+         0,
+         -1.7976931348623157e+308
+        ],
+        [
+         3,
+         0.5,
+         1,
+         -1.7976931348623157e+308
+        ],
+        [
+         4,
+         0,
+         0,
+         -1.7976931348623157e+308
+        ]
+       ],
+       "p": 3,
+       "u": [
+        0,
+        0,
+        0,
+        0,
+        0.5,
+        1,
+        1,
+        1,
+        1
+       ]
+      }
+     },
+     "in_param": true,
+     "copy": 0,
+     "owner": 1
+    }
+   }
+  },
+  {
+   "name": "cubic_knots_cached",
+   "upstream_ref": "source/SMLib/src/SmSrfInVolume.cpp:1219 (SmCrvInVolume(*pBSC, bInParamSpace, vol, 0, 1))",
+   "inputs": {
+    "op": "knots",
+    "ivl": null,
+    "want": true,
+    "civ": {
+     "curve": {
+      "bspline": {
+       "dim": 3,
+       "cpts": [
+        [
+         0,
+         0,
+         0,
+         -1.7976931348623157e+308
+        ],
+        [
+         1,
+         1,
+         0,
+         -1.7976931348623157e+308
+        ],
+        [
+         2,
+         -1,
+         0,
+         -1.7976931348623157e+308
+        ],
+        [
+         3,
+         0.5,
+         1,
+         -1.7976931348623157e+308
+        ],
+        [
+         4,
+         0,
+         0,
+         -1.7976931348623157e+308
+        ]
+       ],
+       "p": 3,
+       "u": [
+        0,
+        0,
+        0,
+        0,
+        0.5,
+        1,
+        1,
+        1,
+        1
+       ]
+      }
+     },
+     "in_param": true,
+     "copy": 0,
+     "owner": 1,
+     "cache": {
+      "need": false,
+      "breaks": [
+       0,
+       0.25,
+       0.5,
+       1
+      ],
+      "conts": [
+       1,
+       7,
+       3,
+       1
+      ]
+     }
+    }
+   }
+  },
+  {
+   "name": "cubic_knots_cached_ivl",
+   "upstream_ref": "source/SMLib/src/SmSrfInVolume.cpp:1219 (SmCrvInVolume(*pBSC, bInParamSpace, vol, 0, 1))",
+   "inputs": {
+    "op": "knots",
+    "ivl": [
+     0.2,
+     0.6
+    ],
+    "want": true,
+    "civ": {
+     "curve": {
+      "bspline": {
+       "dim": 3,
+       "cpts": [
+        [
+         0,
+         0,
+         0,
+         -1.7976931348623157e+308
+        ],
+        [
+         1,
+         1,
+         0,
+         -1.7976931348623157e+308
+        ],
+        [
+         2,
+         -1,
+         0,
+         -1.7976931348623157e+308
+        ],
+        [
+         3,
+         0.5,
+         1,
+         -1.7976931348623157e+308
+        ],
+        [
+         4,
+         0,
+         0,
+         -1.7976931348623157e+308
+        ]
+       ],
+       "p": 3,
+       "u": [
+        0,
+        0,
+        0,
+        0,
+        0.5,
+        1,
+        1,
+        1,
+        1
+       ]
+      }
+     },
+     "in_param": true,
+     "copy": 0,
+     "owner": 1,
+     "cache": {
+      "need": false,
+      "breaks": [
+       0,
+       0.25,
+       0.5,
+       1
+      ],
+      "conts": [
+       1,
+       7,
+       3,
+       1
+      ]
+     }
+    }
+   }
+  },
+  {
+   "name": "cubic_mults",
+   "upstream_ref": "source/SMLib/src/SmSrfInVolume.cpp:1219 (SmCrvInVolume(*pBSC, bInParamSpace, vol, 0, 1))",
+   "inputs": {
+    "op": "mults",
+    "knots": [
+     0,
+     0.1,
+     0.5,
+     1
+    ],
+    "civ": {
+     "curve": {
+      "bspline": {
+       "dim": 3,
+       "cpts": [
+        [
+         0,
+         0,
+         0,
+         -1.7976931348623157e+308
+        ],
+        [
+         1,
+         1,
+         0,
+         -1.7976931348623157e+308
+        ],
+        [
+         2,
+         -1,
+         0,
+         -1.7976931348623157e+308
+        ],
+        [
+         3,
+         0.5,
+         1,
+         -1.7976931348623157e+308
+        ],
+        [
+         4,
+         0,
+         0,
+         -1.7976931348623157e+308
+        ]
+       ],
+       "p": 3,
+       "u": [
+        0,
+        0,
+        0,
+        0,
+        0.5,
+        1,
+        1,
+        1,
+        1
+       ]
+      }
+     },
+     "in_param": true,
+     "copy": 0,
+     "owner": 1,
+     "cache": {
+      "need": false,
+      "breaks": [
+       0,
+       0.25,
+       0.5,
+       1
+      ],
+      "conts": [
+       1,
+       7,
+       3,
+       1
+      ]
+     }
+    }
+   }
+  },
+  {
+   "name": "cubic_mults_past_end",
+   "upstream_ref": "source/SMLib/src/SmSrfInVolume.cpp:1219 (SmCrvInVolume(*pBSC, bInParamSpace, vol, 0, 1))",
+   "inputs": {
+    "op": "mults",
+    "knots": [
+     0.5,
+     1.5
+    ],
+    "civ": {
+     "curve": {
+      "bspline": {
+       "dim": 3,
+       "cpts": [
+        [
+         0,
+         0,
+         0,
+         -1.7976931348623157e+308
+        ],
+        [
+         1,
+         1,
+         0,
+         -1.7976931348623157e+308
+        ],
+        [
+         2,
+         -1,
+         0,
+         -1.7976931348623157e+308
+        ],
+        [
+         3,
+         0.5,
+         1,
+         -1.7976931348623157e+308
+        ],
+        [
+         4,
+         0,
+         0,
+         -1.7976931348623157e+308
+        ]
+       ],
+       "p": 3,
+       "u": [
+        0,
+        0,
+        0,
+        0,
+        0.5,
+        1,
+        1,
+        1,
+        1
+       ]
+      }
+     },
+     "in_param": true,
+     "copy": 0,
+     "owner": 1,
+     "cache": {
+      "need": false,
+      "breaks": [
+       0,
+       0.25,
+       0.5,
+       1
+      ],
+      "conts": [
+       1,
+       7,
+       3,
+       1
+      ]
+     }
+    }
+   }
+  },
+  {
+   "name": "cubic_mults_not_cached",
+   "upstream_ref": "source/SMLib/src/SmSrfInVolume.cpp:1219 (SmCrvInVolume(*pBSC, bInParamSpace, vol, 0, 1))",
+   "inputs": {
+    "op": "mults",
+    "knots": [
+     0.5
+    ],
+    "civ": {
+     "curve": {
+      "bspline": {
+       "dim": 3,
+       "cpts": [
+        [
+         0,
+         0,
+         0,
+         -1.7976931348623157e+308
+        ],
+        [
+         1,
+         1,
+         0,
+         -1.7976931348623157e+308
+        ],
+        [
+         2,
+         -1,
+         0,
+         -1.7976931348623157e+308
+        ],
+        [
+         3,
+         0.5,
+         1,
+         -1.7976931348623157e+308
+        ],
+        [
+         4,
+         0,
+         0,
+         -1.7976931348623157e+308
+        ]
+       ],
+       "p": 3,
+       "u": [
+        0,
+        0,
+        0,
+        0,
+        0.5,
+        1,
+        1,
+        1,
+        1
+       ]
+      }
+     },
+     "in_param": true,
+     "copy": 0,
+     "owner": 1
+    }
+   }
+  },
+  {
+   "name": "cubic_nnk_cached",
+   "upstream_ref": "source/SMLib/src/SmSrfInVolume.cpp:1219 (SmCrvInVolume(*pBSC, bInParamSpace, vol, 0, 1))",
+   "inputs": {
+    "op": "nnk",
+    "civ": {
+     "curve": {
+      "bspline": {
+       "dim": 3,
+       "cpts": [
+        [
+         0,
+         0,
+         0,
+         -1.7976931348623157e+308
+        ],
+        [
+         1,
+         1,
+         0,
+         -1.7976931348623157e+308
+        ],
+        [
+         2,
+         -1,
+         0,
+         -1.7976931348623157e+308
+        ],
+        [
+         3,
+         0.5,
+         1,
+         -1.7976931348623157e+308
+        ],
+        [
+         4,
+         0,
+         0,
+         -1.7976931348623157e+308
+        ]
+       ],
+       "p": 3,
+       "u": [
+        0,
+        0,
+        0,
+        0,
+        0.5,
+        1,
+        1,
+        1,
+        1
+       ]
+      }
+     },
+     "in_param": true,
+     "copy": 0,
+     "owner": 1,
+     "cache": {
+      "need": false,
+      "breaks": [
+       0,
+       0.25,
+       0.5,
+       1
+      ],
+      "conts": [
+       1,
+       7,
+       3,
+       1
+      ]
+     }
+    }
+   }
+  },
+  {
+   "name": "cubic_conts_ends_only",
+   "upstream_ref": "source/SMLib/src/SmSrfInVolume.cpp:1219 (SmCrvInVolume(*pBSC, bInParamSpace, vol, 0, 1))",
+   "inputs": {
+    "op": "conts",
+    "angle": 0.5,
+    "civ": {
+     "curve": {
+      "bspline": {
+       "dim": 3,
+       "cpts": [
+        [
+         0,
+         0,
+         0,
+         -1.7976931348623157e+308
+        ],
+        [
+         1,
+         1,
+         0,
+         -1.7976931348623157e+308
+        ],
+        [
+         2,
+         -1,
+         0,
+         -1.7976931348623157e+308
+        ],
+        [
+         3,
+         0.5,
+         1,
+         -1.7976931348623157e+308
+        ],
+        [
+         4,
+         0,
+         0,
+         -1.7976931348623157e+308
+        ]
+       ],
+       "p": 3,
+       "u": [
+        0,
+        0,
+        0,
+        0,
+        0.5,
+        1,
+        1,
+        1,
+        1
+       ]
+      }
+     },
+     "in_param": true,
+     "copy": 0,
+     "owner": 1,
+     "cache": {
+      "need": false,
+      "breaks": [
+       0,
+       1
+      ],
+      "conts": [
+       1,
+       1
+      ]
+     }
+    }
+   }
+  },
+  {
+   "name": "cubic_conts_interior",
+   "upstream_ref": "source/SMLib/src/SmSrfInVolume.cpp:1219 (SmCrvInVolume(*pBSC, bInParamSpace, vol, 0, 1))",
+   "inputs": {
+    "op": "conts",
+    "angle": 0.5,
+    "civ": {
+     "curve": {
+      "bspline": {
+       "dim": 3,
+       "cpts": [
+        [
+         0,
+         0,
+         0,
+         -1.7976931348623157e+308
+        ],
+        [
+         1,
+         1,
+         0,
+         -1.7976931348623157e+308
+        ],
+        [
+         2,
+         -1,
+         0,
+         -1.7976931348623157e+308
+        ],
+        [
+         3,
+         0.5,
+         1,
+         -1.7976931348623157e+308
+        ],
+        [
+         4,
+         0,
+         0,
+         -1.7976931348623157e+308
+        ]
+       ],
+       "p": 3,
+       "u": [
+        0,
+        0,
+        0,
+        0,
+        0.5,
+        1,
+        1,
+        1,
+        1
+       ]
+      }
+     },
+     "in_param": true,
+     "copy": 0,
+     "owner": 1,
+     "cache": {
+      "need": false,
+      "breaks": [
+       0,
+       0.25,
+       0.5,
+       1
+      ],
+      "conts": [
+       1,
+       7,
+       3,
+       1
+      ]
+     }
+    }
+   }
+  },
+  {
+   "name": "cubic_equal_other_space",
+   "upstream_ref": "source/SMLib/src/SmSrfInVolume.cpp:1219 (SmCrvInVolume(*pBSC, bInParamSpace, vol, 0, 1))",
+   "inputs": {
+    "op": "equal",
+    "other": {
+     "curve": {
+      "bspline": {
+       "dim": 3,
+       "cpts": [
+        [
+         0,
+         0,
+         0,
+         -1.7976931348623157e+308
+        ],
+        [
+         1,
+         1,
+         0,
+         -1.7976931348623157e+308
+        ],
+        [
+         2,
+         -1,
+         0,
+         -1.7976931348623157e+308
+        ],
+        [
+         3,
+         0.5,
+         1,
+         -1.7976931348623157e+308
+        ],
+        [
+         4,
+         0,
+         0,
+         -1.7976931348623157e+308
+        ]
+       ],
+       "p": 3,
+       "u": [
+        0,
+        0,
+        0,
+        0,
+        0.5,
+        1,
+        1,
+        1,
+        1
+       ]
+      }
+     },
+     "in_param": false,
+     "copy": 0,
+     "owner": 1
+    },
+    "civ": {
+     "curve": {
+      "bspline": {
+       "dim": 3,
+       "cpts": [
+        [
+         0,
+         0,
+         0,
+         -1.7976931348623157e+308
+        ],
+        [
+         1,
+         1,
+         0,
+         -1.7976931348623157e+308
+        ],
+        [
+         2,
+         -1,
+         0,
+         -1.7976931348623157e+308
+        ],
+        [
+         3,
+         0.5,
+         1,
+         -1.7976931348623157e+308
+        ],
+        [
+         4,
+         0,
+         0,
+         -1.7976931348623157e+308
+        ]
+       ],
+       "p": 3,
+       "u": [
+        0,
+        0,
+        0,
+        0,
+        0.5,
+        1,
+        1,
+        1,
+        1
+       ]
+      }
+     },
+     "in_param": true,
+     "copy": 0,
+     "owner": 1
+    }
+   }
+  },
+  {
+   "name": "cubic_equal_line",
+   "upstream_ref": "source/SMLib/src/SmSrfInVolume.cpp:1219 (SmCrvInVolume(*pBSC, bInParamSpace, vol, 0, 1))",
+   "inputs": {
+    "op": "equal",
+    "other": {
+     "curve": {
+      "bspline": {
+       "dim": 3,
+       "cpts": [
+        [
+         0,
+         0,
+         0,
+         -1.7976931348623157e+308
+        ],
+        [
+         1,
+         0,
+         0,
+         -1.7976931348623157e+308
+        ]
+       ],
+       "p": 1,
+       "u": [
+        0,
+        0,
+        1,
+        1
+       ]
+      }
+     },
+     "in_param": true,
+     "copy": 0,
+     "owner": 1
+    },
+    "civ": {
+     "curve": {
+      "bspline": {
+       "dim": 3,
+       "cpts": [
+        [
+         0,
+         0,
+         0,
+         -1.7976931348623157e+308
+        ],
+        [
+         1,
+         1,
+         0,
+         -1.7976931348623157e+308
+        ],
+        [
+         2,
+         -1,
+         0,
+         -1.7976931348623157e+308
+        ],
+        [
+         3,
+         0.5,
+         1,
+         -1.7976931348623157e+308
+        ],
+        [
+         4,
+         0,
+         0,
+         -1.7976931348623157e+308
+        ]
+       ],
+       "p": 3,
+       "u": [
+        0,
+        0,
+        0,
+        0,
+        0.5,
+        1,
+        1,
+        1,
+        1
+       ]
+      }
+     },
+     "in_param": true,
+     "copy": 0,
+     "owner": 1
+    }
+   }
+  },
+  {
+   "name": "cubic_equal_same",
+   "upstream_ref": "source/SMLib/src/SmSrfInVolume.cpp:1219 (SmCrvInVolume(*pBSC, bInParamSpace, vol, 0, 1))",
+   "inputs": {
+    "op": "equal",
+    "other": {
+     "curve": {
+      "bspline": {
+       "dim": 3,
+       "cpts": [
+        [
+         0,
+         0,
+         0,
+         -1.7976931348623157e+308
+        ],
+        [
+         1,
+         1,
+         0,
+         -1.7976931348623157e+308
+        ],
+        [
+         2,
+         -1,
+         0,
+         -1.7976931348623157e+308
+        ],
+        [
+         3,
+         0.5,
+         1,
+         -1.7976931348623157e+308
+        ],
+        [
+         4,
+         0,
+         0,
+         -1.7976931348623157e+308
+        ]
+       ],
+       "p": 3,
+       "u": [
+        0,
+        0,
+        0,
+        0,
+        0.5,
+        1,
+        1,
+        1,
+        1
+       ]
+      }
+     },
+     "in_param": true,
+     "copy": 0,
+     "owner": 1
+    },
+    "civ": {
+     "curve": {
+      "bspline": {
+       "dim": 3,
+       "cpts": [
+        [
+         0,
+         0,
+         0,
+         -1.7976931348623157e+308
+        ],
+        [
+         1,
+         1,
+         0,
+         -1.7976931348623157e+308
+        ],
+        [
+         2,
+         -1,
+         0,
+         -1.7976931348623157e+308
+        ],
+        [
+         3,
+         0.5,
+         1,
+         -1.7976931348623157e+308
+        ],
+        [
+         4,
+         0,
+         0,
+         -1.7976931348623157e+308
+        ]
+       ],
+       "p": 3,
+       "u": [
+        0,
+        0,
+        0,
+        0,
+        0.5,
+        1,
+        1,
+        1,
+        1
+       ]
+      }
+     },
+     "in_param": true,
+     "copy": 0,
+     "owner": 1
+    }
+   }
+  },
+  {
+   "name": "cubic_equal_self",
+   "upstream_ref": "source/SMLib/src/SmSrfInVolume.cpp:1219 (SmCrvInVolume(*pBSC, bInParamSpace, vol, 0, 1))",
+   "inputs": {
+    "op": "equal",
+    "other": null,
+    "civ": {
+     "curve": {
+      "bspline": {
+       "dim": 3,
+       "cpts": [
+        [
+         0,
+         0,
+         0,
+         -1.7976931348623157e+308
+        ],
+        [
+         1,
+         1,
+         0,
+         -1.7976931348623157e+308
+        ],
+        [
+         2,
+         -1,
+         0,
+         -1.7976931348623157e+308
+        ],
+        [
+         3,
+         0.5,
+         1,
+         -1.7976931348623157e+308
+        ],
+        [
+         4,
+         0,
+         0,
+         -1.7976931348623157e+308
+        ]
+       ],
+       "p": 3,
+       "u": [
+        0,
+        0,
+        0,
+        0,
+        0.5,
+        1,
+        1,
+        1,
+        1
+       ]
+      }
+     },
+     "in_param": true,
+     "copy": 0,
+     "owner": 1
+    }
+   }
+  },
+  {
+   "name": "cubic_copy_cached",
+   "upstream_ref": "source/SMLib/src/SmSrfInVolume.cpp:1219 (SmCrvInVolume(*pBSC, bInParamSpace, vol, 0, 1))",
+   "inputs": {
+    "op": "copy",
+    "civ": {
+     "curve": {
+      "bspline": {
+       "dim": 3,
+       "cpts": [
+        [
+         0,
+         0,
+         0,
+         -1.7976931348623157e+308
+        ],
+        [
+         1,
+         1,
+         0,
+         -1.7976931348623157e+308
+        ],
+        [
+         2,
+         -1,
+         0,
+         -1.7976931348623157e+308
+        ],
+        [
+         3,
+         0.5,
+         1,
+         -1.7976931348623157e+308
+        ],
+        [
+         4,
+         0,
+         0,
+         -1.7976931348623157e+308
+        ]
+       ],
+       "p": 3,
+       "u": [
+        0,
+        0,
+        0,
+        0,
+        0.5,
+        1,
+        1,
+        1,
+        1
+       ]
+      }
+     },
+     "in_param": true,
+     "copy": 0,
+     "owner": 1,
+     "cache": {
+      "need": false,
+      "breaks": [
+       0,
+       0.25,
+       0.5,
+       1
+      ],
+      "conts": [
+       1,
+       7,
+       3,
+       1
+      ]
+     }
+    }
+   }
+  },
+  {
+   "name": "cubic_copy_unowned",
+   "upstream_ref": "source/SMLib/src/SmSrfInVolume.cpp:1219 (SmCrvInVolume(*pBSC, bInParamSpace, vol, 0, 1))",
+   "inputs": {
+    "op": "copy",
+    "civ": {
+     "curve": {
+      "bspline": {
+       "dim": 3,
+       "cpts": [
+        [
+         0,
+         0,
+         0,
+         -1.7976931348623157e+308
+        ],
+        [
+         1,
+         1,
+         0,
+         -1.7976931348623157e+308
+        ],
+        [
+         2,
+         -1,
+         0,
+         -1.7976931348623157e+308
+        ],
+        [
+         3,
+         0.5,
+         1,
+         -1.7976931348623157e+308
+        ],
+        [
+         4,
+         0,
+         0,
+         -1.7976931348623157e+308
+        ]
+       ],
+       "p": 3,
+       "u": [
+        0,
+        0,
+        0,
+        0,
+        0.5,
+        1,
+        1,
+        1,
+        1
+       ]
+      }
+     },
+     "in_param": true,
+     "copy": 0,
+     "owner": 0,
+     "cache": {
+      "need": false,
+      "breaks": [
+       0,
+       0.25,
+       0.5,
+       1
+      ],
+      "conts": [
+       1,
+       7,
+       3,
+       1
+      ]
+     }
+    }
+   }
+  },
+  {
+   "name": "cubic_edit_param",
+   "upstream_ref": "source/SMLib/src/SmSrfInVolume.cpp:1219 (SmCrvInVolume(*pBSC, bInParamSpace, vol, 0, 1))",
+   "inputs": {
+    "op": "edit_param",
+    "a": 2,
+    "b": 4,
+    "civ": {
+     "curve": {
+      "bspline": {
+       "dim": 3,
+       "cpts": [
+        [
+         0,
+         0,
+         0,
+         -1.7976931348623157e+308
+        ],
+        [
+         1,
+         1,
+         0,
+         -1.7976931348623157e+308
+        ],
+        [
+         2,
+         -1,
+         0,
+         -1.7976931348623157e+308
+        ],
+        [
+         3,
+         0.5,
+         1,
+         -1.7976931348623157e+308
+        ],
+        [
+         4,
+         0,
+         0,
+         -1.7976931348623157e+308
+        ]
+       ],
+       "p": 3,
+       "u": [
+        0,
+        0,
+        0,
+        0,
+        0.5,
+        1,
+        1,
+        1,
+        1
+       ]
+      }
+     },
+     "in_param": true,
+     "copy": 0,
+     "owner": 1,
+     "cache": {
+      "need": false,
+      "breaks": [
+       0,
+       0.25,
+       0.5,
+       1
+      ],
+      "conts": [
+       1,
+       7,
+       3,
+       1
+      ]
+     }
+    }
+   }
+  },
+  {
+   "name": "cubic_reverse_owned",
+   "upstream_ref": "source/SMLib/src/SmSrfInVolume.cpp:1219 (SmCrvInVolume(*pBSC, bInParamSpace, vol, 0, 1))",
+   "inputs": {
+    "op": "reverse",
+    "a": 0.2,
+    "b": 0.9,
+    "civ": {
+     "curve": {
+      "bspline": {
+       "dim": 3,
+       "cpts": [
+        [
+         0,
+         0,
+         0,
+         -1.7976931348623157e+308
+        ],
+        [
+         1,
+         1,
+         0,
+         -1.7976931348623157e+308
+        ],
+        [
+         2,
+         -1,
+         0,
+         -1.7976931348623157e+308
+        ],
+        [
+         3,
+         0.5,
+         1,
+         -1.7976931348623157e+308
+        ],
+        [
+         4,
+         0,
+         0,
+         -1.7976931348623157e+308
+        ]
+       ],
+       "p": 3,
+       "u": [
+        0,
+        0,
+        0,
+        0,
+        0.5,
+        1,
+        1,
+        1,
+        1
+       ]
+      }
+     },
+     "in_param": true,
+     "copy": 0,
+     "owner": 1
+    }
+   }
+  },
+  {
+   "name": "cubic_reverse_unowned",
+   "upstream_ref": "source/SMLib/src/SmSrfInVolume.cpp:1219 (SmCrvInVolume(*pBSC, bInParamSpace, vol, 0, 1))",
+   "inputs": {
+    "op": "reverse",
+    "a": 0.2,
+    "b": 0.9,
+    "civ": {
+     "curve": {
+      "bspline": {
+       "dim": 3,
+       "cpts": [
+        [
+         0,
+         0,
+         0,
+         -1.7976931348623157e+308
+        ],
+        [
+         1,
+         1,
+         0,
+         -1.7976931348623157e+308
+        ],
+        [
+         2,
+         -1,
+         0,
+         -1.7976931348623157e+308
+        ],
+        [
+         3,
+         0.5,
+         1,
+         -1.7976931348623157e+308
+        ],
+        [
+         4,
+         0,
+         0,
+         -1.7976931348623157e+308
+        ]
+       ],
+       "p": 3,
+       "u": [
+        0,
+        0,
+        0,
+        0,
+        0.5,
+        1,
+        1,
+        1,
+        1
+       ]
+      }
+     },
+     "in_param": true,
+     "copy": 0,
+     "owner": 2
+    }
+   }
+  },
+  {
+   "name": "cubic_trim",
+   "upstream_ref": "source/SMLib/src/SmSrfInVolume.cpp:1219 (SmCrvInVolume(*pBSC, bInParamSpace, vol, 0, 1))",
+   "inputs": {
+    "op": "trim",
+    "a": 0.1,
+    "b": 0.8,
+    "mode": 0,
+    "civ": {
+     "curve": {
+      "bspline": {
+       "dim": 3,
+       "cpts": [
+        [
+         0,
+         0,
+         0,
+         -1.7976931348623157e+308
+        ],
+        [
+         1,
+         1,
+         0,
+         -1.7976931348623157e+308
+        ],
+        [
+         2,
+         -1,
+         0,
+         -1.7976931348623157e+308
+        ],
+        [
+         3,
+         0.5,
+         1,
+         -1.7976931348623157e+308
+        ],
+        [
+         4,
+         0,
+         0,
+         -1.7976931348623157e+308
+        ]
+       ],
+       "p": 3,
+       "u": [
+        0,
+        0,
+        0,
+        0,
+        0.5,
+        1,
+        1,
+        1,
+        1
+       ]
+      }
+     },
+     "in_param": true,
+     "copy": 0,
+     "owner": 1,
+     "cache": {
+      "need": false,
+      "breaks": [
+       0,
+       0.25,
+       0.5,
+       1
+      ],
+      "conts": [
+       1,
+       7,
+       3,
+       1
+      ]
+     }
+    }
+   }
+  },
+  {
+   "name": "cubic_trim_interval_only",
+   "upstream_ref": "source/SMLib/src/SmSrfInVolume.cpp:1219 (SmCrvInVolume(*pBSC, bInParamSpace, vol, 0, 1))",
+   "inputs": {
+    "op": "trim",
+    "a": 0.1,
+    "b": 0.8,
+    "mode": 2,
+    "civ": {
+     "curve": {
+      "bspline": {
+       "dim": 3,
+       "cpts": [
+        [
+         0,
+         0,
+         0,
+         -1.7976931348623157e+308
+        ],
+        [
+         1,
+         1,
+         0,
+         -1.7976931348623157e+308
+        ],
+        [
+         2,
+         -1,
+         0,
+         -1.7976931348623157e+308
+        ],
+        [
+         3,
+         0.5,
+         1,
+         -1.7976931348623157e+308
+        ],
+        [
+         4,
+         0,
+         0,
+         -1.7976931348623157e+308
+        ]
+       ],
+       "p": 3,
+       "u": [
+        0,
+        0,
+        0,
+        0,
+        0.5,
+        1,
+        1,
+        1,
+        1
+       ]
+      }
+     },
+     "in_param": true,
+     "copy": 0,
+     "owner": 1,
+     "cache": {
+      "need": false,
+      "breaks": [
+       0,
+       0.25,
+       0.5,
+       1
+      ],
+      "conts": [
+       1,
+       7,
+       3,
+       1
+      ]
+     }
+    }
+   }
+  },
+  {
+   "name": "cubic_trim_unowned",
+   "upstream_ref": "source/SMLib/src/SmSrfInVolume.cpp:1219 (SmCrvInVolume(*pBSC, bInParamSpace, vol, 0, 1))",
+   "inputs": {
+    "op": "trim",
+    "a": 0.1,
+    "b": 0.8,
+    "mode": 0,
+    "civ": {
+     "curve": {
+      "bspline": {
+       "dim": 3,
+       "cpts": [
+        [
+         0,
+         0,
+         0,
+         -1.7976931348623157e+308
+        ],
+        [
+         1,
+         1,
+         0,
+         -1.7976931348623157e+308
+        ],
+        [
+         2,
+         -1,
+         0,
+         -1.7976931348623157e+308
+        ],
+        [
+         3,
+         0.5,
+         1,
+         -1.7976931348623157e+308
+        ],
+        [
+         4,
+         0,
+         0,
+         -1.7976931348623157e+308
+        ]
+       ],
+       "p": 3,
+       "u": [
+        0,
+        0,
+        0,
+        0,
+        0.5,
+        1,
+        1,
+        1,
+        1
+       ]
+      }
+     },
+     "in_param": true,
+     "copy": 0,
+     "owner": 0,
+     "cache": {
+      "need": false,
+      "breaks": [
+       0,
+       0.25,
+       0.5,
+       1
+      ],
+      "conts": [
+       1,
+       7,
+       3,
+       1
+      ]
+     }
+    }
+   }
+  },
+  {
+   "name": "cubic_transform_identity",
+   "upstream_ref": "source/SMLib/src/SmSrfInVolume.cpp:1219 (SmCrvInVolume(*pBSC, bInParamSpace, vol, 0, 1))",
+   "inputs": {
+    "op": "transform",
+    "origin": [
+     0,
+     0,
+     0
+    ],
+    "x": [
+     1,
+     0,
+     0
+    ],
+    "y": [
+     0,
+     1,
+     0
+    ],
+    "scale": null,
+    "civ": {
+     "curve": {
+      "bspline": {
+       "dim": 3,
+       "cpts": [
+        [
+         0,
+         0,
+         0,
+         -1.7976931348623157e+308
+        ],
+        [
+         1,
+         1,
+         0,
+         -1.7976931348623157e+308
+        ],
+        [
+         2,
+         -1,
+         0,
+         -1.7976931348623157e+308
+        ],
+        [
+         3,
+         0.5,
+         1,
+         -1.7976931348623157e+308
+        ],
+        [
+         4,
+         0,
+         0,
+         -1.7976931348623157e+308
+        ]
+       ],
+       "p": 3,
+       "u": [
+        0,
+        0,
+        0,
+        0,
+        0.5,
+        1,
+        1,
+        1,
+        1
+       ]
+      }
+     },
+     "in_param": true,
+     "copy": 0,
+     "owner": 1
+    }
+   }
+  },
+  {
+   "name": "cubic_transform_move",
+   "upstream_ref": "source/SMLib/src/SmSrfInVolume.cpp:1219 (SmCrvInVolume(*pBSC, bInParamSpace, vol, 0, 1))",
+   "inputs": {
+    "op": "transform",
+    "origin": [
+     1,
+     2,
+     3
+    ],
+    "x": [
+     1,
+     0,
+     0
+    ],
+    "y": [
+     0,
+     1,
+     0
+    ],
+    "scale": null,
+    "civ": {
+     "curve": {
+      "bspline": {
+       "dim": 3,
+       "cpts": [
+        [
+         0,
+         0,
+         0,
+         -1.7976931348623157e+308
+        ],
+        [
+         1,
+         1,
+         0,
+         -1.7976931348623157e+308
+        ],
+        [
+         2,
+         -1,
+         0,
+         -1.7976931348623157e+308
+        ],
+        [
+         3,
+         0.5,
+         1,
+         -1.7976931348623157e+308
+        ],
+        [
+         4,
+         0,
+         0,
+         -1.7976931348623157e+308
+        ]
+       ],
+       "p": 3,
+       "u": [
+        0,
+        0,
+        0,
+        0,
+        0.5,
+        1,
+        1,
+        1,
+        1
+       ]
+      }
+     },
+     "in_param": true,
+     "copy": 0,
+     "owner": 1
+    }
+   }
+  },
+  {
+   "name": "read_bad_curve_type",
+   "upstream_ref": "source/SMLib/src/SmCrvInVolume.cpp:1404 (ReadFromDB)",
+   "inputs": {
+    "op": "read_db",
+    "version": 33,
+    "text": "1 Has knots flag\n Begin CrvInVolume->Curve Section \nObject Type 14099\nCurve Dim 3\n"
+   }
+  },
+  {
+   "name": "read_unknown_volume_type",
+   "upstream_ref": "source/SMLib/src/SmCrvInVolume.cpp:1404 (ReadFromDB)",
+   "inputs": {
+    "op": "read_db",
+    "version": 33,
+    "text": "1 Has knots flag\n Begin CrvInVolume->Curve Section \nObject Type 14033\nCurve Dim 3\n1\n1\n0\n3\n1\n6\n0 0 0\n1 0 0\n0\n0\n1\n1\n1 InParamSpace\n Begin CrvInVolume->Volume Section \nObject Type 23000\n"
+   }
+  }
+ ]
+}

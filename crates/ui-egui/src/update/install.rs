@@ -157,10 +157,11 @@ impl Progress {
     pub fn message(&self) -> String {
         let selected = self.selected.lock().unwrap_or_else(|e| e.into_inner());
         match selected.as_ref() {
-            None => crate::i18n::tr("update.refresh_checking").to_string(),
-            Some((release, fallback)) => {
-                crate::i18n::format(if *fallback { "update.refresh_fallback" } else { "update.refresh_selected" }, &[("version", release.version())])
-            }
+            None => solidcraft_ui_text::tr("update.refresh_checking").to_string(),
+            Some((release, fallback)) => solidcraft_ui_text::format(
+                if *fallback { "update.refresh_fallback" } else { "update.refresh_selected" },
+                &[("version", release.version())],
+            ),
         }
     }
 }
@@ -275,11 +276,11 @@ pub fn run(
 }
 
 /// Where an AppImage called `path` goes once it holds `version`: if its name is a release name
-/// (`solidcraft-<version>-linux-<arch>.AppImage`, or the old `solvecraft-` one), the new release's name
+/// (`solidcraft-<version>-linux-<arch>.AppImage`), the new release's name
 /// in the same folder; any other name (renamed by the user, or without a version) is kept.
 pub fn release_named(path: &Path, version: &str, arch: &str) -> PathBuf {
     let name = path.file_name().map(|n| n.to_string_lossy().to_ascii_lowercase()).unwrap_or_default();
-    let rest = name.strip_prefix("solidcraft-").or_else(|| name.strip_prefix("solvecraft-"));
+    let rest = name.strip_prefix("solidcraft-");
     if rest.is_some_and(|r| r.starts_with(|c: char| c.is_ascii_digit()) && r.contains("-linux-") && r.ends_with(".appimage")) {
         path.with_file_name(format!("solidcraft-{}-linux-{arch}.AppImage", version.trim_start_matches('v')))
     } else {

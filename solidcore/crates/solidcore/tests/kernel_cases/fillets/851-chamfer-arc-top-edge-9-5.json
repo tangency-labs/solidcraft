@@ -1,0 +1,166 @@
+{
+  "area": "fillets",
+  "bodies": {
+    "b22": {
+      "keeping_splines": false,
+      "trusted": true
+    }
+  },
+  "calls": [
+    {
+      "inputs": [
+        "b22"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b23"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b23"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b24"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b24"
+      ],
+      "op": "tagged",
+      "outputs": [
+        "b25"
+      ],
+      "params": {
+        "operand": 0
+      }
+    },
+    {
+      "inputs": [
+        "b25"
+      ],
+      "op": "blend_dropping",
+      "outputs": [
+        "b26"
+      ],
+      "params": {
+        "edges": {
+          "kind": "edge",
+          "picked": [
+            {
+              "at": [
+                [
+                  62.166666666666664,
+                  0.0,
+                  10.0
+                ],
+                [
+                  41.166666666666664,
+                  -21.0,
+                  10.0
+                ]
+              ],
+              "index": 1
+            }
+          ],
+          "points": [
+            [
+              47.317424261749146,
+              -6.150757595082487,
+              9.999999999999998
+            ]
+          ],
+          "tolerance": 3.3197702709152845
+        },
+        "kind": "chamfer",
+        "sizes": [
+          9.5
+        ]
+      }
+    }
+  ],
+  "case": "851-chamfer-arc-top-edge-9-5",
+  "expected": {
+    "body_count": 1,
+    "continuity": {
+      "order": "g0"
+    },
+    "method": "plate x 0..41.1667, y -21..0 and the corner x 41.1667..62.1667 less the cylinder r 21 about (62.1667, -21), 10 high (tessellation/1263): V0 = 10 (62.1667 x 21 - pi 21^2/4) = 9591.394099. The blend's section in (rho, z) about the wall's axis, the triangle (rho - 21) + (10 - z) <= 9.5, is swept round it from the front face (square to the arc) to the back face y = 0, which the arc runs into tangent at the tip: at radius rho the part spans the angle asin(21/rho), so the blend takes Int_21^30.5 rho asin(21/rho) h(rho) drho with h(rho) = s - (rho - 21): 1180.944160. V = 8410.449939",
+    "source": "analytic",
+    "sources": [
+      "tangency-labs/solidcraft#851",
+      "tangency-labs/solidcraft#1113",
+      "tangency-labs/solidcraft#854"
+    ],
+    "volume_mm3": 8410.449939154401,
+    "what": "the top edge of #851's concave R21 wall chamfered 9.5, just under its height"
+  },
+  "expressible": false,
+  "operation_expressible": true,
+  "outcome": {
+    "ran": true,
+    "raw_counts": {
+      "edges": 15,
+      "faces": 7,
+      "vertices": 10
+    }
+  },
+  "records": "851-chamfer-arc-top-edge-9-5.bodies.json.gz",
+  "result": [
+    {
+      "body": "Plate",
+      "made": "b26"
+    }
+  ],
+  "rig": {
+    "error": null,
+    "known_failing": null,
+    "measured": {
+      "area_mm2": 3097.2577245705593,
+      "body_count": 1,
+      "edges": 15,
+      "faces": 7,
+      "vertices": 10,
+      "volume_mm3": 8410.44991660132
+    },
+    "refused_with": null,
+    "status": "pass"
+  },
+  "sources": [
+    "tangency-labs/solidcraft#851",
+    "tangency-labs/solidcraft#1113",
+    "tangency-labs/solidcraft#854"
+  ],
+  "traced_ops": [
+    "extrude",
+    "extrude",
+    "extrude",
+    "copy",
+    "copy",
+    "copy",
+    "copy",
+    "tagged",
+    "tagged",
+    "boolean",
+    "copy",
+    "copy",
+    "copy",
+    "copy",
+    "tagged",
+    "tagged",
+    "boolean",
+    "copy",
+    "copy",
+    "tagged",
+    "blend_dropping"
+  ],
+  "ungraded": [
+    "continuity: SolidCraft computes it"
+  ],
+  "what": "the top edge of #851's concave R21 wall chamfered 9.5, just under its height",
+  "why_not": []
+}

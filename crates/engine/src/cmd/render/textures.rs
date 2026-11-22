@@ -1,6 +1,7 @@
 //! Bounded immutable file capture; decoding is deferred to the admitted worker.
 use crate::{Result, params::bad};
 use serde::Deserialize;
+use solidcraft_geom::MeshGeom;
 use solidcraft_render::{
     ProductScene,
     job::textures::{BaseColorMode, MAX_TEXTURE_BINDINGS, MAX_TEXTURE_SOURCE_BYTES, PlanarFrame, RuntimeTextures, TextureBinding, TextureMap},
@@ -38,6 +39,7 @@ fn load(
     remaining: &mut u64,
     command: &str,
     captured: &mut std::collections::BTreeMap<(String, u8), TextureMap>,
+    resources: Option<&solidcraft_doc::render_texture_resources::TextureResources>,
 ) -> Result<TextureMap> {
     if path.is_empty() || path.len() > 4096 || path.chars().any(char::is_control) {
         return Err(bad(command, "texture path must be a bounded local path"));
@@ -54,7 +56,20 @@ fn load(
         return Ok(map.clone());
     }
     let maximum = (*remaining).min(solidcraft_render::texture_input::MAX_TEXTURE_BYTES as u64);
-    let bytes = if let Some(key) = path.strip_prefix("builtin://") {
+    let bytes = if let Some(key) = path.strip_prefix("embedded://") {
+        let id: solidcraft_doc::render_resources::HdrId = serde_json::from_value(serde_json::json!(key)).map_err(|e| bad(command, e.to_string()))?;
+        let resource = resources
+            .ok_or_else(|| bad(command, "embedded texture resources are unavailable"))?
+            .required(&id)
+            .map_err(|e| bad(command, e.to_string()))?;
+        if resource.retained_bytes() as u64 > maximum {
+            return Err(bad(command, "embedded texture exceeds captured source budget"));
+        }
+        let mut bytes = Vec::new();
+        bytes.try_reserve_exact(resource.bytes().len()).map_err(|_| bad(command, "could not reserve captured texture"))?;
+        bytes.extend_from_slice(resource.bytes());
+        bytes
+    } else if let Some(key) = path.strip_prefix("builtin://") {
         super::library::texture_bytes(key, role, maximum, command)?
     } else {
         solidcraft_io::vfs::read(path, maximum as usize).map_err(|e| bad(command, format!("could not capture texture: {e}")))?
@@ -62,7 +77,8 @@ fn load(
     if bytes.is_empty() {
         return Err(bad(command, "texture file must not be empty"));
     }
-    let map = TextureMap::new(bytes, role).map_err(|e| bad(command, e.to_string()))?;
+    let map = if path.starts_with("embedded://") { TextureMap::new_portable(bytes, role) } else { TextureMap::new(bytes, role) }
+        .map_err(|e| bad(command, e.to_string()))?;
     *remaining = remaining.checked_sub(map.retained_bytes() as u64).ok_or_else(|| bad(command, "encoded texture capacity exceeds budget"))?;
     captured.insert(key, map.clone());
     Ok(map)
@@ -96,7 +112,28 @@ pub(super) fn validate_targets(scene: &ProductScene, overrides: &[Override], com
     }
     Ok(())
 }
+#[cfg(test)]
 pub(super) fn capture(scene: &ProductScene, overrides: &[Override], command: &str) -> Result<Option<Arc<RuntimeTextures>>> {
+    capture_with_resources(scene, overrides, None, command)
+}
+
+#[cfg(test)]
+pub(super) fn capture_with_resources(
+    scene: &ProductScene,
+    overrides: &[Override],
+    resources: Option<&solidcraft_doc::render_texture_resources::TextureResources>,
+    command: &str,
+) -> Result<Option<Arc<RuntimeTextures>>> {
+    capture_with_resources_and_filtering(scene, overrides, resources, command, false)
+}
+
+pub(super) fn capture_with_resources_and_filtering(
+    scene: &ProductScene,
+    overrides: &[Override],
+    resources: Option<&solidcraft_doc::render_texture_resources::TextureResources>,
+    command: &str,
+    filtering: bool,
+) -> Result<Option<Arc<RuntimeTextures>>> {
     if overrides.is_empty() {
         return Ok(None);
     }
@@ -119,10 +156,14 @@ pub(super) fn capture(scene: &ProductScene, overrides: &[Override], command: &st
         if body.transmission.is_some() || body.opacity != 1.0 || body.faces.iter().any(|f| f.transmission.is_some() || f.opacity != 1.0) {
             return Err(bad(command, "runtime maps support opaque bodies only"));
         }
-        let base_color = input.base_color_srgb.as_ref().map(|p| load(p, MapRole::BaseColor, &mut remaining, command, &mut captured)).transpose()?;
-        let normal = input.normal_opengl.as_ref().map(|p| load(p, MapRole::NormalOpenGl, &mut remaining, command, &mut captured)).transpose()?;
-        let roughness = input.roughness_linear.as_ref().map(|p| load(p, MapRole::Roughness, &mut remaining, command, &mut captured)).transpose()?;
-        let metallic = input.metallic_linear.as_ref().map(|p| load(p, MapRole::Metallic, &mut remaining, command, &mut captured)).transpose()?;
+        let base_color =
+            input.base_color_srgb.as_ref().map(|p| load(p, MapRole::BaseColor, &mut remaining, command, &mut captured, resources)).transpose()?;
+        let normal =
+            input.normal_opengl.as_ref().map(|p| load(p, MapRole::NormalOpenGl, &mut remaining, command, &mut captured, resources)).transpose()?;
+        let roughness =
+            input.roughness_linear.as_ref().map(|p| load(p, MapRole::Roughness, &mut remaining, command, &mut captured, resources)).transpose()?;
+        let metallic =
+            input.metallic_linear.as_ref().map(|p| load(p, MapRole::Metallic, &mut remaining, command, &mut captured, resources)).transpose()?;
         bindings.push(TextureBinding {
             body_index: input.body_index,
             body_name: input.body_name.clone(),
@@ -136,7 +177,7 @@ pub(super) fn capture(scene: &ProductScene, overrides: &[Override], command: &st
             flip_v: input.flip_v,
         });
     }
-    let resources = RuntimeTextures::new(bindings).map_err(|e| bad(command, e.to_string()))?;
+    let resources = RuntimeTextures::new(bindings).map_err(|e| bad(command, e.to_string()))?.with_filtering(filtering);
     resources.validate_scene(scene).map_err(|e| bad(command, e.to_string()))?;
     Ok(Some(Arc::new(resources)))
 }

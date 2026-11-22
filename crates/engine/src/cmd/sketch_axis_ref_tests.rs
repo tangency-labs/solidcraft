@@ -95,6 +95,23 @@ fn a_real_curve_named_like_an_axis_wins() {
     assert!((start.x + end.x - 10.0).abs() < 1e-7, "mirrored about x = 5: {start:?} {end:?}");
 }
 
+/// Tangent also takes a curve's end point (#12092), but `x` and `y` still name the axes before
+/// their lines exist: a point called `x` does not take the axis's place.
+#[test]
+fn a_point_named_like_an_axis_leaves_tangent_on_the_axis() {
+    for (a, b) in [("c", "x"), ("x", "c")] {
+        let mut s = on(json!("XY"));
+        run(&mut s, "sketch.point", json!({"point": [3, 7], "id": "x", "connect": false}));
+        run(&mut s, "sketch.circle.center", json!({"center": [10, 4], "radius": 2, "id": "c"}));
+        run(&mut s, "sketch.constraint.tangent", json!({"a": a, "b": b}));
+        let sk = sketch(&s);
+        assert_eq!(axis_lines(&sk).iter().map(|(n, _)| n.as_str()).collect::<Vec<_>>(), ["x"], "{a}, {b}: the x axis's line");
+        let CurveKind::Circle { c: centre, r } = sk.curves[sk.curve_index("c").unwrap()].kind else { panic!() };
+        assert!((sk.point(centre).unwrap().y.abs() - r).abs() < 1e-7, "{a}, {b}: tangent to x");
+        assert!(pt(&sk, "x").dist(Vec2::new(3.0, 7.0)) < 1e-9, "{a}, {b}: the point called x moved");
+    }
+}
+
 #[test]
 fn a_rectangle_centred_on_the_origin_keeps_one_profile() {
     let mut s = on(json!("XY"));
@@ -195,6 +212,122 @@ fn other_line_constraints_take_sketch_axes() {
     assert_eq!(names, ["x", "y"]);
 }
 
+/// A point picked with an origin axis (in the view or the browser) goes onto the axis's
+/// projection, either pick order, and stays on it when the point is dragged.
+#[test]
+fn coincident_takes_an_origin_axis_reference() {
+    let mut s = on(json!("XY"));
+    run(&mut s, "sketch.point", json!({"point": [7, 9], "id": "u"}));
+    run(&mut s, "sketch.constraint.coincident", json!({"a": "u", "b": {"axis": "X"}}));
+    assert!(pt(&sketch(&s), "u").y.abs() < 1e-7, "on X");
+    run(&mut s, "sketch.point", json!({"point": [3, 4], "id": "v"}));
+    run(&mut s, "sketch.constraint.coincident", json!({"a": {"axis": "Y"}, "b": "v"}));
+    assert!(pt(&sketch(&s), "v").x.abs() < 1e-7, "on Y");
+    // Z is seen end on: the point goes to where it pierces the sketch.
+    run(&mut s, "sketch.point", json!({"point": [5, -2], "id": "w"}));
+    run(&mut s, "sketch.constraint.coincident", json!({"a": "w", "b": {"axis": "Z"}}));
+    assert!(pt(&sketch(&s), "w").len() < 1e-7, "on Z");
+    let from = pt(&sketch(&s), "u");
+    run(&mut s, "sketch.drag", json!({"entity": "u", "from": [from.x, from.y], "to": [12, 6]}));
+    assert!(pt(&sketch(&s), "u").y.abs() < 1e-7, "still on X after a drag");
+}
+
+/// A line dimensioned to an origin axis is their distance, not the line's length, and the
+/// line stays parallel to the axis.
+#[test]
+fn dimension_measures_a_line_to_an_origin_axis() {
+    // Either pick order: the axis is the reference and the line is kept parallel to it.
+    for entities in [json!(["l", {"axis": "X"}]), json!([{"axis": "X"}, "l"])] {
+        let mut s = on(json!("XY"));
+        run(&mut s, "sketch.line", json!({"points": [[-4, 7], [10, 7]], "ids": ["l"]}));
+        let out = run(&mut s, "sketch.dimension", json!({"entities": entities, "value": "12"}));
+        let sk = sketch(&s);
+        assert!((pt(&sk, "l.start").y.abs() - 12.0).abs() < 1e-7, "12 from X ({entities})");
+        assert!((pt(&sk, "l.end").y - pt(&sk, "l.start").y).abs() < 1e-7, "kept parallel to X, so all of it is 12 from X ({entities})");
+        assert!((pt(&sk, "l.end").dist(pt(&sk, "l.start")) - 12.0).abs() > 1.0, "not the line's length");
+        // What it measures once solved, not the 7 before (the Parallel after it is not it).
+        assert!((out["measured"].as_f64().unwrap_or(f64::NAN) - 12.0).abs() < 1e-6, "{out}");
+    }
+}
+
+/// A line dimensioned to a projected model edge keeps its old dimension: a distance from one
+/// end, with no Parallel to the edge, so a later edit can still turn the line.
+#[test]
+fn a_line_dimensioned_to_a_projected_edge_gets_no_parallel() {
+    for entities in [json!(["l", {"edge": [5, 0, 0]}]), json!([{"edge": [5, 0, 0]}, "l"])] {
+        let mut s = Session::default();
+        run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10}));
+        run(&mut s, "sketch.create", json!({"plane": "XY"}));
+        run(&mut s, "sketch.line", json!({"points": [[-4, 7], [10, 7]], "ids": ["l"]}));
+        run(&mut s, "sketch.dimension", json!({"entities": entities, "value": "12"}));
+        let sk = sketch(&s);
+        assert!(
+            !sk.constraints.iter().any(|c| matches!(c.kind, solidcraft_sketch::ConstraintKind::Parallel { .. })),
+            "{entities}: {:?}",
+            sk.constraints
+        );
+    }
+}
+
+/// A driven dimension to an origin axis reports what it measures on the solved sketch.
+#[test]
+fn a_driven_dimension_to_an_origin_axis_reports_the_solved_value() {
+    let mut s = on(json!("XY"));
+    run(&mut s, "sketch.line", json!({"points": [[-4, 7], [10, 7]], "ids": ["l"]}));
+    let out = run(&mut s, "sketch.dimension", json!({"entities": ["l", {"axis": "X"}], "driven": true}));
+    assert_eq!(out["driven"], json!(true), "{out}");
+    assert!((out["measured"].as_f64().unwrap_or(f64::NAN) - 7.0).abs() < 1e-6, "{out}");
+}
+
+/// A line parallel only to another free line still gets its Parallel to the axis: the two free
+/// lines could otherwise turn together and leave all but one end of the line off the distance.
+/// Once that other line's direction is fixed, the line's is too, and no Parallel is added.
+#[test]
+fn a_line_parallel_to_a_free_line_still_keeps_parallel_to_the_axis() {
+    let axis_parallels = |sk: &Sketch| {
+        let axis: Vec<usize> = (0..sk.curves.len()).filter(|c| sk.curves[*c].link.is_some()).collect();
+        sk.constraints
+            .iter()
+            .filter(|c| matches!(c.kind, solidcraft_sketch::ConstraintKind::Parallel { a, b } if axis.contains(&a) || axis.contains(&b)))
+            .count()
+    };
+    for fixed in [false, true] {
+        let mut s = on(json!("XY"));
+        run(&mut s, "sketch.line", json!({"points": [[-4, 7], [10, 7]], "ids": ["l"]}));
+        run(&mut s, "sketch.line", json!({"points": [[-4, 20], [10, 20]], "ids": ["m"]}));
+        run(&mut s, "sketch.constraint.parallel", json!({"a": "l", "b": "m"}));
+        if fixed {
+            run(&mut s, "sketch.constraint.horizontal_vertical", json!({"line": "m", "mode": "horizontal"}));
+        }
+        run(&mut s, "sketch.dimension", json!({"entities": ["l", {"axis": "X"}], "value": "12"}));
+        let sk = sketch(&s);
+        assert_eq!(axis_parallels(&sk), usize::from(!fixed), "m fixed: {fixed}: {:?}", sk.constraints);
+        assert!((pt(&sk, "l.start").y.abs() - 12.0).abs() < 1e-7 && (pt(&sk, "l.end").y.abs() - 12.0).abs() < 1e-7, "all of l is 12 from X");
+    }
+}
+
+/// An origin axis is `{"axis": "X"|"Y"|"Z"}`; lowercase `x`/`y` name the sketch's own axes, so
+/// `{"axis": "x"}` is refused and changes nothing.
+#[test]
+fn a_lowercase_origin_axis_object_is_refused() {
+    let mut s = on(json!("XY"));
+    run(&mut s, "sketch.line", json!({"points": [[-4, 7], [10, 7]], "ids": ["l"]}));
+    let before = s.doc.to_json();
+    assert!(s.execute("sketch.dimension", &json!({"entities": ["l", {"axis": "x"}], "value": "12"})).is_err());
+    assert_eq!(s.doc.to_json(), before);
+}
+
+/// A line whose angle is already set keeps it: no Parallel is added to the axis.
+#[test]
+fn a_line_with_an_angle_gets_no_parallel_to_the_axis() {
+    let mut s = on(json!("XY"));
+    run(&mut s, "sketch.line", json!({"points": [[-4, 7], [10, 7]], "ids": ["l"]}));
+    run(&mut s, "sketch.dimension", json!({"entities": ["l"], "type": "angle", "value": "0 deg"}));
+    run(&mut s, "sketch.dimension", json!({"entities": ["l", {"axis": "X"}], "value": "12"}));
+    let sk = sketch(&s);
+    assert!(!sk.constraints.iter().any(|c| matches!(c.kind, solidcraft_sketch::ConstraintKind::Parallel { .. })), "{:?}", sk.constraints);
+}
+
 #[test]
 fn the_axis_survives_save_and_load() {
     let mut s = on(json!("YZ"));
@@ -237,4 +370,66 @@ fn bad_line_references_are_errors_and_change_nothing() {
     assert!(s.execute("sketch.constraint.parallel", &json!({"a": "b", "b": "x", "if_redundant": "refuse"})).is_err(), "already horizontal");
     assert_eq!(s.doc.to_json(), before_redundant);
     assert!(axis_lines(&sketch(&s)).is_empty());
+}
+
+/// #2364: a dimension takes `x` / `y` too. A line parallel to the axis gets its distance to it,
+/// a point its distance to it, and both share the one axis line.
+#[test]
+fn issue_2364_dimension_to_a_sketch_axis() {
+    let mut s = on(json!("XY"));
+    run(&mut s, "sketch.line", json!({"points": [[5, 0], [5, 10]], "ids": ["a"]}));
+    run(&mut s, "sketch.constraint.horizontal_vertical", json!({"line": "a"}));
+    let r = run(&mut s, "sketch.dimension", json!({"entities": ["a", "y"], "value": 12}));
+    assert!(r["sketch"]["solved"].as_bool().unwrap(), "{r}");
+    let sk = sketch(&s);
+    for end in ["a.start", "a.end"] {
+        let p = pt(&sk, end);
+        assert!((p.x.abs() - 12.0).abs() < 1e-7, "{end} is 12 from the y axis: {p:?}");
+    }
+    let axes = axis_lines(&sk);
+    assert_eq!(axes.len(), 1, "{axes:?}");
+    assert_eq!(axes[0].0, "y");
+    assert_axis_line(&sk, &axes[0].1, Vec2::Y);
+
+    // A point to the other axis; the y axis line is not made again.
+    let r = run(&mut s, "sketch.dimension", json!({"entities": ["a.end", "x"], "value": 7}));
+    assert!(r["sketch"]["solved"].as_bool().unwrap(), "{r}");
+    let r = run(&mut s, "sketch.dimension", json!({"entities": ["y", "a.start"], "value": 12, "driven": true}));
+    assert!(r["sketch"]["solved"].as_bool().unwrap(), "{r}");
+    let sk = sketch(&s);
+    assert!((pt(&sk, "a.end").y.abs() - 7.0).abs() < 1e-7, "{:?}", pt(&sk, "a.end"));
+    let mut names: Vec<String> = axis_lines(&sk).into_iter().map(|(n, _)| n).collect();
+    names.sort();
+    assert_eq!(names, ["x", "y"], "one line per axis");
+}
+
+/// #2364: a real curve named like an axis is still the curve, not the axis.
+#[test]
+fn issue_2364_a_curve_named_like_an_axis_wins_in_a_dimension() {
+    let mut s = on(json!("XY"));
+    run(&mut s, "sketch.line", json!({"points": [[0, 0], [8, 0]], "ids": ["y"]}));
+    run(&mut s, "sketch.dimension", json!({"entities": ["y"], "value": 20}));
+    let sk = sketch(&s);
+    let (a, b) = (pt(&sk, "y.start"), pt(&sk, "y.end"));
+    assert!(((b - a).len() - 20.0).abs() < 1e-7, "the line `y` is 20 long: {a:?} {b:?}");
+    assert!(axis_lines(&sk).is_empty(), "no axis line was made");
+}
+
+/// #3137: a dimension takes `x` / `y` for the sketch's axes too, from a circle's centre point,
+/// and both dimensions share the axis line.
+#[test]
+fn issue_3137_dimensions_from_a_circle_centre_to_the_sketch_axes() {
+    let mut s = on(json!("XY"));
+    run(&mut s, "sketch.circle.center", json!({"center": [30, 20], "radius": 5, "id": "c"}));
+    let r = run(&mut s, "sketch.dimension", json!({"entities": ["c.center", "y"], "value": 40}));
+    let line = strs(&r["created"]["curves"]);
+    assert_eq!(line.len(), 1, "the y axis line is created: {r}");
+    run(&mut s, "sketch.dimension", json!({"entities": ["c.center", "x"], "value": 15}));
+    let sk = sketch(&s);
+    let o = pt(&sk, "c.center");
+    assert!((o.x - 40.0).abs() < 1e-7 && (o.y - 15.0).abs() < 1e-7, "the centre is 40 from y and 15 from x: {o:?}");
+    let axes = axis_lines(&sk);
+    assert_eq!(axes.len(), 2, "{axes:?}");
+    assert_axis_line(&sk, &line[0], Vec2::Y);
+    assert!(sk.radius(sk.curve_index("c").unwrap()).is_some_and(|r| (r - 5.0).abs() < 1e-7), "the circle keeps its radius");
 }

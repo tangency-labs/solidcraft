@@ -16,6 +16,7 @@ pub struct FixtureState {
     pub reopens: u64,
     pub applies: u64,
     pub finishes: u64,
+    pub pulses: u64,
     pub reparents: u64,
     pub destroys: u64,
     pub transaction_live: bool,
@@ -94,13 +95,13 @@ impl PanelController for FixtureController {
         let summary = self.state.try_borrow().ok().map(|s| (s.updates, s.transaction_live));
         PanelPresentation {
             title: format!("Specimen {}", self.instance.0),
-            icon: "panel".into(),
+            icon: "list".into(),
             status: summary.map(|(updates, live)| format!("updates={updates}; transaction={live}")),
             attention: self.editor,
             actions: if self.editor {
                 ["apply", "cancel", "finish"]
                     .into_iter()
-                    .map(|id| RuntimeAction { id: ControlId(id.into()), label: id.into(), enabled: true, disabled_reason: None })
+                    .map(|id| RuntimeAction { id: ControlId(id.into()), label: id.into(), enabled: true, disabled_reason: None, pressed: None })
                     .collect()
             } else {
                 Vec::new()
@@ -435,10 +436,10 @@ impl PanelHost for FakePanelHost {
         context.validate()?;
         let mut failure = None;
         let ctx = self.context.clone();
-        let _output = ctx.run_ui(egui::RawInput::default(), |root_ui| {
+        let mut output = ctx.run_ui(egui::RawInput::default(), |root_ui| {
             crate::ui_kit::Container::new(root_ui.ctx(), crate::ui_kit::Surface::Viewport).central().show(root_ui, |ui| {
                 for slot in [ContentSlot::Header, ContentSlot::Body, ContentSlot::Footer] {
-                    if failure.is_some() {
+                    if failure.is_some() || geometry.body.is_none() {
                         break;
                     }
                     if let Err(reason) = content.render(slot, ui, context, services) {
@@ -448,6 +449,7 @@ impl PanelHost for FakePanelHost {
                 }
             });
         });
+        output.textures_delta.clear();
         if let Some(reason) = failure {
             return Err(reason);
         }

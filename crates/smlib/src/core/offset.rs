@@ -29,8 +29,7 @@ use solidcore::nurbs::b_spline_curve::ControlPointForm;
 use solidcore::nurbs::b_spline_surface::p1::SurfParamType;
 use solidcore::nurbs::b_spline_surface_n_lib::p2::OrientType;
 use solidcore::nurbs::knots::Side;
-use solidcore::offset::construction::ShellRefusal;
-use solidcore::offset::offset_executive::p2::{OffsetOptions, ShellOptions, local_operation_simple, offset_brep_simple, shell_brep_simple};
+use solidcore::offset::offset_executive::p2::{OffsetOptions, ShellOptions, local_operation_simple, offset_brep_simple};
 use solidcore::offset::offset_faces::{OffsetFacesExecutive, OffsetFacesRefusal};
 use solidcore::query::api_queries::{face_bounding_box, face_classify_uv, face_closest_point_in_shape, face_internal_point};
 use solidcore::query::brep::{BrepIdentity, BrepQuery, LiveBrepObjects};
@@ -50,21 +49,30 @@ type Out<T> = std::result::Result<T, Error>;
 /// `SM_ERR_INVALID_INPUT`.
 const INVALID_INPUT: i32 = 1007;
 
-/// `SM_ERR_OFFSET_WALLS_TOUCH` (fork a759622), which `status` (smlib_shim.h) reports as
-/// `SMLIB_ERR_WALLS_TOUCH`.
-const OFFSET_WALLS_TOUCH: i32 = 1042;
-
-/// `status` (smlib_shim.h): an offset whose walls touch is [`Error::WallsTouch`]; a vertex moved
-/// past an edge's other end (`SM_ERR_OFFSET_EDGE_VANISHES`, fork 34318f4) is
-/// `SMLIB_ERR_UNSUPPORTED`; a wall whose face's offset folds, which solidcore's one construction
-/// refuses (`fixes.shell_one_construction`, solidcore#2367), is [`Error::WallFolds`] with the
-/// largest wall it names; any other status as the blends pass it on.
+/// The offset's typed refusal and complete diagnostic come through solidcore-ops.
+/// Other failures pass through the blend mapper, retaining that diagnostic wherever
+/// it would otherwise give only a numeric status.
 fn status(e: SolidError) -> Error {
-    match e {
-        SolidError::Upstream { code: OFFSET_WALLS_TOUCH, .. } => Error::WallsTouch,
-        SolidError::ShellRefused { refusal: ShellRefusal::Fold, size, .. } => Error::WallFolds { largest: size },
-        e if e.is_offset_edge_vanishes() => Error::Unsupported,
-        e => blend_status(e),
+    let diagnostic = solidcore_ops::offset::diagnostic(&e);
+    match diagnostic.refusal {
+        Some(error) => refused(error, diagnostic.detail),
+        None => match blend_status(e) {
+            Error::Status(_) => Error::Solidcore(diagnostic.detail),
+            other => other,
+        },
+    }
+}
+
+/// Application errors for ops' offset refusals: specialised wall answers keep
+/// their fields; other typed refusals keep the kernel diagnostic alongside them.
+pub(super) fn refused(error: solidcore_ops::Error, diagnostic: String) -> Error {
+    use solidcore_ops::Error as Ops;
+    match error {
+        Ops::WallsTouch => Error::WallsTouch,
+        Ops::WallFolds { largest } => Error::WallFolds { largest },
+        Ops::Unsupported(_) => Error::Unsupported,
+        error @ Ops::OffsetRefused { why: solidcore_ops::OffsetRefusal::Phrase { .. }, .. } => Error::Refused(error),
+        refusal => Error::RefusedWithDiagnostic { refusal, diagnostic },
     }
 }
 
@@ -279,7 +287,8 @@ fn shell_brep_full(k: &mut Kernel, b: &Brep, distance: f64, open: &[FaceId]) -> 
         create_offset_solid: true,
         merge_sheet_side_walls: true,
     };
-    shell_brep_simple(k, b, options, open)
+    // solidcore's shell, a feature narrower than twice an inward wall left solid
+    solidcore::offset::thin_features::shell_brep(k, b, options, open)
 }
 
 /// `SmApiOffsetBrepFull(b, distance, TRUE, TRUE, r)`.
@@ -322,11 +331,27 @@ pub(crate) fn shell(body: &Body, points: &[[f64; 3]], tolerance: f64, thickness:
         if thickness < 0.0 && solid_in && !leaves_cavity(k, &mut w, &picked, -thickness)? {
             return Ok(Err(Error::NoRoom));
         }
-        match called(shell_brep_full(k, &w, thickness, &picked))? {
-            Ok(r) => finish(r, solid_in),
-            Err(e) => Ok(Err(e)),
+        let shelled = match called(shell_brep_full(k, &w, thickness, &picked))? {
+            Ok(r) => finish(r, solid_in)?,
+            Err(e) => Err(e),
+        };
+        match shelled {
+            Err(e) if is_bare_failure(&e) => match solidcore_ops::offset::outline_touch(k, &w)? {
+                Some(at) => Ok(Err(Error::OutlineTouches { at, detail: e.to_string() })),
+                None => Ok(Err(e)),
+            },
+            r => Ok(r),
         }
     })
+}
+
+/// (#18568) A failure that does not say why: a bare status, solidcore's text, a result that is
+/// not a solid, or an offset refused as unsound.
+fn is_bare_failure(e: &Error) -> bool {
+    matches!(
+        e,
+        Error::Status(_) | Error::Solidcore(_) | Error::NotSolid | Error::Exception | Error::Refused(solidcore_ops::Error::OffsetRefused { .. })
+    )
 }
 
 /// `smlib_offset_faces`: its checks, the pick, the solid check, (moving faces in) the cavity
@@ -363,18 +388,26 @@ pub(crate) fn offset_faces(body: &Body, points: &[[f64; 3]], tolerance: f64, dis
 /// to meet it; the tangent blends on them follow (`SmOffsetFacesExecutive`: taken off, the faces
 /// moved, put back at their own sizes). A blend that no longer fits is [`Error::NoRoom`], one that
 /// cannot be put back as it was [`Error::Unsupported`], one that would need a continuation that
-/// cannot be made exactly [`Error::NotExact`], a move that moved nothing [`Error::NoEffect`].
+/// cannot be made exactly [`Error::NotExact`], a move that moved nothing [`Error::NoEffect`]. Where
+/// solidcore says why a blend cannot follow, the last three are [`Error::BlendsNotFollowed`] with
+/// its reason (#18575).
 fn move_faces(k: &mut Kernel, b: &mut Brep, picked: &[FaceId], distance: f64) -> Out<()> {
     let mut exec = OffsetFacesExecutive::new();
-    exec.offset_faces(k, b, picked, distance).map_err(|e| match exec.refusal() {
-        OffsetFacesRefusal::NoRoom => Error::NoRoom,
-        OffsetFacesRefusal::Unsupported => Error::Unsupported,
-        OffsetFacesRefusal::NotExact => Error::NotExact,
-        OffsetFacesRefusal::NoEffect => Error::NoEffect,
-        // Not in the fork (solidcore#2020, #2027): the blends cannot be put back, the fillet's
-        // status kept. SolidCraft has no such error: a move solidcore does not make.
-        OffsetFacesRefusal::NotPutBack => Error::Unsupported,
-        OffsetFacesRefusal::None => status(e),
+    exec.offset_faces(k, b, picked, distance).map_err(|e| {
+        let why = exec.reason().trim();
+        let not_followed = |exact: bool, bare: Error| {
+            if why.is_empty() { bare } else { Error::BlendsNotFollowed { exact, why: why.to_string() } }
+        };
+        match exec.refusal() {
+            OffsetFacesRefusal::NoRoom => Error::NoRoom,
+            OffsetFacesRefusal::Unsupported => not_followed(false, Error::Unsupported),
+            OffsetFacesRefusal::NotExact => not_followed(true, Error::NotExact),
+            OffsetFacesRefusal::NoEffect => Error::NoEffect,
+            // Not in the fork (solidcore#2020, #2027): the blends cannot be put back, the fillet's
+            // status kept. SolidCraft has no such error: a move solidcore does not make.
+            OffsetFacesRefusal::NotPutBack => not_followed(false, Error::Unsupported),
+            OffsetFacesRefusal::None => status(e),
+        }
     })
 }
 

@@ -1,0 +1,1504 @@
+{
+ "cases": [
+  {
+   "name": "wr614_strip_union_d1e-05",
+   "note": "#1794 / WR-614, WR-619 geometry: box A [-2,2]x[16,20]x[0,4] and a 4 mm cube B turned atan(0.1) about z whose face F1 crosses A's face y = 20 at x = 2 - d/0.1 and stays within d = 1e-05 of it across x in [2 - 2d/0.1, 2]. SmApiBooleanUnion; the union at d = 1e-5 fails in MakeFaceuse with SM_ERR (WR-614); at d = 5e-6 it has no solid region (WR-619).",
+   "inputs": {
+    "api": "union",
+    "a": {
+     "kind": "box",
+     "origin": [
+      -2.0,
+      16.0,
+      0.0
+     ],
+     "size": [
+      4.0,
+      4.0,
+      4.0
+     ]
+    },
+    "b": {
+     "kind": "moved",
+     "steps": [
+      {
+       "rotate": {
+        "point": [
+         0.0,
+         0.0,
+         0.0
+        ],
+        "axis": [
+         0.0,
+         0.0,
+         1.0
+        ],
+        "angle_deg": 5.710593137499643
+       }
+      },
+      {
+       "translate": {
+        "vector": [
+         1.9998,
+         19.99999,
+         0.0
+        ]
+       }
+      }
+     ],
+     "brep": {
+      "kind": "box",
+      "origin": [
+       0.0,
+       0.0,
+       0.0
+      ],
+      "size": [
+       4.0,
+       4.0,
+       4.0
+      ]
+     }
+    }
+   }
+  },
+  {
+   "name": "wr614_strip_intersection_d1e-05",
+   "note": "#1794 / WR-614, WR-619 geometry: box A [-2,2]x[16,20]x[0,4] and a 4 mm cube B turned atan(0.1) about z whose face F1 crosses A's face y = 20 at x = 2 - d/0.1 and stays within d = 1e-05 of it across x in [2 - 2d/0.1, 2]. SmApiBooleanIntersection; the union at d = 1e-5 fails in MakeFaceuse with SM_ERR (WR-614); at d = 5e-6 it has no solid region (WR-619).",
+   "inputs": {
+    "api": "intersection",
+    "a": {
+     "kind": "box",
+     "origin": [
+      -2.0,
+      16.0,
+      0.0
+     ],
+     "size": [
+      4.0,
+      4.0,
+      4.0
+     ]
+    },
+    "b": {
+     "kind": "moved",
+     "steps": [
+      {
+       "rotate": {
+        "point": [
+         0.0,
+         0.0,
+         0.0
+        ],
+        "axis": [
+         0.0,
+         0.0,
+         1.0
+        ],
+        "angle_deg": 5.710593137499643
+       }
+      },
+      {
+       "translate": {
+        "vector": [
+         1.9998,
+         19.99999,
+         0.0
+        ]
+       }
+      }
+     ],
+     "brep": {
+      "kind": "box",
+      "origin": [
+       0.0,
+       0.0,
+       0.0
+      ],
+      "size": [
+       4.0,
+       4.0,
+       4.0
+      ]
+     }
+    }
+   }
+  },
+  {
+   "name": "wr614_strip_difference_d1e-05",
+   "note": "#1794 / WR-614, WR-619 geometry: box A [-2,2]x[16,20]x[0,4] and a 4 mm cube B turned atan(0.1) about z whose face F1 crosses A's face y = 20 at x = 2 - d/0.1 and stays within d = 1e-05 of it across x in [2 - 2d/0.1, 2]. SmApiBooleanDifference; the union at d = 1e-5 fails in MakeFaceuse with SM_ERR (WR-614); at d = 5e-6 it has no solid region (WR-619).",
+   "inputs": {
+    "api": "difference",
+    "a": {
+     "kind": "box",
+     "origin": [
+      -2.0,
+      16.0,
+      0.0
+     ],
+     "size": [
+      4.0,
+      4.0,
+      4.0
+     ]
+    },
+    "b": {
+     "kind": "moved",
+     "steps": [
+      {
+       "rotate": {
+        "point": [
+         0.0,
+         0.0,
+         0.0
+        ],
+        "axis": [
+         0.0,
+         0.0,
+         1.0
+        ],
+        "angle_deg": 5.710593137499643
+       }
+      },
+      {
+       "translate": {
+        "vector": [
+         1.9998,
+         19.99999,
+         0.0
+        ]
+       }
+      }
+     ],
+     "brep": {
+      "kind": "box",
+      "origin": [
+       0.0,
+       0.0,
+       0.0
+      ],
+      "size": [
+       4.0,
+       4.0,
+       4.0
+      ]
+     }
+    }
+   }
+  },
+  {
+   "name": "wr614_strip_measured_union_d1e-05",
+   "note": "#1794 / WR-614, WR-619 geometry: box A [-2,2]x[16,20]x[0,4] and a 4 mm cube B turned atan(0.1) about z whose face F1 crosses A's face y = 20 at x = 2 - d/0.1 and stays within d = 1e-05 of it across x in [2 - 2d/0.1, 2]. SmApiBooleanWithOptions (union) with the post-process flag, then volume and face areas.",
+   "inputs": {
+    "api": "measured",
+    "a": {
+     "kind": "box",
+     "origin": [
+      -2.0,
+      16.0,
+      0.0
+     ],
+     "size": [
+      4.0,
+      4.0,
+      4.0
+     ]
+    },
+    "b": {
+     "kind": "moved",
+     "steps": [
+      {
+       "rotate": {
+        "point": [
+         0.0,
+         0.0,
+         0.0
+        ],
+        "axis": [
+         0.0,
+         0.0,
+         1.0
+        ],
+        "angle_deg": 5.710593137499643
+       }
+      },
+      {
+       "translate": {
+        "vector": [
+         1.9998,
+         19.99999,
+         0.0
+        ]
+       }
+      }
+     ],
+     "brep": {
+      "kind": "box",
+      "origin": [
+       0.0,
+       0.0,
+       0.0
+      ],
+      "size": [
+       4.0,
+       4.0,
+       4.0
+      ]
+     }
+    },
+    "operation": 1
+   }
+  },
+  {
+   "name": "wr614_strip_measured_intersection_d1e-05",
+   "note": "#1794 / WR-614, WR-619 geometry: box A [-2,2]x[16,20]x[0,4] and a 4 mm cube B turned atan(0.1) about z whose face F1 crosses A's face y = 20 at x = 2 - d/0.1 and stays within d = 1e-05 of it across x in [2 - 2d/0.1, 2]. SmApiBooleanWithOptions (intersection) with the post-process flag, then volume and face areas.",
+   "inputs": {
+    "api": "measured",
+    "a": {
+     "kind": "box",
+     "origin": [
+      -2.0,
+      16.0,
+      0.0
+     ],
+     "size": [
+      4.0,
+      4.0,
+      4.0
+     ]
+    },
+    "b": {
+     "kind": "moved",
+     "steps": [
+      {
+       "rotate": {
+        "point": [
+         0.0,
+         0.0,
+         0.0
+        ],
+        "axis": [
+         0.0,
+         0.0,
+         1.0
+        ],
+        "angle_deg": 5.710593137499643
+       }
+      },
+      {
+       "translate": {
+        "vector": [
+         1.9998,
+         19.99999,
+         0.0
+        ]
+       }
+      }
+     ],
+     "brep": {
+      "kind": "box",
+      "origin": [
+       0.0,
+       0.0,
+       0.0
+      ],
+      "size": [
+       4.0,
+       4.0,
+       4.0
+      ]
+     }
+    },
+    "operation": 2
+   }
+  },
+  {
+   "name": "wr614_strip_measured_difference_d1e-05",
+   "note": "#1794 / WR-614, WR-619 geometry: box A [-2,2]x[16,20]x[0,4] and a 4 mm cube B turned atan(0.1) about z whose face F1 crosses A's face y = 20 at x = 2 - d/0.1 and stays within d = 1e-05 of it across x in [2 - 2d/0.1, 2]. SmApiBooleanWithOptions (difference) with the post-process flag, then volume and face areas.",
+   "inputs": {
+    "api": "measured",
+    "a": {
+     "kind": "box",
+     "origin": [
+      -2.0,
+      16.0,
+      0.0
+     ],
+     "size": [
+      4.0,
+      4.0,
+      4.0
+     ]
+    },
+    "b": {
+     "kind": "moved",
+     "steps": [
+      {
+       "rotate": {
+        "point": [
+         0.0,
+         0.0,
+         0.0
+        ],
+        "axis": [
+         0.0,
+         0.0,
+         1.0
+        ],
+        "angle_deg": 5.710593137499643
+       }
+      },
+      {
+       "translate": {
+        "vector": [
+         1.9998,
+         19.99999,
+         0.0
+        ]
+       }
+      }
+     ],
+     "brep": {
+      "kind": "box",
+      "origin": [
+       0.0,
+       0.0,
+       0.0
+      ],
+      "size": [
+       4.0,
+       4.0,
+       4.0
+      ]
+     }
+    },
+    "operation": 3
+   }
+  },
+  {
+   "name": "wr614_strip_union_d5e-06",
+   "note": "#1794 / WR-614, WR-619 geometry: box A [-2,2]x[16,20]x[0,4] and a 4 mm cube B turned atan(0.1) about z whose face F1 crosses A's face y = 20 at x = 2 - d/0.1 and stays within d = 5e-06 of it across x in [2 - 2d/0.1, 2]. SmApiBooleanUnion; the union at d = 1e-5 fails in MakeFaceuse with SM_ERR (WR-614); at d = 5e-6 it has no solid region (WR-619).",
+   "inputs": {
+    "api": "union",
+    "a": {
+     "kind": "box",
+     "origin": [
+      -2.0,
+      16.0,
+      0.0
+     ],
+     "size": [
+      4.0,
+      4.0,
+      4.0
+     ]
+    },
+    "b": {
+     "kind": "moved",
+     "steps": [
+      {
+       "rotate": {
+        "point": [
+         0.0,
+         0.0,
+         0.0
+        ],
+        "axis": [
+         0.0,
+         0.0,
+         1.0
+        ],
+        "angle_deg": 5.710593137499643
+       }
+      },
+      {
+       "translate": {
+        "vector": [
+         1.9998999999999998,
+         19.999995,
+         0.0
+        ]
+       }
+      }
+     ],
+     "brep": {
+      "kind": "box",
+      "origin": [
+       0.0,
+       0.0,
+       0.0
+      ],
+      "size": [
+       4.0,
+       4.0,
+       4.0
+      ]
+     }
+    }
+   }
+  },
+  {
+   "name": "wr614_strip_intersection_d5e-06",
+   "note": "#1794 / WR-614, WR-619 geometry: box A [-2,2]x[16,20]x[0,4] and a 4 mm cube B turned atan(0.1) about z whose face F1 crosses A's face y = 20 at x = 2 - d/0.1 and stays within d = 5e-06 of it across x in [2 - 2d/0.1, 2]. SmApiBooleanIntersection; the union at d = 1e-5 fails in MakeFaceuse with SM_ERR (WR-614); at d = 5e-6 it has no solid region (WR-619).",
+   "inputs": {
+    "api": "intersection",
+    "a": {
+     "kind": "box",
+     "origin": [
+      -2.0,
+      16.0,
+      0.0
+     ],
+     "size": [
+      4.0,
+      4.0,
+      4.0
+     ]
+    },
+    "b": {
+     "kind": "moved",
+     "steps": [
+      {
+       "rotate": {
+        "point": [
+         0.0,
+         0.0,
+         0.0
+        ],
+        "axis": [
+         0.0,
+         0.0,
+         1.0
+        ],
+        "angle_deg": 5.710593137499643
+       }
+      },
+      {
+       "translate": {
+        "vector": [
+         1.9998999999999998,
+         19.999995,
+         0.0
+        ]
+       }
+      }
+     ],
+     "brep": {
+      "kind": "box",
+      "origin": [
+       0.0,
+       0.0,
+       0.0
+      ],
+      "size": [
+       4.0,
+       4.0,
+       4.0
+      ]
+     }
+    }
+   }
+  },
+  {
+   "name": "wr614_strip_difference_d5e-06",
+   "note": "#1794 / WR-614, WR-619 geometry: box A [-2,2]x[16,20]x[0,4] and a 4 mm cube B turned atan(0.1) about z whose face F1 crosses A's face y = 20 at x = 2 - d/0.1 and stays within d = 5e-06 of it across x in [2 - 2d/0.1, 2]. SmApiBooleanDifference; the union at d = 1e-5 fails in MakeFaceuse with SM_ERR (WR-614); at d = 5e-6 it has no solid region (WR-619).",
+   "inputs": {
+    "api": "difference",
+    "a": {
+     "kind": "box",
+     "origin": [
+      -2.0,
+      16.0,
+      0.0
+     ],
+     "size": [
+      4.0,
+      4.0,
+      4.0
+     ]
+    },
+    "b": {
+     "kind": "moved",
+     "steps": [
+      {
+       "rotate": {
+        "point": [
+         0.0,
+         0.0,
+         0.0
+        ],
+        "axis": [
+         0.0,
+         0.0,
+         1.0
+        ],
+        "angle_deg": 5.710593137499643
+       }
+      },
+      {
+       "translate": {
+        "vector": [
+         1.9998999999999998,
+         19.999995,
+         0.0
+        ]
+       }
+      }
+     ],
+     "brep": {
+      "kind": "box",
+      "origin": [
+       0.0,
+       0.0,
+       0.0
+      ],
+      "size": [
+       4.0,
+       4.0,
+       4.0
+      ]
+     }
+    }
+   }
+  },
+  {
+   "name": "wr614_strip_measured_union_d5e-06",
+   "note": "#1794 / WR-614, WR-619 geometry: box A [-2,2]x[16,20]x[0,4] and a 4 mm cube B turned atan(0.1) about z whose face F1 crosses A's face y = 20 at x = 2 - d/0.1 and stays within d = 5e-06 of it across x in [2 - 2d/0.1, 2]. SmApiBooleanWithOptions (union) with the post-process flag, then volume and face areas.",
+   "inputs": {
+    "api": "measured",
+    "a": {
+     "kind": "box",
+     "origin": [
+      -2.0,
+      16.0,
+      0.0
+     ],
+     "size": [
+      4.0,
+      4.0,
+      4.0
+     ]
+    },
+    "b": {
+     "kind": "moved",
+     "steps": [
+      {
+       "rotate": {
+        "point": [
+         0.0,
+         0.0,
+         0.0
+        ],
+        "axis": [
+         0.0,
+         0.0,
+         1.0
+        ],
+        "angle_deg": 5.710593137499643
+       }
+      },
+      {
+       "translate": {
+        "vector": [
+         1.9998999999999998,
+         19.999995,
+         0.0
+        ]
+       }
+      }
+     ],
+     "brep": {
+      "kind": "box",
+      "origin": [
+       0.0,
+       0.0,
+       0.0
+      ],
+      "size": [
+       4.0,
+       4.0,
+       4.0
+      ]
+     }
+    },
+    "operation": 1
+   }
+  },
+  {
+   "name": "wr614_strip_measured_intersection_d5e-06",
+   "note": "#1794 / WR-614, WR-619 geometry: box A [-2,2]x[16,20]x[0,4] and a 4 mm cube B turned atan(0.1) about z whose face F1 crosses A's face y = 20 at x = 2 - d/0.1 and stays within d = 5e-06 of it across x in [2 - 2d/0.1, 2]. SmApiBooleanWithOptions (intersection) with the post-process flag, then volume and face areas.",
+   "inputs": {
+    "api": "measured",
+    "a": {
+     "kind": "box",
+     "origin": [
+      -2.0,
+      16.0,
+      0.0
+     ],
+     "size": [
+      4.0,
+      4.0,
+      4.0
+     ]
+    },
+    "b": {
+     "kind": "moved",
+     "steps": [
+      {
+       "rotate": {
+        "point": [
+         0.0,
+         0.0,
+         0.0
+        ],
+        "axis": [
+         0.0,
+         0.0,
+         1.0
+        ],
+        "angle_deg": 5.710593137499643
+       }
+      },
+      {
+       "translate": {
+        "vector": [
+         1.9998999999999998,
+         19.999995,
+         0.0
+        ]
+       }
+      }
+     ],
+     "brep": {
+      "kind": "box",
+      "origin": [
+       0.0,
+       0.0,
+       0.0
+      ],
+      "size": [
+       4.0,
+       4.0,
+       4.0
+      ]
+     }
+    },
+    "operation": 2
+   }
+  },
+  {
+   "name": "wr614_strip_measured_difference_d5e-06",
+   "note": "#1794 / WR-614, WR-619 geometry: box A [-2,2]x[16,20]x[0,4] and a 4 mm cube B turned atan(0.1) about z whose face F1 crosses A's face y = 20 at x = 2 - d/0.1 and stays within d = 5e-06 of it across x in [2 - 2d/0.1, 2]. SmApiBooleanWithOptions (difference) with the post-process flag, then volume and face areas.",
+   "inputs": {
+    "api": "measured",
+    "a": {
+     "kind": "box",
+     "origin": [
+      -2.0,
+      16.0,
+      0.0
+     ],
+     "size": [
+      4.0,
+      4.0,
+      4.0
+     ]
+    },
+    "b": {
+     "kind": "moved",
+     "steps": [
+      {
+       "rotate": {
+        "point": [
+         0.0,
+         0.0,
+         0.0
+        ],
+        "axis": [
+         0.0,
+         0.0,
+         1.0
+        ],
+        "angle_deg": 5.710593137499643
+       }
+      },
+      {
+       "translate": {
+        "vector": [
+         1.9998999999999998,
+         19.999995,
+         0.0
+        ]
+       }
+      }
+     ],
+     "brep": {
+      "kind": "box",
+      "origin": [
+       0.0,
+       0.0,
+       0.0
+      ],
+      "size": [
+       4.0,
+       4.0,
+       4.0
+      ]
+     }
+    },
+    "operation": 3
+   }
+  },
+  {
+   "name": "wr614_strip_union_d2e-06",
+   "note": "#1794 / WR-614, WR-619 geometry: box A [-2,2]x[16,20]x[0,4] and a 4 mm cube B turned atan(0.1) about z whose face F1 crosses A's face y = 20 at x = 2 - d/0.1 and stays within d = 2e-06 of it across x in [2 - 2d/0.1, 2]. SmApiBooleanUnion; the union at d = 1e-5 fails in MakeFaceuse with SM_ERR (WR-614); at d = 5e-6 it has no solid region (WR-619).",
+   "inputs": {
+    "api": "union",
+    "a": {
+     "kind": "box",
+     "origin": [
+      -2.0,
+      16.0,
+      0.0
+     ],
+     "size": [
+      4.0,
+      4.0,
+      4.0
+     ]
+    },
+    "b": {
+     "kind": "moved",
+     "steps": [
+      {
+       "rotate": {
+        "point": [
+         0.0,
+         0.0,
+         0.0
+        ],
+        "axis": [
+         0.0,
+         0.0,
+         1.0
+        ],
+        "angle_deg": 5.710593137499643
+       }
+      },
+      {
+       "translate": {
+        "vector": [
+         1.9999600000000002,
+         19.999998,
+         0.0
+        ]
+       }
+      }
+     ],
+     "brep": {
+      "kind": "box",
+      "origin": [
+       0.0,
+       0.0,
+       0.0
+      ],
+      "size": [
+       4.0,
+       4.0,
+       4.0
+      ]
+     }
+    }
+   }
+  },
+  {
+   "name": "wr614_strip_intersection_d2e-06",
+   "note": "#1794 / WR-614, WR-619 geometry: box A [-2,2]x[16,20]x[0,4] and a 4 mm cube B turned atan(0.1) about z whose face F1 crosses A's face y = 20 at x = 2 - d/0.1 and stays within d = 2e-06 of it across x in [2 - 2d/0.1, 2]. SmApiBooleanIntersection; the union at d = 1e-5 fails in MakeFaceuse with SM_ERR (WR-614); at d = 5e-6 it has no solid region (WR-619).",
+   "inputs": {
+    "api": "intersection",
+    "a": {
+     "kind": "box",
+     "origin": [
+      -2.0,
+      16.0,
+      0.0
+     ],
+     "size": [
+      4.0,
+      4.0,
+      4.0
+     ]
+    },
+    "b": {
+     "kind": "moved",
+     "steps": [
+      {
+       "rotate": {
+        "point": [
+         0.0,
+         0.0,
+         0.0
+        ],
+        "axis": [
+         0.0,
+         0.0,
+         1.0
+        ],
+        "angle_deg": 5.710593137499643
+       }
+      },
+      {
+       "translate": {
+        "vector": [
+         1.9999600000000002,
+         19.999998,
+         0.0
+        ]
+       }
+      }
+     ],
+     "brep": {
+      "kind": "box",
+      "origin": [
+       0.0,
+       0.0,
+       0.0
+      ],
+      "size": [
+       4.0,
+       4.0,
+       4.0
+      ]
+     }
+    }
+   }
+  },
+  {
+   "name": "wr614_strip_difference_d2e-06",
+   "note": "#1794 / WR-614, WR-619 geometry: box A [-2,2]x[16,20]x[0,4] and a 4 mm cube B turned atan(0.1) about z whose face F1 crosses A's face y = 20 at x = 2 - d/0.1 and stays within d = 2e-06 of it across x in [2 - 2d/0.1, 2]. SmApiBooleanDifference; the union at d = 1e-5 fails in MakeFaceuse with SM_ERR (WR-614); at d = 5e-6 it has no solid region (WR-619).",
+   "inputs": {
+    "api": "difference",
+    "a": {
+     "kind": "box",
+     "origin": [
+      -2.0,
+      16.0,
+      0.0
+     ],
+     "size": [
+      4.0,
+      4.0,
+      4.0
+     ]
+    },
+    "b": {
+     "kind": "moved",
+     "steps": [
+      {
+       "rotate": {
+        "point": [
+         0.0,
+         0.0,
+         0.0
+        ],
+        "axis": [
+         0.0,
+         0.0,
+         1.0
+        ],
+        "angle_deg": 5.710593137499643
+       }
+      },
+      {
+       "translate": {
+        "vector": [
+         1.9999600000000002,
+         19.999998,
+         0.0
+        ]
+       }
+      }
+     ],
+     "brep": {
+      "kind": "box",
+      "origin": [
+       0.0,
+       0.0,
+       0.0
+      ],
+      "size": [
+       4.0,
+       4.0,
+       4.0
+      ]
+     }
+    }
+   }
+  },
+  {
+   "name": "wr614_strip_measured_union_d2e-06",
+   "note": "#1794 / WR-614, WR-619 geometry: box A [-2,2]x[16,20]x[0,4] and a 4 mm cube B turned atan(0.1) about z whose face F1 crosses A's face y = 20 at x = 2 - d/0.1 and stays within d = 2e-06 of it across x in [2 - 2d/0.1, 2]. SmApiBooleanWithOptions (union) with the post-process flag, then volume and face areas.",
+   "inputs": {
+    "api": "measured",
+    "a": {
+     "kind": "box",
+     "origin": [
+      -2.0,
+      16.0,
+      0.0
+     ],
+     "size": [
+      4.0,
+      4.0,
+      4.0
+     ]
+    },
+    "b": {
+     "kind": "moved",
+     "steps": [
+      {
+       "rotate": {
+        "point": [
+         0.0,
+         0.0,
+         0.0
+        ],
+        "axis": [
+         0.0,
+         0.0,
+         1.0
+        ],
+        "angle_deg": 5.710593137499643
+       }
+      },
+      {
+       "translate": {
+        "vector": [
+         1.9999600000000002,
+         19.999998,
+         0.0
+        ]
+       }
+      }
+     ],
+     "brep": {
+      "kind": "box",
+      "origin": [
+       0.0,
+       0.0,
+       0.0
+      ],
+      "size": [
+       4.0,
+       4.0,
+       4.0
+      ]
+     }
+    },
+    "operation": 1
+   }
+  },
+  {
+   "name": "wr614_strip_measured_intersection_d2e-06",
+   "note": "#1794 / WR-614, WR-619 geometry: box A [-2,2]x[16,20]x[0,4] and a 4 mm cube B turned atan(0.1) about z whose face F1 crosses A's face y = 20 at x = 2 - d/0.1 and stays within d = 2e-06 of it across x in [2 - 2d/0.1, 2]. SmApiBooleanWithOptions (intersection) with the post-process flag, then volume and face areas.",
+   "inputs": {
+    "api": "measured",
+    "a": {
+     "kind": "box",
+     "origin": [
+      -2.0,
+      16.0,
+      0.0
+     ],
+     "size": [
+      4.0,
+      4.0,
+      4.0
+     ]
+    },
+    "b": {
+     "kind": "moved",
+     "steps": [
+      {
+       "rotate": {
+        "point": [
+         0.0,
+         0.0,
+         0.0
+        ],
+        "axis": [
+         0.0,
+         0.0,
+         1.0
+        ],
+        "angle_deg": 5.710593137499643
+       }
+      },
+      {
+       "translate": {
+        "vector": [
+         1.9999600000000002,
+         19.999998,
+         0.0
+        ]
+       }
+      }
+     ],
+     "brep": {
+      "kind": "box",
+      "origin": [
+       0.0,
+       0.0,
+       0.0
+      ],
+      "size": [
+       4.0,
+       4.0,
+       4.0
+      ]
+     }
+    },
+    "operation": 2
+   }
+  },
+  {
+   "name": "wr614_strip_measured_difference_d2e-06",
+   "note": "#1794 / WR-614, WR-619 geometry: box A [-2,2]x[16,20]x[0,4] and a 4 mm cube B turned atan(0.1) about z whose face F1 crosses A's face y = 20 at x = 2 - d/0.1 and stays within d = 2e-06 of it across x in [2 - 2d/0.1, 2]. SmApiBooleanWithOptions (difference) with the post-process flag, then volume and face areas.",
+   "inputs": {
+    "api": "measured",
+    "a": {
+     "kind": "box",
+     "origin": [
+      -2.0,
+      16.0,
+      0.0
+     ],
+     "size": [
+      4.0,
+      4.0,
+      4.0
+     ]
+    },
+    "b": {
+     "kind": "moved",
+     "steps": [
+      {
+       "rotate": {
+        "point": [
+         0.0,
+         0.0,
+         0.0
+        ],
+        "axis": [
+         0.0,
+         0.0,
+         1.0
+        ],
+        "angle_deg": 5.710593137499643
+       }
+      },
+      {
+       "translate": {
+        "vector": [
+         1.9999600000000002,
+         19.999998,
+         0.0
+        ]
+       }
+      }
+     ],
+     "brep": {
+      "kind": "box",
+      "origin": [
+       0.0,
+       0.0,
+       0.0
+      ],
+      "size": [
+       4.0,
+       4.0,
+       4.0
+      ]
+     }
+    },
+    "operation": 3
+   }
+  },
+  {
+   "name": "wr614_strip_union_d1.5e-05",
+   "note": "#1794 / WR-614, WR-619 geometry: box A [-2,2]x[16,20]x[0,4] and a 4 mm cube B turned atan(0.1) about z whose face F1 crosses A's face y = 20 at x = 2 - d/0.1 and stays within d = 1.5e-05 of it across x in [2 - 2d/0.1, 2]. SmApiBooleanUnion; the union at d = 1e-5 fails in MakeFaceuse with SM_ERR (WR-614); at d = 5e-6 it has no solid region (WR-619).",
+   "inputs": {
+    "api": "union",
+    "a": {
+     "kind": "box",
+     "origin": [
+      -2.0,
+      16.0,
+      0.0
+     ],
+     "size": [
+      4.0,
+      4.0,
+      4.0
+     ]
+    },
+    "b": {
+     "kind": "moved",
+     "steps": [
+      {
+       "rotate": {
+        "point": [
+         0.0,
+         0.0,
+         0.0
+        ],
+        "axis": [
+         0.0,
+         0.0,
+         1.0
+        ],
+        "angle_deg": 5.710593137499643
+       }
+      },
+      {
+       "translate": {
+        "vector": [
+         1.9996999999999998,
+         19.999985,
+         0.0
+        ]
+       }
+      }
+     ],
+     "brep": {
+      "kind": "box",
+      "origin": [
+       0.0,
+       0.0,
+       0.0
+      ],
+      "size": [
+       4.0,
+       4.0,
+       4.0
+      ]
+     }
+    }
+   }
+  },
+  {
+   "name": "wr614_strip_intersection_d1.5e-05",
+   "note": "#1794 / WR-614, WR-619 geometry: box A [-2,2]x[16,20]x[0,4] and a 4 mm cube B turned atan(0.1) about z whose face F1 crosses A's face y = 20 at x = 2 - d/0.1 and stays within d = 1.5e-05 of it across x in [2 - 2d/0.1, 2]. SmApiBooleanIntersection; the union at d = 1e-5 fails in MakeFaceuse with SM_ERR (WR-614); at d = 5e-6 it has no solid region (WR-619).",
+   "inputs": {
+    "api": "intersection",
+    "a": {
+     "kind": "box",
+     "origin": [
+      -2.0,
+      16.0,
+      0.0
+     ],
+     "size": [
+      4.0,
+      4.0,
+      4.0
+     ]
+    },
+    "b": {
+     "kind": "moved",
+     "steps": [
+      {
+       "rotate": {
+        "point": [
+         0.0,
+         0.0,
+         0.0
+        ],
+        "axis": [
+         0.0,
+         0.0,
+         1.0
+        ],
+        "angle_deg": 5.710593137499643
+       }
+      },
+      {
+       "translate": {
+        "vector": [
+         1.9996999999999998,
+         19.999985,
+         0.0
+        ]
+       }
+      }
+     ],
+     "brep": {
+      "kind": "box",
+      "origin": [
+       0.0,
+       0.0,
+       0.0
+      ],
+      "size": [
+       4.0,
+       4.0,
+       4.0
+      ]
+     }
+    }
+   }
+  },
+  {
+   "name": "wr614_strip_difference_d1.5e-05",
+   "note": "#1794 / WR-614, WR-619 geometry: box A [-2,2]x[16,20]x[0,4] and a 4 mm cube B turned atan(0.1) about z whose face F1 crosses A's face y = 20 at x = 2 - d/0.1 and stays within d = 1.5e-05 of it across x in [2 - 2d/0.1, 2]. SmApiBooleanDifference; the union at d = 1e-5 fails in MakeFaceuse with SM_ERR (WR-614); at d = 5e-6 it has no solid region (WR-619).",
+   "inputs": {
+    "api": "difference",
+    "a": {
+     "kind": "box",
+     "origin": [
+      -2.0,
+      16.0,
+      0.0
+     ],
+     "size": [
+      4.0,
+      4.0,
+      4.0
+     ]
+    },
+    "b": {
+     "kind": "moved",
+     "steps": [
+      {
+       "rotate": {
+        "point": [
+         0.0,
+         0.0,
+         0.0
+        ],
+        "axis": [
+         0.0,
+         0.0,
+         1.0
+        ],
+        "angle_deg": 5.710593137499643
+       }
+      },
+      {
+       "translate": {
+        "vector": [
+         1.9996999999999998,
+         19.999985,
+         0.0
+        ]
+       }
+      }
+     ],
+     "brep": {
+      "kind": "box",
+      "origin": [
+       0.0,
+       0.0,
+       0.0
+      ],
+      "size": [
+       4.0,
+       4.0,
+       4.0
+      ]
+     }
+    }
+   }
+  },
+  {
+   "name": "wr614_strip_measured_union_d1.5e-05",
+   "note": "#1794 / WR-614, WR-619 geometry: box A [-2,2]x[16,20]x[0,4] and a 4 mm cube B turned atan(0.1) about z whose face F1 crosses A's face y = 20 at x = 2 - d/0.1 and stays within d = 1.5e-05 of it across x in [2 - 2d/0.1, 2]. SmApiBooleanWithOptions (union) with the post-process flag, then volume and face areas.",
+   "inputs": {
+    "api": "measured",
+    "a": {
+     "kind": "box",
+     "origin": [
+      -2.0,
+      16.0,
+      0.0
+     ],
+     "size": [
+      4.0,
+      4.0,
+      4.0
+     ]
+    },
+    "b": {
+     "kind": "moved",
+     "steps": [
+      {
+       "rotate": {
+        "point": [
+         0.0,
+         0.0,
+         0.0
+        ],
+        "axis": [
+         0.0,
+         0.0,
+         1.0
+        ],
+        "angle_deg": 5.710593137499643
+       }
+      },
+      {
+       "translate": {
+        "vector": [
+         1.9996999999999998,
+         19.999985,
+         0.0
+        ]
+       }
+      }
+     ],
+     "brep": {
+      "kind": "box",
+      "origin": [
+       0.0,
+       0.0,
+       0.0
+      ],
+      "size": [
+       4.0,
+       4.0,
+       4.0
+      ]
+     }
+    },
+    "operation": 1
+   }
+  },
+  {
+   "name": "wr614_strip_measured_intersection_d1.5e-05",
+   "note": "#1794 / WR-614, WR-619 geometry: box A [-2,2]x[16,20]x[0,4] and a 4 mm cube B turned atan(0.1) about z whose face F1 crosses A's face y = 20 at x = 2 - d/0.1 and stays within d = 1.5e-05 of it across x in [2 - 2d/0.1, 2]. SmApiBooleanWithOptions (intersection) with the post-process flag, then volume and face areas.",
+   "inputs": {
+    "api": "measured",
+    "a": {
+     "kind": "box",
+     "origin": [
+      -2.0,
+      16.0,
+      0.0
+     ],
+     "size": [
+      4.0,
+      4.0,
+      4.0
+     ]
+    },
+    "b": {
+     "kind": "moved",
+     "steps": [
+      {
+       "rotate": {
+        "point": [
+         0.0,
+         0.0,
+         0.0
+        ],
+        "axis": [
+         0.0,
+         0.0,
+         1.0
+        ],
+        "angle_deg": 5.710593137499643
+       }
+      },
+      {
+       "translate": {
+        "vector": [
+         1.9996999999999998,
+         19.999985,
+         0.0
+        ]
+       }
+      }
+     ],
+     "brep": {
+      "kind": "box",
+      "origin": [
+       0.0,
+       0.0,
+       0.0
+      ],
+      "size": [
+       4.0,
+       4.0,
+       4.0
+      ]
+     }
+    },
+    "operation": 2
+   }
+  },
+  {
+   "name": "wr614_strip_measured_difference_d1.5e-05",
+   "note": "#1794 / WR-614, WR-619 geometry: box A [-2,2]x[16,20]x[0,4] and a 4 mm cube B turned atan(0.1) about z whose face F1 crosses A's face y = 20 at x = 2 - d/0.1 and stays within d = 1.5e-05 of it across x in [2 - 2d/0.1, 2]. SmApiBooleanWithOptions (difference) with the post-process flag, then volume and face areas.",
+   "inputs": {
+    "api": "measured",
+    "a": {
+     "kind": "box",
+     "origin": [
+      -2.0,
+      16.0,
+      0.0
+     ],
+     "size": [
+      4.0,
+      4.0,
+      4.0
+     ]
+    },
+    "b": {
+     "kind": "moved",
+     "steps": [
+      {
+       "rotate": {
+        "point": [
+         0.0,
+         0.0,
+         0.0
+        ],
+        "axis": [
+         0.0,
+         0.0,
+         1.0
+        ],
+        "angle_deg": 5.710593137499643
+       }
+      },
+      {
+       "translate": {
+        "vector": [
+         1.9996999999999998,
+         19.999985,
+         0.0
+        ]
+       }
+      }
+     ],
+     "brep": {
+      "kind": "box",
+      "origin": [
+       0.0,
+       0.0,
+       0.0
+      ],
+      "size": [
+       4.0,
+       4.0,
+       4.0
+      ]
+     }
+    },
+    "operation": 3
+   }
+  }
+ ]
+}

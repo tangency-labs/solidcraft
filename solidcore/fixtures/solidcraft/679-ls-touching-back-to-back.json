@@ -1,0 +1,355 @@
+{
+ "issue": "https://github.com/tangency-labs/solidcraft/issues/679",
+ "pr": "https://github.com/tangency-labs/solidcraft/pull/704",
+ "test": "crates/kernel/src/issue_679_tests.rs: two_ls_up_and_down_fuse_into_one_solid, several_contact_regions_and_edge_contact",
+ "summary": "Bodies that touch back to back over part of a face did not fuse into one solid on SolidCraft's earlier kernel: two L-shaped prisms of a 2 x 2 grid of 10 mm cells, one extruded up from z = 0 and one down, share two whole cells, an edge and a point at z = 0 (#679). The fix's test also fuses a plate under two separate blocks (two contact regions) and a plate under one block, flush with two of its sides. All bodies are planar, so each union is exactly the sum of its operands' volumes; tolerance 1e-6 mm^3 and one solid, as in the test. The test's #674 case (a pad half past a block's edge) is already fixtures/solidcraft/674-partial-face-contact.json; its random-rectangle sweep is not ported.",
+ "cases": [
+  {
+   "name": "two_ls_up_then_down",
+   "note": "#679: the L of cells XO/XX extruded up 10 from z = 0 and the L XX/OX down 10, 10 mm cells. They meet back to back over two whole cells, along an edge and at the centre point. Union(up, down).",
+   "steps": [
+    {
+     "op": "extrude",
+     "id": "up",
+     "profile": [
+      {
+       "kind": "polygon",
+       "points": [
+        [
+         -10,
+         -10
+        ],
+        [
+         10,
+         -10
+        ],
+        [
+         10,
+         0
+        ],
+        [
+         0,
+         0
+        ],
+        [
+         0,
+         10
+        ],
+        [
+         -10,
+         10
+        ]
+       ]
+      }
+     ],
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "distance": 10
+    },
+    {
+     "op": "extrude",
+     "id": "down",
+     "profile": [
+      {
+       "kind": "polygon",
+       "points": [
+        [
+         -10,
+         10
+        ],
+        [
+         -10,
+         0
+        ],
+        [
+         0,
+         0
+        ],
+        [
+         0,
+         -10
+        ],
+        [
+         10,
+         -10
+        ],
+        [
+         10,
+         10
+        ]
+       ]
+      }
+     ],
+     "origin": [
+      0,
+      0,
+      -10
+     ],
+     "distance": 10
+    },
+    {
+     "op": "union",
+     "id": "result",
+     "a": "up",
+     "b": "down"
+    }
+   ],
+   "expect": {
+    "lumps": 1,
+    "volume": {
+     "value": 6000.0,
+     "tol": 1e-06,
+     "formula": "6 cells of 10 x 10 x 10 mm (3 up, 3 down; the two prisms only touch, at z = 0)"
+    }
+   }
+  },
+  {
+   "name": "two_ls_down_then_up",
+   "note": "#679 with the operands swapped: union(down, up).",
+   "steps": [
+    {
+     "op": "extrude",
+     "id": "up",
+     "profile": [
+      {
+       "kind": "polygon",
+       "points": [
+        [
+         -10,
+         -10
+        ],
+        [
+         10,
+         -10
+        ],
+        [
+         10,
+         0
+        ],
+        [
+         0,
+         0
+        ],
+        [
+         0,
+         10
+        ],
+        [
+         -10,
+         10
+        ]
+       ]
+      }
+     ],
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "distance": 10
+    },
+    {
+     "op": "extrude",
+     "id": "down",
+     "profile": [
+      {
+       "kind": "polygon",
+       "points": [
+        [
+         -10,
+         10
+        ],
+        [
+         -10,
+         0
+        ],
+        [
+         0,
+         0
+        ],
+        [
+         0,
+         -10
+        ],
+        [
+         10,
+         -10
+        ],
+        [
+         10,
+         10
+        ]
+       ]
+      }
+     ],
+     "origin": [
+      0,
+      0,
+      -10
+     ],
+     "distance": 10
+    },
+    {
+     "op": "union",
+     "id": "result",
+     "a": "down",
+     "b": "up"
+    }
+   ],
+   "expect": {
+    "lumps": 1,
+    "volume": {
+     "value": 6000.0,
+     "tol": 1e-06,
+     "formula": "6 cells of 10 x 10 x 10 mm (3 up, 3 down; the two prisms only touch, at z = 0)"
+    }
+   }
+  },
+  {
+   "name": "two_contact_regions",
+   "note": "Two 8 x 8 x 10 blocks up from z = 0 at opposite corners, joined first, then an L-shaped plate 5 deep under both and under one more cell: two separate contacts fuse into one solid.",
+   "steps": [
+    {
+     "op": "box",
+     "id": "up",
+     "origin": [
+      -10,
+      -10,
+      0
+     ],
+     "size": [
+      8,
+      8,
+      10
+     ]
+    },
+    {
+     "op": "box",
+     "id": "up2",
+     "origin": [
+      2,
+      2,
+      0
+     ],
+     "size": [
+      8,
+      8,
+      10
+     ]
+    },
+    {
+     "op": "union",
+     "id": "ups",
+     "a": "up",
+     "b": "up2"
+    },
+    {
+     "op": "extrude",
+     "id": "down",
+     "profile": [
+      {
+       "kind": "polygon",
+       "points": [
+        [
+         -10,
+         -10
+        ],
+        [
+         0,
+         -10
+        ],
+        [
+         0,
+         0
+        ],
+        [
+         10,
+         0
+        ],
+        [
+         10,
+         10
+        ],
+        [
+         -10,
+         10
+        ]
+       ]
+      }
+     ],
+     "origin": [
+      0,
+      0,
+      -5
+     ],
+     "distance": 5
+    },
+    {
+     "op": "union",
+     "id": "result",
+     "a": "ups",
+     "b": "down"
+    }
+   ],
+   "expect": {
+    "lumps": 1,
+    "volume": {
+     "value": 2780.0,
+     "tol": 1e-06,
+     "formula": "2 blocks of 8*8*10 = 640 each, plus the plate: 3 cells of 10*10*5 = 500 each"
+    }
+   }
+  },
+  {
+   "name": "contact_and_flush_sides",
+   "note": "An 8 x 8 x 10 block up from z = 0 and an 8 x 15 x 5 plate under it, flush with two of its sides and running on past the third: a face contact whose sides continue on the same planes.",
+   "steps": [
+    {
+     "op": "box",
+     "id": "up",
+     "origin": [
+      -10,
+      -10,
+      0
+     ],
+     "size": [
+      8,
+      8,
+      10
+     ]
+    },
+    {
+     "op": "box",
+     "id": "down",
+     "origin": [
+      -10,
+      -10,
+      -5
+     ],
+     "size": [
+      8,
+      15,
+      5
+     ]
+    },
+    {
+     "op": "union",
+     "id": "result",
+     "a": "up",
+     "b": "down"
+    }
+   ],
+   "expect": {
+    "lumps": 1,
+    "volume": {
+     "value": 1240.0,
+     "tol": 1e-06,
+     "formula": "8*8*10 + 8*15*5"
+    }
+   }
+  }
+ ]
+}

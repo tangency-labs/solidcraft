@@ -1,0 +1,272 @@
+{
+  "area": "fillets",
+  "bodies": {
+    "b2": {
+      "keeping_splines": false,
+      "trusted": true
+    }
+  },
+  "calls": [
+    {
+      "inputs": [
+        "b2"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b3"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b3"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b4"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b4"
+      ],
+      "op": "tagged",
+      "outputs": [
+        "b5"
+      ],
+      "params": {
+        "operand": 0
+      }
+    },
+    {
+      "inputs": [
+        "b5"
+      ],
+      "op": "chamfer_sides",
+      "outputs": [
+        "b6"
+      ],
+      "params": {
+        "distance": 1.0,
+        "edges": {
+          "kind": "edge",
+          "picked": [
+            {
+              "at": [
+                [
+                  -23.79,
+                  7.12,
+                  10.0
+                ],
+                [
+                  -11.4,
+                  -15.85,
+                  10.0
+                ]
+              ],
+              "index": 0
+            },
+            {
+              "at": [
+                [
+                  -9.75,
+                  30.42,
+                  10.0
+                ],
+                [
+                  -23.79,
+                  7.12,
+                  10.0
+                ]
+              ],
+              "index": 6
+            },
+            {
+              "at": [
+                [
+                  -11.4,
+                  -15.85,
+                  10.0
+                ],
+                [
+                  8.76,
+                  -18.38,
+                  10.0
+                ]
+              ],
+              "index": 1
+            },
+            {
+              "at": [
+                [
+                  16.49,
+                  26.89,
+                  10.0
+                ],
+                [
+                  -9.75,
+                  30.42,
+                  10.0
+                ]
+              ],
+              "index": 5
+            },
+            {
+              "at": [
+                [
+                  8.76,
+                  -18.38,
+                  10.0
+                ],
+                [
+                  25.67,
+                  -12.81,
+                  10.0
+                ]
+              ],
+              "index": 2
+            },
+            {
+              "at": [
+                [
+                  32.16,
+                  3.86,
+                  10.0
+                ],
+                [
+                  16.49,
+                  26.89,
+                  10.0
+                ]
+              ],
+              "index": 4
+            },
+            {
+              "at": [
+                [
+                  25.67,
+                  -12.81,
+                  10.0
+                ],
+                [
+                  32.16,
+                  3.86,
+                  10.0
+                ]
+              ],
+              "index": 3
+            }
+          ],
+          "points": [
+            [
+              -20.583353930291484,
+              -6.007422077037045,
+              10.0
+            ],
+            [
+              -19.940191630058656,
+              20.721274599207078,
+              10.0
+            ],
+            [
+              -1.5311028420121744,
+              -18.58289091875152,
+              10.0
+            ],
+            [
+              3.7219451348737356,
+              31.756226410099472,
+              10.0
+            ],
+            [
+              17.668801455501654,
+              -16.8825137608106,
+              10.0
+            ],
+            [
+              27.22731568949321,
+              17.277223200161355,
+              10.0
+            ],
+            [
+              30.669368853206798,
+              -5.172562328334994,
+              10.0
+            ]
+          ],
+          "tolerance": 3.812663296164795
+        },
+        "first": [
+          0.0,
+          0.0,
+          1.0
+        ],
+        "second": {
+          "distance": 7.0
+        }
+      }
+    }
+  ],
+  "case": "4332-two-distance-chamfer-of-spline-rim",
+  "expected": {
+    "body_count": 1,
+    "continuity": {
+      "order": "g0"
+    },
+    "method": "the outline is smooth and convex enough everywhere for a 1 x 7 setback, so the chamfer exists round the whole tangent chain: one valid closed body. The spline's chamfer has no closed-form volume (the reporter's script)",
+    "source": "invariants",
+    "sources": [
+      "tangency-labs/solidcraft#4332",
+      "tangency-labs/solidcraft#4469"
+    ],
+    "what": "a two-distance chamfer (1 mm across the top, 7 mm down the wall) round the top rim of a periodic fit-spline outline extruded 10: truck refused it ('loop edges must be lines or arcs'), though an equal chamfer of the same rim worked"
+  },
+  "expressible": false,
+  "operation_expressible": true,
+  "outcome": {
+    "ran": true,
+    "raw_counts": {
+      "edges": 35,
+      "faces": 16,
+      "vertices": 21
+    }
+  },
+  "records": "4332-two-distance-chamfer-of-spline-rim.bodies.json.gz",
+  "result": [
+    {
+      "body": "Body1",
+      "made": "b6"
+    }
+  ],
+  "rig": {
+    "error": null,
+    "known_failing": null,
+    "measured": {
+      "area_mm2": 6042.787997875162,
+      "body_count": 1,
+      "edges": 35,
+      "faces": 16,
+      "vertices": 21,
+      "volume_mm3": 22030.820870611293
+    },
+    "refused_with": null,
+    "status": "pass"
+  },
+  "sources": [
+    "tangency-labs/solidcraft#4332",
+    "tangency-labs/solidcraft#4469"
+  ],
+  "traced_ops": [
+    "extrude",
+    "copy",
+    "copy",
+    "tagged",
+    "chamfer_sides"
+  ],
+  "ungraded": [
+    "continuity: SolidCraft computes it"
+  ],
+  "what": "a two-distance chamfer (1 mm across the top, 7 mm down the wall) round the top rim of a periodic fit-spline outline extruded 10: truck refused it ('loop edges must be lines or arcs'), though an equal chamfer of the same rim worked",
+  "why_not": []
+}

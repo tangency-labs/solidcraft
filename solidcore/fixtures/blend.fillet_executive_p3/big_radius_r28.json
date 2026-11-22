@@ -1,0 +1,25 @@
+{
+  "cases": [
+    {
+      "name": "big-radius-box_diff_cyl_big_rad-r28-edge12",
+      "upstream_ref": "source/SM_API/src/SmApiBrep.cpp:2049",
+      "inputs": {
+        "real_solid": {
+          "source": {
+            "kind": "file",
+            "path": {
+              "$upstream_file": "Fillet/box_diff_cyl_big_rad.smb"
+            }
+          },
+          "radius": 28.0,
+          "xsect": 1,
+          "continuity": 1,
+          "thumbweight": 1,
+          "edges": [
+            12
+          ]
+        }
+      }
+    }
+  ]
+}

@@ -1,0 +1,12 @@
+id = "nlib.spiral"
+upstream = ["source/SMLib/src/NL_Spiral.cpp", "source/SMLib/src/SmNurbsVol.cpp"]
+rust_module = "nurbs::spiral"
+depends_on = []
+soft_depends_on = ["nlib.crv_basic", "nlib.crv_fit_p3", "nlib.crv_nurb"]
+est_lines = 392
+layer = 8
+tests = ["prog_test:my_test_surface_closest_point", "prog_test:my_test_drop_point", "prog_test:my_test_matrix", "prog_test:my_test_reversed_line_join", "SM_API_test:TestSmCreateRectangle", "SM_API_test:TestSmCreateRegularPolygon"]
+status = "green"
+claimed_by = "swarm-nlib.spiral-a1"
+claimed_at = "2026-10-12T21:55:30Z"
+notes = "8 fns; largest: N_CrvApproxSpiral, sm_InitNurbVolumeMemory, sm_AllocateAndCopyNurbVolume, sm_ComputeNurbVolumeSize; 317 upstream test entry points reach this unit; GREEN: difftest 2032 cases (32 fixture from TestSmCreateHelixInvalidInputs, smSurfaceTest.cpp:1975 CreateHelixSegment, span-limit/fixed-point/volume edge cases + 2000 generated), all bit-identical (max_rel_err 0), 0 deferred; 20k-seed run clean; --perturb SENSITIVE. No UNPORTED(nlib.spiral) stubs existed. Upstream N_CrvApproxSpiral crashes (N_EndNurbs on uninitialised SL) on its early input errors: ffi rejects those inputs, Rust returns NL_INP_ERR (findings.md)"

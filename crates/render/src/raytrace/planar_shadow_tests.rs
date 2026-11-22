@@ -1,4 +1,4 @@
-//! Proposed regressions, not compiled or run; install only with the reviewed depth change.
+//! Analytic shadow-ray depth regressions for exact and nearly coordinate-planar faces.
 use super::*;
 use prepared::SharedHit;
 
@@ -27,7 +27,7 @@ fn spawned(triangle: Triangle, point: Vec3, scale: f64, direction: Vec3) -> Ray 
         geometric_normal: normal,
         front_face: hit.front_face,
         shading_normal: normal,
-        surface: crate::surface::OpaqueSurface::new(Vec3::new(0.5, 0.5, 0.5), 0.0, 0.7, 1.5).unwrap(),
+        surface: solidcraft_viewport::surface::OpaqueSurface::new(Vec3::new(0.5, 0.5, 0.5), 0.0, 0.7, 1.5).unwrap(),
         vertices: triangle.vertices(),
         barycentric: hit.barycentric,
     }
@@ -122,4 +122,45 @@ fn exact_coordinate_plane_depth_keeps_closed_intervals_signed_zero_and_oblique_p
     }
     let oblique = Triangle::new([Vec3::new(-4.0, -4.0, -4.0), Vec3::new(4.0, -4.0, 4.0), Vec3::new(4.0, 4.0, 4.0)]).unwrap();
     assert_eq!(oblique.intersect(&Ray::new(Vec3::new(1.0, 1.0, 9.0), -Vec3::Z, 0.0, 10.0).unwrap()).unwrap().distance, 8.0);
+}
+
+#[test]
+fn native_sample_plate_front_face_does_not_shadow_its_outgoing_rim_ray() {
+    // These are the two front-side triangles of the built-in Sample Plate,
+    // exported at standard quality. Tiny evaluated coordinate differences make
+    // this a real slanted plane, not an exactly axis-aligned special case.
+    let fixtures = [
+        (
+            [
+                Vec3::new(5.9999999999993445, -1.7763568393612512e-15, 0.0),
+                Vec3::new(74.00000000000065, 1.77635683943593e-15, 8.0),
+                Vec3::new(5.999999999999999, -1.7763568394002505e-15, 8.0),
+            ],
+            Vec3::new(12.935950282461624, -1.413982641678367e-15, 5.4093378813347),
+        ),
+        (
+            [
+                Vec3::new(73.99999999999999, 1.7763568394002296e-15, 0.0),
+                Vec3::new(74.00000000000065, 1.77635683943593e-15, 8.0),
+                Vec3::new(5.9999999999993445, -1.7763568393612512e-15, 0.0),
+            ],
+            Vec3::new(42.44826731118756, 1.2791165835596725e-16, 3.8240400501773513),
+        ),
+    ];
+    for (vertices, origin) in fixtures {
+        let triangle = Triangle::new(vertices).unwrap();
+        let ray = Ray::new(origin, Vec3::new(0.0, -0.6, 0.8), 0.0_f64.next_up(), MAX_DISTANCE_MM).unwrap();
+        let normal = triangle.geometric_normal().unwrap();
+        // Independent plane-side oracle: the origin is outside and the ray
+        // travels farther outside. No positive plane intersection can exist.
+        assert!((origin - vertices[0]).dot(normal) > 0.0);
+        assert!(ray.direction().dot(normal) > 0.0);
+        assert!(triangle.intersect(&ray).is_none(), "the departed Sample Plate face cannot occlude its own rim light");
+        // A distinct surface only 5 micrometres along this same ray must remain
+        // visible. The repair must not introduce a near-distance rejection floor.
+        let center = ray.at(0.005).unwrap();
+        let blocker =
+            Triangle::new([center + Vec3::new(-1.0, 0.0, -1.0), center + Vec3::new(1.0, 0.0, -1.0), center + Vec3::new(0.0, 0.0, 1.0)]).unwrap();
+        assert!(blocker.intersect(&ray).is_some());
+    }
 }

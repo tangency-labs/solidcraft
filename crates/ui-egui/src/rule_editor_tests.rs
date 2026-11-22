@@ -1,9 +1,11 @@
 //! Freeze rule-manager commands, reload policy and published row/control identities.
-use crate::{SolveApp, dialogs::Kind, dialogs_plastic::Pl, dialogs_sheet::Sm, scenario, theme::Tokens};
+use crate::{SolveApp, dialogs::Kind, dialogs_plastic::Pl, dialogs_sheet::Sm, scenario};
 use serde_json::{Value, json};
+use solidcraft_theme::Tokens;
 
 const SHEET_ROWS: &[&str] = &[
     "Rule",
+    "Material",
     "Thickness",
     "K Factor",
     "Bend Radius",
@@ -36,7 +38,7 @@ fn frame(app: &mut SolveApp, ctx: &egui::Context, kind: &mut Kind, labels: &[&st
     scenario::clear_handles();
     let mut output = ctx.run_ui(egui::RawInput::default(), |ui| {
         crate::ui_kit::scope(ui, |ui| match kind {
-            Kind::Sheet(k) => assert!(!crate::dialogs_sheet::rows(app, ui, k, &mut [])),
+            Kind::Sheet(k) => assert!(!crate::dialogs_sheet::rows(app, ui, k, &mut Vec::new())),
             Kind::Plastic(k) => assert!(!crate::dialogs_plastic::rows(app, ui, k, &[])),
             _ => panic!("rule dialog"),
         });
@@ -143,7 +145,7 @@ fn plastic_rule_editor_contract() {
 
 #[test]
 fn sheet_rule_editor_delete_reloads_and_plastic_has_no_delete() {
-    for layout in [crate::shell::LayoutMode::Docked, crate::shell::LayoutMode::Floating] {
+    for layout in [crate::ui_kit::LayoutMode::Docked, crate::ui_kit::LayoutMode::Floating] {
         let mut h = scenario::Harness::new();
         h.app.home.open = false;
         h.call("ui.set", json!({"layout":layout}));

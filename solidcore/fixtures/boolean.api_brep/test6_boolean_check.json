@@ -1,0 +1,349 @@
+{
+ "cases": [
+  {
+   "name": "test6_crescent_on_rim_union_angle0",
+   "note": "A cylinder r 10 h 10 united with the crescent prism (r 6 cylinder centred on its rim at 0 degrees minus the r 10 cylinder), as wr528_crescent_on_rim_union_angle0. At the default fixes the port's check reports SmEdgeuse test #6 (UV trim curve owner != edge use) twice here (#1615 diagnostic). Compares the failed tests of SMLib's capi check (ValidatePointers, then AssertValid, level 2) of the result with the port's.",
+   "inputs": {
+    "api": "checked",
+    "a": {
+     "kind": "cylinder",
+     "origin": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "radius": 10.0,
+     "height": 10.0
+    },
+    "b": {
+     "kind": "boolean",
+     "operation": 3,
+     "a": {
+      "kind": "cylinder",
+      "origin": [
+       10.0,
+       0.0,
+       0.0
+      ],
+      "radius": 6.0,
+      "height": 10.0
+     },
+     "b": {
+      "kind": "cylinder",
+      "origin": [
+       0.0,
+       0.0,
+       0.0
+      ],
+      "radius": 10.0,
+      "height": 10.0
+     }
+    },
+    "operation": 1,
+    "level": 2
+   }
+  },
+  {
+   "name": "test6_crescent_on_rim_union_angle45",
+   "note": "A cylinder r 10 h 10 united with the crescent prism (r 6 cylinder centred on its rim at 45 degrees minus the r 10 cylinder), as wr528_crescent_on_rim_union_angle45. At the default fixes the port's check reports SmEdgeuse test #6 (UV trim curve owner != edge use) twice here (#1615 diagnostic). Compares the failed tests of SMLib's capi check (ValidatePointers, then AssertValid, level 2) of the result with the port's.",
+   "inputs": {
+    "api": "checked",
+    "a": {
+     "kind": "cylinder",
+     "origin": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "radius": 10.0,
+     "height": 10.0
+    },
+    "b": {
+     "kind": "boolean",
+     "operation": 3,
+     "a": {
+      "kind": "cylinder",
+      "origin": [
+       7.0710678118654755,
+       7.071067811865475,
+       0.0
+      ],
+      "radius": 6.0,
+      "height": 10.0
+     },
+     "b": {
+      "kind": "cylinder",
+      "origin": [
+       0.0,
+       0.0,
+       0.0
+      ],
+      "radius": 10.0,
+      "height": 10.0
+     }
+    },
+    "operation": 1,
+    "level": 2
+   }
+  },
+  {
+   "name": "test6_crescent_on_rim_union_angle90",
+   "note": "A cylinder r 10 h 10 united with the crescent prism (r 6 cylinder centred on its rim at 90 degrees minus the r 10 cylinder), as wr528_crescent_on_rim_union_angle90. At the default fixes the port's check reports SmEdgeuse test #6 (UV trim curve owner != edge use) twice here (#1615 diagnostic). Compares the failed tests of SMLib's capi check (ValidatePointers, then AssertValid, level 2) of the result with the port's.",
+   "inputs": {
+    "api": "checked",
+    "a": {
+     "kind": "cylinder",
+     "origin": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "radius": 10.0,
+     "height": 10.0
+    },
+    "b": {
+     "kind": "boolean",
+     "operation": 3,
+     "a": {
+      "kind": "cylinder",
+      "origin": [
+       6.123233995736766e-16,
+       10.0,
+       0.0
+      ],
+      "radius": 6.0,
+      "height": 10.0
+     },
+     "b": {
+      "kind": "cylinder",
+      "origin": [
+       0.0,
+       0.0,
+       0.0
+      ],
+      "radius": 10.0,
+      "height": 10.0
+     }
+    },
+    "operation": 1,
+    "level": 2
+   }
+  },
+  {
+   "name": "test6_crescent_on_rim_union_angle180",
+   "note": "A cylinder r 10 h 10 united with the crescent prism (r 6 cylinder centred on its rim at 180 degrees minus the r 10 cylinder), as wr528_crescent_on_rim_union_angle180. At the default fixes the port's check reports SmEdgeuse test #6 (UV trim curve owner != edge use) twice here (#1615 diagnostic). Compares the failed tests of SMLib's capi check (ValidatePointers, then AssertValid, level 2) of the result with the port's.",
+   "inputs": {
+    "api": "checked",
+    "a": {
+     "kind": "cylinder",
+     "origin": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "radius": 10.0,
+     "height": 10.0
+    },
+    "b": {
+     "kind": "boolean",
+     "operation": 3,
+     "a": {
+      "kind": "cylinder",
+      "origin": [
+       -10.0,
+       1.2246467991473533e-15,
+       0.0
+      ],
+      "radius": 6.0,
+      "height": 10.0
+     },
+     "b": {
+      "kind": "cylinder",
+      "origin": [
+       0.0,
+       0.0,
+       0.0
+      ],
+      "radius": 10.0,
+      "height": 10.0
+     }
+    },
+    "operation": 1,
+    "level": 2
+   }
+  },
+  {
+   "name": "test6_crescent_alone",
+   "note": "The crescent prism alone: the r 6 cylinder centred on (10, 0) minus the r 10 cylinder (the inner Boolean of the union cases), so a test #6 failure there can be told from one the union adds. Narrows down where the port's SmEdgeuse test #6 failures come from. Compares the failed tests of SMLib's capi check (ValidatePointers, then AssertValid, level 2) of the result with the port's.",
+   "inputs": {
+    "api": "checked",
+    "a": {
+     "kind": "cylinder",
+     "origin": [
+      10.0,
+      0.0,
+      0.0
+     ],
+     "radius": 6.0,
+     "height": 10.0
+    },
+    "b": {
+     "kind": "cylinder",
+     "origin": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "radius": 10.0,
+     "height": 10.0
+    },
+    "operation": 3,
+    "level": 2
+   }
+  },
+  {
+   "name": "test6_drilled_box",
+   "note": "A 40 x 40 x 20 box minus a drill (r 3, a 118 degree tip, 10 deep from the top at (20, 20)), the drill the r 3 cylinder from the tip's base to z 21 united with the cone of the tip (apex down; the #1609 diagnostic revolves the drill's profile instead, which this runner cannot build). The port's check of the box minus the revolved drill reports SmEdgeuse test #6 once (#1609 diagnostic). Compares the failed tests of SMLib's capi check (ValidatePointers, then AssertValid, level 2) of the result with the port's.",
+   "inputs": {
+    "api": "checked",
+    "a": {
+     "kind": "box",
+     "origin": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "size": [
+      40.0,
+      40.0,
+      20.0
+     ]
+    },
+    "b": {
+     "kind": "boolean",
+     "operation": 1,
+     "a": {
+      "kind": "cylinder",
+      "origin": [
+       20.0,
+       20.0,
+       10.0
+      ],
+      "radius": 3.0,
+      "height": 11.0
+     },
+     "b": {
+      "kind": "cone",
+      "origin": [
+       20.0,
+       20.0,
+       8.19741814291732
+      ],
+      "radius_base": 0.0,
+      "radius_top": 3.0,
+      "height": 1.8025818570826808
+     }
+    },
+    "operation": 3,
+    "level": 2
+   }
+  },
+  {
+   "name": "test6_drill_alone",
+   "note": "The drill of test6_drilled_box alone: the r 3 cylinder united with the cone of its tip. Narrows down where the port's SmEdgeuse test #6 failures come from. Compares the failed tests of SMLib's capi check (ValidatePointers, then AssertValid, level 2) of the result with the port's.",
+   "inputs": {
+    "api": "checked",
+    "a": {
+     "kind": "cylinder",
+     "origin": [
+      20.0,
+      20.0,
+      10.0
+     ],
+     "radius": 3.0,
+     "height": 11.0
+    },
+    "b": {
+     "kind": "cone",
+     "origin": [
+      20.0,
+      20.0,
+      8.19741814291732
+     ],
+     "radius_base": 0.0,
+     "radius_top": 3.0,
+     "height": 1.8025818570826808
+    },
+    "operation": 1,
+    "level": 2
+   }
+  },
+  {
+   "name": "test6_flat_hole",
+   "note": "The box of test6_drilled_box minus the r 3 cylinder alone (a flat-bottomed hole), to tell a cone-related failure from a hole-related one. Narrows down where the port's SmEdgeuse test #6 failures come from. Compares the failed tests of SMLib's capi check (ValidatePointers, then AssertValid, level 2) of the result with the port's.",
+   "inputs": {
+    "api": "checked",
+    "a": {
+     "kind": "box",
+     "origin": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "size": [
+      40.0,
+      40.0,
+      20.0
+     ]
+    },
+    "b": {
+     "kind": "cylinder",
+     "origin": [
+      20.0,
+      20.0,
+      10.0
+     ],
+     "radius": 3.0,
+     "height": 11.0
+    },
+    "operation": 3,
+    "level": 2
+   }
+  },
+  {
+   "name": "test6_box_union_control",
+   "note": "Control: two overlapping boxes united (planar faces only). Expected clean on both sides.",
+   "inputs": {
+    "api": "checked",
+    "a": {
+     "kind": "box",
+     "origin": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "size": [
+      10.0,
+      10.0,
+      10.0
+     ]
+    },
+    "b": {
+     "kind": "box",
+     "origin": [
+      5.0,
+      5.0,
+      5.0
+     ],
+     "size": [
+      10.0,
+      10.0,
+      10.0
+     ]
+    },
+    "operation": 1,
+    "level": 2
+   }
+  }
+ ]
+}

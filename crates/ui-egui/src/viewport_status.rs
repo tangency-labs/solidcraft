@@ -51,10 +51,10 @@ pub(crate) fn section_setting(app: &SolveApp, origin: [f64; 3], normal: [f64; 3]
     let distance = crate::prefs::show_mm(app, offset, 1);
     let mut text = match axis {
         Some(axis) => format!("{axis} {distance}"),
-        None => crate::i18n::format("ui.viewport_status_section_tilted", &[("offset", &distance)]),
+        None => solidcraft_ui_text::format("ui.viewport_status_section_tilted", &[("offset", &distance)]),
     };
     if hatch {
-        text = crate::i18n::format("ui.viewport_status_section_hatch", &[("setting", &text)]);
+        text = solidcraft_ui_text::format("ui.viewport_status_section_hatch", &[("setting", &text)]);
     }
     Some(text)
 }
@@ -82,12 +82,12 @@ pub(crate) fn presentation(app: &SolveApp, effect: &Effect) -> Option<StatusItem
     }
     let command = solidcraft_engine::find_command(&effect.command)?;
     let setting = match effect.setting {
-        StatusSetting::Zebra { stripes } => crate::i18n::format("ui.viewport_status_stripes", &[("count", &stripes.to_string())]),
+        StatusSetting::Zebra { stripes } => solidcraft_ui_text::format("ui.viewport_status_stripes", &[("count", &stripes.to_string())]),
         StatusSetting::Draft { pull, angle_deg } => format!("{} · {angle_deg}°", direction(pull)),
         StatusSetting::Environment => String::new(),
-        StatusSetting::Accessibility { direction: from } => crate::i18n::format("ui.viewport_status_from", &[("direction", &direction(from))]),
+        StatusSetting::Accessibility { direction: from } => solidcraft_ui_text::format("ui.viewport_status_from", &[("direction", &direction(from))]),
         StatusSetting::Curvature { radius_mm } => format!("R {}", crate::prefs::show_mm(app, radius_mm, 1)),
-        StatusSetting::Continuity { edge_count } => crate::i18n::format("ui.viewport_status_edges", &[("count", &edge_count.to_string())]),
+        StatusSetting::Continuity { edge_count } => solidcraft_ui_text::format("ui.viewport_status_edges", &[("count", &edge_count.to_string())]),
         StatusSetting::Section { origin_mm, normal, hatch } => section_setting(app, origin_mm, normal, hatch)?,
     };
     Some(StatusItem {
@@ -110,16 +110,25 @@ pub(crate) fn has_effect(app: &SolveApp) -> bool {
     app.session.newest_status_item(&eligible(app)).is_some()
 }
 
+/// Whether an idle Escape is this row's: an open key card always is; an analysis or section
+/// only with the `escape_closes_analyses` preference (off by default, so Escape keeps them).
+pub(crate) fn owns_escape(app: &SolveApp) -> bool {
+    app.viewport_status.open_key.is_some() || (app.preferences.escape_closes_analyses && has_effect(app))
+}
+
 /// Called only after existing Escape owners have yielded. A repeat cannot cascade clears.
 pub(crate) fn escape(app: &mut SolveApp, repeat: bool) -> bool {
     if repeat {
-        return app.viewport_status.open_key.is_some() || has_effect(app);
+        return owns_escape(app);
     }
     if let Some(open) = app.viewport_status.open_key.clone()
         && app.session.status_items().iter().any(|effect| presentation(app, effect).is_some_and(|item| item.has_key && item.id == open))
     {
         app.viewport_status.close_details();
         return true;
+    }
+    if !app.preferences.escape_closes_analyses {
+        return false;
     }
     if let Some(effect) = app.session.newest_status_item(&eligible(app)) {
         clear(app, &effect);
@@ -167,7 +176,7 @@ pub(crate) fn reconcile(app: &mut SolveApp, ctx: &egui::Context) {
     app.viewport_status.reconcile_summary(ctx, members);
     // The popup is a separate foreground host: the badge's Background layer cannot
     // shield it. Tools deliberately remain eligible for their existing row actions.
-    let higher_owner = app.prefs_window.open
+    let higher_owner = app.prefs_window.shell.open
         || app.dialog.is_some()
         || app.keymap.open
         || app.ui.palette_open
@@ -271,7 +280,9 @@ pub(crate) fn dispatch(app: &mut SolveApp, actions: Vec<StatusAction>) {
                         app.viewport_status.open_key = Some(id);
                     }
                 } else if effects.iter().any(|effect| effect.id == StatusId::Section && identity(effect) == id) {
-                    crate::dialogs::edit_section(app);
+                    // The plane the setting shows: the first on show.
+                    let shown = app.session.section.first().map(|c| c.id);
+                    crate::dialogs::edit_section_plane(app, shown);
                 }
             }
         }

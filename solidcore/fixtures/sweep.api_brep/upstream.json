@@ -1,0 +1,1541 @@
+{
+ "cases": [
+  {
+   "name": "curve_sweep_circle_along_z",
+   "upstream_ref": "tests/SM_API_test/src/TestSmBrep.cpp:1731",
+   "inputs": {
+    "op": "curve_sweep",
+    "profile": [
+     {
+      "kind": "arc",
+      "center": [
+       0,
+       0,
+       0
+      ],
+      "radius": 2,
+      "start_deg": 0,
+      "end_deg": 360
+     }
+    ],
+    "sweep": {
+     "path": {
+      "kind": "curve",
+      "points": [
+       [
+        0,
+        0,
+        0
+       ],
+       [
+        0,
+        0,
+        3
+       ],
+       [
+        0,
+        0,
+        7
+       ],
+       [
+        0,
+        0,
+        10
+       ]
+      ]
+     }
+    }
+   }
+  },
+  {
+   "name": "curve_sweep_from_faces_disc",
+   "upstream_ref": "tests/SM_API_test/src/TestSmBrep.cpp:1774",
+   "inputs": {
+    "op": "from_faces",
+    "circles": [
+     [
+      [
+       0,
+       0,
+       0
+      ],
+      2.0
+     ]
+    ],
+    "sweep": {
+     "path": {
+      "kind": "curve",
+      "points": [
+       [
+        0,
+        0,
+        0
+       ],
+       [
+        0,
+        0,
+        3
+       ],
+       [
+        0,
+        0,
+        7
+       ],
+       [
+        0,
+        0,
+        10
+       ]
+      ]
+     }
+    }
+   }
+  },
+  {
+   "name": "curve_sweep_from_edges_disc",
+   "upstream_ref": "tests/SM_API_test/src/TestSmBrep.cpp:1774",
+   "inputs": {
+    "op": "from_edges",
+    "circles": [
+     [
+      [
+       0,
+       0,
+       0
+      ],
+      2.0
+     ]
+    ],
+    "sweep": {
+     "path": {
+      "kind": "curve",
+      "points": [
+       [
+        0,
+        0,
+        0
+       ],
+       [
+        0,
+        0,
+        3
+       ],
+       [
+        0,
+        0,
+        7
+       ],
+       [
+        0,
+        0,
+        10
+       ]
+      ]
+     }
+    }
+   }
+  },
+  {
+   "name": "taper_extrude_null_entry",
+   "upstream_ref": "tests/SM_API_test/src/TestSmBrep.cpp:1841",
+   "inputs": {
+    "op": "taper",
+    "curves": [
+     {
+      "kind": "line",
+      "start": [
+       0,
+       0,
+       0
+      ],
+      "end": [
+       10,
+       0,
+       0
+      ]
+     },
+     {
+      "kind": "line",
+      "start": [
+       10,
+       0,
+       0
+      ],
+      "end": [
+       10,
+       10,
+       0
+      ]
+     },
+     {
+      "kind": "line",
+      "start": [
+       10,
+       10,
+       0
+      ],
+      "end": [
+       0,
+       10,
+       0
+      ]
+     },
+     {
+      "kind": "line",
+      "start": [
+       0,
+       10,
+       0
+      ],
+      "end": [
+       0,
+       0,
+       0
+      ]
+     },
+     {
+      "kind": "null"
+     }
+    ],
+    "height": 10.0,
+    "angle_deg": 5.0,
+    "fillet": false,
+    "caps": 3
+   }
+  },
+  {
+   "name": "taper_extrude_square",
+   "upstream_ref": "tests/SM_API_test/src/TestSmBrep.cpp:1846",
+   "inputs": {
+    "op": "taper",
+    "curves": [
+     {
+      "kind": "line",
+      "start": [
+       0,
+       0,
+       0
+      ],
+      "end": [
+       10,
+       0,
+       0
+      ]
+     },
+     {
+      "kind": "line",
+      "start": [
+       10,
+       0,
+       0
+      ],
+      "end": [
+       10,
+       10,
+       0
+      ]
+     },
+     {
+      "kind": "line",
+      "start": [
+       10,
+       10,
+       0
+      ],
+      "end": [
+       0,
+       10,
+       0
+      ]
+     },
+     {
+      "kind": "line",
+      "start": [
+       0,
+       10,
+       0
+      ],
+      "end": [
+       0,
+       0,
+       0
+      ]
+     }
+    ],
+    "height": 10.0,
+    "angle_deg": 5.0,
+    "fillet": false,
+    "caps": 3
+   }
+  },
+  {
+   "name": "pipe_sweep_zigzag",
+   "upstream_ref": "tests/SM_API_test/src/TestSmBrep.cpp:1856",
+   "inputs": {
+    "op": "pipe",
+    "radius": 1.0,
+    "path": {
+     "kind": "curve",
+     "points": [
+      [
+       0,
+       0,
+       0
+      ],
+      [
+       5,
+       5,
+       0
+      ],
+      [
+       10,
+       0,
+       0
+      ],
+      [
+       15,
+       5,
+       0
+      ]
+     ]
+    },
+    "cap": true
+   }
+  },
+  {
+   "name": "pipe_sweep_zero_radius",
+   "upstream_ref": "tests/SM_API_test/src/TestSmBrep.cpp:1856",
+   "inputs": {
+    "op": "pipe",
+    "radius": 0.0,
+    "path": {
+     "kind": "curve",
+     "points": [
+      [
+       0,
+       0,
+       0
+      ],
+      [
+       5,
+       5,
+       0
+      ],
+      [
+       10,
+       0,
+       0
+      ],
+      [
+       15,
+       5,
+       0
+      ]
+     ]
+    },
+    "cap": true
+   }
+  },
+  {
+   "name": "pipe_sweep_null_path",
+   "upstream_ref": "tests/SM_API_test/src/TestSmBrep.cpp:1856",
+   "inputs": {
+    "op": "pipe",
+    "radius": 1.0,
+    "path": {
+     "kind": "null"
+    },
+    "cap": true
+   }
+  },
+  {
+   "name": "draft_sweep_rectangle",
+   "upstream_ref": "tests/SM_API_test/src/TestSmPrimitives.cpp:401",
+   "inputs": {
+    "op": "draft",
+    "curves": [
+     {
+      "kind": "line",
+      "start": [
+       0,
+       0,
+       0
+      ],
+      "end": [
+       10,
+       0,
+       0
+      ]
+     },
+     {
+      "kind": "line",
+      "start": [
+       10,
+       0,
+       0
+      ],
+      "end": [
+       10,
+       20,
+       0
+      ]
+     },
+     {
+      "kind": "line",
+      "start": [
+       10,
+       20,
+       0
+      ],
+      "end": [
+       0,
+       20,
+       0
+      ]
+     },
+     {
+      "kind": "line",
+      "start": [
+       0,
+       20,
+       0
+      ],
+      "end": [
+       0,
+       0,
+       0
+      ]
+     }
+    ],
+    "height": 10.0,
+    "angle_deg": -5.0,
+    "corner": true,
+    "caps": 3
+   }
+  },
+  {
+   "name": "rotational_sweep_semicircle_sphere",
+   "upstream_ref": "tests/SM_API_test/src/TestSmPrimitives.cpp:261",
+   "inputs": {
+    "op": "rotational",
+    "curves": [
+     {
+      "kind": "arc",
+      "center": [
+       0,
+       0,
+       0
+      ],
+      "radius": 10,
+      "start_deg": 0,
+      "end_deg": 180
+     }
+    ],
+    "base": [
+     0,
+     0,
+     0
+    ],
+    "axis": [
+     1,
+     0,
+     0
+    ],
+    "angle_deg": 360.0,
+    "cap": false
+   }
+  },
+  {
+   "name": "rotational_sweep_degenerate_curve",
+   "upstream_ref": "tests/SM_API_test/src/TestSmPrimitives.cpp:283",
+   "inputs": {
+    "op": "rotational",
+    "curves": [
+     {
+      "kind": "curve",
+      "points": [
+       [
+        1,
+        1,
+        1
+       ],
+       [
+        1,
+        1,
+        1
+       ],
+       [
+        1,
+        1,
+        1
+       ],
+       [
+        1,
+        1,
+        1
+       ]
+      ]
+     }
+    ],
+    "base": [
+     0,
+     0,
+     0
+    ],
+    "axis": [
+     0,
+     0,
+     1
+    ],
+    "angle_deg": 90.0,
+    "cap": false
+   }
+  },
+  {
+   "name": "linear_sweep_reps_zero_capped",
+   "upstream_ref": "tests/SM_API_test/src/TestSmPrimitives.cpp:298",
+   "inputs": {
+    "op": "linear_reps",
+    "curves": [
+     {
+      "kind": "arc",
+      "center": [
+       0,
+       0,
+       0
+      ],
+      "radius": 10,
+      "start_deg": 0,
+      "end_deg": 180
+     }
+    ],
+    "dir": [
+     0,
+     0,
+     1
+    ],
+    "dist": 5.0,
+    "reps": 0,
+    "cap": true
+   }
+  },
+  {
+   "name": "linear_sweep_semicircle_and_line",
+   "upstream_ref": "tests/SM_API_test/src/TestSmPrimitives.cpp:312",
+   "inputs": {
+    "op": "linear",
+    "curves": [
+     {
+      "kind": "arc",
+      "center": [
+       0,
+       0,
+       0
+      ],
+      "radius": 10,
+      "start_deg": 0,
+      "end_deg": 180
+     },
+     {
+      "kind": "line",
+      "start": [
+       -10,
+       0,
+       0
+      ],
+      "end": [
+       10,
+       0,
+       0
+      ]
+     }
+    ],
+    "dir": [
+     0,
+     0,
+     1
+    ],
+    "dist": 10.0,
+    "cap": true
+   }
+  },
+  {
+   "name": "linear_sweep_plane",
+   "upstream_ref": "tests/SM_API_test/src/TestSmPrimitives.cpp:344",
+   "inputs": {
+    "op": "linear",
+    "curves": [
+     {
+      "kind": "line",
+      "start": [
+       0,
+       0,
+       0
+      ],
+      "end": [
+       4,
+       2,
+       0
+      ]
+     }
+    ],
+    "dir": [
+     0,
+     0,
+     1
+    ],
+    "dist": 10.0,
+    "cap": false
+   }
+  },
+  {
+   "name": "linear_sweep_cylinder",
+   "upstream_ref": "tests/SM_API_test/src/TestSmPrimitives.cpp:372",
+   "inputs": {
+    "op": "linear",
+    "curves": [
+     {
+      "kind": "arc",
+      "center": [
+       0,
+       0,
+       0
+      ],
+      "radius": 10,
+      "start_deg": 0,
+      "end_deg": 360
+     }
+    ],
+    "dir": [
+     0,
+     0,
+     1
+    ],
+    "dist": 10.0,
+    "cap": true
+   }
+  },
+  {
+   "name": "planar_path_empty",
+   "upstream_ref": "tests/SM_API_test/src/TestSmBrep.cpp:2879",
+   "inputs": {
+    "op": "planar_path",
+    "profile": [],
+    "path": [],
+    "move_profile": true,
+    "caps": 3
+   }
+  },
+  {
+   "name": "planar_path_rectangle_line",
+   "upstream_ref": "tests/SM_API_test/src/TestSmBrep.cpp:2906",
+   "inputs": {
+    "op": "planar_path",
+    "profile": [
+     {
+      "kind": "line",
+      "start": [
+       -1,
+       -0.5,
+       0
+      ],
+      "end": [
+       1,
+       -0.5,
+       0
+      ]
+     },
+     {
+      "kind": "line",
+      "start": [
+       1,
+       -0.5,
+       0
+      ],
+      "end": [
+       1,
+       0.5,
+       0
+      ]
+     },
+     {
+      "kind": "line",
+      "start": [
+       1,
+       0.5,
+       0
+      ],
+      "end": [
+       -1,
+       0.5,
+       0
+      ]
+     },
+     {
+      "kind": "line",
+      "start": [
+       -1,
+       0.5,
+       0
+      ],
+      "end": [
+       -1,
+       -0.5,
+       0
+      ]
+     }
+    ],
+    "path": [
+     {
+      "kind": "line",
+      "start": [
+       0,
+       0,
+       0
+      ],
+      "end": [
+       20,
+       0,
+       0
+      ]
+     }
+    ],
+    "move_profile": true,
+    "caps": 1
+   }
+  },
+  {
+   "name": "planar_path_circle_caps0",
+   "upstream_ref": "tests/SM_API_test/src/TestSmBrep.cpp:3004",
+   "inputs": {
+    "op": "planar_path",
+    "profile": [
+     {
+      "kind": "circle",
+      "center": [
+       0,
+       0,
+       0
+      ],
+      "radius": 1.0
+     }
+    ],
+    "path": [
+     {
+      "kind": "line",
+      "start": [
+       0,
+       0,
+       0
+      ],
+      "end": [
+       0,
+       0,
+       10
+      ]
+     }
+    ],
+    "move_profile": true,
+    "caps": 0
+   }
+  },
+  {
+   "name": "planar_path_circle_caps1",
+   "upstream_ref": "tests/SM_API_test/src/TestSmBrep.cpp:3004",
+   "inputs": {
+    "op": "planar_path",
+    "profile": [
+     {
+      "kind": "circle",
+      "center": [
+       0,
+       0,
+       0
+      ],
+      "radius": 1.0
+     }
+    ],
+    "path": [
+     {
+      "kind": "line",
+      "start": [
+       0,
+       0,
+       0
+      ],
+      "end": [
+       0,
+       0,
+       10
+      ]
+     }
+    ],
+    "move_profile": true,
+    "caps": 1
+   }
+  },
+  {
+   "name": "planar_path_circle_caps2",
+   "upstream_ref": "tests/SM_API_test/src/TestSmBrep.cpp:3004",
+   "inputs": {
+    "op": "planar_path",
+    "profile": [
+     {
+      "kind": "circle",
+      "center": [
+       0,
+       0,
+       0
+      ],
+      "radius": 1.0
+     }
+    ],
+    "path": [
+     {
+      "kind": "line",
+      "start": [
+       0,
+       0,
+       0
+      ],
+      "end": [
+       0,
+       0,
+       10
+      ]
+     }
+    ],
+    "move_profile": true,
+    "caps": 2
+   }
+  },
+  {
+   "name": "planar_path_circle_caps3",
+   "upstream_ref": "tests/SM_API_test/src/TestSmBrep.cpp:3004",
+   "inputs": {
+    "op": "planar_path",
+    "profile": [
+     {
+      "kind": "circle",
+      "center": [
+       0,
+       0,
+       0
+      ],
+      "radius": 1.0
+     }
+    ],
+    "path": [
+     {
+      "kind": "line",
+      "start": [
+       0,
+       0,
+       0
+      ],
+      "end": [
+       0,
+       0,
+       10
+      ]
+     }
+    ],
+    "move_profile": true,
+    "caps": 3
+   }
+  },
+  {
+   "name": "planar_path_circle_bad_caps-1",
+   "upstream_ref": "tests/SM_API_test/src/TestSmBrep.cpp:3079",
+   "inputs": {
+    "op": "planar_path",
+    "profile": [
+     {
+      "kind": "circle",
+      "center": [
+       0,
+       0,
+       0
+      ],
+      "radius": 1.0
+     }
+    ],
+    "path": [
+     {
+      "kind": "line",
+      "start": [
+       0,
+       0,
+       0
+      ],
+      "end": [
+       0,
+       0,
+       10
+      ]
+     }
+    ],
+    "move_profile": true,
+    "caps": -1
+   }
+  },
+  {
+   "name": "planar_path_circle_bad_caps4",
+   "upstream_ref": "tests/SM_API_test/src/TestSmBrep.cpp:3079",
+   "inputs": {
+    "op": "planar_path",
+    "profile": [
+     {
+      "kind": "circle",
+      "center": [
+       0,
+       0,
+       0
+      ],
+      "radius": 1.0
+     }
+    ],
+    "path": [
+     {
+      "kind": "line",
+      "start": [
+       0,
+       0,
+       0
+      ],
+      "end": [
+       0,
+       0,
+       10
+      ]
+     }
+    ],
+    "move_profile": true,
+    "caps": 4
+   }
+  },
+  {
+   "name": "planar_path_connected",
+   "upstream_ref": "tests/SM_API_test/src/TestSmBrep.cpp:3096",
+   "inputs": {
+    "op": "planar_path",
+    "profile": [
+     {
+      "kind": "circle",
+      "center": [
+       0,
+       0,
+       0
+      ],
+      "radius": 1.0
+     }
+    ],
+    "path": [
+     {
+      "kind": "line",
+      "start": [
+       0,
+       0,
+       0
+      ],
+      "end": [
+       0,
+       0,
+       10
+      ]
+     },
+     {
+      "kind": "line",
+      "start": [
+       0,
+       0,
+       10
+      ],
+      "end": [
+       5,
+       0,
+       15
+      ]
+     }
+    ],
+    "move_profile": true,
+    "caps": 3
+   }
+  },
+  {
+   "name": "curve_sweep_open_profile_capped",
+   "upstream_ref": "tests/SM_API_test/src/TestSmGeneral.cpp:1180",
+   "inputs": {
+    "op": "curve_sweep",
+    "profile": [
+     {
+      "kind": "line",
+      "start": [
+       1,
+       0,
+       0
+      ],
+      "end": [
+       0,
+       1,
+       0
+      ]
+     }
+    ],
+    "sweep": {
+     "path": {
+      "kind": "line",
+      "start": [
+       0,
+       0,
+       0
+      ],
+      "end": [
+       0,
+       0,
+       10
+      ]
+     },
+     "scale_reference": {
+      "kind": "line",
+      "start": [
+       0,
+       0,
+       0
+      ],
+      "end": [
+       0,
+       0,
+       10
+      ]
+     },
+     "scale_curve": {
+      "kind": "line",
+      "start": [
+       1,
+       0,
+       0
+      ],
+      "end": [
+       2,
+       0,
+       10
+      ]
+     },
+     "options": [
+      true,
+      false,
+      false,
+      false,
+      false
+     ]
+    }
+   }
+  },
+  {
+   "name": "curve_sweep_closed_profile_capped",
+   "upstream_ref": "tests/SM_API_test/src/TestSmGeneral.cpp:1203",
+   "inputs": {
+    "op": "curve_sweep",
+    "profile": [
+     {
+      "kind": "arc",
+      "center": [
+       0,
+       0,
+       0
+      ],
+      "radius": 1,
+      "start_deg": 0,
+      "end_deg": 360
+     }
+    ],
+    "sweep": {
+     "path": {
+      "kind": "line",
+      "start": [
+       0,
+       0,
+       0
+      ],
+      "end": [
+       0,
+       0,
+       10
+      ]
+     },
+     "scale_reference": {
+      "kind": "line",
+      "start": [
+       0,
+       0,
+       0
+      ],
+      "end": [
+       0,
+       0,
+       10
+      ]
+     },
+     "scale_curve": {
+      "kind": "line",
+      "start": [
+       1,
+       0,
+       0
+      ],
+      "end": [
+       2,
+       0,
+       10
+      ]
+     },
+     "options": [
+      true,
+      false,
+      false,
+      false,
+      false
+     ]
+    }
+   }
+  },
+  {
+   "name": "curve_sweep_no_profile",
+   "inputs": {
+    "op": "curve_sweep",
+    "profile": [],
+    "sweep": {
+     "path": {
+      "kind": "curve",
+      "points": [
+       [
+        0,
+        0,
+        0
+       ],
+       [
+        0,
+        0,
+        3
+       ],
+       [
+        0,
+        0,
+        7
+       ],
+       [
+        0,
+        0,
+        10
+       ]
+      ]
+     }
+    }
+   }
+  },
+  {
+   "name": "curve_sweep_no_path",
+   "inputs": {
+    "op": "curve_sweep",
+    "profile": [
+     {
+      "kind": "circle",
+      "center": [
+       0,
+       0,
+       0
+      ],
+      "radius": 1.0
+     }
+    ],
+    "sweep": {
+     "path": {
+      "kind": "null"
+     }
+    }
+   }
+  },
+  {
+   "name": "from_faces_none",
+   "inputs": {
+    "op": "from_faces",
+    "circles": [],
+    "sweep": {
+     "path": {
+      "kind": "curve",
+      "points": [
+       [
+        0,
+        0,
+        0
+       ],
+       [
+        0,
+        0,
+        3
+       ],
+       [
+        0,
+        0,
+        7
+       ],
+       [
+        0,
+        0,
+        10
+       ]
+      ]
+     }
+    }
+   }
+  },
+  {
+   "name": "from_edges_none",
+   "inputs": {
+    "op": "from_edges",
+    "circles": [],
+    "sweep": {
+     "path": {
+      "kind": "curve",
+      "points": [
+       [
+        0,
+        0,
+        0
+       ],
+       [
+        0,
+        0,
+        3
+       ],
+       [
+        0,
+        0,
+        7
+       ],
+       [
+        0,
+        0,
+        10
+       ]
+      ]
+     }
+    }
+   }
+  },
+  {
+   "name": "from_faces_no_path",
+   "inputs": {
+    "op": "from_faces",
+    "circles": [
+     [
+      [
+       0,
+       0,
+       0
+      ],
+      2.0
+     ]
+    ],
+    "sweep": {
+     "path": {
+      "kind": "null"
+     }
+    }
+   }
+  },
+  {
+   "name": "taper_extrude_empty",
+   "inputs": {
+    "op": "taper",
+    "curves": [],
+    "height": 10.0,
+    "angle_deg": 5.0,
+    "fillet": true,
+    "caps": 3
+   }
+  },
+  {
+   "name": "linear_reps_empty",
+   "inputs": {
+    "op": "linear_reps",
+    "curves": [],
+    "dir": [
+     0,
+     0,
+     1
+    ],
+    "dist": 5.0,
+    "reps": 2,
+    "cap": false
+   }
+  },
+  {
+   "name": "rotational_reps_empty",
+   "inputs": {
+    "op": "rotational_reps",
+    "curves": [],
+    "base": [
+     0,
+     0,
+     0
+    ],
+    "axis": [
+     1,
+     0,
+     0
+    ],
+    "angle_deg": 90.0,
+    "reps": 2,
+    "cap": false
+   }
+  },
+  {
+   "name": "rotational_reps_semicircle",
+   "inputs": {
+    "op": "rotational_reps",
+    "curves": [
+     {
+      "kind": "arc",
+      "center": [
+       0,
+       0,
+       0
+      ],
+      "radius": 10,
+      "start_deg": 0,
+      "end_deg": 180
+     }
+    ],
+    "base": [
+     0,
+     0,
+     0
+    ],
+    "axis": [
+     1,
+     0,
+     0
+    ],
+    "angle_deg": 90.0,
+    "reps": 4,
+    "cap": false
+   }
+  },
+  {
+   "name": "linear_sweep_hermite_no_copy",
+   "inputs": {
+    "op": "linear",
+    "curves": [
+     {
+      "kind": "circle",
+      "center": [
+       0,
+       0,
+       0
+      ],
+      "radius": 1.0
+     },
+     {
+      "kind": "hermite",
+      "p1": [
+       0,
+       0,
+       0
+      ],
+      "v1": [
+       1,
+       0,
+       0
+      ],
+      "p2": [
+       1,
+       1,
+       0
+      ],
+      "v2": [
+       0,
+       1,
+       0
+      ]
+     }
+    ],
+    "dir": [
+     0,
+     0,
+     1
+    ],
+    "dist": 1.0,
+    "cap": true
+   }
+  },
+  {
+   "name": "linear_sweep_hermite_before_null",
+   "inputs": {
+    "op": "linear",
+    "curves": [
+     {
+      "kind": "hermite",
+      "p1": [
+       0,
+       0,
+       0
+      ],
+      "v1": [
+       1,
+       0,
+       0
+      ],
+      "p2": [
+       1,
+       1,
+       0
+      ],
+      "v2": [
+       0,
+       1,
+       0
+      ]
+     },
+     {
+      "kind": "null"
+     }
+    ],
+    "dir": [
+     0,
+     0,
+     1
+    ],
+    "dist": 1.0,
+    "cap": true
+   }
+  },
+  {
+   "name": "linear_sweep_null_before_hermite",
+   "inputs": {
+    "op": "linear",
+    "curves": [
+     {
+      "kind": "null"
+     },
+     {
+      "kind": "hermite",
+      "p1": [
+       0,
+       0,
+       0
+      ],
+      "v1": [
+       1,
+       0,
+       0
+      ],
+      "p2": [
+       1,
+       1,
+       0
+      ],
+      "v2": [
+       0,
+       1,
+       0
+      ]
+     }
+    ],
+    "dir": [
+     0,
+     0,
+     1
+    ],
+    "dist": 1.0,
+    "cap": true
+   }
+  },
+  {
+   "name": "draft_sweep_hermite",
+   "inputs": {
+    "op": "draft",
+    "curves": [
+     {
+      "kind": "hermite",
+      "p1": [
+       0,
+       0,
+       0
+      ],
+      "v1": [
+       1,
+       0,
+       0
+      ],
+      "p2": [
+       1,
+       1,
+       0
+      ],
+      "v2": [
+       0,
+       1,
+       0
+      ]
+     }
+    ],
+    "height": 1.0,
+    "angle_deg": 5.0,
+    "corner": false,
+    "caps": 0
+   }
+  },
+  {
+   "name": "pipe_sweep_negative_zero_radius",
+   "inputs": {
+    "op": "pipe",
+    "radius": -0.0,
+    "path": {
+     "kind": "curve",
+     "points": [
+      [
+       0,
+       0,
+       0
+      ],
+      [
+       0,
+       0,
+       3
+      ],
+      [
+       0,
+       0,
+       7
+      ],
+      [
+       0,
+       0,
+       10
+      ]
+     ]
+    },
+    "cap": false
+   }
+  },
+  {
+   "name": "pipe_sweep_analytic_circle_path",
+   "inputs": {
+    "op": "pipe",
+    "radius": 0.1,
+    "path": {
+     "kind": "analytic_circle",
+     "center": [
+      0,
+      0,
+      0
+     ],
+     "radius": 5.0
+    },
+    "cap": false
+   }
+  }
+ ]
+}

@@ -50,6 +50,25 @@ fn look_at_on_the_active_sketch_keeps_a_wider_zoom() {
     assert_eq!(h.app.cam.distance, 5000.0, "it never zooms in on a zoom the user chose");
 }
 
+/// A key given to Look At faces the open sketch with nothing selected, as the navigation bar's
+/// button (which shows that key) and Ctrl+8 do; it used to do nothing there, because Normal to
+/// Selection is disabled without a planar face or plane.
+#[test]
+fn look_ats_own_key_faces_the_open_sketch_with_nothing_selected() {
+    let (mut h, id) = far_sketch();
+    h.app.session.active_sketch = Some(id);
+    crate::keymap::bind(&mut h.app, "view.normal_to", "N", true).unwrap();
+    h.app.cam.yaw = 0.7;
+    h.app.cam.pitch = 0.4;
+    assert!(h.app.session.selection.is_empty());
+    crate::keymap::press(&mut h.app, "N", false);
+    assert!((h.app.cam.back() - Vec3::new(0.0, 0.0, 1.0)).len() < 1e-6, "facing the sketch: {:?}", h.app.cam.back());
+    assert!(near(h.app.cam.target, Vec3::new(340.0, 490.0, 8.0)), "{:?}", h.app.cam.target);
+    // Holding the key does not turn the view to the other side and back.
+    crate::keymap::press(&mut h.app, "N", true);
+    assert!((h.app.cam.back() - Vec3::new(0.0, 0.0, 1.0)).len() < 1e-6, "a repeat changes nothing: {:?}", h.app.cam.back());
+}
+
 #[test]
 fn an_empty_sketch_keeps_its_planes_origin() {
     let mut h = Harness::new();
@@ -131,4 +150,30 @@ fn editing_a_sketch_in_a_turned_component_faces_its_world_plane() {
     assert!((back.cross(plane.normal())).len() < 1e-5, "facing world plane: back={back:?} n={:?}", plane.normal());
     assert!(right.dot(plane.x).abs() > 0.99, "x right: {right:?} vs {:?}", plane.x);
     assert!(up.dot(plane.y) > 0.99, "y up: {up:?} vs {:?}", plane.y);
+}
+
+/// #13111: the viewport menu's Look At on a construction plane. It resolved only the origin
+/// planes by name, so a plane of the model's own (here one tilted 45°) fell through to the
+/// selection's Look At, which does nothing without a selection and left the camera where it was.
+#[test]
+fn the_viewport_menu_looks_at_a_construction_plane() {
+    let mut h = Harness::new();
+    h.app.home.open = false;
+    h.app.preferences.look_at_anim = false;
+    h.app
+        .run(
+            "construct.plane.three_points",
+            json!({"a": {"point": [0, 0, 0]}, "b": {"point": [10, 0, 0]}, "c": {"point": [0, 10, 10]}, "name": "Tilted"}),
+        )
+        .unwrap();
+    let want = crate::dialogs::plane_by_name(&h.app.session, "Tilted").expect("the plane exists");
+    assert!(want.normal().z.abs() > 0.1 && want.normal().z.abs() < 0.99, "a tilted plane: {:?}", want.normal());
+    let before = h.app.cam.back();
+    h.app.menu.plane = Some("Tilted".to_string());
+    let items = crate::context_menu::items(&h.app, &crate::context_menu::Target::Viewport);
+    let look = items.iter().find(|i| i.id == "ui.lookAt").cloned().expect("a plane's menu has Look At");
+    crate::context_menu::run_item(&mut h.app, &look, egui::Pos2::ZERO);
+    assert!((h.app.cam.back() - before).len() > 1e-3, "the camera moved");
+    assert!((h.app.cam.back().cross(want.normal())).len() < 1e-6, "facing the plane along its normal: {:?}", h.app.cam.back());
+    assert!(near(h.app.cam.target, want.origin), "centred on the plane's origin: {:?}", h.app.cam.target);
 }

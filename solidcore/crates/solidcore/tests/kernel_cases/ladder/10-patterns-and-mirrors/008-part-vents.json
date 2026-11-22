@@ -1,0 +1,299 @@
+{
+  "area": "ladder/10-patterns-and-mirrors",
+  "bodies": {
+    "b132": {
+      "keeping_splines": false,
+      "trusted": true
+    },
+    "b155": {
+      "keeping_splines": false,
+      "trusted": true
+    }
+  },
+  "calls": [
+    {
+      "inputs": [
+        "b155"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b156"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b156"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b157"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b132"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b158"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b158"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b159"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b157"
+      ],
+      "op": "tagged",
+      "outputs": [
+        "b160"
+      ],
+      "params": {
+        "operand": 0
+      }
+    },
+    {
+      "inputs": [
+        "b159"
+      ],
+      "op": "tagged",
+      "outputs": [
+        "b161"
+      ],
+      "params": {
+        "operand": 1
+      }
+    },
+    {
+      "inputs": [
+        "b160",
+        "b161"
+      ],
+      "op": "boolean",
+      "outputs": [
+        "b162"
+      ],
+      "params": {
+        "op": "subtract"
+      }
+    }
+  ],
+  "case": "008-part-vents",
+  "expected": {
+    "bbox": {
+      "max": [
+        60,
+        40,
+        35
+      ],
+      "min": [
+        0,
+        0,
+        0
+      ]
+    },
+    "body_count": 1,
+    "method": "pattern = 4 x the feature: each d3 vent goes through the shelled top skin (z 18.5..20) into the cavity and meets nothing else (the M6 hole's tube is 7.3 away, the wall's 6 past y = 24): V = 09/011 - 4 pi 1.5^2 1.5; the bbox is the part's",
+    "source": "analytic",
+    "sources": [],
+    "tolerance": {
+      "rel": 0.0001
+    },
+    "volume_mm3": 15355.301474157,
+    "what": "the running part with a d3 vent hole in its top patterned 4 times at 5 mm"
+  },
+  "expressible": true,
+  "golden": {
+    "measured": {
+      "area_mm2": 20922.655884695778,
+      "body_count": 1,
+      "edges": 152,
+      "faces": 59,
+      "vertices": 100,
+      "volume_mm3": 15355.288772644028
+    },
+    "status": "pass",
+    "unstable": null
+  },
+  "operation_expressible": true,
+  "outcome": {
+    "ran": true,
+    "raw_counts": {
+      "edges": 152,
+      "faces": 59,
+      "vertices": 100
+    }
+  },
+  "records": "008-part-vents.bodies.json.gz",
+  "result": [
+    {
+      "body": "Part",
+      "made": "b162"
+    }
+  ],
+  "rig": {
+    "error": null,
+    "known_failing": null,
+    "measured": {
+      "area_mm2": 20922.65590857008,
+      "body_count": 1,
+      "edges": 152,
+      "faces": 59,
+      "vertices": 100,
+      "volume_mm3": 15355.289039002431
+    },
+    "refused_with": null,
+    "status": "pass"
+  },
+  "sources": [],
+  "traced_ops": [
+    "extrude",
+    "extrude",
+    "copy",
+    "copy",
+    "copy",
+    "copy",
+    "tagged",
+    "tagged",
+    "boolean",
+    "revolve",
+    "copy",
+    "copy",
+    "copy",
+    "copy",
+    "tagged",
+    "tagged",
+    "boolean",
+    "extrude",
+    "copy",
+    "copy",
+    "copy",
+    "copy",
+    "tagged",
+    "tagged",
+    "boolean",
+    "extrude",
+    "copy",
+    "copy",
+    "copy",
+    "copy",
+    "tagged",
+    "tagged",
+    "boolean",
+    "extrude",
+    "copy",
+    "copy",
+    "copy",
+    "copy",
+    "tagged",
+    "tagged",
+    "boolean",
+    "extrude",
+    "copy",
+    "copy",
+    "copy",
+    "copy",
+    "tagged",
+    "tagged",
+    "boolean",
+    "extrude",
+    "copy",
+    "copy",
+    "copy",
+    "copy",
+    "tagged",
+    "tagged",
+    "boolean",
+    "copy",
+    "copy",
+    "tagged",
+    "blend_dropping",
+    "copy",
+    "copy",
+    "tagged",
+    "blend_dropping",
+    "copy",
+    "copy",
+    "tagged",
+    "blend_dropping",
+    "copy",
+    "copy",
+    "tagged",
+    "blend_dropping",
+    "copy",
+    "copy",
+    "tagged",
+    "blend_dropping",
+    "copy",
+    "copy",
+    "tagged",
+    "shell",
+    "extrude",
+    "copy",
+    "copy",
+    "copy",
+    "copy",
+    "tagged",
+    "tagged",
+    "boolean",
+    "extrude",
+    "extrude",
+    "extrude",
+    "copy",
+    "copy",
+    "copy",
+    "copy",
+    "tagged",
+    "tagged",
+    "boolean",
+    "copy",
+    "copy",
+    "copy",
+    "copy",
+    "tagged",
+    "tagged",
+    "boolean",
+    "copy",
+    "copy",
+    "copy",
+    "copy",
+    "tagged",
+    "tagged",
+    "boolean",
+    "copy",
+    "copy",
+    "copy",
+    "copy",
+    "tagged",
+    "tagged",
+    "boolean",
+    "copy",
+    "copy",
+    "copy",
+    "copy",
+    "tagged",
+    "tagged",
+    "boolean",
+    "copy",
+    "copy",
+    "copy",
+    "copy",
+    "tagged",
+    "tagged",
+    "boolean"
+  ],
+  "ungraded": [],
+  "what": "the running part with a d3 vent hole in its top patterned 4 times at 5 mm",
+  "why_not": []
+}

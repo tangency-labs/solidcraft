@@ -1,0 +1,86 @@
+{
+  "area": "fillets",
+  "bodies": {
+    "b1": {
+      "keeping_splines": false,
+      "trusted": true
+    }
+  },
+  "calls": [
+    {
+      "inputs": [
+        "b1"
+      ],
+      "op": "blend_dropping",
+      "outputs": [
+        "b2"
+      ],
+      "params": {
+        "edges": {
+          "kind": "edge",
+          "picked": [
+            {
+              "at": [
+                [
+                  5.0,
+                  0.0,
+                  13.0
+                ],
+                [
+                  11.0,
+                  0.0,
+                  13.0
+                ]
+              ],
+              "index": 18
+            }
+          ],
+          "points": [
+            [
+              8.0,
+              0.0,
+              13.0
+            ]
+          ],
+          "tolerance": 0.01
+        },
+        "kind": "chamfer",
+        "sizes": [
+          0.5
+        ],
+        "turn": "mitre"
+      }
+    }
+  ],
+  "case": "11991-chamfer-cylinder-edge-ending-on-a-round-tangent-line",
+  "expected": {
+    "body_count": 1,
+    "method": "Before: 30*20*20 - (1 - pi/4)*5^2*20 + (pi*2^2/2)*6 = 12000 - 500 (1 - pi/4) + 12 pi = 11930.398193541801. The chamfer's two lines are where a ball of radius 0.5 touching the face y = 0 and the circle from outside touches them (as SolidCraft places a distance chamfer on a curved face, 0.30.1 and rc.3 alike): in the section x = const, (y, z), P1 = (0, 15 - sqrt 6) on the face and T2 = (-0.4, 15 - 0.8 sqrt 6) on the circle; it runs the full 6 mm between the cylinder's end faces. It adds 6 times the triangle P1 E T2 (E = (0, 13), area 0.08989794855663576) less the circle's segment between E and T2 (chord |E T2| = 0.40203584802083275, angle 2 asin(chord/4), segment 2 (angle - sin angle) = 0.002715841580661571): A = 0.08718210697597419. Volume 11930.398193541801 + 6 A = 11930.921286183657. body_count 1",
+    "outcome": "solid",
+    "source": "analytic",
+    "sources": [
+      "tangency-labs/solidcraft#11991"
+    ],
+    "tolerance": {
+      "rel": 1e-09
+    },
+    "volume_mm3": 11930.921286183657,
+    "what": "the chamfer twin of 11991-round-cylinder-edge-ending-on-a-round-tangent-line: a box 30 x 20 x 20 with its vertical edge at x = y = 0 rounded R5, joined with a half cylinder r2 along x (axis y = 0, z = 15, x 5..11) standing out of the front face y = 0; the cylinder's end x = 5 lies exactly on the line where the front face runs tangent into the R5 round. A 0.5 chamfer on the concave edge where the cylinder meets the front face (z = 13). Failed on 0.40.0-rc.2 with SMLib status 1001; builds on rc.3."
+  },
+  "expressible": true,
+  "operation_expressible": true,
+  "records": "11991-chamfer-cylinder-edge-ending-on-a-round-tangent-line.bodies.json.gz",
+  "result": [
+    {
+      "body": "Body1",
+      "made": "b2"
+    }
+  ],
+  "sources": [
+    "tangency-labs/solidcraft#11991",
+    "tangency-labs/solidcore#2843"
+  ],
+  "ungraded": [],
+  "what": "the chamfer twin of 11991-round-cylinder-edge-ending-on-a-round-tangent-line: a box 30 x 20 x 20 with its vertical edge at x = y = 0 rounded R5, joined with a half cylinder r2 along x (axis y = 0, z = 15, x 5..11) standing out of the front face y = 0; the cylinder's end x = 5 lies exactly on the line where the front face runs tangent into the R5 round. A 0.5 chamfer on the concave edge where the cylinder meets the front face (z = 13). Failed on 0.40.0-rc.2 with SMLib status 1001; builds on rc.3.",
+  "why_not": []
+}

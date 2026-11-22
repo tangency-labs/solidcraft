@@ -1,6 +1,7 @@
 use crate::scenario::Harness;
 use serde_json::{Value, json};
 use solidcraft_engine::doc::{FeatureKind, kernel};
+use solidcraft_engine::geom::MeshGeom;
 
 fn fixture(mut h: Harness, extra: Value) -> Harness {
     h.app.run("sketch.create", json!({"plane":"XY","name":"Profile"})).unwrap();

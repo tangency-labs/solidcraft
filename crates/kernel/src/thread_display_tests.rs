@@ -3,6 +3,7 @@
 use solidcore_record::Vec3;
 use solidcraft_geom::Mesh;
 use solidcraft_geom::prelude::*;
+use solidcraft_geom::tess::EvaluateMesh as _;
 use solidcraft_geom::tess::TessPlan;
 
 use std::f64::consts::{PI, TAU};
@@ -74,12 +75,14 @@ fn quality(plan: &TessPlan, mesh: &Mesh) -> Quality {
     }
     for f in &plan.faces {
         let Some(s) = f.surface.and_then(|i| plan.surfaces.get(i as usize)) else { continue };
-        let pos = |k: u32| f.fixed.get(k as usize).copied().unwrap_or_else(|| s.eval(f.uv[k as usize][0], f.uv[k as usize][1]).0);
+        let pos = |k: u32| {
+            f.fixed.get(k as usize).copied().unwrap_or_else(|| solidcraft_geom::tess::from_kernel(s.eval(f.uv[k as usize][0], f.uv[k as usize][1]).0))
+        };
         for t in &f.triangles {
             let mid = (pos(t[0]) + pos(t[1]) + pos(t[2])) * (1.0 / 3.0);
             let mut uv = f.uv[t[0] as usize];
             for _ in 0..8 {
-                let Some((p, su, sv)) = s.derivs(uv[0], uv[1]) else { break };
+                let Some((p, su, sv)) = s.derivs(uv[0], uv[1]).map(solidcraft_geom::tess::from_kernel3) else { break };
                 let d = mid - p;
                 let (a, b, c) = (su.dot(su), su.dot(sv), sv.dot(sv));
                 let det = a * c - b * b;
@@ -90,6 +93,7 @@ fn quality(plan: &TessPlan, mesh: &Mesh) -> Quality {
                 uv = [uv[0] + (c * x - b * y) / det, uv[1] + (a * y - b * x) / det];
             }
             let (on, n) = s.eval(uv[0], uv[1]);
+            let (on, n) = (solidcraft_geom::tess::from_kernel(on), solidcraft_geom::tess::from_kernel(n));
             let sag = (on - mid).dot(n).abs();
             q.worst_sag = q.worst_sag.max(sag);
         }
@@ -134,7 +138,7 @@ fn thread_display_mesh_stays_on_its_surfaces() {
         let tol = tol(&b);
         let plan =
             b.mesh_plan(&crate::MeshTolerance { chord: tol, angle: Some(DISPLAY_ANGLE) }).unwrap_or_else(|e| panic!("{name}: no display plan: {e}"));
-        let mesh = plan.evaluate();
+        let mesh = plan.evaluate_mesh();
         let q = quality(&plan, &mesh);
         assert!(q.worst_sag <= 1.5 * tol, "{name}: a triangle lies {} mm off its surface (tolerance {tol})", q.worst_sag);
         // Every vertex of the cylinders on its cylinder, every triangle centre within the
@@ -176,7 +180,7 @@ fn thread_display_mesh_has_no_degenerate_or_flipped_triangles() {
         let plan = b
             .mesh_plan(&crate::MeshTolerance { chord: tol(&b), angle: Some(DISPLAY_ANGLE) })
             .unwrap_or_else(|e| panic!("{name}: no display plan: {e}"));
-        let mesh = plan.evaluate();
+        let mesh = plan.evaluate_mesh();
         let q = quality(&plan, &mesh);
         assert!(q.tris > 1000, "{name}: {} triangles", q.tris);
         assert_eq!(q.slivers, 0, "{name}: degenerate triangles");

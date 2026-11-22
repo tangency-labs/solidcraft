@@ -1,0 +1,37 @@
+{
+  "area": "history",
+  "bodies": {},
+  "calls": [],
+  "case": "cov-timeline-suppress-unknown-feature-refused",
+  "expected": {
+    "method": "no feature named Nope: a clean refusal naming it",
+    "outcome": "refused",
+    "refusal": "no feature `Nope`",
+    "source": "invariants",
+    "sources": [],
+    "what": "timeline.suppress of a feature the design does not have"
+  },
+  "expressible": false,
+  "operation_expressible": false,
+  "outcome": {
+    "engine_error": "step 2 (timeline.suppress): invalid parameters for `timeline.suppress`: no feature `Nope`",
+    "ran": false
+  },
+  "result": [],
+  "rig": {
+    "error": null,
+    "known_failing": null,
+    "measured": null,
+    "refused_with": "step 2 (timeline.suppress): invalid parameters for `timeline.suppress`: no feature `Nope`",
+    "status": "pass"
+  },
+  "sources": [],
+  "traced_ops": [
+    "extrude"
+  ],
+  "ungraded": [],
+  "what": "timeline.suppress of a feature the design does not have",
+  "why_not": [
+    "the failure is SolidCraft's, not a kernel operation's: step 2 (timeline.suppress): invalid parameters for `timeline.suppress`: no feature `Nope`"
+  ]
+}

@@ -1,0 +1,1943 @@
+{
+ "issue": "https://github.com/tangency-labs/solidcraft/issues/3396",
+ "pr": "https://github.com/tangency-labs/solidcraft/pull/4012",
+ "test": "none: not fixed on truck (paused under #3992); geometry from the user's design attached to #3396",
+ "summary": "Joining the layers of the user's MasonJar_BreathingCap_v2, six bodies stacked flush along -Z, never finishes on SolidCraft's truck kernel (0.19.0: Extrude Join, #3403 To-Object Join and #3411 Combine; the 7-body v1 design fails after 480 s with `boolean Union: the operation failed: no result`). Every adjacent pair joins in under a second and (Body1 + Body2) in 0.55 s, but adding Body3 to that is still running at 240 s; joined in a tree order the whole stack finishes in 5.4 s. Not fixed on truck: kernel work is paused (tangency-labs/solidcraft#3992) and the `pr` link is the SMLib kernel move (tangency-labs/solidcraft#4012). Radii, heights and band edges are the user's design: Sketch1 circles r 28.3, 29.5, 35, 37 and Sketch2 (the r 37 circle, an r 33 circle and horizontal chords of the r 37 circle at y = -32, -29, -24, -21, -16, -13, -8, -5, 0, 3, 8, 11, 16, 19, 24, 27, 32, 35); the profiles each extrude used were identified with 0.19.0's sketch.inspect, and their summed areas equal the closed forms below to 1e-15. Body1 z -3.6..0: an r 37 disc whose lower 2.4 leaves out the full-width bands y 8..11, 24..27, -13..-8, -29..-24. Body2 z -5.6..-3.6: annulus r 35..37. Body3 z -8..-5.6: an r 37 disc less the parts inside r 33 of the bands y -5..3, 16..19, 27..33, -21..-16, -33..-29, except where the r 28.3..29.5 ring crosses them. Body4 z -10.2..-8: annulus r 33..37. Body5 z -20..-8: annulus r 28.3..29.5. Body6 z -20..-8: annulus r 35..37, overlapping Body4 in r 35..37, z -10.2..-8. Each body is built from cylinders and boxes instead of extruded profiles, every cutter reaching past the faces it does not shape, so the only flush faces are those between the layers. Volumes are closed form (strip areas of discs times heights); each body agrees with 0.19.0's measure of the user's design within 9e-5 relative, and a 0.01 mm grid integration of these steps agrees with every case within 1e-5. Which union stalls truck depends on how the faces are split: on these primitive-built bodies (Body3 has 56 kernel faces, the user's 94) the top-down chain stalls one layer later, at + Body4, and the tree order stalls too (each case's note gives 0.19.0's times). Tolerance 0.01 mm^3, as the other analytic cases.",
+ "cases": [
+  {
+   "name": "pair_b1_b2",
+   "note": "control: Body1 (z -3.6..0) joined with Body2 (z -5.6..-3.6) on its own; the first step of the failing chain, 0.55 s on SolidCraft 0.19.0",
+   "steps": [
+    {
+     "op": "cylinder",
+     "id": "b1",
+     "origin": [
+      0,
+      0,
+      -3.6
+     ],
+     "radius": 37,
+     "height": 3.6
+    },
+    {
+     "op": "box",
+     "id": "b1_slot0",
+     "origin": [
+      -40,
+      8,
+      -4
+     ],
+     "size": [
+      80,
+      3,
+      2.8
+     ]
+    },
+    {
+     "op": "difference",
+     "id": "b1",
+     "a": "b1",
+     "b": "b1_slot0"
+    },
+    {
+     "op": "box",
+     "id": "b1_slot1",
+     "origin": [
+      -40,
+      24,
+      -4
+     ],
+     "size": [
+      80,
+      3,
+      2.8
+     ]
+    },
+    {
+     "op": "difference",
+     "id": "b1",
+     "a": "b1",
+     "b": "b1_slot1"
+    },
+    {
+     "op": "box",
+     "id": "b1_slot2",
+     "origin": [
+      -40,
+      -13,
+      -4
+     ],
+     "size": [
+      80,
+      5,
+      2.8
+     ]
+    },
+    {
+     "op": "difference",
+     "id": "b1",
+     "a": "b1",
+     "b": "b1_slot2"
+    },
+    {
+     "op": "box",
+     "id": "b1_slot3",
+     "origin": [
+      -40,
+      -29,
+      -4
+     ],
+     "size": [
+      80,
+      5,
+      2.8
+     ]
+    },
+    {
+     "op": "difference",
+     "id": "b1",
+     "a": "b1",
+     "b": "b1_slot3"
+    },
+    {
+     "op": "cylinder",
+     "id": "b2",
+     "origin": [
+      0,
+      0,
+      -5.6
+     ],
+     "radius": 37,
+     "height": 2
+    },
+    {
+     "op": "cylinder",
+     "id": "b2_bore",
+     "origin": [
+      0,
+      0,
+      -6
+     ],
+     "radius": 35,
+     "height": 2.8
+    },
+    {
+     "op": "difference",
+     "id": "b2",
+     "a": "b2",
+     "b": "b2_bore"
+    },
+    {
+     "op": "union",
+     "id": "result",
+     "a": "b1",
+     "b": "b2"
+    }
+   ],
+   "expect": {
+    "lumps": 1,
+    "volume": {
+     "value": 14018.918981442299,
+     "tol": 0.01,
+     "formula": "Body1 + Body2 = pi*37^2*3.6 - 2.4*(S37(8,11) + S37(24,27) + S37(-13,-8) + S37(-29,-24)) + 2*pi*(37^2 - 35^2); SR(a,b) = F(R,b) - F(R,a), the area of the r R disc between y = a and y = b, F(R,y) = y*sqrt(R^2 - y^2) + R^2*asin(y/R), y clamped to [-R, R]"
+    }
+   }
+  },
+  {
+   "name": "pair_b2_b3",
+   "note": "control: Body2 (z -5.6..-3.6) joined with Body3 (z -8..-5.6) on its own; < 1 s on SolidCraft 0.19.0",
+   "steps": [
+    {
+     "op": "cylinder",
+     "id": "b2",
+     "origin": [
+      0,
+      0,
+      -5.6
+     ],
+     "radius": 37,
+     "height": 2
+    },
+    {
+     "op": "cylinder",
+     "id": "b2_bore",
+     "origin": [
+      0,
+      0,
+      -6
+     ],
+     "radius": 35,
+     "height": 2.8
+    },
+    {
+     "op": "difference",
+     "id": "b2",
+     "a": "b2",
+     "b": "b2_bore"
+    },
+    {
+     "op": "cylinder",
+     "id": "b3",
+     "origin": [
+      0,
+      0,
+      -8
+     ],
+     "radius": 37,
+     "height": 2.4
+    },
+    {
+     "op": "cylinder",
+     "id": "b3_inner",
+     "origin": [
+      0,
+      0,
+      -8.4
+     ],
+     "radius": 33,
+     "height": 3.2
+    },
+    {
+     "op": "cylinder",
+     "id": "b3_ring",
+     "origin": [
+      0,
+      0,
+      -8.8
+     ],
+     "radius": 29.5,
+     "height": 4
+    },
+    {
+     "op": "cylinder",
+     "id": "b3_ring_bore",
+     "origin": [
+      0,
+      0,
+      -9.2
+     ],
+     "radius": 28.3,
+     "height": 4.8
+    },
+    {
+     "op": "difference",
+     "id": "b3_ring",
+     "a": "b3_ring",
+     "b": "b3_ring_bore"
+    },
+    {
+     "op": "difference",
+     "id": "b3_inner",
+     "a": "b3_inner",
+     "b": "b3_ring"
+    },
+    {
+     "op": "box",
+     "id": "b3_band0",
+     "origin": [
+      -34,
+      -5,
+      -9.2
+     ],
+     "size": [
+      68,
+      8,
+      4.8
+     ]
+    },
+    {
+     "op": "intersection",
+     "id": "b3_slot0",
+     "a": "b3_band0",
+     "b": "b3_inner"
+    },
+    {
+     "op": "difference",
+     "id": "b3",
+     "a": "b3",
+     "b": "b3_slot0"
+    },
+    {
+     "op": "box",
+     "id": "b3_band1",
+     "origin": [
+      -34,
+      16,
+      -9.2
+     ],
+     "size": [
+      68,
+      3,
+      4.8
+     ]
+    },
+    {
+     "op": "intersection",
+     "id": "b3_slot1",
+     "a": "b3_band1",
+     "b": "b3_inner"
+    },
+    {
+     "op": "difference",
+     "id": "b3",
+     "a": "b3",
+     "b": "b3_slot1"
+    },
+    {
+     "op": "box",
+     "id": "b3_band2",
+     "origin": [
+      -34,
+      27,
+      -9.2
+     ],
+     "size": [
+      68,
+      7,
+      4.8
+     ]
+    },
+    {
+     "op": "intersection",
+     "id": "b3_slot2",
+     "a": "b3_band2",
+     "b": "b3_inner"
+    },
+    {
+     "op": "difference",
+     "id": "b3",
+     "a": "b3",
+     "b": "b3_slot2"
+    },
+    {
+     "op": "box",
+     "id": "b3_band3",
+     "origin": [
+      -34,
+      -21,
+      -9.2
+     ],
+     "size": [
+      68,
+      5,
+      4.8
+     ]
+    },
+    {
+     "op": "intersection",
+     "id": "b3_slot3",
+     "a": "b3_band3",
+     "b": "b3_inner"
+    },
+    {
+     "op": "difference",
+     "id": "b3",
+     "a": "b3",
+     "b": "b3_slot3"
+    },
+    {
+     "op": "box",
+     "id": "b3_band4",
+     "origin": [
+      -34,
+      -34,
+      -9.2
+     ],
+     "size": [
+      68,
+      5,
+      4.8
+     ]
+    },
+    {
+     "op": "intersection",
+     "id": "b3_slot4",
+     "a": "b3_band4",
+     "b": "b3_inner"
+    },
+    {
+     "op": "difference",
+     "id": "b3",
+     "a": "b3",
+     "b": "b3_slot4"
+    },
+    {
+     "op": "union",
+     "id": "result",
+     "a": "b2",
+     "b": "b3"
+    }
+   ],
+   "expect": {
+    "lumps": 1,
+    "volume": {
+     "value": 8505.460741186722,
+     "tol": 0.01,
+     "formula": "Body2 + Body3 = 2*pi*(37^2 - 35^2) + 2.4*(pi*37^2 - sum over (a,b) in [(-5,3), (16,19), (27,33), (-21,-16), (-33,-29)] of (S33(a,b) - S29.5(a,b) + S28.3(a,b))); SR(a,b) = F(R,b) - F(R,a), the area of the r R disc between y = a and y = b, F(R,y) = y*sqrt(R^2 - y^2) + R^2*asin(y/R), y clamped to [-R, R]"
+    }
+   }
+  },
+  {
+   "name": "chain_b1_b2_b3",
+   "note": "#3396: (Body1 + Body2) + Body3, top down. On the user's extruded bodies the second union never finished on SolidCraft 0.19.0's truck kernel (still running at 240 s); built from these primitives truck finishes it in 0.25 s",
+   "steps": [
+    {
+     "op": "cylinder",
+     "id": "b1",
+     "origin": [
+      0,
+      0,
+      -3.6
+     ],
+     "radius": 37,
+     "height": 3.6
+    },
+    {
+     "op": "box",
+     "id": "b1_slot0",
+     "origin": [
+      -40,
+      8,
+      -4
+     ],
+     "size": [
+      80,
+      3,
+      2.8
+     ]
+    },
+    {
+     "op": "difference",
+     "id": "b1",
+     "a": "b1",
+     "b": "b1_slot0"
+    },
+    {
+     "op": "box",
+     "id": "b1_slot1",
+     "origin": [
+      -40,
+      24,
+      -4
+     ],
+     "size": [
+      80,
+      3,
+      2.8
+     ]
+    },
+    {
+     "op": "difference",
+     "id": "b1",
+     "a": "b1",
+     "b": "b1_slot1"
+    },
+    {
+     "op": "box",
+     "id": "b1_slot2",
+     "origin": [
+      -40,
+      -13,
+      -4
+     ],
+     "size": [
+      80,
+      5,
+      2.8
+     ]
+    },
+    {
+     "op": "difference",
+     "id": "b1",
+     "a": "b1",
+     "b": "b1_slot2"
+    },
+    {
+     "op": "box",
+     "id": "b1_slot3",
+     "origin": [
+      -40,
+      -29,
+      -4
+     ],
+     "size": [
+      80,
+      5,
+      2.8
+     ]
+    },
+    {
+     "op": "difference",
+     "id": "b1",
+     "a": "b1",
+     "b": "b1_slot3"
+    },
+    {
+     "op": "cylinder",
+     "id": "b2",
+     "origin": [
+      0,
+      0,
+      -5.6
+     ],
+     "radius": 37,
+     "height": 2
+    },
+    {
+     "op": "cylinder",
+     "id": "b2_bore",
+     "origin": [
+      0,
+      0,
+      -6
+     ],
+     "radius": 35,
+     "height": 2.8
+    },
+    {
+     "op": "difference",
+     "id": "b2",
+     "a": "b2",
+     "b": "b2_bore"
+    },
+    {
+     "op": "cylinder",
+     "id": "b3",
+     "origin": [
+      0,
+      0,
+      -8
+     ],
+     "radius": 37,
+     "height": 2.4
+    },
+    {
+     "op": "cylinder",
+     "id": "b3_inner",
+     "origin": [
+      0,
+      0,
+      -8.4
+     ],
+     "radius": 33,
+     "height": 3.2
+    },
+    {
+     "op": "cylinder",
+     "id": "b3_ring",
+     "origin": [
+      0,
+      0,
+      -8.8
+     ],
+     "radius": 29.5,
+     "height": 4
+    },
+    {
+     "op": "cylinder",
+     "id": "b3_ring_bore",
+     "origin": [
+      0,
+      0,
+      -9.2
+     ],
+     "radius": 28.3,
+     "height": 4.8
+    },
+    {
+     "op": "difference",
+     "id": "b3_ring",
+     "a": "b3_ring",
+     "b": "b3_ring_bore"
+    },
+    {
+     "op": "difference",
+     "id": "b3_inner",
+     "a": "b3_inner",
+     "b": "b3_ring"
+    },
+    {
+     "op": "box",
+     "id": "b3_band0",
+     "origin": [
+      -34,
+      -5,
+      -9.2
+     ],
+     "size": [
+      68,
+      8,
+      4.8
+     ]
+    },
+    {
+     "op": "intersection",
+     "id": "b3_slot0",
+     "a": "b3_band0",
+     "b": "b3_inner"
+    },
+    {
+     "op": "difference",
+     "id": "b3",
+     "a": "b3",
+     "b": "b3_slot0"
+    },
+    {
+     "op": "box",
+     "id": "b3_band1",
+     "origin": [
+      -34,
+      16,
+      -9.2
+     ],
+     "size": [
+      68,
+      3,
+      4.8
+     ]
+    },
+    {
+     "op": "intersection",
+     "id": "b3_slot1",
+     "a": "b3_band1",
+     "b": "b3_inner"
+    },
+    {
+     "op": "difference",
+     "id": "b3",
+     "a": "b3",
+     "b": "b3_slot1"
+    },
+    {
+     "op": "box",
+     "id": "b3_band2",
+     "origin": [
+      -34,
+      27,
+      -9.2
+     ],
+     "size": [
+      68,
+      7,
+      4.8
+     ]
+    },
+    {
+     "op": "intersection",
+     "id": "b3_slot2",
+     "a": "b3_band2",
+     "b": "b3_inner"
+    },
+    {
+     "op": "difference",
+     "id": "b3",
+     "a": "b3",
+     "b": "b3_slot2"
+    },
+    {
+     "op": "box",
+     "id": "b3_band3",
+     "origin": [
+      -34,
+      -21,
+      -9.2
+     ],
+     "size": [
+      68,
+      5,
+      4.8
+     ]
+    },
+    {
+     "op": "intersection",
+     "id": "b3_slot3",
+     "a": "b3_band3",
+     "b": "b3_inner"
+    },
+    {
+     "op": "difference",
+     "id": "b3",
+     "a": "b3",
+     "b": "b3_slot3"
+    },
+    {
+     "op": "box",
+     "id": "b3_band4",
+     "origin": [
+      -34,
+      -34,
+      -9.2
+     ],
+     "size": [
+      68,
+      5,
+      4.8
+     ]
+    },
+    {
+     "op": "intersection",
+     "id": "b3_slot4",
+     "a": "b3_band4",
+     "b": "b3_inner"
+    },
+    {
+     "op": "difference",
+     "id": "b3",
+     "a": "b3",
+     "b": "b3_slot4"
+    },
+    {
+     "op": "union",
+     "id": "b12",
+     "a": "b1",
+     "b": "b2"
+    },
+    {
+     "op": "union",
+     "id": "result",
+     "a": "b12",
+     "b": "b3"
+    }
+   ],
+   "expect": {
+    "lumps": 1,
+    "volume": {
+     "value": 21619.60103839516,
+     "tol": 0.01,
+     "formula": "Body1 + Body2 + Body3 = pi*37^2*3.6 - 2.4*(S37(8,11) + S37(24,27) + S37(-13,-8) + S37(-29,-24)) + 2*pi*(37^2 - 35^2) + 2.4*(pi*37^2 - sum over (a,b) in [(-5,3), (16,19), (27,33), (-21,-16), (-33,-29)] of (S33(a,b) - S29.5(a,b) + S28.3(a,b))); SR(a,b) = F(R,b) - F(R,a), the area of the r R disc between y = a and y = b, F(R,y) = y*sqrt(R^2 - y^2) + R^2*asin(y/R), y clamped to [-R, R]"
+    }
+   }
+  },
+  {
+   "name": "chain_b1_to_b4",
+   "note": "(Body1 + Body2 + Body3) + Body4, top down: the step where the stack built from these primitives stalls truck (0.19.0: not finished at 180 s; Body3 + Body4 alone 0.8 s)",
+   "steps": [
+    {
+     "op": "cylinder",
+     "id": "b1",
+     "origin": [
+      0,
+      0,
+      -3.6
+     ],
+     "radius": 37,
+     "height": 3.6
+    },
+    {
+     "op": "box",
+     "id": "b1_slot0",
+     "origin": [
+      -40,
+      8,
+      -4
+     ],
+     "size": [
+      80,
+      3,
+      2.8
+     ]
+    },
+    {
+     "op": "difference",
+     "id": "b1",
+     "a": "b1",
+     "b": "b1_slot0"
+    },
+    {
+     "op": "box",
+     "id": "b1_slot1",
+     "origin": [
+      -40,
+      24,
+      -4
+     ],
+     "size": [
+      80,
+      3,
+      2.8
+     ]
+    },
+    {
+     "op": "difference",
+     "id": "b1",
+     "a": "b1",
+     "b": "b1_slot1"
+    },
+    {
+     "op": "box",
+     "id": "b1_slot2",
+     "origin": [
+      -40,
+      -13,
+      -4
+     ],
+     "size": [
+      80,
+      5,
+      2.8
+     ]
+    },
+    {
+     "op": "difference",
+     "id": "b1",
+     "a": "b1",
+     "b": "b1_slot2"
+    },
+    {
+     "op": "box",
+     "id": "b1_slot3",
+     "origin": [
+      -40,
+      -29,
+      -4
+     ],
+     "size": [
+      80,
+      5,
+      2.8
+     ]
+    },
+    {
+     "op": "difference",
+     "id": "b1",
+     "a": "b1",
+     "b": "b1_slot3"
+    },
+    {
+     "op": "cylinder",
+     "id": "b2",
+     "origin": [
+      0,
+      0,
+      -5.6
+     ],
+     "radius": 37,
+     "height": 2
+    },
+    {
+     "op": "cylinder",
+     "id": "b2_bore",
+     "origin": [
+      0,
+      0,
+      -6
+     ],
+     "radius": 35,
+     "height": 2.8
+    },
+    {
+     "op": "difference",
+     "id": "b2",
+     "a": "b2",
+     "b": "b2_bore"
+    },
+    {
+     "op": "cylinder",
+     "id": "b3",
+     "origin": [
+      0,
+      0,
+      -8
+     ],
+     "radius": 37,
+     "height": 2.4
+    },
+    {
+     "op": "cylinder",
+     "id": "b3_inner",
+     "origin": [
+      0,
+      0,
+      -8.4
+     ],
+     "radius": 33,
+     "height": 3.2
+    },
+    {
+     "op": "cylinder",
+     "id": "b3_ring",
+     "origin": [
+      0,
+      0,
+      -8.8
+     ],
+     "radius": 29.5,
+     "height": 4
+    },
+    {
+     "op": "cylinder",
+     "id": "b3_ring_bore",
+     "origin": [
+      0,
+      0,
+      -9.2
+     ],
+     "radius": 28.3,
+     "height": 4.8
+    },
+    {
+     "op": "difference",
+     "id": "b3_ring",
+     "a": "b3_ring",
+     "b": "b3_ring_bore"
+    },
+    {
+     "op": "difference",
+     "id": "b3_inner",
+     "a": "b3_inner",
+     "b": "b3_ring"
+    },
+    {
+     "op": "box",
+     "id": "b3_band0",
+     "origin": [
+      -34,
+      -5,
+      -9.2
+     ],
+     "size": [
+      68,
+      8,
+      4.8
+     ]
+    },
+    {
+     "op": "intersection",
+     "id": "b3_slot0",
+     "a": "b3_band0",
+     "b": "b3_inner"
+    },
+    {
+     "op": "difference",
+     "id": "b3",
+     "a": "b3",
+     "b": "b3_slot0"
+    },
+    {
+     "op": "box",
+     "id": "b3_band1",
+     "origin": [
+      -34,
+      16,
+      -9.2
+     ],
+     "size": [
+      68,
+      3,
+      4.8
+     ]
+    },
+    {
+     "op": "intersection",
+     "id": "b3_slot1",
+     "a": "b3_band1",
+     "b": "b3_inner"
+    },
+    {
+     "op": "difference",
+     "id": "b3",
+     "a": "b3",
+     "b": "b3_slot1"
+    },
+    {
+     "op": "box",
+     "id": "b3_band2",
+     "origin": [
+      -34,
+      27,
+      -9.2
+     ],
+     "size": [
+      68,
+      7,
+      4.8
+     ]
+    },
+    {
+     "op": "intersection",
+     "id": "b3_slot2",
+     "a": "b3_band2",
+     "b": "b3_inner"
+    },
+    {
+     "op": "difference",
+     "id": "b3",
+     "a": "b3",
+     "b": "b3_slot2"
+    },
+    {
+     "op": "box",
+     "id": "b3_band3",
+     "origin": [
+      -34,
+      -21,
+      -9.2
+     ],
+     "size": [
+      68,
+      5,
+      4.8
+     ]
+    },
+    {
+     "op": "intersection",
+     "id": "b3_slot3",
+     "a": "b3_band3",
+     "b": "b3_inner"
+    },
+    {
+     "op": "difference",
+     "id": "b3",
+     "a": "b3",
+     "b": "b3_slot3"
+    },
+    {
+     "op": "box",
+     "id": "b3_band4",
+     "origin": [
+      -34,
+      -34,
+      -9.2
+     ],
+     "size": [
+      68,
+      5,
+      4.8
+     ]
+    },
+    {
+     "op": "intersection",
+     "id": "b3_slot4",
+     "a": "b3_band4",
+     "b": "b3_inner"
+    },
+    {
+     "op": "difference",
+     "id": "b3",
+     "a": "b3",
+     "b": "b3_slot4"
+    },
+    {
+     "op": "cylinder",
+     "id": "b4",
+     "origin": [
+      0,
+      0,
+      -10.2
+     ],
+     "radius": 37,
+     "height": 2.2
+    },
+    {
+     "op": "cylinder",
+     "id": "b4_bore",
+     "origin": [
+      0,
+      0,
+      -10.6
+     ],
+     "radius": 33,
+     "height": 3
+    },
+    {
+     "op": "difference",
+     "id": "b4",
+     "a": "b4",
+     "b": "b4_bore"
+    },
+    {
+     "op": "union",
+     "id": "acc",
+     "a": "b1",
+     "b": "b2"
+    },
+    {
+     "op": "union",
+     "id": "acc",
+     "a": "acc",
+     "b": "b3"
+    },
+    {
+     "op": "union",
+     "id": "result",
+     "a": "acc",
+     "b": "b4"
+    }
+   ],
+   "expect": {
+    "lumps": 1,
+    "volume": {
+     "value": 23554.822113006474,
+     "tol": 0.01,
+     "formula": "Body1 + Body2 + Body3 + Body4 = pi*37^2*3.6 - 2.4*(S37(8,11) + S37(24,27) + S37(-13,-8) + S37(-29,-24)) + 2*pi*(37^2 - 35^2) + 2.4*(pi*37^2 - sum over (a,b) in [(-5,3), (16,19), (27,33), (-21,-16), (-33,-29)] of (S33(a,b) - S29.5(a,b) + S28.3(a,b))) + 2.2*pi*(37^2 - 33^2); SR(a,b) = F(R,b) - F(R,a), the area of the r R disc between y = a and y = b, F(R,y) = y*sqrt(R^2 - y^2) + R^2*asin(y/R), y clamped to [-R, R]"
+    }
+   }
+  },
+  {
+   "name": "stack_top_down",
+   "note": "#3411: Body1 combined with Body2..Body6, one union at a time in that order (Combine into Body1 on the user's design: still running at 600 s on 0.19.0; the 7-body v1 design failed after 480 s with `boolean Union: the operation failed: no result`). Built from these primitives: not finished at 300 s",
+   "steps": [
+    {
+     "op": "cylinder",
+     "id": "b1",
+     "origin": [
+      0,
+      0,
+      -3.6
+     ],
+     "radius": 37,
+     "height": 3.6
+    },
+    {
+     "op": "box",
+     "id": "b1_slot0",
+     "origin": [
+      -40,
+      8,
+      -4
+     ],
+     "size": [
+      80,
+      3,
+      2.8
+     ]
+    },
+    {
+     "op": "difference",
+     "id": "b1",
+     "a": "b1",
+     "b": "b1_slot0"
+    },
+    {
+     "op": "box",
+     "id": "b1_slot1",
+     "origin": [
+      -40,
+      24,
+      -4
+     ],
+     "size": [
+      80,
+      3,
+      2.8
+     ]
+    },
+    {
+     "op": "difference",
+     "id": "b1",
+     "a": "b1",
+     "b": "b1_slot1"
+    },
+    {
+     "op": "box",
+     "id": "b1_slot2",
+     "origin": [
+      -40,
+      -13,
+      -4
+     ],
+     "size": [
+      80,
+      5,
+      2.8
+     ]
+    },
+    {
+     "op": "difference",
+     "id": "b1",
+     "a": "b1",
+     "b": "b1_slot2"
+    },
+    {
+     "op": "box",
+     "id": "b1_slot3",
+     "origin": [
+      -40,
+      -29,
+      -4
+     ],
+     "size": [
+      80,
+      5,
+      2.8
+     ]
+    },
+    {
+     "op": "difference",
+     "id": "b1",
+     "a": "b1",
+     "b": "b1_slot3"
+    },
+    {
+     "op": "cylinder",
+     "id": "b2",
+     "origin": [
+      0,
+      0,
+      -5.6
+     ],
+     "radius": 37,
+     "height": 2
+    },
+    {
+     "op": "cylinder",
+     "id": "b2_bore",
+     "origin": [
+      0,
+      0,
+      -6
+     ],
+     "radius": 35,
+     "height": 2.8
+    },
+    {
+     "op": "difference",
+     "id": "b2",
+     "a": "b2",
+     "b": "b2_bore"
+    },
+    {
+     "op": "cylinder",
+     "id": "b3",
+     "origin": [
+      0,
+      0,
+      -8
+     ],
+     "radius": 37,
+     "height": 2.4
+    },
+    {
+     "op": "cylinder",
+     "id": "b3_inner",
+     "origin": [
+      0,
+      0,
+      -8.4
+     ],
+     "radius": 33,
+     "height": 3.2
+    },
+    {
+     "op": "cylinder",
+     "id": "b3_ring",
+     "origin": [
+      0,
+      0,
+      -8.8
+     ],
+     "radius": 29.5,
+     "height": 4
+    },
+    {
+     "op": "cylinder",
+     "id": "b3_ring_bore",
+     "origin": [
+      0,
+      0,
+      -9.2
+     ],
+     "radius": 28.3,
+     "height": 4.8
+    },
+    {
+     "op": "difference",
+     "id": "b3_ring",
+     "a": "b3_ring",
+     "b": "b3_ring_bore"
+    },
+    {
+     "op": "difference",
+     "id": "b3_inner",
+     "a": "b3_inner",
+     "b": "b3_ring"
+    },
+    {
+     "op": "box",
+     "id": "b3_band0",
+     "origin": [
+      -34,
+      -5,
+      -9.2
+     ],
+     "size": [
+      68,
+      8,
+      4.8
+     ]
+    },
+    {
+     "op": "intersection",
+     "id": "b3_slot0",
+     "a": "b3_band0",
+     "b": "b3_inner"
+    },
+    {
+     "op": "difference",
+     "id": "b3",
+     "a": "b3",
+     "b": "b3_slot0"
+    },
+    {
+     "op": "box",
+     "id": "b3_band1",
+     "origin": [
+      -34,
+      16,
+      -9.2
+     ],
+     "size": [
+      68,
+      3,
+      4.8
+     ]
+    },
+    {
+     "op": "intersection",
+     "id": "b3_slot1",
+     "a": "b3_band1",
+     "b": "b3_inner"
+    },
+    {
+     "op": "difference",
+     "id": "b3",
+     "a": "b3",
+     "b": "b3_slot1"
+    },
+    {
+     "op": "box",
+     "id": "b3_band2",
+     "origin": [
+      -34,
+      27,
+      -9.2
+     ],
+     "size": [
+      68,
+      7,
+      4.8
+     ]
+    },
+    {
+     "op": "intersection",
+     "id": "b3_slot2",
+     "a": "b3_band2",
+     "b": "b3_inner"
+    },
+    {
+     "op": "difference",
+     "id": "b3",
+     "a": "b3",
+     "b": "b3_slot2"
+    },
+    {
+     "op": "box",
+     "id": "b3_band3",
+     "origin": [
+      -34,
+      -21,
+      -9.2
+     ],
+     "size": [
+      68,
+      5,
+      4.8
+     ]
+    },
+    {
+     "op": "intersection",
+     "id": "b3_slot3",
+     "a": "b3_band3",
+     "b": "b3_inner"
+    },
+    {
+     "op": "difference",
+     "id": "b3",
+     "a": "b3",
+     "b": "b3_slot3"
+    },
+    {
+     "op": "box",
+     "id": "b3_band4",
+     "origin": [
+      -34,
+      -34,
+      -9.2
+     ],
+     "size": [
+      68,
+      5,
+      4.8
+     ]
+    },
+    {
+     "op": "intersection",
+     "id": "b3_slot4",
+     "a": "b3_band4",
+     "b": "b3_inner"
+    },
+    {
+     "op": "difference",
+     "id": "b3",
+     "a": "b3",
+     "b": "b3_slot4"
+    },
+    {
+     "op": "cylinder",
+     "id": "b4",
+     "origin": [
+      0,
+      0,
+      -10.2
+     ],
+     "radius": 37,
+     "height": 2.2
+    },
+    {
+     "op": "cylinder",
+     "id": "b4_bore",
+     "origin": [
+      0,
+      0,
+      -10.6
+     ],
+     "radius": 33,
+     "height": 3
+    },
+    {
+     "op": "difference",
+     "id": "b4",
+     "a": "b4",
+     "b": "b4_bore"
+    },
+    {
+     "op": "cylinder",
+     "id": "b5",
+     "origin": [
+      0,
+      0,
+      -20
+     ],
+     "radius": 29.5,
+     "height": 12
+    },
+    {
+     "op": "cylinder",
+     "id": "b5_bore",
+     "origin": [
+      0,
+      0,
+      -20.4
+     ],
+     "radius": 28.3,
+     "height": 12.8
+    },
+    {
+     "op": "difference",
+     "id": "b5",
+     "a": "b5",
+     "b": "b5_bore"
+    },
+    {
+     "op": "cylinder",
+     "id": "b6",
+     "origin": [
+      0,
+      0,
+      -20
+     ],
+     "radius": 37,
+     "height": 12
+    },
+    {
+     "op": "cylinder",
+     "id": "b6_bore",
+     "origin": [
+      0,
+      0,
+      -20.4
+     ],
+     "radius": 35,
+     "height": 12.8
+    },
+    {
+     "op": "difference",
+     "id": "b6",
+     "a": "b6",
+     "b": "b6_bore"
+    },
+    {
+     "op": "union",
+     "id": "acc",
+     "a": "b1",
+     "b": "b2"
+    },
+    {
+     "op": "union",
+     "id": "acc",
+     "a": "acc",
+     "b": "b3"
+    },
+    {
+     "op": "union",
+     "id": "acc",
+     "a": "acc",
+     "b": "b4"
+    },
+    {
+     "op": "union",
+     "id": "acc",
+     "a": "acc",
+     "b": "b5"
+    },
+    {
+     "op": "union",
+     "id": "result",
+     "a": "acc",
+     "b": "b6"
+    }
+   ],
+   "expect": {
+    "lumps": 1,
+    "volume": {
+     "value": 30603.04806318825,
+     "tol": 0.01,
+     "formula": "Body1 + ... + Body6 - Body4 & Body6 = pi*37^2*3.6 - 2.4*(S37(8,11) + S37(24,27) + S37(-13,-8) + S37(-29,-24)) + 2*pi*(37^2 - 35^2) + 2.4*(pi*37^2 - sum over (a,b) in [(-5,3), (16,19), (27,33), (-21,-16), (-33,-29)] of (S33(a,b) - S29.5(a,b) + S28.3(a,b))) + 2.2*pi*(37^2 - 33^2) + 12*pi*(29.5^2 - 28.3^2) + 12*pi*(37^2 - 35^2) - 2.2*pi*(37^2 - 35^2); SR(a,b) = F(R,b) - F(R,a), the area of the r R disc between y = a and y = b, F(R,y) = y*sqrt(R^2 - y^2) + R^2*asin(y/R), y clamped to [-R, R]"
+    }
+   }
+  },
+  {
+   "name": "stack_tree_order",
+   "note": "the order that finished on the user's design on 0.19.0 in 5.4 s (30601.568 on its mesh): Body2 + Body3, Body4 + Body5, + Body6, the two joined, then Body1. Built from these primitives truck took 120 s for the fourth union and had not finished the last about 120 s later, when the 240 s run was stopped",
+   "steps": [
+    {
+     "op": "cylinder",
+     "id": "b1",
+     "origin": [
+      0,
+      0,
+      -3.6
+     ],
+     "radius": 37,
+     "height": 3.6
+    },
+    {
+     "op": "box",
+     "id": "b1_slot0",
+     "origin": [
+      -40,
+      8,
+      -4
+     ],
+     "size": [
+      80,
+      3,
+      2.8
+     ]
+    },
+    {
+     "op": "difference",
+     "id": "b1",
+     "a": "b1",
+     "b": "b1_slot0"
+    },
+    {
+     "op": "box",
+     "id": "b1_slot1",
+     "origin": [
+      -40,
+      24,
+      -4
+     ],
+     "size": [
+      80,
+      3,
+      2.8
+     ]
+    },
+    {
+     "op": "difference",
+     "id": "b1",
+     "a": "b1",
+     "b": "b1_slot1"
+    },
+    {
+     "op": "box",
+     "id": "b1_slot2",
+     "origin": [
+      -40,
+      -13,
+      -4
+     ],
+     "size": [
+      80,
+      5,
+      2.8
+     ]
+    },
+    {
+     "op": "difference",
+     "id": "b1",
+     "a": "b1",
+     "b": "b1_slot2"
+    },
+    {
+     "op": "box",
+     "id": "b1_slot3",
+     "origin": [
+      -40,
+      -29,
+      -4
+     ],
+     "size": [
+      80,
+      5,
+      2.8
+     ]
+    },
+    {
+     "op": "difference",
+     "id": "b1",
+     "a": "b1",
+     "b": "b1_slot3"
+    },
+    {
+     "op": "cylinder",
+     "id": "b2",
+     "origin": [
+      0,
+      0,
+      -5.6
+     ],
+     "radius": 37,
+     "height": 2
+    },
+    {
+     "op": "cylinder",
+     "id": "b2_bore",
+     "origin": [
+      0,
+      0,
+      -6
+     ],
+     "radius": 35,
+     "height": 2.8
+    },
+    {
+     "op": "difference",
+     "id": "b2",
+     "a": "b2",
+     "b": "b2_bore"
+    },
+    {
+     "op": "cylinder",
+     "id": "b3",
+     "origin": [
+      0,
+      0,
+      -8
+     ],
+     "radius": 37,
+     "height": 2.4
+    },
+    {
+     "op": "cylinder",
+     "id": "b3_inner",
+     "origin": [
+      0,
+      0,
+      -8.4
+     ],
+     "radius": 33,
+     "height": 3.2
+    },
+    {
+     "op": "cylinder",
+     "id": "b3_ring",
+     "origin": [
+      0,
+      0,
+      -8.8
+     ],
+     "radius": 29.5,
+     "height": 4
+    },
+    {
+     "op": "cylinder",
+     "id": "b3_ring_bore",
+     "origin": [
+      0,
+      0,
+      -9.2
+     ],
+     "radius": 28.3,
+     "height": 4.8
+    },
+    {
+     "op": "difference",
+     "id": "b3_ring",
+     "a": "b3_ring",
+     "b": "b3_ring_bore"
+    },
+    {
+     "op": "difference",
+     "id": "b3_inner",
+     "a": "b3_inner",
+     "b": "b3_ring"
+    },
+    {
+     "op": "box",
+     "id": "b3_band0",
+     "origin": [
+      -34,
+      -5,
+      -9.2
+     ],
+     "size": [
+      68,
+      8,
+      4.8
+     ]
+    },
+    {
+     "op": "intersection",
+     "id": "b3_slot0",
+     "a": "b3_band0",
+     "b": "b3_inner"
+    },
+    {
+     "op": "difference",
+     "id": "b3",
+     "a": "b3",
+     "b": "b3_slot0"
+    },
+    {
+     "op": "box",
+     "id": "b3_band1",
+     "origin": [
+      -34,
+      16,
+      -9.2
+     ],
+     "size": [
+      68,
+      3,
+      4.8
+     ]
+    },
+    {
+     "op": "intersection",
+     "id": "b3_slot1",
+     "a": "b3_band1",
+     "b": "b3_inner"
+    },
+    {
+     "op": "difference",
+     "id": "b3",
+     "a": "b3",
+     "b": "b3_slot1"
+    },
+    {
+     "op": "box",
+     "id": "b3_band2",
+     "origin": [
+      -34,
+      27,
+      -9.2
+     ],
+     "size": [
+      68,
+      7,
+      4.8
+     ]
+    },
+    {
+     "op": "intersection",
+     "id": "b3_slot2",
+     "a": "b3_band2",
+     "b": "b3_inner"
+    },
+    {
+     "op": "difference",
+     "id": "b3",
+     "a": "b3",
+     "b": "b3_slot2"
+    },
+    {
+     "op": "box",
+     "id": "b3_band3",
+     "origin": [
+      -34,
+      -21,
+      -9.2
+     ],
+     "size": [
+      68,
+      5,
+      4.8
+     ]
+    },
+    {
+     "op": "intersection",
+     "id": "b3_slot3",
+     "a": "b3_band3",
+     "b": "b3_inner"
+    },
+    {
+     "op": "difference",
+     "id": "b3",
+     "a": "b3",
+     "b": "b3_slot3"
+    },
+    {
+     "op": "box",
+     "id": "b3_band4",
+     "origin": [
+      -34,
+      -34,
+      -9.2
+     ],
+     "size": [
+      68,
+      5,
+      4.8
+     ]
+    },
+    {
+     "op": "intersection",
+     "id": "b3_slot4",
+     "a": "b3_band4",
+     "b": "b3_inner"
+    },
+    {
+     "op": "difference",
+     "id": "b3",
+     "a": "b3",
+     "b": "b3_slot4"
+    },
+    {
+     "op": "cylinder",
+     "id": "b4",
+     "origin": [
+      0,
+      0,
+      -10.2
+     ],
+     "radius": 37,
+     "height": 2.2
+    },
+    {
+     "op": "cylinder",
+     "id": "b4_bore",
+     "origin": [
+      0,
+      0,
+      -10.6
+     ],
+     "radius": 33,
+     "height": 3
+    },
+    {
+     "op": "difference",
+     "id": "b4",
+     "a": "b4",
+     "b": "b4_bore"
+    },
+    {
+     "op": "cylinder",
+     "id": "b5",
+     "origin": [
+      0,
+      0,
+      -20
+     ],
+     "radius": 29.5,
+     "height": 12
+    },
+    {
+     "op": "cylinder",
+     "id": "b5_bore",
+     "origin": [
+      0,
+      0,
+      -20.4
+     ],
+     "radius": 28.3,
+     "height": 12.8
+    },
+    {
+     "op": "difference",
+     "id": "b5",
+     "a": "b5",
+     "b": "b5_bore"
+    },
+    {
+     "op": "cylinder",
+     "id": "b6",
+     "origin": [
+      0,
+      0,
+      -20
+     ],
+     "radius": 37,
+     "height": 12
+    },
+    {
+     "op": "cylinder",
+     "id": "b6_bore",
+     "origin": [
+      0,
+      0,
+      -20.4
+     ],
+     "radius": 35,
+     "height": 12.8
+    },
+    {
+     "op": "difference",
+     "id": "b6",
+     "a": "b6",
+     "b": "b6_bore"
+    },
+    {
+     "op": "union",
+     "id": "b23",
+     "a": "b2",
+     "b": "b3"
+    },
+    {
+     "op": "union",
+     "id": "b45",
+     "a": "b4",
+     "b": "b5"
+    },
+    {
+     "op": "union",
+     "id": "b456",
+     "a": "b45",
+     "b": "b6"
+    },
+    {
+     "op": "union",
+     "id": "b2_6",
+     "a": "b23",
+     "b": "b456"
+    },
+    {
+     "op": "union",
+     "id": "result",
+     "a": "b1",
+     "b": "b2_6"
+    }
+   ],
+   "expect": {
+    "lumps": 1,
+    "volume": {
+     "value": 30603.04806318825,
+     "tol": 0.01,
+     "formula": "Body1 + ... + Body6 - Body4 & Body6 = pi*37^2*3.6 - 2.4*(S37(8,11) + S37(24,27) + S37(-13,-8) + S37(-29,-24)) + 2*pi*(37^2 - 35^2) + 2.4*(pi*37^2 - sum over (a,b) in [(-5,3), (16,19), (27,33), (-21,-16), (-33,-29)] of (S33(a,b) - S29.5(a,b) + S28.3(a,b))) + 2.2*pi*(37^2 - 33^2) + 12*pi*(29.5^2 - 28.3^2) + 12*pi*(37^2 - 35^2) - 2.2*pi*(37^2 - 35^2); SR(a,b) = F(R,b) - F(R,a), the area of the r R disc between y = a and y = b, F(R,y) = y*sqrt(R^2 - y^2) + R^2*asin(y/R), y clamped to [-R, R]"
+    }
+   }
+  }
+ ]
+}

@@ -1,8 +1,7 @@
 //! The timeline (bottom): features in order, the rollback marker, errors and warnings.
 
-use crate::ui_kit::BackingTooltipExt as _;
-use crate::ui_kit::{Container, Edge, Status, Surface};
-use egui::{Rect, Sense, UiBuilder, pos2, vec2};
+use crate::ui_kit::{Status, StatusTip};
+use egui::{Rect, pos2};
 use serde_json::{Value, json};
 use solidcraft_engine::doc::{
     FeatureKind, FeatureResult, PlaneRef, SketchId,
@@ -13,7 +12,11 @@ use solidcraft_engine::doc::{
 use solidcraft_engine::schema::edit::PlaybackAction;
 
 use crate::SolveApp;
-use crate::theme::Tokens;
+use crate::history_bar;
+use crate::ui_kit::Item;
+use solidcraft_engine::doc::Document;
+use solidcraft_theme::Tokens;
+use std::sync::Arc;
 
 /// Apply transport actions from the current marker; endpoints stay bounded, including an
 /// empty design. All orientations reach the same rollback command.
@@ -22,43 +25,133 @@ pub(crate) fn run_transport(app: &mut SolveApp, control: crate::ui_kit::HistoryT
     if app.close_editor_for_history().is_err() {
         return;
     }
+    if control == crate::ui_kit::HistoryTransport::Play {
+        app.start("timeline.play");
+        return;
+    }
     let n = app.session.doc.features.len();
-    let marker = app.session.doc.marker.unwrap_or(n);
-    let position = match control {
-        crate::ui_kit::HistoryTransport::First => 0,
-        crate::ui_kit::HistoryTransport::Back => marker.saturating_sub(1),
-        crate::ui_kit::HistoryTransport::Play => {
-            app.start("timeline.play");
-            return;
-        }
-        crate::ui_kit::HistoryTransport::Forward => marker.saturating_add(1).min(n),
-        crate::ui_kit::HistoryTransport::Last => n,
+    let Some(position) = step_position(app, app.session.doc.marker.unwrap_or(n), control) else {
+        // The marker stays, but the click still takes over from playback, as a step does.
+        stop_playback(app);
+        return;
     };
     let params = if position < n { json!({"position":position}) } else { json!({}) };
     let _ = app.run_heavy("timeline.roll_to", params);
 }
 
-/// A click runs a History control; a right-click offers to show or hide the Play button.
-pub(crate) fn transport_response(app: &mut SolveApp, control: crate::ui_kit::HistoryTransport, response: &egui::Response) {
-    if response.clicked() {
-        run_transport(app, control);
+/// Where a step control (not Play) takes the marker from `marker`, or `None` when it keeps it.
+/// The steps are the features the History shows: in the bottom bar, only those of the component
+/// it shows (`timeline_scope`, #11430). A step lands where dropping the marker in that slot would.
+fn step_position(app: &SolveApp, marker: usize, control: crate::ui_kit::HistoryTransport) -> Option<usize> {
+    use crate::ui_kit::HistoryTransport;
+    let n = app.session.doc.features.len();
+    let view = transport_view(app);
+    let len = view.len();
+    if len == 0 && n > 0 {
+        return None;
     }
-    if response.secondary_clicked() {
-        let at = response.interact_pointer_pos().unwrap_or(response.rect.left_bottom());
-        crate::context_menu::open_for(app, at, crate::context_menu::Target::HistoryControls);
+    let slot = view.slot(marker);
+    let slot = match control {
+        HistoryTransport::First => 0,
+        HistoryTransport::Back => slot.saturating_sub(1),
+        HistoryTransport::Play => return None,
+        HistoryTransport::Forward => slot.saturating_add(1).min(len),
+        HistoryTransport::Last => len,
+    };
+    let position = view.index(slot);
+    // From a marker outside the shown features, the nearest shown slot can lie the other way:
+    // First and Back never add features, and Forward and Last never roll any back.
+    let backwards = matches!(control, HistoryTransport::First | HistoryTransport::Back);
+    if (backwards && position > marker) || (!backwards && position < marker) { None } else { Some(position) }
+}
+
+/// Whether a History control would do anything now: a step that moves the marker, or Play (Stop
+/// while History plays) when it can run. Only Play says why not: a dimmed step already says the
+/// marker is at that end.
+pub(crate) fn transport_effect(app: &SolveApp, control: crate::ui_kit::HistoryTransport) -> Result<(), Option<String>> {
+    transport_availability(app, control).map_err(Some)?;
+    if control == crate::ui_kit::HistoryTransport::Play {
+        return Ok(());
     }
+    // An open feature editor has rolled the marker to its feature; a step starts from the
+    // design's own marker, which it gets back when the step closes the editor (#10688).
+    let doc = app.editing_state.as_ref().map_or(&app.session.doc, |editing| &editing.original.doc);
+    let marker = doc.marker.unwrap_or(doc.features.len());
+    match step_position(app, marker, control) {
+        Some(position) if position != marker => Ok(()),
+        _ => Err(None),
+    }
+}
+
+/// The History folder's menu, with History in the browser: the History controls (first,
+/// previous, Play History when shown, next, last), each greyed out while it would do nothing,
+/// then the controls' own menu.
+pub(crate) fn history_folder_items(app: &SolveApp) -> Vec<Item> {
+    let playing = app.timeline_playback.is_some();
+    let mut items: Vec<Item> = crate::ui_kit::HistoryTransport::shown(app.preferences.history_play_button)
+        .iter()
+        .map(|&control| {
+            let icon = match control {
+                crate::ui_kit::HistoryTransport::Play if playing => "timeline_stop".to_owned(),
+                _ => format!("timeline_{}", control.id()),
+            };
+            let effect = transport_effect(app, control);
+            Item::action("ui.historyTransport", control.label(playing, play_labels(app)), &icon)
+                .with(json!({ "control": control.id() }))
+                .on(effect.is_ok())
+                .off_because(effect.err().flatten())
+        })
+        .collect();
+    items.push(Item::sep());
+    items.extend(transport_items(app));
+    items
+}
+
+/// Shared-header actions use the same command availability as History playback.
+pub(crate) fn transport_availability(app: &SolveApp, control: crate::ui_kit::HistoryTransport) -> Result<(), String> {
+    if control == crate::ui_kit::HistoryTransport::Play {
+        if app.timeline_playback.is_some() {
+            return Ok(());
+        }
+        return playback_ready(app);
+    }
+    let command = solidcraft_engine::find_command("timeline.roll_to").ok_or_else(|| solidcraft_ui_text::tr("cmd.timeline_roll_to").to_owned())?;
+    let info = command.info(&app.session);
+    if info.enabled { Ok(()) } else { Err(info.disabled_reason.unwrap_or_else(|| info.label.to_owned())) }
+}
+
+/// The features the History controls step through: those the bottom bar shows (one component's
+/// and those inside it while the bar shows one, without the components kept out of the bar), or
+/// every feature for the History on the left or in the browser, or when Preferences > Layout
+/// turns "History steps by component" off.
+fn transport_view(app: &SolveApp) -> crate::timeline_fold::View {
+    let doc = &app.session.doc;
+    use solidcraft_engine::panels::{SectionLocation, Zone};
+
+    let side_history = app.panel_runtime().is_some_and(|runtime| {
+        let layout = runtime.layout().layout();
+        layout.sections.iter().any(|section| {
+            matches!(section.location, SectionLocation::Dock { zone: Zone::Left | Zone::Right })
+                && section.tabs.iter().any(|instance| instance.0 == "history")
+        })
+    });
+    if side_history || app.preferences.history_in_browser || !app.preferences.history_steps_component {
+        return crate::timeline_fold::View::of(doc, None, true);
+    }
+    let within = crate::timeline_scope::shown(app).map(|c| crate::timeline_scope::components_within(app, c));
+    crate::timeline_fold::View::of(doc, within.as_ref(), app.tree.history_show_hidden)
 }
 
 /// The History controls' menu: shows or hides the Play button, and — when the design marks any
 /// component out of the bar — shows or hides those components' entries (#10393).
-pub(crate) fn transport_items(app: &SolveApp) -> Vec<crate::context_menu::Item> {
+pub(crate) fn transport_items(app: &SolveApp) -> Vec<crate::ui_kit::Item> {
     let show = !app.preferences.history_play_button;
-    let label = crate::i18n::tr(if show { "ui.history_play_button_show" } else { "ui.history_play_button_hide" });
-    let mut items = vec![crate::context_menu::Item::action("ui.historyPlayButton", label, "timeline_play").with(json!({ "show": show }))];
+    let label = solidcraft_ui_text::tr(if show { "ui.history_play_button_show" } else { "ui.history_play_button_hide" });
+    let mut items = vec![crate::ui_kit::Item::action("ui.historyPlayButton", label, "timeline_play").with(json!({ "show": show }))];
     if app.session.doc.components.iter().any(|c| c.history_hidden) {
         let show_hidden = !app.tree.history_show_hidden;
-        let label = crate::i18n::tr(if show_hidden { "ui.history_show_hidden" } else { "ui.history_hide_hidden" });
-        items.push(crate::context_menu::Item::action("ui.historyShowHidden", label, "eye").with(json!({ "show": show_hidden })));
+        let label = solidcraft_ui_text::tr(if show_hidden { "ui.history_show_hidden" } else { "ui.history_hide_hidden" });
+        items.push(crate::ui_kit::Item::action("ui.historyShowHidden", label, "eye").with(json!({ "show": show_hidden })));
     }
     items
 }
@@ -67,9 +160,18 @@ pub(crate) fn transport_items(app: &SolveApp) -> Vec<crate::context_menu::Item> 
 /// as Edit Feature on a face finds it (the hole, not the plate it was cut into), else the feature
 /// that made the body.
 fn geometry_feature(app: &SolveApp, body: &str, face: Option<usize>) -> Option<u64> {
-    face.and_then(|index| crate::context_menu::face_feature(app, body, index))
-        .or_else(|| crate::open_meshing::session_world(&app.session).body(body).map(|b| b.feature))
-        .filter(|id| app.session.doc.feature(*id).is_some())
+    // Asked at every frame for a face picked in the view (the timeline follows the pick).
+    let world = crate::open_meshing::still_world(app);
+    let model_body = world.body(body)?;
+    let owner = app.session.doc.feature(model_body.feature);
+    // An imported mesh can only highlight its import feature. Looking up a geometric face
+    // name here would scan the mesh on the UI thread the first time its face is hovered.
+    if model_body.body.triangle_mesh().is_some()
+        && owner.is_some_and(|feature| matches!(feature.kind, FeatureKind::Import { .. } | FeatureKind::MeshImport { .. }))
+    {
+        return Some(model_body.feature);
+    }
+    face.and_then(|index| crate::context_menu::face_feature(app, model_body, index)).or_else(|| owner.map(|feature| feature.id))
 }
 
 /// The feature of the face, edge or vertex under the pointer in the view.
@@ -90,6 +192,11 @@ pub(crate) fn picked_feature(app: &SolveApp) -> Option<u64> {
     })
 }
 
+/// The feature under the pointer (in the 3D view, Browser, or timeline) or picked in the 3D view.
+pub(crate) fn from_view(app: &SolveApp) -> [Option<u64>; 2] {
+    [hovered_feature(app).or(app.viewport.hover_feature), picked_feature(app)]
+}
+
 /// A new face or edge picked in the view scrolls the history shown to the feature that made it,
 /// once per pick; the history stays where it is while the pick does not change.
 pub(crate) fn follow_view_pick(app: &mut SolveApp) {
@@ -108,7 +215,7 @@ pub(crate) fn follow_view_pick(app: &mut SolveApp) {
 
 // Snapshot only the data used by timeline interactions. Cloning FeatureKind here would
 // also copy imported mesh vertices and triangles on every frame.
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, PartialEq, Eq)]
 pub(crate) enum TimelineKind {
     Sketch,
     Profile(SketchId),
@@ -120,6 +227,8 @@ impl TimelineKind {
         match kind {
             FeatureKind::Sketch { .. } => Self::Sketch,
             FeatureKind::Extrude { sketch, .. } | FeatureKind::Revolve { sketch, .. } | FeatureKind::Sweep { sketch, .. } => Self::Profile(*sketch),
+            // Sheet metal drawn from a sketch: the base flange's outline and the contour flange's chain.
+            FeatureKind::SheetBase { sketch, .. } | FeatureKind::SheetContour { sketch, .. } => Self::Profile(*sketch),
             _ => Self::Other,
         }
     }
@@ -195,12 +304,15 @@ pub(crate) fn icon_of(k: &FeatureKind) -> &'static str {
         FeatureKind::Remove { .. } => "delete",
         FeatureKind::BoundingSolid { .. } => "bounding_solid",
         FeatureKind::Pipe { .. } => "pipe",
+        FeatureKind::FrameEndCap { .. } => "end_cap",
         FeatureKind::FrameMember { .. } => "frame_member",
+        FeatureKind::FrameMemberTurn { .. } => "rotate_member",
         FeatureKind::Emboss { .. } => "emboss",
         FeatureKind::ReplaceFace { .. } => "replace_face",
         FeatureKind::Align { .. } => "align",
         FeatureKind::Coil { .. } => "coil",
         FeatureKind::SheetPerforate { .. } => "perforate",
+        FeatureKind::CellGrid { .. } => "perforate",
         FeatureKind::BoundaryFill { .. } => "boundary_fill",
         FeatureKind::Patch { .. } => "surface_patch",
         FeatureKind::Stitch { .. } => "surface_stitch",
@@ -209,6 +321,36 @@ pub(crate) fn icon_of(k: &FeatureKind) -> &'static str {
         FeatureKind::SurfaceTrim { .. } => "surface_trim",
         other => crate::workspace::feature_icon(other).unwrap_or("feature"),
     }
+}
+
+/// The icon a History folder takes from its features when Preferences says so: theirs, when every
+/// feature in it (and in the folders inside it) has the same icon and it holds no joints.
+pub(crate) fn folder_kind_icon(app: &SolveApp, id: u64) -> Option<&'static str> {
+    if !app.preferences.history_folder_kind_icon {
+        return None;
+    }
+    let doc = &app.session.doc;
+    let mut pending = vec![id];
+    let mut seen = std::collections::BTreeSet::new();
+    let mut icon = None;
+    while let Some(id) = pending.pop() {
+        if !seen.insert(id) {
+            continue;
+        }
+        let group = doc.timeline_groups.iter().find(|group| group.id == id)?;
+        if !group.joints.is_empty() {
+            return None;
+        }
+        for feature in &group.features {
+            let this = icon_of(&doc.feature(*feature)?.kind);
+            if icon.is_some_and(|icon| icon != this) {
+                return None;
+            }
+            icon = Some(this);
+        }
+        pending.extend(doc.timeline_groups.iter().filter(|child| child.parent == Some(id)).map(|child| child.id));
+    }
+    icon
 }
 
 fn construction_plane_icon(plane: &PlaneRef) -> &'static str {
@@ -225,60 +367,15 @@ fn construction_plane_icon(plane: &PlaneRef) -> &'static str {
     }
 }
 
-#[derive(Clone, Debug, PartialEq)]
-enum Drag {
-    Marker,
-    Feature(u64),
-}
-
-/// The component whose features the bottom timeline shows (#2880): the active component, else
-/// the one component picked in the browser. `None`: the whole design (nothing active or picked,
-/// or Show All turned on). A design with many parts lists every part's features otherwise.
-pub(crate) fn timeline_component(app: &SolveApp, show_all: bool) -> Option<u64> {
-    if show_all {
-        return None;
+/// Scrolls the History bar to `rect` when it `holds` the feature to reveal. The request is done
+/// only once the rect is presented in the viewport (an offscreen or hidden bar asks again on the
+/// next frame); then it returns true and the caller clears `timeline_reveal`.
+fn reveal_once(ui: &egui::Ui, reveal: &mut Option<usize>, holds: bool, rect: Rect, align: egui::Align) -> bool {
+    if holds && crate::semantic_content::scroll_acknowledged_at(ui, rect, align) {
+        *reveal = None;
+        return true;
     }
-    if app.session.active_component != 0 {
-        return Some(app.session.active_component);
-    }
-    match app.tree.picked_components.as_slice() {
-        [one] if *one != 0 => Some(*one),
-        _ => None,
-    }
-}
-
-/// Indices into the design's features that the timeline shows for `component` (all of them for
-/// `None`): the features of that component and of the components inside it, leaving out the
-/// components marked out of the History bar unless `show_hidden` asks for them (#10393).
-pub(crate) fn shown_feature_indices(doc: &solidcraft_engine::doc::Document, component: Option<u64>, show_hidden: bool) -> Vec<usize> {
-    doc.features
-        .iter()
-        .enumerate()
-        .filter(|(_, f)| component.is_none_or(|c| doc.component_within(f.component, c)))
-        .filter(|(_, f)| show_hidden || !doc.component_history_hidden(f.component))
-        .map(|(i, _)| i)
-        .collect()
-}
-
-/// The design's feature position for a slot among the shown features: before the shown feature
-/// in that slot, or just after the last shown one (the end of the design when all are shown).
-fn design_position(shown: &[usize], slot: usize, n: usize) -> usize {
-    match shown.get(slot) {
-        Some(i) => *i,
-        None => shown.last().map_or(n, |i| (i + 1).min(n)),
-    }
-}
-
-/// Slot index (0..=n) nearest to screen x, given the left edges of the feature buttons.
-fn slot_at(xs: &[f32], end: f32, x: f32) -> usize {
-    let mut best = (0usize, f32::INFINITY);
-    for (i, sx) in xs.iter().chain(std::iter::once(&end)).enumerate() {
-        let d = (sx - 2.0 - x).abs();
-        if d < best.1 {
-            best = (i, d);
-        }
-    }
-    best.0
+    false
 }
 
 /// Check what deleting `ids` takes with it or makes fail (off the window thread when that takes a
@@ -328,17 +425,32 @@ pub(crate) fn delete_params(features: &[u64], groups: &[u64]) -> Value {
     if groups.is_empty() { json!({ "features": features }) } else { json!({ "features": features, "groups": groups }) }
 }
 
+/// The feature a selection item stands for in the Features list and the History: a picked
+/// feature itself, or the construction plane, axis or point the 3D view or the Construction
+/// folder picked by name. One mapping for both directions with [`viewport_sel_of_feature`], so
+/// the lists, the History and the 3D view agree on a construction feature (#17000).
+pub(crate) fn feature_of_sel(doc: &Document, sel: &solidcraft_engine::Sel) -> Option<u64> {
+    use solidcraft_engine::Sel;
+    match sel {
+        Sel::Feature { id } => Some(*id),
+        Sel::Plane { .. } | Sel::Axis { .. } | Sel::ConstructionPoint { .. } => {
+            doc.features.iter().find(|f| f.kind.is_construction() && solidcraft_engine::browser_find::construction_sel(f) == *sel).map(|f| f.id)
+        }
+        _ => None,
+    }
+}
+
+/// What the 3D view lights for a selected construction feature: the plane, axis or point
+/// itself, picked by name. `None` for any other feature.
+pub(crate) fn viewport_sel_of_feature(doc: &Document, id: u64) -> Option<solidcraft_engine::Sel> {
+    doc.feature(id).filter(|f| f.kind.is_construction()).map(solidcraft_engine::browser_find::construction_sel)
+}
+
 /// The selected timeline features, in timeline order.
 pub(crate) fn selected_feature_ids(app: &SolveApp) -> Vec<u64> {
-    app.session
-        .doc
-        .features
-        .iter()
-        .filter(|feature| {
-            app.session.selection.iter().any(|selection| matches!(selection, solidcraft_engine::Sel::Feature { id } if *id == feature.id))
-        })
-        .map(|feature| feature.id)
-        .collect()
+    let doc = &app.session.doc;
+    let picked: std::collections::HashSet<u64> = app.session.selection.iter().filter_map(|selection| feature_of_sel(doc, selection)).collect();
+    doc.features.iter().filter(|feature| picked.contains(&feature.id)).map(|feature| feature.id).collect()
 }
 
 /// What Copy and Delete in a feature's menu act on: the selected features when the
@@ -348,18 +460,38 @@ pub(crate) fn menu_targets(app: &SolveApp, id: u64) -> Vec<u64> {
     if selected.contains(&id) { selected } else { vec![id] }
 }
 
+/// Delete's label in a feature's menu: how many features it deletes when that is more than one.
+pub(crate) fn delete_label(count: usize) -> String {
+    match count {
+        1 => solidcraft_ui_text::tr_label("Delete").to_string(),
+        n => solidcraft_ui_text::format("timeline.delete_many", &[("count", &n.to_string())]),
+    }
+}
+
 /// Delete in a feature's menu, in both timelines: the selected features when the right-clicked
 /// one is among them, labelled with how many, else that feature alone (#5005).
 pub(crate) fn delete_button(app: &mut SolveApp, ui: &mut egui::Ui, id: u64) {
     let targets = menu_targets(app, id);
-    let label = match targets.len() {
-        1 => crate::i18n::tr_label("Delete").to_string(),
-        n => crate::i18n::format("timeline.delete_many", &[("count", &n.to_string())]),
-    };
-    if crate::context_menu::button(ui, &label, "delete").clicked() {
+    if crate::ui_kit::menu::button(ui, &delete_label(targets.len()), "delete").clicked() {
         delete_features(app, targets);
         ui.close();
     }
+}
+
+/// Suppress in a feature's menu, in both timelines, when it acts on several selected features:
+/// its label, saying how many, and `timeline.suppress`'s parameters, one undo step for them all.
+/// It unsuppresses them when all of them are suppressed, else suppresses them all (#16245).
+/// `None` when the menu acts on one feature. It is an extra entry: the feature's own Suppress
+/// entry stays and acts on that feature alone.
+pub(crate) fn suppress_selected(app: &SolveApp, id: u64) -> Option<(String, Value)> {
+    let targets = menu_targets(app, id);
+    if targets.len() < 2 {
+        return None;
+    }
+    let all_suppressed = targets.iter().all(|id| app.session.doc.feature(*id).is_some_and(|f| f.suppressed));
+    let key = if all_suppressed { "timeline.unsuppress_many" } else { "timeline.suppress_many" };
+    let label = solidcraft_ui_text::format(key, &[("count", &targets.len().to_string())]);
+    Some((label, json!({ "features": targets, "suppressed": !all_suppressed })))
 }
 
 /// The features from design position `from` to the end, only the `shown` positions (ascending)
@@ -370,22 +502,87 @@ fn features_from(app: &SolveApp, from: usize, shown: Option<&[usize]>) -> Vec<u6
 }
 
 /// In the menu of a feature after the history marker (feature `id` at design position
-/// `index`, `marker` a design position too): delete every feature after the marker, only the
-/// `shown` ones when the timeline is filtered to a component, labelled with how many, in one
-/// delete through [`delete_features`] so the confirmation still lists what would fail. Not
-/// offered before the marker, nor when the menu acts on several selected features: an entry
-/// that acts partly on the selection and partly beyond it is hard to read.
-pub(crate) fn delete_after_marker_button(app: &mut SolveApp, ui: &mut egui::Ui, id: u64, index: usize, marker: usize, shown: Option<&[usize]>) {
+/// `index`, `marker` a design position too): every feature after the marker, only the `shown`
+/// ones when the timeline is filtered to a component, with the entry's label, for one delete
+/// through [`delete_features`] so the confirmation still lists what would fail. Not offered
+/// before the marker, nor when the menu acts on several selected features: an entry that acts
+/// partly on the selection and partly beyond it is hard to read.
+fn after_marker(app: &SolveApp, id: u64, index: usize, marker: usize, shown: Option<&[usize]>) -> Option<(String, Vec<u64>)> {
     if index < marker || menu_targets(app, id).len() > 1 {
-        return;
+        return None;
     }
     let ids = features_from(app, marker, shown);
+    // A feature the bar's filter leaves out has nothing shown after the marker to delete.
+    if ids.is_empty() {
+        return None;
+    }
     let key = if ids.len() == 1 { "timeline.delete_after_marker_one" } else { "timeline.delete_after_marker_other" };
-    let label = crate::i18n::format(key, &[("count", &ids.len().to_string())]);
-    if crate::context_menu::button(ui, &label, "delete").clicked() {
+    Some((solidcraft_ui_text::format(key, &[("count", &ids.len().to_string())]), ids))
+}
+
+/// The [`after_marker`] entry as a button.
+pub(crate) fn delete_after_marker_button(app: &mut SolveApp, ui: &mut egui::Ui, id: u64, index: usize, marker: usize, shown: Option<&[usize]>) {
+    let Some((label, ids)) = after_marker(app, id, index, marker, shown) else { return };
+    if crate::ui_kit::menu::button(ui, &label, "delete").clicked() {
         delete_features(app, ids);
         ui.close();
     }
+}
+
+/// A History bar feature's menu (`Target::Timeline`): edit, rename, group, suppress, roll back,
+/// find, the clipboard and delete.
+pub(crate) fn feature_items(app: &SolveApp, id: u64) -> Vec<Item> {
+    let doc = &app.session.doc;
+    let (Some(feature), Some(index)) = (doc.feature(id), doc.feature_index(id)) else { return Vec::new() };
+    let mut v = vec![Item::action("ui.editFeature", "Edit Feature", "edit").with(json!({ "feature": id }))];
+    if matches!(feature.kind, FeatureKind::Sketch { .. }) {
+        v.extend(
+            crate::context_menu::items(app, &crate::context_menu::Target::Sketch { id }).into_iter().filter(|item| item.id == "ui.redefineSketch"),
+        );
+    }
+    if let Some(sketch) = TimelineKind::of(&feature.kind).profile_sketch() {
+        v.push(Item::action("ui.editSketch", "Edit Profile Sketch", "sketch").with(json!({ "sketch": sketch.0 })));
+    }
+    // Its own message, not a literal: no catalog held the literal, so the item stayed English
+    // in every language (#8301).
+    let suppress = if feature.suppressed { "timeline.unsuppress_features" } else { "timeline.suppress_features" };
+    let targets = menu_targets(app, id);
+    let parent = crate::timeline_folders::group_parent(&doc.timeline_groups, &targets);
+    v.extend([
+        Item::action("ui.rename", "Rename", "rename").with(json!({ "feature": id, "dialog": true })),
+        // A new folder of the selected features, or of this one when it isn't selected.
+        Item::action("ui.groupFeatures", "Group Features", "feature_group")
+            .with(json!({ "features": targets, "parent": parent }))
+            .off_because(app.session.group_refusal(&targets, parent)),
+        Item::action("timeline.suppress", solidcraft_ui_text::tr(suppress), "suppress").with(json!({ "feature": id })),
+    ]);
+    // An extra entry for the selection; the one above still acts on this feature alone.
+    if let Some((label, params)) = suppress_selected(app, id) {
+        v.push(Item::action("timeline.suppress", &label, "suppress").with(params));
+    }
+    v.extend([
+        Item::action("timeline.roll_to", "Roll History Marker Here", "rollback").with(json!({ "feature": id })),
+        Item::action("ui.findBrowser", "Find in Browser", "list").with(json!({ "feature": id })),
+        Item::sep(),
+        Item::action("timeline.copy", "Copy", "copy").with(json!({ "features": menu_targets(app, id) })),
+        Item::action("timeline.paste", "Paste", "paste").with(json!({})).on_if(!app.session.clipboard.is_empty()),
+    ]);
+    if feature_message(app, id).is_some() {
+        let failed = app.session.model.result(id).is_some_and(|r| r.error.is_some());
+        let label = if failed { "Copy Error Message" } else { "Copy Warning Message" };
+        v.push(Item::action("ui.copyMessage", label, "copy").with(json!({ "feature": id })));
+    }
+    v.push(Item::sep());
+    v.push(Item::action("ui.deleteFeatures", &delete_label(targets.len()), "delete").with(json!({ "features": targets })));
+    let marker = doc.marker.unwrap_or(doc.features.len());
+    // The features the bar shows (`timeline_scope`), as it draws them.
+    let within = crate::timeline_scope::shown(app).map(|c| crate::timeline_scope::components_within(app, c));
+    let view = crate::timeline_fold::View::of(doc, within.as_ref(), app.tree.history_show_hidden);
+    if let Some((label, ids)) = after_marker(app, id, index, marker, view.shown()) {
+        // Its own id, so `ui.menuPick` can tell it from Delete.
+        v.push(Item::action("ui.deleteAfterMarker", &label, "delete").with(json!({ "features": ids })));
+    }
+    v
 }
 
 /// The timeline anchor of a feature: the last one clicked, where a Shift+click range starts.
@@ -395,12 +592,12 @@ pub(crate) fn anchor_key(id: u64) -> String {
 
 /// Copy and Paste in a feature's timeline menu. Paste puts the copies at the history marker.
 pub(crate) fn clipboard_buttons(app: &mut SolveApp, ui: &mut egui::Ui, id: u64) {
-    if crate::context_menu::button(ui, crate::i18n::tr_label("Copy"), "copy").clicked() {
+    if crate::ui_kit::menu::button(ui, solidcraft_ui_text::tr_label("Copy"), "copy").clicked() {
         let features = menu_targets(app, id);
         let _ = app.run("timeline.copy", json!({ "features": features }));
         ui.close();
     }
-    if crate::context_menu::button_enabled(ui, crate::i18n::tr_label("Paste"), "paste", !app.session.clipboard.is_empty()).clicked() {
+    if crate::ui_kit::menu::button_enabled(ui, solidcraft_ui_text::tr_label("Paste"), "paste", !app.session.clipboard.is_empty()).clicked() {
         let _ = app.run("timeline.paste", json!({}));
         ui.close();
     }
@@ -408,16 +605,11 @@ pub(crate) fn clipboard_buttons(app: &mut SolveApp, ui: &mut egui::Ui, id: u64) 
 
 /// A feature tooltip's (and its copied message's) name, type, error and warning: an import's
 /// summary as it is (the mark already says it is a warning), any other warning labelled.
-pub(crate) fn feature_status_text(name: &str, ty: &str, result: Option<&FeatureResult>) -> String {
+pub(crate) fn feature_status_tip(name: &str, ty: &str, result: Option<&FeatureResult>) -> StatusTip {
     let error = result.and_then(|r| r.error.as_deref());
     match result.and_then(|r| r.import_report.as_deref()).filter(|r| !r.issues.is_empty()) {
-        Some(report) => {
-            let mut text = status_text(name, ty, error, None);
-            text.push('\n');
-            text.push_str(&import_summary(report));
-            text
-        }
-        None => status_text(name, ty, error, result.and_then(|r| r.warning.as_deref())),
+        Some(report) => StatusTip { warning: Some(import_summary(report)), ..status_tip(name, ty, error, None) },
+        None => status_tip(name, ty, error, result.and_then(|r| r.warning.as_deref())),
     }
 }
 
@@ -427,18 +619,40 @@ pub(crate) fn result_index(results: &[solidcraft_engine::doc::FeatureResult]) ->
     results.iter().enumerate().rev().map(|(k, r)| (r.id, k)).collect()
 }
 
-/// The common prefix of a feature tooltip and its copied status message.
-pub(crate) fn status_text(name: &str, ty: &str, error: Option<&str>, warning: Option<&str>) -> String {
-    let mut text = format!("{name}  ({ty})");
-    if let Some(error) = error {
-        text.push('\n');
-        text.push_str(&crate::i18n::format("timeline.feature_error", &[("message", &crate::i18n::tr_diagnostic(error))]));
+/// The common start of a feature tooltip and its copied status message: its name and type,
+/// then its error and its warning, each labelled.
+pub(crate) fn status_tip(name: &str, ty: &str, error: Option<&str>, warning: Option<&str>) -> StatusTip {
+    let line = |key: &str, message: &str| solidcraft_ui_text::format(key, &[("message", &crate::i18n::tr_diagnostic(message))]);
+    StatusTip {
+        head: format!("{name}  ({ty})"),
+        error: error.map(|error| line("timeline.feature_error", error)),
+        warning: warning.map(|warning| line("timeline.feature_warning", warning)),
+        tail: String::new(),
     }
-    if let Some(warning) = warning {
-        text.push('\n');
-        text.push_str(&crate::i18n::format("timeline.feature_warning", &[("message", &crate::i18n::tr_diagnostic(warning))]));
+}
+
+/// A feature's tooltip in the bottom and the left History: its name and type, its error and
+/// warning, then why a rolled-back feature isn't shown, a sketch's state, the time it took and
+/// the edit hint. Both Histories show this one, so the two stay identical (#14027).
+pub(crate) fn feature_tooltip(
+    name: &str,
+    ty: &str,
+    result: Option<&FeatureResult>,
+    rolled: bool,
+    sketch_state: Option<crate::sketch_state::SketchState>,
+) -> StatusTip {
+    // The type as a user reads it, translated, without the programmatic `Feature` suffix: a
+    // user sees "Fillet", not "FilletFeature".
+    let kind = solidcraft_ui_text::tr_label(ty.strip_suffix("Feature").unwrap_or(ty));
+    let mut lines = Vec::new();
+    // Greyed out says only "not shown": say why (#8100).
+    if rolled {
+        lines.push(solidcraft_ui_text::tr("timeline.feature_rolled_back").to_string());
     }
-    text
+    lines.extend(sketch_state.map(|state| state.text()));
+    lines.extend(result.map(|r| format!("{:.1} ms", r.ms)));
+    lines.push(solidcraft_ui_text::tr("timeline.feature_hint").to_string());
+    StatusTip { tail: lines.join("\n"), ..feature_status_tip(name, kind, result) }
 }
 
 /// A feature's mark: an error, else a warning; none while it is suppressed or rolled back, as
@@ -449,7 +663,7 @@ pub(crate) fn feature_status(app: &SolveApp, id: u64) -> Option<Status> {
 }
 
 /// The mark of the feature at `index` in the history, given how to find its result.
-fn status_at<'a>(app: &SolveApp, index: usize, result: impl FnOnce() -> Option<&'a solidcraft_engine::doc::FeatureResult>) -> Option<Status> {
+pub(crate) fn status_at<'a>(app: &SolveApp, index: usize, result: impl FnOnce() -> Option<&'a FeatureResult>) -> Option<Status> {
     let feature = app.session.doc.features.get(index)?;
     if feature.suppressed || app.session.doc.marker.is_some_and(|marker| index >= marker) {
         return None;
@@ -459,7 +673,7 @@ fn status_at<'a>(app: &SolveApp, index: usize, result: impl FnOnce() -> Option<&
 }
 
 /// The worst mark among `ids`, with the message of the first feature that has it.
-pub(crate) fn worst_status(app: &SolveApp, ids: &[u64]) -> (Option<Status>, Option<String>) {
+pub(crate) fn worst_status(app: &SolveApp, ids: &[u64]) -> (Option<Status>, Option<StatusTip>) {
     let mark = |status: Option<Status>, id: &u64| status.map(|status| (status, *id));
     // A long folder finds each feature's place and result in tables built once: a search per
     // feature made a folded long history cost the square of its length every frame. A short
@@ -477,30 +691,36 @@ pub(crate) fn worst_status(app: &SolveApp, ids: &[u64]) -> (Option<Status>, Opti
     };
     let worst = marks.into_iter().reduce(|a, b| if b.0 > a.0 { b } else { a });
     match worst {
-        Some((status, id)) => (Some(status), feature_message(app, id)),
+        Some((status, id)) => (Some(status), feature_tip(app, id)),
         None => (None, None),
     }
 }
 
 /// What a feature's error or warning mark says, as its tooltip shows it (name and type, then
-/// the error and the warning), for the clipboard, and an import's every warning as the kernel
-/// words them. `None` when it has neither.
-pub(crate) fn feature_message(app: &SolveApp, id: u64) -> Option<String> {
+/// the error and the warning), and an import's every warning as the kernel words them. `None`
+/// when it has neither.
+pub(crate) fn feature_tip(app: &SolveApp, id: u64) -> Option<StatusTip> {
     let result = app.session.model.result(id)?;
     if result.error.is_none() && result.warning.is_none() {
         return None;
     }
     let feature = app.session.doc.features.iter().find(|f| f.id == id)?;
-    let mut text = feature_status_text(&feature.name, feature.kind.type_name(), Some(result));
+    let mut tip = feature_status_tip(&feature.name, feature.kind.type_name(), Some(result));
     if let Some(report) = result.import_report.as_ref().filter(|r| !r.issues.is_empty()) {
-        text.push_str("\n\n");
-        text.push_str(crate::i18n::tr("import_report.details"));
+        // A blank line before the details.
+        tip.tail.push('\n');
+        tip.tail.push_str(solidcraft_ui_text::tr("import_report.details"));
         for issue in &report.issues {
-            text.push('\n');
-            text.push_str(&issue.detail);
+            tip.tail.push('\n');
+            tip.tail.push_str(&issue.detail);
         }
     }
-    Some(text)
+    Some(tip)
+}
+
+/// [`feature_tip`] as plain text, for the clipboard.
+pub(crate) fn feature_message(app: &SolveApp, id: u64) -> Option<String> {
+    feature_tip(app, id).map(|tip| tip.plain())
 }
 
 /// What a feature's warning mark says: an import's warnings summed up in words, else the
@@ -510,6 +730,12 @@ pub(crate) fn warning_text(result: &FeatureResult) -> Option<String> {
         Some(report) => Some(import_summary(report)),
         None => result.warning.clone(),
     }
+}
+
+/// Whether a feature has a warning mark, as [`warning_text`] would say, without writing it:
+/// the bar asks this of every chip every frame.
+pub(crate) fn has_warning(result: &FeatureResult) -> bool {
+    result.import_report.as_deref().is_some_and(|r| !r.issues.is_empty()) || result.warning.is_some()
 }
 
 /// The status line after an open or an import with warnings: their summary. The import made
@@ -532,6 +758,33 @@ pub(crate) fn import_status(app: &SolveApp, reply: &Value) -> Option<String> {
     result.import_report.as_deref().map(import_summary)
 }
 
+/// The status line after an open or an import that warns: the import's summary
+/// ([`import_status`]), else how many warnings the reply has and the first of them. `None` without
+/// warnings. The desktop's open, the web's open and an insert all say it the same way.
+pub(crate) fn import_warning_status(app: &SolveApp, reply: &Value) -> Option<String> {
+    import_status(app, reply).or_else(|| {
+        let w = reply.get("warnings").and_then(Value::as_array).filter(|w| !w.is_empty())?;
+        Some(format!("imported with {} warning(s): {}", w.len(), w.first().and_then(Value::as_str).unwrap_or("")))
+    })
+}
+
+/// SMLib's check of an import's parts runs on after the design shows (#17697). When it ends,
+/// what it found joins the import's result, so its History chip warns, and a part to repair is
+/// said on the status line, once per import, in history order. While a check runs the window
+/// looks again a few times a second.
+pub(crate) fn tick_import_checks(app: &mut SolveApp, ctx: &egui::Context) {
+    // Parts the checks healed: the import is its healed bodies from now on.
+    app.session.settle_import_checks();
+    for id in app.session.model.take_import_notices() {
+        if let Some(summary) = app.session.model.result(id).and_then(|r| r.import_report.as_deref()).map(import_summary) {
+            app.set_status(summary, false);
+        }
+    }
+    if app.session.model.checking_imports() {
+        ctx.request_repaint_after(std::time::Duration::from_millis(250));
+    }
+}
+
 /// An import's warnings for a person who uses CAD: how many of the file's parts came in as
 /// solids, then what happened to the others, by kind, counted by part (faces for the faces left
 /// out or not drawn), and what may help. Entity numbers and the kernel's wording stay in the
@@ -550,10 +803,11 @@ pub(crate) fn import_summary(report: &ImportReport) -> String {
     }
     let parts_of = |kind| parts.get(&kind).map_or(0, std::collections::BTreeSet::len);
     let faces_of = |kind| faces.get(&kind).copied().unwrap_or(0);
-    let counted = |key: &str, n: usize| crate::i18n::format(&format!("{key}_{}", if n == 1 { "one" } else { "other" }), &[("count", &n.to_string())]);
+    let counted =
+        |key: &str, n: usize| solidcraft_ui_text::format(&format!("{key}_{}", if n == 1 { "one" } else { "other" }), &[("count", &n.to_string())]);
     let mut out = Vec::new();
     if report.parts > 1 && report.solids < report.parts {
-        out.push(crate::i18n::format("import_report.solids", &[("solids", &report.solids.to_string()), ("parts", &report.parts.to_string())]));
+        out.push(solidcraft_ui_text::format("import_report.solids", &[("solids", &report.solids.to_string()), ("parts", &report.parts.to_string())]));
     }
     let sentences = [
         ("import_report.not_imported", parts_of(IssueKind::NotImported)),
@@ -569,7 +823,7 @@ pub(crate) fn import_summary(report: &ImportReport) -> String {
     out.extend(sentences.iter().filter(|(_, n)| *n > 0).map(|(key, n)| counted(key, *n)));
     let lost = [IssueKind::NotImported, IssueKind::Refused, IssueKind::ImportedAsSurfaces, IssueKind::FaceLeftOut, IssueKind::OpenBody];
     if lost.iter().any(|k| parts.contains_key(k)) {
-        out.push(crate::i18n::tr("import_report.hint").to_string());
+        out.push(solidcraft_ui_text::tr("import_report.hint").to_string());
     }
     out.join(" ")
 }
@@ -579,7 +833,7 @@ pub(crate) fn message_button(app: &SolveApp, ui: &mut egui::Ui, id: u64) {
     let Some(text) = feature_message(app, id) else { return };
     let failed = app.session.model.result(id).is_some_and(|r| r.error.is_some());
     let label = if failed { "Copy Error Message" } else { "Copy Warning Message" };
-    if crate::context_menu::button(ui, crate::i18n::tr_label(label), "copy").clicked() {
+    if crate::ui_kit::menu::button(ui, solidcraft_ui_text::tr_label(label), "copy").clicked() {
         ui.ctx().copy_text(text);
         ui.close();
     }
@@ -595,7 +849,7 @@ pub(crate) fn sketch_plane_button(app: &mut SolveApp, ui: &mut egui::Ui, id: u64
     else {
         return;
     };
-    let response = crate::context_menu::button_enabled(ui, &item.label, &item.icon, item.enabled);
+    let response = crate::ui_kit::menu::button_enabled(ui, &item.label, &item.icon, item.enabled);
     if response.clicked() {
         crate::context_menu::run_item(app, &item, response.rect.center());
         ui.close();
@@ -603,8 +857,9 @@ pub(crate) fn sketch_plane_button(app: &mut SolveApp, ui: &mut egui::Ui, id: u64
 }
 
 /// Shift+click on a feature: select the features from the anchor (the last feature clicked, or
-/// the last selected one) to this one. `order` is the timeline as drawn this frame, taken before
-/// drawing so the range never mixes two orders. Ctrl as well adds the range to the selection.
+/// the last selected one) to this one. `order` is the timeline as drawn this frame, taken from
+/// the list it was drawn from so the range never mixes two orders. Ctrl as well adds the range to
+/// the selection.
 fn select_range(app: &mut SolveApp, order: &[u64], id: u64, add: bool) {
     let anchor = app.tree.timeline_anchor.clone().or_else(|| selected_feature_ids(app).last().map(|f| anchor_key(*f)));
     let from = anchor.and_then(|key| order.iter().position(|f| anchor_key(*f) == key));
@@ -617,18 +872,24 @@ fn select_range(app: &mut SolveApp, order: &[u64], id: u64, add: bool) {
     let _ = app.run("select.set", json!({ "items": items, "add": add }));
 }
 
-/// Give a History feature click to a compatible active dialog input in any layout.
+/// Give a History or Browser feature click to a compatible active dialog input in any layout.
 /// Plain clicks keep an existing pick; Ctrl/Command clicks toggle it off.
 pub(crate) fn pick_feature_into_dialog(app: &mut SolveApp, id: u64, modifiers: egui::Modifiers) -> bool {
     // A pattern or Mirror says why it does not take a sketch (#10057).
     if app.dialog.as_mut().is_some_and(|d| d.refuse_sketch(&app.session, id)) {
         return true;
     }
+    // The chat's picker takes the step into Features whichever list is active (#11318).
+    if let Some(d) = app.dialog.as_mut() {
+        d.activate_input_taking(crate::selection::FEATURES);
+    }
     let Some(d) = app.dialog.as_mut().filter(|d| d.active_input().is_some_and(|i| i.accept & crate::selection::FEATURES != 0)) else {
         return false;
     };
     let feature = solidcraft_engine::Sel::Feature { id };
-    if modifiers.command || modifiers.ctrl || !d.active_input().is_some_and(|i| i.items.contains(&feature)) {
+    // The chat's picker takes a picked step out on a plain click too, as the model view does.
+    let toggle = modifiers.command || modifiers.ctrl || matches!(d.kind, crate::dialogs::Kind::ChatContext);
+    if toggle || !d.active_input().is_some_and(|i| i.items.contains(&feature)) {
         d.pick(&app.session, feature);
     }
     true
@@ -693,7 +954,7 @@ fn playback_blocked(app: &SolveApp) -> bool {
         || app.session.active_sketch.is_some()
         || app.dialog.is_some()
         || app.tool.is_some()
-        || app.file_load.busy()
+        || app.file_load_holds()
         || app.file_picker.is_some()
         || app.saving.is_some()
         || app.applying.is_some()
@@ -703,13 +964,20 @@ fn playback_blocked(app: &SolveApp) -> bool {
 
 fn playback_ready(app: &SolveApp) -> Result<(), String> {
     if app.computing_since().is_some() || playback_blocked(app) {
-        return Err(crate::i18n::tr("ui.history_play_finish_action").into());
+        return Err(solidcraft_ui_text::tr("ui.history_play_finish_action").into());
     }
     let n = app.session.doc.features.len();
-    if app.session.doc.marker.unwrap_or(n) >= n {
-        return Err(crate::i18n::tr("ui.history_play_roll_back").into());
+    if app.session.doc.marker.unwrap_or(n) >= n && !play_starts_over(app) {
+        return Err(solidcraft_ui_text::tr("ui.history_play_roll_back").into());
     }
     Ok(())
+}
+
+/// Whether Play History starts over: the marker is at the end of a History that has features
+/// (#10798).
+fn play_starts_over(app: &SolveApp) -> bool {
+    let n = app.session.doc.features.len();
+    n > 0 && app.session.doc.marker.unwrap_or(n) >= n
 }
 
 pub(crate) fn request_playback(app: &mut SolveApp, action: PlaybackAction) -> Result<(), String> {
@@ -721,6 +989,14 @@ pub(crate) fn request_playback(app: &mut SolveApp, action: PlaybackAction) -> Re
         return Ok(());
     }
     playback_ready(app)?;
+    if play_starts_over(app) {
+        // Back to the start first, shown like any step; the next step shows the first feature
+        // (#10798).
+        let revision = app.session.revision;
+        app.run_heavy("timeline.roll_to", json!({"position": 0}))?;
+        app.timeline_playback = Some(Playback { revision, position: 0, waiting: true, next_at: 0.0 });
+        return Ok(());
+    }
     let n = app.session.doc.features.len();
     let position = app.session.doc.marker.unwrap_or(n);
     app.timeline_playback = Some(Playback { revision: app.session.revision, position, waiting: false, next_at: 0.0 });
@@ -774,525 +1050,424 @@ pub(crate) fn tick_playback(app: &mut SolveApp, ctx: &egui::Context) {
     app.timeline_playback = Some(playback);
 }
 
-pub fn timeline(app: &mut SolveApp, ui: &mut egui::Ui) {
-    crate::browser::sync_reveals(app);
-    let t = Tokens::get();
-    app.shell.history_dock_space = Some(ui.available_rect_before_wrap());
-    if Container::for_layout(app.ui.layout, Surface::Panel).floating() {
-        let rect = floating_rect(ui.available_rect_before_wrap());
-        // A window too short for the card (the ribbon already fills it) leaves the history out
-        // rather than drawing into a negative-size rectangle.
-        if !rect.is_finite() || rect.width() < 1.0 || rect.height() < 30.0 {
-            app.shell.history = None;
-            return;
+/// A folder's Edit Holes item, when it holds holes only: one Hole dialog for all of them.
+pub(crate) fn edit_holes_item(app: &mut SolveApp, ui: &mut egui::Ui, folder: u64) {
+    if crate::hole_folder::holes(app, folder).is_none() {
+        return;
+    }
+    if crate::ui_kit::menu::button(ui, "Edit Holes", "hole").clicked() {
+        if let Err(why) = crate::hole_folder::open(app, folder) {
+            app.set_status(why, true);
         }
-        app.shell.history = Some(rect);
-        crate::scenario::publish_rect("history:card", rect);
-        let mut child = ui.new_child(UiBuilder::new().id_salt("sc_timeline").max_rect(rect));
-        Container::paint_panel_frame(
-            ui.painter(),
-            Container::new(ui.ctx(), Surface::Panel).frame(ui.ctx(), t.timeline, crate::frame::Side::Left),
-            rect,
-        );
-        child.set_clip_rect(rect);
-        timeline_contents(app, &mut child, true);
-    } else {
-        let host = Container::new(ui.ctx(), Surface::Panel);
-        let response = host.show_edge(ui, host.edge("sc_timeline", Edge::Bottom).exact_size(40.0), host.edge_frame(t.timeline), |ui| {
-            timeline_contents(app, ui, false);
+        ui.close();
+    }
+}
+
+/// Where the bottom History strip publishes its marker and feature chips.
+const BAR_HANDLES: history_bar::Handles<'static> = history_bar::Handles { marker: "history:marker", step: "timeline:" };
+
+/// A feature as the bar draws it: id, name, icon, suppressed, type name, kind.
+type BarFeature = (u64, String, &'static str, bool, &'static str, TimelineKind);
+
+/// What the bar reads from one feature: id, name, icon, suppressed, type name and kind. The rows
+/// are built from it and checked against it, so the check compares exactly what the build reads.
+fn bar_feature(f: &solidcraft_engine::doc::Feature) -> (u64, &str, &'static str, bool, &'static str, TimelineKind) {
+    (f.id, f.name.as_str(), icon_of(&f.kind), f.suppressed, f.kind.type_name(), TimelineKind::of(&f.kind))
+}
+
+/// What tells the bar that the document may have changed since its rows were last checked: the
+/// same kind of key as the vertical History's row plan (`PlanKey`), without the marker and the
+/// group count, which these rows do not depend on. The design changes through commands, which
+/// count the session's revision up; the document's address and the feature count guard edits made
+/// in place without one. The address is a plain number, never a pointer that is held: a weak
+/// pointer here would make `Session::doc_mut` (`Arc::make_mut`) move the document to a new address
+/// instead of editing it in place, which is why the engine drops its own weak caches before an
+/// edit (#7502).
+#[derive(Clone, Copy, PartialEq, Eq)]
+struct BarSeen {
+    /// Another design in the same window.
+    session: u64,
+    revision: u64,
+    document: usize,
+    features: usize,
+}
+
+impl BarSeen {
+    fn of(app: &SolveApp) -> Self {
+        let session = &app.session;
+        Self { session: session.uid, revision: session.revision, document: Arc::as_ptr(&session.doc) as usize, features: session.doc.features.len() }
+    }
+}
+
+/// The bar's features as the design alone gives them, kept in the egui context with the key they
+/// were last checked under ([`BarSeen`]): a long history copied every feature's name, and wrote
+/// every step's handle, on every frame. A frame with the same key takes them as they are. When the
+/// key changes they are checked against the document's features ([`BarRows::describes`]) and built
+/// again only if a feature changed: a counted-up revision (a selection) or a moved document (every
+/// frame of a sketch drag) does not mean one did. Nothing here depends on the theme, the results,
+/// the selection, the marker or the folds.
+struct BarRows {
+    features: Vec<BarFeature>,
+    /// Each feature's handle: `BAR_HANDLES.step` followed by its name.
+    handles: Vec<Arc<str>>,
+    /// Each feature's icon accent, which its type name and icon give
+    /// (`workspace::feature_icon_accent`).
+    accents: Vec<Option<&'static str>>,
+    /// No feature id repeats, so results that line up with the features need no table
+    /// ([`BarResults`]).
+    unique_ids: bool,
+}
+
+#[cfg(test)]
+thread_local! {
+    /// How many times the bar's rows were built.
+    static BAR_ROWS_BUILT: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+    /// How many times the kept rows were checked against the document, the key having changed.
+    static BAR_ROWS_CHECKED: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
+impl BarRows {
+    /// The rows for the design as it is: the kept ones under the same key; under another, the
+    /// kept ones again (now under the new key) while they still describe its features.
+    fn cached(app: &SolveApp, ui: &egui::Ui) -> Arc<Self> {
+        let id = egui::Id::unique("sc_history_bar_rows");
+        let seen = BarSeen::of(app);
+        let kept = ui.data(|data| data.get_temp::<(BarSeen, Arc<Self>)>(id));
+        if let Some((was, rows)) = &kept
+            && *was == seen
+        {
+            return rows.clone();
+        }
+        // The key changed: the kept rows still serve if no feature did.
+        let held = kept.map(|(_, rows)| rows).filter(|rows| {
+            #[cfg(test)]
+            BAR_ROWS_CHECKED.with(|checked| checked.set(checked.get() + 1));
+            rows.describes(&app.session.doc)
         });
-        let frame = host.edge_frame(t.timeline);
-        Container::paint_inset(ui.painter(), response.response.rect - frame.outer_margin, frame);
-        app.shell.history = Some(response.response.rect);
-        crate::scenario::publish_rect("history:strip", response.response.rect);
+        let rows = held.unwrap_or_else(|| Arc::new(Self::of(app)));
+        ui.data_mut(|data| data.insert_temp(id, (seen, rows.clone())));
+        rows
     }
-}
 
-pub(crate) fn floating_rect(available: Rect) -> Rect {
-    Container::floating_card(Surface::Panel).bottom_strip_rect(available, 40.0)
-}
-
-#[derive(Clone, Debug)]
-enum FolderTile {
-    Feature(usize),
-    Folder(u64),
-    Joints(Vec<u64>),
-}
-
-/// Lay out each folder as a block, keeping feature order and placing its joints at its end.
-fn folder_tiles(app: &SolveApp, features: &[u64]) -> Vec<FolderTile> {
-    if app.session.doc.timeline_groups.is_empty() {
-        return (0..features.len()).map(FolderTile::Feature).collect();
-    }
-    fn entries(app: &SolveApp, features: &[u64], parent: Option<u64>) -> Vec<FolderTile> {
-        let groups = &app.session.doc.timeline_groups;
-        let mut entries: Vec<(usize, u64, FolderTile)> = features
+    /// Build the rows from the design.
+    fn of(app: &SolveApp) -> Self {
+        #[cfg(test)]
+        BAR_ROWS_BUILT.with(|built| built.set(built.get() + 1));
+        let features: Vec<BarFeature> = app
+            .session
+            .doc
+            .features
             .iter()
-            .enumerate()
-            .filter(|(_, id)| groups.iter().find(|group| group.features.contains(id)).map(|group| group.id) == parent)
-            .map(|(index, id)| (index, *id, FolderTile::Feature(index)))
+            .map(|f| {
+                let (id, name, icon, suppressed, ty, kind) = bar_feature(f);
+                (id, name.to_string(), icon, suppressed, ty, kind)
+            })
             .collect();
-        for group in groups.iter().filter(|group| group.parent == parent) {
-            let mut pending = vec![group.id];
-            let mut seen = std::collections::BTreeSet::new();
-            let mut first = features.len();
-            while let Some(id) = pending.pop() {
-                if !seen.insert(id) {
-                    continue;
-                }
-                if let Some(group) = groups.iter().find(|group| group.id == id) {
-                    first = first.min(features.iter().position(|id| group.features.contains(id)).unwrap_or(features.len()));
-                    pending.extend(groups.iter().filter(|child| child.parent == Some(id)).map(|child| child.id));
-                }
-            }
-            entries.push((first, group.id, FolderTile::Folder(group.id)));
-        }
-        entries.sort_by_key(|(index, id, _)| (*index, *id));
-        entries.into_iter().map(|(_, _, tile)| tile).collect()
+        let handles = features.iter().map(|f| Arc::from(format!("{}{}", BAR_HANDLES.step, f.1))).collect();
+        let accents = features.iter().map(|f| crate::workspace::feature_icon_accent(f.4, f.2)).collect();
+        let mut seen = std::collections::HashSet::with_capacity(features.len());
+        let unique_ids = features.iter().all(|f| seen.insert(f.0));
+        Self { features, handles, accents, unique_ids }
     }
 
-    let mut out = Vec::new();
-    let mut pending = entries(app, features, None);
-    pending.reverse();
-    let mut visited = std::collections::BTreeSet::new();
-    while let Some(tile) = pending.pop() {
-        if let FolderTile::Folder(id) = tile {
-            if !visited.insert(id) {
-                continue;
-            }
-            out.push(FolderTile::Folder(id));
-            if !app.tree.collapsed.contains(&format!("timeline_group:{id}")) {
-                if let Some(group) = app.session.doc.timeline_groups.iter().find(|group| group.id == id) {
-                    pending.push(FolderTile::Joints(group.joints.clone()));
-                }
-                pending.extend(entries(app, features, Some(id)).into_iter().rev());
-            }
-        } else {
-            out.push(tile);
-        }
+    /// Whether these rows are the ones [`BarRows::of`] would build from `doc` now, for a frame whose
+    /// key changed. Nothing is allocated. The handles, accents and `unique_ids` follow from the six values compared
+    /// (`feature_icon_accent` reads only its two arguments), so they need no check of their own.
+    fn describes(&self, doc: &Document) -> bool {
+        self.features.len() == doc.features.len()
+            && self.features.iter().zip(&doc.features).all(|(row, f)| (row.0, row.1.as_str(), row.2, row.3, row.4, row.5) == bar_feature(f))
     }
-    out
 }
 
-fn folder_tile(app: &mut SolveApp, ui: &mut egui::Ui, p: &egui::Painter, x: f32, r: Rect, id: u64) -> f32 {
-    let Some(group) = app.session.doc.timeline_groups.iter().find(|group| group.id == id).cloned() else { return x };
-    let t = Tokens::get();
-    let br = Rect::from_min_size(pos2(x, r.top() + 6.0), vec2(28.0, 28.0));
-    let key = format!("timeline_group:{id}");
-    let open = !app.tree.collapsed.contains(&key);
-    let resp = ui.interact(br, ui.id().with(("folder", id)), Sense::click());
-    p.rect(
-        br,
-        t.radius_sm.saturating_sub(1),
-        if resp.hovered() { t.hover } else { t.timeline_item },
-        t.control_border_stroke(t.border),
-        egui::StrokeKind::Inside,
-    );
-    crate::icons::paint_icon(p, br.shrink(4.0), "folder", f32::from(t.icon.a()) / 255.0);
-    let mut pending = vec![id];
-    let mut seen = std::collections::BTreeSet::new();
-    let mut count = 0;
-    while let Some(id) = pending.pop() {
-        if !seen.insert(id) {
-            continue;
-        }
-        if let Some(group) = app.session.doc.timeline_groups.iter().find(|group| group.id == id) {
-            count += group.features.len() + group.joints.len();
-            pending.extend(app.session.doc.timeline_groups.iter().filter(|child| child.parent == Some(id)).map(|child| child.id));
-        }
-    }
-    p.text(br.right_bottom(), egui::Align2::RIGHT_BOTTOM, count.to_string(), egui::FontId::proportional(t.font_micro), t.text);
-    crate::scenario::publish_handle(&format!("timeline-folder:{}", group.name), br.center());
-    crate::scenario::publish_handle(&format!("timeline-folder-fold:{}", group.name), br.center());
-    if resp.clicked() {
-        if open {
-            app.tree.collapsed.insert(key);
-        } else {
-            app.tree.collapsed.remove(&key);
-        }
-    }
-    resp.backing_on_hover_text(format!("{} ({count})", group.name));
-    x + 32.0
+/// How the bar finds each feature's result this frame: the first result with its id, as
+/// [`result_index`] and `Model::result` find it.
+enum BarResults {
+    /// One result per feature, with its id, at its place, and no id twice: a feature's result is
+    /// the one at its own place, with no table to build.
+    InPlace,
+    /// Otherwise a table built once for the strip: a search per chip made a long timeline cost
+    /// the square of its length every frame.
+    Indexed(std::collections::HashMap<u64, usize>),
 }
 
-fn timeline_contents(app: &mut SolveApp, ui: &mut egui::Ui, floating: bool) {
+impl BarResults {
+    fn of(features: &[BarFeature], unique_ids: bool, results: &[FeatureResult]) -> Self {
+        if unique_ids && results.len() == features.len() && features.iter().zip(results).all(|(f, r)| f.0 == r.id) {
+            Self::InPlace
+        } else {
+            Self::Indexed(result_index(results))
+        }
+    }
+
+    /// The result of the feature `id` at `at` in the design. A feature without a result has
+    /// none; a place that no longer holds this id (a click earlier in the frame ran a command) is
+    /// searched for.
+    fn get<'m>(&self, model: &'m solidcraft_engine::doc::Model, at: usize, id: u64) -> Option<&'m FeatureResult> {
+        match self {
+            Self::InPlace => model.results.get(at).filter(|r| r.id == id).or_else(|| model.result(id)),
+            Self::Indexed(index) => index.get(&id).and_then(|k| model.results.get(*k).filter(|r| r.id == id).or_else(|| model.result(id))),
+        }
+    }
+}
+
+/// The History Play control's names: SolidCraft's commands that play and stop History, and
+/// "Play from the start" while Play starts over (#10798).
+pub(crate) fn play_labels(app: &SolveApp) -> crate::ui_kit::PlayLabels<'static> {
+    let play = if play_starts_over(app) { "ui.history_play_from_start" } else { "cmd.timeline_play" };
+    crate::ui_kit::PlayLabels { play: solidcraft_ui_text::tr(play), stop: solidcraft_ui_text::tr("cmd.timeline_stop") }
+}
+
+/// The bar as SolidCraft describes it; the strip sets the marker's slot and the step count.
+fn bar(app: &SolveApp, floating: bool) -> history_bar::Bar<'static> {
     let t = Tokens::get();
-    let accent = crate::theme::TabAccent::for_tab(&t, &app.ui.tab);
+    history_bar::Bar {
+        marker_tip: solidcraft_ui_text::tr("ui.history_marker_tip"),
+        accent: crate::workspace::tab_accent(&t, &app.ui.tab),
+        drag_accent: crate::workspace::tab_accent(&t, "SKETCH"),
+        marker: 0,
+        steps: 0,
+        floating,
+        reorder: true,
+        handles: BAR_HANDLES,
+    }
+}
+
+/// The shared host already supplies the title and declared playback controls.
+pub(crate) fn panel_inline(app: &mut SolveApp, ui: &mut egui::Ui) {
+    crate::browser::sync_reveals(app);
+    timeline_strip(app, ui, true, ui.max_rect().left());
+}
+
+/// Render the horizontal history strip and its interactive feature tiles, handling selection,
+/// edits, drags, and hover updates.
+fn timeline_strip(app: &mut SolveApp, ui: &mut egui::Ui, floating: bool, x: f32) {
+    let t = Tokens::get();
+    let accent = crate::workspace::tab_accent(&t, &app.ui.tab);
     let r = ui.max_rect();
     let p = ui.painter().clone();
-
     let n = app.session.doc.features.len();
     let marker = app.session.doc.marker.unwrap_or(n);
-    // Playback controls.
-    let mut x = r.left() + t.space_10;
-    let grip_rect = Rect::from_center_size(pos2(x + t.space_10 / 2.0, r.center().y), vec2(t.space_10, t.space_16 + t.space_2));
-    let mut grip_ui = ui.new_child(UiBuilder::new().max_rect(grip_rect).layout(egui::Layout::left_to_right(egui::Align::Center)));
-    let grip = crate::ui_kit::panel_grip(&mut grip_ui).rect;
-    x += t.space_10 + t.space_8;
-    let mut drag_rect = grip;
-    let heading = crate::ui_kit::StripHeading::new(&p, crate::i18n::tr("ui.history_title"));
-    if x + heading.width() + crate::ui_kit::history_transport_width() <= r.right() {
-        let title_rect = heading.paint(&p, Rect::from_min_max(pos2(x, r.top()), r.right_bottom()));
-        drag_rect = drag_rect.union(title_rect);
-        x += heading.width();
-    }
-    let response = ui.interact(drag_rect, egui::Id::new("sc_history_dock_grip"), Sense::drag());
-    crate::scenario::publish_handle("history:grip", drag_rect.center());
-    crate::timeline_left::dock_drag(app, ui, &response);
-    let controls = crate::ui_kit::HistoryTransport::shown(app.preferences.history_play_button);
-    for &control in controls {
-        let br = Rect::from_center_size(pos2(x + t.space_24 / 2.0, r.center().y), vec2(t.space_24, t.space_24));
-        let response = control.show(ui, br, app.timeline_playback.is_some());
-        transport_response(app, control, &response);
-        x += t.space_24 + t.space_2;
-    }
-    x += 14.0;
+    let mut bar = bar(app, floating);
+    // The feature under the cursor (viewport, browser, or timeline) or picked in the viewport.
+    let from_view = from_view(app);
+    // Long runs of one component's features show as one chip (`timeline_fold`). The bar shows the
+    // edited or picked component's features, after the path to it (`timeline_scope`).
+    let strip = crate::timeline_fold::Strip { marker, from_view, floating, accent };
+    crate::timeline_scope::follow(app);
+    let history = crate::timeline_fold::history(app, &strip);
+    // The edited component's last feature, scrolled into view once (`timeline_scope`): the
+    // folded chip holding it, its component's own chip, or the feature itself. Read before the
+    // path, whose click asks for it in what the next frame shows.
+    let reveal_at = app.tree.timeline_reveal.and_then(|id| app.session.doc.features.iter().position(|f| f.id == id));
+    let reveal = reveal_at.and_then(|i| history.view.find(i));
+    let x = crate::timeline_scope::header(app, ui, &p, x, r).min(r.right() - t.space_24);
+    // Below, slots and features count those the bar shows; the marker's slot among them.
+    let shown = history.view.len();
+    let marker_view = history.view.slot(marker);
+    bar.marker = marker_view;
+    bar.steps = shown;
     // The features scroll horizontally in the space right of the playback controls.
-    let strip = Rect::from_min_max(pos2(x, r.top()), r.right_bottom());
-    ui.scope_builder(UiBuilder::new().max_rect(strip), |ui| {
-        // A plain mouse wheel scrolls the strip sideways too (#3356).
-        ui.style_mut().always_scroll_the_only_direction = true;
-        egui::ScrollArea::horizontal().auto_shrink([false, false]).show(ui, |ui| {
-            let p = ui.painter().clone();
-            let mut x = ui.max_rect().left();
-            let origin = x;
-            // In an assembly, only the active (or picked) component's features (#2880).
-            let show_all_id = ui.id().with("tl_show_all");
-            let show_all = ui.data(|d| d.get_temp::<bool>(show_all_id)).unwrap_or(false);
-            let only = timeline_component(app, show_all);
-            let filtering = only.is_some() || show_all;
-            let shown = shown_feature_indices(&app.session.doc, only, app.tree.history_show_hidden);
-            if filtering || app.session.doc.features.iter().any(|f| f.component != 0) {
-                // A toggle ahead of the features: this part only, or the whole design.
-                let label = match only {
-                    Some(c) => app.session.doc.components.iter().find(|k| k.id == c).map_or_else(|| "Component".to_string(), |k| k.name.clone()),
-                    None => "All components".to_string(),
-                };
-                let galley = ui.painter().layout_no_wrap(label.clone(), egui::FontId::proportional(t.font_label), t.text);
-                let br = Rect::from_min_size(pos2(x, r.top() + 9.0), vec2(galley.size().x + 12.0, 22.0));
-                crate::scenario::publish_handle("timeline:components", br.center());
-                let resp = ui.interact(br, ui.id().with("tl_components"), Sense::click());
-                p.rect(br, 3.0, if resp.hovered() { t.hover } else { t.timeline_item }, egui::Stroke::new(1.0, t.border), egui::StrokeKind::Inside);
-                p.galley(br.left_center() + vec2(6.0, -galley.size().y * 0.5), galley, t.text);
-                let tip = if show_all {
-                    "Showing every component's features. Click to show only the active or picked component's"
-                } else if only.is_some() {
-                    "Showing this component's features only. Click to show the whole design's"
-                } else {
-                    "Activate or pick a component in the browser to show only its features"
-                };
-                if resp.backing_on_hover_text(tip).clicked() && (only.is_some() || show_all) {
-                    ui.data_mut(|d| d.insert_temp(show_all_id, !show_all));
-                }
-                x = br.right() + 8.0;
+    let strip_rect = Rect::from_min_max(pos2(x, r.top()), r.right_bottom());
+    let rows = BarRows::cached(app, ui);
+    let out = {
+        let mut steps = BarSteps { app: &mut *app, history: &history, strip: &strip, rows: &rows, reveal, marker, marker_view };
+        history_bar::strip(ui, &bar, r, strip_rect, ("history_strip", history.within), &mut steps)
+    };
+    crate::semantic_content::set_timeline_feature_hover(app, out.hovered);
+    // The design's position of a slot; at the marker's, on the side of the marker the pointer is
+    // on (features not shown may sit between it and the next one shown).
+    let position = |slot: usize, before: bool| {
+        let at = history.view.index(slot);
+        match (slot == marker_view, before) {
+            (true, true) => at.min(marker),
+            (true, false) => at.max(marker),
+            (false, _) => at,
+        }
+    };
+    // The bar's features in the order it draws them, folded ones included: a Shift+click range
+    // runs over these. Taken once, when a click needs it, from the list this frame drew (never
+    // from the design as the click's command leaves it), so a range never mixes two orders.
+    let mut order: Option<Vec<u64>> = None;
+    for action in out.actions {
+        match action {
+            history_bar::Action::Select { step, modifiers } => {
+                let order =
+                    order.get_or_insert_with(|| history.view.indices(0, shown).iter().filter_map(|i| rows.features.get(*i).map(|f| f.0)).collect());
+                click_feature(app, order, step, modifiers);
             }
-            let design_marker = marker;
-            let marker = shown.iter().position(|i| *i >= marker).unwrap_or(shown.len());
-            let feats: Vec<_> = shown
-                .iter()
-                .filter_map(|i| app.session.doc.features.get(*i))
-                .map(|f| (f.id, f.name.clone(), icon_of(&f.kind), f.suppressed, f.kind.type_name(), TimelineKind::of(&f.kind)))
-                .collect();
-            let order: Vec<u64> = feats.iter().map(|f| f.0).collect();
-            // Find in Timeline: scroll the found feature into the strip on this frame (#5850).
-            let reveal = app.tree.timeline_reveal;
-            // The feature that made what is under the cursor or picked in the viewport.
-            let from_view = [hovered_feature(app), picked_feature(app)];
-            let drag_id = ui.id().with("tl_drag");
-            let mut drag: Option<Drag> = ui.data(|d| d.get_temp(drag_id));
-            let pointer = ui.input(|i| i.pointer.hover_pos());
-            let mut xs: Vec<f32> = vec![x; feats.len()];
-            let mut hovered: Option<u64> = None;
-            let mut edit: Option<u64> = None;
-            let mut marker_rect: Option<Rect> = None;
-            // Each sketch's solve state, read once for the strip (#7245).
-            let sketch_states = crate::sketch_state::SketchStates::of(app);
-            // Each feature's result, found once for the strip: a search per chip made a long
-            // timeline cost the square of its length every frame.
-            let results = result_index(&app.session.model.results);
-            // The features picked in the design or in the open dialog, collected once for the
-            // strip: the dialog built its item list again for every chip.
-            let feature_of = |selection: &solidcraft_engine::Sel| match selection {
-                solidcraft_engine::Sel::Feature { id } => Some(*id),
-                _ => None,
-            };
-            let picked: std::collections::HashSet<u64> = app
-                .session
-                .selection
-                .iter()
-                .filter_map(feature_of)
-                .chain(app.dialog.as_ref().map(|dialog| dialog.items()).unwrap_or_default().iter().filter_map(feature_of))
-                .collect();
-            for tile in folder_tiles(app, &order) {
-                let i = match tile {
-                    FolderTile::Folder(id) => {
-                        if marker_rect.is_none() && app.tree.collapsed.contains(&format!("timeline_group:{id}")) {
-                            let mut pending = vec![id];
-                            let mut seen = std::collections::BTreeSet::new();
-                            let mut contains_marker = false;
-                            while let Some(id) = pending.pop() {
-                                if !seen.insert(id) {
-                                    continue;
-                                }
-                                if let Some(group) = app.session.doc.timeline_groups.iter().find(|group| group.id == id) {
-                                    contains_marker |= order.get(marker).is_some_and(|feature| group.features.contains(feature));
-                                    pending.extend(
-                                        app.session.doc.timeline_groups.iter().filter(|child| child.parent == Some(id)).map(|child| child.id),
-                                    );
-                                }
-                            }
-                            if contains_marker {
-                                marker_rect = Some(Rect::from_min_size(pos2(x, r.top() + 5.0), vec2(t.space_12, r.height() - 10.0)));
-                                x += t.space_16;
-                            }
-                        }
-                        x = folder_tile(app, ui, &p, x, r, id);
-                        continue;
-                    }
-                    FolderTile::Joints(ids) => {
-                        x = crate::dialogs_assembly::timeline_joint_tiles(app, ui, &p, x, r, Some(&ids));
-                        continue;
-                    }
-                    FolderTile::Feature(index) => index,
-                };
-                let Some((id, name, icon, suppressed, ty, kind)) = feats.get(i) else { continue };
-                let sketch_state = matches!(kind, TimelineKind::Sketch).then(|| sketch_states.get(*id)).flatten();
-                if i == marker {
-                    marker_rect = Some(Rect::from_min_size(pos2(x, r.top() + 5.0), vec2(t.space_12, r.height() - 10.0)));
-                    x += t.space_16;
+            history_bar::Action::Edit(id) => app.edit_feature(id),
+            // The same menu as the browser's, so the control channel reports it (#10745). A
+            // right-click outside the selection selects that feature first, as the vertical
+            // History does, so the menu acts on what is highlighted.
+            history_bar::Action::Menu { step, at } => {
+                if !selected_feature_ids(app).contains(&step) {
+                    select_one(app, step);
                 }
-                if let Some(slot) = xs.get_mut(i) {
-                    *slot = x;
-                }
-                let br = Rect::from_min_size(pos2(x, r.top() + 6.0), vec2(28.0, 28.0));
-                if reveal == Some(*id) && crate::semantic_content::scroll_acknowledged(ui, br) {
-                    app.tree.timeline_reveal = None;
-                }
-                crate::scenario::publish_handle(&format!("timeline:{name}"), br.center());
-                // A chip scrolled out of the strip is neither drawn nor interactive: a long
-                // history drew every chip each frame. Its slot above still places the marker and drops.
-                // One being dragged or focused, or under an open menu, stays alive until that ends.
-                let chip_id = ui.id().with(("feat", *id));
-                if !ui.clip_rect().intersects(br)
-                    && drag != Some(Drag::Feature(*id))
-                    && !ui.memory(|m| m.has_focus(chip_id))
-                    && !egui::Popup::is_any_open(ui.ctx())
-                {
-                    x += 32.0;
-                    continue;
-                }
-                let resp = ui.interact(br, chip_id, Sense::click_and_drag());
-                // A feature without a result has none; an index that no longer holds this id (a
-                // command run from an earlier chip evaluated again) is searched for.
-                let res =
-                    results.get(id).and_then(|k| app.session.model.results.get(*k).filter(|r| r.id == *id).or_else(|| app.session.model.result(*id)));
-                let err = res.and_then(|r| r.error.clone());
-                let warn = res.and_then(warning_text);
-                let rolled = i >= marker;
-                let sel = picked.contains(id);
-                if resp.hovered() {
-                    hovered = Some(*id);
-                }
-                crate::ui_kit::HistoryChip {
-                    icon,
-                    name,
-                    kind: ty,
-                    selected: sel,
-                    hovered: resp.hovered() || from_view.contains(&Some(*id)),
-                    dim: rolled,
-                    suppressed: *suppressed,
-                    error: err.is_some(),
-                    warning: warn.is_some(),
-                    reference: false,
-                    ink: sketch_state.and_then(|state| state.ink(&t)),
-                    // A dragged feature takes the colour of its drop bar.
-                    accent: if drag == Some(Drag::Feature(*id)) { crate::theme::TabAccent::for_tab(&t, "SKETCH") } else { accent },
-                }
-                .paint(&p, br, crate::ui_kit::HistoryStyle::Bottom);
-                if floating && marker > 0 && i == marker - 1 {
-                    p.circle_filled(pos2(br.center().x, br.bottom() + t.space_3), t.space_2, accent.color);
-                }
-                let ms = res.map(|r| r.ms);
-                if resp.drag_started() {
-                    drag = Some(Drag::Feature(*id));
-                }
-                // The tip is written only while it shows (as `on_hover_text` would lay it out).
-                let resp = resp.backing_on_hover_ui(|ui| {
-                    let mut tip = feature_status_text(name, ty, res);
-                    // Greyed out says only "not shown": say why (#8100).
-                    if rolled {
-                        tip.push('\n');
-                        tip.push_str(crate::i18n::tr("timeline.feature_rolled_back"));
-                    }
-                    if let Some(state) = sketch_state {
-                        tip.push('\n');
-                        tip.push_str(&state.text());
-                    }
-                    if let Some(ms) = ms {
-                        tip += &format!("\n{ms:.1} ms");
-                    }
-                    tip.push('\n');
-                    tip.push_str(crate::i18n::tr("timeline.feature_hint"));
-                    ui.set_max_width(ui.spacing().tooltip_width);
-                    ui.add(egui::Label::new(tip));
-                });
-                if resp.clicked() && !pick_feature_into_dialog(app, *id, ui.input(|i| i.modifiers)) {
-                    let modifiers = ui.input(|i| i.modifiers);
-                    if modifiers.shift {
-                        select_range(app, &order, *id, modifiers.command || modifiers.ctrl);
-                    } else if modifiers.command || modifiers.ctrl {
-                        toggle_feature(app, *id);
-                    } else if !modifiers.any() && crate::browser::pick_sketch_into_dialog(app, *id) {
-                        // Extrude, Revolve or Emboss took every profile of the sketch (#6106).
-                    } else {
-                        select_one(app, *id);
-                    }
-                }
-                if resp.double_clicked() {
-                    edit = Some(*id);
-                }
-                let sketch_of = kind.profile_sketch();
-                crate::ui_kit::Menu::context(&resp, |ui| {
-                    if crate::context_menu::button(ui, crate::i18n::tr_label("Edit Feature"), "edit").clicked() {
-                        edit = Some(*id);
-                        ui.close();
-                    }
-                    sketch_plane_button(app, ui, *id);
-                    if let Some(sk) = sketch_of
-                        && crate::context_menu::button(ui, crate::i18n::tr_label("Edit Profile Sketch"), "sketch").clicked()
-                    {
-                        app.edit_sketch(sk.0);
-                        ui.close();
-                    }
-                    if crate::context_menu::button(ui, crate::i18n::tr_label("Rename"), "rename").clicked() {
-                        app.dialog = Some(crate::dialogs::Dialog::rename(*id, name));
-                        ui.close();
-                    }
-                    // Its own message, not a literal: no catalog held the literal, so the item
-                    // stayed English in every language (#8301).
-                    let suppress = if *suppressed { "timeline.unsuppress_features" } else { "timeline.suppress_features" };
-                    if crate::context_menu::button(ui, crate::i18n::tr(suppress), "suppress").clicked() {
-                        let _ = app.run_heavy("timeline.suppress", json!({"feature": id}));
-                        ui.close();
-                    }
-                    if crate::context_menu::button(ui, crate::i18n::tr_label("Roll History Marker Here"), "rollback").clicked() {
-                        let _ = app.run_heavy("timeline.roll_to", json!({ "feature": id }));
-                        ui.close();
-                    }
-                    if crate::context_menu::button(ui, crate::i18n::tr_label("Find in Browser"), "list").clicked() {
-                        find_in_browser(app, *id);
-                        ui.close();
-                    }
-                    ui.separator();
-                    clipboard_buttons(app, ui, *id);
-                    message_button(app, ui, *id);
-                    ui.separator();
-                    delete_button(app, ui, *id);
-                    delete_after_marker_button(app, ui, *id, design_position(&shown, i, n), design_marker, Some(&shown));
-                });
-                x += 32.0;
+                crate::context_menu::open_for(app, at, crate::context_menu::Target::Timeline { feature: step });
             }
-            let mut previous = origin;
-            for slot in &mut xs {
-                *slot = (*slot).max(previous);
-                previous = *slot;
+            history_bar::Action::Seek { slot, before } => {
+                let slot = position(slot, before);
+                let _ = app.run_heavy("timeline.roll_to", if slot >= n { json!({}) } else { json!({ "position": slot }) });
             }
-            let end = x;
-            if marker >= feats.len() {
-                marker_rect = Some(Rect::from_min_size(pos2(x, r.top() + 5.0), vec2(t.space_12, r.height() - 10.0)));
+            // Crossing the marker rolls the feature back or forward, in the same step.
+            history_bar::Action::Reorder { step, slot, before } => {
+                crate::timeline_folders::drop_feature(app, &history.folders, step, position(slot, before), before, marker.min(n));
             }
-            // The history marker: drag it to roll the model back or forward.
-            if let Some(mr) = marker_rect {
-                crate::scenario::publish_rect("history:marker", mr);
-                let resp = ui.interact(mr.expand2(vec2(3.0, 0.0)), ui.id().with("tl_marker"), Sense::drag());
-                if resp.drag_started() {
-                    drag = Some(Drag::Marker);
-                }
-                if resp.hovered() {
-                    ui.ctx().set_cursor_icon(egui::CursorIcon::Grab);
-                }
-                crate::ui_kit::history_marker(&p, mr, false, accent);
-                resp.backing_on_hover_text(crate::i18n::tr("ui.history_marker_tip"));
-            }
-            let content_end = crate::dialogs_assembly::timeline_joints(app, ui, &p, end + 10.0, r);
-            // The scroll range follows the drawn content (the buttons don't take layout space themselves).
-            ui.allocate_exact_size(vec2((content_end - origin).max(0.0), r.height()), Sense::hover());
-            // Drag feedback, and the drop.
-            if drag.is_some() {
-                ui.ctx().set_cursor_icon(egui::CursorIcon::Grabbing);
-            }
-            let marker_slot = marker.min(n);
-            // At the marker's slot, which side of the marker the pointer is on: before it, a
-            // dropped feature stays in the model; after it, the feature is rolled back.
-            let before_marker = |slot: usize, x: f32| slot < marker_slot || (slot == marker_slot && marker_rect.is_none_or(|mr| x < mr.center().x));
-            // The marker dropped where it already is needs no bar: the marker shows the spot.
-            if let (Some(dg), Some(pp)) = (drag.as_ref(), pointer)
-                && let slot = slot_at(&xs, end, pp.x)
-                && !(matches!(dg, Drag::Marker) && slot == marker_slot)
-            {
-                // Centred in the gap between two chips, or beside the marker at its slot.
-                let sx = match marker_rect {
-                    Some(mr) if slot == marker_slot => {
-                        if before_marker(slot, pp.x) {
-                            mr.left() - 2.0
-                        } else {
-                            mr.right() + 2.0
-                        }
-                    }
-                    _ => xs.get(slot).copied().unwrap_or(end) - 2.0,
-                };
-                // Kept inside the strip so the slot before the first feature stays visible.
-                let sx = sx.max(origin + t.space_2);
-                crate::ui_kit::history_drop_bar(
-                    &p,
-                    Rect::from_min_max(pos2(sx, r.top() + 3.0), pos2(sx, r.bottom() - 3.0)),
-                    false,
-                    if matches!(dg, Drag::Marker) { accent.color } else { t.sketch_accent },
-                );
-            }
-            let released = ui.input(|i| i.pointer.any_released());
-            // (Taking the drag ends it even when the pointer has left the window.)
-            if released
-                && let Some(dg) = drag.take()
-                && let Some(pp) = pointer
-            {
-                let slot = design_position(&shown, slot_at(&xs, end, pp.x), n);
-                match dg {
-                    Drag::Marker => {
-                        let _ = app.run_heavy("timeline.roll_to", if slot >= n { json!({}) } else { json!({ "position": slot }) });
-                    }
-                    Drag::Feature(id) => {
-                        let from = app.session.doc.feature_index(id).unwrap_or(0);
-                        // Dropping after itself means the slot shifts by one.
-                        let to = if slot > from { slot - 1 } else { slot };
-                        // Crossing the marker rolls the feature back or forward, in the same step.
-                        let active = before_marker(slot, pp.x);
-                        if to != from || active != (from < marker_slot) {
-                            let _ = app.run_heavy("timeline.reorder", json!({ "feature": id, "position": to, "active": active }));
-                        }
-                    }
-                }
-            }
-            ui.data_mut(|d| match drag {
-                Some(dg) => {
-                    d.insert_temp(drag_id, dg.clone());
-                }
-                None => d.remove::<Drag>(drag_id),
-            });
-            app.viewport.hover_feature = hovered;
-            if let Some(id) = edit {
-                app.edit_feature(id);
-            }
-        });
-    });
+        }
+    }
 }
 
-/// Select what a feature made, so the browser shows it.
-fn find_in_browser(app: &mut SolveApp, id: u64) {
+/// A click on a feature chip: into the open dialog's input when it takes features, else a
+/// selection by the modifiers held.
+fn click_feature(app: &mut SolveApp, order: &[u64], id: u64, modifiers: egui::Modifiers) {
+    if pick_feature_into_dialog(app, id, modifiers) {
+        return;
+    }
+    if modifiers.shift {
+        select_range(app, order, id, modifiers.command || modifiers.ctrl);
+    } else if modifiers.command || modifiers.ctrl {
+        toggle_feature(app, id);
+    } else if !modifiers.any() && crate::browser::pick_sketch_into_dialog(app, id) {
+        // Extrude, Revolve or Emboss took every profile of the sketch (#6106).
+    } else {
+        select_one(app, id);
+    }
+}
+
+/// SolidCraft's entries of the bar: its features, and its folded runs, folders, joints and trays.
+struct BarSteps<'a> {
+    app: &'a mut SolveApp,
+    history: &'a crate::timeline_fold::History,
+    strip: &'a crate::timeline_fold::Strip,
+    rows: &'a BarRows,
+    /// The slot to scroll into view, until it is.
+    reveal: Option<usize>,
+    /// The marker's design position, and its slot among the features shown.
+    marker: usize,
+    marker_view: usize,
+}
+
+impl history_bar::Contents for BarSteps<'_> {
+    /// Draws the bar's chips: each feature, and the folded runs, folders, joints and trays around it.
+    fn entries(&mut self, s: &mut history_bar::Strip<'_, '_>) {
+        let t = Tokens::get();
+        let app = &mut *self.app;
+        let (history, strip) = (self.history, self.strip);
+        // Each sketch's solve state, read once for the strip (#7245).
+        let sketch_states = crate::sketch_state::SketchStates::of(app);
+        // Each feature's result, found once for the strip.
+        let results = BarResults::of(&self.rows.features, self.rows.unique_ids, &app.session.model.results);
+        // The features picked in the design or in the open dialog, collected once for the
+        // strip: the dialog built its item list again for every chip.
+        let doc = &app.session.doc;
+        let feature_of = |selection: &solidcraft_engine::Sel| feature_of_sel(doc, selection);
+        let picked: std::collections::HashSet<u64> = app
+            .session
+            .selection
+            .iter()
+            .filter_map(feature_of)
+            .chain(app.dialog.as_ref().map(|dialog| dialog.items()).unwrap_or_default().iter().filter_map(feature_of))
+            .collect();
+        let editing = crate::timeline_scope::focus(app).unwrap_or(0);
+        for entry in history.entries.iter().copied() {
+            let i = match entry {
+                crate::timeline_fold::Entry::Feature(i) => i,
+                crate::timeline_fold::Entry::Group(group) => {
+                    let rect = s.chip(group.start, group.end, group.open, group.depth, |ui, p, at| {
+                        crate::timeline_fold::group_chip(app, ui, p, at, &group, history, strip)
+                    });
+                    let holds = self.reveal.is_some_and(|k| group.start <= k && k < group.end && (!group.open || group.component == editing));
+                    if reveal_once(s.ui(), &mut self.reveal, holds, rect, egui::Align::Min) {
+                        app.tree.timeline_reveal = None;
+                    }
+                    continue;
+                }
+                crate::timeline_fold::Entry::Folder(folder) => {
+                    let rect = s.chip(folder.start, folder.end, folder.open, folder.depth, |ui, p, at| {
+                        crate::timeline_folders::folder_chip(app, ui, p, at, &folder, history, strip)
+                    });
+                    let holds = self.reveal.is_some_and(|k| folder.start <= k && k < folder.end && !folder.open);
+                    if reveal_once(s.ui(), &mut self.reveal, holds, rect, egui::Align::Min) {
+                        app.tree.timeline_reveal = None;
+                    }
+                    continue;
+                }
+                crate::timeline_fold::Entry::Joints(folder) => {
+                    let joints = history.folders.joints.get(&folder).cloned().unwrap_or_default();
+                    let run = crate::dialogs_assembly::JointRun::Folder { id: folder, name: history.folders.name(folder) };
+                    s.inline(|ui, p, x, r| crate::dialogs_assembly::joint_chips(app, ui, p, x, r, &joints, run));
+                    continue;
+                }
+                crate::timeline_fold::Entry::End(_) => {
+                    s.end_tray();
+                    continue;
+                }
+            };
+            // The feature's index in the design.
+            let at = history.view.index(i);
+            let Some((id, name, icon, suppressed, ty, kind)) = self.rows.features.get(at) else {
+                continue;
+            };
+            let sketch_state = matches!(kind, TimelineKind::Sketch).then(|| sketch_states.get(*id)).flatten();
+            let res = results.get(&app.session.model, at, *id);
+            let rolled = i >= self.marker_view;
+            let tip = || feature_tooltip(name, ty, res, rolled, sketch_state);
+            let rect = s.step(&history_bar::Step {
+                id: *id,
+                slot: i,
+                label: name,
+                icon,
+                icon_accent: self.rows.accents.get(at).copied().flatten(),
+                state: history_bar::StepState {
+                    selected: picked.contains(id),
+                    highlighted: strip.from_view.contains(&Some(*id)),
+                    rolled_back: rolled,
+                    suppressed: *suppressed,
+                    last_done: at + 1 == self.marker,
+                },
+                error: res.is_some_and(|r| r.error.is_some()),
+                warning: res.is_some_and(has_warning),
+                ink: sketch_state.and_then(|state| state.ink(&t)),
+                tip: &tip,
+                handle: self.rows.handles.get(at),
+            });
+            // Only the step to reveal takes the strip's ui: taking it makes the steps out of view
+            // after it read egui's memory again.
+            let holds = self.reveal == Some(i);
+            if holds && reveal_once(s.ui(), &mut self.reveal, holds, rect, egui::Align::Center) {
+                app.tree.timeline_reveal = None;
+            }
+        }
+    }
+
+    /// The joints at the end belong to the whole design: a bar with its groups that shows one
+    /// component leaves them out. Without the groups they stay, as they always have.
+    fn trailing(&mut self, ui: &mut egui::Ui, p: &egui::Painter, end: f32, r: Rect) -> f32 {
+        if self.history.within.is_none() || !self.app.preferences.history_bar_groups {
+            crate::dialogs_assembly::timeline_joints(self.app, ui, p, end + 10.0, r, &self.history.folders.held)
+        } else {
+            end
+        }
+    }
+}
+
+/// Select what a feature made, so the browser shows it. While the browser's rows start closed
+/// (Preferences › Layout), its first body is also found there, as Find in Browser on a body
+/// does: the rows down to it open.
+pub(crate) fn find_in_browser(app: &mut SolveApp, id: u64) {
     let st = crate::open_meshing::session_world(&app.session);
-    let bodies: Vec<serde_json::Value> = st.bodies.iter().filter(|b| b.feature == id).map(|b| json!({"type": "body", "name": b.name})).collect();
-    let items = if bodies.is_empty() { vec![json!({"type": "feature", "id": id})] } else { bodies };
+    let bodies: Vec<String> = st.bodies.iter().filter(|b| b.feature == id).map(|b| b.name.clone()).collect();
+    let items: Vec<serde_json::Value> = if bodies.is_empty() {
+        vec![json!({"type": "feature", "id": id})]
+    } else {
+        bodies.iter().map(|name| json!({"type": "body", "name": name})).collect()
+    };
     let _ = app.run("select.set", json!({ "items": items }));
+    if !crate::browser::rows_start_open(app)
+        && let Some(first) = bodies.first()
+    {
+        crate::browser::reveal_body(app, first);
+    }
 }
 
 #[cfg(test)]
@@ -1303,12 +1478,46 @@ mod tests {
     use crate::scenario::Harness;
 
     #[test]
+    fn a_folder_of_one_kind_of_feature_takes_its_icon_when_preferences_say_so() {
+        let mut h = Harness::new();
+        h.app.home.open = false;
+        h.app.run("solid.box", json!({"length": 40, "width": 30, "height": 20, "name": "Block"})).unwrap();
+        for x in [8, 16, 24, 32] {
+            h.app.run("solid.hole", json!({"position": [x, 10, 20], "diameter": 4, "name": format!("H{x}")})).unwrap();
+        }
+        let group = |h: &mut Harness, p: serde_json::Value| h.app.run("timeline.group", p).unwrap()["group"].as_u64().unwrap();
+        let inner = group(&mut h, json!({"name": "Inner", "features": ["H8", "H16"]}));
+        // Holes, and a folder of holes inside: all one kind.
+        let holes = group(&mut h, json!({"name": "Holes", "features": ["H24"], "groups": [inner]}));
+        let mixed = group(&mut h, json!({"name": "Mixed", "features": ["Block"]}));
+        let hole = super::icon_of(&h.app.session.doc.find_feature("H8").unwrap().kind);
+        // Off (the default): every folder keeps the folder icon.
+        assert!(!h.app.preferences.history_folder_kind_icon);
+        assert_eq!(super::folder_kind_icon(&h.app, holes), None);
+        crate::prefs::set(&mut h.app, &json!({"history_folder_kind_icon": true})).unwrap();
+        assert_eq!(super::folder_kind_icon(&h.app, holes), Some(hole));
+        assert_eq!(super::folder_kind_icon(&h.app, inner), Some(hole));
+        assert_eq!(super::folder_kind_icon(&h.app, mixed), Some(super::icon_of(&h.app.session.doc.find_feature("Block").unwrap().kind)));
+        // A box among the holes: back to the folder icon.
+        h.app.run("timeline.group", json!({"name": "Both", "groups": [holes, mixed]})).unwrap();
+        let both = h.app.session.doc.timeline_groups.iter().find(|g| g.name == "Both").unwrap().id;
+        assert_eq!(super::folder_kind_icon(&h.app, both), None);
+        // Both Histories draw it without trouble.
+        for left in [false, true] {
+            h.app.run("view.history_layout", json!({"dock":if left { "left" } else { "bottom" }})).unwrap();
+            h.frames(3);
+        }
+    }
+
+    #[test]
     fn joint_folder_hides_fifty_joint_tiles_in_both_history_layouts() {
         use crate::scenario::handle_at;
         for left in [false, true] {
             let mut h = Harness::new();
             h.app.home.open = false;
-            h.app.preferences.timeline_left = left;
+            h.app.run("view.history_layout", json!({"dock":if left { "left" } else { "bottom" }})).unwrap();
+            h.app.preferences.history_group_joints = true;
+            h.app.preferences.history_bar_groups = true;
             h.app.run("component.create", json!({"name":"Part"})).unwrap();
             let mut joints = Vec::new();
             for index in 0..50 {
@@ -1319,23 +1528,32 @@ mod tests {
                 );
             }
             let folder = h.app.run("timeline.group", json!({"name":"Joints", "joints":joints})).unwrap()["group"].as_u64().unwrap();
-            h.app.tree.collapsed.insert(format!("timeline_group:{folder}"));
+            crate::timeline_folders::set_open(&mut h.app, folder, false);
             h.frames(4);
-            assert!(handle_at("timeline-folder:Joints").is_some());
-            assert_eq!(crate::scenario::handles("timeline-folder:").len(), 1);
+            // The History bar shows a folder as a chip; the History beside the Browser as a row.
+            let (folders, fold) =
+                if left { ("timeline-folder:", "timeline-folder-fold:Joints") } else { ("timeline-folder-chip:", "timeline-folder-chip:Joints") };
+            assert!(handle_at(&format!("{folders}Joints")).is_some());
+            assert_eq!(crate::scenario::handles(folders).len(), 1);
             assert!(crate::scenario::handles("timeline-joint:").is_empty());
             for index in 0..50 {
                 assert!(handle_at(&format!("timeline-joint:Hinge{index}")).is_none());
             }
-            h.step(&json!({"click":{"handle":"timeline-folder-fold:Joints"}})).unwrap();
+            h.step(&json!({"click":{"handle":fold}})).unwrap();
             h.frames(4);
+            if !left {
+                // In the History bar an open folder's joints are one button from the second on.
+                assert!(crate::scenario::handles("timeline-joint:").is_empty());
+                h.step(&json!({"click":{"handle":"timeline-folder-joints:Joints"}})).unwrap();
+                h.frames(4);
+            }
             for index in 0..50 {
                 assert!(handle_at(&format!("timeline-joint:Hinge{index}")).is_some(), "joint {index} missing, left={left}");
             }
             assert_eq!(crate::scenario::handles("timeline-joint:").len(), 50, "no trailing duplicates");
             h.step(&json!({"click":{"handle":"timeline-joint:Hinge0"}})).unwrap();
             assert_eq!(h.app.tree.picked_joints, [joints[0]]);
-            h.step(&json!({"click":{"handle":"timeline-folder-fold:Joints"}})).unwrap();
+            h.step(&json!({"click":{"handle":fold}})).unwrap();
             h.frames(4);
             assert!(handle_at("timeline-joint:Hinge0").is_none());
         }
@@ -1357,14 +1575,14 @@ mod tests {
         assert!(handle_at("timeline:CopyBox").is_some() && handle_at("timeline:PartBox").is_some(), "both parts' features start in the bar");
         // The Browser menu offers to hide the copy's History, and running it leaves its entries out.
         let copy = h.app.session.doc.components.iter().find(|c| c.name == "Copy").unwrap().id;
-        let menu = context_menu::items(&h.app, &Target::Component { id: copy });
+        let menu = context_menu::entries(&h.app, &Target::Component { id: copy });
         let hide = menu.iter().find(|i| i.id == "component.hide_history").expect("the component menu offers Hide its History");
         context_menu::run_item(&mut h.app, hide, egui::Pos2::ZERO);
         h.frames(4);
         assert!(handle_at("timeline:CopyBox").is_none(), "the hidden copy leaves the bar");
         assert!(handle_at("timeline:PartBox").is_some(), "the rest of the design stays");
         // The History controls' menu shows them anyway, and hides them again (#10393).
-        fn toggle(h: &Harness) -> context_menu::Item {
+        fn toggle(h: &Harness) -> crate::ui_kit::Item {
             let items = context_menu::items(&h.app, &Target::HistoryControls);
             items.into_iter().find(|i| i.id == "ui.historyShowHidden").expect("the bar offers to show hidden entries").clone()
         }
@@ -1377,12 +1595,12 @@ mod tests {
         h.frames(4);
         assert!(handle_at("timeline:CopyBox").is_none(), "and hides them again");
         // The component menu now offers to show its History back.
-        let menu = context_menu::items(&h.app, &Target::Component { id: copy });
+        let menu = context_menu::entries(&h.app, &Target::Component { id: copy });
         assert!(menu.iter().any(|i| i.id == "component.show_history"), "the menu flips to Show its History");
     }
 
     #[test]
-    fn shown_feature_indices_leave_out_hidden_components_and_their_children() {
+    fn the_bar_leaves_out_hidden_components_and_their_children() {
         let mut h = Harness::new();
         h.app.run("component.create", json!({ "name": "Copy" })).unwrap();
         h.app.run("solid.box", json!({ "length": 1, "width": 1, "height": 1, "name": "CopyBox" })).unwrap();
@@ -1393,45 +1611,58 @@ mod tests {
         h.app.run("solid.box", json!({ "length": 1, "width": 1, "height": 1, "name": "PartBox" })).unwrap();
         h.app.run("component.activate", json!({ "component": "root" })).unwrap();
         h.app.run("component.hide_history", json!({ "component": "Copy" })).unwrap();
+        use crate::timeline_fold::View;
         let doc = &h.app.session.doc;
-        let shown = |show_hidden: bool| super::shown_feature_indices(doc, None, show_hidden);
-        let names = |idx: Vec<usize>| idx.iter().map(|i| doc.features[*i].name.clone()).collect::<Vec<_>>();
-        assert_eq!(names(shown(false)), ["PartBox"], "a hidden component takes its own and its children's rows out");
-        assert_eq!(names(shown(true)), ["CopyBox", "InnerBox", "PartBox"], "show-hidden lists everything again");
-        // The same filter applies when the bar narrows to one component.
+        let names = |view: View| view.indices(0, view.len()).iter().map(|i| doc.features[*i].name.clone()).collect::<Vec<_>>();
+        assert_eq!(names(View::of(doc, None, false)), ["PartBox"], "a hidden component takes its own and its children's rows out");
+        assert_eq!(names(View::of(doc, None, true)), ["CopyBox", "InnerBox", "PartBox"], "show-hidden lists everything again");
+        // The same filter applies when the bar shows one component.
         let copy = doc.components.iter().find(|c| c.name == "Copy").unwrap().id;
-        assert!(super::shown_feature_indices(doc, Some(copy), false).is_empty(), "the component filter shows nothing of a hidden component");
-        assert_eq!(super::shown_feature_indices(doc, Some(copy), true).len(), 2, "Copy owns CopyBox and InnerBox");
+        let within = crate::timeline_scope::components_within(&h.app, copy);
+        assert!(names(View::of(doc, Some(&within), false)).is_empty(), "the component filter shows nothing of a hidden component");
+        assert_eq!(names(View::of(doc, Some(&within), true)), ["CopyBox", "InnerBox"], "Copy owns CopyBox and InnerBox");
     }
 
     #[test]
     fn history_status_translates_prefixes_and_both_diagnostics() {
+        crate::i18n::install();
         let diagnostic = "there is no body to cut or intersect in component 'Mount'; the tool may overlap 'Plate' in component 'Base' — activate that component or pick the body as a target";
-        let _language = crate::i18n::scope("ja");
+        let _language = solidcraft_ui_text::scope("ja");
         let translated = crate::i18n::tr_diagnostic(diagnostic);
         assert_ne!(translated, diagnostic);
         assert_eq!(
-            super::status_text("My feature", "ExtrudeFeature", Some(diagnostic), Some(diagnostic)),
+            super::status_tip("My feature", "ExtrudeFeature", Some(diagnostic), Some(diagnostic)).plain(),
             format!("My feature  (ExtrudeFeature)\nエラー: {translated}\n警告: {translated}")
         );
-        assert_eq!(super::status_text("My feature", "ExtrudeFeature", None, None), "My feature  (ExtrudeFeature)");
+        assert_eq!(super::status_tip("My feature", "ExtrudeFeature", None, None).plain(), "My feature  (ExtrudeFeature)");
         // Unknown diagnostics remain intact, including names and measured values.
         assert_eq!(
-            super::status_text("My feature", "ExtrudeFeature", None, Some("Custom part: 1.25 mm")),
+            super::status_tip("My feature", "ExtrudeFeature", None, Some("Custom part: 1.25 mm")).plain(),
             "My feature  (ExtrudeFeature)\n警告: Custom part: 1.25 mm"
         );
-        let _english = crate::i18n::scope("en");
-        assert_eq!(super::status_text("Box", "BoxFeature", Some("error"), Some("warning")), "Box  (BoxFeature)\nError: error\nWarning: warning");
+        let _english = solidcraft_ui_text::scope("en");
+        assert_eq!(
+            super::status_tip("Box", "BoxFeature", Some("error"), Some("warning")).plain(),
+            "Box  (BoxFeature)\nError: error\nWarning: warning"
+        );
     }
 
     /// An import's warnings read as a summary for a CAD user: parts counted by what became of
     /// them, faces counted, no entity numbers or kernel wording (those stay in the details).
     #[test]
     fn an_import_summary_counts_parts_and_faces_in_plain_words() {
+        crate::i18n::install();
         use solidcraft_engine::doc::kernel::{ImportIssue, ImportReport, IssueKind};
-        let _english = crate::i18n::scope("en");
-        let issue =
-            |kind, item: Option<u64>, faces, detail: &str| ImportIssue { kind, item, part: String::new(), faces, times: 1, detail: detail.into() };
+        let _english = solidcraft_ui_text::scope("en");
+        let issue = |kind, item: Option<u64>, faces, detail: &str| ImportIssue {
+            kind,
+            item,
+            part: String::new(),
+            paths: Vec::new(),
+            faces,
+            times: 1,
+            detail: detail.into(),
+        };
         let report = ImportReport {
             parts: 43,
             solids: 40,
@@ -1456,6 +1687,8 @@ mod tests {
                 issue(IssueKind::Repaired, Some(4), 0, "solid #4: 1 faces turned over: their loops disagree with their same_sense"),
                 issue(IssueKind::File, None, 0, "component placement #77: … (placed at the origin)"),
             ],
+            single_root: true,
+            ..Default::default()
         };
         let summary = super::import_summary(&report);
         assert_eq!(
@@ -1467,7 +1700,13 @@ mod tests {
         );
         assert!(!summary.contains('#') && !summary.contains("SMLib"), "{summary}");
         // Only repairs: no advice, and a part alone has no "of" count.
-        let repaired = ImportReport { parts: 1, solids: 1, issues: vec![issue(IssueKind::Repaired, Some(3), 0, "solid #3: …")] };
+        let repaired = ImportReport {
+            parts: 1,
+            solids: 1,
+            issues: vec![issue(IssueKind::Repaired, Some(3), 0, "solid #3: …")],
+            single_root: true,
+            ..Default::default()
+        };
         assert_eq!(super::import_summary(&repaired), "Small flaws were repaired in 1 part.");
     }
 
@@ -1476,14 +1715,14 @@ mod tests {
         for left in [false, true] {
             let mut h = Harness::new();
             h.app.preferences.language = "ja".into();
-            h.app.preferences.timeline_left = left;
+            h.app.run("view.history_layout", json!({"dock":if left { "left" } else { "bottom" }})).unwrap();
             h.app.run("sketch.create", json!({"plane": "XY"})).unwrap();
             h.app.run("sketch.finish", json!({})).unwrap();
             h.frames(4);
             let marker = crate::scenario::rect_of("history:marker").unwrap().center();
             h.call("ui.move", json!({"x": marker.x, "y": marker.y}));
             h.frames(90);
-            let expected = crate::i18n::Locale::for_language("ja").text("ui.history_marker_tip");
+            let expected = solidcraft_ui_text::Locale::for_language("ja").text("ui.history_marker_tip");
             let output = egui::FullOutput { shapes: h.shapes.clone(), ..Default::default() };
             let texts: Vec<_> = crate::test_support::text_shapes(&output).map(|t| t.galley.text()).collect();
             assert!(texts.contains(&expected), "left={left}: {texts:?}");
@@ -1506,8 +1745,8 @@ mod tests {
         h.step(&json!({"click": {"handle": "timeline:First"}, "button": "right"})).unwrap();
         let texts = painted(&h);
         assert!(!texts.iter().any(|t| t == "Suppress Features"), "the English literal is painted in the Japanese UI: {texts:?}");
-        let ja = crate::i18n::Locale::for_language("ja").text("timeline.suppress_features").to_string();
-        let ja_unsuppress = crate::i18n::Locale::for_language("ja").text("timeline.unsuppress_features").to_string();
+        let ja = solidcraft_ui_text::Locale::for_language("ja").text("timeline.suppress_features").to_string();
+        let ja_unsuppress = solidcraft_ui_text::Locale::for_language("ja").text("timeline.unsuppress_features").to_string();
         assert!(texts.contains(&ja), "the item must read {ja}: {texts:?}");
         h.step(&json!({"key": "Escape"})).unwrap();
         // A suppressed feature offers the other way round.
@@ -1521,8 +1760,8 @@ mod tests {
         h.step(&json!({"key": "Escape"})).unwrap();
         // The English wording is the one the menu always showed: the change adds messages, it
         // does not reword the item.
-        assert_eq!(crate::i18n::Locale::for_language("en").text("timeline.suppress_features"), "Suppress Features");
-        assert_eq!(crate::i18n::Locale::for_language("en").text("timeline.unsuppress_features"), "Unsuppress Features");
+        assert_eq!(solidcraft_ui_text::Locale::for_language("en").text("timeline.suppress_features"), "Suppress Features");
+        assert_eq!(solidcraft_ui_text::Locale::for_language("en").text("timeline.unsuppress_features"), "Unsuppress Features");
     }
 
     #[test]
@@ -1555,7 +1794,7 @@ mod tests {
             cases.push((format!("construct.point.{id}"), FeatureKind::ConstructionPoint { def }));
         }
         for (id, plane) in [
-            ("midplane", PlaneRef::Midplane { a: reference(), b: reference() }),
+            ("midplane", PlaneRef::Midplane { a: reference(), b: reference(), old_frame: false }),
             ("axis_point", PlaneRef::AxisPoint { axis: reference(), point: reference() }),
             ("two_edges", PlaneRef::TwoEdges { a: reference(), b: reference() }),
             ("three_points", PlaneRef::ThreePoints { a: reference(), b: reference(), c: reference() }),
@@ -1601,6 +1840,7 @@ mod tests {
         let feature = FeatureKind::Pattern {
             features: Vec::new(),
             bodies: Vec::new(),
+            placements: Vec::new(),
             pattern: PatternKind::Path {
                 path_sketch: solidcraft_engine::doc::SketchId(0),
                 path: Vec::new(),
@@ -1616,7 +1856,7 @@ mod tests {
 
     fn two_boxes(left: bool) -> Harness {
         let mut h = Harness::new();
-        h.app.preferences.timeline_left = left;
+        h.app.run("view.history_layout", json!({"dock":if left { "left" } else { "bottom" }})).unwrap();
         h.app.run("solid.box", json!({"length": 10, "width": 10, "height": 10, "name": "First", "body_name": "One"})).unwrap();
         h.app
             .run(
@@ -1627,6 +1867,52 @@ mod tests {
         h.app.run("select.clear", json!({})).unwrap();
         h.frames(4);
         h
+    }
+
+    /// With History in the browser its bar is hidden, so a right-click on the History folder
+    /// offers the bar's controls, each greyed out while it would leave the marker where it is
+    /// (#14521).
+    #[test]
+    fn the_browser_history_folder_menu_steps_and_greys_out_what_would_not_move() {
+        let mut h = two_boxes(false);
+        let folder = crate::context_menu::Target::HistoryFolder;
+        assert!(crate::context_menu::check_target(&h.app, &folder).is_err(), "only the browser lists History as a folder");
+        h.app.run("view.history_layout", json!({"dock": "browser"})).unwrap();
+        h.frames(4);
+        assert!(crate::context_menu::check_target(&h.app, &folder).is_ok());
+        let enabled = |h: &Harness| -> Vec<(String, bool)> {
+            crate::context_menu::items(&h.app, &crate::context_menu::Target::HistoryFolder)
+                .into_iter()
+                .filter(|i| i.id == "ui.historyTransport")
+                .map(|i| (i.params.as_ref().and_then(|p| p["control"].as_str()).unwrap_or_default().to_owned(), i.enabled))
+                .collect()
+        };
+        let state = |pairs: [(&str, bool); 5]| pairs.map(|(c, on)| (c.to_owned(), on)).to_vec();
+        // At the end: only the steps back are on, and Play plays from the start (#10798).
+        assert_eq!(enabled(&h), state([("first", true), ("back", true), ("play", true), ("forward", false), ("last", false)]));
+        let play = |h: &Harness| {
+            crate::context_menu::items(&h.app, &folder).into_iter().find(|i| i.id == "ui.historyTransport" && i.icon == "timeline_play")
+        };
+        assert_eq!(play(&h).map(|i| i.label).as_deref(), Some(solidcraft_ui_text::tr("ui.history_play_from_start")));
+        // The bar's controls menu follows a separator.
+        let items = crate::context_menu::items(&h.app, &folder);
+        assert!(items.iter().any(|i| i.is_sep()) && items.iter().any(|i| i.id == "ui.historyPlayButton"));
+        // A right-click on the folder opens the menu; Go to beginning rolls to the start.
+        h.step(&json!({"click": {"browser": solidcraft_ui_text::tr("ui.history_title")}, "button": "right"})).unwrap();
+        assert_eq!(h.app.menu.target, folder);
+        h.call("ui.menuPick", json!({"item": solidcraft_ui_text::tr("ui.history_first")}));
+        h.frames(4);
+        assert_eq!(h.app.session.doc.marker, Some(0));
+        assert_eq!(enabled(&h), state([("first", false), ("back", false), ("play", true), ("forward", true), ("last", true)]));
+        // One step forward leaves every control something to do.
+        let forward = crate::context_menu::items(&h.app, &folder).into_iter().find(|i| i.label == solidcraft_ui_text::tr("ui.history_forward"));
+        crate::context_menu::run_item(&mut h.app, &forward.unwrap(), egui::Pos2::ZERO);
+        h.frames(4);
+        assert_eq!(h.app.session.doc.marker, Some(1));
+        assert!(enabled(&h).iter().all(|(_, on)| *on), "{:?}", enabled(&h));
+        // With the Play button hidden, the menu leaves Play out, as the bar does.
+        h.app.preferences.history_play_button = false;
+        assert!(enabled(&h).iter().all(|(c, _)| c != "play"));
     }
 
     #[test]
@@ -1676,7 +1962,7 @@ mod tests {
 
     #[test]
     fn playback_shows_each_feature_in_every_history_layout() {
-        for layout in [crate::shell::LayoutMode::Floating, crate::shell::LayoutMode::Docked] {
+        for layout in [crate::ui_kit::LayoutMode::Floating, crate::ui_kit::LayoutMode::Docked] {
             for (dock, width) in
                 [("bottom", 130.0), ("left", 56.0), ("left", crate::ui_kit::history_width(true)), ("left", 320.0), ("under_browser", 170.0)]
             {
@@ -1762,31 +2048,66 @@ mod tests {
         // Model a rebuild that held the window thread for ten seconds. Its first visible
         // frame must still show the first feature; elapsed compute time is not playback.
         let time = h.ctx.input(|i| i.time) + 10.0;
-        let _ = h.ctx.run_ui(egui::RawInput { time: Some(time), ..Default::default() }, |ui| {
-            super::tick_playback(&mut h.app, ui.ctx());
-        });
+        h.ctx
+            .run_ui(egui::RawInput { time: Some(time), ..Default::default() }, |ui| {
+                super::tick_playback(&mut h.app, ui.ctx());
+            })
+            .textures_delta
+            .clear();
         assert_eq!(h.app.session.doc.marker, Some(1));
         assert_eq!(h.app.session.model.state().bodies.len(), 1);
     }
 
+    /// Play with the marker at the end goes back to the start, shows the design before its first
+    /// feature, then plays every feature at the usual pace (#10798).
     #[test]
-    fn playback_at_the_end_or_in_an_empty_design_leaves_history_unchanged() {
-        for mut h in [Harness::new(), two_boxes(false)] {
-            h.frames(2);
-            let revision = h.app.session.revision;
-            h.app.start("timeline.play");
-            h.frames(2);
-            h.frames(60);
-            assert_eq!(h.app.session.revision, revision);
-            assert!(h.app.timeline_playback.is_none());
-        }
+    fn playback_at_the_end_starts_over_from_the_first_feature() {
+        let mut h = two_boxes(false);
+        assert_eq!(h.app.session.doc.marker, None);
+        assert_eq!(super::play_labels(&h.app).play, solidcraft_ui_text::tr("ui.history_play_from_start"));
+        h.app.start("timeline.play");
+        h.frames(2);
+        assert_eq!(h.app.session.doc.marker, Some(0), "back to the start first");
+        assert_eq!(h.app.session.model.state().bodies.len(), 0);
+        assert!(h.app.timeline_playback.is_some());
+        assert_eq!(super::play_labels(&h.app).play, solidcraft_ui_text::tr("cmd.timeline_play"), "away from the end, Play is Play History again");
+        h.frames(10);
+        assert_eq!(h.app.session.doc.marker, Some(0), "leave time to see the start");
+        h.frames(40);
+        assert_eq!(h.app.session.doc.marker, Some(1));
+        assert_eq!(h.app.session.model.state().bodies.len(), 1);
+        h.frames(60);
+        assert_eq!(h.app.session.doc.marker, None, "played to the end");
+        assert_eq!(h.app.session.model.state().bodies.len(), 2);
+        assert!(h.app.timeline_playback.is_none());
+
+        // Escape stops a playback that started over where it is.
+        h.app.start("timeline.play");
+        h.frames(2);
+        assert_eq!(h.app.session.doc.marker, Some(0));
+        h.step(&json!({"key": "Escape"})).unwrap();
+        h.frames(80);
+        assert!(h.app.timeline_playback.is_none());
+        assert_eq!(h.app.session.doc.marker, Some(0), "stopped at the start");
+    }
+
+    #[test]
+    fn playback_in_an_empty_design_leaves_history_unchanged() {
+        let mut h = Harness::new();
+        h.frames(2);
+        let revision = h.app.session.revision;
+        h.app.start("timeline.play");
+        h.frames(2);
+        h.frames(60);
+        assert_eq!(h.app.session.revision, revision);
+        assert!(h.app.timeline_playback.is_none());
     }
 
     #[test]
     fn playback_refuses_to_start_while_other_history_work_waits() {
         let mut h = two_boxes(false);
         h.app.run("timeline.roll_to", json!({"position": 0})).unwrap();
-        h.app.deferred_queue.push(("timeline.roll_to".into(), json!({"position": 1})));
+        h.app.deferred_queue.push(("timeline.roll_to".into(), json!({"position": 1}), 0));
         assert!(h.app.run("timeline.play", json!({"action": "play"})).is_err(), "refused up front, not stopped a frame later");
         assert!(h.app.timeline_playback.is_none());
         h.app.deferred_queue.clear();
@@ -1815,12 +2136,13 @@ mod tests {
 
             let at = |name: &str| crate::scenario::handle_at(name).unwrap();
             let (back, play, forward) = (at("history:back"), at("history:play"), at("history:forward"));
-            let across = dock == "bottom" || width > 56.0;
-            if across {
-                assert!(back.x < play.x && play.x < forward.x, "Play sits between Previous and Next; {dock} {width}");
-            } else {
-                assert!(back.y < play.y && play.y < forward.y, "Play sits between Previous and Next; {dock} {width}");
-            }
+            let along_strip = |position: egui::Pos2| {
+                if dock == "left" && width == crate::ui_kit::history_width(false) { position.y } else { position.x }
+            };
+            assert!(
+                along_strip(back) < along_strip(play) && along_strip(play) < along_strip(forward),
+                "Play sits between Previous and Next; {dock} {width}"
+            );
 
             h.app.run("timeline.roll_to", json!({"position": 0})).unwrap();
             h.frames(2);
@@ -1832,14 +2154,14 @@ mod tests {
             right_click(&mut h, "history:back");
             assert!(h.app.viewport.context_menu.is_some() && h.app.menu.target == Target::HistoryControls, "{dock} {width}");
             let items = crate::context_menu::items(&h.app, &Target::HistoryControls);
-            assert_eq!(items[0].label, crate::i18n::tr("ui.history_play_button_hide"));
+            assert_eq!(items[0].label, solidcraft_ui_text::tr("ui.history_play_button_hide"));
             crate::context_menu::run_item(&mut h.app, &items[0], egui::Pos2::ZERO);
             assert!(!h.app.preferences.history_play_button);
             h.frames(2);
             assert!(crate::scenario::handle_at("history:play").is_none(), "the four controls again; {dock} {width}");
 
             let items = crate::context_menu::items(&h.app, &Target::HistoryControls);
-            assert_eq!(items[0].label, crate::i18n::tr("ui.history_play_button_show"));
+            assert_eq!(items[0].label, solidcraft_ui_text::tr("ui.history_play_button_show"));
             crate::context_menu::run_item(&mut h.app, &items[0], egui::Pos2::ZERO);
             h.frames(2);
             assert!(crate::scenario::handle_at("history:play").is_some(), "and Play back; {dock} {width}");
@@ -1956,13 +2278,468 @@ mod tests {
         assert_eq!(super::selected_feature_ids(&h.app).len(), 200);
     }
 
+    /// A long history folds a component's features into one chip with its name and count. A run
+    /// that holds the history marker shows each feature until its chip is clicked; folded by
+    /// hand, the marker waits after the chip. Clicking the chip again shows each feature.
+    #[test]
+    fn a_long_history_folds_a_components_features_into_one_chip() {
+        use crate::scenario::{handle_at, rect_of};
+        let mut h = Harness::new();
+        assert_eq!(h.call("ui.prefs", json!({"history_bar_groups": true}))["ok"], true);
+        h.app.run("sketch.create", json!({"plane": "XY", "name": "Root sketch"})).unwrap();
+        h.app.run("sketch.finish", json!({})).unwrap();
+        h.app.run("component.create", json!({"name": "Rig"})).unwrap();
+        for i in 0..crate::timeline_fold::FOLD_FROM {
+            h.app.run("sketch.create", json!({"plane": "XY", "name": format!("S{i}")})).unwrap();
+            h.app.run("sketch.finish", json!({})).unwrap();
+        }
+        h.app.run("component.activate", json!({"component": "root"})).unwrap();
+        h.frames(4);
+        assert!(handle_at("timeline:Root sketch").is_some(), "a root feature stays on its own");
+        assert!(handle_at("timeline:S0").is_none(), "the component's features are folded");
+        assert!(handle_at("timeline-group:Rig").is_some(), "the folded run's chip");
+
+        h.app.run("timeline.roll_to", json!({"position": 20})).unwrap();
+        h.frames(2);
+        assert!(handle_at("timeline:S10").is_some(), "the run holding the marker shows each feature");
+        let chip = handle_at("timeline-group:Rig").unwrap();
+        h.call("ui.click", json!({"x": chip.x, "y": chip.y}));
+        h.frames(2);
+        assert!(handle_at("timeline:S10").is_none(), "clicking the chip folds them anyway");
+        let chip = handle_at("timeline-group:Rig").unwrap();
+        let marker = rect_of("history:marker").expect("the marker stays in view");
+        assert!(marker.left() > chip.x, "the marker waits after the folded chip: {marker:?} {chip:?}");
+
+        h.app.run("timeline.roll_to", json!({})).unwrap();
+        h.call("ui.click", json!({"x": chip.x, "y": chip.y}));
+        h.frames(2);
+        assert!(handle_at("timeline:S0").is_some() && handle_at("timeline:S49").is_some(), "clicking again shows each feature");
+    }
+
+    /// #10393 with the bar's groups on: a component marked out of the History bar leaves neither
+    /// its features nor a chip for them, and its features don't count towards folding. Showing
+    /// hidden components brings its long run back, folded like any other.
+    #[test]
+    fn a_component_hidden_from_the_bar_leaves_no_chip_and_comes_back_folded() {
+        use crate::scenario::handle_at;
+        let mut h = Harness::new();
+        assert_eq!(h.call("ui.prefs", json!({"history_bar_groups": true}))["ok"], true);
+        h.app.run("sketch.create", json!({"plane": "XY", "name": "Root sketch"})).unwrap();
+        h.app.run("sketch.finish", json!({})).unwrap();
+        h.app.run("component.create", json!({"name": "Copy"})).unwrap();
+        for i in 0..crate::timeline_fold::FOLD_FROM {
+            h.app.run("sketch.create", json!({"plane": "XY", "name": format!("C{i}")})).unwrap();
+            h.app.run("sketch.finish", json!({})).unwrap();
+        }
+        h.app.run("component.activate", json!({"component": "root"})).unwrap();
+        h.app.run("component.hide_history", json!({"component": "Copy"})).unwrap();
+        h.frames(4);
+        assert!(handle_at("timeline:Root sketch").is_some(), "the rest of the design shows");
+        assert!(handle_at("timeline:C0").is_none() && handle_at("timeline-group:Copy").is_none(), "no feature or chip of the hidden component");
+        h.app.tree.history_show_hidden = true;
+        h.frames(4);
+        assert!(handle_at("timeline-group:Copy").is_some(), "shown again, its long run folds into a chip");
+        assert!(handle_at("timeline:C0").is_none(), "folded, not each feature");
+    }
+
+    /// A run that holds subassemblies folding in turn shows only its component's features when
+    /// clicked, after a path back to the whole design. A subassembly there opens in place, and the
+    /// marker dragged between its features rolls the whole history there. "All components" goes
+    /// back to the whole design, where such a run stays folded with the marker inside it.
+    #[test]
+    fn a_deep_run_shows_only_its_component_and_the_path_steps_back_out() {
+        use crate::scenario::{handle_at, rect_of};
+        let (mut h, _) = rig_with_arm_and_leg(30);
+        h.call("ui.resize", json!({"width":2200,"height":1000}));
+        let rig_chip = handle_at("timeline-group:Rig").expect("the rig folds");
+        assert!(handle_at("timeline-group:Arm").is_none() && handle_at("timeline-path:Rig").is_none());
+        assert!(handle_at("timeline-path:All components").is_some(), "the path starts at the whole design");
+        h.call("ui.click", json!({"x": rig_chip.x, "y": rig_chip.y}));
+        h.frames(3);
+        assert!(handle_at("timeline-path:Rig").is_some(), "the path ends at the rig");
+        assert!(handle_at("timeline:Root sketch").is_none(), "the rest of the history is left out");
+        let arm = handle_at("timeline-group:Arm").expect("its subassemblies show folded");
+        assert!(handle_at("timeline-group:Leg").is_some());
+        h.call("ui.click", json!({"x": arm.x, "y": arm.y}));
+        h.frames(3);
+        assert!(handle_at("timeline:Arm0").is_some() && handle_at("timeline:Arm29").is_some(), "a subassembly opens in place");
+
+        let marker = rect_of("history:marker").expect("the marker sits at the end of the history");
+        let arm5 = handle_at("timeline:Arm5").unwrap();
+        h.step(&json!({"drag": [[marker.center().x, marker.center().y], [arm5.x - 14.0, arm5.y]]})).unwrap();
+        h.settle();
+        let index = h.app.session.doc.features.iter().position(|f| f.name == "Arm5").unwrap();
+        assert_eq!(h.app.session.doc.marker, Some(index), "the marker goes before Arm5 in the whole history");
+
+        let all = handle_at("timeline-path:All components").unwrap();
+        h.call("ui.click", json!({"x": all.x, "y": all.y}));
+        h.frames(3);
+        assert!(handle_at("timeline:Root sketch").is_some() && handle_at("timeline-path:Rig").is_none(), "back to the whole design");
+        assert!(handle_at("timeline-group:Rig").is_some() && handle_at("timeline-group:Arm").is_none(), "the rig stays folded around the marker");
+    }
+
+    /// A root sketch, then a component Rig holding Arm (`arm` sketches) and Leg (25): Rig's run is
+    /// deep. The bar's groups are on. Returns the harness, editing the root again, and the
+    /// components' ids by name.
+    fn rig_with_arm_and_leg(arm: usize) -> (Harness, std::collections::HashMap<&'static str, u64>) {
+        let mut h = Harness::new();
+        assert_eq!(h.call("ui.prefs", json!({"history_bar_groups": true}))["ok"], true);
+        h.app.run("sketch.create", json!({"plane": "XY", "name": "Root sketch"})).unwrap();
+        h.app.run("sketch.finish", json!({})).unwrap();
+        let rig = h.app.run("component.create", json!({"name": "Rig"})).unwrap()["component"].as_u64().unwrap();
+        let mut ids = std::collections::HashMap::from([("Rig", rig)]);
+        for (part, count) in [("Arm", arm), ("Leg", 25)] {
+            h.app.run("component.activate", json!({"component": rig})).unwrap();
+            let id = h.app.run("component.create", json!({"name": part})).unwrap()["component"].as_u64().unwrap();
+            ids.insert(part, id);
+            for i in 0..count {
+                h.app.run("sketch.create", json!({"plane": "XY", "name": format!("{part}{i}")})).unwrap();
+                h.app.run("sketch.finish", json!({})).unwrap();
+            }
+        }
+        h.app.run("component.activate", json!({"component": "root"})).unwrap();
+        h.frames(4);
+        (h, ids)
+    }
+
+    /// Editing a component shows only its features, after the path to it. A click on a step
+    /// around it shows that component's features, with the way to the edited one open and
+    /// scrolled into view past an open subassembly wider than the window; the edited one's step
+    /// goes back in. Editing another component or picking one in the Browser follows it; editing
+    /// the root shows the whole design.
+    #[test]
+    fn editing_a_component_shows_only_its_features_and_the_path_steps_out() {
+        use crate::scenario::{handle_at, rect_of};
+        let (mut h, ids) = rig_with_arm_and_leg(60);
+        let rig = handle_at("timeline-group:Rig").unwrap();
+        h.call("ui.click", json!({"x": rig.x, "y": rig.y}));
+        h.frames(3);
+        let arm = handle_at("timeline-group:Arm").unwrap();
+        h.call("ui.click", json!({"x": arm.x, "y": arm.y}));
+        h.frames(3);
+        let all = handle_at("timeline-path:All components").unwrap();
+        h.call("ui.click", json!({"x": all.x, "y": all.y}));
+        h.frames(3);
+        assert!(handle_at("timeline-group:Rig").is_some() && handle_at("timeline:Leg0").is_none());
+
+        h.app.run("component.activate", json!({"component": ids["Leg"]})).unwrap();
+        h.frames(3);
+        assert!(handle_at("timeline:Leg0").is_some() && handle_at("timeline:Leg24").is_some(), "the leg's features show");
+        assert!(handle_at("timeline:Arm0").is_none() && handle_at("timeline:Root sketch").is_none(), "nothing else does");
+        assert!(handle_at("timeline-path:Rig").is_some() && handle_at("timeline-path:Leg").is_some(), "the path to the leg");
+
+        let rig = handle_at("timeline-path:Rig").unwrap();
+        h.call("ui.click", json!({"x": rig.x, "y": rig.y}));
+        h.frames(30);
+        assert!(handle_at("timeline:Arm0").is_some() && handle_at("timeline:Leg0").is_some(), "the rig's features: the open arm's and the leg's");
+        let strip = rect_of("history:strip").or_else(|| rect_of("history:card")).unwrap();
+        let leg = handle_at("timeline-group:Leg").unwrap();
+        assert!(strip.x_range().contains(leg.x), "the leg's chip scrolled into view: {leg:?} in {strip:?}");
+        let back_in = handle_at("timeline-path:Leg").expect("the leg's step stays on the path");
+        h.call("ui.click", json!({"x": back_in.x, "y": back_in.y}));
+        h.frames(3);
+        assert!(handle_at("timeline:Leg0").is_some() && handle_at("timeline:Arm0").is_none(), "back in to the leg");
+
+        h.app.run("component.activate", json!({"component": ids["Arm"]})).unwrap();
+        h.frames(3);
+        assert!(handle_at("timeline:Arm0").is_some() && handle_at("timeline:Leg0").is_none(), "switching to the arm follows it");
+        h.app.run("component.activate", json!({"component": "root"})).unwrap();
+        h.frames(3);
+        assert!(handle_at("timeline:Root sketch").is_some() && handle_at("timeline-path:Arm").is_none(), "the root shows the whole design");
+
+        h.app.tree.picked_components = vec![ids["Leg"]];
+        h.frames(3);
+        assert!(handle_at("timeline:Leg0").is_some() && handle_at("timeline:Root sketch").is_none(), "a component picked in the Browser");
+        h.app.tree.picked_components.clear();
+        h.frames(3);
+        assert!(handle_at("timeline:Root sketch").is_some(), "nothing picked shows the whole design again");
+    }
+
+    /// While a component is edited, its features keep their place in the design: the marker
+    /// dragged before one rolls back there, past another component's features in between, and a
+    /// feature dropped before another goes there in the design.
+    #[test]
+    fn a_components_history_rolls_and_reorders_in_the_whole_design() {
+        use crate::scenario::{handle_at, rect_of};
+        let mut h = Harness::new();
+        // The path to "All components" comes with the bar's groups (`timeline_scope`).
+        h.app.preferences.history_bar_groups = true;
+        let a = h.app.run("component.create", json!({"name": "A"})).unwrap()["component"].as_u64().unwrap();
+        h.app.run("solid.box", json!({"length": 10, "width": 10, "height": 10, "name": "A1"})).unwrap();
+        h.app.run("component.activate", json!({"component": "root"})).unwrap();
+        let b = h.app.run("component.create", json!({"name": "B"})).unwrap()["component"].as_u64().unwrap();
+        h.app.run("solid.box", json!({"length": 10, "width": 10, "height": 10, "corner": [20, 0, 0], "name": "B1"})).unwrap();
+        h.app.run("component.activate", json!({"component": a})).unwrap();
+        h.app.run("solid.box", json!({"length": 10, "width": 10, "height": 10, "corner": [0, 20, 0], "name": "A2"})).unwrap();
+        h.frames(4);
+        let names = |h: &Harness| h.app.session.doc.features.iter().map(|f| f.name.clone()).collect::<Vec<_>>();
+        assert_eq!(names(&h), ["A1", "B1", "A2"]);
+        assert!(handle_at("timeline:A1").is_some() && handle_at("timeline:A2").is_some() && handle_at("timeline:B1").is_none());
+
+        let marker = rect_of("history:marker").unwrap();
+        let a2 = handle_at("timeline:A2").unwrap();
+        h.step(&json!({"drag": [[marker.center().x, marker.center().y], [a2.x - 14.0, a2.y]]})).unwrap();
+        h.settle();
+        assert_eq!(h.app.session.doc.marker, Some(2), "B1 stays built, A2 is rolled back");
+
+        h.app.run("timeline.roll_to", json!({})).unwrap();
+        h.frames(3);
+        let (a1, a2) = (handle_at("timeline:A1").unwrap(), handle_at("timeline:A2").unwrap());
+        h.step(&json!({"drag": [[a2.x, a2.y], [a1.x - 14.0, a1.y]]})).unwrap();
+        h.settle();
+        assert_eq!(names(&h), ["A2", "A1", "B1"], "A2 goes before A1 in the design");
+
+        h.app.run("component.activate", json!({"component": b})).unwrap();
+        h.frames(3);
+        assert!(handle_at("timeline:B1").is_some() && handle_at("timeline:A1").is_none());
+        let all = handle_at("timeline-path:All components").unwrap();
+        h.call("ui.click", json!({"x": all.x, "y": all.y}));
+        h.frames(3);
+        assert!(handle_at("timeline:A1").is_some() && handle_at("timeline:B1").is_some(), "All components shows both");
+        assert!(handle_at("timeline-path:B").is_some(), "the way back in to the edited component");
+    }
+
+    fn shown(h: &mut Harness) -> Vec<String> {
+        h.frames(4);
+        crate::scenario::handles("timeline:").into_iter().map(|(n, _)| n).filter(|n| n != "timeline:components").collect()
+    }
+
+    /// Two components with a box each: while one is active, the timeline shows only its
+    /// feature; the toggle ahead of the features shows the whole design again, and so does the
+    /// root (#2880). Without the bar's groups (the default) there is no path, and the whole
+    /// design stays shown while another component is edited or picked, until the toggle again.
+    #[test]
+    fn the_timeline_shows_only_the_active_components_features() {
+        let mut h = Harness::new();
+        h.app.run("component.create", json!({"name": "Left"})).unwrap();
+        h.app.run("solid.box", json!({"length": 10, "width": 10, "height": 10, "name": "LeftBox"})).unwrap();
+        h.app.run("component.activate", json!({"component": 0})).unwrap();
+        h.app.run("component.create", json!({"name": "Right"})).unwrap();
+        h.app.run("solid.box", json!({"length": 10, "width": 10, "height": 10, "corner": [20, 0, 0], "name": "RightBox"})).unwrap();
+        let names = shown(&mut h);
+        assert!(names.contains(&"timeline:RightBox".to_string()) && !names.contains(&"timeline:LeftBox".to_string()), "{names:?}");
+        h.step(&json!({"click": {"handle": "timeline:components"}})).unwrap();
+        let names = shown(&mut h);
+        assert!(names.contains(&"timeline:LeftBox".to_string()) && names.contains(&"timeline:RightBox".to_string()), "show all: {names:?}");
+        h.step(&json!({"click": {"handle": "timeline:components"}})).unwrap();
+        let names = shown(&mut h);
+        assert!(!names.contains(&"timeline:LeftBox".to_string()), "this part again: {names:?}");
+        h.app.run("component.activate", json!({"component": 0})).unwrap();
+        let names = shown(&mut h);
+        assert!(names.contains(&"timeline:LeftBox".to_string()) && names.contains(&"timeline:RightBox".to_string()), "root: {names:?}");
+        assert!(crate::scenario::handle_at("timeline-path:All components").is_none(), "no path without the bar's groups");
+
+        let id = |h: &Harness, name: &str| h.app.session.doc.components.iter().find(|c| c.name == name).map(|c| c.id).unwrap();
+        let (left, right) = (id(&h, "Left"), id(&h, "Right"));
+        h.app.run("component.activate", json!({"component": right})).unwrap();
+        shown(&mut h);
+        h.step(&json!({"click": {"handle": "timeline:components"}})).unwrap();
+        h.app.run("component.activate", json!({"component": left})).unwrap();
+        let names = shown(&mut h);
+        assert!(names.contains(&"timeline:RightBox".to_string()), "all still shown while another is edited: {names:?}");
+        h.app.run("component.activate", json!({"component": 0})).unwrap();
+        h.app.tree.picked_components = vec![right];
+        let names = shown(&mut h);
+        assert!(names.contains(&"timeline:LeftBox".to_string()), "and while one is picked: {names:?}");
+        h.step(&json!({"click": {"handle": "timeline:components"}})).unwrap();
+        let names = shown(&mut h);
+        assert!(
+            names.contains(&"timeline:RightBox".to_string()) && !names.contains(&"timeline:LeftBox".to_string()),
+            "the picked one only: {names:?}"
+        );
+    }
+
+    /// A design opened or made afresh in the tab shows the edited or picked component's
+    /// features again, not the whole design chosen for the one before.
+    #[test]
+    fn a_new_design_in_the_tab_starts_on_the_edited_component() {
+        let mut h = Harness::new();
+        h.app.run("component.create", json!({"name": "Part"})).unwrap();
+        h.app.run("solid.box", json!({"length": 10, "width": 10, "height": 10, "name": "PartBox"})).unwrap();
+        shown(&mut h);
+        h.step(&json!({"click": {"handle": "timeline:components"}})).unwrap();
+        shown(&mut h);
+        assert_eq!(h.app.tree.timeline_scope, crate::timeline_scope::Scope::All);
+        h.app.run("file.new", json!({})).unwrap();
+        assert_eq!(h.app.tree.timeline_scope, crate::timeline_scope::Scope::Follow, "file.new");
+        assert_eq!(h.app.tree.timeline_followed, None, "it follows the new design's own component");
+    }
+
+    /// While a component is active, the History controls step through the features the timeline
+    /// shows (that component's), not the whole design's (#11430).
+    #[test]
+    fn the_history_controls_step_through_the_active_components_features() {
+        let mut h = Harness::new();
+        h.app.home.open = false;
+        h.app.run("view.history_layout", json!({"dock": "bottom"})).unwrap();
+        h.app.run("component.create", json!({"name": "Left"})).unwrap();
+        h.app.run("solid.box", json!({"length": 10, "width": 10, "height": 10, "operation": "new_body", "name": "LeftBox"})).unwrap();
+        h.app.run("component.activate", json!({"component": 0})).unwrap();
+        h.app.run("component.create", json!({"name": "Right"})).unwrap();
+        h.app
+            .run("solid.box", json!({"length": 10, "width": 10, "height": 10, "corner": [20, 0, 0], "operation": "new_body", "name": "RightBox"}))
+            .unwrap();
+        h.app.run("component.activate", json!({"component": "Left"})).unwrap();
+        h.app
+            .run("solid.box", json!({"length": 5, "width": 5, "height": 5, "corner": [0, 0, 10], "operation": "new_body", "name": "LeftTop"}))
+            .unwrap();
+        let names: Vec<String> = h.app.session.doc.features.iter().map(|f| f.name.clone()).collect();
+        assert_eq!(names, ["LeftBox", "RightBox", "LeftTop"]);
+        let features = h.app.session.doc.features.clone();
+        h.settle();
+        // Positions are the design's: 0 before LeftBox, 2 before LeftTop, None the end.
+        for (control, position) in [
+            ("back", Some(2)),
+            ("back", Some(0)),
+            ("back", Some(0)),
+            ("forward", Some(2)),
+            ("forward", None),
+            ("forward", None),
+            ("first", Some(0)),
+            ("last", None),
+        ] {
+            h.step(&json!({"click": {"handle": format!("history:{control}")}})).unwrap();
+            h.settle();
+            assert_eq!(h.app.session.doc.marker, position, "{control}");
+            assert_eq!(h.app.session.doc.features, features, "transport only moves the marker");
+        }
+        // Show All steps through every feature again.
+        h.step(&json!({"click": {"handle": "timeline:components"}})).unwrap();
+        h.settle();
+        for (control, position) in [("back", Some(2)), ("back", Some(1)), ("back", Some(0)), ("forward", Some(1))] {
+            h.step(&json!({"click": {"handle": format!("history:{control}")}})).unwrap();
+            h.settle();
+            assert_eq!(h.app.session.doc.marker, position, "show all: {control}");
+        }
+        // Back to Left's features with the marker between them (after LeftBox, before RightBox):
+        // Forward adds LeftTop, the next feature the bar shows, not only the hidden RightBox.
+        h.step(&json!({"click": {"handle": "timeline:components"}})).unwrap();
+        h.settle();
+        h.step(&json!({"click": {"handle": "history:forward"}})).unwrap();
+        h.settle();
+        assert_eq!(h.app.session.doc.marker, None, "forward from between the shown features");
+    }
+
+    /// A component with no features of its own lists nothing, so the controls leave the marker
+    /// where it is rather than stepping through other components' features (#11430).
+    #[test]
+    fn the_history_controls_of_a_component_with_no_features_do_nothing() {
+        let mut h = Harness::new();
+        h.app.home.open = false;
+        h.app.run("view.history_layout", json!({"dock": "bottom"})).unwrap();
+        h.app.run("solid.box", json!({"length": 10, "width": 10, "height": 10, "name": "Base"})).unwrap();
+        h.app.run("solid.box", json!({"length": 5, "width": 5, "height": 5, "corner": [20, 0, 0], "name": "Side"})).unwrap();
+        h.app.run("component.create", json!({"name": "Empty"})).unwrap();
+        h.settle();
+        h.app.run("timeline.roll_to", json!({"position": 1})).unwrap();
+        h.settle();
+        for control in ["first", "back", "forward", "last"] {
+            h.step(&json!({"click": {"handle": format!("history:{control}")}})).unwrap();
+            h.settle();
+            assert_eq!(h.app.session.doc.marker, Some(1), "{control}");
+        }
+        // A control that leaves the marker still takes over from playback, as any other step does.
+        for control in ["first", "back", "forward", "last"] {
+            h.app.run("timeline.roll_to", json!({"position": 0})).unwrap();
+            h.settle();
+            h.app.start("timeline.play");
+            h.frames(2);
+            assert!(h.app.timeline_playback.is_some(), "playing before {control}");
+            h.step(&json!({"click": {"handle": format!("history:{control}")}})).unwrap();
+            h.frames(2);
+            assert!(h.app.timeline_playback.is_none(), "{control} stops playback");
+        }
+    }
+
+    /// With the marker outside the shown features (after them, or before them), a control never
+    /// moves it the other way: Forward and Last don't roll back over hidden features, and First
+    /// and Back don't add them (#11430).
+    #[test]
+    fn the_history_controls_never_step_against_their_direction() {
+        let mut h = Harness::new();
+        h.app.home.open = false;
+        h.app.run("view.history_layout", json!({"dock": "bottom"})).unwrap();
+        h.app.run("component.create", json!({"name": "Left"})).unwrap();
+        h.app.run("solid.box", json!({"length": 10, "width": 10, "height": 10, "operation": "new_body", "name": "LeftBox"})).unwrap();
+        h.app.run("component.activate", json!({"component": 0})).unwrap();
+        h.app.run("component.create", json!({"name": "Right"})).unwrap();
+        h.app
+            .run("solid.box", json!({"length": 10, "width": 10, "height": 10, "corner": [20, 0, 0], "operation": "new_body", "name": "RightBox"}))
+            .unwrap();
+        // Left shows only LeftBox, and the marker is at the end, after RightBox.
+        h.app.run("component.activate", json!({"component": "Left"})).unwrap();
+        h.settle();
+        for control in ["forward", "last"] {
+            h.step(&json!({"click": {"handle": format!("history:{control}")}})).unwrap();
+            h.settle();
+            assert_eq!(h.app.session.doc.marker, None, "{control} past the shown features");
+        }
+        // Right shows only RightBox, and the marker is at the start, before LeftBox.
+        h.app.run("component.activate", json!({"component": "Right"})).unwrap();
+        h.app.run("timeline.roll_to", json!({"position": 0})).unwrap();
+        h.settle();
+        for control in ["back", "first"] {
+            h.step(&json!({"click": {"handle": format!("history:{control}")}})).unwrap();
+            h.settle();
+            assert_eq!(h.app.session.doc.marker, Some(0), "{control} before the shown features");
+        }
+    }
+
+    /// With "History steps by component" off, the controls step through
+    /// the whole design as before, even while a component is active (#11430).
+    #[test]
+    fn the_history_controls_step_through_the_whole_design_when_the_preference_is_off() {
+        let mut h = Harness::new();
+        h.app.home.open = false;
+        h.app.preferences.history_steps_component = false;
+        h.app.run("view.history_layout", json!({"dock": "bottom"})).unwrap();
+        h.app.run("component.create", json!({"name": "Left"})).unwrap();
+        h.app.run("solid.box", json!({"length": 10, "width": 10, "height": 10, "operation": "new_body", "name": "LeftBox"})).unwrap();
+        h.app.run("component.activate", json!({"component": 0})).unwrap();
+        h.app.run("component.create", json!({"name": "Right"})).unwrap();
+        h.app
+            .run("solid.box", json!({"length": 10, "width": 10, "height": 10, "corner": [20, 0, 0], "operation": "new_body", "name": "RightBox"}))
+            .unwrap();
+        h.app.run("component.activate", json!({"component": "Left"})).unwrap();
+        h.app
+            .run("solid.box", json!({"length": 5, "width": 5, "height": 5, "corner": [0, 0, 10], "operation": "new_body", "name": "LeftTop"}))
+            .unwrap();
+        h.settle();
+        for (control, position) in [("back", Some(2)), ("back", Some(1)), ("back", Some(0)), ("forward", Some(1)), ("last", None), ("first", Some(0))]
+        {
+            h.step(&json!({"click": {"handle": format!("history:{control}")}})).unwrap();
+            h.settle();
+            assert_eq!(h.app.session.doc.marker, position, "{control}");
+        }
+    }
+
+    /// Preferences > Layout shows "History steps by component" as a
+    /// checkbox with its note, and clicking it turns the preference off and on (#11430).
+    #[test]
+    fn the_layout_page_has_a_checkbox_for_the_history_controls_preference() {
+        let mut h = Harness::new();
+        h.call("ui.prefs", json!({"language": "en", "open": "Layout"}));
+        assert_eq!(h.call("ui.prefs", json!({}))["result"]["history_steps_component"], true, "on by default");
+        crate::prefs::reveal_preference(&mut h, "prefs:history_steps_component");
+        h.step(&json!({"click": {"handle": "prefs:history_steps_component"}})).unwrap();
+        assert_eq!(h.call("ui.prefs", json!({}))["result"]["history_steps_component"], false, "a click turns it off");
+        h.step(&json!({"click": {"handle": "prefs:history_steps_component"}})).unwrap();
+        assert_eq!(h.call("ui.prefs", json!({}))["result"]["history_steps_component"], true, "a second click turns it on again");
+        for locale in ["ar", "de", "he", "ja", "ko", "vi", "zh"] {
+            for id in ["prefs.history_steps_component", "prefs.history_steps_component_note"] {
+                let text = solidcraft_ui_text::Locale::for_language(locale).text(id);
+                assert_ne!(text, solidcraft_ui_text::Locale::for_language("en").text(id), "{locale} translates {id}");
+            }
+        }
+    }
+
     /// Find in Timeline on the last body of a history longer than the timeline scrolls its
     /// feature into view, in the bottom strip and in the history on the left (#5850).
     #[test]
     fn find_in_timeline_scrolls_both_timelines_to_the_found_feature() {
         for left in [false, true] {
             let mut h = Harness::new();
-            h.app.preferences.timeline_left = left;
+            h.app.run("view.history_layout", json!({"dock":if left { "left" } else { "bottom" }})).unwrap();
             for i in 0..80 {
                 h.app.run("sketch.create", json!({"plane": "XY", "name": format!("S{i}")})).unwrap();
                 h.app.run("sketch.finish", json!({})).unwrap();
@@ -1994,7 +2771,7 @@ mod tests {
     fn a_face_picked_in_the_view_scrolls_both_timelines_to_the_feature_that_made_it() {
         for left in [false, true] {
             let mut h = Harness::new();
-            h.app.preferences.timeline_left = left;
+            h.app.run("view.history_layout", json!({"dock":if left { "left" } else { "bottom" }})).unwrap();
             let block =
                 h.app.run("solid.box", json!({"length": 20, "width": 20, "height": 10, "name": "Block", "body_name": "Plate"})).unwrap()["feature"]
                     .as_u64()
@@ -2035,10 +2812,33 @@ mod tests {
     }
 
     #[test]
+    fn an_imported_mesh_lights_its_import_feature_in_history() {
+        use solidcraft_engine::doc::{Document, MeshData};
+
+        let mut doc = Document::default();
+        let mesh = MeshData {
+            name: "Scan".into(),
+            positions: [0.0, 0.0, 0.0, 2.0, 0.0, 0.0, 0.0, 3.0, 0.0].into(),
+            triangles: [0, 1, 2].into(),
+            color: None,
+            corner_normals: Default::default(),
+        };
+        let imported = doc.add_feature(FeatureKind::MeshImport { file: "scan.stl".into(), meshes: vec![mesh] }, Some("Import Scan")).unwrap();
+        let mut app = crate::SolveApp::new(solidcraft_engine::Session::new(doc), crate::Services::default());
+        let world = crate::open_meshing::session_world(&app.session);
+        let body = world.bodies.first().unwrap().name.clone();
+        let point = solidcore_record::Vec3::new(0.25, 0.25, 0.0);
+        app.viewport.hover = Some(crate::viewport::Hit::Face { body: body.clone(), index: 0, point });
+        assert_eq!(super::hovered_feature(&app), Some(imported));
+        app.session.selection = vec![solidcraft_engine::Sel::Face { body, index: 0, point }];
+        assert_eq!(super::picked_feature(&app), Some(imported));
+    }
+
+    #[test]
     fn the_feature_menu_edits_its_profile_sketch_in_both_timelines() {
         for left in [false, true] {
             let mut h = Harness::new();
-            h.app.preferences.timeline_left = left;
+            h.app.run("view.history_layout", json!({"dock":if left { "left" } else { "bottom" }})).unwrap();
             h.app.run("sketch.create", json!({"plane": "XY", "name": "Base"})).unwrap();
             h.app.run("sketch.rectangle.two_point", json!({"p0": [0, 0], "p1": [10, 10]})).unwrap();
             h.app.run("sketch.finish", json!({})).unwrap();
@@ -2053,45 +2853,6 @@ mod tests {
             h.step(&json!({"widget": "Edit Profile Sketch"})).unwrap();
             assert_eq!(h.app.session.active_sketch, Some(sketch), "left: {left}");
         }
-    }
-
-    fn shown(h: &mut Harness) -> Vec<String> {
-        h.frames(4);
-        crate::scenario::handles("timeline:").into_iter().map(|(n, _)| n).filter(|n| n != "timeline:components").collect()
-    }
-
-    /// Two components with a box each: while one is active, the timeline shows only its
-    /// feature; the toggle ahead of the features shows the whole design again, and so does the
-    /// root (#2880).
-    #[test]
-    fn the_timeline_shows_only_the_active_components_features() {
-        let mut h = Harness::new();
-        h.app.run("component.create", json!({"name": "Left"})).unwrap();
-        h.app.run("solid.box", json!({"length": 10, "width": 10, "height": 10, "name": "LeftBox"})).unwrap();
-        h.app.run("component.activate", json!({"component": 0})).unwrap();
-        h.app.run("component.create", json!({"name": "Right"})).unwrap();
-        h.app.run("solid.box", json!({"length": 10, "width": 10, "height": 10, "corner": [20, 0, 0], "name": "RightBox"})).unwrap();
-        let names = shown(&mut h);
-        assert!(names.contains(&"timeline:RightBox".to_string()) && !names.contains(&"timeline:LeftBox".to_string()), "{names:?}");
-        h.step(&json!({"click": {"handle": "timeline:components"}})).unwrap();
-        let names = shown(&mut h);
-        assert!(names.contains(&"timeline:LeftBox".to_string()) && names.contains(&"timeline:RightBox".to_string()), "show all: {names:?}");
-        h.step(&json!({"click": {"handle": "timeline:components"}})).unwrap();
-        let names = shown(&mut h);
-        assert!(!names.contains(&"timeline:LeftBox".to_string()), "this part again: {names:?}");
-        h.app.run("component.activate", json!({"component": 0})).unwrap();
-        let names = shown(&mut h);
-        assert!(names.contains(&"timeline:LeftBox".to_string()) && names.contains(&"timeline:RightBox".to_string()), "root: {names:?}");
-    }
-
-    /// The marker and a drop map from the shown features back to the design's positions.
-    #[test]
-    fn a_slot_among_the_shown_features_is_a_design_position() {
-        let shown = [1, 4, 5];
-        assert_eq!(super::design_position(&shown, 0, 7), 1);
-        assert_eq!(super::design_position(&shown, 2, 7), 5);
-        assert_eq!(super::design_position(&shown, 3, 7), 6);
-        assert_eq!(super::design_position(&[], 0, 7), 7);
     }
 
     fn copied(h: &Harness) -> Vec<String> {
@@ -2176,14 +2937,14 @@ mod tests {
         }
         let own = |h: &Harness, ids: &[u64]| {
             let worst = ids.iter().filter_map(|id| super::feature_status(&h.app, *id).map(|s| (s, *id))).reduce(|a, b| if b.0 > a.0 { b } else { a });
-            (worst.map(|w| w.0), worst.and_then(|w| super::feature_message(&h.app, w.1)))
+            (worst.map(|w| w.0), worst.and_then(|w| super::feature_tip(&h.app, w.1)))
         };
         // Every folder short enough to be searched, then the same repeated past the length that
         // builds the tables.
         let check = |h: &Harness, folder: &[u64], status: Option<Status>, of: Option<u64>, why: &str| {
             for ids in [folder.to_vec(), folder.repeat(16)] {
                 let found = super::worst_status(&h.app, &ids);
-                assert_eq!(found, (status, of.and_then(|id| super::feature_message(&h.app, id))), "{why}, {} ids", ids.len());
+                assert_eq!(found, (status, of.and_then(|id| super::feature_tip(&h.app, id))), "{why}, {} ids", ids.len());
                 assert_eq!(found, own(h, &ids), "{why}, {} ids", ids.len());
             }
         };
@@ -2238,7 +2999,41 @@ mod tests {
         }
     }
 
-    /// Copy on a feature outside the selection copies that feature alone.
+    /// Shift+click selects every feature from the last one clicked to this one, folded chips in
+    /// between included, and keeps measuring from that feature; Ctrl+Shift+click adds the range.
+    #[test]
+    fn shift_click_selects_the_features_in_between() {
+        let mut h = Harness::new();
+        assert_eq!(h.call("ui.prefs", json!({"history_bar_groups": true}))["ok"], true);
+        for (i, name) in ["A", "B", "C", "D", "E", "F"].into_iter().enumerate() {
+            let corner = [i as f64 * 15.0, 0.0, 0.0];
+            h.app
+                .run("solid.box", json!({"length": 10, "width": 10, "height": 10, "corner": corner, "operation": "new_body", "name": name}))
+                .unwrap();
+        }
+        h.app.run("select.clear", json!({})).unwrap();
+        h.frames(4);
+        let ids =
+            |h: &Harness, names: &[&str]| -> Vec<u64> { names.iter().map(|n| h.app.session.doc.find_feature(n).map(|f| f.id).unwrap()).collect() };
+        h.step(&json!({"click": {"handle": "timeline:B"}})).unwrap();
+        h.step(&json!({"click": {"handle": "timeline:D"}, "shift": true})).unwrap();
+        assert_eq!(super::selected_feature_ids(&h.app), ids(&h, &["B", "C", "D"]));
+        h.step(&json!({"click": {"handle": "timeline:A"}, "shift": true})).unwrap();
+        assert_eq!(super::selected_feature_ids(&h.app), ids(&h, &["A", "B"]), "the range still starts at B");
+        h.step(&json!({"click": {"handle": "timeline:E"}, "shift": true, "ctrl": true})).unwrap();
+        assert_eq!(super::selected_feature_ids(&h.app), ids(&h, &["A", "B", "C", "D", "E"]), "Ctrl+Shift adds B to E");
+
+        // C and D folded into a folder chip: a range across it takes them too.
+        h.app.run("timeline.group", json!({"name": "Pair", "features": ["C", "D"]})).unwrap();
+        h.frames(2);
+        assert!(crate::scenario::handle_at("timeline:C").is_none(), "C and D are folded");
+        h.step(&json!({"click": {"handle": "timeline:B"}})).unwrap();
+        h.step(&json!({"click": {"handle": "timeline:F"}, "shift": true})).unwrap();
+        assert_eq!(super::selected_feature_ids(&h.app), ids(&h, &["B", "C", "D", "E", "F"]));
+    }
+
+    /// Copy on a feature outside the selection copies that feature alone: the right-click
+    /// selects it first.
     #[test]
     fn copy_on_an_unselected_feature_copies_only_it() {
         let mut h = two_boxes(false);
@@ -2246,11 +3041,11 @@ mod tests {
         h.step(&json!({"click": {"handle": "timeline:Second"}, "button": "right"})).unwrap();
         h.step(&json!({"widget": "Copy"})).unwrap();
         assert_eq!(copied(&h), ["Second"]);
+        assert_eq!(super::selected_feature_ids(&h.app), ids(&h, &["Second"]));
         // Ctrl+click again takes a feature back out of the selection.
-        h.step(&json!({"click": {"handle": "timeline:Second"}, "ctrl": true})).unwrap();
-        h.step(&json!({"click": {"handle": "timeline:Second"}, "ctrl": true})).unwrap();
-        let first = h.app.session.doc.find_feature("First").map(|f| f.id).unwrap();
-        assert_eq!(super::selected_feature_ids(&h.app), [first]);
+        h.step(&json!({"click": {"handle": "timeline:First"}, "ctrl": true})).unwrap();
+        h.step(&json!({"click": {"handle": "timeline:First"}, "ctrl": true})).unwrap();
+        assert_eq!(super::selected_feature_ids(&h.app), ids(&h, &["Second"]));
     }
     fn three_boxes(left: bool) -> Harness {
         let mut h = two_boxes(left);
@@ -2312,6 +3107,87 @@ mod tests {
             assert_eq!(names(&h), ["Third"], "left: {left}");
             h.app.run("edit.undo", json!({})).unwrap();
             assert_eq!(names(&h), ["First", "Second", "Third"], "left: {left}");
+        }
+    }
+
+    /// A right-click on a feature outside the selection selects that feature alone, so its
+    /// menu acts on what is highlighted; a right-click inside the selection keeps it. The same
+    /// in both timelines.
+    #[test]
+    fn a_right_click_outside_the_selection_selects_that_feature() {
+        for left in [false, true] {
+            let mut h = three_boxes(left);
+            h.step(&json!({"click": {"handle": "timeline:First"}})).unwrap();
+            h.step(&json!({"click": {"handle": "timeline:Second"}, "ctrl": true})).unwrap();
+            h.step(&json!({"click": {"handle": "timeline:Second"}, "button": "right"})).unwrap();
+            assert_eq!(super::selected_feature_ids(&h.app), ids(&h, &["First", "Second"]), "inside keeps it, left: {left}");
+            assert!(h.widget("Delete 2 Selected Features").is_some(), "left: {left}");
+            h.step(&json!({"key": "Escape"})).unwrap();
+
+            h.step(&json!({"click": {"handle": "timeline:Third"}, "button": "right"})).unwrap();
+            assert_eq!(super::selected_feature_ids(&h.app), ids(&h, &["Third"]), "outside selects it alone, left: {left}");
+            assert!(h.widget("Delete 2 Selected Features").is_none(), "left: {left}");
+            h.step(&json!({"widget": if left { "Suppress Feature" } else { "Suppress Features" }})).unwrap();
+            h.settle();
+            let suppressed: Vec<&str> = h.app.session.doc.features.iter().filter(|f| f.suppressed).map(|f| f.name.as_str()).collect();
+            assert_eq!(suppressed, ["Third"], "left: {left}");
+        }
+    }
+
+    /// The menu of a selected feature adds an entry that suppresses the whole selection in one
+    /// undo step and says how many; when every selected feature is already suppressed it offers
+    /// to unsuppress them instead, and a mixed selection is suppressed. The single-feature entry
+    /// stays and still acts on the right-clicked feature alone. The same in both timelines
+    /// (#16245).
+    #[test]
+    fn the_feature_menu_suppresses_the_selected_features() {
+        fn suppressed(h: &Harness) -> Vec<String> {
+            h.app.session.doc.features.iter().filter(|f| f.suppressed).map(|f| f.name.clone()).collect()
+        }
+        fn menu_on_first_and_second(h: &mut Harness) {
+            h.app.run("select.clear", json!({})).unwrap();
+            h.frames(2);
+            h.step(&json!({"click": {"handle": "timeline:First"}})).unwrap();
+            h.step(&json!({"click": {"handle": "timeline:Second"}, "ctrl": true})).unwrap();
+            h.step(&json!({"click": {"handle": "timeline:Second"}, "button": "right"})).unwrap();
+        }
+        for left in [false, true] {
+            let mut h = three_boxes(left);
+            // The single-feature entry stays as it was beside the new one, and still acts on
+            // the right-clicked feature alone.
+            let single = if left { "Suppress Feature" } else { "Suppress Features" };
+            menu_on_first_and_second(&mut h);
+            h.step(&json!({"widget": single})).unwrap();
+            h.settle();
+            assert_eq!(suppressed(&h), ["Second"], "left: {left}");
+            h.app.run("edit.undo", json!({})).unwrap();
+            h.settle();
+            assert!(suppressed(&h).is_empty(), "left: {left}");
+
+            menu_on_first_and_second(&mut h);
+            assert!(h.widget(single).is_some(), "left: {left}");
+            assert!(h.widget("Unsuppress 2 Selected Features").is_none(), "left: {left}");
+            h.step(&json!({"widget": "Suppress 2 Selected Features"})).unwrap();
+            h.settle();
+            assert_eq!(suppressed(&h), ["First", "Second"], "left: {left}");
+            h.app.run("edit.undo", json!({})).unwrap();
+            h.settle();
+            assert!(suppressed(&h).is_empty(), "one undo step restores both, left: {left}");
+
+            h.app.run("timeline.suppress", json!({"features": ["First", "Second"], "suppressed": true})).unwrap();
+            h.settle();
+            menu_on_first_and_second(&mut h);
+            assert!(h.widget("Suppress 2 Selected Features").is_none(), "left: {left}");
+            h.step(&json!({"widget": "Unsuppress 2 Selected Features"})).unwrap();
+            h.settle();
+            assert!(suppressed(&h).is_empty(), "left: {left}");
+
+            h.app.run("timeline.suppress", json!({"feature": "First", "suppressed": true})).unwrap();
+            h.settle();
+            menu_on_first_and_second(&mut h);
+            h.step(&json!({"widget": "Suppress 2 Selected Features"})).unwrap();
+            h.settle();
+            assert_eq!(suppressed(&h), ["First", "Second"], "a mixed selection is suppressed, left: {left}");
         }
     }
 
@@ -2408,19 +3284,18 @@ mod tests {
     #[test]
     fn both_strips_keep_selection_reorder_marker_and_transport() {
         use crate::scenario::{handle_at, rect_of};
-        for mode in [crate::shell::LayoutMode::Floating, crate::shell::LayoutMode::Docked] {
+        for mode in [crate::ui_kit::LayoutMode::Floating, crate::ui_kit::LayoutMode::Docked] {
             let mut h = two_boxes(false);
             h.app.ui.layout = mode;
             h.settle();
             let viewport = h.app.viewport.rect.unwrap();
-            if mode == crate::shell::LayoutMode::Floating {
-                assert_eq!(rect_of("history:card").unwrap().bottom(), viewport.bottom() - crate::shell::SHELL_GAP);
+            if mode == crate::ui_kit::LayoutMode::Floating {
+                assert_eq!(rect_of("history:card").unwrap().bottom(), viewport.bottom() - crate::ui_kit::SHELL_GAP);
             } else {
                 let strip = rect_of("history:strip").unwrap();
-                assert_eq!(strip.top(), viewport.bottom());
-                assert_eq!(strip.bottom(), h.ctx.content_rect().bottom());
-                assert_eq!(strip.left(), 0.0);
-                assert_eq!(strip.height(), 40.0);
+                assert!(viewport.contains_rect(strip), "the strip overlays the viewport");
+                assert_eq!(strip.bottom(), viewport.bottom());
+                assert_eq!(strip.left(), viewport.left());
             }
             h.step(&json!({"click":{"handle":"timeline:First"}})).unwrap();
             h.step(&json!({"click":{"handle":"timeline:Second"},"ctrl":true})).unwrap();
@@ -2471,11 +3346,11 @@ mod tests {
     }
 
     #[test]
-    fn floating_strip_has_only_history_text_and_accents_the_last_done_chip_and_marker() {
+    fn history_strip_body_accents_the_last_done_chip_and_marker() {
         let mut h = two_boxes(false);
         h.app.ui.tab = "SURFACE".into();
-        let t = crate::theme::Tokens::get();
-        let accent = crate::theme::TabAccent::for_tab(&t, "SURFACE");
+        let t = solidcraft_theme::Tokens::get();
+        let accent = crate::workspace::tab_accent(&t, "SURFACE");
         for marker_position in [None, Some(1), Some(0)] {
             h.app.session.doc_mut().marker = marker_position;
             let marker_index = marker_position.unwrap_or(2);
@@ -2483,7 +3358,7 @@ mod tests {
                 h.app.session.selection =
                     selected.map(|i| solidcraft_engine::Sel::Feature { id: h.app.session.doc.features[i].id }).into_iter().collect();
                 let ctx = crate::fonts::test_context();
-                let mut out = ctx.run_ui(egui::RawInput::default(), |ui| super::timeline(&mut h.app, ui));
+                let mut out = ctx.run_ui(egui::RawInput::default(), |ui| super::panel_inline(&mut h.app, ui));
                 out.textures_delta.clear();
                 let texts: Vec<_> = out
                     .shapes
@@ -2493,7 +3368,7 @@ mod tests {
                         _ => None,
                     })
                     .collect();
-                assert_eq!(texts, ["History"]);
+                assert!(texts.is_empty(), "the shared host owns the title");
                 let chips: Vec<_> = out
                     .shapes
                     .iter()
@@ -2519,6 +3394,780 @@ mod tests {
                 assert!(out.shapes.iter().any(|s| matches!(&s.shape, egui::Shape::Circle(c)
                     if marker.contains(c.center) && c.fill == t.timeline && c.stroke == egui::Stroke::new(t.space_2, accent.color))));
             }
+        }
+    }
+
+    /// Boxes named `names`, in that order, nothing selected.
+    fn boxes(names: &[&str]) -> Harness {
+        let mut h = Harness::new();
+        for (i, name) in names.iter().enumerate() {
+            let corner = [20.0 * i as f64, 0.0, 0.0];
+            h.app.run("solid.box", json!({"length": 5, "width": 5, "height": 5, "corner": corner, "operation": "new_body", "name": name})).unwrap();
+        }
+        h.app.run("select.clear", json!({})).unwrap();
+        h.frames(4);
+        h
+    }
+
+    /// Each folder's name and its features' names.
+    fn folders(h: &Harness) -> Vec<(String, Vec<String>)> {
+        let doc = &h.app.session.doc;
+        let name = |id: &u64| doc.feature(*id).map(|f| f.name.clone()).unwrap_or_default();
+        doc.timeline_groups.iter().map(|g| (g.name.clone(), g.features.iter().map(name).collect())).collect()
+    }
+
+    fn folder_names(h: &Harness, list: &[(&str, &[&str])]) -> bool {
+        folders(h) == list.iter().map(|(n, f)| (n.to_string(), f.iter().map(|x| x.to_string()).collect())).collect::<Vec<_>>()
+    }
+
+    /// Whether the menu item `label` on screen is shown off.
+    fn disabled(h: &Harness, label: &str) -> Option<bool> {
+        let tree = h.output.accesskit_update.as_ref()?;
+        tree.nodes
+            .iter()
+            .rev()
+            .find(|(_, n)| n.label().is_some_and(|l| l == label || l.starts_with(&format!("{label} "))))
+            .map(|(_, n)| n.is_disabled())
+    }
+
+    /// Group Features in a feature's menu folds the selected features, or the one right-clicked
+    /// when it isn't selected, into one folded chip whose name is typed next, in one undo step.
+    /// Features apart in the history can't be grouped: the item is shown off.
+    #[test]
+    fn group_features_in_the_feature_menu_makes_one_folded_chip() {
+        use crate::scenario::handle_at;
+        let mut h = boxes(&["A", "B", "C", "D", "E"]);
+        h.step(&json!({"click": {"handle": "timeline:A"}})).unwrap();
+        h.step(&json!({"click": {"handle": "timeline:C"}, "ctrl": true})).unwrap();
+        h.step(&json!({"click": {"handle": "timeline:C"}, "button": "right"})).unwrap();
+        assert_eq!(disabled(&h, "Group Features"), Some(true), "A and C are apart");
+        // The control channel's report of the menu says why too.
+        let group_item = |h: &mut Harness| {
+            let menu = h.call("ui.menu", json!({}))["result"].clone();
+            menu["items"].as_array().into_iter().flatten().find(|i| i["id"] == "ui.groupFeatures").cloned().unwrap_or_default()
+        };
+        let item = group_item(&mut h);
+        assert_eq!(item["enabled"], false, "{item}");
+        assert!(item["tip"].as_str().is_some_and(|t| !t.is_empty()), "{item}");
+        h.step(&json!({"widget": "Group Features"})).unwrap();
+        assert!(h.app.session.doc.timeline_groups.is_empty());
+        h.step(&json!({"key": "Escape"})).unwrap();
+
+        // One feature: the one right-clicked, not the selection.
+        h.step(&json!({"click": {"handle": "timeline:E"}, "button": "right"})).unwrap();
+        assert_eq!(disabled(&h, "Group Features"), Some(false));
+        assert!(group_item(&mut h)["tip"].is_null(), "on, it gives no reason");
+        let undo = h.app.session.undo.len();
+        h.step(&json!({"widget": "Group Features"})).unwrap();
+        assert_eq!(h.app.session.undo.len(), undo + 1, "one undo step");
+        assert!(
+            matches!(h.app.menu.rename.as_ref().map(|r| &r.what), Some(crate::context_menu::RenameWhat::TimelineGroup(_))),
+            "its name is typed next"
+        );
+        h.step(&json!({"text": "Solo"})).unwrap();
+        h.step(&json!({"key": "Enter"})).unwrap();
+        assert!(folder_names(&h, &[("Solo", &["E"])]), "{:?}", folders(&h));
+        assert!(handle_at("timeline:E").is_none() && handle_at("timeline-folder-chip:Solo").is_some(), "folded into its chip");
+
+        // Several selected features.
+        h.step(&json!({"click": {"handle": "timeline:C"}})).unwrap();
+        h.step(&json!({"click": {"handle": "timeline:D"}, "ctrl": true})).unwrap();
+        h.step(&json!({"click": {"handle": "timeline:D"}, "button": "right"})).unwrap();
+        h.step(&json!({"widget": "Group Features"})).unwrap();
+        h.step(&json!({"text": "Pair"})).unwrap();
+        h.step(&json!({"key": "Enter"})).unwrap();
+        assert!(folder_names(&h, &[("Solo", &["E"]), ("Pair", &["C", "D"])]), "{:?}", folders(&h));
+        assert!(handle_at("timeline:C").is_none() && handle_at("timeline:D").is_none() && handle_at("timeline:B").is_some());
+    }
+
+    /// A folder's chip opens and folds with a click or its menu, which also renames it, selects
+    /// its features and ungroups it. Opened or folded in either History, both show it so.
+    #[test]
+    fn a_folder_chip_opens_renames_ungroups_and_both_histories_agree() {
+        use crate::scenario::handle_at;
+        let mut h = boxes(&["A", "B", "C"]);
+        assert_eq!(h.call("ui.prefs", json!({"history_bar_groups": true}))["ok"], true);
+        h.app.run("timeline.group", json!({"name": "Pair", "features": ["A", "B"]})).unwrap();
+        h.frames(2);
+        assert!(handle_at("timeline:A").is_none(), "a folder starts folded");
+        h.step(&json!({"click": {"handle": "timeline-folder-chip:Pair"}})).unwrap();
+        assert!(handle_at("timeline:A").is_some() && handle_at("timeline:B").is_some(), "a click shows each feature");
+
+        // Folded in the History beside the browser, it is folded here too, and the other way.
+        h.app.run("view.history_layout", json!({"dock":"left"})).unwrap();
+        h.frames(4);
+        assert!(handle_at("timeline:A").is_some(), "open there too");
+        h.step(&json!({"click": {"handle": "timeline-folder-fold:Pair"}})).unwrap();
+        assert!(handle_at("timeline:A").is_none());
+        h.app.run("view.history_layout", json!({"dock":"bottom"})).unwrap();
+        h.frames(4);
+        assert!(handle_at("timeline:A").is_none() && handle_at("timeline-folder-chip:Pair").is_some(), "folded here too");
+        h.step(&json!({"click": {"handle": "timeline-folder-chip:Pair"}})).unwrap();
+        h.app.run("view.history_layout", json!({"dock":"left"})).unwrap();
+        h.frames(4);
+        assert!(handle_at("timeline:A").is_some(), "opened here, open there");
+        h.app.run("view.history_layout", json!({"dock":"bottom"})).unwrap();
+        h.frames(4);
+
+        let menu = |h: &mut Harness, name: &str, item: &str| {
+            h.step(&json!({"click": {"handle": format!("timeline-folder-chip:{name}")}, "button": "right"})).unwrap();
+            h.step(&json!({"widget": item})).unwrap();
+        };
+        menu(&mut h, "Pair", "Fold Features");
+        assert!(handle_at("timeline:A").is_none());
+        menu(&mut h, "Pair", "Show Each Feature");
+        assert!(handle_at("timeline:A").is_some());
+        menu(&mut h, "Pair", "Rename");
+        h.step(&json!({"text": "Renamed"})).unwrap();
+        h.step(&json!({"key": "Enter"})).unwrap();
+        assert!(folder_names(&h, &[("Renamed", &["A", "B"])]), "{:?}", folders(&h));
+        menu(&mut h, "Renamed", "Select Features");
+        let ids: Vec<u64> = ["A", "B"].iter().map(|n| h.app.session.doc.find_feature(n).unwrap().id).collect();
+        assert_eq!(super::selected_feature_ids(&h.app), ids);
+        menu(&mut h, "Renamed", "Ungroup");
+        assert!(h.app.session.doc.timeline_groups.is_empty());
+        assert!(handle_at("timeline:A").is_some() && handle_at("timeline-folder-chip:Renamed").is_none());
+    }
+
+    /// The marker rolled into a folded folder waits after its chip, and dragged onto the chip it
+    /// goes before it; a feature dropped on the folded chip goes before it too, and dropped
+    /// between an open folder's features it joins the folder.
+    #[test]
+    fn the_marker_and_a_dropped_feature_go_around_a_folded_folder() {
+        use crate::scenario::{handle_at, rect_of};
+        let mut h = boxes(&["A", "B", "C", "D"]);
+        assert_eq!(h.call("ui.prefs", json!({"history_bar_groups": true}))["ok"], true);
+        h.app.run("timeline.group", json!({"name": "Mid", "features": ["B", "C"]})).unwrap();
+        h.app.run("timeline.roll_to", json!({"position": 2})).unwrap();
+        h.frames(2);
+        let chip = rect_of("timeline-folder-chip:Mid").unwrap();
+        let marker = rect_of("history:marker").unwrap();
+        assert!(marker.left() > chip.right(), "the marker waits after the folded chip: {marker:?} {chip:?}");
+        let y = chip.center().y;
+        h.step(&json!({"drag": [[marker.center().x, marker.center().y], [chip.left() + 2.0, y]]})).unwrap();
+        h.settle();
+        assert_eq!(h.app.session.doc.marker, Some(1), "dropped on the chip, the marker goes before the folder");
+
+        h.app.run("timeline.roll_to", json!({})).unwrap();
+        h.frames(2);
+        let d = handle_at("timeline:D").unwrap();
+        let chip = rect_of("timeline-folder-chip:Mid").unwrap();
+        h.step(&json!({"drag": [[d.x, d.y], [chip.left() + 2.0, y]]})).unwrap();
+        h.settle();
+        let order: Vec<&str> = h.app.session.doc.features.iter().map(|f| f.name.as_str()).collect();
+        assert_eq!(order, ["A", "D", "B", "C"]);
+        assert!(folder_names(&h, &[("Mid", &["B", "C"])]), "{:?}", folders(&h));
+
+        h.step(&json!({"click": {"handle": "timeline-folder-chip:Mid"}})).unwrap();
+        let (a, b, c) = (handle_at("timeline:A").unwrap(), handle_at("timeline:B").unwrap(), handle_at("timeline:C").unwrap());
+        h.step(&json!({"drag": [[a.x, a.y], [(b.x + c.x) / 2.0, y]]})).unwrap();
+        h.settle();
+        let order: Vec<&str> = h.app.session.doc.features.iter().map(|f| f.name.as_str()).collect();
+        assert_eq!(order, ["D", "B", "A", "C"]);
+        assert!(folder_names(&h, &[("Mid", &["B", "A", "C"])]), "dropped inside the open folder, it joins it: {:?}", folders(&h));
+    }
+
+    /// An assembly's STEP file (here one cylinder placed twice) shows as one folded chip named
+    /// Group #1, holding its Import feature; one rigid group keeps its parts in place, so there
+    /// are no joints to show. A file with one object shows its Import feature as before.
+    #[test]
+    fn a_multi_object_step_insert_shows_as_one_chip() {
+        use crate::scenario::{handle_at, handles};
+        let corpus = |name: &str| format!("{}/../../tests/step-conformance/{name}.step", env!("CARGO_MANIFEST_DIR"));
+        let mut h = Harness::new();
+        assert_eq!(h.call("ui.prefs", json!({"history_group_joints": true}))["ok"], true);
+        assert_eq!(h.call("ui.prefs", json!({"history_bar_groups": true}))["ok"], true);
+        let one = h.app.run("file.insert_step", json!({"path": corpus("cylinder")})).unwrap();
+        let two = h.app.run("file.insert_step", json!({"path": corpus("cylinder_twice"), "folder": true})).unwrap();
+        h.app.run("component.activate", json!({"component": "root"})).unwrap();
+        h.frames(4);
+        let feature = |r: &serde_json::Value| r["name"].as_str().unwrap().to_string();
+        assert!(handle_at(&format!("timeline:{}", feature(&one))).is_some(), "one object: its Import feature as before");
+        assert_eq!(handles("timeline-folder-chip:").len(), 1, "only the second insert is a folder");
+        assert!(handle_at("timeline-folder-chip:Group #1").is_some(), "{two}");
+        assert!(handle_at(&format!("timeline:{}", feature(&two))).is_none(), "the Import feature is folded into the chip");
+        // One rigid group holds its parts: no joints, so nothing to show after the feature.
+        assert!(h.app.session.doc.assembly.joints.is_empty() && h.app.session.doc.assembly.rigid_groups.len() == 1);
+        assert!(handles("timeline-joint:").is_empty() && handle_at("timeline:joints").is_none());
+
+        h.step(&json!({"click": {"handle": "timeline-folder-chip:Group #1"}})).unwrap();
+        assert!(handle_at(&format!("timeline:{}", feature(&two))).is_some(), "open, the Import feature shows");
+        assert!(handle_at("timeline-folder-joints:Group #1").is_none(), "and no joints button");
+    }
+
+    /// A folder's joints, shown one by one, stay shown in their own design only: another
+    /// design's `Group #1`, numbered the same, keeps its joints grouped, and the first design
+    /// shows them again when its tab comes back.
+    #[test]
+    fn a_step_folders_shown_joints_stay_with_their_design() {
+        use crate::scenario::{handle_at, handles};
+        let corpus = |name: &str| format!("{}/../../tests/step-conformance/{name}.step", env!("CARGO_MANIFEST_DIR"));
+        let mut h = Harness::new();
+        assert_eq!(h.call("ui.prefs", json!({"history_group_joints": true}))["ok"], true);
+        assert_eq!(h.call("ui.prefs", json!({"history_bar_groups": true}))["ok"], true);
+        // An assembly's import, unlocked and held instead by two rigid joints of a folder with its
+        // Import feature.
+        let insert = |h: &mut Harness| {
+            let reply = h.app.run("file.insert_step", json!({"path": corpus("cylinder_twice")})).unwrap();
+            let component = reply["component"].as_u64().unwrap();
+            h.app.run("component.unlock", json!({"component": component})).unwrap();
+            let doc = &h.app.session.doc;
+            let occurrences: Vec<u64> =
+                doc.occurrences.iter().filter(|o| o.component == component || doc.component_within(o.parent, component)).map(|o| o.id).collect();
+            let joints = h.app.run("joint.rigid_group", json!({"occurrences": occurrences})).unwrap()["joints"].clone();
+            let group = h.app.run("timeline.group", json!({"name": "Group #1", "features": [reply["feature"]], "joints": joints})).unwrap();
+            h.app.run("component.activate", json!({"component": "root"})).unwrap();
+            h.frames(4);
+            h.step(&json!({"click": {"handle": "timeline-folder-chip:Group #1"}})).unwrap();
+            group["group"].clone()
+        };
+        let first = insert(&mut h);
+        h.step(&json!({"click": {"handle": "timeline-folder-joints:Group #1"}})).unwrap();
+        assert_eq!(handles("timeline-joint:").len(), 2, "shown one by one in the first design");
+
+        crate::documents::new_design(&mut h.app);
+        assert_eq!(h.app.docs.active, 1, "the second design has a tab of its own");
+        let second = insert(&mut h);
+        assert_eq!(first, second, "both designs number their folder the same");
+        assert!(handle_at("timeline-folder-joints:Group #1").is_some(), "the second design's folder is open");
+        assert!(handles("timeline-joint:").is_empty(), "and its joints stay grouped");
+
+        crate::documents::switch(&mut h.app, 0);
+        h.frames(4);
+        assert_eq!(handles("timeline-joint:").len(), 2, "back in the first design, they show one by one again");
+    }
+
+    /// With "Fold the History bar into groups" off, as it is by default, the bar shows each feature
+    /// as it always has: a long run of one component's features doesn't fold, a feature folder
+    /// starts open (a click still folds it), and a STEP assembly the app inserts gets no `Group #N`
+    /// folder. Turned on, the run folds and the app's insert makes one; turned off again, each
+    /// feature shows.
+    #[test]
+    fn with_its_groups_off_the_bar_shows_each_feature_and_a_step_insert_makes_no_folder() {
+        use crate::scenario::handle_at;
+        let corpus = |name: &str| format!("{}/../../tests/step-conformance/{name}.step", env!("CARGO_MANIFEST_DIR"));
+        let mut h = Harness::new();
+        assert!(!h.app.preferences.history_bar_groups, "the bar's groups are off by default");
+        h.app.run("component.create", json!({"name": "Rig"})).unwrap();
+        for i in 0..crate::timeline_fold::FOLD_FROM {
+            h.app.run("sketch.create", json!({"plane": "XY", "name": format!("S{i}")})).unwrap();
+            h.app.run("sketch.finish", json!({})).unwrap();
+        }
+        h.app.run("component.activate", json!({"component": "root"})).unwrap();
+        h.app.run("timeline.group", json!({"name": "Pair", "features": ["S0", "S1"]})).unwrap();
+        h.frames(4);
+        assert!(handle_at("timeline-group:Rig").is_none(), "no run folds");
+        assert!(handle_at("timeline-folder-chip:Pair").is_some(), "the folder's chip");
+        assert!(handle_at("timeline:S0").is_some() && handle_at("timeline:S49").is_some(), "each feature shows, the folder's too");
+        h.step(&json!({"click": {"handle": "timeline-folder-chip:Pair"}})).unwrap();
+        assert!(handle_at("timeline:S0").is_none() && handle_at("timeline:S2").is_some(), "a click still folds the folder");
+
+        h.app.insert_path(&corpus("cylinder_twice"));
+        let (v, _) = h.call_queued("engine.execute", json!({"command": "file.insert_step", "params": {"path": corpus("cylinder_twice")}}));
+        assert_eq!(v["ok"], true, "{v}");
+        let names: Vec<&str> = h.app.session.doc.timeline_groups.iter().map(|g| g.name.as_str()).collect();
+        assert_eq!(names, ["Pair"], "neither insert made a folder");
+        assert_eq!(h.app.session.doc.assembly.rigid_groups.len(), 2, "their rigid groups are there all the same");
+
+        assert_eq!(h.call("ui.prefs", json!({"history_bar_groups": true}))["ok"], true);
+        h.app.run("component.activate", json!({"component": "root"})).unwrap();
+        h.frames(4);
+        assert!(handle_at("timeline-group:Rig").is_some(), "turned on, the run folds");
+        h.app.insert_path(&corpus("cylinder_twice"));
+        let names: Vec<&str> = h.app.session.doc.timeline_groups.iter().map(|g| g.name.as_str()).collect();
+        assert!(names.contains(&"Group #1"), "turned on, the app's insert asks for a folder: {names:?}");
+        assert_eq!(h.call("ui.prefs", json!({"history_bar_groups": false}))["ok"], true);
+        h.frames(4);
+        assert!(handle_at("timeline-group:Rig").is_none() && handle_at("timeline:S49").is_some(), "off again, each feature shows");
+    }
+
+    /// The bar's rows as the History bar kept them, from the egui context.
+    fn kept_rows(h: &Harness) -> std::sync::Arc<super::BarRows> {
+        h.ctx
+            .data(|data| data.get_temp::<(super::BarSeen, std::sync::Arc<super::BarRows>)>(egui::Id::unique("sc_history_bar_rows")))
+            .expect("the History bar kept its rows")
+            .1
+    }
+
+    /// Everything the bar's rows hold, to compare kept ones with ones built afresh.
+    fn rows_summary(rows: &super::BarRows) -> String {
+        use super::TimelineKind;
+        let kind = |kind: &TimelineKind| match kind {
+            TimelineKind::Sketch => "sketch".to_string(),
+            TimelineKind::Profile(sketch) => format!("profile of {sketch:?}"),
+            TimelineKind::Other => "other".to_string(),
+        };
+        let features: Vec<_> = rows.features.iter().map(|f| (f.0, &f.1, f.2, f.3, f.4, kind(&f.5))).collect();
+        format!("{features:?}\n{:?}\n{:?}\n{}", rows.handles, rows.accents, rows.unique_ids)
+    }
+
+    fn rows_built() -> usize {
+        super::BAR_ROWS_BUILT.with(std::cell::Cell::get)
+    }
+
+    fn rows_checked() -> usize {
+        super::BAR_ROWS_CHECKED.with(std::cell::Cell::get)
+    }
+
+    /// A frame where nothing changed takes the kept rows without checking them. A selection
+    /// counts the revision up: one check, nothing built, and the frames after it check nothing
+    /// again. A rename builds the rows once.
+    #[test]
+    fn a_frame_where_nothing_changed_checks_nothing() {
+        let mut h = two_boxes(false);
+        h.settle();
+        h.frames(2);
+        let (checked, built) = (rows_checked(), rows_built());
+        h.frames(5);
+        assert_eq!((rows_checked(), rows_built()), (checked, built), "nothing changed: no check, nothing built");
+        let id = h.app.session.doc.find_feature("First").unwrap().id;
+        h.app.run("select.set", json!({"items": [{"type": "feature", "id": id}]})).unwrap();
+        h.frames(2);
+        assert!(rows_checked() > checked, "a selection counts the revision up: the rows are checked");
+        assert_eq!(rows_built(), built, "and not built");
+        let checked = rows_checked();
+        h.frames(5);
+        assert_eq!(rows_checked(), checked, "the key the check held under is kept: no check after it");
+        let second = h.app.session.doc.find_feature("Second").unwrap().id;
+        h.app.run("timeline.rename", json!({"feature": second, "name": "Lid"})).unwrap();
+        h.frames(3);
+        assert_eq!(rows_built(), built + 1, "a rename builds the rows once");
+    }
+
+    #[test]
+    fn the_kept_bar_rows_are_the_ones_built_afresh_after_every_change() {
+        let mut h = two_boxes(false);
+        let check = |h: &mut Harness, what: &str| {
+            h.frames(2);
+            let kept = kept_rows(h);
+            assert!(kept.describes(&h.app.session.doc), "{what}: kept for the design as it is");
+            assert_eq!(rows_summary(&kept), rows_summary(&super::BarRows::of(&h.app)), "{what}");
+        };
+        check(&mut h, "opened");
+        let id = |h: &Harness, name: &str| h.app.session.doc.find_feature(name).unwrap().id;
+        let (first, second) = (id(&h, "First"), id(&h, "Second"));
+        let third = json!({"length": 10, "width": 10, "height": 10, "corner": [40, 0, 0], "operation": "new_body", "name": "Third"});
+        let steps: [(&str, serde_json::Value); 7] = [
+            ("timeline.rename", json!({"feature": second, "name": "Lid"})),
+            ("timeline.suppress", json!({"feature": first})),
+            ("solid.box", third),
+            ("timeline.move_many", json!({"features": [first], "position": 3, "group": null, "active": true})),
+            ("timeline.roll_to", json!({"position": 1})),
+            ("timeline.roll_to", json!({})),
+            ("timeline.delete", json!({"feature": second})),
+        ];
+        for (command, params) in steps {
+            h.app.run(command, params.clone()).unwrap_or_else(|e| panic!("{command} {params}: {e}"));
+            check(&mut h, command);
+        }
+        h.app.run("edit.undo", json!({})).unwrap();
+        check(&mut h, "undo");
+        assert!(has_chip("Lid"), "the undone delete brings Lid's chip back");
+    }
+
+    /// Whether the bar drew a chip for the feature `name` last frame.
+    fn has_chip(name: &str) -> bool {
+        crate::scenario::handle_at(&format!("timeline:{name}")).is_some()
+    }
+
+    /// The bar's rows follow the document alone: the pointer moving, a hover over a chip and a
+    /// new selection (which counts the session's revision up, `Session::refresh_display`) leave
+    /// them as they are, and a rename builds them once.
+    #[test]
+    fn the_bar_rows_are_built_again_only_when_the_document_changes() {
+        let mut h = two_boxes(false);
+        h.frames(2);
+        let built = rows_built();
+        for k in 0..5 {
+            h.frame_with(vec![egui::Event::PointerMoved(egui::pos2(300.0 + 40.0 * k as f32, 300.0))]);
+        }
+        let chip = crate::scenario::handle_at("timeline:Second").unwrap();
+        h.frame_with(vec![egui::Event::PointerMoved(chip)]);
+        h.frames(2);
+        assert_eq!(rows_built(), built, "a moving pointer and a hover build nothing");
+        let id = h.app.session.doc.find_feature("First").unwrap().id;
+        h.app.run("select.set", json!({"items": [{"type": "feature", "id": id}]})).unwrap();
+        h.frames(2);
+        assert_eq!(rows_built(), built, "a selection by command builds nothing");
+        h.step(&json!({"click": {"handle": "timeline:Second"}})).unwrap();
+        h.frames(2);
+        assert_eq!(rows_built(), built, "a selection by a click on a chip builds nothing");
+        let second = h.app.session.doc.find_feature("Second").unwrap().id;
+        h.app.run("timeline.rename", json!({"feature": second, "name": "Lid"})).unwrap();
+        h.frames(3);
+        assert_eq!(rows_built(), built + 1, "a rename builds them once");
+        assert!(has_chip("Lid") && !has_chip("Second"));
+    }
+
+    /// A document replaced by an equal copy at another address (as a sketch drag gives the session
+    /// on every frame) keeps the rows: nothing is built and the kept rows are the same ones.
+    #[test]
+    fn an_equal_document_at_a_new_address_keeps_the_bar_rows() {
+        let mut h = two_boxes(false);
+        h.frames(2);
+        let (kept, built, checked) = (kept_rows(&h), rows_built(), rows_checked());
+        let before = std::sync::Arc::as_ptr(&h.app.session.doc);
+        h.app.session.doc = std::sync::Arc::new((*h.app.session.doc).clone());
+        assert!(!std::ptr::eq(before, std::sync::Arc::as_ptr(&h.app.session.doc)), "the copy is at another address");
+        h.frames(2);
+        assert!(rows_checked() > checked, "the address changed the key: the rows are checked");
+        assert_eq!(rows_built(), built, "nothing is built");
+        assert!(std::sync::Arc::ptr_eq(&kept, &kept_rows(&h)), "the kept rows are the same ones");
+    }
+
+    /// An edit made in place on the document, at its own address, shows on the next frame,
+    /// whichever of the values the bar reads it changes, once the revision is counted up as a
+    /// command counts it. A feature added or removed shows even without that: the feature count
+    /// is part of the key, as for the vertical History.
+    #[test]
+    fn an_edit_in_place_reaches_the_bar_on_the_next_frame() {
+        let mut h = boxes(&["Alpha", "Beta", "Gamma"]);
+        h.app.run("sketch.create", json!({"plane": "XY", "name": "Plan"})).unwrap();
+        h.app.run("sketch.rectangle.two_point", json!({"p0": [100, 0], "p1": [110, 10]})).unwrap();
+        h.app.run("sketch.finish", json!({})).unwrap();
+        h.app.run("solid.extrude", json!({"sketch": "Plan", "distance": 5, "operation": "new", "name": "Pad"})).unwrap();
+        h.frames(2);
+        type Edit = fn(&mut Vec<solidcraft_engine::doc::Feature>);
+        // Each edit, and whether the revision is counted up after it as a command does.
+        let edits: [(&str, Edit, bool); 10] = [
+            ("a rename", |f| f[1].name = "Renamed".to_string(), true),
+            ("a suppress", |f| f[0].suppressed = !f[0].suppressed, true),
+            ("a changed id", |f| f[2].id += 1000, true),
+            // The same icon and type name: only the profile's sketch changes.
+            (
+                "a profile's sketch changed",
+                |f| {
+                    let sketch = f.iter_mut().find_map(|feature| match &mut feature.kind {
+                        FeatureKind::Extrude { sketch, .. } => Some(sketch),
+                        _ => None,
+                    });
+                    let Some(sketch) = sketch else { panic!("the design has an extrude") };
+                    sketch.0 += 1000;
+                },
+                true,
+            ),
+            (
+                "a changed kind",
+                |f| {
+                    let kind = f[3].kind.clone();
+                    f[3].kind = std::mem::replace(&mut f[0].kind, kind);
+                },
+                true,
+            ),
+            (
+                "a feature added",
+                |f| {
+                    let mut added = f[1].clone();
+                    added.id += 5000;
+                    added.name = "Added".to_string();
+                    f.push(added);
+                },
+                true,
+            ),
+            (
+                "a feature removed",
+                |f| {
+                    f.pop();
+                },
+                true,
+            ),
+            ("two features swapped", |f| f.swap(0, 1), true),
+            (
+                "a feature added, the revision as it was",
+                |f| {
+                    let mut added = f[0].clone();
+                    added.id += 7000;
+                    added.name = "Quiet".to_string();
+                    f.push(added);
+                },
+                false,
+            ),
+            (
+                "a feature removed, the revision as it was",
+                |f| {
+                    f.pop();
+                },
+                false,
+            ),
+        ];
+        for (what, edit, command) in edits {
+            // A copy no one else holds can be changed where it is: an edit through
+            // `Session::doc_mut` would move a document that others share.
+            h.app.session.doc = std::sync::Arc::new((*h.app.session.doc).clone());
+            let kept = kept_rows(&h);
+            assert!(kept.describes(&h.app.session.doc), "{what}: the kept rows describe the copy");
+            // As though a frame had checked them against the copy, so that only the edit can
+            // change the key: a frame here could hold the copy elsewhere (the Browser keeps a weak
+            // pointer to the document), and it could no longer be changed where it is.
+            let rows_id = egui::Id::unique("sc_history_bar_rows");
+            let seen = super::BarSeen::of(&h.app);
+            h.ctx.data_mut(|data| data.insert_temp(rows_id, (seen, kept.clone())));
+            let at = std::sync::Arc::as_ptr(&h.app.session.doc);
+            let before = h.app.session.doc.features.clone();
+            let Some(doc) = std::sync::Arc::get_mut(&mut h.app.session.doc) else { panic!("{what}: the copy is held elsewhere") };
+            edit(&mut doc.features);
+            if command {
+                h.app.session.revision += 1;
+            }
+            assert!(std::ptr::eq(at, std::sync::Arc::as_ptr(&h.app.session.doc)), "{what}: made in place");
+            assert_ne!(h.app.session.doc.features, before, "{what}: the edit changed the features");
+            assert!(!kept.describes(&h.app.session.doc), "{what}: the kept rows no longer describe the document");
+            let built = rows_built();
+            h.frame();
+            assert_eq!(rows_built(), built + 1, "{what}: the next frame builds the rows once");
+            assert_eq!(rows_summary(&kept_rows(&h)), rows_summary(&super::BarRows::of(&h.app)), "{what}");
+        }
+    }
+
+    /// Every feature's chip is published under the name the kept rows hold for it: after a
+    /// rename, under the new name only.
+    #[test]
+    fn the_bar_publishes_each_features_name_from_the_kept_rows() {
+        let mut h = boxes(&["Alpha", "Beta", "Gamma"]);
+        h.frames(2);
+        let names = |h: &Harness| h.app.session.doc.features.iter().map(|f| f.name.clone()).collect::<Vec<_>>();
+        for name in names(&h) {
+            assert!(has_chip(&name), "{name} has its chip");
+        }
+        let beta = h.app.session.doc.find_feature("Beta").unwrap().id;
+        h.app.run("timeline.rename", json!({"feature": beta, "name": "Lid"})).unwrap();
+        h.frames(2);
+        assert_eq!(names(&h), ["Alpha", "Lid", "Gamma"]);
+        for name in names(&h) {
+            assert!(has_chip(&name), "{name} has its chip after the rename");
+        }
+        assert!(!has_chip("Beta"), "the old name is gone");
+        let kept: Vec<String> = kept_rows(&h).handles.iter().map(|handle| handle.to_string()).collect();
+        let published: Vec<String> = crate::scenario::handles("timeline:").into_iter().map(|(name, _)| name).collect();
+        assert_eq!(published, kept, "the kept names, in order");
+    }
+
+    /// A frame drawn with the rows kept publishes the same chip handles and paints the same bar as
+    /// the first frame of the same design, which builds them. `every_chip`: each feature has its
+    /// own chip (no run folds), in the design's order.
+    fn assert_a_warm_frame_matches_the_first(h: &mut Harness, every_chip: bool, what: &str) {
+        h.frames(2);
+        let bar = |h: &Harness| {
+            let card = h.app.shell.history.expect("the History bar is shown");
+            let shapes: Vec<egui::epaint::ClippedShape> =
+                h.shapes.iter().filter(|s| card.intersects(s.shape.visual_bounding_rect())).cloned().collect();
+            (crate::scenario::handles("timeline"), shapes)
+        };
+        h.ctx.data_mut(|data| data.remove::<(super::BarSeen, std::sync::Arc<super::BarRows>)>(egui::Id::unique("sc_history_bar_rows")));
+        let built = rows_built();
+        h.frame();
+        assert_eq!(rows_built(), built + 1, "{what}: the first frame builds the rows");
+        let first = bar(h);
+        h.frame();
+        assert_eq!(rows_built(), built + 1, "{what}: the next one keeps them");
+        let warm = bar(h);
+        assert!(!first.1.is_empty(), "{what}: the bar paints");
+        assert_eq!(warm, first, "{what}: the same handles, at the same points, and the same shapes");
+        if every_chip {
+            let names: Vec<String> = h.app.session.doc.features.iter().map(|f| format!("timeline:{}", f.name)).collect();
+            assert_eq!(warm.0.iter().map(|(name, _)| name.clone()).collect::<Vec<_>>(), names, "{what}: each feature's chip, in order");
+        }
+    }
+
+    #[test]
+    fn a_warm_frame_publishes_and_paints_the_bar_as_the_first_one_does() {
+        assert_a_warm_frame_matches_the_first(&mut boxes(&["Alpha", "Beta", "Gamma", "Delta"]), true, "four boxes");
+
+        // Most steps out of view.
+        let mut h = Harness::new();
+        for i in 0..120 {
+            h.app.run("sketch.create", json!({"plane": "XY", "name": format!("S{i}")})).unwrap();
+            h.app.run("sketch.finish", json!({})).unwrap();
+        }
+        h.frames(4);
+        let width = h.app.shell.history.unwrap().right();
+        assert!(crate::scenario::handle_at("timeline:S119").unwrap().x > width, "the last steps are out of view");
+        assert_a_warm_frame_matches_the_first(&mut h, true, "a long history");
+
+        // The bar's groups on: a component's long run folds into one chip (as in
+        // `a_long_history_folds_a_components_features_into_one_chip`).
+        let mut h = Harness::new();
+        assert_eq!(h.call("ui.prefs", json!({"history_bar_groups": true}))["ok"], true);
+        h.app.run("sketch.create", json!({"plane": "XY", "name": "Root sketch"})).unwrap();
+        h.app.run("sketch.finish", json!({})).unwrap();
+        h.app.run("component.create", json!({"name": "Rig"})).unwrap();
+        for i in 0..crate::timeline_fold::FOLD_FROM {
+            h.app.run("sketch.create", json!({"plane": "XY", "name": format!("S{i}")})).unwrap();
+            h.app.run("sketch.finish", json!({})).unwrap();
+        }
+        h.app.run("component.activate", json!({"component": "root"})).unwrap();
+        h.frames(4);
+        assert!(crate::scenario::handle_at("timeline-group:Rig").is_some(), "the run folds");
+        assert_a_warm_frame_matches_the_first(&mut h, false, "the bar's groups on");
+    }
+
+    /// The bar finds each feature's result where `result_index` and `Model::result` do: in place
+    /// when the results line up with the features, else through the table.
+    #[test]
+    fn the_bar_finds_each_result_as_the_table_does() {
+        use super::{BarResults, result_index};
+        let mut h = two_boxes(false);
+        let edges = json!([[0, 0, 5], [10, 0, 5], [10, 10, 5], [0, 10, 5]]);
+        h.app.run("solid.fillet", json!({"edges": edges, "radius": 6, "fit": "reduce", "body": "One"})).unwrap();
+        h.frames(2);
+        let features = super::BarRows::of(&h.app).features;
+        assert!(features.len() >= 3);
+        let unique = |features: &[super::BarFeature]| {
+            let mut seen = std::collections::HashSet::new();
+            features.iter().all(|f| seen.insert(f.0))
+        };
+        // Each feature's result as the strip found it before: the first of its id in a table.
+        let table = |model: &solidcraft_engine::doc::Model, id: u64| {
+            let index = result_index(&model.results);
+            index.get(&id).and_then(|k| model.results.get(*k).filter(|r| r.id == id).or_else(|| model.result(id))).map(|r| r as *const _)
+        };
+        let compare = |model: &solidcraft_engine::doc::Model, features: &[super::BarFeature], in_place: bool, what: &str| {
+            let found = BarResults::of(features, unique(features), &model.results);
+            assert_eq!(matches!(found, BarResults::InPlace), in_place, "{what}");
+            for (at, feature) in features.iter().enumerate() {
+                let got = found.get(model, at, feature.0).map(|r| r as *const _);
+                assert_eq!(got, table(model, feature.0), "{what}: feature {at}");
+            }
+        };
+        let model = h.app.session.model.clone();
+        compare(&model, &features, true, "lined up");
+        let mut fewer = model.clone();
+        fewer.results.truncate(features.len() - 1);
+        compare(&fewer, &features, false, "fewer results than features");
+        let mut reversed = model.clone();
+        reversed.results.reverse();
+        compare(&reversed, &features, false, "results in another order");
+        // The first feature listed again at the end, its result too: lined up, but the second
+        // listing's result is the first one's.
+        let mut twice = features.clone();
+        twice.push(features[0].clone());
+        let mut again = model.clone();
+        again.results.push(model.results[0].clone());
+        compare(&again, &twice, false, "a feature id twice");
+        let mut repeated = model.clone();
+        repeated.results[1] = model.results[0].clone();
+        compare(&repeated, &features, false, "a result id twice");
+        // Results that change after the strip found them lined up (a click on a chip earlier in
+        // the frame ran a command): each feature still gets what the table would give it now.
+        let lined_up = BarResults::of(&features, true, &model.results);
+        assert!(matches!(lined_up, BarResults::InPlace));
+        for (changed, what) in [(&fewer, "a result gone"), (&reversed, "results moved"), (&repeated, "a result replaced")] {
+            for (at, feature) in features.iter().enumerate() {
+                let got = lined_up.get(changed, at, feature.0).map(|r| r as *const _);
+                assert_eq!(got, table(changed, feature.0), "{what} after lining up: feature {at}");
+            }
+        }
+    }
+
+    /// A feature id listed twice: the rows say their ids are not unique, so results that line up
+    /// with the features by position are still looked up as the table does, and the second
+    /// listing gets the first result with its id, not the one at its own place. The bar still
+    /// draws such a design.
+    #[test]
+    fn a_repeated_feature_id_makes_the_bar_look_results_up_by_id() {
+        use super::{BarResults, BarRows, result_index};
+        let mut h = two_boxes(false);
+        h.frames(2);
+        assert!(BarRows::of(&h.app).unique_ids, "the plain design's ids are unique");
+        // A copy no one else holds, changed where it is: the first feature listed again at the
+        // end under another name.
+        h.app.session.doc = std::sync::Arc::new((*h.app.session.doc).clone());
+        let Some(doc) = std::sync::Arc::get_mut(&mut h.app.session.doc) else { panic!("the copy is held elsewhere") };
+        let mut twice = doc.features[0].clone();
+        twice.name = "Twice".to_string();
+        doc.features.push(twice);
+        let rows = BarRows::of(&h.app);
+        assert!(!rows.unique_ids, "an id listed twice");
+        // One result per listing, lined up by position, the last one a copy of the first.
+        let mut model = h.app.session.model.clone();
+        model.results.truncate(rows.features.len() - 1);
+        let Some(first) = model.results.first().cloned() else { panic!("the design has results") };
+        model.results.push(first);
+        assert!(rows.features.iter().zip(&model.results).all(|(f, r)| f.0 == r.id), "the results line up by position");
+        let found = BarResults::of(&rows.features, rows.unique_ids, &model.results);
+        assert!(matches!(found, BarResults::Indexed(_)), "looked up by id");
+        let last = rows.features.len() - 1;
+        let id = rows.features[last].0;
+        let got = found.get(&model, last, id).map(|r| r as *const _);
+        let index = result_index(&model.results);
+        let table = index.get(&id).and_then(|k| model.results.get(*k)).map(|r| r as *const _);
+        assert_eq!(got, table, "what the table gives");
+        assert_eq!(got, model.results.first().map(|r| r as *const _), "the first result with the id");
+        assert_ne!(got, model.results.get(last).map(|r| r as *const _), "not the one at its own place");
+        h.frames(2);
+        assert!(has_chip("Twice") && has_chip("First"), "the bar draws both listings");
+    }
+
+    #[test]
+    fn has_warning_says_what_warning_text_would() {
+        use solidcraft_engine::doc::kernel::{ImportIssue, ImportReport, IssueKind};
+        let h = two_boxes(false);
+        let plain = h.app.session.model.results[0].clone();
+        let issue = ImportIssue {
+            kind: IssueKind::Repaired,
+            item: Some(3),
+            part: String::new(),
+            paths: Vec::new(),
+            faces: 0,
+            times: 1,
+            detail: "solid #3: …".into(),
+        };
+        let report = |issues: Vec<ImportIssue>| {
+            Some(std::sync::Arc::new(ImportReport { parts: 1, solids: 1, issues, single_root: true, ..Default::default() }))
+        };
+        let with = |warning: Option<&str>, import_report| {
+            let mut result = plain.clone();
+            result.warning = warning.map(str::to_string);
+            result.import_report = import_report;
+            result
+        };
+        let cases = [
+            (with(None, None), false, "neither"),
+            (with(Some("reduced"), None), true, "a warning only"),
+            (with(None, report(vec![issue.clone()])), true, "a report with issues"),
+            (with(None, report(Vec::new())), false, "a report without issues"),
+            (with(Some("reduced"), report(vec![issue])), true, "both"),
+        ];
+        for (result, warned, what) in cases {
+            assert_eq!(super::has_warning(&result), warned, "{what}");
+            assert_eq!(super::has_warning(&result), super::warning_text(&result).is_some(), "{what}");
+        }
+    }
+
+    #[test]
+    fn browser_row_hover_highlights_feature_and_sketch_in_timeline() {
+        for left in [false, true] {
+            let mut h = Harness::new();
+            h.app.home.open = false;
+            h.app.ui.show_browser = true;
+            h.app.ui.show_timeline = true;
+            h.app.run("view.history_layout", json!({"dock": if left { "left" } else { "bottom" }})).unwrap();
+            h.app.run("solid.box", json!({"length":20,"width":20,"height":20})).unwrap();
+            let round = h.app.run("solid.fillet", json!({"edges":[[0,0,10]],"radius":2,"name":"Round"})).unwrap()["feature"].as_u64().unwrap();
+            h.app.run("sketch.create", json!({"plane":"XY","name":"MySketch"})).unwrap();
+            h.app.run("sketch.rectangle.two_point", json!({"p0":[0,0],"p1":[10,10]})).unwrap();
+            h.app.run("sketch.finish", json!({})).unwrap();
+            let sketch = h.app.session.doc.find_feature("MySketch").unwrap().id;
+            h.app.tree.expanded.insert("c0/features".into());
+            h.app.tree.expanded.insert("c0/sketches".into());
+            h.frames(2);
+
+            // Hovering a feature row in the browser sets hover_feature and highlights it in the timeline.
+            let row_feature = crate::scenario::handle_at(&format!("row:browser-feature:c0:{round}")).unwrap();
+            h.step(&json!({"move":[row_feature.x, row_feature.y]})).unwrap();
+            assert_eq!(h.app.viewport.hover_feature, Some(round), "left={left}");
+            assert_eq!(super::from_view(&h.app), [Some(round), None], "left={left}");
+
+            // Hovering a sketch row in the browser sets hover_feature and highlights it in the timeline.
+            let row_sketch = crate::scenario::handle_at("row:MySketch").unwrap();
+            h.step(&json!({"move":[row_sketch.x, row_sketch.y]})).unwrap();
+            assert_eq!(h.app.viewport.hover_feature, Some(sketch), "left={left}");
+            assert_eq!(super::from_view(&h.app), [Some(sketch), None], "left={left}");
+
+            // Moving the cursor away clears the timeline highlight.
+            h.step(&json!({"move":[5, 5]})).unwrap();
+            assert_eq!(h.app.viewport.hover_feature, None, "left={left}");
+            assert_eq!(super::from_view(&h.app), [None, None], "left={left}");
         }
     }
 }

@@ -4,6 +4,16 @@ use solidcraft_engine::panels::*;
 
 use super::*;
 
+/// A floating rectangle changes geometry, not the controller's presentation
+/// host. Keep its keyboard/overlay ownership while retaining ordinary reparent
+/// guards for changed groups, dock edges, native hosts and workspaces.
+fn same_presentation_host(before: Option<(&SectionId, &SectionLocation)>, after: Option<(&SectionId, &SectionLocation)>) -> bool {
+    match (before, after) {
+        (Some((before_id, SectionLocation::Floating { .. })), Some((after_id, SectionLocation::Floating { .. }))) => before_id == after_id,
+        _ => before == after,
+    }
+}
+
 /// Retention spans every open document, independently of the active layout.
 pub const MAX_RETAINED_DOCUMENT_OWNERS: usize = crate::documents::MAX_OPEN;
 /// Application, workspace and window owners share a separate bounded budget.
@@ -122,6 +132,21 @@ pub trait PanelController {
     /// Runs for retained controllers, including hidden, closed and inactive documents.
     fn update(&mut self, owner: &ContentOwner, services: &mut ContentServices<'_>) -> PanelResult<()>;
     fn presentation(&self) -> PanelPresentation;
+    /// Capture bounded read-only measurement data. The returned immutable
+    /// provider can answer candidate widths without borrowing live controllers,
+    /// rendering hidden bodies or calling mutable services. The default reports
+    /// registration's preferred outer height honestly, not an intrinsic extent.
+    fn measure(&self, _owner: &ContentOwner, _models: &dyn PanelModels, spec: &PanelSpec) -> PanelResult<std::sync::Arc<dyn HostContentMetrics>> {
+        Ok(std::sync::Arc::new(PreferredPanelMetrics { height: spec.default_size.height, policy: spec.side_height_policy }))
+    }
+    /// Read the live measurement source through this same controller. Immutable
+    /// providers cannot report later source changes through their old revision.
+    /// A cheap override must include every model/style/policy input to measure;
+    /// the safe default captures a new bounded provider for comparison only.
+    /// Neither path may render, tick services or publish owner state.
+    fn measurement_revision(&self, owner: &ContentOwner, models: &dyn PanelModels, spec: &PanelSpec) -> PanelResult<u64> {
+        Ok(self.measure(owner, models, spec)?.revision())
+    }
     /// MUST be side-effect-free. Failure rejects the whole layout transaction.
     /// Validate cancellation and reserve anything fallible before committing.
     /// State notifications are observational and cannot veto a layout change.
@@ -129,8 +154,62 @@ pub trait PanelController {
     /// Infallible application of an already prepared lifecycle transition.
     fn lifecycle(&mut self, event: &LifecycleEvent);
     fn render(&mut self, slot: ContentSlot, ui: &mut egui::Ui, context: &PanelContext, services: &mut ContentServices<'_>) -> PanelResult<()>;
+    /// Safe fallback for existing content; adapters can supply compact controls.
+    fn render_inline(&mut self, ui: &mut egui::Ui, context: &PanelContext, services: &mut ContentServices<'_>) -> PanelResult<()> {
+        self.render(ContentSlot::Body, ui, context, services)
+    }
+    /// Validate a binding without mutating its owner. Implementations may add
+    /// transaction-specific refusals here, before any host state commits.
+    fn prepare_action(&self, _owner: &ContentOwner, action: &ControlId, _models: &dyn PanelModels) -> PanelResult<()> {
+        let presentation = self.presentation();
+        presentation.validate()?;
+        let binding = presentation
+            .actions
+            .iter()
+            .find(|binding| binding.id == *action)
+            .ok_or_else(|| error(Rule::Capability, "content action has no controller binding"))?;
+        if !binding.enabled {
+            return Err(error(Rule::Availability, binding.disabled_reason.as_deref().unwrap_or("content action unavailable")));
+        }
+        Ok(())
+    }
     /// Apply/Finish/Cancel/Stop stay explicit content actions, never layout mutations.
     fn action(&mut self, owner: &ContentOwner, action: &ControlId, services: &mut ContentServices<'_>) -> PanelResult<()>;
+}
+
+#[derive(Debug)]
+struct PreferredPanelMetrics {
+    height: f32,
+    policy: SideHeightPolicy,
+}
+impl HostContentMetrics for PreferredPanelMetrics {
+    fn measure(&self, request: &ContentMeasureRequest) -> PanelResult<SideContentMeasure> {
+        Ok(SideContentMeasure { request: request.clone(), needed_height: self.height.max(request.chrome_height), policy: self.policy })
+    }
+    fn revision(&self) -> u64 {
+        u64::from(self.height.to_bits()) * 2 + u64::from(self.policy == SideHeightPolicy::Fill)
+    }
+}
+
+#[derive(Debug)]
+struct CapturedPanelMetrics {
+    panels: BTreeMap<InstanceId, std::sync::Arc<dyn HostContentMetrics>>,
+    revision: u64,
+}
+impl HostContentMetrics for CapturedPanelMetrics {
+    fn measure(&self, request: &ContentMeasureRequest) -> PanelResult<SideContentMeasure> {
+        self.panels.get(&request.instance).ok_or_else(|| error(Rule::Availability, "content metrics unavailable"))?.measure(request)
+    }
+    fn revision(&self) -> u64 {
+        use std::hash::{Hash, Hasher};
+        let mut signature = std::collections::hash_map::DefaultHasher::new();
+        self.revision.hash(&mut signature);
+        for (id, provider) in &self.panels {
+            id.hash(&mut signature);
+            provider.revision().hash(&mut signature);
+        }
+        signature.finish()
+    }
 }
 
 pub struct ControllerBinding {
@@ -139,7 +218,7 @@ pub struct ControllerBinding {
     pub create: Box<dyn Fn(&PanelInstance, &ContentOwner) -> PanelResult<Box<dyn PanelController>>>,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct ControllerKey {
     pub instance: InstanceId,
     pub owner: ContentOwner,
@@ -156,6 +235,58 @@ struct RetainedController {
     native_host: Option<HostId>,
     flow: Option<Flow>,
     availability: Availability,
+}
+
+/// Private, side-effect-free owner cohort. Providers and newly created
+/// controllers survive projection and are moved into the successful commit.
+struct RuntimeCohort {
+    base_environment: RuntimeEnvironment,
+    base_revision: u64,
+    environment: RuntimeEnvironment,
+    staged: BTreeMap<ControllerKey, RetainedController>,
+    availability: AvailabilityMap,
+    metrics: std::sync::Arc<dyn HostContentMetrics>,
+    metric_revision: u64,
+    providers: BTreeMap<ControllerKey, std::sync::Arc<dyn HostContentMetrics>>,
+}
+
+pub(crate) struct RuntimeHostProposal {
+    candidate: PreparedHostLayout,
+    reference: HostLayout,
+    source_reference: HostLayout,
+    cohort: RuntimeCohort,
+}
+impl RuntimeHostProposal {
+    pub(crate) fn action(&self) -> &LayoutAction {
+        self.candidate.action()
+    }
+    pub(crate) fn layout(&self) -> &Layout {
+        self.candidate.prepared().layout()
+    }
+    pub(crate) fn validate_preparation_context(&self, context: &LayoutPreparationContext) -> PanelResult<()> {
+        if self.reference.geometry_policy.identity_reservations.preparation_context()? != *context {
+            return Err(error(Rule::Revision, "host proposal preparation context changed"));
+        }
+        Ok(())
+    }
+    pub(crate) fn validate_captured(&self, runtime: &PanelRuntime, models: &dyn PanelModels) -> PanelResult<()> {
+        self.validate(runtime, &self.source_reference, models)
+    }
+    pub(crate) fn validate(&self, runtime: &PanelRuntime, reference: &HostLayout, models: &dyn PanelModels) -> PanelResult<()> {
+        if &self.source_reference != reference {
+            return Err(error(Rule::Revision, "host proposal source environment changed"));
+        }
+        self.candidate.validate_current(runtime.layout(), &runtime_scope(runtime), &self.reference)?;
+        let snapshot = self.candidate.proposal_snapshot();
+        if self.cohort.availability != snapshot.availability || !std::sync::Arc::ptr_eq(&self.cohort.metrics, &snapshot.metrics) {
+            return Err(error(Rule::Revision, "runtime cohort differs from admitted host snapshot"));
+        }
+        runtime.validate_cohort(self.layout(), &self.cohort, models)
+    }
+}
+
+pub(crate) fn standalone_header_action(action: &LayoutAction) -> bool {
+    matches!(action, LayoutAction::Apply { mutations, .. } if matches!(mutations.as_slice(), [Mutation::HeaderAction { .. }]))
 }
 
 /// Layout stays on the app, controllers on their content owners, host services on
@@ -176,6 +307,24 @@ pub struct RuntimeUpdateError {
     pub error: PanelError,
 }
 
+/// A mount supplies the complete presented set for exactly this cohort. Native
+/// viewport adapters must never reconcile another viewport's presentation.
+#[derive(Clone, Debug, PartialEq, Eq)]
+enum PresentationCohort {
+    All,
+    InApp,
+    Native(HostId),
+}
+impl PresentationCohort {
+    fn includes(&self, current: Option<&HostId>, previous: Option<&HostId>) -> bool {
+        match self {
+            Self::All => true,
+            Self::InApp => current.is_none() && previous.is_none(),
+            Self::Native(host) => current == Some(host) || previous == Some(host),
+        }
+    }
+}
+
 /// A scoped live action sink for host and future command routing. It includes the
 /// runtime lifecycle guard rather than exposing a mutable bare LayoutService.
 pub struct RuntimeActionSink<'a, 'services> {
@@ -183,23 +332,30 @@ pub struct RuntimeActionSink<'a, 'services> {
     pub native: &'a mut dyn NativeHostAdapter,
     pub services: &'a mut ContentServices<'services>,
 }
+
+pub(crate) fn normalize_native_reply(mut reply: LayoutReply, native: &HostCapabilities) -> LayoutReply {
+    reply.capabilities.native_windows &= native.native_windows;
+    reply.capabilities.max_native_hosts = reply.capabilities.max_native_hosts.min(native.max_native_hosts);
+    reply
+}
+
 impl ActionSink for RuntimeActionSink<'_, '_> {
+    fn project_in_context(&self, action: LayoutAction, context: &LayoutPreparationContext) -> PanelResult<Layout> {
+        self.runtime.layout.project_with_context(action, context)
+    }
+    fn dispatch_in_context(&mut self, action: LayoutAction, context: &LayoutPreparationContext) -> PanelResult<LayoutReply> {
+        let reply = self.runtime.dispatch_in_context(action, context, self.native, self.services)?;
+        Ok(normalize_native_reply(reply, &self.native.capabilities()))
+    }
     fn project(&self, action: LayoutAction) -> PanelResult<Layout> {
         self.runtime.layout.project(action)
     }
     fn dispatch(&mut self, action: LayoutAction) -> PanelResult<LayoutReply> {
-        let mut reply = self.runtime.dispatch(action, self.native, self.services)?;
-        let native = self.native.capabilities();
-        reply.capabilities.native_windows &= native.native_windows;
-        reply.capabilities.max_native_hosts = reply.capabilities.max_native_hosts.min(native.max_native_hosts);
-        Ok(reply)
+        let reply = self.runtime.dispatch(action, self.native, self.services)?;
+        Ok(normalize_native_reply(reply, &self.native.capabilities()))
     }
     fn inspect(&self) -> LayoutReply {
-        let mut reply = self.runtime.layout.inspect();
-        let native = self.native.capabilities();
-        reply.capabilities.native_windows &= native.native_windows;
-        reply.capabilities.max_native_hosts = reply.capabilities.max_native_hosts.min(native.max_native_hosts);
-        reply
+        normalize_native_reply(self.runtime.layout.inspect(), &self.native.capabilities())
     }
 }
 
@@ -237,13 +393,242 @@ impl PanelRuntime {
     pub fn environment(&self) -> &RuntimeEnvironment {
         &self.environment
     }
+    /// Snapshot only current available owners. No controller render/update, list
+    /// enumeration, command or local input service runs during metric capture.
+    pub fn capture_metrics(&self, models: &dyn PanelModels) -> PanelResult<std::sync::Arc<dyn HostContentMetrics>> {
+        // Current-frame collection never creates/discards a controller. The
+        // explicit context reconciliation must retain owners before painting.
+        Ok(self.capture_cohort_with(self.layout.layout(), self.environment.clone(), BTreeMap::new(), BTreeMap::new(), models)?.metrics)
+    }
+    fn capture_cohort(&self, layout: &Layout, models: &dyn PanelModels) -> PanelResult<RuntimeCohort> {
+        self.require_live()?;
+        let mut environment = self.environment.clone();
+        environment.workspace = layout.workspace.clone();
+        environment.validate()?;
+        let staged = self.stage_controllers(layout, &environment)?;
+        self.capture_cohort_with(layout, environment, staged, BTreeMap::new(), models)
+    }
+    fn capture_cohort_with(
+        &self,
+        layout: &Layout,
+        environment: RuntimeEnvironment,
+        staged: BTreeMap<ControllerKey, RetainedController>,
+        mut providers: BTreeMap<ControllerKey, std::sync::Arc<dyn HostContentMetrics>>,
+        models: &dyn PanelModels,
+    ) -> PanelResult<RuntimeCohort> {
+        use std::hash::{Hash, Hasher};
+        self.require_live()?;
+        let availability = self.cohort_availability(layout, &environment, &staged, models)?;
+        let mut panels = BTreeMap::new();
+        let mut signature = std::collections::hash_map::DefaultHasher::new();
+        for instance in &layout.instances {
+            instance.id.hash(&mut signature);
+            if !instance.requested_open || availability.get(&instance.id) != Some(&Availability::Available) {
+                continue;
+            }
+            let key = self.key_in(instance, &environment)?;
+            let retained = self
+                .controllers
+                .get(&key)
+                .or_else(|| staged.get(&key))
+                .ok_or_else(|| error(Rule::Availability, "content metrics controller unavailable"))?;
+            let metrics = match providers.get(&key) {
+                Some(metrics) => metrics.clone(),
+                None => {
+                    let metrics = retained.controller.measure(&key.owner, models, self.layout.registry().get(&instance.kind)?)?;
+                    providers.insert(key.clone(), metrics.clone());
+                    metrics
+                }
+            };
+            key.hash(&mut signature);
+            panels.insert(instance.id.clone(), metrics);
+        }
+        let metrics = std::sync::Arc::new(CapturedPanelMetrics { panels, revision: signature.finish() });
+        let metric_revision = metrics.revision();
+        Ok(RuntimeCohort {
+            base_environment: self.environment.clone(),
+            base_revision: self.layout.inspect().revision,
+            environment,
+            staged,
+            availability,
+            metrics,
+            metric_revision,
+            providers,
+        })
+    }
+    fn cohort_availability(
+        &self,
+        layout: &Layout,
+        environment: &RuntimeEnvironment,
+        staged: &BTreeMap<ControllerKey, RetainedController>,
+        models: &dyn PanelModels,
+    ) -> PanelResult<AvailabilityMap> {
+        let mut availability = AvailabilityMap::new();
+        for instance in &layout.instances {
+            let state = match self.key_in(instance, environment) {
+                Ok(key) => match self.controllers.get(&key).or_else(|| staged.get(&key)) {
+                    Some(retained) => {
+                        let state = retained.controller.availability(&key.owner, models);
+                        if matches!(&state, Availability::Unavailable { reason } if reason.is_empty() || reason.len() > 256) {
+                            return Err(error(Rule::Availability, "controller availability reason bound"));
+                        }
+                        if self.update_errors.iter().any(|e| e.controller.as_ref() == Some(&key)) { retained.availability.clone() } else { state }
+                    }
+                    None => Availability::Unavailable { reason: "content controller unavailable".into() },
+                },
+                Err(reason) => Availability::Unavailable { reason: reason.detail },
+            };
+            availability.insert(instance.id.clone(), state);
+        }
+        Ok(availability)
+    }
+    fn validate_cohort(&self, layout: &Layout, cohort: &RuntimeCohort, models: &dyn PanelModels) -> PanelResult<()> {
+        self.require_live()?;
+        if self.environment != cohort.base_environment
+            || self.layout.inspect().revision != cohort.base_revision
+            || self.cohort_availability(layout, &cohort.environment, &cohort.staged, models)? != cohort.availability
+            || cohort.metrics.revision() != cohort.metric_revision
+        {
+            return Err(error(Rule::Revision, "runtime proposal cohort changed"));
+        }
+        for instance in &layout.instances {
+            if !instance.requested_open || cohort.availability.get(&instance.id) != Some(&Availability::Available) {
+                continue;
+            }
+            let key = self.key_in(instance, &cohort.environment)?;
+            let retained = self
+                .controllers
+                .get(&key)
+                .or_else(|| cohort.staged.get(&key))
+                .ok_or_else(|| error(Rule::Revision, "measured controller is no longer retained"))?;
+            let original = cohort.providers.get(&key).ok_or_else(|| error(Rule::Revision, "controller metric source snapshot missing"))?;
+            let live = retained.controller.measurement_revision(&key.owner, models, self.layout.registry().get(&instance.kind)?)?;
+            if live != original.revision() {
+                return Err(error(Rule::Revision, "controller measurement source changed after capture"));
+            }
+        }
+        Ok(())
+    }
+    pub(crate) fn prepare_host_proposal(
+        &self,
+        reference: HostLayout,
+        action: LayoutAction,
+        models: &dyn PanelModels,
+    ) -> PanelResult<RuntimeHostProposal> {
+        self.prepare_host_proposal_with(reference, action, models, None, None)
+    }
+    pub(crate) fn prepare_host_proposal_in_context(
+        &self,
+        reference: HostLayout,
+        action: LayoutAction,
+        context: &LayoutPreparationContext,
+        models: &dyn PanelModels,
+    ) -> PanelResult<RuntimeHostProposal> {
+        self.prepare_host_proposal_with(reference, action, models, None, Some(context))
+    }
+    pub(crate) fn revise_host_proposal(
+        &self,
+        previous: RuntimeHostProposal,
+        reference: HostLayout,
+        action: LayoutAction,
+        context: Option<&LayoutPreparationContext>,
+        models: &dyn PanelModels,
+    ) -> PanelResult<RuntimeHostProposal> {
+        previous.validate(self, &reference, models)?;
+        let context = match context {
+            Some(context) => context.clone(),
+            None => previous.reference.geometry_policy.identity_reservations.preparation_context()?,
+        };
+        self.prepare_host_proposal_with(reference, action, models, Some(previous.cohort), Some(&context))
+    }
+    fn prepare_host_proposal_with(
+        &self,
+        source_reference: HostLayout,
+        action: LayoutAction,
+        models: &dyn PanelModels,
+        previous: Option<RuntimeCohort>,
+        context: Option<&LayoutPreparationContext>,
+    ) -> PanelResult<RuntimeHostProposal> {
+        // Workspace/preset staging can supply an incoming envelope context. Keep
+        // the outgoing painted environment independently for freshness, while B
+        // owns the exact supplied preparation environment throughout admission.
+        let mut reference = source_reference.clone();
+        if let Some(context) = context {
+            let reservations = HostIdentityReservations {
+                sections: context.sections.clone(),
+                columns: context.columns.clone(),
+                extent_priorities: context.extent_priorities.clone(),
+                replacement_ownership: context.replacement_ownership.clone(),
+            };
+            reservations.validate()?;
+            reference.geometry_policy.identity_reservations = reservations;
+        }
+        let mut cohort = None;
+        let candidate = prepare_host_layout_with_snapshot(&self.layout, &runtime_scope(self), &reference, action, |layout| {
+            let captured = if let Some(previous) = previous {
+                let mut environment = self.environment.clone();
+                environment.workspace = layout.workspace.clone();
+                environment.validate()?;
+                let staged = self.stage_controllers_with(layout, &environment, previous.staged)?;
+                self.capture_cohort_with(layout, environment, staged, previous.providers, models)?
+            } else {
+                self.capture_cohort(layout, models)?
+            };
+            let snapshot = HostProposalSnapshot { availability: captured.availability.clone(), metrics: captured.metrics.clone() };
+            cohort = Some(captured);
+            Ok(snapshot)
+        })?;
+        Ok(RuntimeHostProposal {
+            candidate,
+            reference,
+            source_reference,
+            cohort: cohort.ok_or_else(|| error(Rule::Lifecycle, "host capture callback was not called"))?,
+        })
+    }
+    /// Pointer candidates already own their geometry. Capture current retained
+    /// owners without replaying their action, and reject a mismatching snapshot.
+    pub(crate) fn retain_host_candidate(
+        &self,
+        candidate: PreparedHostLayout,
+        reference: HostLayout,
+        models: &dyn PanelModels,
+    ) -> PanelResult<RuntimeHostProposal> {
+        candidate.validate_current(&self.layout, &runtime_scope(self), &reference)?;
+        let layout = candidate.prepared().layout();
+        let environment = self.environment.clone();
+        if layout.workspace != environment.workspace {
+            return Err(error(Rule::Revision, "pointer candidate changed workspace"));
+        }
+        // Fresh comparison providers come from the same retained/staged objects.
+        // Keep B's original aggregate for geometry/commit when revisions agree.
+        let mut cohort = self.capture_cohort(layout, models)?;
+        let snapshot = candidate.proposal_snapshot();
+        if cohort.availability != snapshot.availability || cohort.metrics.revision() != snapshot.metrics.revision() {
+            return Err(error(Rule::Revision, "pointer proposed measurement sources changed"));
+        }
+        cohort.metrics = snapshot.metrics.clone();
+        cohort.metric_revision = snapshot.metrics.revision();
+        Ok(RuntimeHostProposal { candidate, source_reference: reference.clone(), reference, cohort })
+    }
+    pub(crate) fn commit_host_proposal(
+        &mut self,
+        proposal: RuntimeHostProposal,
+        native: &mut dyn NativeHostAdapter,
+        services: &mut ContentServices<'_>,
+    ) -> PanelResult<LayoutReply> {
+        proposal.validate_captured(self, services.models)?;
+        let RuntimeHostProposal { candidate, reference, cohort, .. } = proposal;
+        let action = candidate.action().clone();
+        let prepared = candidate.into_prepared(&self.layout, &runtime_scope(self), &reference)?;
+        self.commit_layout(Some(action), prepared, native, services, Some(cohort))
+    }
     pub fn controller_count(&self) -> usize {
         self.controllers.len()
     }
     pub fn update_errors(&self) -> &[RuntimeUpdateError] {
         &self.update_errors
     }
-    fn require_live(&self) -> PanelResult<()> {
+    pub(crate) fn require_live(&self) -> PanelResult<()> {
         if self.destroyed {
             return Err(error(Rule::Lifecycle, "runtime destroyed"));
         }
@@ -256,6 +641,16 @@ impl PanelRuntime {
         let value = self.controllers.get(key).ok_or_else(|| error(Rule::MissingTarget, "controller not retained"))?.controller.presentation();
         value.validate()?;
         Ok(value)
+    }
+    /// Read inactive tabs/rails through the registered ownership policy. This
+    /// never creates, updates or renders a controller.
+    pub fn instance_presentation(&self, instance: &InstanceId) -> PanelResult<PanelPresentation> {
+        self.require_live()?;
+        let key = self.key(self.layout.layout().instance(instance)?)?;
+        self.presentation(&key)
+    }
+    pub fn instance_owner(&self, instance: &InstanceId) -> PanelResult<ContentOwner> {
+        self.key(self.layout.layout().instance(instance)?).map(|key| key.owner)
     }
     fn key(&self, instance: &PanelInstance) -> PanelResult<ControllerKey> {
         self.key_in(instance, &self.environment)
@@ -309,10 +704,71 @@ impl PanelRuntime {
         Ok(())
     }
 
+    /// Re-read owner/context availability without ticking background work or
+    /// evaluating a model. App boundaries use this after Session changes later
+    /// in the same egui frame; incoming controllers are staged and retained.
+    pub fn reconcile_context(&mut self, environment: RuntimeEnvironment, services: &mut ContentServices<'_>) -> PanelResult<()> {
+        self.require_live()?;
+        self.set_environment(environment, services.local)?;
+        let staged = self.stage_controllers(self.layout.layout(), &self.environment)?;
+        self.controllers.extend(staged);
+        let mut availability = AvailabilityMap::new();
+        let mut retained_availability = Vec::new();
+        for instance in &self.layout.layout().instances {
+            let state = match self.key(instance) {
+                Ok(key) => {
+                    let retained = self.controllers.get(&key).ok_or_else(|| error(Rule::Availability, "content controller unavailable"))?;
+                    let available = retained.controller.availability(&key.owner, services.models);
+                    if matches!(&available, Availability::Unavailable { reason } if reason.is_empty() || reason.len() > 256) {
+                        return Err(error(Rule::Availability, "controller availability reason bound"));
+                    }
+                    // A boundary refresh is not a successful background tick.
+                    let state = if self.update_errors.iter().any(|failure| failure.controller.as_ref() == Some(&key)) {
+                        retained.availability.clone()
+                    } else {
+                        available
+                    };
+                    retained_availability.push((key, state.clone()));
+                    state
+                }
+                Err(reason) => Availability::Unavailable { reason: reason.detail },
+            };
+            availability.insert(instance.id.clone(), state);
+        }
+        self.layout.set_availability(availability)?;
+        for (key, state) in retained_availability {
+            if let Some(retained) = self.controllers.get_mut(&key) {
+                retained.availability = state;
+            }
+        }
+        self.sync_states(None, services.local);
+        Ok(())
+    }
+
+    /// Fail closed when a current-Session provider/context cannot be reconciled.
+    /// Hiding releases local input but never closes or destroys retained drafts.
+    pub fn suspend_presentations(&mut self, local: &mut dyn PanelLocalServices) {
+        for (key, retained) in &mut self.controllers {
+            if retained.state.presented || retained.state.activated {
+                local.release(&retained.scope, &key.instance);
+                retained.state.presented = false;
+                retained.state.activated = false;
+                retained.controller.lifecycle(&LifecycleEvent::State(retained.state.clone()));
+            }
+        }
+    }
+
     fn stage_controllers(&self, layout: &Layout, environment: &RuntimeEnvironment) -> PanelResult<BTreeMap<ControllerKey, RetainedController>> {
-        let mut staged = BTreeMap::new();
+        self.stage_controllers_with(layout, environment, BTreeMap::new())
+    }
+    fn stage_controllers_with(
+        &self,
+        layout: &Layout,
+        environment: &RuntimeEnvironment,
+        mut staged: BTreeMap<ControllerKey, RetainedController>,
+    ) -> PanelResult<BTreeMap<ControllerKey, RetainedController>> {
         let mut owner_counts = BTreeMap::<ContentOwner, usize>::new();
-        for key in self.controllers.keys() {
+        for key in self.controllers.keys().chain(staged.keys()) {
             *owner_counts.entry(key.owner.clone()).or_default() += 1;
         }
         let mut document_owners = owner_counts.keys().filter(|owner| matches!(owner, ContentOwner::Document(_))).count();
@@ -375,27 +831,7 @@ impl PanelRuntime {
     pub fn refresh_context(&mut self, models: &dyn PanelModels, local: &mut dyn PanelLocalServices) -> PanelResult<()> {
         self.require_live()?;
         let staged = self.stage_controllers(self.layout.layout(), &self.environment)?;
-        let mut availability = AvailabilityMap::new();
-        for instance in &self.layout.layout().instances {
-            let state = match self.key(instance) {
-                Ok(key) => match self.controllers.get(&key).or_else(|| staged.get(&key)) {
-                    Some(retained) => {
-                        let state = retained.controller.availability(&key.owner, models);
-                        if matches!(&state,Availability::Unavailable { reason } if reason.is_empty() || reason.len() > 256) {
-                            return Err(error(Rule::Availability, "controller availability reason bound"));
-                        }
-                        if self.update_errors.iter().any(|failure| failure.controller.as_ref() == Some(&key)) {
-                            retained.availability.clone()
-                        } else {
-                            state
-                        }
-                    }
-                    None => Availability::Unavailable { reason: "content controller unavailable".into() },
-                },
-                Err(reason) => Availability::Unavailable { reason: reason.detail },
-            };
-            availability.insert(instance.id.clone(), state);
-        }
+        let availability = self.cohort_availability(self.layout.layout(), &self.environment, &staged, models)?;
         self.layout.set_availability(availability.clone())?;
         self.controllers.extend(staged);
         for instance in &self.layout.layout().instances {
@@ -481,8 +917,57 @@ impl PanelRuntime {
         if self.destroyed {
             return Err(error(Rule::Lifecycle, "runtime destroyed"));
         }
+        if let LayoutAction::Apply { mutations, .. } = &action
+            && mutations.iter().any(|m| matches!(m, Mutation::HeaderAction { .. }))
+        {
+            if !standalone_header_action(&action) {
+                return Err(error(Rule::Capability, "header actions cannot be mixed with layout mutations"));
+            }
+            let prepared = self.layout.prepare(action.clone())?;
+            if let [Mutation::HeaderAction { instance, action }] = mutations.as_slice() {
+                let key = self.key(self.layout.layout().instance(instance)?)?;
+                let retained = self.controllers.get(&key).ok_or_else(|| error(Rule::Availability, "header action controller unavailable"))?;
+                retained.controller.availability(&key.owner, services.models).require()?;
+                retained.availability.require()?;
+                retained.controller.prepare_action(&key.owner, action, services.models)?;
+                self.content_action(instance, action, services)?;
+            }
+            return self.layout.commit(prepared);
+        }
+        let prepared = self.layout.prepare(action.clone())?;
+        self.commit_layout(Some(action), prepared, native, services, None)
+    }
+
+    /// Host-disabled/native adapters still prepare against the full envelope
+    /// context and the same once-created proposed owners used for lifecycle.
+    fn dispatch_in_context(
+        &mut self,
+        action: LayoutAction,
+        context: &LayoutPreparationContext,
+        native: &mut dyn NativeHostAdapter,
+        services: &mut ContentServices<'_>,
+    ) -> PanelResult<LayoutReply> {
+        if action == LayoutAction::Inspect || standalone_header_action(&action) {
+            return self.dispatch(action, native, services);
+        }
+        self.require_live()?;
+        let owners = self.layout.project_with_context(action.clone(), context)?;
+        let cohort = self.capture_cohort(&owners, services.models)?;
+        let prepared = self.layout.prepare_with_context(action.clone(), &cohort.availability, context)?;
+        self.commit_layout(Some(action), prepared, native, services, Some(cohort))
+    }
+
+    fn commit_layout(
+        &mut self,
+        action: Option<LayoutAction>,
+        mut prepared: PreparedLayout,
+        native: &mut dyn NativeHostAdapter,
+        services: &mut ContentServices<'_>,
+        cohort: Option<RuntimeCohort>,
+    ) -> PanelResult<LayoutReply> {
+        self.require_live()?;
         let requests: Vec<_> = match &action {
-            LayoutAction::Apply { mutations, .. } => mutations
+            Some(LayoutAction::Apply { mutations, .. }) => mutations
                 .iter()
                 .filter_map(|m| match m {
                     Mutation::Open { instance, .. }
@@ -492,13 +977,13 @@ impl PanelRuntime {
                     _ => None,
                 })
                 .collect(),
-            LayoutAction::Inspect | LayoutAction::Replace { .. } => Vec::new(),
+            _ => Vec::new(),
         };
-        let replacement = matches!(&action, LayoutAction::Replace { .. });
+        let replacement = matches!(&action, Some(LayoutAction::Replace { .. }));
         let mut explicit_close = BTreeSet::new();
         let mut explicit_destroy = BTreeSet::new();
         let mut explicit_open = BTreeSet::new();
-        if let LayoutAction::Apply { mutations, .. } = &action {
+        if let Some(LayoutAction::Apply { mutations, .. }) = &action {
             for mutation in mutations {
                 match mutation {
                     Mutation::Close { instance } => {
@@ -514,34 +999,22 @@ impl PanelRuntime {
                 }
             }
         }
-        let mut prepared = self.layout.prepare(action)?;
-        let mut environment = self.environment.clone();
-        environment.workspace = prepared.layout().workspace.clone();
+        let cohort = match cohort {
+            Some(cohort) => cohort,
+            None => self.capture_cohort(prepared.layout(), services.models)?,
+        };
+        self.validate_cohort(prepared.layout(), &cohort, services.models)?;
+        let RuntimeCohort { environment, mut staged, availability, .. } = cohort;
+        // A batch may replace an earlier private snapshot. Only controllers in
+        // its final owner cohort are published; discarded stages never ticked.
+        let proposed_keys: BTreeSet<_> = prepared.layout().instances.iter().filter_map(|p| self.key_in(p, &environment).ok()).collect();
+        staged.retain(|key, _| proposed_keys.contains(key));
         let capabilities = native.capabilities();
         if capabilities.max_native_hosts > MAX_SECTIONS {
             return Err(error(Rule::Capability, "native adapter reports invalid capacity"));
         }
         if prepared.effects().iter().any(|e| matches!(e, HostEffect::CreateNative { .. })) && !capabilities.native_windows {
             return Err(error(Rule::Capability, "native adapter is unavailable"));
-        }
-        let staged = self.stage_controllers(prepared.layout(), &environment)?;
-        let mut availability = AvailabilityMap::new();
-        for instance in &prepared.layout().instances {
-            let state = match self.key_in(instance, &environment) {
-                Ok(key) => match self.controllers.get(&key).or_else(|| staged.get(&key)) {
-                    Some(retained) => {
-                        let state = retained.controller.availability(&key.owner, services.models);
-                        if matches!(&state, Availability::Unavailable { reason } if reason.is_empty() || reason.len() > 256) {
-                            return Err(error(Rule::Availability, "controller availability reason bound"));
-                        }
-                        // A failed retained service cannot become healthy solely by moving it.
-                        if self.update_errors.iter().any(|e| e.controller.as_ref() == Some(&key)) { retained.availability.clone() } else { state }
-                    }
-                    None => Availability::Unavailable { reason: "content controller unavailable".into() },
-                },
-                Err(reason) => Availability::Unavailable { reason: reason.detail },
-            };
-            availability.insert(instance.id.clone(), state);
         }
         prepared.set_availability(availability.clone())?;
         for id in requests {
@@ -575,7 +1048,7 @@ impl PanelRuntime {
             let same_controller = after.is_some_and(|p| self.key_in(p, &environment).is_ok_and(|k| k == *key))
                 && before.is_some_and(|p| self.key(p).is_ok_and(|k| k == *key));
             if same_controller
-                && (old != new || self.environment.workspace != environment.workspace)
+                && (!same_presentation_host(old, new) || self.environment.workspace != environment.workspace)
                 && before.is_some_and(|p| p.requested_open)
                 && after.is_some_and(|p| p.requested_open)
             {
@@ -583,8 +1056,34 @@ impl PanelRuntime {
                 events.push((key.clone(), LifecycleEvent::Reparent));
             }
         }
+        let header_actions: Vec<_> = prepared
+            .effects()
+            .iter()
+            .filter_map(|effect| match effect {
+                HostEffect::HeaderAction { instance, action } => Some((instance.clone(), action.clone())),
+                _ => None,
+            })
+            .collect();
+        // A fallible owner action is its own command. Mixing it with structural
+        // changes could otherwise commit half a content/layout transaction.
+        if !header_actions.is_empty() && !matches!(&action, Some(LayoutAction::Apply { mutations, .. }) if mutations.len() == 1) {
+            return Err(error(Rule::Capability, "header actions cannot be mixed with layout mutations"));
+        }
+        for (instance, action) in &header_actions {
+            let key = self.key_in(prepared.layout().instance(instance)?, &environment)?;
+            let retained = self
+                .controllers
+                .get(&key)
+                .or_else(|| staged.get(&key))
+                .ok_or_else(|| error(Rule::Availability, "header action controller unavailable"))?;
+            retained.availability.require()?;
+            retained.controller.prepare_action(&key.owner, action, services.models)?;
+        }
         // Effects are available from the same candidate, before irreversible work.
         native.prepare(prepared.effects())?;
+        for (instance, action) in &header_actions {
+            self.content_action(instance, action, services)?;
+        }
         let reply = self.layout.commit(prepared)?;
         self.controllers.extend(staged);
         if replacement {
@@ -625,8 +1124,13 @@ impl PanelRuntime {
     }
 
     fn sync_states(&mut self, resolved: Option<&ResolvedLayout>, local: &mut dyn PanelLocalServices) {
+        self.sync_presented_states(resolved, &PresentationCohort::All, local);
+    }
+
+    fn sync_presented_states(&mut self, resolved: Option<&ResolvedLayout>, cohort: &PresentationCohort, local: &mut dyn PanelLocalServices) {
         let active_keys: BTreeSet<_> = self.layout.layout().instances.iter().filter_map(|p| self.key(p).ok()).collect();
         let scope = self.scope();
+        let availability: AvailabilityMap = self.layout.layout().instances.iter().map(|p| (p.id.clone(), self.layout.availability(&p.id))).collect();
         let mut pending = Vec::new();
         for (key, retained) in &self.controllers {
             let instance = self.layout.layout().instance(&key.instance).ok();
@@ -639,10 +1143,12 @@ impl PanelRuntime {
                 SectionLocation::Window { host, .. } => Some(host.clone()),
                 _ => None,
             });
-            let peek = &self.layout.interaction().peek;
-            let selected = section.is_some_and(|s| (!s.collapsed && s.active == key.instance) || peek.as_ref() == Some(&key.instance));
+            if !cohort.includes(host.as_ref(), retained.native_host.as_ref()) {
+                continue;
+            }
+            let selected = section.is_some_and(|s| !s.collapsed && presented_tab(s, &availability) == Some(&key.instance));
             let geometry_presented = match resolved {
-                Some(r) => r.panels.iter().any(|p| p.instance == key.instance),
+                Some(r) => r.panels.iter().any(|p| p.instance == key.instance && !p.painted.is_empty()),
                 None => retained.state.presented && retained.section == section_id && retained.native_host == host && selected,
             };
             let presented = current && requested_open && available == Availability::Available && geometry_presented;
@@ -673,10 +1179,63 @@ impl PanelRuntime {
     }
 
     pub fn mount(&mut self, resolved: &ResolvedLayout, host: &mut dyn PanelHost, services: &mut ContentServices<'_>) -> PanelResult<()> {
+        self.mount_frame(resolved, host, services, &PresentationCohort::All, true)
+    }
+
+    /// Mount exactly once with every currently presented in-app section,
+    /// including an empty set when hidden. Native peers are not deactivated.
+    pub fn mount_in_app(&mut self, resolved: &ResolvedLayout, host: &mut dyn PanelHost, services: &mut ContentServices<'_>) -> PanelResult<()> {
+        self.mount_frame(resolved, host, services, &PresentationCohort::InApp, true)
+    }
+
+    /// Includes every currently presented section in one native host, or an
+    /// empty set to unmount only that host. Root and sibling windows survive.
+    pub fn mount_native(
+        &mut self,
+        native_host: &HostId,
+        resolved: &ResolvedLayout,
+        host: &mut dyn PanelHost,
+        services: &mut ContentServices<'_>,
+    ) -> PanelResult<()> {
+        valid_id(&native_host.0)?;
+        if !resolved.rails.is_empty() {
+            return Err(error(Rule::Placement, "native cohort cannot mount root rails"));
+        }
+        self.mount_frame(resolved, host, services, &PresentationCohort::Native(native_host.clone()), true)
+    }
+
+    pub(crate) fn repaint_in_app(
+        &mut self,
+        resolved: &ResolvedLayout,
+        host: &mut dyn PanelHost,
+        services: &mut ContentServices<'_>,
+    ) -> PanelResult<()> {
+        self.mount_frame(resolved, host, services, &PresentationCohort::InApp, false)
+    }
+
+    /// After a kit Area sizing pass, reconcile actual visibility without
+    /// invoking any content renderer twice or deactivating native peers.
+    pub(crate) fn reconcile_in_app_presentation(&mut self, resolved: &ResolvedLayout, local: &mut dyn PanelLocalServices) {
+        self.sync_presented_states(Some(resolved), &PresentationCohort::InApp, local);
+    }
+
+    fn mount_frame(
+        &mut self,
+        resolved: &ResolvedLayout,
+        host: &mut dyn PanelHost,
+        services: &mut ContentServices<'_>,
+        cohort: &PresentationCohort,
+        reconcile: bool,
+    ) -> PanelResult<()> {
         self.require_live()?;
         resolved.validate()?;
         for record in &resolved.unpresented {
-            self.layout.layout().section(&record.section)?;
+            let section = self.layout.layout().section(&record.section)?;
+            if let PresentationCohort::Native(expected) = cohort
+                && !matches!(&section.location, SectionLocation::Window { host, .. } if host == expected)
+            {
+                return Err(error(Rule::Placement, "unpresented section belongs to another host"));
+            }
         }
         let mut ids = BTreeSet::new();
         for geometry in &resolved.panels {
@@ -685,18 +1244,25 @@ impl PanelRuntime {
                 return Err(error(Rule::ExactlyOnce, "panel mounted twice"));
             }
             let section = self.layout.layout().containing(&geometry.instance)?;
+            let native_host = match &section.location {
+                SectionLocation::Window { host, .. } => Some(host),
+                _ => None,
+            };
+            if !cohort.includes(native_host, native_host) {
+                return Err(error(Rule::Placement, "content belongs to another presentation cohort"));
+            }
             if section.id != geometry.section
                 || section.location.zone() != geometry.zone
                 || !self.layout.layout().instance(&geometry.instance)?.requested_open
             {
                 return Err(error(Rule::Placement, "resolved host differs from live layout"));
             }
-            let peek = self.layout.interaction().peek.as_ref() == Some(&geometry.instance);
-            if section.active != geometry.instance && !peek || section.collapsed && !peek {
+            let availability: AvailabilityMap = section.tabs.iter().map(|id| (id.clone(), self.layout.availability(id))).collect();
+            if presented_tab(section, &availability) != Some(&geometry.instance) || section.collapsed && geometry.body.is_some() {
                 return Err(error(Rule::Placement, "cannot mount inactive or collapsed tab content"));
             }
             let (min, max) = tab_bounds(self.layout.layout(), self.layout.registry(), section)?;
-            if !geometry.outer.size.within(min, max) {
+            if !section.collapsed && !geometry.outer.size.within(min, max) {
                 return Err(error(Rule::Bounds, "host violates tab outer bounds"));
             }
             if self.layout.availability(&geometry.instance) != Availability::Available {
@@ -705,13 +1271,18 @@ impl PanelRuntime {
             let key = self.key(self.layout.layout().instance(&geometry.instance)?)?;
             self.controllers.get(&key).ok_or_else(|| error(Rule::Availability, "content controller unavailable"))?.availability.require()?;
         }
-        self.sync_states(Some(resolved), services.local);
+        if reconcile {
+            self.sync_presented_states(Some(resolved), cohort, services.local);
+        }
         let interaction = self.layout.interaction().clone();
         for geometry in &resolved.panels {
+            if geometry.painted.is_empty() {
+                continue;
+            }
             let instance = self.layout.layout().instance(&geometry.instance)?;
             let key = self.key(instance)?;
             let retained = self.controllers.get_mut(&key).ok_or_else(|| error(Rule::MissingTarget, "call update before mount"))?;
-            let (flow, size_class) = responsive(geometry.zone, geometry.body.size, retained.flow)?;
+            let (flow, size_class) = responsive(geometry.zone, geometry.outer.size, retained.flow)?;
             let context = PanelContext {
                 instance: geometry.instance.clone(),
                 owner: key.owner.clone(),
@@ -724,6 +1295,7 @@ impl PanelRuntime {
                 flow,
                 size_class,
                 focused: interaction.focused.as_ref() == Some(&geometry.instance),
+                preview_geometry: false,
                 direction: self.environment.direction,
                 motion: self.environment.motion,
             };
@@ -792,6 +1364,39 @@ impl PanelRuntime {
             local.release(&retained.scope, &key.instance);
             retained.controller.lifecycle(&LifecycleEvent::DestroyOwner);
         }
+        self.controllers.clear();
+        self.destroyed = true;
+        Ok(())
+    }
+
+    /// Release the exact native resources belonging to this runtime only after
+    /// every controller and native adapter has accepted teardown.
+    pub fn shutdown_with_native(&mut self, native: &mut dyn NativeHostAdapter, local: &mut dyn PanelLocalServices) -> PanelResult<()> {
+        if self.destroyed {
+            return Ok(());
+        }
+        let effects: Vec<_> = if native.capabilities().native_windows {
+            self.layout
+                .layout()
+                .sections
+                .iter()
+                .filter_map(|section| match &section.location {
+                    SectionLocation::Window { host, .. } => Some(HostEffect::ReleaseNative { host: host.clone() }),
+                    _ => None,
+                })
+                .collect()
+        } else {
+            Vec::new()
+        };
+        for retained in self.controllers.values() {
+            retained.controller.prepare_lifecycle(&LifecycleEvent::DestroyOwner)?;
+        }
+        native.prepare(&effects)?;
+        for (key, retained) in &mut self.controllers {
+            local.release(&retained.scope, &key.instance);
+            retained.controller.lifecycle(&LifecycleEvent::DestroyOwner);
+        }
+        native.commit(&effects);
         self.controllers.clear();
         self.destroyed = true;
         Ok(())

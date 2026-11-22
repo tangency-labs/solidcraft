@@ -1,0 +1,5031 @@
+{
+  "cases": [
+    {
+      "name": "review_face_kind1_eps0.001_orientation0_flags1",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp: SmODEAreaIFEO::Evaluate and ComputePreciseProperties; PR119 review",
+      "inputs": {
+        "geometry": {
+          "op": "face",
+          "kind": 1,
+          "parameters": [
+            1,
+            2,
+            3,
+            1,
+            1,
+            -1,
+            -1,
+            1,
+            1,
+            2.37,
+            3.21,
+            3.41,
+            0.001,
+            0,
+            0,
+            1
+          ],
+          "query": 0
+        }
+      }
+    },
+    {
+      "name": "review_face_kind1_eps0.001_orientation0_flags63",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp: SmODEAreaIFEO::Evaluate and ComputePreciseProperties; PR119 review",
+      "inputs": {
+        "geometry": {
+          "op": "face",
+          "kind": 1,
+          "parameters": [
+            1,
+            2,
+            3,
+            1,
+            1,
+            -1,
+            -1,
+            1,
+            1,
+            2.37,
+            3.21,
+            3.41,
+            0.001,
+            0,
+            0,
+            63
+          ],
+          "query": 0
+        }
+      }
+    },
+    {
+      "name": "review_face_kind1_eps0.001_orientation1_flags1",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp: SmODEAreaIFEO::Evaluate and ComputePreciseProperties; PR119 review",
+      "inputs": {
+        "geometry": {
+          "op": "face",
+          "kind": 1,
+          "parameters": [
+            1,
+            2,
+            3,
+            1,
+            1,
+            -1,
+            -1,
+            1,
+            1,
+            2.37,
+            3.21,
+            3.41,
+            0.001,
+            0,
+            1,
+            1
+          ],
+          "query": 0
+        }
+      }
+    },
+    {
+      "name": "review_face_kind1_eps0.001_orientation1_flags63",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp: SmODEAreaIFEO::Evaluate and ComputePreciseProperties; PR119 review",
+      "inputs": {
+        "geometry": {
+          "op": "face",
+          "kind": 1,
+          "parameters": [
+            1,
+            2,
+            3,
+            1,
+            1,
+            -1,
+            -1,
+            1,
+            1,
+            2.37,
+            3.21,
+            3.41,
+            0.001,
+            0,
+            1,
+            63
+          ],
+          "query": 0
+        }
+      }
+    },
+    {
+      "name": "review_face_kind1_eps0.0001_orientation0_flags1",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp: SmODEAreaIFEO::Evaluate and ComputePreciseProperties; PR119 review",
+      "inputs": {
+        "geometry": {
+          "op": "face",
+          "kind": 1,
+          "parameters": [
+            1,
+            2,
+            3,
+            1,
+            1,
+            -1,
+            -1,
+            1,
+            1,
+            2.37,
+            3.21,
+            3.41,
+            0.0001,
+            0,
+            0,
+            1
+          ],
+          "query": 0
+        }
+      }
+    },
+    {
+      "name": "review_face_kind1_eps0.0001_orientation0_flags63",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp: SmODEAreaIFEO::Evaluate and ComputePreciseProperties; PR119 review",
+      "inputs": {
+        "geometry": {
+          "op": "face",
+          "kind": 1,
+          "parameters": [
+            1,
+            2,
+            3,
+            1,
+            1,
+            -1,
+            -1,
+            1,
+            1,
+            2.37,
+            3.21,
+            3.41,
+            0.0001,
+            0,
+            0,
+            63
+          ],
+          "query": 0
+        }
+      }
+    },
+    {
+      "name": "review_face_kind1_eps0.0001_orientation1_flags1",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp: SmODEAreaIFEO::Evaluate and ComputePreciseProperties; PR119 review",
+      "inputs": {
+        "geometry": {
+          "op": "face",
+          "kind": 1,
+          "parameters": [
+            1,
+            2,
+            3,
+            1,
+            1,
+            -1,
+            -1,
+            1,
+            1,
+            2.37,
+            3.21,
+            3.41,
+            0.0001,
+            0,
+            1,
+            1
+          ],
+          "query": 0
+        }
+      }
+    },
+    {
+      "name": "review_face_kind1_eps0.0001_orientation1_flags63",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp: SmODEAreaIFEO::Evaluate and ComputePreciseProperties; PR119 review",
+      "inputs": {
+        "geometry": {
+          "op": "face",
+          "kind": 1,
+          "parameters": [
+            1,
+            2,
+            3,
+            1,
+            1,
+            -1,
+            -1,
+            1,
+            1,
+            2.37,
+            3.21,
+            3.41,
+            0.0001,
+            0,
+            1,
+            63
+          ],
+          "query": 0
+        }
+      }
+    },
+    {
+      "name": "review_face_kind1_eps1e-06_orientation0_flags1",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp: SmODEAreaIFEO::Evaluate and ComputePreciseProperties; PR119 review",
+      "inputs": {
+        "geometry": {
+          "op": "face",
+          "kind": 1,
+          "parameters": [
+            1,
+            2,
+            3,
+            1,
+            1,
+            -1,
+            -1,
+            1,
+            1,
+            2.37,
+            3.21,
+            3.41,
+            1e-06,
+            0,
+            0,
+            1
+          ],
+          "query": 0
+        }
+      }
+    },
+    {
+      "name": "review_face_kind1_eps1e-06_orientation0_flags63",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp: SmODEAreaIFEO::Evaluate and ComputePreciseProperties; PR119 review",
+      "inputs": {
+        "geometry": {
+          "op": "face",
+          "kind": 1,
+          "parameters": [
+            1,
+            2,
+            3,
+            1,
+            1,
+            -1,
+            -1,
+            1,
+            1,
+            2.37,
+            3.21,
+            3.41,
+            1e-06,
+            0,
+            0,
+            63
+          ],
+          "query": 0
+        }
+      }
+    },
+    {
+      "name": "review_face_kind1_eps1e-06_orientation1_flags1",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp: SmODEAreaIFEO::Evaluate and ComputePreciseProperties; PR119 review",
+      "inputs": {
+        "geometry": {
+          "op": "face",
+          "kind": 1,
+          "parameters": [
+            1,
+            2,
+            3,
+            1,
+            1,
+            -1,
+            -1,
+            1,
+            1,
+            2.37,
+            3.21,
+            3.41,
+            1e-06,
+            0,
+            1,
+            1
+          ],
+          "query": 0
+        }
+      }
+    },
+    {
+      "name": "review_face_kind1_eps1e-06_orientation1_flags63",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp: SmODEAreaIFEO::Evaluate and ComputePreciseProperties; PR119 review",
+      "inputs": {
+        "geometry": {
+          "op": "face",
+          "kind": 1,
+          "parameters": [
+            1,
+            2,
+            3,
+            1,
+            1,
+            -1,
+            -1,
+            1,
+            1,
+            2.37,
+            3.21,
+            3.41,
+            1e-06,
+            0,
+            1,
+            63
+          ],
+          "query": 0
+        }
+      }
+    },
+    {
+      "name": "review_face_kind1_eps1e-08_orientation0_flags1",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp: SmODEAreaIFEO::Evaluate and ComputePreciseProperties; PR119 review",
+      "inputs": {
+        "geometry": {
+          "op": "face",
+          "kind": 1,
+          "parameters": [
+            1,
+            2,
+            3,
+            1,
+            1,
+            -1,
+            -1,
+            1,
+            1,
+            2.37,
+            3.21,
+            3.41,
+            1e-08,
+            0,
+            0,
+            1
+          ],
+          "query": 0
+        }
+      }
+    },
+    {
+      "name": "review_face_kind1_eps1e-08_orientation0_flags63",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp: SmODEAreaIFEO::Evaluate and ComputePreciseProperties; PR119 review",
+      "inputs": {
+        "geometry": {
+          "op": "face",
+          "kind": 1,
+          "parameters": [
+            1,
+            2,
+            3,
+            1,
+            1,
+            -1,
+            -1,
+            1,
+            1,
+            2.37,
+            3.21,
+            3.41,
+            1e-08,
+            0,
+            0,
+            63
+          ],
+          "query": 0
+        }
+      }
+    },
+    {
+      "name": "review_face_kind1_eps1e-08_orientation1_flags1",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp: SmODEAreaIFEO::Evaluate and ComputePreciseProperties; PR119 review",
+      "inputs": {
+        "geometry": {
+          "op": "face",
+          "kind": 1,
+          "parameters": [
+            1,
+            2,
+            3,
+            1,
+            1,
+            -1,
+            -1,
+            1,
+            1,
+            2.37,
+            3.21,
+            3.41,
+            1e-08,
+            0,
+            1,
+            1
+          ],
+          "query": 0
+        }
+      }
+    },
+    {
+      "name": "review_face_kind1_eps1e-08_orientation1_flags63",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp: SmODEAreaIFEO::Evaluate and ComputePreciseProperties; PR119 review",
+      "inputs": {
+        "geometry": {
+          "op": "face",
+          "kind": 1,
+          "parameters": [
+            1,
+            2,
+            3,
+            1,
+            1,
+            -1,
+            -1,
+            1,
+            1,
+            2.37,
+            3.21,
+            3.41,
+            1e-08,
+            0,
+            1,
+            63
+          ],
+          "query": 0
+        }
+      }
+    },
+    {
+      "name": "review_face_kind2_eps0.001_orientation0_flags1",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp: SmODEAreaIFEO::Evaluate and ComputePreciseProperties; PR119 review",
+      "inputs": {
+        "geometry": {
+          "op": "face",
+          "kind": 2,
+          "parameters": [
+            1,
+            2,
+            3,
+            1,
+            1,
+            -1,
+            -1,
+            1,
+            1,
+            2.37,
+            3.21,
+            3.41,
+            0.001,
+            0,
+            0,
+            1
+          ],
+          "query": 0
+        }
+      }
+    },
+    {
+      "name": "review_face_kind2_eps0.001_orientation0_flags63",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp: SmODEAreaIFEO::Evaluate and ComputePreciseProperties; PR119 review",
+      "inputs": {
+        "geometry": {
+          "op": "face",
+          "kind": 2,
+          "parameters": [
+            1,
+            2,
+            3,
+            1,
+            1,
+            -1,
+            -1,
+            1,
+            1,
+            2.37,
+            3.21,
+            3.41,
+            0.001,
+            0,
+            0,
+            63
+          ],
+          "query": 0
+        }
+      }
+    },
+    {
+      "name": "review_face_kind2_eps0.001_orientation1_flags1",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp: SmODEAreaIFEO::Evaluate and ComputePreciseProperties; PR119 review",
+      "inputs": {
+        "geometry": {
+          "op": "face",
+          "kind": 2,
+          "parameters": [
+            1,
+            2,
+            3,
+            1,
+            1,
+            -1,
+            -1,
+            1,
+            1,
+            2.37,
+            3.21,
+            3.41,
+            0.001,
+            0,
+            1,
+            1
+          ],
+          "query": 0
+        }
+      }
+    },
+    {
+      "name": "review_face_kind2_eps0.001_orientation1_flags63",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp: SmODEAreaIFEO::Evaluate and ComputePreciseProperties; PR119 review",
+      "inputs": {
+        "geometry": {
+          "op": "face",
+          "kind": 2,
+          "parameters": [
+            1,
+            2,
+            3,
+            1,
+            1,
+            -1,
+            -1,
+            1,
+            1,
+            2.37,
+            3.21,
+            3.41,
+            0.001,
+            0,
+            1,
+            63
+          ],
+          "query": 0
+        }
+      }
+    },
+    {
+      "name": "review_face_kind2_eps0.0001_orientation0_flags1",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp: SmODEAreaIFEO::Evaluate and ComputePreciseProperties; PR119 review",
+      "inputs": {
+        "geometry": {
+          "op": "face",
+          "kind": 2,
+          "parameters": [
+            1,
+            2,
+            3,
+            1,
+            1,
+            -1,
+            -1,
+            1,
+            1,
+            2.37,
+            3.21,
+            3.41,
+            0.0001,
+            0,
+            0,
+            1
+          ],
+          "query": 0
+        }
+      }
+    },
+    {
+      "name": "review_face_kind2_eps0.0001_orientation0_flags63",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp: SmODEAreaIFEO::Evaluate and ComputePreciseProperties; PR119 review",
+      "inputs": {
+        "geometry": {
+          "op": "face",
+          "kind": 2,
+          "parameters": [
+            1,
+            2,
+            3,
+            1,
+            1,
+            -1,
+            -1,
+            1,
+            1,
+            2.37,
+            3.21,
+            3.41,
+            0.0001,
+            0,
+            0,
+            63
+          ],
+          "query": 0
+        }
+      }
+    },
+    {
+      "name": "review_face_kind2_eps0.0001_orientation1_flags1",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp: SmODEAreaIFEO::Evaluate and ComputePreciseProperties; PR119 review",
+      "inputs": {
+        "geometry": {
+          "op": "face",
+          "kind": 2,
+          "parameters": [
+            1,
+            2,
+            3,
+            1,
+            1,
+            -1,
+            -1,
+            1,
+            1,
+            2.37,
+            3.21,
+            3.41,
+            0.0001,
+            0,
+            1,
+            1
+          ],
+          "query": 0
+        }
+      }
+    },
+    {
+      "name": "review_face_kind2_eps0.0001_orientation1_flags63",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp: SmODEAreaIFEO::Evaluate and ComputePreciseProperties; PR119 review",
+      "inputs": {
+        "geometry": {
+          "op": "face",
+          "kind": 2,
+          "parameters": [
+            1,
+            2,
+            3,
+            1,
+            1,
+            -1,
+            -1,
+            1,
+            1,
+            2.37,
+            3.21,
+            3.41,
+            0.0001,
+            0,
+            1,
+            63
+          ],
+          "query": 0
+        }
+      }
+    },
+    {
+      "name": "review_face_kind2_eps1e-06_orientation0_flags1",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp: SmODEAreaIFEO::Evaluate and ComputePreciseProperties; PR119 review",
+      "inputs": {
+        "geometry": {
+          "op": "face",
+          "kind": 2,
+          "parameters": [
+            1,
+            2,
+            3,
+            1,
+            1,
+            -1,
+            -1,
+            1,
+            1,
+            2.37,
+            3.21,
+            3.41,
+            1e-06,
+            0,
+            0,
+            1
+          ],
+          "query": 0
+        }
+      }
+    },
+    {
+      "name": "review_face_kind2_eps1e-06_orientation0_flags63",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp: SmODEAreaIFEO::Evaluate and ComputePreciseProperties; PR119 review",
+      "inputs": {
+        "geometry": {
+          "op": "face",
+          "kind": 2,
+          "parameters": [
+            1,
+            2,
+            3,
+            1,
+            1,
+            -1,
+            -1,
+            1,
+            1,
+            2.37,
+            3.21,
+            3.41,
+            1e-06,
+            0,
+            0,
+            63
+          ],
+          "query": 0
+        }
+      }
+    },
+    {
+      "name": "review_face_kind2_eps1e-06_orientation1_flags1",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp: SmODEAreaIFEO::Evaluate and ComputePreciseProperties; PR119 review",
+      "inputs": {
+        "geometry": {
+          "op": "face",
+          "kind": 2,
+          "parameters": [
+            1,
+            2,
+            3,
+            1,
+            1,
+            -1,
+            -1,
+            1,
+            1,
+            2.37,
+            3.21,
+            3.41,
+            1e-06,
+            0,
+            1,
+            1
+          ],
+          "query": 0
+        }
+      }
+    },
+    {
+      "name": "review_face_kind2_eps1e-06_orientation1_flags63",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp: SmODEAreaIFEO::Evaluate and ComputePreciseProperties; PR119 review",
+      "inputs": {
+        "geometry": {
+          "op": "face",
+          "kind": 2,
+          "parameters": [
+            1,
+            2,
+            3,
+            1,
+            1,
+            -1,
+            -1,
+            1,
+            1,
+            2.37,
+            3.21,
+            3.41,
+            1e-06,
+            0,
+            1,
+            63
+          ],
+          "query": 0
+        }
+      }
+    },
+    {
+      "name": "review_face_kind2_eps1e-08_orientation0_flags1",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp: SmODEAreaIFEO::Evaluate and ComputePreciseProperties; PR119 review",
+      "inputs": {
+        "geometry": {
+          "op": "face",
+          "kind": 2,
+          "parameters": [
+            1,
+            2,
+            3,
+            1,
+            1,
+            -1,
+            -1,
+            1,
+            1,
+            2.37,
+            3.21,
+            3.41,
+            1e-08,
+            0,
+            0,
+            1
+          ],
+          "query": 0
+        }
+      }
+    },
+    {
+      "name": "review_face_kind2_eps1e-08_orientation0_flags63",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp: SmODEAreaIFEO::Evaluate and ComputePreciseProperties; PR119 review",
+      "inputs": {
+        "geometry": {
+          "op": "face",
+          "kind": 2,
+          "parameters": [
+            1,
+            2,
+            3,
+            1,
+            1,
+            -1,
+            -1,
+            1,
+            1,
+            2.37,
+            3.21,
+            3.41,
+            1e-08,
+            0,
+            0,
+            63
+          ],
+          "query": 0
+        }
+      }
+    },
+    {
+      "name": "review_face_kind2_eps1e-08_orientation1_flags1",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp: SmODEAreaIFEO::Evaluate and ComputePreciseProperties; PR119 review",
+      "inputs": {
+        "geometry": {
+          "op": "face",
+          "kind": 2,
+          "parameters": [
+            1,
+            2,
+            3,
+            1,
+            1,
+            -1,
+            -1,
+            1,
+            1,
+            2.37,
+            3.21,
+            3.41,
+            1e-08,
+            0,
+            1,
+            1
+          ],
+          "query": 0
+        }
+      }
+    },
+    {
+      "name": "review_face_kind2_eps1e-08_orientation1_flags63",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp: SmODEAreaIFEO::Evaluate and ComputePreciseProperties; PR119 review",
+      "inputs": {
+        "geometry": {
+          "op": "face",
+          "kind": 2,
+          "parameters": [
+            1,
+            2,
+            3,
+            1,
+            1,
+            -1,
+            -1,
+            1,
+            1,
+            2.37,
+            3.21,
+            3.41,
+            1e-08,
+            0,
+            1,
+            63
+          ],
+          "query": 0
+        }
+      }
+    },
+    {
+      "name": "review_face_kind3_eps0.001_orientation0_flags1",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp: SmODEAreaIFEO::Evaluate and ComputePreciseProperties; PR119 review",
+      "inputs": {
+        "geometry": {
+          "op": "face",
+          "kind": 3,
+          "parameters": [
+            1,
+            2,
+            3,
+            1,
+            1,
+            0,
+            0,
+            1,
+            1,
+            2.37,
+            3.21,
+            3.41,
+            0.001,
+            0,
+            0,
+            1
+          ],
+          "query": 0
+        }
+      }
+    },
+    {
+      "name": "review_face_kind3_eps0.001_orientation0_flags63",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp: SmODEAreaIFEO::Evaluate and ComputePreciseProperties; PR119 review",
+      "inputs": {
+        "geometry": {
+          "op": "face",
+          "kind": 3,
+          "parameters": [
+            1,
+            2,
+            3,
+            1,
+            1,
+            0,
+            0,
+            1,
+            1,
+            2.37,
+            3.21,
+            3.41,
+            0.001,
+            0,
+            0,
+            63
+          ],
+          "query": 0
+        }
+      }
+    },
+    {
+      "name": "review_face_kind3_eps0.001_orientation1_flags1",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp: SmODEAreaIFEO::Evaluate and ComputePreciseProperties; PR119 review",
+      "inputs": {
+        "geometry": {
+          "op": "face",
+          "kind": 3,
+          "parameters": [
+            1,
+            2,
+            3,
+            1,
+            1,
+            0,
+            0,
+            1,
+            1,
+            2.37,
+            3.21,
+            3.41,
+            0.001,
+            0,
+            1,
+            1
+          ],
+          "query": 0
+        }
+      }
+    },
+    {
+      "name": "review_face_kind3_eps0.001_orientation1_flags63",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp: SmODEAreaIFEO::Evaluate and ComputePreciseProperties; PR119 review",
+      "inputs": {
+        "geometry": {
+          "op": "face",
+          "kind": 3,
+          "parameters": [
+            1,
+            2,
+            3,
+            1,
+            1,
+            0,
+            0,
+            1,
+            1,
+            2.37,
+            3.21,
+            3.41,
+            0.001,
+            0,
+            1,
+            63
+          ],
+          "query": 0
+        }
+      }
+    },
+    {
+      "name": "review_face_kind3_eps0.0001_orientation0_flags1",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp: SmODEAreaIFEO::Evaluate and ComputePreciseProperties; PR119 review",
+      "inputs": {
+        "geometry": {
+          "op": "face",
+          "kind": 3,
+          "parameters": [
+            1,
+            2,
+            3,
+            1,
+            1,
+            0,
+            0,
+            1,
+            1,
+            2.37,
+            3.21,
+            3.41,
+            0.0001,
+            0,
+            0,
+            1
+          ],
+          "query": 0
+        }
+      }
+    },
+    {
+      "name": "review_face_kind3_eps0.0001_orientation0_flags63",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp: SmODEAreaIFEO::Evaluate and ComputePreciseProperties; PR119 review",
+      "inputs": {
+        "geometry": {
+          "op": "face",
+          "kind": 3,
+          "parameters": [
+            1,
+            2,
+            3,
+            1,
+            1,
+            0,
+            0,
+            1,
+            1,
+            2.37,
+            3.21,
+            3.41,
+            0.0001,
+            0,
+            0,
+            63
+          ],
+          "query": 0
+        }
+      }
+    },
+    {
+      "name": "review_face_kind3_eps0.0001_orientation1_flags1",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp: SmODEAreaIFEO::Evaluate and ComputePreciseProperties; PR119 review",
+      "inputs": {
+        "geometry": {
+          "op": "face",
+          "kind": 3,
+          "parameters": [
+            1,
+            2,
+            3,
+            1,
+            1,
+            0,
+            0,
+            1,
+            1,
+            2.37,
+            3.21,
+            3.41,
+            0.0001,
+            0,
+            1,
+            1
+          ],
+          "query": 0
+        }
+      }
+    },
+    {
+      "name": "review_face_kind3_eps0.0001_orientation1_flags63",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp: SmODEAreaIFEO::Evaluate and ComputePreciseProperties; PR119 review",
+      "inputs": {
+        "geometry": {
+          "op": "face",
+          "kind": 3,
+          "parameters": [
+            1,
+            2,
+            3,
+            1,
+            1,
+            0,
+            0,
+            1,
+            1,
+            2.37,
+            3.21,
+            3.41,
+            0.0001,
+            0,
+            1,
+            63
+          ],
+          "query": 0
+        }
+      }
+    },
+    {
+      "name": "review_face_kind3_eps1e-06_orientation0_flags1",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp: SmODEAreaIFEO::Evaluate and ComputePreciseProperties; PR119 review",
+      "inputs": {
+        "geometry": {
+          "op": "face",
+          "kind": 3,
+          "parameters": [
+            1,
+            2,
+            3,
+            1,
+            1,
+            0,
+            0,
+            1,
+            1,
+            2.37,
+            3.21,
+            3.41,
+            1e-06,
+            0,
+            0,
+            1
+          ],
+          "query": 0
+        }
+      }
+    },
+    {
+      "name": "review_face_kind3_eps1e-06_orientation0_flags63",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp: SmODEAreaIFEO::Evaluate and ComputePreciseProperties; PR119 review",
+      "inputs": {
+        "geometry": {
+          "op": "face",
+          "kind": 3,
+          "parameters": [
+            1,
+            2,
+            3,
+            1,
+            1,
+            0,
+            0,
+            1,
+            1,
+            2.37,
+            3.21,
+            3.41,
+            1e-06,
+            0,
+            0,
+            63
+          ],
+          "query": 0
+        }
+      }
+    },
+    {
+      "name": "review_face_kind3_eps1e-06_orientation1_flags1",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp: SmODEAreaIFEO::Evaluate and ComputePreciseProperties; PR119 review",
+      "inputs": {
+        "geometry": {
+          "op": "face",
+          "kind": 3,
+          "parameters": [
+            1,
+            2,
+            3,
+            1,
+            1,
+            0,
+            0,
+            1,
+            1,
+            2.37,
+            3.21,
+            3.41,
+            1e-06,
+            0,
+            1,
+            1
+          ],
+          "query": 0
+        }
+      }
+    },
+    {
+      "name": "review_face_kind3_eps1e-06_orientation1_flags63",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp: SmODEAreaIFEO::Evaluate and ComputePreciseProperties; PR119 review",
+      "inputs": {
+        "geometry": {
+          "op": "face",
+          "kind": 3,
+          "parameters": [
+            1,
+            2,
+            3,
+            1,
+            1,
+            0,
+            0,
+            1,
+            1,
+            2.37,
+            3.21,
+            3.41,
+            1e-06,
+            0,
+            1,
+            63
+          ],
+          "query": 0
+        }
+      }
+    },
+    {
+      "name": "review_face_kind3_eps1e-08_orientation0_flags1",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp: SmODEAreaIFEO::Evaluate and ComputePreciseProperties; PR119 review",
+      "inputs": {
+        "geometry": {
+          "op": "face",
+          "kind": 3,
+          "parameters": [
+            1,
+            2,
+            3,
+            1,
+            1,
+            0,
+            0,
+            1,
+            1,
+            2.37,
+            3.21,
+            3.41,
+            1e-08,
+            0,
+            0,
+            1
+          ],
+          "query": 0
+        }
+      }
+    },
+    {
+      "name": "review_face_kind3_eps1e-08_orientation0_flags63",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp: SmODEAreaIFEO::Evaluate and ComputePreciseProperties; PR119 review",
+      "inputs": {
+        "geometry": {
+          "op": "face",
+          "kind": 3,
+          "parameters": [
+            1,
+            2,
+            3,
+            1,
+            1,
+            0,
+            0,
+            1,
+            1,
+            2.37,
+            3.21,
+            3.41,
+            1e-08,
+            0,
+            0,
+            63
+          ],
+          "query": 0
+        }
+      }
+    },
+    {
+      "name": "review_face_kind3_eps1e-08_orientation1_flags1",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp: SmODEAreaIFEO::Evaluate and ComputePreciseProperties; PR119 review",
+      "inputs": {
+        "geometry": {
+          "op": "face",
+          "kind": 3,
+          "parameters": [
+            1,
+            2,
+            3,
+            1,
+            1,
+            0,
+            0,
+            1,
+            1,
+            2.37,
+            3.21,
+            3.41,
+            1e-08,
+            0,
+            1,
+            1
+          ],
+          "query": 0
+        }
+      }
+    },
+    {
+      "name": "review_face_kind3_eps1e-08_orientation1_flags63",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp: SmODEAreaIFEO::Evaluate and ComputePreciseProperties; PR119 review",
+      "inputs": {
+        "geometry": {
+          "op": "face",
+          "kind": 3,
+          "parameters": [
+            1,
+            2,
+            3,
+            1,
+            1,
+            0,
+            0,
+            1,
+            1,
+            2.37,
+            3.21,
+            3.41,
+            1e-08,
+            0,
+            1,
+            63
+          ],
+          "query": 0
+        }
+      }
+    },
+    {
+      "name": "review_surface_area_kind3_eps0.001",
+      "upstream_ref": "source/SMLib/src/SmSurface.cpp: SmAreaIFEO::Evaluate and Area",
+      "inputs": {
+        "geometry": {
+          "op": "face",
+          "kind": 3,
+          "parameters": [
+            1,
+            2,
+            3,
+            1.3,
+            0.7,
+            0.1,
+            0.2,
+            0.9,
+            0.8,
+            2.37,
+            3.21,
+            3.41,
+            0.001,
+            0,
+            0,
+            63
+          ],
+          "query": 7
+        }
+      }
+    },
+    {
+      "name": "review_surface_area_kind3_eps1e-06",
+      "upstream_ref": "source/SMLib/src/SmSurface.cpp: SmAreaIFEO::Evaluate and Area",
+      "inputs": {
+        "geometry": {
+          "op": "face",
+          "kind": 3,
+          "parameters": [
+            1,
+            2,
+            3,
+            1.3,
+            0.7,
+            0.1,
+            0.2,
+            0.9,
+            0.8,
+            2.37,
+            3.21,
+            3.41,
+            1e-06,
+            0,
+            0,
+            63
+          ],
+          "query": 7
+        }
+      }
+    },
+    {
+      "name": "review_surface_area_kind3_eps1e-08",
+      "upstream_ref": "source/SMLib/src/SmSurface.cpp: SmAreaIFEO::Evaluate and Area",
+      "inputs": {
+        "geometry": {
+          "op": "face",
+          "kind": 3,
+          "parameters": [
+            1,
+            2,
+            3,
+            1.3,
+            0.7,
+            0.1,
+            0.2,
+            0.9,
+            0.8,
+            2.37,
+            3.21,
+            3.41,
+            1e-08,
+            0,
+            0,
+            63
+          ],
+          "query": 7
+        }
+      }
+    },
+    {
+      "name": "review_face_kind4_eps0.001_orientation0_flags1",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp: SmODEAreaIFEO::Evaluate and ComputePreciseProperties; PR119 review",
+      "inputs": {
+        "geometry": {
+          "op": "face",
+          "kind": 4,
+          "parameters": [
+            1,
+            2,
+            3,
+            1,
+            1,
+            -1,
+            -1,
+            1,
+            1,
+            2.37,
+            3.21,
+            3.41,
+            0.001,
+            0,
+            0,
+            1
+          ],
+          "query": 0
+        }
+      }
+    },
+    {
+      "name": "review_face_kind4_eps0.001_orientation0_flags63",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp: SmODEAreaIFEO::Evaluate and ComputePreciseProperties; PR119 review",
+      "inputs": {
+        "geometry": {
+          "op": "face",
+          "kind": 4,
+          "parameters": [
+            1,
+            2,
+            3,
+            1,
+            1,
+            -1,
+            -1,
+            1,
+            1,
+            2.37,
+            3.21,
+            3.41,
+            0.001,
+            0,
+            0,
+            63
+          ],
+          "query": 0
+        }
+      }
+    },
+    {
+      "name": "review_face_kind4_eps0.001_orientation1_flags1",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp: SmODEAreaIFEO::Evaluate and ComputePreciseProperties; PR119 review",
+      "inputs": {
+        "geometry": {
+          "op": "face",
+          "kind": 4,
+          "parameters": [
+            1,
+            2,
+            3,
+            1,
+            1,
+            -1,
+            -1,
+            1,
+            1,
+            2.37,
+            3.21,
+            3.41,
+            0.001,
+            0,
+            1,
+            1
+          ],
+          "query": 0
+        }
+      }
+    },
+    {
+      "name": "review_face_kind4_eps0.001_orientation1_flags63",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp: SmODEAreaIFEO::Evaluate and ComputePreciseProperties; PR119 review",
+      "inputs": {
+        "geometry": {
+          "op": "face",
+          "kind": 4,
+          "parameters": [
+            1,
+            2,
+            3,
+            1,
+            1,
+            -1,
+            -1,
+            1,
+            1,
+            2.37,
+            3.21,
+            3.41,
+            0.001,
+            0,
+            1,
+            63
+          ],
+          "query": 0
+        }
+      }
+    },
+    {
+      "name": "review_face_kind4_eps0.0001_orientation0_flags1",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp: SmODEAreaIFEO::Evaluate and ComputePreciseProperties; PR119 review",
+      "inputs": {
+        "geometry": {
+          "op": "face",
+          "kind": 4,
+          "parameters": [
+            1,
+            2,
+            3,
+            1,
+            1,
+            -1,
+            -1,
+            1,
+            1,
+            2.37,
+            3.21,
+            3.41,
+            0.0001,
+            0,
+            0,
+            1
+          ],
+          "query": 0
+        }
+      }
+    },
+    {
+      "name": "review_face_kind4_eps0.0001_orientation0_flags63",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp: SmODEAreaIFEO::Evaluate and ComputePreciseProperties; PR119 review",
+      "inputs": {
+        "geometry": {
+          "op": "face",
+          "kind": 4,
+          "parameters": [
+            1,
+            2,
+            3,
+            1,
+            1,
+            -1,
+            -1,
+            1,
+            1,
+            2.37,
+            3.21,
+            3.41,
+            0.0001,
+            0,
+            0,
+            63
+          ],
+          "query": 0
+        }
+      }
+    },
+    {
+      "name": "review_face_kind4_eps0.0001_orientation1_flags1",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp: SmODEAreaIFEO::Evaluate and ComputePreciseProperties; PR119 review",
+      "inputs": {
+        "geometry": {
+          "op": "face",
+          "kind": 4,
+          "parameters": [
+            1,
+            2,
+            3,
+            1,
+            1,
+            -1,
+            -1,
+            1,
+            1,
+            2.37,
+            3.21,
+            3.41,
+            0.0001,
+            0,
+            1,
+            1
+          ],
+          "query": 0
+        }
+      }
+    },
+    {
+      "name": "review_face_kind4_eps0.0001_orientation1_flags63",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp: SmODEAreaIFEO::Evaluate and ComputePreciseProperties; PR119 review",
+      "inputs": {
+        "geometry": {
+          "op": "face",
+          "kind": 4,
+          "parameters": [
+            1,
+            2,
+            3,
+            1,
+            1,
+            -1,
+            -1,
+            1,
+            1,
+            2.37,
+            3.21,
+            3.41,
+            0.0001,
+            0,
+            1,
+            63
+          ],
+          "query": 0
+        }
+      }
+    },
+    {
+      "name": "review_face_kind4_eps1e-06_orientation0_flags1",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp: SmODEAreaIFEO::Evaluate and ComputePreciseProperties; PR119 review",
+      "inputs": {
+        "geometry": {
+          "op": "face",
+          "kind": 4,
+          "parameters": [
+            1,
+            2,
+            3,
+            1,
+            1,
+            -1,
+            -1,
+            1,
+            1,
+            2.37,
+            3.21,
+            3.41,
+            1e-06,
+            0,
+            0,
+            1
+          ],
+          "query": 0
+        }
+      }
+    },
+    {
+      "name": "review_face_kind4_eps1e-06_orientation0_flags63",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp: SmODEAreaIFEO::Evaluate and ComputePreciseProperties; PR119 review",
+      "inputs": {
+        "geometry": {
+          "op": "face",
+          "kind": 4,
+          "parameters": [
+            1,
+            2,
+            3,
+            1,
+            1,
+            -1,
+            -1,
+            1,
+            1,
+            2.37,
+            3.21,
+            3.41,
+            1e-06,
+            0,
+            0,
+            63
+          ],
+          "query": 0
+        }
+      }
+    },
+    {
+      "name": "review_face_kind4_eps1e-06_orientation1_flags1",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp: SmODEAreaIFEO::Evaluate and ComputePreciseProperties; PR119 review",
+      "inputs": {
+        "geometry": {
+          "op": "face",
+          "kind": 4,
+          "parameters": [
+            1,
+            2,
+            3,
+            1,
+            1,
+            -1,
+            -1,
+            1,
+            1,
+            2.37,
+            3.21,
+            3.41,
+            1e-06,
+            0,
+            1,
+            1
+          ],
+          "query": 0
+        }
+      }
+    },
+    {
+      "name": "review_face_kind4_eps1e-06_orientation1_flags63",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp: SmODEAreaIFEO::Evaluate and ComputePreciseProperties; PR119 review",
+      "inputs": {
+        "geometry": {
+          "op": "face",
+          "kind": 4,
+          "parameters": [
+            1,
+            2,
+            3,
+            1,
+            1,
+            -1,
+            -1,
+            1,
+            1,
+            2.37,
+            3.21,
+            3.41,
+            1e-06,
+            0,
+            1,
+            63
+          ],
+          "query": 0
+        }
+      }
+    },
+    {
+      "name": "review_face_kind4_eps1e-08_orientation0_flags1",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp: SmODEAreaIFEO::Evaluate and ComputePreciseProperties; PR119 review",
+      "inputs": {
+        "geometry": {
+          "op": "face",
+          "kind": 4,
+          "parameters": [
+            1,
+            2,
+            3,
+            1,
+            1,
+            -1,
+            -1,
+            1,
+            1,
+            2.37,
+            3.21,
+            3.41,
+            1e-08,
+            0,
+            0,
+            1
+          ],
+          "query": 0
+        }
+      }
+    },
+    {
+      "name": "review_face_kind4_eps1e-08_orientation0_flags63",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp: SmODEAreaIFEO::Evaluate and ComputePreciseProperties; PR119 review",
+      "inputs": {
+        "geometry": {
+          "op": "face",
+          "kind": 4,
+          "parameters": [
+            1,
+            2,
+            3,
+            1,
+            1,
+            -1,
+            -1,
+            1,
+            1,
+            2.37,
+            3.21,
+            3.41,
+            1e-08,
+            0,
+            0,
+            63
+          ],
+          "query": 0
+        }
+      }
+    },
+    {
+      "name": "review_face_kind4_eps1e-08_orientation1_flags1",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp: SmODEAreaIFEO::Evaluate and ComputePreciseProperties; PR119 review",
+      "inputs": {
+        "geometry": {
+          "op": "face",
+          "kind": 4,
+          "parameters": [
+            1,
+            2,
+            3,
+            1,
+            1,
+            -1,
+            -1,
+            1,
+            1,
+            2.37,
+            3.21,
+            3.41,
+            1e-08,
+            0,
+            1,
+            1
+          ],
+          "query": 0
+        }
+      }
+    },
+    {
+      "name": "review_face_kind4_eps1e-08_orientation1_flags63",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp: SmODEAreaIFEO::Evaluate and ComputePreciseProperties; PR119 review",
+      "inputs": {
+        "geometry": {
+          "op": "face",
+          "kind": 4,
+          "parameters": [
+            1,
+            2,
+            3,
+            1,
+            1,
+            -1,
+            -1,
+            1,
+            1,
+            2.37,
+            3.21,
+            3.41,
+            1e-08,
+            0,
+            1,
+            63
+          ],
+          "query": 0
+        }
+      }
+    },
+    {
+      "name": "review_surface_area_kind4_eps0.001",
+      "upstream_ref": "source/SMLib/src/SmSurface.cpp: SmAreaIFEO::Evaluate and Area",
+      "inputs": {
+        "geometry": {
+          "op": "face",
+          "kind": 4,
+          "parameters": [
+            1,
+            2,
+            3,
+            1.3,
+            0.7,
+            0.1,
+            0.2,
+            0.9,
+            0.8,
+            2.37,
+            3.21,
+            3.41,
+            0.001,
+            0,
+            0,
+            63
+          ],
+          "query": 7
+        }
+      }
+    },
+    {
+      "name": "review_surface_area_kind4_eps1e-06",
+      "upstream_ref": "source/SMLib/src/SmSurface.cpp: SmAreaIFEO::Evaluate and Area",
+      "inputs": {
+        "geometry": {
+          "op": "face",
+          "kind": 4,
+          "parameters": [
+            1,
+            2,
+            3,
+            1.3,
+            0.7,
+            0.1,
+            0.2,
+            0.9,
+            0.8,
+            2.37,
+            3.21,
+            3.41,
+            1e-06,
+            0,
+            0,
+            63
+          ],
+          "query": 7
+        }
+      }
+    },
+    {
+      "name": "review_surface_area_kind4_eps1e-08",
+      "upstream_ref": "source/SMLib/src/SmSurface.cpp: SmAreaIFEO::Evaluate and Area",
+      "inputs": {
+        "geometry": {
+          "op": "face",
+          "kind": 4,
+          "parameters": [
+            1,
+            2,
+            3,
+            1.3,
+            0.7,
+            0.1,
+            0.2,
+            0.9,
+            0.8,
+            2.37,
+            3.21,
+            3.41,
+            1e-08,
+            0,
+            0,
+            63
+          ],
+          "query": 7
+        }
+      }
+    },
+    {
+      "name": "review_edge_exact_quarter_circle_0.001_[0, 1]_0",
+      "upstream_ref": "source/SMLib/src/SmEdge.cpp: ComputePreciseProperties; source/SMLib/src/SmCurve.cpp: Length",
+      "inputs": {
+        "geometry": {
+          "op": "edge",
+          "kind": 0,
+          "p": [
+            1,
+            0,
+            0,
+            0.7071067811865476,
+            0.7071067811865476,
+            0,
+            0,
+            1,
+            0
+          ],
+          "weights": [
+            1,
+            0.7071067811865476,
+            1
+          ],
+          "controls": [
+            0,
+            1,
+            0.001,
+            0.37,
+            -0.29,
+            0.41,
+            0.1
+          ],
+          "query": 0
+        }
+      }
+    },
+    {
+      "name": "review_edge_exact_quarter_circle_0.001_[0, 1]_1",
+      "upstream_ref": "source/SMLib/src/SmEdge.cpp: ComputePreciseProperties; source/SMLib/src/SmCurve.cpp: Length",
+      "inputs": {
+        "geometry": {
+          "op": "edge",
+          "kind": 0,
+          "p": [
+            1,
+            0,
+            0,
+            0.7071067811865476,
+            0.7071067811865476,
+            0,
+            0,
+            1,
+            0
+          ],
+          "weights": [
+            1,
+            0.7071067811865476,
+            1
+          ],
+          "controls": [
+            0,
+            1,
+            0.001,
+            0.37,
+            -0.29,
+            0.41,
+            0.1
+          ],
+          "query": 1
+        }
+      }
+    },
+    {
+      "name": "review_edge_exact_quarter_circle_0.001_[0.5, 0.5]_0",
+      "upstream_ref": "source/SMLib/src/SmEdge.cpp: ComputePreciseProperties; source/SMLib/src/SmCurve.cpp: Length",
+      "inputs": {
+        "geometry": {
+          "op": "edge",
+          "kind": 0,
+          "p": [
+            1,
+            0,
+            0,
+            0.7071067811865476,
+            0.7071067811865476,
+            0,
+            0,
+            1,
+            0
+          ],
+          "weights": [
+            1,
+            0.7071067811865476,
+            1
+          ],
+          "controls": [
+            0.5,
+            0.5,
+            0.001,
+            0.37,
+            -0.29,
+            0.41,
+            0.1
+          ],
+          "query": 0
+        }
+      }
+    },
+    {
+      "name": "review_edge_exact_quarter_circle_0.001_[0.5, 0.5]_1",
+      "upstream_ref": "source/SMLib/src/SmEdge.cpp: ComputePreciseProperties; source/SMLib/src/SmCurve.cpp: Length",
+      "inputs": {
+        "geometry": {
+          "op": "edge",
+          "kind": 0,
+          "p": [
+            1,
+            0,
+            0,
+            0.7071067811865476,
+            0.7071067811865476,
+            0,
+            0,
+            1,
+            0
+          ],
+          "weights": [
+            1,
+            0.7071067811865476,
+            1
+          ],
+          "controls": [
+            0.5,
+            0.5,
+            0.001,
+            0.37,
+            -0.29,
+            0.41,
+            0.1
+          ],
+          "query": 1
+        }
+      }
+    },
+    {
+      "name": "review_edge_exact_quarter_circle_0.001_[0.1, 0.9]_0",
+      "upstream_ref": "source/SMLib/src/SmEdge.cpp: ComputePreciseProperties; source/SMLib/src/SmCurve.cpp: Length",
+      "inputs": {
+        "geometry": {
+          "op": "edge",
+          "kind": 0,
+          "p": [
+            1,
+            0,
+            0,
+            0.7071067811865476,
+            0.7071067811865476,
+            0,
+            0,
+            1,
+            0
+          ],
+          "weights": [
+            1,
+            0.7071067811865476,
+            1
+          ],
+          "controls": [
+            0.1,
+            0.9,
+            0.001,
+            0.37,
+            -0.29,
+            0.41,
+            0.1
+          ],
+          "query": 0
+        }
+      }
+    },
+    {
+      "name": "review_edge_exact_quarter_circle_0.001_[0.1, 0.9]_1",
+      "upstream_ref": "source/SMLib/src/SmEdge.cpp: ComputePreciseProperties; source/SMLib/src/SmCurve.cpp: Length",
+      "inputs": {
+        "geometry": {
+          "op": "edge",
+          "kind": 0,
+          "p": [
+            1,
+            0,
+            0,
+            0.7071067811865476,
+            0.7071067811865476,
+            0,
+            0,
+            1,
+            0
+          ],
+          "weights": [
+            1,
+            0.7071067811865476,
+            1
+          ],
+          "controls": [
+            0.1,
+            0.9,
+            0.001,
+            0.37,
+            -0.29,
+            0.41,
+            0.1
+          ],
+          "query": 1
+        }
+      }
+    },
+    {
+      "name": "review_edge_exact_quarter_circle_1e-06_[0, 1]_0",
+      "upstream_ref": "source/SMLib/src/SmEdge.cpp: ComputePreciseProperties; source/SMLib/src/SmCurve.cpp: Length",
+      "inputs": {
+        "geometry": {
+          "op": "edge",
+          "kind": 0,
+          "p": [
+            1,
+            0,
+            0,
+            0.7071067811865476,
+            0.7071067811865476,
+            0,
+            0,
+            1,
+            0
+          ],
+          "weights": [
+            1,
+            0.7071067811865476,
+            1
+          ],
+          "controls": [
+            0,
+            1,
+            1e-06,
+            0.37,
+            -0.29,
+            0.41,
+            0.1
+          ],
+          "query": 0
+        }
+      }
+    },
+    {
+      "name": "review_edge_exact_quarter_circle_1e-06_[0, 1]_1",
+      "upstream_ref": "source/SMLib/src/SmEdge.cpp: ComputePreciseProperties; source/SMLib/src/SmCurve.cpp: Length",
+      "inputs": {
+        "geometry": {
+          "op": "edge",
+          "kind": 0,
+          "p": [
+            1,
+            0,
+            0,
+            0.7071067811865476,
+            0.7071067811865476,
+            0,
+            0,
+            1,
+            0
+          ],
+          "weights": [
+            1,
+            0.7071067811865476,
+            1
+          ],
+          "controls": [
+            0,
+            1,
+            1e-06,
+            0.37,
+            -0.29,
+            0.41,
+            0.1
+          ],
+          "query": 1
+        }
+      }
+    },
+    {
+      "name": "review_edge_exact_quarter_circle_1e-06_[0.5, 0.5]_0",
+      "upstream_ref": "source/SMLib/src/SmEdge.cpp: ComputePreciseProperties; source/SMLib/src/SmCurve.cpp: Length",
+      "inputs": {
+        "geometry": {
+          "op": "edge",
+          "kind": 0,
+          "p": [
+            1,
+            0,
+            0,
+            0.7071067811865476,
+            0.7071067811865476,
+            0,
+            0,
+            1,
+            0
+          ],
+          "weights": [
+            1,
+            0.7071067811865476,
+            1
+          ],
+          "controls": [
+            0.5,
+            0.5,
+            1e-06,
+            0.37,
+            -0.29,
+            0.41,
+            0.1
+          ],
+          "query": 0
+        }
+      }
+    },
+    {
+      "name": "review_edge_exact_quarter_circle_1e-06_[0.5, 0.5]_1",
+      "upstream_ref": "source/SMLib/src/SmEdge.cpp: ComputePreciseProperties; source/SMLib/src/SmCurve.cpp: Length",
+      "inputs": {
+        "geometry": {
+          "op": "edge",
+          "kind": 0,
+          "p": [
+            1,
+            0,
+            0,
+            0.7071067811865476,
+            0.7071067811865476,
+            0,
+            0,
+            1,
+            0
+          ],
+          "weights": [
+            1,
+            0.7071067811865476,
+            1
+          ],
+          "controls": [
+            0.5,
+            0.5,
+            1e-06,
+            0.37,
+            -0.29,
+            0.41,
+            0.1
+          ],
+          "query": 1
+        }
+      }
+    },
+    {
+      "name": "review_edge_exact_quarter_circle_1e-06_[0.1, 0.9]_0",
+      "upstream_ref": "source/SMLib/src/SmEdge.cpp: ComputePreciseProperties; source/SMLib/src/SmCurve.cpp: Length",
+      "inputs": {
+        "geometry": {
+          "op": "edge",
+          "kind": 0,
+          "p": [
+            1,
+            0,
+            0,
+            0.7071067811865476,
+            0.7071067811865476,
+            0,
+            0,
+            1,
+            0
+          ],
+          "weights": [
+            1,
+            0.7071067811865476,
+            1
+          ],
+          "controls": [
+            0.1,
+            0.9,
+            1e-06,
+            0.37,
+            -0.29,
+            0.41,
+            0.1
+          ],
+          "query": 0
+        }
+      }
+    },
+    {
+      "name": "review_edge_exact_quarter_circle_1e-06_[0.1, 0.9]_1",
+      "upstream_ref": "source/SMLib/src/SmEdge.cpp: ComputePreciseProperties; source/SMLib/src/SmCurve.cpp: Length",
+      "inputs": {
+        "geometry": {
+          "op": "edge",
+          "kind": 0,
+          "p": [
+            1,
+            0,
+            0,
+            0.7071067811865476,
+            0.7071067811865476,
+            0,
+            0,
+            1,
+            0
+          ],
+          "weights": [
+            1,
+            0.7071067811865476,
+            1
+          ],
+          "controls": [
+            0.1,
+            0.9,
+            1e-06,
+            0.37,
+            -0.29,
+            0.41,
+            0.1
+          ],
+          "query": 1
+        }
+      }
+    },
+    {
+      "name": "review_edge_exact_quarter_circle_1e-09_[0, 1]_0",
+      "upstream_ref": "source/SMLib/src/SmEdge.cpp: ComputePreciseProperties; source/SMLib/src/SmCurve.cpp: Length",
+      "inputs": {
+        "geometry": {
+          "op": "edge",
+          "kind": 0,
+          "p": [
+            1,
+            0,
+            0,
+            0.7071067811865476,
+            0.7071067811865476,
+            0,
+            0,
+            1,
+            0
+          ],
+          "weights": [
+            1,
+            0.7071067811865476,
+            1
+          ],
+          "controls": [
+            0,
+            1,
+            1e-09,
+            0.37,
+            -0.29,
+            0.41,
+            0.1
+          ],
+          "query": 0
+        }
+      }
+    },
+    {
+      "name": "review_edge_exact_quarter_circle_1e-09_[0, 1]_1",
+      "upstream_ref": "source/SMLib/src/SmEdge.cpp: ComputePreciseProperties; source/SMLib/src/SmCurve.cpp: Length",
+      "inputs": {
+        "geometry": {
+          "op": "edge",
+          "kind": 0,
+          "p": [
+            1,
+            0,
+            0,
+            0.7071067811865476,
+            0.7071067811865476,
+            0,
+            0,
+            1,
+            0
+          ],
+          "weights": [
+            1,
+            0.7071067811865476,
+            1
+          ],
+          "controls": [
+            0,
+            1,
+            1e-09,
+            0.37,
+            -0.29,
+            0.41,
+            0.1
+          ],
+          "query": 1
+        }
+      }
+    },
+    {
+      "name": "review_edge_exact_quarter_circle_1e-09_[0.5, 0.5]_0",
+      "upstream_ref": "source/SMLib/src/SmEdge.cpp: ComputePreciseProperties; source/SMLib/src/SmCurve.cpp: Length",
+      "inputs": {
+        "geometry": {
+          "op": "edge",
+          "kind": 0,
+          "p": [
+            1,
+            0,
+            0,
+            0.7071067811865476,
+            0.7071067811865476,
+            0,
+            0,
+            1,
+            0
+          ],
+          "weights": [
+            1,
+            0.7071067811865476,
+            1
+          ],
+          "controls": [
+            0.5,
+            0.5,
+            1e-09,
+            0.37,
+            -0.29,
+            0.41,
+            0.1
+          ],
+          "query": 0
+        }
+      }
+    },
+    {
+      "name": "review_edge_exact_quarter_circle_1e-09_[0.5, 0.5]_1",
+      "upstream_ref": "source/SMLib/src/SmEdge.cpp: ComputePreciseProperties; source/SMLib/src/SmCurve.cpp: Length",
+      "inputs": {
+        "geometry": {
+          "op": "edge",
+          "kind": 0,
+          "p": [
+            1,
+            0,
+            0,
+            0.7071067811865476,
+            0.7071067811865476,
+            0,
+            0,
+            1,
+            0
+          ],
+          "weights": [
+            1,
+            0.7071067811865476,
+            1
+          ],
+          "controls": [
+            0.5,
+            0.5,
+            1e-09,
+            0.37,
+            -0.29,
+            0.41,
+            0.1
+          ],
+          "query": 1
+        }
+      }
+    },
+    {
+      "name": "review_edge_exact_quarter_circle_1e-09_[0.1, 0.9]_0",
+      "upstream_ref": "source/SMLib/src/SmEdge.cpp: ComputePreciseProperties; source/SMLib/src/SmCurve.cpp: Length",
+      "inputs": {
+        "geometry": {
+          "op": "edge",
+          "kind": 0,
+          "p": [
+            1,
+            0,
+            0,
+            0.7071067811865476,
+            0.7071067811865476,
+            0,
+            0,
+            1,
+            0
+          ],
+          "weights": [
+            1,
+            0.7071067811865476,
+            1
+          ],
+          "controls": [
+            0.1,
+            0.9,
+            1e-09,
+            0.37,
+            -0.29,
+            0.41,
+            0.1
+          ],
+          "query": 0
+        }
+      }
+    },
+    {
+      "name": "review_edge_exact_quarter_circle_1e-09_[0.1, 0.9]_1",
+      "upstream_ref": "source/SMLib/src/SmEdge.cpp: ComputePreciseProperties; source/SMLib/src/SmCurve.cpp: Length",
+      "inputs": {
+        "geometry": {
+          "op": "edge",
+          "kind": 0,
+          "p": [
+            1,
+            0,
+            0,
+            0.7071067811865476,
+            0.7071067811865476,
+            0,
+            0,
+            1,
+            0
+          ],
+          "weights": [
+            1,
+            0.7071067811865476,
+            1
+          ],
+          "controls": [
+            0.1,
+            0.9,
+            1e-09,
+            0.37,
+            -0.29,
+            0.41,
+            0.1
+          ],
+          "query": 1
+        }
+      }
+    },
+    {
+      "name": "review_edge_rational_0.001_[0, 1]_0",
+      "upstream_ref": "source/SMLib/src/SmEdge.cpp: ComputePreciseProperties; source/SMLib/src/SmCurve.cpp: Length",
+      "inputs": {
+        "geometry": {
+          "op": "edge",
+          "kind": 0,
+          "p": [
+            0,
+            0,
+            0,
+            1.5,
+            -0.75,
+            0.5,
+            2,
+            1,
+            3
+          ],
+          "weights": [
+            1,
+            0.25,
+            2
+          ],
+          "controls": [
+            0,
+            1,
+            0.001,
+            0.37,
+            -0.29,
+            0.41,
+            0.1
+          ],
+          "query": 0
+        }
+      }
+    },
+    {
+      "name": "review_edge_rational_0.001_[0, 1]_1",
+      "upstream_ref": "source/SMLib/src/SmEdge.cpp: ComputePreciseProperties; source/SMLib/src/SmCurve.cpp: Length",
+      "inputs": {
+        "geometry": {
+          "op": "edge",
+          "kind": 0,
+          "p": [
+            0,
+            0,
+            0,
+            1.5,
+            -0.75,
+            0.5,
+            2,
+            1,
+            3
+          ],
+          "weights": [
+            1,
+            0.25,
+            2
+          ],
+          "controls": [
+            0,
+            1,
+            0.001,
+            0.37,
+            -0.29,
+            0.41,
+            0.1
+          ],
+          "query": 1
+        }
+      }
+    },
+    {
+      "name": "review_edge_rational_0.001_[0.5, 0.5]_0",
+      "upstream_ref": "source/SMLib/src/SmEdge.cpp: ComputePreciseProperties; source/SMLib/src/SmCurve.cpp: Length",
+      "inputs": {
+        "geometry": {
+          "op": "edge",
+          "kind": 0,
+          "p": [
+            0,
+            0,
+            0,
+            1.5,
+            -0.75,
+            0.5,
+            2,
+            1,
+            3
+          ],
+          "weights": [
+            1,
+            0.25,
+            2
+          ],
+          "controls": [
+            0.5,
+            0.5,
+            0.001,
+            0.37,
+            -0.29,
+            0.41,
+            0.1
+          ],
+          "query": 0
+        }
+      }
+    },
+    {
+      "name": "review_edge_rational_0.001_[0.5, 0.5]_1",
+      "upstream_ref": "source/SMLib/src/SmEdge.cpp: ComputePreciseProperties; source/SMLib/src/SmCurve.cpp: Length",
+      "inputs": {
+        "geometry": {
+          "op": "edge",
+          "kind": 0,
+          "p": [
+            0,
+            0,
+            0,
+            1.5,
+            -0.75,
+            0.5,
+            2,
+            1,
+            3
+          ],
+          "weights": [
+            1,
+            0.25,
+            2
+          ],
+          "controls": [
+            0.5,
+            0.5,
+            0.001,
+            0.37,
+            -0.29,
+            0.41,
+            0.1
+          ],
+          "query": 1
+        }
+      }
+    },
+    {
+      "name": "review_edge_rational_0.001_[0.1, 0.9]_0",
+      "upstream_ref": "source/SMLib/src/SmEdge.cpp: ComputePreciseProperties; source/SMLib/src/SmCurve.cpp: Length",
+      "inputs": {
+        "geometry": {
+          "op": "edge",
+          "kind": 0,
+          "p": [
+            0,
+            0,
+            0,
+            1.5,
+            -0.75,
+            0.5,
+            2,
+            1,
+            3
+          ],
+          "weights": [
+            1,
+            0.25,
+            2
+          ],
+          "controls": [
+            0.1,
+            0.9,
+            0.001,
+            0.37,
+            -0.29,
+            0.41,
+            0.1
+          ],
+          "query": 0
+        }
+      }
+    },
+    {
+      "name": "review_edge_rational_0.001_[0.1, 0.9]_1",
+      "upstream_ref": "source/SMLib/src/SmEdge.cpp: ComputePreciseProperties; source/SMLib/src/SmCurve.cpp: Length",
+      "inputs": {
+        "geometry": {
+          "op": "edge",
+          "kind": 0,
+          "p": [
+            0,
+            0,
+            0,
+            1.5,
+            -0.75,
+            0.5,
+            2,
+            1,
+            3
+          ],
+          "weights": [
+            1,
+            0.25,
+            2
+          ],
+          "controls": [
+            0.1,
+            0.9,
+            0.001,
+            0.37,
+            -0.29,
+            0.41,
+            0.1
+          ],
+          "query": 1
+        }
+      }
+    },
+    {
+      "name": "review_edge_rational_1e-06_[0, 1]_0",
+      "upstream_ref": "source/SMLib/src/SmEdge.cpp: ComputePreciseProperties; source/SMLib/src/SmCurve.cpp: Length",
+      "inputs": {
+        "geometry": {
+          "op": "edge",
+          "kind": 0,
+          "p": [
+            0,
+            0,
+            0,
+            1.5,
+            -0.75,
+            0.5,
+            2,
+            1,
+            3
+          ],
+          "weights": [
+            1,
+            0.25,
+            2
+          ],
+          "controls": [
+            0,
+            1,
+            1e-06,
+            0.37,
+            -0.29,
+            0.41,
+            0.1
+          ],
+          "query": 0
+        }
+      }
+    },
+    {
+      "name": "review_edge_rational_1e-06_[0, 1]_1",
+      "upstream_ref": "source/SMLib/src/SmEdge.cpp: ComputePreciseProperties; source/SMLib/src/SmCurve.cpp: Length",
+      "inputs": {
+        "geometry": {
+          "op": "edge",
+          "kind": 0,
+          "p": [
+            0,
+            0,
+            0,
+            1.5,
+            -0.75,
+            0.5,
+            2,
+            1,
+            3
+          ],
+          "weights": [
+            1,
+            0.25,
+            2
+          ],
+          "controls": [
+            0,
+            1,
+            1e-06,
+            0.37,
+            -0.29,
+            0.41,
+            0.1
+          ],
+          "query": 1
+        }
+      }
+    },
+    {
+      "name": "review_edge_rational_1e-06_[0.5, 0.5]_0",
+      "upstream_ref": "source/SMLib/src/SmEdge.cpp: ComputePreciseProperties; source/SMLib/src/SmCurve.cpp: Length",
+      "inputs": {
+        "geometry": {
+          "op": "edge",
+          "kind": 0,
+          "p": [
+            0,
+            0,
+            0,
+            1.5,
+            -0.75,
+            0.5,
+            2,
+            1,
+            3
+          ],
+          "weights": [
+            1,
+            0.25,
+            2
+          ],
+          "controls": [
+            0.5,
+            0.5,
+            1e-06,
+            0.37,
+            -0.29,
+            0.41,
+            0.1
+          ],
+          "query": 0
+        }
+      }
+    },
+    {
+      "name": "review_edge_rational_1e-06_[0.5, 0.5]_1",
+      "upstream_ref": "source/SMLib/src/SmEdge.cpp: ComputePreciseProperties; source/SMLib/src/SmCurve.cpp: Length",
+      "inputs": {
+        "geometry": {
+          "op": "edge",
+          "kind": 0,
+          "p": [
+            0,
+            0,
+            0,
+            1.5,
+            -0.75,
+            0.5,
+            2,
+            1,
+            3
+          ],
+          "weights": [
+            1,
+            0.25,
+            2
+          ],
+          "controls": [
+            0.5,
+            0.5,
+            1e-06,
+            0.37,
+            -0.29,
+            0.41,
+            0.1
+          ],
+          "query": 1
+        }
+      }
+    },
+    {
+      "name": "review_edge_rational_1e-06_[0.1, 0.9]_0",
+      "upstream_ref": "source/SMLib/src/SmEdge.cpp: ComputePreciseProperties; source/SMLib/src/SmCurve.cpp: Length",
+      "inputs": {
+        "geometry": {
+          "op": "edge",
+          "kind": 0,
+          "p": [
+            0,
+            0,
+            0,
+            1.5,
+            -0.75,
+            0.5,
+            2,
+            1,
+            3
+          ],
+          "weights": [
+            1,
+            0.25,
+            2
+          ],
+          "controls": [
+            0.1,
+            0.9,
+            1e-06,
+            0.37,
+            -0.29,
+            0.41,
+            0.1
+          ],
+          "query": 0
+        }
+      }
+    },
+    {
+      "name": "review_edge_rational_1e-06_[0.1, 0.9]_1",
+      "upstream_ref": "source/SMLib/src/SmEdge.cpp: ComputePreciseProperties; source/SMLib/src/SmCurve.cpp: Length",
+      "inputs": {
+        "geometry": {
+          "op": "edge",
+          "kind": 0,
+          "p": [
+            0,
+            0,
+            0,
+            1.5,
+            -0.75,
+            0.5,
+            2,
+            1,
+            3
+          ],
+          "weights": [
+            1,
+            0.25,
+            2
+          ],
+          "controls": [
+            0.1,
+            0.9,
+            1e-06,
+            0.37,
+            -0.29,
+            0.41,
+            0.1
+          ],
+          "query": 1
+        }
+      }
+    },
+    {
+      "name": "review_edge_rational_1e-09_[0, 1]_0",
+      "upstream_ref": "source/SMLib/src/SmEdge.cpp: ComputePreciseProperties; source/SMLib/src/SmCurve.cpp: Length",
+      "inputs": {
+        "geometry": {
+          "op": "edge",
+          "kind": 0,
+          "p": [
+            0,
+            0,
+            0,
+            1.5,
+            -0.75,
+            0.5,
+            2,
+            1,
+            3
+          ],
+          "weights": [
+            1,
+            0.25,
+            2
+          ],
+          "controls": [
+            0,
+            1,
+            1e-09,
+            0.37,
+            -0.29,
+            0.41,
+            0.1
+          ],
+          "query": 0
+        }
+      }
+    },
+    {
+      "name": "review_edge_rational_1e-09_[0, 1]_1",
+      "upstream_ref": "source/SMLib/src/SmEdge.cpp: ComputePreciseProperties; source/SMLib/src/SmCurve.cpp: Length",
+      "inputs": {
+        "geometry": {
+          "op": "edge",
+          "kind": 0,
+          "p": [
+            0,
+            0,
+            0,
+            1.5,
+            -0.75,
+            0.5,
+            2,
+            1,
+            3
+          ],
+          "weights": [
+            1,
+            0.25,
+            2
+          ],
+          "controls": [
+            0,
+            1,
+            1e-09,
+            0.37,
+            -0.29,
+            0.41,
+            0.1
+          ],
+          "query": 1
+        }
+      }
+    },
+    {
+      "name": "review_edge_rational_1e-09_[0.5, 0.5]_0",
+      "upstream_ref": "source/SMLib/src/SmEdge.cpp: ComputePreciseProperties; source/SMLib/src/SmCurve.cpp: Length",
+      "inputs": {
+        "geometry": {
+          "op": "edge",
+          "kind": 0,
+          "p": [
+            0,
+            0,
+            0,
+            1.5,
+            -0.75,
+            0.5,
+            2,
+            1,
+            3
+          ],
+          "weights": [
+            1,
+            0.25,
+            2
+          ],
+          "controls": [
+            0.5,
+            0.5,
+            1e-09,
+            0.37,
+            -0.29,
+            0.41,
+            0.1
+          ],
+          "query": 0
+        }
+      }
+    },
+    {
+      "name": "review_edge_rational_1e-09_[0.5, 0.5]_1",
+      "upstream_ref": "source/SMLib/src/SmEdge.cpp: ComputePreciseProperties; source/SMLib/src/SmCurve.cpp: Length",
+      "inputs": {
+        "geometry": {
+          "op": "edge",
+          "kind": 0,
+          "p": [
+            0,
+            0,
+            0,
+            1.5,
+            -0.75,
+            0.5,
+            2,
+            1,
+            3
+          ],
+          "weights": [
+            1,
+            0.25,
+            2
+          ],
+          "controls": [
+            0.5,
+            0.5,
+            1e-09,
+            0.37,
+            -0.29,
+            0.41,
+            0.1
+          ],
+          "query": 1
+        }
+      }
+    },
+    {
+      "name": "review_edge_rational_1e-09_[0.1, 0.9]_0",
+      "upstream_ref": "source/SMLib/src/SmEdge.cpp: ComputePreciseProperties; source/SMLib/src/SmCurve.cpp: Length",
+      "inputs": {
+        "geometry": {
+          "op": "edge",
+          "kind": 0,
+          "p": [
+            0,
+            0,
+            0,
+            1.5,
+            -0.75,
+            0.5,
+            2,
+            1,
+            3
+          ],
+          "weights": [
+            1,
+            0.25,
+            2
+          ],
+          "controls": [
+            0.1,
+            0.9,
+            1e-09,
+            0.37,
+            -0.29,
+            0.41,
+            0.1
+          ],
+          "query": 0
+        }
+      }
+    },
+    {
+      "name": "review_edge_rational_1e-09_[0.1, 0.9]_1",
+      "upstream_ref": "source/SMLib/src/SmEdge.cpp: ComputePreciseProperties; source/SMLib/src/SmCurve.cpp: Length",
+      "inputs": {
+        "geometry": {
+          "op": "edge",
+          "kind": 0,
+          "p": [
+            0,
+            0,
+            0,
+            1.5,
+            -0.75,
+            0.5,
+            2,
+            1,
+            3
+          ],
+          "weights": [
+            1,
+            0.25,
+            2
+          ],
+          "controls": [
+            0.1,
+            0.9,
+            1e-09,
+            0.37,
+            -0.29,
+            0.41,
+            0.1
+          ],
+          "query": 1
+        }
+      }
+    },
+    {
+      "name": "review_edge_cusp_0.001_[0, 1]_0",
+      "upstream_ref": "source/SMLib/src/SmEdge.cpp: ComputePreciseProperties; source/SMLib/src/SmCurve.cpp: Length",
+      "inputs": {
+        "geometry": {
+          "op": "edge",
+          "kind": 0,
+          "p": [
+            0,
+            0,
+            0,
+            1,
+            0,
+            0,
+            0,
+            0,
+            0
+          ],
+          "weights": [
+            1,
+            1,
+            1
+          ],
+          "controls": [
+            0,
+            1,
+            0.001,
+            0.37,
+            -0.29,
+            0.41,
+            0.1
+          ],
+          "query": 0
+        }
+      }
+    },
+    {
+      "name": "review_edge_cusp_0.001_[0, 1]_1",
+      "upstream_ref": "source/SMLib/src/SmEdge.cpp: ComputePreciseProperties; source/SMLib/src/SmCurve.cpp: Length",
+      "inputs": {
+        "geometry": {
+          "op": "edge",
+          "kind": 0,
+          "p": [
+            0,
+            0,
+            0,
+            1,
+            0,
+            0,
+            0,
+            0,
+            0
+          ],
+          "weights": [
+            1,
+            1,
+            1
+          ],
+          "controls": [
+            0,
+            1,
+            0.001,
+            0.37,
+            -0.29,
+            0.41,
+            0.1
+          ],
+          "query": 1
+        }
+      }
+    },
+    {
+      "name": "review_edge_cusp_0.001_[0.5, 0.5]_0",
+      "upstream_ref": "source/SMLib/src/SmEdge.cpp: ComputePreciseProperties; source/SMLib/src/SmCurve.cpp: Length",
+      "inputs": {
+        "geometry": {
+          "op": "edge",
+          "kind": 0,
+          "p": [
+            0,
+            0,
+            0,
+            1,
+            0,
+            0,
+            0,
+            0,
+            0
+          ],
+          "weights": [
+            1,
+            1,
+            1
+          ],
+          "controls": [
+            0.5,
+            0.5,
+            0.001,
+            0.37,
+            -0.29,
+            0.41,
+            0.1
+          ],
+          "query": 0
+        }
+      }
+    },
+    {
+      "name": "review_edge_cusp_0.001_[0.5, 0.5]_1",
+      "upstream_ref": "source/SMLib/src/SmEdge.cpp: ComputePreciseProperties; source/SMLib/src/SmCurve.cpp: Length",
+      "inputs": {
+        "geometry": {
+          "op": "edge",
+          "kind": 0,
+          "p": [
+            0,
+            0,
+            0,
+            1,
+            0,
+            0,
+            0,
+            0,
+            0
+          ],
+          "weights": [
+            1,
+            1,
+            1
+          ],
+          "controls": [
+            0.5,
+            0.5,
+            0.001,
+            0.37,
+            -0.29,
+            0.41,
+            0.1
+          ],
+          "query": 1
+        }
+      }
+    },
+    {
+      "name": "review_edge_cusp_0.001_[0.1, 0.9]_0",
+      "upstream_ref": "source/SMLib/src/SmEdge.cpp: ComputePreciseProperties; source/SMLib/src/SmCurve.cpp: Length",
+      "inputs": {
+        "geometry": {
+          "op": "edge",
+          "kind": 0,
+          "p": [
+            0,
+            0,
+            0,
+            1,
+            0,
+            0,
+            0,
+            0,
+            0
+          ],
+          "weights": [
+            1,
+            1,
+            1
+          ],
+          "controls": [
+            0.1,
+            0.9,
+            0.001,
+            0.37,
+            -0.29,
+            0.41,
+            0.1
+          ],
+          "query": 0
+        }
+      }
+    },
+    {
+      "name": "review_edge_cusp_0.001_[0.1, 0.9]_1",
+      "upstream_ref": "source/SMLib/src/SmEdge.cpp: ComputePreciseProperties; source/SMLib/src/SmCurve.cpp: Length",
+      "inputs": {
+        "geometry": {
+          "op": "edge",
+          "kind": 0,
+          "p": [
+            0,
+            0,
+            0,
+            1,
+            0,
+            0,
+            0,
+            0,
+            0
+          ],
+          "weights": [
+            1,
+            1,
+            1
+          ],
+          "controls": [
+            0.1,
+            0.9,
+            0.001,
+            0.37,
+            -0.29,
+            0.41,
+            0.1
+          ],
+          "query": 1
+        }
+      }
+    },
+    {
+      "name": "review_edge_cusp_1e-06_[0, 1]_0",
+      "upstream_ref": "source/SMLib/src/SmEdge.cpp: ComputePreciseProperties; source/SMLib/src/SmCurve.cpp: Length",
+      "inputs": {
+        "geometry": {
+          "op": "edge",
+          "kind": 0,
+          "p": [
+            0,
+            0,
+            0,
+            1,
+            0,
+            0,
+            0,
+            0,
+            0
+          ],
+          "weights": [
+            1,
+            1,
+            1
+          ],
+          "controls": [
+            0,
+            1,
+            1e-06,
+            0.37,
+            -0.29,
+            0.41,
+            0.1
+          ],
+          "query": 0
+        }
+      }
+    },
+    {
+      "name": "review_edge_cusp_1e-06_[0, 1]_1",
+      "upstream_ref": "source/SMLib/src/SmEdge.cpp: ComputePreciseProperties; source/SMLib/src/SmCurve.cpp: Length",
+      "inputs": {
+        "geometry": {
+          "op": "edge",
+          "kind": 0,
+          "p": [
+            0,
+            0,
+            0,
+            1,
+            0,
+            0,
+            0,
+            0,
+            0
+          ],
+          "weights": [
+            1,
+            1,
+            1
+          ],
+          "controls": [
+            0,
+            1,
+            1e-06,
+            0.37,
+            -0.29,
+            0.41,
+            0.1
+          ],
+          "query": 1
+        }
+      }
+    },
+    {
+      "name": "review_edge_cusp_1e-06_[0.5, 0.5]_0",
+      "upstream_ref": "source/SMLib/src/SmEdge.cpp: ComputePreciseProperties; source/SMLib/src/SmCurve.cpp: Length",
+      "inputs": {
+        "geometry": {
+          "op": "edge",
+          "kind": 0,
+          "p": [
+            0,
+            0,
+            0,
+            1,
+            0,
+            0,
+            0,
+            0,
+            0
+          ],
+          "weights": [
+            1,
+            1,
+            1
+          ],
+          "controls": [
+            0.5,
+            0.5,
+            1e-06,
+            0.37,
+            -0.29,
+            0.41,
+            0.1
+          ],
+          "query": 0
+        }
+      }
+    },
+    {
+      "name": "review_edge_cusp_1e-06_[0.5, 0.5]_1",
+      "upstream_ref": "source/SMLib/src/SmEdge.cpp: ComputePreciseProperties; source/SMLib/src/SmCurve.cpp: Length",
+      "inputs": {
+        "geometry": {
+          "op": "edge",
+          "kind": 0,
+          "p": [
+            0,
+            0,
+            0,
+            1,
+            0,
+            0,
+            0,
+            0,
+            0
+          ],
+          "weights": [
+            1,
+            1,
+            1
+          ],
+          "controls": [
+            0.5,
+            0.5,
+            1e-06,
+            0.37,
+            -0.29,
+            0.41,
+            0.1
+          ],
+          "query": 1
+        }
+      }
+    },
+    {
+      "name": "review_edge_cusp_1e-06_[0.1, 0.9]_0",
+      "upstream_ref": "source/SMLib/src/SmEdge.cpp: ComputePreciseProperties; source/SMLib/src/SmCurve.cpp: Length",
+      "inputs": {
+        "geometry": {
+          "op": "edge",
+          "kind": 0,
+          "p": [
+            0,
+            0,
+            0,
+            1,
+            0,
+            0,
+            0,
+            0,
+            0
+          ],
+          "weights": [
+            1,
+            1,
+            1
+          ],
+          "controls": [
+            0.1,
+            0.9,
+            1e-06,
+            0.37,
+            -0.29,
+            0.41,
+            0.1
+          ],
+          "query": 0
+        }
+      }
+    },
+    {
+      "name": "review_edge_cusp_1e-06_[0.1, 0.9]_1",
+      "upstream_ref": "source/SMLib/src/SmEdge.cpp: ComputePreciseProperties; source/SMLib/src/SmCurve.cpp: Length",
+      "inputs": {
+        "geometry": {
+          "op": "edge",
+          "kind": 0,
+          "p": [
+            0,
+            0,
+            0,
+            1,
+            0,
+            0,
+            0,
+            0,
+            0
+          ],
+          "weights": [
+            1,
+            1,
+            1
+          ],
+          "controls": [
+            0.1,
+            0.9,
+            1e-06,
+            0.37,
+            -0.29,
+            0.41,
+            0.1
+          ],
+          "query": 1
+        }
+      }
+    },
+    {
+      "name": "review_edge_cusp_1e-09_[0, 1]_0",
+      "upstream_ref": "source/SMLib/src/SmEdge.cpp: ComputePreciseProperties; source/SMLib/src/SmCurve.cpp: Length",
+      "inputs": {
+        "geometry": {
+          "op": "edge",
+          "kind": 0,
+          "p": [
+            0,
+            0,
+            0,
+            1,
+            0,
+            0,
+            0,
+            0,
+            0
+          ],
+          "weights": [
+            1,
+            1,
+            1
+          ],
+          "controls": [
+            0,
+            1,
+            1e-09,
+            0.37,
+            -0.29,
+            0.41,
+            0.1
+          ],
+          "query": 0
+        }
+      }
+    },
+    {
+      "name": "review_edge_cusp_1e-09_[0, 1]_1",
+      "upstream_ref": "source/SMLib/src/SmEdge.cpp: ComputePreciseProperties; source/SMLib/src/SmCurve.cpp: Length",
+      "inputs": {
+        "geometry": {
+          "op": "edge",
+          "kind": 0,
+          "p": [
+            0,
+            0,
+            0,
+            1,
+            0,
+            0,
+            0,
+            0,
+            0
+          ],
+          "weights": [
+            1,
+            1,
+            1
+          ],
+          "controls": [
+            0,
+            1,
+            1e-09,
+            0.37,
+            -0.29,
+            0.41,
+            0.1
+          ],
+          "query": 1
+        }
+      }
+    },
+    {
+      "name": "review_edge_cusp_1e-09_[0.5, 0.5]_0",
+      "upstream_ref": "source/SMLib/src/SmEdge.cpp: ComputePreciseProperties; source/SMLib/src/SmCurve.cpp: Length",
+      "inputs": {
+        "geometry": {
+          "op": "edge",
+          "kind": 0,
+          "p": [
+            0,
+            0,
+            0,
+            1,
+            0,
+            0,
+            0,
+            0,
+            0
+          ],
+          "weights": [
+            1,
+            1,
+            1
+          ],
+          "controls": [
+            0.5,
+            0.5,
+            1e-09,
+            0.37,
+            -0.29,
+            0.41,
+            0.1
+          ],
+          "query": 0
+        }
+      }
+    },
+    {
+      "name": "review_edge_cusp_1e-09_[0.5, 0.5]_1",
+      "upstream_ref": "source/SMLib/src/SmEdge.cpp: ComputePreciseProperties; source/SMLib/src/SmCurve.cpp: Length",
+      "inputs": {
+        "geometry": {
+          "op": "edge",
+          "kind": 0,
+          "p": [
+            0,
+            0,
+            0,
+            1,
+            0,
+            0,
+            0,
+            0,
+            0
+          ],
+          "weights": [
+            1,
+            1,
+            1
+          ],
+          "controls": [
+            0.5,
+            0.5,
+            1e-09,
+            0.37,
+            -0.29,
+            0.41,
+            0.1
+          ],
+          "query": 1
+        }
+      }
+    },
+    {
+      "name": "review_edge_cusp_1e-09_[0.1, 0.9]_0",
+      "upstream_ref": "source/SMLib/src/SmEdge.cpp: ComputePreciseProperties; source/SMLib/src/SmCurve.cpp: Length",
+      "inputs": {
+        "geometry": {
+          "op": "edge",
+          "kind": 0,
+          "p": [
+            0,
+            0,
+            0,
+            1,
+            0,
+            0,
+            0,
+            0,
+            0
+          ],
+          "weights": [
+            1,
+            1,
+            1
+          ],
+          "controls": [
+            0.1,
+            0.9,
+            1e-09,
+            0.37,
+            -0.29,
+            0.41,
+            0.1
+          ],
+          "query": 0
+        }
+      }
+    },
+    {
+      "name": "review_edge_cusp_1e-09_[0.1, 0.9]_1",
+      "upstream_ref": "source/SMLib/src/SmEdge.cpp: ComputePreciseProperties; source/SMLib/src/SmCurve.cpp: Length",
+      "inputs": {
+        "geometry": {
+          "op": "edge",
+          "kind": 0,
+          "p": [
+            0,
+            0,
+            0,
+            1,
+            0,
+            0,
+            0,
+            0,
+            0
+          ],
+          "weights": [
+            1,
+            1,
+            1
+          ],
+          "controls": [
+            0.1,
+            0.9,
+            1e-09,
+            0.37,
+            -0.29,
+            0.41,
+            0.1
+          ],
+          "query": 1
+        }
+      }
+    },
+    {
+      "name": "review_edge_constant_0.001_[0, 1]_0",
+      "upstream_ref": "source/SMLib/src/SmEdge.cpp: ComputePreciseProperties; source/SMLib/src/SmCurve.cpp: Length",
+      "inputs": {
+        "geometry": {
+          "op": "edge",
+          "kind": 0,
+          "p": [
+            0.3,
+            0.4,
+            0.5,
+            0.3,
+            0.4,
+            0.5,
+            0.3,
+            0.4,
+            0.5
+          ],
+          "weights": [
+            1,
+            1,
+            1
+          ],
+          "controls": [
+            0,
+            1,
+            0.001,
+            0.37,
+            -0.29,
+            0.41,
+            0.1
+          ],
+          "query": 0
+        }
+      }
+    },
+    {
+      "name": "review_edge_constant_0.001_[0, 1]_1",
+      "upstream_ref": "source/SMLib/src/SmEdge.cpp: ComputePreciseProperties; source/SMLib/src/SmCurve.cpp: Length",
+      "inputs": {
+        "geometry": {
+          "op": "edge",
+          "kind": 0,
+          "p": [
+            0.3,
+            0.4,
+            0.5,
+            0.3,
+            0.4,
+            0.5,
+            0.3,
+            0.4,
+            0.5
+          ],
+          "weights": [
+            1,
+            1,
+            1
+          ],
+          "controls": [
+            0,
+            1,
+            0.001,
+            0.37,
+            -0.29,
+            0.41,
+            0.1
+          ],
+          "query": 1
+        }
+      }
+    },
+    {
+      "name": "review_edge_constant_0.001_[0.5, 0.5]_0",
+      "upstream_ref": "source/SMLib/src/SmEdge.cpp: ComputePreciseProperties; source/SMLib/src/SmCurve.cpp: Length",
+      "inputs": {
+        "geometry": {
+          "op": "edge",
+          "kind": 0,
+          "p": [
+            0.3,
+            0.4,
+            0.5,
+            0.3,
+            0.4,
+            0.5,
+            0.3,
+            0.4,
+            0.5
+          ],
+          "weights": [
+            1,
+            1,
+            1
+          ],
+          "controls": [
+            0.5,
+            0.5,
+            0.001,
+            0.37,
+            -0.29,
+            0.41,
+            0.1
+          ],
+          "query": 0
+        }
+      }
+    },
+    {
+      "name": "review_edge_constant_0.001_[0.5, 0.5]_1",
+      "upstream_ref": "source/SMLib/src/SmEdge.cpp: ComputePreciseProperties; source/SMLib/src/SmCurve.cpp: Length",
+      "inputs": {
+        "geometry": {
+          "op": "edge",
+          "kind": 0,
+          "p": [
+            0.3,
+            0.4,
+            0.5,
+            0.3,
+            0.4,
+            0.5,
+            0.3,
+            0.4,
+            0.5
+          ],
+          "weights": [
+            1,
+            1,
+            1
+          ],
+          "controls": [
+            0.5,
+            0.5,
+            0.001,
+            0.37,
+            -0.29,
+            0.41,
+            0.1
+          ],
+          "query": 1
+        }
+      }
+    },
+    {
+      "name": "review_edge_constant_0.001_[0.1, 0.9]_0",
+      "upstream_ref": "source/SMLib/src/SmEdge.cpp: ComputePreciseProperties; source/SMLib/src/SmCurve.cpp: Length",
+      "inputs": {
+        "geometry": {
+          "op": "edge",
+          "kind": 0,
+          "p": [
+            0.3,
+            0.4,
+            0.5,
+            0.3,
+            0.4,
+            0.5,
+            0.3,
+            0.4,
+            0.5
+          ],
+          "weights": [
+            1,
+            1,
+            1
+          ],
+          "controls": [
+            0.1,
+            0.9,
+            0.001,
+            0.37,
+            -0.29,
+            0.41,
+            0.1
+          ],
+          "query": 0
+        }
+      }
+    },
+    {
+      "name": "review_edge_constant_0.001_[0.1, 0.9]_1",
+      "upstream_ref": "source/SMLib/src/SmEdge.cpp: ComputePreciseProperties; source/SMLib/src/SmCurve.cpp: Length",
+      "inputs": {
+        "geometry": {
+          "op": "edge",
+          "kind": 0,
+          "p": [
+            0.3,
+            0.4,
+            0.5,
+            0.3,
+            0.4,
+            0.5,
+            0.3,
+            0.4,
+            0.5
+          ],
+          "weights": [
+            1,
+            1,
+            1
+          ],
+          "controls": [
+            0.1,
+            0.9,
+            0.001,
+            0.37,
+            -0.29,
+            0.41,
+            0.1
+          ],
+          "query": 1
+        }
+      }
+    },
+    {
+      "name": "review_edge_constant_1e-06_[0, 1]_0",
+      "upstream_ref": "source/SMLib/src/SmEdge.cpp: ComputePreciseProperties; source/SMLib/src/SmCurve.cpp: Length",
+      "inputs": {
+        "geometry": {
+          "op": "edge",
+          "kind": 0,
+          "p": [
+            0.3,
+            0.4,
+            0.5,
+            0.3,
+            0.4,
+            0.5,
+            0.3,
+            0.4,
+            0.5
+          ],
+          "weights": [
+            1,
+            1,
+            1
+          ],
+          "controls": [
+            0,
+            1,
+            1e-06,
+            0.37,
+            -0.29,
+            0.41,
+            0.1
+          ],
+          "query": 0
+        }
+      }
+    },
+    {
+      "name": "review_edge_constant_1e-06_[0, 1]_1",
+      "upstream_ref": "source/SMLib/src/SmEdge.cpp: ComputePreciseProperties; source/SMLib/src/SmCurve.cpp: Length",
+      "inputs": {
+        "geometry": {
+          "op": "edge",
+          "kind": 0,
+          "p": [
+            0.3,
+            0.4,
+            0.5,
+            0.3,
+            0.4,
+            0.5,
+            0.3,
+            0.4,
+            0.5
+          ],
+          "weights": [
+            1,
+            1,
+            1
+          ],
+          "controls": [
+            0,
+            1,
+            1e-06,
+            0.37,
+            -0.29,
+            0.41,
+            0.1
+          ],
+          "query": 1
+        }
+      }
+    },
+    {
+      "name": "review_edge_constant_1e-06_[0.5, 0.5]_0",
+      "upstream_ref": "source/SMLib/src/SmEdge.cpp: ComputePreciseProperties; source/SMLib/src/SmCurve.cpp: Length",
+      "inputs": {
+        "geometry": {
+          "op": "edge",
+          "kind": 0,
+          "p": [
+            0.3,
+            0.4,
+            0.5,
+            0.3,
+            0.4,
+            0.5,
+            0.3,
+            0.4,
+            0.5
+          ],
+          "weights": [
+            1,
+            1,
+            1
+          ],
+          "controls": [
+            0.5,
+            0.5,
+            1e-06,
+            0.37,
+            -0.29,
+            0.41,
+            0.1
+          ],
+          "query": 0
+        }
+      }
+    },
+    {
+      "name": "review_edge_constant_1e-06_[0.5, 0.5]_1",
+      "upstream_ref": "source/SMLib/src/SmEdge.cpp: ComputePreciseProperties; source/SMLib/src/SmCurve.cpp: Length",
+      "inputs": {
+        "geometry": {
+          "op": "edge",
+          "kind": 0,
+          "p": [
+            0.3,
+            0.4,
+            0.5,
+            0.3,
+            0.4,
+            0.5,
+            0.3,
+            0.4,
+            0.5
+          ],
+          "weights": [
+            1,
+            1,
+            1
+          ],
+          "controls": [
+            0.5,
+            0.5,
+            1e-06,
+            0.37,
+            -0.29,
+            0.41,
+            0.1
+          ],
+          "query": 1
+        }
+      }
+    },
+    {
+      "name": "review_edge_constant_1e-06_[0.1, 0.9]_0",
+      "upstream_ref": "source/SMLib/src/SmEdge.cpp: ComputePreciseProperties; source/SMLib/src/SmCurve.cpp: Length",
+      "inputs": {
+        "geometry": {
+          "op": "edge",
+          "kind": 0,
+          "p": [
+            0.3,
+            0.4,
+            0.5,
+            0.3,
+            0.4,
+            0.5,
+            0.3,
+            0.4,
+            0.5
+          ],
+          "weights": [
+            1,
+            1,
+            1
+          ],
+          "controls": [
+            0.1,
+            0.9,
+            1e-06,
+            0.37,
+            -0.29,
+            0.41,
+            0.1
+          ],
+          "query": 0
+        }
+      }
+    },
+    {
+      "name": "review_edge_constant_1e-06_[0.1, 0.9]_1",
+      "upstream_ref": "source/SMLib/src/SmEdge.cpp: ComputePreciseProperties; source/SMLib/src/SmCurve.cpp: Length",
+      "inputs": {
+        "geometry": {
+          "op": "edge",
+          "kind": 0,
+          "p": [
+            0.3,
+            0.4,
+            0.5,
+            0.3,
+            0.4,
+            0.5,
+            0.3,
+            0.4,
+            0.5
+          ],
+          "weights": [
+            1,
+            1,
+            1
+          ],
+          "controls": [
+            0.1,
+            0.9,
+            1e-06,
+            0.37,
+            -0.29,
+            0.41,
+            0.1
+          ],
+          "query": 1
+        }
+      }
+    },
+    {
+      "name": "review_edge_constant_1e-09_[0, 1]_0",
+      "upstream_ref": "source/SMLib/src/SmEdge.cpp: ComputePreciseProperties; source/SMLib/src/SmCurve.cpp: Length",
+      "inputs": {
+        "geometry": {
+          "op": "edge",
+          "kind": 0,
+          "p": [
+            0.3,
+            0.4,
+            0.5,
+            0.3,
+            0.4,
+            0.5,
+            0.3,
+            0.4,
+            0.5
+          ],
+          "weights": [
+            1,
+            1,
+            1
+          ],
+          "controls": [
+            0,
+            1,
+            1e-09,
+            0.37,
+            -0.29,
+            0.41,
+            0.1
+          ],
+          "query": 0
+        }
+      }
+    },
+    {
+      "name": "review_edge_constant_1e-09_[0, 1]_1",
+      "upstream_ref": "source/SMLib/src/SmEdge.cpp: ComputePreciseProperties; source/SMLib/src/SmCurve.cpp: Length",
+      "inputs": {
+        "geometry": {
+          "op": "edge",
+          "kind": 0,
+          "p": [
+            0.3,
+            0.4,
+            0.5,
+            0.3,
+            0.4,
+            0.5,
+            0.3,
+            0.4,
+            0.5
+          ],
+          "weights": [
+            1,
+            1,
+            1
+          ],
+          "controls": [
+            0,
+            1,
+            1e-09,
+            0.37,
+            -0.29,
+            0.41,
+            0.1
+          ],
+          "query": 1
+        }
+      }
+    },
+    {
+      "name": "review_edge_constant_1e-09_[0.5, 0.5]_0",
+      "upstream_ref": "source/SMLib/src/SmEdge.cpp: ComputePreciseProperties; source/SMLib/src/SmCurve.cpp: Length",
+      "inputs": {
+        "geometry": {
+          "op": "edge",
+          "kind": 0,
+          "p": [
+            0.3,
+            0.4,
+            0.5,
+            0.3,
+            0.4,
+            0.5,
+            0.3,
+            0.4,
+            0.5
+          ],
+          "weights": [
+            1,
+            1,
+            1
+          ],
+          "controls": [
+            0.5,
+            0.5,
+            1e-09,
+            0.37,
+            -0.29,
+            0.41,
+            0.1
+          ],
+          "query": 0
+        }
+      }
+    },
+    {
+      "name": "review_edge_constant_1e-09_[0.5, 0.5]_1",
+      "upstream_ref": "source/SMLib/src/SmEdge.cpp: ComputePreciseProperties; source/SMLib/src/SmCurve.cpp: Length",
+      "inputs": {
+        "geometry": {
+          "op": "edge",
+          "kind": 0,
+          "p": [
+            0.3,
+            0.4,
+            0.5,
+            0.3,
+            0.4,
+            0.5,
+            0.3,
+            0.4,
+            0.5
+          ],
+          "weights": [
+            1,
+            1,
+            1
+          ],
+          "controls": [
+            0.5,
+            0.5,
+            1e-09,
+            0.37,
+            -0.29,
+            0.41,
+            0.1
+          ],
+          "query": 1
+        }
+      }
+    },
+    {
+      "name": "review_edge_constant_1e-09_[0.1, 0.9]_0",
+      "upstream_ref": "source/SMLib/src/SmEdge.cpp: ComputePreciseProperties; source/SMLib/src/SmCurve.cpp: Length",
+      "inputs": {
+        "geometry": {
+          "op": "edge",
+          "kind": 0,
+          "p": [
+            0.3,
+            0.4,
+            0.5,
+            0.3,
+            0.4,
+            0.5,
+            0.3,
+            0.4,
+            0.5
+          ],
+          "weights": [
+            1,
+            1,
+            1
+          ],
+          "controls": [
+            0.1,
+            0.9,
+            1e-09,
+            0.37,
+            -0.29,
+            0.41,
+            0.1
+          ],
+          "query": 0
+        }
+      }
+    },
+    {
+      "name": "review_edge_constant_1e-09_[0.1, 0.9]_1",
+      "upstream_ref": "source/SMLib/src/SmEdge.cpp: ComputePreciseProperties; source/SMLib/src/SmCurve.cpp: Length",
+      "inputs": {
+        "geometry": {
+          "op": "edge",
+          "kind": 0,
+          "p": [
+            0.3,
+            0.4,
+            0.5,
+            0.3,
+            0.4,
+            0.5,
+            0.3,
+            0.4,
+            0.5
+          ],
+          "weights": [
+            1,
+            1,
+            1
+          ],
+          "controls": [
+            0.1,
+            0.9,
+            1e-09,
+            0.37,
+            -0.29,
+            0.41,
+            0.1
+          ],
+          "query": 1
+        }
+      }
+    },
+    {
+      "name": "review_face_tight_accuracy_kind1_1e-12",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp: ComputePreciseProperties retry divisors 2/8/64/512/4096",
+      "inputs": {
+        "geometry": {
+          "op": "face",
+          "kind": 1,
+          "parameters": [
+            1,
+            2,
+            3,
+            1,
+            1,
+            -1,
+            -1,
+            1,
+            1,
+            2.37,
+            3.21,
+            3.41,
+            1e-12,
+            0,
+            0,
+            63
+          ],
+          "query": 0
+        }
+      }
+    },
+    {
+      "name": "review_face_tight_accuracy_kind1_1e-14",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp: ComputePreciseProperties retry divisors 2/8/64/512/4096",
+      "inputs": {
+        "geometry": {
+          "op": "face",
+          "kind": 1,
+          "parameters": [
+            1,
+            2,
+            3,
+            1,
+            1,
+            -1,
+            -1,
+            1,
+            1,
+            2.37,
+            3.21,
+            3.41,
+            1e-14,
+            0,
+            0,
+            63
+          ],
+          "query": 0
+        }
+      }
+    },
+    {
+      "name": "review_face_tight_accuracy_kind1_0.0",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp: ComputePreciseProperties retry divisors 2/8/64/512/4096",
+      "inputs": {
+        "geometry": {
+          "op": "face",
+          "kind": 1,
+          "parameters": [
+            1,
+            2,
+            3,
+            1,
+            1,
+            -1,
+            -1,
+            1,
+            1,
+            2.37,
+            3.21,
+            3.41,
+            0.0,
+            0,
+            0,
+            63
+          ],
+          "query": 0
+        }
+      }
+    },
+    {
+      "name": "review_face_tight_accuracy_kind2_1e-12",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp: ComputePreciseProperties retry divisors 2/8/64/512/4096",
+      "inputs": {
+        "geometry": {
+          "op": "face",
+          "kind": 2,
+          "parameters": [
+            1,
+            2,
+            3,
+            1,
+            1,
+            -1,
+            -1,
+            1,
+            1,
+            2.37,
+            3.21,
+            3.41,
+            1e-12,
+            0,
+            0,
+            63
+          ],
+          "query": 0
+        }
+      }
+    },
+    {
+      "name": "review_face_tight_accuracy_kind2_1e-14",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp: ComputePreciseProperties retry divisors 2/8/64/512/4096",
+      "inputs": {
+        "geometry": {
+          "op": "face",
+          "kind": 2,
+          "parameters": [
+            1,
+            2,
+            3,
+            1,
+            1,
+            -1,
+            -1,
+            1,
+            1,
+            2.37,
+            3.21,
+            3.41,
+            1e-14,
+            0,
+            0,
+            63
+          ],
+          "query": 0
+        }
+      }
+    },
+    {
+      "name": "review_face_tight_accuracy_kind2_0.0",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp: ComputePreciseProperties retry divisors 2/8/64/512/4096",
+      "inputs": {
+        "geometry": {
+          "op": "face",
+          "kind": 2,
+          "parameters": [
+            1,
+            2,
+            3,
+            1,
+            1,
+            -1,
+            -1,
+            1,
+            1,
+            2.37,
+            3.21,
+            3.41,
+            0.0,
+            0,
+            0,
+            63
+          ],
+          "query": 0
+        }
+      }
+    },
+    {
+      "name": "review_face_tight_accuracy_kind3_1e-12",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp: ComputePreciseProperties retry divisors 2/8/64/512/4096",
+      "inputs": {
+        "geometry": {
+          "op": "face",
+          "kind": 3,
+          "parameters": [
+            1,
+            2,
+            3,
+            1,
+            1,
+            0,
+            0,
+            1,
+            1,
+            2.37,
+            3.21,
+            3.41,
+            1e-12,
+            0,
+            0,
+            63
+          ],
+          "query": 0
+        }
+      }
+    },
+    {
+      "name": "review_face_tight_accuracy_kind3_1e-14",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp: ComputePreciseProperties retry divisors 2/8/64/512/4096",
+      "inputs": {
+        "geometry": {
+          "op": "face",
+          "kind": 3,
+          "parameters": [
+            1,
+            2,
+            3,
+            1,
+            1,
+            0,
+            0,
+            1,
+            1,
+            2.37,
+            3.21,
+            3.41,
+            1e-14,
+            0,
+            0,
+            63
+          ],
+          "query": 0
+        }
+      }
+    },
+    {
+      "name": "review_face_tight_accuracy_kind3_0.0",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp: ComputePreciseProperties retry divisors 2/8/64/512/4096",
+      "inputs": {
+        "geometry": {
+          "op": "face",
+          "kind": 3,
+          "parameters": [
+            1,
+            2,
+            3,
+            1,
+            1,
+            0,
+            0,
+            1,
+            1,
+            2.37,
+            3.21,
+            3.41,
+            0.0,
+            0,
+            0,
+            63
+          ],
+          "query": 0
+        }
+      }
+    },
+    {
+      "name": "review_edge_scaled_exact_arc_1e-09_0",
+      "upstream_ref": "source/SMLib/src/SmEdge.cpp: ComputePreciseProperties; rational quarter circle, PR119 review",
+      "inputs": {
+        "geometry": {
+          "op": "edge",
+          "kind": 0,
+          "p": [
+            1e-09,
+            0.0,
+            0.0,
+            7.071067811865477e-10,
+            7.071067811865477e-10,
+            0.0,
+            0.0,
+            1e-09,
+            0.0
+          ],
+          "weights": [
+            1,
+            0.7071067811865476,
+            1
+          ],
+          "controls": [
+            0,
+            1,
+            1e-06,
+            3.7e-10,
+            -2.9e-10,
+            4.1e-10,
+            1.0000000000000002e-10
+          ],
+          "query": 0
+        }
+      }
+    },
+    {
+      "name": "review_edge_scaled_exact_arc_1e-09_1",
+      "upstream_ref": "source/SMLib/src/SmEdge.cpp: ComputePreciseProperties; rational quarter circle, PR119 review",
+      "inputs": {
+        "geometry": {
+          "op": "edge",
+          "kind": 0,
+          "p": [
+            1e-09,
+            0.0,
+            0.0,
+            7.071067811865477e-10,
+            7.071067811865477e-10,
+            0.0,
+            0.0,
+            1e-09,
+            0.0
+          ],
+          "weights": [
+            1,
+            0.7071067811865476,
+            1
+          ],
+          "controls": [
+            0,
+            1,
+            1e-06,
+            3.7e-10,
+            -2.9e-10,
+            4.1e-10,
+            1.0000000000000002e-10
+          ],
+          "query": 1
+        }
+      }
+    },
+    {
+      "name": "review_edge_scaled_exact_arc_1000000000.0_0",
+      "upstream_ref": "source/SMLib/src/SmEdge.cpp: ComputePreciseProperties; rational quarter circle, PR119 review",
+      "inputs": {
+        "geometry": {
+          "op": "edge",
+          "kind": 0,
+          "p": [
+            1000000000.0,
+            0.0,
+            0.0,
+            707106781.1865475,
+            707106781.1865475,
+            0.0,
+            0.0,
+            1000000000.0,
+            0.0
+          ],
+          "weights": [
+            1,
+            0.7071067811865476,
+            1
+          ],
+          "controls": [
+            0,
+            1,
+            1e-06,
+            370000000.0,
+            -290000000.0,
+            410000000.0,
+            100000000.0
+          ],
+          "query": 0
+        }
+      }
+    },
+    {
+      "name": "review_edge_scaled_exact_arc_1000000000.0_1",
+      "upstream_ref": "source/SMLib/src/SmEdge.cpp: ComputePreciseProperties; rational quarter circle, PR119 review",
+      "inputs": {
+        "geometry": {
+          "op": "edge",
+          "kind": 0,
+          "p": [
+            1000000000.0,
+            0.0,
+            0.0,
+            707106781.1865475,
+            707106781.1865475,
+            0.0,
+            0.0,
+            1000000000.0,
+            0.0
+          ],
+          "weights": [
+            1,
+            0.7071067811865476,
+            1
+          ],
+          "controls": [
+            0,
+            1,
+            1e-06,
+            370000000.0,
+            -290000000.0,
+            410000000.0,
+            100000000.0
+          ],
+          "query": 1
+        }
+      }
+    }
+  ]
+}

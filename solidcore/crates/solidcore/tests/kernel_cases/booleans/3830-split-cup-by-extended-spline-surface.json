@@ -1,0 +1,169 @@
+{
+  "area": "booleans",
+  "bodies": {
+    "b21": {
+      "keeping_splines": false,
+      "trusted": true
+    },
+    "b24": {
+      "keeping_splines": false,
+      "trusted": true
+    },
+    "b25": {
+      "keeping_splines": false,
+      "trusted": true
+    }
+  },
+  "calls": [
+    {
+      "inputs": [
+        "b21"
+      ],
+      "op": "tagged",
+      "outputs": [
+        "b22"
+      ],
+      "params": {
+        "operand": 0
+      }
+    },
+    {
+      "inputs": [
+        "b22"
+      ],
+      "op": "stitch",
+      "outputs": [
+        "b23"
+      ],
+      "params": {
+        "tolerance": 0.0002
+      }
+    },
+    {
+      "inputs": [
+        "b25"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b26"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b26"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b27"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b27"
+      ],
+      "op": "tagged",
+      "outputs": [
+        "b28"
+      ],
+      "params": {
+        "operand": 0
+      }
+    },
+    {
+      "inputs": [
+        "b28",
+        "b24"
+      ],
+      "op": "split_body_by_sheet",
+      "outputs": [
+        "b29",
+        "b30"
+      ],
+      "params": {
+        "face": 2
+      }
+    }
+  ],
+  "case": "3830-split-cup-by-extended-spline-surface",
+  "expected": {
+    "body_count": 3,
+    "method": "cup = cylinder r15 h30 shelled 1 mm inward with its top removed: V = pi*15^2*30 - pi*14^2*29 = 3349.04. The surface crosses the whole cup from above its rim to below its floor, so it splits the cup in two; splitting only divides material: two valid bodies whose volumes add up to 3349.04; the surface body that cut it stays, a third body",
+    "source": "analytic",
+    "sources": [
+      "tangency-labs/solidcraft#3830"
+    ],
+    "volume_mm3": 3348.938,
+    "what": "split a thin-walled cup (shell of a d30 cylinder) with a surface body: an extruded spline surface, extended at both ends"
+  },
+  "expressible": true,
+  "operation_expressible": true,
+  "outcome": {
+    "ran": true,
+    "raw_counts": {
+      "edges": 36,
+      "faces": 14,
+      "vertices": 26
+    }
+  },
+  "records": "3830-split-cup-by-extended-spline-surface.bodies.json.gz",
+  "result": [
+    {
+      "body": "Body1",
+      "made": "b29"
+    },
+    {
+      "body": "Body2",
+      "made": "b23"
+    },
+    {
+      "body": "Body1 (1)",
+      "made": "b30"
+    }
+  ],
+  "rig": {
+    "error": null,
+    "known_failing": null,
+    "measured": {
+      "area_mm2": 10947.828015685955,
+      "body_count": 3,
+      "edges": 30,
+      "faces": 14,
+      "vertices": 20,
+      "volume_mm3": 3348.9377643252164
+    },
+    "refused_with": null,
+    "status": "pass"
+  },
+  "sources": [
+    "tangency-labs/solidcraft#3830"
+  ],
+  "traced_ops": [
+    "extrude",
+    "copy",
+    "copy",
+    "tagged",
+    "shell",
+    "extrude",
+    "copy",
+    "copy",
+    "tagged",
+    "extend_sheet",
+    "tagged",
+    "stitch",
+    "copy",
+    "copy",
+    "tagged",
+    "extend_sheet",
+    "tagged",
+    "stitch",
+    "copy",
+    "copy",
+    "tagged",
+    "split_body_by_sheet"
+  ],
+  "ungraded": [],
+  "what": "split a thin-walled cup (shell of a d30 cylinder) with a surface body: an extruded spline surface, extended at both ends",
+  "why_not": []
+}

@@ -151,15 +151,11 @@ pub fn library(app: &mut SolveApp) -> Vec<Look> {
     from_engine.unwrap_or_else(builtin)
 }
 
-/// "#rrggbb" or [r, g, b].
+/// "#rrggbb" (the `#` may be left out) or [r, g, b].
 pub fn parse_color(v: &Value) -> Option<[u8; 3]> {
     if let Some(s) = v.as_str() {
-        let h = s.trim().trim_start_matches('#');
-        if h.len() != 6 {
-            return None;
-        }
-        let byte = |i: usize| h.get(i..i + 2).and_then(|x| u8::from_str_radix(x, 16).ok());
-        return Some([byte(0)?, byte(2)?, byte(4)?]);
+        let s = s.trim();
+        return solidcraft_color::hex::parse_digits(s.strip_prefix('#').unwrap_or(s)).and_then(|(rgb, alpha)| alpha.is_none().then_some(rgb));
     }
     let a = v.as_array()?;
     let c = |i: usize| a.get(i).and_then(Value::as_u64).filter(|x| *x <= 255).map(|x| x as u8);
@@ -167,7 +163,7 @@ pub fn parse_color(v: &Value) -> Option<[u8; 3]> {
 }
 
 pub fn hex(c: [u8; 3]) -> String {
-    format!("#{:02x}{:02x}{:02x}", c[0], c[1], c[2])
+    solidcraft_color::hex::format(c)
 }
 
 #[derive(Clone, Debug)]
@@ -385,7 +381,9 @@ pub fn rows(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut Ap, inputs: &mut [Sel
     // Apply To: bodies or faces (the input follows).
     if let Some(component) = &k.component {
         ui_kit::row(ui, "Apply To", |ui| ui_kit::text(ui, &format!("Component: {component}"), ui_kit::Text::Cell));
-        if ui_kit::row(ui, "", |ui| ui_kit::button(ui, crate::i18n::tr_label("Select bodies or faces instead"), ui_kit::Button::Normal)).clicked() {
+        if ui_kit::row(ui, "", |ui| ui_kit::button(ui, solidcraft_ui_text::tr_label("Select bodies or faces instead"), ui_kit::Button::Normal))
+            .clicked()
+        {
             k.component = None;
         }
     } else {
@@ -462,7 +460,7 @@ pub fn rows(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut Ap, inputs: &mut [Sel
             });
         }
         if ui_kit::button(ui, "Remove override", ui_kit::Button::Enabled(has_target))
-            .backing_on_hover_text(crate::i18n::tr_label("Restore the inherited component or physical material appearance"))
+            .backing_on_hover_text(solidcraft_ui_text::tr_label("Restore the inherited component or physical material appearance"))
             .clicked()
             && let Some(p) = clear_params(k, &picked)
         {
@@ -485,7 +483,7 @@ pub fn rows(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut Ap, inputs: &mut [Sel
             ui_kit::swatch_grid(ui, &items, |ui, (i, (look, n))| {
                 if ui_kit::color_swatch(
                     ui,
-                    egui::Id::new(("ap_used", *i)),
+                    egui::Id::unique(("ap_used", *i)),
                     c32(look.color, look.opacity),
                     k.color == look.color && k.opacity == look.opacity && k.pbr == look.pbr,
                     &format!("{} · {n} item(s)", look.name),
@@ -523,7 +521,7 @@ pub fn rows(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut Ap, inputs: &mut [Sel
         .filter(|(_, l)| matches_library_filter(l, (k.category != 0).then_some(want.as_str()), &query, k.only_available))
         .collect();
     if shown.is_empty() {
-        ui_kit::text(ui, crate::i18n::tr_label("No matching appearances"), ui_kit::Text::Note("appearances_empty"));
+        ui_kit::text(ui, solidcraft_ui_text::tr_label("No matching appearances"), ui_kit::Text::Note("appearances_empty"));
     }
     ui_kit::swatch_grid(ui, &shown, |ui, (i, l)| {
         let picked_look = k.look.as_deref() == Some(l.name.as_str()) && k.pbr == l.pbr;
@@ -533,7 +531,7 @@ pub fn rows(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut Ap, inputs: &mut [Sel
             |p| format!("{}\n{}\n{}", l.name, p.preview_note, p.requirements.join(", ")),
         );
         ui.add_enabled_ui(available, |ui| {
-            let response = ui_kit::color_swatch(ui, egui::Id::new(("ap_lib", *i)), c32(l.color, l.opacity), picked_look, &tip, (*l).clone());
+            let response = ui_kit::color_swatch(ui, egui::Id::unique(("ap_lib", *i)), c32(l.color, l.opacity), picked_look, &tip, (*l).clone());
             if let Some(preset) = &l.preset {
                 crate::scenario::publish_handle(&format!("appearance:preset:{}", preset.id), response.rect.center());
             }
@@ -639,6 +637,11 @@ mod tests {
         assert_eq!(parse_color(&json!([1, 2, 3])), Some([1, 2, 3]));
         assert_eq!(parse_color(&json!([1, 2, 300])), None);
         assert_eq!(parse_color(&json!("#12345")), None);
+        // The `#` may be left out (preference fields), but only one, and only hex digits follow.
+        assert_eq!(parse_color(&json!(" 0a1b2c ")), Some([10, 27, 44]));
+        assert_eq!(parse_color(&json!("##0a1b2c")), None);
+        assert_eq!(parse_color(&json!("#+a1b2c")), None);
+        assert_eq!(parse_color(&json!("#0a1b2c80")), None);
         assert_eq!(hex([10, 27, 44]), "#0a1b2c");
     }
 

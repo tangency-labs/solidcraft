@@ -1,0 +1,12 @@
+id = "surface.surface_point_solve_p1"
+upstream = ["source/SMLib/src/SmSurfacePointSolve.cpp"]
+rust_module = "surface::surface_point_solve::p1"
+depends_on = ["geom.extent1d", "geom.extent2d", "geom.extent3d", "geom.vector2d", "geom.vector3d", "nurbs.b_spline_surface_p1", "surface.surface_p1", "surface.surface_p2"]
+soft_depends_on = ["curve.curve_p6", "geom.geom_utility_p1", "geom.geom_utility_p2", "geom.object", "geom.tol", "nurbs.b_spline_curve_p1", "surface.offset_surface", "surface.surface_p4", "surface.surface_p5", "surface.surface_p7"]
+est_lines = 1771
+layer = 32
+tests = ["prog_test:my_test_surface_closest_point", "prog_test:my_test_drop_point", "prog_test:my_test_matrix", "prog_test:my_test_reversed_line_join", "SM_API_test:TestSmCreateRectangle", "SM_API_test:TestSmCreateRegularPolygon"]
+status = "green"
+claimed_by = ""
+claimed_at = ""
+notes = "49 fns; largest: SmSurfPtGlobalSolver::RefineGuessPolygonLeg, WellBehavedControlNet, SmSurfPtGlobalSolver::FindPolygonTriangleGuess, SmSurfPtGlobalSolver::CheckGuessForSeams; unit-SCC #22 (220 units); 317 upstream test entry points reach this unit; PARTIAL (PR #58): difftest 1035 cases (135 inline on upstream Surface.sms with the my_test_surface_closest_point points, 900 generated: planes, B-splines incl. closed / rational / bilinear / zigzag / huge / tiny nets, curve-bounded and STEP-wrapped surfaces, sub-domains, the 5 solver operations, test points on, near and off the surface), 976 pass bit-identical, 59 deferred (surface.surface_p5 32, surface.surface_p4 27); --perturb SENSITIVE Re-run (PR #52, after merging surface_p4/#49 and surface_p5/#50): 1035 cases, 1003 pass, 32 deferred (curve.iso_curve 32). PR #106: the stepper Normal accessor retains its cached normal after ordinary evaluation failure, like C++; missing dependencies still propagate. Native collapsed-surface regressions cover this in p2/p3. Re-run after merging PR #106 (surface.surface_point_solve_p3 wired, 2026-10-15): 1035 cases, 1035 pass, 0 deferred, 0 failed, max_rel_err 0."

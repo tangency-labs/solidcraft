@@ -1,6 +1,7 @@
 //! The Symmetry tool's third pick may be the origin point or an origin axis (#1075); with three
 //! lines, the construction line between the other two is the symmetry line in any pick order (#1796).
-//! A constraint tool's pick may be a body's edge, a mirrored copy's too (#6348).
+//! A constraint tool's pick may be a body's edge, a mirrored copy's too (#6348), and Collinear's or
+//! Tangent's an origin axis (#15461).
 
 use serde_json::json;
 use solidcore_record::Vec2;
@@ -130,4 +131,49 @@ fn collinear_with_an_edge_of_a_mirrored_body_projects_the_edge() {
     h.app.run("edit.undo", json!({})).unwrap();
     assert_eq!(links(&h), 1, "undone with the constraint");
     assert!((point(&h, "side.start").x + 100.0).abs() < 1e-6);
+}
+
+/// #15461: with the Collinear tool running, a line and then the X axis are clicked: the line lands
+/// on the axis, as it does with the sketch's own `x` given to the command.
+#[test]
+fn collinear_with_a_clicked_origin_axis() {
+    let mut h = Harness::new();
+    h.app.set_origin_shown(true);
+    h.app.run("sketch.create", json!({"plane":"XY"})).unwrap();
+    h.app.run("sketch.line", json!({"points":[[5,8],[25,11]],"infer":false,"connect":false})).unwrap();
+    h.app.cam.distance = 120.0;
+    h.settle();
+    h.app.start("sketch.constraint.collinear");
+    // The line's middle, then the X axis (drawn from the origin along +x) away from the origin
+    // point and the line.
+    for xy in [[15.0, 9.5], [6.0, 0.0]] {
+        let at = h.call("ui.at", json!({ "sketch": xy }))["result"].clone();
+        h.step(&json!({ "click": at })).unwrap();
+    }
+    let (a, b) = (point(&h, "l1.start"), point(&h, "l1.end"));
+    assert!(a.y.abs() < 1e-6 && b.y.abs() < 1e-6, "on the X axis: {a:?} {b:?} ({:?})", h.app.status);
+}
+
+/// A 40 x 30 x 20 box and a sketch above it, 30 up, with a point q. The Coincident tool picking q
+/// and then the box's top edge at x = 40 at its middle ties q to that middle (#17920); picked
+/// elsewhere along the edge, q only goes onto the edge.
+#[test]
+fn coincident_with_a_body_edge_at_its_middle_takes_the_middle() {
+    for (at_middle, y) in [(true, 15.0), (false, 5.0)] {
+        let mut h = Harness::new();
+        h.app.run("solid.box", json!({"length":40,"width":30,"height":20})).unwrap();
+        h.app.run("sketch.create", json!({"plane":"XY","offset":"30 mm"})).unwrap();
+        h.app.run("sketch.point", json!({"point":[20,45],"id":"q"})).unwrap();
+        h.app.cam.target = solidcore_record::Vec3::new(20.0, 20.0, 20.0);
+        h.app.cam.distance = 200.0;
+        h.settle();
+        h.app.start("sketch.constraint.coincident");
+        let q = h.call("ui.at", json!({"sketch":[20,45]}))["result"].clone();
+        h.step(&json!({ "click": q })).unwrap();
+        let edge = h.call("ui.at", json!({"world":[40.0, y, 20.0]}))["result"].clone();
+        h.step(&json!({ "click": edge })).unwrap();
+        let q = point(&h, "q");
+        assert!((q.x - 40.0).abs() < 1e-6, "middle {at_middle}: q at {q:?} is on the edge ({:?})", h.app.status);
+        assert_eq!((q.y - 15.0).abs() < 1e-6, at_middle, "middle {at_middle}: q at {q:?}");
+    }
 }

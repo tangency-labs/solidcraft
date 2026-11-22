@@ -1,32 +1,9 @@
-//! What a client is told about a control request that outlasts its wait (docs/control-protocol.md,
-//! #1618): the app's control server and the bridged MCP server both say what the request still
-//! does when it finishes: nothing (it only reads), write a file (an export or a save), or change
-//! the design.
+//! What SolidCraft's requests do when they outlast their wait (docs/control-protocol.md, #1618), as
+//! a [`solidcraft_control::Effect`]: nothing (it only reads), write a file (an export or a save),
+//! or change the design. The app's control server and the bridged MCP server both say it.
 
 use serde_json::Value;
-
-/// What a request still running does when it finishes.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum Effect {
-    /// It only reads (the design, the window or the command list): nothing changes.
-    ReadsOnly,
-    /// It writes a file (an export, a save, a render to a path); the design stays as it is.
-    WritesFile,
-    /// It changes the design (or may: anything not known to read or only write a file).
-    Changes,
-}
-
-impl Effect {
-    /// What happens when the request finishes, for a message: "it only reads: nothing changes",
-    /// "it was not cancelled and will still write the file when it finishes", …
-    pub fn when_done(self) -> &'static str {
-        match self {
-            Effect::ReadsOnly => "it only reads: nothing changes",
-            Effect::WritesFile => "it was not cancelled and will still write the file when it finishes; the design does not change",
-            Effect::Changes => "it was not cancelled and will still apply when it finishes",
-        }
-    }
-}
+use solidcraft_control::Effect;
 
 /// Control methods that only read: a timed-out one changes nothing when it finishes.
 /// (`ui.screenshot` with a `path`, and `ui.render`, write a file: see [`effect`].)
@@ -88,6 +65,8 @@ pub fn effect(method: &str, params: &Value) -> Effect {
         "ui.render" => Effect::WritesFile,
         "ui.screenshot" if params.get("path").is_some_and(|p| !p.is_null()) => Effect::WritesFile,
         "ui.screenshot" => Effect::ReadsOnly,
+        "ui.help" if params.get("item").is_none_or(Value::is_null) => Effect::ReadsOnly,
+        "control.joint_drive" if params.get("action").and_then(Value::as_str) != Some("finish") => Effect::ReadsOnly,
         m if READ_METHODS.contains(&m) => Effect::ReadsOnly,
         _ => Effect::Changes,
     }
@@ -116,10 +95,20 @@ mod tests {
     use serde_json::json;
 
     #[test]
+    fn only_finishing_an_interactive_joint_drive_changes_the_design() {
+        for action in ["begin", "update", "cancel"] {
+            assert_eq!(effect("control.joint_drive", &json!({"action": action})), Effect::ReadsOnly);
+        }
+        assert_eq!(effect("control.joint_drive", &json!({"action": "finish"})), Effect::Changes);
+    }
+
+    #[test]
     fn reads_are_told_from_changes() {
         for (m, p) in [
             ("ui.inspect", json!({})),
             ("ui.screenshot", json!({})),
+            ("ui.help", json!({})),
+            ("ui.help", json!({"item": null})),
             ("document.export", json!({})),
             ("document.inspect", json!({"measure": true})),
             ("engine.execute", json!({"command": "sketch.inspect"})),
@@ -136,9 +125,19 @@ mod tests {
             ("engine.execute", json!({})),
             ("engine.batch", json!({"commands": []})),
             ("ui.click", json!({"x": 1, "y": 2})),
+            ("ui.help", json!({"item": "about"})),
+            ("ui.help", json!({"item": "report"})),
+            ("ui.help", json!({"item": "updates"})),
+            ("ui.help", json!({"item": "install_cli"})),
+            ("ui.help", json!({"item": ""})),
+            ("ui.help", json!({"item": false})),
+            ("ui.help", json!({"item": 0})),
+            ("ui.help", json!({"item": []})),
+            ("ui.help", json!({"item": {}})),
             ("app.quit", json!({})),
             ("document.import", json!({"text": "{}"})),
             ("document.saved", json!({"revision": 1})),
+            ("document.close", json!({"document_id": "current"})),
         ] {
             assert!(!reads_only(m, &p), "{m} {p}");
             assert_eq!(effect(m, &p), Effect::Changes, "{m} {p}");
@@ -163,8 +162,10 @@ mod tests {
             assert_eq!(effect(m, &p), Effect::WritesFile, "{m} {p}");
             assert!(!reads_only(m, &p), "{m} {p}");
         }
-        assert!(Effect::WritesFile.when_done().contains("will still write the file") && !Effect::WritesFile.when_done().contains("apply"));
-        assert!(Effect::Changes.when_done().contains("will still apply"));
-        assert!(Effect::ReadsOnly.when_done().contains("nothing changes"));
+        assert!(
+            Effect::WritesFile.when_done("design").contains("will still write the file") && !Effect::WritesFile.when_done("design").contains("apply")
+        );
+        assert!(Effect::Changes.when_done("design").contains("will still apply"));
+        assert!(Effect::ReadsOnly.when_done("design").contains("nothing changes"));
     }
 }

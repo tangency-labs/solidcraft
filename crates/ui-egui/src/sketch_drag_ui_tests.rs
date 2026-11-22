@@ -79,6 +79,7 @@ fn elsewhere_a_drag_from_empty_space_draws_a_selection_box() {
     for selected in [true, false] {
         let (mut h, gap) = two_letters(selected);
         let from = if selected { gap + Vec2::new(12.0, 0.0) } else { gap };
+        h.call("ui.camera", json!({"target":[from.x,from.y,0.0],"distance":55}));
         let a = screen(&mut h, from.x, from.y);
         let b = screen(&mut h, from.x + 3.0, from.y + 2.0);
         let mut path = vec![a];
@@ -179,7 +180,7 @@ fn a_four_bar_edge_follows_a_stationary_pointer_and_keeps_the_grab() {
     let b = screen(&mut h, -7.0, 11.2);
     let undo = h.app.session.undo.len();
     press_and_move(&mut h, &[a, b]);
-    assert_eq!(h.app.viewport.point_drag.as_ref().map(|(id, _, _)| id.as_str()), Some("crank"), "grabbed the edge, not an endpoint");
+    assert_eq!(h.app.viewport.point_drag.as_ref().map(|(id, _, _, _, _)| id.as_str()), Some("crank"), "grabbed the edge, not an endpoint");
     h.frames(8);
     let nearest = Vec2::new(-10.0, 16.0).normalized().unwrap() * 10.0;
     assert!(point(&h, "crank.end").dist(nearest) < 0.05, "{:?}", point(&h, "crank.end"));
@@ -198,7 +199,7 @@ fn a_four_bar_release_uses_the_final_pointer_position() {
     let end = screen(&mut h, -10.0, 16.0);
     press_and_move(&mut h, &[a, b]);
     h.frames(8);
-    assert_eq!(h.app.viewport.point_drag.as_ref().map(|(id, _, _)| id.as_str()), Some("crank.end"));
+    assert_eq!(h.app.viewport.point_drag.as_ref().map(|(id, _, _, _, _)| id.as_str()), Some("crank.end"));
     release(&mut h, end);
     let nearest = Vec2::new(-10.0, 16.0).normalized().unwrap() * 10.0;
     assert!(point(&h, "crank.end").dist(nearest) < 0.05, "release left {:?}", point(&h, "crank.end"));
@@ -211,7 +212,7 @@ fn a_four_bar_edge_grab_keeps_its_pick_offset_when_rotating() {
     let a = screen(&mut h, -7.0, 0.25);
     let b = screen(&mut h, -7.0, 11.2);
     press_and_move(&mut h, &[a, b]);
-    assert_eq!(h.app.viewport.point_drag.as_ref().map(|(id, _, _)| id.as_str()), Some("crank"));
+    assert_eq!(h.app.viewport.point_drag.as_ref().map(|(id, _, _, _, _)| id.as_str()), Some("crank"));
     h.frames(8);
     release(&mut h, b);
     let local = Vec2::new(0.7, -0.025);
@@ -304,7 +305,11 @@ fn associated_spline_offset_hides_fit_nodes_and_follows_a_source_drag_live() {
     let original = h.app.session.world_state().unwrap().sketch(sid).unwrap().sketch.clone();
     let source = original.curve_index("s1").unwrap();
     let derived = original.curve_index(&output).unwrap();
-    let source_points = original.curves[source].kind.point_ids();
+    // The source's fit points; its tangent handles (#6502) show only while it is selected.
+    let source_points = match &original.curves[source].kind {
+        solidcraft_engine::sketch::CurveKind::Spline { pts, .. } => pts.clone(),
+        kind => kind.point_ids(),
+    };
     let derived_points = original.curves[derived].kind.point_ids();
     assert!(derived_points.len() > 100, "exercise the crowded generated fit nodes");
     for &i in &source_points {
@@ -485,11 +490,90 @@ fn a_centre_rectangles_centre_held_on_the_origin_keeps_the_rectangle_when_dragge
     let mut path = vec![a];
     path.extend(steps(a, b, 6));
     press_and_move(&mut h, &path);
-    assert_eq!(h.app.viewport.point_drag.as_ref().map(|(id, _, _)| id.as_str()), Some("p5"), "grabbed the centre, not the diagonal");
+    assert_eq!(h.app.viewport.point_drag.as_ref().map(|(id, _, _, _, _)| id.as_str()), Some("p5"), "grabbed the centre, not the diagonal");
     h.frames(4);
     release(&mut h, b);
     assert!(point(&h, "p5").len() < 1e-6, "the centre left the origin: {:?}", point(&h, "p5"));
     for (p, was) in ["p1", "p2", "p3", "p4"].into_iter().zip(corners) {
         assert!(point(&h, p).dist(was) < 1e-6, "{p} moved from {was:?} to {:?}", point(&h, p));
     }
+}
+
+/// A selected rectangle with a corner on the origin, dragged by its right side or its top,
+/// stretches as far as the pointer goes. The grab followed the average of the moving corners,
+/// one of which the origin held back, and each frame's catch-up took the side nearly twice as
+/// far as the pointer.
+#[test]
+fn a_selected_rectangle_held_at_a_corner_stretches_with_the_pointer() {
+    for (grab, to) in [(Vec2::new(30.0, 10.0), Vec2::new(40.0, 10.0)), (Vec2::new(15.0, 20.0), Vec2::new(15.0, 30.0))] {
+        let mut h = Harness::new();
+        run(&mut h, "sketch.create", json!({"plane": "XY"}));
+        run(&mut h, "sketch.rectangle.two_point", json!({"p0": [0, 0], "p1": [30, 20]}));
+        let sid = h.app.session.active_sketch.expect("sketch mode");
+        let corner =
+            h.app.session.doc.sketch(sid).expect("the sketch").points.iter().find(|p| p.id != "origin" && p.pos.len() < 1e-9).map(|p| p.id.clone());
+        run(&mut h, "sketch.constraint.coincident", json!({"a": corner.expect("a corner on the origin"), "b": "origin"}));
+        run(&mut h, "sketch.options", json!({"show_dimensions": false, "show_constraints": false}));
+        h.app.session.selection = ["l1", "l2", "l3", "l4"].iter().map(|l| Sel::SketchCurve { id: (*l).into(), sketch: None }).collect();
+        h.call("ui.view", json!({"view": "top"}));
+        h.app.cam.distance = 150.0;
+        h.frames(3);
+        let a = screen(&mut h, grab.x, grab.y);
+        let b = screen(&mut h, to.x, to.y);
+        let mut path = vec![a];
+        path.extend(steps(a, b, 6));
+        press_and_move(&mut h, &path);
+        release(&mut h, b);
+        let st = h.app.session.world_state().unwrap();
+        let sk = &st.sketch(sid).expect("the sketch").sketch;
+        let far = sk.points.iter().map(|p| p.pos).fold(Vec2::ZERO, |m, p| Vec2::new(m.x.max(p.x), m.y.max(p.y)));
+        let want = Vec2::new(30.0, 20.0) + (to - grab);
+        assert!(far.dist(want) < 0.05, "dragged {:?}: the far corner went to {far:?}, not {want:?}", to - grab);
+    }
+}
+
+/// #6502: a selected fit spline shows a tangent handle at each fit point without storing any; a
+/// drag from one stores them and turns it, in the drag's one undo step.
+#[test]
+fn a_shown_tangent_handle_is_stored_and_turned_by_a_drag() {
+    let mut h = Harness::new();
+    h.app.home.open = false;
+    run(&mut h, "sketch.create", json!({"plane": "XY"}));
+    run(&mut h, "sketch.spline.fit_point", json!({"points": [[-40, 0], [-15, 20], [15, -10], [40, 10]]}));
+    run(&mut h, "sketch.options", json!({"snap": false, "show_dimensions": false, "show_constraints": false}));
+    h.call("ui.view", json!({"view": "top"}));
+    h.call("ui.view", json!({"view": "fit"}));
+    h.app.session.selection = vec![Sel::SketchCurve { id: "s1".into(), sketch: None }];
+    h.settle();
+    let sid = h.app.session.active_sketch.expect("sketch mode");
+    let shown = {
+        let st = h.app.session.world_state().unwrap();
+        let sk = &st.sketch(sid).unwrap().sketch;
+        solidcraft_engine::view::spline_tangent_guides(sk, sk.curve_index("s1").unwrap())
+    };
+    assert_eq!(shown.len(), 4, "a guide at each fit point");
+    assert!(shown.iter().all(|g| g.point.is_none()), "shown, not stored");
+    let stored = |h: &Harness| {
+        let sk = h.app.session.doc.sketch(sid).expect("the sketch");
+        match &sk.curves[sk.curve_index("s1").unwrap()].kind {
+            solidcraft_engine::sketch::CurveKind::Spline { handles, .. } => handles.iter().map(|i| sk.points[*i].id.clone()).collect::<Vec<_>>(),
+            _ => panic!("a fit spline"),
+        }
+    };
+    assert!(stored(&h).is_empty());
+    let undo = h.app.session.undo.len();
+    let target = shown[1].handle + Vec2::new(-3.0, 8.0);
+    let a = screen(&mut h, shown[1].handle.x, shown[1].handle.y);
+    let b = screen(&mut h, target.x, target.y);
+    let mut path = vec![a];
+    path.extend(steps(a, b, 8));
+    press_and_move(&mut h, &path);
+    assert!(h.app.viewport.point_drag.is_some(), "the drag is under way");
+    release(&mut h, b);
+    let handles = stored(&h);
+    assert_eq!(handles.len(), 4, "the drag stored the handles");
+    assert!(point(&h, &handles[1]).dist(target) < 0.1, "{:?}", point(&h, &handles[1]));
+    assert_eq!(h.app.session.undo.len(), undo + 1, "one undo step for storing and turning");
+    run(&mut h, "edit.undo", json!({}));
+    assert!(stored(&h).is_empty(), "undo gives back the spline without handles");
 }

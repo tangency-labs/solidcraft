@@ -1,0 +1,212 @@
+{
+  "cases": [
+    {
+      "name": "public_extrusion_identity",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:TurnToNURBS;source/SMLib/src/SmSurfOfExtrusion.cpp",
+      "inputs": {
+        "script": "scale_probe",
+        "obj": {
+          "extrusion_face": {
+            "origin": [
+              2,
+              3,
+              5
+            ],
+            "size": [
+              4,
+              3
+            ]
+          }
+        },
+        "op": {
+          "translate": {
+            "v": [
+              0,
+              0,
+              0
+            ]
+          }
+        }
+      }
+    },
+    {
+      "name": "public_extrusion_translate",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:TurnToNURBS;source/SMLib/src/SmSurfOfExtrusion.cpp",
+      "inputs": {
+        "script": "scale_probe",
+        "obj": {
+          "extrusion_face": {
+            "origin": [
+              2,
+              3,
+              5
+            ],
+            "size": [
+              4,
+              3
+            ]
+          }
+        },
+        "op": {
+          "translate": {
+            "v": [
+              7,
+              -2,
+              3
+            ]
+          }
+        }
+      }
+    },
+    {
+      "name": "public_extrusion_uniform",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:TurnToNURBS;source/SMLib/src/SmSurfOfExtrusion.cpp",
+      "inputs": {
+        "script": "scale_probe",
+        "obj": {
+          "extrusion_face": {
+            "origin": [
+              2,
+              3,
+              5
+            ],
+            "size": [
+              4,
+              3
+            ]
+          }
+        },
+        "op": {
+          "scale": {
+            "s": [
+              2,
+              2,
+              2
+            ]
+          }
+        }
+      }
+    },
+    {
+      "name": "public_extrusion_anisotropic",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:TurnToNURBS;source/SMLib/src/SmSurfOfExtrusion.cpp",
+      "inputs": {
+        "script": "scale_probe",
+        "obj": {
+          "extrusion_face": {
+            "origin": [
+              2,
+              3,
+              5
+            ],
+            "size": [
+              4,
+              3
+            ]
+          }
+        },
+        "op": {
+          "scale": {
+            "s": [
+              2,
+              3,
+              0.5
+            ]
+          }
+        }
+      }
+    },
+    {
+      "name": "public_extrusion_signed",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:TurnToNURBS;source/SMLib/src/SmSurfOfExtrusion.cpp",
+      "inputs": {
+        "script": "scale_probe",
+        "obj": {
+          "extrusion_face": {
+            "origin": [
+              2,
+              3,
+              5
+            ],
+            "size": [
+              4,
+              3
+            ]
+          }
+        },
+        "op": {
+          "scale_by_pt": {
+            "s": [
+              -2,
+              3,
+              0.5
+            ],
+            "r": [
+              1,
+              2,
+              3
+            ]
+          }
+        }
+      }
+    },
+    {
+      "name": "public_extrusion_odd_reflection",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:TurnToNURBS;source/SMLib/src/SmSurfOfExtrusion.cpp",
+      "inputs": {
+        "script": "scale_probe",
+        "obj": {
+          "extrusion_face": {
+            "origin": [
+              2,
+              3,
+              5
+            ],
+            "size": [
+              4,
+              3
+            ]
+          }
+        },
+        "op": {
+          "scale": {
+            "s": [
+              -1,
+              -1,
+              -1
+            ]
+          }
+        }
+      }
+    },
+    {
+      "name": "public_extrusion_even_reflection",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:TurnToNURBS;source/SMLib/src/SmSurfOfExtrusion.cpp",
+      "inputs": {
+        "script": "scale_probe",
+        "obj": {
+          "extrusion_face": {
+            "origin": [
+              2,
+              3,
+              5
+            ],
+            "size": [
+              4,
+              3
+            ]
+          }
+        },
+        "op": {
+          "scale": {
+            "s": [
+              -1,
+              -1,
+              1
+            ]
+          }
+        }
+      }
+    }
+  ]
+}

@@ -112,13 +112,13 @@ impl PrimaryFilm {
 
     /// A display consumer can only read a fully completed, immutable pass. The
     /// returned radiance is premultiplied by coverage; background is kept separate.
-    pub(crate) fn pixel(&self, index: usize) -> Result<([f64; 3], u16, u16)> {
+    pub(crate) fn pixel(&self, index: usize) -> Result<([f64; 3], u32, u32)> {
         if !self.ready() || self.next_pixel != 0 || self.samples == 0 {
             return Err(invalid("primary film has no uniform complete pass"));
         }
         let pixel = self.pixels.get(index).ok_or_else(|| invalid("primary film resolve index out of range"))?;
-        let covered = u16::try_from(pixel.covered).map_err(|_| limit("primary coverage exceeds resolve representation"))?;
-        let samples = u16::try_from(self.samples).map_err(|_| limit("primary sample count exceeds resolve representation"))?;
+        let covered = pixel.covered;
+        let samples = self.samples;
         Ok((pixel.sum.map(|sum| sum / f64::from(self.samples)), covered, samples))
     }
 }

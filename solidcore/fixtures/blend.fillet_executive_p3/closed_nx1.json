@@ -1,0 +1,88 @@
+{
+  "cases": [
+    {
+      "name": "big-rad-filleted_box-r2.0-top-edges",
+      "upstream_ref": "tests/prog_test/src/smFilletTest.cpp:1176",
+      "inputs": {
+        "real_solid": {
+          "source": {
+            "kind": "file",
+            "path": {
+              "$upstream_file": "Fillet/filleted_box.smb"
+            }
+          },
+          "radius": 2.0,
+          "xsect": 1,
+          "continuity": 1,
+          "thumbweight": 1,
+          "edges": [
+            3,
+            6,
+            9,
+            12,
+            15,
+            17,
+            20,
+            23
+          ]
+        }
+      }
+    },
+    {
+      "name": "big-rad-filleted_box-r1.0-top-edges",
+      "upstream_ref": "tests/prog_test/src/smFilletTest.cpp:1176",
+      "inputs": {
+        "real_solid": {
+          "source": {
+            "kind": "file",
+            "path": {
+              "$upstream_file": "Fillet/filleted_box.smb"
+            }
+          },
+          "radius": 1.0,
+          "xsect": 1,
+          "continuity": 1,
+          "thumbweight": 1,
+          "edges": [
+            3,
+            6,
+            9,
+            12,
+            15,
+            17,
+            20,
+            23
+          ]
+        }
+      }
+    },
+    {
+      "name": "big-rad-filleted_box-r3.0-top-edges",
+      "upstream_ref": "tests/prog_test/src/smFilletTest.cpp:1176",
+      "inputs": {
+        "real_solid": {
+          "source": {
+            "kind": "file",
+            "path": {
+              "$upstream_file": "Fillet/filleted_box.smb"
+            }
+          },
+          "radius": 3.0,
+          "xsect": 1,
+          "continuity": 1,
+          "thumbweight": 1,
+          "edges": [
+            3,
+            6,
+            9,
+            12,
+            15,
+            17,
+            20,
+            23
+          ]
+        }
+      }
+    }
+  ]
+}

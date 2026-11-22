@@ -1,0 +1,318 @@
+{
+ "issue": "https://github.com/tangency-labs/solidcraft/issues/2707",
+ "pr": "https://github.com/tangency-labs/solidcraft/pull/4012",
+ "test": "none: not fixed on truck (paused under tangency-labs/solidcraft#3992); on the kernel-smlib branch (#4012), SMLib's fillet and boolean build these plates and its integration measures them within 1e-10 of the body's volume (local run, see the PR)",
+ "summary": "SolidCraft's Measure on truck read the volume a 1 mm round removes along a 100 mm edge as 21.49 mm^3 on a 100 mm plate, 21.97 on a 300 mm plate and 23.47 from 500 mm (exact 21.4602; a 1 mm chamfer was exact). Its fine tessellation is meant to tighten for small radii, but the radius probe runs on a mesh sized by the part, misses the R1 arc on large plates, and leaves the chord tolerance (sag) at 1/20000 of the part: the error matches 32, 8, 4 and 4 chords on the round's quarter arc on the 100, 300, 500 and 1000 mm plates. The cases are the issue's plates (100 x D x 10, the round on the top edge at y = D), a dia. 3 through hole in the 100 and 1000 mm plates, and the plain 100 and 1000 mm plates as controls. Tolerances are 0.1 % of the feature's volume, so a volume that drifts with the part's size fails. Volumes are closed form.",
+ "cases": [
+  {
+   "name": "plate_100",
+   "note": "Control: the 100 mm plate alone, to separate the integrator's error on a large body from the feature's (same tolerance as the round).",
+   "steps": [
+    {
+     "op": "box",
+     "id": "result",
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "size": [
+      100,
+      100,
+      10
+     ]
+    }
+   ],
+   "expect": {
+    "lumps": 1,
+    "volume": {
+     "value": 100000.0,
+     "tol": 0.021460183660255174,
+     "formula": "100*100*10 (tol: 0.1 % of the round's volume)"
+    }
+   }
+  },
+  {
+   "name": "plate_1000",
+   "note": "Control: the 1000 mm plate alone, to separate the integrator's error on a large body from the feature's (same tolerance as the round).",
+   "steps": [
+    {
+     "op": "box",
+     "id": "result",
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "size": [
+      100,
+      1000,
+      10
+     ]
+    }
+   ],
+   "expect": {
+    "lumps": 1,
+    "volume": {
+     "value": 1000000.0,
+     "tol": 0.021460183660255174,
+     "formula": "100*1000*10 (tol: 0.1 % of the round's volume)"
+    }
+   }
+  },
+  {
+   "name": "round_on_plate_100",
+   "note": "#2707: R1 round along the plate's top edge at y = 100. On truck its error matches 32 chords on the quarter arc: it read 0.15 % high.",
+   "steps": [
+    {
+     "op": "box",
+     "id": "plate",
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "size": [
+      100,
+      100,
+      10
+     ]
+    },
+    {
+     "op": "fillet",
+     "id": "result",
+     "body": "plate",
+     "edges": [
+      [
+       50,
+       100,
+       10
+      ]
+     ],
+     "radius": 1
+    }
+   ],
+   "expect": {
+    "lumps": 1,
+    "volume": {
+     "value": 99978.53981633975,
+     "tol": 0.021460183660255174,
+     "formula": "100*100*10 - (1 - pi/4)*1^2*100 (tol: 0.1 % of the round)"
+    }
+   }
+  },
+  {
+   "name": "round_on_plate_300",
+   "note": "#2707: R1 round along the plate's top edge at y = 300. On truck its error matches 8 chords on the quarter arc: it read 2.36 % high.",
+   "steps": [
+    {
+     "op": "box",
+     "id": "plate",
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "size": [
+      100,
+      300,
+      10
+     ]
+    },
+    {
+     "op": "fillet",
+     "id": "result",
+     "body": "plate",
+     "edges": [
+      [
+       50,
+       300,
+       10
+      ]
+     ],
+     "radius": 1
+    }
+   ],
+   "expect": {
+    "lumps": 1,
+    "volume": {
+     "value": 299978.53981633973,
+     "tol": 0.021460183660255174,
+     "formula": "100*300*10 - (1 - pi/4)*1^2*100 (tol: 0.1 % of the round)"
+    }
+   }
+  },
+  {
+   "name": "round_on_plate_500",
+   "note": "#2707: R1 round along the plate's top edge at y = 500. On truck its error matches 4 chords on the quarter arc: it read 9.38 % high.",
+   "steps": [
+    {
+     "op": "box",
+     "id": "plate",
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "size": [
+      100,
+      500,
+      10
+     ]
+    },
+    {
+     "op": "fillet",
+     "id": "result",
+     "body": "plate",
+     "edges": [
+      [
+       50,
+       500,
+       10
+      ]
+     ],
+     "radius": 1
+    }
+   ],
+   "expect": {
+    "lumps": 1,
+    "volume": {
+     "value": 499978.53981633973,
+     "tol": 0.021460183660255174,
+     "formula": "100*500*10 - (1 - pi/4)*1^2*100 (tol: 0.1 % of the round)"
+    }
+   }
+  },
+  {
+   "name": "round_on_plate_1000",
+   "note": "#2707: R1 round along the plate's top edge at y = 1000. On truck its error matches 4 chords on the quarter arc: it read 9.38 % high. Same 4 chords as at 500 mm: truck's error saturates there.",
+   "steps": [
+    {
+     "op": "box",
+     "id": "plate",
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "size": [
+      100,
+      1000,
+      10
+     ]
+    },
+    {
+     "op": "fillet",
+     "id": "result",
+     "body": "plate",
+     "edges": [
+      [
+       50,
+       1000,
+       10
+      ]
+     ],
+     "radius": 1
+    }
+   ],
+   "expect": {
+    "lumps": 1,
+    "volume": {
+     "value": 999978.5398163397,
+     "tol": 0.021460183660255174,
+     "formula": "100*1000*10 - (1 - pi/4)*1^2*100 (tol: 0.1 % of the round)"
+    }
+   }
+  },
+  {
+   "name": "hole_in_plate_100",
+   "note": "Control: a dia. 3 through hole in the 100 mm plate; truck read it 0.04 % low.",
+   "steps": [
+    {
+     "op": "box",
+     "id": "plate",
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "size": [
+      100,
+      100,
+      10
+     ]
+    },
+    {
+     "op": "cylinder",
+     "id": "drill",
+     "origin": [
+      50,
+      50,
+      -1
+     ],
+     "radius": 1.5,
+     "height": 12
+    },
+    {
+     "op": "difference",
+     "id": "result",
+     "a": "plate",
+     "b": "drill"
+    }
+   ],
+   "expect": {
+    "lumps": 1,
+    "volume": {
+     "value": 99929.31416529423,
+     "tol": 0.07068583470577035,
+     "formula": "100*100*10 - pi*1.5^2*10 (tol: 0.1 % of the hole)"
+    }
+   }
+  },
+  {
+   "name": "hole_in_plate_1000",
+   "note": "The same dia. 3 hole in the 1000 mm plate; truck read it 0.20 % low.",
+   "steps": [
+    {
+     "op": "box",
+     "id": "plate",
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "size": [
+      100,
+      1000,
+      10
+     ]
+    },
+    {
+     "op": "cylinder",
+     "id": "drill",
+     "origin": [
+      50,
+      500,
+      -1
+     ],
+     "radius": 1.5,
+     "height": 12
+    },
+    {
+     "op": "difference",
+     "id": "result",
+     "a": "plate",
+     "b": "drill"
+    }
+   ],
+   "expect": {
+    "lumps": 1,
+    "volume": {
+     "value": 999929.3141652943,
+     "tol": 0.07068583470577035,
+     "formula": "100*1000*10 - pi*1.5^2*10 (tol: 0.1 % of the hole)"
+    }
+   }
+  }
+ ]
+}

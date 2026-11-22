@@ -16,6 +16,8 @@ pub struct Editor {
     pub(super) new_values: std::collections::BTreeMap<String, String>,
     pub(super) adding_row: bool,
     pub(super) focus_new_row: bool,
+    /// The row being renamed (its name, the text typed so far), opened by a double-click on its name.
+    pub(super) renaming: Option<(String, String)>,
     pub(super) drafts: std::collections::BTreeMap<(String, String), String>,
     /// The configuration table at a design revision: the command's answer and its shown cells.
     pub(super) table: Option<std::sync::Arc<(u64, Value, super::Table)>>,
@@ -23,6 +25,9 @@ pub struct Editor {
     /// takes focus when the menu opens and is cleared when it closes).
     pub(super) column_filter: String,
     pub(super) column_menu_open: bool,
+    /// After Update: the changes the table has no column for (`config.update_from_design`'s
+    /// `not_captured`), at the design revision the update made.
+    pub(super) not_captured: Option<(u64, Vec<String>)>,
 }
 impl Default for Editor {
     fn default() -> Self {
@@ -42,15 +47,17 @@ impl Default for Editor {
             new_values: Default::default(),
             adding_row: false,
             focus_new_row: false,
+            renaming: None,
             drafts: Default::default(),
             table: None,
             column_filter: String::new(),
             column_menu_open: false,
+            not_captured: None,
         }
     }
 }
 fn choose(ui: &mut Ui, id: &str, value: &mut String, options: &[String]) {
-    let mut labels = vec![crate::i18n::tr_label("Choose…")];
+    let mut labels = vec![solidcraft_ui_text::tr_label("Choose…")];
     labels.extend(options.iter().map(String::as_str));
     let mut selected = options.iter().position(|o| o == value).map_or(0, |i| i + 1);
     let before = selected;
@@ -92,13 +99,13 @@ pub(super) fn show(ui: &mut Ui, app: &mut SolveApp, error: &mut Option<String>, 
     let unlisted_features = suppression_features.len() < features.len();
     let unlisted_parameters = all_parameters.iter().any(|p| !parameters.contains(p));
     ui_kit::divider(ui, "configuration_rules");
-    ui_kit::text(ui, crate::i18n::tr_label("Configuration rules"), ui_kit::Text::Heading("rules_heading"));
+    ui_kit::text(ui, solidcraft_ui_text::tr_label("Configuration rules"), ui_kit::Text::Heading("rules_heading"));
     ui_kit::text(
         ui,
-        crate::i18n::tr_label("Rules run from top to bottom. Matched drives change effective values."),
+        solidcraft_ui_text::tr_label("Rules run from top to bottom. Matched drives change effective values."),
         ui_kit::Text::Note("rules_drives"),
     );
-    ui_kit::text(ui, crate::i18n::tr_label("Matched restrictions check the final values."), ui_kit::Text::Note("rules_restrictions"));
+    ui_kit::text(ui, solidcraft_ui_text::tr_label("Matched restrictions check the final values."), ui_kit::Text::Note("rules_restrictions"));
     for (index, rule) in rules.iter().enumerate() {
         ui.push_id(&rule.id, |ui| {
             let summary = match &rule.effect {
@@ -111,24 +118,25 @@ pub(super) fn show(ui: &mut Ui, app: &mut SolveApp, error: &mut Option<String>, 
                 RuleEffect::AllowParameterValues { parameter, expressions } => format!("Restricts {parameter}: {}", expressions.join(", ")),
             };
             let actions_width = ["Edit", "↑", "↓", "Delete"].iter().map(|label| ui_kit::ContentWidth::button(ui, label)).sum::<f32>()
-                + crate::theme::Tokens::get().space_4 * 3.0;
+                + solidcraft_theme::Tokens::get().space_4 * 3.0;
             let mut enabled = rule.enabled;
             if ui_kit::summary_row(ui, &rule.name, &summary, &mut enabled, actions_width, |ui| {
-                if ui_kit::button(ui, crate::i18n::tr_label("Edit"), ui_kit::Button::Normal).clicked() {
+                if ui_kit::button(ui, solidcraft_ui_text::tr_label("Edit"), ui_kit::Button::Normal).clicked() {
                     editor.rule = rule.clone();
                 }
-                let up = ui_kit::button(ui, "↑", ui_kit::Button::Enabled(index > 0)).backing_on_hover_text(crate::i18n::tr_label("Move earlier"));
+                let up =
+                    ui_kit::button(ui, "↑", ui_kit::Button::Enabled(index > 0)).backing_on_hover_text(solidcraft_ui_text::tr_label("Move earlier"));
                 crate::scenario::publish_handle(&format!("config:rule:{}:up", rule.id), up.rect.center());
                 if up.clicked() {
                     *error = app.run("config.rule", json!({"id":rule.id,"index":index-1})).err();
                 }
                 if ui_kit::button(ui, "↓", ui_kit::Button::Enabled(index + 1 < rules.len()))
-                    .backing_on_hover_text(crate::i18n::tr_label("Move later"))
+                    .backing_on_hover_text(solidcraft_ui_text::tr_label("Move later"))
                     .clicked()
                 {
                     *error = app.run("config.rule", json!({"id":rule.id,"index":index+1})).err();
                 }
-                if ui_kit::button(ui, crate::i18n::tr_label("Delete"), ui_kit::Button::Normal).clicked() {
+                if ui_kit::button(ui, solidcraft_ui_text::tr_label("Delete"), ui_kit::Button::Normal).clicked() {
                     *error = app.run("config.rule", json!({"id":rule.id,"delete":true})).err();
                 }
             }) {
@@ -141,8 +149,8 @@ pub(super) fn show(ui: &mut Ui, app: &mut SolveApp, error: &mut Option<String>, 
     ui_kit::section(ui, "rule_editor", "Add or edit rule", false, |ui| {
         ui.vertical(|ui| {
             expression(ui, "Rule name", &mut editor.rule.name);
-            ui_kit::checkbox(ui, crate::i18n::tr_label("Enabled"), &mut editor.rule.enabled);
-            if ui_kit::button(ui, crate::i18n::tr_label("New"), ui_kit::Button::Small).clicked() {
+            ui_kit::checkbox(ui, solidcraft_ui_text::tr_label("Enabled"), &mut editor.rule.enabled);
+            if ui_kit::button(ui, solidcraft_ui_text::tr_label("New"), ui_kit::Button::Small).clicked() {
                 editor.rule = Editor::default().rule;
             }
         });
@@ -192,7 +200,7 @@ pub(super) fn show(ui: &mut Ui, app: &mut SolveApp, error: &mut Option<String>, 
                 ui.vertical(|ui| {
                     feature_choice(ui, "effect_feature", feature, &suppression_features);
                     columns_note(ui, unlisted_features, "config.rule_suppression_columns");
-                    ui_kit::checkbox(ui, crate::i18n::tr_label("Suppressed"), value);
+                    ui_kit::checkbox(ui, solidcraft_ui_text::tr_label("Suppressed"), value);
                 });
             }
             RuleEffect::ParameterRange { parameter, minimum, maximum } => {
@@ -258,7 +266,7 @@ pub(super) fn show(ui: &mut Ui, app: &mut SolveApp, error: &mut Option<String>, 
         }
         if let Some(preview) = &editor.preview {
             ui_kit::section(ui, "rule_preview", &format!("Preview: {}", preview["active"].as_str().unwrap_or("row")), false, |ui| {
-                report(ui, crate::i18n::tr_label("Preview leaves the current design unchanged."));
+                report(ui, solidcraft_ui_text::tr_label("Preview leaves the current design unchanged."));
                 if let Some(styles) = preview["styles"].as_array() {
                     for style in styles {
                         report(
@@ -326,11 +334,11 @@ pub(super) fn show(ui: &mut Ui, app: &mut SolveApp, error: &mut Option<String>, 
 /// how to add one.
 fn columns_note(ui: &mut Ui, unlisted: bool, message: &'static str) {
     if unlisted {
-        ui_kit::text(ui, crate::i18n::tr(message), ui_kit::Text::Note(message));
+        ui_kit::text(ui, solidcraft_ui_text::tr(message), ui_kit::Text::Note(message));
     }
 }
 fn report(ui: &mut Ui, text: impl AsRef<str>) {
-    ui_kit::text(ui, crate::i18n::tr_label(text.as_ref()), ui_kit::Text::Report("rule_report", false));
+    ui_kit::text(ui, solidcraft_ui_text::tr_label(text.as_ref()), ui_kit::Text::Report("rule_report", false));
 }
 
 fn feature_choice(ui: &mut Ui, id: &str, feature: &mut u64, features: &[(u64, String)]) {
@@ -398,7 +406,7 @@ fn condition_editor(ui: &mut Ui, condition: &mut RuleCondition, parameters: &[St
         RuleCondition::Suppression { feature, value } => {
             ui.vertical(|ui| {
                 feature_choice(ui, "condition_feature", feature, features);
-                ui_kit::checkbox(ui, crate::i18n::tr_label("Suppressed"), value);
+                ui_kit::checkbox(ui, solidcraft_ui_text::tr_label("Suppressed"), value);
             });
         }
         RuleCondition::All { conditions } | RuleCondition::Any { conditions } => {
@@ -407,7 +415,7 @@ fn condition_editor(ui: &mut Ui, condition: &mut RuleCondition, parameters: &[St
                 ui.push_id(index, |ui| {
                     ui.indent("condition_group", |ui| {
                         condition_editor(ui, child, parameters, features, depth + 1);
-                        if ui_kit::button(ui, crate::i18n::tr_label("Remove condition"), ui_kit::Button::Small).clicked() {
+                        if ui_kit::button(ui, solidcraft_ui_text::tr_label("Remove condition"), ui_kit::Button::Small).clicked() {
                             remove = Some(index);
                         }
                     });

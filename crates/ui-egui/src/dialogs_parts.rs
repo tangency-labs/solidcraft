@@ -12,7 +12,7 @@ use solidcraft_engine::{Sel, Session};
 use crate::SolveApp;
 use crate::dialogs::{Kind, combo, form_row};
 use crate::selection::{EDGES, FACES, SelInput};
-use crate::theme::Tokens;
+use solidcraft_theme::Tokens;
 
 /// One family of the library.
 #[derive(Clone, Debug, PartialEq)]
@@ -58,7 +58,7 @@ pub fn families(v: &Value) -> Vec<Family> {
 /// name for a family the catalogs don't know.
 pub(crate) fn family_name(f: &Family) -> String {
     let id = format!("parts.family.{}", f.id);
-    match crate::i18n::tr(&id) {
+    match solidcraft_ui_text::tr(&id) {
         shown if shown == id => f.name.clone(),
         shown => shown.to_string(),
     }
@@ -78,6 +78,9 @@ pub struct Pt {
     pub picture: Option<(usize, usize, Option<usize>)>,
     /// The library, read once.
     pub lib: Option<Vec<Family>>,
+    /// Turned over where it sits (the command's `flip`): for a screw that a pick seats upside
+    /// down, as one on the outer edge of a counterbore's floor does.
+    pub flip: bool,
 }
 
 /// The dialog for Insert Part.
@@ -86,7 +89,7 @@ pub fn start(_app: &SolveApp, id: &str) -> Option<(Kind, Vec<SelInput>)> {
     // that shows it (#8735), which did nothing before.
     matches!(id, "parts.fastener" | "parts.insert" | "parts.library").then(|| {
         (
-            Kind::Part(Pt { family: 0, size: 0, length: None, name: String::new(), picture: None, lib: None }),
+            Kind::Part(Pt { family: 0, size: 0, length: None, name: String::new(), picture: None, lib: None, flip: false }),
             vec![SelInput::new("parts.holes", FACES | EDGES, true)],
         )
     })
@@ -120,6 +123,10 @@ pub fn insert_params(lib: &[Family], k: &Pt, holes: &[Sel]) -> Result<Value, Str
         1 => p["at"] = at.into_iter().next().unwrap_or(Value::Null),
         _ => p["at"] = Value::Array(at),
     }
+    // Flipped, the part turns over where it sits: in each hole picked, or at the origin.
+    if k.flip {
+        p["flip"] = json!(true);
+    }
     if !k.name.trim().is_empty() {
         p["name"] = json!(k.name.trim());
     }
@@ -149,6 +156,8 @@ fn picture(p: &Value) -> Option<egui::ColorImage> {
     let mut s = Session::default();
     let mut q = p.clone();
     if let Value::Object(m) = &mut q {
+        // The picture shows the part itself, head up.
+        m.remove("flip");
         m.remove("at");
         m.insert("point".into(), json!([0.0, 0.0, 0.0]));
         m.insert("direction".into(), json!([0.0, 0.0, 1.0]));
@@ -170,7 +179,11 @@ pub fn rows(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut Pt, inputs: &[SelInpu
     };
     if lib.is_empty() {
         ui.vertical(|ui| {
-            crate::ui_kit::text(ui, crate::i18n::tr_label("the parts library is not available"), crate::ui_kit::Text::Note("parts_unavailable"));
+            crate::ui_kit::text(
+                ui,
+                solidcraft_ui_text::tr_label("the parts library is not available"),
+                crate::ui_kit::Text::Note("parts_unavailable"),
+            );
         });
         return false;
     }
@@ -222,10 +235,13 @@ pub fn rows(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut Pt, inputs: &[SelInpu
             k.length = Some(i);
         });
     }
-    text_row(ui, "Name", &mut k.name, crate::i18n::tr("parts.automatic_name"));
+    if crate::ui_kit::checkbox_row(ui, "pt_flip", "Flip", k.flip) {
+        k.flip = !k.flip;
+    }
+    text_row(ui, "Name", &mut k.name, solidcraft_ui_text::tr("parts.automatic_name"));
     // The part, and its table values.
     let key = (k.family, k.size, k.length);
-    let tex_id = egui::Id::new("sc_part_picture");
+    let tex_id = egui::Id::unique("sc_part_picture");
     if k.picture != Some(key) {
         let tex = insert_params(&lib, k, &[])
             .ok()
@@ -244,7 +260,7 @@ pub fn rows(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut Pt, inputs: &[SelInpu
             ui.add(egui::Image::new(&tx).fit_to_exact_size(vec2(180.0, 112.0)).corner_radius(t.radius_sm));
         }
         None => {
-            crate::ui_kit::text(ui, crate::i18n::tr_label("no picture"), crate::ui_kit::Text::Note("parts_picture"));
+            crate::ui_kit::text(ui, solidcraft_ui_text::tr_label("no picture"), crate::ui_kit::Text::Note("parts_picture"));
         }
     });
     if let Some((_, row)) = f.sizes.get(k.size)
@@ -264,7 +280,7 @@ pub fn rows(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut Pt, inputs: &[SelInpu
     }
     if inputs.first().is_some_and(|i| i.items.is_empty()) {
         ui.vertical(|ui| {
-            crate::ui_kit::text(ui, crate::i18n::tr("parts.placement_hint"), crate::ui_kit::Text::Note("parts_placement"));
+            crate::ui_kit::text(ui, solidcraft_ui_text::tr("parts.placement_hint"), crate::ui_kit::Text::Note("parts_placement"));
         });
     }
     false
@@ -330,9 +346,10 @@ mod tests {
     /// don't know keeps the library's name.
     #[test]
     fn family_names_follow_the_language() {
+        crate::i18n::install();
         let l = families(&solidcraft_engine::Session::default().execute("parts.library", &json!({})).unwrap());
         assert!(l.len() >= 7, "{}", l.len());
-        let _german = crate::i18n::scope("de");
+        let _german = solidcraft_ui_text::scope("de");
         for f in &l {
             assert_ne!(family_name(f), f.name, "{}", f.id);
         }
@@ -358,7 +375,7 @@ mod tests {
     #[test]
     fn insert_params_for_picks() {
         let l = lib();
-        let k = Pt { family: 0, size: 1, length: Some(2), name: String::new(), picture: None, lib: None };
+        let k = Pt { family: 0, size: 1, length: Some(2), name: String::new(), picture: None, lib: None, flip: false };
         let hole = Sel::Face { body: "Body1".into(), index: 3, point: Vec3::new(5.0, 0.0, 10.0) };
         let p = insert_params(&l, &k, std::slice::from_ref(&hole)).unwrap();
         assert_eq!(p, json!({"family": "socket_head_cap_screw", "size": "M6", "length": 20.0, "at": [5.0, 0.0, 10.0]}));
@@ -366,12 +383,44 @@ mod tests {
         let p = insert_params(&l, &k, &[hole, rim]).unwrap();
         assert_eq!(p["at"], json!([[5.0, 0.0, 10.0], [25.0, 0.0, 10.0]]));
         assert!(p.get("point").is_none());
-        let k = Pt { family: 1, size: 0, length: None, name: "Front bearing".into(), picture: None, lib: None };
+        let k = Pt { family: 1, size: 0, length: None, name: "Front bearing".into(), picture: None, lib: None, flip: false };
         let p = insert_params(&l, &k, &[]).unwrap();
         assert_eq!(p["point"], json!([0.0, 0.0, 0.0]));
         assert_eq!(p["name"], "Front bearing");
         assert!(p.get("length").is_none());
         assert!(insert_params(&[], &k, &[]).is_err());
+    }
+
+    /// #16688: Flip turns the part over where it sits, in a hole picked and at the origin.
+    /// Unticked, the command is not asked to flip.
+    #[test]
+    fn flip_turns_the_part_over_where_it_sits() {
+        let l = lib();
+        let hole = Sel::Face { body: "Body1".into(), index: 3, point: Vec3::new(5.0, 0.0, 10.0) };
+        let k = Pt { family: 0, size: 1, length: Some(2), name: String::new(), picture: None, lib: None, flip: true };
+        let p = insert_params(&l, &k, std::slice::from_ref(&hole)).unwrap();
+        assert_eq!(p, json!({"family": "socket_head_cap_screw", "size": "M6", "length": 20.0, "at": [5.0, 0.0, 10.0], "flip": true}));
+        let p = insert_params(&l, &k, &[]).unwrap();
+        assert_eq!(p["flip"], true, "{p}");
+        let p = insert_params(&l, &Pt { flip: false, ..k }, std::slice::from_ref(&hole)).unwrap();
+        assert!(p.get("flip").is_none(), "{p}");
+    }
+
+    /// The Flip row is in the dialog, and ticking it reaches the command OK runs.
+    #[test]
+    fn the_flip_row_reaches_the_command() {
+        let chosen = |h: &crate::scenario::Harness| {
+            let Kind::Part(k) = &h.app.dialog.as_ref().unwrap().kind else { panic!("not Insert Part") };
+            commands(&h.app, k, &[]).unwrap()[0].1.clone()
+        };
+        let mut h = crate::scenario::Harness::new();
+        h.app.home.open = false;
+        h.app.start("parts.insert");
+        h.frames(3);
+        assert!(chosen(&h).get("flip").is_none());
+        h.step(&json!({"click":{"handle":"sketch_palette:toggle:pt_flip"}})).unwrap();
+        h.frames(2);
+        assert_eq!(chosen(&h)["flip"], true);
     }
 
     /// #10316: the Unit system list above Type picks metric or inch, and Type then lists that
@@ -409,13 +458,14 @@ mod tests {
     /// Every dimension the library gives for a size is labelled in words, in each family.
     #[test]
     fn every_library_dimension_has_a_label_in_words() {
+        crate::i18n::install();
         let mut s = solidcraft_engine::Session::default();
         let l = families(&s.execute("parts.library", &json!({})).unwrap());
         assert!(l.len() >= 7, "{}", l.len());
         for f in &l {
             for (size, row) in &f.sizes {
                 for key in row.as_object().into_iter().flat_map(|o| o.keys()).filter(|k| !matches!(k.as_str(), "size" | "default_length")) {
-                    let label = dimension_label(key).map(crate::i18n::tr);
+                    let label = dimension_label(key).map(solidcraft_ui_text::tr);
                     assert!(
                         label.is_some_and(|l| l.starts_with(char::is_uppercase) && !l.contains('_') && !l.starts_with("parts.")),
                         "{} {size}: {key} is labelled {label:?}",

@@ -105,9 +105,10 @@ fn a_picked_cam_edge_makes_the_cam() {
 /// The dialog's rows pass their English text, which the catalogs translate by its key.
 #[test]
 fn the_cam_dialog_labels_translate() {
-    let de = crate::i18n::Locale::for_language("de");
+    crate::i18n::install();
+    let de = solidcraft_ui_text::Locale::for_language("de");
     for (english, german) in [("Cam", "Nocken"), ("Follower", "Stößel"), ("Roller", "Rolle"), ("Tip (optional)", "Spitze (optional)")] {
         assert_eq!(de.label(english), german);
     }
-    assert_eq!(crate::i18n::Locale::for_language("zh").label("Knife edge"), "尖顶");
+    assert_eq!(solidcraft_ui_text::Locale::for_language("zh").label("Knife edge"), "尖顶");
 }

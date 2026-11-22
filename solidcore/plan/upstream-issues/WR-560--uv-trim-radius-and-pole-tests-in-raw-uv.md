@@ -1,0 +1,22 @@
+#### WR-560. `SmBSplineCurve::AssertValid` tests a UV trim's radius of curvature (13) and coincident control points (15) in raw (u, v)
+- **Severity:** Wrong result (a check reports a valid trim)
+- **Area:** Curves
+- **Location:** `source/SMLib/src/SmBSplineCurve.cpp`, `SmBSplineCurve::AssertValid` (def. `:7670`): the radius test at `:8020`-`:8098` (the copy and scale onto the surface is commented out, "for want of the surface"), and test 15 at `:8102`-`:8105` (`HasInternalPole(SM_ZONE_TOL_3D/10.0)`).
+- **What happens:** a UV trim's lengths are those of its face's surface, but both tests measure it in (u, v). On a face whose parameters run at very different speeds, or a tiny loop on a large face, the exact trim of a valid circle fails them:
+  - **Test 13.** A r 4 circle's trim on a plane spanning 200 x 3 over [0,1]^2 is an ellipse 67 times as long as it is wide, of radius 0.0003 at its ends against its own tolerance 0.00048. This test is live only when the minimum radius is read first; see WR-382.
+  - **Test 15.** A r 0.002 hole's trim on a 3 m plate has control points 6e-7 apart in (u, v), under the 3D tolerance `SM_ZONE_TOL_3D/10`. On the plate they are 0.002 apart.
+- **Trigger:** `AssertValid` / the B-rep check on a body with such trims: a plate with a rod along its edge, a 1 mm hole through a wave-topped block, or a 0.002 hole in a 3000 x 1000 plate (tangency-labs/solidcore#891 item 2, #1524).
+- **How found:** SolidCraft's checks on SMLib (#891, #1524).
+- **Confirmed:** by the fork's C++ tests (`capi/tests/sweeps.cpp`, tangency-labs/smlib b4f8c57 and 54ca3e0). The Rust port reports both by default (unit tests below).
+- **Fix:** tangency-labs/smlib@b4f8c57 and 54ca3e0 (`sm_TrimMetric`, `sm_MappedTrim`). A trim of a face is mapped by `(u, v) -> (a u + b v, c v)`, the Cholesky factor of its surface's first fundamental form. The form is taken at the trim's middle, or at the centre of the surface's natural domain when the middle is a singular point. This map is exact on a plane.
+  - **Test 13** runs on the mapped trim with its tolerance `(size / dSizeT) / 10000` and spacing `size / max(20, dSizeT)`. A mapped trim that cannot be sized fails test 13.
+  - **Test 15** runs on the mapped trim.
+  - A curve that is no face's trim, or whose surface has no metric at either point, is tested as before.
+- **Rust port:** behaves as upstream by default. `Kernel::fixes.uv_trim_checks_on_surface` ports the fork's change in `BSplineCurve::assert_valid_with` (`trim_metric`, `mapped_trim`). The face's surface reaches the check through `DerivedOverrides::trim_surface`:
+  - from the B-rep check's edge-use UV trim check (`topology::brep::validation::assert_valid::edge`);
+  - through the new `BSplineCurve::assert_valid_on`, `Line::assert_valid_on` and `Ellipse::assert_valid_on`.
+- **Deviations:** the trim's middle is evaluated on its B-spline (NURB) form, also for a line or ellipse trim, where upstream calls the virtual `EvaluatePoint`. The fork's earlier restructuring of test 13 (`bSized`, a failed analysis reported as test 13) is not part of this record; the pinned test-13 flow is kept.
+- **Tests:** `issue_891_uv_trim_radius_is_measured_on_its_surface` and `issue_1524_uv_trim_control_points_are_measured_on_its_surface` in `crates/solidcore/src/nurbs/b_spline_curve/p3.rs`.
+  - Test 13: the exact trim of a r 1 circle on a 600 x 3 plane.
+  - Test 15: the exact trim of a r 0.003 circle on a 4500 x 4500 plane.
+- **Difftest:** no change on the default path. The B-spline and B-rep check units run the default kernel.

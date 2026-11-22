@@ -1,0 +1,22 @@
+Updates: WR-685. Under the same flag, `fillet_gn_section_generator`, the G^n section now has the fork's equal area thumbweight and the ease's thumbweight 0. These are tangency-labs/smlib 6148773 and 22d258a, which are 1947a45 and adb9854 in the history of d01d7b0.
+
+- **The default thumbweight is equal area.** `GN_DEFAULT_THUMBWEIGHT` is now `GN_THUMBWEIGHT_EQUAL_AREA` (-2).
+  - That value is resolved per generator to the w at which the order-n section takes off the area the ball's circle does: `GnSectionFsg::equal_area_thumbweight` (`EqualAreaThumbweight`).
+  - The solve is a bisection of `sm_GnSectionAreaIntegral`, a composite Simpson rule on 2048 intervals.
+  - The wedge is taken at the middle station of the first blend built (`Build`), or at `ContactOrderAt`'s station.
+  - The valid thumbweights are now -1 < w < 1, or -2.
+- **Solvers share the resolved value.** The fork's solvers share one generator, so the first blend's wedge sets the thumbweight for every edge of one `SetFilletParameters`. The port's solvers hold copies. The session gives a resolved thumbweight back to its generator and to every other copy after each solver's `CalcFilletGeom`.
+- **The ease keeps thumbweight 0.** `EaseSetBackSections` blends into the order-2 section at w = 0, not at the default (22d258a).
+- **Checked against fork d01d7b0** built locally:
+  - `EqualAreaThumbweight` for orders 2 to 4 over six wedge angles is bit-identical, including the refusals. At a square corner, order 2 gives -0.52521240458756147. The figure -0.5252123889 quoted from SolidCraft differs from it by 3e-8.
+  - Volumes, Rust against the fork:
+    - the box edge at equal area, n 2 to 4: max rel err 2.1e-10;
+    - the box's three-edge corner at equal area and at w = 0: 9.8e-11;
+    - two edges of different wedges in both orders, which are order-dependent as in the fork: 4.6e-10;
+    - the eased setback corner: 3.7e-9, at volume accuracy 1e-6.
+- **Tests** are in `crates/solidcore/tests/wr685_gn_section.rs`:
+  - `box_edge_equal_area_round_takes_off_the_circle_s_area`: (1 - pi/4) r^2 per unit length, closed form;
+  - `box_corner_equal_area_rounds_take_the_fork_s_volume`;
+  - `equal_area_thumbweight_is_the_first_blend_s_for_every_edge`: it fails without the sharing;
+  - `eased_setback_takes_the_order_2_section_at_thumbweight_0`: it fails with the default as the ease's target;
+  - the unit test `blend::fillet_section::section::tests::equal_area_thumbweights_are_the_fork_s`.

@@ -1,0 +1,298 @@
+{
+  "area": "fillets",
+  "bodies": {
+    "b7": {
+      "keeping_splines": false,
+      "trusted": true
+    }
+  },
+  "calls": [
+    {
+      "inputs": [
+        "b7"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b8"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b8"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b9"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b9"
+      ],
+      "op": "tagged",
+      "outputs": [
+        "b10"
+      ],
+      "params": {
+        "operand": 0
+      }
+    },
+    {
+      "inputs": [
+        "b10"
+      ],
+      "op": "blend_dropping",
+      "outputs": [
+        "b11"
+      ],
+      "params": {
+        "edges": {
+          "kind": "edge",
+          "picked": [
+            {
+              "at": [
+                [
+                  19.0,
+                  20.0,
+                  0.0
+                ],
+                [
+                  -19.0,
+                  20.0,
+                  0.0
+                ]
+              ],
+              "index": 6
+            },
+            {
+              "at": [
+                [
+                  -19.0,
+                  -20.0,
+                  0.0
+                ],
+                [
+                  19.0,
+                  -20.0,
+                  0.0
+                ]
+              ],
+              "index": 10
+            },
+            {
+              "at": [
+                [
+                  20.0,
+                  -19.0,
+                  0.0
+                ],
+                [
+                  20.0,
+                  19.0,
+                  0.0
+                ]
+              ],
+              "index": 8
+            },
+            {
+              "at": [
+                [
+                  -20.0,
+                  19.0,
+                  0.0
+                ],
+                [
+                  -20.0,
+                  -19.0,
+                  0.0
+                ]
+              ],
+              "index": 3
+            },
+            {
+              "at": [
+                [
+                  20.0,
+                  19.0,
+                  0.0
+                ],
+                [
+                  19.0,
+                  20.0,
+                  0.0
+                ]
+              ],
+              "index": 7
+            },
+            {
+              "at": [
+                [
+                  -19.0,
+                  20.0,
+                  0.0
+                ],
+                [
+                  -20.0,
+                  19.0,
+                  0.0
+                ]
+              ],
+              "index": 5
+            },
+            {
+              "at": [
+                [
+                  19.0,
+                  -20.0,
+                  0.0
+                ],
+                [
+                  20.0,
+                  -19.0,
+                  0.0
+                ]
+              ],
+              "index": 9
+            },
+            {
+              "at": [
+                [
+                  -20.0,
+                  -19.0,
+                  0.0
+                ],
+                [
+                  -19.0,
+                  -20.0,
+                  0.0
+                ]
+              ],
+              "index": 4
+            }
+          ],
+          "points": [
+            [
+              0.0,
+              20.0,
+              0.0
+            ],
+            [
+              0.0,
+              -20.0,
+              0.0
+            ],
+            [
+              20.0,
+              0.0,
+              0.0
+            ],
+            [
+              -20.0,
+              0.0,
+              0.0
+            ],
+            [
+              19.70710678118655,
+              19.70710678118655,
+              0.0
+            ],
+            [
+              -19.70710678118655,
+              19.70710678118655,
+              0.0
+            ],
+            [
+              19.70710678118655,
+              -19.70710678118655,
+              0.0
+            ],
+            [
+              -19.70710678118655,
+              -19.70710678118655,
+              0.0
+            ]
+          ],
+          "tolerance": 3.001
+        },
+        "kind": "chamfer",
+        "sizes": [
+          1.0,
+          1.0,
+          1.0,
+          1.0,
+          1.0,
+          1.0,
+          1.0,
+          1.0
+        ]
+      }
+    }
+  ],
+  "case": "2719-chamfer-as-wide-as-corner-round",
+  "expected": {
+    "body_count": 1,
+    "continuity": {
+      "order": "g0"
+    },
+    "faces": 18,
+    "method": "block 40x40x20 with the four vertical edges rounded R1: V0 = 32000 - 4*(1-pi/4)*20. A 1 mm chamfer on the bottom loop (4 straights of 38 mm and 4 quarter arcs R1): straights 4 * 1/2 * 38 = 76; each quarter arc is a quarter revolution of the 1 mm right triangle about the corner axis, centroid radius R - c/3 = 2/3 (Pappus): 1/2 * (pi/2) * (2/3) = pi/6 each. Because c = R the chamfer cone has its apex on the axis at z=0. V = V0 - 76 - 4*pi/6 = 31904.738. Faces: top, bottom, 4 sides, 4 R1 cylinders, 4 chamfer planes, 4 chamfer cones = 18.",
+    "source": "analytic",
+    "sources": [
+      "tangency-labs/solidcraft#2719"
+    ],
+    "volume_mm3": 31904.7374579694,
+    "what": "a 1 mm chamfer round a bottom loop whose corners are R1 rounds: each corner cone closes to a point on the bottom face"
+  },
+  "expressible": false,
+  "operation_expressible": true,
+  "outcome": {
+    "ran": true,
+    "raw_counts": {
+      "edges": 36,
+      "faces": 18,
+      "vertices": 20
+    }
+  },
+  "records": "2719-chamfer-as-wide-as-corner-round.bodies.json.gz",
+  "result": [
+    {
+      "body": "Body1",
+      "made": "b11"
+    }
+  ],
+  "rig": {
+    "error": null,
+    "known_failing": null,
+    "measured": {
+      "area_mm2": 6269.925457941574,
+      "body_count": 1,
+      "edges": 40,
+      "faces": 18,
+      "vertices": 24,
+      "volume_mm3": 31904.737458104064
+    },
+    "refused_with": null,
+    "status": "pass"
+  },
+  "sources": [
+    "tangency-labs/solidcraft#2719"
+  ],
+  "traced_ops": [
+    "extrude",
+    "copy",
+    "copy",
+    "tagged",
+    "blend_dropping",
+    "copy",
+    "copy",
+    "tagged",
+    "blend_dropping"
+  ],
+  "ungraded": [
+    "continuity: SolidCraft computes it"
+  ],
+  "what": "a 1 mm chamfer round a bottom loop whose corners are R1 rounds: each corner cone closes to a point on the bottom face",
+  "why_not": []
+}

@@ -16,9 +16,16 @@ with 0xlillith's prior work. This integration adds no third-party assets, code,
 rendering library or dependency. The source identity is provenance, not proof
 that its old tests passed on this new combination.
 
-## Connected capabilities
+## Historical recovery capabilities
 
-| Area | Actual consumer in this revision | Limits |
+The following table records the original recovery tree above, not the complete
+published renderer. Current Path Glass, coats, saved maps, adaptive sampling and
+qualification are listed in [renderer parity](render-parity.md). In particular,
+the current legacy box certificate accepts valid tiled box faces; it does not
+require exactly 12 triangles. Historical test/provenance claims below stay scoped
+to their recorded source.
+
+| Area | Original recovery consumer | Original recovery limits |
 | --- | --- | --- |
 | GGX visible-normal sampling (VNDF) | CPU `ImageTask` rough reflections and the certified anisotropic adapter | The original single-scattering Schlick/GGX/separable-Smith model; no layered coat transport, transmission proposal or diffuse GI. |
 | Fixed primary AA | Existing CPU image job and visible 1/4/16 sample controls | Reuse only for completed, nonselected primary hits within one fixed spatial sample. Not a progressive sample prefix. |
@@ -39,8 +46,10 @@ runtime API inputs, outside portable setup persistence. Existing CPU primary AA,
 exposure, shadow and studio preset controls remain in place. The GPU material
 editor owns a different runtime schema selected explicitly with top-level
 `progressive: true`. CPU progressive sampling instead uses `raytrace.progressive`
-and rejects area lights, dielectric and anisotropic overrides in its initial
-bounded contract; the fixed CPU route retains those capabilities.
+and supports the existing rectangular/continuous LED light integral with a fresh
+film-aware sample identity. The subsequent progressive continuation also accepts
+the existing certified thin-sheet/axis-aligned-box dielectric and planar anisotropy
+subsets, preserving all geometry, HDR, clear-coat and optical-overlap checks.
 
 See [VNDF](render-vndf-prototype.md), [primary AA](render-primary-aa.md),
 [emission](render-surface-emission.md), [surface effects](render-surface-patterns.md)
@@ -88,7 +97,7 @@ coat and dielectric path remains unchanged. Captured GPU `transmission` data is
 not reinterpreted as CPU dielectric options.
 
 CPU admission still certifies immutable captured body identities, retains opaque
-alpha requirements, checks finite inputs and bounded capacities, and rejects
+body/face alpha requirements, checks finite inputs and bounded capacities, and rejects
 unsupported intersections between optical, emission and surface selections.
 Geometry, document history, physical mass properties and saved materials are not
 modified by these runtime inputs.
@@ -103,9 +112,18 @@ recovered tests are retained, with new integration regressions for preservation
 of clear coat, refusal of unmatched coat transport and exclusion of registered
 executors from CPU film reservations.
 
-The integrator must compile and execute the exact combined revision, including
-CPU feature on/off and the current `ImageTask` layout bound. Render/engine/UI
-contracts, cancellation and lease tests, hostile inputs, wasm and project CI
-remain gates. Real equal-camera CPU output and exported PNGs are still needed to
-assess the visible results. Historical results from earlier source snapshots do
-not qualify this revision.
+Subsequent integration has executed CPU renderer, saved-document and engine
+regressions, default-feature host metadata/digest checks, and an earlier-snapshot
+Render workspace suite with CPU enabled and a real GPU required. That earlier
+workspace result does not qualify the new combined CPU additions. The workspace
+suite includes an actual CPU Render action and export of that job's retained
+native master; see [CPU output presentation](render-cpu-output.md#focused-validation)
+for the exercised scope. The source-only qualification above describes the
+original recovery handoff.
+
+Each final combined revision still needs its repository-wide and platform checks,
+including wasm, plus native equal-camera image acceptance. Historical results
+from earlier source snapshots do not qualify later changes.
+
+
+The optional [CPU opaque path lighting](render-cpu-path.md) consumer is part of the combined source and has executed renderer regressions. It adds bounded progressive diffuse/specular GI only when `path` is authored; existing restrictions and bytes above describe the absent-path route. Mixed glass/anisotropy/volume parity and combined document/engine/UI/native qualification remain incomplete.

@@ -1,0 +1,13 @@
+#### WR-778. A face skin whose sections leave a plane and return to it pairs its sections twisted: the side faces fold and the shell is inside-out
+- **Severity:** Wrong result
+- **Area:** Skinning (lofts)
+- **Location:** the section correspondence of the face skin, before the side surfaces are interpolated: the port's `primitive_creation::p3::construct::create_skin_from_faces` (`SmApiCreateSkinFromFaces` in the C++). Each section's loop is taken with the winding and seam its face gives, whatever the direction of travel between sections.
+- **What happens:**
+  - Three square sections: `(0, 0, 0)`–`(10, 10, 0)` on z = 0, a square on x = 15 spanning y = 0..10 and z = 5..15, and `(20, 0, 0)`–`(30, 10, 0)` back on z = 0. The two end sections are regions of one plane, so travel leaves the plane and comes back to it.
+  - The end section's loop keeps the winding its face gives, which runs against the direction of travel, and its seam pairs the start section's corner `(0, 0, 0)` with `(20, 0, 0)` where the untwisted arch pairs it with `(30, 0, 0)`.
+  - The `y = 0` side face is a quadratic-by-linear patch whose Jacobian vanishes inside it (about `u = 0.8227`, `v = 1/2`), and its two boundary curves cross (about `u = 0.9228`, `w = 0.6903`). Stitching gives consistent coedges, but the signed volume is `-1339.03 mm³` (exact rational, from the stored control points), and no reversal of the shell or of a cap makes it a valid solid.
+  - The correct result is the arch through the three sections: exact volume `8000/3 mm³`, area `1324.910 mm²`, both caps facing −Z.
+- **Trigger:** any face skin whose consecutive sections face opposite ways relative to the travel between them (a U-turn loft). Sections stacked along one direction are unaffected.
+- **How found:** tangency-labs/solidcraft#15263. SolidCraft 0.40 measured the loft as "no mass".
+- **Confirmed:** no, not against the C++ build. The port reproduces it, and SolidCraft 0.30.1, built on the SMLib fork, built the same folded skin, which closed into a valid but pinched solid (1338.154 mm³), so the C++ very likely has it too.
+- **Fix in solidcore:** tangency-labs/solidcraft#15266. Before skinning, each turning section's winding is aligned with the travel between section centroids (exact polygon moments for degree-one sections), and its seam is rotated to the start that pairs best with the previous section, by exact curve evaluations. Sections stacked along one direction keep their correspondence: five ordinary lofts give byte-identical solid records. The proof of the fold and the arch's exact volume are in `plan/findings/skin--returning-sections-fold-before-cap-orientation-15263.md`.

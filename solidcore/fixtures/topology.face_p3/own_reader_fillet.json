@@ -1,0 +1,7684 @@
+{
+ "cases": [
+  {
+   "name": "own_reader_sphere_diff_3cylinders_uv_trim_f0",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp (SmFace::CreateUVTrimCurves)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/sphere_diff_3cylinders.smb",
+     "rebuild": false
+    },
+    "init_gaps": false,
+    "op": "uv_trim",
+    "face": 0,
+    "adjust": false,
+    "own_curves": false
+   }
+  },
+  {
+   "name": "own_reader_sphere_diff_3cylinders_uv_trim_f0_rebuild",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp (SmFace::CreateUVTrimCurves)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/sphere_diff_3cylinders.smb",
+     "rebuild": true
+    },
+    "init_gaps": false,
+    "op": "uv_trim",
+    "face": 0,
+    "adjust": false,
+    "own_curves": false
+   }
+  },
+  {
+   "name": "own_reader_sphere_diff_3cylinders_uv_trim_f1",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp (SmFace::CreateUVTrimCurves)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/sphere_diff_3cylinders.smb",
+     "rebuild": false
+    },
+    "init_gaps": false,
+    "op": "uv_trim",
+    "face": 1,
+    "adjust": true,
+    "own_curves": false
+   }
+  },
+  {
+   "name": "own_reader_sphere_diff_3cylinders_uv_trim_f1_rebuild",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp (SmFace::CreateUVTrimCurves)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/sphere_diff_3cylinders.smb",
+     "rebuild": true
+    },
+    "init_gaps": false,
+    "op": "uv_trim",
+    "face": 1,
+    "adjust": true,
+    "own_curves": false
+   }
+  },
+  {
+   "name": "own_reader_sphere_diff_3cylinders_uv_trim_f2",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp (SmFace::CreateUVTrimCurves)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/sphere_diff_3cylinders.smb",
+     "rebuild": false
+    },
+    "init_gaps": false,
+    "op": "uv_trim",
+    "face": 2,
+    "adjust": false,
+    "own_curves": true
+   }
+  },
+  {
+   "name": "own_reader_sphere_diff_3cylinders_uv_trim_f2_rebuild",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp (SmFace::CreateUVTrimCurves)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/sphere_diff_3cylinders.smb",
+     "rebuild": true
+    },
+    "init_gaps": false,
+    "op": "uv_trim",
+    "face": 2,
+    "adjust": false,
+    "own_curves": true
+   }
+  },
+  {
+   "name": "own_reader_sphere_diff_3cylinders_uv_trim_f3",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp (SmFace::CreateUVTrimCurves)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/sphere_diff_3cylinders.smb",
+     "rebuild": false
+    },
+    "init_gaps": false,
+    "op": "uv_trim",
+    "face": 3,
+    "adjust": false,
+    "own_curves": false
+   }
+  },
+  {
+   "name": "own_reader_sphere_diff_3cylinders_uv_trim_f3_rebuild",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp (SmFace::CreateUVTrimCurves)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/sphere_diff_3cylinders.smb",
+     "rebuild": true
+    },
+    "init_gaps": false,
+    "op": "uv_trim",
+    "face": 3,
+    "adjust": false,
+    "own_curves": false
+   }
+  },
+  {
+   "name": "own_reader_sphere_diff_3cylinders_uv_trim_f4",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp (SmFace::CreateUVTrimCurves)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/sphere_diff_3cylinders.smb",
+     "rebuild": false
+    },
+    "init_gaps": false,
+    "op": "uv_trim",
+    "face": 4,
+    "adjust": true,
+    "own_curves": false
+   }
+  },
+  {
+   "name": "own_reader_sphere_diff_3cylinders_uv_trim_f4_rebuild",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp (SmFace::CreateUVTrimCurves)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/sphere_diff_3cylinders.smb",
+     "rebuild": true
+    },
+    "init_gaps": false,
+    "op": "uv_trim",
+    "face": 4,
+    "adjust": true,
+    "own_curves": false
+   }
+  },
+  {
+   "name": "own_reader_sphere_diff_3cylinders_uv_trim_f5",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp (SmFace::CreateUVTrimCurves)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/sphere_diff_3cylinders.smb",
+     "rebuild": false
+    },
+    "init_gaps": false,
+    "op": "uv_trim",
+    "face": 5,
+    "adjust": false,
+    "own_curves": false
+   }
+  },
+  {
+   "name": "own_reader_sphere_diff_3cylinders_uv_trim_f5_rebuild",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp (SmFace::CreateUVTrimCurves)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/sphere_diff_3cylinders.smb",
+     "rebuild": true
+    },
+    "init_gaps": false,
+    "op": "uv_trim",
+    "face": 5,
+    "adjust": false,
+    "own_curves": false
+   }
+  },
+  {
+   "name": "own_reader_sphere_diff_3cylinders_uv_trim_f6",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp (SmFace::CreateUVTrimCurves)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/sphere_diff_3cylinders.smb",
+     "rebuild": false
+    },
+    "init_gaps": false,
+    "op": "uv_trim",
+    "face": 6,
+    "adjust": false,
+    "own_curves": true
+   }
+  },
+  {
+   "name": "own_reader_sphere_diff_3cylinders_uv_trim_f6_rebuild",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp (SmFace::CreateUVTrimCurves)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/sphere_diff_3cylinders.smb",
+     "rebuild": true
+    },
+    "init_gaps": false,
+    "op": "uv_trim",
+    "face": 6,
+    "adjust": false,
+    "own_curves": true
+   }
+  },
+  {
+   "name": "own_reader_sphere_diff_3cylinders_uv_trim_f7",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp (SmFace::CreateUVTrimCurves)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/sphere_diff_3cylinders.smb",
+     "rebuild": false
+    },
+    "init_gaps": false,
+    "op": "uv_trim",
+    "face": 7,
+    "adjust": true,
+    "own_curves": false
+   }
+  },
+  {
+   "name": "own_reader_sphere_diff_3cylinders_uv_trim_f7_rebuild",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp (SmFace::CreateUVTrimCurves)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/sphere_diff_3cylinders.smb",
+     "rebuild": true
+    },
+    "init_gaps": false,
+    "op": "uv_trim",
+    "face": 7,
+    "adjust": true,
+    "own_curves": false
+   }
+  },
+  {
+   "name": "own_reader_sphere_diff_3cylinders_uv_trim_f8",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp (SmFace::CreateUVTrimCurves)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/sphere_diff_3cylinders.smb",
+     "rebuild": false
+    },
+    "init_gaps": false,
+    "op": "uv_trim",
+    "face": 8,
+    "adjust": false,
+    "own_curves": false
+   }
+  },
+  {
+   "name": "own_reader_sphere_diff_3cylinders_uv_trim_f8_rebuild",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp (SmFace::CreateUVTrimCurves)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/sphere_diff_3cylinders.smb",
+     "rebuild": true
+    },
+    "init_gaps": false,
+    "op": "uv_trim",
+    "face": 8,
+    "adjust": false,
+    "own_curves": false
+   }
+  },
+  {
+   "name": "own_reader_sphere_diff_3cylinders_uv_trim_f9",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp (SmFace::CreateUVTrimCurves)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/sphere_diff_3cylinders.smb",
+     "rebuild": false
+    },
+    "init_gaps": false,
+    "op": "uv_trim",
+    "face": 9,
+    "adjust": false,
+    "own_curves": false
+   }
+  },
+  {
+   "name": "own_reader_sphere_diff_3cylinders_uv_trim_f9_rebuild",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp (SmFace::CreateUVTrimCurves)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/sphere_diff_3cylinders.smb",
+     "rebuild": true
+    },
+    "init_gaps": false,
+    "op": "uv_trim",
+    "face": 9,
+    "adjust": false,
+    "own_curves": false
+   }
+  },
+  {
+   "name": "own_reader_sphere_diff_3cylinders_uv_trim_f10",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp (SmFace::CreateUVTrimCurves)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/sphere_diff_3cylinders.smb",
+     "rebuild": false
+    },
+    "init_gaps": false,
+    "op": "uv_trim",
+    "face": 10,
+    "adjust": true,
+    "own_curves": true
+   }
+  },
+  {
+   "name": "own_reader_sphere_diff_3cylinders_uv_trim_f10_rebuild",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp (SmFace::CreateUVTrimCurves)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/sphere_diff_3cylinders.smb",
+     "rebuild": true
+    },
+    "init_gaps": false,
+    "op": "uv_trim",
+    "face": 10,
+    "adjust": true,
+    "own_curves": true
+   }
+  },
+  {
+   "name": "own_reader_sphere_diff_3cylinders_uv_trim_f11",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp (SmFace::CreateUVTrimCurves)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/sphere_diff_3cylinders.smb",
+     "rebuild": false
+    },
+    "init_gaps": false,
+    "op": "uv_trim",
+    "face": 11,
+    "adjust": false,
+    "own_curves": false
+   }
+  },
+  {
+   "name": "own_reader_sphere_diff_3cylinders_uv_trim_f11_rebuild",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp (SmFace::CreateUVTrimCurves)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/sphere_diff_3cylinders.smb",
+     "rebuild": true
+    },
+    "init_gaps": false,
+    "op": "uv_trim",
+    "face": 11,
+    "adjust": false,
+    "own_curves": false
+   }
+  },
+  {
+   "name": "own_reader_bottle_uv_trim_f0",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp (SmFace::CreateUVTrimCurves)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/bottle.smb",
+     "rebuild": false
+    },
+    "init_gaps": false,
+    "op": "uv_trim",
+    "face": 0,
+    "adjust": false,
+    "own_curves": false
+   }
+  },
+  {
+   "name": "own_reader_bottle_uv_trim_f0_rebuild",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp (SmFace::CreateUVTrimCurves)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/bottle.smb",
+     "rebuild": true
+    },
+    "init_gaps": false,
+    "op": "uv_trim",
+    "face": 0,
+    "adjust": false,
+    "own_curves": false
+   }
+  },
+  {
+   "name": "own_reader_bottle_uv_trim_f1",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp (SmFace::CreateUVTrimCurves)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/bottle.smb",
+     "rebuild": false
+    },
+    "init_gaps": false,
+    "op": "uv_trim",
+    "face": 1,
+    "adjust": true,
+    "own_curves": false
+   }
+  },
+  {
+   "name": "own_reader_bottle_uv_trim_f1_rebuild",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp (SmFace::CreateUVTrimCurves)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/bottle.smb",
+     "rebuild": true
+    },
+    "init_gaps": false,
+    "op": "uv_trim",
+    "face": 1,
+    "adjust": true,
+    "own_curves": false
+   }
+  },
+  {
+   "name": "own_reader_bottle_uv_trim_f2",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp (SmFace::CreateUVTrimCurves)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/bottle.smb",
+     "rebuild": false
+    },
+    "init_gaps": false,
+    "op": "uv_trim",
+    "face": 2,
+    "adjust": false,
+    "own_curves": true
+   }
+  },
+  {
+   "name": "own_reader_bottle_uv_trim_f2_rebuild",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp (SmFace::CreateUVTrimCurves)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/bottle.smb",
+     "rebuild": true
+    },
+    "init_gaps": false,
+    "op": "uv_trim",
+    "face": 2,
+    "adjust": false,
+    "own_curves": true
+   }
+  },
+  {
+   "name": "own_reader_bottle_uv_trim_f3",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp (SmFace::CreateUVTrimCurves)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/bottle.smb",
+     "rebuild": false
+    },
+    "init_gaps": false,
+    "op": "uv_trim",
+    "face": 3,
+    "adjust": false,
+    "own_curves": false
+   }
+  },
+  {
+   "name": "own_reader_bottle_uv_trim_f3_rebuild",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp (SmFace::CreateUVTrimCurves)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/bottle.smb",
+     "rebuild": true
+    },
+    "init_gaps": false,
+    "op": "uv_trim",
+    "face": 3,
+    "adjust": false,
+    "own_curves": false
+   }
+  },
+  {
+   "name": "own_reader_bottle_uv_trim_f4",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp (SmFace::CreateUVTrimCurves)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/bottle.smb",
+     "rebuild": false
+    },
+    "init_gaps": false,
+    "op": "uv_trim",
+    "face": 4,
+    "adjust": true,
+    "own_curves": false
+   }
+  },
+  {
+   "name": "own_reader_bottle_uv_trim_f4_rebuild",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp (SmFace::CreateUVTrimCurves)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/bottle.smb",
+     "rebuild": true
+    },
+    "init_gaps": false,
+    "op": "uv_trim",
+    "face": 4,
+    "adjust": true,
+    "own_curves": false
+   }
+  },
+  {
+   "name": "own_reader_bottle_uv_trim_f5",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp (SmFace::CreateUVTrimCurves)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/bottle.smb",
+     "rebuild": false
+    },
+    "init_gaps": false,
+    "op": "uv_trim",
+    "face": 5,
+    "adjust": false,
+    "own_curves": false
+   }
+  },
+  {
+   "name": "own_reader_bottle_uv_trim_f5_rebuild",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp (SmFace::CreateUVTrimCurves)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/bottle.smb",
+     "rebuild": true
+    },
+    "init_gaps": false,
+    "op": "uv_trim",
+    "face": 5,
+    "adjust": false,
+    "own_curves": false
+   }
+  },
+  {
+   "name": "own_reader_bottle_uv_trim_f6",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp (SmFace::CreateUVTrimCurves)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/bottle.smb",
+     "rebuild": false
+    },
+    "init_gaps": false,
+    "op": "uv_trim",
+    "face": 6,
+    "adjust": false,
+    "own_curves": true
+   }
+  },
+  {
+   "name": "own_reader_bottle_uv_trim_f6_rebuild",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp (SmFace::CreateUVTrimCurves)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/bottle.smb",
+     "rebuild": true
+    },
+    "init_gaps": false,
+    "op": "uv_trim",
+    "face": 6,
+    "adjust": false,
+    "own_curves": true
+   }
+  },
+  {
+   "name": "own_reader_bottle_uv_trim_f7",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp (SmFace::CreateUVTrimCurves)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/bottle.smb",
+     "rebuild": false
+    },
+    "init_gaps": false,
+    "op": "uv_trim",
+    "face": 7,
+    "adjust": true,
+    "own_curves": false
+   }
+  },
+  {
+   "name": "own_reader_bottle_uv_trim_f7_rebuild",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp (SmFace::CreateUVTrimCurves)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/bottle.smb",
+     "rebuild": true
+    },
+    "init_gaps": false,
+    "op": "uv_trim",
+    "face": 7,
+    "adjust": true,
+    "own_curves": false
+   }
+  },
+  {
+   "name": "own_reader_bottle_uv_trim_f8",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp (SmFace::CreateUVTrimCurves)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/bottle.smb",
+     "rebuild": false
+    },
+    "init_gaps": false,
+    "op": "uv_trim",
+    "face": 8,
+    "adjust": false,
+    "own_curves": false
+   }
+  },
+  {
+   "name": "own_reader_bottle_uv_trim_f8_rebuild",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp (SmFace::CreateUVTrimCurves)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/bottle.smb",
+     "rebuild": true
+    },
+    "init_gaps": false,
+    "op": "uv_trim",
+    "face": 8,
+    "adjust": false,
+    "own_curves": false
+   }
+  },
+  {
+   "name": "own_reader_bottle_uv_trim_f9",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp (SmFace::CreateUVTrimCurves)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/bottle.smb",
+     "rebuild": false
+    },
+    "init_gaps": false,
+    "op": "uv_trim",
+    "face": 9,
+    "adjust": false,
+    "own_curves": false
+   }
+  },
+  {
+   "name": "own_reader_bottle_uv_trim_f9_rebuild",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp (SmFace::CreateUVTrimCurves)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/bottle.smb",
+     "rebuild": true
+    },
+    "init_gaps": false,
+    "op": "uv_trim",
+    "face": 9,
+    "adjust": false,
+    "own_curves": false
+   }
+  },
+  {
+   "name": "own_reader_bottle_uv_trim_f10",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp (SmFace::CreateUVTrimCurves)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/bottle.smb",
+     "rebuild": false
+    },
+    "init_gaps": false,
+    "op": "uv_trim",
+    "face": 10,
+    "adjust": true,
+    "own_curves": true
+   }
+  },
+  {
+   "name": "own_reader_bottle_uv_trim_f10_rebuild",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp (SmFace::CreateUVTrimCurves)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/bottle.smb",
+     "rebuild": true
+    },
+    "init_gaps": false,
+    "op": "uv_trim",
+    "face": 10,
+    "adjust": true,
+    "own_curves": true
+   }
+  },
+  {
+   "name": "own_reader_bottle_uv_trim_f11",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp (SmFace::CreateUVTrimCurves)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/bottle.smb",
+     "rebuild": false
+    },
+    "init_gaps": false,
+    "op": "uv_trim",
+    "face": 11,
+    "adjust": false,
+    "own_curves": false
+   }
+  },
+  {
+   "name": "own_reader_bottle_uv_trim_f11_rebuild",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp (SmFace::CreateUVTrimCurves)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/bottle.smb",
+     "rebuild": true
+    },
+    "init_gaps": false,
+    "op": "uv_trim",
+    "face": 11,
+    "adjust": false,
+    "own_curves": false
+   }
+  },
+  {
+   "name": "own_reader_box_diff_cyl_uv_trim_f0",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp (SmFace::CreateUVTrimCurves)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/box_diff_cyl.smb",
+     "rebuild": false
+    },
+    "init_gaps": false,
+    "op": "uv_trim",
+    "face": 0,
+    "adjust": false,
+    "own_curves": false
+   }
+  },
+  {
+   "name": "own_reader_box_diff_cyl_uv_trim_f0_rebuild",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp (SmFace::CreateUVTrimCurves)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/box_diff_cyl.smb",
+     "rebuild": true
+    },
+    "init_gaps": false,
+    "op": "uv_trim",
+    "face": 0,
+    "adjust": false,
+    "own_curves": false
+   }
+  },
+  {
+   "name": "own_reader_box_diff_cyl_uv_trim_f1",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp (SmFace::CreateUVTrimCurves)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/box_diff_cyl.smb",
+     "rebuild": false
+    },
+    "init_gaps": false,
+    "op": "uv_trim",
+    "face": 1,
+    "adjust": true,
+    "own_curves": false
+   }
+  },
+  {
+   "name": "own_reader_box_diff_cyl_uv_trim_f1_rebuild",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp (SmFace::CreateUVTrimCurves)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/box_diff_cyl.smb",
+     "rebuild": true
+    },
+    "init_gaps": false,
+    "op": "uv_trim",
+    "face": 1,
+    "adjust": true,
+    "own_curves": false
+   }
+  },
+  {
+   "name": "own_reader_box_diff_cyl_uv_trim_f2",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp (SmFace::CreateUVTrimCurves)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/box_diff_cyl.smb",
+     "rebuild": false
+    },
+    "init_gaps": false,
+    "op": "uv_trim",
+    "face": 2,
+    "adjust": false,
+    "own_curves": true
+   }
+  },
+  {
+   "name": "own_reader_box_diff_cyl_uv_trim_f2_rebuild",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp (SmFace::CreateUVTrimCurves)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/box_diff_cyl.smb",
+     "rebuild": true
+    },
+    "init_gaps": false,
+    "op": "uv_trim",
+    "face": 2,
+    "adjust": false,
+    "own_curves": true
+   }
+  },
+  {
+   "name": "own_reader_box_diff_cyl_uv_trim_f3",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp (SmFace::CreateUVTrimCurves)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/box_diff_cyl.smb",
+     "rebuild": false
+    },
+    "init_gaps": false,
+    "op": "uv_trim",
+    "face": 3,
+    "adjust": false,
+    "own_curves": false
+   }
+  },
+  {
+   "name": "own_reader_box_diff_cyl_uv_trim_f3_rebuild",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp (SmFace::CreateUVTrimCurves)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/box_diff_cyl.smb",
+     "rebuild": true
+    },
+    "init_gaps": false,
+    "op": "uv_trim",
+    "face": 3,
+    "adjust": false,
+    "own_curves": false
+   }
+  },
+  {
+   "name": "own_reader_box_diff_cyl_uv_trim_f4",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp (SmFace::CreateUVTrimCurves)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/box_diff_cyl.smb",
+     "rebuild": false
+    },
+    "init_gaps": false,
+    "op": "uv_trim",
+    "face": 4,
+    "adjust": true,
+    "own_curves": false
+   }
+  },
+  {
+   "name": "own_reader_box_diff_cyl_uv_trim_f4_rebuild",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp (SmFace::CreateUVTrimCurves)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/box_diff_cyl.smb",
+     "rebuild": true
+    },
+    "init_gaps": false,
+    "op": "uv_trim",
+    "face": 4,
+    "adjust": true,
+    "own_curves": false
+   }
+  },
+  {
+   "name": "own_reader_box_diff_cyl_uv_trim_f5",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp (SmFace::CreateUVTrimCurves)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/box_diff_cyl.smb",
+     "rebuild": false
+    },
+    "init_gaps": false,
+    "op": "uv_trim",
+    "face": 5,
+    "adjust": false,
+    "own_curves": false
+   }
+  },
+  {
+   "name": "own_reader_box_diff_cyl_uv_trim_f5_rebuild",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp (SmFace::CreateUVTrimCurves)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/box_diff_cyl.smb",
+     "rebuild": true
+    },
+    "init_gaps": false,
+    "op": "uv_trim",
+    "face": 5,
+    "adjust": false,
+    "own_curves": false
+   }
+  },
+  {
+   "name": "own_reader_box_diff_cyl_uv_trim_f6",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp (SmFace::CreateUVTrimCurves)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/box_diff_cyl.smb",
+     "rebuild": false
+    },
+    "init_gaps": false,
+    "op": "uv_trim",
+    "face": 6,
+    "adjust": false,
+    "own_curves": true
+   }
+  },
+  {
+   "name": "own_reader_box_diff_cyl_uv_trim_f6_rebuild",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp (SmFace::CreateUVTrimCurves)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/box_diff_cyl.smb",
+     "rebuild": true
+    },
+    "init_gaps": false,
+    "op": "uv_trim",
+    "face": 6,
+    "adjust": false,
+    "own_curves": true
+   }
+  },
+  {
+   "name": "own_reader_box_diff_cyl_uv_trim_f7",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp (SmFace::CreateUVTrimCurves)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/box_diff_cyl.smb",
+     "rebuild": false
+    },
+    "init_gaps": false,
+    "op": "uv_trim",
+    "face": 7,
+    "adjust": true,
+    "own_curves": false
+   }
+  },
+  {
+   "name": "own_reader_box_diff_cyl_uv_trim_f7_rebuild",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp (SmFace::CreateUVTrimCurves)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/box_diff_cyl.smb",
+     "rebuild": true
+    },
+    "init_gaps": false,
+    "op": "uv_trim",
+    "face": 7,
+    "adjust": true,
+    "own_curves": false
+   }
+  },
+  {
+   "name": "own_reader_box_diff_cyl_uv_trim_f8",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp (SmFace::CreateUVTrimCurves)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/box_diff_cyl.smb",
+     "rebuild": false
+    },
+    "init_gaps": false,
+    "op": "uv_trim",
+    "face": 8,
+    "adjust": false,
+    "own_curves": false
+   }
+  },
+  {
+   "name": "own_reader_box_diff_cyl_uv_trim_f8_rebuild",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp (SmFace::CreateUVTrimCurves)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/box_diff_cyl.smb",
+     "rebuild": true
+    },
+    "init_gaps": false,
+    "op": "uv_trim",
+    "face": 8,
+    "adjust": false,
+    "own_curves": false
+   }
+  },
+  {
+   "name": "own_reader_box_diff_cyl_uv_trim_f9",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp (SmFace::CreateUVTrimCurves)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/box_diff_cyl.smb",
+     "rebuild": false
+    },
+    "init_gaps": false,
+    "op": "uv_trim",
+    "face": 9,
+    "adjust": false,
+    "own_curves": false
+   }
+  },
+  {
+   "name": "own_reader_box_diff_cyl_uv_trim_f9_rebuild",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp (SmFace::CreateUVTrimCurves)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/box_diff_cyl.smb",
+     "rebuild": true
+    },
+    "init_gaps": false,
+    "op": "uv_trim",
+    "face": 9,
+    "adjust": false,
+    "own_curves": false
+   }
+  },
+  {
+   "name": "own_reader_box_diff_cyl_uv_trim_f10",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp (SmFace::CreateUVTrimCurves)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/box_diff_cyl.smb",
+     "rebuild": false
+    },
+    "init_gaps": false,
+    "op": "uv_trim",
+    "face": 10,
+    "adjust": true,
+    "own_curves": true
+   }
+  },
+  {
+   "name": "own_reader_box_diff_cyl_uv_trim_f10_rebuild",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp (SmFace::CreateUVTrimCurves)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/box_diff_cyl.smb",
+     "rebuild": true
+    },
+    "init_gaps": false,
+    "op": "uv_trim",
+    "face": 10,
+    "adjust": true,
+    "own_curves": true
+   }
+  },
+  {
+   "name": "own_reader_box_diff_cyl_uv_trim_f11",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp (SmFace::CreateUVTrimCurves)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/box_diff_cyl.smb",
+     "rebuild": false
+    },
+    "init_gaps": false,
+    "op": "uv_trim",
+    "face": 11,
+    "adjust": false,
+    "own_curves": false
+   }
+  },
+  {
+   "name": "own_reader_box_diff_cyl_uv_trim_f11_rebuild",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp (SmFace::CreateUVTrimCurves)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/box_diff_cyl.smb",
+     "rebuild": true
+    },
+    "init_gaps": false,
+    "op": "uv_trim",
+    "face": 11,
+    "adjust": false,
+    "own_curves": false
+   }
+  },
+  {
+   "name": "own_reader_box_diff_cyl_big_rad_uv_trim_f0",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp (SmFace::CreateUVTrimCurves)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/box_diff_cyl_big_rad.smb",
+     "rebuild": false
+    },
+    "init_gaps": false,
+    "op": "uv_trim",
+    "face": 0,
+    "adjust": false,
+    "own_curves": false
+   }
+  },
+  {
+   "name": "own_reader_box_diff_cyl_big_rad_uv_trim_f0_rebuild",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp (SmFace::CreateUVTrimCurves)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/box_diff_cyl_big_rad.smb",
+     "rebuild": true
+    },
+    "init_gaps": false,
+    "op": "uv_trim",
+    "face": 0,
+    "adjust": false,
+    "own_curves": false
+   }
+  },
+  {
+   "name": "own_reader_box_diff_cyl_big_rad_uv_trim_f1",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp (SmFace::CreateUVTrimCurves)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/box_diff_cyl_big_rad.smb",
+     "rebuild": false
+    },
+    "init_gaps": false,
+    "op": "uv_trim",
+    "face": 1,
+    "adjust": true,
+    "own_curves": false
+   }
+  },
+  {
+   "name": "own_reader_box_diff_cyl_big_rad_uv_trim_f1_rebuild",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp (SmFace::CreateUVTrimCurves)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/box_diff_cyl_big_rad.smb",
+     "rebuild": true
+    },
+    "init_gaps": false,
+    "op": "uv_trim",
+    "face": 1,
+    "adjust": true,
+    "own_curves": false
+   }
+  },
+  {
+   "name": "own_reader_box_diff_cyl_big_rad_uv_trim_f2",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp (SmFace::CreateUVTrimCurves)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/box_diff_cyl_big_rad.smb",
+     "rebuild": false
+    },
+    "init_gaps": false,
+    "op": "uv_trim",
+    "face": 2,
+    "adjust": false,
+    "own_curves": true
+   }
+  },
+  {
+   "name": "own_reader_box_diff_cyl_big_rad_uv_trim_f2_rebuild",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp (SmFace::CreateUVTrimCurves)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/box_diff_cyl_big_rad.smb",
+     "rebuild": true
+    },
+    "init_gaps": false,
+    "op": "uv_trim",
+    "face": 2,
+    "adjust": false,
+    "own_curves": true
+   }
+  },
+  {
+   "name": "own_reader_box_diff_cyl_big_rad_uv_trim_f3",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp (SmFace::CreateUVTrimCurves)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/box_diff_cyl_big_rad.smb",
+     "rebuild": false
+    },
+    "init_gaps": false,
+    "op": "uv_trim",
+    "face": 3,
+    "adjust": false,
+    "own_curves": false
+   }
+  },
+  {
+   "name": "own_reader_box_diff_cyl_big_rad_uv_trim_f3_rebuild",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp (SmFace::CreateUVTrimCurves)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/box_diff_cyl_big_rad.smb",
+     "rebuild": true
+    },
+    "init_gaps": false,
+    "op": "uv_trim",
+    "face": 3,
+    "adjust": false,
+    "own_curves": false
+   }
+  },
+  {
+   "name": "own_reader_box_diff_cyl_big_rad_uv_trim_f4",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp (SmFace::CreateUVTrimCurves)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/box_diff_cyl_big_rad.smb",
+     "rebuild": false
+    },
+    "init_gaps": false,
+    "op": "uv_trim",
+    "face": 4,
+    "adjust": true,
+    "own_curves": false
+   }
+  },
+  {
+   "name": "own_reader_box_diff_cyl_big_rad_uv_trim_f4_rebuild",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp (SmFace::CreateUVTrimCurves)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/box_diff_cyl_big_rad.smb",
+     "rebuild": true
+    },
+    "init_gaps": false,
+    "op": "uv_trim",
+    "face": 4,
+    "adjust": true,
+    "own_curves": false
+   }
+  },
+  {
+   "name": "own_reader_box_diff_cyl_big_rad_uv_trim_f5",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp (SmFace::CreateUVTrimCurves)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/box_diff_cyl_big_rad.smb",
+     "rebuild": false
+    },
+    "init_gaps": false,
+    "op": "uv_trim",
+    "face": 5,
+    "adjust": false,
+    "own_curves": false
+   }
+  },
+  {
+   "name": "own_reader_box_diff_cyl_big_rad_uv_trim_f5_rebuild",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp (SmFace::CreateUVTrimCurves)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/box_diff_cyl_big_rad.smb",
+     "rebuild": true
+    },
+    "init_gaps": false,
+    "op": "uv_trim",
+    "face": 5,
+    "adjust": false,
+    "own_curves": false
+   }
+  },
+  {
+   "name": "own_reader_box_diff_cyl_big_rad_uv_trim_f6",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp (SmFace::CreateUVTrimCurves)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/box_diff_cyl_big_rad.smb",
+     "rebuild": false
+    },
+    "init_gaps": false,
+    "op": "uv_trim",
+    "face": 6,
+    "adjust": false,
+    "own_curves": true
+   }
+  },
+  {
+   "name": "own_reader_box_diff_cyl_big_rad_uv_trim_f6_rebuild",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp (SmFace::CreateUVTrimCurves)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/box_diff_cyl_big_rad.smb",
+     "rebuild": true
+    },
+    "init_gaps": false,
+    "op": "uv_trim",
+    "face": 6,
+    "adjust": false,
+    "own_curves": true
+   }
+  },
+  {
+   "name": "own_reader_box_diff_cyl_big_rad_uv_trim_f7",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp (SmFace::CreateUVTrimCurves)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/box_diff_cyl_big_rad.smb",
+     "rebuild": false
+    },
+    "init_gaps": false,
+    "op": "uv_trim",
+    "face": 7,
+    "adjust": true,
+    "own_curves": false
+   }
+  },
+  {
+   "name": "own_reader_box_diff_cyl_big_rad_uv_trim_f7_rebuild",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp (SmFace::CreateUVTrimCurves)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/box_diff_cyl_big_rad.smb",
+     "rebuild": true
+    },
+    "init_gaps": false,
+    "op": "uv_trim",
+    "face": 7,
+    "adjust": true,
+    "own_curves": false
+   }
+  },
+  {
+   "name": "own_reader_box_diff_cyl_big_rad_uv_trim_f8",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp (SmFace::CreateUVTrimCurves)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/box_diff_cyl_big_rad.smb",
+     "rebuild": false
+    },
+    "init_gaps": false,
+    "op": "uv_trim",
+    "face": 8,
+    "adjust": false,
+    "own_curves": false
+   }
+  },
+  {
+   "name": "own_reader_box_diff_cyl_big_rad_uv_trim_f8_rebuild",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp (SmFace::CreateUVTrimCurves)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/box_diff_cyl_big_rad.smb",
+     "rebuild": true
+    },
+    "init_gaps": false,
+    "op": "uv_trim",
+    "face": 8,
+    "adjust": false,
+    "own_curves": false
+   }
+  },
+  {
+   "name": "own_reader_box_diff_cyl_big_rad_uv_trim_f9",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp (SmFace::CreateUVTrimCurves)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/box_diff_cyl_big_rad.smb",
+     "rebuild": false
+    },
+    "init_gaps": false,
+    "op": "uv_trim",
+    "face": 9,
+    "adjust": false,
+    "own_curves": false
+   }
+  },
+  {
+   "name": "own_reader_box_diff_cyl_big_rad_uv_trim_f9_rebuild",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp (SmFace::CreateUVTrimCurves)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/box_diff_cyl_big_rad.smb",
+     "rebuild": true
+    },
+    "init_gaps": false,
+    "op": "uv_trim",
+    "face": 9,
+    "adjust": false,
+    "own_curves": false
+   }
+  },
+  {
+   "name": "own_reader_box_diff_cyl_big_rad_uv_trim_f10",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp (SmFace::CreateUVTrimCurves)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/box_diff_cyl_big_rad.smb",
+     "rebuild": false
+    },
+    "init_gaps": false,
+    "op": "uv_trim",
+    "face": 10,
+    "adjust": true,
+    "own_curves": true
+   }
+  },
+  {
+   "name": "own_reader_box_diff_cyl_big_rad_uv_trim_f10_rebuild",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp (SmFace::CreateUVTrimCurves)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/box_diff_cyl_big_rad.smb",
+     "rebuild": true
+    },
+    "init_gaps": false,
+    "op": "uv_trim",
+    "face": 10,
+    "adjust": true,
+    "own_curves": true
+   }
+  },
+  {
+   "name": "own_reader_box_diff_cyl_big_rad_uv_trim_f11",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp (SmFace::CreateUVTrimCurves)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/box_diff_cyl_big_rad.smb",
+     "rebuild": false
+    },
+    "init_gaps": false,
+    "op": "uv_trim",
+    "face": 11,
+    "adjust": false,
+    "own_curves": false
+   }
+  },
+  {
+   "name": "own_reader_box_diff_cyl_big_rad_uv_trim_f11_rebuild",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp (SmFace::CreateUVTrimCurves)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/box_diff_cyl_big_rad.smb",
+     "rebuild": true
+    },
+    "init_gaps": false,
+    "op": "uv_trim",
+    "face": 11,
+    "adjust": false,
+    "own_curves": false
+   }
+  },
+  {
+   "name": "own_reader_corner_box_uv_trim_f0",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp (SmFace::CreateUVTrimCurves)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/corner_box.smb",
+     "rebuild": false
+    },
+    "init_gaps": false,
+    "op": "uv_trim",
+    "face": 0,
+    "adjust": false,
+    "own_curves": false
+   }
+  },
+  {
+   "name": "own_reader_corner_box_uv_trim_f0_rebuild",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp (SmFace::CreateUVTrimCurves)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/corner_box.smb",
+     "rebuild": true
+    },
+    "init_gaps": false,
+    "op": "uv_trim",
+    "face": 0,
+    "adjust": false,
+    "own_curves": false
+   }
+  },
+  {
+   "name": "own_reader_corner_box_uv_trim_f1",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp (SmFace::CreateUVTrimCurves)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/corner_box.smb",
+     "rebuild": false
+    },
+    "init_gaps": false,
+    "op": "uv_trim",
+    "face": 1,
+    "adjust": true,
+    "own_curves": false
+   }
+  },
+  {
+   "name": "own_reader_corner_box_uv_trim_f1_rebuild",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp (SmFace::CreateUVTrimCurves)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/corner_box.smb",
+     "rebuild": true
+    },
+    "init_gaps": false,
+    "op": "uv_trim",
+    "face": 1,
+    "adjust": true,
+    "own_curves": false
+   }
+  },
+  {
+   "name": "own_reader_corner_box_uv_trim_f2",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp (SmFace::CreateUVTrimCurves)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/corner_box.smb",
+     "rebuild": false
+    },
+    "init_gaps": false,
+    "op": "uv_trim",
+    "face": 2,
+    "adjust": false,
+    "own_curves": true
+   }
+  },
+  {
+   "name": "own_reader_corner_box_uv_trim_f2_rebuild",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp (SmFace::CreateUVTrimCurves)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/corner_box.smb",
+     "rebuild": true
+    },
+    "init_gaps": false,
+    "op": "uv_trim",
+    "face": 2,
+    "adjust": false,
+    "own_curves": true
+   }
+  },
+  {
+   "name": "own_reader_corner_box_uv_trim_f3",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp (SmFace::CreateUVTrimCurves)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/corner_box.smb",
+     "rebuild": false
+    },
+    "init_gaps": false,
+    "op": "uv_trim",
+    "face": 3,
+    "adjust": false,
+    "own_curves": false
+   }
+  },
+  {
+   "name": "own_reader_corner_box_uv_trim_f3_rebuild",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp (SmFace::CreateUVTrimCurves)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/corner_box.smb",
+     "rebuild": true
+    },
+    "init_gaps": false,
+    "op": "uv_trim",
+    "face": 3,
+    "adjust": false,
+    "own_curves": false
+   }
+  },
+  {
+   "name": "own_reader_corner_box_uv_trim_f4",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp (SmFace::CreateUVTrimCurves)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/corner_box.smb",
+     "rebuild": false
+    },
+    "init_gaps": false,
+    "op": "uv_trim",
+    "face": 4,
+    "adjust": true,
+    "own_curves": false
+   }
+  },
+  {
+   "name": "own_reader_corner_box_uv_trim_f4_rebuild",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp (SmFace::CreateUVTrimCurves)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/corner_box.smb",
+     "rebuild": true
+    },
+    "init_gaps": false,
+    "op": "uv_trim",
+    "face": 4,
+    "adjust": true,
+    "own_curves": false
+   }
+  },
+  {
+   "name": "own_reader_corner_box_uv_trim_f5",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp (SmFace::CreateUVTrimCurves)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/corner_box.smb",
+     "rebuild": false
+    },
+    "init_gaps": false,
+    "op": "uv_trim",
+    "face": 5,
+    "adjust": false,
+    "own_curves": false
+   }
+  },
+  {
+   "name": "own_reader_corner_box_uv_trim_f5_rebuild",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp (SmFace::CreateUVTrimCurves)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/corner_box.smb",
+     "rebuild": true
+    },
+    "init_gaps": false,
+    "op": "uv_trim",
+    "face": 5,
+    "adjust": false,
+    "own_curves": false
+   }
+  },
+  {
+   "name": "own_reader_corner_box_uv_trim_f6",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp (SmFace::CreateUVTrimCurves)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/corner_box.smb",
+     "rebuild": false
+    },
+    "init_gaps": false,
+    "op": "uv_trim",
+    "face": 6,
+    "adjust": false,
+    "own_curves": true
+   }
+  },
+  {
+   "name": "own_reader_corner_box_uv_trim_f6_rebuild",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp (SmFace::CreateUVTrimCurves)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/corner_box.smb",
+     "rebuild": true
+    },
+    "init_gaps": false,
+    "op": "uv_trim",
+    "face": 6,
+    "adjust": false,
+    "own_curves": true
+   }
+  },
+  {
+   "name": "own_reader_corner_box_uv_trim_f7",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp (SmFace::CreateUVTrimCurves)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/corner_box.smb",
+     "rebuild": false
+    },
+    "init_gaps": false,
+    "op": "uv_trim",
+    "face": 7,
+    "adjust": true,
+    "own_curves": false
+   }
+  },
+  {
+   "name": "own_reader_corner_box_uv_trim_f7_rebuild",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp (SmFace::CreateUVTrimCurves)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/corner_box.smb",
+     "rebuild": true
+    },
+    "init_gaps": false,
+    "op": "uv_trim",
+    "face": 7,
+    "adjust": true,
+    "own_curves": false
+   }
+  },
+  {
+   "name": "own_reader_corner_box_uv_trim_f8",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp (SmFace::CreateUVTrimCurves)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/corner_box.smb",
+     "rebuild": false
+    },
+    "init_gaps": false,
+    "op": "uv_trim",
+    "face": 8,
+    "adjust": false,
+    "own_curves": false
+   }
+  },
+  {
+   "name": "own_reader_corner_box_uv_trim_f8_rebuild",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp (SmFace::CreateUVTrimCurves)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/corner_box.smb",
+     "rebuild": true
+    },
+    "init_gaps": false,
+    "op": "uv_trim",
+    "face": 8,
+    "adjust": false,
+    "own_curves": false
+   }
+  },
+  {
+   "name": "own_reader_corner_box_uv_trim_f9",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp (SmFace::CreateUVTrimCurves)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/corner_box.smb",
+     "rebuild": false
+    },
+    "init_gaps": false,
+    "op": "uv_trim",
+    "face": 9,
+    "adjust": false,
+    "own_curves": false
+   }
+  },
+  {
+   "name": "own_reader_corner_box_uv_trim_f9_rebuild",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp (SmFace::CreateUVTrimCurves)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/corner_box.smb",
+     "rebuild": true
+    },
+    "init_gaps": false,
+    "op": "uv_trim",
+    "face": 9,
+    "adjust": false,
+    "own_curves": false
+   }
+  },
+  {
+   "name": "own_reader_corner_box_uv_trim_f10",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp (SmFace::CreateUVTrimCurves)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/corner_box.smb",
+     "rebuild": false
+    },
+    "init_gaps": false,
+    "op": "uv_trim",
+    "face": 10,
+    "adjust": true,
+    "own_curves": true
+   }
+  },
+  {
+   "name": "own_reader_corner_box_uv_trim_f10_rebuild",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp (SmFace::CreateUVTrimCurves)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/corner_box.smb",
+     "rebuild": true
+    },
+    "init_gaps": false,
+    "op": "uv_trim",
+    "face": 10,
+    "adjust": true,
+    "own_curves": true
+   }
+  },
+  {
+   "name": "own_reader_corner_box_uv_trim_f11",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp (SmFace::CreateUVTrimCurves)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/corner_box.smb",
+     "rebuild": false
+    },
+    "init_gaps": false,
+    "op": "uv_trim",
+    "face": 11,
+    "adjust": false,
+    "own_curves": false
+   }
+  },
+  {
+   "name": "own_reader_corner_box_uv_trim_f11_rebuild",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp (SmFace::CreateUVTrimCurves)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/corner_box.smb",
+     "rebuild": true
+    },
+    "init_gaps": false,
+    "op": "uv_trim",
+    "face": 11,
+    "adjust": false,
+    "own_curves": false
+   }
+  },
+  {
+   "name": "own_reader_cyl_on_box_uv_trim_f0",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp (SmFace::CreateUVTrimCurves)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/cyl_on_box.smb",
+     "rebuild": false
+    },
+    "init_gaps": false,
+    "op": "uv_trim",
+    "face": 0,
+    "adjust": false,
+    "own_curves": false
+   }
+  },
+  {
+   "name": "own_reader_cyl_on_box_uv_trim_f0_rebuild",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp (SmFace::CreateUVTrimCurves)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/cyl_on_box.smb",
+     "rebuild": true
+    },
+    "init_gaps": false,
+    "op": "uv_trim",
+    "face": 0,
+    "adjust": false,
+    "own_curves": false
+   }
+  },
+  {
+   "name": "own_reader_cyl_on_box_uv_trim_f1",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp (SmFace::CreateUVTrimCurves)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/cyl_on_box.smb",
+     "rebuild": false
+    },
+    "init_gaps": false,
+    "op": "uv_trim",
+    "face": 1,
+    "adjust": true,
+    "own_curves": false
+   }
+  },
+  {
+   "name": "own_reader_cyl_on_box_uv_trim_f1_rebuild",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp (SmFace::CreateUVTrimCurves)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/cyl_on_box.smb",
+     "rebuild": true
+    },
+    "init_gaps": false,
+    "op": "uv_trim",
+    "face": 1,
+    "adjust": true,
+    "own_curves": false
+   }
+  },
+  {
+   "name": "own_reader_cyl_on_box_uv_trim_f2",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp (SmFace::CreateUVTrimCurves)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/cyl_on_box.smb",
+     "rebuild": false
+    },
+    "init_gaps": false,
+    "op": "uv_trim",
+    "face": 2,
+    "adjust": false,
+    "own_curves": true
+   }
+  },
+  {
+   "name": "own_reader_cyl_on_box_uv_trim_f2_rebuild",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp (SmFace::CreateUVTrimCurves)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/cyl_on_box.smb",
+     "rebuild": true
+    },
+    "init_gaps": false,
+    "op": "uv_trim",
+    "face": 2,
+    "adjust": false,
+    "own_curves": true
+   }
+  },
+  {
+   "name": "own_reader_cyl_on_box_uv_trim_f3",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp (SmFace::CreateUVTrimCurves)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/cyl_on_box.smb",
+     "rebuild": false
+    },
+    "init_gaps": false,
+    "op": "uv_trim",
+    "face": 3,
+    "adjust": false,
+    "own_curves": false
+   }
+  },
+  {
+   "name": "own_reader_cyl_on_box_uv_trim_f3_rebuild",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp (SmFace::CreateUVTrimCurves)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/cyl_on_box.smb",
+     "rebuild": true
+    },
+    "init_gaps": false,
+    "op": "uv_trim",
+    "face": 3,
+    "adjust": false,
+    "own_curves": false
+   }
+  },
+  {
+   "name": "own_reader_cyl_on_box_uv_trim_f4",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp (SmFace::CreateUVTrimCurves)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/cyl_on_box.smb",
+     "rebuild": false
+    },
+    "init_gaps": false,
+    "op": "uv_trim",
+    "face": 4,
+    "adjust": true,
+    "own_curves": false
+   }
+  },
+  {
+   "name": "own_reader_cyl_on_box_uv_trim_f4_rebuild",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp (SmFace::CreateUVTrimCurves)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/cyl_on_box.smb",
+     "rebuild": true
+    },
+    "init_gaps": false,
+    "op": "uv_trim",
+    "face": 4,
+    "adjust": true,
+    "own_curves": false
+   }
+  },
+  {
+   "name": "own_reader_cyl_on_box_uv_trim_f5",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp (SmFace::CreateUVTrimCurves)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/cyl_on_box.smb",
+     "rebuild": false
+    },
+    "init_gaps": false,
+    "op": "uv_trim",
+    "face": 5,
+    "adjust": false,
+    "own_curves": false
+   }
+  },
+  {
+   "name": "own_reader_cyl_on_box_uv_trim_f5_rebuild",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp (SmFace::CreateUVTrimCurves)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/cyl_on_box.smb",
+     "rebuild": true
+    },
+    "init_gaps": false,
+    "op": "uv_trim",
+    "face": 5,
+    "adjust": false,
+    "own_curves": false
+   }
+  },
+  {
+   "name": "own_reader_cyl_on_box_uv_trim_f6",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp (SmFace::CreateUVTrimCurves)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/cyl_on_box.smb",
+     "rebuild": false
+    },
+    "init_gaps": false,
+    "op": "uv_trim",
+    "face": 6,
+    "adjust": false,
+    "own_curves": true
+   }
+  },
+  {
+   "name": "own_reader_cyl_on_box_uv_trim_f6_rebuild",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp (SmFace::CreateUVTrimCurves)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/cyl_on_box.smb",
+     "rebuild": true
+    },
+    "init_gaps": false,
+    "op": "uv_trim",
+    "face": 6,
+    "adjust": false,
+    "own_curves": true
+   }
+  },
+  {
+   "name": "own_reader_cyl_on_box_uv_trim_f7",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp (SmFace::CreateUVTrimCurves)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/cyl_on_box.smb",
+     "rebuild": false
+    },
+    "init_gaps": false,
+    "op": "uv_trim",
+    "face": 7,
+    "adjust": true,
+    "own_curves": false
+   }
+  },
+  {
+   "name": "own_reader_cyl_on_box_uv_trim_f7_rebuild",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp (SmFace::CreateUVTrimCurves)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/cyl_on_box.smb",
+     "rebuild": true
+    },
+    "init_gaps": false,
+    "op": "uv_trim",
+    "face": 7,
+    "adjust": true,
+    "own_curves": false
+   }
+  },
+  {
+   "name": "own_reader_cyl_on_box_uv_trim_f8",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp (SmFace::CreateUVTrimCurves)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/cyl_on_box.smb",
+     "rebuild": false
+    },
+    "init_gaps": false,
+    "op": "uv_trim",
+    "face": 8,
+    "adjust": false,
+    "own_curves": false
+   }
+  },
+  {
+   "name": "own_reader_cyl_on_box_uv_trim_f8_rebuild",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp (SmFace::CreateUVTrimCurves)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/cyl_on_box.smb",
+     "rebuild": true
+    },
+    "init_gaps": false,
+    "op": "uv_trim",
+    "face": 8,
+    "adjust": false,
+    "own_curves": false
+   }
+  },
+  {
+   "name": "own_reader_cyl_on_box_uv_trim_f9",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp (SmFace::CreateUVTrimCurves)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/cyl_on_box.smb",
+     "rebuild": false
+    },
+    "init_gaps": false,
+    "op": "uv_trim",
+    "face": 9,
+    "adjust": false,
+    "own_curves": false
+   }
+  },
+  {
+   "name": "own_reader_cyl_on_box_uv_trim_f9_rebuild",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp (SmFace::CreateUVTrimCurves)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/cyl_on_box.smb",
+     "rebuild": true
+    },
+    "init_gaps": false,
+    "op": "uv_trim",
+    "face": 9,
+    "adjust": false,
+    "own_curves": false
+   }
+  },
+  {
+   "name": "own_reader_cyl_on_box_uv_trim_f10",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp (SmFace::CreateUVTrimCurves)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/cyl_on_box.smb",
+     "rebuild": false
+    },
+    "init_gaps": false,
+    "op": "uv_trim",
+    "face": 10,
+    "adjust": true,
+    "own_curves": true
+   }
+  },
+  {
+   "name": "own_reader_cyl_on_box_uv_trim_f10_rebuild",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp (SmFace::CreateUVTrimCurves)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/cyl_on_box.smb",
+     "rebuild": true
+    },
+    "init_gaps": false,
+    "op": "uv_trim",
+    "face": 10,
+    "adjust": true,
+    "own_curves": true
+   }
+  },
+  {
+   "name": "own_reader_cyl_on_box_uv_trim_f11",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp (SmFace::CreateUVTrimCurves)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/cyl_on_box.smb",
+     "rebuild": false
+    },
+    "init_gaps": false,
+    "op": "uv_trim",
+    "face": 11,
+    "adjust": false,
+    "own_curves": false
+   }
+  },
+  {
+   "name": "own_reader_cyl_on_box_uv_trim_f11_rebuild",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp (SmFace::CreateUVTrimCurves)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/cyl_on_box.smb",
+     "rebuild": true
+    },
+    "init_gaps": false,
+    "op": "uv_trim",
+    "face": 11,
+    "adjust": false,
+    "own_curves": false
+   }
+  },
+  {
+   "name": "own_reader_l_shaped_box_uv_trim_f0",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp (SmFace::CreateUVTrimCurves)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/l_shaped_box.smb",
+     "rebuild": false
+    },
+    "init_gaps": false,
+    "op": "uv_trim",
+    "face": 0,
+    "adjust": false,
+    "own_curves": false
+   }
+  },
+  {
+   "name": "own_reader_l_shaped_box_uv_trim_f0_rebuild",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp (SmFace::CreateUVTrimCurves)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/l_shaped_box.smb",
+     "rebuild": true
+    },
+    "init_gaps": false,
+    "op": "uv_trim",
+    "face": 0,
+    "adjust": false,
+    "own_curves": false
+   }
+  },
+  {
+   "name": "own_reader_l_shaped_box_uv_trim_f1",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp (SmFace::CreateUVTrimCurves)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/l_shaped_box.smb",
+     "rebuild": false
+    },
+    "init_gaps": false,
+    "op": "uv_trim",
+    "face": 1,
+    "adjust": true,
+    "own_curves": false
+   }
+  },
+  {
+   "name": "own_reader_l_shaped_box_uv_trim_f1_rebuild",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp (SmFace::CreateUVTrimCurves)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/l_shaped_box.smb",
+     "rebuild": true
+    },
+    "init_gaps": false,
+    "op": "uv_trim",
+    "face": 1,
+    "adjust": true,
+    "own_curves": false
+   }
+  },
+  {
+   "name": "own_reader_l_shaped_box_uv_trim_f2",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp (SmFace::CreateUVTrimCurves)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/l_shaped_box.smb",
+     "rebuild": false
+    },
+    "init_gaps": false,
+    "op": "uv_trim",
+    "face": 2,
+    "adjust": false,
+    "own_curves": true
+   }
+  },
+  {
+   "name": "own_reader_l_shaped_box_uv_trim_f2_rebuild",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp (SmFace::CreateUVTrimCurves)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/l_shaped_box.smb",
+     "rebuild": true
+    },
+    "init_gaps": false,
+    "op": "uv_trim",
+    "face": 2,
+    "adjust": false,
+    "own_curves": true
+   }
+  },
+  {
+   "name": "own_reader_l_shaped_box_uv_trim_f3",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp (SmFace::CreateUVTrimCurves)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/l_shaped_box.smb",
+     "rebuild": false
+    },
+    "init_gaps": false,
+    "op": "uv_trim",
+    "face": 3,
+    "adjust": false,
+    "own_curves": false
+   }
+  },
+  {
+   "name": "own_reader_l_shaped_box_uv_trim_f3_rebuild",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp (SmFace::CreateUVTrimCurves)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/l_shaped_box.smb",
+     "rebuild": true
+    },
+    "init_gaps": false,
+    "op": "uv_trim",
+    "face": 3,
+    "adjust": false,
+    "own_curves": false
+   }
+  },
+  {
+   "name": "own_reader_l_shaped_box_uv_trim_f4",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp (SmFace::CreateUVTrimCurves)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/l_shaped_box.smb",
+     "rebuild": false
+    },
+    "init_gaps": false,
+    "op": "uv_trim",
+    "face": 4,
+    "adjust": true,
+    "own_curves": false
+   }
+  },
+  {
+   "name": "own_reader_l_shaped_box_uv_trim_f4_rebuild",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp (SmFace::CreateUVTrimCurves)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/l_shaped_box.smb",
+     "rebuild": true
+    },
+    "init_gaps": false,
+    "op": "uv_trim",
+    "face": 4,
+    "adjust": true,
+    "own_curves": false
+   }
+  },
+  {
+   "name": "own_reader_l_shaped_box_uv_trim_f5",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp (SmFace::CreateUVTrimCurves)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/l_shaped_box.smb",
+     "rebuild": false
+    },
+    "init_gaps": false,
+    "op": "uv_trim",
+    "face": 5,
+    "adjust": false,
+    "own_curves": false
+   }
+  },
+  {
+   "name": "own_reader_l_shaped_box_uv_trim_f5_rebuild",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp (SmFace::CreateUVTrimCurves)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/l_shaped_box.smb",
+     "rebuild": true
+    },
+    "init_gaps": false,
+    "op": "uv_trim",
+    "face": 5,
+    "adjust": false,
+    "own_curves": false
+   }
+  },
+  {
+   "name": "own_reader_l_shaped_box_uv_trim_f6",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp (SmFace::CreateUVTrimCurves)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/l_shaped_box.smb",
+     "rebuild": false
+    },
+    "init_gaps": false,
+    "op": "uv_trim",
+    "face": 6,
+    "adjust": false,
+    "own_curves": true
+   }
+  },
+  {
+   "name": "own_reader_l_shaped_box_uv_trim_f6_rebuild",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp (SmFace::CreateUVTrimCurves)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/l_shaped_box.smb",
+     "rebuild": true
+    },
+    "init_gaps": false,
+    "op": "uv_trim",
+    "face": 6,
+    "adjust": false,
+    "own_curves": true
+   }
+  },
+  {
+   "name": "own_reader_l_shaped_box_uv_trim_f7",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp (SmFace::CreateUVTrimCurves)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/l_shaped_box.smb",
+     "rebuild": false
+    },
+    "init_gaps": false,
+    "op": "uv_trim",
+    "face": 7,
+    "adjust": true,
+    "own_curves": false
+   }
+  },
+  {
+   "name": "own_reader_l_shaped_box_uv_trim_f7_rebuild",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp (SmFace::CreateUVTrimCurves)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/l_shaped_box.smb",
+     "rebuild": true
+    },
+    "init_gaps": false,
+    "op": "uv_trim",
+    "face": 7,
+    "adjust": true,
+    "own_curves": false
+   }
+  },
+  {
+   "name": "own_reader_l_shaped_box_uv_trim_f8",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp (SmFace::CreateUVTrimCurves)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/l_shaped_box.smb",
+     "rebuild": false
+    },
+    "init_gaps": false,
+    "op": "uv_trim",
+    "face": 8,
+    "adjust": false,
+    "own_curves": false
+   }
+  },
+  {
+   "name": "own_reader_l_shaped_box_uv_trim_f8_rebuild",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp (SmFace::CreateUVTrimCurves)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/l_shaped_box.smb",
+     "rebuild": true
+    },
+    "init_gaps": false,
+    "op": "uv_trim",
+    "face": 8,
+    "adjust": false,
+    "own_curves": false
+   }
+  },
+  {
+   "name": "own_reader_l_shaped_box_uv_trim_f9",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp (SmFace::CreateUVTrimCurves)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/l_shaped_box.smb",
+     "rebuild": false
+    },
+    "init_gaps": false,
+    "op": "uv_trim",
+    "face": 9,
+    "adjust": false,
+    "own_curves": false
+   }
+  },
+  {
+   "name": "own_reader_l_shaped_box_uv_trim_f9_rebuild",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp (SmFace::CreateUVTrimCurves)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/l_shaped_box.smb",
+     "rebuild": true
+    },
+    "init_gaps": false,
+    "op": "uv_trim",
+    "face": 9,
+    "adjust": false,
+    "own_curves": false
+   }
+  },
+  {
+   "name": "own_reader_l_shaped_box_uv_trim_f10",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp (SmFace::CreateUVTrimCurves)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/l_shaped_box.smb",
+     "rebuild": false
+    },
+    "init_gaps": false,
+    "op": "uv_trim",
+    "face": 10,
+    "adjust": true,
+    "own_curves": true
+   }
+  },
+  {
+   "name": "own_reader_l_shaped_box_uv_trim_f10_rebuild",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp (SmFace::CreateUVTrimCurves)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/l_shaped_box.smb",
+     "rebuild": true
+    },
+    "init_gaps": false,
+    "op": "uv_trim",
+    "face": 10,
+    "adjust": true,
+    "own_curves": true
+   }
+  },
+  {
+   "name": "own_reader_l_shaped_box_uv_trim_f11",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp (SmFace::CreateUVTrimCurves)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/l_shaped_box.smb",
+     "rebuild": false
+    },
+    "init_gaps": false,
+    "op": "uv_trim",
+    "face": 11,
+    "adjust": false,
+    "own_curves": false
+   }
+  },
+  {
+   "name": "own_reader_l_shaped_box_uv_trim_f11_rebuild",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp (SmFace::CreateUVTrimCurves)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/l_shaped_box.smb",
+     "rebuild": true
+    },
+    "init_gaps": false,
+    "op": "uv_trim",
+    "face": 11,
+    "adjust": false,
+    "own_curves": false
+   }
+  },
+  {
+   "name": "own_reader_nurb_cone_uv_trim_f0",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp (SmFace::CreateUVTrimCurves)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/nurb_cone.smb",
+     "rebuild": false
+    },
+    "init_gaps": false,
+    "op": "uv_trim",
+    "face": 0,
+    "adjust": false,
+    "own_curves": false
+   }
+  },
+  {
+   "name": "own_reader_nurb_cone_uv_trim_f0_rebuild",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp (SmFace::CreateUVTrimCurves)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/nurb_cone.smb",
+     "rebuild": true
+    },
+    "init_gaps": false,
+    "op": "uv_trim",
+    "face": 0,
+    "adjust": false,
+    "own_curves": false
+   }
+  },
+  {
+   "name": "own_reader_nurb_cone_uv_trim_f1",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp (SmFace::CreateUVTrimCurves)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/nurb_cone.smb",
+     "rebuild": false
+    },
+    "init_gaps": false,
+    "op": "uv_trim",
+    "face": 1,
+    "adjust": true,
+    "own_curves": false
+   }
+  },
+  {
+   "name": "own_reader_nurb_cone_uv_trim_f1_rebuild",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp (SmFace::CreateUVTrimCurves)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/nurb_cone.smb",
+     "rebuild": true
+    },
+    "init_gaps": false,
+    "op": "uv_trim",
+    "face": 1,
+    "adjust": true,
+    "own_curves": false
+   }
+  },
+  {
+   "name": "own_reader_nurb_cone_uv_trim_f2",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp (SmFace::CreateUVTrimCurves)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/nurb_cone.smb",
+     "rebuild": false
+    },
+    "init_gaps": false,
+    "op": "uv_trim",
+    "face": 2,
+    "adjust": false,
+    "own_curves": true
+   }
+  },
+  {
+   "name": "own_reader_nurb_cone_uv_trim_f2_rebuild",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp (SmFace::CreateUVTrimCurves)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/nurb_cone.smb",
+     "rebuild": true
+    },
+    "init_gaps": false,
+    "op": "uv_trim",
+    "face": 2,
+    "adjust": false,
+    "own_curves": true
+   }
+  },
+  {
+   "name": "own_reader_nurb_cone_uv_trim_f3",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp (SmFace::CreateUVTrimCurves)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/nurb_cone.smb",
+     "rebuild": false
+    },
+    "init_gaps": false,
+    "op": "uv_trim",
+    "face": 3,
+    "adjust": false,
+    "own_curves": false
+   }
+  },
+  {
+   "name": "own_reader_nurb_cone_uv_trim_f3_rebuild",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp (SmFace::CreateUVTrimCurves)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/nurb_cone.smb",
+     "rebuild": true
+    },
+    "init_gaps": false,
+    "op": "uv_trim",
+    "face": 3,
+    "adjust": false,
+    "own_curves": false
+   }
+  },
+  {
+   "name": "own_reader_nurb_cone_uv_trim_f4",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp (SmFace::CreateUVTrimCurves)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/nurb_cone.smb",
+     "rebuild": false
+    },
+    "init_gaps": false,
+    "op": "uv_trim",
+    "face": 4,
+    "adjust": true,
+    "own_curves": false
+   }
+  },
+  {
+   "name": "own_reader_nurb_cone_uv_trim_f4_rebuild",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp (SmFace::CreateUVTrimCurves)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/nurb_cone.smb",
+     "rebuild": true
+    },
+    "init_gaps": false,
+    "op": "uv_trim",
+    "face": 4,
+    "adjust": true,
+    "own_curves": false
+   }
+  },
+  {
+   "name": "own_reader_nurb_cone_uv_trim_f5",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp (SmFace::CreateUVTrimCurves)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/nurb_cone.smb",
+     "rebuild": false
+    },
+    "init_gaps": false,
+    "op": "uv_trim",
+    "face": 5,
+    "adjust": false,
+    "own_curves": false
+   }
+  },
+  {
+   "name": "own_reader_nurb_cone_uv_trim_f5_rebuild",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp (SmFace::CreateUVTrimCurves)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/nurb_cone.smb",
+     "rebuild": true
+    },
+    "init_gaps": false,
+    "op": "uv_trim",
+    "face": 5,
+    "adjust": false,
+    "own_curves": false
+   }
+  },
+  {
+   "name": "own_reader_nurb_cone_uv_trim_f6",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp (SmFace::CreateUVTrimCurves)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/nurb_cone.smb",
+     "rebuild": false
+    },
+    "init_gaps": false,
+    "op": "uv_trim",
+    "face": 6,
+    "adjust": false,
+    "own_curves": true
+   }
+  },
+  {
+   "name": "own_reader_nurb_cone_uv_trim_f6_rebuild",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp (SmFace::CreateUVTrimCurves)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/nurb_cone.smb",
+     "rebuild": true
+    },
+    "init_gaps": false,
+    "op": "uv_trim",
+    "face": 6,
+    "adjust": false,
+    "own_curves": true
+   }
+  },
+  {
+   "name": "own_reader_nurb_cone_uv_trim_f7",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp (SmFace::CreateUVTrimCurves)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/nurb_cone.smb",
+     "rebuild": false
+    },
+    "init_gaps": false,
+    "op": "uv_trim",
+    "face": 7,
+    "adjust": true,
+    "own_curves": false
+   }
+  },
+  {
+   "name": "own_reader_nurb_cone_uv_trim_f7_rebuild",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp (SmFace::CreateUVTrimCurves)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/nurb_cone.smb",
+     "rebuild": true
+    },
+    "init_gaps": false,
+    "op": "uv_trim",
+    "face": 7,
+    "adjust": true,
+    "own_curves": false
+   }
+  },
+  {
+   "name": "own_reader_nurb_cone_uv_trim_f8",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp (SmFace::CreateUVTrimCurves)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/nurb_cone.smb",
+     "rebuild": false
+    },
+    "init_gaps": false,
+    "op": "uv_trim",
+    "face": 8,
+    "adjust": false,
+    "own_curves": false
+   }
+  },
+  {
+   "name": "own_reader_nurb_cone_uv_trim_f8_rebuild",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp (SmFace::CreateUVTrimCurves)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/nurb_cone.smb",
+     "rebuild": true
+    },
+    "init_gaps": false,
+    "op": "uv_trim",
+    "face": 8,
+    "adjust": false,
+    "own_curves": false
+   }
+  },
+  {
+   "name": "own_reader_nurb_cone_uv_trim_f9",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp (SmFace::CreateUVTrimCurves)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/nurb_cone.smb",
+     "rebuild": false
+    },
+    "init_gaps": false,
+    "op": "uv_trim",
+    "face": 9,
+    "adjust": false,
+    "own_curves": false
+   }
+  },
+  {
+   "name": "own_reader_nurb_cone_uv_trim_f9_rebuild",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp (SmFace::CreateUVTrimCurves)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/nurb_cone.smb",
+     "rebuild": true
+    },
+    "init_gaps": false,
+    "op": "uv_trim",
+    "face": 9,
+    "adjust": false,
+    "own_curves": false
+   }
+  },
+  {
+   "name": "own_reader_nurb_cone_uv_trim_f10",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp (SmFace::CreateUVTrimCurves)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/nurb_cone.smb",
+     "rebuild": false
+    },
+    "init_gaps": false,
+    "op": "uv_trim",
+    "face": 10,
+    "adjust": true,
+    "own_curves": true
+   }
+  },
+  {
+   "name": "own_reader_nurb_cone_uv_trim_f10_rebuild",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp (SmFace::CreateUVTrimCurves)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/nurb_cone.smb",
+     "rebuild": true
+    },
+    "init_gaps": false,
+    "op": "uv_trim",
+    "face": 10,
+    "adjust": true,
+    "own_curves": true
+   }
+  },
+  {
+   "name": "own_reader_nurb_cone_uv_trim_f11",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp (SmFace::CreateUVTrimCurves)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/nurb_cone.smb",
+     "rebuild": false
+    },
+    "init_gaps": false,
+    "op": "uv_trim",
+    "face": 11,
+    "adjust": false,
+    "own_curves": false
+   }
+  },
+  {
+   "name": "own_reader_nurb_cone_uv_trim_f11_rebuild",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp (SmFace::CreateUVTrimCurves)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/nurb_cone.smb",
+     "rebuild": true
+    },
+    "init_gaps": false,
+    "op": "uv_trim",
+    "face": 11,
+    "adjust": false,
+    "own_curves": false
+   }
+  },
+  {
+   "name": "own_reader_filleted_box_uv_trim_f0",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp (SmFace::CreateUVTrimCurves)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/filleted_box.smb",
+     "rebuild": false
+    },
+    "init_gaps": false,
+    "op": "uv_trim",
+    "face": 0,
+    "adjust": false,
+    "own_curves": false
+   }
+  },
+  {
+   "name": "own_reader_filleted_box_uv_trim_f0_rebuild",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp (SmFace::CreateUVTrimCurves)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/filleted_box.smb",
+     "rebuild": true
+    },
+    "init_gaps": false,
+    "op": "uv_trim",
+    "face": 0,
+    "adjust": false,
+    "own_curves": false
+   }
+  },
+  {
+   "name": "own_reader_filleted_box_uv_trim_f1",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp (SmFace::CreateUVTrimCurves)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/filleted_box.smb",
+     "rebuild": false
+    },
+    "init_gaps": false,
+    "op": "uv_trim",
+    "face": 1,
+    "adjust": true,
+    "own_curves": false
+   }
+  },
+  {
+   "name": "own_reader_filleted_box_uv_trim_f1_rebuild",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp (SmFace::CreateUVTrimCurves)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/filleted_box.smb",
+     "rebuild": true
+    },
+    "init_gaps": false,
+    "op": "uv_trim",
+    "face": 1,
+    "adjust": true,
+    "own_curves": false
+   }
+  },
+  {
+   "name": "own_reader_filleted_box_uv_trim_f2",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp (SmFace::CreateUVTrimCurves)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/filleted_box.smb",
+     "rebuild": false
+    },
+    "init_gaps": false,
+    "op": "uv_trim",
+    "face": 2,
+    "adjust": false,
+    "own_curves": true
+   }
+  },
+  {
+   "name": "own_reader_filleted_box_uv_trim_f2_rebuild",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp (SmFace::CreateUVTrimCurves)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/filleted_box.smb",
+     "rebuild": true
+    },
+    "init_gaps": false,
+    "op": "uv_trim",
+    "face": 2,
+    "adjust": false,
+    "own_curves": true
+   }
+  },
+  {
+   "name": "own_reader_filleted_box_uv_trim_f3",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp (SmFace::CreateUVTrimCurves)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/filleted_box.smb",
+     "rebuild": false
+    },
+    "init_gaps": false,
+    "op": "uv_trim",
+    "face": 3,
+    "adjust": false,
+    "own_curves": false
+   }
+  },
+  {
+   "name": "own_reader_filleted_box_uv_trim_f3_rebuild",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp (SmFace::CreateUVTrimCurves)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/filleted_box.smb",
+     "rebuild": true
+    },
+    "init_gaps": false,
+    "op": "uv_trim",
+    "face": 3,
+    "adjust": false,
+    "own_curves": false
+   }
+  },
+  {
+   "name": "own_reader_filleted_box_uv_trim_f4",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp (SmFace::CreateUVTrimCurves)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/filleted_box.smb",
+     "rebuild": false
+    },
+    "init_gaps": false,
+    "op": "uv_trim",
+    "face": 4,
+    "adjust": true,
+    "own_curves": false
+   }
+  },
+  {
+   "name": "own_reader_filleted_box_uv_trim_f4_rebuild",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp (SmFace::CreateUVTrimCurves)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/filleted_box.smb",
+     "rebuild": true
+    },
+    "init_gaps": false,
+    "op": "uv_trim",
+    "face": 4,
+    "adjust": true,
+    "own_curves": false
+   }
+  },
+  {
+   "name": "own_reader_filleted_box_uv_trim_f5",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp (SmFace::CreateUVTrimCurves)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/filleted_box.smb",
+     "rebuild": false
+    },
+    "init_gaps": false,
+    "op": "uv_trim",
+    "face": 5,
+    "adjust": false,
+    "own_curves": false
+   }
+  },
+  {
+   "name": "own_reader_filleted_box_uv_trim_f5_rebuild",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp (SmFace::CreateUVTrimCurves)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/filleted_box.smb",
+     "rebuild": true
+    },
+    "init_gaps": false,
+    "op": "uv_trim",
+    "face": 5,
+    "adjust": false,
+    "own_curves": false
+   }
+  },
+  {
+   "name": "own_reader_filleted_box_uv_trim_f6",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp (SmFace::CreateUVTrimCurves)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/filleted_box.smb",
+     "rebuild": false
+    },
+    "init_gaps": false,
+    "op": "uv_trim",
+    "face": 6,
+    "adjust": false,
+    "own_curves": true
+   }
+  },
+  {
+   "name": "own_reader_filleted_box_uv_trim_f6_rebuild",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp (SmFace::CreateUVTrimCurves)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/filleted_box.smb",
+     "rebuild": true
+    },
+    "init_gaps": false,
+    "op": "uv_trim",
+    "face": 6,
+    "adjust": false,
+    "own_curves": true
+   }
+  },
+  {
+   "name": "own_reader_filleted_box_uv_trim_f7",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp (SmFace::CreateUVTrimCurves)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/filleted_box.smb",
+     "rebuild": false
+    },
+    "init_gaps": false,
+    "op": "uv_trim",
+    "face": 7,
+    "adjust": true,
+    "own_curves": false
+   }
+  },
+  {
+   "name": "own_reader_filleted_box_uv_trim_f7_rebuild",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp (SmFace::CreateUVTrimCurves)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/filleted_box.smb",
+     "rebuild": true
+    },
+    "init_gaps": false,
+    "op": "uv_trim",
+    "face": 7,
+    "adjust": true,
+    "own_curves": false
+   }
+  },
+  {
+   "name": "own_reader_filleted_box_uv_trim_f8",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp (SmFace::CreateUVTrimCurves)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/filleted_box.smb",
+     "rebuild": false
+    },
+    "init_gaps": false,
+    "op": "uv_trim",
+    "face": 8,
+    "adjust": false,
+    "own_curves": false
+   }
+  },
+  {
+   "name": "own_reader_filleted_box_uv_trim_f8_rebuild",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp (SmFace::CreateUVTrimCurves)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/filleted_box.smb",
+     "rebuild": true
+    },
+    "init_gaps": false,
+    "op": "uv_trim",
+    "face": 8,
+    "adjust": false,
+    "own_curves": false
+   }
+  },
+  {
+   "name": "own_reader_filleted_box_uv_trim_f9",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp (SmFace::CreateUVTrimCurves)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/filleted_box.smb",
+     "rebuild": false
+    },
+    "init_gaps": false,
+    "op": "uv_trim",
+    "face": 9,
+    "adjust": false,
+    "own_curves": false
+   }
+  },
+  {
+   "name": "own_reader_filleted_box_uv_trim_f9_rebuild",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp (SmFace::CreateUVTrimCurves)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/filleted_box.smb",
+     "rebuild": true
+    },
+    "init_gaps": false,
+    "op": "uv_trim",
+    "face": 9,
+    "adjust": false,
+    "own_curves": false
+   }
+  },
+  {
+   "name": "own_reader_filleted_box_uv_trim_f10",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp (SmFace::CreateUVTrimCurves)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/filleted_box.smb",
+     "rebuild": false
+    },
+    "init_gaps": false,
+    "op": "uv_trim",
+    "face": 10,
+    "adjust": true,
+    "own_curves": true
+   }
+  },
+  {
+   "name": "own_reader_filleted_box_uv_trim_f10_rebuild",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp (SmFace::CreateUVTrimCurves)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/filleted_box.smb",
+     "rebuild": true
+    },
+    "init_gaps": false,
+    "op": "uv_trim",
+    "face": 10,
+    "adjust": true,
+    "own_curves": true
+   }
+  },
+  {
+   "name": "own_reader_filleted_box_uv_trim_f11",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp (SmFace::CreateUVTrimCurves)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/filleted_box.smb",
+     "rebuild": false
+    },
+    "init_gaps": false,
+    "op": "uv_trim",
+    "face": 11,
+    "adjust": false,
+    "own_curves": false
+   }
+  },
+  {
+   "name": "own_reader_filleted_box_uv_trim_f11_rebuild",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp (SmFace::CreateUVTrimCurves)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/filleted_box.smb",
+     "rebuild": true
+    },
+    "init_gaps": false,
+    "op": "uv_trim",
+    "face": 11,
+    "adjust": false,
+    "own_curves": false
+   }
+  },
+  {
+   "name": "own_reader_test5_uv_trim_f0",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp (SmFace::CreateUVTrimCurves)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/test5.smb",
+     "rebuild": false
+    },
+    "init_gaps": false,
+    "op": "uv_trim",
+    "face": 0,
+    "adjust": false,
+    "own_curves": false
+   }
+  },
+  {
+   "name": "own_reader_test5_uv_trim_f0_rebuild",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp (SmFace::CreateUVTrimCurves)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/test5.smb",
+     "rebuild": true
+    },
+    "init_gaps": false,
+    "op": "uv_trim",
+    "face": 0,
+    "adjust": false,
+    "own_curves": false
+   }
+  },
+  {
+   "name": "own_reader_test5_uv_trim_f1",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp (SmFace::CreateUVTrimCurves)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/test5.smb",
+     "rebuild": false
+    },
+    "init_gaps": false,
+    "op": "uv_trim",
+    "face": 1,
+    "adjust": true,
+    "own_curves": false
+   }
+  },
+  {
+   "name": "own_reader_test5_uv_trim_f1_rebuild",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp (SmFace::CreateUVTrimCurves)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/test5.smb",
+     "rebuild": true
+    },
+    "init_gaps": false,
+    "op": "uv_trim",
+    "face": 1,
+    "adjust": true,
+    "own_curves": false
+   }
+  },
+  {
+   "name": "own_reader_test5_uv_trim_f2",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp (SmFace::CreateUVTrimCurves)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/test5.smb",
+     "rebuild": false
+    },
+    "init_gaps": false,
+    "op": "uv_trim",
+    "face": 2,
+    "adjust": false,
+    "own_curves": true
+   }
+  },
+  {
+   "name": "own_reader_test5_uv_trim_f2_rebuild",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp (SmFace::CreateUVTrimCurves)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/test5.smb",
+     "rebuild": true
+    },
+    "init_gaps": false,
+    "op": "uv_trim",
+    "face": 2,
+    "adjust": false,
+    "own_curves": true
+   }
+  },
+  {
+   "name": "own_reader_test5_uv_trim_f3",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp (SmFace::CreateUVTrimCurves)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/test5.smb",
+     "rebuild": false
+    },
+    "init_gaps": false,
+    "op": "uv_trim",
+    "face": 3,
+    "adjust": false,
+    "own_curves": false
+   }
+  },
+  {
+   "name": "own_reader_test5_uv_trim_f3_rebuild",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp (SmFace::CreateUVTrimCurves)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/test5.smb",
+     "rebuild": true
+    },
+    "init_gaps": false,
+    "op": "uv_trim",
+    "face": 3,
+    "adjust": false,
+    "own_curves": false
+   }
+  },
+  {
+   "name": "own_reader_test5_uv_trim_f4",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp (SmFace::CreateUVTrimCurves)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/test5.smb",
+     "rebuild": false
+    },
+    "init_gaps": false,
+    "op": "uv_trim",
+    "face": 4,
+    "adjust": true,
+    "own_curves": false
+   }
+  },
+  {
+   "name": "own_reader_test5_uv_trim_f4_rebuild",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp (SmFace::CreateUVTrimCurves)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/test5.smb",
+     "rebuild": true
+    },
+    "init_gaps": false,
+    "op": "uv_trim",
+    "face": 4,
+    "adjust": true,
+    "own_curves": false
+   }
+  },
+  {
+   "name": "own_reader_test5_uv_trim_f5",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp (SmFace::CreateUVTrimCurves)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/test5.smb",
+     "rebuild": false
+    },
+    "init_gaps": false,
+    "op": "uv_trim",
+    "face": 5,
+    "adjust": false,
+    "own_curves": false
+   }
+  },
+  {
+   "name": "own_reader_test5_uv_trim_f5_rebuild",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp (SmFace::CreateUVTrimCurves)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/test5.smb",
+     "rebuild": true
+    },
+    "init_gaps": false,
+    "op": "uv_trim",
+    "face": 5,
+    "adjust": false,
+    "own_curves": false
+   }
+  },
+  {
+   "name": "own_reader_test5_uv_trim_f6",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp (SmFace::CreateUVTrimCurves)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/test5.smb",
+     "rebuild": false
+    },
+    "init_gaps": false,
+    "op": "uv_trim",
+    "face": 6,
+    "adjust": false,
+    "own_curves": true
+   }
+  },
+  {
+   "name": "own_reader_test5_uv_trim_f6_rebuild",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp (SmFace::CreateUVTrimCurves)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/test5.smb",
+     "rebuild": true
+    },
+    "init_gaps": false,
+    "op": "uv_trim",
+    "face": 6,
+    "adjust": false,
+    "own_curves": true
+   }
+  },
+  {
+   "name": "own_reader_test5_uv_trim_f7",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp (SmFace::CreateUVTrimCurves)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/test5.smb",
+     "rebuild": false
+    },
+    "init_gaps": false,
+    "op": "uv_trim",
+    "face": 7,
+    "adjust": true,
+    "own_curves": false
+   }
+  },
+  {
+   "name": "own_reader_test5_uv_trim_f7_rebuild",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp (SmFace::CreateUVTrimCurves)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/test5.smb",
+     "rebuild": true
+    },
+    "init_gaps": false,
+    "op": "uv_trim",
+    "face": 7,
+    "adjust": true,
+    "own_curves": false
+   }
+  },
+  {
+   "name": "own_reader_test5_uv_trim_f8",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp (SmFace::CreateUVTrimCurves)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/test5.smb",
+     "rebuild": false
+    },
+    "init_gaps": false,
+    "op": "uv_trim",
+    "face": 8,
+    "adjust": false,
+    "own_curves": false
+   }
+  },
+  {
+   "name": "own_reader_test5_uv_trim_f8_rebuild",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp (SmFace::CreateUVTrimCurves)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/test5.smb",
+     "rebuild": true
+    },
+    "init_gaps": false,
+    "op": "uv_trim",
+    "face": 8,
+    "adjust": false,
+    "own_curves": false
+   }
+  },
+  {
+   "name": "own_reader_test5_uv_trim_f9",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp (SmFace::CreateUVTrimCurves)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/test5.smb",
+     "rebuild": false
+    },
+    "init_gaps": false,
+    "op": "uv_trim",
+    "face": 9,
+    "adjust": false,
+    "own_curves": false
+   }
+  },
+  {
+   "name": "own_reader_test5_uv_trim_f9_rebuild",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp (SmFace::CreateUVTrimCurves)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/test5.smb",
+     "rebuild": true
+    },
+    "init_gaps": false,
+    "op": "uv_trim",
+    "face": 9,
+    "adjust": false,
+    "own_curves": false
+   }
+  },
+  {
+   "name": "own_reader_test5_uv_trim_f10",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp (SmFace::CreateUVTrimCurves)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/test5.smb",
+     "rebuild": false
+    },
+    "init_gaps": false,
+    "op": "uv_trim",
+    "face": 10,
+    "adjust": true,
+    "own_curves": true
+   }
+  },
+  {
+   "name": "own_reader_test5_uv_trim_f10_rebuild",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp (SmFace::CreateUVTrimCurves)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/test5.smb",
+     "rebuild": true
+    },
+    "init_gaps": false,
+    "op": "uv_trim",
+    "face": 10,
+    "adjust": true,
+    "own_curves": true
+   }
+  },
+  {
+   "name": "own_reader_test5_uv_trim_f11",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp (SmFace::CreateUVTrimCurves)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/test5.smb",
+     "rebuild": false
+    },
+    "init_gaps": false,
+    "op": "uv_trim",
+    "face": 11,
+    "adjust": false,
+    "own_curves": false
+   }
+  },
+  {
+   "name": "own_reader_test5_uv_trim_f11_rebuild",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp (SmFace::CreateUVTrimCurves)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/test5.smb",
+     "rebuild": true
+    },
+    "init_gaps": false,
+    "op": "uv_trim",
+    "face": 11,
+    "adjust": false,
+    "own_curves": false
+   }
+  },
+  {
+   "name": "own_reader_brepForFillet2_uv_trim_f0",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp (SmFace::CreateUVTrimCurves)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/brepForFillet2.smb",
+     "rebuild": false
+    },
+    "init_gaps": false,
+    "op": "uv_trim",
+    "face": 0,
+    "adjust": false,
+    "own_curves": false
+   }
+  },
+  {
+   "name": "own_reader_brepForFillet2_uv_trim_f0_rebuild",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp (SmFace::CreateUVTrimCurves)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/brepForFillet2.smb",
+     "rebuild": true
+    },
+    "init_gaps": false,
+    "op": "uv_trim",
+    "face": 0,
+    "adjust": false,
+    "own_curves": false
+   }
+  },
+  {
+   "name": "own_reader_brepForFillet2_uv_trim_f1",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp (SmFace::CreateUVTrimCurves)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/brepForFillet2.smb",
+     "rebuild": false
+    },
+    "init_gaps": false,
+    "op": "uv_trim",
+    "face": 1,
+    "adjust": true,
+    "own_curves": false
+   }
+  },
+  {
+   "name": "own_reader_brepForFillet2_uv_trim_f1_rebuild",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp (SmFace::CreateUVTrimCurves)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/brepForFillet2.smb",
+     "rebuild": true
+    },
+    "init_gaps": false,
+    "op": "uv_trim",
+    "face": 1,
+    "adjust": true,
+    "own_curves": false
+   }
+  },
+  {
+   "name": "own_reader_brepForFillet2_uv_trim_f2",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp (SmFace::CreateUVTrimCurves)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/brepForFillet2.smb",
+     "rebuild": false
+    },
+    "init_gaps": false,
+    "op": "uv_trim",
+    "face": 2,
+    "adjust": false,
+    "own_curves": true
+   }
+  },
+  {
+   "name": "own_reader_brepForFillet2_uv_trim_f2_rebuild",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp (SmFace::CreateUVTrimCurves)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/brepForFillet2.smb",
+     "rebuild": true
+    },
+    "init_gaps": false,
+    "op": "uv_trim",
+    "face": 2,
+    "adjust": false,
+    "own_curves": true
+   }
+  },
+  {
+   "name": "own_reader_brepForFillet2_uv_trim_f3",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp (SmFace::CreateUVTrimCurves)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/brepForFillet2.smb",
+     "rebuild": false
+    },
+    "init_gaps": false,
+    "op": "uv_trim",
+    "face": 3,
+    "adjust": false,
+    "own_curves": false
+   }
+  },
+  {
+   "name": "own_reader_brepForFillet2_uv_trim_f3_rebuild",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp (SmFace::CreateUVTrimCurves)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/brepForFillet2.smb",
+     "rebuild": true
+    },
+    "init_gaps": false,
+    "op": "uv_trim",
+    "face": 3,
+    "adjust": false,
+    "own_curves": false
+   }
+  },
+  {
+   "name": "own_reader_brepForFillet2_uv_trim_f4",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp (SmFace::CreateUVTrimCurves)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/brepForFillet2.smb",
+     "rebuild": false
+    },
+    "init_gaps": false,
+    "op": "uv_trim",
+    "face": 4,
+    "adjust": true,
+    "own_curves": false
+   }
+  },
+  {
+   "name": "own_reader_brepForFillet2_uv_trim_f4_rebuild",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp (SmFace::CreateUVTrimCurves)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/brepForFillet2.smb",
+     "rebuild": true
+    },
+    "init_gaps": false,
+    "op": "uv_trim",
+    "face": 4,
+    "adjust": true,
+    "own_curves": false
+   }
+  },
+  {
+   "name": "own_reader_brepForFillet2_uv_trim_f5",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp (SmFace::CreateUVTrimCurves)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/brepForFillet2.smb",
+     "rebuild": false
+    },
+    "init_gaps": false,
+    "op": "uv_trim",
+    "face": 5,
+    "adjust": false,
+    "own_curves": false
+   }
+  },
+  {
+   "name": "own_reader_brepForFillet2_uv_trim_f5_rebuild",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp (SmFace::CreateUVTrimCurves)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/brepForFillet2.smb",
+     "rebuild": true
+    },
+    "init_gaps": false,
+    "op": "uv_trim",
+    "face": 5,
+    "adjust": false,
+    "own_curves": false
+   }
+  },
+  {
+   "name": "own_reader_brepForFillet2_uv_trim_f6",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp (SmFace::CreateUVTrimCurves)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/brepForFillet2.smb",
+     "rebuild": false
+    },
+    "init_gaps": false,
+    "op": "uv_trim",
+    "face": 6,
+    "adjust": false,
+    "own_curves": true
+   }
+  },
+  {
+   "name": "own_reader_brepForFillet2_uv_trim_f6_rebuild",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp (SmFace::CreateUVTrimCurves)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/brepForFillet2.smb",
+     "rebuild": true
+    },
+    "init_gaps": false,
+    "op": "uv_trim",
+    "face": 6,
+    "adjust": false,
+    "own_curves": true
+   }
+  },
+  {
+   "name": "own_reader_brepForFillet2_uv_trim_f7",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp (SmFace::CreateUVTrimCurves)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/brepForFillet2.smb",
+     "rebuild": false
+    },
+    "init_gaps": false,
+    "op": "uv_trim",
+    "face": 7,
+    "adjust": true,
+    "own_curves": false
+   }
+  },
+  {
+   "name": "own_reader_brepForFillet2_uv_trim_f7_rebuild",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp (SmFace::CreateUVTrimCurves)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/brepForFillet2.smb",
+     "rebuild": true
+    },
+    "init_gaps": false,
+    "op": "uv_trim",
+    "face": 7,
+    "adjust": true,
+    "own_curves": false
+   }
+  },
+  {
+   "name": "own_reader_brepForFillet2_uv_trim_f8",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp (SmFace::CreateUVTrimCurves)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/brepForFillet2.smb",
+     "rebuild": false
+    },
+    "init_gaps": false,
+    "op": "uv_trim",
+    "face": 8,
+    "adjust": false,
+    "own_curves": false
+   }
+  },
+  {
+   "name": "own_reader_brepForFillet2_uv_trim_f8_rebuild",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp (SmFace::CreateUVTrimCurves)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/brepForFillet2.smb",
+     "rebuild": true
+    },
+    "init_gaps": false,
+    "op": "uv_trim",
+    "face": 8,
+    "adjust": false,
+    "own_curves": false
+   }
+  },
+  {
+   "name": "own_reader_brepForFillet2_uv_trim_f9",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp (SmFace::CreateUVTrimCurves)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/brepForFillet2.smb",
+     "rebuild": false
+    },
+    "init_gaps": false,
+    "op": "uv_trim",
+    "face": 9,
+    "adjust": false,
+    "own_curves": false
+   }
+  },
+  {
+   "name": "own_reader_brepForFillet2_uv_trim_f9_rebuild",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp (SmFace::CreateUVTrimCurves)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/brepForFillet2.smb",
+     "rebuild": true
+    },
+    "init_gaps": false,
+    "op": "uv_trim",
+    "face": 9,
+    "adjust": false,
+    "own_curves": false
+   }
+  },
+  {
+   "name": "own_reader_brepForFillet2_uv_trim_f10",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp (SmFace::CreateUVTrimCurves)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/brepForFillet2.smb",
+     "rebuild": false
+    },
+    "init_gaps": false,
+    "op": "uv_trim",
+    "face": 10,
+    "adjust": true,
+    "own_curves": true
+   }
+  },
+  {
+   "name": "own_reader_brepForFillet2_uv_trim_f10_rebuild",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp (SmFace::CreateUVTrimCurves)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/brepForFillet2.smb",
+     "rebuild": true
+    },
+    "init_gaps": false,
+    "op": "uv_trim",
+    "face": 10,
+    "adjust": true,
+    "own_curves": true
+   }
+  },
+  {
+   "name": "own_reader_brepForFillet2_uv_trim_f11",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp (SmFace::CreateUVTrimCurves)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/brepForFillet2.smb",
+     "rebuild": false
+    },
+    "init_gaps": false,
+    "op": "uv_trim",
+    "face": 11,
+    "adjust": false,
+    "own_curves": false
+   }
+  },
+  {
+   "name": "own_reader_brepForFillet2_uv_trim_f11_rebuild",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp (SmFace::CreateUVTrimCurves)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/brepForFillet2.smb",
+     "rebuild": true
+    },
+    "init_gaps": false,
+    "op": "uv_trim",
+    "face": 11,
+    "adjust": false,
+    "own_curves": false
+   }
+  },
+  {
+   "name": "own_reader_shell_fillet_uv_trim_f0",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp (SmFace::CreateUVTrimCurves)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/shell_fillet.smb",
+     "rebuild": false
+    },
+    "init_gaps": false,
+    "op": "uv_trim",
+    "face": 0,
+    "adjust": false,
+    "own_curves": false
+   }
+  },
+  {
+   "name": "own_reader_shell_fillet_uv_trim_f0_rebuild",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp (SmFace::CreateUVTrimCurves)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/shell_fillet.smb",
+     "rebuild": true
+    },
+    "init_gaps": false,
+    "op": "uv_trim",
+    "face": 0,
+    "adjust": false,
+    "own_curves": false
+   }
+  },
+  {
+   "name": "own_reader_shell_fillet_uv_trim_f1",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp (SmFace::CreateUVTrimCurves)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/shell_fillet.smb",
+     "rebuild": false
+    },
+    "init_gaps": false,
+    "op": "uv_trim",
+    "face": 1,
+    "adjust": true,
+    "own_curves": false
+   }
+  },
+  {
+   "name": "own_reader_shell_fillet_uv_trim_f1_rebuild",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp (SmFace::CreateUVTrimCurves)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/shell_fillet.smb",
+     "rebuild": true
+    },
+    "init_gaps": false,
+    "op": "uv_trim",
+    "face": 1,
+    "adjust": true,
+    "own_curves": false
+   }
+  },
+  {
+   "name": "own_reader_shell_fillet_uv_trim_f2",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp (SmFace::CreateUVTrimCurves)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/shell_fillet.smb",
+     "rebuild": false
+    },
+    "init_gaps": false,
+    "op": "uv_trim",
+    "face": 2,
+    "adjust": false,
+    "own_curves": true
+   }
+  },
+  {
+   "name": "own_reader_shell_fillet_uv_trim_f2_rebuild",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp (SmFace::CreateUVTrimCurves)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/shell_fillet.smb",
+     "rebuild": true
+    },
+    "init_gaps": false,
+    "op": "uv_trim",
+    "face": 2,
+    "adjust": false,
+    "own_curves": true
+   }
+  },
+  {
+   "name": "own_reader_shell_fillet_uv_trim_f3",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp (SmFace::CreateUVTrimCurves)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/shell_fillet.smb",
+     "rebuild": false
+    },
+    "init_gaps": false,
+    "op": "uv_trim",
+    "face": 3,
+    "adjust": false,
+    "own_curves": false
+   }
+  },
+  {
+   "name": "own_reader_shell_fillet_uv_trim_f3_rebuild",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp (SmFace::CreateUVTrimCurves)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/shell_fillet.smb",
+     "rebuild": true
+    },
+    "init_gaps": false,
+    "op": "uv_trim",
+    "face": 3,
+    "adjust": false,
+    "own_curves": false
+   }
+  },
+  {
+   "name": "own_reader_shell_fillet_uv_trim_f4",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp (SmFace::CreateUVTrimCurves)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/shell_fillet.smb",
+     "rebuild": false
+    },
+    "init_gaps": false,
+    "op": "uv_trim",
+    "face": 4,
+    "adjust": true,
+    "own_curves": false
+   }
+  },
+  {
+   "name": "own_reader_shell_fillet_uv_trim_f4_rebuild",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp (SmFace::CreateUVTrimCurves)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/shell_fillet.smb",
+     "rebuild": true
+    },
+    "init_gaps": false,
+    "op": "uv_trim",
+    "face": 4,
+    "adjust": true,
+    "own_curves": false
+   }
+  },
+  {
+   "name": "own_reader_shell_fillet_uv_trim_f5",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp (SmFace::CreateUVTrimCurves)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/shell_fillet.smb",
+     "rebuild": false
+    },
+    "init_gaps": false,
+    "op": "uv_trim",
+    "face": 5,
+    "adjust": false,
+    "own_curves": false
+   }
+  },
+  {
+   "name": "own_reader_shell_fillet_uv_trim_f5_rebuild",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp (SmFace::CreateUVTrimCurves)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/shell_fillet.smb",
+     "rebuild": true
+    },
+    "init_gaps": false,
+    "op": "uv_trim",
+    "face": 5,
+    "adjust": false,
+    "own_curves": false
+   }
+  },
+  {
+   "name": "own_reader_shell_fillet_uv_trim_f6",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp (SmFace::CreateUVTrimCurves)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/shell_fillet.smb",
+     "rebuild": false
+    },
+    "init_gaps": false,
+    "op": "uv_trim",
+    "face": 6,
+    "adjust": false,
+    "own_curves": true
+   }
+  },
+  {
+   "name": "own_reader_shell_fillet_uv_trim_f6_rebuild",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp (SmFace::CreateUVTrimCurves)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/shell_fillet.smb",
+     "rebuild": true
+    },
+    "init_gaps": false,
+    "op": "uv_trim",
+    "face": 6,
+    "adjust": false,
+    "own_curves": true
+   }
+  },
+  {
+   "name": "own_reader_shell_fillet_uv_trim_f7",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp (SmFace::CreateUVTrimCurves)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/shell_fillet.smb",
+     "rebuild": false
+    },
+    "init_gaps": false,
+    "op": "uv_trim",
+    "face": 7,
+    "adjust": true,
+    "own_curves": false
+   }
+  },
+  {
+   "name": "own_reader_shell_fillet_uv_trim_f7_rebuild",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp (SmFace::CreateUVTrimCurves)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/shell_fillet.smb",
+     "rebuild": true
+    },
+    "init_gaps": false,
+    "op": "uv_trim",
+    "face": 7,
+    "adjust": true,
+    "own_curves": false
+   }
+  },
+  {
+   "name": "own_reader_shell_fillet_uv_trim_f8",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp (SmFace::CreateUVTrimCurves)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/shell_fillet.smb",
+     "rebuild": false
+    },
+    "init_gaps": false,
+    "op": "uv_trim",
+    "face": 8,
+    "adjust": false,
+    "own_curves": false
+   }
+  },
+  {
+   "name": "own_reader_shell_fillet_uv_trim_f8_rebuild",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp (SmFace::CreateUVTrimCurves)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/shell_fillet.smb",
+     "rebuild": true
+    },
+    "init_gaps": false,
+    "op": "uv_trim",
+    "face": 8,
+    "adjust": false,
+    "own_curves": false
+   }
+  },
+  {
+   "name": "own_reader_shell_fillet_uv_trim_f9",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp (SmFace::CreateUVTrimCurves)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/shell_fillet.smb",
+     "rebuild": false
+    },
+    "init_gaps": false,
+    "op": "uv_trim",
+    "face": 9,
+    "adjust": false,
+    "own_curves": false
+   }
+  },
+  {
+   "name": "own_reader_shell_fillet_uv_trim_f9_rebuild",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp (SmFace::CreateUVTrimCurves)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/shell_fillet.smb",
+     "rebuild": true
+    },
+    "init_gaps": false,
+    "op": "uv_trim",
+    "face": 9,
+    "adjust": false,
+    "own_curves": false
+   }
+  },
+  {
+   "name": "own_reader_shell_fillet_uv_trim_f10",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp (SmFace::CreateUVTrimCurves)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/shell_fillet.smb",
+     "rebuild": false
+    },
+    "init_gaps": false,
+    "op": "uv_trim",
+    "face": 10,
+    "adjust": true,
+    "own_curves": true
+   }
+  },
+  {
+   "name": "own_reader_shell_fillet_uv_trim_f10_rebuild",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp (SmFace::CreateUVTrimCurves)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/shell_fillet.smb",
+     "rebuild": true
+    },
+    "init_gaps": false,
+    "op": "uv_trim",
+    "face": 10,
+    "adjust": true,
+    "own_curves": true
+   }
+  },
+  {
+   "name": "own_reader_shell_fillet_uv_trim_f11",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp (SmFace::CreateUVTrimCurves)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/shell_fillet.smb",
+     "rebuild": false
+    },
+    "init_gaps": false,
+    "op": "uv_trim",
+    "face": 11,
+    "adjust": false,
+    "own_curves": false
+   }
+  },
+  {
+   "name": "own_reader_shell_fillet_uv_trim_f11_rebuild",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp (SmFace::CreateUVTrimCurves)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/shell_fillet.smb",
+     "rebuild": true
+    },
+    "init_gaps": false,
+    "op": "uv_trim",
+    "face": 11,
+    "adjust": false,
+    "own_curves": false
+   }
+  },
+  {
+   "name": "own_reader_bague_uv_trim_f0",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp (SmFace::CreateUVTrimCurves)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/bague.smb",
+     "rebuild": false
+    },
+    "init_gaps": false,
+    "op": "uv_trim",
+    "face": 0,
+    "adjust": false,
+    "own_curves": false
+   }
+  },
+  {
+   "name": "own_reader_bague_uv_trim_f0_rebuild",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp (SmFace::CreateUVTrimCurves)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/bague.smb",
+     "rebuild": true
+    },
+    "init_gaps": false,
+    "op": "uv_trim",
+    "face": 0,
+    "adjust": false,
+    "own_curves": false
+   }
+  },
+  {
+   "name": "own_reader_bague_uv_trim_f1",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp (SmFace::CreateUVTrimCurves)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/bague.smb",
+     "rebuild": false
+    },
+    "init_gaps": false,
+    "op": "uv_trim",
+    "face": 1,
+    "adjust": true,
+    "own_curves": false
+   }
+  },
+  {
+   "name": "own_reader_bague_uv_trim_f1_rebuild",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp (SmFace::CreateUVTrimCurves)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/bague.smb",
+     "rebuild": true
+    },
+    "init_gaps": false,
+    "op": "uv_trim",
+    "face": 1,
+    "adjust": true,
+    "own_curves": false
+   }
+  },
+  {
+   "name": "own_reader_bague_uv_trim_f2",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp (SmFace::CreateUVTrimCurves)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/bague.smb",
+     "rebuild": false
+    },
+    "init_gaps": false,
+    "op": "uv_trim",
+    "face": 2,
+    "adjust": false,
+    "own_curves": true
+   }
+  },
+  {
+   "name": "own_reader_bague_uv_trim_f2_rebuild",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp (SmFace::CreateUVTrimCurves)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/bague.smb",
+     "rebuild": true
+    },
+    "init_gaps": false,
+    "op": "uv_trim",
+    "face": 2,
+    "adjust": false,
+    "own_curves": true
+   }
+  },
+  {
+   "name": "own_reader_bague_uv_trim_f3",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp (SmFace::CreateUVTrimCurves)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/bague.smb",
+     "rebuild": false
+    },
+    "init_gaps": false,
+    "op": "uv_trim",
+    "face": 3,
+    "adjust": false,
+    "own_curves": false
+   }
+  },
+  {
+   "name": "own_reader_bague_uv_trim_f3_rebuild",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp (SmFace::CreateUVTrimCurves)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/bague.smb",
+     "rebuild": true
+    },
+    "init_gaps": false,
+    "op": "uv_trim",
+    "face": 3,
+    "adjust": false,
+    "own_curves": false
+   }
+  },
+  {
+   "name": "own_reader_bague_uv_trim_f4",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp (SmFace::CreateUVTrimCurves)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/bague.smb",
+     "rebuild": false
+    },
+    "init_gaps": false,
+    "op": "uv_trim",
+    "face": 4,
+    "adjust": true,
+    "own_curves": false
+   }
+  },
+  {
+   "name": "own_reader_bague_uv_trim_f4_rebuild",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp (SmFace::CreateUVTrimCurves)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/bague.smb",
+     "rebuild": true
+    },
+    "init_gaps": false,
+    "op": "uv_trim",
+    "face": 4,
+    "adjust": true,
+    "own_curves": false
+   }
+  },
+  {
+   "name": "own_reader_bague_uv_trim_f5",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp (SmFace::CreateUVTrimCurves)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/bague.smb",
+     "rebuild": false
+    },
+    "init_gaps": false,
+    "op": "uv_trim",
+    "face": 5,
+    "adjust": false,
+    "own_curves": false
+   }
+  },
+  {
+   "name": "own_reader_bague_uv_trim_f5_rebuild",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp (SmFace::CreateUVTrimCurves)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/bague.smb",
+     "rebuild": true
+    },
+    "init_gaps": false,
+    "op": "uv_trim",
+    "face": 5,
+    "adjust": false,
+    "own_curves": false
+   }
+  },
+  {
+   "name": "own_reader_bague_uv_trim_f6",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp (SmFace::CreateUVTrimCurves)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/bague.smb",
+     "rebuild": false
+    },
+    "init_gaps": false,
+    "op": "uv_trim",
+    "face": 6,
+    "adjust": false,
+    "own_curves": true
+   }
+  },
+  {
+   "name": "own_reader_bague_uv_trim_f6_rebuild",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp (SmFace::CreateUVTrimCurves)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/bague.smb",
+     "rebuild": true
+    },
+    "init_gaps": false,
+    "op": "uv_trim",
+    "face": 6,
+    "adjust": false,
+    "own_curves": true
+   }
+  },
+  {
+   "name": "own_reader_bague_uv_trim_f7",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp (SmFace::CreateUVTrimCurves)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/bague.smb",
+     "rebuild": false
+    },
+    "init_gaps": false,
+    "op": "uv_trim",
+    "face": 7,
+    "adjust": true,
+    "own_curves": false
+   }
+  },
+  {
+   "name": "own_reader_bague_uv_trim_f7_rebuild",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp (SmFace::CreateUVTrimCurves)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/bague.smb",
+     "rebuild": true
+    },
+    "init_gaps": false,
+    "op": "uv_trim",
+    "face": 7,
+    "adjust": true,
+    "own_curves": false
+   }
+  },
+  {
+   "name": "own_reader_bague_uv_trim_f8",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp (SmFace::CreateUVTrimCurves)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/bague.smb",
+     "rebuild": false
+    },
+    "init_gaps": false,
+    "op": "uv_trim",
+    "face": 8,
+    "adjust": false,
+    "own_curves": false
+   }
+  },
+  {
+   "name": "own_reader_bague_uv_trim_f8_rebuild",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp (SmFace::CreateUVTrimCurves)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/bague.smb",
+     "rebuild": true
+    },
+    "init_gaps": false,
+    "op": "uv_trim",
+    "face": 8,
+    "adjust": false,
+    "own_curves": false
+   }
+  },
+  {
+   "name": "own_reader_bague_uv_trim_f9",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp (SmFace::CreateUVTrimCurves)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/bague.smb",
+     "rebuild": false
+    },
+    "init_gaps": false,
+    "op": "uv_trim",
+    "face": 9,
+    "adjust": false,
+    "own_curves": false
+   }
+  },
+  {
+   "name": "own_reader_bague_uv_trim_f9_rebuild",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp (SmFace::CreateUVTrimCurves)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/bague.smb",
+     "rebuild": true
+    },
+    "init_gaps": false,
+    "op": "uv_trim",
+    "face": 9,
+    "adjust": false,
+    "own_curves": false
+   }
+  },
+  {
+   "name": "own_reader_bague_uv_trim_f10",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp (SmFace::CreateUVTrimCurves)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/bague.smb",
+     "rebuild": false
+    },
+    "init_gaps": false,
+    "op": "uv_trim",
+    "face": 10,
+    "adjust": true,
+    "own_curves": true
+   }
+  },
+  {
+   "name": "own_reader_bague_uv_trim_f10_rebuild",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp (SmFace::CreateUVTrimCurves)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/bague.smb",
+     "rebuild": true
+    },
+    "init_gaps": false,
+    "op": "uv_trim",
+    "face": 10,
+    "adjust": true,
+    "own_curves": true
+   }
+  },
+  {
+   "name": "own_reader_bague_uv_trim_f11",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp (SmFace::CreateUVTrimCurves)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/bague.smb",
+     "rebuild": false
+    },
+    "init_gaps": false,
+    "op": "uv_trim",
+    "face": 11,
+    "adjust": false,
+    "own_curves": false
+   }
+  },
+  {
+   "name": "own_reader_bague_uv_trim_f11_rebuild",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp (SmFace::CreateUVTrimCurves)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/bague.smb",
+     "rebuild": true
+    },
+    "init_gaps": false,
+    "op": "uv_trim",
+    "face": 11,
+    "adjust": false,
+    "own_curves": false
+   }
+  },
+  {
+   "name": "own_reader_coons_01_03_29_uv_trim_f0",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp (SmFace::CreateUVTrimCurves)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/coons_01_03_29.smb",
+     "rebuild": false
+    },
+    "init_gaps": false,
+    "op": "uv_trim",
+    "face": 0,
+    "adjust": false,
+    "own_curves": false
+   }
+  },
+  {
+   "name": "own_reader_coons_01_03_29_uv_trim_f0_rebuild",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp (SmFace::CreateUVTrimCurves)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/coons_01_03_29.smb",
+     "rebuild": true
+    },
+    "init_gaps": false,
+    "op": "uv_trim",
+    "face": 0,
+    "adjust": false,
+    "own_curves": false
+   }
+  },
+  {
+   "name": "own_reader_coons_01_03_29_uv_trim_f1",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp (SmFace::CreateUVTrimCurves)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/coons_01_03_29.smb",
+     "rebuild": false
+    },
+    "init_gaps": false,
+    "op": "uv_trim",
+    "face": 1,
+    "adjust": true,
+    "own_curves": false
+   }
+  },
+  {
+   "name": "own_reader_coons_01_03_29_uv_trim_f1_rebuild",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp (SmFace::CreateUVTrimCurves)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/coons_01_03_29.smb",
+     "rebuild": true
+    },
+    "init_gaps": false,
+    "op": "uv_trim",
+    "face": 1,
+    "adjust": true,
+    "own_curves": false
+   }
+  },
+  {
+   "name": "own_reader_coons_01_03_29_uv_trim_f2",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp (SmFace::CreateUVTrimCurves)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/coons_01_03_29.smb",
+     "rebuild": false
+    },
+    "init_gaps": false,
+    "op": "uv_trim",
+    "face": 2,
+    "adjust": false,
+    "own_curves": true
+   }
+  },
+  {
+   "name": "own_reader_coons_01_03_29_uv_trim_f2_rebuild",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp (SmFace::CreateUVTrimCurves)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/coons_01_03_29.smb",
+     "rebuild": true
+    },
+    "init_gaps": false,
+    "op": "uv_trim",
+    "face": 2,
+    "adjust": false,
+    "own_curves": true
+   }
+  },
+  {
+   "name": "own_reader_coons_01_03_29_uv_trim_f3",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp (SmFace::CreateUVTrimCurves)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/coons_01_03_29.smb",
+     "rebuild": false
+    },
+    "init_gaps": false,
+    "op": "uv_trim",
+    "face": 3,
+    "adjust": false,
+    "own_curves": false
+   }
+  },
+  {
+   "name": "own_reader_coons_01_03_29_uv_trim_f3_rebuild",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp (SmFace::CreateUVTrimCurves)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/coons_01_03_29.smb",
+     "rebuild": true
+    },
+    "init_gaps": false,
+    "op": "uv_trim",
+    "face": 3,
+    "adjust": false,
+    "own_curves": false
+   }
+  },
+  {
+   "name": "own_reader_coons_01_03_29_uv_trim_f4",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp (SmFace::CreateUVTrimCurves)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/coons_01_03_29.smb",
+     "rebuild": false
+    },
+    "init_gaps": false,
+    "op": "uv_trim",
+    "face": 4,
+    "adjust": true,
+    "own_curves": false
+   }
+  },
+  {
+   "name": "own_reader_coons_01_03_29_uv_trim_f4_rebuild",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp (SmFace::CreateUVTrimCurves)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/coons_01_03_29.smb",
+     "rebuild": true
+    },
+    "init_gaps": false,
+    "op": "uv_trim",
+    "face": 4,
+    "adjust": true,
+    "own_curves": false
+   }
+  },
+  {
+   "name": "own_reader_coons_01_03_29_uv_trim_f5",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp (SmFace::CreateUVTrimCurves)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/coons_01_03_29.smb",
+     "rebuild": false
+    },
+    "init_gaps": false,
+    "op": "uv_trim",
+    "face": 5,
+    "adjust": false,
+    "own_curves": false
+   }
+  },
+  {
+   "name": "own_reader_coons_01_03_29_uv_trim_f5_rebuild",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp (SmFace::CreateUVTrimCurves)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/coons_01_03_29.smb",
+     "rebuild": true
+    },
+    "init_gaps": false,
+    "op": "uv_trim",
+    "face": 5,
+    "adjust": false,
+    "own_curves": false
+   }
+  },
+  {
+   "name": "own_reader_coons_01_03_29_uv_trim_f6",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp (SmFace::CreateUVTrimCurves)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/coons_01_03_29.smb",
+     "rebuild": false
+    },
+    "init_gaps": false,
+    "op": "uv_trim",
+    "face": 6,
+    "adjust": false,
+    "own_curves": true
+   }
+  },
+  {
+   "name": "own_reader_coons_01_03_29_uv_trim_f6_rebuild",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp (SmFace::CreateUVTrimCurves)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/coons_01_03_29.smb",
+     "rebuild": true
+    },
+    "init_gaps": false,
+    "op": "uv_trim",
+    "face": 6,
+    "adjust": false,
+    "own_curves": true
+   }
+  },
+  {
+   "name": "own_reader_coons_01_03_29_uv_trim_f7",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp (SmFace::CreateUVTrimCurves)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/coons_01_03_29.smb",
+     "rebuild": false
+    },
+    "init_gaps": false,
+    "op": "uv_trim",
+    "face": 7,
+    "adjust": true,
+    "own_curves": false
+   }
+  },
+  {
+   "name": "own_reader_coons_01_03_29_uv_trim_f7_rebuild",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp (SmFace::CreateUVTrimCurves)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/coons_01_03_29.smb",
+     "rebuild": true
+    },
+    "init_gaps": false,
+    "op": "uv_trim",
+    "face": 7,
+    "adjust": true,
+    "own_curves": false
+   }
+  },
+  {
+   "name": "own_reader_coons_01_03_29_uv_trim_f8",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp (SmFace::CreateUVTrimCurves)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/coons_01_03_29.smb",
+     "rebuild": false
+    },
+    "init_gaps": false,
+    "op": "uv_trim",
+    "face": 8,
+    "adjust": false,
+    "own_curves": false
+   }
+  },
+  {
+   "name": "own_reader_coons_01_03_29_uv_trim_f8_rebuild",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp (SmFace::CreateUVTrimCurves)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/coons_01_03_29.smb",
+     "rebuild": true
+    },
+    "init_gaps": false,
+    "op": "uv_trim",
+    "face": 8,
+    "adjust": false,
+    "own_curves": false
+   }
+  },
+  {
+   "name": "own_reader_coons_01_03_29_uv_trim_f9",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp (SmFace::CreateUVTrimCurves)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/coons_01_03_29.smb",
+     "rebuild": false
+    },
+    "init_gaps": false,
+    "op": "uv_trim",
+    "face": 9,
+    "adjust": false,
+    "own_curves": false
+   }
+  },
+  {
+   "name": "own_reader_coons_01_03_29_uv_trim_f9_rebuild",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp (SmFace::CreateUVTrimCurves)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/coons_01_03_29.smb",
+     "rebuild": true
+    },
+    "init_gaps": false,
+    "op": "uv_trim",
+    "face": 9,
+    "adjust": false,
+    "own_curves": false
+   }
+  },
+  {
+   "name": "own_reader_coons_01_03_29_uv_trim_f10",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp (SmFace::CreateUVTrimCurves)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/coons_01_03_29.smb",
+     "rebuild": false
+    },
+    "init_gaps": false,
+    "op": "uv_trim",
+    "face": 10,
+    "adjust": true,
+    "own_curves": true
+   }
+  },
+  {
+   "name": "own_reader_coons_01_03_29_uv_trim_f10_rebuild",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp (SmFace::CreateUVTrimCurves)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/coons_01_03_29.smb",
+     "rebuild": true
+    },
+    "init_gaps": false,
+    "op": "uv_trim",
+    "face": 10,
+    "adjust": true,
+    "own_curves": true
+   }
+  },
+  {
+   "name": "own_reader_coons_01_03_29_uv_trim_f11",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp (SmFace::CreateUVTrimCurves)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/coons_01_03_29.smb",
+     "rebuild": false
+    },
+    "init_gaps": false,
+    "op": "uv_trim",
+    "face": 11,
+    "adjust": false,
+    "own_curves": false
+   }
+  },
+  {
+   "name": "own_reader_coons_01_03_29_uv_trim_f11_rebuild",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp (SmFace::CreateUVTrimCurves)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/coons_01_03_29.smb",
+     "rebuild": true
+    },
+    "init_gaps": false,
+    "op": "uv_trim",
+    "face": 11,
+    "adjust": false,
+    "own_curves": false
+   }
+  },
+  {
+   "name": "own_reader_letter_g_uv_trim_f0",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp (SmFace::CreateUVTrimCurves)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/letter_g.smb",
+     "rebuild": false
+    },
+    "init_gaps": false,
+    "op": "uv_trim",
+    "face": 0,
+    "adjust": false,
+    "own_curves": false
+   }
+  },
+  {
+   "name": "own_reader_letter_g_uv_trim_f0_rebuild",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp (SmFace::CreateUVTrimCurves)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/letter_g.smb",
+     "rebuild": true
+    },
+    "init_gaps": false,
+    "op": "uv_trim",
+    "face": 0,
+    "adjust": false,
+    "own_curves": false
+   }
+  },
+  {
+   "name": "own_reader_letter_g_uv_trim_f1",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp (SmFace::CreateUVTrimCurves)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/letter_g.smb",
+     "rebuild": false
+    },
+    "init_gaps": false,
+    "op": "uv_trim",
+    "face": 1,
+    "adjust": true,
+    "own_curves": false
+   }
+  },
+  {
+   "name": "own_reader_letter_g_uv_trim_f1_rebuild",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp (SmFace::CreateUVTrimCurves)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/letter_g.smb",
+     "rebuild": true
+    },
+    "init_gaps": false,
+    "op": "uv_trim",
+    "face": 1,
+    "adjust": true,
+    "own_curves": false
+   }
+  },
+  {
+   "name": "own_reader_letter_g_uv_trim_f2",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp (SmFace::CreateUVTrimCurves)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/letter_g.smb",
+     "rebuild": false
+    },
+    "init_gaps": false,
+    "op": "uv_trim",
+    "face": 2,
+    "adjust": false,
+    "own_curves": true
+   }
+  },
+  {
+   "name": "own_reader_letter_g_uv_trim_f2_rebuild",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp (SmFace::CreateUVTrimCurves)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/letter_g.smb",
+     "rebuild": true
+    },
+    "init_gaps": false,
+    "op": "uv_trim",
+    "face": 2,
+    "adjust": false,
+    "own_curves": true
+   }
+  },
+  {
+   "name": "own_reader_letter_g_uv_trim_f3",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp (SmFace::CreateUVTrimCurves)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/letter_g.smb",
+     "rebuild": false
+    },
+    "init_gaps": false,
+    "op": "uv_trim",
+    "face": 3,
+    "adjust": false,
+    "own_curves": false
+   }
+  },
+  {
+   "name": "own_reader_letter_g_uv_trim_f3_rebuild",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp (SmFace::CreateUVTrimCurves)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/letter_g.smb",
+     "rebuild": true
+    },
+    "init_gaps": false,
+    "op": "uv_trim",
+    "face": 3,
+    "adjust": false,
+    "own_curves": false
+   }
+  },
+  {
+   "name": "own_reader_letter_g_uv_trim_f4",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp (SmFace::CreateUVTrimCurves)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/letter_g.smb",
+     "rebuild": false
+    },
+    "init_gaps": false,
+    "op": "uv_trim",
+    "face": 4,
+    "adjust": true,
+    "own_curves": false
+   }
+  },
+  {
+   "name": "own_reader_letter_g_uv_trim_f4_rebuild",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp (SmFace::CreateUVTrimCurves)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/letter_g.smb",
+     "rebuild": true
+    },
+    "init_gaps": false,
+    "op": "uv_trim",
+    "face": 4,
+    "adjust": true,
+    "own_curves": false
+   }
+  },
+  {
+   "name": "own_reader_letter_g_uv_trim_f5",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp (SmFace::CreateUVTrimCurves)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/letter_g.smb",
+     "rebuild": false
+    },
+    "init_gaps": false,
+    "op": "uv_trim",
+    "face": 5,
+    "adjust": false,
+    "own_curves": false
+   }
+  },
+  {
+   "name": "own_reader_letter_g_uv_trim_f5_rebuild",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp (SmFace::CreateUVTrimCurves)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/letter_g.smb",
+     "rebuild": true
+    },
+    "init_gaps": false,
+    "op": "uv_trim",
+    "face": 5,
+    "adjust": false,
+    "own_curves": false
+   }
+  },
+  {
+   "name": "own_reader_letter_g_uv_trim_f6",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp (SmFace::CreateUVTrimCurves)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/letter_g.smb",
+     "rebuild": false
+    },
+    "init_gaps": false,
+    "op": "uv_trim",
+    "face": 6,
+    "adjust": false,
+    "own_curves": true
+   }
+  },
+  {
+   "name": "own_reader_letter_g_uv_trim_f6_rebuild",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp (SmFace::CreateUVTrimCurves)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/letter_g.smb",
+     "rebuild": true
+    },
+    "init_gaps": false,
+    "op": "uv_trim",
+    "face": 6,
+    "adjust": false,
+    "own_curves": true
+   }
+  },
+  {
+   "name": "own_reader_letter_g_uv_trim_f7",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp (SmFace::CreateUVTrimCurves)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/letter_g.smb",
+     "rebuild": false
+    },
+    "init_gaps": false,
+    "op": "uv_trim",
+    "face": 7,
+    "adjust": true,
+    "own_curves": false
+   }
+  },
+  {
+   "name": "own_reader_letter_g_uv_trim_f7_rebuild",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp (SmFace::CreateUVTrimCurves)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/letter_g.smb",
+     "rebuild": true
+    },
+    "init_gaps": false,
+    "op": "uv_trim",
+    "face": 7,
+    "adjust": true,
+    "own_curves": false
+   }
+  },
+  {
+   "name": "own_reader_letter_g_uv_trim_f8",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp (SmFace::CreateUVTrimCurves)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/letter_g.smb",
+     "rebuild": false
+    },
+    "init_gaps": false,
+    "op": "uv_trim",
+    "face": 8,
+    "adjust": false,
+    "own_curves": false
+   }
+  },
+  {
+   "name": "own_reader_letter_g_uv_trim_f8_rebuild",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp (SmFace::CreateUVTrimCurves)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/letter_g.smb",
+     "rebuild": true
+    },
+    "init_gaps": false,
+    "op": "uv_trim",
+    "face": 8,
+    "adjust": false,
+    "own_curves": false
+   }
+  },
+  {
+   "name": "own_reader_letter_g_uv_trim_f9",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp (SmFace::CreateUVTrimCurves)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/letter_g.smb",
+     "rebuild": false
+    },
+    "init_gaps": false,
+    "op": "uv_trim",
+    "face": 9,
+    "adjust": false,
+    "own_curves": false
+   }
+  },
+  {
+   "name": "own_reader_letter_g_uv_trim_f9_rebuild",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp (SmFace::CreateUVTrimCurves)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/letter_g.smb",
+     "rebuild": true
+    },
+    "init_gaps": false,
+    "op": "uv_trim",
+    "face": 9,
+    "adjust": false,
+    "own_curves": false
+   }
+  },
+  {
+   "name": "own_reader_letter_g_uv_trim_f10",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp (SmFace::CreateUVTrimCurves)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/letter_g.smb",
+     "rebuild": false
+    },
+    "init_gaps": false,
+    "op": "uv_trim",
+    "face": 10,
+    "adjust": true,
+    "own_curves": true
+   }
+  },
+  {
+   "name": "own_reader_letter_g_uv_trim_f10_rebuild",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp (SmFace::CreateUVTrimCurves)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/letter_g.smb",
+     "rebuild": true
+    },
+    "init_gaps": false,
+    "op": "uv_trim",
+    "face": 10,
+    "adjust": true,
+    "own_curves": true
+   }
+  },
+  {
+   "name": "own_reader_letter_g_uv_trim_f11",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp (SmFace::CreateUVTrimCurves)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/letter_g.smb",
+     "rebuild": false
+    },
+    "init_gaps": false,
+    "op": "uv_trim",
+    "face": 11,
+    "adjust": false,
+    "own_curves": false
+   }
+  },
+  {
+   "name": "own_reader_letter_g_uv_trim_f11_rebuild",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp (SmFace::CreateUVTrimCurves)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/letter_g.smb",
+     "rebuild": true
+    },
+    "init_gaps": false,
+    "op": "uv_trim",
+    "face": 11,
+    "adjust": false,
+    "own_curves": false
+   }
+  },
+  {
+   "name": "own_reader_blade_hub_uv_trim_f0",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp (SmFace::CreateUVTrimCurves)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/blade_hub.smb",
+     "rebuild": false
+    },
+    "init_gaps": false,
+    "op": "uv_trim",
+    "face": 0,
+    "adjust": false,
+    "own_curves": false
+   }
+  },
+  {
+   "name": "own_reader_blade_hub_uv_trim_f0_rebuild",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp (SmFace::CreateUVTrimCurves)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/blade_hub.smb",
+     "rebuild": true
+    },
+    "init_gaps": false,
+    "op": "uv_trim",
+    "face": 0,
+    "adjust": false,
+    "own_curves": false
+   }
+  },
+  {
+   "name": "own_reader_blade_hub_uv_trim_f1",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp (SmFace::CreateUVTrimCurves)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/blade_hub.smb",
+     "rebuild": false
+    },
+    "init_gaps": false,
+    "op": "uv_trim",
+    "face": 1,
+    "adjust": true,
+    "own_curves": false
+   }
+  },
+  {
+   "name": "own_reader_blade_hub_uv_trim_f1_rebuild",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp (SmFace::CreateUVTrimCurves)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/blade_hub.smb",
+     "rebuild": true
+    },
+    "init_gaps": false,
+    "op": "uv_trim",
+    "face": 1,
+    "adjust": true,
+    "own_curves": false
+   }
+  },
+  {
+   "name": "own_reader_blade_hub_uv_trim_f2",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp (SmFace::CreateUVTrimCurves)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/blade_hub.smb",
+     "rebuild": false
+    },
+    "init_gaps": false,
+    "op": "uv_trim",
+    "face": 2,
+    "adjust": false,
+    "own_curves": true
+   }
+  },
+  {
+   "name": "own_reader_blade_hub_uv_trim_f2_rebuild",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp (SmFace::CreateUVTrimCurves)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/blade_hub.smb",
+     "rebuild": true
+    },
+    "init_gaps": false,
+    "op": "uv_trim",
+    "face": 2,
+    "adjust": false,
+    "own_curves": true
+   }
+  },
+  {
+   "name": "own_reader_blade_hub_uv_trim_f3",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp (SmFace::CreateUVTrimCurves)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/blade_hub.smb",
+     "rebuild": false
+    },
+    "init_gaps": false,
+    "op": "uv_trim",
+    "face": 3,
+    "adjust": false,
+    "own_curves": false
+   }
+  },
+  {
+   "name": "own_reader_blade_hub_uv_trim_f3_rebuild",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp (SmFace::CreateUVTrimCurves)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/blade_hub.smb",
+     "rebuild": true
+    },
+    "init_gaps": false,
+    "op": "uv_trim",
+    "face": 3,
+    "adjust": false,
+    "own_curves": false
+   }
+  },
+  {
+   "name": "own_reader_blade_hub_uv_trim_f4",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp (SmFace::CreateUVTrimCurves)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/blade_hub.smb",
+     "rebuild": false
+    },
+    "init_gaps": false,
+    "op": "uv_trim",
+    "face": 4,
+    "adjust": true,
+    "own_curves": false
+   }
+  },
+  {
+   "name": "own_reader_blade_hub_uv_trim_f4_rebuild",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp (SmFace::CreateUVTrimCurves)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/blade_hub.smb",
+     "rebuild": true
+    },
+    "init_gaps": false,
+    "op": "uv_trim",
+    "face": 4,
+    "adjust": true,
+    "own_curves": false
+   }
+  },
+  {
+   "name": "own_reader_blade_hub_uv_trim_f5",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp (SmFace::CreateUVTrimCurves)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/blade_hub.smb",
+     "rebuild": false
+    },
+    "init_gaps": false,
+    "op": "uv_trim",
+    "face": 5,
+    "adjust": false,
+    "own_curves": false
+   }
+  },
+  {
+   "name": "own_reader_blade_hub_uv_trim_f5_rebuild",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp (SmFace::CreateUVTrimCurves)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/blade_hub.smb",
+     "rebuild": true
+    },
+    "init_gaps": false,
+    "op": "uv_trim",
+    "face": 5,
+    "adjust": false,
+    "own_curves": false
+   }
+  },
+  {
+   "name": "own_reader_blade_hub_uv_trim_f6",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp (SmFace::CreateUVTrimCurves)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/blade_hub.smb",
+     "rebuild": false
+    },
+    "init_gaps": false,
+    "op": "uv_trim",
+    "face": 6,
+    "adjust": false,
+    "own_curves": true
+   }
+  },
+  {
+   "name": "own_reader_blade_hub_uv_trim_f6_rebuild",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp (SmFace::CreateUVTrimCurves)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/blade_hub.smb",
+     "rebuild": true
+    },
+    "init_gaps": false,
+    "op": "uv_trim",
+    "face": 6,
+    "adjust": false,
+    "own_curves": true
+   }
+  },
+  {
+   "name": "own_reader_blade_hub_uv_trim_f7",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp (SmFace::CreateUVTrimCurves)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/blade_hub.smb",
+     "rebuild": false
+    },
+    "init_gaps": false,
+    "op": "uv_trim",
+    "face": 7,
+    "adjust": true,
+    "own_curves": false
+   }
+  },
+  {
+   "name": "own_reader_blade_hub_uv_trim_f7_rebuild",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp (SmFace::CreateUVTrimCurves)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/blade_hub.smb",
+     "rebuild": true
+    },
+    "init_gaps": false,
+    "op": "uv_trim",
+    "face": 7,
+    "adjust": true,
+    "own_curves": false
+   }
+  },
+  {
+   "name": "own_reader_blade_hub_uv_trim_f8",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp (SmFace::CreateUVTrimCurves)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/blade_hub.smb",
+     "rebuild": false
+    },
+    "init_gaps": false,
+    "op": "uv_trim",
+    "face": 8,
+    "adjust": false,
+    "own_curves": false
+   }
+  },
+  {
+   "name": "own_reader_blade_hub_uv_trim_f8_rebuild",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp (SmFace::CreateUVTrimCurves)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/blade_hub.smb",
+     "rebuild": true
+    },
+    "init_gaps": false,
+    "op": "uv_trim",
+    "face": 8,
+    "adjust": false,
+    "own_curves": false
+   }
+  },
+  {
+   "name": "own_reader_blade_hub_uv_trim_f9",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp (SmFace::CreateUVTrimCurves)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/blade_hub.smb",
+     "rebuild": false
+    },
+    "init_gaps": false,
+    "op": "uv_trim",
+    "face": 9,
+    "adjust": false,
+    "own_curves": false
+   }
+  },
+  {
+   "name": "own_reader_blade_hub_uv_trim_f9_rebuild",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp (SmFace::CreateUVTrimCurves)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/blade_hub.smb",
+     "rebuild": true
+    },
+    "init_gaps": false,
+    "op": "uv_trim",
+    "face": 9,
+    "adjust": false,
+    "own_curves": false
+   }
+  },
+  {
+   "name": "own_reader_blade_hub_uv_trim_f10",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp (SmFace::CreateUVTrimCurves)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/blade_hub.smb",
+     "rebuild": false
+    },
+    "init_gaps": false,
+    "op": "uv_trim",
+    "face": 10,
+    "adjust": true,
+    "own_curves": true
+   }
+  },
+  {
+   "name": "own_reader_blade_hub_uv_trim_f10_rebuild",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp (SmFace::CreateUVTrimCurves)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/blade_hub.smb",
+     "rebuild": true
+    },
+    "init_gaps": false,
+    "op": "uv_trim",
+    "face": 10,
+    "adjust": true,
+    "own_curves": true
+   }
+  },
+  {
+   "name": "own_reader_blade_hub_uv_trim_f11",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp (SmFace::CreateUVTrimCurves)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/blade_hub.smb",
+     "rebuild": false
+    },
+    "init_gaps": false,
+    "op": "uv_trim",
+    "face": 11,
+    "adjust": false,
+    "own_curves": false
+   }
+  },
+  {
+   "name": "own_reader_blade_hub_uv_trim_f11_rebuild",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp (SmFace::CreateUVTrimCurves)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/blade_hub.smb",
+     "rebuild": true
+    },
+    "init_gaps": false,
+    "op": "uv_trim",
+    "face": 11,
+    "adjust": false,
+    "own_curves": false
+   }
+  },
+  {
+   "name": "own_reader_ext_w_hole_uv_trim_f0",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp (SmFace::CreateUVTrimCurves)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/ext_w_hole.smb",
+     "rebuild": false
+    },
+    "init_gaps": false,
+    "op": "uv_trim",
+    "face": 0,
+    "adjust": false,
+    "own_curves": false
+   }
+  },
+  {
+   "name": "own_reader_ext_w_hole_uv_trim_f0_rebuild",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp (SmFace::CreateUVTrimCurves)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/ext_w_hole.smb",
+     "rebuild": true
+    },
+    "init_gaps": false,
+    "op": "uv_trim",
+    "face": 0,
+    "adjust": false,
+    "own_curves": false
+   }
+  },
+  {
+   "name": "own_reader_ext_w_hole_uv_trim_f1",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp (SmFace::CreateUVTrimCurves)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/ext_w_hole.smb",
+     "rebuild": false
+    },
+    "init_gaps": false,
+    "op": "uv_trim",
+    "face": 1,
+    "adjust": true,
+    "own_curves": false
+   }
+  },
+  {
+   "name": "own_reader_ext_w_hole_uv_trim_f1_rebuild",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp (SmFace::CreateUVTrimCurves)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/ext_w_hole.smb",
+     "rebuild": true
+    },
+    "init_gaps": false,
+    "op": "uv_trim",
+    "face": 1,
+    "adjust": true,
+    "own_curves": false
+   }
+  },
+  {
+   "name": "own_reader_ext_w_hole_uv_trim_f2",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp (SmFace::CreateUVTrimCurves)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/ext_w_hole.smb",
+     "rebuild": false
+    },
+    "init_gaps": false,
+    "op": "uv_trim",
+    "face": 2,
+    "adjust": false,
+    "own_curves": true
+   }
+  },
+  {
+   "name": "own_reader_ext_w_hole_uv_trim_f2_rebuild",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp (SmFace::CreateUVTrimCurves)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/ext_w_hole.smb",
+     "rebuild": true
+    },
+    "init_gaps": false,
+    "op": "uv_trim",
+    "face": 2,
+    "adjust": false,
+    "own_curves": true
+   }
+  },
+  {
+   "name": "own_reader_ext_w_hole_uv_trim_f3",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp (SmFace::CreateUVTrimCurves)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/ext_w_hole.smb",
+     "rebuild": false
+    },
+    "init_gaps": false,
+    "op": "uv_trim",
+    "face": 3,
+    "adjust": false,
+    "own_curves": false
+   }
+  },
+  {
+   "name": "own_reader_ext_w_hole_uv_trim_f3_rebuild",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp (SmFace::CreateUVTrimCurves)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/ext_w_hole.smb",
+     "rebuild": true
+    },
+    "init_gaps": false,
+    "op": "uv_trim",
+    "face": 3,
+    "adjust": false,
+    "own_curves": false
+   }
+  },
+  {
+   "name": "own_reader_ext_w_hole_uv_trim_f4",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp (SmFace::CreateUVTrimCurves)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/ext_w_hole.smb",
+     "rebuild": false
+    },
+    "init_gaps": false,
+    "op": "uv_trim",
+    "face": 4,
+    "adjust": true,
+    "own_curves": false
+   }
+  },
+  {
+   "name": "own_reader_ext_w_hole_uv_trim_f4_rebuild",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp (SmFace::CreateUVTrimCurves)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/ext_w_hole.smb",
+     "rebuild": true
+    },
+    "init_gaps": false,
+    "op": "uv_trim",
+    "face": 4,
+    "adjust": true,
+    "own_curves": false
+   }
+  },
+  {
+   "name": "own_reader_ext_w_hole_uv_trim_f5",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp (SmFace::CreateUVTrimCurves)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/ext_w_hole.smb",
+     "rebuild": false
+    },
+    "init_gaps": false,
+    "op": "uv_trim",
+    "face": 5,
+    "adjust": false,
+    "own_curves": false
+   }
+  },
+  {
+   "name": "own_reader_ext_w_hole_uv_trim_f5_rebuild",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp (SmFace::CreateUVTrimCurves)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/ext_w_hole.smb",
+     "rebuild": true
+    },
+    "init_gaps": false,
+    "op": "uv_trim",
+    "face": 5,
+    "adjust": false,
+    "own_curves": false
+   }
+  },
+  {
+   "name": "own_reader_ext_w_hole_uv_trim_f6",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp (SmFace::CreateUVTrimCurves)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/ext_w_hole.smb",
+     "rebuild": false
+    },
+    "init_gaps": false,
+    "op": "uv_trim",
+    "face": 6,
+    "adjust": false,
+    "own_curves": true
+   }
+  },
+  {
+   "name": "own_reader_ext_w_hole_uv_trim_f6_rebuild",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp (SmFace::CreateUVTrimCurves)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/ext_w_hole.smb",
+     "rebuild": true
+    },
+    "init_gaps": false,
+    "op": "uv_trim",
+    "face": 6,
+    "adjust": false,
+    "own_curves": true
+   }
+  },
+  {
+   "name": "own_reader_ext_w_hole_uv_trim_f7",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp (SmFace::CreateUVTrimCurves)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/ext_w_hole.smb",
+     "rebuild": false
+    },
+    "init_gaps": false,
+    "op": "uv_trim",
+    "face": 7,
+    "adjust": true,
+    "own_curves": false
+   }
+  },
+  {
+   "name": "own_reader_ext_w_hole_uv_trim_f7_rebuild",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp (SmFace::CreateUVTrimCurves)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/ext_w_hole.smb",
+     "rebuild": true
+    },
+    "init_gaps": false,
+    "op": "uv_trim",
+    "face": 7,
+    "adjust": true,
+    "own_curves": false
+   }
+  },
+  {
+   "name": "own_reader_ext_w_hole_uv_trim_f8",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp (SmFace::CreateUVTrimCurves)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/ext_w_hole.smb",
+     "rebuild": false
+    },
+    "init_gaps": false,
+    "op": "uv_trim",
+    "face": 8,
+    "adjust": false,
+    "own_curves": false
+   }
+  },
+  {
+   "name": "own_reader_ext_w_hole_uv_trim_f8_rebuild",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp (SmFace::CreateUVTrimCurves)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/ext_w_hole.smb",
+     "rebuild": true
+    },
+    "init_gaps": false,
+    "op": "uv_trim",
+    "face": 8,
+    "adjust": false,
+    "own_curves": false
+   }
+  },
+  {
+   "name": "own_reader_ext_w_hole_uv_trim_f9",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp (SmFace::CreateUVTrimCurves)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/ext_w_hole.smb",
+     "rebuild": false
+    },
+    "init_gaps": false,
+    "op": "uv_trim",
+    "face": 9,
+    "adjust": false,
+    "own_curves": false
+   }
+  },
+  {
+   "name": "own_reader_ext_w_hole_uv_trim_f9_rebuild",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp (SmFace::CreateUVTrimCurves)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/ext_w_hole.smb",
+     "rebuild": true
+    },
+    "init_gaps": false,
+    "op": "uv_trim",
+    "face": 9,
+    "adjust": false,
+    "own_curves": false
+   }
+  },
+  {
+   "name": "own_reader_ext_w_hole_uv_trim_f10",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp (SmFace::CreateUVTrimCurves)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/ext_w_hole.smb",
+     "rebuild": false
+    },
+    "init_gaps": false,
+    "op": "uv_trim",
+    "face": 10,
+    "adjust": true,
+    "own_curves": true
+   }
+  },
+  {
+   "name": "own_reader_ext_w_hole_uv_trim_f10_rebuild",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp (SmFace::CreateUVTrimCurves)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/ext_w_hole.smb",
+     "rebuild": true
+    },
+    "init_gaps": false,
+    "op": "uv_trim",
+    "face": 10,
+    "adjust": true,
+    "own_curves": true
+   }
+  },
+  {
+   "name": "own_reader_ext_w_hole_uv_trim_f11",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp (SmFace::CreateUVTrimCurves)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/ext_w_hole.smb",
+     "rebuild": false
+    },
+    "init_gaps": false,
+    "op": "uv_trim",
+    "face": 11,
+    "adjust": false,
+    "own_curves": false
+   }
+  },
+  {
+   "name": "own_reader_ext_w_hole_uv_trim_f11_rebuild",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp (SmFace::CreateUVTrimCurves)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/ext_w_hole.smb",
+     "rebuild": true
+    },
+    "init_gaps": false,
+    "op": "uv_trim",
+    "face": 11,
+    "adjust": false,
+    "own_curves": false
+   }
+  },
+  {
+   "name": "own_reader_open_shell_uv_trim_f0",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp (SmFace::CreateUVTrimCurves)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/open_shell.smb",
+     "rebuild": false
+    },
+    "init_gaps": false,
+    "op": "uv_trim",
+    "face": 0,
+    "adjust": false,
+    "own_curves": false
+   }
+  },
+  {
+   "name": "own_reader_open_shell_uv_trim_f0_rebuild",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp (SmFace::CreateUVTrimCurves)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/open_shell.smb",
+     "rebuild": true
+    },
+    "init_gaps": false,
+    "op": "uv_trim",
+    "face": 0,
+    "adjust": false,
+    "own_curves": false
+   }
+  },
+  {
+   "name": "own_reader_open_shell_uv_trim_f1",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp (SmFace::CreateUVTrimCurves)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/open_shell.smb",
+     "rebuild": false
+    },
+    "init_gaps": false,
+    "op": "uv_trim",
+    "face": 1,
+    "adjust": true,
+    "own_curves": false
+   }
+  },
+  {
+   "name": "own_reader_open_shell_uv_trim_f1_rebuild",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp (SmFace::CreateUVTrimCurves)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/open_shell.smb",
+     "rebuild": true
+    },
+    "init_gaps": false,
+    "op": "uv_trim",
+    "face": 1,
+    "adjust": true,
+    "own_curves": false
+   }
+  },
+  {
+   "name": "own_reader_open_shell_uv_trim_f2",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp (SmFace::CreateUVTrimCurves)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/open_shell.smb",
+     "rebuild": false
+    },
+    "init_gaps": false,
+    "op": "uv_trim",
+    "face": 2,
+    "adjust": false,
+    "own_curves": true
+   }
+  },
+  {
+   "name": "own_reader_open_shell_uv_trim_f2_rebuild",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp (SmFace::CreateUVTrimCurves)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/open_shell.smb",
+     "rebuild": true
+    },
+    "init_gaps": false,
+    "op": "uv_trim",
+    "face": 2,
+    "adjust": false,
+    "own_curves": true
+   }
+  },
+  {
+   "name": "own_reader_open_shell_uv_trim_f3",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp (SmFace::CreateUVTrimCurves)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/open_shell.smb",
+     "rebuild": false
+    },
+    "init_gaps": false,
+    "op": "uv_trim",
+    "face": 3,
+    "adjust": false,
+    "own_curves": false
+   }
+  },
+  {
+   "name": "own_reader_open_shell_uv_trim_f3_rebuild",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp (SmFace::CreateUVTrimCurves)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/open_shell.smb",
+     "rebuild": true
+    },
+    "init_gaps": false,
+    "op": "uv_trim",
+    "face": 3,
+    "adjust": false,
+    "own_curves": false
+   }
+  },
+  {
+   "name": "own_reader_open_shell_uv_trim_f4",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp (SmFace::CreateUVTrimCurves)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/open_shell.smb",
+     "rebuild": false
+    },
+    "init_gaps": false,
+    "op": "uv_trim",
+    "face": 4,
+    "adjust": true,
+    "own_curves": false
+   }
+  },
+  {
+   "name": "own_reader_open_shell_uv_trim_f4_rebuild",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp (SmFace::CreateUVTrimCurves)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/open_shell.smb",
+     "rebuild": true
+    },
+    "init_gaps": false,
+    "op": "uv_trim",
+    "face": 4,
+    "adjust": true,
+    "own_curves": false
+   }
+  },
+  {
+   "name": "own_reader_open_shell_uv_trim_f5",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp (SmFace::CreateUVTrimCurves)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/open_shell.smb",
+     "rebuild": false
+    },
+    "init_gaps": false,
+    "op": "uv_trim",
+    "face": 5,
+    "adjust": false,
+    "own_curves": false
+   }
+  },
+  {
+   "name": "own_reader_open_shell_uv_trim_f5_rebuild",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp (SmFace::CreateUVTrimCurves)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/open_shell.smb",
+     "rebuild": true
+    },
+    "init_gaps": false,
+    "op": "uv_trim",
+    "face": 5,
+    "adjust": false,
+    "own_curves": false
+   }
+  },
+  {
+   "name": "own_reader_open_shell_uv_trim_f6",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp (SmFace::CreateUVTrimCurves)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/open_shell.smb",
+     "rebuild": false
+    },
+    "init_gaps": false,
+    "op": "uv_trim",
+    "face": 6,
+    "adjust": false,
+    "own_curves": true
+   }
+  },
+  {
+   "name": "own_reader_open_shell_uv_trim_f6_rebuild",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp (SmFace::CreateUVTrimCurves)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/open_shell.smb",
+     "rebuild": true
+    },
+    "init_gaps": false,
+    "op": "uv_trim",
+    "face": 6,
+    "adjust": false,
+    "own_curves": true
+   }
+  },
+  {
+   "name": "own_reader_open_shell_uv_trim_f7",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp (SmFace::CreateUVTrimCurves)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/open_shell.smb",
+     "rebuild": false
+    },
+    "init_gaps": false,
+    "op": "uv_trim",
+    "face": 7,
+    "adjust": true,
+    "own_curves": false
+   }
+  },
+  {
+   "name": "own_reader_open_shell_uv_trim_f7_rebuild",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp (SmFace::CreateUVTrimCurves)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/open_shell.smb",
+     "rebuild": true
+    },
+    "init_gaps": false,
+    "op": "uv_trim",
+    "face": 7,
+    "adjust": true,
+    "own_curves": false
+   }
+  },
+  {
+   "name": "own_reader_open_shell_uv_trim_f8",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp (SmFace::CreateUVTrimCurves)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/open_shell.smb",
+     "rebuild": false
+    },
+    "init_gaps": false,
+    "op": "uv_trim",
+    "face": 8,
+    "adjust": false,
+    "own_curves": false
+   }
+  },
+  {
+   "name": "own_reader_open_shell_uv_trim_f8_rebuild",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp (SmFace::CreateUVTrimCurves)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/open_shell.smb",
+     "rebuild": true
+    },
+    "init_gaps": false,
+    "op": "uv_trim",
+    "face": 8,
+    "adjust": false,
+    "own_curves": false
+   }
+  },
+  {
+   "name": "own_reader_open_shell_uv_trim_f9",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp (SmFace::CreateUVTrimCurves)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/open_shell.smb",
+     "rebuild": false
+    },
+    "init_gaps": false,
+    "op": "uv_trim",
+    "face": 9,
+    "adjust": false,
+    "own_curves": false
+   }
+  },
+  {
+   "name": "own_reader_open_shell_uv_trim_f9_rebuild",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp (SmFace::CreateUVTrimCurves)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/open_shell.smb",
+     "rebuild": true
+    },
+    "init_gaps": false,
+    "op": "uv_trim",
+    "face": 9,
+    "adjust": false,
+    "own_curves": false
+   }
+  },
+  {
+   "name": "own_reader_open_shell_uv_trim_f10",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp (SmFace::CreateUVTrimCurves)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/open_shell.smb",
+     "rebuild": false
+    },
+    "init_gaps": false,
+    "op": "uv_trim",
+    "face": 10,
+    "adjust": true,
+    "own_curves": true
+   }
+  },
+  {
+   "name": "own_reader_open_shell_uv_trim_f10_rebuild",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp (SmFace::CreateUVTrimCurves)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/open_shell.smb",
+     "rebuild": true
+    },
+    "init_gaps": false,
+    "op": "uv_trim",
+    "face": 10,
+    "adjust": true,
+    "own_curves": true
+   }
+  },
+  {
+   "name": "own_reader_open_shell_uv_trim_f11",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp (SmFace::CreateUVTrimCurves)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/open_shell.smb",
+     "rebuild": false
+    },
+    "init_gaps": false,
+    "op": "uv_trim",
+    "face": 11,
+    "adjust": false,
+    "own_curves": false
+   }
+  },
+  {
+   "name": "own_reader_open_shell_uv_trim_f11_rebuild",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp (SmFace::CreateUVTrimCurves)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/open_shell.smb",
+     "rebuild": true
+    },
+    "init_gaps": false,
+    "op": "uv_trim",
+    "face": 11,
+    "adjust": false,
+    "own_curves": false
+   }
+  },
+  {
+   "name": "own_reader_torii_unioned_uv_trim_f0",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp (SmFace::CreateUVTrimCurves)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/torii_unioned.smb",
+     "rebuild": false
+    },
+    "init_gaps": false,
+    "op": "uv_trim",
+    "face": 0,
+    "adjust": false,
+    "own_curves": false
+   }
+  },
+  {
+   "name": "own_reader_torii_unioned_uv_trim_f0_rebuild",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp (SmFace::CreateUVTrimCurves)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/torii_unioned.smb",
+     "rebuild": true
+    },
+    "init_gaps": false,
+    "op": "uv_trim",
+    "face": 0,
+    "adjust": false,
+    "own_curves": false
+   }
+  },
+  {
+   "name": "own_reader_torii_unioned_uv_trim_f1",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp (SmFace::CreateUVTrimCurves)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/torii_unioned.smb",
+     "rebuild": false
+    },
+    "init_gaps": false,
+    "op": "uv_trim",
+    "face": 1,
+    "adjust": true,
+    "own_curves": false
+   }
+  },
+  {
+   "name": "own_reader_torii_unioned_uv_trim_f1_rebuild",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp (SmFace::CreateUVTrimCurves)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/torii_unioned.smb",
+     "rebuild": true
+    },
+    "init_gaps": false,
+    "op": "uv_trim",
+    "face": 1,
+    "adjust": true,
+    "own_curves": false
+   }
+  },
+  {
+   "name": "own_reader_torii_unioned_uv_trim_f2",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp (SmFace::CreateUVTrimCurves)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/torii_unioned.smb",
+     "rebuild": false
+    },
+    "init_gaps": false,
+    "op": "uv_trim",
+    "face": 2,
+    "adjust": false,
+    "own_curves": true
+   }
+  },
+  {
+   "name": "own_reader_torii_unioned_uv_trim_f2_rebuild",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp (SmFace::CreateUVTrimCurves)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/torii_unioned.smb",
+     "rebuild": true
+    },
+    "init_gaps": false,
+    "op": "uv_trim",
+    "face": 2,
+    "adjust": false,
+    "own_curves": true
+   }
+  },
+  {
+   "name": "own_reader_torii_unioned_uv_trim_f3",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp (SmFace::CreateUVTrimCurves)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/torii_unioned.smb",
+     "rebuild": false
+    },
+    "init_gaps": false,
+    "op": "uv_trim",
+    "face": 3,
+    "adjust": false,
+    "own_curves": false
+   }
+  },
+  {
+   "name": "own_reader_torii_unioned_uv_trim_f3_rebuild",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp (SmFace::CreateUVTrimCurves)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/torii_unioned.smb",
+     "rebuild": true
+    },
+    "init_gaps": false,
+    "op": "uv_trim",
+    "face": 3,
+    "adjust": false,
+    "own_curves": false
+   }
+  },
+  {
+   "name": "own_reader_torii_unioned_uv_trim_f4",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp (SmFace::CreateUVTrimCurves)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/torii_unioned.smb",
+     "rebuild": false
+    },
+    "init_gaps": false,
+    "op": "uv_trim",
+    "face": 4,
+    "adjust": true,
+    "own_curves": false
+   }
+  },
+  {
+   "name": "own_reader_torii_unioned_uv_trim_f4_rebuild",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp (SmFace::CreateUVTrimCurves)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/torii_unioned.smb",
+     "rebuild": true
+    },
+    "init_gaps": false,
+    "op": "uv_trim",
+    "face": 4,
+    "adjust": true,
+    "own_curves": false
+   }
+  },
+  {
+   "name": "own_reader_torii_unioned_uv_trim_f5",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp (SmFace::CreateUVTrimCurves)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/torii_unioned.smb",
+     "rebuild": false
+    },
+    "init_gaps": false,
+    "op": "uv_trim",
+    "face": 5,
+    "adjust": false,
+    "own_curves": false
+   }
+  },
+  {
+   "name": "own_reader_torii_unioned_uv_trim_f5_rebuild",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp (SmFace::CreateUVTrimCurves)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/torii_unioned.smb",
+     "rebuild": true
+    },
+    "init_gaps": false,
+    "op": "uv_trim",
+    "face": 5,
+    "adjust": false,
+    "own_curves": false
+   }
+  },
+  {
+   "name": "own_reader_torii_unioned_uv_trim_f6",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp (SmFace::CreateUVTrimCurves)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/torii_unioned.smb",
+     "rebuild": false
+    },
+    "init_gaps": false,
+    "op": "uv_trim",
+    "face": 6,
+    "adjust": false,
+    "own_curves": true
+   }
+  },
+  {
+   "name": "own_reader_torii_unioned_uv_trim_f6_rebuild",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp (SmFace::CreateUVTrimCurves)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/torii_unioned.smb",
+     "rebuild": true
+    },
+    "init_gaps": false,
+    "op": "uv_trim",
+    "face": 6,
+    "adjust": false,
+    "own_curves": true
+   }
+  },
+  {
+   "name": "own_reader_torii_unioned_uv_trim_f7",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp (SmFace::CreateUVTrimCurves)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/torii_unioned.smb",
+     "rebuild": false
+    },
+    "init_gaps": false,
+    "op": "uv_trim",
+    "face": 7,
+    "adjust": true,
+    "own_curves": false
+   }
+  },
+  {
+   "name": "own_reader_torii_unioned_uv_trim_f7_rebuild",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp (SmFace::CreateUVTrimCurves)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/torii_unioned.smb",
+     "rebuild": true
+    },
+    "init_gaps": false,
+    "op": "uv_trim",
+    "face": 7,
+    "adjust": true,
+    "own_curves": false
+   }
+  },
+  {
+   "name": "own_reader_torii_unioned_uv_trim_f8",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp (SmFace::CreateUVTrimCurves)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/torii_unioned.smb",
+     "rebuild": false
+    },
+    "init_gaps": false,
+    "op": "uv_trim",
+    "face": 8,
+    "adjust": false,
+    "own_curves": false
+   }
+  },
+  {
+   "name": "own_reader_torii_unioned_uv_trim_f8_rebuild",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp (SmFace::CreateUVTrimCurves)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/torii_unioned.smb",
+     "rebuild": true
+    },
+    "init_gaps": false,
+    "op": "uv_trim",
+    "face": 8,
+    "adjust": false,
+    "own_curves": false
+   }
+  },
+  {
+   "name": "own_reader_torii_unioned_uv_trim_f9",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp (SmFace::CreateUVTrimCurves)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/torii_unioned.smb",
+     "rebuild": false
+    },
+    "init_gaps": false,
+    "op": "uv_trim",
+    "face": 9,
+    "adjust": false,
+    "own_curves": false
+   }
+  },
+  {
+   "name": "own_reader_torii_unioned_uv_trim_f9_rebuild",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp (SmFace::CreateUVTrimCurves)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/torii_unioned.smb",
+     "rebuild": true
+    },
+    "init_gaps": false,
+    "op": "uv_trim",
+    "face": 9,
+    "adjust": false,
+    "own_curves": false
+   }
+  },
+  {
+   "name": "own_reader_torii_unioned_uv_trim_f10",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp (SmFace::CreateUVTrimCurves)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/torii_unioned.smb",
+     "rebuild": false
+    },
+    "init_gaps": false,
+    "op": "uv_trim",
+    "face": 10,
+    "adjust": true,
+    "own_curves": true
+   }
+  },
+  {
+   "name": "own_reader_torii_unioned_uv_trim_f10_rebuild",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp (SmFace::CreateUVTrimCurves)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/torii_unioned.smb",
+     "rebuild": true
+    },
+    "init_gaps": false,
+    "op": "uv_trim",
+    "face": 10,
+    "adjust": true,
+    "own_curves": true
+   }
+  },
+  {
+   "name": "own_reader_torii_unioned_uv_trim_f11",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp (SmFace::CreateUVTrimCurves)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/torii_unioned.smb",
+     "rebuild": false
+    },
+    "init_gaps": false,
+    "op": "uv_trim",
+    "face": 11,
+    "adjust": false,
+    "own_curves": false
+   }
+  },
+  {
+   "name": "own_reader_torii_unioned_uv_trim_f11_rebuild",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp (SmFace::CreateUVTrimCurves)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/torii_unioned.smb",
+     "rebuild": true
+    },
+    "init_gaps": false,
+    "op": "uv_trim",
+    "face": 11,
+    "adjust": false,
+    "own_curves": false
+   }
+  },
+  {
+   "name": "own_reader_sphere_plane_uv_trim_f0",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp (SmFace::CreateUVTrimCurves)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/sphere_plane.smb",
+     "rebuild": false
+    },
+    "init_gaps": false,
+    "op": "uv_trim",
+    "face": 0,
+    "adjust": false,
+    "own_curves": false
+   }
+  },
+  {
+   "name": "own_reader_sphere_plane_uv_trim_f0_rebuild",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp (SmFace::CreateUVTrimCurves)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/sphere_plane.smb",
+     "rebuild": true
+    },
+    "init_gaps": false,
+    "op": "uv_trim",
+    "face": 0,
+    "adjust": false,
+    "own_curves": false
+   }
+  },
+  {
+   "name": "own_reader_sphere_plane_uv_trim_f1",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp (SmFace::CreateUVTrimCurves)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/sphere_plane.smb",
+     "rebuild": false
+    },
+    "init_gaps": false,
+    "op": "uv_trim",
+    "face": 1,
+    "adjust": true,
+    "own_curves": false
+   }
+  },
+  {
+   "name": "own_reader_sphere_plane_uv_trim_f1_rebuild",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp (SmFace::CreateUVTrimCurves)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/sphere_plane.smb",
+     "rebuild": true
+    },
+    "init_gaps": false,
+    "op": "uv_trim",
+    "face": 1,
+    "adjust": true,
+    "own_curves": false
+   }
+  },
+  {
+   "name": "own_reader_sphere_plane_uv_trim_f2",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp (SmFace::CreateUVTrimCurves)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/sphere_plane.smb",
+     "rebuild": false
+    },
+    "init_gaps": false,
+    "op": "uv_trim",
+    "face": 2,
+    "adjust": false,
+    "own_curves": true
+   }
+  },
+  {
+   "name": "own_reader_sphere_plane_uv_trim_f2_rebuild",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp (SmFace::CreateUVTrimCurves)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/sphere_plane.smb",
+     "rebuild": true
+    },
+    "init_gaps": false,
+    "op": "uv_trim",
+    "face": 2,
+    "adjust": false,
+    "own_curves": true
+   }
+  },
+  {
+   "name": "own_reader_sphere_plane_uv_trim_f3",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp (SmFace::CreateUVTrimCurves)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/sphere_plane.smb",
+     "rebuild": false
+    },
+    "init_gaps": false,
+    "op": "uv_trim",
+    "face": 3,
+    "adjust": false,
+    "own_curves": false
+   }
+  },
+  {
+   "name": "own_reader_sphere_plane_uv_trim_f3_rebuild",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp (SmFace::CreateUVTrimCurves)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/sphere_plane.smb",
+     "rebuild": true
+    },
+    "init_gaps": false,
+    "op": "uv_trim",
+    "face": 3,
+    "adjust": false,
+    "own_curves": false
+   }
+  },
+  {
+   "name": "own_reader_sphere_plane_uv_trim_f4",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp (SmFace::CreateUVTrimCurves)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/sphere_plane.smb",
+     "rebuild": false
+    },
+    "init_gaps": false,
+    "op": "uv_trim",
+    "face": 4,
+    "adjust": true,
+    "own_curves": false
+   }
+  },
+  {
+   "name": "own_reader_sphere_plane_uv_trim_f4_rebuild",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp (SmFace::CreateUVTrimCurves)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/sphere_plane.smb",
+     "rebuild": true
+    },
+    "init_gaps": false,
+    "op": "uv_trim",
+    "face": 4,
+    "adjust": true,
+    "own_curves": false
+   }
+  },
+  {
+   "name": "own_reader_sphere_plane_uv_trim_f5",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp (SmFace::CreateUVTrimCurves)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/sphere_plane.smb",
+     "rebuild": false
+    },
+    "init_gaps": false,
+    "op": "uv_trim",
+    "face": 5,
+    "adjust": false,
+    "own_curves": false
+   }
+  },
+  {
+   "name": "own_reader_sphere_plane_uv_trim_f5_rebuild",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp (SmFace::CreateUVTrimCurves)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/sphere_plane.smb",
+     "rebuild": true
+    },
+    "init_gaps": false,
+    "op": "uv_trim",
+    "face": 5,
+    "adjust": false,
+    "own_curves": false
+   }
+  },
+  {
+   "name": "own_reader_sphere_plane_uv_trim_f6",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp (SmFace::CreateUVTrimCurves)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/sphere_plane.smb",
+     "rebuild": false
+    },
+    "init_gaps": false,
+    "op": "uv_trim",
+    "face": 6,
+    "adjust": false,
+    "own_curves": true
+   }
+  },
+  {
+   "name": "own_reader_sphere_plane_uv_trim_f6_rebuild",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp (SmFace::CreateUVTrimCurves)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/sphere_plane.smb",
+     "rebuild": true
+    },
+    "init_gaps": false,
+    "op": "uv_trim",
+    "face": 6,
+    "adjust": false,
+    "own_curves": true
+   }
+  },
+  {
+   "name": "own_reader_sphere_plane_uv_trim_f7",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp (SmFace::CreateUVTrimCurves)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/sphere_plane.smb",
+     "rebuild": false
+    },
+    "init_gaps": false,
+    "op": "uv_trim",
+    "face": 7,
+    "adjust": true,
+    "own_curves": false
+   }
+  },
+  {
+   "name": "own_reader_sphere_plane_uv_trim_f7_rebuild",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp (SmFace::CreateUVTrimCurves)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/sphere_plane.smb",
+     "rebuild": true
+    },
+    "init_gaps": false,
+    "op": "uv_trim",
+    "face": 7,
+    "adjust": true,
+    "own_curves": false
+   }
+  },
+  {
+   "name": "own_reader_sphere_plane_uv_trim_f8",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp (SmFace::CreateUVTrimCurves)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/sphere_plane.smb",
+     "rebuild": false
+    },
+    "init_gaps": false,
+    "op": "uv_trim",
+    "face": 8,
+    "adjust": false,
+    "own_curves": false
+   }
+  },
+  {
+   "name": "own_reader_sphere_plane_uv_trim_f8_rebuild",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp (SmFace::CreateUVTrimCurves)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/sphere_plane.smb",
+     "rebuild": true
+    },
+    "init_gaps": false,
+    "op": "uv_trim",
+    "face": 8,
+    "adjust": false,
+    "own_curves": false
+   }
+  },
+  {
+   "name": "own_reader_sphere_plane_uv_trim_f9",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp (SmFace::CreateUVTrimCurves)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/sphere_plane.smb",
+     "rebuild": false
+    },
+    "init_gaps": false,
+    "op": "uv_trim",
+    "face": 9,
+    "adjust": false,
+    "own_curves": false
+   }
+  },
+  {
+   "name": "own_reader_sphere_plane_uv_trim_f9_rebuild",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp (SmFace::CreateUVTrimCurves)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/sphere_plane.smb",
+     "rebuild": true
+    },
+    "init_gaps": false,
+    "op": "uv_trim",
+    "face": 9,
+    "adjust": false,
+    "own_curves": false
+   }
+  },
+  {
+   "name": "own_reader_sphere_plane_uv_trim_f10",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp (SmFace::CreateUVTrimCurves)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/sphere_plane.smb",
+     "rebuild": false
+    },
+    "init_gaps": false,
+    "op": "uv_trim",
+    "face": 10,
+    "adjust": true,
+    "own_curves": true
+   }
+  },
+  {
+   "name": "own_reader_sphere_plane_uv_trim_f10_rebuild",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp (SmFace::CreateUVTrimCurves)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/sphere_plane.smb",
+     "rebuild": true
+    },
+    "init_gaps": false,
+    "op": "uv_trim",
+    "face": 10,
+    "adjust": true,
+    "own_curves": true
+   }
+  },
+  {
+   "name": "own_reader_sphere_plane_uv_trim_f11",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp (SmFace::CreateUVTrimCurves)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/sphere_plane.smb",
+     "rebuild": false
+    },
+    "init_gaps": false,
+    "op": "uv_trim",
+    "face": 11,
+    "adjust": false,
+    "own_curves": false
+   }
+  },
+  {
+   "name": "own_reader_sphere_plane_uv_trim_f11_rebuild",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp (SmFace::CreateUVTrimCurves)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Fillet/sphere_plane.smb",
+     "rebuild": true
+    },
+    "init_gaps": false,
+    "op": "uv_trim",
+    "face": 11,
+    "adjust": false,
+    "own_curves": false
+   }
+  }
+ ]
+}

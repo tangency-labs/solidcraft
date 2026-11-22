@@ -16,7 +16,7 @@ use egui::{Color32, Mesh, Pos2, Rect, Sense, Stroke, Ui, vec2};
 
 use crate::ui_kit;
 
-use crate::theme::Tokens;
+use solidcraft_theme::Tokens;
 
 /// The part of a range a gesture moves, and that playing moves.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -109,7 +109,7 @@ const RULER: f32 = 14.0;
 const BARS: f32 = 40.0;
 
 fn id(key: &str) -> egui::Id {
-    egui::Id::new(("sc_range_track", key))
+    egui::Id::unique(("sc_range_track", key))
 }
 
 fn state(ctx: &egui::Context, key: &str) -> State {

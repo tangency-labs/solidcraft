@@ -1,0 +1,15 @@
+#### WR-612. A fillet edge split in two keeps only one half when the other matches its curve only to tolerance, leaving the corner's sheet with free edges
+- **Severity:** Wrong result
+- **Area:** Blends
+- **Location:** `source/SMLib/src/SmFilletGeom.cpp:8331`, `SmFilletEdge::FindFilletBrepEdge` (def. `:8192`), after the loop over the candidate edges (the `bFindMultipleEdges` branch).
+- **What happens:** `SmFilletCorner::InsertIntersectionTopology` merges each corner fillet edge's B-rep edges (`GetFilletBrepEdges`) into the face they lie on. A face curve that is split at the side's middle has two such edges. `FindFilletBrepEdge` finds them by dropping each B-rep edge's midpoint onto the fillet edge's curve. It takes a midpoint within scaled zero as a match, and keeps one within the edge's tolerance only as a "best" for when nothing matched at all. When one half matched to scaled zero and the other only to tolerance, the near half was dropped. Only one half was merged into its face, so the corner's sheet came out with two free edges besides the hole's (`SMLIB_ERR_NOT_SOLID`), and the classification asserted ("Aligned Parameter Sequence is broken"). Which cases fail depends on how the two halves round.
+- **Trigger:** SolidCraft's G2 corner on a 60 x 40 x 20 box. Its three edges at (60, 40, 20) are rounded r5, set back 12 or 13 and eased first (the fork's `smlib_blend_setback_open_eased`). It fails for setback 12 with ease 0.5 or 1.25, and for setback 13 with ease 0.5 or 5. More generally it hits any fillet edge split in two whose halves' midpoints land on either side of scaled zero.
+- **How found:** the SolidCraft fork (tangency-labs/smlib@ceb3272 on branch replay/1.0.1, not yet merged in the fork's main, capi test `corner_setback_eased_long_setbacks`), SolidCraft issue #1819.
+- **Confirmed:** by the port's unit test below (the eased setbacks of the trigger are not ported). By default (pinned behaviour) the near half is dropped.
+- **Fix:** tangency-labs/smlib@ceb3272. When looking for two edges, if the first matched and no second did, the closest near edge is kept as the second, but only if both of its ends also lie on the curve (to its tolerance), so that a different curve passing near the midpoint [B332] is not taken.
+- **Rust port:** behaves as upstream by default. `Kernel::fixes.fillet_split_edge_keeps_near_half` ports the change in `blend::fillet_geom::p1::FilletBrep::find_fillet_brep_edge`.
+- **Tests:** `blend::fillet_geom::p1::tests::wr_612_split_fillet_edge_keeps_its_near_half`. A fillet edge from 0 to 10 along x is split into an exact first half and a second half 1e-8 off.
+  - With the opt-in, both halves are found.
+  - Without it, only the first is found.
+  - A crossing curve whose midpoint is 1e-8 off but whose ends are off the curve is never taken.
+- **Difftest:** no change on the default path.

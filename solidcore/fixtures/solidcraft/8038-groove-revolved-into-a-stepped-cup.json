@@ -1,0 +1,547 @@
+{
+ "issue": "https://github.com/tangency-labs/solidcraft/issues/8038",
+ "pr": "https://github.com/tangency-labs/solidcraft/pull/4012",
+ "test": "none: open on SolidCraft's truck kernel (kernel work paused under tangency-labs/solidcraft#3992); geometry is the report's repro_xz.json, its mirrored variant and its control t1, reproduced on 0.29.0 with solidcraft-cli",
+ "summary": "A revolve cut of a small round groove into a stepped cup needed a 'Boolean retry: tool displacement' on SolidCraft's truck kernel every time (#8038). The report's repro_xz.json: on the XZ plane a cup section, the polygon (r, z) (75, 54.6), (75, 128.8), (50.15, 128.8), (50.15, 105.1), (47, 105.1), (47, 101.1), (56, 101.1), (57, 100.1), (57, 54.6) (a wall r 57..75 for z 54.6..100.1, a 1 mm chamfer, a ledge in to r 47 for z 101.1..105.1 and the bore r 50.15 above the step at z = 105.1), revolved a full turn about Z; then a groove, two lines from (49.65, 106.4) round a square corner at (49.65, 104.9) to (51.15, 104.9) and a 270 degree arc of radius 1.5 about (51.15, 106.4) back to the start, revolved and cut. The groove (z 104.9..107.9) straddles the bore wall r = 50.15 (0.5 inside the bore) just above the step, its lowest 0.2 below the step's plane, in the ledge. Replayed with solidcraft-cli 0.29.0 (truck; the XZ sketch's v is -z, so the cup sits at z 54.6..128.8): the cut builds only after 'Boolean retry: tool displacement 3.768070e-4 mm, rotation 2.000000e-6 rad', as reported (also on 0.25.0 and 0.18.2), and the same with both sections drawn at x < 0 (the report's repro_xz_sym); drawn on the YZ plane, which puts the same cup at z -128.8..-54.6 (its mirror image in z = 0), it needs no retry, and the report's control t1 (a circle of diameter 6 on the wall of a plain tube's bore, revolved and cut) needs none either. Not fixed on truck: kernel work is paused (tangency-labs/solidcraft#3992), and the `pr` link is the SMLib kernel move (tangency-labs/solidcraft#4012). The cases build the sections as revolve steps (the cup's polygon, the groove's two lines and arc; the t1 groove a circle) on the XZ plane (u = x, v = z), the mirrored one on the YZ plane, and cut. Everything is a solid of revolution about Z, so each volume is 2 pi times its section's first moment int r dA (Pappus): the cup's polygon by Green's theorem (checked against a sum over triangles and a randomised QMC over the section, within 0.95 of its standard errors); the groove's part in the cup in closed form (the disc and the square less their shared quarter disc, less the part on the bore's side of the step: a strip of the square and a strip of the disc, the latter by its antiderivative; checked by quadrature, and by randomised QMC over the groove's box with a point-in-polygon test, within 0.81 and 0.53 standard errors). Every case expects one lump, a manifold solid and its volume within 0.01 mm^3. Expected values are analytic; nothing comes from a commercial CAD product.",
+ "cases": [
+  {
+   "name": "cup_alone",
+   "note": "Control: the report's cup, its section revolved a full turn about Z (outer wall r 75; for z 54.6..100.1 the bore r 57, then a 1 mm chamfer and a ledge in to r 47 for z 101.1..105.1, and above the step at z = 105.1 the bore r 50.15).",
+   "steps": [
+    {
+     "op": "revolve",
+     "id": "result",
+     "plane": "xz",
+     "profile": [
+      {
+       "kind": "polygon",
+       "points": [
+        [
+         75.0,
+         54.6
+        ],
+        [
+         75.0,
+         128.8
+        ],
+        [
+         50.15,
+         128.8
+        ],
+        [
+         50.15,
+         105.1
+        ],
+        [
+         47.0,
+         105.1
+        ],
+        [
+         47.0,
+         101.1
+        ],
+        [
+         56.0,
+         101.1
+        ],
+        [
+         57.0,
+         100.1
+        ],
+        [
+         57.0,
+         54.6
+        ]
+       ]
+      }
+     ],
+     "axis_point": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "axis_dir": [
+      0.0,
+      0.0,
+      1.0
+     ],
+     "angle_deg": 360.0
+    }
+   ],
+   "expect": {
+    "lumps": 1,
+    "manifold": true,
+    "volume": {
+     "value": 621756.16280543,
+     "tol": 0.01,
+     "formula": "2*pi times the section's first moment int r dA (Pappus; everything is revolved a full turn about Z): the cup's section, the polygon (r, z) (75, 54.6), (75, 128.8), (50.15, 128.8), (50.15, 105.1), (47, 105.1), (47, 101.1), (56, 101.1), (57, 100.1), (57, 54.6), int r dA = sum over its edges of dz*(r1^2 + r1*r2 + r2^2)/6 = 98955.566708333; tol 0.01 mm^3"
+    }
+   }
+  },
+  {
+   "name": "groove_cut",
+   "note": "The report's case (repro_xz.json): the groove revolved and cut from the cup, straddling the bore wall r = 50.15 just above the step z = 105.1, its lowest 0.2 below the step's plane, in the ledge. On SolidCraft 0.29.0 (truck) the cut builds only after a retry with the tool moved ('Boolean retry: tool displacement 3.768070e-4 mm, rotation 2.000000e-6 rad').",
+   "steps": [
+    {
+     "op": "revolve",
+     "id": "cup",
+     "plane": "xz",
+     "profile": [
+      {
+       "kind": "polygon",
+       "points": [
+        [
+         75.0,
+         54.6
+        ],
+        [
+         75.0,
+         128.8
+        ],
+        [
+         50.15,
+         128.8
+        ],
+        [
+         50.15,
+         105.1
+        ],
+        [
+         47.0,
+         105.1
+        ],
+        [
+         47.0,
+         101.1
+        ],
+        [
+         56.0,
+         101.1
+        ],
+        [
+         57.0,
+         100.1
+        ],
+        [
+         57.0,
+         54.6
+        ]
+       ]
+      }
+     ],
+     "axis_point": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "axis_dir": [
+      0.0,
+      0.0,
+      1.0
+     ],
+     "angle_deg": 360.0
+    },
+    {
+     "op": "revolve",
+     "id": "groove",
+     "plane": "xz",
+     "profile": [
+      {
+       "kind": "line",
+       "from": [
+        49.65,
+        106.4
+       ],
+       "to": [
+        49.65,
+        104.9
+       ]
+      },
+      {
+       "kind": "line",
+       "from": [
+        49.65,
+        104.9
+       ],
+       "to": [
+        51.15,
+        104.9
+       ]
+      },
+      {
+       "kind": "arc",
+       "center": [
+        51.15,
+        106.4
+       ],
+       "radius": 1.5,
+       "start_deg": -90.0,
+       "end_deg": 180.0
+      }
+     ],
+     "axis_point": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "axis_dir": [
+      0.0,
+      0.0,
+      1.0
+     ],
+     "angle_deg": 360.0
+    },
+    {
+     "op": "difference",
+     "id": "result",
+     "a": "cup",
+     "b": "groove"
+    }
+   ],
+   "expect": {
+    "lumps": 1,
+    "manifold": true,
+    "volume": {
+     "value": 619658.082479751,
+     "tol": 0.01,
+     "formula": "2*pi times the section's first moment int r dA (Pappus; everything is revolved a full turn about Z): the cup's section, the polygon (r, z) (75, 54.6), (75, 128.8), (50.15, 128.8), (50.15, 105.1), (47, 105.1), (47, 101.1), (56, 101.1), (57, 100.1), (57, 54.6), int r dA = sum over its edges of dz*(r1^2 + r1*r2 + r2^2)/6 = 98955.566708333, less the groove's part in the cup: the groove is the disc of radius 1.5 about (51.15, 106.4) and the square r 49.65..51.15, z 104.9..106.4, int r dA = pi*1.5^2*51.15 + 1.5^2*(49.65 + 51.15)/2 - (pi*1.5^2/4*51.15 - 1.5^3/3) (the quarter disc they share) = 385.693533390; the cup there is r >= 50.15 or z <= 105.1, so the part outside it is the strip r 49.65..50.15, z 105.1..106.4 and the disc's strip r 49.65..50.15 above z = 106.4, int r dA = 51.773678554 (the strip's in closed form, the cap's int (51.15 + x) sqrt(1.5^2 - x^2) dx from -1.5 to -1 by its antiderivative); removed 333.919854836; tol 0.01 mm^3"
+    }
+   }
+  },
+  {
+   "name": "groove_cut_drawn_at_minus_x",
+   "note": "The report's mirrored variant (repro_xz_sym.json): both sections drawn at x < 0 on the XZ plane, the same solids. On SolidCraft 0.29.0 (truck) the cut also needs the 3.768070e-4 mm retry.",
+   "steps": [
+    {
+     "op": "revolve",
+     "id": "cup",
+     "plane": "xz",
+     "profile": [
+      {
+       "kind": "polygon",
+       "points": [
+        [
+         -75.0,
+         54.6
+        ],
+        [
+         -75.0,
+         128.8
+        ],
+        [
+         -50.15,
+         128.8
+        ],
+        [
+         -50.15,
+         105.1
+        ],
+        [
+         -47.0,
+         105.1
+        ],
+        [
+         -47.0,
+         101.1
+        ],
+        [
+         -56.0,
+         101.1
+        ],
+        [
+         -57.0,
+         100.1
+        ],
+        [
+         -57.0,
+         54.6
+        ]
+       ]
+      }
+     ],
+     "axis_point": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "axis_dir": [
+      0.0,
+      0.0,
+      1.0
+     ],
+     "angle_deg": 360.0
+    },
+    {
+     "op": "revolve",
+     "id": "groove",
+     "plane": "xz",
+     "profile": [
+      {
+       "kind": "line",
+       "from": [
+        -49.65,
+        106.4
+       ],
+       "to": [
+        -49.65,
+        104.9
+       ]
+      },
+      {
+       "kind": "line",
+       "from": [
+        -49.65,
+        104.9
+       ],
+       "to": [
+        -51.15,
+        104.9
+       ]
+      },
+      {
+       "kind": "arc",
+       "center": [
+        -51.15,
+        106.4
+       ],
+       "radius": 1.5,
+       "start_deg": 0.0,
+       "end_deg": 270.0
+      }
+     ],
+     "axis_point": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "axis_dir": [
+      0.0,
+      0.0,
+      1.0
+     ],
+     "angle_deg": 360.0
+    },
+    {
+     "op": "difference",
+     "id": "result",
+     "a": "cup",
+     "b": "groove"
+    }
+   ],
+   "expect": {
+    "lumps": 1,
+    "manifold": true,
+    "volume": {
+     "value": 619658.082479751,
+     "tol": 0.01,
+     "formula": "2*pi times the section's first moment int r dA (Pappus; everything is revolved a full turn about Z): the same sections mirrored in the axis, the cup's section, the polygon (r, z) (75, 54.6), (75, 128.8), (50.15, 128.8), (50.15, 105.1), (47, 105.1), (47, 101.1), (56, 101.1), (57, 100.1), (57, 54.6), int r dA = sum over its edges of dz*(r1^2 + r1*r2 + r2^2)/6 = 98955.566708333, less the groove's part in the cup: the groove is the disc of radius 1.5 about (51.15, 106.4) and the square r 49.65..51.15, z 104.9..106.4, int r dA = pi*1.5^2*51.15 + 1.5^2*(49.65 + 51.15)/2 - (pi*1.5^2/4*51.15 - 1.5^3/3) (the quarter disc they share) = 385.693533390; the cup there is r >= 50.15 or z <= 105.1, so the part outside it is the strip r 49.65..50.15, z 105.1..106.4 and the disc's strip r 49.65..50.15 above z = 106.4, int r dA = 51.773678554 (the strip's in closed form, the cap's int (51.15 + x) sqrt(1.5^2 - x^2) dx from -1.5 to -1 by its antiderivative); removed 333.919854836; tol 0.01 mm^3"
+    }
+   }
+  },
+  {
+   "name": "groove_cut_mirrored_in_xy",
+   "note": "Not in the report: the same cup and groove mirrored in z = 0 (the cup at z -128.8..-54.6), drawn on the YZ plane (u along Y, v along Z). On SolidCraft 0.29.0 (truck) this cut needs no retry.",
+   "steps": [
+    {
+     "op": "revolve",
+     "id": "cup",
+     "plane": "yz",
+     "profile": [
+      {
+       "kind": "polygon",
+       "points": [
+        [
+         75.0,
+         -54.6
+        ],
+        [
+         75.0,
+         -128.8
+        ],
+        [
+         50.15,
+         -128.8
+        ],
+        [
+         50.15,
+         -105.1
+        ],
+        [
+         47.0,
+         -105.1
+        ],
+        [
+         47.0,
+         -101.1
+        ],
+        [
+         56.0,
+         -101.1
+        ],
+        [
+         57.0,
+         -100.1
+        ],
+        [
+         57.0,
+         -54.6
+        ]
+       ]
+      }
+     ],
+     "axis_point": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "axis_dir": [
+      0.0,
+      0.0,
+      1.0
+     ],
+     "angle_deg": 360.0
+    },
+    {
+     "op": "revolve",
+     "id": "groove",
+     "plane": "yz",
+     "profile": [
+      {
+       "kind": "line",
+       "from": [
+        49.65,
+        -106.4
+       ],
+       "to": [
+        49.65,
+        -104.9
+       ]
+      },
+      {
+       "kind": "line",
+       "from": [
+        49.65,
+        -104.9
+       ],
+       "to": [
+        51.15,
+        -104.9
+       ]
+      },
+      {
+       "kind": "arc",
+       "center": [
+        51.15,
+        -106.4
+       ],
+       "radius": 1.5,
+       "start_deg": -180.0,
+       "end_deg": 90.0
+      }
+     ],
+     "axis_point": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "axis_dir": [
+      0.0,
+      0.0,
+      1.0
+     ],
+     "angle_deg": 360.0
+    },
+    {
+     "op": "difference",
+     "id": "result",
+     "a": "cup",
+     "b": "groove"
+    }
+   ],
+   "expect": {
+    "lumps": 1,
+    "manifold": true,
+    "volume": {
+     "value": 619658.082479751,
+     "tol": 0.01,
+     "formula": "2*pi times the section's first moment int r dA (Pappus; everything is revolved a full turn about Z): the same sections mirrored in z = 0, the cup's section, the polygon (r, z) (75, 54.6), (75, 128.8), (50.15, 128.8), (50.15, 105.1), (47, 105.1), (47, 101.1), (56, 101.1), (57, 100.1), (57, 54.6), int r dA = sum over its edges of dz*(r1^2 + r1*r2 + r2^2)/6 = 98955.566708333, less the groove's part in the cup: the groove is the disc of radius 1.5 about (51.15, 106.4) and the square r 49.65..51.15, z 104.9..106.4, int r dA = pi*1.5^2*51.15 + 1.5^2*(49.65 + 51.15)/2 - (pi*1.5^2/4*51.15 - 1.5^3/3) (the quarter disc they share) = 385.693533390; the cup there is r >= 50.15 or z <= 105.1, so the part outside it is the strip r 49.65..50.15, z 105.1..106.4 and the disc's strip r 49.65..50.15 above z = 106.4, int r dA = 51.773678554 (the strip's in closed form, the cap's int (51.15 + x) sqrt(1.5^2 - x^2) dx from -1.5 to -1 by its antiderivative); removed 333.919854836; tol 0.01 mm^3"
+    }
+   }
+  },
+  {
+   "name": "groove_in_a_plain_bore",
+   "note": "The report's control t1: a tube r 75 / 50, z 0..40, with a circle of diameter 6 about (50, 20) on the bore wall revolved and cut. On SolidCraft 0.29.0 (truck) this cut needs no retry.",
+   "steps": [
+    {
+     "op": "cylinder",
+     "id": "outer",
+     "origin": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "radius": 75.0,
+     "height": 40.0
+    },
+    {
+     "op": "cylinder",
+     "id": "bore",
+     "origin": [
+      0.0,
+      0.0,
+      -1.0
+     ],
+     "radius": 50.0,
+     "height": 42.0
+    },
+    {
+     "op": "difference",
+     "id": "tube",
+     "a": "outer",
+     "b": "bore"
+    },
+    {
+     "op": "revolve",
+     "id": "groove",
+     "plane": "xz",
+     "profile": [
+      {
+       "kind": "circle",
+       "center": [
+        50.0,
+        20.0
+       ],
+       "radius": 3.0
+      }
+     ],
+     "axis_point": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "axis_dir": [
+      0.0,
+      0.0,
+      1.0
+     ],
+     "angle_deg": 360.0
+    },
+    {
+     "op": "difference",
+     "id": "result",
+     "a": "tube",
+     "b": "groove"
+    }
+   ],
+   "expect": {
+    "lumps": 1,
+    "manifold": true,
+    "volume": {
+     "value": 388144.662382705,
+     "tol": 0.01,
+     "formula": "pi*(75^2 - 50^2)*40 less 2*pi times the half disc's int r dA beyond the bore (r >= 50): 50*pi*3^2/2 + 2*3^3/3; tol 0.01 mm^3"
+    }
+   }
+  }
+ ]
+}

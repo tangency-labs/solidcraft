@@ -1,0 +1,1364 @@
+{
+  "cases": [
+    {
+      "name": "filleted_box_face0",
+      "upstream_ref": "source/SMLib/src/SmFilletRemoval.cpp SmBrep::DeleteFilletFace",
+      "inputs": {
+        "file": "Fillet/filleted_box.smb",
+        "face": 0
+      }
+    },
+    {
+      "name": "filleted_box_face1",
+      "upstream_ref": "source/SMLib/src/SmFilletRemoval.cpp SmBrep::DeleteFilletFace",
+      "inputs": {
+        "file": "Fillet/filleted_box.smb",
+        "face": 1
+      }
+    },
+    {
+      "name": "filleted_box_face2",
+      "upstream_ref": "source/SMLib/src/SmFilletRemoval.cpp SmBrep::DeleteFilletFace",
+      "inputs": {
+        "file": "Fillet/filleted_box.smb",
+        "face": 2
+      }
+    },
+    {
+      "name": "filleted_box_face3",
+      "upstream_ref": "source/SMLib/src/SmFilletRemoval.cpp SmBrep::DeleteFilletFace",
+      "inputs": {
+        "file": "Fillet/filleted_box.smb",
+        "face": 3
+      }
+    },
+    {
+      "name": "filleted_box_face4",
+      "upstream_ref": "source/SMLib/src/SmFilletRemoval.cpp SmBrep::DeleteFilletFace",
+      "inputs": {
+        "file": "Fillet/filleted_box.smb",
+        "face": 4
+      }
+    },
+    {
+      "name": "filleted_box_face5",
+      "upstream_ref": "source/SMLib/src/SmFilletRemoval.cpp SmBrep::DeleteFilletFace",
+      "inputs": {
+        "file": "Fillet/filleted_box.smb",
+        "face": 5
+      }
+    },
+    {
+      "name": "filleted_box_face6",
+      "upstream_ref": "source/SMLib/src/SmFilletRemoval.cpp SmBrep::DeleteFilletFace",
+      "inputs": {
+        "file": "Fillet/filleted_box.smb",
+        "face": 6
+      }
+    },
+    {
+      "name": "filleted_box_face7",
+      "upstream_ref": "source/SMLib/src/SmFilletRemoval.cpp SmBrep::DeleteFilletFace",
+      "inputs": {
+        "file": "Fillet/filleted_box.smb",
+        "face": 7
+      }
+    },
+    {
+      "name": "filleted_box_face8",
+      "upstream_ref": "source/SMLib/src/SmFilletRemoval.cpp SmBrep::DeleteFilletFace",
+      "inputs": {
+        "file": "Fillet/filleted_box.smb",
+        "face": 8
+      }
+    },
+    {
+      "name": "filleted_box_face9",
+      "upstream_ref": "source/SMLib/src/SmFilletRemoval.cpp SmBrep::DeleteFilletFace",
+      "inputs": {
+        "file": "Fillet/filleted_box.smb",
+        "face": 9
+      }
+    },
+    {
+      "name": "fillet0114_face0",
+      "upstream_ref": "source/SMLib/src/SmFilletRemoval.cpp SmBrep::DeleteFilletFace",
+      "inputs": {
+        "file": "Fillet/fillet0114.smb",
+        "face": 0
+      }
+    },
+    {
+      "name": "fillet0114_face1",
+      "upstream_ref": "source/SMLib/src/SmFilletRemoval.cpp SmBrep::DeleteFilletFace",
+      "inputs": {
+        "file": "Fillet/fillet0114.smb",
+        "face": 1
+      }
+    },
+    {
+      "name": "fillet0114_face2",
+      "upstream_ref": "source/SMLib/src/SmFilletRemoval.cpp SmBrep::DeleteFilletFace",
+      "inputs": {
+        "file": "Fillet/fillet0114.smb",
+        "face": 2
+      }
+    },
+    {
+      "name": "fillet0227_face0",
+      "upstream_ref": "source/SMLib/src/SmFilletRemoval.cpp SmBrep::DeleteFilletFace",
+      "inputs": {
+        "file": "Fillet/fillet0227.smb",
+        "face": 0
+      }
+    },
+    {
+      "name": "fillet0227_face1",
+      "upstream_ref": "source/SMLib/src/SmFilletRemoval.cpp SmBrep::DeleteFilletFace",
+      "inputs": {
+        "file": "Fillet/fillet0227.smb",
+        "face": 1
+      }
+    },
+    {
+      "name": "fillet0227_face2",
+      "upstream_ref": "source/SMLib/src/SmFilletRemoval.cpp SmBrep::DeleteFilletFace",
+      "inputs": {
+        "file": "Fillet/fillet0227.smb",
+        "face": 2
+      }
+    },
+    {
+      "name": "fillet0227_face3",
+      "upstream_ref": "source/SMLib/src/SmFilletRemoval.cpp SmBrep::DeleteFilletFace",
+      "inputs": {
+        "file": "Fillet/fillet0227.smb",
+        "face": 3
+      }
+    },
+    {
+      "name": "fillet0227_face4",
+      "upstream_ref": "source/SMLib/src/SmFilletRemoval.cpp SmBrep::DeleteFilletFace",
+      "inputs": {
+        "file": "Fillet/fillet0227.smb",
+        "face": 4
+      }
+    },
+    {
+      "name": "fillet1010_face0",
+      "upstream_ref": "source/SMLib/src/SmFilletRemoval.cpp SmBrep::DeleteFilletFace",
+      "inputs": {
+        "file": "Fillet/fillet1010.smb",
+        "face": 0
+      }
+    },
+    {
+      "name": "fillet1010_face1",
+      "upstream_ref": "source/SMLib/src/SmFilletRemoval.cpp SmBrep::DeleteFilletFace",
+      "inputs": {
+        "file": "Fillet/fillet1010.smb",
+        "face": 1
+      }
+    },
+    {
+      "name": "fillet1010_face2",
+      "upstream_ref": "source/SMLib/src/SmFilletRemoval.cpp SmBrep::DeleteFilletFace",
+      "inputs": {
+        "file": "Fillet/fillet1010.smb",
+        "face": 2
+      }
+    },
+    {
+      "name": "fillet1010_face3",
+      "upstream_ref": "source/SMLib/src/SmFilletRemoval.cpp SmBrep::DeleteFilletFace",
+      "inputs": {
+        "file": "Fillet/fillet1010.smb",
+        "face": 3
+      }
+    },
+    {
+      "name": "fillet1010_face4",
+      "upstream_ref": "source/SMLib/src/SmFilletRemoval.cpp SmBrep::DeleteFilletFace",
+      "inputs": {
+        "file": "Fillet/fillet1010.smb",
+        "face": 4
+      }
+    },
+    {
+      "name": "fillet1010_face5",
+      "upstream_ref": "source/SMLib/src/SmFilletRemoval.cpp SmBrep::DeleteFilletFace",
+      "inputs": {
+        "file": "Fillet/fillet1010.smb",
+        "face": 5
+      }
+    },
+    {
+      "name": "fillet1017_face0",
+      "upstream_ref": "source/SMLib/src/SmFilletRemoval.cpp SmBrep::DeleteFilletFace",
+      "inputs": {
+        "file": "Fillet/fillet1017.smb",
+        "face": 0
+      }
+    },
+    {
+      "name": "fillet1017_face1",
+      "upstream_ref": "source/SMLib/src/SmFilletRemoval.cpp SmBrep::DeleteFilletFace",
+      "inputs": {
+        "file": "Fillet/fillet1017.smb",
+        "face": 1
+      }
+    },
+    {
+      "name": "fillet1017_face2",
+      "upstream_ref": "source/SMLib/src/SmFilletRemoval.cpp SmBrep::DeleteFilletFace",
+      "inputs": {
+        "file": "Fillet/fillet1017.smb",
+        "face": 2
+      }
+    },
+    {
+      "name": "fillet1017_face3",
+      "upstream_ref": "source/SMLib/src/SmFilletRemoval.cpp SmBrep::DeleteFilletFace",
+      "inputs": {
+        "file": "Fillet/fillet1017.smb",
+        "face": 3
+      }
+    },
+    {
+      "name": "fillet1017_face4",
+      "upstream_ref": "source/SMLib/src/SmFilletRemoval.cpp SmBrep::DeleteFilletFace",
+      "inputs": {
+        "file": "Fillet/fillet1017.smb",
+        "face": 4
+      }
+    },
+    {
+      "name": "fillet1017_face5",
+      "upstream_ref": "source/SMLib/src/SmFilletRemoval.cpp SmBrep::DeleteFilletFace",
+      "inputs": {
+        "file": "Fillet/fillet1017.smb",
+        "face": 5
+      }
+    },
+    {
+      "name": "fillet1017_face6",
+      "upstream_ref": "source/SMLib/src/SmFilletRemoval.cpp SmBrep::DeleteFilletFace",
+      "inputs": {
+        "file": "Fillet/fillet1017.smb",
+        "face": 6
+      }
+    },
+    {
+      "name": "fillet1017_face7",
+      "upstream_ref": "source/SMLib/src/SmFilletRemoval.cpp SmBrep::DeleteFilletFace",
+      "inputs": {
+        "file": "Fillet/fillet1017.smb",
+        "face": 7
+      }
+    },
+    {
+      "name": "fillet1017_face8",
+      "upstream_ref": "source/SMLib/src/SmFilletRemoval.cpp SmBrep::DeleteFilletFace",
+      "inputs": {
+        "file": "Fillet/fillet1017.smb",
+        "face": 8
+      }
+    },
+    {
+      "name": "fillet1017_face9",
+      "upstream_ref": "source/SMLib/src/SmFilletRemoval.cpp SmBrep::DeleteFilletFace",
+      "inputs": {
+        "file": "Fillet/fillet1017.smb",
+        "face": 9
+      }
+    },
+    {
+      "name": "fillet1017_face10",
+      "upstream_ref": "source/SMLib/src/SmFilletRemoval.cpp SmBrep::DeleteFilletFace",
+      "inputs": {
+        "file": "Fillet/fillet1017.smb",
+        "face": 10
+      }
+    },
+    {
+      "name": "fillet1018_face0",
+      "upstream_ref": "source/SMLib/src/SmFilletRemoval.cpp SmBrep::DeleteFilletFace",
+      "inputs": {
+        "file": "Fillet/fillet1018.smb",
+        "face": 0
+      }
+    },
+    {
+      "name": "fillet1018_face1",
+      "upstream_ref": "source/SMLib/src/SmFilletRemoval.cpp SmBrep::DeleteFilletFace",
+      "inputs": {
+        "file": "Fillet/fillet1018.smb",
+        "face": 1
+      }
+    },
+    {
+      "name": "fillet1018_face2",
+      "upstream_ref": "source/SMLib/src/SmFilletRemoval.cpp SmBrep::DeleteFilletFace",
+      "inputs": {
+        "file": "Fillet/fillet1018.smb",
+        "face": 2
+      }
+    },
+    {
+      "name": "fillet1018_face3",
+      "upstream_ref": "source/SMLib/src/SmFilletRemoval.cpp SmBrep::DeleteFilletFace",
+      "inputs": {
+        "file": "Fillet/fillet1018.smb",
+        "face": 3
+      }
+    },
+    {
+      "name": "fillet1018_face4",
+      "upstream_ref": "source/SMLib/src/SmFilletRemoval.cpp SmBrep::DeleteFilletFace",
+      "inputs": {
+        "file": "Fillet/fillet1018.smb",
+        "face": 4
+      }
+    },
+    {
+      "name": "fillet1018_face5",
+      "upstream_ref": "source/SMLib/src/SmFilletRemoval.cpp SmBrep::DeleteFilletFace",
+      "inputs": {
+        "file": "Fillet/fillet1018.smb",
+        "face": 5
+      }
+    },
+    {
+      "name": "fillet1018_face6",
+      "upstream_ref": "source/SMLib/src/SmFilletRemoval.cpp SmBrep::DeleteFilletFace",
+      "inputs": {
+        "file": "Fillet/fillet1018.smb",
+        "face": 6
+      }
+    },
+    {
+      "name": "fillet1018_face7",
+      "upstream_ref": "source/SMLib/src/SmFilletRemoval.cpp SmBrep::DeleteFilletFace",
+      "inputs": {
+        "file": "Fillet/fillet1018.smb",
+        "face": 7
+      }
+    },
+    {
+      "name": "fillet1018_face8",
+      "upstream_ref": "source/SMLib/src/SmFilletRemoval.cpp SmBrep::DeleteFilletFace",
+      "inputs": {
+        "file": "Fillet/fillet1018.smb",
+        "face": 8
+      }
+    },
+    {
+      "name": "fillet1018_face9",
+      "upstream_ref": "source/SMLib/src/SmFilletRemoval.cpp SmBrep::DeleteFilletFace",
+      "inputs": {
+        "file": "Fillet/fillet1018.smb",
+        "face": 9
+      }
+    },
+    {
+      "name": "fillet1018_face10",
+      "upstream_ref": "source/SMLib/src/SmFilletRemoval.cpp SmBrep::DeleteFilletFace",
+      "inputs": {
+        "file": "Fillet/fillet1018.smb",
+        "face": 10
+      }
+    },
+    {
+      "name": "fillet1019_face0",
+      "upstream_ref": "source/SMLib/src/SmFilletRemoval.cpp SmBrep::DeleteFilletFace",
+      "inputs": {
+        "file": "Fillet/fillet1019.smb",
+        "face": 0
+      }
+    },
+    {
+      "name": "fillet1019_face1",
+      "upstream_ref": "source/SMLib/src/SmFilletRemoval.cpp SmBrep::DeleteFilletFace",
+      "inputs": {
+        "file": "Fillet/fillet1019.smb",
+        "face": 1
+      }
+    },
+    {
+      "name": "fillet1019_face2",
+      "upstream_ref": "source/SMLib/src/SmFilletRemoval.cpp SmBrep::DeleteFilletFace",
+      "inputs": {
+        "file": "Fillet/fillet1019.smb",
+        "face": 2
+      }
+    },
+    {
+      "name": "fillet1019_face3",
+      "upstream_ref": "source/SMLib/src/SmFilletRemoval.cpp SmBrep::DeleteFilletFace",
+      "inputs": {
+        "file": "Fillet/fillet1019.smb",
+        "face": 3
+      }
+    },
+    {
+      "name": "fillet1019_face4",
+      "upstream_ref": "source/SMLib/src/SmFilletRemoval.cpp SmBrep::DeleteFilletFace",
+      "inputs": {
+        "file": "Fillet/fillet1019.smb",
+        "face": 4
+      }
+    },
+    {
+      "name": "fillet1019_face5",
+      "upstream_ref": "source/SMLib/src/SmFilletRemoval.cpp SmBrep::DeleteFilletFace",
+      "inputs": {
+        "file": "Fillet/fillet1019.smb",
+        "face": 5
+      }
+    },
+    {
+      "name": "fillet1019_face6",
+      "upstream_ref": "source/SMLib/src/SmFilletRemoval.cpp SmBrep::DeleteFilletFace",
+      "inputs": {
+        "file": "Fillet/fillet1019.smb",
+        "face": 6
+      }
+    },
+    {
+      "name": "fillet1019_face7",
+      "upstream_ref": "source/SMLib/src/SmFilletRemoval.cpp SmBrep::DeleteFilletFace",
+      "inputs": {
+        "file": "Fillet/fillet1019.smb",
+        "face": 7
+      }
+    },
+    {
+      "name": "fillet1019_face8",
+      "upstream_ref": "source/SMLib/src/SmFilletRemoval.cpp SmBrep::DeleteFilletFace",
+      "inputs": {
+        "file": "Fillet/fillet1019.smb",
+        "face": 8
+      }
+    },
+    {
+      "name": "cyl_on_box_w_fillet_face0",
+      "upstream_ref": "source/SMLib/src/SmFilletRemoval.cpp SmBrep::DeleteFilletFace",
+      "inputs": {
+        "file": "Fillet/cyl_on_box_w_fillet.smb",
+        "face": 0
+      }
+    },
+    {
+      "name": "cyl_on_box_w_fillet_face1",
+      "upstream_ref": "source/SMLib/src/SmFilletRemoval.cpp SmBrep::DeleteFilletFace",
+      "inputs": {
+        "file": "Fillet/cyl_on_box_w_fillet.smb",
+        "face": 1
+      }
+    },
+    {
+      "name": "cyl_on_box_w_fillet_face2",
+      "upstream_ref": "source/SMLib/src/SmFilletRemoval.cpp SmBrep::DeleteFilletFace",
+      "inputs": {
+        "file": "Fillet/cyl_on_box_w_fillet.smb",
+        "face": 2
+      }
+    },
+    {
+      "name": "cyl_on_box_w_fillet_face3",
+      "upstream_ref": "source/SMLib/src/SmFilletRemoval.cpp SmBrep::DeleteFilletFace",
+      "inputs": {
+        "file": "Fillet/cyl_on_box_w_fillet.smb",
+        "face": 3
+      }
+    },
+    {
+      "name": "cyl_on_box_w_fillet_face4",
+      "upstream_ref": "source/SMLib/src/SmFilletRemoval.cpp SmBrep::DeleteFilletFace",
+      "inputs": {
+        "file": "Fillet/cyl_on_box_w_fillet.smb",
+        "face": 4
+      }
+    },
+    {
+      "name": "cyl_on_box_w_fillet_face5",
+      "upstream_ref": "source/SMLib/src/SmFilletRemoval.cpp SmBrep::DeleteFilletFace",
+      "inputs": {
+        "file": "Fillet/cyl_on_box_w_fillet.smb",
+        "face": 5
+      }
+    },
+    {
+      "name": "cyl_on_box_w_fillet_face6",
+      "upstream_ref": "source/SMLib/src/SmFilletRemoval.cpp SmBrep::DeleteFilletFace",
+      "inputs": {
+        "file": "Fillet/cyl_on_box_w_fillet.smb",
+        "face": 6
+      }
+    },
+    {
+      "name": "cyl_on_box_w_fillet_face7",
+      "upstream_ref": "source/SMLib/src/SmFilletRemoval.cpp SmBrep::DeleteFilletFace",
+      "inputs": {
+        "file": "Fillet/cyl_on_box_w_fillet.smb",
+        "face": 7
+      }
+    },
+    {
+      "name": "cyl_on_box_w_fillet_face8",
+      "upstream_ref": "source/SMLib/src/SmFilletRemoval.cpp SmBrep::DeleteFilletFace",
+      "inputs": {
+        "file": "Fillet/cyl_on_box_w_fillet.smb",
+        "face": 8
+      }
+    },
+    {
+      "name": "cyl_on_box_w_fillet1_face0",
+      "upstream_ref": "source/SMLib/src/SmFilletRemoval.cpp SmBrep::DeleteFilletFace",
+      "inputs": {
+        "file": "Fillet/cyl_on_box_w_fillet1.smb",
+        "face": 0
+      }
+    },
+    {
+      "name": "cyl_on_box_w_fillet1_face1",
+      "upstream_ref": "source/SMLib/src/SmFilletRemoval.cpp SmBrep::DeleteFilletFace",
+      "inputs": {
+        "file": "Fillet/cyl_on_box_w_fillet1.smb",
+        "face": 1
+      }
+    },
+    {
+      "name": "cyl_on_box_w_fillet1_face2",
+      "upstream_ref": "source/SMLib/src/SmFilletRemoval.cpp SmBrep::DeleteFilletFace",
+      "inputs": {
+        "file": "Fillet/cyl_on_box_w_fillet1.smb",
+        "face": 2
+      }
+    },
+    {
+      "name": "cyl_on_box_w_fillet1_face3",
+      "upstream_ref": "source/SMLib/src/SmFilletRemoval.cpp SmBrep::DeleteFilletFace",
+      "inputs": {
+        "file": "Fillet/cyl_on_box_w_fillet1.smb",
+        "face": 3
+      }
+    },
+    {
+      "name": "cyl_on_box_w_fillet1_face4",
+      "upstream_ref": "source/SMLib/src/SmFilletRemoval.cpp SmBrep::DeleteFilletFace",
+      "inputs": {
+        "file": "Fillet/cyl_on_box_w_fillet1.smb",
+        "face": 4
+      }
+    },
+    {
+      "name": "cyl_on_box_w_fillet1_face5",
+      "upstream_ref": "source/SMLib/src/SmFilletRemoval.cpp SmBrep::DeleteFilletFace",
+      "inputs": {
+        "file": "Fillet/cyl_on_box_w_fillet1.smb",
+        "face": 5
+      }
+    },
+    {
+      "name": "cyl_on_box_w_fillet1_face6",
+      "upstream_ref": "source/SMLib/src/SmFilletRemoval.cpp SmBrep::DeleteFilletFace",
+      "inputs": {
+        "file": "Fillet/cyl_on_box_w_fillet1.smb",
+        "face": 6
+      }
+    },
+    {
+      "name": "cyl_on_box_w_fillet1_face7",
+      "upstream_ref": "source/SMLib/src/SmFilletRemoval.cpp SmBrep::DeleteFilletFace",
+      "inputs": {
+        "file": "Fillet/cyl_on_box_w_fillet1.smb",
+        "face": 7
+      }
+    },
+    {
+      "name": "cyl_on_box_w_fillet1_face8",
+      "upstream_ref": "source/SMLib/src/SmFilletRemoval.cpp SmBrep::DeleteFilletFace",
+      "inputs": {
+        "file": "Fillet/cyl_on_box_w_fillet1.smb",
+        "face": 8
+      }
+    },
+    {
+      "name": "box_with_large_fillet_face0",
+      "upstream_ref": "source/SMLib/src/SmFilletRemoval.cpp SmBrep::DeleteFilletFace",
+      "inputs": {
+        "file": "box_with_large_fillet.smb",
+        "face": 0
+      }
+    },
+    {
+      "name": "box_with_large_fillet_face1",
+      "upstream_ref": "source/SMLib/src/SmFilletRemoval.cpp SmBrep::DeleteFilletFace",
+      "inputs": {
+        "file": "box_with_large_fillet.smb",
+        "face": 1
+      }
+    },
+    {
+      "name": "box_with_large_fillet_face2",
+      "upstream_ref": "source/SMLib/src/SmFilletRemoval.cpp SmBrep::DeleteFilletFace",
+      "inputs": {
+        "file": "box_with_large_fillet.smb",
+        "face": 2
+      }
+    },
+    {
+      "name": "box_with_large_fillet_face3",
+      "upstream_ref": "source/SMLib/src/SmFilletRemoval.cpp SmBrep::DeleteFilletFace",
+      "inputs": {
+        "file": "box_with_large_fillet.smb",
+        "face": 3
+      }
+    },
+    {
+      "name": "box_with_large_fillet_face4",
+      "upstream_ref": "source/SMLib/src/SmFilletRemoval.cpp SmBrep::DeleteFilletFace",
+      "inputs": {
+        "file": "box_with_large_fillet.smb",
+        "face": 4
+      }
+    },
+    {
+      "name": "box_with_large_fillet_face5",
+      "upstream_ref": "source/SMLib/src/SmFilletRemoval.cpp SmBrep::DeleteFilletFace",
+      "inputs": {
+        "file": "box_with_large_fillet.smb",
+        "face": 5
+      }
+    },
+    {
+      "name": "box_with_large_fillet_face6",
+      "upstream_ref": "source/SMLib/src/SmFilletRemoval.cpp SmBrep::DeleteFilletFace",
+      "inputs": {
+        "file": "box_with_large_fillet.smb",
+        "face": 6
+      }
+    },
+    {
+      "name": "nurb_fillet_face0",
+      "upstream_ref": "source/SMLib/src/SmFilletRemoval.cpp SmBrep::DeleteFilletFace",
+      "inputs": {
+        "file": "Solids/nurb_fillet.smb",
+        "face": 0
+      }
+    },
+    {
+      "name": "nurb_fillet_face1",
+      "upstream_ref": "source/SMLib/src/SmFilletRemoval.cpp SmBrep::DeleteFilletFace",
+      "inputs": {
+        "file": "Solids/nurb_fillet.smb",
+        "face": 1
+      }
+    },
+    {
+      "name": "nurb_fillet_face2",
+      "upstream_ref": "source/SMLib/src/SmFilletRemoval.cpp SmBrep::DeleteFilletFace",
+      "inputs": {
+        "file": "Solids/nurb_fillet.smb",
+        "face": 2
+      }
+    },
+    {
+      "name": "nurb_fillet_face3",
+      "upstream_ref": "source/SMLib/src/SmFilletRemoval.cpp SmBrep::DeleteFilletFace",
+      "inputs": {
+        "file": "Solids/nurb_fillet.smb",
+        "face": 3
+      }
+    },
+    {
+      "name": "nurb_fillet_face4",
+      "upstream_ref": "source/SMLib/src/SmFilletRemoval.cpp SmBrep::DeleteFilletFace",
+      "inputs": {
+        "file": "Solids/nurb_fillet.smb",
+        "face": 4
+      }
+    },
+    {
+      "name": "nurb_fillet_face5",
+      "upstream_ref": "source/SMLib/src/SmFilletRemoval.cpp SmBrep::DeleteFilletFace",
+      "inputs": {
+        "file": "Solids/nurb_fillet.smb",
+        "face": 5
+      }
+    },
+    {
+      "name": "nurb_fillet_face6",
+      "upstream_ref": "source/SMLib/src/SmFilletRemoval.cpp SmBrep::DeleteFilletFace",
+      "inputs": {
+        "file": "Solids/nurb_fillet.smb",
+        "face": 6
+      }
+    },
+    {
+      "name": "nurb_fillet_face7",
+      "upstream_ref": "source/SMLib/src/SmFilletRemoval.cpp SmBrep::DeleteFilletFace",
+      "inputs": {
+        "file": "Solids/nurb_fillet.smb",
+        "face": 7
+      }
+    },
+    {
+      "name": "nurb_fillet_face8",
+      "upstream_ref": "source/SMLib/src/SmFilletRemoval.cpp SmBrep::DeleteFilletFace",
+      "inputs": {
+        "file": "Solids/nurb_fillet.smb",
+        "face": 8
+      }
+    },
+    {
+      "name": "nurb_fillet_face9",
+      "upstream_ref": "source/SMLib/src/SmFilletRemoval.cpp SmBrep::DeleteFilletFace",
+      "inputs": {
+        "file": "Solids/nurb_fillet.smb",
+        "face": 9
+      }
+    },
+    {
+      "name": "nurb_fillet_face10",
+      "upstream_ref": "source/SMLib/src/SmFilletRemoval.cpp SmBrep::DeleteFilletFace",
+      "inputs": {
+        "file": "Solids/nurb_fillet.smb",
+        "face": 10
+      }
+    },
+    {
+      "name": "nurb_fillet_face11",
+      "upstream_ref": "source/SMLib/src/SmFilletRemoval.cpp SmBrep::DeleteFilletFace",
+      "inputs": {
+        "file": "Solids/nurb_fillet.smb",
+        "face": 11
+      }
+    },
+    {
+      "name": "nurb_fillet_face12",
+      "upstream_ref": "source/SMLib/src/SmFilletRemoval.cpp SmBrep::DeleteFilletFace",
+      "inputs": {
+        "file": "Solids/nurb_fillet.smb",
+        "face": 12
+      }
+    },
+    {
+      "name": "nurb_fillet_face13",
+      "upstream_ref": "source/SMLib/src/SmFilletRemoval.cpp SmBrep::DeleteFilletFace",
+      "inputs": {
+        "file": "Solids/nurb_fillet.smb",
+        "face": 13
+      }
+    },
+    {
+      "name": "nurb_fillet_face14",
+      "upstream_ref": "source/SMLib/src/SmFilletRemoval.cpp SmBrep::DeleteFilletFace",
+      "inputs": {
+        "file": "Solids/nurb_fillet.smb",
+        "face": 14
+      }
+    },
+    {
+      "name": "nurb_fillet_face15",
+      "upstream_ref": "source/SMLib/src/SmFilletRemoval.cpp SmBrep::DeleteFilletFace",
+      "inputs": {
+        "file": "Solids/nurb_fillet.smb",
+        "face": 15
+      }
+    },
+    {
+      "name": "nurb_fillet_face16",
+      "upstream_ref": "source/SMLib/src/SmFilletRemoval.cpp SmBrep::DeleteFilletFace",
+      "inputs": {
+        "file": "Solids/nurb_fillet.smb",
+        "face": 16
+      }
+    },
+    {
+      "name": "nurb_fillet_face17",
+      "upstream_ref": "source/SMLib/src/SmFilletRemoval.cpp SmBrep::DeleteFilletFace",
+      "inputs": {
+        "file": "Solids/nurb_fillet.smb",
+        "face": 17
+      }
+    },
+    {
+      "name": "nurb_fillet_face18",
+      "upstream_ref": "source/SMLib/src/SmFilletRemoval.cpp SmBrep::DeleteFilletFace",
+      "inputs": {
+        "file": "Solids/nurb_fillet.smb",
+        "face": 18
+      }
+    },
+    {
+      "name": "nurb_fillet_face19",
+      "upstream_ref": "source/SMLib/src/SmFilletRemoval.cpp SmBrep::DeleteFilletFace",
+      "inputs": {
+        "file": "Solids/nurb_fillet.smb",
+        "face": 19
+      }
+    },
+    {
+      "name": "torii_fillet_face0",
+      "upstream_ref": "source/SMLib/src/SmFilletRemoval.cpp SmBrep::DeleteFilletFace",
+      "inputs": {
+        "file": "Fillet/torii_fillet.smb",
+        "face": 0
+      }
+    },
+    {
+      "name": "torii_fillet_face1",
+      "upstream_ref": "source/SMLib/src/SmFilletRemoval.cpp SmBrep::DeleteFilletFace",
+      "inputs": {
+        "file": "Fillet/torii_fillet.smb",
+        "face": 1
+      }
+    },
+    {
+      "name": "torii_fillet_face2",
+      "upstream_ref": "source/SMLib/src/SmFilletRemoval.cpp SmBrep::DeleteFilletFace",
+      "inputs": {
+        "file": "Fillet/torii_fillet.smb",
+        "face": 2
+      }
+    },
+    {
+      "name": "torii_fillet_face3",
+      "upstream_ref": "source/SMLib/src/SmFilletRemoval.cpp SmBrep::DeleteFilletFace",
+      "inputs": {
+        "file": "Fillet/torii_fillet.smb",
+        "face": 3
+      }
+    },
+    {
+      "name": "torii_fillet_face4",
+      "upstream_ref": "source/SMLib/src/SmFilletRemoval.cpp SmBrep::DeleteFilletFace",
+      "inputs": {
+        "file": "Fillet/torii_fillet.smb",
+        "face": 4
+      }
+    },
+    {
+      "name": "torii_fillet_face5",
+      "upstream_ref": "source/SMLib/src/SmFilletRemoval.cpp SmBrep::DeleteFilletFace",
+      "inputs": {
+        "file": "Fillet/torii_fillet.smb",
+        "face": 5
+      }
+    },
+    {
+      "name": "torii_fillet_face6",
+      "upstream_ref": "source/SMLib/src/SmFilletRemoval.cpp SmBrep::DeleteFilletFace",
+      "inputs": {
+        "file": "Fillet/torii_fillet.smb",
+        "face": 6
+      }
+    },
+    {
+      "name": "torii_fillet_face7",
+      "upstream_ref": "source/SMLib/src/SmFilletRemoval.cpp SmBrep::DeleteFilletFace",
+      "inputs": {
+        "file": "Fillet/torii_fillet.smb",
+        "face": 7
+      }
+    },
+    {
+      "name": "torii_fillet_face8",
+      "upstream_ref": "source/SMLib/src/SmFilletRemoval.cpp SmBrep::DeleteFilletFace",
+      "inputs": {
+        "file": "Fillet/torii_fillet.smb",
+        "face": 8
+      }
+    },
+    {
+      "name": "torii_fillet_face9",
+      "upstream_ref": "source/SMLib/src/SmFilletRemoval.cpp SmBrep::DeleteFilletFace",
+      "inputs": {
+        "file": "Fillet/torii_fillet.smb",
+        "face": 9
+      }
+    },
+    {
+      "name": "torii_fillet_face10",
+      "upstream_ref": "source/SMLib/src/SmFilletRemoval.cpp SmBrep::DeleteFilletFace",
+      "inputs": {
+        "file": "Fillet/torii_fillet.smb",
+        "face": 10
+      }
+    },
+    {
+      "name": "torii_fillet_face11",
+      "upstream_ref": "source/SMLib/src/SmFilletRemoval.cpp SmBrep::DeleteFilletFace",
+      "inputs": {
+        "file": "Fillet/torii_fillet.smb",
+        "face": 11
+      }
+    },
+    {
+      "name": "torii_fillet_face12",
+      "upstream_ref": "source/SMLib/src/SmFilletRemoval.cpp SmBrep::DeleteFilletFace",
+      "inputs": {
+        "file": "Fillet/torii_fillet.smb",
+        "face": 12
+      }
+    },
+    {
+      "name": "shell_fillet_face0",
+      "upstream_ref": "source/SMLib/src/SmFilletRemoval.cpp SmBrep::DeleteFilletFace",
+      "inputs": {
+        "file": "Fillet/shell_fillet.smb",
+        "face": 0
+      }
+    },
+    {
+      "name": "shell_fillet_face1",
+      "upstream_ref": "source/SMLib/src/SmFilletRemoval.cpp SmBrep::DeleteFilletFace",
+      "inputs": {
+        "file": "Fillet/shell_fillet.smb",
+        "face": 1
+      }
+    },
+    {
+      "name": "shell_fillet_face2",
+      "upstream_ref": "source/SMLib/src/SmFilletRemoval.cpp SmBrep::DeleteFilletFace",
+      "inputs": {
+        "file": "Fillet/shell_fillet.smb",
+        "face": 2
+      }
+    },
+    {
+      "name": "defillet_face0",
+      "upstream_ref": "source/SMLib/src/SmFilletRemoval.cpp SmBrep::DeleteFilletFace",
+      "inputs": {
+        "file": "Defeature/defillet.smb",
+        "face": 0
+      }
+    },
+    {
+      "name": "defillet_face1",
+      "upstream_ref": "source/SMLib/src/SmFilletRemoval.cpp SmBrep::DeleteFilletFace",
+      "inputs": {
+        "file": "Defeature/defillet.smb",
+        "face": 1
+      }
+    },
+    {
+      "name": "defillet_face2",
+      "upstream_ref": "source/SMLib/src/SmFilletRemoval.cpp SmBrep::DeleteFilletFace",
+      "inputs": {
+        "file": "Defeature/defillet.smb",
+        "face": 2
+      }
+    },
+    {
+      "name": "defillet_face3",
+      "upstream_ref": "source/SMLib/src/SmFilletRemoval.cpp SmBrep::DeleteFilletFace",
+      "inputs": {
+        "file": "Defeature/defillet.smb",
+        "face": 3
+      }
+    },
+    {
+      "name": "defillet_face4",
+      "upstream_ref": "source/SMLib/src/SmFilletRemoval.cpp SmBrep::DeleteFilletFace",
+      "inputs": {
+        "file": "Defeature/defillet.smb",
+        "face": 4
+      }
+    },
+    {
+      "name": "defillet_face5",
+      "upstream_ref": "source/SMLib/src/SmFilletRemoval.cpp SmBrep::DeleteFilletFace",
+      "inputs": {
+        "file": "Defeature/defillet.smb",
+        "face": 5
+      }
+    },
+    {
+      "name": "defillet_face6",
+      "upstream_ref": "source/SMLib/src/SmFilletRemoval.cpp SmBrep::DeleteFilletFace",
+      "inputs": {
+        "file": "Defeature/defillet.smb",
+        "face": 6
+      }
+    },
+    {
+      "name": "defillet_face7",
+      "upstream_ref": "source/SMLib/src/SmFilletRemoval.cpp SmBrep::DeleteFilletFace",
+      "inputs": {
+        "file": "Defeature/defillet.smb",
+        "face": 7
+      }
+    },
+    {
+      "name": "defillet_face8",
+      "upstream_ref": "source/SMLib/src/SmFilletRemoval.cpp SmBrep::DeleteFilletFace",
+      "inputs": {
+        "file": "Defeature/defillet.smb",
+        "face": 8
+      }
+    },
+    {
+      "name": "inset_cube_1x1fillet_face0",
+      "upstream_ref": "source/SMLib/src/SmFilletRemoval.cpp SmBrep::DeleteFilletFace",
+      "inputs": {
+        "file": "Defeature/inset_cube_1x1fillet.smb",
+        "face": 0
+      }
+    },
+    {
+      "name": "inset_cube_1x1fillet_face1",
+      "upstream_ref": "source/SMLib/src/SmFilletRemoval.cpp SmBrep::DeleteFilletFace",
+      "inputs": {
+        "file": "Defeature/inset_cube_1x1fillet.smb",
+        "face": 1
+      }
+    },
+    {
+      "name": "inset_cube_1x1fillet_face2",
+      "upstream_ref": "source/SMLib/src/SmFilletRemoval.cpp SmBrep::DeleteFilletFace",
+      "inputs": {
+        "file": "Defeature/inset_cube_1x1fillet.smb",
+        "face": 2
+      }
+    },
+    {
+      "name": "inset_cube_1x1fillet_face3",
+      "upstream_ref": "source/SMLib/src/SmFilletRemoval.cpp SmBrep::DeleteFilletFace",
+      "inputs": {
+        "file": "Defeature/inset_cube_1x1fillet.smb",
+        "face": 3
+      }
+    },
+    {
+      "name": "inset_cube_1x1fillet_face4",
+      "upstream_ref": "source/SMLib/src/SmFilletRemoval.cpp SmBrep::DeleteFilletFace",
+      "inputs": {
+        "file": "Defeature/inset_cube_1x1fillet.smb",
+        "face": 4
+      }
+    },
+    {
+      "name": "inset_cube_1x1fillet_face5",
+      "upstream_ref": "source/SMLib/src/SmFilletRemoval.cpp SmBrep::DeleteFilletFace",
+      "inputs": {
+        "file": "Defeature/inset_cube_1x1fillet.smb",
+        "face": 5
+      }
+    },
+    {
+      "name": "inset_cube_1x1fillet_face6",
+      "upstream_ref": "source/SMLib/src/SmFilletRemoval.cpp SmBrep::DeleteFilletFace",
+      "inputs": {
+        "file": "Defeature/inset_cube_1x1fillet.smb",
+        "face": 6
+      }
+    },
+    {
+      "name": "inset_cube_1x1fillet_face7",
+      "upstream_ref": "source/SMLib/src/SmFilletRemoval.cpp SmBrep::DeleteFilletFace",
+      "inputs": {
+        "file": "Defeature/inset_cube_1x1fillet.smb",
+        "face": 7
+      }
+    },
+    {
+      "name": "inset_cube_1x1fillet_face8",
+      "upstream_ref": "source/SMLib/src/SmFilletRemoval.cpp SmBrep::DeleteFilletFace",
+      "inputs": {
+        "file": "Defeature/inset_cube_1x1fillet.smb",
+        "face": 8
+      }
+    },
+    {
+      "name": "inset_cube_1x1fillet_face9",
+      "upstream_ref": "source/SMLib/src/SmFilletRemoval.cpp SmBrep::DeleteFilletFace",
+      "inputs": {
+        "file": "Defeature/inset_cube_1x1fillet.smb",
+        "face": 9
+      }
+    },
+    {
+      "name": "inset_cube_1x2fillet_face0",
+      "upstream_ref": "source/SMLib/src/SmFilletRemoval.cpp SmBrep::DeleteFilletFace",
+      "inputs": {
+        "file": "Defeature/inset_cube_1x2fillet.smb",
+        "face": 0
+      }
+    },
+    {
+      "name": "inset_cube_1x2fillet_face1",
+      "upstream_ref": "source/SMLib/src/SmFilletRemoval.cpp SmBrep::DeleteFilletFace",
+      "inputs": {
+        "file": "Defeature/inset_cube_1x2fillet.smb",
+        "face": 1
+      }
+    },
+    {
+      "name": "inset_cube_1x2fillet_face2",
+      "upstream_ref": "source/SMLib/src/SmFilletRemoval.cpp SmBrep::DeleteFilletFace",
+      "inputs": {
+        "file": "Defeature/inset_cube_1x2fillet.smb",
+        "face": 2
+      }
+    },
+    {
+      "name": "inset_cube_1x2fillet_face3",
+      "upstream_ref": "source/SMLib/src/SmFilletRemoval.cpp SmBrep::DeleteFilletFace",
+      "inputs": {
+        "file": "Defeature/inset_cube_1x2fillet.smb",
+        "face": 3
+      }
+    },
+    {
+      "name": "inset_cube_1x2fillet_face4",
+      "upstream_ref": "source/SMLib/src/SmFilletRemoval.cpp SmBrep::DeleteFilletFace",
+      "inputs": {
+        "file": "Defeature/inset_cube_1x2fillet.smb",
+        "face": 4
+      }
+    },
+    {
+      "name": "inset_cube_1x2fillet_face5",
+      "upstream_ref": "source/SMLib/src/SmFilletRemoval.cpp SmBrep::DeleteFilletFace",
+      "inputs": {
+        "file": "Defeature/inset_cube_1x2fillet.smb",
+        "face": 5
+      }
+    },
+    {
+      "name": "inset_cube_1x2fillet_face6",
+      "upstream_ref": "source/SMLib/src/SmFilletRemoval.cpp SmBrep::DeleteFilletFace",
+      "inputs": {
+        "file": "Defeature/inset_cube_1x2fillet.smb",
+        "face": 6
+      }
+    },
+    {
+      "name": "inset_cube_1x2fillet_face7",
+      "upstream_ref": "source/SMLib/src/SmFilletRemoval.cpp SmBrep::DeleteFilletFace",
+      "inputs": {
+        "file": "Defeature/inset_cube_1x2fillet.smb",
+        "face": 7
+      }
+    },
+    {
+      "name": "inset_cube_1x2fillet_face8",
+      "upstream_ref": "source/SMLib/src/SmFilletRemoval.cpp SmBrep::DeleteFilletFace",
+      "inputs": {
+        "file": "Defeature/inset_cube_1x2fillet.smb",
+        "face": 8
+      }
+    },
+    {
+      "name": "inset_cube_1x2fillet_face9",
+      "upstream_ref": "source/SMLib/src/SmFilletRemoval.cpp SmBrep::DeleteFilletFace",
+      "inputs": {
+        "file": "Defeature/inset_cube_1x2fillet.smb",
+        "face": 9
+      }
+    },
+    {
+      "name": "inset_cube_1x2fillet_face10",
+      "upstream_ref": "source/SMLib/src/SmFilletRemoval.cpp SmBrep::DeleteFilletFace",
+      "inputs": {
+        "file": "Defeature/inset_cube_1x2fillet.smb",
+        "face": 10
+      }
+    },
+    {
+      "name": "inset_cube_1x3fillet_face0",
+      "upstream_ref": "source/SMLib/src/SmFilletRemoval.cpp SmBrep::DeleteFilletFace",
+      "inputs": {
+        "file": "Defeature/inset_cube_1x3fillet.smb",
+        "face": 0
+      }
+    },
+    {
+      "name": "inset_cube_1x3fillet_face1",
+      "upstream_ref": "source/SMLib/src/SmFilletRemoval.cpp SmBrep::DeleteFilletFace",
+      "inputs": {
+        "file": "Defeature/inset_cube_1x3fillet.smb",
+        "face": 1
+      }
+    },
+    {
+      "name": "inset_cube_1x3fillet_face2",
+      "upstream_ref": "source/SMLib/src/SmFilletRemoval.cpp SmBrep::DeleteFilletFace",
+      "inputs": {
+        "file": "Defeature/inset_cube_1x3fillet.smb",
+        "face": 2
+      }
+    },
+    {
+      "name": "inset_cube_1x3fillet_face3",
+      "upstream_ref": "source/SMLib/src/SmFilletRemoval.cpp SmBrep::DeleteFilletFace",
+      "inputs": {
+        "file": "Defeature/inset_cube_1x3fillet.smb",
+        "face": 3
+      }
+    },
+    {
+      "name": "inset_cube_1x3fillet_face4",
+      "upstream_ref": "source/SMLib/src/SmFilletRemoval.cpp SmBrep::DeleteFilletFace",
+      "inputs": {
+        "file": "Defeature/inset_cube_1x3fillet.smb",
+        "face": 4
+      }
+    },
+    {
+      "name": "inset_cube_1x3fillet_face5",
+      "upstream_ref": "source/SMLib/src/SmFilletRemoval.cpp SmBrep::DeleteFilletFace",
+      "inputs": {
+        "file": "Defeature/inset_cube_1x3fillet.smb",
+        "face": 5
+      }
+    },
+    {
+      "name": "inset_cube_1x3fillet_face6",
+      "upstream_ref": "source/SMLib/src/SmFilletRemoval.cpp SmBrep::DeleteFilletFace",
+      "inputs": {
+        "file": "Defeature/inset_cube_1x3fillet.smb",
+        "face": 6
+      }
+    },
+    {
+      "name": "inset_cube_1x3fillet_face7",
+      "upstream_ref": "source/SMLib/src/SmFilletRemoval.cpp SmBrep::DeleteFilletFace",
+      "inputs": {
+        "file": "Defeature/inset_cube_1x3fillet.smb",
+        "face": 7
+      }
+    },
+    {
+      "name": "inset_cube_1x3fillet_face8",
+      "upstream_ref": "source/SMLib/src/SmFilletRemoval.cpp SmBrep::DeleteFilletFace",
+      "inputs": {
+        "file": "Defeature/inset_cube_1x3fillet.smb",
+        "face": 8
+      }
+    },
+    {
+      "name": "inset_cube_1x3fillet_face9",
+      "upstream_ref": "source/SMLib/src/SmFilletRemoval.cpp SmBrep::DeleteFilletFace",
+      "inputs": {
+        "file": "Defeature/inset_cube_1x3fillet.smb",
+        "face": 9
+      }
+    },
+    {
+      "name": "inset_cube_1x3fillet_face10",
+      "upstream_ref": "source/SMLib/src/SmFilletRemoval.cpp SmBrep::DeleteFilletFace",
+      "inputs": {
+        "file": "Defeature/inset_cube_1x3fillet.smb",
+        "face": 10
+      }
+    },
+    {
+      "name": "inset_cube_1x3fillet_face11",
+      "upstream_ref": "source/SMLib/src/SmFilletRemoval.cpp SmBrep::DeleteFilletFace",
+      "inputs": {
+        "file": "Defeature/inset_cube_1x3fillet.smb",
+        "face": 11
+      }
+    },
+    {
+      "name": "inset_cube_3x1fillet_face0",
+      "upstream_ref": "source/SMLib/src/SmFilletRemoval.cpp SmBrep::DeleteFilletFace",
+      "inputs": {
+        "file": "Defeature/inset_cube_3x1fillet.smb",
+        "face": 0
+      }
+    },
+    {
+      "name": "inset_cube_3x1fillet_face1",
+      "upstream_ref": "source/SMLib/src/SmFilletRemoval.cpp SmBrep::DeleteFilletFace",
+      "inputs": {
+        "file": "Defeature/inset_cube_3x1fillet.smb",
+        "face": 1
+      }
+    },
+    {
+      "name": "inset_cube_3x1fillet_face2",
+      "upstream_ref": "source/SMLib/src/SmFilletRemoval.cpp SmBrep::DeleteFilletFace",
+      "inputs": {
+        "file": "Defeature/inset_cube_3x1fillet.smb",
+        "face": 2
+      }
+    },
+    {
+      "name": "inset_cube_3x1fillet_face3",
+      "upstream_ref": "source/SMLib/src/SmFilletRemoval.cpp SmBrep::DeleteFilletFace",
+      "inputs": {
+        "file": "Defeature/inset_cube_3x1fillet.smb",
+        "face": 3
+      }
+    },
+    {
+      "name": "inset_cube_3x1fillet_face4",
+      "upstream_ref": "source/SMLib/src/SmFilletRemoval.cpp SmBrep::DeleteFilletFace",
+      "inputs": {
+        "file": "Defeature/inset_cube_3x1fillet.smb",
+        "face": 4
+      }
+    },
+    {
+      "name": "inset_cube_3x1fillet_face5",
+      "upstream_ref": "source/SMLib/src/SmFilletRemoval.cpp SmBrep::DeleteFilletFace",
+      "inputs": {
+        "file": "Defeature/inset_cube_3x1fillet.smb",
+        "face": 5
+      }
+    },
+    {
+      "name": "inset_cube_3x1fillet_face6",
+      "upstream_ref": "source/SMLib/src/SmFilletRemoval.cpp SmBrep::DeleteFilletFace",
+      "inputs": {
+        "file": "Defeature/inset_cube_3x1fillet.smb",
+        "face": 6
+      }
+    },
+    {
+      "name": "inset_cube_3x1fillet_face7",
+      "upstream_ref": "source/SMLib/src/SmFilletRemoval.cpp SmBrep::DeleteFilletFace",
+      "inputs": {
+        "file": "Defeature/inset_cube_3x1fillet.smb",
+        "face": 7
+      }
+    },
+    {
+      "name": "inset_cube_3x1fillet_face8",
+      "upstream_ref": "source/SMLib/src/SmFilletRemoval.cpp SmBrep::DeleteFilletFace",
+      "inputs": {
+        "file": "Defeature/inset_cube_3x1fillet.smb",
+        "face": 8
+      }
+    },
+    {
+      "name": "inset_cube_3x1fillet_face9",
+      "upstream_ref": "source/SMLib/src/SmFilletRemoval.cpp SmBrep::DeleteFilletFace",
+      "inputs": {
+        "file": "Defeature/inset_cube_3x1fillet.smb",
+        "face": 9
+      }
+    },
+    {
+      "name": "inset_cube_3x1fillet_face10",
+      "upstream_ref": "source/SMLib/src/SmFilletRemoval.cpp SmBrep::DeleteFilletFace",
+      "inputs": {
+        "file": "Defeature/inset_cube_3x1fillet.smb",
+        "face": 10
+      }
+    },
+    {
+      "name": "inset_cube_3x1fillet_face11",
+      "upstream_ref": "source/SMLib/src/SmFilletRemoval.cpp SmBrep::DeleteFilletFace",
+      "inputs": {
+        "file": "Defeature/inset_cube_3x1fillet.smb",
+        "face": 11
+      }
+    }
+  ]
+}

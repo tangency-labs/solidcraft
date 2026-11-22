@@ -1,0 +1,301 @@
+{
+ "cases": [
+  {
+   "name": "cov_arc_length_back_through_cusp_off_start",
+   "upstream_ref": "source/SMLib/src/SmCurve.cpp:4113 (coverage: crates/solidcore/src/curve/curve/p3.rs:619)",
+   "inputs": {
+    "op": "arc_length",
+    "curve": {
+     "bspline": {
+      "dim": 3,
+      "cpts": [
+       [
+        0,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        1,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        1,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        0,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 3,
+      "u": [
+       0,
+       0,
+       0,
+       0,
+       1,
+       1,
+       1,
+       1
+      ]
+     }
+    },
+    "start": 0.51,
+    "len": -0.01
+   }
+  },
+  {
+   "name": "cov_arc_length_zigzag_off_end",
+   "upstream_ref": "source/SMLib/src/SmCurve.cpp:4121 (coverage: crates/solidcore/src/curve/curve/p3.rs:629)",
+   "inputs": {
+    "op": "arc_length",
+    "curve": {
+     "bspline": {
+      "dim": 3,
+      "cpts": [
+       [
+        0,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        1,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        1,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        0,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        0,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        1,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        1,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 3,
+      "u": [
+       0,
+       0,
+       0,
+       0,
+       0.3,
+       0.6,
+       0.9,
+       1,
+       1,
+       1,
+       1
+      ]
+     }
+    },
+    "start": 0.48,
+    "len": 0.5
+   }
+  },
+  {
+   "name": "cov_arc_length_zigzag_damped",
+   "upstream_ref": "source/SMLib/src/SmCurve.cpp:4132 (coverage: crates/solidcore/src/curve/curve/p3.rs:635)",
+   "inputs": {
+    "op": "arc_length",
+    "curve": {
+     "bspline": {
+      "dim": 3,
+      "cpts": [
+       [
+        0,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        1,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        1,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        0,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        0,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        1,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        1,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 3,
+      "u": [
+       0,
+       0,
+       0,
+       0,
+       0.3,
+       0.6,
+       0.9,
+       1,
+       1,
+       1,
+       1
+      ]
+     }
+    },
+    "start": 0.7,
+    "len": 0.01
+   }
+  },
+  {
+   "name": "cov_arc_length_large_curve_no_movement",
+   "upstream_ref": "source/SMLib/src/SmCurve.cpp:4096 (coverage: crates/solidcore/src/curve/curve/p3.rs:603)",
+   "inputs": {
+    "op": "arc_length",
+    "curve": {
+     "bspline": {
+      "dim": 3,
+      "cpts": [
+       [
+        0,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        10000.0,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        10000.0,
+        10000.0,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        20000.0,
+        3000.0,
+        0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 3,
+      "u": [
+       0,
+       0,
+       0,
+       0,
+       1,
+       1,
+       1,
+       1
+      ]
+     }
+    },
+    "start": 0.37,
+    "len": 0.5
+   }
+  },
+  {
+   "name": "cov_arc_length_huge_curve_no_movement_from_start",
+   "upstream_ref": "source/SMLib/src/SmCurve.cpp:4096 (coverage: crates/solidcore/src/curve/curve/p3.rs:603)",
+   "inputs": {
+    "op": "arc_length",
+    "curve": {
+     "bspline": {
+      "dim": 3,
+      "cpts": [
+       [
+        0,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        100000.0,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        100000.0,
+        100000.0,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        200000.0,
+        30000.0,
+        0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 3,
+      "u": [
+       0,
+       0,
+       0,
+       0,
+       1,
+       1,
+       1,
+       1
+      ]
+     }
+    },
+    "start": 0.0,
+    "len": 0.5
+   }
+  }
+ ]
+}

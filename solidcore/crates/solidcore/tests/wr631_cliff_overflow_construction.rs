@@ -1,0 +1,348 @@
+//! WR-631 / WR-638 (#960; the fork's tangency-labs/smlib@8ba4667 and ae2a6de, rev 68fb9162):
+//! a convex blend whose rail leaves its face across a cliff is built on the faces'
+//! continuations and trimmed at its creases with the body (WR-695; the fork's closing and
+//! subtraction of the removed region went with `fillet_overflow_trim_at_creases`).
+//!
+//! Every expected volume is the body less the blend's corner region clipped to the body, in
+//! closed form: for a round of radius r on an edge between two perpendicular faces w and h
+//! wide, the section removed is `{0 <= u <= min(w, r), 0 <= v <= min(h, r)}` outside the
+//! circle of radius r about `(r, r)`.
+
+#![allow(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    clippy::panic,
+    clippy::indexing_slicing,
+    clippy::cast_precision_loss
+)]
+
+use solidcore::blend::fillet_executive::session::FilletSession;
+use solidcore::blend::fillet_geom::p1::FilletErrorType;
+use solidcore::blend::fillet_standard_solver::p1::FilletLaw;
+use solidcore::boolean::api_brep::boolean_difference;
+use solidcore::curve::curve::Curve;
+use solidcore::geom::attribute::{AttributeStore, ObjectKey};
+use solidcore::mass::integrator::properties::{brep_volume, PropertyAttributes};
+use solidcore::math::{Point3, Vec3};
+use solidcore::primitive::api_curves::create_line_segment;
+use solidcore::primitive::api_primitives::{create_box, create_cylinder};
+use solidcore::sweep::api_brep::create_linear_sweep;
+use solidcore::topology::brep::p2::is_manifold_solid;
+use solidcore::topology::{edge, EdgeId};
+use solidcore::{Brep, Kernel};
+
+fn kernel() -> Kernel {
+    let mut k = Kernel::default();
+    k.fixes.fillet_trace_reaches_rails = true;
+    k
+}
+
+fn volume(k: &Kernel, b: &mut Brep) -> f64 {
+    let store = AttributeStore::default();
+    let attrs = PropertyAttributes {
+        store: &store,
+        key_of: &|_| ObjectKey(0),
+    };
+    brep_volume(k, b, 1e-10, &attrs).unwrap()
+}
+
+/// The area of the section a round of radius `r` removes between faces `w` and `h` wide
+/// (perpendicular), in closed form.
+fn removed_area(r: f64, w: f64, h: f64) -> f64 {
+    let a = w.min(r);
+    let f = |s: f64| s / 2.0 * (r * r - s * s).max(0.0).sqrt() + r * r / 2.0 * (s / r).asin();
+    let u_h = if h >= r {
+        0.0
+    } else {
+        r - (r * r - (r - h) * (r - h)).sqrt()
+    };
+    let mut area = if h < r { h * u_h.min(a) } else { 0.0 };
+    if a > u_h {
+        area += r * (a - u_h) - (f(r - u_h) - f(r - a));
+    }
+    area
+}
+
+/// The edge from `p` to `q` (either way).
+fn edge_between(k: &Kernel, b: &Brep, p: Point3, q: Point3) -> EdgeId {
+    b.edges()
+        .ids()
+        .find(|&e| {
+            let ivl = edge::interval(b, e).unwrap();
+            let c = edge::curve(b, e).unwrap().unwrap();
+            let s = c.evaluate_point(k, ivl.min()).unwrap();
+            let t = c.evaluate_point(k, ivl.max()).unwrap();
+            (s.distance(p) < 1e-9 && t.distance(q) < 1e-9)
+                || (s.distance(q) < 1e-9 && t.distance(p) < 1e-9)
+        })
+        .expect("edge")
+}
+
+/// The outcome of a blend: the error code and comment of a refusal, or the volume of the
+/// result (a manifold solid).
+#[derive(Debug)]
+enum Outcome {
+    Built(f64),
+    Refused(i32, String),
+}
+
+/// Rounds (`chamfer` false: circular section; true: linear) the edge from `p` to `q` of
+/// the body `make` builds, by `r`.
+fn blend(make: fn(&mut Kernel) -> Brep, p: Point3, q: Point3, r: f64, chamfer: bool) -> Outcome {
+    let mut k = kernel();
+    let mut b = make(&mut k);
+    let e = edge_between(&k, &b, p, q);
+    let mut session = FilletSession::new(&mut k, &mut b).unwrap();
+    session
+        .prepare_constant_radius_edges(&mut k, &[e], r, u32::from(!chamfer), 1, 1.0)
+        .unwrap();
+    let result = session.do_fillet(&mut k);
+    let info = session.error_info().clone();
+    drop(session);
+    match result {
+        Ok(()) => {
+            assert!(
+                is_manifold_solid(&b).unwrap(),
+                "r {r}: not a manifold solid"
+            );
+            Outcome::Built(volume(&k, &mut b))
+        }
+        Err(_) => Outcome::Refused(info.code, info.comment),
+    }
+}
+
+fn assert_builds(outcome: &Outcome, expected: f64, rel: f64) {
+    let Outcome::Built(v) = outcome else {
+        panic!("expected a build at {expected}, got {outcome:?}");
+    };
+    assert!(
+        (v - expected).abs() <= rel * expected,
+        "volume {v} against {expected} (rel {})",
+        (v - expected).abs() / expected
+    );
+}
+
+fn p(x: f64, y: f64, z: f64) -> Point3 {
+    Point3::new(x, y, z)
+}
+
+/// The stepped bar of `wr631_cliff_overflow_choice`: its profile
+/// `(0,0) (10,0) (10,5) (7,5) (7,10) (0,10)` swept 20 along z.
+fn stepped_bar(k: &mut Kernel) -> Brep {
+    const PROFILE: [[f64; 2]; 6] = [
+        [0.0, 0.0],
+        [10.0, 0.0],
+        [10.0, 5.0],
+        [7.0, 5.0],
+        [7.0, 10.0],
+        [0.0, 10.0],
+    ];
+    let cs: Vec<Curve> = PROFILE
+        .iter()
+        .zip(PROFILE.iter().cycle().skip(1))
+        .map(|(a, b)| {
+            Curve::from(
+                create_line_segment(Vec3::new(a[0], a[1], 0.0), Vec3::new(b[0], b[1], 0.0))
+                    .unwrap(),
+            )
+        })
+        .collect();
+    let refs: Vec<Option<&Curve>> = cs.iter().map(Some).collect();
+    create_linear_sweep(k, &refs, Vec3::new(0.0, 0.0, 1.0), 20.0, true).unwrap()
+}
+
+/// An 80 x 5 x 5 bar (#1466).
+fn bar(k: &mut Kernel) -> Brep {
+    create_box(k, Point3::ZERO, 80.0, 5.0, 5.0).unwrap()
+}
+
+/// A 40 x 20 x 10 box (#1467).
+fn box_40_20_10(k: &mut Kernel) -> Brep {
+    create_box(k, Point3::ZERO, 40.0, 20.0, 10.0).unwrap()
+}
+
+#[test]
+fn a_round_over_a_step_rim_is_trimmed() {
+    // r6 at (10, 0): the rail on the 5 high side runs past the step's rim
+    let expected = 1700.0 - 20.0 * removed_area(6.0, 10.0, 5.0);
+    let (a, b) = (p(10.0, 0.0, 0.0), p(10.0, 0.0, 20.0));
+    assert_builds(&blend(stepped_bar, a, b, 6.0, false), expected, 1e-8);
+}
+
+#[test]
+fn a_chamfer_into_a_wall_foot_is_trimmed() {
+    // chamfer 4 at (10, 5): it reaches x = 6 on the 3 wide step, past the wall's foot; the
+    // triangle it removes lies inside the body
+    let (a, b) = (p(10.0, 5.0, 0.0), p(10.0, 5.0, 20.0));
+    assert_builds(
+        &blend(stepped_bar, a, b, 4.0, true),
+        1700.0 - 20.0 * 8.0,
+        1e-9,
+    );
+}
+
+#[test]
+fn a_round_wider_than_a_bar_is_trimmed() {
+    // #1466: the long top edge of an 80 x 5 x 5 bar; r9 and r10 run past both faces
+    let (a, b) = (p(0.0, 5.0, 5.0), p(80.0, 5.0, 5.0));
+    for r in [9.0, 10.0, 12.0] {
+        let expected = 80.0 * 25.0 - 80.0 * removed_area(r, 5.0, 5.0);
+        assert_builds(&blend(bar, a, b, r, false), expected, 1e-8);
+    }
+}
+
+#[test]
+fn a_round_just_past_a_box_side_is_trimmed() {
+    // #1467: the top edge of the 40 x 20 x 10 box on its 10 high face, r just over 10 (the
+    // radii of the fork's test)
+    let (a, b) = (p(0.0, 20.0, 10.0), p(40.0, 20.0, 10.0));
+    for r in [10.05, 10.07, 12.0] {
+        let expected = 8000.0 - 40.0 * removed_area(r, 20.0, 10.0);
+        assert_builds(&blend(box_40_20_10, a, b, r, false), expected, 1e-8);
+    }
+}
+
+/// A 40 x 20 x 10 block with a through hole of radius 3 at (20, 14.5) (#422, SolidCraft
+/// rig 324, `fixtures/solidcraft/324-round-beside-through-hole.json`).
+fn block_with_hole(k: &mut Kernel) -> Brep {
+    let block = create_box(k, Point3::ZERO, 40.0, 20.0, 10.0).unwrap();
+    let drill = create_cylinder(k, p(20.0, 14.5, -1.0), 3.0, 12.0).unwrap();
+    boolean_difference(k, block, drill).unwrap()
+}
+
+#[test]
+fn a_round_over_a_hole_is_trimmed() {
+    // #422: R4 on the top edge at y = 20; its rail on the top face runs into the hole, whose
+    // rim is a cliff. The block less the hole and the round's corner, plus the part of that
+    // corner inside the hole: O = int_16^17.5 2 sqrt(9 - (y - 14.5)^2) (4 - sqrt(16 - (y -
+    // 16)^2)) dy = 0.3758296360 (the fixture's formula, its value)
+    let (a, b) = (p(0.0, 20.0, 10.0), p(40.0, 20.0, 10.0));
+    let expected = 7580.287315387334;
+    assert_builds(&blend(block_with_hole, a, b, 4.0, false), expected, 1e-8);
+}
+
+/// The 10 x 20 x 30 box of `wr609_trace_reaches_rails`; its top edge at x = 0 is 20 long,
+/// the top face 10 wide, the side 30 high.
+fn box_10_20_30(k: &mut Kernel) -> Brep {
+    create_box(k, Point3::ZERO, 10.0, 20.0, 30.0).unwrap()
+}
+
+#[test]
+fn a_constant_round_past_a_box_top_is_trimmed() {
+    // R12: the rail on the 10 wide top runs past its far edge (the fork's 5384.17828518)
+    let (a, b) = (p(0.0, 0.0, 30.0), p(0.0, 20.0, 30.0));
+    let expected = 6000.0 - 20.0 * removed_area(12.0, 10.0, 30.0);
+    assert!((expected - 5384.17828518).abs() < 1e-8);
+    assert_builds(&blend(box_10_20_30, a, b, 12.0, false), expected, 1e-8);
+}
+
+/// The variable round from `r0` to `r1` (linear) of the box's top edge at x = 0.
+fn variable_round(r0: f64, r1: f64) -> Outcome {
+    let mut k = kernel();
+    let mut b = box_10_20_30(&mut k);
+    let e = edge_between(&k, &b, p(0.0, 0.0, 30.0), p(0.0, 20.0, 30.0));
+    let mut session = FilletSession::new(&mut k, &mut b).unwrap();
+    session
+        .prepare_variable_radius_edges(&mut k, &[e], r0, FilletLaw::linear(r0, r1, None), 1, 1)
+        .unwrap();
+    let result = session.do_fillet(&mut k);
+    let info = session.error_info().clone();
+    drop(session);
+    match result {
+        Ok(()) => {
+            assert!(is_manifold_solid(&b).unwrap(), "not a manifold solid");
+            Outcome::Built(volume(&k, &mut b))
+        }
+        Err(_) => Outcome::Refused(info.code, info.comment),
+    }
+}
+
+#[test]
+fn a_variable_round_past_a_box_top_is_trimmed() {
+    // The round is the union of its balls (WR-685), here the balls' cone: the box less the corner
+    // between the planes and the cone, cut by the 10 wide top's far face and the box's bottom, by
+    // Gauss-Legendre quadrature of each plane across the edge (5 and 10 panels along it agree to
+    // 1e-9; 2 -> 11 is `wr685_variable_round_touch_circle`'s `CLIFF_2_11_VOLUME` within its 1e-5),
+    // from either end, to 1e-7. Upstream's approximated arcs (the fork's
+    // d01d7b0) kept up to 0.12 less (2 -> 50: 4693.48804); its great circles took off up to 1147
+    // more (3546.18768).
+    for (r1, closed) in [
+        (11.0, 5_802.443_145_423),
+        (20.0, 5_503.887_121_531),
+        (30.0, 5_184.057_273_581),
+        (50.0, 4_693.608_889_860),
+    ] {
+        assert_builds(&variable_round(2.0, r1), closed, 1e-7);
+        assert_builds(&variable_round(r1, 2.0), closed, 1e-7);
+    }
+}
+
+/// The 40 x 20 x 10 box with its x = 0 end cut concave by a vertical cylinder of radius 30
+/// about (-25, 10): the top edge at y = 20 ends on that cylinder.
+fn box_with_round_end(k: &mut Kernel) -> Brep {
+    let block = create_box(k, Point3::ZERO, 40.0, 20.0, 10.0).unwrap();
+    let cutter = create_cylinder(k, p(-25.0, 10.0, -1.0), 30.0, 12.0).unwrap();
+    boolean_difference(k, block, cutter).unwrap()
+}
+
+#[test]
+fn an_overflow_the_construction_cannot_cut_reports_its_own_error() {
+    // WR-638 (ae2a6de): R12 on the top edge at y = 20 runs past the 10 high side; at the
+    // cylinder end its rails miss their side edges, and the end face that would cut the
+    // fillet off there is not planar. The refusal is the construction's own, not the generic
+    // "larger than the faces".
+    let x0 = -25.0 + 800.0f64.sqrt();
+    let (a, b) = (p(x0, 20.0, 10.0), p(40.0, 20.0, 10.0));
+    let Outcome::Refused(code, comment) = blend(box_with_round_end, a, b, 12.0, false) else {
+        panic!("expected a refusal");
+    };
+    assert_eq!(code, FilletErrorType::NoRoom as i32);
+    assert_eq!(
+        comment,
+        "Fillet Error: a cliff overflow runs past a fillet end whose end face is not planar"
+    );
+}
+
+#[test]
+fn a_cliff_overflow_is_deterministic() {
+    let (a, b) = (p(10.0, 0.0, 0.0), p(10.0, 0.0, 20.0));
+    let runs: Vec<f64> = (0..2)
+        .map(|_| match blend(stepped_bar, a, b, 6.0, false) {
+            Outcome::Built(v) => v,
+            other @ Outcome::Refused(..) => panic!("{other:?}"),
+        })
+        .collect();
+    assert_eq!(runs[0].to_bits(), runs[1].to_bits());
+}
+
+#[test]
+fn a_round_a_hair_past_its_wall_builds_its_closed_form() {
+    // #1467's box at r10.01 and r10.02: the round's face meets the bottom face a hair (2e-5
+    // at r10.02) from its edge. The removed subtraction's Boolean could leave an empty or
+    // open body there, and the blend was then refused (`CliffSubtractionLeavesNoSolid`); the
+    // trim at creases builds the round, a manifold solid with the closed-form volume.
+    let (a, b) = (p(0.0, 20.0, 10.0), p(40.0, 20.0, 10.0));
+    for r in [10.01, 10.02] {
+        let mut k = kernel();
+        let mut body = box_40_20_10(&mut k);
+        let e = edge_between(&k, &body, a, b);
+        let mut session = FilletSession::new(&mut k, &mut body).unwrap();
+        session
+            .prepare_constant_radius_edges(&mut k, &[e], r, 1, 1, 1.0)
+            .unwrap();
+        let result = session.do_fillet(&mut k);
+        let info = session.error_info().clone();
+        drop(session);
+        assert!(result.is_ok(), "r {r}: refused: {info:?}");
+        assert!(
+            is_manifold_solid(&body).unwrap(),
+            "r {r}: built a body that is not a manifold solid"
+        );
+        let expected = 8000.0 - 40.0 * removed_area(r, 20.0, 10.0);
+        let v = volume(&k, &mut body);
+        assert!(
+            (v - expected).abs() <= 1e-8 * expected,
+            "r {r}: {v} against {expected}"
+        );
+    }
+}

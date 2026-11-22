@@ -1,0 +1,49 @@
+{
+ "cases": [
+  {
+   "name": "box_1e6_size_1e_6_refused",
+   "note": "Constructor status (both sides refuse; compared as a status): SmApiCreateBox of a 1e-6 cube at the origin. It was the setup of offset.offset_executive_p2 review_box_*_selected, which now runs just inside the limit.",
+   "inputs": {
+    "op": "box",
+    "args": [
+     0,
+     0,
+     0,
+     1e-06,
+     1e-06,
+     1e-06
+    ]
+   }
+  },
+  {
+   "name": "box_size_1e_5_refused",
+   "note": "Constructor status (both sides refuse; compared as a status): SmApiCreateBox of a 1e-5 cube at the origin (3e-5 builds). It was the setup of offset.offset_executive_p2 review_box_smallest_buildable_*, which now runs just inside the limit.",
+   "inputs": {
+    "op": "box",
+    "args": [
+     0,
+     0,
+     0,
+     1e-05,
+     1e-05,
+     1e-05
+    ]
+   }
+  },
+  {
+   "name": "box_at_1e6_size_1e_3_refused",
+   "note": "Constructor status (both sides refuse; compared as a status): SmApiCreateBox of a 1e-3 cube at (1e6, 1e6, 1e6) (3e-3 builds). It was the setup of offset.offset_executive_p2 review_box_*translated*_selected, which now runs just inside the limit.",
+   "inputs": {
+    "op": "box",
+    "args": [
+     1000000.0,
+     1000000.0,
+     1000000.0,
+     0.001,
+     0.001,
+     0.001
+    ]
+   }
+  }
+ ]
+}

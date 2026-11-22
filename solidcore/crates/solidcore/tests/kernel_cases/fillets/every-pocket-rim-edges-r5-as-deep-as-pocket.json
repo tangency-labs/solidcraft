@@ -1,0 +1,226 @@
+{
+  "area": "fillets",
+  "bodies": {
+    "b12": {
+      "keeping_splines": false,
+      "trusted": true
+    }
+  },
+  "calls": [
+    {
+      "inputs": [
+        "b12"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b13"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b13"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b14"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b14"
+      ],
+      "op": "tagged",
+      "outputs": [
+        "b15"
+      ],
+      "params": {
+        "operand": 0
+      }
+    },
+    {
+      "inputs": [
+        "b15"
+      ],
+      "op": "blend_dropping",
+      "outputs": [
+        "b16"
+      ],
+      "params": {
+        "edges": {
+          "kind": "edge",
+          "picked": [
+            {
+              "at": [
+                [
+                  15.0,
+                  10.0,
+                  10.0
+                ],
+                [
+                  45.0,
+                  10.0,
+                  10.0
+                ]
+              ],
+              "index": 5
+            },
+            {
+              "at": [
+                [
+                  45.0,
+                  30.0,
+                  10.0
+                ],
+                [
+                  15.0,
+                  30.0,
+                  10.0
+                ]
+              ],
+              "index": 7
+            },
+            {
+              "at": [
+                [
+                  15.0,
+                  30.0,
+                  10.0
+                ],
+                [
+                  15.0,
+                  10.0,
+                  10.0
+                ]
+              ],
+              "index": 6
+            },
+            {
+              "at": [
+                [
+                  45.0,
+                  10.0,
+                  10.0
+                ],
+                [
+                  45.0,
+                  30.0,
+                  10.0
+                ]
+              ],
+              "index": 4
+            }
+          ],
+          "points": [
+            [
+              30.0,
+              10.0,
+              10.0
+            ],
+            [
+              30.0,
+              30.0,
+              10.0
+            ],
+            [
+              15.0,
+              20.0,
+              10.0
+            ],
+            [
+              45.0,
+              20.0,
+              10.0
+            ]
+          ],
+          "tolerance": 3.6410549446402594
+        },
+        "kind": "round",
+        "sizes": [
+          5.0,
+          5.0,
+          5.0,
+          5.0
+        ]
+      }
+    }
+  ],
+  "case": "every-pocket-rim-edges-r5-as-deep-as-pocket",
+  "expected": {
+    "bbox": {
+      "max": [
+        60,
+        40,
+        10
+      ],
+      "min": [
+        0,
+        0,
+        0
+      ]
+    },
+    "body_count": 1,
+    "continuity": {
+      "order": "g1"
+    },
+    "faces": 11,
+    "method": "plate 60x40x10 with the pocket 30x20x5 (x 15..45, y 10..30, floor z = 5, sharp vertical corners): V0 = 24000 - 3000 = 21000. As every-pocket-rim-edges-r2 with r = 5, the wall's height: each round reaches the floor tangent to the wall exactly at the floor edge, so the walls are used up (a round may use up a face). Removed = 100 (1-pi/4) 25 + 4 * 125 (5/3-pi/2) = 584.4398. V = 20415.5602. Faces 11 - 4 walls + 4 rounds = 11.",
+    "source": "analytic",
+    "sources": [],
+    "volume_mm3": 20415.560238557737,
+    "what": "a 5 mm deep pocket's rim edges rounded r5: the rounds use up the walls and meet the floor where the walls met it"
+  },
+  "expressible": false,
+  "operation_expressible": true,
+  "outcome": {
+    "ran": true,
+    "raw_counts": {
+      "edges": 24,
+      "faces": 11,
+      "vertices": 16
+    }
+  },
+  "records": "every-pocket-rim-edges-r5-as-deep-as-pocket.bodies.json.gz",
+  "result": [
+    {
+      "body": "Plate",
+      "made": "b16"
+    }
+  ],
+  "rig": {
+    "error": null,
+    "known_failing": null,
+    "measured": {
+      "area_mm2": 7099.557428762131,
+      "body_count": 1,
+      "edges": 24,
+      "faces": 11,
+      "vertices": 16,
+      "volume_mm3": 20415.56023877799
+    },
+    "refused_with": null,
+    "status": "pass"
+  },
+  "sources": [],
+  "traced_ops": [
+    "extrude",
+    "extrude",
+    "copy",
+    "copy",
+    "copy",
+    "copy",
+    "tagged",
+    "tagged",
+    "boolean",
+    "copy",
+    "copy",
+    "tagged",
+    "blend_dropping"
+  ],
+  "ungraded": [
+    "continuity: SolidCraft computes it"
+  ],
+  "what": "a 5 mm deep pocket's rim edges rounded r5: the rounds use up the walls and meet the floor where the walls met it",
+  "why_not": []
+}

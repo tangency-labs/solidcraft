@@ -8,7 +8,7 @@
 
 use serde_json::{Map, Value};
 
-use crate::i18n::{format as trf, tr, tr_label};
+use solidcraft_ui_text::{format as trf, tr, tr_command};
 
 /// Steps of a batch named before "and N more".
 const MAX_STEPS: usize = 4;
@@ -270,7 +270,7 @@ fn plural((one, other): (&str, &str), count: usize) -> String {
 
 /// A command's label in the interface language.
 fn label(id: &str) -> Option<&'static str> {
-    solidcraft_engine::find_command(id).map(|c| tr_label(c.label))
+    solidcraft_engine::find_command(id).map(|c| tr_command(c.id, c.label))
 }
 
 /// A file's name without its folders; `None` for a temporary file (the agent's scratch, not

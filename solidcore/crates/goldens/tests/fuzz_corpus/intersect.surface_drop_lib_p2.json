@@ -1,0 +1,6 @@
+{
+  "unit": "intersect.surface_drop_lib_p2",
+  "cases": [
+    {"name": "fuzz00210_chain_of_9223372036854775807_spans_exceeds_20000", "origin": "fuzz-out/n2000/intersect.surface_drop_lib_p2/fuzz00210.json (panic: cpp runner: capacity overflow)", "cpp": "harness: chain of 9223372036854775807 spans exceeds 20000", "rust": "harness: chain of 9223372036854775807 spans exceeds 20000", "inputs": {"flush": true, "n": 9223372036854775807, "op": "chain"}}
+  ]
+}

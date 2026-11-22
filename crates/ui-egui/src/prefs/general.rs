@@ -14,21 +14,21 @@ pub(super) fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
                         ui_kit::dropdown_menu(
                             ui,
                             "pref_language",
-                            &if app.preferences.language == crate::i18n::SYSTEM {
+                            &if app.preferences.language == solidcraft_ui_text::SYSTEM {
                                 app.tr("prefs.language_system").to_owned()
                             } else {
-                                crate::i18n::Locale::for_language(&app.preferences.language).display_name().into_owned()
+                                solidcraft_ui_text::Locale::for_language(&app.preferences.language).display_name().into_owned()
                             },
                             |ui| {
                                 if ui_kit::list_picker(
                                     ui,
-                                    crate::i18n::SYSTEM,
+                                    solidcraft_ui_text::SYSTEM,
                                     app.tr("prefs.language_system"),
-                                    app.preferences.language == crate::i18n::SYSTEM,
+                                    app.preferences.language == solidcraft_ui_text::SYSTEM,
                                 )
                                 .clicked()
                                 {
-                                    app.preferences.language = crate::i18n::SYSTEM.into();
+                                    app.preferences.language = solidcraft_ui_text::SYSTEM.into();
                                 }
                                 for locale in crate::i18n::LOCALES {
                                     if ui_kit::list_picker(ui, locale.id, &locale.display_name(), app.preferences.language == locale.id).clicked() {
@@ -41,10 +41,41 @@ pub(super) fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
                 });
             });
         });
+        ui_kit::settings_section(ui, "startup", app.tr("ui.on_startup"), |ui| {
+            ui_kit::settings_form(ui, labels, |ui| {
+                ui_kit::row(ui, app.tr("ui.on_startup"), |ui| {
+                    let selected = app.tr(if app.preferences.show_home_on_startup { "ui.home" } else { "ui.new_design" }).to_string();
+                    let choice = ui_kit::dropdown_menu(ui, "pref_startup", &selected, |ui| {
+                        for (home, key) in [(true, "ui.home"), (false, "ui.new_design")] {
+                            let response = ui_kit::list_picker(ui, key, solidcraft_ui_text::tr(key), app.preferences.show_home_on_startup == home);
+                            crate::scenario::publish_rect(if home { "prefs:startup_home" } else { "prefs:startup_design" }, response.rect);
+                            if response.clicked() {
+                                app.preferences.show_home_on_startup = home;
+                                ui.close();
+                            }
+                        }
+                    });
+                    crate::scenario::publish_rect("prefs:startup", choice.rect);
+                });
+                ui_kit::text(ui, app.tr("ui.on_startup_note"), ui_kit::Text::Note("startup"));
+            });
+        });
         ui_kit::settings_section(ui, "saving", app.tr("prefs.saving"), |ui| {
             ui_kit::checkbox(ui, app.tr("Reopen the designs that were open when SolidCraft was last closed"), &mut app.preferences.reopen_designs);
+            // Only the web app keeps designs in the browser (#10220).
+            if app.services.browser_files.is_some() {
+                let tip = app.tr("prefs.keep_unsaved_in_browser_tip").to_string();
+                ui_kit::checkbox(ui, app.tr("prefs.keep_unsaved_in_browser"), &mut app.preferences.keep_unsaved_in_browser)
+                    .backing_on_hover_text(tip);
+                if app.preferences.keep_unsaved_in_browser {
+                    let tip = app.tr("prefs.keep_unsaved_also_asks_tip").to_string();
+                    ui_kit::checkbox(ui, app.tr("prefs.keep_unsaved_also_asks"), &mut app.preferences.keep_unsaved_also_asks)
+                        .backing_on_hover_text(tip);
+                }
+            }
+            setting::save_prompt_one_at_a_time(app, ui).on_hover_text(app.tr("prefs.save_prompt_one_at_a_time_help"));
             ui_kit::settings_form(ui, labels, |ui| {
-                let shown = ui_kit::settings_row_help(ui, app.tr("ui.autosave_every"), crate::i18n::tr_label("0 turns it off"), |ui| {
+                let shown = ui_kit::settings_row_help(ui, app.tr("ui.autosave_every"), solidcraft_ui_text::tr_label("0 turns it off"), |ui| {
                     let number = ui_kit::settings_number(ui, &mut app.autosave_minutes, 0.0..=120.0, 0.5);
                     number.widget_info(|| {
                         let mut info = egui::WidgetInfo::drag_value(ui.is_enabled(), app.autosave_minutes);
@@ -60,7 +91,7 @@ pub(super) fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
                 });
                 if shown {
                     ui_kit::below_row_control(ui, app.tr("ui.autosave_every"), t.space_24 * 10.0 + t.space_16 + t.space_4, |ui| {
-                        ui_kit::settings_autosave_timeline(ui, app.autosave_minutes)
+                        super::figures::autosave_timeline(ui, app.autosave_minutes)
                     });
                 }
             });
@@ -100,11 +131,29 @@ pub(super) fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
                     app.preferences.network_hosts.remove(i);
                 }
             }
+            link_folders(app, ui);
             ui.horizontal(|ui| {
                 let (single, tip) = (app.tr("ui.slicer_single_instance").to_string(), app.tr("ui.slicer_single_instance_tip").to_string());
                 let width = (ui.available_width() - t.space_16 - ui.spacing().item_spacing.x).max(0.0);
                 ui.allocate_ui_with_layout(egui::vec2(width, t.control_height), egui::Layout::left_to_right(egui::Align::Center), |ui| {
                     ui_kit::checkbox(ui, &single, &mut app.preferences.slicer_single_instance).backing_on_hover_text(&tip);
+                });
+                ui_kit::help_icon(ui, &tip);
+            });
+            ui.horizontal(|ui| {
+                let (only, tip) = (app.tr("ui.export_selects_only_body").to_string(), app.tr("ui.export_selects_only_body_tip").to_string());
+                let width = (ui.available_width() - t.space_16 - ui.spacing().item_spacing.x).max(0.0);
+                ui.allocate_ui_with_layout(egui::vec2(width, t.control_height), egui::Layout::left_to_right(egui::Align::Center), |ui| {
+                    ui_kit::checkbox(ui, &only, &mut app.preferences.export_selects_only_body).backing_on_hover_text(&tip);
+                });
+                ui_kit::help_icon(ui, &tip);
+            });
+            ui.horizontal(|ui| {
+                let (keep, tip) = (app.tr("prefs.keep_print_faces").to_string(), app.tr("prefs.keep_print_faces_tip").to_string());
+                let width = (ui.available_width() - t.space_16 - ui.spacing().item_spacing.x).max(0.0);
+                ui.allocate_ui_with_layout(egui::vec2(width, t.control_height), egui::Layout::left_to_right(egui::Align::Center), |ui| {
+                    let response = ui_kit::checkbox(ui, &keep, &mut app.preferences.keep_print_faces).backing_on_hover_text(&tip);
+                    crate::scenario::publish_target("prefs:keep_print_faces", response.rect);
                 });
                 ui_kit::help_icon(ui, &tip);
             });
@@ -124,13 +173,32 @@ pub(super) fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
                 });
             });
         });
+        ui_kit::settings_section(ui, "freecad", app.tr("prefs.freecad_files"), |ui| {
+            setting::freecad_history(app, ui);
+        });
+        ui_kit::settings_section(ui, "cadmpeg", app.tr("prefs.cadmpeg_import"), |ui| {
+            let cadmpeg = setting::cadmpeg_import(app, ui);
+            crate::scenario::publish_target("prefs:cadmpeg_import", cadmpeg.rect);
+        });
+        ui_kit::settings_section(ui, "dialogs", app.tr("prefs.dialogs"), |ui| {
+            let right_click = setting::right_click_confirms(app, ui);
+            crate::scenario::publish_target("prefs:right_click_confirms", right_click.rect);
+            let first_letter = setting::dialog_first_letter_buttons(app, ui).backing_on_hover_text(app.tr("prefs.dialog_first_letter_buttons_help"));
+            crate::scenario::publish_target("prefs:dialog_first_letter_buttons", first_letter.rect);
+        });
+        ui_kit::settings_section(ui, "community", app.tr("prefs.community"), |ui| {
+            let donate = setting::show_donate_button(app, ui).backing_on_hover_text(app.tr("prefs.show_donate_button_help"));
+            crate::scenario::publish_target("prefs:show_donate_button", donate.rect);
+            let discord = setting::show_discord_button(app, ui).backing_on_hover_text(app.tr("prefs.show_discord_button_help"));
+            crate::scenario::publish_target("prefs:show_discord_button", discord.rect);
+        });
         ui_kit::settings_section(ui, "updates", app.tr("prefs.updates"), |ui| {
             crate::update::prefs_rows(app, ui);
         });
         ui_kit::settings_section(ui, "crash_reports", app.tr("prefs.general.crash_reports"), |ui| {
             ui.horizontal(|ui| {
                 let count = app.crashes.saved_count();
-                let label = crate::i18n::format("prefs.reports_saved", &[("n", &count.to_string())]);
+                let label = solidcraft_ui_text::format("prefs.reports_saved", &[("n", &count.to_string())]);
                 let tone = if count == 0 { ui_kit::SettingsBadgeTone::Neutral } else { ui_kit::SettingsBadgeTone::Warning };
                 let badge = ui_kit::settings_state_badge(ui, &label, tone);
                 crate::scenario::publish_rect("prefs:crash_count", badge.rect);
@@ -162,7 +230,7 @@ fn file_size_rows(app: &mut SolveApp, ui: &mut egui::Ui, labels: f32) {
     let mut help = app.tr("prefs.max_file_size_note").to_string();
     if let Some(bytes) = limits::override_bytes() {
         help.push('\n');
-        help.push_str(&crate::i18n::format("prefs.max_file_size_flag", &[("size", &limits::describe(bytes))]));
+        help.push_str(&solidcraft_ui_text::format("prefs.max_file_size_flag", &[("size", &limits::describe(bytes))]));
     }
     let t = Tokens::get();
     let rows = [
@@ -174,7 +242,7 @@ fn file_size_rows(app: &mut SolveApp, ui: &mut egui::Ui, labels: f32) {
             ui.spacing_mut().item_spacing.x = t.space_16 + t.space_4;
             for (label, caption, handle, default, value) in rows {
                 let size = limits::describe(value.saturating_mul(limits::MB));
-                let unit = crate::i18n::tr("prefs.megabytes");
+                let unit = solidcraft_ui_text::tr("prefs.megabytes");
                 let note = if *value >= 1024 { format!("{unit} ({size})") } else { unit.to_owned() };
                 let number_width = t.space_24 * 3.0;
                 let width = (number_width + t.space_4 + ui_kit::ContentWidth::label(ui, &note))
@@ -203,4 +271,37 @@ fn file_size_rows(app: &mut SolveApp, ui: &mut egui::Ui, labels: f32) {
             }
         });
     });
+}
+
+/// The folders linked files load from when a design opens (`linked_file_folders`): each can be
+/// removed, or all forgotten; a design in one of them that is removed asks again.
+fn link_folders(app: &mut SolveApp, ui: &mut egui::Ui) {
+    let t = Tokens::get();
+    // Wrapped, so a narrow window keeps the notes inside the page.
+    ui.horizontal_wrapped(|ui| ui_kit::settings_inline_note(ui, app.tr("prefs.link_folders_note")));
+    if app.preferences.linked_file_folders.is_empty() {
+        ui.horizontal_wrapped(|ui| ui_kit::settings_inline_note(ui, app.tr("prefs.link_folders_none")));
+        return;
+    }
+    let mut remove = None;
+    ui.horizontal_wrapped(|ui| {
+        ui.spacing_mut().item_spacing = egui::vec2(t.space_6, t.space_6);
+        for (i, folder) in app.preferences.linked_file_folders.iter().enumerate() {
+            let chip =
+                ui_kit::SettingsChip { key: Some(folder), monospace: true, remove: Some(app.tr("prefs.link_folders_remove")), ..Default::default() };
+            let button = ui_kit::settings_chip(ui, folder, chip);
+            crate::scenario::publish_target(&format!("prefs:link_folder:{i}:remove"), button.rect);
+            if button.clicked() {
+                remove = Some(i);
+            }
+        }
+    });
+    if let Some(i) = remove.filter(|i| *i < app.preferences.linked_file_folders.len()) {
+        app.preferences.linked_file_folders.remove(i);
+    }
+    let clear = ui_kit::button(ui, app.tr("prefs.link_folders_clear"), ui_kit::Button::Normal);
+    crate::scenario::publish_target("prefs:link_folders:clear", clear.rect);
+    if clear.clicked() {
+        app.preferences.linked_file_folders.clear();
+    }
 }

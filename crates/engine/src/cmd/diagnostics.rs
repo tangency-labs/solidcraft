@@ -8,7 +8,7 @@ use super::CommandSpec;
 use crate::params::{bad, str_};
 use crate::schema::diagnostics::{
     CrashReport, CrashReportList, CrashReportParams, CrashReportsClearParams, CrashReportsCleared, CrashReportsParams, CrashTestParams,
-    CrashTestResult,
+    CrashTestResult, ReportIssueParams, ReportIssueReply, ReportIssueStatusParams,
 };
 use crate::schema::{TypedContract, output_schema_for};
 use crate::{EngineError, Result, Session, crash};
@@ -17,9 +17,35 @@ const LIST_CONTRACT: TypedContract<CrashReportsParams> = TypedContract::new();
 const READ_CONTRACT: TypedContract<CrashReportParams> = TypedContract::new();
 const CLEAR_CONTRACT: TypedContract<CrashReportsClearParams> = TypedContract::new();
 const CRASH_TEST_CONTRACT: TypedContract<CrashTestParams> = TypedContract::new();
+const REPORT_CONTRACT: TypedContract<ReportIssueParams> = TypedContract::new();
+const REPORT_STATUS_CONTRACT: TypedContract<ReportIssueStatusParams> = TypedContract::new();
 
 pub static COMMANDS: &[CommandSpec] = &[
+    CommandSpec::new("diagnostics.report_issue", "Report an Issue", crate::checked!("diagnostics.report_issue", report_issue))
+        .icon("bug_report")
+        .noundo()
+        .contract(&REPORT_CONTRACT)
+        .output(output_schema_for::<ReportIssueReply>)
+        .params(
+            "title: string; description?: string; type?: bug | feature | question; app?: slug (default solidcraft); system?, repro?, \
+             log?, screenshot?: bool (default true); design?, crash?: bool (default false). Files a problem report on \
+             tickets.solidcraft.io for the person: the app gathers what the report dialog would, sends it as a draft and opens it \
+             in their browser to review and file. Ask the person first. design and crash are never sent on an agent's word: \
+             asking for them shows the report dialog for the person to tick them. Returns {report, status, message?, url?, ticket?, \
+             dropped?}; follow it with diagnostics.report_issue_status. Needs the SolidCraft app (not headless)",
+        ),
+    CommandSpec::new("diagnostics.report_issue_status", "Report Status", crate::checked!("diagnostics.report_issue_status", report_issue_status))
+        .icon("bug_report")
+        .noundo()
+        .contract(&REPORT_STATUS_CONTRACT)
+        .output(output_schema_for::<ReportIssueReply>)
+        .params(
+            "report: id from diagnostics.report_issue. Returns {report, status, message?, url?, ticket?, dropped?}: status pending, \
+             awaiting_user (the report dialog waits for the person), sending, opened (in their browser to file), filed, queued \
+             (offline) or failed",
+        ),
     CommandSpec::new("diagnostics.crash_reports", "Crash Reports", crate::checked!("diagnostics.crash_reports", list))
+        .any_part()
         .icon("bug_report")
         .noundo()
         .contract(&LIST_CONTRACT)
@@ -30,6 +56,7 @@ pub static COMMANDS: &[CommandSpec] = &[
              Read one with diagnostics.crash_report; reproduce it with `solidcraft-cli crashes replay <id>`",
         ),
     CommandSpec::new("diagnostics.crash_report", "Crash Report", crate::checked!("diagnostics.crash_report", read))
+        .any_part()
         .icon("bug_report")
         .noundo()
         .contract(&READ_CONTRACT)
@@ -40,12 +67,14 @@ pub static COMMANDS: &[CommandSpec] = &[
              (`solidcraft-cli run <replay_path> --in <design_path>`)",
         ),
     CommandSpec::new("diagnostics.crash_reports.clear", "Delete Crash Reports", crate::checked!("diagnostics.crash_reports.clear", clear))
+        .any_part()
         .icon("delete")
         .noundo()
         .contract(&CLEAR_CONTRACT)
         .output(output_schema_for::<CrashReportsCleared>)
         .params("id?: one report (default: all). Returns {deleted}"),
     CommandSpec::new("diagnostics.profile", "Profile", crate::checked!("diagnostics.profile", profile))
+        .any_part()
         .icon("bug_report")
         .noundo()
         .contract(&PROFILE_CONTRACT)
@@ -61,6 +90,7 @@ pub static COMMANDS: &[CommandSpec] = &[
              --profile and the app's preference; off, it costs nothing measurable. Read-only",
         ),
     CommandSpec::new("diagnostics.validation", "Validation", crate::checked!("diagnostics.validation", validation))
+        .any_part()
         .icon("bug_report")
         .noundo()
         .contract(&VALIDATION_CONTRACT)
@@ -73,15 +103,17 @@ pub static COMMANDS: &[CommandSpec] = &[
              The app's preference of the same name sets it. Returns {mode, previous}",
         ),
     CommandSpec::new("diagnostics.crash_test", "Crash Test", crate::checked!("diagnostics.crash_test", crash_test))
+        .any_part()
         .icon("bug_report")
         .noundo()
         .enabled(crash_test_enabled)
         .contract(&CRASH_TEST_CONTRACT)
         .output(output_schema_for::<CrashTestResult>)
         .params(
-            "mode: panic | kernel | abort. Checks that crash reports work: panic = an internal error in this command (caught; \
-             the design is unchanged), kernel = one inside the geometry kernel (caught), abort = the app ends at once (reported \
-             at the next start). Only when the SOLIDCRAFT_CRASH_TEST environment variable is set",
+            "mode: panic | kernel | worker | worker_raw | abort. Checks that crash reports work: panic = an internal error in this \
+             command (caught; the design is unchanged), kernel = one inside the geometry kernel (caught), worker / worker_raw = \
+             one on a Rayon worker, caught inside / outside the kernel's guard, abort = the app ends at once (reported at the \
+             next start). Only when the SOLIDCRAFT_CRASH_TEST environment variable is set",
         ),
 ];
 
@@ -123,8 +155,10 @@ fn crash_test_enabled(_: &Session) -> std::result::Result<(), String> {
     if solidcraft_geom::env::var_os("CRASH_TEST").is_some() { Ok(()) } else { Err("set SOLIDCRAFT_CRASH_TEST to use the crash test".into()) }
 }
 
-// The one deliberate panic: it proves the crash reports work, and runs only when asked for with
-// SOLIDCRAFT_CRASH_TEST.
+/// `diagnostics.crash_test`: the one deliberate panic. It proves the crash reports work, and runs
+/// only when asked for with SOLIDCRAFT_CRASH_TEST. `mode` picks where the internal error happens
+/// ([`CrashTestMode`](crate::schema::diagnostics::CrashTestMode)); every mode but `abort` ends
+/// in a caught error.
 #[allow(clippy::panic)]
 fn crash_test(_: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "diagnostics.crash_test";
@@ -134,8 +168,16 @@ fn crash_test(_: &mut Session, p: &Value) -> Result<Value> {
             solidcraft_kernel::crash_test()?;
             Err(EngineError::Other("crash test: the kernel error was not caught".into()))
         }
+        Some("worker") => {
+            solidcraft_kernel::crash_test_worker_panic("an internal error in the kernel on a worker")?;
+            Err(EngineError::Other("crash test: the kernel error was not caught".into()))
+        }
+        Some("worker_raw") => {
+            solidcraft_kernel::crash_test_worker_panic_raw("a worker panic in a command")?;
+            Err(EngineError::Other("crash test: the worker panic was not resumed".into()))
+        }
         Some("abort") => std::process::abort(),
-        _ => Err(bad(cmd, "`mode` must be panic, kernel or abort")),
+        _ => Err(bad(cmd, "`mode` must be panic, kernel, worker, worker_raw or abort")),
     }
 }
 
@@ -196,4 +238,40 @@ fn profile(_: &mut Session, p: &Value) -> Result<Value> {
         out.enabled = solidcraft_profile::enabled();
     }
     serde_json::to_value(out).map_err(|e| EngineError::Other(format!("{cmd}: {e}")))
+}
+
+fn report_issue(s: &mut Session, p: &Value) -> Result<Value> {
+    let cmd = "diagnostics.report_issue";
+    let title = str_(p, "title").map(str::trim).unwrap_or_default();
+    if title.is_empty() {
+        return Err(bad(cmd, "`title` is required: a short title for the problem"));
+    }
+    if title.chars().count() > 200 {
+        return Err(bad(cmd, "`title` is at most 200 characters"));
+    }
+    if !crate::report_issue::host_attached() {
+        return Err(bad(
+            cmd,
+            "not supported yet: reports are filed from the SolidCraft app; connect to it (solidcraft-cli mcp --connect) instead of a headless session",
+        ));
+    }
+    let id = crate::report_issue::submit(s.uid, p.clone());
+    reply(
+        cmd,
+        ReportIssueReply {
+            report: id,
+            status: "pending".into(),
+            message: Some("SolidCraft is gathering the report; call diagnostics.report_issue_status for where it is.".into()),
+            url: None,
+            ticket: None,
+            dropped: Vec::new(),
+            param_warnings: Vec::new(),
+        },
+    )
+}
+
+fn report_issue_status(_: &mut Session, p: &Value) -> Result<Value> {
+    let cmd = "diagnostics.report_issue_status";
+    let id = str_(p, "report").ok_or_else(|| bad(cmd, "`report` is required (as diagnostics.report_issue returned it)"))?;
+    crate::report_issue::status(id).ok_or_else(|| bad(cmd, format!("no report `{id}` in this session")))
 }

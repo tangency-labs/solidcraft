@@ -1,0 +1,6375 @@
+{
+ "cases": [
+  {
+   "name": "box_stage2_stage3_done_op_0",
+   "inputs": {
+    "case": "heal",
+    "brep": {
+     "kind": "box",
+     "size": [
+      1,
+      2,
+      3
+     ]
+    },
+    "init_gaps": false,
+    "targets": {
+     "v": "all",
+     "e": "all",
+     "f": "all"
+    },
+    "steps": [
+     {
+      "step": "cache_edge_props"
+     },
+     {
+      "step": "cache_vertex_props"
+     },
+     {
+      "step": "cache_face_props_gaps"
+     },
+     {
+      "step": "cache_coin_vertices"
+     },
+     {
+      "step": "cache_coin_edges"
+     },
+     {
+      "step": "fix_coin_edges"
+     },
+     {
+      "step": "cache_missed_edge_xsects"
+     },
+     {
+      "step": "fix_missed_edge_xsects"
+     },
+     {
+      "step": "fix_uncontained_edges"
+     },
+     {
+      "step": "fix_bad_gaps"
+     },
+     {
+      "step": "set_done_heal_op",
+      "op": 0
+     },
+     {
+      "step": "cache_face_props_stage2"
+     },
+     {
+      "step": "face_snapshot"
+     },
+     {
+      "step": "cache_face_props_stage3"
+     },
+     {
+      "step": "face_snapshot"
+     }
+    ],
+    "validate_only": false
+   }
+  },
+  {
+   "name": "box_stage2_stage3_done_op_0_faces_only",
+   "inputs": {
+    "case": "heal",
+    "brep": {
+     "kind": "box",
+     "size": [
+      1,
+      2,
+      3
+     ]
+    },
+    "init_gaps": false,
+    "targets": {
+     "v": "all",
+     "e": "all",
+     "f": "all"
+    },
+    "steps": [
+     {
+      "step": "cache_face_props_gaps"
+     },
+     {
+      "step": "set_done_heal_op",
+      "op": 0
+     },
+     {
+      "step": "cache_face_props_stage2"
+     },
+     {
+      "step": "face_snapshot"
+     },
+     {
+      "step": "cache_face_props_stage3"
+     },
+     {
+      "step": "face_snapshot"
+     }
+    ],
+    "validate_only": false
+   }
+  },
+  {
+   "name": "box_stage2_stage3_done_op_4",
+   "inputs": {
+    "case": "heal",
+    "brep": {
+     "kind": "box",
+     "size": [
+      1,
+      2,
+      3
+     ]
+    },
+    "init_gaps": false,
+    "targets": {
+     "v": "all",
+     "e": "all",
+     "f": "all"
+    },
+    "steps": [
+     {
+      "step": "cache_edge_props"
+     },
+     {
+      "step": "cache_vertex_props"
+     },
+     {
+      "step": "cache_face_props_gaps"
+     },
+     {
+      "step": "cache_coin_vertices"
+     },
+     {
+      "step": "cache_coin_edges"
+     },
+     {
+      "step": "fix_coin_edges"
+     },
+     {
+      "step": "cache_missed_edge_xsects"
+     },
+     {
+      "step": "fix_missed_edge_xsects"
+     },
+     {
+      "step": "fix_uncontained_edges"
+     },
+     {
+      "step": "fix_bad_gaps"
+     },
+     {
+      "step": "set_done_heal_op",
+      "op": 4
+     },
+     {
+      "step": "cache_face_props_stage2"
+     },
+     {
+      "step": "face_snapshot"
+     },
+     {
+      "step": "cache_face_props_stage3"
+     },
+     {
+      "step": "face_snapshot"
+     }
+    ],
+    "validate_only": false
+   }
+  },
+  {
+   "name": "box_stage2_stage3_done_op_4_faces_only",
+   "inputs": {
+    "case": "heal",
+    "brep": {
+     "kind": "box",
+     "size": [
+      1,
+      2,
+      3
+     ]
+    },
+    "init_gaps": false,
+    "targets": {
+     "v": "all",
+     "e": "all",
+     "f": "all"
+    },
+    "steps": [
+     {
+      "step": "cache_face_props_gaps"
+     },
+     {
+      "step": "set_done_heal_op",
+      "op": 4
+     },
+     {
+      "step": "cache_face_props_stage2"
+     },
+     {
+      "step": "face_snapshot"
+     },
+     {
+      "step": "cache_face_props_stage3"
+     },
+     {
+      "step": "face_snapshot"
+     }
+    ],
+    "validate_only": false
+   }
+  },
+  {
+   "name": "box_stage2_stage3_done_op_5",
+   "inputs": {
+    "case": "heal",
+    "brep": {
+     "kind": "box",
+     "size": [
+      1,
+      2,
+      3
+     ]
+    },
+    "init_gaps": false,
+    "targets": {
+     "v": "all",
+     "e": "all",
+     "f": "all"
+    },
+    "steps": [
+     {
+      "step": "cache_edge_props"
+     },
+     {
+      "step": "cache_vertex_props"
+     },
+     {
+      "step": "cache_face_props_gaps"
+     },
+     {
+      "step": "cache_coin_vertices"
+     },
+     {
+      "step": "cache_coin_edges"
+     },
+     {
+      "step": "fix_coin_edges"
+     },
+     {
+      "step": "cache_missed_edge_xsects"
+     },
+     {
+      "step": "fix_missed_edge_xsects"
+     },
+     {
+      "step": "fix_uncontained_edges"
+     },
+     {
+      "step": "fix_bad_gaps"
+     },
+     {
+      "step": "set_done_heal_op",
+      "op": 5
+     },
+     {
+      "step": "cache_face_props_stage2"
+     },
+     {
+      "step": "face_snapshot"
+     },
+     {
+      "step": "cache_face_props_stage3"
+     },
+     {
+      "step": "face_snapshot"
+     }
+    ],
+    "validate_only": false
+   }
+  },
+  {
+   "name": "box_stage2_stage3_done_op_5_faces_only",
+   "inputs": {
+    "case": "heal",
+    "brep": {
+     "kind": "box",
+     "size": [
+      1,
+      2,
+      3
+     ]
+    },
+    "init_gaps": false,
+    "targets": {
+     "v": "all",
+     "e": "all",
+     "f": "all"
+    },
+    "steps": [
+     {
+      "step": "cache_face_props_gaps"
+     },
+     {
+      "step": "set_done_heal_op",
+      "op": 5
+     },
+     {
+      "step": "cache_face_props_stage2"
+     },
+     {
+      "step": "face_snapshot"
+     },
+     {
+      "step": "cache_face_props_stage3"
+     },
+     {
+      "step": "face_snapshot"
+     }
+    ],
+    "validate_only": false
+   }
+  },
+  {
+   "name": "box_stage2_stage3_done_op_16",
+   "inputs": {
+    "case": "heal",
+    "brep": {
+     "kind": "box",
+     "size": [
+      1,
+      2,
+      3
+     ]
+    },
+    "init_gaps": false,
+    "targets": {
+     "v": "all",
+     "e": "all",
+     "f": "all"
+    },
+    "steps": [
+     {
+      "step": "cache_edge_props"
+     },
+     {
+      "step": "cache_vertex_props"
+     },
+     {
+      "step": "cache_face_props_gaps"
+     },
+     {
+      "step": "cache_coin_vertices"
+     },
+     {
+      "step": "cache_coin_edges"
+     },
+     {
+      "step": "fix_coin_edges"
+     },
+     {
+      "step": "cache_missed_edge_xsects"
+     },
+     {
+      "step": "fix_missed_edge_xsects"
+     },
+     {
+      "step": "fix_uncontained_edges"
+     },
+     {
+      "step": "fix_bad_gaps"
+     },
+     {
+      "step": "set_done_heal_op",
+      "op": 16
+     },
+     {
+      "step": "cache_face_props_stage2"
+     },
+     {
+      "step": "face_snapshot"
+     },
+     {
+      "step": "cache_face_props_stage3"
+     },
+     {
+      "step": "face_snapshot"
+     }
+    ],
+    "validate_only": false
+   }
+  },
+  {
+   "name": "box_stage2_stage3_done_op_16_faces_only",
+   "inputs": {
+    "case": "heal",
+    "brep": {
+     "kind": "box",
+     "size": [
+      1,
+      2,
+      3
+     ]
+    },
+    "init_gaps": false,
+    "targets": {
+     "v": "all",
+     "e": "all",
+     "f": "all"
+    },
+    "steps": [
+     {
+      "step": "cache_face_props_gaps"
+     },
+     {
+      "step": "set_done_heal_op",
+      "op": 16
+     },
+     {
+      "step": "cache_face_props_stage2"
+     },
+     {
+      "step": "face_snapshot"
+     },
+     {
+      "step": "cache_face_props_stage3"
+     },
+     {
+      "step": "face_snapshot"
+     }
+    ],
+    "validate_only": false
+   }
+  },
+  {
+   "name": "box_stage2_stage3_done_op_17",
+   "inputs": {
+    "case": "heal",
+    "brep": {
+     "kind": "box",
+     "size": [
+      1,
+      2,
+      3
+     ]
+    },
+    "init_gaps": false,
+    "targets": {
+     "v": "all",
+     "e": "all",
+     "f": "all"
+    },
+    "steps": [
+     {
+      "step": "cache_edge_props"
+     },
+     {
+      "step": "cache_vertex_props"
+     },
+     {
+      "step": "cache_face_props_gaps"
+     },
+     {
+      "step": "cache_coin_vertices"
+     },
+     {
+      "step": "cache_coin_edges"
+     },
+     {
+      "step": "fix_coin_edges"
+     },
+     {
+      "step": "cache_missed_edge_xsects"
+     },
+     {
+      "step": "fix_missed_edge_xsects"
+     },
+     {
+      "step": "fix_uncontained_edges"
+     },
+     {
+      "step": "fix_bad_gaps"
+     },
+     {
+      "step": "set_done_heal_op",
+      "op": 17
+     },
+     {
+      "step": "cache_face_props_stage2"
+     },
+     {
+      "step": "face_snapshot"
+     },
+     {
+      "step": "cache_face_props_stage3"
+     },
+     {
+      "step": "face_snapshot"
+     }
+    ],
+    "validate_only": false
+   }
+  },
+  {
+   "name": "box_stage2_stage3_done_op_17_faces_only",
+   "inputs": {
+    "case": "heal",
+    "brep": {
+     "kind": "box",
+     "size": [
+      1,
+      2,
+      3
+     ]
+    },
+    "init_gaps": false,
+    "targets": {
+     "v": "all",
+     "e": "all",
+     "f": "all"
+    },
+    "steps": [
+     {
+      "step": "cache_face_props_gaps"
+     },
+     {
+      "step": "set_done_heal_op",
+      "op": 17
+     },
+     {
+      "step": "cache_face_props_stage2"
+     },
+     {
+      "step": "face_snapshot"
+     },
+     {
+      "step": "cache_face_props_stage3"
+     },
+     {
+      "step": "face_snapshot"
+     }
+    ],
+    "validate_only": false
+   }
+  },
+  {
+   "name": "box_stage2_stage3_done_op_18",
+   "inputs": {
+    "case": "heal",
+    "brep": {
+     "kind": "box",
+     "size": [
+      1,
+      2,
+      3
+     ]
+    },
+    "init_gaps": false,
+    "targets": {
+     "v": "all",
+     "e": "all",
+     "f": "all"
+    },
+    "steps": [
+     {
+      "step": "cache_edge_props"
+     },
+     {
+      "step": "cache_vertex_props"
+     },
+     {
+      "step": "cache_face_props_gaps"
+     },
+     {
+      "step": "cache_coin_vertices"
+     },
+     {
+      "step": "cache_coin_edges"
+     },
+     {
+      "step": "fix_coin_edges"
+     },
+     {
+      "step": "cache_missed_edge_xsects"
+     },
+     {
+      "step": "fix_missed_edge_xsects"
+     },
+     {
+      "step": "fix_uncontained_edges"
+     },
+     {
+      "step": "fix_bad_gaps"
+     },
+     {
+      "step": "set_done_heal_op",
+      "op": 18
+     },
+     {
+      "step": "cache_face_props_stage2"
+     },
+     {
+      "step": "face_snapshot"
+     },
+     {
+      "step": "cache_face_props_stage3"
+     },
+     {
+      "step": "face_snapshot"
+     }
+    ],
+    "validate_only": false
+   }
+  },
+  {
+   "name": "box_stage2_stage3_done_op_18_faces_only",
+   "inputs": {
+    "case": "heal",
+    "brep": {
+     "kind": "box",
+     "size": [
+      1,
+      2,
+      3
+     ]
+    },
+    "init_gaps": false,
+    "targets": {
+     "v": "all",
+     "e": "all",
+     "f": "all"
+    },
+    "steps": [
+     {
+      "step": "cache_face_props_gaps"
+     },
+     {
+      "step": "set_done_heal_op",
+      "op": 18
+     },
+     {
+      "step": "cache_face_props_stage2"
+     },
+     {
+      "step": "face_snapshot"
+     },
+     {
+      "step": "cache_face_props_stage3"
+     },
+     {
+      "step": "face_snapshot"
+     }
+    ],
+    "validate_only": false
+   }
+  },
+  {
+   "name": "box_stage2_stage3_done_op_19",
+   "inputs": {
+    "case": "heal",
+    "brep": {
+     "kind": "box",
+     "size": [
+      1,
+      2,
+      3
+     ]
+    },
+    "init_gaps": false,
+    "targets": {
+     "v": "all",
+     "e": "all",
+     "f": "all"
+    },
+    "steps": [
+     {
+      "step": "cache_edge_props"
+     },
+     {
+      "step": "cache_vertex_props"
+     },
+     {
+      "step": "cache_face_props_gaps"
+     },
+     {
+      "step": "cache_coin_vertices"
+     },
+     {
+      "step": "cache_coin_edges"
+     },
+     {
+      "step": "fix_coin_edges"
+     },
+     {
+      "step": "cache_missed_edge_xsects"
+     },
+     {
+      "step": "fix_missed_edge_xsects"
+     },
+     {
+      "step": "fix_uncontained_edges"
+     },
+     {
+      "step": "fix_bad_gaps"
+     },
+     {
+      "step": "set_done_heal_op",
+      "op": 19
+     },
+     {
+      "step": "cache_face_props_stage2"
+     },
+     {
+      "step": "face_snapshot"
+     },
+     {
+      "step": "cache_face_props_stage3"
+     },
+     {
+      "step": "face_snapshot"
+     }
+    ],
+    "validate_only": false
+   }
+  },
+  {
+   "name": "box_stage2_stage3_done_op_19_faces_only",
+   "inputs": {
+    "case": "heal",
+    "brep": {
+     "kind": "box",
+     "size": [
+      1,
+      2,
+      3
+     ]
+    },
+    "init_gaps": false,
+    "targets": {
+     "v": "all",
+     "e": "all",
+     "f": "all"
+    },
+    "steps": [
+     {
+      "step": "cache_face_props_gaps"
+     },
+     {
+      "step": "set_done_heal_op",
+      "op": 19
+     },
+     {
+      "step": "cache_face_props_stage2"
+     },
+     {
+      "step": "face_snapshot"
+     },
+     {
+      "step": "cache_face_props_stage3"
+     },
+     {
+      "step": "face_snapshot"
+     }
+    ],
+    "validate_only": false
+   }
+  },
+  {
+   "name": "box_stage2_stage3_done_op_26",
+   "inputs": {
+    "case": "heal",
+    "brep": {
+     "kind": "box",
+     "size": [
+      1,
+      2,
+      3
+     ]
+    },
+    "init_gaps": false,
+    "targets": {
+     "v": "all",
+     "e": "all",
+     "f": "all"
+    },
+    "steps": [
+     {
+      "step": "cache_edge_props"
+     },
+     {
+      "step": "cache_vertex_props"
+     },
+     {
+      "step": "cache_face_props_gaps"
+     },
+     {
+      "step": "cache_coin_vertices"
+     },
+     {
+      "step": "cache_coin_edges"
+     },
+     {
+      "step": "fix_coin_edges"
+     },
+     {
+      "step": "cache_missed_edge_xsects"
+     },
+     {
+      "step": "fix_missed_edge_xsects"
+     },
+     {
+      "step": "fix_uncontained_edges"
+     },
+     {
+      "step": "fix_bad_gaps"
+     },
+     {
+      "step": "set_done_heal_op",
+      "op": 26
+     },
+     {
+      "step": "cache_face_props_stage2"
+     },
+     {
+      "step": "face_snapshot"
+     },
+     {
+      "step": "cache_face_props_stage3"
+     },
+     {
+      "step": "face_snapshot"
+     }
+    ],
+    "validate_only": false
+   }
+  },
+  {
+   "name": "box_stage2_stage3_done_op_26_faces_only",
+   "inputs": {
+    "case": "heal",
+    "brep": {
+     "kind": "box",
+     "size": [
+      1,
+      2,
+      3
+     ]
+    },
+    "init_gaps": false,
+    "targets": {
+     "v": "all",
+     "e": "all",
+     "f": "all"
+    },
+    "steps": [
+     {
+      "step": "cache_face_props_gaps"
+     },
+     {
+      "step": "set_done_heal_op",
+      "op": 26
+     },
+     {
+      "step": "cache_face_props_stage2"
+     },
+     {
+      "step": "face_snapshot"
+     },
+     {
+      "step": "cache_face_props_stage3"
+     },
+     {
+      "step": "face_snapshot"
+     }
+    ],
+    "validate_only": false
+   }
+  },
+  {
+   "name": "stage2_without_gaps_null_face",
+   "inputs": {
+    "case": "heal",
+    "brep": {
+     "kind": "box",
+     "size": [
+      1,
+      2,
+      3
+     ]
+    },
+    "init_gaps": false,
+    "targets": {
+     "v": "all",
+     "e": "all",
+     "f": "all"
+    },
+    "steps": [
+     {
+      "step": "set_done_heal_op",
+      "op": 17
+     },
+     {
+      "step": "cache_face_props_stage2"
+     }
+    ],
+    "validate_only": false
+   }
+  },
+  {
+   "name": "stage2_without_gaps_low_op",
+   "inputs": {
+    "case": "heal",
+    "brep": {
+     "kind": "box",
+     "size": [
+      1,
+      2,
+      3
+     ]
+    },
+    "init_gaps": false,
+    "targets": {
+     "v": "all",
+     "e": "all",
+     "f": "all"
+    },
+    "steps": [
+     {
+      "step": "set_done_heal_op",
+      "op": 2
+     },
+     {
+      "step": "cache_face_props_stage2"
+     }
+    ],
+    "validate_only": false
+   }
+  },
+  {
+   "name": "stage3_without_gaps",
+   "inputs": {
+    "case": "heal",
+    "brep": {
+     "kind": "box",
+     "size": [
+      1,
+      2,
+      3
+     ]
+    },
+    "init_gaps": false,
+    "targets": {
+     "v": "all",
+     "e": "all",
+     "f": "all"
+    },
+    "steps": [
+     {
+      "step": "set_done_heal_op",
+      "op": 21
+     },
+     {
+      "step": "cache_face_props_stage3"
+     }
+    ],
+    "validate_only": false
+   }
+  },
+  {
+   "name": "make_uv_without_gaps_no_make",
+   "inputs": {
+    "case": "heal",
+    "brep": {
+     "kind": "box",
+     "size": [
+      1,
+      2,
+      3
+     ]
+    },
+    "init_gaps": false,
+    "targets": {
+     "v": "all",
+     "e": "all",
+     "f": "all"
+    },
+    "steps": [
+     {
+      "step": "make_uv_trim_curves",
+      "make": false
+     }
+    ],
+    "validate_only": false
+   }
+  },
+  {
+   "name": "make_uv_without_gaps_make",
+   "inputs": {
+    "case": "heal",
+    "brep": {
+     "kind": "box",
+     "size": [
+      1,
+      2,
+      3
+     ]
+    },
+    "init_gaps": false,
+    "targets": {
+     "v": "all",
+     "e": "all",
+     "f": "all"
+    },
+    "steps": [
+     {
+      "step": "make_uv_trim_curves",
+      "make": true
+     }
+    ],
+    "validate_only": false
+   }
+  },
+  {
+   "name": "make_uv_make",
+   "inputs": {
+    "case": "heal",
+    "brep": {
+     "kind": "box",
+     "size": [
+      1,
+      2,
+      3
+     ]
+    },
+    "init_gaps": false,
+    "targets": {
+     "v": "all",
+     "e": "all",
+     "f": "all"
+    },
+    "steps": [
+     {
+      "step": "cache_edge_props"
+     },
+     {
+      "step": "cache_vertex_props"
+     },
+     {
+      "step": "cache_face_props_gaps"
+     },
+     {
+      "step": "cache_coin_vertices"
+     },
+     {
+      "step": "cache_coin_edges"
+     },
+     {
+      "step": "fix_coin_edges"
+     },
+     {
+      "step": "cache_missed_edge_xsects"
+     },
+     {
+      "step": "fix_missed_edge_xsects"
+     },
+     {
+      "step": "fix_uncontained_edges"
+     },
+     {
+      "step": "fix_bad_gaps"
+     },
+     {
+      "step": "make_uv_trim_curves",
+      "make": true
+     }
+    ],
+    "validate_only": false
+   }
+  },
+  {
+   "name": "make_uv_make_faces_only",
+   "inputs": {
+    "case": "heal",
+    "brep": {
+     "kind": "box",
+     "size": [
+      1,
+      2,
+      3
+     ]
+    },
+    "init_gaps": false,
+    "targets": {
+     "v": "all",
+     "e": "all",
+     "f": "all"
+    },
+    "steps": [
+     {
+      "step": "cache_face_props_gaps"
+     },
+     {
+      "step": "make_uv_trim_curves",
+      "make": true
+     }
+    ],
+    "validate_only": false
+   }
+  },
+  {
+   "name": "no_targets_all_steps",
+   "inputs": {
+    "case": "heal",
+    "brep": {
+     "kind": "box",
+     "size": [
+      1,
+      2,
+      3
+     ]
+    },
+    "init_gaps": false,
+    "targets": {
+     "v": "none",
+     "e": "none",
+     "f": "none"
+    },
+    "steps": [
+     {
+      "step": "set_done_heal_op",
+      "op": 17
+     },
+     {
+      "step": "cache_face_props_stage2"
+     },
+     {
+      "step": "face_snapshot"
+     },
+     {
+      "step": "set_done_heal_op",
+      "op": 20
+     },
+     {
+      "step": "fix_bad_sheets"
+     },
+     {
+      "step": "set_done_heal_op",
+      "op": 21
+     },
+     {
+      "step": "cache_face_props_stage3"
+     },
+     {
+      "step": "set_done_heal_op",
+      "op": 24
+     },
+     {
+      "step": "make_uv_trim_curves",
+      "make": false
+     },
+     {
+      "step": "face_snapshot"
+     },
+     {
+      "step": "fix_bad_sheets"
+     }
+    ],
+    "validate_only": false
+   }
+  },
+  {
+   "name": "old_count_equal",
+   "inputs": {
+    "case": "heal",
+    "brep": {
+     "kind": "box",
+     "size": [
+      1,
+      2,
+      3
+     ]
+    },
+    "init_gaps": false,
+    "targets": {
+     "v": "all",
+     "e": "all",
+     "f": "all"
+    },
+    "steps": [
+     {
+      "step": "cache_edge_props"
+     },
+     {
+      "step": "cache_vertex_props"
+     },
+     {
+      "step": "cache_face_props_gaps"
+     },
+     {
+      "step": "cache_coin_vertices"
+     },
+     {
+      "step": "cache_coin_edges"
+     },
+     {
+      "step": "fix_coin_edges"
+     },
+     {
+      "step": "cache_missed_edge_xsects"
+     },
+     {
+      "step": "fix_missed_edge_xsects"
+     },
+     {
+      "step": "fix_uncontained_edges"
+     },
+     {
+      "step": "fix_bad_gaps"
+     },
+     {
+      "step": "set_old_counts",
+      "counts": [
+       0,
+       0,
+       6
+      ]
+     },
+     {
+      "step": "set_done_heal_op",
+      "op": 17
+     },
+     {
+      "step": "cache_face_props_stage2"
+     },
+     {
+      "step": "face_snapshot"
+     },
+     {
+      "step": "set_done_heal_op",
+      "op": 20
+     },
+     {
+      "step": "fix_bad_sheets"
+     },
+     {
+      "step": "set_done_heal_op",
+      "op": 21
+     },
+     {
+      "step": "cache_face_props_stage3"
+     },
+     {
+      "step": "set_done_heal_op",
+      "op": 24
+     },
+     {
+      "step": "make_uv_trim_curves",
+      "make": false
+     },
+     {
+      "step": "face_snapshot"
+     }
+    ],
+    "validate_only": false
+   }
+  },
+  {
+   "name": "old_count_equal_faces_only",
+   "inputs": {
+    "case": "heal",
+    "brep": {
+     "kind": "box",
+     "size": [
+      1,
+      2,
+      3
+     ]
+    },
+    "init_gaps": false,
+    "targets": {
+     "v": "all",
+     "e": "all",
+     "f": "all"
+    },
+    "steps": [
+     {
+      "step": "cache_face_props_gaps"
+     },
+     {
+      "step": "set_old_counts",
+      "counts": [
+       0,
+       0,
+       6
+      ]
+     },
+     {
+      "step": "set_done_heal_op",
+      "op": 17
+     },
+     {
+      "step": "cache_face_props_stage2"
+     },
+     {
+      "step": "face_snapshot"
+     },
+     {
+      "step": "set_done_heal_op",
+      "op": 20
+     },
+     {
+      "step": "fix_bad_sheets"
+     },
+     {
+      "step": "set_done_heal_op",
+      "op": 21
+     },
+     {
+      "step": "cache_face_props_stage3"
+     },
+     {
+      "step": "set_done_heal_op",
+      "op": 24
+     },
+     {
+      "step": "make_uv_trim_curves",
+      "make": false
+     },
+     {
+      "step": "face_snapshot"
+     }
+    ],
+    "validate_only": false
+   }
+  },
+  {
+   "name": "old_count_above",
+   "inputs": {
+    "case": "heal",
+    "brep": {
+     "kind": "box",
+     "size": [
+      1,
+      2,
+      3
+     ]
+    },
+    "init_gaps": false,
+    "targets": {
+     "v": "all",
+     "e": "all",
+     "f": "all"
+    },
+    "steps": [
+     {
+      "step": "cache_edge_props"
+     },
+     {
+      "step": "cache_vertex_props"
+     },
+     {
+      "step": "cache_face_props_gaps"
+     },
+     {
+      "step": "cache_coin_vertices"
+     },
+     {
+      "step": "cache_coin_edges"
+     },
+     {
+      "step": "fix_coin_edges"
+     },
+     {
+      "step": "cache_missed_edge_xsects"
+     },
+     {
+      "step": "fix_missed_edge_xsects"
+     },
+     {
+      "step": "fix_uncontained_edges"
+     },
+     {
+      "step": "fix_bad_gaps"
+     },
+     {
+      "step": "set_old_counts",
+      "counts": [
+       0,
+       0,
+       9
+      ]
+     },
+     {
+      "step": "set_done_heal_op",
+      "op": 17
+     },
+     {
+      "step": "cache_face_props_stage2"
+     },
+     {
+      "step": "face_snapshot"
+     },
+     {
+      "step": "set_done_heal_op",
+      "op": 20
+     },
+     {
+      "step": "fix_bad_sheets"
+     },
+     {
+      "step": "set_done_heal_op",
+      "op": 21
+     },
+     {
+      "step": "cache_face_props_stage3"
+     },
+     {
+      "step": "set_done_heal_op",
+      "op": 24
+     },
+     {
+      "step": "make_uv_trim_curves",
+      "make": false
+     },
+     {
+      "step": "face_snapshot"
+     }
+    ],
+    "validate_only": false
+   }
+  },
+  {
+   "name": "old_count_above_faces_only",
+   "inputs": {
+    "case": "heal",
+    "brep": {
+     "kind": "box",
+     "size": [
+      1,
+      2,
+      3
+     ]
+    },
+    "init_gaps": false,
+    "targets": {
+     "v": "all",
+     "e": "all",
+     "f": "all"
+    },
+    "steps": [
+     {
+      "step": "cache_face_props_gaps"
+     },
+     {
+      "step": "set_old_counts",
+      "counts": [
+       0,
+       0,
+       9
+      ]
+     },
+     {
+      "step": "set_done_heal_op",
+      "op": 17
+     },
+     {
+      "step": "cache_face_props_stage2"
+     },
+     {
+      "step": "face_snapshot"
+     },
+     {
+      "step": "set_done_heal_op",
+      "op": 20
+     },
+     {
+      "step": "fix_bad_sheets"
+     },
+     {
+      "step": "set_done_heal_op",
+      "op": 21
+     },
+     {
+      "step": "cache_face_props_stage3"
+     },
+     {
+      "step": "set_done_heal_op",
+      "op": 24
+     },
+     {
+      "step": "make_uv_trim_curves",
+      "make": false
+     },
+     {
+      "step": "face_snapshot"
+     }
+    ],
+    "validate_only": false
+   }
+  },
+  {
+   "name": "old_count_tail",
+   "inputs": {
+    "case": "heal",
+    "brep": {
+     "kind": "box",
+     "size": [
+      1,
+      2,
+      3
+     ]
+    },
+    "init_gaps": false,
+    "targets": {
+     "v": "all",
+     "e": "all",
+     "f": "all"
+    },
+    "steps": [
+     {
+      "step": "cache_edge_props"
+     },
+     {
+      "step": "cache_vertex_props"
+     },
+     {
+      "step": "cache_face_props_gaps"
+     },
+     {
+      "step": "cache_coin_vertices"
+     },
+     {
+      "step": "cache_coin_edges"
+     },
+     {
+      "step": "fix_coin_edges"
+     },
+     {
+      "step": "cache_missed_edge_xsects"
+     },
+     {
+      "step": "fix_missed_edge_xsects"
+     },
+     {
+      "step": "fix_uncontained_edges"
+     },
+     {
+      "step": "fix_bad_gaps"
+     },
+     {
+      "step": "set_old_counts",
+      "counts": [
+       0,
+       0,
+       4
+      ]
+     },
+     {
+      "step": "set_done_heal_op",
+      "op": 17
+     },
+     {
+      "step": "cache_face_props_stage2"
+     },
+     {
+      "step": "face_snapshot"
+     },
+     {
+      "step": "set_done_heal_op",
+      "op": 20
+     },
+     {
+      "step": "fix_bad_sheets"
+     },
+     {
+      "step": "set_done_heal_op",
+      "op": 21
+     },
+     {
+      "step": "cache_face_props_stage3"
+     },
+     {
+      "step": "set_done_heal_op",
+      "op": 24
+     },
+     {
+      "step": "make_uv_trim_curves",
+      "make": false
+     },
+     {
+      "step": "face_snapshot"
+     }
+    ],
+    "validate_only": false
+   }
+  },
+  {
+   "name": "old_count_tail_faces_only",
+   "inputs": {
+    "case": "heal",
+    "brep": {
+     "kind": "box",
+     "size": [
+      1,
+      2,
+      3
+     ]
+    },
+    "init_gaps": false,
+    "targets": {
+     "v": "all",
+     "e": "all",
+     "f": "all"
+    },
+    "steps": [
+     {
+      "step": "cache_face_props_gaps"
+     },
+     {
+      "step": "set_old_counts",
+      "counts": [
+       0,
+       0,
+       4
+      ]
+     },
+     {
+      "step": "set_done_heal_op",
+      "op": 17
+     },
+     {
+      "step": "cache_face_props_stage2"
+     },
+     {
+      "step": "face_snapshot"
+     },
+     {
+      "step": "set_done_heal_op",
+      "op": 20
+     },
+     {
+      "step": "fix_bad_sheets"
+     },
+     {
+      "step": "set_done_heal_op",
+      "op": 21
+     },
+     {
+      "step": "cache_face_props_stage3"
+     },
+     {
+      "step": "set_done_heal_op",
+      "op": 24
+     },
+     {
+      "step": "make_uv_trim_curves",
+      "make": false
+     },
+     {
+      "step": "face_snapshot"
+     }
+    ],
+    "validate_only": false
+   }
+  },
+  {
+   "name": "move_then_stage",
+   "inputs": {
+    "case": "heal",
+    "brep": {
+     "kind": "box",
+     "size": [
+      1,
+      2,
+      3
+     ]
+    },
+    "init_gaps": false,
+    "targets": {
+     "v": "all",
+     "e": "all",
+     "f": "all"
+    },
+    "steps": [
+     {
+      "step": "cache_edge_props"
+     },
+     {
+      "step": "cache_vertex_props"
+     },
+     {
+      "step": "cache_face_props_gaps"
+     },
+     {
+      "step": "cache_coin_vertices"
+     },
+     {
+      "step": "cache_coin_edges"
+     },
+     {
+      "step": "fix_coin_edges"
+     },
+     {
+      "step": "cache_missed_edge_xsects"
+     },
+     {
+      "step": "fix_missed_edge_xsects"
+     },
+     {
+      "step": "fix_uncontained_edges"
+     },
+     {
+      "step": "fix_bad_gaps"
+     },
+     {
+      "step": "move_to_not_yet",
+      "sel": 2
+     },
+     {
+      "step": "move_to_not_yet",
+      "sel": 2
+     },
+     {
+      "step": "set_done_heal_op",
+      "op": 17
+     },
+     {
+      "step": "cache_face_props_stage2"
+     },
+     {
+      "step": "face_snapshot"
+     },
+     {
+      "step": "set_done_heal_op",
+      "op": 20
+     },
+     {
+      "step": "fix_bad_sheets"
+     },
+     {
+      "step": "set_done_heal_op",
+      "op": 21
+     },
+     {
+      "step": "cache_face_props_stage3"
+     },
+     {
+      "step": "set_done_heal_op",
+      "op": 24
+     },
+     {
+      "step": "make_uv_trim_curves",
+      "make": false
+     },
+     {
+      "step": "face_snapshot"
+     }
+    ],
+    "validate_only": false
+   }
+  },
+  {
+   "name": "move_then_stage_faces_only",
+   "inputs": {
+    "case": "heal",
+    "brep": {
+     "kind": "box",
+     "size": [
+      1,
+      2,
+      3
+     ]
+    },
+    "init_gaps": false,
+    "targets": {
+     "v": "all",
+     "e": "all",
+     "f": "all"
+    },
+    "steps": [
+     {
+      "step": "cache_face_props_gaps"
+     },
+     {
+      "step": "move_to_not_yet",
+      "sel": 2
+     },
+     {
+      "step": "move_to_not_yet",
+      "sel": 2
+     },
+     {
+      "step": "set_done_heal_op",
+      "op": 17
+     },
+     {
+      "step": "cache_face_props_stage2"
+     },
+     {
+      "step": "face_snapshot"
+     },
+     {
+      "step": "set_done_heal_op",
+      "op": 20
+     },
+     {
+      "step": "fix_bad_sheets"
+     },
+     {
+      "step": "set_done_heal_op",
+      "op": 21
+     },
+     {
+      "step": "cache_face_props_stage3"
+     },
+     {
+      "step": "set_done_heal_op",
+      "op": 24
+     },
+     {
+      "step": "make_uv_trim_curves",
+      "make": false
+     },
+     {
+      "step": "face_snapshot"
+     }
+    ],
+    "validate_only": false
+   }
+  },
+  {
+   "name": "move_twice_same",
+   "inputs": {
+    "case": "heal",
+    "brep": {
+     "kind": "box",
+     "size": [
+      1,
+      2,
+      3
+     ]
+    },
+    "init_gaps": false,
+    "targets": {
+     "v": "all",
+     "e": "all",
+     "f": "all"
+    },
+    "steps": [
+     {
+      "step": "cache_edge_props"
+     },
+     {
+      "step": "cache_vertex_props"
+     },
+     {
+      "step": "cache_face_props_gaps"
+     },
+     {
+      "step": "cache_coin_vertices"
+     },
+     {
+      "step": "cache_coin_edges"
+     },
+     {
+      "step": "fix_coin_edges"
+     },
+     {
+      "step": "cache_missed_edge_xsects"
+     },
+     {
+      "step": "fix_missed_edge_xsects"
+     },
+     {
+      "step": "fix_uncontained_edges"
+     },
+     {
+      "step": "fix_bad_gaps"
+     },
+     {
+      "step": "set_done_heal_op",
+      "op": 17
+     },
+     {
+      "step": "cache_face_props_stage2"
+     },
+     {
+      "step": "move_to_not_yet",
+      "sel": 0
+     },
+     {
+      "step": "move_to_not_yet",
+      "sel": 5
+     }
+    ],
+    "validate_only": false
+   }
+  },
+  {
+   "name": "move_twice_same_faces_only",
+   "inputs": {
+    "case": "heal",
+    "brep": {
+     "kind": "box",
+     "size": [
+      1,
+      2,
+      3
+     ]
+    },
+    "init_gaps": false,
+    "targets": {
+     "v": "all",
+     "e": "all",
+     "f": "all"
+    },
+    "steps": [
+     {
+      "step": "cache_face_props_gaps"
+     },
+     {
+      "step": "set_done_heal_op",
+      "op": 17
+     },
+     {
+      "step": "cache_face_props_stage2"
+     },
+     {
+      "step": "move_to_not_yet",
+      "sel": 0
+     },
+     {
+      "step": "move_to_not_yet",
+      "sel": 5
+     }
+    ],
+    "validate_only": false
+   }
+  },
+  {
+   "name": "remove_then_stage2",
+   "inputs": {
+    "case": "heal",
+    "brep": {
+     "kind": "box",
+     "size": [
+      1,
+      2,
+      3
+     ]
+    },
+    "init_gaps": false,
+    "targets": {
+     "v": "all",
+     "e": "all",
+     "f": "all"
+    },
+    "steps": [
+     {
+      "step": "cache_edge_props"
+     },
+     {
+      "step": "cache_vertex_props"
+     },
+     {
+      "step": "cache_face_props_gaps"
+     },
+     {
+      "step": "cache_coin_vertices"
+     },
+     {
+      "step": "cache_coin_edges"
+     },
+     {
+      "step": "fix_coin_edges"
+     },
+     {
+      "step": "cache_missed_edge_xsects"
+     },
+     {
+      "step": "fix_missed_edge_xsects"
+     },
+     {
+      "step": "fix_uncontained_edges"
+     },
+     {
+      "step": "fix_bad_gaps"
+     },
+     {
+      "step": "remove_face_props",
+      "sel": 1
+     },
+     {
+      "step": "set_done_heal_op",
+      "op": 17
+     },
+     {
+      "step": "cache_face_props_stage2"
+     },
+     {
+      "step": "face_snapshot"
+     }
+    ],
+    "validate_only": false
+   }
+  },
+  {
+   "name": "remove_then_stage2_faces_only",
+   "inputs": {
+    "case": "heal",
+    "brep": {
+     "kind": "box",
+     "size": [
+      1,
+      2,
+      3
+     ]
+    },
+    "init_gaps": false,
+    "targets": {
+     "v": "all",
+     "e": "all",
+     "f": "all"
+    },
+    "steps": [
+     {
+      "step": "cache_face_props_gaps"
+     },
+     {
+      "step": "remove_face_props",
+      "sel": 1
+     },
+     {
+      "step": "set_done_heal_op",
+      "op": 17
+     },
+     {
+      "step": "cache_face_props_stage2"
+     },
+     {
+      "step": "face_snapshot"
+     }
+    ],
+    "validate_only": false
+   }
+  },
+  {
+   "name": "stage2_twice",
+   "inputs": {
+    "case": "heal",
+    "brep": {
+     "kind": "box",
+     "size": [
+      1,
+      2,
+      3
+     ]
+    },
+    "init_gaps": false,
+    "targets": {
+     "v": "all",
+     "e": "all",
+     "f": "all"
+    },
+    "steps": [
+     {
+      "step": "cache_edge_props"
+     },
+     {
+      "step": "cache_vertex_props"
+     },
+     {
+      "step": "cache_face_props_gaps"
+     },
+     {
+      "step": "cache_coin_vertices"
+     },
+     {
+      "step": "cache_coin_edges"
+     },
+     {
+      "step": "fix_coin_edges"
+     },
+     {
+      "step": "cache_missed_edge_xsects"
+     },
+     {
+      "step": "fix_missed_edge_xsects"
+     },
+     {
+      "step": "fix_uncontained_edges"
+     },
+     {
+      "step": "fix_bad_gaps"
+     },
+     {
+      "step": "set_done_heal_op",
+      "op": 17
+     },
+     {
+      "step": "cache_face_props_stage2"
+     },
+     {
+      "step": "cache_face_props_stage2"
+     },
+     {
+      "step": "face_snapshot"
+     }
+    ],
+    "validate_only": false
+   }
+  },
+  {
+   "name": "stage2_twice_faces_only",
+   "inputs": {
+    "case": "heal",
+    "brep": {
+     "kind": "box",
+     "size": [
+      1,
+      2,
+      3
+     ]
+    },
+    "init_gaps": false,
+    "targets": {
+     "v": "all",
+     "e": "all",
+     "f": "all"
+    },
+    "steps": [
+     {
+      "step": "cache_face_props_gaps"
+     },
+     {
+      "step": "set_done_heal_op",
+      "op": 17
+     },
+     {
+      "step": "cache_face_props_stage2"
+     },
+     {
+      "step": "cache_face_props_stage2"
+     },
+     {
+      "step": "face_snapshot"
+     }
+    ],
+    "validate_only": false
+   }
+  },
+  {
+   "name": "stage3_twice_low",
+   "inputs": {
+    "case": "heal",
+    "brep": {
+     "kind": "box",
+     "size": [
+      1,
+      2,
+      3
+     ]
+    },
+    "init_gaps": false,
+    "targets": {
+     "v": "all",
+     "e": "all",
+     "f": "all"
+    },
+    "steps": [
+     {
+      "step": "cache_edge_props"
+     },
+     {
+      "step": "cache_vertex_props"
+     },
+     {
+      "step": "cache_face_props_gaps"
+     },
+     {
+      "step": "cache_coin_vertices"
+     },
+     {
+      "step": "cache_coin_edges"
+     },
+     {
+      "step": "fix_coin_edges"
+     },
+     {
+      "step": "cache_missed_edge_xsects"
+     },
+     {
+      "step": "fix_missed_edge_xsects"
+     },
+     {
+      "step": "fix_uncontained_edges"
+     },
+     {
+      "step": "fix_bad_gaps"
+     },
+     {
+      "step": "set_done_heal_op",
+      "op": 18
+     },
+     {
+      "step": "cache_face_props_stage3"
+     },
+     {
+      "step": "cache_face_props_stage3"
+     }
+    ],
+    "validate_only": false
+   }
+  },
+  {
+   "name": "stage3_twice_low_faces_only",
+   "inputs": {
+    "case": "heal",
+    "brep": {
+     "kind": "box",
+     "size": [
+      1,
+      2,
+      3
+     ]
+    },
+    "init_gaps": false,
+    "targets": {
+     "v": "all",
+     "e": "all",
+     "f": "all"
+    },
+    "steps": [
+     {
+      "step": "cache_face_props_gaps"
+     },
+     {
+      "step": "set_done_heal_op",
+      "op": 18
+     },
+     {
+      "step": "cache_face_props_stage3"
+     },
+     {
+      "step": "cache_face_props_stage3"
+     }
+    ],
+    "validate_only": false
+   }
+  },
+  {
+   "name": "reset_keep_new",
+   "inputs": {
+    "case": "heal",
+    "brep": {
+     "kind": "box",
+     "size": [
+      1,
+      2,
+      3
+     ]
+    },
+    "init_gaps": false,
+    "targets": {
+     "v": "all",
+     "e": "all",
+     "f": "all"
+    },
+    "steps": [
+     {
+      "step": "cache_edge_props"
+     },
+     {
+      "step": "cache_vertex_props"
+     },
+     {
+      "step": "cache_face_props_gaps"
+     },
+     {
+      "step": "cache_coin_vertices"
+     },
+     {
+      "step": "cache_coin_edges"
+     },
+     {
+      "step": "fix_coin_edges"
+     },
+     {
+      "step": "cache_missed_edge_xsects"
+     },
+     {
+      "step": "fix_missed_edge_xsects"
+     },
+     {
+      "step": "fix_uncontained_edges"
+     },
+     {
+      "step": "fix_bad_gaps"
+     },
+     {
+      "step": "set_done_heal_op",
+      "op": 17
+     },
+     {
+      "step": "cache_face_props_stage2"
+     },
+     {
+      "step": "face_snapshot"
+     },
+     {
+      "step": "set_done_heal_op",
+      "op": 20
+     },
+     {
+      "step": "fix_bad_sheets"
+     },
+     {
+      "step": "set_done_heal_op",
+      "op": 21
+     },
+     {
+      "step": "cache_face_props_stage3"
+     },
+     {
+      "step": "set_done_heal_op",
+      "op": 24
+     },
+     {
+      "step": "make_uv_trim_curves",
+      "make": false
+     },
+     {
+      "step": "face_snapshot"
+     },
+     {
+      "step": "reset",
+      "new_obj_arrays": false
+     }
+    ],
+    "validate_only": false
+   }
+  },
+  {
+   "name": "reset_keep_new_faces_only",
+   "inputs": {
+    "case": "heal",
+    "brep": {
+     "kind": "box",
+     "size": [
+      1,
+      2,
+      3
+     ]
+    },
+    "init_gaps": false,
+    "targets": {
+     "v": "all",
+     "e": "all",
+     "f": "all"
+    },
+    "steps": [
+     {
+      "step": "cache_face_props_gaps"
+     },
+     {
+      "step": "set_done_heal_op",
+      "op": 17
+     },
+     {
+      "step": "cache_face_props_stage2"
+     },
+     {
+      "step": "face_snapshot"
+     },
+     {
+      "step": "set_done_heal_op",
+      "op": 20
+     },
+     {
+      "step": "fix_bad_sheets"
+     },
+     {
+      "step": "set_done_heal_op",
+      "op": 21
+     },
+     {
+      "step": "cache_face_props_stage3"
+     },
+     {
+      "step": "set_done_heal_op",
+      "op": 24
+     },
+     {
+      "step": "make_uv_trim_curves",
+      "make": false
+     },
+     {
+      "step": "face_snapshot"
+     },
+     {
+      "step": "reset",
+      "new_obj_arrays": false
+     }
+    ],
+    "validate_only": false
+   }
+  },
+  {
+   "name": "reset_fresh",
+   "inputs": {
+    "case": "heal",
+    "brep": {
+     "kind": "box",
+     "size": [
+      1,
+      2,
+      3
+     ]
+    },
+    "init_gaps": false,
+    "targets": {
+     "v": "all",
+     "e": "all",
+     "f": "all"
+    },
+    "steps": [
+     {
+      "step": "reset",
+      "new_obj_arrays": true
+     }
+    ],
+    "validate_only": false
+   }
+  },
+  {
+   "name": "heal_brep_null",
+   "inputs": {
+    "case": "heal",
+    "brep": {
+     "kind": "box",
+     "size": [
+      1,
+      2,
+      3
+     ]
+    },
+    "init_gaps": false,
+    "targets": {
+     "v": "all",
+     "e": "all",
+     "f": "all"
+    },
+    "steps": [
+     {
+      "step": "cache_edge_props"
+     },
+     {
+      "step": "cache_vertex_props"
+     },
+     {
+      "step": "cache_face_props_gaps"
+     },
+     {
+      "step": "cache_coin_vertices"
+     },
+     {
+      "step": "cache_coin_edges"
+     },
+     {
+      "step": "fix_coin_edges"
+     },
+     {
+      "step": "cache_missed_edge_xsects"
+     },
+     {
+      "step": "fix_missed_edge_xsects"
+     },
+     {
+      "step": "fix_uncontained_edges"
+     },
+     {
+      "step": "fix_bad_gaps"
+     },
+     {
+      "step": "heal_brep",
+      "mode": 0,
+      "op": 26,
+      "make": true
+     }
+    ],
+    "validate_only": false
+   }
+  },
+  {
+   "name": "heal_brep_null_faces_only",
+   "inputs": {
+    "case": "heal",
+    "brep": {
+     "kind": "box",
+     "size": [
+      1,
+      2,
+      3
+     ]
+    },
+    "init_gaps": false,
+    "targets": {
+     "v": "all",
+     "e": "all",
+     "f": "all"
+    },
+    "steps": [
+     {
+      "step": "cache_face_props_gaps"
+     },
+     {
+      "step": "heal_brep",
+      "mode": 0,
+      "op": 26,
+      "make": true
+     }
+    ],
+    "validate_only": false
+   }
+  },
+  {
+   "name": "heal_brep_null_then_stage",
+   "inputs": {
+    "case": "heal",
+    "brep": {
+     "kind": "box",
+     "size": [
+      1,
+      2,
+      3
+     ]
+    },
+    "init_gaps": false,
+    "targets": {
+     "v": "all",
+     "e": "all",
+     "f": "all"
+    },
+    "steps": [
+     {
+      "step": "cache_edge_props"
+     },
+     {
+      "step": "cache_vertex_props"
+     },
+     {
+      "step": "cache_face_props_gaps"
+     },
+     {
+      "step": "cache_coin_vertices"
+     },
+     {
+      "step": "cache_coin_edges"
+     },
+     {
+      "step": "fix_coin_edges"
+     },
+     {
+      "step": "cache_missed_edge_xsects"
+     },
+     {
+      "step": "fix_missed_edge_xsects"
+     },
+     {
+      "step": "fix_uncontained_edges"
+     },
+     {
+      "step": "fix_bad_gaps"
+     },
+     {
+      "step": "heal_brep",
+      "mode": 0,
+      "op": 3,
+      "make": false
+     },
+     {
+      "step": "set_done_heal_op",
+      "op": 17
+     },
+     {
+      "step": "cache_face_props_stage2"
+     },
+     {
+      "step": "face_snapshot"
+     },
+     {
+      "step": "set_done_heal_op",
+      "op": 20
+     },
+     {
+      "step": "fix_bad_sheets"
+     },
+     {
+      "step": "set_done_heal_op",
+      "op": 21
+     },
+     {
+      "step": "cache_face_props_stage3"
+     },
+     {
+      "step": "set_done_heal_op",
+      "op": 24
+     },
+     {
+      "step": "make_uv_trim_curves",
+      "make": false
+     },
+     {
+      "step": "face_snapshot"
+     }
+    ],
+    "validate_only": false
+   }
+  },
+  {
+   "name": "heal_brep_null_then_stage_faces_only",
+   "inputs": {
+    "case": "heal",
+    "brep": {
+     "kind": "box",
+     "size": [
+      1,
+      2,
+      3
+     ]
+    },
+    "init_gaps": false,
+    "targets": {
+     "v": "all",
+     "e": "all",
+     "f": "all"
+    },
+    "steps": [
+     {
+      "step": "cache_face_props_gaps"
+     },
+     {
+      "step": "heal_brep",
+      "mode": 0,
+      "op": 3,
+      "make": false
+     },
+     {
+      "step": "set_done_heal_op",
+      "op": 17
+     },
+     {
+      "step": "cache_face_props_stage2"
+     },
+     {
+      "step": "face_snapshot"
+     },
+     {
+      "step": "set_done_heal_op",
+      "op": 20
+     },
+     {
+      "step": "fix_bad_sheets"
+     },
+     {
+      "step": "set_done_heal_op",
+      "op": 21
+     },
+     {
+      "step": "cache_face_props_stage3"
+     },
+     {
+      "step": "set_done_heal_op",
+      "op": 24
+     },
+     {
+      "step": "make_uv_trim_curves",
+      "make": false
+     },
+     {
+      "step": "face_snapshot"
+     }
+    ],
+    "validate_only": false
+   }
+  },
+  {
+   "name": "heal_brep_targets",
+   "inputs": {
+    "case": "heal",
+    "brep": {
+     "kind": "box",
+     "size": [
+      1,
+      2,
+      3
+     ]
+    },
+    "init_gaps": false,
+    "targets": {
+     "v": "all",
+     "e": "all",
+     "f": "all"
+    },
+    "steps": [
+     {
+      "step": "heal_brep",
+      "mode": 2,
+      "op": 26,
+      "make": false,
+      "targets": {
+       "v": "all",
+       "e": "all",
+       "f": {
+        "list": [
+         0,
+         3
+        ]
+       }
+      }
+     }
+    ],
+    "validate_only": false
+   }
+  },
+  {
+   "name": "heal_brep_op_none",
+   "inputs": {
+    "case": "heal",
+    "brep": {
+     "kind": "box",
+     "size": [
+      1,
+      2,
+      3
+     ]
+    },
+    "init_gaps": false,
+    "targets": {
+     "v": "all",
+     "e": "all",
+     "f": "all"
+    },
+    "steps": [
+     {
+      "step": "heal_brep",
+      "mode": 1,
+      "op": 0,
+      "make": false
+     }
+    ],
+    "validate_only": false
+   }
+  },
+  {
+   "name": "fix_infinite_region_fresh",
+   "inputs": {
+    "case": "heal",
+    "brep": {
+     "kind": "box",
+     "size": [
+      1,
+      2,
+      3
+     ]
+    },
+    "init_gaps": false,
+    "targets": {
+     "v": "all",
+     "e": "all",
+     "f": "all"
+    },
+    "steps": [
+     {
+      "step": "fix_infinite_region"
+     }
+    ],
+    "validate_only": false
+   }
+  },
+  {
+   "name": "box_scale_1e-4_min",
+   "inputs": {
+    "case": "heal",
+    "brep": {
+     "kind": "box",
+     "size": [
+      0.0001,
+      0.0001,
+      0.0001
+     ]
+    },
+    "init_gaps": false,
+    "targets": {
+     "v": "all",
+     "e": "all",
+     "f": "all"
+    },
+    "steps": [
+     {
+      "step": "cache_edge_props"
+     },
+     {
+      "step": "cache_vertex_props"
+     },
+     {
+      "step": "cache_face_props_gaps"
+     },
+     {
+      "step": "cache_coin_vertices"
+     },
+     {
+      "step": "cache_coin_edges"
+     },
+     {
+      "step": "fix_coin_edges"
+     },
+     {
+      "step": "cache_missed_edge_xsects"
+     },
+     {
+      "step": "fix_missed_edge_xsects"
+     },
+     {
+      "step": "fix_uncontained_edges"
+     },
+     {
+      "step": "fix_bad_gaps"
+     },
+     {
+      "step": "set_done_heal_op",
+      "op": 17
+     },
+     {
+      "step": "cache_face_props_stage2"
+     },
+     {
+      "step": "face_snapshot"
+     },
+     {
+      "step": "set_done_heal_op",
+      "op": 20
+     },
+     {
+      "step": "fix_bad_sheets"
+     },
+     {
+      "step": "set_done_heal_op",
+      "op": 21
+     },
+     {
+      "step": "cache_face_props_stage3"
+     },
+     {
+      "step": "set_done_heal_op",
+      "op": 24
+     },
+     {
+      "step": "make_uv_trim_curves",
+      "make": false
+     },
+     {
+      "step": "face_snapshot"
+     }
+    ],
+    "validate_only": false
+   }
+  },
+  {
+   "name": "box_scale_1e-4_min_faces_only",
+   "inputs": {
+    "case": "heal",
+    "brep": {
+     "kind": "box",
+     "size": [
+      0.0001,
+      0.0001,
+      0.0001
+     ]
+    },
+    "init_gaps": false,
+    "targets": {
+     "v": "all",
+     "e": "all",
+     "f": "all"
+    },
+    "steps": [
+     {
+      "step": "cache_face_props_gaps"
+     },
+     {
+      "step": "set_done_heal_op",
+      "op": 17
+     },
+     {
+      "step": "cache_face_props_stage2"
+     },
+     {
+      "step": "face_snapshot"
+     },
+     {
+      "step": "set_done_heal_op",
+      "op": 20
+     },
+     {
+      "step": "fix_bad_sheets"
+     },
+     {
+      "step": "set_done_heal_op",
+      "op": 21
+     },
+     {
+      "step": "cache_face_props_stage3"
+     },
+     {
+      "step": "set_done_heal_op",
+      "op": 24
+     },
+     {
+      "step": "make_uv_trim_curves",
+      "make": false
+     },
+     {
+      "step": "face_snapshot"
+     }
+    ],
+    "validate_only": false
+   }
+  },
+  {
+   "name": "box_scale_0.0001_0.0002_0.0003",
+   "inputs": {
+    "case": "heal",
+    "brep": {
+     "kind": "box",
+     "size": [
+      0.0001,
+      0.0002,
+      0.0003
+     ]
+    },
+    "init_gaps": false,
+    "targets": {
+     "v": "all",
+     "e": "all",
+     "f": "all"
+    },
+    "steps": [
+     {
+      "step": "cache_edge_props"
+     },
+     {
+      "step": "cache_vertex_props"
+     },
+     {
+      "step": "cache_face_props_gaps"
+     },
+     {
+      "step": "cache_coin_vertices"
+     },
+     {
+      "step": "cache_coin_edges"
+     },
+     {
+      "step": "fix_coin_edges"
+     },
+     {
+      "step": "cache_missed_edge_xsects"
+     },
+     {
+      "step": "fix_missed_edge_xsects"
+     },
+     {
+      "step": "fix_uncontained_edges"
+     },
+     {
+      "step": "fix_bad_gaps"
+     },
+     {
+      "step": "set_done_heal_op",
+      "op": 17
+     },
+     {
+      "step": "cache_face_props_stage2"
+     },
+     {
+      "step": "face_snapshot"
+     },
+     {
+      "step": "set_done_heal_op",
+      "op": 20
+     },
+     {
+      "step": "fix_bad_sheets"
+     },
+     {
+      "step": "set_done_heal_op",
+      "op": 21
+     },
+     {
+      "step": "cache_face_props_stage3"
+     },
+     {
+      "step": "set_done_heal_op",
+      "op": 24
+     },
+     {
+      "step": "make_uv_trim_curves",
+      "make": false
+     },
+     {
+      "step": "face_snapshot"
+     }
+    ],
+    "validate_only": false
+   }
+  },
+  {
+   "name": "box_scale_0.0001_0.0002_0.0003_faces_only",
+   "inputs": {
+    "case": "heal",
+    "brep": {
+     "kind": "box",
+     "size": [
+      0.0001,
+      0.0002,
+      0.0003
+     ]
+    },
+    "init_gaps": false,
+    "targets": {
+     "v": "all",
+     "e": "all",
+     "f": "all"
+    },
+    "steps": [
+     {
+      "step": "cache_face_props_gaps"
+     },
+     {
+      "step": "set_done_heal_op",
+      "op": 17
+     },
+     {
+      "step": "cache_face_props_stage2"
+     },
+     {
+      "step": "face_snapshot"
+     },
+     {
+      "step": "set_done_heal_op",
+      "op": 20
+     },
+     {
+      "step": "fix_bad_sheets"
+     },
+     {
+      "step": "set_done_heal_op",
+      "op": 21
+     },
+     {
+      "step": "cache_face_props_stage3"
+     },
+     {
+      "step": "set_done_heal_op",
+      "op": 24
+     },
+     {
+      "step": "make_uv_trim_curves",
+      "make": false
+     },
+     {
+      "step": "face_snapshot"
+     }
+    ],
+    "validate_only": false
+   }
+  },
+  {
+   "name": "box_scale_10000_10000_10000",
+   "inputs": {
+    "case": "heal",
+    "brep": {
+     "kind": "box",
+     "size": [
+      10000.0,
+      10000.0,
+      10000.0
+     ]
+    },
+    "init_gaps": false,
+    "targets": {
+     "v": "all",
+     "e": "all",
+     "f": "all"
+    },
+    "steps": [
+     {
+      "step": "cache_edge_props"
+     },
+     {
+      "step": "cache_vertex_props"
+     },
+     {
+      "step": "cache_face_props_gaps"
+     },
+     {
+      "step": "cache_coin_vertices"
+     },
+     {
+      "step": "cache_coin_edges"
+     },
+     {
+      "step": "fix_coin_edges"
+     },
+     {
+      "step": "cache_missed_edge_xsects"
+     },
+     {
+      "step": "fix_missed_edge_xsects"
+     },
+     {
+      "step": "fix_uncontained_edges"
+     },
+     {
+      "step": "fix_bad_gaps"
+     },
+     {
+      "step": "set_done_heal_op",
+      "op": 17
+     },
+     {
+      "step": "cache_face_props_stage2"
+     },
+     {
+      "step": "face_snapshot"
+     },
+     {
+      "step": "set_done_heal_op",
+      "op": 20
+     },
+     {
+      "step": "fix_bad_sheets"
+     },
+     {
+      "step": "set_done_heal_op",
+      "op": 21
+     },
+     {
+      "step": "cache_face_props_stage3"
+     },
+     {
+      "step": "set_done_heal_op",
+      "op": 24
+     },
+     {
+      "step": "make_uv_trim_curves",
+      "make": false
+     },
+     {
+      "step": "face_snapshot"
+     }
+    ],
+    "validate_only": false
+   }
+  },
+  {
+   "name": "box_scale_10000_10000_10000_faces_only",
+   "inputs": {
+    "case": "heal",
+    "brep": {
+     "kind": "box",
+     "size": [
+      10000.0,
+      10000.0,
+      10000.0
+     ]
+    },
+    "init_gaps": false,
+    "targets": {
+     "v": "all",
+     "e": "all",
+     "f": "all"
+    },
+    "steps": [
+     {
+      "step": "cache_face_props_gaps"
+     },
+     {
+      "step": "set_done_heal_op",
+      "op": 17
+     },
+     {
+      "step": "cache_face_props_stage2"
+     },
+     {
+      "step": "face_snapshot"
+     },
+     {
+      "step": "set_done_heal_op",
+      "op": 20
+     },
+     {
+      "step": "fix_bad_sheets"
+     },
+     {
+      "step": "set_done_heal_op",
+      "op": 21
+     },
+     {
+      "step": "cache_face_props_stage3"
+     },
+     {
+      "step": "set_done_heal_op",
+      "op": 24
+     },
+     {
+      "step": "make_uv_trim_curves",
+      "make": false
+     },
+     {
+      "step": "face_snapshot"
+     }
+    ],
+    "validate_only": false
+   }
+  },
+  {
+   "name": "box_scale_1e4_max",
+   "inputs": {
+    "case": "heal",
+    "brep": {
+     "kind": "box",
+     "size": [
+      10000.0,
+      10000.0,
+      10000.0
+     ]
+    },
+    "init_gaps": false,
+    "targets": {
+     "v": "all",
+     "e": "all",
+     "f": "all"
+    },
+    "steps": [
+     {
+      "step": "cache_edge_props"
+     },
+     {
+      "step": "cache_vertex_props"
+     },
+     {
+      "step": "cache_face_props_gaps"
+     },
+     {
+      "step": "cache_coin_vertices"
+     },
+     {
+      "step": "cache_coin_edges"
+     },
+     {
+      "step": "fix_coin_edges"
+     },
+     {
+      "step": "cache_missed_edge_xsects"
+     },
+     {
+      "step": "fix_missed_edge_xsects"
+     },
+     {
+      "step": "fix_uncontained_edges"
+     },
+     {
+      "step": "fix_bad_gaps"
+     },
+     {
+      "step": "set_done_heal_op",
+      "op": 17
+     },
+     {
+      "step": "cache_face_props_stage2"
+     },
+     {
+      "step": "face_snapshot"
+     },
+     {
+      "step": "set_done_heal_op",
+      "op": 20
+     },
+     {
+      "step": "fix_bad_sheets"
+     },
+     {
+      "step": "set_done_heal_op",
+      "op": 21
+     },
+     {
+      "step": "cache_face_props_stage3"
+     },
+     {
+      "step": "set_done_heal_op",
+      "op": 24
+     },
+     {
+      "step": "make_uv_trim_curves",
+      "make": false
+     },
+     {
+      "step": "face_snapshot"
+     }
+    ],
+    "validate_only": false
+   }
+  },
+  {
+   "name": "box_scale_1e4_max_faces_only",
+   "inputs": {
+    "case": "heal",
+    "brep": {
+     "kind": "box",
+     "size": [
+      10000.0,
+      10000.0,
+      10000.0
+     ]
+    },
+    "init_gaps": false,
+    "targets": {
+     "v": "all",
+     "e": "all",
+     "f": "all"
+    },
+    "steps": [
+     {
+      "step": "cache_face_props_gaps"
+     },
+     {
+      "step": "set_done_heal_op",
+      "op": 17
+     },
+     {
+      "step": "cache_face_props_stage2"
+     },
+     {
+      "step": "face_snapshot"
+     },
+     {
+      "step": "set_done_heal_op",
+      "op": 20
+     },
+     {
+      "step": "fix_bad_sheets"
+     },
+     {
+      "step": "set_done_heal_op",
+      "op": 21
+     },
+     {
+      "step": "cache_face_props_stage3"
+     },
+     {
+      "step": "set_done_heal_op",
+      "op": 24
+     },
+     {
+      "step": "make_uv_trim_curves",
+      "make": false
+     },
+     {
+      "step": "face_snapshot"
+     }
+    ],
+    "validate_only": false
+   }
+  },
+  {
+   "name": "box_scale_1_0.001_1000",
+   "inputs": {
+    "case": "heal",
+    "brep": {
+     "kind": "box",
+     "size": [
+      1,
+      0.001,
+      1000.0
+     ]
+    },
+    "init_gaps": false,
+    "targets": {
+     "v": "all",
+     "e": "all",
+     "f": "all"
+    },
+    "steps": [
+     {
+      "step": "cache_edge_props"
+     },
+     {
+      "step": "cache_vertex_props"
+     },
+     {
+      "step": "cache_face_props_gaps"
+     },
+     {
+      "step": "cache_coin_vertices"
+     },
+     {
+      "step": "cache_coin_edges"
+     },
+     {
+      "step": "fix_coin_edges"
+     },
+     {
+      "step": "cache_missed_edge_xsects"
+     },
+     {
+      "step": "fix_missed_edge_xsects"
+     },
+     {
+      "step": "fix_uncontained_edges"
+     },
+     {
+      "step": "fix_bad_gaps"
+     },
+     {
+      "step": "set_done_heal_op",
+      "op": 17
+     },
+     {
+      "step": "cache_face_props_stage2"
+     },
+     {
+      "step": "face_snapshot"
+     },
+     {
+      "step": "set_done_heal_op",
+      "op": 20
+     },
+     {
+      "step": "fix_bad_sheets"
+     },
+     {
+      "step": "set_done_heal_op",
+      "op": 21
+     },
+     {
+      "step": "cache_face_props_stage3"
+     },
+     {
+      "step": "set_done_heal_op",
+      "op": 24
+     },
+     {
+      "step": "make_uv_trim_curves",
+      "make": false
+     },
+     {
+      "step": "face_snapshot"
+     }
+    ],
+    "validate_only": false
+   }
+  },
+  {
+   "name": "box_scale_1_0.001_1000_faces_only",
+   "inputs": {
+    "case": "heal",
+    "brep": {
+     "kind": "box",
+     "size": [
+      1,
+      0.001,
+      1000.0
+     ]
+    },
+    "init_gaps": false,
+    "targets": {
+     "v": "all",
+     "e": "all",
+     "f": "all"
+    },
+    "steps": [
+     {
+      "step": "cache_face_props_gaps"
+     },
+     {
+      "step": "set_done_heal_op",
+      "op": 17
+     },
+     {
+      "step": "cache_face_props_stage2"
+     },
+     {
+      "step": "face_snapshot"
+     },
+     {
+      "step": "set_done_heal_op",
+      "op": 20
+     },
+     {
+      "step": "fix_bad_sheets"
+     },
+     {
+      "step": "set_done_heal_op",
+      "op": 21
+     },
+     {
+      "step": "cache_face_props_stage3"
+     },
+     {
+      "step": "set_done_heal_op",
+      "op": 24
+     },
+     {
+      "step": "make_uv_trim_curves",
+      "make": false
+     },
+     {
+      "step": "face_snapshot"
+     }
+    ],
+    "validate_only": false
+   }
+  },
+  {
+   "name": "sheet_face_plane",
+   "inputs": {
+    "case": "heal",
+    "brep": {
+     "kind": "file",
+     "file": "plane_square.smb",
+     "rebuild": false
+    },
+    "init_gaps": false,
+    "targets": {
+     "v": "all",
+     "e": "all",
+     "f": "all"
+    },
+    "steps": [
+     {
+      "step": "cache_edge_props"
+     },
+     {
+      "step": "cache_vertex_props"
+     },
+     {
+      "step": "cache_face_props_gaps"
+     },
+     {
+      "step": "cache_coin_vertices"
+     },
+     {
+      "step": "cache_coin_edges"
+     },
+     {
+      "step": "fix_coin_edges"
+     },
+     {
+      "step": "cache_missed_edge_xsects"
+     },
+     {
+      "step": "fix_missed_edge_xsects"
+     },
+     {
+      "step": "fix_uncontained_edges"
+     },
+     {
+      "step": "fix_bad_gaps"
+     },
+     {
+      "step": "set_done_heal_op",
+      "op": 17
+     },
+     {
+      "step": "cache_face_props_stage2"
+     },
+     {
+      "step": "face_snapshot"
+     },
+     {
+      "step": "set_done_heal_op",
+      "op": 20
+     },
+     {
+      "step": "fix_bad_sheets"
+     },
+     {
+      "step": "set_done_heal_op",
+      "op": 21
+     },
+     {
+      "step": "cache_face_props_stage3"
+     },
+     {
+      "step": "set_done_heal_op",
+      "op": 24
+     },
+     {
+      "step": "make_uv_trim_curves",
+      "make": false
+     },
+     {
+      "step": "face_snapshot"
+     },
+     {
+      "step": "fix_bad_sheets"
+     },
+     {
+      "step": "face_snapshot"
+     }
+    ],
+    "validate_only": false
+   }
+  },
+  {
+   "name": "sheet_face_plane_faces_only",
+   "inputs": {
+    "case": "heal",
+    "brep": {
+     "kind": "file",
+     "file": "plane_square.smb",
+     "rebuild": false
+    },
+    "init_gaps": false,
+    "targets": {
+     "v": "all",
+     "e": "all",
+     "f": "all"
+    },
+    "steps": [
+     {
+      "step": "cache_face_props_gaps"
+     },
+     {
+      "step": "set_done_heal_op",
+      "op": 17
+     },
+     {
+      "step": "cache_face_props_stage2"
+     },
+     {
+      "step": "face_snapshot"
+     },
+     {
+      "step": "set_done_heal_op",
+      "op": 20
+     },
+     {
+      "step": "fix_bad_sheets"
+     },
+     {
+      "step": "set_done_heal_op",
+      "op": 21
+     },
+     {
+      "step": "cache_face_props_stage3"
+     },
+     {
+      "step": "set_done_heal_op",
+      "op": 24
+     },
+     {
+      "step": "make_uv_trim_curves",
+      "make": false
+     },
+     {
+      "step": "face_snapshot"
+     },
+     {
+      "step": "fix_bad_sheets"
+     },
+     {
+      "step": "face_snapshot"
+     }
+    ],
+    "validate_only": false
+   }
+  },
+  {
+   "name": "sheet_face_disk_targets_subset",
+   "inputs": {
+    "case": "heal",
+    "brep": {
+     "kind": "file",
+     "file": "disk.smb",
+     "rebuild": false
+    },
+    "init_gaps": false,
+    "targets": {
+     "v": "none",
+     "e": "all",
+     "f": {
+      "list": [
+       0,
+       0
+      ]
+     }
+    },
+    "steps": [
+     {
+      "step": "cache_edge_props"
+     },
+     {
+      "step": "cache_vertex_props"
+     },
+     {
+      "step": "cache_face_props_gaps"
+     },
+     {
+      "step": "cache_coin_vertices"
+     },
+     {
+      "step": "cache_coin_edges"
+     },
+     {
+      "step": "fix_coin_edges"
+     },
+     {
+      "step": "cache_missed_edge_xsects"
+     },
+     {
+      "step": "fix_missed_edge_xsects"
+     },
+     {
+      "step": "fix_uncontained_edges"
+     },
+     {
+      "step": "fix_bad_gaps"
+     },
+     {
+      "step": "set_done_heal_op",
+      "op": 17
+     },
+     {
+      "step": "cache_face_props_stage2"
+     },
+     {
+      "step": "face_snapshot"
+     },
+     {
+      "step": "set_done_heal_op",
+      "op": 20
+     },
+     {
+      "step": "fix_bad_sheets"
+     },
+     {
+      "step": "set_done_heal_op",
+      "op": 21
+     },
+     {
+      "step": "cache_face_props_stage3"
+     },
+     {
+      "step": "set_done_heal_op",
+      "op": 24
+     },
+     {
+      "step": "make_uv_trim_curves",
+      "make": false
+     },
+     {
+      "step": "face_snapshot"
+     }
+    ],
+    "validate_only": false
+   }
+  },
+  {
+   "name": "sheet_face_disk_targets_subset_faces_only",
+   "inputs": {
+    "case": "heal",
+    "brep": {
+     "kind": "file",
+     "file": "disk.smb",
+     "rebuild": false
+    },
+    "init_gaps": false,
+    "targets": {
+     "v": "none",
+     "e": "all",
+     "f": {
+      "list": [
+       0,
+       0
+      ]
+     }
+    },
+    "steps": [
+     {
+      "step": "cache_face_props_gaps"
+     },
+     {
+      "step": "set_done_heal_op",
+      "op": 17
+     },
+     {
+      "step": "cache_face_props_stage2"
+     },
+     {
+      "step": "face_snapshot"
+     },
+     {
+      "step": "set_done_heal_op",
+      "op": 20
+     },
+     {
+      "step": "fix_bad_sheets"
+     },
+     {
+      "step": "set_done_heal_op",
+      "op": 21
+     },
+     {
+      "step": "cache_face_props_stage3"
+     },
+     {
+      "step": "set_done_heal_op",
+      "op": 24
+     },
+     {
+      "step": "make_uv_trim_curves",
+      "make": false
+     },
+     {
+      "step": "face_snapshot"
+     }
+    ],
+    "validate_only": false
+   }
+  },
+  {
+   "name": "sphere_low_op",
+   "inputs": {
+    "case": "heal",
+    "brep": {
+     "kind": "sphere",
+     "radius": 0.001,
+     "swap": false
+    },
+    "init_gaps": false,
+    "targets": {
+     "v": "all",
+     "e": "all",
+     "f": "all"
+    },
+    "steps": [
+     {
+      "step": "cache_edge_props"
+     },
+     {
+      "step": "cache_vertex_props"
+     },
+     {
+      "step": "cache_face_props_gaps"
+     },
+     {
+      "step": "cache_coin_vertices"
+     },
+     {
+      "step": "cache_coin_edges"
+     },
+     {
+      "step": "fix_coin_edges"
+     },
+     {
+      "step": "cache_missed_edge_xsects"
+     },
+     {
+      "step": "fix_missed_edge_xsects"
+     },
+     {
+      "step": "fix_uncontained_edges"
+     },
+     {
+      "step": "fix_bad_gaps"
+     },
+     {
+      "step": "set_done_heal_op",
+      "op": 4
+     },
+     {
+      "step": "cache_face_props_stage2"
+     },
+     {
+      "step": "face_snapshot"
+     }
+    ],
+    "validate_only": false
+   }
+  },
+  {
+   "name": "sphere_low_op_faces_only",
+   "inputs": {
+    "case": "heal",
+    "brep": {
+     "kind": "sphere",
+     "radius": 0.001,
+     "swap": false
+    },
+    "init_gaps": false,
+    "targets": {
+     "v": "all",
+     "e": "all",
+     "f": "all"
+    },
+    "steps": [
+     {
+      "step": "cache_face_props_gaps"
+     },
+     {
+      "step": "set_done_heal_op",
+      "op": 4
+     },
+     {
+      "step": "cache_face_props_stage2"
+     },
+     {
+      "step": "face_snapshot"
+     }
+    ],
+    "validate_only": false
+   }
+  },
+  {
+   "name": "sphere_big",
+   "inputs": {
+    "case": "heal",
+    "brep": {
+     "kind": "sphere",
+     "radius": 1000.0,
+     "swap": true
+    },
+    "init_gaps": false,
+    "targets": {
+     "v": "all",
+     "e": "all",
+     "f": "all"
+    },
+    "steps": [
+     {
+      "step": "cache_edge_props"
+     },
+     {
+      "step": "cache_vertex_props"
+     },
+     {
+      "step": "cache_face_props_gaps"
+     },
+     {
+      "step": "cache_coin_vertices"
+     },
+     {
+      "step": "cache_coin_edges"
+     },
+     {
+      "step": "fix_coin_edges"
+     },
+     {
+      "step": "cache_missed_edge_xsects"
+     },
+     {
+      "step": "fix_missed_edge_xsects"
+     },
+     {
+      "step": "fix_uncontained_edges"
+     },
+     {
+      "step": "fix_bad_gaps"
+     },
+     {
+      "step": "set_done_heal_op",
+      "op": 17
+     },
+     {
+      "step": "cache_face_props_stage2"
+     },
+     {
+      "step": "face_snapshot"
+     },
+     {
+      "step": "set_done_heal_op",
+      "op": 20
+     },
+     {
+      "step": "fix_bad_sheets"
+     },
+     {
+      "step": "set_done_heal_op",
+      "op": 21
+     },
+     {
+      "step": "cache_face_props_stage3"
+     },
+     {
+      "step": "set_done_heal_op",
+      "op": 24
+     },
+     {
+      "step": "make_uv_trim_curves",
+      "make": false
+     },
+     {
+      "step": "face_snapshot"
+     }
+    ],
+    "validate_only": false
+   }
+  },
+  {
+   "name": "sphere_big_faces_only",
+   "inputs": {
+    "case": "heal",
+    "brep": {
+     "kind": "sphere",
+     "radius": 1000.0,
+     "swap": true
+    },
+    "init_gaps": false,
+    "targets": {
+     "v": "all",
+     "e": "all",
+     "f": "all"
+    },
+    "steps": [
+     {
+      "step": "cache_face_props_gaps"
+     },
+     {
+      "step": "set_done_heal_op",
+      "op": 17
+     },
+     {
+      "step": "cache_face_props_stage2"
+     },
+     {
+      "step": "face_snapshot"
+     },
+     {
+      "step": "set_done_heal_op",
+      "op": 20
+     },
+     {
+      "step": "fix_bad_sheets"
+     },
+     {
+      "step": "set_done_heal_op",
+      "op": 21
+     },
+     {
+      "step": "cache_face_props_stage3"
+     },
+     {
+      "step": "set_done_heal_op",
+      "op": 24
+     },
+     {
+      "step": "make_uv_trim_curves",
+      "make": false
+     },
+     {
+      "step": "face_snapshot"
+     }
+    ],
+    "validate_only": false
+   }
+  },
+  {
+   "name": "file_surf_extrude_op4",
+   "inputs": {
+    "case": "heal",
+    "brep": {
+     "kind": "file",
+     "file": "surf_extrude.smb",
+     "rebuild": false
+    },
+    "init_gaps": false,
+    "targets": {
+     "v": "all",
+     "e": "all",
+     "f": "all"
+    },
+    "steps": [
+     {
+      "step": "cache_face_props_gaps"
+     },
+     {
+      "step": "set_done_heal_op",
+      "op": 4
+     },
+     {
+      "step": "cache_face_props_stage2"
+     },
+     {
+      "step": "face_snapshot"
+     },
+     {
+      "step": "fix_bad_sheets"
+     },
+     {
+      "step": "face_snapshot"
+     },
+     {
+      "step": "cache_face_props_stage3"
+     },
+     {
+      "step": "make_uv_trim_curves",
+      "make": false
+     }
+    ],
+    "validate_only": false
+   }
+  },
+  {
+   "name": "file_surf_extrude_op4_rebuild",
+   "inputs": {
+    "case": "heal",
+    "brep": {
+     "kind": "file",
+     "file": "surf_extrude.smb",
+     "rebuild": true
+    },
+    "init_gaps": true,
+    "targets": {
+     "v": "none",
+     "e": "reverse",
+     "f": "reverse"
+    },
+    "steps": [
+     {
+      "step": "cache_face_props_gaps"
+     },
+     {
+      "step": "set_done_heal_op",
+      "op": 4
+     },
+     {
+      "step": "cache_face_props_stage2"
+     },
+     {
+      "step": "face_snapshot"
+     },
+     {
+      "step": "fix_bad_sheets"
+     },
+     {
+      "step": "face_snapshot"
+     },
+     {
+      "step": "cache_face_props_stage3"
+     },
+     {
+      "step": "make_uv_trim_curves",
+      "make": false
+     }
+    ],
+    "validate_only": false
+   }
+  },
+  {
+   "name": "file_surf_extrude_op17",
+   "inputs": {
+    "case": "heal",
+    "brep": {
+     "kind": "file",
+     "file": "surf_extrude.smb",
+     "rebuild": false
+    },
+    "init_gaps": false,
+    "targets": {
+     "v": "all",
+     "e": "all",
+     "f": "all"
+    },
+    "steps": [
+     {
+      "step": "cache_face_props_gaps"
+     },
+     {
+      "step": "set_done_heal_op",
+      "op": 17
+     },
+     {
+      "step": "cache_face_props_stage2"
+     },
+     {
+      "step": "face_snapshot"
+     },
+     {
+      "step": "fix_bad_sheets"
+     },
+     {
+      "step": "face_snapshot"
+     },
+     {
+      "step": "cache_face_props_stage3"
+     },
+     {
+      "step": "make_uv_trim_curves",
+      "make": false
+     }
+    ],
+    "validate_only": false
+   }
+  },
+  {
+   "name": "file_surf_extrude_op17_rebuild",
+   "inputs": {
+    "case": "heal",
+    "brep": {
+     "kind": "file",
+     "file": "surf_extrude.smb",
+     "rebuild": true
+    },
+    "init_gaps": true,
+    "targets": {
+     "v": "none",
+     "e": "reverse",
+     "f": "reverse"
+    },
+    "steps": [
+     {
+      "step": "cache_face_props_gaps"
+     },
+     {
+      "step": "set_done_heal_op",
+      "op": 17
+     },
+     {
+      "step": "cache_face_props_stage2"
+     },
+     {
+      "step": "face_snapshot"
+     },
+     {
+      "step": "fix_bad_sheets"
+     },
+     {
+      "step": "face_snapshot"
+     },
+     {
+      "step": "cache_face_props_stage3"
+     },
+     {
+      "step": "make_uv_trim_curves",
+      "make": false
+     }
+    ],
+    "validate_only": false
+   }
+  },
+  {
+   "name": "file_surf_extrude_op18",
+   "inputs": {
+    "case": "heal",
+    "brep": {
+     "kind": "file",
+     "file": "surf_extrude.smb",
+     "rebuild": false
+    },
+    "init_gaps": false,
+    "targets": {
+     "v": "all",
+     "e": "all",
+     "f": "all"
+    },
+    "steps": [
+     {
+      "step": "cache_face_props_gaps"
+     },
+     {
+      "step": "set_done_heal_op",
+      "op": 18
+     },
+     {
+      "step": "cache_face_props_stage2"
+     },
+     {
+      "step": "face_snapshot"
+     },
+     {
+      "step": "fix_bad_sheets"
+     },
+     {
+      "step": "face_snapshot"
+     },
+     {
+      "step": "cache_face_props_stage3"
+     },
+     {
+      "step": "make_uv_trim_curves",
+      "make": false
+     },
+     {
+      "step": "move_to_not_yet",
+      "sel": 1
+     },
+     {
+      "step": "face_snapshot"
+     }
+    ],
+    "validate_only": false
+   }
+  },
+  {
+   "name": "file_surf_extrude_op18_rebuild",
+   "inputs": {
+    "case": "heal",
+    "brep": {
+     "kind": "file",
+     "file": "surf_extrude.smb",
+     "rebuild": true
+    },
+    "init_gaps": true,
+    "targets": {
+     "v": "none",
+     "e": "reverse",
+     "f": "reverse"
+    },
+    "steps": [
+     {
+      "step": "cache_face_props_gaps"
+     },
+     {
+      "step": "set_done_heal_op",
+      "op": 18
+     },
+     {
+      "step": "cache_face_props_stage2"
+     },
+     {
+      "step": "face_snapshot"
+     },
+     {
+      "step": "fix_bad_sheets"
+     },
+     {
+      "step": "face_snapshot"
+     },
+     {
+      "step": "cache_face_props_stage3"
+     },
+     {
+      "step": "make_uv_trim_curves",
+      "make": false
+     },
+     {
+      "step": "move_to_not_yet",
+      "sel": 1
+     },
+     {
+      "step": "face_snapshot"
+     }
+    ],
+    "validate_only": false
+   }
+  },
+  {
+   "name": "file_surf_extrude_op21",
+   "inputs": {
+    "case": "heal",
+    "brep": {
+     "kind": "file",
+     "file": "surf_extrude.smb",
+     "rebuild": false
+    },
+    "init_gaps": false,
+    "targets": {
+     "v": "all",
+     "e": "all",
+     "f": "all"
+    },
+    "steps": [
+     {
+      "step": "cache_face_props_gaps"
+     },
+     {
+      "step": "set_done_heal_op",
+      "op": 21
+     },
+     {
+      "step": "cache_face_props_stage2"
+     },
+     {
+      "step": "face_snapshot"
+     },
+     {
+      "step": "fix_bad_sheets"
+     },
+     {
+      "step": "face_snapshot"
+     },
+     {
+      "step": "cache_face_props_stage3"
+     },
+     {
+      "step": "make_uv_trim_curves",
+      "make": false
+     }
+    ],
+    "validate_only": false
+   }
+  },
+  {
+   "name": "file_surf_extrude_op21_rebuild",
+   "inputs": {
+    "case": "heal",
+    "brep": {
+     "kind": "file",
+     "file": "surf_extrude.smb",
+     "rebuild": true
+    },
+    "init_gaps": true,
+    "targets": {
+     "v": "none",
+     "e": "reverse",
+     "f": "reverse"
+    },
+    "steps": [
+     {
+      "step": "cache_face_props_gaps"
+     },
+     {
+      "step": "set_done_heal_op",
+      "op": 21
+     },
+     {
+      "step": "cache_face_props_stage2"
+     },
+     {
+      "step": "face_snapshot"
+     },
+     {
+      "step": "fix_bad_sheets"
+     },
+     {
+      "step": "face_snapshot"
+     },
+     {
+      "step": "cache_face_props_stage3"
+     },
+     {
+      "step": "make_uv_trim_curves",
+      "make": false
+     }
+    ],
+    "validate_only": false
+   }
+  },
+  {
+   "name": "file_surf_rev_op4",
+   "inputs": {
+    "case": "heal",
+    "brep": {
+     "kind": "file",
+     "file": "surf_rev.smb",
+     "rebuild": false
+    },
+    "init_gaps": false,
+    "targets": {
+     "v": "all",
+     "e": "all",
+     "f": "all"
+    },
+    "steps": [
+     {
+      "step": "cache_face_props_gaps"
+     },
+     {
+      "step": "set_done_heal_op",
+      "op": 4
+     },
+     {
+      "step": "cache_face_props_stage2"
+     },
+     {
+      "step": "face_snapshot"
+     },
+     {
+      "step": "fix_bad_sheets"
+     },
+     {
+      "step": "face_snapshot"
+     },
+     {
+      "step": "cache_face_props_stage3"
+     },
+     {
+      "step": "make_uv_trim_curves",
+      "make": false
+     }
+    ],
+    "validate_only": false
+   }
+  },
+  {
+   "name": "file_surf_rev_op4_rebuild",
+   "inputs": {
+    "case": "heal",
+    "brep": {
+     "kind": "file",
+     "file": "surf_rev.smb",
+     "rebuild": true
+    },
+    "init_gaps": true,
+    "targets": {
+     "v": "none",
+     "e": "reverse",
+     "f": "reverse"
+    },
+    "steps": [
+     {
+      "step": "cache_face_props_gaps"
+     },
+     {
+      "step": "set_done_heal_op",
+      "op": 4
+     },
+     {
+      "step": "cache_face_props_stage2"
+     },
+     {
+      "step": "face_snapshot"
+     },
+     {
+      "step": "fix_bad_sheets"
+     },
+     {
+      "step": "face_snapshot"
+     },
+     {
+      "step": "cache_face_props_stage3"
+     },
+     {
+      "step": "make_uv_trim_curves",
+      "make": false
+     }
+    ],
+    "validate_only": false
+   }
+  },
+  {
+   "name": "file_surf_rev_op17",
+   "inputs": {
+    "case": "heal",
+    "brep": {
+     "kind": "file",
+     "file": "surf_rev.smb",
+     "rebuild": false
+    },
+    "init_gaps": false,
+    "targets": {
+     "v": "all",
+     "e": "all",
+     "f": "all"
+    },
+    "steps": [
+     {
+      "step": "cache_face_props_gaps"
+     },
+     {
+      "step": "set_done_heal_op",
+      "op": 17
+     },
+     {
+      "step": "cache_face_props_stage2"
+     },
+     {
+      "step": "face_snapshot"
+     },
+     {
+      "step": "fix_bad_sheets"
+     },
+     {
+      "step": "face_snapshot"
+     },
+     {
+      "step": "cache_face_props_stage3"
+     },
+     {
+      "step": "make_uv_trim_curves",
+      "make": false
+     }
+    ],
+    "validate_only": false
+   }
+  },
+  {
+   "name": "file_surf_rev_op17_rebuild",
+   "inputs": {
+    "case": "heal",
+    "brep": {
+     "kind": "file",
+     "file": "surf_rev.smb",
+     "rebuild": true
+    },
+    "init_gaps": true,
+    "targets": {
+     "v": "none",
+     "e": "reverse",
+     "f": "reverse"
+    },
+    "steps": [
+     {
+      "step": "cache_face_props_gaps"
+     },
+     {
+      "step": "set_done_heal_op",
+      "op": 17
+     },
+     {
+      "step": "cache_face_props_stage2"
+     },
+     {
+      "step": "face_snapshot"
+     },
+     {
+      "step": "fix_bad_sheets"
+     },
+     {
+      "step": "face_snapshot"
+     },
+     {
+      "step": "cache_face_props_stage3"
+     },
+     {
+      "step": "make_uv_trim_curves",
+      "make": false
+     }
+    ],
+    "validate_only": false
+   }
+  },
+  {
+   "name": "file_surf_rev_op18",
+   "inputs": {
+    "case": "heal",
+    "brep": {
+     "kind": "file",
+     "file": "surf_rev.smb",
+     "rebuild": false
+    },
+    "init_gaps": false,
+    "targets": {
+     "v": "all",
+     "e": "all",
+     "f": "all"
+    },
+    "steps": [
+     {
+      "step": "cache_face_props_gaps"
+     },
+     {
+      "step": "set_done_heal_op",
+      "op": 18
+     },
+     {
+      "step": "cache_face_props_stage2"
+     },
+     {
+      "step": "face_snapshot"
+     },
+     {
+      "step": "fix_bad_sheets"
+     },
+     {
+      "step": "face_snapshot"
+     },
+     {
+      "step": "cache_face_props_stage3"
+     },
+     {
+      "step": "make_uv_trim_curves",
+      "make": false
+     },
+     {
+      "step": "move_to_not_yet",
+      "sel": 1
+     },
+     {
+      "step": "face_snapshot"
+     }
+    ],
+    "validate_only": false
+   }
+  },
+  {
+   "name": "file_surf_rev_op18_rebuild",
+   "inputs": {
+    "case": "heal",
+    "brep": {
+     "kind": "file",
+     "file": "surf_rev.smb",
+     "rebuild": true
+    },
+    "init_gaps": true,
+    "targets": {
+     "v": "none",
+     "e": "reverse",
+     "f": "reverse"
+    },
+    "steps": [
+     {
+      "step": "cache_face_props_gaps"
+     },
+     {
+      "step": "set_done_heal_op",
+      "op": 18
+     },
+     {
+      "step": "cache_face_props_stage2"
+     },
+     {
+      "step": "face_snapshot"
+     },
+     {
+      "step": "fix_bad_sheets"
+     },
+     {
+      "step": "face_snapshot"
+     },
+     {
+      "step": "cache_face_props_stage3"
+     },
+     {
+      "step": "make_uv_trim_curves",
+      "make": false
+     },
+     {
+      "step": "move_to_not_yet",
+      "sel": 1
+     },
+     {
+      "step": "face_snapshot"
+     }
+    ],
+    "validate_only": false
+   }
+  },
+  {
+   "name": "file_surf_rev_op21",
+   "inputs": {
+    "case": "heal",
+    "brep": {
+     "kind": "file",
+     "file": "surf_rev.smb",
+     "rebuild": false
+    },
+    "init_gaps": false,
+    "targets": {
+     "v": "all",
+     "e": "all",
+     "f": "all"
+    },
+    "steps": [
+     {
+      "step": "cache_face_props_gaps"
+     },
+     {
+      "step": "set_done_heal_op",
+      "op": 21
+     },
+     {
+      "step": "cache_face_props_stage2"
+     },
+     {
+      "step": "face_snapshot"
+     },
+     {
+      "step": "fix_bad_sheets"
+     },
+     {
+      "step": "face_snapshot"
+     },
+     {
+      "step": "cache_face_props_stage3"
+     },
+     {
+      "step": "make_uv_trim_curves",
+      "make": false
+     }
+    ],
+    "validate_only": false
+   }
+  },
+  {
+   "name": "file_surf_rev_op21_rebuild",
+   "inputs": {
+    "case": "heal",
+    "brep": {
+     "kind": "file",
+     "file": "surf_rev.smb",
+     "rebuild": true
+    },
+    "init_gaps": true,
+    "targets": {
+     "v": "none",
+     "e": "reverse",
+     "f": "reverse"
+    },
+    "steps": [
+     {
+      "step": "cache_face_props_gaps"
+     },
+     {
+      "step": "set_done_heal_op",
+      "op": 21
+     },
+     {
+      "step": "cache_face_props_stage2"
+     },
+     {
+      "step": "face_snapshot"
+     },
+     {
+      "step": "fix_bad_sheets"
+     },
+     {
+      "step": "face_snapshot"
+     },
+     {
+      "step": "cache_face_props_stage3"
+     },
+     {
+      "step": "make_uv_trim_curves",
+      "make": false
+     }
+    ],
+    "validate_only": false
+   }
+  },
+  {
+   "name": "file_vase_rev_op4",
+   "inputs": {
+    "case": "heal",
+    "brep": {
+     "kind": "file",
+     "file": "vase_rev.smb",
+     "rebuild": false
+    },
+    "init_gaps": false,
+    "targets": {
+     "v": "all",
+     "e": "all",
+     "f": "all"
+    },
+    "steps": [
+     {
+      "step": "cache_face_props_gaps"
+     },
+     {
+      "step": "set_done_heal_op",
+      "op": 4
+     },
+     {
+      "step": "cache_face_props_stage2"
+     },
+     {
+      "step": "face_snapshot"
+     },
+     {
+      "step": "fix_bad_sheets"
+     },
+     {
+      "step": "face_snapshot"
+     },
+     {
+      "step": "cache_face_props_stage3"
+     },
+     {
+      "step": "make_uv_trim_curves",
+      "make": false
+     }
+    ],
+    "validate_only": false
+   }
+  },
+  {
+   "name": "file_vase_rev_op4_rebuild",
+   "inputs": {
+    "case": "heal",
+    "brep": {
+     "kind": "file",
+     "file": "vase_rev.smb",
+     "rebuild": true
+    },
+    "init_gaps": true,
+    "targets": {
+     "v": "none",
+     "e": "reverse",
+     "f": "reverse"
+    },
+    "steps": [
+     {
+      "step": "cache_face_props_gaps"
+     },
+     {
+      "step": "set_done_heal_op",
+      "op": 4
+     },
+     {
+      "step": "cache_face_props_stage2"
+     },
+     {
+      "step": "face_snapshot"
+     },
+     {
+      "step": "fix_bad_sheets"
+     },
+     {
+      "step": "face_snapshot"
+     },
+     {
+      "step": "cache_face_props_stage3"
+     },
+     {
+      "step": "make_uv_trim_curves",
+      "make": false
+     }
+    ],
+    "validate_only": false
+   }
+  },
+  {
+   "name": "file_vase_rev_op17",
+   "inputs": {
+    "case": "heal",
+    "brep": {
+     "kind": "file",
+     "file": "vase_rev.smb",
+     "rebuild": false
+    },
+    "init_gaps": false,
+    "targets": {
+     "v": "all",
+     "e": "all",
+     "f": "all"
+    },
+    "steps": [
+     {
+      "step": "cache_face_props_gaps"
+     },
+     {
+      "step": "set_done_heal_op",
+      "op": 17
+     },
+     {
+      "step": "cache_face_props_stage2"
+     },
+     {
+      "step": "face_snapshot"
+     },
+     {
+      "step": "fix_bad_sheets"
+     },
+     {
+      "step": "face_snapshot"
+     },
+     {
+      "step": "cache_face_props_stage3"
+     },
+     {
+      "step": "make_uv_trim_curves",
+      "make": false
+     }
+    ],
+    "validate_only": false
+   }
+  },
+  {
+   "name": "file_vase_rev_op17_rebuild",
+   "inputs": {
+    "case": "heal",
+    "brep": {
+     "kind": "file",
+     "file": "vase_rev.smb",
+     "rebuild": true
+    },
+    "init_gaps": true,
+    "targets": {
+     "v": "none",
+     "e": "reverse",
+     "f": "reverse"
+    },
+    "steps": [
+     {
+      "step": "cache_face_props_gaps"
+     },
+     {
+      "step": "set_done_heal_op",
+      "op": 17
+     },
+     {
+      "step": "cache_face_props_stage2"
+     },
+     {
+      "step": "face_snapshot"
+     },
+     {
+      "step": "fix_bad_sheets"
+     },
+     {
+      "step": "face_snapshot"
+     },
+     {
+      "step": "cache_face_props_stage3"
+     },
+     {
+      "step": "make_uv_trim_curves",
+      "make": false
+     }
+    ],
+    "validate_only": false
+   }
+  },
+  {
+   "name": "file_vase_rev_op18",
+   "inputs": {
+    "case": "heal",
+    "brep": {
+     "kind": "file",
+     "file": "vase_rev.smb",
+     "rebuild": false
+    },
+    "init_gaps": false,
+    "targets": {
+     "v": "all",
+     "e": "all",
+     "f": "all"
+    },
+    "steps": [
+     {
+      "step": "cache_face_props_gaps"
+     },
+     {
+      "step": "set_done_heal_op",
+      "op": 18
+     },
+     {
+      "step": "cache_face_props_stage2"
+     },
+     {
+      "step": "face_snapshot"
+     },
+     {
+      "step": "fix_bad_sheets"
+     },
+     {
+      "step": "face_snapshot"
+     },
+     {
+      "step": "cache_face_props_stage3"
+     },
+     {
+      "step": "make_uv_trim_curves",
+      "make": false
+     },
+     {
+      "step": "move_to_not_yet",
+      "sel": 1
+     },
+     {
+      "step": "face_snapshot"
+     }
+    ],
+    "validate_only": false
+   }
+  },
+  {
+   "name": "file_vase_rev_op18_rebuild",
+   "inputs": {
+    "case": "heal",
+    "brep": {
+     "kind": "file",
+     "file": "vase_rev.smb",
+     "rebuild": true
+    },
+    "init_gaps": true,
+    "targets": {
+     "v": "none",
+     "e": "reverse",
+     "f": "reverse"
+    },
+    "steps": [
+     {
+      "step": "cache_face_props_gaps"
+     },
+     {
+      "step": "set_done_heal_op",
+      "op": 18
+     },
+     {
+      "step": "cache_face_props_stage2"
+     },
+     {
+      "step": "face_snapshot"
+     },
+     {
+      "step": "fix_bad_sheets"
+     },
+     {
+      "step": "face_snapshot"
+     },
+     {
+      "step": "cache_face_props_stage3"
+     },
+     {
+      "step": "make_uv_trim_curves",
+      "make": false
+     },
+     {
+      "step": "move_to_not_yet",
+      "sel": 1
+     },
+     {
+      "step": "face_snapshot"
+     }
+    ],
+    "validate_only": false
+   }
+  },
+  {
+   "name": "file_vase_rev_op21",
+   "inputs": {
+    "case": "heal",
+    "brep": {
+     "kind": "file",
+     "file": "vase_rev.smb",
+     "rebuild": false
+    },
+    "init_gaps": false,
+    "targets": {
+     "v": "all",
+     "e": "all",
+     "f": "all"
+    },
+    "steps": [
+     {
+      "step": "cache_face_props_gaps"
+     },
+     {
+      "step": "set_done_heal_op",
+      "op": 21
+     },
+     {
+      "step": "cache_face_props_stage2"
+     },
+     {
+      "step": "face_snapshot"
+     },
+     {
+      "step": "fix_bad_sheets"
+     },
+     {
+      "step": "face_snapshot"
+     },
+     {
+      "step": "cache_face_props_stage3"
+     },
+     {
+      "step": "make_uv_trim_curves",
+      "make": false
+     }
+    ],
+    "validate_only": false
+   }
+  },
+  {
+   "name": "file_vase_rev_op21_rebuild",
+   "inputs": {
+    "case": "heal",
+    "brep": {
+     "kind": "file",
+     "file": "vase_rev.smb",
+     "rebuild": true
+    },
+    "init_gaps": true,
+    "targets": {
+     "v": "none",
+     "e": "reverse",
+     "f": "reverse"
+    },
+    "steps": [
+     {
+      "step": "cache_face_props_gaps"
+     },
+     {
+      "step": "set_done_heal_op",
+      "op": 21
+     },
+     {
+      "step": "cache_face_props_stage2"
+     },
+     {
+      "step": "face_snapshot"
+     },
+     {
+      "step": "fix_bad_sheets"
+     },
+     {
+      "step": "face_snapshot"
+     },
+     {
+      "step": "cache_face_props_stage3"
+     },
+     {
+      "step": "make_uv_trim_curves",
+      "make": false
+     }
+    ],
+    "validate_only": false
+   }
+  },
+  {
+   "name": "file_ellips_ts2_op4",
+   "inputs": {
+    "case": "heal",
+    "brep": {
+     "kind": "file",
+     "file": "ellips_ts2.smb",
+     "rebuild": false
+    },
+    "init_gaps": false,
+    "targets": {
+     "v": "all",
+     "e": "all",
+     "f": "all"
+    },
+    "steps": [
+     {
+      "step": "cache_face_props_gaps"
+     },
+     {
+      "step": "set_done_heal_op",
+      "op": 4
+     },
+     {
+      "step": "cache_face_props_stage2"
+     },
+     {
+      "step": "face_snapshot"
+     },
+     {
+      "step": "fix_bad_sheets"
+     },
+     {
+      "step": "face_snapshot"
+     },
+     {
+      "step": "cache_face_props_stage3"
+     },
+     {
+      "step": "make_uv_trim_curves",
+      "make": false
+     }
+    ],
+    "validate_only": false
+   }
+  },
+  {
+   "name": "file_ellips_ts2_op4_rebuild",
+   "inputs": {
+    "case": "heal",
+    "brep": {
+     "kind": "file",
+     "file": "ellips_ts2.smb",
+     "rebuild": true
+    },
+    "init_gaps": true,
+    "targets": {
+     "v": "none",
+     "e": "reverse",
+     "f": "reverse"
+    },
+    "steps": [
+     {
+      "step": "cache_face_props_gaps"
+     },
+     {
+      "step": "set_done_heal_op",
+      "op": 4
+     },
+     {
+      "step": "cache_face_props_stage2"
+     },
+     {
+      "step": "face_snapshot"
+     },
+     {
+      "step": "fix_bad_sheets"
+     },
+     {
+      "step": "face_snapshot"
+     },
+     {
+      "step": "cache_face_props_stage3"
+     },
+     {
+      "step": "make_uv_trim_curves",
+      "make": false
+     }
+    ],
+    "validate_only": false
+   }
+  },
+  {
+   "name": "file_ellips_ts2_op17",
+   "inputs": {
+    "case": "heal",
+    "brep": {
+     "kind": "file",
+     "file": "ellips_ts2.smb",
+     "rebuild": false
+    },
+    "init_gaps": false,
+    "targets": {
+     "v": "all",
+     "e": "all",
+     "f": "all"
+    },
+    "steps": [
+     {
+      "step": "cache_face_props_gaps"
+     },
+     {
+      "step": "set_done_heal_op",
+      "op": 17
+     },
+     {
+      "step": "cache_face_props_stage2"
+     },
+     {
+      "step": "face_snapshot"
+     },
+     {
+      "step": "fix_bad_sheets"
+     },
+     {
+      "step": "face_snapshot"
+     },
+     {
+      "step": "cache_face_props_stage3"
+     },
+     {
+      "step": "make_uv_trim_curves",
+      "make": false
+     }
+    ],
+    "validate_only": false
+   }
+  },
+  {
+   "name": "file_ellips_ts2_op17_rebuild",
+   "inputs": {
+    "case": "heal",
+    "brep": {
+     "kind": "file",
+     "file": "ellips_ts2.smb",
+     "rebuild": true
+    },
+    "init_gaps": true,
+    "targets": {
+     "v": "none",
+     "e": "reverse",
+     "f": "reverse"
+    },
+    "steps": [
+     {
+      "step": "cache_face_props_gaps"
+     },
+     {
+      "step": "set_done_heal_op",
+      "op": 17
+     },
+     {
+      "step": "cache_face_props_stage2"
+     },
+     {
+      "step": "face_snapshot"
+     },
+     {
+      "step": "fix_bad_sheets"
+     },
+     {
+      "step": "face_snapshot"
+     },
+     {
+      "step": "cache_face_props_stage3"
+     },
+     {
+      "step": "make_uv_trim_curves",
+      "make": false
+     }
+    ],
+    "validate_only": false
+   }
+  },
+  {
+   "name": "file_ellips_ts2_op18",
+   "inputs": {
+    "case": "heal",
+    "brep": {
+     "kind": "file",
+     "file": "ellips_ts2.smb",
+     "rebuild": false
+    },
+    "init_gaps": false,
+    "targets": {
+     "v": "all",
+     "e": "all",
+     "f": "all"
+    },
+    "steps": [
+     {
+      "step": "cache_face_props_gaps"
+     },
+     {
+      "step": "set_done_heal_op",
+      "op": 18
+     },
+     {
+      "step": "cache_face_props_stage2"
+     },
+     {
+      "step": "face_snapshot"
+     },
+     {
+      "step": "fix_bad_sheets"
+     },
+     {
+      "step": "face_snapshot"
+     },
+     {
+      "step": "cache_face_props_stage3"
+     },
+     {
+      "step": "make_uv_trim_curves",
+      "make": false
+     },
+     {
+      "step": "move_to_not_yet",
+      "sel": 1
+     },
+     {
+      "step": "face_snapshot"
+     }
+    ],
+    "validate_only": false
+   }
+  },
+  {
+   "name": "file_ellips_ts2_op18_rebuild",
+   "inputs": {
+    "case": "heal",
+    "brep": {
+     "kind": "file",
+     "file": "ellips_ts2.smb",
+     "rebuild": true
+    },
+    "init_gaps": true,
+    "targets": {
+     "v": "none",
+     "e": "reverse",
+     "f": "reverse"
+    },
+    "steps": [
+     {
+      "step": "cache_face_props_gaps"
+     },
+     {
+      "step": "set_done_heal_op",
+      "op": 18
+     },
+     {
+      "step": "cache_face_props_stage2"
+     },
+     {
+      "step": "face_snapshot"
+     },
+     {
+      "step": "fix_bad_sheets"
+     },
+     {
+      "step": "face_snapshot"
+     },
+     {
+      "step": "cache_face_props_stage3"
+     },
+     {
+      "step": "make_uv_trim_curves",
+      "make": false
+     },
+     {
+      "step": "move_to_not_yet",
+      "sel": 1
+     },
+     {
+      "step": "face_snapshot"
+     }
+    ],
+    "validate_only": false
+   }
+  },
+  {
+   "name": "file_ellips_ts2_op21",
+   "inputs": {
+    "case": "heal",
+    "brep": {
+     "kind": "file",
+     "file": "ellips_ts2.smb",
+     "rebuild": false
+    },
+    "init_gaps": false,
+    "targets": {
+     "v": "all",
+     "e": "all",
+     "f": "all"
+    },
+    "steps": [
+     {
+      "step": "cache_face_props_gaps"
+     },
+     {
+      "step": "set_done_heal_op",
+      "op": 21
+     },
+     {
+      "step": "cache_face_props_stage2"
+     },
+     {
+      "step": "face_snapshot"
+     },
+     {
+      "step": "fix_bad_sheets"
+     },
+     {
+      "step": "face_snapshot"
+     },
+     {
+      "step": "cache_face_props_stage3"
+     },
+     {
+      "step": "make_uv_trim_curves",
+      "make": false
+     }
+    ],
+    "validate_only": false
+   }
+  },
+  {
+   "name": "file_ellips_ts2_op21_rebuild",
+   "inputs": {
+    "case": "heal",
+    "brep": {
+     "kind": "file",
+     "file": "ellips_ts2.smb",
+     "rebuild": true
+    },
+    "init_gaps": true,
+    "targets": {
+     "v": "none",
+     "e": "reverse",
+     "f": "reverse"
+    },
+    "steps": [
+     {
+      "step": "cache_face_props_gaps"
+     },
+     {
+      "step": "set_done_heal_op",
+      "op": 21
+     },
+     {
+      "step": "cache_face_props_stage2"
+     },
+     {
+      "step": "face_snapshot"
+     },
+     {
+      "step": "fix_bad_sheets"
+     },
+     {
+      "step": "face_snapshot"
+     },
+     {
+      "step": "cache_face_props_stage3"
+     },
+     {
+      "step": "make_uv_trim_curves",
+      "make": false
+     }
+    ],
+    "validate_only": false
+   }
+  },
+  {
+   "name": "file_toruswvy_op4",
+   "inputs": {
+    "case": "heal",
+    "brep": {
+     "kind": "file",
+     "file": "toruswvy.smb",
+     "rebuild": false
+    },
+    "init_gaps": false,
+    "targets": {
+     "v": "all",
+     "e": "all",
+     "f": "all"
+    },
+    "steps": [
+     {
+      "step": "cache_face_props_gaps"
+     },
+     {
+      "step": "set_done_heal_op",
+      "op": 4
+     },
+     {
+      "step": "cache_face_props_stage2"
+     },
+     {
+      "step": "face_snapshot"
+     },
+     {
+      "step": "fix_bad_sheets"
+     },
+     {
+      "step": "face_snapshot"
+     },
+     {
+      "step": "cache_face_props_stage3"
+     },
+     {
+      "step": "make_uv_trim_curves",
+      "make": false
+     }
+    ],
+    "validate_only": false
+   }
+  },
+  {
+   "name": "file_toruswvy_op4_rebuild",
+   "inputs": {
+    "case": "heal",
+    "brep": {
+     "kind": "file",
+     "file": "toruswvy.smb",
+     "rebuild": true
+    },
+    "init_gaps": true,
+    "targets": {
+     "v": "none",
+     "e": "reverse",
+     "f": "reverse"
+    },
+    "steps": [
+     {
+      "step": "cache_face_props_gaps"
+     },
+     {
+      "step": "set_done_heal_op",
+      "op": 4
+     },
+     {
+      "step": "cache_face_props_stage2"
+     },
+     {
+      "step": "face_snapshot"
+     },
+     {
+      "step": "fix_bad_sheets"
+     },
+     {
+      "step": "face_snapshot"
+     },
+     {
+      "step": "cache_face_props_stage3"
+     },
+     {
+      "step": "make_uv_trim_curves",
+      "make": false
+     }
+    ],
+    "validate_only": false
+   }
+  },
+  {
+   "name": "file_toruswvy_op17",
+   "inputs": {
+    "case": "heal",
+    "brep": {
+     "kind": "file",
+     "file": "toruswvy.smb",
+     "rebuild": false
+    },
+    "init_gaps": false,
+    "targets": {
+     "v": "all",
+     "e": "all",
+     "f": "all"
+    },
+    "steps": [
+     {
+      "step": "cache_face_props_gaps"
+     },
+     {
+      "step": "set_done_heal_op",
+      "op": 17
+     },
+     {
+      "step": "cache_face_props_stage2"
+     },
+     {
+      "step": "face_snapshot"
+     },
+     {
+      "step": "fix_bad_sheets"
+     },
+     {
+      "step": "face_snapshot"
+     },
+     {
+      "step": "cache_face_props_stage3"
+     },
+     {
+      "step": "make_uv_trim_curves",
+      "make": false
+     }
+    ],
+    "validate_only": false
+   }
+  },
+  {
+   "name": "file_toruswvy_op17_rebuild",
+   "inputs": {
+    "case": "heal",
+    "brep": {
+     "kind": "file",
+     "file": "toruswvy.smb",
+     "rebuild": true
+    },
+    "init_gaps": true,
+    "targets": {
+     "v": "none",
+     "e": "reverse",
+     "f": "reverse"
+    },
+    "steps": [
+     {
+      "step": "cache_face_props_gaps"
+     },
+     {
+      "step": "set_done_heal_op",
+      "op": 17
+     },
+     {
+      "step": "cache_face_props_stage2"
+     },
+     {
+      "step": "face_snapshot"
+     },
+     {
+      "step": "fix_bad_sheets"
+     },
+     {
+      "step": "face_snapshot"
+     },
+     {
+      "step": "cache_face_props_stage3"
+     },
+     {
+      "step": "make_uv_trim_curves",
+      "make": false
+     }
+    ],
+    "validate_only": false
+   }
+  },
+  {
+   "name": "file_toruswvy_op18",
+   "inputs": {
+    "case": "heal",
+    "brep": {
+     "kind": "file",
+     "file": "toruswvy.smb",
+     "rebuild": false
+    },
+    "init_gaps": false,
+    "targets": {
+     "v": "all",
+     "e": "all",
+     "f": "all"
+    },
+    "steps": [
+     {
+      "step": "cache_face_props_gaps"
+     },
+     {
+      "step": "set_done_heal_op",
+      "op": 18
+     },
+     {
+      "step": "cache_face_props_stage2"
+     },
+     {
+      "step": "face_snapshot"
+     },
+     {
+      "step": "fix_bad_sheets"
+     },
+     {
+      "step": "face_snapshot"
+     },
+     {
+      "step": "cache_face_props_stage3"
+     },
+     {
+      "step": "make_uv_trim_curves",
+      "make": false
+     },
+     {
+      "step": "move_to_not_yet",
+      "sel": 1
+     },
+     {
+      "step": "face_snapshot"
+     }
+    ],
+    "validate_only": false
+   }
+  },
+  {
+   "name": "file_toruswvy_op18_rebuild",
+   "inputs": {
+    "case": "heal",
+    "brep": {
+     "kind": "file",
+     "file": "toruswvy.smb",
+     "rebuild": true
+    },
+    "init_gaps": true,
+    "targets": {
+     "v": "none",
+     "e": "reverse",
+     "f": "reverse"
+    },
+    "steps": [
+     {
+      "step": "cache_face_props_gaps"
+     },
+     {
+      "step": "set_done_heal_op",
+      "op": 18
+     },
+     {
+      "step": "cache_face_props_stage2"
+     },
+     {
+      "step": "face_snapshot"
+     },
+     {
+      "step": "fix_bad_sheets"
+     },
+     {
+      "step": "face_snapshot"
+     },
+     {
+      "step": "cache_face_props_stage3"
+     },
+     {
+      "step": "make_uv_trim_curves",
+      "make": false
+     },
+     {
+      "step": "move_to_not_yet",
+      "sel": 1
+     },
+     {
+      "step": "face_snapshot"
+     }
+    ],
+    "validate_only": false
+   }
+  },
+  {
+   "name": "file_toruswvy_op21",
+   "inputs": {
+    "case": "heal",
+    "brep": {
+     "kind": "file",
+     "file": "toruswvy.smb",
+     "rebuild": false
+    },
+    "init_gaps": false,
+    "targets": {
+     "v": "all",
+     "e": "all",
+     "f": "all"
+    },
+    "steps": [
+     {
+      "step": "cache_face_props_gaps"
+     },
+     {
+      "step": "set_done_heal_op",
+      "op": 21
+     },
+     {
+      "step": "cache_face_props_stage2"
+     },
+     {
+      "step": "face_snapshot"
+     },
+     {
+      "step": "fix_bad_sheets"
+     },
+     {
+      "step": "face_snapshot"
+     },
+     {
+      "step": "cache_face_props_stage3"
+     },
+     {
+      "step": "make_uv_trim_curves",
+      "make": false
+     }
+    ],
+    "validate_only": false
+   }
+  },
+  {
+   "name": "file_toruswvy_op21_rebuild",
+   "inputs": {
+    "case": "heal",
+    "brep": {
+     "kind": "file",
+     "file": "toruswvy.smb",
+     "rebuild": true
+    },
+    "init_gaps": true,
+    "targets": {
+     "v": "none",
+     "e": "reverse",
+     "f": "reverse"
+    },
+    "steps": [
+     {
+      "step": "cache_face_props_gaps"
+     },
+     {
+      "step": "set_done_heal_op",
+      "op": 21
+     },
+     {
+      "step": "cache_face_props_stage2"
+     },
+     {
+      "step": "face_snapshot"
+     },
+     {
+      "step": "fix_bad_sheets"
+     },
+     {
+      "step": "face_snapshot"
+     },
+     {
+      "step": "cache_face_props_stage3"
+     },
+     {
+      "step": "make_uv_trim_curves",
+      "make": false
+     }
+    ],
+    "validate_only": false
+   }
+  },
+  {
+   "name": "file_surf_sphere150_op4",
+   "inputs": {
+    "case": "heal",
+    "brep": {
+     "kind": "file",
+     "file": "surf_sphere150.smb",
+     "rebuild": false
+    },
+    "init_gaps": false,
+    "targets": {
+     "v": "all",
+     "e": "all",
+     "f": "all"
+    },
+    "steps": [
+     {
+      "step": "cache_face_props_gaps"
+     },
+     {
+      "step": "set_done_heal_op",
+      "op": 4
+     },
+     {
+      "step": "cache_face_props_stage2"
+     },
+     {
+      "step": "face_snapshot"
+     },
+     {
+      "step": "fix_bad_sheets"
+     },
+     {
+      "step": "face_snapshot"
+     },
+     {
+      "step": "cache_face_props_stage3"
+     },
+     {
+      "step": "make_uv_trim_curves",
+      "make": false
+     }
+    ],
+    "validate_only": false
+   }
+  },
+  {
+   "name": "file_surf_sphere150_op4_rebuild",
+   "inputs": {
+    "case": "heal",
+    "brep": {
+     "kind": "file",
+     "file": "surf_sphere150.smb",
+     "rebuild": true
+    },
+    "init_gaps": true,
+    "targets": {
+     "v": "none",
+     "e": "reverse",
+     "f": "reverse"
+    },
+    "steps": [
+     {
+      "step": "cache_face_props_gaps"
+     },
+     {
+      "step": "set_done_heal_op",
+      "op": 4
+     },
+     {
+      "step": "cache_face_props_stage2"
+     },
+     {
+      "step": "face_snapshot"
+     },
+     {
+      "step": "fix_bad_sheets"
+     },
+     {
+      "step": "face_snapshot"
+     },
+     {
+      "step": "cache_face_props_stage3"
+     },
+     {
+      "step": "make_uv_trim_curves",
+      "make": false
+     }
+    ],
+    "validate_only": false
+   }
+  },
+  {
+   "name": "file_surf_sphere150_op17",
+   "inputs": {
+    "case": "heal",
+    "brep": {
+     "kind": "file",
+     "file": "surf_sphere150.smb",
+     "rebuild": false
+    },
+    "init_gaps": false,
+    "targets": {
+     "v": "all",
+     "e": "all",
+     "f": "all"
+    },
+    "steps": [
+     {
+      "step": "cache_face_props_gaps"
+     },
+     {
+      "step": "set_done_heal_op",
+      "op": 17
+     },
+     {
+      "step": "cache_face_props_stage2"
+     },
+     {
+      "step": "face_snapshot"
+     },
+     {
+      "step": "fix_bad_sheets"
+     },
+     {
+      "step": "face_snapshot"
+     },
+     {
+      "step": "cache_face_props_stage3"
+     },
+     {
+      "step": "make_uv_trim_curves",
+      "make": false
+     }
+    ],
+    "validate_only": false
+   }
+  },
+  {
+   "name": "file_surf_sphere150_op17_rebuild",
+   "inputs": {
+    "case": "heal",
+    "brep": {
+     "kind": "file",
+     "file": "surf_sphere150.smb",
+     "rebuild": true
+    },
+    "init_gaps": true,
+    "targets": {
+     "v": "none",
+     "e": "reverse",
+     "f": "reverse"
+    },
+    "steps": [
+     {
+      "step": "cache_face_props_gaps"
+     },
+     {
+      "step": "set_done_heal_op",
+      "op": 17
+     },
+     {
+      "step": "cache_face_props_stage2"
+     },
+     {
+      "step": "face_snapshot"
+     },
+     {
+      "step": "fix_bad_sheets"
+     },
+     {
+      "step": "face_snapshot"
+     },
+     {
+      "step": "cache_face_props_stage3"
+     },
+     {
+      "step": "make_uv_trim_curves",
+      "make": false
+     }
+    ],
+    "validate_only": false
+   }
+  },
+  {
+   "name": "file_surf_sphere150_op18",
+   "inputs": {
+    "case": "heal",
+    "brep": {
+     "kind": "file",
+     "file": "surf_sphere150.smb",
+     "rebuild": false
+    },
+    "init_gaps": false,
+    "targets": {
+     "v": "all",
+     "e": "all",
+     "f": "all"
+    },
+    "steps": [
+     {
+      "step": "cache_face_props_gaps"
+     },
+     {
+      "step": "set_done_heal_op",
+      "op": 18
+     },
+     {
+      "step": "cache_face_props_stage2"
+     },
+     {
+      "step": "face_snapshot"
+     },
+     {
+      "step": "fix_bad_sheets"
+     },
+     {
+      "step": "face_snapshot"
+     },
+     {
+      "step": "cache_face_props_stage3"
+     },
+     {
+      "step": "make_uv_trim_curves",
+      "make": false
+     },
+     {
+      "step": "move_to_not_yet",
+      "sel": 1
+     },
+     {
+      "step": "face_snapshot"
+     }
+    ],
+    "validate_only": false
+   }
+  },
+  {
+   "name": "file_surf_sphere150_op18_rebuild",
+   "inputs": {
+    "case": "heal",
+    "brep": {
+     "kind": "file",
+     "file": "surf_sphere150.smb",
+     "rebuild": true
+    },
+    "init_gaps": true,
+    "targets": {
+     "v": "none",
+     "e": "reverse",
+     "f": "reverse"
+    },
+    "steps": [
+     {
+      "step": "cache_face_props_gaps"
+     },
+     {
+      "step": "set_done_heal_op",
+      "op": 18
+     },
+     {
+      "step": "cache_face_props_stage2"
+     },
+     {
+      "step": "face_snapshot"
+     },
+     {
+      "step": "fix_bad_sheets"
+     },
+     {
+      "step": "face_snapshot"
+     },
+     {
+      "step": "cache_face_props_stage3"
+     },
+     {
+      "step": "make_uv_trim_curves",
+      "make": false
+     },
+     {
+      "step": "move_to_not_yet",
+      "sel": 1
+     },
+     {
+      "step": "face_snapshot"
+     }
+    ],
+    "validate_only": false
+   }
+  },
+  {
+   "name": "file_surf_sphere150_op21",
+   "inputs": {
+    "case": "heal",
+    "brep": {
+     "kind": "file",
+     "file": "surf_sphere150.smb",
+     "rebuild": false
+    },
+    "init_gaps": false,
+    "targets": {
+     "v": "all",
+     "e": "all",
+     "f": "all"
+    },
+    "steps": [
+     {
+      "step": "cache_face_props_gaps"
+     },
+     {
+      "step": "set_done_heal_op",
+      "op": 21
+     },
+     {
+      "step": "cache_face_props_stage2"
+     },
+     {
+      "step": "face_snapshot"
+     },
+     {
+      "step": "fix_bad_sheets"
+     },
+     {
+      "step": "face_snapshot"
+     },
+     {
+      "step": "cache_face_props_stage3"
+     },
+     {
+      "step": "make_uv_trim_curves",
+      "make": false
+     }
+    ],
+    "validate_only": false
+   }
+  },
+  {
+   "name": "file_surf_sphere150_op21_rebuild",
+   "inputs": {
+    "case": "heal",
+    "brep": {
+     "kind": "file",
+     "file": "surf_sphere150.smb",
+     "rebuild": true
+    },
+    "init_gaps": true,
+    "targets": {
+     "v": "none",
+     "e": "reverse",
+     "f": "reverse"
+    },
+    "steps": [
+     {
+      "step": "cache_face_props_gaps"
+     },
+     {
+      "step": "set_done_heal_op",
+      "op": 21
+     },
+     {
+      "step": "cache_face_props_stage2"
+     },
+     {
+      "step": "face_snapshot"
+     },
+     {
+      "step": "fix_bad_sheets"
+     },
+     {
+      "step": "face_snapshot"
+     },
+     {
+      "step": "cache_face_props_stage3"
+     },
+     {
+      "step": "make_uv_trim_curves",
+      "make": false
+     }
+    ],
+    "validate_only": false
+   }
+  }
+ ]
+}

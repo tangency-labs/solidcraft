@@ -16,10 +16,10 @@ use solidcraft_engine::{
 
 use crate::{
     SolveApp,
-    theme::Tokens,
     ui_kit::{Container, Surface},
     viewport::Proj,
 };
+use solidcraft_theme::Tokens;
 
 #[derive(Clone, Debug)]
 pub(crate) struct Mode {
@@ -119,7 +119,6 @@ pub(crate) fn begin(app: &mut SolveApp, occurrence: u64) -> bool {
     }
     crate::dialogs::cancel(app);
     app.tool = None;
-    app.tree.occurrence_move = None;
     app.viewport.nav = None;
     app.viewport.primary_nav = None;
     app.home.open = false;
@@ -248,7 +247,7 @@ impl Blocked {
         if self.conflicts.is_empty() {
             app.tr("joint_move.fixed").to_string()
         } else {
-            crate::i18n::format("joint_move.conflict", &[("joint", &self.conflicts.join(", "))])
+            solidcraft_ui_text::format("joint_move.conflict", &[("joint", &self.conflicts.join(", "))])
         }
     }
 }
@@ -263,16 +262,17 @@ pub(crate) fn show_warning(app: &mut SolveApp, ctx: &egui::Context) {
         app.menu.joint_move_warning = None;
         return;
     }
-    let (closed, action) = crate::ui_kit::Confirm::new(egui::Id::new("sc_joint_move_blocked"), "status_warning", app.tr("joint_move.blocked_title"))
-        .tone(crate::ui_kit::Tone::Warning)
-        .actions(app.tr("ui.heading_ok"), "", None)
-        .show(ctx, true, |ui| {
-            if !blocked.part.is_empty() {
-                crate::ui_kit::text(ui, &blocked.part, crate::ui_kit::Text::Report("part", false));
-            }
-            crate::ui_kit::text(ui, &reason, crate::ui_kit::Text::Report("reason", false));
-            crate::ui_kit::text(ui, app.tr(hint), crate::ui_kit::Text::Hint("remedy"));
-        });
+    let (closed, action) =
+        crate::ui_kit::Confirm::new(egui::Id::unique("sc_joint_move_blocked"), "status_warning", app.tr("joint_move.blocked_title"))
+            .tone(crate::ui_kit::Tone::Warning)
+            .actions(app.tr("ui.heading_ok"), "", None)
+            .show(ctx, true, |ui| {
+                if !blocked.part.is_empty() {
+                    crate::ui_kit::text(ui, &blocked.part, crate::ui_kit::Text::Report("part", false));
+                }
+                crate::ui_kit::text(ui, &reason, crate::ui_kit::Text::Report("reason", false));
+                crate::ui_kit::text(ui, app.tr(hint), crate::ui_kit::Text::Hint("remedy"));
+            });
     app.viewport.dialog_rect = crate::scenario::rect_of("dialog:window");
     if closed || action != crate::ui_kit::Action::None {
         app.menu.joint_move_warning = None;
@@ -644,7 +644,7 @@ pub(crate) fn show(app: &mut SolveApp, ui: &mut egui::Ui, painter: &egui::Painte
         if let Some(p) = pointer {
             let at = (p + vec2(20.0, 22.0)).clamp(proj.rect.min, proj.rect.max - vec2(260.0, 82.0).min(proj.rect.size()));
             let host = Container::new(ui.ctx(), Surface::Canvas);
-            host.area(egui::Id::new("joint_move_readout")).interactable(false).fixed_pos(at).order(egui::Order::Foreground).show(ui.ctx(), |ui| {
+            host.area(egui::Id::unique("joint_move_readout")).interactable(false).fixed_pos(at).order(egui::Order::Foreground).show(ui.ctx(), |ui| {
                 let frame = host.frame(ui.ctx(), tk.overlay, crate::frame::Side::Right).inner_margin(tk.space_8);
                 Container::show_backing(ui, frame, |ui| {
                     let value = if d.axis.angular {
@@ -678,7 +678,7 @@ pub(crate) fn show(app: &mut SolveApp, ui: &mut egui::Ui, painter: &egui::Painte
     }
     let host = Container::new(ui.ctx(), Surface::Canvas);
     let mut done = false;
-    host.area(egui::Id::new("joint_move_help")).fixed_pos(proj.rect.left_bottom() + vec2(16.0, -148.0)).show(ui.ctx(), |ui| {
+    host.area(egui::Id::unique("joint_move_help")).fixed_pos(proj.rect.left_bottom() + vec2(16.0, -148.0)).show(ui.ctx(), |ui| {
         let frame = host.frame(ui.ctx(), tk.overlay, crate::frame::Side::Right).inner_margin(tk.space_8);
         Container::show_backing(ui, frame, |ui| {
             ui.label(app.tr("joint_move.help"));
@@ -739,6 +739,26 @@ mod tests {
     }
     fn drag_data(h: &Harness) -> &Drag {
         h.app.viewport.joint_handles.as_ref().unwrap().drag.as_ref().unwrap()
+    }
+
+    /// Idle Joint Move handles brighten under the pointer, which only a frame draws: pointer
+    /// motion onto a handle needs one, though what lights up under it stays the same.
+    #[test]
+    fn moving_onto_an_idle_handle_needs_a_frame() {
+        let (mut h, _) = assembly("slider", Vec3::X, false);
+        h.app.start("occurrence.move");
+        h.frames(3);
+        let a = h.app.viewport.joint_handles.as_ref().unwrap().axes[0].clone();
+        let proj = projection(&h);
+        let r = radius(&h.app, &proj, &a).unwrap();
+        let on_handle = proj.to_screen(a.origin + a.axis * r * 0.7).unwrap();
+        assert!(owns_pointer(&h.app, &proj, on_handle));
+        let near = crate::test_support::lit_alike_around(&h, on_handle, |p| owns_pointer(&h.app, &proj, p));
+        assert!(near.len() >= 2, "the handle lies over something larger than it: {near:?}");
+        move_to(&mut h, near[0]);
+        assert!(h.app.viewport.quiet_motion.is_some(), "a still view, only hovered");
+        assert!(crate::viewport::follow_pointer_without_frame(&mut h.app, &h.ctx, near[1]), "the same item, off the handles");
+        assert!(!crate::viewport::follow_pointer_without_frame(&mut h.app, &h.ctx, on_handle), "onto a handle");
     }
 
     #[test]
@@ -981,10 +1001,12 @@ mod tests {
         crate::prefs::set(&mut h.app, &json!({"assembly_move_handles":false})).unwrap();
         h.frames(2);
         assert!(h.app.viewport.joint_handles.is_none());
+        // Move/Copy takes the selection into its own picks, so the placement is read first.
+        let selected = selected_path(&h.app).unwrap();
         for context in [false, true] {
-            h.app.tree.occurrence_move = None;
+            crate::dialogs::cancel(&mut h.app);
             if context {
-                let path = selected_path(&h.app).unwrap();
+                let path = selected.clone();
                 let item = crate::context_menu::items(&h.app, &crate::context_menu::Target::Occurrence { path })
                     .into_iter()
                     .find(|item| item.id == "ui.moveOccurrence" && item.enabled)
@@ -995,12 +1017,14 @@ mod tests {
             }
             h.frames(2);
             assert!(h.app.viewport.joint_handles.is_none());
-            assert!(h.app.tree.occurrence_move.is_some());
+            assert!(crate::dialogs_move::moving(&h.app).is_some(), "Move/Copy opens on the component");
             assert_eq!(h.app.session.doc.to_json(), before);
             assert_eq!(h.app.session.undo.len(), undo);
         }
-        h.app.tree.occurrence_move = None;
+        crate::dialogs::cancel(&mut h.app);
         crate::prefs::set(&mut h.app, &json!({"assembly_move_handles":true})).unwrap();
+        crate::dialogs::cancel(&mut h.app);
+        h.app.run("select.set", json!({"items": [{"type": "occurrence", "path": selected}]})).unwrap();
         h.app.start("occurrence.move");
         h.frames(2);
         assert!(visible(&h.app));
@@ -1015,7 +1039,7 @@ mod tests {
             for (query, key, text, expected) in
                 [("Near-axis step", "joint_rotation_coarse", "0.025", (0.025, 0.1)), ("Far-axis step", "joint_rotation_fine", "12.5", (0.025, 12.5))]
             {
-                h.app.prefs_window.filter = query.into();
+                h.app.prefs_window.shell.filter = query.into();
                 h.frames(5);
                 let target = format!("prefs:{key}");
                 crate::prefs::reveal_preference(&mut h, &target);

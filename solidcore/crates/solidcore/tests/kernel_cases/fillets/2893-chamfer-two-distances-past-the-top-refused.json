@@ -1,0 +1,129 @@
+{
+  "area": "fillets",
+  "bodies": {
+    "b2": {
+      "keeping_splines": false,
+      "trusted": true
+    }
+  },
+  "calls": [
+    {
+      "inputs": [
+        "b2"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b3"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b3"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b4"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b4"
+      ],
+      "op": "tagged",
+      "outputs": [
+        "b5"
+      ],
+      "params": {
+        "operand": 0
+      }
+    },
+    {
+      "error": "the blend is larger than its faces allow at the edge at (-8.179, -5.754, 20.000): a face curves tighter than the offset along it; the largest scale that fits is 0.8324999999999996",
+      "inputs": [
+        "b5"
+      ],
+      "op": "chamfer_sides",
+      "params": {
+        "distance": 12.0,
+        "edges": {
+          "kind": "edge",
+          "picked": [
+            {
+              "at": [
+                [
+                  8.178681931579773,
+                  5.754056122601737,
+                  20.0
+                ],
+                [
+                  8.178681931579773,
+                  5.754056122601737,
+                  20.0
+                ]
+              ],
+              "index": 2
+            }
+          ],
+          "points": [
+            [
+              -8.17868193157977,
+              -5.754056122601739,
+              20.0
+            ]
+          ],
+          "tolerance": 1.529992074132168
+        },
+        "first": [
+          0.0,
+          0.0,
+          1.0
+        ],
+        "second": {
+          "distance": 3.0
+        }
+      }
+    }
+  ],
+  "case": "2893-chamfer-two-distances-past-the-top-refused",
+  "expected": {
+    "method": "12 across a top of radius 10 runs past the axis: no chamfer of the rim between the top and the wall has those sizes, so the right answer is a refusal saying why",
+    "outcome": "refused",
+    "refusal": "larger than",
+    "source": "analytic",
+    "sources": [
+      "tangency-labs/solidcraft#2893"
+    ],
+    "what": "the top rim of a cylinder r10 x 20 chamfered 12 across the top and 3 down the wall: refused"
+  },
+  "expressible": true,
+  "operation_expressible": true,
+  "outcome": {
+    "engine_error": "step 2 (solid.chamfer): not supported yet: the chamfer is larger than the faces beside its edges allow, at the edge at (-8.179, -5.754, 20.000): a face curves tighter than the offset along it; the largest that fits is 0.8325 times the distances given",
+    "kernel_error": "the blend is larger than its faces allow at the edge at (-8.179, -5.754, 20.000): a face curves tighter than the offset along it; the largest scale that fits is 0.8324999999999996",
+    "ran": false
+  },
+  "records": "2893-chamfer-two-distances-past-the-top-refused.bodies.json.gz",
+  "result": [],
+  "rig": {
+    "error": null,
+    "known_failing": null,
+    "measured": null,
+    "refused_with": "step 2 (solid.chamfer): not supported yet: the chamfer is larger than the faces beside its edges allow, at the edge at (-8.179, -5.754, 20.000): a face curves tighter than the offset along it; the largest that fits is 0.8325 times the distances given",
+    "status": "pass"
+  },
+  "sources": [
+    "tangency-labs/solidcraft#2893"
+  ],
+  "traced_ops": [
+    "extrude",
+    "copy",
+    "copy",
+    "tagged",
+    "chamfer_sides"
+  ],
+  "ungraded": [],
+  "what": "the top rim of a cylinder r10 x 20 chamfered 12 across the top and 3 down the wall: refused",
+  "why_not": []
+}

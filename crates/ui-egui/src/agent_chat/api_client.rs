@@ -643,6 +643,7 @@ pub struct ApiConfig {
     pub base_url: String,
     pub model: String,
     pub key: Option<String>,
+    pub allow_insecure_http: bool,
     pub http: HttpFn,
     /// How long one model request may take, in seconds (the endpoint's setting).
     pub request_timeout_s: u64,
@@ -658,6 +659,7 @@ enum Cmd {
     SetModel(String),
     SetRequestTimeout(u64),
     SetReasoningEffort(String),
+    SetInstructions(String),
 }
 
 pub struct ApiBackend {
@@ -669,8 +671,8 @@ pub struct ApiBackend {
 
 impl ApiBackend {
     pub fn start(cfg: ApiConfig, ctx: StartContext) -> Result<ApiBackend, String> {
-        if cfg.key.is_some() && !super::agents::key_safe_for(&cfg.base_url) {
-            return Err(crate::i18n::tr("ui.ai_key_needs_https").to_string());
+        if cfg.key.is_some() && !super::agents::key_allowed_for(&cfg.base_url, cfg.protocol == Protocol::OpenAi && cfg.allow_insecure_http) {
+            return Err(solidcraft_ui_text::tr("ui.ai_key_needs_https").to_string());
         }
         // One stable session ID per chat for OpenCode Go's routing and prompt cache.
         let session_id = new_session_id();
@@ -696,6 +698,7 @@ impl ApiBackend {
                 tools: Vec::new(),
                 tool_names: Vec::new(),
                 history: Vec::new(),
+                note: super::acp::SYSTEM_NOTE.to_string(),
                 session_id,
                 gemini_sigs: Default::default(),
                 events: ev_tx,
@@ -737,6 +740,11 @@ impl ChatBackend for ApiBackend {
             let _ = c.send(Cmd::SetReasoningEffort(effort.to_string()));
         }
     }
+    fn set_instructions(&mut self, text: &str) {
+        if let Some(c) = &self.cmds {
+            let _ = c.send(Cmd::SetInstructions(text.to_string()));
+        }
+    }
     fn new_session(&mut self) {
         // A running turn is cancelled; the worker resets the history once it has ended.
         self.cancel.store(true, Ordering::Relaxed);
@@ -774,6 +782,8 @@ struct Worker {
     tool_names: Vec<String>,
     /// The conversation in the endpoint's shape, without the system note (sent separately).
     history: Vec<Value>,
+    /// The system note every request carries ([`super::acp::system_note`]).
+    note: String,
     /// OpenCode Go's stable session ID for this chat (one per chat, not per request).
     session_id: String,
     /// Thought signatures of Gemini function-call parts, by kept call id, for the
@@ -828,6 +838,7 @@ impl Worker {
                     // the endpoint's, not the user's, and must not silently override the choice.
                     self.no_reasoning.set(false);
                 }
+                Cmd::SetInstructions(text) => self.note = super::acp::system_note(&text),
                 Cmd::NewChat => {
                     self.history.clear();
                     // A new conversation gets a fresh Go session ID for routing and caching.
@@ -846,7 +857,7 @@ impl Worker {
     /// The endpoint's models, in the shape its protocol lists them.
     fn model_list(&self) -> Result<Vec<ModelInfo>, String> {
         match self.cfg.protocol {
-            Protocol::OpenAi => model_list(&self.cfg.http, &self.cfg.base_url, self.cfg.key.as_deref()),
+            Protocol::OpenAi => model_list(&self.cfg.http, &self.cfg.base_url, self.cfg.key.as_deref(), self.cfg.allow_insecure_http),
             Protocol::Anthropic => anthropic_model_list(&self.cfg.http, &self.cfg.base_url, self.cfg.key.as_deref()),
         }
     }
@@ -894,6 +905,15 @@ impl Worker {
         if let Some(m) = &self.mcp {
             m.send(&json!({"jsonrpc": "2.0", "method": "notifications/initialized"}));
         }
+        self.refresh_tools()
+    }
+
+    /// Lists the tools again, so a plugin installed, enabled or removed since the last turn is
+    /// offered (or no longer offered) from the next turn on. Both lists change together.
+    fn refresh_tools(&mut self) -> Result<(), String> {
+        if self.mcp.is_none() {
+            return Ok(());
+        }
         let list = self.mcp_call("tools/list", json!({}))?;
         self.tools = match self.cfg.protocol {
             Protocol::OpenAi => openai_tools(&list),
@@ -904,6 +924,8 @@ impl Worker {
     }
 
     fn turn(&mut self, parts: Vec<PromptPart>) {
+        // A failed refresh keeps the previous listing: the turn still runs with the tools it had.
+        let _ = self.refresh_tools();
         self.history.push(user_message(self.cfg.protocol, &parts));
         let dropped = drop_old_views(&mut self.history, MAX_HISTORY_IMAGES);
         let trimmed = self.trim_history();
@@ -968,7 +990,9 @@ impl Worker {
                 } else if !self.tool_names.iter().any(|n| n == &c.name) {
                     (format!("unknown tool `{}`", c.name), true)
                 } else {
-                    match self.mcp_call("tools/call", json!({"name": c.name, "arguments": args})) {
+                    // A plugin tool goes back by its MCP name, and through the same approval
+                    // gate as every other call: the app asks before it runs.
+                    match self.mcp_call("tools/call", json!({"name": mcp_tool_name(&c.name), "arguments": args})) {
                         Ok(r) => tool_text(&r),
                         Err(e) => (e, true),
                     }
@@ -1135,7 +1159,7 @@ impl Worker {
         match protocol {
             GoProtocol::Chat => self.body(),
             GoProtocol::Responses => {
-                let mut body = json!({"model": self.cfg.model, "input": go_responses_input(super::acp::SYSTEM_NOTE, &self.history)});
+                let mut body = json!({"model": self.cfg.model, "input": go_responses_input(&self.note, &self.history)});
                 if let Some(tools) = self.go_tools(protocol) {
                     body["tools"] = tools;
                 }
@@ -1145,7 +1169,7 @@ impl Worker {
                 let mut body = json!({
                     "model": self.cfg.model,
                     "max_tokens": ANTHROPIC_MAX_TOKENS,
-                    "system": super::acp::SYSTEM_NOTE,
+                    "system": self.note,
                     "messages": go_anthropic_messages(&self.history),
                 });
                 if let Some(tools) = self.go_tools(protocol) {
@@ -1155,7 +1179,7 @@ impl Worker {
             }
             GoProtocol::Gemini => {
                 let mut body = json!({"contents": go_gemini_contents(&self.history, &self.gemini_sigs.borrow())});
-                body["systemInstruction"] = json!({"parts": [{"text": super::acp::SYSTEM_NOTE}]});
+                body["systemInstruction"] = json!({"parts": [{"text": self.note}]});
                 if let Some(tools) = self.go_tools(protocol) {
                     body["tools"] = tools;
                 }
@@ -1180,7 +1204,7 @@ impl Worker {
         match self.cfg.protocol {
             Protocol::OpenAi => {
                 let mut messages = Vec::with_capacity(self.history.len() + 1);
-                messages.push(json!({"role": "system", "content": super::acp::SYSTEM_NOTE}));
+                messages.push(json!({"role": "system", "content": self.note}));
                 messages.extend(self.history.iter().cloned());
                 let mut body = json!({"model": self.cfg.model, "messages": messages});
                 if let Some(effort) = self.reasoning_effort() {
@@ -1200,7 +1224,7 @@ impl Worker {
                 let mut body = json!({
                     "model": self.cfg.model,
                     "max_tokens": ANTHROPIC_MAX_TOKENS,
-                    "system": super::acp::SYSTEM_NOTE,
+                    "system": self.note,
                     "messages": &self.history,
                 });
                 if !self.tools.is_empty() {
@@ -1284,7 +1308,7 @@ impl Worker {
 
 /// What the chat says when a request ran out of time: the limit, and where to raise it.
 pub fn timed_out(limit_s: u64) -> String {
-    crate::i18n::format("ui.ai_request_timed_out", &[("seconds", &limit_s.to_string())])
+    solidcraft_ui_text::format("ui.ai_request_timed_out", &[("seconds", &limit_s.to_string())])
 }
 
 /// A failed request as people read it: one that ran into the endpoint's request timeout (the
@@ -1298,10 +1322,10 @@ pub fn http_error(status: u16, body: &Value) -> String {
     let detail =
         body.pointer("/error/message").or_else(|| body.get("error")).and_then(Value::as_str).unwrap_or("").chars().take(300).collect::<String>();
     let what = match status {
-        401 | 403 => crate::i18n::tr("ui.ai_http_key"),
-        404 => crate::i18n::tr("ui.ai_http_not_found"),
-        429 => crate::i18n::tr("ui.ai_http_busy"),
-        413 => crate::i18n::tr("ui.ai_http_too_large"),
+        401 | 403 => solidcraft_ui_text::tr("ui.ai_http_key"),
+        404 => solidcraft_ui_text::tr("ui.ai_http_not_found"),
+        429 => solidcraft_ui_text::tr("ui.ai_http_busy"),
+        413 => solidcraft_ui_text::tr("ui.ai_http_too_large"),
         _ => "",
     };
     format!(
@@ -1562,8 +1586,8 @@ pub fn openai_tools(list: &Value) -> Vec<Value> {
             a.iter()
                 .take(128)
                 .filter_map(|t| {
-                    let name = t.get("name")?.as_str()?;
-                    if HIDDEN_TOOLS.contains(&name) {
+                    let name = api_tool_name(t.get("name")?.as_str()?)?;
+                    if HIDDEN_TOOLS.contains(&name.as_str()) {
                         return None;
                     }
                     let params = t.get("inputSchema").cloned().filter(Value::is_object).unwrap_or(json!({"type": "object", "properties": {}}));
@@ -1586,8 +1610,8 @@ pub fn anthropic_tools(list: &Value) -> Vec<Value> {
             a.iter()
                 .take(128)
                 .filter_map(|t| {
-                    let name = t.get("name")?.as_str()?;
-                    if HIDDEN_TOOLS.contains(&name) {
+                    let name = api_tool_name(t.get("name")?.as_str()?)?;
+                    if HIDDEN_TOOLS.contains(&name.as_str()) {
                         return None;
                     }
                     let schema = t.get("inputSchema").cloned().filter(Value::is_object).unwrap_or(json!({"type": "object", "properties": {}}));
@@ -1610,12 +1634,31 @@ fn tool_names(list: &Value) -> Vec<String> {
             a.iter()
                 .take(128)
                 .filter_map(|t| {
-                    let name = t.get("name")?.as_str()?;
-                    (!HIDDEN_TOOLS.contains(&name)).then(|| name.to_string())
+                    let name = api_tool_name(t.get("name")?.as_str()?)?;
+                    (!HIDDEN_TOOLS.contains(&name.as_str())).then_some(name)
                 })
                 .collect()
         })
         .unwrap_or_default()
+}
+
+/// A tool's name as the model APIs take it (letters, digits, `_` and `-`, at most 64): a plugin
+/// tool's `<plugin>.<entry>` is offered as `<plugin>__<entry>` (plugin and entry ids never hold
+/// `_`). A name that still does not fit is not offered.
+fn api_tool_name(name: &str) -> Option<String> {
+    let api = name.replacen('.', "__", 1);
+    (!api.is_empty() && api.len() <= 64 && api.bytes().all(|c| c.is_ascii_alphanumeric() || c == b'_' || c == b'-')).then_some(api)
+}
+
+/// The MCP name of the tool the model called by its API name: `<plugin>__<entry>` is the plugin
+/// tool `<plugin>.<entry>`; any other name is the same in both.
+fn mcp_tool_name(api: &str) -> String {
+    match api.split_once("__") {
+        Some((plugin, entry)) if solidcraft_engine::plugin::valid_id(plugin) && solidcraft_engine::plugin::valid_id(entry) => {
+            format!("{plugin}.{entry}")
+        }
+        _ => api.to_string(),
+    }
 }
 
 /// `{base}/v1/{path}`, whether the user's base URL ends in `/v1` or in the endpoint root the
@@ -1632,7 +1675,7 @@ fn anthropic_headers(base_url: &str, key: Option<&str>) -> Result<Vec<(String, S
     let mut headers = vec![("anthropic-version".to_string(), ANTHROPIC_VERSION.to_string())];
     if let Some(k) = key {
         if !super::agents::key_safe_for(base_url) {
-            return Err(crate::i18n::tr("ui.ai_key_needs_https").to_string());
+            return Err(solidcraft_ui_text::tr("ui.ai_key_needs_https").to_string());
         }
         headers.push(("x-api-key".to_string(), k.to_string()));
     }
@@ -1659,7 +1702,7 @@ pub fn anthropic_model_list(http: &HttpFn, base_url: &str, key: Option<&str>) ->
 pub fn test_anthropic_endpoint(http: &HttpFn, base_url: &str, key: Option<&str>, model: &str) -> Result<String, String> {
     let model = model.trim();
     if model.is_empty() {
-        return Err(crate::i18n::tr("ui.ai_need_model").to_string());
+        return Err(solidcraft_ui_text::tr("ui.ai_need_model").to_string());
     }
     let mut headers = anthropic_headers(base_url, key)?;
     headers.push(("Content-Type".to_string(), "application/json".to_string()));
@@ -1676,7 +1719,7 @@ pub fn test_anthropic_endpoint(http: &HttpFn, base_url: &str, key: Option<&str>,
     if status != 200 {
         return Err(http_error(status, &v));
     }
-    Ok(crate::i18n::format("ui.ai_test_answered", &[("model", model)]))
+    Ok(solidcraft_ui_text::format("ui.ai_test_answered", &[("model", model)]))
 }
 
 /// A tool call's result as text for the model, and whether it failed.
@@ -1730,7 +1773,7 @@ fn tool_title(name: &str, args: &Value) -> String {
 /// endpoint should be, say): an error, so the picker says so and asks again later.
 fn listed_models(body: &Value, name_key: &str) -> Result<Vec<(String, Option<String>)>, String> {
     let Some(entries) = body.get("data").and_then(Value::as_array) else {
-        return Err(crate::i18n::tr("ui.agent_chat_models_not_a_list").to_string());
+        return Err(solidcraft_ui_text::tr("ui.agent_chat_models_not_a_list").to_string());
     };
     Ok(entries
         .iter()
@@ -1756,11 +1799,11 @@ fn model_entries(http: &HttpFn, base_url: &str, headers: Vec<(String, String)>) 
 }
 
 /// The endpoint's models for the picker.
-pub fn model_list(http: &HttpFn, base_url: &str, key: Option<&str>) -> Result<Vec<ModelInfo>, String> {
+pub fn model_list(http: &HttpFn, base_url: &str, key: Option<&str>, allow_insecure_http: bool) -> Result<Vec<ModelInfo>, String> {
     let mut headers = Vec::new();
     if let Some(k) = key {
-        if !super::agents::key_safe_for(base_url) {
-            return Err(crate::i18n::tr("ui.ai_key_needs_https").to_string());
+        if !super::agents::key_allowed_for(base_url, allow_insecure_http) {
+            return Err(solidcraft_ui_text::tr("ui.ai_key_needs_https").to_string());
         }
         headers.push(("Authorization".to_string(), format!("Bearer {k}")));
     }
@@ -1768,17 +1811,20 @@ pub fn model_list(http: &HttpFn, base_url: &str, key: Option<&str>) -> Result<Ve
 }
 
 /// Ask an endpoint for its models (Test connection): how many, and whether `model` is one.
-pub fn test_endpoint(http: &HttpFn, base_url: &str, key: Option<&str>, model: &str) -> Result<String, String> {
+pub fn test_endpoint(http: &HttpFn, base_url: &str, key: Option<&str>, model: &str, allow_insecure_http: bool) -> Result<String, String> {
     let mut headers = Vec::new();
     if let Some(k) = key {
-        if !super::agents::key_safe_for(base_url) {
-            return Err(crate::i18n::tr("ui.ai_key_needs_https").to_string());
+        if !super::agents::key_allowed_for(base_url, allow_insecure_http) {
+            return Err(solidcraft_ui_text::tr("ui.ai_key_needs_https").to_string());
         }
         headers.push(("Authorization".to_string(), format!("Bearer {k}")));
     }
     let models = model_entries(http, base_url, headers)?;
     let found = model.is_empty() || models.iter().any(|m| m.id == model);
-    Ok(crate::i18n::format(if found { "ui.ai_test_ok" } else { "ui.ai_test_no_model" }, &[("count", &models.len().to_string()), ("model", model)]))
+    Ok(solidcraft_ui_text::format(
+        if found { "ui.ai_test_ok" } else { "ui.ai_test_no_model" },
+        &[("count", &models.len().to_string()), ("model", model)],
+    ))
 }
 
 #[cfg(test)]
@@ -1910,6 +1956,7 @@ mod tests {
             protocol: Protocol::OpenAi,
             base_url: "http://localhost:1/v1".into(),
             model: "m".into(),
+            allow_insecure_http: false,
             key: None,
             http,
             request_timeout_s: 300,
@@ -1961,6 +2008,7 @@ mod tests {
             protocol: Protocol::OpenAi,
             base_url: "http://localhost:1/v1".into(),
             model: "m".into(),
+            allow_insecure_http: false,
             key: None,
             http,
             request_timeout_s: 300,
@@ -1998,7 +2046,8 @@ mod tests {
     }
 
     /// New chat resets the model's history to the system note: the next request carries nothing
-    /// of the conversation before it.
+    /// of the conversation before it. The note carries the custom instructions set for each
+    /// conversation (#8220): the first one's, then none after they were cleared.
     #[test]
     fn a_new_chat_resets_the_history_to_the_system_note() {
         let seen = Arc::new(std::sync::Mutex::new(Vec::<Value>::new()));
@@ -2015,6 +2064,7 @@ mod tests {
             protocol: Protocol::OpenAi,
             base_url: "http://localhost:1/v1".into(),
             model: "m".into(),
+            allow_insecure_http: false,
             key: None,
             http,
             request_timeout_s: 300,
@@ -2033,12 +2083,16 @@ mod tests {
                 std::thread::sleep(Duration::from_millis(10));
             }
         };
+        b.set_instructions("Use M3 screws.");
         run(&mut b, &|b| b.prompt(&[PromptPart::Text("one".into())]), 2);
+        b.set_instructions("");
         run(&mut b, &|b| b.new_session(), 1);
         run(&mut b, &|b| b.prompt(&[PromptPart::Text("two".into())]), 1);
         let sent = seen.lock().unwrap();
+        assert_eq!(sent[0]["messages"][0]["content"], super::super::acp::system_note("Use M3 screws."));
         let roles: Vec<&str> = sent[1]["messages"].as_array().unwrap().iter().map(|m| m["role"].as_str().unwrap_or("")).collect();
         assert_eq!(roles, ["system", "user"]);
+        assert_eq!(sent[1]["messages"][0]["content"], super::super::acp::SYSTEM_NOTE);
         assert_eq!(sent[1]["messages"][1]["content"], "two");
         b.shutdown(true);
     }
@@ -2062,6 +2116,7 @@ mod tests {
             protocol: Protocol::OpenAi,
             base_url: "http://localhost:1/v1".into(),
             model: "local".into(),
+            allow_insecure_http: false,
             key: None,
             http,
             request_timeout_s: 300,
@@ -2147,6 +2202,7 @@ mod tests {
             protocol: Protocol::OpenAi,
             base_url: "https://opencode.ai/inference/go/v1".into(),
             model: model.into(),
+            allow_insecure_http: false,
             key: None,
             http,
             request_timeout_s: 300,
@@ -2221,6 +2277,7 @@ mod tests {
             protocol: Protocol::OpenAi,
             base_url: "https://api.openai.com/v1".into(),
             model: "muse-spark-1.3-contributor".into(),
+            allow_insecure_http: false,
             key: None,
             http,
             request_timeout_s: 300,
@@ -2387,7 +2444,7 @@ mod tests {
             log.lock().unwrap().push(r.clone());
             Ok((200, b"{\"data\":[{\"id\":\"kimi-k3\"}]}".to_vec()))
         });
-        let listed = model_list(&http, "https://opencode.ai/inference/go/v1", None).unwrap();
+        let listed = model_list(&http, "https://opencode.ai/inference/go/v1", None, false).unwrap();
         assert_eq!(listed.iter().map(|m| m.id.as_str()).collect::<Vec<_>>(), ["kimi-k3"]);
         let reqs = seen.lock().unwrap();
         assert_eq!(reqs.len(), 1);
@@ -2540,6 +2597,7 @@ mod tests {
             protocol: Protocol::OpenAi,
             base_url: "http://localhost:1/v1".into(),
             model: "m".into(),
+            allow_insecure_http: false,
             key: None,
             http,
             request_timeout_s: 300,
@@ -2593,6 +2651,7 @@ mod tests {
             protocol: Protocol::OpenAi,
             base_url: "http://localhost:1/v1".into(),
             model: "local".into(),
+            allow_insecure_http: false,
             key: None,
             http,
             request_timeout_s: 300,
@@ -2618,6 +2677,7 @@ mod tests {
     /// id that could not be sent back is left out, and the list stays within its caps.
     #[test]
     fn a_listing_keeps_the_names_and_stays_within_its_caps() {
+        crate::i18n::install();
         let mut data = vec![
             json!({"id": "openai/gpt-x", "name": "OpenAI: GPT X", "description": "Long text", "supported_parameters": ["tools"]}),
             json!({"id": "same", "name": "same", "display_name": "Same One"}),
@@ -2631,7 +2691,7 @@ mod tests {
         data.extend((0..MODEL_LIST_CAP + 500).map(|i| json!({"id": format!("m{i}")})));
         let body = json!({"data": data}).to_string().into_bytes();
         let http: HttpFn = Arc::new(move |_: &HttpRequest| Ok((200, body.clone())));
-        let list = model_list(&http, "https://openrouter.ai/api/v1", None).unwrap();
+        let list = model_list(&http, "https://openrouter.ai/api/v1", None, false).unwrap();
         assert_eq!(list.len(), MODEL_LIST_CAP);
         let [first, same, long, next] = &list[..4] else { panic!("{}", list.len()) };
         assert_eq!((first.id.as_str(), first.name.as_str(), first.description.as_str()), ("openai/gpt-x", "openai/gpt-x", "OpenAI: GPT X"));
@@ -2644,22 +2704,22 @@ mod tests {
         assert_eq!(first.name, "openai/gpt-x");
         assert_eq!(same.name, "Same One");
         assert_eq!(long.name.chars().count(), MODEL_NAME_CAP);
-        assert!(test_endpoint(&http, "https://openrouter.ai/api/v1", None, "openai/gpt-x").unwrap().contains(&MODEL_LIST_CAP.to_string()));
+        assert!(test_endpoint(&http, "https://openrouter.ai/api/v1", None, "openai/gpt-x", false).unwrap().contains(&MODEL_LIST_CAP.to_string()));
     }
 
     /// A 200 that is no model list (a web page where the endpoint should be) is an error, so the
     /// picker says why and asks again later; a list with nothing in it is a list.
     #[test]
     fn an_answer_that_is_no_model_list_is_an_error() {
-        let expected = crate::i18n::tr("ui.agent_chat_models_not_a_list").to_string();
+        let expected = solidcraft_ui_text::tr("ui.agent_chat_models_not_a_list").to_string();
         let page: HttpFn = Arc::new(|_: &HttpRequest| Ok((200, b"<!doctype html><html><body>Control UI</body></html>".to_vec())));
-        assert_eq!(model_list(&page, "http://localhost:18789/v1", None).unwrap_err(), expected);
+        assert_eq!(model_list(&page, "http://localhost:18789/v1", None, false).unwrap_err(), expected);
         assert_eq!(anthropic_model_list(&page, "http://localhost:18789/v1", None).unwrap_err(), expected);
-        assert_eq!(test_endpoint(&page, "http://localhost:18789/v1", None, "").unwrap_err(), expected);
+        assert_eq!(test_endpoint(&page, "http://localhost:18789/v1", None, "", false).unwrap_err(), expected);
         let object: HttpFn = Arc::new(|_: &HttpRequest| Ok((200, json!({"object": "list"}).to_string().into_bytes())));
-        assert_eq!(model_list(&object, "http://localhost:18789/v1", None).unwrap_err(), expected);
+        assert_eq!(model_list(&object, "http://localhost:18789/v1", None, false).unwrap_err(), expected);
         let empty: HttpFn = Arc::new(|_: &HttpRequest| Ok((200, json!({"data": []}).to_string().into_bytes())));
-        assert!(model_list(&empty, "http://localhost:18789/v1", None).unwrap().is_empty());
+        assert!(model_list(&empty, "http://localhost:18789/v1", None, false).unwrap().is_empty());
     }
 
     #[test]
@@ -2694,6 +2754,7 @@ mod tests {
             protocol: Protocol::OpenAi,
             base_url: "http://localhost:1/v1".into(),
             model: "m".into(),
+            allow_insecure_http: false,
             key: None,
             http,
             request_timeout_s: 300,
@@ -2716,21 +2777,46 @@ mod tests {
     }
 
     #[test]
-    fn keys_never_go_over_plain_http_to_another_computer() {
-        let http: HttpFn = Arc::new(|_: &HttpRequest| Ok((200, b"{}".to_vec())));
-        assert!(test_endpoint(&http, "http://10.0.0.2:11434/v1", Some("k"), "m").is_err());
-        let cfg = ApiConfig {
+    fn http_authentication_needs_opt_in_for_tests_models_and_chat() {
+        let seen = Arc::new(std::sync::Mutex::new(Vec::<HttpRequest>::new()));
+        let requests = seen.clone();
+        let http: HttpFn = Arc::new(move |r: &HttpRequest| {
+            requests.lock().unwrap().push(r.clone());
+            let body = if r.method == "GET" {
+                json!({"data":[{"id":"m"}]})
+            } else {
+                json!({"choices":[{"message":{"role":"assistant","content":"Done."}}]})
+            };
+            Ok((200, body.to_string().into_bytes()))
+        });
+        assert!(test_endpoint(&http, "http://10.0.0.2:11434/v1", Some("k"), "m", false).is_err());
+        assert!(model_list(&http, "http://10.0.0.2:11434/v1", Some("k"), false).is_err());
+        let config = |allow_insecure_http, protocol| ApiConfig {
             name: "x".into(),
-            protocol: Protocol::OpenAi,
+            protocol,
             base_url: "http://10.0.0.2/v1".into(),
             model: "m".into(),
+            allow_insecure_http,
             key: Some("k".into()),
-            http,
+            http: http.clone(),
             request_timeout_s: 300,
             reasoning_effort: String::new(),
         };
-        let ctx = StartContext { cwd: std::env::temp_dir(), bridge: None, tools: None, wake: Box::new(|| {}) };
-        assert!(ApiBackend::start(cfg, ctx).is_err());
+        let context = || StartContext { cwd: std::env::temp_dir(), bridge: None, tools: None, wake: Box::new(|| {}) };
+        assert!(ApiBackend::start(config(false, Protocol::OpenAi), context()).is_err());
+        assert!(ApiBackend::start(config(true, Protocol::Anthropic), context()).is_err());
+        assert!(seen.lock().unwrap().is_empty(), "refusal must happen before any HTTP request");
+        assert!(test_endpoint(&http, "http://10.0.0.2/v1", Some("k"), "m", true).is_ok());
+        assert_eq!(model_list(&http, "http://10.0.0.2/v1", Some("k"), true).unwrap()[0].id, "m");
+        let mut backend = ApiBackend::start(config(true, Protocol::OpenAi), context()).unwrap();
+        backend.prompt(&[PromptPart::Text("hello".into())]);
+        let events = wait_for_turn(&mut backend);
+        assert!(events.iter().any(|e| matches!(e, Event::Text { text, .. } if text == "Done.")), "{events:?}");
+        backend.shutdown(true);
+        let sent = seen.lock().unwrap();
+        assert!(sent.iter().any(|r| r.url == "http://10.0.0.2/v1/chat/completions" && r.method == "POST"));
+        assert!(sent.iter().filter(|r| r.url.ends_with("/models")).count() >= 3);
+        assert!(sent.iter().all(|r| r.headers.iter().any(|(name, value)| name == "Authorization" && value == "Bearer k")));
     }
 
     /// A worker with one function tool whose endpoint answers each POST with the next scripted
@@ -2754,6 +2840,7 @@ mod tests {
             protocol: Protocol::OpenAi,
             base_url: "http://localhost:1/v1".into(),
             model: "m".into(),
+            allow_insecure_http: false,
             key: Some("sk-secret".into()),
             http,
             request_timeout_s: 300,
@@ -2767,6 +2854,7 @@ mod tests {
             tools: vec![json!({"type": "function", "function": {"name": "measure"}})],
             tool_names: vec!["measure".into()],
             history: vec![json!({"role": "user", "content": "hi"})],
+            note: super::super::acp::SYSTEM_NOTE.to_string(),
             session_id: "test-session".to_string(),
             gemini_sigs: Default::default(),
             events,
@@ -2838,6 +2926,23 @@ mod tests {
         let sent = seen.lock().unwrap();
         assert_eq!(sent.len(), 1, "the refusal is shown, not replayed with none");
         assert_eq!(sent[0]["reasoning_effort"], "max");
+    }
+
+    #[test]
+    fn plugin_tools_reach_the_model_under_api_names_and_go_back_under_their_own() {
+        let list = json!({"tools": [
+            {"name": "measure"},
+            {"name": "gears.make", "description": "Plugin tool", "inputSchema": {"type": "object"}, "plugin": {"id": "gears"}},
+            {"name": "bad name"},
+        ]});
+        assert_eq!(tool_names(&list), ["measure", "gears__make"]);
+        assert_eq!(anthropic_tools(&list)[1]["name"], "gears__make");
+        assert_eq!(openai_tools(&list)[1]["function"]["name"], "gears__make");
+        assert_eq!(mcp_tool_name("gears__make"), "gears.make");
+        assert_eq!(mcp_tool_name("measure"), "measure");
+        assert_eq!(mcp_tool_name("skill_reference"), "skill_reference");
+        let long = format!("{}.{}", "a".repeat(40), "b".repeat(40));
+        assert_eq!(api_tool_name(&long), None, "a name past 64 characters is left out, never sent");
     }
 
     #[test]
@@ -2919,6 +3024,7 @@ mod tests {
             protocol: Protocol::Anthropic,
             base_url: "http://localhost:1".into(),
             model: "m".into(),
+            allow_insecure_http: false,
             key: Some("sk-secret".into()),
             http,
             request_timeout_s: 300,
@@ -2969,6 +3075,7 @@ mod tests {
             protocol: Protocol::Anthropic,
             base_url: "http://localhost:1".into(),
             model: "m".into(),
+            allow_insecure_http: false,
             key: Some("sk-secret".into()),
             http,
             request_timeout_s: 300,
@@ -3020,6 +3127,7 @@ mod tests {
             protocol: Protocol::Anthropic,
             base_url: "http://localhost:1".into(),
             model: "m".into(),
+            allow_insecure_http: false,
             key: Some("sk-secret".into()),
             http,
             request_timeout_s: 300,
@@ -3055,6 +3163,7 @@ mod tests {
 
     #[test]
     fn the_anthropic_test_sends_one_small_message_and_checks_the_key_rule() {
+        crate::i18n::install();
         let seen = Arc::new(std::sync::Mutex::new(Vec::<HttpRequest>::new()));
         let log = seen.clone();
         let http: HttpFn = Arc::new(move |r: &HttpRequest| {

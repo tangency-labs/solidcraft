@@ -1,0 +1,154 @@
+{
+  "area": "fillets",
+  "bodies": {
+    "b12": {
+      "keeping_splines": false,
+      "trusted": true
+    }
+  },
+  "calls": [
+    {
+      "inputs": [
+        "b12"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b13"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b13"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b14"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b14"
+      ],
+      "op": "tagged",
+      "outputs": [
+        "b15"
+      ],
+      "params": {
+        "operand": 0
+      }
+    },
+    {
+      "inputs": [
+        "b15"
+      ],
+      "op": "blend_dropping",
+      "outputs": [
+        "b16"
+      ],
+      "params": {
+        "edges": {
+          "kind": "edge",
+          "picked": [
+            {
+              "at": [
+                [
+                  40.0,
+                  20.0,
+                  10.0
+                ],
+                [
+                  0.0,
+                  20.0,
+                  10.0
+                ]
+              ],
+              "index": 3
+            }
+          ],
+          "points": [
+            [
+              20.0,
+              20.0,
+              10.0
+            ]
+          ],
+          "tolerance": 2.29228784747792
+        },
+        "kind": "round",
+        "sizes": [
+          4.0
+        ]
+      }
+    }
+  ],
+  "case": "324-fillet-over-hole-cut-by-overlong-cylinder",
+  "expected": {
+    "body_count": 1,
+    "continuity": {
+      "order": "g1"
+    },
+    "method": "the same body as 324-fillet-over-hole-overlap: block 40x20x10 minus a through hole of r=3 centred (20,14.5), then R4 on the top long edge at y=20. The round covers y=16..20 and removes 40*(16-4pi) = 137.35; the hole removes 9*pi*10 = 282.74; where both remove the same material (y in 16..17.5) add it back: overlap = integral over y from 16 to 17.5 of [4 - sqrt(16-(y-16)^2)] x 2 sqrt(9-(y-14.5)^2) dy = 0.3758. V = 8000 - 9*pi*10 - 40*(16-4*pi) + overlap = 7580.287.",
+    "source": "analytic",
+    "sources": [
+      "tangency-labs/solidcraft#324"
+    ],
+    "volume_mm3": 7580.287315360674,
+    "what": "324-fillet-over-hole-overlap with the hole cut by a cylinder longer than the block (z -1 to 11), so the hole's wall is trimmed by both the top and the bottom face"
+  },
+  "expressible": false,
+  "operation_expressible": true,
+  "outcome": {
+    "ran": true,
+    "raw_counts": {
+      "edges": 21,
+      "faces": 8,
+      "vertices": 14
+    }
+  },
+  "records": "324-fillet-over-hole-cut-by-overlong-cylinder.bodies.json.gz",
+  "result": [
+    {
+      "body": "Block",
+      "made": "b16"
+    }
+  ],
+  "rig": {
+    "error": null,
+    "known_failing": null,
+    "measured": {
+      "area_mm2": 2855.36646906791,
+      "body_count": 1,
+      "edges": 21,
+      "faces": 8,
+      "vertices": 14,
+      "volume_mm3": 7580.287353562249
+    },
+    "refused_with": null,
+    "status": "pass"
+  },
+  "sources": [
+    "tangency-labs/solidcraft#324"
+  ],
+  "traced_ops": [
+    "extrude",
+    "extrude",
+    "copy",
+    "copy",
+    "copy",
+    "copy",
+    "tagged",
+    "tagged",
+    "boolean",
+    "copy",
+    "copy",
+    "tagged",
+    "blend_dropping"
+  ],
+  "ungraded": [
+    "continuity: SolidCraft computes it"
+  ],
+  "what": "324-fillet-over-hole-overlap with the hole cut by a cylinder longer than the block (z -1 to 11), so the hole's wall is trimmed by both the top and the bottom face",
+  "why_not": []
+}

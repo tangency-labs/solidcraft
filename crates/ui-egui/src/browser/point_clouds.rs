@@ -1,19 +1,20 @@
 //! The Point Clouds folder of the Browser (#5151): an eye per cloud and for the folder, a menu,
-//! and the Edit Point Cloud card: the file's units, the size of the dots, how the cloud is
-//! coloured (its colours, one colour, a ramp over a property, its range on a track, or the
-//! palette of a label, with its legend), and its filters (a range on a track, played with ▶ or
-//! Space, or the values of a label picked in its legend). Each track shows how much of the cloud
-//! lies at each value, over what the other filters keep. The live edits of one opening are one
-//! undo step.
+//! and the Edit Point Cloud card: the file's units, the size of the dots (when some points are
+//! dots), how the cloud is coloured (its colours, one colour, a ramp over a property, its range
+//! on a track, or the palette of a label, with its legend), and its filters (a range on a track,
+//! played with ▶ or Space, or the values of a label picked in its legend). Each track shows how
+//! much of the cloud lies at each value, over what the other filters keep. The live edits of
+//! one opening are one undo step.
 
 use serde_json::{Value, json};
 use solidcraft_engine::doc::point_cloud::{COORDINATES, ColorBy, Filter, Keep, MAX_FILTERS, Names, PLAIN, PointCloud, UNITS, byte, label_color};
 use solidcraft_engine::view::POINT_CLOUDS_FOLDER;
 
-use super::{Actions, Row, draw_row, is_open, panel_pos, toggle, toggle_folder};
+use super::{Actions, Row, Rows, Spec, is_open, node_row, rows_start_open, toggle, toggle_folder};
 use crate::SolveApp;
-use crate::context_menu::{Item, Target};
+use crate::context_menu::Target;
 use crate::ui_kit;
+use crate::ui_kit::Item;
 
 #[path = "point_cloud_tracks.rs"]
 pub(crate) mod point_cloud_tracks;
@@ -23,15 +24,17 @@ use point_cloud_tracks::{Ask, Paint, Tracks};
 use range_track::{Part, Track, range_track};
 
 /// Filters the GPU applies; the others are kept but not drawn.
-pub const DRAWN_FILTERS: usize = solidcraft_gpu::view::FILTERS;
+pub const DRAWN_FILTERS: usize = solidcraft_viewport_gpu::view::FILTERS;
 
 /// The Edit Point Cloud card: the cloud, the undo depth when it opened, what it worked out once
-/// for the cloud's data (the automatic height range), its tracks' bars, and a filter playing.
+/// for the cloud's data (the automatic height range, the number of dots), its tracks' bars, and
+/// a filter playing.
 #[derive(Clone, Debug)]
 pub struct CloudPanel {
     pub cloud: u64,
     pub(crate) depth: usize,
     auto: Option<(usize, [u64; 16], Option<[f64; 2]>)>,
+    dots: Option<([usize; 3], usize)>,
     tracks: Tracks,
     pub play: Option<Play>,
 }
@@ -42,6 +45,9 @@ pub struct CloudPanel {
 #[derive(Clone, Debug)]
 pub struct Play {
     pub filter: usize,
+    /// The property of that filter: filters are told by place, and a place changes hands when a
+    /// filter before it goes.
+    property: String,
     part: Part,
     /// When it last moved, and where it is exactly.
     at: f64,
@@ -63,14 +69,14 @@ fn colour_key(cloud: u64) -> String {
 
 impl Play {
     /// Start playing `part` of `range` within `span`, from the start again when it is at the end.
-    fn new(filter: usize, part: Part, [lo, hi]: [f64; 2], span: [f64; 2], at: f64) -> Play {
+    fn new(filter: usize, property: String, part: Part, [lo, hi]: [f64; 2], span: [f64; 2], at: f64) -> Play {
         let exact = match part {
             Part::High if hi >= span[1] => [lo, lo],
             Part::Band if hi >= span[1] => [span[0], span[0] + hi - lo],
             Part::Low if lo >= hi => [span[0], hi],
             _ => [lo, hi],
         };
-        Play { filter, part, at, exact, now: exact }
+        Play { filter, property, part, at, exact, now: exact }
     }
     /// Move on to time `now` at `speed` units a second; whether it reached the end.
     fn step(&mut self, now: f64, speed: f64, span: [f64; 2], integer: bool) -> bool {
@@ -94,7 +100,7 @@ impl Play {
 
 impl CloudPanel {
     pub fn new(app: &SolveApp, cloud: u64) -> Self {
-        CloudPanel { cloud, depth: app.session.undo.len(), auto: None, tracks: Tracks::default(), play: None }
+        CloudPanel { cloud, depth: app.session.undo.len(), auto: None, dots: None, tracks: Tracks::default(), play: None }
     }
     /// The cloud's automatic height range, worked out again only when its points or placement
     /// change.
@@ -106,6 +112,22 @@ impl CloudPanel {
                 let r = c.auto_height_range();
                 self.auto = Some((key.0, key.1, r));
                 r
+            }
+        }
+    }
+    /// How many points are drawn as dots, worked out again only when the cloud's data change.
+    fn dots(&mut self, c: &PointCloud) -> usize {
+        let key = [
+            std::sync::Arc::as_ptr(c.points.values()).cast::<f32>() as usize,
+            std::sync::Arc::as_ptr(&c.complex.segments.0).cast::<u32>() as usize,
+            std::sync::Arc::as_ptr(&c.complex.triangles.0).cast::<u32>() as usize,
+        ];
+        match self.dots {
+            Some((k, n)) if k == key => n,
+            _ => {
+                let n = c.isolated_points();
+                self.dots = Some((key, n));
+                n
             }
         }
     }
@@ -183,22 +205,24 @@ fn legend(ui: &mut egui::Ui, c: &PointCloud, names: &Names) -> Option<i32> {
     clicked
 }
 
-pub(super) fn rows(app: &mut SolveApp, ui: &mut egui::Ui, depth: usize, acts: &mut Actions) {
+pub(super) fn rows(app: &mut SolveApp, rows: &mut Rows<'_>, depth: usize, acts: &mut Actions) {
     let clouds: Vec<(u64, String, bool)> = app.session.doc.point_clouds.iter().map(|c| (c.id, c.name.clone(), c.visible)).collect();
     if clouds.is_empty() {
         return;
     }
     let key = "point_clouds";
-    let open = is_open(app, key, true);
+    // Like the other folders, it starts closed while the Browser's rows do (Preferences › Layout).
+    let start_open = rows_start_open(app);
+    let open = is_open(app, key, start_open);
     // The folder's eye is its own: each cloud keeps its eye while the folder hides them all.
     let shown = !app.session.folder_hidden(POINT_CLOUDS_FOLDER);
-    let r = draw_row(
-        ui,
-        ui.id().with(key),
-        &Row { depth, fold: Some(open), eye: Some(shown), icon: "folder", label: "Point Clouds", dim: !shown, ..Default::default() },
+    let r = node_row(
+        rows,
+        Spec { key, ..Default::default() },
+        Row { depth, fold: Some(open), eye: Some(shown), icon: "folder", label: "Point Clouds", dim: !shown, ..Default::default() },
     );
     if r.fold || r.clicked {
-        toggle(app, key, true);
+        toggle(app, key, start_open);
     }
     if r.eye {
         toggle_folder(app, POINT_CLOUDS_FOLDER);
@@ -207,10 +231,11 @@ pub(super) fn rows(app: &mut SolveApp, ui: &mut egui::Ui, depth: usize, acts: &m
         return;
     }
     for (id, name, visible) in clouds {
-        let r = draw_row(
-            ui,
-            ui.id().with(("point_cloud", id)),
-            &Row { depth: depth + 1, eye: Some(visible), icon: "point", label: &name, name: true, dim: !visible || !shown, ..Default::default() },
+        let cloud_key = format!("point_cloud:{id}");
+        let r = node_row(
+            rows,
+            Spec { key: &cloud_key, ..Default::default() },
+            Row { depth: depth + 1, eye: Some(visible), icon: "point", label: &name, name: true, dim: !visible || !shown, ..Default::default() },
         );
         if r.eye {
             let _ = app.run("pointcloud.edit", json!({ "cloud": id, "visible": !visible }));
@@ -243,11 +268,16 @@ pub(crate) fn panel(app: &mut SolveApp, ctx: &egui::Context) {
         return;
     };
     let mut edit: Option<Value> = None;
-    let title = crate::i18n::format("browser.edit_point_cloud_title", &[("name", &c.name)]);
+    let mut reload = false;
+    let title = solidcraft_ui_text::format("browser.edit_point_cloud_title", &[("name", &c.name)]);
     let auto = if c.color_by == ColorBy::Height { m.auto_range(&c) } else { None };
+    let dots = m.dots(&c);
     let now = ctx.input(|i| i.time);
     // A playing filter moves on; at the end of its span it stops, and is written once.
     let mut stop_play = false;
+    // A filter gone from under it (a reload, an agent's edit, an undo) ends the play, unwritten,
+    // or its range would land on the filter that took its place.
+    m.play.take_if(|p| c.filters.get(p.filter).is_none_or(|f| f.property != p.property));
     if let Some(p) = m.play.as_mut()
         && let Some(span) = c.filters.get(p.filter).and_then(|f| c.span(&f.property))
     {
@@ -267,22 +297,30 @@ pub(crate) fn panel(app: &mut SolveApp, ctx: &egui::Context) {
         _ => Paint::One,
     };
     let changes_of = c.colored_property().filter(|n| c.complex.integer(n)).map(str::to_string);
-    let at = panel_pos(app);
-    let (closed, action) = ui_kit::Window::new(egui::Id::new("sc_point_cloud_panel"), "point", &title)
-        .placed(egui::Align2::LEFT_TOP, at)
+    let (pivot, at) = crate::shell::floating_editor_anchor(app, ctx);
+    let (closed, action) = ui_kit::Window::new(egui::Id::unique("sc_point_cloud_panel"), "point", &title)
+        .placed(pivot, at)
         .fields()
-        .actions("", crate::i18n::tr("ui.close"), None)
+        .actions("", solidcraft_ui_text::tr("ui.close"), None)
         .show(ctx, true, |ui| {
-            ui_kit::row(ui, crate::i18n::tr_label("Points"), |ui| ui.label(c.len().to_string()));
-            let mut size = c.point_size;
-            if ui_kit::row(ui, crate::i18n::tr("ui.point_cloud_size"), |ui| ui_kit::slider(ui, &mut size, 0.5..=16.0, Default::default())).changed() {
-                edit = Some(json!({ "cloud": c.id, "point_size": size }));
+            ui_kit::row(ui, solidcraft_ui_text::tr_label("Points"), |ui| ui.label(c.len().to_string()));
+            // The dots' size, where some points are dots: those no segment or triangle ends on.
+            if dots > 0 {
+                if dots < c.len() {
+                    ui_kit::row(ui, solidcraft_ui_text::tr_label("Dots"), |ui| ui.label(dots.to_string()));
+                }
+                let mut size = c.point_size;
+                if ui_kit::row(ui, solidcraft_ui_text::tr("ui.point_cloud_size"), |ui| ui_kit::slider(ui, &mut size, 0.5..=16.0, Default::default()))
+                    .changed()
+                {
+                    edit = Some(json!({ "cloud": c.id, "point_size": size }));
+                }
             }
             let units: Vec<&str> = UNITS.iter().map(|(u, _)| *u).collect();
             let was = units.iter().position(|u| *u == c.units).unwrap_or(0);
             let mut unit = was;
             // A dropdown's response doesn't report the pick: compare the index.
-            ui_kit::row(ui, crate::i18n::tr("ui.point_cloud_units"), |ui| ui_kit::dropdown(ui, "point_cloud_units", &mut unit, &units));
+            ui_kit::row(ui, solidcraft_ui_text::tr("ui.point_cloud_units"), |ui| ui_kit::dropdown(ui, "point_cloud_units", &mut unit, &units));
             if unit != was
                 && let Some(u) = units.get(unit)
             {
@@ -298,7 +336,7 @@ pub(crate) fn panel(app: &mut SolveApp, ctx: &egui::Context) {
                 by => COLOR_BY.iter().position(|(b, _)| *b == by).unwrap_or(0),
             };
             let mut by = was;
-            ui_kit::row(ui, crate::i18n::tr("ui.point_cloud_color_by"), |ui| ui_kit::dropdown(ui, "point_cloud_color_by", &mut by, &labels));
+            ui_kit::row(ui, solidcraft_ui_text::tr("ui.point_cloud_color_by"), |ui| ui_kit::dropdown(ui, "point_cloud_color_by", &mut by, &labels));
             if by != was {
                 let name = COLOR_BY.get(by).map(|(b, _)| b.name()).or_else(|| properties.get(by - COLOR_BY.len()).copied());
                 if let Some(name) = name {
@@ -309,12 +347,12 @@ pub(crate) fn panel(app: &mut SolveApp, ctx: &egui::Context) {
             let legend_shown = colored.and_then(|n| label(&c, n));
             match c.color_by {
                 ColorBy::File if c.colors.is_empty() => {
-                    ui_kit::row(ui, "", |ui| ui.weak(crate::i18n::tr("ui.point_cloud_no_file_colors")));
+                    ui_kit::row(ui, "", |ui| ui.weak(solidcraft_ui_text::tr("ui.point_cloud_no_file_colors")));
                 }
                 ColorBy::File => {}
                 ColorBy::Single => {
                     let mut rgb = c.color.unwrap_or(PLAIN).map(byte);
-                    if ui_kit::row(ui, crate::i18n::tr_label("Colour"), |ui| ui_kit::color_field(ui, &mut rgb)).changed() {
+                    if ui_kit::row(ui, solidcraft_ui_text::tr_label("Colour"), |ui| ui_kit::color_field(ui, &mut rgb)).changed() {
                         edit = Some(json!({ "cloud": c.id, "color": rgb.map(|v| f64::from(v) / 255.0) }));
                     }
                 }
@@ -330,7 +368,7 @@ pub(crate) fn panel(app: &mut SolveApp, ctx: &egui::Context) {
                     {
                         // A ramp over what is shown, unless its range is set.
                         let automatic = c.height_range.is_none();
-                        if ui_kit::checkbox_row(ui, "point_cloud_auto_range", crate::i18n::tr("ui.point_cloud_auto_range"), automatic) {
+                        if ui_kit::checkbox_row(ui, "point_cloud_auto_range", solidcraft_ui_text::tr("ui.point_cloud_auto_range"), automatic) {
                             edit = Some(json!({ "cloud": c.id, "color_range": if automatic { json!(crate::point_clouds::color_range(ui.ctx(), &live)) } else { Value::Null } }));
                         }
                         // The ramp's range is a range on a track of the property, over what the
@@ -386,9 +424,9 @@ pub(crate) fn panel(app: &mut SolveApp, ctx: &egui::Context) {
                         && ui_kit::button(
                             ui,
                             if playing {
-                                format!("⏸ {}", crate::i18n::tr_label("Pause"))
+                                format!("⏸ {}", solidcraft_ui_text::tr_label("Pause"))
                             } else {
-                                format!("▶ {}", crate::i18n::tr_label("Play"))
+                                format!("▶ {}", solidcraft_ui_text::tr_label("Play"))
                             },
                             ui_kit::Button::Small,
                         )
@@ -406,7 +444,7 @@ pub(crate) fn panel(app: &mut SolveApp, ctx: &egui::Context) {
                 match (&f.keep, span) {
                     (Keep::Values { .. }, _) => match label(&c, &f.property) {
                         Some(names) if legend_shown.is_some_and(|l| l.property == names.property) => {
-                            ui.weak(crate::i18n::tr_label("Shown and hidden in the legend above"));
+                            ui.weak(solidcraft_ui_text::tr_label("Shown and hidden in the legend above"));
                         }
                         Some(names) => {
                             if let Some(v) = legend(ui, &c, names) {
@@ -473,7 +511,7 @@ pub(crate) fn panel(app: &mut SolveApp, ctx: &egui::Context) {
                             changed = true;
                         }
                         let part = range_track::last_part(ui.ctx(), &filter_key(c.id, k));
-                        m.play = Some(Play::new(k, part, range, span, now));
+                        m.play = Some(Play::new(k, f.property.clone(), part, range, span, now));
                     }
                 }
             }
@@ -484,10 +522,10 @@ pub(crate) fn panel(app: &mut SolveApp, ctx: &egui::Context) {
             }
             let all: Vec<&str> = c.property_names().collect();
             if c.filters.len() < MAX_FILTERS {
-                let mut add_labels = vec![crate::i18n::tr_label("Add filter…")];
+                let mut add_labels = vec![solidcraft_ui_text::tr_label("Add filter…")];
                 add_labels.extend(all.iter().copied());
                 let mut pick = 0;
-                ui_kit::row(ui, crate::i18n::tr_label("Filter by"), |ui| ui_kit::dropdown(ui, "point_cloud_add_filter", &mut pick, &add_labels));
+                ui_kit::row(ui, solidcraft_ui_text::tr_label("Filter by"), |ui| ui_kit::dropdown(ui, "point_cloud_add_filter", &mut pick, &add_labels));
                 if let Some(name) = all.get(pick.wrapping_sub(1)) {
                     // A label keeps all its values at first, anything else its whole span.
                     let keep = match (label(&c, name), c.span(name)) {
@@ -504,6 +542,9 @@ pub(crate) fn panel(app: &mut SolveApp, ctx: &egui::Context) {
             if changed {
                 edit = Some(json!({ "cloud": c.id, "filters": filters_json(&filters) }));
             }
+            if !c.source.is_empty() && ui_kit::button(ui, solidcraft_ui_text::tr("ui.point_cloud_reload"), ui_kit::Button::Normal).clicked() {
+                reload = true;
+            }
         });
     // A filter that stops playing is written where it stopped.
     if stop_play && let Some(p) = m.play.take() {
@@ -512,6 +553,9 @@ pub(crate) fn panel(app: &mut SolveApp, ctx: &egui::Context) {
             f.keep = Keep::Range { range: p.now };
             edit = Some(json!({ "cloud": c.id, "filters": filters_json(&filters) }));
         }
+    }
+    if reload {
+        crate::network_prompt::reload_cloud(app, c.id, &c.source);
     }
     if let Some(p) = edit
         && app.run("pointcloud.edit", p).is_ok()
@@ -557,7 +601,7 @@ mod tests {
         }
         h.app.run("pointcloud.edit", json!({"cloud": id, "color_by": "height"})).unwrap();
         h.frames(2);
-        assert!(h.widget(crate::i18n::tr("ui.point_cloud_auto_range")).is_some());
+        assert!(h.widget(solidcraft_ui_text::tr("ui.point_cloud_auto_range")).is_some());
         h.step(&json!({"widget": "Close"})).unwrap();
         h.frames(2);
         assert!(h.app.tree.cloud_panel.is_none());
@@ -565,19 +609,48 @@ mod tests {
         let _ = std::fs::remove_dir_all(dir);
     }
 
-    /// A PLY file of points along x, `t` running 0 to 10 by halves, a layer every 2: the layer
-    /// changes at t = 2, 4, 6 and 8.
-    fn layered_points(dir: &std::path::Path) -> std::path::PathBuf {
+    /// A PLY file of ten segments along x, `t` running 0 to 10 along them and two segments to a
+    /// layer: the layer changes at t = 2, 4, 6 and 8.
+    fn layered_segments(dir: &std::path::Path) -> std::path::PathBuf {
         let mut ply = String::from(
-            "ply\nformat ascii 1.0\nelement vertex 21\nproperty float x\nproperty float y\nproperty float z\nproperty float t\nproperty int layer\nend_header\n",
+            "ply\nformat ascii 1.0\nelement vertex 11\nproperty float x\nproperty float y\nproperty float z\nproperty float t\n\
+             element edge 10\nproperty int vertex1\nproperty int vertex2\nproperty int layer\nend_header\n",
         );
-        for i in 0..=20 {
-            let t = f64::from(i) / 2.0;
-            ply += &format!("{t} 0 0 {t} {}\n", (i / 4).min(4));
+        for i in 0..=10 {
+            ply += &format!("{i} 0 0 {i}\n");
+        }
+        for i in 0..10 {
+            ply += &format!("{i} {} {}\n", i + 1, i / 2);
         }
         let path = dir.join("layers.ply");
         std::fs::write(&path, ply).unwrap();
         path
+    }
+
+    /// Filters are told by place: one gone from under a play moves the next into its place, which
+    /// must not take the play's range, on screen or written when the play ends.
+    #[test]
+    fn a_filter_gone_from_under_a_play_ends_the_play() {
+        let mut h = crate::scenario::Harness::new();
+        h.app.home.open = false;
+        let dir = std::env::temp_dir().join(format!("solidcraft-browser-play-gone-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = layered_segments(&dir);
+        let id = h.app.run("pointcloud.insert", json!({"path": path.to_string_lossy()})).unwrap()["cloud"].as_u64().unwrap();
+        let layer = json!({"property": "layer", "range": [0.0, 2.0]});
+        h.app.run("pointcloud.edit", json!({"cloud": id, "filters": [{"property": "t", "range": [2.0, 5.0]}, layer]})).unwrap();
+        let mut card = super::CloudPanel::new(&h.app, id);
+        card.play = Some(super::Play::new(0, "t".into(), super::Part::High, [2.0, 5.0], [0.0, 10.0], 0.0));
+        h.app.tree.cloud_panel = Some(card);
+        h.frames(2);
+        assert!(h.app.tree.cloud_panel.as_ref().unwrap().play.is_some(), "it plays while its filter is there");
+
+        h.app.run("pointcloud.edit", json!({"cloud": id, "filters": [layer]})).unwrap();
+        h.frames(2);
+        let card = h.app.tree.cloud_panel.as_ref().unwrap();
+        assert!(card.play.is_none() && card.playing(id, 0).is_none(), "the layer filter took its place");
+        assert_eq!(h.app.session.doc.point_clouds[0].filters[0].range(), Some([0.0, 2.0]));
+        let _ = std::fs::remove_dir_all(dir);
     }
 
     #[test]
@@ -586,7 +659,7 @@ mod tests {
         h.app.home.open = false;
         let dir = std::env::temp_dir().join(format!("solidcraft-browser-track-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
-        let path = layered_points(&dir);
+        let path = layered_segments(&dir);
         let id = h.app.run("pointcloud.insert", json!({"path": path.to_string_lossy()})).unwrap()["cloud"].as_u64().unwrap();
         h.app.run("pointcloud.edit", json!({"cloud": id, "color_by": "layer", "filters": [{"property": "t", "range": [2.0, 5.0]}]})).unwrap();
         h.app.tree.cloud_panel = Some(super::CloudPanel::new(&h.app, id));

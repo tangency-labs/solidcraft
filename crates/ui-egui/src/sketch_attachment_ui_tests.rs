@@ -290,10 +290,12 @@ fn nested_anchor_saved_fixed_conversion_preserves_rotated_second_author_plane() 
     };
     *plane = PlaneRef::AtAngle {
         base: Box::new(PlaneRef::Offset { base: Box::new(plane.clone()), distance: "2 mm".into() }),
-        axis_origin: Vec3::ZERO,
+        axis_origin: solidcraft_engine::doc::point_expr(Vec3::ZERO),
         axis_dir: Vec3::X,
         angle: "15 deg".into(),
         line: None,
+        direction_only: false,
+        pivot: None,
     };
     h.app.session = solidcraft_engine::Session::new(document);
     let raw = h.app.session.doc.sketch(id).unwrap().clone();
@@ -376,6 +378,80 @@ fn picked_top_face_of_a_stacked_join_extrude_takes_a_sketch() {
 }
 
 #[test]
+fn live_redefine_editor_survives_host_toggles_and_reserves_only_its_current_visible_footprint() {
+    fn assert_live(h: &Harness, sketch: u64, commands: &[(String, Value)]) -> egui::Rect {
+        assert_eq!(h.app.tree.redefine, Some(sketch));
+        assert_eq!(crate::sketch_attachment_ui::commands(&h.app).as_deref(), Some(commands));
+        let rect = h.app.viewport.dialog_rect.expect("the live redefine editor must actually paint");
+        assert!(rect.is_positive() && rect.is_finite());
+        assert_eq!(crate::scenario::rect_of("dialog:outer"), Some(rect));
+        if h.app.universal_panel_host_enabled() {
+            let usable = crate::shell::host_usable(&h.app).unwrap();
+            assert!(usable.obstacles.contains(&crate::panel_runtime::logical_rect(rect)));
+            assert!(usable.free.iter().all(|piece| !crate::panel_runtime::egui_rect(*piece).intersect(rect).is_positive()));
+        }
+        rect
+    }
+    for scale in [1.0, 2.0] {
+        let mut h = Harness::new();
+        h.app.home.open = false;
+        h.call("ui.resize", json!({"width":1400,"height":1000}));
+        let sketch = h.app.run("sketch.create", json!({"plane":"XY"})).unwrap()["sketch"].as_u64().unwrap();
+        h.app.run("sketch.rectangle.two_point", json!({"p0":[10,10],"p1":[30,20]})).unwrap();
+        h.app.finish_sketch();
+        h.settle();
+        h.ctx.set_pixels_per_point(scale);
+        crate::panel_runtime::enable_host_specimen(&mut h.app, "docks").unwrap();
+        h.frames(3);
+        h.ctx.options_mut(|options| options.max_passes = 1.try_into().unwrap());
+        let document = h.app.session.doc.clone();
+        let revision = h.app.session.revision;
+        let undo = h.app.session.undo.len();
+        let before = crate::shell::host_usable(&h.app).unwrap();
+        crate::browser::redefine_sketch(&mut h.app, sketch);
+        h.frame();
+        assert_eq!(h.app.tree.redefine, Some(sketch));
+        assert!(h.app.tree.redefine_draft.is_some());
+        assert!(h.app.viewport.dialog_rect.is_none(), "the first invisible sizing pass cannot reserve a dialog footprint");
+        assert!(crate::scenario::rect_of("dialog:outer").is_none());
+        assert_eq!(crate::shell::host_usable(&h.app).unwrap(), before);
+        h.frame();
+        let initial = h.app.viewport.dialog_rect.expect("the next pass paints the actual editor");
+        assert_eq!(crate::scenario::rect_of("dialog:outer"), Some(initial));
+        h.step(&json!({"widget":"Use XZ plane"})).unwrap();
+        let commands = crate::sketch_attachment_ui::commands(&h.app).unwrap();
+        assert_eq!(commands, vec![("sketch.redefine".into(), json!({"sketch":sketch,"plane":"XZ"}))]);
+        assert_live(&h, sketch, &commands);
+
+        h.app.disable_universal_panel_host().unwrap();
+        h.frames(3);
+        assert_live(&h, sketch, &commands);
+        h.app.enable_universal_panel_host(crate::panel_runtime::HostOptions::default()).unwrap();
+        h.frame();
+        assert_live(&h, sketch, &commands);
+        h.frames(3);
+        let mounted = assert_live(&h, sketch, &commands);
+        assert!(std::sync::Arc::ptr_eq(&h.app.session.doc, &document));
+        assert_eq!(h.app.session.revision, revision);
+        assert_eq!(h.app.session.undo.len(), undo, "host toggles cannot apply or cancel the pending redefine command");
+        let cancel = crate::scenario::handle_at("dialog:cancel").unwrap();
+        assert!(mounted.contains(cancel));
+        h.step(&json!({"click":{"handle":"dialog:cancel"}})).unwrap();
+        h.frames(2);
+        assert!(h.app.tree.redefine.is_none() && h.app.tree.redefine_draft.is_none());
+        assert!(h.app.viewport.dialog_rect.is_none());
+        assert!(crate::scenario::rect_of("dialog:outer").is_none());
+        assert!(
+            !crate::shell::host_usable(&h.app).unwrap().obstacles.contains(&crate::panel_runtime::logical_rect(mounted)),
+            "a producer that no longer paints cannot leave a phantom dialog reservation"
+        );
+        assert!(std::sync::Arc::ptr_eq(&h.app.session.doc, &document));
+        assert_eq!(h.app.session.revision, revision);
+        assert_eq!(h.app.session.undo.len(), undo);
+    }
+}
+
+#[test]
 fn plane_redefinition_uses_dense_card_and_keeps_command_preview_cancel_and_ok() {
     use crate::scenario;
     let mut h = Harness::new();
@@ -423,6 +499,25 @@ fn redefine_panel_names_the_plane_a_sketch_is_on() {
     assert_eq!(plane_description(&h.app.session.doc, &PlaneRef::Flipped { base: xy, about_y: false }), "The XY plane, from its other side");
 }
 
+/// The panel's "Current plane" value wraps and its row grows: a name longer than the control
+/// column is shown on every line it takes, not clipped to the first.
+#[test]
+fn redefine_panel_current_plane_row_grows_for_a_long_plane_name() {
+    use crate::scenario;
+    let mut h = Harness::new();
+    let name = "Bracket mounting plane offset above the base plate";
+    h.app.run("construct.plane.offset", json!({"base": "XY", "offset": 10, "name": name})).unwrap();
+    let sketch = h.app.run("sketch.create", json!({"plane": name})).unwrap()["sketch"].as_u64().unwrap();
+    h.app.run("sketch.finish", json!({})).unwrap();
+    crate::browser::redefine_sketch(&mut h.app, sketch);
+    h.frames(5);
+    let row = scenario::rect_of("dialog:row:Current plane").expect("the panel names the current plane");
+    let control = scenario::rect_of("dialog:control:Current plane").unwrap();
+    assert!(row.height() > solidcraft_theme::Tokens::get().control_height, "the long name wraps and the row grows: {row:?}");
+    assert!(row.contains_rect(control));
+    assert!(scenario::rect_of("dialog:field:Plane").unwrap().top() >= row.bottom(), "the Plane field sits below the grown row");
+}
+
 /// Preferences › Sketch › "Sketching on a part's face makes that part active" (#10215): a face of
 /// a part's body picked for Create Sketch while the design is active puts the sketch in the part,
 /// which stays active; off, the sketch belongs to the design.
@@ -453,4 +548,84 @@ fn face_pick_makes_its_part_active_only_with_the_preference() {
         h.app.finish_sketch();
         assert_eq!(h.app.session.active_component, if on { component } else { 0 }, "the part stays active as after Activate");
     }
+}
+
+/// #12540: a plane or a flat face picked in the view while Redefine Sketch Plane is open fills
+/// its Plane field; a pick that was already there when the panel opened does not.
+#[test]
+fn redefine_panel_takes_a_plane_or_face_picked_in_the_view() {
+    let mut h = Harness::new();
+    h.app.set_origin_shown(false);
+    h.app.session.auto_project = false;
+    h.app.preferences.origin_plane_names = crate::prefs::OriginPlaneNames::TopFrontRight;
+    h.app.run("solid.box", json!({"length":20,"width":20,"height":10,"corner":[-10,-10,0],"body_name":"Block"})).unwrap();
+    h.app.run("construct.plane.offset", json!({"base":"XZ","offset":30,"name":"Front30"})).unwrap();
+    let sketch = h.app.run("sketch.create", json!({"plane":"XY"})).unwrap()["sketch"].as_u64().unwrap();
+    h.app.run("sketch.rectangle.two_point", json!({"p0":[20,20],"p1":[30,25]})).unwrap();
+    h.app.finish_sketch();
+    h.call("ui.view", json!({"view":"top"}));
+    h.call("ui.view", json!({"view":"fit"}));
+    h.settle();
+    assert!(crate::viewport::origin_planes(&h.app).is_empty());
+    h.app.session.selection = vec![solidcraft_engine::Sel::Plane { name: "YZ".into() }];
+    crate::browser::redefine_sketch(&mut h.app, sketch);
+    h.frames(3);
+    assert!(crate::sketch_attachment_ui::commands(&h.app).is_none(), "a selection from before the panel opened is not a pick");
+
+    h.app.session.selection = vec![solidcraft_engine::Sel::Plane { name: "Front30".into() }];
+    h.frames(2);
+    assert_eq!(crate::sketch_attachment_ui::commands(&h.app).unwrap(), vec![("sketch.redefine".into(), json!({"sketch":sketch,"plane":"Front30"}))]);
+
+    // Only the open panel reveals the hidden origin. Its XY plane is under the box's top face.
+    let origin = crate::viewport::origin_planes(&h.app);
+    assert_eq!(origin.len(), 3);
+    let (_, _, quad) = origin.into_iter().find(|(name, _, _)| *name == "XY").unwrap();
+    let at = (quad[2].x * 0.5).min(5.0);
+    h.step(&json!({"click":{"world":[at,at,0]}})).unwrap();
+    h.frames(2);
+    assert!(matches!(h.app.session.selection.first(), Some(solidcraft_engine::Sel::Plane { name }) if name == "XY"));
+    let draft = h.app.tree.redefine_draft.as_ref().unwrap();
+    assert_eq!(draft.label, "Top");
+    assert_eq!(draft.commands().unwrap()[0].1["plane"], "XY");
+
+    h.app.session.selection.clear();
+    h.frames(2);
+    h.step(&json!({"click":{"world":[-7,-6,10]}})).unwrap();
+    h.frames(2);
+    assert!(matches!(h.app.session.selection.first(), Some(solidcraft_engine::Sel::Face { body, .. }) if body == "Block"));
+    let commands = crate::sketch_attachment_ui::commands(&h.app).expect("the picked face fills the Plane field");
+    assert_eq!(commands[0].1["plane"]["body"], "Block", "{commands:?}");
+    // A plane selected ahead of the face does not take the field from the face.
+    let face = h.app.session.selection.first().cloned().unwrap();
+    h.app.session.selection = vec![solidcraft_engine::Sel::Plane { name: "Front30".into() }, face];
+    h.frames(2);
+    assert_eq!(crate::sketch_attachment_ui::commands(&h.app).unwrap()[0].1["plane"]["body"], "Block");
+    h.step(&json!({"click":{"handle":"dialog:ok"}})).unwrap();
+    assert!(h.app.tree.redefine.is_none());
+    assert!(crate::viewport::origin_planes(&h.app).is_empty());
+    assert!(h.app.session.model.result(sketch).unwrap().error.is_none());
+}
+
+#[test]
+fn redefine_panel_takes_repeated_explicit_plane_picks() {
+    let mut h = Harness::new();
+    let sketch = h.app.run("sketch.create", json!({"plane":"XY"})).unwrap()["sketch"].as_u64().unwrap();
+    h.app.run("sketch.rectangle.two_point", json!({"p0":[10,10],"p1":[30,20]})).unwrap();
+    h.app.finish_sketch();
+    h.app.run("select.set", json!({"items":[{"type":"plane","name":"YZ"}]})).unwrap();
+    crate::browser::redefine_sketch(&mut h.app, sketch);
+    h.frames(3);
+    assert!(crate::sketch_attachment_ui::commands(&h.app).is_none(), "opening the panel does not consume its preselection");
+
+    // Viewport clicks use select.set even when the selected plane has not changed.
+    crate::viewport::select(&mut h.app, Some(solidcraft_engine::Sel::Plane { name: "YZ".into() }), false, false);
+    h.frames(2);
+    assert_eq!(crate::sketch_attachment_ui::commands(&h.app).unwrap()[0].1["plane"], "YZ");
+
+    h.step(&json!({"widget":"Use XZ plane"})).unwrap();
+    h.frames(2);
+    assert_eq!(crate::sketch_attachment_ui::commands(&h.app).unwrap()[0].1["plane"], "XZ");
+    crate::viewport::select(&mut h.app, Some(solidcraft_engine::Sel::Plane { name: "YZ".into() }), false, false);
+    h.frames(2);
+    assert_eq!(crate::sketch_attachment_ui::commands(&h.app).unwrap()[0].1["plane"], "YZ", "a repeated pick replaces the panel button's candidate");
 }

@@ -1,0 +1,41 @@
+{
+  "area": "plastic",
+  "bodies": {},
+  "calls": [],
+  "case": "cov-lip-on-a-face-without-an-opening-refused",
+  "expected": {
+    "method": "a lip runs round the opening of a rim face (an inner and an outer edge); the closed bottom has only its outer edge, so it is refused and says what to pick",
+    "outcome": "refused",
+    "refusal": "pick the rim face of a shelled body",
+    "source": "invariants",
+    "sources": [],
+    "what": "plastic.lip on the bottom face of the shelled box: a face with one edge, no rim"
+  },
+  "expressible": false,
+  "operation_expressible": false,
+  "outcome": {
+    "engine_error": "step 3 (plastic.lip): pick the rim face of a shelled body (a face with an inner and an outer edge)",
+    "ran": false
+  },
+  "result": [],
+  "rig": {
+    "error": null,
+    "known_failing": null,
+    "measured": null,
+    "refused_with": "step 3 (plastic.lip): pick the rim face of a shelled body (a face with an inner and an outer edge)",
+    "status": "pass"
+  },
+  "sources": [],
+  "traced_ops": [
+    "extrude",
+    "copy",
+    "copy",
+    "tagged",
+    "shell"
+  ],
+  "ungraded": [],
+  "what": "plastic.lip on the bottom face of the shelled box: a face with one edge, no rim",
+  "why_not": [
+    "the failure is SolidCraft's, not a kernel operation's: step 3 (plastic.lip): pick the rim face of a shelled body (a face with an inner and an outer edge)"
+  ]
+}

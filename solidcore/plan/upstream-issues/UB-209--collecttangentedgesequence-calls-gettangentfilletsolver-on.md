@@ -1,0 +1,11 @@
+#### UB-209. `CollectTangentEdgeSequence` calls `GetTangentFilletSolver` on the raw edge-use array of a vertex without a corner
+- **Severity:** Crash / undefined behaviour
+- **Area:**
+- **Location:** `source/SMLib/src/SmFilletExecutive.cpp:1803-1808` (`LoadFilletSolver` stores a `SmTArray<SmEdgeuse*>` for each filleted vertex in `m_vVertexCornerMap`); `:1844-1863` (`CreateFilletCorners` replaces it with the corner only when `SmFilletCorner::Create` succeeds, and otherwise `continue`s and still returns success); `:1605` (`GetFilletCornerOfVertex` C-casts the map value to `SmFilletCorner*`, reached through `SmFilletSolver::GetFilletCorner`, `SmFilletSolver.cpp:221-226`); `:4620-4622` (`CollectTangentEdgeSequence`: `NER( pCorner0 )` passes, then `pCorner0->GetTangentFilletSolver( pFS )`; the same at `:4642`, `:4660`, `:4681`).
+- **What happens:** for a vertex whose corner `Create` does not implement ("Corner Case Not Implemented", `SmFilletCorner.cpp:1304`, `:1317`, `:1375`), the map entry stays the edge-use array. The tangent walk takes it for a corner and makes a virtual call on an object of the wrong type.
+- **Trigger:** through the public API: `DoFillet` runs `CreateFilletCorners`, then `CreateFilletBrep` (`:1938`) calls `ProcessSmoothEdgeSequences`, then `CollectTangentEdgeSequence`, on an edge set where one filleted vertex has no implemented corner (e.g. two filleted edges at an apex of five or more edges) and at least two solvers remain.
+- **How found:** pre-review of PR #267 (`blend.fillet_executive_p2`), by source reading.
+- **Confirmed:** no (no native reproduction built; the shim's executive ops never fillet such a vertex).
+- **Severity:** crash/UB (virtual call through a mistyped pointer).
+- **Related:** WR-208 (the same `m_vVertexCornerMap` arrays leak for vertices without a corner).
+- **Rust port:** `ExecutiveAccess::solver_corner` yields `None` for a vertex without a corner, so the walk returns `SM_ERR_NULL_POINTER` (upstream's `NER`) instead.

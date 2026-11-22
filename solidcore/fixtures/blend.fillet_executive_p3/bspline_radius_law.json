@@ -1,0 +1,574 @@
+{
+ "cases": [
+  {
+   "name": "law-cube20-e0-deg1-4-2-4-c0-corner",
+   "upstream_ref": "source/SMLib/src/SmFilletExecutive.cpp:5714 (SmBSplineFilletLaw(pCurve, crEdgeMap)); SM_API SmApiBrep.cpp:2147 body (SmApiVariableRadiusFillet) with that law; prog_test smFilletTest.cpp:399; tangency-labs/solidcore#430: the round misses the law at its C0 knot (removes 35.11, analytic 40.06)",
+   "inputs": {
+    "real_solid": {
+     "dimensions": [
+      20,
+      20,
+      20
+     ],
+     "radius": 4,
+     "radius_law": {
+      "degree": 1,
+      "radii": [
+       4,
+       2,
+       4
+      ],
+      "knots": [
+       0,
+       0.5,
+       1
+      ],
+      "multiplicities": [
+       2,
+       1,
+       2
+      ]
+     },
+     "xsect": 1,
+     "continuity": 1,
+     "thumbweight": 1,
+     "edges": [
+      0
+     ]
+    }
+   }
+  },
+  {
+   "name": "law-cube20-e3-deg1-4-2-4-c0-corner",
+   "upstream_ref": "source/SMLib/src/SmFilletExecutive.cpp:5714 (SmBSplineFilletLaw(pCurve, crEdgeMap)); SM_API SmApiBrep.cpp:2147 body (SmApiVariableRadiusFillet) with that law; prog_test smFilletTest.cpp:399",
+   "inputs": {
+    "real_solid": {
+     "dimensions": [
+      20,
+      20,
+      20
+     ],
+     "radius": 4,
+     "radius_law": {
+      "degree": 1,
+      "radii": [
+       4,
+       2,
+       4
+      ],
+      "knots": [
+       0,
+       0.5,
+       1
+      ],
+      "multiplicities": [
+       2,
+       1,
+       2
+      ]
+     },
+     "xsect": 1,
+     "continuity": 1,
+     "thumbweight": 1,
+     "edges": [
+      3
+     ]
+    }
+   }
+  },
+  {
+   "name": "law-cube20-e0-deg1-two-corners",
+   "upstream_ref": "source/SMLib/src/SmFilletExecutive.cpp:5714 (SmBSplineFilletLaw(pCurve, crEdgeMap)); SM_API SmApiBrep.cpp:2147 body (SmApiVariableRadiusFillet) with that law; prog_test smFilletTest.cpp:399",
+   "inputs": {
+    "real_solid": {
+     "dimensions": [
+      20,
+      20,
+      20
+     ],
+     "radius": 3,
+     "radius_law": {
+      "degree": 1,
+      "radii": [
+       3,
+       2,
+       4,
+       2,
+       3
+      ],
+      "knots": [
+       0,
+       0.25,
+       0.5,
+       0.75,
+       1
+      ],
+      "multiplicities": [
+       2,
+       1,
+       1,
+       1,
+       2
+      ]
+     },
+     "xsect": 1,
+     "continuity": 1,
+     "thumbweight": 1,
+     "edges": [
+      0
+     ]
+    }
+   }
+  },
+  {
+   "name": "law-cube20-e0-deg2-c0-knot",
+   "upstream_ref": "source/SMLib/src/SmFilletExecutive.cpp:5714 (SmBSplineFilletLaw(pCurve, crEdgeMap)); SM_API SmApiBrep.cpp:2147 body (SmApiVariableRadiusFillet) with that law; prog_test smFilletTest.cpp:399",
+   "inputs": {
+    "real_solid": {
+     "dimensions": [
+      20,
+      20,
+      20
+     ],
+     "radius": 4,
+     "radius_law": {
+      "degree": 2,
+      "radii": [
+       4,
+       3,
+       2,
+       3,
+       4
+      ],
+      "knots": [
+       0,
+       0.5,
+       1
+      ],
+      "multiplicities": [
+       3,
+       2,
+       3
+      ]
+     },
+     "xsect": 1,
+     "continuity": 1,
+     "thumbweight": 1,
+     "edges": [
+      0
+     ]
+    }
+   }
+  },
+  {
+   "name": "law-cube20-e0-deg1-linear-2-4",
+   "upstream_ref": "source/SMLib/src/SmFilletExecutive.cpp:5714 (SmBSplineFilletLaw(pCurve, crEdgeMap)); SM_API SmApiBrep.cpp:2147 body (SmApiVariableRadiusFillet) with that law; prog_test smFilletTest.cpp:399",
+   "inputs": {
+    "real_solid": {
+     "dimensions": [
+      20,
+      20,
+      20
+     ],
+     "radius": 2,
+     "radius_law": {
+      "degree": 1,
+      "radii": [
+       2,
+       4
+      ],
+      "knots": [
+       0,
+       1
+      ],
+      "multiplicities": [
+       2,
+       2
+      ]
+     },
+     "xsect": 1,
+     "continuity": 1,
+     "thumbweight": 1,
+     "edges": [
+      0
+     ]
+    }
+   }
+  },
+  {
+   "name": "law-cube20-e0-deg2-smooth-4-2-4",
+   "upstream_ref": "source/SMLib/src/SmFilletExecutive.cpp:5714 (SmBSplineFilletLaw(pCurve, crEdgeMap)); SM_API SmApiBrep.cpp:2147 body (SmApiVariableRadiusFillet) with that law; prog_test smFilletTest.cpp:399",
+   "inputs": {
+    "real_solid": {
+     "dimensions": [
+      20,
+      20,
+      20
+     ],
+     "radius": 4,
+     "radius_law": {
+      "degree": 2,
+      "radii": [
+       4,
+       2,
+       4
+      ],
+      "knots": [
+       0,
+       1
+      ],
+      "multiplicities": [
+       3,
+       3
+      ]
+     },
+     "xsect": 1,
+     "continuity": 1,
+     "thumbweight": 1,
+     "edges": [
+      0
+     ]
+    }
+   }
+  },
+  {
+   "name": "law-cube20-e0-deg3-asymmetric",
+   "upstream_ref": "source/SMLib/src/SmFilletExecutive.cpp:5714 (SmBSplineFilletLaw(pCurve, crEdgeMap)); SM_API SmApiBrep.cpp:2147 body (SmApiVariableRadiusFillet) with that law; prog_test smFilletTest.cpp:399",
+   "inputs": {
+    "real_solid": {
+     "dimensions": [
+      20,
+      20,
+      20
+     ],
+     "radius": 2,
+     "radius_law": {
+      "degree": 3,
+      "radii": [
+       2,
+       3,
+       5,
+       3
+      ],
+      "knots": [
+       0,
+       1
+      ],
+      "multiplicities": [
+       4,
+       4
+      ]
+     },
+     "xsect": 1,
+     "continuity": 1,
+     "thumbweight": 1,
+     "edges": [
+      0
+     ]
+    }
+   }
+  },
+  {
+   "name": "law-cube20-e7-deg3-asymmetric",
+   "upstream_ref": "source/SMLib/src/SmFilletExecutive.cpp:5714 (SmBSplineFilletLaw(pCurve, crEdgeMap)); SM_API SmApiBrep.cpp:2147 body (SmApiVariableRadiusFillet) with that law; prog_test smFilletTest.cpp:399",
+   "inputs": {
+    "real_solid": {
+     "dimensions": [
+      20,
+      20,
+      20
+     ],
+     "radius": 2,
+     "radius_law": {
+      "degree": 3,
+      "radii": [
+       2,
+       3,
+       5,
+       3
+      ],
+      "knots": [
+       0,
+       1
+      ],
+      "multiplicities": [
+       4,
+       4
+      ]
+     },
+     "xsect": 1,
+     "continuity": 1,
+     "thumbweight": 1,
+     "edges": [
+      7
+     ]
+    }
+   }
+  },
+  {
+   "name": "law-cube20-e0-deg2-smooth-xsect-linear",
+   "upstream_ref": "source/SMLib/src/SmFilletExecutive.cpp:5714 (SmBSplineFilletLaw(pCurve, crEdgeMap)); SM_API SmApiBrep.cpp:2147 body (SmApiVariableRadiusFillet) with that law; prog_test smFilletTest.cpp:399",
+   "inputs": {
+    "real_solid": {
+     "dimensions": [
+      20,
+      20,
+      20
+     ],
+     "radius": 4,
+     "radius_law": {
+      "degree": 2,
+      "radii": [
+       4,
+       2,
+       4
+      ],
+      "knots": [
+       0,
+       1
+      ],
+      "multiplicities": [
+       3,
+       3
+      ]
+     },
+     "xsect": 0,
+     "continuity": 1,
+     "thumbweight": 1,
+     "edges": [
+      0
+     ]
+    }
+   }
+  },
+  {
+   "name": "law-cube20-e0-deg2-smooth-xsect-blend-curve",
+   "upstream_ref": "source/SMLib/src/SmFilletExecutive.cpp:5714 (SmBSplineFilletLaw(pCurve, crEdgeMap)); SM_API SmApiBrep.cpp:2147 body (SmApiVariableRadiusFillet) with that law; prog_test smFilletTest.cpp:399",
+   "inputs": {
+    "real_solid": {
+     "dimensions": [
+      20,
+      20,
+      20
+     ],
+     "radius": 4,
+     "radius_law": {
+      "degree": 2,
+      "radii": [
+       4,
+       2,
+       4
+      ],
+      "knots": [
+       0,
+       1
+      ],
+      "multiplicities": [
+       3,
+       3
+      ]
+     },
+     "xsect": 2,
+     "continuity": 1,
+     "thumbweight": 1,
+     "edges": [
+      0
+     ]
+    }
+   }
+  },
+  {
+   "name": "law-cube20-e0-deg2-smooth-g2",
+   "upstream_ref": "source/SMLib/src/SmFilletExecutive.cpp:5714 (SmBSplineFilletLaw(pCurve, crEdgeMap)); SM_API SmApiBrep.cpp:2147 body (SmApiVariableRadiusFillet) with that law; prog_test smFilletTest.cpp:399",
+   "inputs": {
+    "real_solid": {
+     "dimensions": [
+      20,
+      20,
+      20
+     ],
+     "radius": 4,
+     "radius_law": {
+      "degree": 2,
+      "radii": [
+       4,
+       2,
+       4
+      ],
+      "knots": [
+       0,
+       1
+      ],
+      "multiplicities": [
+       3,
+       3
+      ]
+     },
+     "xsect": 1,
+     "continuity": 2,
+     "thumbweight": 1,
+     "edges": [
+      0
+     ]
+    }
+   }
+  },
+  {
+   "name": "law-box10x20x30-e0-deg1-half-to-two",
+   "upstream_ref": "source/SMLib/src/SmFilletExecutive.cpp:5714 (SmBSplineFilletLaw(pCurve, crEdgeMap)); SM_API SmApiBrep.cpp:2147 body (SmApiVariableRadiusFillet) with that law; prog_test smFilletTest.cpp:399; the linear law of real-box-single-edge-linear-radius-half-to-two as a B-spline",
+   "inputs": {
+    "real_solid": {
+     "dimensions": [
+      10,
+      20,
+      30
+     ],
+     "radius": 0.5,
+     "radius_law": {
+      "degree": 1,
+      "radii": [
+       0.5,
+       2
+      ],
+      "knots": [
+       0,
+       1
+      ],
+      "multiplicities": [
+       2,
+       2
+      ]
+     },
+     "xsect": 1,
+     "continuity": 1,
+     "thumbweight": 1,
+     "edges": [
+      0
+     ]
+    }
+   }
+  },
+  {
+   "name": "law-box10x20x30-e0-deg2-edge-map-sub-range",
+   "upstream_ref": "source/SMLib/src/SmFilletExecutive.cpp:5714 (SmBSplineFilletLaw(pCurve, crEdgeMap)); SM_API SmApiBrep.cpp:2147 body (SmApiVariableRadiusFillet) with that law; prog_test smFilletTest.cpp:399",
+   "inputs": {
+    "real_solid": {
+     "dimensions": [
+      10,
+      20,
+      30
+     ],
+     "radius": 0.5,
+     "radius_law": {
+      "degree": 2,
+      "radii": [
+       0.5,
+       3,
+       1
+      ],
+      "knots": [
+       0,
+       1
+      ],
+      "multiplicities": [
+       3,
+       3
+      ],
+      "edge_map": [
+       0.2,
+       0.8
+      ]
+     },
+     "xsect": 1,
+     "continuity": 1,
+     "thumbweight": 1,
+     "edges": [
+      0
+     ]
+    }
+   }
+  },
+  {
+   "name": "law-box10x20x30-e0-deg1-edge-map-degenerate",
+   "upstream_ref": "source/SMLib/src/SmFilletExecutive.cpp:5714 (SmBSplineFilletLaw(pCurve, crEdgeMap)); SM_API SmApiBrep.cpp:2147 body (SmApiVariableRadiusFillet) with that law; prog_test smFilletTest.cpp:399; an edge map shorter than SM_EFF_ZERO becomes [0, 1]",
+   "inputs": {
+    "real_solid": {
+     "dimensions": [
+      10,
+      20,
+      30
+     ],
+     "radius": 0.5,
+     "radius_law": {
+      "degree": 1,
+      "radii": [
+       0.5,
+       1,
+       2
+      ],
+      "knots": [
+       0,
+       0.5,
+       1
+      ],
+      "multiplicities": [
+       2,
+       1,
+       2
+      ],
+      "edge_map": [
+       0.5,
+       0.5
+      ]
+     },
+     "xsect": 1,
+     "continuity": 1,
+     "thumbweight": 1,
+     "edges": [
+      0
+     ]
+    }
+   }
+  },
+  {
+   "name": "law-box10x20x30-e0-deg2-edge-map-reversed",
+   "upstream_ref": "source/SMLib/src/SmFilletExecutive.cpp:5714 (SmBSplineFilletLaw(pCurve, crEdgeMap)); SM_API SmApiBrep.cpp:2147 body (SmApiVariableRadiusFillet) with that law; prog_test smFilletTest.cpp:399; SmExtent1d.cpp:115 (SmExtent1d(dMin, dMax) swaps a reversed map)",
+   "inputs": {
+    "real_solid": {
+     "dimensions": [
+      10,
+      20,
+      30
+     ],
+     "radius": 0.5,
+     "radius_law": {
+      "degree": 2,
+      "radii": [
+       0.5,
+       3,
+       1
+      ],
+      "knots": [
+       0,
+       1
+      ],
+      "multiplicities": [
+       3,
+       3
+      ],
+      "edge_map": [
+       0.8,
+       0.2
+      ]
+     },
+     "xsect": 1,
+     "continuity": 1,
+     "thumbweight": 1,
+     "edges": [
+      0
+     ]
+    }
+   }
+  }
+ ]
+}

@@ -1,0 +1,3928 @@
+{
+ "cases": [
+  {
+   "name": "delface_Mouse_e0_d0",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp (SmBrep::DeleteFace)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Mouse.smb",
+     "rebuild": false
+    },
+    "editing": 0,
+    "op": "delete_face",
+    "face": 0,
+    "delete_ev": false,
+    "nesting": true,
+    "keep": -1
+   }
+  },
+  {
+   "name": "delface_Mouse_e0_d1",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp (SmBrep::DeleteFace)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Mouse.smb",
+     "rebuild": false
+    },
+    "editing": 0,
+    "op": "delete_face",
+    "face": 0,
+    "delete_ev": true,
+    "nesting": true,
+    "keep": -1
+   }
+  },
+  {
+   "name": "delface_Mouse_e0_nonest",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp (SmBrep::DeleteFace)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Mouse.smb",
+     "rebuild": false
+    },
+    "editing": 0,
+    "op": "delete_face",
+    "face": 1,
+    "delete_ev": false,
+    "nesting": false,
+    "keep": 0
+   }
+  },
+  {
+   "name": "delface_Mouse_e1_d0",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp (SmBrep::DeleteFace)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Mouse.smb",
+     "rebuild": false
+    },
+    "editing": 1,
+    "op": "delete_face",
+    "face": 0,
+    "delete_ev": false,
+    "nesting": true,
+    "keep": -1
+   }
+  },
+  {
+   "name": "delface_Mouse_e1_d1",
+   "upstream_ref": "tests/SM_API_test/src/TestSmBrep.cpp (TestSmDeleteFaceKeepsInfiniteRegion's DeleteFace(face, TRUE, TRUE) with editing on, here on face 0 of Mouse.smb)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Mouse.smb",
+     "rebuild": false
+    },
+    "editing": 1,
+    "op": "delete_face",
+    "face": 0,
+    "delete_ev": true,
+    "nesting": true,
+    "keep": -1
+   }
+  },
+  {
+   "name": "delface_Mouse_e1_nonest",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp (SmBrep::DeleteFace)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Mouse.smb",
+     "rebuild": false
+    },
+    "editing": 1,
+    "op": "delete_face",
+    "face": 1,
+    "delete_ev": false,
+    "nesting": false,
+    "keep": 0
+   }
+  },
+  {
+   "name": "squeeze_Mouse_e0_w0",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp (SqueezeEdge)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Mouse.smb",
+     "rebuild": false
+    },
+    "editing": -1,
+    "op": "squeeze",
+    "edge": 0,
+    "which": 0,
+    "v": 2
+   }
+  },
+  {
+   "name": "squeeze_Mouse_e1_w0",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp (SqueezeEdge)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Mouse.smb",
+     "rebuild": false
+    },
+    "editing": -1,
+    "op": "squeeze",
+    "edge": 1,
+    "which": 0,
+    "v": 2
+   }
+  },
+  {
+   "name": "squeeze_Mouse_e0_w1",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp (SqueezeEdge)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Mouse.smb",
+     "rebuild": false
+    },
+    "editing": -1,
+    "op": "squeeze",
+    "edge": 0,
+    "which": 1,
+    "v": 2
+   }
+  },
+  {
+   "name": "squeeze_Mouse_e1_w1",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp (SqueezeEdge)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Mouse.smb",
+     "rebuild": false
+    },
+    "editing": -1,
+    "op": "squeeze",
+    "edge": 1,
+    "which": 1,
+    "v": 2
+   }
+  },
+  {
+   "name": "squeeze_Mouse_e0_w2",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp (SqueezeEdge)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Mouse.smb",
+     "rebuild": false
+    },
+    "editing": -1,
+    "op": "squeeze",
+    "edge": 0,
+    "which": 2,
+    "v": 2
+   }
+  },
+  {
+   "name": "squeeze_Mouse_e1_w2",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp (SqueezeEdge)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Mouse.smb",
+     "rebuild": false
+    },
+    "editing": -1,
+    "op": "squeeze",
+    "edge": 1,
+    "which": 2,
+    "v": 2
+   }
+  },
+  {
+   "name": "delface_Endcap_e0_d0",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp (SmBrep::DeleteFace)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Endcap.smb",
+     "rebuild": false
+    },
+    "editing": 0,
+    "op": "delete_face",
+    "face": 0,
+    "delete_ev": false,
+    "nesting": true,
+    "keep": -1
+   }
+  },
+  {
+   "name": "delface_Endcap_e0_d1",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp (SmBrep::DeleteFace)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Endcap.smb",
+     "rebuild": false
+    },
+    "editing": 0,
+    "op": "delete_face",
+    "face": 0,
+    "delete_ev": true,
+    "nesting": true,
+    "keep": -1
+   }
+  },
+  {
+   "name": "delface_Endcap_e0_nonest",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp (SmBrep::DeleteFace)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Endcap.smb",
+     "rebuild": false
+    },
+    "editing": 0,
+    "op": "delete_face",
+    "face": 1,
+    "delete_ev": false,
+    "nesting": false,
+    "keep": 0
+   }
+  },
+  {
+   "name": "delface_Endcap_e1_d0",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp (SmBrep::DeleteFace)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Endcap.smb",
+     "rebuild": false
+    },
+    "editing": 1,
+    "op": "delete_face",
+    "face": 0,
+    "delete_ev": false,
+    "nesting": true,
+    "keep": -1
+   }
+  },
+  {
+   "name": "delface_Endcap_e1_d1",
+   "upstream_ref": "tests/SM_API_test/src/TestSmBrep.cpp (TestSmDeleteFaceKeepsInfiniteRegion's DeleteFace(face, TRUE, TRUE) with editing on, here on face 0 of Endcap.smb)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Endcap.smb",
+     "rebuild": false
+    },
+    "editing": 1,
+    "op": "delete_face",
+    "face": 0,
+    "delete_ev": true,
+    "nesting": true,
+    "keep": -1
+   }
+  },
+  {
+   "name": "delface_Endcap_e1_nonest",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp (SmBrep::DeleteFace)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Endcap.smb",
+     "rebuild": false
+    },
+    "editing": 1,
+    "op": "delete_face",
+    "face": 1,
+    "delete_ev": false,
+    "nesting": false,
+    "keep": 0
+   }
+  },
+  {
+   "name": "squeeze_Endcap_e0_w0",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp (SqueezeEdge)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Endcap.smb",
+     "rebuild": false
+    },
+    "editing": -1,
+    "op": "squeeze",
+    "edge": 0,
+    "which": 0,
+    "v": 2
+   }
+  },
+  {
+   "name": "squeeze_Endcap_e1_w0",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp (SqueezeEdge)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Endcap.smb",
+     "rebuild": false
+    },
+    "editing": -1,
+    "op": "squeeze",
+    "edge": 1,
+    "which": 0,
+    "v": 2
+   }
+  },
+  {
+   "name": "squeeze_Endcap_e0_w1",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp (SqueezeEdge)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Endcap.smb",
+     "rebuild": false
+    },
+    "editing": -1,
+    "op": "squeeze",
+    "edge": 0,
+    "which": 1,
+    "v": 2
+   }
+  },
+  {
+   "name": "squeeze_Endcap_e1_w1",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp (SqueezeEdge)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Endcap.smb",
+     "rebuild": false
+    },
+    "editing": -1,
+    "op": "squeeze",
+    "edge": 1,
+    "which": 1,
+    "v": 2
+   }
+  },
+  {
+   "name": "squeeze_Endcap_e0_w2",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp (SqueezeEdge)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Endcap.smb",
+     "rebuild": false
+    },
+    "editing": -1,
+    "op": "squeeze",
+    "edge": 0,
+    "which": 2,
+    "v": 2
+   }
+  },
+  {
+   "name": "squeeze_Endcap_e1_w2",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp (SqueezeEdge)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Endcap.smb",
+     "rebuild": false
+    },
+    "editing": -1,
+    "op": "squeeze",
+    "edge": 1,
+    "which": 2,
+    "v": 2
+   }
+  },
+  {
+   "name": "delface_box_with_large_fillet_e0_d0",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp (SmBrep::DeleteFace)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "box_with_large_fillet.smb",
+     "rebuild": false
+    },
+    "editing": 0,
+    "op": "delete_face",
+    "face": 0,
+    "delete_ev": false,
+    "nesting": true,
+    "keep": -1
+   }
+  },
+  {
+   "name": "delface_box_with_large_fillet_e0_d1",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp (SmBrep::DeleteFace)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "box_with_large_fillet.smb",
+     "rebuild": false
+    },
+    "editing": 0,
+    "op": "delete_face",
+    "face": 0,
+    "delete_ev": true,
+    "nesting": true,
+    "keep": -1
+   }
+  },
+  {
+   "name": "delface_box_with_large_fillet_e0_nonest",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp (SmBrep::DeleteFace)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "box_with_large_fillet.smb",
+     "rebuild": false
+    },
+    "editing": 0,
+    "op": "delete_face",
+    "face": 1,
+    "delete_ev": false,
+    "nesting": false,
+    "keep": 0
+   }
+  },
+  {
+   "name": "delface_box_with_large_fillet_e1_d0",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp (SmBrep::DeleteFace)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "box_with_large_fillet.smb",
+     "rebuild": false
+    },
+    "editing": 1,
+    "op": "delete_face",
+    "face": 0,
+    "delete_ev": false,
+    "nesting": true,
+    "keep": -1
+   }
+  },
+  {
+   "name": "delface_box_with_large_fillet_e1_d1",
+   "upstream_ref": "tests/SM_API_test/src/TestSmBrep.cpp (TestSmDeleteFaceKeepsInfiniteRegion's DeleteFace(face, TRUE, TRUE) with editing on, here on face 0 of box_with_large_fillet.smb)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "box_with_large_fillet.smb",
+     "rebuild": false
+    },
+    "editing": 1,
+    "op": "delete_face",
+    "face": 0,
+    "delete_ev": true,
+    "nesting": true,
+    "keep": -1
+   }
+  },
+  {
+   "name": "delface_box_with_large_fillet_e1_nonest",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp (SmBrep::DeleteFace)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "box_with_large_fillet.smb",
+     "rebuild": false
+    },
+    "editing": 1,
+    "op": "delete_face",
+    "face": 1,
+    "delete_ev": false,
+    "nesting": false,
+    "keep": 0
+   }
+  },
+  {
+   "name": "squeeze_box_with_large_fillet_e0_w0",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp (SqueezeEdge)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "box_with_large_fillet.smb",
+     "rebuild": false
+    },
+    "editing": -1,
+    "op": "squeeze",
+    "edge": 0,
+    "which": 0,
+    "v": 2
+   }
+  },
+  {
+   "name": "squeeze_box_with_large_fillet_e1_w0",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp (SqueezeEdge)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "box_with_large_fillet.smb",
+     "rebuild": false
+    },
+    "editing": -1,
+    "op": "squeeze",
+    "edge": 1,
+    "which": 0,
+    "v": 2
+   }
+  },
+  {
+   "name": "squeeze_box_with_large_fillet_e0_w1",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp (SqueezeEdge)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "box_with_large_fillet.smb",
+     "rebuild": false
+    },
+    "editing": -1,
+    "op": "squeeze",
+    "edge": 0,
+    "which": 1,
+    "v": 2
+   }
+  },
+  {
+   "name": "squeeze_box_with_large_fillet_e1_w1",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp (SqueezeEdge)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "box_with_large_fillet.smb",
+     "rebuild": false
+    },
+    "editing": -1,
+    "op": "squeeze",
+    "edge": 1,
+    "which": 1,
+    "v": 2
+   }
+  },
+  {
+   "name": "squeeze_box_with_large_fillet_e0_w2",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp (SqueezeEdge)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "box_with_large_fillet.smb",
+     "rebuild": false
+    },
+    "editing": -1,
+    "op": "squeeze",
+    "edge": 0,
+    "which": 2,
+    "v": 2
+   }
+  },
+  {
+   "name": "squeeze_box_with_large_fillet_e1_w2",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp (SqueezeEdge)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "box_with_large_fillet.smb",
+     "rebuild": false
+    },
+    "editing": -1,
+    "op": "squeeze",
+    "edge": 1,
+    "which": 2,
+    "v": 2
+   }
+  },
+  {
+   "name": "delface_cone_e0_d0",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp (SmBrep::DeleteFace)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "cone.smb",
+     "rebuild": false
+    },
+    "editing": 0,
+    "op": "delete_face",
+    "face": 0,
+    "delete_ev": false,
+    "nesting": true,
+    "keep": -1
+   }
+  },
+  {
+   "name": "delface_cone_e0_d1",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp (SmBrep::DeleteFace)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "cone.smb",
+     "rebuild": false
+    },
+    "editing": 0,
+    "op": "delete_face",
+    "face": 0,
+    "delete_ev": true,
+    "nesting": true,
+    "keep": -1
+   }
+  },
+  {
+   "name": "delface_cone_e0_nonest",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp (SmBrep::DeleteFace)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "cone.smb",
+     "rebuild": false
+    },
+    "editing": 0,
+    "op": "delete_face",
+    "face": 1,
+    "delete_ev": false,
+    "nesting": false,
+    "keep": 0
+   }
+  },
+  {
+   "name": "delface_cone_e1_d0",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp (SmBrep::DeleteFace)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "cone.smb",
+     "rebuild": false
+    },
+    "editing": 1,
+    "op": "delete_face",
+    "face": 0,
+    "delete_ev": false,
+    "nesting": true,
+    "keep": -1
+   }
+  },
+  {
+   "name": "delface_cone_e1_d1",
+   "upstream_ref": "tests/SM_API_test/src/TestSmBrep.cpp (TestSmDeleteFaceKeepsInfiniteRegion's DeleteFace(face, TRUE, TRUE) with editing on, here on face 0 of cone.smb)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "cone.smb",
+     "rebuild": false
+    },
+    "editing": 1,
+    "op": "delete_face",
+    "face": 0,
+    "delete_ev": true,
+    "nesting": true,
+    "keep": -1
+   }
+  },
+  {
+   "name": "delface_cone_e1_nonest",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp (SmBrep::DeleteFace)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "cone.smb",
+     "rebuild": false
+    },
+    "editing": 1,
+    "op": "delete_face",
+    "face": 1,
+    "delete_ev": false,
+    "nesting": false,
+    "keep": 0
+   }
+  },
+  {
+   "name": "squeeze_cone_e0_w0",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp (SqueezeEdge)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "cone.smb",
+     "rebuild": false
+    },
+    "editing": -1,
+    "op": "squeeze",
+    "edge": 0,
+    "which": 0,
+    "v": 2
+   }
+  },
+  {
+   "name": "squeeze_cone_e1_w0",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp (SqueezeEdge)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "cone.smb",
+     "rebuild": false
+    },
+    "editing": -1,
+    "op": "squeeze",
+    "edge": 1,
+    "which": 0,
+    "v": 2
+   }
+  },
+  {
+   "name": "squeeze_cone_e0_w1",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp (SqueezeEdge)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "cone.smb",
+     "rebuild": false
+    },
+    "editing": -1,
+    "op": "squeeze",
+    "edge": 0,
+    "which": 1,
+    "v": 2
+   }
+  },
+  {
+   "name": "squeeze_cone_e1_w1",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp (SqueezeEdge)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "cone.smb",
+     "rebuild": false
+    },
+    "editing": -1,
+    "op": "squeeze",
+    "edge": 1,
+    "which": 1,
+    "v": 2
+   }
+  },
+  {
+   "name": "squeeze_cone_e0_w2",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp (SqueezeEdge)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "cone.smb",
+     "rebuild": false
+    },
+    "editing": -1,
+    "op": "squeeze",
+    "edge": 0,
+    "which": 2,
+    "v": 2
+   }
+  },
+  {
+   "name": "squeeze_cone_e1_w2",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp (SqueezeEdge)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "cone.smb",
+     "rebuild": false
+    },
+    "editing": -1,
+    "op": "squeeze",
+    "edge": 1,
+    "which": 2,
+    "v": 2
+   }
+  },
+  {
+   "name": "delface_disk_e0_d0",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp (SmBrep::DeleteFace)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "disk.smb",
+     "rebuild": false
+    },
+    "editing": 0,
+    "op": "delete_face",
+    "face": 0,
+    "delete_ev": false,
+    "nesting": true,
+    "keep": -1
+   }
+  },
+  {
+   "name": "delface_disk_e0_d1",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp (SmBrep::DeleteFace)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "disk.smb",
+     "rebuild": false
+    },
+    "editing": 0,
+    "op": "delete_face",
+    "face": 0,
+    "delete_ev": true,
+    "nesting": true,
+    "keep": -1
+   }
+  },
+  {
+   "name": "delface_disk_e0_nonest",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp (SmBrep::DeleteFace)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "disk.smb",
+     "rebuild": false
+    },
+    "editing": 0,
+    "op": "delete_face",
+    "face": 1,
+    "delete_ev": false,
+    "nesting": false,
+    "keep": 0
+   }
+  },
+  {
+   "name": "delface_disk_e1_d0",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp (SmBrep::DeleteFace)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "disk.smb",
+     "rebuild": false
+    },
+    "editing": 1,
+    "op": "delete_face",
+    "face": 0,
+    "delete_ev": false,
+    "nesting": true,
+    "keep": -1
+   }
+  },
+  {
+   "name": "delface_disk_e1_d1",
+   "upstream_ref": "tests/SM_API_test/src/TestSmBrep.cpp (TestSmDeleteFaceKeepsInfiniteRegion's DeleteFace(face, TRUE, TRUE) with editing on, here on face 0 of disk.smb)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "disk.smb",
+     "rebuild": false
+    },
+    "editing": 1,
+    "op": "delete_face",
+    "face": 0,
+    "delete_ev": true,
+    "nesting": true,
+    "keep": -1
+   }
+  },
+  {
+   "name": "delface_disk_e1_nonest",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp (SmBrep::DeleteFace)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "disk.smb",
+     "rebuild": false
+    },
+    "editing": 1,
+    "op": "delete_face",
+    "face": 1,
+    "delete_ev": false,
+    "nesting": false,
+    "keep": 0
+   }
+  },
+  {
+   "name": "squeeze_disk_e0_w0",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp (SqueezeEdge)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "disk.smb",
+     "rebuild": false
+    },
+    "editing": -1,
+    "op": "squeeze",
+    "edge": 0,
+    "which": 0,
+    "v": 2
+   }
+  },
+  {
+   "name": "squeeze_disk_e1_w0",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp (SqueezeEdge)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "disk.smb",
+     "rebuild": false
+    },
+    "editing": -1,
+    "op": "squeeze",
+    "edge": 1,
+    "which": 0,
+    "v": 2
+   }
+  },
+  {
+   "name": "squeeze_disk_e0_w1",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp (SqueezeEdge)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "disk.smb",
+     "rebuild": false
+    },
+    "editing": -1,
+    "op": "squeeze",
+    "edge": 0,
+    "which": 1,
+    "v": 2
+   }
+  },
+  {
+   "name": "squeeze_disk_e1_w1",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp (SqueezeEdge)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "disk.smb",
+     "rebuild": false
+    },
+    "editing": -1,
+    "op": "squeeze",
+    "edge": 1,
+    "which": 1,
+    "v": 2
+   }
+  },
+  {
+   "name": "squeeze_disk_e0_w2",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp (SqueezeEdge)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "disk.smb",
+     "rebuild": false
+    },
+    "editing": -1,
+    "op": "squeeze",
+    "edge": 0,
+    "which": 2,
+    "v": 2
+   }
+  },
+  {
+   "name": "squeeze_disk_e1_w2",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp (SqueezeEdge)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "disk.smb",
+     "rebuild": false
+    },
+    "editing": -1,
+    "op": "squeeze",
+    "edge": 1,
+    "which": 2,
+    "v": 2
+   }
+  },
+  {
+   "name": "delface_ellips_ts2_e0_d0",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp (SmBrep::DeleteFace)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "ellips_ts2.smb",
+     "rebuild": false
+    },
+    "editing": 0,
+    "op": "delete_face",
+    "face": 0,
+    "delete_ev": false,
+    "nesting": true,
+    "keep": -1
+   }
+  },
+  {
+   "name": "delface_ellips_ts2_e0_d1",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp (SmBrep::DeleteFace)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "ellips_ts2.smb",
+     "rebuild": false
+    },
+    "editing": 0,
+    "op": "delete_face",
+    "face": 0,
+    "delete_ev": true,
+    "nesting": true,
+    "keep": -1
+   }
+  },
+  {
+   "name": "delface_ellips_ts2_e0_nonest",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp (SmBrep::DeleteFace)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "ellips_ts2.smb",
+     "rebuild": false
+    },
+    "editing": 0,
+    "op": "delete_face",
+    "face": 1,
+    "delete_ev": false,
+    "nesting": false,
+    "keep": 0
+   }
+  },
+  {
+   "name": "delface_ellips_ts2_e1_d0",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp (SmBrep::DeleteFace)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "ellips_ts2.smb",
+     "rebuild": false
+    },
+    "editing": 1,
+    "op": "delete_face",
+    "face": 0,
+    "delete_ev": false,
+    "nesting": true,
+    "keep": -1
+   }
+  },
+  {
+   "name": "delface_ellips_ts2_e1_d1",
+   "upstream_ref": "tests/SM_API_test/src/TestSmBrep.cpp (TestSmDeleteFaceKeepsInfiniteRegion's DeleteFace(face, TRUE, TRUE) with editing on, here on face 0 of ellips_ts2.smb)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "ellips_ts2.smb",
+     "rebuild": false
+    },
+    "editing": 1,
+    "op": "delete_face",
+    "face": 0,
+    "delete_ev": true,
+    "nesting": true,
+    "keep": -1
+   }
+  },
+  {
+   "name": "delface_ellips_ts2_e1_nonest",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp (SmBrep::DeleteFace)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "ellips_ts2.smb",
+     "rebuild": false
+    },
+    "editing": 1,
+    "op": "delete_face",
+    "face": 1,
+    "delete_ev": false,
+    "nesting": false,
+    "keep": 0
+   }
+  },
+  {
+   "name": "squeeze_ellips_ts2_e0_w0",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp (SqueezeEdge)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "ellips_ts2.smb",
+     "rebuild": false
+    },
+    "editing": -1,
+    "op": "squeeze",
+    "edge": 0,
+    "which": 0,
+    "v": 2
+   }
+  },
+  {
+   "name": "squeeze_ellips_ts2_e1_w0",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp (SqueezeEdge)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "ellips_ts2.smb",
+     "rebuild": false
+    },
+    "editing": -1,
+    "op": "squeeze",
+    "edge": 1,
+    "which": 0,
+    "v": 2
+   }
+  },
+  {
+   "name": "squeeze_ellips_ts2_e0_w1",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp (SqueezeEdge)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "ellips_ts2.smb",
+     "rebuild": false
+    },
+    "editing": -1,
+    "op": "squeeze",
+    "edge": 0,
+    "which": 1,
+    "v": 2
+   }
+  },
+  {
+   "name": "squeeze_ellips_ts2_e1_w1",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp (SqueezeEdge)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "ellips_ts2.smb",
+     "rebuild": false
+    },
+    "editing": -1,
+    "op": "squeeze",
+    "edge": 1,
+    "which": 1,
+    "v": 2
+   }
+  },
+  {
+   "name": "squeeze_ellips_ts2_e0_w2",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp (SqueezeEdge)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "ellips_ts2.smb",
+     "rebuild": false
+    },
+    "editing": -1,
+    "op": "squeeze",
+    "edge": 0,
+    "which": 2,
+    "v": 2
+   }
+  },
+  {
+   "name": "squeeze_ellips_ts2_e1_w2",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp (SqueezeEdge)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "ellips_ts2.smb",
+     "rebuild": false
+    },
+    "editing": -1,
+    "op": "squeeze",
+    "edge": 1,
+    "which": 2,
+    "v": 2
+   }
+  },
+  {
+   "name": "delface_plane_circ_e0_d0",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp (SmBrep::DeleteFace)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "plane_circ.smb",
+     "rebuild": false
+    },
+    "editing": 0,
+    "op": "delete_face",
+    "face": 0,
+    "delete_ev": false,
+    "nesting": true,
+    "keep": -1
+   }
+  },
+  {
+   "name": "delface_plane_circ_e0_d1",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp (SmBrep::DeleteFace)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "plane_circ.smb",
+     "rebuild": false
+    },
+    "editing": 0,
+    "op": "delete_face",
+    "face": 0,
+    "delete_ev": true,
+    "nesting": true,
+    "keep": -1
+   }
+  },
+  {
+   "name": "delface_plane_circ_e0_nonest",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp (SmBrep::DeleteFace)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "plane_circ.smb",
+     "rebuild": false
+    },
+    "editing": 0,
+    "op": "delete_face",
+    "face": 1,
+    "delete_ev": false,
+    "nesting": false,
+    "keep": 0
+   }
+  },
+  {
+   "name": "delface_plane_circ_e1_d0",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp (SmBrep::DeleteFace)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "plane_circ.smb",
+     "rebuild": false
+    },
+    "editing": 1,
+    "op": "delete_face",
+    "face": 0,
+    "delete_ev": false,
+    "nesting": true,
+    "keep": -1
+   }
+  },
+  {
+   "name": "delface_plane_circ_e1_d1",
+   "upstream_ref": "tests/SM_API_test/src/TestSmBrep.cpp (TestSmDeleteFaceKeepsInfiniteRegion's DeleteFace(face, TRUE, TRUE) with editing on, here on face 0 of plane_circ.smb)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "plane_circ.smb",
+     "rebuild": false
+    },
+    "editing": 1,
+    "op": "delete_face",
+    "face": 0,
+    "delete_ev": true,
+    "nesting": true,
+    "keep": -1
+   }
+  },
+  {
+   "name": "delface_plane_circ_e1_nonest",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp (SmBrep::DeleteFace)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "plane_circ.smb",
+     "rebuild": false
+    },
+    "editing": 1,
+    "op": "delete_face",
+    "face": 1,
+    "delete_ev": false,
+    "nesting": false,
+    "keep": 0
+   }
+  },
+  {
+   "name": "squeeze_plane_circ_e0_w0",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp (SqueezeEdge)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "plane_circ.smb",
+     "rebuild": false
+    },
+    "editing": -1,
+    "op": "squeeze",
+    "edge": 0,
+    "which": 0,
+    "v": 2
+   }
+  },
+  {
+   "name": "squeeze_plane_circ_e1_w0",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp (SqueezeEdge)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "plane_circ.smb",
+     "rebuild": false
+    },
+    "editing": -1,
+    "op": "squeeze",
+    "edge": 1,
+    "which": 0,
+    "v": 2
+   }
+  },
+  {
+   "name": "squeeze_plane_circ_e0_w1",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp (SqueezeEdge)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "plane_circ.smb",
+     "rebuild": false
+    },
+    "editing": -1,
+    "op": "squeeze",
+    "edge": 0,
+    "which": 1,
+    "v": 2
+   }
+  },
+  {
+   "name": "squeeze_plane_circ_e1_w1",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp (SqueezeEdge)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "plane_circ.smb",
+     "rebuild": false
+    },
+    "editing": -1,
+    "op": "squeeze",
+    "edge": 1,
+    "which": 1,
+    "v": 2
+   }
+  },
+  {
+   "name": "squeeze_plane_circ_e0_w2",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp (SqueezeEdge)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "plane_circ.smb",
+     "rebuild": false
+    },
+    "editing": -1,
+    "op": "squeeze",
+    "edge": 0,
+    "which": 2,
+    "v": 2
+   }
+  },
+  {
+   "name": "squeeze_plane_circ_e1_w2",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp (SqueezeEdge)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "plane_circ.smb",
+     "rebuild": false
+    },
+    "editing": -1,
+    "op": "squeeze",
+    "edge": 1,
+    "which": 2,
+    "v": 2
+   }
+  },
+  {
+   "name": "delface_plane_square_e0_d0",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp (SmBrep::DeleteFace)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "plane_square.smb",
+     "rebuild": false
+    },
+    "editing": 0,
+    "op": "delete_face",
+    "face": 0,
+    "delete_ev": false,
+    "nesting": true,
+    "keep": -1
+   }
+  },
+  {
+   "name": "delface_plane_square_e0_d1",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp (SmBrep::DeleteFace)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "plane_square.smb",
+     "rebuild": false
+    },
+    "editing": 0,
+    "op": "delete_face",
+    "face": 0,
+    "delete_ev": true,
+    "nesting": true,
+    "keep": -1
+   }
+  },
+  {
+   "name": "delface_plane_square_e0_nonest",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp (SmBrep::DeleteFace)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "plane_square.smb",
+     "rebuild": false
+    },
+    "editing": 0,
+    "op": "delete_face",
+    "face": 1,
+    "delete_ev": false,
+    "nesting": false,
+    "keep": 0
+   }
+  },
+  {
+   "name": "delface_plane_square_e1_d0",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp (SmBrep::DeleteFace)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "plane_square.smb",
+     "rebuild": false
+    },
+    "editing": 1,
+    "op": "delete_face",
+    "face": 0,
+    "delete_ev": false,
+    "nesting": true,
+    "keep": -1
+   }
+  },
+  {
+   "name": "delface_plane_square_e1_d1",
+   "upstream_ref": "tests/SM_API_test/src/TestSmBrep.cpp (TestSmDeleteFaceKeepsInfiniteRegion's DeleteFace(face, TRUE, TRUE) with editing on, here on face 0 of plane_square.smb)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "plane_square.smb",
+     "rebuild": false
+    },
+    "editing": 1,
+    "op": "delete_face",
+    "face": 0,
+    "delete_ev": true,
+    "nesting": true,
+    "keep": -1
+   }
+  },
+  {
+   "name": "delface_plane_square_e1_nonest",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp (SmBrep::DeleteFace)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "plane_square.smb",
+     "rebuild": false
+    },
+    "editing": 1,
+    "op": "delete_face",
+    "face": 1,
+    "delete_ev": false,
+    "nesting": false,
+    "keep": 0
+   }
+  },
+  {
+   "name": "squeeze_plane_square_e0_w0",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp (SqueezeEdge)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "plane_square.smb",
+     "rebuild": false
+    },
+    "editing": -1,
+    "op": "squeeze",
+    "edge": 0,
+    "which": 0,
+    "v": 2
+   }
+  },
+  {
+   "name": "squeeze_plane_square_e1_w0",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp (SqueezeEdge)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "plane_square.smb",
+     "rebuild": false
+    },
+    "editing": -1,
+    "op": "squeeze",
+    "edge": 1,
+    "which": 0,
+    "v": 2
+   }
+  },
+  {
+   "name": "squeeze_plane_square_e0_w1",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp (SqueezeEdge)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "plane_square.smb",
+     "rebuild": false
+    },
+    "editing": -1,
+    "op": "squeeze",
+    "edge": 0,
+    "which": 1,
+    "v": 2
+   }
+  },
+  {
+   "name": "squeeze_plane_square_e1_w1",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp (SqueezeEdge)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "plane_square.smb",
+     "rebuild": false
+    },
+    "editing": -1,
+    "op": "squeeze",
+    "edge": 1,
+    "which": 1,
+    "v": 2
+   }
+  },
+  {
+   "name": "squeeze_plane_square_e0_w2",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp (SqueezeEdge)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "plane_square.smb",
+     "rebuild": false
+    },
+    "editing": -1,
+    "op": "squeeze",
+    "edge": 0,
+    "which": 2,
+    "v": 2
+   }
+  },
+  {
+   "name": "squeeze_plane_square_e1_w2",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp (SqueezeEdge)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "plane_square.smb",
+     "rebuild": false
+    },
+    "editing": -1,
+    "op": "squeeze",
+    "edge": 1,
+    "which": 2,
+    "v": 2
+   }
+  },
+  {
+   "name": "delface_sphere_e0_d0",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp (SmBrep::DeleteFace)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "sphere.smb",
+     "rebuild": false
+    },
+    "editing": 0,
+    "op": "delete_face",
+    "face": 0,
+    "delete_ev": false,
+    "nesting": true,
+    "keep": -1
+   }
+  },
+  {
+   "name": "delface_sphere_e0_d1",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp (SmBrep::DeleteFace)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "sphere.smb",
+     "rebuild": false
+    },
+    "editing": 0,
+    "op": "delete_face",
+    "face": 0,
+    "delete_ev": true,
+    "nesting": true,
+    "keep": -1
+   }
+  },
+  {
+   "name": "delface_sphere_e0_nonest",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp (SmBrep::DeleteFace)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "sphere.smb",
+     "rebuild": false
+    },
+    "editing": 0,
+    "op": "delete_face",
+    "face": 1,
+    "delete_ev": false,
+    "nesting": false,
+    "keep": 0
+   }
+  },
+  {
+   "name": "delface_sphere_e1_d0",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp (SmBrep::DeleteFace)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "sphere.smb",
+     "rebuild": false
+    },
+    "editing": 1,
+    "op": "delete_face",
+    "face": 0,
+    "delete_ev": false,
+    "nesting": true,
+    "keep": -1
+   }
+  },
+  {
+   "name": "delface_sphere_e1_d1",
+   "upstream_ref": "tests/SM_API_test/src/TestSmBrep.cpp (TestSmDeleteFaceKeepsInfiniteRegion's DeleteFace(face, TRUE, TRUE) with editing on, here on face 0 of sphere.smb)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "sphere.smb",
+     "rebuild": false
+    },
+    "editing": 1,
+    "op": "delete_face",
+    "face": 0,
+    "delete_ev": true,
+    "nesting": true,
+    "keep": -1
+   }
+  },
+  {
+   "name": "delface_sphere_e1_nonest",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp (SmBrep::DeleteFace)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "sphere.smb",
+     "rebuild": false
+    },
+    "editing": 1,
+    "op": "delete_face",
+    "face": 1,
+    "delete_ev": false,
+    "nesting": false,
+    "keep": 0
+   }
+  },
+  {
+   "name": "squeeze_sphere_e0_w0",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp (SqueezeEdge)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "sphere.smb",
+     "rebuild": false
+    },
+    "editing": -1,
+    "op": "squeeze",
+    "edge": 0,
+    "which": 0,
+    "v": 2
+   }
+  },
+  {
+   "name": "squeeze_sphere_e1_w0",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp (SqueezeEdge)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "sphere.smb",
+     "rebuild": false
+    },
+    "editing": -1,
+    "op": "squeeze",
+    "edge": 1,
+    "which": 0,
+    "v": 2
+   }
+  },
+  {
+   "name": "squeeze_sphere_e0_w1",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp (SqueezeEdge)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "sphere.smb",
+     "rebuild": false
+    },
+    "editing": -1,
+    "op": "squeeze",
+    "edge": 0,
+    "which": 1,
+    "v": 2
+   }
+  },
+  {
+   "name": "squeeze_sphere_e1_w1",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp (SqueezeEdge)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "sphere.smb",
+     "rebuild": false
+    },
+    "editing": -1,
+    "op": "squeeze",
+    "edge": 1,
+    "which": 1,
+    "v": 2
+   }
+  },
+  {
+   "name": "squeeze_sphere_e0_w2",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp (SqueezeEdge)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "sphere.smb",
+     "rebuild": false
+    },
+    "editing": -1,
+    "op": "squeeze",
+    "edge": 0,
+    "which": 2,
+    "v": 2
+   }
+  },
+  {
+   "name": "squeeze_sphere_e1_w2",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp (SqueezeEdge)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "sphere.smb",
+     "rebuild": false
+    },
+    "editing": -1,
+    "op": "squeeze",
+    "edge": 1,
+    "which": 2,
+    "v": 2
+   }
+  },
+  {
+   "name": "delface_surf_extrude_e0_d0",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp (SmBrep::DeleteFace)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "surf_extrude.smb",
+     "rebuild": false
+    },
+    "editing": 0,
+    "op": "delete_face",
+    "face": 0,
+    "delete_ev": false,
+    "nesting": true,
+    "keep": -1
+   }
+  },
+  {
+   "name": "delface_surf_extrude_e0_d1",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp (SmBrep::DeleteFace)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "surf_extrude.smb",
+     "rebuild": false
+    },
+    "editing": 0,
+    "op": "delete_face",
+    "face": 0,
+    "delete_ev": true,
+    "nesting": true,
+    "keep": -1
+   }
+  },
+  {
+   "name": "delface_surf_extrude_e0_nonest",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp (SmBrep::DeleteFace)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "surf_extrude.smb",
+     "rebuild": false
+    },
+    "editing": 0,
+    "op": "delete_face",
+    "face": 1,
+    "delete_ev": false,
+    "nesting": false,
+    "keep": 0
+   }
+  },
+  {
+   "name": "delface_surf_extrude_e1_d0",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp (SmBrep::DeleteFace)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "surf_extrude.smb",
+     "rebuild": false
+    },
+    "editing": 1,
+    "op": "delete_face",
+    "face": 0,
+    "delete_ev": false,
+    "nesting": true,
+    "keep": -1
+   }
+  },
+  {
+   "name": "delface_surf_extrude_e1_d1",
+   "upstream_ref": "tests/SM_API_test/src/TestSmBrep.cpp (TestSmDeleteFaceKeepsInfiniteRegion's DeleteFace(face, TRUE, TRUE) with editing on, here on face 0 of surf_extrude.smb)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "surf_extrude.smb",
+     "rebuild": false
+    },
+    "editing": 1,
+    "op": "delete_face",
+    "face": 0,
+    "delete_ev": true,
+    "nesting": true,
+    "keep": -1
+   }
+  },
+  {
+   "name": "delface_surf_extrude_e1_nonest",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp (SmBrep::DeleteFace)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "surf_extrude.smb",
+     "rebuild": false
+    },
+    "editing": 1,
+    "op": "delete_face",
+    "face": 1,
+    "delete_ev": false,
+    "nesting": false,
+    "keep": 0
+   }
+  },
+  {
+   "name": "squeeze_surf_extrude_e0_w0",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp (SqueezeEdge)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "surf_extrude.smb",
+     "rebuild": false
+    },
+    "editing": -1,
+    "op": "squeeze",
+    "edge": 0,
+    "which": 0,
+    "v": 2
+   }
+  },
+  {
+   "name": "squeeze_surf_extrude_e1_w0",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp (SqueezeEdge)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "surf_extrude.smb",
+     "rebuild": false
+    },
+    "editing": -1,
+    "op": "squeeze",
+    "edge": 1,
+    "which": 0,
+    "v": 2
+   }
+  },
+  {
+   "name": "squeeze_surf_extrude_e0_w1",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp (SqueezeEdge)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "surf_extrude.smb",
+     "rebuild": false
+    },
+    "editing": -1,
+    "op": "squeeze",
+    "edge": 0,
+    "which": 1,
+    "v": 2
+   }
+  },
+  {
+   "name": "squeeze_surf_extrude_e1_w1",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp (SqueezeEdge)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "surf_extrude.smb",
+     "rebuild": false
+    },
+    "editing": -1,
+    "op": "squeeze",
+    "edge": 1,
+    "which": 1,
+    "v": 2
+   }
+  },
+  {
+   "name": "squeeze_surf_extrude_e0_w2",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp (SqueezeEdge)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "surf_extrude.smb",
+     "rebuild": false
+    },
+    "editing": -1,
+    "op": "squeeze",
+    "edge": 0,
+    "which": 2,
+    "v": 2
+   }
+  },
+  {
+   "name": "squeeze_surf_extrude_e1_w2",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp (SqueezeEdge)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "surf_extrude.smb",
+     "rebuild": false
+    },
+    "editing": -1,
+    "op": "squeeze",
+    "edge": 1,
+    "which": 2,
+    "v": 2
+   }
+  },
+  {
+   "name": "delface_surf_rev_e0_d0",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp (SmBrep::DeleteFace)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "surf_rev.smb",
+     "rebuild": false
+    },
+    "editing": 0,
+    "op": "delete_face",
+    "face": 0,
+    "delete_ev": false,
+    "nesting": true,
+    "keep": -1
+   }
+  },
+  {
+   "name": "delface_surf_rev_e0_d1",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp (SmBrep::DeleteFace)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "surf_rev.smb",
+     "rebuild": false
+    },
+    "editing": 0,
+    "op": "delete_face",
+    "face": 0,
+    "delete_ev": true,
+    "nesting": true,
+    "keep": -1
+   }
+  },
+  {
+   "name": "delface_surf_rev_e0_nonest",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp (SmBrep::DeleteFace)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "surf_rev.smb",
+     "rebuild": false
+    },
+    "editing": 0,
+    "op": "delete_face",
+    "face": 1,
+    "delete_ev": false,
+    "nesting": false,
+    "keep": 0
+   }
+  },
+  {
+   "name": "delface_surf_rev_e1_d0",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp (SmBrep::DeleteFace)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "surf_rev.smb",
+     "rebuild": false
+    },
+    "editing": 1,
+    "op": "delete_face",
+    "face": 0,
+    "delete_ev": false,
+    "nesting": true,
+    "keep": -1
+   }
+  },
+  {
+   "name": "delface_surf_rev_e1_d1",
+   "upstream_ref": "tests/SM_API_test/src/TestSmBrep.cpp (TestSmDeleteFaceKeepsInfiniteRegion's DeleteFace(face, TRUE, TRUE) with editing on, here on face 0 of surf_rev.smb)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "surf_rev.smb",
+     "rebuild": false
+    },
+    "editing": 1,
+    "op": "delete_face",
+    "face": 0,
+    "delete_ev": true,
+    "nesting": true,
+    "keep": -1
+   }
+  },
+  {
+   "name": "delface_surf_rev_e1_nonest",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp (SmBrep::DeleteFace)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "surf_rev.smb",
+     "rebuild": false
+    },
+    "editing": 1,
+    "op": "delete_face",
+    "face": 1,
+    "delete_ev": false,
+    "nesting": false,
+    "keep": 0
+   }
+  },
+  {
+   "name": "squeeze_surf_rev_e0_w0",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp (SqueezeEdge)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "surf_rev.smb",
+     "rebuild": false
+    },
+    "editing": -1,
+    "op": "squeeze",
+    "edge": 0,
+    "which": 0,
+    "v": 2
+   }
+  },
+  {
+   "name": "squeeze_surf_rev_e1_w0",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp (SqueezeEdge)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "surf_rev.smb",
+     "rebuild": false
+    },
+    "editing": -1,
+    "op": "squeeze",
+    "edge": 1,
+    "which": 0,
+    "v": 2
+   }
+  },
+  {
+   "name": "squeeze_surf_rev_e0_w1",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp (SqueezeEdge)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "surf_rev.smb",
+     "rebuild": false
+    },
+    "editing": -1,
+    "op": "squeeze",
+    "edge": 0,
+    "which": 1,
+    "v": 2
+   }
+  },
+  {
+   "name": "squeeze_surf_rev_e1_w1",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp (SqueezeEdge)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "surf_rev.smb",
+     "rebuild": false
+    },
+    "editing": -1,
+    "op": "squeeze",
+    "edge": 1,
+    "which": 1,
+    "v": 2
+   }
+  },
+  {
+   "name": "squeeze_surf_rev_e0_w2",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp (SqueezeEdge)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "surf_rev.smb",
+     "rebuild": false
+    },
+    "editing": -1,
+    "op": "squeeze",
+    "edge": 0,
+    "which": 2,
+    "v": 2
+   }
+  },
+  {
+   "name": "squeeze_surf_rev_e1_w2",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp (SqueezeEdge)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "surf_rev.smb",
+     "rebuild": false
+    },
+    "editing": -1,
+    "op": "squeeze",
+    "edge": 1,
+    "which": 2,
+    "v": 2
+   }
+  },
+  {
+   "name": "delface_surf_sphere150_e0_d0",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp (SmBrep::DeleteFace)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "surf_sphere150.smb",
+     "rebuild": false
+    },
+    "editing": 0,
+    "op": "delete_face",
+    "face": 0,
+    "delete_ev": false,
+    "nesting": true,
+    "keep": -1
+   }
+  },
+  {
+   "name": "delface_surf_sphere150_e0_d1",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp (SmBrep::DeleteFace)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "surf_sphere150.smb",
+     "rebuild": false
+    },
+    "editing": 0,
+    "op": "delete_face",
+    "face": 0,
+    "delete_ev": true,
+    "nesting": true,
+    "keep": -1
+   }
+  },
+  {
+   "name": "delface_surf_sphere150_e0_nonest",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp (SmBrep::DeleteFace)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "surf_sphere150.smb",
+     "rebuild": false
+    },
+    "editing": 0,
+    "op": "delete_face",
+    "face": 1,
+    "delete_ev": false,
+    "nesting": false,
+    "keep": 0
+   }
+  },
+  {
+   "name": "delface_surf_sphere150_e1_d0",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp (SmBrep::DeleteFace)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "surf_sphere150.smb",
+     "rebuild": false
+    },
+    "editing": 1,
+    "op": "delete_face",
+    "face": 0,
+    "delete_ev": false,
+    "nesting": true,
+    "keep": -1
+   }
+  },
+  {
+   "name": "delface_surf_sphere150_e1_d1",
+   "upstream_ref": "tests/SM_API_test/src/TestSmBrep.cpp (TestSmDeleteFaceKeepsInfiniteRegion's DeleteFace(face, TRUE, TRUE) with editing on, here on face 0 of surf_sphere150.smb)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "surf_sphere150.smb",
+     "rebuild": false
+    },
+    "editing": 1,
+    "op": "delete_face",
+    "face": 0,
+    "delete_ev": true,
+    "nesting": true,
+    "keep": -1
+   }
+  },
+  {
+   "name": "delface_surf_sphere150_e1_nonest",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp (SmBrep::DeleteFace)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "surf_sphere150.smb",
+     "rebuild": false
+    },
+    "editing": 1,
+    "op": "delete_face",
+    "face": 1,
+    "delete_ev": false,
+    "nesting": false,
+    "keep": 0
+   }
+  },
+  {
+   "name": "squeeze_surf_sphere150_e0_w0",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp (SqueezeEdge)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "surf_sphere150.smb",
+     "rebuild": false
+    },
+    "editing": -1,
+    "op": "squeeze",
+    "edge": 0,
+    "which": 0,
+    "v": 2
+   }
+  },
+  {
+   "name": "squeeze_surf_sphere150_e1_w0",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp (SqueezeEdge)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "surf_sphere150.smb",
+     "rebuild": false
+    },
+    "editing": -1,
+    "op": "squeeze",
+    "edge": 1,
+    "which": 0,
+    "v": 2
+   }
+  },
+  {
+   "name": "squeeze_surf_sphere150_e0_w1",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp (SqueezeEdge)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "surf_sphere150.smb",
+     "rebuild": false
+    },
+    "editing": -1,
+    "op": "squeeze",
+    "edge": 0,
+    "which": 1,
+    "v": 2
+   }
+  },
+  {
+   "name": "squeeze_surf_sphere150_e1_w1",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp (SqueezeEdge)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "surf_sphere150.smb",
+     "rebuild": false
+    },
+    "editing": -1,
+    "op": "squeeze",
+    "edge": 1,
+    "which": 1,
+    "v": 2
+   }
+  },
+  {
+   "name": "squeeze_surf_sphere150_e0_w2",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp (SqueezeEdge)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "surf_sphere150.smb",
+     "rebuild": false
+    },
+    "editing": -1,
+    "op": "squeeze",
+    "edge": 0,
+    "which": 2,
+    "v": 2
+   }
+  },
+  {
+   "name": "squeeze_surf_sphere150_e1_w2",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp (SqueezeEdge)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "surf_sphere150.smb",
+     "rebuild": false
+    },
+    "editing": -1,
+    "op": "squeeze",
+    "edge": 1,
+    "which": 2,
+    "v": 2
+   }
+  },
+  {
+   "name": "delface_torus_e0_d0",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp (SmBrep::DeleteFace)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "torus.smb",
+     "rebuild": false
+    },
+    "editing": 0,
+    "op": "delete_face",
+    "face": 0,
+    "delete_ev": false,
+    "nesting": true,
+    "keep": -1
+   }
+  },
+  {
+   "name": "delface_torus_e0_d1",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp (SmBrep::DeleteFace)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "torus.smb",
+     "rebuild": false
+    },
+    "editing": 0,
+    "op": "delete_face",
+    "face": 0,
+    "delete_ev": true,
+    "nesting": true,
+    "keep": -1
+   }
+  },
+  {
+   "name": "delface_torus_e0_nonest",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp (SmBrep::DeleteFace)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "torus.smb",
+     "rebuild": false
+    },
+    "editing": 0,
+    "op": "delete_face",
+    "face": 1,
+    "delete_ev": false,
+    "nesting": false,
+    "keep": 0
+   }
+  },
+  {
+   "name": "delface_torus_e1_d0",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp (SmBrep::DeleteFace)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "torus.smb",
+     "rebuild": false
+    },
+    "editing": 1,
+    "op": "delete_face",
+    "face": 0,
+    "delete_ev": false,
+    "nesting": true,
+    "keep": -1
+   }
+  },
+  {
+   "name": "delface_torus_e1_d1",
+   "upstream_ref": "tests/SM_API_test/src/TestSmBrep.cpp (TestSmDeleteFaceKeepsInfiniteRegion's DeleteFace(face, TRUE, TRUE) with editing on, here on face 0 of torus.smb)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "torus.smb",
+     "rebuild": false
+    },
+    "editing": 1,
+    "op": "delete_face",
+    "face": 0,
+    "delete_ev": true,
+    "nesting": true,
+    "keep": -1
+   }
+  },
+  {
+   "name": "delface_torus_e1_nonest",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp (SmBrep::DeleteFace)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "torus.smb",
+     "rebuild": false
+    },
+    "editing": 1,
+    "op": "delete_face",
+    "face": 1,
+    "delete_ev": false,
+    "nesting": false,
+    "keep": 0
+   }
+  },
+  {
+   "name": "squeeze_torus_e0_w0",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp (SqueezeEdge)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "torus.smb",
+     "rebuild": false
+    },
+    "editing": -1,
+    "op": "squeeze",
+    "edge": 0,
+    "which": 0,
+    "v": 2
+   }
+  },
+  {
+   "name": "squeeze_torus_e1_w0",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp (SqueezeEdge)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "torus.smb",
+     "rebuild": false
+    },
+    "editing": -1,
+    "op": "squeeze",
+    "edge": 1,
+    "which": 0,
+    "v": 2
+   }
+  },
+  {
+   "name": "squeeze_torus_e0_w1",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp (SqueezeEdge)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "torus.smb",
+     "rebuild": false
+    },
+    "editing": -1,
+    "op": "squeeze",
+    "edge": 0,
+    "which": 1,
+    "v": 2
+   }
+  },
+  {
+   "name": "squeeze_torus_e1_w1",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp (SqueezeEdge)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "torus.smb",
+     "rebuild": false
+    },
+    "editing": -1,
+    "op": "squeeze",
+    "edge": 1,
+    "which": 1,
+    "v": 2
+   }
+  },
+  {
+   "name": "squeeze_torus_e0_w2",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp (SqueezeEdge)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "torus.smb",
+     "rebuild": false
+    },
+    "editing": -1,
+    "op": "squeeze",
+    "edge": 0,
+    "which": 2,
+    "v": 2
+   }
+  },
+  {
+   "name": "squeeze_torus_e1_w2",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp (SqueezeEdge)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "torus.smb",
+     "rebuild": false
+    },
+    "editing": -1,
+    "op": "squeeze",
+    "edge": 1,
+    "which": 2,
+    "v": 2
+   }
+  },
+  {
+   "name": "delface_toruswvy_e0_d0",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp (SmBrep::DeleteFace)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "toruswvy.smb",
+     "rebuild": false
+    },
+    "editing": 0,
+    "op": "delete_face",
+    "face": 0,
+    "delete_ev": false,
+    "nesting": true,
+    "keep": -1
+   }
+  },
+  {
+   "name": "delface_toruswvy_e0_d1",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp (SmBrep::DeleteFace)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "toruswvy.smb",
+     "rebuild": false
+    },
+    "editing": 0,
+    "op": "delete_face",
+    "face": 0,
+    "delete_ev": true,
+    "nesting": true,
+    "keep": -1
+   }
+  },
+  {
+   "name": "delface_toruswvy_e0_nonest",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp (SmBrep::DeleteFace)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "toruswvy.smb",
+     "rebuild": false
+    },
+    "editing": 0,
+    "op": "delete_face",
+    "face": 1,
+    "delete_ev": false,
+    "nesting": false,
+    "keep": 0
+   }
+  },
+  {
+   "name": "delface_toruswvy_e1_d0",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp (SmBrep::DeleteFace)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "toruswvy.smb",
+     "rebuild": false
+    },
+    "editing": 1,
+    "op": "delete_face",
+    "face": 0,
+    "delete_ev": false,
+    "nesting": true,
+    "keep": -1
+   }
+  },
+  {
+   "name": "delface_toruswvy_e1_d1",
+   "upstream_ref": "tests/SM_API_test/src/TestSmBrep.cpp (TestSmDeleteFaceKeepsInfiniteRegion's DeleteFace(face, TRUE, TRUE) with editing on, here on face 0 of toruswvy.smb)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "toruswvy.smb",
+     "rebuild": false
+    },
+    "editing": 1,
+    "op": "delete_face",
+    "face": 0,
+    "delete_ev": true,
+    "nesting": true,
+    "keep": -1
+   }
+  },
+  {
+   "name": "delface_toruswvy_e1_nonest",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp (SmBrep::DeleteFace)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "toruswvy.smb",
+     "rebuild": false
+    },
+    "editing": 1,
+    "op": "delete_face",
+    "face": 1,
+    "delete_ev": false,
+    "nesting": false,
+    "keep": 0
+   }
+  },
+  {
+   "name": "squeeze_toruswvy_e0_w0",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp (SqueezeEdge)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "toruswvy.smb",
+     "rebuild": false
+    },
+    "editing": -1,
+    "op": "squeeze",
+    "edge": 0,
+    "which": 0,
+    "v": 2
+   }
+  },
+  {
+   "name": "squeeze_toruswvy_e1_w0",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp (SqueezeEdge)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "toruswvy.smb",
+     "rebuild": false
+    },
+    "editing": -1,
+    "op": "squeeze",
+    "edge": 1,
+    "which": 0,
+    "v": 2
+   }
+  },
+  {
+   "name": "squeeze_toruswvy_e0_w1",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp (SqueezeEdge)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "toruswvy.smb",
+     "rebuild": false
+    },
+    "editing": -1,
+    "op": "squeeze",
+    "edge": 0,
+    "which": 1,
+    "v": 2
+   }
+  },
+  {
+   "name": "squeeze_toruswvy_e1_w1",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp (SqueezeEdge)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "toruswvy.smb",
+     "rebuild": false
+    },
+    "editing": -1,
+    "op": "squeeze",
+    "edge": 1,
+    "which": 1,
+    "v": 2
+   }
+  },
+  {
+   "name": "squeeze_toruswvy_e0_w2",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp (SqueezeEdge)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "toruswvy.smb",
+     "rebuild": false
+    },
+    "editing": -1,
+    "op": "squeeze",
+    "edge": 0,
+    "which": 2,
+    "v": 2
+   }
+  },
+  {
+   "name": "squeeze_toruswvy_e1_w2",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp (SqueezeEdge)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "toruswvy.smb",
+     "rebuild": false
+    },
+    "editing": -1,
+    "op": "squeeze",
+    "edge": 1,
+    "which": 2,
+    "v": 2
+   }
+  },
+  {
+   "name": "delface_vase_rev_e0_d0",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp (SmBrep::DeleteFace)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "vase_rev.smb",
+     "rebuild": false
+    },
+    "editing": 0,
+    "op": "delete_face",
+    "face": 0,
+    "delete_ev": false,
+    "nesting": true,
+    "keep": -1
+   }
+  },
+  {
+   "name": "delface_vase_rev_e0_d1",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp (SmBrep::DeleteFace)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "vase_rev.smb",
+     "rebuild": false
+    },
+    "editing": 0,
+    "op": "delete_face",
+    "face": 0,
+    "delete_ev": true,
+    "nesting": true,
+    "keep": -1
+   }
+  },
+  {
+   "name": "delface_vase_rev_e0_nonest",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp (SmBrep::DeleteFace)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "vase_rev.smb",
+     "rebuild": false
+    },
+    "editing": 0,
+    "op": "delete_face",
+    "face": 1,
+    "delete_ev": false,
+    "nesting": false,
+    "keep": 0
+   }
+  },
+  {
+   "name": "delface_vase_rev_e1_d0",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp (SmBrep::DeleteFace)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "vase_rev.smb",
+     "rebuild": false
+    },
+    "editing": 1,
+    "op": "delete_face",
+    "face": 0,
+    "delete_ev": false,
+    "nesting": true,
+    "keep": -1
+   }
+  },
+  {
+   "name": "delface_vase_rev_e1_d1",
+   "upstream_ref": "tests/SM_API_test/src/TestSmBrep.cpp (TestSmDeleteFaceKeepsInfiniteRegion's DeleteFace(face, TRUE, TRUE) with editing on, here on face 0 of vase_rev.smb)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "vase_rev.smb",
+     "rebuild": false
+    },
+    "editing": 1,
+    "op": "delete_face",
+    "face": 0,
+    "delete_ev": true,
+    "nesting": true,
+    "keep": -1
+   }
+  },
+  {
+   "name": "delface_vase_rev_e1_nonest",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp (SmBrep::DeleteFace)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "vase_rev.smb",
+     "rebuild": false
+    },
+    "editing": 1,
+    "op": "delete_face",
+    "face": 1,
+    "delete_ev": false,
+    "nesting": false,
+    "keep": 0
+   }
+  },
+  {
+   "name": "squeeze_vase_rev_e0_w0",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp (SqueezeEdge)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "vase_rev.smb",
+     "rebuild": false
+    },
+    "editing": -1,
+    "op": "squeeze",
+    "edge": 0,
+    "which": 0,
+    "v": 2
+   }
+  },
+  {
+   "name": "squeeze_vase_rev_e1_w0",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp (SqueezeEdge)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "vase_rev.smb",
+     "rebuild": false
+    },
+    "editing": -1,
+    "op": "squeeze",
+    "edge": 1,
+    "which": 0,
+    "v": 2
+   }
+  },
+  {
+   "name": "squeeze_vase_rev_e0_w1",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp (SqueezeEdge)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "vase_rev.smb",
+     "rebuild": false
+    },
+    "editing": -1,
+    "op": "squeeze",
+    "edge": 0,
+    "which": 1,
+    "v": 2
+   }
+  },
+  {
+   "name": "squeeze_vase_rev_e1_w1",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp (SqueezeEdge)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "vase_rev.smb",
+     "rebuild": false
+    },
+    "editing": -1,
+    "op": "squeeze",
+    "edge": 1,
+    "which": 1,
+    "v": 2
+   }
+  },
+  {
+   "name": "squeeze_vase_rev_e0_w2",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp (SqueezeEdge)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "vase_rev.smb",
+     "rebuild": false
+    },
+    "editing": -1,
+    "op": "squeeze",
+    "edge": 0,
+    "which": 2,
+    "v": 2
+   }
+  },
+  {
+   "name": "squeeze_vase_rev_e1_w2",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp (SqueezeEdge)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "vase_rev.smb",
+     "rebuild": false
+    },
+    "editing": -1,
+    "op": "squeeze",
+    "edge": 1,
+    "which": 2,
+    "v": 2
+   }
+  },
+  {
+   "name": "squeeze_net_e0_w0",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp (SqueezeEdge)",
+   "inputs": {
+    "brep": {
+     "kind": "network"
+    },
+    "editing": -1,
+    "op": "squeeze",
+    "edge": 0,
+    "which": 0,
+    "v": 2
+   }
+  },
+  {
+   "name": "squeeze_net_e1_w0",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp (SqueezeEdge)",
+   "inputs": {
+    "brep": {
+     "kind": "network"
+    },
+    "editing": -1,
+    "op": "squeeze",
+    "edge": 1,
+    "which": 0,
+    "v": 2
+   }
+  },
+  {
+   "name": "squeeze_net_e0_w1",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp (SqueezeEdge)",
+   "inputs": {
+    "brep": {
+     "kind": "network"
+    },
+    "editing": -1,
+    "op": "squeeze",
+    "edge": 0,
+    "which": 1,
+    "v": 2
+   }
+  },
+  {
+   "name": "squeeze_net_e1_w1",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp (SqueezeEdge)",
+   "inputs": {
+    "brep": {
+     "kind": "network"
+    },
+    "editing": -1,
+    "op": "squeeze",
+    "edge": 1,
+    "which": 1,
+    "v": 2
+   }
+  },
+  {
+   "name": "squeeze_net_e0_w2",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp (SqueezeEdge)",
+   "inputs": {
+    "brep": {
+     "kind": "network"
+    },
+    "editing": -1,
+    "op": "squeeze",
+    "edge": 0,
+    "which": 2,
+    "v": 2
+   }
+  },
+  {
+   "name": "squeeze_net_e1_w2",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp (SqueezeEdge)",
+   "inputs": {
+    "brep": {
+     "kind": "network"
+    },
+    "editing": -1,
+    "op": "squeeze",
+    "edge": 1,
+    "which": 2,
+    "v": 2
+   }
+  },
+  {
+   "name": "wire_net_w0_r-1",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp (my_test_topology)",
+   "inputs": {
+    "brep": {
+     "kind": "network"
+    },
+    "editing": -1,
+    "op": "wire",
+    "which": 0,
+    "region": -1,
+    "v1": 0,
+    "v2": 1,
+    "curve": {
+     "dim": 3,
+     "cpts": [
+      [
+       0,
+       0,
+       0,
+       -1.7976931348623157e+308
+      ],
+      [
+       1,
+       0,
+       0,
+       -1.7976931348623157e+308
+      ]
+     ],
+     "p": 1,
+     "u": [
+      0,
+      0,
+      1,
+      1
+     ]
+    },
+    "t0": 0.0,
+    "t1": 1.0,
+    "orient": 1,
+    "end": [
+     1.0,
+     0.0,
+     0.0
+    ]
+   }
+  },
+  {
+   "name": "wire_net_w0_r0",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp (my_test_topology)",
+   "inputs": {
+    "brep": {
+     "kind": "network"
+    },
+    "editing": -1,
+    "op": "wire",
+    "which": 0,
+    "region": 0,
+    "v1": 0,
+    "v2": 1,
+    "curve": {
+     "dim": 3,
+     "cpts": [
+      [
+       0,
+       0,
+       0,
+       -1.7976931348623157e+308
+      ],
+      [
+       1,
+       0,
+       0,
+       -1.7976931348623157e+308
+      ]
+     ],
+     "p": 1,
+     "u": [
+      0,
+      0,
+      1,
+      1
+     ]
+    },
+    "t0": 0.0,
+    "t1": 1.0,
+    "orient": 1,
+    "end": [
+     1.0,
+     0.0,
+     0.0
+    ]
+   }
+  },
+  {
+   "name": "wire_net_w0_r1",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp (my_test_topology)",
+   "inputs": {
+    "brep": {
+     "kind": "network"
+    },
+    "editing": -1,
+    "op": "wire",
+    "which": 0,
+    "region": 1,
+    "v1": 0,
+    "v2": 1,
+    "curve": {
+     "dim": 3,
+     "cpts": [
+      [
+       0,
+       0,
+       0,
+       -1.7976931348623157e+308
+      ],
+      [
+       1,
+       0,
+       0,
+       -1.7976931348623157e+308
+      ]
+     ],
+     "p": 1,
+     "u": [
+      0,
+      0,
+      1,
+      1
+     ]
+    },
+    "t0": 0.0,
+    "t1": 1.0,
+    "orient": 1,
+    "end": [
+     1.0,
+     0.0,
+     0.0
+    ]
+   }
+  },
+  {
+   "name": "wire_net_w1_r-1",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp (my_test_topology)",
+   "inputs": {
+    "brep": {
+     "kind": "network"
+    },
+    "editing": -1,
+    "op": "wire",
+    "which": 1,
+    "region": -1,
+    "v1": 0,
+    "v2": 1,
+    "curve": {
+     "dim": 3,
+     "cpts": [
+      [
+       0,
+       0,
+       0,
+       -1.7976931348623157e+308
+      ],
+      [
+       1,
+       0,
+       0,
+       -1.7976931348623157e+308
+      ]
+     ],
+     "p": 1,
+     "u": [
+      0,
+      0,
+      1,
+      1
+     ]
+    },
+    "t0": 0.0,
+    "t1": 1.0,
+    "orient": 1,
+    "end": [
+     1.0,
+     0.0,
+     0.0
+    ]
+   }
+  },
+  {
+   "name": "wire_net_w1_r0",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp (my_test_topology)",
+   "inputs": {
+    "brep": {
+     "kind": "network"
+    },
+    "editing": -1,
+    "op": "wire",
+    "which": 1,
+    "region": 0,
+    "v1": 0,
+    "v2": 1,
+    "curve": {
+     "dim": 3,
+     "cpts": [
+      [
+       0,
+       0,
+       0,
+       -1.7976931348623157e+308
+      ],
+      [
+       1,
+       0,
+       0,
+       -1.7976931348623157e+308
+      ]
+     ],
+     "p": 1,
+     "u": [
+      0,
+      0,
+      1,
+      1
+     ]
+    },
+    "t0": 0.0,
+    "t1": 1.0,
+    "orient": 1,
+    "end": [
+     1.0,
+     0.0,
+     0.0
+    ]
+   }
+  },
+  {
+   "name": "wire_net_w1_r1",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp (my_test_topology)",
+   "inputs": {
+    "brep": {
+     "kind": "network"
+    },
+    "editing": -1,
+    "op": "wire",
+    "which": 1,
+    "region": 1,
+    "v1": 0,
+    "v2": 1,
+    "curve": {
+     "dim": 3,
+     "cpts": [
+      [
+       0,
+       0,
+       0,
+       -1.7976931348623157e+308
+      ],
+      [
+       1,
+       0,
+       0,
+       -1.7976931348623157e+308
+      ]
+     ],
+     "p": 1,
+     "u": [
+      0,
+      0,
+      1,
+      1
+     ]
+    },
+    "t0": 0.0,
+    "t1": 1.0,
+    "orient": 1,
+    "end": [
+     1.0,
+     0.0,
+     0.0
+    ]
+   }
+  },
+  {
+   "name": "wire_plane_square_w0_r-1",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp (my_test_topology)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "plane_square.smb",
+     "rebuild": false
+    },
+    "editing": -1,
+    "op": "wire",
+    "which": 0,
+    "region": -1,
+    "v1": 0,
+    "v2": 1,
+    "curve": {
+     "dim": 3,
+     "cpts": [
+      [
+       0,
+       0,
+       0,
+       -1.7976931348623157e+308
+      ],
+      [
+       1,
+       0,
+       0,
+       -1.7976931348623157e+308
+      ]
+     ],
+     "p": 1,
+     "u": [
+      0,
+      0,
+      1,
+      1
+     ]
+    },
+    "t0": 0.0,
+    "t1": 1.0,
+    "orient": 1,
+    "end": [
+     1.0,
+     0.0,
+     0.0
+    ]
+   }
+  },
+  {
+   "name": "wire_plane_square_w0_r0",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp (my_test_topology)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "plane_square.smb",
+     "rebuild": false
+    },
+    "editing": -1,
+    "op": "wire",
+    "which": 0,
+    "region": 0,
+    "v1": 0,
+    "v2": 1,
+    "curve": {
+     "dim": 3,
+     "cpts": [
+      [
+       0,
+       0,
+       0,
+       -1.7976931348623157e+308
+      ],
+      [
+       1,
+       0,
+       0,
+       -1.7976931348623157e+308
+      ]
+     ],
+     "p": 1,
+     "u": [
+      0,
+      0,
+      1,
+      1
+     ]
+    },
+    "t0": 0.0,
+    "t1": 1.0,
+    "orient": 1,
+    "end": [
+     1.0,
+     0.0,
+     0.0
+    ]
+   }
+  },
+  {
+   "name": "wire_plane_square_w0_r1",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp (my_test_topology)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "plane_square.smb",
+     "rebuild": false
+    },
+    "editing": -1,
+    "op": "wire",
+    "which": 0,
+    "region": 1,
+    "v1": 0,
+    "v2": 1,
+    "curve": {
+     "dim": 3,
+     "cpts": [
+      [
+       0,
+       0,
+       0,
+       -1.7976931348623157e+308
+      ],
+      [
+       1,
+       0,
+       0,
+       -1.7976931348623157e+308
+      ]
+     ],
+     "p": 1,
+     "u": [
+      0,
+      0,
+      1,
+      1
+     ]
+    },
+    "t0": 0.0,
+    "t1": 1.0,
+    "orient": 1,
+    "end": [
+     1.0,
+     0.0,
+     0.0
+    ]
+   }
+  },
+  {
+   "name": "wire_plane_square_w1_r-1",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp (my_test_topology)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "plane_square.smb",
+     "rebuild": false
+    },
+    "editing": -1,
+    "op": "wire",
+    "which": 1,
+    "region": -1,
+    "v1": 0,
+    "v2": 1,
+    "curve": {
+     "dim": 3,
+     "cpts": [
+      [
+       0,
+       0,
+       0,
+       -1.7976931348623157e+308
+      ],
+      [
+       1,
+       0,
+       0,
+       -1.7976931348623157e+308
+      ]
+     ],
+     "p": 1,
+     "u": [
+      0,
+      0,
+      1,
+      1
+     ]
+    },
+    "t0": 0.0,
+    "t1": 1.0,
+    "orient": 1,
+    "end": [
+     1.0,
+     0.0,
+     0.0
+    ]
+   }
+  },
+  {
+   "name": "wire_plane_square_w1_r0",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp (my_test_topology)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "plane_square.smb",
+     "rebuild": false
+    },
+    "editing": -1,
+    "op": "wire",
+    "which": 1,
+    "region": 0,
+    "v1": 0,
+    "v2": 1,
+    "curve": {
+     "dim": 3,
+     "cpts": [
+      [
+       0,
+       0,
+       0,
+       -1.7976931348623157e+308
+      ],
+      [
+       1,
+       0,
+       0,
+       -1.7976931348623157e+308
+      ]
+     ],
+     "p": 1,
+     "u": [
+      0,
+      0,
+      1,
+      1
+     ]
+    },
+    "t0": 0.0,
+    "t1": 1.0,
+    "orient": 1,
+    "end": [
+     1.0,
+     0.0,
+     0.0
+    ]
+   }
+  },
+  {
+   "name": "wire_plane_square_w1_r1",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp (my_test_topology)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "plane_square.smb",
+     "rebuild": false
+    },
+    "editing": -1,
+    "op": "wire",
+    "which": 1,
+    "region": 1,
+    "v1": 0,
+    "v2": 1,
+    "curve": {
+     "dim": 3,
+     "cpts": [
+      [
+       0,
+       0,
+       0,
+       -1.7976931348623157e+308
+      ],
+      [
+       1,
+       0,
+       0,
+       -1.7976931348623157e+308
+      ]
+     ],
+     "p": 1,
+     "u": [
+      0,
+      0,
+      1,
+      1
+     ]
+    },
+    "t0": 0.0,
+    "t1": 1.0,
+    "orient": 1,
+    "end": [
+     1.0,
+     0.0,
+     0.0
+    ]
+   }
+  },
+  {
+   "name": "wire_sphere_w0_r-1",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp (my_test_topology)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "sphere.smb",
+     "rebuild": false
+    },
+    "editing": -1,
+    "op": "wire",
+    "which": 0,
+    "region": -1,
+    "v1": 0,
+    "v2": 1,
+    "curve": {
+     "dim": 3,
+     "cpts": [
+      [
+       0,
+       0,
+       0,
+       -1.7976931348623157e+308
+      ],
+      [
+       1,
+       0,
+       0,
+       -1.7976931348623157e+308
+      ]
+     ],
+     "p": 1,
+     "u": [
+      0,
+      0,
+      1,
+      1
+     ]
+    },
+    "t0": 0.0,
+    "t1": 1.0,
+    "orient": 1,
+    "end": [
+     1.0,
+     0.0,
+     0.0
+    ]
+   }
+  },
+  {
+   "name": "wire_sphere_w0_r0",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp (my_test_topology)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "sphere.smb",
+     "rebuild": false
+    },
+    "editing": -1,
+    "op": "wire",
+    "which": 0,
+    "region": 0,
+    "v1": 0,
+    "v2": 1,
+    "curve": {
+     "dim": 3,
+     "cpts": [
+      [
+       0,
+       0,
+       0,
+       -1.7976931348623157e+308
+      ],
+      [
+       1,
+       0,
+       0,
+       -1.7976931348623157e+308
+      ]
+     ],
+     "p": 1,
+     "u": [
+      0,
+      0,
+      1,
+      1
+     ]
+    },
+    "t0": 0.0,
+    "t1": 1.0,
+    "orient": 1,
+    "end": [
+     1.0,
+     0.0,
+     0.0
+    ]
+   }
+  },
+  {
+   "name": "wire_sphere_w0_r1",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp (my_test_topology)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "sphere.smb",
+     "rebuild": false
+    },
+    "editing": -1,
+    "op": "wire",
+    "which": 0,
+    "region": 1,
+    "v1": 0,
+    "v2": 1,
+    "curve": {
+     "dim": 3,
+     "cpts": [
+      [
+       0,
+       0,
+       0,
+       -1.7976931348623157e+308
+      ],
+      [
+       1,
+       0,
+       0,
+       -1.7976931348623157e+308
+      ]
+     ],
+     "p": 1,
+     "u": [
+      0,
+      0,
+      1,
+      1
+     ]
+    },
+    "t0": 0.0,
+    "t1": 1.0,
+    "orient": 1,
+    "end": [
+     1.0,
+     0.0,
+     0.0
+    ]
+   }
+  },
+  {
+   "name": "wire_sphere_w1_r-1",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp (my_test_topology)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "sphere.smb",
+     "rebuild": false
+    },
+    "editing": -1,
+    "op": "wire",
+    "which": 1,
+    "region": -1,
+    "v1": 0,
+    "v2": 1,
+    "curve": {
+     "dim": 3,
+     "cpts": [
+      [
+       0,
+       0,
+       0,
+       -1.7976931348623157e+308
+      ],
+      [
+       1,
+       0,
+       0,
+       -1.7976931348623157e+308
+      ]
+     ],
+     "p": 1,
+     "u": [
+      0,
+      0,
+      1,
+      1
+     ]
+    },
+    "t0": 0.0,
+    "t1": 1.0,
+    "orient": 1,
+    "end": [
+     1.0,
+     0.0,
+     0.0
+    ]
+   }
+  },
+  {
+   "name": "wire_sphere_w1_r0",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp (my_test_topology)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "sphere.smb",
+     "rebuild": false
+    },
+    "editing": -1,
+    "op": "wire",
+    "which": 1,
+    "region": 0,
+    "v1": 0,
+    "v2": 1,
+    "curve": {
+     "dim": 3,
+     "cpts": [
+      [
+       0,
+       0,
+       0,
+       -1.7976931348623157e+308
+      ],
+      [
+       1,
+       0,
+       0,
+       -1.7976931348623157e+308
+      ]
+     ],
+     "p": 1,
+     "u": [
+      0,
+      0,
+      1,
+      1
+     ]
+    },
+    "t0": 0.0,
+    "t1": 1.0,
+    "orient": 1,
+    "end": [
+     1.0,
+     0.0,
+     0.0
+    ]
+   }
+  },
+  {
+   "name": "wire_sphere_w1_r1",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp (my_test_topology)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "sphere.smb",
+     "rebuild": false
+    },
+    "editing": -1,
+    "op": "wire",
+    "which": 1,
+    "region": 1,
+    "v1": 0,
+    "v2": 1,
+    "curve": {
+     "dim": 3,
+     "cpts": [
+      [
+       0,
+       0,
+       0,
+       -1.7976931348623157e+308
+      ],
+      [
+       1,
+       0,
+       0,
+       -1.7976931348623157e+308
+      ]
+     ],
+     "p": 1,
+     "u": [
+      0,
+      0,
+      1,
+      1
+     ]
+    },
+    "t0": 0.0,
+    "t1": 1.0,
+    "orient": 1,
+    "end": [
+     1.0,
+     0.0,
+     0.0
+    ]
+   }
+  }
+ ]
+}

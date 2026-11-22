@@ -1,0 +1,604 @@
+{
+ "cases": [
+  {
+   "name": "default_context",
+   "upstream_ref": "tests/prog_test/src/smFeatureTest.cpp:26 (SmContext sContext)",
+   "inputs": {
+    "steps": [
+     {
+      "op": 0,
+      "ctx": 0,
+      "m": 0
+     },
+     {
+      "op": 0,
+      "ctx": 0,
+      "m": 1
+     },
+     {
+      "op": 0,
+      "ctx": 0,
+      "m": 2
+     },
+     {
+      "op": 0,
+      "ctx": 0,
+      "m": 4
+     },
+     {
+      "op": 0,
+      "ctx": 0,
+      "m": 8
+     },
+     {
+      "op": 0,
+      "ctx": 0,
+      "m": 16
+     },
+     {
+      "op": 0,
+      "ctx": 0,
+      "m": 31
+     },
+     {
+      "op": 1,
+      "ctx": 0,
+      "m": 0
+     },
+     {
+      "op": 1,
+      "ctx": 0,
+      "m": 1
+     },
+     {
+      "op": 1,
+      "ctx": 0,
+      "m": 2
+     },
+     {
+      "op": 1,
+      "ctx": 0,
+      "m": 4
+     },
+     {
+      "op": 1,
+      "ctx": 0,
+      "m": 8
+     },
+     {
+      "op": 1,
+      "ctx": 0,
+      "m": 16
+     },
+     {
+      "op": 1,
+      "ctx": 0,
+      "m": 31
+     },
+     {
+      "op": 11
+     },
+     {
+      "op": 14,
+      "m": 0
+     },
+     {
+      "op": 14,
+      "m": 2
+     },
+     {
+      "op": 14,
+      "ctx": -1,
+      "m": 0
+     }
+    ]
+   }
+  },
+  {
+   "name": "api_create_context",
+   "upstream_ref": "tests/SM_API_test/src/TestSmBrep.cpp:45 (SmApiCreateContext)",
+   "inputs": {
+    "steps": [
+     {
+      "op": 19
+     },
+     {
+      "op": 19
+     }
+    ]
+   }
+  },
+  {
+   "name": "scoped_lock_all_marks",
+   "upstream_ref": "source/SMLib/src/SmAssembly.cpp:275 (SmNewMarkAndLock sMarkLock(GetContext(), SM_MT_ALLMARKS))",
+   "inputs": {
+    "steps": [
+     {
+      "op": 2,
+      "slot": 0,
+      "m": 31
+     },
+     {
+      "op": 9,
+      "slot": 0
+     },
+     {
+      "op": 5,
+      "slot": 0
+     },
+     {
+      "op": 5,
+      "slot": 0
+     },
+     {
+      "op": 0,
+      "m": 1
+     },
+     {
+      "op": 8,
+      "slot": 0
+     },
+     {
+      "op": 1,
+      "m": 1
+     }
+    ]
+   }
+  },
+  {
+   "name": "nested_locks_exhaust",
+   "upstream_ref": "source/SMLib/inc/SmContext.h:496 (GetUnlockedMark: all marks locked -> SM_MT_MARKIO)",
+   "inputs": {
+    "slots": 8,
+    "steps": [
+     {
+      "op": 2,
+      "slot": 0,
+      "m": 31
+     },
+     {
+      "op": 2,
+      "slot": 1,
+      "m": 31
+     },
+     {
+      "op": 2,
+      "slot": 2,
+      "m": 31
+     },
+     {
+      "op": 2,
+      "slot": 3,
+      "m": 31
+     },
+     {
+      "op": 2,
+      "slot": 4,
+      "m": 31
+     },
+     {
+      "op": 2,
+      "slot": 5,
+      "m": 31
+     },
+     {
+      "op": 2,
+      "slot": 6,
+      "m": 31
+     },
+     {
+      "op": 9,
+      "slot": 0
+     },
+     {
+      "op": 9,
+      "slot": 1
+     },
+     {
+      "op": 9,
+      "slot": 2
+     },
+     {
+      "op": 9,
+      "slot": 3
+     },
+     {
+      "op": 9,
+      "slot": 4
+     },
+     {
+      "op": 9,
+      "slot": 5
+     },
+     {
+      "op": 9,
+      "slot": 6
+     },
+     {
+      "op": 8,
+      "slot": 3
+     },
+     {
+      "op": 2,
+      "slot": 7,
+      "m": 31
+     },
+     {
+      "op": 9,
+      "slot": 7
+     }
+    ]
+   }
+  },
+  {
+   "name": "lock_single_mask_locked",
+   "upstream_ref": "source/SMLib/src/SmContext.cpp:516 (GetUnlockedMark returns the single-mark mask)",
+   "inputs": {
+    "steps": [
+     {
+      "op": 2,
+      "slot": 0,
+      "m": 4
+     },
+     {
+      "op": 2,
+      "slot": 1,
+      "m": 4
+     },
+     {
+      "op": 9,
+      "slot": 1
+     },
+     {
+      "op": 2,
+      "slot": 2,
+      "m": 0
+     },
+     {
+      "op": 9,
+      "slot": 2
+     },
+     {
+      "op": 2,
+      "slot": 3,
+      "m": 3
+     },
+     {
+      "op": 9,
+      "slot": 3
+     }
+    ]
+   }
+  },
+  {
+   "name": "default_lock_set_context",
+   "upstream_ref": "source/SMLib/src/SmSphere.cpp:3600 (SmNewMarkAndLock sMarkLock; SetContext(GetContext()))",
+   "inputs": {
+    "steps": [
+     {
+      "op": 4,
+      "slot": 0
+     },
+     {
+      "op": 9,
+      "slot": 0
+     },
+     {
+      "op": 5,
+      "slot": 0
+     },
+     {
+      "op": 6,
+      "slot": 0,
+      "m": 31
+     },
+     {
+      "op": 9,
+      "slot": 0
+     },
+     {
+      "op": 6,
+      "slot": 0,
+      "m": 2
+     },
+     {
+      "op": 9,
+      "slot": 0
+     }
+    ]
+   }
+  },
+  {
+   "name": "boolean_pair_same_context",
+   "upstream_ref": "source/SMLib/src/SmPrimitiveCreation.cpp:7745 (SmNewMarkAndLock(BrepA ctx, BrepB ctx))",
+   "inputs": {
+    "steps": [
+     {
+      "op": 3,
+      "slot": 0,
+      "ctx": 0,
+      "ctx2": 0
+     },
+     {
+      "op": 9,
+      "slot": 0
+     },
+     {
+      "op": 5,
+      "slot": 0
+     },
+     {
+      "op": 10,
+      "m": 1
+     },
+     {
+      "op": 10,
+      "m": 0,
+      "flag": 1
+     }
+    ]
+   }
+  },
+  {
+   "name": "boolean_pair_two_contexts",
+   "upstream_ref": "source/SMLib/src/SmPrimitiveCreation.cpp:7745 (SmNewMarkAndLock with distinct contexts)",
+   "inputs": {
+    "contexts": [
+     [
+      9876543.21,
+      9876543.21
+     ],
+     [
+      9876543.21,
+      9876543.21
+     ]
+    ],
+    "steps": [
+     {
+      "op": 2,
+      "slot": 1,
+      "ctx": 1,
+      "m": 31
+     },
+     {
+      "op": 3,
+      "slot": 0,
+      "ctx": 0,
+      "ctx2": 1
+     },
+     {
+      "op": 9,
+      "slot": 0
+     },
+     {
+      "op": 5,
+      "slot": 0
+     },
+     {
+      "op": 8,
+      "slot": 0
+     },
+     {
+      "op": 7,
+      "slot": 2,
+      "ctx": 1,
+      "ctx2": 0
+     },
+     {
+      "op": 9,
+      "slot": 2
+     }
+    ]
+   }
+  },
+  {
+   "name": "set_context_pair_rebind",
+   "upstream_ref": "source/SMLib/inc/SmContext.h:600 (SmNewMarkAndLock::SetContext(ctx1, ctx2))",
+   "inputs": {
+    "contexts": [
+     [
+      9876543.21,
+      9876543.21
+     ],
+     [
+      9876543.21,
+      9876543.21
+     ],
+     [
+      9876543.21,
+      9876543.21
+     ]
+    ],
+    "steps": [
+     {
+      "op": 7,
+      "slot": 0,
+      "ctx": 0,
+      "ctx2": 1
+     },
+     {
+      "op": 7,
+      "slot": 0,
+      "ctx": 2,
+      "ctx2": 2
+     },
+     {
+      "op": 6,
+      "slot": 0,
+      "ctx": 1,
+      "m": 31
+     },
+     {
+      "op": 9,
+      "slot": 0
+     },
+     {
+      "op": 5,
+      "slot": 0
+     }
+    ]
+   }
+  },
+  {
+   "name": "model_size_1000",
+   "upstream_ref": "source/SMLib/src/SmContext.cpp:161 (SmContext(dThisModelSizeEstimate, dThisLargeSmallSizeRatio))",
+   "inputs": {
+    "contexts": [
+     [
+      1000.0,
+      50.0
+     ],
+     [
+      0.01,
+      9876543.21
+     ]
+    ],
+    "steps": [
+     {
+      "op": 11,
+      "ctx": 0
+     },
+     {
+      "op": 11,
+      "ctx": 1
+     },
+     {
+      "op": 14,
+      "ctx": 0,
+      "m": 1
+     },
+     {
+      "op": 14,
+      "ctx": 1,
+      "m": 3
+     },
+     {
+      "op": 15,
+      "ctx": 0,
+      "x": [
+       0.0002,
+       0.0001,
+       0.0003,
+       0
+      ],
+      "flag": 1
+     },
+     {
+      "op": 16,
+      "ctx": 1,
+      "x": [
+       2e-06,
+       0,
+       0,
+       0
+      ]
+     }
+    ]
+   }
+  },
+  {
+   "name": "set_model_size",
+   "upstream_ref": "source/SMLib/src/SmTol.cpp:80 (SmTol::SetModelSizeEstimate(SmContext&, double))",
+   "inputs": {
+    "sys_model": 5000.0,
+    "steps": [
+     {
+      "op": 11
+     },
+     {
+      "op": 12,
+      "x": [
+       0.001,
+       0,
+       0,
+       0
+      ]
+     },
+     {
+      "op": 11
+     },
+     {
+      "op": 12,
+      "flag": 1,
+      "x": [
+       9876543.21,
+       0,
+       0,
+       0
+      ]
+     },
+     {
+      "op": 11
+     },
+     {
+      "op": 13,
+      "x": [
+       10.0,
+       0,
+       0,
+       0
+      ]
+     },
+     {
+      "op": 14,
+      "m": 4
+     },
+     {
+      "op": 14,
+      "ctx": -1,
+      "m": 2
+     }
+    ]
+   }
+  },
+  {
+   "name": "notify_callbacks",
+   "upstream_ref": "source/SMLib/inc/SmContext.h:372 (SetSysNotifyCallback / GetUserNotifyCallback)",
+   "inputs": {
+    "steps": [
+     {
+      "op": 17,
+      "m": 1
+     },
+     {
+      "op": 17,
+      "m": 0
+     },
+     {
+      "op": 17,
+      "m": 1,
+      "flag": 1
+     },
+     {
+      "op": 17,
+      "m": 0,
+      "flag": 1
+     }
+    ]
+   }
+  },
+  {
+   "name": "mass_property_behavior",
+   "upstream_ref": "source/SMLib/inc/SmTopoTypes.h:280 (SmMassPropertyBehavior)",
+   "inputs": {
+    "steps": [
+     {
+      "op": 18,
+      "slot": 1
+     },
+     {
+      "op": 18,
+      "x": [
+       7.8,
+       0.1,
+       0.2,
+       0.3
+      ],
+      "m": 2,
+      "flag": 1
+     }
+    ]
+   }
+  }
+ ]
+}

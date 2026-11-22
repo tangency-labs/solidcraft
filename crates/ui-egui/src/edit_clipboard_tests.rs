@@ -2,8 +2,11 @@
 
 use serde_json::{Value, json};
 use solidcore_record::Vec2;
-use solidcraft_engine::Sel;
 use solidcraft_engine::geom::prelude::*;
+use solidcraft_engine::{
+    Sel,
+    doc::{FeatureKind, PlaneRef},
+};
 
 use crate::scenario::Harness;
 
@@ -50,7 +53,7 @@ fn start(h: &Harness, id: &str) -> Vec2 {
 }
 
 fn clipboard_frame(h: &mut Harness, ctx: &egui::Context, events: Vec<egui::Event>) {
-    let _ = ctx.run_ui(egui::RawInput { events, ..Default::default() }, |ui| super::handle(&mut h.app, ui.ctx()));
+    ctx.run_ui(egui::RawInput { events, ..Default::default() }, |ui| super::handle(&mut h.app, ui.ctx())).textures_delta.clear();
 }
 
 fn middle_button(pressed: bool) -> egui::Event {
@@ -335,9 +338,9 @@ fn contribution_linked_design_clipboard_crosses_tabs_reuses_links_and_undoes_onc
         assert_eq!(app.session.doc.occurrences.len(), n);
         assert_eq!(app.session.undo.len(), n);
         assert!(app.session.doc.occurrences.iter().all(|o| !o.grounded));
-        assert!(app.tree.occurrence_move.is_some());
+        assert!(crate::dialogs_move::moving(&app).is_some(), "Move/Copy opens on the pasted component");
     }
-    app.tree.occurrence_move = None;
+    crate::dialogs::cancel(&mut app);
     app.run("edit.undo", json!({})).unwrap();
     assert_eq!(app.session.doc.occurrences.len(), 1);
     app.run("edit.undo", json!({})).unwrap();
@@ -350,25 +353,26 @@ fn contribution_linked_design_clipboard_crosses_tabs_reuses_links_and_undoes_onc
 }
 
 #[test]
-fn contribution_occurrence_move_panel_belongs_to_its_document() {
+fn contribution_move_copy_of_a_pasted_component_stays_with_its_document() {
     let file = ContributionPart::new();
     let mut app = contribution_saved_part(&file);
     assert!(super::copy(&mut app));
     crate::documents::open_tab(&mut app, solidcraft_engine::Session::default()).unwrap();
     assert!(super::paste(&mut app, None));
-    let id = app.tree.occurrence_move.as_ref().unwrap().occurrence;
-    app.run("occurrence.move", json!({"occurrence":id,"translate":[10,0,0],"capture":false})).unwrap();
-    let pending = app.session.pending_moves.clone();
+    let path = crate::dialogs_move::moving(&app).expect("Move/Copy opens on the pasted component");
     crate::documents::switch(&mut app, 0);
-    assert!(app.tree.occurrence_move.is_none());
+    assert!(crate::dialogs_move::moving(&app).is_none(), "the other design shows no Move/Copy of it");
     assert!(app.session.doc.occurrences.is_empty());
     crate::documents::switch(&mut app, 1);
-    assert_eq!(app.tree.occurrence_move.as_ref().unwrap().occurrence, id);
-    assert_eq!(app.session.pending_moves, pending);
+    assert!(app.session.doc.occurrences.iter().any(|o| path.last() == Some(&o.id)));
+    assert!(app.session.pending_moves.is_empty(), "nothing moves before OK");
+    if app.preferences.keep_work_on_tab_switch {
+        assert_eq!(crate::dialogs_move::moving(&app), Some(path));
+    }
 }
 
 #[test]
-fn contribution_linked_paste_uses_the_pointer_and_pending_numeric_move() {
+fn contribution_linked_paste_uses_the_pointer_and_a_numeric_move() {
     use solidcore_record::Vec3;
     let file = ContributionPart::new();
     let mut h = crate::scenario::Harness::new();
@@ -384,28 +388,30 @@ fn contribution_linked_paste_uses_the_pointer_and_pending_numeric_move() {
     let undo = h.app.session.undo.len();
     assert!(super::paste(&mut h.app, Some(at)));
     h.frames(3);
-    let path = h.app.tree.occurrence_move.as_ref().unwrap().path.clone();
+    let path = crate::dialogs_move::moving(&h.app).expect("Move/Copy opens on the pasted component");
     let initial = solidcraft_engine::doc::apply_point(&h.app.session.occurrence_placement(&path).unwrap().world, Vec3::ZERO);
     assert!((initial - pointed).len() < 1e-5, "{initial:?}");
     assert_eq!(h.app.session.undo.len(), undo + 1);
     let camera = h.app.cam;
-    let field = h.call("ui.at", json!({"handle":"occurrence-move:distance:0"}));
-    h.call("ui.click", json!({"x":field["result"][0],"y":field["result"][1],"double":true}));
+    if let Some(crate::dialogs::Kind::Move { x, .. }) = h.app.dialog.as_mut().map(|d| &mut d.kind) {
+        *x = "12 mm".into();
+    }
     h.frames(2);
-    h.step(&json!({"key":"A","cmd":true})).unwrap();
-    h.step(&json!({"text":"12"})).unwrap();
-    h.step(&json!({"key":"Enter"})).unwrap();
-    h.frames(3);
+    h.step(&json!({"click": {"handle": "dialog:ok"}})).unwrap();
+    h.settle();
+    assert!(h.app.dialog.is_none());
     let moved = solidcraft_engine::doc::apply_point(&h.app.session.occurrence_placement(&path).unwrap().world, Vec3::ZERO);
-    assert!(moved.x > initial.x + 10., "numeric move must retain the pasted occurrence: {initial:?} -> {moved:?}");
+    assert!((moved.x - initial.x - 12.).abs() < 1e-5, "numeric move must retain the pasted occurrence: {initial:?} -> {moved:?}");
+    assert!(h.app.session.pending_moves.is_empty(), "Capture All Positions is ticked at first");
     assert_eq!(h.app.cam, camera, "numeric editing does not move the camera");
-    let movement = h.app.tree.occurrence_move.as_ref().unwrap();
-    assert!((movement.translate[0] - (moved.x - initial.x)).abs() < 1e-5);
-    assert_eq!(h.app.session.undo.len(), undo + 1, "pending movement does not split the initial paste undo");
-    h.app.run("edit.undo", json!({})).unwrap();
+    for _ in 0..3 {
+        if h.app.session.doc.links.is_empty() {
+            break;
+        }
+        h.app.run("edit.undo", json!({})).unwrap();
+    }
     h.frames(3);
-    assert!(h.app.session.doc.links.is_empty());
-    assert!(h.app.tree.occurrence_move.is_none());
+    assert!(h.app.session.doc.links.is_empty(), "undo takes back the move and then the paste");
     crate::documents::switch(&mut h.app, 0);
     assert_eq!(h.app.session.doc.features.len(), 1, "source geometry stays untouched");
 }
@@ -858,6 +864,84 @@ fn paste_new_is_off_while_a_component_is_cut() {
     let find = |id: &str| menu.iter().find(|i| i.id == id).unwrap();
     assert!(find("ui.paste").enabled);
     assert!(!find("ui.pasteNew").enabled);
+}
+
+/// Paste New from a parent component's menu keeps face-attached sketches in a copied child.
+#[test]
+fn paste_new_into_selected_parent_keeps_child_face_attachment() {
+    use crate::context_menu::{Target, items, run_item};
+
+    let mut app = plain_app();
+    let parent = app.run("component.create", json!({"name":"Component1"})).unwrap();
+    let parent_component = parent["component"].as_u64().unwrap();
+    let parent_occurrence = parent["occurrence"].as_u64().unwrap();
+    let child = app.run("component.create", json!({"name":"Component2"})).unwrap();
+    let child_component = child["component"].as_u64().unwrap();
+    let child_occurrence = child["occurrence"].as_u64().unwrap();
+
+    app.run("sketch.create", json!({"plane":"XY","name":"Sketch1"})).unwrap();
+    app.run("sketch.circle.center", json!({"center":[0,0],"diameter":32})).unwrap();
+    app.run("sketch.finish", json!({})).unwrap();
+    app.run("solid.extrude", json!({"sketch":"Sketch1","distance":10,"operation":"new_body","body_name":"Disc"})).unwrap();
+    let source_path = vec![parent_occurrence, child_occurrence];
+    let placed = app.session.placed_document();
+    let body_name = placed.body_frames_with_source(&app.session.model.state()).into_iter().find(|(_, _, _, path, _)| path == &source_path).unwrap().0;
+    let world = app.session.world_state().unwrap();
+    let body = world.body(&body_name).unwrap();
+    let face = body
+        .body
+        .faces(0.01)
+        .unwrap()
+        .into_iter()
+        .find(|face| body.body.face_plane(face.index).is_some_and(|plane| plane.normal().dot(solidcore_record::Vec3::Z) > 0.999))
+        .unwrap();
+    let uncut_volume = app.run("inspect.measure", json!({"bodies":[body_name]})).unwrap()["total"]["volume_mm3"].as_f64().unwrap();
+    app.run("sketch.create", json!({"plane":{"body":body_name,"face":face.centroid,"index":face.index,"path":source_path},"name":"Sketch2"}))
+        .unwrap();
+    app.run("sketch.circle.center", json!({"center":[0,0],"diameter":16})).unwrap();
+    app.run("sketch.finish", json!({})).unwrap();
+    app.run("solid.extrude", json!({"sketch":"Sketch2","distance":-10,"operation":"cut","targets":["Disc"]})).unwrap();
+    let cut_volume = app.run("inspect.measure", json!({"bodies":[body_name]})).unwrap()["total"]["volume_mm3"].as_f64().unwrap();
+    assert!(cut_volume < uncut_volume, "the face-attached sketch must cut Disc: {cut_volume} >= {uncut_volume}");
+
+    select(&mut app, json!({"type":"occurrence","path":source_path}));
+    assert!(super::copy(&mut app));
+    assert!(super::paste_into(&mut app, None, false, Some((parent_component, vec![parent_occurrence]))));
+    select(&mut app, json!({"type":"occurrence","path":[parent_occurrence,child_occurrence]}));
+    assert!(super::copy(&mut app));
+    select(&mut app, json!({"type":"occurrence","path":[parent_occurrence]}));
+    assert_eq!(app.session.active_component, child_component);
+    let paste_new = items(&app, &Target::Occurrence { path: vec![parent_occurrence] }).into_iter().find(|item| item.id == "ui.pasteNew").unwrap();
+    assert!(paste_new.enabled);
+    run_item(&mut app, &paste_new, egui::Pos2::ZERO);
+    assert!(!app.status.as_ref().is_some_and(|(_, _, error)| *error), "{:?}", app.status);
+
+    let [Sel::Occurrence { path: copied_path }] = app.session.selection.as_slice() else { panic!("Paste New did not select one occurrence") };
+    assert_eq!(copied_path.first(), Some(&parent_occurrence));
+    let copied_occurrence = *copied_path.last().unwrap();
+    let copied_component = app.session.doc.occurrences.iter().find(|occurrence| occurrence.id == copied_occurrence).unwrap().component;
+    let copied_body = app
+        .session
+        .placed_document()
+        .body_frames_with_source(&app.session.model.state())
+        .into_iter()
+        .find(|(_, _, _, body_path, _)| body_path == copied_path)
+        .unwrap()
+        .0;
+    let copied_anchor = app
+        .session
+        .doc
+        .features
+        .iter()
+        .find_map(|feature| {
+            if feature.component != copied_component {
+                return None;
+            }
+            let FeatureKind::Sketch { plane: PlaneRef::Face { anchor: Some(anchor), .. }, .. } = &feature.kind else { return None };
+            Some(anchor)
+        })
+        .expect("copied Sketch2 has no face anchor");
+    assert_eq!(copied_anchor.target.body, copied_body);
 }
 
 /// A body of a component's second placement is that component's body seen there: it isn't cut on

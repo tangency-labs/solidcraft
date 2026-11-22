@@ -1,0 +1,143 @@
+{
+  "area": "fillets",
+  "bodies": {
+    "b17": {
+      "keeping_splines": false,
+      "trusted": true
+    }
+  },
+  "calls": [
+    {
+      "inputs": [
+        "b17"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b18"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b18"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b19"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b19"
+      ],
+      "op": "tagged",
+      "outputs": [
+        "b20"
+      ],
+      "params": {
+        "operand": 0
+      }
+    },
+    {
+      "error": "SMLib failed (status 1001)",
+      "inputs": [
+        "b20"
+      ],
+      "op": "blend_dropping",
+      "params": {
+        "edges": {
+          "kind": "edge",
+          "picked": [
+            {
+              "at": [
+                [
+                  16.093476939431238,
+                  -14.999999999999838,
+                  10.0
+                ],
+                [
+                  100.0,
+                  -15.0,
+                  10.0
+                ]
+              ],
+              "index": 7
+            }
+          ],
+          "points": [
+            [
+              58.04673846971562,
+              -14.999999999999918,
+              10.0
+            ]
+          ],
+          "tolerance": 6.347528024625401
+        },
+        "kind": "round",
+        "sizes": [
+          2.0
+        ]
+      }
+    }
+  ],
+  "case": "1207-fillet-bar-top-edge-after-boss-arc-round-partial-chain",
+  "expected": {
+    "body_count": 1,
+    "continuity": {
+      "order": "g1"
+    },
+    "method": "bar and boss as 1207-fillet-bar-top-edge-and-boss-arc-together; the base arc rounded r2 first (V0 + 28.9190), running out over the front face where its section is a curve on that face tangent to the bar's top edge; then that edge rounded r2 alone (tangent chain off): it ends where the section curve goes on tangentially, so a valid body or a refusal saying so (the edge continues tangentially)",
+    "outcome": "solid_or_refused",
+    "refusal": "continues tangentially",
+    "source": "invariants",
+    "sources": [
+      "tangency-labs/solidcraft#1207"
+    ],
+    "what": "after the boss's partial base arc is rounded r2, the bar's top edge that runs into the round rounded r2 without its tangent chain"
+  },
+  "expressible": false,
+  "operation_expressible": true,
+  "outcome": {
+    "engine_error": "step 4 (solid.fillet): SMLib fillet: operation: SMLib failed (status 1001) (a picked edge continues tangentially into the edge at (14.260, -15.000, 10.483), which is not blended with it, and the blend cannot end there: with tangent propagation on, tangent_chain: true, its tangent chain is blended as one)",
+    "kernel_error": "SMLib failed (status 1001)",
+    "ran": false
+  },
+  "records": "1207-fillet-bar-top-edge-after-boss-arc-round-partial-chain.bodies.json.gz",
+  "result": [],
+  "rig": {
+    "error": null,
+    "known_failing": null,
+    "measured": null,
+    "refused_with": "step 4 (solid.fillet): SMLib fillet: operation: SMLib failed (status 1001) (a picked edge continues tangentially into the edge at (14.260, -15.000, 10.483), which is not blended with it, and the blend cannot end there: with tangent propagation on, tangent_chain: true, its tangent chain is blended as one)",
+    "status": "pass"
+  },
+  "sources": [
+    "tangency-labs/solidcraft#1207"
+  ],
+  "traced_ops": [
+    "extrude",
+    "extrude",
+    "copy",
+    "copy",
+    "copy",
+    "copy",
+    "tagged",
+    "tagged",
+    "boolean",
+    "copy",
+    "copy",
+    "tagged",
+    "blend_dropping",
+    "copy",
+    "copy",
+    "tagged",
+    "blend_dropping"
+  ],
+  "ungraded": [
+    "continuity: SolidCraft computes it",
+    "refusal \"continues tangentially\": SolidCraft's wording of the kernel's error"
+  ],
+  "what": "after the boss's partial base arc is rounded r2, the bar's top edge that runs into the round rounded r2 without its tangent chain",
+  "why_not": []
+}

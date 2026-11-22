@@ -63,18 +63,6 @@ fn the_headless_grid_fades_out_with_the_distance() {
     assert!(farthest < cut, "the grid fades out at {farthest}, short of the cut at {cut}");
 }
 
-/// #4214: the grid's half size, the one the picture and the window share: the grid reaches as far
-/// on its plane as the view is wide, and further as the plane is seen at a slant.
-#[test]
-fn the_grid_reaches_further_as_its_plane_is_seen_at_a_slant() {
-    let major = grid_step(40.0).1;
-    let flat = grid_ext(40.0, major, 1.0);
-    assert_eq!(flat, (40.0 * 3.0 / major).ceil() * major, "seen face on, the grid reaches as far as the view is wide");
-    assert!(grid_ext(40.0, major, 0.5) > flat, "seen at a slant, the grid reaches further on its plane");
-    // A plane seen edge-on keeps a usable size.
-    assert!(grid_ext(40.0, major, 0.0).is_finite());
-}
-
 /// #9570: zooming through a switch of the grid's spacing used to swap the whole grid at once, so
 /// scrolling made it pop over and over. The drawn grid now cross-fades: zoomed in small steps
 /// through a switch, no line's strength jumps from one step to the next, while away from a
@@ -222,7 +210,7 @@ const MARK: Palette = Palette {
     cap: Rgb(55, 56, 57),
     hatch: [Rgb(61, 62, 63), Rgb(64, 65, 66)],
     isocurve: Rgb(58, 59, 60),
-    analysis: solidcraft_render::AnalysisColors {
+    analysis: solidcraft_color::AnalysisColors {
         draft: [[0.1, 0.2, 0.3], [0.4, 0.5, 0.6], [0.7, 0.8, 0.9]],
         access: [[0.11, 0.12, 0.13], [0.14, 0.15, 0.16]],
         curvature: [[0.17, 0.18, 0.19], [0.21, 0.22, 0.23], [0.24, 0.25, 0.26]],
@@ -253,7 +241,7 @@ fn the_default_palette_is_the_colour_table() {
         (colors::SKETCH_PROJECTED, colors::SKETCH_LOST, colors::SKETCH_CONSTRUCTION, colors::SKETCH_CENTERLINE)
     );
     assert_eq!((p.axes, p.cap, p.isocurve), ([colors::AXIS_X, colors::AXIS_Y, colors::AXIS_Z], colors::SECTION_CAP, colors::ISOCURVE));
-    assert_eq!(p.analysis, solidcraft_render::AnalysisColors::DEFAULT);
+    assert_eq!(p.analysis, solidcraft_color::AnalysisColors::DEFAULT);
 }
 
 #[test]
@@ -336,14 +324,14 @@ fn every_scene_colour_comes_from_its_palette_and_appearances_stay() {
     // Isocurve Analysis on Plain's side face.
     s.execute("inspect.isocurve", &json!({"faces": [[45, 0, 5]], "count": 2})).unwrap();
     s.selection = vec![Sel::Body { name: "Picked".into() }];
-    s.section = Some((Vec3::new(0., 0., 5.), Vec3::Z));
+    s.section = vec![crate::SectionPlane { id: 1, origin: Vec3::new(0., 0., 5.), normal: Vec3::Z }];
     let cam = home_camera(&s).unwrap();
     let names: Vec<String> = s.world_state().unwrap().bodies.iter().filter(|b| s.body_visible(&b.name)).map(|b| b.name.clone()).collect();
     let mesh = |sc: &Scene, name: &str| {
         names.iter().position(|n| n == name).and_then(|i| sc.meshes.get(i)).map(|m| (m.color, m.face_colors.clone())).unwrap()
     };
 
-    let marked = scene_with_palette(&s, &cam, s.section, world_curve_parts, &MARK).unwrap();
+    let marked = scene_with_palette(&s, &cam, &s.section, world_curve_parts, &MARK).unwrap();
     assert_eq!((marked.background, marked.cap), (Some(MARK.background), Some(MARK.cap)));
     let allowed = [
         MARK.grid,
@@ -376,11 +364,11 @@ fn every_scene_colour_comes_from_its_palette_and_appearances_stay() {
     assert!(!faces.is_empty() && faces.iter().all(|(_, c)| *c == Rgb(0, 255, 0)), "face colours are the design's: {faces:?}");
 
     // The default palette is the scene everyone else gets, line for line.
-    let default = scene_with_palette(&s, &cam, s.section, world_curve_parts, &Palette::DEFAULT).unwrap();
+    let default = scene_with_palette(&s, &cam, &s.section, world_curve_parts, &Palette::DEFAULT).unwrap();
     let plain_scene = scene(&s, &cam).unwrap();
     assert_eq!(
-        (default.background, default.cap, default.clip, default.radius),
-        (plain_scene.background, plain_scene.cap, plain_scene.clip, plain_scene.radius)
+        (default.background, default.cap, &default.clip, default.radius),
+        (plain_scene.background, plain_scene.cap, &plain_scene.clip, plain_scene.radius)
     );
     assert_eq!((default.lines.len(), default.grid.len()), (plain_scene.lines.len(), plain_scene.grid.len()));
     for (a, b) in default.lines.iter().zip(&plain_scene.lines).chain(default.grid.iter().zip(&plain_scene.grid)) {

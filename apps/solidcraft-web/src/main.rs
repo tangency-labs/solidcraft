@@ -19,10 +19,23 @@ mod easyprint;
 mod files;
 #[cfg(target_arch = "wasm32")]
 mod install;
+#[cfg(any(target_arch = "wasm32", test))]
+mod keep;
 #[cfg(target_arch = "wasm32")]
 mod linked;
 #[cfg(any(target_arch = "wasm32", test))]
+mod mouse_buttons;
+#[cfg(any(target_arch = "wasm32", test))]
 mod space_mouse;
+#[cfg(all(target_arch = "wasm32", feature = "usage-stats"))]
+mod usage;
+#[cfg(target_arch = "wasm32")]
+mod wheel_samples;
+
+/// The folder the page serves its fonts from: index.html copies each there, and a drawing's text
+/// fetches its fonts from it (#4890).
+#[cfg(any(target_arch = "wasm32", test))]
+const FONTS: &str = "fonts";
 
 /// The browser switches tabs with Ctrl+Tab and Ctrl+Shift+Tab, so the page leaves those keys to
 /// it (#5227); plain Tab and Shift+Tab still move between the app's fields. (Ctrl+PageUp and
@@ -78,6 +91,16 @@ impl Launch {
         }
         url.to_string()
     }
+}
+
+/// A design just opened from a link is a clean copy under the link's name: its saved state is
+/// the loaded state, so the tab shows no unsaved mark and the autosave (kept only while the
+/// design is dirty) records nothing until the first edit (#17519).
+#[cfg(any(target_arch = "wasm32", test))]
+fn adopt_linked_design(session: &mut solidcraft_engine::Session, name: String) {
+    session.path = None;
+    session.doc_mut().name = name;
+    session.mark_saved();
 }
 
 #[cfg(any(target_arch = "wasm32", test))]
@@ -184,12 +207,14 @@ mod web {
     use crate::api::Api;
     use crate::disk::{self, SaveTarget};
     use crate::files::{self, Files, Intent};
+    use crate::keep;
     use crate::space_mouse::SpaceMouse;
 
     const CANVAS_ID: &str = "solidcraft_canvas";
     const LOADING_ID: &str = "solidcraft_loading";
-    /// A 32-bit float depth buffer (no stencil): WebGPU and WebGL2 both have it, and the viewport
-    /// draws it with reversed depth, whose precision follows the distance from the eye (#1434).
+    /// The viewport scene's depth buffer, a 32-bit float one (no stencil): WebGPU and WebGL2 both
+    /// have it, and the viewport draws it with reversed depth, whose precision follows the
+    /// distance from the eye (#1434). egui's own pass has none: the scene is drawn offscreen.
     const DEPTH_BITS: u8 = 32;
 
     /// The loading animation (assets/styles/web/loading-logo.svg) settles into the finished mark
@@ -243,7 +268,9 @@ mod web {
     }
 
     /// The browser's "leave site? changes you made may not be saved" prompt while a design has
-    /// unsaved changes (the page can't show its own dialog when it is being closed).
+    /// unsaved changes (the page can't show its own dialog when it is being closed). With "keep
+    /// unsaved work in this browser" on and "still ask" off, there is nothing to ask once every
+    /// unsaved design's copy is current (`keep::asks_before_unload`, #10220).
     fn ask_before_unload(window: &web_sys::Window) {
         let on_unload = wasm_bindgen::closure::Closure::<dyn FnMut(web_sys::BeforeUnloadEvent)>::new(|e: web_sys::BeforeUnloadEvent| {
             if UNSAVED.with(std::cell::Cell::get) {
@@ -254,6 +281,50 @@ mod web {
         let _ = window.add_event_listener_with_callback("beforeunload", on_unload.as_ref().unchecked_ref());
         // The listener lives as long as the page.
         on_unload.forget();
+    }
+
+    /// With "keep unsaved work in this browser" on, the page brings every unsaved design's copy up
+    /// to date when it is hidden or goes (`pagehide`, `visibilitychange`): the browser may not
+    /// wait for that write, so the copies are written shortly after each change as well
+    /// (`Shell::keep_tick`, #10220).
+    fn keep_when_hidden(window: &web_sys::Window, runner: &eframe::WebRunner) {
+        let keep_now = {
+            let runner = runner.clone();
+            move || {
+                if let Some(mut shell) = runner.app_mut::<Shell>() {
+                    shell.keep_tick(None, true);
+                }
+            }
+        };
+        let on_hide = {
+            let keep_now = keep_now.clone();
+            wasm_bindgen::closure::Closure::<dyn FnMut(web_sys::Event)>::new(move |_: web_sys::Event| keep_now())
+        };
+        let on_visibility = wasm_bindgen::closure::Closure::<dyn FnMut(web_sys::Event)>::new(move |_: web_sys::Event| {
+            let hidden = web_sys::window()
+                .and_then(|w| w.document())
+                .and_then(|d| js_sys::Reflect::get(&d, &"visibilityState".into()).ok())
+                .and_then(|v| v.as_string())
+                .is_some_and(|v| v == "hidden");
+            if hidden {
+                keep_now();
+            }
+        });
+        let _ = window.add_event_listener_with_callback("pagehide", on_hide.as_ref().unchecked_ref());
+        if let Some(document) = window.document() {
+            let _ = document.add_event_listener_with_callback("visibilitychange", on_visibility.as_ref().unchecked_ref());
+        }
+        // The listeners live as long as the page.
+        on_hide.forget();
+        on_visibility.forget();
+    }
+
+    /// One open design followed for its kept copy: its revision, when that last changed, and since
+    /// when its copy has lacked a change (`None`: current, or being written).
+    struct Track {
+        revision: u64,
+        last_change: f64,
+        first_unwritten: Option<f64>,
     }
 
     /// eframe cancels the browser's action for every Tab it gets, so the browser couldn't switch
@@ -291,8 +362,11 @@ mod web {
     const JAPANESE_FONT_PATH: &str = "./fonts/BIZUDPGothic-Regular.ttf";
     const CHINESE_SC_FONT_PATH: &str = "./fonts/CraftUI-SC.otf";
     const CHINESE_TC_FONT_PATH: &str = "./fonts/CraftUI-TC.otf";
+    const KOREAN_FONT_PATH: &str = "./fonts/CraftUI-KR.otf";
 
     type FontLoadResult = Rc<std::cell::RefCell<Option<Result<(String, Vec<u8>), String>>>>;
+    /// The fetches of drawing fonts that have finished, for the next frame to hand on.
+    type DrawingFontsDone = Rc<std::cell::RefCell<Vec<(solidcraft_engine::sketch::fallback::WebFont, Result<Vec<u8>, String>)>>>;
 
     struct Shell {
         app: SolveApp,
@@ -311,7 +385,7 @@ mod web {
         /// The start page's recent designs were filled from the stored ones.
         recents_synced: bool,
         /// On-demand script fonts: fetched only when a CJK language is selected.
-        font: solidcraft_ui_egui::fonts::CjkFontLoader,
+        font: solidcraft_ui_egui::ui_kit::type_face::CjkFontLoader,
         font_result: FontLoadResult,
         /// The fetched Japanese font's bytes: kept so a language change can re-order the fallbacks.
         cjk_bytes: Option<Vec<u8>>,
@@ -319,26 +393,62 @@ mod web {
         chinese_bytes: Option<Vec<u8>>,
         /// Which Chinese face `chinese_bytes` is: `"zh"` or `"zh-TW"`.
         chinese_kind: Option<&'static str>,
-        /// Kind requested by the in-flight fetch (`"ja"`, `"zh"`, or `"zh-TW"`).
+        /// The fetched Korean font's bytes: kept so a language change can re-order the fallbacks.
+        korean_bytes: Option<Vec<u8>>,
+        /// Kind requested by the in-flight fetch (`"ja"`, `"zh"`, `"zh-TW"` or `"ko"`).
         font_fetch_kind: Option<&'static str>,
         /// The language the fonts were last set up for (a CJK UI leads with the CJK face).
         font_language: String,
+        /// The fonts a drawing's text asked for, other than Japanese, each fetched once a session.
+        drawing_fonts_asked: std::collections::HashSet<solidcraft_engine::sketch::fallback::WebFont>,
+        drawing_fonts_done: DrawingFontsDone,
         space_mouse: SpaceMouse,
         wheel_gestures: solidcraft_ui_egui::WebWheelGestures,
+        /// What the browser said about each wheel event since the last frame (`wheel_samples`).
+        wheel_samples: Rc<std::cell::RefCell<Vec<solidcraft_ui_egui::wheel_hint::WheelSample>>>,
+        /// The mouse buttons the browser holds, which egui's are kept to (`mouse_buttons`).
+        mouse_buttons: Rc<std::cell::RefCell<crate::mouse_buttons::Tracker>>,
         /// The settings this tab wrote or loaded last, and those another tab wrote since (#8644).
         prefs_writer: crate::PrefsWriter,
+        prefs_warning: Option<String>,
         other_tab_prefs: PrefsInbox,
+        /// The open designs followed for their kept copy, by `Session::uid` (#10220).
+        keep_track: std::collections::HashMap<u64, Track>,
+        /// Every unsaved design's kept copy is current (and the preference is on).
+        all_kept: bool,
+        /// A kept copy or recovered work being opened, in stages with progress and Cancel
+        /// (#10198): the answer to come and what follows it ([`Shell::restored`]).
+        restoring: Option<(std::sync::mpsc::Receiver<serde_json::Value>, keep::AfterOpen)>,
     }
 
     impl Shell {
         /// The settings as they are kept between visits: with the user's own language, not a
         /// session-only English fallback.
-        fn persisted_prefs(&mut self) -> String {
+        fn persisted_prefs(&mut self, previous: impl FnOnce() -> Result<Option<String>, String>) -> Option<String> {
             let saved = self.font.persisted_language(&self.app.preferences.language).to_owned();
             let live = std::mem::replace(&mut self.app.preferences.language, saved);
-            let prefs = self.app.prefs();
+            let (prefs, warning) = match self.app.try_prefs() {
+                Ok(prefs) => (Some(prefs), None),
+                Err(reason) => match previous().and_then(|previous| self.app.prefs_with_stored_panel_layout(previous.as_deref())) {
+                    Ok(prefs) => (Some(prefs), Some(format!("Panel layout changes were not saved: {reason}"))),
+                    Err(error) => (None, Some(format!("Settings were not written: {error}; panel layout: {reason}"))),
+                },
+            };
+            if self.prefs_warning != warning {
+                if let Some(warning) = &warning {
+                    log::warn!("{warning}");
+                }
+                self.prefs_warning = warning;
+            }
             self.app.preferences.language = live;
             prefs
+        }
+
+        fn stored_prefs() -> Result<Option<String>, String> {
+            let storage = web_sys::window()
+                .and_then(|window| window.local_storage().ok().flatten())
+                .ok_or_else(|| "browser settings storage is unavailable".to_owned())?;
+            storage.get_item(&crate::prefs_key()).map_err(|_| "browser settings could not be read".to_owned())
         }
 
         /// A settings change goes to the browser's storage in the frame it is made, and from
@@ -348,7 +458,7 @@ mod web {
             if !self.launch.persists() || ctx.input(|i| i.events.is_empty()) {
                 return;
             }
-            let prefs = self.persisted_prefs();
+            let Some(prefs) = self.persisted_prefs(Self::stored_prefs) else { return };
             let Some(prefs) = self.prefs_writer.take(prefs) else { return };
             let stored = web_sys::window().and_then(|w| w.local_storage().ok().flatten()).map(|s| s.set_item(&crate::prefs_key(), &prefs));
             if !matches!(stored, Some(Ok(()))) {
@@ -362,8 +472,9 @@ mod web {
         fn load_other_tabs_prefs(&mut self) {
             let Some(prefs) = self.other_tab_prefs.take() else { return };
             self.app.load_prefs(&prefs);
-            let held = self.persisted_prefs();
-            self.prefs_writer.loaded(held);
+            if let Some(held) = self.persisted_prefs(Self::stored_prefs) {
+                self.prefs_writer.loaded(held);
+            }
         }
 
         /// Files from the computer, writes to store, messages and the autosave.
@@ -442,8 +553,14 @@ mod web {
                 self.sync_recents();
             }
             let now = ctx.input(|i| i.time);
+            // With "keep unsaved work in this browser" on, each design's own copy takes over from
+            // the single autosave (#10220).
+            if self.app.preferences.keep_unsaved_in_browser && self.autosaved.is_some() {
+                files::autosave(&self.files, None);
+                self.autosaved = None;
+            }
             // Unsaved work is kept (at most every AUTOSAVE_S); saved work needs no autosave.
-            if self.files.ready.get() && self.files.recovery.borrow().is_none() {
+            if self.files.ready.get() && self.files.recovery.borrow().is_none() && !self.app.preferences.keep_unsaved_in_browser {
                 let s = &self.app.session;
                 let changed = s.is_dirty() && self.autosaved != Some(s.revision);
                 let wait = AUTOSAVE_S - (now - self.autosaved_at);
@@ -461,6 +578,226 @@ mod web {
             }
             if !self.files.ready.get() || !self.files.incoming.borrow().is_empty() {
                 ctx.request_repaint_after(std::time::Duration::from_millis(100));
+            }
+            self.all_kept = self.keep_tick(Some(ctx), false);
+        }
+
+        /// Keep each open design's unsaved changes in the browser, when the preference asks for
+        /// it: a design's copy is written once it has been still a moment (`keep::due`), or at
+        /// once with `now` (the page is being hidden); a copy whose design is saved or closed, or
+        /// with the preference off, goes. Answers whether every unsaved design's copy is current.
+        fn keep_tick(&mut self, ctx: Option<&egui::Context>, now: bool) -> bool {
+            if !self.launch.persists() || !self.files.ready.get() {
+                return false;
+            }
+            let Shell { app, files, keep_track, .. } = self;
+            let on = app.preferences.keep_unsaved_in_browser;
+            let time = js_sys::Date::now();
+            let page = files.keep_page.borrow().clone();
+            let mut wanted = std::collections::HashSet::new();
+            let mut all_kept = true;
+            let mut wake: Option<f64> = None;
+            let mut error = None;
+            let mut soon = |ms: f64| wake = Some(wake.map_or(ms, |w: f64| w.min(ms)));
+            if on {
+                for s in solidcraft_ui_egui::documents::open_sessions(app).into_iter().filter(|s| s.is_dirty()) {
+                    let id = keep::entry_id(&page, s.uid);
+                    wanted.insert(s.uid);
+                    let t = keep_track.entry(s.uid).or_insert(Track { revision: s.revision, last_change: time, first_unwritten: None });
+                    if t.revision != s.revision {
+                        t.revision = s.revision;
+                        t.last_change = time;
+                    }
+                    if files.kept.borrow().get(&id).copied().flatten() == Some(s.revision) {
+                        t.first_unwritten = None;
+                        continue;
+                    }
+                    all_kept = false;
+                    if files.keeping.borrow().contains(&id) {
+                        soon(100.0);
+                        continue;
+                    }
+                    let first = *t.first_unwritten.get_or_insert(time);
+                    let failed = files.kept_failed.borrow().get(&id).copied();
+                    if !keep::may_write(time, failed) {
+                        // The last write failed: try again after a while.
+                        soon(keep::RETRY_MS);
+                        continue;
+                    }
+                    if now || keep::due(time, first, t.last_change) {
+                        match solidcraft_engine::io::write_design_container(&s.design()) {
+                            Ok(bytes) => {
+                                let entry = keep::Entry { id, name: s.doc.name.clone(), path: s.path.clone(), changed_at: t.last_change };
+                                files::write_kept(files, &entry, bytes, s.revision);
+                                t.first_unwritten = None;
+                            }
+                            Err(e) => {
+                                files.kept_failed.borrow_mut().insert(id, time);
+                                error = Some(format!("keeping unsaved work in this browser: {e}"));
+                            }
+                        }
+                        soon(100.0);
+                    } else {
+                        soon((keep::QUIET_MS - (time - t.last_change)).min(keep::MAX_WAIT_MS - (time - first)).max(16.0));
+                    }
+                }
+            }
+            // This page's copies no design needs any more: saved, closed, or the preference off.
+            let stale: Vec<String> = files
+                .kept
+                .borrow()
+                .keys()
+                .filter(|id| keep::page_of(id) == Some(page.as_str()))
+                .filter(|id| !wanted.iter().any(|uid| keep::entry_id(&page, *uid) == **id))
+                .cloned()
+                .collect();
+            for id in stale {
+                files::remove_kept(files, &id);
+                soon(100.0);
+            }
+            keep_track.retain(|uid, _| wanted.contains(uid));
+            if let Some(e) = error {
+                app.set_status(e, true);
+            }
+            if let (Some(ctx), Some(ms)) = (ctx, wake) {
+                ctx.request_repaint_after(std::time::Duration::from_secs_f64(ms / 1000.0));
+            }
+            on && all_kept
+        }
+
+        /// Offer the copies an earlier visit kept (#10220): "Restore unsaved design: <name>,
+        /// changed <time>?", one window for all of them, each with Restore, Open saved version
+        /// (when it has a file) and Discard.
+        fn keep_prompt(&mut self, ctx: &egui::Context) {
+            let offered = self.files.keep_offered.borrow().clone();
+            if offered.is_empty() || !self.files.ready.get() || self.restoring.is_some() {
+                return;
+            }
+            let now = (js_sys::Date::now() / 1000.0) as u64;
+            let rows: Vec<_> = offered
+                .iter()
+                .map(|e| solidcraft_ui_egui::recovery_ui::BrowserCopy {
+                    name: &e.name,
+                    when: solidcraft_ui_egui::recovery_ui::ago_between(now, (e.changed_at / 1000.0) as u64),
+                    open_saved: keep::answers(e, self.saved_exists(e)).contains(&keep::Answer::OpenSaved),
+                })
+                .collect();
+            let act = solidcraft_ui_egui::recovery_ui::browser_copies_window(ctx, &self.app.preferences.language, &rows);
+            let Some((index, answer)) = act else { return };
+            let Some(entry) = offered.get(index) else { return };
+            let answer = match answer {
+                solidcraft_ui_egui::recovery_ui::CopyAnswer::Restore => keep::Answer::Restore,
+                solidcraft_ui_egui::recovery_ui::CopyAnswer::OpenSaved => keep::Answer::OpenSaved,
+                solidcraft_ui_egui::recovery_ui::CopyAnswer::Discard => keep::Answer::Discard,
+            };
+            self.keep_answer(entry, answer);
+        }
+
+        /// Whether a kept copy's design file can still be opened: in the browser's storage, or a
+        /// file on the computer this browser remembers.
+        fn saved_exists(&self, e: &keep::Entry) -> bool {
+            e.path.as_deref().is_some_and(|p| vfs::exists(p) || disk::parse(p).is_some_and(|(id, _)| self.files.disk_known.borrow().contains(id)))
+        }
+
+        /// Act on an answer in the "Restore unsaved design?" window (`keep::plan`).
+        fn keep_answer(&mut self, entry: &keep::Entry, answer: keep::Answer) {
+            let Some(plan) = keep::plan(answer, entry, self.saved_exists(entry)) else { return };
+            if plan.open_copy {
+                let copy = match files::prepare_kept(&entry.id, entry.path.as_deref()) {
+                    Ok(copy) => copy,
+                    Err(error) => {
+                        self.app.set_status(error, true);
+                        return;
+                    }
+                };
+                // Finished in `restored` once it is in.
+                let after = keep::AfterOpen::KeptCopy {
+                    opened: copy.clone(),
+                    id: entry.id.clone(),
+                    path: entry.path.clone(),
+                    name: entry.name.clone(),
+                    drop: plan.drop_copy,
+                };
+                self.restore(&copy, after);
+                return;
+            }
+            if let Some(path) = &plan.open_saved {
+                if vfs::exists(path) {
+                    self.restore(path, keep::AfterOpen::KeptSaved { opened: path.clone(), id: entry.id.clone(), drop: plan.drop_copy });
+                    return;
+                } else {
+                    // A file on the computer: the browser asks for access again, in this click.
+                    // The copy goes once the file has opened, not before: if access is refused,
+                    // the picker is dismissed or the file is gone, it stays offered.
+                    let (files, id) = (self.files.clone(), entry.id.clone());
+                    disk::restore(
+                        &self.files,
+                        path,
+                        Some(Box::new(move || {
+                            files.keep_offered.borrow_mut().retain(|e| e.id != id);
+                            files::remove_kept(&files, &id);
+                        })),
+                    );
+                    return;
+                }
+            }
+            if plan.drop_copy {
+                self.drop_kept(&entry.id);
+            }
+        }
+
+        fn drop_kept(&self, id: &str) {
+            self.files.keep_offered.borrow_mut().retain(|e| e.id != id);
+            files::remove_kept(&self.files, id);
+        }
+
+        /// Open a kept copy, its saved design or recovered work as any design opens, a few
+        /// features a frame with progress and Cancel (#10198), so a large design doesn't freeze the
+        /// page; `after` follows once it is in ([`Self::restored`]).
+        fn restore(&mut self, path: &str, after: keep::AfterOpen) {
+            self.restoring = Some((self.app.open_path_answered(path), after));
+            self.restored();
+        }
+
+        /// What follows a restore that is in: the design gets back its file and name, and the
+        /// copy or the recovered work it came from goes. One that didn't open (refused or
+        /// cancelled; the status says why) stays offered.
+        fn restored(&mut self) {
+            let Some((rx, _)) = &self.restoring else { return };
+            let reply = match rx.try_recv() {
+                Ok(reply) => reply,
+                Err(std::sync::mpsc::TryRecvError::Empty) => return,
+                Err(std::sync::mpsc::TryRecvError::Disconnected) => serde_json::json!({"ok": false}),
+            };
+            let Some((_, after)) = self.restoring.take() else { return };
+            if !keep::opened(&reply, self.app.session.path.as_deref(), after.opened()) {
+                return;
+            }
+            match after {
+                keep::AfterOpen::KeptCopy { id, path, name, drop, .. } => {
+                    // It is its own design again (saving goes to its file), with its changes unsaved.
+                    self.app.session.path = path;
+                    self.app.session.doc_mut().name = name;
+                    self.app.session.mark_unsaved();
+                    self.app.home.open = false;
+                    if drop {
+                        self.drop_kept(&id);
+                    }
+                }
+                keep::AfterOpen::KeptSaved { id, drop, .. } => {
+                    if drop {
+                        self.drop_kept(&id);
+                    }
+                }
+                keep::AfterOpen::Recovery { path, name, .. } => {
+                    // It belongs to its own file again (saving goes there); it is unsaved.
+                    self.app.session.path = path;
+                    self.app.session.doc_mut().name = name;
+                    self.app.session.mark_unsaved();
+                    self.app.home.open = false;
+                    *self.files.recovery.borrow_mut() = None;
+                    files::autosave(&self.files, None);
+                }
             }
         }
 
@@ -498,7 +835,7 @@ mod web {
                 return;
             }
             let mut act: Option<(&'static str, String)> = None;
-            let closed = solidcraft_ui_egui::ui_kit::Window::new(egui::Id::new("sc_browser_files"), "folder", "Files in this browser")
+            let closed = solidcraft_ui_egui::ui_kit::Window::new(egui::Id::unique("sc_browser_files"), "folder", "Files in this browser")
                 // Room for long names; the kit still caps the window at the browser's width.
                 .cards(4.0)
                 .show_body(ctx, |ui| {
@@ -507,7 +844,7 @@ mod web {
                             files::pick_from_disk(&self.files, Intent::Open);
                         }
                         if ui_kit::button(ui, "Insert from computer…", ui_kit::Button::Normal)
-                            .backing_on_hover_text(solidcraft_ui_egui::i18n::tr("web.files.insert_drawings_hint"))
+                            .backing_on_hover_text(solidcraft_ui_text::tr("web.files.insert_drawings_hint"))
                             .clicked()
                         {
                             files::pick_from_disk(&self.files, Intent::Insert);
@@ -561,7 +898,7 @@ mod web {
                                         let design = solidcraft_engine::io::is_design_path(&e.name);
                                         if !design
                                             && ui_kit::button(ui, "Insert", ui_kit::Button::Small)
-                                                .backing_on_hover_text(solidcraft_ui_egui::i18n::tr("web.files.insert_stored_drawings_hint"))
+                                                .backing_on_hover_text(solidcraft_ui_text::tr("web.files.insert_stored_drawings_hint"))
                                                 .clicked()
                                         {
                                             act = Some(("insert", e.name.clone()));
@@ -600,7 +937,9 @@ mod web {
                     self.files.panel.set(false);
                 }
                 "insert" => {
-                    self.app.insert_path(&path);
+                    // The staged loader, as Open uses: a large STEP insert keeps the page drawing
+                    // (it asks an STL's or OBJ's units first, as the synchronous insert did).
+                    self.app.insert_path_async(&path);
                     self.files.panel.set(false);
                 }
                 "download" => match vfs::read(&path, solidcraft_engine::io::MAX_DESIGN_BYTES) {
@@ -645,10 +984,16 @@ mod web {
                                         *r = new.clone();
                                     }
                                 }
+                                if let Some(at) = self.app.home.opened_at.remove(&old) {
+                                    self.app.home.opened_at.insert(new.clone(), at);
+                                }
                                 // A forgotten design follows its new name.
                                 if self.app.home.forgotten.remove(&old) {
-                                    self.app.home.forgotten.insert(new);
+                                    self.app.home.forgotten.insert(new.clone());
                                 }
+                                // An open tab of that file keeps its path and, when the name came
+                                // from the file, the title that matches the file list (#11375).
+                                solidcraft_ui_egui::documents::follow_file_rename(&mut self.app, &old, &new);
                             }
                             Err(e) => self.app.set_status(e, true),
                         }
@@ -660,9 +1005,12 @@ mod web {
 
         /// Offer the autosave an earlier session left.
         fn recovery_prompt(&mut self, ctx: &egui::Context) {
+            if self.restoring.is_some() {
+                return;
+            }
             let Some((name, path)) = self.files.recovery.borrow().clone() else { return };
             let mut answer = None;
-            let _ = solidcraft_ui_egui::ui_kit::Window::new(egui::Id::new("sc_browser_recovery"), "restore", "Recover unsaved work?")
+            let _ = solidcraft_ui_egui::ui_kit::Window::new(egui::Id::unique("sc_browser_recovery"), "restore", "Recover unsaved work?")
                 .required()
                 .show_body(ctx, |ui| {
                     ui.label(format!("“{name}” had unsaved changes when this page last closed."));
@@ -684,26 +1032,29 @@ mod web {
                         return;
                     }
                 };
-                self.app.open_path(&recovery);
-                if self.app.session.path.as_deref() != Some(recovery.as_str()) {
-                    return;
-                }
-                // It belongs to its own file again (saving goes there); it is unsaved.
-                self.app.session.path = path;
-                self.app.session.doc_mut().name = name;
-                self.app.session.mark_unsaved();
-                self.app.home.open = false;
+                // Finished in `restored` once it is in; until then the prompt stays away.
+                let after = keep::AfterOpen::Recovery { opened: recovery.clone(), path, name };
+                self.restore(&recovery, after);
+                return;
             }
             *self.files.recovery.borrow_mut() = None;
             files::autosave(&self.files, None);
         }
 
+        /// Whether leaving the page asks through the browser's own box (`keep::asks_before_unload`).
+        fn asks_before_unload(&self) -> bool {
+            let any = solidcraft_ui_egui::documents::any_dirty(&self.app);
+            let prefs = &self.app.preferences;
+            keep::asks_before_unload(self.launch.persists(), prefs.keep_unsaved_in_browser, prefs.keep_unsaved_also_asks, any, self.all_kept)
+        }
+
         /// Whether the shell already has the on-demand face the live language needs.
         fn script_font_ready(&self) -> bool {
-            match solidcraft_ui_egui::fonts::web_script_font_kind(solidcraft_ui_egui::i18n::effective_language(&self.app.preferences.language)) {
+            match solidcraft_ui_egui::fonts::web_script_font_kind(solidcraft_ui_text::effective_language(&self.app.preferences.language)) {
                 Some("zh") => self.chinese_bytes.is_some() && self.chinese_kind == Some("zh"),
                 Some("zh-TW") => self.chinese_bytes.is_some() && self.chinese_kind == Some("zh-TW"),
                 Some("ja") => self.cjk_bytes.is_some(),
+                Some("ko") => self.korean_bytes.is_some(),
                 _ => true,
             }
         }
@@ -725,7 +1076,14 @@ mod web {
                                 self.chinese_bytes = Some(bytes);
                                 self.chinese_kind = Some("zh-TW");
                             }
+                            Some("ko") => {
+                                self.korean_bytes = Some(bytes);
+                            }
                             _ => {
+                                solidcraft_engine::sketch::fallback::provide_web_font(
+                                    solidcraft_engine::sketch::fallback::WebFont::Japanese,
+                                    bytes.clone(),
+                                );
                                 self.cjk_bytes = Some(bytes);
                             }
                         }
@@ -736,14 +1094,18 @@ mod web {
                         let path = match kind {
                             Some("zh") => CHINESE_SC_FONT_PATH,
                             Some("zh-TW") => CHINESE_TC_FONT_PATH,
+                            Some("ko") => KOREAN_FONT_PATH,
                             _ => JAPANESE_FONT_PATH,
                         };
                         log::warn!("failed to fetch script font from {path}: {err}");
+                        if !matches!(kind, Some("zh" | "zh-TW")) {
+                            solidcraft_engine::sketch::fallback::web_font_failed(solidcraft_engine::sketch::fallback::WebFont::Japanese);
+                        }
                         false
                     }
                 };
-                let effective = solidcraft_ui_egui::i18n::effective_language(&self.app.preferences.language);
-                if !installed && solidcraft_ui_egui::fonts::needs_cjk_font(effective) {
+                let effective = solidcraft_ui_text::effective_language(&self.app.preferences.language);
+                if !installed && solidcraft_ui_egui::ui_kit::type_face::needs_cjk_font(effective) {
                     log::warn!("script font unavailable; showing English for this session");
                 }
                 self.font.finished(installed, &mut self.app.preferences.language);
@@ -751,33 +1113,42 @@ mod web {
                 ctx.request_repaint();
             }
             let ready = self.script_font_ready();
-            let effective = solidcraft_ui_egui::i18n::effective_language(&self.app.preferences.language);
+            let effective = solidcraft_ui_text::effective_language(&self.app.preferences.language);
             if self.font.tick(&mut self.app.preferences.language, ready) {
                 self.fetch_font(ctx, solidcraft_ui_egui::fonts::web_script_font_kind(effective).unwrap_or("ja"));
             }
             // The CJK face leads only a CJK UI: its Cyrillic glyphs are full-width, so switching
             // to Ukrainian (or English) must put the Latin face back in front.
-            if solidcraft_ui_egui::i18n::effective_language(&self.app.preferences.language) != self.font_language {
+            if solidcraft_ui_text::effective_language(&self.app.preferences.language) != self.font_language {
                 self.apply_fonts(ctx);
             }
         }
 
         /// Set up the UI fonts for the live language, keeping fetched script fonts as fallbacks
-        /// (Chinese leads a Chinese UI; see [`solidcraft_ui_egui::fonts::install_web_script_fonts`]).
+        /// (Chinese leads a Chinese UI, Korean a Korean one; see
+        /// [`solidcraft_ui_egui::fonts::install_web_script_fonts`]).
         fn apply_fonts(&mut self, ctx: &egui::Context) {
-            let effective = solidcraft_ui_egui::i18n::effective_language(&self.app.preferences.language);
-            if self.cjk_bytes.is_none() && self.chinese_bytes.is_none() {
+            let effective = solidcraft_ui_text::effective_language(&self.app.preferences.language);
+            if self.cjk_bytes.is_none() && self.chinese_bytes.is_none() && self.korean_bytes.is_none() {
                 solidcraft_ui_egui::fonts::setup_fonts(ctx);
             } else {
-                solidcraft_ui_egui::fonts::install_web_script_fonts(ctx, self.cjk_bytes.clone(), self.chinese_bytes.clone(), effective);
+                solidcraft_ui_egui::fonts::install_web_script_fonts(
+                    ctx,
+                    self.cjk_bytes.clone(),
+                    self.chinese_bytes.clone(),
+                    self.korean_bytes.clone(),
+                    effective,
+                );
             }
             self.font_language = effective.to_owned();
         }
 
-        /// CJK text on screen with no Japanese font yet (an English UI showing a Japanese name):
-        /// fetch the Japanese font, so the text does not stay tofu (#720).
+        /// CJK text on screen with no Japanese font yet (an English UI showing a Japanese name), or a
+        /// drawing's text waiting for one: fetch the Japanese font, so the text does not stay tofu (#720).
         fn watch_text_for_font(&mut self, ctx: &egui::Context) {
-            if self.font.watching_text() && solidcraft_ui_egui::fonts::painted_cjk(ctx) && self.font.text_needs_font() {
+            let japanese = solidcraft_engine::sketch::fallback::web_fonts_wanted().contains(&solidcraft_engine::sketch::fallback::WebFont::Japanese);
+            let wanted = solidcraft_ui_egui::ui_kit::type_face::painted_cjk(ctx) || japanese;
+            if self.font.watching_text() && wanted && self.font.text_needs_font() {
                 self.fetch_font(ctx, "ja");
             }
         }
@@ -786,6 +1157,7 @@ mod web {
             let path = match kind {
                 "zh" => CHINESE_SC_FONT_PATH,
                 "zh-TW" => CHINESE_TC_FONT_PATH,
+                "ko" => KOREAN_FONT_PATH,
                 _ => JAPANESE_FONT_PATH,
             };
             self.font_fetch_kind = Some(kind);
@@ -798,25 +1170,61 @@ mod web {
                 ctx.request_repaint();
             });
         }
+
+        /// The other fonts a drawing's text waits for (Arabic, Chinese, Korean): each fetched once,
+        /// and handed to the text when it comes. Japanese comes with the interface's CJK font.
+        fn fetch_drawing_fonts(&mut self, ctx: &egui::Context) {
+            use solidcraft_engine::sketch::fallback::{self, WebFont};
+            for (font, res) in self.drawing_fonts_done.borrow_mut().drain(..) {
+                match res {
+                    Ok(bytes) => fallback::provide_web_font(font, bytes),
+                    Err(err) => {
+                        log::warn!("failed to fetch the drawing font {}/{}: {err}", crate::FONTS, font.file());
+                        fallback::web_font_failed(font);
+                    }
+                }
+                ctx.request_repaint();
+            }
+            for font in fallback::web_fonts_wanted() {
+                if font == WebFont::Japanese || !self.drawing_fonts_asked.insert(font) {
+                    continue;
+                }
+                let (done, ctx) = (self.drawing_fonts_done.clone(), ctx.clone());
+                wasm_bindgen_futures::spawn_local(async move {
+                    let res = fetch_font_bytes(&format!("./{}/{}", crate::FONTS, font.file())).await;
+                    done.borrow_mut().push((font, res));
+                    ctx.request_repaint();
+                });
+            }
+        }
     }
 
     impl eframe::App for Shell {
         fn logic(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+            // First: what the browser did with the last right-click (#20011). A browser may take
+            // a right-click for itself and open its own menu; the app then opens none of its own.
+            self.app.menu.browser_menu = self.mouse_buttons.borrow().menu();
             // First: a language another tab chose fetches its font this frame.
             self.load_other_tabs_prefs();
             self.tick_font(ctx);
+            self.fetch_drawing_fonts(ctx);
             self.app.logic(ctx);
             self.api.poll();
             self.space_mouse.logic(&mut self.app, ctx);
             self.files_tick(ctx);
-            UNSAVED.with(|u| u.set(solidcraft_ui_egui::documents::any_dirty(&self.app)));
+            UNSAVED.with(|u| u.set(self.asks_before_unload()));
             DESIGN_SHOWN.with(|d| d.set(solidcraft_ui_egui::toolbar::design_shown(&self.app)));
         }
         fn raw_input_hook(&mut self, ctx: &egui::Context, raw: &mut egui::RawInput) {
+            // First, so everything after sees the buttons the browser holds.
+            let taps = crate::mouse_buttons::reconcile(&self.mouse_buttons, ctx, raw);
+            solidcraft_ui_egui::window_chrome::release_stale_input(ctx, raw);
             let now = raw.time.unwrap_or_else(|| ctx.input(|i| i.time));
-            if let Some(delay) = self.wheel_gestures.update(raw, now) {
+            if let Some(delay) = self.wheel_gestures.update(raw, now, self.app.preferences.browser_scroll_wheel) {
                 ctx.request_repaint_after(delay);
             }
+            let samples = std::mem::take(&mut *self.wheel_samples.borrow_mut());
+            solidcraft_ui_egui::wheel_hint::feed(&mut self.app, ctx, &samples);
             if self.launch.persists() {
                 let theme = solidcraft_ui_egui::prefs::theme_drop_target(&self.app, ctx);
                 files::take_drops(&self.files, raw, theme);
@@ -825,14 +1233,15 @@ mod web {
             }
             // Before the app's own hook, which adds the control channel's events.
             self.space_mouse.raw_input_hook(ctx, self.app.preferences.space_mouse_enabled, raw);
-            self.app.raw_input_hook(raw);
+            self.app.raw_input_hook_with_taps(ctx, raw, taps);
         }
-        fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
+        fn ui(&mut self, ui: &mut egui::Ui, frame: &mut eframe::Frame) {
             self.linked.tick(&mut self.app, ui.ctx());
-            UNSAVED.with(|u| u.set(self.launch.persists() && solidcraft_ui_egui::documents::any_dirty(&self.app)));
+            self.restored();
+            UNSAVED.with(|u| u.set(self.asks_before_unload()));
             if self.launch.embed {
                 ui_kit::Container::new(ui.ctx(), ui_kit::Surface::Chrome).edge("embed_header", ui_kit::Edge::Top).show(ui, |ui| {
-                    if ui_kit::button(ui, solidcraft_ui_egui::i18n::tr("web.open_full"), ui_kit::Button::Normal).clicked()
+                    if ui_kit::button(ui, solidcraft_ui_text::tr("web.open_full"), ui_kit::Button::Normal).clicked()
                         && let (Some(window), Some(url)) = (web_sys::window(), &self.full_url)
                     {
                         let _ = window.open_with_url_and_target_and_features(url, "_blank", "noopener");
@@ -840,13 +1249,19 @@ mod web {
                 });
             }
             self.app.ui(ui);
+            self.app.retain_view_pictures(frame.wgpu_render_state());
             let ctx = ui.ctx().clone();
             if self.launch.persists() {
                 self.file_panel(&ctx);
                 self.recovery_prompt(&ctx);
+                self.keep_prompt(&ctx);
             }
             self.watch_text_for_font(&ctx);
             self.store_prefs(&ctx);
+        }
+        #[cfg(target_arch = "wasm32")]
+        fn as_any_mut(&mut self) -> Option<&mut dyn std::any::Any> {
+            Some(&mut *self)
         }
         fn persist_egui_memory(&self) -> bool {
             // eframe keeps this under one fixed key: only stable uses it, so a pre-release never rewrites it.
@@ -856,8 +1271,10 @@ mod web {
             if !self.launch.persists() {
                 return;
             }
-            let prefs = self.persisted_prefs();
+            let Some(prefs) = self.persisted_prefs(|| Ok(storage.get_string(&crate::prefs_key()))) else { return };
             storage.set_string(&crate::prefs_key(), prefs);
+            #[cfg(feature = "usage-stats")]
+            storage.set_string(&crate::channel::key(solidcraft_ui_egui::usage_stats::STORAGE_KEY), self.app.usage_stats_for_storage());
         }
     }
 
@@ -888,6 +1305,25 @@ mod web {
         storage.and_then(|s| s.get_item(&crate::channel::key(WEBGL_KEY)).ok().flatten()).is_some()
     }
 
+    /// Install the GPU viewport the desktop's way: the scene is drawn offscreen with its own depth
+    /// buffer and the saved anti-aliasing, then copied into egui's pass, which has neither. Drawn
+    /// straight into egui's pass, the view was 1x whatever Graphics said (#11622).
+    ///
+    /// The sample count follows the desktop's rule (`gpu::scene_samples`): the saved choice where
+    /// the browser's device draws it, else the supported default. WebGL draws 1x, as desktop
+    /// OpenGL does. eframe's web painter has no stencil buffer.
+    fn install_viewport(app: &mut SolveApp, rs: &eframe::egui_wgpu::RenderState) {
+        let backend = rs.adapter.get_info().backend;
+        let depth = eframe::egui_wgpu::depth_format_from_bits(DEPTH_BITS, 0);
+        let supported = eframe::egui_wgpu::supported_msaa_samples(&rs.adapter, &rs.device, rs.target_format, depth);
+        let requested = solidcraft_ui_egui::gpu::scene_samples(backend, app.preferences.msaa, &supported);
+        let drawn = app.set_wgpu_split(rs, DEPTH_BITS, 0, requested);
+        // After the install, which sets egui's own counts: those leave out the scene's depth
+        // buffer, and they include counts WebGL would draw at 1x.
+        app.msaa_supported = solidcraft_ui_egui::gpu::scene_sample_choices(backend, supported);
+        log::info!("SolidCraft graphics: {backend:?}, MSAA {drawn}x (saved {}x)", app.preferences.msaa);
+    }
+
     /// Fetch font bytes asynchronously through the browser.
     async fn fetch_font_bytes(url: &str) -> Result<Vec<u8>, String> {
         let window = web_sys::window().ok_or("no window")?;
@@ -903,6 +1339,10 @@ mod web {
 
     pub fn start() {
         eframe::WebLogger::init(log::LevelFilter::Info).ok();
+        solidcraft_ui_egui::i18n::install();
+        solidcraft_look::install_tables();
+        solidcraft_ui_egui::workspace::install_tabs();
+        solidcraft_ui_egui::navigation_slots::install();
         wasm_bindgen_futures::spawn_local(async {
             let Some(window) = web_sys::window() else { return };
             let launch = crate::Launch::parse(&query());
@@ -916,13 +1356,25 @@ mod web {
                 log::error!("missing <canvas id=\"{CANVAS_ID}\">");
                 return;
             };
-            let mut options = eframe::WebOptions { depth_buffer: DEPTH_BITS, ..Default::default() };
-            if webgl()
-                && let eframe::egui_wgpu::WgpuSetup::CreateNew(create) = &mut options.wgpu_options.wgpu_setup
-            {
-                create.instance_descriptor.backends = eframe::wgpu::Backends::GL;
+            // The window's pass (egui's) has no depth buffer: the scene has its own
+            // (`install_viewport`).
+            let mut options = eframe::WebOptions { depth_buffer: 0, ..Default::default() };
+            if let eframe::egui_wgpu::WgpuSetup::CreateNew(create) = &mut options.wgpu_options.wgpu_setup {
+                if webgl() {
+                    create.instance_descriptor.backends = eframe::wgpu::Backends::GL;
+                }
+                // Indirect draws that start at an instance, where the browser has them: instanced
+                // meshes are drawn a call per pipeline (`solidcraft_viewport_gpu::INDIRECT_DRAWS`).
+                let base = create.device_descriptor.clone();
+                create.device_descriptor = std::sync::Arc::new(move |adapter| {
+                    let mut d = base(adapter);
+                    d.required_features |= adapter.features() & eframe::wgpu::Features::INDIRECT_FIRST_INSTANCE;
+                    d
+                });
             }
-            let result = eframe::WebRunner::new()
+            let mouse_canvas = canvas.clone();
+            let runner = eframe::WebRunner::new();
+            let result = runner
                 .start(
                     canvas,
                     options,
@@ -966,11 +1418,14 @@ mod web {
                             can_restore: Some(Box::new(move |path: &str| {
                                 disk::parse(path).is_some_and(|(id, _)| restorable.disk_known.borrow().contains(id))
                             })),
-                            restore_file: Some(Box::new(move |path: &str| disk::restore(&restorer, path))),
+                            restore_file: Some(Box::new(move |path: &str| disk::restore(&restorer, path, None))),
                             download_design: Some(Box::new(files::download)),
+                            open_bytes: Some(Box::new(files::open_in_tab)),
                             easyprint_upload: Some(std::sync::Arc::new(crate::easyprint::upload)),
                             browser_files: Some(Box::new(move || shown.panel.set(true))),
                             install_app: Some(crate::install::service(&cc.egui_ctx)),
+                            #[cfg(feature = "usage-stats")]
+                            usage_http: Some(std::sync::Arc::new(crate::usage::post)),
                             ..Default::default()
                         }};
                         // Thumbnails of saves and start-page cards.
@@ -988,9 +1443,13 @@ mod web {
                         if launch.persists() && let Some(p) = cc.storage.and_then(|s| solidcraft_ui_egui::prefs::stored(|k| s.get_string(&crate::channel::key(k)))) {
                             app.load_prefs(&p);
                         }
+                        #[cfg(feature = "usage-stats")]
+                        if launch.persists() {
+                            let key = crate::channel::key(solidcraft_ui_egui::usage_stats::STORAGE_KEY);
+                            app.load_usage_stats(cc.storage.and_then(|s| s.get_string(&key)).as_deref());
+                        }
                         if let Some(rs) = &cc.wgpu_render_state {
-                            // eframe's web painter has no stencil buffer.
-                            app.set_wgpu(rs, DEPTH_BITS, 0, 1);
+                            install_viewport(&mut app, rs);
                         }
                         if launch.open.is_none() && crate::query_flag(&query(), "sample") {
                             if let Err(e) = app.session.run_script(&solidcraft_engine::sample::script()) {
@@ -1003,9 +1462,13 @@ mod web {
                             // The empty design takes Units of new designs (#1205). The sample
                             // part is built in millimetres and is left that way.
                             solidcraft_ui_egui::prefs::apply_new_design(&mut app);
-                            let rev = app.session.revision;
-                            app.home.show(rev);
+                            if app.preferences.home_on_launch(false, false, false) {
+                                let rev = app.session.revision;
+                                app.home.show(rev);
+                            }
                         }
+                        let mouse_buttons = crate::mouse_buttons::install(&window, &mouse_canvas, &cc.egui_ctx);
+                        let wheel_samples = crate::wheel_samples::install(&window);
                         let api = Api::install(sender, cc.egui_ctx.clone()).map_err(|e| format!("SolidCraft browser API: {e:?}"))?;
                         let font_language = app.preferences.language.clone();
                         let linked = crate::linked::Download::start(launch.open.as_deref(), &cc.egui_ctx);
@@ -1027,16 +1490,31 @@ mod web {
                             cjk_bytes: None,
                             chinese_bytes: None,
                             chinese_kind: None,
+                            korean_bytes: None,
                             font_fetch_kind: None,
                             font_language,
+                            drawing_fonts_asked: Default::default(),
+                            drawing_fonts_done: Default::default(),
                             space_mouse: SpaceMouse::default(),
                             wheel_gestures: solidcraft_ui_egui::WebWheelGestures::default(),
+                            wheel_samples,
+                            mouse_buttons,
                             prefs_writer: crate::PrefsWriter::default(),
+                            prefs_warning: None,
                             other_tab_prefs,
+                            keep_track: Default::default(),
+                            all_kept: false,
+                            restoring: None,
                         }))
                     }),
                 )
                 .await;
+            if result.is_ok()
+                && crate::Launch::parse(&query()).persists()
+                && let Some(window) = web_sys::window()
+            {
+                keep_when_hidden(&window, &runner);
+            }
             if let Some(el) = document.get_element_by_id(LOADING_ID) {
                 match result {
                     Ok(()) => dismiss_loading(el),
@@ -1051,6 +1529,8 @@ mod web {
 
 #[cfg(target_arch = "wasm32")]
 fn main() {
+    // The kernel's fix set, named to solidcore-ops before any call runs on it.
+    solidcraft_engine::kernel::start();
     web::start();
 }
 
@@ -1098,6 +1578,16 @@ mod tests {
         let viewer = Launch::parse("?embed=viewer&open=https://example.org/a.sc");
         assert!(viewer.embed && !viewer.editor, "any other value is the viewer embed, as before");
         assert!(!Launch::parse("?other=editor").editor);
+    }
+
+    #[test]
+    fn a_design_opened_from_a_link_is_clean_until_edited() {
+        let mut session = solidcraft_engine::Session::default();
+        adopt_linked_design(&mut session, "arm".into());
+        assert_eq!(session.doc.name, "arm");
+        assert!(!session.is_dirty(), "a linked design is not unsaved work, so nothing is autosaved for it");
+        session.doc_mut().name = "arm 2".into();
+        assert!(session.is_dirty(), "an edit makes it unsaved");
     }
 
     #[test]
@@ -1204,5 +1694,21 @@ mod tests {
         assert_eq!(settings_written(key, Some(key), None), None, "removed settings leave this tab's");
         assert_eq!(settings_written(key, None, None), None, "clearing all storage leaves this tab's settings");
         assert_eq!(settings_written(key, Some("rc:solidcraft.prefs"), Some("{}".into())), None, "another channel's settings are not loaded");
+    }
+
+    /// Each font a drawing's text can ask for on the web is one index.html copies, from an asset
+    /// in the repository, into the folder the app fetches it from.
+    #[test]
+    fn each_drawing_font_is_copied_where_it_is_fetched() {
+        let page = include_str!("../index.html");
+        let here = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
+        for font in solidcraft_engine::sketch::fallback::WebFont::ALL {
+            let served = format!("{FONTS}/{}", font.file());
+            let (folder, file) = served.rsplit_once('/').unwrap_or_default();
+            let copy = page.lines().find(|l| l.contains("rel=\"copy-file\"") && l.contains(&format!("/{file}\""))).unwrap_or_default();
+            assert!(copy.contains(&format!("data-target-path=\"{folder}\"")), "index.html doesn't copy {served}: {copy}");
+            let from = copy.split("href=\"").nth(1).and_then(|rest| rest.split('"').next()).unwrap_or_default();
+            assert!(here.join(from).is_file(), "{served}: no {from}");
+        }
     }
 }

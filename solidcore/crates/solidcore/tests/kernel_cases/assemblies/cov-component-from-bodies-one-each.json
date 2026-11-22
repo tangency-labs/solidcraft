@@ -1,0 +1,239 @@
+{
+  "area": "assemblies",
+  "bodies": {},
+  "calls": [
+    {
+      "inputs": [],
+      "op": "extrude",
+      "outputs": [
+        "b1"
+      ],
+      "params": {
+        "cap": true,
+        "corner": "curvature",
+        "direction": [
+          0.0,
+          0.0,
+          1.0
+        ],
+        "distance": 10.0,
+        "draft": 0.0,
+        "profile": [
+          {
+            "line": {
+              "end": [
+                10.0,
+                0.0,
+                0.0
+              ],
+              "start": [
+                0.0,
+                0.0,
+                0.0
+              ]
+            }
+          },
+          {
+            "line": {
+              "end": [
+                10.0,
+                10.0,
+                0.0
+              ],
+              "start": [
+                10.0,
+                0.0,
+                0.0
+              ]
+            }
+          },
+          {
+            "line": {
+              "end": [
+                0.0,
+                10.0,
+                0.0
+              ],
+              "start": [
+                10.0,
+                10.0,
+                0.0
+              ]
+            }
+          },
+          {
+            "line": {
+              "end": [
+                0.0,
+                0.0,
+                0.0
+              ],
+              "start": [
+                0.0,
+                10.0,
+                0.0
+              ]
+            }
+          }
+        ]
+      }
+    },
+    {
+      "inputs": [],
+      "op": "extrude",
+      "outputs": [
+        "b2"
+      ],
+      "params": {
+        "cap": true,
+        "corner": "curvature",
+        "direction": [
+          0.0,
+          0.0,
+          1.0
+        ],
+        "distance": 10.0,
+        "draft": 0.0,
+        "profile": [
+          {
+            "line": {
+              "end": [
+                50.0,
+                0.0,
+                0.0
+              ],
+              "start": [
+                30.0,
+                0.0,
+                0.0
+              ]
+            }
+          },
+          {
+            "line": {
+              "end": [
+                50.0,
+                10.0,
+                0.0
+              ],
+              "start": [
+                50.0,
+                0.0,
+                0.0
+              ]
+            }
+          },
+          {
+            "line": {
+              "end": [
+                30.0,
+                10.0,
+                0.0
+              ],
+              "start": [
+                50.0,
+                10.0,
+                0.0
+              ]
+            }
+          },
+          {
+            "line": {
+              "end": [
+                30.0,
+                0.0,
+                0.0
+              ],
+              "start": [
+                30.0,
+                10.0,
+                0.0
+              ]
+            }
+          }
+        ]
+      }
+    }
+  ],
+  "case": "cov-component-from-bodies-one-each",
+  "expected": {
+    "body_count": 2,
+    "method": "boxes P 10x10x10 from (0,0,0) and Q 20x10x10 from (30,0,0): one component each, named after its body, in place: P:1 (5,5,5), Q:1 (40,5,5)",
+    "results": [
+      {
+        "json": {
+          "total": {
+            "center_of_mass": [
+              5.0,
+              5.0,
+              5.0
+            ],
+            "volume_mm3": 1000.0
+          }
+        },
+        "step": 4
+      },
+      {
+        "json": {
+          "total": {
+            "center_of_mass": [
+              40.0,
+              5.0,
+              5.0
+            ],
+            "volume_mm3": 2000.0
+          }
+        },
+        "step": 5
+      }
+    ],
+    "source": "analytic",
+    "sources": [],
+    "volume_mm3": 3000.0,
+    "what": "component.from_bodies on two root bodies"
+  },
+  "expressible": false,
+  "operation_expressible": true,
+  "outcome": {
+    "ran": true,
+    "raw_counts": {
+      "edges": 24,
+      "faces": 12,
+      "vertices": 16
+    }
+  },
+  "result": [
+    {
+      "body": "P",
+      "made": "b1"
+    },
+    {
+      "body": "Q",
+      "made": "b2"
+    }
+  ],
+  "rig": {
+    "error": null,
+    "known_failing": null,
+    "measured": {
+      "area_mm2": 1600.0,
+      "body_count": 2,
+      "edges": 24,
+      "faces": 12,
+      "vertices": 16,
+      "volume_mm3": 3000.0
+    },
+    "refused_with": null,
+    "status": "pass"
+  },
+  "sources": [],
+  "traced_ops": [
+    "extrude",
+    "extrude"
+  ],
+  "ungraded": [
+    "results: SolidCraft computes it"
+  ],
+  "what": "component.from_bodies on two root bodies",
+  "why_not": []
+}

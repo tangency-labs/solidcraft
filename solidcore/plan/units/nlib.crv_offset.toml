@@ -1,0 +1,12 @@
+id = "nlib.crv_offset"
+upstream = ["source/SMLib/src/NL_CrvOffset.cpp"]
+rust_module = "nurbs::crv_offset"
+depends_on = ["nlib.crv_basic", "nlib.crv_fit_p1", "nlib.crv_nurb", "nlib.geom"]
+soft_depends_on = ["nlib.crv_adv_p2", "nlib.crv_common", "nlib.crv_tool_p1", "nlib.math"]
+est_lines = 346
+layer = 10
+tests = ["prog_test:my_test_ss_nurb", "prog_test:my_test_surface_point_intersect", "prog_test:my_test_GlobalCC_intersect", "prog_test:my_test_GlobalCSI", "prog_test:my_test_surface_curve_intersect", "prog_test:my_test_cci_nurb"]
+status = "green"
+claimed_by = "swarm-nlib.crv_offset-a1"
+claimed_at = "2026-10-12T22:47:21Z"
+notes = "difftest green: 1555 cases (55 fixture + 1500 generated), 0 deferred, max_rel_err 0; 1 fns; largest: N_CrvOffsetPtSampling; 181 upstream test entry points reach this unit"

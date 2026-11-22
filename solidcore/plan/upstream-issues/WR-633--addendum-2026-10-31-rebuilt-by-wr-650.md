@@ -1,0 +1,3 @@
+Updates: WR-633
+
+The fork rebuilt `sm_ExtendAsItself` after de0a6b8, in tangency-labs/smlib@93db777 and @b298cc2 (WR-650, #1986). The piecewise NLib continuation (`N_SrfExtendByParamDist`, then a knot insertion and a weight rescale per piece) is gone. The extension is now built directly from the analytic surface in rational quadratic arc spans, and round the axis it reaches no further than closing the turn, then wraps. The Rust port follows it under the same flag, `Kernel::fixes.offset_extension_as_itself`. The 4096-piece bound per side is now a bound of 4096 spans per end. WR-633's regression test `wr633_offset_of_a_cylinder_continues_as_itself_past_its_domain` still passes.

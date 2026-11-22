@@ -1,0 +1,15 @@
+#### WR-361. `SmMerge::MakeFaceuse` rebuilds a face from the second operand without its UV trims
+- **Severity:** Wrong result (accuracy loss)
+- **Area:** Boolean
+- **Location:** `source/SMLib/src/SmMerge.cpp` (`SmMerge::MakeFaceuse`, the `SmBrep::MakeFace` call before `m_vTI.Relate(pNewFace, pFaceToMake)` at `:7211`). `MakeFace` takes the trims as `cpOptUVCurves` (`SmBrep.h:967`-`969`) but is called with `NULL`.
+- **What happens:** every face a Boolean takes over from its second operand is rebuilt in the first without the operand's UV trims. SMLib later projects the edge for the trims it needs (`SmEdgeuse::GetOrCreateUVTrimCurve`, a fitted approximation), and the rest stay missing (allowed by `SmEdgeuse.h:124`-`125`).
+- **Trigger:** issue #488. An M6 thread groove (`smlib_screw_sweep`, exact trims, maximum lift 3.6e-15) cut from a shaft comes back with 4 edge uses without a trim on its helical faces. This is the root cause of #474.
+- **How found:** issue #488 (SolidCraft's `kernel-smlib` regression rig).
+- **Confirmed:** from the issue and the fork's fix (tangency-labs/smlib@ad24a8efb); not reproduced on this harness's C++ reference.
+- **Fix:** the fork's `sm_CopyUVTrimCurvesOfOtherFace`, called after the `Relate`. It gives each new edge use a copy of the operand edge use's trim where the new edge is the operand edge's mate, runs on `MergeEdge`'s copy of its curve over the same interval, and the face is on the copy of the operand's surface. The i-th edge use of the new face use (of the operand face use's orientation) answers the i-th one.
+- **Rust port:** opt-in, `Kernel::fixes.keep_operand_uv_trims` (off by default, so results match upstream). `crates/solidcore/src/boolean/merge/p2.rs` has `copy_uv_trim_curves_of_other_face`, called in `make_faceuse_attempt_with` after `relate_faces`. Curves have no mates in the port, so "a copy of its curve" is checked as the same points at the interval's ends and middle.
+- **Test:** `crates/solidcore/tests/issue_488_operand_trims.rs`. A 10 cube less an r 2 cylinder inside it leaves a void whose faces are the cylinder's, taken over whole.
+  - `issue_488_operand_face_keeps_its_exact_trims`: with the opt-in, the void's cylindrical faces carry the cylinder's trims.
+  - `issue_488_operand_face_is_rebuilt_without_them_by_default`: the default differs.
+- **Note:** the fork found that with this fix, `tangent_cylinders` seed 36 fails SMLib's check on the slit loop (WR-360, issue #746). Before, the check skipped faces with a missing trim.
+- Fixes tangency-labs/solidcore#488.

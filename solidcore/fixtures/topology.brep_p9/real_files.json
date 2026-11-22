@@ -1,0 +1,1067 @@
+{
+  "cases": [
+    {
+      "name": "real_cone_split_e0_t0",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:21206-21612",
+      "inputs": {
+        "op": 4,
+        "brep": {
+          "kind": "file",
+          "file": "cone.smb"
+        },
+        "selector": 0,
+        "variant": 0,
+        "parameter": 0.0,
+        "tolerances": [
+          0.001,
+          0.001
+        ],
+        "editing": true
+      }
+    },
+    {
+      "name": "real_cone_split_e0_t0.5",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:21206-21612",
+      "inputs": {
+        "op": 4,
+        "brep": {
+          "kind": "file",
+          "file": "cone.smb"
+        },
+        "selector": 0,
+        "variant": 0,
+        "parameter": 0.5,
+        "tolerances": [
+          0.001,
+          0.001
+        ],
+        "editing": true
+      }
+    },
+    {
+      "name": "real_cone_split_e0_t0.5_noedit",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:21206-21612",
+      "inputs": {
+        "op": 4,
+        "brep": {
+          "kind": "file",
+          "file": "cone.smb"
+        },
+        "selector": 0,
+        "variant": 0,
+        "parameter": 0.5,
+        "tolerances": [
+          0.001,
+          0.001
+        ],
+        "editing": false
+      }
+    },
+    {
+      "name": "real_cone_split_e0_t1",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:21206-21612",
+      "inputs": {
+        "op": 4,
+        "brep": {
+          "kind": "file",
+          "file": "cone.smb"
+        },
+        "selector": 0,
+        "variant": 0,
+        "parameter": 1.0,
+        "tolerances": [
+          0.001,
+          0.001
+        ],
+        "editing": true
+      }
+    },
+    {
+      "name": "real_cone_split_e0_t3.14159",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:21206-21612",
+      "inputs": {
+        "op": 4,
+        "brep": {
+          "kind": "file",
+          "file": "cone.smb"
+        },
+        "selector": 0,
+        "variant": 0,
+        "parameter": 3.141592653589793,
+        "tolerances": [
+          0.001,
+          0.001
+        ],
+        "editing": true
+      }
+    },
+    {
+      "name": "real_cone_split_e1_t0",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:21206-21612",
+      "inputs": {
+        "op": 4,
+        "brep": {
+          "kind": "file",
+          "file": "cone.smb"
+        },
+        "selector": 1,
+        "variant": 0,
+        "parameter": 0.0,
+        "tolerances": [
+          0.001,
+          0.001
+        ],
+        "editing": true
+      }
+    },
+    {
+      "name": "real_cone_split_e1_t0.5",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:21206-21612",
+      "inputs": {
+        "op": 4,
+        "brep": {
+          "kind": "file",
+          "file": "cone.smb"
+        },
+        "selector": 1,
+        "variant": 0,
+        "parameter": 0.5,
+        "tolerances": [
+          0.001,
+          0.001
+        ],
+        "editing": true
+      }
+    },
+    {
+      "name": "real_cone_split_e1_t1",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:21206-21612",
+      "inputs": {
+        "op": 4,
+        "brep": {
+          "kind": "file",
+          "file": "cone.smb"
+        },
+        "selector": 1,
+        "variant": 0,
+        "parameter": 1.0,
+        "tolerances": [
+          0.001,
+          0.001
+        ],
+        "editing": true
+      }
+    },
+    {
+      "name": "real_cone_split_e1_t3.14159",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:21206-21612",
+      "inputs": {
+        "op": 4,
+        "brep": {
+          "kind": "file",
+          "file": "cone.smb"
+        },
+        "selector": 1,
+        "variant": 0,
+        "parameter": 3.141592653589793,
+        "tolerances": [
+          0.001,
+          0.001
+        ],
+        "editing": true
+      }
+    },
+    {
+      "name": "real_cone_split_e2_t0",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:21206-21612",
+      "inputs": {
+        "op": 4,
+        "brep": {
+          "kind": "file",
+          "file": "cone.smb"
+        },
+        "selector": 2,
+        "variant": 0,
+        "parameter": 0.0,
+        "tolerances": [
+          0.001,
+          0.001
+        ],
+        "editing": true
+      }
+    },
+    {
+      "name": "real_cone_split_e2_t0.5",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:21206-21612",
+      "inputs": {
+        "op": 4,
+        "brep": {
+          "kind": "file",
+          "file": "cone.smb"
+        },
+        "selector": 2,
+        "variant": 0,
+        "parameter": 0.5,
+        "tolerances": [
+          0.001,
+          0.001
+        ],
+        "editing": true
+      }
+    },
+    {
+      "name": "real_cone_split_e2_t1",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:21206-21612",
+      "inputs": {
+        "op": 4,
+        "brep": {
+          "kind": "file",
+          "file": "cone.smb"
+        },
+        "selector": 2,
+        "variant": 0,
+        "parameter": 1.0,
+        "tolerances": [
+          0.001,
+          0.001
+        ],
+        "editing": true
+      }
+    },
+    {
+      "name": "real_cone_split_e2_t3.14159",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:21206-21612",
+      "inputs": {
+        "op": 4,
+        "brep": {
+          "kind": "file",
+          "file": "cone.smb"
+        },
+        "selector": 2,
+        "variant": 0,
+        "parameter": 3.141592653589793,
+        "tolerances": [
+          0.001,
+          0.001
+        ],
+        "editing": true
+      }
+    },
+    {
+      "name": "real_cone_split_e3_t0",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:21206-21612",
+      "inputs": {
+        "op": 4,
+        "brep": {
+          "kind": "file",
+          "file": "cone.smb"
+        },
+        "selector": 3,
+        "variant": 0,
+        "parameter": 0.0,
+        "tolerances": [
+          0.001,
+          0.001
+        ],
+        "editing": true
+      }
+    },
+    {
+      "name": "real_cone_split_e3_t0.5",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:21206-21612",
+      "inputs": {
+        "op": 4,
+        "brep": {
+          "kind": "file",
+          "file": "cone.smb"
+        },
+        "selector": 3,
+        "variant": 0,
+        "parameter": 0.5,
+        "tolerances": [
+          0.001,
+          0.001
+        ],
+        "editing": true
+      }
+    },
+    {
+      "name": "real_cone_split_e3_t1",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:21206-21612",
+      "inputs": {
+        "op": 4,
+        "brep": {
+          "kind": "file",
+          "file": "cone.smb"
+        },
+        "selector": 3,
+        "variant": 0,
+        "parameter": 1.0,
+        "tolerances": [
+          0.001,
+          0.001
+        ],
+        "editing": true
+      }
+    },
+    {
+      "name": "real_cone_split_e3_t3.14159",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:21206-21612",
+      "inputs": {
+        "op": 4,
+        "brep": {
+          "kind": "file",
+          "file": "cone.smb"
+        },
+        "selector": 3,
+        "variant": 0,
+        "parameter": 3.141592653589793,
+        "tolerances": [
+          0.001,
+          0.001
+        ],
+        "editing": true
+      }
+    },
+    {
+      "name": "real_cone_split_e4_t0",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:21206-21612",
+      "inputs": {
+        "op": 4,
+        "brep": {
+          "kind": "file",
+          "file": "cone.smb"
+        },
+        "selector": 4,
+        "variant": 0,
+        "parameter": 0.0,
+        "tolerances": [
+          0.001,
+          0.001
+        ],
+        "editing": true
+      }
+    },
+    {
+      "name": "real_cone_split_e4_t0.5",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:21206-21612",
+      "inputs": {
+        "op": 4,
+        "brep": {
+          "kind": "file",
+          "file": "cone.smb"
+        },
+        "selector": 4,
+        "variant": 0,
+        "parameter": 0.5,
+        "tolerances": [
+          0.001,
+          0.001
+        ],
+        "editing": true
+      }
+    },
+    {
+      "name": "real_cone_split_e4_t1",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:21206-21612",
+      "inputs": {
+        "op": 4,
+        "brep": {
+          "kind": "file",
+          "file": "cone.smb"
+        },
+        "selector": 4,
+        "variant": 0,
+        "parameter": 1.0,
+        "tolerances": [
+          0.001,
+          0.001
+        ],
+        "editing": true
+      }
+    },
+    {
+      "name": "real_cone_split_e4_t3.14159",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:21206-21612",
+      "inputs": {
+        "op": 4,
+        "brep": {
+          "kind": "file",
+          "file": "cone.smb"
+        },
+        "selector": 4,
+        "variant": 0,
+        "parameter": 3.141592653589793,
+        "tolerances": [
+          0.001,
+          0.001
+        ],
+        "editing": true
+      }
+    },
+    {
+      "name": "real_cone_split_e5_t0",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:21206-21612",
+      "inputs": {
+        "op": 4,
+        "brep": {
+          "kind": "file",
+          "file": "cone.smb"
+        },
+        "selector": 5,
+        "variant": 0,
+        "parameter": 0.0,
+        "tolerances": [
+          0.001,
+          0.001
+        ],
+        "editing": true
+      }
+    },
+    {
+      "name": "real_cone_split_e5_t0.5",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:21206-21612",
+      "inputs": {
+        "op": 4,
+        "brep": {
+          "kind": "file",
+          "file": "cone.smb"
+        },
+        "selector": 5,
+        "variant": 0,
+        "parameter": 0.5,
+        "tolerances": [
+          0.001,
+          0.001
+        ],
+        "editing": true
+      }
+    },
+    {
+      "name": "real_cone_split_e5_t1",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:21206-21612",
+      "inputs": {
+        "op": 4,
+        "brep": {
+          "kind": "file",
+          "file": "cone.smb"
+        },
+        "selector": 5,
+        "variant": 0,
+        "parameter": 1.0,
+        "tolerances": [
+          0.001,
+          0.001
+        ],
+        "editing": true
+      }
+    },
+    {
+      "name": "real_cone_split_e5_t3.14159",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:21206-21612",
+      "inputs": {
+        "op": 4,
+        "brep": {
+          "kind": "file",
+          "file": "cone.smb"
+        },
+        "selector": 5,
+        "variant": 0,
+        "parameter": 3.141592653589793,
+        "tolerances": [
+          0.001,
+          0.001
+        ],
+        "editing": true
+      }
+    },
+    {
+      "name": "real_mouse_split_e0_t0",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:21206-21612",
+      "inputs": {
+        "op": 4,
+        "brep": {
+          "kind": "file",
+          "file": "Mouse.smb"
+        },
+        "selector": 0,
+        "variant": 0,
+        "parameter": 0.0,
+        "tolerances": [
+          0.001,
+          0.001
+        ],
+        "editing": true
+      }
+    },
+    {
+      "name": "real_mouse_split_e0_t0.5",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:21206-21612",
+      "inputs": {
+        "op": 4,
+        "brep": {
+          "kind": "file",
+          "file": "Mouse.smb"
+        },
+        "selector": 0,
+        "variant": 0,
+        "parameter": 0.5,
+        "tolerances": [
+          0.001,
+          0.001
+        ],
+        "editing": true
+      }
+    },
+    {
+      "name": "real_mouse_split_e0_t0.5_noedit",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:21206-21612",
+      "inputs": {
+        "op": 4,
+        "brep": {
+          "kind": "file",
+          "file": "Mouse.smb"
+        },
+        "selector": 0,
+        "variant": 0,
+        "parameter": 0.5,
+        "tolerances": [
+          0.001,
+          0.001
+        ],
+        "editing": false
+      }
+    },
+    {
+      "name": "real_mouse_split_e0_t1",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:21206-21612",
+      "inputs": {
+        "op": 4,
+        "brep": {
+          "kind": "file",
+          "file": "Mouse.smb"
+        },
+        "selector": 0,
+        "variant": 0,
+        "parameter": 1.0,
+        "tolerances": [
+          0.001,
+          0.001
+        ],
+        "editing": true
+      }
+    },
+    {
+      "name": "real_mouse_split_e0_t3.14159",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:21206-21612",
+      "inputs": {
+        "op": 4,
+        "brep": {
+          "kind": "file",
+          "file": "Mouse.smb"
+        },
+        "selector": 0,
+        "variant": 0,
+        "parameter": 3.141592653589793,
+        "tolerances": [
+          0.001,
+          0.001
+        ],
+        "editing": true
+      }
+    },
+    {
+      "name": "real_mouse_split_e1_t0",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:21206-21612",
+      "inputs": {
+        "op": 4,
+        "brep": {
+          "kind": "file",
+          "file": "Mouse.smb"
+        },
+        "selector": 1,
+        "variant": 0,
+        "parameter": 0.0,
+        "tolerances": [
+          0.001,
+          0.001
+        ],
+        "editing": true
+      }
+    },
+    {
+      "name": "real_mouse_split_e1_t0.5",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:21206-21612",
+      "inputs": {
+        "op": 4,
+        "brep": {
+          "kind": "file",
+          "file": "Mouse.smb"
+        },
+        "selector": 1,
+        "variant": 0,
+        "parameter": 0.5,
+        "tolerances": [
+          0.001,
+          0.001
+        ],
+        "editing": true
+      }
+    },
+    {
+      "name": "real_mouse_split_e1_t1",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:21206-21612",
+      "inputs": {
+        "op": 4,
+        "brep": {
+          "kind": "file",
+          "file": "Mouse.smb"
+        },
+        "selector": 1,
+        "variant": 0,
+        "parameter": 1.0,
+        "tolerances": [
+          0.001,
+          0.001
+        ],
+        "editing": true
+      }
+    },
+    {
+      "name": "real_mouse_split_e1_t3.14159",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:21206-21612",
+      "inputs": {
+        "op": 4,
+        "brep": {
+          "kind": "file",
+          "file": "Mouse.smb"
+        },
+        "selector": 1,
+        "variant": 0,
+        "parameter": 3.141592653589793,
+        "tolerances": [
+          0.001,
+          0.001
+        ],
+        "editing": true
+      }
+    },
+    {
+      "name": "real_mouse_split_e2_t0",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:21206-21612",
+      "inputs": {
+        "op": 4,
+        "brep": {
+          "kind": "file",
+          "file": "Mouse.smb"
+        },
+        "selector": 2,
+        "variant": 0,
+        "parameter": 0.0,
+        "tolerances": [
+          0.001,
+          0.001
+        ],
+        "editing": true
+      }
+    },
+    {
+      "name": "real_mouse_split_e2_t0.5",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:21206-21612",
+      "inputs": {
+        "op": 4,
+        "brep": {
+          "kind": "file",
+          "file": "Mouse.smb"
+        },
+        "selector": 2,
+        "variant": 0,
+        "parameter": 0.5,
+        "tolerances": [
+          0.001,
+          0.001
+        ],
+        "editing": true
+      }
+    },
+    {
+      "name": "real_mouse_split_e2_t1",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:21206-21612",
+      "inputs": {
+        "op": 4,
+        "brep": {
+          "kind": "file",
+          "file": "Mouse.smb"
+        },
+        "selector": 2,
+        "variant": 0,
+        "parameter": 1.0,
+        "tolerances": [
+          0.001,
+          0.001
+        ],
+        "editing": true
+      }
+    },
+    {
+      "name": "real_mouse_split_e2_t3.14159",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:21206-21612",
+      "inputs": {
+        "op": 4,
+        "brep": {
+          "kind": "file",
+          "file": "Mouse.smb"
+        },
+        "selector": 2,
+        "variant": 0,
+        "parameter": 3.141592653589793,
+        "tolerances": [
+          0.001,
+          0.001
+        ],
+        "editing": true
+      }
+    },
+    {
+      "name": "real_mouse_split_e3_t0",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:21206-21612",
+      "inputs": {
+        "op": 4,
+        "brep": {
+          "kind": "file",
+          "file": "Mouse.smb"
+        },
+        "selector": 3,
+        "variant": 0,
+        "parameter": 0.0,
+        "tolerances": [
+          0.001,
+          0.001
+        ],
+        "editing": true
+      }
+    },
+    {
+      "name": "real_mouse_split_e3_t0.5",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:21206-21612",
+      "inputs": {
+        "op": 4,
+        "brep": {
+          "kind": "file",
+          "file": "Mouse.smb"
+        },
+        "selector": 3,
+        "variant": 0,
+        "parameter": 0.5,
+        "tolerances": [
+          0.001,
+          0.001
+        ],
+        "editing": true
+      }
+    },
+    {
+      "name": "real_mouse_split_e3_t1",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:21206-21612",
+      "inputs": {
+        "op": 4,
+        "brep": {
+          "kind": "file",
+          "file": "Mouse.smb"
+        },
+        "selector": 3,
+        "variant": 0,
+        "parameter": 1.0,
+        "tolerances": [
+          0.001,
+          0.001
+        ],
+        "editing": true
+      }
+    },
+    {
+      "name": "real_mouse_split_e3_t3.14159",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:21206-21612",
+      "inputs": {
+        "op": 4,
+        "brep": {
+          "kind": "file",
+          "file": "Mouse.smb"
+        },
+        "selector": 3,
+        "variant": 0,
+        "parameter": 3.141592653589793,
+        "tolerances": [
+          0.001,
+          0.001
+        ],
+        "editing": true
+      }
+    },
+    {
+      "name": "real_mouse_split_e4_t0",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:21206-21612",
+      "inputs": {
+        "op": 4,
+        "brep": {
+          "kind": "file",
+          "file": "Mouse.smb"
+        },
+        "selector": 4,
+        "variant": 0,
+        "parameter": 0.0,
+        "tolerances": [
+          0.001,
+          0.001
+        ],
+        "editing": true
+      }
+    },
+    {
+      "name": "real_mouse_split_e4_t0.5",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:21206-21612",
+      "inputs": {
+        "op": 4,
+        "brep": {
+          "kind": "file",
+          "file": "Mouse.smb"
+        },
+        "selector": 4,
+        "variant": 0,
+        "parameter": 0.5,
+        "tolerances": [
+          0.001,
+          0.001
+        ],
+        "editing": true
+      }
+    },
+    {
+      "name": "real_mouse_split_e4_t1",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:21206-21612",
+      "inputs": {
+        "op": 4,
+        "brep": {
+          "kind": "file",
+          "file": "Mouse.smb"
+        },
+        "selector": 4,
+        "variant": 0,
+        "parameter": 1.0,
+        "tolerances": [
+          0.001,
+          0.001
+        ],
+        "editing": true
+      }
+    },
+    {
+      "name": "real_mouse_split_e4_t3.14159",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:21206-21612",
+      "inputs": {
+        "op": 4,
+        "brep": {
+          "kind": "file",
+          "file": "Mouse.smb"
+        },
+        "selector": 4,
+        "variant": 0,
+        "parameter": 3.141592653589793,
+        "tolerances": [
+          0.001,
+          0.001
+        ],
+        "editing": true
+      }
+    },
+    {
+      "name": "real_mouse_split_e5_t0",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:21206-21612",
+      "inputs": {
+        "op": 4,
+        "brep": {
+          "kind": "file",
+          "file": "Mouse.smb"
+        },
+        "selector": 5,
+        "variant": 0,
+        "parameter": 0.0,
+        "tolerances": [
+          0.001,
+          0.001
+        ],
+        "editing": true
+      }
+    },
+    {
+      "name": "real_mouse_split_e5_t0.5",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:21206-21612",
+      "inputs": {
+        "op": 4,
+        "brep": {
+          "kind": "file",
+          "file": "Mouse.smb"
+        },
+        "selector": 5,
+        "variant": 0,
+        "parameter": 0.5,
+        "tolerances": [
+          0.001,
+          0.001
+        ],
+        "editing": true
+      }
+    },
+    {
+      "name": "real_mouse_split_e5_t1",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:21206-21612",
+      "inputs": {
+        "op": 4,
+        "brep": {
+          "kind": "file",
+          "file": "Mouse.smb"
+        },
+        "selector": 5,
+        "variant": 0,
+        "parameter": 1.0,
+        "tolerances": [
+          0.001,
+          0.001
+        ],
+        "editing": true
+      }
+    },
+    {
+      "name": "real_mouse_split_e5_t3.14159",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:21206-21612",
+      "inputs": {
+        "op": 4,
+        "brep": {
+          "kind": "file",
+          "file": "Mouse.smb"
+        },
+        "selector": 5,
+        "variant": 0,
+        "parameter": 3.141592653589793,
+        "tolerances": [
+          0.001,
+          0.001
+        ],
+        "editing": true
+      }
+    },
+    {
+      "name": "real_plane_square_projection_v0",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:12418-12497",
+      "inputs": {
+        "op": 8,
+        "brep": {
+          "kind": "file",
+          "file": "plane_square.smb"
+        },
+        "selector": 0,
+        "variant": 0
+      }
+    },
+    {
+      "name": "real_plane_square_projection_v1",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:12418-12497",
+      "inputs": {
+        "op": 8,
+        "brep": {
+          "kind": "file",
+          "file": "plane_square.smb"
+        },
+        "selector": 0,
+        "variant": 1
+      }
+    },
+    {
+      "name": "real_plane_square_projection_v2",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:12418-12497",
+      "inputs": {
+        "op": 8,
+        "brep": {
+          "kind": "file",
+          "file": "plane_square.smb"
+        },
+        "selector": 0,
+        "variant": 2
+      }
+    },
+    {
+      "name": "real_cone_infinite_region",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:8004-8582",
+      "inputs": {
+        "op": 0,
+        "brep": {
+          "kind": "file",
+          "file": "cone.smb"
+        }
+      }
+    },
+    {
+      "name": "real_box_with_large_fillet_infinite_region",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:8004-8582",
+      "inputs": {
+        "op": 0,
+        "brep": {
+          "kind": "file",
+          "file": "box_with_large_fillet.smb"
+        }
+      }
+    },
+    {
+      "name": "real_plane_square_orient_sheet_same",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:11620-11704",
+      "inputs": {
+        "op": 1,
+        "brep": {
+          "kind": "file",
+          "file": "plane_square.smb"
+        },
+        "selector": 0,
+        "same": true
+      }
+    },
+    {
+      "name": "real_plane_square_orient_sheet_opposite",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:11620-11704",
+      "inputs": {
+        "op": 1,
+        "brep": {
+          "kind": "file",
+          "file": "plane_square.smb"
+        },
+        "selector": 0,
+        "same": false
+      }
+    },
+    {
+      "name": "real_plane_circ_orient_sheet_same",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:11620-11704",
+      "inputs": {
+        "op": 1,
+        "brep": {
+          "kind": "file",
+          "file": "plane_circ.smb"
+        },
+        "selector": 0,
+        "same": true
+      }
+    },
+    {
+      "name": "real_plane_circ_orient_sheet_opposite",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:11620-11704",
+      "inputs": {
+        "op": 1,
+        "brep": {
+          "kind": "file",
+          "file": "plane_circ.smb"
+        },
+        "selector": 0,
+        "same": false
+      }
+    }
+  ]
+}

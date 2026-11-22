@@ -1,0 +1,155 @@
+{
+  "area": "fillets",
+  "bodies": {
+    "b12": {
+      "keeping_splines": false,
+      "trusted": true
+    }
+  },
+  "calls": [
+    {
+      "inputs": [
+        "b12"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b13"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b13"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b14"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b14"
+      ],
+      "op": "tagged",
+      "outputs": [
+        "b15"
+      ],
+      "params": {
+        "operand": 0
+      }
+    },
+    {
+      "error": "SMLib failed (status 1001)",
+      "inputs": [
+        "b15"
+      ],
+      "op": "blend_dropping",
+      "params": {
+        "edges": {
+          "kind": "edge",
+          "picked": [
+            {
+              "at": [
+                [
+                  5.222142911842534,
+                  3.4524336735610426,
+                  1.7763568394002505e-15
+                ],
+                [
+                  -5.847608800326175,
+                  2.4094545686415962,
+                  6.73008708250424e-16
+                ]
+              ],
+              "index": 5
+            },
+            {
+              "at": [
+                [
+                  -5.847608800326176,
+                  -2.4094545686415954,
+                  3.5771071404005476e-16
+                ],
+                [
+                  5.222142911842534,
+                  3.4524336735610426,
+                  1.7763568394002505e-15
+                ]
+              ],
+              "index": 6
+            }
+          ],
+          "points": [
+            [
+              -0.6079778355273653,
+              5.969249478099265,
+              0.0
+            ],
+            [
+              2.9747639117032714,
+              -5.273968311846048,
+              0.0
+            ]
+          ],
+          "tolerance": 4.558496653866665
+        },
+        "kind": "round",
+        "sizes": [
+          1.5,
+          1.5
+        ]
+      }
+    }
+  ],
+  "case": "cov-junction-boss-tilt-20-root-round",
+  "expected": {
+    "method": "Boss R 6 on the axis through the origin along (sin 20, 0, cos 20), its bottom cap the plane p.a = -2, rounded 1.5 where it joins the plate (z = 0). In the plane y = 0 on the -x side the wall rail of a round r lies r (1 - sin 20) above the plate, and the cap's rim 6 sin 20 - 2 cos 20 = 0.1727 above it: past r* = (6 sin 20 - 2 cos 20) / (1 - sin 20) = 0.262524174 the rail runs over the rim onto the cap, where the round's End has no room. The owner's ruling (#2358): refuse, naming r* less the part's tolerance 1e-5, 0.262514174; a round of that size builds.",
+    "outcome": "refused",
+    "refusal": "0.2625",
+    "source": "analytic",
+    "sources": [
+      "tangency-labs/solidcore#2358",
+      "tangency-labs/solidcore#2839"
+    ],
+    "what": "cylinder R6 tilted 20 degrees joined into a plate, its root edge rounded 1.5: refused, naming 0.262514174"
+  },
+  "expressible": false,
+  "gallery_note": "the wall rail would run over the bottom cap's rim, 0.17 above the plate on the -x side; SMLib failed it (status 1001)",
+  "operation_expressible": true,
+  "outcome": {
+    "engine_error": "step 3 (solid.fillet): SMLib fillet: operation: SMLib failed (status 1001) (tangent propagation blended the picked edges' tangent chain with them; with it off, tangent_chain: false, only the picked edges are blended)",
+    "kernel_error": "SMLib failed (status 1001)",
+    "ran": false
+  },
+  "records": "cov-junction-boss-tilt-20-root-round.bodies.json.gz",
+  "result": [],
+  "rig": {
+    "error": "step 3 (solid.fillet): SMLib fillet: operation: SMLib failed (status 1001) (tangent propagation blended the picked edges' tangent chain with them; with it off, tangent_chain: false, only the picked edges are blended)",
+    "known_failing": "[fail] fillet status 1001 on a cylinder tilted 20 degrees into the plate, as on SMLib",
+    "measured": null,
+    "refused_with": null,
+    "status": "fail"
+  },
+  "sources": [],
+  "traced_ops": [
+    "extrude",
+    "extrude",
+    "copy",
+    "copy",
+    "copy",
+    "copy",
+    "tagged",
+    "tagged",
+    "boolean",
+    "copy",
+    "copy",
+    "tagged",
+    "blend_dropping"
+  ],
+  "ungraded": [
+    "refusal \"0.2625\": SolidCraft's wording of the kernel's error"
+  ],
+  "what": "cylinder R6 tilted 20 degrees joined into a plate, its root edge rounded 1.5",
+  "why_not": []
+}

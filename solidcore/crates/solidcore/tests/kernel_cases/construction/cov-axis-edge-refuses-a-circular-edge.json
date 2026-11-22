@@ -1,0 +1,37 @@
+{
+  "area": "construction",
+  "bodies": {},
+  "calls": [],
+  "case": "cov-axis-edge-refuses-a-circular-edge",
+  "expected": {
+    "method": "cylinder r 5, h 10 on (60,0,0) along +Z: its top edge is a circle, no line: refused",
+    "outcome": "refused",
+    "refusal": "the edge is not straight",
+    "source": "analytic",
+    "sources": [],
+    "what": "an axis on a circular edge, which is not straight"
+  },
+  "expressible": false,
+  "operation_expressible": false,
+  "outcome": {
+    "engine_error": "step 2 (construct.axis.edge): the edge is not straight",
+    "ran": false
+  },
+  "result": [],
+  "rig": {
+    "error": null,
+    "known_failing": null,
+    "measured": null,
+    "refused_with": "step 2 (construct.axis.edge): the edge is not straight",
+    "status": "pass"
+  },
+  "sources": [],
+  "traced_ops": [
+    "extrude"
+  ],
+  "ungraded": [],
+  "what": "an axis on a circular edge, which is not straight",
+  "why_not": [
+    "the failure is SolidCraft's, not a kernel operation's: step 2 (construct.axis.edge): the edge is not straight"
+  ]
+}

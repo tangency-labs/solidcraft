@@ -1,0 +1,17 @@
+#### WR-641. The fork's extended-rail-end through knot (d33890f) makes a boss's base round fail where its arc meets a wall obliquely
+- **Severity:** Wrong result (the round fails, `SM_ERR` 1001, on valid input that the fork rounds without the change)
+- **Area:** Fillets
+- **Location:** the SolidCraft fork tangency-labs/smlib, commit d33890f ("a round's surface reaches its edge's end at an extended-edge rail end"), `source/SMLib/src/SmFilletSolver.cpp`, `SmFilletSolver::CalcFilletGeom`, the "SolidCraft change: a rail that ends on an extended edge" block before the through-point loop (fork main 83748ba, `:1864`). Not in the pinned v1.0.1; the port carries it as `Kernel::fixes.fillet_through_extended_rail_end` (WR-468).
+- **What happens:**
+  - At a corner where a rail of geometry 0 ends on an extended edge, the change adds the filleted edge's end parameter to the through knots.
+  - The through-point loop takes its guess there from the edge use's binormal at that end, half the second offset long, dropped onto the first base surface and evaluated on its offset.
+  - When the base arc meets the wall at an angle (not square to it), that guess lies past the wall: (-0.8, 36.6, 12) for the boss below, where the edge ends at (0, 36, 10). `sm_FindFilletTsectPnt` finds no section there.
+  - The loop's `SER(SM_ERR)` then aborts `CalcFilletGeom`, and the executive reports "Fillet Surface Computation Failure" (1001).
+- **Trigger:** a 30 x 60 x 10 box united with a cylinder r 5 x 10 standing on its top at (4, 33). The cylinder overhangs the wall x = 0, and its base arc meets that wall at 143.13 degrees round its axis. Rounding the arc over the box (two edges, split at the cylinder's seam) R 2 fails. The same block with the boss at (2, 30) r 6 (R 1.5) or (0, 30) r 5 (axis on the wall) rounds, with or without the change, to identical volumes.
+- **How found:** an audit of the port's opt-in flags (`plan/findings/audits/flag-reachability-2026-10-31/`) and its follow-ups.
+- **Confirmed:** yes, on the fork's C++. The fork's main 83748ba was built from source (SMLib and SM_API) and run through `SM_API` (`SmApiCreateBox`, `SmApiCreateCylinder`, `SmApiBooleanUnion`, `SmApiFilletEdges`):
+  - **With d33890f's hunk:** (4, 33) gives 1001; (2, 30) gives 1000, 19142.548432302; (0, 30) gives 1000, 18800.086736688.
+  - **Hunk reverted, nothing else changed:** (4, 33) gives 1000 at 18807.824471782; the other two are unchanged.
+  - **The fork's own capi test for d33890f's trigger** (rig fillets/4369: a 60 x 40 x 10 block rounded r 10 in plan, boss r 10 x 10 at (12, 32)) passes on fork main with and without the hunk: 26323.5441606 against the closed form 26323.5435064, 2.49e-8 relative under its 1e-7 bound, `smlib_brep_check` sound. So at fork main the change no longer has a case that needs it.
+  - **The port** (`fillet_through_extended_rail_end` with WR-499 and WR-457 on) gives the same outcomes on all of these: 18807.824471783 without WR-468, 1001 with it; 4369 at 2.49e-8 either way. Test: `crates/solidcore/tests/wr_468_overhanging_boss_fork_parity.rs`.
+  - **The pinned v1.0.1** fails every one of these bosses earlier, at the Nx1 corner (WR-499, tangency-labs/solidcore#1021).

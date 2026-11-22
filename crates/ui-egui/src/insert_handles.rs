@@ -91,7 +91,7 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui, proj: &Proj) {
     };
     let away = (top - knob_from).normalized();
     let knob = top + if away.length() > 0.0 { away * KNOB_GAP } else { vec2(0.0, -KNOB_GAP) };
-    let t = crate::theme::Tokens::get();
+    let t = solidcraft_theme::Tokens::get();
     let painter = ui.painter().clone();
     let stroke = Stroke::new(1.5, t.accent);
     painter.add(egui::Shape::closed_line(corners.clone(), stroke));
@@ -108,7 +108,7 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui, proj: &Proj) {
     }
     parts.push((egui::Rect::from_center_size(knob, Screen::splat(HANDLE * 3.0)), Part::Turn, egui::CursorIcon::Crosshair));
     for (i, (rect, part, cursor)) in parts.into_iter().enumerate() {
-        let response = ui.interact(rect, egui::Id::new(("sc_insert_handle", i)), Sense::drag()).on_hover_cursor(cursor);
+        let response = ui.interact(rect, egui::Id::unique(("sc_insert_handle", i)), Sense::drag()).on_hover_cursor(cursor);
         crate::scenario::publish_handle(&format!("insert:handle:{i}"), rect.center());
         if response.drag_started()
             && let Some(from) = response.interact_pointer_pos().and_then(|p| pointer_on_sketch(&plane, proj, p))

@@ -1,0 +1,120 @@
+{
+ "issue": "https://github.com/tangency-labs/solidcraft/issues/168",
+ "pr": "https://github.com/tangency-labs/solidcraft/pull/4012",
+ "test": "none: open on SolidCraft's truck kernel (kernel work paused under tangency-labs/solidcraft#3992); geometry is the issue's",
+ "summary": "Two bodies that touch only along a line were joined into one on SolidCraft's truck kernel (#168): an r 10 coin 3 thick and, on top of it, a ring r 10..15 from z = 3 to 6, which meet only along the circle r 10 at z = 3. They share no area, so the union is two separate solids. The triage comment's straight-edge variant, a box with a second box on top touching it along one edge, gave an error. Both are checked as two lumps and the sum of the volumes.",
+ "cases": [
+  {
+   "name": "coin_and_ring_touch_along_a_circle",
+   "note": "Coin r 10, h 3; ring r 10..15 over z 3..6; union.",
+   "steps": [
+    {
+     "op": "cylinder",
+     "id": "coin",
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "axis": [
+      0,
+      0,
+      1
+     ],
+     "radius": 10,
+     "height": 3
+    },
+    {
+     "op": "extrude",
+     "id": "rim",
+     "profile": [
+      {
+       "kind": "circle",
+       "center": [
+        0,
+        0
+       ],
+       "radius": 15
+      },
+      {
+       "kind": "circle",
+       "center": [
+        0,
+        0
+       ],
+       "radius": 10
+      }
+     ],
+     "origin": [
+      0,
+      0,
+      3
+     ],
+     "distance": 3
+    },
+    {
+     "op": "union",
+     "id": "result",
+     "a": "coin",
+     "b": "rim"
+    }
+   ],
+   "expect": {
+    "lumps": 2,
+    "volume": {
+     "value": 2120.5750411731105,
+     "tol": 0.0001,
+     "formula": "pi*10^2*3 + pi*(15^2 - 10^2)*3: two solids touching along a circle"
+    }
+   }
+  },
+  {
+   "name": "boxes_touch_along_an_edge",
+   "note": "A 10 x 10 x 3 box and a second one on top of it from x = 10, touching it along the edge x = 10, z = 3; union.",
+   "steps": [
+    {
+     "op": "box",
+     "id": "a",
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "size": [
+      10,
+      10,
+      3
+     ]
+    },
+    {
+     "op": "box",
+     "id": "b",
+     "origin": [
+      10,
+      0,
+      3
+     ],
+     "size": [
+      10,
+      10,
+      3
+     ]
+    },
+    {
+     "op": "union",
+     "id": "result",
+     "a": "a",
+     "b": "b"
+    }
+   ],
+   "expect": {
+    "lumps": 2,
+    "volume": {
+     "value": 600,
+     "tol": 1e-06,
+     "formula": "2*10*10*3: two solids touching along an edge"
+    }
+   }
+  }
+ ]
+}

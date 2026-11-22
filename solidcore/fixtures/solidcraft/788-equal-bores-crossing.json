@@ -1,0 +1,224 @@
+{
+ "issue": "https://github.com/tangency-labs/solidcraft/issues/788",
+ "pr": "https://github.com/tangency-labs/solidcraft/pull/1179",
+ "test": "crates/kernel/src/issue_788_tests.rs: equal_bores_crossing_at_right_angles",
+ "summary": "A 45 mm cube with two equal bores crossing at right angles at its centre, cut one after the other; with r 10 SolidCraft refused the second cut (r 17.5 built before the fix too, per the issue's table; r 4 is from the test). The Steinmetz solid the bores share, 16 r^3/3, lies inside the cube for r < 22.5, so the removed volume is 2 pi r^2 45 - 16 r^3/3. Radii 10, 17.5 and 4 as in the test. Tolerance 0.01 mm^3.",
+ "cases": [
+  {
+   "name": "equal_bores_crossing_r10",
+   "note": "Two bores of radius 10 through a 45 mm cube, axes Z and Y, crossing at the centre.",
+   "steps": [
+    {
+     "op": "box",
+     "id": "result",
+     "origin": [
+      -22.5,
+      -22.5,
+      -22.5
+     ],
+     "size": [
+      45,
+      45,
+      45
+     ]
+    },
+    {
+     "op": "cylinder",
+     "id": "b1",
+     "origin": [
+      0,
+      0,
+      -30
+     ],
+     "axis": [
+      0,
+      0,
+      1
+     ],
+     "radius": 10,
+     "height": 60
+    },
+    {
+     "op": "difference",
+     "id": "result",
+     "a": "result",
+     "b": "b1"
+    },
+    {
+     "op": "cylinder",
+     "id": "b2",
+     "origin": [
+      0,
+      -30,
+      0
+     ],
+     "axis": [
+      0,
+      1,
+      0
+     ],
+     "radius": 10,
+     "height": 60
+    },
+    {
+     "op": "difference",
+     "id": "result",
+     "a": "result",
+     "b": "b2"
+    }
+   ],
+   "expect": {
+    "lumps": 1,
+    "volume": {
+     "value": 68183.99945102519,
+     "tol": 0.01,
+     "formula": "45^3 - 2*pi*10^2*45 + 16*10^3/3 (the Steinmetz solid of the crossing is removed once)"
+    }
+   }
+  },
+  {
+   "name": "equal_bores_crossing_r17_5",
+   "note": "Control from the issue: radius 17.5 built before the fix too. Two bores of radius 17.5 through a 45 mm cube, axes Z and Y, crossing at the centre.",
+   "steps": [
+    {
+     "op": "box",
+     "id": "result",
+     "origin": [
+      -22.5,
+      -22.5,
+      -22.5
+     ],
+     "size": [
+      45,
+      45,
+      45
+     ]
+    },
+    {
+     "op": "cylinder",
+     "id": "b1",
+     "origin": [
+      0,
+      0,
+      -30
+     ],
+     "axis": [
+      0,
+      0,
+      1
+     ],
+     "radius": 17.5,
+     "height": 60
+    },
+    {
+     "op": "difference",
+     "id": "result",
+     "a": "result",
+     "b": "b1"
+    },
+    {
+     "op": "cylinder",
+     "id": "b2",
+     "origin": [
+      0,
+      -30,
+      0
+     ],
+     "axis": [
+      0,
+      1,
+      0
+     ],
+     "radius": 17.5,
+     "height": 60
+    },
+    {
+     "op": "difference",
+     "id": "result",
+     "a": "result",
+     "b": "b2"
+    }
+   ],
+   "expect": {
+    "lumps": 1,
+    "volume": {
+     "value": 33118.18581876466,
+     "tol": 0.01,
+     "formula": "45^3 - 2*pi*17.5^2*45 + 16*17.5^3/3 (the Steinmetz solid of the crossing is removed once)"
+    }
+   }
+  },
+  {
+   "name": "equal_bores_crossing_r4",
+   "note": "Two bores of radius 4 through a 45 mm cube, axes Z and Y, crossing at the centre.",
+   "steps": [
+    {
+     "op": "box",
+     "id": "result",
+     "origin": [
+      -22.5,
+      -22.5,
+      -22.5
+     ],
+     "size": [
+      45,
+      45,
+      45
+     ]
+    },
+    {
+     "op": "cylinder",
+     "id": "b1",
+     "origin": [
+      0,
+      0,
+      -30
+     ],
+     "axis": [
+      0,
+      0,
+      1
+     ],
+     "radius": 4,
+     "height": 60
+    },
+    {
+     "op": "difference",
+     "id": "result",
+     "a": "result",
+     "b": "b1"
+    },
+    {
+     "op": "cylinder",
+     "id": "b2",
+     "origin": [
+      0,
+      -30,
+      0
+     ],
+     "axis": [
+      0,
+      1,
+      0
+     ],
+     "radius": 4,
+     "height": 60
+    },
+    {
+     "op": "difference",
+     "id": "result",
+     "a": "result",
+     "b": "b2"
+    }
+   ],
+   "expect": {
+    "lumps": 1,
+    "volume": {
+     "value": 86942.43991216403,
+     "tol": 0.01,
+     "formula": "45^3 - 2*pi*4^2*45 + 16*4^3/3 (the Steinmetz solid of the crossing is removed once)"
+    }
+   }
+  }
+ ]
+}

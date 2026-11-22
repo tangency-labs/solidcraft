@@ -1,0 +1,168 @@
+{
+  "area": "ladder/02-booleans",
+  "bodies": {
+    "b13": {
+      "keeping_splines": false,
+      "trusted": true
+    },
+    "b14": {
+      "keeping_splines": false,
+      "trusted": true
+    }
+  },
+  "calls": [
+    {
+      "inputs": [
+        "b14"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b15"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b15"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b16"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b13"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b17"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b17"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b18"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b16"
+      ],
+      "op": "tagged",
+      "outputs": [
+        "b19"
+      ],
+      "params": {
+        "operand": 0
+      }
+    },
+    {
+      "inputs": [
+        "b18"
+      ],
+      "op": "tagged",
+      "outputs": [
+        "b20"
+      ],
+      "params": {
+        "operand": 1
+      }
+    },
+    {
+      "inputs": [
+        "b19",
+        "b20"
+      ],
+      "op": "boolean",
+      "outputs": [
+        "b21"
+      ],
+      "params": {
+        "op": "subtract"
+      }
+    }
+  ],
+  "case": "012-tangent-along-circle-bowl",
+  "expected": {
+    "body_count": 1,
+    "faces": 8,
+    "method": "the sphere's equator is the floor's edge circle (tangent to the hole wall along it): removed = pi r^2 10 + 2/3 pi r^3; faces 6 + wall + bowl",
+    "source": "analytic",
+    "sources": [],
+    "volume_mm3": 42764.012244017,
+    "what": "a blind hole r10 10 deep, then a sphere r10 centred on its floor: the floor disk vanishes exactly"
+  },
+  "expressible": true,
+  "golden": {
+    "measured": {
+      "area_mm2": 9742.477796079262,
+      "body_count": 1,
+      "edges": 17,
+      "faces": 8,
+      "vertices": 12,
+      "volume_mm3": 42764.012243807694
+    },
+    "status": "pass",
+    "unstable": null
+  },
+  "operation_expressible": true,
+  "outcome": {
+    "ran": true,
+    "raw_counts": {
+      "edges": 17,
+      "faces": 8,
+      "vertices": 12
+    }
+  },
+  "records": "012-tangent-along-circle-bowl.bodies.json.gz",
+  "result": [
+    {
+      "body": "Part",
+      "made": "b21"
+    }
+  ],
+  "rig": {
+    "error": null,
+    "known_failing": null,
+    "measured": {
+      "area_mm2": 9742.477796079262,
+      "body_count": 1,
+      "edges": 17,
+      "faces": 8,
+      "vertices": 12,
+      "volume_mm3": 42764.012243807694
+    },
+    "refused_with": null,
+    "status": "pass"
+  },
+  "sources": [],
+  "traced_ops": [
+    "extrude",
+    "extrude",
+    "copy",
+    "copy",
+    "copy",
+    "copy",
+    "tagged",
+    "tagged",
+    "boolean",
+    "make_sphere",
+    "copy",
+    "copy",
+    "copy",
+    "copy",
+    "tagged",
+    "tagged",
+    "boolean"
+  ],
+  "ungraded": [],
+  "what": "a blind hole r10 10 deep, then a sphere r10 centred on its floor: the floor disk vanishes exactly",
+  "why_not": []
+}

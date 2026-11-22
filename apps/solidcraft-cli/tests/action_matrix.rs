@@ -691,7 +691,7 @@ fn action_matrix_worker() {
         // With ACTION_MATRIX_UNFOLD, sheet metal must still unfold and fold back after the action.
         if r.is_ok() && std::env::var_os("ACTION_MATRIX_UNFOLD").is_some() {
             let t = Instant::now();
-            let sheets: Vec<String> = scratch.model.state().sheets.iter().map(|sh| sh.body.clone()).collect();
+            let sheets: Vec<String> = scratch.model.state().surface_sheets.iter().map(|sh| sh.body.clone()).collect();
             let mut r = Ok(());
             for body in &sheets {
                 for id in ["sheet.unfold", "sheet.refold"] {
@@ -1308,7 +1308,7 @@ fn edge_round_actions_keep_the_picked_body() {
             let mut unscoped = p.clone();
             unscoped.as_object_mut().unwrap().remove("body");
             let err = s.scratch().execute(id, &unscoped).unwrap_err().to_string();
-            assert!(err.contains("edges meet"), "{err}");
+            assert!(err.contains("[10, 0, 20] lies on edges of 2 bodies, Plate and Block"), "{err}");
             perform(&mut s.scratch(), &a.act, &errors(&s)).unwrap();
             tried += 1;
         }
@@ -1407,7 +1407,7 @@ fn a_hole_square_to_a_45_degree_flange() {
     let gone = before - volume(&s);
     let expected = std::f64::consts::PI * 1.724 * 1.724 * 2.5;
     assert!((gone - expected).abs() < 0.1, "the hole took {gone} mm³, not {expected}");
-    let sheets: Vec<String> = s.model.state().sheets.iter().map(|sh| sh.body.clone()).collect();
+    let sheets: Vec<String> = s.model.state().surface_sheets.iter().map(|sh| sh.body.clone()).collect();
     assert!(!sheets.is_empty());
     for body in sheets {
         for id in ["sheet.unfold", "sheet.refold"] {
@@ -1749,4 +1749,32 @@ fn the_ribbed_lid_builds_the_same_body_every_time() {
     for _ in 0..5 {
         assert_eq!(fingerprint(), first);
     }
+}
+
+// #13295: a circle sketched on the plane at 45 degrees through a bar's step edge, 7.9e-6 off
+// that edge (as the reporter's sketch had it), cut through all across a hole. The cut wall's
+// seam edge ends on the bar's edge a few micrometres across the seam, inside its vertex's
+// tolerance, and the check refused the result ("Face Near missing Seam").
+#[test]
+fn a_circle_cut_from_a_slanted_plane_through_a_step_edge_beside_a_hole() {
+    let mut s = Session::default();
+    let (y0, z1, yc, z2) = (16.423877938511588, 13.06859205815335, 12.527075811882755, 19.566787029154483);
+    let p = [[0.0, 0.0], [y0, 0.0], [y0, z1], [yc, z1], [yc, z2], [0.0, z2]];
+    s.execute("sketch.create", &json!({"plane": "YZ"})).unwrap();
+    for i in 0..6 {
+        s.execute("sketch.line", &json!({"points": [p[i], p[(i + 1) % 6]]})).unwrap();
+    }
+    s.execute("sketch.finish", &json!({})).unwrap();
+    s.execute("solid.extrude", &json!({"distance": 100, "operation": "new"})).unwrap();
+    let start = s.doc.features.len();
+    let hole = json!({"base": [20.421614627576027, y0 + 5.0, 6.534296029076675], "axis": [0, -1, 0], "radius": 3.5355339059327378, "height": y0 + 10.0, "operation": "cut", "targets": ["Body1"]});
+    s.execute("solid.cylinder", &hole).unwrap();
+    let r = std::f64::consts::FRAC_1_SQRT_2;
+    let plane = json!({"origin": [0, yc - yc * r, z2 + yc * r], "x_dir": [1, 0, 0], "y_dir": [0, r, -r]});
+    s.execute("sketch.create", &json!({"plane": plane, "name": "Slant"})).unwrap();
+    s.execute("sketch.circle.center", &json!({"center": [20.4216146277246, 12.527083680740917], "radius": 4.716990566008734})).unwrap();
+    s.execute("sketch.finish", &json!({})).unwrap();
+    s.execute("solid.extrude", &json!({"sketch": "Slant", "through_all": true, "direction": "negative", "operation": "cut", "targets": ["Body1"]}))
+        .unwrap();
+    check(&s, start, &BTreeMap::new()).unwrap_or_else(|(kind, e)| panic!("{kind}: {e}"));
 }

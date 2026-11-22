@@ -17,7 +17,9 @@ pub(super) struct Exported {
     pub ext: &'static str,
     /// A 3MF was asked for and couldn't be written, so this is an STL.
     pub fell_back: bool,
-    /// The bodies that went in: the ones named, else the selected ones.
+    /// The bodies that went in: the ones named, else the selected ones (read by `file.send`, which
+    /// the browser build doesn't have).
+    #[cfg_attr(target_arch = "wasm32", allow(dead_code))]
     pub bodies: Vec<String>,
     /// The bodies laid on their print face, and the ones that couldn't be.
     pub laid: super::print_face::Laid,
@@ -34,10 +36,13 @@ pub(super) fn export_bodies(s: &Session, cmd: &str, named: &[String], format: Fo
         return Err(bad(cmd, "select the bodies to send, or give `bodies`"));
     }
     let mut doc = s.doc.painted(&*s.world_state()?);
-    let laid = super::print_face::lay_on_print_faces(s, &mut doc, &bodies, &[]);
-    let write = |format| solidcraft_io::export_with_metadata(&doc, &bodies, format, &s.doc.name, &s.doc.metadata);
+    let mut laid = super::print_face::lay_on_print_faces(s, &mut doc, &bodies, &[]);
+    // What meshing the bodies reported goes with the print-face warnings.
+    let write = |format| {
+        solidcraft_io::export_with_parts_noted(&doc, &bodies, &[], format, &s.doc.name, &s.doc.metadata, solidcraft_io::MeshQuality::Standard, None)
+    };
     let mut fell_back = false;
-    let (bytes, ext) = match (format, write(format)) {
+    let ((bytes, notes), ext) = match (format, write(format)) {
         (_, Ok(b)) => (b, if format == Format::StlBinary { "stl" } else { "3mf" }),
         (Format::ThreeMf, Err(_)) => {
             fell_back = true;
@@ -45,6 +50,7 @@ pub(super) fn export_bodies(s: &Session, cmd: &str, named: &[String], format: Fo
         }
         (_, Err(e)) => return Err(e.into()),
     };
+    laid.warnings.extend(notes);
     Ok(Exported { bytes, ext, fell_back, bodies, laid })
 }
 

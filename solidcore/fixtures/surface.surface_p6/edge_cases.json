@@ -1,0 +1,5620 @@
+{
+ "cases": [
+  {
+   "name": "cont_surface_u",
+   "inputs": {
+    "surface": {
+     "sms": {
+      "$upstream_file": "Surface.sms"
+     }
+    },
+    "op": {
+     "op": "cont",
+     "param": 0
+    }
+   },
+   "upstream_ref": "tests/prog_test (my_test_surface_closest_point, my_test_drop_point: TestFiles/pt_TestFiles surfaces)"
+  },
+  {
+   "name": "cont_surface_v",
+   "inputs": {
+    "surface": {
+     "sms": {
+      "$upstream_file": "Surface.sms"
+     }
+    },
+    "op": {
+     "op": "cont",
+     "param": 1
+    }
+   },
+   "upstream_ref": "tests/prog_test (my_test_surface_closest_point, my_test_drop_point: TestFiles/pt_TestFiles surfaces)"
+  },
+  {
+   "name": "trim_surface_side0",
+   "inputs": {
+    "surface": {
+     "sms": {
+      "$upstream_file": "Surface.sms"
+     }
+    },
+    "op": {
+     "op": "trim",
+     "dom": [
+      0,
+      0.0634210842965636,
+      1,
+      0.6377485983139218
+     ],
+     "side": 0,
+     "remove": false
+    }
+   },
+   "upstream_ref": "tests/prog_test (my_test_surface_closest_point, my_test_drop_point: TestFiles/pt_TestFiles surfaces)"
+  },
+  {
+   "name": "trim_surface_side1",
+   "inputs": {
+    "surface": {
+     "sms": {
+      "$upstream_file": "Surface.sms"
+     }
+    },
+    "op": {
+     "op": "trim",
+     "dom": [
+      0,
+      0.0634210842965636,
+      1,
+      0.6377485983139218
+     ],
+     "side": 1,
+     "remove": false
+    }
+   },
+   "upstream_ref": "tests/prog_test (my_test_surface_closest_point, my_test_drop_point: TestFiles/pt_TestFiles surfaces)"
+  },
+  {
+   "name": "trim_surface_sub_remove",
+   "inputs": {
+    "surface": {
+     "sms": {
+      "$upstream_file": "Surface.sms"
+     }
+    },
+    "op": {
+     "op": "trim",
+     "dom": [
+      0.25,
+      0.12085383569829942,
+      0.75,
+      0.6377485983139218
+     ],
+     "side": 1,
+     "remove": true
+    }
+   },
+   "upstream_ref": "tests/prog_test (my_test_surface_closest_point, my_test_drop_point: TestFiles/pt_TestFiles surfaces)"
+  },
+  {
+   "name": "scls_surface_boundaries_min",
+   "inputs": {
+    "surface": {
+     "sms": {
+      "$upstream_file": "Surface.sms"
+     }
+    },
+    "op": {
+     "op": "scls",
+     "dom": [
+      0,
+      0.0634210842965636,
+      1,
+      0.6377485983139218
+     ],
+     "uc": [
+      1,
+      1
+     ],
+     "vc": [
+      1,
+      1
+     ],
+     "sbox": [
+      -1,
+      -1,
+      -1,
+      1,
+      1,
+      1
+     ],
+     "cbox": null,
+     "curve": {
+      "bspline": {
+       "dim": 3,
+       "p": 2,
+       "cpts": [
+        [
+         0,
+         0,
+         0,
+         -1.7976931348623157e+308
+        ],
+        [
+         0.3,
+         0.2,
+         0.1,
+         -1.7976931348623157e+308
+        ],
+        [
+         0.6,
+         0.5,
+         0.0,
+         -1.7976931348623157e+308
+        ],
+        [
+         0.9,
+         0.9,
+         0.2,
+         -1.7976931348623157e+308
+        ]
+       ],
+       "u": [
+        0,
+        0,
+        0,
+        0.5,
+        1,
+        1,
+        1
+       ]
+      }
+     },
+     "ivl": [
+      0,
+      1
+     ],
+     "tc": [
+      10,
+      10
+     ],
+     "tol": 0.001,
+     "vec": null,
+     "sop": 3,
+     "skip": true,
+     "process": true
+    }
+   },
+   "upstream_ref": "tests/prog_test (my_test_surface_closest_point, my_test_drop_point: TestFiles/pt_TestFiles surfaces)"
+  },
+  {
+   "name": "scls_surface_boundaries_max",
+   "inputs": {
+    "surface": {
+     "sms": {
+      "$upstream_file": "Surface.sms"
+     }
+    },
+    "op": {
+     "op": "scls",
+     "dom": [
+      0,
+      0.0634210842965636,
+      1,
+      0.6377485983139218
+     ],
+     "uc": [
+      2,
+      1
+     ],
+     "vc": [
+      1,
+      2
+     ],
+     "sbox": [
+      -1,
+      -1,
+      -1,
+      1,
+      1,
+      1
+     ],
+     "cbox": [
+      0,
+      0,
+      0,
+      1,
+      1,
+      1
+     ],
+     "curve": {
+      "bspline": {
+       "dim": 3,
+       "p": 2,
+       "cpts": [
+        [
+         0,
+         0,
+         0,
+         -1.7976931348623157e+308
+        ],
+        [
+         0.3,
+         0.2,
+         0.1,
+         -1.7976931348623157e+308
+        ],
+        [
+         0.6,
+         0.5,
+         0.0,
+         -1.7976931348623157e+308
+        ],
+        [
+         0.9,
+         0.9,
+         0.2,
+         -1.7976931348623157e+308
+        ]
+       ],
+       "u": [
+        0,
+        0,
+        0,
+        0.5,
+        1,
+        1,
+        1
+       ]
+      }
+     },
+     "ivl": [
+      0,
+      1
+     ],
+     "tc": [
+      10,
+      10
+     ],
+     "tol": 0.001,
+     "vec": null,
+     "sop": 4,
+     "skip": true,
+     "process": true
+    }
+   },
+   "upstream_ref": "tests/prog_test (my_test_surface_closest_point, my_test_drop_point: TestFiles/pt_TestFiles surfaces)"
+  },
+  {
+   "name": "scls_surface_curve_end_defers",
+   "inputs": {
+    "surface": {
+     "sms": {
+      "$upstream_file": "Surface.sms"
+     }
+    },
+    "op": {
+     "op": "scls",
+     "dom": [
+      0,
+      0.0634210842965636,
+      1,
+      0.6377485983139218
+     ],
+     "uc": [
+      10,
+      10
+     ],
+     "vc": [
+      10,
+      10
+     ],
+     "sbox": [
+      -1,
+      -1,
+      -1,
+      1,
+      1,
+      1
+     ],
+     "cbox": null,
+     "curve": {
+      "bspline": {
+       "dim": 3,
+       "p": 2,
+       "cpts": [
+        [
+         0,
+         0,
+         0,
+         -1.7976931348623157e+308
+        ],
+        [
+         0.3,
+         0.2,
+         0.1,
+         -1.7976931348623157e+308
+        ],
+        [
+         0.6,
+         0.5,
+         0.0,
+         -1.7976931348623157e+308
+        ],
+        [
+         0.9,
+         0.9,
+         0.2,
+         -1.7976931348623157e+308
+        ]
+       ],
+       "u": [
+        0,
+        0,
+        0,
+        0.5,
+        1,
+        1,
+        1
+       ]
+      }
+     },
+     "ivl": [
+      0,
+      1
+     ],
+     "tc": [
+      1,
+      1
+     ],
+     "tol": 0.001,
+     "vec": null,
+     "sop": 3,
+     "skip": true,
+     "process": false
+    }
+   }
+  },
+  {
+   "name": "cont_dropcurvesurface_u",
+   "inputs": {
+    "surface": {
+     "sms": {
+      "$upstream_file": "DropCurveSurface.sms"
+     }
+    },
+    "op": {
+     "op": "cont",
+     "param": 0
+    }
+   },
+   "upstream_ref": "tests/prog_test (my_test_surface_closest_point, my_test_drop_point: TestFiles/pt_TestFiles surfaces)"
+  },
+  {
+   "name": "cont_dropcurvesurface_v",
+   "inputs": {
+    "surface": {
+     "sms": {
+      "$upstream_file": "DropCurveSurface.sms"
+     }
+    },
+    "op": {
+     "op": "cont",
+     "param": 1
+    }
+   },
+   "upstream_ref": "tests/prog_test (my_test_surface_closest_point, my_test_drop_point: TestFiles/pt_TestFiles surfaces)"
+  },
+  {
+   "name": "trim_dropcurvesurface_side0",
+   "inputs": {
+    "surface": {
+     "sms": {
+      "$upstream_file": "DropCurveSurface.sms"
+     }
+    },
+    "op": {
+     "op": "trim",
+     "dom": [
+      0,
+      0,
+      1,
+      1
+     ],
+     "side": 0,
+     "remove": false
+    }
+   },
+   "upstream_ref": "tests/prog_test (my_test_surface_closest_point, my_test_drop_point: TestFiles/pt_TestFiles surfaces)"
+  },
+  {
+   "name": "trim_dropcurvesurface_side1",
+   "inputs": {
+    "surface": {
+     "sms": {
+      "$upstream_file": "DropCurveSurface.sms"
+     }
+    },
+    "op": {
+     "op": "trim",
+     "dom": [
+      0,
+      0,
+      1,
+      1
+     ],
+     "side": 1,
+     "remove": false
+    }
+   },
+   "upstream_ref": "tests/prog_test (my_test_surface_closest_point, my_test_drop_point: TestFiles/pt_TestFiles surfaces)"
+  },
+  {
+   "name": "trim_dropcurvesurface_sub_remove",
+   "inputs": {
+    "surface": {
+     "sms": {
+      "$upstream_file": "DropCurveSurface.sms"
+     }
+    },
+    "op": {
+     "op": "trim",
+     "dom": [
+      0.25,
+      0.1,
+      0.75,
+      1
+     ],
+     "side": 1,
+     "remove": true
+    }
+   },
+   "upstream_ref": "tests/prog_test (my_test_surface_closest_point, my_test_drop_point: TestFiles/pt_TestFiles surfaces)"
+  },
+  {
+   "name": "scls_dropcurvesurface_boundaries_min",
+   "inputs": {
+    "surface": {
+     "sms": {
+      "$upstream_file": "DropCurveSurface.sms"
+     }
+    },
+    "op": {
+     "op": "scls",
+     "dom": [
+      0,
+      0,
+      1,
+      1
+     ],
+     "uc": [
+      1,
+      1
+     ],
+     "vc": [
+      1,
+      1
+     ],
+     "sbox": [
+      -1,
+      -1,
+      -1,
+      1,
+      1,
+      1
+     ],
+     "cbox": null,
+     "curve": {
+      "bspline": {
+       "dim": 3,
+       "p": 2,
+       "cpts": [
+        [
+         0,
+         0,
+         0,
+         -1.7976931348623157e+308
+        ],
+        [
+         0.3,
+         0.2,
+         0.1,
+         -1.7976931348623157e+308
+        ],
+        [
+         0.6,
+         0.5,
+         0.0,
+         -1.7976931348623157e+308
+        ],
+        [
+         0.9,
+         0.9,
+         0.2,
+         -1.7976931348623157e+308
+        ]
+       ],
+       "u": [
+        0,
+        0,
+        0,
+        0.5,
+        1,
+        1,
+        1
+       ]
+      }
+     },
+     "ivl": [
+      0,
+      1
+     ],
+     "tc": [
+      10,
+      10
+     ],
+     "tol": 0.001,
+     "vec": null,
+     "sop": 3,
+     "skip": true,
+     "process": true
+    }
+   },
+   "upstream_ref": "tests/prog_test (my_test_surface_closest_point, my_test_drop_point: TestFiles/pt_TestFiles surfaces)"
+  },
+  {
+   "name": "scls_dropcurvesurface_boundaries_max",
+   "inputs": {
+    "surface": {
+     "sms": {
+      "$upstream_file": "DropCurveSurface.sms"
+     }
+    },
+    "op": {
+     "op": "scls",
+     "dom": [
+      0,
+      0,
+      1,
+      1
+     ],
+     "uc": [
+      2,
+      1
+     ],
+     "vc": [
+      1,
+      2
+     ],
+     "sbox": [
+      -1,
+      -1,
+      -1,
+      1,
+      1,
+      1
+     ],
+     "cbox": [
+      0,
+      0,
+      0,
+      1,
+      1,
+      1
+     ],
+     "curve": {
+      "bspline": {
+       "dim": 3,
+       "p": 2,
+       "cpts": [
+        [
+         0,
+         0,
+         0,
+         -1.7976931348623157e+308
+        ],
+        [
+         0.3,
+         0.2,
+         0.1,
+         -1.7976931348623157e+308
+        ],
+        [
+         0.6,
+         0.5,
+         0.0,
+         -1.7976931348623157e+308
+        ],
+        [
+         0.9,
+         0.9,
+         0.2,
+         -1.7976931348623157e+308
+        ]
+       ],
+       "u": [
+        0,
+        0,
+        0,
+        0.5,
+        1,
+        1,
+        1
+       ]
+      }
+     },
+     "ivl": [
+      0,
+      1
+     ],
+     "tc": [
+      10,
+      10
+     ],
+     "tol": 0.001,
+     "vec": null,
+     "sop": 4,
+     "skip": true,
+     "process": true
+    }
+   },
+   "upstream_ref": "tests/prog_test (my_test_surface_closest_point, my_test_drop_point: TestFiles/pt_TestFiles surfaces)"
+  },
+  {
+   "name": "scls_dropcurvesurface_curve_end_defers",
+   "inputs": {
+    "surface": {
+     "sms": {
+      "$upstream_file": "DropCurveSurface.sms"
+     }
+    },
+    "op": {
+     "op": "scls",
+     "dom": [
+      0,
+      0,
+      1,
+      1
+     ],
+     "uc": [
+      10,
+      10
+     ],
+     "vc": [
+      10,
+      10
+     ],
+     "sbox": [
+      -1,
+      -1,
+      -1,
+      1,
+      1,
+      1
+     ],
+     "cbox": null,
+     "curve": {
+      "bspline": {
+       "dim": 3,
+       "p": 2,
+       "cpts": [
+        [
+         0,
+         0,
+         0,
+         -1.7976931348623157e+308
+        ],
+        [
+         0.3,
+         0.2,
+         0.1,
+         -1.7976931348623157e+308
+        ],
+        [
+         0.6,
+         0.5,
+         0.0,
+         -1.7976931348623157e+308
+        ],
+        [
+         0.9,
+         0.9,
+         0.2,
+         -1.7976931348623157e+308
+        ]
+       ],
+       "u": [
+        0,
+        0,
+        0,
+        0.5,
+        1,
+        1,
+        1
+       ]
+      }
+     },
+     "ivl": [
+      0,
+      1
+     ],
+     "tc": [
+      1,
+      1
+     ],
+     "tol": 0.001,
+     "vec": null,
+     "sop": 3,
+     "skip": true,
+     "process": false
+    }
+   }
+  },
+  {
+   "name": "cont_offset_nurb_u",
+   "inputs": {
+    "surface": {
+     "sms": {
+      "$upstream_file": "offset_nurb.sms"
+     }
+    },
+    "op": {
+     "op": "cont",
+     "param": 0
+    }
+   },
+   "upstream_ref": "tests/prog_test (my_test_surface_closest_point, my_test_drop_point: TestFiles/pt_TestFiles surfaces)"
+  },
+  {
+   "name": "cont_offset_nurb_v",
+   "inputs": {
+    "surface": {
+     "sms": {
+      "$upstream_file": "offset_nurb.sms"
+     }
+    },
+    "op": {
+     "op": "cont",
+     "param": 1
+    }
+   },
+   "upstream_ref": "tests/prog_test (my_test_surface_closest_point, my_test_drop_point: TestFiles/pt_TestFiles surfaces)"
+  },
+  {
+   "name": "trim_offset_nurb_side0",
+   "inputs": {
+    "surface": {
+     "sms": {
+      "$upstream_file": "offset_nurb.sms"
+     }
+    },
+    "op": {
+     "op": "trim",
+     "dom": [
+      -5.475299932110956,
+      0,
+      0,
+      10
+     ],
+     "side": 0,
+     "remove": false
+    }
+   },
+   "upstream_ref": "tests/prog_test (my_test_surface_closest_point, my_test_drop_point: TestFiles/pt_TestFiles surfaces)"
+  },
+  {
+   "name": "trim_offset_nurb_side1",
+   "inputs": {
+    "surface": {
+     "sms": {
+      "$upstream_file": "offset_nurb.sms"
+     }
+    },
+    "op": {
+     "op": "trim",
+     "dom": [
+      -5.475299932110956,
+      0,
+      0,
+      10
+     ],
+     "side": 1,
+     "remove": false
+    }
+   },
+   "upstream_ref": "tests/prog_test (my_test_surface_closest_point, my_test_drop_point: TestFiles/pt_TestFiles surfaces)"
+  },
+  {
+   "name": "trim_offset_nurb_sub_remove",
+   "inputs": {
+    "surface": {
+     "sms": {
+      "$upstream_file": "offset_nurb.sms"
+     }
+    },
+    "op": {
+     "op": "trim",
+     "dom": [
+      -4.106474949083217,
+      1.0,
+      -1.3688249830277393,
+      10
+     ],
+     "side": 1,
+     "remove": true
+    }
+   },
+   "upstream_ref": "tests/prog_test (my_test_surface_closest_point, my_test_drop_point: TestFiles/pt_TestFiles surfaces)"
+  },
+  {
+   "name": "scls_offset_nurb_boundaries_min",
+   "inputs": {
+    "surface": {
+     "sms": {
+      "$upstream_file": "offset_nurb.sms"
+     }
+    },
+    "op": {
+     "op": "scls",
+     "dom": [
+      -5.475299932110956,
+      0,
+      0,
+      10
+     ],
+     "uc": [
+      1,
+      1
+     ],
+     "vc": [
+      1,
+      1
+     ],
+     "sbox": [
+      -1,
+      -1,
+      -1,
+      1,
+      1,
+      1
+     ],
+     "cbox": null,
+     "curve": {
+      "bspline": {
+       "dim": 3,
+       "p": 2,
+       "cpts": [
+        [
+         0,
+         0,
+         0,
+         -1.7976931348623157e+308
+        ],
+        [
+         0.3,
+         0.2,
+         0.1,
+         -1.7976931348623157e+308
+        ],
+        [
+         0.6,
+         0.5,
+         0.0,
+         -1.7976931348623157e+308
+        ],
+        [
+         0.9,
+         0.9,
+         0.2,
+         -1.7976931348623157e+308
+        ]
+       ],
+       "u": [
+        0,
+        0,
+        0,
+        0.5,
+        1,
+        1,
+        1
+       ]
+      }
+     },
+     "ivl": [
+      0,
+      1
+     ],
+     "tc": [
+      10,
+      10
+     ],
+     "tol": 0.001,
+     "vec": null,
+     "sop": 3,
+     "skip": true,
+     "process": true
+    }
+   },
+   "upstream_ref": "tests/prog_test (my_test_surface_closest_point, my_test_drop_point: TestFiles/pt_TestFiles surfaces)"
+  },
+  {
+   "name": "scls_offset_nurb_boundaries_max",
+   "inputs": {
+    "surface": {
+     "sms": {
+      "$upstream_file": "offset_nurb.sms"
+     }
+    },
+    "op": {
+     "op": "scls",
+     "dom": [
+      -5.475299932110956,
+      0,
+      0,
+      10
+     ],
+     "uc": [
+      2,
+      1
+     ],
+     "vc": [
+      1,
+      2
+     ],
+     "sbox": [
+      -1,
+      -1,
+      -1,
+      1,
+      1,
+      1
+     ],
+     "cbox": [
+      0,
+      0,
+      0,
+      1,
+      1,
+      1
+     ],
+     "curve": {
+      "bspline": {
+       "dim": 3,
+       "p": 2,
+       "cpts": [
+        [
+         0,
+         0,
+         0,
+         -1.7976931348623157e+308
+        ],
+        [
+         0.3,
+         0.2,
+         0.1,
+         -1.7976931348623157e+308
+        ],
+        [
+         0.6,
+         0.5,
+         0.0,
+         -1.7976931348623157e+308
+        ],
+        [
+         0.9,
+         0.9,
+         0.2,
+         -1.7976931348623157e+308
+        ]
+       ],
+       "u": [
+        0,
+        0,
+        0,
+        0.5,
+        1,
+        1,
+        1
+       ]
+      }
+     },
+     "ivl": [
+      0,
+      1
+     ],
+     "tc": [
+      10,
+      10
+     ],
+     "tol": 0.001,
+     "vec": null,
+     "sop": 4,
+     "skip": true,
+     "process": true
+    }
+   },
+   "upstream_ref": "tests/prog_test (my_test_surface_closest_point, my_test_drop_point: TestFiles/pt_TestFiles surfaces)"
+  },
+  {
+   "name": "scls_offset_nurb_curve_end_defers",
+   "inputs": {
+    "surface": {
+     "sms": {
+      "$upstream_file": "offset_nurb.sms"
+     }
+    },
+    "op": {
+     "op": "scls",
+     "dom": [
+      -5.475299932110956,
+      0,
+      0,
+      10
+     ],
+     "uc": [
+      10,
+      10
+     ],
+     "vc": [
+      10,
+      10
+     ],
+     "sbox": [
+      -1,
+      -1,
+      -1,
+      1,
+      1,
+      1
+     ],
+     "cbox": null,
+     "curve": {
+      "bspline": {
+       "dim": 3,
+       "p": 2,
+       "cpts": [
+        [
+         0,
+         0,
+         0,
+         -1.7976931348623157e+308
+        ],
+        [
+         0.3,
+         0.2,
+         0.1,
+         -1.7976931348623157e+308
+        ],
+        [
+         0.6,
+         0.5,
+         0.0,
+         -1.7976931348623157e+308
+        ],
+        [
+         0.9,
+         0.9,
+         0.2,
+         -1.7976931348623157e+308
+        ]
+       ],
+       "u": [
+        0,
+        0,
+        0,
+        0.5,
+        1,
+        1,
+        1
+       ]
+      }
+     },
+     "ivl": [
+      0,
+      1
+     ],
+     "tc": [
+      1,
+      1
+     ],
+     "tol": 0.001,
+     "vec": null,
+     "sop": 3,
+     "skip": true,
+     "process": false
+    }
+   }
+  },
+  {
+   "name": "cont_plane_u",
+   "inputs": {
+    "surface": {
+     "plane": {
+      "o": [
+       0,
+       0,
+       0
+      ],
+      "n": [
+       0,
+       0,
+       1
+      ]
+     }
+    },
+    "op": {
+     "op": "cont",
+     "param": 0
+    }
+   }
+  },
+  {
+   "name": "cont_plane_v",
+   "inputs": {
+    "surface": {
+     "plane": {
+      "o": [
+       0,
+       0,
+       0
+      ],
+      "n": [
+       0,
+       0,
+       1
+      ]
+     }
+    },
+    "op": {
+     "op": "cont",
+     "param": 1
+    }
+   }
+  },
+  {
+   "name": "trim_plane_side0",
+   "inputs": {
+    "surface": {
+     "plane": {
+      "o": [
+       0,
+       0,
+       0
+      ],
+      "n": [
+       0,
+       0,
+       1
+      ]
+     }
+    },
+    "op": {
+     "op": "trim",
+     "dom": [
+      -1,
+      -1,
+      1,
+      1
+     ],
+     "side": 0,
+     "remove": false
+    }
+   }
+  },
+  {
+   "name": "trim_plane_side1",
+   "inputs": {
+    "surface": {
+     "plane": {
+      "o": [
+       0,
+       0,
+       0
+      ],
+      "n": [
+       0,
+       0,
+       1
+      ]
+     }
+    },
+    "op": {
+     "op": "trim",
+     "dom": [
+      -1,
+      -1,
+      1,
+      1
+     ],
+     "side": 1,
+     "remove": false
+    }
+   }
+  },
+  {
+   "name": "trim_plane_side3",
+   "inputs": {
+    "surface": {
+     "plane": {
+      "o": [
+       0,
+       0,
+       0
+      ],
+      "n": [
+       0,
+       0,
+       1
+      ]
+     }
+    },
+    "op": {
+     "op": "trim",
+     "dom": [
+      -1,
+      -1,
+      1,
+      1
+     ],
+     "side": 3,
+     "remove": true
+    }
+   }
+  },
+  {
+   "name": "cont_plane_tilted_u",
+   "inputs": {
+    "surface": {
+     "plane": {
+      "o": [
+       1,
+       2,
+       3
+      ],
+      "n": [
+       0.3,
+       -0.4,
+       0.8
+      ]
+     }
+    },
+    "op": {
+     "op": "cont",
+     "param": 0
+    }
+   }
+  },
+  {
+   "name": "cont_plane_tilted_v",
+   "inputs": {
+    "surface": {
+     "plane": {
+      "o": [
+       1,
+       2,
+       3
+      ],
+      "n": [
+       0.3,
+       -0.4,
+       0.8
+      ]
+     }
+    },
+    "op": {
+     "op": "cont",
+     "param": 1
+    }
+   }
+  },
+  {
+   "name": "trim_plane_tilted_side0",
+   "inputs": {
+    "surface": {
+     "plane": {
+      "o": [
+       1,
+       2,
+       3
+      ],
+      "n": [
+       0.3,
+       -0.4,
+       0.8
+      ]
+     }
+    },
+    "op": {
+     "op": "trim",
+     "dom": [
+      -1,
+      -1,
+      1,
+      1
+     ],
+     "side": 0,
+     "remove": false
+    }
+   }
+  },
+  {
+   "name": "trim_plane_tilted_side1",
+   "inputs": {
+    "surface": {
+     "plane": {
+      "o": [
+       1,
+       2,
+       3
+      ],
+      "n": [
+       0.3,
+       -0.4,
+       0.8
+      ]
+     }
+    },
+    "op": {
+     "op": "trim",
+     "dom": [
+      -1,
+      -1,
+      1,
+      1
+     ],
+     "side": 1,
+     "remove": false
+    }
+   }
+  },
+  {
+   "name": "trim_plane_tilted_side3",
+   "inputs": {
+    "surface": {
+     "plane": {
+      "o": [
+       1,
+       2,
+       3
+      ],
+      "n": [
+       0.3,
+       -0.4,
+       0.8
+      ]
+     }
+    },
+    "op": {
+     "op": "trim",
+     "dom": [
+      -1,
+      -1,
+      1,
+      1
+     ],
+     "side": 3,
+     "remove": true
+    }
+   }
+  },
+  {
+   "name": "cont_revolution_cone_u",
+   "inputs": {
+    "surface": {
+     "revolution": {
+      "a": [
+       1,
+       0,
+       0
+      ],
+      "b": [
+       2,
+       0,
+       3
+      ],
+      "p": [
+       0,
+       0,
+       0
+      ],
+      "axis": [
+       0,
+       0,
+       1
+      ],
+      "swap": false
+     }
+    },
+    "op": {
+     "op": "cont",
+     "param": 0
+    }
+   }
+  },
+  {
+   "name": "cont_revolution_cone_v",
+   "inputs": {
+    "surface": {
+     "revolution": {
+      "a": [
+       1,
+       0,
+       0
+      ],
+      "b": [
+       2,
+       0,
+       3
+      ],
+      "p": [
+       0,
+       0,
+       0
+      ],
+      "axis": [
+       0,
+       0,
+       1
+      ],
+      "swap": false
+     }
+    },
+    "op": {
+     "op": "cont",
+     "param": 1
+    }
+   }
+  },
+  {
+   "name": "trim_revolution_cone_side0",
+   "inputs": {
+    "surface": {
+     "revolution": {
+      "a": [
+       1,
+       0,
+       0
+      ],
+      "b": [
+       2,
+       0,
+       3
+      ],
+      "p": [
+       0,
+       0,
+       0
+      ],
+      "axis": [
+       0,
+       0,
+       1
+      ],
+      "swap": false
+     }
+    },
+    "op": {
+     "op": "trim",
+     "dom": [
+      0.1,
+      0.2,
+      0.9,
+      0.8
+     ],
+     "side": 0,
+     "remove": false
+    }
+   }
+  },
+  {
+   "name": "trim_revolution_cone_side1",
+   "inputs": {
+    "surface": {
+     "revolution": {
+      "a": [
+       1,
+       0,
+       0
+      ],
+      "b": [
+       2,
+       0,
+       3
+      ],
+      "p": [
+       0,
+       0,
+       0
+      ],
+      "axis": [
+       0,
+       0,
+       1
+      ],
+      "swap": false
+     }
+    },
+    "op": {
+     "op": "trim",
+     "dom": [
+      0.1,
+      0.2,
+      0.9,
+      0.8
+     ],
+     "side": 1,
+     "remove": false
+    }
+   }
+  },
+  {
+   "name": "trim_revolution_cone_side3",
+   "inputs": {
+    "surface": {
+     "revolution": {
+      "a": [
+       1,
+       0,
+       0
+      ],
+      "b": [
+       2,
+       0,
+       3
+      ],
+      "p": [
+       0,
+       0,
+       0
+      ],
+      "axis": [
+       0,
+       0,
+       1
+      ],
+      "swap": false
+     }
+    },
+    "op": {
+     "op": "trim",
+     "dom": [
+      0.1,
+      0.2,
+      0.9,
+      0.8
+     ],
+     "side": 3,
+     "remove": true
+    }
+   }
+  },
+  {
+   "name": "cont_revolution_swapped_u",
+   "inputs": {
+    "surface": {
+     "revolution": {
+      "a": [
+       1,
+       0,
+       -1
+      ],
+      "b": [
+       1,
+       0,
+       2
+      ],
+      "p": [
+       0,
+       0,
+       0
+      ],
+      "axis": [
+       0,
+       0,
+       1
+      ],
+      "swap": true
+     }
+    },
+    "op": {
+     "op": "cont",
+     "param": 0
+    }
+   }
+  },
+  {
+   "name": "cont_revolution_swapped_v",
+   "inputs": {
+    "surface": {
+     "revolution": {
+      "a": [
+       1,
+       0,
+       -1
+      ],
+      "b": [
+       1,
+       0,
+       2
+      ],
+      "p": [
+       0,
+       0,
+       0
+      ],
+      "axis": [
+       0,
+       0,
+       1
+      ],
+      "swap": true
+     }
+    },
+    "op": {
+     "op": "cont",
+     "param": 1
+    }
+   }
+  },
+  {
+   "name": "trim_revolution_swapped_side0",
+   "inputs": {
+    "surface": {
+     "revolution": {
+      "a": [
+       1,
+       0,
+       -1
+      ],
+      "b": [
+       1,
+       0,
+       2
+      ],
+      "p": [
+       0,
+       0,
+       0
+      ],
+      "axis": [
+       0,
+       0,
+       1
+      ],
+      "swap": true
+     }
+    },
+    "op": {
+     "op": "trim",
+     "dom": [
+      0.1,
+      0.2,
+      0.9,
+      0.8
+     ],
+     "side": 0,
+     "remove": false
+    }
+   }
+  },
+  {
+   "name": "trim_revolution_swapped_side1",
+   "inputs": {
+    "surface": {
+     "revolution": {
+      "a": [
+       1,
+       0,
+       -1
+      ],
+      "b": [
+       1,
+       0,
+       2
+      ],
+      "p": [
+       0,
+       0,
+       0
+      ],
+      "axis": [
+       0,
+       0,
+       1
+      ],
+      "swap": true
+     }
+    },
+    "op": {
+     "op": "trim",
+     "dom": [
+      0.1,
+      0.2,
+      0.9,
+      0.8
+     ],
+     "side": 1,
+     "remove": false
+    }
+   }
+  },
+  {
+   "name": "trim_revolution_swapped_side3",
+   "inputs": {
+    "surface": {
+     "revolution": {
+      "a": [
+       1,
+       0,
+       -1
+      ],
+      "b": [
+       1,
+       0,
+       2
+      ],
+      "p": [
+       0,
+       0,
+       0
+      ],
+      "axis": [
+       0,
+       0,
+       1
+      ],
+      "swap": true
+     }
+    },
+    "op": {
+     "op": "trim",
+     "dom": [
+      0.1,
+      0.2,
+      0.9,
+      0.8
+     ],
+     "side": 3,
+     "remove": true
+    }
+   }
+  },
+  {
+   "name": "cont_bounded_errors",
+   "inputs": {
+    "surface": {
+     "bounded": {
+      "basis": {
+       "plane": {
+        "o": [
+         0,
+         0,
+         0
+        ],
+        "n": [
+         0,
+         0,
+         1
+        ]
+       }
+      },
+      "implicit": true
+     }
+    },
+    "op": {
+     "op": "cont",
+     "param": 0
+    }
+   }
+  },
+  {
+   "name": "trim_bounded_defers",
+   "inputs": {
+    "surface": {
+     "bounded": {
+      "basis": {
+       "plane": {
+        "o": [
+         0,
+         0,
+         0
+        ],
+        "n": [
+         0,
+         0,
+         1
+        ]
+       }
+      },
+      "implicit": false
+     }
+    },
+    "op": {
+     "op": "trim",
+     "dom": [
+      0,
+      0,
+      1,
+      1
+     ],
+     "side": 0,
+     "remove": false
+    }
+   }
+  },
+  {
+   "name": "ssid_planes_identical",
+   "inputs": {
+    "surface": {
+     "plane": {
+      "o": [
+       0,
+       0,
+       0
+      ],
+      "n": [
+       0,
+       0,
+       1
+      ]
+     }
+    },
+    "op": {
+     "op": "ssid",
+     "other": {
+      "plane": {
+       "o": [
+        1,
+        2,
+        3
+       ],
+       "n": [
+        0.3,
+        -0.4,
+        0.8
+       ]
+      }
+     },
+     "tol": 0.001,
+     "sol1": {
+      "ty": 1,
+      "nvars": 4,
+      "value": 0.0001,
+      "end_value": 0,
+      "start": [
+       0.0,
+       0.25,
+       0.5,
+       0.25,
+       0.5
+      ],
+      "end": [
+       0.0,
+       0.25,
+       0.5,
+       0.25,
+       0.5
+      ]
+     },
+     "sol2": {
+      "ty": 1,
+      "nvars": 4,
+      "value": 0.0002,
+      "end_value": 0,
+      "start": [
+       0.0,
+       0.25,
+       0.5,
+       0.25,
+       0.5
+      ],
+      "end": [
+       0.0,
+       0.25,
+       0.5,
+       0.25,
+       0.5
+      ]
+     }
+    }
+   }
+  },
+  {
+   "name": "ssid_planes_diff_params_far",
+   "inputs": {
+    "surface": {
+     "plane": {
+      "o": [
+       0,
+       0,
+       0
+      ],
+      "n": [
+       0,
+       0,
+       1
+      ]
+     }
+    },
+    "op": {
+     "op": "ssid",
+     "other": {
+      "plane": {
+       "o": [
+        1,
+        2,
+        3
+       ],
+       "n": [
+        0.3,
+        -0.4,
+        0.8
+       ]
+      }
+     },
+     "tol": 0.001,
+     "sol1": {
+      "ty": 1,
+      "nvars": 4,
+      "value": 0.0001,
+      "end_value": 0,
+      "start": [
+       0.0,
+       0.25,
+       0.5,
+       0.25,
+       0.5
+      ],
+      "end": [
+       0.0,
+       0.25,
+       0.5,
+       0.25,
+       0.5
+      ]
+     },
+     "sol2": {
+      "ty": 1,
+      "nvars": 4,
+      "value": 0.0001,
+      "end_value": 0,
+      "start": [
+       0,
+       0.75,
+       0.5,
+       0.25,
+       0.5
+      ],
+      "end": [
+       0.0,
+       0.25,
+       0.5,
+       0.25,
+       0.5
+      ]
+     }
+    }
+   }
+  },
+  {
+   "name": "ssid_same_plane_coincident_points",
+   "inputs": {
+    "surface": {
+     "plane": {
+      "o": [
+       0,
+       0,
+       0
+      ],
+      "n": [
+       0,
+       0,
+       1
+      ]
+     }
+    },
+    "op": {
+     "op": "ssid",
+     "other": {
+      "plane": {
+       "o": [
+        0,
+        0,
+        0
+       ],
+       "n": [
+        0,
+        0,
+        1
+       ]
+      }
+     },
+     "tol": 0.001,
+     "sol1": {
+      "ty": 1,
+      "nvars": 4,
+      "value": 0.0001,
+      "end_value": 0,
+      "start": [
+       0,
+       0.2,
+       0.3,
+       0.2,
+       0.3
+      ],
+      "end": [
+       0.0,
+       0.25,
+       0.5,
+       0.25,
+       0.5
+      ]
+     },
+     "sol2": {
+      "ty": 1,
+      "nvars": 4,
+      "value": 0.0001,
+      "end_value": 0,
+      "start": [
+       0,
+       0.2,
+       0.3,
+       0.2,
+       0.3001
+      ],
+      "end": [
+       0.0,
+       0.25,
+       0.5,
+       0.25,
+       0.5
+      ]
+     }
+    }
+   }
+  },
+  {
+   "name": "ssid_same_plane_huge_tol",
+   "inputs": {
+    "surface": {
+     "plane": {
+      "o": [
+       0,
+       0,
+       0
+      ],
+      "n": [
+       0,
+       0,
+       1
+      ]
+     }
+    },
+    "op": {
+     "op": "ssid",
+     "other": {
+      "plane": {
+       "o": [
+        0,
+        0,
+        0
+       ],
+       "n": [
+        0,
+        0,
+        1
+       ]
+      }
+     },
+     "tol": 1000.0,
+     "sol1": {
+      "ty": 1,
+      "nvars": 4,
+      "value": 0.0001,
+      "end_value": 0,
+      "start": [
+       0,
+       0.2,
+       0.3,
+       0.2,
+       0.3
+      ],
+      "end": [
+       0.0,
+       0.25,
+       0.5,
+       0.25,
+       0.5
+      ]
+     },
+     "sol2": {
+      "ty": 1,
+      "nvars": 4,
+      "value": 0.0001,
+      "end_value": 0,
+      "start": [
+       0,
+       0.9,
+       -0.3,
+       0.2,
+       0.4
+      ],
+      "end": [
+       0.0,
+       0.25,
+       0.5,
+       0.25,
+       0.5
+      ]
+     }
+    }
+   }
+  },
+  {
+   "name": "ssid_diff_counts",
+   "inputs": {
+    "surface": {
+     "plane": {
+      "o": [
+       0,
+       0,
+       0
+      ],
+      "n": [
+       0,
+       0,
+       1
+      ]
+     }
+    },
+    "op": {
+     "op": "ssid",
+     "other": {
+      "plane": {
+       "o": [
+        1,
+        2,
+        3
+       ],
+       "n": [
+        0.3,
+        -0.4,
+        0.8
+       ]
+      }
+     },
+     "tol": 0.001,
+     "sol1": {
+      "ty": 1,
+      "nvars": 4,
+      "value": 0.0001,
+      "end_value": 0,
+      "start": [
+       0.0,
+       0.25,
+       0.5,
+       0.25,
+       0.5
+      ],
+      "end": [
+       0.0,
+       0.25,
+       0.5,
+       0.25,
+       0.5
+      ]
+     },
+     "sol2": {
+      "ty": 1,
+      "nvars": 3,
+      "value": 0.0001,
+      "end_value": 0,
+      "start": [
+       0.0,
+       0.25,
+       0.5,
+       0.25,
+       0.5
+      ],
+      "end": [
+       0.0,
+       0.25,
+       0.5,
+       0.25,
+       0.5
+      ]
+     }
+    }
+   }
+  },
+  {
+   "name": "ssid_range_solutions",
+   "inputs": {
+    "surface": {
+     "plane": {
+      "o": [
+       0,
+       0,
+       0
+      ],
+      "n": [
+       0,
+       0,
+       1
+      ]
+     }
+    },
+    "op": {
+     "op": "ssid",
+     "other": {
+      "plane": {
+       "o": [
+        1,
+        2,
+        3
+       ],
+       "n": [
+        0.3,
+        -0.4,
+        0.8
+       ]
+      }
+     },
+     "tol": 1000.0,
+     "sol1": {
+      "ty": 2,
+      "nvars": 4,
+      "value": 0.0001,
+      "end_value": 0,
+      "start": [
+       0.0,
+       0.25,
+       0.5,
+       0.25,
+       0.5
+      ],
+      "end": [
+       0.0,
+       0.25,
+       0.5,
+       0.25,
+       0.5
+      ]
+     },
+     "sol2": {
+      "ty": 2,
+      "nvars": 4,
+      "value": 0.0001,
+      "end_value": 0,
+      "start": [
+       0,
+       0.9,
+       0.5,
+       0.25,
+       0.5
+      ],
+      "end": [
+       0.0,
+       0.25,
+       0.5,
+       0.25,
+       0.5
+      ]
+     }
+    }
+   }
+  },
+  {
+   "name": "ssid_bspline_singular_test_defers",
+   "inputs": {
+    "surface": {
+     "sms": {
+      "$upstream_file": "DropCurveSurface.sms"
+     }
+    },
+    "op": {
+     "op": "ssid",
+     "other": {
+      "sms": {
+       "$upstream_file": "DropCurveSurface.sms"
+      }
+     },
+     "tol": 1000.0,
+     "sol1": {
+      "ty": 1,
+      "nvars": 4,
+      "value": 0.0001,
+      "end_value": 0,
+      "start": [
+       0,
+       0.2,
+       0.3,
+       0.2,
+       0.3
+      ],
+      "end": [
+       0.0,
+       0.25,
+       0.5,
+       0.25,
+       0.5
+      ]
+     },
+     "sol2": {
+      "ty": 1,
+      "nvars": 4,
+      "value": 0.0001,
+      "end_value": 0,
+      "start": [
+       0,
+       0.8,
+       0.3,
+       0.2,
+       0.3
+      ],
+      "end": [
+       0.0,
+       0.25,
+       0.5,
+       0.25,
+       0.5
+      ]
+     }
+    }
+   }
+  },
+  {
+   "name": "classify_point_solution",
+   "inputs": {
+    "surface": {
+     "plane": {
+      "o": [
+       0,
+       0,
+       0
+      ],
+      "n": [
+       0,
+       0,
+       1
+      ]
+     }
+    },
+    "op": {
+     "op": "classify",
+     "curve": {
+      "line": {
+       "a": [
+        0,
+        0,
+        0
+       ],
+       "b": [
+        1,
+        0,
+        0
+       ]
+      }
+     },
+     "sol": {
+      "ty": 1,
+      "nvars": 3,
+      "value": 0,
+      "end_value": 0,
+      "start": [
+       0.5,
+       0.5,
+       0,
+       0,
+       0
+      ],
+      "end": [
+       0,
+       0,
+       0,
+       0,
+       0
+      ]
+     }
+    }
+   }
+  },
+  {
+   "name": "classify_range_defers",
+   "inputs": {
+    "surface": {
+     "plane": {
+      "o": [
+       0,
+       0,
+       0
+      ],
+      "n": [
+       0,
+       0,
+       1
+      ]
+     }
+    },
+    "op": {
+     "op": "classify",
+     "curve": {
+      "line": {
+       "a": [
+        0,
+        0,
+        0
+       ],
+       "b": [
+        1,
+        0,
+        0
+       ]
+      }
+     },
+     "sol": {
+      "ty": 2,
+      "nvars": 3,
+      "value": 0,
+      "end_value": 0,
+      "start": [
+       0.1,
+       0.1,
+       0,
+       0,
+       0
+      ],
+      "end": [
+       0.9,
+       0.9,
+       0,
+       0,
+       0
+      ]
+     }
+    }
+   }
+  },
+  {
+   "name": "scc_disjoint_line",
+   "inputs": {
+    "surface": {
+     "plane": {
+      "o": [
+       0,
+       0,
+       0
+      ],
+      "n": [
+       0,
+       0,
+       1
+      ]
+     }
+    },
+    "op": {
+     "op": "scc",
+     "dom": [
+      -1,
+      -1,
+      1,
+      1
+     ],
+     "curve": {
+      "line": {
+       "a": [
+        0,
+        0,
+        10
+       ],
+       "b": [
+        1,
+        0,
+        10
+       ]
+      }
+     },
+     "ivl": [
+      0,
+      1
+     ],
+     "tol": 0.001,
+     "partial": false
+    }
+   }
+  },
+  {
+   "name": "scc_disjoint_bspline",
+   "inputs": {
+    "surface": {
+     "sms": {
+      "$upstream_file": "Surface.sms"
+     }
+    },
+    "op": {
+     "op": "scc",
+     "dom": [
+      0,
+      0.0634210842965636,
+      1,
+      0.6377485983139218
+     ],
+     "curve": {
+      "line": {
+       "a": [
+        0,
+        0,
+        1000.0
+       ],
+       "b": [
+        1,
+        0,
+        1000.0
+       ]
+      }
+     },
+     "ivl": [
+      0,
+      1
+     ],
+     "tol": 0.001,
+     "partial": true
+    }
+   }
+  },
+  {
+   "name": "scc_on_plane_defers",
+   "inputs": {
+    "surface": {
+     "plane": {
+      "o": [
+       0,
+       0,
+       0
+      ],
+      "n": [
+       0,
+       0,
+       1
+      ]
+     }
+    },
+    "op": {
+     "op": "scc",
+     "dom": [
+      -1,
+      -1,
+      1,
+      1
+     ],
+     "curve": {
+      "line": {
+       "a": [
+        0,
+        0,
+        0
+       ],
+       "b": [
+        1,
+        0,
+        0
+       ]
+      }
+     },
+     "ivl": [
+      0,
+      1
+     ],
+     "tol": 0.001,
+     "partial": false
+    }
+   }
+  },
+  {
+   "name": "sample_base_curve_type_errors",
+   "inputs": {
+    "surface": {
+     "plane": {
+      "o": [
+       0,
+       0,
+       0
+      ],
+      "n": [
+       0,
+       0,
+       1
+      ]
+     }
+    },
+    "op": {
+     "op": "sample",
+     "n": 4,
+     "tt": 5,
+     "vals": [
+      0,
+      0,
+      1,
+      1,
+      0,
+      0
+     ],
+     "reference": null,
+     "curve": {
+      "line": {
+       "a": [
+        0,
+        0,
+        0
+       ],
+       "b": [
+        1,
+        0,
+        0
+       ]
+      }
+     },
+     "ivl": [
+      0,
+      1
+     ],
+     "right": true,
+     "start": true,
+     "want2": true,
+     "want3": false
+    }
+   }
+  },
+  {
+   "name": "sample_zero_samples_invalid",
+   "inputs": {
+    "surface": {
+     "plane": {
+      "o": [
+       0,
+       0,
+       0
+      ],
+      "n": [
+       0,
+       0,
+       1
+      ]
+     }
+    },
+    "op": {
+     "op": "sample",
+     "n": 0,
+     "tt": 2,
+     "vals": [
+      0,
+      0,
+      1,
+      1,
+      0,
+      0
+     ],
+     "reference": null,
+     "curve": {
+      "line": {
+       "a": [
+        0,
+        0,
+        0
+       ],
+       "b": [
+        1,
+        0,
+        0
+       ]
+      }
+     },
+     "ivl": [
+      0,
+      1
+     ],
+     "right": true,
+     "start": true,
+     "want2": true,
+     "want3": false
+    }
+   }
+  },
+  {
+   "name": "sample_dir_angle_out_of_range",
+   "inputs": {
+    "surface": {
+     "plane": {
+      "o": [
+       0,
+       0,
+       0
+      ],
+      "n": [
+       0,
+       0,
+       1
+      ]
+     }
+    },
+    "op": {
+     "op": "sample",
+     "n": 4,
+     "tt": 2,
+     "vals": [
+      400,
+      0,
+      1,
+      1,
+      0,
+      0
+     ],
+     "reference": null,
+     "curve": {
+      "line": {
+       "a": [
+        0,
+        0,
+        0
+       ],
+       "b": [
+        1,
+        0,
+        0
+       ]
+      }
+     },
+     "ivl": [
+      0,
+      1
+     ],
+     "right": true,
+     "start": true,
+     "want2": true,
+     "want3": false
+    }
+   }
+  },
+  {
+   "name": "sample_negative_tan_length",
+   "inputs": {
+    "surface": {
+     "plane": {
+      "o": [
+       0,
+       0,
+       0
+      ],
+      "n": [
+       0,
+       0,
+       1
+      ]
+     }
+    },
+    "op": {
+     "op": "sample",
+     "n": 4,
+     "tt": 2,
+     "vals": [
+      0,
+      0,
+      -1,
+      1,
+      0,
+      0
+     ],
+     "reference": null,
+     "curve": {
+      "line": {
+       "a": [
+        0,
+        0,
+        0
+       ],
+       "b": [
+        1,
+        0,
+        0
+       ]
+      }
+     },
+     "ivl": [
+      0,
+      1
+     ],
+     "right": true,
+     "start": true,
+     "want2": true,
+     "want3": false
+    }
+   }
+  },
+  {
+   "name": "sample_reference_with_wrong_type",
+   "inputs": {
+    "surface": {
+     "plane": {
+      "o": [
+       0,
+       0,
+       0
+      ],
+      "n": [
+       0,
+       0,
+       1
+      ]
+     }
+    },
+    "op": {
+     "op": "sample",
+     "n": 4,
+     "tt": 2,
+     "vals": [
+      0,
+      0,
+      1,
+      1,
+      0,
+      0
+     ],
+     "reference": {
+      "line": {
+       "a": [
+        0,
+        1,
+        0
+       ],
+       "b": [
+        1,
+        1,
+        0
+       ]
+      }
+     },
+     "curve": {
+      "line": {
+       "a": [
+        0,
+        0,
+        0
+       ],
+       "b": [
+        1,
+        0,
+        0
+       ]
+      }
+     },
+     "ivl": [
+      0,
+      1
+     ],
+     "right": true,
+     "start": true,
+     "want2": true,
+     "want3": false
+    }
+   }
+  },
+  {
+   "name": "sample_degenerate_curve",
+   "inputs": {
+    "surface": {
+     "plane": {
+      "o": [
+       0,
+       0,
+       0
+      ],
+      "n": [
+       0,
+       0,
+       1
+      ]
+     }
+    },
+    "op": {
+     "op": "sample",
+     "n": 4,
+     "tt": 2,
+     "vals": [
+      0,
+      0,
+      1,
+      1,
+      0,
+      0
+     ],
+     "reference": null,
+     "curve": {
+      "bspline": {
+       "dim": 3,
+       "p": 2,
+       "cpts": [
+        [
+         0.5,
+         0.5,
+         0,
+         -1.7976931348623157e+308
+        ],
+        [
+         0.5,
+         0.5,
+         0,
+         -1.7976931348623157e+308
+        ],
+        [
+         0.5,
+         0.5,
+         0,
+         -1.7976931348623157e+308
+        ],
+        [
+         0.5,
+         0.5,
+         0,
+         -1.7976931348623157e+308
+        ]
+       ],
+       "u": [
+        0,
+        0,
+        0,
+        0.5,
+        1,
+        1,
+        1
+       ]
+      }
+     },
+     "ivl": [
+      0,
+      1
+     ],
+     "right": true,
+     "start": true,
+     "want2": true,
+     "want3": false
+    }
+   }
+  },
+  {
+   "name": "sample_drop_defers",
+   "inputs": {
+    "surface": {
+     "plane": {
+      "o": [
+       0,
+       0,
+       0
+      ],
+      "n": [
+       0,
+       0,
+       1
+      ]
+     }
+    },
+    "op": {
+     "op": "sample",
+     "n": 4,
+     "tt": 2,
+     "vals": [
+      0,
+      0,
+      1,
+      1,
+      0,
+      0
+     ],
+     "reference": null,
+     "curve": {
+      "line": {
+       "a": [
+        0,
+        0,
+        0
+       ],
+       "b": [
+        1,
+        0,
+        0
+       ]
+      }
+     },
+     "ivl": [
+      0,
+      1
+     ],
+     "right": true,
+     "start": true,
+     "want2": true,
+     "want3": false
+    }
+   }
+  },
+  {
+   "name": "sample_reference_drop_defers",
+   "inputs": {
+    "surface": {
+     "plane": {
+      "o": [
+       0,
+       0,
+       0
+      ],
+      "n": [
+       0,
+       0,
+       1
+      ]
+     }
+    },
+    "op": {
+     "op": "sample",
+     "n": 4,
+     "tt": 3,
+     "vals": [
+      0,
+      0,
+      1,
+      1,
+      0,
+      0
+     ],
+     "reference": {
+      "line": {
+       "a": [
+        0,
+        1,
+        0
+       ],
+       "b": [
+        1,
+        1,
+        0
+       ]
+      }
+     },
+     "curve": {
+      "line": {
+       "a": [
+        0,
+        0,
+        0
+       ],
+       "b": [
+        1,
+        0,
+        0
+       ]
+      }
+     },
+     "ivl": [
+      0,
+      1
+     ],
+     "right": true,
+     "start": true,
+     "want2": true,
+     "want3": true
+    }
+   }
+  },
+  {
+   "name": "lci_defers",
+   "inputs": {
+    "surface": {
+     "plane": {
+      "o": [
+       0,
+       0,
+       0
+      ],
+      "n": [
+       0,
+       0,
+       1
+      ]
+     }
+    },
+    "op": {
+     "op": "lci",
+     "dom": [
+      -1,
+      -1,
+      1,
+      1
+     ],
+     "curve": {
+      "line": {
+       "a": [
+        0,
+        0,
+        -1
+       ],
+       "b": [
+        0,
+        0,
+        1
+       ]
+      }
+     },
+     "ivl": [
+      0,
+      2
+     ],
+     "tol": 0.001,
+     "guess_uv": [
+      0,
+      0
+     ],
+     "guess_t": 1
+    }
+   }
+  },
+  {
+   "name": "adv_cone_apex_cont_u",
+   "inputs": {
+    "surface": {
+     "revolution": {
+      "a": [
+       0,
+       0,
+       0
+      ],
+      "b": [
+       2,
+       0,
+       3
+      ],
+      "p": [
+       0,
+       0,
+       0
+      ],
+      "axis": [
+       0,
+       0,
+       1
+      ],
+      "swap": false
+     }
+    },
+    "op": {
+     "op": "cont",
+     "param": 0
+    }
+   },
+   "upstream_ref": "review of PR #92: adversarial edge case"
+  },
+  {
+   "name": "adv_cone_apex_cont_v",
+   "inputs": {
+    "surface": {
+     "revolution": {
+      "a": [
+       0,
+       0,
+       0
+      ],
+      "b": [
+       2,
+       0,
+       3
+      ],
+      "p": [
+       0,
+       0,
+       0
+      ],
+      "axis": [
+       0,
+       0,
+       1
+      ],
+      "swap": false
+     }
+    },
+    "op": {
+     "op": "cont",
+     "param": 1
+    }
+   },
+   "upstream_ref": "review of PR #92: adversarial edge case"
+  },
+  {
+   "name": "adv_cone_apex_trim_s0_r0",
+   "inputs": {
+    "surface": {
+     "revolution": {
+      "a": [
+       0,
+       0,
+       0
+      ],
+      "b": [
+       2,
+       0,
+       3
+      ],
+      "p": [
+       0,
+       0,
+       0
+      ],
+      "axis": [
+       0,
+       0,
+       1
+      ],
+      "swap": false
+     }
+    },
+    "op": {
+     "op": "trim",
+     "dom": [
+      0,
+      0,
+      1,
+      1
+     ],
+     "side": 0,
+     "remove": false
+    }
+   },
+   "upstream_ref": "review of PR #92: adversarial edge case"
+  },
+  {
+   "name": "adv_cone_apex_trim_s0_r1",
+   "inputs": {
+    "surface": {
+     "revolution": {
+      "a": [
+       0,
+       0,
+       0
+      ],
+      "b": [
+       2,
+       0,
+       3
+      ],
+      "p": [
+       0,
+       0,
+       0
+      ],
+      "axis": [
+       0,
+       0,
+       1
+      ],
+      "swap": false
+     }
+    },
+    "op": {
+     "op": "trim",
+     "dom": [
+      0,
+      0,
+      1,
+      1
+     ],
+     "side": 0,
+     "remove": true
+    }
+   },
+   "upstream_ref": "review of PR #92: adversarial edge case"
+  },
+  {
+   "name": "adv_cone_apex_trim_s1_r0",
+   "inputs": {
+    "surface": {
+     "revolution": {
+      "a": [
+       0,
+       0,
+       0
+      ],
+      "b": [
+       2,
+       0,
+       3
+      ],
+      "p": [
+       0,
+       0,
+       0
+      ],
+      "axis": [
+       0,
+       0,
+       1
+      ],
+      "swap": false
+     }
+    },
+    "op": {
+     "op": "trim",
+     "dom": [
+      0,
+      0,
+      1,
+      1
+     ],
+     "side": 1,
+     "remove": false
+    }
+   },
+   "upstream_ref": "review of PR #92: adversarial edge case"
+  },
+  {
+   "name": "adv_cone_apex_trim_s1_r1",
+   "inputs": {
+    "surface": {
+     "revolution": {
+      "a": [
+       0,
+       0,
+       0
+      ],
+      "b": [
+       2,
+       0,
+       3
+      ],
+      "p": [
+       0,
+       0,
+       0
+      ],
+      "axis": [
+       0,
+       0,
+       1
+      ],
+      "swap": false
+     }
+    },
+    "op": {
+     "op": "trim",
+     "dom": [
+      0,
+      0,
+      1,
+      1
+     ],
+     "side": 1,
+     "remove": true
+    }
+   },
+   "upstream_ref": "review of PR #92: adversarial edge case"
+  },
+  {
+   "name": "adv_cone_apex_swap_cont_u",
+   "inputs": {
+    "surface": {
+     "revolution": {
+      "a": [
+       0,
+       0,
+       0
+      ],
+      "b": [
+       2,
+       0,
+       3
+      ],
+      "p": [
+       0,
+       0,
+       0
+      ],
+      "axis": [
+       0,
+       0,
+       1
+      ],
+      "swap": true
+     }
+    },
+    "op": {
+     "op": "cont",
+     "param": 0
+    }
+   },
+   "upstream_ref": "review of PR #92: adversarial edge case"
+  },
+  {
+   "name": "adv_cone_apex_swap_cont_v",
+   "inputs": {
+    "surface": {
+     "revolution": {
+      "a": [
+       0,
+       0,
+       0
+      ],
+      "b": [
+       2,
+       0,
+       3
+      ],
+      "p": [
+       0,
+       0,
+       0
+      ],
+      "axis": [
+       0,
+       0,
+       1
+      ],
+      "swap": true
+     }
+    },
+    "op": {
+     "op": "cont",
+     "param": 1
+    }
+   },
+   "upstream_ref": "review of PR #92: adversarial edge case"
+  },
+  {
+   "name": "adv_cone_apex_swap_trim_s0_r0",
+   "inputs": {
+    "surface": {
+     "revolution": {
+      "a": [
+       0,
+       0,
+       0
+      ],
+      "b": [
+       2,
+       0,
+       3
+      ],
+      "p": [
+       0,
+       0,
+       0
+      ],
+      "axis": [
+       0,
+       0,
+       1
+      ],
+      "swap": true
+     }
+    },
+    "op": {
+     "op": "trim",
+     "dom": [
+      0,
+      0,
+      1,
+      1
+     ],
+     "side": 0,
+     "remove": false
+    }
+   },
+   "upstream_ref": "review of PR #92: adversarial edge case"
+  },
+  {
+   "name": "adv_cone_apex_swap_trim_s0_r1",
+   "inputs": {
+    "surface": {
+     "revolution": {
+      "a": [
+       0,
+       0,
+       0
+      ],
+      "b": [
+       2,
+       0,
+       3
+      ],
+      "p": [
+       0,
+       0,
+       0
+      ],
+      "axis": [
+       0,
+       0,
+       1
+      ],
+      "swap": true
+     }
+    },
+    "op": {
+     "op": "trim",
+     "dom": [
+      0,
+      0,
+      1,
+      1
+     ],
+     "side": 0,
+     "remove": true
+    }
+   },
+   "upstream_ref": "review of PR #92: adversarial edge case"
+  },
+  {
+   "name": "adv_cone_apex_swap_trim_s1_r0",
+   "inputs": {
+    "surface": {
+     "revolution": {
+      "a": [
+       0,
+       0,
+       0
+      ],
+      "b": [
+       2,
+       0,
+       3
+      ],
+      "p": [
+       0,
+       0,
+       0
+      ],
+      "axis": [
+       0,
+       0,
+       1
+      ],
+      "swap": true
+     }
+    },
+    "op": {
+     "op": "trim",
+     "dom": [
+      0,
+      0,
+      1,
+      1
+     ],
+     "side": 1,
+     "remove": false
+    }
+   },
+   "upstream_ref": "review of PR #92: adversarial edge case"
+  },
+  {
+   "name": "adv_cone_apex_swap_trim_s1_r1",
+   "inputs": {
+    "surface": {
+     "revolution": {
+      "a": [
+       0,
+       0,
+       0
+      ],
+      "b": [
+       2,
+       0,
+       3
+      ],
+      "p": [
+       0,
+       0,
+       0
+      ],
+      "axis": [
+       0,
+       0,
+       1
+      ],
+      "swap": true
+     }
+    },
+    "op": {
+     "op": "trim",
+     "dom": [
+      0,
+      0,
+      1,
+      1
+     ],
+     "side": 1,
+     "remove": true
+    }
+   },
+   "upstream_ref": "review of PR #92: adversarial edge case"
+  },
+  {
+   "name": "adv_bss_many_knots_cont_u",
+   "inputs": {
+    "surface": {
+     "bspline": {
+      "net": [
+       [
+        [
+         0,
+         0.0,
+         0.0,
+         -1.7976931348623157e+308
+        ],
+        [
+         0,
+         1.0,
+         0.0,
+         -1.7976931348623157e+308
+        ],
+        [
+         0,
+         2.0,
+         0.0,
+         -1.7976931348623157e+308
+        ]
+       ],
+       [
+        [
+         1,
+         0.0,
+         0.0,
+         -1.7976931348623157e+308
+        ],
+        [
+         1,
+         1.0,
+         0.0,
+         -1.7976931348623157e+308
+        ],
+        [
+         1,
+         2.0,
+         0.0,
+         -1.7976931348623157e+308
+        ]
+       ],
+       [
+        [
+         2,
+         0.0,
+         0.0,
+         -1.7976931348623157e+308
+        ],
+        [
+         2,
+         1.0,
+         0.0,
+         -1.7976931348623157e+308
+        ],
+        [
+         2,
+         2.0,
+         0.0,
+         -1.7976931348623157e+308
+        ]
+       ],
+       [
+        [
+         3,
+         0.0,
+         1.0,
+         -1.7976931348623157e+308
+        ],
+        [
+         3,
+         1.0,
+         1.0,
+         -1.7976931348623157e+308
+        ],
+        [
+         3,
+         2.0,
+         1.0,
+         -1.7976931348623157e+308
+        ]
+       ],
+       [
+        [
+         4,
+         0.0,
+         0.0,
+         -1.7976931348623157e+308
+        ],
+        [
+         4,
+         1.0,
+         0.0,
+         -1.7976931348623157e+308
+        ],
+        [
+         4,
+         2.0,
+         0.0,
+         -1.7976931348623157e+308
+        ]
+       ],
+       [
+        [
+         5,
+         0.5,
+         0.0,
+         -1.7976931348623157e+308
+        ],
+        [
+         5,
+         1.5,
+         0.0,
+         -1.7976931348623157e+308
+        ],
+        [
+         5,
+         2.5,
+         0.0,
+         -1.7976931348623157e+308
+        ]
+       ],
+       [
+        [
+         6,
+         0.0,
+         0.0,
+         -1.7976931348623157e+308
+        ],
+        [
+         6,
+         1.0,
+         0.0,
+         -1.7976931348623157e+308
+        ],
+        [
+         6,
+         2.0,
+         0.0,
+         -1.7976931348623157e+308
+        ]
+       ],
+       [
+        [
+         7,
+         0.0,
+         0.0,
+         -1.7976931348623157e+308
+        ],
+        [
+         7,
+         1.0,
+         0.0,
+         -1.7976931348623157e+308
+        ],
+        [
+         7,
+         2.0,
+         0.0,
+         -1.7976931348623157e+308
+        ]
+       ]
+      ],
+      "p": 1,
+      "q": 1,
+      "u": [
+       0,
+       0,
+       1,
+       2,
+       3,
+       4,
+       5,
+       6,
+       7,
+       7
+      ],
+      "v": [
+       0,
+       0,
+       1,
+       2,
+       2
+      ]
+     }
+    },
+    "op": {
+     "op": "cont",
+     "param": 0
+    }
+   },
+   "upstream_ref": "review of PR #92: adversarial edge case"
+  },
+  {
+   "name": "adv_bss_many_knots_cont_v",
+   "inputs": {
+    "surface": {
+     "bspline": {
+      "net": [
+       [
+        [
+         0,
+         0.0,
+         0.0,
+         -1.7976931348623157e+308
+        ],
+        [
+         0,
+         1.0,
+         0.0,
+         -1.7976931348623157e+308
+        ],
+        [
+         0,
+         2.0,
+         0.0,
+         -1.7976931348623157e+308
+        ]
+       ],
+       [
+        [
+         1,
+         0.0,
+         0.0,
+         -1.7976931348623157e+308
+        ],
+        [
+         1,
+         1.0,
+         0.0,
+         -1.7976931348623157e+308
+        ],
+        [
+         1,
+         2.0,
+         0.0,
+         -1.7976931348623157e+308
+        ]
+       ],
+       [
+        [
+         2,
+         0.0,
+         0.0,
+         -1.7976931348623157e+308
+        ],
+        [
+         2,
+         1.0,
+         0.0,
+         -1.7976931348623157e+308
+        ],
+        [
+         2,
+         2.0,
+         0.0,
+         -1.7976931348623157e+308
+        ]
+       ],
+       [
+        [
+         3,
+         0.0,
+         1.0,
+         -1.7976931348623157e+308
+        ],
+        [
+         3,
+         1.0,
+         1.0,
+         -1.7976931348623157e+308
+        ],
+        [
+         3,
+         2.0,
+         1.0,
+         -1.7976931348623157e+308
+        ]
+       ],
+       [
+        [
+         4,
+         0.0,
+         0.0,
+         -1.7976931348623157e+308
+        ],
+        [
+         4,
+         1.0,
+         0.0,
+         -1.7976931348623157e+308
+        ],
+        [
+         4,
+         2.0,
+         0.0,
+         -1.7976931348623157e+308
+        ]
+       ],
+       [
+        [
+         5,
+         0.5,
+         0.0,
+         -1.7976931348623157e+308
+        ],
+        [
+         5,
+         1.5,
+         0.0,
+         -1.7976931348623157e+308
+        ],
+        [
+         5,
+         2.5,
+         0.0,
+         -1.7976931348623157e+308
+        ]
+       ],
+       [
+        [
+         6,
+         0.0,
+         0.0,
+         -1.7976931348623157e+308
+        ],
+        [
+         6,
+         1.0,
+         0.0,
+         -1.7976931348623157e+308
+        ],
+        [
+         6,
+         2.0,
+         0.0,
+         -1.7976931348623157e+308
+        ]
+       ],
+       [
+        [
+         7,
+         0.0,
+         0.0,
+         -1.7976931348623157e+308
+        ],
+        [
+         7,
+         1.0,
+         0.0,
+         -1.7976931348623157e+308
+        ],
+        [
+         7,
+         2.0,
+         0.0,
+         -1.7976931348623157e+308
+        ]
+       ]
+      ],
+      "p": 1,
+      "q": 1,
+      "u": [
+       0,
+       0,
+       1,
+       2,
+       3,
+       4,
+       5,
+       6,
+       7,
+       7
+      ],
+      "v": [
+       0,
+       0,
+       1,
+       2,
+       2
+      ]
+     }
+    },
+    "op": {
+     "op": "cont",
+     "param": 1
+    }
+   },
+   "upstream_ref": "review of PR #92: adversarial edge case"
+  },
+  {
+   "name": "adv_bss_many_knots_trim",
+   "inputs": {
+    "surface": {
+     "bspline": {
+      "net": [
+       [
+        [
+         0,
+         0.0,
+         0.0,
+         -1.7976931348623157e+308
+        ],
+        [
+         0,
+         1.0,
+         0.0,
+         -1.7976931348623157e+308
+        ],
+        [
+         0,
+         2.0,
+         0.0,
+         -1.7976931348623157e+308
+        ]
+       ],
+       [
+        [
+         1,
+         0.0,
+         0.0,
+         -1.7976931348623157e+308
+        ],
+        [
+         1,
+         1.0,
+         0.0,
+         -1.7976931348623157e+308
+        ],
+        [
+         1,
+         2.0,
+         0.0,
+         -1.7976931348623157e+308
+        ]
+       ],
+       [
+        [
+         2,
+         0.0,
+         0.0,
+         -1.7976931348623157e+308
+        ],
+        [
+         2,
+         1.0,
+         0.0,
+         -1.7976931348623157e+308
+        ],
+        [
+         2,
+         2.0,
+         0.0,
+         -1.7976931348623157e+308
+        ]
+       ],
+       [
+        [
+         3,
+         0.0,
+         1.0,
+         -1.7976931348623157e+308
+        ],
+        [
+         3,
+         1.0,
+         1.0,
+         -1.7976931348623157e+308
+        ],
+        [
+         3,
+         2.0,
+         1.0,
+         -1.7976931348623157e+308
+        ]
+       ],
+       [
+        [
+         4,
+         0.0,
+         0.0,
+         -1.7976931348623157e+308
+        ],
+        [
+         4,
+         1.0,
+         0.0,
+         -1.7976931348623157e+308
+        ],
+        [
+         4,
+         2.0,
+         0.0,
+         -1.7976931348623157e+308
+        ]
+       ],
+       [
+        [
+         5,
+         0.5,
+         0.0,
+         -1.7976931348623157e+308
+        ],
+        [
+         5,
+         1.5,
+         0.0,
+         -1.7976931348623157e+308
+        ],
+        [
+         5,
+         2.5,
+         0.0,
+         -1.7976931348623157e+308
+        ]
+       ],
+       [
+        [
+         6,
+         0.0,
+         0.0,
+         -1.7976931348623157e+308
+        ],
+        [
+         6,
+         1.0,
+         0.0,
+         -1.7976931348623157e+308
+        ],
+        [
+         6,
+         2.0,
+         0.0,
+         -1.7976931348623157e+308
+        ]
+       ],
+       [
+        [
+         7,
+         0.0,
+         0.0,
+         -1.7976931348623157e+308
+        ],
+        [
+         7,
+         1.0,
+         0.0,
+         -1.7976931348623157e+308
+        ],
+        [
+         7,
+         2.0,
+         0.0,
+         -1.7976931348623157e+308
+        ]
+       ]
+      ],
+      "p": 1,
+      "q": 1,
+      "u": [
+       0,
+       0,
+       1,
+       2,
+       3,
+       4,
+       5,
+       6,
+       7,
+       7
+      ],
+      "v": [
+       0,
+       0,
+       1,
+       2,
+       2
+      ]
+     }
+    },
+    "op": {
+     "op": "trim",
+     "dom": [
+      0.5,
+      0.25,
+      6.5,
+      1.75
+     ],
+     "side": 1,
+     "remove": true
+    }
+   },
+   "upstream_ref": "review of PR #92: adversarial edge case"
+  },
+  {
+   "name": "adv_two_poles_cont_v",
+   "inputs": {
+    "surface": {
+     "bspline": {
+      "net": [
+       [
+        [
+         0,
+         1,
+         0,
+         -1.7976931348623157e+308
+        ],
+        [
+         0,
+         1,
+         0,
+         -1.7976931348623157e+308
+        ],
+        [
+         0,
+         1,
+         0,
+         -1.7976931348623157e+308
+        ]
+       ],
+       [
+        [
+         1,
+         0,
+         0,
+         -1.7976931348623157e+308
+        ],
+        [
+         1,
+         1,
+         0.5,
+         -1.7976931348623157e+308
+        ],
+        [
+         1,
+         2,
+         0,
+         -1.7976931348623157e+308
+        ]
+       ],
+       [
+        [
+         2,
+         1,
+         0,
+         -1.7976931348623157e+308
+        ],
+        [
+         2,
+         1,
+         0,
+         -1.7976931348623157e+308
+        ],
+        [
+         2,
+         1,
+         0,
+         -1.7976931348623157e+308
+        ]
+       ]
+      ],
+      "p": 2,
+      "q": 2,
+      "u": [
+       0,
+       0,
+       0,
+       1,
+       1,
+       1
+      ],
+      "v": [
+       0,
+       0,
+       0,
+       1,
+       1,
+       1
+      ]
+     }
+    },
+    "op": {
+     "op": "cont",
+     "param": 1
+    }
+   },
+   "upstream_ref": "review of PR #92: adversarial edge case"
+  },
+  {
+   "name": "adv_two_poles_cont_u",
+   "inputs": {
+    "surface": {
+     "bspline": {
+      "net": [
+       [
+        [
+         0,
+         1,
+         0,
+         -1.7976931348623157e+308
+        ],
+        [
+         0,
+         1,
+         0,
+         -1.7976931348623157e+308
+        ],
+        [
+         0,
+         1,
+         0,
+         -1.7976931348623157e+308
+        ]
+       ],
+       [
+        [
+         1,
+         0,
+         0,
+         -1.7976931348623157e+308
+        ],
+        [
+         1,
+         1,
+         0.5,
+         -1.7976931348623157e+308
+        ],
+        [
+         1,
+         2,
+         0,
+         -1.7976931348623157e+308
+        ]
+       ],
+       [
+        [
+         2,
+         1,
+         0,
+         -1.7976931348623157e+308
+        ],
+        [
+         2,
+         1,
+         0,
+         -1.7976931348623157e+308
+        ],
+        [
+         2,
+         1,
+         0,
+         -1.7976931348623157e+308
+        ]
+       ]
+      ],
+      "p": 2,
+      "q": 2,
+      "u": [
+       0,
+       0,
+       0,
+       1,
+       1,
+       1
+      ],
+      "v": [
+       0,
+       0,
+       0,
+       1,
+       1,
+       1
+      ]
+     }
+    },
+    "op": {
+     "op": "cont",
+     "param": 0
+    }
+   },
+   "upstream_ref": "review of PR #92: adversarial edge case"
+  },
+  {
+   "name": "adv_two_poles_trim_s0_r1",
+   "inputs": {
+    "surface": {
+     "bspline": {
+      "net": [
+       [
+        [
+         0,
+         1,
+         0,
+         -1.7976931348623157e+308
+        ],
+        [
+         0,
+         1,
+         0,
+         -1.7976931348623157e+308
+        ],
+        [
+         0,
+         1,
+         0,
+         -1.7976931348623157e+308
+        ]
+       ],
+       [
+        [
+         1,
+         0,
+         0,
+         -1.7976931348623157e+308
+        ],
+        [
+         1,
+         1,
+         0.5,
+         -1.7976931348623157e+308
+        ],
+        [
+         1,
+         2,
+         0,
+         -1.7976931348623157e+308
+        ]
+       ],
+       [
+        [
+         2,
+         1,
+         0,
+         -1.7976931348623157e+308
+        ],
+        [
+         2,
+         1,
+         0,
+         -1.7976931348623157e+308
+        ],
+        [
+         2,
+         1,
+         0,
+         -1.7976931348623157e+308
+        ]
+       ]
+      ],
+      "p": 2,
+      "q": 2,
+      "u": [
+       0,
+       0,
+       0,
+       1,
+       1,
+       1
+      ],
+      "v": [
+       0,
+       0,
+       0,
+       1,
+       1,
+       1
+      ]
+     }
+    },
+    "op": {
+     "op": "trim",
+     "dom": [
+      0,
+      0,
+      1,
+      1
+     ],
+     "side": 0,
+     "remove": true
+    }
+   },
+   "upstream_ref": "review of PR #92: adversarial edge case"
+  },
+  {
+   "name": "adv_two_poles_trim_s0_r0",
+   "inputs": {
+    "surface": {
+     "bspline": {
+      "net": [
+       [
+        [
+         0,
+         1,
+         0,
+         -1.7976931348623157e+308
+        ],
+        [
+         0,
+         1,
+         0,
+         -1.7976931348623157e+308
+        ],
+        [
+         0,
+         1,
+         0,
+         -1.7976931348623157e+308
+        ]
+       ],
+       [
+        [
+         1,
+         0,
+         0,
+         -1.7976931348623157e+308
+        ],
+        [
+         1,
+         1,
+         0.5,
+         -1.7976931348623157e+308
+        ],
+        [
+         1,
+         2,
+         0,
+         -1.7976931348623157e+308
+        ]
+       ],
+       [
+        [
+         2,
+         1,
+         0,
+         -1.7976931348623157e+308
+        ],
+        [
+         2,
+         1,
+         0,
+         -1.7976931348623157e+308
+        ],
+        [
+         2,
+         1,
+         0,
+         -1.7976931348623157e+308
+        ]
+       ]
+      ],
+      "p": 2,
+      "q": 2,
+      "u": [
+       0,
+       0,
+       0,
+       1,
+       1,
+       1
+      ],
+      "v": [
+       0,
+       0,
+       0,
+       1,
+       1,
+       1
+      ]
+     }
+    },
+    "op": {
+     "op": "trim",
+     "dom": [
+      0,
+      0,
+      1,
+      1
+     ],
+     "side": 0,
+     "remove": false
+    }
+   },
+   "upstream_ref": "review of PR #92: adversarial edge case"
+  },
+  {
+   "name": "adv_two_poles_trim_s1_r1",
+   "inputs": {
+    "surface": {
+     "bspline": {
+      "net": [
+       [
+        [
+         0,
+         1,
+         0,
+         -1.7976931348623157e+308
+        ],
+        [
+         0,
+         1,
+         0,
+         -1.7976931348623157e+308
+        ],
+        [
+         0,
+         1,
+         0,
+         -1.7976931348623157e+308
+        ]
+       ],
+       [
+        [
+         1,
+         0,
+         0,
+         -1.7976931348623157e+308
+        ],
+        [
+         1,
+         1,
+         0.5,
+         -1.7976931348623157e+308
+        ],
+        [
+         1,
+         2,
+         0,
+         -1.7976931348623157e+308
+        ]
+       ],
+       [
+        [
+         2,
+         1,
+         0,
+         -1.7976931348623157e+308
+        ],
+        [
+         2,
+         1,
+         0,
+         -1.7976931348623157e+308
+        ],
+        [
+         2,
+         1,
+         0,
+         -1.7976931348623157e+308
+        ]
+       ]
+      ],
+      "p": 2,
+      "q": 2,
+      "u": [
+       0,
+       0,
+       0,
+       1,
+       1,
+       1
+      ],
+      "v": [
+       0,
+       0,
+       0,
+       1,
+       1,
+       1
+      ]
+     }
+    },
+    "op": {
+     "op": "trim",
+     "dom": [
+      0,
+      0,
+      1,
+      1
+     ],
+     "side": 1,
+     "remove": true
+    }
+   },
+   "upstream_ref": "review of PR #92: adversarial edge case"
+  },
+  {
+   "name": "adv_two_poles_trim_s1_r0",
+   "inputs": {
+    "surface": {
+     "bspline": {
+      "net": [
+       [
+        [
+         0,
+         1,
+         0,
+         -1.7976931348623157e+308
+        ],
+        [
+         0,
+         1,
+         0,
+         -1.7976931348623157e+308
+        ],
+        [
+         0,
+         1,
+         0,
+         -1.7976931348623157e+308
+        ]
+       ],
+       [
+        [
+         1,
+         0,
+         0,
+         -1.7976931348623157e+308
+        ],
+        [
+         1,
+         1,
+         0.5,
+         -1.7976931348623157e+308
+        ],
+        [
+         1,
+         2,
+         0,
+         -1.7976931348623157e+308
+        ]
+       ],
+       [
+        [
+         2,
+         1,
+         0,
+         -1.7976931348623157e+308
+        ],
+        [
+         2,
+         1,
+         0,
+         -1.7976931348623157e+308
+        ],
+        [
+         2,
+         1,
+         0,
+         -1.7976931348623157e+308
+        ]
+       ]
+      ],
+      "p": 2,
+      "q": 2,
+      "u": [
+       0,
+       0,
+       0,
+       1,
+       1,
+       1
+      ],
+      "v": [
+       0,
+       0,
+       0,
+       1,
+       1,
+       1
+      ]
+     }
+    },
+    "op": {
+     "op": "trim",
+     "dom": [
+      0,
+      0,
+      1,
+      1
+     ],
+     "side": 1,
+     "remove": false
+    }
+   },
+   "upstream_ref": "review of PR #92: adversarial edge case"
+  },
+  {
+   "name": "adv_plane_huge_trim",
+   "inputs": {
+    "surface": {
+     "plane": {
+      "o": [
+       1000.0,
+       -1000.0,
+       500.0
+      ],
+      "n": [
+       0.1,
+       0.2,
+       0.97
+      ]
+     }
+    },
+    "op": {
+     "op": "trim",
+     "dom": [
+      -10000.0,
+      -10000.0,
+      10000.0,
+      10000.0
+     ],
+     "side": 1,
+     "remove": true
+    }
+   },
+   "upstream_ref": "review of PR #92: adversarial edge case"
+  },
+  {
+   "name": "adv_plane_tiny_trim",
+   "inputs": {
+    "surface": {
+     "plane": {
+      "o": [
+       0,
+       0,
+       0
+      ],
+      "n": [
+       0,
+       0,
+       1
+      ]
+     }
+    },
+    "op": {
+     "op": "trim",
+     "dom": [
+      0,
+      0,
+      1e-09,
+      1e-09
+     ],
+     "side": 0,
+     "remove": true
+    }
+   },
+   "upstream_ref": "review of PR #92: adversarial edge case"
+  },
+  {
+   "name": "adv_plane_tiny_trim_keep",
+   "inputs": {
+    "surface": {
+     "plane": {
+      "o": [
+       0,
+       0,
+       0
+      ],
+      "n": [
+       0,
+       0,
+       1
+      ]
+     }
+    },
+    "op": {
+     "op": "trim",
+     "dom": [
+      0,
+      0,
+      1e-09,
+      1e-09
+     ],
+     "side": 0,
+     "remove": false
+    }
+   },
+   "upstream_ref": "review of PR #92: adversarial edge case"
+  },
+  {
+   "name": "adv_scls_c0int",
+   "inputs": {
+    "surface": {
+     "sms": {
+      "$upstream_file": "Surface.sms"
+     }
+    },
+    "op": {
+     "op": "scls",
+     "dom": [
+      0,
+      0.0634210842965636,
+      1,
+      0.6377485983139218
+     ],
+     "uc": [
+      2,
+      2
+     ],
+     "vc": [
+      2,
+      2
+     ],
+     "sbox": [
+      -1,
+      -1,
+      -1,
+      1,
+      1,
+      1
+     ],
+     "cbox": null,
+     "curve": {
+      "bspline": {
+       "dim": 3,
+       "p": 2,
+       "cpts": [
+        [
+         0,
+         0,
+         0,
+         -1.7976931348623157e+308
+        ],
+        [
+         0.3,
+         0.2,
+         0.1,
+         -1.7976931348623157e+308
+        ],
+        [
+         0.6,
+         0.5,
+         0.0,
+         -1.7976931348623157e+308
+        ],
+        [
+         0.9,
+         0.9,
+         0.2,
+         -1.7976931348623157e+308
+        ]
+       ],
+       "u": [
+        0,
+        0,
+        0,
+        0.5,
+        1,
+        1,
+        1
+       ]
+      }
+     },
+     "ivl": [
+      0,
+      1
+     ],
+     "tc": [
+      10,
+      10
+     ],
+     "tol": 0.001,
+     "vec": null,
+     "sop": 3,
+     "skip": true,
+     "process": true
+    }
+   },
+   "upstream_ref": "review of PR #92: adversarial edge case"
+  },
+  {
+   "name": "adv_scls_mixed",
+   "inputs": {
+    "surface": {
+     "sms": {
+      "$upstream_file": "Surface.sms"
+     }
+    },
+    "op": {
+     "op": "scls",
+     "dom": [
+      0,
+      0.0634210842965636,
+      1,
+      0.6377485983139218
+     ],
+     "uc": [
+      1,
+      2
+     ],
+     "vc": [
+      2,
+      1
+     ],
+     "sbox": [
+      -1,
+      -1,
+      -1,
+      1,
+      1,
+      1
+     ],
+     "cbox": null,
+     "curve": {
+      "bspline": {
+       "dim": 3,
+       "p": 2,
+       "cpts": [
+        [
+         0,
+         0,
+         0,
+         -1.7976931348623157e+308
+        ],
+        [
+         0.3,
+         0.2,
+         0.1,
+         -1.7976931348623157e+308
+        ],
+        [
+         0.6,
+         0.5,
+         0.0,
+         -1.7976931348623157e+308
+        ],
+        [
+         0.9,
+         0.9,
+         0.2,
+         -1.7976931348623157e+308
+        ]
+       ],
+       "u": [
+        0,
+        0,
+        0,
+        0.5,
+        1,
+        1,
+        1
+       ]
+      }
+     },
+     "ivl": [
+      0,
+      1
+     ],
+     "tc": [
+      10,
+      10
+     ],
+     "tol": 0.001,
+     "vec": null,
+     "sop": 4,
+     "skip": true,
+     "process": true
+    }
+   },
+   "upstream_ref": "review of PR #92: adversarial edge case"
+  },
+  {
+   "name": "adv_scls_disc_max",
+   "inputs": {
+    "surface": {
+     "sms": {
+      "$upstream_file": "Surface.sms"
+     }
+    },
+    "op": {
+     "op": "scls",
+     "dom": [
+      0,
+      0.0634210842965636,
+      1,
+      0.6377485983139218
+     ],
+     "uc": [
+      1,
+      1
+     ],
+     "vc": [
+      1,
+      1
+     ],
+     "sbox": [
+      -1,
+      -1,
+      -1,
+      1,
+      1,
+      1
+     ],
+     "cbox": null,
+     "curve": {
+      "bspline": {
+       "dim": 3,
+       "p": 2,
+       "cpts": [
+        [
+         0,
+         0,
+         0,
+         -1.7976931348623157e+308
+        ],
+        [
+         0.3,
+         0.2,
+         0.1,
+         -1.7976931348623157e+308
+        ],
+        [
+         0.6,
+         0.5,
+         0.0,
+         -1.7976931348623157e+308
+        ],
+        [
+         0.9,
+         0.9,
+         0.2,
+         -1.7976931348623157e+308
+        ]
+       ],
+       "u": [
+        0,
+        0,
+        0,
+        0.5,
+        1,
+        1,
+        1
+       ]
+      }
+     },
+     "ivl": [
+      0,
+      1
+     ],
+     "tc": [
+      10,
+      10
+     ],
+     "tol": 0.001,
+     "vec": null,
+     "sop": 4,
+     "skip": true,
+     "process": true
+    }
+   },
+   "upstream_ref": "review of PR #92: adversarial edge case"
+  },
+  {
+   "name": "adv_scls_none",
+   "inputs": {
+    "surface": {
+     "sms": {
+      "$upstream_file": "Surface.sms"
+     }
+    },
+    "op": {
+     "op": "scls",
+     "dom": [
+      0,
+      0.0634210842965636,
+      1,
+      0.6377485983139218
+     ],
+     "uc": [
+      10,
+      10
+     ],
+     "vc": [
+      10,
+      10
+     ],
+     "sbox": [
+      -1,
+      -1,
+      -1,
+      1,
+      1,
+      1
+     ],
+     "cbox": null,
+     "curve": {
+      "bspline": {
+       "dim": 3,
+       "p": 2,
+       "cpts": [
+        [
+         0,
+         0,
+         0,
+         -1.7976931348623157e+308
+        ],
+        [
+         0.3,
+         0.2,
+         0.1,
+         -1.7976931348623157e+308
+        ],
+        [
+         0.6,
+         0.5,
+         0.0,
+         -1.7976931348623157e+308
+        ],
+        [
+         0.9,
+         0.9,
+         0.2,
+         -1.7976931348623157e+308
+        ]
+       ],
+       "u": [
+        0,
+        0,
+        0,
+        0.5,
+        1,
+        1,
+        1
+       ]
+      }
+     },
+     "ivl": [
+      0,
+      1
+     ],
+     "tc": [
+      10,
+      10
+     ],
+     "tol": 0.001,
+     "vec": null,
+     "sop": 3,
+     "skip": true,
+     "process": true
+    }
+   },
+   "upstream_ref": "review of PR #92: adversarial edge case"
+  },
+  {
+   "name": "adv_scls_subdom",
+   "inputs": {
+    "surface": {
+     "sms": {
+      "$upstream_file": "Surface.sms"
+     }
+    },
+    "op": {
+     "op": "scls",
+     "dom": [
+      0.2,
+      0.1,
+      0.7,
+      0.5
+     ],
+     "uc": [
+      1,
+      1
+     ],
+     "vc": [
+      1,
+      1
+     ],
+     "sbox": [
+      -1,
+      -1,
+      -1,
+      1,
+      1,
+      1
+     ],
+     "cbox": null,
+     "curve": {
+      "bspline": {
+       "dim": 3,
+       "p": 2,
+       "cpts": [
+        [
+         0,
+         0,
+         0,
+         -1.7976931348623157e+308
+        ],
+        [
+         0.3,
+         0.2,
+         0.1,
+         -1.7976931348623157e+308
+        ],
+        [
+         0.6,
+         0.5,
+         0.0,
+         -1.7976931348623157e+308
+        ],
+        [
+         0.9,
+         0.9,
+         0.2,
+         -1.7976931348623157e+308
+        ]
+       ],
+       "u": [
+        0,
+        0,
+        0,
+        0.5,
+        1,
+        1,
+        1
+       ]
+      }
+     },
+     "ivl": [
+      0.1,
+      0.8
+     ],
+     "tc": [
+      10,
+      10
+     ],
+     "tol": 1e-06,
+     "vec": null,
+     "sop": 3,
+     "skip": true,
+     "process": true
+    }
+   },
+   "upstream_ref": "review of PR #92: adversarial edge case"
+  },
+  {
+   "name": "adv_scls_normalize_skip",
+   "inputs": {
+    "surface": {
+     "sms": {
+      "$upstream_file": "Surface.sms"
+     }
+    },
+    "op": {
+     "op": "scls",
+     "dom": [
+      0,
+      0.0634210842965636,
+      1,
+      0.6377485983139218
+     ],
+     "uc": [
+      1,
+      1
+     ],
+     "vc": [
+      1,
+      1
+     ],
+     "sbox": [
+      -1,
+      -1,
+      -1,
+      1,
+      1,
+      1
+     ],
+     "cbox": null,
+     "curve": {
+      "bspline": {
+       "dim": 3,
+       "p": 2,
+       "cpts": [
+        [
+         0,
+         0,
+         0,
+         -1.7976931348623157e+308
+        ],
+        [
+         0.3,
+         0.2,
+         0.1,
+         -1.7976931348623157e+308
+        ],
+        [
+         0.6,
+         0.5,
+         0.0,
+         -1.7976931348623157e+308
+        ],
+        [
+         0.9,
+         0.9,
+         0.2,
+         -1.7976931348623157e+308
+        ]
+       ],
+       "u": [
+        0,
+        0,
+        0,
+        0.5,
+        1,
+        1,
+        1
+       ]
+      }
+     },
+     "ivl": [
+      0,
+      1
+     ],
+     "tc": [
+      1,
+      1
+     ],
+     "tol": 0.001,
+     "vec": null,
+     "sop": 5,
+     "skip": true,
+     "process": true
+    }
+   },
+   "upstream_ref": "review of PR #92: adversarial edge case"
+  },
+  {
+   "name": "adv_ssid_zero_tol",
+   "inputs": {
+    "surface": {
+     "plane": {
+      "o": [
+       0,
+       0,
+       0
+      ],
+      "n": [
+       0,
+       0,
+       1
+      ]
+     }
+    },
+    "op": {
+     "op": "ssid",
+     "other": {
+      "plane": {
+       "o": [
+        0,
+        0,
+        0
+       ],
+       "n": [
+        0,
+        0,
+        1
+       ]
+      }
+     },
+     "tol": 0.0,
+     "sol1": {
+      "ty": 1,
+      "nvars": 4,
+      "value": 0.0,
+      "end_value": 0,
+      "start": [
+       0,
+       0.1,
+       0.2,
+       0.1,
+       0.2
+      ],
+      "end": [
+       0,
+       0.1,
+       0.2,
+       0.1,
+       0.2
+      ]
+     },
+     "sol2": {
+      "ty": 1,
+      "nvars": 4,
+      "value": 0.0,
+      "end_value": 0,
+      "start": [
+       0,
+       0.1,
+       0.2,
+       0.1,
+       0.2000001
+      ],
+      "end": [
+       0,
+       0.1,
+       0.2,
+       0.1,
+       0.2000001
+      ]
+     }
+    }
+   },
+   "upstream_ref": "review of PR #92: adversarial edge case"
+  },
+  {
+   "name": "adv_ssid_equal_values",
+   "inputs": {
+    "surface": {
+     "plane": {
+      "o": [
+       0,
+       0,
+       0
+      ],
+      "n": [
+       0,
+       0,
+       1
+      ]
+     }
+    },
+    "op": {
+     "op": "ssid",
+     "other": {
+      "plane": {
+       "o": [
+        0,
+        0,
+        0
+       ],
+       "n": [
+        0,
+        0,
+        1
+       ]
+      }
+     },
+     "tol": 1.0,
+     "sol1": {
+      "ty": 1,
+      "nvars": 4,
+      "value": 0.0001,
+      "end_value": 0,
+      "start": [
+       0,
+       0.1,
+       0.2,
+       0.1,
+       0.2
+      ],
+      "end": [
+       0,
+       0.1,
+       0.2,
+       0.1,
+       0.2
+      ]
+     },
+     "sol2": {
+      "ty": 1,
+      "nvars": 4,
+      "value": 0.0001,
+      "end_value": 0,
+      "start": [
+       0,
+       0.1,
+       0.3,
+       0.1,
+       0.3
+      ],
+      "end": [
+       0,
+       0.1,
+       0.3,
+       0.1,
+       0.3
+      ]
+     }
+    }
+   },
+   "upstream_ref": "review of PR #92: adversarial edge case"
+  }
+ ]
+}
