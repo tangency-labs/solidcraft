@@ -283,6 +283,7 @@ pub(crate) mod quick_measure;
 #[cfg(test)]
 mod quick_measure_tests;
 pub(crate) mod quick_menu;
+mod radial_context;
 pub mod recovery_ui;
 pub mod ref_images;
 pub(crate) mod refused_part;
@@ -4606,6 +4607,7 @@ impl SolveApp {
                     context_menu::show(self, ui.ctx());
                 }
                 app_bar_custom::show(self, ui.ctx());
+                radial_context::show_editor(self, ui.ctx());
                 if settings_open {
                     panel_runtime::hide_app_host(self);
                 }
@@ -4657,6 +4659,7 @@ impl SolveApp {
         joint_handles::show_warning(self, ui.ctx());
         toolbar::command_search(self, ui.ctx());
         prefs::show(self, ui.ctx());
+        radial_context::show_editor(self, ui.ctx());
         toolbar_custom::window(self, ui.ctx());
         app_bar_custom::show(self, ui.ctx());
         // All persistent producers have now registered this pass's actual
