@@ -24,7 +24,10 @@ pub mod theme_files;
 pub mod theme_options;
 pub mod toast;
 pub mod view_compass;
+pub mod view_layout_menu;
 pub mod window_chrome;
+pub mod window_options_menu;
+mod window_preview;
 
 mod actions;
 mod assistant;
@@ -76,6 +79,7 @@ mod preferences_small;
 mod radial;
 pub mod recent_colors;
 mod reports;
+pub mod reveal;
 mod review;
 mod search;
 pub mod settings_search;
