@@ -66,7 +66,7 @@ use super::p1::{OffsetExecutive, OffsetOperation};
 use super::p2::OffsetNotifications;
 use crate::curve::curve::p8::CurveIntersectOptions;
 use crate::curve::curve::Curve;
-use crate::error::{EntityRef, Result, SolidError, SM_ERR_ASSERT_FAILURE, SM_ERR_NULL_POINTER};
+use crate::error::{EntityRef, Result, SolidError};
 use crate::geom::extent1d::Extent1d;
 use crate::geom::global_solver::{SolutionRequested, SolverOperation};
 use crate::geom::object::NotifyOperation;
@@ -337,7 +337,7 @@ fn cut_at_crossings_refusing_touch(
 
     // Loops that touch without crossing bound no face there, however the rest of it is
     // resolved.
-    let surface = present(b.face(f)?.surface.as_ref(), FACE_NO_SURFACE)?;
+    let surface = required(b.face(f)?.surface.as_ref())?;
     for c in &contacts {
         let (e_a, e_b) = (
             edge_of(b, *at(edgeuses, c.a)?)?,
@@ -483,128 +483,52 @@ fn classify_one_loop(kernel: &Kernel, stretches: &mut [LoopStretch], uvs: &[Curv
     Ok(())
 }
 
-/// The UV trim curve of an edge use does not run over its edge's interval: a defect, with
-/// the status `SM_ERR_ASSERT_FAILURE` of the check it replaces.
-#[track_caller]
+/// The UV trim curve of an edge use does not run over its edge's interval
+/// (`SM_ERR_ASSERT_FAILURE`).
 fn trim_interval_mismatch() -> SolidError {
-    Failure::new(
+    SolidError::offset(
         OP,
-        OffsetFailure::Defect {
-            why: "an offset edge use's UV trim curve does not span its edge's interval, though \
-                  the kernel keeps an edge use's trim curve over its edge's interval",
-        },
+        OffsetFailure::Inconsistent(
+            "an edge use's UV trim curve does not span its edge's interval",
+        ),
     )
-    .with_status(SM_ERR_ASSERT_FAILURE)
-    .into_error()
 }
 
-/// A defect of the offset's own data (`why` says what is missing), with the status
-/// `SM_ERR_NULL_POINTER` of the `NER` it replaces.
-#[track_caller]
-fn defect(why: &'static str) -> SolidError {
-    Failure::new(OP, OffsetFailure::Defect { why })
-        .with_status(SM_ERR_NULL_POINTER)
-        .into_error()
+/// `value`, or `SM_ERR_NULL_POINTER` (upstream `NER`) for an entity or curve that is not
+/// there.
+fn required<T>(value: Option<T>) -> Result<T> {
+    value.ok_or_else(|| SolidError::offset_missing(OP, "an entity or curve of the offset face"))
 }
 
-/// `value`, or the defect `why` ([`defect`]): a link or entity of the offset B-rep, or of
-/// the routine's own data, that is not there.
-#[track_caller]
-fn present<T>(value: Option<T>, why: &'static str) -> Result<T> {
-    match value {
-        Some(v) => Ok(v),
-        None => Err(defect(why)),
-    }
-}
-
-/// Why an index into the routine's own lists is past their end.
-const INDEX_PAST_END: &str = "an index into the crossings' own lists is past their end, though \
-                              every index is taken from those lists";
-
-#[track_caller]
 fn at<T>(v: &[T], i: usize) -> Result<&T> {
-    present(v.get(i), INDEX_PAST_END)
+    v.get(i)
+        .ok_or_else(|| SolidError::offset_missing(OP, "an entry of the crossings' own lists"))
 }
 
-#[track_caller]
 fn at_mut<T>(v: &mut [T], i: usize) -> Result<&mut T> {
-    present(v.get_mut(i), INDEX_PAST_END)
+    v.get_mut(i)
+        .ok_or_else(|| SolidError::offset_missing(OP, "an entry of the crossings' own lists"))
 }
 
-#[track_caller]
 fn index_i64(i: usize) -> Result<i64> {
-    match i64::try_from(i) {
-        Ok(n) => Ok(n),
-        Err(_) => Err(defect(
-            "an edge use's index does not fit a node number, though a list holds no more \
-             entries than an i64 counts",
-        )),
-    }
+    i64::try_from(i).map_err(|_| SolidError::offset_missing(OP, "a node number for the edge use"))
 }
-
-/// Why the offset B-rep is not there.
-const NO_OFFSET: &str = "the offset B-rep is not there, though the executive builds it before \
-                         it resolves crossing loops";
-/// Why an offset face has no surface.
-const FACE_NO_SURFACE: &str =
-    "an offset face has no surface, though the offset gives every face it builds one";
-/// Why an offset face has no face use.
-const FACE_NO_FACEUSE: &str =
-    "an offset face has no face use, though the kernel makes every face with its face uses";
-/// Why a face use has no mate.
-const FU_NO_MATE: &str = "a face use has no mate, though the kernel makes face uses in mated pairs";
-/// Why a vertex loop has no vertex use.
-const VLOOP_NO_VU: &str = "a vertex loop use has no vertex use, though the kernel starts every \
-                           vertex loop use with one";
-/// Why a vertex use has no vertex.
-const VU_NO_VERTEX: &str =
-    "a vertex use has no vertex, though the kernel links every vertex use to its vertex";
-/// Why a loop use has no loop.
-const LU_NO_LOOP: &str =
-    "a loop use has no loop, though the kernel links every loop use to its loop";
-/// Why an edge use has no UV trim curve.
-const EU_NO_UV: &str = "an edge use has no UV trim curve right after the curve was made for it \
-                        without an error";
-/// Why an edge use has no edge.
-const EU_NO_EDGE: &str =
-    "an edge use has no edge, though the kernel links every edge use to its edge";
-/// Why an edge use has no mate.
-const EU_NO_MATE: &str =
-    "an edge use has no mate, though the kernel makes edge uses in mated pairs";
-/// Why an edge use has no face use.
-const EU_NO_FU: &str = "an edge use of an offset face has no face use, though the kernel makes \
-                        every edge use of a face in a loop of its face use";
-/// Why an edge has no edge use.
-const EDGE_NO_EU: &str =
-    "an offset edge has no edge use, though the kernel makes every edge with its uses";
-/// Why an offset edge has no curve.
-const EDGE_NO_CURVE: &str =
-    "an offset edge has no curve, though the offset gives every edge it builds one";
-/// Why an edge has no vertex at an end.
-const EDGE_NO_VERTEX: &str =
-    "an offset edge has no vertex at an end, though the kernel bounds every edge by its vertices";
-/// Why a face just built is not returned.
-const NO_NEW_FACE: &str = "the face built from the kept stretches was not returned, though its \
-                           construction succeeded";
 
 /// The vertex node of edge use `k`: `-1 - k`.
 fn vertex_node(k: usize) -> Result<i64> {
     Ok(-1 - index_i64(k)?)
 }
 
-#[track_caller]
 fn edge_of(b: &Brep, edgeuse: EdgeuseId) -> Result<EdgeId> {
-    present(eu::edge(b, edgeuse)?, EU_NO_EDGE)
+    required(eu::edge(b, edgeuse)?)
 }
 
-#[track_caller]
 fn edge_curve(b: &Brep, e: EdgeId) -> Result<&Curve> {
-    present(b.edge(e)?.curve.as_ref(), EDGE_NO_CURVE)
+    required(b.edge(e)?.curve.as_ref())
 }
 
-#[track_caller]
 fn vertex_point(b: &Brep, v: Option<crate::topology::VertexId>) -> Result<Point3> {
-    Ok(b.vertex(present(v, EDGE_NO_VERTEX)?)?.point)
+    Ok(b.vertex(required(v)?)?.point)
 }
 
 /// (not in the fork, solidcraft#18374) A crossing of the loops of an offset face: where it
@@ -736,7 +660,7 @@ impl OffsetExecutive {
         original: &mut Brep,
         notifications: &mut OffsetNotifications<'_>,
     ) -> Result<()> {
-        let mut offset = present(self.take_offset_brep(), NO_OFFSET)?;
+        let mut offset = required(self.take_offset_brep())?;
         let status = bp1::faces(&offset, None).and_then(|faces| {
             faces.into_iter().try_for_each(|f| {
                 self.resolve_crossing_loops_of_face(kernel, original, &mut offset, f, notifications)
@@ -800,14 +724,14 @@ impl OffsetExecutive {
     ) -> Result<()> {
         // (the face's tolerance model: SmTol::GetZoneTol3d reads the surface's face)
         let (zone_tol, uv_tol) = {
-            let surface = present(b.face(f)?.surface.as_ref(), FACE_NO_SURFACE)?;
+            let surface = required(b.face(f)?.surface.as_ref())?;
             let zone_tol = zone_tol_3d(kernel, surface)?;
             let uv_mid = surface.natural_uv_domain_with_nurb(kernel)?.mid();
             (zone_tol, map_to_2d(kernel, zone_tol, uv_mid, surface)?)
         };
-        let mut fu = present(face::upward_faceuse(b, f)?, FACE_NO_FACEUSE)?;
+        let mut fu = required(face::upward_faceuse(b, f)?)?;
         if eu::faceuse_orientation(b, fu)? != OrientType::Same {
-            fu = present(eu::faceuse_mate(b, fu)?, FU_NO_MATE)?;
+            fu = required(eu::faceuse_mate(b, fu)?)?;
         }
 
         // The face's edge loops (the outer loop first) and the points of its vertex loops.
@@ -817,12 +741,11 @@ impl OffsetExecutive {
         for lu in eu::faceuse_loopuses(b, fu, false, None)? {
             if let LoopuseStart::Vertexuse(_) = b.loopuse(lu)?.start {
                 let vus = loopuse::vertexuses(b, lu, None)?;
-                let vu = present(vus.first().copied().flatten(), VLOOP_NO_VU)?;
-                let v = present(vertexuse::vertex(b, vu)?, VU_NO_VERTEX)?;
-                loop_points.push(b.vertex(v)?.point);
+                let vu = required(vus.first().copied().flatten())?;
+                loop_points.push(vertex_point(b, vertexuse::vertex(b, vu)?)?);
                 continue;
             }
-            loops.push(present(b.loopuse(lu)?.loop_, LU_NO_LOOP)?);
+            loops.push(required(b.loopuse(lu)?.loop_)?);
             loop_edgeuses.push(eu::loopuse_edgeuses(b, lu)?);
         }
         // (not upstream, solidcraft#16983) a face of one loop: the loop crosses itself, or
@@ -847,7 +770,7 @@ impl OffsetExecutive {
             first_of_loop.push(edgeuses.len());
             for &edgeuse in list {
                 eu3::get_or_create_uv_trim_curve(kernel, b, edgeuse, false, false, true)?.status?;
-                let uv = present(eu::uv_trim_curve(b, edgeuse)?.0.cloned(), EU_NO_UV)?;
+                let uv = required(eu::uv_trim_curve(b, edgeuse)?.0.cloned())?;
                 let e = edge_of(b, edgeuse)?;
                 if !uv.natural_interval().are_equal(&b.edge(e)?.interval, 0.0) {
                     return Err(trim_interval_mismatch());
@@ -1168,11 +1091,7 @@ impl OffsetExecutive {
                 if at(&stretches, tt)?.loop_index == 0 {
                     outer = true;
                 }
-                tt = present(
-                    *at(&next, tt)?,
-                    "a kept stretch has no next stretch, though each kept stretch was given \
-                     one or refused as leaving no way",
-                )?;
+                tt = required(*at(&next, tt)?)?;
             }
             new_loops.push(chain);
             new_loop_is_outer.push(outer);
@@ -1241,8 +1160,7 @@ impl OffsetExecutive {
             }
             input.curves_3d = Some(curves_3d);
             input.uv_curves = Some(uv_curves);
-            let new_surface =
-                present(b.face(f)?.surface.as_ref(), FACE_NO_SURFACE)?.copy(kernel)?;
+            let new_surface = required(b.face(f)?.surface.as_ref())?.copy(kernel)?;
             let region = b.infinite_region();
             let key_of = notifications.result_key_of;
             let mut stores = NotificationStores {
@@ -1282,7 +1200,7 @@ impl OffsetExecutive {
                     }
                 }
             }
-            new_faces.push(present(made.face, NO_NEW_FACE)?);
+            new_faces.push(required(made.face)?);
         }
 
         // Fork 1b016ca: the regions the loops wind round the other way that are cavity,
@@ -1332,8 +1250,7 @@ impl OffsetExecutive {
             }
             input.curves_3d = Some(curves_3d);
             input.uv_curves = Some(uv_curves);
-            let new_surface =
-                present(b.face(f)?.surface.as_ref(), FACE_NO_SURFACE)?.copy(kernel)?;
+            let new_surface = required(b.face(f)?.surface.as_ref())?.copy(kernel)?;
             let region = b.infinite_region();
             let key_of = notifications.result_key_of;
             let mut stores = NotificationStores {
@@ -1373,7 +1290,7 @@ impl OffsetExecutive {
                     }
                 }
             }
-            new_faces.push(present(made.face, NO_NEW_FACE)?);
+            new_faces.push(required(made.face)?);
             // its edges come from them
             for &ss in chain {
                 at_mut(&mut stretches, ss)?.keep = true;
@@ -1409,11 +1326,7 @@ impl OffsetExecutive {
             for new_edge in face_edges(b, new_face)? {
                 // The builder reports the edge that owns each input curve slot;
                 // provenance is that slot's source, not a nearest midpoint.
-                let old_eu = *present(
-                    edge_sources.get(&new_edge),
-                    "an edge of a rebuilt face has no source edge use, though the face builder \
-                     reports the slot that owns every edge it makes",
-                )?;
+                let old_eu = *required(edge_sources.get(&new_edge))?;
                 let old_edge = edge_of(b, old_eu)?;
                 let new_vertices = [
                     edge::start_vertex(b, new_edge)?,
@@ -1426,10 +1339,11 @@ impl OffsetExecutive {
                 let mut pairs = vec![(EntityRef::Edge(old_edge), EntityRef::Edge(new_edge))];
                 for &new_v in &new_vertices {
                     for &old_v in &old_vertices {
-                        let new_v = present(new_v, EDGE_NO_VERTEX)?;
-                        let old_v = present(old_v, EDGE_NO_VERTEX)?;
-                        if b.vertex(new_v)?.point.distance(b.vertex(old_v)?.point) <= tol_3d {
-                            pairs.push((EntityRef::Vertex(old_v), EntityRef::Vertex(new_v)));
+                        if vertex_point(b, new_v)?.distance(vertex_point(b, old_v)?) <= tol_3d {
+                            pairs.push((
+                                EntityRef::Vertex(required(old_v)?),
+                                EntityRef::Vertex(required(new_v)?),
+                            ));
                         }
                     }
                 }
@@ -1458,12 +1372,12 @@ impl OffsetExecutive {
                 )?;
                 let new_eus = b.edge(new_edge)?.edgeuses.clone();
                 for old in [Some(old_eu), eu::mate(b, old_eu)?] {
-                    let old = present(old, EU_NO_MATE)?;
+                    let old = required(old)?;
                     let old_orientation =
-                        eu::faceuse_orientation(b, present(eu::faceuse(b, old)?, EU_NO_FU)?)?;
+                        eu::faceuse_orientation(b, required(eu::faceuse(b, old)?)?)?;
                     let originals = self.edgeuse_to_edgeuses.firsts(old);
                     for &new_eu in &new_eus {
-                        let new_fu = present(eu::faceuse(b, new_eu)?, EU_NO_FU)?;
+                        let new_fu = required(eu::faceuse(b, new_eu)?)?;
                         if eu::faceuse_orientation(b, new_fu)? != old_orientation {
                             continue;
                         }
@@ -1509,7 +1423,7 @@ impl OffsetExecutive {
         }
         for &edgeuse in &edgeuses {
             for old in [Some(edgeuse), eu::mate(b, edgeuse)?] {
-                let old = present(old, EU_NO_MATE)?;
+                let old = required(old)?;
                 for original in self.edgeuse_to_edgeuses.firsts(old) {
                     self.edgeuse_to_edgeuses.remove_pair(original, old)?;
                 }
@@ -1590,7 +1504,7 @@ impl OffsetExecutive {
         tol_3d: f64,
     ) -> Result<bool> {
         for crossing in crossings {
-            let normal = present(b.face(f)?.surface.as_ref(), FACE_NO_SURFACE)?.evaluate_normal(
+            let normal = required(b.face(f)?.surface.as_ref())?.evaluate_normal(
                 kernel,
                 crossing.uv,
                 Side::Left,
@@ -1609,7 +1523,7 @@ impl OffsetExecutive {
                     if !(cp.distance.is_finite() && cp.distance <= tol_3d) {
                         return Ok(false);
                     }
-                    let wall_use = present(b.edge(wall)?.edgeuses.first().copied(), EDGE_NO_EU)?;
+                    let wall_use = required(b.edge(wall)?.edgeuses.first().copied())?;
                     let into = eu3::evaluate_binormal(
                         kernel,
                         b,
@@ -1729,25 +1643,14 @@ impl OffsetExecutive {
         let Some(&fu) = self.faceuse_to_faces.firsts(offset_face).first() else {
             return Ok(None);
         };
-        let orig = present(
-            original.faceuse(fu)?.face,
-            "a face use of the body has no face, though the kernel links every face use to \
-             its face",
-        )?;
+        let orig = required(original.faceuse(fu)?.face)?;
         let Some(shell) = original.faceuse(fu)?.shell else {
             return Ok(None);
         };
         let Some(region) = original.shell(shell)?.region else {
             return Ok(None);
         };
-        // the body as the caller gave it
-        let Some(surface) = face::surface(original, orig)? else {
-            return Err(SolidError::offset(
-                OP,
-                OffsetFailure::FaceHasNoSurface { face: orig },
-            ));
-        };
-        let surface = surface.clone_for_evaluation()?;
+        let surface = required(face::surface(original, orig)?)?.clone_for_evaluation()?;
         let domain = surface.natural_uv_domain_with_nurb(kernel)?;
         let solutions = live_owned_surface_global_point_solve(
             kernel,
@@ -1912,9 +1815,9 @@ impl OffsetExecutive {
         reach: f64,
         notifications: &mut OffsetNotifications<'_>,
     ) -> Result<Option<FaceId>> {
-        let mut fu = present(face::upward_faceuse(b, wf)?, FACE_NO_FACEUSE)?;
+        let mut fu = required(face::upward_faceuse(b, wf)?)?;
         if eu::faceuse_orientation(b, fu)? != OrientType::Same {
-            fu = present(eu::faceuse_mate(b, fu)?, FU_NO_MATE)?;
+            fu = required(eu::faceuse_mate(b, fu)?)?;
         }
         let Some(edgeuse) = b
             .edge(wall)?
@@ -1926,13 +1829,13 @@ impl OffsetExecutive {
             return Ok(None);
         };
         eu3::get_or_create_uv_trim_curve(kernel, b, edgeuse, false, false, true)?.status?;
-        let uv = present(eu::uv_trim_curve(b, edgeuse)?.0.cloned(), EU_NO_UV)?;
+        let uv = required(eu::uv_trim_curve(b, edgeuse)?.0.cloned())?;
         let same = eu::orientation(b, edgeuse)? == OrientType::Same;
         // the wall's surface carried on past its sides, its parameters kept (a bounded
         // surface can end where the wall does)
         let surface = super::reach::extended_by_margin(
             kernel,
-            present(b.face(wf)?.surface.as_ref(), FACE_NO_SURFACE)?,
+            required(b.face(wf)?.surface.as_ref())?,
             2.0 * reach,
         )?;
         let uv_at = |t: f64| -> Result<Point2> {
@@ -2074,7 +1977,7 @@ impl OffsetExecutive {
         chain: &[usize],
     ) -> Result<bool> {
         let wall = self.offset_distance();
-        let surface = present(face::surface(b, f)?, FACE_NO_SURFACE)?.clone_for_evaluation()?;
+        let surface = required(face::surface(b, f)?)?.clone_for_evaluation()?;
         // a point of the region: the middle of its stretches' middles, on the surface
         let mut mid = Point3::new(0.0, 0.0, 0.0);
         for &ss in chain {
