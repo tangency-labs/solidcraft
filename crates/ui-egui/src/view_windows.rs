@@ -98,6 +98,11 @@ struct Returned {
     expires: f64,
 }
 
+/// Whether the window being drawn shows the open command (always, with one window).
+pub(crate) fn shows_tool(app: &SolveApp) -> bool {
+    app.view_windows.shows_tool(app.docs.current_tab())
+}
+
 fn viewport_id(tab: u64, id: WindowId) -> ViewportId {
     ViewportId::from_hash_of(("solidcraft-view-window", tab, id))
 }
@@ -105,6 +110,11 @@ fn viewport_id(tab: u64, id: WindowId) -> ViewportId {
 impl Windows {
     pub(crate) fn child_tool_owner(&self, tab: u64) -> Option<WindowId> {
         self.tool_owner.get(&tab).copied()
+    }
+
+    /// Whether the window being drawn shows the open command: the one it was started in.
+    fn shows_tool(&self, tab: u64) -> bool {
+        self.child_tool_owner(tab) == self.painting
     }
 
     pub(crate) fn start_tool_panel(&mut self, tab: u64) {
