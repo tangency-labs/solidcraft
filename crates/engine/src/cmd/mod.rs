@@ -489,6 +489,11 @@ pub fn in_sketch(s: &Session) -> std::result::Result<(), String> {
     }
 }
 
+/// Lifecycle actions address the one active edit independently of the focused receiver.
+pub fn has_sketch_edit(s: &Session) -> std::result::Result<(), String> {
+    if s.active_sketch.is_some() || s.active_sheet_sketch.is_some() { Ok(()) } else { in_sketch(s) }
+}
+
 /// The mirror of [`in_sketch`], for a command that acts on bodies and has nothing to offer the
 /// geometry under the cursor while a sketch is open.
 pub fn not_in_sketch(s: &Session) -> std::result::Result<(), String> {

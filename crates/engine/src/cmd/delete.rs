@@ -894,6 +894,17 @@ mod tests {
         assert_eq!(s.drawing("test").unwrap(), &drawing);
     }
 
+    #[test]
+    fn explicit_ui_drawing_selection_keeps_its_drawing_history_owner() {
+        let (mut s, _, dimension, _, drawing) = sheet_objects();
+        s.selection = vec![Sel::Drawing { drawing, object: dimension }];
+        let items = serde_json::to_value(&s.selection).unwrap();
+        run(&mut s, "selection.delete", json!({"items":items}));
+        assert_eq!(s.undo.last().unwrap().part, Some(drawing));
+        run(&mut s, "edit.undo", json!({}));
+        assert!(s.drawing("test").unwrap().has_object(dimension));
+    }
+
     /// Seeded selections of the drawing's objects, deleted or dry-run in turn with undos between:
     /// each is refused or leaves a drawing that keeps its rules, saves and reads back as itself, and
     /// holds nothing that hangs off what went.
