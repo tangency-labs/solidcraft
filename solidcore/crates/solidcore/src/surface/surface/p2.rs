@@ -638,6 +638,24 @@ impl Surface {
         self.clone_for_evaluation_depth(0)
     }
 
+    /// A [`Surface::clone_for_evaluation`] that keeps this surface's definition
+    /// ([`Surface::procedural_blend`]): a copy an operation builds geometry from, as a shell's
+    /// working body does when it offsets each face, where an evaluation copy, which only
+    /// evaluates, has none. Only this surface's own definition is kept: a nested surface inside
+    /// its kind (an offset's or a STEP surface's base) is still an evaluation copy without one,
+    /// as it has no face of its own. Not upstream: a round of an exact class keeps its
+    /// definition beside its net (#2485), so a copy that drops it offsets the net instead of the
+    /// definition.
+    ///
+    /// # Errors
+    ///
+    /// Those of [`Surface::clone_for_evaluation`].
+    pub(crate) fn clone_for_evaluation_keeping_definition(&self) -> Result<Self> {
+        let mut copy = self.clone_for_evaluation()?;
+        copy.definition.clone_from(&self.definition);
+        Ok(copy)
+    }
+
     /// Check every owned geometry branch before invoking recursive `Clone` impls.
     /// This includes trim curves, curve-on-surface children and volume chains, not only
     /// the surface basis.
