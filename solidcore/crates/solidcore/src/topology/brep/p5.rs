@@ -1099,8 +1099,9 @@ pub(crate) fn cover_joined_line_gaps(k: &Kernel, b: &mut Brep, e: EdgeId) -> Res
 /// curve over the stretch, which is the same curve exactly (WR-598); on a procedural
 /// blend, which evaluates its definition rather than its net, only while the net's
 /// certified bound is within `tolerance`, the joined edge's. Any other curve is `None`;
-/// upstream dereferences the null cast instead.
-fn exact_bspline_of_edge(
+/// upstream dereferences the null cast instead. Import seam completion also uses this
+/// extraction at tolerance zero, then maps the iso's parameter back onto its edge interval.
+pub(crate) fn exact_bspline_of_edge(
     k: &Kernel,
     b: &Brep,
     edge: EdgeId,
