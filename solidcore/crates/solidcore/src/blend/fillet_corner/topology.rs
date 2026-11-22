@@ -1237,9 +1237,18 @@ impl FilletCorner {
 
         // At this point, we have only one fillet (cross) edge at this corner.
         if self.vertices.len() != 2 {
-            // the three- and four-edge branches above make two; the two-edge one makes one
-            // per face of the first blended edge
-            return Err(shape_not_built(OP_NX2, CornerShape::EdgeNotBetweenTwoFaces));
+            // The side loop makes one vertex per side face of the blended edges; the
+            // three-edge branch adds the face vertex. With both blended uses on one closed
+            // edge, the ring walk keeps one use of that edge, so at three edges a blended use
+            // is off the ring and three vertices are made: name that shape, as the four-edge
+            // check does. Otherwise the first blended edge is not between two faces.
+            let off_ring = total == 3 && (!all.contains(&base_eu1) || !all.contains(&base_eu2));
+            let shape = if off_ring {
+                CornerShape::BlendedEdgeOffRing
+            } else {
+                CornerShape::EdgeNotBetweenTwoFaces
+            };
+            return Err(shape_not_built(OP_NX2, shape));
         }
         let cross = pseudo.make_fillet_edge(
             self.vertices.first().copied(),
