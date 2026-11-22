@@ -3630,6 +3630,7 @@ fn split_body(s: &mut Session, p: &Value) -> Result<Value> {
                 tool_plane: false,
                 tool_sheet: SplitSheet::Extended,
                 tool_faces: Vec::new(),
+                tool_bodies: Vec::new(),
                 sketch: Some(solidcraft_doc::SketchId(sketch)),
                 line: Some(line),
             },
@@ -3682,6 +3683,35 @@ fn split_body(s: &mut Session, p: &Value) -> Result<Value> {
         if tool_sheet == SplitSheet::Body && !tbody.body.is_surface() {
             return Err(bad(cmd, format!("`{tb}` is not a surface body, so it cannot split as a whole")));
         }
+        // More surface bodies that cut with the tool's, each whole (#13303).
+        let tool_bodies = match p.get("tool_bodies").filter(|v| !v.is_null()) {
+            None => Vec::new(),
+            Some(v) => {
+                let names = v.as_array().ok_or_else(|| bad(cmd, "`tool_bodies` must be a list of body names"))?;
+                if names.len() > MAX_SPLIT_TOOL_BODIES {
+                    return Err(bad(cmd, format!("`tool_bodies` takes at most {MAX_SPLIT_TOOL_BODIES} bodies")));
+                }
+                let mut bodies: Vec<BodyName> = Vec::with_capacity(names.len());
+                for name in names {
+                    let name = name.as_str().ok_or_else(|| bad(cmd, "`tool_bodies` must be a list of body names"))?;
+                    let other = st.body(name).ok_or_else(|| bad(cmd, format!("no body `{name}`")))?;
+                    if !other.body.is_surface() {
+                        return Err(bad(cmd, format!("`{name}` is not a surface body, so it cannot split as a whole")));
+                    }
+                    if name == body {
+                        return Err(bad(cmd, format!("`{body}` cannot split itself")));
+                    }
+                    if name == tb || bodies.iter().any(|b| b.as_ref() == name) {
+                        return Err(bad(cmd, format!("`{name}` is a splitting tool twice")));
+                    }
+                    bodies.push(BodyName(name.to_string()));
+                }
+                bodies
+            }
+        };
+        if tool_sheet != SplitSheet::Body && !tool_bodies.is_empty() {
+            return Err(bad(cmd, "`tool_bodies` needs `tool_sheet` \"body\""));
+        }
         return add_feature(
             s,
             p,
@@ -3692,6 +3722,7 @@ fn split_body(s: &mut Session, p: &Value) -> Result<Value> {
                 tool_plane,
                 tool_sheet,
                 tool_faces,
+                tool_bodies,
                 sketch: None,
                 line: None,
             },
@@ -3708,6 +3739,7 @@ fn split_body(s: &mut Session, p: &Value) -> Result<Value> {
             tool_plane: false,
             tool_sheet: SplitSheet::Extended,
             tool_faces: Vec::new(),
+            tool_bodies: Vec::new(),
             sketch: None,
             line: None,
         },
@@ -3716,6 +3748,9 @@ fn split_body(s: &mut Session, p: &Value) -> Result<Value> {
 
 /// The most other faces one Split Body by faces takes (`tool_faces`).
 const MAX_SPLIT_TOOL_FACES: usize = 1024;
+
+/// The most other surface bodies one Split Body takes (`tool_bodies`).
+const MAX_SPLIT_TOOL_BODIES: usize = 256;
 
 /// The fits [`clearance_diameter`] knows (close, normal, loose, and their older names).
 const CLEARANCE_FITS: [&str; 6] = ["close", "fine", "normal", "medium", "loose", "coarse"];

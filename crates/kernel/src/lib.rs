@@ -434,6 +434,7 @@ pub use splitface::face_split_if_on_face;
 pub use splitface::has_cap_at;
 pub use splitface::split_body;
 pub use splitface::split_body_by_faces;
+pub use splitface::split_body_by_sheet_where_it_cuts;
 pub use splitface::split_faces;
 pub use splitface::split_faces_with_map;
 pub use step::step_export;

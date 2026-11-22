@@ -3536,10 +3536,14 @@ fn placement_digest(doc: &Document, f: &Feature, st: Option<&ModelState>) -> u64
         }
         // A plane taken from a face, or tool faces used as they are (#9305), is moved from the
         // tool's frame into the body's.
-        FeatureKind::Split { body, tool: Some(tool), tool_plane, tool_sheet, .. } if *tool_plane || !tool_sheet.is_extended() => {
+        FeatureKind::Split { body, tool: Some(tool), tool_plane, tool_sheet, tool_bodies, .. } if *tool_plane || !tool_sheet.is_extended() => {
             frame = st.and_then(|st| st.body(body)).map(|b| body_world(doc, b));
             reads.placed_body(st, body);
             reads.placed_body(st, &tool.body);
+            // So are the other surface bodies that cut with it (#13303).
+            for b in tool_bodies {
+                reads.placed_body(st, b);
+            }
         }
         // A pattern of bodies copies them along its directions or about its axis in its own
         // component's frame, so it follows where each body it copies is placed relative to that
@@ -13123,7 +13127,7 @@ fn eval_feature_kind(
             }
             Ok(())
         }
-        FeatureKind::Split { body, plane, tool, tool_plane, tool_sheet, tool_faces, sketch, line } => {
+        FeatureKind::Split { body, plane, tool, tool_plane, tool_sheet, tool_faces, tool_bodies, sketch, line } => {
             let i = st.bodies.iter().position(|b| &b.name == body).ok_or_else(|| DocError::Unknown(format!("body `{body}`")))?;
             let Some(mb) = st.bodies.get(i).cloned() else { return Err(DocError::Unknown(format!("body `{body}`"))) };
             let input = mb.traced();
@@ -13167,8 +13171,15 @@ fn eval_feature_kind(
                                 .ok_or_else(|| DocError::Invalid(format!("the component holding `{body}` has a singular placement")))?;
                             Ok(kernel::transform_matrix(&tb.body, crate::mat_mul(&inverse, &source))?)
                         };
-                        let parts = match tool_sheet {
-                            crate::SplitSheet::Extended => kernel::split_body(&mb.body, &kernel::SplitTool::Face { body: &tb.body, face })?,
+                        // The pieces keep the planar roles of the faces they share with the body (#565).
+                        let traced = |parts: Vec<kernel::Body>| {
+                            parts
+                                .into_iter()
+                                .map(|part| Ok(Traced::step(part.with_preserved_planar_sources(&mb.body)?, &[&input])))
+                                .collect::<Result<Vec<_>>>()
+                        };
+                        match tool_sheet {
+                            crate::SplitSheet::Extended => traced(kernel::split_body(&mb.body, &kernel::SplitTool::Face { body: &tb.body, face })?)?,
                             // The picked faces as they are, never extended (#9305).
                             crate::SplitSheet::Faces => {
                                 let faces = tool_faces
@@ -13178,22 +13189,57 @@ fn eval_feature_kind(
                                             .ok_or_else(|| DocError::Invalid(format!("no face of `{}` at a tool point", t.body)))
                                     })
                                     .collect::<Result<Vec<_>>>()?;
-                                kernel::split_body_by_faces(&mb.body, &sheet(tb)?, face, &faces)?
+                                traced(kernel::split_body_by_faces(&mb.body, &sheet(tb)?, face, &faces)?)?
                             }
                             // Every face of a surface body as it is (#9305).
-                            crate::SplitSheet::Body => {
+                            crate::SplitSheet::Body if tool_bodies.is_empty() => {
                                 if !tb.body.is_surface() {
                                     return Err(DocError::Invalid(format!("`{}` is not a surface body, so it cannot split as a whole", t.body)));
                                 }
                                 let faces: Vec<usize> = (0..tb.body.face_count()).collect();
-                                kernel::split_body_by_faces(&mb.body, &sheet(tb)?, face, &faces)?
+                                traced(kernel::split_body_by_faces(&mb.body, &sheet(tb)?, face, &faces)?)?
                             }
-                        };
-                        // The pieces keep the planar roles of the faces they share with the body (#565).
-                        parts
-                            .into_iter()
-                            .map(|part| Ok(Traced::step(part.with_preserved_planar_sources(&mb.body)?, &[&input])))
-                            .collect::<Result<Vec<_>>>()?
+                            // Several surface bodies, each whole and as it is (#13303): each in turn
+                            // cuts the pieces it crosses into closed solids and leaves the others,
+                            // and each must cut one. The tool face gives the first body's sides,
+                            // the first face each other body's.
+                            crate::SplitSheet::Body => {
+                                let names: Vec<&crate::BodyName> = std::iter::once(&t.body).chain(tool_bodies).collect();
+                                let mut pieces = vec![input.clone()];
+                                for (k, name) in names.iter().enumerate() {
+                                    if names.get(..k).is_some_and(|before| before.contains(name)) {
+                                        return Err(DocError::Invalid(format!("`{name}` is a splitting tool twice")));
+                                    }
+                                    if *name == body {
+                                        return Err(DocError::Invalid(format!("`{body}` cannot split itself")));
+                                    }
+                                    let tool = st.body(name).ok_or_else(|| DocError::Unknown(format!("body `{name}`")))?;
+                                    if !tool.body.is_surface() {
+                                        return Err(DocError::Invalid(format!("`{name}` is not a surface body, so it cannot split as a whole")));
+                                    }
+                                    let side = if k == 0 { face } else { 0 };
+                                    let tool = sheet(tool)?;
+                                    let mut next = Vec::with_capacity(pieces.len() + 1);
+                                    let mut cut = false;
+                                    for piece in pieces {
+                                        match kernel::split_body_by_sheet_where_it_cuts(&piece.body, &tool, side)? {
+                                            Some(parts) => {
+                                                cut = true;
+                                                for part in parts {
+                                                    next.push(piece.then(part.with_preserved_planar_sources(&piece.body)?));
+                                                }
+                                            }
+                                            None => next.push(piece),
+                                        }
+                                    }
+                                    if !cut {
+                                        return Err(DocError::Invalid(format!("`{name}` does not cut `{body}` through")));
+                                    }
+                                    pieces = next;
+                                }
+                                pieces
+                            }
+                        }
                     }
                 }
                 None => {
