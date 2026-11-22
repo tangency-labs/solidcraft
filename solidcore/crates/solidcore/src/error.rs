@@ -3474,17 +3474,6 @@ pub(crate) mod replaced_upstream_samples {
         };
         #[rustfmt::skip] // one file per line, so conversions in parallel merge cleanly
         const PINNED: &[(&str, usize)] = &[
-            ("solidcore/src/boolean/api_brep.rs", 2),
-            ("solidcore/src/boolean/merge/p1.rs", 17),
-            ("solidcore/src/boolean/merge/p2.rs", 4),
-            ("solidcore/src/boolean/merge/p3.rs", 15),
-            ("solidcore/src/boolean/merge/p4.rs", 5),
-            ("solidcore/src/boolean/merge/p4/arena_pair.rs", 2),
-            ("solidcore/src/boolean/merge/p4/kernel_adapter.rs", 1),
-            ("solidcore/src/boolean/merge/p5.rs", 11),
-            ("solidcore/src/boolean/topology_intersector/p1.rs", 10),
-            ("solidcore/src/boolean/topology_intersector/p2.rs", 4),
-            ("solidcore/src/boolean/topology_intersector/p3.rs", 10),
             ("solidcore/src/offset/offset_executive/p2.rs", 1),
         ];
         assert_pinned("generic phrase-cause sites", &crate_sites(&PHRASES), PINNED);

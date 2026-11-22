@@ -23,7 +23,7 @@ use crate::boolean::topology_intersector::p1::IntersectorBrep;
 use crate::boolean::topology_intersector::p2::IntersectorBrepP2;
 use crate::boolean::topology_intersector::p3::IntersectorBrepP3;
 use crate::curve::curve::Curve as SmCurve;
-use crate::error::boolean::BooleanStage;
+use crate::error::boolean::BooleanFailure;
 use crate::geom::a_object::BREP_TYPE;
 use crate::geom::attribute::{AttributeStore, ObjectKey};
 use crate::geom::context::Context;
@@ -1328,10 +1328,9 @@ impl IntersectorBrep<H> for ArenaPair<'_> {
             identity,
         )?;
         if !out.split {
-            return Err(SolidError::boolean_stage_failed(
+            return Err(SolidError::boolean(
                 "boolean::merge::p4::arena_pair::split",
-                BooleanStage::Split,
-                "the edge was not split",
+                BooleanFailure::EdgeNotSplit,
             ));
         }
         let [a, z] = out
@@ -1745,7 +1744,7 @@ impl IntersectorBrep<H> for ArenaPair<'_> {
         let surface = self
             .face_surface_h(face)
             .flatten()
-            .ok_or_else(|| SolidError::entity_missing(OP_FACE_CACHE, "the face has no surface"))?;
+            .ok_or_else(|| SolidError::boolean(OP_FACE_CACHE, BooleanFailure::FaceWithoutSurface))?;
         Ok(ti::FaceCacheTarget {
             brep: self.brep_m(face)?,
             face: fid(face),
@@ -2010,9 +2009,9 @@ impl TopologyObjects<H> for ArenaPair<'_> {
     }
     fn face_surface(&self, face: H) -> crate::Result<H> {
         self.face_surface_h(face).flatten().ok_or_else(|| {
-            SolidError::entity_missing(
+            SolidError::boolean(
                 "boolean::merge::p4::arena_pair::face_surface",
-                "the face has no surface",
+                BooleanFailure::FaceWithoutSurface,
             )
         })
     }
