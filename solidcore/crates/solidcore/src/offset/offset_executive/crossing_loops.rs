@@ -521,6 +521,17 @@ fn present<T>(value: Option<T>, why: &'static str) -> Result<T> {
 const INDEX_PAST_END: &str = "an index into the crossings' own lists is past their end, though \
                               every index is taken from those lists";
 
+/// A wall strip's result: a strip that cannot be made is `None`, as [`crate::error::ignored`]
+/// reads it. A defect (the kernel's fault, [`SolidError::is_defect`]) is passed on with its
+/// reason, never read as a strip that cannot be made
+/// (`solidcore/docs/failure-codes-and-reproduction.md` §6, rule 5).
+fn strip_result<T>(r: Result<T>) -> Result<Option<T>> {
+    match r {
+        Err(e) if e.is_defect() => Err(e),
+        r => crate::error::ignored(r),
+    }
+}
+
 /// Why a curve's evaluation to the first derivative gave no tangent (the words of
 /// `intersect::curve_class::p1`).
 const EVAL_1ST: &str = "the curve's evaluation to the first derivative returned fewer than two \
@@ -1876,8 +1887,8 @@ impl OffsetExecutive {
                 };
                 for wf in edge::faces(b, wall, None)? {
                     // a strip that cannot be made leaves the walls apart, which the
-                    // shell's gate refuses
-                    let strip = crate::error::ignored(self.wall_strip(
+                    // shell's gate refuses; a defect is passed on
+                    let strip = strip_result(self.wall_strip(
                         kernel,
                         b,
                         wf,
@@ -2273,5 +2284,23 @@ mod tests {
         }
         assert_eq!(at(&short, 0).ok(), Some(&0));
         assert_eq!(present(Some(7_u8), FU_NO_MATE).ok(), Some(7));
+    }
+
+    /// A wall strip's defect reaches the caller with its reason; a strip that cannot be made
+    /// for any other reason is skipped, and a strip that is made is kept.
+    #[test]
+    fn a_wall_strip_defect_is_passed_on_and_other_failures_skip_the_strip() {
+        let defect = strip_result::<u8>(present(None, FACE_NO_FACEUSE)).unwrap_err();
+        assert!(defect.is_defect(), "{defect:?}");
+        assert_eq!(
+            defect.offset_failure(),
+            Some(&OffsetFailure::Defect {
+                why: FACE_NO_FACEUSE
+            })
+        );
+        let failed = SolidError::invalid_input(OP, "no step found");
+        assert!(!failed.is_defect());
+        assert_eq!(strip_result::<u8>(Err(failed)).ok(), Some(None));
+        assert_eq!(strip_result(Ok(7_u8)).ok(), Some(Some(7)));
     }
 }
