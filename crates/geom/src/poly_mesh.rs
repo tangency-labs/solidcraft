@@ -167,7 +167,9 @@ fn bits(p: Vec3) -> [u64; 3] {
 impl PolyMesh {
     /// The polygon mesh of a body's display plan. `evaluated` is the plan evaluated with its
     /// edges flagged (the body's display mesh of the plan); when it does not match the plan,
-    /// the plan is evaluated again here and no edge is flagged beyond [`edge_flag::BREP`].
+    /// the plan is evaluated again here and its flags are not used: every B-rep edge segment is
+    /// then marked [`edge_flag::TANGENT`] or [`edge_flag::SHARP`] from the polygons' normals
+    /// on either side, and none [`edge_flag::SURFACE_SEAM`].
     pub fn from_plan(plan: &TessPlan, evaluated: &Mesh, o: &PolyOptions) -> Result<PolyMesh, PolyMeshError> {
         let count = plan.vertex_count();
         if count > MAX_POLY_VERTICES {
@@ -205,7 +207,8 @@ impl PolyMesh {
     }
 
     /// The polygon mesh of a triangle mesh with a B-rep face per triangle (a body that has no
-    /// plan). A face is planar when all its normals agree.
+    /// plan). A face is planar when its points lie in one plane and all its normals agree (the
+    /// normals alone could hide a fold).
     pub fn from_mesh(m: &Mesh, o: &PolyOptions) -> Result<PolyMesh, PolyMeshError> {
         if m.positions.len() > MAX_POLY_VERTICES {
             return Err(PolyMeshError::TooLarge(m.positions.len()));
@@ -231,7 +234,8 @@ impl PolyMesh {
         }
         for f in &mut faces {
             let first = f.tris.first().and_then(|t| t[0].n.normalized());
-            f.planar = first.is_some_and(|n0| f.tris.iter().flatten().all(|c| c.n.normalized().is_some_and(|n| n.dot(n0) > 1.0 - 1e-9)));
+            let normals_agree = first.is_some_and(|n0| f.tris.iter().flatten().all(|c| c.n.normalized().is_some_and(|n| n.dot(n0) > 1.0 - 1e-9)));
+            f.planar = normals_agree && coplanar(&f.tris, &w.positions);
         }
         let flags = (m.seams.len() == m.edges.len() && m.smooth_edges.len() == m.edges.len() && m.sharp_edges.len() == m.edges.len()).then_some(m);
         Ok(build(w, faces, &m.edges, flags, o))
@@ -319,14 +323,18 @@ fn build(w: Welder, faces: Vec<FaceTris>, brep_edges: &[Vec<Vec3>], flags: Optio
         let mut seen: Vec<u32> = corners.iter().map(|c| c.v).collect();
         seen.sort_unstable();
         let repeats = seen.windows(2).any(|s| s[0] == s[1]);
-        if corners.len() >= 3 && !repeats {
+        if corners.len() >= 3 && !repeats && keeps_turning(&p.corners, &corners, &w.positions) {
             out_polys.push((p.face, corners));
         } else {
             for t in p.tris {
-                let t = t.map(|c| Corner { v: root(c.v), n: c.n });
-                if t[0].v != t[1].v && t[1].v != t[2].v && t[2].v != t[0].v {
-                    out_polys.push((p.face, t.to_vec()));
+                let welded = t.map(|c| Corner { v: root(c.v), n: c.n });
+                if welded[0].v == welded[1].v || welded[1].v == welded[2].v || welded[2].v == welded[0].v {
+                    // Two of its own corners joined: a sliver with no area.
+                    continue;
                 }
+                // A weld that would turn the triangle over or flatten it leaves it as it was.
+                let t = if keeps_turning(&t, &welded, &w.positions) { welded } else { t };
+                out_polys.push((p.face, t.to_vec()));
             }
         }
     }
@@ -570,7 +578,8 @@ fn quads(face: u32, tris: Vec<[Corner; 3]>, positions: &[Vec3], o: &PolyOptions)
         for i in 0..3 {
             let (a, b) = (t[i].v, t[(i + 1) % 3].v);
             by_edge.insert((a, b), (k, i));
-            *shared.entry((a.min(b), a.max(b))).or_insert(0) += 1;
+            let uses = shared.entry((a.min(b), a.max(b))).or_insert(0);
+            *uses = uses.saturating_add(1);
         }
     }
     // Every inner edge between two triangles that wind the same way is a candidate quad.
@@ -707,7 +716,8 @@ fn weld_open(positions: &[Vec3], polys: &[Poly], eps: f64) -> Vec<u32> {
         for dx in -1..=1 {
             for dy in -1..=1 {
                 for dz in -1..=1 {
-                    let Some(near) = grid.get(&[c[0] + dx, c[1] + dy, c[2] + dz]) else { continue };
+                    let (Some(x), Some(y), Some(z)) = (c[0].checked_add(dx), c[1].checked_add(dy), c[2].checked_add(dz)) else { continue };
+                    let Some(near) = grid.get(&[x, y, z]) else { continue };
                     for &u in near {
                         if u <= v || positions.get(u as usize).is_none_or(|q| q.dist(p) > eps) {
                             continue;
@@ -730,12 +740,47 @@ fn weld_open(positions: &[Vec3], polys: &[Poly], eps: f64) -> Vec<u32> {
 /// A polygon's normal from its corners (the sum of its edges' cross products), for corners
 /// whose normal is missing.
 fn polygon_normal(corners: &[Corner], positions: &[Vec3]) -> Vec3 {
+    area_vector(corners, positions).normalized().unwrap_or(Vec3::Z)
+}
+
+/// Twice a polygon's area along its normal (the sum of its edges' cross products).
+fn area_vector(corners: &[Corner], positions: &[Vec3]) -> Vec3 {
     let p = |c: &Corner| positions.get(c.v as usize).copied().unwrap_or(Vec3::ZERO);
     let mut n = Vec3::ZERO;
     for (i, c) in corners.iter().enumerate() {
         n += p(c).cross(corners.get((i + 1) % corners.len()).map_or(p(c), p));
     }
-    n.normalized().unwrap_or(Vec3::Z)
+    n
+}
+
+/// A polygon still faces the way it did before welding (`before`), with some area left.
+fn keeps_turning(before: &[Corner], after: &[Corner], positions: &[Vec3]) -> bool {
+    let (b, a) = (area_vector(before, positions), area_vector(after, positions));
+    let scale = b.len() * a.len();
+    scale > 0.0 && b.dot(a) > 1e-9 * scale
+}
+
+/// The corners of a face's triangles lie in one plane, the one their winding gives, to within
+/// a millionth of the face's size.
+fn coplanar(tris: &[[Corner; 3]], positions: &[Vec3]) -> bool {
+    let pos = |c: &Corner| positions.get(c.v as usize).copied();
+    let mut normal = Vec3::ZERO;
+    let big = Vec3::new(f64::MAX, f64::MAX, f64::MAX);
+    let (mut lo, mut hi) = (big, -big);
+    for t in tris {
+        let (Some(a), Some(b), Some(c)) = (pos(&t[0]), pos(&t[1]), pos(&t[2])) else { return false };
+        normal += (b - a).cross(c - a);
+        for p in [a, b, c] {
+            (lo, hi) = (lo.min(p), hi.max(p));
+        }
+    }
+    let (Some(n), Some(origin)) = (normal.normalized(), tris.first().and_then(|t| pos(&t[0]))) else { return false };
+    let size = (hi - lo).len();
+    if !size.is_finite() {
+        return false;
+    }
+    let tolerance = 1e-6 * size;
+    tris.iter().flatten().filter_map(pos).all(|p| (p - origin).dot(n).abs() <= tolerance)
 }
 
 #[cfg(test)]

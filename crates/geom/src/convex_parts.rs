@@ -45,7 +45,8 @@ pub fn convex_parts(loops: &[Vec<Vec2>]) -> Option<Vec<Vec<(usize, usize)>>> {
     let at = |i: usize| pts.get(i).copied().unwrap_or(Vec2::ZERO);
     let areas: Vec<f64> = ranges.iter().map(|r| area(&r.clone().collect::<Vec<_>>(), &at)).collect();
     let (Some(&outer_area), Some(holes)) = (areas.first(), areas.get(1..)) else { return None };
-    if !(outer_area > 0.0) || holes.iter().any(|a| !(*a < 0.0)) {
+    // Finite points can still make an area too large for a float (sides of 1e300).
+    if !(outer_area > 0.0 && outer_area.is_finite()) || holes.iter().any(|a| !(*a < 0.0 && a.is_finite())) {
         return None;
     }
 
@@ -98,6 +99,17 @@ pub fn convex_parts(loops: &[Vec<Vec2>]) -> Option<Vec<Vec<(usize, usize)>>> {
                 corners.extend(run);
             }
         }
+        // A point set aside as straight may still turn inwards a little: the part must stay
+        // convex with it (straight points pass, give or take rounding).
+        let m = corners.len();
+        let reflex = (0..m).any(|k| {
+            let (Some(&a), Some(&v), Some(&b)) = (corners.get((k + m - 1) % m), corners.get(k), corners.get((k + 1) % m)) else { return true };
+            let (pa, pv, pb) = (at(a), at(v), at(b));
+            turn(pa, pv, pb) < -1e-12 * pa.dist(pv) * pv.dist(pb)
+        });
+        if reflex {
+            return None;
+        }
         out.push(corners);
     }
 
@@ -105,7 +117,11 @@ pub fn convex_parts(loops: &[Vec<Vec2>]) -> Option<Vec<Vec<(usize, usize)>>> {
     let covered: f64 = out.iter().map(|p| area(p, &at)).sum();
     let region: f64 = areas.iter().sum();
     let used: HashSet<usize> = out.iter().flatten().copied().collect();
-    if !(region > 0.0) || (covered - region).abs() > 1e-9 * outer_area || used.len() != total || out.iter().any(|p| !(area(p, &at) > 0.0)) {
+    if !(region > 0.0 && region.is_finite() && covered.is_finite())
+        || (covered - region).abs() > 1e-9 * outer_area
+        || used.len() != total
+        || out.iter().any(|p| !(area(p, &at) > 0.0 && area(p, &at).is_finite()))
+    {
         return None;
     }
     out.into_iter().map(|p| p.into_iter().map(|i| ids.get(i).copied()).collect()).collect()

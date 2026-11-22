@@ -290,3 +290,24 @@ fn a_sketch_being_dragged_is_meshed_as_it_stands() {
     let m = only_mesh(&meshes(&mut s, json!({})));
     assert_eq!(m.euler_closed(), (2, true));
 }
+
+#[test]
+fn a_mesh_is_told_apart_by_everything_that_changes_it() {
+    let mut s = Session::default();
+    s.execute("solid.cylinder", &json!({"radius": 5, "height": 10, "body_name": "Pin"})).unwrap();
+    let key = |r: &Value| r["objects"][0]["mesh"].clone();
+    // A mesh sent without normals never stands in for one asked with them.
+    let bare = meshes(&mut s, json!({"normals": false}));
+    let shaded = meshes(&mut s, json!({"normals": true}));
+    assert_ne!(key(&bare), key(&shaded));
+    assert!(only_mesh(&bare).normals.is_empty());
+    assert!(!only_mesh(&shaded).normals.is_empty());
+    // The same request again gives the same mesh.
+    assert_eq!(key(&meshes(&mut s, json!({"normals": true}))), key(&shaded));
+    assert_eq!(key(&meshes(&mut s, json!({"normals": false}))), key(&bare));
+    // With a chord given, the quality still sets the angle.
+    let coarse = meshes(&mut s, json!({"chord_mm": 0.5, "quality": "coarse"}));
+    let ultra = meshes(&mut s, json!({"chord_mm": 0.5, "quality": "ultra"}));
+    assert_ne!(key(&coarse), key(&ultra));
+    assert!(only_mesh(&ultra).positions.len() > only_mesh(&coarse).positions.len());
+}

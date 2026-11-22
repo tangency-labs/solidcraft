@@ -930,7 +930,9 @@ version) in an app that has the command.
 ```
 
 - Every reply lists every visible body (`objects`) with its placement, colours and the key of
-  its mesh, so a body missing from a reply is gone. Placements of one part share one mesh.
+  its mesh, so a body missing from a reply is gone. A request that names `bodies` gets only
+  those: a body it did not name is not gone for being left out. Placements of one part share
+  one mesh.
 - A mesh is sent only when its key is not in `have`. Keep the meshes you hold by key, send their
   keys, and a change re-sends only the bodies that changed. Meshes past `max_mb` are listed in
   `pending`: ask again with the received keys in `have`.

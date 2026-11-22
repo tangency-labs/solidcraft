@@ -107,6 +107,21 @@ fn loops_that_cannot_be_cut_are_refused() {
 }
 
 #[test]
+fn a_point_turning_in_a_little_never_makes_a_reflex_corner() {
+    // The bottom side's middle point lies a hair inside: near enough to be set aside as straight,
+    // but put back it turns inwards.
+    let loops = vec![ring(&[(0.0, 0.0), (1.0, 5e-8), (2.0, 0.0), (2.0, 1.0), (0.0, 1.0)])];
+    if let Some(parts) = convex_parts(&loops) {
+        check(&loops, &parts);
+    }
+    // Exactly on the side, it goes back in and the part stays one.
+    let loops = vec![ring(&[(0.0, 0.0), (1.0, 0.0), (2.0, 0.0), (2.0, 1.0), (0.0, 1.0)])];
+    let parts = convex_parts(&loops).unwrap();
+    check(&loops, &parts);
+    assert_eq!(parts.len(), 1);
+}
+
+#[test]
 fn hostile_loops_never_panic() {
     let square = ring(&[(0.0, 0.0), (4.0, 0.0), (4.0, 4.0), (0.0, 4.0)]);
     let bow = ring(&[(0.0, 0.0), (4.0, 4.0), (4.0, 0.0), (0.0, 4.0)]);
@@ -129,4 +144,6 @@ fn hostile_loops_never_panic() {
             }
         }
     }
+    // Finite points whose area is not.
+    assert!(convex_parts(&[ring(&[(0.0, 0.0), (1e300, 0.0), (1e300, 1e300), (0.0, 1e300)])]).is_none());
 }

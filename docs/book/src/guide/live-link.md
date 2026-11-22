@@ -34,7 +34,8 @@ The add-on can ask for coarser or finer meshes, for all bodies or for the ones y
 - **Quality** follows SolidCraft's display qualities (coarse, normal, fine, ultra).
 - **Chord** is how far a facet may stand off the true surface, in millimetres or as a share of
   the body's size; **angle** is how far one facet of a curved face may turn.
-- **Topology** chooses n-gons and quads (the default), quads only, or triangles only.
+- **Topology** chooses n-gons and quads (the default), quads where they fit with triangles
+  elsewhere, or triangles only.
 
 ## When it doesn't connect
 

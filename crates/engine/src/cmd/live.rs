@@ -39,6 +39,7 @@ const CACHE_BYTES: usize = 512 << 20;
 pub static COMMANDS: &[CommandSpec] = &[CommandSpec::new(CMD, "Live Link Meshes", crate::checked!("live.meshes", run))
     .icon("inspect")
     .noundo()
+    .read_only()
     .contract(&CONTRACT)
     .output(output_schema_for::<LiveMeshesResult>)
     .params(
@@ -58,7 +59,7 @@ struct Settings {
 }
 
 impl Settings {
-    /// What goes into a mesh's key: everything that changes its polygons.
+    /// What goes into a mesh's key and its cache entry: everything that changes what is sent.
     fn tag(&self) -> String {
         let topology = match self.topology {
             PolyTopology::NGons => "ngons",
@@ -70,8 +71,10 @@ impl Settings {
             Some((c, false)) => format!("mm{c:e}"),
             None => self.quality.id().to_string(),
         };
-        let angle = self.angle.map_or_else(String::new, |a| format!("{a:e}"));
-        format!("{topology}/{chord}/{angle}")
+        // The angle the mesh is made with, given or the quality's (as `mesh_of` takes it).
+        let angle = self.angle.unwrap_or_else(|| self.quality.angle());
+        let normals = if self.normals { "n" } else { "-" };
+        format!("{topology}/{chord}/{angle:e}/{normals}")
     }
 
     /// The plan made the way the viewport makes it (cached with the body).

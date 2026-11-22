@@ -520,3 +520,77 @@ fn the_same_plan_gives_the_same_mesh() {
     let b = PolyMesh::from_plan(&plan, &plan.evaluate().0, &PolyOptions::default()).unwrap();
     assert_eq!(a, b);
 }
+
+#[test]
+fn a_fold_with_one_normal_is_not_one_ngon() {
+    // Two triangles of one face folded along their diagonal, their normals all +Z as an import
+    // may give them: the fold stays.
+    let fold = Mesh {
+        positions: vec![Vec3::ZERO, Vec3::X, Vec3::new(1.0, 1.0, 0.0), Vec3::new(0.0, 1.0, 1.0)],
+        normals: vec![Vec3::Z; 4],
+        triangles: vec![[0, 1, 2], [0, 2, 3]],
+        tri_face: vec![0, 0],
+        ..Mesh::default()
+    };
+    let p = PolyMesh::from_mesh(&fold, &PolyOptions::default()).unwrap();
+    check_invariants(&p);
+    assert_eq!((p.stats.triangles, p.stats.quads, p.stats.ngons), (2, 0, 0), "{:?}", p.stats);
+    // The same corners in one plane are one polygon.
+    let flat = Mesh { positions: vec![Vec3::ZERO, Vec3::X, Vec3::new(1.0, 1.0, 0.0), Vec3::Y], ..fold };
+    let p = PolyMesh::from_mesh(&flat, &PolyOptions::default()).unwrap();
+    check_invariants(&p);
+    assert_eq!(p.poly_sizes, vec![4]);
+}
+
+#[test]
+fn a_weld_never_turns_a_polygon_over() {
+    // Two triangles apart; with a weld distance of 2 the apex of the second (above its base)
+    // would join the apex of the first (below that base) and turn the second over.
+    let m = Mesh {
+        positions: vec![
+            Vec3::new(5.0, -0.9, 0.0),
+            Vec3::new(-5.0, -20.0, 0.0),
+            Vec3::new(15.0, -20.0, 0.0),
+            Vec3::ZERO,
+            Vec3::new(10.0, 0.0, 0.0),
+            Vec3::new(5.0, 0.9, 0.0),
+        ],
+        normals: vec![Vec3::Z; 6],
+        triangles: vec![[0, 1, 2], [3, 4, 5]],
+        tri_face: vec![0, 1],
+        ..Mesh::default()
+    };
+    for topology in [PolyTopology::Triangles, PolyTopology::Quads, PolyTopology::NGons] {
+        let p = PolyMesh::from_mesh(&m, &PolyOptions { topology, weld_eps: 2.0, ..PolyOptions::default() }).unwrap();
+        check_invariants(&p);
+        assert_eq!(p.poly_sizes.len(), 2, "{topology:?}");
+        let mut at = 0;
+        for &size in &p.poly_sizes {
+            let c: Vec<Vec3> = p.loops[at..at + size as usize].iter().map(|&v| p.positions[v as usize]).collect();
+            at += size as usize;
+            let z: f64 = (0..c.len()).map(|k| c[k].cross(c[(k + 1) % c.len()]).z).sum();
+            assert!(z > 0.0, "{topology:?}: {c:?} turned over");
+        }
+    }
+}
+
+#[test]
+fn crowded_edges_and_tiny_welds_never_panic() {
+    // 300 triangles of one face on one edge: more uses than a byte counts.
+    let mut positions = vec![Vec3::ZERO, Vec3::X];
+    let mut triangles = Vec::new();
+    for k in 0..300u32 {
+        let t = f64::from(k) * 0.01;
+        positions.push(Vec3::new(0.5, t.cos(), t.sin()));
+        triangles.push([0, 1, k + 2]);
+    }
+    let fan = Mesh { positions, tri_face: vec![0; triangles.len()], triangles, ..Mesh::default() };
+    for topology in [PolyTopology::Quads, PolyTopology::NGons] {
+        check_invariants(&PolyMesh::from_mesh(&fan, &PolyOptions { topology, ..PolyOptions::default() }).unwrap());
+    }
+    // A weld distance so small that the grid cells of ordinary points run past the integers.
+    let open = Mesh { positions: vec![Vec3::X, Vec3::new(2.0, 0.0, 0.0), Vec3::new(1.0, 1.0, 0.0)], triangles: vec![[0, 1, 2]], ..Mesh::default() };
+    let p = PolyMesh::from_mesh(&open, &PolyOptions { weld_eps: 1e-20, ..PolyOptions::default() }).unwrap();
+    check_invariants(&p);
+    assert_eq!(p.poly_sizes.len(), 1);
+}
