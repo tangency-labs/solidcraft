@@ -864,6 +864,8 @@ pub enum SolverFailure {
     /// The caller's fillet geometry has no rail on side `side`: the caller's solver set-up
     /// ([`ErrorKind::InvalidInput`]); status `SM_ERR_NULL_POINTER`.
     FilletGeomWithoutRail {
+        /// The fillet geometry.
+        fillet_geom: crate::blend::fillet_geom::p1::FilletGeomId,
         /// The rail side, 0 or 1.
         side: usize,
     },
@@ -897,9 +899,13 @@ pub enum SolverFailure {
         /// The curve's kind (its type string), `None` when the rail has no curve.
         kind: Option<&'static str>,
     },
-    /// A rail of the caller's fillet geometry has `count` edge uses where two are needed:
-    /// the caller's solver set-up ([`ErrorKind::InvalidInput`]).
+    /// Rail `side` of the caller's fillet geometry has `count` edge uses where two are
+    /// needed: the caller's solver set-up ([`ErrorKind::InvalidInput`]).
     RailEdgeUseCount {
+        /// The fillet geometry.
+        fillet_geom: crate::blend::fillet_geom::p1::FilletGeomId,
+        /// The rail side, 0 or 1.
+        side: usize,
         /// The rail's edge uses.
         count: usize,
     },
@@ -1335,8 +1341,11 @@ impl core::fmt::Display for SolverFailure {
                 "the last piece of the roll-over runs over a corner, with no split vertex to \
                  start the corner's support edge",
             ),
-            Self::FilletGeomWithoutRail { side } => {
-                write!(f, "the fillet geometry has no rail on side {side}")
+            Self::FilletGeomWithoutRail { fillet_geom, side } => {
+                write!(
+                    f,
+                    "fillet geometry {fillet_geom:?} has no rail on side {side}"
+                )
             }
             Self::FilletGeomWithoutSurface { fillet_geom } => {
                 write!(f, "fillet geometry {fillet_geom:?} has no fillet surface")
@@ -1362,12 +1371,14 @@ impl core::fmt::Display for SolverFailure {
                     "rail {side} of fillet geometry {fillet_geom:?} has no curve"
                 ),
             },
-            Self::RailEdgeUseCount { count } => {
-                write!(
-                    f,
-                    "the fillet geometry's rail has {count} edge uses, not two"
-                )
-            }
+            Self::RailEdgeUseCount {
+                fillet_geom,
+                side,
+                count,
+            } => write!(
+                f,
+                "rail {side} of fillet geometry {fillet_geom:?} has {count} edge uses, not two"
+            ),
             Self::RailWithoutUvCurve { rail } => write!(
                 f,
                 "rail {} of the fillet geometry has no uv curve on its face",
@@ -2013,7 +2024,12 @@ impl core::fmt::Display for BlendFailure {
                 "{}: the crossing leaves the surface's domain at (u, v) = ({u}, {v}) before its end",
                 self.class()
             ),
-            Self::PlaneCurveStepVanished { u, v, step, minimum } => write!(
+            Self::PlaneCurveStepVanished {
+                u,
+                v,
+                step,
+                minimum,
+            } => write!(
                 f,
                 "{}: the crossing's step at (u, v) = ({u}, {v}) was halved to {step}, below its minimum {minimum}, without an accepted step",
                 self.class()
@@ -2045,7 +2061,11 @@ impl core::fmt::Display for BlendFailure {
                 self.class()
             ),
             Self::FaceHasNoSurface => {
-                write!(f, "{}: a face given to the fillet has no surface", self.class())
+                write!(
+                    f,
+                    "{}: a face given to the fillet has no surface",
+                    self.class()
+                )
             }
             Self::NoFirstBody => write!(
                 f,
@@ -2104,7 +2124,11 @@ impl core::fmt::Display for BlendFailure {
                 self.class()
             ),
             Self::LawHasNoValue => {
-                write!(f, "{}: a base radius law has no value of its own", self.class())
+                write!(
+                    f,
+                    "{}: a base radius law has no value of its own",
+                    self.class()
+                )
             }
             Self::SequenceCurveNotBSpline { kind } => write!(
                 f,
@@ -2159,7 +2183,9 @@ impl core::fmt::Display for BlendFailure {
             | Self::PassedOn { what, .. } => f.write_str(what),
             Self::Missing(what) => write!(f, "{what} is missing"),
             Self::BandInputMissing(input) => write!(f, "{} is missing", input.what()),
-            Self::CliffInputMissing { face, input } => write!(f, "cliff face {face:?} is missing its {}", input.what()),
+            Self::CliffInputMissing { face, input } => {
+                write!(f, "cliff face {face:?} is missing its {}", input.what())
+            }
             Self::Solver(cause) => cause.fmt(f),
             Self::Inconsistent(what) => write!(f, "a consistency check failed: {what}"),
             Self::NotCertified { halvings, stations } => write!(
@@ -2791,7 +2817,12 @@ mod tests {
     #[test]
     fn a_plane_curve_vanished_step_is_a_defect_with_its_numbers() {
         assert_plane_curve_cause(
-            BlendFailure::PlaneCurveStepVanished { u: 0.25, v: 0.5, step: 0.0000000005, minimum: 0.000000001 },
+            BlendFailure::PlaneCurveStepVanished {
+                u: 0.25,
+                v: 0.5,
+                step: 0.0000000005,
+                minimum: 0.000000001,
+            },
             ErrorKind::StageFailed,
             "the crossing's step at (u, v) = (0.25, 0.5) was halved to 0.0000000005, below its minimum 0.000000001, without an accepted step",
         );
@@ -2800,7 +2831,10 @@ mod tests {
     #[test]
     fn a_plane_curve_fit_cap_names_its_stations_and_passes() {
         assert_plane_curve_cause(
-            BlendFailure::PlaneCurveFitCap { stations: 128, passes: 20 },
+            BlendFailure::PlaneCurveFitCap {
+                stations: 128,
+                passes: 20,
+            },
             ErrorKind::NotWithinTolerance,
             "the crossing's Hermite fit is still off the exact curve by more than a tenth of the tolerance with 128 stations after 20 passes",
         );

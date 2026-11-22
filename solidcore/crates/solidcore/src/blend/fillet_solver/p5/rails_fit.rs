@@ -247,7 +247,7 @@ pub fn is_knife_edge(
                 SolidError::Unported { .. } | SolidError::Cancelled { .. }
             ) || e.is_not_certified() =>
         {
-            return Err(e)
+            return Err(e);
         }
         Err(_) => return Ok(false),
     };
@@ -807,7 +807,13 @@ impl FilletSolver {
             }
             for ii in 0..2 {
                 let rail = fillets.geom(id)?.rail(ii).ok_or_else(|| {
-                    SolidError::blend_solver(OP, SolverFailure::FilletGeomWithoutRail { side: ii })
+                    SolidError::blend_solver(
+                        OP,
+                        SolverFailure::FilletGeomWithoutRail {
+                            fillet_geom: id,
+                            side: ii,
+                        },
+                    )
                 })?;
                 let curve = edge::curve(fillets.brep(), rail)?
                     .ok_or_else(|| {

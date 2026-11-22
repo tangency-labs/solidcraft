@@ -345,7 +345,10 @@ impl FilletSolver {
                     let rail = fillets.geom(id)?.rail(ii).ok_or_else(|| {
                         SolidError::blend_solver(
                             OP,
-                            SolverFailure::FilletGeomWithoutRail { side: ii },
+                            SolverFailure::FilletGeomWithoutRail {
+                                fillet_geom: id,
+                                side: ii,
+                            },
                         )
                     })?;
                     let curve = edge::curve(fillets.brep(), rail)?

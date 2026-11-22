@@ -496,7 +496,10 @@ impl Recovery<'_> {
     fn rail_copy(&self, geom: FilletGeomId, which: usize) -> Result<Rail> {
         let rail = caller(
             self.fillets.geom(geom)?.rail(which),
-            Solver::FilletGeomWithoutRail { side: which },
+            Solver::FilletGeomWithoutRail {
+                fillet_geom: geom,
+                side: which,
+            },
         )?;
         let count = required(self.fillets.fillet_edge(rail)?.curve_class(), CLASSIFIED)?.size();
         let curve = caller(
@@ -620,7 +623,10 @@ impl Recovery<'_> {
         for which in 0..2 {
             let rail = caller(
                 self.fillets.geom(geom)?.rail(which),
-                Solver::FilletGeomWithoutRail { side: which },
+                Solver::FilletGeomWithoutRail {
+                    fillet_geom: geom,
+                    side: which,
+                },
             )?;
             let vertex = if last {
                 self.end(rail)?
@@ -682,7 +688,10 @@ impl Recovery<'_> {
         let mut out = [None, None];
         let rail0 = caller(
             self.fillets.geom(geom)?.rail(0),
-            Solver::FilletGeomWithoutRail { side: 0 },
+            Solver::FilletGeomWithoutRail {
+                fillet_geom: geom,
+                side: 0,
+            },
         )?;
         let along = self.fillets.vertex_point(self.end(rail0)?)?
             - self.fillets.vertex_point(self.start(rail0)?)?;
@@ -692,7 +701,10 @@ impl Recovery<'_> {
             for which in 0..2 {
                 let rail = caller(
                     self.fillets.geom(geom)?.rail(which),
-                    Solver::FilletGeomWithoutRail { side: which },
+                    Solver::FilletGeomWithoutRail {
+                        fillet_geom: geom,
+                        side: which,
+                    },
                 )?;
                 let vertex = if at_end {
                     self.end(rail)?
@@ -763,7 +775,10 @@ impl Recovery<'_> {
         // Preserve rail-0 NER before touching rail 1.
         let r0 = caller(
             self.fillets.geom(id)?.rail(0),
-            Solver::FilletGeomWithoutRail { side: 0 },
+            Solver::FilletGeomWithoutRail {
+                fillet_geom: id,
+                side: 0,
+            },
         )?;
         let cc0 =
             self.fillets.fillet_edge(r0)?.curve_class().ok_or_else(|| {
@@ -772,7 +787,10 @@ impl Recovery<'_> {
         let n0 = cc0.size();
         let r1 = caller(
             self.fillets.geom(id)?.rail(1),
-            Solver::FilletGeomWithoutRail { side: 1 },
+            Solver::FilletGeomWithoutRail {
+                fillet_geom: id,
+                side: 1,
+            },
         )?;
         let cc1 =
             self.fillets.fillet_edge(r1)?.curve_class().ok_or_else(|| {
@@ -1192,7 +1210,10 @@ impl Recovery<'_> {
                 for which in 0..2 {
                     let rail = caller(
                         self.fillets.geom(current_geom)?.rail(which),
-                        Solver::FilletGeomWithoutRail { side: which },
+                        Solver::FilletGeomWithoutRail {
+                            fillet_geom: current_geom,
+                            side: which,
+                        },
                     )?;
                     let vertex = if last {
                         self.end(rail)?
@@ -1243,7 +1264,10 @@ impl Recovery<'_> {
                     .set_fillet_surface(None);
                 let start = self.start(caller(
                     self.fillets.geom(current_geom)?.rail(0),
-                    Solver::FilletGeomWithoutRail { side: 0 },
+                    Solver::FilletGeomWithoutRail {
+                        fillet_geom: current_geom,
+                        side: 0,
+                    },
                 )?)?;
                 let point = self.fillets.vertex_point(start)?;
                 let original_curve = &get(&rails, 0)?.curve;
@@ -1309,7 +1333,10 @@ impl Recovery<'_> {
                 for (which, rail) in rails.iter_mut().enumerate() {
                     rail.edge = caller(
                         self.fillets.geom(geom)?.rail(which),
-                        Solver::FilletGeomWithoutRail { side: which },
+                        Solver::FilletGeomWithoutRail {
+                            fillet_geom: geom,
+                            side: which,
+                        },
                     )?;
                     rail.split_last_time = true;
                 }
