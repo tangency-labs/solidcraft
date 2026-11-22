@@ -15,6 +15,7 @@
 //! | [`MassFailure::SkippedSpan`]    | `SM_ERR`                 |
 //! | [`MassFailure::Defect`]         | `SM_ERR` (or the site's, through `with_status`) |
 //! | [`MassFailure::EdgeWithoutCurve`], [`MassFailure::FaceWithoutSurface`], [`MassFailure::FaceuseWithoutRegion`] | `SM_ERR_NULL_POINTER` (or the site's, through `with_status`) |
+//! | [`MassFailure::FaceWithoutFaceuse`], [`MassFailure::FaceuseWithoutMate`], [`MassFailure::EdgeuseWithoutEdge`], [`MassFailure::EdgeuseWithoutVertexuse`], [`MassFailure::VertexuseWithoutVertex`] | `SM_ERR_NULL_POINTER` |
 //! | [`MassFailure::EdgeCurveSingular`], [`MassFailure::TrimNotFinite`] | `SM_ERR`  |
 //!
 //! [`MassFailure::Defect`] is a failure reviewed at its site as the kernel's fault, with its
@@ -73,6 +74,22 @@ pub enum MassFailure {
     /// A face use of the caller's body is in no shell or its shell in no region.
     /// [`ErrorKind::InvalidInput`]; status `SM_ERR_NULL_POINTER`.
     FaceuseWithoutRegion,
+    /// A face of the caller's body has no (upward) face use. The B-rep's links are public,
+    /// and the mass routines do not validate the body first.
+    /// [`ErrorKind::InvalidInput`]; status `SM_ERR_NULL_POINTER`.
+    FaceWithoutFaceuse,
+    /// A face use of the caller's body has no mate. [`ErrorKind::InvalidInput`]; status
+    /// `SM_ERR_NULL_POINTER`.
+    FaceuseWithoutMate,
+    /// An edge use of a loop of the caller's body has no edge.
+    /// [`ErrorKind::InvalidInput`]; status `SM_ERR_NULL_POINTER`.
+    EdgeuseWithoutEdge,
+    /// An edge use of a loop of the caller's body has no vertex use.
+    /// [`ErrorKind::InvalidInput`]; status `SM_ERR_NULL_POINTER`.
+    EdgeuseWithoutVertexuse,
+    /// A vertex use of the caller's body has no vertex. [`ErrorKind::InvalidInput`];
+    /// status `SM_ERR_NULL_POINTER`.
+    VertexuseWithoutVertex,
 }
 
 impl MassFailure {
@@ -82,7 +99,12 @@ impl MassFailure {
             Self::Missing(_)
             | Self::EdgeWithoutCurve
             | Self::FaceWithoutSurface
-            | Self::FaceuseWithoutRegion => SM_ERR_NULL_POINTER,
+            | Self::FaceuseWithoutRegion
+            | Self::FaceWithoutFaceuse
+            | Self::FaceuseWithoutMate
+            | Self::EdgeuseWithoutEdge
+            | Self::EdgeuseWithoutVertexuse
+            | Self::VertexuseWithoutVertex => SM_ERR_NULL_POINTER,
             Self::Failed(_)
             | Self::StepControl
             | Self::Integrand
@@ -96,7 +118,7 @@ impl MassFailure {
     /// The failure's stable [`ErrorKind`]: [`ErrorKind::Missing`] for
     /// [`MassFailure::Missing`], [`ErrorKind::InvalidInput`] for the caller's body (an
     /// edge or face without its geometry, a trim that is not finite, a face use in no
-    /// region), [`ErrorKind::Degenerate`] for
+    /// region, a missing link of its topology), [`ErrorKind::Degenerate`] for
     /// [`MassFailure::EdgeCurveSingular`], [`ErrorKind::Failed`] otherwise.
     /// [`MassFailure::Defect`] is [`ErrorKind::StageFailed`], a defect.
     #[must_use]
@@ -106,7 +128,12 @@ impl MassFailure {
             Self::EdgeWithoutCurve
             | Self::FaceWithoutSurface
             | Self::TrimNotFinite
-            | Self::FaceuseWithoutRegion => ErrorKind::InvalidInput,
+            | Self::FaceuseWithoutRegion
+            | Self::FaceWithoutFaceuse
+            | Self::FaceuseWithoutMate
+            | Self::EdgeuseWithoutEdge
+            | Self::EdgeuseWithoutVertexuse
+            | Self::VertexuseWithoutVertex => ErrorKind::InvalidInput,
             Self::EdgeCurveSingular => ErrorKind::Degenerate,
             _ => ErrorKind::of_status(self.comparison_status()),
         }
@@ -132,6 +159,11 @@ impl core::fmt::Display for MassFailure {
             ),
             Self::TrimNotFinite => f.write_str("the trim's point or tangent is not finite"),
             Self::FaceuseWithoutRegion => f.write_str("the face use has no region"),
+            Self::FaceWithoutFaceuse => f.write_str("the face has no face use"),
+            Self::FaceuseWithoutMate => f.write_str("the face use has no mate"),
+            Self::EdgeuseWithoutEdge => f.write_str("the edge use has no edge"),
+            Self::EdgeuseWithoutVertexuse => f.write_str("the edge use has no vertex use"),
+            Self::VertexuseWithoutVertex => f.write_str("the vertex use has no vertex"),
         }
     }
 }
@@ -241,6 +273,31 @@ mod tests {
             (MassFailure::TrimNotFinite, SM_ERR, K::InvalidInput),
             (
                 MassFailure::FaceuseWithoutRegion,
+                SM_ERR_NULL_POINTER,
+                K::InvalidInput,
+            ),
+            (
+                MassFailure::FaceWithoutFaceuse,
+                SM_ERR_NULL_POINTER,
+                K::InvalidInput,
+            ),
+            (
+                MassFailure::FaceuseWithoutMate,
+                SM_ERR_NULL_POINTER,
+                K::InvalidInput,
+            ),
+            (
+                MassFailure::EdgeuseWithoutEdge,
+                SM_ERR_NULL_POINTER,
+                K::InvalidInput,
+            ),
+            (
+                MassFailure::EdgeuseWithoutVertexuse,
+                SM_ERR_NULL_POINTER,
+                K::InvalidInput,
+            ),
+            (
+                MassFailure::VertexuseWithoutVertex,
                 SM_ERR_NULL_POINTER,
                 K::InvalidInput,
             ),

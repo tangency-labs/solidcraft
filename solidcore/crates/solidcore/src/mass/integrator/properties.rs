@@ -102,12 +102,6 @@ fn null_defect(why: &'static str) -> SolidError {
 const SHORT_EVALUATION: &str = "the curve's evaluation returned fewer values than asked for, \
                                 though an evaluation that succeeds returns the point and each \
                                 derivative asked for";
-/// Why a face has no face use.
-const NO_FACEUSE: &str =
-    "the face has no face use, though the kernel makes every face with its two face uses";
-/// Why a face use has no mate.
-const NO_MATE: &str =
-    "the face use has no mate, though the kernel makes a face's two uses as each other's mates";
 /// Why the closed boundary and the face's loops disagree.
 const BOUNDARY_LOOPS: &str = "the face's closed boundary and its loops disagree, though the \
                               boundary is built from those loops, one edge use at a time";
@@ -1678,8 +1672,8 @@ fn gap_closure(
     use crate::nurbs::b_spline_surface_n_lib::p2::EvaluateFlags;
     use crate::nurbs::knots::Side;
     use crate::topology::edgeuse::{p1 as eu1, p3 as eu3};
-    let fu =
-        crate::topology::face::p2::upward_faceuse(b, f)?.ok_or_else(|| null_defect(NO_FACEUSE))?;
+    let fu = crate::topology::face::p2::upward_faceuse(b, f)?
+        .ok_or_else(|| SolidError::mass(OP, MassFailure::FaceWithoutFaceuse))?;
     let mut pools = Vec::new();
     for lu in eu1::faceuse_loopuses(b, fu, false, None)? {
         if crate::topology::loopuse::is_vertex_loopuse(b, lu)? {
@@ -1697,25 +1691,17 @@ fn gap_closure(
                          missing",
                 )
             })?;
-            let vu = b.edgeuse(eu)?.vertexuse.ok_or_else(|| {
-                null_defect(
-                    "an edge use of the face's loop has no vertex use, though the kernel \
-                         makes every edge use with the vertex use at its start",
-                )
-            })?;
-            let v = b.vertexuse(vu)?.vertex.ok_or_else(|| {
-                null_defect(
-                    "a vertex use has no vertex, though the kernel makes every vertex use \
-                         on its vertex",
-                )
-            })?;
+            let vu = b
+                .edgeuse(eu)?
+                .vertexuse
+                .ok_or_else(|| SolidError::mass(OP, MassFailure::EdgeuseWithoutVertexuse))?;
+            let v = b
+                .vertexuse(vu)?
+                .vertex
+                .ok_or_else(|| SolidError::mass(OP, MassFailure::VertexuseWithoutVertex))?;
             let vertex = b.vertex(v)?.point;
-            let e = eu1::edge(b, eu)?.ok_or_else(|| {
-                null_defect(
-                    "an edge use of the face's loop has no edge, though the kernel makes \
-                         every edge use of a loop on its edge",
-                )
-            })?;
+            let e = eu1::edge(b, eu)?
+                .ok_or_else(|| SolidError::mass(OP, MassFailure::EdgeuseWithoutEdge))?;
             let ivl = b.edge(e)?.interval;
             let edge = edge::curve(b, e)?.map(|c| (c.clone(), ivl.min(), ivl.max()));
             sides.push((
@@ -2094,8 +2080,14 @@ fn properties_in_box(
         if mass.x < EFF_ZERO {
             mass.x = 1.0;
         }
-        let up = b.face(f)?.faceuse.ok_or_else(|| null_defect(NO_FACEUSE))?;
-        let mate = b.faceuse(up)?.mate.ok_or_else(|| null_defect(NO_MATE))?;
+        let up = b
+            .face(f)?
+            .faceuse
+            .ok_or_else(|| SolidError::mass(OP, MassFailure::FaceWithoutFaceuse))?;
+        let mate = b
+            .faceuse(up)?
+            .mate
+            .ok_or_else(|| SolidError::mass(OP, MassFailure::FaceuseWithoutMate))?;
         let mut separating = faceuse_region(b, up)? != faceuse_region(b, mate)?;
         // the face's closure onto its edges (#16735), made once for both its uses
         let mut closure: Option<PreciseProperties> = None;
@@ -2110,7 +2102,10 @@ fn properties_in_box(
             }
             match behavior.face_area {
                 0 => {
-                    let other = b.faceuse(fu)?.mate.ok_or_else(|| null_defect(NO_MATE))?;
+                    let other = b
+                        .faceuse(fu)?
+                        .mate
+                        .ok_or_else(|| SolidError::mass(OP, MassFailure::FaceuseWithoutMate))?;
                     if !region_void(b, faceuse_region(b, fu)?)?
                         && region_void(b, faceuse_region(b, other)?)?
                     {
@@ -3017,6 +3012,31 @@ mod tests {
             b.edgeuses().iter().any(|(_, u)| u.uv_trim_curve.is_some()),
             "the trims are made on the box itself"
         );
+    }
+    /// A body whose topology links the caller left out (the B-rep's links are public) is
+    /// the caller's: a named invalid-input cause with `SM_ERR_NULL_POINTER`, not a defect.
+    #[test]
+    fn a_missing_link_of_the_callers_body_is_refused_by_name() {
+        let mut k = Kernel::default();
+        let boxed = |k: &mut Kernel| {
+            crate::primitive::api_primitives::create_box(k, Point3::ZERO, 1.0, 1.0, 1.0).unwrap()
+        };
+        // a face use without its mate
+        let mut b = boxed(&mut k);
+        let f = *faces(&b).unwrap().first().unwrap();
+        let fu = b.face(f).unwrap().faceuse.unwrap();
+        b.faceuse_mut(fu).unwrap().mate = None;
+        let err = brep_volume_default(&k, &mut b, 1e-6).unwrap_err();
+        assert_eq!(
+            err.mass_failure(),
+            Some(&MassFailure::FaceuseWithoutMate),
+            "{err}"
+        );
+        assert_eq!(err.upstream_status(), Some(SM_ERR_NULL_POINTER));
+        assert_eq!(err.kind(), crate::error::ErrorKind::InvalidInput);
+        assert!(!err.is_defect(), "{err}");
+        // (`face_area` on a face without its face use, or with an edge use without its
+        // edge, is refused earlier as invalid input, by `topology::face::p1` and `p4`)
     }
     /// A trim whose point is not finite is refused as such at once, not bisected to the
     /// depth bound and reported as step control.
