@@ -1,0 +1,13 @@
+{
+  "ar": { "Chamfer both ends": "شطف الطرفين" },
+  "de": { "Chamfer both ends": "Beide Enden anfasen" },
+  "en": { "Chamfer both ends": "Chamfer both ends" },
+  "en-GB": { "Chamfer both ends": "Chamfer both ends" },
+  "es": { "Chamfer both ends": "Chaflán en ambos extremos" },
+  "he": { "Chamfer both ends": "שיפוע בשני הקצוות" },
+  "ja": { "Chamfer both ends": "両端を面取り" },
+  "ko": { "Chamfer both ends": "양쪽 끝 모따기" },
+  "uk": { "Chamfer both ends": "Фаска на обох кінцях" },
+  "vi": { "Chamfer both ends": "Vát mép cả hai đầu" },
+  "zh": { "Chamfer both ends": "两端倒角" }
+}
