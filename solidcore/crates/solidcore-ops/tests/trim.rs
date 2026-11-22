@@ -236,7 +236,8 @@ fn a_slot_dropped_onto_a_half_cylinder_cuts_out_its_closed_form_area() {
     // the foot of the slot's middle, and a point of the wall well outside the slot
     let (middle, beside) = ([0.0, r, 20.0], [r, 0.0, 20.0]);
 
-    let kept = trim_by_dropped_curves(&b, &slot(a, d), &[middle], TOL).unwrap();
+    let slot = [slot(a, d).to_vec()];
+    let kept = trim_by_dropped_curves(&b, &slot, &[middle], TOL).unwrap();
     assert_eq!(kept.counts().unwrap()[0], 1, "inside: one face");
     assert!(
         (area(&kept) - inside).abs() < bound,
@@ -244,7 +245,7 @@ fn a_slot_dropped_onto_a_half_cylinder_cuts_out_its_closed_form_area() {
         area(&kept)
     );
 
-    let rest = trim_by_dropped_curves(&b, &slot(a, d), &[beside], TOL).unwrap();
+    let rest = trim_by_dropped_curves(&b, &slot, &[beside], TOL).unwrap();
     assert_eq!(rest.counts().unwrap()[0], 1, "outside: one face");
     assert!(
         (area(&rest) - (all - inside)).abs() < bound,
@@ -254,7 +255,7 @@ fn a_slot_dropped_onto_a_half_cylinder_cuts_out_its_closed_form_area() {
     );
 
     // both regions picked: the whole wall, cut in two faces
-    let both = trim_by_dropped_curves(&b, &slot(a, d), &[middle, beside], TOL).unwrap();
+    let both = trim_by_dropped_curves(&b, &slot, &[middle, beside], TOL).unwrap();
     assert_eq!(both.counts().unwrap()[0], 2, "both: two faces");
     assert!(rel(area(&both), all) < 1e-9, "both {}", area(&both));
     assert_eq!(
@@ -272,8 +273,8 @@ fn a_slot_dropped_onto_a_half_cylinder_cuts_out_its_closed_form_area() {
 fn a_slot_drawn_farther_away_drops_onto_a_narrower_piece() {
     let (r, a, d) = (10.0_f64, 3.0_f64, 40.0_f64);
     let inside = slot_area_on_cylinder(r, a, d);
-    let kept =
-        trim_by_dropped_curves(&half_cylinder(), &slot(a, d), &[[0.0, r, 20.0]], TOL).unwrap();
+    let slot = [slot(a, d).to_vec()];
+    let kept = trim_by_dropped_curves(&half_cylinder(), &slot, &[[0.0, r, 20.0]], TOL).unwrap();
     assert!(
         (area(&kept) - inside).abs() < TOL * 2.0 * PI * a,
         "inside {} against {inside}",
@@ -303,12 +304,12 @@ fn a_face_the_dropped_curves_bound_nothing_on_stays_whole() {
     )
     .unwrap();
     assert_eq!(b.counts().unwrap()[0], 2, "two faces");
-    let above = polygon(&[
+    let above = [polygon(&[
         [3.0, 3.0, 5.0],
         [7.0, 3.0, 5.0],
         [7.0, 7.0, 5.0],
         [3.0, 7.0, 5.0],
-    ]);
+    ])];
     let inside = trim_by_dropped_curves(&b, &above, &[[5.0, 5.0, 0.0]], TOL).unwrap();
     assert_eq!(inside.counts().unwrap()[0], 1);
     assert!(rel(area(&inside), 16.0) < 1e-9, "inside {}", area(&inside));
@@ -324,7 +325,9 @@ fn a_face_the_dropped_curves_bound_nothing_on_stays_whole() {
 #[test]
 fn a_dropped_trim_refuses_what_does_not_cut_or_cannot_be_picked() {
     let (b, _) = sheet();
-    let trim = |c: &[Curve], p: &[[f64; 3]], t| trim_by_dropped_curves(&b, c, p, t).err();
+    // one chain
+    let trim =
+        |c: &[Curve], p: &[[f64; 3]], t| trim_by_dropped_curves(&b, &[c.to_vec()], p, t).err();
     let inner = square(5.0, 15.0, 5.0);
     let on = [10.0, 10.0, 0.0];
     let slit = [line([5.0, 10.0, 5.0], [15.0, 10.0, 5.0])];
@@ -335,17 +338,25 @@ fn a_dropped_trim_refuses_what_does_not_cut_or_cannot_be_picked() {
         trim(&off, &[on], TOL),
         Some(Error::Unsupported(_))
     ));
-    let with_off: Vec<Curve> = inner.iter().chain(&off).cloned().collect();
     assert!(matches!(
-        trim(&with_off, &[on], TOL),
-        Some(Error::Unsupported(_))
+        trim_by_dropped_curves(&b, &[inner.clone(), off.to_vec()], &[on], TOL),
+        Err(Error::Unsupported(_))
     ));
+    assert_eq!(
+        trim_by_dropped_curves(&b, &[], &[on], TOL).err(),
+        Some(Error::Argument),
+        "no chain"
+    );
     // on the cut line x = 5: as near the square as the sheet round it
     assert!(matches!(
         trim(&inner, &[[5.0, 10.0, 0.0]], TOL),
         Some(Error::Unsupported(_))
     ));
-    assert_eq!(trim(&[], &[on], TOL), Some(Error::Argument), "no curve");
+    assert_eq!(
+        trim(&[], &[on], TOL),
+        Some(Error::Argument),
+        "an empty chain"
+    );
     assert_eq!(trim(&inner, &[], TOL), Some(Error::Argument), "no point");
     assert_eq!(
         trim(&inner, &[[f64::NAN, 0.0, 0.0]], TOL),
@@ -361,9 +372,9 @@ fn a_dropped_trim_refuses_what_does_not_cut_or_cannot_be_picked() {
     assert_eq!(trim(&inner, &many, TOL), Some(Error::Argument));
     assert_eq!(b.counts().unwrap()[0], 1, "the sheet stays as it was");
     // and the square does cut it: inside 100, outside 300
-    let kept = trim_by_dropped_curves(&b, &inner, &[on], TOL).unwrap();
+    let kept = trim_by_dropped_curves(&b, std::slice::from_ref(&inner), &[on], TOL).unwrap();
     assert!(rel(area(&kept), 100.0) < 1e-9, "{}", area(&kept));
-    let round = trim_by_dropped_curves(&b, &inner, &[[1.0, 1.0, 0.0]], TOL).unwrap();
+    let round = trim_by_dropped_curves(&b, &[inner], &[[1.0, 1.0, 0.0]], TOL).unwrap();
     assert!(rel(area(&round), 300.0) < 1e-9, "{}", area(&round));
 }
 
@@ -379,7 +390,7 @@ fn a_dropped_curve_past_a_faces_boundary_is_cut_at_the_boundary() {
         [0.0, 20.0, 0.0],
     ]))
     .unwrap();
-    let across = [line([-5.0, 5.0, 5.0], [25.0, 5.0, 5.0])];
+    let across = [vec![line([-5.0, 5.0, 5.0], [25.0, 5.0, 5.0])]];
     let below = trim_by_dropped_curves(&b, &across, &[[2.0, 1.0, 0.0]], TOL).unwrap();
     assert!(rel(area(&below), 87.5) < 1e-9, "below {}", area(&below));
     let above = trim_by_dropped_curves(&b, &across, &[[2.0, 9.0, 0.0]], TOL).unwrap();
@@ -419,7 +430,7 @@ fn a_slot_across_a_closed_faces_seam_is_refused_and_one_clear_of_it_cuts() {
     };
     for n in [[0.0, 1.0], [-1.0, 0.0], [0.0, -1.0]] {
         let foot = [n[0] * r, n[1] * r, 20.0];
-        let kept = trim_by_dropped_curves(&can, &facing(n), &[foot], TOL).unwrap();
+        let kept = trim_by_dropped_curves(&can, &[facing(n).to_vec()], &[foot], TOL).unwrap();
         assert_eq!(kept.counts().unwrap()[0], 1, "{n:?}: the piece alone");
         assert!(
             (area(&kept) - inside).abs() < TOL * 2.0 * PI * a,
@@ -428,8 +439,117 @@ fn a_slot_across_a_closed_faces_seam_is_refused_and_one_clear_of_it_cuts() {
         );
     }
     assert!(matches!(
-        trim_by_dropped_curves(&can, &facing([1.0, 0.0]), &[[r, 0.0, 20.0]], TOL),
+        trim_by_dropped_curves(&can, &[facing([1.0, 0.0]).to_vec()], &[[r, 0.0, 20.0]], TOL),
         Err(Error::Unsupported(_))
     ));
     assert_eq!(can.counts().unwrap()[0], 3, "the cylinder stays as it was");
+}
+
+/// Two lines that cross (x = 10 and y = 10, each a chain) cut the sheet [0, 20]^2 into four
+/// squares of 100. The second line splits the first line's edge where they cross, and both
+/// pieces of it stay cut lines: a point picks its own square alone, whichever it is, and two
+/// points pick two.
+#[test]
+fn crossing_cut_lines_part_all_the_regions_they_bound() {
+    let (b, _) = sheet();
+    let cross = [
+        vec![line([10.0, -5.0, 5.0], [10.0, 25.0, 5.0])],
+        vec![line([-5.0, 10.0, 5.0], [25.0, 10.0, 5.0])],
+    ];
+    for p in [
+        [5.0, 5.0, 0.0],
+        [15.0, 5.0, 0.0],
+        [15.0, 15.0, 0.0],
+        [5.0, 15.0, 0.0],
+    ] {
+        let kept = trim_by_dropped_curves(&b, &cross, &[p], TOL).unwrap();
+        assert_eq!(kept.counts().unwrap()[0], 1, "{p:?}");
+        assert!(rel(area(&kept), 100.0) < 1e-9, "{p:?}: {}", area(&kept));
+    }
+    let opposite = [[5.0, 5.0, 0.0], [15.0, 15.0, 0.0]];
+    let two = trim_by_dropped_curves(&b, &cross, &opposite, TOL).unwrap();
+    assert_eq!(two.counts().unwrap()[0], 2);
+    assert!(rel(area(&two), 200.0) < 1e-9, "{}", area(&two));
+}
+
+/// A chain that ends on another chain's line cuts whichever is listed first. The line y = 10
+/// halves the sheet [0, 20]^2; the line x = 10 from y = 10 up past the sheet's edge halves the
+/// upper half. Alone the second leaves a slit, so listed first it waits for the first. The
+/// lower half is 200 and the two upper pieces are 100 each.
+#[test]
+fn a_chain_that_ends_on_another_chains_line_cuts_in_either_order() {
+    let (b, _) = sheet();
+    let across = vec![line([-5.0, 10.0, 5.0], [25.0, 10.0, 5.0])];
+    let up = vec![line([10.0, 10.0, 5.0], [10.0, 25.0, 5.0])];
+    for chains in [[across.clone(), up.clone()], [up, across]] {
+        for (p, want) in [
+            ([5.0, 5.0, 0.0], 200.0),
+            ([5.0, 15.0, 0.0], 100.0),
+            ([15.0, 15.0, 0.0], 100.0),
+        ] {
+            let kept = trim_by_dropped_curves(&b, &chains, &[p], TOL).unwrap();
+            assert_eq!(kept.counts().unwrap()[0], 1, "{p:?}");
+            assert!(rel(area(&kept), want) < 1e-9, "{p:?}: {}", area(&kept));
+        }
+    }
+}
+
+/// A chain that bounds nothing is refused, however well the others cut; it never goes missing
+/// from a cut that succeeds. On the triangle (0, 0), (20, 0), (0, 20) the line y = 5 cuts, as
+/// in [`a_dropped_curve_past_a_faces_boundary_is_cut_at_the_boundary`]. With it:
+/// - a segment from (12, 12) to (15, 12) drops inside the triangle's parameter box but off the
+///   triangle itself;
+/// - a segment from (2, 8) to (4, 8) drops inside the triangle and ends there, a slit.
+///
+/// Each is refused in either order, and the triangle stays as it was.
+#[test]
+fn a_chain_that_bounds_nothing_is_refused_beside_one_that_cuts() {
+    let b = planar_faces(&polygon(&[
+        [0.0, 0.0, 0.0],
+        [20.0, 0.0, 0.0],
+        [0.0, 20.0, 0.0],
+    ]))
+    .unwrap();
+    let across = vec![line([-5.0, 5.0, 5.0], [25.0, 5.0, 5.0])];
+    let off_the_face = vec![line([12.0, 12.0, 5.0], [15.0, 12.0, 5.0])];
+    let slit = vec![line([2.0, 8.0, 5.0], [4.0, 8.0, 5.0])];
+    let keep = [[2.0, 1.0, 0.0]];
+    for stray in [off_the_face, slit] {
+        for chains in [[across.clone(), stray.clone()], [stray, across.clone()]] {
+            assert_eq!(
+                trim_by_dropped_curves(&b, &chains, &keep, TOL).err(),
+                Some(Error::CurveDoesNotCut)
+            );
+        }
+    }
+    assert_eq!(b.counts().unwrap()[0], 1, "the triangle stays as it was");
+}
+
+/// A cut line that ends on an edge two faces share splits that edge, and both pieces still
+/// join the faces. The floor and wall of
+/// [`a_face_the_dropped_curves_bound_nothing_on_stays_whole`] with the line y = 5 drawn above
+/// the floor from the fold to the floor's far side: the floor is cut in two halves of 50, each
+/// still joined to the wall along its piece of the fold, so the whole body is one region. Any
+/// point keeps all of it: three faces, 200.
+#[test]
+fn a_cut_that_splits_a_shared_edge_leaves_its_faces_joined() {
+    let chain = [
+        line([0.0, 0.0, 10.0], [0.0, 0.0, 0.0]),
+        line([0.0, 0.0, 0.0], [10.0, 0.0, 0.0]),
+    ];
+    let b = extrude(
+        &chain,
+        [0.0, 1.0, 0.0],
+        10.0,
+        0.0,
+        DraftCorner::Round,
+        false,
+    )
+    .unwrap();
+    let across = [vec![line([-5.0, 5.0, 5.0], [15.0, 5.0, 5.0])]];
+    for p in [[5.0, 2.0, 0.0], [5.0, 8.0, 0.0], [0.0, 5.0, 8.0]] {
+        let kept = trim_by_dropped_curves(&b, &across, &[p], TOL).unwrap();
+        assert_eq!(kept.counts().unwrap()[0], 3, "{p:?}");
+        assert!(rel(area(&kept), 200.0) < 1e-9, "{p:?}: {}", area(&kept));
+    }
 }

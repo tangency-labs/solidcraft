@@ -71,19 +71,24 @@ impl Brep {
         core::trim::face_points(self.core())
     }
 
-    /// A copy cut along `curves` dropped square onto its faces (each point of a curve to its foot
-    /// on the face's surface, within `tolerance`), keeping the regions the faces nearest `points`
-    /// lie in: solidcore's `trim::trim_by_dropped_curves`. A face the dropped curves bound nothing
-    /// on stays whole. Tags follow each face to its pieces. Curves that divide no face, and a
-    /// point as near one region as another, are [`crate::Error::Refused`] with solidcore-ops' own
-    /// refusal (`CurveDoesNotCut`, `Unsupported`).
-    pub fn trim_by_dropped_curves(&self, curves: &[Curve], points: &[[f64; 3]], tolerance: f64) -> Result<Brep> {
-        let dropped: Vec<solidcore_ops::sweep::Curve> = curves.iter().map(ops_curve).collect();
+    /// A copy cut along `chains` (each a list of curves meeting end to end) dropped square onto its
+    /// faces (each point of a curve to its foot on the face's surface, within `tolerance`), keeping
+    /// the regions the faces nearest `points` lie in: solidcore's `trim::trim_by_dropped_curves`. A
+    /// face a chain bounds nothing on stays whole. Tags follow each face to its pieces. A chain that
+    /// divides no face, a curve that lands on no face and a point as near one region as another are
+    /// [`crate::Error::Refused`] with solidcore-ops' own refusal (`CurveDoesNotCut`, `Unsupported`).
+    pub fn trim_by_dropped_curves(&self, chains: &[Vec<Curve>], points: &[[f64; 3]], tolerance: f64) -> Result<Brep> {
+        let dropped: Vec<Vec<solidcore_ops::sweep::Curve>> = chains.iter().map(|chain| chain.iter().map(ops_curve).collect()).collect();
         let r = core::call::ops_as("trim_by_dropped_curves", &[("brep", self.core())], trim_refusal, || {
             solidcore_ops::trim::trim_by_dropped_curves(self.core(), &dropped, points, tolerance)
         })
         .map(Brep::made_core);
-        trace::made("trim_by_dropped_curves", &[self], &r, || json!({"curves": trace::curves(curves), "points": points, "tolerance": tolerance}));
+        trace::made(
+            "trim_by_dropped_curves",
+            &[self],
+            &r,
+            || json!({"chains": chains.iter().map(|chain| trace::curves(chain)).collect::<Vec<_>>(), "points": points, "tolerance": tolerance}),
+        );
         r
     }
 }

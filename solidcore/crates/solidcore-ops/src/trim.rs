@@ -11,12 +11,17 @@
 //! kernel's interior point of its face (`SmApiFaceInternalPoint`). Faces are taken out by the
 //! kernel's `SmBrep::RemoveFaces`, with the edges and vertices only they used.
 //!
-//! A body is cut along dropped curves face by face: the kernel's drop of the curves square onto
-//! the face's surface ([`crate::sweep::drop_curves`]), merged into the face as above. A face the
-//! dropped curves bound nothing on stays whole. The cut body's faces fall into regions (faces
-//! that meet at an edge that is not a cut line are in one region), a point picks the region of
-//! the face nearest it (the kernel's distance to the face as it is trimmed), and the faces of
-//! the regions no point picks are taken out.
+//! A body is cut along dropped curves face by face and chain by chain (a chain: curves that
+//! meet end to end): the kernel's drop of a chain's curves square onto the face's surface
+//! ([`crate::sweep::drop_curves`]), merged as above into the face and into each piece earlier
+//! chains cut off it. A chain that bounds nothing on a face leaves the face as it was; one that
+//! bounds nothing on any face is refused, and so is a curve the kernel drops onto no face. The cut
+//! lines are the edges the merges made, whole or split by a later cut: the body's own edges
+//! are tagged before the first cut, the kernel's splits carry the tag, and an edge without it
+//! is a cut line. The cut body's faces fall into regions (faces that meet at an edge that is
+//! not a cut line are in one region), a point picks the region of the face nearest it (the
+//! kernel's distance to the face as it is trimmed), and the faces of the regions no point
+//! picks are taken out.
 //!
 //! Faces are record indices ([`Order`]). Ops sequences the kernel's calls and compares what they
 //! return; it computes nothing. Every operation works on a copy: its operands are unchanged.
@@ -39,6 +44,7 @@ use solidcore::EntityRef;
 
 use crate::body::{finish, Body, Expect};
 use crate::error::status;
+use crate::history;
 use crate::order::{self, Order};
 use crate::session::run_on;
 use crate::split::{copies_of, curve_ref, MAX_FACES};
@@ -249,23 +255,27 @@ pub fn split_face_by_curves(
 /// copy's tolerance.
 type DroppedCut = (Brep, Vec<EdgeId>, f64);
 
-/// A copy of `body` cut along `curves` dropped square onto its faces, without the regions no
-/// point of `points` picks.
+/// A copy of `body` cut along `chains` dropped square onto its faces, without the regions no
+/// point of `points` picks. A chain is a list of curves that meet end to end: a closed loop,
+/// or an open run.
 ///
-/// Every face is cut on its own: the curves are dropped onto its surface over the face's
-/// parameter box (each point of a curve to its foot on the surface, as
-/// [`crate::sweep::drop_curves`] drops them, within `tolerance`) and merged into the face, where
-/// each run of them that closes, on itself or on the face's boundary, splits off a face. A face
-/// no curve lands on, or on which the dropped curves bound nothing, stays whole. Faces that meet
-/// at an edge that is not a cut line are in one region; each point picks the region of the face
-/// nearest it (the kernel's distance to the face as it is trimmed), and the faces of the other
-/// regions are taken out, with the edges and vertices only they used. `body` is unchanged.
+/// Every face is cut on its own, one chain at a time: the chain's curves are dropped onto the
+/// face's surface over the face's parameter box (each point of a curve to its foot on the
+/// surface, as [`crate::sweep::drop_curves`] drops them, within `tolerance`) and merged into
+/// the face and into each piece earlier chains cut off it, where each run of them that closes,
+/// on itself, on the face's boundary or on an earlier cut line, splits off a face. A chain that
+/// bounds nothing on a face leaves that face as it was (the chain is tried again once another
+/// chain has cut the face, in case it ends on that chain's line). Faces that meet at an edge
+/// that is not a cut line are in one region; each point picks the region of the face nearest it
+/// (the kernel's distance to the face as it is trimmed), and the faces of the other regions are
+/// taken out, with the edges and vertices only they used. `body` is unchanged.
 ///
 /// # Errors
-/// - [`Error::Argument`]: no curve, more than [`MAX_CURVES`], a curve refused, a tolerance not
-///   finite or outside `[1e-9, 1e3)`, no point, more than [`MAX_PICKS`], or a coordinate that is
-///   not finite;
-/// - [`Error::CurveDoesNotCut`]: the dropped curves divide no face into regions;
+/// - [`Error::Argument`]: no chain, an empty chain, more than [`MAX_CURVES`] curves in all, a
+///   curve refused, a tolerance not finite or outside `[1e-9, 1e3)`, no point, more than
+///   [`MAX_PICKS`], or a coordinate that is not finite;
+/// - [`Error::CurveDoesNotCut`]: a chain bounds no region on any face (an open run that ends
+///   inside a face, or a chain whose drop lies off the faces as they are trimmed);
 /// - [`Error::Unsupported`], with the reason: a curve the kernel drops onto no face (one beside
 ///   the body, or one across the seam of a closed face, which the kernel's drop does not follow
 ///   round), a point as near one region as another (on a cut line), or one whose distance to a
@@ -273,12 +283,17 @@ type DroppedCut = (Brep, Vec<EdgeId>, f64);
 /// - the kernel's errors, and those of [`Body::to_record`] and [`remove_faces`].
 pub fn trim_by_dropped_curves(
     body: &Body,
-    curves: &[Curve],
+    chains: &[Vec<Curve>],
     points: &[[f64; 3]],
     tolerance: f64,
 ) -> Result<Body> {
-    if curves.is_empty()
-        || curves.len() > MAX_CURVES
+    let curves = chains
+        .iter()
+        .map(Vec::len)
+        .fold(0usize, usize::saturating_add);
+    if chains.is_empty()
+        || chains.iter().any(Vec::is_empty)
+        || curves > MAX_CURVES
         || !tolerance_ok(tolerance)
         || points.is_empty()
         || points.len() > MAX_PICKS
@@ -287,63 +302,111 @@ pub fn trim_by_dropped_curves(
         return Err(Error::Argument);
     }
     let (cut, lines, pick_tolerance) = run_on("trim_by_dropped_curves", &[("brep", body)], |k| {
-        cut_dropped(k, body, curves, tolerance)
+        cut_dropped(k, body, chains, tolerance)
     })??;
     let lines: HashSet<EdgeId> = lines.into_iter().collect();
     keep_picked(Body::new(cut), &lines, points, pick_tolerance)
 }
 
 /// [`trim_by_dropped_curves`]'s cut ([`DroppedCut`]): every face of a copy of `body` cut along
-/// the curves dropped onto it, a face they bound nothing on put back as it was.
+/// each chain dropped onto it, a face (or a piece of one) a chain bounds nothing on put back as
+/// it was. The copy's own edges are tagged first ([`history::tag_edges`]); the cut lines are
+/// the edges without the tag once every chain is merged, and the tags are then removed.
 fn cut_dropped(
     k: &mut Kernel,
     body: &Body,
-    curves: &[Curve],
+    chains: &[Vec<Curve>],
     tolerance: f64,
 ) -> solidcore::Result<Result<DroppedCut>> {
-    let curves = match kernel_curves(k, curves) {
-        Ok(c) => c,
-        Err(e) => return Ok(Err(e)),
-    };
+    let mut given = Vec::new();
+    for chain in chains {
+        match kernel_curves(k, chain) {
+            Ok(c) => given.push(c),
+            Err(e) => return Ok(Err(e)),
+        }
+    }
     let mut a = {
         let g = body.lock();
         brep_copy(k, &g)?
     };
-    // the copy's faces as they are before any cut: a face split off another is not cut again
+    if let Err(e) = history::tag_edges(&mut a) {
+        return Ok(Err(e));
+    }
+    // the copy's faces as they are before any cut
     let faces: Vec<FaceId> = a.face_list().to_vec();
-    let mut lines = Vec::new();
-    // whether each curve has landed on a face yet
-    let mut landed = vec![false; curves.len()];
+    // whether each curve of each chain has landed on a face's parameter box, and whether each
+    // chain has cut a face
+    let mut landed: Vec<Vec<bool>> = given.iter().map(|chain| vec![false; chain.len()]).collect();
+    let mut cuts = vec![false; given.len()];
     for f in faces {
-        let pieces = match dropped_on(k, &a, f, &curves, tolerance)? {
-            Ok(d) => d,
-            Err(e) => return Ok(Err(e)),
-        };
-        for (seen, of_curve) in landed.iter_mut().zip(&pieces) {
-            *seen |= !of_curve.is_empty();
+        // every chain's drop onto the face, before a cut changes the face
+        let mut drops = Vec::new();
+        for (chain, seen) in given.iter().zip(&mut landed) {
+            let pieces = match dropped_on(k, &a, f, chain, tolerance)? {
+                Ok(pieces) => pieces,
+                Err(e) => return Ok(Err(e)),
+            };
+            for (seen, of_curve) in seen.iter_mut().zip(&pieces) {
+                *seen |= !of_curve.is_empty();
+            }
+            drops.push(pieces.into_iter().flatten().collect::<Vec<KCurve>>());
         }
-        let dropped: Vec<KCurve> = pieces.into_iter().flatten().collect();
-        if dropped.is_empty() {
-            continue;
-        }
-        let merged = a.with_rollback(
-            |a| merge_on(k, a, f, &dropped, tolerance),
-            |r| matches!(r, Ok(Ok(_))),
-        )?;
-        match merged {
-            Ok((_, made)) => lines.extend(made),
-            Err(Error::CurveDoesNotCut) => {}
-            Err(e) => return Ok(Err(e)),
+        // the face and the pieces cut off it so far; the chains still to cut it
+        let mut pieces = vec![f];
+        let mut waiting: Vec<usize> = (0..drops.len())
+            .filter(|&c| drops.get(c).is_some_and(|d| !d.is_empty()))
+            .collect();
+        // A chain that ends on another chain's line cuts only after that chain: the chains
+        // that cut nothing are tried again while a pass still cuts with one of them.
+        loop {
+            let mut left = Vec::new();
+            for &c in &waiting {
+                let Some(dropped) = drops.get(c) else {
+                    return Ok(Err(Error::Exception));
+                };
+                let mut cut_here = false;
+                for g in pieces.clone() {
+                    let merged = a.with_rollback(
+                        |a| merge_on(k, a, g, dropped, tolerance),
+                        |r| matches!(r, Ok(Ok(_))),
+                    )?;
+                    match merged {
+                        Ok((made, _)) => {
+                            pieces.extend(made);
+                            cut_here = true;
+                        }
+                        Err(Error::CurveDoesNotCut) => {}
+                        Err(e) => return Ok(Err(e)),
+                    }
+                }
+                if cut_here {
+                    if let Some(cut) = cuts.get_mut(c) {
+                        *cut = true;
+                    }
+                } else {
+                    left.push(c);
+                }
+            }
+            let progress = left.len() < waiting.len();
+            waiting = left;
+            if !progress || waiting.is_empty() {
+                break;
+            }
         }
     }
-    // A curve the kernel drops onto no face is no part of any cut: the cut asked for is not the
-    // one made. The kernel's drop gives no curve for one that leaves a face's parameter box,
-    // which a curve across the seam of a closed face does.
-    if landed.contains(&false) {
+    // A curve the kernel drops onto no face is no part of any cut. The kernel's drop gives no
+    // curve for one that leaves a face's parameter box, which a curve across the seam of a
+    // closed face does.
+    if landed.iter().flatten().any(|seen| !seen) {
         return Ok(Err(Error::Unsupported(CURVE_LANDS_NOWHERE)));
     }
-    if lines.is_empty() {
+    // A chain that lands but bounds nothing anywhere: the cut asked for is not the one made.
+    if cuts.contains(&false) {
         return Ok(Err(Error::CurveDoesNotCut));
+    }
+    let lines = history::untagged_edges(&a);
+    if let Err(e) = history::clear(&mut a) {
+        return Ok(Err(e));
     }
     let tol = a.tolerance();
     Ok(Ok((a, lines, tol)))

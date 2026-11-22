@@ -98,8 +98,9 @@ pub fn trim_keep(body: &Body, tool: &SplitTool, keep: TrimKeep) -> Result<Body> 
 
 /// A surface body trimmed along sketch curves (chains of segments in `plane`) dropped square
 /// onto it: each point of a curve goes to its foot on a face's surface (the nearest point of
-/// that surface, along its normal there), wherever the sketch lies, and the dropped curves cut
-/// the faces they bound a region on (solidcore's `trim::trim_by_dropped_curves`). Dropped
+/// that surface, along its normal there), wherever the sketch lies, and each chain cuts the
+/// faces it bounds a region on (solidcore's `trim::trim_by_dropped_curves`); a chain that bounds
+/// no region on any face is refused, never left out. Dropped
 /// curves have no one side, so every point of `keep` picks the region of the face nearest it,
 /// as it does for a tool of several sketch curves. Each kept face is the face it is a piece of
 /// (the result's history is over `[body]`).
@@ -111,13 +112,14 @@ pub fn trim_dropped_keep(body: &Body, plane: &Plane, curves: &[Vec<Seg2>], keep:
     body.require_brep(NAME)?;
     keep.check()?;
     let segments: usize = curves.iter().map(Vec::len).sum();
-    if segments == 0 {
+    if segments == 0 || curves.iter().any(Vec::is_empty) {
         return Err(KernelError::Invalid("no curves to trim with".into()));
     }
     if segments > crate::splitface::MAX_SEGMENTS {
         return Err(KernelError::Invalid("too many trim curves".into()));
     }
-    let dropped: Vec<_> = curves.iter().flatten().map(|s| crate::smlib_sweeps::curve(plane, s)).collect::<Result<_>>()?;
+    let dropped: Vec<Vec<_>> =
+        curves.iter().map(|chain| chain.iter().map(|s| crate::smlib_sweeps::curve(plane, s)).collect::<Result<_>>()).collect::<Result<_>>()?;
     let points: Vec<[f64; 3]> = keep.points().iter().map(|p| [p.x, p.y, p.z]).collect();
     crate::guard(NAME, || {
         let (target, order) = crate::splitface::tagged(NAME, body)?;
@@ -136,7 +138,7 @@ fn dropped_refusal(e: solidcraft_smlib::Error) -> KernelError {
     use solidcore_ops::Error as Ops;
     match e {
         solidcraft_smlib::Error::Refused(Ops::CurveDoesNotCut) => KernelError::Invalid(
-            "the sketch curves, projected along the surface's normal, don't divide the surface: each curve must close or reach the surface's edges"
+            "a sketch curve, projected along the surface's normal, doesn't divide the surface: each curve must close, reach the surface's edges or end on another curve"
                 .into(),
         ),
         solidcraft_smlib::Error::Refused(Ops::Unsupported(why)) => KernelError::Invalid(why.to_string()),
@@ -456,13 +458,38 @@ mod tests {
         assert!(e.contains("pick inside the region to keep"), "{e}");
         let slit = vec![vec![Seg2::Line { a: Vec2::new(-a, 20.0), b: Vec2::new(a, 20.0) }]];
         let e = trim_dropped_keep(&half, &front, &slit, TrimKeep::Side(on)).unwrap_err().to_string();
-        assert!(e.contains("don't divide the surface"), "{e}");
+        assert!(e.contains("doesn't divide the surface"), "{e}");
         assert!(trim_dropped_keep(&half, &front, &[], TrimKeep::Side(on)).is_err());
         // A curve behind the half cylinder (y = -20 from the axis) has its feet on the half that
         // is not there: it lands on no face.
         let behind = Plane { origin: Vec3::new(0.0, -d, 0.0), y: Vec3::Z, ..Plane::XZ };
         let e = trim_dropped_keep(&half, &behind, std::slice::from_ref(&slot), TrimKeep::Side(on)).unwrap_err().to_string();
         assert!(e.contains("drops onto no face"), "{e}");
+    }
+
+    /// Two sketch lines that cross (x = 10 and y = 10, sketched 5 above the 20 × 20 square)
+    /// dropped square onto it cut it into four squares of 100. Each line is its own chain, and
+    /// the second splits the first's edge where they cross: a point keeps its own square alone,
+    /// two points keep two. With them, a segment that ends inside the square bounds nothing:
+    /// the trim is refused, not made without it.
+    #[test]
+    fn crossing_lines_dropped_square_part_four_regions() {
+        let sq = rect(&Plane::XY, 0.0, 0.0, 20.0, 20.0);
+        let above = Plane { origin: Vec3::new(0.0, 0.0, 5.0), ..Plane::XY };
+        let lines = vec![
+            vec![Seg2::Line { a: Vec2::new(10.0, -5.0), b: Vec2::new(10.0, 25.0) }],
+            vec![Seg2::Line { a: Vec2::new(-5.0, 10.0), b: Vec2::new(25.0, 10.0) }],
+        ];
+        for p in [Vec3::new(5.0, 5.0, 0.0), Vec3::new(15.0, 5.0, 0.0), Vec3::new(15.0, 15.0, 0.0), Vec3::new(5.0, 15.0, 0.0)] {
+            let kept = trim_dropped_keep(&sq, &above, &lines, TrimKeep::Side(p)).unwrap();
+            assert!(kept.face_count() == 1 && rel(area(&kept), 100.0) < 1e-9, "{p:?}: {}", area(&kept));
+        }
+        let two = trim_dropped_keep(&sq, &above, &lines, TrimKeep::Regions(&[Vec3::new(5.0, 5.0, 0.0), Vec3::new(15.0, 15.0, 0.0)])).unwrap();
+        assert!(two.face_count() == 2 && rel(area(&two), 200.0) < 1e-9, "{}", area(&two));
+        let mut with_slit = lines;
+        with_slit.push(vec![Seg2::Line { a: Vec2::new(2.0, 3.0), b: Vec2::new(4.0, 3.0) }]);
+        let e = trim_dropped_keep(&sq, &above, &with_slit, TrimKeep::Side(Vec3::new(5.0, 5.0, 0.0))).unwrap_err().to_string();
+        assert!(e.contains("doesn't divide the surface"), "{e}");
     }
 
     /// Two 20 × 10 sheets crossing at right angles (z = 0 and x = 0, both y = 0…10) trimmed by
