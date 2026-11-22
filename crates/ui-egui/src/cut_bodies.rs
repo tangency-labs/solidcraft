@@ -29,26 +29,31 @@ fn cutting(kind: &Kind) -> bool {
     }
 }
 
-/// Every shown solid body with the name of its component, when the bodies lie in two or more
-/// components; empty otherwise.
-fn candidates(app: &SolveApp) -> Vec<(String, String)> {
+/// Every shown solid body with its component's id and name.
+fn shown_solids(app: &SolveApp) -> Vec<(String, u64, String)> {
     let session = &app.session;
     let state = session.model.state();
     let owners = session.doc.model_body_components(&state);
-    let mut components = std::collections::BTreeSet::new();
     let mut out = Vec::new();
     for (body, owner) in state.bodies.iter().zip(owners) {
         if body.envelope || body.is_surface() || !session.body_visible(&body.name) {
             continue;
         }
-        components.insert(owner);
         let component = session.doc.components.iter().find(|c| c.id == owner).map(|c| c.name.clone()).unwrap_or_default();
-        out.push((body.name.clone(), component));
-    }
-    if components.len() < 2 {
-        out.clear();
+        out.push((body.name.clone(), owner, component));
     }
     out
+}
+
+/// The list to show: every shown solid body with the name of its component, when the bodies
+/// lie in two or more components; empty otherwise.
+fn candidates(app: &SolveApp) -> Vec<(String, String)> {
+    let shown = shown_solids(app);
+    let components: std::collections::BTreeSet<u64> = shown.iter().map(|(_, owner, _)| *owner).collect();
+    if components.len() < 2 {
+        return Vec::new();
+    }
+    shown.into_iter().map(|(body, _, component)| (body, component)).collect()
 }
 
 /// The bodies the user ticked, if they changed the list.
@@ -104,8 +109,9 @@ pub(crate) fn scope(app: &SolveApp, d: &Dialog, cmds: &mut [(String, Value)]) ->
     // A changed list holds even when its bodies are no longer listed (one was hidden while the
     // window was open): only ticked bodies still shown are cut, and none left is refused, never
     // a fall back to bodies the user did not tick.
-    let list = candidates(app);
-    let ticked: Vec<String> = list.into_iter().map(|(body, _)| body).filter(|body| picked.contains(body)).collect();
+    // Every shown solid, not only the list on show: hiding a body can leave one component
+    // shown, and the ticked bodies still shown are still cut.
+    let ticked: Vec<String> = shown_solids(app).into_iter().map(|(body, _, _)| body).filter(|body| picked.contains(body)).collect();
     for (_, p) in cmds {
         let cut = p.get("operation").and_then(Value::as_str) == Some("cut");
         let named = ["targets", "participants"].iter().any(|k| p.get(*k).and_then(Value::as_array).is_some_and(|a| !a.is_empty()));

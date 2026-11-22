@@ -346,3 +346,17 @@ fn hiding_the_only_ticked_body_refuses_the_cut() {
     h.frames(1);
     assert!(crate::dialogs::apply_commands(&h.app, h.app.dialog.as_ref().unwrap()).is_err());
 }
+
+/// Hiding an unticked body keeps the ticked one cut, even when that leaves one component shown and
+/// the list with it (#20647).
+#[test]
+fn hiding_an_unticked_body_still_cuts_the_ticked_one() {
+    let mut h = two_cubes(true);
+    if let Some(d) = h.app.dialog.as_mut() {
+        d.extra.insert(crate::cut_bodies::SKIPPED.into(), json!(["A"]));
+    }
+    h.app.session.visibility.hidden_bodies.push("B".into());
+    h.frames(1);
+    let commands = crate::dialogs::apply_commands(&h.app, h.app.dialog.as_ref().unwrap()).unwrap();
+    assert_eq!(commands.first().map(|(_, p)| p["targets"].clone()), Some(json!(["A"])), "{commands:?}");
+}
