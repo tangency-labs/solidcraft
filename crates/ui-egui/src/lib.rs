@@ -711,7 +711,7 @@ pub struct SolveApp {
     pub(crate) slicer_wait: Option<dialogs_save_mesh::SlicerWait>,
     /// Open with EasyPrint: the upload in flight and the question before the first one.
     pub(crate) easyprint: easyprint_ui::State,
-    /// Install pluginâ€¦: the plugin waiting for the user's answer.
+    /// Install plugin…: the plugin waiting for the user's answer.
     pub(crate) plugin_install: plugin_install::State,
     /// What an importer plugin could not carry over from the file it just opened.
     pub(crate) import_report: Option<import_report::Shown>,
@@ -894,7 +894,7 @@ pub struct SolveApp {
     /// The file brought more than one body or a component tree: the offer says "assembly".
     pub stand_up_assembly: bool,
     /// The offer is the small note over the view, not the dialog (a file from a program not known
-    /// to save Y up, Preferences â€º Design, #7717).
+    /// to save Y up, Preferences › Design, #7717).
     pub stand_up_note: bool,
     /// When the note was first drawn (the window's clock), or since the pointer was last on it; it
     /// goes after `stand_up::NOTE_SECONDS`.
@@ -937,7 +937,7 @@ pub struct SolveApp {
     pub safe_graphics_dismissed: bool,
     /// Try full graphics was clicked: the next start uses full graphics (the line offers a restart).
     pub safe_graphics_full_next: bool,
-    /// Preferences â€º Graphics â€º Start in safe graphics mode, for the next launch only.
+    /// Preferences › Graphics › Start in safe graphics mode, for the next launch only.
     pub safe_graphics_next: bool,
     pub frame_ms: f64,
     /// The viewport's frame-rate readout ([`frame_rate`]).
@@ -1408,7 +1408,7 @@ impl SolveApp {
         self.msaa_supported = rs.msaa_supported.clone();
         let info = rs.adapter.get_info();
         self.help.gpu = Some(format!("{} ({:?}, {:?})", info.name.trim(), info.backend, info.device_type));
-        self.viewport.adapter = format!("{:?} Â· {}", info.backend, info.name);
+        self.viewport.adapter = format!("{:?} · {}", info.backend, info.name);
     }
 
     /// Preferences as JSON for inspection and compatibility. Storage hosts use
@@ -1494,7 +1494,7 @@ impl SolveApp {
         }
         // While the Preferences dialog is open the file holds what Cancel would restore: a change
         // that was never applied must not reach disk through the periodic save, a quit or a
-        // window close (#9730). One change covers every writer â€” desktop save and on_exit, the
+        // window close (#9730). One change covers every writer — desktop save and on_exit, the
         // web app's save, and the control channel.
         if let Some(held) = prefs::held_overlay(self)
             && let Some(obj) = v.as_object_mut()
@@ -1676,7 +1676,7 @@ impl SolveApp {
         {
             params.entry("reuse_import").or_insert(Value::Bool(self.preferences.reuse_imports));
         }
-        // Commands may start only detected slicers and the programs the user added under Customâ€¦.
+        // Commands may start only detected slicers and the programs the user added under Custom….
         if matches!(id, "file.save_mesh" | "file.send_to_slicer") {
             solidcraft_engine::slicers::set_chosen_programs(&self.preferences.custom_slicers);
         }
@@ -2398,7 +2398,7 @@ impl SolveApp {
             self.repeat_last();
             return;
         }
-        // Modify â–¸ Delete deletes what is selected, as the Delete key does (#9079); with nothing
+        // Modify ▸ Delete deletes what is selected, as the Delete key does (#9079); with nothing
         // selected it says what to pick instead of running with no features.
         if id == "timeline.delete" {
             if delete::nothing_to_delete(self) && self.tree.picked_timeline_groups.is_empty() {
@@ -2408,7 +2408,7 @@ impl SolveApp {
             }
             return;
         }
-        // The Dependents button of INSPECT â–¸ HISTORY asks for the dependents of ONE
+        // The Dependents button of INSPECT ▸ HISTORY asks for the dependents of ONE
         // feature, so it needs a target. With nothing selected it used to run the
         // command with no feature and the engine answered "Feature Dependents:
         // `feature` must be an id or name". It reports the dependents of what is
@@ -2451,11 +2451,11 @@ impl SolveApp {
             }
             return;
         }
-        // Front â€¦ Isometric (Ctrl+1â€¦7 by default) turn the view as the navigator's faces do. The
+        // Front … Isometric (Ctrl+1…7 by default) turn the view as the navigator's faces do. The
         // flat pattern is a 2D page: it has no other side to turn to.
         if solidcraft_engine::standard_view(id).is_some() {
             if !dialogs_sheet::flat_active(self) {
-                // `view.isometric` â†’ "isometric", which `StandardView::parse` reads as Iso.
+                // `view.isometric` → "isometric", which `StandardView::parse` reads as Iso.
                 self.animate_view(id.trim_start_matches("view."));
                 self.home.open = false;
             }
@@ -2515,7 +2515,7 @@ impl SolveApp {
             return;
         }
         // The ribbon's Ground acts on the selected placements, or the components picked in the
-        // Browser, as the Browser's Placement â–¸ Ground does (#14911). It used to run with no
+        // Browser, as the Browser's Placement ▸ Ground does (#14911). It used to run with no
         // occurrence and the engine answered "`occurrence` must be an id or name".
         if id == "occurrence.ground" {
             self.ground_selected_occurrences();
@@ -2725,7 +2725,7 @@ impl SolveApp {
             return;
         }
         if id == "component.insert_design" {
-            // The designs open in other tabs first, each a click away, then Browseâ€¦ (#8570).
+            // The designs open in other tabs first, each a click away, then Browse… (#8570).
             if self.preferences.insert_lists_open_designs && !documents::other_designs(self).is_empty() {
                 if let Some(rect) = opener {
                     context_menu::toggle_for(self, rect, rect.left_bottom(), context_menu::Target::InsertDesign);
@@ -2806,7 +2806,7 @@ impl SolveApp {
             }
             return;
         }
-        // Inspect â†’ Measure â†’ Properties: the window, not a reply nobody sees (#8095).
+        // Inspect → Measure → Properties: the window, not a reply nobody sees (#8095).
         if matches!(id, "component.properties" | "occurrence.properties") {
             design_properties::open_selected(self);
             return;
@@ -3161,7 +3161,7 @@ impl SolveApp {
     }
 
     /// Undo, Redo and the History bar would change the design under an open feature editor (Edit
-    /// Hole, Edit Box, â€¦), whose OK and Cancel then refuse it (#10688). They cancel the editor
+    /// Hole, Edit Box, …), whose OK and Cancel then refuse it (#10688). They cancel the editor
     /// first, putting its marker back, as starting another tool does; while it is still opening
     /// they wait for it.
     pub(crate) fn close_editor_for_history(&mut self) -> Result<(), String> {
@@ -3439,7 +3439,7 @@ impl SolveApp {
 
     /// Is the origin widget shown? Origin planes and axes are drawn and pickable. While a dialog
     /// picks a plane ([`SolveApp::picking_plane`]) the Origin is always shown, drawn through the
-    /// model (a plane inside a body stays visible), even when the browser hides it â€” except the
+    /// model (a plane inside a body stays visible), even when the browser hides it — except the
     /// origin planes for Project ([`SolveApp::picking_project_geometry`], #10778), which keep a
     /// hidden Origin hidden.
     pub fn origin_visible(&self) -> bool {
@@ -3945,7 +3945,7 @@ impl SolveApp {
         if !to.is_valid() {
             return;
         }
-        // Preferences â€º Navigation: animated (at a chosen speed) or immediate.
+        // Preferences › Navigation: animated (at a chosen speed) or immediate.
         if !self.preferences.look_at_anim {
             self.cam = to;
             self.cam_anim = None;
@@ -3992,7 +3992,7 @@ impl SolveApp {
     }
 
     /// A view chosen on a navigator (a face, corner or arrow, an axis tip): the view turns
-    /// in place, or frames the whole model from the new direction when Preferences â€º Navigation
+    /// in place, or frames the whole model from the new direction when Preferences › Navigation
     /// asks for it (`navigator_fit`, #10091).
     pub fn animate_turn(&mut self, to: Camera) {
         if self.preferences.navigator_fit {
@@ -4516,7 +4516,7 @@ impl SolveApp {
         link_folders_prompt::show(self, ui.ctx());
         update::show(self, ui.ctx());
         install::show(self, ui.ctx());
-        // Settings â€º AI's Add agent dialog: Settings opens over Home too (#3483).
+        // Settings › AI's Add agent dialog: Settings opens over Home too (#3483).
         if agent_chat::shown(self) {
             agent_chat::settings::dialog(self, ui.ctx());
         }
@@ -4544,7 +4544,7 @@ impl SolveApp {
                     panel_runtime::hide_app_host(self);
                 }
                 browser::editors(self, ui);
-                // File â€º Install pluginâ€¦ is offered on Home too: its question must show there.
+                // File › Install plugin… is offered on Home too: its question must show there.
                 plugin_install::show(self, ui.ctx());
                 // Entry dialogs from every plugin slot are available on Home too.
                 plugin_menu::show(self, ui.ctx());
@@ -4854,7 +4854,7 @@ pub fn command_label(id: &str) -> &str {
     solidcraft_engine::find_command(id).map_or(id, |c| c.label)
 }
 
-/// An engine error with the command's label instead of its id: "Shell: offset must be â€¦".
+/// An engine error with the command's label instead of its id: "Shell: offset must be …".
 /// The command label and catalogued engine messages follow the interface language.
 pub fn friendly_error(id: &str, e: &str) -> String {
     let label = solidcraft_ui_text::tr_command(id, command_label(id));
