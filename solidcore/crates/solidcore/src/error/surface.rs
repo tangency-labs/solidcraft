@@ -365,10 +365,9 @@ pub enum SurfaceFailure {
     /// The inversion of a point onto an iso curve of the surface failed (its error is the
     /// cause). Class `failed`; whether it is a defect or a refusal is its cause's.
     CurveInversionFailed,
-    /// The routine is a base-class default the surface's kind does not implement (upstream
-    /// `SmSurface`'s `SE(SM_ERR)`), or one that takes only another kind (a surface of
-    /// extrusion's base). [`ErrorKind::Unsupported`].
-    RoutineNotForKind,
+    /// The surface's kind has no override of the routine; the base body refuses
+    /// ([`ErrorKind::Unsupported`], `SM_ERR`).
+    UnsupportedSurfaceKind,
     /// The sphere's inversion could not answer whether the point is on it: the point is at
     /// the centre of a sphere whose radius is not above the 3D tolerance, so it has no
     /// parameters. Class `failed`.
@@ -574,7 +573,7 @@ impl SurfaceFailure {
             | Self::GeneratorNotPerpendicular
             | Self::PolarConversionImpossible
             | Self::GeneratorNotPlanar
-            | Self::RoutineNotForKind => ErrorKind::Unsupported,
+            | Self::UnsupportedSurfaceKind => ErrorKind::Unsupported,
             Self::PointInBendSingularity
             | Self::ZeroVolumeTangent { .. }
             | Self::LineCrossingSingular
@@ -794,8 +793,8 @@ impl core::fmt::Display for SurfaceFailure {
             Self::CurveInversionFailed => {
                 f.write_str("the inversion of a point onto an iso curve failed")
             }
-            Self::RoutineNotForKind => {
-                f.write_str("the surface's kind does not implement the routine")
+            Self::UnsupportedSurfaceKind => {
+                f.write_str("the surface's kind does not support the operation")
             }
             Self::InversionNotAnswered => {
                 f.write_str("the sphere's inversion could not answer for the point")
@@ -1326,7 +1325,7 @@ mod tests {
                 ErrorKind::Failed,
             ),
             (
-                SurfaceFailure::RoutineNotForKind,
+                SurfaceFailure::UnsupportedSurfaceKind,
                 SM_ERR,
                 ErrorKind::Unsupported,
             ),

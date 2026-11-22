@@ -370,7 +370,7 @@ const OP_CURVE_ON_CLASSIFY: &str = "surface::surface::p2::Surface::curve_on_clas
 
 /// `SM_ERR` of a base-class default.
 fn base_err() -> SolidError {
-    SolidError::surface(OP_BASE, SurfaceFailure::RoutineNotForKind)
+    SolidError::surface(OP_BASE, SurfaceFailure::UnsupportedSurfaceKind)
 }
 
 // ---- the surface object ---------------------------------------------------------------
@@ -2120,7 +2120,7 @@ impl Surface {
                 // SmSurface::CreateMirrorSurface: SE(SM_ERR)
                 return Err(SolidError::surface(
                     OP_MIRROR,
-                    SurfaceFailure::RoutineNotForKind,
+                    SurfaceFailure::UnsupportedSurfaceKind,
                 ));
             }
         };
@@ -8780,7 +8780,7 @@ mod tests {
         );
         assert_eq!(
             base_copy().unwrap_err().surface_failure(),
-            Some(&SurfaceFailure::RoutineNotForKind)
+            Some(&SurfaceFailure::UnsupportedSurfaceKind)
         );
         assert_eq!(base_degree(), 1001);
         assert_eq!(base_natural_uv_domain().max(), Point2::new(0.0, 0.0));
