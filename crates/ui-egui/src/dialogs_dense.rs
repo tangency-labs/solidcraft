@@ -1159,6 +1159,7 @@ fn additional_rows(app: &mut SolveApp, d: &mut Dialog, ui: &mut egui::Ui) -> boo
         }
         k @ Kind::Move { .. } => {
             enter |= crate::dialogs_move::rows(ui, k);
+            crate::dialogs_move::kept_axis_note(ui, &d.inputs, &d.extra);
             if shared {
                 ui_kit::text(
                     ui,
