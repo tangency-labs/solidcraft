@@ -1761,6 +1761,27 @@ fn add_zone(
                 .rev()
                 .map(Seg2::reversed),
         );
+        // What the panels' outlines leave out under the bend, carried into the zone: only what
+        // lies along the joint within the zone's own span can reach it.
+        let cuts = match BendMap::of(sheet, bend) {
+            Some(map) => {
+                let span = segs
+                    .iter()
+                    .flat_map(|s| extremes(s, &[frame.along]))
+                    .map(|q| (q - frame.origin).dot(frame.along))
+                    .fold((f64::INFINITY, f64::NEG_INFINITY), |(lo, hi), x| {
+                        (lo.min(x), hi.max(x))
+                    });
+                let why = |why| Refusal::Joint { joint: j, why };
+                let mut cuts =
+                    under(sheet, joint.a.panel, placed.0, frame, &map, false, span).map_err(why)?;
+                cuts.extend(
+                    under(sheet, joint.b.panel, placed.1, frame, &map, true, span).map_err(why)?,
+                );
+                cuts
+            }
+            None => Vec::new(),
+        };
         out.zones.push(Zone {
             joint: j,
             region: Region2 {
@@ -1770,6 +1791,7 @@ fn add_zone(
             near: [n0, n1],
             far: [f0, f1],
             panels: [joint.a.panel, joint.b.panel],
+            cuts,
         });
     }
     // A panel's band runs from its tangent line across its anchor, and a thickness past it so
@@ -2351,21 +2373,26 @@ enum Walk {
     Round(Vec<Seg2>),
 }
 
+/// The line along the joint at `level` across it, long enough to hold segment `s`: by a box round
+/// its points and control points.
+fn line_along(s: &Seg2, frame: &JointFrame, level: f64) -> [Seg2; 1] {
+    let b: Box2 = extremes(s, &[X, Y]).into_iter().collect();
+    let far = (b.min - frame.origin).len() + b.size().len() + 1.0;
+    let o = frame.origin + frame.toward_b * level;
+    [Seg2::Line {
+        a: o - frame.along * far,
+        b: o + frame.along * far,
+    }]
+}
+
 /// Where along `s`, past its start, it first meets one of the lines along the joint at `levels`
 /// across it: the parameter and which level. Read off the segment's own crossings with each line
 /// ([`crossings`]), never off points of it, so that a curve that leaves a band and comes back
 /// between two of its points is caught.
 fn first_meeting(s: &Seg2, frame: &JointFrame, levels: &[f64]) -> Option<(f64, usize)> {
-    // Lines long enough to hold the segment, by a box round its points and control points.
-    let b: Box2 = extremes(s, &[X, Y]).into_iter().collect();
-    let far = (b.min - frame.origin).len() + b.size().len() + 1.0;
     let mut first: Option<(f64, usize)> = None;
     for (k, level) in levels.iter().enumerate() {
-        let o = frame.origin + frame.toward_b * *level;
-        let line = [Seg2::Line {
-            a: o - frame.along * far,
-            b: o + frame.along * far,
-        }];
+        let line = line_along(s, frame, *level);
         for c in crossings(&line, std::slice::from_ref(s)) {
             // Where the segment starts on the line it is not met again.
             let t = c.3;
@@ -2492,6 +2519,173 @@ fn record_curve(s: &Seg2) -> Option<(Curve, [f64; 2])> {
             [0.0, 1.0],
         ),
     })
+}
+
+/// What panel `panel`'s outline, placed by `place`, leaves out under a bend whose zone spans `span`
+/// along the joint, carried into the zone by the bend's `map` (see [`Zone::cuts`]): the `b`
+/// panel's when `on_b`. Each hole of the panel that reaches past its tangent line toward the sharp,
+/// and each notch its outline makes in from the sharp (see [`notches`]), laid out as the bend lays
+/// the panel's surface out (see [`laid_under`]). A loop that lies along the joint clear of the
+/// span reaches no zone. Refused ([`JointRefusal::CutFit`]) where no cubic pieces are proved to
+/// follow one's image.
+fn under(
+    sheet: &Sheet,
+    panel: usize,
+    place: &Rigid2,
+    frame: &JointFrame,
+    map: &BendMap,
+    on_b: bool,
+    span: (f64, f64),
+) -> Result<Vec<Region2>, JointRefusal> {
+    let Some(p) = sheet.panels.get(panel) else {
+        return Ok(Vec::new());
+    };
+    let (tangent, way) = map.side(on_b);
+    let placed = |l: &Loop2| l.segs.iter().map(|s| place.seg(s)).collect::<Vec<Seg2>>();
+    // Read off the points that hold each segment, which reach at least as far as it does.
+    let reaches = |l: &[Seg2]| {
+        let pts: Vec<Vec2> = l
+            .iter()
+            .flat_map(|s| extremes(s, &[frame.along, frame.toward_b]))
+            .collect();
+        let along = |q: &Vec2| (*q - frame.origin).dot(frame.along);
+        let into = |q: &Vec2| ((*q - frame.origin).dot(frame.toward_b) - tangent) * way;
+        let lo = pts.iter().map(along).fold(f64::INFINITY, f64::min);
+        let hi = pts.iter().map(along).fold(f64::NEG_INFINITY, f64::max);
+        pts.iter().any(|q| into(q) > EDGE_TOL) && hi > span.0 + EDGE_TOL && lo < span.1 - EDGE_TOL
+    };
+    let mut gaps: Vec<Vec<Seg2>> = p
+        .region
+        .holes
+        .iter()
+        .map(placed)
+        .filter(|h| reaches(h))
+        .collect();
+    let outline = placed(&ccw(p.region.outer.clone()));
+    gaps.extend(
+        notches(&outline, frame, tangent + way * map.setback, way)
+            .into_iter()
+            .filter(|n| reaches(n)),
+    );
+    gaps.iter()
+        .map(|g| {
+            let segs = laid_under(g, frame, map, on_b).ok_or(JointRefusal::CutFit)?;
+            Ok(Region2 {
+                outer: ccw(Loop2 { segs }),
+                holes: Vec::new(),
+            })
+        })
+        .collect()
+}
+
+/// The notches a panel's outline `segs` (counter-clockwise round its material) makes in from a
+/// bend's sharp, which runs along the joint `sharp` across it, `way` the way past it from the
+/// panel: each stretch of the outline from one of its segments that lie along the sharp to the
+/// next, closed by the sharp's line back to where it left, that goes round no material (clockwise,
+/// as the outline goes round its material the other way) and stays on the panel's side of the
+/// sharp. The stretch that goes round the rest of the panel goes round its material.
+fn notches(segs: &[Seg2], frame: &JointFrame, sharp: f64, way: f64) -> Vec<Vec<Seg2>> {
+    let across = |q: Vec2| (q - frame.origin).dot(frame.toward_b);
+    let off = |s: &Seg2| {
+        extremes(s, &[frame.toward_b])
+            .into_iter()
+            .map(|q| across(q) - sharp)
+    };
+    let on_sharp = |s: &Seg2| off(s).all(|d| d.abs() <= EDGE_TOL);
+    let past = |s: &Seg2| off(s).any(|d| d * way > EDGE_TOL);
+    let n = segs.len();
+    let Some(first) = segs.iter().position(on_sharp) else {
+        return Vec::new();
+    };
+    let mut out = Vec::new();
+    let mut run: Vec<Seg2> = Vec::new();
+    for k in 1..=n {
+        let Some(s) = segs.get((first + k) % n) else {
+            continue;
+        };
+        if !on_sharp(s) {
+            run.push(*s);
+            continue;
+        }
+        let mut stretch = std::mem::take(&mut run);
+        let (Some(a), Some(b)) = (
+            stretch.first().map(Seg2::start),
+            stretch.last().map(Seg2::end),
+        ) else {
+            continue;
+        };
+        if stretch.iter().any(past) {
+            continue;
+        }
+        stretch.push(Seg2::Line { a: b, b: a });
+        let notch = Loop2 { segs: stretch };
+        if notch.signed_area().is_ok_and(|x| x.value < 0.0) {
+            out.push(notch.segs);
+        }
+    }
+    out
+}
+
+/// The loop `segs`, a gap in a panel's outline that reaches under a bend, as the bend lays the
+/// panel's surface out (see [`Zone::cuts`]): split where it crosses the panel's tangent line, each
+/// piece past the line toward the sharp carried into the zone by `map` (the `b` panel's when
+/// `on_b`), and each piece before it left where the panel has it, so that the loop crosses the
+/// zone's edge where the panel's outline does. A stretch square across the joint or along it stays
+/// a line; any other is carried by cubic pieces proved within three quarters of [`TEAR_TOL`] of
+/// its image (see [`follow`]), and each piece's start is moved onto the end of the one before it
+/// within the last quarter. `None` where no such pieces are had.
+fn laid_under(segs: &[Seg2], frame: &JointFrame, map: &BendMap, on_b: bool) -> Option<Vec<Seg2>> {
+    let (tangent, way) = map.side(on_b);
+    let along = |q: Vec2| (q - frame.origin).dot(frame.along);
+    let across = |q: Vec2| (q - frame.origin).dot(frame.toward_b);
+    let mut out: Vec<Seg2> = Vec::new();
+    for s in segs {
+        // Where it crosses the tangent line, short of its ends.
+        let line = line_along(s, frame, tangent);
+        let mut breaks: Vec<f64> = crossings(&line, std::slice::from_ref(s))
+            .into_iter()
+            .map(|c| c.3)
+            .filter(|t| {
+                let p = s.point_at(*t);
+                p.dist(s.start()) > EDGE_TOL && p.dist(s.end()) > EDGE_TOL
+            })
+            .collect();
+        breaks.sort_by(f64::total_cmp);
+        let mut t0 = 0.0;
+        for t1 in breaks.into_iter().chain([1.0]) {
+            let piece = part(s, t0, t1);
+            t0 = t1;
+            if (across(piece.point_at(0.5)) - tangent) * way <= 0.0 {
+                out.push(piece);
+                continue;
+            }
+            match piece {
+                Seg2::Line { a, b }
+                    if (along(a) - along(b)).abs() <= EDGE_TOL
+                        || (across(a) - across(b)).abs() <= EDGE_TOL =>
+                {
+                    out.push(Seg2::Line {
+                        a: map.carry(frame, on_b, a),
+                        b: map.carry(frame, on_b, b),
+                    });
+                }
+                _ => out.extend(follow(&piece, frame, map, on_b)?),
+            }
+        }
+    }
+    // Each piece starts where the one before it ends: carried and kept pieces meet at the
+    // tangent line, and carried ones end where the map puts the point they end at, a rounding
+    // off where the next is read to start.
+    let n = out.len();
+    for k in 0..n {
+        let before = out.get((k + n - 1) % n).map(Seg2::end)?;
+        let piece = out.get_mut(k)?;
+        if !(before.dist(piece.start()) <= TEAR_TOL / 4.0) {
+            return None;
+        }
+        *piece = with_ends(piece, Some(before), None);
+    }
+    Some(out)
 }
 
 /// How far along the joint panel `panel`'s side at a bend's end reaches inside its band, the

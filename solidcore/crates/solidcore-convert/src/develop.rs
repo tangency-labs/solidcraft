@@ -387,6 +387,7 @@ pub fn development(d: &r::Development) -> k::Development {
                 near: z.near.map(vec2),
                 far: z.far.map(vec2),
                 panels: z.panels,
+                cuts: z.cuts.iter().map(region2).collect(),
             })
             .collect(),
         trims: d
@@ -455,6 +456,7 @@ pub fn zone(z: &r::Zone) -> k::Zone {
         near: z.near.map(vec2),
         far: z.far.map(vec2),
         panels: z.panels,
+        cuts: z.cuts.iter().map(region2).collect(),
     }
 }
 
@@ -467,6 +469,7 @@ pub fn record_zone(z: &k::Zone) -> r::Zone {
         near: z.near.map(record_vec2),
         far: z.far.map(record_vec2),
         panels: z.panels,
+        cuts: z.cuts.iter().map(record_region2).collect(),
     }
 }
 

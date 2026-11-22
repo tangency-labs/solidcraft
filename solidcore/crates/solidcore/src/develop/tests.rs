@@ -1833,3 +1833,232 @@ fn a_free_end_laid_out_too_far_to_carry_within_its_tolerance_is_refused() {
     ));
     assert!(develop(&sheet, &[(0, Rigid2::IDENTITY)]).is_ok());
 }
+
+/// The bracket with its base's region `base`: its sharp still runs along y = 0 from x 0 to 100.
+fn bracket_with_base(b: Bend, base: Region2) -> Sheet {
+    let mut sheet = bracket(b);
+    if let Some(p) = sheet.panels.first_mut() {
+        p.region = base;
+    }
+    sheet
+}
+
+/// The base, 100 x 60, with the given holes (each made to run clockwise, round no material).
+fn base_with_holes(holes: Vec<Loop2>) -> Region2 {
+    Region2 {
+        outer: rect(0.0, 0.0, 100.0, 60.0).outer,
+        holes: holes.into_iter().map(|h| ccw(h).reversed()).collect(),
+    }
+}
+
+/// A circle as two half arcs.
+fn circle_loop(c: Vec2, r: f64) -> Loop2 {
+    Loop2 {
+        segs: vec![
+            Seg2::Arc {
+                center: c,
+                radius: r,
+                start: 0.0,
+                sweep: PI,
+            },
+            Seg2::Arc {
+                center: c,
+                radius: r,
+                start: PI,
+                sweep: PI,
+            },
+        ],
+    }
+}
+
+/// The bracket's one zone, laid out from its base.
+fn only_zone(sheet: &Sheet) -> super::Zone {
+    let dev = match develop(sheet, &[(0, Rigid2::IDENTITY)]) {
+        Ok(d) => d,
+        Err(e) => panic!("the bracket lays out: {e:?}"),
+    };
+    match dev.zones.as_slice() {
+        [zone] => zone.clone(),
+        _ => panic!("one zone: {dev:?}"),
+    }
+}
+
+/// Points along every segment of a region's outline.
+fn outline_points(r: &Region2) -> Vec<Vec2> {
+    r.outer
+        .segs
+        .iter()
+        .flat_map(|s| (0..=40).map(move |k| s.point_at(k as f64 / 40.0)))
+        .collect()
+}
+
+/// A slot through the base under the bend (x 40 to 46, from y 10 down to y 1, past the base's
+/// tangent line at y = (R + T) tan 45° = 4) runs on into the zone, square through the sheet: the
+/// ray that meets the base's surface at the slot's end, 3 past the tangent line, is atan(3/4) round
+/// the bend, which the neutral arc puts (R + K T) atan(3/4) = 3 × 0.6435 = 1.9305 past the tangent
+/// line in the flat, at y 2.0695. Its sides, square across the joint, stay straight; before the
+/// tangent line it lies as the base has it.
+#[test]
+fn a_slot_under_a_bend_runs_on_into_its_zone() {
+    let slot = ccw(polygon(&[
+        Vec2::new(40.0, 1.0),
+        Vec2::new(46.0, 1.0),
+        Vec2::new(46.0, 10.0),
+        Vec2::new(40.0, 10.0),
+    ]));
+    let zone = only_zone(&bracket_with_base(
+        bend(FRAC_PI_2, Datum::Sharp, (0.0, 100.0)),
+        base_with_holes(vec![slot]),
+    ));
+    let [cut] = zone.cuts.as_slice() else {
+        panic!("one cut: {:?}", zone.cuts)
+    };
+    let b = bounds(cut);
+    let end = 4.0 - 3.0 * 0.75f64.atan();
+    assert!(
+        near(b.min, Vec2::new(40.0, end)) && near(b.max, Vec2::new(46.0, 10.0)),
+        "{b:?}, the slot's end at y {end}"
+    );
+    assert!(cut
+        .outer
+        .segs
+        .iter()
+        .all(|s| matches!(s, Seg2::Line { .. })));
+}
+
+/// A round hole through the base under the bend (Ø4 at (60, 3), reaching 3 past the base's tangent
+/// line at y 4) is carried into the zone square through the sheet: each point of its outline in the
+/// zone, `d` past the tangent line in the flat, lies on the ray d / (R + K T) round the bend, which
+/// meets the base's surface (R + T) tan(d / (R + K T)) past the tangent line, on the hole's circle
+/// there. Its deepest point lands 3 atan(3/4) = 1.9305 past the tangent line.
+#[test]
+fn a_round_hole_under_a_bend_is_carried_into_its_zone_square_through_the_sheet() {
+    let zone = only_zone(&bracket_with_base(
+        bend(FRAC_PI_2, Datum::Sharp, (0.0, 100.0)),
+        base_with_holes(vec![circle_loop(Vec2::new(60.0, 3.0), 2.0)]),
+    ));
+    let [cut] = zone.cuts.as_slice() else {
+        panic!("one cut: {:?}", zone.cuts)
+    };
+    let pts: Vec<Vec2> = outline_points(cut)
+        .into_iter()
+        .filter(|p| p.y < 4.0 - 1e-6)
+        .collect();
+    assert!(pts.len() > 20, "the hole reaches the zone: {pts:?}");
+    for p in &pts {
+        let on_base = 4.0 - 4.0 * ((4.0 - p.y) / 3.0).tan();
+        let off = (Vec2::new(p.x, on_base) - Vec2::new(60.0, 3.0)).len() - 2.0;
+        assert!(
+            off.abs() < 2e-3,
+            "({}, {}) is {off} off the circle",
+            p.x,
+            p.y
+        );
+    }
+    let deepest = pts.iter().map(|p| p.y).fold(f64::INFINITY, f64::min);
+    assert!(
+        (deepest - (4.0 - 3.0 * 0.75f64.atan())).abs() < 2e-3,
+        "{deepest}"
+    );
+}
+
+/// A notch in the base from the sharp (x 40 to 46, 2 deep) and one in the flange at the same place
+/// (a hole cut through the bend's sharp, as the two panels hold it) are each carried into the
+/// zone, and meet in its middle, where the sharp lands from both sides: 3 × π/4 = 2.3562 past
+/// either tangent line, at y 4 − 2.3562 = 1.6438. The base's runs from there to 3 atan(2/4) =
+/// 1.3909 past its tangent line (y 2.6091), the flange's to as far past the flange's (at
+/// y 4 − BA = −0.7124), y 0.6785.
+#[test]
+fn notches_in_from_the_sharp_on_both_sides_meet_in_the_middle_of_the_zone() {
+    let chart = Rigid2::onto(Vec2::ZERO, X, Vec2::new(7.0, -3.0), from_angle(1.1))
+        .unwrap_or(Rigid2::IDENTITY);
+    let notched = |pts: &[(f64, f64)]| Region2 {
+        outer: ccw(polygon(
+            &pts.iter()
+                .map(|&(x, y)| Vec2::new(x, y))
+                .collect::<Vec<_>>(),
+        )),
+        holes: Vec::new(),
+    };
+    let mut sheet = bracket_with_base(
+        bend(FRAC_PI_2, Datum::Sharp, (0.0, 100.0)),
+        notched(&[
+            (0.0, 0.0),
+            (40.0, 0.0),
+            (40.0, 2.0),
+            (46.0, 2.0),
+            (46.0, 0.0),
+            (100.0, 0.0),
+            (100.0, 60.0),
+            (0.0, 60.0),
+        ]),
+    );
+    if let Some(p) = sheet.panels.get_mut(1) {
+        p.region = chart.region(&notched(&[
+            (0.0, -20.0),
+            (100.0, -20.0),
+            (100.0, 0.0),
+            (46.0, 0.0),
+            (46.0, -2.0),
+            (40.0, -2.0),
+            (40.0, 0.0),
+            (0.0, 0.0),
+        ]));
+    }
+    let zone = only_zone(&sheet);
+    let [a, b] = zone.cuts.as_slice() else {
+        panic!("a cut from each panel: {:?}", zone.cuts)
+    };
+    let mid = 4.0 - 3.0 * FRAC_PI_4;
+    let (ba, bb) = (bounds(a), bounds(b));
+    assert!(
+        near(ba.min, Vec2::new(40.0, mid))
+            && near(ba.max, Vec2::new(46.0, 4.0 - 3.0 * 0.5f64.atan())),
+        "the base's: {ba:?}"
+    );
+    assert!(
+        near(
+            bb.min,
+            Vec2::new(40.0, 4.0 - 3.0 * FRAC_PI_2 + 3.0 * 0.5f64.atan())
+        ) && near(bb.max, Vec2::new(46.0, mid)),
+        "the flange's: {bb:?}"
+    );
+}
+
+/// A hole under the base's sharp past the zone's end along the joint (the bend runs x 0 to 50; the
+/// hole lies at x 70 to 76, in the base's kept tail) is no cut of the zone.
+#[test]
+fn a_hole_beside_a_bend_past_its_end_is_no_cut_of_its_zone() {
+    let hole = ccw(polygon(&[
+        Vec2::new(70.0, 1.0),
+        Vec2::new(76.0, 1.0),
+        Vec2::new(76.0, 10.0),
+        Vec2::new(70.0, 10.0),
+    ]));
+    let zone = only_zone(&bracket_with_base(
+        bend(FRAC_PI_2, Datum::Sharp, (0.0, 50.0)),
+        base_with_holes(vec![hole]),
+    ));
+    assert!(zone.cuts.is_empty(), "{:?}", zone.cuts);
+}
+
+/// Laid out 1e12 mm from the flat frame's origin, a round hole under the bend can't be carried
+/// within the tolerance (see
+/// `a_free_end_laid_out_too_far_to_carry_within_its_tolerance_is_refused`): it is refused,
+/// naming the joint. Near the origin the same bracket lays out.
+#[test]
+fn a_hole_under_a_bend_laid_out_too_far_to_carry_is_refused() {
+    let sheet = bracket_with_base(
+        bend(FRAC_PI_2, Datum::Sharp, (0.0, 100.0)),
+        base_with_holes(vec![circle_loop(Vec2::new(60.0, 3.0), 2.0)]),
+    );
+    let far = Rigid2::onto(Vec2::ZERO, X, Vec2::new(1e12, 0.0), X).unwrap_or(Rigid2::IDENTITY);
+    assert!(matches!(
+        develop(&sheet, &[(0, far)]),
+        Err(Refusal::Joint {
+            joint: 0,
+            why: JointRefusal::CutFit
+        })
+    ));
+    assert!(develop(&sheet, &[(0, Rigid2::IDENTITY)]).is_ok());
+}

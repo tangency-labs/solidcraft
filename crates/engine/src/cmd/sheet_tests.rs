@@ -10710,3 +10710,76 @@ fn a_flange_whose_sharp_is_cut_back_into_the_plate_still_carries_its_slanted_sid
     let slope = (up.0 - low.0) / (up.1 - low.1);
     assert!((slope + 0.75).abs() < 1e-9, "the flange's side runs {slope} along for each mm across, not -0.75: {low:?} {up:?}");
 }
+
+/// A 100 x 60 plate drawn with `hole` (a closed polyline, or a circle by center and radius) near its
+/// edge along y 0, and a 26 mm flange set inside on that edge (2 mm sheet, R 2, K 0.44). The bend's
+/// axis lies R + T = 4 inside both surfaces, at y 4, z −2: the plate's surface (its top) meets the
+/// bend at its tangent line, y 4, and the sharp runs along the edge, y 0.
+fn plate_with_hole_by_a_flange(s: &mut Session, hole: Value) {
+    run(s, "sheet.manage_rules", json!({"name": "T", "thickness": "2 mm", "active": true, "bend_radius": "2 mm", "k_factor": 0.44}));
+    run(s, "sketch.create", json!({"plane": "XY", "name": "Base"}));
+    run(s, "sketch.line", json!({"points": [[0, 0], [100, 0], [100, 60], [0, 60]], "closed": true}));
+    match hole.get("center") {
+        Some(_) => run(s, "sketch.circle.center", hole),
+        None => run(s, "sketch.line", hole),
+    };
+    run(s, "sketch.finish", json!({}));
+    run(s, "sheet.flange", json!({"type": "base", "sketch": "Base", "profiles": [{"point": [10, 30]}]}));
+    run(s, "sheet.flange", json!({"type": "edge", "height": 26, "angle": 90, "position": "inside", "edges": [[30, 0, 0]]}));
+}
+
+/// The point `rho` from the bend's axis (y 4, z −2) on the ray `deg` degrees round from the plate
+/// toward the flange, `x` along the bend.
+fn on_the_bend(x: f64, deg: f64, rho: f64) -> solidcore_record::Vec3 {
+    let phi = deg.to_radians();
+    solidcore_record::Vec3::new(x, 4.0 - rho * phi.sin(), -2.0 + rho * phi.cos())
+}
+
+/// A slot drawn through the plate where the flange's bend runs (x 50 to 56, from y 10 down to y 1,
+/// past the bend's tangent line at y 4) runs on into the bend, square through the sheet: the
+/// plate's surface holds it up to 3 past the tangent line, which the ray atan(3/4) = 36.87° round
+/// the bend meets, so the bend is cut through on every ray short of that, at every depth, and
+/// whole past it. Before, the bend kept its material there and the slot stopped at the tangent
+/// line.
+#[test]
+fn a_slot_drawn_where_a_flanges_bend_runs_is_cut_on_through_the_bend() {
+    use solidcraft_kernel::PointClass::{Inside, Outside};
+    let mut s = Session::default();
+    plate_with_hole_by_a_flange(&mut s, json!({"points": [[50, 1], [56, 1], [56, 10], [50, 10]], "closed": true}));
+    let body = &s.model.state().bodies[0].body;
+    let at = |p: solidcore_record::Vec3| body.classify_point(p).unwrap();
+    // Through the plate, and beside it.
+    assert_eq!((at(solidcore_record::Vec3::new(53.0, 6.0, 1.0)), at(solidcore_record::Vec3::new(48.0, 6.0, 1.0))), (Outside, Inside));
+    for rho in [2.1, 3.0, 3.9] {
+        assert_eq!(
+            (at(on_the_bend(53.0, 20.0, rho)), at(on_the_bend(53.0, 36.0, rho)), at(on_the_bend(53.0, 38.0, rho)), at(on_the_bend(48.0, 20.0, rho))),
+            (Outside, Outside, Inside, Inside),
+            "{rho} from the bend's axis"
+        );
+    }
+}
+
+/// A round hole drawn through the plate where the flange's bend runs (Ø4 at (60, 3)) runs on into
+/// the bend square through the sheet, as the plate's surface holds it: the ray atan(1/2) = 26.57°
+/// round the bend meets the plate's surface 2 past the tangent line (y 2), where the circle is
+/// 2√3/2 = 1.732 either side of x 60. So on that ray, at every depth, the bend is cut through
+/// within 1.70 of x 60 and whole 1.76 from it.
+#[test]
+fn a_round_hole_drawn_where_a_flanges_bend_runs_is_cut_on_through_the_bend() {
+    use solidcraft_kernel::PointClass::{Inside, Outside};
+    let mut s = Session::default();
+    plate_with_hole_by_a_flange(&mut s, json!({"center": [60, 3], "radius": 2}));
+    let body = &s.model.state().bodies[0].body;
+    let at = |p: solidcore_record::Vec3| body.classify_point(p).unwrap();
+    assert_eq!(at(solidcore_record::Vec3::new(60.0, 4.5, 1.0)), Outside);
+    let deg = 0.5f64.atan().to_degrees();
+    for rho in [2.1, 3.0, 3.9] {
+        assert_eq!(
+            (at(on_the_bend(58.3, deg, rho)), at(on_the_bend(61.7, deg, rho)), at(on_the_bend(58.24, deg, rho)), at(on_the_bend(61.76, deg, rho))),
+            (Outside, Outside, Inside, Inside),
+            "{rho} from the bend's axis"
+        );
+        // Its deepest point is 3 past the tangent line, on the ray 36.87° round.
+        assert_eq!((at(on_the_bend(60.0, 36.0, rho)), at(on_the_bend(60.0, 38.0, rho))), (Outside, Inside), "{rho} from the bend's axis");
+    }
+}

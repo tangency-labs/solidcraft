@@ -94,6 +94,7 @@ fn joint_words(why: JointRefusal) -> &'static str {
             "an edge beside the bend's end doesn't run on to the bend line (it turns back, or runs along the bend's edge), so the bend's end can't follow it"
         }
         JointRefusal::OutlineFit => "the bend's end can't follow the curve of an edge beside it through the bend closely enough",
+        JointRefusal::CutFit => "a hole or notch a panel has under the bend can't be carried into the bend closely enough",
         JointRefusal::NoFrame => "an anchor has no frame on its panel",
     }
 }

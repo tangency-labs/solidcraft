@@ -90,6 +90,10 @@ pub enum JointRefusal {
     /// A zone's end that follows its panels' outlines where no cubic pieces are proved to follow
     /// an outline's image in the zone within the tolerance.
     OutlineFit,
+    /// What a panel's outline leaves out under a bend (a hole there, or a notch in from the
+    /// sharp) where no cubic pieces are proved to follow its image in the zone within the
+    /// tolerance.
+    CutFit,
     /// An anchor with no frame on its panel's surface.
     NoFrame,
 }

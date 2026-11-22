@@ -40,8 +40,9 @@ const CLEAR: f64 = 1e-6;
 const ON_LINE: f64 = 1e-7;
 
 /// A development's pieces before they are joined: each placed panel less its trims, and the
-/// zones, all less what the development cuts from the flat (the corners' reliefs and the sheet's
-/// cuts), with each piece of a zone sorted by what still holds it (see [`sort_zones`]), and their
+/// zones less what their panels leave out under them, all less what the development cuts from the
+/// flat (the corners' reliefs and the sheet's cuts), with each piece of a zone sorted by what still
+/// holds it (see [`sort_zones`]), and their
 /// longest arcs halved (see [`halved`]). The flat pattern and the folded solid are both made of
 /// them, edge for edge.
 pub(crate) fn pieces(dev: &Development, work: &mut FlatWork) -> Result<Vec<(Piece, Region2)>> {
@@ -63,9 +64,34 @@ pub(crate) fn pieces(dev: &Development, work: &mut FlatWork) -> Result<Vec<(Piec
             pieces.extend(left.into_iter().map(|r| (Piece::Panel(i), r)));
         }
     }
-    pieces.extend(dev.zones.iter().enumerate().map(|(z, zone)| (Piece::Zone(z), on_grid(&zone.region))));
+    // Each zone less what its panels leave out under the bend (see `Zone::cuts`): a cut clear
+    // inside the zone is a hole of it as it is, the rest are cut from it, and from no other piece.
+    let mut cut_zones = false;
+    for (z, zone) in dev.zones.iter().enumerate() {
+        let region = on_grid(&zone.region);
+        if zone.cuts.is_empty() {
+            pieces.push((Piece::Zone(z), region));
+            continue;
+        }
+        cut_zones = true;
+        let cuts =
+            stage(&format!("joining what bend {}'s panels leave out under it", z + 1), planar_union(zone.cuts.iter().map(on_grid).collect(), work))?;
+        let (inside, across): (Vec<Region2>, Vec<Region2>) = cuts.into_iter().partition(|c| holds_clear(&region, c));
+        let mut left = if across.is_empty() {
+            vec![region]
+        } else {
+            stage(&format!("cutting bend {}", z + 1), boolean_past_holes(&[region], &across, BoolOp::Cut, work))?
+        };
+        for c in inside {
+            match left.iter_mut().find(|r| holds_clear(r, &c)) {
+                Some(r) => r.holes.push(c.outer.ccw().reversed()),
+                None => left = stage(&format!("cutting bend {}", z + 1), boolean_past_holes(&left, std::slice::from_ref(&c), BoolOp::Cut, work))?,
+            }
+        }
+        pieces.extend(left.into_iter().map(|r| (Piece::Zone(z), r)));
+    }
     if dev.cuts.is_empty() {
-        return Ok(halved(pieces));
+        return Ok(halved(if cut_zones { sort_zones(dev, pieces)? } else { pieces }));
     }
     // A cut clear inside one piece is a hole of it as it is, its curves kept; the rest are cut
     // from every piece they reach. A cut that came clear of the pieces but meets what the others
