@@ -976,9 +976,12 @@ struct HookState {
     note: bool,
 }
 
+/// Untouched fields send their value from before the hook, so the hook sees the same inputs while
+/// its last reply stays on screen.
 fn hook_values(fields: &[(Field, Input)]) -> Value {
     let mut values = Map::new();
     for (field, input) in fields {
+        let input = field.hook_baseline.as_ref().filter(|_| !field.edited).unwrap_or(input);
         if let Some(value) = scalar_value(field, input) {
             values.insert(field.key.clone(), value);
         } else if matches!(input, Input::Selection(_)) {
@@ -1003,11 +1006,6 @@ fn apply_hook_reply(dialog: &mut EntryDialog, generation: u64, update: solidcraf
     hook.note = update.warning.is_some();
     hook.submitted = Some(generation);
     for (field, input) in fields.iter_mut() {
-        if !field.edited
-            && let Some(baseline) = field.hook_baseline.take()
-        {
-            *input = baseline;
-        }
         field.hook = update.fields.get(&field.key).cloned();
         field.tip = field
             .hook
@@ -1016,12 +1014,26 @@ fn apply_hook_reply(dialog: &mut EntryDialog, generation: u64, update: solidcraf
             .and_then(Value::as_str)
             .or_else(|| hook.schema.get("properties")?.get(&field.key)?.get("description")?.as_str())
             .map(str::to_owned);
-        if !field.edited
-            && field.hook.as_ref().is_some_and(|f| f.contains_key("value") || f.contains_key("default"))
-            && let Some(value) = update.values.get(&field.key).and_then(|v| default_input(field, v))
+        if field.edited {
+            continue;
+        }
+        // An equal value leaves the field as it is; only a value the reply drops goes back.
+        match field
+            .hook
+            .as_ref()
+            .filter(|f| f.contains_key("value") || f.contains_key("default"))
+            .and_then(|_| update.values.get(&field.key))
+            .and_then(|v| default_input(field, v))
         {
-            field.hook_baseline = Some(input.clone());
-            *input = value;
+            Some(value) => {
+                field.hook_baseline.get_or_insert_with(|| input.clone());
+                *input = value;
+            }
+            None => {
+                if let Some(baseline) = field.hook_baseline.take() {
+                    *input = baseline;
+                }
+            }
         }
     }
     refresh_conditions(fields);
@@ -1043,7 +1055,8 @@ fn poll_hooks(app: &mut SolveApp, ctx: &egui::Context) {
             hook.changed_at = now;
             hook.observed = values;
             hook.note = false;
-            for (field, input) in fields.iter_mut() {
+            // A value change keeps the last reply on screen until the next one replaces it.
+            for (field, input) in fields.iter_mut().filter(|_| document_changed) {
                 field.hook = None;
                 field.controls = None;
                 if let Some(baseline) = field.hook_baseline.take()
@@ -2158,7 +2171,8 @@ fn body(
     if let Some(hook) = &dialog.hook {
         if hook.note {
             ui_kit::status_line(ui, app.tr("ui.plugin_hook_unavailable"), ui_kit::StatusTone::Dim);
-        } else if hook.pending.is_some() {
+        } else if hook.pending.is_some() && crate::now_ms() - hook.changed_at >= 500.0 {
+            // A fast hook shows no status line, so the rows under the fields do not move.
             ui_kit::status_line(ui, app.tr("ui.plugin_hook_waiting"), ui_kit::StatusTone::Dim);
         }
     }
