@@ -364,3 +364,86 @@ pub(crate) static PROFILE_TESTS: std::sync::Mutex<()> = std::sync::Mutex::new(()
 #[cfg(test)]
 #[path = "diagnostics_tests.rs"]
 mod tests;
+
+/// File a problem report on tickets.solidcraft.io for the person using SolidCraft, as the report
+/// dialog would: the app gathers system info, the failed operation, the log and a screenshot,
+/// sends them as a draft and opens it in the person's browser to review and file. Ask the person
+/// first. Their design and crash dumps are never sent on an agent's word: asking for them shows
+/// the report dialog for the person to tick them.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[schemars(deny_unknown_fields)]
+pub struct ReportIssueParams {
+    /// A short title for the problem.
+    pub title: String,
+    /// What happened and what was expected (Markdown).
+    #[serde(default)]
+    pub description: Option<String>,
+    /// bug (default), feature or question.
+    #[serde(default, rename = "type")]
+    pub kind: Option<ReportKind>,
+    /// The app the ticket is for, by slug. Default: solidcraft.
+    #[serde(default)]
+    pub app: Option<String>,
+    /// Attach system info (version, commit, OS, GPU). Default: true.
+    #[serde(default)]
+    pub system: Option<bool>,
+    /// Attach the failed operation's details (the command, its parameters and error). Default: true.
+    #[serde(default)]
+    pub repro: Option<bool>,
+    /// Attach the last lines of the log. Default: true.
+    #[serde(default)]
+    pub log: Option<bool>,
+    /// Attach a screenshot of the window. Default: true.
+    #[serde(default)]
+    pub screenshot: Option<bool>,
+    /// Ask to attach the design file. Default: false. Only the person can agree to it, in the
+    /// report dialog.
+    #[serde(default)]
+    pub design: Option<bool>,
+    /// Ask to attach the latest crash report. Default: false. Only the person can agree to it.
+    #[serde(default)]
+    pub crash: Option<bool>,
+}
+
+/// The kind of ticket.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize, Serialize, JsonSchema)]
+#[serde(rename_all = "lowercase")]
+pub enum ReportKind {
+    Bug,
+    Feature,
+    Question,
+}
+
+/// Where a report is.
+#[derive(Debug, Serialize, Deserialize, JsonSchema)]
+pub struct ReportIssueReply {
+    /// The report's id, for `diagnostics.report_issue_status`.
+    pub report: String,
+    /// pending (the app is gathering it), awaiting_user (the report dialog is open for the person
+    /// to agree to the design or crash report), sending, opened (the draft is open in the
+    /// person's browser to file), filed, queued (offline: it waits), failed.
+    pub status: String,
+    /// What to tell the person.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub message: Option<String>,
+    /// The draft's page (opened) or the ticket's (filed).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub url: Option<String>,
+    /// The ticket's number, once filed.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ticket: Option<u64>,
+    /// Attachments asked for and not sent, and why.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub dropped: Vec<String>,
+    /// In the warn parameter-check mode: what the call's parameters got wrong.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub param_warnings: Vec<String>,
+}
+
+/// Where a report from `diagnostics.report_issue` is now.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[schemars(deny_unknown_fields)]
+pub struct ReportIssueStatusParams {
+    /// The report's id, as `diagnostics.report_issue` returned it.
+    pub report: String,
+}

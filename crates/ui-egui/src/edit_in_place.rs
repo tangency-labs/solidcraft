@@ -248,6 +248,11 @@ fn enter(app: &mut SolveApp, component: u64, path: Option<Vec<u64>>, ask: bool) 
 /// and nothing changes.
 fn prepare(app: &mut SolveApp, component: u64, path: Option<Vec<u64>>, ask: bool) -> Result<(PartContext, Value), String> {
     check_enter(app)?;
+    // Opening a source tab uses its saved row, which may differ from this link's selection.
+    // Do not show that other row as though it were the component being edited.
+    if app.session.doc.links.get(&component).is_some_and(|link| link.configuration.is_some()) {
+        return Err(solidcraft_ui_text::tr("ui.edit_in_place_configuration_source").to_string());
+    }
     let Some(assembly) = app.session.path.clone() else {
         return Err(solidcraft_ui_text::tr("ui.edit_in_place_save_first").to_string());
     };
@@ -391,7 +396,10 @@ fn take_refresh(app: &mut SolveApp) {
     let occurrences = &computed.doc.occurrences;
     computed.pending_moves =
         session.pending_moves.iter().filter(|(id, _)| occurrences.iter().any(|o| o.id == **id)).map(|(id, m)| (*id, *m)).collect();
-    session.accept_computed(computed);
+    if let Err(error) = session.accept_computed(computed) {
+        app.set_status(error.to_string(), true);
+        return;
+    }
     // Every link was read as its file was when the run started: one saved since is read again
     // when the assembly's tab comes back.
     crate::documents::record_stamps_at(app, &r.assembly, &r.stamps);

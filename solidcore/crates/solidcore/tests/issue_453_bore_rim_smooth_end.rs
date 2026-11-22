@@ -18,7 +18,22 @@
 //! 6316.944421027456, each with 11 faces. They are within the fork's capi test bound (1e-7
 //! of `ops_kernel.cpp`'s Simpson closed form, 6382.568731366 less the end rib's certified
 //! residual, and 6316.944424728): the input cases come from that test (fork capi test of
-//! tangency-labs/solidcore#453, 41a39ec).
+//! tangency-labs/solidcore#453, 41a39ec). The fork's volumes, and this port's until #16735,
+//! leaked through the blends' tolerant edges; since `brep_volume` closes those gaps the
+//! bodies are the closed forms to 3e-10 and 1.5e-10 (MEASURED), and are held to them.
+//!
+//! **The closed forms** ([`round_takes`], [`chamfer_takes`], the capi test's): the blend's
+//! section (the round's: the r x r corner outside the ball's circle; the chamfer's: the
+//! triangle of legs d) swept about the bore's axis over the arc's 270 degrees, less what
+//! lies below the bottom face (at angle g from V past the face's reach, only
+//! t < 5 / cos g - 5 from the bore), from the 20 cube less the bore. The integrals are
+//! exact; they are evaluated by Simpson's rule at 10^4 spans (2000 for the round's inner
+//! section integral). At 800 spans halving moved them by 6e-10 and 1.3e-9, and the rule's
+//! error falls as the fourth power of the span, so at these counts it is about 1e-12
+//! (a Richardson estimate, ARGUED): negligible. The end rib on the bottom face is the
+//! corner's certified intersection, not the exact torus or cone, and is not in the closed
+//! forms. The 1e-9 each body is held to is therefore MEASURED (the bodies agree to 3e-10 and
+//! 1.5e-10, the end rib's term included), not a closed-form bound.
 //!
 //! The touching line is a non-manifold edge of the input: the holed cube is no closed
 //! manifold solid, so `fillet_edges`' check that a solid stays one (WR-212) does not apply.
@@ -118,18 +133,73 @@ fn the_holed_cube_is_the_forks() {
     assert!((v - 6_429.203_673_205_027).abs() <= 1e-9, "{v}");
 }
 
-/// The round ends at the seam on the plane z = 5 and builds the fork's body.
+/// The 20 cube less the bore r 5 through it.
+fn holed_closed_form() -> f64 {
+    8000.0 - core::f64::consts::PI * 25.0 * 20.0
+}
+
+/// Simpson's rule for `f` on `[a, b]` over `n` (even) spans.
+fn simpson(f: impl Fn(f64) -> f64, a: f64, b: f64, n: u32) -> f64 {
+    let h = (b - a) / f64::from(n);
+    let mut s = f(a) + f(b);
+    for i in 1..n {
+        s += if i % 2 == 1 { 4.0 } else { 2.0 } * f(a + f64::from(i) * h);
+    }
+    s * h / 3.0
+}
+
+/// What a round of radius `rr` takes off the rim (the file header): in the section, t from
+/// the bore and s in from the back face outside the ball's circle about (rr, rr), with
+/// t = rr (1 - cos p), times its radius from the bore's axis, swept and clipped.
+fn round_takes(rr: f64) -> f64 {
+    use core::f64::consts::PI;
+    // the section's integral in p, nested in the outer one in g
+    const INNER: u32 = 2_000;
+    const OUTER: u32 = 10_000;
+    let section = |up: f64| {
+        if up <= 0.0 {
+            return 0.0;
+        }
+        simpson(
+            |p| (5.0 + rr - rr * p.cos()) * rr * (1.0 - p.sin()) * rr * p.sin(),
+            0.0,
+            (1.0 - up / rr).acos(),
+            INNER,
+        )
+    };
+    let g0 = (5.0 / (5.0 + rr)).acos();
+    section(rr) * (1.5 * PI - g0)
+        + simpson(|g| section(rr.min(5.0 / g.cos() - 5.0)), 0.0, g0, OUTER)
+}
+
+/// What a chamfer of legs `d` takes off the rim (the file header).
+fn chamfer_takes(d: f64) -> f64 {
+    use core::f64::consts::PI;
+    let g0 = (5.0 / (5.0 + d)).acos();
+    let clipped = |g: f64| {
+        let t = 5.0 / g.cos() - 5.0;
+        5.0 * d * t - 2.5 * t * t + 0.5 * d * t * t - t * t * t / 3.0
+    };
+    (2.5 * d * d + d * d * d / 6.0) * (1.5 * PI - g0) + simpson(clipped, 0.0, g0, 10_000)
+}
+
+/// The round ends at the seam on the plane z = 5 and builds the fork's body, of the closed
+/// form's volume.
 #[test]
 fn the_round_builds_as_the_forks() {
     let (v, faces) = blended(1).unwrap();
-    assert!((v - 6_382.568_447_649_069).abs() <= 1e-8, "{v}");
+    let want = holed_closed_form() - round_takes(3.0);
+    assert!((want - 6_382.568_731_366).abs() <= 1e-9, "{want}");
+    assert!((v - want).abs() <= 1e-9, "{v} vs {want}");
     assert_eq!(faces, 11);
 }
 
-/// The chamfer builds the fork's body.
+/// The chamfer builds the fork's body, of the closed form's volume.
 #[test]
 fn the_chamfer_builds_as_the_forks() {
     let (v, faces) = blended(0).unwrap();
-    assert!((v - 6_316.944_421_027_456).abs() <= 1e-8, "{v}");
+    let want = holed_closed_form() - chamfer_takes(3.0);
+    assert!((want - 6_316.944_424_728).abs() <= 1e-9, "{want}");
+    assert!((v - want).abs() <= 1e-9, "{v} vs {want}");
     assert_eq!(faces, 11);
 }

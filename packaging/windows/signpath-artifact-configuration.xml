@@ -8,7 +8,7 @@
   .github/workflows/release.yml submits two signing requests per architecture. GitHub stores every
   workflow artifact as a zip, so the root element is a zip-file and the files sit at its top level:
 
-    1. the binaries, before they are packed:  solidcraft.exe, solidcraft-cli.exe, solvecraft-cli.exe
+    1. the binaries, before they are packed:  solidcraft.exe, solidcraft-cli.exe
     2. the installer built from those signed binaries:  solidcraft-<version>-windows-<arch>.msi
 
   Each set is optional (min-matches="0") because each request carries only one of the two shapes.
@@ -20,7 +20,6 @@
     <pe-file-set>
       <include path="solidcraft.exe" min-matches="0" />
       <include path="solidcraft-cli.exe" min-matches="0" />
-      <include path="solvecraft-cli.exe" min-matches="0" />
       <for-each>
         <authenticode-sign />
       </for-each>

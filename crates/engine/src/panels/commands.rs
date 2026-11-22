@@ -1,6 +1,7 @@
 //! Application-owned command execution shared by UI, control and headless MCP.
 //! No Session, document, geometry, dialogs or camera are reachable here.
 mod catalogue;
+pub use catalogue::{bytes_from_plain, plain_bytes, snapshot_from_value, snapshot_value};
 
 use std::collections::BTreeMap;
 use std::sync::Arc;
@@ -727,7 +728,7 @@ fn merge_envelopes(current: &LayoutEnvelope, mut next: LayoutEnvelope, registry:
         }
     }
     next.section_order = order;
-    super::persistence::merge_retained_priority_context(&mut next, &current_priorities, &incoming_priorities)?;
+    merge_retained_priority_context(&mut next, &current_priorities, &incoming_priorities)?;
     let layout = next.layout.clone();
     with_live_layout(&next, layout, registry)
 }

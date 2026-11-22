@@ -1426,3 +1426,89 @@ mod result_breps_tests {
         assert!(e.0.contains("cannot be drawn"), "{e}");
     }
 }
+
+#[cfg(test)]
+mod reparam_origin_tests {
+    use super::*;
+
+    /// Rows that moved when `Reparameterize` started moving the origin (WR-41): each
+    /// is a program with a reparameterisation onto a new domain.
+    const MOVED: [&str; 24] = [
+        "gen0065", "gen0082", "gen0225", "gen0329", "gen0360", "gen0389", "gen0398", "gen0450",
+        "gen0694", "gen0850", "gen0858", "gen0891", "gen0897", "gen0907", "gen0913", "gen1006",
+        "gen1012", "gen1028", "gen1054", "gen1105", "gen1112", "gen1216", "gen1245", "gen1338",
+    ];
+
+    /// The largest distance between the analytic plane and its NURB, and the largest
+    /// coordinate involved, at three corners of the plane's domain. Both are affine in
+    /// (u, v), so agreement at three non-collinear points is agreement everywhere.
+    fn corner_gap(a: &Plane) -> Option<(f64, f64)> {
+        let w = a.base_with_nurb().ok()?;
+        let d = a.step_uv_domain();
+        let mut gap = 0.0f64;
+        let mut size = a.position().origin().length();
+        for uv in [d.evaluate(0.0, 0.0), d.evaluate(1.0, 0.0), d.evaluate(0.0, 1.0)] {
+            let n = w.evaluate_point(uv).ok()?;
+            gap = gap.max(a.evaluate_point(uv).distance(n));
+            size = size.max(n.length());
+        }
+        Some((gap, size))
+    }
+
+    /// Relative agreement: a few ulps of the largest coordinate.
+    fn agrees(gap: f64, size: f64) -> bool {
+        gap <= 1e-14 * (1.0 + size)
+    }
+
+    /// Replays every generated program: after each reparameterisation onto a new
+    /// domain, a plane that agreed with its NURB still does. Upstream's release build
+    /// leaves the origin where it was, which translates every point of the analytic
+    /// plane by the whole origin move. The moved rows are all such programs.
+    #[test]
+    fn reparameterized_planes_stay_on_their_nurb() {
+        let ctx = CaseContext {
+            root: crate::case::repo_root(),
+            seeds: MIN_GENERATED,
+        };
+        let k = Kernel::default();
+        let mut checked = Vec::new();
+        for c in ctx.generated_cases("surface.plane_p1", |rng| Runner.generate(rng)) {
+            let i: Inputs = c.parse().unwrap();
+            let Ok(Ok(mut a)) = rust_make(&i.make) else {
+                continue;
+            };
+            let mut o = Vec::new();
+            for op in &i.ops {
+                if let OpIn::Reparam { dom } = op {
+                    let d = dom_of(&a, *dom);
+                    let before = a.clone();
+                    if a.reparameterize(&d).is_err() || d == before.step_uv_domain() {
+                        continue;
+                    }
+                    // A plane already off its NURB (earlier ops) proves nothing here.
+                    let Some((pre, pre_size)) = corner_gap(&before) else {
+                        continue;
+                    };
+                    if !agrees(pre, pre_size) {
+                        continue;
+                    }
+                    let (gap, size) = corner_gap(&a).unwrap();
+                    assert!(agrees(gap, size), "{}: gap {gap:e} at size {size:e}", c.name);
+                    let moved = a.position().origin().distance(before.position().origin());
+                    checked.push((c.name.clone(), moved));
+                    continue;
+                }
+                if rust_op(&k, op, &mut a, &mut o).is_err() {
+                    break;
+                }
+            }
+        }
+        assert!(checked.len() >= 100, "only {} reparameterisations", checked.len());
+        for name in MOVED {
+            assert!(
+                checked.iter().any(|(n, moved)| n == name && *moved > 0.5),
+                "{name}: no checked reparameterisation that moves the origin"
+            );
+        }
+    }
+}

@@ -86,9 +86,9 @@ pub(crate) fn start(app: &mut SolveApp, what: RenameWhat, row: egui::Id, at: egu
 }
 
 /// A rename of `what` opened without a row (a menu, F2, a new folder or automation) is shown in
-/// the row `row` instead, when that row stands for it.
+/// the row `row` instead, when that row stands for it and no row holds it yet.
 pub(crate) fn adopt(app: &mut SolveApp, what: &RenameWhat, row: egui::Id) {
-    if let Some(rename) = app.menu.rename.as_mut().filter(|rename| !rename.inline && rename.what == *what) {
+    if let Some(rename) = app.menu.rename.as_mut().filter(|rename| rename.inline_id.is_none() && rename.what == *what) {
         rename.inline = true;
         rename.inline_id = Some(row);
         // The row focuses the editor from here (#16217).
@@ -129,7 +129,10 @@ pub(crate) fn editor(app: &mut SolveApp, ui: &mut egui::Ui, row: egui::Id, label
     if escape {
         // Dropping the state cancels the edit.
     } else if commit {
+        // A refused name keeps the editor open, focused with the name selected; the status line
+        // says why.
         if crate::context_menu::commit_rename(app, &rename).is_err() {
+            rename.focused = false;
             app.menu.rename = Some(rename);
         }
     } else {

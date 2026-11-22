@@ -59,6 +59,13 @@ mod imp {
             std::path::Path::new(path).exists()
         }
     }
+    /// The path with links and `.`/`..` resolved, for telling whether two paths name one file.
+    /// It opens the path: on Windows a network path connects to its host, so a path a design
+    /// names goes through [`design_path_refusal`] first. No agent scope applies (it reads nothing).
+    pub fn canonicalize(path: &str) -> Result<std::path::PathBuf> {
+        touched();
+        std::fs::canonicalize(path)
+    }
     /// Whether the path names a regular file the caller may access.
     pub fn is_file(path: &str) -> bool {
         check(path).is_ok() && {
@@ -76,6 +83,30 @@ mod imp {
         check(path)?;
         touched();
         std::fs::create_dir_all(path)
+    }
+    /// A new folder and any missing folders above it, authorized as a new destination
+    /// ([`check_new`]): its parents need not exist yet, but those that do must be in scope.
+    pub fn create_new_dir_all(path: &str) -> Result<()> {
+        check_new(path)?;
+        touched();
+        std::fs::create_dir_all(path)
+    }
+    /// The paths of the regular files directly in a folder, sorted; at most `max` of them.
+    pub fn files_in(dir: &str, max: usize) -> Result<Vec<String>> {
+        check(dir)?;
+        touched();
+        let mut out = Vec::new();
+        for entry in std::fs::read_dir(dir)? {
+            let entry = entry?;
+            if entry.file_type()?.is_file() {
+                out.push(entry.path().to_string_lossy().into_owned());
+                if out.len() > max {
+                    return Err(Error::new(ErrorKind::InvalidData, "too many files in the folder"));
+                }
+            }
+        }
+        out.sort();
+        Ok(out)
     }
 }
 
@@ -133,12 +164,26 @@ mod imp {
     pub fn create_dir_all(_path: &str) -> Result<()> {
         Ok(())
     }
+    /// As [`create_dir_all`]: nothing to make.
+    pub fn create_new_dir_all(_path: &str) -> Result<()> {
+        Ok(())
+    }
     pub fn insert(path: &str, bytes: Vec<u8>) {
         FILES.with(|f| f.borrow_mut().insert(path.to_string(), bytes));
     }
     pub fn take_writes() -> Vec<(String, Vec<u8>)> {
         let paths = WRITES.with(|w| std::mem::take(&mut *w.borrow_mut()));
         paths.into_iter().filter_map(|p| FILES.with(|f| f.borrow().get(&p).cloned()).map(|b| (p, b))).collect()
+    }
+    /// The files directly in a folder, sorted; at most `max` of them.
+    pub fn files_in(dir: &str, max: usize) -> Result<Vec<String>> {
+        let prefix = format!("{}/", dir.trim_end_matches('/'));
+        let out: Vec<String> =
+            FILES.with(|f| f.borrow().keys().filter(|p| p.strip_prefix(&prefix).is_some_and(|rest| !rest.contains('/'))).cloned().collect());
+        if out.len() > max {
+            return Err(Error::new(ErrorKind::InvalidData, "too many files in the folder"));
+        }
+        Ok(out)
     }
     pub fn list(prefix: &str) -> Vec<(String, u64)> {
         FILES.with(|f| f.borrow().iter().filter(|(p, _)| p.starts_with(prefix)).map(|(p, b)| (p.clone(), b.len() as u64)).collect())
@@ -356,6 +401,16 @@ impl PathScope {
 
     /// Whether `path` lies inside one of the folders, after following symlinks and `..`.
     pub fn check(&self, path: &str) -> Result<()> {
+        self.check_path(path, false)
+    }
+
+    /// Check a destination whose parent directories may not exist yet, without creating them.
+    /// Existing ancestors still resolve through symlinks; missing components must be normal names.
+    pub fn check_new(&self, path: &str) -> Result<()> {
+        self.check_path(path, true)
+    }
+
+    fn check_path(&self, path: &str, new: bool) -> Result<()> {
         let refused = || {
             let roots: Vec<String> = self.roots.iter().chain(&self.design_roots).map(|r| r.display().to_string()).collect();
             // A rejected folder is named by its supplied spelling and by its absolute one, so
@@ -392,8 +447,11 @@ impl PathScope {
         {
             return Err(windows(why));
         }
+        if new && cfg!(windows) && path.split(['/', '\\']).any(|part| !matches!(part, "." | "..") && part.ends_with(['.', ' '])) {
+            return Err(windows("trailing dots or spaces in a future path"));
+        }
         touched();
-        let resolved = match resolve(std::path::Path::new(path)) {
+        let resolved = match if new { resolve_new(std::path::Path::new(path)) } else { resolve(std::path::Path::new(path)) } {
             Ok(r) => r,
             Err(e) if e.kind() == ErrorKind::NotFound => return Err(self.missing_folder(path).unwrap_or_else(refused)),
             Err(_) => return Err(refused()),
@@ -752,6 +810,25 @@ fn resolve(path: &std::path::Path) -> Result<std::path::PathBuf> {
     }
 }
 
+/// Resolve a future destination without following a dangling symlink or normalizing missing `..`.
+fn resolve_new(path: &std::path::Path) -> Result<std::path::PathBuf> {
+    let mut at = path;
+    let mut missing = Vec::new();
+    loop {
+        match std::fs::canonicalize(at) {
+            Ok(root) => return Ok(missing.iter().rev().fold(root, |root, name| root.join(name))),
+            Err(error) if error.kind() == ErrorKind::NotFound && std::fs::symlink_metadata(at).is_err() => {
+                let (Some(parent), Some(std::path::Component::Normal(name))) = (at.parent(), at.components().next_back()) else {
+                    return Err(error);
+                };
+                missing.push(name);
+                at = if parent.as_os_str().is_empty() { std::path::Path::new(".") } else { parent };
+            }
+            Err(error) => return Err(error),
+        }
+    }
+}
+
 /// Run `f` with file access confined to `scope` on this thread (`None`: unconfined).
 pub fn scoped<T>(scope: Option<PathScope>, f: impl FnOnce() -> T) -> T {
     struct Restore(Option<PathScope>);
@@ -782,6 +859,14 @@ pub fn check(path: &str) -> Result<()> {
         return Ok(());
     }
     SCOPE.with(|s| s.borrow().as_ref().map_or(Ok(()), |scope| scope.check(path)))
+}
+
+/// Authorize a destination before creating its missing parents. This grants no additional roots.
+pub fn check_new(path: &str) -> Result<()> {
+    if cfg!(target_arch = "wasm32") {
+        return Ok(());
+    }
+    SCOPE.with(|s| s.borrow().as_ref().map_or(Ok(()), |scope| scope.check_new(path)))
 }
 
 /// A file's text, at most `max` bytes.
@@ -1116,6 +1201,43 @@ mod tests {
         assert!(PathScope::new([]).with_design(Some("/part.solidcraft")).design_roots().is_empty());
         assert!(PathScope::new([]).with_design(Some(&s(base.join("missing/p.solidcraft")))).design_roots().is_empty());
         let _ = std::fs::remove_dir_all(&base);
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn future_destinations_preserve_scope_and_do_not_create_directories() {
+        let root = super::temp_dir().join(format!("solidcraft-vfs-new-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(&root).unwrap();
+        let path = root.join("plugins/sample/data/value.json");
+        let scope = super::PathScope::new([root.clone()]);
+        assert!(scope.check(&path.to_string_lossy()).is_err(), "ordinary I/O still requires its parent");
+        assert!(scope.check_new(&path.to_string_lossy()).is_ok());
+        super::scoped(Some(scope.clone()), || {
+            assert!(super::check_new(&path.to_string_lossy()).is_ok());
+            assert!(super::check_new(&root.join("../outside/value.json").to_string_lossy()).is_err());
+        });
+        assert!(!root.join("plugins").exists());
+        let design = super::PathScope::default().with_design_folder(&root);
+        assert!(design.check_new(&path.to_string_lossy()).is_ok());
+        assert!(design.check_new(&root.join("plugins/sample/.private/value").to_string_lossy()).is_err());
+        assert!(scope.check_new(&root.join("missing/../../outside").to_string_lossy()).is_err());
+        assert!(super::PathScope::default().check_new(&path.to_string_lossy()).is_err());
+        #[cfg(windows)]
+        for alias in ["plugins/new/.. /.. /outside", "plugins/new/../outside.", "plugins/new/data "] {
+            assert!(scope.check_new(&root.join(alias).to_string_lossy()).is_err(), "{alias}");
+        }
+        #[cfg(unix)]
+        {
+            let outside = root.with_extension("outside");
+            std::fs::create_dir_all(&outside).unwrap();
+            std::os::unix::fs::symlink(&outside, root.join("escape")).unwrap();
+            std::os::unix::fs::symlink(root.join("absent"), root.join("dangling")).unwrap();
+            assert!(scope.check_new(&root.join("escape/new/file").to_string_lossy()).is_err());
+            assert!(scope.check_new(&root.join("dangling/new/file").to_string_lossy()).is_err());
+            std::fs::remove_dir_all(outside).unwrap();
+        }
+        std::fs::remove_dir_all(root).unwrap();
     }
 
     /// Folders an agent opened or saved a design in (#7181) count as the open design's folder

@@ -20,7 +20,7 @@
       }
     },
     "booleans": {
-      "cases": 131,
+      "cases": 137,
       "chain": {
         "1": 9,
         "10": 1,
@@ -41,11 +41,11 @@
         "7": 77,
         "76": 1,
         "8": 6,
-        "9": 3
+        "9": 9
       },
-      "expressible": 116,
+      "expressible": 122,
       "not_expressible": 12,
-      "operation_expressible": 119,
+      "operation_expressible": 125,
       "reasons": {
         "a final body built or changed by SolidCraft (its own geometry or a change to the kernel's record)": 10,
         "refused or failed in SolidCraft, not in a kernel operation": 2
@@ -104,18 +104,23 @@
       "ungraded": {}
     },
     "fillets": {
-      "cases": 283,
+      "cases": 320,
       "chain": {
-        "1": 11,
-        "13": 4,
+        "1": 15,
+        "13": 8,
+        "14": 1,
+        "17": 1,
         "2": 6,
-        "4": 243,
+        "21": 2,
+        "26": 3,
+        "4": 259,
+        "5": 6,
         "7": 2,
         "8": 1
       },
-      "expressible": 60,
+      "expressible": 97,
       "not_expressible": 16,
-      "operation_expressible": 267,
+      "operation_expressible": 304,
       "reasons": {
         "SolidCraft has no command for it yet": 2,
         "refused or failed in SolidCraft, not in a kernel operation": 14
@@ -134,18 +139,21 @@
       }
     },
     "frames": {
-      "cases": 6,
+      "cases": 7,
       "chain": {
         "1": 4,
+        "17": 1,
         "2": 1
       },
       "expressible": 5,
       "not_expressible": 1,
-      "operation_expressible": 5,
+      "operation_expressible": 6,
       "reasons": {
         "refused or failed in SolidCraft, not in a kernel operation": 1
       },
-      "ungraded": {}
+      "ungraded": {
+        "results": 1
+      }
     },
     "history": {
       "cases": 30,
@@ -398,18 +406,18 @@
       }
     },
     "shell": {
-      "cases": 39,
+      "cases": 42,
       "chain": {
         "11": 1,
-        "4": 30,
+        "4": 33,
         "5": 1,
         "7": 2,
         "8": 1,
         "9": 2
       },
-      "expressible": 35,
+      "expressible": 38,
       "not_expressible": 2,
-      "operation_expressible": 36,
+      "operation_expressible": 39,
       "reasons": {
         "a final body built or changed by SolidCraft (its own geometry or a change to the kernel's record)": 2
       },
@@ -510,7 +518,6 @@
       "ungraded": {}
     }
   },
-  "fixes": "fixes.json",
   "not_expressible": [
     {
       "case": "assemblies/cov-browser-reparent-placement-and-body-into-a-turned-part",

@@ -40,10 +40,12 @@
 //! - G1: the row `P_1 - P_0` through `S'(0) / c1`, where `S'(0)` is the surface's own derivative
 //!   across at each station with its part along the target's normal taken off: the boundary
 //!   leaves into the target's tangent plane, as close to how it left before as that allows;
-//! - G2: along the target's normal only, `P_2` moved by the interpolant of
-//!   `(k_T |S'|^2 - S'' . n) / c2` at the stations, `k_T` the target's normal curvature in the
-//!   direction `S'` (its second fundamental form over its first), so the surface's normal
-//!   curvature across the seam is the target's.
+//! - G2: `P_2` moved by the vector interpolant of `n (k_T |S'|^2 - S'' . n) / c2` at the
+//!   stations, `k_T` the target's normal curvature in the direction `S'` (its second fundamental
+//!   form over its first). At each station the displacement is along the target's normal and
+//!   makes the surface's normal curvature across the seam the target's. Interpolating the vector
+//!   keeps this constraint when the normal turns along the boundary (Salvi and Várady,
+//!   *Hierarchical Surface Fairing with Constraints*, §4.2, "Solution by Minimal Deviation").
 //!
 //! Each row the order does not fix, up to `rows`, moves by `blend` times the move of the row
 //! before it (the falloff that spreads the change into the surface); rows the order does not fix
@@ -215,7 +217,9 @@ pub fn match_boundary(
         spread(&mut new, &old, 1, how)?;
     }
 
-    // G2: the third row along the normal, for the target's normal curvature across
+    // G2: the third row's displacement is normal at each station. Interpolate beta_i * n_i:
+    // sum_j N_j(g_i) delta_j = beta_i * n_i. Multiplying scalar coefficients by n_j after
+    // interpolation would instead insert n_i . n_j into the curvature constraint.
     if k >= 2 {
         carry_into(&mut new, &old, 2)?;
         let trial = with_rows(&s, &new)?;
@@ -226,21 +230,11 @@ pub fn match_boundary(
                 let d = derivs(&trial, u_lo(&u)?, st.g, &v)?;
                 let (su, suu) = (at2(&d, 1, 0)?, at2(&d, 2, 0)?);
                 let want = st.normal_curvature(su)? * su.length_squared();
-                Ok(Vec3::new((want - suu.dot(st.normal)) / c2, 0.0, 0.0))
+                Ok(st.normal * ((want - suu.dot(st.normal)) / c2))
             })
             .collect::<Result<Vec<Vec3>>>()?;
         let lift = interp(&lift, &params, &v, q)?;
-        let behind = row_of(&new, 2)?.clone();
-        let row2 = behind
-            .iter()
-            .enumerate()
-            .map(|(j, b)| -> Result<Vec3> {
-                let (Some(st), Some(l)) = (stations.get(j), lift.get(j)) else {
-                    return Err(invalid("a column without a station"));
-                };
-                Ok(*b + st.normal * l.x)
-            })
-            .collect::<Result<Vec<Vec3>>>()?;
+        let row2 = zip_with(row_of(&new, 2)?, &lift, |p, d| p + d)?;
         set_moved(&mut new, &old, 2, row2)?;
     } else {
         spread(&mut new, &old, 2, how)?;

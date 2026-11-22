@@ -37,7 +37,7 @@
 //! | [`DatabaseWriter::write_characters`]  | `SmDatabaseIO::WriteCharacters`                  |
 //! | [`DatabaseWriter::write_type`]        | `SmDatabaseIO::WriteType`                        |
 //! | [`DatabaseWriter::out_str`] ... [`fixed16`] | `*GetOutStreamPtr() << value` (`fixed`, precision 16) |
-//! | [`DatabaseWriter::with_round_trip_doubles`], [`round_trip`] | (not upstream: WR-655's opt-in, doubles that read back unchanged) |
+//! | [`DatabaseWriter::with_round_trip_doubles`], [`round_trip`] | (not upstream: WR-655's fix, doubles that read back unchanged) |
 //! | [`is_big_endian`]                     | `SmDatabaseIO::IsBigEndian`                      |
 //! | [`byte_swap_f64`]                     | `ByteSwap64(double)`, `ByteSwap128(double)`      |
 //! | [`byte_swap_u64`]                     | `ByteSwap64(unsigned long)`, `ByteSwap64(unsigned long long)` |
@@ -86,12 +86,11 @@
 //!   write garbage on big-endian machines or with `SM_BYTESWAP`; the port swaps the
 //!   value. On the little-endian reference build with `SM_ASCII` or `SM_BINARY` no
 //!   swap happens and the output agrees.
-//! - **ASCII doubles (opt-in).** By default an ASCII double is written as upstream's
+//! - **ASCII doubles.** By default an ASCII double is written as upstream's
 //!   `fixed`, precision 16 stream writes it ([`fixed16`]), which does not read back
 //!   unchanged below 1 (WR-655). A writer made
 //!   [`DatabaseWriter::with_round_trip_doubles`] writes [`round_trip`] text instead;
-//!   the B-rep writers do so under
-//!   [`crate::kernel::UpstreamFixes::ascii_doubles_round_trip`].
+//!   the B-rep file writer `write_brep_to_file` always does.
 //! - **Nesting bound.** Upstream recurses through nested polymorphic reads (a curve
 //!   holding a curve holding ...) without limit. The port stops at
 //!   [`MAX_READ_NESTING`] = 32 levels ([`DatabaseReader::enter_nested`]); upstream
@@ -1132,11 +1131,10 @@ pub fn fixed16(x: f64) -> String {
     }
 }
 
-/// A double as the shortest text that reads back as the same double, in exponent
-/// notation (`3.0000000000000004e-1`, `1e0`, `-0e0`), with [`fixed16`]'s `inf`, `-inf`,
-/// `nan` and `-nan` (not upstream: WR-655's opt-in,
-/// [`crate::kernel::UpstreamFixes::ascii_doubles_round_trip`]). Every ASCII reader
-/// accepts it: `>>` reads the exponent.
+/// A finite double as the shortest text that reads back as the same double, in exponent
+/// notation (`3.0000000000000004e-1`, `1e0`, `-0e0`) (not upstream: WR-655's fix); every
+/// ASCII reader accepts it, as `>>` reads the exponent. A non-finite value is written as
+/// [`fixed16`] writes it, which does not read back.
 #[must_use]
 pub fn round_trip(x: f64) -> String {
     if x.is_finite() {
@@ -1171,9 +1169,8 @@ impl DatabaseWriter {
     }
 
     /// This writer, writing ASCII doubles with [`round_trip`] instead of [`fixed16`]
-    /// when `on` (not upstream: WR-655's opt-in,
-    /// [`crate::kernel::UpstreamFixes::ascii_doubles_round_trip`]). Binary doubles are
-    /// written as they are either way.
+    /// when `on` (not upstream: WR-655's fix). Binary doubles are written as they are
+    /// either way.
     #[must_use]
     pub fn with_round_trip_doubles(mut self, on: bool) -> Self {
         self.round_trip_doubles = on;

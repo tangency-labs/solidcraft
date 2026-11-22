@@ -2,7 +2,7 @@
 //! record): evaluation, derivatives, lengths, areas, containment, polylines and triangles.
 //! Sketches produce profiles; the kernel turns them into faces.
 
-use std::f64::consts::TAU;
+use std::f64::consts::{FRAC_PI_2, PI, TAU};
 
 use solidcore_record::{Loop2, MAX_BEZIER_CTRL, MAX_BEZIER_DEGREE, Region2, Seg2, Vec2};
 
@@ -12,6 +12,31 @@ use crate::{Aabb2, Ring};
 /// Highest derivative order [`Seg2Geom::derivatives`] hands out, and therefore the highest
 /// continuity order a blend curve can be built for (4 = G4).
 pub const MAX_DERIVATIVE_ORDER: usize = 4;
+
+/// How a map of the plane that keeps shapes moves an arc ([`Seg2::mapped`]): it turns it by `angle`
+/// after mirroring it across the x axis when `mirrored`, and scales its radius by `scale`.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct ArcMap {
+    pub angle: f64,
+    pub mirrored: bool,
+    pub scale: f64,
+}
+
+impl ArcMap {
+    /// A turn by `angle`, after a mirror when `mirrored`, that keeps lengths.
+    pub const fn turn(angle: f64, mirrored: bool) -> ArcMap {
+        ArcMap { angle, mirrored, scale: 1.0 }
+    }
+
+    /// The arc map of `f`, a map of points that keeps lengths (a turn, a mirror and a shift), as
+    /// its images of the origin and the unit axes give it: the x axis's angle, and whether the
+    /// axes come out reversed. Its scale is 1, never a measured length.
+    pub fn rigid(f: impl Fn(Vec2) -> Vec2) -> ArcMap {
+        let o = f(Vec2::ZERO);
+        let (ax, ay) = (f(Vec2::new(1.0, 0.0)) - o, f(Vec2::new(0.0, 1.0)) - o);
+        ArcMap::turn(ax.y.atan2(ax.x), ax.cross(ay) < 0.0)
+    }
+}
 
 /// A similarity of the plane: a point is scaled by `scale` (above 0) about the origin, turned
 /// `angle` radians counter-clockwise, then moved by `shift`. It keeps shapes and the direction
@@ -331,16 +356,32 @@ pub trait Seg2Geom {
     fn end_tangent(&self) -> Vec2;
     fn reversed(&self) -> Seg2;
     /// The segment with each control point mapped by `f`: exact for any affine map of lines,
-    /// Béziers and conics. An arc is returned as it is: only a similarity keeps it an arc
-    /// ([`Seg2Geom::similar`]), and callers that mirror one handle it themselves.
+    /// Béziers and conics. An arc is returned as it is, so callers go through [`Seg2Geom::mapped`];
+    /// only a segment that holds no arc, such as a glyph's outline, takes a map that doesn't keep
+    /// shapes.
     fn map_controls(&self, f: impl Fn(Vec2) -> Vec2) -> Seg2;
-    /// The segment moved by the similarity `m`, exactly: an arc's centre maps, its radius scales
-    /// and its start turns; every other kind maps its control points.
+    /// The segment moved by the similarity `m`, exactly ([`Seg2Geom::mapped`]).
     fn similar(&self, m: &Similarity2) -> Seg2;
+    /// The segment under a map of the plane that keeps shapes: `f` moves its points (an arc's centre
+    /// and every control point), and `arc` says how it turns an arc (start `angle - start` and the
+    /// sweep reversed when mirrored, `angle + start` otherwise; the radius scaled). Points go
+    /// through `f` itself, so a map exact on points stays exact.
+    fn mapped(&self, f: impl Fn(Vec2) -> Vec2, arc: ArcMap) -> Seg2;
+    /// The smallest box round the piece: exact for a line and an arc, and for a curve within a
+    /// thousandth of a unit, read off its polyline.
+    fn bounds(&self) -> Aabb2;
     fn length(&self) -> f64;
-    /// The segment split at parameter `t` in (0, 1) (same kind, exact; conic halves are
-    /// re-normalised so their end weights stay 1).
+    /// The nearest to either end, in parameter, that [`Seg2Geom::split_at`] splits a segment.
+    const MIN_SPLIT: f64;
+    /// The segment split at parameter `t` in (0, 1), at least [`Seg2Geom::MIN_SPLIT`] from either
+    /// end (same kind, exact; conic halves are re-normalised so their end weights stay 1).
     fn split_at(&self, t: f64) -> (Seg2, Seg2);
+    /// The part of the segment from parameter `t0` to `t1` (0 <= t0 < t1 <= 1), the same kind: it
+    /// starts at `point_at(t0)` and ends at `point_at(t1)`, exactly as [`Seg2Geom::split_at`] there
+    /// puts them. A conic's tail after the first split is re-normalised, which moves its parameter:
+    /// `t1` is carried into it (its end weights scaled to 1 by the factor `c`, a point at `u` of the
+    /// tail is at `u / (u + c (1 - u))`).
+    fn part(&self, t0: f64, t1: f64) -> Seg2;
     /// Parameter of the closest point: exact for lines and arcs. The remaining curves are sampled and
     /// refined from every dip in the sampled distance, since the lowest sample can sit on the wrong
     /// part of the curve; the ends count, so a closed segment is searched from both.
@@ -349,7 +390,12 @@ pub trait Seg2Geom {
     fn split_half(&self) -> (Seg2, Seg2);
     /// Contribution to the loop's signed area (shoelace integral ½∮(x dy − y dx)).
     fn area_term(&self) -> f64;
-    /// Polyline approximation (including both end points) with at most `tol` chord error.
+    /// How many equal steps of `t` keep every chord within `tol` (above 0) of the segment, unrounded
+    /// and with no floor or cap: an arc by its chord's bulge, the others by the largest second
+    /// difference of their controls (Wang's bound).
+    fn chords(&self, tol: f64) -> f64;
+    /// Polyline approximation (including both end points) with at most `tol` chord error
+    /// ([`Seg2Geom::chords`]) in 2 to 4096 pieces, an arc's tolerance at least a millionth of its radius.
     fn polyline(&self, tol: f64) -> Vec<Vec2>;
 }
 
@@ -557,11 +603,38 @@ impl Seg2Geom for Seg2 {
         }
     }
     fn similar(&self, m: &Similarity2) -> Seg2 {
+        self.mapped(|p| m.apply(p), ArcMap { angle: m.angle(), mirrored: false, scale: m.scale() })
+    }
+    fn mapped(&self, f: impl Fn(Vec2) -> Vec2, arc: ArcMap) -> Seg2 {
+        let ArcMap { angle, mirrored, scale } = arc;
         match *self {
             Seg2::Arc { center, radius, start, sweep } => {
-                Seg2::Arc { center: m.apply(center), radius: radius * m.scale(), start: start + m.angle(), sweep }
+                let (start, sweep) = if mirrored { (angle - start, -sweep) } else { (angle + start, sweep) };
+                Seg2::Arc { center: f(center), radius: radius * scale, start, sweep }
             }
-            _ => self.map_controls(|p| m.apply(p)),
+            _ => self.map_controls(f),
+        }
+    }
+    fn bounds(&self) -> Aabb2 {
+        match *self {
+            Seg2::Line { a, b } => [a, b].into_iter().collect(),
+            Seg2::Arc { center, radius, start, sweep } => {
+                let mut bounds: Aabb2 = [self.start(), self.end()].into_iter().collect();
+                let quarters = [
+                    (0.0, Vec2::new(1.0, 0.0)),
+                    (FRAC_PI_2, Vec2::new(0.0, 1.0)),
+                    (PI, Vec2::new(-1.0, 0.0)),
+                    (3.0 * FRAC_PI_2, Vec2::new(0.0, -1.0)),
+                ];
+                for (at, way) in quarters {
+                    let along = if sweep >= 0.0 { at - start } else { start - at };
+                    if along.rem_euclid(TAU) <= sweep.abs() {
+                        bounds.add(center + way * radius);
+                    }
+                }
+                bounds
+            }
+            _ => self.polyline(1e-3).into_iter().collect(),
         }
     }
     fn length(&self) -> f64 {
@@ -571,8 +644,9 @@ impl Seg2Geom for Seg2 {
             Seg2::Cubic { .. } | Seg2::Conic { .. } | Seg2::Bezier { .. } => integrate(self, |s, t| s.derivative(t).len()),
         }
     }
+    const MIN_SPLIT: f64 = 1e-9;
     fn split_at(&self, t: f64) -> (Seg2, Seg2) {
-        let t = t.clamp(1e-9, 1.0 - 1e-9);
+        let t = t.clamp(Self::MIN_SPLIT, 1.0 - Self::MIN_SPLIT);
         match *self {
             Seg2::Line { a, b } => {
                 let m = a.lerp(b, t);
@@ -608,6 +682,21 @@ impl Seg2Geom for Seg2 {
                 (mk(&l), mk(&r))
             }
         }
+    }
+    fn part(&self, t0: f64, t1: f64) -> Seg2 {
+        let tail = if t0 > 0.0 { self.split_at(t0).1 } else { *self };
+        if t1 >= 1.0 {
+            return tail;
+        }
+        let u = (t1 - t0) / (1.0 - t0);
+        let s = match *self {
+            Seg2::Conic { w, .. } if t0 > 0.0 => {
+                let c = ((1.0 - t0) * (1.0 - t0) + 2.0 * w * t0 * (1.0 - t0) + t0 * t0).sqrt();
+                u / (u + c * (1.0 - u))
+            }
+            _ => u,
+        };
+        tail.split_at(s).0
     }
     fn closest_param(&self, p: Vec2) -> f64 {
         let finite = |p: Vec2| p.x.is_finite() && p.y.is_finite();
@@ -689,34 +778,30 @@ impl Seg2Geom for Seg2 {
             Seg2::Cubic { .. } | Seg2::Conic { .. } | Seg2::Bezier { .. } => integrate(self, |s, t| 0.5 * s.point_at(t).cross(s.derivative(t))),
         }
     }
-    fn polyline(&self, tol: f64) -> Vec<Vec2> {
+    fn chords(&self, tol: f64) -> f64 {
+        // A chord over 1/k of t strays at most an eighth of the second derivative's bound over k².
+        let bound = |d2: f64| (d2 / (8.0 * tol)).sqrt();
         match *self {
-            Seg2::Line { a, b } => vec![a, b],
+            Seg2::Line { .. } => 1.0,
             Seg2::Arc { radius, sweep, .. } => {
-                let tol = tol.max(radius.abs() * 1e-6).max(1e-9);
-                let step = if tol < radius { 2.0 * (1.0 - tol / radius).clamp(-1.0, 1.0).acos() } else { TAU / 8.0 };
-                let n = ((sweep.abs() / step.max(1e-6)).ceil() as usize).clamp(2, 4096);
-                (0..=n).map(|i| self.point_at(i as f64 / n as f64)).collect()
+                sweep.abs() / if tol < radius { 2.0 * (1.0 - tol / radius).clamp(-1.0, 1.0).acos() } else { TAU / 8.0 }
             }
-            Seg2::Cubic { p0, p1, p2, p3 } => {
-                // Chord error of n pieces ≈ max second difference / (8 n²).
-                let bow = (p0 - p1 * 2.0 + p2).len().max((p1 - p2 * 2.0 + p3).len()) * 6.0;
-                let n = ((bow / (8.0 * tol.max(1e-9))).sqrt().ceil() as usize).clamp(2, 4096);
-                (0..=n).map(|i| self.point_at(i as f64 / n as f64)).collect()
-            }
-            Seg2::Conic { a, apex, b, w } => {
-                let bow = (a - apex * 2.0 + b).len() * 2.0 * w.max(1.0);
-                let n = ((bow / (8.0 * tol.max(1e-9))).sqrt().ceil() as usize).clamp(2, 4096);
-                (0..=n).map(|i| self.point_at(i as f64 / n as f64)).collect()
-            }
+            Seg2::Cubic { p0, p1, p2, p3 } => bound((p0 - p1 * 2.0 + p2).len().max((p1 - p2 * 2.0 + p3).len()) * 6.0),
+            Seg2::Conic { a, apex, b, w } => bound((a - apex * 2.0 + b).len() * 2.0 * w.max(1.0)),
             Seg2::Bezier { n, ref p } => {
                 // Second derivative ≤ n(n−1) × the largest second difference of the controls.
                 let c = bez(n, p);
-                let d2 = c.windows(3).map(|w| (w[0] - w[1] * 2.0 + w[2]).len()).fold(0.0, f64::max) * (n as f64) * (n as f64 - 1.0);
-                let k = ((d2 / (8.0 * tol.max(1e-9))).sqrt().ceil() as usize).clamp(2, 4096);
-                (0..=k).map(|i| self.point_at(i as f64 / k as f64)).collect()
+                bound(c.windows(3).map(|w| (w[0] - w[1] * 2.0 + w[2]).len()).fold(0.0, f64::max) * (n as f64) * (n as f64 - 1.0))
             }
         }
+    }
+    fn polyline(&self, tol: f64) -> Vec<Vec2> {
+        if let Seg2::Line { a, b } = *self {
+            return vec![a, b];
+        }
+        let tol = if let Seg2::Arc { radius, .. } = *self { tol.max(radius.abs() * 1e-6) } else { tol }.max(1e-9);
+        let n = (self.chords(tol).ceil() as usize).clamp(2, 4096);
+        (0..=n).map(|i| self.point_at(i as f64 / n as f64)).collect()
     }
 }
 
@@ -978,6 +1063,31 @@ mod tests {
     }
 
     /// #1602: the largest circle inside a region, which bounds how far a taper can go.
+    /// A line's box is its ends'; an arc's takes each quarter point it passes, whichever way it runs
+    /// and wherever its angles start; a curve's follows it, not its control points.
+    #[test]
+    fn a_pieces_bounds_are_the_box_round_it() {
+        let v = Vec2::new;
+        let boxed = |seg: Seg2| {
+            let b = seg.bounds();
+            [b.min.x, b.min.y, b.max.x, b.max.y]
+        };
+        let near = |got: [f64; 4], want: [f64; 4]| assert!(got.iter().zip(want).all(|(a, b)| (a - b).abs() < 1e-3), "{got:?} {want:?}");
+        let arc = |start: f64, sweep: f64| Seg2::Arc { center: v(10.0, 20.0), radius: 5.0, start, sweep };
+        near(boxed(Seg2::Line { a: v(3.0, 1.0), b: v(-1.0, 2.0) }), [-1.0, 1.0, 3.0, 2.0]);
+        near(boxed(arc(0.0, FRAC_PI_2)), [10.0, 20.0, 15.0, 25.0]);
+        near(boxed(arc(FRAC_PI_2, PI)), [5.0, 15.0, 10.0, 25.0]);
+        near(boxed(arc(0.0, -FRAC_PI_2)), [10.0, 15.0, 15.0, 20.0]);
+        near(boxed(arc(0.0, TAU)), [5.0, 15.0, 15.0, 25.0]);
+        near(boxed(arc(0.0, -TAU)), [5.0, 15.0, 15.0, 25.0]);
+        near(
+            boxed(arc(TAU + 0.1, 0.2)),
+            [10.0 + 5.0 * 0.3f64.cos(), 20.0 + 5.0 * 0.1f64.sin(), 10.0 + 5.0 * 0.1f64.cos(), 20.0 + 5.0 * 0.3f64.sin()],
+        );
+        near(boxed(arc(3.0, 1.0)), [5.0, 20.0 + 5.0 * 4.0f64.sin(), 10.0 + 5.0 * 4.0f64.cos(), 20.0 + 5.0 * 3.0f64.sin()]);
+        near(boxed(Seg2::Cubic { p0: v(0.0, 0.0), p1: v(0.0, 10.0), p2: v(10.0, 10.0), p3: v(10.0, 0.0) }), [0.0, 0.0, 10.0, 7.5]);
+    }
+
     #[test]
     fn inradius_of_rectangles_circles_and_rings() {
         let close = |a: f64, b: f64| (a - b).abs() < 1e-3 * b.max(1.0);

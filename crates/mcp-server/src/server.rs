@@ -37,7 +37,12 @@ pub trait Tools {
     fn instructions(&self) -> String;
     /// Every tool's definition ([`crate::tool`]), as `tools/list` serves it now.
     fn list(&mut self) -> Vec<Value>;
-    /// Run tool `name`. The server calls it right after the [`Tools::list`] its arguments were
+    /// The current definition of one tool, for checking a call's arguments. Override this when
+    /// listing unrelated tools would perform work that this call does not need.
+    fn definition(&mut self, name: &str) -> Option<Value> {
+        self.list().into_iter().find(|t| t["name"].as_str() == Some(name))
+    }
+    /// Run tool `name`. The server calls it right after the [`Tools::definition`] its arguments were
     /// checked against ([`crate::check_arguments`]), so it runs the tool as that listing defined
     /// it. Failures are tool results with `isError: true` ([`crate::text_result`]); it never
     /// panics on hostile arguments.
@@ -251,7 +256,8 @@ impl<T: Tools> Server<T> {
                     None | Some(Value::Null) => json!({}),
                     Some(a) => a.clone(),
                 };
-                check_arguments(&self.tools.list(), name, &args).map_err(|e| (INVALID_PARAMS, e))?;
+                let definition = self.tools.definition(name);
+                check_arguments(definition.as_slice(), name, &args).map_err(|e| (INVALID_PARAMS, e))?;
                 Ok(self.tools.call(name, &args))
             }
             "resources/list" => Ok(json!({"resources": self.tools.resources()})),

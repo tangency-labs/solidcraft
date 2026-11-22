@@ -104,12 +104,48 @@ fn check_case(dir: &str) -> Value {
         return json!({"case": name, "pass": false, "skipped": true, "error": "no expected.json yet", "got": got_json});
     };
     let only: Option<Vec<String>> = want["compare"].as_array().map(|a| a.iter().filter_map(|x| x.as_str().map(str::to_string)).collect());
+    let mut c = Checks { list: Vec::new(), pass: true };
+    compare_totals(&mut c, &got, &want);
+    let stl = format!("{dir}/reference.stl");
+    if std::path::Path::new(&stl).is_file() && only.as_ref().is_none_or(|o| o.iter().any(|x| x == "surface")) {
+        let tol = want["tolerance"]["surface_mm"].as_f64().unwrap_or(0.05);
+        reference_checks(&s, &stl, tol, &mut c);
+    }
+    // Our STEP export of the rebuilt part: well formed, and read back with no warnings and the
+    // same volume.
+    let (ok, note) = step_export_check(&s, got.volume);
+    c.push("step_export", json!(note), json!("valid, re-imports cleanly"), ok);
+    // Parameter sweeps (issue #25): change dimensions, rebuild, compare at the same values.
+    // Only a genuinely absent file means no sweeps; a sweep.json that cannot be read or parsed,
+    // or whose root is not an array, is a failed check.
+    let sweep_path = format!("{dir}/sweep.json");
+    if std::path::Path::new(&sweep_path).is_file() {
+        match read_json(&sweep_path) {
+            Err(e) => c.push("sweep.json", json!(e), json!("an array of sweep entries"), false),
+            Ok(sweeps) if !sweeps.is_array() => c.push("sweep.json", json!("not an array"), json!("an array of sweep entries"), false),
+            Ok(sweeps) => {
+                for entry in sweeps.as_array().unwrap_or(&Vec::new()) {
+                    sweep_check(&recipe, entry, &mut c);
+                }
+            }
+        }
+    }
+    let mut out = json!({"case": name, "pass": c.pass, "source": want["source"], "checks": c.list, "got": got_json});
+    if let Some(n) = want["note"].as_str() {
+        out["note"] = json!(n);
+    }
+    out
+}
+
+/// Compare the measured totals with an expected.json-style object (the base case or one sweep
+/// entry). Only checks keys the object names, restricted by its optional `compare` list.
+fn compare_totals(c: &mut Checks, got: &Got, want: &Value) {
+    let only: Option<Vec<String>> = want["compare"].as_array().map(|a| a.iter().filter_map(|x| x.as_str().map(str::to_string)).collect());
     let wanted = |k: &str| want.get(k).is_some_and(|v| !v.is_null()) && only.as_ref().is_none_or(|o| o.iter().any(|x| x == k));
     let rel = want["tolerance"]["rel"].as_f64().unwrap_or(REL_TOL);
     let diag = |b: ([f64; 3], [f64; 3])| ((b.1[0] - b.0[0]).powi(2) + (b.1[1] - b.0[1]).powi(2) + (b.1[2] - b.0[2]).powi(2)).sqrt();
     let want_bbox = v3(&want["bbox"]["min"]).zip(v3(&want["bbox"]["max"]));
     let abs = want["tolerance"]["abs_mm"].as_f64().unwrap_or_else(|| ABS_FRAC * want_bbox.map(diag).unwrap_or_else(|| diag(got.bbox)).max(1.0));
-    let mut c = Checks { list: Vec::new(), pass: true };
     if wanted("body_count") {
         let ok = want["body_count"].as_u64() == Some(got.body_count as u64);
         c.push("body_count", json!(got.body_count), want["body_count"].clone(), ok);
@@ -131,20 +167,56 @@ fn check_case(dir: &str) -> Value {
         let ok = want["faces"].as_u64() == Some(got.faces);
         c.push("faces", json!(got.faces), want["faces"].clone(), ok);
     }
-    let stl = format!("{dir}/reference.stl");
-    if std::path::Path::new(&stl).is_file() && only.as_ref().is_none_or(|o| o.iter().any(|x| x == "surface")) {
-        let tol = want["tolerance"]["surface_mm"].as_f64().unwrap_or(0.05);
-        reference_checks(&s, &stl, tol, &mut c);
+}
+
+/// One entry of `sweep.json`: set parameters on a freshly rebuilt part and compare the result
+/// with the analytic reference at those same values (issue #25: a parameter sweep). Each entry
+/// rebuilds from the recipe, so one entry's parameter changes cannot leak into the next. Entries
+/// use the same schema as `expected.json`, plus `parameters` (name to a number in mm or an
+/// expression string).
+fn sweep_check(recipe: &Value, entry: &Value, c: &mut Checks) {
+    let label = entry["name"].as_str().unwrap_or("sweep").to_string();
+    let fail = |c: &mut Checks, what: String| c.push(&format!("sweep {label}"), json!(what), json!("rebuild"), false);
+    let Some(expected) = entry.get("expected").filter(|e| e.is_object()) else {
+        return fail(c, "no expected object".into());
+    };
+    let Some(params) = entry["parameters"].as_object() else {
+        return fail(c, "no parameters object".into());
+    };
+    let mut s = solidcraft_engine::Session::default();
+    let script = match recipe::to_script(recipe) {
+        Ok(s) => s,
+        Err(e) => return fail(c, format!("recipe: {e}")),
+    };
+    if let Err(e) = s.run_script(&script) {
+        return fail(c, format!("rebuild: {e}"));
     }
-    // Our STEP export of the rebuilt part: well formed, and read back with no warnings and the
-    // same volume.
-    let (ok, note) = step_export_check(&s, got.volume);
-    c.push("step_export", json!(note), json!("valid, re-imports cleanly"), ok);
-    let mut out = json!({"case": name, "pass": c.pass, "source": want["source"], "checks": c.list, "got": got_json});
-    if let Some(n) = want["note"].as_str() {
-        out["note"] = json!(n);
+    for (name, value) in params {
+        let expression = match value {
+            Value::String(e) => e.clone(),
+            v => format!("{v} mm"),
+        };
+        if let Err(e) = s.execute("parameters.change", &json!({"name": name, "expression": expression, "unit": "mm"})) {
+            return fail(c, format!("{name}: {e}"));
+        }
     }
-    out
+    let Ok(m) = s.execute("inspect.measure", &json!({})) else {
+        return fail(c, "measure after rebuild failed".into());
+    };
+    let got = totals(&m);
+    let mut sc = Checks { list: Vec::new(), pass: true };
+    compare_totals(&mut sc, &got, expected);
+    if sc.list.is_empty() {
+        return fail(c, "expected names no comparable measurement".into());
+    }
+    for mut chk in sc.list {
+        if let Some(o) = chk.as_object_mut() {
+            let k = o["check"].as_str().unwrap_or("").to_string();
+            o.insert("check".into(), json!(format!("sweep {label}: {k}")));
+        }
+        c.list.push(chk);
+    }
+    c.pass &= sc.pass;
 }
 
 /// Export the session's bodies as STEP, validate the file and import it again.

@@ -57,6 +57,12 @@
   {
    "command": "sheet.flat_pattern",
    "params": {}
+  },
+  {
+   "command": "sheet.export_dxf",
+   "params": {
+    "path": "$OUT/flat.dxf"
+   }
   }
  ]
 }

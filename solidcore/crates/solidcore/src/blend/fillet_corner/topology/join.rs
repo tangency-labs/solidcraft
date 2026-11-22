@@ -27,7 +27,7 @@
 use super::{find_side_edgeuse, need, new_corner_vertex, radial};
 use crate::blend::fillet_corner::p1::face_by_two_edgeuses;
 use crate::blend::fillet_corner::p3::FilletCorner;
-use crate::blend::fillet_executive::session::SolverObject;
+use crate::blend::fillet_executive::{p3::FitKind, session::SolverObject};
 use crate::blend::fillet_geom::p1::{
     CornerLookup, FilletBrep, FilletCornerId, FilletEdgeType, FilletSolverId, FilletVertexType,
 };
@@ -54,6 +54,16 @@ pub const JOIN_ACROSS_EDGES: &str =
 /// The comment of [`JoinTopology::RefusedUnequalOffsets`] (not the fork's, #2905).
 pub const JOIN_UNEQUAL_OFFSETS: &str =
     "Fillet Error: blends continuing each other at a smooth vertex have different offsets, so no section ends both: give them one offset";
+
+/// The comment of the refusal [`FilletCorner::join_rail_misses_side_edge`] names (not the
+/// fork's, #17224).
+pub const JOIN_RAIL_MISSES_SIDE_EDGE: &str =
+    "Fillet Error: blends continuing each other across a smooth edge between their faces meet only where their contact lines cross that edge, and at this size they never reach it";
+
+/// The golden-section steps of [`largest_ball_on_side_edge`]: 0.618^80 is about 2e-17 of
+/// the side edge's parameter range, below a double's resolution of it, so a further step
+/// moves nothing.
+const GOLDEN_STEPS: usize = 80;
 
 /// Actual objects `SmBlendCorner::MakeJoinTopology` uses.
 #[derive(Debug)]
@@ -89,10 +99,12 @@ pub enum JoinTopology {
     /// caller notes `SM_FILERR_NO_ROOM` at the vertex
     /// ([`JOIN_UNEQUAL_OFFSETS`]) and the fit `builds` on blend `blend`'s edge.
     RefusedUnequalOffsets {
-        /// The blend with the larger offset, 0 or 1 in the corner's order.
+        /// The blend with the larger offset or chord, 0 or 1 in the corner's order.
         blend: usize,
-        /// The other blend's offset there, which `blend` builds at.
+        /// The other blend's offset or chord length.
         builds: f64,
+        /// Whether the fit sizes a radius or a chord.
+        kind: FitKind,
     },
 }
 
@@ -106,47 +118,190 @@ fn live(solvers: &[Option<SolverObject>], id: Option<FilletSolverId>) -> Result<
         .ok_or_else(|| invalid("corner solver is not live"))
 }
 
+/// The four edge uses at an isolated tangent contact of a concave chamfer and a
+/// sharp rim. The strips share their supports through the contact, but the
+/// material beyond the rim is absent. Preserve that rim for the crease trim.
+pub(crate) fn tangent_cliff_join(
+    k: &Kernel,
+    target: &mut Brep,
+    vertex: crate::topology::VertexId,
+    selected: &[EdgeuseId],
+    ring: &[EdgeuseId],
+    angle_tol_deg: f64,
+) -> Result<Option<crate::blend::blend_corner::BlendCornerEvent>> {
+    use crate::blend::fillet_corner::p1::test_g1_continuity;
+    use crate::blend::fillet_solver::p5::{edge_bounds_material, is_concave_edge};
+    use crate::surface::surface::SurfaceKind;
+    use crate::topology::edge;
+
+    // The corner stores one outgoing use per distinct edge. A closed spine
+    // supplies both end tangents and may have its surface seam at the contact.
+    let (first, second, closed) = match selected {
+        [first, second] if ring.len() == 4 => (first, second, false),
+        [edge] if (3..=4).contains(&ring.len()) => (edge, edge, true),
+        _ => return Ok(None),
+    };
+    let (Some(a), Some(b)) = (eu1::edge(target, *first)?, eu1::edge(target, *second)?) else {
+        return Ok(None);
+    };
+    if (closed && !edge::is_closed(target, a)?)
+        || (!closed && a == b)
+        || !edge_bounds_material(target, a)?
+        || !is_concave_edge(k, target, a)?
+        || (!closed && (!edge_bounds_material(target, b)? || !is_concave_edge(k, target, b)?))
+        || !test_g1_continuity(k, target, Some(vertex), Some(a), Some(b), angle_tol_deg)?.0
+    {
+        return Ok(None);
+    }
+    if closed {
+        let supports = faces_of(target, *first)?;
+        for &eu in ring {
+            let adjacent = faces_of(target, eu)?;
+            if !adjacent
+                .iter()
+                .flatten()
+                .any(|face| supports.contains(&Some(*face)))
+            {
+                return Ok(None);
+            }
+        }
+    }
+    let (sides, between) = join_sides(target, selected, ring)?;
+    let same_support = |others: &[EdgeuseId], faces: [Option<FaceId>; 2]| -> Result<bool> {
+        let [Some(f0), Some(f1)] = faces else {
+            return Ok(false);
+        };
+        if f0 != f1 {
+            return Ok(false);
+        }
+        match others {
+            [] => Ok(true),
+            [seam] if closed => Ok(faces_of(target, *seam)? == [Some(f0); 2]),
+            _ => Ok(false),
+        }
+    };
+    let (rim_uses, rim_support) = match &between {
+        [before, after] if before.len() == 2 && same_support(after, sides[1])? => {
+            (before, &sides[0])
+        }
+        [before, after] if after.len() == 2 && same_support(before, sides[0])? => {
+            (after, &sides[1])
+        }
+        _ => return Ok(None),
+    };
+    let [left, right] = rim_uses.as_slice() else {
+        return Ok(None);
+    };
+    let (Some(left), Some(right)) = (eu1::edge(target, *left)?, eu1::edge(target, *right)?) else {
+        return Ok(None);
+    };
+    if left == right
+        || is_concave_edge(k, target, left)?
+        || is_concave_edge(k, target, right)?
+        || !test_g1_continuity(
+            k,
+            target,
+            Some(vertex),
+            Some(left),
+            Some(right),
+            angle_tol_deg,
+        )?
+        .0
+        || !test_g1_continuity(k, target, Some(vertex), Some(a), Some(left), angle_tol_deg)?.0
+    {
+        return Ok(None);
+    }
+    let [Some(f0), Some(f1)] = *rim_support else {
+        return Ok(None);
+    };
+    let plane_normal = |f| -> Result<Option<crate::math::Vec3>> {
+        Ok(
+            match crate::topology::face::p2::surface(target, f)?
+                .map(crate::surface::surface::Surface::kind)
+            {
+                Some(SurfaceKind::Plane(p)) => Some(p.evaluate_normal().unitize()?),
+                _ => None,
+            },
+        )
+    };
+    let (Some(n0), Some(n1)) = (plane_normal(f0)?, plane_normal(f1)?) else {
+        return Ok(None);
+    };
+    // Both planes pass through this topological vertex. Equal normals prove
+    // that the second support continues the first, including split faces.
+    if n0.cross(n1).length() > crate::math::EFF_ZERO {
+        return Ok(None);
+    }
+    let left_faces = edge::faces(target, left, None)?;
+    let right_faces = edge::faces(target, right, None)?;
+    let mut common = left_faces
+        .into_iter()
+        .filter(|f| *f != f0 && *f != f1 && right_faces.contains(f));
+    let Some(cliff) = common.next() else {
+        return Ok(None);
+    };
+    let Some(n_cliff) = plane_normal(cliff)? else {
+        return Ok(None);
+    };
+    if common.next().is_some() || n0.cross(n_cliff).length() <= crate::math::EFF_ZERO {
+        return Ok(None);
+    }
+    Ok(Some(
+        crate::blend::blend_corner::BlendCornerEvent::CliffJoin {
+            rim: [left, right],
+            cliff,
+        },
+    ))
+}
+
 /// Whether two blends at a Join are constant and differ: for each of the two faces of side
 /// `faces` first, its offset, and where the blends' offsets on a side differ by more than a
 /// loop's gap closes ([`LOOP_GAP_ZONES`] of the body's tolerance), the blend with the larger
-/// and the other's offset. Each blend's rails are on its own offsets, which
+/// and the other's offset. At a cliff join, constant-distance blends compare their chord
+/// lengths by the same rule. Each blend's rails are on its own offsets, which
 /// `SM_FE_CROSS_SECTION` cannot end both of. `None` for anything else: other solvers (a
-/// law's rails are the law's to meet), without `fixes.fillet_round_as_definition` (a blend
-/// not by its definition bends its rails to the section), or one closed blend.
+/// law's rails are the law's to meet), or one closed blend.
 fn unequal_blends(
-    k: &Kernel,
     target: &Brep,
     solvers: &[Option<SolverObject>],
     ids: &[Option<FilletSolverId>],
     faces: [Option<FaceId>; 2],
-) -> Result<Option<(usize, f64)>> {
-    if !k.fixes.fillet_round_as_definition {
-        return Ok(None);
-    }
-    let mut offsets = Vec::new();
-    for (&id, face) in ids.iter().zip(faces) {
-        let object = id
-            .and_then(|id| solvers.get(id.0 as usize))
-            .and_then(Option::as_ref);
-        let Some(SolverObject::ConstantRadius(object)) = object else {
-            return Ok(None);
-        };
-        let solver = &object.solver;
-        let rail = solver.find_index_of_rail_on_face(target, face)?;
-        let offset = |r: usize| -> Result<f64> {
-            let slot = solver.surface(r)?;
-            let slot = slot.ok_or_else(|| SolidError::blend_missing(OP, "the solver's surface"))?;
-            Ok(slot.surface.surface.offset_distance().abs())
-        };
-        offsets.push([offset(rail)?, offset(1 - rail.min(1))?]);
-    }
-    let [a, b] = offsets.as_slice() else {
+    cliff_join: bool,
+) -> Result<Option<(usize, f64, FitKind)>> {
+    let [Some(first), Some(second)] = ids else {
         return Ok(None);
     };
+    let object = |id: FilletSolverId| solvers.get(id.0 as usize).and_then(Option::as_ref);
+    let (first, second, kind) = match (object(*first), object(*second)) {
+        (Some(SolverObject::ConstantRadius(a)), Some(SolverObject::ConstantRadius(b))) => {
+            let offsets = |solver: &FilletSolver, face| -> Result<[f64; 2]> {
+                let rail = solver.find_index_of_rail_on_face(target, face)?;
+                let offset = |index| {
+                    solver
+                        .surface(index)?
+                        .map(|slot| slot.surface.surface.offset_distance().abs())
+                        .ok_or_else(|| SolidError::blend_missing(OP, "the solver's surface"))
+                };
+                Ok([offset(rail)?, offset(1 - rail.min(1))?])
+            };
+            let [first_face, second_face] = faces;
+            (
+                offsets(&a.solver, first_face)?,
+                offsets(&b.solver, second_face)?,
+                FitKind::Radius,
+            )
+        }
+        (Some(SolverObject::ConstantDistance(a)), Some(SolverObject::ConstantDistance(b)))
+            if cliff_join =>
+        {
+            ([a.distance(); 2], [b.distance(); 2], FitKind::Chord)
+        }
+        _ => return Ok(None),
+    };
     let gap = LOOP_GAP_ZONES * target.tolerance();
-    for (&x, &y) in a.iter().zip(b) {
+    for (x, y) in first.into_iter().zip(second) {
         if (x - y).abs() > gap {
-            return Ok(Some(if x > y { (0, y) } else { (1, x) }));
+            return Ok(Some(if x > y { (0, y, kind) } else { (1, x, kind) }));
         }
     }
     Ok(None)
@@ -352,6 +507,116 @@ fn rolled_sides(
     Ok(out)
 }
 
+/// Not the fork's (#17224): where the Join's section ends on a side edge `side_eu`
+/// (`SM_FV_RAIL_X_EDGEUSE`), whether the constant round `fs` has a ball of its radius
+/// touching its face F there (F the round's face the side edge bounds, G `other_face` its
+/// other face). The round's contact line on F crosses the side edge exactly where the ball
+/// touching F at the edge's point and touching G (`ball_touching_with`, its radius rho) is
+/// the round's own; where rho stays below the round's radius along the whole side edge the
+/// contact line never reaches it. `None` where some point of the side edge has rho at the
+/// round's radius (or the point is not on G's side of F, so no smaller ball touches it),
+/// else `Some(rho_max)`, the largest radius whose contact line reaches the edge.
+///
+/// rho is 0 at the corner's vertex (on both faces) and is maximized along the side edge by
+/// golden section over its parameter range ([`GOLDEN_STEPS`]); a point where the ball of the
+/// round's radius already reaches G answers at once, as the rounds that cross their side edge
+/// do at their first step. The search assumes one peak of rho along the edge, which nothing
+/// derives, so it never decides whether a round builds: it is asked only after the section's
+/// end on the side edge was looked for and not found ([`FilletCorner::join_rail_misses_side_edge`]),
+/// and then only names why and the size that fits. A side edge without its curve is `None`:
+/// nothing judged, the failure stands.
+///
+/// # Errors
+/// Those of `ball_touching_with`.
+fn largest_ball_on_side_edge(
+    k: &Kernel,
+    target: &Brep,
+    fs: &FilletSolver,
+    side_eu: EdgeuseId,
+    other_face: FaceId,
+) -> Result<Option<f64>> {
+    let Some(e) = eu1::edge(target, side_eu)? else {
+        return Ok(None);
+    };
+    let Some(curve) = crate::topology::edge::evaluation_curve(target, e)? else {
+        return Ok(None);
+    };
+    let ivl = crate::topology::edge::interval(target, e)?;
+    // rho at t, or None where the round's own ball touches F there
+    let rho = |t: f64| -> Result<Option<f64>> {
+        let p = curve.evaluate_point(k, t)?;
+        let (on_g, within, rho) = crate::blend::blend_corner::end::ball_touching_with(
+            k, target, fs, side_eu, other_face, p, None,
+        )?;
+        Ok(if on_g {
+            Some(0.0)
+        } else if within {
+            Some(rho)
+        } else {
+            None
+        })
+    };
+    let golden = 0.5 * (f64::sqrt(5.0) - 1.0);
+    let (mut a, mut b) = (ivl.min(), ivl.max());
+    let mut x1 = b - golden * (b - a);
+    let mut x2 = a + golden * (b - a);
+    let (Some(mut f1), Some(mut f2)) = (rho(x1)?, rho(x2)?) else {
+        return Ok(None);
+    };
+    for _ in 0..GOLDEN_STEPS {
+        if f1 > f2 {
+            b = x2;
+            x2 = x1;
+            f2 = f1;
+            x1 = b - golden * (b - a);
+            let Some(f) = rho(x1)? else {
+                return Ok(None);
+            };
+            f1 = f;
+        } else {
+            a = x1;
+            x1 = x2;
+            f1 = f2;
+            x2 = a + golden * (b - a);
+            let Some(f) = rho(x2)? else {
+                return Ok(None);
+            };
+            f2 = f;
+        }
+    }
+    Ok(Some(f1.max(f2)))
+}
+
+/// Not the fork's (#17224): the end of the edge of `eu` other than `vertex` where it lies on
+/// the face `face` (a vertex of one of that face's edges), else `None`.
+///
+/// # Errors
+/// Those of the topology queries.
+fn far_end_on_face(
+    target: &Brep,
+    eu: EdgeuseId,
+    vertex: Option<crate::topology::VertexId>,
+    face: FaceId,
+) -> Result<Option<crate::topology::VertexId>> {
+    let Some(e) = eu1::edge(target, eu)? else {
+        return Ok(None);
+    };
+    let Some(far) = crate::topology::edge::other_vertex(target, e, vertex)? else {
+        return Ok(None);
+    };
+    if Some(far) == vertex {
+        return Ok(None);
+    }
+    for g in crate::topology::face::p4::edges(target, face, None, false, None)? {
+        if crate::topology::edge::start_vertex(target, g)? == Some(far)
+            || crate::topology::edge::end_vertex(target, g)? == Some(far)
+        {
+            return Ok(Some(far));
+        }
+    }
+    Ok(None)
+}
+
 impl FilletCorner {
     /// `SmBlendCorner::MakeJoinTopology`: the blends end on one shared section, one
     /// `SM_FE_CROSS_SECTION` corner edge with the first blend on its primary edge use and
@@ -396,10 +661,19 @@ impl FilletCorner {
         }
         let (side, mut between) = join_sides(target, &solver_eus, &all_eus)?;
         let rolled = rolled_sides(target, solvers, &solver_eu_solvers, &side, &mut between)?;
+        let cliff_join = self
+            .blend
+            .is_some_and(crate::blend::blend_corner::BlendCorner::is_cliff_join);
         // the section's ends: on a side with an edge between the blends (where they change
         // face, or cross a face's seam) where the rails cross it, else (the first side)
         // through the vertex
-        if between.iter().any(|b| b.len() > 1) {
+        if cliff_join {
+            // The two rim segments meet here; neither bounds the shared section
+            // on the continued support. The face beyond trims the sheet later.
+            for edges in &mut between {
+                edges.clear();
+            }
+        } else if between.iter().any(|edges| edges.len() > 1) {
             return Ok(JoinTopology::RefusedAcrossEdges);
         }
         let on_edge = [between[0].len() == 1, between[1].len() == 1];
@@ -415,12 +689,15 @@ impl FilletCorner {
             fs.push(solver);
         }
         let first_side = side.get(first).copied().unwrap_or_default();
-        if let Some((blend, builds)) =
-            unequal_blends(k, target, solvers, &solver_eu_solvers, first_side)?
+        if let Some((blend, builds, kind)) =
+            unequal_blends(target, solvers, &solver_eu_solvers, first_side, cliff_join)?
         {
-            return Ok(JoinTopology::RefusedUnequalOffsets { blend, builds });
+            return Ok(JoinTopology::RefusedUnequalOffsets {
+                blend,
+                builds,
+                kind,
+            });
         }
-
         // the section's ends
         let mut ends = [None, None];
         for (ee, &s) in [first, other].iter().enumerate() {
@@ -551,5 +828,124 @@ impl FilletCorner {
         self.blending = true;
         self.g1_case = true;
         Ok(JoinTopology::Built)
+    }
+
+    /// Not the fork's (#17224): why this Join's section was not built where its end lies on
+    /// a side edge (`SM_FV_RAIL_X_EDGEUSE`), asked only after its vertex geometry failed. A
+    /// side whose one edge between the blends runs from the corner's vertex to a vertex of
+    /// the blends' other face, where the first blend is a constant round: the ball touching
+    /// that edge shrinks to nothing at both its ends (on both faces), and past them the
+    /// edge's line leaves its face across the other face, so the round's contact line
+    /// crosses the edge between its ends or nowhere. Where the largest ball touching the edge
+    /// (`largest_ball_on_side_edge`) is smaller than the round, the contact line never
+    /// reaches it: `Some` of that radius, the smaller where both sides are judged (the size
+    /// both build at). An edge running on to another face (a rim's seam down a wall) is not
+    /// judged: its contact line may cross the edge's line past its far end
+    /// (`calc_rail_int_edgeuse`'s run-on), as a rim round past its wall does; nor one split
+    /// at its far end only by a seam, which the rail's search continues across
+    /// (`side_edgeuse_across_seam_vertex`). `None` where nothing is judged or no side refuses:
+    /// the failure stands as it is.
+    ///
+    /// Since it is asked only on the failure path, a Join that builds is never refused by it.
+    ///
+    /// # Errors
+    /// Those of the topology queries and of `largest_ball_on_side_edge`.
+    pub fn join_rail_misses_side_edge(
+        &self,
+        k: &Kernel,
+        target: &mut Brep,
+        solvers: &[Option<SolverObject>],
+        solver_eu_solvers: &[Option<FilletSolverId>],
+    ) -> Result<Option<f64>> {
+        let (Some(solver_eus), Some(all_eus)) =
+            (self.solver_eus.as_deref(), self.all_eus.as_deref())
+        else {
+            return Ok(None);
+        };
+        let (2, Some(&Some(id)), Some(&eu1_)) = (
+            solver_eus.len(),
+            solver_eu_solvers.first(),
+            solver_eus.first(),
+        ) else {
+            return Ok(None);
+        };
+        let Some(SolverObject::ConstantRadius(object)) =
+            solvers.get(id.0 as usize).and_then(Option::as_ref)
+        else {
+            return Ok(None);
+        };
+        let (side, mut between) = join_sides(target, solver_eus, all_eus)?;
+        rolled_sides(target, solvers, solver_eu_solvers, &side, &mut between)?;
+        if between.iter().any(|b| b.len() > 1) {
+            return Ok(None);
+        }
+        let mut fit: Option<f64> = None;
+        for s in 0..2 {
+            let Some(&[only]) = between.get(s).map(Vec::as_slice) else {
+                continue;
+            };
+            let Some(other_face) = side.get(1 - s).and_then(|f| f.first()).copied().flatten()
+            else {
+                continue;
+            };
+            let Some(far) = far_end_on_face(target, only, self.vertex, other_face)? else {
+                continue;
+            };
+            let Some(side_eu) = find_side_edgeuse(target, eu1_, only)? else {
+                continue;
+            };
+            if crate::blend::blend_corner::end::side_edgeuse_across_seam_vertex(
+                k,
+                target,
+                side_eu,
+                far,
+                crate::math::rad_to_deg(self.tangency_tol_radians),
+            )?
+            .is_some()
+            {
+                continue;
+            }
+            if let Some(builds) =
+                largest_ball_on_side_edge(k, target, &object.solver, side_eu, other_face)?
+            {
+                fit = Some(fit.map_or(builds, |f| f.min(builds)));
+            }
+        }
+        Ok(fit)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::blend::fillet_standard_solver::p1::ConstantDistanceFs;
+
+    #[test]
+    fn cliff_join_requires_equal_chord_lengths() -> Result<()> {
+        let target = Brep::default();
+        let ids = [Some(FilletSolverId(0)), Some(FilletSolverId(1))];
+        let chord = |distance| {
+            Some(SolverObject::ConstantDistance(Box::new(
+                ConstantDistanceFs {
+                    solver: FilletSolver::new(1e-7, 1e-6, 1e-6),
+                    distance,
+                },
+            )))
+        };
+        let equal = [chord(1.0), chord(1.0)];
+        assert_eq!(
+            unequal_blends(&target, &equal, &ids, [None; 2], true)?,
+            None
+        );
+        let unequal = [chord(1.0), chord(2.0)];
+        assert_eq!(
+            unequal_blends(&target, &unequal, &ids, [None; 2], true)?,
+            Some((1, 1.0, FitKind::Chord))
+        );
+        assert_eq!(
+            unequal_blends(&target, &unequal, &ids, [None; 2], false)?,
+            None
+        );
+        Ok(())
     }
 }
