@@ -2458,21 +2458,43 @@ pub fn is_loop_uv_gap_within_tolerance(
             Err(_) => return Ok(false),
         }
     } else {
-        let patch = match bss.copy_sub_patch(&gap) {
-            Ok(p) => p,
-            Err(e) if e.is_unported_or_cancelled() => return Err(e),
-            Err(_) => return Ok(false),
+        // A gap one rounding error away from an isoline can be narrower than a
+        // representable knot span. Extract a containing strip in that direction.
+        // Only the hull and coverage tests below can certify the gap.
+        let strip = |lo: f64, hi: f64, a: f64, z: f64| {
+            let pad = f64::EPSILON.sqrt() * (z - a);
+            if hi - lo < pad {
+                ((lo - pad).max(a), (hi + pad).min(z))
+            } else {
+                (lo, hi)
+            }
         };
-
-        // CopySubPatch can snap to knots. A shrunken domain cannot certify this gap.
-        let pd = patch.natural_uv_domain();
-        if pd.min().x > gap.min().x
-            || pd.min().y > gap.min().y
-            || pd.max().x < gap.max().x
-            || pd.max().y < gap.max().y
-        {
-            return Ok(false);
-        }
+        let (u0, u1) = strip(gap.min().x, gap.max().x, nat.min().x, nat.max().x);
+        let (v0, v1) = strip(gap.min().y, gap.max().y, nat.min().y, nat.max().y);
+        let enclosing = Extent2d::from_bounds(u0, v0, u1, v1);
+        // Try the original rectangle first. Extraction may snap its limits to
+        // knots; the extracted patch must still contain the full original gap.
+        let extract = |domain: &Extent2d| -> Result<Option<BSplineSurface>> {
+            let patch = match bss.copy_sub_patch(domain) {
+                Ok(patch) => patch,
+                Err(e) if e.is_unported_or_cancelled() => return Err(e),
+                Err(_) => return Ok(None),
+            };
+            let pd = patch.natural_uv_domain();
+            let covers = pd.min().x <= gap.min().x
+                && pd.min().y <= gap.min().y
+                && pd.max().x >= gap.max().x
+                && pd.max().y >= gap.max().y;
+            Ok(covers.then_some(patch))
+        };
+        let patch = match extract(&gap)? {
+            Some(patch) => patch,
+            None if enclosing != gap => match extract(&enclosing)? {
+                Some(patch) => patch,
+                None => return Ok(false),
+            },
+            None => return Ok(false),
+        };
         match patch.control_point_net() {
             Ok(net) => (net.points, net.weights),
             Err(_) => return Ok(false),
@@ -2862,6 +2884,31 @@ mod tests {
     use super::*;
     use crate::nurbs::crv_basic::Curve as NlCurve;
     use crate::nurbs::math::{CPoint, NOW, NOZ};
+
+    #[test]
+    fn nearly_isoparametric_gap_uses_a_containing_strip() {
+        use crate::nurbs::srf_basic::Surface as NlSurface;
+
+        let k = Kernel::default();
+        let height = 0.00044;
+        let net = [0.0, 1.0].map(|u| [0.0, height].map(|v| CPoint::new(u, v, 0.0, NOW)).to_vec());
+        let patch = NlSurface::new(
+            net.to_vec(),
+            1,
+            1,
+            vec![0.0, 0.0, 1.0, 1.0],
+            vec![0.0, 0.0, height, height],
+        )
+        .unwrap();
+        let surface = Surface::from(BSplineSurface::from_nurb(patch, false));
+        let u = 0.125_f64;
+        let start = Point2::new(u, 0.0);
+        let end = Point2::new(f64::from_bits(u.to_bits() + 1), height);
+        let a = surface.evaluate_point(&k, start).unwrap();
+        let z = surface.evaluate_point(&k, end).unwrap();
+        assert!(is_loop_uv_gap_within_tolerance(&k, &surface, start, end, a, z, 0.0005).unwrap());
+        assert!(!is_loop_uv_gap_within_tolerance(&k, &surface, start, end, a, z, 0.0004).unwrap());
+    }
 
     #[test]
     fn original_g1_trim_retains_surface_identity_and_issued_face_owner() {
