@@ -1285,7 +1285,7 @@ mod tests_c1 {
 
     /// A caller-built fillet geometry reaches the rail checks through the public
     /// `calc_fillet_geom`: a rail with one edge use, or no rail, is the caller's input
-    /// (InvalidInput), not a kernel defect.
+    /// (`ErrorKind::InvalidInput`), not a kernel defect.
     #[test]
     fn caller_rail_faults_through_calc_fillet_geom_are_invalid_input() {
         let k = Kernel::default();
