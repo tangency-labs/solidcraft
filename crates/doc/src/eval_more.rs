@@ -1324,8 +1324,20 @@ pub(super) fn sheet_eval(
                 }
                 made.push(joints);
             }
+            let mut open = Vec::new();
             for (k, joints) in made.iter().enumerate() {
-                sk.close_flange_corners(joints).map_err(named(k))?;
+                open.extend(sk.close_flange_corners(joints).map_err(named(k))?);
+            }
+            // The corners on the outside of a bend that stay open (#20720), each said once.
+            let mut said: Vec<Vec3> = Vec::new();
+            for at in open {
+                if !said.iter().any(|p| p.dist(at) < 1e-6) {
+                    append_warning(
+                        warning,
+                        format!("the flanges at ({:.3}, {:.3}, {:.3}) {}", at.x, at.y, at.z, crate::OUTSIDE_BEND_OPEN),
+                    );
+                    said.push(at);
+                }
             }
             let made: Vec<usize> = made.into_iter().flatten().collect();
             sk.clear_of_neighbours(&made)?;

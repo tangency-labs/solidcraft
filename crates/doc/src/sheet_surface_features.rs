@@ -646,12 +646,15 @@ impl SurfaceSheet {
     }
 
     /// Closes the corners of the bends `made`, a feature's flanges all added first (see
-    /// [`SurfaceSheet::flange_on`]), each against the bends before it (see `close_corners`).
-    pub fn close_flange_corners(&mut self, made: &[usize]) -> Result<()> {
+    /// [`SurfaceSheet::flange_on`]), each against the bends before it (see `close_corners`). The
+    /// corners left open because closing them would overlap the flat (see [`OUTSIDE_BEND_OPEN`]),
+    /// where they are in the sheet's space.
+    pub fn close_flange_corners(&mut self, made: &[usize]) -> Result<Vec<Vec3>> {
+        let mut open = Vec::new();
         for &j in made {
-            self.close_corners(j)?;
+            open.extend(self.close_corners(j)?);
         }
-        Ok(())
+        Ok(open)
     }
 
     /// The flange of [`SurfaceSheet::add_flange_on`] with its corners not closed yet. A feature on
@@ -831,8 +834,10 @@ impl SurfaceSheet {
     /// new flange is closed against the other's panel, whose side at the corner the third bend
     /// holds; the two new flanges are closed against each other, across the wall's bend, and that
     /// bend runs to the corner too. Only bends before `j` are met: a later flange of the same
-    /// feature meets `j` when its own corners are closed.
-    fn close_corners(&mut self, j: usize) -> Result<()> {
+    /// feature meets `j` when its own corners are closed. Two such flanges on the outside of the
+    /// bend across, which part as they rise, are left open (see [`OUTSIDE_BEND_OPEN`]): the
+    /// corners that are, in the sheet's space.
+    fn close_corners(&mut self, j: usize) -> Result<Vec<Vec3>> {
         let dev = self.develop().map_err(|e| DocError::Invalid(e.to_string()))?;
         let places = crate::sheet_surface_convert::fold_onto(&self.sheet, &dev, &self.places)?.places;
         let junctions = self.junctions.clone();
@@ -2421,6 +2426,12 @@ impl SurfaceSheet {
 /// does not depend on the order the bends are met in.) No corner is made at a bend's end that
 /// `butt` says butts the next bend of a split edge (by the bend's joint, and whether the end is at
 /// its anchors' length or their origin; see [`crate::SurfaceSheet::junctions`]).
+///
+/// Two flanges closed against each other across a bend (side flanges across a bend) that stand
+/// on its outside, so that they part as they rise, would each have to grow past its end to meet
+/// the other over the bend: laid flat, the two growths cover the same material beside the bend
+/// zone. Such a corner is left open (see [`OUTSIDE_BEND_OPEN`]), and returned, where the anchors
+/// meet in space.
 pub(crate) fn close_corners_on(
     sheet: &mut Sheet,
     places: &[Option<Rigid3>],
@@ -2428,12 +2439,13 @@ pub(crate) fn close_corners_on(
     j: usize,
     open_in: Option<&[Joint]>,
     butt: &dyn Fn(usize, bool) -> bool,
-) -> Result<()> {
+) -> Result<Vec<Vec3>> {
+    let mut left_open = Vec::new();
     let t = sheet.thickness;
     let reach_of = |b: &Bend| (b.radius + t) * (b.angle / 2.0).tan();
     for k in 0..sheet.joints.len() {
         // The new bend as the corners closed so far left it.
-        let Some(Joint { a: on_p, b: on_f, kind: JointKind::Bend(nb) }) = sheet.joints.get(j).cloned() else { return Ok(()) };
+        let Some(Joint { a: on_p, b: on_f, kind: JointKind::Bend(nb) }) = sheet.joints.get(j).cloned() else { return Ok(left_open) };
         let p = on_p.panel;
         let Some(Joint { a, b, kind: JointKind::Bend(ob) }) = sheet.joints.get(k).cloned() else { continue };
         if k >= j || ob.datum != Datum::Sharp {
@@ -2552,6 +2564,19 @@ pub(crate) fn close_corners_on(
         if !(mw.dot(on_w.dir.perp() * side_w) > 1e-9) {
             continue;
         }
+        // Across a bend, on its outside: the line leans back past the new flange's end, away from
+        // its bend, so the flanges part as they rise. Closed, each would grow past its end into
+        // the V over the bend, and laid flat the two growths overlap. Left open. (Convert keeps
+        // its own rule: it closes only a corner the body left open.)
+        if bridged.is_some() && open_in.is_none() {
+            let into_f = if e1 == 0.0 { on_f.dir } else { -on_f.dir };
+            if mf.dot(into_f) < -1e-6 {
+                if let Some(Some(pp)) = places.get(p) {
+                    left_open.push(pp.point(c1.extend(0.0)));
+                }
+                continue;
+            }
+        }
         let (Some(rf), Some(rw)) = (sheet.panels.get(f).map(|x| x.region.clone()), sheet.panels.get(w).map(|x| x.region.clone())) else {
             continue;
         };
@@ -2628,8 +2653,11 @@ pub(crate) fn close_corners_on(
             }),
         });
     }
-    Ok(())
+    Ok(left_open)
 }
+
+/// What a Flange says of a corner [`close_corners_on`] leaves open on the outside of a bend.
+pub const OUTSIDE_BEND_OPEN: &str = "are left open: closed, the flanges would overlap in the flat pattern";
 
 /// Whether panels `i` and `k` meet at a rip (two walls mitred at a corner).
 fn ripped(sheet: &Sheet, i: usize, k: usize) -> bool {

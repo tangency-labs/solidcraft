@@ -10518,3 +10518,40 @@ fn a_fold_line_sketched_outside_a_moved_component_acts_where_it_lies() {
     assert!(min_x > 240.0 && min_x < 250.0, "min_x: {min_x}");
     assert!(max_x > 310.0 && max_x < 325.0, "max_x: {max_x}");
 }
+
+/// #20720: walls on the side edges of a ramp and of the run past it, on the outside of the bend
+/// between the two (where the walls part as they rise), are left open, with the Flange saying
+/// so, as the flat-first sheet left them: closed, each would grow past its end into the V over
+/// the bend, and laid flat the two growths would cover the same material. Unfold and Refold
+/// then work. With K 0.5 every panel and bend zone lies flat at its own area through the
+/// thickness, so a flat whose pieces don't overlap has the body's volume over T.
+#[test]
+fn walls_on_the_outside_of_a_bend_are_left_open_and_unfold() {
+    let mut s = Session::default();
+    run(&mut s, "sheet.manage_rules", json!({"name":"Steel 1mm","thickness":"1 mm","bend_radius":"1 mm","k_factor":"0.5","active":true}));
+    base(&mut s, 60.0, 100.0);
+    // A ramp 80 long at 30°, then a run 100 long bent back 30° (a Z-shaped riser).
+    run(
+        &mut s,
+        "sheet.flange",
+        json!({"edges":[[30, 100, 1]],"height":80,"angle":"30 deg","then":[{"angle":"30 deg","height":100,"flip":true}]}),
+    );
+    // Walls 30 high on the left edge of the ramp and of the run, on the outside of the bend
+    // between them (the points are on those edges, halfway along each).
+    run(&mut s, "sheet.flange", json!({"edges":[[0, 134.141016, 20.866025], [0, 219.282032, 40.866025]],"height":30}));
+    let said = last_warning(&s);
+    assert!(said.contains(solidcraft_doc::OUTSIDE_BEND_OPEN), "{said}");
+    assert_eq!(said.matches(solidcraft_doc::OUTSIDE_BEND_OPEN).count(), 1, "{said}");
+    // No rip parts the two walls: the V stays open.
+    let rips = s.model.state().surface_sheets[0].sheet.joints.iter().filter(|j| matches!(j.kind, solidcraft_develop::JointKind::Rip(_))).count();
+    assert_eq!(rips, 0);
+    let formed = volume(&mut s);
+    let body = &s.model.state().bodies[0].body;
+    assert!(body.validity().is_empty() && body.shell_count() == 1);
+    let area: f64 = flat_pieces(&s).iter().sum();
+    assert!(rel(area * 1.0, formed) < 1e-6, "flat {area} mm² x T 1 vs volume {formed} mm³");
+    run(&mut s, "sheet.unfold", json!({}));
+    assert!(rel(volume(&mut s), formed) < 1e-6);
+    run(&mut s, "sheet.unfold", json!({"refold": true}));
+    assert!(rel(volume(&mut s), formed) < 1e-6);
+}
