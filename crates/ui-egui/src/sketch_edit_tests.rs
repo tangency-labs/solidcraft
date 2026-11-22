@@ -746,6 +746,7 @@ fn several_features_from_one_used_sketch_with_apply() {
         assert!(h.app.dialog.as_ref().is_some_and(|d| matches!(d.kind, Kind::Extrude { .. })), "{last}: Extrude is open");
         assert!(shown(&h, sketch), "{last}: the sketch is shown while Extrude works from it");
         assert!(crate::scenario::rect_of("dialog:apply").is_some(), "{last}: a new Extrude has Apply");
+        assert!(h.widget("Done").is_some() && h.widget("OK").is_none(), "{last}: a window with Apply ends the run with Done, not OK");
         let (features, undo) = (h.app.session.doc.features.len(), h.app.session.undo.len());
         for (index, step) in [(1, "apply"), (2, last)] {
             h.app.dialog.as_mut().unwrap().inputs[0].items = vec![Sel::Profile { sketch, index }];
@@ -757,9 +758,14 @@ fn several_features_from_one_used_sketch_with_apply() {
             };
             h.step(&action).unwrap();
             // The extrusion computes off the window thread, and OK is refused while one is still
-            // computing: wait for it to land, as a person does before pressing OK.
+            // computing: wait for the feature to land (not just for the computing to stop, which
+            // is also true before it starts), as a person does before the next step.
+            let before = features + if step == "apply" { 0 } else { 1 };
             for _ in 0..3000 {
-                if h.app.applying.is_none() {
+                if step == last && last == "Escape" {
+                    break;
+                }
+                if h.app.applying.is_none() && h.app.session.doc.features.len() > before {
                     break;
                 }
                 h.frames(1);
@@ -826,6 +832,9 @@ fn apply_in_a_fillet_window_forgets_the_applied_edges() {
     h.app.edit_feature(id);
     let picks = h.app.dialog.as_ref().unwrap().picked_edges.clone();
     assert_eq!(picks.len(), 1);
+    // Editing a feature has no Apply, so its window keeps OK.
+    h.settle();
+    assert!(h.widget("OK").is_some() && h.widget("Done").is_none(), "a window without Apply keeps OK");
     crate::dialogs::cancel(&mut h.app);
     h.app.run("edit.undo", json!({})).unwrap();
     h.settle();

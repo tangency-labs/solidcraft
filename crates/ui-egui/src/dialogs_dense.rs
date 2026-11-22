@@ -2049,9 +2049,9 @@ mod tests {
                 let disabled = tree
                     .nodes
                     .iter()
-                    .find_map(|(_, node)| (node.role() == egui::accesskit::Role::Button && node.label() == Some("OK")).then(|| node.is_disabled()))
+                    .find_map(|(_, node)| (node.role() == egui::accesskit::Role::Button && node.label() == Some("Done")).then(|| node.is_disabled()))
                     .unwrap();
-                assert_eq!(disabled, count == 0, "OK follows the actual required edge selection");
+                assert_eq!(disabled, count == 0, "Done follows the actual required edge selection");
             }
             let mut output = h.ctx.run_ui(
                 egui::RawInput {
@@ -2069,7 +2069,7 @@ mod tests {
                 (field.width() - scenario::rect_of("dialog:control:Edges").unwrap().width()).abs() < 0.02,
                 "clear is inside the full field (allow egui subpixel rounding)"
             );
-            assert!(h.widget("OK").is_some());
+            assert!(h.widget("Done").is_some());
             if count == 0 {
                 h.step(&json!({"click":{"handle":"dialog:ok"}})).unwrap();
                 assert!(h.app.dialog.is_some(), "invalid OK stays disabled");

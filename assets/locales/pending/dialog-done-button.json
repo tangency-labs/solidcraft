@@ -1,0 +1,10 @@
+{
+  "ar": { "ui.dialog_done": "تم" },
+  "de": { "ui.dialog_done": "Fertig" },
+  "en": { "ui.dialog_done": "Done" },
+  "he": { "ui.dialog_done": "סיום" },
+  "ja": { "ui.dialog_done": "完了" },
+  "ko": { "ui.dialog_done": "완료" },
+  "vi": { "ui.dialog_done": "Xong" },
+  "zh": { "ui.dialog_done": "完成" }
+}

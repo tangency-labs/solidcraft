@@ -4562,6 +4562,9 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
         _ => !has_ok || !d.previews() || (built.unwrap_or_else(|| apply_commands(app, &d).is_ok()) && app.preview.error.is_none()),
     };
     let (ok_label, close_label) = action_labels(&d.kind);
+    // A window with Apply ends its run with Done, not OK (#6940); windows without Apply keep OK.
+    let repeatable = d.editing.is_none() && !d.extra.contains_key("pattern") && repeatable(&d);
+    let ok_label = if repeatable && ok_label == "OK" { tr("ui.dialog_done") } else { ok_label };
     // What the footer's OK takes, for the check in the view's corner too (#6709).
     let ok_enabled = valid && !ok_label.is_empty() && app.applying.is_none();
     // #10620: the card widens to fit its widest label in the current language. The body
@@ -4593,7 +4596,6 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
     let panel =
         panel.reset_scroll(reset_scroll && matches!(d.kind, Kind::Appearance(_) | Kind::Motion(crate::dialogs_motion::Mo::Configurations { .. })));
     let window = panel.window(ctx);
-    let repeatable = d.editing.is_none() && !d.extra.contains_key("pattern") && repeatable(&d);
     let mut painted = false;
     let mut resize = crate::card_resize::Resize::None;
     if let Kind::ConfirmDelete { with, fail, .. } = &d.kind {

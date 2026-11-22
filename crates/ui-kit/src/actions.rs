@@ -451,7 +451,9 @@ fn action_button(ui: &mut Ui, label: &str, kind: Action, look: &ActionLook, padd
         _ => "dialog:cancel",
     };
     solidcraft_ui_registry::publish_target(key, response.rect);
-    solidcraft_ui_registry::publish_handle(&format!("dialog:{label}"), response.rect.center());
+    // OK keeps its script handle when a window with Apply calls it Done.
+    let handle = if kind == Action::Ok && label == solidcraft_ui_text::tr("ui.dialog_done") { "OK" } else { label };
+    solidcraft_ui_registry::publish_handle(&format!("dialog:{handle}"), response.rect.center());
     response
 }
 
