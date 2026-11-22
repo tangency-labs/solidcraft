@@ -1164,6 +1164,9 @@ fn navigation_allows_drawing_drags_with_orbit_latched_in_design() {
         } else {
             navigation_drag_fixture(kind)
         };
+        // The classic switcher, which this test covers: since #19655 the default lets the focused
+        // view choose the workspace (`workspace_follows_view`).
+        h.app.preferences.workspace_follows_view = false;
         let point = OnScreen::of(&h.app.drawing_workspace.page.cam, h.app.viewport.rect.unwrap()).paper(from);
         let selected = h.app.session.selection.clone();
         assert_eq!(h.call("ui.workspace", json!({"workspace": "design"}))["ok"], true);

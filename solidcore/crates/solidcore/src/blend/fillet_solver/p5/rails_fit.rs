@@ -347,8 +347,13 @@ fn filleted_edge(solver: &FilletSolver, target: &Brep) -> Result<EdgeId> {
     let fil_eu = solver.edgeuse(0)?.ok_or_else(|| {
         SolidError::blend_solver(OP, SolverFailure::SolverEdgeUseMissing { index: 0 })
     })?;
-    eu::edge(target, fil_eu)?
-        .ok_or_else(|| SolidError::blend_solver(OP, SolverFailure::EdgeUseWithoutEdge))
+    eu::edge(target, fil_eu)?.ok_or_else(|| {
+        SolidError::blend_at(
+            OP,
+            BlendFailure::EdgeUseWithoutEdge,
+            EntityRef::Edgeuse(fil_eu),
+        )
+    })
 }
 
 /// The filleted edge's curve.

@@ -21,7 +21,7 @@ use crate::blend::fillet_geom::p2::{srf_srf_intersection, SrfSrfOptions};
 use crate::blend::fillet_solver::p1::{
     test_manifold_tangent_rollover, FilletSolver, FilletSolverOps,
 };
-use crate::error::blend::SolverFailure;
+use crate::error::blend::{BlendFailure, SolverFailure};
 use crate::error::{EntityRef, Result, SolidError};
 use crate::geom::axis2_placement::Axis2Placement;
 use crate::geom::extent1d::Extent1d;
@@ -279,8 +279,13 @@ impl FilletSolver {
         let fil_eu = solver.solver().edgeuse(0)?.ok_or_else(|| {
             SolidError::blend_solver(OP, SolverFailure::SolverEdgeUseMissing { index: 0 })
         })?;
-        let fil_edge = eu::edge(target, fil_eu)?
-            .ok_or_else(|| SolidError::blend_solver(OP, SolverFailure::EdgeUseWithoutEdge))?;
+        let fil_edge = eu::edge(target, fil_eu)?.ok_or_else(|| {
+            SolidError::blend_at(
+                OP,
+                BlendFailure::EdgeUseWithoutEdge,
+                EntityRef::Edgeuse(fil_eu),
+            )
+        })?;
         // A sheet's edge bounds no material: no end section can run off its end face under
         // material, and there is no body to subtract an overflow from, so the corner trims
         // the fillet as it does any other (not the fork's, whose `IsConcaveEdge` fails there,

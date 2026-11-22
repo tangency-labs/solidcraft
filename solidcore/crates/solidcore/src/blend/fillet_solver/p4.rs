@@ -96,7 +96,7 @@ use crate::blend::fillet_intersector::{FilletIntersector, StepSolve as StepSolve
 use crate::blend::fillet_solver::p1::NoExtensionCorners;
 use crate::curve::curve::{Curve, CurveKind};
 use crate::error::blend::{BlendFailure, SolverFailure};
-use crate::error::{Failure, Result, SolidError};
+use crate::error::{EntityRef, Failure, Result, SolidError};
 use crate::geom::extent1d::Extent1d;
 use crate::geom::extent2d::Extent2d;
 use crate::geom::vector2d::Point2;
@@ -742,7 +742,13 @@ fn c1_setup(ops: &mut dyn FilletSolverOps, cx: &mut Cx<'_>) -> Result<CalcState>
         .solver()
         .edgeuse(0)?
         .ok_or_else(|| invalid("no edge use 0"))?;
-    let edge = eu::edge(cx.target, eu0)?.ok_or_else(|| fail(SolverFailure::EdgeUseWithoutEdge))?;
+    let edge = eu::edge(cx.target, eu0)?.ok_or_else(|| {
+        SolidError::blend_at(
+            OP,
+            BlendFailure::EdgeUseWithoutEdge,
+            EntityRef::Edgeuse(eu0),
+        )
+    })?;
     // SM_CAST_PTR(SmBSplineCurve, pEdge->GetCurve()): NULL for a missing curve or a
     // kind not derived from SmBSplineCurve
     let edge_curve = match topo_edge::curve(cx.target, edge)? {
@@ -1596,7 +1602,13 @@ fn c2_trace_to_edge_ends(
         .solver()
         .edgeuse(0)?
         .ok_or_else(|| invalid("no edge use 0"))?;
-    let edge = eu::edge(cx.target, eu0)?.ok_or_else(|| fail(SolverFailure::EdgeUseWithoutEdge))?;
+    let edge = eu::edge(cx.target, eu0)?.ok_or_else(|| {
+        SolidError::blend_at(
+            OP,
+            BlendFailure::EdgeUseWithoutEdge,
+            EntityRef::Edgeuse(eu0),
+        )
+    })?;
     if !st.do_sorting
         || topo_edge::start_vertex(cx.target, edge)? == topo_edge::end_vertex(cx.target, edge)?
     {
@@ -1754,7 +1766,13 @@ fn c2_end_past_tangent_edge(
         .solver()
         .edgeuse(0)?
         .ok_or_else(|| fail(SolverFailure::SolverEdgeUseMissing { index: 0 }))?;
-    let edge = eu::edge(cx.target, eu0)?.ok_or_else(|| fail(SolverFailure::EdgeUseWithoutEdge))?;
+    let edge = eu::edge(cx.target, eu0)?.ok_or_else(|| {
+        SolidError::blend_at(
+            OP,
+            BlendFailure::EdgeUseWithoutEdge,
+            EntityRef::Edgeuse(eu0),
+        )
+    })?;
     let corner_vertex = if at_end {
         topo_edge::end_vertex(cx.target, edge)?
     } else {
