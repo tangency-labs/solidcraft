@@ -3747,3 +3747,24 @@ fn a_narrow_profile_across_a_wall_along_the_extrusion_keeps_the_trim_to_the_body
         0.2 * 2.0
     );
 }
+
+/// A 3° draft on a pocket wall whose vertical corners carry 4 mm rounds drafts the wall with the
+/// rounds following, or refuses and says what to do; never a bare kernel status. With sharp
+/// corners it builds; with the rounds it is "SMLib failed (status 1001)" today
+/// ([T-97](https://tickets.solidcraft.io/t/97), #17592).
+#[test]
+fn a_draft_on_a_pocket_wall_beside_rounds_never_fails_with_a_bare_status() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 90, "width": 70, "height": 50, "body_name": "Block"}));
+    run(&mut s, "solid.box", json!({"length": 50, "width": 30, "height": 36, "corner": [20, 20, 14], "operation": "cut", "targets": ["Block"]}));
+    run(&mut s, "solid.fillet", json!({"edges": [[20, 20, 35], [70, 20, 35], [70, 50, 35], [20, 50, 35]], "radius": 4}));
+    let draft = json!({"faces": [[45, 20, 35]], "angle": "3 deg", "neutral": {"origin": [0, 0, 14], "normal": [0, 0, 1]}});
+    match s.execute("solid.draft", &draft) {
+        Ok(_) => {
+            let state = s.model.state();
+            let b = &state.body("Block").unwrap().body;
+            assert!(b.validity().is_empty(), "{:?}", b.validity());
+        }
+        Err(e) => assert!(!e.to_string().contains("status 1001"), "{e}"),
+    }
+}

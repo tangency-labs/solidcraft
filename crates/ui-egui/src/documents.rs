@@ -5340,6 +5340,34 @@ mod tests {
     }
 
     #[test]
+    fn right_click_on_a_view_tab_opens_only_the_tab_menu() {
+        // Both strips: the classic design pill and the clear view tabs.
+        for clear in [false, true] {
+            let mut h = crate::scenario::Harness::new();
+            h.app.home.open = false;
+            h.app.preferences.design_views_as_tabs = true;
+            h.app.preferences.clear_view_tabs = clear;
+            view_open(&mut h.app, ViewKind::Model, None, false);
+            h.call("ui.resize", json!({"width": 1920, "height": 720}));
+            h.frames(3);
+            h.step(&json!({"click": {"handle": "tab:view:1"}, "button": "right"})).unwrap();
+            h.frames(3);
+            assert!(crate::scenario::handle_at("menu:view.close").is_some(), "clear {clear}: the tab menu opens");
+            assert!(
+                !matches!(h.app.menu.target, crate::context_menu::Target::AppBar { .. }),
+                "clear {clear}: the app bar's Customize menu must not open over the tab menu"
+            );
+            // Empty app bar space still opens Customize App Bar.
+            h.step(&json!({"key": "Escape"})).unwrap();
+            h.frames(2);
+            h.step(&json!({"click": [1000, 17], "button": "right"})).unwrap();
+            h.frames(3);
+            assert_eq!(h.app.menu.target, crate::context_menu::Target::AppBar { id: None }, "clear {clear}");
+            assert!(crate::scenario::handle_at("menu:view.close").is_none(), "clear {clear}");
+        }
+    }
+
+    #[test]
     fn view_popups_never_follow_an_index_into_another_design() {
         let mut h = crate::scenario::Harness::new();
         h.app.home.open = false;

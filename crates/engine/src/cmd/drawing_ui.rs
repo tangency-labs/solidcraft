@@ -73,7 +73,7 @@ pub static COMMANDS: &[CommandSpec] = &[
     planned!("drawing.note", "Drawing Note", "4896").at("DRAWING ANNOTATE", "NOTES").icon("drawing_note"),
     planned!("drawing.leader", "Leader Note", "4896").at("DRAWING ANNOTATE", "NOTES").icon("drawing_leader"),
     planned!("drawing.datum", "Datum", "4896").icon("drawing_datum"),
-    planned!("drawing.centre_mark", "Centre Mark", "4896").at("DRAWING ANNOTATE", "SYMBOLS").icon("drawing_centre_mark"),
+    planned!("drawing.centre_mark", "Center Mark", "4896").at("DRAWING ANNOTATE", "SYMBOLS").icon("drawing_centre_mark"),
     planned!("drawing.annotations.align", "Align Annotations", "4896").at("DRAWING ANNOTATE", "ARRANGE").icon("drawing_align_annotations"),
     planned!("drawing.annotations.space", "Space Annotations", "4896").at("DRAWING ANNOTATE", "ARRANGE").icon("drawing_space_annotations"),
     planned!("drawing.parts_list", "Parts List", "3874").at("DRAWING PARTS", "ASSEMBLY").icon("drawing_parts_list"),
