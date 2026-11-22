@@ -600,6 +600,13 @@ pub(super) fn layout(app: &mut SolveApp, ui: &mut egui::Ui) {
                     &mut app.preferences.browser_body_features,
                     "browser_body_features",
                 );
+                layout_check(
+                    ui,
+                    app.tr("prefs.browser_component_colors"),
+                    app.tr("prefs.browser_component_colors_note"),
+                    &mut app.preferences.browser_component_colors,
+                    "browser_component_colors",
+                );
             });
             // A folder's icon from its features (#12514) and the History controls' steps (#11430), in
             // a row of their own: one more box in the row above widens it past the page at narrow

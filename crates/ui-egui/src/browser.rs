@@ -1823,11 +1823,12 @@ fn component_name(app: &SolveApp, id: u64) -> String {
 
 /// The identification colour a component's rows are marked with (#16677): the colour it was
 /// given, or, while Component Colors is on, the automatic colour the 3D view tints its bodies
-/// with. None for the design row and for a component left on its automatic colour while the
-/// switch is off. The Render workspace keeps the slot for the appearance swatch, which its rows
-/// draw in place of the icon.
+/// with. None for the design row, for a component left on its automatic colour while the switch
+/// is off, and while the Browser's component colours are turned off in Preferences
+/// (`browser_component_colors`, #16677). The Render workspace keeps the slot for the appearance
+/// swatch, which its rows draw in place of the icon.
 fn component_swatch(app: &SolveApp, component: u64) -> Option<Color32> {
-    if component == 0 || crate::render_workspace::active(app) {
+    if component == 0 || !app.preferences.browser_component_colors || crate::render_workspace::active(app) {
         return None;
     }
     let own = app.session.doc.components.iter().any(|c| c.id == component && c.identification_color.is_some());

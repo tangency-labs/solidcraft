@@ -13,6 +13,12 @@ macro_rules! layout_preferences {
             /// Each body row in the Browser folds open on the timeline features that built it, in
             /// timeline order (#11945). Off by default: body rows have no fold arrow, as before.
             browser_body_features: bool = false, PAGE_LAYOUT;
+            /// Components' identification colours mark their rows in the Browser (#16677). On by
+            /// default: a component given a colour of its own carries it beside its name, and while
+            /// Component Colors is on every component's row carries the colour the 3D view tints its
+            /// bodies with. Off: the rows stay plain, as before, and the colours show in the 3D view
+            /// alone.
+            browser_component_colors: bool = true, PAGE_LAYOUT;
             /// Every component placement in the browser starts open, as before #9274, instead of closed
             /// until the user opens it. Off by default.
             browser_components_open: bool = false, PAGE_LAYOUT;

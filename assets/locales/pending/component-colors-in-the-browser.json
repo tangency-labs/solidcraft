@@ -1,38 +1,56 @@
 {
   "en": {
     "cmd.component.set_color": "Component Color",
-    "ui.component_automatic_color": "Automatic Component Color"
+    "ui.component_automatic_color": "Automatic Component Color",
+    "prefs.browser_component_colors": "Component colors on rows",
+    "prefs.browser_component_colors_note": "A component you give a color of its own carries it beside its name in the Browser, and with Component Colors on every component's row carries one. Off: the rows stay plain and the colors show in the 3D view alone."
   },
   "en-GB": {
     "cmd.component.set_color": "Component Colour",
-    "ui.component_automatic_color": "Automatic Component Colour"
+    "ui.component_automatic_color": "Automatic Component Colour",
+    "prefs.browser_component_colors": "Component colours on rows",
+    "prefs.browser_component_colors_note": "A component you give a colour of its own carries it beside its name in the Browser, and with Component Colours on every component's row carries one. Off: the rows stay plain and the colours show in the 3D view alone."
   },
   "ar": {
     "cmd.component.set_color": "لون المكوّن",
-    "ui.component_automatic_color": "لون المكوّن التلقائي"
+    "ui.component_automatic_color": "لون المكوّن التلقائي",
+    "prefs.browser_component_colors": "ألوان المكوّنات على الصفوف",
+    "prefs.browser_component_colors_note": "المكوّن الذي تمنحه لونًا خاصًا به يعرضه بجانب اسمه في المتصفّح، ومع تشغيل ألوان المكوّنات يعرض كل صف لونه. عند الإيقاف تبقى الصفوف بلا لون ويظهر اللون في العرض ثلاثي الأبعاد وحده."
   },
   "de": {
     "cmd.component.set_color": "Komponentenfarbe",
-    "ui.component_automatic_color": "Automatische Komponentenfarbe"
+    "ui.component_automatic_color": "Automatische Komponentenfarbe",
+    "prefs.browser_component_colors": "Komponentenfarben in den Zeilen",
+    "prefs.browser_component_colors_note": "Eine Komponente mit eigener Farbe zeigt sie im Browser neben ihrem Namen, und bei eingeschalteten Komponentenfarben zeigt jede Zeile eine. Aus: Die Zeilen bleiben schlicht und die Farben erscheinen nur in der 3D-Ansicht."
   },
   "he": {
     "cmd.component.set_color": "צבע הרכיב",
-    "ui.component_automatic_color": "צבע רכיב אוטומטי"
+    "ui.component_automatic_color": "צבע רכיב אוטומטי",
+    "prefs.browser_component_colors": "צבעי רכיבים בשורות",
+    "prefs.browser_component_colors_note": "רכיב שנתת לו צבע משלו מציג אותו לצד שמו בדפדפן, וכשצבעי הרכיבים פועלים כל שורה מציגה צבע. כבוי: השורות נשארות רגילות והצבעים מופיעים רק בתצוגה התלת-ממדית."
   },
   "ja": {
     "cmd.component.set_color": "コンポーネントの色",
-    "ui.component_automatic_color": "コンポーネントの色を自動に戻す"
+    "ui.component_automatic_color": "コンポーネントの色を自動に戻す",
+    "prefs.browser_component_colors": "行にコンポーネントの色",
+    "prefs.browser_component_colors_note": "独自の色を与えたコンポーネントは、ブラウザーで名前の横にその色を示します。コンポーネントの色を有効にすると、すべての行が色を示します。オフでは行は色を示さず、色は 3D ビューだけに表示されます。"
   },
   "ko": {
     "cmd.component.set_color": "구성 요소 색상",
-    "ui.component_automatic_color": "구성 요소 색상 자동"
+    "ui.component_automatic_color": "구성 요소 색상 자동",
+    "prefs.browser_component_colors": "행에 구성 요소 색상",
+    "prefs.browser_component_colors_note": "고유 색상을 지정한 구성 요소는 브라우저에서 이름 옆에 색상을 표시하며, 구성 요소 색상을 켜면 모든 행이 색상을 표시합니다. 끄면 행은 그대로이고 색상은 3D 뷰에만 나타납니다."
   },
   "vi": {
     "cmd.component.set_color": "Màu thành phần",
-    "ui.component_automatic_color": "Màu thành phần tự động"
+    "ui.component_automatic_color": "Màu thành phần tự động",
+    "prefs.browser_component_colors": "Màu thành phần trên hàng",
+    "prefs.browser_component_colors_note": "Thành phần được bạn gán màu riêng sẽ hiện màu đó bên cạnh tên trong Browser, và khi bật Màu thành phần thì mọi hàng đều hiện màu. Tắt: các hàng giữ nguyên và màu chỉ hiện trong khung nhìn 3D."
   },
   "zh": {
     "cmd.component.set_color": "部件颜色",
-    "ui.component_automatic_color": "部件颜色自动"
+    "ui.component_automatic_color": "部件颜色自动",
+    "prefs.browser_component_colors": "行上显示部件颜色",
+    "prefs.browser_component_colors_note": "为部件指定专属颜色后，它会显示在浏览器中名称旁边；打开部件颜色后，每个部件的行都会显示颜色。关闭时行保持原样，颜色只出现在三维视图中。"
   }
 }

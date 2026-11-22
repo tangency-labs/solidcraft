@@ -2261,8 +2261,16 @@ fn component_rows_carry_the_identification_colour() {
     assert_eq!(component_swatch(&h.app, 0), None, "still not the design row");
     h.app.run("inspect.colored_components", json!({"enabled": false})).unwrap();
     assert_eq!(swatch(&h), None);
-    // The tree draws with the colour in place: the component's row is still there.
+    // Preferences › Interface keeps the plain rows for whoever wants them (#16677).
     h.app.run("component.set_color", json!({"component": component, "color": [12, 34, 56]})).unwrap();
+    assert_eq!(h.call("ui.prefs", json!({"browser_component_colors": false}))["ok"], true);
+    assert_eq!(swatch(&h), None, "the preference takes the colours off the rows");
+    h.app.run("inspect.colored_components", json!({"enabled": true})).unwrap();
+    assert_eq!(swatch(&h), None, "Component Colors does not put them back");
+    h.app.run("inspect.colored_components", json!({"enabled": false})).unwrap();
+    assert_eq!(h.call("ui.prefs", json!({"browser_component_colors": true}))["ok"], true);
+    assert_eq!(swatch(&h), Some(Color32::from_rgb(12, 34, 56)), "and back on, the colour returns");
+    // The tree draws with the colour in place: the component's row is still there.
     h.settle();
     let rows = drawn_rows();
     assert!(rows.iter().any(|(label, ..)| label.contains("Block")), "the component's row is drawn: {rows:?}");

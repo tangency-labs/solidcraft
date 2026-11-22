@@ -4937,6 +4937,7 @@ mod tests {
             ("browser_rows_start_closed", "prefs.browser_rows_start_closed"),
             ("browser_eye_left", "prefs.browser_eye_left"),
             ("browser_body_features", "prefs.browser_body_features"),
+            ("browser_component_colors", "prefs.browser_component_colors"),
         ];
         for width in [1600, 1100, 960, 800, 640] {
             let mut h = crate::scenario::Harness::new();
