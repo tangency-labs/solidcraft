@@ -316,8 +316,9 @@ it at install:
   `<name>` is one of the `files` names below; any command but a known input reader (such as
   `file.insert_step`) needs that folder with both `read` and `write`.
 - `files`: named folders the plugin reads (`read`) or writes (`write`) through the `files`
-  interface, by name and a relative path. The user picks each folder at install; the plugin never
-  sees where it is. Writes appear only when the run succeeds.
+  interface, by name and a relative path. The user picks each folder at install; the `files`
+  interface never shows the plugin where it is, but a `file` or `doc` command's reply or error
+  can name the full path. Writes appear only when the run succeeds.
 - `clock`: the `clock` interface tells the time; without it, it says 0.
 - `input_folder` (importers only): read the other files in the folder of the file being opened,
   such as an assembly's parts.
