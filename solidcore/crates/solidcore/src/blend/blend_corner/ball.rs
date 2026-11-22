@@ -57,7 +57,7 @@ use crate::blend::fillet_section::interval::Ivl;
 use crate::blend::fillet_solver::p1::{FilletSolver, FilletSolverType, FilletSurfaceGeneratorType};
 use crate::blend::fillet_solver::p5::is_concave_edge;
 use crate::curve::curve::Curve;
-use crate::error::blend::{BlendFailure, CornerInput, CornerStep};
+use crate::error::blend::{BlendFailure, CornerInput, CornerStep, FilletSetUp};
 use crate::error::{EntityRef, Failure, Result, SolidError, SM_ERR_NULL_POINTER};
 use crate::geom::krawczyk::{contraction, k_operator};
 use crate::intersect::surface_intersector::p1::SrfIndex;
@@ -101,11 +101,35 @@ fn missing_defect(op: &'static str, why: &'static str) -> SolidError {
 }
 
 /// Invalid input to `op`: the caller's corner, fillet B-rep or body is not what the corner's
-/// construction reads (`input`), with the status the site returned before
-/// ([`CornerInput::status`]). The entry points are public and take a caller's corner.
+/// construction reads (`input`), about `entity` where the check reads one, with the status
+/// the site returned before ([`CornerInput::upstream_status`]). The entry points are public
+/// and take a caller's corner.
 #[track_caller]
-fn bad_input(op: &'static str, input: CornerInput) -> SolidError {
-    SolidError::blend(op, BlendFailure::CornerInputInvalid(input))
+fn bad_input(op: &'static str, input: CornerInput, entity: Option<EntityRef>) -> SolidError {
+    corner_input(op, input, entity).into_error()
+}
+
+/// The [`Failure`] of [`bad_input`], located at `entity` where there is one.
+#[track_caller]
+fn corner_input(op: &'static str, input: CornerInput, entity: Option<EntityRef>) -> Failure {
+    let failure = Failure::new(op, BlendFailure::CornerInputInvalid { input, entity });
+    match entity {
+        Some(at) => failure.at(at),
+        None => failure,
+    }
+}
+
+/// Invalid input to `op`: a link of the caller's fillet structures that the corner reads is
+/// not there (`part`), about `entity` where the check reads one; status
+/// `SM_ERR_NULL_POINTER`, the site's.
+#[track_caller]
+fn bad_setup(op: &'static str, part: FilletSetUp, entity: Option<EntityRef>) -> SolidError {
+    let failure = Failure::new(op, BlendFailure::FilletSetUpInvalid(part));
+    match entity {
+        Some(at) => failure.at(at),
+        None => failure,
+    }
+    .into_error()
 }
 
 /// The corner has no construction at `step` (status `SM_ERR`).
@@ -264,8 +288,13 @@ fn max(a: f64, b: f64) -> f64 {
 /// `sm_BallFaceQuadric` (the fork's 7048946): the quadric (a plane or a natural quadric) a
 /// ring face lies on, [`QuadricKind::None`] where it lies on none.
 fn ball_face_quadric(k: &Kernel, b: &Brep, face: FaceId, tol: f64) -> Result<BlendQuadric> {
-    let surface = face2::surface(b, face)?
-        .ok_or_else(|| bad_input(OP_QUADRIC, CornerInput::FaceWithoutSurface))?;
+    let surface = face2::surface(b, face)?.ok_or_else(|| {
+        bad_input(
+            OP_QUADRIC,
+            CornerInput::FaceWithoutSurface,
+            Some(EntityRef::Face(face)),
+        )
+    })?;
     let q = BlendQuadric::from_surface(k, surface, face2::uv_domain(b, face)?.mid(), tol)?;
     if !matches!(
         q.kind,
@@ -508,8 +537,13 @@ pub fn classify_ball(
             return none;
         }
         radius = r0;
-        let e = eu1::edge(b, eu)?
-            .ok_or_else(|| bad_input(OP_CLASSIFY, CornerInput::EdgeuseWithoutEdge))?;
+        let e = eu1::edge(b, eu)?.ok_or_else(|| {
+            bad_setup(
+                OP_CLASSIFY,
+                FilletSetUp::EdgeUseEdge,
+                Some(EntityRef::Edgeuse(eu)),
+            )
+        })?;
         let concave = is_concave_edge(k, b, e)?;
         if ii == 0 {
             concave0 = concave;
@@ -616,32 +650,49 @@ fn ball_centre(
     let all_eus = corner
         .all_eus
         .as_deref()
-        .ok_or_else(|| bad_input(OP_CENTRE, CornerInput::RingNotSet))?;
+        .ok_or_else(|| bad_input(OP_CENTRE, CornerInput::RingNotSet, None))?;
     let n = all_eus.len();
     let (true, Some(&v0), Some(&e0)) = (
         n >= 3 && corner.vertices.len() == n && corner.edges.len() == n,
         corner.vertices.first(),
         corner.edges.first(),
     ) else {
-        return Err(bad_input(OP_CENTRE, CornerInput::TopologyMismatch));
+        return Err(bad_input(OP_CENTRE, CornerInput::TopologyMismatch, None));
     };
     let tol = corner.approx_tol_3d;
 
     // a ball of the rounds at the contacts: round 0's offset surfaces at vertex 0
-    let section0 = eu1::primary_edgeuse(pseudo.brep(), e0)?
-        .ok_or_else(|| bad_input(OP_CENTRE, CornerInput::EdgeWithoutPrimaryEdgeuse))?;
+    let section0 = eu1::primary_edgeuse(pseudo.brep(), e0)?.ok_or_else(|| {
+        bad_setup(
+            OP_CENTRE,
+            FilletSetUp::PrimaryEdgeUse,
+            Some(EntityRef::Edge(e0)),
+        )
+    })?;
     let g0 = pseudo
         .fillet_edgeuse(section0)?
         .fillet_geom()
-        .ok_or_else(|| bad_input(OP_CENTRE, CornerInput::EdgeOffRound))?;
+        .ok_or_else(|| {
+            bad_setup(
+                OP_CENTRE,
+                FilletSetUp::CrossSectionGeom,
+                Some(EntityRef::Edgeuse(section0)),
+            )
+        })?;
     let vu = pseudo
         .vu_at_rail_end(v0, Some(g0), None, None)?
-        .ok_or_else(|| bad_input(OP_CENTRE, CornerInput::VertexOffRail))?;
+        .ok_or_else(|| {
+            bad_setup(
+                OP_CENTRE,
+                FilletSetUp::RailEndVertexUse,
+                Some(EntityRef::Vertex(v0)),
+            )
+        })?;
     let tsect = pseudo.fillet_vertexuse(vu)?.tsect_pnt().clone();
     let solver_id = pseudo
         .geom(g0)?
         .fillet_solver()
-        .ok_or_else(|| bad_input(OP_CENTRE, CornerInput::BlendGeometryNotBuilt))?;
+        .ok_or_else(|| bad_setup(OP_CENTRE, FilletSetUp::GeomSolver, None))?;
     let solver = solvers.solver(solver_id)?;
     let mut on = [Point3::default(); 2];
     for (p, side) in on.iter_mut().zip([SrfIndex::First, SrfIndex::Second]) {
@@ -649,7 +700,7 @@ fn ball_centre(
         let offset = pseudo
             .geom(g0)?
             .offset_surface(rail, Some(solver))?
-            .ok_or_else(|| bad_input(OP_CENTRE, CornerInput::BlendGeometryNotBuilt))?;
+            .ok_or_else(|| bad_setup(OP_CENTRE, FilletSetUp::RailOffsetSurface, None))?;
         *p = offset.surface.evaluate_point(k, tsect.uv_pos(side))?;
     }
     if on[0].distance(on[1]) > tol {
@@ -659,7 +710,7 @@ fn ball_centre(
     let radius = pseudo
         .geom(g0)?
         .offset_surface(0, Some(solver))?
-        .ok_or_else(|| bad_input(OP_CENTRE, CornerInput::BlendGeometryNotBuilt))?
+        .ok_or_else(|| bad_setup(OP_CENTRE, FilletSetUp::RailOffsetSurface, None))?
         .surface
         .offset_distance()
         .abs();
@@ -678,11 +729,21 @@ fn ball_centre(
         .zip(offsets.iter_mut().zip(side.iter_mut()))
         .enumerate()
     {
-        let face = face.ok_or_else(|| bad_input(OP_CENTRE, CornerInput::EdgeuseWithoutFace))?;
+        let face = face.ok_or_else(|| {
+            bad_setup(
+                OP_CENTRE,
+                FilletSetUp::EdgeUseFace,
+                all_eus.get(ii).copied().map(EntityRef::Edgeuse),
+            )
+        })?;
         face_ids.push(face);
         let quadric = ball_face_quadric(k, target, face, tol)?;
         if quadric.kind == QuadricKind::None {
-            return Err(bad_input(OP_CENTRE, CornerInput::FaceNotAsClassified));
+            return Err(bad_input(
+                OP_CENTRE,
+                CornerInput::FaceNotAsClassified,
+                Some(EntityRef::Face(face)),
+            ));
         }
         let on = pseudo.vertex_point(v)?;
         *sd = if quadric.normal(on).dot(ball - on) >= 0.0 {
@@ -692,13 +753,21 @@ fn ball_centre(
         };
         *offset = quadric.offset(*sd * radius, tol);
         if offset.kind != quadric.kind || offset.side != quadric.side {
-            return Err(bad_input(OP_CENTRE, CornerInput::FaceNotAsClassified));
+            return Err(bad_input(
+                OP_CENTRE,
+                CornerInput::FaceNotAsClassified,
+                Some(EntityRef::Face(face)),
+            ));
         }
         if ii < 3 && offset.kind == QuadricKind::Plane {
             planes += 1;
         }
         if ii >= 3 && offset.kind != QuadricKind::Plane {
-            return Err(bad_input(OP_CENTRE, CornerInput::FaceNotAsClassified));
+            return Err(bad_input(
+                OP_CENTRE,
+                CornerInput::FaceNotAsClassified,
+                Some(EntityRef::Face(face)),
+            ));
         }
     }
 
@@ -883,18 +952,20 @@ pub fn place_ball_contacts(
             let Some(g) = pseudo.fillet_edgeuse(eu)?.fillet_geom() else {
                 continue;
             };
-            let e = pseudo
-                .brep()
-                .edgeuse(eu)?
-                .edge
-                .ok_or_else(|| bad_input(OP_PLACE, CornerInput::EdgeuseWithoutEdge))?;
+            let e = pseudo.brep().edgeuse(eu)?.edge.ok_or_else(|| {
+                bad_setup(
+                    OP_PLACE,
+                    FilletSetUp::EdgeUseEdge,
+                    Some(EntityRef::Edgeuse(eu)),
+                )
+            })?;
             if pseudo.fillet_edge(e)?.fillet_edge_type() != FilletEdgeType::Rail {
                 continue;
             }
             let solver_id = pseudo
                 .geom(g)?
                 .fillet_solver()
-                .ok_or_else(|| bad_input(OP_PLACE, CornerInput::BlendGeometryNotBuilt))?;
+                .ok_or_else(|| bad_setup(OP_PLACE, FilletSetUp::GeomSolver, None))?;
             let solver = solvers.solver(solver_id)?;
             for side in [SrfIndex::First, SrfIndex::Second] {
                 let rail = usize::from(side == SrfIndex::Second);
@@ -902,7 +973,7 @@ pub fn place_ball_contacts(
                 let offset = pseudo
                     .geom(g)?
                     .offset_surface(rail, Some(solver))?
-                    .ok_or_else(|| bad_input(OP_PLACE, CornerInput::BlendGeometryNotBuilt))?;
+                    .ok_or_else(|| bad_setup(OP_PLACE, FilletSetUp::RailOffsetSurface, None))?;
                 let domain = offset_natural_uv_domain(offset);
                 let solved = offset_local_point_solve(k, offset, &domain, centre, guess)?;
                 let Some((uv, _)) = solved else {
@@ -1234,7 +1305,7 @@ pub fn ball_corner_edge_geom(
     solvers: &dyn BallSolvers,
 ) -> Result<()> {
     let Some(slot) = corner.ball.as_mut() else {
-        return Err(bad_input(OP_BUILD, CornerInput::EventNotSet));
+        return Err(bad_input(OP_BUILD, CornerInput::EventNotSet, None));
     };
     slot.delete_surface();
     let (centre, radius, contacts) = ball_centre(k, target, pseudo, corner, solvers)?;
@@ -1248,9 +1319,14 @@ pub fn ball_corner_edge_geom(
         .as_deref()
         .and_then(<[EdgeuseId]>::first)
         .copied()
-        .ok_or_else(|| bad_input(OP_BUILD, CornerInput::RingNotSet))?;
-    let first_edge = eu1::edge(target, first)?
-        .ok_or_else(|| bad_input(OP_BUILD, CornerInput::EdgeuseWithoutEdge))?;
+        .ok_or_else(|| bad_input(OP_BUILD, CornerInput::RingNotSet, None))?;
+    let first_edge = eu1::edge(target, first)?.ok_or_else(|| {
+        bad_setup(
+            OP_BUILD,
+            FilletSetUp::EdgeUseEdge,
+            Some(EntityRef::Edgeuse(first)),
+        )
+    })?;
     let adds_material = is_concave_edge(k, target, first_edge)?;
 
     // each contact's direction from the centre and its corner vertex's point (ball_centre
@@ -1387,9 +1463,9 @@ pub fn create_ball_patch(
     let ball = corner
         .ball
         .as_mut()
-        .ok_or_else(|| bad_input(OP_PATCH, CornerInput::EventNotSet))?;
+        .ok_or_else(|| bad_input(OP_PATCH, CornerInput::EventNotSet, None))?;
     if ball.surfaces.is_empty() || ball.loops.len() != ball.surfaces.len() {
-        return Err(bad_input(OP_PATCH, CornerInput::EventMalformed));
+        return Err(bad_input(OP_PATCH, CornerInput::EventMalformed, None));
     }
     let surfaces = std::mem::take(&mut ball.surfaces);
     let loops = std::mem::take(&mut ball.loops);
@@ -1404,7 +1480,7 @@ pub fn create_ball_patch(
         for _ in 0..count {
             let (Some(c), Some(u), Some(o)) = (curves_3d.next(), uv_curves.next(), orients.next())
             else {
-                return Err(bad_input(OP_PATCH, CornerInput::EventMalformed));
+                return Err(bad_input(OP_PATCH, CornerInput::EventMalformed, None));
             };
             c3.push(Some(c));
             uv.push(u);
@@ -1413,7 +1489,7 @@ pub fn create_ball_patch(
         let fillet = env
             .fillet
             .as_mut()
-            .ok_or_else(|| bad_input(OP_PATCH, CornerInput::FilletBrepNotGiven))?;
+            .ok_or_else(|| bad_input(OP_PATCH, CornerInput::FilletBrepNotGiven, None))?;
         let input = FaceCurvesInput {
             loops: vec![count],
             curves_3d: Some(c3),

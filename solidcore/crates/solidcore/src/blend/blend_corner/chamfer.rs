@@ -93,7 +93,7 @@ use crate::blend::fillet_solver::p1::FilletSolver;
 use crate::blend::fillet_solver::p5::is_concave_edge;
 use crate::curve::curve::Curve;
 use crate::curve::line::Line;
-use crate::error::blend::{BlendFailure, CornerInput, CornerStep};
+use crate::error::blend::{BlendFailure, CornerInput, CornerStep, FilletSetUp};
 use crate::error::{EntityRef, Failure, Result, SolidError, SM_ERR_NULL_POINTER};
 use crate::geom::extent2d::Extent2d;
 use crate::kernel::Kernel;
@@ -124,17 +124,46 @@ fn missing_defect(op: &'static str, why: &'static str) -> SolidError {
 }
 
 /// Invalid input to `op`: the caller's corner, fillet B-rep or body is not what the corner's
-/// construction reads (`input`), with the status the site returned before
-/// ([`CornerInput::status`]). The entry points are public and take a caller's corner.
+/// construction reads (`input`), about `entity` where the check reads one, with the status
+/// the site returned before ([`CornerInput::upstream_status`]). The entry points are public
+/// and take a caller's corner.
 #[track_caller]
-fn bad_input(op: &'static str, input: CornerInput) -> SolidError {
-    SolidError::blend(op, BlendFailure::CornerInputInvalid(input))
+fn bad_input(op: &'static str, input: CornerInput, entity: Option<EntityRef>) -> SolidError {
+    corner_input(op, input, entity).into_error()
+}
+
+/// The [`Failure`] of [`bad_input`], located at `entity` where there is one.
+#[track_caller]
+fn corner_input(op: &'static str, input: CornerInput, entity: Option<EntityRef>) -> Failure {
+    let failure = Failure::new(op, BlendFailure::CornerInputInvalid { input, entity });
+    match entity {
+        Some(at) => failure.at(at),
+        None => failure,
+    }
+}
+
+/// Invalid input to `op`: a link of the caller's fillet structures that the corner reads is
+/// not there (`part`), about `entity` where the check reads one; status
+/// `SM_ERR_NULL_POINTER`, the site's.
+#[track_caller]
+fn bad_setup(op: &'static str, part: FilletSetUp, entity: Option<EntityRef>) -> SolidError {
+    let failure = Failure::new(op, BlendFailure::FilletSetUpInvalid(part));
+    match entity {
+        Some(at) => failure.at(at),
+        None => failure,
+    }
+    .into_error()
 }
 
 /// [`bad_input`], chaining the error of the step that failed (`cause`).
 #[track_caller]
-fn bad_input_caused(op: &'static str, input: CornerInput, cause: SolidError) -> SolidError {
-    Failure::new(op, BlendFailure::CornerInputInvalid(input))
+fn bad_input_caused(
+    op: &'static str,
+    input: CornerInput,
+    entity: Option<EntityRef>,
+    cause: SolidError,
+) -> SolidError {
+    corner_input(op, input, entity)
         .caused_by(cause)
         .into_error()
 }
@@ -704,10 +733,20 @@ pub fn classify_chamfer(
     let mut concave0 = None;
     let mut mixed = false;
     for &eu in all_eus {
-        let e = eu1::edge(b, eu)?
-            .ok_or_else(|| bad_input(OP_CLASSIFY, CornerInput::EdgeuseWithoutEdge))?;
-        let curve = edge::curve(b, e)?
-            .ok_or_else(|| bad_input(OP_CLASSIFY, CornerInput::EdgeWithoutCurve))?;
+        let e = eu1::edge(b, eu)?.ok_or_else(|| {
+            bad_setup(
+                OP_CLASSIFY,
+                FilletSetUp::EdgeUseEdge,
+                Some(EntityRef::Edgeuse(eu)),
+            )
+        })?;
+        let curve = edge::curve(b, e)?.ok_or_else(|| {
+            bad_input(
+                OP_CLASSIFY,
+                CornerInput::EdgeWithoutCurve,
+                Some(EntityRef::Edge(e)),
+            )
+        })?;
         let Some((_, dir)) = curve.is_line(k, 10, tol)? else {
             return Ok(ChamferClass::Declined(
                 "an edge at the vertex is not a straight line",
@@ -718,11 +757,21 @@ pub fn classify_chamfer(
                 "an edge at the vertex has no direction",
             ));
         };
-        let start = edge::vertex(b, e)?
-            .ok_or_else(|| bad_input(OP_CLASSIFY, CornerInput::EdgeWithoutVertex))?;
+        let start = edge::vertex(b, e)?.ok_or_else(|| {
+            bad_input(
+                OP_CLASSIFY,
+                CornerInput::EdgeWithoutVertex,
+                Some(EntityRef::Edge(e)),
+            )
+        })?;
         let other = if start == vertex {
-            edge::other_vertex(b, e, Some(start))?
-                .ok_or_else(|| bad_input(OP_CLASSIFY, CornerInput::EdgeWithoutVertex))?
+            edge::other_vertex(b, e, Some(start))?.ok_or_else(|| {
+                bad_input(
+                    OP_CLASSIFY,
+                    CornerInput::EdgeWithoutVertex,
+                    Some(EntityRef::Edge(e)),
+                )
+            })?
         } else {
             start
         };
@@ -748,8 +797,13 @@ pub fn classify_chamfer(
         if faces.iter().filter(|f| **f == Some(face)).count() > 1 {
             return Ok(ChamferClass::Declined("a face meets the vertex twice"));
         }
-        let surface = face2::surface(b, face)?
-            .ok_or_else(|| bad_input(OP_CLASSIFY, CornerInput::FaceWithoutSurface))?;
+        let surface = face2::surface(b, face)?.ok_or_else(|| {
+            bad_input(
+                OP_CLASSIFY,
+                CornerInput::FaceWithoutSurface,
+                Some(EntityRef::Face(face)),
+            )
+        })?;
         let planar = surface.is_planar(k, tol)?;
         if !planar.is_planar {
             return Ok(ChamferClass::Declined(
@@ -795,7 +849,9 @@ pub fn classify_chamfer(
                 let offset = |r: usize| -> Result<f64> {
                     Ok(solver
                         .surface(r)?
-                        .ok_or_else(|| bad_input(OP_CLASSIFY, CornerInput::BlendGeometryNotBuilt))?
+                        .ok_or_else(|| {
+                            bad_setup(OP_CLASSIFY, FilletSetUp::SolverOffsetSurface, None)
+                        })?
                         .surface
                         .offset_distance()
                         .abs())
@@ -1039,15 +1095,19 @@ pub fn place_chamfer_vertices(pseudo: &mut FilletBrep, corner: &FilletCorner) ->
     let event = &corner
         .chamfer_corner
         .as_ref()
-        .ok_or_else(|| bad_input(OP_PLACE, CornerInput::EventNotSet))?
+        .ok_or_else(|| bad_input(OP_PLACE, CornerInput::EventNotSet, None))?
         .definition;
     let count = event.crossings.len();
     if corner.vertices.len() != count + usize::from(event.mitre.is_some()) {
-        return Err(bad_input(OP_PLACE, CornerInput::TopologyMismatch));
+        return Err(bad_input(OP_PLACE, CornerInput::TopologyMismatch, None));
     }
     for (&fv, &x) in corner.vertices.iter().zip(&event.crossings) {
         if !pseudo.fillet_vertex(fv)?.is_processed() {
-            return Err(bad_input(OP_PLACE, CornerInput::VertexNotProcessed));
+            return Err(bad_input(
+                OP_PLACE,
+                CornerInput::VertexNotProcessed,
+                Some(EntityRef::Vertex(fv)),
+            ));
         }
         if pseudo.vertex_point(fv)?.distance(x) > corner.approx_tol_3d {
             return Err(unbuildable(OP_PLACE, CornerStep::ChamferCrossingOffExact));
@@ -1121,7 +1181,7 @@ pub fn chamfer_corner_edge_geom(
     corner: &mut FilletCorner,
 ) -> Result<()> {
     let Some(event) = corner.chamfer_corner.as_mut() else {
-        return Err(bad_input(OP_EDGES, CornerInput::EventNotSet));
+        return Err(bad_input(OP_EDGES, CornerInput::EventNotSet, None));
     };
     let mitre = event.definition.is_mitre();
     let mut size = 1.0_f64;
@@ -1145,20 +1205,44 @@ pub fn chamfer_corner_edge_geom(
     };
     for &e in &corner.edges {
         if pseudo.fillet_edge(e)?.fillet_edge_type() != edge_type {
-            return Err(bad_input(OP_EDGES, CornerInput::TopologyMismatch));
+            return Err(bad_input(
+                OP_EDGES,
+                CornerInput::TopologyMismatch,
+                Some(EntityRef::Edge(e)),
+            ));
         }
-        let start = edge::vertex(pseudo.brep(), e)?
-            .ok_or_else(|| bad_input(OP_EDGES, CornerInput::EdgeWithoutVertex))?;
-        let end = edge::other_vertex(pseudo.brep(), e, Some(start))?
-            .ok_or_else(|| bad_input(OP_EDGES, CornerInput::EdgeWithoutVertex))?;
+        let start = edge::vertex(pseudo.brep(), e)?.ok_or_else(|| {
+            bad_input(
+                OP_EDGES,
+                CornerInput::EdgeWithoutVertex,
+                Some(EntityRef::Edge(e)),
+            )
+        })?;
+        let end = edge::other_vertex(pseudo.brep(), e, Some(start))?.ok_or_else(|| {
+            bad_input(
+                OP_EDGES,
+                CornerInput::EdgeWithoutVertex,
+                Some(EntityRef::Edge(e)),
+            )
+        })?;
         let (p, q) = (pseudo.vertex_point(start)?, pseudo.vertex_point(end)?);
         let line = Curve::from(Line::create_line_segment(3, p, q, None)?);
         let ivl = line.natural_interval();
         let span = [ivl.min(), ivl.max()];
-        let prim = eu1::primary_edgeuse(pseudo.brep(), e)?
-            .ok_or_else(|| bad_input(OP_EDGES, CornerInput::EdgeWithoutPrimaryEdgeuse))?;
-        let mate = eu1::mate(pseudo.brep(), prim)?
-            .ok_or_else(|| bad_input(OP_EDGES, CornerInput::EdgeuseWithoutMate))?;
+        let prim = eu1::primary_edgeuse(pseudo.brep(), e)?.ok_or_else(|| {
+            bad_setup(
+                OP_EDGES,
+                FilletSetUp::PrimaryEdgeUse,
+                Some(EntityRef::Edge(e)),
+            )
+        })?;
+        let mate = eu1::mate(pseudo.brep(), prim)?.ok_or_else(|| {
+            bad_setup(
+                OP_EDGES,
+                FilletSetUp::PrimaryEdgeUseMate,
+                Some(EntityRef::Edgeuse(prim)),
+            )
+        })?;
         for eu in [prim, mate] {
             let Some(g) = pseudo.fillet_edgeuse(eu)?.fillet_geom() else {
                 continue; // the facet's side of a facet edge: the patch's own loop
@@ -1166,7 +1250,7 @@ pub fn chamfer_corner_edge_geom(
             let surface = pseudo
                 .geom(g)?
                 .fillet_surface(None)?
-                .ok_or_else(|| bad_input(OP_EDGES, CornerInput::BlendGeometryNotBuilt))?
+                .ok_or_else(|| bad_input(OP_EDGES, CornerInput::FilletGeomWithoutSurface, None))?
                 .clone();
             // the chamfer's surface is its solver's; its feet are searches and its
             // parameters need not be affine along the line
@@ -1198,9 +1282,9 @@ pub fn chamfer_corner_edge_geom(
     let normal = event
         .definition
         .facet_normal
-        .ok_or_else(|| bad_input(OP_EDGES, CornerInput::FacetNormalNotSet))?
+        .ok_or_else(|| bad_input(OP_EDGES, CornerInput::FacetNormalNotSet, None))?
         .unitize()
-        .map_err(|cause| bad_input_caused(OP_EDGES, CornerInput::EventMalformed, cause))?;
+        .map_err(|cause| bad_input_caused(OP_EDGES, CornerInput::EventMalformed, None, cause))?;
     let count = xs.len();
     let mut centre = Vec3::default();
     for x in xs {
@@ -1210,10 +1294,10 @@ pub fn chamfer_corner_edge_geom(
     let first = xs
         .first()
         .copied()
-        .ok_or_else(|| bad_input(OP_EDGES, CornerInput::EventMalformed))?;
+        .ok_or_else(|| bad_input(OP_EDGES, CornerInput::EventMalformed, None))?;
     let x_axis = (first - centre - normal * (first - centre).dot(normal))
         .unitize()
-        .map_err(|cause| bad_input_caused(OP_EDGES, CornerInput::EventMalformed, cause))?;
+        .map_err(|cause| bad_input_caused(OP_EDGES, CornerInput::EventMalformed, None, cause))?;
     let y_axis = normal.cross(x_axis);
     let uv_of = |p: Point3| Point2::new((p - centre).dot(x_axis), (p - centre).dot(y_axis));
     let (mut lo, mut hi) = (
@@ -1349,7 +1433,7 @@ fn patch_faces(event: &mut ChamferCorner, patch: &ChamferPatch) -> Result<()> {
         .filter_map(|&i| xs.get(i).copied())
         .collect();
     if n != xs.len() || n < 4 || ring.len() != n {
-        return Err(bad_input(OP_EDGES, CornerInput::EventMalformed));
+        return Err(bad_input(OP_EDGES, CornerInput::EventMalformed, None));
     }
     let mut faces = Vec::new();
     if let &[a, b, c, d] = ring.as_slice() {
@@ -1388,15 +1472,15 @@ pub fn create_chamfer_patch(
     let event = corner
         .chamfer_corner
         .as_mut()
-        .ok_or_else(|| bad_input(OP_PATCH, CornerInput::EventNotSet))?;
+        .ok_or_else(|| bad_input(OP_PATCH, CornerInput::EventNotSet, None))?;
     let faces = std::mem::take(&mut event.faces);
     if faces.is_empty() {
-        return Err(bad_input(OP_PATCH, CornerInput::FacesNotBuilt));
+        return Err(bad_input(OP_PATCH, CornerInput::FacesNotBuilt, None));
     }
     let fillet = env
         .fillet
         .as_mut()
-        .ok_or_else(|| bad_input(OP_PATCH, CornerInput::FilletBrepNotGiven))?;
+        .ok_or_else(|| bad_input(OP_PATCH, CornerInput::FilletBrepNotGiven, None))?;
     for face in faces {
         let input = FaceCurvesInput {
             loops: vec![face.curves_3d.len()],
@@ -1447,7 +1531,10 @@ mod tests {
         let err = place_chamfer_vertices(&mut FilletBrep::new(), &corner).unwrap_err();
         assert_eq!(
             err.blend_failure(),
-            Some(&BlendFailure::CornerInputInvalid(CornerInput::EventNotSet)),
+            Some(&BlendFailure::CornerInputInvalid {
+                input: CornerInput::EventNotSet,
+                entity: None,
+            }),
             "{err:?}"
         );
         assert!(!err.is_defect(), "{err:?}");

@@ -55,7 +55,7 @@ use crate::blend::fillet_geom::p4::set_edge_curve;
 use crate::blend::fillet_solver::p1::{FilletSolver, FilletSurfaceGeneratorType};
 use crate::blend::fillet_solver::p5::is_concave_edge;
 use crate::curve::curve::{Curve, CurveKind};
-use crate::error::blend::{BlendFailure, CornerInput, CornerStep, MixedStep};
+use crate::error::blend::{BlendFailure, CornerInput, CornerStep, FilletSetUp, MixedStep};
 use crate::error::{EntityRef, Failure, Result, SolidError, SM_ERR_NULL_POINTER};
 use crate::geom::axis2_placement::Axis2Placement;
 use crate::geom::extent1d::Extent1d;
@@ -155,11 +155,35 @@ fn missing_defect(op: &'static str, why: &'static str) -> SolidError {
 }
 
 /// Invalid input to `op`: the caller's corner, fillet B-rep or body is not what the corner's
-/// construction reads (`input`), with the status the site returned before
-/// ([`CornerInput::status`]). The entry points are public and take a caller's corner.
+/// construction reads (`input`), about `entity` where the check reads one, with the status
+/// the site returned before ([`CornerInput::upstream_status`]). The entry points are public
+/// and take a caller's corner.
 #[track_caller]
-fn bad_input(op: &'static str, input: CornerInput) -> SolidError {
-    SolidError::blend(op, BlendFailure::CornerInputInvalid(input))
+fn bad_input(op: &'static str, input: CornerInput, entity: Option<EntityRef>) -> SolidError {
+    corner_input(op, input, entity).into_error()
+}
+
+/// The [`Failure`] of [`bad_input`], located at `entity` where there is one.
+#[track_caller]
+fn corner_input(op: &'static str, input: CornerInput, entity: Option<EntityRef>) -> Failure {
+    let failure = Failure::new(op, BlendFailure::CornerInputInvalid { input, entity });
+    match entity {
+        Some(at) => failure.at(at),
+        None => failure,
+    }
+}
+
+/// Invalid input to `op`: a link of the caller's fillet structures that the corner reads is
+/// not there (`part`), about `entity` where the check reads one; status
+/// `SM_ERR_NULL_POINTER`, the site's.
+#[track_caller]
+fn bad_setup(op: &'static str, part: FilletSetUp, entity: Option<EntityRef>) -> SolidError {
+    let failure = Failure::new(op, BlendFailure::FilletSetUpInvalid(part));
+    match entity {
+        Some(at) => failure.at(at),
+        None => failure,
+    }
+    .into_error()
 }
 
 /// The corner has no construction at `step` (status `SM_ERR`).
@@ -280,10 +304,20 @@ pub(crate) fn mixed_ring<S: Copy>(
     let &[eu0, eu1_] = solver_eus else {
         return Ok(None);
     };
-    let e0 = eu1::edge(b, eu0)?
-        .ok_or_else(|| bad_input(OP_CLASSIFY, CornerInput::EdgeuseWithoutEdge))?;
-    let e1 = eu1::edge(b, eu1_)?
-        .ok_or_else(|| bad_input(OP_CLASSIFY, CornerInput::EdgeuseWithoutEdge))?;
+    let e0 = eu1::edge(b, eu0)?.ok_or_else(|| {
+        bad_setup(
+            OP_CLASSIFY,
+            FilletSetUp::EdgeUseEdge,
+            Some(EntityRef::Edgeuse(eu0)),
+        )
+    })?;
+    let e1 = eu1::edge(b, eu1_)?.ok_or_else(|| {
+        bad_setup(
+            OP_CLASSIFY,
+            FilletSetUp::EdgeUseEdge,
+            Some(EntityRef::Edgeuse(eu1_)),
+        )
+    })?;
     let concave = [is_concave_edge(k, b, e0)?, is_concave_edge(k, b, e1)?];
     if concave[0] == concave[1] {
         return Ok(None);
@@ -311,8 +345,13 @@ pub(crate) fn mixed_ring<S: Copy>(
 
 /// The face of `eu`'s sector other than `not`, where the sector holds `not`.
 fn other_face(b: &Brep, eu: EdgeuseId, not: FaceId) -> Result<Option<FaceId>> {
-    let radial = eu1::radial(b, eu)?
-        .ok_or_else(|| bad_input(OP_CLASSIFY, CornerInput::EdgeuseWithoutRadial))?;
+    let radial = eu1::radial(b, eu)?.ok_or_else(|| {
+        bad_input(
+            OP_CLASSIFY,
+            CornerInput::EdgeUseWithoutRadial,
+            Some(EntityRef::Edgeuse(eu)),
+        )
+    })?;
     let faces = [eu1::face(b, eu)?, eu1::face(b, radial)?];
     Ok(match faces {
         [Some(f), Some(g)] if f == not => Some(g),
@@ -569,12 +608,16 @@ pub(crate) fn leaving(
 ) -> Result<Vec3> {
     let at_start = edge::start_vertex(b, e)? == Some(vertex);
     if !at_start && edge::end_vertex(b, e)? != Some(vertex) {
-        return Err(bad_input(op, CornerInput::EdgeOffVertex));
+        return Err(bad_input(
+            op,
+            CornerInput::EdgeOffVertex,
+            Some(EntityRef::Edge(e)),
+        ));
     }
     // the one evaluation, inside the edge and turned away from the vertex
     let d = match leaving_tangent(k, b, e, at_start)? {
         Leaving::NoCurve => {
-            return Err(bad_input(op, CornerInput::EdgeWithoutCurve))
+            return Err(bad_input(op, CornerInput::EdgeWithoutCurve, Some(EntityRef::Edge(e))))
         }
         Leaving::NoTangent => {
             return Err(defect(
@@ -706,17 +749,15 @@ fn rails(
         let geom = pseudo.geom(g)?;
         let it = fs.find_index_of_rail_on_face(target, Some(mixed.ring.t))?;
         let iw = fs.find_index_of_rail_on_face(target, Some(wall))?;
-        let rail_curve = |idx| -> Result<Curve> {
-            let rail = geom
-                .rail(idx)
-                .ok_or_else(|| bad_input(op, CornerInput::BlendGeometryNotBuilt))?;
-            pseudo
-                .brep()
-                .edge(rail)?
-                .curve
-                .clone()
-                .ok_or_else(|| bad_input(op, CornerInput::BlendGeometryNotBuilt))
-        };
+        let rail_curve =
+            |idx| -> Result<Curve> {
+                let rail = geom
+                    .rail(idx)
+                    .ok_or_else(|| bad_input(op, CornerInput::FilletGeomWithoutRail, None))?;
+                pseudo.brep().edge(rail)?.curve.clone().ok_or_else(|| {
+                    bad_setup(op, FilletSetUp::RailCurve, Some(EntityRef::Edge(rail)))
+                })
+            };
         Ok([rail_curve(it)?, rail_curve(iw)?])
     };
     let [t0, w0] = pair(solvers[0], mixed.ring.f1)?;
@@ -758,12 +799,12 @@ pub fn calc_mixed_vert_geom(
     let mixed = corner
         .mixed
         .as_ref()
-        .ok_or_else(|| bad_input(OP_VERT, CornerInput::EventNotSet))?;
+        .ok_or_else(|| bad_input(OP_VERT, CornerInput::EventNotSet, None))?;
     let &[x, a, p, v, q, bv] = corner.vertices.as_slice() else {
-        return Err(bad_input(OP_VERT, CornerInput::TopologyMismatch));
+        return Err(bad_input(OP_VERT, CornerInput::TopologyMismatch, None));
     };
     if corner.edges.len() != 7 {
-        return Err(bad_input(OP_VERT, CornerInput::TopologyMismatch));
+        return Err(bad_input(OP_VERT, CornerInput::TopologyMismatch, None));
     }
     let fs = [
         solvers.solver(mixed.solvers[0])?,
@@ -776,14 +817,16 @@ pub fn calc_mixed_vert_geom(
         }
     }
     if !pseudo.fillet_vertex(x)?.is_processed() || !pseudo.fillet_vertex(v)?.is_processed() {
-        return Err(bad_input(OP_VERT, CornerInput::VertexNotProcessed));
+        return Err(bad_input(OP_VERT, CornerInput::VertexNotProcessed, None));
     }
     let tol = corner.approx_tol_3d;
-    let t_surface = target
-        .face(mixed.ring.t)?
-        .surface
-        .as_ref()
-        .ok_or_else(|| bad_input(OP_VERT, CornerInput::FaceWithoutSurface))?;
+    let t_surface = target.face(mixed.ring.t)?.surface.as_ref().ok_or_else(|| {
+        bad_input(
+            OP_VERT,
+            CornerInput::FaceWithoutSurface,
+            Some(EntityRef::Face(mixed.ring.t)),
+        )
+    })?;
     let normal = plane_normal(k, t_surface, tol, OP_VERT)?;
     let sv = pseudo.vertex_point(v)?;
     let sx = pseudo.vertex_point(x)?;
@@ -808,11 +851,16 @@ pub fn calc_mixed_vert_geom(
     }
 
     // P: B1's wall rail crosses the seam; Q: B2's wall rail crosses the seam's line past V
-    let seam_e = eu1::edge(target, mixed.ring.seam)?
-        .ok_or_else(|| bad_input(OP_VERT, CornerInput::EdgeuseWithoutEdge))?;
+    let seam_e = eu1::edge(target, mixed.ring.seam)?.ok_or_else(|| {
+        bad_setup(
+            OP_VERT,
+            FilletSetUp::EdgeUseEdge,
+            Some(EntityRef::Edgeuse(mixed.ring.seam)),
+        )
+    })?;
     let vertex = corner
         .vertex
-        .ok_or_else(|| bad_input(OP_VERT, CornerInput::VertexNotSet))?;
+        .ok_or_else(|| bad_setup(OP_VERT, FilletSetUp::CornerVertex, None))?;
     let along = leaving(k, target, seam_e, vertex, OP_VERT)?;
     let line = Curve::from(BSplineCurve::create_line_segment(
         3,
@@ -888,11 +936,13 @@ fn normal_at(
     tol: f64,
     op: &'static str,
 ) -> Result<Vec3> {
-    let surface = b
-        .face(face)?
-        .surface
-        .clone()
-        .ok_or_else(|| bad_input(op, CornerInput::FaceWithoutSurface))?;
+    let surface = b.face(face)?.surface.clone().ok_or_else(|| {
+        bad_input(
+            op,
+            CornerInput::FaceWithoutSurface,
+            Some(EntityRef::Face(face)),
+        )
+    })?;
     let dom = surface.natural_uv_domain_with_nurb(k)?;
     let mut test_on: Option<bool> = None;
     let mut classify = |k: &Kernel, uv: Point2, src_tol: f64| -> Result<bool> {
@@ -953,16 +1003,20 @@ pub fn calc_mixed_edge_geom(
     solvers: &dyn SweptSolvers,
 ) -> Result<()> {
     let Some(mixed) = corner.mixed.as_mut() else {
-        return Err(bad_input(OP_EDGE, CornerInput::EventNotSet));
+        return Err(bad_input(OP_EDGE, CornerInput::EventNotSet, None));
     };
     let ring = mixed.ring;
     for &v in &corner.vertices {
         if !pseudo.fillet_vertex(v)?.is_processed() {
-            return Err(bad_input(OP_EDGE, CornerInput::VertexNotProcessed));
+            return Err(bad_input(
+                OP_EDGE,
+                CornerInput::VertexNotProcessed,
+                Some(EntityRef::Vertex(v)),
+            ));
         }
     }
     let &[x, a, p, v, q, bv] = corner.vertices.as_slice() else {
-        return Err(bad_input(OP_EDGE, CornerInput::TopologyMismatch));
+        return Err(bad_input(OP_EDGE, CornerInput::TopologyMismatch, None));
     };
     let fs = [
         solvers.solver(mixed.solvers[0])?,
@@ -975,18 +1029,20 @@ pub fn calc_mixed_edge_geom(
     let mut chamfer = false;
     for s in fs {
         if s.fillet_surface_generator()
-            .ok_or_else(|| bad_input(OP_EDGE, CornerInput::BlendGeometryNotBuilt))?
+            .ok_or_else(|| bad_setup(OP_EDGE, FilletSetUp::SurfaceGenerator, None))?
             .fillet_surface_generator_type()
             == FilletSurfaceGeneratorType::Linear
         {
             chamfer = true;
         }
     }
-    let common = target
-        .face(ring.t)?
-        .surface
-        .clone()
-        .ok_or_else(|| bad_input(OP_EDGE, CornerInput::FaceWithoutSurface))?;
+    let common = target.face(ring.t)?.surface.clone().ok_or_else(|| {
+        bad_input(
+            OP_EDGE,
+            CornerInput::FaceWithoutSurface,
+            Some(EntityRef::Face(ring.t)),
+        )
+    })?;
     let normal = plane_normal(k, &common, tol, OP_EDGE)?;
     let sx = pseudo.vertex_point(x)?;
     let sv = pseudo.vertex_point(v)?;
@@ -998,7 +1054,7 @@ pub fn calc_mixed_edge_geom(
         Ok(pseudo
             .geom(g)?
             .fillet_surface(None)?
-            .ok_or_else(|| bad_input(OP_EDGE, CornerInput::BlendGeometryNotBuilt))?
+            .ok_or_else(|| bad_input(OP_EDGE, CornerInput::FilletGeomWithoutSurface, None))?
             .clone())
     };
     let rounds = [round_of(geoms[0])?, round_of(geoms[1])?];
@@ -1006,13 +1062,28 @@ pub fn calc_mixed_edge_geom(
     // the edges' directions at V, the seam's, the concave edge's axis (Omega through O)
     let vertex = corner
         .vertex
-        .ok_or_else(|| bad_input(OP_EDGE, CornerInput::VertexNotSet))?;
-    let convex_e = eu1::edge(target, ring.convex)?
-        .ok_or_else(|| bad_input(OP_EDGE, CornerInput::EdgeuseWithoutEdge))?;
-    let seam_e = eu1::edge(target, ring.seam)?
-        .ok_or_else(|| bad_input(OP_EDGE, CornerInput::EdgeuseWithoutEdge))?;
-    let concave_e = eu1::edge(target, ring.concave)?
-        .ok_or_else(|| bad_input(OP_EDGE, CornerInput::EdgeuseWithoutEdge))?;
+        .ok_or_else(|| bad_setup(OP_EDGE, FilletSetUp::CornerVertex, None))?;
+    let convex_e = eu1::edge(target, ring.convex)?.ok_or_else(|| {
+        bad_setup(
+            OP_EDGE,
+            FilletSetUp::EdgeUseEdge,
+            Some(EntityRef::Edgeuse(ring.convex)),
+        )
+    })?;
+    let seam_e = eu1::edge(target, ring.seam)?.ok_or_else(|| {
+        bad_setup(
+            OP_EDGE,
+            FilletSetUp::EdgeUseEdge,
+            Some(EntityRef::Edgeuse(ring.seam)),
+        )
+    })?;
+    let concave_e = eu1::edge(target, ring.concave)?.ok_or_else(|| {
+        bad_setup(
+            OP_EDGE,
+            FilletSetUp::EdgeUseEdge,
+            Some(EntityRef::Edgeuse(ring.concave)),
+        )
+    })?;
     // along the convex edge into V, on along the concave one
     let chain = -leaving(k, target, convex_e, vertex, OP_EDGE)?;
     let seam_dir = leaving(k, target, seam_e, vertex, OP_EDGE)?;
@@ -1020,8 +1091,13 @@ pub fn calc_mixed_edge_geom(
     let omega = normal;
     let o = {
         // the concave edge's circle: its centre from three of its points
-        let arc = edge::curve(target, concave_e)?
-            .ok_or_else(|| bad_input(OP_EDGE, CornerInput::EdgeWithoutCurve))?;
+        let arc = edge::curve(target, concave_e)?.ok_or_else(|| {
+            bad_input(
+                OP_EDGE,
+                CornerInput::EdgeWithoutCurve,
+                Some(EntityRef::Edge(concave_e)),
+            )
+        })?;
         let ivl = edge::interval(target, concave_e)?;
         let p0 = arc.evaluate_point(k, ivl.evaluate(0.1))?;
         let p1 = arc.evaluate_point(k, ivl.evaluate(0.5))?;
@@ -1640,7 +1716,7 @@ pub fn calc_mixed_edge_geom(
         .edges
         .as_slice()
         .try_into()
-        .map_err(|_| bad_input(OP_EDGE, CornerInput::TopologyMismatch))?;
+        .map_err(|_| bad_input(OP_EDGE, CornerInput::TopologyMismatch, None))?;
     for (((&face, &side), &reversed), &e) in faces.iter().zip(&which).zip(&rev).zip(&edges) {
         let iso = of2(&side_curves, face)
             .get(side)
@@ -1663,8 +1739,13 @@ pub fn calc_mixed_edge_geom(
     for ii in 0..2 {
         let uv = algebra::to_uv(of2(&pcs, ii))?;
         let e = if ii == 0 { edges[0] } else { edges[6] };
-        let prim = eu1::primary_edgeuse(pseudo.brep(), e)?
-            .ok_or_else(|| bad_input(OP_EDGE, CornerInput::EdgeWithoutPrimaryEdgeuse))?;
+        let prim = eu1::primary_edgeuse(pseudo.brep(), e)?.ok_or_else(|| {
+            bad_setup(
+                OP_EDGE,
+                FilletSetUp::PrimaryEdgeUse,
+                Some(EntityRef::Edge(e)),
+            )
+        })?;
         pseudo.set_edgeuse_uv_curve(prim, Some(Curve::from(uv)), true, false)?;
         pseudo
             .geom_mut(*of2(&geoms, ii))?
@@ -1690,17 +1771,17 @@ pub fn create_mixed_patches(
         let mixed = corner
             .mixed
             .as_mut()
-            .ok_or_else(|| bad_input(OP_PATCH, CornerInput::EventNotSet))?;
+            .ok_or_else(|| bad_input(OP_PATCH, CornerInput::EventNotSet, None))?;
         let surface = of2m(&mut mixed.surfaces, f)
             .take()
-            .ok_or_else(|| bad_input(OP_PATCH, CornerInput::FacesNotBuilt))?;
+            .ok_or_else(|| bad_input(OP_PATCH, CornerInput::FacesNotBuilt, None))?;
         let curves_3d = std::mem::take(of2m(&mut mixed.curves_3d, f));
         let uv_curves = std::mem::take(of2m(&mut mixed.uv_curves, f));
         let orients = of2(&mixed.orients, f).clone();
         let fillet = env
             .fillet
             .as_mut()
-            .ok_or_else(|| bad_input(OP_PATCH, CornerInput::FilletBrepNotGiven))?;
+            .ok_or_else(|| bad_input(OP_PATCH, CornerInput::FilletBrepNotGiven, None))?;
         let input = FaceCurvesInput {
             loops: vec![curves_3d.len()],
             curves_3d: Some(curves_3d.into_iter().map(Some).collect()),
@@ -1800,9 +1881,10 @@ mod tests {
         let err = leaving(&k, &b, e, off, OP_VERT).unwrap_err();
         assert_eq!(
             err.blend_failure(),
-            Some(&BlendFailure::CornerInputInvalid(
-                CornerInput::EdgeOffVertex
-            )),
+            Some(&BlendFailure::CornerInputInvalid {
+                input: CornerInput::EdgeOffVertex,
+                entity: Some(EntityRef::Edge(e)),
+            }),
             "{err:?}"
         );
         assert!(!err.is_defect(), "{err:?}");

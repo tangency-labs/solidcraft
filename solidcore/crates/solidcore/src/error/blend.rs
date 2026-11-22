@@ -26,7 +26,7 @@
 //! | [`BlendFailure::BallsNest`]            | [`ErrorKind::BallsFold`] (105)                |
 //! | [`BlendFailure::MixedCornerUnbuildable`] | the step's ([`MixedStep::class`]): [`ErrorKind::NotFound`] (2), [`ErrorKind::Degenerate`] (3) or [`ErrorKind::Unsupported`] (5) |
 //! | [`BlendFailure::CornerUnbuildable`] | the step's ([`CornerStep::class`]): [`ErrorKind::NotFound`] (2), [`ErrorKind::Degenerate`] (3), [`ErrorKind::Unsupported`] (5) or [`ErrorKind::NotWithinTolerance`] (9) |
-//! | the corner entry points' checks of the caller's corner, fillet B-rep and body ([`BlendFailure::CornerInputInvalid`]) | [`ErrorKind::InvalidInput`] (1) |
+//! | the corner entry points' checks of the caller's corner, fillet B-rep and body ([`BlendFailure::CornerInputInvalid`]), and the checks of the fillet structures' links ([`BlendFailure::FilletSetUpInvalid`]) | [`ErrorKind::InvalidInput`] (1) |
 //! | [`BlendFailure::CreasePieceEndUnbuildable`], [`BlendFailure::BallTriangleNotOnePatch`] | [`ErrorKind::Unsupported`] (5) |
 //! | [`BlendFailure::NotCertified`]         | [`ErrorKind::NotWithinTolerance`] (9): neither defect nor refusal |
 //! | [`BlendFailure::BandInputMissing`]     | [`ErrorKind::Missing`]: neither defect nor refusal |
@@ -44,10 +44,10 @@
 //! |----------------------------------------|-----------------------------------|
 //! | [`BlendFailure::NoRoom`], [`BlendFailure::RemovalRefused`], [`BlendFailure::StationDidNotConverge`], [`BlendFailure::TrimLoopOpen`], [`BlendFailure::TrimLoopDoesNotSeparate`], [`BlendFailure::StageFailed`], [`BlendFailure::Defect`], [`BlendFailure::SkinPastStationCap`], [`BlendFailure::SkinMeasureNotFinite`], [`BlendFailure::BallsNest`], [`BlendFailure::CreasePieceEndUnbuildable`], [`BlendFailure::BallTriangleNotOnePatch`], [`BlendFailure::MixedCornerUnbuildable`], [`BlendFailure::CornerUnbuildable`], [`BlendFailure::PlaneCurveTouches`], [`BlendFailure::PlaneCurveEndOff`], [`BlendFailure::PlaneCurveLeavesDomain`], [`BlendFailure::PlaneCurveStepVanished`], [`BlendFailure::PlaneCurveFitCap`] | `SM_ERR` |
 //! | [`BlendFailure::Failed`], [`BlendFailure::LawIntervalEmpty`], [`BlendFailure::LawHasNoValue`], [`BlendFailure::FilletCrossesItself`], [`BlendFailure::CornerRefused`], [`BlendFailure::ExecutiveStepFailed`] | `SM_ERR` |
-//! | [`BlendFailure::Missing`], [`BlendFailure::BandInputMissing`], [`BlendFailure::VariableRadiusLawsNotGiven`], [`BlendFailure::BevelVertexNotFilleted`], [`BlendFailure::EdgeWithoutCurve`], [`BlendFailure::SequenceCurveNotBSpline`] | `SM_ERR_NULL_POINTER` |
+//! | [`BlendFailure::Missing`], [`BlendFailure::BandInputMissing`], [`BlendFailure::VariableRadiusLawsNotGiven`], [`BlendFailure::BevelVertexNotFilleted`], [`BlendFailure::EdgeWithoutCurve`], [`BlendFailure::SequenceCurveNotBSpline`], [`BlendFailure::FilletSetUpInvalid`] (`SM_ERR` where its site checks the link) | `SM_ERR_NULL_POINTER` |
 //! | [`BlendFailure::InvalidValue`], the fillet executive's other checks of the caller's arguments | `SM_ERR_INVALID_INPUT` |
 //! | [`BlendFailure::Inconsistent`]         | `SM_ERR_ASSERT_FAILURE`           |
-//! | [`BlendFailure::CornerInputInvalid`]   | the input's ([`CornerInput::status`]): `SM_ERR_NULL_POINTER` or `SM_ERR` |
+//! | [`BlendFailure::CornerInputInvalid`]   | the input's ([`CornerInput::upstream_status`]) unless the site says otherwise |
 //! | [`BlendFailure::BadIntersections`]     | `SM_ERR_BAD_INTERSECTIONS`        |
 //! | [`BlendFailure::NotConverged`]         | `SM_ERR_NOT_CONVERGING`           |
 //! | [`BlendFailure::OutsideDomain`]        | `SM_ERR_OUTSIDE_OF_DOMAIN`        |
@@ -209,13 +209,27 @@ pub enum BlendFailure {
     /// within rounding found or proved nothing, or the geometry is one the construction
     /// does not build. The step's class ([`CornerStep::class`]); status `SM_ERR`.
     CornerUnbuildable(CornerStep),
-    /// A ball, chamfer or Mixed corner's entry point was given corner state, a fillet
-    /// B-rep or a body that is not what the corner's construction reads: the entry points
-    /// are public and take a caller's [`crate::blend::fillet_corner::p3::FilletCorner`] and
-    /// [`crate::blend::fillet_geom::p1::FilletBrep`]. A check of the caller's input
-    /// ([`ErrorKind::InvalidInput`]); the status the site returned before
-    /// ([`CornerInput::status`]).
-    CornerInputInvalid(CornerInput),
+    /// A fillet corner step is given a corner, or a pseudo-B-rep, that is not as the corner
+    /// topology makes it: `input` names what it lacks or holds otherwise, `entity` the
+    /// entity it is about (of the pseudo-B-rep, of the target body, or the corner's vertex)
+    /// where the step has one. A check of the caller's corner ([`ErrorKind::InvalidInput`]):
+    /// the corner steps (`crate::blend::fillet_corner`) are public and read a `FilletCorner`
+    /// and a `FilletBrep` that a caller can build part by part, while the fillet executive
+    /// builds them whole before it runs the steps. Status that of the site it replaces
+    /// ([`CornerInput::upstream_status`] unless the site says otherwise). The ball, chamfer
+    /// and Mixed corner steps (`crate::blend::blend_corner`) check their corner the same way.
+    CornerInputInvalid {
+        /// What the corner or its pseudo-B-rep lacks or holds otherwise.
+        input: CornerInput,
+        /// The entity it is about, where the step has one.
+        entity: Option<EntityRef>,
+    },
+    /// A link of the fillet structures a routine is given (the fillet body, its corners and
+    /// solvers) is not there, or not as the routine needs: the link named. The caller's
+    /// input ([`ErrorKind::InvalidInput`]): a caller can build those structures with the
+    /// public API and leave the link out; status `SM_ERR_NULL_POINTER` where upstream
+    /// dereferences the link, `SM_ERR` where it checks it.
+    FilletSetUpInvalid(FilletSetUp),
     /// Tracing a surface/plane crossing found a station where the surface touches the
     /// plane: its tangent along the crossing has no length, so the crossing has no direction.
     /// Degenerate ([`ErrorKind::Degenerate`]); status `SM_ERR`.
@@ -823,129 +837,187 @@ impl CornerStep {
     }
 }
 
-/// What in a corner entry point's input is not what the corner's construction reads
-/// ([`BlendFailure::CornerInputInvalid`]). The ball, chamfer and Mixed entry points are
-/// public and read a caller's corner, fillet B-rep and body, so each of these can come from
-/// the caller.
+/// What a fillet corner given to a corner step lacks, or holds otherwise than the corner
+/// topology makes it ([`BlendFailure::CornerInputInvalid`]).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum CornerInput {
-    /// An edge use of the corner has no edge. Status `SM_ERR_NULL_POINTER`.
-    EdgeuseWithoutEdge,
-    /// An edge of the corner has no curve. Status `SM_ERR_NULL_POINTER`.
+    /// An edge with no curve.
     EdgeWithoutCurve,
-    /// An edge of the corner has no vertex at an end. Status `SM_ERR_NULL_POINTER`.
-    EdgeWithoutVertex,
-    /// An edge of the corner has no primary edge use. Status `SM_ERR_NULL_POINTER`.
-    EdgeWithoutPrimaryEdgeuse,
-    /// An edge use of the corner has no mate. Status `SM_ERR_NULL_POINTER`.
-    EdgeuseWithoutMate,
-    /// An edge use of the corner's ring has no face. Status `SM_ERR_NULL_POINTER`.
-    EdgeuseWithoutFace,
-    /// An edge use of the corner's ring has no radial. Status `SM_ERR_NULL_POINTER`.
-    EdgeuseWithoutRadial,
-    /// A face of the corner has no surface. Status `SM_ERR_NULL_POINTER`.
+    /// A face with no surface.
     FaceWithoutSurface,
-    /// The corner's edge is not on a round's fillet geometry. Status
-    /// `SM_ERR_NULL_POINTER`.
-    EdgeOffRound,
-    /// The corner's vertex has no use at the end of a round's rail. Status
-    /// `SM_ERR_NULL_POINTER`.
-    VertexOffRail,
-    /// The corner has no ring of edge uses. Status `SM_ERR_NULL_POINTER`.
+    /// A fillet geometry with no fillet surface.
+    FilletGeomWithoutSurface,
+    /// An edge of a ball, chamfer or Mixed corner with no vertex at an end.
+    EdgeWithoutVertex,
+    /// An edge use of a Mixed corner's ring with no radial.
+    EdgeUseWithoutRadial,
+    /// A fillet geometry with no rail edge on the face a Mixed corner reads it at.
+    FilletGeomWithoutRail,
+    /// A ball corner with no ring of edge uses.
     RingNotSet,
-    /// The corner has no vertex. Status `SM_ERR_NULL_POINTER`.
-    VertexNotSet,
-    /// The corner has no event of its kind (ball members, chamfer or Mixed event). Status
-    /// `SM_ERR_NULL_POINTER`.
+    /// A ball, chamfer or Mixed corner with no event of its kind (ball members, chamfer or
+    /// Mixed event).
     EventNotSet,
-    /// A round's fillet geometry, solver, rail, surface or offset surface that the corner
-    /// reads is not there. Status `SM_ERR_NULL_POINTER`.
-    BlendGeometryNotBuilt,
-    /// The chamfer facet event has no normal. Status `SM_ERR_NULL_POINTER`.
+    /// A chamfer facet event with no normal.
     FacetNormalNotSet,
-    /// The corner has no faces' geometry for its patch step. Status `SM_ERR_NULL_POINTER`.
+    /// A chamfer or Mixed corner with no faces' geometry for its patch step.
     FacesNotBuilt,
-    /// The corner patch step has no fillet B-rep. Status `SM_ERR_NULL_POINTER`.
+    /// A corner patch step given no fillet B-rep.
     FilletBrepNotGiven,
-    /// The corner's vertices or edges are not the count or kind its topology makes. Status
-    /// `SM_ERR`.
+    /// A ball, chamfer or Mixed corner whose vertices or edges are not the count or kind its
+    /// topology makes.
     TopologyMismatch,
-    /// A vertex of the corner is not processed. Status `SM_ERR`.
+    /// A vertex of a chamfer or Mixed corner that is not processed.
     VertexNotProcessed,
-    /// A ring face's kind or offset is not the one the corner's classification took.
-    /// Status `SM_ERR`.
+    /// A ring face of a ball corner whose kind or offset is not the one the corner's
+    /// classification took.
     FaceNotAsClassified,
-    /// An edge does not meet the corner's vertex. Status `SM_ERR`.
+    /// An edge of a Mixed corner that does not meet the corner's vertex.
     EdgeOffVertex,
-    /// The corner's event or patches do not hold together: a facet without crossings or a
+    /// A corner whose event or patches do not hold together: a facet without crossings or a
     /// unit normal, a patch order that does not run round its crossings, or patches and
-    /// loops that do not pair up. Status `SM_ERR`.
+    /// loops that do not pair up.
     EventMalformed,
 }
 
 impl CornerInput {
-    /// The status the site returned before the cause was named.
+    /// The status the site it replaces returned unless the site says otherwise: `SM_ERR`
+    /// where the C++ reports a failed state check (`SE(SM_ERR)`), else
+    /// `SM_ERR_NULL_POINTER` for what it dereferences and does not find (`NER`).
     #[must_use]
-    pub const fn status(self) -> i32 {
+    pub const fn upstream_status(self) -> i32 {
         match self {
             Self::TopologyMismatch
             | Self::VertexNotProcessed
             | Self::FaceNotAsClassified
             | Self::EdgeOffVertex
             | Self::EventMalformed => SM_ERR,
-            Self::EdgeuseWithoutEdge
-            | Self::EdgeWithoutCurve
-            | Self::EdgeWithoutVertex
-            | Self::EdgeWithoutPrimaryEdgeuse
-            | Self::EdgeuseWithoutMate
-            | Self::EdgeuseWithoutFace
-            | Self::EdgeuseWithoutRadial
+            Self::EdgeWithoutCurve
             | Self::FaceWithoutSurface
-            | Self::EdgeOffRound
-            | Self::VertexOffRail
+            | Self::FilletGeomWithoutSurface
+            | Self::EdgeWithoutVertex
+            | Self::EdgeUseWithoutRadial
+            | Self::FilletGeomWithoutRail
             | Self::RingNotSet
-            | Self::VertexNotSet
             | Self::EventNotSet
-            | Self::BlendGeometryNotBuilt
             | Self::FacetNormalNotSet
             | Self::FacesNotBuilt
             | Self::FilletBrepNotGiven => SM_ERR_NULL_POINTER,
         }
     }
+}
 
-    /// What is not as the construction reads it, as a phrase.
-    #[must_use]
-    pub const fn what(self) -> &'static str {
+/// The link of the fillet structures that is not there or not as the routine needs
+/// ([`BlendFailure::FilletSetUpInvalid`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum FilletSetUp {
+    /// A fillet geometry's solver.
+    GeomSolver,
+    /// One of a fillet solver's two edge uses.
+    SolverEdgeUse,
+    /// One of a fillet solver's two offset surfaces.
+    SolverOffsetSurface,
+    /// The offset surface of a fillet geometry's rail, its own or its solver's.
+    RailOffsetSurface,
+    /// The edge of an edge use of the body.
+    EdgeUseEdge,
+    /// The vertex use an edge use of the body starts at.
+    EdgeUseVertexUse,
+    /// The face an edge use of the body lies in.
+    EdgeUseFace,
+    /// The face use of a vertex use of a face's loop.
+    VertexUseFaceUse,
+    /// The body vertex a fillet corner rounds.
+    CornerVertex,
+    /// The face a fillet vertex (or its mate) is classified to.
+    PointClassFace,
+    /// The side edge use a fillet vertex on a side edge is classified to.
+    PointClassEdgeUse,
+    /// The vertex use of a rail's edge at a fillet vertex at the rail's end.
+    RailEndVertexUse,
+    /// The fillet geometries a fillet vertex's kind joins.
+    VertexGeoms,
+    /// A Join's fillet vertex's mate.
+    Mate,
+    /// The edge use of a shared side edge on each of the two fillet geometries' faces.
+    RadialEdgeUse,
+    /// A rail/rail interpolation edge among its corner's fillet edges.
+    InterpolationEdgeAtCorner,
+    /// The cross-section opposite a rail/rail interpolation edge at its corner.
+    OppositeCrossSection,
+    /// The fillet geometry a cross-section's primary edge use spans.
+    CrossSectionGeom,
+    /// A fillet solver's surface generator.
+    SurfaceGenerator,
+    /// A fillet edge's primary edge use.
+    PrimaryEdgeUse,
+    /// The mate of a fillet edge's primary edge use.
+    PrimaryEdgeUseMate,
+    /// The two fillet vertices a fillet edge joins.
+    EdgeVertices,
+    /// The face a rail/rail interpolation edge lies on.
+    OriginalFace,
+    /// The rail ending at an end of a rail/rail interpolation edge.
+    InterpolationEndRail,
+    /// A rail edge's 3D curve, or the UV trim curve the 2D path reads.
+    RailCurve,
+    /// A rail's end vertex on the rail's curve.
+    RailEndOffRail,
+    /// The B-spline UV trim curve of a rail's edge use.
+    UvTrimCurve,
+}
+
+impl FilletSetUp {
+    /// What is wrong, as a clause.
+    const fn what(self) -> &'static str {
         match self {
-            Self::EdgeuseWithoutEdge => "an edge use of the corner has no edge",
-            Self::EdgeWithoutCurve => "an edge of the corner has no curve",
-            Self::EdgeWithoutVertex => "an edge of the corner has no vertex at an end",
-            Self::EdgeWithoutPrimaryEdgeuse => "an edge of the corner has no primary edge use",
-            Self::EdgeuseWithoutMate => "an edge use of the corner has no mate",
-            Self::EdgeuseWithoutFace => "an edge use of the corner's ring has no face",
-            Self::EdgeuseWithoutRadial => "an edge use of the corner's ring has no radial",
-            Self::FaceWithoutSurface => "a face of the corner has no surface",
-            Self::EdgeOffRound => "the corner's edge is not on a round's fillet geometry",
-            Self::VertexOffRail => "the corner's vertex has no use at the end of a round's rail",
-            Self::RingNotSet => "the corner has no ring of edge uses",
-            Self::VertexNotSet => "the corner has no vertex",
-            Self::EventNotSet => "the corner has no event of its kind",
-            Self::BlendGeometryNotBuilt => {
-                "a round's fillet geometry, solver, rail or surface that the corner reads is not there"
+            Self::GeomSolver => "a fillet geometry has no solver",
+            Self::SolverEdgeUse => "a fillet solver lacks one of its two edge uses",
+            Self::SolverOffsetSurface => "a fillet solver lacks one of its two offset surfaces",
+            Self::RailOffsetSurface => {
+                "a rail of a fillet geometry has no offset surface, of its own or its solver's"
             }
-            Self::FacetNormalNotSet => "the chamfer facet has no normal",
-            Self::FacesNotBuilt => "the corner has no faces' geometry for its patches",
-            Self::FilletBrepNotGiven => "the corner patch step has no fillet B-rep",
-            Self::TopologyMismatch => {
-                "the corner's vertices or edges are not the count or kind its topology makes"
+            Self::EdgeUseEdge => "an edge use of the body belongs to no edge",
+            Self::EdgeUseVertexUse => "an edge use of the body starts at no vertex use",
+            Self::EdgeUseFace => "an edge use of the body lies in no face",
+            Self::VertexUseFaceUse => "a vertex use of a face's loop is in no face use",
+            Self::CornerVertex => "the fillet corner records no body vertex it rounds",
+            Self::PointClassFace => "a fillet vertex is not classified to a face",
+            Self::PointClassEdgeUse => {
+                "a fillet vertex on a side edge is not classified to that edge's edge use"
             }
-            Self::VertexNotProcessed => "a vertex of the corner is not processed",
-            Self::FaceNotAsClassified => {
-                "a ring face's kind or offset is not the one the corner's classification took"
+            Self::RailEndVertexUse => {
+                "a fillet vertex at a rail's end has no vertex use of the rail's edge"
             }
-            Self::EdgeOffVertex => "an edge does not meet the corner's vertex",
-            Self::EventMalformed => "the corner's event or patches do not hold together",
+            Self::VertexGeoms => "a fillet vertex lacks the fillet geometries its kind joins",
+            Self::Mate => "a Join's fillet vertex has no mate",
+            Self::RadialEdgeUse => {
+                "a side edge shared by two fillet geometries has no edge use on one of their faces"
+            }
+            Self::InterpolationEdgeAtCorner => {
+                "the rail/rail interpolation edge is not one of its corner's fillet edges"
+            }
+            Self::OppositeCrossSection => {
+                "the fillet edge opposite the rail/rail interpolation edge is not a cross-section"
+            }
+            Self::CrossSectionGeom => "a cross-section's primary edge use spans no fillet geometry",
+            Self::SurfaceGenerator => "a fillet solver has no surface generator",
+            Self::PrimaryEdgeUse => "a fillet edge has no primary edge use",
+            Self::PrimaryEdgeUseMate => "a fillet edge's primary edge use has no mate",
+            Self::EdgeVertices => "a fillet edge does not join two fillet vertices",
+            Self::OriginalFace => "the rail/rail interpolation edge records no face it lies on",
+            Self::InterpolationEndRail => {
+                "an end of the rail/rail interpolation edge is no rail's end"
+            }
+            Self::RailCurve => {
+                "a rail edge lacks its 3D curve or the UV trim curve the 2D path reads"
+            }
+            Self::RailEndOffRail => {
+                "the fillet vertex at the rail's end does not lie on the rail's curve"
+            }
+            Self::UvTrimCurve => "the rail's edge use has no B-spline UV trim curve",
         }
     }
 }
@@ -1129,6 +1201,7 @@ impl BlendFailure {
             | Self::VariableRadiusLawsNotGiven
             | Self::BevelVertexNotFilleted
             | Self::EdgeWithoutCurve
+            | Self::FilletSetUpInvalid(_)
             | Self::SequenceCurveNotBSpline { .. } => SM_ERR_NULL_POINTER,
             Self::NoEdgesGiven
             | Self::SizeBelowResolution { .. }
@@ -1149,7 +1222,7 @@ impl BlendFailure {
             Self::NotConverged(_) => SM_ERR_NOT_CONVERGING,
             Self::OutsideDomain(_) => SM_ERR_OUTSIDE_OF_DOMAIN,
             Self::NotWithinTolerance(_) => SM_ERR_NOT_WITHIN_TOLERANCE,
-            Self::CornerInputInvalid(input) => input.status(),
+            Self::CornerInputInvalid { input, .. } => input.upstream_status(),
             Self::PassedOn { status, .. } => *status,
         }
     }
@@ -1217,7 +1290,8 @@ impl BlendFailure {
             | Self::BevelVertexNotFilleted
             | Self::LawIntervalEmpty
             | Self::EdgeWithoutCurve
-            | Self::CornerInputInvalid(_) => ErrorKind::InvalidInput,
+            | Self::CornerInputInvalid { .. }
+            | Self::FilletSetUpInvalid(_) => ErrorKind::InvalidInput,
             Self::ClosedCliffWouldNotSplit { .. }
             | Self::CornerRefused
             | Self::ExecutiveStepFailed => ErrorKind::Failed,
@@ -1256,7 +1330,8 @@ impl BlendFailure {
             | Self::BallTriangleNotOnePatch { .. }
             | Self::MixedCornerUnbuildable(_)
             | Self::CornerUnbuildable(_)
-            | Self::CornerInputInvalid(_)
+            | Self::CornerInputInvalid { .. }
+            | Self::FilletSetUpInvalid(_)
             | Self::PlaneCurveTouches { .. }
             | Self::PlaneCurveEndOff { .. }
             | Self::PlaneCurveLeavesDomain { .. }
@@ -1324,7 +1399,8 @@ impl BlendFailure {
             | Self::BallTriangleNotOnePatch { .. }
             | Self::MixedCornerUnbuildable(_)
             | Self::CornerUnbuildable(_)
-            | Self::CornerInputInvalid(_)
+            | Self::CornerInputInvalid { .. }
+            | Self::FilletSetUpInvalid(_)
             | Self::PlaneCurveTouches { .. }
             | Self::PlaneCurveEndOff { .. }
             | Self::PlaneCurveLeavesDomain { .. }
@@ -1438,12 +1514,11 @@ impl core::fmt::Display for BlendFailure {
                 self.class(),
                 step.what()
             ),
-            Self::CornerInputInvalid(input) => write!(
-                f,
-                "{}: the corner's input is not what its construction reads: {}",
-                self.class(),
-                input.what()
-            ),
+            // (the entity is the failure's site, which the failure prints)
+            Self::CornerInputInvalid { input, .. } => {
+                write!(f, "{}: the fillet corner given: {input:?}", self.class())
+            }
+            Self::FilletSetUpInvalid(part) => write!(f, "{}: {}", self.class(), part.what()),
             Self::MixedCornerUnbuildable(step) => write!(
                 f,
                 "{}: the mixed corner has no construction: {}",
@@ -2307,13 +2382,30 @@ mod tests {
             (CornerInput::VertexNotProcessed, SM_ERR),
             (CornerInput::EventMalformed, SM_ERR),
         ] {
-            let e = SolidError::blend("blend::op", BlendFailure::CornerInputInvalid(input));
+            let e = SolidError::blend(
+                "blend::op",
+                BlendFailure::CornerInputInvalid {
+                    input,
+                    entity: None,
+                },
+            );
             assert_eq!(e.kind(), ErrorKind::InvalidInput, "{e}");
             assert_eq!(e.upstream_status(), Some(status), "{e}");
             assert!(!e.is_defect() && !e.is_port_failure(), "{e}");
             assert!(!e.is_unported_or_cancelled(), "{e}");
-            assert!(e.to_string().contains(input.what()), "{e}");
+            assert!(e.to_string().contains(&format!("{input:?}")), "{e}");
         }
+        // the site's status overrides the input's
+        let e = Failure::new(
+            "blend::op",
+            BlendFailure::CornerInputInvalid {
+                input: CornerInput::EventNotSet,
+                entity: None,
+            },
+        )
+        .with_status(SM_ERR)
+        .into_error();
+        assert_eq!(e.upstream_status(), Some(SM_ERR), "{e}");
     }
 
     #[test]
@@ -2601,7 +2693,7 @@ mod tests {
     /// The number of `BlendFailure` variants. Adding a variant means adding an arm to
     /// `variant_index_and_phrase_name` (the compiler asks for it), with the next index, and
     /// raising this number; the test below then fails until `causes` holds the new variant.
-    const VARIANTS: usize = 55;
+    const VARIANTS: usize = 56;
 
     /// Each variant's distinct index in `0..VARIANTS`, and the variant name of a phrase cause
     /// (`None` for any other cause). The match has no wildcard, so it is the inventory of
@@ -2662,7 +2754,8 @@ mod tests {
             BlendFailure::BallTriangleNotOnePatch { .. } => (51, None),
             BlendFailure::MixedCornerUnbuildable(_) => (52, None),
             BlendFailure::CornerUnbuildable(_) => (53, None),
-            BlendFailure::CornerInputInvalid(_) => (54, None),
+            BlendFailure::CornerInputInvalid { .. } => (54, None),
+            BlendFailure::FilletSetUpInvalid(_) => (55, None),
         }
     }
 
@@ -2710,7 +2803,11 @@ mod tests {
             BlendFailure::BallTriangleNotOnePatch { pole: 0 },
             BlendFailure::MixedCornerUnbuildable(MixedStep::NoFootOnWallFace),
             BlendFailure::CornerUnbuildable(CornerStep::BallCentreNotProved),
-            BlendFailure::CornerInputInvalid(CornerInput::EventNotSet),
+            BlendFailure::CornerInputInvalid {
+                input: CornerInput::EventNotSet,
+                entity: None,
+            },
+            BlendFailure::FilletSetUpInvalid(FilletSetUp::GeomSolver),
             BlendFailure::PlaneCurveTouches { u: 0.0, v: 0.0 },
             BlendFailure::PlaneCurveEndOff {
                 at_end: false,
