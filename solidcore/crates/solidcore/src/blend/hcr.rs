@@ -698,10 +698,11 @@ fn silhouette_cache(
     // With the tree built and the scene's editing enabled (as during
     // `ComputeSilhouettes`), `SmTrimSrfCache::BuildTree` then only sets
     // `m_bProcessBoundaryCurves = TRUE`, `m_bPointTestEnabled = FALSE` and
-    // `m_bHaveTSurfaceCache = FALSE`, and restores `m_bFaceContainmentDone`. The build
-    // above left those values; they are set again here, and the trace keeps them (its
-    // `DoTrace` sets the same two flags and restores them), so each rebuild it would make
-    // is that reset. The containment guard keeps the built tree instead of rebuilding; no
+    // `m_bHaveTSurfaceCache = FALSE`, and restores `m_bFaceContainmentDone`. Here no
+    // build writes the point test bit (whether a cache tests a point is asked of its face
+    // each time), so this is the one place those values are set for the trace: it keeps
+    // them (its `DoTrace` sets the same two flags and restores them), so each rebuild it
+    // would make is that reset. The containment guard keeps the built tree instead of rebuilding; no
     // trace path reads the guard (only `GetTree` and the trimmed point classifications,
     // which the trace runs with point testing off). The cache is dropped after the trace.
     if !cache.have_t_surface_cache {

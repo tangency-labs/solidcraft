@@ -290,13 +290,17 @@ pub fn upward_loopuses(
 
 /// Whether face `f` has loop uses ([`upward_loopuses`] of all loops is not empty):
 /// whether it has trim boundaries. A trimmed surface cache's point test classifies a
-/// solution only on such a face; a face without loop uses keeps every solution.
+/// solution only on such a face; a face without loop uses keeps every solution. It
+/// reads the face use's list in place (the point test asks it per solution).
 ///
 /// # Errors
 ///
 /// Those of [`upward_loopuses`].
 pub fn has_loopuses(b: &Brep, f: FaceId) -> Result<bool> {
-    Ok(!selected_loopuses(b, f, false, None)?.is_empty())
+    match b.face(f)?.faceuse {
+        Some(fu) => Ok(!b.faceuse(fu)?.loopuses.is_empty()),
+        None => Ok(false),
+    }
 }
 
 /// `GetUpwardVertexuses`: the vertex uses of each selected loop use

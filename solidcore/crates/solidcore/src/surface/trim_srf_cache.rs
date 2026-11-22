@@ -257,6 +257,16 @@ pub trait CacheFace<O> {
     /// The implementor's.
     fn upward_loopuses(&self) -> Result<Vec<O>>;
 
+    /// Whether [`CacheFace::upward_loopuses`] is not empty (the point test asks it per
+    /// point; an implementor answers it without listing the loop uses).
+    ///
+    /// # Errors
+    ///
+    /// The implementor's.
+    fn has_loopuses(&self) -> Result<bool> {
+        Ok(!self.upward_loopuses()?.is_empty())
+    }
+
     /// `pLU->GetEdgeuses(sEUses)`.
     ///
     /// # Errors
@@ -667,7 +677,7 @@ impl<O: Copy + PartialEq> TrimSrfCache<O> {
         self.check_face_binding(face.face())?;
 
         // a face without loop uses has no trim boundaries: every point is kept
-        if face.upward_loopuses()?.is_empty() {
+        if !face.has_loopuses()? {
             return Ok((true, None));
         }
 

@@ -175,6 +175,10 @@ impl<O: Copy + PartialEq> CacheFace<O> for MappedCacheFace<'_, O> {
         self.handles(self.inner.upward_loopuses()?)
     }
 
+    fn has_loopuses(&self) -> Result<bool> {
+        self.inner.has_loopuses()
+    }
+
     fn loopuse_edgeuses(&self, loopuse: O) -> Result<Vec<O>> {
         self.handles(self.inner.loopuse_edgeuses(self.entity(loopuse)?)?)
     }
