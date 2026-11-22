@@ -123,12 +123,14 @@ fn refuse<T>(note: &mut Option<Refusal>, reason: NoRoomReason, comment: &'static
 /// A face or edge the overflow reads lacks `input` ([`BlendFailure::OverflowInputMissing`]).
 /// The helpers read the caller's body and the executive's sheet alike, so the failure names
 /// no entity: the executive's refusal carries the error's entity as the target's.
+#[track_caller]
 fn input_missing(input: OverflowInput) -> SolidError {
     SolidError::blend(OP, BlendFailure::OverflowInputMissing(input))
 }
 
 /// A missing thing this module built ([`BlendFailure::Defect`] keeping the upstream `NER`
 /// status `SM_ERR_NULL_POINTER`), `why` saying why it is always there.
+#[track_caller]
 fn null_defect(why: &'static str) -> SolidError {
     Failure::new(OP, BlendFailure::Defect { why })
         .with_status(SM_ERR_NULL_POINTER)
@@ -136,6 +138,7 @@ fn null_defect(why: &'static str) -> SolidError {
 }
 
 /// A [`BlendFailure::Defect`] chaining the failed step's error `cause`.
+#[track_caller]
 fn defect_caused_by(why: &'static str, cause: SolidError) -> SolidError {
     Failure::new(OP, BlendFailure::Defect { why })
         .caused_by(cause)
