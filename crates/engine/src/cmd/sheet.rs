@@ -157,6 +157,7 @@ pub static COMMANDS: &[CommandSpec] = &[
              even thickness is refused, naming its thicknesses",
         ),
     CommandSpec::new("sheet.parts", "List Sheet Metal Parts", crate::checked!("sheet.parts", sheet_parts))
+        .icon("inspect")
         .contract(&PARTS_CONTRACT)
         .output(output_schema_for::<SheetPartsResult>)
         .noundo()
