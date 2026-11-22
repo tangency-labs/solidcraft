@@ -106,7 +106,9 @@ use core::ops::Div;
 use crate::curve::curve::{Curve, CurveKind};
 use crate::curve::ellipse::{Ellipse, EllipseOptions};
 use crate::error::surface::{AnalyticCheck, SurfaceFailure};
-use crate::error::{ignore_status, ignored, Failure, Result, SolidError, SM_ERR, SM_ERR_NULL_POINTER};
+use crate::error::{
+    ignore_status, ignored, Failure, Result, SolidError, SM_ERR, SM_ERR_NULL_POINTER,
+};
 use crate::geom::axis2_placement::Axis2Placement;
 use crate::geom::extent1d::Extent1d;
 use crate::geom::extent2d::Extent2d;
@@ -209,7 +211,10 @@ fn gen_circle<'a>(gen: Option<&'a Curve>, op: &'static str) -> Result<&'a Ellips
     match gen.map(Curve::kind) {
         Some(CurveKind::Ellipse(e)) => Ok(e),
         Some(_) => Err(SolidError::invalid_input(op, "generator is not a circle")),
-        None => Err(SolidError::surface(op, SurfaceFailure::SurfaceWithoutGenerator)),
+        None => Err(SolidError::surface(
+            op,
+            SurfaceFailure::SurfaceWithoutGenerator,
+        )),
     }
 }
 
@@ -1306,20 +1311,18 @@ impl Torus {
         // torus keeps the NURB tested (SetFromGwNurb, whose rebuild's status is ignored).
         // (`test` has a NURB: without one its degrees are 0 and the degree test above
         // returned `None`; the error is kept for a NURB-less surface all the same.)
-        let nurb = test
-            .gw_nurb()
-            .ok_or_else(|| {
-                Failure::new(
-                    OP_NURB_TORUS,
-                    SurfaceFailure::Defect {
-                        why: "the tested surface has no NURB after the torus was fitted to it, \
+        let nurb = test.gw_nurb().ok_or_else(|| {
+            Failure::new(
+                OP_NURB_TORUS,
+                SurfaceFailure::Defect {
+                    why: "the tested surface has no NURB after the torus was fitted to it, \
                               though without one its degrees are 0 and the fit's degree test \
                               returns no torus",
-                    },
-                )
-                .with_status(SM_ERR_NULL_POINTER)
-                .into_error()
-            })?;
+                },
+            )
+            .with_status(SM_ERR_NULL_POINTER)
+            .into_error()
+        })?;
         torus.base.base.nurb = Some(copy_nurb_surface(nurb)).into();
         torus.base.base.nurb_is_borrowed = false;
         ignore_status(torus.rebuild_step_from_nurb_parameters(k))?;
@@ -1721,19 +1724,17 @@ impl Revolved for Torus {
 /// through the axis, so every one of its control points has the meridian's angle about the
 /// axis.
 fn meridians(srf: &BSplineSurface, swap_uv: bool) -> Result<[Vec<Point3>; 2]> {
-    let nurb = srf
-        .gw_nurb()
-        .ok_or_else(|| {
-            Failure::new(
-                OP_NURB_TORUS,
-                SurfaceFailure::Defect {
-                    why: "the meridians' form has no NURB, though every caller first extracts an \
+    let nurb = srf.gw_nurb().ok_or_else(|| {
+        Failure::new(
+            OP_NURB_TORUS,
+            SurfaceFailure::Defect {
+                why: "the meridians' form has no NURB, though every caller first extracts an \
                           iso curve from it or tests its degrees, which fail or return without one",
-                },
-            )
-            .with_status(SM_ERR_NULL_POINTER)
-            .into_error()
-        })?;
+            },
+        )
+        .with_status(SM_ERR_NULL_POINTER)
+        .into_error()
+    })?;
     let (n, m) = (nurb.n(), nurb.m());
     let column = |end: bool| -> Result<Vec<Point3>> {
         if swap_uv {
@@ -2267,7 +2268,7 @@ mod tests {
         for (a, b) in [(0.0, 1.0), (1.0, 0.0), (f64::NAN, 1.0), (-1.0, 0.5)] {
             let e = Torus::create_canonical(&k, &frame, a, b, TorusOptions::default(), None)
                 .unwrap_err();
-            assert_eq!(e.upstream_status(), Some(crate::error::SM_ERR));
+            assert_eq!(e.upstream_status(), Some(SM_ERR));
             assert_eq!(e.operation(), OP_CANONICAL);
             assert_eq!(
                 e.surface_failure(),
@@ -2284,7 +2285,7 @@ mod tests {
         let k = Kernel::default();
         let mut t = canonical(&k, false, false);
         let e = t.evaluate_step(Point2::new(0.0, 0.0), 4, 4).unwrap_err();
-        assert_eq!(e.upstream_status(), Some(crate::error::SM_ERR));
+        assert_eq!(e.upstream_status(), Some(SM_ERR));
         assert_eq!(e.operation(), OP_EVAL_STEP);
         assert_eq!(e.kind(), crate::error::ErrorKind::InvalidInput);
         assert_eq!(
@@ -2298,12 +2299,12 @@ mod tests {
                 Some(Vec3::new(1.0, 2.0, 1.0)),
             )
             .unwrap_err();
-        assert_eq!(e.upstream_status(), Some(crate::error::SM_ERR));
+        assert_eq!(e.upstream_status(), Some(SM_ERR));
         assert_eq!(e.operation(), OP_TRANSFORM);
         assert_eq!(e.surface_failure(), Some(&SurfaceFailure::ScaleNotUniform));
         assert_eq!(e.kind(), crate::error::ErrorKind::InvalidInput);
         let e = gen_circle(None, OP_NEW).unwrap_err();
-        assert_eq!(e.upstream_status(), Some(crate::error::SM_ERR_NULL_POINTER));
+        assert_eq!(e.upstream_status(), Some(SM_ERR_NULL_POINTER));
         assert_eq!(e.operation(), OP_NEW);
         assert_eq!(
             e.surface_failure(),
@@ -2318,7 +2319,7 @@ mod tests {
         let mut bare = canonical(&k, false, false);
         bare.base.base.nurb = None.into();
         let e = bare.create_offset_surface(&k, 0.1, 1e-6).unwrap_err();
-        assert_eq!(e.upstream_status(), Some(crate::error::SM_ERR_NULL_POINTER));
+        assert_eq!(e.upstream_status(), Some(SM_ERR_NULL_POINTER));
         assert_eq!(e.operation(), OP_OFFSET);
         assert_eq!(e.surface_failure(), Some(&SurfaceFailure::NoNurb));
         assert_eq!(e.kind(), crate::error::ErrorKind::InvalidInput);

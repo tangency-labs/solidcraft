@@ -455,10 +455,22 @@ mod tests {
         let op = "surface::op";
         let analytic = |check| SurfaceFailure::NurbNotAnalytic { check };
         let cases = [
-            (SurfaceFailure::ScaleNotUniform, SM_ERR, ErrorKind::InvalidInput),
-            (SurfaceFailure::NoNurb, SM_ERR_NULL_POINTER, ErrorKind::InvalidInput),
+            (
+                SurfaceFailure::ScaleNotUniform,
+                SM_ERR,
+                ErrorKind::InvalidInput,
+            ),
+            (
+                SurfaceFailure::NoNurb,
+                SM_ERR_NULL_POINTER,
+                ErrorKind::InvalidInput,
+            ),
             (SurfaceFailure::NurbNotMade, SM_ERR, ErrorKind::Failed),
-            (SurfaceFailure::RadiusNotPositive, SM_ERR, ErrorKind::InvalidInput),
+            (
+                SurfaceFailure::RadiusNotPositive,
+                SM_ERR,
+                ErrorKind::InvalidInput,
+            ),
             (
                 SurfaceFailure::SurfaceWithoutGenerator,
                 SM_ERR_NULL_POINTER,
@@ -479,15 +491,31 @@ mod tests {
                 SM_ERR,
                 ErrorKind::Unsupported,
             ),
-            (analytic(AnalyticCheck::MeridianOnAxis), SM_ERR, ErrorKind::Unsupported),
+            (
+                analytic(AnalyticCheck::MeridianOnAxis),
+                SM_ERR,
+                ErrorKind::Unsupported,
+            ),
             (
                 analytic(AnalyticCheck::GeneratorDegenerate),
                 SM_ERR,
                 ErrorKind::Unsupported,
             ),
-            (SurfaceFailure::GeneratorNotMade, SM_ERR_NULL_POINTER, ErrorKind::Failed),
-            (SurfaceFailure::CentreHasNoParameters, SM_ERR, ErrorKind::Failed),
-            (SurfaceFailure::ConeBoundaryOnAxis, SM_ERR, ErrorKind::InvalidInput),
+            (
+                SurfaceFailure::GeneratorNotMade,
+                SM_ERR_NULL_POINTER,
+                ErrorKind::Failed,
+            ),
+            (
+                SurfaceFailure::CentreHasNoParameters,
+                SM_ERR,
+                ErrorKind::Failed,
+            ),
+            (
+                SurfaceFailure::ConeBoundaryOnAxis,
+                SM_ERR,
+                ErrorKind::InvalidInput,
+            ),
         ];
         for (failure, status, kind) in cases {
             let e = SolidError::surface(op, failure);

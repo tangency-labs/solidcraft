@@ -126,7 +126,9 @@
 use crate::curve::curve::{Curve, CurveKind};
 use crate::curve::ellipse::{Ellipse, EllipseOptions};
 use crate::error::surface::{AnalyticCheck, SurfaceFailure};
-use crate::error::{ignore_status, ignored, Failure, Result, SolidError, SM_ERR, SM_ERR_NULL_POINTER};
+use crate::error::{
+    ignore_status, ignored, Failure, Result, SolidError, SM_ERR, SM_ERR_NULL_POINTER,
+};
 use crate::geom::axis2_placement::Axis2Placement;
 use crate::geom::extent1d::Extent1d;
 use crate::geom::extent2d::Extent2d;
@@ -250,7 +252,10 @@ fn gen_circle<'a>(gen: Option<&'a Curve>, op: &'static str) -> Result<&'a Ellips
     match gen.map(Curve::kind) {
         Some(CurveKind::Ellipse(e)) => Ok(e),
         Some(_) => Err(SolidError::invalid_input(op, "generator is not a circle")),
-        None => Err(SolidError::surface(op, SurfaceFailure::SurfaceWithoutGenerator)),
+        None => Err(SolidError::surface(
+            op,
+            SurfaceFailure::SurfaceWithoutGenerator,
+        )),
     }
 }
 
@@ -2384,20 +2389,18 @@ impl Sphere {
         // tested (SetFromGwNurb, whose rebuild's status is ignored). (`test` has a NURB:
         // without one its degrees are 0 and the fit returned `None`; the error is kept
         // for a NURB-less surface all the same.)
-        let nurb = test
-            .gw_nurb()
-            .ok_or_else(|| {
-                Failure::new(
-                    OP_NURB_SPHERE,
-                    SurfaceFailure::Defect {
-                        why: "the tested surface has no NURB after the sphere was fitted to it, \
+        let nurb = test.gw_nurb().ok_or_else(|| {
+            Failure::new(
+                OP_NURB_SPHERE,
+                SurfaceFailure::Defect {
+                    why: "the tested surface has no NURB after the sphere was fitted to it, \
                               though without one its degrees are 0 and the fit's degree test \
                               returns no sphere",
-                    },
-                )
-                .with_status(SM_ERR_NULL_POINTER)
-                .into_error()
-            })?;
+                },
+            )
+            .with_status(SM_ERR_NULL_POINTER)
+            .into_error()
+        })?;
         sphere.base.base.nurb = Some(copy_nurb_surface(nurb)).into();
         sphere.base.base.nurb_is_borrowed = false;
         ignore_status(sphere.rebuild_step_from_nurb_parameters(k))?;
@@ -3423,7 +3426,7 @@ mod tests {
         let k = Kernel::default();
         for r in [0.0, 1e-13, f64::NAN, -1e-13] {
             let e = Sphere::create_canonical(&k, &frame(), r).unwrap_err();
-            assert_eq!(e.upstream_status(), Some(crate::error::SM_ERR));
+            assert_eq!(e.upstream_status(), Some(SM_ERR));
             assert_eq!(e.operation(), OP_CANONICAL);
             assert_eq!(
                 e.surface_failure(),
@@ -3440,7 +3443,7 @@ mod tests {
         let k = Kernel::default();
         let mut s = canonical(&k, 2.0);
         let e = s.evaluate_step(Point2::new(0.0, 0.0), 4, 4).unwrap_err();
-        assert_eq!(e.upstream_status(), Some(crate::error::SM_ERR));
+        assert_eq!(e.upstream_status(), Some(SM_ERR));
         assert_eq!(e.operation(), OP_EVAL_STEP);
         assert_eq!(e.kind(), crate::error::ErrorKind::InvalidInput);
         assert_eq!(
@@ -3454,12 +3457,12 @@ mod tests {
                 Some(Vec3::new(1.0, 2.0, 1.0)),
             )
             .unwrap_err();
-        assert_eq!(e.upstream_status(), Some(crate::error::SM_ERR));
+        assert_eq!(e.upstream_status(), Some(SM_ERR));
         assert_eq!(e.operation(), OP_TRANSFORM);
         assert_eq!(e.surface_failure(), Some(&SurfaceFailure::ScaleNotUniform));
         assert_eq!(e.kind(), crate::error::ErrorKind::InvalidInput);
         let e = gen_circle(None, OP_NEW).unwrap_err();
-        assert_eq!(e.upstream_status(), Some(crate::error::SM_ERR_NULL_POINTER));
+        assert_eq!(e.upstream_status(), Some(SM_ERR_NULL_POINTER));
         assert_eq!(e.operation(), OP_NEW);
         assert_eq!(
             e.surface_failure(),
@@ -3545,7 +3548,7 @@ mod tests {
         let e = s
             .inversion_location(&d, frame().origin(), 1e-3)
             .unwrap_err();
-        assert_eq!(e.upstream_status(), Some(crate::error::SM_ERR));
+        assert_eq!(e.upstream_status(), Some(SM_ERR));
         assert_eq!(e.operation(), OP_SPHERE_STEP_INV);
         assert_eq!(e.kind(), crate::error::ErrorKind::Failed);
         assert_eq!(
