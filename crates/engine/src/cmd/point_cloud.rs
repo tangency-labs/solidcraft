@@ -897,12 +897,21 @@ mod tests {
         assert_eq!((at(&s, 0), at(&s, 1)), (Some([1.0, -3.0, 2.0]), Some([4.0, 6.0, 10.0])));
         assert_eq!(s.doc.point_clouds[0].colors.get(1), Some([1, 100, 200]), "the colours stay with their points");
         assert_eq!(s.execute("pointcloud.list", &json!({})).unwrap()["clouds"][0]["up"], "y");
+        // Clicking a point finds it where it stands.
+        let pick = |s: &mut Session, x: f64, y: f64| {
+            s.execute("view.pick", &json!({"rays": [{"origin": [x, y, 50], "dir": [0, 0, -1]}], "cloud_radius": 0.5})).unwrap()["hits"][0].clone()
+        };
+        let hit = pick(&mut s, 4.0, 6.0);
+        assert_eq!((hit["point_index"].as_u64(), &hit["point"]), (Some(1), &json!([4.0, 6.0, 10.0])));
         // The turn is in the cloud's own frame: a placement is kept through it, and Z up puts the
         // points back as the file has them.
         s.execute("pointcloud.edit", &json!({"cloud": id, "matrix": [1, 0, 0, 100, 0, 1, 0, 0, 0, 0, 1, 0]})).unwrap();
         assert_eq!(at(&s, 0), Some([101.0, -3.0, 2.0]));
         s.execute("pointcloud.edit", &json!({"cloud": id, "up": "z"})).unwrap();
         assert_eq!((at(&s, 0), at(&s, 1)), (Some([101.0, 2.0, 3.0]), Some([104.0, 10.0, -6.0])));
+        // Turned back, clicking finds the point where it now is, and nothing where it stood.
+        assert_eq!(pick(&mut s, 104.0, 10.0)["point"], json!([104.0, 10.0, -6.0]));
+        assert_eq!(pick(&mut s, 104.0, 6.0), serde_json::Value::Null);
         let listed = s.execute("pointcloud.list", &json!({})).unwrap();
         assert_eq!((listed["clouds"][0]["up"].as_str(), listed["clouds"][0]["matrix"][3].as_f64()), (Some("z"), Some(100.0)));
         // With the units in one edit, then undone in one step.
