@@ -4818,8 +4818,9 @@ impl SolveApp {
     }
 
     fn issue_screenshots(&mut self, ctx: &egui::Context) {
-        // A view that just moved is drawn with fewer AO samples: shoot the full-quality frame
-        // that follows (#7165), or after half a second a view that keeps moving as it is.
+        // A view that just moved is drawn with fewer AO samples and coarser instanced edges:
+        // shoot the full-quality frame that follows (#7165), or after half a second a view that
+        // keeps moving (an animation, a motion study) as it is, rather than never.
         let settled = viewport::ao_settled(self, ctx);
         self.shots.issue(ctx, settled, now_ms());
     }

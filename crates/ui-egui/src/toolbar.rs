@@ -1080,6 +1080,14 @@ fn ribbon_command_name(app: &SolveApp, command: &solidcraft_engine::CommandSpec)
     app.tr_command(command.id, crate::render_workspace::interactive_command_info(app, command).label)
 }
 
+/// The effect of a command with a tool (Section: pick a plane, OK) stays on after the tool closed.
+fn persistent_kept(app: &SolveApp, id: &str) -> bool {
+    KEPT_WITH_TOOL.contains(&id) && persistent_pressed(app, id) && running_command(app).as_deref() != Some(id)
+}
+
+/// The persistent commands whose effect is made in a tool confirmed with OK.
+const KEPT_WITH_TOOL: &[&str] = &["inspect.section"];
+
 pub(crate) fn persistent_button_name(app: &SolveApp, command: &solidcraft_engine::CommandSpec) -> String {
     let info = crate::render_workspace::interactive_command_info(app, command);
     let label = crate::workspace::ribbon_button_label(command);
@@ -1116,6 +1124,7 @@ fn paint_persistent_ribbon(app: &SolveApp, ui: &egui::Ui, paints: Vec<Persistent
             let look = ribbon::DeferredLook {
                 id: id.to_string(),
                 selected: persistent_pressed(app, id),
+                kept: persistent_kept(app, id),
                 // Resolve the genuine live tool after dispatch too: a click may have ended it.
                 // The compatibility presentation keeps its original transient recipe.
                 running: pressed && app.tool.as_ref().is_some_and(|tool| tool.cmd == id),
@@ -6947,7 +6956,7 @@ mod persistent_ribbon_tests {
         if check_fill {
             assert_eq!(
                 shapes.iter().any(|s| matches!(s, egui::Shape::Rect(s) if s.rect == r && s.fill == t.selected_bg)),
-                selected,
+                selected && !persistent_kept(&h.app, id),
                 "{id} selected fill"
             );
         }
@@ -6964,6 +6973,22 @@ mod persistent_ribbon_tests {
             assert_eq!(*font, if selected { crate::ui_kit::type_face::semibold(t.font_body) } else { FontId::proportional(t.font_body) });
             assert_eq!(text.galley.job.sections[0].format.color, if selected { t.selected_ink } else { t.text });
         }
+    }
+
+    #[test]
+    fn a_section_kept_after_ok_is_marked_on_without_looking_like_a_running_tool() {
+        let mut h = harness();
+        h.app.preferences.viewport_section_status = true;
+        h.app.preferences.persistent_ribbon_pressed = true;
+        h.app.session.execute("inspect.section", &json!({"plane":"XY","at":4})).unwrap();
+        h.frame();
+        let r = scenario::rect_of("button:inspect.section").unwrap();
+        let t = Tokens::get();
+        let filled = |h: &Harness| {
+            button_shapes(h, "inspect.section").iter().any(|s| matches!(s, egui::Shape::Rect(s) if s.rect == r && s.fill == t.selected_bg))
+        };
+        assert!(!filled(&h), "a kept section has no pressed fill");
+        assert_presentation(&h, "inspect.section", true, false);
     }
 
     fn tap(h: &mut Harness, id: &str) {
@@ -7047,11 +7072,14 @@ mod persistent_ribbon_tests {
         for shape in &h.shapes {
             shapes(&shape.shape, &mut drawn);
         }
-        assert_eq!(
-            drawn.iter().any(|shape| matches!(shape, egui::Shape::Rect(s) if s.rect == rect && s.fill == t.selected_bg)),
-            selected,
-            "{id} grid fill"
-        );
+        // A kept section has no pressed fill, but a focused cell's own background may share its colour.
+        if !persistent_kept(&h.app, id) {
+            assert_eq!(
+                drawn.iter().any(|shape| matches!(shape, egui::Shape::Rect(s) if s.rect == rect && s.fill == t.selected_bg)),
+                selected,
+                "{id} grid fill"
+            );
+        }
         assert_eq!(drawn.iter().any(|shape| matches!(shape, egui::Shape::LineSegment { points, stroke } if stroke.width == 2.0 && stroke.color == t.accent && points[0].y == rect.bottom() - t.space_4 && rect.contains(points[0]))), selected, "{id} grid underline");
         let command = solidcraft_engine::find_command(id).unwrap();
         let label = if toggled.is_some() { persistent_button_name(&h.app, command) } else { h.app.tr_label(command.label).to_string() };
@@ -7118,10 +7146,18 @@ mod persistent_ribbon_tests {
                 for clipped in &output.shapes {
                     let mut drawn = Vec::new();
                     shapes(&clipped.shape, &mut drawn);
-                    if drawn
-                        .iter()
-                        .any(|shape| matches!(shape, egui::Shape::Rect(rect) if rect.rect == cell && rect.fill == Tokens::get().selected_bg))
-                    {
+                    if drawn.iter().any(|shape| match shape {
+                        egui::Shape::Rect(rect) => rect.rect == cell && rect.fill == Tokens::get().selected_bg,
+                        // A kept section is marked by its underline alone (#20663).
+                        egui::Shape::LineSegment { points, stroke } => {
+                            id == "inspect.section"
+                                && stroke.color == Tokens::get().accent
+                                && points[0].y == cell.bottom() - Tokens::get().space_4
+                                && cell.x_range().contains(points[0].x)
+                                && cell.x_range().contains(points[1].x)
+                        }
+                        _ => false,
+                    }) {
                         backgrounds.push(clipped.clip_rect);
                     }
                 }
