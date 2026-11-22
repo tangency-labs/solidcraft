@@ -2446,3 +2446,65 @@ fn a_closed_control_spline_design_saves_and_reopens_unchanged() {
     model.evaluate(&reopened);
     assert!(model.results.iter().all(|r| r.error.is_none()), "{:?}", model.results);
 }
+
+/// A base flange's cutout and hole walls are named after their sketch curves (#20573),
+/// so adding another hole leaves earlier cutout wall names unchanged.
+#[test]
+fn a_base_flange_hole_and_slot_walls_are_named_after_sketch_curves() {
+    let mut doc = Document::new("base flange hole naming");
+    let mut sk = Sketch::new();
+    let p0 = sk.add_point(Vec2::new(0.0, 0.0), None).unwrap();
+    let p1 = sk.add_point(Vec2::new(100.0, 0.0), None).unwrap();
+    let p2 = sk.add_point(Vec2::new(100.0, 60.0), None).unwrap();
+    let p3 = sk.add_point(Vec2::new(0.0, 60.0), None).unwrap();
+    sk.add_line_pts(p0, p1, Some("l1")).unwrap();
+    sk.add_line_pts(p1, p2, Some("l2")).unwrap();
+    sk.add_line_pts(p2, p3, Some("l3")).unwrap();
+    sk.add_line_pts(p3, p0, Some("l4")).unwrap();
+
+    let q0 = sk.add_point(Vec2::new(60.0, 20.0), None).unwrap();
+    let q1 = sk.add_point(Vec2::new(80.0, 20.0), None).unwrap();
+    let q2 = sk.add_point(Vec2::new(80.0, 30.0), None).unwrap();
+    let q3 = sk.add_point(Vec2::new(60.0, 30.0), None).unwrap();
+    sk.add_line_pts(q0, q1, Some("l5")).unwrap();
+    sk.add_line_pts(q1, q2, Some("l6")).unwrap();
+    sk.add_line_pts(q2, q3, Some("l7")).unwrap();
+    sk.add_line_pts(q3, q0, Some("l8")).unwrap();
+
+    let s = doc.add_feature(FeatureKind::Sketch { plane: PlaneRef::Origin { name: "XY".into() }, sketch: sk }, None).unwrap();
+    let f = doc
+        .add_feature(
+            FeatureKind::SheetBase { sketch: SketchId(s), profiles: ProfileSel::Indices { indices: vec![0] }, rule: None, flip: false },
+            None,
+        )
+        .unwrap();
+
+    let get_names = |d: &Document| {
+        let mut m = Model::new();
+        m.evaluate(d);
+        assert!(m.results.iter().all(|r| r.error.is_none()), "{:?}", m.results);
+        let st = m.state();
+        let mut names = crate::naming::face_names(&st.bodies[0]).as_ref().clone();
+        names.sort();
+        names
+    };
+
+    let first = get_names(&doc);
+    for curve in ["l1", "l2", "l3", "l4", "l5", "l6", "l7", "l8"] {
+        let expected = format!("F{f}:side:{curve}");
+        assert!(first.contains(&expected), "expected {expected} in {first:?}");
+    }
+
+    // Now edit the sketch to add a circular hole elsewhere
+    let FeatureKind::Sketch { sketch, .. } = &mut doc.features[0].kind else { panic!("sketch") };
+    sketch.add_circle(Vec2::new(25.0, 30.0), 5.0, None, Some("c1")).unwrap();
+
+    let second = get_names(&doc);
+    for curve in ["l1", "l2", "l3", "l4", "l5", "l6", "l7", "l8"] {
+        let expected = format!("F{f}:side:{curve}");
+        assert!(second.contains(&expected), "expected {expected} in {second:?}");
+    }
+    // A circle hole splits into two half-cylinder faces F<f>:side:c1#1 and F<f>:side:c1#2
+    assert!(second.contains(&format!("F{f}:side:c1#1")), "expected c1#1 in {second:?}");
+    assert!(second.contains(&format!("F{f}:side:c1#2")), "expected c1#2 in {second:?}");
+}

@@ -968,7 +968,7 @@ pub(crate) fn face_centres(b: &ModelBody) -> Vec<Vec3> {
 fn role_name(f: &Feature, before: &ModelState, ps: &[Vec3], ns: &[Vec3], fi: usize, fid: u64, curves: &std::cell::OnceCell<Curves>) -> String {
     let c = ps.iter().fold(Vec3::ZERO, |a, p| a + *p) * (1.0 / ps.len().max(1) as f64);
     match &f.kind {
-        FeatureKind::Extrude { sketch, .. } => {
+        FeatureKind::Extrude { sketch, .. } | FeatureKind::SheetBase { sketch, .. } => {
             let Some(ss) = before.sketch(sketch.0) else { return format!("F{fid}:face:{fi}") };
             let n = ss.plane.normal();
             // A face across the extrusion is a cap; others sweep a sketch curve.
