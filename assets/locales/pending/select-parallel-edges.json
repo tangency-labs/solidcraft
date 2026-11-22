@@ -1,4 +1,11 @@
 {
   "en": { "cmd.select_parallel_edges": "Select Parallel Edges" },
-  "de": { "cmd.select_parallel_edges": "Parallele Kanten auswählen" }
+  "en-GB": { "cmd.select_parallel_edges": "Select Parallel Edges" },
+  "ar": { "cmd.select_parallel_edges": "تحديد الحواف المتوازية" },
+  "de": { "cmd.select_parallel_edges": "Parallele Kanten auswählen" },
+  "he": { "cmd.select_parallel_edges": "בחר מקצועות מקבילים" },
+  "ja": { "cmd.select_parallel_edges": "平行なエッジを選択" },
+  "ko": { "cmd.select_parallel_edges": "평행한 모서리 선택" },
+  "vi": { "cmd.select_parallel_edges": "Chọn các cạnh song song" },
+  "zh": { "cmd.select_parallel_edges": "选择平行边" }
 }
