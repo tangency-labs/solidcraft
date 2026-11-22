@@ -85,9 +85,9 @@ pub(crate) use features_more::{MAX_SKETCH_ID, SidePoint, SketchFrameId, axes_mas
 pub(crate) use file::import::realign_imports;
 pub(crate) use file::mesh_crease_angle;
 pub use file::open_steps::OpenSteps;
-pub use file::runs_plugin_importer;
 pub use file::use_import_cache_dir;
 pub(crate) use file::{GEOMETRY_MESSAGE, NAMES_MESSAGE, READER_MESSAGE, UP_MESSAGE, names_form, up_form, usable_path};
+pub use file::{runs_plugin_exporter, runs_plugin_importer};
 pub(crate) use inspect::color_param;
 pub use join_pieces::{Addition, addition};
 pub use joints::{MAX_REACH_JOINTS, reach_from, reach_preview};

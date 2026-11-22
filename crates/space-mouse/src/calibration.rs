@@ -131,14 +131,35 @@ impl Settle {
     pub fn filter(&mut self, reading: [i16; 6], seconds: f64) -> [i16; 6] {
         let seconds = if seconds.is_finite() { seconds.clamp(0.0, 1.0) } else { 0.0 };
         let band = (SETTLE_SHARE * f64::from(FULL_SCALE)).round() as i32;
-        std::array::from_fn(|axis| {
-            let value = reading[axis];
+        for (axis, &value) in reading.iter().enumerate() {
             if (i32::from(value) - i32::from(self.last[axis])).abs() <= i32::from(SETTLE_WANDER) {
                 self.steady[axis] += seconds;
             } else {
                 (self.last[axis], self.steady[axis]) = (value, 0.0);
             }
-            if i32::from(value).abs() <= band && self.steady[axis] >= SETTLE_AFTER_SECONDS { 0 } else { value }
+        }
+        let band_sq = i64::from(band) * i64::from(band);
+        let trans_sq: i64 = reading[0..3].iter().map(|&v| i64::from(v) * i64::from(v)).sum();
+        let rot_sq: i64 = reading[3..6].iter().map(|&v| i64::from(v) * i64::from(v)).sum();
+
+        // Evaluate translation (0..3) and rotation (3..6) activity independently so multi-axis
+        // motion in one group stays fluid without single-axis locking (#20256, #14273), while a
+        // quiet or leaning companion group still settles cleanly.
+        let trans_active = reading[0..3]
+            .iter()
+            .enumerate()
+            .any(|(axis, &value)| value != 0 && (i32::from(value).abs() > band || self.steady[axis] < SETTLE_AFTER_SECONDS))
+            || trans_sq > band_sq;
+
+        let rot_active = reading[3..6].iter().enumerate().any(|(offset, &value)| {
+            let axis = 3 + offset;
+            value != 0 && (i32::from(value).abs() > band || self.steady[axis] < SETTLE_AFTER_SECONDS)
+        }) || rot_sq > band_sq;
+
+        std::array::from_fn(|axis| {
+            let value = reading[axis];
+            let active = if axis < 3 { trans_active } else { rot_active };
+            if !active && i32::from(value).abs() <= band && self.steady[axis] >= SETTLE_AFTER_SECONDS { 0 } else { value }
         })
     }
 }
@@ -2020,5 +2041,36 @@ mod tests {
         assert_eq!(frames(&mut settle, [0, 0, 0, 0, 0, 200], 2.0)[5], 200);
         // Each axis on its own, and nothing odd for odd times.
         assert!(settle.filter([10, -10, 0, 0, 0, 0], f64::NAN).iter().all(|v| v.abs() <= 10));
+    }
+
+    #[test]
+    fn slow_multi_axis_motion_keeps_both_axes_active_without_locking() {
+        let mut settle = Settle::default();
+        let frames = |settle: &mut Settle, reading: [i16; 6], seconds: f64| {
+            let mut out = [0; 6];
+            for _ in 0..(seconds / 0.02).round() as usize {
+                out = settle.filter(reading, 0.02);
+            }
+            out
+        };
+        // Slow simultaneous 3D rotation on Pitch (axis 3) and Yaw (axis 4):
+        // Pitch changes slowly every 0.1s while Yaw stays relatively steady at 30.
+        // Under per-axis clamping, Yaw would freeze to 0 after 0.25s (#20256, #14273).
+        let _ = frames(&mut settle, [0, 0, 0, 28, 30, 0], 0.1);
+        let _ = frames(&mut settle, [0, 0, 0, 31, 30, 0], 0.1);
+        let out = frames(&mut settle, [0, 0, 0, 33, 30, 0], SETTLE_AFTER_SECONDS);
+        assert_eq!(out[3], 33, "pitch moves");
+        assert_eq!(out[4], 30, "yaw does not lock or clamp to zero while pitch is active");
+
+        // A held diagonal push whose composite deflection exceeds the settle band stays:
+        // 55^2 + 55^2 = 6050 > 4900 (70^2)
+        let diag = frames(&mut settle, [55, 55, 0, 0, 0, 0], 1.0);
+        assert_eq!((diag[0], diag[1]), (55, 55), "held diagonal push stays");
+
+        // An active push in translation (e.g. pan X = 200) with a slight hand lean on rotation (Yaw = 30)
+        // keeps translation active while letting the quiet rotation settle to 0.
+        let pushed_with_lean = frames(&mut settle, [200, 0, 0, 0, 30, 0], SETTLE_AFTER_SECONDS + 0.05);
+        assert_eq!(pushed_with_lean[0], 200, "pan remains active");
+        assert_eq!(pushed_with_lean[4], 0, "leaning rotation settles independently");
     }
 }

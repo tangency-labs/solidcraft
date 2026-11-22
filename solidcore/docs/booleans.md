@@ -766,7 +766,9 @@ What the port does today:
   faster than linearly from a touching point beyond one of its ends (a point solution, or where
   the two curves' interval ends meet) at which the curves are tangent, when the range stops short
   of the touch and its far end, exact, lies off the ends of both curves: the touch is the
-  intersection. A coincidence through the touch reaches it, and one that ends where a curve ends
+  intersection. The growth is read at the range's two exact ends, not between the range and the
+  touch, where a fitted intersection curve strays by up to its fit tolerance, more than the flank's
+  gap. A coincidence through the touch reaches it, and one that ends where a curve ends
   is not a flank; along a coincidence the gap is rounding and shows no growth either way. The
   range is dropped before point contacts move to the curve ends (`move_contacts_to_curve_ends`),
   which leaves a point whose stretch to the end crosses a range where it is: the flank's points
