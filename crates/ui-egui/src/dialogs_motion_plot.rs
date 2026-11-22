@@ -495,4 +495,51 @@ mod tests {
         assert_eq!((&found["collisions"][0]["a"], &found["collisions"][0]["first_step"]), (&json!("A:1"), &json!(11.0)), "{:?}", a.collisions);
         assert_eq!(collision_bands(&found), vec![[11.0, 15.0]]);
     }
+
+    /// The Motion Study dialog over two boxes and a slider pushing B into A, with the study
+    /// "Push" open.
+    fn study_dialog() -> crate::scenario::Harness {
+        let mut h = crate::scenario::Harness::new();
+        for (name, x) in [("A", 0), ("B", 20)] {
+            h.app.run("component.activate", json!({"component": "root"})).unwrap();
+            h.app.run("component.create", json!({ "name": name })).unwrap();
+            h.app.run("solid.box", json!({"length": 10, "width": 10, "height": 10, "corner": [x, 0, 0]})).unwrap();
+        }
+        h.app.run("component.activate", json!({"component": "root"})).unwrap();
+        h.app.run("occurrence.ground", json!({"occurrence": "A:1", "grounded": true})).unwrap();
+        h.app.run("joint.create", json!({"type": "slider", "a": {"face": [10, 5, 5]}, "b": {"face": [20, 5, 5]}, "name": "Rail"})).unwrap();
+        h.app.run("joint.drive", json!({"joint": "Rail", "value": 10})).unwrap();
+        h.app.run("motion.study", json!({"name": "Push", "steps": 15, "keys": [{"joint": "Rail", "points": [[0, 10], [15, -5]]}]})).unwrap();
+        let r = h.call("ui.start", json!({"command": "motion.study", "params": {"study": "Push"}}));
+        assert_eq!(r["ok"], true, "{r}");
+        h.frames(4);
+        h
+    }
+
+    /// #15333: the dialog's Check collisions ran on the window thread, so a slow pair froze the
+    /// window until the app was closed as not responding (the session then ended without a clean
+    /// exit). The check runs off the window thread now: the window answers while it runs, and
+    /// the reply of a design changed since is dropped.
+    #[test]
+    fn the_study_dialog_checks_collisions_off_the_window_thread() {
+        let mut h = study_dialog();
+        h.app.apply_off_thread = Some(std::time::Duration::ZERO);
+        // The check's reply waits for this, so the test sees the check under way.
+        let (release, gate) = std::sync::mpsc::channel();
+        h.app.apply_gate = Some(std::sync::Arc::new(std::sync::Mutex::new(gate)));
+        let [bx, by] = h.widget("Check collisions").unwrap();
+        h.step(&json!({"click": [bx, by]})).unwrap();
+        h.frames(2);
+        // The check is under way, off the window thread: the window answered while it ran, and its
+        // answer is not in yet (before the fix the check ran here and its answer was in at once).
+        assert!(shown(&h).0.collisions.is_none(), "the check is under way, off the window thread");
+        // The design changes meanwhile: the reply says nothing about the design as it is now.
+        h.app.run("solid.box", json!({"length": 5, "width": 5, "height": 5, "corner": [100, 0, 0]})).unwrap();
+        release.send(()).unwrap();
+        for _ in 0..100 {
+            h.frames(1);
+            std::thread::sleep(std::time::Duration::from_millis(5));
+        }
+        assert!(shown(&h).0.collisions.is_none(), "the reply of a design changed since is dropped");
+    }
 }
