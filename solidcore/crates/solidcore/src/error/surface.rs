@@ -15,7 +15,7 @@
 //! | [`SurfaceFailure::OffSurface`]     | `SM_ERR_NOT_WITHIN_TOLERANCE`  |
 //! | [`SurfaceFailure::Defect`]         | `SM_ERR` (or the site's, through `with_status`) |
 //! | the named causes of the surface solvers, [`SurfaceFailure::SolverWithout`] to [`SurfaceFailure::NothingLifted`] | the status of the phrase each replaced (`comparison_status`), or the site's through `with_status` |
-//! | the named causes of the volume surfaces and the implicit checks, from [`SurfaceFailure::TooFewKnots`] on | `SM_ERR`, except [`SurfaceFailure::NoNurb`]: `SM_ERR_NULL_POINTER` (a site that reported `SM_ERR` keeps it through `with_status`) |
+//! | the named causes of the volume surfaces and the implicit checks, [`SurfaceFailure::TooFewKnots`] to [`SurfaceFailure::CallFailed`] | `SM_ERR`, except [`SurfaceFailure::NoNurb`]: `SM_ERR_NULL_POINTER` (a site that reported `SM_ERR` keeps it through `with_status`) |
 //! | the named causes of the analytic and swept surfaces, from [`SurfaceFailure::OperationNotTaken`] on | the status of the phrase each replaced (`comparison_status`), or the site's through `with_status` |
 //!
 //! [`SurfaceFailure::Defect`] is a failure reviewed at its site as the kernel's fault, with its
@@ -261,8 +261,6 @@ pub enum SurfaceFailure {
     /// The solve operation asked for is not one the routine takes (a plane's fast drop
     /// takes minimize, normalize and intersect). [`ErrorKind::InvalidInput`].
     OperationNotTaken,
-    /// The direction of the line given is the zero vector. [`ErrorKind::InvalidInput`].
-    ZeroLineDirection,
     /// The line given is not parallel to the plane within the angle test, but the
     /// determinant of the crossing's linear solve is below the kernel's zero (a line
     /// direction or plane scale too small to solve with). [`ErrorKind::Degenerate`].
@@ -348,7 +346,6 @@ impl SurfaceFailure {
             | Self::NoPolarConverter => SM_ERR_NULL_POINTER,
             Self::InvalidValue(_)
             | Self::LineDirectionZero
-            | Self::ZeroLineDirection
             | Self::DomainPastApex
             | Self::DegenerateIsoCurve => SM_ERR_INVALID_INPUT,
             Self::OutsideDomain(_) => SM_ERR_OUTSIDE_OF_DOMAIN,
@@ -380,7 +377,6 @@ impl SurfaceFailure {
             | Self::CurveWithoutNurb
             | Self::CurveWithoutControlPoints
             | Self::OperationNotTaken
-            | Self::ZeroLineDirection
             | Self::ScaleNotUniform
             | Self::RadiusNotPositive
             | Self::SurfaceWithoutGenerator
@@ -547,7 +543,6 @@ impl core::fmt::Display for SurfaceFailure {
             Self::OperationNotTaken => {
                 f.write_str("the solve operation is not one the routine takes")
             }
-            Self::ZeroLineDirection => f.write_str("the line direction is the zero vector"),
             Self::LineCrossingSingular => {
                 f.write_str("the line's crossing with the plane is singular to solve for")
             }
@@ -937,11 +932,6 @@ mod tests {
             (
                 SurfaceFailure::OperationNotTaken,
                 SM_ERR,
-                ErrorKind::InvalidInput,
-            ),
-            (
-                SurfaceFailure::ZeroLineDirection,
-                SM_ERR_INVALID_INPUT,
                 ErrorKind::InvalidInput,
             ),
             (

@@ -1193,7 +1193,7 @@ impl Plane {
         if line_vector.length_squared() < EFF_ZERO_SQ {
             return Err(SolidError::surface(
                 OP_LINE,
-                SurfaceFailure::ZeroLineDirection,
+                SurfaceFailure::LineDirectionZero,
             ));
         }
 
@@ -2635,7 +2635,7 @@ mod tests {
         assert_eq!(e.sm_status(), Some(SM_ERR_INVALID_INPUT));
         assert_eq!(
             e.surface_failure(),
-            Some(&SurfaceFailure::ZeroLineDirection)
+            Some(&SurfaceFailure::LineDirectionZero)
         );
         assert_eq!(e.kind(), crate::error::ErrorKind::InvalidInput);
     }
