@@ -84,6 +84,20 @@ fn volume(s: &Session, body: &str) -> f64 {
     s.model.state().body(body).map(|b| solidcraft_kernel::measure(&b.body).unwrap().volume).unwrap_or(0.0)
 }
 
+/// #14182: a region bounded in part by two arcs that cross almost tangentially, 0.44 micron apart,
+/// was found with the lens between the two crossings in it, so its loop used one arc twice and
+/// SMLib's check refused the extrude (Bad Gap). The lens is no part of the region: the extrude builds.
+#[test]
+fn a_region_by_two_arcs_crossing_almost_tangentially_extrudes() {
+    let mut s = Session::default();
+    s.set_validation(solidcraft_kernel::Validation::EachStep);
+    s.run_script(&serde_json::from_str(include_str!("../../../examples/regressions/near_tangent_arcs_lens_profile.json")).unwrap()).unwrap();
+    let errors: Vec<_> = s.model.results.iter().filter_map(|r| r.error.clone()).collect();
+    assert!(errors.is_empty(), "{errors:?}");
+    let v = volume(&s, "Body3");
+    assert!((v - 1_733_713.898_7).abs() < 1e-3, "{v}");
+}
+
 /// #18039: a 360° revolve cut whose sketch is in the same plane as the body it cuts (a body
 /// revolved a whole turn in that plane) was refused: SMLib's boolean split the two seam edges
 /// the solids of revolution share and left an edge near the seam, which its check refuses ("Face
