@@ -66,7 +66,6 @@ const PINNED: &[(&str, usize)] = &[
     ("solidcore/src/blend/fillet_geom/p1.rs", 62),
     ("solidcore/src/blend/fillet_geom/p2.rs", 123),
     ("solidcore/src/blend/fillet_geom/p3.rs", 47),
-    ("solidcore/src/blend/fillet_geom/p4.rs", 120),
     ("solidcore/src/blend/fillet_geom/p5.rs", 131),
     ("solidcore/src/blend/fillet_geom/p6.rs", 88),
     ("solidcore/src/blend/fillet_geom/tangent_end_rib.rs", 22),
