@@ -1359,11 +1359,15 @@ fn an_eased_setback_set_on_an_unequal_corner_beside_a_curved_face_is_refused() {
     s.prepare_per_edge_constant_radius(&mut k, &edges, &[2.0, 2.5, 3.0], &xs, 1, 1.0)
         .unwrap();
     s.add_set_back_vertex(vid);
-    s.create_corners(&mut k, None).unwrap();
+    s.create_corners(&k, None).unwrap();
     let mut set = 0;
     for c in s.fillet_corners().unwrap() {
         if s.corner(c).unwrap().vertex == Some(vid) {
-            assert!(s.corner(c).unwrap().blend.is_some_and(|bc| bc.is_setback()));
+            assert!(s
+                .corner(c)
+                .unwrap()
+                .blend
+                .is_some_and(solidcore::blend::blend_corner::BlendCorner::is_setback));
             s.set_corner_setback(c, 4.0).unwrap();
             s.set_corner_ease(c, 1.0).unwrap();
             set += 1;

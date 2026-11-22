@@ -759,7 +759,11 @@ fn blend_box_on_corner(
         for c in s.fillet_corners().unwrap() {
             if s.corner(c).unwrap().vertex == Some(v) {
                 // unequal rounds: the Setback already, before any setback is set on it
-                assert!(s.corner(c).unwrap().blend.is_some_and(|b| b.is_setback()));
+                assert!(s
+                    .corner(c)
+                    .unwrap()
+                    .blend
+                    .is_some_and(solidcore::blend::blend_corner::BlendCorner::is_setback));
                 s.set_corner_setback(c, ask.setback).unwrap();
                 s.set_corner_ease(c, ask.ease).unwrap();
                 set += 1;
@@ -819,7 +823,9 @@ fn a_setback_set_on_a_corner_already_the_setback_builds_as_asked() {
         let r = blend_box(&mut k, [20.0; 3], &SHORT_AT, &[2.0, 3.0, 4.0], Some(&eased));
         assert_eq!(r.code, 0, "{}", r.comment);
         let mut b = r.body.unwrap();
-        let lines = check_brep(&mut k, &mut b, CheckLevel::Level2).unwrap().lines();
+        let lines = check_brep(&mut k, &mut b, CheckLevel::Level2)
+            .unwrap()
+            .lines();
         assert!(lines.is_empty(), "{lines:?}");
         b
     };
@@ -827,4 +833,3 @@ fn a_setback_set_on_a_corner_already_the_setback_builds_as_asked() {
     let r = blend_box_on_corner(&mut k, [20.0; 3], &SHORT_AT, &[2.0, 3.0, 4.0], &eased);
     built(&mut k, r, counts(&through_fill), want);
 }
-
