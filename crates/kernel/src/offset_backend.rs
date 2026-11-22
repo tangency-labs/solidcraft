@@ -126,9 +126,8 @@ pub(crate) fn shell(b: &Body, open: &[Vec3], thickness: f64) -> Result<Body> {
     let seen = std::cell::RefCell::new(None);
     let attempt = |t: f64| {
         run("shell", b, Some(t), |s| {
-            s.shell(&pts, tol, -t).map_err(|e| {
+            s.shell(&pts, tol, -t).inspect_err(|e| {
                 *seen.borrow_mut() = Some(e.clone());
-                e
             })
         })
     };
