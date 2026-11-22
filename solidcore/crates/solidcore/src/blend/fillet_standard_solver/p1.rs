@@ -142,7 +142,7 @@ use crate::curve::curve::p1::GlobalPointSolveOptions;
 use crate::curve::curve::p5::is_arc_base;
 use crate::curve::curve::{Curve, CurveKind};
 use crate::error::blend::trace::defect;
-use crate::error::blend::TraceFailure;
+use crate::error::blend::{SolverFailure, TraceFailure};
 use crate::error::{ignored, Result, SolidError};
 use crate::geom::axis2_placement::Axis2Placement;
 use crate::geom::extent1d::{Extent1d, ExtentNd};
@@ -1574,12 +1574,9 @@ impl ConstantDistanceFs {
                 &GlobalPointSolveOptions::<crate::topology::ObjectHandle>::default(),
             )?;
             let [sol] = sols.as_slice() else {
-                return Err(SolidError::blend_trace(
+                return Err(SolidError::blend_solver(
                     OP,
-                    TraceFailure::PointDropNotSingle {
-                        onto_edge: true,
-                        solutions: sols.len(),
-                    },
+                    SolverFailure::NoSingleCurveFoot { count: sols.len() },
                 ));
             };
             let mut t = sol.start.param(0)?;
@@ -1675,10 +1672,7 @@ impl ConstantDistanceFs {
             let [sol] = *sols.as_slice() else {
                 return Err(SolidError::blend_trace(
                     OP,
-                    TraceFailure::PointDropNotSingle {
-                        onto_edge: false,
-                        solutions: sols.len(),
-                    },
+                    TraceFailure::NoSingleSurfaceFoot { count: sols.len() },
                 ));
             };
             uv2 = sol;
@@ -3268,9 +3262,10 @@ impl CircularCrossSectionFsg {
             // Check for case of zero radius on interior of surface
             if radius1 < EFF_ZERO || radius2 < EFF_ZERO {
                 // Zero radius cross-section curve
-                return Err(SolidError::blend_trace(
+                let radius = if radius1 < EFF_ZERO { radius1 } else { radius2 };
+                return Err(SolidError::blend_solver(
                     OP,
-                    TraceFailure::CrossSectionZeroRadius { t },
+                    SolverFailure::RadiusVanishes { radius },
                 ));
             } else if (radius1 - radius2).abs() > radius1 / 10.0 {
                 // skip adding a cross section for this parameter value
@@ -3291,10 +3286,12 @@ impl CircularCrossSectionFsg {
             // quit for zero and 180 angles
             if angle.abs() < EFF_ZERO_SQRT || angle.abs() > PI - EFF_ZERO_SQRT {
                 // Tangent or Degenerate Angle for cross-section curve
-                return Err(SolidError::blend_trace(
-                    OP,
-                    TraceFailure::CrossSectionAngleDegenerate { angle },
-                ));
+                let failure = if angle.abs() < EFF_ZERO_SQRT {
+                    SolverFailure::SweepAngleTooSmall { angle }
+                } else {
+                    SolverFailure::SweepAngleNearHalfTurn { angle }
+                };
+                return Err(SolidError::blend_solver(OP, failure));
             }
 
             // negate normal for neg angles and recompute CCW angle
@@ -3304,9 +3301,9 @@ impl CircularCrossSectionFsg {
             let mut angle = z_vec.ccw_angle_between(v1, v2)?;
             if angle < EFF_ZERO {
                 // Can't happen ??
-                return Err(SolidError::blend_trace(
+                return Err(SolidError::blend_solver(
                     OP,
-                    TraceFailure::CrossSectionAngleDegenerate { angle },
+                    SolverFailure::SweepAngleTooSmall { angle },
                 ));
             }
 
@@ -3912,7 +3909,7 @@ mod tests {
             CircularCrossSectionFsg::default()
                 .create_surface_from_curves(&k, &mut c, &mut a, &mut b, 1e-6, false)
                 .unwrap_err(),
-            SolidError::blend_trace(OP_CIRC, TraceFailure::CrossSectionZeroRadius { t: 0.0 })
+            SolidError::blend_solver(OP_CIRC, SolverFailure::RadiusVanishes { radius: 0.0 })
         );
     }
 
