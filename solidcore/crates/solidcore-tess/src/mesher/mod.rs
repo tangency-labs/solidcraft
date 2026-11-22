@@ -1623,7 +1623,15 @@ pub(crate) fn polygons(s: &poles::Face, loops: &[seam::Loop], rules: &size::Rule
     for seam::Loop { uv: luv, pts } in &projected {
         let start = uvs.len();
         let n = luv.len();
+        // A loop with every node within the reach of a collapsed line (a face narrower than the
+        // reach all along, a sliver) has no node to split: it is meshed by its nodes as they are.
+        let sliver = all_at_pole(s, &seam::Loop { uv: luv.clone(), pts: Vec::new() }, reach);
         for (k, (q, p)) in luv.iter().zip(pts).enumerate() {
+            if sliver {
+                uvs.push(*q);
+                fixed.push(*p);
+                continue;
+            }
             // At a pole the parameter along the degenerate direction is free: one copy with
             // the previous node's value, one with the next node's.
             let (prev, next) = (luv.get((k + n - 1) % n).copied(), luv.get((k + 1) % n).copied());
@@ -1656,11 +1664,40 @@ pub(crate) fn polygons(s: &poles::Face, loops: &[seam::Loop], rules: &size::Rule
     Ok(Polygons { uvs, fixed, ranges, seamed })
 }
 
+/// Whether every node of `l` is at a pole of the surface (within `reach`).
+fn all_at_pole(s: &poles::Face, l: &seam::Loop, reach: f64) -> bool {
+    !l.uv.is_empty() && l.uv.iter().all(|q| (0..2).any(|d| s.pole(*q, d, reach)))
+}
+
 /// Whether every node of `l` is at a pole of the surface (within `reach`) and all of them lie
 /// within `reach` of the first node's point in 3D: the loop is one point.
 fn collapsed_at_pole(s: &poles::Face, l: &seam::Loop, reach: f64) -> bool {
     let Some(first) = l.pts.first() else { return false };
-    !l.uv.is_empty() && l.uv.len() == l.pts.len() && l.uv.iter().all(|q| (0..2).any(|d| s.pole(*q, d, reach))) && l.pts.iter().all(|p| p.dist(*first) <= reach)
+    l.uv.len() == l.pts.len() && all_at_pole(s, l, reach) && l.pts.iter().all(|p| p.dist(*first) <= reach)
+}
+
+/// Whether the face lies on the surface's side of `l`, a loop that is one point at a pole: the
+/// loop runs once round a closed direction of the surface along the parameter line of the pole,
+/// and the face lies left of it ([`seam::cut`]), so it has the surface's whole patch on its left
+/// when the parameter range goes on that way past the line, and nothing when the line is the
+/// range's end. A loop that does not run round (one node repeated) bounds no area.
+fn point_loop_has_area(s: &poles::Face, l: &seam::Loop) -> bool {
+    let dom = uv::domain(s);
+    (0..2).any(|d| {
+        let Some(per) = dom.period.get(d).copied().flatten() else { return false };
+        let drift = seam::drift(l, d, per);
+        if !drift.is_finite() || drift.abs() <= per * 0.5 {
+            return false;
+        }
+        let other = 1 - d;
+        let Some((lo, hi)) = dom.range.get(other).copied().flatten() else { return true };
+        let at = l.uv.iter().map(|q| comp(q, other)).sum::<f64>() / l.uv.len().max(1) as f64;
+        let room = (hi - lo).abs() * 1e-9;
+        // The face is left of the loop: above the line (larger `other`) when a loop along u
+        // runs towards larger u, and below it when a loop along v does.
+        let above = (drift > 0.0) == (d == 0);
+        if above { at < hi - room } else { at > lo + room }
+    })
 }
 
 /// A pole of the surface on a face's boundary, which the mesh path fans on its own
@@ -1699,8 +1736,10 @@ fn pole_caps(s: &poles::Face, uvs: &[[f64; 2]], ranges: &[std::ops::Range<usize>
         let at = |k: usize| r.start + k % n;
         let pole: Vec<bool> = (0..n).map(|k| is_pole(at(k))).collect();
         let pole_at = |k: usize| pole.get(k % n).copied().unwrap_or(false);
+        // A loop with every node at a pole: a face narrower than the reach all along (a sliver,
+        // [`polygons`]) has no cap to fan, and is meshed by its boundary nodes.
         if pole.iter().all(|p| *p) {
-            return Err(format!("a loop of {n} nodes all at one pole"));
+            continue;
         }
         for k in 0..n {
             // A run starts at a pole node whose predecessor is not a pole.
@@ -2085,11 +2124,15 @@ fn plan_face(
     let mut caps: Vec<crate::Cap> = Vec::new();
     let fail = |why: &str| unsupported(format!("face {fi} ({kind}): {why}"));
     // On the mesh path a loop whose every node is at a pole, all within the reach of one point
-    // in 3D, bounds no area: it is that point, not a boundary to mesh. The loop is left out; a
-    // face with no other loop has no area at all and gets no triangles.
+    // in 3D, is that point, not a boundary to mesh. Where the face lies on the side of it that
+    // is outside the surface's parameter range, it bounds no area and the loop is left out; a
+    // face with no other loop has no triangles. Where the face is the surface's patch on the
+    // other side, it has area: the loop is kept and the face goes on to be planned (or refused)
+    // as it is, never left empty.
+    let drops = |l: &seam::Loop| matches!(purpose, Purpose::Mesh(_)) && collapsed_at_pole(s, l, reach) && !point_loop_has_area(s, l);
     let kept: Vec<seam::Loop>;
-    let loops = if matches!(purpose, Purpose::Mesh(_)) && loops.iter().any(|l| collapsed_at_pole(s, l, reach)) {
-        kept = loops.iter().filter(|l| !collapsed_at_pole(s, l, reach)).cloned().collect();
+    let loops = if loops.iter().any(&drops) {
+        kept = loops.iter().filter(|l| !drops(l)).cloned().collect();
         if kept.is_empty() {
             return Ok(Planned::Face(FacePlan { face: u32::try_from(fi).unwrap_or(u32::MAX), ..FacePlan::default() }));
         }
