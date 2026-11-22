@@ -125,6 +125,16 @@ fn fail(cause: SolverFailure) -> SolidError {
     SolidError::blend_solver(OP, cause)
 }
 
+/// [`SolverFailure::EdgeUseWithoutEdge`] at the edge use, status `SM_ERR_NULL_POINTER`
+/// (as the executive's `BlendFailure::EdgeUseWithoutEdge`).
+fn edge_use_without_edge(edgeuse: crate::topology::EdgeuseId) -> SolidError {
+    SolidError::blend_at(
+        OP,
+        BlendFailure::Solver(SolverFailure::EdgeUseWithoutEdge),
+        crate::error::EntityRef::Edgeuse(edgeuse),
+    )
+}
+
 // =====================================================================================
 // SHARED: data model (sTsectPnts), state passed between the chunks, public resolver
 // =====================================================================================
@@ -742,7 +752,7 @@ fn c1_setup(ops: &mut dyn FilletSolverOps, cx: &mut Cx<'_>) -> Result<CalcState>
         .solver()
         .edgeuse(0)?
         .ok_or_else(|| invalid("no edge use 0"))?;
-    let edge = eu::edge(cx.target, eu0)?.ok_or_else(|| fail(SolverFailure::EdgeUseWithoutEdge))?;
+    let edge = eu::edge(cx.target, eu0)?.ok_or_else(|| edge_use_without_edge(eu0))?;
     // SM_CAST_PTR(SmBSplineCurve, pEdge->GetCurve()): NULL for a missing curve or a
     // kind not derived from SmBSplineCurve
     let edge_curve = match topo_edge::curve(cx.target, edge)? {
@@ -1187,6 +1197,29 @@ mod tests_c1 {
         );
         assert_eq!(e.upstream_status(), Some(crate::error::SM_ERR_NULL_POINTER));
 
+        // an edge use of the caller's body without an edge: at that edge use,
+        // SM_ERR_NULL_POINTER
+        let (mut tb, eus) = target(Some(line_curve([0.0, 0.0, 0.0], [2.0, 0.0, 0.0], 3)));
+        tb.edgeuse_mut(eus[0]).unwrap().edge = None;
+        let (mut edgeless_fb, _, _) = fillets(&k, ROWS);
+        let mut edgeless_ops = solver(&k, eus);
+        let mut edgeless_cx = Cx {
+            k: &k,
+            target: &mut tb,
+            fillets: &mut edgeless_fb,
+            solvers: GeometrySolvers::Indexed(&[]),
+            error_info: None,
+        };
+        let e = c1_setup(&mut edgeless_ops, &mut edgeless_cx).unwrap_err();
+        assert_eq!(
+            e.blend_failure(),
+            Some(&BlendFailure::Solver(SolverFailure::EdgeUseWithoutEdge)),
+            "{e:?}"
+        );
+        assert_eq!(e.entity(), Some(crate::error::EntityRef::Edgeuse(eus[0])));
+        assert!(!e.is_defect(), "{e:?}");
+        assert_eq!(e.upstream_status(), Some(crate::error::SM_ERR_NULL_POINTER));
+
         // an edge curve not of a B-spline class (a Hermite curve): SM_ERR_NULL_POINTER
         let (mut tb, eus) = target(Some(Curve::from(
             crate::curve::hermite_curve::HermiteCurve::new(
@@ -1596,7 +1629,7 @@ fn c2_trace_to_edge_ends(
         .solver()
         .edgeuse(0)?
         .ok_or_else(|| invalid("no edge use 0"))?;
-    let edge = eu::edge(cx.target, eu0)?.ok_or_else(|| fail(SolverFailure::EdgeUseWithoutEdge))?;
+    let edge = eu::edge(cx.target, eu0)?.ok_or_else(|| edge_use_without_edge(eu0))?;
     if !st.do_sorting
         || topo_edge::start_vertex(cx.target, edge)? == topo_edge::end_vertex(cx.target, edge)?
     {
@@ -1754,7 +1787,7 @@ fn c2_end_past_tangent_edge(
         .solver()
         .edgeuse(0)?
         .ok_or_else(|| fail(SolverFailure::SolverEdgeUseMissing { index: 0 }))?;
-    let edge = eu::edge(cx.target, eu0)?.ok_or_else(|| fail(SolverFailure::EdgeUseWithoutEdge))?;
+    let edge = eu::edge(cx.target, eu0)?.ok_or_else(|| edge_use_without_edge(eu0))?;
     let corner_vertex = if at_end {
         topo_edge::end_vertex(cx.target, edge)?
     } else {
@@ -3385,8 +3418,15 @@ fn c5_split_rail(
         .geom(st.geom0)?
         .rail(mm)
         .ok_or_else(|| invalid("split: geometry 0 has no rail"))?;
-    let rail_curve = edge_unit::curve(brep, rail)?
-        .ok_or_else(|| SolidError::blend_null_defect(OP, "a rail the solver built has no curve"))?;
+    // a trace can succeed without a flush (c4_trace), leaving geometry 0's rails as the
+    // caller built them
+    let rail_curve = edge_unit::curve(brep, rail)?.ok_or_else(|| {
+        fail(SolverFailure::RailNotBSpline {
+            fillet_geom: st.geom0,
+            side: mm,
+            kind: None,
+        })
+    })?;
     let mut trim_ivl = rail_curve.natural_interval();
     let mut new_trim_ivl = trim_ivl;
     let prim_eu = eu::primary_edgeuse(brep, rail)?
@@ -3394,10 +3434,10 @@ fn c5_split_rail(
     let mate_eu =
         eu::mate(brep, prim_eu)?.ok_or_else(|| invalid("split: rail edge use without mate"))?;
     let uv_curve = eu::uv_trim_curve_pointer(brep, mate_eu)?.ok_or_else(|| {
-        SolidError::blend_null_defect(
-            OP,
-            "a rail edge use's mate in the solver's fillet body has no uv trim curve",
-        )
+        fail(SolverFailure::RailMateWithoutUvCurve {
+            fillet_geom: st.geom0,
+            side: mm,
+        })
     })?;
     let new_rail = cx
         .fillets
@@ -3975,6 +4015,56 @@ mod tests_c5 {
         );
         assert!(!e.is_defect(), "{e:?}");
         assert_eq!(e.upstream_status(), Some(SM_ERR_NULL_POINTER), "{e:?}");
+    }
+
+    /// A trace can succeed without a flush, so geometry 0's rails reach the split as the
+    /// caller built them: a rail without a curve, or a mate without a uv trim curve, is
+    /// the caller's set-up (`InvalidInput`), status `SM_ERR_NULL_POINTER`.
+    #[test]
+    fn split_rail_rejects_a_callers_rail_without_curve_or_uv_curve() {
+        let mut f = Fixture::new();
+        f.fb.brep_mut().edge_mut(f.rails[1]).unwrap().curve = None;
+        let mut cx = Cx {
+            k: &f.k,
+            target: &mut f.target,
+            fillets: &mut f.fb,
+            solvers: GeometrySolvers::Indexed(&[]),
+            error_info: None,
+        };
+        let e = c5_split_rail(&mut cx, &f.st, f.g, 1, 0.0).unwrap_err();
+        assert_eq!(
+            e,
+            fail(SolverFailure::RailNotBSpline {
+                fillet_geom: f.g,
+                side: 1,
+                kind: None,
+            })
+        );
+        assert!(!e.is_defect(), "{e:?}");
+        assert_eq!(e.upstream_status(), Some(SM_ERR_NULL_POINTER));
+
+        let mut f = Fixture::new();
+        f.fb.brep_mut()
+            .edgeuse_mut(f.mates[0])
+            .unwrap()
+            .uv_trim_curve = None;
+        let mut cx = Cx {
+            k: &f.k,
+            target: &mut f.target,
+            fillets: &mut f.fb,
+            solvers: GeometrySolvers::Indexed(&[]),
+            error_info: None,
+        };
+        let e = c5_split_rail(&mut cx, &f.st, f.g, 0, 0.0).unwrap_err();
+        assert_eq!(
+            e,
+            fail(SolverFailure::RailMateWithoutUvCurve {
+                fillet_geom: f.g,
+                side: 0,
+            })
+        );
+        assert!(!e.is_defect(), "{e:?}");
+        assert_eq!(e.upstream_status(), Some(SM_ERR_NULL_POINTER));
     }
 
     #[test]

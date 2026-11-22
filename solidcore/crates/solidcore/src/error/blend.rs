@@ -763,6 +763,15 @@ pub enum SolverFailure {
         /// The curve's kind (its type string), `None` when the rail has no curve.
         kind: Option<&'static str>,
     },
+    /// The mate edge use of rail `side` of the caller's fillet geometry has no uv trim
+    /// curve: the caller's solver set-up ([`ErrorKind::InvalidInput`]); status
+    /// `SM_ERR_NULL_POINTER`.
+    RailMateWithoutUvCurve {
+        /// The fillet geometry.
+        fillet_geom: crate::blend::fillet_geom::p1::FilletGeomId,
+        /// The rail side, 0 or 1.
+        side: usize,
+    },
     /// A rail of the caller's fillet geometry has `count` edge uses where two are needed:
     /// the caller's solver set-up ([`ErrorKind::InvalidInput`]).
     RailEdgeUseCount {
@@ -862,7 +871,8 @@ impl SolverFailure {
             | Self::FilletGeomWithoutSurface { .. }
             | Self::FilletGeomWithoutCenterLine { .. }
             | Self::FilletGeomWithoutSolver { .. }
-            | Self::RailNotBSpline { .. } => ErrorKind::InvalidInput,
+            | Self::RailNotBSpline { .. }
+            | Self::RailMateWithoutUvCurve { .. } => ErrorKind::InvalidInput,
             Self::JacobianNotLoaded
             | Self::SupportIntersectionFailed
             | Self::SurfaceCacheNotBuilt => ErrorKind::Failed,
@@ -891,7 +901,8 @@ impl SolverFailure {
             | Self::FilletGeomWithoutSurface { .. }
             | Self::FilletGeomWithoutCenterLine { .. }
             | Self::FilletGeomWithoutSolver { .. }
-            | Self::RailNotBSpline { .. } => SM_ERR_NULL_POINTER,
+            | Self::RailNotBSpline { .. }
+            | Self::RailMateWithoutUvCurve { .. } => SM_ERR_NULL_POINTER,
             Self::CrossSectionPointNotFound { .. }
             | Self::RailTangentZero { .. }
             | Self::PiecesTooFarApart { .. }
@@ -1145,6 +1156,11 @@ impl core::fmt::Display for SolverFailure {
                     "rail {side} of fillet geometry {fillet_geom:?} has no curve"
                 ),
             },
+            Self::RailMateWithoutUvCurve { fillet_geom, side } => write!(
+                f,
+                "the mate edge use of rail {side} of fillet geometry {fillet_geom:?} has no uv \
+                 trim curve"
+            ),
             Self::RailEdgeUseCount { count } => {
                 write!(
                     f,
