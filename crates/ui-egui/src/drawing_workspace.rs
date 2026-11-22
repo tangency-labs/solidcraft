@@ -767,6 +767,13 @@ fn sheet_card(
     let name_response = ui.put(name, egui::Label::new(label).truncate().sense(Sense::click()));
     if response.clicked() || name_response.clicked() {
         select_sheet(app, sheet.id);
+        // With sheets as design views, the card brings that sheet's view forward (opening it when
+        // none is open), so the canvas shows the sheet clicked.
+        if app.preferences.design_sub_tab_sheets
+            && let Err(error) = crate::sheet_views::open_in(app, drawing.id, sheet.id, false)
+        {
+            app.set_status(error, true);
+        }
     }
 
     let menu_button = ui_kit::icon_button_at(ui, menu, "dots", app.tr("ui.drawing_sheets.actions"));
