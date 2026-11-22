@@ -76,7 +76,7 @@ fn designs() -> Vec<(String, Source)> {
     out
 }
 
-/// Build a design: a design file (also a design saved as JSON) is opened, a script is run. A
+/// Builds a design. A design file (also a design saved as JSON) is opened, and a script is run. A
 /// `.sc` file (or one of an older extension) is opened whether it holds a container or JSON.
 fn load(source: &Source) -> Result<Session, String> {
     let mut s = Session::default();
@@ -397,11 +397,13 @@ const UNSTABLE: [(&str, &str); 1] = [(
 )];
 
 /// The designs that take longest to build, heaviest first, with one build's time (ci profile,
-/// `load` and `build` of this test timed with one worker, one design at a time, 2026-11-21). The
-/// test hands them out first, and each design's two builds go to two workers, so a heavy design is
-/// never built twice in a row on one worker while the rest wait. Every other design took under
-/// 3 s. Only the order of the work depends on this list. A stale entry makes the test slower,
-/// never wrong. Re-measure when a design here gets much faster, or one not listed takes over 5 s.
+/// `load` and `build` of this test with one worker, 2026-11-21). Each of the 38 designs that took
+/// over 5 s in a full parallel run was timed this way, and the list keeps the 23 that took over
+/// 3.5 s. The slowest design left off took 2.9 s. The test hands them out first, and each design's
+/// two builds go to two workers, so a heavy design is never built twice in a row on one worker
+/// while the rest wait. Only the order of the work depends on this list. A stale entry makes the
+/// test slower, never wrong. Re-measure when a design here gets much faster, or one not listed
+/// takes over 5 s.
 const HEAVIEST: [&str; 23] = [
     "oracle/81-fillet-spline-radius",                  // 29.6 s
     "regressions/fins_joined_into_their_hub",          // 24.8 s
