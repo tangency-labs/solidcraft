@@ -380,7 +380,12 @@ pub fn app_bar(app: &mut SolveApp, ui: &mut egui::Ui) {
                         crate::links::run(ui.ctx(), id);
                     }
                     app_bar::BarAction::HidePill { id } => {
-                        crate::app_bar_custom::run(app, &json!({"item":if id == "kofi" { "donate" } else { id },"action":"hide"}));
+                        // A pill the organization's policy shows stays: say why instead.
+                        if crate::links::by_id(id).is_some_and(|link| app.policy.locks(link.pref)) {
+                            app.set_status(solidcraft_ui_text::tr("policy.set_by_organization").to_string(), false);
+                        } else {
+                            crate::app_bar_custom::run(app, &json!({"item":if id == "kofi" { "donate" } else { id },"action":"hide"}));
+                        }
                     }
                     app_bar::BarAction::Version => ui.ctx().open_url(egui::OpenUrl::new_tab(&url)),
                     app_bar::BarAction::App { id } => run_overflow_control(app, id),
@@ -756,6 +761,10 @@ pub(crate) fn file_rows(app: &SolveApp) -> Vec<app_bar::FileRow> {
     rows.push(row("file.export_urdf", app.tr_label("Export URDF…"), &key("file.export_urdf"), "export", shown));
     rows.push(row("file.export_sdf", app.tr_label("Export SDF Model…"), &key("file.export_sdf"), "export", shown));
     rows.push(row("export_json", app.tr_label("Export Design as JSON…"), "", "export", true));
+    // Each installed export slot is a format of its own, labelled with the plugin's name.
+    for (format, label) in crate::plugin_slots::export_slots(app) {
+        rows.push(row(&format!("{PLUGIN_EXPORT}{format}"), &label, "", "export", shown));
+    }
     // Print the drawing shown: only in Drawing, where Ctrl+P does the same.
     if crate::drawing_workspace::active(app) && app.session.open_drawing.is_some() {
         rows.push(row("drawing.print", &format!("{}…", app.tr("ui.drawing_print.menu")), &key("drawing.print"), "export", true));
@@ -787,6 +796,9 @@ pub(crate) fn file_rows(app: &SolveApp) -> Vec<app_bar::FileRow> {
     rows
 }
 
+/// The File menu row of an export slot: this, then its `plugin_id.entry`.
+const PLUGIN_EXPORT: &str = "plugin_export:";
+
 /// Runs the File menu's row `id` ([`file_rows`]).
 pub(crate) fn run_file_row(app: &mut SolveApp, id: &str) {
     if id == "plugins.preferences" {
@@ -795,6 +807,11 @@ pub(crate) fn run_file_row(app: &mut SolveApp, id: &str) {
     }
     if crate::plugin_slots::items(app, crate::plugin_slots::Slot::Menu("File")).iter().any(|item| item.command == id) {
         crate::plugin_slots::begin(app, id);
+        return;
+    }
+    // An export slot opens its dialog: the options, then where to save.
+    if let Some(format) = id.strip_prefix(PLUGIN_EXPORT) {
+        crate::plugin_slots::begin(app, format);
         return;
     }
     if let Some(i) = id.strip_prefix("recent:").and_then(|i| i.parse::<usize>().ok()) {
@@ -2824,7 +2841,22 @@ pub(crate) fn cancel_unfinished(app: &mut SolveApp) -> bool {
 
 /// Global keyboard shortcuts (when no text field has focus).
 pub fn shortcuts(app: &mut SolveApp, ctx: &egui::Context) {
+    let sketch = app.session.active_sketch;
+    let held = if !crate::workspace::tool_receives_input(app) { app.tool.take() } else { None };
+    shortcuts_focused(app, ctx);
+    if let Some(tool) = held
+        && app.session.active_sketch == sketch
+        && app.tool.is_none()
+    {
+        app.tool = Some(tool);
+    }
+}
+
+fn shortcuts_focused(app: &mut SolveApp, ctx: &egui::Context) {
     if crate::view_window_drag::keyboard_active(app, ctx) {
+        return;
+    }
+    if app.sketch_notices.focus_shortcut(ctx, app.session.uid, app.view_windows.current_window()) {
         return;
     }
     if crate::view_windows::is_clean(app) && ctx.input_mut(|input| input.consume_key(egui::Modifiers::NONE, egui::Key::Escape)) {
@@ -3109,7 +3141,7 @@ pub fn shortcuts(app: &mut SolveApp, ctx: &egui::Context) {
                     && !(crate::viewport_status::enabled(app) && crate::viewport_status::owns_escape(app))
                     && app.tool.is_none()
                     && app.dialog.is_none()
-                    && let Some(sketch) = app.session.active_sketch
+                    && let Some(sketch) = crate::workspace::focused_sketch(app)
                 {
                     app.last_escape = None;
                     // A sketch left blank is taken away instead, in one undo step, so no empty

@@ -940,6 +940,9 @@ pub(crate) struct EntryDialog {
     pub(crate) result: Option<String>,
     /// An importer's extensions: its button chooses the file to open, with these options.
     pub(crate) opens: Option<Vec<String>>,
+    /// An export slot's extensions: its button chooses where to save, then exports the design
+    /// with these options.
+    pub(crate) writes: Option<Vec<String>>,
     /// The design the selection fields' picks were made on. A change to it (an edit, an undo, an
     /// update) clears them: a reference into an older model never stands for another item.
     pub(crate) picked_on: Option<Arc<solidcraft_engine::doc::Document>>,
@@ -976,14 +979,20 @@ struct HookState {
     note: bool,
 }
 
+/// Untouched fields send their value from before the hook, so the hook sees the same inputs while
+/// its last reply stays on screen.
 fn hook_values(fields: &[(Field, Input)]) -> Value {
     let mut values = Map::new();
     for (field, input) in fields {
+        let input = field.hook_baseline.as_ref().filter(|_| !field.edited).unwrap_or(input);
         if let Some(value) = scalar_value(field, input) {
             values.insert(field.key.clone(), value);
         } else if matches!(input, Input::Selection(_)) {
             let mut field = field.clone();
             field.required = false;
+            // The shown visibility may come from a hook value; the engine drops what the sent
+            // controllers hide.
+            field.visible = true;
             if let Ok(value) = params(&[(field, input.clone())])
                 && let Some(object) = value.as_object()
             {
@@ -1003,11 +1012,6 @@ fn apply_hook_reply(dialog: &mut EntryDialog, generation: u64, update: solidcraf
     hook.note = update.warning.is_some();
     hook.submitted = Some(generation);
     for (field, input) in fields.iter_mut() {
-        if !field.edited
-            && let Some(baseline) = field.hook_baseline.take()
-        {
-            *input = baseline;
-        }
         field.hook = update.fields.get(&field.key).cloned();
         field.tip = field
             .hook
@@ -1016,12 +1020,28 @@ fn apply_hook_reply(dialog: &mut EntryDialog, generation: u64, update: solidcraf
             .and_then(Value::as_str)
             .or_else(|| hook.schema.get("properties")?.get(&field.key)?.get("description")?.as_str())
             .map(str::to_owned);
-        if !field.edited
-            && field.hook.as_ref().is_some_and(|f| f.contains_key("value") || f.contains_key("default"))
-            && let Some(value) = update.values.get(&field.key).and_then(|v| default_input(field, v))
+        if field.edited {
+            continue;
+        }
+        // An equal value leaves the field as it is; only a value the reply drops goes back.
+        match field
+            .hook
+            .as_ref()
+            .filter(|f| f.contains_key("value") || f.contains_key("default"))
+            .and_then(|_| update.values.get(&field.key))
+            .and_then(|v| default_input(field, v))
         {
-            field.hook_baseline = Some(input.clone());
-            *input = value;
+            Some(value) => {
+                field.hook_baseline.get_or_insert_with(|| input.clone());
+                *input = value;
+            }
+            None => {
+                if let Some(baseline) = field.hook_baseline.take() {
+                    *input = baseline;
+                    // Let refresh_conditions apply a conditional default that the hook value held back.
+                    field.controls = None;
+                }
+            }
         }
     }
     refresh_conditions(fields);
@@ -1043,7 +1063,8 @@ fn poll_hooks(app: &mut SolveApp, ctx: &egui::Context) {
             hook.changed_at = now;
             hook.observed = values;
             hook.note = false;
-            for (field, input) in fields.iter_mut() {
+            // A value change keeps the last reply on screen until the next one replaces it.
+            for (field, input) in fields.iter_mut().filter(|_| document_changed) {
                 field.hook = None;
                 field.controls = None;
                 if let Some(baseline) = field.hook_baseline.take()
@@ -1149,6 +1170,7 @@ pub(crate) fn open_entry(app: &mut SolveApp, p: usize, e: usize) {
     }
     let mut fields = form(&entry.input_schema);
     let opens = (entry.kind == solidcraft_engine::plugin::EntryKind::Importer).then(|| entry.extensions.clone());
+    let writes = (entry.kind == solidcraft_engine::plugin::EntryKind::Exporter).then(|| entry.extensions.clone());
     let id = app.plugin_menu.next_dialog;
     app.plugin_menu.next_dialog += 1;
     // What is selected fills the first selection field, as far as that field takes it; the
@@ -1184,6 +1206,7 @@ pub(crate) fn open_entry(app: &mut SolveApp, p: usize, e: usize) {
         error: None,
         result: None,
         opens,
+        writes,
         picked_on: prefilled.then(|| app.session.doc.clone()),
         picks_cleared: false,
         preview: true,
@@ -1815,11 +1838,32 @@ pub(crate) fn run_dialog(app: &mut SolveApp, id: u64) -> Result<(), String> {
         });
         return Ok(());
     }
+    // An export slot: choose where to save, then export the design on the worker, as a run is,
+    // with the options from this dialog. The dialog stays open with any error until it is done.
+    if let Some(extensions) = dialog.writes.clone() {
+        let format = std::format!("{}.{}", dialog.plugin.id, dialog.entry);
+        let extension = extensions.first().cloned().unwrap_or_default();
+        let name = std::format!("{}.{extension}", crate::export_name::offered(app, None, &app.session.doc.name));
+        let extensions: Vec<&str> = extensions.iter().map(String::as_str).collect();
+        app.pick_save(&name, &extensions, move |app, path| {
+            let Some(path) = path else { return };
+            let request = json!({"command":"file.export","params":{"path": path, "format": format, "options": params}});
+            queue(app, id, request);
+        });
+        return Ok(());
+    }
     let request = json!({"command":"plugin.run","params":{
         "path": dialog.plugin.path, "approval": dialog.plugin.approval, "entry": dialog.entry, "params": params, "form_guard": dialog.form_guard}});
+    queue(app, id, request);
+    Ok(())
+}
+
+/// Queue dialog `id`'s request on the control channel's worker, for the design it was opened on.
+fn queue(app: &mut SolveApp, id: u64, request: Value) {
+    let Some(session) = app.plugin_menu.dialogs.iter().find(|d| d.id == id).map(|d| d.session) else { return };
     let (req, reply) = solidcraft_control::ControlRequest::new("engine.execute", request);
     let ticket = req.ticket.clone();
-    app.plugin_menu.pending.push((req.serial, app.session.uid));
+    app.plugin_menu.pending.push((req.serial, session));
     app.control_held.push_back(req);
     if let Some(dialog) = app.plugin_menu.dialogs.iter_mut().find(|d| d.id == id) {
         dialog.running = Some(Running { reply, ticket, received: None });
@@ -1827,7 +1871,6 @@ pub(crate) fn run_dialog(app: &mut SolveApp, id: u64) -> Result<(), String> {
         dialog.error = None;
         dialog.result = None;
     }
-    Ok(())
 }
 
 /// A queued run is for the design its dialog was opened on: refused, when its turn comes, if
@@ -1889,6 +1932,18 @@ fn poll_dialog(app: &mut SolveApp, id: u64) {
         }
         dialog.revalidated = validation.get("changed") == Some(&Value::Bool(true));
         dialog.changed |= dialog.revalidated;
+        return;
+    }
+    if dialog.writes.is_some() {
+        let path = reply.pointer("/result/path").and_then(Value::as_str).unwrap_or_default().to_owned();
+        let notes: Vec<String> =
+            reply.pointer("/result/warnings").and_then(Value::as_array).into_iter().flatten().filter_map(Value::as_str).map(String::from).collect();
+        app.plugin_menu.dialogs.remove(at);
+        let mut done = solidcraft_ui_text::format("plugin_export.done", &[("path", &path)]);
+        for note in notes {
+            done = std::format!("{done} · {note}");
+        }
+        app.set_status(done, false);
         return;
     }
     if dialog.read {
@@ -1997,6 +2052,8 @@ fn show_dialog(app: &mut SolveApp, ctx: &egui::Context, dialog: &mut EntryDialog
     let title = dialog.label.clone();
     let run_key = if dialog.opens.is_some() {
         "ui.plugin_dialog_choose_file"
+    } else if dialog.writes.is_some() {
+        "plugin_export.button"
     } else if dialog.form_guard.is_some() {
         "ui.plugin_edit_apply"
     } else {
@@ -2158,7 +2215,8 @@ fn body(
     if let Some(hook) = &dialog.hook {
         if hook.note {
             ui_kit::status_line(ui, app.tr("ui.plugin_hook_unavailable"), ui_kit::StatusTone::Dim);
-        } else if hook.pending.is_some() {
+        } else if hook.pending.is_some() && crate::now_ms() - hook.changed_at >= 500.0 {
+            // A fast hook shows no status line, so the rows under the fields do not move.
             ui_kit::status_line(ui, app.tr("ui.plugin_hook_waiting"), ui_kit::StatusTone::Dim);
         }
     }

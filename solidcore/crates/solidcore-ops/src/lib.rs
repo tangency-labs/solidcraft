@@ -57,6 +57,7 @@ pub mod error;
 pub mod export_geometry;
 pub mod extend;
 pub mod face_surface;
+pub mod faceted;
 pub mod file;
 pub mod fit_projection;
 pub mod hatch;
@@ -113,6 +114,7 @@ pub use error::{
     Error, FailureCode, FitKind, OffsetRefusal, RecordEntity, Result, RoomReason, SolidTest,
     Unblendable, Unsoundness,
 };
+pub use faceted::faceted_volume;
 pub use measure::{
     point_displacement, point_distance, point_set_summary, points_meet, ClassifiedPoint, Distance,
     EdgeCurve, EdgePoint, EdgeRayPoint, FaceCentroid, FaceRayHit, GapSample,

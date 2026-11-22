@@ -1330,6 +1330,15 @@ pub enum FeatureKind {
         /// and section names. Otherwise use the face's extended surface and its sheet.
         #[serde(default, skip_serializing_if = "std::ops::Not::not")]
         tool_plane: bool,
+        /// With `tool`: what of the tool body cuts, its face extended (older designs), the
+        /// picked faces as they are, or the whole body as it is (#9305).
+        #[serde(default, skip_serializing_if = "SplitSheet::is_extended")]
+        tool_sheet: SplitSheet,
+        /// With `tool_sheet` `faces`: points on the tool body's other picked faces, named like
+        /// `tool` so they follow the faces.
+        #[walk(picks_faces)]
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        tool_faces: Vec<Position>,
         /// A straight line of this sketch as the tool (#1552): the plane through it along the
         /// sketch's normal, which follows the sketch.
         #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -1518,6 +1527,11 @@ pub enum FeatureKind {
         /// never given again.
         #[serde(default, skip_serializing_if = "is_zero_u32")]
         next_pair: u32,
+        /// Two or more groups of lines, each placed its own way (`frame::MemberGroup`); then they
+        /// stand in for `lines`, `anchor`, `locate`, `angle`, `mirror` and `body_name`, which stay
+        /// unset. None: those fields are the feature's one group (`frame::member_groups`).
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        groups: Vec<crate::frame::MemberGroup>,
     },
     /// Raise or sink profiles on a planar face, or wrap them on a selected cylindrical wall.
     Emboss {
@@ -2697,6 +2711,25 @@ pub struct TrimCurves {
     pub curves: Vec<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub direction: Option<Dir>,
+}
+
+/// What of the tool body cuts in a Split Body by a face (#9305).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SplitSheet {
+    /// The picked face's surface extended (with its sheet where that does not cut through).
+    #[default]
+    Extended,
+    /// The picked faces exactly as they are, bounded where they end.
+    Faces,
+    /// Every face of the tool body exactly as it is.
+    Body,
+}
+
+impl SplitSheet {
+    pub fn is_extended(&self) -> bool {
+        *self == SplitSheet::Extended
+    }
 }
 
 /// A face picked by a point on it, on a named body.
@@ -4227,6 +4260,7 @@ impl Document {
             .chain(a.contact_sets.iter().map(|c| c.id))
             .chain(a.studies.iter().map(|s| s.id))
             .chain(a.exploded.iter().map(|v| v.id))
+            .chain(a.rigid_groups.iter().map(|g| g.id))
             .chain(self.configs.rows.iter().map(|r| r.id))
             .max()
             .unwrap_or(0);
@@ -5690,15 +5724,18 @@ impl Document {
             .is_some_and(|from| sk.points.iter().zip(&from.points).any(|(p, q)| (p.fixed || p.link.is_some()) && p.id == q.id && p.pos != q.pos));
         let mut report = solidcraft_sketch::solve_after_edit_with_analysis(sk, stored, was(sk).as_deref(), first_analysis);
         // Links that moved far (a large change of a size upstream): when the jump fails, or
-        // lands on the mirror image of a side or turn the stored sketch has, walked there in
-        // steps; a turn the walk cannot avoid either is reported as one.
+        // lands on the mirror image of a side or turn the stored sketch has, or turns a line
+        // parallel or square to another end for end, walked there in steps; a side or turn the
+        // walk cannot avoid either is reported as one. A sense is not: the links may run its
+        // line through zero length, which turns it end for end as the only solution.
         if let Some(from) = moved_from.filter(|_| given_moved) {
             let flips = if report.ok() { solidcraft_sketch::flips_from_stored(sk, from) } else { Vec::new() };
             if !report.keeps_orientation() || !flips.is_empty() {
                 match solidcraft_sketch::solve_after_link_move(sk, from, stored, first_analysis) {
                     Some(walked) => report = walked,
                     None => {
-                        for id in flips {
+                        let sides = if flips.is_empty() { Vec::new() } else { solidcraft_sketch::side_flips_from_stored(sk, from) };
+                        for id in sides {
                             if !report.failing.contains(&id) {
                                 report.failing.push(id.clone());
                             }
