@@ -682,18 +682,6 @@ pub enum SolverFailure {
         /// The interval's index.
         index: usize,
     },
-    /// A face of the caller's body has no surface: the caller's input
-    /// ([`ErrorKind::InvalidInput`]); status `SM_ERR_NULL_POINTER`.
-    FaceWithoutSurface {
-        /// The face.
-        face: crate::topology::FaceId,
-    },
-    /// An edge of the caller's body has no curve: the caller's input
-    /// ([`ErrorKind::InvalidInput`]); status `SM_ERR_NULL_POINTER`.
-    EdgeWithoutCurve {
-        /// The edge.
-        edge: crate::topology::EdgeId,
-    },
     /// An edge use of the caller's body has no mate: the caller's input
     /// ([`ErrorKind::InvalidInput`]); status `SM_ERR_NULL_POINTER`.
     EdgeUseWithoutMate,
@@ -811,8 +799,6 @@ impl SolverFailure {
             | Self::ExtensionCornerMissing
             | Self::TooManySolverValues { .. }
             | Self::OffsetSurfaceMissing
-            | Self::FaceWithoutSurface { .. }
-            | Self::EdgeWithoutCurve { .. }
             | Self::EdgeUseWithoutMate
             | Self::EdgeUseWithoutFace => ErrorKind::InvalidInput,
             Self::JacobianNotLoaded
@@ -826,8 +812,6 @@ impl SolverFailure {
         match self {
             Self::GnSideInputMissing { .. }
             | Self::ExtensionCornerMissing
-            | Self::FaceWithoutSurface { .. }
-            | Self::EdgeWithoutCurve { .. }
             | Self::EdgeUseWithoutMate
             | Self::EdgeUseWithoutFace
             | Self::CenterLineNotBSpline { .. }
@@ -983,12 +967,6 @@ impl core::fmt::Display for SolverFailure {
                 f,
                 "interval {index} of the roll-over rail's classification is not bounded by an edge"
             ),
-            Self::FaceWithoutSurface { face } => {
-                write!(f, "face {} of the body has no surface", face.index())
-            }
-            Self::EdgeWithoutCurve { edge } => {
-                write!(f, "edge {} of the body has no curve", edge.index())
-            }
             Self::EdgeUseWithoutMate => f.write_str("an edge use of the body has no mate"),
             Self::EdgeUseWithoutFace => f.write_str("an edge use of the body has no face"),
             Self::CenterLineNotBSpline { fillet_geom } => write!(
