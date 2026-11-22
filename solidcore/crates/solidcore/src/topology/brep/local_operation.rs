@@ -6887,14 +6887,17 @@ mod tests {
                 t.before
             );
         }
-        // and the rebuilt cut edges the UV-trim rebuild inflated (the kernel's
-        // only-grow rule, twice the distance to the surface: at most twice the zone
-        // tolerance here) shrink back
+        // and the rebuilt cut edge the UV-trim rebuild inflated shrinks back (the
+        // kernel's only-grow rule, twice the distance to the surface: at most twice the
+        // zone tolerance here). One of the two rebuilt cut edges: since upstream #18166
+        // (lazily built UV trim curves raise the edge tolerance from a certified gap,
+        // not from the edge tolerance) the other is raised only from its certified gap
+        // and was never inflated, so it needs no shrink back.
         let edges: Vec<_> = tolerances
             .iter()
             .filter(|t| t.entity.starts_with('E'))
             .collect();
-        assert_eq!(edges.len(), 2, "{tolerances:?}");
+        assert_eq!(edges.len(), 1, "{tolerances:?}");
         for t in &edges {
             assert!(
                 (t.before - 2.0e-5).abs() < 1.0e-12,
