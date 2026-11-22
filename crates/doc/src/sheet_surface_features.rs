@@ -1135,7 +1135,7 @@ impl SurfaceSheet {
         bend: &Bend,
         position: &str,
     ) -> Result<std::result::Result<FoldPlan, &'static str>> {
-        let planned = self.plan_fold_outline(i, (here, places), (region, sheet_cuts), line, n, bend, position);
+        let planned = self.plan_fold_drawn(i, (here, places), (region, sheet_cuts), line, n, bend, position);
         // A round-ended notch can connect the zone while separating the material beyond it
         // (#18560). Close its mouth for the panel/joint recipe, then keep the original notch
         // as a cross-joint cut: the rebuilt surface model cuts it from panels and bends alike.
@@ -1175,6 +1175,38 @@ impl SurfaceSheet {
             }
             Err(_) => planned,
         }
+    }
+
+    /// The fold planned for `line` as drawn; where that can't be made, for the line pulled in
+    /// from each end by a hair. A line drawn exactly to the far edges of the cut-outs at its ends
+    /// (across a tongue, from one side of its slot to the other) also touches the material past
+    /// them, which the fold then takes (its chords touch the line); pulled in, it crosses only
+    /// the tongue.
+    #[allow(clippy::too_many_arguments)]
+    fn plan_fold_drawn(
+        &self,
+        i: usize,
+        (here, places): (&Rigid3, &[Option<Rigid3>]),
+        (region, sheet_cuts): (&Region2, &[Region2]),
+        line: [Vec2; 2],
+        n: Vec2,
+        bend: &Bend,
+        position: &str,
+    ) -> Result<std::result::Result<FoldPlan, &'static str>> {
+        let planned = self.plan_fold_outline(i, (here, places), (region, sheet_cuts), line, n, bend, position);
+        if matches!(planned, Ok(Ok(_))) {
+            return planned;
+        }
+        let hair = (bend.allowance(self.sheet.thickness, self.sheet.k_factor).max(self.sheet.thickness) * 1e-4).max(1e-6);
+        let length = line[0].dist(line[1]);
+        if length > 4.0 * hair {
+            let d = (line[1] - line[0]) * (hair / length);
+            let inner = [line[0] + d, line[1] - d];
+            if let Ok(Ok(plan)) = self.plan_fold_outline(i, (here, places), (region, sheet_cuts), inner, n, bend, position) {
+                return Ok(Ok(plan));
+            }
+        }
+        planned
     }
 
     #[allow(clippy::too_many_arguments)]
