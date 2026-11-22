@@ -92,12 +92,14 @@ impl Srf {
 /// B-splines read are the kernel's own, canonical and consistent). A Mixed face rebuilt
 /// from a record reads the caller's curves: the record's check refuses, as invalid input,
 /// an empty curve the rule reads, an empty segment, or breaks that do not strictly
-/// increase from 0 to 1, before the rule runs (`CornerRecord::validate`).
+/// increase from 0 to 1 (or two within the rounding [`union`] merges, or two of different
+/// curves the union merges that [`refine`] keeps apart, [`breaks_coincide`]), before the
+/// rule runs (`CornerRecord::validate`).
 fn out_of_table() -> SolidError {
     SolidError::blend(
         OP,
         BlendFailure::Defect {
-            why: "an index or size is past a table of the Mixed corner's algebra, though every table is built at the size its degree and breaks give, from consistent canonical B-spline data or a record whose curves the record check found non-empty, with breaks strictly increasing from 0 to 1",
+            why: "an index or size is past a table of the Mixed corner's algebra, though every table is built at the size its degree and breaks give, from consistent canonical B-spline data or a record whose curves the record check found non-empty, with breaks strictly increasing from 0 to 1, no two of a curve within the rounding its union merges and none of two curves merged by the union but kept apart by its refinement",
         },
     )
 }
@@ -327,6 +329,25 @@ pub fn refine(c: &Crv, brks: &[f64]) -> Result<Crv> {
     Ok(r)
 }
 
+/// Whether break `t` lies within rounding of the break `back` before it: within
+/// `1e-13·(1 + |t|)`, the gap [`union`] drops. A curve whose breaks are this close would
+/// keep a segment the union of its breaks with another curve's does not, so the record
+/// check refuses it (`BezierCurveRecord::validate_read`).
+#[must_use]
+pub fn breaks_merge(back: f64, t: f64) -> bool {
+    t <= back + 1e-13 * (1.0 + t.abs())
+}
+
+/// Whether breaks `x < y` of two curves are one break to [`refine`]: each lies within the
+/// rounding `refine` skips (`1e-14·(1 + |t|)`) of the other, so refining either curve to the
+/// other's break adds no segment. Two breaks that [`breaks_merge`] but do not coincide would
+/// leave the two curves [`common`] refines with different segment counts, so the record check
+/// refuses them (`CornerRecord::validate`).
+#[must_use]
+pub fn breaks_coincide(x: f64, y: f64) -> bool {
+    y <= x + 1e-14 * (1.0 + y.abs()) && x >= y - 1e-14 * (1.0 + x.abs())
+}
+
 /// `sm_MxUnion`: the sorted breaks of both, those within rounding of the previous one
 /// dropped.
 fn union(a: &[f64], b: &[f64]) -> Vec<f64> {
@@ -336,7 +357,7 @@ fn union(a: &[f64], b: &[f64]) -> Vec<f64> {
     let mut r: Vec<f64> = Vec::new();
     for t in u {
         match r.last() {
-            Some(&back) if t <= back + 1e-13 * (1.0 + t.abs()) => {}
+            Some(&back) if breaks_merge(back, t) => {}
             _ => r.push(t),
         }
     }

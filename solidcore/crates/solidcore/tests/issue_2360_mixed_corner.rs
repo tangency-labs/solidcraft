@@ -773,7 +773,7 @@ fn no_mixed_record_curve_shape_reaches_a_defect() {
 #[test]
 fn a_mixed_record_with_breaks_off_the_unit_range_is_invalid_input() {
     type Shape = fn(&BezierCurveRecord) -> BezierCurveRecord;
-    let shapes: [(&str, Shape); 5] = [
+    let shapes: [(&str, Shape); 8] = [
         ("scaled", |c| BezierCurveRecord {
             brk: c.brk.iter().map(|b| b * 2.0).collect(),
             seg: c.seg.clone(),
@@ -793,6 +793,29 @@ fn a_mixed_record_with_breaks_off_the_unit_range_is_invalid_input() {
         ("extra segment", |c| {
             let mut r = c.clone();
             r.brk.push(2.0);
+            r.seg.push(c.seg.last().unwrap().clone());
+            r
+        }),
+        // breaks that strictly increase but lie within the rounding the algebra's union
+        // merges (#20725's third review)
+        ("tiny first segment", |c| {
+            let mut r = c.clone();
+            r.brk.insert(1, 1e-15);
+            r.seg.insert(0, c.seg[0].clone());
+            r
+        }),
+        ("tiny last segment", |c| {
+            let mut r = c.clone();
+            let n = r.brk.len();
+            r.brk.insert(n - 1, 1.0 - 1e-15);
+            r.seg.push(c.seg.last().unwrap().clone());
+            r
+        }),
+        ("split mid", |c| {
+            let mut r = c.clone();
+            r.brk.extend([0.5, 0.5 + 5e-14]);
+            r.brk.sort_by(f64::total_cmp);
+            r.seg.push(c.seg.last().unwrap().clone());
             r.seg.push(c.seg.last().unwrap().clone());
             r
         }),
@@ -850,5 +873,82 @@ fn a_mixed_record_with_breaks_off_the_unit_range_is_invalid_input() {
         }
     }
     // every side's c on both faces of both rules, at least, in every shape
-    assert!(refused >= 2 * 2 * 4 * 5, "{refused} refused");
+    assert!(refused >= 2 * 2 * 4 * 8, "{refused} refused");
+}
+
+/// Review r3 (B1): a break a rounding (5e-14) from another curve's break. The algebra's
+/// union of breaks merges the two but its refinement keeps both, so the two curves it
+/// combines would end with different segment counts and reach the table Defect. The record
+/// check refuses such a record as `InvalidInput`; no shape reaches a Defect.
+#[test]
+fn a_mixed_record_with_breaks_of_two_curves_a_rounding_apart_is_invalid_input() {
+    let mut runs = 0;
+    let mut refused = 0;
+    for xsect in [1, 0] {
+        let (k, b, res) = blended(2.0, xsect);
+        res.unwrap();
+        for face in corner_faces(&b, CornerKind::Mixed) {
+            let CornerRecord::Mixed(rec) = corner_to_record(&k, &face).unwrap() else {
+                panic!("not a mixed record");
+            };
+            let mut all: Vec<f64> = rec.trim_uv.brk.clone();
+            // the breaks of the curves the rule reads
+            for side in &rec.sides {
+                all.extend_from_slice(&side.c.brk);
+                if !rec.bilinear {
+                    all.extend_from_slice(&side.dir.brk);
+                    if side.has_t {
+                        all.extend_from_slice(&side.t.brk);
+                    }
+                }
+            }
+            all.retain(|t| *t > 0.0 && *t < 1.0);
+            all.sort_by(f64::total_cmp);
+            all.dedup();
+            assert!(
+                !all.is_empty(),
+                "xsect {xsect}: the record has inner breaks"
+            );
+            for i in 0..rec.sides.len() {
+                for which in 0..3 {
+                    for &t in &all {
+                        for d in [5e-14, -5e-14] {
+                            let mut off = rec.clone();
+                            let s = &mut off.sides[i];
+                            let c = match which {
+                                0 => &mut s.c,
+                                1 => &mut s.dir,
+                                _ => &mut s.t,
+                            };
+                            if c.seg.is_empty() {
+                                continue;
+                            }
+                            let x = t + d;
+                            if c.brk.iter().any(|b| (b - x).abs() < 1e-12) {
+                                continue;
+                            }
+                            c.brk.push(x);
+                            c.brk.sort_by(f64::total_cmp);
+                            let last = c.seg.last().unwrap().clone();
+                            c.seg.push(last);
+                            runs += 1;
+                            let Err(e) = corner_rebuild(&k, &CornerRecord::Mixed(off)) else {
+                                continue;
+                            };
+                            let what = format!("xsect {xsect} side {i} curve {which} t {t} d {d}");
+                            assert!(!e.is_defect(), "{what}: {e}");
+                            if which == 0 {
+                                // every side's c is read, by both rules
+                                assert_eq!(e.kind(), ErrorKind::InvalidInput, "{what}: {e}");
+                            }
+                            if e.kind() == ErrorKind::InvalidInput {
+                                refused += 1;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+    assert!(runs > 0 && refused > 0, "{runs} runs, {refused} refused");
 }

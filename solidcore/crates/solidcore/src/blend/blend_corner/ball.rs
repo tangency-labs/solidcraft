@@ -57,7 +57,7 @@ use crate::blend::fillet_section::interval::Ivl;
 use crate::blend::fillet_solver::p1::{FilletSolver, FilletSolverType, FilletSurfaceGeneratorType};
 use crate::blend::fillet_solver::p5::is_concave_edge;
 use crate::curve::curve::Curve;
-use crate::error::blend::{BlendFailure, CornerInput, CornerStep, FilletSetUp};
+use crate::error::blend::{BlendFailure, CornerInput, CornerStep, FilletSetUp, SolverFailure};
 use crate::error::{EntityRef, Failure, Result, SolidError, SM_ERR_NULL_POINTER};
 use crate::geom::krawczyk::{contraction, k_operator};
 use crate::intersect::surface_intersector::p1::SrfIndex;
@@ -119,6 +119,17 @@ fn corner_input(op: &'static str, input: CornerInput, entity: Option<EntityRef>)
     }
 }
 
+/// A face of the caller's body that the corner reads, `face`, has no surface: the caller's
+/// input, [`BlendFailure::FaceHasNoSurface`] at the face, status `SM_ERR_NULL_POINTER` (the
+/// site's).
+#[track_caller]
+fn face_without_surface(op: &'static str, face: FaceId) -> SolidError {
+    Failure::new(op, BlendFailure::FaceHasNoSurface)
+        .with_status(SM_ERR_NULL_POINTER)
+        .at(EntityRef::Face(face))
+        .into_error()
+}
+
 /// An edge use of the caller's body or fillet B-rep, `edgeuse`, has no edge: the caller's
 /// input, [`BlendFailure::EdgeUseWithoutEdge`] at the edge use, status
 /// `SM_ERR_NULL_POINTER`.
@@ -129,6 +140,19 @@ fn edge_use_without_edge(op: &'static str, edgeuse: EdgeuseId) -> SolidError {
         BlendFailure::EdgeUseWithoutEdge,
         EntityRef::Edgeuse(edgeuse),
     )
+}
+
+/// Invalid input to `op`: the caller's fillet solver set-up lacks what the corner reads
+/// (`cause`, [`BlendFailure::Solver`]), about `entity` where the check reads one; status
+/// the cause's, `SM_ERR_NULL_POINTER`, the site's.
+#[track_caller]
+fn solver_input(op: &'static str, cause: SolverFailure, entity: Option<EntityRef>) -> SolidError {
+    let failure = Failure::new(op, BlendFailure::Solver(cause));
+    match entity {
+        Some(at) => failure.at(at),
+        None => failure,
+    }
+    .into_error()
 }
 
 /// Invalid input to `op`: a link of the caller's fillet structures that the corner reads is
@@ -300,13 +324,7 @@ fn max(a: f64, b: f64) -> f64 {
 /// `sm_BallFaceQuadric` (the fork's 7048946): the quadric (a plane or a natural quadric) a
 /// ring face lies on, [`QuadricKind::None`] where it lies on none.
 fn ball_face_quadric(k: &Kernel, b: &Brep, face: FaceId, tol: f64) -> Result<BlendQuadric> {
-    let surface = face2::surface(b, face)?.ok_or_else(|| {
-        bad_input(
-            OP_QUADRIC,
-            CornerInput::FaceWithoutSurface,
-            Some(EntityRef::Face(face)),
-        )
-    })?;
+    let surface = face2::surface(b, face)?.ok_or_else(|| face_without_surface(OP_QUADRIC, face))?;
     let q = BlendQuadric::from_surface(k, surface, face2::uv_domain(b, face)?.mid(), tol)?;
     if !matches!(
         q.kind,
@@ -695,10 +713,13 @@ fn ball_centre(
             )
         })?;
     let tsect = pseudo.fillet_vertexuse(vu)?.tsect_pnt().clone();
-    let solver_id = pseudo
-        .geom(g0)?
-        .fillet_solver()
-        .ok_or_else(|| bad_setup(OP_CENTRE, FilletSetUp::GeomSolver, None))?;
+    let solver_id = pseudo.geom(g0)?.fillet_solver().ok_or_else(|| {
+        solver_input(
+            OP_CENTRE,
+            SolverFailure::FilletGeomWithoutSolver { fillet_geom: g0 },
+            None,
+        )
+    })?;
     let solver = solvers.solver(solver_id)?;
     let mut on = [Point3::default(); 2];
     for (p, side) in on.iter_mut().zip([SrfIndex::First, SrfIndex::Second]) {
@@ -736,9 +757,9 @@ fn ball_centre(
         .enumerate()
     {
         let face = face.ok_or_else(|| {
-            bad_setup(
+            solver_input(
                 OP_CENTRE,
-                FilletSetUp::EdgeUseFace,
+                SolverFailure::EdgeUseWithoutFace,
                 all_eus.get(ii).copied().map(EntityRef::Edgeuse),
             )
         })?;
@@ -966,10 +987,13 @@ pub fn place_ball_contacts(
             if pseudo.fillet_edge(e)?.fillet_edge_type() != FilletEdgeType::Rail {
                 continue;
             }
-            let solver_id = pseudo
-                .geom(g)?
-                .fillet_solver()
-                .ok_or_else(|| bad_setup(OP_PLACE, FilletSetUp::GeomSolver, None))?;
+            let solver_id = pseudo.geom(g)?.fillet_solver().ok_or_else(|| {
+                solver_input(
+                    OP_PLACE,
+                    SolverFailure::FilletGeomWithoutSolver { fillet_geom: g },
+                    None,
+                )
+            })?;
             let solver = solvers.solver(solver_id)?;
             for side in [SrfIndex::First, SrfIndex::Second] {
                 let rail = usize::from(side == SrfIndex::Second);

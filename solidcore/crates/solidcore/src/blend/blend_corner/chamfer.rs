@@ -93,7 +93,7 @@ use crate::blend::fillet_solver::p1::FilletSolver;
 use crate::blend::fillet_solver::p5::is_concave_edge;
 use crate::curve::curve::Curve;
 use crate::curve::line::Line;
-use crate::error::blend::{BlendFailure, CornerInput, CornerStep, FilletSetUp};
+use crate::error::blend::{BlendFailure, CornerInput, CornerStep, FilletSetUp, SolverFailure};
 use crate::error::{EntityRef, Failure, Result, SolidError, SM_ERR_NULL_POINTER};
 use crate::geom::extent2d::Extent2d;
 use crate::kernel::Kernel;
@@ -107,7 +107,7 @@ use crate::surface::surface::Surface;
 use crate::topology::brep::p7::{make_face_with_curves, FaceCurvesInput};
 use crate::topology::edgeuse::p1 as eu1;
 use crate::topology::face::p2 as face2;
-use crate::topology::{edge, vertex, Brep, EdgeId, EdgeuseId, VertexId};
+use crate::topology::{edge, vertex, Brep, EdgeId, EdgeuseId, FaceId, VertexId};
 
 const OP_CLASSIFY: &str = "blend::blend_corner::chamfer::classify_chamfer";
 const OP_PLACE: &str = "blend::blend_corner::chamfer::place_chamfer_vertices";
@@ -142,6 +142,24 @@ fn corner_input(op: &'static str, input: CornerInput, entity: Option<EntityRef>)
     }
 }
 
+/// A face of the caller's body that the corner reads, `face`, has no surface: the caller's
+/// input, [`BlendFailure::FaceHasNoSurface`] at the face, status `SM_ERR_NULL_POINTER` (the
+/// site's).
+#[track_caller]
+fn face_without_surface(op: &'static str, face: FaceId) -> SolidError {
+    Failure::new(op, BlendFailure::FaceHasNoSurface)
+        .with_status(SM_ERR_NULL_POINTER)
+        .at(EntityRef::Face(face))
+        .into_error()
+}
+
+/// An edge of the caller's body that the corner reads, `edge`, has no curve: the caller's
+/// input, [`BlendFailure::EdgeWithoutCurve`] at the edge, status `SM_ERR_NULL_POINTER`.
+#[track_caller]
+fn edge_without_curve(op: &'static str, edge: EdgeId) -> SolidError {
+    SolidError::blend_at(op, BlendFailure::EdgeWithoutCurve, EntityRef::Edge(edge))
+}
+
 /// An edge use of the caller's body or fillet B-rep, `edgeuse`, has no edge: the caller's
 /// input, [`BlendFailure::EdgeUseWithoutEdge`] at the edge use, status
 /// `SM_ERR_NULL_POINTER`.
@@ -152,6 +170,19 @@ fn edge_use_without_edge(op: &'static str, edgeuse: EdgeuseId) -> SolidError {
         BlendFailure::EdgeUseWithoutEdge,
         EntityRef::Edgeuse(edgeuse),
     )
+}
+
+/// Invalid input to `op`: the caller's fillet solver set-up lacks what the corner reads
+/// (`cause`, [`BlendFailure::Solver`]), about `entity` where the check reads one; status
+/// the cause's, `SM_ERR_NULL_POINTER`, the site's.
+#[track_caller]
+fn solver_input(op: &'static str, cause: SolverFailure, entity: Option<EntityRef>) -> SolidError {
+    let failure = Failure::new(op, BlendFailure::Solver(cause));
+    match entity {
+        Some(at) => failure.at(at),
+        None => failure,
+    }
+    .into_error()
 }
 
 /// Invalid input to `op`: a link of the caller's fillet structures that the corner reads is
@@ -634,7 +665,7 @@ fn facet_fails(
 // ---- Classify ---------------------------------------------------------------------------
 
 /// The ring's faces: face i between edge uses i - 1 and i.
-fn ring_faces(b: &Brep, all_eus: &[EdgeuseId]) -> Result<Vec<Option<crate::topology::FaceId>>> {
+fn ring_faces(b: &Brep, all_eus: &[EdgeuseId]) -> Result<Vec<Option<FaceId>>> {
     let n = all_eus.len();
     let mut out = Vec::new();
     for i in 0..n {
@@ -746,13 +777,7 @@ pub fn classify_chamfer(
     let mut mixed = false;
     for &eu in all_eus {
         let e = eu1::edge(b, eu)?.ok_or_else(|| edge_use_without_edge(OP_CLASSIFY, eu))?;
-        let curve = edge::curve(b, e)?.ok_or_else(|| {
-            bad_input(
-                OP_CLASSIFY,
-                CornerInput::EdgeWithoutCurve,
-                Some(EntityRef::Edge(e)),
-            )
-        })?;
+        let curve = edge::curve(b, e)?.ok_or_else(|| edge_without_curve(OP_CLASSIFY, e))?;
         let Some((_, dir)) = curve.is_line(k, 10, tol)? else {
             return Ok(ChamferClass::Declined(
                 "an edge at the vertex is not a straight line",
@@ -803,13 +828,8 @@ pub fn classify_chamfer(
         if faces.iter().filter(|f| **f == Some(face)).count() > 1 {
             return Ok(ChamferClass::Declined("a face meets the vertex twice"));
         }
-        let surface = face2::surface(b, face)?.ok_or_else(|| {
-            bad_input(
-                OP_CLASSIFY,
-                CornerInput::FaceWithoutSurface,
-                Some(EntityRef::Face(face)),
-            )
-        })?;
+        let surface =
+            face2::surface(b, face)?.ok_or_else(|| face_without_surface(OP_CLASSIFY, face))?;
         let planar = surface.is_planar(k, tol)?;
         if !planar.is_planar {
             return Ok(ChamferClass::Declined(
@@ -1218,16 +1238,16 @@ pub fn chamfer_corner_edge_geom(
             ));
         }
         let start = edge::vertex(pseudo.brep(), e)?.ok_or_else(|| {
-            bad_input(
+            bad_setup(
                 OP_EDGES,
-                CornerInput::EdgeWithoutVertex,
+                FilletSetUp::EdgeVertices,
                 Some(EntityRef::Edge(e)),
             )
         })?;
         let end = edge::other_vertex(pseudo.brep(), e, Some(start))?.ok_or_else(|| {
-            bad_input(
+            bad_setup(
                 OP_EDGES,
-                CornerInput::EdgeWithoutVertex,
+                FilletSetUp::EdgeVertices,
                 Some(EntityRef::Edge(e)),
             )
         })?;
@@ -1256,7 +1276,13 @@ pub fn chamfer_corner_edge_geom(
             let surface = pseudo
                 .geom(g)?
                 .fillet_surface(None)?
-                .ok_or_else(|| bad_input(OP_EDGES, CornerInput::FilletGeomWithoutSurface, None))?
+                .ok_or_else(|| {
+                    solver_input(
+                        OP_EDGES,
+                        SolverFailure::FilletGeomWithoutSurface { fillet_geom: g },
+                        None,
+                    )
+                })?
                 .clone();
             // the chamfer's surface is its solver's; its feet are searches and its
             // parameters need not be affine along the line

@@ -55,7 +55,9 @@ use crate::blend::fillet_geom::p4::set_edge_curve;
 use crate::blend::fillet_solver::p1::{FilletSolver, FilletSurfaceGeneratorType};
 use crate::blend::fillet_solver::p5::is_concave_edge;
 use crate::curve::curve::{Curve, CurveKind};
-use crate::error::blend::{BlendFailure, CornerInput, CornerStep, FilletSetUp, MixedStep};
+use crate::error::blend::{
+    BlendFailure, CornerInput, CornerStep, FilletSetUp, MixedStep, SolverFailure,
+};
 use crate::error::{EntityRef, Failure, Result, SolidError, SM_ERR_NULL_POINTER};
 use crate::geom::axis2_placement::Axis2Placement;
 use crate::geom::extent1d::Extent1d;
@@ -173,6 +175,24 @@ fn corner_input(op: &'static str, input: CornerInput, entity: Option<EntityRef>)
     }
 }
 
+/// A face of the caller's body that the corner reads, `face`, has no surface: the caller's
+/// input, [`BlendFailure::FaceHasNoSurface`] at the face, status `SM_ERR_NULL_POINTER` (the
+/// site's).
+#[track_caller]
+fn face_without_surface(op: &'static str, face: FaceId) -> SolidError {
+    Failure::new(op, BlendFailure::FaceHasNoSurface)
+        .with_status(SM_ERR_NULL_POINTER)
+        .at(EntityRef::Face(face))
+        .into_error()
+}
+
+/// An edge of the caller's body that the corner reads, `edge`, has no curve: the caller's
+/// input, [`BlendFailure::EdgeWithoutCurve`] at the edge, status `SM_ERR_NULL_POINTER`.
+#[track_caller]
+fn edge_without_curve(op: &'static str, edge: EdgeId) -> SolidError {
+    SolidError::blend_at(op, BlendFailure::EdgeWithoutCurve, EntityRef::Edge(edge))
+}
+
 /// An edge use of the caller's body or fillet B-rep, `edgeuse`, has no edge: the caller's
 /// input, [`BlendFailure::EdgeUseWithoutEdge`] at the edge use, status
 /// `SM_ERR_NULL_POINTER`.
@@ -183,6 +203,19 @@ fn edge_use_without_edge(op: &'static str, edgeuse: EdgeuseId) -> SolidError {
         BlendFailure::EdgeUseWithoutEdge,
         EntityRef::Edgeuse(edgeuse),
     )
+}
+
+/// Invalid input to `op`: the caller's fillet solver set-up lacks what the corner reads
+/// (`cause`, [`BlendFailure::Solver`]), about `entity` where the check reads one; status
+/// the cause's, `SM_ERR_NULL_POINTER`, the site's.
+#[track_caller]
+fn solver_input(op: &'static str, cause: SolverFailure, entity: Option<EntityRef>) -> SolidError {
+    let failure = Failure::new(op, BlendFailure::Solver(cause));
+    match entity {
+        Some(at) => failure.at(at),
+        None => failure,
+    }
+    .into_error()
 }
 
 /// Invalid input to `op`: a link of the caller's fillet structures that the corner reads is
@@ -617,7 +650,7 @@ pub(crate) fn leaving(
     // the one evaluation, inside the edge and turned away from the vertex
     let d = match leaving_tangent(k, b, e, at_start)? {
         Leaving::NoCurve => {
-            return Err(bad_input(op, CornerInput::EdgeWithoutCurve, Some(EntityRef::Edge(e))))
+            return Err(edge_without_curve(op, e))
         }
         Leaving::NoTangent => {
             return Err(defect(
@@ -693,9 +726,10 @@ fn rail_wall(
     normal: Vec3,
     reach: f64,
     op: &'static str,
+    rail_at: RailAt,
     at: EntityRef,
 ) -> Result<Surface> {
-    let b0 = bspline_curve(rail).ok_or_else(|| not_bspline(op, MixedStep::RailNotBSpline, at))?;
+    let b0 = bspline_curve(rail).ok_or_else(|| rail_not_bspline(op, rail_at, rail, at))?;
     let b1 = b0
         .create_extended_curve_by_distance(
             0.25 * reach,
@@ -734,6 +768,33 @@ fn rail_wall(
 struct Rails {
     on_t: [Curve; 2],
     on_wall: [Curve; 2],
+    /// Each rail on T's fillet geometry and side, where a failure of its curve is reported.
+    t_at: [RailAt; 2],
+    /// Each rail on its wall's fillet geometry and side.
+    wall_at: [RailAt; 2],
+}
+
+/// A rail's fillet geometry and side ([`SolverFailure::RailNotBSpline`]).
+#[derive(Clone, Copy)]
+struct RailAt {
+    fillet_geom: FilletGeomId,
+    side: usize,
+}
+
+/// Rail `at` has no B-spline form for the corner's exact algebra: the caller's fillet
+/// geometry ([`SolverFailure::RailNotBSpline`], with the curve's kind), at blend edge use
+/// `entity`; status `SM_ERR_NULL_POINTER`, the site's.
+#[track_caller]
+fn rail_not_bspline(op: &'static str, at: RailAt, rail: &Curve, entity: EntityRef) -> SolidError {
+    solver_input(
+        op,
+        SolverFailure::RailNotBSpline {
+            fillet_geom: at.fillet_geom,
+            side: at.side,
+            kind: Some(rail.type_string()),
+        },
+        Some(entity),
+    )
 }
 
 fn rails(
@@ -744,27 +805,47 @@ fn rails(
     op: &'static str,
 ) -> Result<Rails> {
     // a blend's rails on T and on its wall
-    let pair = |fs: &FilletSolver, wall: FaceId| -> Result<[Curve; 2]> {
+    let pair = |fs: &FilletSolver, wall: FaceId| -> Result<([Curve; 2], [RailAt; 2])> {
         let g = fs.first_fillet_geom()?;
         let geom = pseudo.geom(g)?;
         let it = fs.find_index_of_rail_on_face(target, Some(mixed.ring.t))?;
         let iw = fs.find_index_of_rail_on_face(target, Some(wall))?;
-        let rail_curve =
-            |idx| -> Result<Curve> {
-                let rail = geom
-                    .rail(idx)
-                    .ok_or_else(|| bad_input(op, CornerInput::FilletGeomWithoutRail, None))?;
-                pseudo.brep().edge(rail)?.curve.clone().ok_or_else(|| {
-                    bad_setup(op, FilletSetUp::RailCurve, Some(EntityRef::Edge(rail)))
-                })
-            };
-        Ok([rail_curve(it)?, rail_curve(iw)?])
+        let rail_curve = |idx| -> Result<Curve> {
+            let rail = geom.rail(idx).ok_or_else(|| {
+                solver_input(
+                    op,
+                    SolverFailure::FilletGeomWithoutRail {
+                        fillet_geom: g,
+                        side: idx,
+                    },
+                    None,
+                )
+            })?;
+            pseudo.brep().edge(rail)?.curve.clone().ok_or_else(|| {
+                solver_input(
+                    op,
+                    SolverFailure::RailNotBSpline {
+                        fillet_geom: g,
+                        side: idx,
+                        kind: None,
+                    },
+                    Some(EntityRef::Edge(rail)),
+                )
+            })
+        };
+        let at = |side| RailAt {
+            fillet_geom: g,
+            side,
+        };
+        Ok(([rail_curve(it)?, rail_curve(iw)?], [at(it), at(iw)]))
     };
-    let [t0, w0] = pair(solvers[0], mixed.ring.f1)?;
-    let [t1, w1] = pair(solvers[1], mixed.ring.f2)?;
+    let ([t0, w0], [t0_at, w0_at]) = pair(solvers[0], mixed.ring.f1)?;
+    let ([t1, w1], [t1_at, w1_at]) = pair(solvers[1], mixed.ring.f2)?;
     Ok(Rails {
         on_t: [t0, t1],
         on_wall: [w0, w1],
+        t_at: [t0_at, t1_at],
+        wall_at: [w0_at, w1_at],
     })
 }
 
@@ -820,13 +901,11 @@ pub fn calc_mixed_vert_geom(
         return Err(bad_input(OP_VERT, CornerInput::VertexNotProcessed, None));
     }
     let tol = corner.approx_tol_3d;
-    let t_surface = target.face(mixed.ring.t)?.surface.as_ref().ok_or_else(|| {
-        bad_input(
-            OP_VERT,
-            CornerInput::FaceWithoutSurface,
-            Some(EntityRef::Face(mixed.ring.t)),
-        )
-    })?;
+    let t_surface = target
+        .face(mixed.ring.t)?
+        .surface
+        .as_ref()
+        .ok_or_else(|| face_without_surface(OP_VERT, mixed.ring.t))?;
     let normal = plane_normal(k, t_surface, tol, OP_VERT)?;
     let sv = pseudo.vertex_point(v)?;
     let sx = pseudo.vertex_point(x)?;
@@ -840,6 +919,7 @@ pub fn calc_mixed_vert_geom(
             normal,
             reach,
             OP_VERT,
+            *of2(&rails.t_at, 1 - ii),
             blend_edgeuse(&mixed.ring, 1 - ii),
         )?;
         let pnt = curve_surface(k, of2(&rails.on_wall, ii), &wall, sx, tol, OP_VERT)?;
@@ -931,13 +1011,11 @@ fn normal_at(
     tol: f64,
     op: &'static str,
 ) -> Result<Vec3> {
-    let surface = b.face(face)?.surface.clone().ok_or_else(|| {
-        bad_input(
-            op,
-            CornerInput::FaceWithoutSurface,
-            Some(EntityRef::Face(face)),
-        )
-    })?;
+    let surface = b
+        .face(face)?
+        .surface
+        .clone()
+        .ok_or_else(|| face_without_surface(op, face))?;
     let dom = surface.natural_uv_domain_with_nurb(k)?;
     let mut test_on: Option<bool> = None;
     let mut classify = |k: &Kernel, uv: Point2, src_tol: f64| -> Result<bool> {
@@ -1031,13 +1109,11 @@ pub fn calc_mixed_edge_geom(
             chamfer = true;
         }
     }
-    let common = target.face(ring.t)?.surface.clone().ok_or_else(|| {
-        bad_input(
-            OP_EDGE,
-            CornerInput::FaceWithoutSurface,
-            Some(EntityRef::Face(ring.t)),
-        )
-    })?;
+    let common = target
+        .face(ring.t)?
+        .surface
+        .clone()
+        .ok_or_else(|| face_without_surface(OP_EDGE, ring.t))?;
     let normal = plane_normal(k, &common, tol, OP_EDGE)?;
     let sx = pseudo.vertex_point(x)?;
     let sv = pseudo.vertex_point(v)?;
@@ -1049,7 +1125,13 @@ pub fn calc_mixed_edge_geom(
         Ok(pseudo
             .geom(g)?
             .fillet_surface(None)?
-            .ok_or_else(|| bad_input(OP_EDGE, CornerInput::FilletGeomWithoutSurface, None))?
+            .ok_or_else(|| {
+                solver_input(
+                    OP_EDGE,
+                    SolverFailure::FilletGeomWithoutSurface { fillet_geom: g },
+                    None,
+                )
+            })?
             .clone())
     };
     let rounds = [round_of(geoms[0])?, round_of(geoms[1])?];
@@ -1071,13 +1153,8 @@ pub fn calc_mixed_edge_geom(
     let omega = normal;
     let o = {
         // the concave edge's circle: its centre from three of its points
-        let arc = edge::curve(target, concave_e)?.ok_or_else(|| {
-            bad_input(
-                OP_EDGE,
-                CornerInput::EdgeWithoutCurve,
-                Some(EntityRef::Edge(concave_e)),
-            )
-        })?;
+        let arc = edge::curve(target, concave_e)?
+            .ok_or_else(|| edge_without_curve(OP_EDGE, concave_e))?;
         let ivl = edge::interval(target, concave_e)?;
         let p0 = arc.evaluate_point(k, ivl.evaluate(0.1))?;
         let p1 = arc.evaluate_point(k, ivl.evaluate(0.5))?;
@@ -1106,6 +1183,7 @@ pub fn calc_mixed_edge_geom(
             normal,
             reach,
             OP_EDGE,
+            *of2(&rails.t_at, 1 - ii),
             blend_edgeuse(&ring, 1 - ii),
         )?;
         let to = if ii == 0 { a } else { bv };
@@ -1219,10 +1297,20 @@ pub fn calc_mixed_edge_geom(
     // the rail pieces A-P (B1's), B-Q (B2's), the lines V-P, V-Q, and the arc X-V
     let (ap, bq) = {
         let r0 = algebra::from_bspline(bspline_curve(&rails.on_wall[0]).ok_or_else(|| {
-            not_bspline(OP_EDGE, MixedStep::RailNotBSpline, blend_edgeuse(&ring, 0))
+            rail_not_bspline(
+                OP_EDGE,
+                rails.wall_at[0],
+                &rails.on_wall[0],
+                blend_edgeuse(&ring, 0),
+            )
         })?)?;
         let r1 = algebra::from_bspline(bspline_curve(&rails.on_wall[1]).ok_or_else(|| {
-            not_bspline(OP_EDGE, MixedStep::RailNotBSpline, blend_edgeuse(&ring, 1))
+            rail_not_bspline(
+                OP_EDGE,
+                rails.wall_at[1],
+                &rails.on_wall[1],
+                blend_edgeuse(&ring, 1),
+            )
         })?)?;
         let da = param_of(k, &rails.on_wall[0], sa, tol, OP_EDGE)?;
         let dp = param_of(k, &rails.on_wall[0], pseudo.vertex_point(p)?, tol, OP_EDGE)?;
