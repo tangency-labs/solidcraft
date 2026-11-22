@@ -323,7 +323,9 @@ fn iso_arc_exact(k: &Kernel, curve: &BSplineCurve, scaled_zero: f64) -> Result<O
 /// must be within `scaled_zero` of the plane square to it through the start of the first
 /// segment at least half as wide as the widest (#17462). A very
 /// short arc's legs and point angles amplify coordinate rounding past the tolerance; its
-/// chord, weight and plane distances do not. The other checks are [`iso_arc_exact`]'s. Used only where [`iso_arc_exact`]'s circles make no
+/// chord, weight and plane distances do not, nor does the middle point's offset from the
+/// chord's bisector, which is checked in place of equal legs. The other checks are
+/// [`iso_arc_exact`]'s. Used only where [`iso_arc_exact`]'s circles make no
 /// cylinder, so a form that was recognised keeps its circles to the last bit.
 ///
 /// # Errors
@@ -364,17 +366,21 @@ fn iso_arc_from_chord(
         }
         let (q0, q1, q2) = (to_euclid(a), to_euclid(b), to_euclid(c));
         let (leg0, leg1, chord) = (q1 - q0, q2 - q1, q2 - q0);
-        if (leg0.length() - leg1.length()).abs() > scaled_zero {
-            return Ok(None);
-        }
         // the legs made unit before their cross product: a short arc's legs are short, and
         // the product of their lengths would fall under the unit vector's absolute floor
-        let (Ok(tangent), Ok(next)) = (leg0.unitize(), leg1.unitize()) else {
+        let (Ok(tangent), Ok(next), Ok(along)) = (leg0.unitize(), leg1.unitize(), chord.unitize())
+        else {
             return Ok(None);
         };
         // the half sweep, from the leg and the chord
         let half = tangent.cross(chord).length().atan2(tangent.dot(chord));
+        // The middle point's offset along the chord moves the curve off its circle by at most
+        // off sin α w / (1 + w); the legs' difference amplifies a far centre's rounding by 1 / sin α.
         let weight = b.w / (a.w * c.w).sqrt();
+        let off = (q1 - (q0 + chord * 0.5)).dot(along);
+        if off.abs() * half.sin() * weight / (1.0 + weight) > scaled_zero {
+            return Ok(None);
+        }
         if (weight - half.cos()).abs() > EFF_ZERO_SQRT {
             return Ok(None);
         }
@@ -2355,12 +2361,8 @@ mod tests {
             .is_none());
     }
 
-    /// The wall a 0.4 mm cut made from a nearly straight arc of an imported DXF: radius
-    /// 914 mm over 0.042 degrees, extruded along z from 0.6 to 1, its control points as the
-    /// cut carries them. The far centre's rounding puts the middle point 2e-10 mm off the
-    /// chord's bisector, so its legs differ by 4.1e-10 mm, past the point zero; along the
-    /// curve's tangent that leaves it off the circle by under 1e-13 mm. It is a cylinder on
-    /// its form.
+    /// An imported DXF's arc of radius 914 mm over 0.042 degrees, its middle point 2e-10 mm off
+    /// the chord's bisector (legs 4.1e-10 apart), extruded: a cylinder that lies on its form.
     #[test]
     fn a_nearly_straight_extruded_arc_is_a_cylinder_on_its_form() {
         use crate::nurbs::math::CPoint;
