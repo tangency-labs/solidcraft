@@ -241,7 +241,9 @@ const NOTE_DETAILS_UPDATED: &str =
     "Technical details updated to match the current view. Screenshot captured locally. Review it before attaching it on GitHub.";
 const NOTE_DETAILS_KEPT: &str = "Screenshot captured locally. Your edited technical details were kept: check that they still match the current view.";
 
-/// What the drafts say about attaching the design: GitHub takes no `.sc` file (#4019).
+/// What a crash draft says about attaching the design: GitHub takes no `.sc` file (#4019). The
+/// typical in-app report leaves it to the form's note and button: that text would push it past
+/// the link's budget (`issue_report_link_carries_a_typical_report_whole_and_exactly`).
 const ATTACH_DESIGN: &str = "To share the design, attach it as a .zip: GitHub does not accept .sc files. Use Save design (.zip), or rename name.sc to name.sc.zip. Only attach it if the design can be shared publicly.";
 
 struct Pending {
@@ -526,7 +528,7 @@ pub fn draft_for(app: &SolveApp, dialog: Option<&dialogs::Dialog>, error: Option
         "The screenshot shows the current view."
     };
     let mut body = format!(
-        "## Operation context\n{actual}\n\n{image_state}\n\n## Settings and selection\n{context}\n## Environment\n{}\nRevision: {}\nCamera: {}\n\n## Visual context\nAttach the reviewed screenshot or a short example showing the problem.\n{ATTACH_DESIGN}\n",
+        "## Operation context\n{actual}\n\n{image_state}\n\n## Settings and selection\n{context}\n## Environment\n{}\nRevision: {}\nCamera: {}\n\n## Visual context\nAttach the reviewed screenshot or a short example showing the problem.\n",
         block(&debug(&help::diagnostics(app), 2000)),
         app.session.revision,
         block(&debug(&app.cam, 1500))
