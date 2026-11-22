@@ -64,6 +64,7 @@
 //! - The stepper's `IsLocalMin` / `IsLocalMax` are not used upstream and are not
 //!   ported. Debug-only drawing and `SM_ASSERT`s are omitted.
 
+use crate::error::surface::SurfaceFailure;
 use crate::error::{Result, SolidError};
 use crate::geom::extent2d::Extent2d;
 use crate::geom::geom_utility::p1::{line_closest_point, vec_lin_comb_two_vectors};
@@ -232,10 +233,7 @@ impl SurfPtGlobalSolver<'_> {
 
             // when either guess is uninitialized - quit
             if poly_dist >= BIG_DOUBLE && grid_dist >= BIG_DOUBLE {
-                return Err(SolidError::surface_failed(
-                    OP_ROUGH,
-                    "neither rough guess is initialized",
-                ));
+                return Err(SolidError::surface(OP_ROUGH, SurfaceFailure::NoRoughGuess));
             }
 
             // when the GridGuess is better than the PolyGuess, use it
@@ -246,10 +244,7 @@ impl SurfPtGlobalSolver<'_> {
             uv = grid_uv_guess;
         } else {
             // both failed
-            return Err(SolidError::surface_failed(
-                OP_ROUGH,
-                "both rough guesses failed",
-            ));
+            return Err(SolidError::surface(OP_ROUGH, SurfaceFailure::NoRoughGuess));
         }
 
         Ok(RoughGuess {
@@ -275,9 +270,9 @@ impl SurfPtGlobalSolver<'_> {
         let b = &self.base;
         // We need a SmBSplineSurface to work with control points.
         let Some(bspl) = b.b_spline() else {
-            return Err(SolidError::surface_failed(
+            return Err(SolidError::surface(
                 OP_POLY,
-                "the surface is not a B-spline surface",
+                SurfaceFailure::SolverSurfaceNotBSpline,
             ));
         };
         let op = b.solver_op();
@@ -333,8 +328,8 @@ impl SurfPtGlobalSolver<'_> {
 
         // Next try: Iter every ControlPoint and find the one closest to the target
         let rational = bspl.is_rational();
-        let (num_u, num_v, cpts) = bspl.control_points().map_err(|_| {
-            SolidError::surface_failed(OP_POLY, "the B-spline surface has no control points")
+        let (num_u, num_v, cpts) = bspl.control_points().map_err(|e| {
+            SolidError::surface_caused_by(OP_POLY, SurfaceFailure::NoControlPoints, e)
         })?;
 
         let mut tied: Option<(usize, usize)> = None;
@@ -1038,10 +1033,11 @@ impl SurfPtGlobalSolver<'_> {
         let rough = match NetScope::with_net(k, || self.find_rough_guess(k)) {
             Ok(r) => r,
             Err(e) if e.is_unported_or_cancelled() => return Err(e),
-            Err(_) => {
-                return Err(SolidError::surface_failed(
+            Err(e) => {
+                return Err(SolidError::surface_caused_by(
                     OP_SOLVE,
-                    "no rough guess was found",
+                    SurfaceFailure::NoRoughGuess,
+                    e,
                 ))
             }
         };
@@ -1412,9 +1408,9 @@ impl SurfPtSolveStepper<'_> {
                 return Ok((adjusted, scale));
             }
             self.set_uv(domain.clamp_point(self.uv()));
-            return Err(SolidError::surface_failed(
+            return Err(SolidError::surface(
                 OP_ADJUST,
-                "the guess is outside the domain and the step is zero",
+                SurfaceFailure::ZeroStepOutsideDomain,
             ));
         }
 
@@ -1908,9 +1904,9 @@ impl SurfPtSolveStepper<'_> {
                 | ErrorNormType::MaxAbs
                 | ErrorNormType::Gap
         ) {
-            return Err(SolidError::surface_failed(
+            return Err(SolidError::surface(
                 OP_LINE_B,
-                "the error norm is an absolute norm",
+                SurfaceFailure::LineSearchNormUnsigned,
             ));
         }
 
@@ -1918,9 +1914,9 @@ impl SurfPtSolveStepper<'_> {
         let mut y1 = self.error_norm(norm_type)?;
 
         if y0 * y1 > 0.0 {
-            return Err(SolidError::surface_failed(
+            return Err(SolidError::surface(
                 OP_LINE_B,
-                "the error norm does not change sign over the step",
+                SurfaceFailure::LineSearchNotBracketed,
             ));
         }
 

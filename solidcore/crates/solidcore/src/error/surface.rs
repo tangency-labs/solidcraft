@@ -14,6 +14,9 @@
 //! | [`SurfaceFailure::OutsideDomain`]  | `SM_ERR_OUTSIDE_OF_DOMAIN`     |
 //! | [`SurfaceFailure::OffSurface`]     | `SM_ERR_NOT_WITHIN_TOLERANCE`  |
 //! | [`SurfaceFailure::Defect`]         | `SM_ERR` (or the site's, through `with_status`) |
+//! | [`SurfaceFailure::UnsupportedCacheKind`], [`SurfaceFailure::SolverSurfaceNotBSpline`], [`SurfaceFailure::NoControlPoints`], [`SurfaceFailure::PointsDoNotTurnOneWay`], [`SurfaceFailure::UnsupportedSurfaceKind`], [`SurfaceFailure::UnsupportedSolverOperation`], [`SurfaceFailure::NoRoughGuess`], [`SurfaceFailure::ZeroStepOutsideDomain`], [`SurfaceFailure::LineSearchNormUnsigned`], [`SurfaceFailure::LineSearchNotBracketed`] | `SM_ERR` |
+//! | [`SurfaceFailure::TrimmedCacheHasNoFace`], [`SurfaceFailure::SurfaceNotBSplineKind`], [`SurfaceFailure::CurveNotBSplineKind`], [`SurfaceFailure::CurvesNotCached`], [`SurfaceFailure::FaceHasNoSurface`], [`SurfaceFailure::EdgeuseHasNoTrimCurve`] | `SM_ERR_NULL_POINTER` |
+//! | [`SurfaceFailure::DisjointFaceDomain`] | `SM_ERR_INVALID_INPUT` |
 //!
 //! [`SurfaceFailure::Defect`] is a failure reviewed at its site as the kernel's fault, with its
 //! reason: a defect ([`ErrorKind::StageFailed`], class 127). The phrase causes are sites
@@ -59,15 +62,84 @@ pub enum SurfaceFailure {
         /// The step that failed, and why that is the kernel's fault.
         why: &'static str,
     },
+    /// The surface cache is of a kind that does not do this: the base cache answers the
+    /// trimmed cache's queries with a refusal ([`ErrorKind::Unsupported`], `SM_ERR`).
+    UnsupportedCacheKind,
+    /// The trimmed surface cache that point testing reads has no face to test against
+    /// ([`ErrorKind::InvalidInput`], `SM_ERR_NULL_POINTER`).
+    TrimmedCacheHasNoFace,
+    /// The caller's surface is not of a B-spline kind, which the routine reads as one
+    /// ([`ErrorKind::Unsupported`], `SM_ERR_NULL_POINTER`).
+    SurfaceNotBSplineKind,
+    /// The caller's curve is not of a B-spline kind, which the routine reads as one
+    /// ([`ErrorKind::Unsupported`], `SM_ERR_NULL_POINTER`).
+    CurveNotBSplineKind,
+    /// The point solver's surface is not a B-spline surface, so it has no control net
+    /// to guess from ([`ErrorKind::Unsupported`], `SM_ERR`).
+    SolverSurfaceNotBSpline,
+    /// The B-spline surface's control points could not be read; the failure is the
+    /// cause (`SM_ERR`, class [`ErrorKind::Failed`]: its defect-ness follows the cause).
+    NoControlPoints,
+    /// The three points' pairwise normals do not all point one way, so they give no
+    /// plane ([`ErrorKind::Degenerate`], `SM_ERR`).
+    PointsDoNotTurnOneWay,
+    /// The alternate cache holds no curves of the kind (3D or UV) asked for
+    /// ([`ErrorKind::InvalidInput`], `SM_ERR_NULL_POINTER`).
+    CurvesNotCached,
+    /// The surface's kind has no override of the routine; the base body refuses
+    /// ([`ErrorKind::Unsupported`], `SM_ERR`).
+    UnsupportedSurfaceKind,
+    /// The caller's face has no surface ([`ErrorKind::InvalidInput`],
+    /// `SM_ERR_NULL_POINTER`).
+    FaceHasNoSurface,
+    /// The solver's operation is one this step does not help with
+    /// ([`ErrorKind::Unsupported`], `SM_ERR`).
+    UnsupportedSolverOperation,
+    /// Neither the control-net guess nor the grid guess gave a starting point; the
+    /// failure, where there was one, is the cause ([`ErrorKind::NotFound`], `SM_ERR`).
+    NoRoughGuess,
+    /// The stepper's guess lies outside the domain and it has no step to move back along
+    /// ([`ErrorKind::OutsideDomain`], `SM_ERR`).
+    ZeroStepOutsideDomain,
+    /// The caller asked a line search for the zero of an absolute error norm, which
+    /// cannot change sign ([`ErrorKind::InvalidInput`], `SM_ERR`).
+    LineSearchNormUnsigned,
+    /// The caller's two points do not bracket a zero of the error norm: it has one sign
+    /// at both ([`ErrorKind::InvalidInput`], `SM_ERR`).
+    LineSearchNotBracketed,
+    /// The face's UV domain, grown from its edge uses, and the surface's are disjoint
+    /// ([`ErrorKind::InvalidInput`]; upstream's status `SM_ERR_INVALID_INPUT`, which the
+    /// cache factory falls back from).
+    DisjointFaceDomain,
+    /// The caller's edge use has no UV trim curve ([`ErrorKind::InvalidInput`],
+    /// `SM_ERR_NULL_POINTER`).
+    EdgeuseHasNoTrimCurve,
 }
 
 impl SurfaceFailure {
     /// The status the C++ reports for the failure (a comparison detail).
     pub(crate) const fn comparison_status(&self) -> i32 {
         match self {
-            Self::Failed(_) | Self::Defect { .. } => SM_ERR,
-            Self::Missing(_) => SM_ERR_NULL_POINTER,
-            Self::InvalidValue(_) => SM_ERR_INVALID_INPUT,
+            Self::Failed(_)
+            | Self::Defect { .. }
+            | Self::UnsupportedCacheKind
+            | Self::SolverSurfaceNotBSpline
+            | Self::NoControlPoints
+            | Self::PointsDoNotTurnOneWay
+            | Self::UnsupportedSurfaceKind
+            | Self::UnsupportedSolverOperation
+            | Self::NoRoughGuess
+            | Self::ZeroStepOutsideDomain
+            | Self::LineSearchNormUnsigned
+            | Self::LineSearchNotBracketed => SM_ERR,
+            Self::Missing(_)
+            | Self::TrimmedCacheHasNoFace
+            | Self::SurfaceNotBSplineKind
+            | Self::CurveNotBSplineKind
+            | Self::CurvesNotCached
+            | Self::FaceHasNoSurface
+            | Self::EdgeuseHasNoTrimCurve => SM_ERR_NULL_POINTER,
+            Self::InvalidValue(_) | Self::DisjointFaceDomain => SM_ERR_INVALID_INPUT,
             Self::OutsideDomain(_) => SM_ERR_OUTSIDE_OF_DOMAIN,
             Self::OffSurface(_) => SM_ERR_NOT_WITHIN_TOLERANCE,
         }
@@ -81,6 +153,23 @@ impl SurfaceFailure {
     pub const fn kind(&self) -> ErrorKind {
         match self {
             Self::Defect { .. } => ErrorKind::StageFailed,
+            Self::TrimmedCacheHasNoFace
+            | Self::CurvesNotCached
+            | Self::FaceHasNoSurface
+            | Self::LineSearchNormUnsigned
+            | Self::LineSearchNotBracketed
+            | Self::DisjointFaceDomain
+            | Self::EdgeuseHasNoTrimCurve => ErrorKind::InvalidInput,
+            Self::UnsupportedCacheKind
+            | Self::SurfaceNotBSplineKind
+            | Self::CurveNotBSplineKind
+            | Self::SolverSurfaceNotBSpline
+            | Self::UnsupportedSurfaceKind
+            | Self::UnsupportedSolverOperation => ErrorKind::Unsupported,
+            Self::NoControlPoints => ErrorKind::Failed,
+            Self::PointsDoNotTurnOneWay => ErrorKind::Degenerate,
+            Self::NoRoughGuess => ErrorKind::NotFound,
+            Self::ZeroStepOutsideDomain => ErrorKind::OutsideDomain,
             _ => ErrorKind::of_status(self.comparison_status()),
         }
     }
@@ -95,6 +184,43 @@ impl core::fmt::Display for SurfaceFailure {
             | Self::OffSurface(what) => f.write_str(what),
             Self::Missing(what) => write!(f, "{what} is missing"),
             Self::Defect { why } => write!(f, "{}: {why}", ErrorKind::StageFailed),
+            Self::UnsupportedCacheKind => {
+                f.write_str("the surface cache's kind does not support the operation")
+            }
+            Self::TrimmedCacheHasNoFace => f.write_str("the trimmed surface cache has no face"),
+            Self::SurfaceNotBSplineKind => f.write_str("the surface is not of a B-spline kind"),
+            Self::CurveNotBSplineKind => f.write_str("the curve is not of a B-spline kind"),
+            Self::SolverSurfaceNotBSpline => {
+                f.write_str("the solver's surface is not a B-spline surface")
+            }
+            Self::NoControlPoints => {
+                f.write_str("the B-spline surface's control points could not be read")
+            }
+            Self::PointsDoNotTurnOneWay => f.write_str("the three points do not turn one way"),
+            Self::CurvesNotCached => {
+                f.write_str("the alternate cache holds no curves of the kind asked for")
+            }
+            Self::UnsupportedSurfaceKind => {
+                f.write_str("the surface's kind does not support the operation")
+            }
+            Self::FaceHasNoSurface => f.write_str("the face has no surface"),
+            Self::UnsupportedSolverOperation => {
+                f.write_str("the solver's operation gets no help from this step")
+            }
+            Self::NoRoughGuess => f.write_str("no rough guess was found"),
+            Self::ZeroStepOutsideDomain => {
+                f.write_str("the guess is outside the domain and the step is zero")
+            }
+            Self::LineSearchNormUnsigned => {
+                f.write_str("the error norm is an absolute norm, which cannot change sign")
+            }
+            Self::LineSearchNotBracketed => {
+                f.write_str("the error norm does not change sign over the step")
+            }
+            Self::DisjointFaceDomain => {
+                f.write_str("the face's domain and the surface's are disjoint")
+            }
+            Self::EdgeuseHasNoTrimCurve => f.write_str("the edge use has no UV trim curve"),
         }
     }
 }
@@ -130,6 +256,23 @@ impl crate::SolidError {
     #[must_use]
     pub(crate) fn surface_missing(operation: &'static str, what: &'static str) -> Self {
         Self::surface(operation, SurfaceFailure::Missing(what))
+    }
+
+    /// [`crate::SolidError::Failed`] for a surface routine that fails with `failure`
+    /// because of `cause`, chained as its cause. A port failure is not chained: it would
+    /// turn the status answer into a port failure, so the failure stands alone then.
+    #[must_use]
+    pub(crate) fn surface_caused_by(
+        operation: &'static str,
+        failure: SurfaceFailure,
+        cause: Self,
+    ) -> Self {
+        let failure = Failure::new(operation, failure);
+        if cause.is_port_failure() {
+            failure.into_error()
+        } else {
+            failure.caused_by(cause).into_error()
+        }
     }
 
     /// The surface failure behind this error, for a [`crate::SolidError::Failed`] with a
@@ -234,7 +377,7 @@ mod tests {
             ),
             (
                 "surface::trim_srf_cache::TrimSrfCache::build_tree_with_face",
-                SurfaceFailure::InvalidValue("the face's domain and the surface's are disjoint"),
+                SurfaceFailure::DisjointFaceDomain,
                 SM_ERR_INVALID_INPUT,
             ),
             (
@@ -315,6 +458,90 @@ mod tests {
         assert_eq!(missing.surface_failure(), Some(&defect));
     }
 
+    /// The named causes of the surface caches and point solvers keep the status of the
+    /// phrase they replace, with their own class.
+    #[test]
+    fn the_surface_cache_and_solver_causes_keep_their_status_with_their_class() {
+        use SurfaceFailure as F;
+        let cases = [
+            (F::UnsupportedCacheKind, SM_ERR, ErrorKind::Unsupported),
+            (
+                F::TrimmedCacheHasNoFace,
+                SM_ERR_NULL_POINTER,
+                ErrorKind::InvalidInput,
+            ),
+            (
+                F::SurfaceNotBSplineKind,
+                SM_ERR_NULL_POINTER,
+                ErrorKind::Unsupported,
+            ),
+            (
+                F::CurveNotBSplineKind,
+                SM_ERR_NULL_POINTER,
+                ErrorKind::Unsupported,
+            ),
+            (F::SolverSurfaceNotBSpline, SM_ERR, ErrorKind::Unsupported),
+            (F::NoControlPoints, SM_ERR, ErrorKind::Failed),
+            (F::PointsDoNotTurnOneWay, SM_ERR, ErrorKind::Degenerate),
+            (
+                F::CurvesNotCached,
+                SM_ERR_NULL_POINTER,
+                ErrorKind::InvalidInput,
+            ),
+            (F::UnsupportedSurfaceKind, SM_ERR, ErrorKind::Unsupported),
+            (
+                F::FaceHasNoSurface,
+                SM_ERR_NULL_POINTER,
+                ErrorKind::InvalidInput,
+            ),
+            (
+                F::UnsupportedSolverOperation,
+                SM_ERR,
+                ErrorKind::Unsupported,
+            ),
+            (F::NoRoughGuess, SM_ERR, ErrorKind::NotFound),
+            (F::ZeroStepOutsideDomain, SM_ERR, ErrorKind::OutsideDomain),
+            (F::LineSearchNormUnsigned, SM_ERR, ErrorKind::InvalidInput),
+            (F::LineSearchNotBracketed, SM_ERR, ErrorKind::InvalidInput),
+            (
+                F::DisjointFaceDomain,
+                SM_ERR_INVALID_INPUT,
+                ErrorKind::InvalidInput,
+            ),
+            (
+                F::EdgeuseHasNoTrimCurve,
+                SM_ERR_NULL_POINTER,
+                ErrorKind::InvalidInput,
+            ),
+        ];
+        for (failure, code, kind) in cases {
+            let typed = SolidError::surface("surface::op", failure);
+            assert_eq!(typed.sm_status(), Some(code), "{failure:?}");
+            assert_eq!(typed.upstream_status(), Some(code), "{failure:?}");
+            assert_eq!(typed.kind(), kind, "{failure:?}");
+            assert!(!typed.is_defect(), "{failure:?}");
+            assert!(!typed.is_port_failure(), "{failure:?}");
+            assert!(typed.is_status_answer(), "{failure:?}");
+            assert_eq!(typed.surface_failure(), Some(&failure));
+            assert!(!typed.to_string().is_empty());
+        }
+        // a caught cause is chained, unless it is a port failure
+        let cause = SolidError::surface("surface::inner", F::NoRoughGuess);
+        let chained = SolidError::surface_caused_by("surface::op", F::NoRoughGuess, cause);
+        assert_eq!(chained.sm_status(), Some(SM_ERR));
+        assert!(chained.is_status_answer());
+        assert_eq!(
+            chained.cause().and_then(SolidError::surface_failure),
+            Some(&F::NoRoughGuess)
+        );
+        let port = SolidError::unported("x", "y");
+        let alone = SolidError::surface_caused_by("surface::op", F::NoControlPoints, port);
+        assert_eq!(alone.sm_status(), Some(SM_ERR));
+        assert!(!alone.is_port_failure());
+        assert!(alone.is_status_answer());
+        assert!(alone.cause().is_none());
+    }
+
     /// The sites that build a surface phrase cause only fall:
     /// per file, in the library code of `solidcore` and `solidcore-ops`, as
     /// [`super::super::site_scan`] counts them. A PR that converts sites lowers its
@@ -384,14 +611,7 @@ mod tests {
             ("solidcore/src/surface/surface/p7.rs", 21),
             ("solidcore/src/surface/surface/p8.rs", 33),
             ("solidcore/src/surface/surface/p9.rs", 33),
-            ("solidcore/src/surface/surface_cache/face_context.rs", 1),
-            ("solidcore/src/surface/surface_cache/p1.rs", 17),
-            ("solidcore/src/surface/surface_cache/p2.rs", 5),
-            ("solidcore/src/surface/surface_cache/p3.rs", 1),
-            ("solidcore/src/surface/surface_point_solve/p1.rs", 5),
-            ("solidcore/src/surface/surface_point_solve/p2.rs", 8),
             ("solidcore/src/surface/torus.rs", 15),
-            ("solidcore/src/surface/trim_srf_cache.rs", 4),
             ("solidcore/src/surface/unbend_volume.rs", 2),
             ("solidcore/src/surface/volume/p1.rs", 8),
             ("solidcore/src/surface/volume/p2.rs", 6),

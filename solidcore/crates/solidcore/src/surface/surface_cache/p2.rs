@@ -58,7 +58,8 @@
 
 use crate::curve::curve::Curve;
 use crate::curve::iso_curve::IsoCurve;
-use crate::error::{Result, SolidError};
+use crate::error::surface::SurfaceFailure;
+use crate::error::{Failure, Result, SolidError, SM_ERR_NULL_POINTER};
 use crate::geom::extent2d::Extent2d;
 use crate::geom::extent3d::Extent3d;
 use crate::geom::pseudo_box::PseudoBox;
@@ -412,9 +413,12 @@ impl<O: Copy + PartialEq> SurfaceCache<O> {
     ) -> Result<()> {
         let caches = self.alt_caches_mut();
         if caches.len() > MAX_ALT_CACHES {
-            return Err(SolidError::surface_failed(
+            return Err(SolidError::surface(
                 OP_ADD,
-                "the alternate caches are full",
+                SurfaceFailure::Defect {
+                    why: "the cache holds more alternate caches than its limit, which this \
+                          method's eviction of the oldest never allows",
+                },
             ));
         }
 
@@ -470,13 +474,22 @@ impl<O: Copy + PartialEq> SurfaceCache<O> {
             (n.aux_type, n.child1.is_some(), fields)
         };
         if aux_type != AuxDataType::BezierSurface && aux_type != AuxDataType::AuxData {
-            return Err(SolidError::surface_failed(
+            return Err(SolidError::surface(
                 OP_TEST,
-                "the node is not a surface node",
+                SurfaceFailure::Defect {
+                    why: "the tree build and the tessellator test only the surface nodes of \
+                          the cache's own tree, so a node of another kind is the kernel's",
+                },
             ));
         }
         if has_child {
-            return Err(SolidError::surface_failed(OP_TEST, "the node has children"));
+            return Err(SolidError::surface(
+                OP_TEST,
+                SurfaceFailure::Defect {
+                    why: "the tree build and the tessellator test only leaf nodes, before they \
+                          split them, so a node with children is the kernel's",
+                },
+            ));
         }
         let fields = fields.ok_or_else(|| invalid(OP_TEST, "node has no surface data"))?;
 
@@ -854,9 +867,17 @@ impl<O: Copy + PartialEq> SurfaceCache<O> {
                 _ => return Err(invalid(OP_BLOCK, "node has no surface data")),
             }
         };
-        let handle = fields
-            .surface
-            .ok_or_else(|| SolidError::surface_missing(OP_BLOCK, "the node's surface"))?;
+        let handle = fields.surface.ok_or_else(|| {
+            Failure::new(
+                OP_BLOCK,
+                SurfaceFailure::Defect {
+                    why: "the cache gives every surface node it makes the surface it \
+                              covers, so a node without one is the kernel's",
+                },
+            )
+            .with_status(SM_ERR_NULL_POINTER)
+            .into_error()
+        })?;
         // upstream works on the node's surface itself (`pAux->mBA_pSurface`); the cache is
         // edited below, so an evaluation copy (exact knots, owner kept) stands for it: the
         // copy constructor's knot fix-up would move near-coincident knots and so the splits.
@@ -1057,9 +1078,16 @@ impl<O: Copy + PartialEq> SurfaceCache<O> {
         let mut curr: Vec<NodeId> = base_nodes.clone();
         let mut next: Vec<NodeId> = Vec::with_capacity(base_nodes.len());
         let at = |v: &[NodeId], i: usize| -> Result<NodeId> {
-            v.get(i)
-                .copied()
-                .ok_or_else(|| SolidError::surface_failed(OP_BLOCK, "a base node is out of range"))
+            v.get(i).copied().ok_or_else(|| {
+                SolidError::surface(
+                    OP_BLOCK,
+                    SurfaceFailure::Defect {
+                        why: "the generations are combined over the base nodes this \
+                                  routine made, one per split cell, so an index past them is \
+                                  the kernel's",
+                    },
+                )
+            })
         };
 
         // assemble U and V splits until there is just one

@@ -89,7 +89,7 @@
 //!   [`SolidError::InvalidInput`].
 //! - **Statuses.** `BuildTree`'s `SER(sSurfaceDomain.Intersect(sFaceDomain, ..))` of
 //!   disjoint domains (no edge use grew the face domain) is the upstream status
-//!   `SM_ERR_INVALID_INPUT` ([`SurfaceFailure::InvalidValue`]), not
+//!   `SM_ERR_INVALID_INPUT` ([`SurfaceFailure::DisjointFaceDomain`]), not
 //!   [`SolidError::InvalidInput`], so the cache factory falls back to the plain
 //!   surface cache as `smsurf_GetSurfaceCache` does when `CacheMakeOrValidate` fails;
 //!   a `GetTree` that builds a deferred tree returns the same status.
@@ -99,7 +99,7 @@
 use crate::curve::curve::Curve;
 use crate::curve::curve_cache::{CurveCache, CurveCacheOptions};
 use crate::error::surface::SurfaceFailure;
-use crate::error::{Result, SolidError};
+use crate::error::{Failure, Result, SolidError, SM_ERR_NULL_POINTER};
 use crate::geom::extent1d::Extent1d;
 use crate::geom::extent2d::Extent2d;
 use crate::geom::extent3d::Extent3d;
@@ -625,9 +625,9 @@ impl<O: Copy + PartialEq> TrimSrfCache<O> {
         _uv_point: Point2,
         _src_zone_tol_3d: f64,
     ) -> Result<(i32, Option<O>)> {
-        self.base
-            .face()?
-            .ok_or_else(|| SolidError::surface_missing(OP_CLASSIFY, "the face"))?;
+        self.base.face()?.ok_or_else(|| {
+            SolidError::surface(OP_CLASSIFY, SurfaceFailure::TrimmedCacheHasNoFace)
+        })?;
         Err(SolidError::unported(
             "prepared face classifier for bound trim",
             "query.face_p2",
@@ -885,12 +885,9 @@ impl<O: Copy + PartialEq> TrimSrfCache<O> {
         };
         // SER: disjoint domains (a face domain no edge use grew) are the status
         // SM_ERR_INVALID_INPUT, a failed build the cache factory falls back from
-        let domain = surface_domain.intersect(&face_domain).map_err(|_| {
-            SolidError::surface(
-                OP_BUILD,
-                SurfaceFailure::InvalidValue("the face's domain and the surface's are disjoint"),
-            )
-        })?;
+        let domain = surface_domain
+            .intersect(&face_domain)
+            .map_err(|_| SolidError::surface(OP_BUILD, SurfaceFailure::DisjointFaceDomain))?;
         self.base.set_uv_domain(domain);
 
         // When the surface has UVTrimCurves
@@ -993,9 +990,9 @@ impl<O: Copy + PartialEq> TrimSrfCache<O> {
         opt_tree_node: Option<NodeId>,
     ) -> Result<()> {
         let geometry = EdgeuseGeometry {
-            curve: input.uv_trim_curve.ok_or_else(|| {
-                SolidError::surface_missing(OP_EU, "the edge use's UV trim curve")
-            })?,
+            curve: input
+                .uv_trim_curve
+                .ok_or_else(|| SolidError::surface(OP_EU, SurfaceFailure::EdgeuseHasNoTrimCurve))?,
             owner_zone_tol_3d: input.owner_zone_tol_3d,
         };
         let index = if let Some(index) = self
@@ -1322,10 +1319,16 @@ impl<O: Copy + PartialEq> TrimSrfCache<O> {
                                 Some(child),
                             )
                         } else {
-                            Err(SolidError::surface_missing(
+                            Err(Failure::new(
                                 OP_EU,
-                                "the edge use's retained curve",
-                            ))
+                                SurfaceFailure::Defect {
+                                    why: "every edge use in a node's list was implanted, which \
+                                          retains its curve, so an edge use without one is \
+                                          the kernel's",
+                                },
+                            )
+                            .with_status(SM_ERR_NULL_POINTER)
+                            .into_error())
                         };
                         if let Err(e) = r {
                             if e.is_unported_or_cancelled() {
