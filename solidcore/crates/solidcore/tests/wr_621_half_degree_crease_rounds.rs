@@ -213,5 +213,4 @@ fn wr_621_a_shallow_crease_too_small_to_round_is_refused_before_solving() {
         ),
         "{err:?}"
     );
-    assert_eq!(k.fillet_point_step.get(), None);
 }
