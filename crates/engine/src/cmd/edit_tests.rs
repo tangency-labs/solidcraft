@@ -1879,6 +1879,17 @@ fn app_bar_reset_is_registered_and_only_requests_a_ui_reset() {
 }
 
 #[test]
+fn app_bar_customize_validates_without_opening_or_changing_a_design() {
+    let mut s = Session::default();
+    let before = (s.doc.to_json(), s.revision, s.undo.len(), s.redo.len());
+    let spec = crate::find_command("ui.appBarCustomize").unwrap();
+    assert!(spec.info(&s).enabled);
+    assert!(!spec.undoable);
+    assert_eq!(s.execute(spec.id, &json!({})).unwrap(), json!({"available":true}));
+    assert_eq!((s.doc.to_json(), s.revision, s.undo.len(), s.redo.len()), before);
+}
+
+#[test]
 fn assistant_toggle_is_refused_headlessly_without_changing_the_document() {
     let mut s = Session::default();
     let before = (s.doc.to_json(), s.undo.len());
@@ -2669,4 +2680,22 @@ fn a_hole_position_edited_with_an_expression_follows_it() {
     assert_eq!(hole["position"][0], 20.0, "`position` keeps the point the hole was made at: {hole}");
     let id = s.doc.find_feature("H").unwrap().id;
     assert_eq!(s.model.result(id).and_then(|r| r.error.clone()), None, "the hole rebuilds");
+}
+
+/// `select.mode` (#4255) names every selection mode and gives it back; anything else is refused.
+/// A window setting: the design, its history and the selection are untouched.
+#[test]
+fn select_mode_takes_each_mode_and_leaves_the_design_alone() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10}));
+    run(&mut s, "select.set", json!({"items": [{"type": "body", "name": "Body1"}]}));
+    let (doc, undo, selection) = (s.doc.to_json(), s.undo.len(), s.selection.clone());
+    for mode in crate::PickMode::ALL {
+        let name = serde_json::to_value(mode).unwrap();
+        assert_eq!(run(&mut s, "select.mode", json!({"mode": name})), json!({"mode": name}));
+    }
+    for p in [json!({}), json!({"mode": "edges"}), json!({"mode": 1}), json!({"mode": null}), json!({"mode": "Bodies"})] {
+        assert!(s.execute("select.mode", &p).is_err(), "{p}");
+    }
+    assert_eq!((s.doc.to_json(), s.undo.len(), s.selection.clone()), (doc, undo, selection));
 }

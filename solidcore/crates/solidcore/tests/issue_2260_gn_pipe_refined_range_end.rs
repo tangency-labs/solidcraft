@@ -47,7 +47,6 @@ use solidcore::Kernel;
 const SOLIDCRAFT_C494A18: &[&str] = &[
     "analytic_copy_keeps_parameterization",
     "bspline_trim_preserves_uv_spans",
-    "classify_edge_interval",
     "curve_loop_normal_from_area",
     "edgeuse_convexity_propagates_step_off_failure",
     "fillet_chamfer_cone_on_arc",

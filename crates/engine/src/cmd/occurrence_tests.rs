@@ -643,7 +643,7 @@ fn exact_visibility_isolate_rename_and_async_accept() {
     let mut scratch = s.scratch();
     assert_eq!(scratch.visibility, s.visibility);
     run(&mut scratch, "component.rename", json!({"component":component,"name":"Changed"}));
-    s.accept_computed(scratch);
+    s.accept_computed(scratch).unwrap();
     assert!(!s.occurrence_visible(&[second]));
     run(&mut s, "browser.visibility", json!({"visible":true,"paths":[[second]],"isolate":true}));
     assert!(!s.body_visible(&first_body));
@@ -1146,6 +1146,61 @@ fn a_cut_or_join_from_the_top_level_into_a_linked_part_is_refused() {
     assert_eq!(s.doc.features.len(), features);
     let volume = run(&mut s, "inspect.measure", json!({"bodies": ["Plate"]}))["total"]["volume_mm3"].clone();
     near(&volume, 6000.0);
+}
+
+/// #5679 for a revolve from a fixed face, which keeps no attachment: a cut or join from the top
+/// level into the linked part's face is refused the same way, and the plate stays.
+#[test]
+fn a_fixed_face_revolve_from_the_top_level_into_a_linked_part_is_refused() {
+    let dir = std::env::temp_dir().join(format!("solidcraft-linked-revolve-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let part = dir.join("plate.solidcraft");
+    saved_box_design(&part, 30.0);
+    let mut s = Session::default();
+    run(&mut s, INSERT_DESIGN, json!({"path": part, "translate": [50, 0, 0]}));
+    let _ = std::fs::remove_dir_all(&dir);
+    run(&mut s, "component.activate", json!({"component": "root"}));
+    let features = s.doc.features.len();
+    for operation in ["cut", "join"] {
+        let refused = s
+            .execute(
+                "solid.revolve",
+                &json!({"face": [55, 10, 30], "fixed": true, "axis": {"origin": [50, 0, 30], "dir": [0, 1, 0]},
+                        "angle": "180 deg", "direction": "symmetric", "operation": operation}),
+            )
+            .unwrap_err()
+            .to_string();
+        assert!(refused.contains("`Plate`") && refused.contains("linked to a design file"), "{operation}: {refused}");
+    }
+    assert_eq!(s.doc.features.len(), features);
+    let volume = run(&mut s, "inspect.measure", json!({"bodies": ["Plate"]}))["total"]["volume_mm3"].clone();
+    near(&volume, 6000.0);
+}
+
+/// A fixed-face cut from a linked sibling's face changes only the active component's bodies, so
+/// the link does not refuse it.
+#[test]
+fn a_fixed_face_revolve_cut_from_a_linked_siblings_face_cuts_the_active_component() {
+    let dir = std::env::temp_dir().join(format!("solidcraft-linked-sibling-revolve-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let part = dir.join("plate.solidcraft");
+    saved_box_design(&part, 30.0);
+    let mut s = Session::default();
+    run(&mut s, INSERT_DESIGN, json!({"path": part, "translate": [50, 0, 0]}));
+    let _ = std::fs::remove_dir_all(&dir);
+    run(&mut s, "component.activate", json!({"component": "root"}));
+    run(&mut s, "component.create", json!({"name": "A", "activate": true}));
+    run(&mut s, "solid.box", json!({"length": 100, "width": 20, "height": 25, "body_name": "Base"}));
+    run(
+        &mut s,
+        "solid.revolve",
+        json!({"face": [55, 10, 30], "fixed": true, "axis": {"origin": [50, 0, 30], "dir": [0, 1, 0]},
+               "angle": "180 deg", "direction": "symmetric", "operation": "cut"}),
+    );
+    let base = run(&mut s, "inspect.measure", json!({"bodies": ["Base"]}))["total"]["volume_mm3"].as_f64().unwrap();
+    assert!(base < 100.0 * 20.0 * 25.0 - 1.0, "Base was not cut: {base}");
+    let plate = run(&mut s, "inspect.measure", json!({"bodies": ["Plate"]}))["total"]["volume_mm3"].clone();
+    near(&plate, 6000.0);
 }
 
 /// The compact list counts what a component holds and leaves out identity transforms; the full

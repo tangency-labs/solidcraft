@@ -1,0 +1,1 @@
+sections a body by crossing its mesh triangles

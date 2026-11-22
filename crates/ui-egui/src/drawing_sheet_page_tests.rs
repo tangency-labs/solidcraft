@@ -39,6 +39,73 @@ fn note_tool_places_text_on_the_active_sheet() {
     assert_eq!(note.content.0, vec![solidcraft_engine::geom::cell::Part::Text("Deburr all edges".to_owned())]);
 }
 
+/// A note saved before alignments keeps its layout in the Notes tool's panel: its own entry is selected
+/// and OK changes nothing; choosing Centre is per-line centring (`centre`), a different layout, and only
+/// then does the edit set it. A note with an alignment has no such entry.
+#[test]
+fn a_note_saved_before_alignments_has_its_own_choice_in_the_notes_panel() {
+    let (mut h, _) = plate_sheet();
+    let added = h.app.run("drawing.note.add", json!({"anchor": {"sheet": "Sheet 1"}, "at": [300, 230], "content": "DEBURR"})).unwrap();
+    let id = solidcraft_engine::doc::ids::decode(added["note"].as_str().unwrap()).unwrap();
+    let align = |h: &Harness| h.app.session.drawing("drawing.inspect").unwrap().notes.by_id(id).unwrap().align;
+    let open = |h: &mut Harness| {
+        crate::drawing_workspace::edit_object(&mut h.app, "note", id);
+        settle(h);
+        h.frames(3);
+        assert!(crate::drawing_workspace::inspector_visible(&h.app), "the note's options are open");
+    };
+    let click = |h: &mut Harness, at: egui::Pos2| {
+        h.step(&json!({"click": [at.x, at.y]})).unwrap();
+        h.frames(3);
+    };
+    // Where to click for an entry: its segment when the choice is a row of segments, and, when the kit
+    // has turned it into a dropdown for want of room (as it may with the fourth entry), its place in the
+    // list, which this opens.
+    let entry = |h: &mut Harness, name: &str, key: &'static str| {
+        if let Some(segment) = crate::scenario::rect_of(&format!("drawing:note:align:{name}")) {
+            return Some(segment.center());
+        }
+        let widget = crate::scenario::rect_of("dialog:widget:Alignment")?.center();
+        click(h, widget);
+        solidcraft_ui_registry::handle_at(&format!("dialog:Alignment:{}", solidcraft_ui_text::tr(key)))
+    };
+    let ok = |h: &mut Harness| {
+        let at = crate::scenario::rect_of("dialog:button::OK").expect("OK is drawn").center();
+        click(h, at);
+    };
+    // A note with an alignment: its choices are Left, Center and Right, no entry for the old layout.
+    open(&mut h);
+    let shown = |name: &str| crate::scenario::rect_of(&format!("drawing:note:align:{name}")).is_some();
+    assert!(shown("left") && shown("centre") && shown("right"), "the three choices are drawn");
+    assert!(!shown("saved"), "no entry for the old layout on a note that has an alignment");
+    crate::drawing_workspace::close_panel(&mut h.app);
+    // The same note as an older drawing saved it.
+    h.app
+        .session
+        .edit_drawing("drawing.note.edit", |d| {
+            if let Some(at) = d.notes.index_of(id)
+                && let Some(note) = d.notes.get_mut(at)
+            {
+                std::sync::Arc::make_mut(note).align = None;
+            }
+            Ok(())
+        })
+        .unwrap();
+    assert_eq!(align(&h), None);
+    open(&mut h);
+    let saved = entry(&mut h, "saved", "ui.drawing_note.align_saved").expect("the old layout has its own entry");
+    // Picking it, the entry that is selected, changes nothing, and neither does OK.
+    click(&mut h, saved);
+    let undo = h.app.session.undo.len();
+    ok(&mut h);
+    assert_eq!((align(&h), h.app.session.undo.len()), (None, undo), "choosing nothing changes nothing");
+    open(&mut h);
+    let centre = entry(&mut h, "centre", "ui.drawing_note.align_centre").expect("Center is an entry");
+    click(&mut h, centre);
+    ok(&mut h);
+    assert_eq!(align(&h), Some(solidcraft_engine::geom::cell::HAlign::Centre), "Centre is per-line centring");
+}
+
 /// A right-click on the sheet opens the menu a sketch's right-click opens: it selects what is under
 /// the pointer first, offers Edit and Delete for it, then the tools, then Undo and Redo. On empty
 /// paper the selection stays, and a right-click with a tool in hand puts the tool down.
@@ -475,6 +542,79 @@ fn dimension_tool_dimensions_a_holes_diameter() {
     let read = added_dimension(&mut h, &before);
     assert!(read["record"]["kind"]["radial"].is_object(), "{read}");
     assert_eq!(read["text"], "Ø12.00", "{read}");
+}
+
+/// A Ø12 rod 100 long along X, seen side on in a 1:2 front view centred at (140, 180) on A3: on paper
+/// its two outline lines (silhouettes, not edges) run from x = 115 to 165 at y = 177 and 183, and its
+/// ends, circles seen edge on, are the edges x = 115 and x = 165. The Dimension tool is on.
+fn rod_dimensioning() -> Harness {
+    let mut h = Harness::new();
+    h.app.home.open = false;
+    h.call("ui.resize", json!({"width": 1400, "height": 900}));
+    h.app.run("solid.cylinder", json!({"radius": 6, "height": 100, "base": [0, 0, 0], "axis": "X", "body_name": "Rod"})).unwrap();
+    h.app.run("drawing.create", json!({})).unwrap();
+    h.app.run("drawing.view.base", json!({"sheet": "Sheet 1", "scale": "1:2", "position_mm": [140, 180]})).unwrap();
+    crate::drawing_workspace::enter(&mut h.app, true).unwrap();
+    settle(&mut h);
+    let sheet = solidcraft_engine::doc::ids::encode(h.app.session.drawing("drawing.inspect").unwrap().sheets[0].id);
+    for y in [177.0, 183.0] {
+        let line = h.app.run("drawing.scene.line", json!({"sheet": sheet, "point_mm": [140.0, y], "band_mm": 0.5})).unwrap();
+        assert_eq!(line["line"]["source"]["kind"], "silhouette", "an outline line at y = {y}: {line}");
+    }
+    assert!(crate::drawing_workspace::start(&mut h.app, "drawing.dimension"));
+    h.frames(4);
+    h
+}
+
+/// A cylinder seen side on is dimensioned by its outline, as on paper (ISO 129-1): the outline line
+/// under the pointer is shaded, a click picks it, and the next click places the rod's Ø12 there.
+#[test]
+fn dimension_tool_dimensions_a_cylinders_diameter_from_one_outline() {
+    use crate::drawing_workspace::dimension::{Shape, hovered_shape, picked_shapes};
+    let mut h = rod_dimensioning();
+    let before: Vec<u64> = h.app.session.drawing("drawing.inspect").unwrap().dimensions.iter().map(|d| d.id).collect();
+    let paper = crate::scenario::rect_of("sheet:paper").unwrap();
+    h.step(&json!({"move": [paper.left() + paper.width() * 140.0 / 420.0, paper.bottom() - paper.height() * 183.0 / 297.0]})).unwrap();
+    h.frames(2);
+    assert!(matches!(hovered_shape(&h.app), Some(Shape::Straight(_))), "the outline line is shaded: {:?}", hovered_shape(&h.app));
+    click_paper(&mut h, 140.0, 183.0);
+    assert!(matches!(picked_shapes(&h.app)[..], [Shape::Straight(_)]), "{:?}", picked_shapes(&h.app));
+    // Past the rod's left end: the engine draws a Ø between outlines beyond their ends.
+    click_paper(&mut h, 100.0, 180.0);
+    let read = added_dimension(&mut h, &before);
+    assert!(read["record"]["kind"]["cylinder"].is_object(), "{read}");
+    assert_eq!(read["text"], "Ø12.00", "{read}");
+}
+
+/// Both outline lines of one cylinder, picked one after the other, are its diameter: one Ø12, not a
+/// distance between two lines.
+#[test]
+fn dimension_tool_dimensions_a_cylinders_diameter_from_its_two_outlines() {
+    use crate::drawing_workspace::dimension::{Shape, picked_shapes};
+    let mut h = rod_dimensioning();
+    let before: Vec<u64> = h.app.session.drawing("drawing.inspect").unwrap().dimensions.iter().map(|d| d.id).collect();
+    click_paper(&mut h, 140.0, 183.0);
+    click_paper(&mut h, 140.0, 177.0);
+    assert!(matches!(picked_shapes(&h.app)[..], [Shape::Straight(_), Shape::Straight(_)]), "{:?}", picked_shapes(&h.app));
+    assert_eq!(h.app.session.drawing("drawing.inspect").unwrap().dimensions.len(), before.len(), "two picks place nothing yet");
+    click_paper(&mut h, 100.0, 180.0);
+    let read = added_dimension(&mut h, &before);
+    assert!(read["record"]["kind"]["cylinder"].is_object(), "{read}");
+    assert_eq!(read["text"], "Ø12.00", "{read}");
+}
+
+/// An outline line and an edge measure nothing the drawing has a dimension for, so the click after
+/// them adds nothing: the rod's outline, then its left end.
+#[test]
+fn dimension_tool_adds_nothing_for_an_outline_and_an_edge() {
+    use crate::drawing_workspace::dimension::{Shape, picked_shapes};
+    let mut h = rod_dimensioning();
+    let before = h.app.session.drawing("drawing.inspect").unwrap().dimensions.len();
+    click_paper(&mut h, 140.0, 183.0);
+    click_paper(&mut h, 115.0, 180.0);
+    assert!(matches!(picked_shapes(&h.app)[..], [Shape::Straight(_), Shape::Straight(_)]), "{:?}", picked_shapes(&h.app));
+    click_paper(&mut h, 100.0, 180.0);
+    assert_eq!(h.app.session.drawing("drawing.inspect").unwrap().dimensions.len(), before, "nothing added");
 }
 
 /// Esc drops the tool's picks first and keeps the tool, as in a sketch; the next Esc leaves it.
@@ -1164,6 +1304,9 @@ fn navigation_allows_drawing_drags_with_orbit_latched_in_design() {
         } else {
             navigation_drag_fixture(kind)
         };
+        // The classic switcher, which this test covers: since #19655 the default lets the focused
+        // view choose the workspace (`workspace_follows_view`).
+        h.app.preferences.workspace_follows_view = false;
         let point = OnScreen::of(&h.app.drawing_workspace.page.cam, h.app.viewport.rect.unwrap()).paper(from);
         let selected = h.app.session.selection.clone();
         assert_eq!(h.call("ui.workspace", json!({"workspace": "design"}))["ok"], true);
@@ -1187,6 +1330,33 @@ fn navigation_allows_drawing_drags_with_orbit_latched_in_design() {
         h.frames(2);
         assert_eq!(h.app.session.doc.to_json(), doc, "{kind}: one Undo restores the ordinary drag");
     }
+}
+
+/// A side button the user mapped to Pan drags the sheet through the shared navigation, and a plain
+/// click on it moves nothing. Unmapped, the same drag does nothing.
+#[test]
+fn a_mapped_side_button_pans_the_drawing_sheet() {
+    let (mut h, _) = plate_sheet();
+    let drag = |h: &mut Harness| {
+        let at = h.app.viewport.rect.unwrap().center();
+        let ev = |pressed| egui::Event::PointerButton { pos: at, button: egui::PointerButton::Extra2, pressed, modifiers: egui::Modifiers::NONE };
+        h.frame_with(vec![egui::Event::PointerMoved(at)]);
+        h.frame_with(vec![ev(true)]);
+        for i in 1..=8 {
+            h.frame_with(vec![egui::Event::PointerMoved(at + vec2(10.0, 3.0) * i as f32)]);
+        }
+        h.frame_with(vec![ev(false)]);
+        h.frames(2);
+    };
+    let paper = || crate::scenario::rect_of("sheet:paper").unwrap();
+    let (doc, undo, cam, before) = (h.app.session.doc.to_json(), h.app.session.undo.len(), h.app.cam, paper());
+    drag(&mut h);
+    assert_eq!(paper(), before, "unmapped, the side button leaves the sheet alone");
+    assert_eq!(h.call("ui.prefs", json!({"nav_button_map": {"extra2": "pan"}}))["ok"], true);
+    drag(&mut h);
+    let moved = paper().min - before.min;
+    assert!((moved.x - 80.0).abs() < 4.0 && (moved.y - 24.0).abs() < 4.0, "the sheet panned with the drag: {moved:?}");
+    assert_eq!((h.app.session.doc.to_json(), h.app.session.undo.len(), h.app.cam), (doc, undo, cam), "the design and its camera are untouched");
 }
 
 /// Each sheet colour is drawn in its tokens, standing off the backdrop, and is screen only: the

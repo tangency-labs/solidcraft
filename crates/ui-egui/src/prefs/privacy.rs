@@ -60,11 +60,12 @@ fn usage(app: &mut SolveApp, ui: &mut egui::Ui) {
         }
         // Delete my data works with statistics off too (data sent earlier stays until deleted);
         // not when the organization or the environment turned them off, which sends nothing.
-        let can_delete = !matches!(off, Some(Off::Policy | Off::Environment));
+        // One at a time: while a deletion is on its way, the button waits for it.
+        let can_delete = !matches!(off, Some(Off::Policy | Off::Environment)) && app.usage.store.forget.is_empty();
         let delete = ui_kit::button(ui, app.tr("prefs.privacy.delete"), ui_kit::Button::Enabled(can_delete));
         crate::scenario::publish_target("prefs:usage_statistics:delete", delete.rect);
         if can_delete && delete.clicked() && usage_stats::delete_my_data(app) {
-            let text = app.tr("prefs.privacy.delete_queued").to_string();
+            let text = solidcraft_ui_text::format("prefs.privacy.delete_requested", &[("id", &app.usage.store.install_id)]);
             app.set_status(text, false);
         }
         let label = app.tr(if app.usage.show_report { "prefs.privacy.hide" } else { "prefs.privacy.show" }).to_string();
@@ -74,6 +75,11 @@ fn usage(app: &mut SolveApp, ui: &mut egui::Ui) {
             app.usage.show_report = !app.usage.show_report;
         }
     });
+    // Said in place too, so nobody wonders whether the click worked.
+    if !app.usage.store.forget.is_empty() {
+        let text = solidcraft_ui_text::format("prefs.privacy.delete_requested", &[("id", &app.usage.store.install_id)]);
+        ui.horizontal_wrapped(|ui| ui_kit::settings_inline_note(ui, &text));
+    }
     if app.usage.show_report {
         match usage_stats::next_report_json(app) {
             Some(json) => {

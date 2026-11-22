@@ -3,10 +3,14 @@ package craft:plugin@0.2.0;
 // Capabilities are sets of the interfaces in this file. A plugin names the ones it needs in its
 // manifest's `capabilities` list:
 // - `commands@0.2`: types, commands, log, control, files, clock and entry (world `command-plugin`);
-// - `formats@0.2`: types, log, control, clock, source, design and importer (world `importer-plugin`);
+// - `formats@0.2`: file-format slots (RFC 0015 §4). An import slot is world `importer-plugin`
+//   (types, log, control, clock, source, design and importer); an export slot is world
+//   `exporter-plugin` (types, commands, log, control, clock and formats-provider). A plugin
+//   declares its slots in its manifest (kind, extensions, label, options, needs_plugin_data), so
+//   the install review shows them before any of its code runs;
 // - `evaluate@0.2`: with `formats`, evaluate, so an importer can check its result;
-// - `storage@0.1`: with `commands`, the app's `storage.*` commands, so a plugin keeps its own data
-//   in the open design (no interface of its own).
+// - `storage@0.1`: with `commands`, the app's `storage.*` commands and the `storage` interface, so a
+//   plugin keeps its own data in the open design: its main document as JSON, its files as bytes.
 // - `design@0.1`: with `commands`, design-state, for document identity/revision and read listeners.
 // - `forms@0.1`: with `commands`, forms.open, to request a populated command form;
 //   programs receive an interactive-required refusal instead of a window.
@@ -67,6 +71,22 @@ interface files {
 interface clock {
     now: func() -> u64;
 }
+// A plugin's own files in the open design (capability `storage@0.1`), as bytes: never as text.
+// Files are named by a plain relative path; a cache file is one the plugin can make again, which
+// a save may drop. Only the plugin's own run writes its files; anyone reads them.
+interface storage {
+    use types.{plugin-error};
+    // Writes the running plugin's file `name` (`cache`: as a cache file), its bytes as they are;
+    // `append` adds them to the file's end, to write a large file in parts. One name is one file:
+    // writing it as the other kind moves it. Returns the file's size. Part of the run's one undo step.
+    put-blob: func(name: string, data: list<u8>, cache: bool, append: bool) -> result<u64, plugin-error>;
+    // Up to `len` bytes (at most 1 MiB) of a plugin's file from `offset`; empty past its end.
+    // `plugin`: whose file, the running plugin's own when left out (inside a run, only its own).
+    get-blob: func(plugin: option<string>, name: string, offset: u64, len: u32) -> result<list<u8>, plugin-error>;
+    // Up to `len` bytes (at most 1 MiB) of a plugin's main document, its saved JSON, from
+    // `offset`; empty past its end, or when it has none.
+    get-document: func(plugin: option<string>, offset: u64, len: u32) -> result<list<u8>, plugin-error>;
+}
 // What the plugin exports: its manifest's entries, called by name.
 interface entry {
     use types.{json, plugin-error};
@@ -92,7 +112,7 @@ interface design {
     use types.{plugin-error};
     write: func(bytes: list<u8>) -> result<_, plugin-error>;
 }
-// An importer checks its own result in the app (capability `evaluate@0.1`). It stages a design
+// An importer checks its own result in the app (capability `evaluate@0.2`). It stages a design
 // file it made; the app opens it in a private session, apart from every open design and every
 // file, and runs read-only commands on it. Nothing here reaches the user's designs or files.
 interface evaluate {
@@ -116,6 +136,15 @@ interface importer {
     // result is the loss report: what could not be carried over, as JSON.
     import-file: func(entry: string, file: file-info, options: json) -> result<json, plugin-error>;
 }
+// What an exporter exports: its manifest's export slots, called by name (RFC 0015 §4).
+interface formats-provider {
+    use types.{json, plugin-error};
+    // Write the open design in the slot's format, with the options the user filled in the slot's
+    // form. The plugin reads the design through `commands`, which runs only the read-only commands
+    // its manifest lists. It returns the file's bytes (at most 256 MiB); the app writes them to
+    // the path the user chose, and only when the whole call succeeds.
+    export-file: func(slot: string, options: json) -> result<list<u8>, plugin-error>;
+}
 world command-plugin {
     import forms;
     import commands;
@@ -124,6 +153,7 @@ world command-plugin {
     import control;
     import files;
     import clock;
+    import storage;
     export entry;
 }
 world importer-plugin {
@@ -134,6 +164,13 @@ world importer-plugin {
     import design;
     import evaluate;
     export importer;
+}
+world exporter-plugin {
+    import commands;
+    import log;
+    import control;
+    import clock;
+    export formats-provider;
 }
 
 // Optional, additive capability dialog@0.1. Existing worlds retain their exports.

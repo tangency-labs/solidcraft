@@ -11,6 +11,7 @@
 //! Deviations: this convenience entry point binds the arena face and its trimmed
 //! cache before delegating to the existing surface solver. No recursion.
 
+use crate::error::query::QueryFailure;
 use crate::geom::extent2d::Extent2d;
 use crate::geom::global_solver::{SolutionRequested, SolverOperation};
 use crate::nurbs::knots::Side;
@@ -48,7 +49,10 @@ pub fn face_surface_intersect(
 ) -> Result<SurfaceIntersection> {
     let surface = face::surface(brep, id)?
         .ok_or_else(|| {
-            SolidError::query_missing("query::face_surface_intersect", "the face's surface")
+            SolidError::query(
+                "query::face_surface_intersect",
+                QueryFailure::FaceWithoutSurface,
+            )
         })?
         .clone_for_evaluation()?;
     let domain = face::uv_domain(brep, id)?;
@@ -109,7 +113,9 @@ pub fn face_surface_feet(
     points: &[Point3],
 ) -> Result<Vec<Option<SurfaceFoot>>> {
     let stored = face::surface(brep, id)?
-        .ok_or_else(|| SolidError::query_missing("query::face_surface_feet", "the face's surface"))?
+        .ok_or_else(|| {
+            SolidError::query("query::face_surface_feet", QueryFailure::FaceWithoutSurface)
+        })?
         .clone_for_evaluation()?;
     let surface = untrimmed(k, stored, points)?;
     let domain = surface.natural_uv_domain_with_nurb(k)?;
@@ -189,4 +195,28 @@ fn surface_foot(
     let normal = surface.evaluate_normal(k, foot.uv, Side::Left, Side::Left)?;
     let along = (p - foot.point).cross(normal).length();
     Ok((along <= tolerance).then_some(foot))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::error::query::QueryFailure;
+
+    /// A face of the caller's body without a surface is the caller's input, named, with
+    /// upstream's null-pointer status.
+    #[test]
+    fn a_face_without_a_surface_is_refused_by_name() {
+        let k = Kernel::default();
+        let mut b = Brep::new();
+        let f = crate::query::face::p2::tests::square(&mut b);
+        b.face_mut(f).unwrap().surface = None;
+        let e = face_surface_feet(&k, &b, f, &[Point3::new(0.0, 0.0, 0.0)]).unwrap_err();
+        assert_eq!(
+            e.query_failure(),
+            Some(&QueryFailure::FaceWithoutSurface),
+            "{e}"
+        );
+        assert_eq!(e.sm_status(), Some(crate::error::SM_ERR_NULL_POINTER));
+        assert_eq!(e.kind(), crate::error::ErrorKind::InvalidInput);
+    }
 }
