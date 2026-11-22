@@ -2430,8 +2430,8 @@ impl SurfaceSheet {
 /// Two flanges closed against each other across a bend (side flanges across a bend) that stand
 /// on its outside, so that they part as they rise, would each have to grow past its end to meet
 /// the other over the bend: laid flat, the two growths cover the same material beside the bend
-/// zone. Such a corner is left open (see [`OUTSIDE_BEND_OPEN`]), and returned, where the anchors
-/// meet in space.
+/// zone. Such a corner is left open, each flange ending square at the bend's tangent line (see
+/// [`OUTSIDE_BEND_OPEN`]), and returned, where the anchors meet in space.
 pub(crate) fn close_corners_on(
     sheet: &mut Sheet,
     places: &[Option<Rigid3>],
@@ -2566,11 +2566,42 @@ pub(crate) fn close_corners_on(
         }
         // Across a bend, on its outside: the line leans back past the new flange's end, away from
         // its bend, so the flanges part as they rise. Closed, each would grow past its end into
-        // the V over the bend, and laid flat the two growths overlap. Left open. (Convert keeps
-        // its own rule: it closes only a corner the body left open.)
-        if bridged.is_some() && open_in.is_none() {
+        // the V over the bend; and each, running to the bend's sharp, already lies past the bend's
+        // tangent line, so that laid flat the two overlap beside its zone. So the corner is left
+        // open, and each flange ends square at the tangent line, as far back from the sharp as the
+        // bend sets its outside back: (R + T)·tan(θ/2). (Convert keeps its own rule: it closes
+        // only a corner the body left open.)
+        if let (Some((m, _, _)), None) = (bridged, open_in) {
             let into_f = if e1 == 0.0 { on_f.dir } else { -on_f.dir };
             if mf.dot(into_f) < -1e-6 {
+                let Some(JointKind::Bend(mbend)) = sheet.joints.get(m).map(|x| x.kind.clone()) else { continue };
+                let back = reach_of(&mbend);
+                let cut = |e: f64, len: f64| if e == 0.0 { back } else { len - back };
+                let (s_f, s_w) = (cut(e1, nb.length), cut(e2, ob.length));
+                if !(s_f > 1e-9 && s_f < nb.length - 1e-9 && s_w > 1e-9 && s_w < ob.length - 1e-9) {
+                    continue;
+                }
+                let (Some(rf), Some(rw)) = (sheet.panels.get(f).map(|x| x.region.clone()), sheet.panels.get(w).map(|x| x.region.clone())) else {
+                    continue;
+                };
+                let (Some((rf, _)), Some((rw, _))) = (
+                    to_line(&rf, &on_f, -1.0, e1, s_f, -on_f.dir.perp())?,
+                    to_line(&rw, &on_w, side_w, e2, s_w, on_w.dir.perp() * side_w)?,
+                ) else {
+                    continue;
+                };
+                if let Some(x) = sheet.panels.get_mut(f) {
+                    x.region = rf;
+                }
+                if let Some(x) = sheet.panels.get_mut(w) {
+                    x.region = rw;
+                }
+                if let Some(Joint { a, b, kind: JointKind::Bend(bend) }) = sheet.joints.get_mut(j) {
+                    to_corner(a, b, bend, s_f, e1);
+                }
+                if let Some(Joint { a, b, kind: JointKind::Bend(bend) }) = sheet.joints.get_mut(k) {
+                    to_corner(a, b, bend, s_w, e2);
+                }
                 if let Some(Some(pp)) = places.get(p) {
                     left_open.push(pp.point(c1.extend(0.0)));
                 }
