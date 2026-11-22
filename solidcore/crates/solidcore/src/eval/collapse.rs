@@ -1489,7 +1489,7 @@ fn rational_partial_bound(
                 finite(near + part)
             };
             // How far the weights move from one Bézier point to the next, over every row.
-            let mut turns = Vec::with_capacity(p);
+            let mut turns = Vec::new();
             let mut most_turn = 0.0f64;
             for kk in 0..p {
                 let mut turn = 0.0f64;
