@@ -316,7 +316,7 @@ pub(crate) fn escape_panel(app: &mut SolveApp) -> bool {
 /// shows its own, and they go when it is no longer the selection. A tool in hand, the sheet's
 /// settings or a panel opened another way stays as it is; the panel closed by hand stays closed
 /// until the selection changes.
-fn follow_selection(app: &mut SolveApp) {
+pub(crate) fn follow_selection(app: &mut SolveApp) {
     let one = match &app.session.selection[..] {
         [solidcraft_engine::Sel::Drawing { drawing, object }] if app.session.open_drawing == Some(*drawing) => Some(*object),
         _ => None,
@@ -1515,8 +1515,11 @@ mod tests {
         let second = h.app.session.drawing("test").unwrap().sheets[1].id;
         select_sheet(&mut h.app, second);
         h.frames(3);
-        let view = h.app.session.drawing("test").unwrap().views[0].id;
-        let picked = serde_json::json!({"type":"drawing","drawing":solidcraft_engine::doc::ids::encode(drawing.unwrap()),"object":solidcraft_engine::doc::ids::encode(view)});
+        // A sheet keeps its own selection (a pick of an object on another sheet is not kept when a
+        // sheet is shown), so what Drawing selects is an object of the sheet it shows: a note.
+        h.app.run("drawing.note.add", serde_json::json!({"anchor": {"sheet": "Second"}, "at": [100, 100], "content": "NOTE"})).unwrap();
+        let note = h.app.session.drawing("test").unwrap().notes[0].id;
+        let picked = serde_json::json!({"type":"drawing","drawing":solidcraft_engine::doc::ids::encode(drawing.unwrap()),"object":solidcraft_engine::doc::ids::encode(note)});
         h.app.run("select.set", serde_json::json!({"items":[picked]})).unwrap();
         let sheet_selection = h.app.session.selection.clone();
         let page = |h: &Harness| {
@@ -2054,10 +2057,14 @@ mod tests {
         h.app.run("solid.box", serde_json::json!({"length":40,"width":20,"height":3})).unwrap();
         enter(&mut h.app, true).unwrap();
         h.app.run("drawing.create", serde_json::json!({})).unwrap();
+        let first = active_sheet(&h.app);
         let added = h.app.run("drawing.sheet.add", serde_json::json!({})).unwrap();
         let second = added["sheet"].as_str().unwrap();
+        // Adding a sheet opens it as the focused view, so the first sheet's view is focused again:
+        // the menu is then on a sheet that is not the one on the canvas.
+        let (drawing, sheet) = (h.app.session.open_drawing.unwrap(), first.unwrap());
+        crate::sheet_views::open_in(&mut h.app, drawing, sheet, false).unwrap();
         h.frames(4);
-        let first = active_sheet(&h.app);
         h.step(&serde_json::json!({"click":{"handle":format!("drawing:sheets:menu:{second}")}})).unwrap();
         h.frames(3);
         h.step(&serde_json::json!({"widget":"Delete Sheet"})).unwrap();
@@ -2079,9 +2086,13 @@ mod tests {
         h.app.run("solid.box", serde_json::json!({"length":40,"width":20,"height":3})).unwrap();
         enter(&mut h.app, true).unwrap();
         h.app.run("drawing.create", serde_json::json!({})).unwrap();
+        let first = active_sheet(&h.app);
         let added = h.app.run("drawing.sheet.add", serde_json::json!({"name":"Detail"})).unwrap();
         let second = added["sheet"].as_str().unwrap();
-        let first = active_sheet(&h.app);
+        // Adding a sheet opens it as the focused view, so the first sheet's view is focused again:
+        // the menu is then on a sheet that is not the one on the canvas.
+        let (drawing, sheet) = (h.app.session.open_drawing.unwrap(), first.unwrap());
+        crate::sheet_views::open_in(&mut h.app, drawing, sheet, false).unwrap();
         h.frames(8);
         h.step(&serde_json::json!({"click":{"handle":format!("drawing:browser:sheet:{second}")},"button":"right"})).unwrap();
         h.frames(3);

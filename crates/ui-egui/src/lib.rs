@@ -2063,6 +2063,7 @@ impl SolveApp {
         if workspace::sheet_scope(self) {
             workspace::sync_context(self);
         }
+        sheet_views::drop_deleted(self);
         crate::drawing_sheet_page::retire_closed(self);
         if r.is_ok() && self.session.active_sketch.is_some() && !self.sketch_finish_processing {
             // A sketch some command left open: remember the view to go back to, as a command run from

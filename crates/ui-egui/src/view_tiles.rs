@@ -957,13 +957,16 @@ fn ground_chip(app: &mut SolveApp, ui: &egui::Ui, id: u64, ground: Rect) {
     let galley = painter.layout_no_wrap(name.to_owned(), egui::FontId::proportional(t.font_body), t.text);
     let editing = painter.layout_no_wrap(app.tr("sketch_mode.editing").to_owned(), crate::ui_kit::type_face::semibold(t.font_small), t.text);
     let owner = crate::sketch_view::owner_label(app, id);
-    let owner_width =
-        owner.as_ref().map_or(0.0, |owner| painter.layout_no_wrap(owner.clone(), crate::ui_kit::type_face::semibold(t.font_small), t.text).size().x + 22.0);
+    let owner_width = owner
+        .as_ref()
+        .map_or(0.0, |owner| painter.layout_no_wrap(owner.clone(), crate::ui_kit::type_face::semibold(t.font_small), t.text).size().x + 22.0);
     let badges = crate::drawing_sheet_page::view_badge(app, id, ui.ctx());
     let badge_width = badges.as_ref().map_or(0.0, |(paper, state)| {
         [paper, state]
             .iter()
-            .map(|label| painter.layout_no_wrap((*label).clone(), crate::ui_kit::type_face::semibold(t.font_small), t.text).size().x + t.space_12 + t.space_6)
+            .map(|label| {
+                painter.layout_no_wrap((*label).clone(), crate::ui_kit::type_face::semibold(t.font_small), t.text).size().x + t.space_12 + t.space_6
+            })
             .sum::<f32>()
     });
     let size = vec2(

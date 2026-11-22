@@ -19,6 +19,38 @@ pub(crate) fn resolve_for_session(session: &solidcraft_engine::Session, subject:
     owners.next().is_none().then_some((owner.id, sheet))
 }
 
+/// Whether a Sheet view's subject names a sheet the design no longer has: deleted, not merely
+/// ambiguous (that stays an error to show). Subjects that are not sheet ids never count.
+fn gone(session: &solidcraft_engine::Session, view: &DesignView) -> bool {
+    if view.kind != ViewKind::Sheet {
+        return false;
+    }
+    let Some(subject) = view.subject.as_deref() else { return false };
+    match subject.split_once('/') {
+        Some((drawing, sheet)) => {
+            ids::decode(drawing).is_some() && ids::decode(sheet).is_some() && resolve_for_session(session, Some(subject)).is_none()
+        }
+        None => ids::decode(subject).is_some_and(|sheet| !session.doc.drawings.iter().any(|drawing| drawing.sheets.iter().any(|s| s.id == sheet))),
+    }
+}
+
+/// Close the Sheet views of sheets a command deleted, so the canvas falls back to a sheet that is
+/// still there (the view to the left, as when any view closes) instead of showing a stale one.
+pub(crate) fn drop_deleted(app: &mut SolveApp) {
+    let doomed: Vec<u64> = app
+        .docs
+        .views
+        .views()
+        .iter()
+        .chain(app.docs.views.windows().iter().flat_map(|window| window.views.views()))
+        .filter(|view| gone(&app.session, view))
+        .map(|view| view.id)
+        .collect();
+    if !doomed.is_empty() {
+        crate::documents::change_views(app, |views| views.drop_views(|view| !doomed.contains(&view.id)));
+    }
+}
+
 pub(crate) fn filter_selection(session: &solidcraft_engine::Session, owner: (u64, u64), picks: &mut Vec<solidcraft_engine::Sel>) {
     let on = session.doc.drawing(owner.0).map(|drawing| drawing.on_sheet(owner.1));
     picks.retain(|pick| match pick {

@@ -607,6 +607,13 @@ fn right_click_opens_the_shared_menu_on_what_is_under_the_pointer() {
 #[test]
 fn double_click_edits_a_dimensions_or_a_notes_text_in_place() {
     let (mut h, _) = plate_sheet();
+    // The first click of a double-click on the note selects it and opens its options on the right.
+    // With the focused view choosing the workspace (`workspace_follows_view`) the sheet is in a card
+    // beside the Model card, so the note at 300 mm sits at x 1202, under where those options open
+    // (x 1073 and on) before the second click lands. The note is placed for the classic layout,
+    // where the sheet fills the canvas and the note is left of the panel, so this test sets it.
+    h.app.preferences.workspace_follows_view = false;
+    h.frames(4);
     let encode = solidcraft_engine::doc::ids::encode;
     let dimension = h.app.session.drawing("drawing.inspect").unwrap().dimensions[0].id;
     let note = h.app.run("drawing.note.add", json!({"anchor": {"sheet": "Sheet 1"}, "at": [300, 230], "content": "DEBURR"})).unwrap();
@@ -1386,6 +1393,12 @@ fn fit_sheet_keeps_the_paper_clear_of_the_ribbon_browser_and_history() {
 #[test]
 fn fit_sheet_frames_beside_a_short_browser_not_under_it() {
     let (mut h, _) = plate_sheet();
+    // The Browser floats over the canvas the sheet fills; the focused view choosing the workspace
+    // (`workspace_follows_view`) puts the sheet in a card beside the Model card instead, where the
+    // Browser at the canvas's left edge is not over it. This test is about the classic
+    // single-canvas layout, so it sets the classic one.
+    h.app.preferences.workspace_follows_view = false;
+    h.frames(2);
     h.call("ui.resize", json!({"width": 1280, "height": 720}));
     h.frames(6);
     let canvas = h.app.viewport.rect.unwrap();

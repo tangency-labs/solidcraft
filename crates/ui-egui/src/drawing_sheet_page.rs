@@ -297,6 +297,10 @@ pub(crate) fn show_view(app: &mut SolveApp, ui: &mut egui::Ui, id: u64) -> bool 
     if !crate::drawing_workspace::active(app) {
         app.ui.tab = "DRAWING LAYOUT".into();
     }
+    if focused_selection.is_none() {
+        // The focused view's selected object shows its options, as on the classic Drawing canvas.
+        crate::drawing_workspace::follow_selection(app);
+    }
     let shown = show(app, ui);
     app.session.open_drawing = previous.1;
     app.session.model_focus = previous.3;
