@@ -896,9 +896,9 @@ fn grouped_thread_dialog_preserves_coincident_body_identities_and_missing_slots(
 fn a_thread_can_be_chamfered_at_both_ends() {
     let mut h = shaft();
     // A checkbox, not a labelled row: its own handle is what is drawn.
-    assert!(scenario::rect_of("dialog:Chamfer both ends").is_none(), "only offered once the start is chamfered");
+    assert!(crate::scenario::handle_at("dialog:Chamfer both ends").is_none(), "only offered once the start is chamfered");
     choose(&mut h, "Start", "Chamfer");
-    assert!(scenario::rect_of("dialog:Chamfer both ends").is_some());
+    assert!(crate::scenario::handle_at("dialog:Chamfer both ends").is_some());
     assert_eq!(params(&h)["tip"], "start");
     click(&mut h, &["dialog:Chamfer both ends"]);
     assert_eq!(params(&h)["tip"], "both");
