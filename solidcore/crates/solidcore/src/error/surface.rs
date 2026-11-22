@@ -14,7 +14,8 @@
 //! | [`SurfaceFailure::OutsideDomain`]  | `SM_ERR_OUTSIDE_OF_DOMAIN`     |
 //! | [`SurfaceFailure::OffSurface`]     | `SM_ERR_NOT_WITHIN_TOLERANCE`  |
 //! | [`SurfaceFailure::Defect`]         | `SM_ERR` (or the site's, through `with_status`) |
-//! | [`SurfaceFailure::ScaleNotUniform`], [`SurfaceFailure::CurveNoNurb`], [`SurfaceFailure::BallDefinitionUnreadable`], [`SurfaceFailure::PointOnAxis`], [`SurfaceFailure::IsoCircleUndefined`], [`SurfaceFailure::ExtensionWeightNotPositive`] | `SM_ERR` |
+//! | [`SurfaceFailure::ScaleNotUniform`], [`SurfaceFailure::CurveNoNurb`], [`SurfaceFailure::BallDefinitionUnreadable`], [`SurfaceFailure::PointOnAxis`], [`SurfaceFailure::IsoCircleUndefined`], [`SurfaceFailure::ExtensionWeightNotPositive`], [`SurfaceFailure::BlendCurveNotBSpline`], [`SurfaceFailure::BlendDefinitionUnreadable`], [`SurfaceFailure::NetNotCertified`], [`SurfaceFailure::CurveDimensionTooLarge`], [`SurfaceFailure::NoBSplineForm`], [`SurfaceFailure::DoesNotContinueAsItself`], [`SurfaceFailure::OffsetNestedTooDeep`], [`SurfaceFailure::DerivativeOrderTooHigh`], [`SurfaceFailure::BaseNormalDegenerate`], [`SurfaceFailure::InvertedPointOffOffset`], [`SurfaceFailure::BaseNotOwned`], [`SurfaceFailure::ExtensionTowardFailed`], [`SurfaceFailure::RevolutionArcOutOfRange`], [`SurfaceFailure::ExtensionSpanNotPositive`], [`SurfaceFailure::ExtensionSpansPastBound`], [`SurfaceFailure::AsItselfNetUnexpected`], [`SurfaceFailure::RevolutionAxisDegenerate`], [`SurfaceFailure::GeneratorCircleUndefined`], [`SurfaceFailure::AsItselfWeightNotPositive`], [`SurfaceFailure::RotationSenseUndefined`], [`SurfaceFailure::NoNonsingularStepoff`] | `SM_ERR` |
+//! | [`SurfaceFailure::RecordDoesNotRebuild`] | `SM_ERR_INVALID_INPUT` |
 //! | [`SurfaceFailure::NoNurb`], [`SurfaceFailure::NoInputStream`] | `SM_ERR_NULL_POINTER` (or the site's, through `with_status`) |
 //!
 //! [`SurfaceFailure::Defect`] is a failure reviewed at its site as the kernel's fault, with its
@@ -89,6 +90,75 @@ pub enum SurfaceFailure {
     /// though the asks at both ends of the bracket had positive weights (a weight's sign is
     /// not monotone in the ask). Class `failed`.
     ExtensionWeightNotPositive,
+    /// A curve of a procedural blend's definition in the file is not a B-spline curve.
+    /// [`ErrorKind::InvalidInput`].
+    BlendCurveNotBSpline,
+    /// A procedural blend's definition (its order, flags and numbers, or its chamfer's kind
+    /// and sizes) could not be read from the file's ASCII record.
+    /// [`ErrorKind::InvalidInput`].
+    BlendDefinitionUnreadable,
+    /// A blend face's net is not proved within its bound of its definition (or is not a net
+    /// of its definition's stations), as a body rebuilt from a record must be before its
+    /// faces are operands. Class `failed`; the re-certification's own error is its cause.
+    NetNotCertified,
+    /// The curve given has a dimension past what a record stores (`u32`).
+    /// [`ErrorKind::InvalidInput`].
+    CurveDimensionTooLarge,
+    /// A face's procedural blend record does not rebuild (its rebuild's error is the
+    /// cause). [`ErrorKind::InvalidInput`].
+    RecordDoesNotRebuild,
+    /// The surface given is of a kind with no B-spline form (an offset, a curve-bounded, a
+    /// STEP or an in-volume surface), which a record stores. [`ErrorKind::InvalidInput`].
+    NoBSplineForm,
+    /// The surface given is not one whose offset continues as itself (a cone, cylinder,
+    /// sphere or torus). [`ErrorKind::InvalidInput`].
+    DoesNotContinueAsItself,
+    /// The offset surface given has a base that is an offset surface whose own base is an
+    /// offset surface: offsets nest one deep at most. [`ErrorKind::InvalidInput`].
+    OffsetNestedTooDeep,
+    /// The derivative order asked is past the most the offset surface evaluates.
+    /// [`ErrorKind::InvalidInput`].
+    DerivativeOrderTooHigh,
+    /// The offset surface's base has no normal at the point (its normal is shorter than
+    /// `SM_EFF_ZERO`, even past a pole's step-off). Class `failed`.
+    BaseNormalDegenerate,
+    /// The point the base surface's inversion gives is farther from the offset surface than
+    /// the tolerance. Class `failed`.
+    InvertedPointOffOffset,
+    /// The offset surface given does not own its base, so cannot edit it (swap its UV,
+    /// transform or trim it). [`ErrorKind::InvalidInput`].
+    BaseNotOwned,
+    /// The NLib G1R extension of the base toward the point failed (its error is the cause).
+    /// Class `failed`.
+    ExtensionTowardFailed,
+    /// An arc of the surface of revolution (round its axis, outside `(0, 360]` degrees, or
+    /// along a generator that is a circle, not positive) or its rotation's parameter length
+    /// is out of range. Class `failed`.
+    RevolutionArcOutOfRange,
+    /// A span the extension as itself adds has a length that is not positive. Class
+    /// `failed`.
+    ExtensionSpanNotPositive,
+    /// The extension as itself needs more spans at one end than its bound. Class `failed`.
+    ExtensionSpansPastBound,
+    /// The surface's NURB is not of the shape extending as itself reads: at least two
+    /// control points each way with a weight per point, end knots of full multiplicity,
+    /// degree 2 round the axis and 2 (a circle) or 1 (a line) along the generator, and a
+    /// last span of positive length. Class `failed`.
+    AsItselfNetUnexpected,
+    /// The axis of the surface of revolution has no direction. Class `failed`.
+    RevolutionAxisDegenerate,
+    /// The generator's end control point, its inner one and the circle's centre are
+    /// collinear or not finite, so they orient no circle. Class `failed`.
+    GeneratorCircleUndefined,
+    /// A weight the extension as itself reads (the reference control point's) or carries on
+    /// (a line's next control point) is not positive. Class `failed`.
+    AsItselfWeightNotPositive,
+    /// The end row of the net and its inner row give no sense to turn about the axis. Class
+    /// `failed`.
+    RotationSenseUndefined,
+    /// No step from the pole toward the domain's middle, in either direction, gives a first
+    /// derivative longer than the tolerance. Class `failed`.
+    NoNonsingularStepoff,
 }
 
 impl SurfaceFailure {
@@ -102,9 +172,30 @@ impl SurfaceFailure {
             | Self::BallDefinitionUnreadable
             | Self::PointOnAxis
             | Self::IsoCircleUndefined
-            | Self::ExtensionWeightNotPositive => SM_ERR,
+            | Self::ExtensionWeightNotPositive
+            | Self::BlendCurveNotBSpline
+            | Self::BlendDefinitionUnreadable
+            | Self::NetNotCertified
+            | Self::CurveDimensionTooLarge
+            | Self::NoBSplineForm
+            | Self::DoesNotContinueAsItself
+            | Self::OffsetNestedTooDeep
+            | Self::DerivativeOrderTooHigh
+            | Self::BaseNormalDegenerate
+            | Self::InvertedPointOffOffset
+            | Self::BaseNotOwned
+            | Self::ExtensionTowardFailed
+            | Self::RevolutionArcOutOfRange
+            | Self::ExtensionSpanNotPositive
+            | Self::ExtensionSpansPastBound
+            | Self::AsItselfNetUnexpected
+            | Self::RevolutionAxisDegenerate
+            | Self::GeneratorCircleUndefined
+            | Self::AsItselfWeightNotPositive
+            | Self::RotationSenseUndefined
+            | Self::NoNonsingularStepoff => SM_ERR,
             Self::Missing(_) | Self::NoNurb | Self::NoInputStream => SM_ERR_NULL_POINTER,
-            Self::InvalidValue(_) => SM_ERR_INVALID_INPUT,
+            Self::InvalidValue(_) | Self::RecordDoesNotRebuild => SM_ERR_INVALID_INPUT,
             Self::OutsideDomain(_) => SM_ERR_OUTSIDE_OF_DOMAIN,
             Self::OffSurface(_) => SM_ERR_NOT_WITHIN_TOLERANCE,
         }
@@ -123,7 +214,16 @@ impl SurfaceFailure {
             | Self::NoNurb
             | Self::CurveNoNurb
             | Self::NoInputStream
-            | Self::BallDefinitionUnreadable => ErrorKind::InvalidInput,
+            | Self::BallDefinitionUnreadable
+            | Self::BlendCurveNotBSpline
+            | Self::BlendDefinitionUnreadable
+            | Self::CurveDimensionTooLarge
+            | Self::RecordDoesNotRebuild
+            | Self::NoBSplineForm
+            | Self::DoesNotContinueAsItself
+            | Self::OffsetNestedTooDeep
+            | Self::DerivativeOrderTooHigh
+            | Self::BaseNotOwned => ErrorKind::InvalidInput,
             _ => ErrorKind::of_status(self.comparison_status()),
         }
     }
@@ -152,6 +252,28 @@ impl core::fmt::Display for SurfaceFailure {
             Self::ExtensionWeightNotPositive => f.write_str(
                 "an extension inside the solve's bracket has a weight that is not positive",
             ),
+            Self::BlendCurveNotBSpline => f.write_str("a curve of the blend's definition is not a B-spline"),
+            Self::BlendDefinitionUnreadable => f.write_str("the procedural blend's definition could not be read"),
+            Self::NetNotCertified => f.write_str("the blend face's net is not proved within its bound of its definition"),
+            Self::CurveDimensionTooLarge => f.write_str("the curve's dimension is past what a record stores"),
+            Self::RecordDoesNotRebuild => f.write_str("the face's procedural blend record does not rebuild"),
+            Self::NoBSplineForm => f.write_str("the surface is of a kind with no B-spline form"),
+            Self::DoesNotContinueAsItself => f.write_str("only a cone, cylinder, sphere or torus continues as itself"),
+            Self::OffsetNestedTooDeep => f.write_str("the base of the offset surface's base is an offset surface"),
+            Self::DerivativeOrderTooHigh => f.write_str("the derivative order is past the most the offset surface evaluates"),
+            Self::BaseNormalDegenerate => f.write_str("the base surface's normal is degenerate"),
+            Self::InvertedPointOffOffset => f.write_str("the inverted point is farther from the offset surface than the tolerance"),
+            Self::BaseNotOwned => f.write_str("the offset surface does not own its base, so cannot edit it"),
+            Self::ExtensionTowardFailed => f.write_str("the G1R extension toward the point failed"),
+            Self::RevolutionArcOutOfRange => f.write_str("an arc of the surface of revolution or its parameter length is out of range"),
+            Self::ExtensionSpanNotPositive => f.write_str("the span length of the extension is not positive"),
+            Self::ExtensionSpansPastBound => f.write_str("the extension needs more spans than its bound"),
+            Self::AsItselfNetUnexpected => f.write_str("the surface's NURB is not of the shape and degree a surface extending as itself has"),
+            Self::RevolutionAxisDegenerate => f.write_str("the axis of the surface of revolution has no direction"),
+            Self::GeneratorCircleUndefined => f.write_str("the generator's end orients no circle"),
+            Self::AsItselfWeightNotPositive => f.write_str("a weight of the extension as itself is not positive"),
+            Self::RotationSenseUndefined => f.write_str("the end rows give no sense to turn about the axis"),
+            Self::NoNonsingularStepoff => f.write_str("neither direction gives a nonsingular stepoff"),
         }
     }
 }
@@ -406,6 +528,51 @@ mod tests {
         );
     }
 
+    /// The named causes of the offset and procedural blend surfaces keep the status of the
+    /// phrase causes they replaced, with the kind their condition is: the caller's input, or
+    /// a failure of the geometry.
+    #[test]
+    fn the_named_offset_and_blend_causes_keep_the_status_they_replaced() {
+        use crate::error::ErrorKind as K;
+        let cases = [
+            (SurfaceFailure::BlendCurveNotBSpline, SM_ERR, K::InvalidInput),
+            (SurfaceFailure::BlendDefinitionUnreadable, SM_ERR, K::InvalidInput),
+            (SurfaceFailure::CurveDimensionTooLarge, SM_ERR, K::InvalidInput),
+            (SurfaceFailure::NoBSplineForm, SM_ERR, K::InvalidInput),
+            (SurfaceFailure::DoesNotContinueAsItself, SM_ERR, K::InvalidInput),
+            (SurfaceFailure::OffsetNestedTooDeep, SM_ERR, K::InvalidInput),
+            (SurfaceFailure::DerivativeOrderTooHigh, SM_ERR, K::InvalidInput),
+            (SurfaceFailure::BaseNotOwned, SM_ERR, K::InvalidInput),
+            (
+                SurfaceFailure::RecordDoesNotRebuild,
+                SM_ERR_INVALID_INPUT,
+                K::InvalidInput,
+            ),
+            (SurfaceFailure::NetNotCertified, SM_ERR, K::Failed),
+            (SurfaceFailure::BaseNormalDegenerate, SM_ERR, K::Failed),
+            (SurfaceFailure::InvertedPointOffOffset, SM_ERR, K::Failed),
+            (SurfaceFailure::ExtensionTowardFailed, SM_ERR, K::Failed),
+            (SurfaceFailure::RevolutionArcOutOfRange, SM_ERR, K::Failed),
+            (SurfaceFailure::ExtensionSpanNotPositive, SM_ERR, K::Failed),
+            (SurfaceFailure::ExtensionSpansPastBound, SM_ERR, K::Failed),
+            (SurfaceFailure::AsItselfNetUnexpected, SM_ERR, K::Failed),
+            (SurfaceFailure::RevolutionAxisDegenerate, SM_ERR, K::Failed),
+            (SurfaceFailure::GeneratorCircleUndefined, SM_ERR, K::Failed),
+            (SurfaceFailure::AsItselfWeightNotPositive, SM_ERR, K::Failed),
+            (SurfaceFailure::RotationSenseUndefined, SM_ERR, K::Failed),
+            (SurfaceFailure::NoNonsingularStepoff, SM_ERR, K::Failed),
+        ];
+        for (failure, code, kind) in cases {
+            let e = SolidError::surface("surface::op", failure);
+            assert_eq!(e.sm_status(), Some(code), "{failure:?}");
+            assert_eq!(e.upstream_status(), Some(code), "{failure:?}");
+            assert_eq!(super::super::upstream_status(&e), Some(code), "{failure:?}");
+            assert_eq!(e.kind(), kind, "{failure:?}");
+            assert_eq!(e.surface_failure(), Some(&failure));
+            assert!(!e.is_defect(), "{failure:?}");
+        }
+    }
+
     /// A reviewed defect is of class 127 with the status of the phrase cause it replaces,
     /// and says why.
     #[test]
@@ -470,12 +637,8 @@ mod tests {
             ("solidcore/src/surface/cone/p3.rs", 3),
             ("solidcore/src/surface/from_parameters.rs", 1),
             ("solidcore/src/surface/implicit.rs", 9),
-            ("solidcore/src/surface/offset_surface.rs", 27),
             ("solidcore/src/surface/plane/p1.rs", 3),
             ("solidcore/src/surface/plane/p2.rs", 9),
-            ("solidcore/src/surface/procedural_blend.rs", 9),
-            ("solidcore/src/surface/procedural_blend/convert.rs", 13),
-            ("solidcore/src/surface/procedural_blend/offset.rs", 5),
             ("solidcore/src/surface/sphere.rs", 16),
             ("solidcore/src/surface/srf_in_volume.rs", 4),
             ("solidcore/src/surface/surf_of_extrusion/p1.rs", 16),

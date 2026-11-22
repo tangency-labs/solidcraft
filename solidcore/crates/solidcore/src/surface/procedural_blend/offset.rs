@@ -39,6 +39,7 @@ use super::{BlendDefinitionInput, ProceduralBlend};
 use crate::blend::fillet_section::recertify::net_of_definition;
 use crate::blend::fillet_section::section::GnSectionFsg;
 use crate::blend::fillet_section::station::as_b_spline;
+use crate::error::surface::SurfaceFailure;
 use crate::error::{Result, SolidError};
 use crate::geom::extent2d::Extent2d;
 use crate::kernel::Kernel;
@@ -221,9 +222,11 @@ pub fn procedural_offset(
             b.recertify(k)?;
         }
         None => {
-            return Err(SolidError::surface_failed(
+            return Err(SolidError::surface(
                 OP,
-                "the offset round is not a procedural blend",
+                SurfaceFailure::Defect {
+                    why: "the offset round is not a procedural blend, though it was made as one with no kept definition and only put into the old blend's parameters",
+                },
             ))
         }
     }
@@ -241,9 +244,11 @@ fn into_parameters_of(k: &Kernel, made: &mut Surface, like: &ProceduralBlend) ->
         made.swap_uv(k)?;
     }
     let SurfaceKind::ProceduralBlend(pb) = made.kind_mut() else {
-        return Err(SolidError::surface_failed(
+        return Err(SolidError::surface(
             OP,
-            "the made surface is not a procedural blend",
+            SurfaceFailure::Defect {
+                why: "the surface made is not a procedural blend, though its caller made it as one and swapping its UV keeps its kind",
+            },
         ));
     };
     // (p, q) drive (s, t): u and v, or v and u when swapped
@@ -261,9 +266,11 @@ fn into_parameters_of(k: &Kernel, made: &mut Surface, like: &ProceduralBlend) ->
         }
         let (now_a, now_b, _) = pb.definition_map();
         let (Some(&na), Some(&nb)) = (now_a.get(c), now_b.get(c)) else {
-            return Err(SolidError::surface_failed(
+            return Err(SolidError::surface(
                 OP,
-                "the definition map has no entry for the parameter",
+                SurfaceFailure::Defect {
+                    why: "the definition map has no entry for the parameter, though both its arrays hold one for each of the two parameters walked",
+                },
             ));
         };
         // the net's range in this parameter, then the same s in like's parameter
@@ -316,7 +323,14 @@ pub fn exact_offset(
     for (i, o) in inputs.offsets.iter_mut().enumerate() {
         let support = round
             .support(i)
-            .ok_or_else(|| SolidError::surface_failed(OP, "the round has no support to offset"))?;
+            .ok_or_else(|| {
+                SolidError::surface(
+                    OP,
+                    SurfaceFailure::Defect {
+                        why: "the round has no support at an index below two, though an exact round holds its two supports",
+                    },
+                )
+            })?;
         // the centre's signed offset from the support is side_i r; the support moves by
         // -tau side_i d, so the centre's offset from it is side_i r'
         let side = if *o >= 0.0 { 1.0 } else { -1.0 };
@@ -324,9 +338,11 @@ pub fn exact_offset(
         *o = side * moved;
     }
     let (Some(s0), Some(s1)) = (supports.first(), supports.get(1)) else {
-        return Err(SolidError::surface_failed(
+        return Err(SolidError::surface(
             OP,
-            "the round has fewer than two supports",
+            SurfaceFailure::Defect {
+                why: "the offset round has fewer than two supports, though one is pushed for each of its two offsets",
+            },
         ));
     };
     let moved_round =
