@@ -69,6 +69,7 @@ pub mod conditions;
 pub mod dialog;
 pub mod images;
 mod input;
+mod schema_refs;
 pub mod swatches;
 pub use input::{check_input, prepare_input, strict_input_schema};
 
@@ -1139,7 +1140,18 @@ pub fn parse_manifest_for_version(text: &[u8], folder: &str, app: &str, host_ver
     {
         check_capabilities(&requested, app)?;
     }
-    let mut manifest: Manifest = serde_json::from_slice(text).map_err(|error| invalid("manifest", error.to_string()))?;
+    let mut parsed = Some(value);
+    // Shared field definitions are inlined first; a manifest without them keeps its exact
+    // deserialization (and error positions).
+    let expanded = match parsed.as_mut().map(schema_refs::expand).transpose()? {
+        Some(true) => parsed,
+        _ => None,
+    };
+    let mut manifest: Manifest = match expanded {
+        Some(value) => serde_json::from_value(value),
+        None => serde_json::from_slice(text),
+    }
+    .map_err(|error| invalid("manifest", error.to_string()))?;
     manifest.name = manifest.name.trim().to_string();
     manifest.version = manifest.version.trim().to_string();
     manifest.description = manifest.description.trim().to_string();

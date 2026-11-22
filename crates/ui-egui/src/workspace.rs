@@ -78,12 +78,29 @@ fn enter_legacy(app: &mut crate::SolveApp, workspace: &str) -> Result<(), String
 pub(crate) type ViewRibbon = (String, Option<String>, Option<String>);
 
 pub(crate) fn focused_sketch(app: &crate::SolveApp) -> Option<u64> {
-    app.session.active_sketch.filter(|_| !app.preferences.workspace_follows_view || app.session.sketching_view == Some(app.docs.views.active().id))
+    app.session
+        .active_sketch
+        .or_else(|| app.session.active_sheet_sketch.as_ref().map(|entry| entry.sketch))
+        .filter(|_| !app.preferences.workspace_follows_view || app.session.editing_view() == Some(app.docs.views.active().id))
+}
+
+pub(crate) fn sheet_scope(app: &crate::SolveApp) -> bool {
+    app.docs.views.active().kind == solidcraft_views::ViewKind::Sheet
+}
+
+pub(crate) fn sync_history(app: &mut crate::SolveApp) {
+    if sheet_scope(app) {
+        app.session.model_focus = false;
+    } else {
+        crate::drawing_workspace::sync_history(app);
+    }
 }
 
 /// Canonical tool state stays alive while its sketch owner is unfocused.
 pub(crate) fn tool_receives_input(app: &crate::SolveApp) -> bool {
-    !app.preferences.workspace_follows_view || app.session.active_sketch.is_none() || focused_sketch(app).is_some()
+    !app.preferences.workspace_follows_view
+        || (app.session.active_sketch.is_none() && app.session.active_sheet_sketch.is_none())
+        || focused_sketch(app).is_some()
 }
 
 pub(crate) fn remember_view(app: &mut crate::SolveApp, view: u64) {
@@ -101,6 +118,8 @@ pub(crate) fn apply_focused_view(app: &mut crate::SolveApp, view: &solidcraft_vi
     }
     if view.kind == ViewKind::Sheet {
         crate::sheet_views::focus(app, view)?;
+    } else if view.kind == ViewKind::Render {
+        crate::render_workspace::focus_view_framing(app, view.id);
     }
     let home = crate::documents::view_workspace(view.kind);
     let current_workspace = if drawing_tab(&app.ui.tab) {
@@ -125,7 +144,7 @@ pub(crate) fn apply_focused_view(app: &mut crate::SolveApp, view: &solidcraft_vi
         app.ui.sketch_return_tab = None;
     }
     crate::drawing_workspace::swap_selection(app);
-    crate::drawing_workspace::sync_history(app);
+    sync_history(app);
     sync_context(app);
     Ok(())
 }
@@ -1127,8 +1146,12 @@ pub fn set_tab_shown(app: &mut crate::SolveApp, tab: &str, shown: bool) {
 
 /// Every design tab stays hidden until the person chooses to show it again.
 pub fn visible_tabs(app: &crate::SolveApp) -> Vec<&'static str> {
-    if crate::drawing_workspace::active(app) {
-        return DRAWING_TABS.to_vec();
+    if crate::drawing_workspace::active(app) || sheet_scope(app) {
+        let mut tabs = DRAWING_TABS.to_vec();
+        if app.session.active_sheet_sketch.as_ref().is_some_and(|entry| entry.view == Some(app.docs.views.active().id)) {
+            tabs.push("SKETCH");
+        }
+        return tabs;
     }
     if crate::render_workspace::active(app) {
         return Vec::new();
@@ -1167,6 +1190,26 @@ pub fn starts_a_sketch(app: &crate::SolveApp, id: &str) -> bool {
 /// other tabs to remain usable for the rest of that context. Sketch takes precedence over sheet
 /// metal, and sheet metal over weldments.
 pub fn sync_context(app: &mut crate::SolveApp) {
+    if sheet_scope(app) {
+        let context = app
+            .session
+            .active_sheet_sketch
+            .as_ref()
+            .filter(|entry| entry.view == Some(app.docs.views.active().id))
+            .map(|entry| format!("sheet_sketch:{}:{}", entry.drawing, entry.sketch));
+        if let Some(context) = context {
+            if app.ui.ribbon_context.as_deref() != Some(context.as_str()) {
+                app.ui.sketch_return_tab = Some(if drawing_tab(&app.ui.tab) { app.ui.tab.clone() } else { "DRAWING LAYOUT".into() });
+                app.ui.tab = "SKETCH".into();
+                app.ui.ribbon_context = Some(context);
+            }
+        } else if app.ui.ribbon_context.as_deref().is_some_and(|context| context.starts_with("sheet_sketch:")) {
+            app.ui.tab = app.ui.sketch_return_tab.take().filter(|tab| drawing_tab(tab)).unwrap_or_else(|| "DRAWING LAYOUT".into());
+            app.ui.ribbon_context = None;
+        }
+        sync_history(app);
+        return;
+    }
     if crate::render_workspace::active(app) || crate::drawing_workspace::active(app) {
         return;
     }
@@ -2503,7 +2546,6 @@ mod tests {
         let added = solidcraft_engine::doc::ids::decode(reply["result"]["note"].as_str().unwrap()).unwrap();
         assert!(h.app.session.doc.drawing(drawing).unwrap().on_sheet(sheet).notes.contains(&added));
     }
-
     #[test]
     fn suspended_sketch_tool_hints_follow_owner_focus_without_hiding_other_statuses() {
         fn painted(h: &crate::scenario::Harness, expected: &str) -> bool {

@@ -486,6 +486,52 @@ fn larger_manifests_fit_without_removing_input_descriptions() {
 }
 
 #[test]
+fn entries_share_field_definitions_through_defs_and_ref() {
+    let place = json!({"type":"string","title":"Place","default":"auto","enum":["auto","origin"]});
+    let units = json!({"type":"string","enum":["mm","in"]});
+    let entries = |make: Value, edit: Value| json!([{"name":"make","input_schema":make},{"name":"edit","input_schema":edit}]);
+    let mut inline = manifest();
+    inline["runtime"]["entries"] = entries(
+        json!({"type":"object","properties":{"place":place,"units":units}}),
+        json!({"type":"object","properties":{"place":{"type":"string","title":"Place","default":"origin","enum":["auto","origin"]}}}),
+    );
+    // One definition in the manifest, one in an entry, and a `default` beside a `$ref` overriding.
+    let mut shared = manifest();
+    shared["$defs"] = json!({"place":place});
+    shared["runtime"]["entries"] = entries(
+        json!({"type":"object","$defs":{"units":units},"properties":{"place":{"$ref":"#/$defs/place"},"units":{"$ref":"#/$defs/units"}}}),
+        json!({"type":"object","properties":{"place":{"$ref":"#/$defs/place","default":"origin"}}}),
+    );
+    let expanded = parse(&shared).unwrap().runtime.unwrap().entries;
+    let expected = parse(&inline).unwrap().runtime.unwrap().entries;
+    for (expanded, expected) in expanded.iter().zip(&expected) {
+        assert_eq!(expanded.input_schema, expected.input_schema, "every consumer sees the inline schema");
+        assert_eq!(strict_input_schema(&expanded.input_schema), strict_input_schema(&expected.input_schema));
+    }
+    assert!(check_input(&expanded[0].input_schema, &json!({"place":"origin","units":"mm"})).is_ok());
+    assert!(check_input(&expanded[0].input_schema, &json!({"place":"x","units":"mm"})).is_err(), "a shared field keeps its choices");
+
+    let refused = |defs: Value, property: Value| {
+        let mut value = manifest();
+        value["$defs"] = defs;
+        value["runtime"]["entries"] = json!([{"name":"make","input_schema":{"type":"object","properties":{"a":property}}}]);
+        matches!(parse(&value), Err(HostError::InvalidManifest { field, .. }) if field == "runtime.entries.make.input_schema")
+    };
+    let cycle = json!({"a":{"type":"object","properties":{"b":{"$ref":"#/$defs/b"}}},"b":{"type":"object","properties":{"a":{"$ref":"#/$defs/a"}}}});
+    assert!(refused(cycle, json!({"$ref":"#/$defs/a"})), "a cycle is refused");
+    assert!(refused(json!({}), json!({"$ref":"#/$defs/missing"})), "an unknown name is refused");
+    assert!(refused(json!({"a":{"type":"string"}}), json!({"$ref":"other.json#/a"})), "only local definitions");
+    // Refs that double at every level would multiply the manifest; they stop at a limit.
+    let mut doubling = serde_json::Map::new();
+    for level in 0..20 {
+        let next = json!({"$ref": format!("#/$defs/d{}", level + 1)});
+        doubling.insert(format!("d{level}"), json!({"type":"object","properties":{"x":next,"y":next}}));
+    }
+    doubling.insert("d20".into(), json!({"type":"string"}));
+    assert!(refused(Value::Object(doubling), json!({"$ref":"#/$defs/d0"})));
+}
+
+#[test]
 fn host_limits_have_typed_failures() {
     let limits = HostLimits::default();
     assert!(limits.check(&Limits::default()).is_ok());
