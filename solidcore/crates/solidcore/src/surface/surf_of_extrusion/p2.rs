@@ -3801,7 +3801,9 @@ mod tests {
     /// quadrilateral of area about `1 - d / 2`, an area error `d / 2`). They merge into
     /// the corner `(0, 0)` where their sides meet: the boundary is the box itself,
     /// every edge on a side of it, its area `1` within `d^2 / 2` of the exact one.
-    /// The answer's ends are then the plane points of the box corners, bit for bit.
+    /// The answer's ends are then the plane points of the box corners, bit for bit,
+    /// and each curve's deviation covers the corner's `d / sqrt 2` from the region
+    /// the extrusion covers.
     #[test]
     fn slab_merges_a_far_cut_corner_into_the_corner() {
         let k = k();
@@ -3841,6 +3843,12 @@ mod tests {
                 }
             }
             assert_region_closing_to(&r, &plane, 1.0, 2.0 * f64::EPSILON);
+            // The corner `(0, 0)` is off the region the extrusion covers (`u + w >= d`)
+            // by `d / sqrt 2` in the plane: every curve's deviation bounds it.
+            assert_eq!(r.deviations.len(), 4);
+            for &dev in &r.deviations {
+                assert!(dev >= d / 2f64.sqrt(), "deviation {dev:e}");
+            }
         }
     }
 
