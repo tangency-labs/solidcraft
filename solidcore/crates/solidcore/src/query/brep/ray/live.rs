@@ -499,6 +499,22 @@ impl TopologyObjects<CacheObject> for LiveBrepObjects<'_, '_> {
     fn face_tolerance(&self, face: CacheObject) -> Result<f64> {
         self.read(|b| b.face_tolerance(face))
     }
+    fn with_face_entity_mut(
+        &self,
+        face: CacheObject,
+        f: &mut dyn FnMut(&mut Brep, FaceId) -> Result<()>,
+    ) -> Option<Result<()>> {
+        Some((|| {
+            let CacheObject::Face(face) = face else {
+                return Err(SolidError::invalid_input(OP, "expected face handle"));
+            };
+            // the classification's lazy face queries (UV trim curves, gap caches,
+            // tolerance growth) stay on the B-rep, as upstream's; they are queries, so
+            // the kept face caches stay
+            let mut brep = self.faces.brep.try_borrow_mut().map_err(borrow_conflict)?;
+            f(&mut brep, face)
+        })())
+    }
     fn surface_owner(&self, surface: CacheObject) -> Result<Option<CacheObject>> {
         self.read(|b| b.surface_owner(surface))
     }
@@ -541,7 +557,7 @@ impl SurfaceSolveContext<CacheObject> for LiveSurfaceContext<'_, '_, '_> {
         };
         self.0.cache(k, face)
     }
-    fn surface_cache_state(
+    fn surface_cache_without_get_tree(
         &mut self,
         k: &Kernel,
         surface: &Surface,
@@ -776,7 +792,7 @@ impl SurfaceSolveContext<CacheObject> for BrepFaceServices<'_> {
             Some(_) => Err(SolidError::invalid_input(OP, "expected surface handle")),
         }
     }
-    fn surface_cache_state(
+    fn surface_cache_without_get_tree(
         &mut self,
         k: &Kernel,
         surface: &Surface,
@@ -880,7 +896,7 @@ impl SurfaceSolveContext<SideObject> for SidedFaceServices<'_> {
             _ => Err(SolidError::invalid_input(OP, "expected surface handle")),
         }
     }
-    fn surface_cache_state(
+    fn surface_cache_without_get_tree(
         &mut self,
         k: &Kernel,
         surface: &Surface,
@@ -998,7 +1014,7 @@ impl SurfaceSolveContext<CurveFaceObject> for CurveFaceServices<'_, '_> {
             Some(_) => Err(SolidError::invalid_input(OP, "expected surface handle")),
         }
     }
-    fn surface_cache_state(
+    fn surface_cache_without_get_tree(
         &mut self,
         k: &Kernel,
         surface: &Surface,

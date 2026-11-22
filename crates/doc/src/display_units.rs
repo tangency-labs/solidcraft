@@ -1,31 +1,32 @@
 //! The existing length display policy, shared by windowed and headless consumers.
 //!
-//! Values are stored in millimetres and displayed in the five design units. Unknown unit
-//! names retain the millimetre fallback; expression units have a separate, broader vocabulary.
-//! These functions format values, not validate them: non-finite inputs retain Rust's `NaN`,
-//! `inf` and `-inf` text. Callers that require finite measurements must validate them first.
+//! Values are stored in millimetres and displayed in any length unit of the expression unit table
+//! ([`UNITS`]): a design's five units and the others a drawing may give its measurements in. One
+//! table for both, so every length unit a design or a drawing accepts shows its own numbers. Other
+//! names retain the millimetre fallback. These functions format values, not validate them:
+//! non-finite inputs retain Rust's `NaN`, `inf` and `-inf` text. Callers that require finite
+//! measurements must validate them first.
 
 use serde::{Deserialize, Serialize};
 
+use crate::expr::{Kind, UNITS};
 pub use crate::tolerance::{DimensionStyle, DimensionText, DimensionValue, format_dimension};
 use crate::{DocError, Result, expr};
 
-/// Units per millimetre and the unit's name. Unknown names use millimetres.
+/// Units per millimetre and the unit's name, for a length unit of [`UNITS`]. Other names use
+/// millimetres.
 pub fn unit_scale(units: &str) -> (f64, &'static str) {
-    match units {
-        "cm" => (0.1, "cm"),
-        "m" => (0.001, "m"),
-        "in" => (1.0 / 25.4, "in"),
-        "ft" => (1.0 / 304.8, "ft"),
-        _ => (1.0, "mm"),
+    match UNITS.iter().find(|(name, kind, _)| *name == units && *kind == Kind::Length) {
+        Some(&(name, _, mm)) => (1.0 / mm, name),
+        None => (1.0, "mm"),
     }
 }
 
-/// Inch labels retain a meaningful fourth digit without promoting floating-point noise.
-/// `value` is already converted to the requested display unit, not a millimetre value.
+/// Inch labels (`in` or `inch`) retain a meaningful fourth digit without promoting floating-point
+/// noise. `value` is already converted to the requested display unit, not a millimetre value.
 pub fn length_precision(value: f64, units: &str, decimals: u8) -> usize {
     let base = usize::from(decimals.min(8));
-    if units != "in" {
+    if unit_scale(units).0 != unit_scale("in").0 {
         return base;
     }
     let needs_four = ((value * 10_000.0).round() - (value * 1000.0).round() * 10.0).abs() >= 0.5;
@@ -147,10 +148,14 @@ fn format_display(x: f64, scale: f64, decimals: u8, f: &NumberFormat, step: Opti
     Ok(Shown { text, value })
 }
 
+/// The most decimals a number is written with: the one cap for the formatter and for what names
+/// decimals to it (a drafting profile).
+pub const MAX_DECIMALS: u8 = 8;
+
 /// Validate and prepare the magnitude once, identically for both rounding paths.
 fn prepare_decimal(x: f64, decimals: u8, resolution: usize) -> Result<String> {
-    if decimals > 8 {
-        return Err(DocError::Invalid("number precision must be at most 8 decimal places".into()));
+    if decimals > MAX_DECIMALS {
+        return Err(DocError::Invalid(format!("number precision must be at most {MAX_DECIMALS} decimal places")));
     }
     if !x.is_finite() || x.abs() > 1e12 {
         return Err(DocError::Invalid("display value must be finite with magnitude at most 1e12".into()));
@@ -288,6 +293,7 @@ pub(crate) fn grouped_digits(text: &mut String, digits: &str, integer: bool, gro
 #[cfg(test)]
 mod tests {
     use super::{format_length, length_number, length_precision, unit_scale};
+    use crate::expr::{Kind, UNITS};
 
     #[test]
     fn all_design_units_keep_bare_and_suffixed_labels() {
@@ -352,8 +358,25 @@ mod tests {
     }
 
     #[test]
+    fn every_length_unit_shows_its_own_numbers() {
+        // Each length unit of the expression table, which a design's units and a drawing's unit
+        // come from, never millimetres unless it is millimetres.
+        for &(name, kind, mm) in UNITS {
+            if kind != Kind::Length {
+                continue;
+            }
+            assert_eq!(unit_scale(name), (1.0 / mm, name), "{name}");
+            let bare = if matches!(name, "in" | "inch") { "12.500" } else { "12.50" };
+            assert_eq!(length_number(12.5 * mm, name, 2), bare, "{name}");
+            assert_eq!(format_length(12.5 * mm, name, 2), format!("{bare} {name}"), "{name}");
+        }
+        assert_eq!(length_number(25.4 * 1.2345, "inch", 0), "1.2345");
+    }
+
+    #[test]
     fn unknown_display_units_keep_the_millimetre_fallback() {
-        for units in ["", "inch", " in ", "IN", "unsupported"] {
+        // Names that aren't a length unit of the expression table, angles included.
+        for units in ["", " in ", "IN", "unsupported", "deg", "rad"] {
             assert_eq!(unit_scale(units), (1.0, "mm"), "{units}");
             assert_eq!(length_number(25.4, units, 2), "25.40", "{units}");
             assert_eq!(format_length(25.4, units, 2), "25.40 mm", "{units}");

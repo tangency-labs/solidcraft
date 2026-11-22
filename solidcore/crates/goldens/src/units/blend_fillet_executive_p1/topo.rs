@@ -116,3 +116,81 @@ pub(super) fn generate(rng: &mut Rng) -> Option<Value> {
     let i = (0..64).find_map(|_| try_generate(rng))?;
     Some(serde_json::json!({ "remove_topo_edges": serde_json::to_value(i).ok()? }))
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use solidcore::topology::brep::validation::{check_brep, CheckLevel};
+    use solidcore::Brep;
+
+    fn mouse(k: &mut Kernel) -> Brep {
+        let brep: BrepIn = serde_json::from_value(serde_json::json!(
+            {"kind": "file", "file": "Mouse.smb", "rebuild": false}
+        ))
+        .unwrap();
+        let crate::own_builder::Built::Brep(b) = fixture(k, &brep).unwrap() else {
+            panic!("fixture")
+        };
+        let mut b = *b;
+        p4::sync_face_tolerances(&mut b).unwrap();
+        b.set_editing_enabled(true);
+        b
+    }
+
+    /// The `remove_topo_edges_mouse_two_struts` case: Mouse.smb (4 faces, 6 edges, a
+    /// manifold solid that passes Level 2) with its edges 1 and 2 removed. The drop of the
+    /// joined edge onto its face (zone tolerance 3.63, UV tolerances about 1.8) came back in
+    /// pieces whose ends are 0.54 apart in UV, which `longest_drop_run` took as one run and
+    /// `create_by_joining` refused (`segments not end to end`), so the removal failed. It
+    /// now keeps the longer piece and the removal succeeds with the topology main gives (2
+    /// faces, 1 edge, a manifold solid).
+    ///
+    /// The result is not a valid body on main either: the edges are not struts (their faces
+    /// meet at an angle), so the removal changes the shape (volume 141.58 to 0.70) and the
+    /// check reports the same three failures on main (a UV gap in the loop, and edge and
+    /// vertex tolerances of 3.63). The test holds what this change is about: the removal
+    /// builds, with main's topology, and the check finds no failure of another kind.
+    #[test]
+    fn mouse_two_struts_removal_builds_with_mains_topology() {
+        let mut k = Kernel::default();
+        let mut input = mouse(&mut k);
+        assert!(check_brep(&mut k, &mut input, CheckLevel::Level2)
+            .unwrap()
+            .lines()
+            .is_empty());
+        let mut k = Kernel::default();
+        let mut b = mouse(&mut k);
+        assert_eq!((b.faces().len(), b.edges().len()), (4, 6));
+        remove_topo_edges(
+            &mut k,
+            &mut b,
+            &[Some(EdgeId::from_index(1)), Some(EdgeId::from_index(2))],
+        )
+        .unwrap();
+        assert_eq!((b.faces().len(), b.edges().len()), (2, 1));
+        assert!(solidcore::topology::brep::p2::is_manifold_solid(&b).unwrap());
+        let lines = check_brep(&mut k, &mut b, CheckLevel::Level2)
+            .unwrap()
+            .lines();
+        // the failure kinds main reports for this input, each once (one loop, edge and
+        // vertex), and no other
+        let known = [
+            ("SmTrimmingTools::Test #1 ", 1),
+            ("SmBrep::Test #59 ", 1),
+            ("SmBrep::Test #82 ", 1),
+            ("AssertValid skipped: ValidatePointers failed", 1),
+        ];
+        for line in &lines {
+            assert!(
+                known.iter().any(|(kind, _)| line.starts_with(kind)),
+                "a failure main does not have: {line}"
+            );
+        }
+        let counts: Vec<usize> = known
+            .iter()
+            .map(|(kind, _)| lines.iter().filter(|l| l.starts_with(kind)).count())
+            .collect();
+        let expected: Vec<usize> = known.iter().map(|&(_, n)| n).collect();
+        assert_eq!(counts, expected, "{lines:#?}");
+    }
+}

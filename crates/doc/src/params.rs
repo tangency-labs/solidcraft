@@ -6,6 +6,9 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
+#[path = "params_import_order.rs"]
+mod import_order;
+
 use serde::{Deserialize, Serialize};
 
 use crate::expr::{self, Expr, Kind, ParamDef, Value};
@@ -264,18 +267,28 @@ impl Document {
     /// Every length input of every feature as the geometry reads it (mm; a unit-less result is
     /// in the design's units), for checking that an edit moves nothing.
     pub fn length_inputs(&self) -> Vec<Option<f64>> {
+        let read = self.length_reader();
+        self.features.iter().flat_map(|f| f.kind.inputs()).filter(|(_, _, k)| *k == Kind::Length).map(|(_, e, _)| read(&e)).collect()
+    }
+
+    /// Feature `feature`'s length input `label` as the geometry reads it, as [`Document::length_inputs`]
+    /// reads each; `None` when it has none so labelled, or it doesn't evaluate.
+    pub fn length_input(&self, feature: u64, label: &str) -> Option<f64> {
+        let inputs = self.feature(feature)?.kind.inputs();
+        let (_, e, _) = inputs.iter().find(|(l, _, k)| *l == label && *k == Kind::Length)?;
+        self.length_reader()(e)
+    }
+
+    /// How a length expression reads, with the design's parameters as they are now: the one rule
+    /// of [`Document::length_inputs`] and [`Document::length_input`].
+    fn length_reader(&self) -> impl Fn(&str) -> Option<f64> {
         let (vals, _) = self.param_values();
         let scale = expr::unit_info(self.units.trim()).filter(|(k, _)| *k == Kind::Length).map(|(_, s)| s).unwrap_or(1.0);
-        let look = |n: &str| vals.get(n).copied().ok_or_else(|| DocError::Expr(format!("unknown parameter `{n}`")));
-        self.features
-            .iter()
-            .flat_map(|f| f.kind.inputs())
-            .filter(|(_, _, k)| *k == Kind::Length)
-            .map(|(_, e, _)| {
-                let d = if expr::is_literal(&e) { expr::Defaults::default() } else { expr::Defaults { len: scale, ..expr::Defaults::default() } };
-                expr::eval_with_defaults(&e, &look, d).and_then(|v| v.to_kind_in(Kind::Length, d)).ok()
-            })
-            .collect()
+        move |e: &str| {
+            let look = |n: &str| vals.get(n).copied().ok_or_else(|| DocError::Expr(format!("unknown parameter `{n}`")));
+            let d = if expr::is_literal(e) { expr::Defaults::default() } else { expr::Defaults { len: scale, ..expr::Defaults::default() } };
+            expr::eval_with_defaults(e, &look, d).and_then(|v| v.to_kind_in(Kind::Length, d)).ok()
+        }
     }
 
     pub fn change_param(&mut self, name: &str, expr_s: &str, unit: Option<&str>, comment: Option<&str>) -> Result<()> {
@@ -542,19 +555,57 @@ impl Document {
         if rows.len() > MAX_PARAMS {
             return Err(DocError::Invalid("too many parameters".into()));
         }
-        // Each row is checked and applied as `change_param` would, but the parameters are
-        // evaluated once for all of them, not once per row (thousands of rows took minutes).
+        let mut row_by_name: BTreeMap<&str, usize> = BTreeMap::new();
+        let mut previous_row = vec![None; rows.len()];
+        let mut text_rows = vec![false; rows.len()];
+        for (index, (name, expression, unit, _)) in rows.iter().enumerate() {
+            // Validate before reference extraction, which caches expressions independently
+            // of the document transaction.
+            if expression.len() > 4096 {
+                return Err(DocError::Expr("expression too long".into()));
+            }
+            previous_row[index] = row_by_name.insert(name, index);
+            let was_text = previous_row[index].map_or(self.text_param(name).is_some(), |previous| text_rows[previous]);
+            text_rows[index] = unit.as_deref().map_or(was_text, crate::text_params::is_text_unit);
+        }
+        let graph: Vec<_> =
+            rows.iter().zip(&text_rows).map(|((name, expression, ..), is_text)| (name.as_str(), expression.as_str(), *is_text)).collect();
+        let ordered_rows =
+            import_order::order(&graph, expr::references).ok_or_else(|| DocError::Expr("circular parameter references in import".into()))?;
+
+        // Evaluate in dependency order, but keep the Parameters table and reply in input
+        // order. Existing parameters retain their positions; new ones follow first appearance.
         let mut next = self.clone();
         let (mut vals, _) = next.param_values();
-        for (n, e, u, c) in &rows {
+        for index in ordered_rows {
+            let (n, e, u, c) = &rows[index];
             next.import_row(n, e, u.as_deref(), c.as_deref(), &mut vals)?;
         }
+        let numeric_order: BTreeMap<String, usize> =
+            self.params.iter().map(|p| p.name.clone()).chain(rows.iter().map(|(n, ..)| n.clone())).enumerate().fold(
+                BTreeMap::new(),
+                |mut order, (index, name)| {
+                    order.entry(name).or_insert(index);
+                    order
+                },
+            );
+        next.params.sort_by_key(|p| numeric_order.get(&p.name).copied().unwrap_or(usize::MAX));
+        let text_order: BTreeMap<String, usize> =
+            self.text_params.iter().map(|p| p.name.clone()).chain(rows.iter().map(|(n, ..)| n.clone())).enumerate().fold(
+                BTreeMap::new(),
+                |mut order, (index, name)| {
+                    order.entry(name).or_insert(index);
+                    order
+                },
+            );
+        next.text_params.sort_by_key(|p| text_order.get(&p.name).copied().unwrap_or(usize::MAX));
+        let names = rows.iter().map(|(name, ..)| name.clone()).collect();
         let (_, errors) = next.param_values();
         if let Some(e) = rows.iter().find_map(|(n, ..)| errors.get(n)) {
             return Err(DocError::Expr(e.clone()));
         }
         *self = next;
-        Ok(rows.into_iter().map(|(n, ..)| n).collect())
+        Ok(names)
     }
 
     /// One imported row: the checks and change of `change_param` (a feature's parameter) or
@@ -649,6 +700,8 @@ pub enum ParamUser {
     /// A joint's offset, angle or value, or a motion link's gear, rack or screw length (`input`
     /// says which; a link is named by the joint it drives).
     Joint { joint: u64, name: String, input: String },
+    /// A component's quantity in bills of materials ([`crate::metadata::BOM_QUANTITY`]).
+    Quantity { component: u64, name: String },
     /// A sheet metal or plastic rule's value (`kind` says which, `field` which value).
     Rule { kind: String, name: String, field: String },
     /// The plane a canvas lies on (`input` is its label, e.g. `Offset`).
@@ -668,6 +721,7 @@ impl ParamUser {
                 None => format!("configuration column {column}"),
             },
             ParamUser::Joint { name, input, .. } => format!("joint {name} ({input})"),
+            ParamUser::Quantity { name, .. } => format!("component {name} (quantity)"),
             ParamUser::Rule { kind, name, field } => format!("{kind} rule {name} ({field})"),
             ParamUser::Canvas { name, input, .. } => format!("canvas {name} ({input})"),
             ParamUser::Occurrence { name, input, .. } => format!("occurrence {name} ({input})"),
@@ -781,9 +835,9 @@ impl Document {
                 out.push(ParamUser::Feature { feature: f.id, name: f.name.clone(), input: "Position".into() });
             }
             if let FeatureKind::Sketch { sketch, .. } = &f.kind {
-                for c in &sketch.constraints {
-                    if c.param.as_deref() == Some(name) {
-                        out.push(ParamUser::Dimension { feature: f.id, name: f.name.clone(), constraint: c.id.clone() });
+                for (id, param) in sketch.dimension_param_ids() {
+                    if param == name {
+                        out.push(ParamUser::Dimension { feature: f.id, name: f.name.clone(), constraint: id.to_string() });
                     }
                 }
                 for pattern in &sketch.patterns {
@@ -809,12 +863,18 @@ impl Document {
                 out.push(ParamUser::Joint { joint, name: jname, input });
             }
         }
+        for c in &self.components {
+            if c.metadata.bom_quantity().is_some_and(|e| expr::references(e).iter().any(|r| r == name)) {
+                out.push(ParamUser::Quantity { component: c.id, name: c.name.clone() });
+            }
+        }
         let uses = |e: &str| expr::references(e).iter().any(|r| r == name);
         let rule_uses = |field: &str, e: &str| rule_references(field, e).iter().any(|r| r == name);
         for o in &self.occurrences {
-            let axes: BTreeSet<&str> = o.expressed_moves.iter().flat_map(|m| m.exprs()).filter(|(_, e)| uses(e)).map(|(axis, _)| axis).collect();
-            for axis in axes {
-                out.push(ParamUser::Occurrence { occurrence: o.id, name: o.name.clone(), input: format!("translate {axis}") });
+            let inputs: BTreeSet<String> =
+                o.expressed_moves.iter().flat_map(|m| m.exprs()).filter(|(_, e)| uses(e)).map(|(input, _)| input).collect();
+            for input in inputs {
+                out.push(ParamUser::Occurrence { occurrence: o.id, name: o.name.clone(), input });
             }
         }
         for r in &self.sheet.rules {
@@ -928,9 +988,9 @@ impl Document {
                 }
             }
             if let FeatureKind::Sketch { sketch, .. } = &mut f.kind {
-                for c in &mut sketch.constraints {
-                    if c.param.as_deref() == Some(old) {
-                        c.param = Some(new.to_string());
+                for param in sketch.dimension_params_mut() {
+                    if param.as_deref() == Some(old) {
+                        *param = Some(new.to_string());
                         n += 1;
                     }
                 }
@@ -990,7 +1050,7 @@ impl Document {
                 }
             }
         }
-        for e in self.occurrences.iter_mut().flat_map(|o| &mut o.expressed_moves).flat_map(|m| m.translate.iter_mut().flatten()) {
+        for e in self.occurrences.iter_mut().flat_map(|o| &mut o.expressed_moves).flat_map(|m| m.exprs_mut()) {
             let r = expr::rename_reference(e, old, new);
             if r != *e {
                 *e = r;
@@ -1001,6 +1061,13 @@ impl Document {
             let r = expr::rename_reference(e, old, new);
             if r != *e {
                 *e = r;
+                n += 1;
+            }
+        }
+        for c in &mut self.components {
+            let Some(e) = c.metadata.bom_quantity() else { continue };
+            let r = expr::rename_reference(e, old, new);
+            if r != e && c.metadata.set(crate::metadata::Owner::Component, crate::metadata::BOM_QUANTITY, r.into()).is_ok() {
                 n += 1;
             }
         }
@@ -1060,7 +1127,7 @@ impl Document {
         for f in &self.features {
             let mut names: BTreeSet<String> = f.param_names.iter().filter(|n| !n.is_empty()).cloned().collect();
             if let FeatureKind::Sketch { sketch, .. } = &f.kind {
-                names.extend(sketch.constraints.iter().filter_map(|c| c.param.clone()));
+                names.extend(sketch.dimension_params().into_iter().cloned());
             }
             names.extend(self.feature_reads(f));
             out.extend(names.into_iter().map(|n| (format!("Feature:{}", f.name), n)));
@@ -1115,7 +1182,7 @@ impl Document {
             hit |= (sheet && f.kind.is_sheet()) || (plastic && f.kind.is_plastic());
             hit |= f.kind.expressions().iter().any(|e| expr::references(e).iter().any(|r| affected.contains(r)));
             if let FeatureKind::Sketch { sketch, .. } = &f.kind {
-                hit |= sketch.constraints.iter().any(|c| c.param.as_ref().is_some_and(|p| affected.contains(p)));
+                hit |= sketch.dimension_params().into_iter().any(|p| affected.contains(p));
                 hit |= sketch.patterns.iter().flat_map(|p| p.expressions.values()).any(|e| expr::references(e).iter().any(|r| affected.contains(r)));
                 hit |= sketch.text_exprs().iter().any(|(_, e)| expr::references(e).iter().any(|r| affected.contains(r)));
                 hit |= sketch.text_word_exprs().iter().any(|e| crate::text_params::references(e).iter().any(|r| affected.contains(r)));

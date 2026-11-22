@@ -850,6 +850,28 @@ mod tests {
         assert!(app.session.undo.is_empty(), "a view setting, not an edit");
     }
 
+    /// #17912: a button set to Show/Hide (`browser.visibility`, as the Buttons list offers it) hides
+    /// and shows the selected body, as V does, where it used to say "`visible` must be true or
+    /// false".
+    #[test]
+    fn a_button_set_to_show_hide_toggles_the_selected_body() {
+        use solidcraft_engine::Sel;
+        let device = "hid 046d:c62b";
+        let mut app = app();
+        app.space_mouse.device = Some(device.into());
+        app.preferences.space_mouse_buttons.insert(device.into(), [(2, ButtonJob::Command("browser.visibility".into()))].into());
+        app.run("solid.box", serde_json::json!({"length": 10, "width": 10, "height": 10, "body_name": "Ball"})).unwrap();
+        app.run("select.set", serde_json::json!({"items": [Sel::Body { name: "Ball".into() }]})).unwrap();
+        let ctx = window(true);
+        assert!(app.session.body_visible("Ball"));
+        press(&mut app, &ctx, 0b10, vec![]);
+        assert!(!app.status.as_ref().is_some_and(|s| s.2), "no error: {:?}", app.status);
+        assert!(!app.session.body_visible("Ball"), "the press hides the selected body");
+        press(&mut app, &ctx, 0, vec![]);
+        press(&mut app, &ctx, 0b10, vec![]);
+        assert!(app.session.body_visible("Ball"), "the next press shows it again");
+    }
+
     /// The keyboard and a button hold the same modifier: it stays down until both let go, whichever
     /// lets go first, for each of Shift, Ctrl and Alt.
     #[test]
@@ -1426,14 +1448,13 @@ mod tests {
     #[test]
     fn navigation_off_the_start_page_and_a_hostile_speed_leave_the_view_alone() {
         let ctx = window(true);
-        // The app is large: kept on the heap, three at once do not overflow a test thread's stack.
-        let mut off = Box::new(app());
-        off.preferences.space_mouse_enabled = false;
-        let mut home = Box::new(app());
-        home.home.open = true;
-        let mut nan = Box::new(app());
-        nan.preferences.space_mouse_speed = f32::NAN;
-        for mut app in [off, home, nan] {
+        for change in [
+            (|app: &mut SolveApp| app.preferences.space_mouse_enabled = false) as fn(&mut SolveApp),
+            |app| app.home.open = true,
+            |app| app.preferences.space_mouse_speed = f32::NAN,
+        ] {
+            let mut app = Box::new(app());
+            change(&mut app);
             let before = app.cam;
             assert!(!frame(&mut app, &ctx, DriverMapping::default(), PUSH, 0.02));
             assert_eq!(app.cam.distance, before.distance);

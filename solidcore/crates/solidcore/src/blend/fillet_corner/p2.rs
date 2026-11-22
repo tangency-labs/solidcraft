@@ -40,9 +40,10 @@
 //!   vertex use is attached in between).
 //! - **`MakeAnalyticCornerSurface`** returns `SmBoolean` but exits through `SER` / `NER`:
 //!   the status it returns there is non-zero, which its caller reads as `TRUE` (an
-//!   analytic surface was made, though none was added). The port returns `Ok(true)`
-//!   for those exits by default; with `Kernel::fixes.analytic_corner_failure_is_false`
-//!   it returns `Ok(false)` instead (`plan/upstream-issues/WR-254--smfilletcorner-makeanalyticcornersurface-reports-its-ser-ner--dup2.md`). Its fits that fail softly upstream
+//!   analytic surface was made, though none was added, and skips the Coons patch). The
+//!   port returns `Ok(false)` for those exits, so the caller builds the Coons patch
+//!   (`plan/upstream-issues/WR-254--smfilletcorner-makeanalyticcornersurface-reports-its-ser-ner--dup2.md`);
+//!   an exit that carries no upstream status propagates. Its fits that fail softly upstream
 //!   (`if (SM_SUCCESS != fit(..)) return FALSE;`) are `false`; only
 //!   [`SolidError::Unported`] and [`SolidError::InvalidInput`] propagate from them.
 //!   The fillet solvers are the base [`FilletSolver`]s of [`CornerEnv::solvers`]; a
@@ -89,8 +90,8 @@ use crate::blend::fillet_corner::p1::{
     create_planar_surface, create_srf_of_revolution, fillet_radius,
 };
 use crate::blend::fillet_corner::p3::{
-    move_vertexuse, primary_eu, set_vertex_point, unchecked_point, CornerEnv, CornerPatchEnv,
-    FilletCorner, FilletExecutiveData,
+    move_vertexuse, primary_eu, set_vertex_point, CornerEnv, CornerPatchEnv, FilletCorner,
+    FilletExecutiveData,
 };
 use crate::blend::fillet_custom_solver::SurfaceId;
 use crate::blend::fillet_executive::p3::{ErrorInfo, FilletExecutive};
@@ -373,15 +374,8 @@ impl FilletCorner {
             .as_ref()
             .ok_or_else(|| null_deref("side edge without curve"))?;
         // fork 66b02de passes these on (SER)
-        let pass_on = k.fixes.fillet_statuses_pass_on;
-        let pnt1 = unchecked_point(crate::error::passed_on(
-            side_edge_curve.evaluate_point(k, edge_param1),
-            pass_on,
-        )?)?;
-        let pnt2 = unchecked_point(crate::error::passed_on(
-            side_edge_curve.evaluate_point(k, edge_param2),
-            pass_on,
-        )?)?;
+        let pnt1 = side_edge_curve.evaluate_point(k, edge_param1)?;
+        let pnt2 = side_edge_curve.evaluate_point(k, edge_param2)?;
 
         // See if we have coincident geometry, i.e. two rails intersect at this vertex.
         let gap_dist = pnt1.distance(pnt2);
@@ -891,24 +885,27 @@ impl FilletCorner {
     /// its arcs, or else a constant-radius fillet (`MakeConstantRadiusFillet`).
     ///
     /// Upstream returns `SmBoolean` but exits through `SER` / `NER`, whose non-zero
-    /// status its caller reads as `TRUE`: a failing status here is `Ok(true)` (no
-    /// surface is added). With `Kernel::fixes.analytic_corner_failure_is_false` it is
-    /// `Ok(false)` instead, so the caller builds the Coons patch (WR-254).
+    /// status its caller reads as `TRUE` although no surface was added. Here a failing
+    /// upstream status is `Ok(false)` (no surface is added), so the caller builds the
+    /// Coons patch (WR-254).
     ///
     /// # Errors
     ///
     /// [`SolidError::InvalidInput`] where upstream dereferences `NULL` (a primary edge
     /// use, fillet solver, surface generator, start vertex or intersection curve);
     /// [`SolidError::Unported`] (`MakeConstantRadiusFillet`, unit
-    /// `blend.fillet_corner_p1`).
+    /// `blend.fillet_corner_p1`); [`SolidError::Cancelled`],
+    /// [`SolidError::PortInvariant`], a certificate past its work budget, and every
+    /// error that carries no upstream status (such as [`SolidError::NotFound`] for an
+    /// entity the corner names but the B-reps lack): none is read as a made surface.
     pub fn make_analytic_corner_surface(&mut self, env: &mut CornerEnv<'_>) -> Result<bool> {
         env.with_patch_env(|env| self.make_analytic_corner_surface_with(env))
     }
 
     /// [`FilletCorner::make_analytic_corner_surface`] against any [`CornerPatchEnv`].
     ///
-    /// A failing upstream status is `Ok(true)` by default and `Ok(false)` with
-    /// `Kernel::fixes.analytic_corner_failure_is_false` (WR-254).
+    /// A failing upstream status is `Ok(false)` (WR-254); every other error is passed
+    /// on.
     ///
     /// # Errors
     /// As [`FilletCorner::make_analytic_corner_surface`].
@@ -918,21 +915,15 @@ impl FilletCorner {
     ) -> Result<bool> {
         match self.analytic_corner_surface(env) {
             Ok(made) => Ok(made),
-            Err(
-                e @ (SolidError::Unported { .. }
-                | SolidError::Cancelled { .. }
-                | SolidError::InvalidInput { .. }
-                | SolidError::PortInvariant { .. }),
-            ) => Err(e),
-            // `return sErr` / `return SM_ERR_NULL_POINTER` as an SmBoolean: with the
-            // opt-in fix they read as FALSE (WR-254).
-            Err(e)
-                if e.upstream_status().is_some()
-                    && env.k.fixes.analytic_corner_failure_is_false =>
-            {
-                Ok(false)
-            }
-            Err(_) => Ok(true),
+            // `return sErr` / `return SM_ERR_NULL_POINTER` as an SmBoolean: no surface
+            // was added, so they read as FALSE (upstream reads TRUE; WR-254). A
+            // certificate past its work budget carries a status but is work given up.
+            Err(e) if e.upstream_status().is_some() && !e.is_not_certified() => Ok(false),
+            // `Unported`, `Cancelled`, `InvalidInput`, `PortInvariant`, and every error
+            // whose `upstream_status()` is `None` (`NotFound`, `Degenerate`, ...): no
+            // surface was added either, and none of them is an upstream FALSE to patch
+            // over, so they are passed on.
+            Err(e) => Err(e),
         }
     }
 
@@ -1109,6 +1100,7 @@ impl FilletCorner {
                     SrfSrfOptions {
                         skip_two_pnts_intersection: false,
                         ref_point: None,
+                        closed_by_start_direction: false,
                     },
                 )?;
 
@@ -1666,17 +1658,17 @@ impl FilletCorner {
 
         // Compute marching direction for solver
         let march_dir = tangent(ivl.min())?;
-        match new_fs.re_calc_fillet_geom(
-            env.k,
-            env.pseudo,
-            false,
-            Some(march_dir),
-            Some(&center_curve),
-        ) {
-            Ok(()) => {}
-            Err(e) if e.is_unported_or_cancelled() => return Err(e),
-            Err(_) => return Err(sm_err()), // Unable to convert
-        }
+        // Unable to convert when the re-solve fails (its error is kept as the cause)
+        super::p1::re_solved(
+            new_fs.re_calc_fillet_geom(
+                env.k,
+                env.pseudo,
+                false,
+                Some(march_dir),
+                Some(&center_curve),
+            ),
+            sm_err,
+        )?;
 
         if self.corner_type() == FilletCornerType::NByNConcave {
             // Test if the fillet intersect the corner
@@ -1696,39 +1688,33 @@ impl FilletCorner {
             }
         }
 
-        // Not upstream (WR-645, `fixes.fillet_corner_variable_radius_rail_on_opposite_fillet`):
+        // Not upstream (WR-645):
         // rail 1 replaces the opposite edge, which also bounds the opposite fillet's
         // face, so it must stay on that fillet's surface as the edge did. Refused as
         // the crossing rail-rail curve is above: the corner gets the patch instead.
-        if env
-            .k
-            .fixes
-            .fillet_corner_variable_radius_rail_on_opposite_fillet
-        {
-            let opposite_fillet = env
-                .pseudo
-                .geom(opposite_fg)?
-                .fillet_surface(None)?
-                .cloned()
-                .ok_or_else(null)?;
-            let rail1_curve = env
-                .pseudo
-                .brep()
-                .edge(rail1)?
-                .curve
-                .clone()
-                .ok_or_else(null)?;
-            if !rail_on_surface(
-                env.k,
-                &rail1_curve,
-                &opposite_fillet,
-                &uv_domain,
-                10.0 * tol,
-            )? {
-                env.pseudo.delete_fillet_edge(rail0)?;
-                env.pseudo.delete_fillet_edge(rail1)?;
-                return Err(sm_err()); // Unable to convert
-            }
+        let opposite_fillet = env
+            .pseudo
+            .geom(opposite_fg)?
+            .fillet_surface(None)?
+            .cloned()
+            .ok_or_else(null)?;
+        let rail1_curve = env
+            .pseudo
+            .brep()
+            .edge(rail1)?
+            .curve
+            .clone()
+            .ok_or_else(null)?;
+        if !rail_on_surface(
+            env.k,
+            &rail1_curve,
+            &opposite_fillet,
+            &uv_domain,
+            10.0 * tol,
+        )? {
+            env.pseudo.delete_fillet_edge(rail0)?;
+            env.pseudo.delete_fillet_edge(rail1)?;
+            return Err(sm_err()); // Unable to convert
         }
 
         // Reset all geometry of corresponding edges: retrieve 3d & uv curves from rails,
@@ -1867,12 +1853,17 @@ fn unitize_ser(v: Vec3, operation: &'static str) -> Result<Vec3> {
 fn soft<T>(r: Result<T>) -> Result<Option<T>> {
     match r {
         Ok(v) => Ok(Some(v)),
-        Err(
-            e @ (SolidError::Unported { .. }
-            | SolidError::Cancelled { .. }
-            | SolidError::InvalidInput { .. }
-            | SolidError::PortInvariant { .. }),
-        ) => Err(e),
+        Err(e)
+            if matches!(
+                e,
+                SolidError::Unported { .. }
+                    | SolidError::Cancelled { .. }
+                    | SolidError::InvalidInput { .. }
+                    | SolidError::PortInvariant { .. }
+            ) || e.is_not_certified() =>
+        {
+            Err(e)
+        }
         Err(_) => Ok(None),
     }
 }
@@ -2050,9 +2041,27 @@ fn new_rail_x_edgeuse_vertex_in(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A G^n section certificate that spent its work budget inside a corner's surface
+    /// (`make_{variable,constant}_radius_fillet_with`, the analytic corner) is passed on,
+    /// never read as a soft FALSE that makes the corner another way.
+    #[test]
+    fn a_certificate_past_its_budget_passes_the_corner_s_soft_statuses() {
+        let e = SolidError::blend(
+            "t",
+            crate::error::blend::BlendFailure::NotCertified {
+                halvings: 1,
+                stations: 2,
+            },
+        );
+        assert_eq!(soft::<()>(Err(e.clone())), Err(e.clone()));
+        assert_eq!(soft(Ok(2)), Ok(Some(2)));
+        assert_eq!(soft::<()>(Err(SolidError::sm_err("t"))), Ok(None));
+    }
     use crate::blend::fillet_corner::p3::FilletCornerKind;
     use crate::curve::line::Line;
     use crate::primitive::api_curves::create_analytic_circle;
+    use crate::surface::surface::SurfaceKind;
     use crate::topology::Edgeuse;
 
     /// A pseudo B-rep with `n` fillet vertices on a circle and `n` curveless fillet edges
@@ -2145,6 +2154,20 @@ mod tests {
         (pseudo, c)
     }
 
+    /// The three-line [`line_chamfer_corner`] whose first edge is a rail-rail
+    /// interpolating arc (a unit circle) with `original_face`.
+    fn arc_chamfer_corner(original_face: Option<FaceId>) -> (FilletBrep, FilletCorner) {
+        let k = Kernel::default();
+        let (mut pseudo, c) = line_chamfer_corner(3);
+        let e = c.edges[0];
+        let circle = Curve::from(create_analytic_circle(&k, Point3::ZERO, 1.0).unwrap());
+        pseudo.brep_mut().edge_mut(e).unwrap().curve = Some(circle);
+        let fe = pseudo.fillet_edge_mut(e).unwrap();
+        fe.set_fillet_edge_type(FilletEdgeType::RailRailInterpolation);
+        fe.set_original_face(original_face);
+        (pseudo, c)
+    }
+
     #[test]
     fn analytic_corner_surface_needs_three_or_four_edges() {
         for n in [2, 5] {
@@ -2155,14 +2178,71 @@ mod tests {
         }
     }
 
-    /// An edge without curve exits through `SER(SM_ERR)`, which the caller reads as
-    /// `TRUE`: no surface is made.
+    /// An edge without curve exits through `SER(SM_ERR)`: no surface is made, so the
+    /// result is `FALSE` (upstream reads the status as `TRUE` and skips the Coons
+    /// patch) and the corner's state is unchanged (WR-254).
     #[test]
-    fn analytic_corner_surface_reads_a_failing_status_as_true() {
+    fn analytic_corner_surface_reads_a_failing_status_as_false() {
         let (mut pseudo, mut c) = loop_corner(FilletCornerKind::ConvexNByN, 3);
+        let before = corner_state(&pseudo, &c);
         let r = with_env(&mut pseudo, |env| c.make_analytic_corner_surface(env));
-        assert!(r.unwrap());
+        assert!(!r.unwrap());
         assert!(c.surfaces.is_empty());
+        assert_eq!(corner_state(&pseudo, &c), before);
+
+        // the FALSE comes from the SER arm: the inner exit is an upstream status
+        let (mut pseudo, mut c) = loop_corner(FilletCornerKind::ConvexNByN, 3);
+        let inner = with_env(&mut pseudo, |env| {
+            env.with_patch_env(|env| c.analytic_corner_surface(env))
+        });
+        let e = inner.unwrap_err();
+        assert_eq!(e.upstream_status(), Some(crate::error::SM_ERR), "{e:?}");
+        assert!(c.surfaces.is_empty());
+    }
+
+    /// After a failing analytic exit, `CreateCornerPatch` goes on to the Coons patch
+    /// (WR-254), which needs every side's 3D curve. The exits here leave a side
+    /// without one (an edge with no curve; a chamfer's arc whose curve was deleted to be
+    /// recomputed), so the patch refuses with `SM_ERR_NULL_POINTER` where upstream
+    /// reported success with no surface and no face.
+    #[test]
+    fn corner_patch_after_a_failing_analytic_exit_refuses_without_a_boundary_curve() {
+        use crate::error::blend::BlendFailure;
+        use crate::error::SM_ERR_NULL_POINTER;
+        let arc_chamfer = || arc_chamfer_corner(None);
+
+        // the chamfer's exit: NER on the missing original face, after the arc's curve
+        // was deleted
+        let (mut pseudo, mut c) = arc_chamfer();
+        let inner = with_env(&mut pseudo, |env| {
+            env.with_patch_env(|env| c.analytic_corner_surface(env))
+        });
+        let e = inner.unwrap_err();
+        assert_eq!(
+            e.blend_failure(),
+            Some(&BlendFailure::Missing(
+                "the interpolating edge's original face"
+            )),
+            "{e:?}"
+        );
+        assert!(pseudo.brep().edge(c.edges[0]).unwrap().curve.is_none());
+
+        for (name, (mut pseudo, mut c)) in [
+            ("curveless", loop_corner(FilletCornerKind::ConvexNByN, 3)),
+            ("arc chamfer", arc_chamfer()),
+        ] {
+            c.extended_surface_patch = false;
+            let r = with_env(&mut pseudo, |env| c.create_corner_patch_default(env));
+            let e = r.unwrap_err();
+            assert_eq!(
+                e.blend_failure(),
+                Some(&BlendFailure::Missing("a boundary curve")),
+                "{name}: {e:?}"
+            );
+            assert_eq!(e.upstream_status(), Some(SM_ERR_NULL_POINTER), "{name}");
+            assert!(c.surfaces.is_empty(), "{name}");
+            assert!(c.surface_faces.is_empty(), "{name}");
+        }
     }
 
     #[test]
@@ -2177,127 +2257,109 @@ mod tests {
         assert!(!r.unwrap());
     }
 
-    /// `SER(SM_ERR)` reads as `FALSE` with the opt-in fix (the caller then builds the
-    /// Coons patch); the default stays `TRUE` and the corner's state is unchanged
-    /// either way (WR-254).
+    /// The corner's genuine `FALSE` controls (two or five edges, a cubic rail-rail
+    /// interpolation) stay `FALSE`, with no surface and the corner's state unchanged.
     #[test]
-    fn analytic_corner_surface_failure_is_false_with_the_fix() {
-        let run = |fixed: bool| {
-            let (mut pseudo, mut c) = loop_corner(FilletCornerKind::ConvexNByN, 3);
+    fn analytic_corner_surface_keeps_the_false_controls() {
+        for n in [2, 5] {
+            let (mut pseudo, mut c) = loop_corner(FilletCornerKind::ConvexNByN, n);
             let before = corner_state(&pseudo, &c);
-            let r = with_env(&mut pseudo, |env| {
-                env.k.fixes.analytic_corner_failure_is_false = fixed;
-                c.make_analytic_corner_surface(env)
-            });
-            (r, c, pseudo, before)
-        };
-
-        // default: pinned C++ reads the failing status as TRUE
-        let (r, c, pseudo, before) = run(false);
-        assert!(r.unwrap());
-        assert!(c.surfaces.is_empty());
-        assert_eq!(corner_state(&pseudo, &c), before);
-
-        // fix: the failing status reads as FALSE, and no surface is made
-        let (r, c, pseudo, before) = run(true);
-        assert!(!r.unwrap());
-        assert!(c.surfaces.is_empty());
-        assert_eq!(corner_state(&pseudo, &c), before);
-    }
-
-    /// The fix changes only the upstream-status exits: the corner's genuine `FALSE`
-    /// controls (two or five edges, a cubic rail-rail interpolation) stay `FALSE` with
-    /// the flag off and on.
-    #[test]
-    fn analytic_corner_surface_failure_flag_keeps_the_false_controls() {
-        for fixed in [false, true] {
-            for n in [2, 5] {
-                let (mut pseudo, mut c) = loop_corner(FilletCornerKind::ConvexNByN, n);
-                let before = corner_state(&pseudo, &c);
-                let r = with_env(&mut pseudo, |env| {
-                    env.k.fixes.analytic_corner_failure_is_false = fixed;
-                    c.make_analytic_corner_surface(env)
-                });
-                assert!(!r.unwrap(), "flag {fixed}, {n} edges");
-                assert!(c.surfaces.is_empty());
-                assert_eq!(corner_state(&pseudo, &c), before);
-            }
-
-            let (mut pseudo, mut c) = loop_corner(FilletCornerKind::ConvexNByN, 4);
-            let e = c.edges[0];
-            let fe = pseudo.fillet_edge_mut(e).unwrap();
-            fe.set_fillet_edge_type(FilletEdgeType::RailRailInterpolation);
-            fe.set_status(FilStatus::CubicRailRailInterpolate);
-            let r = with_env(&mut pseudo, |env| {
-                env.k.fixes.analytic_corner_failure_is_false = fixed;
-                c.make_analytic_corner_surface(env)
-            });
-            assert!(!r.unwrap(), "flag {fixed}, cubic rail-rail");
+            let r = with_env(&mut pseudo, |env| c.make_analytic_corner_surface(env));
+            assert!(!r.unwrap(), "{n} edges");
             assert!(c.surfaces.is_empty());
+            assert_eq!(corner_state(&pseudo, &c), before);
         }
+
+        let (mut pseudo, mut c) = loop_corner(FilletCornerKind::ConvexNByN, 4);
+        let e = c.edges[0];
+        let fe = pseudo.fillet_edge_mut(e).unwrap();
+        fe.set_fillet_edge_type(FilletEdgeType::RailRailInterpolation);
+        fe.set_status(FilStatus::CubicRailRailInterpolate);
+        let r = with_env(&mut pseudo, |env| c.make_analytic_corner_surface(env));
+        assert!(!r.unwrap(), "cubic rail-rail");
+        assert!(c.surfaces.is_empty());
     }
 
-    /// The fix does not swallow the port's own failures: a non-linear chamfer edge
-    /// without fillet geometry reaches the port's null-dereference `InvalidInput`, with
-    /// the flag off and on.
+    /// Only the upstream-status exits read as `FALSE`: a non-linear chamfer edge
+    /// without fillet geometry still reaches the port's null-dereference
+    /// `InvalidInput`.
     #[test]
-    fn analytic_corner_surface_failure_flag_keeps_invalid_input() {
+    fn analytic_corner_surface_keeps_invalid_input() {
         let k = Kernel::default();
-        for fixed in [false, true] {
-            let (mut pseudo, mut c) = line_chamfer_corner(3);
-            let e = c.edges[0];
-            let circle = Curve::from(create_analytic_circle(&k, Point3::ZERO, 1.0).unwrap());
-            pseudo.brep_mut().edge_mut(e).unwrap().curve = Some(circle);
-            let r = with_env(&mut pseudo, |env| {
-                env.k.fixes.analytic_corner_failure_is_false = fixed;
-                c.make_analytic_corner_surface(env)
-            });
-            assert!(
-                matches!(r, Err(SolidError::InvalidInput { .. })),
-                "flag {fixed}: {r:?}"
-            );
-        }
+        let (mut pseudo, mut c) = line_chamfer_corner(3);
+        let e = c.edges[0];
+        let circle = Curve::from(create_analytic_circle(&k, Point3::ZERO, 1.0).unwrap());
+        pseudo.brep_mut().edge_mut(e).unwrap().curve = Some(circle);
+        let r = with_env(&mut pseudo, |env| c.make_analytic_corner_surface(env));
+        assert!(matches!(r, Err(SolidError::InvalidInput { .. })), "{r:?}");
     }
 
-    /// The fix only maps the upstream-status exits: a chamfer of three real lines makes
-    /// the same plane, with the same corner state, at the default and with the flag on.
+    /// An exit no upstream status stands for is passed on, never read as a made
+    /// surface: here the chamfer's arc names an original face the target does not have
+    /// (`NotFound`), after its curve was deleted to be recomputed. Read as `TRUE`, the
+    /// corner skipped the Coons patch and reported success with no surface and no face.
     #[test]
-    fn analytic_corner_surface_failure_flag_does_not_change_a_made_surface() {
-        let run = |fixed: bool| {
-            let (mut pseudo, mut c) = line_chamfer_corner(3);
-            let before = corner_state(&pseudo, &c);
-            let r = with_env(&mut pseudo, |env| {
-                env.k.fixes.analytic_corner_failure_is_false = fixed;
-                c.make_analytic_corner_surface(env)
-            });
-            (r, c, pseudo, before)
+    fn analytic_corner_surface_passes_on_an_exit_without_upstream_status() {
+        let missing_face = FaceId::from_index(u32::MAX);
+        let is_missing_face = |e: &SolidError| match e {
+            SolidError::NotFound { entity, .. } => *entity == EntityRef::Face(missing_face),
+            _ => false,
         };
 
-        let (r_off, c_off, p_off, before_off) = run(false);
-        assert!(r_off.unwrap());
-        assert_eq!(c_off.surfaces.len(), 1);
-        assert_eq!(corner_state(&p_off, &c_off), before_off);
+        let (mut pseudo, mut c) = arc_chamfer_corner(Some(missing_face));
+        let r = with_env(&mut pseudo, |env| c.make_analytic_corner_surface(env));
+        let e = r.unwrap_err();
+        assert!(is_missing_face(&e), "{e:?}");
+        assert_eq!(e.upstream_status(), None, "{e:?}");
+        assert!(c.surfaces.is_empty());
+        assert!(pseudo.brep().edge(c.edges[0]).unwrap().curve.is_none());
 
-        let (r_on, c_on, p_on, before_on) = run(true);
-        assert!(r_on.unwrap());
-        assert_eq!(c_on.surfaces.len(), 1);
-        assert_eq!(corner_state(&p_on, &c_on), before_on);
+        // the corner patch passes it on too, with no surface and no face
+        let (mut pseudo, mut c) = arc_chamfer_corner(Some(missing_face));
+        c.extended_surface_patch = false;
+        let r = with_env(&mut pseudo, |env| c.create_corner_patch_default(env));
+        let e = r.unwrap_err();
+        assert!(is_missing_face(&e), "{e:?}");
+        assert!(c.surfaces.is_empty());
+        assert!(c.surface_faces.is_empty());
+    }
 
-        let (s_off, s_on) = (&c_off.surfaces[0], &c_on.surfaces[0]);
-        assert_eq!(
-            std::mem::discriminant(s_off.kind()),
-            std::mem::discriminant(s_on.kind())
-        );
-        assert!(s_off.approx_eq(&Kernel::default(), s_on).unwrap());
+    /// A chamfer of three real lines makes one surface, reported `TRUE`, that lies in
+    /// the plane through the corner's three vertices (closed form: the signed distance
+    /// of each evaluated point from that plane), with the corner's state unchanged.
+    #[test]
+    fn analytic_corner_surface_makes_the_chamfer_plane() {
+        let (mut pseudo, mut c) = line_chamfer_corner(3);
+        let before = corner_state(&pseudo, &c);
+        let p: Vec<Point3> = (0..3)
+            .map(|i| pseudo.vertex_point(c.vertices[i]).unwrap())
+            .collect();
+        let r = with_env(&mut pseudo, |env| c.make_analytic_corner_surface(env));
+        assert!(r.unwrap());
+        assert_eq!(c.surfaces.len(), 1);
+        assert_eq!(corner_state(&pseudo, &c), before);
+
+        let s = &c.surfaces[0];
+        assert!(matches!(s.kind(), SurfaceKind::Plane(_)), "{:?}", s.kind());
+        let n = (p[1] - p[0]).cross(p[2] - p[0]);
+        let n_len = n.length();
+        assert!(n_len > 0.0);
+        let scale = p
+            .iter()
+            .map(|q| (*q - Point3::ZERO).length())
+            .fold(1.0, f64::max);
         let k = Kernel::default();
         for uv in [
             Point2::new(0.0, 0.0),
             Point2::new(0.3, 0.7),
             Point2::new(-0.4, 0.2),
         ] {
-            let a = s_off.evaluate_point(&k, uv).unwrap();
-            let b = s_on.evaluate_point(&k, uv).unwrap();
-            assert!(a.distance(b) <= 1e-12, "{uv:?}: {a:?} vs {b:?}");
+            let q = s.evaluate_point(&k, uv).unwrap();
+            let dist = (q - p[0]).dot(n) / n_len;
+            assert!(
+                dist.abs() <= 1e-12 * scale,
+                "{uv:?}: {q:?} is {dist} off the plane"
+            );
         }
     }
 
@@ -2317,6 +2379,46 @@ mod tests {
         let (mut pseudo, mut c) = loop_corner(FilletCornerKind::ConvexNByN, 4);
         let r = with_env(&mut pseudo, |env| c.make_variable_radius_fillet(env));
         assert!(r.is_err_and(|e| e.upstream_status().is_some()));
+    }
+
+    /// A variable-radius conversion whose re-solve fails is reported as before (the
+    /// failure `unable` builds, here the conversion's `sm_err` failure: operation, phrase,
+    /// status), keeping the re-solve's error as its cause, whose class it takes (#13790).
+    #[test]
+    fn a_failed_variable_radius_re_solve_keeps_its_error() {
+        use crate::blend::fillet_executive::NoRoomReason;
+        use crate::error::blend::BlendFailure;
+        let phrase = "the corner cannot be made a variable-radius fillet";
+        for cause in [
+            SolidError::blend(
+                "re-solve",
+                BlendFailure::NoRoom(NoRoomReason::BallDoesNotFit),
+            ),
+            SolidError::blend("re-solve", BlendFailure::StageFailed),
+            SolidError::sm_err("re-solve"),
+        ] {
+            let sm_err = || SolidError::blend_failed(OP_VAR_RAD, phrase);
+            let e = super::super::p1::re_solved(Err(cause.clone()), sm_err).unwrap_err();
+            assert_eq!(e.operation(), OP_VAR_RAD, "{e:?}");
+            assert_eq!(
+                e.blend_failure(),
+                Some(&BlendFailure::Failed(phrase)),
+                "{e:?}"
+            );
+            assert_eq!(e.sm_status(), Some(crate::error::SM_ERR), "{e:?}");
+            assert_eq!(
+                e.kind(),
+                crate::error::ErrorKind::of_status(crate::error::SM_ERR),
+                "{e:?}"
+            );
+            assert_eq!(e.cause(), Some(&cause), "{e:?}");
+            assert_eq!(
+                e.to_string(),
+                format!("{OP_VAR_RAD}: {phrase}; caused by {cause}")
+            );
+            assert_eq!(e.is_defect(), cause.is_defect(), "{e:?}");
+            assert_eq!(e.is_refusal(), cause.is_refusal(), "{e:?}");
+        }
     }
 
     #[test]

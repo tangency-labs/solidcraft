@@ -92,7 +92,7 @@ impl Model {
             }
             let index = match feature.kind {
                 FeatureKind::Sketch { .. } => &mut sketches,
-                FeatureKind::ConstructionPlane { .. } | FeatureKind::ConstructionAxis { .. } | FeatureKind::ConstructionPoint { .. } => &mut planes,
+                _ if feature.kind.is_construction() => &mut planes,
                 _ => continue,
             };
             index.entry(feature.component).or_default().push(i);
@@ -258,6 +258,11 @@ impl Model {
             }
             self.body_paths = Some(paths);
         }
+        self.placed_path(body)
+    }
+
+    /// [`Model::body_path`] once its walk has run for this model (else None).
+    pub fn placed_path(&self, body: &str) -> Option<Vec<u64>> {
         self.body_paths.as_ref()?.get(body).cloned()
     }
 

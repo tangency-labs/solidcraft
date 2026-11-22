@@ -194,7 +194,7 @@ fn whole_face(surface: solidcore::surface::surface::Surface) -> Body {
         b.refresh_cached_topology();
         Ok(b)
     })
-    .map(Body::new)
+    .map(Body::from_kernel)
     .unwrap()
 }
 
