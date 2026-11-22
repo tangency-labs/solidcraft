@@ -342,7 +342,7 @@ pub enum SurfaceFailure {
     /// [`ErrorKind::InvalidInput`].
     GeneratorOnAxis,
     /// The generator parameter given is outside the generator's natural interval.
-    /// [`ErrorKind::InvalidInput`].
+    /// [`ErrorKind::OutsideDomain`].
     ParameterOutsideGenerator,
     /// The angle from the surface's start direction to the plane's direction about the
     /// axis could not be measured (the measure's error is the cause). Class `failed`.
@@ -503,8 +503,7 @@ impl SurfaceFailure {
             | Self::DegenerateIsoCurve
             | Self::LeanNotFinite
             | Self::ToleranceNotADistance
-            | Self::GeneratorOnAxis
-            | Self::ParameterOutsideGenerator => ErrorKind::InvalidInput,
+            | Self::GeneratorOnAxis => ErrorKind::InvalidInput,
             Self::BoxOutsideBendHalfSpace { .. }
             | Self::BoxOutsideZeroPeriod { .. }
             | Self::PointOutsideVolumeDomain { .. }
@@ -513,7 +512,8 @@ impl SurfaceFailure {
             | Self::PseudoBoxOutsideDomain
             | Self::TrimDomainOutside
             | Self::DomainPastApex
-            | Self::PointOutsideSweep => ErrorKind::OutsideDomain,
+            | Self::PointOutsideSweep
+            | Self::ParameterOutsideGenerator => ErrorKind::OutsideDomain,
             Self::IsoCurveKindNotLiftable
             | Self::DerivativeCombinationUnsupported { .. }
             | Self::PlainVolume
@@ -1213,7 +1213,7 @@ mod tests {
             (
                 SurfaceFailure::ParameterOutsideGenerator,
                 SM_ERR,
-                ErrorKind::InvalidInput,
+                ErrorKind::OutsideDomain,
             ),
             (SurfaceFailure::AngleNotMeasured, SM_ERR, ErrorKind::Failed),
             (
