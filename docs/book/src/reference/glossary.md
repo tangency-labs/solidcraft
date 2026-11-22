@@ -391,7 +391,7 @@ overlap are all multi-trims; `frame.multi_trim` sets how one corner of a frame i
 ### note
 
 Text on a sheet or a view of a drawing, in its fields and its words, that may point at the model
-with a leader. A note on a view moves with the view.
+with a leader. A note on a view moves with the view. Its alignment (left, centre or right, as a title block's) says which end of its text sits at its place, each line standing that way. A note saved before alignments has none: its block is centred and its lines start at the block's left edge, as they always did.
 
 - **In SolidCraft:** `drawing.note.add`, `drawing.note.edit` and `drawing.note.inspect`; a drawing's
   `notes`.

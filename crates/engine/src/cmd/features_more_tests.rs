@@ -848,6 +848,36 @@ fn emboss_text_wraps_round_a_whole_tube_outside_and_in_its_bore() {
     }
 }
 
+/// Text wraps onto the outside of a half tube, a wall that is not a whole cylinder (#12029):
+/// emboss and deboss change the volume as on a whole tube.
+#[test]
+fn emboss_text_wraps_onto_a_half_tube() {
+    let mut flat = Session::default();
+    run(&mut flat, "solid.box", json!({"length": 60, "width": 60, "height": 20, "body_name": "Flat"}));
+    let flat_before = volume(&mut flat);
+    run(&mut flat, "sketch.create", json!({"plane": {"origin": [20, 20, 20], "x_dir": [1, 0, 0], "y_dir": [0, 1, 0]}, "name": "Text"}));
+    run(&mut flat, "sketch.text", json!({"text": "Emboss", "at": [-10, 10], "height": 6}));
+    run(&mut flat, "sketch.finish", json!({}));
+    run(&mut flat, "solid.emboss", json!({"sketch": "Text", "depth": 1}));
+    let area = volume(&mut flat) - flat_before;
+    for (mode, rr) in [("emboss", 21.0_f64), ("deboss", 19.)] {
+        let mut s = Session::default();
+        run(&mut s, "solid.cylinder", json!({"radius": 20, "height": 30, "body_name": "Tube"}));
+        run(&mut s, "solid.cylinder", json!({"radius": 16, "height": 30, "operation": "cut", "targets": ["Tube"]}));
+        run(&mut s, "solid.box", json!({"length": 50, "width": 25, "height": 40, "corner": [-25, -25, -5], "operation": "cut", "targets": ["Tube"]}));
+        run(&mut s, "sketch.create", json!({"plane": {"origin": [0, 20, 0], "x_dir": [-1, 0, 0], "y_dir": [0, 0, 1]}, "name": "Text"}));
+        run(&mut s, "sketch.text", json!({"text": "Emboss", "at": [-10, 10], "height": 6}));
+        run(&mut s, "sketch.finish", json!({}));
+        let before = volume(&mut s);
+        run(&mut s, "solid.emboss", json!({"sketch": "Text", "face": [0.0, 20.0, 13.0], "depth": 1, "mode": mode}));
+        assert_eq!(s.model.state().body("Tube").unwrap().body.shell_count(), 1);
+        // Signed: an emboss adds material and a deboss takes it away.
+        let change = volume(&mut s) - before;
+        let want = area * (rr * rr - 400.) / 40.;
+        assert!((change - want).abs() < 1e-4 * want.abs(), "{mode}: {change} vs {want}");
+    }
+}
+
 #[test]
 fn concave_cylinder_emboss_and_deboss_with_sketch_profile_and_text() {
     let mut s = Session::default();
@@ -3746,4 +3776,25 @@ fn a_narrow_profile_across_a_wall_along_the_extrusion_keeps_the_trim_to_the_body
         outside * 10.0,
         0.2 * 2.0
     );
+}
+
+/// A 3° draft on a pocket wall whose vertical corners carry 4 mm rounds drafts the wall with the
+/// rounds following, or refuses and says what to do; never a bare kernel status. With sharp
+/// corners it builds; with the rounds it is "SMLib failed (status 1001)" today
+/// ([T-97](https://tickets.solidcraft.io/t/97), #17592).
+#[test]
+fn a_draft_on_a_pocket_wall_beside_rounds_never_fails_with_a_bare_status() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 90, "width": 70, "height": 50, "body_name": "Block"}));
+    run(&mut s, "solid.box", json!({"length": 50, "width": 30, "height": 36, "corner": [20, 20, 14], "operation": "cut", "targets": ["Block"]}));
+    run(&mut s, "solid.fillet", json!({"edges": [[20, 20, 35], [70, 20, 35], [70, 50, 35], [20, 50, 35]], "radius": 4}));
+    let draft = json!({"faces": [[45, 20, 35]], "angle": "3 deg", "neutral": {"origin": [0, 0, 14], "normal": [0, 0, 1]}});
+    match s.execute("solid.draft", &draft) {
+        Ok(_) => {
+            let state = s.model.state();
+            let b = &state.body("Block").unwrap().body;
+            assert!(b.validity().is_empty(), "{:?}", b.validity());
+        }
+        Err(e) => assert!(!e.to_string().contains("status 1001"), "{e}"),
+    }
 }

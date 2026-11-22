@@ -66,8 +66,11 @@ struct Quadric {
     kind: QuadricKind,
 }
 
-/// A quadric's kind, for its distance bound: a plane's `|f|` (its normal unit), a sphere's
-/// `|f| / r`, a cylinder's or cone's `|f| / R`, `R` its least radius along the span.
+/// A quadric's kind, for its distance bound: a plane's `|f|` (its normal unit); a sphere's
+/// and a cylinder's or cone's from `f = (d - R)(d + R)`, `d` the distance from the centre or
+/// the axis and `R` the radius (a cone's least along the span), by [`radial_off`], a cone's
+/// then over `sqrt(1 + tan^2)`, as its surface is that far from a point `d - R` off it
+/// radially.
 enum QuadricKind {
     Plane,
     Sphere {
@@ -194,6 +197,23 @@ fn de_casteljau(pts: &[[f64; 4]], u: f64, upper: bool) -> Vec<[f64; 4]> {
     }
 }
 
+/// Not upstream (#20691): a bound of `|d - r|` from `|f| <= f_over` where
+/// `f = (d - r)(d + r)`, `d >= 0`, `r >= r_min > 0`: `|d - r| = |f| / (d + r)` and
+/// `d + r >= max(r_min, 2 r_min - |d - r|)`, so `|d - r| (2 r_min - |d - r|) <= f_over`.
+/// Where `f_over < r_min^2` that is `|d - r| <= f_over / (r_min + sqrt(r_min^2 - f_over))`
+/// (the other root exceeds `r_min`, where `|f| >= |d - r| r_min > r_min^2`), about
+/// `f_over / 2 r_min`; else `f_over / r_min`. Returns the bound, raised by `gamma(6)` for
+/// the rounding of its five operations and that raise, and whether `|d - r| < r_min`.
+fn radial_off(f_over: f64, r_min: f64) -> (f64, bool) {
+    let disc = r_min * r_min - f_over;
+    let raise = 1.0 + crate::nurbs::math::gamma(6);
+    if disc > 0.0 {
+        (f_over / (r_min + disc.sqrt()) * raise, true)
+    } else {
+        (f_over / r_min * raise, false)
+    }
+}
+
 /// Not upstream (#3062): a certified bound of how far `curve` over `[from, to]` (inside one
 /// of its spans) lies from each of `surfaces` (planes, cylinders, cones, spheres), with no
 /// sampling. The span's Bézier form, its homogeneous control points `(X, W)` cut to the
@@ -295,7 +315,7 @@ fn span_off_surfaces(
         let f_over = f_bound / (w_min * w_min);
         let off = match q.kind {
             QuadricKind::Plane => f_over,
-            QuadricKind::Sphere { radius } => f_over / radius,
+            QuadricKind::Sphere { radius } => radial_off(f_over, radius).0,
             QuadricKind::Cone {
                 axis,
                 radius,
@@ -316,7 +336,12 @@ fn span_off_surfaces(
                 if !(r_min > 0.0) {
                     return None;
                 }
-                f_over / r_min
+                // Within `r_min` of the axis's distance, the point's foot on its generator
+                // line in its half plane through the axis lies on the cone, not past its apex.
+                match radial_off(f_over, r_min) {
+                    (radial, true) => radial / tan_angle.mul_add(tan_angle, 1.0).sqrt(),
+                    (radial, false) => radial,
+                }
             }
         };
         worst = worst.max(off);
@@ -1216,6 +1241,39 @@ mod tests {
         assert!(on <= 1e-14, "{on:e}");
         let off = span_off_surfaces(&arc, a, b, [&plane(-2e-4, z), &plane(0.0, z)]).unwrap();
         assert!((2e-4..=4e-4 * (1.0 + 1e-12)).contains(&off), "{off:e}");
+    }
+
+    /// #20691: a circle `d` off a cylinder, a sphere or a 45° cone of radius 2 radially is
+    /// bounded off it by its distance, `d` (`d / sqrt 2` for the cone), not twice that: the
+    /// quadric's `f` is `(r + d)^2 - r^2`, about `2 r d`, which the bound took over `r`.
+    /// The groove of an M1 thread on a chamfered boss meets the chamfer's cone in a circle
+    /// on its root cylinder, continued 2.9e-6 to its vertex, and the doubled bound, 5.9e-6,
+    /// refused it against its tolerance 5e-6.
+    #[test]
+    fn a_span_off_a_quadric_is_bounded_by_its_distance() {
+        use crate::geom::axis2_placement::Axis2Placement;
+        use crate::surface::cone::p1::Cone;
+        use crate::surface::sphere::Sphere;
+        use crate::surface::surface::Surface;
+        let k = Kernel::default();
+        let frame = Axis2Placement::new(Point3::ZERO, Vec3::X, Vec3::Y);
+        let (r, d) = (2.0, 1e-4);
+        let arc = crate::primitive::api_curves::create_arc(Point3::ZERO, r + d, 0.0, 90.0).unwrap();
+        let arc = Curve::from(arc);
+        let ivl = arc.natural_interval();
+        let (a, b) = (ivl.evaluate(0.1), ivl.evaluate(0.12));
+        let cylinder = Surface::from(Cone::create_canonical_cylinder(&k, &frame, r).unwrap());
+        let sphere = Surface::from(Sphere::create_canonical(&k, &frame, r).unwrap());
+        let cone = Surface::from(
+            Cone::create_canonical_with_semi_angle(&k, &frame, r, 45.0, Some(1.0), false, false)
+                .unwrap(),
+        );
+        for (surface, off) in [(&cylinder, d), (&sphere, d), (&cone, d / 2.0_f64.sqrt())] {
+            let bound = span_off_surfaces(&arc, a, b, [surface, surface]).unwrap();
+            // at least the distance; above it only by the hull of the span's Bernstein
+            // coefficients (2% here), well under the doubled bound
+            assert!((off..=off * 1.05).contains(&bound), "{bound:e} for {off:e}");
+        }
     }
 
     /// A clamped cubic with three spans (inner knots 1 and 2) over `[0, 3]`.

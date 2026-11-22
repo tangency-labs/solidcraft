@@ -103,7 +103,7 @@ pub fn tick(app: &mut SolveApp, wait: bool) {
     crate::operations::ended(app, &format!("save:{command}"), outcome);
     if cancelled {
         // Not an error: the file is as it was, and the design still has its changes to save.
-        let name = solidcraft_ui_text::tr_label(crate::command_label(command)).to_string();
+        let name = solidcraft_ui_text::tr_command(command, crate::command_label(command)).to_string();
         app.set_status(solidcraft_ui_text::format("operations.cancelled", &[("name", &name)]), false);
     } else {
         app.finish_command(command, &r);

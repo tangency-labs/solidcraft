@@ -3,6 +3,7 @@ use std::sync::Arc;
 use serde_json::{Value, json};
 use solidcraft_doc::MAX_PLACEMENT_DEPTH;
 use solidcraft_doc::drawing::DEFAULT_DPI;
+use solidcraft_doc::drawing::projection_symbol::title_block_paper;
 use solidcraft_doc::drawing::view::{View, ViewKind, ViewPlace};
 use solidcraft_doc::drawing_view::{Exploded, ViewDirection, ViewOverrides};
 use solidcraft_geom::cell::Projection;
@@ -91,6 +92,47 @@ pub(crate) fn nest(s: &mut Session, level: u64) {
     // From JSON, so a field another change adds to occurrences takes its default here.
     let occurrence = json!({"id": 5000 + level, "component": component, "parent": parent, "name": name});
     doc.occurrences.push(serde_json::from_value(occurrence).unwrap());
+}
+
+/// `change` run on the model with the drawing open closed, as the model can only be changed then,
+/// and the drawing opened again; what `change` gave. Both through the commands, so the lines a
+/// close keeps for the reopen are kept.
+pub(crate) fn with_the_model<R>(s: &mut Session, change: impl FnOnce(&mut Session) -> R) -> R {
+    let drawing = ids::encode(s.open_drawing.unwrap());
+    run(s, "drawing.close", json!({}));
+    let changed = change(s);
+    run(s, "drawing.open", json!({"drawing": drawing}));
+    changed
+}
+
+/// Model command `id` run with `p` as [`with_the_model`] runs a change: its reply.
+pub(crate) fn in_the_model(s: &mut Session, id: &str, p: Value) -> Value {
+    with_the_model(s, |s| run(s, id, p))
+}
+
+/// `s` saved to a file called `file` (its extension picks the form) and opened from it in a new
+/// session, with its drawing `drawing` open there.
+pub(crate) fn reopened(s: &mut Session, drawing: u64, file: &str) -> Session {
+    // A folder of each call's own: tests run side by side in one process.
+    static CALLS: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+    let folder = crate::tests::Folder::new(&format!("reopened-{}", CALLS.fetch_add(1, std::sync::atomic::Ordering::Relaxed)));
+    let path = folder.path(file);
+    run(s, "file.save", json!({"path": path}));
+    let mut opened = Session::default();
+    run(&mut opened, "doc.open", json!({"path": path}));
+    run(&mut opened, "drawing.open", json!({"drawing": ids::encode(drawing)}));
+    opened
+}
+
+/// The drawing milestone's plate (acceptance case 84, #4894) by its script: 100 x 80 x 20 mm with
+/// two bores of 10, sized from its parameters, and a drawing of it, open, with a top view at 1:2 on
+/// its A3 sheet. The session and the top view's reply.
+pub(crate) fn milestone_plate_script() -> (Session, Value) {
+    let mut s = Session::default();
+    let script: Value = serde_json::from_str(include_str!("../../../examples/acceptance/drawing_m2.json")).unwrap();
+    let mut made = s.run_script(&script).unwrap();
+    let top = made.pop().unwrap();
+    (s, top)
 }
 
 /// Part `Part` with a 10 mm cube `Cube` from the origin, placed twice: the second copy 30 mm along
@@ -555,7 +597,8 @@ fn a_sheets_title_block_is_drawn_after_its_views() {
     assert_eq!(scene.groups.iter().map(|g| (g.object, g.kind)).collect::<Vec<_>>(), expected);
     let d = s.drawing("test").unwrap();
     let record = d.sheets.iter().find(|x| x.id == sheet).unwrap();
-    let drawn = block.layout(&record.border.as_ref().unwrap().layout(&record.sheet).unwrap()).unwrap().paper(sheet, Projection::Third);
+    let placed = block.layout(&record.border.as_ref().unwrap().layout(&record.sheet).unwrap()).unwrap();
+    let drawn = title_block_paper(&placed, sheet, Projection::Third);
     assert_eq!(serde_json::to_string(&without_text(scene.groups.last().unwrap())).unwrap(), serde_json::to_string(&drawn).unwrap());
     let reply = run(&mut s, CMD, json!({"sheet": ids::encode(sheet)}));
     let schema = output_schema_for::<SheetSceneResult>();
@@ -581,7 +624,7 @@ fn the_title_blocks_symbol_follows_the_drawings_projection() {
         let d = s.drawing("test").unwrap();
         let record = d.sheets.iter().find(|x| x.id == sheet).unwrap();
         let border = record.border.as_ref().unwrap().layout(&record.sheet).unwrap();
-        serde_json::to_string(&record.title_block.as_ref().unwrap().layout(&border).unwrap().paper(sheet, projection)).unwrap()
+        serde_json::to_string(&title_block_paper(&record.title_block.as_ref().unwrap().layout(&border).unwrap(), sheet, projection)).unwrap()
     };
     let third = settled(&mut s, sheet);
     assert_eq!(serde_json::to_string(&without_text(third.scene.groups.last().unwrap())).unwrap(), block_of(&s, Projection::Third));
@@ -2613,13 +2656,10 @@ fn out_of_date_dimensions(reply: &Value) -> Vec<Value> {
 fn held_after(mark: fn(&mut Session, u64) -> u64, change: impl FnOnce(&mut Session)) -> (Session, u64, u64) {
     let (mut s, sheet, [front, _]) = front_and_top();
     let id = mark(&mut s, front);
-    let drawing = json!({"drawing": ids::encode(s.open_drawing.unwrap())});
     run(&mut s, "drawing.set", json!({"updates": "deferred"}));
     run(&mut s, "drawing.update", json!({}));
     settled(&mut s, sheet);
-    run(&mut s, "drawing.close", json!({}));
-    change(&mut s);
-    run(&mut s, "drawing.open", drawing);
+    with_the_model(&mut s, change);
     (s, sheet, id)
 }
 
@@ -3459,15 +3499,6 @@ fn cube_on_block() -> (Session, u64, Value) {
     (s, sheet, cube)
 }
 
-/// Runs model command `id` with the drawing closed, as the model can only be changed then, and
-/// opens the drawing again.
-fn in_the_model(s: &mut Session, id: &str, p: Value) {
-    let drawing = ids::encode(s.open_drawing.unwrap());
-    run(s, "drawing.close", json!({}));
-    run(s, id, p);
-    run(s, "drawing.open", json!({"drawing": drawing}));
-}
-
 /// Lines worked out beside the window (#4892 B7) on another thread are taken once they come back,
 /// a view at a time, until the provider's scene is the built one, byte for byte; then nothing is
 /// asked for. Taking them changes nothing authored and adds no undo step.
@@ -3751,11 +3782,11 @@ fn notes_are_drawn_on_the_sheet_and_on_their_views() {
     let (texts, tips) = text_and_tips(group_of(&built.scene, edge));
     assert_eq!(texts, vec!["Deburr".to_string()]);
     assert!(tips.len() == 1 && tips[0].dist(Vec2::new(150.0, 145.0)) < 1e-9, "{tips:?}");
-    // Its text centred on its place from the view's centre, (150, 150) + (60, -40): one line, its
-    // capitals 3.5 mm high, so its baseline 1.75 mm below the middle.
+    // Its text starts at its place from the view's centre, (150, 150) + (60, -40), as a new note's
+    // does (left): one line, its capitals 3.5 mm high, so its baseline 1.75 mm below the middle.
     let starts: Vec<Vec2> =
         group_of(&built.scene, edge).items.iter().filter_map(|i| if let Item::Text(run) = i { Some(run.origin) } else { None }).collect();
-    assert!(starts.len() == 1 && (starts[0].y - 108.25).abs() < 1e-9 && starts[0].x < 210.0, "{starts:?}");
+    assert!(starts.len() == 1 && (starts[0].y - 108.25).abs() < 1e-9 && (starts[0].x - 210.0).abs() < 1e-9, "{starts:?}");
     assert!(built.notes.iter().all(|n| n.drawn && n.status == solidcraft_doc::drawing::dimension::Status::Ok), "{:?}", built.notes);
     assert_eq!(built.notes.last().map(|n| (n.note, n.view)), Some((general, None)));
 
@@ -3770,7 +3801,11 @@ fn notes_are_drawn_on_the_sheet_and_on_their_views() {
     assert!(notes.contains(&(json!(ids::encode(general)), None)) && notes.contains(&(json!(ids::encode(edge)), Some(json!(ids::encode(front))))));
     let export = run(&mut s, "drawing.export", json!({"sheet": ids::encode(sheet)}));
     assert_eq!(export["notes"], reply["notes"]);
-    let hit = run(&mut s, "drawing.scene.hit", json!({"sheet": ids::encode(sheet), "point_mm": [60.0, 40.0]}));
+    // The general note starts at its place, (60, 40), so the middle of its text is half its width on.
+    let ends =
+        group_of(&built.scene, general).items.iter().filter_map(|i| if let Item::Text(run) = i { Some(run.origin.x + run.reach()) } else { None });
+    let middle = 60.0 + (ends.fold(0.0, f64::max) - 60.0) / 2.0;
+    let hit = run(&mut s, "drawing.scene.hit", json!({"sheet": ids::encode(sheet), "point_mm": [middle, 40.0]}));
     assert_eq!((&hit["hit"]["object"], &hit["hit"]["kind"]), (&json!(ids::encode(general)), &json!("note")), "{hit}");
 }
 
@@ -4019,7 +4054,7 @@ fn sheet_sketch_provider_extract_is_read_only_and_steps_one_sketch_at_a_time() {
     assert_eq!((s.drawing_scenes.sketch_solves, s.drawing_scenes.projections), (2, 0));
     assert!(Arc::ptr_eq(&doc, &s.doc) && Arc::ptr_eq(&model, &s.model.state()));
     assert_eq!((s.undo.len(), s.redo.len(), s.evaluations, s.revision), history);
-    assert!(s.model.is_stale() && s.active_sketch == Some(model_sketch));
+    assert!(s.active_sketch.is_none(), "starting the sheet sketch finished the model sketch before the extracts ran");
 }
 
 #[test]
