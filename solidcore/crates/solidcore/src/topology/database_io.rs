@@ -1378,6 +1378,9 @@ mod tests {
         let mut db = DatabaseReader::new();
         assert!(named(db.read_longs(1).map(drop)));
         assert!(named(db.read_type(false).map(drop)));
+        // An ASCII reader reads the type line from the stream itself.
+        let mut ascii = DatabaseReader::with_file_type(FileType::Ascii);
+        assert!(named(ascii.read_type(false).map(drop)));
     }
 
     #[test]

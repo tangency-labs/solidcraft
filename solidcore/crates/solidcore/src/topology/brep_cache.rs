@@ -903,7 +903,8 @@ mod tests {
         open.add_edge(v0, v1).unwrap();
         assert!(cache
             .build_trees(&k, CacheSource::Brep(&open), |o| o, &arena_identity)
-            .is_err_and(|e| e.upstream_status() == Some(1006)));
+            .is_err_and(|e| e.upstream_status() == Some(1006)
+                && e.topology_failure() == Some(&TopologyFailure::EdgeWithoutCurve)));
         assert!(
             cache.vertex_tree().is_none()
                 && cache.curve_tree().is_none()

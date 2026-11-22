@@ -2477,6 +2477,15 @@ mod tests {
         let c = c.unwrap();
         assert_eq!(c.object.type_code(), BSPLINE_CURVE_TYPE);
         assert_eq!(attrs2.store.attributes(c.key).len(), 1);
+        // the same record cut before the line's end: the line skip fails, so no placeholder
+        // is made and the listed slot stays empty
+        let mut db = ascii_reader(text.trim_end_matches('\n'));
+        let mut store3 = AttributeStore::new();
+        let mut all3: Vec<Option<AttributeHandle>> = vec![None];
+        let mut attrs3 = AttributeSink::new(&mut store3, &mut all3, 0);
+        assert!(read_curve_from_db(&k, 3, 31, &mut attrs3, &mut db, true)
+            .is_err_and(|e| e.upstream_status() == Some(1006)
+                && e.topology_failure() == Some(&TopologyFailure::AttributeSlotEmpty)));
     }
 
     #[test]
