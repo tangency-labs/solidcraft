@@ -43,14 +43,17 @@ pub(crate) fn normalize_request(session: &solidcraft_engine::Session, method: &s
 }
 
 /// Whether an agent's request runs a plugin's code: `plugin.run` (a `<plugin>.<entry>` call is
-/// one once normalized), `file.import`, or `doc.open` of a file an installed importer opens, alone
-/// or as a batch step. The chat asks before such a request in every mode, whatever was allowed
-/// before: running a plugin's code needs the user's go each time.
+/// one once normalized), `file.import`, `doc.open` of a file an installed importer opens, or
+/// `file.export` through an installed exporter, alone or as a batch step. The chat asks before
+/// such a request in every mode, whatever was allowed before: running a plugin's code needs the
+/// user's go each time.
 pub(crate) fn runs_plugin_code(session: &solidcraft_engine::Session, method: &str, params: &serde_json::Value) -> bool {
     let step = |step: &serde_json::Value| {
         let Some(command) = step.get("command").or_else(|| step.get("id")).and_then(serde_json::Value::as_str) else { return false };
         let params = step.get("params").unwrap_or(&serde_json::Value::Null);
-        command.eq_ignore_ascii_case("plugin.run") || solidcraft_engine::cmd::runs_plugin_importer(session, command, params)
+        command.eq_ignore_ascii_case("plugin.run")
+            || solidcraft_engine::cmd::runs_plugin_importer(session, command, params)
+            || solidcraft_engine::cmd::runs_plugin_exporter(session, command, params)
     };
     match method {
         "engine.execute" | "command" => step(params),
