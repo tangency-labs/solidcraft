@@ -2888,11 +2888,12 @@ mod tests {
     }
 
     /// A newer build's container keeps exactly the blobs that what this build can't read names,
-    /// each as a whole string at any depth of an unread feature, field or section (not an object's
-    /// key, not part of a longer text). Which blobs those are is found in one walk of what is kept,
-    /// not one walk for each part. With these thousands of parts and an unread feature holding a
-    /// long list, checking each part against all of it took seconds, and a hostile file of under
-    /// 1 MiB took minutes.
+    /// each as a whole string at any depth (not an object's key, not part of a longer text). What
+    /// this build can't read here is a feature, fields it doesn't know, a section it leaves out
+    /// whole and an element it leaves out of a list. Which blobs those name is found in one walk of
+    /// what is kept, not one walk for each part. With these thousands of parts and an unread
+    /// feature holding a long list, checking each part against all of it took seconds, and a
+    /// crafted file of about 1 MB took minutes.
     #[test]
     fn a_newer_builds_container_keeps_exactly_the_blobs_its_unread_parts_name() {
         let mut entries = parts(&write_design_container(&document()).unwrap());
@@ -2912,18 +2913,28 @@ mod tests {
             "note": "blobs/2 is not a name",
         });
         metadata["features"].as_array_mut().unwrap().push(future);
-        // A field this build doesn't know names every fifth, and a section it doesn't know one more.
+        // A field this build doesn't know names every fifth, and one it doesn't know at the top names
+        // blobs/4. Typed reading drops both, so they are kept as fields.
         metadata["features"][0]["future_field"] = json!({"refs": every(5)});
-        metadata["future_section"] = json!([[{"part": "blobs/4"}]]);
+        metadata["future_top_field"] = json!([[{"part": "blobs/4"}]]);
+        // A point cloud this build can't read leaves its section out whole, and only it names
+        // blobs/7.
+        metadata["point_clouds"] = json!([{"id": 9001, "name": "Scan", "points_blob": "blobs/7", "complex": {"columns": {"nz": "packed"}}}]);
+        // A parameter this build can't read is left out of the list, and only it names blobs/8.
+        metadata["params"].as_array_mut().unwrap().push(json!({"name": "Lookup", "expression": {"kind": "table", "rows": ["blobs/8"]}}));
         entries.insert("document.json".into(), serde_json::to_vec(&metadata).unwrap());
         for blob in &blobs {
             entries.insert(blob.clone(), Vec::new());
         }
 
         let opened = crate::read_design(&package(&entries)).unwrap();
-        let kept: BTreeSet<&str> = opened.newer_file.as_ref().unwrap().parts.iter().map(|(name, _)| name.as_str()).collect();
+        let file = opened.newer_file.as_ref().unwrap();
+        let unread = &file.not_understood;
+        assert!(unread.iter().any(|what| what.starts_with("section `point_clouds`")), "{unread:?}");
+        assert!(unread.iter().any(|what| what.starts_with("parameter `Lookup`")), "{unread:?}");
+        let kept: BTreeSet<&str> = file.parts.iter().map(|(name, _)| name.as_str()).collect();
         let named: BTreeSet<&str> =
-            blobs.iter().enumerate().filter(|(i, _)| i % 3 == 0 || i % 5 == 0 || *i == 4).map(|(_, blob)| blob.as_str()).collect();
+            blobs.iter().enumerate().filter(|(i, _)| i % 3 == 0 || i % 5 == 0 || [4, 7, 8].contains(i)).map(|(_, blob)| blob.as_str()).collect();
         assert_eq!(kept, named);
     }
 
