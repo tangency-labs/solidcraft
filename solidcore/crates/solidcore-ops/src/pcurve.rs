@@ -163,18 +163,23 @@ pub fn exact_pcurves(
         .collect())
 }
 
-/// A proved bound (mm) of how far a B-spline edge `curve` on its `interval` lies from the
-/// boundary curve of the polynomial spline patch `surface` it is a whole copy of, `None` where
-/// it is not proved within `cap` ([`solidcore::eval::pcurve::boundary_iso`]): the importer's edge
-/// covers it before the edge's pcurve is asked for.
+/// A proved bound (mm) of how far a B-spline or line edge `curve` on its `interval` lies from
+/// the boundary curve of the polynomial spline patch `surface` it is a whole copy of, `None`
+/// where it is not proved, or where [`exact_pcurves`] would not then take the straight line along
+/// that boundary for it ([`solidcore::eval::pcurve::boundary_covered`]): the importer's edge
+/// covers it (`margin` times, within `max_tolerance`, over its `tolerance`, the largest of the
+/// face's and its own) before its pcurve is asked for, and only for an edge that gets the line.
 ///
 /// # Errors
-/// [`Error::Invalid`] for a malformed record, an interval or a `cap` that is not valid.
+/// [`Error::Invalid`] for a malformed record, an interval, a tolerance, a margin or a maximum that
+/// is not valid.
 pub fn boundary_gap(
     surface: &Surface,
     curve: &Curve,
     interval: [f64; 2],
-    cap: f64,
+    tolerance: f64,
+    margin: f64,
+    max_tolerance: f64,
 ) -> Result<Option<f64>> {
     let invalid = |e: solidcore_record::brep::Invalid| Error::Invalid(e.to_string());
     let mut budget = Budget::input();
@@ -183,7 +188,7 @@ pub fn boundary_gap(
     check_interval(&interval, curve.natural()).map_err(invalid)?;
     let surface = solidcore_convert::surface(surface).map_err(invalid)?;
     let curve = solidcore_convert::curve(curve).map_err(invalid)?;
-    Ok(k::boundary_iso(&surface, &curve, interval, cap)?.map(|b| b.gap))
+    k::boundary_covered(&surface, &curve, interval, tolerance, margin, max_tolerance)
 }
 
 /// The pcurve on a cylinder or cone face `label` (on its NURBS form `form` when the face has

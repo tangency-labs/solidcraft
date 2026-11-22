@@ -546,6 +546,8 @@ impl<'t> Assembly<'t> {
     /// holds the bound a proof of that puts on its distance from them ([`pcurve::boundary_gap`]),
     /// before the pcurves are asked for: the pcurve is then the straight line along the boundary,
     /// whatever the few micrometres the file's edge stands off it, with no kernel in between.
+    /// Only an edge that gets that line is raised (the call asks for it at the raised tolerance,
+    /// as the pcurves are asked for), so none is held wider for a pcurve the kernel makes.
     /// Nothing else is measured on a spline (see [`Self::measure_edges`]); an edge the proof does
     /// not cover is left as it is, and its pcurve is made as it was.
     fn measure_boundary_edges(&mut self, surface: &BSurface, edge_loops: &[Vec<(u32, bool)>]) -> R<()> {
@@ -556,9 +558,9 @@ impl<'t> Assembly<'t> {
                     Some((c, i)) => (c, *i),
                     None => (&edge.curve, edge.interval),
                 };
-                // Within what the edge's tolerance can be raised to, with its margin.
-                let cap = MAX_TOLERANCE / pcurve::SURFACE_GAP_MARGIN;
-                if let Ok(Some(gap)) = pcurve::boundary_gap(surface, curve, interval, cap) {
+                // As `exact_pcurves` takes it: within the larger of the face's and the edge's.
+                let tolerance = self.tol.max(edge.tolerance);
+                if let Ok(Some(gap)) = pcurve::boundary_gap(surface, curve, interval, tolerance, pcurve::SURFACE_GAP_MARGIN, MAX_TOLERANCE) {
                     self.cover_edge(e, gap, pcurve::SURFACE_GAP_MARGIN)?;
                 }
             }

@@ -37,7 +37,7 @@ use super::{Axes, Curve, Curve2, CurveEval, EvalError, Surface, SurfaceEval};
 use crate::math::Vec3;
 use crate::nurbs::crv_basic::Curve as NlCurve;
 use crate::nurbs::crv_deviation::certified_distance;
-use crate::nurbs::math::{gamma, CPoint, NOW};
+use crate::nurbs::math::{gamma, CPoint, NOW, UNIT};
 use crate::nurbs::srf_basic::Direction;
 use crate::nurbs::srf_tool::p1::extract_iso_crv;
 use crate::SolidError;
@@ -324,6 +324,53 @@ pub fn boundary_iso(
     })
 }
 
+/// The proved gap (mm) of an edge `curve` on its `interval` that is a whole boundary curve of
+/// the polynomial patch `surface`, where the straight line along that boundary is then the
+/// pcurve [`exact_pcurves`] takes for it, and `None` where it is not.
+///
+/// The importer raises an edge's tolerance to cover the gap `margin` times (`covered`, never
+/// lowered from `tolerance`, the largest of the face's and the edge's) before it asks for pcurves,
+/// and asks within `covered`: this is the one question of both. The bound is [`boundary_iso`]'s
+/// within `max_tolerance / margin`, and the answer is `Some` only where `covered` is within
+/// `max_tolerance` and the line, taken at `covered` exactly as `exact_pcurves` takes it (the
+/// proof again within half of it, then the lift checked against the edge), is accepted: a
+/// tolerance raised for a line that is then not taken would hold the edge and its vertices wider
+/// than the kernel's pcurves ask.
+///
+/// # Errors
+/// [`Error::Invalid`] for a malformed surface or curve, an interval that is not finite and
+/// increasing, or a `tolerance`, `margin` or `max_tolerance` that is not positive and finite.
+pub fn boundary_covered(
+    surface: &Surface,
+    curve: &Curve,
+    interval: [f64; 2],
+    tolerance: f64,
+    margin: f64,
+    max_tolerance: f64,
+) -> Result<Option<f64>> {
+    #[allow(clippy::neg_cmp_op_on_partial_ord)] // NaN-refusing
+    if !([tolerance, margin, max_tolerance]
+        .iter()
+        .all(|x| x.is_finite() && *x > 0.0))
+    {
+        return Err(Error::Invalid(format!(
+            "boundary cover of tolerance {tolerance}, margin {margin}, at most {max_tolerance}"
+        )));
+    }
+    let Some(found) = boundary_iso(surface, curve, interval, max_tolerance / margin)? else {
+        return Ok(None);
+    };
+    let covered = tolerance.max(margin * found.gap);
+    if covered > max_tolerance {
+        return Ok(None);
+    }
+    let on = On::new(surface)?;
+    let eval = CurveEval::new(curve)?;
+    Ok(on
+        .boundary_line(curve, &eval, interval, covered)
+        .map(|_| found.gap))
+}
+
 /// [`boundary_iso`] on a patch already evaluated, the numbers checked.
 fn boundary_of(n: &Nurbs, curve: &Curve, [t0, t1]: [f64; 2], cap: f64) -> Option<BoundaryIso> {
     // A periodic direction has no boundary to be the edge of (its two ends are one curve, and
@@ -392,11 +439,23 @@ fn point_of(p: &CPoint) -> Vec3 {
 }
 
 /// The edge's curve as a polynomial NLib curve over exactly `[t0, t1]`, and the most (mm) that
-/// forming it moved it. A line is the degree-1 spline through its points at `t0` and `t1`
-/// (where `t` is 0 or 1 the line's own end, so a whole line is exact; any other parameter is
-/// `start + t (end − start)`, each coordinate off by at most `γ₄` of the ends' size times
-/// `1 + 2 |t|`). A spline is its own, and must cover its whole domain. `None` for any other
-/// record.
+/// forming it moved it. `None` for any record but a line or a B-spline that covers `[t0, t1]`
+/// as its whole domain.
+///
+/// Claim: the formed curve is within `moved` of the record at every parameter of `[t0, t1]`.
+///
+/// Proof. A spline is its own: `moved = 0`. A line is `L(t) = a + t (b − a)`, affine in `t`, so
+/// the degree-1 spline through `L(t0)` and `L(t1)` on `[t0, t1]` is `L` exactly, and the formed
+/// curve, through the two points as computed, is off `L` by at most the larger of the two points'
+/// errors (a convex combination of two points each off by `e` is off by at most `e`). Where `t`
+/// is 0 or 1 the point is the line's own end, so a whole line is exact. Otherwise each
+/// coordinate is `fl(a + fl(t · fl(b − a)))`: with `S` the largest coordinate of the ends,
+/// `|b − a| ≤ 2 S`, and the three roundings leave an error of at most
+/// `|t| |b − a| γ₂ + u |a + t (b − a)| (1 + γ₂) ≤ S (1 + 2 |t|) γ₃`
+/// (`γ₂ + u (1 + γ₂) ≤ γ₃`, Higham's `γ_n`, docs/definitions-and-certificates.md §4.4). The norm of
+/// three such errors is at most `√3` of one, `√3 γ₃ ≤ 2 γ₄`: `moved` is `2 γ₄ S (1 + 2 max |t|)`,
+/// plus the absolute error of an underflowed product, `2⁻¹⁰⁷⁴` a coordinate, taken as four
+/// subnormal steps.
 fn edge_form(curve: &Curve, [t0, t1]: [f64; 2]) -> Option<(NlCurve, f64)> {
     let (knots, points, moved) = match curve {
         Curve::Line { start, end } => {
@@ -421,7 +480,7 @@ fn edge_form(curve: &Curve, [t0, t1]: [f64; 2]) -> Option<(NlCurve, f64)> {
                 0.0
             } else {
                 // Per coordinate, and the norm of three of them.
-                2.0 * gamma(4) * size * reach
+                2.0 * gamma(4) * size * reach + 4.0 * f64::from_bits(1)
             };
             (vec![t0, t0, t1, t1], vec![at(t0), at(t1)], moved)
         }
@@ -442,16 +501,144 @@ fn edge_form(curve: &Curve, [t0, t1]: [f64; 2]) -> Option<(NlCurve, f64)> {
     Some((NlCurve::new(pw, degree, knots).ok()?, moved))
 }
 
-/// A proved bound of the distance between `edge` and the boundary curve `iso` put on `edge`'s
-/// interval (reversed, or as it runs), at every parameter; `None` where it cannot be formed.
+/// A bound of how far moving every knot of a B-spline curve by at most `delta` moves the curve
+/// (the control points kept): `None` where it cannot be formed (a degree of 0, knots that are not
+/// finite and non-decreasing or do not fit the points, a `delta` that is not finite and
+/// non-negative).
 ///
-/// The bound is [`certified_distance`] of the two curves on one domain, plus the rounding of
-/// what is done to the curves first: the edge's own formation (`moved`, [`edge_form`]), the
-/// extraction of `iso` (a copy of a control row, still given the extraction's allowance) and its
-/// knots' affine map. Each mapped knot is off by at most
-/// `δ = γ₅ (|t|max + (t₁ − t₀))`, and a B-spline's point depends on `2 p` consecutive knots, each
-/// moving it by at most the largest derivative-control magnitude `p |ΔP| / (knot gap)` per unit,
-/// `L`, so the curve is off its exactly mapped self by at most `2 p L δ`. The sum is rounded up.
+/// Claim (knot shift). Let `P₀ … Pₙ` be control points, `K` and `K′` non-decreasing knot vectors
+/// of `n + p + 2` knots, both clamped (the end knots `p + 1`-fold) on one domain, with
+/// `|K_j − K′_j| ≤ δ` for every `j`, and `C`, `C′` the degree-`p` curves of `P` on them. At every
+/// `t` of the domain
+///
+/// `|C(t) − C′(t)| ≤ Σ_{i ∈ A(t)} |P_{i+1} − P_i| · min(1, p δ / g′_i)`,
+///
+/// `g′_i = K′_{i+p+1} − K′_{i+1}` and `A(t)` the legs `i` with
+/// `K′_{i+1} − δ ≤ t ≤ K′_{i+p+1} + δ`. A leg with `g′_i = 0` counts its whole `|ΔPᵢ|`.
+///
+/// Proof. Write `N_m`, `N′_m` for the basis functions on `K`, `K′`; both sum to 1 on the domain
+/// (clamped), so `Σ_m P_m (N_m − N′_m) = Σ_m (P_m − P₀)(N_m − N′_m)`, and summing by parts
+/// `C − C′ = Σ_{i<n} (P_{i+1} − P_i) (R_i − R′_i)`, `R_i = Σ_{m>i} N_m`. By the derivative
+/// formula of B-splines (The NURBS Book, 2nd ed., eq. 2.7) the sum telescopes:
+/// `R_i′ = p N_{i+1,p−1} / (K_{i+p+1} − K_{i+1})`, which is the Curry–Schoenberg B-spline of the
+/// knots `K_{i+1} … K_{i+p+1}`, a probability density; by the Hermite–Genocchi formula it is the
+/// density of `X_i = Σ_j λ_j K_{i+1+j}`, `λ` uniform on the `p`-simplex. So `R_i(t) = P(X_i ≤ t)`
+/// (checked on `p = 1, 2` with the Bézier knots), and with the same `λ` for `K′`,
+/// `R′_i(t) = P(X′_i ≤ t)`, `|X_i − X′_i| ≤ Σ λ_j |K_j − K′_j| ≤ δ`. Hence
+/// `R_i(t − δ) ≤ R′_i(t) ≤ R_i(t + δ)` and the same with the two swapped, so
+/// `|R_i(t) − R′_i(t)| ≤ R′_i(t + δ) − R′_i(t) ≤ δ · sup (R′_i)′ ≤ p δ / g′_i` (`N ≤ 1`), and of
+/// course at most 1. It vanishes unless `t` lies between the smallest of `K_{i+1}, K′_{i+1}` and
+/// the largest of `K_{i+p+1}, K′_{i+p+1}`, inside the window of `A(t)`. ∎
+///
+/// So a knot error of `δ` moves a point by at most `δ |Q_i|`, `|Q_i| = p |ΔP_i| / g_i` the
+/// derivative control point's magnitude, for each leg whose window holds `t`: `p` legs where no
+/// knot lies within `2 δ` of `t`, and `p + r` with `r` knots there. That is the sense in which a
+/// B-spline moves "at most `L` per unit of knot error", `L` the largest `|Q_i|`: per leg, and
+/// the number of legs is `p` only away from knots (an estimate "`2 p L δ`", which this bound
+/// replaced, was never proved, and is not claimed for knots that cluster: with more than `2 p`
+/// windows over a point the proof above gives more terms, and none of the cases tried broke it).
+/// Where a knot is `p + 1`-fold inside the domain, or the knots coincide to rounding, `g′` is 0 and
+/// `|Q|` infinite: the leg then counts its whole `|ΔP_i|`, which no knot error can exceed, so
+/// such a curve gets a (large) bound, not a refusal, and the cap then declines it.
+///
+/// Computing it. The windows' ends are non-decreasing in `i` (the knots are), so the largest
+/// total weight over a point is found at a window's start, where the legs covering it are a
+/// contiguous range found by two pointers, and its weight is a difference of prefix sums. Each
+/// window is widened by `2 δ + 4 u M` (`M` the largest knot, so the rounding of its ends, at
+/// most `u M`, cannot narrow it below `δ`; the windows are taken closed). Roundings: each leg's
+/// weight is a norm (`γ₅`), a quotient and a product (`γ₂`) and the prefix sums add `γ_(n)` each
+/// side of a difference, so the result is `(best + 2 γ_(n+2) Σ w)(1 + γ₁₆)`, plus one subnormal
+/// step a leg for an underflowed weight.
+fn knot_shift_bound(points: &[CPoint], knots: &[f64], degree: usize, delta: f64) -> Option<f64> {
+    let n = points.len();
+    #[allow(clippy::neg_cmp_op_on_partial_ord)] // NaN-refusing
+    if degree == 0
+        || n == 0
+        || knots.len() != n.checked_add(degree)?.checked_add(1)?
+        || !(delta >= 0.0 && delta.is_finite())
+        || knots.iter().any(|k| !k.is_finite())
+        || knots.windows(2).any(|w| w.first() > w.get(1))
+    {
+        return None;
+    }
+    let d = degree as f64;
+    let big = knots.iter().fold(0.0_f64, |m, k| m.max(k.abs()));
+    let slack = 2.0 * delta + 4.0 * UNIT * big;
+    let (mut lo, mut hi, mut weight) = (Vec::new(), Vec::new(), Vec::new());
+    for (i, w) in points.windows(2).enumerate() {
+        let (c, e) = (w.first()?, w.get(1)?);
+        let step = point_of(c).dist(point_of(e));
+        let (first, last) = (*knots.get(i + 1)?, *knots.get(i + degree + 1)?);
+        let gap = last - first;
+        let share = if gap > 0.0 {
+            (d * delta / gap).min(1.0)
+        } else {
+            1.0
+        };
+        lo.push(first - slack);
+        hi.push(last + slack);
+        weight.push(step * share);
+    }
+    let legs = weight.len();
+    let mut prefix = Vec::with_capacity(legs + 1);
+    prefix.push(0.0_f64);
+    for (i, w) in weight.iter().enumerate() {
+        prefix.push(prefix.get(i)? + w);
+    }
+    let total = *prefix.last()?;
+    let (mut from, mut to, mut best) = (0, 0, 0.0_f64);
+    for start in lo.iter().copied() {
+        while hi.get(from).is_some_and(|h| *h < start) {
+            from += 1;
+        }
+        while lo.get(to).is_some_and(|l| *l <= start) {
+            to += 1;
+        }
+        best = best.max(prefix.get(to)? - prefix.get(from)?);
+    }
+    let bound = (best + 2.0 * gamma(legs + 2) * total) * (1.0 + gamma(16))
+        + 4.0 * f64::from_bits(1) * legs as f64;
+    bound.is_finite().then_some(bound)
+}
+
+/// A proved bound of the distance between `edge` and the boundary curve `iso` put on `edge`'s
+/// interval (reversed, or as it runs), at every parameter of the interval; `None` where it
+/// cannot be formed.
+///
+/// Claim: for every `t` of `[t₀, t₁]`, `|edge(t) − S(line(t))| ≤ bound`, `S` the patch and `line`
+/// the straight (u, v) pcurve of [`boundary_of`]. That line is affine in `t` between the
+/// boundary's ends, so `S(line(t)) = iso(s(t))`, `s` the exact affine map of `[t₀, t₁]` onto
+/// the iso's knot range (the iso is the patch's end row, a boundary of a clamped patch).
+/// By the triangle inequality the bound is the sum of
+///
+/// 1. `moved` ([`edge_form`]): the edge's record against the curve formed from it;
+/// 2. `certified`: [`certified_distance`] of that curve and `placed`, the iso's control row on
+///    the knots as computed by the affine map (every rounding of the refinement and the
+///    comparison is inside it, `nurbs::crv_deviation`);
+/// 3. `shifted`: `placed` against the same row on the exactly mapped knots, which is
+///    `iso ∘ s` (a B-spline's affine reparametrisation is its knots' image, exactly);
+/// 4. `extraction`: the iso against the patch's row. `extract_iso_crv` at the end of a clamped
+///    range returns a copy of the control row and the knots (its boundary branch, `srf_tool::p1`),
+///    so this is 0, pinned by `the_extracted_boundary_is_a_copy_of_the_net_s_row`; the allowance
+///    `4 γ_(12 (d + 1)) S` (the rounding of an extraction by de Boor's levels, `S` the largest
+///    coordinate) is kept, not needed, so that a changed extraction fails the test, not a proof.
+///
+/// The knot map is `fl(t₀ + fl(fl(x − a) / fl(b − a)) · fl(t₁ − t₀))` for the knot `x` of the
+/// range `[a, b]` (`fl(b − x)` reversed), the ends mapped to the ends exactly and the result put
+/// into `[t₀, t₁]`. With `r ∈ [0, 1]` the exact ratio, the quotient is `r (1 + θ)`, `|θ| ≤ γ₃`
+/// (two subtractions and a division), the product with the rounded span `r (t₁ − t₀)(1 + θ′)`,
+/// `|θ′| ≤ γ₅`, off by at most `γ₅ (t₁ − t₀)`; the sum with `t₀` rounds once more
+/// by `u (|t₀| + (t₁ − t₀))(1 + γ₅)`. Together the mapped knot is off its exact image by at most
+/// `δ = γ₇ (max(|t₀|, |t₁|) + (t₁ − t₀))` (`γ₅ + u (1 + γ₅) ≤ γ₆`, one more for the span's own
+/// rounding), plus one subnormal step for an underflow, and putting it into `[t₀, t₁]`, where
+/// the exact image lies, does not increase that. The map is monotone (each operation is, rounded)
+/// and equal knots map to equal knots, so the mapped knots are non-decreasing, the multiplicities
+/// of the interior knots stay or grow (two knots closer than the rounding may merge, which the
+/// next bound takes into account), and the end knots, mapped exactly, stay `p + 1`-fold on the
+/// same domain as the edge. The shift of `placed` against `iso ∘ s` is then [`knot_shift_bound`]
+/// with that `δ`.
+///
+/// The sum is rounded up by `γ₈` (three additions, and each term is itself a rounded product).
 fn boundary_gap_of(
     edge: &NlCurve,
     moved: f64,
@@ -477,10 +664,14 @@ fn boundary_gap_of(
             } else {
                 t1
             }
-        } else if reversed {
-            t0 + (b - x) / (b - a) * span
         } else {
-            t0 + (x - a) / (b - a) * span
+            let r = if reversed {
+                (b - x) / (b - a)
+            } else {
+                (x - a) / (b - a)
+            };
+            // The exact image is inside the interval, and so is the closest float to it.
+            (t0 + r * span).max(t0).min(t1)
         }
     };
     let knots: Vec<f64> = if reversed {
@@ -503,22 +694,9 @@ fn boundary_gap_of(
         .flat_map(|c| [c.x.abs(), c.y.abs(), c.z.abs()])
         .fold(0.0_f64, f64::max);
     let extraction = 4.0 * gamma(12 * (surface_degree + 1)) * size;
-    // The derivative's control points, per mapped unit: the steepest the curve goes.
-    let ks = placed.knots();
-    let mut lipschitz = 0.0_f64;
-    for (i, w) in placed.cpts().windows(2).enumerate() {
-        let gap = ks.get(i + p + 1)? - ks.get(i + 1)?;
-        let [c, d] = [w.first()?, w.get(1)?];
-        let step = point_of(c).dist(point_of(d));
-        if gap > 0.0 {
-            lipschitz = lipschitz.max(p as f64 * step / gap);
-        } else if step > 0.0 {
-            return None;
-        }
-    }
-    let delta = gamma(5) * (t0.abs().max(t1.abs()) + span);
-    let knot_map = 2.0 * p as f64 * lipschitz * delta;
-    let bound = (certified + extraction + knot_map + moved) * (1.0 + gamma(3));
+    let delta = gamma(7) * (t0.abs().max(t1.abs()) + span) + 4.0 * f64::from_bits(1);
+    let shifted = knot_shift_bound(placed.cpts(), placed.knots(), p, delta)?;
+    let bound = (certified + extraction + shifted + moved) * (1.0 + gamma(8));
     bound.is_finite().then_some(bound)
 }
 
@@ -774,6 +952,25 @@ impl On {
         )))
     }
 
+    /// The straight line along a whole boundary curve of a polynomial patch that the proved bound
+    /// ([`boundary_of`]) puts within half of `tol` of the edge, and that lifts onto the edge
+    /// within it ([`Self::lifts`]): the pcurve [`Self::exact`] takes first on a spline face, and
+    /// what [`boundary_covered`] asks of the importer's edge before it raises its tolerance.
+    fn boundary_line(
+        &self,
+        record: &Curve,
+        curve: &CurveEval,
+        range: [f64; 2],
+        tol: f64,
+    ) -> Option<Curve2> {
+        let SurfaceEval::Eval(EvalSurface::Nurbs(n), _) = &self.surface else {
+            return None;
+        };
+        boundary_of(n, record, range, 0.5 * tol)
+            .map(|b| b.pcurve)
+            .filter(|pc| self.lifts(pc, curve, range, 0.5 * tol))
+    }
+
     /// The closed-form pcurve where there is one (unchecked).
     fn exact(
         &self,
@@ -897,18 +1094,12 @@ impl On {
                 let u = b.atan2(a);
                 Some(segment([u, height(t0)?], [u, height(t1)?]))
             }
-            (SurfaceEval::Eval(surface, _), _) => {
+            (SurfaceEval::Eval(..), _) => {
                 // A whole boundary curve of a polynomial patch first, by its proved bound: the
                 // one closed form that does not test the pcurve against a tolerance it was
                 // never raised to (the importer raises an edge's tolerance to cover the proved
                 // bound before it asks).
-                let proved = match surface {
-                    EvalSurface::Nurbs(n) => boundary_of(n, record, [t0, t1], 0.5 * tol)
-                        .map(|b| b.pcurve)
-                        .filter(|pc| self.lifts(pc, curve, [t0, t1], 0.5 * tol)),
-                    _ => None,
-                };
-                match proved {
+                match self.boundary_line(record, curve, [t0, t1], tol) {
                     Some(pc) => Some(pc),
                     None => self.along(curve, [t0, t1], tol),
                 }

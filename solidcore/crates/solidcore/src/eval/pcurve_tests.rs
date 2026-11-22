@@ -2614,10 +2614,7 @@ fn boundary_proofs_of_hostile_records_give_errors_or_none() {
             points: vec![big([0., 0., 0.]), big([10., 0., 0.])],
         };
         let r = boundary_iso(&patch, &curve, [0., 1.], 1e-3);
-        assert!(
-            matches!(r, Err(_) | Ok(None) | Ok(Some(_))),
-            "{scale}: {r:?}"
-        );
+        assert!(matches!(r, Err(_) | Ok(None | Some(_))), "{scale}: {r:?}");
     }
     // An edge with more control points than the proof refines.
     let n = MAX_BOUNDARY_POINTS + 1;
@@ -2631,4 +2628,496 @@ fn boundary_proofs_of_hostile_records_give_errors_or_none() {
             .collect(),
     };
     assert_eq!(boundary_iso(&surface, &long, [0., 1.], 1e-3).unwrap(), None);
+}
+
+/// A tiny deterministic generator (xorshift) for the tests' perturbations, in [0, 1).
+struct Lcg(u64);
+
+impl Lcg {
+    fn next(&mut self) -> f64 {
+        self.0 ^= self.0 << 13;
+        self.0 ^= self.0 >> 7;
+        self.0 ^= self.0 << 17;
+        (self.0 >> 11) as f64 / (1u64 << 53) as f64
+    }
+}
+
+/// A point of the degree-`p` B-spline of `points` on `knots` by de Boor's algorithm, written here
+/// on its own (not the library's evaluator) so a bound is not checked with its own code.
+fn de_boor(points: &[[f64; 3]], knots: &[f64], p: usize, t: f64) -> [f64; 3] {
+    let n = points.len();
+    let mut l = p;
+    while l + 1 < n && knots[l + 1] <= t {
+        l += 1;
+    }
+    let mut d: Vec<[f64; 3]> = (0..=p).map(|j| points[l - p + j]).collect();
+    for r in 1..=p {
+        for j in (r..=p).rev() {
+            let i = l - p + j;
+            let den = knots[i + p + 1 - r] - knots[i];
+            let a = if den > 0.0 { (t - knots[i]) / den } else { 0.0 };
+            d[j] = std::array::from_fn(|k| (1.0 - a) * d[j - 1][k] + a * d[j][k]);
+        }
+    }
+    d[p]
+}
+
+/// The knots `k` with every interior one moved by up to `delta` (the ends kept, the order kept),
+/// each by `delta` exactly where `extreme` (a random sign), else by a random amount.
+fn shifted(k: &[f64], p: usize, delta: f64, extreme: bool, rng: &mut Lcg) -> Vec<f64> {
+    let (first, last) = (k[0], k[k.len() - 1]);
+    let mut out = k.to_vec();
+    for j in p + 1..k.len() - p - 1 {
+        let s = if extreme {
+            if rng.next() < 0.5 {
+                -1.0
+            } else {
+                1.0
+            }
+        } else {
+            2.0 * rng.next() - 1.0
+        };
+        // A shade under `delta`, so the sum's own rounding stays inside it.
+        out[j] = (k[j] + s * delta * (1.0 - 1e-3))
+            .max(out[j - 1])
+            .min(last)
+            .max(first);
+    }
+    // The running maximum cannot have moved a knot by more than `delta`.
+    assert!(out.iter().zip(k).all(|(a, b)| (a - b).abs() <= delta));
+    assert!(out.windows(2).all(|w| w[0] <= w[1]));
+    out
+}
+
+/// The largest distance between the curve of `points` on `a` and on `b` over `a`'s and `b`'s
+/// knots, their middles, and three random points of each span.
+fn curves_apart(points: &[[f64; 3]], a: &[f64], b: &[f64], p: usize, rng: &mut Lcg) -> f64 {
+    let (first, last) = (a[0], a[a.len() - 1]);
+    let mut ts = vec![first, last];
+    for k in [a, b] {
+        for w in k.windows(2) {
+            ts.push(w[0]);
+            ts.push(0.5 * (w[0] + w[1]));
+            ts.extend((0..3).map(|_| w[0] + rng.next() * (w[1] - w[0])));
+        }
+    }
+    ts.iter()
+        .filter(|t| **t >= first && **t <= last)
+        .map(|&t| {
+            let (x, y) = (de_boor(points, a, p, t), de_boor(points, b, p, t));
+            ((x[0] - y[0]).powi(2) + (x[1] - y[1]).powi(2) + (x[2] - y[2]).powi(2)).sqrt()
+        })
+        .fold(0.0, f64::max)
+}
+
+/// The estimate the first proof used, `2 p L δ`, `L` the steepest derivative control point.
+fn first_order_estimate(points: &[[f64; 3]], knots: &[f64], p: usize, delta: f64) -> f64 {
+    let mut l = 0.0_f64;
+    for (i, w) in points.windows(2).enumerate() {
+        let gap = knots[i + p + 1] - knots[i + 1];
+        let step = ((w[1][0] - w[0][0]).powi(2)
+            + (w[1][1] - w[0][1]).powi(2)
+            + (w[1][2] - w[0][2]).powi(2))
+        .sqrt();
+        if gap > 0.0 {
+            l = l.max(p as f64 * step / gap);
+        } else if step > 0.0 {
+            return f64::INFINITY;
+        }
+    }
+    2.0 * p as f64 * l * delta
+}
+
+/// Clamped knots of degree `p` over `[0, last]`, the interior ones as `interior` gives them.
+fn clamped(p: usize, interior: &[f64], last: f64) -> Vec<f64> {
+    let mut k = vec![0.0; p + 1];
+    k.extend(interior);
+    k.extend(vec![last; p + 1]);
+    k
+}
+
+/// Control points of a wandering polygon of `n` points about a few tens of millimetres.
+fn polygon(n: usize, rng: &mut Lcg) -> Vec<[f64; 3]> {
+    (0..n)
+        .map(|i| {
+            let x = i as f64;
+            [
+                0.6 * x + 3.0 * rng.next(),
+                20.0 * (x / 9.0).sin() + 3.0 * rng.next(),
+                5.0 * (x / 3.0).cos() + 6.0 * rng.next(),
+            ]
+        })
+        .collect()
+}
+
+/// What moving the knots does is bounded by `knot_shift_bound`, which is a proved bound where the
+/// estimate `2 p L δ` it replaces was not: for a cubic of 168 poles on uneven knots, and for one
+/// whose knots come in clusters (triple, pairs, and four within a few parts in 10⁷), every knot
+/// moved by up to δ, in random amounts and by δ in a random direction, δ from far below the knot
+/// gaps to past them; each time the curve's actual deviation is under the bound, with the knots
+/// as given as the computed ones and the other way round.
+#[test]
+fn the_knot_shift_bound_covers_the_curves_a_perturbation_moves() {
+    let p = 3;
+    let mut rng = Lcg(0x9e37_79b9_7f4a_7c15);
+    let poles = 168;
+    let points = polygon(poles, &mut rng);
+    let cp = |pts: &[[f64; 3]]| -> Vec<CPoint> {
+        pts.iter()
+            .map(|q| CPoint::new(q[0], q[1], q[2], NOW))
+            .collect()
+    };
+    let cps = cp(&points);
+    // Uneven: gaps between 0.2 and 1.8.
+    let uneven: Vec<f64> = (0..poles - p - 1)
+        .scan(0.0, |x, _| {
+            *x += 0.2 + 1.6 * rng.next();
+            Some(*x)
+        })
+        .collect();
+    let last = uneven[uneven.len() - 1] + 1.0;
+    let even = clamped(p, &uneven, last);
+    // Clusters: 41 centres, four knots each, the pattern changing with the centre.
+    let mut clustered = Vec::new();
+    for c in 0..(poles - p - 1) / 4 {
+        let at = 1.0 + c as f64;
+        let s = 1e-7 * (1 + c % 3) as f64;
+        match c % 4 {
+            // A knot of multiplicity 3, one more beside it.
+            0 => clustered.extend([at, at, at, at + s]),
+            // Four distinct knots within 3 s.
+            1 => clustered.extend([at, at + s, at + 2.0 * s, at + 3.0 * s]),
+            // Two pairs.
+            2 => clustered.extend([at, at, at + s, at + s]),
+            _ => clustered.extend([at, at + 0.5 * s, at + 0.5 * s, at + 2.0 * s]),
+        }
+    }
+    assert_eq!(clustered.len(), poles - p - 1);
+    let cluster_end = 1.0 + (clustered.len() / 4) as f64;
+    let clustered = clamped(p, &clustered, cluster_end);
+    assert_eq!(even.len(), poles + p + 1);
+    assert_eq!(clustered.len(), poles + p + 1);
+    let mut report = Vec::new();
+    for (name, knots, deltas) in [
+        ("uneven", &even, vec![1e-9, 1e-4, 0.05, 0.2, 0.5]),
+        (
+            "clustered",
+            &clustered,
+            vec![1e-9, 1e-8, 1e-7, 3e-7, 1e-6, 1e-4, 0.01],
+        ),
+    ] {
+        for delta in deltas {
+            let mut worst = 0.0_f64;
+            let mut best_ratio = f64::INFINITY;
+            for trial in 0..12 {
+                let moved = shifted(knots, p, delta, trial % 2 == 0, &mut rng);
+                let actual = curves_apart(&points, knots, &moved, p, &mut rng);
+                for (given, computed) in [(knots, &moved), (&moved, knots)] {
+                    let bound = knot_shift_bound(&cps, computed, p, delta).unwrap();
+                    assert!(
+                        actual <= bound + 1e-11,
+                        "{name} δ = {delta} trial {trial}: moved {actual}, bound {bound} (given {} knots)",
+                        given.len()
+                    );
+                    best_ratio = best_ratio.min(bound / actual.max(1e-300));
+                }
+                worst = worst.max(actual);
+            }
+            let old = first_order_estimate(&points, knots, p, delta);
+            let bound = knot_shift_bound(&cps, knots, p, delta).unwrap();
+            report.push(format!("{name} δ = {delta:e}: worst moved {worst:.3e}, bound {bound:.3e}, 2pLδ {old:.3e}, tightest bound/moved {best_ratio:.2}"));
+        }
+    }
+    eprintln!("{}", report.join("\n"));
+    // Hostile arguments: no bound, never a panic.
+    assert_eq!(knot_shift_bound(&cps, &even, 0, 1e-3), None);
+    assert_eq!(knot_shift_bound(&cps, &even[1..], p, 1e-3), None);
+    assert_eq!(knot_shift_bound(&cps, &even, p, f64::NAN), None);
+    assert_eq!(knot_shift_bound(&cps, &even, p, -1.0), None);
+    let mut unordered = even.clone();
+    unordered.swap(10, 11);
+    assert_eq!(knot_shift_bound(&cps, &unordered, p, 1e-3), None);
+    assert_eq!(knot_shift_bound(&[], &[0.0; 4], 3, 0.0), None);
+}
+
+/// Where knots cluster closer than δ (five of a cubic's interior knots within 4 mm in a span of
+/// five, δ from a quarter of their spacing to past it) the curve moves by up to what the proved
+/// bound allows and no more; the first-order estimate `2 p L δ` it replaced is only a comparison
+/// (it was never proved: no case here breaks it, and the proved bound is the smaller).
+#[test]
+fn the_knot_shift_bound_holds_where_the_knots_of_a_cubic_cluster() {
+    let p = 3;
+    let points: Vec<[f64; 3]> = (0..12)
+        .map(|i| [i as f64, if i % 2 == 0 { 0.0 } else { 3.0 }, 0.0])
+        .collect();
+    let cps: Vec<CPoint> = points
+        .iter()
+        .map(|q| CPoint::new(q[0], q[1], q[2], NOW))
+        .collect();
+    // Eight interior knots: three even, then five a thousandth apart.
+    let interior = [1.0, 2.0, 3.0, 4.0, 4.001, 4.002, 4.003, 4.004];
+    let knots = clamped(p, &interior, 5.0);
+    let mut rng = Lcg(7);
+    for delta in [2.5e-4, 1e-3, 2e-3, 4e-3, 1e-2] {
+        let old = first_order_estimate(&points, &knots, p, delta);
+        let bound = knot_shift_bound(&cps, &knots, p, delta).unwrap();
+        let mut worst = 0.0_f64;
+        for k in 0..40 {
+            let moved = shifted(&knots, p, delta, k % 2 == 0, &mut rng);
+            let actual = curves_apart(&points, &knots, &moved, p, &mut rng);
+            assert!(
+                actual <= bound + 1e-11,
+                "δ = {delta}: {actual} against {bound}"
+            );
+            worst = worst.max(actual);
+        }
+        assert!(
+            bound <= old,
+            "δ = {delta}: the proved bound {bound} is no larger than the estimate {old}"
+        );
+        eprintln!(
+            "cluster δ = {delta}: 2pLδ {old:.4e}, proved {bound:.4e}, worst moved {worst:.4e}"
+        );
+    }
+}
+
+/// `extract_iso_crv` at the end of a clamped range returns the net's end row and the knots
+/// themselves, bit for bit: the extraction term of a boundary proof is 0 (kept as an allowance).
+#[test]
+fn the_extracted_boundary_is_a_copy_of_the_net_s_row() {
+    let u_knots = vec![0.0, 0.0, 0.0, 0.0, 0.37, 0.81, 1.0, 1.0, 1.0, 1.0];
+    let v_knots = vec![0.25, 0.25, 0.25, 0.6, 1.5, 1.5, 1.5];
+    let mut rng = Lcg(11);
+    let points: Vec<Vec<[f64; 3]>> = (0..6)
+        .map(|i| {
+            (0..4)
+                .map(|j| {
+                    [
+                        i as f64 + rng.next(),
+                        j as f64 * 3.0 + rng.next(),
+                        10.0 * rng.next() - 5.0,
+                    ]
+                })
+                .collect()
+        })
+        .collect();
+    let surface = Surface::Spline {
+        u_knots: u_knots.clone(),
+        v_knots: v_knots.clone(),
+        points: points.clone(),
+    };
+    let SurfaceEval::Eval(EvalSurface::Nurbs(n), _) = SurfaceEval::new(&surface).unwrap() else {
+        panic!("a spline")
+    };
+    let nl = n.nl_surface().expect("an NLib surface");
+    let row = |c: &NlCurve| -> Vec<[f64; 3]> { c.cpts().iter().map(|q| [q.x, q.y, q.z]).collect() };
+    let u_end = extract_iso_crv(nl, 0.25, Direction::U).unwrap();
+    assert_eq!(row(&u_end), points.iter().map(|r| r[0]).collect::<Vec<_>>());
+    assert_eq!(u_end.knots(), &u_knots[..]);
+    let v_end = extract_iso_crv(nl, 1.5, Direction::U).unwrap();
+    assert_eq!(row(&v_end), points.iter().map(|r| r[3]).collect::<Vec<_>>());
+    let first = extract_iso_crv(nl, 0.0, Direction::V).unwrap();
+    assert_eq!(row(&first), points[0]);
+    assert_eq!(first.knots(), &v_knots[..]);
+    let last = extract_iso_crv(nl, 1.0, Direction::V).unwrap();
+    assert_eq!(row(&last), points[5]);
+}
+
+/// A cubic patch of 168 poles along u (uneven knots) over a bilinear v, whose four edges are its
+/// boundary rows 20 micrometres off, on parameter intervals that are no affine image of the
+/// patch's but one whose knots round (so the proof's knot-map term is exercised on a long
+/// polygon): each gets its line, with a proved gap that is the offset plus rounding, and the line
+/// lifts onto the edge within it.
+#[test]
+fn a_long_cubic_patch_boundary_is_proved_on_an_interval_of_its_own() {
+    let p = 3;
+    let mut rng = Lcg(0xdead_beef);
+    let poles = 168;
+    let row = polygon(poles, &mut rng);
+    let uneven: Vec<f64> = (0..poles - p - 1)
+        .scan(0.0, |x, _| {
+            *x += 0.2 + 1.6 * rng.next();
+            Some(*x)
+        })
+        .collect();
+    let end = uneven[uneven.len() - 1] + 1.0;
+    let u_knots = clamped(p, &uneven, end);
+    let lift = [0.0, 0.0, 10.0];
+    let points: Vec<Vec<[f64; 3]>> = row
+        .iter()
+        .map(|q| vec![*q, [q[0] + lift[0], q[1] + lift[1], q[2] + lift[2]]])
+        .collect();
+    let surface = Surface::Spline {
+        u_knots: u_knots.clone(),
+        v_knots: vec![0., 0., 1., 1.],
+        points,
+    };
+    let off = 2e-5;
+    for (t0, t1) in [(0.0, 1.0), (1000.0, 1007.5), (-3.0, 4.25)] {
+        for reversed in [false, true] {
+            // Boundary v = 0, on [t0, t1]: knots a linear map of the patch's, rounded.
+            let map = |x: f64| t0 + x / end * (t1 - t0);
+            let mut knots: Vec<f64> = u_knots.iter().map(|x| map(*x)).collect();
+            knots[0] = t0;
+            let n = knots.len();
+            knots[n - 1] = t1;
+            for k in knots.iter_mut().take(p + 1) {
+                *k = t0;
+            }
+            for k in knots.iter_mut().skip(n - p - 1) {
+                *k = t1;
+            }
+            let mut pts: Vec<[f64; 3]> = row.iter().map(|q| [q[0], q[1], q[2] + off]).collect();
+            if reversed {
+                pts.reverse();
+                knots = knots.iter().rev().map(|k| t0 + t1 - k).collect();
+                let n = knots.len();
+                for k in knots.iter_mut().take(p + 1) {
+                    *k = t0;
+                }
+                for k in knots.iter_mut().skip(n - p - 1) {
+                    *k = t1;
+                }
+            }
+            let edge = Curve::Spline { knots, points: pts };
+            let found = boundary_iso(&surface, &edge, [t0, t1], 1e-3)
+                .unwrap()
+                .unwrap_or_else(|| panic!("[{t0}, {t1}] {reversed}"));
+            assert!(
+                found.gap >= off * (1.0 - 1e-9) && found.gap <= off + 1e-6,
+                "[{t0}, {t1}] {reversed}: proved {}",
+                found.gap
+            );
+            let [from, to] = segment_points(&found.pcurve);
+            assert_eq!([from[1], to[1]], [0.0, 0.0], "on v = 0");
+            assert_eq!(from[0] == 0.0, !reversed);
+            let lifted = lift_error(&surface, &edge, [t0, t1], &found.pcurve);
+            assert!(
+                lifted <= found.gap,
+                "[{t0}, {t1}] {reversed}: {lifted} against {}",
+                found.gap
+            );
+        }
+    }
+}
+
+/// `boundary_covered` is the importer's one question: an edge is covered for the line only where
+/// `exact_pcurves` then takes it at the covered tolerance. For every side, either way, and the gaps
+/// of the other tests: the answer is the proved gap exactly where the line is taken at the larger of
+/// the tolerance and the margin times the gap; at a margin under 2 (which asks the proof within
+/// half of less than its own gap) the bound is proved and the line is not taken, and no gap is
+/// given.
+#[test]
+fn a_boundary_gap_is_covered_only_where_the_closed_form_takes_the_line() {
+    let surface = twisted(2.);
+    let (face, margin, most) = (1e-6, SURFACE_GAP_MARGIN, 1.0);
+    for off in [0.0, 2e-5, 7.5e-5, 1e-3, 0.3] {
+        for (from, to) in SIDES {
+            for reversed in [false, true] {
+                let (a, b) = if reversed { (to, from) } else { (from, to) };
+                let edge = boundary_edge(2., a, b, off);
+                let proved = boundary_iso(&surface, &edge, [0., 1.], most / margin).unwrap();
+                let covered =
+                    boundary_covered(&surface, &edge, [0., 1.], face, margin, most).unwrap();
+                assert_eq!(covered, proved.as_ref().map(|p| p.gap), "{off} {a:?} {b:?}");
+                if let Some(gap) = covered {
+                    let raised = face.max(margin * gap);
+                    let made =
+                        exact_pcurves(&surface, &one(&edge, [0., 1.]), raised, None).unwrap();
+                    assert!(made[0][0].is_some(), "{off}: covered but not taken");
+                    // The edge's own tolerance, where it is the larger, is the one asked at.
+                    let wide =
+                        boundary_covered(&surface, &edge, [0., 1.], 0.5, margin, most).unwrap();
+                    assert_eq!(wide, Some(gap));
+                }
+            }
+        }
+        let edge = boundary_edge(2., [0., 0.], [1., 0.], off);
+        let proved = boundary_iso(&surface, &edge, [0., 1.], most).unwrap();
+        // A margin of 1.5 asks the closed form within 0.75 of the gap, which the proof is not.
+        let low = boundary_covered(&surface, &edge, [0., 1.], face, 1.5, most).unwrap();
+        if let Some(p) = proved {
+            if p.gap > 0.5 * face / 0.75 {
+                assert_eq!(
+                    low, None,
+                    "{off}: proved {} but not taken at a margin of 1.5",
+                    p.gap
+                );
+            }
+        }
+    }
+    // Past what a tolerance holds, nothing; and nothing for a tolerance or margin that is not a number.
+    let far = boundary_edge(2., [0., 0.], [1., 0.], 0.5);
+    assert_eq!(
+        boundary_covered(&surface, &far, [0., 1.], face, margin, most).unwrap(),
+        None
+    );
+    for (tolerance, margin) in [
+        (f64::NAN, 3.0),
+        (1e-6, f64::NAN),
+        (0.0, 3.0),
+        (1e-6, f64::INFINITY),
+        (1e-6, -3.0),
+    ] {
+        assert!(boundary_covered(&surface, &far, [0., 1.], tolerance, margin, 1.0).is_err());
+    }
+}
+
+/// A patch closed in one direction has a seam: its edge along the seam (or round the closed
+/// direction) is no boundary, the proof gives none, no tolerance is covered for it, and
+/// `exact_pcurves` makes of it only what the straight-line candidate always made (taken at
+/// the tolerance, nothing proved). A polynomial net that comes back to its first row in u.
+#[test]
+fn a_patch_closed_in_one_direction_has_no_boundary_proof_on_its_seam() {
+    let square = [[0., 0.], [10., 0.], [10., 10.], [0., 10.], [0., 0.]];
+    let closed = Surface::Spline {
+        u_knots: vec![0., 0., 1., 2., 3., 4., 4.],
+        v_knots: vec![0., 0., 1., 1.],
+        points: square
+            .iter()
+            .map(|[x, y]| vec![[*x, *y, 0.], [*x, *y, 5.]])
+            .collect(),
+    };
+    // The seam: the v-curve at u = 0 (and the same at u = 4), either way; the u-curves at v = 0 and v = 1.
+    let seams = [([0., 0., 0.], [0., 0., 5.]), ([0., 0., 5.], [0., 0., 0.])];
+    let rim = |z: f64| Curve::Spline {
+        knots: vec![0., 0., 1., 2., 3., 4., 4.],
+        points: square.iter().map(|[x, y]| [*x, *y, z]).collect(),
+    };
+    let mut edges: Vec<(Curve, [f64; 2])> = seams
+        .iter()
+        .map(|(a, b)| {
+            (
+                Curve::Spline {
+                    knots: vec![0., 0., 1., 1.],
+                    points: vec![*a, *b],
+                },
+                [0., 1.],
+            )
+        })
+        .collect();
+    edges.push((rim(0.), [0., 4.]));
+    edges.push((rim(5.), [0., 4.]));
+    for (edge, interval) in &edges {
+        assert_eq!(boundary_iso(&closed, edge, *interval, 1e-3).unwrap(), None);
+        assert_eq!(
+            boundary_covered(&closed, edge, *interval, 1e-6, SURFACE_GAP_MARGIN, 1.0).unwrap(),
+            None
+        );
+        // What `exact_pcurves` makes is what the straight-line candidate makes, and nothing else.
+        let on = On::new(&closed).unwrap();
+        let eval = CurveEval::new(edge).unwrap();
+        let tol = 1e-3;
+        let direct = on.pcurve(edge, &eval, *interval, tol).ok();
+        let made = exact_pcurves(&closed, &one(edge, *interval), tol, None)
+            .unwrap()
+            .remove(0)
+            .remove(0);
+        assert_eq!(made, direct);
+        assert_eq!(
+            made,
+            on.along(&eval, *interval, tol)
+                .filter(|pc| on.lifts(pc, &eval, *interval, 0.5 * tol))
+        );
+    }
 }
