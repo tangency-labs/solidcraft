@@ -332,11 +332,11 @@ fn auto_operation_in(s: &Session, p: &Value, st: &solidcraft_doc::ModelState) ->
         started_on = Some(name);
         (point, normal)
     } else {
-        if p.get("face").is_none() {
-            if let Ok(sketch) = feature_sketch(s, p, "Extrude") {
-                hidden_face = hidden_face_body(s, sketch);
-                started_on = face_body_reached(s, sketch).ok().flatten().filter(|_| hidden_face.is_none());
-            }
+        if p.get("face").is_none()
+            && let Ok(sketch) = feature_sketch(s, p, "Extrude")
+        {
+            hidden_face = hidden_face_body(s, sketch);
+            started_on = face_body_reached(s, sketch).ok().flatten().filter(|_| hidden_face.is_none());
         }
         extrude_base(s, p)?
     };
@@ -1181,7 +1181,10 @@ fn extrude_from(s: &mut Session, p: &Value, grouped: Option<FaceProfile>) -> Res
         let st = s.model.state();
         let shown: Vec<String> = active_scope(s, &st).into_iter().filter(|b| b.name != hidden && shown_solid(s, b)).map(|b| b.name.clone()).collect();
         if shown.is_empty() {
-            return Err(bad(cmd, format!("no visible body to cut: `{hidden}`, the body this sketch is on, is hidden; show it, or choose participants")));
+            return Err(bad(
+                cmd,
+                format!("no visible body to cut: `{hidden}`, the body this sketch is on, is hidden; show it, or choose participants"),
+            ));
         }
         p.to_mut()["participants"] = json!(shown);
     } else if let Some(parts) = cut_scope(s, &p, operation, sketch, face_body, cmd)? {
