@@ -716,7 +716,11 @@ fn mapped(trim: &b::Curve2, same: bool, [scale, offset]: [f64; 2], [t0, t1]: [f6
             // on the unit interval, whatever the edge's own parameter is (it reports it as
             // having no length): the same position along the edge, so the knots are carried
             // onto its interval, the ends exactly.
-            if a == 0.0 && z == 1.0 {
+            // Only where each end that is not the edge's is far from it (a quarter of the interval,
+            // as for `end`: a rounding or a point within tolerance short of it is refused as
+            // before), and the edge is not a micro edge, whose [0, 1] trim stays refused.
+            let far = |x: f64, t: f64| end(x, t).is_some() || (x - t).abs() >= 0.25 * (t1 - t0).abs();
+            if a == 0.0 && z == 1.0 && t1 - t0 > 1e-6 && far(a, t0) && far(z, t1) {
                 for x in &mut k {
                     *x = t0 * (1.0 - *x) + t1 * *x;
                 }

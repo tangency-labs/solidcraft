@@ -581,8 +581,8 @@ mod mapped_tests {
         let out = mapped(&line(2e-12), true, [1.0, 0.0], [0.0, 2e-12], &|_, _| false).unwrap();
         check_curve2(&out, &mut Budget::input()).unwrap();
         // Each other refusal says which end is off, not the knot resolution.
-        let e = mapped(&line(1.0), true, [1.0, 0.0], [0.0, 0.5], &|_, _| false).unwrap_err().to_string();
-        assert!(e.contains("its end 0.5 from the edge's") && !e.contains("its start") && !e.contains("knot resolution"), "{e}");
+        let e = mapped(&line(0.9), true, [1.0, 0.0], [0.0, 0.5], &|_, _| false).unwrap_err().to_string();
+        assert!(e.contains("its end 0.4 from the edge's") && !e.contains("its start") && !e.contains("knot resolution"), "{e}");
     }
 
     /// An edge on a spline whose knots run from 5e-12 to 2.5e-4 (a file may write knots in
@@ -664,7 +664,9 @@ mod mapped_tests {
         // The same gap where the edge's points there are farther apart than its tolerance is
         // not the edge's end: the trim is refused, as one a quarter short would be.
         assert!(mapped(&trim, true, [1.0, 0.0], [0.0, end], &|_, _| false).is_err());
-        assert!(mapped(&trim, true, [1.0, 0.0], [0.0, 1.5], &on_edge).is_err());
+        // (Its unit-interval form, [0, 1] on an edge [0, 1.5], is the case of a short edge on a spline
+        // face, carried onto the edge's interval; a trim ending at 0.9 there is refused.)
+        assert!(mapped(&trim, true, [0.9, 0.0], [0.0, 1.5], &on_edge).is_err());
     }
 
     /// A trim that runs past its edge's end by more than a rounding but within the edge's
