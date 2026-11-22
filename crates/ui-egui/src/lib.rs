@@ -673,6 +673,8 @@ pub struct SolveApp {
     /// The views around opening the open sketch. Leaving it goes back to the earlier one as the
     /// "When a sketch ends" preference says (#7038).
     pub pre_sketch_cam: Option<PreSketchView>,
+    /// The command now running named the view to open its sketch in, so that view turns to face it.
+    sketch_view_named: bool,
     /// The view from before Extrude turned it to isometric (#9176); the view goes back to it when
     /// the dialog closes, as the "and back when it closes" preference says.
     pub pre_extrude_cam: Option<Camera>,
@@ -1072,6 +1074,7 @@ impl SolveApp {
             view_gizmo: view_gizmo::State::default(),
             now: 0.0,
             pre_sketch_cam: None,
+            sketch_view_named: false,
             pre_extrude_cam: None,
             pre_command_cam: None,
             pre_sketch_component: None,
@@ -1605,6 +1608,7 @@ impl SolveApp {
         // command (the engine runs it), so it meets the same rules.
         let id = solidcraft_engine::find_command(id).map_or(id, |spec| spec.id);
         crate::sketch_view::sync(self)?;
+        self.sketch_view_named = params.get("view").is_some_and(|view| !view.is_null());
         if matches!(id, "sketch.create" | "sketch.edit") {
             let explicit = match params.get("view") {
                 None | Some(Value::Null) => None,
@@ -1781,7 +1785,8 @@ impl SolveApp {
                 "ui.appBarReset" => self.toolbar_custom.reset_app_bar(),
                 "sketch.create" | "sketch.edit" => {
                     let before = self.settled_cam();
-                    self.look_at_opened_sketch(before);
+                    let named = std::mem::take(&mut self.sketch_view_named);
+                    self.open_sketch_camera(before, named);
                 }
                 "sketch.finish" | "sketch.cancel" => self.sketch_closed(v.get("sketch").and_then(Value::as_u64)),
                 // The sketch being edited has all new contents: a tool's picks named the old ones.
@@ -3208,12 +3213,19 @@ impl SolveApp {
     /// opens" preference is off, and remember the view from `before` it and the one facing it for
     /// when the sketch ends (#7038). Returns whether the view turned.
     pub(crate) fn look_at_opened_sketch(&mut self, before: Camera) -> bool {
+        self.open_sketch_camera(before, true)
+    }
+
+    /// [`Self::look_at_opened_sketch`], turning the view only when `turn` asks for it. A command run
+    /// from a script or an agent only remembers the view to go back to: the person or the agent that
+    /// started the sketch there, or named its view, is the one to turn it.
+    pub(crate) fn open_sketch_camera(&mut self, before: Camera, turn: bool) -> bool {
         let Some((view, sketch)) = self.session.sketching_view.zip(self.session.active_sketch) else { return false };
-        if self.pre_sketch_cam.is_some_and(|pre| pre.sketch == sketch && pre.view == view) {
+        if self.pre_sketch_cam.is_some_and(|pre| pre.sketch == sketch && pre.view == view && (!turn || pre.facing != pre.before)) {
             return false;
         }
         let painted = self.viewport.compass_view.unwrap_or_else(|| self.docs.views.active().id);
-        let turn = self.preferences.sketch_open_look_at;
+        let turn = turn && self.preferences.sketch_open_look_at;
         let _ = documents::with_sketch_camera(self, view, |app| {
             let before = if painted == view { before } else { app.settled_cam() };
             if turn {
@@ -3396,7 +3408,8 @@ impl SolveApp {
     /// open (always orthographic) or when the #2682 mode is on: then the view is orthographic
     /// exactly when the camera faces a standard axis view, and perspective otherwise.
     pub fn perspective_view(&self) -> bool {
-        if self.session.active_sketch.is_some() {
+        // Only the view that edits the sketch is orthographic: another tile keeps its projection.
+        if crate::sketch_view::active_sketch(self).is_some() {
             return false;
         }
         if self.ui.auto_ortho_faces {

@@ -4736,12 +4736,14 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
         && let Some(mut plane) = crate::sketch_attachment_ui::face_plane(app, sel)
     {
         plane["fixed"] = json!(true);
+        let before = app.settled_cam();
         let mut params = json!({"plane":plane});
         if app.preferences.sketch_face_activates_part {
             params["activate_part"] = json!(true);
         }
         match app.run("sketch.create", params) {
             Ok(_) => {
+                app.look_at_opened_sketch(before);
                 cancel = true;
                 then_start = d.then_start;
             }
@@ -5570,8 +5572,9 @@ pub fn start_sketch(app: &mut SolveApp, sel: &Sel) -> Result<(), String> {
     {
         params["flip"] = json!(flip);
     }
+    let before = app.settled_cam();
     app.run("sketch.create", params).map_err(|error| crate::friendly_error("sketch.create", &error))?;
-    let turned = app.preferences.sketch_open_look_at;
+    let turned = app.look_at_opened_sketch(before);
     // On a face: look at the picked point, not the plane's origin (a corner of the face),
     // which left the face filling the view off-centre like a big square.
     if turned

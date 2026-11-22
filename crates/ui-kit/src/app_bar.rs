@@ -2164,7 +2164,7 @@ pub fn paint_sketch_header(painter: &Painter, rect: Rect, name: &str, editing: &
     let t = Tokens::get();
     let painter = painter.with_clip_rect(rect);
     painter.rect_filled(rect, 0, t.sketch_soft);
-    let chip = painter.layout_no_wrap(editing.to_owned(), crate::type_face::semibold(11.0), t.text);
+    let chip = painter.layout_no_wrap(editing.to_owned(), crate::type_face::semibold(t.font_small), t.text);
     let chip_width = (chip.size().x + 16.0).min(rect.width());
     let leading = (rect.width() - chip_width - 6.0).max(0.0);
     let glyph_width = if leading >= 23.0 { 23.0 } else { 0.0 };
@@ -2187,7 +2187,7 @@ pub fn paint_sketch_header(painter: &Painter, rect: Rect, name: &str, editing: &
     let padding = 8.0_f32.min(chip_width / 2.0);
     let text_width = (chip_width - 2.0 * padding).max(0.0);
     if text_width > 0.0 {
-        let mut job = egui::text::LayoutJob::simple_singleline(editing.to_owned(), crate::type_face::semibold(11.0), t.text);
+        let mut job = egui::text::LayoutJob::simple_singleline(editing.to_owned(), crate::type_face::semibold(t.font_small), t.text);
         job.wrap = egui::text::TextWrapping { max_width: text_width, max_rows: 1, break_anywhere: true, overflow_character: Some('…') };
         let chip = painter.layout_job(job);
         painter.with_clip_rect(chip_rect).galley(chip_rect.left_center() + vec2(padding, -chip.size().y / 2.0), chip, t.text);

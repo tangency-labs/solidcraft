@@ -921,7 +921,7 @@ fn ground_chip(app: &mut SolveApp, ui: &egui::Ui, id: u64, ground: Rect) {
     let name = sketch_name.as_deref().unwrap_or_else(|| app.docs.views.get(id).map_or("", |view| view.name.as_str()));
     let painter = ui.painter();
     let galley = painter.layout_no_wrap(name.to_owned(), egui::FontId::proportional(t.font_body), t.text);
-    let editing = painter.layout_no_wrap(app.tr("sketch_mode.editing").to_owned(), crate::ui_kit::type_face::semibold(11.0), t.text);
+    let editing = painter.layout_no_wrap(app.tr("sketch_mode.editing").to_owned(), crate::ui_kit::type_face::semibold(t.font_small), t.text);
     let size = vec2(galley.size().x + if sketch_name.is_some() { editing.size().x + 56.0 } else { 34.0 }, 26.0);
     let at = pos2(ground.left() + MARGIN, ground.top() - HEADER + (HEADER - size.y) / 2.0);
     let chip = clear_of_panels(app, Rect::from_min_size(at, size));

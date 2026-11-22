@@ -713,6 +713,9 @@ fn enter_workspace(app: &mut SolveApp, render: bool) {
 pub(crate) fn sync_views(app: &mut SolveApp) {
     let shown = if crate::render_workspace::active(app) { Some((ViewKind::Render, None)) } else { None };
     let prefs = DesignTabPrefs::from(&app.preferences);
+    // The Sketch ribbon shows because a sketch is open, not because the person left the Render
+    // view: another view editing a sketch keeps the Render view the ground.
+    let editing_elsewhere = app.session.sketching_view.is_some_and(|owner| owner != app.docs.views.active().id);
     let views = &mut app.docs.views;
     let before = views.active().id;
     match shown {
@@ -721,7 +724,7 @@ pub(crate) fn sync_views(app: &mut SolveApp) {
                 views.open(kind, subject, prefs.reuse_views);
             }
         }
-        None if views.active().kind == ViewKind::Render => {
+        None if views.active().kind == ViewKind::Render && !editing_elsewhere => {
             let model = views.views().iter().find(|view| view.kind == ViewKind::Model).map(|view| view.id);
             if !model.is_some_and(|model| views.activate(model)) {
                 views.open(ViewKind::Model, None, true);
