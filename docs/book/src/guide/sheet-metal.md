@@ -497,6 +497,32 @@ For a program that cuts every line it is given, `"bend_lines": false` leaves the
 (`BEND_UP` and `BEND_DOWN` are then empty), and `"layers": "single"` writes every entity on layer
 `0` instead of a layer for each role.
 
+A cutter's software often expects its own layer names and colours. A **DXF profile** is a small
+file a shop writes once for its machine: for each role (the outline, the cut-outs, cut text,
+etched text, bends up, bends down, bend notes, pockets, perforation, roll lines) it gives the
+layer's name, its colour and its linetype (continuous, dashed or hidden), or turns the role off
+so that it is not in the file at all. Pass it as `"profile"`, either the file's path or the
+profile itself:
+
+```json
+{"command":"sheet.export_dxf","params":{"path":"bracket-flat.dxf","profile":"example-laser.json"}}
+{"command":"sheet.export_dxf","params":{"path":"bracket-flat.dxf","profile":{
+  "format":"solidcraft-dxf-profile",
+  "roles":{
+    "outline":{"layer":"CUT","color":7},
+    "cut":{"layer":"CUT","color":7},
+    "bend_up":{"layer":"FOLD","color":3,"linetype":"hidden"},
+    "bend_down":{"layer":"FOLD","color":3,"linetype":"hidden"},
+    "cut_text":{"on":false}}}}}
+```
+
+A role the profile does not mention keeps the layer in the table above, and without a profile
+the file is exactly as described there. The entities and their order do not change, only their
+layers; a role is written when both the export's options and the profile allow it, and
+`"layers": "single"` cannot be combined with a profile. A profile that names an unknown role or
+gives a colour, linetype or layer name that cannot be used is refused with a message saying
+which, and no file is written. The file format: `docs/formats/dxf-profiles.md`.
+
 A bend's angle is how far the sheet turns from flat. Many press brakes are set by the
 **included angle** instead: the angle left between the bend's two sides, 180° less the bend
 angle. A 90° bend is 90° either way, but a 58° bend is set as 122°. The rule's `angle_display`

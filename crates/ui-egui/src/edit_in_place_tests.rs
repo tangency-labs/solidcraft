@@ -572,6 +572,26 @@ fn the_mouse_back_button_finishes_the_edit() {
 }
 
 #[test]
+fn the_mouse_back_button_still_goes_back_when_it_drags_the_view() {
+    let mut f = assembly("mouse-back-mapped");
+    let mut h = crate::scenario::Harness::new();
+    h.app = std::mem::replace(&mut f.app, SolveApp::new(Session::default(), Default::default()));
+    h.app.home.open = false;
+    h.call("ui.prefs", json!({"nav_button_map": {"extra1": "orbit"}}));
+    double_click_component(&mut h.app, json!({"component": f.plate}));
+    settle(&mut h.app);
+    h.frames(2);
+    let pos = egui::pos2(400.0, 300.0);
+    let button = |pressed| egui::Event::PointerButton { pos, button: egui::PointerButton::Extra1, pressed, modifiers: Default::default() };
+    let cam = h.app.cam;
+    h.frame_with(vec![egui::Event::PointerMoved(pos), button(true)]);
+    h.frame_with(vec![button(false)]);
+    settle(&mut h.app);
+    assert!(h.app.edit_in_place.active.is_none(), "a plain click on the mapped side button still goes Back");
+    assert_eq!((h.app.cam.yaw, h.app.cam.pitch), (cam.yaw, cam.pitch), "and does not turn the view");
+}
+
+#[test]
 fn a_dialog_open_in_the_assembly_keeps_a_double_click_from_leaving_it() {
     use crate::context_menu::{self, Target};
     let mut f = assembly("assembly-dialog");

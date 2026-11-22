@@ -24,7 +24,7 @@ const DELETE_CONTRACT: TypedContract<PointCloudDeleteParams> = TypedContract::ne
 const LIST_CONTRACT: TypedContract<PointCloudListParams> = TypedContract::new();
 
 pub static COMMANDS: &[CommandSpec] = &[
-    CommandSpec::new("pointcloud.insert", "Insert Point Cloud", crate::checked!("pointcloud.insert", insert))
+    CommandSpec::new("pointcloud.insert", "Insert Point Cloud", crate::checked!("pointcloud.insert", insert)).begins_edit()
         .at("SOLID", "INSERT")
         .icon("import")
         .contract(&INSERT_CONTRACT)

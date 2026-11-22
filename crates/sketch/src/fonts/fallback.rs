@@ -558,6 +558,8 @@ fn run_asked() {
             running.held = search.asked.drain().collect();
         }
         let found = search(&running.held);
+        #[cfg(feature = "test-font-gate")]
+        gate::wait_while_held(&running.held);
         // Admitted here, so the window doesn't read and hash them when it asks again.
         for (path, index) in found.iter().filter_map(|(_, answer)| answer.as_ref()) {
             crate::paper_text::warm(path, *index);
@@ -658,4 +660,43 @@ pub(super) fn placeholder(path: &Path) -> bool {
 fn sets(face: &FaceTable, ch: char) -> bool {
     let Some(cmap) = face.table.as_deref().filter(|_| face.outlines).and_then(ttf_parser::cmap::Table::parse) else { return false };
     cmap.subtables.into_iter().filter(|table| table.is_unicode()).any(|table| table.glyph_index(u32::from(ch)).is_some_and(|glyph| glyph.0 != 0))
+}
+
+/// A test's hold on the search's answer for chosen characters (feature `test-font-gate`, never on
+/// in a release): the thread searches as usual but keeps the answer back until the hold is dropped,
+/// so a test can read the text while it waits, however fast the search is.
+#[cfg(feature = "test-font-gate")]
+pub mod gate {
+    use super::Query;
+    use std::collections::BTreeSet;
+    use std::sync::{Condvar, Mutex, MutexGuard};
+
+    static HELD: Mutex<BTreeSet<char>> = Mutex::new(BTreeSet::new());
+    static RELEASED: Condvar = Condvar::new();
+
+    fn held() -> MutexGuard<'static, BTreeSet<char>> {
+        HELD.lock().unwrap_or_else(|poisoned| poisoned.into_inner())
+    }
+
+    /// Holds back the answer for `ch` until the returned hold is dropped.
+    pub fn hold(ch: char) -> Hold {
+        held().insert(ch);
+        Hold(ch)
+    }
+
+    pub struct Hold(char);
+
+    impl Drop for Hold {
+        fn drop(&mut self) {
+            held().remove(&self.0);
+            RELEASED.notify_all();
+        }
+    }
+
+    pub(super) fn wait_while_held(queries: &[Query]) {
+        let mut held = held();
+        while queries.iter().any(|query| held.contains(&query.ch)) {
+            held = RELEASED.wait(held).unwrap_or_else(|poisoned| poisoned.into_inner());
+        }
+    }
 }

@@ -327,6 +327,7 @@ pub(crate) fn describe<H: PluginHost + 'static>(
         folders: BTreeMap::new(),
         staged: BTreeMap::new(),
         clock: false,
+        forms: false,
         limits: store_limits(limits, 10_000),
         failed: None,
         calls: 0,
