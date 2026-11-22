@@ -170,7 +170,7 @@ use crate::nurbs::knots::Side;
 use crate::surface::offset_surface::{OffsetSurface, SS_UNKNOWN};
 use crate::surface::plane::Plane;
 use crate::surface::surface_cache::face_context::FaceQueries;
-use crate::surface::surface_cache::p1::{SurfaceCache, SurfaceCacheOptions};
+use crate::surface::surface_cache::p1::{SurfaceCache, SurfaceCacheOptions, SurfaceCacheState};
 use crate::surface::trim_srf_cache::{CacheFace, TrimSrfCache};
 use crate::topology::database_io::{DatabaseReader, DatabaseWriter, FileType};
 use crate::topology::geometry_write::write_surface_at;
@@ -1199,6 +1199,9 @@ pub trait SurfaceSolveContext<O: Copy + PartialEq> {
     /// whether the face's cache was built before, as upstream's and as the live
     /// readers' (`intersect::point_class`, `topology::vertexuse`) do.
     ///
+    /// Only those state bits are answered ([`SurfaceCacheState`]), read from a kept
+    /// cache in place: the values the cache handed out would read.
+    ///
     /// # Errors
     /// As [`SurfaceSolveContext::build_surface_cache`].
     fn surface_cache_without_get_tree(
@@ -1206,8 +1209,8 @@ pub trait SurfaceSolveContext<O: Copy + PartialEq> {
         k: &Kernel,
         surface: &Surface,
         handle: Option<O>,
-    ) -> Result<SurfaceCache<O>> {
-        self.build_surface_cache(k, surface, handle)
+    ) -> Result<SurfaceCacheState<O>> {
+        self.build_surface_cache(k, surface, handle)?.state()
     }
 
     /// Read-only classification of the topology prepared by this context.
