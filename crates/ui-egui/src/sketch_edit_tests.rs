@@ -1357,7 +1357,7 @@ fn sketch_finish_notice_uses_window_safe_area_instead_of_the_last_ground_tile() 
             app.viewport.rect =
                 Some(Rect::from_min_max(pos2(if right_ground { 650.0 } else { 0.0 }, 150.0), pos2(if right_ground { 1200.0 } else { 550.0 }, 700.0)));
             let mut host = Rect::NOTHING;
-            let _ = ctx.run_ui(RawInput { screen_rect: Some(screen), ..Default::default() }, |ui| {
+            let mut output = ctx.run_ui(RawInput { screen_rect: Some(screen), ..Default::default() }, |ui| {
                 host = ui.max_rect();
                 // A tall right editor ends above the bottom notice band. It must not shift
                 // a window-centred notice left, regardless of the last ground tile.
@@ -1372,6 +1372,8 @@ fn sketch_finish_notice_uses_window_safe_area_instead_of_the_last_ground_tile() 
                 app.viewport.host_windows = Some(obstacles);
                 crate::sketch_view::show_notice(&mut app, ui);
             });
+            // The frame's texture upload is not under test; egui asserts it is cleared before the output drops.
+            output.textures_delta.clear();
             let notice = crate::scenario::rect_of(&handle).unwrap();
             assert!(
                 (notice.center().x - host.center().x).abs() < 0.5,
