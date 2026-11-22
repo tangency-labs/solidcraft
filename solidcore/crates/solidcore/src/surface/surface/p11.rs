@@ -61,8 +61,8 @@
 //! - **Upstream issues.** `IntersectSurfaceBoundaries` dereferences a `NULL` curve
 //!   array (UB-121; the port always returns the curves); `LocalSurfaceIntersect`'s
 //!   out-of-bounds boundary retries bind `!bFoundSolution` to the minimum test only
-//!   (WR-99; reproduced by default, gated by
-//!   `Kernel::fixes.local_surface_intersect_guards_max_boundary_retry`).
+//!   (WR-99; the port guards the maximum tests too, so a failed retry at a maximum
+//!   boundary never overwrites a boundary solution already found).
 //! - **Surface cache history.** `LiftCurve` reads the surface cache's continuity arrays
 //!   (its C0 knot splits, and `GetDomainWithContinuity`'s C1 domain around each
 //!   segment's start point) without building the cache's tree. Upstream's arrays are
@@ -273,10 +273,10 @@ impl Surface {
     /// guess normals are parallel and no plane normal is given).
     ///
     /// Dispatch: `EvaluatePoint`/`EvaluateNormal` are the virtuals of each surface's
-    /// own kind ([`Surface::evaluate_point`], [`Surface::evaluate_normal`]). When
-    /// `k.fixes.local_surface_intersect_guards_max_boundary_retry` is `true`, the
+    /// own kind ([`Surface::evaluate_point`], [`Surface::evaluate_normal`]). The
     /// out-of-bounds boundary retries guard both minimum and maximum boundary tests of
-    /// the subsequent parameter branches with `!bFoundSolution` (WR-99).
+    /// the subsequent parameter branches with `!bFoundSolution`, as the first does
+    /// (WR-99).
     ///
     /// # Errors
     ///
@@ -590,8 +590,6 @@ impl Surface {
         // 4th - When no Iteration solution was found because boundaries were hit - look
         //       for a surf/BoundaryCurve solution at the iteration stopping point
         if !found_solution && termination == TerminationReason::OutOfBounds && do_boundary {
-            let guard_max = k.fixes.local_surface_intersect_guards_max_boundary_retry;
-
             // when solution search stopped on Surface1 U Boundary
             if are_same(sv[0], uv_domain.min().x) || are_same(sv[0], uv_domain.max().x) {
                 // (SER: checked)
@@ -614,15 +612,10 @@ impl Surface {
             }
 
             // when solution search stopped on Surface1 V Boundary (WR-99: upstream's
-            // precedence is `(!found && min) || max`; opt-in guards `max` too)
-            let try_v1 = if guard_max {
-                !found_solution
-                    && (are_same(sv[1], uv_domain.min().y) || are_same(sv[1], uv_domain.max().y))
-            } else {
-                (!found_solution && are_same(sv[1], uv_domain.min().y))
-                    || are_same(sv[1], uv_domain.max().y)
-            };
-            if try_v1 {
+            // precedence is `(!found && min) || max`; the port guards `max` too)
+            if !found_solution
+                && (are_same(sv[1], uv_domain.min().y) || are_same(sv[1], uv_domain.max().y))
+            {
                 // (SER: checked)
                 let hit = intersect_srf_bndry_crv(
                     k,
@@ -643,15 +636,10 @@ impl Surface {
             }
 
             // when solution search stopped on Surface2 U Boundary (WR-99)
-            let try_u2 = if guard_max {
-                !found_solution
-                    && (are_same(sv[2], other_uv_domain.min().x)
-                        || are_same(sv[2], other_uv_domain.max().x))
-            } else {
-                (!found_solution && are_same(sv[2], other_uv_domain.min().x))
-                    || are_same(sv[2], other_uv_domain.max().x)
-            };
-            if try_u2 {
+            if !found_solution
+                && (are_same(sv[2], other_uv_domain.min().x)
+                    || are_same(sv[2], other_uv_domain.max().x))
+            {
                 // (SER: checked)
                 let hit = intersect_srf_bndry_crv(
                     k,
@@ -672,15 +660,10 @@ impl Surface {
             }
 
             // when solution search stopped on Surface2 V Boundary (WR-99)
-            let try_v2 = if guard_max {
-                !found_solution
-                    && (are_same(sv[3], other_uv_domain.min().y)
-                        || are_same(sv[3], other_uv_domain.max().y))
-            } else {
-                (!found_solution && are_same(sv[3], other_uv_domain.min().y))
-                    || are_same(sv[3], other_uv_domain.max().y)
-            };
-            if try_v2 {
+            if !found_solution
+                && (are_same(sv[3], other_uv_domain.min().y)
+                    || are_same(sv[3], other_uv_domain.max().y))
+            {
                 // (SER: checked)
                 let hit = intersect_srf_bndry_crv(
                     k,
@@ -2339,19 +2322,6 @@ mod tests {
     }
 
     #[test]
-    fn wr99_flag_metadata_and_toggle() {
-        let mut k = Kernel::default();
-        assert!(!k.fixes.local_surface_intersect_guards_max_boundary_retry);
-        assert!(UpstreamFixes::NAMES.contains(&"local_surface_intersect_guards_max_boundary_retry"));
-        assert!(UpstreamFixes::all().local_surface_intersect_guards_max_boundary_retry);
-
-        *k.fixes
-            .flag_mut("local_surface_intersect_guards_max_boundary_retry")
-            .unwrap() = true;
-        assert!(k.fixes.local_surface_intersect_guards_max_boundary_retry);
-    }
-
-    #[test]
     fn wr99_surface1_u_solution_not_lost_on_v_max_retry() {
         // S1(u, v) = (u, 0, v - 1) on [0, 1]^2; S2(u, v) = (u - 0.5, v^2 - 0.25, 0) on
         // [0, 1]^2. From interior guesses with plane normal (1, 0, 0), the 4D Newton
@@ -2360,7 +2330,7 @@ mod tests {
         // boundary solve finds the exact intersection S1(0, 1) == S2(0.5, 0.5) == (0,0,0),
         // setting sv[1] = 1.0 (v1_max). Upstream's unguarded `|| sv[1] == v_max` then
         // runs Surface 1's v = 1 iso-curve (which lies in S2's plane z = 0) and overwrites
-        // `found_solution` with `false`.
+        // `found_solution` with `false`; the guarded retry keeps the solution.
         let s1 = bspline_surface(
             1,
             1,
@@ -2394,43 +2364,16 @@ mod tests {
         let uv_guess = Point2::new(0.1, 0.5);
         let other_uv_guess = Point2::new(0.1, 0.9);
 
-        let k_default = Kernel::default();
-        let res_default = s1
-            .local_surface_intersect(
-                &k_default,
-                &dom,
-                &s2,
-                &dom,
-                1e-6,
-                uv_guess,
-                other_uv_guess,
-                &opts,
-            )
-            .unwrap();
-        assert!(res_default.is_none());
-
-        let mut k_fixed = Kernel::default();
-        k_fixed
-            .fixes
-            .local_surface_intersect_guards_max_boundary_retry = true;
+        let k = Kernel::default();
         let hit = s1
-            .local_surface_intersect(
-                &k_fixed,
-                &dom,
-                &s2,
-                &dom,
-                1e-6,
-                uv_guess,
-                other_uv_guess,
-                &opts,
-            )
+            .local_surface_intersect(&k, &dom, &s2, &dom, 1e-6, uv_guess, other_uv_guess, &opts)
             .unwrap()
             .unwrap();
         assert!((hit.uv.x - 0.0).abs() < 1e-9 && (hit.uv.y - 1.0).abs() < 1e-9);
         assert!((hit.other_uv.x - 0.5).abs() < 1e-9 && (hit.other_uv.y - 0.5).abs() < 1e-9);
         assert!(hit.deviation < 1e-9);
-        let p1 = s1.evaluate_point(&k_fixed, hit.uv).unwrap();
-        let p2 = s2.evaluate_point(&k_fixed, hit.other_uv).unwrap();
+        let p1 = s1.evaluate_point(&k, hit.uv).unwrap();
+        let p2 = s2.evaluate_point(&k, hit.other_uv).unwrap();
         assert!(p1.distance(p2) < 1e-9);
         assert!(p1.distance(Point3::new(0.0, 0.0, 0.0)) < 1e-9);
     }
@@ -2443,11 +2386,7 @@ mod tests {
             previous_uv: None,
             do_boundary_testing: true,
         };
-        let k_default = Kernel::default();
-        let mut k_fixed = Kernel::default();
-        k_fixed
-            .fixes
-            .local_surface_intersect_guards_max_boundary_retry = true;
+        let k = Kernel::default();
 
         // Branch 3 (`SmSurface.cpp:27804`, Surface 2 U-max):
         // S1(u, v) = (v, u^2 - 0.25, 0), S2(u, v) = (v - 0.5, 0, u - 1).
@@ -2470,22 +2409,9 @@ mod tests {
                 &[Vec3::new(-0.5, 0.0, 0.0), Vec3::new(0.5, 0.0, 0.0)],
             ],
         );
-        assert!(s1_b
-            .local_surface_intersect(
-                &k_default,
-                &dom,
-                &s2_b,
-                &dom,
-                1e-6,
-                Point2::new(0.9, 0.1),
-                Point2::new(0.5, 0.1),
-                &opts,
-            )
-            .unwrap()
-            .is_none());
         let hit_b = s1_b
             .local_surface_intersect(
-                &k_fixed,
+                &k,
                 &dom,
                 &s2_b,
                 &dom,
@@ -2528,22 +2454,9 @@ mod tests {
                 &[Vec3::new(1.0, 0.0, -1.0), Vec3::new(1.0, 0.0, 0.0)],
             ],
         );
-        assert!(s1_c
-            .local_surface_intersect(
-                &k_default,
-                &dom,
-                &s2_c,
-                &dom,
-                1e-6,
-                Point2::new(0.1, 0.9),
-                Point2::new(0.1, 0.5),
-                &opts,
-            )
-            .unwrap()
-            .is_none());
         let hit_c = s1_c
             .local_surface_intersect(
-                &k_fixed,
+                &k,
                 &dom,
                 &s2_c,
                 &dom,
@@ -2564,7 +2477,7 @@ mod tests {
         // S1(u, v) = (u, 0, v - 1) and S2(u, v) = (u - 0.5, v^2 - 0.25, 0.7 - u) on
         // [0, 1]^2. Newton clamps both u1 -> 0 and v1 -> 1 (OutOfBounds at sv[0]=0, sv[1]=1).
         // S1's u = 0 boundary misses S2 (gap >= 0.14), leaving `found_solution == false`, so
-        // both default and opt-in modes enter S1's v = 1 max-boundary check and find the
+        // the guarded S1 v = 1 max-boundary check still runs and finds the
         // transverse intersection S1(0.2, 1.0) == S2(0.7, 0.5) == (0.2, 0.0, 0.0).
         let s1 = bspline_surface(
             1,
@@ -2599,44 +2512,14 @@ mod tests {
         let uv_guess = Point2::new(0.1, 0.5);
         let other_uv_guess = Point2::new(0.1, 0.9);
 
-        let k_default = Kernel::default();
-        let mut k_fixed = Kernel::default();
-        k_fixed
-            .fixes
-            .local_surface_intersect_guards_max_boundary_retry = true;
-
-        let hit_default = s1
-            .local_surface_intersect(
-                &k_default,
-                &dom,
-                &s2,
-                &dom,
-                1e-6,
-                uv_guess,
-                other_uv_guess,
-                &opts,
-            )
+        let k = Kernel::default();
+        let hit = s1
+            .local_surface_intersect(&k, &dom, &s2, &dom, 1e-6, uv_guess, other_uv_guess, &opts)
             .unwrap()
             .unwrap();
-        let hit_fixed = s1
-            .local_surface_intersect(
-                &k_fixed,
-                &dom,
-                &s2,
-                &dom,
-                1e-6,
-                uv_guess,
-                other_uv_guess,
-                &opts,
-            )
-            .unwrap()
-            .unwrap();
-
-        for hit in [hit_default, hit_fixed] {
-            assert!((hit.uv.x - 0.2).abs() < 1e-9 && (hit.uv.y - 1.0).abs() < 1e-9);
-            assert!((hit.other_uv.x - 0.7).abs() < 1e-9 && (hit.other_uv.y - 0.5).abs() < 1e-9);
-            assert!(hit.deviation < 1e-9);
-        }
+        assert!((hit.uv.x - 0.2).abs() < 1e-9 && (hit.uv.y - 1.0).abs() < 1e-9);
+        assert!((hit.other_uv.x - 0.7).abs() < 1e-9 && (hit.other_uv.y - 0.5).abs() < 1e-9);
+        assert!(hit.deviation < 1e-9);
     }
 
     /// The intersection and lifting failures keep the operation, status, kind and entity of the bare
