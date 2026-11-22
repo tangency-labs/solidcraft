@@ -29,7 +29,7 @@ use solidcore::topology::brep::validation::{
     check_brep, update_tolerances_after_boolean, CheckLevel,
 };
 use solidcore::topology::edgeuse::p1 as eu1;
-use solidcore::topology::{edge, vertex, EdgeuseId};
+use solidcore::topology::{edge, vertex, vertexuse, EdgeuseId, VertexuseId};
 use solidcore::{Brep, Kernel};
 
 fn volume(k: &Kernel, b: &mut Brep) -> f64 {
@@ -171,9 +171,13 @@ fn edgeuse_ids(b: &Brep) -> Vec<EdgeuseId> {
     b.edgeuses().ids().collect()
 }
 
+fn vertexuse_ids(b: &Brep) -> Vec<VertexuseId> {
+    b.vertexuses().ids().collect()
+}
+
 /// A Boolean's result as `solidcore-ops` leaves it: the tolerance pass (which caches every
-/// edge use's edge/face gap) and each edge/edge gap asked for once, then scaled by `s` with
-/// its tolerances (`Body::transform`). `cleared`: every gap cache of the scaled body is then
+/// edge use's edge/face gap), each edge/edge gap and each vertex use's vertex/edge and
+/// vertex/face gap asked for once, then scaled by `s` with its tolerances (`Body::transform`). `cleared`: every gap cache of the scaled body is then
 /// emptied, the twin whose reads measure everything afresh.
 fn scaled_after_the_tolerance_pass(build: Build, s: f64, cleared: bool) -> (Kernel, Brep) {
     let mut k = Kernel::default();
@@ -182,6 +186,10 @@ fn scaled_after_the_tolerance_pass(build: Build, s: f64, cleared: bool) -> (Kern
     for eu in edgeuse_ids(&b) {
         let _ = eu1::edge_ccw_edge_gap(&k, &mut b, eu, false);
     }
+    for vu in vertexuse_ids(&b) {
+        vertexuse::vertex_edge_gap(&k, &mut b, vu, false).unwrap();
+        vertexuse::vertex_face_gap(&k, &mut b, vu, false).unwrap();
+    }
     transform_matrix(&mut k, &mut b, &uniform_scale(s), true).unwrap();
     if cleared {
         for eu in edgeuse_ids(&b) {
@@ -189,8 +197,7 @@ fn scaled_after_the_tolerance_pass(build: Build, s: f64, cleared: bool) -> (Kern
             r.max_edge_face_gap.reset();
             r.edge_ccw_edge_gap.reset();
         }
-        let vus: Vec<_> = b.vertexuses().ids().collect();
-        for vu in vus {
+        for vu in vertexuse_ids(&b) {
             let r = b.vertexuse_mut(vu).unwrap();
             r.vertex_edge_gap.reset();
             r.vertex_face_gap.reset();
@@ -273,8 +280,8 @@ const SCALED_BODIES: [(&str, Build); 2] = [
     ("ball drilled off centre", ball_drilled_off_centre),
 ];
 
-/// Every edge use's cached edge/face and edge/edge gap after the scale is the scaled body's
-/// own: before, both kept the distance measured before the scale (4.26e-6 on the crossed
+/// Every edge use's cached edge/face and edge/edge gap, and every vertex use's cached
+/// vertex/edge and vertex/face gap, after the scale is the scaled body's own: before, both kept the distance measured before the scale (4.26e-6 on the crossed
 /// cylinders where the scaled body has 4.26e-3 at x1000 and 4.26e-9 at x0.001).
 #[test]
 fn issue_20939_a_scaled_body_caches_its_own_edge_gaps() {
@@ -289,8 +296,7 @@ fn issue_20939_a_scaled_body_caches_its_own_edge_gaps() {
             };
             let edge_gap = |b: &mut Brep, eu, force| {
                 eu1::edge_ccw_edge_gap(&k, b, eu, force)
-                    .ok()
-                    .flatten()
+                    .unwrap()
                     .map(|g| g.gap_3d)
             };
             let cached: Vec<_> = uses
@@ -316,6 +322,33 @@ fn issue_20939_a_scaled_body_caches_its_own_edge_gaps() {
                 face_gaps > 0,
                 "{name} x{s}: no edge/face gap over 1e-9 * scale"
             );
+            // the vertex uses' gaps, reset when the scale moves each vertex
+            let vus = vertexuse_ids(&b);
+            let vertex_gaps = |b: &mut Brep, vu, force| {
+                (
+                    vertexuse::vertex_edge_gap(&k, b, vu, force)
+                        .unwrap()
+                        .map(|g| g.gap_3d),
+                    vertexuse::vertex_face_gap(&k, b, vu, force)
+                        .unwrap()
+                        .map(|g| g.gap_3d),
+                )
+            };
+            let cached: Vec<_> = vus
+                .iter()
+                .map(|&vu| vertex_gaps(&mut b, vu, false))
+                .collect();
+            for (&vu, (edge, face)) in vus.iter().zip(cached) {
+                let (forced_edge, forced_face) = vertex_gaps(&mut b, vu, true);
+                assert!(
+                    same_gap(edge, forced_edge, s),
+                    "{name} x{s}: {vu:?} caches vertex/edge gap {edge:?}, recalculated {forced_edge:?}"
+                );
+                assert!(
+                    same_gap(face, forced_face, s),
+                    "{name} x{s}: {vu:?} caches vertex/face gap {face:?}, recalculated {forced_face:?}"
+                );
+            }
         }
     }
 }
@@ -336,6 +369,11 @@ fn issue_20939_checks_and_tolerances_after_a_scale_read_the_real_gaps() {
                 check_report(&mut k2, &mut b2),
             );
             assert_eq!(c1, c2, "{name} x{s}: check of the scaled body");
+            assert!(
+                c1.0,
+                "{name} x{s}: the scaled body checks valid: {:?}",
+                c1.1
+            );
             assert!(
                 !c1.1.iter().any(|l| l.contains("Bad Gap")),
                 "{name} x{s}: {:?}",
