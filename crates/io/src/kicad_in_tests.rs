@@ -746,7 +746,8 @@ fn pads_on_a_turned_footprint_keep_their_own_rotation() {
 }
 
 /// A slotted hole lies along its pad: on a footprint turned a quarter turn, an oval pad and its
-/// 2 × 0.8 mm slot written at 90° stand up, in the hole cut through the board and in the pad's copper.
+/// 2 × 0.8 mm slot written at 90° stand up. The drill's angle, the outline traces stop at, the hole
+/// cut through the board, the hole opened in the pad's copper and the pad itself are all checked.
 #[test]
 fn a_slot_on_a_turned_footprint_lies_along_its_pad() {
     let source = r#"(kicad_pcb (general (thickness 1.6)) (gr_rect (start -20 -20) (end 20 20) (layer "Edge.Cuts"))
@@ -760,6 +761,24 @@ fn a_slot_on_a_turned_footprint_lies_along_its_pad() {
     let width = xs.iter().cloned().fold(f64::MIN, f64::max) - xs.iter().cloned().fold(f64::MAX, f64::min);
     let height = ys.iter().cloned().fold(f64::MIN, f64::max) - ys.iter().cloned().fold(f64::MAX, f64::min);
     assert!((width - 0.8).abs() < 1e-3 && (height - 2.0).abs() < 1e-3, "{width} × {height}");
+    // The hole cut through the board and the hole opened in the pad's copper stand up too: both read
+    // the drill's angle, and a hole that ignored it would be 2 mm wide and 0.8 mm tall.
+    let corners = [[-20.0, -20.0], [20.0, -20.0], [20.0, 20.0], [-20.0, 20.0]];
+    let square = Loop2::polygon(&corners.map(|[x, y]| Vec2::new(x, y)));
+    let extent = |hole: &Loop2| {
+        let (xs, ys): (Vec<f64>, Vec<f64>) = hole.polyline(1e-3).to_vec().into_iter().map(|p| (p.x, p.y)).unzip();
+        let span = |v: &[f64]| v.iter().cloned().fold(f64::MIN, f64::max) - v.iter().cloned().fold(f64::MAX, f64::min);
+        (span(&xs), span(&ys))
+    };
+    let regions = regions_from_loops(vec![square.clone()], Some(&board.drills));
+    let [region] = regions.as_slice() else { panic!("one region: {}", regions.len()) };
+    let [board_hole] = region.holes.as_slice() else { panic!("one hole in the board: {}", region.holes.len()) };
+    let (w, h) = extent(board_hole);
+    assert!((w - 0.8).abs() < 1e-3 && (h - 2.0).abs() < 1e-3, "the hole through the board: {w} × {h}");
+    let pad_hole = pad_holes(&square, &corners, &board.drills);
+    let [pad_hole] = pad_hole.as_slice() else { panic!("one hole in the pad: {}", pad_hole.len()) };
+    let (w, h) = extent(pad_hole);
+    assert!((w - 0.8).abs() < 1e-3 && (h - 2.0).abs() < 1e-3, "the hole in the pad's copper: {w} × {h}");
     let pads = front_pad_bounds(
         r#"(footprint "S" (layer "F.Cu") (at 0 0 90) (pad "1" thru_hole oval (at 0 0 90) (size 3 1.5) (drill oval 2 0.8) (layers "*.Cu" "*.Mask")))"#,
     );
