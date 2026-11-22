@@ -920,6 +920,50 @@ fn a_tool_cutting_another_part_cuts_again_when_that_part_moves() {
     assert!((volume(&model, &body) - (400.0 - 16.0)).abs() < 1e-6, "{}", volume(&model, &body));
 }
 
+/// A combine whose tool is a further placement's body (`Bit (Drill:2)`) reads that placement
+/// alone. A component or another placement added elsewhere keeps the combine's result; moving
+/// the tool's own placement cuts again. Reading every placement cut each such combine again
+/// for every occurrence added anywhere in the design.
+#[test]
+fn a_combine_with_a_placed_copys_tool_keeps_its_result_when_other_placements_are_added() {
+    let boxed = |corner: Vec3, length: &str, height: &str| FeatureKind::Box {
+        corner: point_expr(corner),
+        length: length.into(),
+        width: length.into(),
+        height: height.into(),
+        operation: Operation::NewBody,
+        centred: false,
+    };
+    let mut doc = Document::new("copy tool");
+    let board = doc.add_feature(boxed(Vec3::ZERO, "100", "10"), None).unwrap();
+    let drill = doc.add_component(Some("Drill"), 0).unwrap();
+    let bit = doc.add_feature(boxed(Vec3::new(-50.0, -50.0, 5.0), "10", "5"), None).unwrap();
+    doc.feature_mut(bit).unwrap().component = drill;
+    let copy = doc.add_occurrence(drill, 0, rigid(Vec3::new(70.0, 70.0, 0.0), Vec3::ZERO, Vec3::Z, 0.0)).unwrap();
+    let mut model = Model::new();
+    model.evaluate(&doc);
+    let st = model.state();
+    let name_of = |id: u64| st.bodies.iter().find(|b| b.feature == id).unwrap().name.clone();
+    let (board, tool) = (name_of(board), crate::WorldNames::new(&doc, &st).name(&name_of(bit), drill, &[copy]));
+    let kind = FeatureKind::Combine { target: board.clone().into(), tools: vec![tool.into()], operation: Operation::Cut, keep_tools: true };
+    let combine = doc.add_feature(kind, None).unwrap();
+    model.evaluate(&doc);
+    assert!(model.result(combine).is_some_and(|r| r.error.is_none()), "{:?}", model.result(combine));
+    assert!((volume(&model, &board) - (100_000.0 - 500.0)).abs() < 1e-6, "{}", volume(&model, &board));
+    // A new component and another placement of the drill, away from the board: nothing to cut again.
+    doc.add_component(Some("Other"), 0).unwrap();
+    model.evaluate(&doc);
+    assert_eq!(model.last_recomputed, 0, "component added");
+    doc.add_occurrence(drill, 0, rigid(Vec3::new(500.0, 0.0, 0.0), Vec3::ZERO, Vec3::Z, 0.0)).unwrap();
+    model.evaluate(&doc);
+    assert_eq!(model.last_recomputed, 0, "placement added");
+    // The tool's own placement moved off the board: the hole goes with it.
+    doc.occurrences.iter_mut().find(|o| o.id == copy).unwrap().transform = rigid(Vec3::new(300.0, 300.0, 0.0), Vec3::ZERO, Vec3::Z, 0.0);
+    model.evaluate(&doc);
+    assert_eq!(model.last_recomputed, 1, "tool moved");
+    assert!((volume(&model, &board) - 100_000.0).abs() < 1e-6, "{}", volume(&model, &board));
+}
+
 /// A root design with two 10 x 10 x 4 mm plates, "Plate" at the origin and "Other" 30 mm along Y,
 /// and a sketch on origin plane `plane` of the rectangle `profile` spans (opposite corners, in mm):
 /// (the plate part, the other part, the sketch).

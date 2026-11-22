@@ -414,7 +414,7 @@ pub(super) fn paste(s: &mut Session, p: &Value) -> Result<Value> {
         }
     }
     scratch.selection = ids.values().map(|id| Sel::Feature { id: *id }).collect();
-    s.accept_computed(scratch);
+    s.accept_computed(scratch)?;
     serde_json::to_value(PasteResult { pasted: made, errors: Vec::new(), notices: Vec::new(), param_warnings: Vec::new() })
         .map_err(|e| bad(CMD, e.to_string()))
 }

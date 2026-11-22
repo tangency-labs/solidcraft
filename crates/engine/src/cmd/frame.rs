@@ -49,10 +49,9 @@ macro_rules! profile_doc {
 }
 
 pub static COMMANDS: &[CommandSpec] = &[
-    CommandSpec::new("frame.member", "Frame Member", crate::checked!("frame.member", member))
+    CommandSpec::new("frame.member", "Frame Member", crate::checked!("frame.member", member)).begins_edit()
         .at("WELDMENTS", "CREATE")
         .icon("frame_member")
-        .enabled(not_in_sketch)
         .contract(&MEMBER_CONTRACT)
         .output(output_schema_for::<FeatureResult>)
         .params(concat!(

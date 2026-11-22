@@ -3960,3 +3960,146 @@ fn restarted_curve_errors_keep_their_step_messages() {
     let open = BCurve::Polyline { points: vec![[0.; 3], [1.; 3], [2.; 3]] };
     assert_eq!(crate::kernel::restart_curve(&open, 0.5).unwrap_err(), "spline seam endpoints do not coincide");
 }
+
+/// A 20 × 30 × 10 mm block (mm, uncertainty 1e-6 mm) whose 12 edges are straight cubic Béziers
+/// on the knots (0, `span`), as Siemens NX writes them (`span` 1.020781457822e-7), and whose edge
+/// from (0, 0, 0) to (20, 0, 0) is split `split` mm from its start: a micro edge and the rest,
+/// both on that edge's curve, in its place in both its faces' loops.
+fn bezier_block(span: f64, split: f64) -> p21::Exchange {
+    let mut w = W::default();
+    let size = [20.0, 30.0, 10.0];
+    let corner = |i: usize| -> V {
+        let c = [[0, 0, 0], [1, 0, 0], [1, 1, 0], [0, 1, 0], [0, 0, 1], [1, 0, 1], [1, 1, 1], [0, 1, 1]][i];
+        [f64::from(c[0]) * size[0], f64::from(c[1]) * size[1], f64::from(c[2]) * size[2]]
+    };
+    let vs: Vec<u64> = (0..8).map(|i| w.vertex(corner(i))).collect();
+    let cut = w.vertex([split, 0.0, 0.0]);
+    let pairs = [(0, 1), (1, 2), (2, 3), (3, 0), (4, 5), (5, 6), (6, 7), (7, 4), (0, 4), (1, 5), (2, 6), (3, 7)];
+    let mut edges = Vec::new();
+    for (k, &(a, z)) in pairs.iter().enumerate() {
+        let (p, q) = (corner(a), corner(z));
+        let pts: Vec<u64> = (0..4)
+            .map(|j| {
+                let t = f64::from(j) / 3.0;
+                w.pt([p[0] + t * (q[0] - p[0]), p[1] + t * (q[1] - p[1]), p[2] + t * (q[2] - p[2])])
+            })
+            .collect();
+        let c = w.add(format!(
+            "B_SPLINE_CURVE_WITH_KNOTS('',3,({}),.UNSPECIFIED.,.F.,.F.,(4,4),(0.,{}),.PIECEWISE_BEZIER_KNOTS.)",
+            list(&pts),
+            real(span)
+        ));
+        if k == 0 {
+            edges.push(w.add(format!("EDGE_CURVE('',#{},#{cut},#{c},.T.)", vs[0])));
+            let rest = w.add(format!("EDGE_CURVE('',#{cut},#{},#{c},.T.)", vs[1]));
+            edges.push(rest);
+        } else {
+            edges.push(w.add(format!("EDGE_CURVE('',#{},#{},#{c},.T.)", vs[a], vs[z])));
+        }
+    }
+    // `edges[0]` is the micro edge and `edges[1]` the rest of that edge; the others follow.
+    let e = |k: usize| if k == 0 { 0 } else { k + 1 };
+    // Loops counter-clockwise seen from outside: (edge index into `pairs`, or 12 for the rest of
+    // edge 0; forward), then the plane's origin and normal.
+    let faces: [(&[(usize, bool)], V, V); 6] = [
+        (&[(3, false), (2, false), (1, false), (12, false), (0, false)], [0.0; 3], [0.0, 0.0, -1.0]),
+        (&[(4, true), (5, true), (6, true), (7, true)], [0.0, 0.0, 10.0], [0.0, 0.0, 1.0]),
+        (&[(0, true), (12, true), (9, true), (4, false), (8, false)], [0.0; 3], [0.0, -1.0, 0.0]),
+        (&[(1, true), (10, true), (5, false), (9, false)], [20.0, 0.0, 0.0], [1.0, 0.0, 0.0]),
+        (&[(2, true), (11, true), (6, false), (10, false)], [20.0, 30.0, 0.0], [0.0, 1.0, 0.0]),
+        (&[(3, true), (8, true), (7, false), (11, false)], [0.0, 30.0, 0.0], [-1.0, 0.0, 0.0]),
+    ];
+    let mut ids = Vec::new();
+    for (lp, o, n) in faces {
+        let oes: Vec<u64> = lp.iter().map(|&(k, fwd)| w.oe(edges[if k == 12 { 1 } else { e(k) }], fwd)).collect();
+        let bound = w.bound(&oes, true, true);
+        let x = if n[0] == 0.0 { [1.0, 0.0, 0.0] } else { [0.0, 1.0, 0.0] };
+        let plane = w.plane(o, n, x);
+        ids.push(w.face(&[bound], plane, true));
+    }
+    let shell = closed_shell(&mut w, &ids);
+    let solid = w.add(format!("MANIFOLD_SOLID_BREP('block',#{shell})"));
+    w.file_with_uncertainty(&[solid], 1e-6)
+}
+
+/// A micro edge cut from the start of a straight cubic Bézier whose knots span 1.02e-7 (Siemens
+/// NX writes both) lies on [0, 6.5e-15] of the file's parameter at 1.283e-6 mm: no more than the
+/// kernel's knot resolution (1e-12), so its trims' end knots were one and the kernel's check
+/// failed the block (and with a 1.26e-3 mm micro edge, [0, 6.4e-12], only 6.4 times it). Such a
+/// curve's parameter is rescaled where it is read, exactly, and every one of these blocks is the
+/// closed 6000 mm³ block the kernel's check passes, as with the knots (0, 20).
+#[test]
+fn a_micro_edge_on_a_bezier_with_a_tiny_knot_span_reads_as_the_block() {
+    for span in [20.0, 1.020781457822e-7] {
+        for split in [1.283e-6, 1.26e-3] {
+            let case = format!("knots (0, {span}), micro edge {split} mm");
+            let s = one_solid(&bezier_block(span, split));
+            assert!(!s.sheet, "{case}");
+            // The record as read, without the kernel's healer (which takes the split vertex off
+            // the straight edge): the kernel's check of the reader's own trims.
+            let (body, _) = solidcore_ops::body::Body::from_record(&s.brep, true).unwrap_or_else(|e| panic!("{case}: {e}"));
+            assert!(body.is_manifold_solid().unwrap(), "{case}");
+            let report = body.check(solidcore_ops::check::CheckLevel::All).unwrap();
+            assert!(report.is_valid(), "{case}: {report}");
+            assert_eq!(body.counts().unwrap(), [6, 13, 9], "{case}");
+            let mass = body.mass_properties(1e-9).unwrap();
+            assert!((mass.volume - 6000.0).abs() <= 1e-9 * 6000.0, "{case}: volume {}", mass.volume);
+            // Each edge's curve is its cubic with the file's control points, on the file's knots
+            // (0, 20) as written, and on (0, 1.02e-7) scaled by the least power of two at or above
+            // the curve's speed, its length L over the span (3 |P_{i+1} − P_i| / span, exact
+            // thirds); every edge then spans more than the knot resolution.
+            for e in &s.brep.edges {
+                let solidcore_record::brep::Curve::Spline { knots, points } = &e.curve else { panic!("{case}: {:?}", e.curve) };
+                let (Some(p0), Some(p3)) = (points.first(), points.last()) else { panic!("{case}") };
+                let length = ((p3[0] - p0[0]).powi(2) + (p3[1] - p0[1]).powi(2) + (p3[2] - p0[2]).powi(2)).sqrt();
+                let end = *knots.last().unwrap();
+                assert_eq!(&knots[..4], &[0.0; 4], "{case}");
+                assert!(knots[4..].iter().all(|k| *k == end), "{case}: {knots:?}");
+                if span == 20.0 {
+                    assert_eq!(end, 20.0, "{case}");
+                } else {
+                    let scale = end / span;
+                    assert_eq!(scale, 2f64.powi(scale.log2().round() as i32), "{case}: {knots:?}");
+                    let speed = length / span;
+                    assert!(scale >= speed && scale < 2.0 * speed * (1.0 + 1e-12), "{case}: {scale} for {speed}");
+                }
+                assert!(e.interval[1] - e.interval[0] > 1e-12, "{case}: {:?}", e.interval);
+            }
+        }
+    }
+}
+
+/// A cubic rational spline with 101 control points 10 mm apart along a 1000 mm line, weights
+/// alternating 1 and 0.9, on uniform knots over [0, 1]: its speed is about 1000, so a 5e-8 mm edge
+/// spans 5e-11 of its parameter, which the kernel resolves, and its knots stay the file's bit for
+/// bit. Its local bound is `3 · 1.9 · 50 / 0.9 / (3 / 98)`, about 1.0e4 (the box of the 6 points
+/// each derivative term spans, 50 mm); the whole curve's box (1000 mm) would give 2.1e5, past the
+/// threshold (5e4), and a 2^18 rescale it does not need. On [0, 1e-7] it is rescaled, exactly.
+#[test]
+fn a_rational_curve_that_resolves_its_edges_keeps_its_knots() {
+    let n = 101;
+    let homogeneous: Vec<[f64; 4]> = (0..n)
+        .map(|i| {
+            let w = if i % 2 == 0 { 1.0 } else { 0.9 };
+            [w * 10.0 * f64::from(i), 0.0, 0.0, w]
+        })
+        .collect();
+    let knots = |end: f64| -> Vec<f64> {
+        let mut k = vec![0.0; 4];
+        k.extend((1..98).map(|j| end * f64::from(j) / 98.0));
+        k.extend([end; 4]);
+        k
+    };
+    let curve = BCurve::RationalSpline { knots: knots(1.0), homogeneous: homogeneous.clone() };
+    assert_eq!(super::resolvable(curve.clone()).unwrap(), curve);
+    let fast = knots(1e-7);
+    let BCurve::RationalSpline { knots: scaled, homogeneous: same } =
+        super::resolvable(BCurve::RationalSpline { knots: fast.clone(), homogeneous: homogeneous.clone() }).unwrap()
+    else {
+        panic!("not a rational spline")
+    };
+    assert_eq!(same, homogeneous);
+    let scale = scaled.last().unwrap() / 1e-7;
+    assert_eq!(scale, 2f64.powi(scale.log2().round() as i32), "{scale}");
+    assert!(scaled.iter().zip(&fast).all(|(s, f)| *s == f * scale), "{scaled:?}");
+}

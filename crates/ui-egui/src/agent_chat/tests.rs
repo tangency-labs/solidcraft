@@ -585,6 +585,8 @@ fn merging_finds_the_turns_start_when_the_history_was_trimmed() {
         label: String::new(),
         doc: d.clone(),
         active_sketch: None,
+        sketching_view: None,
+        sketch_restore_marker: None,
         active_sheet_sketch: None,
         pending_moves: Default::default(),
         part: None,
@@ -5610,6 +5612,20 @@ fn a_prompt_at_the_top_of_the_conversation_is_as_tall_as_its_content() {
     let row = solidcraft_theme::Tokens::get().control_height;
     assert!(prompt.bottom() - button.y < row, "the bubble ends {} below its button", prompt.bottom() - button.y);
     assert!(reply.top() - button.y < 2.0 * row, "the reply starts {} below the prompt's button", reply.top() - button.y);
+}
+
+/// A short prompt's bubble is as wide as its lines and its Copy message button, at the right
+/// edge of the conversation, instead of spanning most of the panel (#14738).
+#[test]
+fn a_short_prompt_has_a_bubble_as_wide_as_its_content() {
+    // Kept to the end: the published handles and rects are its last frame's.
+    let _h = chat_with_copiable_messages();
+    let bubble = solidcraft_ui_registry::rect_of("agent_chat:bubble:0").expect("the prompt's bubble");
+    let button = solidcraft_ui_registry::handle_at("agent_chat:copy:0").expect("the prompt's Copy message button");
+    let reply = solidcraft_ui_registry::rect_of("agent_chat:msg:1").expect("the reply's message area");
+    assert!(bubble.width() < 0.5 * reply.width(), "the bubble is {} wide in a conversation {} wide", bubble.width(), reply.width());
+    assert!((bubble.right() - reply.right()).abs() < 1.0, "the bubble ends at {}, the conversation at {}", bubble.right(), reply.right());
+    assert!(bubble.contains(button), "the Copy message button {button:?} is in the bubble {bubble:?}");
 }
 
 /// The visible button on a reply copies its original Markdown: heading, paragraphs, list and

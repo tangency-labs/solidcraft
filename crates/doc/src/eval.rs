@@ -3512,8 +3512,14 @@ fn placement_digest(doc: &Document, f: &Feature, st: Option<&ModelState>) -> u64
         FeatureKind::Combine { target, tools, .. } => {
             frame = st.and_then(|st| st.body(target)).map(|b| body_world(doc, b));
             reads.placed_body(st, target);
+            // A tool from a further placement (`Bit (Drill:2)`) is read through its occurrence
+            // path alone: reading every placement cut it again for each occurrence added anywhere.
+            let copies = st.map(|st| copy_paths(doc, st, tools)).unwrap_or_default();
             for tool in tools {
-                reads.placed_body(st, tool);
+                match copies.get(&**tool) {
+                    Some(path) => reads.paths.push(path.clone()),
+                    None => reads.placed_body(st, tool),
+                }
             }
         }
         FeatureKind::Split { body, tool: Some(tool), tool_plane: true, .. } => {
@@ -3689,6 +3695,30 @@ fn contents_digest(doc: &Document, f: &Feature, st: Option<&ModelState>) -> u64 
         Err(e) => e.to_string().hash(&mut h),
     }
     h.finish() | 1
+}
+
+/// The occurrence path of each name in `names` that `st` lacks and that names a further
+/// placement's body (`Bit (Drill:2)`), found as [`with_placed_copies`] finds it.
+fn copy_paths<'n>(doc: &Document, st: &ModelState, names: &'n [crate::BodyName]) -> std::collections::HashMap<&'n str, Vec<u64>> {
+    let mut found = std::collections::HashMap::new();
+    let missing: Vec<&str> = names.iter().map(|n| &**n).filter(|n| !n.is_empty() && st.body(n).is_none()).collect();
+    if missing.is_empty() || doc.occurrences.is_empty() {
+        return found;
+    }
+    let mut by_component: std::collections::HashMap<u64, Vec<&ModelBody>> = std::collections::HashMap::new();
+    for (b, owner) in st.bodies.iter().zip(doc.model_body_components(st)) {
+        by_component.entry(owner).or_default().push(b);
+    }
+    let world = crate::WorldNames::new(doc, st);
+    for (comp, path, _) in doc.placements() {
+        for b in by_component.get(&comp).into_iter().flatten() {
+            let name = world.name(&b.name, comp, &path);
+            if let Some(n) = missing.iter().find(|n| **n == name) {
+                found.entry(*n).or_insert_with(|| path.clone());
+            }
+        }
+    }
+    found
 }
 
 /// Every occurrence's placement and every body offset (a feature read from a frame that cannot

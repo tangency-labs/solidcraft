@@ -159,8 +159,7 @@ pub enum Target {
 pub(crate) fn cmd(app: &SolveApp, id: &str, label: &str) -> Item {
     let info = solidcraft_engine::find_command(id).map(|c| c.info(&app.session));
     let shortcut = match id {
-        "edit.undo" => crate::ui_kit::chord_label("Ctrl+Z"),
-        "edit.redo" => [crate::ui_kit::chord_label("Ctrl+Y"), crate::ui_kit::chord_label("Ctrl+Shift+Z")].join(", "),
+        "edit.undo" | "edit.redo" => crate::keymap::keys(app, id).iter().map(|key| crate::ui_kit::chord_label(key)).collect::<Vec<_>>().join(", "),
         _ => crate::keymap::display_for(app, id).unwrap_or_default(),
     };
     Item {
@@ -179,6 +178,22 @@ pub(crate) fn cmd(app: &SolveApp, id: &str, label: &str) -> Item {
 /// A view action (`ui.*`).
 pub(crate) fn act(id: &str, label: &str, icon: &str) -> Item {
     Item::action(id, label, icon)
+}
+
+/// What the browser did with a right-click (#20011).
+///
+/// A browser may take a right-click for itself: Firefox takes a Shift+right-click, opens its own
+/// menu and never offers the page its context menu event, which no page can stop. The browser
+/// offers the event when the click is the page's, as Chrome, Edge and Safari always do.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum BrowserMenu {
+    /// The browser offered the page its context menu event: the click is the page's, and the app
+    /// may open its own menu.
+    #[default]
+    Offered,
+    /// The browser took the click and opened its own menu: the app opens no menu of its own
+    /// under the browser's.
+    Taken,
 }
 
 /// Menu state kept between frames. The anchor is `app.viewport.context_menu`.
@@ -235,6 +250,9 @@ pub struct MenuState {
     opener: Option<Rect>,
     /// The menu was on screen in an earlier frame. Until then a press is the opening click's own.
     shown: bool,
+    /// What the browser did with the last right-click (#20011): `Taken` when the browser opened
+    /// its own menu, so the app opens none of its own under it.
+    pub browser_menu: BrowserMenu,
     /// Clicks and selections the quick menu follows.
     pub(crate) quick: crate::quick_menu::Watch,
 }
@@ -465,11 +483,18 @@ pub fn items(app: &SolveApp, target: &Target) -> Vec<Item> {
                 act("ui.workspace.drawing", "Drawing", "ws_drawing")
                     .with(json!({"workspace":"drawing"}))
                     .key(if drawing { "current" } else { "" })
-                    .on(app.session.active_sketch.is_none() && app.tool.is_none() && app.dialog.is_none() && !app.file_load.busy()),
-                act("ui.workspace.render", "Render", "ws_render")
-                    .with(json!({"workspace":"render"}))
-                    .key(if rendering { "current" } else { "" })
-                    .on(crate::render_workspace::entry_open(app)),
+                    .on(if app.preferences.workspace_follows_view {
+                        crate::workspace::switcher_available(app)
+                    } else {
+                        app.session.active_sketch.is_none() && app.tool.is_none() && app.dialog.is_none() && !app.file_load.busy()
+                    }),
+                act("ui.workspace.render", "Render", "ws_render").with(json!({"workspace":"render"})).key(if rendering { "current" } else { "" }).on(
+                    if app.preferences.workspace_follows_view {
+                        crate::workspace::switcher_available(app)
+                    } else {
+                        crate::render_workspace::entry_open(app)
+                    },
+                ),
             ]
         }
         Target::Units => crate::prefs::UNITS
@@ -2662,11 +2687,24 @@ fn in_selection(app: &SolveApp, sel: &Sel) -> bool {
     context_target_selected(&app.session.selection, sel) || pick_body(sel).is_some_and(|body| crate::selection::holds_body(&app.session, body))
 }
 
+/// The browser took the right-click and opened its own menu: the app opens no menu of its own
+/// under the browser's, and tells the user what to do instead (#20011).
+fn browser_took_the_click(app: &mut SolveApp) -> bool {
+    if app.menu.browser_menu != BrowserMenu::Taken {
+        return false;
+    }
+    app.set_status(app.tr("ui.context_menu_browser_took").to_owned(), false);
+    true
+}
+
 /// Open the viewport menu at a screen position. A right-click on something not selected
 /// selects it first, so the menu is about what is under the cursor; a face or edge already in a
 /// multi-selection keeps the whole selection (#3733), as does one of a selected body (#5849). `held`: the keys held at that click.
 /// On the view gizmo it opens the gizmo's own menu and leaves the selection alone.
 pub fn open(app: &mut SolveApp, at: Pos2, held: crate::tool_modifiers::Held) {
+    if browser_took_the_click(app) {
+        return;
+    }
     if crate::drawing_workspace::active(app) {
         let under = crate::drawing_sheet_page::hovered(app);
         return open_on_sheet(app, at, held, under);
@@ -2723,6 +2761,9 @@ fn select_under(app: &mut SolveApp, at: Pos2, before: Vec<Sel>, sel: Sel) {
 /// the object whose row in the browser was right-clicked, selected first unless it is already part
 /// of the selection. Empty paper keeps the selection, as empty space does in a sketch.
 pub(crate) fn open_on_sheet(app: &mut SolveApp, at: Pos2, held: crate::tool_modifiers::Held, under: Option<Sel>) {
+    if browser_took_the_click(app) {
+        return;
+    }
     app.menu.opened = Some((at, held));
     app.menu.picked = None;
     app.menu.over_geometry = false;
@@ -2741,6 +2782,9 @@ pub(crate) fn open_on_sheet(app: &mut SolveApp, at: Pos2, held: crate::tool_modi
 
 /// Open a menu for a target (the radial ring only for the viewport).
 pub fn open_for(app: &mut SolveApp, at: Pos2, target: Target) {
+    if browser_took_the_click(app) {
+        return;
+    }
     app.menu.key_row = None;
     app.menu.submenu.clear();
     app.menu.submenu_key = None;
@@ -2755,6 +2799,9 @@ pub fn open_for(app: &mut SolveApp, at: Pos2, target: Target) {
 
 /// A button's menu: a click opens it, and a click on the same button while it is open closes it.
 pub fn toggle_for(app: &mut SolveApp, opener: Rect, at: Pos2, target: Target) {
+    if browser_took_the_click(app) {
+        return;
+    }
     if open_from(app, opener, &target) {
         close(app);
     } else {
@@ -4077,6 +4124,26 @@ mod tests {
         assert!(!h.app.menu.radial, "browser menus remain lists when radial menus are enabled");
     }
 
+    /// #20011: in the browser, Firefox takes a Shift+right-click for itself: it opens its own
+    /// menu and never offers the page its context menu event, which no page can stop. SolidCraft
+    /// must open no menu of its own under the browser's, and the user is told what to do.
+    #[test]
+    fn a_right_click_the_browser_took_opens_no_menu() {
+        let mut h = crate::scenario::Harness::new();
+        h.app.home.open = false;
+        h.settle();
+        let point = h.at(&json!({"world":[0,0,0]})).unwrap();
+        h.step(&json!({"click":point,"button":"right"})).unwrap();
+        assert!(h.app.viewport.context_menu.is_some(), "an ordinary right-click opens the menu");
+        close(&mut h.app);
+        // The browser took this click for itself and opened its own menu.
+        h.app.menu.browser_menu = BrowserMenu::Taken;
+        h.step(&json!({"click":point,"button":"right"})).unwrap();
+        assert!(h.app.viewport.context_menu.is_none(), "the browser's menu is open: ours must not open under it");
+        let status = h.app.status.as_ref().map(|(text, _, _)| text.clone()).unwrap_or_default();
+        assert!(status.contains("browser"), "the user is told why: {status:?}");
+    }
+
     #[test]
     fn disabled_radial_menu_does_not_capture_right_button_hold() {
         let mut app = SolveApp::new(solidcraft_engine::Session::default(), Default::default());
@@ -4345,6 +4412,9 @@ mod workspace_menu_tests {
     #[test]
     fn workspace_rows_keep_switching_handles_and_disabled_render_behavior() {
         let mut h = Harness::new();
+        // The classic switcher, which this test covers: since #19655 the default lets the focused
+        // view choose the workspace (`workspace_follows_view`).
+        h.app.preferences.workspace_follows_view = false;
         h.call("ui.resize", json!({"width":1200,"height":1000}));
         h.step(&json!({"click":{"handle":"ribbon:workspace"}})).unwrap();
         let opener = rect_of("ribbon:workspace").unwrap();
@@ -4375,6 +4445,9 @@ mod workspace_menu_tests {
     #[test]
     fn render_row_opens_while_isocurve_analysis_is_on() {
         let mut h = Harness::new();
+        // The classic switcher, which this test covers: since #19655 the default lets the focused
+        // view choose the workspace (`workspace_follows_view`).
+        h.app.preferences.workspace_follows_view = false;
         h.call("ui.resize", json!({"width":1200,"height":1000}));
         h.app.run("solid.cylinder", json!({"radius": 10, "height": 30})).unwrap();
         h.settle();
