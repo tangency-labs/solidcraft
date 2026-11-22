@@ -247,10 +247,16 @@ impl Closure {
             let shortfall = if missing > 0.0 {
                 let a = lo.max_extension + (0.5 * missing) * lo_scale;
                 let mut b = hi.max_extension + (0.5 * missing) * hi_scale;
-                if a / lo_scale + b / hi_scale < gap {
-                    // The suggested lengths must still close the gap when supplied
-                    // back to this test. Round the remaining meridian length outwards.
-                    b = ((Ivl::from(gap) - Ivl::from(a / lo_scale)) * Ivl::from(hi_scale)).hi;
+                let axial = a / lo_scale;
+                if axial + b / hi_scale < gap {
+                    // Replay uses the same rounded axial reach. The upper bound on
+                    // the remainder is representable, so b / hi_scale rounds to at
+                    // least that bound. Adding axial then rounds to at least gap.
+                    let remaining_axial = Ivl::from(gap).sub_ulp(Ivl::from(axial)).hi;
+                    b = Ivl::from(remaining_axial).mul_ulp(Ivl::from(hi_scale)).hi;
+                }
+                if !a.is_finite() || !b.is_finite() {
+                    return Ok(None);
                 }
                 Some(DefeatureFailure::InsufficientAnnularReach {
                     available,

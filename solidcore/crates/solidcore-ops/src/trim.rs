@@ -47,7 +47,7 @@ use crate::body::{finish, finish_proved, Body, Expect};
 use crate::error::status;
 use crate::history::{self, History, Made};
 use crate::order::{self, Order};
-use crate::session::{run_on, with_body};
+use crate::session::{run_on, run_taking, with_body};
 use crate::split::{copies_of, curve_ref, MAX_FACES};
 use crate::sweep::{dropped_on, kernel_curves, tolerance_ok, Curve};
 use crate::{Error, Result};
@@ -570,9 +570,9 @@ pub fn remove_ring_groove(
         .map(|&i| order::face(&mapped, i))
         .collect::<Result<Vec<_>>>()?;
     let selection: HashSet<_> = picked.iter().copied().collect();
-    let mut outward = None;
+    let mut removed = false;
     let history = history::recorded(&result, &mapped, Made::Plain, || {
-        with_body("remove_ring_groove", &result, |k, b| {
+        removed = with_body("remove_ring_groove", &result, |k, b| {
             let mut feature = FeatureExecutive::new(k, b)?;
             let Some(i) = feature.add_feature(
                 k,
@@ -581,7 +581,7 @@ pub fn remove_ring_groove(
                 RebuildBrepType::FromOtherBrep,
             )?
             else {
-                return Ok(Ok(()));
+                return Ok(false);
             };
             // add_feature partitions from the first selected face. Never accept a subset
             // of a disconnected selection as the requested groove.
@@ -589,19 +589,20 @@ pub fn remove_ring_groove(
                 f.faces.len() == selection.len()
                     && f.faces.iter().all(|face| selection.contains(face))
             }) || feature.annular_supports(k, i)?.is_none()
-                || !feature.do_defeature(k)?.is_empty()
             {
-                return Ok(Ok(()));
+                return Ok(false);
             }
-            // Read the history from the finished solid. Clearing its temporary history
-            // tags afterwards changes neither the topology nor the outward proof.
-            Ok(
-                finish_proved(k, std::mem::take(b), Expect::SOLID)?.map(|(solid, proof)| {
-                    *b = solid;
-                    outward = proof;
-                }),
-            )
-        })?
+            Ok(feature.do_defeature(k)?.is_empty())
+        })?;
+        Ok(())
     })?;
-    Ok(outward.map(|proof| (Body::held(result.into_inner(), Some(proof)), history)))
+    if !removed {
+        return Ok(None);
+    }
+    // Recording materializes missing UV trims and clears the history tags.
+    // Prove the resulting B-rep after those edits and return it with that proof.
+    let (solid, proof) = run_taking("finish_ring_groove", &[("brep", &result)], |k| {
+        finish_proved(k, result.take_held().0, Expect::SOLID)
+    })??;
+    Ok(Some((Body::held(solid, proof), history)))
 }

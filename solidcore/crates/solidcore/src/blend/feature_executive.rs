@@ -671,8 +671,9 @@ impl<'a> FeatureExecutive<'a> {
     ///
     /// Not upstream (WR-656): a feature that was not partitioned, or whose base patch could
     /// not be built, is not taken off. Upstream leaves its hole open, with success, for the
-    /// caller to put back with `RestoreFeatures`; in a batch the base is put back as it
-    /// was before the refused feature, so the next feature sees the intact body. The features kept are returned,
+    /// caller to put back with `RestoreFeatures`. A batch containing an annular closure
+    /// puts a refused partition back immediately so subsequent closures see a closed
+    /// body. Other batches restore their kept features at the end. The kept features are returned,
     /// each naming the base loop edge of its open hole and, when its patch's construction
     /// said, why it was not built ([`KeptFeature::limit`], #3218), and the executive drops
     /// them, as `RestoreFeatures` does. When no feature comes off, the call is refused at the
@@ -718,7 +719,17 @@ impl<'a> FeatureExecutive<'a> {
         let mut kept: Vec<KeptFeature> = Vec::new();
         let mut untouched = Vec::new();
         let mut off = 0;
-        let batch = self.features.len() > 1;
+        // A joint patch needs a closed base. Find out before any partition can open
+        // it, but compute each closure on the current body when its turn comes.
+        let mut batch_has_annular_closure = false;
+        if self.features.len() > 1 {
+            for feature in &self.features {
+                if annular::Closure::of(k, self.base, feature)?.is_some() {
+                    batch_has_annular_closure = true;
+                    break;
+                }
+            }
+        }
         for i in 0..self.features.len() {
             let Some(feature) = self.features.get_mut(i) else {
                 continue;
@@ -737,8 +748,8 @@ impl<'a> FeatureExecutive<'a> {
                 continue;
             }
             // Partition cuts the selected faces out even when no patch can be built.
-            // The later features in a batch still refer to the original arena ids.
-            let before = if batch {
+            // Only a batch with a joint patch needs the original arena ids put back here.
+            let before = if batch_has_annular_closure {
                 Some(self.base.snapshot()?)
             } else {
                 None
