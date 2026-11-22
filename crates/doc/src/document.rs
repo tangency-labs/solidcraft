@@ -4352,6 +4352,18 @@ impl Document {
         for g in self.browser_groups.iter_mut().filter(|g| g.folder == "bodies") {
             g.items.iter_mut().for_each(rename);
         }
+        // Saved selections keep pointing at the renamed body (its faces and edges too), so a
+        // body given the old name later is not selected in its place (#18716).
+        for item in self.named_selections.iter_mut().flat_map(|x| x.items.iter_mut()) {
+            let key = match item.get("type").and_then(serde_json::Value::as_str) {
+                Some("body") => "name",
+                Some("face" | "edge") => "body",
+                _ => continue,
+            };
+            if let Some(o) = item.as_object_mut().filter(|o| o.get(key).and_then(serde_json::Value::as_str) == Some(old)) {
+                o.insert(key.into(), serde_json::Value::from(new));
+            }
+        }
         for (_, v) in self.browser_order.iter_mut().filter(|(k, _)| k.ends_with("/bodies")) {
             v.iter_mut().for_each(rename);
         }

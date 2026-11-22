@@ -85,3 +85,42 @@ fn default_names_count_faces_and_edges_and_follow_an_update() {
     let body = json!([{"type": "body", "name": "Board"}]);
     assert_eq!(run(&mut s, "named_selection.update", json!({"selection": "LEDs", "items": body}))["selection"], "LEDs");
 }
+
+/// A saved face is found again by its persistent name after a fillet renumbers the body's faces,
+/// and a renamed body keeps its place in a saved selection; a typed name survives an update.
+#[test]
+fn saved_faces_follow_edits_and_bodies_follow_renames() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10, "body_name": "Block"}));
+    run(&mut s, "select.set", json!({"items": [{"type": "face", "body": "Block", "point": [5.0, 5.0, 10.0]}, {"type": "body", "name": "Block"}]}));
+    let saved = run(&mut s, "named_selection.save", json!({"name": "Selection7 – Top"}));
+    assert_eq!(saved["count"], 2);
+    let kept = s.doc.named_selections[0].items[0].clone();
+    let top = kept["name"].as_str().expect("the face keeps its name").to_string();
+    let index_before = kept["index"].as_u64();
+    let face_name = |s: &Session| -> Option<String> {
+        let st = s.world_state().ok()?;
+        s.selection.iter().find_map(|x| match x {
+            Sel::Face { body, index, .. } => st.body(body).and_then(|b| solidcraft_doc::naming::face_names(b).get(*index).cloned()),
+            _ => None,
+        })
+    };
+    // Fillet all four vertical edges: the body gains faces and its faces are numbered anew.
+    let edges: Vec<Value> = [[0.0, 0.0], [10.0, 0.0], [10.0, 10.0], [0.0, 10.0]].iter().map(|[x, y]| json!([x, y, 5.0])).collect();
+    run(&mut s, "solid.fillet", json!({"edges": edges, "radius": 1.0, "body": "Block"}));
+    let applied = run(&mut s, "named_selection.apply", json!({"selection": "Selection7 – Top"}));
+    assert_eq!((applied["selected"].as_u64(), applied["skipped"].as_u64()), (Some(2), Some(0)), "{applied}");
+    assert_eq!(face_name(&s).as_deref(), Some(top.as_str()), "the same face, saved index {index_before:?}");
+    // The body renamed, then its old name given to another body: the selection follows the
+    // renamed one.
+    run(&mut s, "body.rename", json!({"body": "Block", "name": "Housing"}));
+    run(&mut s, "solid.box", json!({"length": 4, "width": 4, "height": 4, "corner": [30, 0, 0], "body_name": "Block"}));
+    let applied = run(&mut s, "named_selection.apply", json!({"selection": "Selection7 – Top"}));
+    assert_eq!((applied["selected"].as_u64(), applied["skipped"].as_u64()), (Some(2), Some(0)), "{applied}");
+    assert!(s.selection.contains(&Sel::Body { name: "Housing".into() }), "{:?}", s.selection);
+    assert!(!s.selection.contains(&Sel::Body { name: "Block".into() }), "{:?}", s.selection);
+    assert_eq!(face_name(&s).as_deref(), Some(top.as_str()));
+    // A typed name in the default's shape is not a default name: an update keeps it.
+    let updated = run(&mut s, "named_selection.update", json!({"selection": "Selection7 – Top", "items": [{"type": "body", "name": "Housing"}]}));
+    assert_eq!(updated["selection"], "Selection7 – Top");
+}

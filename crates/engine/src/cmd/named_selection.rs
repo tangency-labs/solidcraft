@@ -57,6 +57,7 @@ pub static COMMANDS: &[CommandSpec] = &[
     CommandSpec::new("named_selection.list", "List Named Selections", crate::checked!("named_selection.list", list))
         .icon("list")
         .noundo()
+        .read_only()
         .contract(&LIST_CONTRACT)
         .output(output_schema_for::<SelectionListResult>)
         .doc_only(),
@@ -86,7 +87,52 @@ fn items_of(s: &Session, p: &Value, cmd: &str) -> Result<Vec<Value>> {
     if items.len() > MAX_ITEMS {
         return Err(bad(cmd, format!("a named selection holds at most {MAX_ITEMS} items")));
     }
-    Ok(items)
+    Ok(with_face_names(s, items))
+}
+
+/// Each face and edge kept with its persistent name (what made it, see `naming`), so applying
+/// finds the same face after an edit renumbers the body's faces rather than whichever face now
+/// has the saved index.
+fn with_face_names(s: &Session, items: Vec<Value>) -> Vec<Value> {
+    let Ok(state) = s.world_state() else { return items };
+    items
+        .into_iter()
+        .map(|mut it| {
+            let kind = it.get("type").and_then(Value::as_str).unwrap_or_default();
+            let index = it.get("index").and_then(Value::as_u64).and_then(|i| usize::try_from(i).ok());
+            let body = it.get("body").and_then(Value::as_str).and_then(|b| state.body(b));
+            let name = match (kind, index, body) {
+                _ if it.get("point").is_none() || it.get("name").is_some() => None,
+                ("face", Some(i), Some(b)) => solidcraft_doc::naming::face_names(b).get(i).cloned(),
+                ("edge", Some(i), Some(b)) => solidcraft_doc::naming::edge_names(b).get(i).cloned(),
+                _ => None,
+            };
+            if let (Some(name), Some(o)) = (name, it.as_object_mut()) {
+                o.insert("name".into(), Value::String(name));
+            }
+            it
+        })
+        .collect()
+}
+
+/// The item to select for a saved one: a named face or edge found again by its name near its
+/// saved point, on the body it was saved on (`None`: it is gone, or no longer one face or edge);
+/// anything else as saved.
+fn found(state: &solidcraft_doc::ModelState, it: Value) -> Option<Value> {
+    let kind = it.get("type").and_then(Value::as_str).unwrap_or_default();
+    let Some(name) = it.get("name").and_then(Value::as_str).filter(|_| kind == "face" || kind == "edge") else {
+        return Some(it);
+    };
+    let body_name = it.get("body").and_then(Value::as_str)?;
+    let b = state.body(body_name)?;
+    let near: solidcore_record::Vec3 = serde_json::from_value(it.get("point")?.clone()).ok()?;
+    if kind == "face" {
+        let (index, point) = solidcraft_doc::naming::face_on_body(b, name, near)?;
+        Some(json!({"type": "face", "body": body_name, "index": index, "point": point}))
+    } else {
+        let point = solidcraft_doc::naming::find_edge(b, name, near).ok()?;
+        Some(json!({"type": "edge", "body": body_name, "point": point}))
+    }
 }
 
 /// What the items are, in words: "3 components, 2 bodies, 1 face".
@@ -135,8 +181,7 @@ fn default_name(k: usize, what: &str) -> String {
     format!("Selection{k} – {what}")
 }
 
-/// The number in a name still in the default form ("Selection3 – 4 faces"), so an update can
-/// say what the selection now holds; a name someone typed is kept.
+/// The number in a name in the default form ("Selection3 – 4 faces").
 fn default_number(name: &str) -> Option<usize> {
     let (head, _) = name.split_once(" – ")?;
     head.strip_prefix("Selection")?.parse().ok()
@@ -172,11 +217,13 @@ fn apply(s: &mut Session, p: &Value) -> Result<Value> {
     let name = p.get("selection").and_then(Value::as_str).ok_or_else(|| bad(cmd, "`selection` must be a name"))?;
     let items = s.doc.named_selections.get(index_of(s, name, cmd)?).map(|x| x.items.clone()).unwrap_or_default();
     s.selection.clear();
-    // One item at a time, so an item that is gone (a deleted body or placement) is skipped and
-    // the rest are still selected.
+    // One item at a time, so an item that is gone (a deleted body or placement, a face an edit
+    // removed) is skipped and the rest are still selected.
+    let state = s.world_state()?;
     let mut skipped = 0;
     for it in items {
-        if super::edit::select_set(s, &json!({"items": [it], "add": true})).is_err() {
+        let picked = found(&state, it).map(|it| super::edit::select_set(s, &json!({"items": [it], "add": true})));
+        if !matches!(picked, Some(Ok(_))) {
             skipped += 1;
         }
     }
@@ -190,9 +237,12 @@ fn update(s: &mut Session, p: &Value) -> Result<Value> {
     let i = index_of(s, &name, cmd)?;
     let items = items_of(s, p, cmd)?;
     let count = items.len();
-    // A name still in the default form says what the selection holds, so it follows the update
-    // (keeping its number) unless another selection already has the new name.
+    // A default name says what the selection holds, so it follows the update (keeping its
+    // number) unless another selection already has the new name. Only a name that is exactly
+    // the default for what it held is one: a typed "Selection7 – Mounting holes" stays.
+    let held = s.doc.named_selections.get(i).map(|x| summary(s, &x.items)).unwrap_or_default();
     let renamed = default_number(&name)
+        .filter(|k| default_name(*k, &held) == name)
         .map(|k| default_name(k, &summary(s, &items)))
         .filter(|n| !s.doc.named_selections.iter().enumerate().any(|(j, x)| j != i && x.name == *n));
     let name = renamed.unwrap_or(name);
