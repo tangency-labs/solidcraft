@@ -1082,7 +1082,7 @@ pub fn read_kicad(bytes: &[u8], file: &str, options: &KicadOptions, load: KicadL
                                     .map(|p| Vec3::new(p.x * KICAD_VRML_UNIT_MM, p.y * KICAD_VRML_UNIT_MM, p.z * KICAD_VRML_UNIT_MM))
                                     .collect();
                                 match solidcraft_kernel::mesh_body(&positions, &m.triangles) {
-                                    Ok(_) => (vec![mesh_data(component_name(footprint, &model.path), positions, m.triangles, m.color)], None, notes),
+                                    Ok(_) => (vec![mesh_data(component_name(&model.path), positions, m.triangles, m.color)], None, notes),
                                     Err(e) => (Vec::new(), Some(short_reason(&e.to_string())), std::mem::take(&mut notes)),
                                 }
                             }
@@ -1117,7 +1117,7 @@ pub fn read_kicad(bytes: &[u8], file: &str, options: &KicadOptions, load: KicadL
                     continue;
                 }
                 let slot = plan.slots.len();
-                plan.slots.push(component_name(footprint, &model.path));
+                plan.slots.push(component_name(&model.path));
                 let transform = model_local_matrix(model, back);
                 let mut failed = None;
                 let mut placed = Vec::with_capacity(imported_meshes.len());
@@ -1200,9 +1200,11 @@ fn board_corner(board: &KicadBoard) -> Option<[f64; 2]> {
 /// Millimetres in one unit of a KiCad VRML model (0.1 inch).
 const KICAD_VRML_UNIT_MM: f64 = 2.54;
 
-fn component_name(footprint: &KicadFootprint, path: &str) -> String {
-    let label = footprint.reference.trim();
-    if label.is_empty() { path.to_string() } else { label.to_string() }
+/// The component a model becomes: named after the model's file (`R_0603_1608Metric`), since every
+/// footprint that places the model shares it. Each placement carries its footprint's reference.
+fn component_name(path: &str) -> String {
+    let stem = Path::new(path).file_stem().and_then(|stem| stem.to_str()).map(str::trim).unwrap_or("");
+    if stem.is_empty() { path.to_string() } else { stem.to_string() }
 }
 
 /// The STEP file inside a KiCad `….stpZ` (a zip archive holding one `….step`).
@@ -1311,7 +1313,8 @@ fn file_id(path: &str) -> std::path::PathBuf {
 }
 
 /// Place a built model in a footprint, once per footprint: a footprint that names one model more
-/// than once (both formats of the same file, say) shows it once.
+/// than once (both formats of the same file, say) shows it once. The placement is named after the
+/// footprint's reference (none when it has none).
 fn place_model(
     plan: &mut crate::MeshPlan,
     placed_here: &mut std::collections::HashSet<usize>,
@@ -1321,7 +1324,9 @@ fn place_model(
     thickness: f64,
 ) {
     if placed_here.insert(slot) {
-        plan.places.push(crate::PlanPlace { slot, parent: None, transform: footprint_place(footprint, back, thickness) });
+        let reference = footprint.reference.trim();
+        let name = (!reference.is_empty()).then(|| reference.to_string());
+        plan.places.push(crate::PlanPlace { slot, parent: None, transform: footprint_place(footprint, back, thickness), name });
     }
 }
 
