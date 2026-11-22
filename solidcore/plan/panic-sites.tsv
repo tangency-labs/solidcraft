@@ -566,6 +566,8 @@ crates/solidcore/src/intersect/curve_class/p1.rs	CurveClassification::remove_at	
 crates/solidcore/src/intersect/curve_class/p1.rs	get_winding_count	chunks	1	proven	chunks_exact(2)	constant non-zero size
 crates/solidcore/src/intersect/curve_class/p1.rs	get_winding_count	int-rem	1	proven	touches.len() % 2	constant non-zero divisor
 crates/solidcore/src/intersect/curve_class/p1.rs	remove_non_crossings	int-rem	1	proven	count % 2	constant non-zero divisor
+crates/solidcore/src/intersect/curve_class/p3.rs	radial_deviation	f64::clamp	1	proven	clamp(ka, kb)	ka < kb is checked just above with partial_cmp (NaN or crossed bounds return None), so the bounds are ordered and finite-comparable
+crates/solidcore/src/intersect/curve_class/p3.rs	run_along_gap_bound	Vec::swap_remove	1	proven	swap_remove(i)	i comes from pairs.iter().enumerate(), with no intervening Vec mutation
 crates/solidcore/src/intersect/curve_class/p4.rs	CurveClassification::classify_touch	int-rem	1	proven	(next + c.ivl_cnt - 1) % c.ivl_cnt	preceding checked_rem(c.ivl_cnt)? returns Err for zero divisor
 crates/solidcore/src/intersect/curve_class/p4.rs	CurveClassification::classify_touch	with_capacity	1	proven	Vec::with_capacity(vertexuses.len())	n = vertexuses.len(), an existing Vec of the same vertexuse handle type
 crates/solidcore/src/intersect/curve_class/p4.rs	CurveClassification::crossings_from_touches	int-div	1	proven	get_connected_touches(Some(lp), &crossings).len() as u64 / 2	constant non-zero divisor

@@ -1523,19 +1523,41 @@ impl Body {
     /// The body's volume: measured with exact mass properties via SMLib for B-rep bodies,
     /// or from mesh triangles for mesh bodies.
     pub fn volume_at(&self, _tol: f64) -> Option<f64> {
+        self.measured_volume().ok()
+    }
+
+    /// The body's volume as [`crate::measure_mass`] measures it, measured once and kept with the
+    /// record ([`Body::volume`]): its clones, and every later caller, read it back. The validity
+    /// check and Convert Mesh's volume check each integrated the same body's mass properties
+    /// again, most of a conversion's time (#18458).
+    pub(crate) fn measured_volume(&self) -> Result<f64> {
         if let Some(cell) = &self.volume
             && let Ok(cached) = cell.lock()
             && let Some((_, volume)) = *cached
         {
-            return Some(volume);
+            return Ok(volume);
         }
-        let volume = crate::measure(self).ok()?.volume;
+        let volume = crate::measure_mass(self)?.volume;
         if let Some(cell) = &self.volume
             && let Ok(mut slot) = cell.lock()
         {
             *slot = Some((0, volume));
         }
-        Some(volume)
+        Ok(volume)
+    }
+
+    /// The volume a check of this body compares: a faceted solid's exactly
+    /// ([`solidcore_ops::faceted_volume`]: every face flat, every edge straight, closed shells),
+    /// else [`Body::measured_volume`]. The validity check and Convert Mesh's volume check, which
+    /// a faceted solid passes or fails by its volume's sign and size, integrated its mass
+    /// properties for it: about 2 s for a mesh of 4,000 triangles (#18458).
+    pub(crate) fn validated_volume(&self) -> Result<f64> {
+        if self.mesh.is_none()
+            && let Ok(Some(volume)) = solidcore_ops::faceted_volume(self.record())
+        {
+            return Ok(volume);
+        }
+        self.measured_volume()
     }
 
     /// Rough heap footprint, for the evaluation cache's byte budget: the B-rep topology is what
@@ -2145,9 +2167,9 @@ impl Body {
         if missing > 0 {
             out.push(format!("{missing} face(s) don't mesh"));
         }
-        match crate::measure(self) {
-            Ok(m) if m.volume.is_finite() && m.volume > 0.0 => {}
-            Ok(m) => out.push(format!("volume {}", m.volume)),
+        match self.validated_volume() {
+            Ok(volume) if volume.is_finite() && volume > 0.0 => {}
+            Ok(volume) => out.push(format!("volume {volume}")),
             Err(e) => out.push(format!("no measure: {e}")),
         }
         out

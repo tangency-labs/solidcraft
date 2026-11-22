@@ -31,6 +31,7 @@
 #![allow(clippy::neg_cmp_op_on_partial_ord)] // NaN-refusing tests
 
 use crate::curve::curve::Curve;
+use crate::error::query::QueryFailure;
 use crate::error::{Result, SolidError};
 use crate::eval::normal_section::normal_section;
 use crate::eval::{Partials, MAX_PARTIAL_ORDER};
@@ -116,10 +117,7 @@ fn partials(k: &Kernel, s: &Surface, uv: Point2) -> Result<Partials> {
         for (j, x) in row.iter_mut().enumerate() {
             if i + j <= MAX_PARTIAL_ORDER {
                 *x = d.get(i).and_then(|r| r.get(j)).copied().ok_or_else(|| {
-                    SolidError::query_failed(
-                        OP,
-                        "the surface evaluation has fewer partials than asked",
-                    )
+                    SolidError::query(OP, QueryFailure::Defect { why: "the surface evaluation, asked for the partials to the fourth order, returned fewer, though an evaluation that succeeds returns every order it is asked for" })
                 })?;
             }
         }
@@ -404,19 +402,15 @@ pub fn continuity_on_surfaces(
     }
     let d = curve.evaluate(k, t, 1, true, false)?;
     let (Some(&point), Some(&d1)) = (d.first(), d.get(1)) else {
-        return Err(SolidError::query_failed(
-            OP,
-            "the curve evaluation has no first derivative",
-        ));
+        return Err(SolidError::query(OP, QueryFailure::Defect { why: "the curve evaluation, asked for the first derivative, returned fewer, though an evaluation that succeeds returns every order it is asked for" }));
     };
     let speed = d1.length();
     if !(speed > 0.0 && speed.is_finite() && finite(point)) {
         return Ok(None);
     }
     let tangent = d1 * (1.0 / speed);
-    let mut feet = Vec::with_capacity(2);
-    let mut jets = Vec::with_capacity(2);
-    for (&(s, sign), g) in sides.iter().zip(guess) {
+    // one face at the station, with its normal section across the edge; `None` as below
+    let one_side = |(s, sign): (&Surface, f64), g: Option<Point2>| -> Result<Option<_>> {
         let Some(one) = side(k, s, sign, point, g)? else {
             return Ok(None);
         };
@@ -430,16 +424,14 @@ pub fn continuity_on_surfaces(
         let Some(jet) = normal_section(&d, one.normal, across * (1.0 / len)) else {
             return Ok(None);
         };
-        feet.push(one);
-        jets.push(jet.values());
-    }
-    let (Some(a), Some(bb), Some(ja), Some(jb)) =
-        (feet.first(), feet.get(1), jets.first(), jets.get(1))
-    else {
-        return Err(SolidError::query_failed(
-            OP,
-            "the edge has fewer than two sides",
-        ));
+        Ok(Some((one, jet.values())))
+    };
+    let ([s0, s1], [g0, g1]) = (sides, guess);
+    let Some((a, ja)) = one_side(s0, g0)? else {
+        return Ok(None);
+    };
+    let Some((bb, jb)) = one_side(s1, g1)? else {
+        return Ok(None);
     };
     let opposed = a.normal.dot(bb.normal) < 0.0;
     let mut jumps = [0.0_f64; 3];
@@ -491,10 +483,7 @@ pub fn curvature_of(k: &Kernel, curve: &Curve, t: f64) -> Result<Option<Curvatur
     }
     let d = curve.evaluate(k, t, 2, true, false)?;
     let (Some(&point), Some(&d1), Some(&d2)) = (d.first(), d.get(1), d.get(2)) else {
-        return Err(SolidError::query_failed(
-            OP,
-            "the curve evaluation has no second derivative",
-        ));
+        return Err(SolidError::query(OP, QueryFailure::Defect { why: "the curve evaluation, asked for the second derivative, returned fewer, though an evaluation that succeeds returns every order it is asked for" }));
     };
     let s2 = d1.dot(d1);
     if !(s2 > 0.0) {
@@ -527,7 +516,7 @@ pub fn iso_curvature(
     let d = s.evaluate(k, uv, 2, 2, flags)?;
     let at = |i: usize, j: usize| {
         d.get(i).and_then(|r| r.get(j)).copied().ok_or_else(|| {
-            SolidError::query_failed(OP, "the surface evaluation has fewer partials than asked")
+            SolidError::query(OP, QueryFailure::Defect { why: "the surface evaluation, asked for the partials to the second order, returned fewer, though an evaluation that succeeds returns every order it is asked for" })
         })
     };
     let (point, su, sv) = (at(0, 0)?, at(1, 0)?, at(0, 1)?);

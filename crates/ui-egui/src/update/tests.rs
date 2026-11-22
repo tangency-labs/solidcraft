@@ -370,7 +370,12 @@ fn turning_off_automatic_checks_stops_the_launch_check() {
 
 /// A computer whose administrator set `CheckForUpdates` to `on` (#10260).
 fn update_policy(on: bool) -> crate::policy::Policy {
-    crate::policy::Policy { mandatory: crate::policy::Layer { check_for_updates: Some(on), ..Default::default() }, ..Default::default() }
+    crate::policy::Policy::from_json(&format!(r#"{{"CheckForUpdates": {}}}"#, u8::from(on)))
+}
+
+/// The person's own `check_updates`, as the preferences file keeps it under a policy.
+fn saved_check_updates(app: &SolveApp) -> Option<bool> {
+    serde_json::from_str::<serde_json::Value>(&app.prefs()).ok()?["preferences"]["check_updates"].as_bool()
 }
 
 #[test]
@@ -390,7 +395,8 @@ fn an_organizations_policy_turns_update_checks_off_whatever_the_preference_says(
     check_now(&mut h.app, &ctx);
     h.frames(3);
     assert!(h.app.updater.rx.is_none() && h.app.updater.release.is_none());
-    assert!(h.app.preferences.check_updates, "the person's own choice is kept for when the policy goes");
+    assert!(!h.app.preferences.check_updates, "the policy's value is in force");
+    assert_eq!(saved_check_updates(&h.app), Some(true), "the person's own choice is kept for when the policy goes");
 }
 
 #[test]
@@ -404,7 +410,7 @@ fn an_organizations_policy_keeps_update_checks_on_whatever_the_preference_says()
     h.frame();
     wait_for_check(&mut h);
     assert_eq!(h.app.updater.release.as_ref().map(|r| r.version().to_string()), Some(version));
-    assert!(!h.app.preferences.check_updates);
+    assert_eq!(saved_check_updates(&h.app), Some(false), "the person's own choice is kept");
 }
 
 #[test]
@@ -421,7 +427,11 @@ fn a_setting_under_policy_shows_the_organizations_value_and_cannot_be_changed() 
         h.app.updater.feed = Some(feed);
         h.app.policy = update_policy(on);
         let reply = h.call("ui.prefs", json!({"open":"General"}));
-        assert_eq!(reply["result"]["policy"], json!({"locked": ["check_updates"], "check_updates": on}), "{reply}");
+        assert_eq!(
+            reply["result"]["policy"],
+            json!({"locked": ["check_updates"], "check_updates": on, "settings": {"check_updates": on}}),
+            "{reply}"
+        );
         assert_eq!(reply["result"]["check_updates"], json!(!on), "the stored preference is reported as stored");
         crate::prefs::reveal_preference(&mut h, "prefs:check_updates");
         let tree = h.output.accesskit_update.as_ref().unwrap();
@@ -437,10 +447,12 @@ fn a_setting_under_policy_shows_the_organizations_value_and_cannot_be_changed() 
         assert_eq!(refused["ok"], json!(false), "{refused}");
         assert!(refused["error"].as_str().unwrap().contains("set by your organization's policy"), "{refused}");
         assert_eq!(h.call("ui.prefs", json!({"check_updates": !on}))["ok"], json!(true));
-        assert_eq!(h.app.preferences.check_updates, !on);
+        assert_eq!(h.app.preferences.check_updates, on, "the policy's value stays in force");
+        assert_eq!(saved_check_updates(&h.app), Some(!on));
         // Restore page defaults leaves it too: the person's choice outlives the policy.
         assert_eq!(h.call("ui.prefs", json!({"button":"defaults"}))["ok"], json!(true));
-        assert_eq!(h.app.preferences.check_updates, !on, "policy {on}: defaults keep the stored choice");
+        assert_eq!(h.app.preferences.check_updates, on);
+        assert_eq!(saved_check_updates(&h.app), Some(!on), "policy {on}: defaults keep the stored choice");
     }
     // Without a policy the reply names none, and the setting changes as before.
     let mut h = crate::scenario::Harness::new();
@@ -604,15 +616,17 @@ fn the_title_bar_offers_the_new_version_and_opens_the_update_window() {
     h.frame();
     wait_for_check(&mut h);
     h.frames(2);
-    // An accent pill reading "Update to <version>", left of the Settings/Help/Report cluster.
+    // The transient Update pill follows the saved End items, rather than preceding Assistant.
     let label = format!("Update to {version}");
     let at = h.widget(&label).unwrap_or_else(|| panic!("no `{label}` in the title bar"));
     let pill = crate::scenario::rect_of("titlebar:update").unwrap();
     assert!(pill.contains(egui::pos2(at[0] as f32, at[1] as f32)));
-    let assistant = crate::scenario::rect_of("titlebar:assistant").unwrap();
-    assert!(pill.right() < assistant.left() && assistant.left() - pill.right() < 12.0, "beside Assistant: {pill:?} {assistant:?}");
+    let version_rect = crate::scenario::rect_of("titlebar:version").unwrap();
+    assert!((pill.left() - version_rect.right() - crate::ui_kit::app_bar_layout::application::GAP).abs() < 0.5);
     assert!((pill.center().y - report.center().y).abs() < 1.0 && pill.height() <= report.height());
-    assert_eq!(crate::scenario::rect_of("titlebar:report"), Some(report), "Report a bug stays where it was");
+    let shifted_report = crate::scenario::rect_of("titlebar:report").unwrap();
+    assert_eq!(shifted_report.size(), report.size(), "adding a transient keeps the Report control's size");
+    assert!(!shifted_report.intersects(pill), "End-stack neighbours move aside for the update pill");
     assert!(!h.app.updater.open, "no window pops up by itself");
     assert!(crate::scenario::rect_of("update:window").is_none());
     // Clicking it opens the Update window (not a modal: the bar stays usable).
@@ -639,7 +653,7 @@ fn the_pill_shortens_in_a_narrow_title_bar() {
     let wide = crate::scenario::rect_of("titlebar:update").unwrap();
     let label = format!("Update to {version}");
     assert!(h.widget(&label).is_some());
-    // Narrower and narrower: the pill never grows, never reaches Report a bug, and its label gives
+    // Narrower and narrower: the pill never grows or overlaps Report a bug, and its label gives
     // way (to "Update", then the icon alone) before the document tabs run out of room.
     let mut last = wide.width();
     let mut shortened = false;
@@ -653,7 +667,8 @@ fn the_pill_shortens_in_a_narrow_title_bar() {
         if let Some(p) = pill {
             assert!(p.width() <= last + 0.5, "at {width}: {p:?} grew from {last}");
             if let Some(report) = report {
-                assert!(p.right() <= report.left(), "at {width}: {p:?} overlaps Report a bug {report:?}");
+                // Saved-list End order puts the transient after Report, so check separation in either direction.
+                assert!(!p.intersects(report), "at {width}: {p:?} overlaps Report a bug {report:?}");
             }
             last = p.width();
         }

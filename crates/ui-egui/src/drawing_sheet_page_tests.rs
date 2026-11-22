@@ -1164,6 +1164,9 @@ fn navigation_allows_drawing_drags_with_orbit_latched_in_design() {
         } else {
             navigation_drag_fixture(kind)
         };
+        // The classic switcher, which this test covers: since #19655 the default lets the focused
+        // view choose the workspace (`workspace_follows_view`).
+        h.app.preferences.workspace_follows_view = false;
         let point = OnScreen::of(&h.app.drawing_workspace.page.cam, h.app.viewport.rect.unwrap()).paper(from);
         let selected = h.app.session.selection.clone();
         assert_eq!(h.call("ui.workspace", json!({"workspace": "design"}))["ok"], true);
@@ -1187,6 +1190,33 @@ fn navigation_allows_drawing_drags_with_orbit_latched_in_design() {
         h.frames(2);
         assert_eq!(h.app.session.doc.to_json(), doc, "{kind}: one Undo restores the ordinary drag");
     }
+}
+
+/// A side button the user mapped to Pan drags the sheet through the shared navigation, and a plain
+/// click on it moves nothing. Unmapped, the same drag does nothing.
+#[test]
+fn a_mapped_side_button_pans_the_drawing_sheet() {
+    let (mut h, _) = plate_sheet();
+    let drag = |h: &mut Harness| {
+        let at = h.app.viewport.rect.unwrap().center();
+        let ev = |pressed| egui::Event::PointerButton { pos: at, button: egui::PointerButton::Extra2, pressed, modifiers: egui::Modifiers::NONE };
+        h.frame_with(vec![egui::Event::PointerMoved(at)]);
+        h.frame_with(vec![ev(true)]);
+        for i in 1..=8 {
+            h.frame_with(vec![egui::Event::PointerMoved(at + vec2(10.0, 3.0) * i as f32)]);
+        }
+        h.frame_with(vec![ev(false)]);
+        h.frames(2);
+    };
+    let paper = || crate::scenario::rect_of("sheet:paper").unwrap();
+    let (doc, undo, cam, before) = (h.app.session.doc.to_json(), h.app.session.undo.len(), h.app.cam, paper());
+    drag(&mut h);
+    assert_eq!(paper(), before, "unmapped, the side button leaves the sheet alone");
+    assert_eq!(h.call("ui.prefs", json!({"nav_button_map": {"extra2": "pan"}}))["ok"], true);
+    drag(&mut h);
+    let moved = paper().min - before.min;
+    assert!((moved.x - 80.0).abs() < 4.0 && (moved.y - 24.0).abs() < 4.0, "the sheet panned with the drag: {moved:?}");
+    assert_eq!((h.app.session.doc.to_json(), h.app.session.undo.len(), h.app.cam), (doc, undo, cam), "the design and its camera are untouched");
 }
 
 /// Each sheet colour is drawn in its tokens, standing off the backdrop, and is screen only: the

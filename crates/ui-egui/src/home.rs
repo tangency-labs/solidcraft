@@ -2039,7 +2039,13 @@ mod tests {
             let page = crate::scenario::rect_of("home:page").unwrap();
             let tile = crate::scenario::rect_of("home:new_mm").unwrap();
             assert!(page.contains_rect(tile), "{dark}: the new tile escapes the narrow page");
-            h.step(&serde_json::json!({"widget":"Start page"})).unwrap();
+            // The movable Home button shares this label; use the File page's own navigation.
+            let navigation = h
+                .widgets("Start page")
+                .into_iter()
+                .find(|[x, y]| page.contains(egui::pos2(*x as f32, *y as f32)))
+                .expect("the narrow page's navigation");
+            h.step(&serde_json::json!({"click":navigation})).unwrap();
             h.frames(2);
             assert!(crate::scenario::handle_at("home:settings").is_some(), "all File actions remain available through the narrow menu");
         }

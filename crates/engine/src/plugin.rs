@@ -491,9 +491,12 @@ fn run_package(session: &mut Session, package: Package, entry: &str, params: &se
         let value = result?;
         if !std::sync::Arc::ptr_eq(&session.doc, &host.session.doc)
             || session.active_sketch != host.session.active_sketch
+            || session.sketching_view != host.session.sketching_view
+            || !host.session.sketch_finish_events.is_empty()
+            || host.session.edit_start_sequence != 0
             || session.pending_moves != host.session.pending_moves
         {
-            session.accept_computed(host.session);
+            session.accept_computed(host.session)?;
         } else {
             session.plugin_state.link_changes = host.session.plugin_state.link_changes;
             std::sync::Arc::make_mut(&mut session.plugin_state.link_reads).extend(host.session.plugin_state.link_reads.iter().copied());
@@ -577,6 +580,18 @@ impl SolidCraftHost {
     }
 }
 
+/// A storage call's error as the plugin gets it: the host's own (a permission, a limit) as it is,
+/// a bad name or range as invalid input it can act on, anything else as the call failing.
+fn storage_error(call: &str, error: crate::EngineError) -> HostError {
+    if let Some(host) = error.host_error() {
+        return host.clone();
+    }
+    match error {
+        crate::EngineError::BadParams { .. } => HostError::InvalidInput { field: call.into(), reason: error.to_string() },
+        error => HostError::CommandFailed { command: call.into(), reason: error.to_string() },
+    }
+}
+
 /// The commands an importer may run on its own design to check it: they read the model, and
 /// `timeline.roll_to` moves only that private session's marker.
 pub const EVALUATE_COMMANDS: &[&str] = &["document.inspect", "inspect.measure", "model.edges", "model.faces", "timeline.roll_to"];
@@ -608,6 +623,21 @@ impl PluginHost for SolidCraftHost {
     }
     fn evaluate_close(&mut self) {
         self.evaluation = None;
+    }
+    fn storage_put_blob(&mut self, name: &str, data: &[u8], cache: bool, append: bool) -> craft_plugin::Result<u64> {
+        let s = self
+            .transaction
+            .as_mut()
+            .ok_or_else(|| HostError::CommandFailed { command: "storage.put-blob".into(), reason: "no active transaction".into() })?;
+        storage::write_blob(s, name, data, cache, append).map_err(|e| storage_error("storage.put-blob", e))
+    }
+    fn storage_get_blob(&mut self, plugin: Option<&str>, name: &str, offset: u64, len: u32) -> craft_plugin::Result<Vec<u8>> {
+        let s = self.transaction.as_ref().unwrap_or(&self.session);
+        storage::read_blob(s, plugin, name, offset, len).map(|read| read.data).map_err(|e| storage_error("storage.get-blob", e))
+    }
+    fn storage_get_document(&mut self, plugin: Option<&str>, offset: u64, len: u32) -> craft_plugin::Result<Vec<u8>> {
+        let s = self.transaction.as_ref().unwrap_or(&self.session);
+        storage::read_document(s, plugin, offset, len).map(|(data, _)| data).map_err(|e| storage_error("storage.get-document", e))
     }
     fn command_catalog(&self) -> Vec<CommandSchema> {
         crate::command_specs()
@@ -655,6 +685,7 @@ impl PluginHost for SolidCraftHost {
             _ => Default::default(),
         };
         let s = self.transaction.as_mut().ok_or_else(|| HostError::CommandFailed { command: name.into(), reason: "no active transaction".into() })?;
+        let finish_sequence = s.sketch_finish_sequence;
         let camera_before = s.camera;
         let before = s.doc.clone();
         let previous: BTreeMap<_, _> = s.model.results.iter().map(|r| (r.id, r.error.clone())).collect();
@@ -670,6 +701,9 @@ impl PluginHost for SolidCraftHost {
             return Err(HostError::CommandFailed { command: name.into(), reason: failed.error.clone().unwrap_or_default() });
         }
         let camera_after = s.camera;
+        for event in s.sketch_finish_events.iter().filter(|event| event.sequence > finish_sequence && event.domain == crate::SketchDomain::Model) {
+            self.sketch_exits.push(Some(event.sketch));
+        }
         if matches!(name, "sketch.finish" | "sketch.cancel") {
             self.sketch_exits.push(reply.get("sketch").and_then(Value::as_u64));
         }
@@ -691,9 +725,14 @@ impl PluginHost for SolidCraftHost {
         // Session::execute(plugin.run) owns the one outer undo step.
         if !std::sync::Arc::ptr_eq(&self.session.doc, &computed.doc)
             || self.session.active_sketch != computed.active_sketch
+            || self.session.sketching_view != computed.sketching_view
+            || !computed.sketch_finish_events.is_empty()
+            || computed.edit_start_sequence != 0
             || self.session.pending_moves != computed.pending_moves
         {
-            self.session.accept_computed(computed);
+            self.session
+                .accept_computed(computed)
+                .map_err(|error| HostError::InvalidInput { field: "transaction".into(), reason: error.to_string() })?;
         } else {
             self.session.plugin_state.link_changes = computed.plugin_state.link_changes;
             std::sync::Arc::make_mut(&mut self.session.plugin_state.link_reads).extend(computed.plugin_state.link_reads.iter().copied());
