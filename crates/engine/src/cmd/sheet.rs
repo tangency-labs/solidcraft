@@ -759,14 +759,14 @@ fn fold(s: &mut Session, p: &Value) -> Result<Value> {
         // A fixed point that touches no material of the sheet picks no side: refused, here and
         // only here, against the sheet the fold is made on (#263).
         if let Some(f) = fixed
-            && s.doc.fold_fixed_off_sheet(&st, &authored)
+            && s.doc.fold_fixed_off_sheet(&st, &authored, s.active_component)
         {
             return Err(bad(
                 cmd,
                 format!("the fixed point ({:.3}, {:.3}, {:.3}) is not on the sheet: pick a point on the face of the side that stays", f.x, f.y, f.z),
             ));
         }
-        if let Ok(Some(side)) = s.doc.fold_side_at(&st, &authored)
+        if let Ok(Some(side)) = s.doc.fold_side_at(&st, &authored, s.active_component)
             && let FeatureKind::SheetFold { stays, fixed, .. } = &mut kind
         {
             *stays = Some(side);
