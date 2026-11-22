@@ -969,7 +969,7 @@ mod tests {
             trim: None,
         })
         .unwrap();
-        let mut bent = crate::curve::curve::Curve::from(curve);
+        let mut bent = Curve::from(curve);
         bent.set_owner(owner, None);
         b.edge_mut(e).unwrap().curve = Some(bent);
         e
