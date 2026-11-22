@@ -772,7 +772,7 @@ impl SolverFailure {
     }
 
     /// The status the C++ reports unless the site says otherwise (a comparison detail).
-    pub(crate) const fn comparison_status(&self) -> i32 {
+    pub(crate) const fn comparison_status(self) -> i32 {
         match self {
             Self::FilletGeomWithoutSurface { .. } => SM_ERR_NULL_POINTER,
         }
