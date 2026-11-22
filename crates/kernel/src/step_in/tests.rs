@@ -3477,7 +3477,82 @@ fn a_closed_spline_wall_with_a_curved_seam_keeps_all_faces() {
         let m = measure(&imp.bodies[0].body).unwrap();
         assert_eq!(m.faces, 3);
         assert!(rel(m.volume, 100.0 * std::f64::consts::PI) < 1e-6, "{}", m.volume);
+        assert_periodic_trim_domains_and_seams(&imp.bodies[0].body);
+        let check = imp.bodies[0].body.smlib().unwrap().check(solidcraft_smlib::CheckLevel::All).unwrap();
+        assert!(check.is_valid(), "start {start}: {check}");
     }
+}
+
+/// Containment of the positive-weight control hull proves containment of the entire stored
+/// trim, including between samples. Seam uses share an edge and its vertices, run oppositely,
+/// and lie on opposite sides of the surface's base period.
+fn assert_periodic_trim_domains_and_seams(body: &Body) {
+    use solidcore_record::brep::{Curve2, Loop};
+
+    let controls = |pc: &Curve2| -> Vec<[f64; 2]> {
+        match pc {
+            Curve2::Spline { points, .. } => points.clone(),
+            Curve2::RationalSpline { homogeneous, .. } => homogeneous
+                .iter()
+                .map(|h| {
+                    assert!(h[2].is_finite() && h[2] > 0.0);
+                    [h[0] / h[2], h[1] / h[2]]
+                })
+                .collect(),
+        }
+    };
+    let record = body.record();
+    let mut seams = 0;
+    for (fi, face) in record.faces.iter().enumerate() {
+        let domain = solidcraft_geom::brep::eval::SurfaceEval::new(face.nurbs.as_ref().unwrap_or(&face.surface)).unwrap().domain();
+        for l in &face.loops {
+            let Loop::Edges { edges } = l else { continue };
+            for u in edges {
+                let points = controls(&u.pcurve);
+                assert!(!points.is_empty());
+                for p in &points {
+                    for (d, range) in domain.range.iter().enumerate() {
+                        if let Some((lo, hi)) = range {
+                            // Only floating-point rounding at a cut, never the edge's model tolerance.
+                            let round = 1e-9 * (hi - lo).abs().max(1.0);
+                            assert!(
+                                p[d].is_finite() && p[d] >= lo - round && p[d] <= hi + round,
+                                "face {fi}, edge {}: {p:?} outside {range:?}",
+                                u.edge
+                            );
+                        }
+                    }
+                }
+            }
+        }
+        for (ei, edge) in record.edges.iter().enumerate() {
+            let [a, b] = edge.uses.as_slice() else { continue };
+            if a.face as usize != fi || b.face as usize != fi {
+                continue;
+            }
+            let use_at = |r: &solidcore_record::brep::EdgeUseRef| {
+                let Loop::Edges { edges } = &face.loops[r.r#loop as usize] else { panic!("a seam use must be on an edge loop") };
+                &edges[r.position as usize]
+            };
+            let (a_use, b_use) = (use_at(a), use_at(b));
+            assert_eq!(a_use.edge as usize, ei);
+            assert_eq!(b_use.edge as usize, ei);
+            assert_ne!(a_use.forward, b_use.forward);
+            assert_eq!(a.upper, !a_use.forward);
+            assert_eq!(b.upper, !b_use.forward);
+            assert_ne!(edge.vertices[0], edge.vertices[1]);
+            let (a_points, b_points) = (controls(&a_use.pcurve), controls(&b_use.pcurve));
+            let on_cut = (0..2).any(|d| {
+                let (Some(period), Some((lo, hi))) = (domain.period[d], domain.range[d]) else { return false };
+                let round = 1e-9 * period;
+                let at = |points: &[[f64; 2]], side: f64| points.iter().all(|p| (p[d] - side).abs() <= round);
+                (at(&a_points, lo) && at(&b_points, hi)) || (at(&a_points, hi) && at(&b_points, lo))
+            });
+            assert!(on_cut, "face {fi}, seam edge {ei}: its uses must lie on the two sides of the base period");
+            seams += 1;
+        }
+    }
+    assert!(seams > 0, "the closed spline wall must have a seam edge");
 }
 
 /// The volume of the one solid `solidcore_step::topology` reads from `text` into schema 4,
