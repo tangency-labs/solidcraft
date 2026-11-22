@@ -1466,21 +1466,22 @@ impl OffsetSurface {
         flags: EvaluateFlags,
         base_sides: [Side; 2],
     ) -> Result<Vec<Vec<Vec3>>> {
-        // (checked before the array is sized)
-        match highest_offset_deriv(hu, hv, flags.only_upper_half) {
-            Some(d) if d <= MAX_DERIVS => {}
+        // (checked before the array is sized, once: the step-off recursion passes it on)
+        let hod = match highest_offset_deriv(hu, hv, flags.only_upper_half) {
+            Some(d) if d <= MAX_DERIVS => d,
             _ => {
                 return Err(SolidError::surface(
                     OP_EVAL,
-                    SurfaceFailure::DerivativeOrderTooHigh,
+                    SurfaceFailure::DerivativeOrderTooHigh { max: MAX_DERIVS },
                 ))
             }
-        }
+        };
         let mut out = vec![Vec3::UNDEF; (hu + 1) * (hv + 1)];
         self.plain_or_simple(
             k,
             ext,
             0,
+            hod,
             do_eval_simple,
             uv,
             [hu, hv],
@@ -1493,12 +1494,15 @@ impl OffsetSurface {
     }
 
     /// `EvaluatePlainOrSimple`: writes upstream's flat derivative array
-    /// (`out[i * (hv + 1) + j]`). `depth` counts the pole step-off recursion.
+    /// (`out[i * (hv + 1) + j]`). `depth` counts the pole step-off recursion; `hod` is the
+    /// highest derivative order of `[hu, hv]`, which `evaluate_with` checked is at most
+    /// [`MAX_DERIVS`].
     fn plain_or_simple(
         &self,
         k: &Kernel,
         ext: &mut Extension<'_>,
         depth: usize,
+        hod: usize,
         do_eval_simple: bool,
         cr_uv: Point2,
         [hu, hv]: [usize; 2],
@@ -1508,17 +1512,6 @@ impl OffsetSurface {
         out: &mut [Vec3],
     ) -> Result<()> {
         // locals
-        let hod = match highest_offset_deriv(hu, hv, only_upper_half) {
-            Some(d) if d <= MAX_DERIVS => d,
-            _ => {
-                return Err(SolidError::surface(
-                    OP_EVAL,
-                    SurfaceFailure::Defect {
-                        why: "the derivative order is past the most the offset surface evaluates, though evaluate_with checked the same orders before the first call and the step-off recursion passes them on unchanged",
-                    },
-                ))
-            }
-        };
         let hb = hod + 1;
 
         // when base surface is also an offset surface
@@ -1623,6 +1616,7 @@ impl OffsetSurface {
                 k,
                 ext,
                 depth + 1,
+                hod,
                 do_eval_simple,
                 step_uv,
                 [hu, hv],
@@ -1636,6 +1630,7 @@ impl OffsetSurface {
                 k,
                 ext,
                 depth + 1,
+                hod,
                 do_eval_simple,
                 step_uv,
                 [hu, hv],
@@ -1744,7 +1739,7 @@ impl OffsetSurface {
         if l < EFF_ZERO {
             return Err(SolidError::surface(
                 OP_EVAL,
-                SurfaceFailure::BaseNormalDegenerate,
+                SurfaceFailure::NoNormal,
             ));
         }
 
@@ -2013,7 +2008,7 @@ impl OffsetSurface {
             }
         } else {
             // Can not swap UV if I do not own the surface
-            return Err(SolidError::surface(OP_EDIT, SurfaceFailure::BaseNotOwned));
+            return Err(SolidError::surface(OP_EDIT, SurfaceFailure::BaseSurfaceNotOwned));
         }
         Ok(())
     }
@@ -2069,7 +2064,7 @@ impl OffsetSurface {
                 .transform_at_depth(k, rotate_n_move, scale, depth + 1)?;
         } else {
             // Can not transform if I do not own the surface
-            return Err(SolidError::surface(OP_EDIT, SurfaceFailure::BaseNotOwned));
+            return Err(SolidError::surface(OP_EDIT, SurfaceFailure::BaseSurfaceNotOwned));
         }
         Ok(())
     }
@@ -2102,7 +2097,7 @@ impl OffsetSurface {
             self.surface.trim_with_domain(k, trim_domain)?;
         }
         if !self.owns_surface {
-            return Err(SolidError::surface(OP_EDIT, SurfaceFailure::BaseNotOwned));
+            return Err(SolidError::surface(OP_EDIT, SurfaceFailure::BaseSurfaceNotOwned));
         }
         Ok(())
     }
@@ -3314,7 +3309,10 @@ fn extend_surface(
 ) -> Result<Option<Surface>> {
     // SM_CAST_PTR(SmBSplineSurface, pSurface); NER(pOriginal) (in the caller)
     if !is_b_spline_kind(surface) {
-        return Err(SolidError::surface(OP_EXTEND, SurfaceFailure::NoNurb));
+        return Err(SolidError::surface(
+            OP_EXTEND,
+            SurfaceFailure::SurfaceNotBSplineKind,
+        ));
     }
 
     // locals
@@ -4465,7 +4463,7 @@ mod tests {
         let err = off.swap_uv(&k).unwrap_err();
         assert_eq!(err.operation(), OP_EDIT);
         assert_eq!(err.upstream_status(), Some(crate::error::SM_ERR));
-        assert_eq!(err.surface_failure(), Some(&SurfaceFailure::BaseNotOwned));
+        assert_eq!(err.surface_failure(), Some(&SurfaceFailure::BaseSurfaceNotOwned));
         assert_eq!(off.offset_distance(), -0.4);
         assert!(off.extended_base_surface().is_some());
     }
@@ -4889,7 +4887,7 @@ mod tests {
         check(
             e,
             OP_EVAL,
-            SurfaceFailure::DerivativeOrderTooHigh,
+            SurfaceFailure::DerivativeOrderTooHigh { max: MAX_DERIVS },
             ErrorKind::InvalidInput,
         );
         // a non-uniform scale

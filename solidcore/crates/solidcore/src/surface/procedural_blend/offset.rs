@@ -319,32 +319,19 @@ pub fn exact_offset(
         return Ok(BlendOffset::Collapsed);
     };
     let mut inputs = *round.inputs();
-    let mut supports = Vec::new();
-    for (i, o) in inputs.offsets.iter_mut().enumerate() {
-        let support = round
-            .support(i)
-            .ok_or_else(|| {
-                SolidError::surface(
-                    OP,
-                    SurfaceFailure::Defect {
-                        why: "the round has no support at an index below two, though an exact round holds its two supports",
-                    },
-                )
-            })?;
-        // the centre's signed offset from the support is side_i r; the support moves by
-        // -tau side_i d, so the centre's offset from it is side_i r'
+    // the centre's signed offset from support i is side_i r; the support moves by
+    // -tau side_i d, so the centre's offset from it is side_i r' (support 0, then 1)
+    let move_support = |support: &Surface, o: &mut f64| -> Result<Surface> {
         let side = if *o >= 0.0 { 1.0 } else { -1.0 };
-        supports.push(offset_support(k, support, -tau * side * distance, tol)?);
+        let moved_support = offset_support(k, support, -tau * side * distance, tol)?;
         *o = side * moved;
-    }
-    let (Some(s0), Some(s1)) = (supports.first(), supports.get(1)) else {
-        return Err(SolidError::surface(
-            OP,
-            SurfaceFailure::Defect {
-                why: "the offset round has fewer than two supports, though one is pushed for each of its two offsets",
-            },
-        ));
+        Ok(moved_support)
     };
+    let [r0, r1] = &round.supports;
+    let [o0, o1] = &mut inputs.offsets;
+    let s0 = move_support(r0.as_ref(), o0)?;
+    let s1 = move_support(r1.as_ref(), o1)?;
+    let (s0, s1) = (&s0, &s1);
     let moved_round =
         ExactRound::create(k, round.class(), [s0, s1], moved, round.leader(), inputs)?;
     moved_round.recertify(k, &offset)?;

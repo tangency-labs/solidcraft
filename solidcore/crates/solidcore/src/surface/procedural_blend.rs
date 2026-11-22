@@ -1052,8 +1052,8 @@ impl ProceduralBlend {
         } else {
             None
         };
-        let mut supports = Vec::new();
-        for _ in 0..2 {
+        // the two supports, then the leader and the two seeds, in the file's order
+        let read_support = |db: &mut DatabaseReader| -> Result<Surface> {
             if ascii {
                 db.go_to_next_line();
             }
@@ -1061,19 +1061,22 @@ impl ProceduralBlend {
                 .read_type(false)?
                 .type_code
                 .ok_or_else(|| SolidError::invalid_input(OP_READ, "surface type not read"))?;
-            supports.push(Surface::read_from_db(k, ty, db, version)?);
-        }
+            Surface::read_from_db(k, ty, db, version)
+        };
+        let s0 = read_support(db)?;
+        let s1 = read_support(db)?;
         if ascii {
             db.go_to_next_line();
         }
         let leader = read_curve(k, db, version)?;
-        let mut seeds = Vec::new();
-        for _ in 0..2 {
+        let read_seed = |db: &mut DatabaseReader| -> Result<BSplineCurve> {
             if ascii {
                 db.go_to_next_line();
             }
-            seeds.push(read_curve(k, db, version)?);
-        }
+            read_curve(k, db, version)
+        };
+        let seed0 = read_seed(db)?;
+        let seed1 = read_seed(db)?;
         let law = if has_law {
             if ascii {
                 db.go_to_next_line();
@@ -1096,21 +1099,8 @@ impl ProceduralBlend {
                 "its parametrization is singular",
             ));
         }
-        let (Some(s0), Some(s1), Some(seed0), Some(seed1)) = (
-            supports.first(),
-            supports.get(1),
-            seeds.first(),
-            seeds.get(1),
-        ) else {
-            return Err(SolidError::surface(
-                OP_READ,
-                SurfaceFailure::Defect {
-                    why: "the definition read has fewer than two supports or seeds, though its reader reads each in a loop of two",
-                },
-            ));
-        };
         let input = BlendDefinitionInput {
-            supports: [s0, s1],
+            supports: [&s0, &s1],
             sides: [side0, side1],
             offsets: [r0, r1],
             law: law.as_ref(),
@@ -1118,7 +1108,7 @@ impl ProceduralBlend {
             order: u32::try_from(order).unwrap_or(u32::MAX),
             thumbweight,
             leader: &leader,
-            seeds: [seed0, seed1],
+            seeds: [&seed0, &seed1],
             bound,
             chamfer,
         };
