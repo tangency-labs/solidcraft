@@ -654,8 +654,11 @@ fn refuse_links(dir: &Dir, path: &Path) -> std::io::Result<()> {
             Ok(metadata) if metadata.file_type().is_symlink() => {
                 return Err(std::io::Error::other(format!("{} is a link; links are not followed", prefix.display())));
             }
+            // Nothing lies past a plain file, so no link can either: the caller reports a file
+            // where a folder should be as a wrong path, not as a refused permission (#20493).
+            Ok(metadata) if !metadata.is_dir() => return Ok(()),
             Ok(_) => {}
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+            Err(error) if matches!(error.kind(), std::io::ErrorKind::NotFound | std::io::ErrorKind::NotADirectory) => return Ok(()),
             Err(error) => return Err(error),
         }
     }
