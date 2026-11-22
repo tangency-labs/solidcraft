@@ -467,7 +467,8 @@ fn bad_members_are_refused() {
     let arc = run(&mut s, "sketch.arc.three_point", json!({"start": [0, 0], "end": [100, 0], "through": [50, 30]}));
     let arc_id = arc["created"]["curves"][0].as_str().unwrap().to_string();
     run(&mut s, "sketch.finish", json!({}));
-    run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Empty"}));
+    run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Points only"}));
+    run(&mut s, "sketch.point", json!({"point": [7, 9]}));
     run(&mut s, "sketch.finish", json!({}));
     for (p, why) in [
         (json!({"sketch": "Frame"}), "`profile`"),
@@ -479,7 +480,7 @@ fn bad_members_are_refused() {
         (json!({"sketch": "Frame", "profile": tube(), "lines": ["nope"]}), "nope"),
         (json!({"sketch": "Arc", "profile": tube(), "lines": [arc_id]}), "not a straight line"),
         (json!({"sketch": "Arc", "profile": tube()}), "no lines"),
-        (json!({"sketch": "Empty", "profile": tube()}), "no lines"),
+        (json!({"sketch": "Points only", "profile": tube()}), "no lines"),
         (json!({"sketch": "Frame", "profile": tube(), "anchor": "middle"}), "`anchor`"),
         (json!({"sketch": "Frame", "profile": tube(), "angle": "a lot"}), "angle"),
         (json!({"sketch": "Frame", "profile": tube(), "mirror": 3}), "`mirror`"),
@@ -490,9 +491,11 @@ fn bad_members_are_refused() {
         assert!(err.contains(why), "{p}: {err}");
     }
     assert!(bodies(&mut s).is_empty(), "nothing was made");
-    // Not while a sketch is open.
+    // Starting the member tool commits the open sketch first.
     run(&mut s, "sketch.create", json!({"plane": "XY"}));
-    assert!(s.execute("frame.member", &json!({"sketch": "Frame", "profile": tube()})).is_err());
+    let reply = s.execute("frame.member", &json!({"sketch": "Frame", "profile": tube()})).unwrap();
+    assert!(reply.get("finished_sketch").is_some());
+    assert!(s.active_sketch.is_none());
 }
 
 #[test]
