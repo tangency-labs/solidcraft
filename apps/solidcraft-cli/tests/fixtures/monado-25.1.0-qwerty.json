@@ -1,0 +1,123 @@
+{
+  "openxr": {
+    "api_layers": [
+      {
+        "description": "API Layer to record api calls as they occur",
+        "layer_version": 1,
+        "name": "XR_APILAYER_LUNARG_api_dump",
+        "spec_version": "1.1.0"
+      },
+      {
+        "description": "API Layer to modify runtime behavior in conformant but perhaps unexpected ways",
+        "layer_version": 1,
+        "name": "XR_APILAYER_KHRONOS_best_practices_validation",
+        "spec_version": "1.1.0"
+      },
+      {
+        "description": "API Layer to perform validation of api calls and parameters as they occur",
+        "layer_version": 1,
+        "name": "XR_APILAYER_LUNARG_core_validation",
+        "spec_version": "1.1.0"
+      }
+    ],
+    "graphics": {
+      "note": "XR_KHR_vulkan_enable2 available - wgpu can adopt the OpenXR instance via wgpu-hal",
+      "vulkan_supported": true
+    },
+    "instance_extensions": [
+      { "name": "XR_BD_controller_interaction" },
+      { "name": "XR_EXT_debug_utils" },
+      { "name": "XR_EXT_eye_gaze_interaction" },
+      { "name": "XR_EXT_hand_tracking" },
+      { "name": "XR_EXT_dpad_binding" },
+      { "name": "XR_EXT_samsung_odyssey_controller" },
+      { "name": "XR_EXT_hp_mixed_reality_controller" },
+      { "name": "XR_EXT_hand_interaction" },
+      { "name": "XR_EXT_active_action_set_priority" },
+      { "name": "XR_EXT_local_floor" },
+      { "name": "XR_EXT_hand_tracking_data_source" },
+      { "name": "XR_EXT_future" },
+      { "name": "XR_EXT_user_presence" },
+      { "name": "XR_FB_display_refresh_rate" },
+      { "name": "XR_FB_touch_controller_pro" },
+      { "name": "XR_FB_touch_controller_proximity" },
+      { "name": "XR_HTC_vive_cosmos_controller_interaction" },
+      { "name": "XR_HTC_vive_focus3_controller_interaction" },
+      { "name": "XR_KHR_composition_layer_depth" },
+      { "name": "XR_KHR_vulkan_swapchain_format_list" },
+      { "name": "XR_KHR_composition_layer_cylinder" },
+      { "name": "XR_KHR_opengl_enable" },
+      { "name": "XR_KHR_opengl_es_enable" },
+      { "name": "XR_KHR_vulkan_enable" },
+      { "name": "XR_KHR_visibility_mask" },
+      { "name": "XR_KHR_convert_timespec_time" },
+      { "name": "XR_KHR_vulkan_enable2" },
+      { "name": "XR_KHR_composition_layer_equirect2" },
+      { "name": "XR_KHR_binding_modification" },
+      { "name": "XR_KHR_extended_struct_name_lengths" },
+      { "name": "XR_KHR_swapchain_usage_input_attachment_bit" },
+      { "name": "XR_KHR_locate_spaces" },
+      { "name": "XR_KHR_maintenance1" },
+      { "name": "XR_META_touch_controller_plus" },
+      { "name": "XR_ML_ml2_controller_interaction" },
+      { "name": "XR_MND_headless" },
+      { "name": "XR_MND_swapchain_usage_input_attachment_bit" },
+      { "name": "XR_MSFT_unbounded_reference_space" },
+      { "name": "XR_OPPO_controller_interaction" },
+      { "name": "XR_EXTX_overlay" },
+      { "name": "XR_MNDX_egl_enable" },
+      { "name": "XR_MNDX_force_feedback_curl" },
+      { "name": "XR_MNDX_ball_on_a_stick_controller" },
+      { "name": "XR_MNDX_blubur_s1" },
+      { "name": "XR_MNDX_hydra" },
+      { "name": "XR_MNDX_oculus_remote" },
+      { "name": "XR_MNDX_psvr2_interaction" },
+      { "name": "XR_MNDX_system_buttons" },
+      { "name": "XR_MNDX_xdev_space" }
+    ],
+    "runtime": {
+      "runtime_name": "Monado(XRT) by Collabora et al 'v25.1.0'",
+      "runtime_version": "25.1.0"
+    },
+    "systems": [
+      {
+        "graphics_properties": {
+          "max_layer_count": 128,
+          "max_swapchain_image_height": 16384,
+          "max_swapchain_image_width": 16384
+        },
+        "system_id": "SystemId(1)",
+        "system_name": "Monado: Qwerty HMD",
+        "tracking_properties": {
+          "orientation_tracking": false,
+          "position_tracking": false
+        },
+        "vendor_id": 42
+      }
+    ],
+    "view_configurations": [
+      {
+        "environment_blend_modes": ["opaque"],
+        "type": "primary_stereo",
+        "views": [
+          {
+            "max_height": 1440,
+            "max_sample_count": 1,
+            "max_width": 1280,
+            "recommended_height": 1007,
+            "recommended_sample_count": 1,
+            "recommended_width": 896
+          },
+          {
+            "max_height": 1440,
+            "max_sample_count": 1,
+            "max_width": 1280,
+            "recommended_height": 1007,
+            "recommended_sample_count": 1,
+            "recommended_width": 896
+          }
+        ]
+      }
+    ]
+  }
+}

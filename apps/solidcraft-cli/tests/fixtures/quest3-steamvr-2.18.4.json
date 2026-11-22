@@ -1,0 +1,96 @@
+{
+  "openxr": {
+    "api_layers": [],
+    "graphics": {
+      "note": "XR_KHR_vulkan_enable2 available - wgpu can adopt the OpenXR instance via wgpu-hal",
+      "vulkan_supported": true
+    },
+    "instance_extensions": [
+      { "name": "XR_EXT_debug_utils" },
+      { "name": "XR_EXT_eye_gaze_interaction" },
+      { "name": "XR_EXT_hand_tracking" },
+      { "name": "XR_EXT_win32_appcontainer_compatible" },
+      { "name": "XR_EXT_dpad_binding" },
+      { "name": "XR_EXT_hand_joints_motion_range" },
+      { "name": "XR_EXT_hp_mixed_reality_controller" },
+      { "name": "XR_EXT_palm_pose" },
+      { "name": "XR_EXT_uuid" },
+      { "name": "XR_EXT_render_model" },
+      { "name": "XR_EXT_interaction_render_model" },
+      { "name": "XR_EXT_hand_interaction" },
+      { "name": "XR_EXT_active_action_set_priority" },
+      { "name": "XR_EXT_local_floor" },
+      { "name": "XR_EXT_hand_tracking_data_source" },
+      { "name": "XR_EXT_user_presence" },
+      { "name": "XR_EXT_interaction_profile_battery_state_display" },
+      { "name": "XR_EXT_view_configuration_views_change" },
+      { "name": "XR_FB_display_refresh_rate" },
+      { "name": "XR_HTC_vive_cosmos_controller_interaction" },
+      { "name": "XR_HTC_vive_focus3_controller_interaction" },
+      { "name": "XR_HTC_vive_wrist_tracker_interaction" },
+      { "name": "XR_KHR_composition_layer_depth" },
+      { "name": "XR_KHR_opengl_enable" },
+      { "name": "XR_KHR_vulkan_enable" },
+      { "name": "XR_KHR_D3D11_enable" },
+      { "name": "XR_KHR_D3D12_enable" },
+      { "name": "XR_KHR_visibility_mask" },
+      { "name": "XR_KHR_win32_convert_performance_counter_time" },
+      { "name": "XR_KHR_vulkan_enable2" },
+      { "name": "XR_KHR_binding_modification" },
+      { "name": "XR_KHR_locate_spaces" },
+      { "name": "XR_KHR_generic_controller" },
+      { "name": "XR_META_performance_metrics" },
+      { "name": "XR_META_recommended_layer_resolution" },
+      { "name": "XR_MND_headless" },
+      { "name": "XR_VALVE_analog_threshold" },
+      { "name": "XR_HTCX_vive_tracker_interaction" },
+      { "name": "XR_EXT_frame_composition_report" },
+      { "name": "XR_VALVE_timing_utils" },
+      { "name": "XR_VALVE_frame_controller_interaction" },
+      { "name": "XR_VALVE_app_space_delta_pose" }
+    ],
+    "runtime": {
+      "runtime_name": "SteamVR/OpenXR",
+      "runtime_version": "2.18.4"
+    },
+    "systems": [
+      {
+        "graphics_properties": {
+          "max_layer_count": 16,
+          "max_swapchain_image_height": 8192,
+          "max_swapchain_image_width": 8192
+        },
+        "system_id": "SystemId(1153130652334293729)",
+        "system_name": "SteamVR/OpenXR : oculus",
+        "tracking_properties": {
+          "orientation_tracking": true,
+          "position_tracking": true
+        },
+        "vendor_id": 10462
+      }
+    ],
+    "view_configurations": [
+      {
+        "type": "primary_stereo",
+        "views": [
+          {
+            "max_height": 8192,
+            "max_sample_count": 1,
+            "max_width": 8192,
+            "recommended_height": 2780,
+            "recommended_sample_count": 1,
+            "recommended_width": 2528
+          },
+          {
+            "max_height": 8192,
+            "max_sample_count": 1,
+            "max_width": 8192,
+            "recommended_height": 2780,
+            "recommended_sample_count": 1,
+            "recommended_width": 2528
+          }
+        ]
+      }
+    ]
+  }
+}
