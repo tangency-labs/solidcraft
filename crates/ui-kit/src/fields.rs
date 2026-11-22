@@ -543,7 +543,13 @@ fn searchable_dropdown_with(
         let changed = ui.data_mut(|data| {
             let previous = data.get_temp::<(usize, bool)>(state.with("layout"));
             data.insert_temp(state.with("layout"), layout);
-            previous.is_some_and(|previous| previous != layout)
+            let changed = previous.is_some_and(|previous| previous != layout);
+            if changed {
+                // The popup is measured again below, and the editor can lose the keyboard in that
+                // pass; ask for focus again instead of treating the earlier request as final.
+                data.remove::<bool>(state.with("focused"));
+            }
+            changed
         });
         let widget = ui.make_persistent_id(egui::IdSalt::new(id));
         let popup = widget.with("popup");
