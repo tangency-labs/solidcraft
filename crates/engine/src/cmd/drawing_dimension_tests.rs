@@ -37,7 +37,16 @@ fn drawn_from_the_front(mut s: Session) -> (Session, u64) {
     let (sheet, source) = (d.sheets[0].id, d.sources[0].id);
     let kind = ViewKind::Base { source, view: ViewDirection::Named(NamedView::Front) };
     let settings = ViewOverrides { scale: Some("1:1".parse().unwrap()), ..ViewOverrides::default() };
-    d.add_views([Arc::new(View { id, sheet, kind, place: ViewPlace::At([200.0, 150.0]), settings, reference_shown_percent: 0.0, label: None })]);
+    d.add_views([Arc::new(View {
+        id,
+        sheet,
+        kind,
+        place: ViewPlace::At([200.0, 150.0]),
+        settings,
+        reference_shown_percent: 0.0,
+        label: None,
+        rotation: 0.0,
+    })]);
     d.validate().unwrap();
     s.doc_mut().put_drawing(Arc::new(d));
     (s, id)
@@ -2652,6 +2661,43 @@ fn a_drag_keeps_its_place_when_the_view_moves() {
     assert!(box_centre(&read).dist(Vec2::new(227.0, 178.0)) < 1e-9, "{read}");
 }
 
+/// A drag on a turned view lands where it is dropped, and saves what the same drag saves on the view
+/// unturned (#13044): the offset and the text's place are kept on the view's own axes. The front view
+/// turned a quarter turn about its centre (200, 150): the top front edge then runs up at x 185, from
+/// y 110 to 190. Its line dragged through (160, 150), where the turn takes (200, 190), runs from
+/// (160, 110) to (160, 190) with offset 25; its text dragged to (165, 165), where the turn takes
+/// (215, 185), is centred there. Both are saved as the unturned drags save them.
+#[test]
+fn a_drag_on_a_turned_view_saves_what_it_saves_unturned() {
+    let drags = |turn: f64, line: [f64; 2], text: [f64; 2]| {
+        let (mut s, view) = front_view();
+        run(&mut s, "drawing.view.edit", json!({"view": ids::encode(view), "set": {"rotation": turn}}));
+        let added = add(&mut s, view, json!({"length": {"edge": [40, 0, 30]}}));
+        let (_, along) = drag_to(&mut s, &added, json!({"line_through_mm": line}));
+        let (_, read) = drag_to(&mut s, &added, json!({"text_to_mm": text}));
+        (along, read)
+    };
+    let (_, flat) = drags(0.0, [200.0, 190.0], [215.0, 185.0]);
+    let (along, turned) = drags(90.0, [160.0, 150.0], [165.0, 165.0]);
+    let lines = layout_lines(&along, "dimension_lines");
+    let ends = |line: &Vec<Vec2>| line.iter().all(|q| (q.x - 160.0).abs() < 1e-9) && line.iter().any(|q| (q.y - 110.0).abs() < 1e-9);
+    assert!(lines.len() == 1 && ends(&lines[0]) && lines[0].iter().any(|q| (q.y - 190.0).abs() < 1e-9), "{along}");
+    assert!(box_centre(&turned).dist(Vec2::new(165.0, 165.0)) < 1e-9, "{turned}");
+    fn close(a: &Value, b: &Value) -> bool {
+        match (a, b) {
+            (Value::Number(x), Value::Number(y)) => (x.as_f64().unwrap() - y.as_f64().unwrap()).abs() < 1e-9,
+            (Value::Array(x), Value::Array(y)) => x.len() == y.len() && x.iter().zip(y).all(|(x, y)| close(x, y)),
+            (Value::Object(x), Value::Object(y)) => x.len() == y.len() && x.iter().all(|(k, v)| y.get(k).is_some_and(|w| close(v, w))),
+            _ => a == b,
+        }
+    }
+    for field in ["offset_mm", "text"] {
+        assert!(close(&turned["record"][field], &flat["record"][field]), "{field}: turned {turned}, unturned {flat}");
+    }
+    // The line drag alone saves the 25 mm on paper; the text drag then moves the line to the text, turned or not.
+    assert!((along["record"]["offset_mm"].as_f64().unwrap() - 25.0).abs() < 1e-9, "{along}");
+}
+
 /// A drag lands where an exploded view draws its dimension (#13048): from the bolt's top corner, lifted
 /// 50 by Apart, across to the plate's top corner, horizontal; its line dragged through (300, 200)
 /// runs through it there, not 25 higher, where the design's own bolt would put it.
@@ -2705,4 +2751,50 @@ fn a_drag_that_cant_place_is_refused_and_changes_nothing() {
     run(&mut s, "drawing.open", json!({"drawing": ids::encode(drawing)}));
     let lost = json!(ids::encode(dimension));
     refuses(&mut s, &[(&lost, json!({"line_through_mm": [200, 190]}), "what it measures has no place to draw on its view")]);
+}
+
+/// A dimension on a view turned 90° keeps reading the same value (#13044's acceptance): the box's 80
+/// mm width, measured horizontally on the view's own axes. Its line turns with the view, so it runs up
+/// the sheet, and its text reads along it, up. Turned 180°, its line is horizontal again on the other
+/// side of the view's centre, as the box turned, and its text still reads left to right, not upside
+/// down. Turned back, it lays out exactly as before.
+#[test]
+fn a_turned_views_dimension_reads_the_same_and_turns_with_it() {
+    let (mut s, view) = front_view();
+    let added = add(&mut s, view, json!({"linear": {"a": [0, 0, 0], "b": [80, 0, 0], "direction": "horizontal"}}));
+    let id = added["dimension"].clone();
+    let layout = |s: &mut Session| run(s, INSPECT, json!({"dimension": id}));
+    let line = |v: &Value| -> (Vec2, Vec2) {
+        let points = v["layout"]["dimension_lines"][0].as_array().unwrap();
+        let at = |p: &Value| Vec2::new(p[0].as_f64().unwrap(), p[1].as_f64().unwrap());
+        (at(&points[0]), at(points.last().unwrap()))
+    };
+    let reads_along = |v: &Value| {
+        let corners = &v["layout"]["text_boxes"][0];
+        let at = |i: usize| Vec2::new(corners[i][0].as_f64().unwrap(), corners[i][1].as_f64().unwrap());
+        (at(1) - at(0)).normalized().unwrap()
+    };
+    let before = layout(&mut s);
+    let (a, b) = line(&before);
+    assert!((a.y - b.y).abs() < 1e-9 && a.y < 150.0, "horizontal, below the view's centre: {before}");
+    let turn = |s: &mut Session, degrees: f64| {
+        s.execute("drawing.view.edit", &json!({"view": ids::encode(view), "set": {"rotation": degrees}})).unwrap();
+    };
+
+    turn(&mut s, 90.0);
+    let upright = layout(&mut s);
+    reads(&upright, 80.0, "80.00");
+    let (a, b) = line(&upright);
+    assert!((a.x - b.x).abs() < 1e-9 && (a.y - b.y).abs() > 70.0, "it runs up the sheet: {upright}");
+    assert!((reads_along(&upright) - Vec2::new(0.0, 1.0)).len() < 1e-9, "its text reads up: {upright}");
+
+    turn(&mut s, 180.0);
+    let half = layout(&mut s);
+    reads(&half, 80.0, "80.00");
+    let (a, b) = line(&half);
+    assert!((a.y - b.y).abs() < 1e-9 && a.y > 150.0, "horizontal, above the view's centre: {half}");
+    assert!((reads_along(&half) - Vec2::X).len() < 1e-9, "its text reads left to right: {half}");
+
+    turn(&mut s, 0.0);
+    assert_eq!(layout(&mut s), before, "turned back, as before");
 }
