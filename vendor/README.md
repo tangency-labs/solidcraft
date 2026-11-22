@@ -219,3 +219,6 @@ SolidCraft changes:
   that error, so asking for the monitor list or going full screen ended the app (#20645). Now
   `name` is `None`, `native_identifier` is empty and `size` is 0x0, the same kind of fallback
   winit already uses in `position` ((0, 0)), `scale_factor` (96 DPI) and `video_modes` (none).
+- `src/platform_impl/windows/window.rs` (`set_fullscreen`): going full screen on such a monitor
+  would have sized the window 0x0, so it fills the monitor the window is on instead, and never
+  applies a zero-area size (#20645).
