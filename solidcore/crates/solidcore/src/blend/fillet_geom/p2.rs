@@ -200,7 +200,7 @@ use crate::blend::fillet_solver::p1::{FilletSolver, FilletSolverOps, FilletSurfa
 use crate::curve::curve::p1::GlobalPointSolveOptions;
 use crate::curve::curve::p3::PointSolveOptions;
 use crate::curve::curve::{Curve, CurveKind};
-use crate::error::blend::{BlendFailure, FilletSetUp};
+use crate::error::blend::{BlendFailure, FilletSetUp, SolverFailure};
 use crate::error::{EntityRef, Failure, Result, SolidError, SM_ERR, SM_ERR_NULL_POINTER};
 use crate::geom::extent1d::Extent1d;
 use crate::geom::extent2d::Extent2d;
@@ -552,9 +552,12 @@ impl RailSolvers<'_> {
     }
 
     fn geom_solver(fb: &FilletBrep, g: FilletGeomId) -> Result<FilletSolverId> {
-        fb.geom(g)?
-            .fillet_solver()
-            .ok_or_else(|| missing_set_up(OP_RAIL_EU, FilletSetUp::GeomSolver))
+        fb.geom(g)?.fillet_solver().ok_or_else(|| {
+            SolidError::blend_solver(
+                OP_RAIL_EU,
+                SolverFailure::FilletGeomWithoutSolver { fillet_geom: g },
+            )
+        })
     }
 
     fn offset_surface<'a>(
@@ -578,13 +581,16 @@ impl RailSolvers<'_> {
     }
 }
 
-/// `SmFilletSolver::GetEdgeuse(i)`, dereferenced (`NULL` is a [`missing_set_up`] at the
-/// caller's line: `SM_ERR_NULL_POINTER`).
+/// `SmFilletSolver::GetEdgeuse(i)`, dereferenced (`NULL` is
+/// [`SolverFailure::SolverEdgeUseMissing`] at the caller's line: `SM_ERR_NULL_POINTER`).
 #[track_caller]
 fn solver_edgeuse(fs: &FilletSolver, i: usize, op: &'static str) -> Result<EdgeuseId> {
     match fs.edgeuse(i)? {
         Some(eu) => Ok(eu),
-        None => Err(missing_set_up(op, FilletSetUp::SolverEdgeUse)),
+        None => Err(SolidError::blend_solver(
+            op,
+            SolverFailure::SolverEdgeUseMissing { index: i },
+        )),
     }
 }
 
@@ -2338,9 +2344,12 @@ fn face_surface<'b>(
 impl FilletBrep {
     /// The solver index of fillet geometry `g` (`GetFilletSolver()`, dereferenced).
     fn geom_solver_id(&self, g: FilletGeomId, op: &'static str) -> Result<FilletSolverId> {
-        self.geom(g)?
-            .fillet_solver()
-            .ok_or_else(|| missing_set_up(op, FilletSetUp::GeomSolver))
+        self.geom(g)?.fillet_solver().ok_or_else(|| {
+            SolidError::blend_solver(
+                op,
+                SolverFailure::FilletGeomWithoutSolver { fillet_geom: g },
+            )
+        })
     }
 
     /// `GetVUAtRailEnd(pFG)->GetTsectPnt()`, dereferenced: the vertex use and a copy of
@@ -3702,7 +3711,12 @@ impl FilletBrep {
                     let tangency = fs.tangency_tolerance;
                     let foot = b.point + bin;
                     let Some(from) = eu1::face(target, side_eu)? else {
-                        return Err(invalid_set_up(OP, FilletSetUp::EdgeUseFace));
+                        return Err(Failure::new(
+                            OP,
+                            BlendFailure::Solver(SolverFailure::EdgeUseWithoutFace),
+                        )
+                        .with_status(SM_ERR)
+                        .into_error());
                     };
                     let seed = crate::blend::fillet_tangent_rollover::rolled_edge_point(
                         k, target, from, onto, foot, tangency,
