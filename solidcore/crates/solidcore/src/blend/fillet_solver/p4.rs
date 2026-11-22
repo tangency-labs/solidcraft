@@ -125,12 +125,6 @@ fn fail(cause: SolverFailure) -> SolidError {
     SolidError::blend_solver(OP, cause)
 }
 
-/// A defect of the kernel's own fillet body or solver state, keeping upstream's `SM_ERR`.
-#[track_caller]
-fn defect(why: &'static str) -> SolidError {
-    SolidError::blend(OP, BlendFailure::Defect { why })
-}
-
 // =====================================================================================
 // SHARED: data model (sTsectPnts), state passed between the chunks, public resolver
 // =====================================================================================
@@ -753,7 +747,12 @@ fn c1_setup(ops: &mut dyn FilletSolverOps, cx: &mut Cx<'_>) -> Result<CalcState>
     // kind not derived from SmBSplineCurve
     let edge_curve = match topo_edge::curve(cx.target, edge)? {
         Some(c) if bspline_curve_cast(c).is_some() => c.clone(),
-        Some(_) => return Err(fail(SolverFailure::EdgeCurveNotBSpline { edge })),
+        Some(c) => {
+            return Err(fail(SolverFailure::EdgeCurveNotBSpline {
+                edge,
+                kind: c.type_string(),
+            }))
+        }
         None => return Err(fail(SolverFailure::EdgeWithoutCurve { edge })),
     };
     let ivl = topo_edge::interval(cx.target, edge)?;
@@ -922,17 +921,16 @@ fn c1_collect_points(
     // Process rail_ends: rail[i]->edgeuse[jj]->FilletVertexuse->TsectPnt
     let geom0 = st.geom0;
     for which_rail in 0..2 {
-        let this_rail = cx.fillets.geom(geom0)?.rail(which_rail).ok_or_else(|| {
-            SolidError::blend_null_defect(
-                OP,
-                "the fillet geometry the solver built has no rail on this side",
-            )
-        })?;
+        let this_rail = cx
+            .fillets
+            .geom(geom0)?
+            .rail(which_rail)
+            .ok_or_else(|| fail(SolverFailure::FilletGeomWithoutRail { side: which_rail }))?;
         let fil_edgeuses = topo_edge::edgeuses(cx.fillets.brep(), this_rail, None, None)?;
         if fil_edgeuses.len() != 2 {
-            return Err(defect(
-                "the rail the solver built does not have its two edge uses",
-            ));
+            return Err(fail(SolverFailure::RailEdgeUseCount {
+                count: fil_edgeuses.len(),
+            }));
         }
 
         // for both Rail->edgeuses
@@ -1281,11 +1279,37 @@ mod tests_c1 {
         };
         let mut st = c1_setup(&mut ops, &mut cx).unwrap();
         let e = c1_collect_points(&mut ops, &mut cx, &mut st, 0).unwrap_err();
-        assert_eq!(
-            e,
-            defect("the rail the solver built does not have its two edge uses")
-        );
+        assert_eq!(e, fail(SolverFailure::RailEdgeUseCount { count: 1 }));
         assert_eq!(e.upstream_status(), Some(crate::error::SM_ERR));
+    }
+
+    /// A caller-built fillet geometry reaches the rail checks through the public
+    /// `calc_fillet_geom`: a rail with one edge use, or no rail, is the caller's input
+    /// (InvalidInput), not a kernel defect.
+    #[test]
+    fn caller_rail_faults_through_calc_fillet_geom_are_invalid_input() {
+        let k = Kernel::default();
+
+        let (mut tb, eus) = target(Some(line_curve([0.0, 0.0, 0.0], [2.0, 0.0, 0.0], 3)));
+        let (mut fb, g, _) = fillets(&k, ROWS);
+        let rail = fb.geom(g).unwrap().rail(1).unwrap();
+        fb.brep_mut().edge_mut(rail).unwrap().edgeuses.pop();
+        let mut ops = solver(&k, eus);
+        let e = FilletSolver::calc_fillet_geom(&mut ops, &k, &mut tb, &mut fb, &[]).unwrap_err();
+        assert_eq!(e, fail(SolverFailure::RailEdgeUseCount { count: 1 }));
+        assert_eq!(e.kind(), crate::error::ErrorKind::InvalidInput);
+        assert!(!e.is_defect(), "{e:?}");
+        assert_eq!(e.upstream_status(), Some(crate::error::SM_ERR));
+
+        let (mut tb, eus) = target(Some(line_curve([0.0, 0.0, 0.0], [2.0, 0.0, 0.0], 3)));
+        let (mut fb, g, _) = fillets(&k, ROWS);
+        fb.geom_mut(g).unwrap().set_rail(1, None);
+        let mut ops = solver(&k, eus);
+        let e = FilletSolver::calc_fillet_geom(&mut ops, &k, &mut tb, &mut fb, &[]).unwrap_err();
+        assert_eq!(e, fail(SolverFailure::FilletGeomWithoutRail { side: 1 }));
+        assert_eq!(e.kind(), crate::error::ErrorKind::InvalidInput);
+        assert!(!e.is_defect(), "{e:?}");
+        assert_eq!(e.upstream_status(), Some(crate::error::SM_ERR_NULL_POINTER));
     }
 
     #[test]
@@ -1705,12 +1729,11 @@ fn c2_end_past_tangent_edge(
         topo_edge::start_vertex(cx.target, edge)?
     };
     for which_rail in 0..2 {
-        let rail = cx.fillets.geom(st.geom0)?.rail(which_rail).ok_or_else(|| {
-            SolidError::blend_null_defect(
-                OP,
-                "the fillet geometry the solver built has no rail on this side",
-            )
-        })?;
+        let rail = cx
+            .fillets
+            .geom(st.geom0)?
+            .rail(which_rail)
+            .ok_or_else(|| fail(SolverFailure::FilletGeomWithoutRail { side: which_rail }))?;
         let brep = cx.fillets.brep();
         let first = topo_edge::vertex(brep, rail)?;
         let second = match first {
@@ -2003,8 +2026,8 @@ fn c3_try_analytic(
     }
 
     // get filletEdge->Surface1, then filletEdge->Surface2 (each NER)
-    let base1 = c3_bspline_base(&st.base_surfaces[0])?;
-    let base2 = c3_bspline_base(&st.base_surfaces[1])?;
+    let base1 = c3_bspline_base(&st.base_surfaces[0], 0)?;
+    let base2 = c3_bspline_base(&st.base_surfaces[1], 1)?;
 
     // when both surfaces are analytic (planes or cones); `&&` short-circuits as
     // upstream's does (the second test only runs when the first passes)
@@ -2067,20 +2090,26 @@ fn c3_exact_by_class(
 /// :1960-1977: `SM_CAST_PTR(SmBSplineSurface, pBaseSrf)`, else (another level of
 /// offset surface) `SM_CAST_PTR(SmBSplineSurface, pOffsetSurf->GetBaseSurface())`;
 /// `NER` when the base is not an offset surface or its base not a B-spline.
-fn c3_bspline_base(base: &Surface) -> Result<&Surface> {
+fn c3_bspline_base(base: &Surface, side: usize) -> Result<&Surface> {
     if is_bspline_surface(base) {
         return Ok(base);
     }
     // If the base surface is not an SmBSplineSurface, maybe it's another level of
     // offset surface; check one more level.
     let SurfaceKind::OffsetSurface(offset) = base.kind() else {
-        return Err(fail(SolverFailure::BaseSurfaceNotBSpline));
+        return Err(fail(SolverFailure::BaseSurfaceNotBSpline {
+            side,
+            kind: base.type_string(),
+        }));
     };
     let inner = offset.base_surface();
     if is_bspline_surface(inner) {
         Ok(inner)
     } else {
-        Err(fail(SolverFailure::BaseSurfaceNotBSpline))
+        Err(fail(SolverFailure::BaseSurfaceNotBSpline {
+            side,
+            kind: inner.type_string(),
+        }))
     }
 }
 
@@ -2373,17 +2402,23 @@ mod tests_c3 {
         let k = Kernel::default();
         let (a, _) = planes();
         assert!(std::ptr::eq(
-            c3_bspline_base(&a).unwrap(),
+            c3_bspline_base(&a, 0).unwrap(),
             std::ptr::from_ref(&a)
         ));
 
         let once = offset(&k, 0.5, &a);
-        let inner = c3_bspline_base(&once).unwrap();
+        let inner = c3_bspline_base(&once, 0).unwrap();
         assert!(matches!(inner.kind(), SurfaceKind::BSpline(_)));
 
         let twice = offset(&k, 0.5, &once);
-        let e = c3_bspline_base(&twice).unwrap_err();
-        assert_eq!(e, fail(SolverFailure::BaseSurfaceNotBSpline));
+        let e = c3_bspline_base(&twice, 1).unwrap_err();
+        assert_eq!(
+            e,
+            fail(SolverFailure::BaseSurfaceNotBSpline {
+                side: 1,
+                kind: once.type_string(),
+            })
+        );
         assert_eq!(e.upstream_status(), Some(crate::error::SM_ERR_NULL_POINTER));
     }
 

@@ -681,19 +681,26 @@ pub enum SolverFailure {
     /// An edge use of the caller's body has no edge: the caller's input
     /// ([`ErrorKind::InvalidInput`]); status `SM_ERR_NULL_POINTER`.
     EdgeUseWithoutEdge,
-    /// The edge to fillet has a curve of a kind with no B-spline form: a kind the routine
-    /// cannot handle ([`ErrorKind::Unsupported`]); status `SM_ERR_NULL_POINTER`.
+    /// The edge to fillet has a curve not of a B-spline class: a kind the routine cannot
+    /// handle ([`ErrorKind::Unsupported`]); status `SM_ERR_NULL_POINTER`.
     EdgeCurveNotBSpline {
         /// The edge.
         edge: crate::topology::EdgeId,
+        /// The curve's kind (its type string).
+        kind: &'static str,
     },
     /// The trace left no cross-section points to clean at its ends: an empty search
     /// ([`ErrorKind::NotFound`]).
     NoTracePoints,
-    /// An offset surface's base is neither a B-spline surface nor an offset of one: a kind
-    /// the routine cannot handle ([`ErrorKind::Unsupported`]); status
+    /// Offset surface `side`'s base is neither of a B-spline class nor an offset of one: a
+    /// kind the routine cannot handle ([`ErrorKind::Unsupported`]); status
     /// `SM_ERR_NULL_POINTER`.
-    BaseSurfaceNotBSpline,
+    BaseSurfaceNotBSpline {
+        /// The offset surface, 0 or 1.
+        side: usize,
+        /// The kind (type string) of the surface that is not of a B-spline class.
+        kind: &'static str,
+    },
     /// The trace ran more than `limit` passes (too many self-intersections or other
     /// restarts) without finishing ([`ErrorKind::NotConverged`]).
     TraceLoopLimit {
@@ -719,6 +726,18 @@ pub enum SolverFailure {
     /// The two offset surfaces' normals at a tangent intersection point are parallel, so
     /// their cross product gives the curve no direction ([`ErrorKind::Degenerate`]).
     OffsetNormalsParallel,
+    /// The caller's fillet geometry has no rail on side `side`: the caller's solver set-up
+    /// ([`ErrorKind::InvalidInput`]); status `SM_ERR_NULL_POINTER`.
+    FilletGeomWithoutRail {
+        /// The rail side, 0 or 1.
+        side: usize,
+    },
+    /// A rail of the caller's fillet geometry has `count` edge uses where two are needed:
+    /// the caller's solver set-up ([`ErrorKind::InvalidInput`]).
+    RailEdgeUseCount {
+        /// The rail's edge uses.
+        count: usize,
+    },
 }
 
 /// The analytic shape a fillet solver routine builds
@@ -794,7 +813,7 @@ impl SolverFailure {
             | Self::ShortIntervalsNotRemoved { .. }
             | Self::TangentRolloverUnhandled
             | Self::EdgeCurveNotBSpline { .. }
-            | Self::BaseSurfaceNotBSpline
+            | Self::BaseSurfaceNotBSpline { .. }
             | Self::TraceTouchesBoundaryAgain => ErrorKind::Unsupported,
             Self::TraceLoopLimit { .. } => ErrorKind::NotConverged,
             Self::GnSideInputMissing { .. }
@@ -806,7 +825,9 @@ impl SolverFailure {
             | Self::EdgeUseWithoutMate
             | Self::EdgeUseWithoutFace
             | Self::SolverEdgeUseMissing { .. }
-            | Self::EdgeUseWithoutEdge => ErrorKind::InvalidInput,
+            | Self::EdgeUseWithoutEdge
+            | Self::FilletGeomWithoutRail { .. }
+            | Self::RailEdgeUseCount { .. } => ErrorKind::InvalidInput,
             Self::JacobianNotLoaded
             | Self::SupportIntersectionFailed
             | Self::SurfaceCacheNotBuilt => ErrorKind::Failed,
@@ -829,8 +850,9 @@ impl SolverFailure {
             | Self::SolverEdgeUseMissing { .. }
             | Self::EdgeUseWithoutEdge
             | Self::EdgeCurveNotBSpline { .. }
-            | Self::BaseSurfaceNotBSpline
-            | Self::NoCenterLineTraced => SM_ERR_NULL_POINTER,
+            | Self::BaseSurfaceNotBSpline { .. }
+            | Self::NoCenterLineTraced
+            | Self::FilletGeomWithoutRail { .. } => SM_ERR_NULL_POINTER,
             Self::CrossSectionPointNotFound { .. }
             | Self::RailTangentZero { .. }
             | Self::PiecesTooFarApart { .. }
@@ -869,7 +891,8 @@ impl SolverFailure {
             | Self::TraceTouchesBoundaryAgain
             | Self::SplitPointDoesNotDropOnRail { .. }
             | Self::NeighbourPointsNotFound
-            | Self::OffsetNormalsParallel => SM_ERR,
+            | Self::OffsetNormalsParallel
+            | Self::RailEdgeUseCount { .. } => SM_ERR,
         }
     }
 }
@@ -1027,13 +1050,15 @@ impl core::fmt::Display for SolverFailure {
                 )
             }
             Self::EdgeUseWithoutEdge => f.write_str("an edge use of the body has no edge"),
-            Self::EdgeCurveNotBSpline { edge } => write!(
+            Self::EdgeCurveNotBSpline { edge, kind } => write!(
                 f,
-                "the curve of edge {edge:?} to fillet has no B-spline form"
+                "the {kind} curve of edge {edge:?} to fillet is not of a B-spline class"
             ),
             Self::NoTracePoints => f.write_str("the trace left no cross-section points"),
-            Self::BaseSurfaceNotBSpline => f.write_str(
-                "an offset surface's base is neither a B-spline surface nor an offset of one",
+            Self::BaseSurfaceNotBSpline { side, kind } => write!(
+                f,
+                "offset surface {side}'s base is a {kind} surface, neither of a B-spline class \
+                 nor an offset of one"
             ),
             Self::TraceLoopLimit { limit } => {
                 write!(f, "the trace did not finish within {limit} passes")
@@ -1054,6 +1079,15 @@ impl core::fmt::Display for SolverFailure {
             Self::OffsetNormalsParallel => f.write_str(
                 "the offset surfaces' normals are parallel at the tangent intersection point",
             ),
+            Self::FilletGeomWithoutRail { side } => {
+                write!(f, "the fillet geometry has no rail on side {side}")
+            }
+            Self::RailEdgeUseCount { count } => {
+                write!(
+                    f,
+                    "the fillet geometry's rail has {count} edge uses, not two"
+                )
+            }
         }
     }
 }
