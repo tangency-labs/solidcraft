@@ -850,9 +850,11 @@ pub(crate) fn node_id(key: &str) -> NodeId {
     egui::Id::unique(("sc_browser_row", key)).value()
 }
 
-/// The kinds of rows the Browser drags: a folder's items or groups, and placements.
+/// The kinds of rows the Browser drags, one number each: a folder's items or groups, placements,
+/// and a drawing's sheets (`drawing_workspace::browser`).
 const DRAG_ITEMS: u32 = 0;
 const DRAG_PLACEMENTS: u32 = 1;
+pub(crate) const DRAG_SHEETS: u32 = 2;
 
 /// What a Browser row is beyond its look: its tree key, whether it is an item of the selection
 /// (in the order a Shift range spans), the kind it drags as, the drops it takes and its rule for
@@ -1021,7 +1023,7 @@ pub(crate) fn present(
 }
 
 /// Whether rows dragged in the panel come from this document.
-fn same_document(app: &SolveApp, dragged: &Dragged) -> bool {
+pub(crate) fn same_document(app: &SolveApp, dragged: &Dragged) -> bool {
     dragged.source.scope == app.session.uid
 }
 
@@ -1238,6 +1240,11 @@ pub(crate) struct Actions {
 impl Actions {
     fn drop_from(&mut self, source: crate::semantic_content::ContentSource, action: DropAction) {
         self.drop = Some((source, action));
+    }
+
+    /// A drawing's sheets dropped into a new `order` (every sheet's id), from the drag's `source`.
+    pub(crate) fn drop_sheets(&mut self, source: panel::Source, order: Vec<u64>) {
+        self.drop_from(crate::semantic_content::content_source(source), DropAction::SheetOrder { order });
     }
 }
 
@@ -1589,8 +1596,8 @@ fn rows_scrolling(app: &mut SolveApp, ui: &mut egui::Ui, acts: &mut Actions, shr
         let output = egui::Frame::NONE
             .inner_margin(inset)
             .show(ui, |ui| {
-                present(app, ui, acts, (true, shrink_height), |app, rows, _| {
-                    crate::drawing_workspace::browser::show(app, rows);
+                present(app, ui, acts, (true, shrink_height), |app, rows, acts| {
+                    crate::drawing_workspace::browser::show(app, rows, acts);
                 })
             })
             .inner;
@@ -3688,6 +3695,10 @@ enum DropAction {
         parent: u64,
         parent_path: Option<Vec<u64>>,
     },
+    /// A drawing's sheets, every one's id in the new order.
+    SheetOrder {
+        order: Vec<u64>,
+    },
 }
 
 fn entry_json(e: &BrowserEntry) -> Value {
@@ -3748,6 +3759,7 @@ fn apply_drop(app: &mut SolveApp, d: DropAction) {
                 Err(e) => app.set_status(e, true),
             }
         }
+        DropAction::SheetOrder { order } => crate::drawing_workspace::reorder_sheets(app, &order),
     }
 }
 
