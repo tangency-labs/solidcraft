@@ -173,6 +173,18 @@ fn corner_input(op: &'static str, input: CornerInput, entity: Option<EntityRef>)
     }
 }
 
+/// An edge use of the caller's body or fillet B-rep, `edgeuse`, has no edge: the caller's
+/// input, [`BlendFailure::EdgeUseWithoutEdge`] at the edge use, status
+/// `SM_ERR_NULL_POINTER`.
+#[track_caller]
+fn edge_use_without_edge(op: &'static str, edgeuse: EdgeuseId) -> SolidError {
+    SolidError::blend_at(
+        op,
+        BlendFailure::EdgeUseWithoutEdge,
+        EntityRef::Edgeuse(edgeuse),
+    )
+}
+
 /// Invalid input to `op`: a link of the caller's fillet structures that the corner reads is
 /// not there (`part`), about `entity` where the check reads one; status
 /// `SM_ERR_NULL_POINTER`, the site's.
@@ -304,20 +316,8 @@ pub(crate) fn mixed_ring<S: Copy>(
     let &[eu0, eu1_] = solver_eus else {
         return Ok(None);
     };
-    let e0 = eu1::edge(b, eu0)?.ok_or_else(|| {
-        bad_setup(
-            OP_CLASSIFY,
-            FilletSetUp::EdgeUseEdge,
-            Some(EntityRef::Edgeuse(eu0)),
-        )
-    })?;
-    let e1 = eu1::edge(b, eu1_)?.ok_or_else(|| {
-        bad_setup(
-            OP_CLASSIFY,
-            FilletSetUp::EdgeUseEdge,
-            Some(EntityRef::Edgeuse(eu1_)),
-        )
-    })?;
+    let e0 = eu1::edge(b, eu0)?.ok_or_else(|| edge_use_without_edge(OP_CLASSIFY, eu0))?;
+    let e1 = eu1::edge(b, eu1_)?.ok_or_else(|| edge_use_without_edge(OP_CLASSIFY, eu1_))?;
     let concave = [is_concave_edge(k, b, e0)?, is_concave_edge(k, b, e1)?];
     if concave[0] == concave[1] {
         return Ok(None);
@@ -851,13 +851,8 @@ pub fn calc_mixed_vert_geom(
     }
 
     // P: B1's wall rail crosses the seam; Q: B2's wall rail crosses the seam's line past V
-    let seam_e = eu1::edge(target, mixed.ring.seam)?.ok_or_else(|| {
-        bad_setup(
-            OP_VERT,
-            FilletSetUp::EdgeUseEdge,
-            Some(EntityRef::Edgeuse(mixed.ring.seam)),
-        )
-    })?;
+    let seam_e = eu1::edge(target, mixed.ring.seam)?
+        .ok_or_else(|| edge_use_without_edge(OP_VERT, mixed.ring.seam))?;
     let vertex = corner
         .vertex
         .ok_or_else(|| bad_setup(OP_VERT, FilletSetUp::CornerVertex, None))?;
@@ -1063,27 +1058,12 @@ pub fn calc_mixed_edge_geom(
     let vertex = corner
         .vertex
         .ok_or_else(|| bad_setup(OP_EDGE, FilletSetUp::CornerVertex, None))?;
-    let convex_e = eu1::edge(target, ring.convex)?.ok_or_else(|| {
-        bad_setup(
-            OP_EDGE,
-            FilletSetUp::EdgeUseEdge,
-            Some(EntityRef::Edgeuse(ring.convex)),
-        )
-    })?;
-    let seam_e = eu1::edge(target, ring.seam)?.ok_or_else(|| {
-        bad_setup(
-            OP_EDGE,
-            FilletSetUp::EdgeUseEdge,
-            Some(EntityRef::Edgeuse(ring.seam)),
-        )
-    })?;
-    let concave_e = eu1::edge(target, ring.concave)?.ok_or_else(|| {
-        bad_setup(
-            OP_EDGE,
-            FilletSetUp::EdgeUseEdge,
-            Some(EntityRef::Edgeuse(ring.concave)),
-        )
-    })?;
+    let convex_e = eu1::edge(target, ring.convex)?
+        .ok_or_else(|| edge_use_without_edge(OP_EDGE, ring.convex))?;
+    let seam_e =
+        eu1::edge(target, ring.seam)?.ok_or_else(|| edge_use_without_edge(OP_EDGE, ring.seam))?;
+    let concave_e = eu1::edge(target, ring.concave)?
+        .ok_or_else(|| edge_use_without_edge(OP_EDGE, ring.concave))?;
     // along the convex edge into V, on along the concave one
     let chain = -leaving(k, target, convex_e, vertex, OP_EDGE)?;
     let seam_dir = leaving(k, target, seam_e, vertex, OP_EDGE)?;

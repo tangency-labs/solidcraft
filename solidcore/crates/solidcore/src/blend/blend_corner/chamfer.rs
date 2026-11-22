@@ -142,6 +142,18 @@ fn corner_input(op: &'static str, input: CornerInput, entity: Option<EntityRef>)
     }
 }
 
+/// An edge use of the caller's body or fillet B-rep, `edgeuse`, has no edge: the caller's
+/// input, [`BlendFailure::EdgeUseWithoutEdge`] at the edge use, status
+/// `SM_ERR_NULL_POINTER`.
+#[track_caller]
+fn edge_use_without_edge(op: &'static str, edgeuse: EdgeuseId) -> SolidError {
+    SolidError::blend_at(
+        op,
+        BlendFailure::EdgeUseWithoutEdge,
+        EntityRef::Edgeuse(edgeuse),
+    )
+}
+
 /// Invalid input to `op`: a link of the caller's fillet structures that the corner reads is
 /// not there (`part`), about `entity` where the check reads one; status
 /// `SM_ERR_NULL_POINTER`, the site's.
@@ -733,13 +745,7 @@ pub fn classify_chamfer(
     let mut concave0 = None;
     let mut mixed = false;
     for &eu in all_eus {
-        let e = eu1::edge(b, eu)?.ok_or_else(|| {
-            bad_setup(
-                OP_CLASSIFY,
-                FilletSetUp::EdgeUseEdge,
-                Some(EntityRef::Edgeuse(eu)),
-            )
-        })?;
+        let e = eu1::edge(b, eu)?.ok_or_else(|| edge_use_without_edge(OP_CLASSIFY, eu))?;
         let curve = edge::curve(b, e)?.ok_or_else(|| {
             bad_input(
                 OP_CLASSIFY,

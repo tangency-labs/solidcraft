@@ -119,6 +119,18 @@ fn corner_input(op: &'static str, input: CornerInput, entity: Option<EntityRef>)
     }
 }
 
+/// An edge use of the caller's body or fillet B-rep, `edgeuse`, has no edge: the caller's
+/// input, [`BlendFailure::EdgeUseWithoutEdge`] at the edge use, status
+/// `SM_ERR_NULL_POINTER`.
+#[track_caller]
+fn edge_use_without_edge(op: &'static str, edgeuse: EdgeuseId) -> SolidError {
+    SolidError::blend_at(
+        op,
+        BlendFailure::EdgeUseWithoutEdge,
+        EntityRef::Edgeuse(edgeuse),
+    )
+}
+
 /// Invalid input to `op`: a link of the caller's fillet structures that the corner reads is
 /// not there (`part`), about `entity` where the check reads one; status
 /// `SM_ERR_NULL_POINTER`, the site's.
@@ -537,13 +549,7 @@ pub fn classify_ball(
             return none;
         }
         radius = r0;
-        let e = eu1::edge(b, eu)?.ok_or_else(|| {
-            bad_setup(
-                OP_CLASSIFY,
-                FilletSetUp::EdgeUseEdge,
-                Some(EntityRef::Edgeuse(eu)),
-            )
-        })?;
+        let e = eu1::edge(b, eu)?.ok_or_else(|| edge_use_without_edge(OP_CLASSIFY, eu))?;
         let concave = is_concave_edge(k, b, e)?;
         if ii == 0 {
             concave0 = concave;
@@ -952,13 +958,11 @@ pub fn place_ball_contacts(
             let Some(g) = pseudo.fillet_edgeuse(eu)?.fillet_geom() else {
                 continue;
             };
-            let e = pseudo.brep().edgeuse(eu)?.edge.ok_or_else(|| {
-                bad_setup(
-                    OP_PLACE,
-                    FilletSetUp::EdgeUseEdge,
-                    Some(EntityRef::Edgeuse(eu)),
-                )
-            })?;
+            let e = pseudo
+                .brep()
+                .edgeuse(eu)?
+                .edge
+                .ok_or_else(|| edge_use_without_edge(OP_PLACE, eu))?;
             if pseudo.fillet_edge(e)?.fillet_edge_type() != FilletEdgeType::Rail {
                 continue;
             }
@@ -1320,13 +1324,8 @@ pub fn ball_corner_edge_geom(
         .and_then(<[EdgeuseId]>::first)
         .copied()
         .ok_or_else(|| bad_input(OP_BUILD, CornerInput::RingNotSet, None))?;
-    let first_edge = eu1::edge(target, first)?.ok_or_else(|| {
-        bad_setup(
-            OP_BUILD,
-            FilletSetUp::EdgeUseEdge,
-            Some(EntityRef::Edgeuse(first)),
-        )
-    })?;
+    let first_edge =
+        eu1::edge(target, first)?.ok_or_else(|| edge_use_without_edge(OP_BUILD, first))?;
     let adds_material = is_concave_edge(k, target, first_edge)?;
 
     // each contact's direction from the centre and its corner vertex's point (ball_centre

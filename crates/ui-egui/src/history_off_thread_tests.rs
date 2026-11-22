@@ -28,7 +28,15 @@ fn block_boss_hole() -> Harness {
 /// Frames until nothing computes or waits (a few seconds at most).
 fn until_settled(h: &mut Harness) {
     for _ in 0..500 {
-        if h.app.deferred.is_none() && h.app.deferred_queue.is_empty() && h.app.delete_check.is_none() && h.app.pending_feature_edit.is_none() {
+        // Finishing a sketch for the next edit computes off the window thread too: the edit waits
+        // for that sketch refresh (`start_after_roll`), as the control channel's `pending` does.
+        if h.app.deferred.is_none()
+            && h.app.deferred_queue.is_empty()
+            && h.app.delete_check.is_none()
+            && h.app.pending_feature_edit.is_none()
+            && h.app.start_after_roll.is_none()
+            && !h.app.sketch_refreshes.contains_key(&h.app.session.uid)
+        {
             break;
         }
         h.frames(1);
@@ -402,6 +410,30 @@ fn switching_from_a_sketch_to_a_feature_restores_partial_markers_and_sketch_chan
     }
 }
 
+/// An editor that is still opening when it is cancelled leaves the finished sketch's refresh to
+/// run afterwards: the model shows the sketch as finished, not as it was before the edit.
+#[test]
+fn a_feature_editor_cancelled_while_opening_still_refreshes_the_finished_sketch() {
+    for when in ["opening", "open"] {
+        let (mut h, sketches) = sketches_with_later_bodies();
+        let feature = h.app.session.doc.features[3].id;
+        h.app.edit_sketch(sketches[0]);
+        h.app.run("sketch.line", json!({"points": [[0, 2], [10, 2]]})).unwrap();
+        h.app.edit_feature(feature);
+        if when == "open" {
+            until_settled(&mut h);
+            assert!(h.app.dialog.is_some());
+        }
+        crate::dialogs::cancel(&mut h.app);
+        until_settled(&mut h);
+        assert!(h.app.dialog.is_none(), "{when}");
+        assert!(!h.app.session.needs_sketch_finish_evaluation(), "{when}: the finished sketch was evaluated");
+        let drawn = h.app.session.doc.sketch(sketches[0]).unwrap().curves.len();
+        let shown = h.app.session.model.state().sketch(sketches[0]).unwrap().sketch.curves.len();
+        assert_eq!(shown, drawn, "{when}: the model shows the line the sketch finished with");
+    }
+}
+
 #[test]
 fn switching_from_a_sketch_to_a_feature_rejects_replaced_or_changed_documents() {
     for action in ["new", "change"] {
@@ -713,7 +745,7 @@ fn a_design_closed_while_its_history_computes_holds_up_nothing() {
     let (job, late) = crate::deferred::Deferred::never_done("timeline.roll_to", json!({"position": 1}), h.app.session.revision);
     h.app.deferred = Some(job);
     h.app.deferred_queue.push(("timeline.roll_to".into(), json!({"position": 2}), 0));
-    h.app.start_after_roll = Some(("solid.extrude".into(), 1));
+    h.app.start_after_roll = Some(("solid.extrude".into(), Some(1)));
     crate::documents::close(&mut h.app, 0, true);
     assert!(h.app.computing_since().is_none(), "the blank design has nothing computing");
     assert!(h.app.deferred.is_none() && h.app.deferred_queue.is_empty() && h.app.start_after_roll.is_none());
