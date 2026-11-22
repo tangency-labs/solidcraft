@@ -14,7 +14,7 @@
 //! | [`SurfaceFailure::OutsideDomain`]  | `SM_ERR_OUTSIDE_OF_DOMAIN`     |
 //! | [`SurfaceFailure::OffSurface`]     | `SM_ERR_NOT_WITHIN_TOLERANCE`  |
 //! | [`SurfaceFailure::Defect`]         | `SM_ERR` (or the site's, through `with_status`) |
-//! | [`SurfaceFailure::ScaleNotUniform`], [`SurfaceFailure::CurveNoNurb`], [`SurfaceFailure::BallDefinitionUnreadable`], [`SurfaceFailure::PointOnAxis`], [`SurfaceFailure::IsoCircleUndefined`], [`SurfaceFailure::ExtensionWeightNotPositive`], [`SurfaceFailure::BlendCurveNotBSpline`], [`SurfaceFailure::BlendDefinitionUnreadable`], [`SurfaceFailure::NetNotCertified`], [`SurfaceFailure::CurveDimensionTooLarge`], [`SurfaceFailure::NoBSplineForm`], [`SurfaceFailure::DoesNotContinueAsItself`], [`SurfaceFailure::OffsetNestedTooDeep`], [`SurfaceFailure::DerivativeOrderTooHigh`], [`SurfaceFailure::BaseNormalDegenerate`], [`SurfaceFailure::InvertedPointOffOffset`], [`SurfaceFailure::BaseNotOwned`], [`SurfaceFailure::ExtensionTowardFailed`], [`SurfaceFailure::RevolutionArcOutOfRange`], [`SurfaceFailure::ExtensionSpanNotPositive`], [`SurfaceFailure::ExtensionSpansPastBound`], [`SurfaceFailure::AsItselfNetUnexpected`], [`SurfaceFailure::RevolutionAxisDegenerate`], [`SurfaceFailure::GeneratorCircleUndefined`], [`SurfaceFailure::AsItselfWeightNotPositive`], [`SurfaceFailure::RotationSenseUndefined`], [`SurfaceFailure::NoNonsingularStepoff`] | `SM_ERR` |
+//! | [`SurfaceFailure::ScaleNotUniform`], [`SurfaceFailure::CurveNoNurb`], [`SurfaceFailure::BallDefinitionUnreadable`], [`SurfaceFailure::PointOnAxis`], [`SurfaceFailure::IsoCircleUndefined`], [`SurfaceFailure::ExtensionNotMadeInBracket`], [`SurfaceFailure::BlendCurveNotBSpline`], [`SurfaceFailure::BlendDefinitionUnreadable`], [`SurfaceFailure::NetNotCertified`], [`SurfaceFailure::CurveDimensionTooLarge`], [`SurfaceFailure::NoBSplineForm`], [`SurfaceFailure::DoesNotContinueAsItself`], [`SurfaceFailure::OffsetNestedTooDeep`], [`SurfaceFailure::DerivativeOrderTooHigh`], [`SurfaceFailure::BaseNormalDegenerate`], [`SurfaceFailure::InvertedPointOffOffset`], [`SurfaceFailure::BaseNotOwned`], [`SurfaceFailure::ExtensionTowardFailed`], [`SurfaceFailure::RevolutionArcOutOfRange`], [`SurfaceFailure::ExtensionSpanNotPositive`], [`SurfaceFailure::ExtensionSpansPastBound`], [`SurfaceFailure::AsItselfNetUnexpected`], [`SurfaceFailure::RevolutionAxisDegenerate`], [`SurfaceFailure::GeneratorCircleUndefined`], [`SurfaceFailure::AsItselfWeightNotPositive`], [`SurfaceFailure::RotationSenseUndefined`], [`SurfaceFailure::NoNonsingularStepoff`] | `SM_ERR` |
 //! | [`SurfaceFailure::RecordDoesNotRebuild`] | `SM_ERR_INVALID_INPUT` |
 //! | [`SurfaceFailure::NoNurb`], [`SurfaceFailure::NoInputStream`] | `SM_ERR_NULL_POINTER` (or the site's, through `with_status`) |
 //!
@@ -86,10 +86,11 @@ pub enum SurfaceFailure {
     /// far end, its halfway point and its point on the side) are collinear or not finite,
     /// so they give no plane. Class `failed`.
     IsoCircleUndefined,
-    /// An extension asked inside the solve's bracket has a weight that is not positive,
-    /// though the asks at both ends of the bracket had positive weights (a weight's sign is
-    /// not monotone in the ask). Class `failed`.
-    ExtensionWeightNotPositive,
+    /// An extension asked inside the solve's bracket could not be made (a weight that is not
+    /// positive, a half turn on the analytic path, or its points, its world net or its bound
+    /// not finite), though the bracket's upper end was made (whether an extension can be made
+    /// is not monotone in the ask). Class `failed`.
+    ExtensionNotMadeInBracket,
     /// A curve of a procedural blend's definition in the file is not a B-spline curve.
     /// [`ErrorKind::InvalidInput`].
     BlendCurveNotBSpline,
@@ -172,7 +173,7 @@ impl SurfaceFailure {
             | Self::BallDefinitionUnreadable
             | Self::PointOnAxis
             | Self::IsoCircleUndefined
-            | Self::ExtensionWeightNotPositive
+            | Self::ExtensionNotMadeInBracket
             | Self::BlendCurveNotBSpline
             | Self::BlendDefinitionUnreadable
             | Self::NetNotCertified
@@ -249,8 +250,8 @@ impl core::fmt::Display for SurfaceFailure {
             Self::IsoCircleUndefined => {
                 f.write_str("the source's iso across the side orients no circle")
             }
-            Self::ExtensionWeightNotPositive => f.write_str(
-                "an extension inside the solve's bracket has a weight that is not positive",
+            Self::ExtensionNotMadeInBracket => f.write_str(
+                "an extension asked inside the solve's bracket could not be made, though its upper end was made",
             ),
             Self::BlendCurveNotBSpline => f.write_str("a curve of the blend's definition is not a B-spline"),
             Self::BlendDefinitionUnreadable => f.write_str("the procedural blend's definition could not be read"),
@@ -503,7 +504,7 @@ mod tests {
             (SurfaceFailure::PointOnAxis, None, SM_ERR, K::Failed),
             (SurfaceFailure::IsoCircleUndefined, None, SM_ERR, K::Failed),
             (
-                SurfaceFailure::ExtensionWeightNotPositive,
+                SurfaceFailure::ExtensionNotMadeInBracket,
                 None,
                 SM_ERR,
                 K::Failed,
