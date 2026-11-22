@@ -759,7 +759,13 @@ fn c1_setup(ops: &mut dyn FilletSolverOps, cx: &mut Cx<'_>) -> Result<CalcState>
                 kind: c.type_string(),
             }));
         }
-        None => return Err(fail(SolverFailure::EdgeWithoutCurve { edge })),
+        None => {
+            return Err(SolidError::blend_at(
+                OP,
+                BlendFailure::EdgeWithoutCurve,
+                EntityRef::Edge(edge),
+            ))
+        }
     };
     let ivl = topo_edge::interval(cx.target, edge)?;
 
@@ -1188,10 +1194,7 @@ mod tests_c1 {
         };
         let e = c1_setup(&mut ops, &mut cx).unwrap_err();
         assert!(
-            matches!(
-                e.blend_failure(),
-                Some(BlendFailure::Solver(SolverFailure::EdgeWithoutCurve { .. }))
-            ),
+            matches!(e.blend_failure(), Some(BlendFailure::EdgeWithoutCurve)),
             "{e:?}"
         );
         assert_eq!(e.upstream_status(), Some(crate::error::SM_ERR_NULL_POINTER));
@@ -3979,7 +3982,7 @@ mod tests_c5 {
             matches!(
                 e.failure().map(|f| &f.reason),
                 Some(crate::error::Reason::Topology(
-                    crate::error::topology::TopologyFailure::Missing("the edge use's face use")
+                    crate::error::topology::TopologyFailure::EdgeUseNotOnFace
                 ))
             ),
             "{e:?}"

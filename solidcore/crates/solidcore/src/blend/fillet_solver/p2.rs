@@ -111,8 +111,8 @@ use crate::blend::fillet_solver::p1::{
 use crate::curve::curve::p1::GlobalPointSolveOptions;
 use crate::curve::curve::Curve;
 use crate::curve::line::Line;
-use crate::error::blend::{AnalyticShape, SolverFailure};
-use crate::error::{ignore_status, Result, SolidError};
+use crate::error::blend::{AnalyticShape, BlendFailure, SolverFailure};
+use crate::error::{ignore_status, EntityRef, Failure, Result, SolidError, SM_ERR_NULL_POINTER};
 use crate::geom::axis2_placement::Axis2Placement;
 use crate::geom::extent1d::{Extent1d, ExtentNd};
 use crate::geom::extent2d::Extent2d;
@@ -390,7 +390,7 @@ fn checked_edge_curve(k: &Kernel, s: &FilletSolver, b: &Brep, e: EdgeId) -> Resu
     // NER(pCurve)
     edge::curve(b, e)?
         .cloned()
-        .ok_or_else(|| fail(SolverFailure::EdgeWithoutCurve { edge: e }))
+        .ok_or_else(|| SolidError::blend_at(OP, BlendFailure::EdgeWithoutCurve, EntityRef::Edge(e)))
 }
 
 fn is_circular_fsg(s: &FilletSolver) -> Result<bool> {
@@ -1989,8 +1989,9 @@ impl FilletSolver {
 
         // the edge's ends, and where the ball touches each cylinder in their cross-sections
         let e = filleted_edge(ops.solver(), b)?;
-        let curve =
-            edge::curve(b, e)?.ok_or_else(|| fail(SolverFailure::EdgeWithoutCurve { edge: e }))?;
+        let curve = edge::curve(b, e)?.ok_or_else(|| {
+            SolidError::blend_at(OP, BlendFailure::EdgeWithoutCurve, EntityRef::Edge(e))
+        })?;
         let ivl = edge::interval(b, e)?;
         let ends = [
             curve_pv(k, curve, ivl.min())?.0,
@@ -2833,10 +2834,10 @@ impl FilletSolver {
             adj_surface
         } else {
             let adj = adj_surface.ok_or_else(|| {
-                SolidError::blend_solver(
-                    OP_C,
-                    SolverFailure::FaceWithoutSurface { face: side_face },
-                )
+                Failure::new(OP_C, BlendFailure::FaceHasNoSurface)
+                    .with_status(SM_ERR_NULL_POINTER)
+                    .at(EntityRef::Face(side_face))
+                    .into_error()
             })?;
             let new_surface = adj
                 .extended_sides(
@@ -2971,9 +2972,10 @@ impl FilletSolver {
 
                 // drop the corner point to the side curve
                 let side_curve = edge::curve(b, side_edge)?.ok_or_else(|| {
-                    SolidError::blend_solver(
+                    SolidError::blend_at(
                         OP_C,
-                        SolverFailure::EdgeWithoutCurve { edge: side_edge },
+                        BlendFailure::EdgeWithoutCurve,
+                        EntityRef::Edge(side_edge),
                     )
                 })?;
                 let sols = side_curve.global_point_solve(
@@ -3398,8 +3400,13 @@ pub fn find_rollover_side_edge<O: ClassObject>(
 
             // Check whether the side edge we hit is a tangent edge, and whether it's
             // convex.
-            let (tangent, opposite) =
-                test_manifold_tangent_rollover(k, b, side_edge, tangency_tol_rad)?;
+            let (tangent, opposite) = super::p1::test_manifold_tangent_rollover_at(
+                k,
+                b,
+                side_edge,
+                end_pc.t_param(),
+                tangency_tol_rad,
+            )?;
             io.is_tangential_side_edge = tangent;
             io.opposite_normals = opposite;
             let convex_side_edge =
@@ -3546,8 +3553,13 @@ pub fn find_rollover_side_edge<O: ClassObject>(
         let side_edge = edge_object(&ivl.start, edge_of)?;
 
         // Check whether the side edge we hit is tangent, or concave/convex.
-        let (tangent, opposite) =
-            test_manifold_tangent_rollover(k, b, side_edge, tangency_tol_rad)?;
+        let (tangent, opposite) = super::p1::test_manifold_tangent_rollover_at(
+            k,
+            b,
+            side_edge,
+            start_pc.t_param(),
+            tangency_tol_rad,
+        )?;
         io.is_tangential_side_edge = tangent;
         io.opposite_normals = opposite;
         let convex_side_edge =

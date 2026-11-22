@@ -37,8 +37,8 @@ use crate::blend::fillet_geom::p5::FilletEdgeContext;
 use crate::blend::fillet_solver::p1::{FilletSolverOffsetsData, OffsetSurfaceSlot};
 use crate::curve::curve::p1::GlobalPointSolveOptions;
 use crate::curve::curve::Curve;
-use crate::error::blend::{BlendFailure, SolverFailure as Solver};
-use crate::error::Failure;
+use crate::error::blend::{BlendFailure, CrossingInput, SolverFailure as Solver};
+use crate::error::{Failure, SM_ERR_NULL_POINTER};
 use crate::geom::global_solver::{SolutionRequested, SolverOperation};
 use crate::intersect::surface_intersector::p1::TsectPnt;
 use crate::math::{Point3, Vec3, EFF_ZERO_SQRT};
@@ -136,6 +136,10 @@ pub(super) trait RecoveryOps {
             Some(EntityRef::Edge(e)) => Some(e),
             _ => None,
         };
+        let tolerance = c
+            .solver
+            .rollover_tolerance(c.k, c.target)?
+            .min(tangency_tolerance);
         let r = crate::blend::fillet_solver::p2::find_rollover_side_edge(
             c.k,
             c.fillets,
@@ -145,7 +149,7 @@ pub(super) trait RecoveryOps {
             original_uv_curve,
             original_surface,
             convex,
-            tangency_tolerance,
+            tolerance,
             &edge_of,
             &mut io,
         );
@@ -201,12 +205,23 @@ pub(super) trait RecoveryOps {
             c.solver, c.k, c.target, c.fillets, vertex, geom, which, rail, side, guess,
         )
     }
-    fn tangent(&mut self, c: &mut Recovery<'_>, side: EdgeId) -> Result<bool> {
-        super::super::p1::test_manifold_tangent_rollover(
+    fn tangent(&mut self, c: &mut Recovery<'_>, side: EdgeId, point: Point3) -> Result<bool> {
+        let tolerance = c.solver.rollover_tolerance(c.k, c.target)?;
+        let curve = edge::curve(c.target, side)?.ok_or_else(|| {
+            SolidError::blend_crossing_input_missing(OP, CrossingInput::SideEdgeCurve)
+        })?;
+        let (parameter, _) = super::super::p3::drop_param(
             c.k,
-            c.target,
-            side,
-            c.solver.solver().tangency_tolerance,
+            curve,
+            &edge::interval(c.target, side)?,
+            point,
+            false,
+        )?
+        .ok_or_else(|| {
+            SolidError::blend_crossing_input_missing(OP, CrossingInput::CrossingOnSideEdge)
+        })?;
+        super::super::p1::test_manifold_tangent_rollover_at(
+            c.k, c.target, side, parameter, tolerance,
         )
         .map(|r| r.0)
     }
@@ -948,7 +963,10 @@ impl Recovery<'_> {
                             *get_mut(&mut self.solver.solver_mut().orientations, which)? *= -1.0;
                         }
                         let base = self.target.face(face)?.surface.as_ref().ok_or_else(|| {
-                            SolidError::blend_solver(OP, Solver::FaceWithoutSurface { face })
+                            Failure::new(OP, BlendFailure::FaceHasNoSurface)
+                                .with_status(SM_ERR_NULL_POINTER)
+                                .at(EntityRef::Face(face))
+                                .into_error()
                         })?;
                         let mut offset = OffsetSurface::new(
                             self.k,
@@ -1127,7 +1145,7 @@ impl Recovery<'_> {
                         ));
                     };
                     let guess = self.fillets.vertex_point(vertex)?;
-                    if ops.tangent(self, side)? {
+                    if ops.tangent(self, side, guess)? {
                         ops.rail_x_edge(
                             self,
                             vertex,
