@@ -2726,6 +2726,8 @@ mod tests {
         let mut h = crate::scenario::Harness::new();
         h.app.home.open = false;
         h.app.session = solidcraft_engine::Session::new(doc);
+        // Grouping is opt-in (Preferences › Design).
+        h.app.preferences.params_group_by_component = true;
         h.app.start("parameters.change");
         h.frames(5);
         let y_of = |h: &crate::scenario::Harness, group: &str| {
@@ -2739,7 +2741,7 @@ mod tests {
         let (top, frame, lid) = (y_of(&h, "PlaneTop"), y_of(&h, "PlaneA"), y_of(&h, "PlaneB"));
         assert!(top < frame && top < lid, "the top-level feature stays first: {top} {frame} {lid}");
         assert!(frame < lid, "each component's rows follow the component order");
-        // Off in Preferences, the list is flat in listing order, as before.
+        // Off (the default), the list is flat in listing order, as before.
         h.app.preferences.params_group_by_component = false;
         h.frames(3);
         let (top, frame, lid) = (y_of(&h, "PlaneTop"), y_of(&h, "PlaneA"), y_of(&h, "PlaneB"));
