@@ -1373,7 +1373,7 @@ mod tests {
 
     #[test]
     fn rng_is_deterministic_and_in_range() {
-        let k1 = Kernel::default();
+        let mut k1 = Kernel::default();
         let k2 = Kernel::new(&KernelOptions::default());
         let (mut r1, mut r2) = (k1.seeded_rng(), k2.seeded_rng());
         for _ in 0..1000 {
