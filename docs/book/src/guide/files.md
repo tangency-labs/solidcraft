@@ -190,6 +190,11 @@ is the tessellation's own double-precision value. Meshing and analysis tools can
 keep a model's faces (for loads, boundary conditions or feature edges); other 3MF readers ignore
 them. The format is specified in [`docs/formats/3mf-face-tags.md`](https://github.com/tangency-labs/solidcraft/blob/main/docs/formats/3mf-face-tags.md).
 
+`file.export` with `format: "stla"` (or `file.export_stl` with `ascii: true`) and `solids: "face"` writes an ASCII STL with
+one named `solid` block per B-rep face, named by the face's persistent name, so CFD meshers such as snappyHexMesh and
+cfMesh make a boundary patch of each. It is command-only for now. The naming rule is in
+[`docs/formats/stl-face-solids.md`](https://github.com/tangency-labs/solidcraft/blob/main/docs/formats/stl-face-solids.md).
+
 **File → Export URDF…** (`file.export` with a `.urdf` path) writes the assembly for robot
 simulators and ROS: a link per component placement with its mesh, mass and inertia, and the
 assembly's joints, so the parts move in the simulator as they do in SolidCraft. The meshes are

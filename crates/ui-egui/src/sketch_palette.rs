@@ -262,7 +262,7 @@ pub fn image_tool(app: &SolveApp) -> bool {
 fn image_tool_presentation(app: &SolveApp) -> Option<crate::panel_runtime::PanelPresentation> {
     let spec = solidcraft_engine::find_command(app.tool.as_ref()?.cmd)?;
     Some(crate::panel_runtime::PanelPresentation {
-        title: app.tr_label(spec.label).to_owned(),
+        title: app.tr_command(spec.id, spec.label).to_owned(),
         icon: spec.icon.into(),
         status: None,
         attention: false,
@@ -471,7 +471,7 @@ pub(crate) fn shared_body(app: &mut SolveApp, ui: &mut egui::Ui) {
                     .map(|spec| crate::ui_kit::ToolChoice {
                         key: spec.id,
                         icon: spec.icon,
-                        label: app.tr_label(spec.label),
+                        label: app.tr_command(spec.id, spec.label),
                         enabled: spec.info(&app.session).enabled,
                     })
                     .collect();

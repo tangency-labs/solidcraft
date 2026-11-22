@@ -14,10 +14,18 @@
 //! | [`SurfaceFailure::OutsideDomain`]  | `SM_ERR_OUTSIDE_OF_DOMAIN`     |
 //! | [`SurfaceFailure::OffSurface`]     | `SM_ERR_NOT_WITHIN_TOLERANCE`  |
 //! | [`SurfaceFailure::Defect`]         | `SM_ERR` (or the site's, through `with_status`) |
+//! | the named causes of the volume surfaces and the implicit checks | `SM_ERR`, except [`SurfaceFailure::NoNurb`]: `SM_ERR_NULL_POINTER` (a site that reported `SM_ERR` keeps it through `with_status`) |
 //!
 //! [`SurfaceFailure::Defect`] is a failure reviewed at its site as the kernel's fault, with its
 //! reason: a defect ([`ErrorKind::StageFailed`], class 127). The phrase causes are sites
 //! not yet converted (the conversion guide: `docs/failure-codes-and-reproduction.md` §6).
+//!
+//! **Classes of the named causes.** A check of the caller's argument or object that is
+//! malformed is [`ErrorKind::InvalidInput`]; a box or point outside the domain it must lie
+//! in is [`ErrorKind::OutsideDomain`]; a kind or an ask the routine has no code for is
+//! [`ErrorKind::Unsupported`]; geometry degenerate where the routine needs it not to be is
+//! [`ErrorKind::Degenerate`]; a routine whose callee failed keeps that error as its cause
+//! ([`SurfaceFailure::CallFailed`]).
 //!
 //! Deviations: not upstream. A failure says in a phrase what went wrong; the failure's
 //! `operation` path says which routine. A failure names an entity only where the site it
@@ -31,7 +39,7 @@ use super::{
 };
 
 /// Why a surface routine fails.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 #[non_exhaustive]
 pub enum SurfaceFailure {
     /// The routine could not continue, as the phrase says (for example "the generator
@@ -59,28 +67,147 @@ pub enum SurfaceFailure {
         /// The step that failed, and why that is the kernel's fault.
         why: &'static str,
     },
+    /// A knot vector of the caller's volume has fewer than two distinct knots.
+    /// [`ErrorKind::InvalidInput`].
+    TooFewKnots {
+        /// The distinct knots.
+        knots: usize,
+    },
+    /// The parameter box given to a bend volume's trim has a NaN bound, a degenerate
+    /// infinite v range or a negative volume, or the bend's own numbers are NaN.
+    /// [`ErrorKind::InvalidInput`].
+    BendBoxMalformed,
+    /// The surface in volume does not own its base surface, so it cannot edit it.
+    /// [`ErrorKind::InvalidInput`].
+    BaseSurfaceNotOwned,
+    /// A derivative of an order above `max` was asked of a form that evaluates up to `max`.
+    /// [`ErrorKind::InvalidInput`].
+    DerivativeOrderTooHigh {
+        /// The highest order the form evaluates.
+        max: usize,
+    },
+    /// The volume type read from a file is none the reader knows.
+    /// [`ErrorKind::InvalidInput`].
+    UnknownVolumeType {
+        /// The type read.
+        volume_type: i64,
+    },
+    /// The surface given has no NURB form, which the routine reads.
+    /// [`ErrorKind::InvalidInput`].
+    NoNurb,
+    /// The caller's B-spline curve has no NURB data. [`ErrorKind::InvalidInput`].
+    CurveWithoutNurb,
+    /// The caller's B-spline curve has no control points. [`ErrorKind::InvalidInput`].
+    CurveWithoutControlPoints,
+    /// The parameter box reaches no further out than the bend's singularity: its largest
+    /// u, `u_max`, is below the bend's legal minimum `limit`.
+    /// [`ErrorKind::OutsideDomain`].
+    BoxOutsideBendHalfSpace {
+        /// The box's largest u.
+        u_max: f64,
+        /// The bend's singularity tolerance.
+        limit: f64,
+    },
+    /// A bend of zero period takes only v = 0, and the box's v range misses it by more
+    /// than the kernel's zero. [`ErrorKind::OutsideDomain`].
+    BoxOutsideZeroPeriod {
+        /// The box's smallest v.
+        v_min: f64,
+        /// The box's largest v.
+        v_max: f64,
+    },
+    /// The point is outside the volume's parameter domain.
+    /// [`ErrorKind::OutsideDomain`].
+    PointOutsideVolumeDomain {
+        /// The point.
+        point: [f64; 3],
+    },
+    /// The point is outside the parameter domain the caller gave.
+    /// [`ErrorKind::OutsideDomain`].
+    PointOutsideGivenDomain {
+        /// The point.
+        point: [f64; 3],
+    },
+    /// The parameter box is outside the volume's natural parameter domain.
+    /// [`ErrorKind::OutsideDomain`].
+    BoxOutsideParamDomain,
+    /// The in-space pseudo box maps outside the volume's natural parameter domain.
+    /// [`ErrorKind::OutsideDomain`].
+    PseudoBoxOutsideDomain,
+    /// The surface in volume evaluates its u and v derivatives up to orders `u` and `v`
+    /// only together as upstream supports them (equal orders with the upper half only or
+    /// at most 1, or one of them 0). [`ErrorKind::Unsupported`].
+    DerivativeCombinationUnsupported {
+        /// The highest u derivative asked.
+        u: usize,
+        /// The highest v derivative asked.
+        v: usize,
+    },
+    /// A plain volume (upstream's base `SmVolume`) has no code for this: only the derived
+    /// volumes copy, evaluate and invert. [`ErrorKind::Unsupported`].
+    PlainVolume,
+    /// B-spline volumes are not supported: upstream's build has no volume NURBS library
+    /// (`USE_VOLUMES`), so they do not evaluate, transform, read or write.
+    /// [`ErrorKind::Unsupported`].
+    BSplineVolumeUnsupported,
+    /// The point lies within the bend's singularity (its distance from the bend axis is
+    /// below the bend's legal minimum), where the bend has no inverse.
+    /// [`ErrorKind::Degenerate`].
+    PointInBendSingularity,
+    /// A tangent of the volume has zero length at the point: its squared length is below
+    /// the kernel's zero squared. [`ErrorKind::Degenerate`].
+    ZeroVolumeTangent {
+        /// The shortest tangent's squared length.
+        length_squared: f64,
+    },
+    /// The volume's inversion of the point found no parameter point.
+    /// [`ErrorKind::Failed`].
+    NoVolumeInverse,
+    /// A routine this one calls failed; the failure keeps that routine's error as its
+    /// cause. [`ErrorKind::Failed`].
+    CallFailed,
 }
 
 impl SurfaceFailure {
     /// The status the C++ reports for the failure (a comparison detail).
     pub(crate) const fn comparison_status(&self) -> i32 {
         match self {
-            Self::Failed(_) | Self::Defect { .. } => SM_ERR,
-            Self::Missing(_) => SM_ERR_NULL_POINTER,
+            Self::Missing(_) | Self::NoNurb => SM_ERR_NULL_POINTER,
             Self::InvalidValue(_) => SM_ERR_INVALID_INPUT,
             Self::OutsideDomain(_) => SM_ERR_OUTSIDE_OF_DOMAIN,
             Self::OffSurface(_) => SM_ERR_NOT_WITHIN_TOLERANCE,
+            _ => SM_ERR,
         }
     }
 
     /// The failure's stable [`ErrorKind`]: the kind of the status it replaced
     /// ([`ErrorKind::Failed`], [`ErrorKind::Missing`], [`ErrorKind::InvalidInput`],
     /// [`ErrorKind::OutsideDomain`], [`ErrorKind::NotWithinTolerance`]).
-    /// [`SurfaceFailure::Defect`] is [`ErrorKind::StageFailed`], a defect.
+    /// [`SurfaceFailure::Defect`] is [`ErrorKind::StageFailed`], a defect. Each named
+    /// cause has the class its doc names.
     #[must_use]
     pub const fn kind(&self) -> ErrorKind {
         match self {
             Self::Defect { .. } => ErrorKind::StageFailed,
+            Self::TooFewKnots { .. }
+            | Self::BendBoxMalformed
+            | Self::BaseSurfaceNotOwned
+            | Self::DerivativeOrderTooHigh { .. }
+            | Self::UnknownVolumeType { .. }
+            | Self::NoNurb
+            | Self::CurveWithoutNurb
+            | Self::CurveWithoutControlPoints => ErrorKind::InvalidInput,
+            Self::BoxOutsideBendHalfSpace { .. }
+            | Self::BoxOutsideZeroPeriod { .. }
+            | Self::PointOutsideVolumeDomain { .. }
+            | Self::PointOutsideGivenDomain { .. }
+            | Self::BoxOutsideParamDomain
+            | Self::PseudoBoxOutsideDomain => ErrorKind::OutsideDomain,
+            Self::DerivativeCombinationUnsupported { .. }
+            | Self::PlainVolume
+            | Self::BSplineVolumeUnsupported => ErrorKind::Unsupported,
+            Self::PointInBendSingularity | Self::ZeroVolumeTangent { .. } => ErrorKind::Degenerate,
+            Self::NoVolumeInverse | Self::CallFailed => ErrorKind::Failed,
             _ => ErrorKind::of_status(self.comparison_status()),
         }
     }
@@ -95,6 +222,66 @@ impl core::fmt::Display for SurfaceFailure {
             | Self::OffSurface(what) => f.write_str(what),
             Self::Missing(what) => write!(f, "{what} is missing"),
             Self::Defect { why } => write!(f, "{}: {why}", ErrorKind::StageFailed),
+            Self::TooFewKnots { knots } => write!(
+                f,
+                "the knot vector has {knots} distinct knots, fewer than two"
+            ),
+            Self::BendBoxMalformed => f.write_str(
+                "the box has a NaN bound, a degenerate infinite v range or a negative volume, or the bend's numbers are NaN",
+            ),
+            Self::BaseSurfaceNotOwned => {
+                f.write_str("the surface in volume does not own its base surface")
+            }
+            Self::DerivativeOrderTooHigh { max } => {
+                write!(f, "a derivative order above {max} was asked")
+            }
+            Self::UnknownVolumeType { volume_type } => {
+                write!(f, "the volume type {volume_type} is unknown")
+            }
+            Self::NoNurb => f.write_str("the surface has no NURB form"),
+            Self::CurveWithoutNurb => f.write_str("the B-spline curve has no NURB"),
+            Self::CurveWithoutControlPoints => f.write_str("the curve has no control points"),
+            Self::BoxOutsideBendHalfSpace { u_max, limit } => write!(
+                f,
+                "the box's largest u, {u_max:e}, is below the bend's singularity tolerance {limit:e}"
+            ),
+            Self::BoxOutsideZeroPeriod { v_min, v_max } => write!(
+                f,
+                "the box's v range [{v_min:e}, {v_max:e}] misses the bend's zero period"
+            ),
+            Self::PointOutsideVolumeDomain { point: [x, y, z] } => write!(
+                f,
+                "the point ({x}, {y}, {z}) is outside the volume's parameter domain"
+            ),
+            Self::PointOutsideGivenDomain { point: [x, y, z] } => write!(
+                f,
+                "the point ({x}, {y}, {z}) is outside the given parameter domain"
+            ),
+            Self::BoxOutsideParamDomain => {
+                f.write_str("the parameter box is outside the parameter domain")
+            }
+            Self::PseudoBoxOutsideDomain => {
+                f.write_str("the pseudo box maps outside the in-space domain")
+            }
+            Self::DerivativeCombinationUnsupported { u, v } => write!(
+                f,
+                "derivatives up to order {u} in u and {v} in v are not supported together"
+            ),
+            Self::PlainVolume => f.write_str(
+                "a plain volume has no code for this; only the derived volumes do",
+            ),
+            Self::BSplineVolumeUnsupported => f.write_str(
+                "B-spline volumes are not supported (upstream's build has no volume NURBS library)",
+            ),
+            Self::PointInBendSingularity => {
+                f.write_str("the point lies within the bend's singularity")
+            }
+            Self::ZeroVolumeTangent { length_squared } => write!(
+                f,
+                "a volume tangent has zero length (its squared length is {length_squared:e})"
+            ),
+            Self::NoVolumeInverse => f.write_str("the volume's inversion found no point"),
+            Self::CallFailed => f.write_str("a routine it calls failed"),
         }
     }
 }
@@ -344,10 +531,7 @@ mod tests {
         };
         #[rustfmt::skip] // one file per line, so conversions in parallel merge cleanly
         const PINNED: &[(&str, usize)] = &[
-            ("solidcore/src/surface/b_spline_volume.rs", 4),
-            ("solidcore/src/surface/b_spline_volume_n_lib.rs", 1),
             ("solidcore/src/surface/ball_patch.rs", 8),
-            ("solidcore/src/surface/bend_volume.rs", 2),
             ("solidcore/src/surface/cone/p1.rs", 12),
             ("solidcore/src/surface/cone/p2.rs", 14),
             ("solidcore/src/surface/cone/p3.rs", 3),
@@ -356,8 +540,6 @@ mod tests {
             ("solidcore/src/surface/extend/ball.rs", 16),
             ("solidcore/src/surface/extend/blend.rs", 6),
             ("solidcore/src/surface/extend/sides.rs", 2),
-            ("solidcore/src/surface/from_parameters.rs", 1),
-            ("solidcore/src/surface/implicit.rs", 9),
             ("solidcore/src/surface/offset_surface.rs", 27),
             ("solidcore/src/surface/plane/p1.rs", 3),
             ("solidcore/src/surface/plane/p2.rs", 9),
@@ -366,7 +548,6 @@ mod tests {
             ("solidcore/src/surface/procedural_blend/offset.rs", 5),
             ("solidcore/src/surface/side.rs", 7),
             ("solidcore/src/surface/sphere.rs", 16),
-            ("solidcore/src/surface/srf_in_volume.rs", 4),
             ("solidcore/src/surface/surf_of_extrusion/p1.rs", 16),
             ("solidcore/src/surface/surf_of_extrusion/p2.rs", 13),
             ("solidcore/src/surface/surf_of_revolution/p1.rs", 10),
@@ -375,7 +556,7 @@ mod tests {
             ("solidcore/src/surface/surface/approximate.rs", 10),
             ("solidcore/src/surface/surface/p1.rs", 8),
             ("solidcore/src/surface/surface/p10.rs", 7),
-            ("solidcore/src/surface/surface/p11.rs", 21),
+            ("solidcore/src/surface/surface/p11.rs", 20),
             ("solidcore/src/surface/surface/p2.rs", 21),
             ("solidcore/src/surface/surface/p3.rs", 3),
             ("solidcore/src/surface/surface/p4.rs", 19),
@@ -392,9 +573,6 @@ mod tests {
             ("solidcore/src/surface/surface_point_solve/p2.rs", 8),
             ("solidcore/src/surface/torus.rs", 15),
             ("solidcore/src/surface/trim_srf_cache.rs", 4),
-            ("solidcore/src/surface/unbend_volume.rs", 2),
-            ("solidcore/src/surface/volume/p1.rs", 8),
-            ("solidcore/src/surface/volume/p2.rs", 6),
         ];
         assert_pinned("surface phrase-cause sites", &crate_sites(&PHRASES), PINNED);
     }

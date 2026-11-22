@@ -751,6 +751,8 @@ pub(crate) fn scheme_owner_identity(
 /// - [`Brep::clone_standing_for_self`]: a private copy that stands for this B-rep,
 ///   with the same ids, key and naming, and geometry that keeps its owners. Use it
 ///   for a scratch copy a query addresses by this B-rep's ids.
+/// - [`Brep::clone_standing_for_self_keeping_definitions`]: the same, for a working copy
+///   an operation builds geometry from, which keeps each face surface's definition.
 /// - [`Brep::with_rollback`] (inside the crate, `snapshot`/`restore`): an operation's
 ///   rollback, putting this B-rep back exactly as it was.
 #[derive(Debug)]
@@ -1218,11 +1220,37 @@ impl Brep {
     /// resets every owner, and a B-rep cache made from such a copy holds no curve or
     /// surface).
     ///
+    /// The face surfaces' definitions are dropped, as an evaluation copy
+    /// ([`Surface::clone_for_evaluation`]) has none; a copy an operation builds geometry
+    /// from asks for [`Brep::clone_standing_for_self_keeping_definitions`] instead.
+    ///
     /// # Errors
     ///
     /// Those of the geometry copies (a geometry nesting deeper than
     /// `MAX_GEOMETRY_NESTING`).
     pub fn clone_standing_for_self(&self) -> Result<Self> {
+        self.standing_copy(false)
+    }
+
+    /// [`Brep::clone_standing_for_self`] with every face surface's definition kept
+    /// ([`Surface::procedural_blend`]): a working copy an operation offsets or shells, so that
+    /// a round is offset by its definition, the round of the moved radius on the offset
+    /// supports, not by its net, and the result keeps the definition.
+    ///
+    /// (not upstream: a round of an exact class keeps its definition beside its net, #2485,
+    /// which an evaluation copy drops; upstream's copy keeps the round's class.)
+    ///
+    /// # Errors
+    ///
+    /// Those of the geometry copies (a geometry nesting deeper than
+    /// `MAX_GEOMETRY_NESTING`).
+    pub fn clone_standing_for_self_keeping_definitions(&self) -> Result<Self> {
+        self.standing_copy(true)
+    }
+
+    /// [`Brep::clone_standing_for_self`], keeping the face surfaces' definitions when
+    /// `keep_definitions` says so.
+    fn standing_copy(&self, keep_definitions: bool) -> Result<Self> {
         let mut copy = self.copy(false);
         for (id, edge) in self.edges.iter() {
             if let Some(curve) = edge.curve.as_ref() {
@@ -1231,7 +1259,12 @@ impl Brep {
         }
         for (id, face) in self.faces.iter() {
             if let Some(surface) = face.surface.as_ref() {
-                copy.face_mut(id)?.surface = Some(surface.clone_for_evaluation()?);
+                let made = if keep_definitions {
+                    surface.clone_for_evaluation_keeping_definition()?
+                } else {
+                    surface.clone_for_evaluation()?
+                };
+                copy.face_mut(id)?.surface = Some(made);
             }
         }
         for (id, edgeuse) in self.edgeuses.iter() {
@@ -1245,8 +1278,8 @@ impl Brep {
     /// A [`Brep::clone_standing_for_self`] to be edited as a trial of an operation on this
     /// B-rep (not upstream): the same ids and geometry owners, but each face surface's
     /// top-level cache slot is its own ([`Surface::detach_for_edit`]), holding a copy of
-    /// what this B-rep's holds ([`Surface::copy_cache_slot_of`]: its tree state and its
-    /// trimmed surface cache), so that the trial starts from this B-rep's cache state and
+    /// what this B-rep's holds ([`Surface::copy_cache_slot_of`]: its trimmed surface
+    /// cache), so that the trial starts from this B-rep's cache state and
     /// no cache built on the edited copy reaches this B-rep's face surfaces. Nested
     /// surfaces (an offset's or a STEP surface's base) and the surfaces of edge curves
     /// still share their slots.
