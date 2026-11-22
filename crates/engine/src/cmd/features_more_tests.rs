@@ -1943,7 +1943,7 @@ fn assert_join_refused(s: &mut Session, cmd: &str, params: Value) {
     let result = s.execute(cmd, &params);
     assert!(result.is_err(), "{cmd}: the join was made, Stock {:.1} mm3", body_volume(s, "Stock"));
     let err = result.unwrap_err().to_string();
-    assert!(err.contains("no visible body to join"), "{cmd}: {err}");
+    assert!(err.contains("no visible body to join") && err.contains("`Stock`"), "{cmd}: {err}");
     assert_eq!(s.doc.to_json(), before, "{cmd}");
     assert!((body_volume(s, "Stock") - 1000.0).abs() < 1e-6, "{cmd}");
     assert!((body_volume(s, "Block") - 1000.0).abs() < 1e-6, "{cmd}");
@@ -1965,6 +1965,22 @@ fn extrude_join_refuses_a_sketch_face_body_whose_placement_is_hidden() {
 fn extrude_join_refuses_a_hidden_sketch_face_body() {
     let mut s = sketch_on_a_hidden_face("body", rectangle_over_both_cubes);
     assert_join_refused(&mut s, "solid.extrude", json!({"distance": 3, "operation": "join"}));
+}
+
+/// Auto never joins onto the hidden body under the sketch, up from its face or down into it: it
+/// makes a new body and leaves both cubes as they were.
+#[test]
+fn extrude_auto_from_a_hidden_bodys_face_makes_a_new_body() {
+    for distance in [3, -3] {
+        let mut s = sketch_on_a_hidden_face("body", |s, at| {
+            run(s, "sketch.rectangle.two_point", json!({"p0": at(2.0, 2.0), "p1": at(8.0, 8.0)}));
+        });
+        let bodies = s.model.state().bodies.len();
+        run(&mut s, "solid.extrude", json!({"distance": distance, "operation": "auto"}));
+        assert!((body_volume(&s, "Stock") - 1000.0).abs() < 1e-6, "{distance}: Stock {:.1}", body_volume(&s, "Stock"));
+        assert!((body_volume(&s, "Block") - 1000.0).abs() < 1e-6, "{distance}: Block {:.1}", body_volume(&s, "Block"));
+        assert_eq!(s.model.state().bodies.len(), bodies + 1, "{distance}");
+    }
 }
 
 #[test]

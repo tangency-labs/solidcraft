@@ -1147,7 +1147,10 @@ fn extrude_from(s: &mut Session, p: &Value, grouped: Option<FaceProfile>) -> Res
     };
     let operation = match str_(p, "operation") {
         Some(o) if o.eq_ignore_ascii_case("auto") => {
-            Operation::parse(auto_operation_in(s, p, &s.model.state()).unwrap_or("new")).unwrap_or(Operation::NewBody)
+            let auto = Operation::parse(auto_operation_in(s, p, &s.model.state()).unwrap_or("new")).unwrap_or(Operation::NewBody);
+            // A Join that names no body would be refused for a hidden face body: Auto makes a new body.
+            let hidden = face_body.is_none() && face_body_reached(s, sketch).ok().flatten().is_some_and(|b| !s.body_visible(&b));
+            if auto == Operation::Join && hidden && string_list(cmd, p, "targets")?.is_empty() { Operation::NewBody } else { auto }
         }
         _ => operation(p, cmd)?,
     };
@@ -1346,7 +1349,10 @@ fn sketch_face_body(s: &Session, sketch: u64) -> Option<String> {
 /// hidden: a hidden body is left alone (#1988, #14476).
 fn shown_face_body(s: &Session, sketch: u64, cmd: &str) -> Result<Option<String>> {
     match face_body_reached(s, sketch)? {
-        Some(body) if !s.body_visible(&body) => Err(bad(cmd, NO_VISIBLE_JOIN)),
+        Some(body) if !s.body_visible(&body) => Err(bad(
+            cmd,
+            format!("no visible body to join: `{body}`, the body this sketch is on, is hidden; show it, choose explicit targets, or use New Body"),
+        )),
         reached => Ok(reached),
     }
 }
