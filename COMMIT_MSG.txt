@@ -1,7 +1,0 @@
-Parameters: model parameters group under their component
-
-The Model Parameters list now puts each sketch's and feature's rows under a
-folder named after the component they belong to. Nested components nest, top-level
-features stay first and ungrouped, and a design without components looks as
-before. Each folder remembers whether it is open, like the other sections.
-Fixes #20648.
