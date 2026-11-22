@@ -1573,7 +1573,12 @@ fn revolve(s: &mut Session, p: &Value) -> Result<Value> {
     let mut targets = face_join_targets(s, p, operation, &[sketch], cmd)?;
     let unnamed = targets.is_empty() && string_list(cmd, p, "participants")?.is_empty();
     if let Some(body) = face_body.as_deref().filter(|_| unnamed && operation != Operation::NewBody) {
-        body_reachable(s, body, &[])?;
+        // A cut changes the picked body only inside the active component (`cut_scope`).
+        let st = s.model.state();
+        let inside = st.body(body).is_some_and(|b| s.doc.component_within(s.doc.model_body_component(b), s.active_component));
+        if operation == Operation::Join || inside {
+            body_reachable(s, body, &[])?;
+        }
     }
     // A fixed plane keeps no attachment to the face, so its body is the one picked.
     if unnamed && operation == Operation::Join {
