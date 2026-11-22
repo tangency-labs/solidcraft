@@ -485,6 +485,90 @@ fn point3d_tool_places_points_and_stays() {
     assert!(h.app.tool.as_ref().is_some_and(|t| t.cmd == "sketch.point3d"), "the tool stays for the next point");
 }
 
+/// 3D Sketch (#19426): the ribbon button asks for no plane. A 3D sketch opens with 3D Line running
+/// in it, as one undo step, and the view stays where it was.
+#[test]
+fn create3d_button_opens_a_3d_sketch_with_3d_line_and_no_plane_to_pick() {
+    let mut h = crate::scenario::Harness::new();
+    h.app.run("solid.box", json!({"corner":[10,0,5],"length":10,"width":10,"height":5,"body_name":"Create3d"})).unwrap();
+    h.app.session.visibility.origin_hidden = Some(true);
+    h.call("ui.view", json!({"view":"home"}));
+    h.call("ui.view", json!({"view":"fit"}));
+    h.frames(3);
+    let before = h.app.settled_cam();
+    let undo = h.app.session.undo.len();
+    h.step(&json!({"click": {"handle": "button:sketch.create3d"}})).unwrap();
+    h.frames(3);
+    assert!(h.app.dialog.is_none(), "3D Sketch asks for no plane");
+    let sketch = h.app.session.active_sketch.expect("3D Sketch opens a sketch");
+    assert!(crate::sketch3d::active(&h.app), "with 3D Sketch already on");
+    assert!(h.app.tool.as_ref().is_some_and(|t| t.cmd == "sketch.line3d"), "and 3D Line running: {:?}", h.app.status);
+    assert_eq!(h.app.session.undo.len(), undo + 1, "as one undo step");
+    assert_eq!(h.app.settled_cam(), before, "the view does not turn: there is no plane to face");
+    let hint = h.app.tr("sketch.hint.create3d").to_owned();
+    assert_eq!(h.app.status.as_ref().map(|status| status.0.as_str()), Some(hint.as_str()), "the hint says how to leave the plane");
+    // The box's top-face vertices are off the plane the sketch rests on: the line keeps them.
+    for p in OFF_PLANE {
+        h.step(&json!({"click": {"world": p}})).unwrap();
+    }
+    h.step(&json!({"key": "Escape"})).unwrap();
+    let wires = crate::open_meshing::session_world(&h.app.session).sketch(sketch).unwrap().sketch.wires.clone();
+    assert_eq!(wires.len(), 2, "three clicks draw two joined 3D segments");
+    let expected = [[Vec3::new(10.0, 0.0, 10.0), Vec3::new(20.0, 10.0, 10.0)], [Vec3::new(20.0, 10.0, 10.0), Vec3::new(10.0, 10.0, 10.0)]];
+    for (w, pair) in wires.iter().zip(expected) {
+        assert!(w.fit[0].dist(pair[0]) < 1e-6 && w.fit[1].dist(pair[1]) < 1e-6, "{:?}", w.fit);
+    }
+    // Escape ends the tool as in any sketch, and Finish Sketch keeps what was drawn.
+    h.step(&json!({"key": "Escape"})).unwrap();
+    assert!(h.app.tool.is_none(), "Escape ends 3D Line");
+    h.app.start("sketch.finish");
+    h.frames(3);
+    assert!(h.app.session.active_sketch.is_none());
+    assert_eq!(h.app.session.doc.sketch(sketch).unwrap().wires.len(), 2);
+}
+
+/// 3D Sketch started and finished with nothing drawn leaves no empty sketch behind, as Create
+/// Sketch does; and Undo takes back a 3D sketch that was started by mistake.
+#[test]
+fn create3d_left_empty_goes_when_it_finishes_and_undo_takes_it_back() {
+    let mut h = crate::scenario::Harness::new();
+    h.frames(2);
+    h.app.start("sketch.create3d");
+    h.frames(2);
+    let sketch = h.app.session.active_sketch.expect("3D Sketch opens a sketch");
+    h.step(&json!({"key": "Escape"})).unwrap();
+    h.app.start("sketch.finish");
+    h.frames(3);
+    assert!(h.app.session.active_sketch.is_none());
+    assert!(h.app.session.doc.feature(sketch).is_none(), "an empty 3D sketch is not kept");
+
+    let empty = h.app.session.doc.to_json();
+    h.app.start("sketch.create3d");
+    h.frames(2);
+    assert!(h.app.session.active_sketch.is_some());
+    h.step(&json!({"key": "Escape"})).unwrap();
+    h.app.run("edit.undo", json!({})).unwrap();
+    h.frames(2);
+    assert!(h.app.session.active_sketch.is_none(), "Undo leaves the sketch");
+    assert_eq!(h.app.session.doc.to_json(), empty);
+}
+
+/// With a sketch already open, 3D Sketch finishes it first, as New Sketch does.
+#[test]
+fn create3d_from_inside_a_sketch_finishes_that_sketch_first() {
+    let mut h = crate::scenario::Harness::new();
+    let first = h.app.run("sketch.create", json!({"plane":"XY","name":"Flat"})).unwrap()["sketch"].as_u64().unwrap();
+    h.app.run("sketch.rectangle.two_point", json!({"p0": [0, 0], "p1": [40, 30]})).unwrap();
+    h.frames(2);
+    h.app.start("sketch.create3d");
+    h.frames(3);
+    let second = h.app.session.active_sketch.expect("the 3D sketch is open");
+    assert_ne!(second, first);
+    assert!(crate::sketch3d::active(&h.app));
+    assert!(h.app.tool.as_ref().is_some_and(|t| t.cmd == "sketch.line3d"), "{:?}", h.app.status);
+    assert_eq!(h.app.session.doc.sketch(first).unwrap().curves.len(), 4, "the rectangle is kept");
+}
+
 /// Snap points in 3D sketches (#11229): hovering a box's top edge wakes its middle, and the 3D
 /// Point tool takes the middle itself from just beside it on the edge (a woken point beats the
 /// edge it lies on within `snap_wake::ON`).

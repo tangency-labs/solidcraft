@@ -6814,10 +6814,14 @@ mod fill_width_tests {
         let mut h = crate::scenario::Harness::new();
         h.app.home.open = false;
         h.call("ui.resize", json!({"width":1600,"height":900}));
-        crate::toolbar_custom::remove(&mut h.app, "MODEL", "sketch.create");
-        assert!(crate::toolbar_custom::pinned_on(&h.app, "MODEL", "sketch.create").is_none());
+        // The Sketch panel's two buttons: New Sketch and 3D Sketch (#19426).
+        for id in ["sketch.create", "sketch.create3d"] {
+            crate::toolbar_custom::remove(&mut h.app, "MODEL", id);
+            assert!(crate::toolbar_custom::pinned_on(&h.app, "MODEL", id).is_none());
+        }
         h.frames(3);
         assert!(crate::scenario::handle_at("button:sketch.create").is_none(), "New Sketch is no longer a full button");
+        assert!(crate::scenario::handle_at("button:sketch.create3d").is_none(), "3D Sketch is no longer a full button");
         let panel = crate::scenario::rect_of("panel:MODEL:SKETCH").unwrap();
         assert_eq!(panel.width(), ribbon::COLLAPSED_WIDTH, "the panel takes a collapsed panel's room");
         let button = crate::scenario::handle_at("collapsed:MODEL:SKETCH").expect("the Sketch panel keeps a button");

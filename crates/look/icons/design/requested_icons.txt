@@ -328,6 +328,7 @@ shell	false
 shield	false
 silhouette	false
 sketch	false
+sketch3d	false
 sketch_break	false
 sketch_cancel	false
 sketch_chamfer	false

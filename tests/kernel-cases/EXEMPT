@@ -431,6 +431,7 @@ sketch.construction_line.tangent_external  2D sketch only (the sketch solver and
 sketch.construction_line.tangent_two  2D sketch only (the sketch solver and engine tests); no kernel operation
 sketch.construction_line.vertical 2D sketch only (the sketch solver and engine tests); no kernel operation
 sketch.copy                       2D sketch only (the sketch solver and engine tests); no kernel operation
+sketch.create3d                   3D sketch lifecycle: a new sketch with 3D Sketch on (engine tests, sketch_3d_frame_tests.rs); no kernel operation
 sketch.cut                        2D sketch only (the sketch solver and engine tests); no kernel operation
 sketch.delete                     2D sketch only (the sketch solver and engine tests); no kernel operation
 sketch.dimension_text             2D sketch only (the sketch solver and engine tests); no kernel operation

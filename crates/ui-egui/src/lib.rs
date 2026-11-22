@@ -1691,7 +1691,7 @@ impl SolveApp {
         crate::sketch_view::sync(self)?;
         self.sketch_view_named = params.get("view").is_some_and(|view| !view.is_null());
         let finished_sketch = crate::sketch_view::prepare_edit(self, id, &params)?;
-        if matches!(id, "sketch.create" | "sketch.edit") {
+        if matches!(id, "sketch.create" | "sketch.create3d" | "sketch.edit") {
             let explicit = match params.get("view") {
                 None | Some(Value::Null) => None,
                 Some(value) => Some(value.as_u64().ok_or_else(|| "view must be an unsigned integer identifying an open Model view".to_string())?),
@@ -3060,6 +3060,22 @@ impl SolveApp {
             }
             self.view_windows.start_tool_panel(self.docs.current_tab());
             self.dialog = Some(d);
+            return;
+        }
+        // 3D Sketch has no plane to pick (#19426): the sketch opens at once with 3D Line running
+        // in it. The view stays as it is, as there is no plane to turn to.
+        if id == "sketch.create3d" {
+            if self.run(id, json!({})).is_ok() {
+                // A person started it, so an empty one goes when it finishes, as after Create Sketch.
+                self.session.mark_sketch_entered_by_person();
+                self.start("sketch.line3d");
+                if self.tool.as_ref().is_some_and(|tool| tool.cmd == "sketch.line3d") {
+                    let hint = self.tr("sketch.hint.create3d").to_owned();
+                    self.set_tool_hint(hint);
+                }
+            } else {
+                self.restore_command_tab();
+            }
             return;
         }
         if let Some(mut t) = tools::Tool::for_command(id) {

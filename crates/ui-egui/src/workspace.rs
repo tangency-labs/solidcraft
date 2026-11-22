@@ -161,7 +161,7 @@ pub(crate) fn command_receiver(app: &mut crate::SolveApp, id: &str, params: &ser
         crate::drawing_workspace::sync_history(app);
         return Ok(());
     }
-    let explicit = matches!(id, "sketch.create" | "sketch.edit" | "drawing.sketch.create" | "drawing.sketch.edit")
+    let explicit = matches!(id, "sketch.create" | "sketch.create3d" | "sketch.edit" | "drawing.sketch.create" | "drawing.sketch.edit")
         .then(|| params.get("view").and_then(serde_json::Value::as_u64))
         .flatten();
     let target = explicit.unwrap_or_else(|| crate::view_windows::command_view(app));
@@ -558,8 +558,17 @@ pub const SECTIONS: &[Section] = &[
     Section {
         tab: "MODEL",
         panel: "SKETCH",
-        promoted: 1,
-        ids: &["sketch.create", "sketch.edit", "sketch.line3d", "sketch.arc3d", "sketch.spline3d", "sketch.spline3d.control_point", "sketch.point3d"],
+        promoted: 2,
+        ids: &[
+            "sketch.create",
+            "sketch.create3d",
+            "sketch.edit",
+            "sketch.line3d",
+            "sketch.arc3d",
+            "sketch.spline3d",
+            "sketch.spline3d.control_point",
+            "sketch.point3d",
+        ],
     },
     Section { tab: "MODEL", panel: "CREATE", promoted: 3, ids: &["solid.extrude", "solid.revolve", "solid.hole"] },
     Section {
@@ -1691,7 +1700,7 @@ mod tests {
     fn model_defaults_and_shared_commands_follow_the_map() {
         let specs = solidcraft_engine::command_specs();
         for (panel, expected) in [
-            ("SKETCH", vec!["sketch.create"]),
+            ("SKETCH", vec!["sketch.create", "sketch.create3d"]),
             ("CREATE", vec!["solid.extrude", "solid.revolve", "solid.hole"]),
             ("MODIFY", vec!["solid.fillet", "solid.chamfer", "solid.shell", "solid.press_pull"]),
             ("ARRANGE", vec!["solid.move", "solid.mirror", "solid.pattern.rectangular"]),
