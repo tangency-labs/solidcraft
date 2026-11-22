@@ -1006,27 +1006,15 @@ impl SurfaceIntersector<'_> {
             TsectCurveType::Crossing
         };
 
-        // for every point to flush
-        let n = pnts.len();
-        let at = |i: usize| {
-            pnts.get(i).ok_or_else(|| {
-                SolidError::intersect(
-                    OP_FLUSH,
-                    IntersectFailure::Defect {
-                        why: "the flush reads the points before, at and (at the next to last) \
-                              after its index, which runs below the point count",
-                    },
-                )
-            })
-        };
-        let mut i = 1;
-        while i < n {
-            let prev = at(i - 1)?;
-            let mut curr = at(i)?;
-
-            // merge a very short end segment into its neighbour
-            if i == n - 2 {
-                let fin = at(i + 1)?;
+        // for every point to flush: each point after the first ends a segment that
+        // starts at the point before it
+        let mut prev = first;
+        let mut rest = pnts.iter();
+        rest.next();
+        while let Some(mut curr) = rest.next() {
+            // merge a very short end segment into its neighbour (at the next to last
+            // point, when exactly one point follows)
+            if let [fin] = rest.as_slice() {
                 let t_delta = curr.curve_parameter - prev.curve_parameter;
                 let t_delta_final = fin.curve_parameter - curr.curve_parameter;
                 // Not upstream (WR-697 addendum, solidcore-native): only when the merged
@@ -1035,8 +1023,8 @@ impl SurfaceIntersector<'_> {
                 // further apart than the tolerance
                 if t_delta_final / t_delta < 0.1 && self.span_keeps_accuracy(k, prev, fin)? {
                     // skip next to last xsect point
-                    i += 1;
-                    curr = at(i)?;
+                    curr = fin;
+                    rest.next();
                 }
             }
 
@@ -1078,7 +1066,7 @@ impl SurfaceIntersector<'_> {
                 let pt3 = pt4 - drv2 / 3.0;
                 ctrl.extend([Vec3::from(pt2), Vec3::from(pt3), Vec3::from(pt4)]);
             }
-            i += 1;
+            prev = curr;
         }
 
         // Not upstream (#17110): each span of a UV trim on a sphere is made monotone in
@@ -1807,6 +1795,8 @@ pub fn compute_law_point_values_with<'s, V: IntersectorVirtuals<'s> + ?Sized>(
     point: &mut TsectPnt,
 ) -> Result<()> {
     let mut delta_step = delta_step;
+    // the last try's failure, kept as the cause when no try passes
+    let mut last_failure = None;
     let ivl = &law.point_curve_interval;
 
     // for 6 iterations
@@ -1924,18 +1914,23 @@ pub fn compute_law_point_values_with<'s, V: IntersectorVirtuals<'s> + ?Sized>(
         match v.compute_point_values_delta(k, uvs, uv_deltas, point, &mut delta_pnt) {
             Ok(()) => return Ok(()),
             Err(e @ (SolidError::Unported { .. } | SolidError::Cancelled { .. })) => return Err(e),
-            Err(_) => {}
+            Err(e) => last_failure = Some(e),
         }
 
         // next iteration with a bigger delta step
         delta_step *= 10.0;
     }
-    Err(SolidError::intersect(
+    let failure = Failure::new(
         OP_LAW,
         IntersectFailure::NoDeltaStep {
             tries: LAW_DELTA_TRIES,
         },
-    ))
+    );
+    Err(match last_failure {
+        Some(cause) => failure.caused_by(cause),
+        None => failure,
+    }
+    .into_error())
 }
 
 /// The delta steps [`compute_law_point_values_with`] tries, each ten times the last.
@@ -1961,6 +1956,62 @@ mod tests {
             plane([0.0, -0.5, 0.0], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0]),
             plane([0.0, 0.0, -0.5], [1.0, 0.0, 0.0], [0.0, 0.0, 1.0]),
         )
+    }
+
+    #[test]
+    fn a_law_point_with_no_delta_step_keeps_the_last_tries_failure() {
+        use crate::blend::fillet_standard_solver::p1::FilletLawKind;
+        use crate::curve::line::Line;
+        use crate::surface::offset_surface::OffsetSurface;
+        let k = &Kernel::default();
+        let (a, b) = two_planes();
+        // a law intersection meets the offsets of its surfaces
+        let a = Surface::from(OffsetSurface::new(k, 0.0, a, true, 0).unwrap());
+        let b = Surface::from(OffsetSurface::new(k, 0.0, b, true, 0).unwrap());
+        let d = Extent2d::from_bounds(0.0, 0.0, 1.0, 1.0);
+        let mut si = SurfaceIntersector::new(k, &a, &d, &b, &d, false).unwrap();
+        // the planes' common line, y = 0, z = 0
+        let line = Curve::from(Line::from_points(Vec3::ZERO, Vec3::new(1.0, 0.0, 0.0), 3));
+        let law = LawPointOptions {
+            law_orient: false,
+            point_curve: &line,
+            point_curve_interval: Extent1d::from_min_max(0.0, 1.0),
+            normals: [Vec3::new(0.0, 0.0, 1.0), Vec3::new(0.0, -1.0, 0.0)],
+            average_normals: false,
+            surface_orientations: [1.0, 1.0],
+        };
+        let mut p = TsectPnt::new();
+        // the basic intersector has no delta-step values: every try fails
+        let e = si
+            .compute_law_point_values(
+                k,
+                0.5,
+                Point2::new(0.5, 0.5),
+                Point2::new(0.5, 0.5),
+                1e-6,
+                &law,
+                &mut FilletLaw::new(FilletLawKind::Linear {
+                    start_radius: 0.1,
+                    end_radius: 0.1,
+                }),
+                false,
+                &mut p,
+            )
+            .unwrap_err();
+        assert_eq!(
+            e.intersect_failure(),
+            Some(&IntersectFailure::NoDeltaStep {
+                tries: LAW_DELTA_TRIES
+            }),
+            "{e}"
+        );
+        let cause = e.cause().expect("the last try's failure is kept");
+        assert_eq!(
+            cause.intersect_failure(),
+            Some(&IntersectFailure::DeltaStepUnsupported),
+            "{cause}"
+        );
+        assert!(e.is_refusal() == cause.is_refusal() && e.is_defect() == cause.is_defect());
     }
 
     #[test]
