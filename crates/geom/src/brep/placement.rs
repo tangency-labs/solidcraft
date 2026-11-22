@@ -193,15 +193,9 @@ impl Rigid {
 
     fn support(&self, s: &SupportRecord) -> Option<SupportRecord> {
         Some(match s {
-            SupportRecord::Nurbs {
-                kind,
-                form,
-                revolution,
-            } => SupportRecord::Nurbs {
-                kind: *kind,
-                form: self.nurbs_surface(form)?,
-                revolution: revolution.as_ref().map(|r| self.revolution(r)),
-            },
+            SupportRecord::Nurbs { kind, form, revolution } => {
+                SupportRecord::Nurbs { kind: *kind, form: self.nurbs_surface(form)?, revolution: revolution.as_ref().map(|r| self.revolution(r)) }
+            }
             SupportRecord::Blend(b) => {
                 let net = self.nurbs_surface(&b.net)?;
                 let mut definition = self.procedural(&b.definition)?;
