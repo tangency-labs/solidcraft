@@ -10200,6 +10200,8 @@ pub(crate) struct DrawnNote {
     /// The text as laid out for the box: wrapped at the callout's width, so the box and the
     /// text drawn in it are measured from the same layout.
     pub galley: std::sync::Arc<egui::Galley>,
+    /// The note is ticked off in the Notes panel: drawn muted.
+    pub done: bool,
 }
 
 /// The widest a note's text runs (screen points) before it wraps onto the next line.
@@ -10220,7 +10222,7 @@ pub(crate) fn note_callouts(app: &SolveApp, painter: &egui::Painter, proj: &Proj
             let anchor = proj.to_screen(n.anchor)?;
             let galley = painter.layout(n.text.clone(), FontId::proportional(t.font_small), t.text, NOTE_WRAP_WIDTH);
             let text_rect = Rect::from_min_size(anchor + vec2(14.0, -14.0) - vec2(0.0, galley.size().y + 8.0), galley.size() + vec2(12.0, 8.0));
-            Some(DrawnNote { anchor, text_rect, text: n.text.clone(), galley })
+            Some(DrawnNote { anchor, text_rect, text: n.text.clone(), galley, done: n.done })
         })
         .collect()
 }
@@ -10232,14 +10234,15 @@ fn draw_notes(app: &SolveApp, painter: &egui::Painter, proj: &Proj) {
     let t = Tokens::get();
     for note in note_callouts(app, painter, proj) {
         // A leader from the anchor to the text box, the dot, then the callout itself:
-        // a rounded panel with the text, always parallel to the screen.
-        painter.line_segment([note.anchor, note.text_rect.left_bottom() + vec2(6.0, -4.0)], Stroke::new(1.0, t.accent));
-        painter.circle_filled(note.anchor, 3.0, t.accent);
+        // a rounded panel with the text, always parallel to the screen. A done note is muted.
+        let (edge, ink) = if note.done { (t.text_dim, t.text_dim) } else { (t.accent, t.text) };
+        painter.line_segment([note.anchor, note.text_rect.left_bottom() + vec2(6.0, -4.0)], Stroke::new(1.0, edge));
+        painter.circle_filled(note.anchor, 3.0, edge);
         painter.rect_filled(note.text_rect, 4.0, t.panel);
-        painter.rect_stroke(note.text_rect, 4.0, Stroke::new(1.0, t.accent), egui::StrokeKind::Inside);
+        painter.rect_stroke(note.text_rect, 4.0, Stroke::new(1.0, edge), egui::StrokeKind::Inside);
         // The wrapped layout the box was sized from, not a fresh single-line one: a long note
         // wraps inside its box instead of running out of it.
-        painter.galley(note.text_rect.min + vec2(6.0, 4.0), note.galley.clone(), t.text);
+        painter.galley(note.text_rect.min + vec2(6.0, 4.0), note.galley.clone(), ink);
     }
 }
 

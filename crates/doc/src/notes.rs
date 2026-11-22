@@ -20,6 +20,30 @@ pub struct Note {
     /// Hidden notes are kept but not drawn (`browser.visibility` shows and hides them).
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub hidden: bool,
+    /// Done notes are kept as a record that the comment was worked off (an agent, or the
+    /// user, ticked it in the Notes panel).
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub done: bool,
+    /// What was selected when the note was made: the body and the face, edge or vertex it
+    /// refers to, so a reader (an agent) knows which element the comment means. Informative
+    /// only: face and edge indices can change when the design rebuilds.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub target: Option<NoteTarget>,
+}
+
+/// Longest body name a note target keeps (characters).
+pub const MAX_TARGET_CHARS: usize = 256;
+
+/// The element a note refers to: a body, or one face, edge or vertex of it.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct NoteTarget {
+    /// `body`, `face`, `edge` or `vertex`.
+    pub kind: String,
+    /// The body's name.
+    pub body: String,
+    /// The face or edge index within the body (none for a whole body or a vertex).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub index: Option<usize>,
 }
 
 impl Note {
@@ -41,12 +65,14 @@ mod tests {
     fn a_design_with_notes_survives_a_round_trip() {
         let mut doc = crate::Document::new("Noted");
         doc.notes.push(note(1));
-        doc.notes.push(Note { id: 2, anchor: Vec3::new(-4.0, 0.0, 6.5), text: "Adjust after the test print".into(), hidden: true });
+        doc.notes.push(Note { id: 2, anchor: Vec3::new(-4.0, 0.0, 6.5), text: "Adjust after the test print".into(), hidden: true, done: true, target: Some(NoteTarget { kind: "face".into(), body: "Plate".into(), index: Some(15) }) });
         let json = serde_json::to_string(&doc).unwrap();
         let back: crate::Document = serde_json::from_str(&json).unwrap();
         assert_eq!(back, doc);
         assert_eq!(back.notes.len(), 2);
         assert!(back.notes[1].hidden);
+        assert!(back.notes[1].done);
+        assert_eq!(back.notes[1].target.as_ref().map(|t| t.body.as_str()), Some("Plate"));
     }
 
     #[test]
@@ -63,6 +89,8 @@ mod tests {
         doc.notes.push(note(1));
         let json = serde_json::to_string(&doc).unwrap();
         assert!(!json.contains("hidden"));
+        assert!(!json.contains("done"));
+        assert!(!json.contains("target"));
         assert!(serde_json::from_str::<crate::Document>(&json).unwrap().notes[0].text.starts_with("Check"));
     }
 
