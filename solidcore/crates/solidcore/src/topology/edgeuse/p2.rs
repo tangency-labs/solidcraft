@@ -1708,6 +1708,12 @@ mod tests {
         )
         .unwrap_err();
         assert_eq!(step_err.upstream_status(), Some(1001));
+        assert_eq!(
+            step_err.topology_failure(),
+            Some(&crate::error::topology::TopologyFailure::Failed(
+                "the stepped-off point does not lie on the face"
+            ))
+        );
 
         // Upstream's `SER` inside `SmBoolean` would call the concave sector convex; the
         // port propagates the step-off error.
@@ -1768,6 +1774,22 @@ mod tests {
             &StepOffOptions::default(),
         )
         .is_ok());
+        let radial_err = evaluate_binormal_step_off(
+            &k,
+            &mut b0.clone_standing_for_self().unwrap(),
+            radial_eu,
+            mid_t,
+            0.2,
+            &StepOffOptions::default(),
+        )
+        .unwrap_err();
+        assert_eq!(radial_err.upstream_status(), Some(1001));
+        assert_eq!(
+            radial_err.topology_failure(),
+            Some(&crate::error::topology::TopologyFailure::Failed(
+                "the stepped-off point does not lie on the face"
+            ))
+        );
         let err = is_convex_radial_sector(&k, &mut b0, concave_eu, 1, true, 2.0).unwrap_err();
         assert_eq!(err.upstream_status(), Some(1001));
         assert_eq!(
@@ -1847,10 +1869,20 @@ mod tests {
         let (mut wire_b, wire_eu) = wire_edgeuse();
         assert!(crate::topology::edgeuse::p1::is_shell_edgeuse(&wire_b, wire_eu).unwrap());
         let (mut lone_b, lone_eu) = lone_edgeuse();
-        for (b, eu) in [(&mut wire_b, wire_eu), (&mut lone_b, lone_eu)] {
-            for (samples, tol_deg) in [(1, 0.0), (5, 2.0), (10, 0.0)] {
-                let err = is_convex_radial_sector(&k, b, eu, samples, false, tol_deg).unwrap_err();
-                assert_eq!(err.upstream_status(), Some(1007), "{eu:?}: {err}");
+        let outside = crate::error::topology::TopologyFailure::InvalidValue(
+            "only an edge use in a loop has a binormal",
+        );
+        for (b, eu, step_offs) in [
+            (&mut wire_b, wire_eu, &[false, true][..]),
+            (&mut lone_b, lone_eu, &[false][..]),
+        ] {
+            for &step_off in step_offs {
+                for (samples, tol_deg) in [(1, 0.0), (5, 2.0), (10, 0.0)] {
+                    let err =
+                        is_convex_radial_sector(&k, b, eu, samples, step_off, tol_deg).unwrap_err();
+                    assert_eq!(err.upstream_status(), Some(1007), "{eu:?}: {err}");
+                    assert_eq!(err.topology_failure(), Some(&outside), "{eu:?}: {err}");
+                }
             }
         }
     }
