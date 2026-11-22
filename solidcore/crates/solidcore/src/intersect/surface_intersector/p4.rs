@@ -2065,19 +2065,13 @@ fn do_point_intersection_body<'s, V: IntersectorVirtuals<'s> + ?Sized>(
         }
     }
 
-    // trace from the last start point
-    let tsp_id = v.intersector_mut().start_points.pop().ok_or_else(|| {
-        Failure::new(
-            OP_DPI,
-            IntersectFailure::Defect {
-                why: "the first through point's copy is added as the only start point of a \
-                          cleared list, which always takes it; none to trace from means the \
-                          list lost it",
-            },
-        )
-        .with_status(crate::error::SM_ERR_NULL_POINTER)
-        .into_error()
-    })?;
+    // trace from the last start point (added above; only a caller's override of
+    // `compute_point_values` that re-enters the driver clears it)
+    let tsp_id = v
+        .intersector_mut()
+        .start_points
+        .pop()
+        .ok_or_else(|| SolidError::intersect(OP_DPI, IntersectFailure::StartPointLost))?;
     v.intersector_mut().curve_trace_direction = 1.0;
 
     // tracing beyond the end: clip the extension
@@ -2610,6 +2604,83 @@ mod tests {
             "{r:?}"
         );
         assert_eq!(si.point(id).unwrap().curve_parameter, -1.0);
+    }
+
+    /// A caller's `IntersectorVirtuals` whose `compute_point_values` re-enters the point
+    /// intersection on its second call: the inner call clears the start points.
+    struct Reentrant<'s> {
+        si: SurfaceIntersector<'s>,
+        calls: usize,
+    }
+
+    impl<'s> IntersectorVirtuals<'s> for Reentrant<'s> {
+        fn intersector(&self) -> &SurfaceIntersector<'s> {
+            &self.si
+        }
+
+        fn intersector_mut(&mut self) -> &mut SurfaceIntersector<'s> {
+            &mut self.si
+        }
+
+        fn compute_point_values(
+            &mut self,
+            k: &Kernel,
+            uv_values: [Point2; 2],
+            point: &mut TsectPnt,
+            previous: Option<&TsectPnt>,
+            step_size: Option<f64>,
+        ) -> Result<()> {
+            self.calls += 1;
+            if self.calls == 2 {
+                let opts = PointIntersectionOptions::default();
+                let inner = self.si.do_point_intersection(k, &[TsectId(99_999)], &opts);
+                assert!(inner.is_err());
+            }
+            self.si
+                .compute_point_values(k, uv_values, point, previous, step_size)
+        }
+
+        fn compute_next_point(
+            &mut self,
+            k: &Kernel,
+            prev: TsectId,
+            step_size: f64,
+            next: TsectId,
+        ) -> Result<NextPoint> {
+            self.si.compute_next_point(k, prev, step_size, next)
+        }
+
+        fn flush_curve(&mut self, k: &Kernel, out: &mut TsectCurves) -> Result<()> {
+            self.si.flush_curve(k, out)
+        }
+    }
+
+    #[test]
+    fn a_reentrant_override_that_loses_the_start_point_is_the_callers() {
+        let k = &Kernel::default();
+        let a = plane([0.0; 3], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0]);
+        let b = plane([0.0, 0.5, -0.5], [1.0, 0.0, 0.0], [0.0, 0.0, 1.0]);
+        let si = SurfaceIntersector::new(k, &a, &unit(), &b, &unit(), false).unwrap();
+        let mut v = Reentrant { si, calls: 0 };
+        // two points on the planes' common line y = 0.5, z = 0
+        let mut ids = Vec::new();
+        for u in [0.3, 0.7] {
+            let mut p = TsectPnt::new();
+            *p.uv_pos_mut(SrfIndex::First) = Point2::new(u, 0.5);
+            *p.uv_pos_mut(SrfIndex::Second) = Point2::new(u, 0.5);
+            ids.push(v.si.alloc_point(p));
+        }
+        let opts = PointIntersectionOptions::default();
+        let e = do_point_intersection_with(&mut v, k, &ids, &opts).unwrap_err();
+        assert_eq!(v.calls, 2);
+        assert_eq!(
+            e.intersect_failure(),
+            Some(&IntersectFailure::StartPointLost),
+            "{e}"
+        );
+        assert_eq!(e.kind(), crate::error::ErrorKind::InvalidInput);
+        assert!(!e.is_defect());
+        assert_eq!(e.upstream_status(), Some(1006));
     }
 
     #[test]

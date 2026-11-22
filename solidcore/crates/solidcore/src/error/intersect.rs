@@ -271,6 +271,12 @@ pub enum IntersectFailure {
     /// only a curve they put points on (`trace_back` skips an empty one, WR-80), so only a
     /// caller reaches it (upstream's `SM_ERR_NULL_POINTER`). [`ErrorKind::InvalidInput`].
     NoCurveToReverse,
+    /// The start point the point intersection added was gone when it came to trace from it.
+    /// The driver clears the list and adds the first through point's copy itself, and no
+    /// kernel `IntersectorVirtuals` implementor touches the list, so only a caller's
+    /// override that re-enters the driver (which clears the list) removes it (upstream's
+    /// `SM_ERR_NULL_POINTER`). [`ErrorKind::InvalidInput`].
+    StartPointLost,
     /// The basic intersector was asked for a law point's delta step, which only the
     /// advanced intersectors compute. [`ErrorKind::Unsupported`].
     DeltaStepUnsupported,
@@ -329,7 +335,8 @@ impl IntersectFailure {
             | Self::SurfaceCacheNotBuilt
             | Self::NoSurfaceCaches
             | Self::SurfaceNotOffset { .. }
-            | Self::NoCurveToReverse => SM_ERR_NULL_POINTER,
+            | Self::NoCurveToReverse
+            | Self::StartPointLost => SM_ERR_NULL_POINTER,
             Self::OutsideDomain(_) | Self::SeamJumpNotSnapped => SM_ERR_OUTSIDE_OF_DOMAIN,
             Self::Inconsistent(_) => SM_ERR_ASSERT_FAILURE,
         }
@@ -366,7 +373,8 @@ impl IntersectFailure {
             | Self::NoSurfaceCaches
             | Self::PointCountNotTaken { .. }
             | Self::PointNotOnBothSurfaces
-            | Self::NoCurveToReverse => ErrorKind::InvalidInput,
+            | Self::NoCurveToReverse
+            | Self::StartPointLost => ErrorKind::InvalidInput,
             Self::UnsupportedObjectKind
             | Self::CurveNotBSpline
             | Self::SingularPointInside
@@ -509,6 +517,9 @@ impl core::fmt::Display for IntersectFailure {
                 "no trace step toward the snapped point passes in {tries} tries"
             ),
             Self::NoCurveToReverse => f.write_str("the curve to reverse has no points"),
+            Self::StartPointLost => {
+                f.write_str("the start point added for the trace was gone when the trace began")
+            }
             Self::DeltaStepUnsupported => {
                 f.write_str("the basic intersector does not compute a law point's delta step")
             }
@@ -872,6 +883,7 @@ pub(super) mod tests {
             (F::ApproachHitBoundary, SM_ERR, K::Failed),
             (F::ApproachNotCertified { points: 16 }, SM_ERR, K::Failed),
             (F::NoCurveToReverse, SM_ERR_NULL_POINTER, K::InvalidInput),
+            (F::StartPointLost, SM_ERR_NULL_POINTER, K::InvalidInput),
             (F::DeltaStepUnsupported, SM_ERR, K::Unsupported),
         ];
         for (failure, status, kind) in cases {
