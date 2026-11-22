@@ -3493,6 +3493,13 @@ struct Pushed {
     ends: [[Vec2; 2]; 2],
 }
 
+impl Pushed {
+    /// Whether the piece is a roll: a circular arc's panel is a cylinder, a line's a plane.
+    fn roll(&self) -> bool {
+        matches!(self.surface, Surface::Cylinder { .. })
+    }
+}
+
 /// Piece `seg` of a contour flange's profile in `plane` pushed out `width` along the plane's
 /// normal, the piece as drawn the sheet's surface and its material on the right of the travel (on
 /// the left when `flip`); the joints at its ends run from the height `z0` above the plane to `z1`.
@@ -3705,6 +3712,15 @@ impl SurfaceSheet {
             // How far the profile turns where the two meet, from their own ways there.
             let (da, db) = (a.ways[1], b.ways[0]);
             let angle = da.cross(db).len().atan2(da.dot(db));
+            // A roll's edge cannot take a bend (the develop lays out no bend on one), so an arc
+            // that does not run on into the curve beside it is refused here, naming the arc: the
+            // sheet would bend on the edge of the roll.
+            if angle > SMOOTH && (a.roll() || b.roll()) {
+                let id = if a.roll() { curves.get(i) } else { curves.get(i + 1) }.map_or("", |(c, _)| c.as_str());
+                return err(format!(
+                    "not supported yet: the arc `{id}` is not tangent to the curve beside it: make it tangent, or draw a line there for a bend (#15576)"
+                ));
+            }
             // The joint on each panel, as its chart has it, from where it starts.
             let anchor = |panel: usize, [from, to]: [Vec2; 2]| (to - from).normalized().map(|dir| Anchor { panel, origin: from, dir });
             let (Some(on_a), Some(on_b)) = (anchor(i, a.ends[1]), anchor(i + 1, b.ends[0])) else {

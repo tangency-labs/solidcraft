@@ -8627,6 +8627,18 @@ fn quick_measure_readout(app: &mut SolveApp, ui: &egui::Ui, viewport: Rect) -> O
     crate::quick_measure::show(app, ui, view, &taken)
 }
 
+/// Window messages clear every tile's bottom navigation, independent of the last tile painted.
+fn window_message_rect(app: &SolveApp, viewport: Rect) -> Rect {
+    let mut view = crate::shell::bottom_readout_rect(app, crate::shell::content_rect(app, viewport));
+    if app.preferences.navigation_bar.edge == crate::ui_kit::NavigationEdge::Bottom {
+        let clearance = crate::ui_kit::NavigationMetrics::for_size(app.preferences.navigation_bar.size).height()
+            + crate::ui_kit::NAV_BOTTOM
+            + Tokens::get().space_8;
+        view.max.y = (view.bottom() - clearance).max(view.top());
+    }
+    view
+}
+
 /// A single visual pattern for ongoing work, the existing six-second status, the 3D mouse
 /// calibration offer and the stand-up note, stacked from the bottom of the free view. Returns the toasts' rects.
 /// The usage statistics notice is to show (`usage_stats::notice_pending`).
@@ -8672,7 +8684,7 @@ pub(crate) fn transient_messages(app: &mut SolveApp, ui: &egui::Ui, viewport: Re
     }
     obstacles.extend(readout);
     obstacles.extend(app.operations.rect);
-    let view = crate::shell::content_rect(app, viewport);
+    let view = window_message_rect(app, viewport);
     let mut free = crate::viewport_layout::free_rect(view, &obstacles).shrink(t.space_8);
     if ToastPlace::current(ui.ctx()) == ToastPlace::Corner {
         free = corner_free(view, &obstacles);
@@ -8805,7 +8817,9 @@ pub(crate) fn transient_messages(app: &mut SolveApp, ui: &egui::Ui, viewport: Re
         obstacles.push(r);
         free.max.y = r.top() - t.space_8;
     }
-    if let Some((msg, at, error)) = app.status.clone() {
+    if let Some((msg, at, error)) =
+        app.status.clone().filter(|(_, _, error)| *error || !app.status_is_tool_hint || crate::workspace::tool_receives_input(app))
+    {
         let shown_ms = crate::now_ms() - at;
         if shown_ms < STATUS_TOAST_MS {
             let undo = app.status_undo;
