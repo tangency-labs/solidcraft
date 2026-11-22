@@ -271,6 +271,9 @@ pub struct KicadDrill {
     pub center: [f64; 2],
     /// Round holes have equal sides; a slot is a stadium of this width and height.
     pub size: [f64; 2],
+    /// The direction of a slot's width in the board frame, in radians anticlockwise from +X (its
+    /// pad's rotation on the board).
+    pub angle: f64,
 }
 
 /// A KiCad board and the reusable component placements it references.
@@ -491,11 +494,15 @@ pub fn parse_kicad_board_with(bytes: &[u8], file: &str, options: KicadOptions) -
         for pad in &footprint.pads {
             let Some(drill) = pad.drill else { continue };
             let center = apply2(&transform, pad.at[0], pad.at[1]);
-            board.drills.push(KicadDrill { center, size: [drill[0].abs(), drill[1].abs()] });
+            // The pad's own X axis, turned by its rotation in the footprint frame, on the board.
+            let [ux, uy] = pad_axis(pad);
+            let ahead = apply2(&transform, pad.at[0] + ux, pad.at[1] + uy);
+            let angle = (ahead[1] - center[1]).atan2(ahead[0] - center[0]);
+            board.drills.push(KicadDrill { center, size: [drill[0].abs(), drill[1].abs()], angle });
         }
     }
     for via in &board.vias {
-        board.drills.push(KicadDrill { center: [via.at[0], -via.at[1]], size: [via.drill.abs(), via.drill.abs()] });
+        board.drills.push(KicadDrill { center: [via.at[0], -via.at[1]], size: [via.drill.abs(), via.drill.abs()], angle: 0.0 });
     }
     if extra_text_seen {
         board.warnings.push("text boxes, dimensions and tables are not modeled yet".into());
@@ -1517,7 +1524,8 @@ fn regions_from_loops(loops: Vec<Loop2>, drills: Option<&[KicadDrill]>) -> Vec<R
             let Some(i) = best else { continue };
             let size = [drill.size[0].abs(), drill.size[1].abs()];
             let r = (size[0].min(size[1]) * 0.5).max(1e-4);
-            let hole = if (size[0] - size[1]).abs() <= 1e-6 { Loop2::circle_from(center, r, 0.0) } else { slot_loop(center, size[0], size[1]) };
+            let hole =
+                if (size[0] - size[1]).abs() <= 1e-6 { Loop2::circle_from(center, r, 0.0) } else { slot_loop(center, size[0], size[1], drill.angle) };
             if let Some((_, region)) = regions.get_mut(i) {
                 region.holes.push(hole.reversed());
             }
@@ -1526,7 +1534,9 @@ fn regions_from_loops(loops: Vec<Loop2>, drills: Option<&[KicadDrill]>) -> Vec<R
     regions.into_iter().map(|(_, r)| r).collect()
 }
 
-fn slot_loop(center: Vec2, width: f64, height: f64) -> Loop2 {
+/// A slot (stadium) of `width` × `height` about `center`, its width turned to point along `angle`
+/// (radians from +X towards +Y in the frame it is drawn in).
+fn slot_loop(center: Vec2, width: f64, height: f64, angle: f64) -> Loop2 {
     let (long, short, vertical) = if width >= height { (width, height, false) } else { (height, width, true) };
     let r = short * 0.5;
     let half = (long * 0.5 - r).max(0.0);
@@ -1541,6 +1551,11 @@ fn slot_loop(center: Vec2, width: f64, height: f64) -> Loop2 {
         let a = std::f64::consts::FRAC_PI_2 + std::f64::consts::PI * i as f64 / n as f64;
         let (dx, dy) = (r * a.cos(), r * a.sin());
         pts.push(if vertical { Vec2::new(center.x + dy, center.y - half + dx) } else { Vec2::new(center.x - half + dx, center.y + dy) });
+    }
+    let (s, c) = angle.sin_cos();
+    for p in &mut pts {
+        let (x, y) = (p.x - center.x, p.y - center.y);
+        *p = Vec2::new(center.x + c * x - s * y, center.y + s * x + c * y);
     }
     Loop2::polygon(&pts)
 }
@@ -2909,14 +2924,24 @@ fn pad_loops(pad: &KicadPad) -> Vec<Vec<[f64; 2]>> {
         "roundrect" => rounded_rect_points(sx, sy, (pad.roundrect_ratio.clamp(0.0, 0.5)) * sx.min(sy)),
         _ => vec![[-sx * 0.5, -sy * 0.5], [sx * 0.5, -sy * 0.5], [sx * 0.5, sy * 0.5], [-sx * 0.5, sy * 0.5]],
     };
-    let angle = pad.at[2].to_radians();
-    let (s, c) = angle.sin_cos();
     for p in &mut points {
-        let (x, y) = (p[0], p[1]);
-        p[0] = c * x + s * y + pad.at[0];
-        p[1] = -s * x + c * y + pad.at[1];
+        let [x, y] = turn_in_pad(pad, p[0], p[1]);
+        p[0] = x + pad.at[0];
+        p[1] = y + pad.at[1];
     }
     vec![points]
+}
+
+/// A vector in the pad's own frame turned by the pad's rotation, into the footprint frame (KiCad's
+/// Y down, where a positive rotation turns anticlockwise as the board is seen).
+fn turn_in_pad(pad: &KicadPad, x: f64, y: f64) -> [f64; 2] {
+    let (s, c) = pad.at[2].to_radians().sin_cos();
+    [c * x + s * y, -s * x + c * y]
+}
+
+/// The pad's own X axis in the footprint frame.
+fn pad_axis(pad: &KicadPad) -> [f64; 2] {
+    turn_in_pad(pad, 1.0, 0.0)
 }
 
 /// A via's copper in the board frame: a disc, or a ring when the via is drilled.
@@ -2938,7 +2963,13 @@ fn pad_drill_points(pad: &KicadPad) -> Option<Vec<[f64; 2]>> {
         return None;
     }
     let center = Vec2::new(pad.at[0], pad.at[1]);
-    let hole = if (size[0] - size[1]).abs() <= 1e-6 { Loop2::circle_from(center, size[0] * 0.5, 0.0) } else { slot_loop(center, size[0], size[1]) };
+    // A slot lies along the pad's own axis.
+    let [ux, uy] = pad_axis(pad);
+    let hole = if (size[0] - size[1]).abs() <= 1e-6 {
+        Loop2::circle_from(center, size[0] * 0.5, 0.0)
+    } else {
+        slot_loop(center, size[0], size[1], uy.atan2(ux))
+    };
     Some(hole.polyline(1e-3).to_vec().into_iter().map(|p| [p.x, p.y]).collect())
 }
 
@@ -2967,8 +2998,11 @@ fn pad_holes(outer: &Loop2, points: &[[f64; 2]], drills: &[KicadDrill]) -> Vec<L
         }
         let reach = size[0].max(size[1]) * 0.5;
         let key = ((center.x * 1000.0).round() as i64, (center.y * 1000.0).round() as i64);
-        let hole =
-            if (size[0] - size[1]).abs() <= 1e-6 { Loop2::circle_from(center, size[0] * 0.5, 0.0) } else { slot_loop(center, size[0], size[1]) };
+        let hole = if (size[0] - size[1]).abs() <= 1e-6 {
+            Loop2::circle_from(center, size[0] * 0.5, 0.0)
+        } else {
+            slot_loop(center, size[0], size[1], drill.angle)
+        };
         match widest.get(&key) {
             Some((wider, _)) if *wider >= reach => {}
             _ => {
@@ -3109,6 +3143,11 @@ fn parse_footprint(
             Some("fp_text_box") => *extra_text_seen = true,
             _ => {}
         }
+    }
+    // A pad's rotation is stored on the board (KiCad adds the footprint's); kept here in the
+    // footprint frame, where the pad is placed, so that the footprint's rotation turns it once.
+    for pad in &mut pads {
+        pad.at[2] -= position[2];
     }
     position[2] = position[2].rem_euclid(360.0);
     Ok(KicadFootprint { reference, value, layer, at: position, models, pads, graphics, texts })
