@@ -10,6 +10,8 @@ use super::super::{FilletBody, FilletObject};
 use super::curves::InsertionCurves;
 use crate::blend::fillet_geom::p1::FilletBrep;
 use crate::curve::curve::Curve;
+use crate::error::blend::BlendFailure;
+use crate::error::{Failure, SM_ERR_NULL_POINTER};
 use crate::geom::attribute::AttributeStore;
 use crate::geom::attribute::ObjectKey;
 use crate::geom::context::Context;
@@ -25,6 +27,26 @@ use crate::topology::{Brep, BrepId, FaceId};
 use crate::{EntityRef, Result, SolidError};
 
 const OP: &str = "blend::fillet_executive::insertion_geometry";
+
+/// A face of `role`'s body without a surface (upstream `NER` of `GetSurface()`, status
+/// `SM_ERR_NULL_POINTER`): [`BlendFailure::FaceHasNoSurface`] at the face for a face of the
+/// caller's target, a reviewed defect for one of the bodies the fillet built.
+fn face_without_surface(role: InsertionBody, face: FaceId) -> SolidError {
+    match role {
+        InsertionBody::Target => {
+            Failure::new(OP, BlendFailure::FaceHasNoSurface).at(EntityRef::Face(face))
+        }
+        InsertionBody::Pseudo | InsertionBody::Intermediate => Failure::new(
+            OP,
+            BlendFailure::Defect {
+                why: "a face of a body the fillet built has no surface: the fillet makes each \
+                      of its faces on a surface",
+            },
+        ),
+    }
+    .with_status(SM_ERR_NULL_POINTER)
+    .into_error()
+}
 fn invalid(reason: &'static str) -> SolidError {
     SolidError::invalid_input(OP, reason)
 }
@@ -69,7 +91,7 @@ impl SurfaceBinding {
             .face_mut(face)?
             .surface
             .as_mut()
-            .ok_or_else(|| SolidError::blend_missing(OP, "the face's surface"))?;
+            .ok_or_else(|| face_without_surface(role, face))?;
         let type_code = surface.type_code();
         let key = context.geometry_key(surface.notify_identity_slot())?;
         Ok(Self {
@@ -86,11 +108,18 @@ impl SurfaceBinding {
         if self.body != topology_ref(serial, EntityRef::Brep(BrepId::from_index(0))) {
             return Err(invalid("Surface binding belongs to a foreign body"));
         }
-        let surface = body
-            .face(self.face)?
-            .surface
-            .as_ref()
-            .ok_or_else(|| SolidError::blend_missing(OP, "the face's surface"))?;
+        let surface = body.face(self.face)?.surface.as_ref().ok_or_else(|| {
+            Failure::new(
+                OP,
+                BlendFailure::Defect {
+                    why: "a captured face's surface is gone from the face: the binding was \
+                              captured from that surface, and the insertion does not take a \
+                              face's surface away",
+                },
+            )
+            .with_status(SM_ERR_NULL_POINTER)
+            .into_error()
+        })?;
         if surface.notify_key() != Some(self.geometry.key)
             || surface.type_code() != self.geometry.type_code
         {

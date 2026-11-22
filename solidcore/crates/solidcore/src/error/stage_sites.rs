@@ -60,8 +60,6 @@ const PINNED: &[(&str, usize)] = &[
     ("solidcore/src/blend/fillet_corner/p3.rs", 1),
     ("solidcore/src/blend/fillet_exact/rational.rs", 2),
     ("solidcore/src/blend/fillet_executive/session.rs", 5),
-    ("solidcore/src/blend/fillet_executive/session/law_corners.rs", 1),
-    ("solidcore/src/blend/fillet_executive/session/tangent_rollover.rs", 2),
     ("solidcore/src/blend/fillet_executive/session/trim_at_creases.rs", 4),
     ("solidcore/src/blend/fillet_geom/p1.rs", 62),
     ("solidcore/src/blend/fillet_geom/p2.rs", 123),

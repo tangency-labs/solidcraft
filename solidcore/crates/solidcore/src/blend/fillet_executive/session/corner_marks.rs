@@ -19,7 +19,8 @@
 //! reads them from the target faces, and they go with the session. No recursion.
 
 use super::{invalid, FilletObject, FilletSession};
-use crate::error::{EntityRef, Result, SolidError};
+use crate::error::blend::BlendFailure;
+use crate::error::{EntityRef, Failure, Result, SM_ERR_NULL_POINTER};
 use crate::geom::attribute::{ids, Attribute, AttributeValue, Behavior, TagData};
 use crate::topology::brep::p1;
 use crate::topology::FaceId;
@@ -135,7 +136,18 @@ impl FilletSession<'_> {
                 .get(index)
                 .copied()
                 .filter(|&face| body.face(face).is_ok())
-                .ok_or_else(|| SolidError::blend_missing(OP, "the face of a recorded surface"))?;
+                .ok_or_else(|| {
+                    Failure::new(
+                        OP,
+                        BlendFailure::Defect {
+                            why: "a corner patch surface's recorded face is not live in the \
+                                  intermediate body: the corner records the face it makes for \
+                                  each patch surface, and nothing deletes it before the merge",
+                        },
+                    )
+                    .with_status(SM_ERR_NULL_POINTER)
+                    .into_error()
+                })?;
             faces.push(face);
         }
         Ok(faces)
