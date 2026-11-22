@@ -37,7 +37,7 @@ use crate::blend::fillet_geom::p5::FilletEdgeContext;
 use crate::blend::fillet_solver::p1::{FilletSolverOffsetsData, OffsetSurfaceSlot};
 use crate::curve::curve::p1::GlobalPointSolveOptions;
 use crate::curve::curve::Curve;
-use crate::error::blend::{BlendFailure, SolverFailure};
+use crate::error::blend::{BlendFailure, SolverFailure as Solver};
 use crate::geom::global_solver::{SolutionRequested, SolverOperation};
 use crate::intersect::surface_intersector::p1::TsectPnt;
 use crate::math::{Point3, Vec3, EFF_ZERO_SQRT};
@@ -734,14 +734,16 @@ impl Recovery<'_> {
         }
         // Preserve rail-0 NER before touching rail 1.
         let r0 = required(self.fillets.geom(id)?.rail(0), ROLLOVER_RAIL)?;
-        let cc0 = self.fillets.fillet_edge(r0)?.curve_class().ok_or_else(|| {
-            SolidError::blend_solver(OP, SolverFailure::RailNotClassified { which: 0 })
-        })?;
+        let cc0 =
+            self.fillets.fillet_edge(r0)?.curve_class().ok_or_else(|| {
+                SolidError::blend_solver(OP, Solver::RailNotClassified { which: 0 })
+            })?;
         let n0 = cc0.size();
         let r1 = required(self.fillets.geom(id)?.rail(1), ROLLOVER_RAIL)?;
-        let cc1 = self.fillets.fillet_edge(r1)?.curve_class().ok_or_else(|| {
-            SolidError::blend_solver(OP, SolverFailure::RailNotClassified { which: 1 })
-        })?;
+        let cc1 =
+            self.fillets.fillet_edge(r1)?.curve_class().ok_or_else(|| {
+                SolidError::blend_solver(OP, Solver::RailNotClassified { which: 1 })
+            })?;
         if n0 == 1 && cc1.size() == 1 {
             let unknown0 = cc0.at(0)?.mid.point_class() == PointClassType::Unknown;
             let unknown1 = cc1.at(0)?.mid.point_class() == PointClassType::Unknown;
@@ -752,9 +754,7 @@ impl Recovery<'_> {
                 .fillets
                 .fillet_vertex(self.start(r0)?)?
                 .fillet_corner()
-                .ok_or_else(|| {
-                    SolidError::blend_solver(OP, SolverFailure::RolloverCornerMissing)
-                })?;
+                .ok_or_else(|| SolidError::blend_solver(OP, Solver::RolloverCornerMissing))?;
             // `SM_FCR_N_x_1_CLOSED`: one closed blend meeting itself, now the blend corner's
             // closed Join (the fork's `IsClosedJoin()`, 543d25a; WR-697) or closed Turn (#2349)
             let corner_type = self.corners.corner_type(corner)?;
@@ -763,7 +763,7 @@ impl Recovery<'_> {
             if !meets_itself {
                 return Err(SolidError::blend_solver(
                     OP,
-                    SolverFailure::ClosedBlendDoesNotMeetItself { corner_type },
+                    Solver::ClosedBlendDoesNotMeetItself { corner_type },
                 ));
             }
             if unknown0 {
@@ -791,7 +791,7 @@ impl Recovery<'_> {
         ops: &mut impl RecoveryOps,
     ) -> Result<()> {
         let solver_eu = self.solver.solver().edgeuse(0)?.ok_or_else(|| {
-            SolidError::blend_solver(OP, SolverFailure::SolverEdgeUseMissing { index: 0 })
+            SolidError::blend_solver(OP, Solver::SolverEdgeUseMissing { index: 0 })
         })?;
         let convex = ops.convex(self, solver_eu, 10, false, 0.0)?;
         let surface = required(self.fillets.geom(id)?.fillet_surface(None)?, FILLET_SURFACE)?;
@@ -874,7 +874,7 @@ impl Recovery<'_> {
                         .ok_or_else(|| {
                             SolidError::blend_solver(
                                 OP,
-                                SolverFailure::RolloverHasNoFaceBeyond { edge: side },
+                                Solver::RolloverHasNoFaceBeyond { edge: side },
                             )
                         })?;
                     *get_mut(&mut adjacent, which)? = Some(face);
@@ -891,7 +891,7 @@ impl Recovery<'_> {
                             *get_mut(&mut self.solver.solver_mut().orientations, which)? *= -1.0;
                         }
                         let base = self.target.face(face)?.surface.as_ref().ok_or_else(|| {
-                            SolidError::blend_solver(OP, SolverFailure::FaceWithoutSurface { face })
+                            SolidError::blend_solver(OP, Solver::FaceWithoutSurface { face })
                         })?;
                         let mut offset = OffsetSurface::new(
                             self.k,
@@ -1091,7 +1091,7 @@ impl Recovery<'_> {
                     if corner_eu.is_some() && !hit.trim {
                         // This is target-B-rep geometry, copied into a new pseudo vertex.
                         let corner_vertex = corner_vertex.ok_or_else(|| {
-                            SolidError::blend_solver(OP, SolverFailure::VertexUseWithoutVertex)
+                            SolidError::blend_solver(OP, Solver::VertexUseWithoutVertex)
                         })?;
                         let point = self.target.vertex(corner_vertex)?.point;
                         // SmFilletVertex() + SetPoint: retain SmVertex's zero
@@ -1109,7 +1109,7 @@ impl Recovery<'_> {
                             self.fillets,
                             end,
                             (*get(&new_vertices, which)?).ok_or_else(|| {
-                                SolidError::blend_solver(OP, SolverFailure::CliffCornerOnLastPiece)
+                                SolidError::blend_solver(OP, Solver::CliffCornerOnLastPiece)
                             })?,
                         )?;
                         self.fillets
@@ -1186,7 +1186,7 @@ impl Recovery<'_> {
                         {
                             return Err(SolidError::blend_solver(
                                 OP,
-                                SolverFailure::CornerVertexNotConverged,
+                                Solver::CornerVertexNotConverged,
                             ));
                         }
                     }
