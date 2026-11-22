@@ -3043,3 +3043,23 @@ fn note_callouts_are_screen_facing_and_follow_the_anchor() {
     h.settle();
     assert!(shot(&h).is_empty());
 }
+
+/// Notes: a long note wraps inside its box. The box was sized from a layout wrapped at
+/// `NOTE_WRAP_WIDTH` while the text was drawn on one line, so a sentence ran out of its box.
+#[test]
+fn a_long_note_wraps_inside_its_box() {
+    let mut h = Harness::new();
+    let text = "This is a test comment to check that a long note is drawn correctly in the viewport";
+    h.app.run("note.add", json!({"anchor": [10.0, 5.0, 20.0], "text": text})).unwrap();
+    h.settle();
+    let proj = display_proj(&h.app);
+    let mut out = Vec::new();
+    draw(&h.ctx, |ui| out = note_callouts(&h.app, ui.painter(), &proj));
+    assert_eq!(out.len(), 1);
+    let note = &out[0];
+    assert!(note.galley.rows.len() > 1, "a sentence wider than the callout wraps");
+    assert!(note.galley.size().x <= NOTE_WRAP_WIDTH + 0.5);
+    // The text drawn (the same galley, at the box's inner corner) stays inside the box.
+    let drawn = Rect::from_min_size(note.text_rect.min + vec2(6.0, 4.0), note.galley.size());
+    assert!(note.text_rect.expand(0.5).contains_rect(drawn), "text {drawn:?} inside box {:?}", note.text_rect);
+}
