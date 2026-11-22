@@ -78,36 +78,80 @@ pub fn assistant_controls<R>(ui: &mut Ui, add: impl FnOnce(&mut Ui) -> R) -> Inn
     })
 }
 
-/// Right-aligned user message with a compact lower-right corner and 86% maximum width.
+/// Where [`assistant_bubble_footer`] leaves the width its bubble's content needs.
+#[cfg(any(not(target_arch = "wasm32"), test))]
+fn bubble_needs_id() -> egui::Id {
+    egui::Id::unique("sc_assistant_bubble_needs")
+}
+
+/// Right-aligned user message with a compact lower-right corner, as wide as its content and at
+/// most 86% of the width: a long message wraps there, a short one gets a small bubble (#14738).
+/// The width the content needs is measured on one pass and used from the next; a pass drawn with
+/// a stale width is discarded, so the bubble never shows at the wrong size. Content laid out at
+/// that width cannot report needing more, so when its height changes (it wraps differently:
+/// another message under the same id, a longer time) it is measured again.
 #[cfg(any(not(target_arch = "wasm32"), test))]
 pub fn assistant_bubble<R>(ui: &mut Ui, add: impl FnOnce(&mut Ui) -> R) -> InnerResponse<R> {
     let t = Tokens::get();
     let width = ui.available_width().max(0.0);
-    let bubble_width = width * 0.86;
+    let margin_x = t.space_8 + t.space_3;
+    let max_content = (width * 0.86 - margin_x * 2.0).max(0.0);
+    // The width this bubble's content needed when it was last laid out at this maximum, and its
+    // height on the last pass drawn at that width (none right after measuring).
+    let memory = ui.next_auto_id().with("sc_assistant_bubble_width");
+    let cached = ui.data(|d| d.get_temp::<(f32, f32, Option<f32>)>(memory)).filter(|(max, _, _)| (max - max_content).abs() < 0.5);
+    let known = cached.map(|(_, needs, _)| needs);
+    let content_width = known.unwrap_or(max_content).clamp(0.0, max_content);
+    let bubble_width = content_width + margin_x * 2.0;
     ui.horizontal_top(|ui| {
         ui.spacing_mut().item_spacing.x = 0.0;
-        ui.add_space(width - bubble_width);
+        ui.add_space((width - bubble_width).max(0.0));
         crate::Container::show_backing(
             ui,
             egui::Frame::NONE
                 .fill(t.accent_soft)
                 .corner_radius(egui::CornerRadius { nw: t.radius_xl, ne: t.radius_xl, sw: t.radius_xl, se: t.radius_sm.saturating_sub(1) })
-                .inner_margin(egui::Margin::symmetric((t.space_8 + t.space_3) as i8, t.space_8 as i8)),
+                .inner_margin(egui::Margin::symmetric(margin_x as i8, t.space_8 as i8)),
             |ui| {
-                let content_width = (bubble_width - (t.space_8 + t.space_3) * 2.0).max(0.0);
                 ui.set_width(content_width);
-                ui.with_layout(egui::Layout::top_down(egui::Align::Min), |ui| {
-                    ui.set_width(content_width);
+                ui.data_mut(|d| d.remove_temp::<f32>(bubble_needs_id()));
+                let content = ui.with_layout(egui::Layout::top_down(egui::Align::Min), |ui| {
+                    ui.set_max_width(content_width);
                     ui.spacing_mut().item_spacing.y = t.space_6;
                     ui.style_mut().wrap_mode = Some(egui::TextWrapMode::Wrap);
                     ui.visuals_mut().override_text_color = Some(t.form_ink);
                     add(ui)
-                })
-                .inner
+                });
+                // A footer reports what it needs; without one, the content's own extent.
+                let needs = ui.data_mut(|d| d.remove_temp::<f32>(bubble_needs_id())).unwrap_or(content.response.rect.width()).ceil().min(max_content);
+                let height = content.response.rect.height();
+                let rewrapped = cached.and_then(|(_, _, h)| h).is_some_and(|h| (h - height).abs() >= 0.5);
+                if rewrapped {
+                    ui.data_mut(|d| d.remove_temp::<(f32, f32, Option<f32>)>(memory));
+                } else {
+                    ui.data_mut(|d| d.insert_temp(memory, (max_content, needs, known.filter(|k| (k - needs).abs() < 0.5).map(|_| height))));
+                }
+                if rewrapped || known.is_none_or(|k| (k - needs).abs() >= 0.5) {
+                    ui.ctx().request_discard("assistant bubble width");
+                    ui.ctx().request_repaint();
+                }
+                content.inner
             },
         )
     })
     .inner
+}
+
+/// The last row of an [`assistant_bubble`], laid out right to left at the bubble's right edge
+/// (a Copy button, a time): its own width counts towards the bubble's, not the room it spans.
+#[cfg(any(not(target_arch = "wasm32"), test))]
+pub fn assistant_bubble_footer<R>(ui: &mut Ui, add: impl FnOnce(&mut Ui) -> R) -> InnerResponse<R> {
+    // What the rows above it need, before this row spans the width.
+    let above = ui.min_rect().width();
+    let row = ui.allocate_ui_with_layout(vec2(ui.available_width(), 0.0), egui::Layout::right_to_left(egui::Align::Min), add);
+    let needs = above.max(row.response.rect.width());
+    ui.data_mut(|d| d.insert_temp(bubble_needs_id(), needs));
+    row
 }
 
 /// Assistant prose remains unboxed and uses the shared readable body typography.
@@ -449,6 +493,97 @@ mod tests {
                     });
                     assert!((bubble.response.rect.right() - (left + available)).abs() < 1.0);
                     assert!(bubble.response.rect.width() <= available * 0.86 + 1.0);
+                });
+            }
+        }
+    }
+
+    /// A short message gets a bubble as wide as its text and footer; a long one wraps at 86% of the
+    /// width; both stay at the right edge (#14738).
+    #[test]
+    fn assistant_bubble_fits_a_short_message_and_wraps_a_long_one() {
+        let long = "Make the plate eight millimetres thick, add four holes near its corners and round every outside edge.";
+        for width in [280.0, 440.0, 740.0] {
+            for (text, short) in [("hi", true), (long, false)] {
+                let ctx = crate::test_support::context();
+                for pass in 0..3 {
+                    super::super::test_support::frame(&ctx, vec![], |ui| {
+                        ui.set_width(width);
+                        let right = ui.cursor().left() + ui.available_width();
+                        let available = ui.available_width();
+                        let bubble = assistant_bubble(ui, |ui| {
+                            let message = ui.label(text).rect;
+                            let footer = assistant_bubble_footer(ui, |ui| ui.button("Copy message").rect).inner;
+                            (message, footer)
+                        });
+                        let (message, footer) = bubble.inner;
+                        let rect = bubble.response.rect;
+                        if pass > 0 {
+                            assert!((rect.right() - right).abs() < 1.0, "{text:?} at {width}: right edge {} of {right}", rect.right());
+                            assert!(rect.contains_rect(message) && rect.contains_rect(footer), "{text:?} at {width}: content outside {rect:?}");
+                            if short {
+                                let margins = 2.0 * (Tokens::get().space_8 + Tokens::get().space_3);
+                                assert!(
+                                    rect.width() <= footer.width().max(message.width()) + margins + 1.0,
+                                    "{text:?} at {width}: {} wide",
+                                    rect.width()
+                                );
+                            } else {
+                                assert!(rect.width() > available * 0.86 * 0.7, "{text:?} at {width}: {} wide", rect.width());
+                                assert!(rect.width() <= available * 0.86 + 1.0, "{text:?} at {width}: {} wide", rect.width());
+                            }
+                        }
+                    });
+                }
+            }
+        }
+    }
+
+    /// A bubble whose content grows under the same id (another message at the same place, a
+    /// longer time) is measured again rather than keeping the short content's width.
+    #[test]
+    fn assistant_bubble_grows_when_its_content_grows_under_the_same_id() {
+        let long = "Make the plate eight millimetres thick, add four holes near its corners and round every outside edge.";
+        for width in [280.0, 440.0, 740.0] {
+            let ctx = crate::test_support::context();
+            for (pass, text) in ["hi", "hi", "hi", long, long, long].into_iter().enumerate() {
+                super::super::test_support::frame(&ctx, vec![], |ui| {
+                    ui.set_width(width);
+                    let available = ui.available_width();
+                    let bubble = assistant_bubble(ui, |ui| {
+                        ui.label(text);
+                        assistant_bubble_footer(ui, |ui| ui.button("Copy message"));
+                    });
+                    if pass == 5 {
+                        let rect = bubble.response.rect;
+                        assert!(rect.width() > available * 0.86 * 0.7, "long message after a short one at {width}: {} wide", rect.width());
+                        assert!(rect.width() <= available * 0.86 + 1.0, "long message after a short one at {width}: {} wide", rect.width());
+                    }
+                });
+            }
+            // The time in the footer grows; the message above it stays short.
+            let ctx = crate::test_support::context();
+            for (pass, time) in ["4 s", "4 s", "4 s", "12 minutes ago", "12 minutes ago", "12 minutes ago"].into_iter().enumerate() {
+                super::super::test_support::frame(&ctx, vec![], |ui| {
+                    ui.set_width(width);
+                    let bubble = assistant_bubble(ui, |ui| {
+                        ui.label("hi");
+                        assistant_bubble_footer(ui, |ui| {
+                            let copy = ui.button("Copy").rect;
+                            let time = ui.label(time).rect;
+                            copy.union(time)
+                        })
+                        .inner
+                    });
+                    if pass == 5 {
+                        let footer = bubble.inner;
+                        assert!(
+                            bubble.response.rect.contains_rect(footer),
+                            "a longer time at {width}: footer {footer:?} outside {:?}",
+                            bubble.response.rect
+                        );
+                        assert!(footer.height() < Tokens::get().control_height * 1.5, "a longer time at {width} wraps: {footer:?}");
+                    }
                 });
             }
         }
