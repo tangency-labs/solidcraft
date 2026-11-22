@@ -118,7 +118,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .noundo()
         .contract(&EXPORT_CONTRACT)
         .output(crate::schema::output_schema_for::<crate::schema::file::FileExportResult>)
-        .params("path; format?: stl|stla|obj|step|3mf|3mf-tagged|glb|urdf|sdf|json (default from extension; sdf: a Gazebo model folder, as file.export_sdf (the path is the folder, a `.sdf` ending dropped; name?, static?, model_uris?, quality?); docs/sdf.md; 3mf-tagged: 3MF whose triangles carry their B-rep face, at full precision, for meshing and analysis tools; docs/formats/3mf-face-tags.md; obj: the colours of the bodies go in a material library (`.mtl`) written next to the mesh file; glb: binary glTF in metres with Y up, each body placed and named, its colours, metallic and roughness as materials; a transparent body or face, or a body a render setup gives an image texture or optics, is refused; urdf: the whole assembly as a robot, with STL meshes written next to it; docs/urdf.md); bodies?: [names] (JSON and URDF export the complete design); urdf only: mesh_prefix? (before each mesh file name, e.g. package://robot/meshes/), effort? (default 1000), velocity? (default 10), images?: bool (default false; true: each shown canvas and decal is written as a textured quad, its image next to the URDF); quality?: standard|fine|finest (STL, OBJ, 3MF and GLB: how closely the mesh follows curved faces, a chord tolerance of 2e-4, 5e-5 or 1e-5 of each body's size; default standard); objects?: body|component (3MF only: one object per body, the default, or one object for each placed component with two or more bodies, with those bodies as its parts, so a slicer loads them as one object with parts); lay_on_print_faces?: bool (STL and 3MF only, default false: each body with a print face (body.print_face) is written laid on it, as a slicer export lays it → print_faces: the bodies laid, warnings: each body that has a print face but was written as it lies)"),
+        .params("path; format?: stl|stla|obj|step|3mf|3mf-tagged|glb|urdf|sdf|json (default from extension; sdf: a Gazebo model folder, as file.export_sdf (the path is the folder, a `.sdf` ending dropped; name?, static?, model_uris?, quality?); docs/sdf.md; 3mf-tagged: 3MF whose triangles carry their B-rep face, at full precision, for meshing and analysis tools; docs/formats/3mf-face-tags.md; obj: the colours of the bodies go in a material library (`.mtl`) written next to the mesh file; glb: binary glTF in metres with Y up, each body placed and named, its colours, metallic and roughness as materials; a transparent body or face, or a body a render setup gives an image texture or optics, is refused; urdf: the whole assembly as a robot, with STL meshes written next to it; docs/urdf.md); bodies?: [names] (JSON and URDF export the complete design); urdf only: mesh_prefix? (before each mesh file name, e.g. package://robot/meshes/), effort? (default 1000), velocity? (default 10), images?: bool (default false; true: each shown canvas and decal is written as a textured quad, its image next to the URDF); quality?: standard|fine|finest (STL, OBJ, 3MF and GLB: how closely the mesh follows curved faces, a chord tolerance of 2e-4, 5e-5 or 1e-5 of each body's size; default standard); objects?: body|component (3MF only: one object per body, the default, or one object for each placed component with two or more bodies, with those bodies as its parts, so a slicer loads them as one object with parts); lay_on_print_faces?: bool (STL and 3MF only, default false: each body with a print face (body.print_face) is written laid on it, as a slicer export lays it → print_faces: the bodies laid, warnings: each body that has a print face but was written as it lies); solids?: body|face (ASCII STL, format stla only, default body: face writes one `solid <name>` block per B-rep face, named by the face's persistent name, for CFD meshers; docs/formats/stl-face-solids.md)"),
     // One command per format, so each File › Export item can have a key of its own; started
     // from a key or command search, the app opens the save picker (the mesh dialog for STL and
     // 3MF). Each takes `file.export`'s parameters for its format, without `format`.
@@ -133,7 +133,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .noundo()
         .contract(&EXPORT_STL_CONTRACT)
         .output(crate::schema::output_schema_for::<crate::schema::file::ExportResult>)
-        .params("path; bodies?: [names] (default: every body); quality?: standard|fine|finest (default standard); lay_on_print_faces?: bool (default false: as file.export) → {path, bytes, format, print_faces?, warnings?}: binary STL, whatever the path's extension"),
+        .params("path; bodies?: [names] (default: every body); quality?: standard|fine|finest (default standard); lay_on_print_faces?: bool (default false: as file.export); ascii?: bool (default false: true writes ASCII STL); solids?: body|face (default body; face, with ascii: true only: one named solid per B-rep face, as file.export) → {path, bytes, format, print_faces?, warnings?}: STL (binary unless ascii), whatever the path's extension"),
     CommandSpec::new("file.export_3mf", "Export 3MF", crate::checked!("file.export_3mf", export_3mf))
         .icon("mesh_export")
         .noundo()
@@ -388,11 +388,19 @@ struct DesignSnapshot {
     revision: u64,
     evaluations: usize,
     active_sketch: Option<u64>,
+    sketching_view: Option<u64>,
 }
 
 impl DesignSnapshot {
     fn of(s: &Session) -> Self {
-        Self { doc: s.doc.clone(), model: s.model.clone(), revision: s.revision, evaluations: s.evaluations, active_sketch: s.active_sketch }
+        Self {
+            doc: s.doc.clone(),
+            model: s.model.clone(),
+            revision: s.revision,
+            evaluations: s.evaluations,
+            active_sketch: s.active_sketch,
+            sketching_view: s.sketching_view,
+        }
     }
 
     fn restore(self, s: &mut Session) {
@@ -401,6 +409,7 @@ impl DesignSnapshot {
         s.revision = self.revision;
         s.evaluations = self.evaluations;
         s.active_sketch = self.active_sketch;
+        s.sketching_view = self.sketching_view;
     }
 }
 
@@ -1538,12 +1547,14 @@ fn open(s: &mut Session, p: &Value) -> Result<Value> {
     let verify = bool_(p, "verify").unwrap_or(false);
     // Stamped before it is read: a write while it is being read is a change too.
     let disk = solidcraft_io::design_lock::stamp(path);
-    let (doc, saved) = read_design(s, path)?;
-    // A file with provenance is evaluated from its timeline, never from a cache the signature
-    // does not cover.
-    let saved = if solidcraft_io::has_design_provenance(path) { None } else { saved };
-    let opened = Session::opened_at_validating(doc, saved.as_ref(), Some(path), s.validation());
-    opened_design(s, opened, path, read_only, disk, verify, None)
+    // One reading of the file gives the document, the model (none for a signed file: it is
+    // evaluated from its timeline, never from a cache the signature does not cover), the
+    // provenance records and the signature check.
+    let file = read_design(s, path, verify)?;
+    let mut doc = file.doc;
+    super::component_link::resolve_design_links(&mut doc, Some(path));
+    let opened = Session::opened_validating(doc, file.model.as_ref(), s.validation()).located_with(Some(path), file.chain.clone());
+    opened_design(s, opened, path, read_only, disk, verify.then_some(file.report), file.chain)
 }
 
 /// Whether running `command` with `params` runs an installed importer plugin's code:
@@ -1589,12 +1600,12 @@ fn unreadable_design(path: &str, reason: &str) -> EngineError {
 }
 
 /// Read the design file at `path` for `doc.open`, under its file's name if it has none of its own.
-fn read_design(s: &mut Session, path: &str) -> Result<(Document, Option<solidcraft_doc::SavedModel>)> {
-    let (mut doc, saved) = solidcraft_io::read_design_file(path, s.open_preview.take()).map_err(|e| unreadable_design(path, &e.to_string()))?;
-    if let Some(stem) = default_name_for(&doc.name, path) {
-        doc.name = stem;
+fn read_design(s: &mut Session, path: &str, verify: bool) -> Result<solidcraft_io::DesignFile> {
+    let mut file = solidcraft_io::read_design_file_once(path, s.open_preview.take(), verify).map_err(|e| unreadable_design(path, &e.to_string()))?;
+    if let Some(stem) = default_name_for(&file.doc.name, path) {
+        file.doc.name = stem;
     }
-    Ok((doc, saved))
+    Ok(file)
 }
 
 /// `doc.open` of a design: `opened`, the design read from `path` and evaluated, takes `s`'s
@@ -1605,18 +1616,16 @@ fn opened_design(
     path: &str,
     read_only: bool,
     disk: Option<solidcraft_io::design_lock::FileStamp>,
-    verify: bool,
     checked: Option<Option<solidcraft_io::ProvenanceReport>>,
+    chain: Option<solidcraft_io::ProvenanceChain>,
 ) -> Result<Value> {
     s.replace_design(opened);
     s.disk = disk;
     s.read_only = read_only;
-    s.provenance_chain = solidcraft_io::read_design_provenance_chain_file(path);
-    // A staged open checks on its worker before it lands; the report is then just taken here.
-    s.provenance = match checked {
-        Some(report) => report,
-        None => verify.then(|| solidcraft_io::read_design_provenance_file(path)).flatten(),
-    };
+    // Both from the reading the design came from (`read_design`): the signature check, when it
+    // was asked for, is the check of these bytes.
+    s.provenance_chain = chain;
+    s.provenance = checked.flatten();
     // A design saved with print faces (by an older version, or with them kept) opens without
     // them when they are not kept (#11512). The rest of it opens as saved, and dropping them is
     // neither an unsaved change nor a step to undo.
@@ -2179,11 +2188,17 @@ impl Session {
 
     /// This session, just opened, as the design in the file at `path`.
     pub(crate) fn located(self, path: Option<&str>) -> Self {
-        let mut session = self;
-        session.path = path.map(str::to_owned);
         // A saved design keeps its provenance for the next save to append to, whichever path
         // opened it (the UI, the CLI, recovery, a linked design).
-        session.provenance_chain = path.and_then(solidcraft_io::read_design_provenance_chain_file);
+        let chain = path.and_then(solidcraft_io::read_design_provenance_chain_file);
+        self.located_with(path, chain)
+    }
+
+    /// [`Self::located`] with the provenance records `chain` already read with the design.
+    pub(crate) fn located_with(self, path: Option<&str>, chain: Option<solidcraft_io::ProvenanceChain>) -> Self {
+        let mut session = self;
+        session.path = path.map(str::to_owned);
+        session.provenance_chain = chain;
         // A design saved before body names were pinned (#6403) is pinned now, as its first
         // command would pin it: that command pinned them as part of itself, so undoing it went
         // back to the unpinned design, whose fingerprints no evaluated result matched, and the
@@ -2396,7 +2411,8 @@ fn saved_geometry_now(s: &Session, design: &Document) -> Option<(solidcraft_doc:
 
 /// Cache only warm display geometry. A save never waits for an unevaluated mesh.
 fn saved_preview(s: &Session) -> Option<solidcraft_io::DesignPreview> {
-    if s.active_sketch.is_some() || !s.pending_moves.is_empty() || s.model.results.iter().any(|r| r.error.is_some()) {
+    // Nor while a joint drag shows a frame: the world placed for it is not the design's.
+    if s.active_sketch.is_some() || !s.pending_moves.is_empty() || !s.drag_moves().is_empty() || s.model.results.iter().any(|r| r.error.is_some()) {
         return None;
     }
     let world = s.cached_world_state()?;
@@ -2671,6 +2687,8 @@ fn export(s: &mut Session, p: &Value) -> Result<Value> {
     {
         return Err(bad("file.export", format!("`format: {f}` disagrees with the path's extension, which picks the OpenUSD encoding")));
     }
+    // Checked first so URDF and SDF refuse `solids: face` too, rather than ignoring it.
+    let face_solids = stl_solids(p, cmd, format)?;
     if format == Format::Urdf {
         if !string_list(cmd, p, "bodies")?.is_empty() {
             return Err(bad(cmd, "urdf exports the whole assembly; omit bodies"));
@@ -2683,7 +2701,11 @@ fn export(s: &mut Session, p: &Value) -> Result<Value> {
     let quality = mesh_quality(p, cmd)?;
     let parts = mesh_parts(s, p, cmd, format)?;
     let bodies = string_list(cmd, p, "bodies")?;
-    if lay_on_print_faces(p, cmd, format)? {
+    let lay = lay_on_print_faces(p, cmd, format)?;
+    if face_solids {
+        return export_face_solids(s, path, &bodies, quality, lay);
+    }
+    if lay {
         return export_laid(s, path, format, &bodies, &parts, quality);
     }
     export_to(s, cmd, path, format, &bodies, &parts, quality)
@@ -2699,10 +2721,58 @@ fn export_stl(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "file.export_stl";
     let path = path_arg(p, cmd)?;
     let (bodies, quality) = (string_list(cmd, p, "bodies")?, mesh_quality(p, cmd)?);
-    if lay_on_print_faces(p, cmd, Format::StlBinary)? {
-        return export_laid(s, path, Format::StlBinary, &bodies, &[], quality);
+    let format = match p.get("ascii") {
+        None | Some(Value::Null) | Some(Value::Bool(false)) => Format::StlBinary,
+        Some(Value::Bool(true)) => Format::StlAscii,
+        Some(_) => return Err(bad(cmd, "`ascii` must be true or false")),
+    };
+    let lay = lay_on_print_faces(p, cmd, format)?;
+    if stl_solids(p, cmd, format)? {
+        return export_face_solids(s, path, &bodies, quality, lay);
     }
-    export_to(s, cmd, path, Format::StlBinary, &bodies, &[], quality)
+    if lay {
+        return export_laid(s, path, format, &bodies, &[], quality);
+    }
+    export_to(s, cmd, path, format, &bodies, &[], quality)
+}
+
+/// `solids` as the STL exports read it: `body` (the default) writes one solid for the file, `face`
+/// one named solid for each B-rep face ([`export_face_solids`]). `face` is for ASCII STL: binary
+/// STL has no names, so it is refused there and for every other format.
+fn stl_solids(p: &Value, cmd: &str, format: Format) -> Result<bool> {
+    match p.get("solids") {
+        None | Some(Value::Null) => Ok(false),
+        Some(Value::String(v)) if v == "body" => Ok(false),
+        Some(Value::String(v)) if v == "face" && format == Format::StlAscii => Ok(true),
+        Some(Value::String(v)) if v == "face" => {
+            Err(bad(cmd, "`solids: face` needs ASCII STL (format stla, or ascii: true): binary STL and other formats have no named solids"))
+        }
+        Some(v) => Err(bad(cmd, format!("`solids` must be body or face, not {v}"))),
+    }
+}
+
+/// The ASCII STL export with `solids: face` (docs/formats/stl-face-solids.md): one named solid for
+/// each B-rep face, from the same mesh as the plain STL export. With `lay` each body with a print
+/// face is laid on it, as [`write_laid`] does.
+fn export_face_solids(s: &Session, path: &str, bodies: &[String], quality: solidcraft_io::MeshQuality, lay: bool) -> Result<Value> {
+    solidcraft_io::vfs::check(path).map_err(|e| EngineError::Other(format!("{path}: {e}")))?;
+    let mut state = s.doc.painted(&*s.world_state()?);
+    let laid = if lay { print_face::lay_on_print_faces(s, &mut state, bodies, &[]) } else { print_face::Laid::default() };
+    let (bytes, notes) = solidcraft_io::export_stl_face_solids(&state, bodies, quality)?;
+    solidcraft_io::vfs::write(path, &bytes).map_err(|e| EngineError::Other(format!("{path}: {e}")))?;
+    let mut warnings = laid.warnings;
+    warnings.extend(notes);
+    let skipped = skipped_from_warnings(&warnings);
+    let reply = ExportResult {
+        path: path.to_string(),
+        bytes: bytes.len(),
+        format: format!("{:?}", Format::StlAscii),
+        print_faces: laid.bodies,
+        skipped,
+        warnings,
+        ..ExportResult::default()
+    };
+    serde_json::to_value(reply).map_err(|e| EngineError::Other(e.to_string()))
 }
 
 fn export_3mf(s: &mut Session, p: &Value) -> Result<Value> {
@@ -3276,6 +3346,56 @@ mod tests {
         other.follow_file_rename("opfs://Plate.solidcraft", "opfs://Bracket.solidcraft");
         assert_eq!(other.path.as_deref(), Some("opfs://Other.solidcraft"));
         assert_eq!(other.doc.name, "Other");
+    }
+
+    /// `solids: face` writes one named ASCII STL solid per B-rep face, named by the face's
+    /// persistent name, from the triangles the plain export writes; the default is unchanged.
+    #[test]
+    fn stl_with_one_solid_per_face_names_each_face_and_keeps_the_triangles() {
+        let dir = std::env::temp_dir().join(format!("solidcraft-stl-faces-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let at = |n: &str| dir.join(n).to_string_lossy().to_string();
+        let mut s = Session::default();
+        s.execute("solid.box", &json!({"length": 10, "width": 20, "height": 30, "body_name": "B"})).unwrap();
+        let faces = s.execute("model.faces", &json!({"body": "B"})).unwrap();
+        let mut want: Vec<String> = faces["faces"].as_array().unwrap().iter().filter_map(|f| f["name"].as_str().map(str::to_string)).collect();
+        want.sort();
+        // Every variant goes to the same path: the solid's name is the file stem.
+        let read = || std::fs::read_to_string(at("part.stl")).unwrap();
+        s.execute("file.export", &json!({"path": at("part.stl"), "format": "stla"})).unwrap();
+        let plain = read();
+        s.execute("file.export", &json!({"path": at("part.stl"), "format": "stla", "solids": "body"})).unwrap();
+        let body = read();
+        s.execute("file.export_stl", &json!({"path": at("part.stl"), "ascii": true, "solids": "face"})).unwrap();
+        let faced = read();
+        assert_eq!(plain, body, "solids: body is the plain export, byte for byte");
+        let mut names: Vec<String> = faced.lines().filter_map(|l| l.strip_prefix("solid ")).map(str::to_string).collect();
+        names.sort();
+        assert_eq!(names, want, "six blocks, named by the faces' persistent names");
+        assert_eq!(faced.matches("endsolid ").count(), 6);
+        assert_eq!(faced.matches("facet normal").count(), plain.matches("facet normal").count(), "the triangles are the plain export's");
+    }
+
+    /// Per-face solids need ASCII: binary STL, other formats and other values are refused.
+    #[test]
+    fn stl_solids_per_face_is_refused_for_binary_and_other_formats() {
+        let dir = std::env::temp_dir().join(format!("solidcraft-stl-faces-refused-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let at = |n: &str| dir.join(n).to_string_lossy().to_string();
+        let mut s = Session::default();
+        s.execute("solid.box", &json!({"length": 10, "width": 10, "height": 10})).unwrap();
+        for (cmd, params) in [
+            ("file.export_stl", json!({"path": at("a.stl"), "solids": "face"})),
+            ("file.export", json!({"path": at("a.stl"), "format": "stl", "solids": "face"})),
+            ("file.export", json!({"path": at("a.3mf"), "solids": "face"})),
+            ("file.export", json!({"path": at("robot.urdf"), "format": "urdf", "solids": "face"})),
+            ("file.export", json!({"path": at("robot"), "format": "sdf", "solids": "face"})),
+            ("file.export_stl", json!({"path": at("a.stl"), "ascii": true, "solids": "patch"})),
+        ] {
+            let e = s.execute(cmd, &params).unwrap_err().to_string();
+            assert!(e.contains("solids"), "{cmd} {params}: {e}");
+        }
+        assert!(!std::path::Path::new(&at("a.stl")).exists() && !std::path::Path::new(&at("a.3mf")).exists());
     }
 
     /// Every placement of a part is its first placement's triangles, moved: a copy moved by a

@@ -282,9 +282,9 @@ joystick instead of the mouse wheel. Delete the file to undo it.
 ### Shift+right-click in Firefox
 
 In Firefox, holding Shift while you right-click opens Firefox's own menu (Save Image As…,
-Inspect and so on), and a web page can't stop it. On Linux, SolidCraft doesn't see the click at
-all: the face isn't selected and SolidCraft's menu doesn't open. On Windows, SolidCraft selects
-the face and opens its menu, and Firefox's menu opens on top. Chrome, Edge and the desktop app
+Inspect and so on), and a web page can't stop it. SolidCraft opens no menu of its own under
+Firefox's, and says on the status line that the browser took the click. On Linux, SolidCraft
+doesn't see the click at all: the face isn't selected either. Chrome, Edge and the desktop app
 aren't affected.
 
 The gestures this blocks in Firefox, and what to use instead:

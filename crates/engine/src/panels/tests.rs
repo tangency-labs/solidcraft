@@ -2656,6 +2656,31 @@ fn headless_cannot_claim_native_support_even_when_an_injected_service_sets_nativ
     assert_eq!(backend.service.inspect(), before);
 }
 
+/// A catalogue snapshot as plain JSON, as preferences and profiles keep it, never base64: its
+/// presets, workspaces and remembered layouts with their records' text and recovery bytes, written
+/// back to the same snapshot byte for byte, bytes that aren't text included.
+#[test]
+fn a_catalogue_snapshot_round_trips_through_plain_json_byte_for_byte() {
+    use commands::LayoutCatalogue;
+    let grown = future_registry(&["a", "b", "c"]);
+    let fallback = persistence_fallback();
+    let dormant = decode(&serde_json::to_vec(&future_group()).unwrap(), &future_registry(&["a"]), &fallback).unwrap().envelope;
+    let mut catalogue = fixture_command_catalogue(&grown).unwrap();
+    catalogue.remember(&dormant, Some(&[0xff, 0x00, b'r', 0xfe]), &grown).unwrap();
+    let snapshot = catalogue.state().export().unwrap();
+    let value = commands::snapshot_value(&snapshot).unwrap();
+    assert!(value["remembered"][0]["record"]["text"].is_string(), "{value}");
+    assert_eq!(value["remembered"][0]["rejected"], serde_json::json!({"bytes": [255, 0, 114, 254]}), "bytes that aren't text, as numbers");
+    assert_eq!(commands::snapshot_from_value(&value).unwrap(), snapshot);
+    let text = value.to_string();
+    let reread: serde_json::Value = serde_json::from_str(&text).unwrap();
+    assert_eq!(commands::snapshot_from_value(&reread).unwrap(), snapshot, "through its text too");
+    for broken in [serde_json::json!({}), serde_json::json!({"builtins": [], "users": [], "workspaces": [], "remembered": [{"workspace": "x"}]})] {
+        assert!(commands::snapshot_from_value(&broken).is_err(), "{broken}");
+    }
+    assert!(commands::snapshot_value(b"not a snapshot").is_err());
+}
+
 #[test]
 fn registry_growth_save_and_live_mutation_keep_uncommitted_reappearance_retryable() {
     use commands::LayoutCatalogue;
