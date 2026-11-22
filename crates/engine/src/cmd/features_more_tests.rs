@@ -1988,6 +1988,34 @@ fn extrude_auto_from_a_hidden_bodys_face_makes_a_new_body() {
     }
 }
 
+/// Down from a hidden body's face into the shown cube, Auto cuts only the shown cube.
+#[test]
+fn extrude_auto_cut_from_a_hidden_bodys_face_leaves_it_alone() {
+    for hide in ["body", "own"] {
+        let mut s = sketch_on_a_hidden_face(hide, |s, at| {
+            run(s, "sketch.rectangle.two_point", json!({"p0": at(8.0, 2.0), "p1": at(16.0, 8.0)}));
+        });
+        run(&mut s, "solid.extrude", json!({"distance": -3, "operation": "auto"}));
+        assert!((body_volume(&s, "Stock") - 1000.0).abs() < 1e-6, "{hide}: Stock {:.1}", body_volume(&s, "Stock"));
+        assert!(body_volume(&s, "Block") < 1000.0 - 1.0, "{hide}: Block {:.1}", body_volume(&s, "Block"));
+    }
+}
+
+#[test]
+fn extrude_join_refuses_a_hidden_top_level_sketch_face_body() {
+    let mut s = sketch_on_a_hidden_face("own", rectangle_over_both_cubes);
+    assert_join_refused(&mut s, "solid.extrude", json!({"distance": 3, "operation": "join"}));
+}
+
+/// A Join that names its target keeps it, hidden face or not.
+#[test]
+fn extrude_join_from_a_hidden_bodys_face_into_a_named_target() {
+    let mut s = sketch_on_a_hidden_face("body", rectangle_over_both_cubes);
+    run(&mut s, "solid.extrude", json!({"distance": 3, "operation": "join", "targets": ["Block"]}));
+    assert!((body_volume(&s, "Stock") - 1000.0).abs() < 1e-6, "Stock {:.1}", body_volume(&s, "Stock"));
+    assert!(body_volume(&s, "Block") > 1000.0 + 1.0, "Block {:.1}", body_volume(&s, "Block"));
+}
+
 /// Auto with explicit participants keeps them: the Join goes into the named shown cube.
 #[test]
 fn extrude_auto_from_a_hidden_bodys_face_keeps_named_participants() {

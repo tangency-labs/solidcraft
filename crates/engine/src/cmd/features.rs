@@ -333,11 +333,10 @@ fn auto_operation_in(s: &Session, p: &Value, st: &solidcraft_doc::ModelState) ->
         (point, normal)
     } else {
         if p.get("face").is_none() {
-            let reached = feature_sketch(s, p, "Extrude").ok().and_then(|sketch| face_body_reached(s, sketch).ok().flatten());
-            (started_on, hidden_face) = match reached {
-                Some(b) if !s.body_visible(&b) => (None, Some(b)),
-                reached => (reached, None),
-            };
+            if let Ok(sketch) = feature_sketch(s, p, "Extrude") {
+                hidden_face = hidden_face_body(s, sketch);
+                started_on = face_body_reached(s, sketch).ok().flatten().filter(|_| hidden_face.is_none());
+            }
         }
         extrude_base(s, p)?
     };
@@ -1155,15 +1154,17 @@ fn extrude_from(s: &mut Session, p: &Value, grouped: Option<FaceProfile>) -> Res
         _ if p.get("thin").is_some_and(|v| !v.is_boolean()) => return Err(bad(cmd, "`thin` must be true or false")),
         _ => None,
     };
-    let operation = match str_(p, "operation") {
-        Some(o) if o.eq_ignore_ascii_case("auto") => {
-            let auto = Operation::parse(auto_operation_in(s, p, &s.model.state()).unwrap_or("new")).unwrap_or(Operation::NewBody);
-            // A Join that names no body would be refused for a hidden face body: Auto makes a new body.
-            let hidden = face_body.is_none() && face_body_reached(s, sketch).ok().flatten().is_some_and(|b| !s.body_visible(&b));
-            let named = !string_list(cmd, p, "targets")?.is_empty() || !string_list(cmd, p, "participants")?.is_empty();
-            if auto == Operation::Join && hidden && !named { Operation::NewBody } else { auto }
+    let auto = str_(p, "operation").is_some_and(|o| o.eq_ignore_ascii_case("auto"));
+    let named = !string_list(cmd, p, "targets")?.is_empty() || !string_list(cmd, p, "participants")?.is_empty();
+    // Auto leaves the hidden body the sketch is on alone, as its probe does.
+    let auto_hidden = if auto && face_body.is_none() && !named { hidden_face_body(s, sketch) } else { None };
+    let operation = if auto {
+        match Operation::parse(auto_operation_in(s, p, &s.model.state()).unwrap_or("new")).unwrap_or(Operation::NewBody) {
+            Operation::Join if auto_hidden.is_some() => Operation::NewBody,
+            o => o,
         }
-        _ => operation(p, cmd)?,
+    } else {
+        operation(p, cmd)?
     };
     let mut targets = string_list(cmd, p, "targets")?;
     let mut p = std::borrow::Cow::Borrowed(p);
@@ -1178,6 +1179,11 @@ fn extrude_from(s: &mut Session, p: &Value, grouped: Option<FaceProfile>) -> Res
             Some(body) => Some(body),
             None => shown_face_body(s, sketch, cmd)?,
         });
+    } else if let Some(hidden) = auto_hidden.filter(|_| operation == Operation::Cut) {
+        let st = s.model.state();
+        let shown: Vec<String> =
+            active_scope(s, &st).into_iter().filter(|b| b.name != hidden && s.body_visible(&b.name) && !b.is_surface()).map(|b| b.name.clone()).collect();
+        p.to_mut()["participants"] = json!(shown);
     } else if let Some(parts) = cut_scope(s, &p, operation, sketch, face_body, cmd)? {
         p.to_mut()["participants"] = json!(parts);
     }
@@ -1354,6 +1360,11 @@ fn sketch_face_body(s: &Session, sketch: u64) -> Option<String> {
     };
     let st = s.model.state();
     active_scope(s, &st).into_iter().find(|b| b.name == anchor.target.body).map(|b| b.name.clone())
+}
+
+/// The body `sketch` is on when it or its placement is hidden.
+fn hidden_face_body(s: &Session, sketch: u64) -> Option<String> {
+    face_body_reached(s, sketch).ok().flatten().filter(|b| !s.body_visible(b))
 }
 
 /// [`face_body_reached`] as a Join's default target, refused when that body or its placement is
