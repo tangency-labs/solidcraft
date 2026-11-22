@@ -1386,6 +1386,9 @@ fn fit_sheet_keeps_the_paper_clear_of_the_ribbon_browser_and_history() {
 #[test]
 fn fit_sheet_frames_beside_a_short_browser_not_under_it() {
     let (mut h, _) = plate_sheet();
+    // The Browser floats over the whole Drawing workspace here, not over one tiled card.
+    h.app.preferences.workspace_follows_view = false;
+    h.frames(4);
     h.call("ui.resize", json!({"width": 1280, "height": 720}));
     h.frames(6);
     let canvas = h.app.viewport.rect.unwrap();
