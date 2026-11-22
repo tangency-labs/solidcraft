@@ -3390,6 +3390,19 @@ fn pipe_scale_offset_bounding_and_materials() {
     assert!(s.execute("material.assign", &json!({"bodies": ["Cube"], "material": "unobtainium"})).is_err());
 }
 
+/// #18344: a wall is a thickness. A user who wants a hollow pipe typed "hollow" into the Wall
+/// field, and the refusal says what a wall is.
+#[test]
+fn a_pipe_wall_that_is_not_a_thickness_says_what_a_wall_is() {
+    let mut s = Session::default();
+    run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Path"}));
+    run(&mut s, "sketch.line", json!({"points": [[0, 0], [30, 0]], "ids": ["l1"]}));
+    run(&mut s, "sketch.finish", json!({}));
+    let e = s.execute("solid.pipe", &json!({"path_sketch": "Path", "path": ["l1"], "diameter": 8, "wall": "hollow"})).unwrap_err().to_string();
+    assert!(e.contains("must be a thickness"), "{e}");
+    assert!(!e.contains("unknown parameter"), "{e}");
+}
+
 /// A Bounding Solid of listed bodies (no `contents`), as every saved design has it, keeps the box
 /// it always built: around the bodies' display meshes, not their exact bounds, so a design saved
 /// before component envelopes rebuilds at the same size.
