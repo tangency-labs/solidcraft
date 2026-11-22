@@ -391,9 +391,8 @@ impl OffsetCurve {
     /// # Errors
     ///
     /// `SM_ERR` when the base curve's first derivative stays zero after a
-    /// finite-difference retry; `SM_ERR_INVALID_INPUT` when the binormal is zero;
-    /// `SM_ERR` from the unit binormal derivatives; those of the base curve's
-    /// evaluator.
+    /// finite-difference retry; `SM_ERR_INVALID_INPUT` when the binormal is zero; those
+    /// of the base curve's evaluator.
     pub fn evaluate(
         &self,
         k: &Kernel,
@@ -491,20 +490,19 @@ impl OffsetCurve {
         } else if num_calc == 2 {
             let bin_t = pv[2].cross(self.normal);
             let bin_tt = pv[3].cross(self.normal);
-            let [a, b] = bin.unitized_derivative2(bin_t, bin_tt).map_err(|_| {
-                SolidError::curve(OP_EVAL, CurveFailure::NoOffsetDirection { t: at })
-            })?;
+            // `unitize` above refused |bin|^2 < EFF_ZERO_SQ; the helpers fail only for
+            // |bin| < EFF_ZERO, the same binormals (sqrt is monotone and
+            // sqrt(EFF_ZERO_SQ) == EFF_ZERO), so neither fails here. On failure they hold
+            // the values upstream writes, which are kept.
+            let (Ok([a, b]) | Err([a, b])) = bin.unitized_derivative2(bin_t, bin_tt);
             ubin_t = a;
             ubin_tt = b;
         } else if num_calc == 3 {
             let bin_t = pv[2].cross(self.normal);
             let bin_tt = pv[3].cross(self.normal);
             let bin_ttt = pv[4].cross(self.normal);
-            let [a, b, c] = bin
-                .unitized_derivative3(bin_t, bin_tt, bin_ttt)
-                .map_err(|_| {
-                    SolidError::curve(OP_EVAL, CurveFailure::NoOffsetDirection { t: at })
-                })?;
+            // cannot fail, as for two derivatives
+            let (Ok([a, b, c]) | Err([a, b, c])) = bin.unitized_derivative3(bin_t, bin_tt, bin_ttt);
             ubin_t = a;
             ubin_tt = b;
             ubin_ttt = c;
