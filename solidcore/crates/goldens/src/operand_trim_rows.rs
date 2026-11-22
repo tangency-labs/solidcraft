@@ -1522,8 +1522,9 @@ mod trim_blocks {
     ///   with no trim (nor its mate) gets the one made from its edge when a caller asks for
     ///   it ([`remade`]); every trim then lies on its edge within the edge's tolerance
     ///   ([`certify_edgeuse`]), the kept trims included (in the `heal.heal_data_p3` seam
-    ///   cuts, the cut's trims on edge uses 1 and 11 too). So a consumer of the body gets
-    ///   trims on its edges, and a dropped trim is equal or closer, never farther.
+    ///   cuts, the cut's trims on edge uses 1 and 11 too, which the healer must have kept).
+    ///   So a consumer of the body gets trims on its edges, and a dropped trim is equal or
+    ///   closer, never farther.
     ///
     /// The trims made again, in all.
     fn certify_drops(runner: &dyn UnitDiff, rows: &[DropRow], drop: fn(f64, f64) -> bool) -> usize {
@@ -1538,25 +1539,30 @@ mod trim_blocks {
             let out = with_hook(
                 Box::new(move |b: &mut Brep| {
                     let k = Kernel::default();
+                    // the seam cut's own trims, which a sampled check once put off their
+                    // edges: the healer keeps them (checked on its body, before any trim
+                    // is made again), and they are certified below like the rest
+                    if name.starts_with("split_face_seam_cone_") {
+                        let kept: Vec<u32> = b
+                            .edgeuses()
+                            .iter()
+                            .filter(|(_, r)| r.uv_trim_curve.is_some())
+                            .map(|(eu, _)| eu.index())
+                            .collect();
+                        for eu in [1, 11] {
+                            assert!(kept.contains(&eu), "{name}: no kept trim on edge use {eu}");
+                        }
+                    }
                     let (s, n) = remade(&k, b);
                     *made_sink.borrow_mut() += n;
-                    let mut certified = Vec::new();
                     for (eu, r) in s.edgeuses().iter() {
                         if r.uv_trim_curve.is_none() {
                             continue;
                         }
-                        certified.push(eu.index());
                         let tol = s.edge(r.edge.unwrap()).unwrap().tolerance;
                         let c = certify_edgeuse(&k, &s, eu, 0.125 * tol)
                             .unwrap_or_else(|e| panic!("{name}: edge use {}: {e}", eu.index()));
                         sink.borrow_mut().push(c);
-                    }
-                    // the seam cut's own trims, which a sampled check once put off their
-                    // edges, are kept and certified like the rest
-                    if name.starts_with("split_face_seam_cone_") {
-                        for eu in [1, 11] {
-                            assert!(certified.contains(&eu), "{name}: no trim on edge use {eu}");
-                        }
                     }
                 }),
                 || runner.run_rust(&case),
