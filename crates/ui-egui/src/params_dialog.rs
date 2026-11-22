@@ -141,6 +141,8 @@ struct Row {
     comment: String,
     source: String,
     group: String,
+    /// The component the row's sketch or feature belongs to; 0 = the top level.
+    component: u64,
     favorite: bool,
     /// A text parameter's text.
     text: Option<String>,
@@ -174,6 +176,12 @@ fn rows(app: &mut SolveApp) -> Vec<Row> {
             }
         }
     }
+    // The component each sketch or feature belongs to, as the design records it.
+    let doc = &app.session.doc;
+    let mut component_of: std::collections::HashMap<&str, u64> = Default::default();
+    for f in &doc.features {
+        component_of.insert(f.name.as_str(), shown_component(&doc.components, f.component));
+    }
     let s = |v: &Value, k: &str| v.get(k).and_then(Value::as_str).unwrap_or_default().to_string();
     list["parameters"]
         .as_array()
@@ -187,7 +195,9 @@ fn rows(app: &mut SolveApp) -> Vec<Row> {
                 "sketch" => owner.get(&name).cloned().unwrap_or_else(|| "Sketch".into()),
                 _ => String::new(),
             };
+            let component = component_of.get(group.as_str()).copied().unwrap_or(0);
             Row {
+                component,
                 expression: s(r, "expression"),
                 unit: s(r, "unit"),
                 // The dialog shows the parameter's own unit, so it reads `display_value`
@@ -203,6 +213,52 @@ fn rows(app: &mut SolveApp) -> Vec<Row> {
             }
         })
         .collect()
+}
+
+/// The component to list a feature under: its own when it is in the design tree, else the top
+/// level (a component that is missing, or whose parents never reach the top, cannot be shown
+/// as a folder).
+fn shown_component(components: &[solidcraft_engine::doc::Component], id: u64) -> u64 {
+    let mut at = id;
+    for _ in 0..=components.len() {
+        if at == 0 {
+            return id;
+        }
+        match components.iter().find(|c| c.id == at) {
+            Some(c) => at = c.parent,
+            None => return 0,
+        }
+    }
+    0
+}
+
+/// The model groups of the components under `parent`, nested the way the components are.
+/// A component with no listed rows (and none below it) gets no folder.
+fn component_folders(
+    app: &mut SolveApp,
+    ui: &mut egui::Ui,
+    d: &mut ParamsDialog,
+    components: &[(u64, u64, String)],
+    parent: u64,
+    groups: &[(&str, Vec<&Row>)],
+    name_floor: f32,
+) {
+    fn has_rows(components: &[(u64, u64, String)], id: u64, groups: &[(&str, Vec<&Row>)], depth: usize) -> bool {
+        groups.iter().any(|(_, m)| m.first().is_some_and(|r| r.component == id))
+            || (depth < components.len()
+                && components.iter().any(|(child, up, _)| *up == id && *child != id && has_rows(components, *child, groups, depth + 1)))
+    }
+    for (id, up, name) in components {
+        if *up != parent || *id == 0 || *id == parent || !has_rows(components, *id, groups, 0) {
+            continue;
+        }
+        ui_kit::section(ui, ("pcomponent", *id), name, true, |ui| {
+            for (group, members) in groups.iter().filter(|(_, m)| m.first().is_some_and(|r| r.component == *id)) {
+                model_group(app, ui, d, group, members, name_floor);
+            }
+            component_folders(app, ui, d, components, *id, groups, name_floor);
+        });
+    }
 }
 
 fn show_value(r: &Row) -> String {
@@ -385,9 +441,14 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
                             {
                                 d.groups_drawn = 0;
                             }
-                            for (group, members) in groups {
-                                model_group(app, ui, &mut d, group, &members, name_floor);
+                            // Top-level features first, then a folder per component, nested like
+                            // the component tree (#20648).
+                            for (group, members) in groups.iter().filter(|(_, m)| m.first().is_none_or(|r| r.component == 0)) {
+                                model_group(app, ui, &mut d, group, members, name_floor);
                             }
+                            let components: Vec<(u64, u64, String)> =
+                                app.session.doc.components.iter().map(|c| (c.id, c.parent, c.name.clone())).collect();
+                            component_folders(app, ui, &mut d, &components, 0, &groups, name_floor);
                         });
                     });
                 });
@@ -2608,6 +2669,51 @@ mod tests {
         h.frames(5);
         assert_eq!(h.app.params.as_ref().unwrap().group_sizes.len(), 1, "filtering invalidates the group layout");
         assert!(crate::scenario::handle_at(&format!("param:{last}")).is_some());
+    }
+
+    /// #20648: model parameters sit under the component their feature belongs to: top-level
+    /// features first, then a folder per component; a design without components stays flat.
+    #[test]
+    fn model_parameters_group_under_their_component() {
+        use solidcraft_engine::doc::{Document, FeatureKind, PlaneRef};
+        let plane = |i: u32| FeatureKind::ConstructionPlane {
+            plane: PlaneRef::Offset { base: Box::new(PlaneRef::Origin { name: "XY".into() }), distance: format!("{} mm", i + 1).into() },
+        };
+        let mut doc = Document::default();
+        let a = doc.add_component(Some("Frame"), 0).unwrap();
+        let b = doc.add_component(Some("Lid"), 0).unwrap();
+        for (name, component) in [("PlaneB", b), ("PlaneA", a), ("PlaneTop", 0)] {
+            doc.add_feature(plane(1), Some(name)).unwrap();
+            if let Some(f) = doc.features.iter_mut().find(|f| f.name == name) {
+                f.component = component;
+            }
+        }
+        let mut h = crate::scenario::Harness::new();
+        h.app.home.open = false;
+        h.app.session = solidcraft_engine::Session::new(doc);
+        h.app.start("parameters.change");
+        h.frames(5);
+        let y_of = |h: &crate::scenario::Harness, group: &str| {
+            let listed = &h.app.params.as_ref().unwrap().listed.as_ref().unwrap().1;
+            let row = listed.iter().find(|r| r.group == group).unwrap();
+            crate::scenario::handle_at(&format!("param:{}", row.name)).unwrap().y
+        };
+        let listed = h.app.params.as_ref().unwrap().listed.as_ref().unwrap().1.clone();
+        let component = |group: &str| listed.iter().find(|r| r.group == group).unwrap().component;
+        assert_eq!((component("PlaneTop"), component("PlaneA"), component("PlaneB")), (0, a, b));
+        let (top, frame, lid) = (y_of(&h, "PlaneTop"), y_of(&h, "PlaneA"), y_of(&h, "PlaneB"));
+        assert!(top < frame && top < lid, "the top-level feature stays first: {top} {frame} {lid}");
+        assert!(frame < lid, "each component's rows follow the component order");
+
+        let mut flat = Document::default();
+        flat.add_feature(plane(1), Some("PlaneTop")).unwrap();
+        h.app.session = solidcraft_engine::Session::new(flat);
+        h.app.params = None;
+        h.app.start("parameters.change");
+        h.frames(5);
+        let listed = &h.app.params.as_ref().unwrap().listed.as_ref().unwrap().1;
+        assert!(listed.iter().all(|r| r.component == 0), "a design without components lists every row at the top level");
+        assert!(crate::scenario::handle_at(&format!("param:{}", listed.iter().find(|r| r.group == "PlaneTop").unwrap().name)).is_some());
     }
 
     /// #2919: the add row starts blank; a blank expression shows no error and adds nothing, and
