@@ -122,6 +122,9 @@ pub struct Vr {
     presses: [Press; 2],
     /// The ring menu, while Select holds it open.
     menu: Option<menu::Open>,
+    /// The design (`Session::uid`) and its `revision` when the ring opened: a part it was opened
+    /// on means nothing once the design changed under it (an undo, a rename on the desktop).
+    menu_design: (u64, u64),
     /// Each hand's stick: left undoes, right redoes.
     flicks: [Flick; 2],
     /// The controllers' own models (by their asset's id), as the VR software handed them out.
@@ -331,6 +334,7 @@ impl Vr {
             pointer: Pointer::default(),
             presses: Default::default(),
             menu: None,
+            menu_design: (0, 0),
             flicks: Default::default(),
             models: HashMap::new(),
             model_reader: controllers::Reader::default(),
@@ -656,7 +660,11 @@ impl Vr {
                 if let Some(open) = self.menu.take()
                     && let Some(act) = open.chosen()
                 {
-                    let said = act_on(app, act, open.target.as_deref(), set.acts_on, i, &mut self.section, &mut self.put_back);
+                    // The design changed while the ring was open: the part it was opened on may be
+                    // gone or another, so the actions take the selection as it is now.
+                    let unchanged = self.menu_design == (app.session.uid, app.session.revision);
+                    let target = open.target.as_deref().filter(|_| unchanged);
+                    let said = act_on(app, act, target, set.acts_on, i, &mut self.section, &mut self.put_back);
                     self.pointer.say(i, said);
                     buzz(session, hand, Pulse::TICK);
                 }
@@ -691,6 +699,7 @@ impl Vr {
                 };
                 if let (Some(aim), Some(head)) = (hands[i].aim, head) {
                     self.menu = menu::Open::new(i, aim.position, head, f64::from(set.menu_size), target, state, &set);
+                    self.menu_design = (app.session.uid, app.session.revision);
                     if self.menu.is_some() {
                         buzz(session, hand, Pulse::GRAB);
                     }
