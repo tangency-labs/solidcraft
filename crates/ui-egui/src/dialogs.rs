@@ -7273,9 +7273,14 @@ fn dialog_commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value)>, S
     if let Value::Object(m) = &mut params {
         // A fillet option that doesn't apply with the others is never sent.
         let fillet = matches!(d.kind, Kind::Fillet { chamfer: false, .. });
+        // The dialog has no end cut control to clear one an edited coil kept.
+        let profile_coil = matches!(d.kind, Kind::Primitive { cmd: "solid.coil", .. }) && m.contains_key("sketch");
         for (k, v) in &d.extra {
             // Saved selection mode is editor state, not a command parameter.
             if matches!(d.kind, Kind::Split { .. }) && k == "split_tool_mode" {
+                continue;
+            }
+            if profile_coil && k == "end_cut" {
                 continue;
             }
             if fillet && !dense::fillet_option_applies(&d.extra, k) {
@@ -8610,6 +8615,7 @@ pub fn for_feature(app: &SolveApp, id: u64, marker: Option<usize>) -> Option<Dia
             position,
             start_angle,
             clockwise,
+            end_cut,
             operation,
             targets,
         } => {
@@ -8647,6 +8653,9 @@ pub fn for_feature(app: &SolveApp, id: u64, marker: Option<usize>) -> Option<Dia
             }
             if *clockwise {
                 d.extra.insert("clockwise".into(), json!(true));
+            }
+            if *end_cut == solidcraft_engine::doc::CoilEndCut::Square {
+                d.extra.insert("end_cut".into(), json!("square"));
             }
             if !targets.is_empty() {
                 d.extra.insert("targets".into(), json!(targets));
