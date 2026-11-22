@@ -30,9 +30,7 @@
 //! with a sharp rim is reported separately: keeping both loops would intersect them
 //! (#20282). There is no recursion.
 
-use super::{
-    RailClassificationContext, LENT_CLASSIFICATION, OP, RAIL, RAIL_CURVE, RAIL_EDGE_USE, RAIL_FACE,
-};
+use super::{RailClassificationContext, LENT_CLASSIFICATION, OP};
 use crate::blend::fillet_classification::FilletClassObject;
 use crate::blend::fillet_geom::p1::{FilletBrep, FilletGeomType};
 use crate::blend::fillet_solver::p1::{
@@ -803,21 +801,23 @@ impl FilletSolver {
                 continue;
             }
             for ii in 0..2 {
-                let rail = fillets
-                    .geom(id)?
-                    .rail(ii)
-                    .ok_or_else(|| SolidError::blend_null_defect(OP, RAIL))?;
+                let rail = fillets.geom(id)?.rail(ii).ok_or_else(|| {
+                    SolidError::blend_solver(OP, SolverFailure::FilletGeomWithoutRail { side: ii })
+                })?;
                 let curve = edge::curve(fillets.brep(), rail)?
-                    .ok_or_else(|| SolidError::blend_null_defect(OP, RAIL_CURVE))?
+                    .ok_or_else(|| {
+                        SolidError::blend_solver(OP, SolverFailure::RailWithoutCurve { rail })
+                    })?
                     .clone();
-                let face = fillets
-                    .fillet_edge(rail)?
-                    .original_face()
-                    .ok_or_else(|| SolidError::blend_null_defect(OP, RAIL_FACE))?;
-                let primary = eu::primary_edgeuse(fillets.brep(), rail)?
-                    .ok_or_else(|| SolidError::blend_null_defect(OP, RAIL_EDGE_USE))?;
-                let mate = eu::mate(fillets.brep(), primary)?
-                    .ok_or_else(|| SolidError::blend_null_defect(OP, RAIL_EDGE_USE))?;
+                let face = fillets.fillet_edge(rail)?.original_face().ok_or_else(|| {
+                    SolidError::blend_solver(OP, SolverFailure::RailWithoutFace { rail })
+                })?;
+                let primary = eu::primary_edgeuse(fillets.brep(), rail)?.ok_or_else(|| {
+                    SolidError::blend_solver(OP, SolverFailure::RailEdgeUseMissing { rail })
+                })?;
+                let mate = eu::mate(fillets.brep(), primary)?.ok_or_else(|| {
+                    SolidError::blend_solver(OP, SolverFailure::RailEdgeUseMissing { rail })
+                })?;
                 let mut cc = CurveClassification::new(k);
                 cc.reset(
                     k,

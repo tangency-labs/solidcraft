@@ -468,20 +468,6 @@ fn join_intervals_on_face(fillets: &mut FilletBrep, rail: EdgeId) -> Result<()> 
     Ok(())
 }
 
-/// A solved default geometry lacks a rail (`SolidError::blend_null_defect`).
-const RAIL: &str = "a solved default fillet geometry lacks a rail: the solve installs both \
-                    rails of every default geometry it traces";
-/// A rail lacks its curve.
-const RAIL_CURVE: &str = "a rail of a solved fillet geometry has no curve: the solve installs \
-                          each rail with its curve";
-/// A rail lacks its original face.
-const RAIL_FACE: &str = "a rail of a solved fillet geometry has no original face: the solve \
-                         records the face each rail runs on when it installs the rail";
-/// A rail lacks its primary edge use or that use's mate.
-const RAIL_EDGE_USE: &str = "a rail of a solved fillet geometry lacks its primary edge use or \
-                             that use's mate: the solve builds each rail as an edge of the \
-                             fillet B-rep with both uses";
-
 /// A rail lost the classification installed on it just before it was classified.
 const LENT_CLASSIFICATION: &str = "the rail lost the curve classification installed on it just \
                                    before: `with_rail_classification` lends it in place and \

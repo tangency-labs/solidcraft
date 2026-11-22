@@ -681,19 +681,26 @@ pub enum SolverFailure {
     /// An edge use of the caller's body has no edge: the caller's input
     /// ([`ErrorKind::InvalidInput`]); status `SM_ERR_NULL_POINTER`.
     EdgeUseWithoutEdge,
-    /// The edge to fillet has a curve of a kind with no B-spline form: a kind the routine
-    /// cannot handle ([`ErrorKind::Unsupported`]); status `SM_ERR_NULL_POINTER`.
+    /// The edge to fillet has a curve not of a B-spline class: a kind the routine cannot
+    /// handle ([`ErrorKind::Unsupported`]); status `SM_ERR_NULL_POINTER`.
     EdgeCurveNotBSpline {
         /// The edge.
         edge: crate::topology::EdgeId,
+        /// The curve's kind (its type string).
+        kind: &'static str,
     },
     /// The trace left no cross-section points to clean at its ends: an empty search
     /// ([`ErrorKind::NotFound`]).
     NoTracePoints,
-    /// An offset surface's base is neither a B-spline surface nor an offset of one: a kind
-    /// the routine cannot handle ([`ErrorKind::Unsupported`]); status
+    /// Offset surface `side`'s base is neither of a B-spline class nor an offset of one: a
+    /// kind the routine cannot handle ([`ErrorKind::Unsupported`]); status
     /// `SM_ERR_NULL_POINTER`.
-    BaseSurfaceNotBSpline,
+    BaseSurfaceNotBSpline {
+        /// The offset surface, 0 or 1.
+        side: usize,
+        /// The kind (type string) of the surface that is not of a B-spline class.
+        kind: &'static str,
+    },
     /// The trace ran more than `limit` passes (too many self-intersections or other
     /// restarts) without finishing ([`ErrorKind::NotConverged`]).
     TraceLoopLimit {
@@ -719,8 +726,9 @@ pub enum SolverFailure {
     /// The two offset surfaces' normals at a tangent intersection point are parallel, so
     /// their cross product gives the curve no direction ([`ErrorKind::Degenerate`]).
     OffsetNormalsParallel,
-    /// An edge of the caller's body lacks a start or end vertex: the caller's input
-    /// ([`ErrorKind::InvalidInput`]); status `SM_ERR_NULL_POINTER`.
+    /// An edge of the caller's body, or a rail of the caller's fillet geometry, lacks a
+    /// start or end vertex: the caller's input ([`ErrorKind::InvalidInput`]); status
+    /// `SM_ERR_NULL_POINTER`.
     EdgeWithoutVertex {
         /// The edge.
         edge: crate::topology::EdgeId,
@@ -789,6 +797,56 @@ pub enum SolverFailure {
     /// corner's support edge: a case the roll-over does not handle
     /// ([`ErrorKind::Unsupported`]); status `SM_ERR_NULL_POINTER`.
     CliffCornerOnLastPiece,
+    /// The caller's default fillet geometry has no fillet surface: the caller's solver
+    /// set-up ([`ErrorKind::InvalidInput`]); status `SM_ERR_NULL_POINTER`.
+    FilletGeomWithoutSurface,
+    /// The caller's fillet geometry has no solver: the caller's solver set-up
+    /// ([`ErrorKind::InvalidInput`]); status `SM_ERR_NULL_POINTER`.
+    FilletGeomWithoutSolver,
+    /// A rail of the caller's fillet geometry has no curve: the caller's solver set-up
+    /// ([`ErrorKind::InvalidInput`]); status `SM_ERR_NULL_POINTER`.
+    RailWithoutCurve {
+        /// The rail.
+        rail: crate::topology::EdgeId,
+    },
+    /// A rail of the caller's fillet geometry has no uv curve on its face: the caller's
+    /// solver set-up ([`ErrorKind::InvalidInput`]); status `SM_ERR_NULL_POINTER`.
+    RailWithoutUvCurve {
+        /// The rail.
+        rail: crate::topology::EdgeId,
+    },
+    /// A rail of the caller's fillet geometry records no original face: the caller's
+    /// solver set-up ([`ErrorKind::InvalidInput`]); status `SM_ERR_NULL_POINTER`.
+    RailWithoutFace {
+        /// The rail.
+        rail: crate::topology::EdgeId,
+    },
+    /// A rail of the caller's fillet geometry lacks its primary edge use or that use's
+    /// mate: the caller's solver set-up ([`ErrorKind::InvalidInput`]); status
+    /// `SM_ERR_NULL_POINTER`.
+    RailEdgeUseMissing {
+        /// The rail.
+        rail: crate::topology::EdgeId,
+    },
+    /// The end cap of the caller's corner is not a plane: the caller's corner
+    /// ([`ErrorKind::InvalidInput`]).
+    EndCapNotPlane,
+    /// The caller's classification context classed a point as on an edge with an object
+    /// that is not an edge: the caller's input ([`ErrorKind::InvalidInput`]); status
+    /// `SM_ERR_NULL_POINTER`.
+    ClassificationEdgePointNotOnEdge,
+    /// The caller's fillet geometry has no rail on side `side`: the caller's solver set-up
+    /// ([`ErrorKind::InvalidInput`]); status `SM_ERR_NULL_POINTER`.
+    FilletGeomWithoutRail {
+        /// The rail side, 0 or 1.
+        side: usize,
+    },
+    /// A rail of the caller's fillet geometry has `count` edge uses where two are needed:
+    /// the caller's solver set-up ([`ErrorKind::InvalidInput`]).
+    RailEdgeUseCount {
+        /// The rail's edge uses.
+        count: usize,
+    },
 }
 
 /// The analytic shape a fillet solver routine builds
@@ -868,7 +926,7 @@ impl SolverFailure {
             | Self::ShortIntervalsNotRemoved { .. }
             | Self::TangentRolloverUnhandled
             | Self::EdgeCurveNotBSpline { .. }
-            | Self::BaseSurfaceNotBSpline
+            | Self::BaseSurfaceNotBSpline { .. }
             | Self::TraceTouchesBoundaryAgain
             | Self::EdgeBoundsNoMaterial { .. }
             | Self::ClosedBlendDoesNotMeetItself { .. }
@@ -888,7 +946,17 @@ impl SolverFailure {
             | Self::EdgeWithoutVertex { .. }
             | Self::VertexUseWithoutVertex
             | Self::RailNotClassified { .. }
-            | Self::RolloverCornerMissing => ErrorKind::InvalidInput,
+            | Self::RolloverCornerMissing
+            | Self::FilletGeomWithoutRail { .. }
+            | Self::RailEdgeUseCount { .. }
+            | Self::FilletGeomWithoutSurface
+            | Self::FilletGeomWithoutSolver
+            | Self::RailWithoutCurve { .. }
+            | Self::RailWithoutUvCurve { .. }
+            | Self::RailWithoutFace { .. }
+            | Self::RailEdgeUseMissing { .. }
+            | Self::EndCapNotPlane
+            | Self::ClassificationEdgePointNotOnEdge => ErrorKind::InvalidInput,
             Self::JacobianNotLoaded
             | Self::SupportIntersectionFailed
             | Self::SurfaceCacheNotBuilt => ErrorKind::Failed,
@@ -911,7 +979,7 @@ impl SolverFailure {
             | Self::SolverEdgeUseMissing { .. }
             | Self::EdgeUseWithoutEdge
             | Self::EdgeCurveNotBSpline { .. }
-            | Self::BaseSurfaceNotBSpline
+            | Self::BaseSurfaceNotBSpline { .. }
             | Self::NoCenterLineTraced
             | Self::EdgeWithoutVertex { .. }
             | Self::VertexUseWithoutVertex
@@ -919,7 +987,15 @@ impl SolverFailure {
             | Self::RailNotClassified { .. }
             | Self::RolloverCornerMissing
             | Self::RolloverHasNoFaceBeyond { .. }
-            | Self::CliffCornerOnLastPiece => SM_ERR_NULL_POINTER,
+            | Self::CliffCornerOnLastPiece
+            | Self::FilletGeomWithoutRail { .. }
+            | Self::FilletGeomWithoutSurface
+            | Self::FilletGeomWithoutSolver
+            | Self::RailWithoutCurve { .. }
+            | Self::RailWithoutUvCurve { .. }
+            | Self::RailWithoutFace { .. }
+            | Self::RailEdgeUseMissing { .. }
+            | Self::ClassificationEdgePointNotOnEdge => SM_ERR_NULL_POINTER,
             Self::CrossSectionPointNotFound { .. }
             | Self::RailTangentZero { .. }
             | Self::PiecesTooFarApart { .. }
@@ -965,7 +1041,9 @@ impl SolverFailure {
             | Self::LeavePointDoesNotDropOnEdge
             | Self::EdgeMiddleDoesNotDropOnRail
             | Self::ClosedBlendDoesNotMeetItself { .. }
-            | Self::CornerVertexNotConverged => SM_ERR,
+            | Self::CornerVertexNotConverged
+            | Self::RailEdgeUseCount { .. }
+            | Self::EndCapNotPlane => SM_ERR,
         }
     }
 }
@@ -1123,13 +1201,15 @@ impl core::fmt::Display for SolverFailure {
                 )
             }
             Self::EdgeUseWithoutEdge => f.write_str("an edge use of the body has no edge"),
-            Self::EdgeCurveNotBSpline { edge } => write!(
+            Self::EdgeCurveNotBSpline { edge, kind } => write!(
                 f,
-                "the curve of edge {edge:?} to fillet has no B-spline form"
+                "the {kind} curve of edge {edge:?} to fillet is not of a B-spline class"
             ),
             Self::NoTracePoints => f.write_str("the trace left no cross-section points"),
-            Self::BaseSurfaceNotBSpline => f.write_str(
-                "an offset surface's base is neither a B-spline surface nor an offset of one",
+            Self::BaseSurfaceNotBSpline { side, kind } => write!(
+                f,
+                "offset surface {side}'s base is a {kind} surface, neither of a B-spline class \
+                 nor an offset of one"
             ),
             Self::TraceLoopLimit { limit } => {
                 write!(f, "the trace did not finish within {limit} passes")
@@ -1200,6 +1280,45 @@ impl core::fmt::Display for SolverFailure {
                 "the last piece of the roll-over runs over a corner, with no split vertex to \
                  start the corner's support edge",
             ),
+            Self::FilletGeomWithoutRail { side } => {
+                write!(f, "the fillet geometry has no rail on side {side}")
+            }
+            Self::RailEdgeUseCount { count } => {
+                write!(
+                    f,
+                    "the fillet geometry's rail has {count} edge uses, not two"
+                )
+            }
+            Self::FilletGeomWithoutSurface => {
+                f.write_str("the default fillet geometry has no fillet surface")
+            }
+            Self::FilletGeomWithoutSolver => f.write_str("the fillet geometry has no solver"),
+            Self::RailWithoutCurve { rail } => {
+                write!(
+                    f,
+                    "rail {} of the fillet geometry has no curve",
+                    rail.index()
+                )
+            }
+            Self::RailWithoutUvCurve { rail } => write!(
+                f,
+                "rail {} of the fillet geometry has no uv curve on its face",
+                rail.index()
+            ),
+            Self::RailWithoutFace { rail } => write!(
+                f,
+                "rail {} of the fillet geometry records no original face",
+                rail.index()
+            ),
+            Self::RailEdgeUseMissing { rail } => write!(
+                f,
+                "rail {} of the fillet geometry lacks its primary edge use or that use's mate",
+                rail.index()
+            ),
+            Self::EndCapNotPlane => f.write_str("the corner's end cap is not a plane"),
+            Self::ClassificationEdgePointNotOnEdge => {
+                f.write_str("the classification put a point on an object that is not an edge")
+            }
         }
     }
 }
