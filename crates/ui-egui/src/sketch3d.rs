@@ -36,8 +36,10 @@ const ARROW: f32 = 60.0;
 
 /// Is the sketch being edited a 3D sketch?
 pub fn active(app: &SolveApp) -> bool {
-    let st = crate::open_meshing::session_world(&app.session);
-    app.session.active_sketch.and_then(|s| st.sketch(s)).is_some_and(|ss| ss.sketch.view.three_d)
+    // Asked at every frame: with no sketch open (a joint drag runs only then), the world is not
+    // asked for, which would place a drag's frame, every moved body again (#6325).
+    let Some(sketch) = app.session.active_sketch else { return false };
+    crate::open_meshing::session_world(&app.session).sketch(sketch).is_some_and(|ss| ss.sketch.view.three_d)
 }
 
 fn takes(cmd: &str) -> bool {
@@ -97,6 +99,7 @@ pub fn point_at(app: &SolveApp, proj: &Proj, pos: Pos2) -> Option<(Vec3, &'stati
                 }
             }
             Hit::Vertex { point, .. } => return Some((point, "Vertex")),
+            Hit::PointCloudPoint { point, .. } => return Some((point, "Cloud")),
             Hit::Edge { body, index, .. } => {
                 let ws = crate::open_meshing::session_world(&app.session);
                 let m = ws.body(&body)?.mesh();

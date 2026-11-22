@@ -1245,8 +1245,8 @@ impl Brep {
     /// A [`Brep::clone_standing_for_self`] to be edited as a trial of an operation on this
     /// B-rep (not upstream): the same ids and geometry owners, but each face surface's
     /// top-level cache slot is its own ([`Surface::detach_for_edit`]), holding a copy of
-    /// what this B-rep's holds ([`Surface::copy_cache_slot_of`]: its tree state and its
-    /// trimmed surface cache), so that the trial starts from this B-rep's cache state and
+    /// what this B-rep's holds ([`Surface::copy_cache_slot_of`]: its trimmed surface
+    /// cache), so that the trial starts from this B-rep's cache state and
     /// no cache built on the edited copy reaches this B-rep's face surfaces. Nested
     /// surfaces (an offset's or a STEP surface's base) and the surfaces of edge curves
     /// still share their slots.

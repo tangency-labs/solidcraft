@@ -282,9 +282,9 @@ joystick instead of the mouse wheel. Delete the file to undo it.
 ### Shift+right-click in Firefox
 
 In Firefox, holding Shift while you right-click opens Firefox's own menu (Save Image As…,
-Inspect and so on), and a web page can't stop it. On Linux, SolidCraft doesn't see the click at
-all: the face isn't selected and SolidCraft's menu doesn't open. On Windows, SolidCraft selects
-the face and opens its menu, and Firefox's menu opens on top. Chrome, Edge and the desktop app
+Inspect and so on), and a web page can't stop it. SolidCraft opens no menu of its own under
+Firefox's, and says on the status line that the browser took the click. On Linux, SolidCraft
+doesn't see the click at all: the face isn't selected either. Chrome, Edge and the desktop app
 aren't affected.
 
 The gestures this blocks in Firefox, and what to use instead:
@@ -369,7 +369,10 @@ Windows PowerShell 5.1 drops the double quotes inside an argument it passes to a
 A command that fails stops the script. A feature can also fail later, when a parameter change
 rebuilds it; `run` then exits with status 1, lists the failing features and writes none of
 its `--out` and `--save` files, because the bodies lack what those features should have made.
-`--allow-errors` writes them anyway.
+`--allow-errors` writes them anyway. `eval` prints its report in full, with each failing
+feature's `error` in `timeline`, and then exits with status 1 for the same reason and lists the
+failing features on stderr; `eval --allow-errors` exits with status 0, for a design you are
+inspecting because it fails.
 
 `--quality standard|fine|finest` sets how closely an STL, OBJ or 3MF written by `--out`
 follows curved faces, as `file.export`'s `quality` does: a chord tolerance of 2e-4, 5e-5 or

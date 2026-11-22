@@ -1012,6 +1012,7 @@
   "cmd.motion_list": "Списак студија кретања",
   "cmd.motion_play": "Репродукуј студију кретања",
   "cmd.motion_plot": "Дијаграм студије кретања",
+  "cmd.motion_simulate": "Симулирај кретање",
   "cmd.motion_study": "Студија кретања",
   "cmd.motion_trace": "Траг кретања",
   "cmd.motion_trace_edit": "Измени траг кретања",
