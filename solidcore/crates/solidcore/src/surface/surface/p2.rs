@@ -246,7 +246,7 @@ use crate::curve::curve::{Curve, CurvePropertyType};
 use crate::curve::line::Line;
 use crate::error::surface::SurfaceFailure;
 use crate::error::{
-    ignore_status, EntityRef, Result, SolidError, SM_ERR, SM_ERR_NOT_WITHIN_TOLERANCE,
+    ignore_status, EntityRef, Failure, Result, SolidError, SM_ERR, SM_ERR_NOT_WITHIN_TOLERANCE,
     SM_ERR_OUTSIDE_OF_DOMAIN,
 };
 use crate::geom::a_object::{self, AObject, CacheStore};
@@ -367,10 +367,15 @@ const OP_GEOM: &str = "surface::surface::p2::evaluate_geometric";
 const OP_DROP: &str = "surface::surface::p2::drop_vectors";
 const OP_BREAKS: &str = "surface::surface::p2::set_up_breaks";
 const OP_CURVE_ON_CLASSIFY: &str = "surface::surface::p2::Surface::curve_on_classify";
+/// The reason of the defect where a surface of extrusion's NURB form is of another kind:
+/// `kind_with_nurb` of a surface of extrusion is the extrusion itself or its copy with the
+/// NURB made, so the other arm is never taken.
+const EXTRUSION_KIND: &str = "the NURB form of a surface of extrusion is of another kind, \
+                              though kind_with_nurb keeps the extrusion's kind";
 
 /// `SM_ERR` of a base-class default.
 fn base_err() -> SolidError {
-    SolidError::surface_failed(OP_BASE, "the surface kind does not implement the routine")
+    SolidError::surface(OP_BASE, SurfaceFailure::RoutineNotForKind)
 }
 
 // ---- the surface object ---------------------------------------------------------------
@@ -1701,9 +1706,9 @@ impl Surface {
     /// [`SurfOfExtrusion::base_with_nurb`].
     pub(crate) fn extrusion_base_with_nurb(&self, k: &Kernel) -> Result<Cow<'_, BSplineSurface>> {
         let SurfaceKind::SurfOfExtrusion(s) = &self.kind else {
-            return Err(SolidError::surface_failed(
+            return Err(SolidError::surface(
                 OP_KIND_WITH_NURB,
-                "the surface is not a surface of extrusion",
+                SurfaceFailure::RoutineNotForKind,
             ));
         };
         s.base_with_nurb(k)
@@ -2115,9 +2120,9 @@ impl Surface {
             }
             SurfaceKind::CurveBounded(_) | SurfaceKind::Step(_) => {
                 // SmSurface::CreateMirrorSurface: SE(SM_ERR)
-                return Err(SolidError::surface_failed(
+                return Err(SolidError::surface(
                     OP_MIRROR,
-                    "the surface kind has no mirror image",
+                    SurfaceFailure::RoutineNotForKind,
                 ));
             }
         };
@@ -2729,9 +2734,11 @@ impl Surface {
             // (GetNaturalUVDomain makes a missing NURB)
             SurfaceKind::SurfOfExtrusion(_) => match self.kind_with_nurb(k)? {
                 SurfaceKind::SurfOfExtrusion(s) => s.convert_uv_from_step_to_nurbs(k, step_uv),
-                _ => Err(SolidError::surface_failed(
+                _ => Err(SolidError::surface(
                     OP_KIND_WITH_NURB,
-                    "the surface's NURB form is not a surface of extrusion",
+                    SurfaceFailure::Defect {
+                        why: EXTRUSION_KIND,
+                    },
                 )),
             },
             _ => Ok(base_convert_uv(step_uv)),
@@ -2757,9 +2764,11 @@ impl Surface {
             // (GetNaturalUVDomain makes a missing NURB)
             SurfaceKind::SurfOfExtrusion(_) => match self.kind_with_nurb(k)? {
                 SurfaceKind::SurfOfExtrusion(s) => s.convert_uv_from_nurbs_to_step(k, nurbs_uv),
-                _ => Err(SolidError::surface_failed(
+                _ => Err(SolidError::surface(
                     OP_KIND_WITH_NURB,
-                    "the surface's NURB form is not a surface of extrusion",
+                    SurfaceFailure::Defect {
+                        why: EXTRUSION_KIND,
+                    },
                 )),
             },
             _ => Ok(base_convert_uv(nurbs_uv)),
@@ -2913,11 +2922,15 @@ impl Surface {
             SurfaceKind::Cone(s) => s
                 .step_inversion(k, point_on_surf, tol_3d, uv_guess)
                 .map_err(|e| {
-                    // the fork (dfc7cb6): off the generator is an answer
+                    // the fork (dfc7cb6): off the generator is an answer, the miss its
+                    // cause (as the surface of revolution's own inversion)
                     if crate::surface::surf_of_revolution::p2::is_off_generator(&e) {
-                        crate::surface::surf_of_revolution::p2::not_within_tolerance(
+                        Failure::new(
                             "surface::surface::Surface::step_inversion",
+                            SurfaceFailure::PointOffSurface,
                         )
+                        .caused_by(e)
+                        .into_error()
                     } else {
                         e
                     }
@@ -2929,9 +2942,7 @@ impl Surface {
                         // the fork (dfc7cb6): outside the sweep is an answer
                         Err(SolidError::surface(
                             "surface::surface::Surface::step_inversion",
-                            SurfaceFailure::OutsideDomain(
-                                "the point is outside the sweep of the surface of revolution",
-                            ),
+                            SurfaceFailure::PointOutsideSweep,
                         ))
                     }
                 }),
@@ -2950,12 +2961,12 @@ impl Surface {
                     // the fork (dfc7cb6): a point off the sphere is an answer
                     Err(SolidError::surface(
                         "surface::surface::Surface::step_inversion",
-                        SurfaceFailure::OffSurface("the point is off the sphere"),
+                        SurfaceFailure::PointOffSurface,
                     ))
                 } else {
-                    Err(SolidError::surface_failed(
+                    Err(SolidError::surface(
                         "surface::surface::Surface::step_inversion",
-                        "the point is off the sphere",
+                        SurfaceFailure::InversionNotAnswered,
                     ))
                 }
             }
@@ -3949,9 +3960,9 @@ impl Surface {
             PROCEDURAL_BLEND_TYPE => Ok(Self::from(ProceduralBlend::read_from_db(k, db, version)?)),
             // the fork's SmBallPatch (f8e6709), which the pinned reader refuses
             BALL_PATCH_TYPE => Ok(Self::from(BallPatch::read_from_db(db, version)?)),
-            _ => Err(SolidError::surface_failed(
+            code => Err(SolidError::surface(
                 OP_READ,
-                "the surface type is not one the reader knows",
+                SurfaceFailure::UnknownSurfaceType { code },
             )),
         }
     }
@@ -3990,9 +4001,9 @@ impl Surface {
         // classify the first Start and the last End from their Mids
         let num_ivls = classification.size();
         if num_ivls == 0 {
-            return Err(SolidError::surface_failed(
+            return Err(SolidError::surface(
                 OP_CURVE_ON_CLASSIFY,
-                "the curve crosses no interval of the surface",
+                SurfaceFailure::CurveCrossesNoInterval,
             ));
         }
         let start_ivl = classification.at_mut(0)?;
@@ -4665,8 +4676,15 @@ fn join_touching_loops(
     tol_3d: f64,
 ) -> Result<()> {
     const OP: &str = "surface::surface::join_touching_loops";
-    let bad =
-        || SolidError::surface_failed(OP, "the loop counts, orders and orientations do not agree");
+    let bad = || {
+        SolidError::surface(
+            OP,
+            SurfaceFailure::Defect {
+                why: "the loop counts, orders and orientations do not agree, though the curve \
+                      ordering and the outer-loop search built them together",
+            },
+        )
+    };
     // each outer loop's set of loops, each loop its (curve, orientation)s
     let mut sets: Vec<Vec<Vec<(usize, OrientType)>>> = Vec::new();
     let (mut curve, mut lp) = (0usize, 0usize);
@@ -5427,12 +5445,20 @@ pub fn surface_cache<O: Copy + PartialEq>(
 pub fn original_surface<O: Copy + PartialEq>(tree: &Tree<O>, _node: &TreeNode<O>) -> Result<O> {
     const OP: &str = "surface::surface::p2::original_surface";
     match tree.owner() {
-        Some(TreeOwner::SurfaceCache | TreeOwner::TrimSrfCache | TreeOwner::TessSrfCache) => tree
-            .owner_object()?
-            .ok_or_else(|| SolidError::surface_failed(OP, "the tree's owner names no surface")),
-        _ => Err(SolidError::surface_failed(
+        Some(TreeOwner::SurfaceCache | TreeOwner::TrimSrfCache | TreeOwner::TessSrfCache) => {
+            tree.owner_object()?.ok_or_else(|| {
+                SolidError::surface(
+                    OP,
+                    SurfaceFailure::Defect {
+                        why: "a surface cache's tree names no owner surface, though the cache \
+                              sets it when it builds the tree",
+                    },
+                )
+            })
+        }
+        _ => Err(SolidError::surface(
             OP,
-            "the tree is not owned by a surface cache",
+            SurfaceFailure::TreeNotOfSurfaceCache,
         )),
     }
 }
@@ -5643,15 +5669,15 @@ impl<'s> SurfaceEval<'s> {
             return Ok(());
         }
         if self.fails_eval {
-            return Err(SolidError::surface_failed(
+            return Err(SolidError::surface(
                 OP_EVAL,
-                "an earlier evaluation at the point failed",
+                SurfaceFailure::EvaluationFailedBefore,
             ));
         }
 
         let surface = self
             .surface
-            .ok_or_else(|| SolidError::surface_missing(OP_EVAL, "the surface"))?;
+            .ok_or_else(|| SolidError::surface(OP_EVAL, SurfaceFailure::NoSurfaceGiven))?;
         let flags = EvaluateFlags {
             u_side: if self.u_from_left {
                 Side::Left
@@ -5669,7 +5695,12 @@ impl<'s> SurfaceEval<'s> {
         let (status, derivs) = eval_second_derivatives_with_output(k, surface, self.uv, flags);
         // Upstream Evaluate writes this array even when zero-tangent correction
         // ultimately fails. Its accessors still read the partially written values.
-        if ignored_surface_result(status)?.is_none() {
+        let failed = status.err();
+        if let Some(e) = &failed {
+            // unported, cancelled and preparation errors pass as they are
+            ignored_surface_result::<()>(Err(e.clone()))?;
+        }
+        if let Some(e) = failed {
             for (i, row) in self.pvv.iter_mut().enumerate() {
                 for (j, slot) in row.iter_mut().enumerate() {
                     if i + j <= 2 {
@@ -5680,10 +5711,9 @@ impl<'s> SurfaceEval<'s> {
                 }
             }
             self.fails_eval = true;
-            return Err(SolidError::surface_failed(
-                OP_EVAL,
-                "the evaluation at the point failed",
-            ));
+            return Err(Failure::new(OP_EVAL, SurfaceFailure::EvaluationFailed)
+                .caused_by(e)
+                .into_error());
         }
         for (i, row) in self.pvv.iter_mut().enumerate() {
             for (j, slot) in row.iter_mut().enumerate() {
@@ -5763,9 +5793,9 @@ fn eval_second_derivatives_with_output(
             SurfaceKind::Step(s) => {
                 let Some(base) = s.surface() else {
                     return (
-                        Err(SolidError::surface_failed(
+                        Err(SolidError::surface(
                             OP_EVAL,
-                            "the step surface has no base surface",
+                            SurfaceFailure::StepWithoutBase,
                         )),
                         Vec::new(),
                     );
@@ -6189,12 +6219,7 @@ impl DerivSurfDefinition<'_> {
         &self,
         values: &CrossSectionValues<'_>,
     ) -> Result<Vec<BSplineCurve>> {
-        let err = || {
-            SolidError::surface_failed(
-                OP_DERIV,
-                "the cross-section values do not agree in size or order",
-            )
-        };
+        let err = || SolidError::surface(OP_DERIV, SurfaceFailure::CrossSectionValuesDisagree);
         let n = values.start_pos.len();
         let size_ok = |a: Option<&[Vec3]>| a.is_none_or(|a| a.len() == n);
         let start2 = values.start_2nd_derivs;
@@ -6931,12 +6956,7 @@ pub struct GeometricProperties {
 /// `SM_ERR` at a singular point (no normal) or where the fundamental forms
 /// degenerate.
 pub fn evaluate_geometric(eval: &mut [[Vec3; 3]; 3]) -> Result<GeometricProperties> {
-    let err = || {
-        SolidError::surface_failed(
-            OP_GEOM,
-            "the surface has no normal or its fundamental forms degenerate",
-        )
-    };
+    let err = || SolidError::surface(OP_GEOM, SurfaceFailure::SingularPoint);
 
     // local parametric surface properties
     let duv = eval[1][1];
@@ -7204,10 +7224,7 @@ pub fn drop_vectors(du: Vec3, dv: Vec3, vectors: &[Vec3]) -> Result<Vec<Vec2>> {
 
     // normalize the normal vector to make stable calculations near singularity cases
     if norm.length_squared() < EFF_ZERO_SQ {
-        return Err(SolidError::surface_failed(
-            OP_DROP,
-            "the surface normal is the zero vector",
-        ));
+        return Err(SolidError::surface(OP_DROP, SurfaceFailure::SingularPoint));
     }
     let norm = norm.unitize_or_z();
 
@@ -7250,8 +7267,10 @@ pub fn drop_vectors(du: Vec3, dv: Vec3, vectors: &[Vec3]) -> Result<Vec<Vec2>> {
         let vec_2d = plane_drop_point(&plane, vec);
         let eq1 = Vec3::new(du_2d.x, dv_2d.x, vec_2d.x);
         let eq2 = Vec3::new(du_2d.y, dv_2d.y, vec_2d.y);
-        let sol = eq1.solve_two_linear_equations(eq2).map_err(|_| {
-            SolidError::surface_failed(OP_DROP, "the vector does not drop onto the tangent plane")
+        let sol = eq1.solve_two_linear_equations(eq2).map_err(|e| {
+            Failure::new(OP_DROP, SurfaceFailure::VectorNotDropped)
+                .caused_by(e)
+                .into_error()
         })?;
         *slot = Vec2::new(sol.x, sol.y);
     }
