@@ -1798,7 +1798,7 @@ fn component_rows_inner(
     let faded = app.session.active_component != 0 && !app.session.doc.component_within(id, app.session.active_component) && !active;
     let name = &root.name;
     let link = app.tree.links.get(id).cloned();
-    let badges = &crate::browser_links::with_link(root.grounded, link.as_ref());
+    let badges: &[&str] = if root.grounded { &["pin"] } else { &[] };
     let appearance = crate::render_workspace::scene::decoration(app, bodies);
     // A search never matches the design itself: it is the matches' parent, dimmed.
     let searching = app.tree.search.on();
@@ -1814,6 +1814,7 @@ fn component_rows_inner(
         dim: faded || searching,
         radio: Some(active),
         badges,
+        icon_badge: link.as_ref().map(|link| link.icon_badge()),
         swatch: appearance.swatch,
         secondary: &appearance.name,
         count: &appearance.count,
@@ -2000,6 +2001,7 @@ fn occurrence_rows_inner(
         cut,
         radio: Some(active),
         badges,
+        icon_badge: link.as_ref().map(|link| link.icon_badge()),
         emphasis,
         mark: acts.lit.placement(&app.session.doc, path, placement.component),
         status: cache.defects.get(&placement.component).map(|_| Status::Warning),

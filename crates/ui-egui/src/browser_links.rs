@@ -3,19 +3,66 @@
 //! window: when the design's links change, and when the window comes back to the front.
 
 use crate::SolveApp;
+use crate::ui_kit::IconBadge;
+use egui::Color32;
 use serde_json::{Value, json};
 use solidcraft_engine::Session;
 use solidcraft_engine::doc::DesignLink;
+use solidcraft_theme::{Tokens, contrast_ratio};
 use std::collections::{BTreeMap, HashMap};
 use std::sync::mpsc::{Receiver, TryRecvError};
 use std::time::Duration;
 
 type Reply = Result<Value, String>;
 
+/// What the badge on a linked component's icon says about its file.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum LinkState {
+    /// The file is there and is the one this design last read.
+    Linked,
+    /// The file is there but is not the one this design last read.
+    Changed,
+    /// The file is not there.
+    Missing,
+    /// Nobody looked at the file; it may be fine.
+    Unchecked,
+}
+
+impl LinkState {
+    /// The glyph on the badge: a chain, broken for a file that is not there.
+    fn glyph(self) -> &'static str {
+        match self {
+            LinkState::Missing => "link_broken",
+            _ => "link",
+        }
+    }
+
+    /// The badge as the Browser draws it, in this theme's colours. A state nobody checked is only
+    /// outlined, because it says nothing about the file.
+    fn badge(self) -> IconBadge<'static> {
+        let t = Tokens::get();
+        let (fill, ink, outlined) = match self {
+            LinkState::Linked => (t.selected_bg, t.accent, false),
+            LinkState::Changed => (t.warning, ink_on(t.warning), false),
+            LinkState::Missing => (t.error, ink_on(t.error), false),
+            LinkState::Unchecked => (t.panel, t.text_dim, true),
+        };
+        IconBadge { glyph: self.glyph(), fill, ink, outlined }
+    }
+}
+
+/// Text ink for a solid badge fill: whichever of the theme's own on-fill colours reads best on it.
+fn ink_on(fill: Color32) -> Color32 {
+    let t = Tokens::get();
+    [t.on_accent, t.tab_on_fill_dark, t.form_ink]
+        .into_iter()
+        .fold(t.text, |best, ink| if contrast_ratio(ink, fill) > contrast_ratio(best, fill) { ink } else { best })
+}
+
 /// The row of one linked component: its badge, and what hovering it says.
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) struct LinkBadge {
-    pub(crate) badge: &'static str,
+    pub(crate) state: LinkState,
     /// The message id of what is wrong or unknown about the file.
     pub(crate) note: Option<&'static str>,
     pub(crate) file: String,
@@ -29,11 +76,11 @@ impl LinkBadge {
             None => source,
         }
     }
-}
 
-/// The badges of a row that may be pinned and may be linked.
-pub(crate) fn with_link(grounded: bool, link: Option<&LinkBadge>) -> Vec<&'static str> {
-    grounded.then_some("pin").into_iter().chain(link.map(|l| l.badge)).collect()
+    /// The badge on the component icon at the start of its row.
+    pub(crate) fn icon_badge(&self) -> IconBadge<'static> {
+        self.state.badge()
+    }
 }
 
 /// The last answer, and the question it answers.
@@ -125,17 +172,17 @@ fn badges_of(reply: &Value) -> HashMap<u64, LinkBadge> {
     reply["links"].as_array().into_iter().flatten().filter_map(badge_of).collect()
 }
 
-/// A warning means something is wrong with the file. A file that was not looked at may be fine,
-/// so it gets the neutral badge and a note saying why.
+/// A missing or changed file gets the badge that says so. A file that was not looked at may be
+/// fine, so it gets the outlined badge and a note saying why.
 pub(crate) fn badge_of(link: &Value) -> Option<(u64, LinkBadge)> {
     let component = link["component"].as_u64()?;
     let file = link["file"].as_str()?.to_string();
-    let (badge, note) = match (link["found"].as_bool(), link["changed"].as_bool()) {
-        (Some(false), _) => ("link_warning", Some("ui.link_missing")),
-        (Some(true), Some(true)) => ("link_warning", Some("ui.link_changed")),
-        (Some(true), _) => ("link", None),
-        (None, _) if link.get("host").is_some() => ("link_unchecked", Some("ui.link_not_checked_network")),
-        (None, _) => ("link_unchecked", Some("ui.link_not_checked")),
+    let (state, note) = match (link["found"].as_bool(), link["changed"].as_bool()) {
+        (Some(false), _) => (LinkState::Missing, Some("ui.link_missing")),
+        (Some(true), Some(true)) => (LinkState::Changed, Some("ui.link_changed")),
+        (Some(true), _) => (LinkState::Linked, None),
+        (None, _) if link.get("host").is_some() => (LinkState::Unchecked, Some("ui.link_not_checked_network")),
+        (None, _) => (LinkState::Unchecked, Some("ui.link_not_checked")),
     };
-    Some((component, LinkBadge { badge, note, file }))
+    Some((component, LinkBadge { state, note, file }))
 }

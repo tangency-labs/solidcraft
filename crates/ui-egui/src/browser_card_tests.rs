@@ -1,4 +1,5 @@
 use super::*;
+use crate::browser_links::LinkState;
 use crate::scenario::{Harness, handle_at, rect_of};
 use crate::semantic_content::{self, ContentOwner, ContentRequest};
 use crate::ui_kit::{LayoutMode, SHELL_GAP};
@@ -2233,9 +2234,9 @@ fn a_linked_components_row_shows_the_state_of_its_file() {
     answer(&mut h);
 
     let link = h.app.tree.links.get(component).expect("the link's badge").clone();
-    assert_eq!((link.badge, link.note), ("link", None));
+    assert_eq!((link.state, link.note), (LinkState::Linked, None));
     assert!(link.tooltip().contains("part.solidcraft"), "{}", link.tooltip());
-    assert_eq!(crate::browser_links::with_link(true, Some(&link)), ["pin", "link"]);
+    assert_eq!(link.icon_badge().glyph, "link");
     h.frames(5);
     assert!(!h.app.tree.links.busy(), "the files are not read again every frame");
 
@@ -2245,20 +2246,22 @@ fn a_linked_components_row_shows_the_state_of_its_file() {
     assert_eq!(h.app.tree.links.get(component).unwrap().note, None, "not looked at until the window returns");
     back_to_the_front(&mut h);
     let changed = h.app.tree.links.get(component).unwrap();
-    assert_eq!((changed.badge, changed.note), ("link_warning", Some("ui.link_changed")));
+    assert_eq!((changed.state, changed.note), (LinkState::Changed, Some("ui.link_changed")));
 
     std::fs::remove_file(&part).unwrap();
     back_to_the_front(&mut h);
     let missing = h.app.tree.links.get(component).unwrap();
-    assert_eq!((missing.badge, missing.note), ("link_warning", Some("ui.link_missing")));
+    assert_eq!((missing.state, missing.note), (LinkState::Missing, Some("ui.link_missing")));
+    assert_eq!(missing.icon_badge().glyph, "link_broken", "a file that is not there breaks the chain");
 
-    // A file that was not looked at may be fine: neutral, and the note says why.
+    // A file that was not looked at may be fine: an outlined badge, and the note says why.
     let not_allowed = json!({"component": 7, "file": "//server/share/a.solidcraft", "found": null, "host": "server", "reason": "not allowed"});
     let (id, network) = crate::browser_links::badge_of(&not_allowed).unwrap();
-    assert_eq!((id, network.badge, network.note), (7, "link_unchecked", Some("ui.link_not_checked_network")));
+    assert_eq!((id, network.state, network.note), (7, LinkState::Unchecked, Some("ui.link_not_checked_network")));
     let device = json!({"component": 8, "file": "CON", "found": null, "reason": "names a device, not a file"});
     let (_, device) = crate::browser_links::badge_of(&device).unwrap();
-    assert_eq!((device.badge, device.note), ("link_unchecked", Some("ui.link_not_checked")));
+    assert_eq!((device.state, device.note), (LinkState::Unchecked, Some("ui.link_not_checked")));
+    assert!(device.icon_badge().outlined, "an unchecked state says nothing, so it is only outlined");
 
     h.app.run("component.break_link", json!({"component": component})).unwrap();
     h.frames(2);
