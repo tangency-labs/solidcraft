@@ -1,10 +1,8 @@
 //! WR-598 (the SolidCraft fork's tangency-labs/smlib@829b982): `DeleteTopologicalVertex`
 //! between a line edge and an edge whose curve is a curve on a B-spline surface along a
 //! UV line of constant u (the seam an extrusion leaves on its wall). Upstream casts the
-//! `SmCrvOnSurf` copy to `SmBSplineCurve` and dereferences the null; the port leaves the
-//! vertex in place (`SM_ERR`, nothing changed), and with
-//! `Kernel::fixes.delete_vertex_joins_seam_iso_curve` joins the two edges into one over
-//! the surface's iso curve.
+//! `SmCrvOnSurf` copy to `SmBSplineCurve` and dereferences the null; the port joins the
+//! two edges into one over the surface's iso curve.
 
 #![allow(
     clippy::unwrap_used,
@@ -81,38 +79,19 @@ fn assert_joined(k: &Kernel, b: &Brep, survivor: EdgeId) {
 }
 
 #[test]
-fn wr598_seam_curve_deleted_joins_with_fix_and_stays_without() {
-    for fixed in [false, true] {
-        let mut k = Kernel::default();
-        k.fixes.delete_vertex_joins_seam_iso_curve = fixed;
-        let (mut b, e_line, e_seam, v) = line_and_seam(&mut k);
-        let r = p5::delete_topological_vertex(&mut k, &mut b, true, Some(v), Some(e_seam));
-        if fixed {
-            r.unwrap();
-            assert_joined(&k, &b, e_line);
-        } else {
-            assert!(r.is_err(), "{r:?}");
-            assert_eq!(vertex::edges(&b, v, None).unwrap().len(), 2);
-            assert!(b.edge(e_seam).unwrap().curve.is_some());
-        }
-    }
+fn wr598_seam_curve_deleted_joins() {
+    let mut k = Kernel::default();
+    let (mut b, e_line, e_seam, v) = line_and_seam(&mut k);
+    p5::delete_topological_vertex(&mut k, &mut b, true, Some(v), Some(e_seam)).unwrap();
+    assert_joined(&k, &b, e_line);
 }
 
 #[test]
-fn wr598_line_deleted_into_seam_curve_joins_with_fix_and_stays_without() {
-    for fixed in [false, true] {
-        let mut k = Kernel::default();
-        k.fixes.delete_vertex_joins_seam_iso_curve = fixed;
-        let (mut b, e_line, e_seam, v) = line_and_seam(&mut k);
-        let r = p5::delete_topological_vertex(&mut k, &mut b, true, Some(v), Some(e_line));
-        if fixed {
-            r.unwrap();
-            assert_joined(&k, &b, e_seam);
-        } else {
-            assert!(r.is_err(), "{r:?}");
-            assert_eq!(vertex::edges(&b, v, None).unwrap().len(), 2);
-        }
-    }
+fn wr598_line_deleted_into_seam_curve_joins() {
+    let mut k = Kernel::default();
+    let (mut b, e_line, e_seam, v) = line_and_seam(&mut k);
+    p5::delete_topological_vertex(&mut k, &mut b, true, Some(v), Some(e_line)).unwrap();
+    assert_joined(&k, &b, e_seam);
 }
 
 /// A B-spline line surviving the join of an `SmLine` (both `SmBSplineCurve` kinds, which

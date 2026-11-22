@@ -435,7 +435,7 @@
 {"case":"gen0404","deferred":null,"error":null,"ints":{},"topology":null,"values":{"rec":{"blocks":[[100000042.57071342,100000042.5864077,500000702.38333607]],"n":60}}}
 {"case":"gen0405","deferred":null,"error":null,"ints":{},"topology":null,"values":{"rec":[1007.0,0.0,0.0,0.0]}}
 {"case":"gen0406","deferred":null,"error":null,"ints":{},"topology":null,"values":{"rec":{"blocks":[[1056.000000001,1056.2000000009998,5659.100000015]],"n":58}}}
-{"case":"gen0407","deferred":null,"error":null,"ints":{},"topology":null,"values":{"rec":{"blocks":[[1164.0211020227666,1193.9108737440679,8549.629149996097]],"n":60}}}
+{"case":"gen0407","deferred":null,"error":null,"ints":{},"topology":null,"values":{"rec":{"blocks":[[1166.0211020227666,1195.9108737440679,8563.629149996097]],"n":60}}}
 {"case":"gen0408","deferred":null,"error":null,"ints":{},"topology":null,"values":{"rec":[0.0,0.0,0.0,0.0]}}
 {"case":"gen0409","deferred":null,"error":null,"ints":{},"topology":null,"values":{"rec":{"blocks":[[1091.4458403116907,1091.4458403116907,7378.823727564802]],"n":84}}}
 {"case":"gen0410","deferred":null,"error":null,"ints":{},"topology":null,"values":{"rec":{"blocks":[[1059.4229819771433,1059.4229819771433,5776.262199094259]],"n":58}}}
@@ -1529,5 +1529,5 @@
 {"case":"gen1498","deferred":null,"error":null,"ints":{},"topology":null,"values":{"rec":{"blocks":[[8.0,"inf","NaN"]],"n":21}}}
 {"case":"gen1499","deferred":null,"error":null,"ints":{},"topology":null,"values":{"rec":[0.0,0.0,0.0,0.0]}}
 {"case":"wr100_normal_point_far","deferred":null,"error":null,"ints":{},"topology":null,"values":{"rec":{"blocks":[[1058.0001,1058.0001,5705.0015]],"n":58}}}
-{"case":"wr100_u_natural_degenerate_point_far","deferred":null,"error":null,"ints":{},"topology":null,"values":{"rec":{"blocks":[[2071.0001,2071.0001,6652.0015]],"n":34}}}
-{"case":"wr100_v_natural_degenerate_point_far","deferred":null,"error":null,"ints":{},"topology":null,"values":{"rec":{"blocks":[[1075.1000999999999,1075.1000999999999,6183.8015000000005]],"n":58}}}
+{"case":"wr100_u_natural_degenerate_point_far","deferred":null,"error":null,"ints":{},"topology":null,"values":{"rec":{"blocks":[[2070.0001,2070.0001,6631.0015]],"n":34}}}
+{"case":"wr100_v_natural_degenerate_point_far","deferred":null,"error":null,"ints":{},"topology":null,"values":{"rec":{"blocks":[[2070.0001,2070.0001,6633.0015]],"n":34}}}

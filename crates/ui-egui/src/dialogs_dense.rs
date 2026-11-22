@@ -80,12 +80,14 @@ pub(super) fn command(kind: &Kind) -> Option<&'static str> {
             crate::dialogs_sheet::Sm::Flange { .. } => Some("sheet.flange"),
             crate::dialogs_sheet::Sm::Unfold { refold } => Some(if *refold { "sheet.refold" } else { "sheet.unfold" }),
             crate::dialogs_sheet::Sm::Convert { .. } => Some("sheet.convert"),
+            crate::dialogs_sheet::Sm::Recognize { .. } => Some("sheet.recognize"),
             crate::dialogs_sheet::Sm::Rules { .. } => Some("sheet.manage_rules"),
             crate::dialogs_sheet::Sm::FlatPattern { .. } => Some("sheet.flat_pattern"),
             _ => k.simple_metadata().map(|(command, _)| command),
         },
         Kind::Frame(_) => Some("frame.member"),
         Kind::EndCap(_) => Some("frame.end_cap"),
+        Kind::RotateMember(_) => Some("frame.rotate_member"),
         Kind::Plastic(k) => match k {
             crate::dialogs_plastic::Pl::SnapFit { .. } => Some("plastic.snap_fit"),
             crate::dialogs_plastic::Pl::Assign { .. } => Some("plastic.assign_rule"),
@@ -420,6 +422,15 @@ pub(super) fn rows(app: &mut SolveApp, ctx: &egui::Context, d: &mut Dialog, ui: 
     } else if matches!(d.kind, Kind::PatternRect { .. }) {
         // Each direction's pick shows in its own group, with its quantity and spacing (#9634).
         input_rows_range(d, ui, &app.session, app.preferences.origin_plane_names, 0..1);
+    } else if matches!(d.kind, Kind::Move { .. }) {
+        // Object (above), Selection, then the Move Type and its own picks.
+        input_rows_range(d, ui, &app.session, app.preferences.origin_plane_names, 0..1);
+        crate::dialogs_move::type_row(app, d, ui);
+        let n = d.inputs.len();
+        input_rows_range(d, ui, &app.session, app.preferences.origin_plane_names, 1..n);
+    } else if matches!(d.kind, Kind::Frame(_)) {
+        // Corner Overrides shows among Frame Member's own rows, under the corner settings.
+        input_rows_range(d, ui, &app.session, app.preferences.origin_plane_names, 0..2);
     } else {
         input_rows(d, ui, &app.session, app.preferences.origin_plane_names);
     }
@@ -438,6 +449,11 @@ pub(super) fn rows(app: &mut SolveApp, ctx: &egui::Context, d: &mut Dialog, ui: 
         Kind::InsertDrawing(p) => crate::dialogs_insert_drawing::rows(ui, p),
         Kind::InsertAirfoil(a) => crate::dialogs_insert_airfoil::rows(ui, a),
         Kind::Sketch => {
+            let edge_on = edge_on_origin_planes(&app.cam);
+            if !edge_on.is_empty() {
+                let text = solidcraft_ui_text::format("sketch_panel.edge_on_hint", &[("planes", &edge_on.join(", "))]);
+                ui_kit::text(ui, &text, ui_kit::Text::Hint("edge_on"));
+            }
             if d.error.is_some() && matches!(d.inputs.first().and_then(|i| i.items.first()), Some(Sel::Face { .. })) {
                 ui_kit::text(
                     ui,
@@ -491,6 +507,7 @@ pub(super) fn rows(app: &mut SolveApp, ctx: &egui::Context, d: &mut Dialog, ui: 
             to_offset,
             start,
             offset_start,
+            symmetric_offset,
             all,
             thin,
             wall,
@@ -507,7 +524,7 @@ pub(super) fn rows(app: &mut SolveApp, ctx: &egui::Context, d: &mut Dialog, ui: 
                     d => d,
                 };
                 let mut pos = order.iter().position(|o| *o == shown).unwrap_or(0);
-                combo(ui, "ex_dir", &["One Side", "Two Sides", "Symmetric"], &mut pos);
+                ui_kit::dropdown_with_keyboard_close(ui, "ex_dir", &mut pos, &["One Side", "Two Sides", "Symmetric"]);
                 if pos != order.iter().position(|o| *o == shown).unwrap_or(0) {
                     *direction = match (order.get(pos).copied().unwrap_or(0), reversed) {
                         (0, true) => 1,
@@ -540,6 +557,14 @@ pub(super) fn rows(app: &mut SolveApp, ctx: &egui::Context, d: &mut Dialog, ui: 
             // A choice made by hand sticks, the shown one included (#6901): Extrude's own choice
             // stops before the next frame makes it.
             if crate::op_auto::op_row(ui, "ex_op", operation) {
+                *auto_op = false;
+                // Cutting air does nothing: Cut points into the body unless the direction was set (#18243).
+                smart.point_cut = crate::dialogs::OPS.get(*operation) == Some(&"cut") && !smart.manual_dir;
+            }
+            // Join and Cut take their bodies in Target Bodies. A body picked there is a
+            // choice by hand, so Extrude's automatic operation stops changing it.
+            set_extrude_targets(&mut d.inputs, &mut d.active, &mut d.extra, *operation);
+            if d.inputs.iter().any(|i| i.label == EXTRUDE_TARGETS && !i.items.is_empty()) {
                 *auto_op = false;
             }
             ui_kit::section(ui, "extrude_options", "Options", true, |ui| {
@@ -590,6 +615,9 @@ pub(super) fn rows(app: &mut SolveApp, ctx: &egui::Context, d: &mut Dialog, ui: 
                 });
                 if st != 0 {
                     enter |= expr_row(ui, "Offset", start);
+                    if *direction == 2 && st == 1 {
+                        form_row(ui, "Symmetric Offset", |ui| check(ui, symmetric_offset));
+                    }
                 }
                 if *direction < 2 {
                     form_row(ui, "Taper Angle", |ui| {
@@ -888,6 +916,13 @@ fn coil_rows(ui: &mut egui::Ui, extra: &mut serde_json::Map<String, Value>) -> b
 fn additional_rows(app: &mut SolveApp, d: &mut Dialog, ui: &mut egui::Ui) -> bool {
     let mut enter = false;
     let through_point = offset_through_point(d).is_some();
+    // Move/Copy of a component without Create Copy moves its placement (`dialogs_move::placements`).
+    let placing = !crate::dialogs_move::placements(d).is_empty();
+    let shared = placing && crate::dialogs_move::moves_shared(app, d);
+    // A component just pasted is placed, not copied.
+    let pasted = crate::dialogs_move::pasted(d);
+    // Picked components moved earlier and not captured: Revert Position puts just them back.
+    let revertible = if placing { crate::dialogs_move::revertible(app, d) } else { Vec::new() };
     match &mut d.kind {
         Kind::Revolve { angle, operation, .. } => {
             let cur = usize::from(to_object_on(&d.inputs));
@@ -946,11 +981,16 @@ fn additional_rows(app: &mut SolveApp, d: &mut Dialog, ui: &mut egui::Ui) -> boo
         Kind::Mirror => {
             // Feature replay retains the source operation; Join is for body copies.
             if !d.inputs.first().is_some_and(|i| i.accept == selection::FEATURES) {
+                let mut picked = false;
                 form_row(ui, "Operation", |ui| {
                     let mut op = usize::from(d.extra.get("combine").and_then(Value::as_bool).unwrap_or(false));
-                    ui_kit::segmented(ui, &mut op, &["New Body", "Join"], Default::default());
+                    picked = ui_kit::segmented(ui, &mut op, &["New Body", "Join"], Default::default());
                     d.extra.insert("combine".into(), json!(op == 1));
                 });
+                // Picked by hand: the preview's own choice, when it comes in, does not replace it.
+                if picked {
+                    crate::preview::mirror_operation_picked(app, d);
+                }
             }
         }
         Kind::OffsetPlane { offset } => {
@@ -979,8 +1019,14 @@ fn additional_rows(app: &mut SolveApp, d: &mut Dialog, ui: &mut egui::Ui) -> boo
         Kind::Construct { t: Some(t), .. } => {
             form_row(ui, "Position (0 to 1)", |ui| enter |= field(ui, t));
         }
-        Kind::Split | Kind::ReplaceFace | Kind::Remove | Kind::Midplane | Kind::ChatContext | Kind::Construct { t: None, .. } => {}
-        Kind::Rib { thickness, depth, flip, normal, .. } => {
+        Kind::Split
+        | Kind::ReplaceFace
+        | Kind::Remove
+        | Kind::Midplane
+        | Kind::ChatContext
+        | Kind::PluginPick { .. }
+        | Kind::Construct { t: None, .. } => {}
+        Kind::Rib { thickness, depth, flip, normal, extend, .. } => {
             form_row(ui, "Direction", |ui| {
                 let mut i = usize::from(*normal);
                 ui_kit::segmented(ui, &mut i, &["In plane", "Normal"], Default::default());
@@ -988,7 +1034,13 @@ fn additional_rows(app: &mut SolveApp, d: &mut Dialog, ui: &mut egui::Ui) -> boo
             });
             enter |= expr_row_positive(ui, "Thickness", thickness);
             enter |= hint_row_positive(ui, "Depth", depth, tr("to the next face"));
-            ui_kit::options(ui, "feature_options", &mut [("Flip", flip)]);
+            // A rib along the sketch normal has no ends to run on, so it has no Extend option.
+            if *normal {
+                ui_kit::options(ui, "feature_options", &mut [("Flip", flip)]);
+            } else {
+                let extend_label = solidcraft_ui_text::tr("ui.rib_extend_ends");
+                ui_kit::options(ui, "feature_options", &mut [("Flip", flip), (extend_label, extend)]);
+            }
         }
         Kind::Emboss { depth, deboss } => {
             enter |= expr_row(ui, "Depth", depth);
@@ -1083,7 +1135,7 @@ fn additional_rows(app: &mut SolveApp, d: &mut Dialog, ui: &mut egui::Ui) -> boo
         Kind::OffsetFaces { distance } => {
             enter |= expr_row(ui, "Distance", distance);
         }
-        Kind::Thread { designation, length, suggested, of, options } => {
+        Kind::Thread { designation, length, suggested, of, options, .. } => {
             let mut modeled = d.extra.get("modeled").and_then(Value::as_bool).unwrap_or(false);
             let before = modeled;
             let (submitted, reset) = crate::dialogs_thread::rows(ui, designation, suggested, length, options, &mut modeled);
@@ -1107,7 +1159,25 @@ fn additional_rows(app: &mut SolveApp, d: &mut Dialog, ui: &mut egui::Ui) -> boo
         }
         k @ Kind::Move { .. } => {
             enter |= crate::dialogs_move::rows(ui, k);
-            extra_options(ui, "move_options", &mut d.extra, &[("Create Copy", "copy")]);
+            if shared {
+                ui_kit::text(
+                    ui,
+                    solidcraft_ui_text::tr_label("This child is shared. Position changes apply to every copy of its parent."),
+                    ui_kit::Text::Note("shared"),
+                );
+            }
+            if placing {
+                // Ticked at first, as the Browser's move captured.
+                d.extra.entry("capture").or_insert(json!(true));
+                let capture = ("Capture All Positions", "capture");
+                let options: &[(&str, &str)] = if pasted { &[capture] } else { &[("Create Copy", "copy"), capture] };
+                extra_options(ui, "move_options", &mut d.extra, options);
+                if !revertible.is_empty() && ui_kit::button(ui, tr("Revert Position"), ui_kit::Button::Normal).clicked() {
+                    let _ = app.run("component.revert_position", json!({ "occurrences": revertible }));
+                }
+            } else {
+                extra_options(ui, "move_options", &mut d.extra, &[("Create Copy", "copy")]);
+            }
         }
         Kind::Primitive { cmd, fields, operation, at, .. } => {
             let from_sketch = *cmd == "solid.coil" && d.inputs.first().is_some_and(|i| i.accept & selection::PROFILES != 0 && !i.items.is_empty());
@@ -1164,14 +1234,19 @@ fn additional_rows(app: &mut SolveApp, d: &mut Dialog, ui: &mut egui::Ui) -> boo
         Kind::Surface(k) => enter |= crate::dialogs_surface::rows(ui, k),
         Kind::Sheet(k) => enter |= crate::dialogs_sheet::rows(app, ui, k, &mut d.inputs),
         Kind::Plastic(k) => enter |= crate::dialogs_plastic::rows(app, ui, k, &d.inputs),
-        Kind::Frame(k) => enter |= crate::dialogs_frame::rows(app, ui, k, &d.inputs),
+        Kind::Frame(_) => enter |= crate::dialogs_frame::rows(app, ui, d),
         Kind::EndCap(k) => enter |= crate::dialogs_end_cap::rows(app, ui, k, &d.inputs),
+        Kind::RotateMember(k) => enter |= crate::dialogs_rotate_member::rows(app, ui, k, &mut d.inputs),
         Kind::Assembly(k) => enter |= crate::dialogs_assembly::rows(app, ui, k, &mut d.inputs, &mut d.active),
         Kind::Measure { result, show, .. } => measure_rows(app, ui, result.as_ref(), show),
-        Kind::Section { offset, flip, hatch } => {
+        Kind::Section { offset, flip, hatch, add, edit } => {
             enter |= expr_row(ui, "Distance", offset);
             ui_kit::options(ui, "feature_options", &mut [("Flip", flip), ("Hatch", hatch)]);
-            if section_turns_off(&app.session, &d.inputs) && !d.extra.contains_key("plane") {
+            if edit.is_some() {
+                ui_kit::text(ui, tr("section.edit_hint"), ui_kit::Text::Hint("section_edit"));
+            } else if *add {
+                ui_kit::text(ui, tr("section.add_hint"), ui_kit::Text::Hint("section_add"));
+            } else if section_turns_off(&app.session, d.extra.contains_key("plane"), &d.inputs) {
                 ui_kit::text(ui, tr("section.off_hint"), ui_kit::Text::Hint("section_off"));
             }
         }
@@ -1256,10 +1331,51 @@ fn measure_rows(app: &SolveApp, ui: &mut egui::Ui, r: Option<&Value>, show: &mut
     }
 }
 
+/// The origin planes the view sees edge-on, as lines with nothing to click (#17606): in a top
+/// view XZ and YZ, in a front view XY and YZ. Create Sketch then says where else to pick them.
+pub(crate) fn edge_on_origin_planes(cam: &solidcraft_viewport::Camera) -> Vec<&'static str> {
+    let back = cam.back();
+    [("XY", back.z), ("XZ", back.y), ("YZ", back.x)].into_iter().filter(|(_, along_normal)| along_normal.abs() < 1e-2).map(|(name, _)| name).collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::scenario::{self, Harness};
+
+    /// #17606: Create Sketch says how to pick a plane the view shows edge-on, and only then.
+    #[test]
+    fn create_sketch_hints_at_planes_seen_edge_on_only_when_there_are_some() {
+        use solidcraft_viewport::StandardView;
+        let mut cam = solidcraft_viewport::Camera::default();
+        assert!(edge_on_origin_planes(&cam).is_empty(), "the iso view sees every origin plane");
+        for (view, planes) in
+            [(StandardView::Top, vec!["XZ", "YZ"]), (StandardView::Front, vec!["XY", "YZ"]), (StandardView::Right, vec!["XY", "XZ"])]
+        {
+            cam.set_view(view);
+            assert_eq!(edge_on_origin_planes(&cam), planes, "{view:?}");
+        }
+        cam.yaw += 0.3;
+        cam.pitch = 0.4;
+        assert!(edge_on_origin_planes(&cam).is_empty(), "a turned view sees every plane again");
+
+        fn has_text(shape: &egui::Shape, text: &str) -> bool {
+            match shape {
+                egui::Shape::Text(t) => t.galley.text() == text,
+                egui::Shape::Vec(shapes) => shapes.iter().any(|s| has_text(s, text)),
+                _ => false,
+            }
+        }
+        let mut h = Harness::new();
+        let hint = solidcraft_ui_text::format("sketch_panel.edge_on_hint", &[("planes", "XZ, YZ")]);
+        assert!(hint.starts_with("XZ, YZ are seen edge-on"), "{hint}");
+        h.step(&json!({"start":"sketch.create"})).unwrap();
+        h.frames(2);
+        assert!(!h.shapes.iter().any(|s| has_text(&s.shape, &hint)), "no hint while every plane can be clicked");
+        h.app.cam.set_view(StandardView::Top);
+        h.frames(2);
+        assert!(h.shapes.iter().any(|s| has_text(&s.shape, &hint)), "the panel says how to pick XZ and YZ: {hint}");
+    }
 
     const COMMANDS: [&str; 6] =
         ["solid.extrude", "solid.fillet", "solid.chamfer", "solid.hole", "solid.pattern.rectangular", "solid.pattern.circular"];
@@ -1352,6 +1468,44 @@ mod tests {
         h.frames(2);
         assert!(scenario::handle_at("dialog:Tangent Chain").is_some());
     }
+    /// #15939: with Tangent Chain unticked, one picked edge is rounded alone, not with the edges
+    /// that run on from it smoothly. A 40 x 30 x 20 box with one upright edge rounded: its top
+    /// back edge runs on into the round's top edge, and that into the top right edge.
+    #[test]
+    fn a_fillet_with_tangent_chain_off_rounds_the_picked_edge_alone() {
+        use solidcraft_engine::geom::MeshGeom;
+        let volume = |h: &Harness| crate::open_meshing::session_world(&h.app.session).body("Body1").unwrap().mesh().measure().volume;
+        let mut h = Harness::new();
+        h.call("ui.resize", json!({"width":1400,"height":1000}));
+        h.app.run("solid.box", json!({"length": 40, "width": 30, "height": 20})).unwrap();
+        h.app.run("solid.fillet", json!({"edges": [[40, 30, 10]], "radius": "5"})).unwrap();
+        let before = volume(&h);
+        h.step(&json!({"start":"solid.fillet"})).unwrap();
+        h.frames(4);
+        h.step(&json!({"click":{"handle":"dialog:Tangent Chain"}})).unwrap();
+        assert!(matches!(h.app.dialog.as_ref().unwrap().kind, Kind::Fillet { chain: false, .. }));
+        let edge = edge_sel(&h.app.session, Vec3::new(17.5, 30.0, 20.0)).unwrap();
+        let session = &h.app.session;
+        h.app.dialog.as_mut().unwrap().pick(session, edge);
+        assert_eq!(h.app.dialog.as_ref().unwrap().items().len(), 1);
+        let p = parameters(&h);
+        assert_eq!(p["tangent_chain"], json!(false), "{p}");
+        h.app.run("solid.fillet", p).unwrap();
+        // A 2 mm round along the 35 mm straight edge takes (1 - pi/4) r^2 L = 30.0 mm^3; with
+        // the chain, the round's top edge and the 25 mm right edge go too (59 mm^3).
+        let removed = before - volume(&h);
+        assert!((27.0..33.0).contains(&removed), "removed {removed} mm^3");
+        // Editing it keeps the chain off; a fillet a script saved with the chain on keeps it on.
+        let saved = h.app.session.doc.features.last().unwrap().id;
+        h.app.edit_feature(saved);
+        assert_eq!(redefined(&h)["tangent_chain"], json!(false));
+        h.step(&json!({"widget":"Cancel"})).unwrap();
+        h.app.run("solid.fillet", json!({"edges": [[0, 15, 0]], "radius": "1"})).unwrap();
+        let scripted = h.app.session.doc.features.last().unwrap().id;
+        h.app.edit_feature(scripted);
+        assert_ne!(redefined(&h)["tangent_chain"], json!(false));
+    }
+
     fn fillet_harness() -> Harness {
         let mut h = Harness::new();
         h.call("ui.resize", json!({"width":1400,"height":1000}));
@@ -1367,6 +1521,15 @@ mod tests {
         let commands = apply_commands(&h.app, h.app.dialog.as_ref().unwrap()).unwrap();
         assert_eq!(commands.first().unwrap().0, "solid.fillet");
         commands.first().unwrap().1.clone()
+    }
+
+    /// The parameters an edit dialog's OK gives its feature again.
+    fn redefined(h: &Harness) -> Value {
+        let commands = apply_commands(&h.app, h.app.dialog.as_ref().unwrap()).unwrap();
+        let (cmd, p) = commands.first().unwrap();
+        assert_eq!(cmd, "timeline.redefine", "{p}");
+        assert_eq!(p["command"], json!("solid.fillet"), "{p}");
+        p["params"].clone()
     }
 
     fn choose(h: &mut Harness, row: &str, option: &str) {

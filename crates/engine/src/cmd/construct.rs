@@ -16,8 +16,9 @@ use super::features::{add_feature, check_expr, plane_param, sketch_id};
 use crate::params::{bad, req_expr, str_, vec3};
 use crate::schema::construct::{
     AxisEdgeParams, AxisNormalToFaceParams, AxisThroughCylinderParams, AxisTwoPlanesParams, AxisTwoPointsParams, MidplaneParams,
-    PlaneAlongPathParams, PlaneAxisPointParams, PlanePerpendicularParams, PlaneTangentParams, PlaneThreePointsParams, PlaneTwoEdgesParams,
-    PointAlongPathParams, PointCenterParams, PointEdgePlaneParams, PointThreePlanesParams, PointTwoEdgesParams, PointVertexParams,
+    PlaneAlongPathParams, PlaneAxisPointParams, PlanePerpendicularParams, PlaneSquareToLineParams, PlaneTangentParams, PlaneThreePointsParams,
+    PlaneTwoEdgesParams, PointAlongPathParams, PointCenterParams, PointEdgePlaneParams, PointThreePlanesParams, PointTwoEdgesParams,
+    PointVertexParams,
 };
 use crate::schema::features::FeatureResult;
 use crate::schema::{TypedContract, output_schema_for};
@@ -44,6 +45,7 @@ const PLANE_THREE_POINTS_CONTRACT: TypedContract<PlaneThreePointsParams> = Typed
 const PLANE_TANGENT_CONTRACT: TypedContract<PlaneTangentParams> = TypedContract::new();
 const PLANE_ALONG_PATH_CONTRACT: TypedContract<PlaneAlongPathParams> = TypedContract::new();
 const PLANE_PERPENDICULAR_CONTRACT: TypedContract<PlanePerpendicularParams> = TypedContract::new();
+const PLANE_SQUARE_TO_LINE_CONTRACT: TypedContract<PlaneSquareToLineParams> = TypedContract::new();
 
 pub static COMMANDS: &[CommandSpec] = &[
     CommandSpec::new("construct.axis.through_cylinder", "Axis Through Cylinder/Cone/Torus", crate::checked!("construct.axis.through_cylinder", axis_face))
@@ -155,6 +157,14 @@ pub static COMMANDS: &[CommandSpec] = &[
         .output(output_schema_for::<FeatureResult>)
         .params(
             "plane: plane or planar face ref; line: straight edge, sketch line or axis ref; name? The plane holds the line and is square to the plane",
+        ),
+    CommandSpec::new("construct.plane.square_to_line", "Plane Through Point, Square To Line", crate::checked!("construct.plane.square_to_line", plane_square_to_line))
+        .at("SOLID", "CONSTRUCT")
+        .icon("plane_square_to_line")
+        .contract(&PLANE_SQUARE_TO_LINE_CONTRACT)
+        .output(output_schema_for::<FeatureResult>)
+        .params(
+            "line: straight edge, sketch line or axis ref; point: vertex, sketch point, construction point or fixed point; name? The plane passes through the point and is square to the line",
         ),
 ];
 
@@ -398,7 +408,7 @@ fn point_along(s: &mut Session, p: &Value) -> Result<Value> {
 fn plane_mid(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "construct.plane.midplane";
     let (a, b) = (geo(s, p.get("a"), cmd, "a")?, geo(s, p.get("b"), cmd, "b")?);
-    plane(s, p, PlaneRef::Midplane { a: Box::new(a), b: Box::new(b) })
+    plane(s, p, PlaneRef::Midplane { a: Box::new(a), b: Box::new(b), old_frame: false })
 }
 
 fn plane_edges(s: &mut Session, p: &Value) -> Result<Value> {
@@ -428,6 +438,7 @@ pub(crate) fn picked_plane(s: &Session, cmd: &str, p: &Value) -> Result<Option<P
         "construct.plane.axis_point" => PlaneRef::AxisPoint { axis: pick("axis")?, point: pick("point")? },
         "construct.plane.three_points" => PlaneRef::ThreePoints { a: pick("a")?, b: pick("b")?, c: pick("c")? },
         "construct.plane.perpendicular" => PlaneRef::Perpendicular { plane: pick("plane")?, line: pick("line")? },
+        "construct.plane.square_to_line" => PlaneRef::SquareToLine { line: pick("line")?, point: pick("point")? },
         _ => return Ok(None),
     }))
 }
@@ -441,6 +452,7 @@ pub fn picked_plane_refs(plane: &PlaneRef) -> Option<(&'static str, Vec<(&'stati
         PlaneRef::AxisPoint { axis, point } => ("construct.plane.axis_point", vec![("axis", &**axis), ("point", &**point)]),
         PlaneRef::ThreePoints { a, b, c } => ("construct.plane.three_points", vec![("a", &**a), ("b", &**b), ("c", &**c)]),
         PlaneRef::Perpendicular { plane, line } => ("construct.plane.perpendicular", vec![("plane", &**plane), ("line", &**line)]),
+        PlaneRef::SquareToLine { line, point } => ("construct.plane.square_to_line", vec![("line", &**line), ("point", &**point)]),
         _ => return None,
     })
 }
@@ -478,4 +490,8 @@ fn plane_along(s: &mut Session, p: &Value) -> Result<Value> {
 
 fn plane_perpendicular(s: &mut Session, p: &Value) -> Result<Value> {
     plane_of_picks(s, p, "construct.plane.perpendicular")
+}
+
+fn plane_square_to_line(s: &mut Session, p: &Value) -> Result<Value> {
+    plane_of_picks(s, p, "construct.plane.square_to_line")
 }

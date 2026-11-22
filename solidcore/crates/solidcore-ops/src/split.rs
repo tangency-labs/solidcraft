@@ -384,7 +384,8 @@ fn both_sides(
 /// The manifold solid `body` cut in two by `tool`: the part behind the surface (its normal
 /// points away) and the part in front, each closed by the tool's piece inside the body and
 /// each possibly several solids. A tool that misses leaves both parts the whole body. `None`
-/// when a side is left empty. `body` is unchanged.
+/// when a side is left empty, or when the tool ends inside the body: it only nicks it, and a
+/// part that is no manifold solid is no cut. `body` is unchanged.
 ///
 /// # Errors
 /// [`Error::NotSolid`] for a body that is no manifold solid; the kernel's errors (a tool it
@@ -399,7 +400,7 @@ pub fn split_body(body: &Body, tool: &Tool) -> Result<Option<(Body, Body)>> {
             },
             Err(e) => return Ok(Err(e)),
         };
-        both_sides(k, body, false, |k, flip| {
+        both_sides(k, body, true, |k, flip| {
             let mut surface = t.surface.copy(k)?;
             if flip {
                 if let Err(e) = surface.swap_uv(k) {

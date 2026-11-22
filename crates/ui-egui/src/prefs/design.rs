@@ -120,6 +120,43 @@ pub(super) fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
             }
             ui_kit::text(ui, app.tr("prefs.validation_note"), ui_kit::Text::Hint("validation"));
         });
+        ui_kit::settings_section(ui, "drawings", app.tr("prefs.drawings"), |ui| {
+            ui_kit::settings_form(ui, t.space_24 * 7.0 + t.space_2, |ui| {
+                ui_kit::row(ui, app.tr("ui.projection_of_new_drawings"), |ui| {
+                    let projections = [Projection::First, Projection::Third];
+                    let labels = [app.tr("ui.first_angle"), app.tr("ui.third_angle")];
+                    let mut selected = projections.iter().position(|p| *p == app.preferences.default_projection).unwrap_or(1);
+                    ui_kit::segmented(ui, &mut selected, &labels, ui_kit::Segments { intrinsic: true, ..Default::default() });
+                    if let Some(projection) = projections.get(selected) {
+                        app.preferences.default_projection = *projection;
+                    }
+                });
+                // Each kind's built-ins, by size: the kind is the row's, so each shows its paper's title.
+                let p = &mut app.preferences;
+                for (label, id, chosen, assembly) in [
+                    ("ui.template_for_new_part_drawings", "pref_part_drawing_template", &mut p.part_drawing_template, false),
+                    ("ui.template_for_new_assembly_drawings", "pref_assembly_drawing_template", &mut p.assembly_drawing_template, true),
+                ] {
+                    let names: Vec<&str> = template::BUILT_INS.iter().copied().filter(|name| super::is_template_for(name, assembly)).collect();
+                    let titles: Vec<String> = names.iter().filter_map(|name| template::title(name)).collect();
+                    let titles: Vec<&str> = titles.iter().map(String::as_str).collect();
+                    ui_kit::row(ui, solidcraft_ui_text::tr(label), |ui| {
+                        let mut selected = names.iter().position(|name| *name == chosen.as_str()).unwrap_or(0);
+                        ui_kit::dropdown(ui, id, &mut selected, &titles);
+                        if let Some(name) = names.get(selected) {
+                            *chosen = (*name).to_string();
+                        }
+                    });
+                }
+                let label = app.tr("ui.sheet_page.colour").to_owned();
+                ui_kit::row(ui, &label, |ui| crate::drawing_sheet_page::colour_choice(app, ui));
+                let label = app.tr("ui.drawing_sheets.visibility").to_string();
+                ui_kit::row(ui, &label, |ui| crate::drawing_workspace::sheets_visibility_choice(app, ui));
+                setting::drawing_calibration(app, ui);
+            });
+            crate::drawing_sheet_page::calibration_bar(app, ui);
+            ui_kit::text(ui, app.tr("ui.sheet_page.calibration_note"), ui_kit::Text::Hint("drawing_calibration"));
+        });
         ui_kit::settings_section(ui, "orientation", app.tr("prefs.orientation"), |ui| {
             ui.horizontal_wrapped(|ui| {
                 ui.spacing_mut().item_spacing.x = t.space_10;
@@ -192,6 +229,8 @@ pub(super) fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
                     }
                 }
             });
+            let heal = setting::heal_tolerance_defects(app, ui).on_hover_text(app.tr("prefs.heal_tolerance_defects_note"));
+            crate::scenario::publish_target("prefs:heal_tolerance_defects", heal.rect);
         });
         export_name(app, ui, label_width);
         origin_plane_names(app, ui, label_width);
@@ -286,5 +325,7 @@ fn origin_plane_names(app: &mut SolveApp, ui: &mut egui::Ui, label_width: f32) {
         crate::scenario::publish_target("dialog:Hide origin by default", response.rect);
         let response = setting::origin_axes_across_view(app, ui).backing_on_hover_text(app.tr("prefs.origin_axes_across_view_help"));
         crate::scenario::publish_target("prefs:origin_axes_across_view", response.rect);
+        let response = setting::browser_hover_shows_origin(app, ui).backing_on_hover_text(app.tr("prefs.browser_hover_shows_origin_help"));
+        crate::scenario::publish_target("prefs:browser_hover_shows_origin", response.rect);
     });
 }

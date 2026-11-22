@@ -26,7 +26,7 @@ fn point_arg_schema(generator: &mut SchemaGenerator, snaps: bool) -> Schema {
     let mut forms = vec![
         json!(point),
         json!({
-            "description": "[x, y] where a coordinate may be an expression over the design's parameters, such as [\"w / 2\", 5]: a point that follows the parameters and is fixed; text naming no parameter, such as \"5\", is just that number, in the design's length unit (a JSON number is mm), and does not itself fix the point.",
+            "description": "[x, y] where a coordinate may be an expression over the design's parameters and the sketch's other points (\"p1.x\"), such as [\"w / 2\", 5]: a point that follows the parameters and is fixed; text naming no parameter, such as \"5\", is just that number, in the design's length unit (a JSON number is mm), and does not itself fix the point.",
             "type": "array", "items": coordinate, "minItems": 2, "maxItems": 2
         }),
         json!({"description": "An existing point's id such as \"l1.end\" or \"p3\", or a snap such as \"mid:l1\".", "type": "string"}),
@@ -39,7 +39,7 @@ fn point_arg_schema(generator: &mut SchemaGenerator, snaps: bool) -> Schema {
         forms.push(json!({"description": "A point on a model edge [x, y, z] in mm, projected into the sketch.", "type": "object", "properties": {"on_edge": model}, "required": ["on_edge"]}));
         "A sketch point: [x, y] in mm (a coordinate may be an expression), an existing point's id (\"l1.end\"), {ref} or {at}, a snap as text (\"mid:<line>\", \"on:<curve>:x,y\", \"x:<a>+<b>:x,y\", \"vertex:x,y,z\"), or a model {vertex} or {on_edge}."
     } else {
-        "A sketch point: [x, y] in mm (a coordinate may be an expression over the design's parameters), an existing point's id such as \"l1.end\", or {ref} or {at}."
+        "A sketch point: [x, y] in mm (a coordinate may be an expression over the design's parameters or over another point's coordinate, \"p1.x\"), an existing point's id such as \"l1.end\", or {ref} or {at}."
     };
     json_schema!({"description": description, "anyOf": forms})
 }
@@ -142,14 +142,16 @@ impl JsonSchema for LinePoints {
     }
 }
 
+/// The pattern of a snap's text form in a schema, from the engine's one list of prefixes.
+fn snap_pattern() -> String {
+    format!("^({})", crate::cmd::SNAP_PREFIXES.join("|"))
+}
+
 /// Whether `v` is a snap that `sketch.point` takes as one, and if so whether it is well formed
 /// (what the design makes of it, such as a line that is not there, stays the handler's).
 fn snap_form(v: &Value) -> Option<bool> {
     let text = v.as_str();
-    let snapped = text.is_some_and(|t| ["mid:", "on:", "vertex:", "x:"].iter().any(|k| t.starts_with(k)))
-        || v.get("vertex").is_some()
-        || v.get("on_edge").is_some();
-    if !snapped {
+    if !crate::cmd::is_snap(v) {
         return None;
     }
     let numbers = |t: &str| -> Vec<f64> { t.split(',').filter_map(|x| x.trim().parse().ok()).collect() };
@@ -207,11 +209,11 @@ impl JsonSchema for PointOrSnap {
         let coordinate = generator.subschema_for::<LengthExpr>();
         let model = generator.subschema_for::<Point3>();
         json_schema!({
-            "description": "A point to make: [x, y] in mm (a coordinate may be an expression over the design's parameters: the point is then fixed and follows them; text naming no parameter, such as \"5\", is just that number, in the design's length unit (a JSON number is mm), and does not itself fix the point), or a snap that makes it and holds it: \"mid:<line>\" (the line's midpoint), \"on:<curve>:x,y\" (on the curve, near x,y), \"x:<a>+<b>:x,y\" (at the crossing of two curves, near x,y), \"vertex:x,y,z\" or {vertex: [x,y,z]} (a model vertex, projected) or {on_edge: [x,y,z]} (a point on a model edge, projected). An existing point's id is not taken.",
+            "description": "A point to make: [x, y] in mm (a coordinate may be an expression over the design's parameters and the sketch's other points (\"p1.x\"): the point is then fixed and follows them; text naming no parameter, such as \"5\", is just that number, in the design's length unit (a JSON number is mm), and does not itself fix the point), or a snap that makes it and holds it: \"mid:<line>\" (the line's midpoint), \"on:<curve>:x,y\" (on the curve, near x,y), \"x:<a>+<b>:x,y\" (at the crossing of two curves, near x,y), \"vertex:x,y,z\" or {vertex: [x,y,z]} (a model vertex, projected) or {on_edge: [x,y,z]} (a point on a model edge, projected). An existing point's id is not taken.",
             "anyOf": [
                 point,
                 {"type": "array", "items": coordinate, "minItems": 2, "maxItems": 2},
-                {"type": "string", "pattern": "^(mid:|on:|x:|vertex:)"},
+                {"type": "string", "pattern": snap_pattern()},
                 {"type": "object", "properties": {"vertex": model}, "required": ["vertex"]},
                 {"type": "object", "properties": {"on_edge": model}, "required": ["on_edge"]}
             ]
@@ -534,33 +536,10 @@ pub struct ArcCenterPointParams {
     pub connect: Option<bool>,
 }
 
-/// A slot's `width`, as `slot_c2c` and `slot_overall` read it: a number above 1e-9 and below 1e9.
-/// A value that is missing, not a number or too small is the handler's one message.
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub struct SlotWidth(pub f64);
-
-impl<'de> Deserialize<'de> for SlotWidth {
-    fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
-        Value::deserialize(d)?
-            .as_f64()
-            .and_then(params::finite)
-            .filter(|w| *w > 1e-9)
-            .map(SlotWidth)
-            .ok_or_else(|| D::Error::custom(whole("`width` must be positive")))
-    }
-}
-
-impl JsonSchema for SlotWidth {
-    fn schema_name() -> Cow<'static, str> {
-        "SlotWidth".into()
-    }
-    fn json_schema(_: &mut SchemaGenerator) -> Schema {
-        json_schema!({
-            "description": "The slot's width in mm: the distance between its two straight sides, and the diameter of its round ends. Positive.",
-            "type": "number", "exclusiveMinimum": 0, "exclusiveMaximum": 1e9
-        })
-    }
-}
+// A slot's `width`, as `slot_width` reads it for every slot command: a number, or text that is an
+// expression over the design's parameters (a diameter dimension on a round end, driven by them),
+// as a circle's radius is (#15857). Whether it is positive is the handler's to check.
+circle_size!(SlotWidth, "width", "A slot's `width`: a number or an expression.");
 
 /// Marks `p0`, `p1` and `width` required in a slot's schema. The types hold them as optional
 /// (`#[schemars(required)]` doesn't do this for a key with `serde(default)`), so that a call
@@ -585,7 +564,8 @@ pub struct SlotCenterToCenterParams {
     #[serde(default, deserialize_with = "present")]
     #[schemars(with = "PlainPoint")]
     pub p1: Option<PlainPoint>,
-    /// The width of the slot, in mm.
+    /// The width of the slot, in mm: a number, or an expression over the design's parameters,
+    /// which makes the width a dimension driven by them. Positive.
     #[serde(default, deserialize_with = "present")]
     #[schemars(with = "SlotWidth")]
     pub width: Option<SlotWidth>,
@@ -611,7 +591,8 @@ pub struct SlotOverallParams {
     #[serde(default, deserialize_with = "present")]
     #[schemars(with = "PlainPoint")]
     pub p1: Option<PlainPoint>,
-    /// The width of the slot, in mm.
+    /// The width of the slot, in mm: a number, or an expression over the design's parameters,
+    /// which makes the width a dimension driven by them. Positive.
     #[serde(default, deserialize_with = "present")]
     #[schemars(with = "SlotWidth")]
     pub width: Option<SlotWidth>,
@@ -684,8 +665,9 @@ pub struct PointResult {
 }
 
 /// A rectangle corner as `sketch::corner_arg` reads it: `[x, y]` or `{x, y}` of numbers, or
-/// `[x, y]` with a coordinate typed as an expression over the design's parameters. Not a point's
-/// id or a snap. Kept as given, for the handler, which evaluates the expressions.
+/// `[x, y]` with a coordinate typed as an expression over the design's parameters or over
+/// another point's coordinate. Not a point's id or a snap. Kept as given, for the handler,
+/// which evaluates the expressions.
 #[derive(Clone, Debug, PartialEq)]
 pub struct CornerPoint(pub Value);
 
@@ -713,10 +695,48 @@ impl JsonSchema for CornerPoint {
         let point = generator.subschema_for::<Point2>();
         let coordinate = generator.subschema_for::<LengthExpr>();
         json_schema!({
-            "description": "A corner: [x, y] or {x, y} in mm, or [x, y] where a coordinate is an expression over the design's parameters, such as [\"w / 2\", 5]: the corner is then fixed and follows the parameters; text naming no parameter, such as \"5\", is just that number, in the design's length unit (a JSON number is mm), and does not itself fix the corner. Not a point's id or a snap.",
+            "description": "A corner: [x, y] or {x, y} in mm, or [x, y] where a coordinate is an expression over the design's parameters and the sketch's other points (\"p1.x\"), such as [\"w / 2\", 5]: the corner is then fixed and follows the parameters; text naming no parameter, such as \"5\", is just that number, in the design's length unit (a JSON number is mm), and does not itself fix the corner. Not a point's id or a snap.",
             "anyOf": [
                 point,
                 {"type": "array", "items": coordinate, "minItems": 2, "maxItems": 2}
+            ]
+        })
+    }
+}
+
+/// A corner of a 2-Point Rectangle, or the centre or corner of a Center Rectangle: a
+/// [`CornerPoint`], or a snap that holds it, as `sketch.point` takes one ([`PointOrSnap`]). Not a
+/// point's id.
+#[derive(Clone, Debug, PartialEq)]
+pub struct CornerOrSnap(pub Value);
+
+impl<'de> Deserialize<'de> for CornerOrSnap {
+    fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        let v = Value::deserialize(d)?;
+        match snap_form(&v) {
+            Some(true) => Ok(CornerOrSnap(v)),
+            Some(false) => Err(D::Error::custom(crate::cmd::CORNER_MUST)),
+            None => serde_json::from_value::<CornerPoint>(v).map(|c| CornerOrSnap(c.0)).map_err(D::Error::custom),
+        }
+    }
+}
+
+impl JsonSchema for CornerOrSnap {
+    fn schema_name() -> Cow<'static, str> {
+        "CornerOrSnap".into()
+    }
+    fn json_schema(generator: &mut SchemaGenerator) -> Schema {
+        let point = generator.subschema_for::<Point2>();
+        let coordinate = generator.subschema_for::<LengthExpr>();
+        let model = generator.subschema_for::<Point3>();
+        json_schema!({
+            "description": "A corner: [x, y] or {x, y} in mm, or [x, y] where a coordinate is an expression over the design's parameters and the sketch's other points (\"p1.x\"), such as [\"w / 2\", 5]: the corner is then fixed and follows the parameters; text naming no parameter, such as \"5\", is just that number, in the design's length unit (a JSON number is mm), and does not itself fix the corner. Or a snap that holds the corner there: \"mid:<line>\" (the line's midpoint), \"on:<curve>:x,y\" (on the curve, near x,y), \"x:<a>+<b>:x,y\" (at the crossing of two curves, near x,y), \"vertex:x,y,z\" or {vertex: [x,y,z]} (a model vertex, projected) or {on_edge: [x,y,z]} (a point on a model edge, projected). Not a point's id.",
+            "anyOf": [
+                point,
+                {"type": "array", "items": coordinate, "minItems": 2, "maxItems": 2},
+                {"type": "string", "pattern": snap_pattern()},
+                {"type": "object", "properties": {"vertex": model}, "required": ["vertex"]},
+                {"type": "object", "properties": {"on_edge": model}, "required": ["on_edge"]}
             ]
         })
     }
@@ -752,10 +772,11 @@ pub struct RectTwoPointParams {
     /// The sketch to draw in: its feature id or name. Default: the one being edited.
     #[serde(default)]
     pub sketch: Option<SketchTarget>,
-    /// One corner. A coordinate typed as an expression holds the corner where the parameters put it.
-    pub p0: CornerPoint,
-    /// The opposite corner. It must differ from `p0` in both x and y.
-    pub p1: CornerPoint,
+    /// One corner. A coordinate typed as an expression holds the corner where the parameters put
+    /// it; a snap holds it on the curve, midpoint, crossing or model vertex it names.
+    pub p0: CornerOrSnap,
+    /// The opposite corner, given as `p0` is. It must differ from `p0` in both x and y.
+    pub p1: CornerOrSnap,
     /// Draw construction geometry, which is not part of a profile. Default: false.
     #[serde(default)]
     pub construction: Option<bool>,
@@ -797,10 +818,44 @@ pub struct RectCenterParams {
     /// The sketch to draw in: its feature id or name. Default: the one being edited.
     #[serde(default)]
     pub sketch: Option<SketchTarget>,
-    /// The centre. A coordinate typed as an expression holds the centre where the parameters put it.
-    pub center: CornerPoint,
-    /// One corner, in any quadrant round the centre. It must differ from `center` in both x and y.
-    pub corner: CornerPoint,
+    /// The centre. A coordinate typed as an expression holds the centre where the parameters put
+    /// it; a snap holds it on the curve, midpoint, crossing or model vertex it names.
+    pub center: CornerOrSnap,
+    /// One corner, in any quadrant round the centre, given as `center` is. It must differ from
+    /// `center` in both x and y.
+    pub corner: CornerOrSnap,
+    /// Draw construction geometry, which is not part of a profile. Default: false.
+    #[serde(default)]
+    pub construction: Option<bool>,
+    /// Make a new point that lands exactly on an existing point (the origin too) coincident with
+    /// it. Default: true.
+    #[serde(default)]
+    pub connect: Option<bool>,
+}
+
+/// Draw a rectangle from the middle of one edge and a corner of the opposite edge (#4798). The
+/// edge can run in any direction; the middle stays at the middle of its edge.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[schemars(deny_unknown_fields)]
+pub struct RectEdgeCenterParams {
+    /// The sketch to draw in: its feature id or name. Default: the one being edited.
+    #[serde(default)]
+    pub sketch: Option<SketchTarget>,
+    /// The middle of the first edge. An existing point's id, or a snap such as `"mid:l1"` (the
+    /// middle of line `l1`, whose direction the edge then takes unless `direction` or `line` is
+    /// given).
+    pub anchor: SnapPoint,
+    /// A corner of the opposite edge, in mm. Its distance from the first edge is the width; its
+    /// offset along the first edge is half the edge's length.
+    pub corner: PlainPoint,
+    /// The direction the first edge runs, `[dx, dy]`, any length but not zero. Wins over `line`.
+    #[serde(default, deserialize_with = "present", skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "PlainPoint")]
+    pub direction: Option<PlainPoint>,
+    /// A line the first edge runs parallel to, by id. Used when `direction` is not given. One of
+    /// `direction`, `line` or a `"mid:<line>"` anchor is needed.
+    #[serde(default)]
+    pub line: Option<String>,
     /// Draw construction geometry, which is not part of a profile. Default: false.
     #[serde(default)]
     pub construction: Option<bool>,
@@ -818,7 +873,8 @@ pub struct RectRoundedParams {
     /// The sketch to draw in: its feature id or name. Default: the one being edited.
     #[serde(default)]
     pub sketch: Option<SketchTarget>,
-    /// One corner of the rectangle before rounding, as `sketch.rectangle.two_point` takes it.
+    /// One corner of the rectangle before rounding. A coordinate typed as an expression holds the
+    /// corner where the parameters put it. A snap is not taken.
     pub p0: CornerPoint,
     /// The opposite corner. It must differ from `p0` in both x and y.
     pub p1: CornerPoint,
@@ -964,6 +1020,56 @@ pub struct RectResult {
     pub param_warnings: Vec<String>,
 }
 
+/// An edge-centre rectangle's sides, as line ids. It may be turned at any angle, so they are
+/// named from the first edge, not by place.
+#[derive(Debug, Default, Serialize, JsonSchema)]
+pub struct EdgeCenterRectSides {
+    /// The first edge, whose middle is the anchor.
+    pub anchor: Option<String>,
+    /// The side from the first edge's end to the opposite edge.
+    pub side_a: Option<String>,
+    /// The edge opposite the first.
+    pub far: Option<String>,
+    /// The side from the opposite edge back to the first edge's start.
+    pub side_b: Option<String>,
+}
+
+/// An edge-centre rectangle's corners, as point ids, named from the first edge.
+#[derive(Debug, Default, Serialize, JsonSchema)]
+pub struct EdgeCenterRectCorners {
+    /// The first edge's start.
+    pub anchor_start: Option<String>,
+    /// The first edge's end.
+    pub anchor_end: Option<String>,
+    /// The end of the opposite edge across from `anchor_end`.
+    pub far_end: Option<String>,
+    /// The end of the opposite edge across from `anchor_start`.
+    pub far_start: Option<String>,
+}
+
+/// What `sketch.rectangle.edge_center` returns.
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct EdgeCenterRectResult {
+    /// The ids of the four sides: the first edge, then on round the rectangle.
+    pub curves: Vec<String>,
+    /// The ids of the constraints added: horizontal and vertical sides (perpendicular and parallel
+    /// ones for a turned rectangle), the anchor held at the middle of the first edge, and a
+    /// coincident for a corner that landed on an existing point.
+    pub constraints: Vec<String>,
+    /// The sketch's solve: `{solved, dof}`.
+    pub sketch: Value,
+    /// The sides, named from the first edge.
+    pub sides: EdgeCenterRectSides,
+    /// The corners, named from the first edge.
+    pub corners: EdgeCenterRectCorners,
+    /// Everything the call added to the sketch: `{points, curves, constraints, dimensions}`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub created: Option<Created>,
+    /// In the warn parameter-check mode: what the call's parameters got wrong.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub param_warnings: Vec<String>,
+}
+
 /// What `sketch.rectangle.rounded` returns.
 #[derive(Debug, Serialize, JsonSchema)]
 pub struct RoundedRectResult {
@@ -983,7 +1089,10 @@ pub struct RoundedRectResult {
     /// The corner arcs: bottom-left, bottom-right, top-right, top-left.
     pub arcs: Vec<String>,
     /// The parameter that holds the corner radius.
-    pub param: String,
+    pub param: Option<String>,
+    /// A sheet sketch keeps its radius expression without making a model parameter.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub expression: Option<String>,
     /// Everything the call added to the sketch: `{points, curves, constraints, dimensions}`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub created: Option<Created>,

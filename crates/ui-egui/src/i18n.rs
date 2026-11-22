@@ -15,6 +15,7 @@ static GERMAN: Catalog = Catalog::new("de", "Deutsch", include_str!(concat!(env!
 /// English in UK spelling: only the messages whose spelling differs; the rest are English's.
 static ENGLISH_UK: Catalog = Catalog::new("en-GB", "English (UK)", include_str!(concat!(env!("OUT_DIR"), "/locales/en-GB.json")));
 static SPANISH: Catalog = Catalog::new("es", "Español (España)", include_str!(concat!(env!("OUT_DIR"), "/locales/es.json")));
+static BASQUE: Catalog = Catalog::new("eu", "Euskara", include_str!(concat!(env!("OUT_DIR"), "/locales/eu.json")));
 static FINNISH: Catalog = Catalog::new("fi", "Suomi", include_str!(concat!(env!("OUT_DIR"), "/locales/fi.json")));
 static FRENCH: Catalog = Catalog::new("fr", "Français", include_str!(concat!(env!("OUT_DIR"), "/locales/fr.json")));
 static GALICIAN: Catalog = Catalog::new("gl", "Galego", include_str!(concat!(env!("OUT_DIR"), "/locales/gl.json")));
@@ -55,6 +56,7 @@ pub const LOCALES: &[&Catalog] = &[
     &GERMAN,
     &ENGLISH_UK,
     &SPANISH,
+    &BASQUE,
     &FINNISH,
     &FRENCH,
     &GALICIAN,
@@ -108,8 +110,9 @@ pub trait LocaleNames {
     /// multi-word Hebrew or Arabic name reads from the right like the interface's own labels (#10471).
     fn given_name(self, text: &str) -> String;
     /// Evaluation errors stay English for scripts; the empty Cut/Intersect hint that names
-    /// another component, and a feature's request to reselect a reference it lost, are translated
-    /// where they are shown. Other text is returned unchanged.
+    /// another component, a feature's request to reselect a reference it lost, an open Stitch
+    /// result and a profile pick with too many curves are translated where they are shown. Other
+    /// text is returned unchanged.
     fn diagnostic(self, text: &str) -> String;
     /// Translate generated browser names and labels, preserving custom names otherwise.
     fn dynamic(self, text: &str) -> String;
@@ -151,6 +154,23 @@ impl LocaleNames for Locale {
                 _ => self.format("diagnostic.lost_projections_more", &args),
             };
         }
+        if let Some((before, detail)) = text.split_once("Stitch result `")
+            && let Some((body, detail)) = detail.rsplit_once("` remains open (boundary edges: ")
+            && let Some((count, after)) = detail.split_once(").")
+            && !body.is_empty()
+            && !count.is_empty()
+            && count.bytes().all(|c| c.is_ascii_digit())
+            && count.parse::<usize>().is_ok_and(|count| count > 0)
+        {
+            let body = self.given_name(body);
+            let message = self.format("diagnostic.stitch_open_edges", &[("body", &body), ("count", count)]);
+            return format!("{before}{message}{after}");
+        }
+        // A profile pick with more curves than a design keeps track of, after anything naming
+        // the feature or command in front.
+        if let Some(before) = text.strip_suffix(solidcraft_engine::doc::WHOLE_PROFILE_TOO_MANY_CURVES) {
+            return format!("{before}{}", self.text("diagnostic.whole_profile_too_many_curves"));
+        }
         const PREFIX: &str = "there is no body to cut or intersect in component '";
         if let Some((before, detail)) = text.split_once(PREFIX)
             && let Some((component, detail)) = detail.split_once("'; the tool may overlap '")
@@ -175,6 +195,9 @@ impl LocaleNames for Locale {
         }
         if let Some(count) = text.strip_prefix("Parameters (").and_then(|s| s.strip_suffix(')')) {
             return self.format("browser.parameters", &[("count", count)]);
+        }
+        if let Some(number) = text.strip_prefix("Section ").filter(|n| !n.is_empty() && n.chars().all(|c| c.is_ascii_digit())) {
+            return self.format("browser.section_plane", &[("number", number)]);
         }
         if let Some(count) = text.strip_suffix(" degrees of freedom")
             && !count.is_empty()
@@ -219,6 +242,15 @@ pub fn tr_engine_error(error: &str) -> String {
     use solidcraft_ui_text::{format, tr};
     // `EngineError::BadParams` carries `invalid parameters for `<command>`: ` in front.
     let text = error.strip_prefix("invalid parameters for `").and_then(|rest| rest.split_once("`: ")).map_or(error, |(_, text)| text);
+    for (english, id) in [
+        ("Boundary Fill cell points must be away from tool boundaries", "boundary_fill.error.boundary_point"),
+        ("Boundary Fill needs closed solid tools; open surface and mesh tools are not supported", "boundary_fill.error.closed_tools"),
+        ("Boundary Fill did not produce a closed solid cell", "boundary_fill.error.open_cell"),
+    ] {
+        if text == english {
+            return tr(id).to_string();
+        }
+    }
     if let Some((name, ids)) = text
         .strip_prefix("ambiguous component `")
         .and_then(|rest| rest.strip_suffix("; use a numeric component ID"))
@@ -243,6 +275,11 @@ pub fn tr_engine_error(error: &str) -> String {
     }
     if text == "nothing to break at there" {
         return tr("sketch.error.nothing_to_break").to_string();
+    }
+    if let Some(name) = text.strip_prefix("sketch `").and_then(|rest| {
+        rest.strip_suffix("` comes after this sketch in the timeline, so its geometry cannot be used here. Move the source sketch earlier if its dependencies allow, or use a sketch after it.")
+    }) {
+        return format("sketch.error.source_later_in_timeline", &[("name", name)]);
     }
     if let Some(id) = offset_error_id(
         text,
@@ -302,6 +339,22 @@ mod tests {
     }
 
     #[test]
+    fn a_plugin_failure_is_worded_from_the_catalog_and_the_cli_english_matches_it() {
+        use solidcraft_engine::plugin::{PluginFailure, messages::MESSAGES};
+        install();
+        for (id, english) in MESSAGES {
+            assert_eq!(Locale::for_language("en").text(id), *english, "{id}: the engine's English is the catalog's");
+        }
+        let failure = PluginFailure {
+            plugin: "Dutchman".into(),
+            file: Some("cube.f3d".into()),
+            error: solidcraft_engine::plugin::HostError::OverCeiling { limit: "memory_mib".into(), requested: 2048, allowed: 128 },
+        };
+        let _scope = scope("de");
+        assert!(failure.text().starts_with("Dutchman konnte cube.f3d nicht öffnen: Es verlangt 2048 MiB Arbeitsspeicher, Plugins dürfen 128 MiB"));
+    }
+
+    #[test]
     fn component_ambiguity_is_translated_without_truncating_names() {
         install();
         let _scope = scope("de");
@@ -311,6 +364,23 @@ mod tests {
         assert_eq!(super::tr_engine_error(&message), expected);
         assert_eq!(super::tr_engine_error(&format!("invalid parameters for `component.delete`: {message}")), expected);
         assert_eq!(super::tr_engine_error("another error"), "another error");
+    }
+
+    #[test]
+    fn boundary_fill_refusals_are_translated() {
+        install();
+        let _scope = scope("de");
+        for (english, id) in [
+            ("Boundary Fill cell points must be away from tool boundaries", "boundary_fill.error.boundary_point"),
+            ("Boundary Fill needs closed solid tools; open surface and mesh tools are not supported", "boundary_fill.error.closed_tools"),
+            ("Boundary Fill did not produce a closed solid cell", "boundary_fill.error.open_cell"),
+        ] {
+            assert_eq!(Locale::for_language("en").text(id), english);
+            let expected = Locale::for_language("de").text(id);
+            assert_ne!(expected, english);
+            assert_eq!(super::tr_engine_error(english), expected);
+            assert_eq!(super::tr_engine_error(&format!("invalid parameters for `solid.boundary_fill`: {english}")), expected);
+        }
     }
 
     #[test]
@@ -345,6 +415,26 @@ mod tests {
         );
         assert_eq!(super::tr_engine_error("point `origin` is fixed and cannot move"), "Der Punkt `origin` ist fest und kann nicht verschoben werden");
         assert_eq!(super::tr_engine_error("another error"), "another error");
+    }
+
+    #[test]
+    fn a_later_sketch_source_is_translated_without_truncating_its_name() {
+        install();
+        let _scope = scope("de");
+        for name in ["Sketch3", "Source` comes after this sketch {name}"] {
+            let message = format!(
+                "sketch `{name}` comes after this sketch in the timeline, so its geometry cannot be used here. Move the source sketch earlier if its dependencies allow, or use a sketch after it."
+            );
+            let expected = format!(
+                "Die Skizze `{name}` liegt in der Zeitleiste nach dieser Skizze. Ihre Geometrie kann hier daher nicht verwendet werden. Verschiebe die Quellskizze nach vorne, wenn ihre Abhängigkeiten dies erlauben, oder verwende eine Skizze, die nach ihr liegt."
+            );
+            assert_eq!(super::tr_engine_error(&message), expected);
+            for command in ["sketch.project", "sketch.intersect", "sketch.include_3d"] {
+                assert_eq!(super::tr_engine_error(&format!("invalid parameters for `{command}`: {message}")), expected, "{command}");
+            }
+            let unknown = format!("sketch `{name}` is unavailable for another reason");
+            assert_eq!(super::tr_engine_error(&unknown), unknown);
+        }
     }
 
     #[test]
@@ -540,6 +630,39 @@ mod tests {
     }
 
     #[test]
+    fn stitch_open_edges_diagnostic_preserves_names_counts_and_other_warnings() {
+        install();
+        for body in ["A", "Plate ` {body} {count}", "Plate` remains open (boundary edges: 2). {body}"] {
+            for (before, after) in [("", ""), ("surface.stitch: ", "; another warning")] {
+                let message = format!("{before}Stitch result `{body}` remains open (boundary edges: 14).{after}");
+                assert_eq!(Locale::for_language("en").diagnostic(&message), message);
+                for language in ["ar", "de", "he", "ja", "ko", "vi", "zh"] {
+                    let translated = Locale::for_language(language).diagnostic(&message);
+                    assert_ne!(translated, message, "{language}");
+                    assert!(translated.contains(body) && translated.contains("14"), "{language}: {translated}");
+                    assert!(translated.starts_with(before) && translated.ends_with(after), "{language}: {translated}");
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn stitch_open_edges_diagnostic_leaves_malformed_lookalikes_unchanged() {
+        install();
+        for count in ["", "0", "-1", "+14", "1.5", " 14", "14 ", "١٤", "184467440737095516160"] {
+            let message = format!("Stitch result `A` remains open (boundary edges: {count}).");
+            assert_eq!(Locale::for_language("ja").diagnostic(&message), message);
+        }
+        for message in [
+            "Stitch result `` remains open (boundary edges: 14).",
+            "Stitch result `A` remains open (boundary edges: 14)",
+            "Stitch result `A` remains open (boundary edges: 14.5).",
+        ] {
+            assert_eq!(Locale::for_language("ja").diagnostic(message), message);
+        }
+    }
+
+    #[test]
     fn lost_projections_diagnostic_translates_with_the_sketch_and_projections_as_given() {
         install();
         let lost = |link: &str, body: &str, curve: &str| solidcraft_engine::doc::LostProjection {
@@ -548,6 +671,7 @@ mod tests {
             curves: vec![curve.into()],
             points: Vec::new(),
             name: "F2:side:l1".into(),
+            from: Vec::new(),
         };
         let lost_error = |n: usize| {
             let links = [("j1", "Tray", "l1"), ("j2", "Cover", "l2"), ("j3", "Tray", "l3"), ("j4", "Tray", "l4")];
@@ -574,6 +698,20 @@ mod tests {
                 assert!(translated.contains(feature) && translated.contains(shown), "{language}: {translated}");
                 assert!(!translated.contains(" more"), "the count of the rest is translated too: {language}: {translated}");
             }
+        }
+    }
+
+    #[test]
+    fn a_profile_pick_with_too_many_curves_reads_in_the_interface_language() {
+        install();
+        let message = format!("solid.extrude: {}", solidcraft_engine::doc::WHOLE_PROFILE_TOO_MANY_CURVES);
+        let english = Locale::for_language("en").diagnostic(&message);
+        assert_eq!(english, format!("solid.extrude: {}", Locale::for_language("en").text("diagnostic.whole_profile_too_many_curves")));
+        assert!(english.contains("Pick fewer profiles"), "{english}");
+        for language in ["ar", "de", "he", "ja", "ko", "pt-BR", "vi", "zh"] {
+            let translated = Locale::for_language(language).diagnostic(&message);
+            assert!(translated.starts_with("solid.extrude: "), "{language}: {translated}");
+            assert_ne!(translated, english, "{language}: the refusal must be translated");
         }
     }
 
@@ -765,6 +903,7 @@ mod tests {
             include_str!("documents.rs"),
             include_str!("dialogs.rs"),
             include_str!("browser.rs"),
+            include_str!("browser_search.rs"),
             include_str!("sketch_palette.rs"),
             include_str!("design_properties.rs"),
             include_str!("home.rs"),
@@ -1143,6 +1282,8 @@ mod tests {
         assert_eq!(ja.dynamic("Precision: 3"), "精度: 3");
         assert_eq!(ja.dynamic("Parameters (5)"), "パラメータ (5)");
         assert_eq!(ja.dynamic("4 degrees of freedom"), "自由度 4");
+        assert_eq!(ja.dynamic("Section 2"), "断面 2");
+        assert_eq!(ja.dynamic("Section View"), ja.label("Section View"), "a label, not a numbered section plane");
         assert_eq!(ja.dynamic("Sketch of bracket"), "Sketch of bracket");
         assert_eq!(Locale::for_language("en").dynamic("Sketch1"), "Sketch1");
     }
@@ -1512,6 +1653,7 @@ mod tests {
         KitCall { name: "search_field", args: &[3], id: false, trim: &[] },
         KitCall { name: "menu_filter", args: &[3], id: false, trim: &[] },
         KitCall { name: "placement_field", args: &[3], id: false, trim: &[] },
+        KitCall { name: "canvas_value_field", args: &[4], id: false, trim: &[] },
         KitCall { name: "library_cell", args: &[3], id: false, trim: &[] },
         // actions.rs
         KitCall { name: "icon_button_at", args: &[3], id: false, trim: &[] },

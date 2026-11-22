@@ -105,20 +105,21 @@ fn stored_positions_are_matched_by_point_id() {
     let was: Vec<Vec2> = stored.points.iter().map(|q| q.pos).collect();
     assert_eq!(sk.positions_in(&stored), Some(was));
 
-    // A link of another shape is built anew: its points are new, and the points after it
-    // change places in the list.
+    // A link of another shape is built anew, and the points after it change places in the
+    // list. Its ends are the rail's ends, moved: they keep their ids and their stored places
+    // (#14249). Its new corner has no stored place.
     let mut sk = stored.clone();
     let bent = [LinkGeom::Line(Vec2::new(0.0, 20.0), Vec2::new(40.0, 30.0)), LinkGeom::Line(Vec2::new(40.0, 30.0), Vec2::new(80.0, 20.0))];
     assert!(sk.update_link(&link, &bent).unwrap());
     let now = sk.point_index("p").unwrap();
     assert_ne!(now, p);
-    assert_eq!(sk.positions_in(&stored), None, "the new points have no stored place and `p` has not moved");
     sk.points[now].pos = Vec2::new(60.0, 45.0);
     let was = sk.positions_in(&stored).unwrap();
     assert_eq!(was[now], Vec2::new(40.0, 45.0));
-    for i in sk.link_points(&link) {
-        assert_eq!(was[i], sk.points[i].pos);
-    }
+    let mut places: Vec<(Vec2, Vec2)> = sk.link_points(&link).into_iter().map(|i| (sk.points[i].pos, was[i])).collect();
+    places.sort_by(|a, b| a.0.x.total_cmp(&b.0.x));
+    let (start, corner, end) = (Vec2::new(0.0, 20.0), Vec2::new(40.0, 30.0), Vec2::new(80.0, 20.0));
+    assert_eq!(places, [(start, Vec2::new(0.0, 50.0)), (corner, corner), (end, Vec2::new(80.0, 50.0))]);
 }
 
 /// A 40 mm horizontal line tangent to a linked circle (r 3) above it, its left end 20 mm left

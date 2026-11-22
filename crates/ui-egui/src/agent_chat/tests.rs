@@ -185,6 +185,8 @@ fn select_all_in_the_transcript_takes_the_whole_conversation() {
         [(crate::ui_kit::LayoutMode::Docked, false), (crate::ui_kit::LayoutMode::Floating, false), (crate::ui_kit::LayoutMode::Floating, true)];
     for (dark, (layout, popped)) in [true, false].into_iter().flat_map(|dark| layouts.map(|l| (dark, l))) {
         let mut h = transcript_clipboard_harness(layout);
+        // The thought is shown open, so the test sees that it is drawn but not highlighted.
+        h.app.preferences.agent_thinking_folded = false;
         h.app.preferences.theme = if dark { "dark" } else { "light" }.into();
         h.app.ui.dark = dark;
         if popped {
@@ -583,19 +585,88 @@ fn merging_finds_the_turns_start_when_the_history_was_trimmed() {
         label: String::new(),
         doc: d.clone(),
         active_sketch: None,
+        active_sheet_sketch: None,
         pending_moves: Default::default(),
+        part: None,
         visibility: Default::default(),
+        section: None,
     };
     let docs: Vec<_> = (0..6).map(doc).collect();
     // The turn began at depth 3 with docs[3]; the history then lost its oldest step.
+    let start = UndoMark { depth: 3, top: Some(Box::new(snap(&docs[2]))) };
     let mut undo: Vec<_> = docs[1..6].iter().map(snap).collect();
-    assert_eq!(merge_undo(&mut undo, &docs[3], 3, "Agent"), 3);
+    assert_eq!(merge_undo(&mut undo, &docs[3], &start, "Agent"), 3);
     assert_eq!(undo.len(), 3);
     assert!(Arc::ptr_eq(&undo[2].doc, &docs[3]) && undo[2].label == "Agent");
+    // The step on top at the start is gone too: the first step is found by its design.
+    let mut undo: Vec<_> = docs[3..6].iter().map(snap).collect();
+    assert_eq!(merge_undo(&mut undo, &docs[3], &start, "Agent"), 3);
+    // A section step in the turn: the merged step brings back the section before it.
+    let mut undo: Vec<_> = docs[1..6].iter().map(snap).collect();
+    let before = solidcraft_engine::SectionState { hatch: true, ..Default::default() };
+    undo[3].section = Some(before.clone());
+    merge_undo(&mut undo, &docs[3], &start, "Agent");
+    assert_eq!(undo[2].section, Some(before.clone()));
     // A start that is no longer in the history: nothing is merged.
     let mut undo: Vec<_> = docs[1..6].iter().map(snap).collect();
-    assert_eq!(merge_undo(&mut undo, &doc(9), 3, "Agent"), 0);
+    let gone = UndoMark { depth: 3, top: Some(Box::new(snap(&doc(8)))) };
+    assert_eq!(merge_undo(&mut undo, &doc(9), &gone, "Agent"), 0);
     assert_eq!(undo.len(), 5);
+    // A drawing's step among the model's: each part keeps its own steps.
+    let mut undo: Vec<_> = docs[1..6].iter().map(snap).collect();
+    undo[3].part = Some(7);
+    assert_eq!(merge_undo(&mut undo, &docs[3], &start, "Agent"), 0);
+    assert_eq!(undo.len(), 5);
+    // A turn that made no step leaves the user's own last step alone, though a section step
+    // keeps the design it began with.
+    let mut undo: Vec<_> = docs[1..4].iter().map(snap).collect();
+    undo[2].section = Some(before.clone());
+    undo[2].doc = docs[3].clone();
+    let start = UndoMark::of(&undo);
+    assert_eq!(merge_undo(&mut undo, &docs[3], &start, "Agent"), 0);
+    assert_eq!((undo.len(), undo[2].label.as_str()), (3, ""));
+    // A full history of steps that all kept one design (section steps): the turn's steps follow
+    // the step on top at its start.
+    let step = |i: usize| solidcraft_engine::Snapshot { label: i.to_string(), ..snap(&docs[3]) };
+    let start = UndoMark::of(&[step(1), step(2), step(3)]);
+    let mut undo = vec![step(3), step(4), step(5)];
+    assert_eq!(merge_undo(&mut undo, &docs[3], &start, "Agent"), 2);
+}
+
+/// The user's own section step is theirs: a message that changed nothing does not take it over,
+/// and the chat's Undo of an agent's changes stops once the user has sectioned since.
+#[test]
+fn section_steps_stay_the_users() {
+    let mut app = SolveApp::new(solidcraft_engine::Session::default(), crate::Services::default());
+    app.run("solid.box", json!({"length": 10, "width": 10, "height": 10})).unwrap();
+    app.run("inspect.section", json!({"plane": "XY", "at": 5})).unwrap();
+    let (_tx, rx) = channel::<ControlRequest>();
+    app.agent_chat.tools_rx = Some(rx);
+    app.agent_chat.state = Some(State::Busy);
+    start_turn(&mut app, "look".into(), false, None, Vec::new());
+    end_turn(&mut app);
+    assert_eq!(app.session.undo.len(), 2);
+    assert_eq!(app.session.undo.last().map(|s| s.label.as_str()), Some("Section Analysis"));
+    assert!(!app.agent_chat.items.iter().any(|i| matches!(i, Item::Changes { .. })));
+
+    let (mut app, tx) = app_in_a_turn();
+    let reply = ask(&tx, "engine.execute", boxed(0.0));
+    frame(&mut app);
+    assert_eq!(reply.recv_timeout(std::time::Duration::from_secs(30)).unwrap()["ok"], true);
+    end_turn(&mut app);
+    let n = app.agent_chat.items.iter().rposition(|i| matches!(i, Item::Changes { .. })).expect("the changes are listed");
+    let offered = |app: &SolveApp| UndoMark::current(&app.agent_chat.items, &app.session.undo).is_some();
+    assert!(offered(&app), "the chat offers Undo of the agent's changes");
+    app.run("inspect.section", json!({"plane": "XY", "at": 5})).unwrap();
+    assert!(!offered(&app), "but not once the user has sectioned since");
+    undo_changes(&mut app, n);
+    assert_eq!(app.session.section.len(), 1, "the user's section stays");
+    assert_eq!(app.session.doc.features.len(), 1, "and so does the agent's box");
+    assert!(matches!(app.agent_chat.items[n], Item::Changes { undone: false, .. }));
+    app.run("edit.undo", json!({})).unwrap();
+    assert!(offered(&app), "but again once the user's section is undone");
+    undo_changes(&mut app, n);
+    assert!(app.session.doc.features.is_empty() && matches!(app.agent_chat.items[n], Item::Changes { undone: true, .. }));
 }
 
 /// People who don't want AI never see it: with "Show AI features" off there is no button, the
@@ -791,6 +862,49 @@ fn permission_modes_decide_what_asks() {
     let crash = ask(&tx, "engine.execute", json!({"command": "diagnostics.crash_reports"}));
     frame(&mut app);
     assert_eq!(crash.recv_timeout(std::time::Duration::from_secs(5)).unwrap()["ok"], false);
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// "Always allow" on a modelling batch covers modelling batches only: a later batch that saves
+/// still asks, and allowing that one always remembers the save, not "batch".
+#[test]
+fn always_allowing_one_batch_does_not_allow_a_later_batchs_file_steps() {
+    let (mut app, tx) = app_in_a_turn();
+    app.agent_chat.running_id = "claude".into();
+    app.preferences.ai_permissions = agents::Mode::Ask;
+    let modelling = json!({"commands": [{"command": "solid.box", "params": {"length": 1, "width": 1, "height": 1}}]});
+    let first = ask(&tx, "engine.batch", modelling.clone());
+    frame(&mut app);
+    assert_eq!(app.agent_chat.waiting(), 1, "a modelling batch asks");
+    let id = app.agent_chat.held[0].id;
+    approve_always(&mut app, id);
+    frame(&mut app);
+    assert_eq!(first.recv_timeout(std::time::Duration::from_secs(30)).unwrap()["ok"], true);
+    assert!(agents::always_allowed(&app.preferences, "claude", "batch"));
+    let _second = ask(&tx, "engine.batch", modelling);
+    frame(&mut app);
+    assert_eq!(app.agent_chat.waiting(), 0, "modelling batches are remembered");
+    let dir = solidcraft_engine::io::vfs::temp_dir().join(format!("sc-agent-chat-batch-always-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let saving = json!({
+        "commands": [{"command": "solid.box"}, {"command": "FILE.SAVE", "params": {"path": dir.join("x.solidcraft").to_string_lossy()}}],
+        "allow_paths": [dir.to_string_lossy()],
+    });
+    let _third = ask(&tx, "engine.batch", saving.clone());
+    frame(&mut app);
+    assert_eq!(app.agent_chat.waiting(), 1, "a batch that saves still asks");
+    let id = app.agent_chat.held[0].id;
+    approve_always(&mut app, id);
+    assert!(agents::always_allowed(&app.preferences, "claude", "file.save"));
+    decline_all(&mut app, "test");
+    let _fourth = ask(&tx, "engine.batch", saving);
+    frame(&mut app);
+    assert_eq!(app.agent_chat.waiting(), 0, "the save itself was allowed always");
+    let exporting = json!({"commands": [{"command": "file.export", "params": {"path": dir.join("x.stl").to_string_lossy()}}], "allow_paths": [dir.to_string_lossy()]});
+    let _fifth = ask(&tx, "engine.batch", exporting);
+    frame(&mut app);
+    assert_eq!(app.agent_chat.waiting(), 1, "an export was never allowed");
+    decline_all(&mut app, "test");
     let _ = std::fs::remove_dir_all(&dir);
 }
 
@@ -5554,6 +5668,27 @@ fn a_picture_only_prompt_and_a_thought_have_no_copy_message_action() {
     assert!(h.widget("Copy message").is_none(), "nothing to click");
 }
 
+/// #17072: a reply's thinking starts folded under a Thinking header, and its arrow opens it;
+/// with `agent_thinking_folded` off it is shown open, as before.
+#[test]
+fn a_thought_starts_folded_and_its_arrow_opens_it() {
+    for folded in [true, false] {
+        let mut h = crate::scenario::Harness::new();
+        h.app.preferences.language = "en".into();
+        h.app.preferences.agent_thinking_folded = folded;
+        h.call("ui.agent_chat", json!({"open": true}));
+        h.frames(3);
+        h.app.agent_chat.items.push(Item::Agent { thought: true, text: "pondering the plate".into() });
+        h.frames(3);
+        assert!(h.widget("Thinking").is_some(), "the header, folded = {folded}");
+        assert_eq!(h.widget("pondering the plate").is_some(), !folded, "the thinking shows only when open");
+        let arrow = solidcraft_ui_registry::handle_at("agent_chat:thought:0").expect("the thought's arrow");
+        h.call("ui.click", json!({"x": arrow.x, "y": arrow.y}));
+        h.frames(3);
+        assert_eq!(h.widget("pondering the plate").is_some(), folded, "the arrow turns it over");
+    }
+}
+
 fn shared_assistant_harness() -> (crate::scenario::Harness, Script) {
     let mut h = narrow_chat();
     h.app.home.open = false;
@@ -6153,4 +6288,73 @@ fn plugin_runs_always_keep_per_run_consent() {
             assert!(reply.try_recv().is_err(), "consent must precede dispatch");
         }
     }
+}
+
+/// A plugin tool the agent calls by name (`<plugin>.<entry>`) waits for the user's answer in
+/// every mode, even one that allows everything or remembers the tool; listing the plugin tools
+/// asks nothing; legacy named calls pass undeclared arguments through after approval.
+#[test]
+fn plugin_tools_go_through_the_chats_approval_and_never_skip_it() {
+    let dir = std::env::temp_dir().join(format!("sc-agent-chat-plugin-tool-{}", std::process::id()));
+    let folder = dir.join("gears");
+    std::fs::create_dir_all(&folder).unwrap();
+    let manifest = json!({"id":"gears","name":"Gears","version":"1","capabilities":["commands@0.1"],"runtime":{
+        "module":"plugin.wasm","commands":["solid.box"],"limits":{"fuel":100000,"memory_mib":1,"deadline_ms":5000},
+        "entries":[{"name":"make","effect":"edit","input_schema":{"type":"object","properties":{"teeth":{"type":"integer"}}}}]}});
+    std::fs::write(folder.join("plugin.json"), manifest.to_string()).unwrap();
+    for mode in [agents::Mode::All, agents::Mode::Edits, agents::Mode::Ask] {
+        let (mut app, tx) = app_in_a_turn();
+        app.session.plugin_state.packages.insert("gears".into(), folder.to_string_lossy().into_owned());
+        app.agent_chat.running_id = "claude".into();
+        app.preferences.ai_permissions = mode;
+        agents::remember(&mut app.preferences, "claude", "gears.make");
+        agents::remember(&mut app.preferences, "claude", "plugin.run");
+        let call = ask(&tx, "engine.execute", json!({"command":"gears.make","params":{"approval":"hash","params":{"teeth":20}}}));
+        pump_tools(&mut app);
+        assert_eq!(app.agent_chat.waiting(), 1, "{mode:?}: an edit entry asks first");
+        assert!(call.try_recv().is_err(), "{mode:?}: nothing runs before the answer");
+        let undeclared = ask(&tx, "engine.execute", json!({"command":"gears.make","params":{"approval":"hash","params":{"colour":"red"}}}));
+        pump_tools(&mut app);
+        assert!(undeclared.try_recv().is_err(), "legacy named inputs still wait for approval");
+        assert_eq!(app.agent_chat.waiting(), 2, "{mode:?}: undeclared inputs pass through the legacy call");
+        let list = ask(&tx, "engine.execute", json!({"command":"plugin.tools"}));
+        pump_tools(&mut app);
+        assert_eq!(app.agent_chat.waiting(), 2, "{mode:?}: listing asks nothing");
+        drop(list);
+    }
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// An importer plugin's code runs only after the user's answer, in every mode and after "always
+/// allow": a plugin importer tool (`file.import`), and `doc.open` of a file an installed importer
+/// opens, alone or in a batch. A file SolidCraft reads itself keeps the mode's answer.
+#[test]
+fn importer_plugins_always_ask_like_plugin_runs() {
+    let dir = std::env::temp_dir().join(format!("sc-agent-chat-importer-tool-{}", std::process::id()));
+    let folder = dir.join("plugins").join("smp");
+    std::fs::create_dir_all(&folder).unwrap();
+    let manifest = json!({"id":"smp","name":"Sample importer","version":"1","capabilities":["formats@0.1"],
+        "runtime":{"module":"plugin.wasm","commands":[],"entries":[{"name":"convert","kind":"importer","extensions":["smp"]}]}});
+    std::fs::write(folder.join("plugin.json"), manifest.to_string()).unwrap();
+    let file = dir.join("part.smp").to_string_lossy().into_owned();
+    let (mut app, tx) = app_in_a_turn();
+    app.session.plugin_state.plugins_dir = Some(dir.join("plugins"));
+    app.agent_chat.running_id = "claude".into();
+    app.preferences.ai_permissions = agents::Mode::All;
+    for command in ["file.import", "doc.open", "batch"] {
+        agents::remember(&mut app.preferences, "claude", command);
+    }
+    let calls = [
+        ask(&tx, "engine.execute", json!({"command":"file.import","params":{"path":file,"format":"smp.convert","options":{}}})),
+        ask(&tx, "engine.execute", json!({"command":"doc.open","params":{"path":file}})),
+        ask(&tx, "engine.batch", json!({"commands":[{"command":"solid.box","params":{}},{"command":"file.import","params":{"path":file}}]})),
+    ];
+    pump_tools(&mut app);
+    assert_eq!(app.agent_chat.waiting(), 3, "each plugin import waits for an answer");
+    assert!(calls.iter().all(|c| c.try_recv().is_err()), "nothing runs before the answer");
+    let session = &app.session;
+    assert!(crate::plugins::runs_plugin_code(session, "engine.execute", &json!({"command":"doc.open","params":{"path":file}})));
+    assert!(!crate::plugins::runs_plugin_code(session, "engine.execute", &json!({"command":"doc.open","params":{"path":"/tmp/part.step"}})));
+    assert!(!crate::plugins::runs_plugin_code(session, "engine.execute", &json!({"command":"solid.box","params":{}})));
+    let _ = std::fs::remove_dir_all(&dir);
 }

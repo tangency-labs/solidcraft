@@ -665,7 +665,7 @@ fn an_assembly_s_bodies_land_where_the_world_has_them() {
             placed.push(bounds(world));
         }
     }
-    let mut expected: Vec<_> = world.bodies.iter().map(|b| bounds(export_mesh_at(&b.body, MeshQuality::Standard).unwrap().positions)).collect();
+    let mut expected: Vec<_> = world.bodies.iter().map(|b| bounds(display_mesh_at(&b.body, MeshQuality::Standard).unwrap().positions)).collect();
     let key = |b: &([f64; 3], [f64; 3])| (b.0.map(|x| (x * 1000.0).round() as i64), b.1.map(|x| (x * 1000.0).round() as i64));
     placed.sort_by_key(key);
     expected.sort_by_key(key);
@@ -692,16 +692,45 @@ fn a_chosen_body_brings_only_its_own_occurrences() {
     assert_eq!(gltf["meshes"].as_array().unwrap().len(), 1);
 }
 
-/// The glTF importer reads the occurrence nodes back as components.
+/// The glTF importer reads the occurrence nodes back as components; the two needles share a mesh
+/// (#19468), so they come back as two occurrences of one component.
 #[test]
 fn an_exported_assembly_imports_as_components_again() {
     let (_, _, _, bytes) = export_assembly(&[]);
     let imported = crate::read_gltf(&bytes, "galvanometer.glb", &mut |uri| panic!("unexpected external buffer: {uri}")).unwrap();
     let plan = &imported.plan;
     let slot = |name: &str| plan.slots.iter().position(|s| s == name).unwrap_or_else(|| panic!("no component {name}: {:?}", plan.slots));
-    let parent = |name: &str| plan.places.iter().find(|p| p.slot == slot(name)).unwrap().parent;
-    assert_eq!(parent("Frame:1"), None);
-    assert_eq!(parent("Needle:1"), Some(slot("Frame:1")));
-    assert_eq!(parent("Needle:2"), Some(slot("Frame:1")));
-    assert_eq!(plan.bodies.len(), 3);
+    let parents = |name: &str| plan.places.iter().filter(|p| p.slot == slot(name)).map(|p| p.parent).collect::<Vec<_>>();
+    assert_eq!(parents("Frame:1"), vec![None]);
+    assert_eq!(parents("Needle:1"), vec![Some(slot("Frame:1")); 2]);
+    assert_eq!(plan.bodies.len(), 2);
+}
+
+/// A part placed twice (#19468) is one mesh that both occurrences' body nodes point at, not one
+/// copy of its arrays per occurrence.
+#[test]
+fn a_part_placed_twice_shares_one_mesh() {
+    let (_, _, _, bytes) = export_assembly(&[]);
+    let (doc, _) = parse(&bytes);
+    let mesh_of = |name: &str| doc["nodes"][children_of(node_named(&doc, name).1)[0]]["mesh"].as_u64().unwrap();
+    assert_eq!(mesh_of("Needle:1"), mesh_of("Needle:2"));
+    assert_eq!(doc["nodes"].as_array().unwrap().iter().filter(|n| n.get("mesh").is_some()).count(), 3, "every occurrence keeps its body node");
+    assert_eq!(doc["meshes"].as_array().unwrap().len(), 2, "the frame and the needle");
+}
+
+/// Bodies are only one mesh when everything written is the same: a different shape, material or
+/// face look keeps its own mesh.
+#[test]
+fn bodies_that_differ_keep_their_own_meshes() {
+    let same = triangle();
+    let mut moved = triangle();
+    moved.mesh.positions[1] = Vec3::new(2.0, 0.0, 0.0);
+    let mut other_material = triangle();
+    other_material.material = 1;
+    let materials = [material(), GlbMaterial { name: "other".into(), ..material() }];
+    let bytes = glb("shared", &[], &[triangle(), same, moved, other_material], &materials).unwrap();
+    let doc = json(&bytes);
+    assert_eq!(doc["meshes"].as_array().unwrap().len(), 3);
+    let nodes: Vec<u64> = doc["nodes"].as_array().unwrap().iter().filter_map(|n| n["mesh"].as_u64()).collect();
+    assert_eq!(nodes, vec![0, 0, 1, 2]);
 }

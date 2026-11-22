@@ -7,19 +7,23 @@
 //! footprint, or restored at the moved corners for a face enclosed by rounds. A corner on the
 //! gap moves to where its planes meet the neighbours across the gap (a fillet's tangent points
 //! go to the sharp corner), and the stretch of loop that bordered deleted faces closes with a
-//! straight edge between the moved corners. Anything else (curved neighbours, a gap the
-//! neighbours cannot close) is refused, naming the faces and the way out.
+//! straight edge between the moved corners. A corner left on one neighbour only, with nowhere
+//! to move (the apex of a V notch or groove), drops out of that edge. Where the gap is left
+//! between neighbours on one plane, that plane extends across it: the region is filled and the
+//! faces on the plane become one. Anything else (curved neighbours, a gap the neighbours cannot
+//! close) is refused, naming the faces and the way out.
 
 use solidcraft_geom::prelude::*;
-use std::collections::{BTreeSet, HashMap};
+use std::collections::{BTreeSet, HashMap, HashSet};
 
+use solidcore_ops::cap::{is_face_on_plane, is_point_on_plane};
 use solidcore_record::Vec3;
 use solidcore_record::brep::Curve;
 use solidcraft_geom::Aabb3;
 
 use crate::assemble::{AFace, AUse, Assembly};
 use crate::body::Body;
-use crate::history::Change;
+use crate::history::{Change, FaceProv};
 use crate::offset::{Surf, surf_of};
 use crate::{KernelError, Result, guard};
 
@@ -110,6 +114,178 @@ fn corner_moves(asm: &Assembly, moved: &HashMap<u32, Vec3>, u: &AUse) -> bool {
 /// Where vertex `v` is after the corners move.
 fn position(asm: &Assembly, moved: &HashMap<u32, Vec3>, v: u32) -> Result<Vec3> {
     moved.get(&v).copied().or_else(|| asm.point(v)).ok_or_else(|| fail("vertex"))
+}
+
+fn arr(v: Vec3) -> [f64; 3] {
+    [v.x, v.y, v.z]
+}
+
+/// Whether face `g` lies on `plane` within `tol`: its own plane points the same way and every
+/// corner of its loops is on `plane` ([`is_face_on_plane`]).
+fn face_on_plane(asm: &Assembly, planes: &HashMap<usize, (Vec3, f64)>, g: usize, plane: (Vec3, f64), tol: f64) -> bool {
+    let (Some(own), Some(face)) = (planes.get(&g), asm.faces.get(g).and_then(Option::as_ref)) else { return false };
+    let corners: Vec<[f64; 3]> = face.loops.iter().flatten().filter_map(|u| asm.ends(u)).filter_map(|(a, _)| asm.point(a)).map(arr).collect();
+    is_face_on_plane(arr(own.0), &corners, arr(plane.0), plane.1, tol)
+}
+
+/// Face `i`, or the face it was merged into.
+fn surviving(alias: &HashMap<usize, usize>, mut i: usize) -> usize {
+    while let Some(j) = alias.get(&i) {
+        i = *j;
+    }
+    i
+}
+
+/// Loop `a` and loop `b` joined along the edge `e` that each uses once (in opposite
+/// directions): `a` from after `e` round to before it, then `b` likewise. `None` when `e` is
+/// not used exactly once in each, both run it the same way, or the joined loop would use an
+/// edge twice.
+fn splice(a: &[AUse], b: &[AUse], e: u32) -> Option<Vec<AUse>> {
+    let once = |l: &[AUse]| if l.iter().filter(|u| u.edge == e).count() == 1 { l.iter().position(|u| u.edge == e) } else { None };
+    let (i, j) = (once(a)?, once(b)?);
+    if a.get(i)?.forward == b.get(j)?.forward {
+        return None;
+    }
+    let out: Vec<AUse> = a.iter().skip(i + 1).chain(a.iter().take(i)).chain(b.iter().skip(j + 1)).chain(b.iter().take(j)).cloned().collect();
+    let edges: HashSet<u32> = out.iter().map(|u| u.edge).collect();
+    (!out.is_empty() && edges.len() == out.len()).then_some(out)
+}
+
+/// Close what the rebuilt faces leave open where the gap lies between neighbours on one plane
+/// (a V notch through a wall, a V groove across a top). Only the closing edges the deletion made
+/// count (`opened`, each with the deleted face it stands in for); a sheet's own free boundary
+/// stays as it is. Those used by one face only make loops; a loop on a neighbour's plane is that
+/// plane extended across the gap, a new face on it merged with the faces of that plane it
+/// borders. A loop on no neighbour's plane cannot close (one face of a box: its sides are
+/// parallel) and is refused, naming the deleted face (`fallback` when none is known).
+fn fill_on_planes(
+    asm: &mut Assembly,
+    planes: &HashMap<usize, (Vec3, f64)>,
+    tol: f64,
+    history: &mut Vec<(usize, FaceProv)>,
+    opened: &HashMap<u32, usize>,
+    fallback: usize,
+) -> Result<()> {
+    let mut uses: HashMap<u32, Vec<(usize, AUse)>> = HashMap::new();
+    for (fi, f) in asm.faces.iter().enumerate() {
+        for u in f.iter().flat_map(|f| &f.loops).flatten() {
+            if opened.contains_key(&u.edge) {
+                uses.entry(u.edge).or_default().push((fi, u.clone()));
+            }
+        }
+    }
+    let cannot = |e: u32| {
+        let f = opened.get(&e).copied().unwrap_or(fallback);
+        fail(format!("the gap left by face {f} cannot close: no neighbouring plane extends across it"))
+    };
+    // The other side of each edge used once, by where it starts, with the face that uses it.
+    let mut open: Vec<u32> = uses.iter().filter(|(_, us)| us.len() == 1).map(|(e, _)| *e).collect();
+    open.sort_unstable();
+    let mut next: HashMap<u32, (usize, AUse)> = HashMap::new();
+    for e in &open {
+        let Some((fi, u)) = uses.get(e).and_then(|us| us.first()).cloned() else { continue };
+        let back = AUse { edge: *e, forward: !u.forward, given: None };
+        let (a, _) = asm.ends(&back).ok_or_else(|| fail("edge"))?;
+        if next.insert(a, (fi, back)).is_some() {
+            return Err(cannot(*e));
+        }
+    }
+    // Faces merged away, to the face they became part of.
+    let mut alias: HashMap<usize, usize> = HashMap::new();
+    let mut done: HashSet<u32> = HashSet::new();
+    for e in open {
+        if done.contains(&e) {
+            continue;
+        }
+        let Some(first) = next.values().find(|(_, u)| u.edge == e).map(|(_, u)| u.clone()) else { continue };
+        let (start, _) = asm.ends(&first).ok_or_else(|| fail("edge"))?;
+        // Walk the loop, with the face on the other side of each edge. A chain that does not
+        // close (it runs into a sheet's free boundary) is left open.
+        let (mut lp, mut beside): (Vec<AUse>, Vec<usize>) = (Vec::new(), Vec::new());
+        let mut at = start;
+        let closed = loop {
+            let Some((fi, u)) = next.get(&at).cloned() else { break false };
+            if !done.insert(u.edge) {
+                return Err(cannot(e));
+            }
+            at = asm.ends(&u).ok_or_else(|| fail("edge"))?.1;
+            lp.push(u);
+            beside.push(surviving(&alias, fi));
+            if at == start {
+                break true;
+            }
+        };
+        if !closed {
+            continue;
+        }
+        // The neighbour plane the loop lies on: every corner on it, and every curved edge on a
+        // face of that plane.
+        let on = |pl: (Vec3, f64)| {
+            lp.iter().zip(&beside).all(|(u, fi)| {
+                let corners_on = asm
+                    .ends(u)
+                    .is_some_and(|(a, b)| [a, b].iter().all(|v| asm.point(*v).is_some_and(|p| is_point_on_plane(arr(p), arr(pl.0), pl.1, tol))));
+                let straight = matches!(asm.edges.get(u.edge as usize).map(|x| &x.curve), Some(Curve::Line { .. }));
+                corners_on && (straight || face_on_plane(asm, planes, *fi, pl, tol))
+            })
+        };
+        let Some(owner) = beside.iter().copied().find(|fi| planes.get(fi).is_some_and(|pl| on(*pl))) else {
+            return Err(cannot(e));
+        };
+        let plane = *planes.get(&owner).ok_or_else(|| fail("plane"))?;
+        let template = asm.faces.get(owner).and_then(Option::as_ref).ok_or_else(|| fail("face"))?.clone();
+        // Merge the new face with the faces of that plane it borders, one shared edge at a time;
+        // where two outer loops cannot be joined the new face stays a face of its own.
+        let mut merged = AFace { loops: vec![lp], domain: None, ..template };
+        let mut into: Option<usize> = None;
+        let mut origins = Vec::new();
+        loop {
+            let found = beside.iter().copied().find_map(|g| {
+                if Some(g) == into || !face_on_plane(asm, planes, g, plane, tol) {
+                    return None;
+                }
+                let face = asm.faces.get(g).and_then(Option::as_ref)?;
+                let (m, o) = (merged.loops.first()?, face.loops.first()?);
+                let e = m.iter().map(|u| u.edge).find(|e| o.iter().any(|x| x.edge == *e))?;
+                Some((g, splice(m, o, e)?))
+            });
+            let Some((g, mut joined)) = found else { break };
+            let mut face = asm.faces.get_mut(g).and_then(Option::take).ok_or_else(|| fail("face"))?;
+            // A face on another surface (or NURBS form) keeps no pcurves: they are about its own
+            // parameters, not the merged face's, and are made again on the merged face's surface.
+            if face.surface != merged.surface || face.nurbs != merged.nurbs {
+                let theirs: HashSet<u32> = face.loops.iter().flatten().map(|u| u.edge).collect();
+                for u in joined.iter_mut().chain(face.loops.iter_mut().skip(1).flatten()) {
+                    if theirs.contains(&u.edge) {
+                        u.given = None;
+                    }
+                }
+            }
+            let holes: Vec<Vec<AUse>> = merged.loops.drain(1..).chain(face.loops.into_iter().skip(1)).collect();
+            merged.loops = std::iter::once(joined).chain(holes).collect();
+            let prov = history.iter().position(|(fi, _)| *fi == g).map(|k| history.remove(k).1);
+            match into {
+                None => into = Some(g),
+                Some(k) => {
+                    alias.insert(g, k);
+                }
+            }
+            origins.extend(prov.into_iter().flat_map(|p| p.origins));
+        }
+        match into {
+            Some(g) => {
+                if let Some(slot) = asm.faces.get_mut(g) {
+                    *slot = Some(merged);
+                }
+                history.push((g, FaceProv { origins, change: Change::Modified }));
+            }
+            None => {
+                asm.face(merged);
+                history.push((asm.faces.len() - 1, crate::record::from_face(0, owner, Change::Modified)));
+            }
+        }
+    }
+    Ok(())
 }
 
 /// Delete faces (indices in the body's face order, as in its mesh's `tri_face`) and heal the
@@ -205,10 +381,40 @@ pub fn delete_faces(body: &Body, faces: &[usize]) -> Result<Body> {
         }
         // Where each vertex on the gap goes: the nearest corner on all of its remaining planes.
         let mut moved: HashMap<u32, Vec3> = HashMap::new();
+        // Corners on a single neighbour with no corner to go to (a V notch's apex): the
+        // neighbour's gap stretch closes straight past them.
+        let mut dropped: HashSet<u32> = HashSet::new();
+        // The plane of a face that keeps a gap vertex: a neighbour's, or (a face meeting the gap
+        // only at a corner) its own where it is planar.
+        let kept_plane = |f: usize| -> Option<(Vec3, f64)> {
+            planes.get(&f).copied().or_else(|| match surf_of(&rec, f) {
+                Some(Surf::Plane { n, d }) => Some((n, d)),
+                _ => None,
+            })
+        };
         for v in &gap_vertices {
             let Some(fs) = vfaces.get(v) else { continue };
             let keep: Vec<usize> = fs.iter().copied().filter(|x| !del.contains(x)).collect();
-            if keep.is_empty() || keep.len() >= 3 {
+            if keep.is_empty() {
+                continue;
+            }
+            if keep.len() >= 3 {
+                // Three or more remaining faces hold the vertex where they meet, unless their
+                // planes all run through one line (a ridge whose round is deleted at its end):
+                // then it slides along that line to the corner the gap closes at, as a vertex of
+                // two faces does.
+                let Some(kp) = keep.iter().map(|f| kept_plane(*f)).collect::<Option<Vec<_>>>() else { continue };
+                let pinned = kp.iter().enumerate().any(|(i, a)| {
+                    kp.iter().enumerate().skip(i + 1).any(|(j, b)| kp.iter().skip(j + 1).any(|c| a.0.dot(b.0.cross(c.0)).abs() >= 1e-9))
+                });
+                if pinned {
+                    continue;
+                }
+                let p = asm.point(*v).ok_or_else(|| fail("vertex"))?;
+                let on_all = |c: Vec3| kp.iter().all(|(n, d)| (n.dot(c) - d).abs() <= size * 1e-6);
+                if let Some(c) = corners.iter().filter(|c| on_all(**c)).min_by(|a, b| a.dist(p).total_cmp(&b.dist(p))) {
+                    moved.insert(*v, *c);
+                }
                 continue;
             }
             if keep.iter().any(|x| !planes.contains_key(x)) {
@@ -219,16 +425,20 @@ pub fn delete_faces(body: &Body, faces: &[usize]) -> Result<Body> {
             let best = corners.iter().filter(|c| keep.iter().all(|x| on(**c, *x))).min_by(|a, b| a.dist(p).total_cmp(&b.dist(p)));
             if let Some(c) = best {
                 moved.insert(*v, *c);
+            } else if keep.len() == 1 {
+                dropped.insert(*v);
             }
         }
         let q = size * 1e-7;
         let mut shared = Shared { q, vertices: HashMap::new(), lines: HashMap::new() };
+        // The deleted face each closing edge stands in for, to name it if the gap cannot close.
+        let mut closed_by: HashMap<u32, usize> = HashMap::new();
         for (i, v) in asm.vertices.iter().enumerate() {
             if !moved.contains_key(&(i as u32)) {
                 shared.vertices.insert(key(Vec3::from(v.point), q), i as u32);
             }
         }
-        let mut history = Vec::new();
+        let mut history: Vec<(usize, FaceProv)> = Vec::new();
         let mut rebuilt: Vec<(usize, AFace)> = Vec::new();
         for fi in 0..n {
             if del.contains(&fi) {
@@ -236,12 +446,28 @@ pub fn delete_faces(body: &Body, faces: &[usize]) -> Result<Body> {
             }
             let f = asm.faces.get(fi).and_then(Option::as_ref).ok_or_else(|| fail("face"))?.clone();
             if !neighbours.contains(&fi) {
-                // Untouched, unless one of its corners moves.
+                // Untouched, unless one of its corners moves: a plane meeting the gap only at a
+                // corner that slides along its edge (a ridge) follows it with its straight edges
+                // when every moved corner stays on it; any other face cannot.
                 if f.loops.iter().flatten().any(|u| corner_moves(&asm, &moved, u)) {
-                    return Err(fail(format!("face {fi} meets the gap only at a corner; it cannot follow")));
+                    let follows = match surf_of(&rec, fi) {
+                        Some(Surf::Plane { n, d }) => f
+                            .loops
+                            .iter()
+                            .flatten()
+                            .filter_map(|u| asm.ends(u))
+                            .flat_map(|(a, b)| [a, b])
+                            .filter_map(|v| moved.get(&v))
+                            .all(|c| (n.dot(*c) - d).abs() <= size * 1e-6),
+                        _ => false,
+                    };
+                    if !follows {
+                        return Err(fail(format!("face {fi} meets the gap only at a corner; it cannot follow")));
+                    }
+                } else {
+                    history.push((fi, crate::record::from_face(0, fi, Change::Kept)));
+                    continue;
                 }
-                history.push(crate::record::from_face(0, fi, Change::Kept));
-                continue;
             }
             let mut loops: Vec<Vec<AUse>> = Vec::new();
             for l in &f.loops {
@@ -282,17 +508,25 @@ pub fn delete_faces(body: &Body, faces: &[usize]) -> Result<Body> {
                 let mut edges: Vec<AUse> = Vec::new();
                 // The moved corners along a gap stretch.
                 let mut pending: Option<Vec<Vec3>> = None;
+                let mut pending_by: Option<usize> = None;
                 for k in 0..m {
                     let Some(u) = l.get((start + k) % m) else { continue };
                     let (va, vb) = asm.ends(u).ok_or_else(|| fail("edge"))?;
                     let (a, b) = (position(&asm, &moved, va)?, position(&asm, &moved, vb)?);
                     if gap_edge(u.edge) {
-                        pending.get_or_insert_with(Vec::new).extend([a, b]);
+                        let stretch = pending.get_or_insert_with(Vec::new);
+                        stretch.extend([(va, a), (vb, b)].into_iter().filter(|(v, _)| !dropped.contains(v)).map(|(_, p)| p));
+                        pending_by = pending_by.or_else(|| efaces.get(&u.edge).and_then(|fs| fs.iter().find(|x| del.contains(x)).copied()));
                         continue;
                     }
                     if let Some(p) = pending.take() {
+                        let by = pending_by.take();
                         for (x, y) in close(p, a, q) {
-                            edges.push(shared.line(&mut asm, x, y)?);
+                            let line = shared.line(&mut asm, x, y)?;
+                            if let Some(d) = by {
+                                closed_by.entry(line.edge).or_insert(d);
+                            }
+                            edges.push(line);
                         }
                     }
                     if !corner_moves(&asm, &moved, u) {
@@ -312,7 +546,11 @@ pub fn delete_faces(body: &Body, faces: &[usize]) -> Result<Body> {
                     let (v0, _) = asm.ends(first).ok_or_else(|| fail("edge"))?;
                     let a = asm.point(v0).ok_or_else(|| fail("vertex"))?;
                     for (x, y) in close(p, a, q) {
-                        edges.push(shared.line(&mut asm, x, y)?);
+                        let line = shared.line(&mut asm, x, y)?;
+                        if let Some(d) = pending_by {
+                            closed_by.entry(line.edge).or_insert(d);
+                        }
+                        edges.push(line);
                     }
                 }
                 if edges.is_empty() {
@@ -325,7 +563,7 @@ pub fn delete_faces(body: &Body, faces: &[usize]) -> Result<Body> {
             }
             // The face keeps its plane: every moved corner lies on it.
             rebuilt.push((fi, AFace { loops, domain: None, ..f }));
-            history.push(crate::record::from_face(0, fi, Change::Modified));
+            history.push((fi, crate::record::from_face(0, fi, Change::Modified)));
         }
         for &fi in &del {
             if let Some(slot) = asm.faces.get_mut(fi) {
@@ -337,8 +575,11 @@ pub fn delete_faces(body: &Body, faces: &[usize]) -> Result<Body> {
                 *slot = Some(face);
             }
         }
+        let fallback = del.first().copied().unwrap_or(0);
+        fill_on_planes(&mut asm, &planes, size * 1e-6, &mut history, &closed_by, fallback)?;
+        history.sort_by_key(|(fi, _)| *fi);
         let finished = asm.finish().map_err(|e| fail(format!("the neighbouring faces do not close the gap ({e})")))?;
-        crate::assemble::body_with_history(finished, &asm, body, history)
+        crate::assemble::body_with_history(finished, &asm, body, history.into_iter().map(|(_, h)| h).collect())
     })
 }
 
@@ -348,7 +589,7 @@ mod tests {
     use solidcraft_geom::MeshGeom;
 
     use super::delete_faces;
-    use crate::{BoolOp, boolean, box_solid, chamfer, cylinder, fillet};
+    use crate::{BoolOp, HalfSpace, boolean, box_solid, chamfer, convex_polyhedron, cylinder, fillet};
 
     fn volume(b: &crate::Body) -> f64 {
         b.mesh(&crate::MeshTolerance::chord(1e-3)).unwrap().measure().volume
@@ -432,6 +673,172 @@ mod tests {
         assert!(delete_faces(&plate, &[0, 1, 2, 3, 4, 5]).is_err());
         // One face of a box: the sides cannot close it.
         let top = faces_where(&plate, |p| (p.z - 10.0).abs() < 1e-9);
-        assert!(delete_faces(&plate, &top).is_err());
+        let refused = delete_faces(&plate, &top).unwrap_err().to_string();
+        assert!(refused.contains("cannot close: no neighbouring plane extends across it"), "{refused}");
+        // The refusal names the face deleted, not face 0.
+        let bottom = faces_where(&plate, |p| p.z.abs() < 1e-9);
+        assert_eq!(bottom.len(), 1);
+        assert_ne!(bottom[0], 0);
+        let refused = delete_faces(&plate, &bottom).unwrap_err().to_string();
+        assert!(refused.contains(&format!("the gap left by face {} cannot close", bottom[0])), "{refused}");
+    }
+
+    /// A half-space `n · x <= d` with `n` made unit.
+    fn half(n: Vec3, d: f64) -> crate::HalfSpace {
+        let len = (n.x * n.x + n.y * n.y + n.z * n.z).sqrt();
+        crate::HalfSpace { n: n / len, d: d / len }
+    }
+
+    /// #14257, #15775: two faces of a V notch or groove whose neighbours across the gap lie on
+    /// one plane (the wall either side of the notch, the top either side of the groove) left an
+    /// open shell. That plane now extends across the gap and the faces on it become one.
+    #[test]
+    fn deleting_a_v_notch_or_groove_extends_the_plane_across_it() {
+        let block = box_solid(Vec3::ZERO, Vec3::new(40.0, 20.0, 10.0)).unwrap();
+        // A V notch through the front wall: mouth x 15..25 at y = 0, apex at (20, 5).
+        let wedge = crate::convex_polyhedron(&[
+            half(Vec3::new(0.0, 0.0, -1.0), 1.0),
+            half(Vec3::new(0.0, 0.0, 1.0), 11.0),
+            half(Vec3::new(0.0, -1.0, 0.0), 1.0),
+            half(Vec3::new(-1.0, 1.0, 0.0), -15.0),
+            half(Vec3::new(1.0, 1.0, 0.0), 25.0),
+        ])
+        .unwrap();
+        let notched = boolean(&block, &wedge, BoolOp::Cut).unwrap().unwrap();
+        assert!((volume(&notched) - 7750.0).abs() < 1e-6);
+        let sides = faces_where(&notched, |p| ((p.x - 20.0).abs() + p.y - 5.0).abs() < 1e-3);
+        assert_eq!(sides.len(), 2, "{sides:?}");
+        let back = delete_faces(&notched, &sides).unwrap();
+        assert!((volume(&back) - 8000.0).abs() < 1e-6, "{}", volume(&back));
+        assert_eq!(back.face_count(), 6);
+        assert_eq!(back.unmeshed_faces(), 0);
+        assert_eq!(back.classify_point(Vec3::new(20.0, 1.0, 5.0)).unwrap(), crate::PointClass::Inside);
+        // A V groove along x across the top: mouth y 5..15 at z = 10, apex at z = 5.
+        let cutter = crate::convex_polyhedron(&[
+            half(Vec3::new(-1.0, 0.0, 0.0), 1.0),
+            half(Vec3::new(1.0, 0.0, 0.0), 41.0),
+            half(Vec3::new(0.0, 0.0, 1.0), 11.0),
+            half(Vec3::new(0.0, -1.0, -1.0), -15.0),
+            half(Vec3::new(0.0, 1.0, -1.0), 5.0),
+        ])
+        .unwrap();
+        let grooved = boolean(&block, &cutter, BoolOp::Cut).unwrap().unwrap();
+        assert!((volume(&grooved) - 7000.0).abs() < 1e-6);
+        let walls = faces_where(&grooved, |p| (p.y + p.z - 15.0).abs() < 1e-3 || (p.y - p.z - 5.0).abs() < 1e-3);
+        assert_eq!(walls.len(), 2, "{walls:?}");
+        let back = delete_faces(&grooved, &walls).unwrap();
+        assert!((volume(&back) - 8000.0).abs() < 1e-6, "{}", volume(&back));
+        assert_eq!(back.face_count(), 6);
+        assert_eq!(back.classify_point(Vec3::new(20.0, 10.0, 9.0)).unwrap(), crate::PointClass::Inside);
+    }
+
+    /// #16864 review: faces merged into the filled face keep no pcurves from their own surface
+    /// frames. Two notched halves, the right one turned half a turn about y: their front faces
+    /// lie on one plane, either side of the notch, with opposite u axes.
+    #[test]
+    fn filling_across_faces_on_two_surfaces_remakes_their_pcurves() {
+        let wedge = crate::convex_polyhedron(&[
+            half(Vec3::new(0.0, 0.0, -1.0), 1.0),
+            half(Vec3::new(0.0, 0.0, 1.0), 11.0),
+            half(Vec3::new(0.0, -1.0, 0.0), 1.0),
+            half(Vec3::new(-1.0, 1.0, 0.0), -15.0),
+            half(Vec3::new(1.0, 1.0, 0.0), 25.0),
+        ])
+        .unwrap();
+        let left = box_solid(Vec3::ZERO, Vec3::new(20.0, 20.0, 10.0)).unwrap();
+        let right = box_solid(Vec3::new(20.0, 0.0, 0.0), Vec3::new(40.0, 20.0, 10.0)).unwrap();
+        let right = crate::transform(&right, Vec3::ZERO, Vec3::new(30.0, 10.0, 5.0), Vec3::new(0.0, 1.0, 0.0), std::f64::consts::PI).unwrap();
+        let left = boolean(&left, &wedge, BoolOp::Cut).unwrap().unwrap();
+        let right = boolean(&right, &wedge, BoolOp::Cut).unwrap().unwrap();
+        let notched = boolean(&left, &right, BoolOp::Union).unwrap().unwrap();
+        let fronts = faces_where(&notched, |p| p.y.abs() < 1e-9);
+        let surfaces: Vec<_> = fronts.iter().map(|f| notched.record().faces[*f].surface.clone()).collect();
+        assert_eq!(fronts.len(), 2, "{fronts:?}");
+        assert_ne!(surfaces[0], surfaces[1], "the fronts must be on two surfaces for this test");
+        let sides = faces_where(&notched, |p| ((p.x - 20.0).abs() + p.y - 5.0).abs() < 1e-3);
+        assert_eq!(sides.len(), 2, "{sides:?}");
+        let back = delete_faces(&notched, &sides).unwrap();
+        assert!((volume(&back) - 8000.0).abs() < 1e-6, "{}", volume(&back));
+        assert_eq!(faces_where(&back, |p| p.y.abs() < 1e-9).len(), 1);
+        solidcore_ops::record_check::agreement(back.record()).unwrap();
+    }
+
+    /// #16864 review: a sheet's own free boundary is not part of the gap. An open box (no top)
+    /// with a chamfered bottom edge: deleting the chamfer heals the corner and leaves the rim open.
+    #[test]
+    fn deleting_on_a_sheet_leaves_its_free_boundary_open() {
+        let plate = box_solid(Vec3::ZERO, Vec3::new(40.0, 20.0, 10.0)).unwrap();
+        let cham = chamfer(&plate, &[Vec3::new(20.0, 0.0, 0.0)], 2.0).unwrap();
+        let top = faces_where(&cham, |p| (p.z - 10.0).abs() < 1e-9);
+        assert_eq!(top.len(), 1);
+        let open_box = crate::remove_faces(&cham, &top).unwrap();
+        let bevel = faces_where(&open_box, |p| (p.y + p.z - 2.0).abs() < 1e-3);
+        assert_eq!(bevel.len(), 1, "{bevel:?}");
+        let healed = delete_faces(&open_box, &bevel).unwrap();
+        assert_eq!(healed.face_count(), 5);
+        assert!(faces_where(&healed, |p| (p.z - 10.0).abs() < 1e-9).is_empty());
+        assert_eq!(faces_where(&healed, |p| p.y.abs() < 1e-9).len(), 1);
+    }
+
+    /// #16864 review: two V grooves either side of one strip of the top. The first fill merges
+    /// the strip into a face; the second must find that face, not the strip's old slot.
+    #[test]
+    fn two_grooves_beside_one_strip_both_fill() {
+        let block = box_solid(Vec3::ZERO, Vec3::new(40.0, 30.0, 10.0)).unwrap();
+        let groove = |left: f64, right: f64| {
+            crate::convex_polyhedron(&[
+                half(Vec3::new(-1.0, 0.0, 0.0), 1.0),
+                half(Vec3::new(1.0, 0.0, 0.0), 41.0),
+                half(Vec3::new(0.0, 0.0, 1.0), 11.0),
+                half(Vec3::new(0.0, -1.0, -1.0), -left),
+                half(Vec3::new(0.0, 1.0, -1.0), right),
+            ])
+            .unwrap()
+        };
+        let one = boolean(&block, &groove(14.0, 2.0), BoolOp::Cut).unwrap().unwrap();
+        let two = boolean(&one, &groove(28.0, 16.0), BoolOp::Cut).unwrap().unwrap();
+        assert!((volume(&two) - 10720.0).abs() < 1e-6, "{}", volume(&two));
+        // Each wall by its own plane: a top strip has every corner on one wall plane or another.
+        let walls: Vec<usize> = [(1.0, 14.0), (-1.0, 2.0), (1.0, 28.0), (-1.0, 16.0)]
+            .iter()
+            .flat_map(|(s, d)| faces_where(&two, |p| (p.y + s * p.z - d).abs() < 1e-3))
+            .collect();
+        assert_eq!(walls.len(), 4, "{walls:?}");
+        let back = delete_faces(&two, &walls).unwrap();
+        assert!((volume(&back) - 12000.0).abs() < 1e-6, "{}", volume(&back));
+        assert_eq!(back.face_count(), 6);
+        assert_eq!(back.classify_point(Vec3::new(20.0, 8.0, 9.0)).unwrap(), crate::PointClass::Inside);
+        assert_eq!(back.classify_point(Vec3::new(20.0, 22.0, 9.0)).unwrap(), crate::PointClass::Inside);
+    }
+
+    /// A round whose end lies on a ridge (T-219): a wedge, its top sloping down from the ridge
+    /// x = 0, z = 26 to x = -37, with a rib on its wall x = 0 (x 0..20, y -22.5..-17.5, up to the
+    /// ridge's height), the inside corner between the wall and the rib rounded r2. The round's
+    /// top end on the wall, (0, -24.5, 26), lies on the rib's top, the wall and the wedge's
+    /// slope, three planes through the ridge: it slides along the ridge to the sharp corner at
+    /// y = -22.5 with the slope's edges. It stayed, and the rib's top came back with an edge
+    /// along the ridge out to -24.5 and back (SmFace test #34).
+    ///
+    /// Closed form: the wedge 37 x 26 / 2 over y -40..10 (24050) and the rib 20 x 5 x 26 (2600).
+    #[test]
+    fn delete_a_round_ending_on_a_ridge() {
+        let slope = Vec3::new(-26.0, 0.0, 37.0);
+        let wedge = convex_polyhedron(&[
+            HalfSpace { n: Vec3::new(1.0, 0.0, 0.0), d: 0.0 },
+            HalfSpace { n: Vec3::new(0.0, 0.0, -1.0), d: 0.0 },
+            HalfSpace { n: Vec3::new(0.0, -1.0, 0.0), d: 40.0 },
+            HalfSpace { n: Vec3::new(0.0, 1.0, 0.0), d: 10.0 },
+            HalfSpace { n: slope, d: 37.0 * 26.0 },
+        ])
+        .unwrap();
+        let rib = box_solid(Vec3::new(0.0, -22.5, 0.0), Vec3::new(20.0, -17.5, 26.0)).unwrap();
+        let ribbed = boolean(&wedge, &rib, BoolOp::Union).unwrap().unwrap();
+        let rounded = fillet(&ribbed, &[Vec3::new(0.0, -22.5, 13.0)], 2.0).unwrap();
+        let round = faces_where(&rounded, |p| ((p.x - 2.0).hypot(p.y + 24.5) - 2.0).abs() < 1e-2);
+        assert_eq!(round.len(), 1, "{round:?}");
+        let back = delete_faces(&rounded, &round).unwrap();
+        assert!(crate::failing_check(&back).unwrap().is_none(), "{:?}", crate::failing_check(&back));
+        let want = 37.0 * 26.0 / 2.0 * 50.0 + 20.0 * 5.0 * 26.0;
+        assert!((volume(&back) - want).abs() < 1e-9 * want, "{} against {want}", volume(&back));
     }
 }

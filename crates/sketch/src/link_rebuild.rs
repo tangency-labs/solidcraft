@@ -71,9 +71,17 @@ fn match_points(old: &[Vec2], old_kind: &[u8], new: &[Vec2], new_kind: &[u8], ne
             claims.push((k, i, false));
         }
     }
+    // Per new point: (claims found where they were, all claims).
+    let mut count: BTreeMap<usize, (usize, usize)> = BTreeMap::new();
+    for &(_, i, exact) in &claims {
+        let n = count.entry(i).or_default();
+        n.0 += usize::from(exact);
+        n.1 += 1;
+    }
     for &(k, i, exact) in &claims {
         // A point found where it was wins over one found by its place in the link.
-        let rivals = claims.iter().filter(|(o, j, e)| *j == i && *o != k && (*e || !exact)).count();
+        let (found, all) = count.get(&i).copied().unwrap_or_default();
+        let rivals = if exact { found } else { all }.saturating_sub(1);
         if rivals == 0
             && let Some(slot) = map.get_mut(k)
         {
@@ -96,10 +104,26 @@ fn overlap(p: Vec2, q: Vec2, u: Vec2, w: Vec2) -> f64 {
     if hi - lo > tol { hi - lo } else { 0.0 }
 }
 
+/// The new whole circle (an index into `lay.curves`) old arc `c` lies on: the one circle about
+/// the point `c`'s centre became, of `c`'s radius. A closed circular edge was once read as its
+/// two halves and is one circle now; both halves lie on it.
+fn circle_of_arc(c: &LCurve, old: &[Vec2], map: &[Option<usize>], lay: &Layout) -> Option<usize> {
+    let LCurve::Arc(centre, a, _) = *c else { return None };
+    let new_centre = map.get(centre).copied().flatten()?;
+    let radius = old.get(centre)?.dist(*old.get(a)?);
+    let tol = TOL * (1.0 + radius);
+    let mut hits = lay.curves.iter().enumerate().filter(|(_, n)| matches!(n, LCurve::Circle(x, r) if *x == new_centre && (r - radius).abs() <= tol));
+    match (hits.next(), hits.next()) {
+        (Some((j, _)), None) => Some(j),
+        _ => None,
+    }
+}
+
 /// The new curve (an index into `lay.curves`) old curve `c` becomes, and whether it is only a
-/// piece of the line `c` was: the curve of the same kind on the points `c`'s points became, or
-/// for a line without one, the longest new line along it (where it was, or between the points
-/// its ends became).
+/// piece of the line `c` was: the curve of the same kind on the points `c`'s points became, for
+/// an arc without one the whole circle it lies on ([`circle_of_arc`], a piece too), or for a
+/// line without one, the longest new line along it (where it was, or between the points its
+/// ends became).
 fn match_curve(c: &LCurve, old: &[Vec2], map: &[Option<usize>], lay: &Layout) -> Option<(usize, bool)> {
     let mapped: Option<Vec<usize>> = curve_points(c).iter().map(|p| map.get(*p).copied().flatten()).collect();
     if let Some(m) = &mapped {
@@ -133,6 +157,9 @@ fn match_curve(c: &LCurve, old: &[Vec2], map: &[Option<usize>], lay: &Layout) ->
             _ => {}
         }
     }
+    if let Some(j) = circle_of_arc(c, old, map, lay) {
+        return Some((j, true));
+    }
     let LCurve::Line(a, b) = *c else { return None };
     let (p, q) = (*old.get(a)?, *old.get(b)?);
     let ends = match mapped.as_deref() {
@@ -162,12 +189,26 @@ fn needs_whole_line(k: &ConstraintKind, c: usize) -> bool {
     }
 }
 
+/// Does `k` depend on where arc `c` ends, not only on the circle it lies on? It cannot move to
+/// that whole circle then.
+fn needs_arc_ends(k: &ConstraintKind, c: usize) -> bool {
+    use ConstraintKind::*;
+    match *k {
+        Midpoint { l, .. } => l == c,
+        ArcSweep { c: x, .. } | ArcLength { c: x, .. } | PointAlong { c: x, .. } => x == c,
+        Smooth { a, b } | SlotOverallLength { a, b, .. } => a == c || b == c,
+        _ => false,
+    }
+}
+
 impl Sketch {
     /// Rebuild link `id`, whose entities are `points` and `curves` (laid out as `cur`, when they
     /// still are a layout), for its new shape `lay`. A curve of the sketch's own on an old point
     /// moves to the new point that matches it, or else to a free point of its own where it was;
     /// a constraint moves to the new points and curves that match, and goes only when one of
-    /// them has no match. All or nothing: on an error the sketch is as it was.
+    /// them has no match. A new point or curve that matches an old one takes its id; one that
+    /// nothing in the sketch holds is matched afterwards, to what the held ones left, and not
+    /// at all past [`MAX_MATCH_WORK`]. All or nothing: on an error the sketch is as it was.
     pub(super) fn rebuild_link(&mut self, id: &str, lay: &Layout, points: &[usize], curves: &[usize], cur: Option<&[LCurve]>) -> Result<()> {
         let saved = self.clone();
         let rebuilt = self.rebuild_link_in_place(id, lay, points, curves, cur);
@@ -197,26 +238,84 @@ impl Sketch {
         for c in needed_curves.iter().filter_map(|k| cur.and_then(|cur| cur.get(*k))) {
             needed.extend(curve_points(c));
         }
+        // An arc's centre, to find the whole circle the arc may be now ([`circle_of_arc`]).
+        needed.extend(cur.unwrap_or_default().iter().filter_map(|c| match *c {
+            LCurve::Arc(centre, ..) => Some(centre),
+            _ => None,
+        }));
         let first_curve = self.curves.len();
         let made = self.build_link(id, lay)?;
         // Old local point -> new layout point, old local curve -> (new layout curve, a piece).
-        let (point_map, curve_map) = match cur {
+        // `id_points` and `id_curves` add the entities nothing in the sketch holds: features
+        // outside it pick a profile by the ids of its curves (#14249). They are matched after the
+        // held ones, only to new entities no held one took, so what the sketch holds moves as
+        // before.
+        let (point_map, curve_map, id_points, id_curves) = match cur {
             Some(cur) => {
                 let kinds = |roles: Vec<[usize; 10]>| roles.iter().map(kind_of).collect::<Vec<_>>();
-                let needed: Vec<usize> = needed.into_iter().collect();
-                let map = match_points(
-                    &old_pos,
-                    &kinds(point_roles(cur, points.len())),
-                    &lay.pts,
-                    &kinds(point_roles(&lay.curves, lay.pts.len())),
-                    &needed,
-                );
+                let (old_kind, mut new_kind) = (kinds(point_roles(cur, points.len())), kinds(point_roles(&lay.curves, lay.pts.len())));
+                let held: Vec<usize> = needed.iter().copied().collect();
+                let map = match_points(&old_pos, &old_kind, &lay.pts, &new_kind, &held);
                 let curve_map: BTreeMap<usize, (usize, bool)> =
                     needed_curves.iter().filter_map(|k| Some((*k, match_curve(cur.get(*k)?, &old_pos, &map, lay)?))).collect();
-                (map, curve_map)
+                // A new point a held one became is no candidate any more.
+                for i in map.iter().flatten() {
+                    if let Some(kind) = new_kind.get_mut(*i) {
+                        *kind = u8::MAX;
+                    }
+                }
+                let rest: Vec<usize> = (0..points.len()).filter(|k| !needed.contains(k)).collect();
+                let mut id_points = match_points(&old_pos, &old_kind, &lay.pts, &new_kind, &rest);
+                for (slot, held) in id_points.iter_mut().zip(&map) {
+                    if held.is_some() {
+                        *slot = *held;
+                    }
+                }
+                // Past the work bound no point was matched, and the curves are not either.
+                let within = rest.len().saturating_mul(lay.pts.len()) <= MAX_MATCH_WORK;
+                // (a piece, how far the radius moved, old curve, new curve): the closest matches
+                // take their curve first, so a circle that kept its radius keeps its id.
+                let mut found: Vec<(bool, f64, usize, usize)> = (0..curves.len())
+                    .filter(|k| within && !needed_curves.contains(k))
+                    .filter_map(|k| {
+                        let c = cur.get(k)?;
+                        let (j, piece) = match_curve(c, &old_pos, &id_points, lay)?;
+                        let moved = match (c, lay.curves.get(j)) {
+                            (LCurve::Circle(_, r), Some(LCurve::Circle(_, s))) => (r - s).abs(),
+                            _ => 0.0,
+                        };
+                        Some((piece, moved, k, j))
+                    })
+                    .collect();
+                found.sort_by(|a, b| a.0.cmp(&b.0).then(a.1.total_cmp(&b.1)));
+                let mut taken: BTreeSet<usize> = curve_map.values().map(|(j, _)| *j).collect();
+                let mut id_curves: BTreeMap<usize, usize> = BTreeMap::new();
+                for (_, _, k, j) in found {
+                    if taken.insert(j) {
+                        id_curves.insert(k, j);
+                    }
+                }
+                (map, curve_map, id_points, id_curves)
             }
-            None => (vec![None; points.len()], BTreeMap::new()),
+            None => (vec![None; points.len()], BTreeMap::new(), vec![None; points.len()], BTreeMap::new()),
         };
+        // Arcs that are one whole circle now (old local curve -> new layout curve), and their
+        // ends, which no new point stands for: the circle each of those lay on. What the sketch
+        // held on such an end keeps its place, on the circle.
+        let arcs_on_circles: BTreeMap<usize, usize> =
+            cur.unwrap_or_default().iter().enumerate().filter_map(|(k, c)| Some((k, circle_of_arc(c, &old_pos, &point_map, lay)?))).collect();
+        let mut end_on_circle: BTreeMap<usize, usize> = BTreeMap::new();
+        for (k, j) in &arcs_on_circles {
+            if let Some(LCurve::Arc(_, a, b)) = cur.and_then(|cur| cur.get(*k)) {
+                for e in [*a, *b] {
+                    if point_map.get(e).copied().flatten().is_none()
+                        && let Some(p) = points.get(e)
+                    {
+                        end_on_circle.entry(*p).or_insert(first_curve + j);
+                    }
+                }
+            }
+        }
         let new_point =
             |p: usize| old_point.get(&p).and_then(|k| point_map.get(*k).copied().flatten()).and_then(|li| made.get(li).copied().flatten());
         // A point of the sketch's own curves with no match stays where it was, as a free point.
@@ -228,9 +327,14 @@ impl Sketch {
             .flat_map(|c| c.kind.point_ids())
             .filter(|p| old_point.contains_key(p) && new_point(*p).is_none())
             .collect();
+        let mut held_on: Vec<(usize, usize)> = Vec::new();
         for p in unmatched {
             let pos = self.points.get(p).map_or(Vec2::ZERO, |q| q.pos);
-            free.insert(p, self.add_point(pos, None)?);
+            let point = self.add_point(pos, None)?;
+            free.insert(p, point);
+            if let Some(c) = end_on_circle.get(&p) {
+                held_on.push((point, *c));
+            }
         }
         let to_point = |p: usize| if old_point.contains_key(&p) { new_point(p).or_else(|| free.get(&p).copied()) } else { Some(p) };
         let to_curve = |c: usize| match old_curve.get(&c) {
@@ -240,15 +344,50 @@ impl Sketch {
         for c in self.curves.iter_mut().filter(|c| c.link.as_deref() != Some(id)) {
             c.kind.map_points(&|p| to_point(p).unwrap_or(p));
         }
-        let pieces: Vec<usize> = curve_map.iter().filter(|(_, (_, piece))| *piece).filter_map(|(k, _)| curves.get(*k).copied()).collect();
-        self.constraints.retain_mut(|k| !pieces.iter().any(|c| needs_whole_line(&k.kind, *c)) && k.kind.remap(&to_point, &to_curve));
+        let pieces: Vec<usize> = curve_map
+            .iter()
+            .filter(|(k, (_, piece))| *piece && !arcs_on_circles.contains_key(k))
+            .filter_map(|(k, _)| curves.get(*k).copied())
+            .collect();
+        let arcs: Vec<usize> = arcs_on_circles.keys().filter_map(|k| curves.get(*k).copied()).collect();
+        // A point of the sketch's own made coincident with such an arc end lies on the circle.
+        for k in &mut self.constraints {
+            if let ConstraintKind::Coincident { p, q } = k.kind {
+                let on = |end: usize, other: usize| if old_point.contains_key(&other) { None } else { end_on_circle.get(&end) };
+                if let Some(c) = on(q, p) {
+                    k.kind = ConstraintKind::PointOnCurve { p, c: *c };
+                } else if let Some(c) = on(p, q) {
+                    k.kind = ConstraintKind::PointOnCurve { p: q, c: *c };
+                }
+            }
+        }
+        self.constraints.retain_mut(|k| {
+            !pieces.iter().any(|c| needs_whole_line(&k.kind, *c))
+                && !arcs.iter().any(|c| needs_arc_ends(&k.kind, *c))
+                && k.kind.remap(&to_point, &to_curve)
+        });
+        for (p, c) in held_on {
+            self.add_constraint(ConstraintKind::PointOnCurve { p, c }, None)?;
+        }
         // A new entity that matches an old one is that entity, moved: it takes the old id, so
         // the solve that follows sees where it was (`positions_in`) and names still find it.
-        let point_ids: BTreeMap<String, String> =
-            points.iter().filter_map(|p| Some((self.points.get(new_point(*p)?)?.id.clone(), self.points.get(*p)?.id.clone()))).collect();
+        let id_point = |k: usize| id_points.get(k).copied().flatten().and_then(|li| made.get(li).copied().flatten());
+        let point_ids: BTreeMap<String, String> = points
+            .iter()
+            .enumerate()
+            .filter_map(|(k, p)| Some((self.points.get(id_point(k)?)?.id.clone(), self.points.get(*p)?.id.clone())))
+            .collect();
         let mut curve_ids: BTreeMap<String, String> = BTreeMap::new();
-        for (k, (j, _)) in &curve_map {
+        // A new curve that is an old one keeps how the sketch used it: a projected outline set to
+        // construction stays out of profiles (#17732).
+        let mut curve_flags: BTreeMap<String, (bool, bool)> = BTreeMap::new();
+        // The halves of a circle that is one curve now: the first half's id names the circle.
+        let matched = curve_map.iter().map(|(k, (j, _))| (k, j));
+        for (k, j) in arcs_on_circles.iter().chain(matched).chain(&id_curves) {
             if let (Some(new), Some(old)) = (self.curves.get(first_curve + j), curves.get(*k).and_then(|c| self.curves.get(*c))) {
+                if !curve_ids.contains_key(&new.id) {
+                    curve_flags.insert(new.id.clone(), (old.construction, old.centerline));
+                }
                 curve_ids.entry(new.id.clone()).or_insert_with(|| old.id.clone());
             }
         }
@@ -262,6 +401,9 @@ impl Sketch {
             }
         }
         for c in &mut self.curves {
+            if let Some((construction, centerline)) = curve_flags.get(&c.id) {
+                (c.construction, c.centerline) = (*construction, *centerline);
+            }
             if let Some(old) = curve_ids.get(&c.id) {
                 c.id.clone_from(old);
             }

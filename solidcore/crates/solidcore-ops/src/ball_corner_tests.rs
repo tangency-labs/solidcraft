@@ -62,13 +62,12 @@ fn edge_at(body: &Body, p: [f64; 3]) -> usize {
 fn rounds_through_certified_ball_corners(body: &Body, edges: &[usize], rel_width: f64) {
     let sharp = body.volume(1e-8).unwrap();
 
-    let before = session::work_counters(solidcore::kernel::WorkCounters::ball_certified_roots);
-    blend(body, Blend::Round, edges, &[1.0], &[], Corners::Filled).unwrap();
-    let after = session::work_counters(solidcore::kernel::WorkCounters::ball_certified_roots);
-    assert!(
-        after > before,
-        "no ball corner's centre was solved ({before} -> {after})"
+    let (rounded, roots) = session::counted(
+        solidcore::kernel::WorkCounters::ball_certified_roots,
+        || blend(body, Blend::Round, edges, &[1.0], &[], Corners::Filled),
     );
+    rounded.unwrap();
+    assert!(roots > 0, "no ball corner's centre was solved");
 
     assert!(body.check(CheckLevel::All).unwrap().is_valid());
     let v = body.volume(1e-8).unwrap();
