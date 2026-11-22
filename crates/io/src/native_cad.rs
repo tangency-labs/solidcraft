@@ -435,8 +435,8 @@ mod convert {
 
     pub(super) mod step_route;
 
-    /// Caps for hostile input: cadmpeg's tight `service` profile, with our STEP size limit on
-    /// the input. The service profile already admits a detailed part's 8 million entities:
+    /// Caps for hostile input: cadmpeg's tight `service` profile, its caps scaled with our STEP
+    /// size limit (never below `service`) and that limit on the input. The service profile already admits a detailed part's 8 million entities:
     /// cadmpeg 0.6.3 dropped the collection-item budget that refused one at a million (#1783)
     /// and the work-unit budget that went with it.
     pub(super) fn policy() -> DecodePolicy {
