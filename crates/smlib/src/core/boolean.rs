@@ -1,118 +1,59 @@
-//! Booleans on solidcore: the C API's own logic round `SM_API`, ported from the fork's
-//! `capi/src/smlib_ops.cpp` (`smlib_boolean_with`, `smlib_boolean2d`,
-//! `smlib_boolean_union_all`, `finish`, `closed_nonmanifold`) and
-//! `capi/src/smlib_imprint.cpp` (`smlib_imprint`).
+//! Booleans: solidcore-ops' ([`solidcore_ops::boolean`]), on copies of the operands.
 //!
-//! As there, every operation works on copies of its operands (`SmApiBrepCopy`): `SM_API` edits
-//! the first operand in place and consumes the second, and a SolidCraft body never changes.
-
-use std::sync::PoisonError;
+//! solidcore-ops' booleans take their operands by value, as the kernel does: it edits the first
+//! and consumes the second. A SolidCraft body never changes, so every operation here copies its
+//! operands first ([`Body::copy`], `SmApiBrepCopy`).
 
 use solidcore::Result as SolidResult;
-use solidcore::SolidError;
-use solidcore::boolean::api_brep::{self as sm, Boolean2dOutcome};
-use solidcore::boolean::merge::MergeOptions;
+use solidcore::boolean::api_brep as sm;
 use solidcore::geom::a_object::BooleanOperation;
 use solidcore::kernel::Kernel;
-use solidcore::primitive::primitive_creation::p1::Boolean2d;
-use solidcore::topology::brep::p3::brep_copy;
-use solidcore::topology::brep::{p1, p2};
-use solidcore::topology::{Brep, edge};
+use solidcore::topology::Brep;
+use solidcore_ops::boolean as ops;
 
-use super::{Body, run_on};
+use super::Body;
+use super::call;
 use crate::{BooleanOp, Error, Result};
 
-/// What an operation's `SM_API` call gave, before it is a SolidCraft result: the capi's
-/// statuses besides success.
-enum Done {
-    Body(Box<Brep>),
-    /// `SMLIB_ERR_EMPTY`.
-    Empty,
-    /// `SMLIB_ERR_NOT_SOLID`.
-    NotSolid,
-    /// `SMLIB_ERR_NO_CUT` (`smlib_imprint`).
-    NoCut,
-}
-
-impl super::dump::Answer for Done {
-    fn refusal(&self) -> Option<String> {
-        matches!(self, Done::NotSolid).then(|| Error::NotSolid.to_string())
+fn operation(op: BooleanOp) -> ops::BooleanOp {
+    match op {
+        BooleanOp::Union => ops::BooleanOp::Union,
+        BooleanOp::Subtract => ops::BooleanOp::Subtract,
+        BooleanOp::Intersect => ops::BooleanOp::Intersect,
     }
 }
 
-/// `GetNumFaces`.
-fn num_faces(b: &Brep) -> usize {
-    b.face_list().len()
-}
-
-/// `closed_nonmanifold` (smlib_ops.cpp): a closed body whose solids touch only along edges or at
-/// vertices: at least two regions, no shell vertices, no wire edge, and four edgeuses (two faces,
-/// both sides) per face round every edge. As there, an edge whose query fails (`e == nullptr`, a
-/// failed `GetEdgeuses`) makes it false: [`edge_closes`].
-fn closed_nonmanifold(r: &Brep) -> SolidResult<bool> {
-    if p1::regions(r, None)?.len() < 2 {
-        return Ok(false);
-    }
-    if !p2::shell_vertices(r, None)?.is_empty() {
-        return Ok(false);
-    }
-    for e in p1::edges(r, None)? {
-        if !edge_closes(edge::is_wire(r, e), edge::edgeuses(r, e, None, None).map(|u| u.len())) {
-            return Ok(false);
-        }
-    }
-    Ok(true)
-}
-
-/// The capi's test of one edge in `closed_nonmanifold`, given its `IsWire` and the count of its
-/// `GetEdgeuses`: not a wire, and four edgeuses per face round it. Either query failing is
-/// false, not an error: the capi returns false where `GetEdgeuses` fails.
-pub(super) fn edge_closes(wire: SolidResult<bool>, uses: SolidResult<usize>) -> bool {
-    matches!(wire, Ok(false)) && matches!(uses, Ok(n) if n >= 4 && n % 4 == 0)
-}
-
-/// `finish` (smlib_ops.cpp): the result must have faces, and a solid input must give a closed
-/// manifold solid or (`nonmanifold`) a closed one whose solids touch along an edge or at a vertex.
-fn finish(r: Brep, solid_in: bool, nonmanifold: bool) -> SolidResult<Done> {
-    if num_faces(&r) == 0 {
-        return Ok(Done::Empty);
-    }
-    if solid_in && !p2::is_manifold_solid(&r)? && !(nonmanifold && closed_nonmanifold(&r)?) {
-        return Ok(Done::NotSolid);
-    }
-    Ok(Done::Body(Box::new(r)))
-}
-
-/// What a failing call's dump calls its first operands.
+/// What a failure's dump calls the first operands.
 const OPERANDS: [&str; 4] = ["a", "b", "c", "d"];
 
-/// `bodies` as a call's inputs, named as its dump names its operands.
 fn operands<'a>(bodies: &[&'a Body]) -> Vec<(&'static str, &'a Body)> {
     bodies.iter().enumerate().map(|(n, &b)| (OPERANDS.get(n).copied().unwrap_or("operand"), b)).collect()
 }
 
-/// Copies of `bodies`, in order (a body given twice is copied twice, as the capi copies each
-/// operand).
-fn copies(k: &mut Kernel, bodies: &[&Body]) -> SolidResult<Vec<Brep>> {
-    // One body's lock at a time, here as everywhere: two calls never deadlock on them.
-    let mut out = Vec::with_capacity(bodies.len());
-    for b in bodies {
-        let c = brep_copy(k, &b.0.lock().unwrap_or_else(PoisonError::into_inner))?;
-        out.push(c);
+/// Fails when a panic left an operand half-edited: it is never used again.
+fn usable(call: &'static str, bodies: &[&Body]) -> Result<()> {
+    if bodies.iter().any(|b| b.kernel_left_unfinished()) {
+        return Err(Error::Internal(format!("{call}: the body was left unfinished by an earlier panic")));
     }
-    Ok(out)
+    Ok(())
 }
 
-fn result(d: Done, empty: Result<Option<Body>>) -> Result<Option<Body>> {
-    match d {
-        Done::Body(b) => Ok(Some(Body::new(*b))),
-        Done::Empty => empty,
-        Done::NotSolid => Err(Error::NotSolid),
-        Done::NoCut => Ok(None),
-    }
+/// A copy of each operand, for the operation to consume.
+fn copies(bodies: &[&Body]) -> Result<Vec<Body>> {
+    bodies.iter().map(|b| call::ops("SmApiBrepCopy", || b.copy())).collect()
 }
 
-fn operation(op: BooleanOp) -> BooleanOperation {
+/// `a` op `b`: `None` when the result is empty, [`Error::NotSolid`] when solid operands give a
+/// body that is not closed (solids touching along an edge or at a vertex are closed).
+pub(crate) fn boolean(a: &Body, b: &Body, op: BooleanOp) -> Result<Option<Body>> {
+    usable("SmApiBoolean", &[a, b])?;
+    let mut c = copies(&[a, b])?.into_iter();
+    let (Some(ca), Some(cb)) = (c.next(), c.next()) else { return Err(Error::Argument) };
+    call::ops_on("SmApiBoolean", &operands(&[a, b]), || ops::boolean(ca, cb, operation(op)))
+}
+
+/// The kernel's operation for [`merged`].
+fn kernel_operation(op: BooleanOp) -> BooleanOperation {
     match op {
         BooleanOp::Union => BooleanOperation::Union,
         BooleanOp::Subtract => BooleanOperation::Difference,
@@ -120,51 +61,22 @@ fn operation(op: BooleanOp) -> BooleanOperation {
     }
 }
 
-/// Whether every body is a manifold solid (`IsManifoldSolid` of each copy).
-fn all_solid(bodies: &[Brep]) -> SolidResult<bool> {
-    for b in bodies {
-        if !p2::is_manifold_solid(b)? {
-            return Ok(false);
-        }
-    }
-    Ok(true)
+/// `SmApiBoolean` of `a` and `b` in the kernel `k` (both consumed), with the result's
+/// tolerances grown as [`boolean`] grows them.
+pub(crate) fn merged(k: &mut Kernel, a: Brep, b: Brep, op: BooleanOp) -> SolidResult<Brep> {
+    let mut r = sm::boolean(k, a, b, kernel_operation(op))?;
+    // Grow the result's tolerances to cover marginal edge/vertex, vertex/face and
+    // edge/face gaps, so an otherwise-sound union is not refused as "Bad Gap" for a
+    // sub-micron gap (SolidCraft issue #10, fuzzer seed 73). Tolerances only grow:
+    // a body that already passes is unchanged; a marginal failure becomes sound.
+    // Offset and shell already grow their results' tolerances this way. First, a vertex
+    // a grazing cut left wider than the check allows is centred on its edges' ends.
+    solidcore::topology::brep::validation::update_tolerances_after_boolean(k, &mut r.result)?;
+    Ok(r.result)
 }
 
-/// Fails when a panic left one of `bodies` half-edited: it is never used again.
-fn usable(call: &'static str, bodies: &[&Body]) -> Result<()> {
-    if bodies.iter().any(|b| b.0.is_poisoned()) {
-        return Err(Error::Internal(format!("{call}: the body was left unfinished by an earlier panic")));
-    }
-    Ok(())
-}
-
-/// `smlib_boolean` (`smlib_boolean_with` with `SMLIB_RESULT_NONMANIFOLD`): `SmApiBoolean` on
-/// copies of `a` and `b`; `None` when the result is empty (`SMLIB_ERR_EMPTY`), and
-/// [`Error::NotSolid`] when solid operands give a body that is not closed.
-pub(crate) fn boolean(a: &Body, b: &Body, op: BooleanOp) -> Result<Option<Body>> {
-    usable("SmApiBoolean", &[a, b])?;
-    let d = run_on("SmApiBoolean", &operands(&[a, b]), |k| {
-        let mut c = copies(k, &[a, b])?.into_iter();
-        let (Some(ca), Some(cb)) = (c.next(), c.next()) else {
-            return Err(SolidError::invalid_input("smlib_boolean", "no operand"));
-        };
-        let solid_in = p2::is_manifold_solid(&ca)? && p2::is_manifold_solid(&cb)?;
-        let mut r = sm::boolean(k, ca, cb, operation(op))?;
-        // Grow the result's tolerances to cover marginal edge/vertex, vertex/face and
-        // edge/face gaps, so an otherwise-sound union is not refused as "Bad Gap" for a
-        // sub-micron gap (SolidCraft issue #10, fuzzer seed 73). Tolerances only grow:
-        // a body that already passes is unchanged; a marginal failure becomes sound.
-        // Offset and shell already grow their results' tolerances this way. First, a vertex
-        // a grazing cut left wider than the check allows is centred on its edges' ends.
-        solidcore::topology::brep::validation::update_tolerances_after_boolean(k, &mut r.result)?;
-        finish(r.result, solid_in, true)
-    })?;
-    result(d, Ok(None))
-}
-
-/// `smlib_boolean_union_all`: copies of `bodies` united pairwise, level by level (an odd one
-/// carried to the next level as it is), each union `SmApiBoolean`'s; then `finish` with
-/// non-manifold results allowed. An empty result is [`Error::Empty`].
+/// The union of copies of `bodies`, pairwise, level by level (an odd one carried to the next
+/// level as it is): at least one body and at most [`crate::MAX_UNION_BREPS`].
 ///
 /// Not upstream: when the level-by-level union fails with a retriable kernel failure (a
 /// classification that found no single nearest point on a face's surface, a refused gap, ...),
@@ -172,131 +84,77 @@ pub(crate) fn boolean(a: &Body, b: &Body, op: BooleanOp) -> Result<Option<Body>>
 /// ([`union_one_by_one`]). The union of solids is the same set whichever pairing computes it, and
 /// a pair the level scheme cannot classify may classify fine against the accumulated body, so a
 /// join of many bodies that fails one pairing is built instead of refused
-/// (SolidCraft issue #16552). A failure of the retry, an unported or cancelled first failure
-/// keeps its own error.
+/// (SolidCraft issue #16552). An unported or cancelled failure keeps its own error; so does a
+/// failure of the retry.
 pub(crate) fn union_all(bodies: &[&Body]) -> Result<Body> {
     if bodies.is_empty() || bodies.len() > crate::MAX_UNION_BREPS {
         return Err(Error::Argument);
     }
     usable("smlib_boolean_union_all", bodies)?;
-    let d = run_on("smlib_boolean_union_all", &operands(bodies), |k| {
-        let level = copies(k, bodies)?;
-        let solid_in = all_solid(&level)?;
-        match union_level_by_level(k, level) {
-            Ok(r) => finish(r, solid_in, true),
-            Err(first) if first.is_unported() || first.is_cancelled() => Err(first),
-            Err(first) => {
-                let fresh = copies(k, bodies)?;
-                match union_one_by_one(k, fresh) {
-                    Ok(r) => finish(r, solid_in, true),
-                    Err(e) if e.is_cancelled() => Err(e),
-                    Err(_) => Err(first),
-                }
+    let c = copies(bodies)?;
+    match call::ops_on("smlib_boolean_union_all", &operands(bodies), || ops::union_all(c)) {
+        Ok(b) => Ok(b),
+        Err(first) if matches!(first, Error::Unported(_) | Error::Cancelled(_)) => Err(first),
+        Err(first) => {
+            let fresh = copies(bodies)?;
+            match union_one_by_one(fresh) {
+                Ok(b) => Ok(b),
+                Err(e) if matches!(e, Error::Cancelled(_)) => Err(e),
+                Err(_) => Err(first),
             }
         }
-    })?;
-    result(d, Err(Error::Empty))?.ok_or(Error::Empty)
-}
-
-/// The level-by-level union of `level`: pairs united at each level, an odd one carried, until one
-/// body is left (the level scheme of upstream's `smlib_boolean_union_all`).
-fn union_level_by_level(k: &mut Kernel, mut level: Vec<Brep>) -> SolidResult<Brep> {
-    while level.len() > 1 {
-        let mut next = Vec::with_capacity(level.len().div_ceil(2));
-        let mut it = level.into_iter();
-        while let Some(a) = it.next() {
-            match it.next() {
-                Some(b) => next.push(sm::boolean(k, a, b, BooleanOperation::Union)?.result),
-                None => next.push(a),
-            }
-        }
-        level = next;
     }
-    level.pop().ok_or_else(|| SolidError::invalid_input("smlib_boolean_union_all", "no operand"))
 }
 
 /// Not upstream: the same bodies united one at a time, each into the result so far. A body whose
 /// union fails is put aside until the others are in (a later union may classify the pair that
 /// failed now); one that still fails then fails the retry. Each union works on a copy of the
 /// result so far and a copy of the body, so a failed union leaves both ready to try again.
-fn union_one_by_one(k: &mut Kernel, breps: Vec<Brep>) -> SolidResult<Brep> {
-    let mut breps = breps.into_iter();
-    let Some(mut acc) = breps.next() else {
-        return Err(SolidError::invalid_input("smlib_boolean_union_all", "no operand"));
-    };
+fn union_one_by_one(bodies: Vec<Body>) -> Result<Body> {
+    let mut bodies = bodies.into_iter();
+    let Some(mut acc) = bodies.next() else { return Err(Error::Argument) };
     let mut deferred = Vec::new();
-    for b in breps {
-        let acc_try = brep_copy(k, &acc)?;
-        let tool = brep_copy(k, &b)?;
-        match sm::boolean(k, acc_try, tool, BooleanOperation::Union) {
-            Ok(r) => acc = r.result,
-            // a cancellation is the answer now, not a body to try later
-            Err(e) if e.is_cancelled() => return Err(e),
+    for b in bodies {
+        match boolean_pair(&acc, &b) {
+            Ok(Some(u)) => acc = u,
+            Ok(None) => return Err(Error::Empty),
+            Err(e) if matches!(e, Error::Cancelled(_)) => return Err(e),
             Err(_) => deferred.push(b),
         }
     }
     for b in deferred {
-        let acc_try = brep_copy(k, &acc)?;
-        acc = sm::boolean(k, acc_try, b, BooleanOperation::Union)?.result;
+        acc = boolean_pair(&acc, &b)?.ok_or(Error::Empty)?;
     }
     Ok(acc)
 }
 
-/// `smlib_boolean2d`: `SmApiBoolean2d` (`SmPrimitiveCreation::Boolean2D`) on copies of `a` and
-/// `b`, sheets of planar faces on one plane; `None` when either has no face (where
-/// `SmApiBoolean2d` succeeds without a result) or the result is empty.
-pub(crate) fn boolean2d(a: &Body, b: &Body, op: BooleanOp) -> Result<Option<Body>> {
-    usable("SmApiBoolean2d", &[a, b])?;
-    let d = run_on("SmApiBoolean2d", &operands(&[a, b]), |k| {
-        let mut c = copies(k, &[a, b])?.into_iter();
-        let (Some(ca), Some(cb)) = (c.next(), c.next()) else {
-            return Err(SolidError::invalid_input("smlib_boolean2d", "no operand"));
-        };
-        if num_faces(&ca) == 0 || num_faces(&cb) == 0 {
-            return Ok(Done::Empty);
-        }
-        let kind = match op {
-            BooleanOp::Union => Boolean2d::Union,
-            BooleanOp::Subtract => Boolean2d::Difference,
-            BooleanOp::Intersect => Boolean2d::Intersection,
-        };
-        match sm::boolean_2d(k, ca, cb, kind)? {
-            Boolean2dOutcome::Result(r) => finish(r, false, false),
-            Boolean2dOutcome::Unassigned { .. } => Ok(Done::Empty),
-        }
-    })?;
-    result(d, Ok(None))
+/// A union of two bodies on copies, as [`ops::boolean`] gives it (the result is `None` only
+/// where a union of nonempty solids never lands: an empty body).
+fn boolean_pair(a: &Body, b: &Body) -> Result<Option<Body>> {
+    let mut c = copies(&[a, b])?.into_iter();
+    let (Some(ca), Some(cb)) = (c.next(), c.next()) else { return Err(Error::Argument) };
+    let inputs = [("a", a), ("b", b)];
+    call::ops_on("smlib_boolean_union_all", &inputs, || ops::boolean(ca, cb, operation(BooleanOp::Union)))
 }
 
-/// `smlib_imprint`: `SmApiBooleanWithOptions(SM_BO_IMPRINT)` on copies of `body` and `tool`,
-/// imprinting and keeping the tool (cookie cutter off, imprinting on, post-process off,
-/// imprint-and-classify off, keep other on). `None` when no face was cut
-/// (`SMLIB_ERR_NO_CUT`); an empty result is [`Error::Empty`]; the same body twice is
-/// [`Error::Argument`].
+/// `a` op `b` for sheets of planar faces on one plane, on copies: `None` when either has no
+/// face or the result is empty.
+pub(crate) fn boolean2d(a: &Body, b: &Body, op: BooleanOp) -> Result<Option<Body>> {
+    usable("SmApiBoolean2d", &[a, b])?;
+    let mut c = copies(&[a, b])?.into_iter();
+    let (Some(ca), Some(cb)) = (c.next(), c.next()) else { return Err(Error::Argument) };
+    call::ops_on("SmApiBoolean2d", &operands(&[a, b]), || ops::boolean2d(ca, cb, operation(op)))
+}
+
+/// `tool`'s edges imprinted on a copy of `body`: `None` when the imprint changed nothing of it
+/// (the tool meets no face).
 pub(crate) fn imprint(body: &Body, tool: &Body) -> Result<Option<Body>> {
     if std::ptr::eq(body, tool) {
         return Err(Error::Argument);
     }
     usable("SmApiBooleanWithOptions", &[body, tool])?;
-    let d = run_on("SmApiBooleanWithOptions", &operands(&[body, tool]), |k| {
-        let mut c = copies(k, &[body, tool])?.into_iter();
-        let (Some(a), Some(t)) = (c.next(), c.next()) else {
-            return Err(SolidError::invalid_input("smlib_imprint", "no operand"));
-        };
-        let before = num_faces(&a);
-        let options = MergeOptions::new(false, true, false, false, true);
-        let r = sm::boolean_with_options(k, a, t, BooleanOperation::Imprint, options)?.result;
-        let after = num_faces(&r);
-        Ok(if after == 0 {
-            Done::Empty
-        } else if after == before {
-            Done::NoCut
-        } else {
-            Done::Body(Box::new(r))
-        })
-    })?;
-    match d {
-        Done::Empty => Err(Error::Empty),
-        d => result(d, Err(Error::Empty)),
-    }
+    let mut c = copies(&[body, tool])?.into_iter();
+    let (Some(cb), Some(ct)) = (c.next(), c.next()) else { return Err(Error::Argument) };
+    let (imprinted, changed) = call::ops_on("SmApiBooleanWithOptions", &operands(&[body, tool]), || ops::imprint(cb, ct))?;
+    Ok(changed.then_some(imprinted))
 }

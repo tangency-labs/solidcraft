@@ -396,6 +396,35 @@ impl Session {
         }
     }
 
+    /// Where component `component`'s first placement is shown: the design's own
+    /// ([`solidcraft_doc::Document::component_transform`]) with a joint drag's shown frame over it
+    /// ([`Session::drag_moves`]), so what is drawn in the component's frame (its construction
+    /// geometry) follows the part while it is dragged.
+    pub fn shown_component_transform(&self, component: u64) -> Mat {
+        let moves = self.drag_moves();
+        if moves.is_empty() {
+            return self.doc.component_transform(component);
+        }
+        let mut world = IDENTITY;
+        for id in self.doc.first_path(component) {
+            let Some(o) = self.doc.occurrences.iter().find(|o| o.id == id) else { return self.doc.component_transform(component) };
+            world = mat_mul(&world, moves.get(&id).unwrap_or(&o.transform));
+        }
+        world
+    }
+
+    /// [`Session::occurrence_placement`] as the view shows it: with a joint drag's shown frame
+    /// over the moves not captured yet.
+    pub fn shown_occurrence_placement(&self, path: &[u64]) -> Result<OccurrencePlacement> {
+        let drag = self.drag_moves();
+        if drag.is_empty() {
+            return self.occurrence_placement(path);
+        }
+        let mut moves = self.pending_moves.clone();
+        moves.extend(drag.iter().map(|(o, m)| (*o, *m)));
+        self.occurrence_placement_with(path, &moves)
+    }
+
     /// Document with uncaptured occurrence positions applied, without changing saved geometry.
     pub fn placed_document(&self) -> std::borrow::Cow<'_, solidcraft_doc::Document> {
         if self.pending_moves.is_empty() {
@@ -912,7 +941,25 @@ impl Session {
 
     /// Whether an occurrence shows in the world: its own eye and every ancestor placement's
     /// eye along its path. A hidden placement hides its Origin folder and items too (#7313).
+    ///
+    /// Inlined, so that while nothing can hide a body the answer costs the caller no call: the
+    /// viewport asks about every body in several passes a frame, and in an assembly of tens of
+    /// thousands of bodies the calls alone took two fifths of the window thread.
+    #[inline]
     pub fn body_visible(&self, name: &str) -> bool {
+        self.shows_every_body() || self.body_shown_among_hidden(name)
+    }
+
+    /// Nothing can hide a body: no body, placement or folder is hidden and no sketch is open
+    /// (an open sketch's model leaves out bodies that later features remove).
+    #[inline]
+    fn shows_every_body(&self) -> bool {
+        let v = &self.visibility;
+        v.hidden_bodies.is_empty() && v.hidden_occurrences.is_empty() && v.hidden_folders.is_empty() && self.active_sketch.is_none()
+    }
+
+    /// [`Session::body_visible`] when something may hide the body.
+    fn body_shown_among_hidden(&self, name: &str) -> bool {
         if self.body_hidden_itself(name) || self.body_removed_later(name) {
             return false;
         }

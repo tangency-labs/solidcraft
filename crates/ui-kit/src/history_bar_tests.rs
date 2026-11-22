@@ -71,7 +71,7 @@ impl Contents for Steps {
             }
             let tip = || {
                 TIPS.with(|tips| tips.set(tips.get() + 1));
-                format!("{label} tip")
+                crate::StatusTip { head: format!("{label} tip"), ..Default::default() }
             };
             let (state, error) = self.marks.get(slot).copied().unwrap_or_default();
             strip.step(&Step {

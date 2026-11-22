@@ -39,14 +39,12 @@ use solidcore::topology::face::p2 as face2;
 use solidcore::topology::{edge, EdgeId};
 use solidcore::{Brep, Kernel};
 
-/// Every fix but `geometric_g2_continuity`.
+/// Every fix.
 fn all_fixes() -> Kernel {
     let mut k = Kernel::default();
     let mut f = UpstreamFixes::default();
     for &name in UpstreamFixes::NAMES {
-        if name != "geometric_g2_continuity" {
-            *f.flag_mut(name).unwrap() = true;
-        }
+        *f.flag_mut(name).unwrap() = true;
     }
     k.fixes = f;
     k
@@ -208,6 +206,69 @@ fn a_pocket_rim_notes_that_no_radius_fits() {
     assert!(fit.edge.is_some_and(|e| edges.contains(&e)), "{fit:?}");
 }
 
+/// An L-shaped prism, two 20 x 10 x 5 boxes crossed at the origin, so the L's inner corner is a
+/// sharp concave vertical edge at (10, 10). Its two inner walls' top edges are rounded r 1
+/// together: convex rounds, whose ball lies in the material, turning round a concave side edge,
+/// whose air side is a 90 degree wedge. The ball keeps its distance r from that wedge by
+/// circling the edge, so the swept turn passes, a horn torus of radii 1, 1, where a ball in the
+/// air (the pocket rim's) could not.
+///
+/// Closed form: the L is 300 x 5 = 1500. Each straight round takes the spandrel between the
+/// square corner and its arc, r^2 (1 - pi/4), off each unit length of its 10 mm wall: it ends
+/// square at the wall's far end (the end face there is square to it) and at the corner's
+/// section. The corner revolves the same spandrel about the side edge through the turn, pi/2.
+/// By Pappus that is its area times pi/2 times its centroid's distance from the axis, the
+/// distance from the wall, (10 - 3 pi) r / (3 (4 - pi)): pi r^3 (10 - 3 pi) / 24.
+#[test]
+fn convex_rounds_turn_round_a_concave_side_edge_as_a_horn_torus() {
+    let mut k = all_fixes();
+    let a = create_box(&mut k, Point3::new(0.0, 0.0, 0.0), 20.0, 10.0, 5.0).unwrap();
+    let c = create_box(&mut k, Point3::new(0.0, 0.0, 0.0), 10.0, 20.0, 5.0).unwrap();
+    let mut b = boolean_union(&mut k, a, c).unwrap();
+    round(
+        &mut k,
+        &mut b,
+        &[[15.0, 10.0, 5.0], [10.0, 15.0, 5.0]],
+        &[1.0; 2],
+    )
+    .unwrap();
+    let v = volume(&k, &mut b);
+    let lines = check_brep(&mut k, &mut b, CheckLevel::Level2)
+        .unwrap()
+        .lines();
+    let tori = tori(&b);
+    let pi = std::f64::consts::PI;
+    let expect = 1500.0 - 2.0 * 10.0 * (1.0 - pi / 4.0) - pi * (10.0 - 3.0 * pi) / 24.0;
+    eprintln!("volume {v:.12} (closed form {expect:.12}), tori {tori:?}");
+    assert!(lines.is_empty(), "{lines:?}");
+    assert_eq!(tori.len(), 1, "{tori:?}");
+    assert!((tori[0].0 - 1.0).abs() <= 1e-12 && (tori[0].1 - 1.0).abs() <= 1e-12);
+    assert!((v - expect).abs() <= 1e-9 * expect, "{v} against {expect}");
+}
+
+/// Two convex rounds at a box's corner, the third edge there (the convex side edge) left sharp:
+/// the ball lies in the material, which is only a 90 degree wedge round that edge, so it cannot
+/// circle it. The swept turn is refused, as the pocket rim's is (a ball in the air at a concave
+/// side edge), naming the radius to round the side edge first, and builds no body
+/// (tangency-labs/solidcraft#13805).
+#[test]
+fn convex_rounds_at_a_convex_side_edge_are_refused_naming_the_radius() {
+    let mut k = all_fixes();
+    let mut b = create_box(&mut k, Point3::new(0.0, 0.0, 0.0), 10.0, 10.0, 10.0).unwrap();
+    let (code, why) = round(
+        &mut k,
+        &mut b,
+        &[[5.0, 0.0, 10.0], [0.0, 5.0, 10.0]],
+        &[1.0; 2],
+    )
+    .unwrap_err();
+    assert_eq!(code, FilletErrorType::NoRoom as i32, "{why}");
+    assert!(
+        why.contains("round that edge at a radius of at least 1 first"),
+        "{why}"
+    );
+}
+
 #[test]
 fn unequal_rounds_are_not_swept_yet() {
     let mut k = all_fixes();
@@ -288,10 +349,9 @@ use solidcore::surface::procedural_blend::record::{CornerRecord, SupportRecord};
 use solidcore::surface::procedural_blend::BlendNet;
 use solidcore::surface::surface::Surface;
 
-/// The swept boss base, with or without `fillet_round_as_definition`.
-fn swept_boss_base(definition: bool) -> (Kernel, Brep) {
+/// The swept boss base.
+fn swept_boss_base() -> (Kernel, Brep) {
     let mut k = all_fixes();
-    k.fixes.fillet_round_as_definition = definition;
     let mut b = boss_base(&mut k);
     round(&mut k, &mut b, &BASE, &[1.0; 4]).unwrap();
     (k, b)
@@ -307,30 +367,6 @@ fn corner_faces(b: &Brep, kind: CornerKind) -> Vec<Surface> {
             s.procedural_blend()
                 .and_then(|d| d.corner())
                 .is_some_and(|c| c.kind() == kind)
-        })
-        .collect()
-}
-
-/// Every face's surface over a 9 x 9 grid of its natural domain, as bits.
-fn face_bits(k: &Kernel, b: &Brep) -> Vec<Vec<[u64; 3]>> {
-    get_faces(b)
-        .unwrap()
-        .into_iter()
-        .filter_map(|f| face2::surface(b, f).unwrap())
-        .map(|s| {
-            let d = s.natural_uv_domain_with_nurb(k).unwrap();
-            let mut pts = Vec::new();
-            for i in 0..=8 {
-                for j in 0..=8 {
-                    let u = d.min().x + (d.max().x - d.min().x) * f64::from(i) / 8.0;
-                    let v = d.min().y + (d.max().y - d.min().y) * f64::from(j) / 8.0;
-                    let p = s
-                        .evaluate_point(k, solidcore::geom::vector2d::Point2::new(u, v))
-                        .unwrap();
-                    pts.push([p.x.to_bits(), p.y.to_bits(), p.z.to_bits()]);
-                }
-            }
-            pts
         })
         .collect()
 }
@@ -352,7 +388,7 @@ fn moved(rec: &SupportRecord, by: f64) -> SupportRecord {
 
 #[test]
 fn the_swept_tori_are_their_definitions() {
-    let (k, mut b) = swept_boss_base(true);
+    let (k, b) = swept_boss_base();
     let tori = corner_faces(&b, CornerKind::Swept);
     assert_eq!(tori.len(), 4);
     for s in &tori {
@@ -364,16 +400,11 @@ fn the_swept_tori_are_their_definitions() {
         assert!(d.support(0).is_some());
         assert_eq!(d.recertify(&k).unwrap(), 0.0);
     }
-    // the volume and every surface bit for bit as without the definition
-    let (k0, mut b0) = swept_boss_base(false);
-    assert!(corner_faces(&b0, CornerKind::Swept).is_empty());
-    assert_eq!(volume(&k, &mut b).to_bits(), volume(&k0, &mut b0).to_bits());
-    assert_eq!(face_bits(&k, &b), face_bits(&k0, &b0));
 }
 
 #[test]
 fn a_swept_torus_round_trips_through_its_record() {
-    let (k, b) = swept_boss_base(true);
+    let (k, b) = swept_boss_base();
     for s in corner_faces(&b, CornerKind::Swept) {
         let rec = corner_to_record(&k, &s).unwrap();
         let json = serde_json::to_string(&rec).unwrap();
@@ -386,7 +417,7 @@ fn a_swept_torus_round_trips_through_its_record() {
 
 #[test]
 fn a_swept_torus_off_its_common_face_or_its_axis_is_refused() {
-    let (k, b) = swept_boss_base(true);
+    let (k, b) = swept_boss_base();
     let s = &corner_faces(&b, CornerKind::Swept)[0];
     let CornerRecord::Swept(rec) = corner_to_record(&k, s).unwrap() else {
         panic!("not a swept record");
@@ -416,7 +447,7 @@ fn a_swept_torus_off_its_common_face_or_its_axis_is_refused() {
 
 #[test]
 fn a_moved_swept_torus_is_certified_again() {
-    let (k, b) = swept_boss_base(true);
+    let (k, b) = swept_boss_base();
     for s in corner_faces(&b, CornerKind::Swept) {
         let mut s = s.copy(&k).unwrap();
         let mut place = solidcore::geom::axis2_placement::Axis2Placement::default();

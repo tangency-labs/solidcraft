@@ -1,0 +1,1 @@
+finds the face across a cylinder's rim by the display mesh

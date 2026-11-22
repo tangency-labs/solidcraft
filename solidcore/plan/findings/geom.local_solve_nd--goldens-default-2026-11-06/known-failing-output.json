@@ -1,0 +1,137 @@
+{
+  "unit": "blend.fillet_executive_p3",
+  "case": "stubs4-open_shell-e5-r0.5",
+  "issue": "tangency-labs/solidcore#2956",
+  "old_main": {
+    "case": "stubs4-open_shell-e5-r0.5",
+    "deferred": null,
+    "error": null,
+    "ints": {
+      "api_status_vertex_edge_face_counts": [
+        0,
+        18,
+        24,
+        7
+      ],
+      "mass_status": [
+        1007
+      ],
+      "result_topology": {
+        "blocks": [
+          [
+            337343,
+            43924563
+          ],
+          [
+            105628,
+            5738038
+          ]
+        ],
+        "n": 359
+      }
+    },
+    "topology": null,
+    "values": {
+      "fillet_point_step": [
+        1e-05
+      ],
+      "mass_properties": [],
+      "result_geometry": {
+        "blocks": [
+          [
+            -864.3564813200322,
+            19670.27954000918,
+            -134824.70274138806
+          ],
+          [
+            723.2226425349643,
+            17264.932632287437,
+            -1723.289599615673
+          ],
+          [
+            17.17198454715698,
+            8601.974044519407,
+            921.0235462851215
+          ]
+        ],
+        "n": 630
+      },
+      "selected_edge_before": {
+        "blocks": [
+          [
+            13840.385369163707,
+            15140.593760262442,
+            67689.83797353065
+          ]
+        ],
+        "n": 17
+      }
+    }
+  },
+  "new": {
+    "case": "stubs4-open_shell-e5-r0.5",
+    "deferred": null,
+    "error": null,
+    "ints": {
+      "api_status_vertex_edge_face_counts": [
+        0,
+        18,
+        24,
+        7
+      ],
+      "mass_status": [
+        1007
+      ],
+      "result_topology": {
+        "blocks": [
+          [
+            337343,
+            43924563
+          ],
+          [
+            105628,
+            5738038
+          ]
+        ],
+        "n": 359
+      }
+    },
+    "topology": null,
+    "values": {
+      "fillet_point_step": [
+        1e-05
+      ],
+      "mass_properties": [],
+      "result_geometry": {
+        "blocks": [
+          [
+            -864.3564813200327,
+            19670.27954000918,
+            -134824.70274138806
+          ],
+          [
+            723.2226425349668,
+            17264.932632287433,
+            -1723.2895996151783
+          ],
+          [
+            17.171984547152945,
+            8601.97404451938,
+            921.0235462846522
+          ]
+        ],
+        "n": 630
+      },
+      "selected_edge_before": {
+        "blocks": [
+          [
+            13840.385369163707,
+            15140.593760262442,
+            67689.83797353065
+          ]
+        ],
+        "n": 17
+      }
+    }
+  }
+}

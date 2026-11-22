@@ -18,6 +18,9 @@
     clippy::print_stderr
 )] // test
 
+#[path = "../../solidcore/tests/support/solidcraft_fixes.rs"]
+mod solidcraft_fixes;
+
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt::Write as _;
 use std::io::Read as _;
@@ -306,14 +309,7 @@ fn one(name: &str, record: &Record, trusted: bool, fixes: &UpstreamFixes, t: &mu
 }
 
 fn fixes() -> UpstreamFixes {
-    let fixes_json: Value =
-        serde_json::from_str(&std::fs::read_to_string(corpus().join("fixes.json")).unwrap())
-            .unwrap();
-    let mut fixes = UpstreamFixes::default();
-    for flag in fixes_json.as_array().unwrap() {
-        *fixes.flag_mut(flag.as_str().unwrap()).unwrap() = true;
-    }
-    fixes
+    solidcraft_fixes::solidcraft_fixes()
 }
 
 const LABEL: [&str; 6] = [
@@ -400,15 +396,6 @@ fn pinned() -> BTreeMap<String, BTreeSet<String>> {
                 "fillets/2903-original-rim-chamfer.json:b0",
                 "fillets/2903-original-rim-round.json:b0",
             ],
-        ),
-        // a torus label whose frame is off its form's own first sweep row past the rounding
-        // `evaluates_as` derives (margin 1.69, tests/issue_3185_label_margins.rs)
-        (
-            label(
-                "torus -> rational_spline",
-                &["major_radius", "minor_radius"],
-            ),
-            &["sweeps/4280-circular-pattern-of-sweep-cut-groove-on-hub.json:b46"],
         ),
         // an extruded circle the flat hop left a spline, proved a cylinder
         (
@@ -582,7 +569,7 @@ fn parity(stride: usize) {
         // differs is pinned above, and the rest must be identical or within rounding.
         assert_eq!(
             (t.bodies - t.identical - t.rounding_only, t.rounding_only),
-            (pinned.len(), 36),
+            (pinned.len(), 37), // 37 with fillets/15437's block (within rounding)
             "bodies that differ, bodies within rounding"
         );
         // the largest rounding difference, relative (#3137: 4.885e-16)

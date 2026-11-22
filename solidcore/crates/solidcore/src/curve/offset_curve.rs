@@ -545,15 +545,8 @@ impl OffsetCurve {
                 if num_derivs < 2 {
                     // recurse back to this function so the next section sets the 1st
                     // derivative (status ignored upstream)
-                    let vals = match self.evaluate(k, t, 2, from_left, true) {
-                        Ok(v) => v,
-                        Err(e @ (SolidError::Unported { .. } | SolidError::Cancelled { .. })) => {
-                            return Err(e)
-                        }
-                        // (fork 4803d6d passes this status on: `SER`)
-                        Err(e) if k.fixes.brep_edit_statuses_pass_on => return Err(e),
-                        Err(_) => vec![Vec3::UNDEF; 3],
-                    };
+                    // (fork 4803d6d passes this status on: `SER`)
+                    let vals = self.evaluate(k, t, 2, from_left, true)?;
 
                     // save the 1st derivative
                     if let Some(o) = out.get_mut(1) {
@@ -817,10 +810,7 @@ impl OffsetCurve {
         c.normal = normal;
         c.distance = distance;
         // (status ignored upstream; fork 4803d6d passes it on: `SER`)
-        let set = c.interval.set_min_max(ivl_min, ivl_max);
-        if k.fixes.brep_edit_statuses_pass_on {
-            set?;
-        }
+        c.interval.set_min_max(ivl_min, ivl_max)?;
         c.reversed = reversed;
         c.owns_curve = 1;
         c.base_linked = true;

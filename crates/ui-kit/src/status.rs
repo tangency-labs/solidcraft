@@ -1,4 +1,4 @@
-//! Status heading and constraint meter; Tokens: font_label, text, text_dim, accent, dialog_rule, sketch_accent, spacing.
+//! Status heading, constraint meter and a feature's status tooltip; Tokens: font_label, text, text_dim, accent, dialog_rule, sketch_accent, error, spacing.
 use crate::BackingTooltipExt as _;
 use crate::type_face::RichTextExt as _;
 use egui::{RichText, vec2};
@@ -252,4 +252,41 @@ pub fn progress_action(ui: &mut egui::Ui, key: &str, name: &str, status: &str, f
         response
     })
     .inner
+}
+
+/// What a feature's mark says in a tooltip (#8834), the same wherever the mark shows: lines
+/// before the message (its name and type), the error, the warning, then lines after it (the
+/// time, a hint). The error is in the error colour so it doesn't read like a warning, and every
+/// line wraps instead of being cut off. Parts left empty are not shown.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct StatusTip {
+    pub head: String,
+    pub error: Option<String>,
+    pub warning: Option<String>,
+    pub tail: String,
+}
+
+impl StatusTip {
+    /// Each part shown, and whether it is the error.
+    fn parts(&self) -> impl Iterator<Item = (&str, bool)> {
+        let parts =
+            [(Some(self.head.as_str()), false), (self.error.as_deref(), true), (self.warning.as_deref(), false), (Some(self.tail.as_str()), false)];
+        parts.into_iter().filter_map(|(part, error)| part.filter(|part| !part.is_empty()).map(|part| (part, error)))
+    }
+
+    /// The tooltip as plain text, a part a line: what Copy Error Message copies and what a
+    /// screen reader is given.
+    pub fn plain(&self) -> String {
+        self.parts().map(|(part, _)| part).collect::<Vec<_>>().join("\n")
+    }
+
+    /// Paints the tooltip's body, at most a tooltip wide.
+    pub fn show(&self, ui: &mut egui::Ui) {
+        let t = Tokens::get();
+        ui.set_max_width(ui.spacing().tooltip_width);
+        for (part, error) in self.parts() {
+            let text = if error { RichText::new(part).color(t.error) } else { RichText::new(part) };
+            ui.add(egui::Label::new(text).wrap());
+        }
+    }
 }

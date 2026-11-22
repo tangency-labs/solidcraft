@@ -30,6 +30,14 @@
 //! models and other validated functional inclusion methods, *Int. J. Pure Appl. Math.* 4
 //! (2003).
 //!
+//! - **Lifted loops.** [`lifted_loop_area_sign`] takes each curve translated by a
+//!   constant `(sx, sy)`, each given as an interval that holds it (a loop on a periodic
+//!   surface, its trims moved by whole periods to close across the seam), without
+//!   rewriting the curve: the translation enters only the integrand's `x - x0`, as
+//!   `x - (x0 - sx)` with `x0 - sx` enclosed, and the curve's ends, enclosed as `p + s`;
+//!   `y'` does not change. So the enclosure holds the area of the exact translated loop. A
+//!   curve with no translation (the point interval 0) is computed as by [`loop_area_sign`].
+//!
 //! Deviations: none (not upstream). Bounded work: at most [`CELL_BUDGET`] cells and
 //! [`MAX_DEPTH`] bisections of one cell, no recursion (a work list ordered by width, then by
 //! insertion), the kernel's cancel token polled every 64 cells.
@@ -202,22 +210,129 @@ fn ends(cn: &NurbsCurve) -> Result<([Ivl; 2], [Ivl; 2])> {
     Ok((point(k0, a)?, point(k1, b)?))
 }
 
+/// [`LoopAreaMemo`]'s cap on the words its keys hold (8 bytes each): past it the memo
+/// starts again. A guard on memory only: clearing the memo changes no result.
+const LOOP_AREA_MEMO_WORDS: usize = 1 << 20;
+
+/// The memo of loop area signs a kernel keeps (not upstream): [`loop_area_sign`]'s result
+/// for each loop it certified, by every bit of the loop's input (each curve's degree,
+/// knots and homogeneous control points, and its sense). The certificate is a function of
+/// that input alone (the kernel is read only for its cancel token), so a hit returns, to
+/// the bit, what certifying the loop again returns. A body's check certifies each face's
+/// loops twice (both of its pointer checks), and the checks of a body and of the bodies
+/// made from it meet the same loops again; each is certified once. Only a certificate that
+/// finished is kept (a cancelled one is not). [`Kernel::memoize_curve_caches`] turns it
+/// off, with the curve cache memo.
+#[derive(Debug, Default)]
+pub struct LoopAreaMemo {
+    signs: std::collections::HashMap<Vec<u64>, LoopAreaSign>,
+    words: usize,
+}
+
+impl LoopAreaMemo {
+    /// The loops the memo keeps.
+    #[must_use]
+    pub fn len(&self) -> usize {
+        self.signs.len()
+    }
+
+    /// Whether it keeps none.
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        self.signs.is_empty()
+    }
+}
+
+/// The memo key of a loop: every bit of its input, each curve's sense, degree and counts
+/// first so that no two inputs share a key.
+fn memo_key(curves: &[(&NurbsCurve, bool)]) -> Vec<u64> {
+    let mut key = Vec::new();
+    for &(cn, forwards) in curves {
+        key.push(u64::from(forwards));
+        key.push(cn.p as u64);
+        key.push(cn.n as u64);
+        key.push(cn.u.len() as u64);
+        key.push(cn.pw.len() as u64);
+        key.extend(cn.u.iter().map(|x| x.to_bits()));
+        key.extend(cn.pw.iter().map(|x| x.to_bits()));
+    }
+    key
+}
+
 /// The certified signed area of the closed loop of `curves` (each `(curve, forwards)`) and
 /// the straight segments joining each curve's end to the next one's start, and its sign
-/// (see the module).
+/// (see the module). A loop the kernel certified before is answered from its memo
+/// ([`LoopAreaMemo`]), to the bit as certifying it again.
 ///
 /// # Errors
 ///
 /// [`SolidError::InvalidInput`] for no curves or a curve with no knot span;
 /// [`SolidError::Cancelled`] when the kernel's cancel token fires.
 pub fn loop_area_sign(k: &Kernel, curves: &[(&NurbsCurve, bool)]) -> Result<LoopAreaSign> {
+    if !k.memoize_curve_caches || curves.is_empty() {
+        return certify(k, curves);
+    }
+    let key = memo_key(curves);
+    if let Some(&hit) = k.loop_area_memo.borrow().signs.get(&key) {
+        return Ok(hit);
+    }
+    let sign = certify(k, curves)?;
+    let mut memo = k.loop_area_memo.borrow_mut();
+    if memo.words + key.len() > LOOP_AREA_MEMO_WORDS {
+        memo.signs.clear();
+        memo.words = 0;
+    }
+    memo.words += key.len();
+    memo.signs.insert(key, sign);
+    Ok(sign)
+}
+
+/// [`loop_area_sign`] computed: the certificate itself.
+fn certify(k: &Kernel, curves: &[(&NurbsCurve, bool)]) -> Result<LoopAreaSign> {
+    area_sign(k, curves, &[])
+}
+
+/// [`loop_area_sign`] of the loop with curve `i` translated by a vector in `shifts[i]`
+/// (intervals `(sx, sy)` holding it; no translation for a curve past the end of `shifts`),
+/// enclosed for the exact translation (see the module).
+///
+/// # Errors
+///
+/// As [`loop_area_sign`].
+pub fn lifted_loop_area_sign(
+    k: &Kernel,
+    curves: &[(&NurbsCurve, bool)],
+    shifts: &[(Ivl, Ivl)],
+) -> Result<LoopAreaSign> {
+    area_sign(k, curves, shifts)
+}
+
+/// `p + s` enclosed, `p` unchanged where `s` is the point interval 0.
+fn shifted(p: [Ivl; 2], s: (Ivl, Ivl)) -> [Ivl; 2] {
+    let zero = Ivl::from(0.0);
+    let [x, y] = p;
+    [
+        if s.0 == zero { x } else { x + s.0 },
+        if s.1 == zero { y } else { y + s.1 },
+    ]
+}
+
+/// [`lifted_loop_area_sign`]; [`loop_area_sign`] with no shifts.
+fn area_sign(
+    k: &Kernel,
+    curves: &[(&NurbsCurve, bool)],
+    shifts: &[(Ivl, Ivl)],
+) -> Result<LoopAreaSign> {
+    let zero = Ivl::from(0.0);
+    let shift = |i: usize| shifts.get(i).copied().unwrap_or((zero, zero));
     if curves.is_empty() {
         return Err(SolidError::invalid_input(OP, "a loop with no curves"));
     }
     // each curve's start and end in the loop's direction
     let mut loop_ends = Vec::new();
-    for &(cn, forwards) in curves {
+    for (i, &(cn, forwards)) in curves.iter().enumerate() {
         let (s, e) = ends(cn)?;
+        let (s, e) = (shifted(s, shift(i)), shifted(e, shift(i)));
         loop_ends.push(if forwards { (s, e) } else { (e, s) });
     }
     let x0 = Ivl::from(loop_ends.first().map_or(f64::NAN, |(s, _)| s[0].mid()));
@@ -251,6 +366,9 @@ pub fn loop_area_sign(k: &Kernel, curves: &[(&NurbsCurve, bool)]) -> Result<Loop
             .get(curve)
             .copied()
             .ok_or_else(|| SolidError::invalid_input(OP, "a cell of no curve"))?;
+        // (x + sx) - x0 = x - (x0 - sx)
+        let sx = shift(curve).0;
+        let x0 = if sx == zero { x0 } else { x0 - sx };
         let mut enc = piece_integral(cn, span, a, b, x0)?;
         if !forwards {
             enc = Ivl::new(-enc.hi, -enc.lo);
@@ -485,5 +603,142 @@ mod tests {
         let c = segment([f64::NAN, 1.0], [0.0, 0.0]);
         let r = loop_area_sign(&k, &[(&a, true), (&b, true), (&c, true)]).unwrap();
         assert!(matches!(r, LoopAreaSign::Undecided(_)), "{r:?}");
+    }
+    /// A unit square on a strip of period 1 written with its top side at its other copy
+    /// (`x` 1 lower) decides as the square, its enclosure holding 1, once the top is
+    /// shifted back by one period; written with its left side one period up in `y` and
+    /// shifted back, likewise. No shifts give exactly [`loop_area_sign`].
+    #[test]
+    fn a_lifted_square_decides_as_the_square() {
+        let k = Kernel::default();
+        let sides = [
+            segment([0.0, 0.0], [1.0, 0.0]),
+            segment([1.0, 0.0], [1.0, 1.0]),
+            segment([0.0, 1.0], [-1.0, 1.0]),
+            segment([0.0, 1.0], [0.0, 0.0]),
+        ];
+        let lp: Vec<(&NurbsCurve, bool)> = sides.iter().map(|c| (c, true)).collect();
+        let (o, one) = (Ivl::from(0.0), Ivl::from(1.0));
+        let shifts = [(o, o), (o, o), (one, o), (o, o)];
+        let LoopAreaSign::Positive(a) = lifted_loop_area_sign(&k, &lp, &shifts).unwrap() else {
+            panic!("the lifted square is counter-clockwise");
+        };
+        assert!(holds(&a, 1.0), "{a:?}");
+        // no shifts: the same as loop_area_sign
+        assert_eq!(
+            lifted_loop_area_sign(&k, &lp, &[]).unwrap(),
+            loop_area_sign(&k, &lp).unwrap()
+        );
+        // the square with its left side written one period up in y
+        let top = segment([1.0, 1.0], [0.0, 1.0]);
+        let left_up = segment([0.0, 2.0], [0.0, 1.0]);
+        let lp: Vec<(&NurbsCurve, bool)> = [&sides[0], &sides[1], &top, &left_up]
+            .into_iter()
+            .map(|c| (c, true))
+            .collect();
+        let shifts = [(o, o), (o, o), (o, o), (o, Ivl::new(-1.0, -1.0))];
+        let LoopAreaSign::Positive(a) = lifted_loop_area_sign(&k, &lp, &shifts).unwrap() else {
+            panic!("the square shifted in y is counter-clockwise");
+        };
+        assert!(holds(&a, 1.0), "{a:?}");
+    }
+
+    /// The lifted form never meets the memo: a unit square written with its right side two
+    /// periods left (`x` 2 lower) is, unshifted, the clockwise loop (0,0) (1,0) (-1,0)
+    /// (-1,1) (1,1) (0,1) of area -1, and shifted back by 2 the square of area 1. With the
+    /// memo on, either call first, each gives its own answer and the lifted one keeps nothing.
+    #[test]
+    fn a_lifted_loop_is_not_answered_from_the_memo() {
+        let sides = [
+            segment([0.0, 0.0], [1.0, 0.0]),
+            segment([-1.0, 0.0], [-1.0, 1.0]),
+            segment([1.0, 1.0], [0.0, 1.0]),
+            segment([0.0, 1.0], [0.0, 0.0]),
+        ];
+        let lp: Vec<(&NurbsCurve, bool)> = sides.iter().map(|c| (c, true)).collect();
+        let o = Ivl::from(0.0);
+        let shifts = [(o, o), (Ivl::from(2.0), o), (o, o), (o, o)];
+        for unshifted_first in [true, false] {
+            let k = Kernel {
+                memoize_curve_caches: true,
+                ..Kernel::default()
+            };
+            let (plain, lifted) = if unshifted_first {
+                let plain = loop_area_sign(&k, &lp).unwrap();
+                (plain, lifted_loop_area_sign(&k, &lp, &shifts).unwrap())
+            } else {
+                let lifted = lifted_loop_area_sign(&k, &lp, &shifts).unwrap();
+                (loop_area_sign(&k, &lp).unwrap(), lifted)
+            };
+            let LoopAreaSign::Negative(a) = plain else {
+                panic!("unshifted, the loop is clockwise: {plain:?}");
+            };
+            assert!(holds(&a, -1.0), "{a:?}");
+            let LoopAreaSign::Positive(a) = lifted else {
+                panic!("lifted, the loop is the square: {lifted:?}");
+            };
+            assert!(holds(&a, 1.0), "{a:?}");
+            assert_eq!(
+                k.loop_area_memo.borrow().len(),
+                1,
+                "only the unshifted loop is kept"
+            );
+            assert_eq!(loop_area_sign(&k, &lp).unwrap(), plain);
+        }
+    }
+
+    /// The kernel's memo answers a loop it certified before with the certificate itself, to
+    /// the bit (the enclosure and its cell count too): a positive, a negative and an
+    /// undecided loop, each certified with the memo off, then twice with it on. A loop and
+    /// its reverse are two entries; with the memo off nothing is kept.
+    #[test]
+    fn a_remembered_loop_area_is_the_certificate() {
+        let (r, t) = (1e4, 1e-3);
+        let outer = quarter_arc(0.0, 0.0, r + t);
+        let inner = quarter_arc(0.0, 0.0, r);
+        let bottom = segment([r, 0.0], [r + t, 0.0]);
+        let left = segment([0.0, r + t], [0.0, r]);
+        let arc = quarter_arc(1e4, 0.0, 3.0);
+        let loops: [Vec<(&NurbsCurve, bool)>; 3] = [
+            vec![
+                (&bottom, true),
+                (&outer, true),
+                (&left, true),
+                (&inner, false),
+            ],
+            vec![
+                (&inner, true),
+                (&left, false),
+                (&outer, false),
+                (&bottom, false),
+            ],
+            vec![(&arc, true), (&arc, false)],
+        ];
+        let off = Kernel {
+            memoize_curve_caches: false,
+            ..Kernel::default()
+        };
+        let on = Kernel {
+            memoize_curve_caches: true,
+            ..Kernel::default()
+        };
+        for (i, lp) in loops.iter().enumerate() {
+            let fresh = format!("{:?}", loop_area_sign(&off, lp).unwrap());
+            let first = format!("{:?}", loop_area_sign(&on, lp).unwrap());
+            assert_eq!(on.loop_area_memo.borrow().len(), i + 1);
+            let again = format!("{:?}", loop_area_sign(&on, lp).unwrap());
+            assert_eq!(
+                on.loop_area_memo.borrow().len(),
+                i + 1,
+                "a hit adds nothing"
+            );
+            assert_eq!(first, fresh);
+            assert_eq!(again, fresh);
+        }
+        assert!(off.loop_area_memo.borrow().is_empty());
+        assert!(matches!(
+            loop_area_sign(&on, &loops[2]).unwrap(),
+            LoopAreaSign::Undecided(_)
+        ));
     }
 }

@@ -126,13 +126,7 @@ fn pick(k: &Kernel, b: &Brep, p: [f64; 3]) -> EdgeId {
 
 /// The front top edge and the concave arc rounded (`xsect` 1) or chamfered (0) at `r`.
 fn blended(r: f64, xsect: u32) -> (Kernel, Brep, solidcore::Result<()>) {
-    blended_kept(true, r, xsect)
-}
-
-/// [`blended`], with `definition` (`fillet_round_as_definition`, #2488) set.
-fn blended_kept(definition: bool, r: f64, xsect: u32) -> (Kernel, Brep, solidcore::Result<()>) {
     let mut k = kernel();
-    k.fixes.fillet_round_as_definition = definition;
     let mut b = read(&mut k);
     let es: Vec<EdgeId> = [[20.0, 0.0, 10.0], [32.0, 8.0, 10.0]]
         .iter()
@@ -394,10 +388,101 @@ fn rounds_together_r5() {
     graded(5.0, false);
 }
 
-/// Chamfers d 2: the corner's faces are the bilinear Coons patches (G0).
+/// Chamfers d 2: the corner's faces are the chamfer's Coons patches of their sides (G0).
 #[test]
 fn chamfers_together_d2() {
     graded(2.0, true);
+}
+
+/// Chamfers d 2: the Mixed corner's face L (X, A, P, V), whose sides A-P and P-V lie in
+/// the front face y = 0, stays on the material's side of it. Its net's weights are positive
+/// and its control points have y >= 0 to the part-scale floor, so the whole face has (a
+/// rational patch lies in its net's hull); a 160 x 160 sample agrees. The bilinear Coons
+/// patch reached y = -7.2e-4 beside the seam's line P-V, a lip the body's tight box misses,
+/// so `chamfers_together_d2` cannot see it (#13755).
+#[test]
+fn the_mixed_chamfer_face_on_the_front_face_stays_behind_it() {
+    let (k, b, res) = blended(2.0, 0);
+    res.unwrap();
+    let counts = [
+        solidcore::topology::brep::p1::faces(&b, None)
+            .unwrap()
+            .len(),
+        solidcore::topology::brep::p1::edges(&b, None)
+            .unwrap()
+            .len(),
+        solidcore::topology::brep::p1::vertices(&b, None)
+            .unwrap()
+            .len(),
+    ];
+    assert_eq!(counts, [11, 26, 17], "faces, edges, vertices");
+    let infinite = b.infinite_region();
+    let shells: Vec<usize> = solidcore::topology::brep::p1::regions(&b, None)
+        .unwrap()
+        .into_iter()
+        .filter(|r| Some(*r) != infinite)
+        .map(|r| b.region(r).unwrap().shells.len())
+        .collect();
+    assert_eq!(shells, [1], "one solid region, one shell");
+    let faces = corner_faces(&b, CornerKind::Mixed);
+    assert_eq!(faces.len(), 2, "the corner's faces L and U");
+    // the floor at the part's scale, tens of millimetres (docs/definitions-and-certificates.md)
+    let round = 1e-10;
+    let (x, a, p, v) = (
+        Point3::new(32.0, 2.0, 10.0),
+        Point3::new(34.0, 0.0, 8.0),
+        Point3::new(40.0, 0.0, 8.0),
+        Point3::new(40.0, 0.0, 10.0),
+    );
+    let corners = |s: &Surface| {
+        let d = s.natural_uv_domain_with_nurb(&k).unwrap();
+        [
+            (d.min().x, d.min().y),
+            (d.max().x, d.min().y),
+            (d.min().x, d.max().y),
+            (d.max().x, d.max().y),
+        ]
+        .map(|(u, v)| s.evaluate_point(&k, Point2::new(u, v)).unwrap())
+    };
+    let near = |c: &[Point3; 4], q: Point3| c.iter().any(|c| c.distance(q) <= 1e-9);
+    let l: Vec<&Surface> = faces
+        .iter()
+        .filter(|s| near(&corners(s), a) && near(&corners(s), p))
+        .collect();
+    assert_eq!(l.len(), 1, "one corner face through A and P");
+    let s = l[0];
+    let c = corners(s);
+    assert!(
+        near(&c, x) && near(&c, a) && near(&c, p) && near(&c, v),
+        "L's corners {c:?}"
+    );
+    let cps = bspline_net(s).unwrap().control_points().unwrap().2;
+    assert!(cps.iter().all(|q| q.w > 0.0), "L's weights");
+    let least_net = cps.iter().map(|q| q.y / q.w).fold(f64::INFINITY, f64::min);
+    let d = s.natural_uv_domain_with_nurb(&k).unwrap();
+    let mut least = (f64::INFINITY, 0.0, 0.0);
+    for i in 0..=160 {
+        for j in 0..=160 {
+            let u = d.min().x + (d.max().x - d.min().x) * f64::from(i) / 160.0;
+            let v = d.min().y + (d.max().y - d.min().y) * f64::from(j) / 160.0;
+            let y = s.evaluate_point(&k, Point2::new(u, v)).unwrap().y;
+            if y < least.0 {
+                least = (y, u, v);
+            }
+        }
+    }
+    eprintln!(
+        "L: least y {:e} at ({}, {}); least control point y {least_net:e}",
+        least.0, least.1, least.2
+    );
+    assert!(least_net >= -round, "L's net reaches y = {least_net:e}");
+    assert!(
+        least.0 >= -round,
+        "L reaches y = {:e} at ({}, {})",
+        least.0,
+        least.1,
+        least.2
+    );
 }
 
 // ---- #2488: a Mixed corner's faces keep their rule ----
@@ -416,33 +501,6 @@ fn corner_faces(b: &Brep, kind: CornerKind) -> Vec<Surface> {
             s.procedural_blend()
                 .and_then(|d| d.corner())
                 .is_some_and(|c| c.kind() == kind)
-        })
-        .collect()
-}
-
-/// Every face's surface over a 9 x 9 grid of its natural domain, as bits; a round that is
-/// a procedural blend by its net (its own definition is #2480's, and evaluates by solving
-/// it).
-fn face_bits(k: &Kernel, b: &Brep) -> Vec<Vec<[u64; 3]>> {
-    b.faces()
-        .ids()
-        .filter_map(|f| b.face(f).unwrap().surface.clone())
-        .map(|s| {
-            let s = match s.kind() {
-                SurfaceKind::ProceduralBlend(pb) => Surface::from(pb.net().copy()),
-                _ => s.clone(),
-            };
-            let d = s.natural_uv_domain_with_nurb(k).unwrap();
-            let mut pts = Vec::new();
-            for i in 0..=8 {
-                for j in 0..=8 {
-                    let u = d.min().x + (d.max().x - d.min().x) * f64::from(i) / 8.0;
-                    let v = d.min().y + (d.max().y - d.min().y) * f64::from(j) / 8.0;
-                    let p = s.evaluate_point(k, Point2::new(u, v)).unwrap();
-                    pts.push([p.x.to_bits(), p.y.to_bits(), p.z.to_bits()]);
-                }
-            }
-            pts
         })
         .collect()
 }
@@ -486,7 +544,7 @@ fn moved(rec: &SupportRecord, by: f64) -> SupportRecord {
 #[test]
 fn the_mixed_faces_are_their_rules() {
     for (xsect, order) in [(1, 1), (0, 0)] {
-        let (k, mut b, res) = blended_kept(true, 2.0, xsect);
+        let (k, b, res) = blended(2.0, xsect);
         res.unwrap();
         let faces = corner_faces(&b, CornerKind::Mixed);
         assert_eq!(faces.len(), 2);
@@ -499,26 +557,12 @@ fn the_mixed_faces_are_their_rules() {
             // where built, the net is its rule's patch
             assert_eq!(d.recertify(&k).unwrap(), 0.0);
         }
-        let (k0, mut b0, res0) = blended_kept(false, 2.0, xsect);
-        res0.unwrap();
-        assert!(corner_faces(&b0, CornerKind::Mixed).is_empty());
-        let (v, v0) = (volume(&k, &mut b, 1e-9), volume(&k0, &mut b0, 1e-9));
-        if xsect == 1 {
-            // the rounds are the same either way: the body bit for bit
-            assert_eq!(v.to_bits(), v0.to_bits());
-            assert_eq!(face_bits(&k, &b), face_bits(&k0, &b0));
-        } else {
-            // a chamfer is its definition with the flag on (#2486), its net certified
-            // within its bound of the chord, so the corner is built on other nets: the body
-            // moves within that bound (3.2e-8 of it here)
-            assert!((v - v0).abs() <= 1e-7 * v0, "{v} vs {v0}");
-        }
     }
 }
 
 #[test]
 fn a_mixed_face_round_trips_through_its_record() {
-    let (k, b, res) = blended_kept(true, 2.0, 1);
+    let (k, b, res) = blended(2.0, 1);
     res.unwrap();
     for s in corner_faces(&b, CornerKind::Mixed) {
         let rec = corner_to_record(&k, &s).unwrap();
@@ -531,7 +575,7 @@ fn a_mixed_face_round_trips_through_its_record() {
 
 #[test]
 fn a_moved_mixed_face_is_certified_again() {
-    let (k, b, res) = blended_kept(true, 2.0, 1);
+    let (k, b, res) = blended(2.0, 1);
     res.unwrap();
     for s in corner_faces(&b, CornerKind::Mixed) {
         let mut s = s.copy(&k).unwrap();
@@ -548,7 +592,7 @@ fn a_moved_mixed_face_is_certified_again() {
 
 #[test]
 fn a_mixed_face_off_its_blend_or_t_is_refused() {
-    let (k, b, res) = blended_kept(true, 2.0, 1);
+    let (k, b, res) = blended(2.0, 1);
     res.unwrap();
     for s in corner_faces(&b, CornerKind::Mixed) {
         let CornerRecord::Mixed(rec) = corner_to_record(&k, &s).unwrap() else {
@@ -571,6 +615,34 @@ fn a_mixed_face_off_its_blend_or_t_is_refused() {
         assert!(why.contains("off T"), "{why}");
         // the net moved off its rule
         let mut off = rec;
+        for p in &mut off.net.points {
+            p[2] += 1e-3;
+        }
+        let why = corner_rebuild(&k, &CornerRecord::Mixed(off))
+            .unwrap_err()
+            .to_string();
+        assert!(why.contains("rule's patch"), "{why}");
+    }
+}
+
+/// Chamfers d 2: each Mixed face rebuilds from its record to the chamfer's rule (#13755),
+/// and a net moved off that rule is refused.
+#[test]
+fn a_mixed_chamfer_face_round_trips_through_its_record() {
+    let (k, b, res) = blended(2.0, 0);
+    res.unwrap();
+    let faces = corner_faces(&b, CornerKind::Mixed);
+    assert_eq!(faces.len(), 2);
+    for s in faces {
+        let rec = corner_to_record(&k, &s).unwrap();
+        let json = serde_json::to_string(&rec).unwrap();
+        let back = corner_rebuild(&k, &serde_json::from_str(&json).unwrap()).unwrap();
+        assert_eq!(corner_to_record(&k, &back).unwrap(), rec);
+        assert_eq!(back.procedural_blend().unwrap().recertify(&k).unwrap(), 0.0);
+        let CornerRecord::Mixed(mut off) = rec else {
+            panic!("not a mixed record");
+        };
+        assert!(off.bilinear, "the chamfer's rule");
         for p in &mut off.net.points {
             p[2] += 1e-3;
         }

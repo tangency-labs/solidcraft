@@ -86,7 +86,7 @@ replaces them with the saved active method. Only the selected method's schema is
 
 The picker lists visible evaluated bodies and narrows long lists with a filter;
 it shows at most 256 rows per opening. Empty names, control characters and names
-longer than 128 UTF-8 bytes cannot be selected. Duplicate visible names and stale
+longer than 512 UTF-8 bytes (`MAX_BODY_NAME_BYTES`) cannot be selected. Duplicate visible names and stale
 model evaluation are refused.
 
 A reflection selection records its document pointer, scene revision and the
