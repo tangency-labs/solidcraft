@@ -13,6 +13,7 @@ mod drawing;
 mod import_cache;
 mod native_cache;
 mod provenance;
+mod text;
 mod thumbnail;
 pub use drawing::{FileKind, file_kind, read_drawing, read_drawing_file, write_drawing_container};
 pub use import_cache::ImportCache;
@@ -21,6 +22,7 @@ pub use provenance::{
     OpenPgpSignature, OpenPgpSigner, ProvenanceChain, ProvenanceRecord, ProvenanceReport, ProvenanceSave, ProvenanceSigner, ProvenanceStatus,
     ProvenanceSummary, SignatureSource, Signer,
 };
+pub use text::{design_text, large_file_text};
 pub use thumbnail::{THUMBNAIL_SIZE, read_design_thumbnail, read_design_thumbnail_file};
 
 use serde_json::{Map, Value, json};
@@ -1999,6 +2001,36 @@ mod tests {
         let bytes = write_container(&doc, DesignCompression::Fast, None, Some(&native_geometry()), None, crate::MAX_DESIGN_BYTES, None).unwrap();
         assert!(read_design_geometry(&bytes).is_some());
         assert!(DesignContainerReader::new(Cursor::new(&bytes)).unwrap().has_model_cache());
+    }
+
+    /// #20724: the cap on the cache's manifest follows the design file limit (an eighth of it, the
+    /// 32 MiB it always was at the default), saving and reading. A manifest just over 32 MiB is
+    /// left out at the default limit, kept when the limit allows it, and refused on a read under
+    /// the default limit, where it is never read unbounded.
+    #[test]
+    fn the_model_cache_manifest_cap_follows_the_design_file_limit() {
+        let mut model = native_geometry();
+        // A body with a 40 MiB name makes a manifest over 32 MiB without a model that big. The name
+        // is a field the manifest keeps as it is, also when the cache is thinned to the final state
+        // (an extra key on the records is dropped there, and left a small manifest).
+        model.records["model_bodies"][0]["name"] = json!("x".repeat(40 << 20));
+        let doc = document();
+        // At the default limit: left out, as before.
+        assert!(native_cache::encode_model(&model, b"{}", usize::MAX).is_err());
+        let bytes = write_container(&doc, DesignCompression::Fast, None, Some(&model), None, 2 << 30, None).unwrap();
+        assert!(!DesignContainerReader::new(Cursor::new(&bytes)).unwrap().has_model_cache());
+        // With a limit that allows it: kept, and read back from the cache.
+        crate::limits::test_cap::set(Some(1 << 30));
+        let (manifest, _) = native_cache::encode_model(&model, b"{}", usize::MAX).unwrap();
+        assert!(manifest.len() > 32 << 20, "{} bytes is not past the default cap", manifest.len());
+        let bytes = write_container(&doc, DesignCompression::Fast, None, Some(&model), None, 2 << 30, None).unwrap();
+        assert!(DesignContainerReader::new(Cursor::new(&bytes)).unwrap().has_model_cache());
+        // Read back under the larger cap. The 40 MiB body name is only padding for the manifest, so
+        // the check is that the cache reads, not a model built from that name.
+        assert!(DesignContainerReader::new(Cursor::new(&bytes)).unwrap().geometry().is_some());
+        // Back at the default limit the same file's oversized manifest is refused, not read.
+        crate::limits::test_cap::set(None);
+        assert!(DesignContainerReader::new(Cursor::new(&bytes)).unwrap().geometry().is_none());
     }
 
     /// Opening a design with its model validates its document once, where the document is read
