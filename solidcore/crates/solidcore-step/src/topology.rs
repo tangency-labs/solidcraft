@@ -1236,19 +1236,24 @@ fn projection_resolution(t: f64) -> f64 {
 /// above `S`, so that the curve runs no faster than one unit of length per unit of parameter
 /// (as a line's edge runs over `[0, length]`): `c` is the first knot when every `t − c` is exact
 /// (always when the first knot is 0, the usual case), else 0. Both steps are exact, so the knots
-/// keep their order and multiplicities and the curve is the file's point for point; with
-/// `c = 0` the knots are no larger than twice the domain's length (a `t − c` is inexact only where
-/// the first knot is smaller than the domain's length), so either way the parameter grows no
-/// larger than about twice the curve's control polygon.
+/// keep their order and multiplicities and the curve is the file's point for point. The new
+/// domain is shorter than `2 S (b − a)`, `[a, b]` the file's domain: twice the length the curve
+/// would have at its bound speed throughout. That is about twice the curve's length where the
+/// bound is tight (a cubic whose control points are evenly spaced along a line, as NX's are,
+/// runs at exactly `S`) and within the bound's own factor otherwise. With `c = 0` the knots also
+/// reach no further from 0 than twice that (a `t − c` is inexact only where the first knot is
+/// smaller than the domain's length).
 ///
 /// `S` is bounded from the derivative's control points (Piegl and Tiller, The NURBS Book,
 /// eqs. 3.4 and 4.8): a spline's derivative is `Σ N_{i,p-1} p (P_{i+1} − P_i) / Δ_i` with
 /// `Δ_i = t_{i+p+1} − t_{i+1}` (terms with `Δ_i = 0` vanish), so `|C'| ≤ max p |P_{i+1} − P_i| / Δ_i`;
-/// a rational one's is `Σ N_{i,p-1} p (w_{i+1} (P_{i+1} − C) − w_i (P_i − C)) / (Δ_i W)` with
-/// `W ≥ min w` and `C` in the hull of the points, so
-/// `|C'| ≤ max p (w_i + w_{i+1}) D / (Δ_i min w)`, `D` the diagonal of the points' box. The bound
-/// is raised by 16 ε, past the rounding of the at most 16 operations behind each term (γ_16 is
-/// below 8.1 ε). A curve whose bound is not finite is refused (only a file whose spans are far
+/// a rational one's is `Σ N_{i,p-1} p (w_{i+1} (P_{i+1} − C) − w_i (P_i − C)) / (Δ_i W)`. Term `i`
+/// is nonzero only on the knot spans `j = i + 1 ..= i + p`, where `C` lies in the hull of
+/// `P_{j-p} ..= P_j` and `W ≥ min w_{j-p ..= j}` (positive weights); both index ranges lie in
+/// `i + 1 − p ..= i + p`, so `|C'| ≤ max p (w_i + w_{i+1}) D_i / (Δ_i m_i)`, with `D_i` the
+/// diagonal of the box of `P_{i+1-p} ..= P_{i+p}` and `m_i` their least weight (local, so a long
+/// rational curve's bound is not its whole extent over each span). The bound is raised by 16 ε,
+/// past the rounding of the at most 16 operations behind each term (γ_16 is below 8.1 ε). A curve whose bound is not finite is refused (only a file whose spans are far
 /// below any rounding of its points gets one).
 fn resolvable(curve: BCurve) -> R<BCurve> {
     let (knots, points, weights): (&[f64], Vec<Vec3>, Option<Vec<f64>>) = match &curve {
@@ -1263,19 +1268,22 @@ fn resolvable(curve: BCurve) -> R<BCurve> {
     let n = points.len();
     let Some(degree) = knots.len().checked_sub(n + 1) else { return Ok(curve) };
     let p = degree as f64;
-    // The rational bound's factor `D / min w` (weights are positive, `check_values`).
-    let rational = weights.as_ref().map(|w| {
+    // The rational bound's factor `D_i / min w` over the points `i + 1 − p ..= i + p` (weights
+    // are positive, `check_values`).
+    let spread = |w: &[f64], i: usize| -> Option<f64> {
+        let (from, to) = ((i + 1).saturating_sub(degree), (i + degree).min(n.saturating_sub(1)));
+        let (near, weights) = (points.get(from..=to)?, w.get(from..=to)?);
         let (mut lo, mut hi) = ([f64::INFINITY; 3], [f64::NEG_INFINITY; 3]);
-        for q in &points {
+        for q in near {
             for (k, x) in [q.x, q.y, q.z].into_iter().enumerate() {
                 if let (Some(l), Some(h)) = (lo.get_mut(k), hi.get_mut(k)) {
                     (*l, *h) = (l.min(x), h.max(x));
                 }
             }
         }
-        let least = w.iter().copied().fold(f64::INFINITY, f64::min);
-        (v3(hi).dist(v3(lo)) / least, w)
-    });
+        let least = weights.iter().copied().fold(f64::INFINITY, f64::min);
+        Some(v3(hi).dist(v3(lo)) / least)
+    };
     let mut speed: f64 = 0.0;
     for (i, pair) in points.windows(2).enumerate() {
         let (Some(t0), Some(t1)) = (knots.get(i + 1), knots.get(i + degree + 1)) else { continue };
@@ -1284,11 +1292,11 @@ fn resolvable(curve: BCurve) -> R<BCurve> {
             continue;
         }
         let (Some(a), Some(b)) = (pair.first(), pair.last()) else { continue };
-        let term = match &rational {
+        let term = match &weights {
             None => p * b.dist(*a) / span,
-            Some((spread, w)) => {
-                let (Some(wa), Some(wb)) = (w.get(i), w.get(i + 1)) else { continue };
-                p * (wa + wb) * spread / span
+            Some(w) => {
+                let (Some(wa), Some(wb), Some(d)) = (w.get(i), w.get(i + 1), spread(w, i)) else { continue };
+                p * (wa + wb) * d / span
             }
         };
         speed = speed.max(term);
