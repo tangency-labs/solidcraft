@@ -4284,13 +4284,15 @@ impl Model {
                         moved.push((f.id, bodies));
                         reuse = true;
                     }
+                    // Not kept in the cached result: its notes follow the sketches as they are now.
+                    let warning = if c.error.is_none() { with_retained_notes(doc, c.warning, f, &state) } else { c.warning };
                     out.push(FeatureResult {
                         id: f.id,
                         name: f.name.clone(),
                         error: c.error,
                         error_code: c.error_code,
                         internal: false,
-                        warning: c.warning,
+                        warning,
                         import_report: c.import_report,
                         repair: c.repair,
                         lost_projections: c.lost_projections,
@@ -4323,7 +4325,8 @@ impl Model {
                         state = r.state.clone();
                     }
                     reuse &= r.error.is_none();
-                    out.push(FeatureResult { state: state.clone(), unkept: false, ..r.clone() });
+                    let warning = if r.error.is_none() { with_retained_notes(doc, r.warning.clone(), f, &state) } else { r.warning.clone() };
+                    out.push(FeatureResult { state: state.clone(), unkept: false, warning, ..r.clone() });
                     continue;
                 }
                 // Or what it changed when what it reads was as it is now, made again on the rest of the
@@ -4575,7 +4578,7 @@ impl Model {
                     checks.store(i, entry, &self.cache, &self.kept);
                 }
                 // Not in the cached result: its notes follow the sketches as they are now.
-                let warning = if error.is_none() { with_retained_notes(warning, f, &state) } else { warning };
+                let warning = if error.is_none() { with_retained_notes(doc, warning, f, &state) } else { warning };
                 reuse &= error.is_none();
                 if reusing
                     && error.is_none()
@@ -4734,7 +4737,7 @@ impl Model {
         // A note naming the sketch follows its new name.
         for (r, f) in self.results.iter_mut().zip(&doc.features).skip(at) {
             if r.error.is_none() && !r.skipped {
-                r.warning = with_retained_notes(r.warning.take(), f, &r.state);
+                r.warning = with_retained_notes(doc, r.warning.take(), f, &r.state);
             }
         }
         self.refingerprint(doc);
@@ -12202,14 +12205,15 @@ const RETAINED_NOTE_END: &str = "'s last outline: its projected geometry could n
 /// A note for each sketch the feature is built from whose linked outline could not be refreshed
 /// (a link marked lost keeps its last geometry): the feature then follows that old outline, and
 /// says so on its own row, not only on the sketch's. `st` is the state after the feature.
-fn retained_outline_notes(f: &Feature, st: &ModelState) -> Vec<String> {
+fn retained_outline_notes(doc: &Document, f: &Feature, st: &ModelState) -> Vec<String> {
     let mut ids = f.kind.input_sketches();
     ids.sort_unstable();
     ids.dedup();
     ids.into_iter()
         .filter_map(|id| st.sketch(id))
         .filter(|ss| ss.sketch.links.iter().any(|l| l.lost))
-        .map(|ss| format!("{RETAINED_NOTE_START}{}{RETAINED_NOTE_END}", ss.name))
+        // The sketch's name in the design now: a state restored from before a rename holds the old one.
+        .map(|ss| format!("{RETAINED_NOTE_START}{}{RETAINED_NOTE_END}", doc.feature(ss.feature).map_or(ss.name.as_str(), |k| k.name.as_str())))
         .collect()
 }
 
@@ -12234,9 +12238,9 @@ pub(crate) fn without_retained_notes(warning: Option<String>) -> Option<String> 
 
 /// `warning` with the retained-outline notes the feature has now (replacing any it held), read
 /// from `st`, the state after it: a saved model or a rename cannot leave an old one.
-pub(crate) fn with_retained_notes(warning: Option<String>, f: &Feature, st: &ModelState) -> Option<String> {
+pub(crate) fn with_retained_notes(doc: &Document, warning: Option<String>, f: &Feature, st: &ModelState) -> Option<String> {
     let mut warning = without_retained_notes(warning);
-    for note in retained_outline_notes(f, st) {
+    for note in retained_outline_notes(doc, f, st) {
         append_warning(&mut warning, note);
     }
     warning

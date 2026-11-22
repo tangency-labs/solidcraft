@@ -1167,7 +1167,7 @@ impl Model {
         // The retained-outline notes as the model is now, whatever the file kept (an older one
         // has none; a sketch may have been renamed since).
         for (f, r) in doc.features.iter().zip(results.iter_mut()).filter(|(_, r)| !r.skipped && !r.unkept) {
-            r.warning = crate::eval::with_retained_notes(r.warning.take(), f, &r.state);
+            r.warning = crate::eval::with_retained_notes(doc, r.warning.take(), f, &r.state);
         }
         let mut model = Model { results, param_errors, import_digests, context: ctx, frame_bodies, validation, heal_off: !heal, ..Model::default() };
         let unkept = model.results.iter().filter(|r| r.unkept).count();
