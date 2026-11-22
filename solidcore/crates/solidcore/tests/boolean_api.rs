@@ -397,12 +397,13 @@ fn a_slice_by_a_solid_fails_with_a_typed_reason() {
     let (a, b, _) = operands(&mut k, "box-box-union").unwrap();
     let error = boolean(&mut k, a, b, BooleanOperation::Slice).unwrap_err();
     assert!(matches!(error, SolidError::Failed(_)), "{error:?}");
-    assert_eq!(error.kind(), ErrorKind::Failed);
+    assert_eq!(error.kind(), ErrorKind::InvalidInput);
     assert_eq!(error.sm_status(), Some(solidcore::error::SM_ERR));
     assert_eq!(error.operation(), "boolean::merge::p4::manifold_boolean");
     assert_eq!(
         error.to_string(),
-        "boolean::merge::p4::manifold_boolean: a slice needs a sheet, and the B-rep is not one"
+        "boolean::merge::p4::manifold_boolean: a slice needs a sheet, and the other B-rep is \
+         not one"
     );
     assert!(!error.is_port_failure());
 }
