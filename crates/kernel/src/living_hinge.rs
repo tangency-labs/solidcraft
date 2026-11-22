@@ -63,9 +63,9 @@ pub fn plate_outline(body: &Body, plane: &Plane) -> Result<PlateOutline> {
     if body.is_mesh() {
         return Err(KernelError::Invalid(format!("{WHAT}: the plate is a mesh body, not a solid")));
     }
-    let (ops_body, _) = body.ops_body().ok_or_else(|| KernelError::Failed(format!("{WHAT}: the kernel could not take the plate")))?;
+    let taken = body.ops_body().ok_or_else(|| KernelError::Failed(format!("{WHAT}: the kernel could not take the plate")))?;
     guard(WHAT, || {
-        ops::plate_outline(ops_body, plane).map_err(|e| match e {
+        ops::plate_outline(&taken.0, plane).map_err(|e| match e {
             solidcore_ops::Error::Empty => KernelError::Invalid(format!("{WHAT}: the plate has no size")),
             solidcore_ops::Error::Unsupported(m) => KernelError::Invalid(format!("{WHAT}: the plate: {m}")),
             solidcore_ops::Error::Internal(m) => KernelError::Internal(format!("{WHAT}: {m}")),
