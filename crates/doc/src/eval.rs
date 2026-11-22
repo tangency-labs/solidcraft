@@ -3541,8 +3541,10 @@ fn placement_digest(doc: &Document, f: &Feature, st: Option<&ModelState>) -> u64
                 reads.placed_body(st, &b.0);
             }
         }
-        // Joins, cuts and intersects meet their targets where those are placed (#3383).
+        // Joins, cuts and intersects meet their targets where those are placed (#3383), and so
+        // do the copies of a mirror or pattern of features made in its own frame (#19451).
         kind if drawn_tools_change_bodies(kind) => reads.drawn_targets(st, f),
+        _ if copies_in_own_frame(doc, f) => reads.drawn_targets(st, f),
         // So does a hole at sketch points, in its sketch's frame (#17623).
         FeatureKind::Hole { points: Some(sp), .. } => {
             frame = doc.feature(sp.sketch.0).map(|s| doc.component_transform(s.component));
@@ -13955,14 +13957,33 @@ fn drawn_tools_change_bodies(kind: &FeatureKind) -> bool {
 
 /// The component whose frame a feature's drawn tools are made in: its own for a feature with
 /// drawn tools (see [`drawn_tools_change_bodies`]), and its sketch's for a hole at sketch points,
-/// whose points are kept in that sketch's frame (#17623), and for a rib (#17655). `None` for every other feature: a hole
-/// at a picked position is kept in the frame of the body it was picked on.
+/// whose points are kept in that sketch's frame (#17623), and for a rib (#17655), and its own for
+/// a mirror or pattern of features made in its own component ([`copies_in_own_frame`]). `None`
+/// for every other feature: a hole at a picked position is kept in the frame of the body it was
+/// picked on.
 fn tools_component(doc: &Document, f: &Feature) -> Option<u64> {
     match &f.kind {
         FeatureKind::Hole { points: Some(sp), .. } => doc.feature(sp.sketch.0).map(|s| s.component),
         FeatureKind::Rib { sketch, .. } => doc.feature(sketch.0).map(|s| s.component),
+        _ if copies_in_own_frame(doc, f) => Some(f.component),
         kind if drawn_tools_change_bodies(kind) => Some(f.component),
         _ => None,
+    }
+}
+
+/// Whether `f` is a mirror or pattern of features (no bodies) whose every copied feature is made
+/// in `f`'s own component: its copies' tools are then made in that component's frame, as a
+/// feature drawn there makes its tools, and are taken into the frame of each body they meet
+/// where it is placed differently: a root mirror of a root cut lands in a body of a part placed
+/// turned or lifted where the copy is shown (#19451). A copied feature of another component (a
+/// mirror made in a part, mirrored again from the root) is placed through that component's own
+/// frame already, and is left so.
+fn copies_in_own_frame(doc: &Document, f: &Feature) -> bool {
+    match &f.kind {
+        FeatureKind::Pattern { features, bodies, .. } | FeatureKind::Mirror { features, bodies, .. } => {
+            !features.is_empty() && bodies.is_empty() && features.iter().all(|id| doc.feature(id.0).is_some_and(|g| g.component == f.component))
+        }
+        _ => false,
     }
 }
 
