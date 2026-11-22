@@ -1,0 +1,50 @@
+{
+  "en": {
+    "ui.coil_size_by": "Size by",
+    "ui.coil_by_revolutions_pitch": "Revolutions and pitch",
+    "ui.coil_by_height_pitch": "Height and pitch",
+    "ui.coil_by_height_revolutions": "Height and revolutions"
+  },
+  "ar": {
+    "ui.coil_size_by": "الحجم حسب",
+    "ui.coil_by_revolutions_pitch": "اللفات والخطوة",
+    "ui.coil_by_height_pitch": "الارتفاع والخطوة",
+    "ui.coil_by_height_revolutions": "الارتفاع واللفات"
+  },
+  "he": {
+    "ui.coil_size_by": "קביעת גודל לפי",
+    "ui.coil_by_revolutions_pitch": "סיבובים ופסיעה",
+    "ui.coil_by_height_pitch": "גובה ופסיעה",
+    "ui.coil_by_height_revolutions": "גובה וסיבובים"
+  },
+  "ja": {
+    "ui.coil_size_by": "サイズの指定",
+    "ui.coil_by_revolutions_pitch": "回転数とピッチ",
+    "ui.coil_by_height_pitch": "高さとピッチ",
+    "ui.coil_by_height_revolutions": "高さと回転数"
+  },
+  "vi": {
+    "ui.coil_size_by": "Định cỡ theo",
+    "ui.coil_by_revolutions_pitch": "Số vòng và bước xoắn",
+    "ui.coil_by_height_pitch": "Chiều cao và bước xoắn",
+    "ui.coil_by_height_revolutions": "Chiều cao và số vòng"
+  },
+  "zh": {
+    "ui.coil_size_by": "尺寸依据",
+    "ui.coil_by_revolutions_pitch": "圈数和螺距",
+    "ui.coil_by_height_pitch": "高度和螺距",
+    "ui.coil_by_height_revolutions": "高度和圈数"
+  },
+  "de": {
+    "ui.coil_size_by": "Größe nach",
+    "ui.coil_by_revolutions_pitch": "Windungen und Steigung",
+    "ui.coil_by_height_pitch": "Höhe und Steigung",
+    "ui.coil_by_height_revolutions": "Höhe und Windungen"
+  },
+  "ko": {
+    "ui.coil_size_by": "크기 기준",
+    "ui.coil_by_revolutions_pitch": "회전 수와 피치",
+    "ui.coil_by_height_pitch": "높이와 피치",
+    "ui.coil_by_height_revolutions": "높이와 회전 수"
+  }
+}
