@@ -630,8 +630,14 @@ impl TopologySweep {
             if self.do_tagging {
                 let tag = a.tag(e(original))?;
                 for entity in result.far_edge.map(e).into_iter().chain(result.face.map(f)) {
-                    let mut tag =
-                        tag.ok_or_else(|| SolidError::sweep(OP, SweepFailure::UntaggedEdge))?;
+                    // tag_profile tagged every edge of a selected sweep; only a whole-B-rep
+                    // sweep's silhouette edges, copied from the untagged scene, have none
+                    let mut tag = tag.ok_or_else(|| {
+                        SolidError::sweep(
+                            OP,
+                            SweepFailure::UntaggedSilhouetteEdge { edge: original.1 },
+                        )
+                    })?;
                     tag.primary_ordinal =
                         tag.primary_ordinal.wrapping_add(tag_ids::SWEEP_STEP_DELTA);
                     a.add_tag(entity, tag)?;

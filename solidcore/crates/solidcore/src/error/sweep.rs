@@ -18,7 +18,7 @@
 //! | [`SweepFailure::EdgeWithoutCurve`]    | `SM_ERR_NULL_POINTER` (or the site's) |
 //! | [`SweepFailure::FaceWithoutSurface`]  | `SM_ERR_NULL_POINTER`    |
 //! | [`SweepFailure::BrepWithoutInfiniteRegion`] | `SM_ERR_NULL_POINTER` |
-//! | [`SweepFailure::UntaggedEdge`]        | `SM_ERR_NULL_POINTER`    |
+//! | [`SweepFailure::UntaggedSilhouetteEdge`] | `SM_ERR_NULL_POINTER` |
 //! | [`SweepFailure::FaceCopyByFullTurn`]  | `SM_ERR_NULL_POINTER`    |
 //! | [`SweepFailure::SweptEdgeCurveDropped`] | `SM_ERR_NULL_POINTER`  |
 //! | [`SweepFailure::Defect`]              | `SM_ERR` (or the site's, through `with_status`) |
@@ -117,9 +117,14 @@ pub enum SweepFailure {
         /// The B-rep.
         brep: EntityRef,
     },
-    /// A tagging sweep copies an edge's tag to its images, and the edge has none.
-    /// [`ErrorKind::InvalidInput`].
-    UntaggedEdge,
+    /// A tagging sweep of a whole B-rep copies each swept edge's tag to its images, and an
+    /// edge of the silhouette it sweeps has none: the silhouette's edges come from the
+    /// hidden-curve scene's faces, which carry no tags, so tagging them is not supported.
+    /// [`ErrorKind::Unsupported`].
+    UntaggedSilhouetteEdge {
+        /// The edge.
+        edge: EdgeId,
+    },
     /// A face to copy by a rotation of a full turn: its image is the face itself, so the
     /// rotation gives no surface to copy. [`ErrorKind::InvalidInput`].
     FaceCopyByFullTurn,
@@ -210,6 +215,12 @@ pub enum SweepFailure {
     /// The edge's curve is tangent to the translation somewhere, where the surface it
     /// sweeps degenerates. [`ErrorKind::Degenerate`].
     CurveTangentToSweep,
+    /// The cylinder piece a profile line parallel to the screw axis sweeps built `faces`
+    /// faces, not one: the line is too short to bound a face. [`ErrorKind::Degenerate`].
+    CylinderPieceNotOneFace {
+        /// The faces it built.
+        faces: usize,
+    },
     /// The surface an edge sweeps has no boundary curves left to trim it.
     /// [`ErrorKind::Degenerate`].
     SweptFaceWithoutBoundary,
@@ -245,7 +256,7 @@ impl SweepFailure {
             | Self::EdgeWithoutCurve { .. }
             | Self::FaceWithoutSurface { .. }
             | Self::BrepWithoutInfiniteRegion { .. }
-            | Self::UntaggedEdge
+            | Self::UntaggedSilhouetteEdge { .. }
             | Self::FaceCopyByFullTurn
             | Self::SweptEdgeCurveDropped => SM_ERR_NULL_POINTER,
             Self::RailPastStationCap { .. }
@@ -267,6 +278,7 @@ impl SweepFailure {
             | Self::SweptBodyNotManifoldSolid
             | Self::SweptSurfaceNormalsDisagree { .. }
             | Self::CurveTangentToSweep
+            | Self::CylinderPieceNotOneFace { .. }
             | Self::SweptFaceWithoutBoundary
             | Self::RevolutionSweepsNoFace
             | Self::ProfileCurveStepFailed { .. }
@@ -284,7 +296,6 @@ impl SweepFailure {
             | Self::EdgeWithoutCurve { .. }
             | Self::FaceWithoutSurface { .. }
             | Self::BrepWithoutInfiniteRegion { .. }
-            | Self::UntaggedEdge
             | Self::FaceCopyByFullTurn
             | Self::FaceAlreadySwept
             | Self::SweepTooShort { .. }
@@ -301,9 +312,11 @@ impl SweepFailure {
             | Self::CurveWithoutBSplineForm { .. }
             | Self::MergeOfTwoSweptEntities { .. }
             | Self::NearlyPerpendicularLine { .. }
+            | Self::UntaggedSilhouetteEdge { .. }
             | Self::SweptBodyNotManifoldSolid => ErrorKind::Unsupported,
             Self::SweptSurfaceNormalsDisagree { .. }
             | Self::CurveTangentToSweep
+            | Self::CylinderPieceNotOneFace { .. }
             | Self::SweptFaceWithoutBoundary
             | Self::SweptEdgeCurveDropped
             | Self::RevolutionSweepsNoFace => ErrorKind::Degenerate,
@@ -360,7 +373,11 @@ impl core::fmt::Display for SweepFailure {
             Self::BrepWithoutInfiniteRegion { brep } => {
                 write!(f, "{brep} has no infinite region")
             }
-            Self::UntaggedEdge => f.write_str("an edge the sweep copies a tag from has no tag"),
+            Self::UntaggedSilhouetteEdge { edge } => write!(
+                f,
+                "silhouette edge {} has no tag to copy: tagging a whole B-rep's silhouette is not supported",
+                edge.index()
+            ),
             Self::FaceCopyByFullTurn => f.write_str(
                 "a rotation of a full turn copies no face: the face's image is the face itself",
             ),
@@ -420,6 +437,10 @@ impl core::fmt::Display for SweepFailure {
             Self::CurveTangentToSweep => {
                 f.write_str("the edge's curve is tangent to the translation somewhere")
             }
+            Self::CylinderPieceNotOneFace { faces } => write!(
+                f,
+                "the cylinder piece a profile line sweeps built {faces} faces, not one"
+            ),
             Self::SweptFaceWithoutBoundary => {
                 f.write_str("the surface the edge sweeps has no boundary curves")
             }
@@ -545,9 +566,9 @@ mod tests {
                 ErrorKind::InvalidInput,
             ),
             (
-                SweepFailure::UntaggedEdge,
+                SweepFailure::UntaggedSilhouetteEdge { edge },
                 SM_ERR_NULL_POINTER,
-                ErrorKind::InvalidInput,
+                ErrorKind::Unsupported,
             ),
             (
                 SweepFailure::FaceCopyByFullTurn,
@@ -651,6 +672,11 @@ mod tests {
                 ErrorKind::Degenerate,
             ),
             (
+                SweepFailure::CylinderPieceNotOneFace { faces: 0 },
+                SM_ERR,
+                ErrorKind::Degenerate,
+            ),
+            (
                 SweepFailure::SweptFaceWithoutBoundary,
                 SM_ERR,
                 ErrorKind::Degenerate,
@@ -687,6 +713,12 @@ mod tests {
             assert_eq!(failure.kind(), kind, "{failure:?}");
             assert_eq!(typed.operation(), before.operation(), "{failure:?}");
             assert!(!typed.is_port_failure(), "{failure:?}");
+            assert_eq!(typed.entity(), before.entity(), "{failure:?}");
+            assert_eq!(
+                typed.is_unported_or_cancelled(),
+                before.is_unported_or_cancelled(),
+                "{failure:?}"
+            );
             assert_eq!(typed.is_status_answer(), before.is_status_answer());
             assert!(failure.replaces_upstream_status(), "{failure:?}");
             assert_eq!(typed.sweep_failure(), Some(&failure));

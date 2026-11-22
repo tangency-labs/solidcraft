@@ -519,9 +519,11 @@ fn cylinder_piece(
         )
     })?;
     if made.faces.len() != 1 {
-        return Err(SolidError::sweep_defect(
+        return Err(SolidError::sweep(
             OP,
-            "create_faces_with_curves builds one face from one loop of the four curves bounding the piece on its cylinder",
+            SweepFailure::CylinderPieceNotOneFace {
+                faces: made.faces.len(),
+            },
         ));
     }
     Ok(())
