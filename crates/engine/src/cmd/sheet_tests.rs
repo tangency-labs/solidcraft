@@ -2078,6 +2078,91 @@ fn flange_edges_are_named_and_follow_the_base_sketch() {
     assert!(h.edge_names[0].contains(&format!("F{id}:far:F{base}:side:l2")), "{:?}", h.edge_names);
 }
 
+/// A flange or hem keeps its named edge when the point picked on it ends up at an end of it, a
+/// corner of the plate: there the pick is as near the edge beside it, and read there it took
+/// whichever of the two came first in the plate's outline, whatever the name said. First as a
+/// user meets it: an edge picked where the plate's end then moves to (its width or height
+/// changed), on each side of a 200 x 60 plate. Then a saved pick at each end of each edge.
+#[test]
+fn a_named_edge_picked_at_its_corner_keeps_its_flange_and_hem() {
+    fn plate(s: &mut Session) -> (String, String) {
+        run(s, "sketch.create", json!({"plane": "XY", "name": "Base"}));
+        run(s, "sketch.rectangle.two_point", json!({"p0": [0, 0], "p1": [200, 60]}));
+        let param = |d: Value| d["param"].as_str().or_else(|| d["name"].as_str()).map(str::to_string).unwrap_or_default();
+        let width = param(run(s, "sketch.dimension", json!({"entities": ["l1"], "value": 200})));
+        let height = param(run(s, "sketch.dimension", json!({"entities": ["l2"], "value": 60})));
+        run(s, "sketch.finish", json!({}));
+        run(s, "sheet.flange", json!({"sketch": "Base"}));
+        (width, height)
+    }
+    fn edge(s: &mut Session, hem: bool, at: [f64; 2]) {
+        let at = [at[0], at[1], 2.5];
+        if hem {
+            run(s, "sheet.hem", json!({"edges": [at], "length": 9, "name": "Edge"}));
+        } else {
+            run(s, "sheet.flange", json!({"edges": [at], "height": 30, "name": "Edge"}));
+        }
+        assert!(no_errors_or_warnings(s), "{:?}", s.model.results);
+        let named = s.doc.find_feature("Edge").map(|f| f.edge_names.clone()).unwrap_or_default();
+        assert!(named.first().is_some_and(|n| !n.is_empty()), "{named:?}");
+    }
+    for hem in [false, true] {
+        // Picked on an edge where the plate's end comes to: the same part as the edge picked at
+        // its middle on the smaller plate.
+        for (pick, mid, width, height) in [
+            ([100.0, 0.0], [50.0, 0.0], "100", "60"),
+            ([100.0, 60.0], [50.0, 60.0], "100", "60"),
+            ([0.0, 30.0], [0.0, 15.0], "200", "30"),
+            ([200.0, 30.0], [200.0, 15.0], "200", "30"),
+        ] {
+            let case = format!("hem {hem}, picked at {pick:?}, plate {width} x {height}");
+            let mut want = Session::default();
+            let (w, h) = plate(&mut want);
+            run(&mut want, "parameters.change", json!({"name": w, "expression": width}));
+            run(&mut want, "parameters.change", json!({"name": h, "expression": height}));
+            edge(&mut want, hem, mid);
+            let mut s = Session::default();
+            let (w, h) = plate(&mut s);
+            edge(&mut s, hem, pick);
+            run(&mut s, "parameters.change", json!({"name": w, "expression": width}));
+            run(&mut s, "parameters.change", json!({"name": h, "expression": height}));
+            assert!(no_errors_or_warnings(&s), "{case}: {:?}", s.model.results);
+            let (got, v) = (volume(&mut s), volume(&mut want));
+            assert!(rel(got, v) < 1e-9, "{case}: {got} vs {v}");
+        }
+        // A saved pick at either end of an edge, its name kept.
+        for (mid, ends) in [
+            ([100.0, 0.0], [[0.0, 0.0], [200.0, 0.0]]),
+            ([200.0, 30.0], [[200.0, 0.0], [200.0, 60.0]]),
+            ([100.0, 60.0], [[200.0, 60.0], [0.0, 60.0]]),
+            ([0.0, 30.0], [[0.0, 60.0], [0.0, 0.0]]),
+        ] {
+            for end in ends {
+                let case = format!("hem {hem}, edge at {mid:?}, saved pick at {end:?}");
+                let mut s = Session::default();
+                plate(&mut s);
+                edge(&mut s, hem, mid);
+                let v0 = volume(&mut s);
+                let corner = solidcraft_doc::Position(solidcore_record::Vec3::new(end[0], end[1], 2.5));
+                {
+                    let doc = std::sync::Arc::make_mut(&mut s.doc);
+                    for f in doc.features.iter_mut().filter(|f| f.name == "Edge") {
+                        match &mut f.kind {
+                            solidcraft_doc::FeatureKind::SheetFlange { edges, .. } => edges.iter_mut().for_each(|e| e.point = corner),
+                            solidcraft_doc::FeatureKind::SheetHem { edges, .. } => edges.iter_mut().for_each(|e| *e = corner),
+                            _ => {}
+                        }
+                    }
+                }
+                s.refresh();
+                assert!(no_errors_or_warnings(&s), "{case}: {:?}", s.model.results);
+                let v1 = volume(&mut s);
+                assert!(rel(v1, v0) < 1e-9, "{case}: {v1} vs {v0}");
+            }
+        }
+    }
+}
+
 /// With no fixed side, the larger side stays whichever side of the line it is on (QA s22).
 #[test]
 fn fold_keeps_the_larger_side_either_way() {

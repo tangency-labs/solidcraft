@@ -728,10 +728,21 @@ fn surface_edge_pick(st: &ModelState, sk: &crate::SurfaceSheet, name: Option<&St
 
 /// The free edge of sheet `sk` along the edge of its body (as `st` has it) that the model's edge
 /// name `name` finds nearest `near`. None where the name finds no edge of the body, or none of
-/// the sheet's free edges lies there.
+/// the sheet's free edges lies there. The free edge is read at the named edge's middle, on its
+/// exact curve, then at the point the name found: a pick at an end of the edge (a corner of the
+/// panel) is as near the edge beside it, and read there it could take that one, whatever the name
+/// said. The middle is read only where the body's edge of that index passes through the point the
+/// name found (the mesh's edges are the B-rep's, in its order).
 fn named_free_edge(st: &ModelState, sk: &crate::SurfaceSheet, name: &str, near: Vec3) -> Option<crate::sheet_surface_features::FreeEdge> {
-    let hit = crate::naming::locate_edge(st.body(&sk.body)?, name, near).ok()?;
-    sk.free_edge_at(hit.point).ok().flatten()
+    let body = st.body(&sk.body)?;
+    let hit = crate::naming::locate_edge(body, name, near).ok()?;
+    let reach = crate::name_lookup::pick_reach(body);
+    let on_it = solidcraft_kernel::edge_distance(&body.body, hit.edge, hit.point).ok().flatten().is_some_and(|d| d <= reach);
+    on_it
+        .then(|| solidcraft_kernel::edge_middle(&body.body, hit.edge).ok().flatten())
+        .flatten()
+        .and_then(|mid| sk.free_edge_at(mid).ok().flatten())
+        .or_else(|| sk.free_edge_at(hit.point).ok().flatten())
 }
 
 /// Rebuild a sheet body's solid from its model.
