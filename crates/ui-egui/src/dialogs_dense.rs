@@ -919,7 +919,8 @@ fn coil_size_row(ui: &mut egui::Ui, extra: &mut serde_json::Map<String, Value>, 
 fn coil_height_row(ui: &mut egui::Ui, extra: &mut serde_json::Map<String, Value>) -> bool {
     let mut height = extra.get("coil_height").and_then(Value::as_str).unwrap_or_default().to_string();
     let before = height.clone();
-    let enter = expr_row(ui, "ui.height", &mut height);
+    // The helix's own height, centre line to centre line; the coil's section reaches past it.
+    let enter = expr_row(ui, "ui.coil_path_height", &mut height);
     if height != before {
         extra.insert("coil_height".into(), json!(height));
     }

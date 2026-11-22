@@ -1151,12 +1151,12 @@ fn coil_dialog_sizes_by_any_two_of_height_pitch_and_revolutions() {
         keys
     };
     assert_eq!(keys(&sent(&h)), ["pitch", "revolutions"]);
-    assert!(shows(&h, "ui.revolutions") && shows(&h, "ui.pitch") && !shows(&h, "ui.height"));
+    assert!(shows(&h, "ui.revolutions") && shows(&h, "ui.pitch") && !shows(&h, "ui.coil_path_height"));
     // Height and pitch, picked in the Size by dropdown: the Height field starts at 20.
     choose(&mut h, "ui.coil_size_by", "ui.coil_by_height_pitch");
     let p = sent(&h);
     assert_eq!(keys(&p), ["height", "pitch"]);
-    assert!(shows(&h, "ui.height") && shows(&h, "ui.pitch") && !shows(&h, "ui.revolutions"));
+    assert!(shows(&h, "ui.coil_path_height") && shows(&h, "ui.pitch") && !shows(&h, "ui.revolutions"));
     assert!(p.get("size_by").is_none() && p.get("coil_height").is_none());
     // Back to the default pair: no height is sent.
     choose(&mut h, "ui.coil_size_by", "ui.coil_by_revolutions_pitch");
@@ -1176,7 +1176,7 @@ fn coil_dialog_sizes_by_any_two_of_height_pitch_and_revolutions() {
     choose(&mut h, "ui.coil_size_by", "ui.coil_by_height_revolutions");
     let p = sent(&h);
     assert_eq!(keys(&p), ["height", "revolutions"]);
-    assert!(shows(&h, "ui.height") && shows(&h, "ui.revolutions") && !shows(&h, "ui.pitch"));
+    assert!(shows(&h, "ui.coil_path_height") && shows(&h, "ui.revolutions") && !shows(&h, "ui.pitch"));
     ok(&mut h);
     // 20 high in 4 turns is a pitch of 5.
     let mut reference = design("mm");
