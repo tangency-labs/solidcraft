@@ -2230,8 +2230,9 @@ mod tests {
     /// itself, with no hand-kept count or index.
     ///
     /// Adding a variant: put its line here, its arms in the enum's other `match`es and its
-    /// `causes` entry next to the related variant, or in alphabetical position. Never append at
-    /// the end of a list: parallel PRs that all append there conflict with each other.
+    /// `causes` entry next to the related variant; with none related, anywhere but the end
+    /// (the lists are not sorted, so a spot alphabetical among its neighbours will do). Never
+    /// append at the end of a list: parallel PRs that all append there conflict with each other.
     macro_rules! blend_failure_inventory {
         ($($variant:ident),* $(,)?) => {
             /// Every variant's name, in the order of the list.
