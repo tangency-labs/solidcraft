@@ -61,6 +61,11 @@ impl Protocol for SolidCraft {
         method == "control.joint_drive"
     }
 
+    /// A plugin package job holds `plugin.install` and `plugin.remove` for every connection.
+    fn background(&self) -> Vec<Value> {
+        solidcraft_ui_egui::plugin_install::running_jobs()
+    }
+
     /// Advertise parameter checks, installed plugin tools and interactive desktop joint drive.
     fn capabilities(&self) -> Value {
         json!({

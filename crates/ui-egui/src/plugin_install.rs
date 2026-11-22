@@ -7,6 +7,11 @@ use solidcraft_ui_text::{format, tr};
 
 use crate::{SolveApp, ui_kit};
 
+/// The plugin package jobs running now, for `control.pending` and `control.running` (#20814).
+pub fn running_jobs() -> Vec<Value> {
+    crate::plugins::running_jobs()
+}
+
 /// The plugin waiting for the user's answer.
 #[derive(Default)]
 pub(crate) struct State {
