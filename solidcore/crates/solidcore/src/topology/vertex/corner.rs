@@ -46,6 +46,7 @@
 //!   `SM_DEBUG_CODE` blocks are compiled out of the reference build.
 //! - No input-driven recursion.
 
+use crate::error::topology::TopologyFailure;
 use crate::error::{ignored, Result, SolidError};
 use crate::geom::tol;
 use crate::intersect::surface_intersector::p1::{IntersectionPointType, SurfaceIntersector};
@@ -516,9 +517,9 @@ pub fn calc_corner_from_faces(k: &Kernel, b: &mut Brep, v: VertexId) -> Result<F
 
         _ => {
             // SM_DBG_WARN: unexpected number of TgtFaces
-            return Err(SolidError::topology_failed(
+            return Err(SolidError::topology(
                 OP,
-                "the vertex has more than three faces",
+                TopologyFailure::TooManyTangentFaces,
             ));
         }
     }
