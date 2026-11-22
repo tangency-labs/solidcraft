@@ -2842,6 +2842,10 @@ fn extend_as_itself(
     close_turn: bool,
 ) -> Result<Surface> {
     let fail = |cause: SurfaceFailure| SolidError::surface(OP_EXTEND, cause);
+    // a named cause that keeps the refusing routine's error as its cause
+    let fail_from = |cause: SurfaceFailure, e: SolidError| {
+        Failure::new(OP_EXTEND, cause).caused_by(e).into_error()
+    };
     let shape = || fail(SurfaceFailure::AsItselfNetUnexpected);
     let defect = |why: &'static str| fail(SurfaceFailure::Defect { why });
     let (rev, generator) = revolution_of(k, surface)?;
@@ -2923,7 +2927,7 @@ fn extend_as_itself(
         .position()
         .z_axis()
         .unitize()
-        .map_err(|_| fail(SurfaceFailure::RevolutionAxisDegenerate))?;
+        .map_err(|e| fail_from(SurfaceFailure::RevolutionAxisDegenerate, e))?;
     let deg_to_rad = PI / 180.0;
     // the fork's tangency-labs/smlib@43fd6b6: a revolved circle's arc is its generator's
     let gen_angle = match generator {
@@ -2974,7 +2978,7 @@ fn extend_as_itself(
                 Generator::Torus { major } => {
                     let out = out
                         .unitize()
-                        .map_err(|_| fail(SurfaceFailure::PointOnAxis))?;
+                        .map_err(|e| fail_from(SurfaceFailure::PointOnAxis, e))?;
                     centre = o + out * major;
                 }
                 // the fork's tangency-labs/smlib@43fd6b6: about the revolved circle's centre
@@ -2986,7 +2990,7 @@ fn extend_as_itself(
             let axis = (end.p - centre)
                 .cross(end.p - inner.p)
                 .unitize()
-                .map_err(|_| fail(SurfaceFailure::GeneratorCircleUndefined))?;
+                .map_err(|e| fail_from(SurfaceFailure::GeneratorCircleUndefined, e))?;
             let first = arc_spans(end, centre, axis, new_knots.len(), 0.5 * PI);
             // Every other column is the first turned about the axis and scaled from it:
             // read off the generator point farthest from the axis.

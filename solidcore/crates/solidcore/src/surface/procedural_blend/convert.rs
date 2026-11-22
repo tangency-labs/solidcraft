@@ -1497,7 +1497,8 @@ mod tests {
 
     /// The record conversion's named causes keep the status of the phrase causes they replaced
     /// (a site whose status differs from the cause's own keeps it through `with_status`), with
-    /// the kind their condition is: the caller's blend, curve or surface.
+    /// the kind their condition is: the caller's blend, curve or surface, or a surface kind the
+    /// conversion has no code for.
     #[test]
     fn the_record_conversion_causes_keep_the_status_they_replaced() {
         use crate::error::surface::SurfaceFailure;
@@ -1506,27 +1507,35 @@ mod tests {
             .with_status(SM_ERR)
             .into_error();
         let samples = [
-            (no_nurb, SurfaceFailure::NoNurb, SM_ERR),
+            (
+                no_nurb,
+                SurfaceFailure::NoNurb,
+                SM_ERR,
+                ErrorKind::InvalidInput,
+            ),
             (
                 SolidError::surface(OP_TO, SurfaceFailure::CurveWithoutNurb),
                 SurfaceFailure::CurveWithoutNurb,
                 SM_ERR,
+                ErrorKind::InvalidInput,
             ),
             (
                 SolidError::surface(OP_TO, SurfaceFailure::CurveDimensionTooLarge),
                 SurfaceFailure::CurveDimensionTooLarge,
                 SM_ERR,
+                ErrorKind::InvalidInput,
             ),
             (
                 SolidError::surface(OP_CORNER_TO, SurfaceFailure::NoBSplineForm),
                 SurfaceFailure::NoBSplineForm,
                 SM_ERR,
+                ErrorKind::Unsupported,
             ),
         ];
-        for (typed, failure, code) in samples {
+        for (typed, failure, code, kind) in samples {
             assert_eq!(typed.sm_status(), Some(code), "{typed:?}");
             assert_eq!(typed.upstream_status(), Some(code), "{typed:?}");
-            assert_eq!(typed.kind(), ErrorKind::InvalidInput, "{typed:?}");
+            assert_eq!(typed.kind(), kind, "{typed:?}");
             assert_eq!(typed.entity(), None, "{typed:?}");
             assert!(!typed.is_defect(), "{typed:?}");
             assert_eq!(typed.surface_failure(), Some(&failure));

@@ -291,7 +291,8 @@ pub enum SurfaceFailure {
     /// cause). [`ErrorKind::InvalidInput`].
     RecordDoesNotRebuild,
     /// The surface given is of a kind with no B-spline form (an offset, a curve-bounded, a
-    /// STEP or an in-volume surface), which a record stores. [`ErrorKind::InvalidInput`].
+    /// STEP or an in-volume surface), which a record stores: a kind the conversion has no
+    /// code for. [`ErrorKind::Unsupported`].
     NoBSplineForm,
     /// The surface given is not one whose offset continues as itself (a cone, cylinder,
     /// sphere or torus). [`ErrorKind::InvalidInput`].
@@ -413,7 +414,6 @@ impl SurfaceFailure {
             | Self::BlendDefinitionUnreadable
             | Self::CurveDimensionTooLarge
             | Self::RecordDoesNotRebuild
-            | Self::NoBSplineForm
             | Self::DoesNotContinueAsItself
             | Self::OffsetNestedTooDeep => ErrorKind::InvalidInput,
             Self::BoxOutsideBendHalfSpace { .. }
@@ -426,7 +426,8 @@ impl SurfaceFailure {
             | Self::DerivativeCombinationUnsupported { .. }
             | Self::PlainVolume
             | Self::BSplineVolumeUnsupported
-            | Self::SurfaceNotBSplineKind => ErrorKind::Unsupported,
+            | Self::SurfaceNotBSplineKind
+            | Self::NoBSplineForm => ErrorKind::Unsupported,
             Self::PointInBendSingularity | Self::ZeroVolumeTangent { .. } | Self::NoNormal => {
                 ErrorKind::Degenerate
             }
@@ -984,7 +985,7 @@ mod tests {
                 SM_ERR,
                 K::InvalidInput,
             ),
-            (SurfaceFailure::NoBSplineForm, SM_ERR, K::InvalidInput),
+            (SurfaceFailure::NoBSplineForm, SM_ERR, K::Unsupported),
             (
                 SurfaceFailure::DoesNotContinueAsItself,
                 SM_ERR,
