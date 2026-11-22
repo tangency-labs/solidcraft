@@ -79,6 +79,8 @@ struct DocWork {
     bom: Option<crate::bom_panel::BomPanel>,
     params: Option<crate::params_dialog::ParamsDialog>,
     design_properties: Option<crate::design_properties::DesignProperties>,
+    cutlist: Option<crate::cutlist_panel::CutListPanel>,
+    cutting_plan: Option<crate::cutting_plan_panel::CuttingPlanPanel>,
     dialog: Option<crate::dialogs::Dialog>,
     editing_state: Option<crate::dialogs::EditingState>,
     tool: Option<crate::tools::Tool>,
@@ -93,17 +95,21 @@ struct DocWork {
 /// (`remember_toolbar_tab`), once the dialog and tool are gone, so it is a tab they leave behind.
 fn take_work(app: &mut SolveApp, presenting: bool) -> DocWork {
     let bom = app.bom.take();
+    let cutlist = app.cutlist.take();
+    let cutting_plan = app.cutting_plan.take();
     if !presenting && (!app.preferences.keep_work_on_tab_switch || app.applying.is_some()) {
         crate::dialogs::cancel(app);
         app.tool = None;
         crate::drawing_workspace::close_panel(app);
         let tab = app.preferences.remember_toolbar_tab.then(|| (app.ui.tab.clone(), app.ui.ribbon_context.clone(), app.ui.sketch_return_tab.clone()));
-        return DocWork { bom, tab, ..DocWork::default() };
+        return DocWork { bom, cutlist, cutting_plan, tab, ..DocWork::default() };
     }
     DocWork {
         bom,
         params: presenting.then(|| app.params.take()).flatten(),
         design_properties: presenting.then(|| app.design_properties.take()).flatten(),
+        cutlist,
+        cutting_plan,
         dialog: app.dialog.take(),
         editing_state: app.editing_state.take(),
         tool: app.tool.take(),
@@ -119,6 +125,10 @@ fn put_work(app: &mut SolveApp, mut work: DocWork, before: u64) {
     app.bom = work.bom;
     app.params = work.params;
     app.design_properties = work.design_properties;
+    app.cutlist = work.cutlist;
+    app.cutting_plan = work.cutting_plan;
+    crate::cutlist_panel::set_focus_pending(app, true);
+    crate::cutting_plan_panel::set_focus_pending(app, true);
     crate::bom_panel::set_focus_pending(app, true);
     // That refresh is not a change to the design: the edit's Cancel must still see the design
     // it left (`Session::restore_editor` compares revisions), as `PendingFeatureEdit` does.
@@ -1914,6 +1924,8 @@ pub fn adopt(app: &mut SolveApp, session: Session) -> bool {
         crate::dialogs::cancel(app);
         app.tool = None;
         app.bom = None;
+        app.cutlist = None;
+        app.cutting_plan = None;
         crate::design_properties::close_object(app);
         crate::sketch_attachment_ui::clear(app);
         app.session.replace_design(session);
@@ -2125,6 +2137,8 @@ pub fn close(app: &mut SolveApp, i: usize, force: bool) {
         crate::dialogs::cancel(app);
         app.tool = None;
         app.bom = None;
+        app.cutlist = None;
+        app.cutting_plan = None;
         app.session.replace_design(Session::default());
         give_up_renames_of_other_designs(app);
         app.session.revision = rev + 1;

@@ -445,10 +445,12 @@ crate::dialog_descriptor::dialog_descriptors! {
             Plastic(crate::dialogs_plastic::Pl),
             /// Frame members (`dialogs_frame`).
             Frame(crate::dialogs_frame::Member),
+            WoodGrain(crate::dialogs_wood_grain::Grain),
             /// End caps on frame members (`dialogs_end_cap`).
             EndCap(crate::dialogs_end_cap::EndCap),
             /// Rotate Member (`dialogs_rotate_member`).
             RotateMember(crate::dialogs_rotate_member::RotateMember),
+            WoodEdgeProfile(crate::dialogs_wood_edge_profile::Router),
             /// Appearance (`dialogs_appearance`).
             Appearance(crate::dialogs_appearance::Ap),
             /// Contact sets, motion studies, exploded views, configurations (`dialogs_motion`).
@@ -1227,6 +1229,8 @@ impl Dialog {
                     .or_else(|| crate::view_gizmo::start(app, id))
                     .or_else(|| crate::dialogs_plastic::start(app, id))
                     .or_else(|| crate::dialogs_frame::start(app, id))
+                    .or_else(|| crate::dialogs_wood_edge_profile::start(app, id))
+                    .or_else(|| crate::dialogs_wood_grain::start(app, id))
                     .or_else(|| crate::dialogs_end_cap::start(app, id))
                     .or_else(|| crate::dialogs_rotate_member::start(app, id))
                     .or_else(|| crate::dialogs_appearance::start(app, id))
@@ -1514,7 +1518,7 @@ impl Dialog {
             Kind::Surface(_) => return true,
             Kind::SketchModify(k) => return k.previews(),
             Kind::Plastic(k) => return k.previews(),
-            Kind::Frame(_) | Kind::EndCap(_) | Kind::RotateMember(_) => return true,
+            Kind::Frame(_) | Kind::EndCap(_) | Kind::RotateMember(_) | Kind::WoodEdgeProfile(_) => return true,
             Kind::Part(_) | Kind::PartSize(_) | Kind::InsertDrawing(_) | Kind::InsertAirfoil(_) => return true,
             // Web previews run synchronously; a modelled thread can take seconds.
             Kind::Thread { .. } => return !cfg!(target_arch = "wasm32") && self.extra.get("modeled").and_then(Value::as_bool).unwrap_or(false),
@@ -3054,8 +3058,10 @@ fn title(k: &Kind) -> &'static str {
         Kind::InsertAirfoil(_) => crate::dialogs_insert_airfoil::title(),
         Kind::Plastic(k) => k.title(),
         Kind::Frame(_) => "FRAME MEMBER",
+        Kind::WoodGrain(_) => "cmd.wood.grain",
         Kind::EndCap(_) => "ui.end_cap_title",
         Kind::RotateMember(_) => "ui.rotate_member_title",
+        Kind::WoodEdgeProfile(_) => "ui.wood.edge_profile.title",
         Kind::Appearance(_) => "APPEARANCE",
         Kind::Motion(k) => k.title(),
         Kind::Part(_) => "INSERT PART",
@@ -4511,6 +4517,7 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
         Kind::ChatContext => true,
         Kind::Material { editor, .. } => !editor.editing() && apply_commands(app, &d).is_ok(),
         Kind::SaveMesh(_) => crate::dialogs_save_mesh::ready(&d.inputs),
+        Kind::WoodGrain(_) => apply_commands(app, &d).is_ok(),
         Kind::SketchModify(crate::sketch_modify_ui::Mod::Corner { .. }) => {
             // Corner dialogs: preview errors are visual only; validation errors from
             // `apply_commands` go to `d.error`. OK stays enabled when the preview fails.
@@ -4974,6 +4981,7 @@ fn rememberable(kind: &Kind) -> bool {
             )
             | Kind::Frame(_)
             | Kind::EndCap(_)
+            | Kind::WoodEdgeProfile(_)
     )
 }
 
@@ -7211,8 +7219,10 @@ fn dialog_commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value)>, S
         Kind::InsertAirfoil(a) => return crate::dialogs_insert_airfoil::commands(a),
         Kind::Plastic(k) => return crate::dialogs_plastic::commands(app, k, &d.inputs, &d.extra),
         Kind::Frame(k) => return crate::dialogs_frame::commands(app, k, &d.inputs, &d.extra),
+        Kind::WoodGrain(k) => return crate::dialogs_wood_grain::commands(k, &d.inputs),
         Kind::EndCap(k) => return crate::dialogs_end_cap::commands(app, k, &d.inputs, &d.extra),
         Kind::RotateMember(k) => return crate::dialogs_rotate_member::commands(app, k, &d.inputs, &d.extra, d.editing.is_some()),
+        Kind::WoodEdgeProfile(k) => return crate::dialogs_wood_edge_profile::commands(app, k, &d.inputs, &d.extra),
         Kind::Appearance(k) => return Ok(crate::dialogs_appearance::commands(k, &d.inputs)),
         Kind::Motion(k) => return crate::dialogs_motion::commands(app, k, &d.inputs),
         Kind::Part(k) => return crate::dialogs_parts::commands(app, k, &d.inputs),
@@ -9195,6 +9205,7 @@ pub fn for_feature(app: &SolveApp, id: u64, marker: Option<usize>) -> Option<Dia
                 .or_else(|| crate::dialogs_frame::for_feature(app, &f))
                 .or_else(|| crate::dialogs_end_cap::for_feature(app, other))
                 .or_else(|| crate::dialogs_rotate_member::for_feature(app, id, other))
+                .or_else(|| crate::dialogs_wood_edge_profile::for_feature(app, &f))
                 .or_else(|| crate::dialogs_surface::for_feature(app, other, &feature_frame(s, f.component)))?;
             let mut d = Dialog::new(kind, inputs);
             d.extra = extra;

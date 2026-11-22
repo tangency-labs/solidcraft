@@ -2331,3 +2331,30 @@ fn a_pattern_of_whole_components_bodies_offers_and_places_the_components() {
     assert_eq!(h.app.session.doc.occurrences.len(), occurrences + 4);
     assert_eq!(h.app.session.model.state().bodies.len(), 2);
 }
+
+#[test]
+fn router_dialog_builds_the_preview_command_and_restores_sizes() {
+    let mut h = Harness::new();
+    h.app.session.execute("solid.box", &json!({"length":100,"width":50,"height":20,"body_name":"Board"})).unwrap();
+    h.app.session.selection = vec![Sel::Edge { body: "Board".into(), index: 0, point: Vec3::new(50.0, 0.0, 20.0) }];
+    let mut dialog = Dialog::for_command(&h.app, "wood.edge_profile").unwrap();
+    assert!(dialog.previews());
+    let Kind::WoodEdgeProfile(r) = &mut dialog.kind else { panic!("router dialog missing") };
+    r.radius = "4 mm".into();
+    r.fillet = "1 mm".into();
+    let commands = apply_commands(&h.app, &dialog).unwrap();
+    assert_eq!(commands[0].0, "wood.edge_profile");
+    assert_eq!(commands[0].1["radius"], "4 mm");
+    assert_eq!(commands[0].1["fillet"], "1 mm");
+    let reply = h.app.session.execute(&commands[0].0, &commands[0].1).unwrap();
+    let id = reply["feature"].as_u64().unwrap();
+    let kind = h.app.session.doc.feature(id).unwrap().clone();
+    let marker = h.app.session.doc.feature_index(id).unwrap();
+    roll_marker(&mut h.app, Some(marker)).unwrap();
+    let (Kind::WoodEdgeProfile(reopened), inputs, _) = crate::dialogs_wood_edge_profile::for_feature(&h.app, &kind).unwrap() else {
+        panic!("router edit missing")
+    };
+    assert_eq!(reopened.radius, "4 mm");
+    assert_eq!(reopened.fillet, "1 mm");
+    assert_eq!(inputs[0].items.len(), 1);
+}

@@ -1,0 +1,6 @@
+[
+  { "call": "engine.execute", "params": { "command": "solid.box", "params": { "length": 500, "width": 200, "height": 18, "body_name": "Shelf" } } },
+  { "start": "wood.estimate" },
+  { "widget": "Calculate estimate" },
+  { "expect": { "errors": 0 } }
+]

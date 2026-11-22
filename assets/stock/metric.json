@@ -1,0 +1,114 @@
+{
+  "stock": [
+    {
+      "id": "timber-6x6-2400",
+      "name": "6x6 timber, 2400 mm",
+      "kind": "board",
+      "material": "",
+      "length": 2400,
+      "width": 152.4,
+      "thickness": 152.4,
+      "nominal": "6x6 in",
+      "price": null
+    },
+    {
+      "id": "timber-6x10-2400",
+      "name": "6x10 timber, 2400 mm",
+      "kind": "board",
+      "material": "",
+      "length": 2400,
+      "width": 254.0,
+      "thickness": 152.4,
+      "nominal": "6x10 in",
+      "price": null
+    },
+    {
+      "id": "timber-4x4-2400",
+      "name": "4x4 timber, 2400 mm",
+      "kind": "board",
+      "material": "",
+      "length": 2400,
+      "width": 101.6,
+      "thickness": 101.6,
+      "nominal": "4x4 in",
+      "price": null
+    },
+    {
+      "id": "timber-3x4-2400",
+      "name": "3x4 timber, 2400 mm",
+      "kind": "board",
+      "material": "",
+      "length": 2400,
+      "width": 101.6,
+      "thickness": 76.2,
+      "nominal": "3x4 in",
+      "price": null
+    },
+    {
+      "id": "timber-3x3-2400",
+      "name": "3x3 timber, 2400 mm",
+      "kind": "board",
+      "material": "",
+      "length": 2400,
+      "width": 76.2,
+      "thickness": 76.2,
+      "nominal": "3x3 in",
+      "price": null
+    },
+    {
+      "id": "timber-2x4-2400",
+      "name": "2x4 timber, 2400 mm",
+      "kind": "board",
+      "material": "",
+      "length": 2400,
+      "width": 101.6,
+      "thickness": 50.8,
+      "nominal": "2x4 in",
+      "price": null
+    },
+    {
+      "id": "timber-2x3-2400",
+      "name": "2x3 timber, 2400 mm",
+      "kind": "board",
+      "material": "",
+      "length": 2400,
+      "width": 76.2,
+      "thickness": 50.8,
+      "nominal": "2x3 in",
+      "price": null
+    },
+    {
+      "id": "timber-1x4-2400",
+      "name": "1x4 timber, 2400 mm",
+      "kind": "board",
+      "material": "",
+      "length": 2400,
+      "width": 101.6,
+      "thickness": 25.4,
+      "nominal": "1x4 in",
+      "price": null
+    },
+    {
+      "id": "plywood-18-2440x1220",
+      "name": "Board 18 mm, 2440 x 1220",
+      "kind": "panel",
+      "material": "",
+      "length": 2440,
+      "width": 1220,
+      "thickness": 18,
+      "nominal": null,
+      "price": null
+    },
+    {
+      "id": "plywood-12-2440x1220",
+      "name": "Board 12 mm, 2440 x 1220",
+      "kind": "panel",
+      "material": "",
+      "length": 2440,
+      "width": 1220,
+      "thickness": 12,
+      "nominal": null,
+      "price": null
+    }
+  ]
+}
