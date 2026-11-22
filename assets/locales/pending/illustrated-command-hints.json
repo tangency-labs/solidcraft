@@ -1,0 +1,50 @@
+{
+  "ar": {
+    "prefs.animate_command_hints": "تحريك تلميحات الأوامر",
+    "prefs.animate_command_hints_note": "تشغيل الرسوم المتحركة في تلميحات الأوامر المصوّرة. عند الإيقاف، تبقى الرسوم التوضيحية ثابتة.",
+    "prefs.illustrated_command_hints": "تلميحات أوامر مصوّرة",
+    "prefs.illustrated_command_hints_note": "عرض رسم توضيحي عند تمرير المؤشر فوق أمر مدعوم. عند الإيقاف، تحتوي التلميحات على نص فقط."
+  },
+  "de": {
+    "prefs.animate_command_hints": "Befehlshinweise animieren",
+    "prefs.animate_command_hints_note": "Spielt Animationen in illustrierten Befehlshinweisen ab. Ausgeschaltet bleiben die Illustrationen unbewegt.",
+    "prefs.illustrated_command_hints": "Illustrierte Befehlshinweise",
+    "prefs.illustrated_command_hints_note": "Zeigt beim Bewegen des Mauszeigers über unterstützte Befehle eine Illustration. Ausgeschaltet enthalten die Hinweise nur Text."
+  },
+  "en": {
+    "prefs.animate_command_hints": "Animate command hints",
+    "prefs.animate_command_hints_note": "Play animations in illustrated command hints. When off, illustrations remain still.",
+    "prefs.illustrated_command_hints": "Illustrated command hints",
+    "prefs.illustrated_command_hints_note": "Show an illustration when hovering over supported commands. When off, hints contain text only."
+  },
+  "he": {
+    "prefs.animate_command_hints": "הנפשת רמזי פקודות",
+    "prefs.animate_command_hints_note": "הפעלת הנפשות ברמזי פקודות מאוירים. כשהאפשרות כבויה, האיורים נשארים ללא תנועה.",
+    "prefs.illustrated_command_hints": "רמזי פקודות מאוירים",
+    "prefs.illustrated_command_hints_note": "הצגת איור בעת ריחוף מעל פקודות נתמכות. כשהאפשרות כבויה, הרמזים מכילים טקסט בלבד."
+  },
+  "ja": {
+    "prefs.animate_command_hints": "コマンドヒントをアニメーション表示",
+    "prefs.animate_command_hints_note": "図解付きコマンドヒントでアニメーションを再生します。オフの場合、図解は静止したままです。",
+    "prefs.illustrated_command_hints": "図解付きコマンドヒント",
+    "prefs.illustrated_command_hints_note": "対応するコマンドにポインターを合わせると図解を表示します。オフの場合、ヒントにはテキストのみを表示します。"
+  },
+  "ko": {
+    "prefs.animate_command_hints": "명령 힌트 애니메이션",
+    "prefs.animate_command_hints_note": "그림이 포함된 명령 힌트에서 애니메이션을 재생합니다. 끄면 그림이 정지된 상태로 표시됩니다.",
+    "prefs.illustrated_command_hints": "그림이 포함된 명령 힌트",
+    "prefs.illustrated_command_hints_note": "지원되는 명령에 마우스 포인터를 올리면 그림을 표시합니다. 끄면 힌트에 텍스트만 표시합니다."
+  },
+  "vi": {
+    "prefs.animate_command_hints": "Phát hoạt cảnh trong gợi ý lệnh",
+    "prefs.animate_command_hints_note": "Phát hoạt cảnh trong gợi ý lệnh có hình minh họa. Khi tắt, hình minh họa giữ nguyên ở dạng tĩnh.",
+    "prefs.illustrated_command_hints": "Gợi ý lệnh có hình minh họa",
+    "prefs.illustrated_command_hints_note": "Hiển thị hình minh họa khi di chuột trên các lệnh được hỗ trợ. Khi tắt, gợi ý chỉ chứa văn bản."
+  },
+  "zh": {
+    "prefs.animate_command_hints": "播放命令提示动画",
+    "prefs.animate_command_hints_note": "在图解命令提示中播放动画。关闭时，图解保持静止。",
+    "prefs.illustrated_command_hints": "图解命令提示",
+    "prefs.illustrated_command_hints_note": "将指针悬停在支持的命令上时显示图解。关闭时，提示仅包含文字。"
+  }
+}

@@ -2374,9 +2374,13 @@ fn the_pointer_ring_stays_off_the_value_being_placed() {
     let pointer = h.ctx.input(|i| i.pointer.hover_pos()).expect("the pointer is over the view");
     assert!(value.contains(pointer), "the value follows the pointer: {value:?} {pointer:?}");
     let tool = h.app.tool.as_ref().expect("the Dimension tool");
-    assert!(!crate::tools::pointer_ring_shown(tool, pointer), "no ring on the value");
-    assert!(!crate::tools::pointer_ring_shown(tool, value.right_center() + egui::vec2(4.0, 0.0)), "nor one that would touch it");
-    assert!(crate::tools::pointer_ring_shown(tool, value.right_center() + egui::vec2(20.0, 0.0)), "the ring elsewhere");
+    let show_ring = |at, width| crate::tools::pointer_ring_shown(tool, at, width);
+    assert!(!show_ring(pointer, 1.5), "no ring on the value");
+    assert!(!show_ring(value.right_center() + egui::vec2(4.0, 0.0), 1.5), "nor one that would touch it");
+    let near_value = value.right_center() + egui::vec2(8.0, 0.0);
+    assert!(show_ring(near_value, 1.5), "the ordinary snapped ring has room");
+    assert!(!show_ring(near_value, 5.5), "the wider capture stroke would touch the value");
+    assert!(show_ring(value.right_center() + egui::vec2(20.0, 0.0), 5.5), "the capture ring still appears elsewhere");
 }
 
 /// #14121: a shown dimension whose constraint fails takes the established conflict colour; a
