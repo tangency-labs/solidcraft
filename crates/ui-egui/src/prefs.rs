@@ -1988,9 +1988,10 @@ preference_settings! {
     /// constraint (#18114). Off (the default): Shift prefers a line midpoint there, as it always has.
     sketch_square_rectangles: bool = false, PAGE_SKETCH => check_tr("prefs.sketch_square_rectangles");
     /// The 3-Point Arc's third point snaps to the arc tangent to the line or arc it starts or ends
-    /// on, and the click adds the Tangent constraints (#20719). Off (the default): that point snaps
-    /// on the curve as it always has.
-    sketch_arc_tangent_snap: bool = false, PAGE_SKETCH => check_tr("prefs.sketch_arc_tangent_snap");
+    /// on, and the click adds the Tangent constraints (#20719). A mode of the 3-Point Arc tool, set
+    /// in the Sketch Palette while it runs and kept for the next time; no Preferences page shows or
+    /// resets it. Off (the default): that point snaps on the curve as it always has.
+    sketch_arc_tangent_snap: bool = false;
     /// Drawing lines a point up with the sketch's points on both axes at once, keeping the
     /// horizontal or vertical snap to the previous point, and the click adds the alignments
     /// (#7828). Off by default: only with the previous point, one axis at a time, as before.

@@ -502,7 +502,7 @@ fn three_point_arc_centre_is_the_circle_through_its_points_and_centre_point_arc_
     assert_eq!(labels("sketch.arc.three_point", 2), ["Radius", "Sweep"]);
 }
 
-/// The tangent snap is opt-in: with the preference off the same hover and click take the snap the
+/// The tangent snap is opt-in: with the tool option off the same hover and click take the snap the
 /// arc had before, on no tangent circle, and add no Tangent constraint (#20719).
 #[test]
 fn three_point_arc_tangent_snap_is_off_unless_turned_on() {

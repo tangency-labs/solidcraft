@@ -1,26 +1,26 @@
 {
   "ar": {
-    "prefs.sketch_arc_tangent_snap": "القوس بثلاث نقاط: تثبيت النقطة الثالثة مماسّة للخط أو القوس الذي يبدأ أو ينتهي عليه"
+    "ui.palette_arc_tangent_snap": "تثبيت مماسّ"
   },
   "de": {
-    "prefs.sketch_arc_tangent_snap": "3-Punkt-Bogen: den dritten Punkt tangential zur Linie oder zum Bogen fangen, an der er beginnt oder endet"
+    "ui.palette_arc_tangent_snap": "Tangential fangen"
   },
   "en": {
-    "prefs.sketch_arc_tangent_snap": "3-Point Arc: snap the third point tangent to the line or arc it starts or ends on"
+    "ui.palette_arc_tangent_snap": "Snap tangent"
   },
   "he": {
-    "prefs.sketch_arc_tangent_snap": "קשת בשלוש נקודות: הצמדת הנקודה השלישית כמשיקה לקו או לקשת שהיא מתחילה או נגמרת עליהם"
+    "ui.palette_arc_tangent_snap": "הצמדה משיקה"
   },
   "ja": {
-    "prefs.sketch_arc_tangent_snap": "3 点円弧: 始点または終点のある線や円弧に接するように 3 点目をスナップする"
+    "ui.palette_arc_tangent_snap": "接線にスナップ"
   },
   "ko": {
-    "prefs.sketch_arc_tangent_snap": "3점 호: 세 번째 점을 시작하거나 끝나는 선이나 호에 접하도록 스냅"
+    "ui.palette_arc_tangent_snap": "접선 스냅"
   },
   "vi": {
-    "prefs.sketch_arc_tangent_snap": "Cung 3 điểm: bắt điểm thứ ba tiếp xúc với đường hoặc cung mà nó bắt đầu hoặc kết thúc trên đó"
+    "ui.palette_arc_tangent_snap": "Bắt tiếp xúc"
   },
   "zh": {
-    "prefs.sketch_arc_tangent_snap": "三点圆弧：将第三点吸附到与其起点或终点所在直线或圆弧相切的位置"
+    "ui.palette_arc_tangent_snap": "吸附相切"
   }
 }
