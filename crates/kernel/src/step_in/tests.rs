@@ -5698,13 +5698,14 @@ fn quarter_cylinder_with_short_net(short: f64) -> String {
 #[test]
 fn a_rational_net_ending_just_short_of_its_edge_within_the_tolerance_imports_closed() {
     let volume = std::f64::consts::PI * 100.0 * 20.0 / 4.0;
+    assert!((volume - 1570.7963).abs() < 1e-4 * volume, "{volume}");
     assert_closed_solid(&quarter_cylinder_with_short_net(0.0), 5, volume);
     assert_closed_solid(&quarter_cylinder_with_short_net(8e-6), 5, volume);
 }
 
 /// A 10 mm cube whose top is a cubic B-spline net with a raised middle (its boundary rows straight
 /// at z = 10) and whose front top edge is split 0.0002 mm before its end, the short piece a cubic
-/// on the knot range `knots` with its inner control points 0.002 mm above the face.
+/// on the knot range `knots`, lying on the face (within the file's tolerance).
 fn cube_with_short_edge_on_spline_top(knots: (f64, f64)) -> String {
     let l = 10.0_f64;
     let mut w = Entities::default();
@@ -5720,9 +5721,11 @@ fn cube_with_short_edge_on_spline_top(knots: (f64, f64)) -> String {
     };
     let e_long = step_line_edge(&mut w, (verts[4], corner(4)), (vq, q));
     let p5 = corner(5);
-    let third = |t: f64, up: f64| [q[0] + (p5[0] - q[0]) * t, 0.0, l + up];
-    let pts: Vec<usize> =
-        [third(0.0, 0.0), third(1.0 / 3.0, 2e-3), third(2.0 / 3.0, 2e-3), third(1.0, 0.0)].iter().map(|p| step_point(&mut w, *p)).collect();
+    // The edge lies on the face: the net's row at y = 0 is straight at z = 10, with x running
+    // linearly in the first parameter, so every control point on that line (unevenly spaced, so
+    // the cubic is a true cubic and not a straight run) keeps the whole edge on the surface.
+    let on_row = |t: f64| [q[0] + (p5[0] - q[0]) * t, 0.0, l];
+    let pts: Vec<usize> = [0.0, 0.2, 0.7, 1.0].iter().map(|t| step_point(&mut w, on_row(*t))).collect();
     let curve = w.add(format!(
         "B_SPLINE_CURVE_WITH_KNOTS('',3,(#{},#{},#{},#{}),.UNSPECIFIED.,.F.,.F.,(4,4),({:?},{:?}),.UNSPECIFIED.)",
         pts[0], pts[1], pts[2], pts[3], knots.0, knots.1
