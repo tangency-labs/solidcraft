@@ -1,0 +1,98 @@
+{
+  "en": {
+    "cmd.tab.window.options": "Get Window Options",
+    "cmd.tab.window.set_options": "Set Window Options",
+    "cmd.window.options.use_as_default": "Use Window Options as Default",
+    "window_options.always": "Always",
+    "window_options.card_headers": "Card headers",
+    "window_options.card_headers_help": "Choose when new pop-outs show the title and controls above each view.",
+    "window_options.hidden": "Hidden",
+    "window_options.keep_on_top": "Keep on top of other windows",
+    "window_options.keep_on_top_help": "New pop-outs stay above other windows where the platform allows.",
+    "window_options.on_hover": "On hover"
+  },
+  "ar": {
+    "cmd.tab.window.options": "قراءة خيارات النافذة",
+    "cmd.tab.window.set_options": "تعيين خيارات النافذة",
+    "cmd.window.options.use_as_default": "استخدام خيارات النافذة كإعداد افتراضي",
+    "window_options.always": "دائماً",
+    "window_options.card_headers": "عناوين البطاقات",
+    "window_options.card_headers_help": "اختر متى تعرض النوافذ المنبثقة الجديدة العنوان وعناصر التحكم فوق كل عرض.",
+    "window_options.hidden": "مخفية",
+    "window_options.keep_on_top": "الإبقاء فوق النوافذ الأخرى",
+    "window_options.keep_on_top_help": "تبقى النوافذ المنبثقة الجديدة فوق النوافذ الأخرى عندما تسمح المنصة بذلك.",
+    "window_options.on_hover": "عند تمرير المؤشر"
+  },
+  "de": {
+    "cmd.tab.window.options": "Fensteroptionen abrufen",
+    "cmd.tab.window.set_options": "Fensteroptionen festlegen",
+    "cmd.window.options.use_as_default": "Fensteroptionen als Standard verwenden",
+    "window_options.always": "Immer",
+    "window_options.card_headers": "Kartenkopfzeilen",
+    "window_options.card_headers_help": "Wählen Sie, wann neue Zusatzfenster Titel und Bedienelemente über jeder Ansicht zeigen.",
+    "window_options.hidden": "Ausgeblendet",
+    "window_options.keep_on_top": "Über anderen Fenstern halten",
+    "window_options.keep_on_top_help": "Neue Zusatzfenster bleiben im Vordergrund, sofern die Plattform dies unterstützt.",
+    "window_options.on_hover": "Bei Mauszeigerkontakt"
+  },
+  "he": {
+    "cmd.tab.window.options": "קבלת אפשרויות חלון",
+    "cmd.tab.window.set_options": "הגדרת אפשרויות חלון",
+    "cmd.window.options.use_as_default": "שימוש באפשרויות החלון כברירת מחדל",
+    "window_options.always": "תמיד",
+    "window_options.card_headers": "כותרות כרטיסים",
+    "window_options.card_headers_help": "בחירה מתי חלונות מופרדים חדשים יציגו כותרות ופקדים מעל כל תצוגה.",
+    "window_options.hidden": "מוסתרות",
+    "window_options.keep_on_top": "הצמדה מעל חלונות אחרים",
+    "window_options.keep_on_top_help": "חלונות מופרדים חדשים נשארים מעל חלונות אחרים אם המערכת תומכת בכך.",
+    "window_options.on_hover": "במעבר סמן"
+  },
+  "ja": {
+    "cmd.tab.window.options": "ウィンドウ設定を取得",
+    "cmd.tab.window.set_options": "ウィンドウ設定を変更",
+    "cmd.window.options.use_as_default": "ウィンドウ設定を既定にする",
+    "window_options.always": "常に表示",
+    "window_options.card_headers": "カードのヘッダー",
+    "window_options.card_headers_help": "新しいポップアウトで各ビューの上にタイトルと操作項目を表示する条件を選びます。",
+    "window_options.hidden": "非表示",
+    "window_options.keep_on_top": "ほかのウィンドウより手前に表示",
+    "window_options.keep_on_top_help": "対応環境では新しいポップアウトをほかのウィンドウより手前に表示します。",
+    "window_options.on_hover": "ホバー時"
+  },
+  "ko": {
+    "cmd.tab.window.options": "창 옵션 가져오기",
+    "cmd.tab.window.set_options": "창 옵션 설정",
+    "cmd.window.options.use_as_default": "창 옵션을 기본값으로 사용",
+    "window_options.always": "항상",
+    "window_options.card_headers": "카드 머리글",
+    "window_options.card_headers_help": "새 팝아웃에서 각 뷰 위에 제목과 조작 버튼을 표시할 시점을 선택합니다.",
+    "window_options.hidden": "숨김",
+    "window_options.keep_on_top": "다른 창 위에 유지",
+    "window_options.keep_on_top_help": "플랫폼이 지원하면 새 팝아웃이 다른 창 위에 표시됩니다.",
+    "window_options.on_hover": "마우스를 올릴 때"
+  },
+  "vi": {
+    "cmd.tab.window.options": "Lấy tùy chọn cửa sổ",
+    "cmd.tab.window.set_options": "Đặt tùy chọn cửa sổ",
+    "cmd.window.options.use_as_default": "Dùng tùy chọn cửa sổ làm mặc định",
+    "window_options.always": "Luôn hiện",
+    "window_options.card_headers": "Tiêu đề thẻ",
+    "window_options.card_headers_help": "Chọn khi nào cửa sổ tách mới hiện tiêu đề và nút điều khiển trên mỗi khung nhìn.",
+    "window_options.hidden": "Ẩn",
+    "window_options.keep_on_top": "Giữ trên các cửa sổ khác",
+    "window_options.keep_on_top_help": "Cửa sổ tách mới nằm trên các cửa sổ khác khi nền tảng hỗ trợ.",
+    "window_options.on_hover": "Khi rê chuột"
+  },
+  "zh": {
+    "cmd.tab.window.options": "获取窗口选项",
+    "cmd.tab.window.set_options": "设置窗口选项",
+    "cmd.window.options.use_as_default": "将窗口选项用作默认值",
+    "window_options.always": "始终显示",
+    "window_options.card_headers": "卡片标题栏",
+    "window_options.card_headers_help": "选择新弹出窗口何时在各视图上方显示标题和控件。",
+    "window_options.hidden": "隐藏",
+    "window_options.keep_on_top": "保持在其他窗口之上",
+    "window_options.keep_on_top_help": "在平台支持时，新弹出窗口会保持在其他窗口之上。",
+    "window_options.on_hover": "悬停时显示"
+  }
+}

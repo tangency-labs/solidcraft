@@ -299,7 +299,9 @@ pub struct PeriodicBoundaryEnd<O> {
 
 enum BoundaryRoot {
     NoCut,
-    One(f64, Point3),
+    /// The root's curve parameter, its point, and its (u, v) on the boundary's displaced,
+    /// extended support.
+    One(f64, Point3, Point2),
     Unresolved,
 }
 
@@ -900,7 +902,14 @@ pub trait OffsetBrep<O>: ProtoGeometry<O> {
     /// of the UV trim curve, if any.
     fn edgeuse_uv_trim_curve(&self, eu: O) -> Result<Option<O>>;
     /// `SmEdgeuse::SetUVTrimCurve(curve, maxDist, TRUE)`
-    /// (`topology::edgeuse::p1::set_uv_trim_curve`, deleting the old curve).
+    /// (`topology::edgeuse::p1::set_uv_trim_curve`, deleting the old curve). Not upstream
+    /// (#18009): where `max_dist` raises the tolerance (it is below `2 * max_dist`) and `B`,
+    /// the new trim's proved distance from the edge curve, is enclosed, the edge tolerance is
+    /// raised to `B` where `B` is past `2 * max_dist` (the bound being the whole bisection's
+    /// wherever it is above half the tolerance), and for `B` where it is below `max_dist` only
+    /// if every other UV trim of the edge is enclosed within the lowered tolerance
+    /// `max(tolerance, 2 * B)`; otherwise for `max_dist`, as upstream
+    /// (`topology::edgeuse::p3::trim_raise_distance`).
     fn edgeuse_set_uv_trim_curve(
         &mut self,
         k: &Kernel,
@@ -1157,7 +1166,7 @@ impl<O: ClassObject, B: OffsetBrep<O>> SurfaceSolveContext<O> for OffsetSurfaceS
         self.0.prepare_surface_solve_cache(k, surface, handle)
     }
 
-    fn surface_cache_state(
+    fn surface_cache_without_get_tree(
         &mut self,
         k: &Kernel,
         surface: &Surface,
@@ -1893,8 +1902,8 @@ fn continues_through_tangent_point(
 /// basis being a partition of unity, so the joined 3D curve's deviation is the first
 /// piece's, or the second's raised by that distance (enclosed in rounded interval
 /// arithmetic), whichever is larger: a proved bound, with nothing estimated. Each joined
-/// curve then loses the copies of its joint knot whose removal is exact to rounding
-/// ([`remove_exact_joint_knot`]); the 3D curve's deviation grows by that removal's
+/// curve then loses the copies of its joint knot whose removal is exact to rounding in
+/// all three curves ([`remove_exact_joint_knot_together`]); the 3D curve's deviation grows by that removal's
 /// certified bound. The deviation is the 3D curve's only: the UV curves' move (their
 /// joint knot's removal, like their end points set above) is not recorded.
 ///
@@ -1949,11 +1958,9 @@ fn join_through_tangent_points(
         // the piece whose last end joins goes first; the other runs on from its joined end
         let (first, second) = if a.last { (a, b) } else { (b, a) };
         let senses = [true, !second.last];
-        let mut joined: Vec<Curve> = Vec::new();
+        let mut joined: Vec<(BSplineCurve, f64)> = Vec::new();
         // how far the second piece's 3D curve moves, proved
         let mut moved = 0.0_f64;
-        // how far removing the joint knot moves the joined 3D curve, bounded
-        let mut smoothed = 0.0_f64;
         for (kind, curves) in [
             &ssi.curves_3d.iter().map(Some).collect::<Vec<_>>(),
             &ssi.surface1_uv_curves.iter().map(Option::as_ref).collect(),
@@ -1993,20 +2000,19 @@ fn join_through_tangent_points(
             }
             // with no last end at the joint, both first ends: the first runs reversed
             let senses = if first.last { senses } else { [false, true] };
-            let (mut curve, breaks) =
+            let (curve, breaks) =
                 BSplineCurve::create_by_joining_with_breaks(&mut segments, Some(&senses))?;
             let at_joint = breaks.get(1).copied().ok_or_else(|| {
                 SolidError::port_invariant(OP_MATE, "a join of two pieces has no joint")
             })?;
-            let bound = remove_exact_joint_knot(&mut curve, at_joint)?;
-            if kind == 0 {
-                smoothed = bound;
-            }
-            joined.push(Curve::from(curve));
+            joined.push((curve, at_joint));
         }
-        let [c3, uv1, uv2]: [Curve; 3] = joined
+        let mut joined: [(BSplineCurve, f64); 3] = joined
             .try_into()
             .map_err(|_| SolidError::port_invariant(OP_MATE, "three joined curves"))?;
+        // how far removing the joint knot moves the joined 3D curve, bounded
+        let smoothed = remove_exact_joint_knot_together(&mut joined)?;
+        let [c3, uv1, uv2] = joined.map(|(c, _)| Curve::from(c));
         let (keep, drop) = (first.piece.min(second.piece), first.piece.max(second.piece));
         if let Some(c) = ssi.curves_3d.get_mut(keep) {
             *c = c3;
@@ -2038,7 +2044,7 @@ fn join_through_tangent_points(
 }
 
 /// Not upstream: the joined curve `curve` without the copies of its joint knot at `at`
-/// whose removal moves the curve by no more than its own scaled zero,
+/// (at most `most` of them) whose removal moves the curve by no more than its own scaled zero,
 /// `SM_EFF_ZERO (1 + extent)`, where the extent is the largest spread of the curve's
 /// control points along a coordinate axis ([`joint_knot_tolerance`]).
 ///
@@ -2049,11 +2055,12 @@ fn join_through_tangent_points(
 /// the cut fell on a knot the curve already had, the copies it had stay: removing one of
 /// them would move the curve, so the removal stops there and keeps the ones before
 /// ([`BSplineCurve::remove_knot_certified`] keeps a partial removal). Left in, the joint
-/// knot puts a break into an edge's curve a rounding-sized distance inside where the
-/// edge's trim ends at the node's offset vertex, and the UV trims dropped from that curve
-/// onto the offset faces are fitted differently (an edge of the thickened `HoodCorner`
-/// sheet of `tests/issue_1502_thicken_rim_halves.rs` took tolerance 9.3e-5 from a drop span
-/// that fits to 7e-8 once the knot is gone).
+/// knot can sit a rounding-sized distance inside where an edge's trim ends at the node's
+/// offset vertex. The trim then drops that tiny span without reparametrising
+/// (`remove_degen_segs`), which leaves a break in parametric speed at the next knot, and
+/// the UV trims dropped from that curve fit less closely there (on the thickened
+/// `HoodCorner` sheet of `tests/issue_1502_thicken_rim_halves.rs`, a drop span fits to
+/// 1.7e-5 with the knot and to 7e-8 without it).
 ///
 /// The test is the curve's shape at the joint, not where the pieces came from or where
 /// they lie: the tolerance scales with the curve's size, not its distance from the origin,
@@ -2064,14 +2071,11 @@ fn join_through_tangent_points(
 /// pieces through a saddle's node (#17210) join into one line. Either way the bound below
 /// covers the move.
 ///
-/// The 3D curve and each UV curve are decided on their own, so they can keep different
-/// knot vectors, against `docs/ssi.md` section 8, invariant 5. That happens at the
-/// `HoodCorner` node: the 3D curve is smooth there and loses all three copies, while the
-/// first UV curve turns there and keeps all three (one copy would come out only within
-/// `1e-8`, a second not even within `1e-4`). Keeping the knot in the 3D curve too brings
-/// the 9.3e-5 edge tolerance back.
+/// A 3D curve and its UV curves are not decided here one by one: they keep one knot
+/// vector (`docs/ssi.md` section 8, invariant 5), so [`remove_exact_joint_knot_together`]
+/// removes from each only the copies all three lose.
 ///
-/// Returns the bound on how far the curve moved: the copies removed times the
+/// Returns the copies removed and the bound on how far the curve moved: the copies removed times the
 /// tolerance, rounded up. [`BSplineCurve::remove_knot_certified`] keeps a removal only
 /// when a certified bound (the knot reinserted in interval arithmetic, control points
 /// compared) is within that; `0` when no copy is removed. Rational curves are left
@@ -2082,27 +2086,77 @@ fn join_through_tangent_points(
 /// # Errors
 ///
 /// Those of the knot and control-point queries and of the removal.
-fn remove_exact_joint_knot(curve: &mut BSplineCurve, at: f64) -> Result<f64> {
+fn remove_joint_copies(curve: &mut BSplineCurve, at: f64, most: usize) -> Result<(usize, f64)> {
     let (knots, multiplicities) = curve.knots(None)?;
     let Some(times) = knots
         .iter()
         .zip(&multiplicities)
-        .find_map(|(&u, &m)| (u == at).then_some(m))
+        .find_map(|(&u, &m)| (u == at).then_some(m.min(most)))
     else {
-        return Ok(0.0);
+        return Ok((0, 0.0));
     };
     let tol = joint_knot_tolerance(curve)?;
     if times == 0 || !tol.is_finite() {
-        return Ok(0.0);
+        return Ok((0, 0.0));
     }
     let removed = curve.remove_knot_certified(at, times, tol)?;
     if removed == 0 {
-        return Ok(0.0);
+        return Ok((0, 0.0));
     }
-    Ok((Ivl::from(removed as f64) * Ivl::from(tol)).hi)
+    Ok((removed, (Ivl::from(removed as f64) * Ivl::from(tol)).hi))
 }
 
-/// Not upstream: the tolerance of [`remove_exact_joint_knot`] for `curve`,
+/// Not upstream: the joined 3D curve and its two UV curves, each with its joint knot,
+/// without the copies of that knot that all three lose exactly
+/// ([`remove_joint_copies`]), so they keep one knot vector (`docs/ssi.md` section 8,
+/// invariant 5). Each curve is tried on its own (on a copy); the fewest copies any of
+/// them loses, `n`, are then removed from each (again on copies), and the three results
+/// are kept only when every one lost exactly `n`; otherwise, or when the three joints
+/// are not at one parameter, all three keep their knot as joined. A joint where one
+/// curve turns keeps its knot in all three: at the `HoodCorner` node of
+/// `tests/issue_1502_thicken_rim_halves.rs` the 3D curve is smooth but the first UV
+/// curve turns (one copy would come out only within `1e-8`, a second not within `1e-4`).
+///
+/// Returns the bound on how far the 3D curve (the first) moved; `0` when nothing is
+/// removed.
+///
+/// # Errors
+///
+/// Those of [`remove_joint_copies`].
+fn remove_exact_joint_knot_together(joined: &mut [(BSplineCurve, f64); 3]) -> Result<f64> {
+    let [(_, at), (_, at_uv1), (_, at_uv2)] = &*joined;
+    let at = *at;
+    if at != *at_uv1 || at != *at_uv2 {
+        return Ok(0.0);
+    }
+    let mut fewest = usize::MAX;
+    for (curve, _) in joined.iter() {
+        let mut trial = curve.clone_exact();
+        fewest = fewest.min(remove_joint_copies(&mut trial, at, usize::MAX)?.0);
+    }
+    if fewest == 0 {
+        return Ok(0.0);
+    }
+    let mut removed = Vec::new();
+    for (curve, _) in joined.iter() {
+        let mut candidate = curve.clone_exact();
+        let (count, bound) = remove_joint_copies(&mut candidate, at, fewest)?;
+        if count != fewest {
+            return Ok(0.0);
+        }
+        removed.push((candidate, bound));
+    }
+    let mut bound_3d = 0.0;
+    for (i, ((curve, _), (candidate, bound))) in joined.iter_mut().zip(removed).enumerate() {
+        *curve = candidate;
+        if i == 0 {
+            bound_3d = bound;
+        }
+    }
+    Ok(bound_3d)
+}
+
+/// Not upstream: the tolerance of [`remove_joint_copies`] for `curve`,
 /// `SM_EFF_ZERO (1 + extent)` rounded up, where the extent is the largest spread
 /// `max - min` of the curve's control points along one coordinate axis (a 2D curve's
 /// `z` is `0`): the curve's size, which a translation leaves alone.
@@ -3929,7 +3983,7 @@ impl OffsetGeometryCreation {
         let roots = surface_global_curve_intersect(
             k, brep, extended, &domain, curve, &interval, tolerance,
         )?;
-        let mut root: Option<(f64, Point3)> = None;
+        let mut root: Option<(f64, Point3, Point2)> = None;
         for solution in roots.as_slice() {
             if solution.solution_type == SolutionType::RangeOfValues {
                 return Ok(BoundaryRoot::Unresolved);
@@ -3943,7 +3997,7 @@ impl OffsetGeometryCreation {
             {
                 return Ok(BoundaryRoot::Unresolved);
             }
-            if let Some((previous_parameter, _)) = root {
+            if let Some((previous_parameter, _, _)) = root {
                 // The solver preserves reports across chart seams and closed
                 // curve ends. Only identical parameters identify the same point
                 // of this curve; spatial proximity cannot merge material roots.
@@ -3951,11 +4005,12 @@ impl OffsetGeometryCreation {
                     return Ok(BoundaryRoot::Unresolved);
                 }
             } else {
-                root = Some((parameter, point));
+                let uv = Point2::new(solution.start.param(1)?, solution.start.param(2)?);
+                root = Some((parameter, point, uv));
             }
         }
         Ok(match root {
-            Some((t, point)) => BoundaryRoot::One(t, point),
+            Some((t, point, uv)) => BoundaryRoot::One(t, point, uv),
             None => BoundaryRoot::NoCut,
         })
     }
@@ -4011,11 +4066,111 @@ impl OffsetGeometryCreation {
         Ok(Some(gap.is_finite() && gap <= tolerance))
     }
 
+    /// Whether the candidate interval of `curve`, from its root `far_parameter` on the far
+    /// support beyond `across` toward its rim root `parameter`, leaves that support to the
+    /// side the original edge of `edgeuse` leaves it at its far vertex (the end that is not
+    /// `vertex`). The edge's side is the sign of its tangent there, directed toward `vertex`,
+    /// along the third face's surface normal; the candidate's is the sign of its tangent at
+    /// the far root, directed toward the rim root, along the normal of that face's
+    /// displaced, extended surface at the root's `far_uv`. A regular offset keeps its
+    /// base's parameters and orientation, so the two normals have one sense. `None` where
+    /// either tangent lies in its support's tangent plane or a value is not finite: no side
+    /// is established.
+    ///
+    /// # Errors
+    ///
+    /// [`SolidError::InvalidInput`] for missing topology; those of the evaluations.
+    #[allow(clippy::too_many_arguments)]
+    fn leaves_far_support_as_edge<O: ClassObject + SolutionObject>(
+        k: &Kernel,
+        brep: &mut impl OffsetBrep<O>,
+        executive: &mut impl OffsetExecutive<O>,
+        edgeuse: O,
+        vertex: O,
+        curve: O,
+        across: O,
+        far_parameter: f64,
+        parameter: f64,
+        far_uv: Point2,
+    ) -> Result<Option<bool>> {
+        let base = brep
+            .edgeuse_edge(edgeuse)?
+            .ok_or(dangling("edge use without edge"))?;
+        let base_curve = brep
+            .edge_curve(base)?
+            .ok_or(dangling("edge without curve"))?;
+        let interval = brep.edge_interval(base)?;
+        // A use along its edge starts at the interval's lower end.
+        let at_start = brep.edgeuse_vertex(edgeuse)? == Some(vertex);
+        let along = brep.edgeuse_orientation(edgeuse)? != OrientType::Opposite;
+        let (far_at, toward_vertex) = if at_start == along {
+            (interval.max(), -1.0)
+        } else {
+            (interval.min(), 1.0)
+        };
+        let edge_tangent = curve_of(brep, base_curve)?
+            .evaluate(k, far_at, 1, true, true)?
+            .get(1)
+            .copied()
+            .ok_or(dangling("tangent missing"))?
+            * toward_vertex;
+        let radial = brep
+            .edgeuse_radial(across)?
+            .ok_or(dangling("boundary without radial"))?;
+        let third = brep
+            .edgeuse_face(radial)?
+            .ok_or(dangling("boundary without face"))?;
+        let third_surface = brep
+            .face_surface(third)?
+            .ok_or(dangling("face without surface"))?;
+        let far = brep
+            .edge_other_vertex(base, vertex)?
+            .ok_or(dangling("edge without other vertex"))?;
+        let radial_end = if brep.edgeuse_vertex(radial)? == Some(far) {
+            0.0
+        } else {
+            1.0
+        };
+        let uv = edgeuse_normalized_evaluate(k, brep, radial, radial_end, true, false, true)?;
+        let before = edge_tangent.dot(surface_of(brep, third_surface)?.evaluate_normal(
+            k,
+            Point2::new(uv.x, uv.y),
+            Side::Left,
+            Side::Left,
+        )?);
+        let offset = executive
+            .offset_edgeuse(radial)
+            .ok_or(dangling("boundary without offset"))?;
+        let face = brep
+            .edgeuse_face(offset)?
+            .ok_or(dangling("offset boundary without face"))?;
+        let surface = brep
+            .face_surface(face)?
+            .ok_or(dangling("face without surface"))?;
+        let (extended, _) = executive.get_create_extended_surface(k, brep, surface)?;
+        let normal =
+            surface_of(brep, extended)?.evaluate_normal(k, far_uv, Side::Left, Side::Left)?;
+        let run = if parameter > far_parameter { 1.0 } else { -1.0 };
+        let after = curve_of(brep, curve)?
+            .evaluate(k, far_parameter, 1, true, true)?
+            .get(1)
+            .copied()
+            .ok_or(dangling("tangent missing"))?
+            .dot(normal)
+            * run;
+        if !(before.is_finite() && after.is_finite()) || before == 0.0 || after == 0.0 {
+            return Ok(None);
+        }
+        Ok(Some((before > 0.0) == (after > 0.0)))
+    }
+
     /// A disappearing chart seam is not a material constraint. The genuine
     /// supports at the opposite end and beyond the seam bound the active SSI
     /// interval. Chart crossings outside this interval do not retain the seam.
-    /// Without genuine supports on both sides, a chart miss does not establish
-    /// seam removal: ordinary endpoint trimming still supplies the constraint.
+    /// The active interval must leave each far support as the edge does; a rim root
+    /// behind the far end keeps the ordinary trim. Without genuine supports on both
+    /// sides, a chart miss does not establish seam removal: ordinary endpoint trimming
+    /// still supplies the constraint.
     #[allow(clippy::too_many_arguments, clippy::too_many_lines)]
     fn periodic_boundary_end<O: ClassObject + SolutionObject>(
         k: &Kernel,
@@ -4074,7 +4229,7 @@ impl OffsetGeometryCreation {
                 let candidate =
                     match Self::unique_boundary_root(k, brep, executive, curve, across, tolerance)?
                     {
-                        BoundaryRoot::One(t, p) => (t, p),
+                        BoundaryRoot::One(t, p, _) => (t, p),
                         BoundaryRoot::NoCut => {
                             // This component never meets the rim support. It cannot
                             // undergo the seam/rim incidence change considered here;
@@ -4104,13 +4259,13 @@ impl OffsetGeometryCreation {
             let mut far_root: Option<(f64, Point3)> = None;
             let mut far_boundary_roots = Vec::new();
             for across in opposite {
-                let BoundaryRoot::One(t, p) =
+                let BoundaryRoot::One(t, p, far_uv) =
                     Self::unique_boundary_root(k, brep, executive, curve, across, tolerance)?
                 else {
                     return Ok(PeriodicEnd::Unresolved);
                 };
                 let candidate = (t, p);
-                far_boundary_roots.push((across, p));
+                far_boundary_roots.push((across, p, far_uv));
                 if let Some((previous_parameter, _)) = far_root {
                     if candidate.0 != previous_parameter {
                         return Ok(PeriodicEnd::Unresolved);
@@ -4122,13 +4277,40 @@ impl OffsetGeometryCreation {
             let Some((far_parameter, _)) = far_root else {
                 return Ok(PeriodicEnd::Unresolved);
             };
+            // The interval from the far root to the rim root is the edge's image only if it
+            // leaves every far support to the side the edge does. A rim root behind the far
+            // end bounds no part of this edge: the seam is not removed by it, and the
+            // ordinary trim supplies the constraint (#19714).
+            let mut leaves_as_edge = true;
+            for &(across, _, far_uv) in &far_boundary_roots {
+                match Self::leaves_far_support_as_edge(
+                    k,
+                    brep,
+                    executive,
+                    edgeuse,
+                    vertex,
+                    curve,
+                    across,
+                    far_parameter,
+                    parameter,
+                    far_uv,
+                )? {
+                    Some(true) => {}
+                    Some(false) => leaves_as_edge = false,
+                    None => return Ok(PeriodicEnd::Unresolved),
+                }
+            }
+            if !leaves_as_edge {
+                ordinary_end = true;
+                continue;
+            }
             let active = Extent1d::from_min_max(parameter, far_parameter);
             if Self::intersects_periodic_chart(k, brep, executive, seam, uv, &active)? {
                 ordinary_end = true;
                 continue;
             }
             let mut owned_branch = false;
-            for (across, point) in far_boundary_roots {
+            for (across, point, _) in far_boundary_roots {
                 match Self::root_on_mated_boundary(k, brep, executive, across, point, tolerance)? {
                     Some(true) => owned_branch = true,
                     Some(false) => return Ok(PeriodicEnd::Unresolved),
@@ -5581,15 +5763,13 @@ impl OffsetGeometryCreation {
         let edge_tol = brep.edge_tolerance(edge)?;
         let ext_surface = surface_of(brep, ext_surf_h)?.clone_for_evaluation()?;
         let lifted = ext_surface
-            .lift_curve_with_context(
+            .lift_curve(
                 k,
                 &ext_domain,
                 &Curve::from(uv_curve_extended.clone()),
                 &ext_ivl,
                 edge_tol / 3.0,
                 false,
-                &mut OffsetSurfaceSolveContext(brep),
-                Some(ext_surf_h),
             )?
             .curve;
         let lifted_curve = lifted;
@@ -8083,6 +8263,11 @@ mod tests {
     use super::*;
     use crate::nurbs::math::CPoint;
 
+    /// [`remove_joint_copies`] with no cap: the bound alone.
+    fn remove_exact_joint_knot(curve: &mut BSplineCurve, at: f64) -> Result<f64> {
+        Ok(remove_joint_copies(curve, at, usize::MAX)?.1)
+    }
+
     #[test]
     fn periodic_branch_ambiguity_is_not_an_unmated_edge() {
         let error = mating_result::<()>(Err(SolidError::offset(
@@ -8157,6 +8342,103 @@ mod tests {
                 .unwrap();
         }
         (joined, at)
+    }
+
+    /// A 3D curve and its two UV curves keep one knot vector at the joint
+    /// (`docs/ssi.md` section 8, invariant 5): when one of them turns there (kink 1e-6),
+    /// all three keep every copy of the knot, though the other two alone would lose them;
+    /// when all three are smooth, all three lose the copies, and the 3D curve's bound is
+    /// returned.
+    #[test]
+    fn a_joint_knot_is_kept_or_dropped_in_all_three_curves_together() {
+        let kept = rejoined_cubic(0.0, 1.7, 0.0).0.knots(None).unwrap();
+        assert_eq!(kept, (vec![0.0, 1.0, 1.7, 2.5], vec![4, 1, 3, 4]));
+        let (smooth, at) = rejoined_cubic(0.0, 1.7, 0.0);
+        let (kinked, at_kinked) = rejoined_cubic(0.0, 1.7, 1e-6);
+        assert_eq!(at, at_kinked);
+        for turning in 0..3 {
+            let mut joined: [(BSplineCurve, f64); 3] = core::array::from_fn(|i| {
+                if i == turning {
+                    (kinked.clone_exact(), at)
+                } else {
+                    (smooth.clone_exact(), at)
+                }
+            });
+            assert_eq!(remove_exact_joint_knot_together(&mut joined).unwrap(), 0.0);
+            for (curve, _) in &joined {
+                assert_eq!(curve.knots(None).unwrap(), kept, "{turning}");
+            }
+        }
+        let mut joined: [(BSplineCurve, f64); 3] =
+            core::array::from_fn(|_| (smooth.clone_exact(), at));
+        let bound = remove_exact_joint_knot_together(&mut joined).unwrap();
+        assert!(bound > 0.0, "{bound}");
+        for (curve, _) in &joined {
+            assert_eq!(
+                curve.knots(None).unwrap(),
+                (vec![0.0, 1.0, 2.5], vec![4, 1, 4])
+            );
+        }
+    }
+
+    /// When one of the three curves can lose only some copies of the joint knot, all three
+    /// lose exactly that many: a cubic that already had a simple knot at the cut loses 2
+    /// of its 3 copies, the rejoined cubic without one would lose all 3, and all three end
+    /// with one copy left. The 3D curve's bound is its two copies' tolerance, rounded up.
+    #[test]
+    fn a_joint_knot_is_reduced_in_all_three_curves_to_the_fewest_removable() {
+        let k = Kernel::default();
+        let pw = [
+            CPoint::new(0.0, 0.0, 0.0, NOW),
+            CPoint::new(1.0, 2.0, 0.5, NOW),
+            CPoint::new(2.0, 3.0, -0.5, NOW),
+            CPoint::new(3.0, 3.0, -1.0, NOW),
+            CPoint::new(4.0, 1.0, 2.0, NOW),
+            CPoint::new(6.0, 0.0, 1.0, NOW),
+        ];
+        let u = [0.0, 0.0, 0.0, 0.0, 1.0, 1.7, 2.5, 2.5, 2.5, 2.5];
+        let whole = BSplineCurve::from_data(3, 5, 9, 3, &pw, &u).unwrap();
+        let mut head = Curve::from(whole.clone_exact());
+        let tail = head.create_by_split_curve(&k, 1.7).unwrap();
+        let piece = |c: &Curve| match c.kind() {
+            CurveKind::BSpline(b) => b.clone_exact(),
+            _ => panic!("not a B-spline"),
+        };
+        let mut segments = [piece(&head), piece(&tail)];
+        let (had_knot, breaks) =
+            BSplineCurve::create_by_joining_with_breaks(&mut segments, Some(&[true, true]))
+                .unwrap();
+        assert_eq!(breaks[1], 1.7);
+        let joined_at = (vec![0.0, 1.0, 1.7, 2.5], vec![4, 1, 3, 4]);
+        assert_eq!(had_knot.knots(None).unwrap(), joined_at);
+        let mut alone = had_knot.clone_exact();
+        assert_eq!(
+            remove_joint_copies(&mut alone, 1.7, usize::MAX).unwrap().0,
+            2
+        );
+        let (smooth, at) = rejoined_cubic(0.0, 1.7, 0.0);
+        assert_eq!(smooth.knots(None).unwrap(), joined_at);
+        let tol = joint_knot_tolerance(&had_knot).unwrap();
+        for first in 0..3 {
+            let mut joined: [(BSplineCurve, f64); 3] = core::array::from_fn(|i| {
+                if i == first {
+                    (had_knot.clone_exact(), at)
+                } else {
+                    (smooth.clone_exact(), at)
+                }
+            });
+            let bound = remove_exact_joint_knot_together(&mut joined).unwrap();
+            if first == 0 {
+                assert_eq!(bound, (Ivl::from(2.0) * Ivl::from(tol)).hi);
+            }
+            for (curve, _) in &joined {
+                assert_eq!(
+                    curve.knots(None).unwrap(),
+                    (vec![0.0, 1.0, 1.7, 2.5], vec![4, 1, 1, 4]),
+                    "{first}"
+                );
+            }
+        }
     }
 
     /// The joint-knot decision depends on the curve's shape, not on where it lies. The

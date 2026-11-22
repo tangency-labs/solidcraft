@@ -206,6 +206,19 @@ fn editor_display_changes_allow_apply_and_cancel() {
 }
 
 #[test]
+fn cancelling_a_previewed_editor_restores_authored_bytes_with_a_fresh_plugin_token() {
+    let (mut session, source, original, commands) = extrusion_editor();
+    let bytes = original.doc.to_json();
+    let historical = original.design_token();
+    let rolled_back = session.design_token();
+    session.preview(&commands).unwrap();
+    session.restore_editor(&source, original).unwrap();
+    assert_eq!(session.doc.to_json(), bytes);
+    assert_ne!(session.design_token(), historical);
+    assert_ne!(session.design_token(), rolled_back);
+}
+
+#[test]
 fn editor_visibility_changes_allow_cancel_and_keep_undo_and_redo_at_the_original_marker() {
     for undo_hide in [false, true] {
         let (mut session, source, original, _) = extrusion_editor();
@@ -413,4 +426,43 @@ fn a_cancelled_computation_stops_promptly_and_is_never_cached() {
     // The cut is the one feature computed anew (the session's counter carries over to its copies).
     assert_eq!(again.computed.model.recomputed, session.model.recomputed + 1, "nothing of the cancelled run was cached");
     assert!(again.computed.model.results.iter().all(|r| r.error.is_none()), "OK again finishes the cut");
+}
+
+#[test]
+fn computed_sketch_ownership_rejects_closed_targets_and_keeps_live_view_metadata() {
+    use crate::{ViewContext, ViewDescriptor};
+    use solidcraft_views::ViewKind;
+    let context = |window| {
+        ViewContext::new(
+            vec![
+                ViewDescriptor { id: 1, kind: ViewKind::Model, window: 0, subject: None },
+                ViewDescriptor { id: 2, kind: ViewKind::Model, window, subject: None },
+            ],
+            1,
+            vec![1, 2],
+        )
+        .unwrap()
+    };
+    let mut session = Session::default();
+    session.set_view_context(context(1)).unwrap();
+    let commands = vec![("sketch.create".into(), json!({"plane":"XY","view":2}))];
+    let prepared = session.scratch().compute_commands(&commands, None).unwrap();
+    session.set_view_context(ViewContext::default()).unwrap();
+    let before = (session.doc.to_json(), session.undo.len(), session.revision);
+    assert!(!prepared.is_current(&session));
+    assert!(session.accept_commands(prepared).is_err());
+    assert_eq!((session.doc.to_json(), session.undo.len(), session.revision), before);
+    session.set_view_context(context(1)).unwrap();
+    let mut computed = session.scratch();
+    computed.execute("sketch.create", &json!({"view":2})).unwrap();
+    session.set_view_context(ViewContext::default()).unwrap();
+    assert!(session.accept_computed(computed).is_err());
+    assert_eq!((session.doc.to_json(), session.undo.len(), session.revision), before);
+    session.set_view_context(context(1)).unwrap();
+    let prepared = session.scratch().compute_commands(&commands, None).unwrap();
+    session.set_view_context(context(2)).unwrap();
+    assert!(prepared.is_current(&session), "moving the same open Model is valid");
+    session.accept_commands(prepared).unwrap();
+    assert_eq!(session.sketching_view, Some(2));
+    assert_eq!(session.view_context, context(2), "adoption cannot reinstall the worker's stale window placement");
 }

@@ -25,6 +25,11 @@
 //!   the geometric tolerance is returned as a point curve at the interval midpoint,
 //!   including a trailing interval at the source curve's end. The extent bound
 //!   includes arithmetic rounding.
+//! - **Domain sides in contact (not upstream).** `MakeNewPlaneEllipse` collapses an
+//!   ellipse's two crossings of a domain side to one touching point also where it overlaps
+//!   the side by up to a contact tolerance its caller gives, read as every contact site
+//!   reads it (`within_contact_tol`; [`Plane::make_new_plane_ellipse_in_contact`]; zero,
+//!   upstream's, by [`Plane::make_new_plane_ellipse`]).
 //! - **Plane first with a torus (not upstream).** `GlobalSurfaceIntersect` takes a torus's
 //!   own plane section (`Torus::intersect_with_plane_owned_into`, its orders and UV curves
 //!   swapped as for a surface of revolution; WR-721, #2405); upstream has no torus case and
@@ -89,7 +94,7 @@ use crate::geom::pseudo_box::PseudoBox;
 use crate::geom::solution_array::{
     ObjectKind, SolutionArray, SolutionObject, SolutionType, SortKey,
 };
-use crate::geom::tol::{are_same, is_zero, is_zero_to_tol, ZONE_TOL_3D};
+use crate::geom::tol::{are_same, is_zero, is_zero_to_tol, within_contact_tol, ZONE_TOL_3D};
 use crate::geom::vector2d::{Point2, Vec2};
 use crate::geom::vector3d::{sqrt, Point3, Vec3};
 use crate::kernel::Kernel;
@@ -1252,6 +1257,39 @@ impl Plane {
         anal_ivl: &Extent1d,
         tol: f64,
     ) -> Result<Vec<Curve>> {
+        self.make_new_plane_ellipse_in_contact(
+            k, uv_domain, center, radius_x, radius_y, x_axis, y_axis, anal_ivl, tol, 0.0,
+        )
+    }
+
+    /// [`Plane::make_new_plane_ellipse`] where an ellipse overlapping a side of the domain
+    /// past touching by up to `contact_tol` (not proved past it, `within_contact_tol`)
+    /// touches that side at one point, as it does by less than half `tol` (upstream's
+    /// [B10]); zero is upstream's. The overlap is the cap's exact depth past the side (not
+    /// upstream for an ellipse: upstream takes a circle's sagitta). Not upstream: a face's
+    /// domain is the box of its trims, so a side of it runs along the face's own boundary
+    /// where that boundary reaches the box. A circle a hair past a round edge there, by up
+    /// to the contact tolerance at which the edge and the circle touch (docs/booleans.md
+    /// §6, "Circles a hair less than tangent"), was cut at the side, its two ends the
+    /// lens's half length off the touch, where no other site of the boolean put a vertex.
+    ///
+    /// # Errors
+    ///
+    /// As [`Plane::make_new_plane_ellipse`].
+    #[allow(clippy::too_many_arguments, clippy::too_many_lines)] // one upstream function
+    pub(crate) fn make_new_plane_ellipse_in_contact(
+        &self,
+        k: &Kernel,
+        uv_domain: &Extent2d,
+        center: Point3,
+        radius_x: f64,
+        radius_y: f64,
+        x_axis: Vec3,
+        y_axis: Vec3,
+        anal_ivl: &Extent1d,
+        tol: f64,
+        contact_tol: f64,
+    ) -> Result<Vec<Curve>> {
         // init output
         let mut crvs: Vec<Curve> = Vec::new();
 
@@ -1382,9 +1420,27 @@ impl Plane {
                 let rad = min2(radius_x, radius_y);
                 if dist < rad * 0.1745 {
                     // About 10 deg: just to avoid a sqrt when not close.
-                    // Max dist from ellipse to line between the two solutions:
-                    let h = rad - sqrt(rad * rad - dist * dist * 0.25);
-                    if h < tol / 2.0 {
+                    // Max dist from ellipse to line between the two solutions: the
+                    // ellipse's support distance along the side's unit normal n,
+                    // sqrt(a²(n·X)² + b²(n·Y)²), less the side's offset from the centre.
+                    // For a circle this is upstream's sagitta rad - sqrt(rad² - dist²/4);
+                    // not upstream for an ellipse, where upstream takes that sagitta of
+                    // the smaller radius, which understates a cap near the major vertex
+                    // (radii 100 and 1 cut 5e-4 inside that vertex: 5e-6) and so merged
+                    // two crossings of a cap deeper than `tol / 2` or the contact.
+                    // A side of zero length makes its roots one point.
+                    let h = bi_norm_in.unitize().map_or(0.0, |n| {
+                        let support = sqrt(
+                            (radius_x * n.dot(x_axis)).powi(2)
+                                + (radius_y * n.dot(circ_y_axis_for_plane_normal)).powi(2),
+                        );
+                        max2(support - n.dot(plane_start_pt - center).abs(), 0.0)
+                    });
+                    // the contact as every contact site reads it (`within_contact_tol`)
+                    let size = center.max_dimension() + max2(radius_x, radius_y);
+                    if h < tol / 2.0
+                        || (contact_tol > 0.0 && within_contact_tol(h, contact_tol, size))
+                    {
                         params = vec![(a0 + a1) / 2.0];
                     }
                 }
@@ -2194,6 +2250,65 @@ mod tests {
             )
             .unwrap();
         assert_eq!(point.len(), 1);
+    }
+
+    /// A long ellipse (radii 100 and 1) whose major vertex is 5e-4 past the side x = 5 of
+    /// the domain crosses that side twice: the cap past it is 100 - 99.9995 = 5e-4 deep,
+    /// above both half the tolerance and the contact tolerance, so the section is cut at
+    /// the side. A circle of the smaller radius through the same two crossings would sit
+    /// only about 5e-6 past the side, which is what the cap's depth must not be taken as.
+    /// The same ellipse 5e-6 past the side does touch it.
+    #[test]
+    fn a_long_ellipse_past_a_side_by_more_than_the_tolerance_is_cut_there() {
+        let k = Kernel::default();
+        let p = rect();
+        let full = Extent1d::from_min_max(0.0, 360.0);
+        let section = |past: f64, tol: f64, contact: f64| {
+            p.make_new_plane_ellipse_in_contact(
+                &k,
+                &dom(),
+                Vec3::new(5.0 + past - 100.0, 0.0, 0.0),
+                100.0,
+                1.0,
+                Vec3::X,
+                Vec3::Y,
+                &full,
+                tol,
+                contact,
+            )
+            .unwrap()
+        };
+        let ends = |curves: &[Curve]| -> Vec<Point3> {
+            curves
+                .iter()
+                .flat_map(|c| {
+                    let ivl = c.natural_interval();
+                    [ivl.min(), ivl.max()].map(|t| c.evaluate_point(&k, t).unwrap())
+                })
+                .collect()
+        };
+        // past by 5e-4: half the tolerance (5e-5) and the contact tolerance (1e-5) are
+        // both below the cap, so the upper and the lower arc each run from the left side
+        // to the right side, and nothing is kept past the right side
+        for (tol, contact) in [(1e-4, 0.0), (1e-6, 1e-5)] {
+            let ends = ends(&section(5e-4, tol, contact));
+            let at = |x: f64| ends.iter().filter(|e| (e.x - x).abs() < 1e-9).count();
+            assert_eq!(
+                (ends.len(), at(-5.0), at(5.0)),
+                (4, 2, 2),
+                "tol {tol}, contact {contact}: {ends:?}"
+            );
+        }
+        // past by 5e-6, under the contact tolerance: the ellipse touches the right side,
+        // and the arc from the left side round the major vertex is kept whole (split at
+        // the vertex, where its parameter starts)
+        let ends = ends(&section(5e-6, 1e-6, 1e-5));
+        let at = |x: f64| ends.iter().filter(|e| (e.x - x).abs() < 1e-9).count();
+        assert_eq!(
+            (ends.len(), at(-5.0), at(5.0 + 5e-6)),
+            (4, 2, 2),
+            "{ends:?}"
+        );
     }
 
     #[test]

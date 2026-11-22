@@ -1299,6 +1299,19 @@ fn packed_mesh_winding_repairs_pairs_and_leaves_non_manifold_edges_alone() {
 }
 
 #[test]
+fn a_flat_scan_keeps_its_welded_source_and_rebuilds_the_same_winding() {
+    // Two triangles of an open square, sharing a side that runs in the same direction.
+    let positions = std::sync::Arc::from([0., 0., 0., 1., 0., 0., 0., 1., 0., 1., 1., 0., 1., 0., 0., 0., 1., 0.]);
+    let facets = std::sync::Arc::from([0, 1, 2, 4, 5, 3]);
+    let (ready, packed, indexed) = crate::Body::from_packed_flat_mesh_indexed(positions, facets).unwrap();
+    assert_eq!(packed.as_chunks::<3>().0, &[[0., 0., 0.], [1., 0., 0.], [0., 1., 0.], [1., 1., 0.]]);
+    assert_eq!(indexed, [0, 1, 2, 1, 2, 3], "source order is kept for shading");
+    let reopened = crate::Body::from_packed_mesh(packed.as_chunks::<3>().0, indexed.as_chunks::<3>().0, &[]).unwrap();
+    assert_eq!(ready.triangle_mesh(), reopened.triangle_mesh());
+    assert_eq!(reopened.triangle_mesh().unwrap().1, &[[0, 1, 2], [1, 3, 2]]);
+}
+
+#[test]
 fn mesh_winding_cannot_close_a_nonorientable_surface() {
     // Six-vertex projective plane. Each side belongs to two triangles, but their
     // directions cannot all be made opposite in one consistent winding.
@@ -2374,6 +2387,42 @@ fn partial_revolve_on_the_axis() {
     assert!(vc < v - 1.0 && vc > v - PI * 3.75 * 3.75 * 2.5, "{vc}");
 }
 
+/// #17528: a profile corner 0.0000119 mm from the axis, as a sketch leaves it when nothing holds
+/// the corner on the axis line. It goes onto the axis, so the turn has no hair-thin cone face along
+/// the axis. That face went to STEP with its apex kilometres away: slicers hung on the file and
+/// SolidCraft read the body back open.
+#[test]
+fn revolve_puts_a_corner_next_to_the_axis_on_it() {
+    let off = 1.19e-5;
+    let profile = Region2 {
+        outer: Loop2::polygon(&[Vec2::new(0.0, -9.0), Vec2::new(2.1, -9.0), Vec2::new(4.25, -6.85), Vec2::new(4.25, 6.5), Vec2::new(off, 6.5)]),
+        holes: vec![],
+    };
+    let body = revolve(&Plane::XZ, &[profile], Vec2::ZERO, Vec2::Y, 2.0 * PI).unwrap().pop().unwrap();
+    assert!(body.validity().is_empty(), "{:?}", body.validity());
+    // The top and bottom discs, the cylinder and the cone: no face from the edge beside the axis.
+    assert_eq!(measure(&body).unwrap().merged.faces, 4);
+    let text = step_export(&[&body], "peg").unwrap();
+    let back = step_import(&text).unwrap().bodies.remove(0).body;
+    assert!(back.validity().is_empty(), "{:?}", back.validity());
+    assert_eq!(measure(&back).unwrap().merged.faces, 4);
+    // A corner as near on the far side of the axis doesn't count as crossing it: the rectangle
+    // turns into a cylinder, two discs and its side.
+    let across =
+        Region2 { outer: Loop2::polygon(&[Vec2::new(0.0, 0.0), Vec2::new(5.0, 0.0), Vec2::new(5.0, 5.0), Vec2::new(-off, 5.0)]), holes: vec![] };
+    let cylinder = revolve(&Plane::XZ, &[across], Vec2::ZERO, Vec2::Y, 2.0 * PI).unwrap().pop().unwrap();
+    assert!(rel(measure(&cylinder).unwrap().volume, PI * 25.0 * 5.0) < 5e-4);
+    assert_eq!(measure(&cylinder).unwrap().merged.faces, 3);
+    // A partial turn goes toward the sketch normal's side from where the profile is once its
+    // corners are on the axis, not from the centroid it had before (here on the other side).
+    let sliver = Region2 { outer: Loop2::polygon(&[Vec2::new(-9e-5, 0.0), Vec2::new(1.1e-4, 1.0), Vec2::new(-9e-5, 2.0)]), holes: vec![] };
+    let on_axis = Region2 { outer: Loop2::polygon(&[Vec2::new(0.0, 0.0), Vec2::new(1.1e-4, 1.0), Vec2::new(0.0, 2.0)]), holes: vec![] };
+    // Too thin for mass properties: the boxes come from the vertices and edges.
+    let quarter = |r: Region2| revolve(&Plane::XY, &[r], Vec2::ZERO, Vec2::Y, PI / 2.0).unwrap().pop().unwrap().outline_bounds();
+    let (a, b) = (quarter(sliver), quarter(on_axis));
+    assert!(a.min.dist(b.min) < 1e-9 && a.max.dist(b.max) < 1e-9, "{a:?} vs {b:?}");
+}
+
 /// Boolean identities on primitives the robustness runs found failing: cylinders tangent to box
 /// faces from inside and out, crossing cylinders touching along a line (their seams used to lie
 /// exactly where the other body cut them).
@@ -2612,6 +2661,60 @@ fn retained_bytes_matches_the_iterator_counts() {
         let walked = r.faces.len() * 2048 + uses * (512 + 96);
         assert_eq!(body.retained_bytes(), walked);
     }
+}
+
+/// #19629: a body lets go of its kernel forms, which are several times its record once it was
+/// measured, and the record gives each again on its next use with the same answers. Clones
+/// share the forms, so letting go through one lets go for all. A 40 x 30 x 10 block less a
+/// Ø 10 hole through it: 12 000 − 250 π mm³, and the point 3 above the middle of its top's
+/// front half is 3 from the top, its nearest face.
+#[test]
+fn released_kernel_forms_are_made_again_from_the_record() {
+    let block = box_solid(Vec3::ZERO, Vec3::new(40.0, 30.0, 10.0)).unwrap();
+    let hole = cylinder(Vec3::new(20.0, 15.0, -5.0), Vec3::Z, 5.0, 30.0).unwrap();
+    let drilled = boolean(&block, &hole, BoolOp::Cut).unwrap().unwrap();
+    assert!(!drilled.holds_kernel_form(), "the record alone until a use asks for a form");
+    // The SMLib form.
+    let before = drilled.smlib().unwrap().volume(1e-8).unwrap();
+    assert!(drilled.holds_kernel_form());
+    drilled.clone().release_kernel_form();
+    assert!(!drilled.holds_kernel_form(), "clones share the form");
+    let after = drilled.smlib().unwrap().volume(1e-8).unwrap();
+    assert!(drilled.holds_kernel_form(), "made again by the next use");
+    assert_eq!(before.to_bits(), after.to_bits(), "the record gives the same body");
+    let exact = 12_000.0 - 250.0 * std::f64::consts::PI;
+    assert!((after - exact).abs() < 1e-6 * exact, "{after} against {exact}");
+    // The solidcore-ops form.
+    drilled.release_kernel_form();
+    let above = Vec3::new(20.0, 5.0, 13.0);
+    let near = drilled.nearest_face(above).unwrap();
+    assert!(drilled.holds_kernel_form());
+    drilled.clone().release_kernel_form();
+    assert!(!drilled.holds_kernel_form());
+    let again = drilled.nearest_face(above).unwrap();
+    assert!(drilled.holds_kernel_form(), "made again by the next use");
+    assert_eq!((near.0.to_bits(), near.1), (again.0.to_bits(), again.1), "the record gives the same body");
+    assert!((again.0 - 3.0).abs() < 1e-9, "{again:?}");
+    // A measurement on forms made again is the measurement on forms in use, to the bit.
+    let warm = format!("{:?}", crate::measure(&drilled).unwrap());
+    drilled.release_kernel_form();
+    assert_eq!(format!("{:?}", crate::measure(&drilled).unwrap()), warm);
+    // So is an operation: a slot cut into the block with its forms in use, and let go.
+    let slot = box_solid(Vec3::new(5.0, 10.0, 5.0), Vec3::new(10.0, 20.0, 15.0)).unwrap();
+    let on_warm = boolean(&drilled, &slot, BoolOp::Cut).unwrap().unwrap();
+    drilled.release_kernel_form();
+    slot.release_kernel_form();
+    let on_cold = boolean(&drilled, &slot, BoolOp::Cut).unwrap().unwrap();
+    assert_eq!(format!("{:?}", on_cold.record()), format!("{:?}", on_warm.record()));
+    // The forms are let go without the body in hand too, until the body itself is gone.
+    let forms = drilled.kernel_forms();
+    drilled.smlib().unwrap();
+    assert!(forms.held() && !forms.gone());
+    forms.release();
+    assert!(!drilled.holds_kernel_form() && !forms.held());
+    drop(drilled);
+    assert!(forms.gone());
+    forms.release();
 }
 
 /// #881: a pleated band lofted to a nearly flat one, both 18 vertices from (-26, 3), counter-

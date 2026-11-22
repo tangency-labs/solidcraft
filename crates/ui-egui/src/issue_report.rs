@@ -2468,6 +2468,7 @@ mod tests {
                 error: "radius too large".into(),
                 origin: None,
                 code: None,
+                failure_code: None,
             }),
             log: vec!["[error] radius too large".into()],
             screenshot: Some(vec![1, 2, 3]),
@@ -2574,7 +2575,14 @@ mod tests {
 
         // A failed modeling command still offers its design. A successful import step
         // also does not suppress design attachments to a later report.
-        let failed = payload::Failing { command: Some("solid.fillet".into()), params: None, error: "too large".into(), origin: None, code: None };
+        let failed = payload::Failing {
+            command: Some("solid.fillet".into()),
+            params: None,
+            error: "too large".into(),
+            origin: None,
+            code: None,
+            failure_code: None,
+        };
         assert!(ticket::evidence(&app, None, Some(failed), None).design.is_some());
         app.issue_report.steps.back_mut().unwrap()["ok"] = json!(true);
         assert!(ticket::evidence(&app, None, None, None).design.is_some());
@@ -2811,6 +2819,57 @@ mod tests {
         cancel_capture(&mut app);
         let _ = ctx.run_ui(Default::default(), |ui| show(&mut app, ui.ctx()));
         assert!(app.issue_report.draft.as_ref().unwrap().ticket.is_none(), "the GitHub draft, as before");
+    }
+
+    /// #17926: a report of a fillet the kernel refuses carries, as `repro.failing.code`, the
+    /// stable code of the kernel call the failure came from: the same code the failed command's
+    /// error has, and the same for a fillet of the timeline that fails so. A failure made from no
+    /// kernel call sends none.
+    #[test]
+    fn a_failed_fillets_report_carries_its_kernel_code() {
+        let wall = || {
+            let mut s = Session::default();
+            for (c, p) in [
+                ("parameters.change", json!({"name":"top_radius", "expression":"0.5 mm"})),
+                ("sketch.create", json!({"plane":"XY", "name":"Wall"})),
+                ("sketch.rectangle.two_point", json!({"p0":[0,0], "p1":[30,2]})),
+                ("sketch.finish", json!({})),
+                ("solid.extrude", json!({"distance":"10 mm", "body_name":"Wall"})),
+            ] {
+                s.execute(c, &p).unwrap();
+            }
+            s
+        };
+        let edges = json!([[15, 0, 10], [15, 2, 10]]);
+        let sent = |app: &mut SolveApp, error: &str| {
+            let draft = draft_for(app, None, Some(error));
+            let t = ticket::new_ticket(app, &draft, None);
+            let all = payload::Ticks { system: true, repro: true, log: true, screenshot: true, design: true, crash: true };
+            payload::build(&t.form, all, &t.evidence, "solidcraft test").ticket["repro"]["failing"].clone()
+        };
+        let as_json = |c: &solidcraft_engine::kernel::ErrorCode| json!({"call": c.call, "kind": c.kind, "operation": c.operation});
+
+        // a new fillet the kernel refuses: its command's error
+        let mut s = wall();
+        let e = s.execute("solid.fillet", &json!({"edges": edges, "radius": "1.5 mm"})).unwrap_err();
+        let code = e.error_code().cloned().expect("a kernel code");
+        let mut app = SolveApp::new(s, Default::default());
+        let failing = sent(&mut app, &e.to_string());
+        assert_eq!(failing["code"], as_json(&code), "{failing}");
+
+        // a fillet of the timeline that fails so after a parameter change: its result's
+        let mut s = wall();
+        s.execute("solid.fillet", &json!({"edges": edges, "radius": "top_radius"})).unwrap();
+        let _ = s.execute("parameters.change", &json!({"name":"top_radius", "expression":"1.8 mm"}));
+        let r = s.model.results.iter().find(|r| r.error.is_some()).cloned().unwrap();
+        assert_eq!(r.error_code.as_ref(), Some(&code), "one failure, one code");
+        let mut app = SolveApp::new(s, Default::default());
+        let failing = sent(&mut app, r.error.as_deref().unwrap());
+        assert_eq!(failing["code"], as_json(&code), "{failing}");
+
+        // a failure no kernel call made
+        let failing = sent(&mut app, "Synthetic command error");
+        assert!(failing.get("code").is_none(), "{failing}");
     }
 
     #[test]

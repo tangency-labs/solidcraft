@@ -247,8 +247,16 @@ pub(crate) fn name_of(app: &SolveApp, id: u64) -> Option<String> {
 }
 
 fn view_name(app: &SolveApp, drawing: &Drawing, view: &View, number: usize) -> String {
+    // A view with a label is called what its label says: its name, else its words and letter
+    // (`DETAIL A`), never nothing.
     if let Some(label) = &view.label {
-        return label.name.clone();
+        if !label.name.is_empty() {
+            return label.name.clone();
+        }
+        let called = format!("{} {}", label.words, label.letter);
+        if !called.trim().is_empty() {
+            return called.trim().to_string();
+        }
     }
     if matches!(view.kind, ViewKind::Base { .. } | ViewKind::Projected { .. })
         && let Ok(resolved) = drawing.resolve_view(view.id)
