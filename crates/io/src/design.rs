@@ -2008,8 +2008,10 @@ mod tests {
     #[test]
     fn the_model_cache_manifest_cap_follows_the_design_file_limit() {
         let mut model = native_geometry();
-        // Many small entries make a manifest of about 38 MB without a model that big.
-        model.records["padding"] = json!(vec!["x".repeat(32); 1_100_000]);
+        // A body with a 40 MiB name makes a manifest over 32 MiB without a model that big. The name
+        // is a field the manifest keeps as it is, also when the cache is thinned to the final state
+        // (an extra key on the records is dropped there, and left a small manifest).
+        model.records["model_bodies"][0]["name"] = json!("x".repeat(40 << 20));
         let doc = document();
         // At the default limit: left out, as before.
         assert!(native_cache::encode_model(&model, b"{}", usize::MAX).is_err());
