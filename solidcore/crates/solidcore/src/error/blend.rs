@@ -1804,7 +1804,6 @@ mod tests {
         assert_eq!(cause.class(), class);
         assert!(!cause.is_phrase());
         assert!(cause.replaces_upstream_status());
-        assert_eq!(variant_index_and_phrase_name(&cause).1, None);
         assert_eq!(cause.comparison_status(), SM_ERR);
         let e = SolidError::blend("blend::op", cause);
         assert_eq!(e.kind(), class);
@@ -2225,78 +2224,91 @@ mod tests {
         );
     }
 
-    /// The number of `BlendFailure` variants. Adding a variant means adding an arm to
-    /// `variant_index_and_phrase_name` (the compiler asks for it), with the next index, and
-    /// raising this number; the test below then fails until `causes` holds the new variant.
-    const VARIANTS: usize = 56;
+    /// The inventory of every `BlendFailure` variant, one per line. The macro turns the list
+    /// into an exhaustive `match` (no wildcard), so the compiler refuses a variant left out, and
+    /// into `INVENTORY`, the same names, so the test below checks `causes` against the list
+    /// itself, with no hand-kept count or index.
+    ///
+    /// Adding a variant: put its line here, its arms in the enum's other `match`es and its
+    /// `causes` entry next to the related variant, or in alphabetical position. Never append at
+    /// the end of a list: parallel PRs that all append there conflict with each other.
+    macro_rules! blend_failure_inventory {
+        ($($variant:ident),* $(,)?) => {
+            /// Every variant's name, in the order of the list.
+            const INVENTORY: &[&str] = &[$(stringify!($variant)),*];
 
-    /// Each variant's distinct index in `0..VARIANTS`, and the variant name of a phrase cause
-    /// (`None` for any other cause). The match has no wildcard, so it is the inventory of
-    /// every variant there is.
-    fn variant_index_and_phrase_name(cause: &BlendFailure) -> (usize, Option<&'static str>) {
-        match cause {
-            BlendFailure::NoRoom(_) => (0, None),
-            BlendFailure::StationDidNotConverge { .. } => (1, None),
-            BlendFailure::TrimLoopOpen => (2, None),
-            BlendFailure::TrimLoopDoesNotSeparate => (3, None),
-            BlendFailure::RemovalRefused(_) => (4, None),
-            BlendFailure::StageFailed => (5, None),
-            BlendFailure::Defect { .. } => (6, None),
-            BlendFailure::SkinPastStationCap { .. } => (7, None),
-            BlendFailure::SkinMeasureNotFinite { .. } => (8, None),
-            BlendFailure::BallsNest { .. } => (9, None),
-            BlendFailure::CreasePieceEndUnbuildable { .. } => (10, None),
-            BlendFailure::BandInputMissing(_) => (11, None),
-            BlendFailure::NotCertified { .. } => (12, None),
-            BlendFailure::Failed(_) => (13, Some("Failed")),
-            BlendFailure::Missing(_) => (14, Some("Missing")),
-            BlendFailure::InvalidValue(_) => (15, Some("InvalidValue")),
-            BlendFailure::Inconsistent(_) => (16, Some("Inconsistent")),
-            BlendFailure::BadIntersections(_) => (17, Some("BadIntersections")),
-            BlendFailure::NotConverged(_) => (18, Some("NotConverged")),
-            BlendFailure::OutsideDomain(_) => (19, Some("OutsideDomain")),
-            BlendFailure::NotWithinTolerance(_) => (20, Some("NotWithinTolerance")),
-            BlendFailure::PassedOn { .. } => (21, Some("PassedOn")),
-            BlendFailure::PlaneCurveTouches { .. } => (22, None),
-            BlendFailure::PlaneCurveEndOff { .. } => (23, None),
-            BlendFailure::PlaneCurveLeavesDomain { .. } => (24, None),
-            BlendFailure::PlaneCurveStepVanished { .. } => (25, None),
-            BlendFailure::PlaneCurveFitCap { .. } => (26, None),
-            BlendFailure::ClosedCliffWouldNotSplit { .. } => (27, None),
-            BlendFailure::CliffInputMissing { .. } => (28, None),
-            BlendFailure::NoEdgesGiven => (29, None),
-            BlendFailure::SizeBelowResolution { .. } => (30, None),
-            BlendFailure::PerEdgeListLength { .. } => (31, None),
-            BlendFailure::ParameterListSizes { .. } => (32, None),
-            BlendFailure::FaceHasNoSurface => (33, None),
-            BlendFailure::NoFirstBody => (34, None),
-            BlendFailure::TargetNotGiven => (35, None),
-            BlendFailure::EdgeNotInTarget { .. } => (36, None),
-            BlendFailure::EdgeNotFilletable { .. } => (37, None),
-            BlendFailure::GnSectionInvalid { .. } => (38, None),
-            BlendFailure::CrossSectionTypeUnknown => (39, None),
-            BlendFailure::RadiusTypeNotForEdges { .. } => (40, None),
-            BlendFailure::VariableRadiusLawsNotGiven => (41, None),
-            BlendFailure::VariableRadiusLawMissing { .. } => (42, None),
-            BlendFailure::BevelVertexNotFilleted => (43, None),
-            BlendFailure::LawIntervalEmpty => (44, None),
-            BlendFailure::EdgeWithoutCurve => (45, None),
-            BlendFailure::LawHasNoValue => (46, None),
-            BlendFailure::SequenceCurveNotBSpline { .. } => (47, None),
-            BlendFailure::FilletCrossesItself { .. } => (48, None),
-            BlendFailure::CornerRefused => (49, None),
-            BlendFailure::ExecutiveStepFailed => (50, None),
-            BlendFailure::EdgeSplitDeclined { .. } => (51, None),
-            BlendFailure::LawCornerNotFound { .. } => (52, None),
-            BlendFailure::EdgeUseWithoutEdge => (53, None),
-            BlendFailure::BoundSurfaceRemoved => (54, None),
-            BlendFailure::CornerPatchFaceNotFound { .. } => (55, None),
-        }
+            /// The cause's variant name. A `{ .. }` pattern matches unit, tuple and struct
+            /// variants alike.
+            fn variant_name(cause: &BlendFailure) -> &'static str {
+                match cause {
+                    $(BlendFailure::$variant { .. } => stringify!($variant),)*
+                }
+            }
+        };
     }
 
-    /// `causes` holds every variant once, `variant_index_and_phrase_name` names a cause exactly when it is a phrase cause, and the
+    blend_failure_inventory! {
+        NoRoom,
+        StationDidNotConverge,
+        TrimLoopOpen,
+        TrimLoopDoesNotSeparate,
+        RemovalRefused,
+        StageFailed,
+        Defect,
+        SkinPastStationCap,
+        SkinMeasureNotFinite,
+        BallsNest,
+        CreasePieceEndUnbuildable,
+        BandInputMissing,
+        NotCertified,
+        Failed,
+        Missing,
+        InvalidValue,
+        Inconsistent,
+        BadIntersections,
+        NotConverged,
+        OutsideDomain,
+        NotWithinTolerance,
+        PassedOn,
+        PlaneCurveTouches,
+        PlaneCurveEndOff,
+        PlaneCurveLeavesDomain,
+        PlaneCurveStepVanished,
+        PlaneCurveFitCap,
+        ClosedCliffWouldNotSplit,
+        CliffInputMissing,
+        NoEdgesGiven,
+        SizeBelowResolution,
+        PerEdgeListLength,
+        ParameterListSizes,
+        FaceHasNoSurface,
+        NoFirstBody,
+        TargetNotGiven,
+        EdgeNotInTarget,
+        EdgeNotFilletable,
+        GnSectionInvalid,
+        CrossSectionTypeUnknown,
+        RadiusTypeNotForEdges,
+        VariableRadiusLawsNotGiven,
+        VariableRadiusLawMissing,
+        BevelVertexNotFilleted,
+        LawIntervalEmpty,
+        EdgeWithoutCurve,
+        LawHasNoValue,
+        SequenceCurveNotBSpline,
+        FilletCrossesItself,
+        CornerRefused,
+        ExecutiveStepFailed,
+        EdgeSplitDeclined,
+        LawCornerNotFound,
+        EdgeUseWithoutEdge,
+        BoundSurfaceRemoved,
+        CornerPatchFaceNotFound,
+    }
+
+    /// `causes` holds every variant of `blend_failure_inventory!` exactly once, and the
     /// `BlendFailure` variants the per-file scan (`phrase_sites::BLEND`) counts are exactly
-    /// those names, so the per-file pins in `error/phrase_sites.rs` see every phrase cause.
+    /// those whose cause is a phrase cause (`is_phrase`), so the per-file pins in `error/phrase_sites.rs` see every phrase cause.
     #[test]
     fn the_phrase_scan_lists_exactly_the_phrase_variants() {
         use super::super::site_scan::Builder;
@@ -2428,20 +2440,28 @@ mod tests {
             BlendFailure::BoundSurfaceRemoved,
             BlendFailure::CornerPatchFaceNotFound { surface: 1 },
         ];
-        let mut names = Vec::new();
-        let mut indices = Vec::new();
-        for cause in &causes {
-            let (index, name) = variant_index_and_phrase_name(cause);
-            indices.push(index);
-            assert_eq!(name.is_some(), cause.is_phrase(), "{cause:?}");
-            names.extend(name);
-        }
-        indices.sort_unstable();
+        // The inventory names each variant once (a repeated line would also be an unreachable
+        // arm), so `causes` equals it as a sorted list exactly when it holds each variant once:
+        // a variant missing from `causes`, or held twice, fails here.
+        let mut inventory = INVENTORY.to_vec();
+        inventory.sort_unstable();
+        let mut repeated = inventory.clone();
+        repeated.dedup();
         assert_eq!(
-            indices,
-            (0..VARIANTS).collect::<Vec<_>>(),
+            repeated, inventory,
+            "blend_failure_inventory! repeats a variant"
+        );
+        let mut held: Vec<&str> = causes.iter().map(variant_name).collect();
+        held.sort_unstable();
+        assert_eq!(
+            held, inventory,
             "`causes` must hold each BlendFailure variant exactly once"
         );
+        let mut names: Vec<&str> = causes
+            .iter()
+            .filter(|cause| cause.is_phrase())
+            .map(variant_name)
+            .collect();
         names.sort_unstable();
         let mut scanned = scanned;
         scanned.sort_unstable();
