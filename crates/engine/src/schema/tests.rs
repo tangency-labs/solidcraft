@@ -1359,7 +1359,7 @@ fn step_and_component_link_schema_keys_and_replies() {
         ("component.links", json!({"links": [], "param_warnings": ["unknown parameter"]})),
         (
             "file.insert_step",
-            json!({"path": "part.step", "feature": 1, "name": "Import", "component": 1, "component_name": "Part", "occurrence": 1, "bodies": ["Box"], "created_bodies": ["Box"], "warnings": [], "system": "SolidCraft"}),
+            json!({"path": "part.step", "feature": 1, "name": "Import", "component": 1, "component_name": "Part", "occurrence": 1, "bodies": ["Box"], "created_bodies": ["Box"], "warnings": [], "system": "SolidCraft", "content_sha256": "0000000000000000000000000000000000000000000000000000000000000000"}),
         ),
     ];
     for (id, reply) in examples {

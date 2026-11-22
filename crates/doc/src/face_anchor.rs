@@ -127,12 +127,12 @@ impl Document {
         use crate::feature_geometry::Geo;
         use crate::walk::Walk;
 
-        fn plane<'a>(p: &'a mut PlaneRef, depth: usize, targets: &mut Vec<&'a mut ConfigFaceTarget>) {
+        fn plane<'a>(p: &'a mut PlaneRef, depth: usize, targets: &mut Vec<&'a mut FaceAnchor>) {
             if depth > 64 {
                 return;
             }
             match p {
-                PlaneRef::Face { anchor: Some(anchor), .. } => targets.push(&mut anchor.target),
+                PlaneRef::Face { anchor: Some(anchor), .. } => targets.push(anchor),
                 PlaneRef::Offset { base, .. } | PlaneRef::Flipped { base, .. } => plane(base, depth + 1, targets),
                 PlaneRef::ThroughPoint { base, point } => {
                     plane(base, depth + 1, targets);
@@ -166,7 +166,7 @@ impl Document {
                 _ => {}
             }
         }
-        fn geometry<'a>(g: &'a mut crate::construct::GeoRef, depth: usize, targets: &mut Vec<&'a mut ConfigFaceTarget>) {
+        fn geometry<'a>(g: &'a mut crate::construct::GeoRef, depth: usize, targets: &mut Vec<&'a mut FaceAnchor>) {
             if let crate::construct::GeoRef::Plane { plane: p } = g {
                 plane(p, depth + 1, targets);
             }
@@ -174,9 +174,9 @@ impl Document {
 
         let doc = self.clone();
         let mut warnings = Vec::new();
-        let mut renew = |target: &mut ConfigFaceTarget, label: &str| {
+        let mut renew = |target: &mut ConfigFaceTarget, label: &str| -> bool {
             if target.origin_feature != feature || !matches!(target.certificate, Some(FaceCertificate::Imported { .. })) {
-                return;
+                return false;
             }
             let certificate = || -> Result<FaceCertificate> {
                 let missing = || DocError::Unknown(format!("linked face `{}` on `{}` no longer exists", target.name, target.body));
@@ -204,8 +204,12 @@ impl Document {
                     if target.name.starts_with(&format!("F{feature}:face:")) {
                         warnings.push(format!("{label} refers to a linked face by its place in the file; check its attachment after this update"));
                     }
+                    true
                 }
-                Err(error) => warnings.push(format!("{label}: {error}")),
+                Err(error) => {
+                    warnings.push(format!("{label}: {error}"));
+                    false
+                }
             }
         };
         for f in &mut self.features {
@@ -215,8 +219,23 @@ impl Document {
                 Geo::Construct(g) => geometry(g, 0, &mut targets),
                 _ => {}
             });
-            for target in targets {
-                renew(target, &format!("feature {}", f.name));
+            for anchor in targets {
+                // The anchor's coordinates are measured from the face's own plane, whose origin
+                // moves with the source. Keep the sketch where it was when the face stays in its plane.
+                let old = doc.anchor_canonical_plane(anchor, f.id, before);
+                if renew(&mut anchor.target, &format!("feature {}", f.name)) {
+                    if let Some(old) = old {
+                        if let Some(new) = doc.anchor_canonical_plane(anchor, f.id, after) {
+                            if old.normal().dot(new.normal()) > 1. - 1e-8 && (old.origin - new.origin).dot(new.normal()).abs() < 1e-7 {
+                                let origin = old.origin + old.x * anchor.coordinates[0] + old.y * anchor.coordinates[1];
+                                let x = old.x * anchor.x_axis[0] + old.y * anchor.x_axis[1];
+                                let delta = origin - new.origin;
+                                anchor.coordinates = [delta.dot(new.x), delta.dot(new.y)];
+                                anchor.x_axis = [x.dot(new.x), x.dot(new.y)];
+                            }
+                        }
+                    }
+                }
             }
         }
         for column in &mut self.configs.columns {
@@ -509,6 +528,14 @@ impl Document {
             if *high { "top" } else { "bottom" },
         );
         Ok((indices, Some(note)))
+    }
+
+    /// The face's exact plane in the author's frame, from which the anchor's coordinates are measured.
+    fn anchor_canonical_plane(&self, anchor: &FaceAnchor, author: u64, state: &ModelState) -> Option<Plane> {
+        let body = state.body(&anchor.target.body)?;
+        let (indices, _) = self.anchored_face_indices(state, body, &anchor.target).ok()?;
+        let plane = self.anchor_face_plane(body, *indices.first()?, anchor.target.certificate.as_ref())?;
+        map_plane(&anchor.source_to_author(self, author, body).ok()?, &plane).ok()
     }
 
     pub fn resolve_face_anchor(&self, anchor: &FaceAnchor, author: u64, state: &ModelState) -> Result<Plane> {
