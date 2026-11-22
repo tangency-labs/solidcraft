@@ -130,12 +130,7 @@ fn arc_about_same_centre(c: &LCurve, old: &[Vec2], map: &[Option<usize>], lay: &
     let (ma, mb) = (map.get(a).copied().flatten()?, map.get(b).copied().flatten()?);
     let was = *old.get(centre)?;
     let became = map.get(centre).copied().flatten().and_then(|i| lay.pts.get(i)).copied();
-    // Concentric arcs read again have centres apart by what the kernel's analytic circles differ
-    // by, which can exceed the point tolerance: the same ordered ends and a centre this close
-    // (against the arc's radius) still name one arc, and a mirrored arc of the same ends is far
-    // further off.
-    let reach = 1e-4 * (1.0 + was.dist(*old.get(a)?));
-    let near = |p: Vec2, q: Vec2| p.dist(q) <= reach.max(TOL * (1.0 + p.len().max(q.len())));
+    let near = |p: Vec2, q: Vec2| p.dist(q) <= TOL * (1.0 + p.len().max(q.len()));
     let mut hits = lay.curves.iter().enumerate().filter(|(_, n)| {
         matches!(**n, LCurve::Arc(x, y, z) if y == ma && z == mb
             && lay.pts.get(x).is_some_and(|p| near(*p, was) || became.is_some_and(|q| near(*p, q))))
