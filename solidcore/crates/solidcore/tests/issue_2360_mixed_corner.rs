@@ -879,11 +879,13 @@ fn a_mixed_record_with_breaks_off_the_unit_range_is_invalid_input() {
 /// Review r3 (B1): a break a rounding (5e-14) from another curve's break. The algebra's
 /// union of breaks merges the two but its refinement keeps both, so the two curves it
 /// combines would end with different segment counts and reach the table Defect. The record
-/// check refuses such a record as `InvalidInput`; no shape reaches a Defect.
+/// check refuses such a record as `InvalidInput` exactly when the rule reads the moved curve
+/// (every side's `c`; the Coons rule's `dir`, and its `t` where the side has one); a curve
+/// the rule does not read rebuilds. No shape reaches a Defect.
 #[test]
 fn a_mixed_record_with_breaks_of_two_curves_a_rounding_apart_is_invalid_input() {
-    let mut runs = 0;
-    let mut refused = 0;
+    let mut read_runs = 0;
+    let mut unread_runs = 0;
     for xsect in [1, 0] {
         let (k, b, res) = blended(2.0, xsect);
         res.unwrap();
@@ -931,18 +933,22 @@ fn a_mixed_record_with_breaks_of_two_curves_a_rounding_apart_is_invalid_input() 
                             c.brk.sort_by(f64::total_cmp);
                             let last = c.seg.last().unwrap().clone();
                             c.seg.push(last);
-                            runs += 1;
-                            let Err(e) = corner_rebuild(&k, &CornerRecord::Mixed(off)) else {
-                                continue;
-                            };
-                            let what = format!("xsect {xsect} side {i} curve {which} t {t} d {d}");
-                            assert!(!e.is_defect(), "{what}: {e}");
-                            if which == 0 {
-                                // every side's c is read, by both rules
-                                assert_eq!(e.kind(), ErrorKind::InvalidInput, "{what}: {e}");
-                            }
-                            if e.kind() == ErrorKind::InvalidInput {
-                                refused += 1;
+                            // every side's c is read, by both rules; the Coons rule also
+                            // reads dir, and t where the side has one
+                            let read = which == 0 || (!rec.bilinear && (which == 1 || s.has_t));
+                            let what = format!(
+                                "xsect {xsect} side {i} curve {which} read {read} t {t} d {d}"
+                            );
+                            match corner_rebuild(&k, &CornerRecord::Mixed(off)) {
+                                Err(e) => {
+                                    assert!(read, "{what}: an unread curve is refused: {e}");
+                                    assert_eq!(e.kind(), ErrorKind::InvalidInput, "{what}: {e}");
+                                    read_runs += 1;
+                                }
+                                Ok(_) => {
+                                    assert!(!read, "{what}: a read curve rebuilds");
+                                    unread_runs += 1;
+                                }
                             }
                         }
                     }
@@ -950,5 +956,9 @@ fn a_mixed_record_with_breaks_of_two_curves_a_rounding_apart_is_invalid_input() 
             }
         }
     }
-    assert!(runs > 0 && refused > 0, "{runs} runs, {refused} refused");
+    // both rules, both faces, every side's c at each inner break, both ways
+    assert!(
+        read_runs >= 2 * 2 * 4 * 2,
+        "{read_runs} read runs refused, {unread_runs} unread runs rebuilt"
+    );
 }

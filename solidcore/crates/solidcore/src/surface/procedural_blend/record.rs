@@ -851,6 +851,17 @@ impl BezierCurveRecord {
 /// Whether two of the sorted `breaks` lie within the rounding the Mixed algebra's union
 /// merges (`algebra::breaks_merge`) but are not one break to its refinement
 /// (`algebra::breaks_coincide`).
+///
+/// The check is conservative: it may refuse a record the algebra would combine soundly, in
+/// two cases. It pools the trim curve's breaks, though the rule only evaluates that curve and
+/// never combines it with another; and it tests every pair within merging distance, though
+/// `union` compares a break only with the last break it kept (with `x`, `y` coinciding,
+/// `y`, `z` merging and `x`, `z` not merging, `union` drops `y`, keeps `z`, and never
+/// compares `y` with `z`). Both need two breaks that merge but do not coincide: on `[0, 1]`
+/// their gap `y - x` exceeds `1e-14·(1 + |y|) >= 1e-14` and is at most
+/// `1e-13·(1 + |y|) <= 2e-13`. So only a record holding two breaks `1e-14` to `2e-13` apart
+/// can be over-refused; the records the kernel writes for its own Mixed faces pass (the
+/// round-trip tests rebuild each of them).
 fn mixed_breaks_split(breaks: &[f64]) -> bool {
     use crate::blend::blend_corner::mixed::algebra::{breaks_coincide, breaks_merge};
     breaks.iter().enumerate().any(|(i, &x)| {
