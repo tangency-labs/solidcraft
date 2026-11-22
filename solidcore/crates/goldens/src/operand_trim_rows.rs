@@ -1270,6 +1270,11 @@ mod local_operation {
 /// listed), and each body's moved values are classed by [`certify_body`]: edge and vertex
 /// tolerances against the trims' certified bounds, edge and surface samples by enclosed
 /// distances, a moved surface domain as the samples it moves.
+///
+/// #17739 raises one vertex tolerance of `fillet_group_fillet1019_rb23` to cover twice its
+/// vertex's gap, 4.7505e-4 in both bodies: at `feature0_geometry[171]` (the copy alone gives
+/// 4.4536e-4, main 5.657e-4) and at `base_geometry[267]` (main 4.4536e-4), which the row
+/// lists for it. Both are classed against main's values like any moved value.
 mod feature_executive {
     use super::{certify_body, certify_rewritten, plain_digest, Class, FALSE_POSITIVES, REWRITTEN};
     use crate::units::blend_feature_executive::{result_breps, Runner};

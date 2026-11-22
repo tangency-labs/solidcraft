@@ -31,8 +31,9 @@ pub const FORMAT: &str = "solidcraft-profile/1";
 pub const MAX_PROFILES: usize = 32;
 /// Most bytes read from a profile file.
 const MAX_FILE_BYTES: u64 = 4 * 1024 * 1024;
-/// Most bytes in one checked profile document.
-const MAX_PROFILE_BYTES: usize = 1024 * 1024;
+/// Most bytes in one checked profile document: room for the largest view navigator body, whose
+/// lists are plain numbers ([`crate::view_gizmo`]), about 2 MB written out, and the rest.
+pub(crate) const MAX_PROFILE_BYTES: usize = 3 * 1024 * 1024;
 const MAX_SHORTCUTS: usize = 2000;
 const MAX_FAVOURITES: usize = 64;
 /// Most imported themes one profile carries (the one it uses).
@@ -53,7 +54,6 @@ const PROFILE_KEYS: &[&str] = &[
     "design_reuse_views",
     "design_sub_tab_render",
     "design_sub_tab_sheets",
-    "design_sub_tab_sketches",
     "design_views_as_tabs",
     "dialog_buttons",
     "direct_interaction",

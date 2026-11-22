@@ -446,7 +446,11 @@ pub fn tool_definitions_with(opts: Options) -> Vec<Value> {
              SolidCraft's recovery folder, or a folder this server was started with `--allow-path DIR`. For a folder outside them, ask the user \
              to add `--allow-path` and that folder to this server's arguments in their MCP client configuration.",
             object(
-                json!({"path": string("Path to save to, e.g. part.sc (default: the current file)"), "format": {"type": "string", "enum": ["container", "json"], "description": "Design encoding (default: JSON for .json, container otherwise)"}}),
+                json!({
+                    "path": string("Path to save to, e.g. part.sc (default: the current file)"),
+                    "format": {"type": "string", "enum": ["container", "json"], "description": "Design encoding (default: JSON for .json, container otherwise)"},
+                    "overwrite": {"type": "boolean", "description": "Replace the design's file even though another program or computer changed it since it was opened or saved; without it that save is refused (default false)"}
+                }),
                 &[],
             ),
             Effect::Files,
@@ -1023,7 +1027,7 @@ fn dispatch(b: &mut dyn Backend, name: &str, a: &Map<String, Value>) -> Result<V
         "redo" => exec(b, "edit.redo", json!({})),
         "new_design" => exec(b, "file.new", pick(a, &["name"])),
         "open" => exec(b, "doc.open", pick(a, &["path", "up", "names", "geometry"])),
-        "save" => exec(b, "file.save", pick(a, &["path", "format"])),
+        "save" => exec(b, "file.save", pick(a, &["path", "format", "overwrite"])),
         other => Err(format!("unknown tool `{other}`")),
     }
 }
@@ -1223,7 +1227,7 @@ fn batch_step(step: &Value) -> Result<(String, Value, Option<Narrow>), String> {
             "file.export",
             pick(a, &["path", "format", "bodies", "mesh_prefix", "effort", "velocity", "images", "name", "static", "model_uris"]),
         ),
-        "save" => mapped("file.save", pick(a, &["path", "format"])),
+        "save" => mapped("file.save", pick(a, &["path", "format", "overwrite"])),
         "open" => mapped("doc.open", pick(a, &["path", "up", "names", "geometry"])),
         "new_design" => mapped("file.new", pick(a, &["name"])),
         "crash_reports" => match a.get("id") {

@@ -4,6 +4,7 @@ use solidcraft_geom::prelude::*;
 use std::collections::BTreeMap;
 use std::sync::Arc;
 
+use serde::Deserialize;
 use serde_json::{Value, json};
 use solidcraft_doc::drawing::{self, Drawing};
 use solidcraft_doc::{Document, Feature, FeatureKind};
@@ -11,20 +12,20 @@ use solidcraft_doc::{Document, Feature, FeatureKind};
 use super::CommandSpec;
 use crate::params::{bad, bool_, name_or_id_values, num, str_};
 use crate::schema::edit::{
-    BrokenFeature, FailingFeature, FeatureInfo, FeatureInput, Inspected, OmittedField, SuppressChanged, TimelineComputeAllParams,
-    TimelineComputeAllResult, TimelineDeleteParams, TimelineDeleteResult, TimelineDependentsParams, TimelineDependentsResult, TimelineEditParams,
-    TimelineEditResult, TimelineGroupMade, TimelineGroupParams, TimelineGroupRenamed, TimelineInspectParams, TimelineInspectResult,
-    TimelineMarkerResult, TimelineMoveManyParams, TimelineMoveToGroupParams, TimelineMoved, TimelineMovedToGroup, TimelineRedefineParams,
-    TimelineRedefined, TimelineRenameGroupParams, TimelineRenameParams, TimelineRenameResult, TimelineReorderManyParams, TimelineReorderParams,
-    TimelineReordered, TimelineReorderedMany, TimelineRollToParams, TimelineRollbackParams, TimelineSuppressParams, TimelineSuppressResult,
-    TimelineUngroupParams, TimelineUngrouped,
+    BrokenFeature, FailingFeature, FeatureInfo, FeatureInput, Inspected, OmittedField, SelectModeParams, SelectModeResult, SuppressChanged,
+    TimelineComputeAllParams, TimelineComputeAllResult, TimelineDeleteParams, TimelineDeleteResult, TimelineDependentsParams,
+    TimelineDependentsResult, TimelineEditParams, TimelineEditResult, TimelineGroupMade, TimelineGroupParams, TimelineGroupRenamed,
+    TimelineInspectParams, TimelineInspectResult, TimelineMarkerResult, TimelineMoveManyParams, TimelineMoveToGroupParams, TimelineMoved,
+    TimelineMovedToGroup, TimelineRedefineParams, TimelineRedefined, TimelineRenameGroupParams, TimelineRenameParams, TimelineRenameResult,
+    TimelineReorderManyParams, TimelineReorderParams, TimelineReordered, TimelineReorderedMany, TimelineRollToParams, TimelineRollbackParams,
+    TimelineSuppressParams, TimelineSuppressResult, TimelineUngroupParams, TimelineUngrouped,
 };
 use crate::schema::select::{
     PartialPick, SameLookParams, SelectAllParams, SelectClearParams, SelectClearResult, SelectFilterParams, SelectFilterResult, SelectItem,
     SelectMode, SelectSetParams, SelectSetResult, SharpEdgesParams, read_item,
 };
 use crate::schema::{TypedContract, output_schema_for};
-use crate::{EngineError, Result, Sel, Session, Snapshot};
+use crate::{EngineError, PickMode, Result, Sel, Session, Snapshot};
 
 pub static COMMANDS: &[CommandSpec] = &[
     CommandSpec::new("ui.assistant", "Toggle Assistant", crate::checked!("ui.assistant", assistant))
@@ -36,6 +37,14 @@ pub static COMMANDS: &[CommandSpec] = &[
         .contract(&ASSISTANT_CONTRACT)
         .output(crate::schema::output_schema_for::<crate::schema::edit::AssistantResult>)
         .params("Show or hide Assistant in the app. Headless calls are refused without changing the design"),
+    CommandSpec::new("ui.appBarCustomize", "Customize App Bar...", crate::checked!("ui.appBarCustomize", app_bar_customize))
+        .any_part()
+        .icon("settings")
+        .noundo()
+        .doc_only()
+        .contract(&APP_BAR_CUSTOMIZE_CONTRACT)
+        .output(crate::schema::output_schema_for::<crate::schema::edit::AppBarCustomizeResult>)
+        .params("Validate access to the application bar editor; returns {available: true}. Only an interactive start toggles tray edit mode; programmatic calls never open dialogs"),
     CommandSpec::new("ui.appBarReset", "Reset App Bar", crate::checked!("ui.appBarReset", app_bar_reset))
         .any_part()
         .icon("restore")
@@ -256,6 +265,17 @@ pub static COMMANDS: &[CommandSpec] = &[
         .noundo()
         .contract(&SELECT_ALL_CONTRACT)
         .output(output_schema_for::<SelectSetResult>),
+    CommandSpec::new("select.mode", "Selection Mode", crate::checked!("select.mode", select_mode))
+        .icon("select")
+        .noundo()
+        .doc_only()
+        .contract(&SELECT_MODE_CONTRACT)
+        .output(output_schema_for::<SelectModeResult>)
+        .params(
+        "mode: faces|bodies|features|parts|components|sketch → mode; what a click on the model picks: faces, edges and vertices, \
+         the face's whole body, the feature that made it, the innermost placement or the top-level component holding it, or \
+         sketch geometry only. A window setting: the design is untouched",
+    ),
 ];
 
 const SELECT_SET_CONTRACT: TypedContract<SelectSetParams> = TypedContract::new();
@@ -281,6 +301,7 @@ const MOVE_MANY_CONTRACT: TypedContract<TimelineMoveManyParams> = TypedContract:
 const REORDER_CONTRACT: TypedContract<TimelineReorderParams> = TypedContract::new();
 const REORDER_MANY_CONTRACT: TypedContract<TimelineReorderManyParams> = TypedContract::new();
 const REDEFINE_CONTRACT: TypedContract<TimelineRedefineParams> = TypedContract::new();
+const SELECT_MODE_CONTRACT: TypedContract<SelectModeParams> = TypedContract::new();
 const PLAY_CONTRACT: crate::schema::TypedContract<crate::schema::edit::TimelinePlayParams> = crate::schema::TypedContract::new();
 
 fn play(_s: &mut Session, p: &Value) -> Result<Value> {
@@ -325,6 +346,12 @@ fn assistant(_s: &mut Session, _p: &Value) -> Result<Value> {
 }
 
 const APP_BAR_RESET_CONTRACT: crate::schema::TypedContract<crate::schema::edit::AppBarResetParams> = crate::schema::TypedContract::new();
+
+const APP_BAR_CUSTOMIZE_CONTRACT: crate::schema::TypedContract<crate::schema::edit::AppBarCustomizeParams> = crate::schema::TypedContract::new();
+
+fn app_bar_customize(_s: &mut Session, _p: &Value) -> Result<Value> {
+    reply("ui.appBarCustomize", crate::schema::edit::AppBarCustomizeResult { available: true })
+}
 
 fn app_bar_reset(_s: &mut Session, _p: &Value) -> Result<Value> {
     reply("ui.appBarReset", crate::schema::edit::AppBarResetResult { reset: true })
@@ -1979,6 +2006,16 @@ fn select_all(s: &mut Session, p: &Value) -> Result<Value> {
     s.selection = all;
     s.refresh_display();
     reply("select.all", SelectSetResult { selected: s.selection.len(), param_warnings: Vec::new() })
+}
+
+fn select_mode(_s: &mut Session, p: &Value) -> Result<Value> {
+    let mode = pick_mode(p.get("mode").unwrap_or(&Value::Null)).map_err(|e| bad("select.mode", e))?;
+    reply("select.mode", SelectModeResult { mode, param_warnings: Vec::new() })
+}
+
+/// `select.mode`'s `mode`, with the handler's message for anything else.
+pub(crate) fn pick_mode(v: &Value) -> std::result::Result<PickMode, String> {
+    PickMode::deserialize(v).map_err(|_| "mode must be faces, bodies, features, parts, components or sketch".to_string())
 }
 
 fn select_clear(s: &mut Session, _p: &Value) -> Result<Value> {

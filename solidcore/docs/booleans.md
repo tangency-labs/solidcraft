@@ -324,7 +324,7 @@ there; where that edge's 3D curve lies farther from the surface than its toleran
 2.8e-3 on an imported edge) the curve/edge intersection finds no crossing, and the end, taken for
 inside the face, became a vertex short of the edge with the loop open beside it.
 
-**A curve that runs along an edge without crossing it.** With `classify_edge_interval` (WR-305) an interval between two points on a face's boundary edge whose middle lies within the band of that edge is on the edge, not inside the face. An end the edge intersections find no crossing for (an arc 1.4e-11 from another arc, ending 2.8e-5 short of that arc's corner) used to stay unclassified, so the interval was imprinted as a second edge beside the first; now such an end counts as on the edge when it lies within the band of it and clear of its vertices, the curve is tangent to the edge (within the angle tolerance) at both ends of the interval, and the whole curve over the interval is proved within the band of the edge on control points: the curve piece's control points against the chord of its ends, those ends against the edge piece's ends, and the edge piece's control points against its own chord, rounding counted (`piece_within_band`); the end is then classified to the edge with its parameter on it (`CurveClassification::classify_edge_interval`, `intersect/curve_class/p3.rs`). Without the tangency (a curve that crosses the edge at the interval's classified end and stops a hair past it, whose short piece lies within the band whatever its angle) or the proof (another curve kind, or a curve that bows out of the band between its ends) the end stays unclassified. An interval whose ends both classify onto the edge is still decided by WR-305 alone (a straight piece along a straight edge by its ends, a curved one by its midpoint).
+**A curve that runs along an edge without crossing it.** An interval between two points on a face's boundary edge that runs within the band of that edge is on the edge, not inside the face (WR-305). A curved interval runs along the edge when its ends are farther apart than the band and the whole curve over it and the edge piece between its ends' drops are proved within the band of each other on enclosures, the pair halved where the bound is too coarse (`curve_runs_along`); on a closed edge the pair may run through the edge's seam, and a piece whose ends are one point runs along it only all the way round. A curved interval with an end in the ball of one of the edge's vertices, past the band but certified within that vertex's tolerance as a whole (typically a round's arc leaving a straight edge tangentially at its end), raises the edge's tolerance to its certified distance (cascading to the edge's vertices) and is then on the edge (`EdgeToleranceRaise`). The fork read the interval's midpoint alone, which also took a curve bowing far out of the band between its ends, and a piece about as short as the band that crosses the edge (a sphere clipping a box corner by about the tolerance, whose arc on a side face cuts across the corner: taken as on the edge, the union failed to relate the operands' entities). An end the edge intersections find no crossing for (an arc 1.4e-11 from another arc, ending 2.8e-5 short of that arc's corner) used to stay unclassified, so the interval was imprinted as a second edge beside the first; now such an end counts as on the edge when it lies within the band of it and clear of its vertices, the curve is tangent to the edge (within the angle tolerance) at both ends of the interval, and the whole curve over the interval is proved within the band of the edge on control points: the curve piece's control points against the chord of its ends, those ends against the edge piece's ends, and the edge piece's control points against its own chord, rounding counted (`piece_within_band`); the end is then classified to the edge with its parameter on it (`CurveClassification::classify_edge_interval`, `intersect/curve_class/p3.rs`). Without the tangency (a curve that crosses the edge at the interval's classified end and stops a hair past it, whose short piece lies within the band whatever its angle) or the proof (another curve kind, or a curve that bows out of the band between its ends) the end stays unclassified. An interval whose ends both classify onto the edge is decided by the run test alone (a straight piece along a straight edge by its ends, a curved one by `curve_runs_along`).
 
 **One image for each vertex.** Where two faces of one operand that are not adjacent come within the
 tolerance of each other, as the two faces of a wedge do near its knife edge, the operand is thinner
@@ -364,13 +364,77 @@ entities within tolerance are one, and a decision across that band has to be mad
 every later step. The port's strip rule is one such decision; a general one for curved faces within
 tolerance is open.
 
+**The coincidence rule.** Whether two places are one (a point on a side of a surface's
+domain, a curve along an edge, two points one vertex) is decided by one tolerance:
+`coincidence_tol_3d` (`geom/tol.rs`), the larger of the contact tolerance (`contact_tol_3d`, §6)
+and the two objects' zone tolerances, read by `within_coincidence_tol` at the tolerance or a
+rounding of the copies past it (`γ_32` of the coordinates' size, as `within_contact_tol` reads a
+contact). A zone tolerance is how far an object's stored geometry may stand from what it stands
+for, so a place within it of an object is on the object by the object's own statement; two
+places farther apart than both tolerances are on neither by either, and nothing makes them one.
+Upstream reads such places at the intersection tolerance, the two zone tolerances' sum, twice
+the zone tolerance where they are equal: one place up to 2e-5 at the default 1e-5, where the
+contact rule (§6) takes circles overlapping by more than 1e-5 for two crossings, two places.
+In that band, a groove more than 1e-5 and up to 2e-5 deep cut into a block face (a 50 mm
+block less a box reaching `depth` past its face, 10 wide) comes out as the block unchanged,
+and a boss overhanging a cut ball's rim by as much is dropped by the union.
+
+The sites move to the rule one at a time (§10, "The coincidence rule in migration"). Reading it:
+- the side test of an edge use (`is_edgeuse_side_in_surface`, `topology/edgeuse/p2.rs`; the
+  check's Loop test 2): a sample of the edge, dropped onto the surface, lies on a non-periodic
+  side of the surface's domain within the coincidence tolerance of the surface with itself
+  (its zone tolerance, at least the contact tolerance), where upstream took twice the zone
+  tolerance. A notch twice the zone tolerance deep has edges, where its walls meet the
+  faces across it, that leave the side square to it; at the intersection tolerance every
+  point of them lay on it, across the side's direction, and the check refused the body
+  (`solidcore-ops` `heal.rs`, `a_block_notched_twice_the_tolerance_deep_is_valid`);
+- two points one proto vertex (`find_proto_vertex_within` and `DeclaredContact::overlaps`,
+  `proto_topology/p1/proto.rs`; "One point or two" below): two points, or their uncertainty
+  regions, are one within the larger of their tolerances (radii), where upstream took their
+  sum. A point classified on a vertex is that vertex's point, so its proto vertex also holds
+  the ball of the vertex's own point (`find_or_create_proto_vertex_crossing`,
+  `proto_topology/p3.rs`): a later point within the vertex's tolerance of it is at that proto
+  vertex though it lies farther from the average the pair was placed at;
+- a point of a curve on the vertex where a seam ends on a boundary of material (the seam stretch
+  of `edge_solutions`, `intersect/curve_class/p9.rs`; "Seams and poles" below), with the proto
+  vertices: within the larger tolerance, not the band of both.
+
+Still on the intersection tolerance:
+- an intersection curve along an edge (`edge_solutions`, `intersect/curve_class/p9.rs`): a
+  curve the intersector finds within the two zone tolerances' sum of an edge, all along it,
+  runs along the edge, so the groove's floor is taken for the block's edge and the groove is
+  lost;
+- a vertex of one operand on a line edge of the other (`split_edges_at_vertices`,
+  `topology_intersector/p2.rs`), the two vertices of a pair that a proto vertex relates
+  (`find_or_create_proto_vertex_crossing`, `proto_topology/p3.rs`) and the combine radius of
+  two exactly placed definitions (`EXACT_TOL_FACTOR`, `proto_topology/p2.rs`): moving the
+  first with the proto vertices turns the unions of two boxes whose faces cross at
+  atan(0.1), 8e-7 and 1.5e-5 off (`wr_614_coincident_strip_crossing.rs`,
+  `wr_619_union_solid_leak.rs`), into refusals, so these move with the curve along an edge;
+- an interval of a curve along an edge (`classify_edge_interval`,
+  `intersect/curve_class/p3.rs`): the boss over the rim;
+- the check's Surface test 6 (an open surface's opposite domain sides partially coincident:
+  a notch's wall more than 1e-5 and under 2e-5 wide fails it) and the healer that reads an imported body (`Body::from_record`
+  untrusted), whose healing changes the topology of a block notched more than 1e-5 and under
+  2e-5 deep, so the import is refused;
+- the side test's own degenerate edge (a sample box under twice the zone tolerance).
+
 **One point or two.** A proto vertex holds the points the two operands' intersections give for one
 place. Each point is known to its tolerance (a proto vertex's, or the one a proto vertex made of
 the point would get: the largest of its deviation, the intersector's tolerance and its objects' zone
-tolerances), so two points whose distance exceeds the sum of their tolerances are provably two points,
-and no proto vertex may hold both: `find_proto_vertex_within` (`proto_topology/p1/proto.rs`) takes a
-proto vertex only within that combined tolerance, the distance shrunk by its rounding (`γ_4`), a NaN
-one apart. The capture distance (0.01, or half the nearest vertex pair of either operand) only says
+tolerances). By the coincidence rule (above), two points whose distance exceeds the larger of their
+tolerances (and the contact tolerance) are on neither's ball, two points, and no proto vertex may
+hold both: `find_proto_vertex_within` (`proto_topology/p1/proto.rs`) takes a proto vertex only
+within that tolerance (`within_coincidence_tol`), the distance shrunk by its rounding (`γ_4`), a NaN
+one apart. Upstream's sum made two points with tolerances of 1e-5 one point up to 2e-5 apart: the
+corners of a groove 1.5e-5 deep were one vertex. A proto vertex made of a point on a vertex (a pair
+of operand vertices, or a vertex and an edge or a face) holds the ball of that vertex's own point
+as well as the ball about the average it is placed at: a vertex says every point within its
+tolerance is on it. A cylinder's seam vertex 1e-5 off a bar's edge, made one with its drop on the
+edge (placed midway), is 1e-5 from where the seam crosses the bar's face beside the edge, and
+1.12e-5 from the midway point: the crossing is on the seam vertex, so it is the same proto vertex
+(`solidcore-ops` `boolean.rs`,
+`a_cut_whose_seam_edge_ends_within_tolerance_across_the_seam_is_valid`). The capture distance (0.01, or half the nearest vertex pair of either operand) only says
 where to look. Upstream merges everything within it, and points 1.4e-4 to 1.7e-4 apart (a box edge
 crossing a 0.3 mm sphere twice, each crossing fixed to 5e-6) became one vertex: the arc between them
 a loop, the boolean the sphere alone or "no radial sector of the edge takes the new edge use".
@@ -399,7 +463,8 @@ crossings are one point with the end of the line where its wall touches the bott
 hair inside. Any other point with no crossing angle has the ball of its tolerance. Two points
 are one when their regions are not proved apart (`DeclaredContact::overlaps`: the gap between the
 two segments' projections onto the direction of their closest pair, less its rounding, which no
-pair of their points is closer than even where the near-parallel solve picks the wrong pair), and
+pair of their points is closer than even where the near-parallel solve picks the wrong pair, within
+the larger radius by the coincidence rule), and
 each proto vertex keeps the regions of the points it holds, also when it is combined into another. A
 point goes to the closest proto vertex it is not proved apart from, so a point whose region also
 reaches a second proto vertex (one made after it, or merely farther) leaves two proto vertices that
@@ -565,10 +630,14 @@ has edges (`WorkCounters::seam_tests`, counted in
 
 A stretch of the curve along a seam is what the curve/edge intersector finds within the reach. It
 reports a stretch only where all of it lies within the distance it is given, and the seam's end is
-no pole where the seam ends on a boundary edge: that vertex bounds material and has the band of
-both tolerances about it. So a stretch the intersector finds within the band also stands where an
-enclosure (`Curve::proved_near`) proves every point of it within the reach of the seam or within
-the band of such a vertex (`BoundaryEdge::seam` carries the two).
+no pole where the seam ends on a boundary edge: that vertex bounds material, and a point is on it
+by the coincidence rule (§5, "The coincidence rule": within the larger of the two tolerances and
+the contact tolerance). So a stretch the intersector finds within the band also stands where an
+enclosure (`Curve::proved_near`) proves every point of it within the reach of the seam or on such a
+vertex (`BoundaryEdge::seam` carries the two). Upstream's band of both tolerances about the vertex
+let a curve leaving a cylinder's seam run "along" it to a point 2.2e-5 to 2.4e-5 from the seam's
+end vertex, which the proto vertices hold apart from the vertex: the bar the seam vertex lies that
+far off (`a_cut_whose_seam_edge_ends_within_tolerance_across_the_seam_is_valid`) came out empty.
 
 "One edge or two" takes a seam for an intersection curve by the same reach
 (`find_edge_proved_along`, given the crossing face's surface), and the loop check takes an edge as
@@ -850,6 +919,17 @@ A reviewer can check each of these on a change to the boolean.
 - A curve the marching intersection traces inside a lens of two circles in contact, from the
   touch to a crossing along both edges (a boss 5e-8 past a rim at a zone tolerance of 1e-7),
   is kept as a curve; the contact makes it no event (§6).
+- The coincidence rule in migration (§5, "The coincidence rule"): the side test of an edge use,
+  the proto vertices (`find_proto_vertex_within`, `DeclaredContact::overlaps`) and a seam's end
+  vertex in the seam stretch of `edge_solutions` read `coincidence_tol_3d`; the intersection
+  curve along an edge (`edge_solutions`), a vertex on a line edge (`split_edges_at_vertices`),
+  the vertex pair of a proto vertex, the exactly placed combine radius, the interval along an
+  edge (`classify_edge_interval`), the
+  check's Surface test 6 and the import healer still read the intersection tolerance. Until
+  they move, a groove more than 1e-5 and up to 2e-5 deep (at the default 1e-5) is lost by the
+  difference and a boss overhanging a rim by as much is dropped by the union. The intersection curve, the
+  proto vertices and the side test together restore the groove; the interval along an edge
+  restores the boss.
 
 ## 11. If you're stuck
 

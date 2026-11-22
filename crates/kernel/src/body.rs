@@ -2011,6 +2011,26 @@ impl Body {
         }
     }
 
+    /// Exact material classes, boundary face indices and outward normals for all points.
+    /// The entire request, including optional face selection, uses one ops rollback scope
+    /// and cached kernel face boxes; no per-point or per-face body snapshots, no mesh.
+    pub fn classify_points_with_normals(
+        &self,
+        points: &[Vec3],
+        face: Option<solidcore_ops::PointNormalFace>,
+    ) -> Result<Vec<solidcore_ops::ClassifiedPoint>> {
+        let form = self.ops_body().ok_or_else(|| KernelError::Invalid("point classification needs an exact body".into()))?;
+        let (body, order) = &*form;
+        let points: Vec<[f64; 3]> = points.iter().copied().map(Into::into).collect();
+        body.classify_points_with_normals(order, &points, face).map_err(|e| match e {
+            solidcore_ops::Error::Argument => {
+                KernelError::Invalid("the point must lie on the selected face, or on an exact boundary face when face is omitted".into())
+            }
+            solidcore_ops::Error::Internal(message) => KernelError::Internal(format!("classify points with normals: {message}")),
+            e => KernelError::Failed(format!("classify points with normals: {e}")),
+        })
+    }
+
     /// Where face `face_index` lies along `direction` when it is a plane square to it: its level
     /// from `origin` and the face's own tolerance ([`solidcore_ops::Body::face_square_level`]),
     /// exact, no mesh. `None` for a face that is not, a mesh body, an index out of range or a

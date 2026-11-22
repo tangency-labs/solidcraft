@@ -40,7 +40,7 @@ fn a_profile_holds_input_and_interface_settings_but_not_the_machine() {
     // Test change: show_design_view_switcher, the setting the owner asked for, is a portable key.
     assert_eq!(
         keys.len(),
-        109,
+        108,
         "include document browser visibility and sizing, the repeated-shortcut preference and the browser scroll wheel preferences among the current portable settings"
     );
     for key in [
@@ -818,7 +818,6 @@ fn profile_keys_cover_the_current_portable_preferences() {
         "design_reuse_views",
         "design_sub_tab_render",
         "design_sub_tab_sheets",
-        "design_sub_tab_sketches",
         "design_views_as_tabs",
         "dialog_buttons",
         "direct_interaction",
@@ -922,7 +921,7 @@ fn profile_keys_cover_the_current_portable_preferences() {
     let mut actual: Vec<_> = keys().collect();
     actual.sort_unstable();
     // Test change: one more portable key, show_design_view_switcher, the setting the owner asked for.
-    assert_eq!(expected.len(), 109);
+    assert_eq!(expected.len(), 108);
     assert_eq!(actual, expected);
 }
 
@@ -1137,7 +1136,7 @@ fn a_profile_carries_the_view_navigators_body_and_one_without_leaves_it_alone() 
     run(&mut h, "view.navigator", json!({"style": "custom", "body": body, "texture": "modeled", "arrows": false, "home": false}));
     run(&mut h, "settings.profile.save", json!({"name": "Gizmo"}));
     let exported = capture(&h.app, "Gizmo");
-    assert!(exported["view_gizmo"]["v"].is_string(), "the body is packed into the profile: {}", exported["view_gizmo"]);
+    assert!(exported["view_gizmo"]["v"].is_array(), "the body is carried in the profile as plain numbers: {}", exported["view_gizmo"]);
     assert!(exported.to_string().len() < 64 * 1024, "a box costs little");
 
     // Elsewhere: a design without that body, the signed axes, and no custom body yet.
