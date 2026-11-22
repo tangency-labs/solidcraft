@@ -1,17 +1,21 @@
-//! Local material libraries: inspect/export files and copy exact revisions into a design, and
-//! the library places. The app keeps the places: like `settings.profile.*`, the place commands
-//! check a change and echo it, and the app applies it (`library_places` in the UI crate).
+//! Local material libraries: inspect/export files and copy exact revisions into a design, the
+//! library places, and making and changing library folders. The app keeps the places: like
+//! `settings.profile.*`, the place commands check a change and echo it, and the app applies it
+//! (`library_places` in the UI crate). A write changes files and leaves the libraries it read
+//! again in the session, which the app keeps.
 use super::CommandSpec;
 use crate::schema::libraries::{
-    LibraryApplied, LibraryApplyParams, LibraryExportParams, LibraryExported, LibraryInspectParams, LibraryInspected, LibraryPlaceChange,
-    LibraryPlacesAddParams, LibraryPlacesListParams, LibraryPlacesListed, LibraryPlacesRefreshParams, LibraryPlacesRefreshed,
-    LibraryPlacesRemoveParams, LibraryPlacesSetParams, LibraryTargets, ListedLibrary, ListedPlace,
+    LibraryApplied, LibraryApplyParams, LibraryCreateParams, LibraryEntriesListed, LibraryEntryAddParams, LibraryEntryCopyParams,
+    LibraryEntryEditParams, LibraryEntryListParams, LibraryEntryRemoveParams, LibraryExportParams, LibraryExported, LibraryInspectParams,
+    LibraryInspected, LibraryPlaceChange, LibraryPlacesAddParams, LibraryPlacesListParams, LibraryPlacesListed, LibraryPlacesRefreshParams,
+    LibraryPlacesRefreshed, LibraryPlacesRemoveParams, LibraryPlacesSetParams, LibraryTargets, LibraryWritten, ListedEntry, ListedLibrary,
+    ListedPlace,
 };
 use crate::schema::{TypedContract, output_schema_for};
 use crate::{Result, Session, params::bad};
 use serde_json::{Value, json};
 use solidcraft_io::catalog::{Catalog, Definition};
-use solidcraft_io::library::{self, Library, Place, PlaceEdit, PlaceRow, RowState, Scanned, Status};
+use solidcraft_io::library::{self, Libraries, Library, Place, PlaceEdit, PlaceRow, RowState, Scanned, Status};
 use solidcraft_io::vfs::{self, Remote};
 
 const INSPECT_CONTRACT: TypedContract<LibraryInspectParams> = TypedContract::new();
@@ -22,6 +26,12 @@ const PLACES_ADD_CONTRACT: TypedContract<LibraryPlacesAddParams> = TypedContract
 const PLACES_REMOVE_CONTRACT: TypedContract<LibraryPlacesRemoveParams> = TypedContract::new();
 const PLACES_SET_CONTRACT: TypedContract<LibraryPlacesSetParams> = TypedContract::new();
 const PLACES_REFRESH_CONTRACT: TypedContract<LibraryPlacesRefreshParams> = TypedContract::new();
+const CREATE_CONTRACT: TypedContract<LibraryCreateParams> = TypedContract::new();
+const ENTRY_LIST_CONTRACT: TypedContract<LibraryEntryListParams> = TypedContract::new();
+const ENTRY_ADD_CONTRACT: TypedContract<LibraryEntryAddParams> = TypedContract::new();
+const ENTRY_EDIT_CONTRACT: TypedContract<LibraryEntryEditParams> = TypedContract::new();
+const ENTRY_REMOVE_CONTRACT: TypedContract<LibraryEntryRemoveParams> = TypedContract::new();
+const ENTRY_COPY_CONTRACT: TypedContract<LibraryEntryCopyParams> = TypedContract::new();
 
 pub static COMMANDS: &[CommandSpec] = &[
     CommandSpec::new("library.inspect", "Inspect Local Library", crate::checked!("library.inspect", inspect)).icon("inspect").noundo().doc_only()
@@ -55,7 +65,31 @@ pub static COMMANDS: &[CommandSpec] = &[
     CommandSpec::new("library.places.refresh", "Rescan Library Places", crate::checked!("library.places.refresh", places_refresh)).icon("refresh").noundo().doc_only()
         .contract(&PLACES_REFRESH_CONTRACT)
         .output(output_schema_for::<LibraryPlacesRefreshed>)
-        .params("path?: a listed place (default: every place); the app scans it again"),
+        .params("path?: a listed place (default: every place); changed_only? false: only places whose files changed, by each file's length and time; the app scans it again"),
+    CommandSpec::new("library.create", "New Library", crate::checked!("library.create", create)).icon("add").noundo().doc_only()
+        .contract(&CREATE_CONTRACT)
+        .output(output_schema_for::<LibraryWritten>)
+        .params("place: a listed place's folder, name: 1-128 bytes, provenance?; a new library folder there (in a library place, that folder, which must be empty); never in a read-only place"),
+    CommandSpec::new("library.entry.list", "List Library Entries", crate::checked!("library.entry.list", entry_list)).icon("list").noundo().doc_only()
+        .contract(&ENTRY_LIST_CONTRACT)
+        .output(output_schema_for::<LibraryEntriesListed>)
+        .params("library: id → entries: [{id, revision, kind, name, file, why}], refused ones with why; reads no files"),
+    CommandSpec::new("library.entry.add", "Add Library Entry", crate::checked!("library.entry.add", entry_add)).icon("add").noundo().doc_only()
+        .contract(&ENTRY_ADD_CONTRACT)
+        .output(output_schema_for::<LibraryWritten>)
+        .params("library: id, definition: {kind: material | appearance, value}, provenance?; a new file under a new id; never in a read-only place or the built-in library"),
+    CommandSpec::new("library.entry.edit", "Change Library Entry", crate::checked!("library.entry.edit", entry_edit)).icon("edit").noundo().doc_only()
+        .contract(&ENTRY_EDIT_CONTRACT)
+        .output(output_schema_for::<LibraryWritten>)
+        .params("entry: id, revision: the one read (64 hex digits), definition, provenance? (default: kept); refused when the file changed since; the id stays, the revision changes"),
+    CommandSpec::new("library.entry.remove", "Remove Library Entry", crate::checked!("library.entry.remove", entry_remove)).icon("delete").noundo().doc_only()
+        .contract(&ENTRY_REMOVE_CONTRACT)
+        .output(output_schema_for::<LibraryWritten>)
+        .params("entry: id, revision: the one read; its file moves to the library's .removed folder, never deleted; refused when the file changed since"),
+    CommandSpec::new("library.entry.copy", "Copy Library Entry", crate::checked!("library.entry.copy", entry_copy)).icon("copy").noundo().doc_only()
+        .contract(&ENTRY_COPY_CONTRACT)
+        .output(output_schema_for::<LibraryWritten>)
+        .params("entry: id (any library, the built-in one too), to: a library id; a new entry there under a new id, with the same values and provenance"),
 ];
 
 impl LibraryTargets {
@@ -331,7 +365,91 @@ fn places_refresh(s: &mut Session, p: &Value) -> Result<Value> {
             return Err(bad(cmd, format!("no place is listed at {path}")));
         }
     }
-    reply(cmd, LibraryPlacesRefreshed { path: request.path, param_warnings: Vec::new() })
+    reply(cmd, LibraryPlacesRefreshed { path: request.path, changed_only: request.changed_only, param_warnings: Vec::new() })
+}
+
+/// The revision a caller read: 64 hex digits, as `library.entry.list` gives it.
+fn revision(cmd: &str, revision: &str) -> Result<()> {
+    if revision.len() != 64 || !revision.bytes().all(|b| b.is_ascii_hexdigit()) {
+        return Err(bad(cmd, "`revision` is the 64 hex digits `library.entry.list` gives"));
+    }
+    Ok(())
+}
+
+/// A write's reply. The session keeps the libraries the write read again, so the next command sees
+/// it; the app takes them as they are (`library_places::adopt` in the UI crate).
+fn written(s: &mut Session, cmd: &str, result: std::result::Result<(Libraries, library::write::Written), String>) -> Result<Value> {
+    let (libraries, written) = result.map_err(|e| bad(cmd, e))?;
+    s.libraries = std::sync::Arc::new(libraries);
+    reply(
+        cmd,
+        LibraryWritten { library: written.library, entry: written.entry, revision: written.revision, file: written.file, param_warnings: Vec::new() },
+    )
+}
+
+fn create(s: &mut Session, p: &Value) -> Result<Value> {
+    let cmd = "library.create";
+    let request: LibraryCreateParams = parse(cmd, p)?;
+    let result = s.libraries.create_library(&request.place, &request.name, request.provenance);
+    written(s, cmd, result)
+}
+
+fn entry_list(s: &mut Session, p: &Value) -> Result<Value> {
+    let cmd = "library.entry.list";
+    let request: LibraryEntryListParams = parse(cmd, p)?;
+    let (library, status) = s
+        .libraries
+        .set()
+        .libraries()
+        .find(|(l, _)| l.id() == Some(request.library.as_str()))
+        .ok_or_else(|| bad(cmd, format!("no library {} is listed", request.library)))?;
+    let entries = library
+        .entries()
+        .iter()
+        .map(|listed| {
+            let entry = listed.entry().ok();
+            ListedEntry {
+                id: entry.map(|e| e.id.clone()),
+                revision: entry.map(|e| e.revision.clone()),
+                kind: listed.kind().name().into(),
+                name: entry.map(|e| e.definition.name().to_string()),
+                file: listed.file(),
+                why: listed.entry().err().map(ToString::to_string),
+            }
+        })
+        .collect();
+    let available = *status == Status::Available;
+    reply(cmd, LibraryEntriesListed { library: request.library, available, why: unavailable(status), entries, param_warnings: Vec::new() })
+}
+
+fn entry_add(s: &mut Session, p: &Value) -> Result<Value> {
+    let cmd = "library.entry.add";
+    let request: LibraryEntryAddParams = parse(cmd, p)?;
+    let result = s.libraries.add_entry(&request.library, request.definition, request.provenance);
+    written(s, cmd, result)
+}
+
+fn entry_edit(s: &mut Session, p: &Value) -> Result<Value> {
+    let cmd = "library.entry.edit";
+    let request: LibraryEntryEditParams = parse(cmd, p)?;
+    revision(cmd, &request.revision)?;
+    let result = s.libraries.edit_entry(&request.entry, &request.revision, request.definition, request.provenance);
+    written(s, cmd, result)
+}
+
+fn entry_remove(s: &mut Session, p: &Value) -> Result<Value> {
+    let cmd = "library.entry.remove";
+    let request: LibraryEntryRemoveParams = parse(cmd, p)?;
+    revision(cmd, &request.revision)?;
+    let result = s.libraries.remove_entry(&request.entry, &request.revision);
+    written(s, cmd, result)
+}
+
+fn entry_copy(s: &mut Session, p: &Value) -> Result<Value> {
+    let cmd = "library.entry.copy";
+    let request: LibraryEntryCopyParams = parse(cmd, p)?;
+    let result = s.libraries.copy_entry(&request.entry, &request.to);
+    written(s, cmd, result)
 }
 
 #[cfg(test)]
