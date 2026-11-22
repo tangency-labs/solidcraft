@@ -383,3 +383,119 @@ fn a_caret_key_in_a_following_value_box_keeps_its_value_to_add_to() {
     assert!(b.locked, "{b:?}");
     assert_eq!(b.value, format!("{live}-5"));
 }
+
+/// An L of two 50 mm lines meeting at the origin, with the 3-Point Arc started and its ends
+/// clicked on the lines' free ends (#20719).
+fn l_with_arc_ends() -> Harness {
+    let mut h = Harness::new();
+    h.app.run("sketch.create", json!({"plane":"XY"})).unwrap();
+    h.app.run("sketch.line", json!({"points":[[0,0],[0,50]]})).unwrap();
+    h.app.run("sketch.line", json!({"points":[[0,0],[50,0]]})).unwrap();
+    h.app.cam.distance = 150.0;
+    h.settle();
+    h.step(&json!({"start":"sketch.arc.three_point"})).unwrap();
+    for at in [[0.0, 50.0], [50.0, 0.0]] {
+        h.step(&json!({"move":{"sketch":at}})).unwrap();
+        h.frames(2);
+        h.step(&json!({"click":{"sketch":at}})).unwrap();
+        h.frames(2);
+    }
+    h
+}
+
+fn arc_numbers(h: &Harness) -> (f64, f64, Vec2) {
+    let st = h.app.session.world_state().unwrap();
+    let sk = &st.sketch(h.app.session.active_sketch.unwrap()).unwrap().sketch;
+    let arc = sk.curves.iter().position(|c| matches!(c.kind, CurveKind::Arc { .. })).expect("the arc");
+    let poly = sk.polyline(arc);
+    let (first, last) = (poly[0], poly[poly.len() - 1]);
+    (sk.radius(arc).unwrap(), first.dist(last), poly[poly.len() / 2])
+}
+
+#[test]
+fn three_point_arc_third_point_offers_radius_and_sweep_boxes() {
+    let mut h = l_with_arc_ends();
+    h.step(&json!({"move":{"sketch":[10.0, 10.0]}})).unwrap();
+    h.frames(2);
+    let labels: Vec<_> = h.app.tool.as_ref().unwrap().dims.iter().map(|d| d.label).collect();
+    assert_eq!(labels, ["Radius", "Sweep"]);
+    type_value(&mut h, "50");
+    enter(&mut h);
+    assert!(constraints(&h).iter().any(|k| matches!(k, ConstraintKind::Radius { value, .. } if (*value - 50.0).abs() < 1e-7)));
+    let (radius, chord, middle) = arc_numbers(&h);
+    assert!((radius - 50.0).abs() < 1e-6, "{radius}");
+    assert!((chord - 50.0 * 2f64.sqrt()).abs() < 1e-6, "{chord}");
+    // The cursor was inside the corner: the short arc, not the long one round the outside.
+    assert!(middle.x + middle.y < 50.0, "{middle:?}");
+}
+
+#[test]
+fn three_point_arc_typed_sweep_gives_that_sweep_and_too_small_a_radius_is_refused() {
+    let mut h = l_with_arc_ends();
+    h.step(&json!({"move":{"sketch":[10.0, 10.0]}})).unwrap();
+    h.frames(2);
+    h.step(&json!({"key":"Tab"})).unwrap();
+    type_value(&mut h, "90 deg");
+    enter(&mut h);
+    let kinds = constraints(&h);
+    assert!(kinds.iter().any(|k| matches!(k, ConstraintKind::ArcSweep { value, .. } if (*value - std::f64::consts::FRAC_PI_2).abs() < 1e-7)));
+    assert!(!kinds.iter().any(|k| matches!(k, ConstraintKind::Radius { .. })));
+    let (radius, ..) = arc_numbers(&h);
+    assert!((radius - 50.0).abs() < 1e-6, "{radius}");
+
+    let mut small = l_with_arc_ends();
+    small.step(&json!({"move":{"sketch":[10.0, 10.0]}})).unwrap();
+    small.frames(2);
+    type_value(&mut small, "20");
+    enter(&mut small);
+    assert_eq!(small.app.tool.as_ref().unwrap().pts.len(), 2, "the arc waits for a radius that fits");
+    assert!(
+        !small
+            .app
+            .session
+            .world_state()
+            .unwrap()
+            .sketch(small.app.session.active_sketch.unwrap())
+            .unwrap()
+            .sketch
+            .curves
+            .iter()
+            .any(|c| matches!(c.kind, CurveKind::Arc { .. }))
+    );
+}
+
+#[test]
+fn three_point_arc_snaps_tangent_to_both_lines_of_the_l() {
+    let mut h = l_with_arc_ends();
+    // A little off the tangent arc's middle, (14.64, 14.64).
+    let off = [14.9, 14.4];
+    h.step(&json!({"move":{"sketch":off}})).unwrap();
+    h.frames(2);
+    let hover = h.app.tool.as_ref().unwrap().hover.clone().unwrap();
+    let centre = Vec2::new(50.0, 50.0);
+    assert!((hover.0.dist(centre) - 50.0).abs() < 1e-9, "snapped onto the R50 circle: {:?}", hover.0);
+    h.step(&json!({"click":{"sketch":off}})).unwrap();
+    h.frames(2);
+    let (radius, chord, middle) = arc_numbers(&h);
+    assert!((radius - 50.0).abs() < 1e-3, "{radius}");
+    assert!((chord - 50.0 * 2f64.sqrt()).abs() < 1e-3, "{chord}");
+    assert!(middle.x + middle.y < 50.0, "{middle:?}");
+    let tangents = constraints(&h).iter().filter(|k| matches!(k, ConstraintKind::Tangent { .. })).count();
+    assert!(tangents >= 1, "a Tangent constraint with the lines it starts and ends on");
+}
+
+#[test]
+fn three_point_arc_centre_is_the_circle_through_its_points_and_centre_point_arc_is_unchanged() {
+    let k = 50.0 * 0.5f64.sqrt();
+    let (centre, radius, sweep) =
+        crate::sketch_dims::three_point_circle(Vec2::new(0.0, 50.0), Vec2::new(50.0, 0.0), Vec2::new(50.0 - k, 50.0 - k)).unwrap();
+    assert!(centre.dist(Vec2::new(50.0, 50.0)) < 1e-9 && (radius - 50.0).abs() < 1e-9 && (sweep - std::f64::consts::FRAC_PI_2).abs() < 1e-9);
+    // The long way round, through the far side of the circle.
+    let (_, _, long) = crate::sketch_dims::three_point_circle(Vec2::new(0.0, 50.0), Vec2::new(50.0, 0.0), Vec2::new(50.0 + k, 50.0 + k)).unwrap();
+    assert!((long - 3.0 * std::f64::consts::FRAC_PI_2).abs() < 1e-9);
+    let labels = |cmd, n| crate::sketch_dims::boxes_for(cmd, n).into_iter().map(|b| b.label).collect::<Vec<_>>();
+    assert_eq!(labels("sketch.arc.center_point", 1), ["Radius"]);
+    assert_eq!(labels("sketch.arc.center_point", 2), ["Sweep"]);
+    assert_eq!(labels("sketch.arc.three_point", 1), Vec::<&str>::new());
+    assert_eq!(labels("sketch.arc.three_point", 2), ["Radius", "Sweep"]);
+}

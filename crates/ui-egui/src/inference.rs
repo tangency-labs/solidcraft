@@ -118,6 +118,106 @@ pub fn tangent(sk: &Sketch, prev: Vec2, lp: Vec2, tol: f64) -> Option<Inference>
     keep(best)
 }
 
+/// The directions the sketch's lines and arcs leave the point `p` in, when it is one of their
+/// ends: (curve id, unit direction along the curve there). Construction curves are left out.
+fn leaving(sk: &Sketch, p: Vec2) -> Vec<(String, Vec2)> {
+    let near = |q: Option<Vec2>| q.is_some_and(|q| q.dist(p) <= 1e-7 * (1.0 + p.len()));
+    let mut out = Vec::new();
+    for (i, c) in sk.curves.iter().enumerate() {
+        if c.construction {
+            continue;
+        }
+        match c.kind {
+            CurveKind::Line { a, b } => {
+                if (near(sk.point(a)) || near(sk.point(b)))
+                    && let Some((a, b)) = line_ends(sk, i)
+                    && let Some(d) = (b - a).normalized()
+                {
+                    out.push((c.id.clone(), d));
+                }
+            }
+            CurveKind::Arc { .. } => {
+                let Some(o) = sk.center(i) else { continue };
+                let at_end = c.kind.point_ids().into_iter().any(|id| near(sk.point(id)) && sk.point(id).is_some_and(|q| q.dist(o) > 1e-9));
+                if at_end && let Some(d) = (p - o).normalized() {
+                    out.push((c.id.clone(), d.perp()));
+                }
+            }
+            _ => {}
+        }
+    }
+    out
+}
+
+/// A 3-Point Arc from `start` to `end` whose third point is near the cursor `lp`: the point that
+/// makes the arc tangent to a line or arc that ends at `start` or at `end` (within `tol` of the
+/// cursor). The arc is the circle through both ends that touches that curve's direction at its
+/// own end, and the point is the nearest point of that circle to the cursor, so the cursor's side
+/// of the chord picks which of its two arcs is drawn (#20719).
+pub fn arc_tangent(sk: &Sketch, start: Vec2, end: Vec2, lp: Vec2, tol: f64) -> Option<Inference> {
+    let mut best: Option<Inference> = None;
+    for (from, other) in [(start, end), (end, start)] {
+        let w = from - other;
+        if w.len() <= 1e-9 {
+            continue;
+        }
+        for (curve, dir) in leaving(sk, from) {
+            // The centre lies on the normal at `from`, as far from it as it is from `other`:
+            // |from + n t - other|^2 = t^2.
+            let n = dir.perp();
+            let k = n.dot(w);
+            if k.abs() <= 1e-9 * w.len() {
+                continue;
+            }
+            let t = -w.len2() / (2.0 * k);
+            let centre = from + n * t;
+            let r = t.abs();
+            let v = lp - centre;
+            let d = v.len();
+            if d <= 1e-12 || !r.is_finite() {
+                continue;
+            }
+            let at = centre + v * (r / d);
+            let off = (d - r).abs();
+            if off < tol && at.dist(start) > tol && at.dist(end) > tol && best.as_ref().is_none_or(|b| off < b.dist) {
+                best = Some(Inference { kind: Kind::Tangent, curve, at, dist: off, guide: (centre, at), arg: None });
+            }
+        }
+    }
+    keep(best)
+}
+
+/// The 3-Point Arc `arc` was placed from `start` to `end` through `through`: when its third point
+/// was the tangent snap, add a Tangent constraint with each line or arc that ends at `start` or
+/// `end` and meets the arc there at a tangent. One that the sketch already implies or would
+/// conflict with is not kept. The drawing's undo step takes them in.
+pub fn commit_arc(app: &mut SolveApp, arc: &str, start: Vec2, end: Vec2, through: Vec2) {
+    let Some(_) = current().filter(|i| i.kind == Kind::Tangent && i.at.dist(through) < 1e-9) else { return };
+    clear();
+    let curves: Vec<String> = {
+        let st = crate::open_meshing::session_world(&app.session);
+        let Some(sk) = app.session.active_sketch.and_then(|s| st.sketch(s)).map(|s| &s.sketch) else { return };
+        let Some(i) = sk.curve_index(arc) else { return };
+        let (Some(centre), Some(r)) = (sk.center(i), sk.radius(i)) else { return };
+        let mut ids: Vec<String> = Vec::new();
+        for p in [start, end] {
+            let Some(radial) = (p - centre).normalized() else { continue };
+            for (id, dir) in leaving(sk, p) {
+                // Tangent: along the curve is across the arc's radius there.
+                if id != arc && dir.dot(radial).abs() <= 1e-6 && (p.dist(centre) - r).abs() <= 1e-6 * r.max(1.0) && !ids.contains(&id) {
+                    ids.push(id);
+                }
+            }
+        }
+        ids
+    };
+    let history = std::mem::take(&mut app.session.undo);
+    for id in curves {
+        let _ = app.session.execute("sketch.constraint.tangent", &json!({"a": id, "b": arc, "if_redundant": "refuse"}));
+    }
+    app.session.undo = history;
+}
+
 /// The line from `prev` passes near the centre of a circle or arc (within `tol`).
 ///
 /// The point lands on that radial line, so the segment contains the centre. On the circle it
@@ -251,7 +351,7 @@ pub fn commit(app: &mut SolveApp, line: &str, end: Vec2) {
 
 /// The dashed guide of the current inference (its label is the snap hint) (while the Line tool is active).
 pub fn show(app: &SolveApp, painter: &egui::Painter, proj: &Proj) {
-    if app.tool.as_ref().is_none_or(|t| t.cmd != "sketch.line") {
+    if app.tool.as_ref().is_none_or(|t| !matches!(t.cmd, "sketch.line" | "sketch.arc.three_point")) {
         return;
     }
     let Some(i) = current() else { return };

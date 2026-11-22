@@ -106,9 +106,10 @@ thread_local! {
     static COMB_OPTIONS: Cell<CombOptions> = const { Cell::new(CombOptions::DEFAULT) };
     /// The points that snap lined the cursor up with, and where it went (#7828).
     static LINED: RefCell<Option<(Vec2, Vec<Lined>)>> = const { RefCell::new(None) };
-    /// The drawing tool's points so far and whether it is the Line tool, from the last hover: a
-    /// click takes the tool out of the app while it runs, and must place what the hover showed.
-    static TOOL: RefCell<(Vec<Vec2>, bool)> = const { RefCell::new((Vec::new(), true)) };
+    /// The drawing tool's points so far, whether it is the Line tool, and whether it is the
+    /// 3-Point Arc waiting for its third point, from the last hover: a click takes the tool out of
+    /// the app while it runs, and must place what the hover showed.
+    static TOOL: RefCell<(Vec<Vec2>, bool, bool)> = const { RefCell::new((Vec::new(), true, false)) };
     /// The image file a Canvas or Decal tool places.
     static IMAGE: RefCell<Option<String>> = const { RefCell::new(None) };
     /// Analysis markers shown while an analysis tool is active: (where, label).
@@ -702,9 +703,9 @@ pub fn refine_snap(
     }
     // The tool's points and kind (a click takes the tool out of the app while it runs, so the
     // last hover's are kept: a rectangle's click takes no Line tool inference its hover didn't).
-    let (own, line_tool) = match app.tool.as_ref() {
+    let (own, line_tool, arc_tool) = match app.tool.as_ref() {
         Some(t) => {
-            let own: (Vec<Vec2>, bool) = (t.pts.iter().map(|p| p.0).collect(), t.cmd == "sketch.line");
+            let own: (Vec<Vec2>, bool, bool) = (t.pts.iter().map(|p| p.0).collect(), t.cmd == "sketch.line", t.cmd == "sketch.arc.three_point");
             TOOL.with(|c| *c.borrow_mut() = own.clone());
             own
         }
@@ -731,6 +732,16 @@ pub fn refine_snap(
     {
         best = Some((i.dist, i.label(), i.at));
         mid_of = i.arg;
+    }
+    // 3-Point Arc: the third point that makes the arc tangent to a line or arc it starts or ends
+    // on (#20719), exact: the point of that tangent circle nearest the cursor.
+    if !mid_only
+        && best.is_none()
+        && arc_tool
+        && let [start, end] = own[..]
+        && let Some(i) = crate::inference::arc_tangent(sk, start, end, lp, tol)
+    {
+        best = Some((i.dist, i.label(), i.at));
     }
     // On a curve (coincident with it). A spline, ellipse or conic has no exact shape here: the
     // nearest point of the polyline it is drawn with, which the click's point-on-curve

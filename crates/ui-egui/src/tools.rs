@@ -661,6 +661,14 @@ pub fn place(app: &mut SolveApp, p: (Vec2, Option<String>)) {
                     }
                 }
                 let placed: Vec<Vec2> = tool.pts.iter().map(|p| p.0).collect();
+                // A 3-Point Arc whose third point was the tangent snap is tangent to the curves it
+                // starts and ends on (#20719).
+                if tool.cmd == "sketch.arc.three_point"
+                    && let [start, end, through] = placed[..]
+                    && let Some(arc) = curves.first()
+                {
+                    crate::inference::commit_arc(app, arc, start, end, through);
+                }
                 crate::sketch_tools::constrain_lined(app, &mut tool, &placed, &before);
                 tool.pts.clear();
                 crate::sketch_dims::reset(&mut tool);
@@ -1247,7 +1255,7 @@ pub(crate) fn preview_curve(
     Some(sk)
 }
 
-fn preview_circumcentre(a: Vec2, b: Vec2, c: Vec2) -> Option<Vec2> {
+pub(crate) fn preview_circumcentre(a: Vec2, b: Vec2, c: Vec2) -> Option<Vec2> {
     let ab = b - a;
     let ac = c - a;
     let d = 2.0 * ab.cross(ac);

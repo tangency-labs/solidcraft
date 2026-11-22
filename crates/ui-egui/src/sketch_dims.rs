@@ -66,6 +66,8 @@ pub fn boxes_for(cmd: &str, n: usize) -> Vec<DimBox> {
         ("sketch.ellipse", 2) => vec![b("Minor radius", Length)],
         ("sketch.arc.center_point" | "sketch.slot.arc_center", 1) => vec![b("Radius", Length)],
         ("sketch.arc.center_point" | "sketch.slot.arc_center", 2) => vec![b("Sweep", Angle)],
+        // The third point of a 3-Point Arc gives its radius and sweep (#20719).
+        ("sketch.arc.three_point", 2) => vec![b("Radius", Length), b("Sweep", Angle)],
         ("sketch.polygon.inscribed" | "sketch.polygon.circumscribed", 1) => vec![b("Radius", Length), b("Sides", Unitless)],
         // By side: the side from the first click to the second (#11271).
         ("sketch.polygon.edge", 1) => vec![b("Length", Length), b("Sides", Unitless)],
@@ -111,6 +113,48 @@ fn dir_or_x(v: Vec2) -> Vec2 {
 
 fn sign(x: f64) -> f64 {
     if x < 0.0 { -1.0 } else { 1.0 }
+}
+
+/// The circle through `s`, `e` and `t`: its centre, radius and the sweep (radians) of the arc from
+/// `s` to `e` that passes through `t`. None for points on one line.
+pub(crate) fn three_point_circle(s: Vec2, e: Vec2, t: Vec2) -> Option<(Vec2, f64, f64)> {
+    let centre = crate::tools::preview_circumcentre(s, t, e)?;
+    let r = centre.dist(s);
+    let chord = e - s;
+    let n = chord.normalized()?.perp();
+    if !r.is_finite() || r <= 1e-9 {
+        return None;
+    }
+    let mid = (s + e) * 0.5;
+    let minor = 2.0 * (chord.len() / (2.0 * r)).clamp(-1.0, 1.0).asin();
+    // The arc through `t` is the long one when `t` is on the centre's side of the chord.
+    let long = n.dot(t - mid) * n.dot(centre - mid) > 0.0;
+    Some((centre, r, if long { std::f64::consts::TAU - minor } else { minor }))
+}
+
+/// The third point of the 3-Point Arc from `s` to `e` for the cursor `h` with a typed radius or
+/// sweep (radians; the sweep wins when both are typed): on the arc of that size whose middle is
+/// nearest the cursor. A radius picks among the minor and major arcs on either side of the chord;
+/// a sweep takes the cursor's side. None: no such arc (a radius under half the chord).
+fn arc_through(s: Vec2, e: Vec2, h: Vec2, radius: Option<f64>, sweep: Option<f64>) -> Option<Vec2> {
+    let chord = e - s;
+    let len = chord.len();
+    let n = chord.normalized()?.perp();
+    let mid = (s + e) * 0.5;
+    if let Some(sweep) = sweep {
+        if !(sweep > 1e-9 && sweep < std::f64::consts::TAU - 1e-9) {
+            return None;
+        }
+        let half = sweep * 0.5;
+        let r = len / (2.0 * half.sin());
+        return Some(mid + n * (sign(n.dot(h - mid)) * r * (1.0 - half.cos())));
+    }
+    let r = radius?;
+    if !r.is_finite() || r * 2.0 < len - 1e-9 {
+        return None;
+    }
+    let k = (r * r - len * len * 0.25).max(0.0).sqrt();
+    [k + r, k - r, r - k, -k - r].into_iter().map(|d| mid + n * d).filter(|p| p.is_finite()).min_by(|x, y| x.dist(h).total_cmp(&y.dist(h)))
 }
 
 /// The next point the tool would place for the cursor at `h`, honouring locked values.
@@ -177,6 +221,14 @@ pub fn effective(app: &SolveApp, t: &Tool, h: Vec2) -> Vec2 {
             c + Vec2::from_angle(a0 + sweep) * r
         }
         ("sketch.polygon.inscribed" | "sketch.polygon.circumscribed", 1) => a + dir_or_x(h - a) * lk("Radius").unwrap_or((h - a).len()),
+        // A typed radius or sweep puts the third point on the arc of that size nearest the cursor.
+        ("sketch.arc.three_point", 2) => {
+            let Some(start) = t.pts.first().map(|p| p.0) else { return h };
+            if lk("Radius").is_none() && lk("Sweep").is_none() {
+                return h;
+            }
+            arc_through(start, a, h, lk("Radius"), lk("Sweep")).unwrap_or(h)
+        }
         ("sketch.polygon.edge", 1) => a + dir_or_x(h - a) * lk("Length").unwrap_or((h - a).len()),
         ("sketch.slot.center_to_center" | "sketch.slot.overall" | "sketch.slot.center_point", 2) => match lk("Width") {
             Some(w) => {
@@ -420,6 +472,14 @@ fn live(app: &SolveApp, t: &Tool, e: Vec2, px: f64) -> Vec<(f64, Vec2)> {
                 _ => ((e - first).angle() - a0).rem_euclid(std::f64::consts::TAU),
             };
             vec![(sweep, e + dir_or_x(e - first) * (2.5 * off))]
+        }
+        // Beyond the cursor, away from the centre, clear of the pointer (#2201).
+        ("sketch.arc.three_point", 2) => {
+            let (r, sweep, out) = match three_point_circle(first, a, e) {
+                Some((centre, r, sweep)) => (r, sweep, dir_or_x(e - centre)),
+                None => (0.0, 0.0, Vec2::X),
+            };
+            vec![(r, e + out * (2.5 * off)), (sweep, e + out * (4.5 * off))]
         }
         ("sketch.conic", 2) => {
             // `rho` is the curve's fullness, not a distance: the conic passes through
@@ -670,6 +730,23 @@ pub fn validate(app: &SolveApp, t: &Tool) -> Result<(), String> {
             _ => return Err(format!("{} must be positive", dimension.label)),
         }
     }
+    if t.cmd == "sketch.arc.three_point"
+        && let (Some(start), Some(end)) = (t.pts.first(), t.pts.get(1))
+    {
+        let chord = start.0.dist(end.0);
+        let (radius, sweep) = (locked(app, t, "Radius"), locked(app, t, "Sweep"));
+        if radius.is_some_and(|r| r * 2.0 < chord - 1e-9) {
+            return Err("Radius must be at least half the distance between the arc's ends".into());
+        }
+        if sweep.is_some_and(|sw| !(sw > 1e-9 && sw < std::f64::consts::TAU - 1e-9)) {
+            return Err("Sweep must be greater than zero and less than 360 degrees".into());
+        }
+        if let (Some(r), Some(sw)) = (radius, sweep)
+            && (2.0 * r * (sw * 0.5).sin() - chord).abs() > 1e-6 * (1.0 + chord)
+        {
+            return Err("Radius and Sweep do not fit the distance between the arc's ends: type one of them".into());
+        }
+    }
     if t.cmd == "sketch.slot.overall"
         && let (Some(length), Some(width)) = (locked(app, t, "Length"), locked(app, t, "Width"))
         && length <= width
@@ -749,6 +826,20 @@ fn boxes(app: &SolveApp, ui: &mut egui::Ui, proj: &Proj, t: &mut Tool) -> Option
     let e = shown(app, t, hover.as_ref()?);
     let px = 2.0 * app.cam.half_height() / f64::from(proj.rect.height().max(1.0));
     let lv = live(app, t, e, px);
+    // The 3-Point Arc's centre, a small cross while its third point is placed. Only a marker: no
+    // geometry is added (#20719).
+    if t.cmd == "sketch.arc.three_point"
+        && let (Some(start), Some(end)) = (t.pts.first(), t.pts.get(1))
+        && let Some((centre, _, _)) = three_point_circle(start.0, end.0, e)
+        && let Some(at) = proj.to_screen(plane.to_world(centre))
+        && at.is_finite()
+    {
+        let stroke = egui::Stroke::new(1.5, tk.rubber_band);
+        let arm = 5.0;
+        ui.painter().line_segment([at - vec2(arm, 0.0), at + vec2(arm, 0.0)], stroke);
+        ui.painter().line_segment([at - vec2(0.0, arm), at + vec2(0.0, arm)], stroke);
+        crate::scenario::publish_count("arc_centre_marker", 1.0);
+    }
     let focus = std::mem::take(&mut t.dims_focus);
     // Egui processes ordinary Tab navigation before these floating text edits are drawn.
     // Remember the box that owned the keyboard and restore a focus within this tool after

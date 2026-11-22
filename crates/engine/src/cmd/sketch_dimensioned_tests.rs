@@ -88,6 +88,24 @@ fn signed_arc_sweep_retains_radius_and_logical_endpoint_identity() {
     }
 }
 
+/// #20719: a 3-Point Arc takes a typed Radius and Sweep as dimensions on the arc it draws; its three
+/// points stay as clicked, and it is never dimensioned unless a value is typed.
+#[test]
+fn a_three_point_arc_takes_a_typed_radius_and_sweep() {
+    let mut s = session();
+    let params = json!({"start":[0,50],"end":[50,0],"through":[50.0 - 50.0 * 0.5f64.sqrt(), 50.0 - 50.0 * 0.5f64.sqrt()]});
+    draw(&mut s, "sketch.arc.three_point", params.clone(), json!({"radius":50,"sweep":"90 deg"}));
+    close(measure(&s, |k| matches!(k, ConstraintKind::Radius { .. })), 50.0);
+    close(measure(&s, |k| matches!(k, ConstraintKind::ArcSweep { .. })), std::f64::consts::FRAC_PI_2);
+    let mut plain = session();
+    run(&mut plain, "sketch.arc.three_point", params.clone());
+    assert!(sketch(&plain).constraints.is_empty());
+    // Asking for the sizes as drawn leaves a typed-only creator as it is drawn.
+    let mut asked = session();
+    run(&mut asked, "sketch.draw.dimensioned", json!({"command":"sketch.arc.three_point","params":params,"as_drawn":true,"locate":true}));
+    assert!(sketch(&asked).constraints.is_empty());
+}
+
 /// #6645: a clicked end with `clockwise` sweeps from the start the other way round, keeps the
 /// start's radius and its `.start`/`.end` names, with and without a typed radius.
 #[test]
