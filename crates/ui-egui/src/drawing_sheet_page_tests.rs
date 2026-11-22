@@ -39,6 +39,73 @@ fn note_tool_places_text_on_the_active_sheet() {
     assert_eq!(note.content.0, vec![solidcraft_engine::geom::cell::Part::Text("Deburr all edges".to_owned())]);
 }
 
+/// A note saved before alignments keeps its layout in the Notes tool's panel: its own entry is selected
+/// and OK changes nothing; choosing Centre is per-line centring (`centre`), a different layout, and only
+/// then does the edit set it. A note with an alignment has no such entry.
+#[test]
+fn a_note_saved_before_alignments_has_its_own_choice_in_the_notes_panel() {
+    let (mut h, _) = plate_sheet();
+    let added = h.app.run("drawing.note.add", json!({"anchor": {"sheet": "Sheet 1"}, "at": [300, 230], "content": "DEBURR"})).unwrap();
+    let id = solidcraft_engine::doc::ids::decode(added["note"].as_str().unwrap()).unwrap();
+    let align = |h: &Harness| h.app.session.drawing("drawing.inspect").unwrap().notes.by_id(id).unwrap().align;
+    let open = |h: &mut Harness| {
+        crate::drawing_workspace::edit_object(&mut h.app, "note", id);
+        settle(h);
+        h.frames(3);
+        assert!(crate::drawing_workspace::inspector_visible(&h.app), "the note's options are open");
+    };
+    let click = |h: &mut Harness, at: egui::Pos2| {
+        h.step(&json!({"click": [at.x, at.y]})).unwrap();
+        h.frames(3);
+    };
+    // Where to click for an entry: its segment when the choice is a row of segments, and, when the kit
+    // has turned it into a dropdown for want of room (as it may with the fourth entry), its place in the
+    // list, which this opens.
+    let entry = |h: &mut Harness, name: &str, key: &'static str| {
+        if let Some(segment) = crate::scenario::rect_of(&format!("drawing:note:align:{name}")) {
+            return Some(segment.center());
+        }
+        let widget = crate::scenario::rect_of("dialog:widget:Alignment")?.center();
+        click(h, widget);
+        solidcraft_ui_registry::handle_at(&format!("dialog:Alignment:{}", solidcraft_ui_text::tr(key)))
+    };
+    let ok = |h: &mut Harness| {
+        let at = crate::scenario::rect_of("dialog:button::OK").expect("OK is drawn").center();
+        click(h, at);
+    };
+    // A note with an alignment: its choices are Left, Center and Right, no entry for the old layout.
+    open(&mut h);
+    let shown = |name: &str| crate::scenario::rect_of(&format!("drawing:note:align:{name}")).is_some();
+    assert!(shown("left") && shown("centre") && shown("right"), "the three choices are drawn");
+    assert!(!shown("saved"), "no entry for the old layout on a note that has an alignment");
+    crate::drawing_workspace::close_panel(&mut h.app);
+    // The same note as an older drawing saved it.
+    h.app
+        .session
+        .edit_drawing("drawing.note.edit", |d| {
+            if let Some(at) = d.notes.index_of(id)
+                && let Some(note) = d.notes.get_mut(at)
+            {
+                std::sync::Arc::make_mut(note).align = None;
+            }
+            Ok(())
+        })
+        .unwrap();
+    assert_eq!(align(&h), None);
+    open(&mut h);
+    let saved = entry(&mut h, "saved", "ui.drawing_note.align_saved").expect("the old layout has its own entry");
+    // Picking it, the entry that is selected, changes nothing, and neither does OK.
+    click(&mut h, saved);
+    let undo = h.app.session.undo.len();
+    ok(&mut h);
+    assert_eq!((align(&h), h.app.session.undo.len()), (None, undo), "choosing nothing changes nothing");
+    open(&mut h);
+    let centre = entry(&mut h, "centre", "ui.drawing_note.align_centre").expect("Center is an entry");
+    click(&mut h, centre);
+    ok(&mut h);
+    assert_eq!(align(&h), Some(solidcraft_engine::geom::cell::HAlign::Centre), "Centre is per-line centring");
+}
+
 /// A right-click on the sheet opens the menu a sketch's right-click opens: it selects what is under
 /// the pointer first, offers Edit and Delete for it, then the tools, then Undo and Redo. On empty
 /// paper the selection stays, and a right-click with a tool in hand puts the tool down.
