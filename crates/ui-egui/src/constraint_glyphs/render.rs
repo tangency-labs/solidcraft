@@ -7,7 +7,7 @@ use solidcore_record::{Plane, Vec3};
 use solidcraft_engine::Sel;
 use solidcraft_engine::doc::SolvedSketch;
 use solidcraft_engine::geom::prelude::*;
-use solidcraft_engine::sketch::{ConstraintKind, CurveKind};
+use solidcraft_engine::sketch::{ConstraintKind, CurveKind, Sketch};
 
 use crate::SolveApp;
 use crate::icons::markers::{glyph_icon, glyph_letter};
@@ -15,13 +15,13 @@ use crate::viewport::{Hit, Proj};
 
 use super::actions::{active_sketch, detach_distance_mm_for_view, resolve_detach_target, selected_symmetric_point, sketch_px_per_mm};
 use super::grouping::{
-    AnchorKey, ConstraintAnchorGroup, CurveRelGroup, CurveRelKind, anchor_groups_with_rel, constraint_entities, find_point_cluster,
-    glyph_constraints, glyph_group, point_cluster_map,
+    AnchorKey, ConstraintAnchorGroup, CurveRelGroup, CurveRelKind, HoveredGeom, SelectedGeomKey, anchor_groups_with_rel, constraint_entities,
+    constraint_relates_to_geom, find_point_cluster, glyph_constraints, glyph_group, point_cluster_map,
 };
 use super::layout::{PlacementScene, glyph_label_rect, glyph_label_wrap_width, square_grid_dims};
 use super::{
-    BADGE_HOVER_DELAY_SECS, CONSTRAINT_GROUP_NEVER, ConstraintFlashGhost, DetachPreview, DrawnRelInfo, GLYPH, HISTORY_FADE_MS, HistoryFlashState,
-    MIN_GLYPH_SPAN_PX, OVERLAY, SymmetryBreakPreview, VC_HOVER_DELAY_SECS, ViewKey, constraint_glyphs_visible_at_scale, glyph_px, pattern_icon_for,
+    BADGE_HOVER_DELAY_SECS, CONSTRAINT_GROUP_NEVER, ConstraintFlashGhost, DetachPreview, DrawnRelInfo, GEOM_HOVER_DELAY_SECS, GLYPH, HISTORY_FADE_MS,
+    HistoryFlashState, MIN_GLYPH_SPAN_PX, OVERLAY, SymmetryBreakPreview, ViewKey, constraint_glyphs_visible_at_scale, glyph_px, pattern_icon_for,
 };
 
 const MIN_VIEW_NORMAL_COS: f64 = 0.342_020_143_325_668_8;
@@ -51,6 +51,35 @@ fn sketch_span_px(ss: &SolvedSketch, proj: &Proj) -> f32 {
         }
     }
     if r.min.x <= r.max.x { r.width().max(r.height()) } else { 0.0 }
+}
+
+fn hovered_sketch_geom(app: &SolveApp, sid: u64, sk: &Sketch, parent: &mut [usize]) -> Option<HoveredGeom> {
+    if !app.preferences.show_constraints_on_geometry_hover || app.tool.is_some() || app.dialog.as_ref().is_some_and(|d| d.wants_picks()) {
+        return None;
+    }
+    match app.viewport.hover.as_ref()? {
+        Hit::SketchCurve { sketch, id, .. } | Hit::SketchMidpoint { sketch, id, .. } if *sketch == sid => sk.curve_index(id).map(HoveredGeom::Curve),
+        Hit::SketchPoint { sketch, id, .. } if *sketch == sid => {
+            sk.resolve_point(id).map(|p| HoveredGeom::PointCluster(find_point_cluster(parent, p)))
+        }
+        _ => None,
+    }
+}
+
+fn last_selected_sketch_geom(app: &SolveApp, sid: u64, sk: &Sketch, parent: &mut [usize]) -> Option<(SelectedGeomKey, HoveredGeom)> {
+    if !app.preferences.show_constraints_on_geometry_hover || app.tool.is_some() || app.dialog.as_ref().is_some_and(|d| d.wants_picks()) {
+        return None;
+    }
+    app.session.selection.iter().rev().find_map(|sel| match sel {
+        Sel::SketchCurve { id, sketch } if sketch.is_none_or(|s| s == sid) => {
+            sk.curve_index(id).map(|ci| (SelectedGeomKey::Curve(id.clone()), HoveredGeom::Curve(ci)))
+        }
+        Sel::SketchMidpoint { id } => sk.curve_index(id).map(|ci| (SelectedGeomKey::Curve(id.clone()), HoveredGeom::Curve(ci))),
+        Sel::SketchPoint { id } => {
+            sk.resolve_point(id).map(|p| (SelectedGeomKey::Point(id.clone()), HoveredGeom::PointCluster(find_point_cluster(parent, p))))
+        }
+        _ => None,
+    })
 }
 
 fn highlight_constraints_entities(ss: &SolvedSketch, painter: &egui::Painter, proj: &Proj, tk: &solidcraft_theme::Tokens, ids: &[String]) {
@@ -343,9 +372,12 @@ pub fn show(app: &SolveApp, painter: &egui::Painter, proj: &Proj, hover: Option<
     let cell_gap = (2.0 * scale).round().max(2.0);
     let pad = (4.0 * scale).round().max(3.0);
     let threshold = app.preferences.constraint_group_threshold;
+    let only_on_hover = app.preferences.show_constraints_on_geometry_hover && app.preferences.only_show_constraints_on_geometry_hover;
     let now = painter.ctx().input(|i| i.time);
     let expand_margin = 10.0 * scale;
     let mut point_parent = point_cluster_map(&ss.sketch);
+    let hovered_geom = hovered_sketch_geom(app, sid, &ss.sketch, &mut point_parent);
+    let last_sel = last_selected_sketch_geom(app, sid, &ss.sketch, &mut point_parent);
 
     // Virtual-corner hover/selection reveal (400 ms dwell on hover, immediate on left-click).
     let vc_points: HashSet<usize> = ss.sketch.virtual_corners().into_iter().map(|(pi, _)| pi).collect();
@@ -385,9 +417,50 @@ pub fn show(app: &SolveApp, painter: &egui::Painter, proj: &Proj, hover: Option<
         }
     }
 
-    let (prev_badge_expanded, vc_hovered_active) = OVERLAY.with(|cell| {
+    let (geom_active, geom_pinned, locked_geom, prev_badge_expanded, vc_hovered_active) = OVERLAY.with(|cell| {
         let mut st = cell.borrow_mut();
-        let prev_exp = if let Some((exp_key, prev_rect)) = st.badge_expanded {
+        if !app.preferences.show_constraints_on_geometry_hover {
+            st.geom_hover.clear();
+            st.geom_expanded.clear();
+            st.geom_pinned = None;
+            st.locked_sel = None;
+        } else {
+            let prev_geom = st.geom_hover.active;
+            st.geom_hover.update(hovered_geom, now, GEOM_HOVER_DELAY_SECS, painter.ctx());
+            if let Some((pg, _, prect)) = st.geom_pinned
+                && st.geom_hover.active.is_none_or(|a| a == pg)
+                && hover.is_some_and(|h| prect.expand(expand_margin).contains(h))
+            {
+                // Keep geom_pinned alive while pointer stays inside its expanded box.
+            } else if hovered_geom.is_none()
+                && let Some(prev_g) = prev_geom
+                && let Some(h) = hover
+                && let Some(&(key, rect)) = st.geom_expanded.iter().find(|(_, r)| r.expand(expand_margin).contains(h))
+            {
+                if only_on_hover {
+                    st.geom_pinned = Some((prev_g, key, rect));
+                } else {
+                    st.geom_pinned = None;
+                    st.badge_expanded = Some((key, rect));
+                }
+            } else {
+                st.geom_pinned = None;
+            }
+            if st.locked_sel.as_ref() != last_sel.as_ref().map(|(k, _)| k) {
+                st.locked_sel = None;
+            }
+            if let (Some((sel_key, sel_geom)), Some(active_g)) = (&last_sel, st.geom_hover.active)
+                && *sel_geom == active_g
+            {
+                st.locked_sel = Some(sel_key.clone());
+            }
+        }
+        st.geom_expanded.clear();
+        let locked = st.locked_sel.as_ref().and_then(|lk| last_sel.as_ref().filter(|(k, _)| k == lk).map(|(_, g)| *g));
+        let prev_exp = if only_on_hover {
+            st.badge_expanded = None;
+            None
+        } else if let Some((exp_key, prev_rect)) = st.badge_expanded {
             if hover.is_some_and(|h| prev_rect.expand(expand_margin).contains(h)) {
                 st.badge_hover.clear();
                 Some((exp_key, prev_rect))
@@ -398,18 +471,21 @@ pub fn show(app: &SolveApp, painter: &egui::Painter, proj: &Proj, hover: Option<
         } else {
             None
         };
-        let vc_act = st.vc_hover.update(raw_vc_hover, now, VC_HOVER_DELAY_SECS, painter.ctx());
-        (prev_exp, vc_act)
+        let vc_act = st.vc_hover.update(raw_vc_hover, now, GEOM_HOVER_DELAY_SECS, painter.ctx());
+        (st.geom_hover.active, st.geom_pinned, locked, prev_exp, vc_act)
     });
 
     let vc_poc_revealed = |p: usize| vc_hovered_active == Some(p) || revealed_vc_selected.contains(&p);
-    let (mut vc_revealed_ids, mut hidden_vc_ids) = (HashSet::new(), HashSet::new());
+    let (mut vc_revealed_ids, mut vc_selected_ids, mut hidden_vc_ids) = (HashSet::new(), HashSet::new(), HashSet::new());
     if !vc_points.is_empty() {
         for c in glyph_constraints(&ss.sketch) {
             if let ConstraintKind::PointOnCurve { p, c: curve } = c.kind
                 && vc_points.contains(&p)
                 && matches!(ss.sketch.curves.get(curve).map(|cv| &cv.kind), Some(CurveKind::Line { .. } | CurveKind::Arc { .. }))
             {
+                if revealed_vc_selected.contains(&p) {
+                    vc_selected_ids.insert(c.id.clone());
+                }
                 if vc_poc_revealed(p) {
                     vc_revealed_ids.insert(c.id.clone());
                 } else {
@@ -433,10 +509,19 @@ pub fn show(app: &SolveApp, painter: &egui::Painter, proj: &Proj, hover: Option<
         raw_groups.retain(|g| !g.constraint_ids.is_empty());
     }
 
-    let mut geom_lit_ids: HashSet<String> = vc_revealed_ids;
+    let effective_geom = geom_active.or(geom_pinned.map(|(g, _, _)| g)).or(locked_geom);
+    let mut geom_lit_ids: HashSet<String> = match effective_geom {
+        Some(geom) => {
+            glyph_constraints(&ss.sketch).filter(|c| constraint_relates_to_geom(&mut point_parent, &c.kind, geom)).map(|c| c.id.clone()).collect()
+        }
+        None => HashSet::new(),
+    };
+    geom_lit_ids.extend(vc_revealed_ids);
     let mut flashed_ids: HashSet<String> = history_added.keys().cloned().collect();
     for rg in &rel_groups {
-        if rg.constraint_ids.iter().any(|id| geom_lit_ids.contains(id)) {
+        if matches!(effective_geom, Some(HoveredGeom::Curve(ci)) if rg.curves.contains(&ci))
+            || rg.constraint_ids.iter().any(|id| geom_lit_ids.contains(id))
+        {
             geom_lit_ids.extend(rg.constraint_ids.iter().cloned());
         }
         if rg.constraint_ids.iter().any(|cid| history_added.contains_key(cid)) {
@@ -444,14 +529,44 @@ pub fn show(app: &SolveApp, painter: &egui::Painter, proj: &Proj, hover: Option<
         }
     }
 
-    let always_visible_ids: HashSet<String> = if only_flashed { flashed_ids.clone() } else { HashSet::new() };
+    let always_visible_ids: HashSet<String> = if only_flashed {
+        flashed_ids.clone()
+    } else if only_on_hover {
+        let mut set: HashSet<String> = glyph_constraints(&ss.sketch)
+            .filter(|c| {
+                let g = glyph_group(&ss.sketch, &c.id);
+                g.iter().any(|x| ss.report.failing.contains(x))
+                    || flashed_ids.contains(&c.id)
+                    || vc_selected_ids.contains(&c.id)
+                    || picked.as_deref() == Some(c.id.as_str())
+                    || app.session.selection.iter().any(|s| matches!(s, Sel::SketchConstraint { id: x } if g.contains(x)))
+            })
+            .map(|c| c.id.clone())
+            .collect();
+        for rg in &rel_groups {
+            if rg.constraint_ids.iter().any(|g| {
+                ss.report.failing.contains(g)
+                    || flashed_ids.contains(g)
+                    || picked.as_deref() == Some(g.as_str())
+                    || app.session.selection.iter().any(|s| matches!(s, Sel::SketchConstraint { id: x } if x == g))
+            }) {
+                set.extend(rg.constraint_ids.iter().cloned());
+            }
+        }
+        set
+    } else {
+        HashSet::new()
+    };
 
     let prev_dirs = OVERLAY.with(|c| c.borrow().prev_anchor_dirs.clone());
     let mut next_dirs: HashMap<AnchorKey, egui::Vec2> = HashMap::new();
+    let cursor_obstacle = hover.map(|h| egui::Rect::from_center_size(h, egui::vec2(18.0 * scale, 18.0 * scale)));
     let mut placed_groups: Vec<PlacedGroup> = Vec::new();
     for mut group in raw_groups {
         if only_flashed {
             group.constraint_ids.retain(|id| always_visible_ids.contains(id));
+        } else if only_on_hover {
+            group.constraint_ids.retain(|id| always_visible_ids.contains(id) || geom_lit_ids.contains(id));
         }
         if group.constraint_ids.is_empty() {
             continue;
@@ -459,7 +574,8 @@ pub fn show(app: &SolveApp, painter: &egui::Painter, proj: &Proj, hover: Option<
         let Some(base) = proj.to_screen(ss.plane.to_world(group.at)) else { continue };
         let dir_screen = group.dir.and_then(|d| proj.to_screen(ss.plane.to_world(group.at + d)));
         let has_flashed = group.constraint_ids.iter().any(|id| flashed_ids.contains(id));
-        let grouped = !only_flashed
+        let grouped = !only_on_hover
+            && !only_flashed
             && !has_flashed
             && !matches!(group.key, AnchorKey::CurveJoint(..))
             && threshold < CONSTRAINT_GROUP_NEVER
@@ -471,22 +587,34 @@ pub fn show(app: &SolveApp, painter: &egui::Painter, proj: &Proj, hover: Option<
             cols as f32 * glyph + cols.saturating_sub(1) as f32 * cell_gap + box_pad,
             rows as f32 * glyph + rows.saturating_sub(1) as f32 * cell_gap + box_pad,
         );
-        let rect = scene.place_group(base, dir_screen, size, glyph, None, prev_dirs.get(&group.key).copied());
+        let pinned_rect = geom_pinned.filter(|&(_, k, r)| k == group.key && (r.size() - size).length() <= 1.0).map(|(_, _, r)| r);
+        let rect = pinned_rect.unwrap_or_else(|| {
+            let avoid_cursor = if only_on_hover && geom_active.is_some() { cursor_obstacle } else { None };
+            scene.place_group(base, dir_screen, size, glyph, avoid_cursor, prev_dirs.get(&group.key).copied())
+        });
         let d = (rect.center() - base).normalized();
         if d.length_sq() > 0.1 {
             next_dirs.insert(group.key, d);
+        }
+        if only_on_hover && (geom_active.is_some() || geom_pinned.is_some_and(|(_, k, _)| k == group.key)) {
+            OVERLAY.with(|c| c.borrow_mut().geom_expanded.push((group.key, rect)));
         }
         scene.placed.push(rect);
         placed_groups.push(PlacedGroup { group, grouped, has_box, cols, base, rect });
     }
 
     // Resolve direct hover/click expansion of a collapsed badge.
-    let badge_expanded_idx = if let Some((exp_key, _)) = prev_badge_expanded {
+    let badge_expanded_idx = if only_on_hover {
+        None
+    } else if let Some((exp_key, _)) = prev_badge_expanded {
         let idx = placed_groups.iter().position(|p| p.grouped && p.group.key == exp_key);
         if idx.is_none() {
             OVERLAY.with(|c| c.borrow_mut().badge_expanded = None);
         }
         idx
+    } else if geom_active.is_some() {
+        OVERLAY.with(|c| c.borrow_mut().badge_hover.clear());
+        None
     } else {
         let hovered_badge = hover.and_then(|h| {
             placed_groups
@@ -503,7 +631,14 @@ pub fn show(app: &SolveApp, painter: &egui::Painter, proj: &Proj, hover: Option<
         })
     };
 
-    let expanded_indices: Vec<usize> = badge_expanded_idx.into_iter().collect();
+    let mut expanded_indices: Vec<usize> = badge_expanded_idx.into_iter().collect();
+    if !only_on_hover && effective_geom.is_some() {
+        for (i, p) in placed_groups.iter().enumerate() {
+            if p.grouped && !expanded_indices.contains(&i) && p.group.constraint_ids.iter().any(|id| geom_lit_ids.contains(id)) {
+                expanded_indices.push(i);
+            }
+        }
+    }
 
     struct ExpandedBox {
         idx: usize,
@@ -529,12 +664,25 @@ pub fn show(app: &SolveApp, painter: &egui::Painter, proj: &Proj, hover: Option<
             cols as f32 * cell_px + cols.saturating_sub(1) as f32 * gap_px + pad_px * 2.0,
             rows as f32 * cell_px + rows.saturating_sub(1) as f32 * gap_px + pad_px * 2.0,
         );
-        let hard_blockers: Vec<egui::Rect> = expanded_boxes.iter().map(|b| b.rect).collect();
+        let must_enclose = badge_expanded_idx == Some(idx);
+        let mut hard_blockers: Vec<egui::Rect> = expanded_boxes.iter().map(|b| b.rect).collect();
+        if !must_enclose
+            && geom_active.is_some()
+            && let Some(c) = cursor_obstacle
+        {
+            hard_blockers.push(c);
+        }
         let neighbors: Vec<egui::Rect> =
             placed_groups.iter().enumerate().filter(|(i, _)| *i != idx && !expanded_indices.contains(i)).map(|(_, p)| p.rect).collect();
-        let exp_rect = scene.place_expanded(exp.rect, exp.base, box_size, proj.rect, true, &hard_blockers, &neighbors, 4.0 * scale);
+        let exp_rect = scene.place_expanded(exp.rect, exp.base, box_size, proj.rect, must_enclose, &hard_blockers, &neighbors, 4.0 * scale);
         OVERLAY.with(|c| {
-            c.borrow_mut().badge_expanded = Some((exp.group.key, exp_rect));
+            let mut st = c.borrow_mut();
+            if must_enclose {
+                st.badge_expanded = Some((exp.group.key, exp_rect));
+            }
+            if geom_active.is_some() {
+                st.geom_expanded.push((exp.group.key, exp_rect));
+            }
         });
         expanded_boxes.push(ExpandedBox { idx, rect: exp_rect, cols, cell_px, gap_px, pad_px });
     }

@@ -1,0 +1,50 @@
+{
+  "en": {
+    "prefs.only_show_constraints_on_geometry_hover": "Only show constraints related to hovered geometry",
+    "prefs.only_show_constraints_on_geometry_hover_note": "Hide healthy unselected constraints until a sketch curve or point is hovered for 400 ms (or kept visible after left-clicking a hovered geometry).",
+    "prefs.show_constraints_on_geometry_hover": "Show constraints on hover over geometry",
+    "prefs.show_constraints_on_geometry_hover_note": "Hovering over a sketch curve or point for 400 ms highlights its constraints and expands any collapsed groups that contain them."
+  },
+  "ar": {
+    "prefs.only_show_constraints_on_geometry_hover": "إظهار القيود المرتبطة بالهندسة المُمرَّر فوقها فقط",
+    "prefs.only_show_constraints_on_geometry_hover_note": "إخفاء القيود السليمة غير المحددة حتى يتم التمرير فوق منحنى أو نقطة في الرسم لمدة 400 مللي ثانية (أو إبقاؤها ظاهرة بعد النقر الأيسر عليها).",
+    "prefs.show_constraints_on_geometry_hover": "إظهار القيود عند التمرير فوق الهندسة",
+    "prefs.show_constraints_on_geometry_hover_note": "يؤدي التمرير فوق منحنى أو نقطة في الرسم لمدة 400 مللي ثانية إلى تمييز قيودها وتوسيع أي مجموعات مطوية تحتوي عليها."
+  },
+  "de": {
+    "prefs.only_show_constraints_on_geometry_hover": "Nur Bindungen der überfahrenen Geometrie anzeigen",
+    "prefs.only_show_constraints_on_geometry_hover_note": "Blendet gesunde, nicht ausgewählte Bindungen aus, bis eine Skizzenkurve oder ein Punkt 400 ms überfahren (oder danach angeklickt) wird.",
+    "prefs.show_constraints_on_geometry_hover": "Bindungen beim Überfahren von Geometrie anzeigen",
+    "prefs.show_constraints_on_geometry_hover_note": "Wenn der Mauszeiger 400 ms über einer Skizzenkurve oder einem Punkt ruht, werden deren Bindungen hervorgehoben und zugehörige Gruppen aufgeklappt."
+  },
+  "he": {
+    "prefs.only_show_constraints_on_geometry_hover": "הצג רק אילוצים הקשורים לגאומטריה שמתחת לסמן",
+    "prefs.only_show_constraints_on_geometry_hover_note": "הסתרת אילוצים תקינים שאינם נבחרים עד שמרחפים מעל עקומה או נקודה למשך 400 אלפיות שנייה (או משאירים אותם מוצגים לאחר לחיצה שמאלית).",
+    "prefs.show_constraints_on_geometry_hover": "הצג אילוצים בעת ריחוף מעל גאומטריה",
+    "prefs.show_constraints_on_geometry_hover_note": "ריחוף מעל עקומה או נקודה בשרטוט למשך 400 אלפיות שנייה מדגיש את האילוצים שלה ומרחיב קבוצות מכווצות המכילות אותם."
+  },
+  "ja": {
+    "prefs.only_show_constraints_on_geometry_hover": "ホバー中のジオメトリに関連する拘束のみ表示",
+    "prefs.only_show_constraints_on_geometry_hover_note": "スケッチ曲線または点に 400 ms ホバー（またはホバー後に左クリック）するまで、未選択の正常な拘束を非表示にします。",
+    "prefs.show_constraints_on_geometry_hover": "ジオメトリ上のホバー時に拘束を表示",
+    "prefs.show_constraints_on_geometry_hover_note": "スケッチ曲線または点の上に 400 ms カーソルを置くと、関連する拘束をハイライトし、それらを含むグループを展開します。"
+  },
+  "ko": {
+    "prefs.only_show_constraints_on_geometry_hover": "마우스를 올린 형상과 관련된 구속 조건만 표시",
+    "prefs.only_show_constraints_on_geometry_hover_note": "스케치 곡선이나 점 위에 400ms 동안 마우스를 올리거나(또는 올린 뒤 왼쪽 클릭할 때까지) 선택되지 않은 정상 구속 조건을 숨깁니다.",
+    "prefs.show_constraints_on_geometry_hover": "형상 위에 마우스를 올릴 때 구속 조건 표시",
+    "prefs.show_constraints_on_geometry_hover_note": "스케치 곡선이나 점 위에 400ms 동안 마우스를 올리면 해당 구속 조건을 강조하고 이를 포함한 그룹을 펼칩니다."
+  },
+  "vi": {
+    "prefs.only_show_constraints_on_geometry_hover": "Chỉ hiện ràng buộc liên quan đến hình học đang di chuột",
+    "prefs.only_show_constraints_on_geometry_hover_note": "Ẩn các ràng buộc bình thường chưa chọn cho đến khi giữ chuột trên đường cong hoặc điểm trong 400 ms (hoặc giữ nguyên sau khi nhấp chuột trái).",
+    "prefs.show_constraints_on_geometry_hover": "Hiện ràng buộc khi di chuột lên hình học",
+    "prefs.show_constraints_on_geometry_hover_note": "Giữ chuột trên đường cong hoặc điểm phác thảo trong 400 ms để làm nổi bật các ràng buộc của nó và mở rộng các nhóm thu gọn chứa chúng."
+  },
+  "zh": {
+    "prefs.only_show_constraints_on_geometry_hover": "仅显示与悬停几何图形相关的约束",
+    "prefs.only_show_constraints_on_geometry_hover_note": "在草图曲线或点上悬停 400 毫秒（或悬停并左键单击后保持显示）之前，隐藏未选中的正常约束。",
+    "prefs.show_constraints_on_geometry_hover": "悬停在几何图形上时显示约束",
+    "prefs.show_constraints_on_geometry_hover_note": "在草图曲线或点上悬停 400 毫秒时高亮显示其约束，并展开包含这些约束的折叠分组。"
+  }
+}

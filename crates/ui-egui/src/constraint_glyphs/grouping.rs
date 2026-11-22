@@ -42,6 +42,18 @@ pub(crate) struct CurveRelGroup {
     pub(crate) first_for_curve: HashMap<usize, String>,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub(crate) enum HoveredGeom {
+    Curve(usize),
+    PointCluster(usize),
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) enum SelectedGeomKey {
+    Curve(String),
+    Point(String),
+}
+
 pub(crate) struct ConstraintAnchorGroup {
     pub(crate) key: AnchorKey,
     pub(crate) at: Vec2,
@@ -133,6 +145,14 @@ pub(crate) fn point_cluster_map(sk: &Sketch) -> Vec<usize> {
         }
     }
     parent
+}
+
+pub(crate) fn constraint_relates_to_geom(parent: &mut [usize], k: &ConstraintKind, geom: HoveredGeom) -> bool {
+    let (cs, ps) = constraint_entities(k);
+    match geom {
+        HoveredGeom::Curve(ci) => cs.contains(&ci),
+        HoveredGeom::PointCluster(root) => ps.into_iter().any(|p| find_point_cluster(parent, p) == root),
+    }
 }
 
 /// Constraints that draw a glyph: no dimensions, one MidPoint per shared midpoint, no PointOnCurve

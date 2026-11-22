@@ -472,7 +472,9 @@ pub fn over_group_badge_or_expanded(pos: Pos2) -> bool {
     OVERLAY.with(|cell| {
         let st = cell.borrow();
         let reach = st.glyph_px * 0.1;
-        st.collapsed_badges.iter().any(|(_, r)| r.expand(reach).contains(pos)) || st.badge_expanded.is_some_and(|(_, r)| r.contains(pos))
+        st.collapsed_badges.iter().any(|(_, r)| r.expand(reach).contains(pos))
+            || st.badge_expanded.is_some_and(|(_, r)| r.contains(pos))
+            || st.geom_expanded.iter().any(|(_, r)| r.contains(pos))
     })
 }
 
