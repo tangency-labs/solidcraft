@@ -755,14 +755,15 @@ const JUNCTION_TOL: f64 = 2.0 * SAMPLE_TOL;
 
 /// The junction of an exact run with a plain one taken as the crossing, when it lies within
 /// [`JUNCTION_TOL`] of the exact curve: the point on the curve nearest `p` and its parameter
-/// (the plain run's end moves there). Two exact runs have no plain end to move.
+/// (the plain run's end moves there). Only a line end moves: an arc's end can only turn along its
+/// own circle, which would leave the joint open. Two exact runs have no plain end to move.
 fn project_junction(a: &Run, b: &Run, p: Vec2) -> Option<(Vec2, f64, f64)> {
     let (seg, t, within) = match (a, b) {
-        (Run::Exact { seg, t0, t1, .. }, Run::Plain(_)) => {
+        (Run::Exact { seg, t0, t1, .. }, Run::Plain(plain)) if plain.first().is_some_and(|s| matches!(s, Seg2::Line { .. })) => {
             let t = local_param(seg, p, *t1);
             (seg, t, t > *t0 && t <= 1.0)
         }
-        (Run::Plain(_), Run::Exact { seg, t0, t1, .. }) => {
+        (Run::Plain(plain), Run::Exact { seg, t0, t1, .. }) if plain.last().is_some_and(|s| matches!(s, Seg2::Line { .. })) => {
             let t = local_param(seg, p, *t0);
             (seg, t, t >= 0.0 && t < *t1)
         }
