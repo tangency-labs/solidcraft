@@ -324,6 +324,16 @@ pub enum SurfaceFailure {
         /// The test of the analytic kind the NURB failed.
         check: AnalyticCheck,
     },
+    /// The point given, moved onto the plane of the generator (along the extrusion, or
+    /// about the axis), meets no point of the generator curve: the inversion's search
+    /// found none, so the point is not on the surface. Class `failed`.
+    PointNotOnGenerator,
+    /// The extrusion is not perpendicular to its generator's plane, which the routine's
+    /// closed form needs. [`ErrorKind::Unsupported`].
+    GeneratorNotPerpendicular,
+    /// The line through the point along the extrusion crosses the generator nowhere, so no
+    /// directrix runs through the point. Class `failed`.
+    DirectrixNotFound,
 }
 
 /// The test of an analytic kind a NURB failed ([`SurfaceFailure::NurbNotAnalytic`]).
@@ -458,7 +468,8 @@ impl SurfaceFailure {
             | Self::PlainVolume
             | Self::BSplineVolumeUnsupported
             | Self::NotACylinder
-            | Self::NurbNotAnalytic { .. } => ErrorKind::Unsupported,
+            | Self::NurbNotAnalytic { .. }
+            | Self::GeneratorNotPerpendicular => ErrorKind::Unsupported,
             Self::PointInBendSingularity
             | Self::ZeroVolumeTangent { .. }
             | Self::LineCrossingSingular
@@ -648,6 +659,13 @@ impl core::fmt::Display for SurfaceFailure {
             }
             Self::NurbNotAnalytic { check } => {
                 write!(f, "the NURB is not of the analytic kind: {check}")
+            }
+            Self::PointNotOnGenerator => f.write_str("the point is not on the generator curve"),
+            Self::GeneratorNotPerpendicular => {
+                f.write_str("the extrusion is not perpendicular to its generator")
+            }
+            Self::DirectrixNotFound => {
+                f.write_str("no directrix of the extrusion runs through the point")
             }
         }
     }
@@ -1097,6 +1115,17 @@ mod tests {
                 SM_ERR,
                 ErrorKind::Unsupported,
             ),
+            (
+                SurfaceFailure::PointNotOnGenerator,
+                SM_ERR,
+                ErrorKind::Failed,
+            ),
+            (
+                SurfaceFailure::GeneratorNotPerpendicular,
+                SM_ERR,
+                ErrorKind::Unsupported,
+            ),
+            (SurfaceFailure::DirectrixNotFound, SM_ERR, ErrorKind::Failed),
         ];
         for (failure, status, kind) in cases {
             let e = SolidError::surface(op, failure);
@@ -1201,8 +1230,6 @@ mod tests {
             ("solidcore/src/surface/procedural_blend/offset.rs", 5),
             ("solidcore/src/surface/side.rs", 7),
             ("solidcore/src/surface/sphere.rs", 16),
-            ("solidcore/src/surface/surf_of_extrusion/p1.rs", 16),
-            ("solidcore/src/surface/surf_of_extrusion/p2.rs", 13),
             ("solidcore/src/surface/surf_of_revolution/p1.rs", 10),
             ("solidcore/src/surface/surf_of_revolution/p2.rs", 6),
             ("solidcore/src/surface/surf_of_revolution/p3.rs", 21),
