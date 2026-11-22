@@ -2243,8 +2243,8 @@ fn second_order_rail_guess(
     for ((slot, (fs, index)), end) in rails.iter_mut().zip(pairs).zip(ends) {
         let (e, vertex_param, from_min) = end.ok_or_else(|| defect(OP, NO_RAIL_END))?;
         let ivl = edge::interval(target, e)?;
-        let curve = edge::curve(target, e)?
-            .ok_or_else(|| edge_without_curve_status(OP, e, SM_ERR))?;
+        let curve =
+            edge::curve(target, e)?.ok_or_else(|| edge_without_curve_status(OP, e, SM_ERR))?;
         // the span the edge runs along from the vertex (the flag picks the span that starts
         // at the parameter; an edge's curve can run on past its end, into the next edge's)
         let pv = curve.evaluate(k, vertex_param, 2, from_min, true)?;

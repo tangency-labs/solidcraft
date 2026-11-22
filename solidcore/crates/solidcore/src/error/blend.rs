@@ -904,7 +904,10 @@ impl BlendFailure {
             | Self::NotCertified { .. }
             | Self::PlaneCurveFitCap { .. } => ErrorKind::NotWithinTolerance,
             Self::PlaneCurveTouches { .. } => ErrorKind::Degenerate,
-            Self::PlaneCurveEndOff { .. } => ErrorKind::NotFound,
+            Self::PlaneCurveEndOff { .. }
+            | Self::SrfSrfHeadingNotFollowed
+            | Self::SrfSrfNoCurveThroughEnds { .. }
+            | Self::RailEndMissesSideEdge { .. } => ErrorKind::NotFound,
             Self::PlaneCurveLeavesDomain { .. } => ErrorKind::OutsideDomain,
             Self::BallsNest { .. } => ErrorKind::BallsFold,
             Self::CreasePieceEndUnbuildable { .. }
@@ -921,10 +924,6 @@ impl BlendFailure {
             Self::ArcLengthNotConverged { .. }
             | Self::RailCrossingNotConverged { .. }
             | Self::JoinSectionNotConverged { .. } => ErrorKind::NotConverged,
-            Self::SrfSrfHeadingNotFollowed
-            | Self::SrfSrfNoCurveThroughEnds { .. }
-            | Self::RailEndMissesSideEdge { .. } => ErrorKind::NotFound,
-            Self::SplitFaceNotGiven => ErrorKind::InvalidInput,
             Self::BandInputMissing(_) | Self::CliffInputMissing { .. } => ErrorKind::Missing,
             Self::NoEdgesGiven
             | Self::SizeBelowResolution { .. }
@@ -942,7 +941,8 @@ impl BlendFailure {
             | Self::VariableRadiusLawMissing { .. }
             | Self::BevelVertexNotFilleted
             | Self::LawIntervalEmpty
-            | Self::EdgeWithoutCurve => ErrorKind::InvalidInput,
+            | Self::EdgeWithoutCurve
+            | Self::SplitFaceNotGiven => ErrorKind::InvalidInput,
             Self::ClosedCliffWouldNotSplit { .. }
             | Self::CornerRefused
             | Self::ExecutiveStepFailed => ErrorKind::Failed,
