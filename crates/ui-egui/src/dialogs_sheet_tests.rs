@@ -1229,7 +1229,9 @@ impl IntoNav for egui::PointerButton {
         match self {
             egui::PointerButton::Middle => crate::prefs::NavButton::Middle,
             egui::PointerButton::Secondary => crate::prefs::NavButton::Right,
-            _ => crate::prefs::NavButton::Left,
+            egui::PointerButton::Extra1 => crate::prefs::NavButton::Extra1,
+            egui::PointerButton::Extra2 => crate::prefs::NavButton::Extra2,
+            egui::PointerButton::Primary => crate::prefs::NavButton::Left,
         }
     }
 }
