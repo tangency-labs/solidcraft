@@ -1133,10 +1133,17 @@ fn the_point_input_of_the_box_sphere_and_torus_takes_snap_points() {
     }
 }
 
-/// Whether the open dialog shows its Body Name row (#20776).
+/// Whether the open dialog's Body Name row can be typed in (#20776): it is always there for a
+/// feature that can make a body, greyed out unless the operation is New Body.
 fn shows_body_name(h: &Harness) -> bool {
     let label = solidcraft_ui_text::tr("ui.body_name");
-    h.output.accesskit_update.as_ref().unwrap().nodes.iter().any(|(_, n)| n.role() == egui::accesskit::Role::TextInput && n.label() == Some(label))
+    h.output
+        .accesskit_update
+        .as_ref()
+        .unwrap()
+        .nodes
+        .iter()
+        .any(|(_, n)| n.role() == egui::accesskit::Role::TextInput && n.label() == Some(label) && !n.is_disabled())
 }
 
 /// The `body_name` the open dialog's OK sends, if any.
@@ -1162,7 +1169,7 @@ fn the_body_name_row_shows_for_new_body_only_and_a_typed_name_names_the_body() {
             }
             h.app.dialog.as_mut().unwrap().extra.insert("body_name".into(), json!("Ignored"));
             h.frames(2);
-            assert!(!shows_body_name(&h), "{cmd}: operation {operation} hides Body Name");
+            assert!(!shows_body_name(&h), "{cmd}: operation {operation} greys Body Name out");
             assert_eq!(sent_body_name(&h), None, "{cmd}: operation {operation} sends no body_name");
         }
         if let Some(Kind::Primitive { operation, .. }) = h.app.dialog.as_mut().map(|d| &mut d.kind) {

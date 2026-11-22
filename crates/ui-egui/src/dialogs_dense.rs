@@ -823,14 +823,20 @@ pub(super) fn rows(app: &mut SolveApp, ctx: &egui::Context, d: &mut Dialog, ui: 
 /// The Body Name row of a feature that makes a body of its own (New Body): empty names it as the
 /// command always has, a typed name is sent as `body_name` (#20776).
 fn body_name_row(d: &mut Dialog, ui: &mut egui::Ui) -> bool {
-    if body_name_slot(&d.kind) != Some(true) {
-        return false;
-    }
+    // Shown for every feature that can make a body, and greyed out unless the operation is New
+    // Body: a window whose operation is still being chosen keeps its size instead of jumping as
+    // the row comes and goes (only New Body sends the name, see `apply_body_name`).
+    let Some(new_body) = body_name_slot(&d.kind) else { return false };
     let mut name = d.extra.get("body_name").and_then(Value::as_str).unwrap_or_default().to_string();
     let mut enter = false;
     form_row(ui, "ui.body_name", |ui| {
-        enter = ui_kit::text_field(ui, &mut name, tr("ui.body_name_hint")).0;
+        ui.add_enabled_ui(new_body, |ui| {
+            enter = ui_kit::text_field(ui, &mut name, tr("ui.body_name_hint")).0;
+        });
     });
+    if !new_body {
+        return false;
+    }
     if name.trim().is_empty() {
         d.extra.remove("body_name");
     } else {

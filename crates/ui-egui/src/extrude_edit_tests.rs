@@ -1503,7 +1503,7 @@ fn extrude_body_name_row_shows_for_new_body_and_a_typed_name_is_sent() {
             .unwrap()
             .nodes
             .iter()
-            .any(|(_, n)| n.role() == egui::accesskit::Role::TextInput && n.label() == Some(label))
+            .any(|(_, n)| n.role() == egui::accesskit::Role::TextInput && n.label() == Some(label) && !n.is_disabled())
     };
     let sent = |h: &Harness| {
         // A refusal (a Cut with nothing to cut) sends nothing, so no name either.
