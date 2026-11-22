@@ -438,7 +438,7 @@ pub struct LoopCurve {
 /// `sm_Extension`: a support face continued to the rails that run past its foot into the
 /// material: the loop on its plane and the face's edges along that loop.
 #[derive(Debug, Clone)]
-pub struct Extension {
+pub(crate) struct Extension {
     /// A point of the face's plane.
     pub at: Point3,
     /// The plane's unit normal.
@@ -755,7 +755,7 @@ fn plane_axes(normal: Vec3) -> Result<(Vec3, Vec3)> {
 /// A kept rail of the sheet that lies on the face [`extend`] continues: its curve over its
 /// interval ([`edge_curve`]) and its start and end vertices in the sheet.
 #[derive(Debug, Clone)]
-pub struct Rail {
+pub(crate) struct Rail {
     /// The rail's curve over its edge's interval.
     pub curve: Curve,
     /// Its start vertex in the sheet.
@@ -770,7 +770,7 @@ pub struct Rail {
 
 /// What [`extend`] makes of one face.
 #[derive(Debug)]
-pub enum ExtendOutcome {
+pub(crate) enum ExtendOutcome {
     /// The extensions (none when no rail runs off the face into the material).
     Extended(Vec<Extension>),
     /// Not an extension this builds: the fork's `rcWhy`.
@@ -800,8 +800,12 @@ struct Way {
 /// curve or vertex (all `SM_ERR`, the last `SM_ERR_NULL_POINTER`); a
 /// [`BlendFailure::Defect`] for a zero axis or tangent; those of the classifications, drops,
 /// copies and trims.
+///
+/// Crate-private: its rails come only from the trim at creases, which keeps the sheet's
+/// rails that lie on the face (`edge_on_surface`), so no caller hands it the rail off the
+/// plane its tangent Defect names.
 #[allow(clippy::too_many_lines)] // one fork routine
-pub fn extend(
+pub(crate) fn extend(
     k: &Kernel,
     target: &mut Brep,
     f: FaceId,
@@ -1340,10 +1344,14 @@ fn takes_off(
 /// over the loop's box, notified through `env` (a hundredth of its diagonal and ten tolerances more), the loop
 /// anticlockwise.
 ///
+/// Crate-private: its extensions come only from [`extend`], whose loops hold their chain's
+/// runs and whose normals are unit (from [`plane_of`]), so no caller builds the empty loop or
+/// zero normal its Defects name.
+///
 /// # Errors
 /// A [`BlendFailure::Defect`] for an empty loop or a zero axis; those of
 /// `MakeFaceWithCurves`.
-pub fn make_extension_face(
+pub(crate) fn make_extension_face(
     k: &mut Kernel,
     b: &mut Brep,
     env: &mut NotifyEnv<'_>,
@@ -1356,8 +1364,9 @@ pub fn make_extension_face(
     loop_polygon(k, &ext.lp, ext.at, x, y, &mut uv)?;
     let Some(&p0) = uv.first() else {
         return Err(defect(
-            "an extension's loop gives no points: it holds its chain's runs, each a curve \
-             sampled at its ends and between",
+            "an extension's loop gives no points: only `extend` (crate-private) builds an \
+             extension, its loop starting with its chain's runs (a chain holds at least one), \
+             each sampled at 16 points",
         ));
     };
     let mut bbox = Extent2d::from_points(p0, p0);
