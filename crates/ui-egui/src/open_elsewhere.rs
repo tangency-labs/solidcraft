@@ -57,6 +57,7 @@ pub fn tick(app: &mut SolveApp, ctx: &egui::Context) {
         return;
     }
     let wanted = wanted(app);
+    let open: Vec<String> = std::iter::once(&app.session).chain(app.docs.background()).filter_map(|s| s.path.clone()).collect();
     let Some(locks) = app.locks.as_mut() else { return };
     let now = design_lock::now_secs();
     let refresh = now.saturating_sub(locks.refreshed) >= design_lock::REFRESH_SECS;
@@ -67,6 +68,7 @@ pub fn tick(app: &mut SolveApp, ctx: &egui::Context) {
         let keep = wanted.contains(path);
         if !keep {
             design_lock::remove(std::path::Path::new(path));
+            tidy(path, &open, now);
         }
         keep
     });
@@ -89,10 +91,25 @@ pub fn tick(app: &mut SolveApp, ctx: &egui::Context) {
 /// The app is closing: its locks go.
 pub fn close(app: &mut SolveApp) {
     if let Some(locks) = app.locks.take() {
+        let now = design_lock::now_secs();
         for path in locks.held.keys() {
             design_lock::remove(std::path::Path::new(path));
+            tidy(path, &[], now);
         }
     }
+}
+
+/// The design at `path` was closed here: its internal components' work folder is tidied
+/// (`solidcraft_engine::tidy_work_folder`), unless another SolidCraft still has the design open
+/// or one of its internal components is open in a tab of this app (`open`: every tab's file).
+fn tidy(path: &str, open: &[String], now: u64) {
+    if design_lock::held_elsewhere(std::path::Path::new(path), now).is_some() {
+        return;
+    }
+    if open.iter().any(|file| file == path || solidcraft_engine::in_work_folder(path, file)) {
+        return;
+    }
+    solidcraft_engine::tidy_work_folder(path);
 }
 
 /// Before an interactive Open of a design: when another SolidCraft has it open, hold the request

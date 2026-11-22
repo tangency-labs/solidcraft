@@ -111,6 +111,7 @@ mod component_link;
 pub use component_link::resolve_design_links;
 mod config;
 mod design_internal;
+pub use design_internal::{in_work_folder, tidy_work_folder};
 mod design_link;
 mod file;
 mod file_library;

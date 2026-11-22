@@ -140,6 +140,41 @@ pub(crate) fn write_back(own: &str, name: &str, bytes: &[u8]) -> Result<usize, S
     Ok(written.len())
 }
 
+/// The design saved at `design` is closed and no one else has it open: the work files that hold
+/// exactly what its file holds are removed, and the work folder with them when nothing is left.
+/// A work file that differs stays (the next open offers it as a recovery component), and so does
+/// anything else in the folder. How many were removed. A design that can't be read loses nothing.
+pub fn tidy_work_folder(design: &str) -> usize {
+    if cfg!(target_arch = "wasm32") {
+        return 0;
+    }
+    let Some(folder) = work_folder(design) else { return 0 };
+    let Ok(entries) = std::fs::read_dir(&folder) else { return 0 };
+    let held = solidcraft_io::vfs::read_design_path(design, None, solidcraft_io::limits::max_design_bytes())
+        .ok()
+        .and_then(|file| solidcraft_io::internal_components(&file).ok())
+        .unwrap_or_default();
+    // Told apart without regard to letter case, as unpacking does.
+    let held: BTreeMap<String, Vec<u8>> = held.into_iter().map(|(name, bytes)| (name.to_lowercase(), bytes)).collect();
+    let mut removed = 0;
+    for entry in entries.flatten() {
+        let name = entry.file_name().to_string_lossy().to_lowercase();
+        let Some(stored) = held.get(&name) else { continue };
+        let file = entry.path();
+        if std::fs::read(&file).is_ok_and(|bytes| bytes == *stored) && std::fs::remove_file(&file).is_ok() {
+            removed += 1;
+        }
+    }
+    // Only an empty folder goes.
+    let _ = std::fs::remove_dir(&folder);
+    removed
+}
+
+/// Whether `file` is in the work folder of the design saved at `design`.
+pub fn in_work_folder(design: &str, file: &str) -> bool {
+    member_at(Some(design), Path::new(file)).is_some()
+}
+
 /// The design `doc`, saved at `own` until now (`None`: never), was written to `path`: its stored
 /// parts get work files beside the new file where they have none, so its links still find them.
 pub(crate) fn carry(doc: &Document, own: Option<&str>, path: &str) -> Vec<String> {
@@ -229,6 +264,41 @@ mod tests {
         let again = unpack(&doc, &design);
         assert_eq!(again, Unpacked { written: vec![], differ: vec!["Top.scprt".into()], failed: vec![] });
         assert_eq!(std::fs::read(&top).unwrap(), b"top, edited");
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    /// Closing a design removes the work files that hold what its file holds, and the folder when
+    /// it is then empty. A work file that differs (work a crash or an unsaved design left) stays.
+    #[test]
+    fn closing_tidies_the_work_files_the_design_already_holds() {
+        let dir = folder("tidy");
+        let design = dir.join("Job.sc").to_string_lossy().into_owned();
+        let mut doc = Document::default();
+        doc.internal.insert("Top.scprt".into(), b"top".to_vec().into());
+        doc.internal.insert("Leg.scprt".into(), b"leg".to_vec().into());
+        std::fs::write(&design, solidcraft_io::write_design_container(&doc).unwrap()).unwrap();
+        unpack(&doc, &design);
+        let work = work_folder(&design).unwrap();
+        let top = work.join("Top.scprt");
+        assert!(in_work_folder(&design, &top.to_string_lossy()));
+        assert!(!in_work_folder(&design, &design));
+        std::fs::write(&top, b"top, edited").unwrap();
+        std::fs::write(work.join("notes.txt"), b"someone's own file").unwrap();
+        assert_eq!(tidy_work_folder(&design), 1);
+        assert!(!work.join("Leg.scprt").exists());
+        assert_eq!(std::fs::read(&top).unwrap(), b"top, edited", "work the design does not hold is never removed");
+        assert!(work.join("notes.txt").exists());
+        // With only matching files, the folder goes too.
+        std::fs::remove_file(work.join("notes.txt")).unwrap();
+        std::fs::write(&top, b"top").unwrap();
+        assert_eq!(tidy_work_folder(&design), 1);
+        assert!(!work.exists());
+        // No folder, or a design that is gone: nothing happens.
+        assert_eq!(tidy_work_folder(&design), 0);
+        unpack(&doc, &design);
+        std::fs::remove_file(&design).unwrap();
+        assert_eq!(tidy_work_folder(&design), 0);
+        assert!(top.exists(), "a design that can't be read loses nothing");
         let _ = std::fs::remove_dir_all(dir);
     }
 

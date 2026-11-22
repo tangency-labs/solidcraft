@@ -34,7 +34,7 @@ pub use design::{
 };
 // Experimental file kinds (#6892).
 pub use design::{
-    DesignKind, LEGACY_SHEET_METAL, design_kind, is_legacy_sheet_metal_file, read_design_kind_file, with_internal_component,
+    DesignKind, LEGACY_SHEET_METAL, design_kind, internal_components, is_legacy_sheet_metal_file, read_design_kind_file, with_internal_component,
     write_design_container_as,
 };
 pub use glb::{DEFAULT_COLOR as GLB_DEFAULT_COLOR, MAX_GLB_BYTES, export_glb};

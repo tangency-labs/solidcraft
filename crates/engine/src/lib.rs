@@ -81,6 +81,8 @@ pub use cmd::{
     extrude_reach, find_command, normalize_command_id, resolve_design_links, shown_scope, standard_view, use_import_cache_dir,
 };
 pub use edit_start::{EditStart, RefreshedSketchModel, SketchDomain, SketchFinishEvent};
+// Internal components (#6892).
+pub use cmd::{in_work_folder, tidy_work_folder};
 // Experimental file kinds (#6892).
 pub use cmd::{experimental_file_kinds, file_kinds_on_for_tests, set_experimental_file_kinds, set_part_library_folders};
 pub use solidcraft_doc as doc;

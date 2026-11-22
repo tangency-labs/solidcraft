@@ -1246,6 +1246,23 @@ pub fn with_internal_component(container: &[u8], name: &str, bytes: &[u8]) -> Re
     Ok(writer.finish()?)
 }
 
+/// The internal components `container`, a design file's bytes, holds, by name (experimental,
+/// #6892): only those parts are read, never the design.
+pub fn internal_components(container: &[u8]) -> Result<std::collections::BTreeMap<String, Vec<u8>>> {
+    let mut reader = PackageReader::new(Cursor::new(container))?;
+    let mut held = std::collections::BTreeMap::new();
+    for name in reader.part_names() {
+        let Some(member) = internal_part(&name) else { continue };
+        if held.len() >= solidcraft_doc::internal::MAX_FILES {
+            break;
+        }
+        if let Ok(bytes) = reader.limited_part(&name, part_limit(&name)) {
+            held.insert(member.to_string(), bytes);
+        }
+    }
+    Ok(held)
+}
+
 /// The name of a part stored inside the file, for a container part under `internal/` that is one.
 fn internal_part(name: &str) -> Option<&str> {
     name.strip_prefix(solidcraft_doc::internal::PREFIX).filter(|member| solidcraft_doc::internal::valid_name(member))
@@ -3058,6 +3075,9 @@ mod tests {
         assert_eq!(added["internal/Leg.scprt"], b"leg");
         assert_eq!(added.len(), before.len() + 1);
         assert!(with_internal_component(&file, "../Top.scprt", b"no").is_err());
+        let listed = internal_components(&file).unwrap();
+        assert_eq!(listed.keys().map(String::as_str).collect::<Vec<_>>(), ["Shelf Bracket.scprt", "Top.scprt"]);
+        assert_eq!(listed["Top.scprt"], part);
     }
 
     /// Plugin data under `plugins/<plugin-id>/` opens and saves back byte for byte with no plugin
