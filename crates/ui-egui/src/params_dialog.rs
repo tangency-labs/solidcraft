@@ -2724,6 +2724,8 @@ mod tests {
             }
         }
         let mut h = crate::scenario::Harness::new();
+        // Tall enough that every group is on screen: an off-screen group is not drawn.
+        h.call("ui.resize", json!({"width": 1600, "height": 1400}));
         h.app.home.open = false;
         h.app.session = solidcraft_engine::Session::new(doc);
         // Grouping is opt-in (Preferences › Design).
