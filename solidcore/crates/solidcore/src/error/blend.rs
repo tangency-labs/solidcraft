@@ -1014,8 +1014,6 @@ pub enum BandInput {
     ClosestBandFeet,
     /// An endpoint of the line.
     LineEndpoint,
-    /// The edge of an edge use.
-    EdgeUseEdge,
 }
 
 impl BandInput {
@@ -1039,7 +1037,6 @@ impl BandInput {
             Self::BlendedEdgeEndpoint => "the blended edge's endpoint",
             Self::ClosestBandFeet => "the closest band feet",
             Self::LineEndpoint => "the line endpoint",
-            Self::EdgeUseEdge => "the edge use's edge",
         }
     }
 }
