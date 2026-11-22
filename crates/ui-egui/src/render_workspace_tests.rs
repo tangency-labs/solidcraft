@@ -16695,6 +16695,11 @@ fn render_views_keep_product_and_completed_image_framing_through_focus_changes()
     let second_camera = Camera { yaw: 1.2, fov: 0.6, ..model_camera };
     h.app.docs.views.set_spec(first, solidcraft_viewport::ViewSpec::new(first_camera));
     h.app.docs.views.set_spec(second, solidcraft_viewport::ViewSpec::new(second_camera));
+    // The second view looks through a lens of its own: its saved options say perspective.
+    assert!(crate::documents::view_activate(&mut h.app, second));
+    h.app.ui.perspective = true;
+    assert!(crate::documents::view_activate(&mut h.app, model));
+    h.app.docs.views.set_spec(second, solidcraft_viewport::ViewSpec::new(second_camera));
 
     crate::documents::with_view_look(&mut h.app, first, |app| {
         with_tile_camera(app, |app| {

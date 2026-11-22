@@ -865,21 +865,12 @@ fn model_sketch_fallback_preserves_render_and_sheet_ground_views() {
         let first = app.docs.views.active().id;
         let ground = app.docs.views.open(kind, (kind == ViewKind::Sheet).then(|| "sheet".into()), false);
         assert!(app.docs.views.close(first));
-        if kind == ViewKind::Sheet {
-            let before = app.docs.views.to_json();
-            assert!(crate::sketch_view::prepare_start(&mut app, None).is_err());
-            assert_eq!(app.docs.views.to_json(), before);
-            assert_eq!(app.session.sketching_view, None);
-            continue;
-        }
         let target = crate::sketch_view::prepare_start(&mut app, None).unwrap();
         assert_ne!(target, ground);
         assert_eq!(app.docs.views.active().id, ground);
         assert_eq!(app.docs.views.get(ground).unwrap().kind, kind);
         assert_eq!(app.docs.views.get(target).unwrap().kind, ViewKind::Model);
-        if kind == ViewKind::Render {
-            assert!(app.docs.views.tiles().unwrap().contains(target));
-        }
+        assert!(app.docs.views.tiles().unwrap().contains(target), "the Model card sits beside the {kind:?} view");
     }
 }
 

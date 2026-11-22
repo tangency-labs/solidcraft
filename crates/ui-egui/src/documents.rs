@@ -5244,6 +5244,7 @@ mod tests {
         h.app.run("solid.box", json!({"length":40,"width":20,"height":3})).unwrap();
         h.app.session.mark_saved();
         assert_eq!(list(&mut h), std::slice::from_ref(&model), "a new design has its Model view only");
+        h.app.run("solid.box", json!({"length":40,"width":20,"height":3})).unwrap();
         h.app.run("drawing.create", json!({})).unwrap();
         let drawing = h.app.session.drawing("drawing.inspect").unwrap();
         let subject = crate::sheet_views::subject(drawing.id, drawing.sheets[0].id);
@@ -5297,6 +5298,9 @@ mod tests {
         assert_eq!(h.app.docs.views.len(), 3);
         h.call("ui.key", json!({"key": "1", "alt": true}));
         assert_eq!(h.app.docs.views.active().id, h.app.docs.views.views()[0].id);
+        h.app.session.mark_saved();
+        // The key closes the design from a Model view; in a Sheet view the Drawing keys take it.
+        assert_eq!(call(&mut h, "tab.view.open", json!({"kind": "model"}))["ok"], true);
         h.call("ui.key", json!({"key": "W", "cmd": true, "shift": true}));
         assert_eq!(h.app.docs.count(), 1, "Ctrl+Shift+W closes the design");
         // Sketch commands edit the current Model without creating a view.

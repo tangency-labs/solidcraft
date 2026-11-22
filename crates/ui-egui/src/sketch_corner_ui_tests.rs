@@ -1224,7 +1224,10 @@ fn a_rectangle_corner_clicked_on_a_line_stays_on_it_with_a_drawing_open() {
     let mut h = crate::scenario::Harness::new();
     // A body away from the sketch, for the drawing to show.
     h.app.run("solid.box", json!({"length": 10, "width": 10, "height": 5, "corner": [200, 200, -50]})).unwrap();
+    let model = h.app.docs.views.active().id;
     h.app.run("drawing.create", json!({})).unwrap();
+    // The new sheet opens in a view of its own; the sketch is drawn in the Model view.
+    assert!(crate::documents::view_activate(&mut h.app, model));
     h.app.ui.tab = "MODEL".into();
     h.settle();
     assert!(h.app.session.open_drawing.is_some());

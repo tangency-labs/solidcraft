@@ -1514,7 +1514,9 @@ mod tests {
         let second = h.app.session.drawing("test").unwrap().sheets[1].id;
         select_sheet(&mut h.app, second);
         h.frames(3);
-        let view = h.app.session.drawing("test").unwrap().views[0].id;
+        // A selection belongs to the sheet it is made on, so the view picked is one of the second sheet's.
+        let created = h.app.run("drawing.view.base", serde_json::json!({"sheet":"Second","scale":"1:1","position_mm":[175,140]})).unwrap();
+        let view = solidcraft_engine::doc::ids::decode(created["view"].as_str().unwrap()).unwrap();
         let picked = serde_json::json!({"type":"drawing","drawing":solidcraft_engine::doc::ids::encode(drawing.unwrap()),"object":solidcraft_engine::doc::ids::encode(view)});
         h.app.run("select.set", serde_json::json!({"items":[picked]})).unwrap();
         let sheet_selection = h.app.session.selection.clone();
