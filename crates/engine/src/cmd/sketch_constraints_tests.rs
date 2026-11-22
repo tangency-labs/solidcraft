@@ -220,9 +220,12 @@ fn a_distance_from_a_construction_line_toggles_to_a_diameter() {
     assert_eq!(r["diameter"], true, "{r}");
     assert!(matches!(find(&s).kind, ConstraintKind::LinearDiameter { value, .. } if (value - 10.0).abs() < 1e-9), "{:?}", find(&s).kind);
     assert_eq!(s.doc.param(&param).unwrap().expr, "10 mm", "the parameter holds the shown (diameter) value");
+    // The point's distance from the axis line (the solver may move either; the axis is free).
     let x = |s: &Session| {
         let sk = sketch(s);
-        sk.point(sk.point_index("rim").unwrap()).unwrap().x
+        let at = sk.point(sk.point_index("rim").unwrap()).unwrap().x;
+        let solidcraft_sketch::CurveKind::Line { a, .. } = sk.curves[sk.curve_index(&axis).unwrap()].kind else { panic!("the axis is a line") };
+        at - sk.point(a).unwrap().x
     };
     assert!((x(&s) - 5.0).abs() < 1e-6, "the point stays put");
     // Saved and reopened, it is still a diameter.
