@@ -174,6 +174,7 @@ impl Document {
 
         let doc = self.clone();
         let mut warnings = Vec::new();
+        let mut flat_lost: Vec<String> = Vec::new();
         let mut renew = |target: &mut ConfigFaceTarget, label: &str| -> bool {
             if target.origin_feature != feature || !matches!(target.certificate, Some(FaceCertificate::Imported { .. })) {
                 return false;
@@ -225,14 +226,19 @@ impl Document {
                 let old = doc.anchor_canonical_plane(anchor, f.component, before);
                 if renew(&mut anchor.target, &format!("feature {}", f.name)) {
                     if let Some(old) = old {
-                        if let Some(new) = doc.anchor_canonical_plane(anchor, f.component, after) {
-                            if old.normal().dot(new.normal()) > 1. - 1e-8 && (old.origin - new.origin).dot(new.normal()).abs() < 1e-7 {
-                                let origin = old.origin + old.x * anchor.coordinates[0] + old.y * anchor.coordinates[1];
-                                let x = old.x * anchor.x_axis[0] + old.y * anchor.x_axis[1];
-                                let delta = origin - new.origin;
-                                anchor.coordinates = [delta.dot(new.x), delta.dot(new.y)];
-                                anchor.x_axis = [x.dot(new.x), x.dot(new.y)];
-                            }
+                        let Some(new) = doc.anchor_canonical_plane(anchor, f.component, after) else {
+                            flat_lost.push(format!(
+                                "feature {}: linked face `{}` on `{}` no longer exists as a flat face",
+                                f.name, anchor.target.name, anchor.target.body
+                            ));
+                            continue;
+                        };
+                        if old.normal().dot(new.normal()) > 1. - 1e-8 && (old.origin - new.origin).dot(new.normal()).abs() < 1e-7 {
+                            let origin = old.origin + old.x * anchor.coordinates[0] + old.y * anchor.coordinates[1];
+                            let x = old.x * anchor.x_axis[0] + old.y * anchor.x_axis[1];
+                            let delta = origin - new.origin;
+                            anchor.coordinates = [delta.dot(new.x), delta.dot(new.y)];
+                            anchor.x_axis = [x.dot(new.x), x.dot(new.y)];
                         }
                     }
                 }
@@ -263,6 +269,7 @@ impl Document {
                 face.certificate = target.certificate;
             }
         }
+        warnings.extend(flat_lost);
         warnings
     }
 
