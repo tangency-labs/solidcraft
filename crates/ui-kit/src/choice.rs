@@ -542,16 +542,17 @@ pub fn swatch_picker(ui: &mut Ui, id: &str, chosen: &mut Option<usize>, options:
         }
         let hover_id = ui.make_persistent_id(("swatch_hover", id));
         if preview {
-            // The highlighted option of the last frame, else the chosen one.
+            // The highlighted option of the last frame, else the chosen one. The area is reserved
+            // whether or not a picture shows, so the tiles never move under the pointer.
             let shown = ui.data(|data| data.get_temp::<usize>(hover_id)).or(*chosen);
+            let side = t.control_height * 6.0;
+            let (area, _) = ui.allocate_exact_size(vec2(ui.available_width().max(side), side), egui::Sense::hover());
             if let Some(texture) = shown.and_then(|index| textures.get(index).copied().flatten()) {
-                let side = t.control_height * 6.0;
-                let (area, _) = ui.allocate_exact_size(vec2(ui.available_width().max(side), side), egui::Sense::hover());
                 let scale = (side / texture.size.x).min(side / texture.size.y);
                 let picture = egui::Rect::from_center_size(area.center(), texture.size * scale);
                 egui::Image::new(texture).paint_at(ui, picture);
-                solidcraft_ui_registry::publish_rect(&format!("swatch:{id}:preview"), area);
             }
+            solidcraft_ui_registry::publish_rect(&format!("swatch:{id}:preview"), area);
         }
         let mut hovered = None;
         let query = query.to_lowercase();

@@ -88,6 +88,9 @@ pub(crate) struct Field {
     pub(crate) images: Vec<String>,
     /// Optional package raster per option, including partially illustrated lists.
     pub(crate) swatches: Vec<Option<String>>,
+    /// Optional larger `x-solidcraft-image` path per option. A loaded picture wins over the
+    /// option's swatch; the swatch stays as the fallback when the picture does not load.
+    pub(crate) pictures: Vec<Option<String>>,
     /// Whether an option names a larger `x-solidcraft-image`: the list then shows a big picture of
     /// the highlighted option.
     pub(crate) pictured: bool,
@@ -271,6 +274,7 @@ fn field(key: &str, property: &Value, required: bool) -> Option<(Field, Input)> 
     let default = p.get("default");
     let mut images = Vec::new();
     let mut swatches = Vec::new();
+    let mut pictures = Vec::new();
     let mut pictured = false;
     let (kind, input) = match kind {
         "number" if !choice => {
@@ -317,19 +321,16 @@ fn field(key: &str, property: &Value, required: bool) -> Option<(Field, Input)> 
         "string" if choice => {
             let (values, titles, pictures) = choices(p)?;
             images = pictures;
-            swatches = p
-                .get("oneOf")
-                .and_then(Value::as_array)
-                .into_iter()
-                .flatten()
-                .map(|option| {
-                    // A larger picture wins over a swatch when an option names both.
-                    [solidcraft_engine::plugin::swatches::IMAGE_KEY, solidcraft_engine::plugin::swatches::KEY]
-                        .iter()
-                        .find_map(|key| option.get(*key).and_then(Value::as_str))
-                        .map(str::to_owned)
-                })
-                .collect();
+            let named = |key: &str| -> Vec<Option<String>> {
+                p.get("oneOf")
+                    .and_then(Value::as_array)
+                    .into_iter()
+                    .flatten()
+                    .map(|option| option.get(key).and_then(Value::as_str).map(str::to_owned))
+                    .collect()
+            };
+            swatches = named(solidcraft_engine::plugin::swatches::KEY);
+            pictures = named(solidcraft_engine::plugin::swatches::IMAGE_KEY);
             pictured = p
                 .get("oneOf")
                 .and_then(Value::as_array)
@@ -357,6 +358,7 @@ fn field(key: &str, property: &Value, required: bool) -> Option<(Field, Input)> 
             kind,
             images,
             swatches,
+            pictures,
             pictured,
             conditions: Default::default(),
             order: 0,
@@ -434,6 +436,7 @@ fn selection_field(key: &str, p: &Map<String, Value>, required: bool) -> Option<
             kind,
             images: Vec::new(),
             swatches: Vec::new(),
+            pictures: Vec::new(),
             pictured: false,
             conditions: Default::default(),
             order: 0,
@@ -2304,15 +2307,20 @@ fn field_row(app: &SolveApp, ui: &mut egui::Ui, plugin: &Listed, field: &Field, 
                         .collect::<Option<Vec<&str>>>()
                 })
                 .flatten();
-            let swatches = plugin.swatches.get();
-            if swatches.is_none() && field.swatches.iter().any(Option::is_some) {
+            let artwork = plugin.swatches.get();
+            if artwork.is_none() && field.swatches.iter().chain(&field.pictures).any(Option::is_some) {
                 ui.ctx().request_repaint_after(std::time::Duration::from_millis(50));
             }
             // The picker uses visible indices; the form and plugin always use schema indices.
             let tiles: Vec<_> = field
                 .available
                 .iter()
-                .map(|i| field.swatches.get(*i).and_then(Option::as_ref).and_then(|rel| swatches?.get(rel)).map(|image| image.texture(ui.ctx())))
+                .map(|i| {
+                    // The loaded picture, else the loaded swatch, each judged by its own limits.
+                    let picture = field.pictures.get(*i).and_then(Option::as_ref).and_then(|rel| artwork?.pictures.get(rel));
+                    let swatch = field.swatches.get(*i).and_then(Option::as_ref).and_then(|rel| artwork?.swatches.get(rel));
+                    picture.or(swatch).map(|image| image.texture(ui.ctx()))
+                })
                 .collect();
             if tiles.iter().any(Option::is_some) {
                 let titles: Vec<String> = field.available.iter().filter_map(|i| titles.get(*i).cloned()).collect();

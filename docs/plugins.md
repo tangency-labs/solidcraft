@@ -694,7 +694,8 @@ with bigger limits: at most **512 KiB** and **1024 × 1024** decoded pixels. The
 picture at most 512 pixels on a side, decodes each distinct file once when it loads the package,
 and caches its texture. The choice list shows the picture as a thumbnail beside the option, and a
 larger one of the highlighted option (the chosen one when none is highlighted). If an option names
-both, the picture is used. A package may name at most 256 distinct swatches and pictures together.
+both, the picture is used, and if that picture is missing or refused, the swatch. A package may name at most 256 distinct swatches and pictures together.
+Decoded swatches and pictures share a budget of 128 MiB per package. When the total would exceed it, the host omits that entry, every later swatch and picture, and records a warning.
 A missing, corrupt, wrongly typed or oversized picture is omitted with a warning in `plugin check`
 and the install review; the plugin still works, and the value sent is still the option's `const`.
 

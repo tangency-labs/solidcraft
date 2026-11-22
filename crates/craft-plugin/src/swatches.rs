@@ -41,7 +41,11 @@ pub struct Swatch {
 
 #[derive(Debug, Default)]
 pub struct Report {
+    /// Accepted `x-solidcraft-swatch` artwork, by package path.
     pub images: BTreeMap<String, Swatch>,
+    /// Accepted `x-solidcraft-image` pictures, by package path. Kept apart from the swatches: one
+    /// file may pass the picture limits and fail the swatch ones.
+    pub pictures: BTreeMap<String, Swatch>,
     pub warnings: Vec<String>,
 }
 
@@ -75,7 +79,8 @@ pub fn check(entries: &[crate::Entry], mut read: impl FnMut(&str) -> Result<Vec<
                                 report.warnings.push(format!("{key}: the {what}s are too large together; remaining {what}s omitted"));
                                 return report;
                             }
-                            report.images.entry(path.to_owned()).or_insert(image);
+                            let accepted = if key == IMAGE_KEY { &mut report.pictures } else { &mut report.images };
+                            accepted.entry(path.to_owned()).or_insert(image);
                         }
                         Err(why) => report.warnings.push(format!("{key} {path}: {why}; {what} omitted")),
                     }

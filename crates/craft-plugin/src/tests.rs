@@ -96,12 +96,33 @@ fn option_images_allow_larger_files_and_refuse_oversized_or_escaping_ones() {
             _ => b"bad image".to_vec(),
         })
     });
-    assert_eq!(report.images.len(), 1, "{:?}", report.warnings);
-    assert_eq!(report.images["parts/elbow.png"].size, [512, 512], "kept at most 512 pixels on a side");
+    assert_eq!(report.pictures.len(), 1, "{:?}", report.warnings);
+    assert!(report.images.is_empty(), "a picture is not a swatch");
+    assert_eq!(report.pictures["parts/elbow.png"].size, [512, 512], "kept at most 512 pixels on a side");
     assert_eq!(report.warnings.len(), 5, "{:?}", report.warnings);
     assert!(swatches::decode("big.png", &big).is_err(), "the same file is too big for a swatch");
     assert!(swatches::decode_image("big.png", &big).is_ok());
     assert!(swatches::decode_image("wide.png", &wide).is_err());
+}
+
+/// Synthetic pixels only: one file named as a swatch and as a picture is judged by each limit.
+#[test]
+fn a_file_named_as_swatch_and_picture_keeps_a_result_for_each_annotation() {
+    let mut value = manifest();
+    value["runtime"]["entries"] = json!([{"name":"make","input_schema":{"type":"object","properties":{"part":{"type":"string","oneOf":[
+        {"const":"a","x-solidcraft-swatch":"big.png","x-solidcraft-image":"big.png"}
+    ]}}}}]);
+    let parsed = parse(&value).expect("manifest");
+    let entries = &parsed.runtime.unwrap().entries;
+    let pixels = image::RgbImage::from_pixel(1024, 1024, image::Rgb([20, 90, 160]));
+    let mut out = std::io::Cursor::new(Vec::new());
+    pixels.write_to(&mut out, image::ImageFormat::Png).unwrap();
+    let big = out.into_inner();
+    let report = swatches::check(entries, |_| Ok(big.clone()));
+    assert!(report.images.is_empty(), "too large for a swatch");
+    assert_eq!(report.pictures["big.png"].size, [512, 512], "valid under the picture limits");
+    assert_eq!(report.warnings.len(), 1, "{:?}", report.warnings);
+    assert!(report.warnings[0].starts_with(swatches::KEY));
 }
 
 #[test]
