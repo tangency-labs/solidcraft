@@ -766,20 +766,31 @@ fn several_features_from_one_used_sketch_with_apply() {
                 "OK" => json!({"key": "Enter"}),
                 _ => json!({"key": "Escape"}),
             };
-            h.step(&action).unwrap();
             // The extrusion computes off the window thread, and OK is refused while one is still
             // computing: wait for the feature to land (not just for the computing to stop, which
-            // is also true before it starts), as a person does before the next step.
+            // is also true before it starts), as a person does before the next step. A click that
+            // landed while the window was still moving did nothing, and a person clicks again: so
+            // does the test, a few times at most (Apply that never works still fails below).
             let before = features + if step == "apply" { 0 } else { 1 };
-            for _ in 0..3000 {
-                if step == last && last == "Escape" {
+            for attempt in 0..4 {
+                if attempt > 0 && step != "apply" {
                     break;
                 }
-                if h.app.applying.is_none() && h.app.session.doc.features.len() > before {
+                h.step(&action).unwrap();
+                for _ in 0..1500 {
+                    if step == last && last == "Escape" {
+                        break;
+                    }
+                    if h.app.applying.is_none() && h.app.session.doc.features.len() > before {
+                        break;
+                    }
+                    h.frames(1);
+                    std::thread::sleep(std::time::Duration::from_millis(10));
+                }
+                if step != "apply" || h.app.session.doc.features.len() > before {
                     break;
                 }
-                h.frames(1);
-                std::thread::sleep(std::time::Duration::from_millis(10));
+                h.settle();
             }
             assert!(h.app.applying.is_none(), "{last}: the {step} finished computing");
             h.settle();
