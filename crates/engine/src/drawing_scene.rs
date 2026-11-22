@@ -603,7 +603,7 @@ pub fn build(s: &Session, drawing: &Drawing, sheet: u64) -> Result<SheetScene> {
     let (labels, _) = view_labels(drawing, drawing.views.iter().map(|v| &**v).filter(|v| v.sheet == sheet), &lettering, true);
     let tables = sheet_tables(s, drawing, record, &lettering, true);
     let (images, logos) = (crate::drawing_pictures::groups(drawing, sheet), crate::drawing_pictures::logo_items(drawing, sheet));
-    let mut assembly = assemble(record, drawing.projection, &text, &images, &logos, &labels, drawn)?;
+    let mut assembly = assemble(record, drawing.projection, &text, &images, &logos, drawn)?;
     // After the views, as they need the views' frames: one read for the sheet's dimensions, each on
     // the session its view drew from.
     let frames: BTreeMap<u64, ViewFrame> = assembly.placed.iter().map(|(view, (frame, _))| (*view, *frame)).collect();
@@ -611,6 +611,7 @@ pub fn build(s: &Session, drawing: &Drawing, sheet: u64) -> Result<SheetScene> {
     let group = |view: u64| on.binary_search_by_key(&view, |(id, ..)| *id).ok().and_then(|at| on.get(at)).map(|(_, v, _)| v.line_group.value);
     let dimensions = draw_dimensions(s, Some(&mut sessions), drawing, &wanted, |view| Some((*frames.get(&view)?, group(view)?)), true);
     assembly.add_dimensions(dimensions.iter());
+    assembly.add_labels(&labels);
     // Tables paint in their own band, under the sheet's own notes, so a note placed on one stays readable.
     let tables = assembly.add_tables(&tables);
     assembly.add_sheet_texts(&texts);
@@ -1420,24 +1421,47 @@ fn detail_mark(d: &Drawing, view: u64, fonts: &PaperFonts) -> Option<(DetailMark
 }
 
 /// Where a label `half` in size sits from its view's centre: at its `offset`, else centred over the
-/// view's `boundary` (centred on the view, as its lines are) and [`LABEL_GAP_MM`] above it, as ISO
-/// 128-30 puts a view's letter.
-fn label_place(offset: Option<Vec2>, half: Vec2, boundary: Option<Aabb2>) -> Vec2 {
+/// view's `boundary` and [`LABEL_GAP_MM`] above it, as ISO 128-30 puts a view's letter, and above
+/// whatever of `beside` (the boxes of what is drawn for the view) it would otherwise cross (#17853).
+/// Both are centred on the view, as its lines are. Lowest first, it steps over each box it would
+/// cross, so it takes the lowest free place: one label rising on one line needs no search wider.
+fn label_place(offset: Option<Vec2>, half: Vec2, boundary: Option<Aabb2>, beside: &[Aabb2]) -> Vec2 {
     offset.unwrap_or_else(|| {
         let boundary = boundary.unwrap_or(Aabb2 { min: Vec2::ZERO, max: Vec2::ZERO });
-        Vec2::new(boundary.center().x, boundary.max.y + LABEL_GAP_MM + half.y)
+        let x = boundary.center().x;
+        let mut under: Vec<&Aabb2> = beside.iter().filter(|b| b.min.x < x + half.x && b.max.x > x - half.x).collect();
+        under.sort_by(|a, b| a.min.y.total_cmp(&b.min.y));
+        let mut bottom = boundary.max.y + LABEL_GAP_MM;
+        for b in under {
+            if b.min.y < bottom + 2.0 * half.y && b.max.y > bottom {
+                bottom = b.max.y + LABEL_GAP_MM;
+            }
+        }
+        Vec2::new(x, bottom + half.y)
     })
 }
 
-/// The box round view `id`'s label on its sheet, for the view centred at `centre` with `boundary` on
-/// the sheet, as [`assemble`] places it: none when it draws no label, or while its text waits for a
-/// font to fall back to (the window's fonts, which never wait).
-pub(crate) fn label_box(d: &Drawing, id: u64, centre: Vec2, boundary: Aabb2) -> Option<Aabb2> {
+/// The box round view `id`'s label on its sheet, for the view `placed` on it, as the sheet places
+/// it ([`Assembly::add_labels`]): none when it draws no label, or while its text waits for a font to
+/// fall back to (the window's fonts, which never wait). A label placed by its view keeps clear of the
+/// view's own annotations, drawn here through the view's frame, each on its session in `sessions`, as
+/// the sheet draws them.
+pub(crate) fn label_box(s: &Session, sessions: &mut ViewSessions, d: &Drawing, id: u64, placed: &crate::drawing_view::OnSheet) -> Option<Aabb2> {
     let lettering = Lettering { units: String::new(), language: d.language.clone(), font: d.font.clone() };
     let (labels, _) = view_labels(d, d.view(id).into_iter(), &lettering, false);
     let label = labels.into_iter().find(|label| !label.group.items.is_empty())?;
-    let around = Aabb2 { min: boundary.min - centre, max: boundary.max - centre };
-    let at = centre + label_place(label.offset, label.half, Some(around));
+    let centre = d.view_centre(id).ok()?;
+    let wanted = if label.offset.is_none() { dimensions_on(d, std::iter::once(id)) } else { Vec::new() };
+    let beside = match d.resolve_view(id) {
+        Ok(view) if !wanted.is_empty() => {
+            let frame = crate::drawing_view::view_frame(&view, &placed.extents.model, Vec2::ZERO, CMD).ok();
+            let drawn = draw_dimensions(s, Some(sessions), d, &wanted, |_| Some((frame?, view.line_group.value)), false);
+            drawn.iter().filter_map(|one| Some(group_bounds(one.group.as_deref()?, &one.fonts))).collect()
+        }
+        _ => Vec::new(),
+    };
+    let boundary = Aabb2 { min: placed.boundary.min - centre, max: placed.boundary.max - centre };
+    let at = centre + label_place(label.offset, label.half, Some(boundary), &beside);
     Some(group_bounds(&moved(&label.group, at), &label.fonts))
 }
 
@@ -1464,6 +1488,10 @@ struct Assembly {
     /// itself, and checking costs one pass over each group.
     alone: Scene,
     states: Vec<ViewState>,
+    /// Each of `states`' views' centre and boundary (centred on the view), for its label.
+    around: Vec<(Vec2, Option<Aabb2>)>,
+    /// The boxes of what joined for each view, centred on it: what its label keeps clear of.
+    beside: BTreeMap<u64, Vec<Aabb2>>,
     /// The objects on the sheet, each with its group's paint band, in the order they joined.
     objects: Vec<(u8, SheetObject)>,
     /// The frame and centre of each view whose lines are in the scene.
@@ -1521,6 +1549,7 @@ impl Assembly {
                 (Some(centre), Some(group)) => match self.add(group, &one.fonts, centre, DrawnFor::View) {
                     Ok(bounds_mm) => {
                         drawn = true;
+                        self.beside.entry(one.view).or_default().push(Aabb2 { min: bounds_mm.min - centre, max: bounds_mm.max - centre });
                         self.objects.extend(SheetObject::on_paper(one.dimension, one.kind, bounds_mm, None).map(banded(DrawnFor::View)));
                     }
                     Err(LeftOut::TooManyRecords) => {
@@ -1569,14 +1598,34 @@ impl Assembly {
         }
     }
 
-    /// Adds `label`, its view's, for the view centred at `centre` with `boundary` round it (centred on
-    /// the view), and says whether it was drawn. One with no text set isn't; one that would take the
-    /// scene past a paper scene's limits is left out and says why.
-    fn add_label(&mut self, label: &SetLabel, centre: Vec2, boundary: Option<Aabb2>) -> LabelState {
+    /// Adds `labels`, each by its view, after the views' annotations, so each keeps clear of its own
+    /// view's ([`label_place`]), and gives each view its label's state.
+    fn add_labels(&mut self, labels: &[SetLabel]) {
+        for (at, (centre, boundary)) in std::mem::take(&mut self.around).into_iter().enumerate() {
+            let Some(view) = self.states.get(at).map(|state| state.view) else { continue };
+            let Some(label) = labels.iter().find(|label| label.view == view) else { continue };
+            let beside = self.beside.remove(&view).unwrap_or_default();
+            let drawn = self.add_label(label, centre, boundary, &beside);
+            if let Some(state) = self.states.get_mut(at) {
+                state.label = Some(drawn);
+            }
+        }
+        // Every view is placed by now: each detail's mark on its parent.
+        for label in labels {
+            if let Some(mark) = &label.mark {
+                self.add_mark(label.view, mark);
+            }
+        }
+    }
+
+    /// Adds `label`, its view's, for the view centred at `centre` with `boundary` round it and `beside`
+    /// drawn for it (both centred on the view), and says whether it was drawn. One with no text set
+    /// isn't; one that would take the scene past a paper scene's limits is left out and says why.
+    fn add_label(&mut self, label: &SetLabel, centre: Vec2, boundary: Option<Aabb2>, beside: &[Aabb2]) -> LabelState {
         if label.group.items.is_empty() {
             return LabelState { drawn: false, why: label.why.clone() };
         }
-        let at = centre + label_place(label.offset, label.half, boundary);
+        let at = centre + label_place(label.offset, label.half, boundary, beside);
         match self.add(&label.group, &label.fonts, at, DrawnFor::View) {
             Ok(bounds_mm) => {
                 self.objects.extend(SheetObject::on_paper(label.view, ObjectKind::ViewLabel, bounds_mm, None).map(banded(DrawnFor::View)));
@@ -1691,18 +1740,17 @@ fn banded(of: DrawnFor) -> impl Fn(SheetObject) -> (u8, SheetObject) {
 }
 
 /// The scene of sheet `record`: its border, then `images`, then each of `views` (its id, centre and
-/// lines, in id order) moved to its centre, each followed by its label of `labels` ([`label_place`]),
-/// with its title block (`logos` under its lines), its symbol in `projection` and its cells' text as
-/// [`block_text`] set it, which its band puts on top ([`Assembly::finish`]). A view or a label that
-/// would take the scene past a paper scene's limits is left out and says why, and the views after it
-/// are still drawn when they fit.
+/// lines, in id order) moved to its centre, with its title block (`logos` under its lines), its symbol
+/// in `projection` and its cells' text as [`block_text`] set it, which its band puts on top
+/// ([`Assembly::finish`]). A view that would take the scene past a paper scene's limits is left out
+/// and says why, and the views after it are still drawn when they fit. The views' labels join after
+/// their annotations ([`Assembly::add_labels`]), so each keeps clear of them.
 fn assemble<D: Borrow<Drawn>>(
     record: &Sheet,
     projection: Projection,
     text: &Set,
     images: &[Group],
     logos: &[Item],
-    labels: &[SetLabel],
     views: impl Iterator<Item = (u64, Vec2, D)>,
 ) -> Result<Assembly> {
     let size_mm = record.sheet.size_mm().map_err(|e| bad(CMD, e.to_string()))?;
@@ -1734,9 +1782,11 @@ fn assemble<D: Borrow<Drawn>>(
     // The block's fonts, each once: all they hold counts, as the table held none before.
     scene.add_fonts(fonts);
     let records = records.saturating_add(alone.font_records_beyond(&scene.fonts));
-    let (states, placed, dimensions, notes, balloons) = (Vec::new(), BTreeMap::new(), Vec::new(), Vec::new(), Vec::new());
+    let (states, around, beside, placed) = (Vec::new(), Vec::new(), BTreeMap::new(), BTreeMap::new());
+    let (dimensions, notes, balloons) = (Vec::new(), Vec::new(), Vec::new());
     let (tags, sketches, fills) = (Vec::new(), Vec::new(), Vec::new());
-    let mut assembly = Assembly { scene, groups, records, alone, states, objects, placed, dimensions, notes, balloons, tags, sketches, fills };
+    let mut assembly =
+        Assembly { scene, groups, records, alone, states, around, beside, objects, placed, dimensions, notes, balloons, tags, sketches, fills };
     for (view, centre, drawn) in views {
         let drawn: &Drawn = drawn.borrow();
         let mut status = drawn.status.clone();
@@ -1761,14 +1811,8 @@ fn assemble<D: Borrow<Drawn>>(
         assembly
             .objects
             .extend(SheetObject::on_paper(view, ObjectKind::View, lines.unwrap_or(Aabb2::EMPTY), boundary_mm).map(banded(DrawnFor::View)));
-        let label = labels.iter().find(|label| label.view == view).map(|label| assembly.add_label(label, centre, drawn.boundary));
-        assembly.states.push(ViewState { view, status, stats: drawn.stats, why: drawn.why.clone(), label, hatches: drawn.hatches.clone() });
-    }
-    // Once every view is placed: each detail's mark on its parent.
-    for label in labels {
-        if let Some(mark) = &label.mark {
-            assembly.add_mark(label.view, mark);
-        }
+        assembly.around.push((centre, drawn.boundary));
+        assembly.states.push(ViewState { view, status, stats: drawn.stats, why: drawn.why.clone(), label: None, hatches: drawn.hatches.clone() });
     }
     Ok(assembly)
 }
@@ -1782,7 +1826,7 @@ fn assemble_with_sketches<D: Borrow<Drawn>, K: Borrow<DrawnSketch>>(
     views: impl Iterator<Item = (u64, Vec2, D)>,
     sketches: impl Iterator<Item = (u64, K)>,
 ) -> Result<(Scene, Vec<ViewState>, Vec<SheetObject>, Vec<SketchState>)> {
-    let mut assembly = assemble(record, projection, &Set::default(), images, &[], &[], views)?;
+    let mut assembly = assemble(record, projection, &Set::default(), images, &[], views)?;
     assembly.add_sketches(sketches);
     let sketches = std::mem::take(&mut assembly.sketches);
     let (scene, views, objects, _, _, _) = assembly.finish()?;
@@ -2550,8 +2594,9 @@ pub fn extract(s: &mut Session, sheet: u64) -> Result<SheetView> {
             cache.views.retain(|id, _| kept.contains(id));
             cache.dimensions.retain(|id, _| d.dimension(*id).is_some() || d.notes.by_id(*id).is_some() || d.balloons.by_id(*id).is_some());
             let drawn = on.iter().filter_map(|(id, _, centre)| cache.views.get(id).map(|e| (*id, *centre, &e.drawn)));
-            let mut assembly = assemble(record, d.projection, &text, &inputs.images, &inputs.logos, &labels, drawn)?;
+            let mut assembly = assemble(record, d.projection, &text, &inputs.images, &inputs.logos, drawn)?;
             assembly.add_dimensions(inputs.dimensions.iter().filter_map(|(id, _)| cache.dimensions.get(id).map(|e| &e.drawn)));
+            assembly.add_labels(&labels);
             let table_states = assembly.add_tables(&tables);
             assembly.add_sheet_texts(&notes);
             let sketched = sketches.iter().filter_map(|record| cache.sketches.get(&record.id).map(|e| (record.id, &e.drawn)));

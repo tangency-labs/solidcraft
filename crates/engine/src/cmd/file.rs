@@ -118,7 +118,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .noundo()
         .contract(&EXPORT_CONTRACT)
         .output(crate::schema::output_schema_for::<crate::schema::file::FileExportResult>)
-        .params("path; format?: stl|stla|obj|step|3mf|3mf-tagged|glb|urdf|sdf|json (default from extension; sdf: a Gazebo model folder, as file.export_sdf (the path is the folder, a `.sdf` ending dropped; name?, static?, model_uris?, quality?); docs/sdf.md; 3mf-tagged: 3MF whose triangles carry their B-rep face, at full precision, for meshing and analysis tools; docs/formats/3mf-face-tags.md; obj: the colours of the bodies go in a material library (`.mtl`) written next to the mesh file; glb: binary glTF in metres with Y up, each body placed and named, its colours, metallic and roughness as materials; a transparent body or face, or a body a render setup gives an image texture or optics, is refused; urdf: the whole assembly as a robot, with STL meshes written next to it; docs/urdf.md); bodies?: [names] (JSON and URDF export the complete design); urdf only: mesh_prefix? (before each mesh file name, e.g. package://robot/meshes/), effort? (default 1000), velocity? (default 10), images?: bool (default false; true: each shown canvas and decal is written as a textured quad, its image next to the URDF); quality?: standard|fine|finest (STL, OBJ, 3MF and GLB: how closely the mesh follows curved faces, a chord tolerance of 2e-4, 5e-5 or 1e-5 of each body's size; default standard); objects?: body|component (3MF only: one object per body, the default, or one object for each placed component with two or more bodies, with those bodies as its parts, so a slicer loads them as one object with parts); lay_on_print_faces?: bool (STL and 3MF only, default false: each body with a print face (body.print_face) is written laid on it, as a slicer export lays it → print_faces: the bodies laid, warnings: each body that has a print face but was written as it lies); solids?: body|face (ASCII STL, format stla only, default body: face writes one `solid <name>` block per B-rep face, named by the face's persistent name, for CFD meshers; docs/formats/stl-face-solids.md)"),
+        .params("path; format?: stl|stla|obj|step|3mf|3mf-tagged|glb|urdf|sdf|json, or plugin_id.entry for an installed exporter plugin (plugin.list exporters), which writes the whole design with options?: the slot's declared options (default from extension; an extension SolidCraft doesn't write goes to the exporter plugin that claims it; sdf: a Gazebo model folder, as file.export_sdf (the path is the folder, a `.sdf` ending dropped; name?, static?, model_uris?, quality?); docs/sdf.md; 3mf-tagged: 3MF whose triangles carry their B-rep face, at full precision, for meshing and analysis tools; docs/formats/3mf-face-tags.md; obj: the colours of the bodies go in a material library (`.mtl`) written next to the mesh file; glb: binary glTF in metres with Y up, each body placed and named, its colours, metallic and roughness as materials; a transparent body or face, or a body a render setup gives an image texture or optics, is refused; urdf: the whole assembly as a robot, with STL meshes written next to it; docs/urdf.md); bodies?: [names] (JSON and URDF export the complete design); urdf only: mesh_prefix? (before each mesh file name, e.g. package://robot/meshes/), effort? (default 1000), velocity? (default 10), images?: bool (default false; true: each shown canvas and decal is written as a textured quad, its image next to the URDF); quality?: standard|fine|finest (STL, OBJ, 3MF and GLB: how closely the mesh follows curved faces, a chord tolerance of 2e-4, 5e-5 or 1e-5 of each body's size; default standard); objects?: body|component (3MF only: one object per body, the default, or one object for each placed component with two or more bodies, with those bodies as its parts, so a slicer loads them as one object with parts); lay_on_print_faces?: bool (STL and 3MF only, default false: each body with a print face (body.print_face) is written laid on it, as a slicer export lays it → print_faces: the bodies laid, warnings: each body that has a print face but was written as it lies); solids?: body|face (ASCII STL, format stla only, default body: face writes one `solid <name>` block per B-rep face, named by the face's persistent name, for CFD meshers; docs/formats/stl-face-solids.md)"),
     // One command per format, so each File › Export item can have a key of its own; started
     // from a key or command search, the app opens the save picker (the mesh dialog for STL and
     // 3MF). Each takes `file.export`'s parameters for its format, without `format`.
@@ -1574,6 +1574,20 @@ pub fn runs_plugin_importer(s: &Session, command: &str, params: &Value) -> bool 
     (format.is_some() || !reads_natively(path)) && !matches!(crate::plugin::importer_for(s, path, format), Ok(None))
 }
 
+/// Whether `file.export` selects an installed exporter plugin instead of a native writer.
+/// Reads manifests only, using the same explicit-format and extension precedence as export.
+pub fn runs_plugin_exporter(s: &Session, command: &str, params: &Value) -> bool {
+    if !command.eq_ignore_ascii_case("file.export") {
+        return false;
+    }
+    let Some(path) = params.get("path").and_then(Value::as_str) else { return false };
+    match params.get("format").and_then(Value::as_str) {
+        Some(format) if format.contains('.') => crate::plugin::exporters(s).iter().any(|e| e.id == format),
+        None if Format::from_name(path).is_err() => !matches!(crate::plugin::exporter_for(s, path, None), Ok(None)),
+        _ => false,
+    }
+}
+
 /// SolidCraft opens this file with its own readers (a design, drawing, CAD, mesh or point cloud file).
 fn reads_natively(path: &str) -> bool {
     let extension = std::path::Path::new(path).extension().and_then(|e| e.to_str()).unwrap_or_default().to_ascii_lowercase();
@@ -2681,7 +2695,21 @@ fn export_laid_to(
 fn export(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "file.export";
     let path = path_arg(p, cmd)?;
-    let format = Format::from_name(str_(p, "format").unwrap_or(path))?;
+    // An installed exporter id takes precedence over native file-name formats such as `part.step`.
+    // Without a named format, only extensions SolidCraft does not write go to a plugin.
+    let named = str_(p, "format");
+    let exporter = match named {
+        Some(format) if format.contains('.') => crate::plugin::exporters(s).into_iter().find(|e| e.id == format),
+        None if Format::from_name(path).is_err() => crate::plugin::exporter_for(s, path, None)?,
+        _ => None,
+    };
+    if let Some(exporter) = exporter {
+        return export_with_plugin(s, cmd, path, &exporter, p);
+    }
+    if p.get("options").is_some_and(|v| !v.is_null()) {
+        return Err(bad(cmd, "`options` applies to formats an exporter plugin writes"));
+    }
+    let format = Format::from_name(named.unwrap_or(path))?;
     // The path's extension picks the OpenUSD encoding; a `format` naming another one is refused
     // rather than ignored.
     if format == Format::Usd
@@ -2714,6 +2742,18 @@ fn export(s: &mut Session, p: &Value) -> Result<Value> {
         return export_laid(s, path, format, &bodies, &parts, quality);
     }
     export_to(s, cmd, path, format, &bodies, &parts, quality)
+}
+
+/// `file.export` through an exporter plugin: the whole design, with the slot's options.
+fn export_with_plugin(s: &mut Session, cmd: &str, path: &str, exporter: &crate::plugin::FormatSlot, p: &Value) -> Result<Value> {
+    for key in ["bodies", "quality", "objects", "lay_on_print_faces", "mesh_prefix", "effort", "velocity"] {
+        if p.get(key).is_some_and(|v| !v.is_null()) {
+            return Err(bad(cmd, format!("`{key}` is for SolidCraft's own formats; an exporter plugin writes the whole design with its `options`")));
+        }
+    }
+    let options = p.get("options").filter(|o| !o.is_null()).cloned().unwrap_or_else(|| json!({}));
+    let exported = crate::plugin::export_file(s, exporter, path, &options)?;
+    serde_json::to_value(exported).map_err(|e| EngineError::Other(e.to_string()))
 }
 
 fn export_step(s: &mut Session, p: &Value) -> Result<Value> {
@@ -3683,6 +3723,14 @@ mod tests {
             let bytes = std::fs::read(&path).unwrap();
             assert_eq!(r["bytes"].as_u64(), Some(bytes.len() as u64), "{cmd}");
             assert!(bytes.starts_with(signature), "{cmd}");
+        }
+        // A native file name in `format` still selects that format, independently of the path.
+        for (format, expected, signature) in [("part.step", "Step", &b"ISO-10303-21;"[..]), ("part.json", "Design", &b"{"[..])] {
+            let path = at(&format!("{format}.out"));
+            let reply = s.execute("file.export", &json!({"path": path, "format": format})).unwrap();
+            assert_eq!(reply["format"], expected);
+            assert!(std::fs::read(&path).unwrap().starts_with(signature));
+            assert!(s.execute("file.export", &json!({"path": path, "format": format, "options": {}})).is_err());
         }
         // The triangles `file.export` writes (the 80-byte header holds the file's name), 84 + 50
         // bytes each, as many as the OBJ export's. The 20 x 10 x 5 box is meshed on the mesh path,

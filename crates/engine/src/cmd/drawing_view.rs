@@ -607,10 +607,7 @@ fn inspect(s: &mut Session, p: &Value) -> Result<Value> {
             offset: label.offset,
             needed: view.needs_letter(),
             text: d.label_text(view.id),
-            box_mm: d
-                .view_centre(view.id)
-                .ok()
-                .and_then(|centre| crate::drawing_scene::label_box(d, view.id, centre, placed.boundary))
+            box_mm: crate::drawing_scene::label_box(s, &mut sessions, d, view.id, &placed)
                 .map(|label| BoxResult { min: label.min.into(), max: label.max.into() }),
         }),
         choices: ChoicesResult {
