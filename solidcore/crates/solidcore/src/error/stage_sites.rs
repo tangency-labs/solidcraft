@@ -74,7 +74,6 @@ const PINNED: &[(&str, usize)] = &[
     ("solidcore/src/intersect/surface_intersector/p1.rs", 5),
     ("solidcore/src/intersect/surface_intersector/p5.rs", 6),
     ("solidcore/src/nurbs/b_spline_curve/p3.rs", 2),
-    ("solidcore/src/offset/offset_geometry_creation.rs", 17),
     ("solidcore/src/topology/proto_topology/p2.rs", 3),
 ];
 

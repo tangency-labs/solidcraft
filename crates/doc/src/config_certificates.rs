@@ -861,11 +861,12 @@ impl Document {
         // Bodies are named in today's form; a design saved before format 52 holds the older one.
         let name = &*crate::persistent_name::written_now(name);
         let names = crate::naming::names(body);
-        // `face` is `name` itself or a piece of it (a piece of a piece, …).
+        // `face` is `name` itself or a piece of it (a piece of a piece, …). Compare the
+        // identities in either saved spelling: 0.40 rc.3 wrote `blend:…`, now `blend(…)`.
         let piece_of = |face: &str| {
             let mut n = face;
             loop {
-                if n == name {
+                if crate::persistent_name::same_face(n, name) {
                     return true;
                 }
                 match crate::piece_names::parent_piece(n) {
@@ -880,7 +881,7 @@ impl Document {
                 .info
                 .iter()
                 .enumerate()
-                .filter(|(_, info)| info.synonyms.iter().chain(&info.aliases).any(|other| other == name))
+                .filter(|(_, info)| info.synonyms.iter().chain(&info.aliases).any(|other| crate::persistent_name::same_face(other, name)))
                 .map(|(index, _)| index)
                 .collect();
         }

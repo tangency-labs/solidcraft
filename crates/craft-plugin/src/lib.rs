@@ -68,6 +68,7 @@ impl std::fmt::Display for DesignToken {
 pub mod conditions;
 pub mod dialog;
 mod input;
+mod schema_refs;
 pub mod swatches;
 pub use input::{FONT_KEY, check_input, font_field, prepare_input, strict_input_schema};
 
@@ -899,7 +900,8 @@ pub fn parse_manifest_for(text: &[u8], folder: &str, app: &str) -> Result<Manife
         return Err(HostError::LimitExceeded { limit: "manifest size exceeds 64 KiB".into() });
     }
     // A plugin from before capabilities names its API in `runtime.api`: say so plainly.
-    if let Ok(value) = serde_json::from_slice::<Value>(text) {
+    let mut parsed = serde_json::from_slice::<Value>(text).ok();
+    if let Some(value) = &parsed {
         if let Some(api) = value.get("runtime").and_then(|runtime| runtime.get("api")) {
             let api = api.as_str().map(|api| api.chars().take(64).collect::<String>()).unwrap_or_else(|| "an older plugin API".into());
             return Err(HostError::UnsupportedCapability {
@@ -915,7 +917,17 @@ pub fn parse_manifest_for(text: &[u8], folder: &str, app: &str) -> Result<Manife
             check_capabilities(&requested, app)?;
         }
     }
-    let mut manifest: Manifest = serde_json::from_slice(text).map_err(|error| invalid("manifest", error.to_string()))?;
+    // Shared field definitions are inlined first; a manifest without them keeps its exact
+    // deserialization (and error positions).
+    let expanded = match parsed.as_mut().map(schema_refs::expand).transpose()? {
+        Some(true) => parsed,
+        _ => None,
+    };
+    let mut manifest: Manifest = match expanded {
+        Some(value) => serde_json::from_value(value),
+        None => serde_json::from_slice(text),
+    }
+    .map_err(|error| invalid("manifest", error.to_string()))?;
     manifest.name = manifest.name.trim().to_string();
     manifest.version = manifest.version.trim().to_string();
     manifest.description = manifest.description.trim().to_string();

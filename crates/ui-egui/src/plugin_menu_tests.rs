@@ -595,6 +595,19 @@ fn font_dialog_filters_picks_with_keyboard_and_click_and_renders() {
     assert!(small.contains_rect(crate::scenario::rect_of("dialog:control:Font *").unwrap()), "the font control fits a small window");
 }
 
+fn shared_field_definitions_are_drawn_like_inline_fields() {
+    let manifest = json!({"id":"sample","name":"Sample","version":"1","capabilities":["commands@0.1"],
+        "$defs":{"angle":{"type":"string","title":"Angle","enum":["14.5","20","25"],"default":"20"}},
+        "runtime":{"module":"plugin.wasm","commands":[],"entries":[{"name":"make","input_schema":{"type":"object",
+            "properties":{"pressure_angle":{"$ref":"#/$defs/angle","default":"25"}}}}]}});
+    let manifest = solidcraft_engine::plugin::parse_manifest(&serde_json::to_vec(&manifest).unwrap(), "sample").unwrap();
+    let schema = &manifest.runtime.unwrap().entries[0].input_schema;
+    let fields = form(schema).expect("a $ref field does not turn the dialog off");
+    let angles: Vec<String> = vec!["14.5".into(), "20".into(), "25".into()];
+    assert_eq!((fields[0].0.label.as_str(), &fields[0].0.kind), ("Angle", &Kind::Choice { values: angles.clone(), titles: angles }));
+    assert_eq!(fields[0].1, Input::Choice(Some(2)), "the default beside the $ref wins");
+}
+
 #[test]
 fn described_field_labels_and_values_show_the_same_tooltip() {
     for mut property in [

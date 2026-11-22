@@ -22,17 +22,37 @@ const MAX_STORED_TEXT_BYTES: usize = 4096;
 const MAX_LOCAL_ID_BYTES: usize = 512;
 const AUXILIARY: [&str; 7] = ["links", "patterns", "offsets", "freeform_offsets", "freeform_chain_offsets", "wires", "equations"];
 
-/// Authored sheet geometry. Points and lengths are paper XY millimetres, regardless
-/// of the drawing's display units. The origin is the sheet's lower-left corner,
-/// with x right and y up, not the border corner. No view scale or source path.
+/// What a drawing sketch belongs to. A sheet's sketch is in paper millimetres, from the sheet's
+/// lower-left corner. A view's sketch is in model millimetres in the view's plane, in the plane's
+/// own coordinates (from its basis's origin, as the view's section curves are), and is placed on
+/// paper at the view's scale, so it moves and scales with its view.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Owner {
+    Sheet(#[serde(with = "crate::ids")] u64),
+    View(#[serde(with = "crate::ids")] u64),
+}
+
+impl Owner {
+    /// The view it moves with, if any.
+    pub fn view(self) -> Option<u64> {
+        match self {
+            Owner::Sheet(_) => None,
+            Owner::View(view) => Some(view),
+        }
+    }
+}
+
+/// Authored drawing geometry, in its owner's frame ([`Owner`]), regardless of the drawing's
+/// display units. A sheet sketch's origin is the sheet's lower-left corner, with x right and
+/// y up, not the border corner. No source path.
 /// Expressions are retained verbatim; interpreting them is the later read-only store's job.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct SheetSketch {
     #[serde(with = "crate::ids")]
     pub id: u64,
-    #[serde(with = "crate::ids")]
-    pub sheet: u64,
+    pub owner: Owner,
     pub name: String,
     pub sketch: Sketch,
 }
@@ -365,7 +385,8 @@ fn solve_record(design: &crate::Document, owner: &Drawing, original: &SheetSketc
     require(report.keeps_orientation(), || report.failure(|conflicts| format!("sheet sketch edit would conflict with {conflicts}")))?;
     check_budget(std::iter::once(&candidate))?;
     check_payload(&candidate)?;
-    Ok(SolvedSheetSketch { drawing: owner.id, sheet: original.sheet, id: original.id, sketch: candidate.sketch, report })
+    let sheet = owner.sketch_sheet(original).ok_or_else(|| invalid("its owner is not in this drawing"))?;
+    Ok(SolvedSheetSketch { drawing: owner.id, sheet, id: original.id, sketch: candidate.sketch, report })
 }
 
 /// Names are collected after record admission, with cumulative expression work

@@ -6,6 +6,7 @@
 //! solidcraft-cli eval <script.json|design.sc|part.step> [--in design.sc|part.step] [--json-out FILE] [--allow-errors] (alias: inspect) measurements as JSON
 //! solidcraft-cli check <design.sc|script.json> [--drawing ID|NAME] [--sheet ID|NAME] [--json-out FILE] Check Drawing on its drawings; exit 1 on findings
 //! solidcraft-cli script <design.sc> [--out script.json]     the design's history as a command script
+//! solidcraft-cli textconv <design.sc|design.json|drawing.scdwg> a design or drawing file as text, for git diff
 //! solidcraft-cli bench-open <design.sc | part.step> [--parse-only] [--save OUT.sc] [--display LEVEL [--edit NAME EXPR]] [--ops script.json] loading timings as JSON lines
 //! solidcraft-cli bench-agent [--scale F] [--save F] [--script-out F] a ~1,300-body design built command by command, timed
 //! solidcraft-cli bench-assistant --connect 127.0.0.1:PORT [--token T] --base-url URL --model NAME [--tasks 1,2,5] [--repeat N]
@@ -51,6 +52,7 @@ mod profiling;
 mod recipe;
 mod render;
 mod spatial;
+mod textconv;
 
 use std::process::ExitCode;
 
@@ -72,11 +74,13 @@ struct Command {
 /// `run`'s lines in the usage.
 const USAGE_RUN: &str = "  solidcraft-cli run <script.json|design.sc|part.step> [--in design.sc|part.step] [--out FILE]... [--save FILE] [--quiet] [--results] [--timings] [--profile] [--profile-out trace.json] [--json-out FILE] [--allow-errors] [--validation each_step|each_feature|off]\n                     [--param-check off|warn|strict] [--quality standard|fine|finest] [--script-relative]\n                     [--param NAME=EXPR]... [--params-file FILE.json]\n  solidcraft-cli run --in <design.sc|part.step> [--out FILE]...\n      (a timeline feature that fails fails the run and nothing is written; --allow-errors writes anyway)\n      (a step of the script that fails stops the run, with --allow-errors too: nothing is written, and --results\n       gives {results: those of the steps before it, error: {step, command, error}}, to --json-out FILE as well)\n      (--quality: how closely an STL, OBJ or 3MF --out follows curved faces, as file.export's quality: a chord of\n       2e-4, 5e-5 or 1e-5 of each body's size, never under 1 µm, default standard)\n      (--validation: when SMLib's full check runs on the features computed (diagnostics.validation), default each_feature)\n      (--param-check checks each step against its command's contract: warn reports on stderr, strict stops the run)\n      (--param NAME=EXPR sets an existing parameter as parameters.change does, before the script's own commands run and without\n       touching the file; repeat it to set several, applied in the order given. --params-file FILE.json holds {\"NAME\": \"EXPR\", ...},\n       applied before any --param. Needs a design (the positional one, or --in); an unknown name, a missing `=` or a bad\n       expression fails the run. Also taken by eval)\n      (--script-relative runs command file paths from the positional script's folder; command-line file paths\n       stay relative to the caller's folder, which remains the default for scripts without this option)\n      (--timings prints {timings: [{index, command, ms}], total_ms} for a script, with --results its results too;\n       --profile adds each command's profile: {boolean_ms, tessellate_ms, other_ms}, the kernel's share)\n      (--profile also records where the time goes, SMLib's calls, kernel operations, features, commands and import stages,\n       and prints the table to stderr: count, total, self time and longest per span; --profile-out FILE writes the spans\n       as a Chrome trace for chrome://tracing or ui.perfetto.dev; SOLIDCRAFT_PROFILE=1 does the same for any command)\n";
 /// `eval`'s lines in the usage.
-const USAGE_EVAL: &str = "  solidcraft-cli eval <script.json|design.sc|part.step> [--in design.sc|part.step] [--json-out FILE] [--allow-errors] [--profile] [--profile-out trace.json] [--validation each_step|each_feature|off]     (alias: inspect)\n  solidcraft-cli eval --in <script.json|design.sc|part.step> [--json-out FILE]\n      (with both inputs, runs the positional script on --in before measuring; does not automatically save the modified design)\n      (--json-out FILE writes the JSON that run (with --results, else the measurement) and eval print to FILE instead of stdout,\n       as plain UTF-8: a shell's > can re-encode it, e.g. Windows PowerShell adds a byte-order mark)\n      (--profile, --profile-out and --validation as for run)\n";
+const USAGE_EVAL: &str = "  solidcraft-cli eval <script.json|design.sc|part.step> [--in design.sc|part.step] [--json-out FILE] [--allow-errors] [--quiet] [--profile] [--profile-out trace.json] [--validation each_step|each_feature|off]     (alias: inspect)\n  solidcraft-cli eval --in <script.json|design.sc|part.step> [--json-out FILE]\n      (with both inputs, runs the positional script on --in before measuring; does not automatically save the modified design)\n      (--json-out FILE writes the JSON that run (with --results, else the measurement) and eval print to FILE instead of stdout,\n       as plain UTF-8: a shell's > can re-encode it, e.g. Windows PowerShell adds a byte-order mark)\n      (--profile, --profile-out and --validation as for run; --quiet prints no report to stdout, as for run: the exit status\n       still says whether a feature failed, and a --json-out file is still written)\n";
 /// `check`'s lines in the usage.
 const USAGE_CHECK: &str = "  solidcraft-cli check <design.sc|script.json> [--drawing ID|NAME] [--sheet ID|NAME] [--json-out FILE]\n      (Check Drawing, drawing.check, on each drawing of the design, or the one --drawing names, by id or name: prints\n       {drawings: [{id, name, check: drawing.check's reply}], findings: the total}, or writes it to --json-out FILE;\n       --sheet checks that sheet only; exits with 1 when anything is found, after the report, and on an error, with none)\n";
 /// `script`'s lines in the usage.
 const USAGE_SCRIPT: &str = "  solidcraft-cli script <design.sc|script.json> [--out script.json]\n      (the design's history as a command script that eval and run replay)\n";
+/// `textconv`'s lines in the usage.
+const USAGE_TEXTCONV: &str = "  solidcraft-cli textconv <design.sc|design.json|drawing.scdwg>\n      (prints a design or drawing file as text for git diff. A container's container.json comes first on one line, then\n       its design or drawing, laid out as a .json save lays it out. Then each other file it holds gets one line with its\n       size and SHA-256. The model cache, the preview and plugin caches are left out, since a save or a plugin writes them afresh. A file it cannot show prints\n       one line with its size and SHA-256 and still exits 0. The user guide's Designs in Git section has the git setup.)\n";
 /// `bench-open`'s lines in the usage.
 const USAGE_BENCH_OPEN: &str = "  solidcraft-cli bench-open <design.sc | part.step> [--parse-only] [--save OUT.sc] [--display LEVEL [--edit NAME EXPR]] [--ops script.json] [--profile] [--profile-out trace.json]\n      (--profile and --profile-out as for run)\n      (--ops: after opening, run each command of the script and undo it, timing the command, the\n       evaluations it caused and the view it leaves: placing and meshing what changed)\n";
 /// `bench-agent`'s lines in the usage.
@@ -148,6 +152,7 @@ const COMMANDS: &[Command] = &[
     Command { name: "inspect", usage: USAGE_EVAL, listed: false },
     Command { name: "check", usage: USAGE_CHECK, listed: true },
     Command { name: "script", usage: USAGE_SCRIPT, listed: true },
+    Command { name: "textconv", usage: USAGE_TEXTCONV, listed: true },
     Command { name: "bench-open", usage: USAGE_BENCH_OPEN, listed: true },
     Command { name: "bench-agent", usage: USAGE_BENCH_AGENT, listed: true },
     Command { name: "bench-assistant", usage: USAGE_BENCH_ASSISTANT, listed: true },
@@ -213,6 +218,7 @@ fn main() -> ExitCode {
         Some("eval" | "inspect") => cmd_eval(&args[1..]),
         Some("check") => check::run(&args[1..]),
         Some("script") => cmd_script(&args[1..]),
+        Some("textconv") => textconv::run(&args[1..]),
         Some("snapshot") => cmd_snapshot(&args[1..]),
         Some("render") => render::run(&args[1..]),
         Some("exec") => cmd_exec(&args[1..]),
@@ -961,7 +967,7 @@ fn cmd_eval(args: &[String]) -> Result<(), String> {
         "eval",
         args,
         &["--in", "--json-out", "--profile-out", "--validation", "--param", "--params-file"],
-        &["--profile", "--allow-errors"],
+        &["--profile", "--allow-errors", "--quiet"],
         true,
     )?;
     let validation = validation_flag("eval", args)?;
@@ -981,7 +987,10 @@ fn cmd_eval(args: &[String]) -> Result<(), String> {
         out["newer_file"] = file.report();
         out["warnings"] = json!(file.warnings());
     }
-    print_json(&out, json_out)?;
+    // `--quiet` silences stdout, as for `run`; a report that was asked for in a file is still written.
+    if json_out.is_some() || !args.iter().any(|a| a == "--quiet") {
+        print_json(&out, json_out)?;
+    }
     // The report shows a failing feature in `timeline[].error`; the exit status says so too, as
     // `run`'s does, so a script that checks only the status doesn't take a broken rebuild for a
     // good one. `--allow-errors` keeps status 0 for a design inspected on purpose. A newer
