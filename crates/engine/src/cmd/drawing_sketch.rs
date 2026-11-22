@@ -148,16 +148,6 @@ pub(super) fn finish(s: &mut Session, p: &Value) -> Result<Value> {
     let _: contract::Empty = parsed("sketch.finish", p)?;
     let entry = sketch_store::sheet_target(s, &Value::Null, "sketch.finish")?;
     let mut result = reading(s, entry.sketch, "sketch.finish")?;
-    if s.doc
-        .drawing(entry.drawing)
-        .and_then(|drawing| drawing.sheet_sketch(entry.sketch))
-        .is_some_and(|record| crate::edit_start::empty_geometry(&record.sketch))
-    {
-        s.edit_drawing("sketch.finish", |drawing| {
-            drawing.sketches.retain(|record| record.id != entry.sketch);
-            Ok(())
-        })?;
-    }
     s.active_sheet_sketch = None;
     s.selection.clear();
     s.revision += 1;
