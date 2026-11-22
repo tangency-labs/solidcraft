@@ -732,9 +732,6 @@ pub enum SolverFailure {
         /// The edge use's index, 0 or 1.
         index: usize,
     },
-    /// An edge use of the caller's body has no edge: the caller's input
-    /// ([`ErrorKind::InvalidInput`]); status `SM_ERR_NULL_POINTER`.
-    EdgeUseWithoutEdge,
     /// The edge to fillet has a curve not of a B-spline class: a kind the routine cannot
     /// handle ([`ErrorKind::Unsupported`]); status `SM_ERR_NULL_POINTER`.
     EdgeCurveNotBSpline {
@@ -917,7 +914,6 @@ impl SolverFailure {
             | Self::EdgeUseWithoutMate
             | Self::EdgeUseWithoutFace
             | Self::SolverEdgeUseMissing { .. }
-            | Self::EdgeUseWithoutEdge
             | Self::FilletGeomWithoutRail { .. }
             | Self::RailEdgeUseCount { .. }
             | Self::FilletGeomWithoutSurface { .. }
@@ -943,7 +939,6 @@ impl SolverFailure {
             | Self::SideSurfaceMissesEndPlane
             | Self::SideEdgeNotOnRailFace
             | Self::SolverEdgeUseMissing { .. }
-            | Self::EdgeUseWithoutEdge
             | Self::EdgeCurveNotBSpline { .. }
             | Self::BaseSurfaceNotBSpline { .. }
             | Self::NoCenterLineTraced
@@ -1143,7 +1138,6 @@ impl core::fmt::Display for SolverFailure {
                     "the solver has no edge use {index} of the edge to fillet"
                 )
             }
-            Self::EdgeUseWithoutEdge => f.write_str("an edge use of the body has no edge"),
             Self::EdgeCurveNotBSpline { edge, kind } => write!(
                 f,
                 "the {kind} curve of edge {edge:?} to fillet is not of a B-spline class"

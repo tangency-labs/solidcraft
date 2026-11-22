@@ -125,6 +125,16 @@ fn fail(cause: SolverFailure) -> SolidError {
     SolidError::blend_solver(OP, cause)
 }
 
+/// An edge use of the caller's body without an edge: [`BlendFailure::EdgeUseWithoutEdge`]
+/// at the edge use, status `SM_ERR_NULL_POINTER`.
+fn edge_use_without_edge(edgeuse: crate::topology::EdgeuseId) -> SolidError {
+    SolidError::blend_at(
+        OP,
+        BlendFailure::EdgeUseWithoutEdge,
+        crate::error::EntityRef::Edgeuse(edgeuse),
+    )
+}
+
 // =====================================================================================
 // SHARED: data model (sTsectPnts), state passed between the chunks, public resolver
 // =====================================================================================
@@ -742,7 +752,7 @@ fn c1_setup(ops: &mut dyn FilletSolverOps, cx: &mut Cx<'_>) -> Result<CalcState>
         .solver()
         .edgeuse(0)?
         .ok_or_else(|| invalid("no edge use 0"))?;
-    let edge = eu::edge(cx.target, eu0)?.ok_or_else(|| fail(SolverFailure::EdgeUseWithoutEdge))?;
+    let edge = eu::edge(cx.target, eu0)?.ok_or_else(|| edge_use_without_edge(eu0))?;
     // SM_CAST_PTR(SmBSplineCurve, pEdge->GetCurve()): NULL for a missing curve or a
     // kind not derived from SmBSplineCurve
     let edge_curve = match topo_edge::curve(cx.target, edge)? {
@@ -753,7 +763,13 @@ fn c1_setup(ops: &mut dyn FilletSolverOps, cx: &mut Cx<'_>) -> Result<CalcState>
                 kind: c.type_string(),
             }))
         }
-        None => return Err(fail(SolverFailure::EdgeWithoutCurve { edge })),
+        None => {
+            return Err(SolidError::blend_at(
+                OP,
+                BlendFailure::EdgeWithoutCurve,
+                crate::error::EntityRef::Edge(edge),
+            ))
+        }
     };
     let ivl = topo_edge::interval(cx.target, edge)?;
 
@@ -1167,8 +1183,9 @@ mod tests_c1 {
         let k = Kernel::default();
         let (mut fb, _g, _) = fillets(&k, ROWS);
 
-        // no edge curve: SM_ERR_NULL_POINTER
+        // no edge curve: at the edge, SM_ERR_NULL_POINTER
         let (mut tb, eus) = target(None);
+        let curveless_edge = tb.edgeuse(eus[0]).unwrap().edge.unwrap();
         let mut ops = solver(&k, eus);
         let mut cx = Cx {
             k: &k,
@@ -1178,16 +1195,19 @@ mod tests_c1 {
             error_info: None,
         };
         let e = c1_setup(&mut ops, &mut cx).unwrap_err();
-        assert!(
-            matches!(
-                e.blend_failure(),
-                Some(BlendFailure::Solver(SolverFailure::EdgeWithoutCurve { .. }))
-            ),
+        assert_eq!(
+            e.blend_failure(),
+            Some(&BlendFailure::EdgeWithoutCurve),
             "{e:?}"
+        );
+        assert_eq!(
+            e.entity(),
+            Some(crate::error::EntityRef::Edge(curveless_edge))
         );
         assert_eq!(e.upstream_status(), Some(crate::error::SM_ERR_NULL_POINTER));
 
-        // an edge use of the caller's body without an edge: SM_ERR_NULL_POINTER
+        // an edge use of the caller's body without an edge: at the edge use,
+        // SM_ERR_NULL_POINTER
         let (mut tb, eus) = target(Some(line_curve([0.0, 0.0, 0.0], [2.0, 0.0, 0.0], 3)));
         tb.edgeuse_mut(eus[0]).unwrap().edge = None;
         let (mut edgeless_fb, _, _) = fillets(&k, ROWS);
@@ -1202,9 +1222,10 @@ mod tests_c1 {
         let e = c1_setup(&mut edgeless_ops, &mut edgeless_cx).unwrap_err();
         assert_eq!(
             e.blend_failure(),
-            Some(&BlendFailure::Solver(SolverFailure::EdgeUseWithoutEdge)),
+            Some(&BlendFailure::EdgeUseWithoutEdge),
             "{e:?}"
         );
+        assert_eq!(e.entity(), Some(crate::error::EntityRef::Edgeuse(eus[0])));
         assert!(!e.is_defect(), "{e:?}");
         assert_eq!(e.upstream_status(), Some(crate::error::SM_ERR_NULL_POINTER));
 
@@ -1617,7 +1638,7 @@ fn c2_trace_to_edge_ends(
         .solver()
         .edgeuse(0)?
         .ok_or_else(|| invalid("no edge use 0"))?;
-    let edge = eu::edge(cx.target, eu0)?.ok_or_else(|| fail(SolverFailure::EdgeUseWithoutEdge))?;
+    let edge = eu::edge(cx.target, eu0)?.ok_or_else(|| edge_use_without_edge(eu0))?;
     if !st.do_sorting
         || topo_edge::start_vertex(cx.target, edge)? == topo_edge::end_vertex(cx.target, edge)?
     {
@@ -1775,7 +1796,7 @@ fn c2_end_past_tangent_edge(
         .solver()
         .edgeuse(0)?
         .ok_or_else(|| fail(SolverFailure::SolverEdgeUseMissing { index: 0 }))?;
-    let edge = eu::edge(cx.target, eu0)?.ok_or_else(|| fail(SolverFailure::EdgeUseWithoutEdge))?;
+    let edge = eu::edge(cx.target, eu0)?.ok_or_else(|| edge_use_without_edge(eu0))?;
     let corner_vertex = if at_end {
         topo_edge::end_vertex(cx.target, edge)?
     } else {
@@ -3468,7 +3489,11 @@ fn c5_split_rail(
         let pnt = st.base_surfaces[0].evaluate_point(cx.k, uv)?;
         // Find the split-at parameter (i.e. -u) of the fillet
         let rail_curve = edge_unit::curve(cx.fillets.brep(), rail)?.ok_or_else(|| {
-            SolidError::blend_null_defect(OP, "a rail the solver built has no curve")
+            SolidError::blend_null_defect(
+                OP,
+                "the first read of this rail in this call returned a curve, and nothing since \
+                 removed it",
+            )
         })?;
         split_at_param = c5_drop_split_param(
             cx.k,
@@ -3490,7 +3515,13 @@ fn c5_split_rail(
         .edge_mut(rail)?
         .curve
         .as_mut()
-        .ok_or_else(|| SolidError::blend_null_defect(OP, "a rail the solver built has no curve"))?
+        .ok_or_else(|| {
+            SolidError::blend_null_defect(
+                OP,
+                "the first read of this rail in this call returned a curve, and nothing since \
+                 removed it",
+            )
+        })?
         .trim(cx.k, &mut trim_ivl, TrimMode::Notify)?; // may snap sIvl by tol to existing knots
 
     // fork 66b02de passes this on (SER)
