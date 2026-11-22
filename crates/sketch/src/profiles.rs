@@ -3067,4 +3067,31 @@ mod tests {
         let ellipse = pi * r * a;
         assert!((areas.iter().sum::<f64>() - ellipse).abs() < 1e-3 * ellipse, "{areas:?}");
     }
+
+    /// Loops along an ellipse hugged by its top's curvature circle keep the ellipse's exact curve.
+    #[test]
+    fn an_ellipse_hugged_by_its_top_curvature_circle_keeps_its_exact_curve() {
+        let mut sk = Sketch::new();
+        let c = sk.add_point(Vec2::new(0.0, 19.0), None).unwrap();
+        let m = sk.add_point(Vec2::new(0.0, 33.0), None).unwrap();
+        let e = sk.add_curve(CurveKind::Ellipse { c, m, r: 7.0 }, None).unwrap();
+        sk.add_circle(Vec2::new(0.0, 29.5), 3.5, None, None).unwrap();
+        sk.add_circle(Vec2::new(0.0, 19.0), 7.0, None, None).unwrap();
+        sk.add_arc(
+            Vec2::new(13.498971154260287, 29.333333333333037),
+            Vec2::new(3.4997332622520654, 29.45679012345668),
+            Vec2::new(5.5583998870771705, 23.25490196078415),
+            [None; 3],
+            None,
+        )
+        .unwrap();
+        let e = sk.curves[e].id.clone();
+        let along: Vec<Profile> = find_profiles(&sk).into_iter().filter(|p| p.outer_curves.contains(&e)).collect();
+        assert!(along.len() >= 3, "{along:?}");
+        for p in &along {
+            let segs = &p.region.outer.segs;
+            assert!(segs.iter().filter(|s| matches!(s, Seg2::Line { .. })).count() <= 2, "{segs:?}");
+            assert!(p.region.outer.joints().all(|(a, b)| a.end().dist(b.start()) < 1e-9), "{segs:?}");
+        }
+    }
 }
