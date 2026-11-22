@@ -5885,8 +5885,15 @@ impl Renderer {
             }
         }
         let reversed = self.target.reversed_depth();
+        // The matrix the frame was drawn with, not the one before the turn: the cull passes this
+        // view to the shader as `prev_vp` and converts each corner's depth with the same
+        // reversed-depth flag the pyramid stored its depths with. The plain `view_proj` here put
+        // the two the other way round on a reversed depth buffer (every frame drawn on Metal),
+        // and `hidden` compared a turned depth with an unturned one: placements in the near half
+        // of the depth range were left out, and the set oscillated as the pyramid changed.
+        let drawn_with = gpu_view_proj_turned(cb.view_proj, cb.turned_depth, reversed);
         if let Some(h) = self.hiz.as_mut() {
-            h.build(queue, kernel, encoder, cb.view_proj, reversed, self.frames);
+            h.build(queue, kernel, encoder, drawn_with, reversed, self.frames);
         }
         self.hiz_slot = self.pic_slot;
     }
@@ -8464,19 +8471,32 @@ mod glass_tests {
             }
             GpuScene { instanced: vec![part], ..GpuScene::default() }
         };
-        let moving = |r: &mut Renderer, ssaa: f32, turn: f32| {
+        // The view frame's own projection and its turned depth, as the frame that built the
+        // pyramid had them.
+        let moving = |r: &mut Renderer, ssaa: f32, turn: f32| -> ([[f32; 4]; 4], Option<[f32; 4]>) {
             let mut frame = test_frame(scene(), ssaa);
             frame.occlusion = true;
             frame.view_proj[3][0] += turn;
+            let (vp, turned) = (frame.view_proj, frame.turned_depth);
             render_frame(r, &device, &queue, &frame, true);
+            (vp, turned)
         };
         let bound = |r: &Renderer| r.pic.model.gpu_cull.as_ref().is_some_and(|g| g.pyramid_bound());
         // The first frame makes the pyramid's pipelines, the second stores its depth and builds
         // the pyramid from it, and the third culls against it.
         moving(&mut r, 2.0, 0.0);
         moving(&mut r, 2.0, 0.05);
-        moving(&mut r, 2.0, 0.1);
+        let (built_with, turned) = moving(&mut r, 2.0, 0.1);
         assert!(r.hiz.as_ref().is_some_and(|h| h.vp.is_some()), "the moving frames built the pyramid");
+        // The pyramid stores the view its frame was drawn with — the turned one on a reversed
+        // depth buffer — because the cull turns the box's depths back with that same flag. Stored
+        // unturned, near and far came out in opposite conventions and near geometry popped.
+        let reversed = r.target.reversed_depth();
+        let drawn_with = gpu_view_proj_turned(built_with, turned, reversed);
+        assert_eq!(r.hiz.as_ref().and_then(|h| h.vp), Some(drawn_with), "the pyramid stores the view the frame was drawn with");
+        if reversed {
+            assert_ne!(drawn_with, built_with, "on a reversed buffer the drawn view is not the plain one, so this test means something");
+        }
         assert!(bound(&r), "a frame drawn into a frame of its own culls against the pyramid");
         // 1.1× is under the 1.25× worth supersampling: drawn straight into the window's pass,
         // where the pyramid must leave nothing out.

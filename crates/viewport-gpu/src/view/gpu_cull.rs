@@ -548,6 +548,30 @@ mod tests {
         for entry in ["pick", "scan", "place"] {
             assert!(module.entry_points.iter().any(|e| e.name == entry), "{entry}");
         }
+        // The margin has a CPU mirror with tests ([`hidden_by_depth`]): the two cannot drift.
+        assert!(super::SHADER.contains("near > far + max(shift, 1e-6)"), "the cull's margin");
+        assert!(super::SHADER.contains("var shift = 0.0;"), "the placement's own depth change");
+    }
+
+    /// The rule `hidden()` ends with, on the CPU: a placement is left out only when it lies
+    /// farther than everything the pyramid holds under it by more than its own depth change since
+    /// that frame (`shift`), and never by less than the depth buffer's own resolution. Here so
+    /// the rule has a test: the shader itself cannot be run on a CPU, and the GPU tests are CI's.
+    fn hidden_by_depth(near: f32, far: f32, shift: f32) -> bool {
+        near > far + shift.max(1e-6)
+    }
+
+    /// A placement's own pixels are part of the pyramid, so its own depth change must never be
+    /// enough to leave it out: that was the popping (near geometry, strongest while orbiting).
+    #[test]
+    fn the_margin_covers_a_placements_own_depth_change() {
+        // It gained 0.02 of depth as the camera receded; the pyramid's farthest under it is its
+        // own back, 0.02 nearer: it is not behind itself.
+        assert!(!hidden_by_depth(0.30, 0.28, 0.02));
+        // Well behind what the last frame drew there, by far more than it moved: left out.
+        assert!(hidden_by_depth(0.80, 0.20, 0.01));
+        // Within the depth buffer's own resolution: the same surface, not one behind another.
+        assert!(!hidden_by_depth(0.500_000_5, 0.5, 0.0));
     }
 
     /// The GPU culls a scene's placements as the CPU does: every level of every part draws the
@@ -694,7 +718,7 @@ mod tests {
     ) -> (u32, Vec<u8>) {
         use super::super::INSTANCE_SIZE;
         let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor::default());
-        batches.cull(device, queue, &mut encoder, vp, size, &super::super::Motions::default(), hidden);
+        batches.cull(device, queue, &mut encoder, vp, size, &super::super::Motions::default(), crate::view::EDGE_PX, hidden);
         queue.submit([encoder.finish()]);
         let Some(g) = batches.gpu_cull.as_ref() else { panic!("the GPU culls the scene") };
         let out = batches.indirect.as_ref().and_then(|i| i.instances()).expect("placements");
@@ -778,7 +802,27 @@ fn fs() -> @builtin(frag_depth) f32 {
     /// left out, and one in front of it is drawn; without the last frame's depth both are.
     #[test]
     fn a_placement_behind_the_last_frames_depth_is_left_out_while_the_view_moves() {
-        use super::super::{Batches, GpuScene, GpuTarget, InstanceLook, InstancedMesh, PaletteIndex, Renderer, SceneSlot, SharedTris, hiz};
+        cull_against_the_last_frames_depth(false);
+    }
+
+    /// The same on a reversed depth buffer — a `Depth32Float` one, which is what the app draws
+    /// into on Metal, so `depth_format` picks `Depth32FloatStencil8` there. The pyramid stores
+    /// the view the frame was drawn with (the turned one) and the cull converts its depths back
+    /// with the same flag. Stored unturned, it compared `1 - z` with `z`: every placement in the
+    /// near half of the depth range was left out, and popped in and out as the pyramid changed.
+    ///
+    /// GPU, CI only: the GPU tests hang on the machine this was written on.
+    #[test]
+    fn a_reversed_depth_pyramid_hides_the_same_placement() {
+        cull_against_the_last_frames_depth(true);
+    }
+
+    /// [`a_placement_behind_the_last_frames_depth_is_left_out_while_the_view_moves`] with
+    /// `reversed` saying which way the depth buffer runs.
+    fn cull_against_the_last_frames_depth(reversed: bool) {
+        use super::super::{
+            Batches, GpuScene, GpuTarget, InstanceLook, InstancedMesh, PaletteIndex, Renderer, SceneSlot, SharedTris, gpu_view_proj_turned, hiz,
+        };
         use solidcore_record::Vec3;
         use std::sync::{Arc, Mutex};
         let Ok((_, device, queue)) = crate::open_headless(crate::test_env::policy()) else { return };
@@ -833,7 +877,12 @@ fn fs() -> @builtin(frag_depth) f32 {
             color_attachments: &[],
             depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
                 view: &depth_view,
-                depth_ops: Some(wgpu::Operations { load: wgpu::LoadOp::Clear(1.0 - 1.0 / 100.0), store: wgpu::StoreOp::Store }),
+                depth_ops: Some(wgpu::Operations {
+                    // The plane at z = -100 is at 1 - 1/100 in the plain convention; a reversed
+                    // buffer holds it the other way round.
+                    load: wgpu::LoadOp::Clear(if reversed { 1.0 / 100.0 } else { 1.0 - 1.0 / 100.0 }),
+                    store: wgpu::StoreOp::Store,
+                }),
                 stencil_ops: None,
             }),
             timestamp_writes: None,
@@ -841,10 +890,13 @@ fn fs() -> @builtin(frag_depth) f32 {
             multiview_mask: None,
         }));
         let mut pyramid = hiz::Hiz::new(&device, &kernel, &depth_view, [64, 48], 1);
-        pyramid.build(&queue, &kernel, &mut encoder, vp, false, 1);
+        // The renderer stores the view the frame was drawn with; the cull is given the unturned
+        // one. Building here with the matrix it culls with is what hid the bug from this test.
+        let drawn_with = gpu_view_proj_turned(vp, None, reversed);
+        pyramid.build(&queue, &kernel, &mut encoder, drawn_with, reversed, 1);
         queue.submit([encoder.finish()]);
         assert_eq!(culled(&mut batches, &device, &queue, &vp, size, None).0, 2, "a still view draws both");
-        let (count, survivor) = culled(&mut batches, &device, &queue, &vp, size, Some((&pyramid, false)));
+        let (count, survivor) = culled(&mut batches, &device, &queue, &vp, size, Some((&pyramid, reversed)));
         assert_eq!(count, 1, "moving: the one behind the plane is left out");
         // The near placement's rows, [row][column]: the part at z -30, the one in front of the plane.
         let near: Vec<u8> =

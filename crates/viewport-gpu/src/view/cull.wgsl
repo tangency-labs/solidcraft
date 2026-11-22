@@ -53,18 +53,31 @@ fn hidden(r0: vec4<f32>, r1: vec4<f32>, r2: vec4<f32>, lo: vec3<f32>, hi: vec3<f
     let frame = vec2<f32>(f32(view.hiz.x), f32(view.hiz.y));
     var pmin = vec2<f32>(1e30, 1e30);
     var pmax = vec2<f32>(-1e30, -1e30);
+    let reversed = (view.hiz.w & 2u) != 0u;
     var near = 1e30;
+    // How far the placement's own depth may have moved since the frame the pyramid holds: the
+    // most any corner of it gained (or lost), this frame's view against the pyramid's. A
+    // placement cannot be its own occluder by this much, so the margin below is at least it.
+    var shift = 0.0;
     var outside = false;
     for (var k = 0u; k < 8u; k = k + 1u) {
         let p = vec4<f32>(corner(lo, hi, k), 1.0);
-        let c = view.prev_vp * vec4<f32>(dot(r0, p), dot(r1, p), dot(r2, p), 1.0);
+        let placed = vec4<f32>(dot(r0, p), dot(r1, p), dot(r2, p), 1.0);
+        let c = view.prev_vp * placed;
         if (!(c.w > 1e-6)) { return false; }
         let ndc = c.xyz / c.w;
         let px = vec2<f32>((ndc.x * 0.5 + 0.5) * frame.x, (0.5 - ndc.y * 0.5) * frame.y);
         if (px.x < 0.0 || px.x >= frame.x || px.y < 0.0 || px.y >= frame.y) { outside = true; }
         pmin = min(pmin, px);
         pmax = max(pmax, px);
-        near = min(near, select(ndc.z, 1.0 - ndc.z, (view.hiz.w & 2u) != 0u));
+        let depth = select(ndc.z, 1.0 - ndc.z, reversed);
+        near = min(near, depth);
+        // `view.vp` is the cull's own view, unturned (the frustum tests take it so): its depth
+        // needs no turning to compare with the pyramid's, which `depth` above turned.
+        let now = view.vp * placed;
+        if (now.w > 1e-6) {
+            shift = max(shift, abs(now.z / now.w - depth));
+        }
     }
     // A box crossing the frame's edge may have a part the current view shows: the depth kept
     // inside the strip says nothing about the rest of it.
@@ -85,7 +98,10 @@ fn hidden(r0: vec4<f32>, r1: vec4<f32>, r2: vec4<f32>, lo: vec3<f32>, hi: vec3<f
             far = max(far, textureLoad(hiz, vec2<i32>(x, y), i32(level)).x);
         }
     }
-    return near > far + 1e-6;
+    // Left out only when it is farther than everything the last frame drew under it by more than
+    // its own depth change since then. The absolute floor is the depth buffer's own resolution
+    // at the near plane: two depths within it are the same surface, not one behind the other.
+    return near > far + max(shift, 1e-6);
 }
 
 const NONE: u32 = 0xffffffffu;
