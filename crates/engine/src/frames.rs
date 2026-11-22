@@ -115,6 +115,8 @@ fn table(id: &str) -> &'static [(&'static str, K)] {
         // where its own occurrence puts it, not at the component's first placement (#20040).
         "solid.combine" => &[("target", Body)],
         "solid.remove" | "solid.bounding_solid" | "material.assign" => &[("bodies", Body)],
+        "solid.amalgam_tag" => &[("remove", Body), ("add", Body), ("new", Body)],
+        "solid.amalgamate" => &[("remove_from", Body), ("add_to", Body)],
         _ => &[],
     }
 }

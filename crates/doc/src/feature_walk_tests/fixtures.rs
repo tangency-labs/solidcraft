@@ -258,6 +258,15 @@ pub(super) fn fixtures() -> Vec<(&'static str, Value)> {
         ("mesh_convert", json!({"type": "mesh_convert", "body": "B", "tolerance": "mesh_convert.tolerance"})),
         ("mesh_import", json!({"type": "mesh_import", "file": "a.stl", "meshes": []})),
         ("repair", json!({"type": "repair", "body": "B", "gap": "repair.gap", "patch_holes": true})),
+        (
+            "amalgam_tag",
+            json!({"type": "amalgam_tag", "remove": ["B"], "add": ["B"], "new": ["B"], "seat": {"type": "sketch_point", "sketch": 1, "point": "p"}}),
+        ),
+        (
+            "amalgamate",
+            json!({"type": "amalgamate", "tool": {"source": {"path": "tool.sc"}, "tag": "Tool", "records": {"bodies": []}, "roles": []},
+                "seeds": [{"type": "sketch_point", "sketch": 1, "point": "p"}], "turns": 1, "flip": true, "remove_from": ["B"], "add_to": ["B"]}),
+        ),
     ]
 }
 

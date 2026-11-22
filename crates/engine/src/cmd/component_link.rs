@@ -132,7 +132,7 @@ fn link_refusal(design: Option<&str>, link: &str) -> Option<solidcraft_io::vfs::
 }
 
 /// The error for a link [`link_refusal`] refuses.
-fn link_refused(design: Option<&str>, link: &str) -> Result<()> {
+pub(super) fn link_refused(design: Option<&str>, link: &str) -> Result<()> {
     solidcraft_io::vfs::check_design_path(link, design).map_err(|e| EngineError::Other(e.to_string()))?;
     let file = resolve(design, link);
     solidcraft_io::vfs::check_design_path(&file.to_string_lossy(), design).map_err(|e| EngineError::Other(e.to_string()))
@@ -177,9 +177,9 @@ static READS: Mutex<Vec<LinkRead>> = Mutex::new(Vec::new());
 const READS_SIZE: usize = 256;
 
 #[derive(Clone, Copy, PartialEq, Eq)]
-struct SelectedConfiguration {
-    row: u64,
-    identity: Option<u64>,
+pub(super) struct SelectedConfiguration {
+    pub(super) row: u64,
+    pub(super) identity: Option<u64>,
 }
 
 fn selected_configuration(link: &DesignLink) -> Option<SelectedConfiguration> {
@@ -256,7 +256,7 @@ fn remember_read(
 }
 
 /// The bytes of the design at `file`, which must not be the design saved at `own`.
-fn read_link(file: &Path, own: Option<&str>) -> Result<Vec<u8>> {
+pub(super) fn read_link(file: &Path, own: Option<&str>) -> Result<Vec<u8>> {
     let shown = file.display().to_string();
     // A network location only when its server is allowed, a device never: judged from the text
     // before anything is asked of the disk (on Windows, resolving or reading `\\host\share\x`
@@ -270,7 +270,7 @@ fn read_link(file: &Path, own: Option<&str>) -> Result<Vec<u8>> {
 }
 
 /// Read a configuration selector before any I/O. An explicit null follows the saved state.
-fn configuration_key<'a>(p: &'a Value, default: Option<u64>, cmd: &str) -> Result<Option<RowKey<'a>>> {
+pub(super) fn configuration_key<'a>(p: &'a Value, default: Option<u64>, cmd: &str) -> Result<Option<RowKey<'a>>> {
     match p.get("configuration") {
         None => Ok(default.map(RowKey::Id)),
         Some(Value::Null) => Ok(None),
@@ -279,7 +279,7 @@ fn configuration_key<'a>(p: &'a Value, default: Option<u64>, cmd: &str) -> Resul
 }
 
 /// Resolve a name once. Links keep the row's stable id through source row renames.
-fn configuration_id(bytes: &[u8], key: Option<RowKey<'_>>) -> Result<Option<SelectedConfiguration>> {
+pub(super) fn configuration_id(bytes: &[u8], key: Option<RowKey<'_>>) -> Result<Option<SelectedConfiguration>> {
     let Some(key) = key else { return Ok(None) };
     let doc = solidcraft_io::read_design(bytes).map_err(|e| EngineError::Other(e.to_string()))?;
     doc.configs
@@ -327,6 +327,24 @@ fn design_bodies(
     #[cfg(test)]
     EVALUATED.with(|n| n.set(n.get() + 1));
     let shown = file.display().to_string();
+    let part = opened_link(file, bytes, configuration, validation)?;
+    let (name, feature, faces, metadata, properties) = session_bodies(&part, &shown)?;
+    remember_read(file, configuration, digest(bytes), &feature, &faces, &properties, &metadata);
+    let images = design_images(&part, &shown);
+    Ok(((name, feature, faces, metadata, properties), images))
+}
+
+/// `bytes`, the design at `file`, opened and evaluated in a session of its own, with its
+/// configuration row `configuration` active. The model the file keeps is its evaluation when this
+/// build saved it for exactly that design, as when it is opened. Insert Design and Amalgamate
+/// read the designs they take bodies from this way.
+pub(super) fn opened_link(
+    file: &Path,
+    bytes: &[u8],
+    configuration: Option<SelectedConfiguration>,
+    validation: solidcraft_kernel::Validation,
+) -> Result<Session> {
+    let shown = file.display().to_string();
     let fail = |e: solidcraft_io::IoError| EngineError::Other(format!("{shown}: {e}"));
     let (doc, saved) = if solidcraft_io::is_design_container(bytes) {
         let mut reader = solidcraft_io::DesignContainerReader::new(std::io::Cursor::new(bytes)).map_err(fail)?;
@@ -346,10 +364,7 @@ fn design_bodies(
         // Its scratch evaluation cannot use the saved geometry of another row.
         part.execute("config.activate", &json!({"row": selected.row})).map_err(|e| EngineError::Other(format!("{shown}: {e}")))?;
     }
-    let (name, feature, faces, metadata, properties) = session_bodies(&part, &shown)?;
-    remember_read(file, configuration, digest(bytes), &feature, &faces, &properties, &metadata);
-    let images = design_images(&part, &shown);
-    Ok(((name, feature, faces, metadata, properties), images))
+    Ok(part)
 }
 
 /// The canvases and decals of `part`, the design saved as `shown`, each where the design shows

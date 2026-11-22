@@ -5778,6 +5778,71 @@ fn empty_boolean_targets(doc: &Document, state: &ModelState, f: &Feature, tools:
 }
 
 /// [`apply_op`] with tools whose lineage is known: the bodies it makes or changes keep theirs.
+/// Amalgamate (#18799): the tool's bodies placed at every seed, where the seeds are now (each
+/// copy turned as the feature says), its Remove copies cut from `remove_from` first and only then
+/// its Add copies joined into `add_to`. Each copy's faces are named after its seed.
+#[allow(clippy::too_many_arguments)]
+fn eval_amalgamate(
+    doc: &Document,
+    st: &mut ModelState,
+    f: &Feature,
+    tool: &crate::amalgam::AmalgamTool,
+    seeds: &[crate::AlignFrame],
+    turns: u32,
+    flip: bool,
+    remove_from: &[crate::BodyName],
+    add_to: &[crate::BodyName],
+) -> Result<()> {
+    use crate::amalgam::{Role, check_placement, copy_roles, seed_key, turn};
+    check_placement(tool, seeds.len(), turns, remove_from, add_to)?;
+    let records = &tool.records;
+    let imp = kernel::records_import_shared(records)?;
+    if imp.bodies.len() != tool.roles.len() {
+        return Err(DocError::Invalid("the tool's bodies and their roles don't match".into()));
+    }
+    let digest = crate::config::payload_digest(&kernel::records_text(records)?);
+    // Each seed's frame, as the model is before this feature, and its name.
+    let turned = turn(turns, flip);
+    let mut placed: Vec<(crate::Mat, String)> = Vec::with_capacity(seeds.len());
+    for seed in seeds {
+        let key = seed_key(seed)?;
+        if placed.iter().any(|(_, k)| *k == key) {
+            return Err(DocError::Invalid(format!("two seeds are at the same place ({key})")));
+        }
+        placed.push((crate::mat_mul(&seed.resolve_frame(doc, st)?, &turned), key));
+    }
+    let copies = |role: Role| -> Result<Vec<Traced>> {
+        let mut out = Vec::new();
+        for (k, (read, r)) in imp.bodies.iter().zip(&tool.roles).enumerate() {
+            if *r != role {
+                continue;
+            }
+            let body = read.body.clone().with_import_certificate(&digest, f.id)?;
+            let carried = tool.faces.get(k).map_or(&[][..], Vec::as_slice);
+            for (m, key) in &placed {
+                let copy = kernel::transform_matrix(&body, *m)?;
+                let roles = copy_roles(key, carried, copy.face_count());
+                out.push(Traced::made(copy, Some(roles)));
+            }
+        }
+        Ok(out)
+    };
+    // Remove first, always; then Add.
+    let cut = copies(Role::Remove)?;
+    if !cut.is_empty() {
+        apply_traced(doc, st, f, cut, Operation::Cut, &crate::plain::<String, _>(remove_from))?;
+    }
+    let joined = copies(Role::Add)?;
+    if !joined.is_empty() {
+        apply_traced(doc, st, f, joined, Operation::Join, &crate::plain::<String, _>(add_to))?;
+        // A copy that touched none of them is a body of its own, not a loose piece of one.
+        for target in add_to {
+            split_off_apart(st, target)?;
+        }
+    }
+    Ok(())
+}
+
 fn apply_traced(doc: &Document, state: &mut ModelState, f: &Feature, tools: Vec<Traced>, op: Operation, targets: &[String]) -> Result<()> {
     apply_traced_with(doc, state, f, tools, op, targets, &[])
 }
@@ -6123,34 +6188,8 @@ fn separate_touching(state: &mut ModelState, name: &str) -> Result<Option<KeptSe
     if n < 2 {
         return Ok(None);
     }
-    // Pieces sharing a face are one solid: each group is listed under its least piece.
     let contacts = mb.body.region_contacts()?;
-    let mut root: Vec<usize> = (0..n).collect();
-    let find = |root: &[usize], mut k: usize| {
-        while let Some(&r) = root.get(k).filter(|&&r| r != k) {
-            k = r;
-        }
-        k
-    };
-    for c in contacts.iter().filter(|c| c.contact == Contact::Face) {
-        let [a, b] = c.regions.map(|k| find(&root, k));
-        if let Some(slot) = root.get_mut(a.max(b)) {
-            *slot = a.min(b);
-        }
-    }
-    let mut groups: Vec<Vec<usize>> = Vec::new();
-    let mut group_of: Vec<usize> = Vec::with_capacity(n);
-    let mut by_root: BTreeMap<usize, usize> = BTreeMap::new();
-    for k in 0..n {
-        let g = *by_root.entry(find(&root, k)).or_insert_with(|| {
-            groups.push(Vec::new());
-            groups.len() - 1
-        });
-        if let Some(list) = groups.get_mut(g) {
-            list.push(k);
-        }
-        group_of.push(g);
-    }
+    let (groups, group_of) = face_groups(n, &contacts);
     // The groups each group touches along an edge or at a point (groups never share a face), and
     // the most any two of them share.
     let mut touches: Vec<Vec<usize>> = vec![Vec::new(); groups.len()];
@@ -6204,6 +6243,62 @@ fn separate_touching(state: &mut ModelState, name: &str) -> Result<Option<KeptSe
     let named = named_pieces(mb, pieces, &mut taken);
     state.bodies.splice(i..=i, named);
     Ok(Some(most))
+}
+
+/// The `n` pieces (material regions) of a body in groups: pieces sharing a face are one solid,
+/// one group, listed in the order of their least piece. Also each piece's group.
+fn face_groups(n: usize, contacts: &[solidcore_record::brep::part::RegionContact]) -> (Vec<Vec<usize>>, Vec<usize>) {
+    let mut root: Vec<usize> = (0..n).collect();
+    let find = |root: &[usize], mut k: usize| {
+        while let Some(&r) = root.get(k).filter(|&&r| r != k) {
+            k = r;
+        }
+        k
+    };
+    for c in contacts.iter().filter(|c| c.contact == Contact::Face) {
+        let [a, b] = c.regions.map(|k| find(&root, k));
+        if let Some(slot) = root.get_mut(a.max(b)) {
+            *slot = a.min(b);
+        }
+    }
+    let mut groups: Vec<Vec<usize>> = Vec::new();
+    let mut group_of: Vec<usize> = Vec::with_capacity(n);
+    let mut by_root: BTreeMap<usize, usize> = BTreeMap::new();
+    for k in 0..n {
+        let g = *by_root.entry(find(&root, k)).or_insert_with(|| {
+            groups.push(Vec::new());
+            groups.len() - 1
+        });
+        if let Some(list) = groups.get_mut(g) {
+            list.push(k);
+        }
+        group_of.push(g);
+    }
+    (groups, group_of)
+}
+
+/// Amalgamate (#18799): an Add copy that touches none of the bodies named for it comes in as a
+/// body of its own, as a union with a tool apart from its target does. The joined body `name`
+/// keeps the groups of pieces that hold its material from before the feature (and what is joined
+/// to them along a face); every other group becomes a body of its own, named as a cut's pieces
+/// are. Where the body's history doesn't say which pieces are its own, it is left as it is.
+fn split_off_apart(state: &mut ModelState, name: &str) -> Result<()> {
+    let Some(i) = state.bodies.iter().position(|b| b.name == name) else { return Ok(()) };
+    let Some(mb) = state.bodies.get(i).filter(|b| !b.body.is_mesh()) else { return Ok(()) };
+    let n = mb.body.record().material_regions().len();
+    if n < 2 {
+        return Ok(());
+    }
+    let (groups, _) = face_groups(n, &mb.body.region_contacts()?);
+    let Some(own) = groups_from_body(mb, &groups).filter(|own| own.contains(&true) && own.contains(&false)) else { return Ok(()) };
+    let mut kept: Vec<usize> = groups.iter().zip(&own).filter(|(_, o)| **o).flat_map(|(g, _)| g.iter().copied()).collect();
+    kept.sort_unstable();
+    let parts: Vec<Vec<usize>> = std::iter::once(kept).chain(groups.into_iter().zip(&own).filter(|(_, o)| !**o).map(|(g, _)| g)).collect();
+    let pieces = mb.body.parts(&parts)?;
+    let mut taken: std::collections::BTreeSet<String> = state.bodies.iter().map(|b| b.name.clone()).collect();
+    let named = named_pieces(mb, pieces, &mut taken);
+    state.bodies.splice(i..=i, named);
+    Ok(())
 }
 
 /// The pairs of `pieces` (positions) that touch though `touches` (the pieces each touches, as
@@ -13409,6 +13504,11 @@ fn eval_feature_kind(
             *target = result;
             Ok(())
         }
+        FeatureKind::Amalgamate { tool, seeds, turns, flip, remove_from, add_to } => {
+            eval_amalgamate(doc, st, f, tool, seeds, *turns, *flip, remove_from, add_to)
+        }
+        // A tag changes no geometry: evaluating it checks it where it stands (#18799).
+        FeatureKind::AmalgamTag { remove, add, new, seat } => crate::amalgam::check_tag(doc, st, remove, add, new, seat.as_ref()),
         FeatureKind::Repair { body, gap, patch_holes } => {
             let gap = val(vals, gap, Kind::Length)?;
             let index = st.bodies.iter().position(|b| &b.name == body).ok_or_else(|| DocError::Unknown(format!("body `{body}`")))?;
