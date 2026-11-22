@@ -385,7 +385,7 @@ impl Writer {
         let sketches = st.sketches.iter().map(|s| self.sketch(s)).collect::<Option<Vec<_>>>()?;
         let surface_sheets = st.surface_sheets.iter().map(|s| self.surface_sheet(s)).collect::<Option<Vec<_>>>()?;
         let threads = self.threads(st)?;
-        let r = json!({
+        let mut r = json!({
             "bodies": runs(&bodies), "sketches": runs(&sketches), "body_counter": st.body_counter,
             "reserved_body_names": st.reserved_body_names.iter().collect::<Vec<_>>(),
             "surface_sheets": surface_sheets, "construct": serde_json::to_value(&st.construct).ok()?,
@@ -396,6 +396,9 @@ impl Writer {
             "tapered": serde_json::to_value(&st.tapered).ok()?,
             "pattern_left_out": serde_json::to_value(&st.pattern_left_out).ok()?,
         });
+        if !st.routed_lengths.is_empty() {
+            r["routed_lengths"] = json!(st.routed_lengths);
+        }
         self.states.push(r);
         self.state_index.insert(id, self.states.len() - 1);
         Some(self.states.len() - 1)
@@ -725,6 +728,11 @@ impl SavedModel {
                     held = held.saturating_add(weight.0.saturating_sub(*weight.1));
                 }
             }
+            if let Some(lengths) = s.get("routed_lengths") {
+                for edges in lengths.as_object().ok_or_else(|| bad("saved model: router lengths"))?.values() {
+                    held = held.saturating_add(1).saturating_add(edges.as_array().ok_or_else(|| bad("saved model: router lengths"))?.len());
+                }
+            }
             // A state that holds a sheet of the flat model, which nothing makes now: the model is
             // stale, and the design is evaluated again.
             if s.get("sheets").and_then(Json::as_array).is_some_and(|l| !l.is_empty()) {
@@ -768,7 +776,13 @@ impl SavedModel {
                 }
                 named_faces.insert(*feature, points.clone());
             }
+            let routed_lengths: BTreeMap<u64, Vec<f64>> =
+                s.get("routed_lengths").cloned().map(serde_json::from_value).transpose().map_err(invalid)?.unwrap_or_default();
+            if routed_lengths.values().flatten().any(|v| !v.is_finite() || *v <= 0.0) {
+                return Err(bad("saved model: router length"));
+            }
             Ok(ModelState {
+                routed_lengths,
                 frame_bodies: Default::default(),
                 origin_frames: Default::default(),
                 bodies: ids("bodies", model_bodies.len())?.into_iter().filter_map(|i| model_bodies.get(i).cloned()).collect(),

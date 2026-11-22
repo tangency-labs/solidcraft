@@ -181,6 +181,7 @@ pub mod timeline_clipboard;
 pub mod ui_prefs;
 pub mod view_navigation;
 pub mod view_pick;
+pub mod wood_edge_profile;
 pub mod wood_grain;
 
 pub(crate) use check::read;
