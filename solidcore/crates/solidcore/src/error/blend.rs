@@ -33,7 +33,7 @@
 //! | [`BlendFailure::EaseInputMissing`] | [`ErrorKind::Missing`]: neither defect nor refusal |
 //! | [`BlendFailure::EaseNotBuilt`] | its stop's kind ([`EaseStop`]): [`ErrorKind::NotFound`] (2), [`ErrorKind::Degenerate`] (3), [`ErrorKind::Unsupported`] (5) or [`ErrorKind::OutsideDomain`] (8) |
 //! | [`BlendFailure::EaseGeometryNotBSpline`] | [`ErrorKind::Unsupported`] (5) |
-//! | [`BlendFailure::EaseLengthNotConverged`] | [`ErrorKind::NotConverged`] (4) |
+//! | [`BlendFailure::ArcLengthNotConverged`] | [`ErrorKind::NotConverged`] (4) |
 //! | the phrase causes ([`BlendFailure::Failed`], [`BlendFailure::Missing`], ...) | their status's kind, as before the record; neither defect nor refusal |
 //!
 //! **Statuses.** Each failure also records, for difftest and the goldens only, the status
@@ -51,7 +51,7 @@
 //! | [`BlendFailure::Inconsistent`]         | `SM_ERR_ASSERT_FAILURE`           |
 //! | [`BlendFailure::BadIntersections`]     | `SM_ERR_BAD_INTERSECTIONS`        |
 //! | [`BlendFailure::NotConverged`]         | `SM_ERR_NOT_CONVERGING`           |
-//! | [`BlendFailure::EaseLengthNotConverged`] | `SM_ERR_NOT_CONVERGING`         |
+//! | [`BlendFailure::ArcLengthNotConverged`] | `SM_ERR_NOT_CONVERGING`          |
 //! | [`BlendFailure::OutsideDomain`]        | `SM_ERR_OUTSIDE_OF_DOMAIN`        |
 //! | [`BlendFailure::NotWithinTolerance`]   | `SM_ERR_NOT_WITHIN_TOLERANCE`     |
 //! | [`BlendFailure::PassedOn`]             | the status of the stage passed on |
@@ -379,9 +379,12 @@ pub enum BlendFailure {
     ExecutiveStepFailed,
     /// A thing the ease of a round before a setback reads lacks the input named
     /// ([`EaseInput`]: a corner's vertex, a round's solver, rail, surface or centre line, a
-    /// face's surface, an edge's curve or an edge use's face). The ease reads the caller's
-    /// body and the round the executive built alike, so the cause names what is missing and
-    /// leaves the blame open, as [`BlendFailure::CliffInputMissing`] does: status
+    /// solver's offset surface, a face's surface, an edge's curve or an edge use's face). The
+    /// ease reads the caller's body and the rounds of the solvers a caller adds and drives
+    /// through the session's own steps (`FilletSession::new_constant_radius_solver`,
+    /// `load_solver`, `calc_solver_geometry`, `create_fillet_brep`) alike, so the cause names
+    /// what is missing and leaves the blame open, as [`BlendFailure::CliffInputMissing`]
+    /// does: status
     /// `SM_ERR_NULL_POINTER` (upstream `NER`) and the kind of that status
     /// ([`ErrorKind::Missing`]), neither a defect nor a refusal.
     EaseInputMissing(EaseInput),
@@ -393,15 +396,18 @@ pub enum BlendFailure {
     /// A kind the ease does not build on ([`ErrorKind::Unsupported`]); status
     /// `SM_ERR_NULL_POINTER` (upstream `NER` of the cast).
     EaseGeometryNotBSpline(EaseGeometry),
-    /// The parameter an arc length along the filleted edge away from the setback (the ease's
-    /// end) is not found: the curve's Newton iteration stopped moving. A solve that does not
-    /// converge ([`ErrorKind::NotConverged`]), carrying where it started and the length
-    /// asked for; status `SM_ERR_NOT_CONVERGING`.
-    EaseLengthNotConverged {
-        /// The edge parameter the length is measured from.
+    /// The search for the parameter `length` along a curve from parameter `start` stopped
+    /// at parameter `stopped_at`: its Newton iteration stopped moving before the length
+    /// was reached (a length past the curve's end is no failure). Not converged
+    /// ([`ErrorKind::NotConverged`]); status `SM_ERR_NOT_CONVERGING`, as upstream's
+    /// `FindParameterAtArcLength` reports it.
+    ArcLengthNotConverged {
+        /// The parameter the search starts from.
         start: f64,
-        /// The arc length asked for.
+        /// The arc length asked (negative: towards the curve's start).
         length: f64,
+        /// The parameter where the iteration stopped.
+        stopped_at: f64,
     },
     /// The routine could not continue, as the phrase says (for example "the fillet's law
     /// has no value at the base"). Upstream `return SE(SM_ERR)`. A phrase cause
@@ -511,6 +517,8 @@ pub enum EaseInput {
     RoundSurface,
     /// A round's centre line.
     CentreLine,
+    /// A round solver's offset surface for a rail (made when the solver is loaded).
+    SolverSurface,
     /// An edge's curve (a rail's or the filleted edge's).
     EdgeCurve,
     /// A face's surface.
@@ -529,6 +537,7 @@ impl EaseInput {
             Self::RoundRail => "an eased round has no rail edge on a side",
             Self::RoundSurface => "an eased round has no fillet surface",
             Self::CentreLine => "an eased round has no centre line",
+            Self::SolverSurface => "an eased round's solver has no offset surface for a rail",
             Self::EdgeCurve => "an edge the ease reads has no curve",
             Self::FaceSurface => "a face the ease reads has no surface",
             Self::EdgeUseFace => "an edge use the ease reads has no face",
@@ -929,7 +938,7 @@ impl BlendFailure {
             | Self::InvalidValue(_) => SM_ERR_INVALID_INPUT,
             Self::Inconsistent(_) => SM_ERR_ASSERT_FAILURE,
             Self::BadIntersections(_) => SM_ERR_BAD_INTERSECTIONS,
-            Self::NotConverged(_) | Self::EaseLengthNotConverged { .. } => SM_ERR_NOT_CONVERGING,
+            Self::ArcLengthNotConverged { .. } | Self::NotConverged(_) => SM_ERR_NOT_CONVERGING,
             Self::OutsideDomain(_) => SM_ERR_OUTSIDE_OF_DOMAIN,
             Self::NotWithinTolerance(_) => SM_ERR_NOT_WITHIN_TOLERANCE,
             Self::PassedOn { status, .. } => *status,
@@ -976,7 +985,7 @@ impl BlendFailure {
             | Self::SequenceCurveNotBSpline { .. }
             | Self::FilletCrossesItself { .. }
             | Self::EaseGeometryNotBSpline(_) => ErrorKind::Unsupported,
-            Self::EaseLengthNotConverged { .. } => ErrorKind::NotConverged,
+            Self::ArcLengthNotConverged { .. } => ErrorKind::NotConverged,
             Self::BandInputMissing(_)
             | Self::CliffInputMissing { .. }
             | Self::EaseInputMissing(_) => ErrorKind::Missing,
@@ -1065,7 +1074,7 @@ impl BlendFailure {
             | Self::EaseInputMissing(_)
             | Self::EaseNotBuilt(_)
             | Self::EaseGeometryNotBSpline(_)
-            | Self::EaseLengthNotConverged { .. }
+            | Self::ArcLengthNotConverged { .. }
             | Self::NotCertified { .. } => false,
             Self::Failed(_)
             | Self::Missing(_)
@@ -1133,7 +1142,7 @@ impl BlendFailure {
             | Self::EaseInputMissing(_)
             | Self::EaseNotBuilt(_)
             | Self::EaseGeometryNotBSpline(_)
-            | Self::EaseLengthNotConverged { .. }
+            | Self::ArcLengthNotConverged { .. }
             | Self::Failed(_)
             | Self::Missing(_)
             | Self::InvalidValue(_)
@@ -1347,10 +1356,13 @@ impl core::fmt::Display for BlendFailure {
             Self::EaseGeometryNotBSpline(geometry) => {
                 write!(f, "{}: {}", self.class(), geometry.what())
             }
-            Self::EaseLengthNotConverged { start, length } => write!(
+            Self::ArcLengthNotConverged {
+                start,
+                length,
+                stopped_at,
+            } => write!(
                 f,
-                "{}: no parameter is found at arc length {length} from parameter {start} along \
-                 the filleted edge",
+                "{}: the search for the parameter {length} along the curve from {start} stopped at {stopped_at}",
                 self.class()
             ),
             Self::Failed(what)
@@ -2285,6 +2297,7 @@ mod tests {
             EaseInput::RoundRail,
             EaseInput::RoundSurface,
             EaseInput::CentreLine,
+            EaseInput::SolverSurface,
             EaseInput::EdgeCurve,
             EaseInput::FaceSurface,
             EaseInput::EdgeUseFace,
@@ -2325,9 +2338,10 @@ mod tests {
             ));
         }
         rows.push((
-            BlendFailure::EaseLengthNotConverged {
+            BlendFailure::ArcLengthNotConverged {
                 start: 0.5,
                 length: 2.0,
+                stopped_at: 1.25,
             },
             ErrorKind::NotConverged,
             SM_ERR_NOT_CONVERGING,
@@ -2415,7 +2429,7 @@ mod tests {
             BlendFailure::EaseInputMissing(_) => (51, None),
             BlendFailure::EaseNotBuilt(_) => (52, None),
             BlendFailure::EaseGeometryNotBSpline(_) => (53, None),
-            BlendFailure::EaseLengthNotConverged { .. } => (54, None),
+            BlendFailure::ArcLengthNotConverged { .. } => (54, None),
         }
     }
 
@@ -2547,9 +2561,10 @@ mod tests {
             BlendFailure::EaseInputMissing(EaseInput::CornerVertex),
             BlendFailure::EaseNotBuilt(EaseStop::EasePastEdgeEnd),
             BlendFailure::EaseGeometryNotBSpline(EaseGeometry::RailCurve),
-            BlendFailure::EaseLengthNotConverged {
+            BlendFailure::ArcLengthNotConverged {
                 start: 0.0,
                 length: 1.0,
+                stopped_at: 0.5,
             },
         ];
         let mut names = Vec::new();

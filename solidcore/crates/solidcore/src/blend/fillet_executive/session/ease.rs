@@ -99,11 +99,6 @@ fn null_defect(why: &'static str) -> SolidError {
 const SOLVER_EDGES: &str = "a round solver lacks an edge use, or its edge use an edge: a \
      solver is set up on the two edge uses of the edge it rolls along";
 
-/// Why a round solver's offset surfaces are there.
-const SOLVER_SURFACES: &str = "a round solver has no offset surface for a rail: the solver \
-     set-up gives each rail the offset of its face's surface before the solver is loaded, and \
-     the ease runs after the round's surface is made";
-
 /// Why a curve's evaluation gives its point and first derivative.
 const EVALUATED: &str = "the filleted edge's curve evaluated with one derivative gives no \
      point or tangent: a curve's evaluation returns its point and each derivative asked for";
@@ -135,9 +130,14 @@ fn arc_length_param(
     if r.converged {
         Ok(r.end_param)
     } else {
+        // the cause's status is `r.status()` of an unconverged search, `SM_ERR_NOT_CONVERGING`
         Err(SolidError::blend(
             OP,
-            BlendFailure::EaseLengthNotConverged { start, length },
+            BlendFailure::ArcLengthNotConverged {
+                start,
+                length,
+                stopped_at: r.end_param,
+            },
         ))
     }
 }
@@ -292,12 +292,12 @@ impl SessionObjects<'_> {
                 let surf1 = Surface::from(
                     base.surface(0)?
                         .map(|slot| slot.surface.surface.clone())
-                        .ok_or_else(|| null_defect(SOLVER_SURFACES))?,
+                        .ok_or_else(|| missing(EaseInput::SolverSurface))?,
                 );
                 let surf2 = Surface::from(
                     base.surface(1)?
                         .map(|slot| slot.surface.surface.clone())
-                        .ok_or_else(|| null_defect(SOLVER_SURFACES))?,
+                        .ok_or_else(|| missing(EaseInput::SolverSurface))?,
                 );
                 let domain1 = surf1.natural_uv_domain_with_nurb(k)?;
                 let domain2 = surf2.natural_uv_domain_with_nurb(k)?;
