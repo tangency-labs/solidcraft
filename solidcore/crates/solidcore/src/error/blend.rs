@@ -29,6 +29,7 @@
 //! | [`BlendFailure::CornerPatchNotMade`]   | the miss's ([`CornerPatchMiss::class`])       |
 //! | [`BlendFailure::NotCertified`]         | [`ErrorKind::NotWithinTolerance`] (9): neither defect nor refusal |
 //! | [`BlendFailure::BandInputMissing`]     | [`ErrorKind::Missing`]: neither defect nor refusal |
+//! | [`BlendFailure::Solver`]               | its cause's ([`SolverFailure::class`])       |
 //! | the fillet executive's checks of the caller's arguments and body ([`BlendFailure::NoEdgesGiven`], [`BlendFailure::SizeBelowResolution`], [`BlendFailure::PerEdgeListLength`], [`BlendFailure::ParameterListSizes`], [`BlendFailure::FaceHasNoSurface`], [`BlendFailure::NoFirstBody`], [`BlendFailure::TargetNotGiven`], [`BlendFailure::EdgeNotInTarget`], [`BlendFailure::EdgeNotFilletable`], [`BlendFailure::GnSectionInvalid`], [`BlendFailure::CrossSectionTypeUnknown`], [`BlendFailure::RadiusTypeNotForEdges`], [`BlendFailure::VariableRadiusLawsNotGiven`], [`BlendFailure::VariableRadiusLawMissing`], [`BlendFailure::BevelVertexNotFilleted`], [`BlendFailure::LawIntervalEmpty`], [`BlendFailure::EdgeWithoutCurve`], [`BlendFailure::EdgeUseWithoutEdge`], [`BlendFailure::BoundSurfaceRemoved`]) | [`ErrorKind::InvalidInput`] (1) |
 //! | [`BlendFailure::CornerInputInvalid`]: a fillet corner step's check of the corner and pseudo-B-rep a caller gives it | [`ErrorKind::InvalidInput`] (1) |
 //! | [`BlendFailure::FilletSetUpInvalid`]: a link of the fillet structures a routine is given is not there | [`ErrorKind::InvalidInput`] (1) |
@@ -62,6 +63,7 @@
 //! | [`BlendFailure::NotWithinTolerance`]   | `SM_ERR_NOT_WITHIN_TOLERANCE`     |
 //! | [`BlendFailure::PassedOn`]             | the status of the stage passed on |
 //! | [`BlendFailure::NotCertified`]         | `SM_ERR`                          |
+//! | [`BlendFailure::Solver`]               | its cause's ([`SolverFailure`]: `SM_ERR`, or `SM_ERR_NULL_POINTER` for a missing input of the caller's, a centre line with no B-spline form, a surface cache not built, a side surface that misses its end plane and a side edge not on the rail's face) |
 //!
 //! **The phrase causes** ([`BlendFailure::Failed`] to [`BlendFailure::PassedOn`]) are the
 //! shape the blend sites were converted to before the record, some of them refusals not yet
@@ -496,6 +498,10 @@ pub enum BlendFailure {
         /// The surface's index among the corner's patch surfaces.
         surface: usize,
     },
+    /// A failure of the fillet solver (`crate::blend::fillet_solver`): its class and status
+    /// are the cause's ([`SolverFailure::class`], status `SM_ERR` unless the cause says
+    /// otherwise). Typed, so not a phrase cause ([`BlendFailure::is_phrase`]).
+    Solver(SolverFailure),
     /// An input a rail's crossing of an edge is judged from is not there (the crossing's
     /// budget, an edge use's radial, the side edge's curve, the crossing's place on it): the
     /// input named. Status `SM_ERR_NULL_POINTER` and the kind of that status
@@ -650,8 +656,9 @@ impl FilletSetUp {
 /// steps check. A missing link of the fillet structures that other routines read too (a
 /// fillet edge's primary edge use or its mate, a rail's end vertex use, a fillet vertex's
 /// face, a cross-section's fillet geometry, a rail's curve) is
-/// [`BlendFailure::FilletSetUpInvalid`] instead, and a target-body edge without curve is
-/// [`BlendFailure::EdgeWithoutCurve`].
+/// [`BlendFailure::FilletSetUpInvalid`] instead, a fillet geometry without its fillet
+/// surface the solver's ([`SolverFailure::FilletGeomWithoutSurface`]), and a target-body
+/// edge without curve is [`BlendFailure::EdgeWithoutCurve`].
 ///
 /// [`CornerInput::upstream_status`] is each kind's default status. A site whose C++ reports
 /// the condition otherwise (a failed state check, `SE(SM_ERR)`, where the default is
@@ -682,8 +689,6 @@ pub enum CornerInput {
     /// A corner edge of the pseudo-B-rep with no curve (a rail's is
     /// [`FilletSetUp::RailCurve`], a target-body edge's [`BlendFailure::EdgeWithoutCurve`]).
     EdgeWithoutCurve,
-    /// A fillet geometry with no fillet surface.
-    FilletGeomWithoutSurface,
     /// A 3x2 corner of four edges with no on-edge edge.
     MixedCornerWithoutOnEdgeEdge,
     /// A 3x2 corner of four edges with no on-extended-edge edge.
@@ -711,7 +716,6 @@ impl CornerInput {
             | Self::NoRailXEdgeUseVertex
             | Self::EdgeUseWithoutFilletGeometry
             | Self::EdgeWithoutCurve
-            | Self::FilletGeomWithoutSurface
             | Self::MixedCornerWithoutOnEdgeEdge
             | Self::MixedCornerWithoutOnExtendedEdgeEdge => SM_ERR_NULL_POINTER,
         }
@@ -740,6 +744,47 @@ impl LawCornerSearch {
             Self::CornerEdge => "edge between the rail points on a side's face",
             Self::Crossing => "crossing of the sides between the rail points",
             Self::CurveBetweenEnds => "corner curve between its edge's end vertices",
+        }
+    }
+}
+
+/// Why the fillet solver (`crate::blend::fillet_solver`) fails ([`BlendFailure::Solver`]).
+/// Each names its class ([`SolverFailure::class`]); none is a defect: the solver's defects
+/// are [`BlendFailure::Defect`], with their reason.
+#[derive(Debug, Clone, Copy, PartialEq)]
+#[non_exhaustive]
+pub enum SolverFailure {
+    /// The caller's fillet geometry has no fillet surface: the caller's solver set-up
+    /// ([`ErrorKind::InvalidInput`]); status `SM_ERR_NULL_POINTER`.
+    FilletGeomWithoutSurface {
+        /// The fillet geometry.
+        fillet_geom: crate::blend::fillet_geom::p1::FilletGeomId,
+    },
+}
+
+impl SolverFailure {
+    /// The failure's class ([`ErrorKind`]): see each variant.
+    #[must_use]
+    pub const fn class(&self) -> ErrorKind {
+        match self {
+            Self::FilletGeomWithoutSurface { .. } => ErrorKind::InvalidInput,
+        }
+    }
+
+    /// The status the C++ reports unless the site says otherwise (a comparison detail).
+    pub(crate) const fn comparison_status(&self) -> i32 {
+        match self {
+            Self::FilletGeomWithoutSurface { .. } => SM_ERR_NULL_POINTER,
+        }
+    }
+}
+
+impl core::fmt::Display for SolverFailure {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        match self {
+            Self::FilletGeomWithoutSurface { fillet_geom } => {
+                write!(f, "fillet geometry {fillet_geom:?} has no fillet surface")
+            }
         }
     }
 }
@@ -1284,6 +1329,7 @@ impl BlendFailure {
             | Self::RadiusTypeNotForEdges { .. }
             | Self::VariableRadiusLawMissing { .. }
             | Self::InvalidValue(_) => SM_ERR_INVALID_INPUT,
+            Self::Solver(s) => s.comparison_status(),
             Self::Inconsistent(_) => SM_ERR_ASSERT_FAILURE,
             Self::BadIntersections(_) => SM_ERR_BAD_INTERSECTIONS,
             Self::NotConverged(_) => SM_ERR_NOT_CONVERGING,
@@ -1344,6 +1390,7 @@ impl BlendFailure {
             Self::BandInputMissing(_)
             | Self::CliffInputMissing { .. }
             | Self::CrossingInputMissing(_) => ErrorKind::Missing,
+            Self::Solver(s) => s.class(),
             Self::CornerPatchNotMade(miss) => miss.class(),
             Self::NoEdgesGiven
             | Self::SizeBelowResolution { .. }
@@ -1409,6 +1456,7 @@ impl BlendFailure {
             | Self::PlaneCurveFitCap { .. }
             | Self::BandInputMissing(_)
             | Self::CliffInputMissing { .. }
+            | Self::Solver(_)
             | Self::CrossingInputMissing(_)
             | Self::CrossingNotFinite
             | Self::CornerShapeNotBuilt(_)
@@ -1486,6 +1534,7 @@ impl BlendFailure {
             | Self::PlaneCurveFitCap { .. }
             | Self::BandInputMissing(_)
             | Self::CliffInputMissing { .. }
+            | Self::Solver(_)
             | Self::CrossingInputMissing(_)
             | Self::CrossingNotFinite
             | Self::CornerShapeNotBuilt(_)
@@ -1779,6 +1828,7 @@ impl core::fmt::Display for BlendFailure {
             Self::CliffInputMissing { face, input } => {
                 write!(f, "cliff face {face:?} is missing its {}", input.what())
             }
+            Self::Solver(cause) => cause.fmt(f),
             Self::CrossingInputMissing(input) => write!(f, "{} is missing", input.what()),
             Self::CrossingNotFinite => write!(
                 f,
@@ -2391,7 +2441,6 @@ mod tests {
             (I::VertexNotRailXRail, SM_ERR),
             (I::EdgeUseWithoutFilletGeometry, SM_ERR_NULL_POINTER),
             (I::EdgeWithoutCurve, SM_ERR_NULL_POINTER),
-            (I::FilletGeomWithoutSurface, SM_ERR_NULL_POINTER),
             (I::MixedCornerWithoutOnEdgeEdge, SM_ERR_NULL_POINTER),
             (I::MixedCornerWithoutOnExtendedEdgeEdge, SM_ERR_NULL_POINTER),
             (I::MixedCornerEdgesDoNotMeet, SM_ERR),
@@ -2996,7 +3045,7 @@ mod tests {
     /// The number of `BlendFailure` variants. Adding a variant means adding an arm to
     /// `variant_index_and_phrase_name` (the compiler asks for it), with the next index, and
     /// raising this number; the test below then fails until `causes` holds the new variant.
-    const VARIANTS: usize = 64;
+    const VARIANTS: usize = 65;
 
     /// Each variant's distinct index in `0..VARIANTS`, and the variant name of a phrase cause
     /// (`None` for any other cause). The match has no wildcard, so it is the inventory of
@@ -3067,6 +3116,7 @@ mod tests {
             BlendFailure::JoinCurveNotBSpline { .. } => (61, None),
             BlendFailure::CornerInputInvalid { .. } => (62, None),
             BlendFailure::FilletSetUpInvalid(_) => (63, None),
+            BlendFailure::Solver(_) => (64, None),
         }
     }
 
@@ -3140,6 +3190,9 @@ mod tests {
                 face: crate::topology::FaceId::from_index(0),
                 input: CliffInput::Plane,
             },
+            BlendFailure::Solver(SolverFailure::FilletGeomWithoutSurface {
+                fillet_geom: crate::blend::fillet_geom::p1::FilletGeomId(0),
+            }),
             BlendFailure::CornerShapeNotBuilt(CornerShape::MoreThanFourEdges),
             BlendFailure::CornerPointDropUnresolved { solutions: 0 },
             BlendFailure::CornerPatchNotMade(CornerPatchMiss::FaceNotMade),
