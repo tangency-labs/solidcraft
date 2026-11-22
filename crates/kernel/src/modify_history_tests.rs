@@ -573,6 +573,48 @@ mod smlib {
         assert!(e.contains("the 1.5 mm walls would meet along a line"), "{e}");
     }
 
+    /// A wall refused for folding names a thinner wall only after building it (#20781): the
+    /// walls tried run from just under the largest the kernel names, and the first that builds
+    /// is the one the message gives; where none builds, the message says the wall is not the
+    /// obstacle and shows no kernel internals.
+    #[test]
+    fn a_refused_shell_names_only_a_wall_that_builds() {
+        use crate::offset_backend::{thinner_shell_hint, thinner_walls};
+        use solidcraft_smlib::Error as SmError;
+        let walls = thinner_walls(2.0, Some(0.8));
+        assert_eq!(walls.len(), 3);
+        assert!(walls.iter().all(|w| *w < 0.8 && *w > 0.0), "{walls:?}");
+        assert!(thinner_walls(2.0, None).iter().all(|w| *w <= 1.0));
+        let folds = SmError::WallFolds { largest: Some(0.8) };
+        let first = || crate::KernelError::Invalid("fold".into());
+        // The 0.95 wall fails, the 0.75 wall builds: that is the one named.
+        let e = thinner_shell_hint(2.0, &folds, first(), |w| w < 0.8 * 0.8).to_string();
+        assert!(e.contains("a wall of 0.6 mm builds (checked)"), "{e}");
+        let e = thinner_shell_hint(2.0, &folds, first(), |_| false).to_string();
+        assert!(e.contains("no thinner wall builds either"), "{e}");
+        assert!(!e.contains("shell_brep") && !e.contains("status") && !e.contains("1001"), "{e}");
+    }
+
+    /// A tube of outer radius 1 shelled open at the top by 2 mm cannot fit; whatever wall the
+    /// refusal offers builds when used (#20781).
+    #[test]
+    fn a_shell_hint_on_a_thin_rod_builds_when_used() {
+        let rod = cylinder(Vec3::ZERO, Vec3::Z, 1.0, 10.0).unwrap();
+        let top = Vec3::new(0.2, 0.2, 10.0);
+        match offset_backend::shell(&rod, &[top], 2.0) {
+            Ok(_) => {}
+            Err(e) => {
+                let e = e.to_string();
+                if let Some(at) = e.rfind("a wall of ").and_then(|i| e[i + 10..].find(" mm builds (checked)").map(|j| (i + 10, i + 10 + j))) {
+                    let w: f64 = e[at.0..at.1].parse().unwrap();
+                    assert!(offset_backend::shell(&rod, &[top], w).is_ok(), "{e}");
+                } else {
+                    assert!(!e.contains("shell_brep") && !e.contains("status 1001"), "{e}");
+                }
+            }
+        }
+    }
+
     #[test]
     fn draft_tilts_a_side_and_keeps_its_name() {
         let b = cube();
