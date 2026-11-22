@@ -24,6 +24,7 @@ use crate::{Result, Session};
 const TO_SKETCH_CONTRACT: TypedContract<CanvasToSketchParams> = TypedContract::new();
 
 pub static COMMANDS: &[CommandSpec] = &[CommandSpec::new("canvas.to_sketch", "Canvas to Sketch", crate::checked!("canvas.to_sketch", to_sketch))
+    .begins_edit()
     .icon("canvas")
     .contract(&TO_SKETCH_CONTRACT)
     .output(output_schema_for::<CanvasTraced>)
