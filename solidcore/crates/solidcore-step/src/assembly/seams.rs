@@ -1670,18 +1670,31 @@ impl Assembly<'_> {
                 // its frame has nearby (beyond what the form's range takes as on it), and a face
                 // whose loops a hole crosses over reads as the wrong solid. Where a quarter line
                 // is clear with room to spare, the seam is on it.
-                let middle = blocked.as_ref().map_or(widest, |b| b.on_quarter_line(widest, offset));
-                let target = middle + offset;
-                let (ea, ta, pa) = self.meets(&a_es, d, target, ax.period, eval)?.ok_or_else(|| unsupported("a band whose bounds share no angle"))?;
-                let (eb, tb, pb) = self.meets(&b_es, d, target, ax.period, eval)?.ok_or_else(|| unsupported("a band whose bounds share no angle"))?;
-                // Both points at the clear angle chosen: the surface's parameter runs the way
-                // the angle does.
-                if !(blocked.as_ref().is_none_or(|b| b.clear(frame.angle(pa)) && b.clear(frame.angle(pb)))) {
-                    return Err(unsupported("a band whose seam's angle meets its other loops"));
-                }
-                if !(pa.dist(pb) > self.tol) {
-                    return Err("a seam of no length".into());
-                }
+                // The quarter line must pass every check the middle does (both bounds met, both
+                // points clear, a seam of some length); where it does not, the middle is used, with
+                // its own checks as before.
+                let quarter = blocked.as_ref().map_or(widest, |b| b.on_quarter_line(widest, offset));
+                let seam_at = |s: &Self, middle: f64| -> R<((u32, f64), (u32, f64))> {
+                    let target = middle + offset;
+                    let (ea, ta, pa) =
+                        s.meets(&a_es, d, target, ax.period, eval)?.ok_or_else(|| unsupported("a band whose bounds share no angle"))?;
+                    let (eb, tb, pb) =
+                        s.meets(&b_es, d, target, ax.period, eval)?.ok_or_else(|| unsupported("a band whose bounds share no angle"))?;
+                    // Both points at the clear angle chosen: the surface's parameter runs the way
+                    // the angle does.
+                    if !(blocked.as_ref().is_none_or(|b| b.clear(frame.angle(pa)) && b.clear(frame.angle(pb)))) {
+                        return Err(unsupported("a band whose seam's angle meets its other loops"));
+                    }
+                    if !(pa.dist(pb) > s.tol) {
+                        return Err("a seam of no length".into());
+                    }
+                    Ok(((ea, ta), (eb, tb)))
+                };
+                let ((ea, ta), (eb, tb)) = match seam_at(self, quarter) {
+                    Ok(found) => found,
+                    Err(_) if quarter.to_bits() != widest.to_bits() => seam_at(self, widest)?,
+                    Err(e) => return Err(e),
+                };
                 *splits += 1;
                 let va = self.split_edge(ea, ta)?;
                 let vb = self.split_edge(eb, tb)?;
