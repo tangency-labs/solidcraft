@@ -1377,6 +1377,8 @@ pub(crate) fn curve_face_gap_bound_within_counted(
     // curve's domain)
     let valid = lo.is_finite() && hi.is_finite() && lo < hi && floor.is_finite() && floor >= 0.0;
     if valid && enough.is_finite() {
+        // (a cancelled run stops here, as the bisection would: no bound under a cancel)
+        k.check_cancelled(OP)?;
         let rec = brep.face(face)?;
         if let (Some(surface), Ok(cn)) = (rec.surface.as_ref(), NurbsCurve::of(curve)) {
             let inside = matches!(
@@ -4728,6 +4730,71 @@ mod tests {
             assert!(pieces > 0);
             assert!(g.is_some_and(|g| g >= lift), "{g:?}");
         }
+    }
+
+    /// A cancelled kernel stops the plane shortcut too: cancellation, never a bound
+    /// (a review of #20416).
+    #[test]
+    fn a_cancelled_kernel_stops_the_plane_shortcut() {
+        let (_, b, caps) = cap_circles();
+        let (f, circle, range) = caps.first().unwrap();
+        let token = crate::kernel::CancelToken::default();
+        token.cancel();
+        let cancelled = Kernel {
+            cancel: Some(token),
+            ..Kernel::default()
+        };
+        let within = [1e-5, f64::INFINITY];
+        let stopped =
+            curve_face_gap_bound_within_counted(&cancelled, &b, *f, circle, *range, 1e-8, within);
+        assert!(
+            matches!(&stopped, Err(e) if e.is_cancelled()),
+            "{stopped:?}"
+        );
+    }
+
+    /// A plane whose stored net is moved `1e-6` off its analytic plane (each corner along the
+    /// normal): the net is still a plane, so [`plane_gap_bound`] would bound against it, but
+    /// the corner probes of [`plane_face_gap_bound`] see the net and the plane disagree and
+    /// give no bound; the bisection decides, exactly as without the shortcut.
+    #[test]
+    fn a_plane_with_its_net_off_the_plane_gets_no_plane_bound() {
+        use crate::nurbs::b_spline_curve::p2::ControlPointForm;
+        use crate::surface::surface::SurfaceKind;
+        let (k, mut b, caps) = cap_circles();
+        let (f, circle, range) = caps.first().unwrap();
+        let cn = NurbsCurve::of(circle).unwrap();
+        let mut surface = b.face(*f).unwrap().surface.clone().unwrap();
+        let SurfaceKind::Plane(plane) = surface.kind_mut() else {
+            panic!("a cap is a plane");
+        };
+        let net = plane.base_mut();
+        for (i, j) in [(0, 0), (0, 1), (1, 0), (1, 1)] {
+            let (p, w) = net
+                .control_point(ControlPointForm::NonRational, i, j)
+                .unwrap();
+            let moved = Point3::new(p.x, p.y, p.z + 1e-6);
+            net.set_control_point(ControlPointForm::NonRational, i, j, moved, w)
+                .unwrap();
+        }
+        // the moved net alone still takes the circle as lying in it, 1e-6 off
+        let stored = NetSurface::of(&k, &surface, &[]).unwrap().unwrap().net;
+        let g = plane_gap_bound(&cn, &stored, *range).unwrap();
+        assert!(g >= 0.9e-6, "{g:e}");
+        // the face's own surface is probed against the analytic plane at the corners
+        assert_eq!(
+            plane_face_gap_bound(&k, &surface, &cn, *range).unwrap(),
+            None
+        );
+        b.face_mut(*f).unwrap().surface = Some(surface);
+        let within = [1e-5, f64::INFINITY];
+        let (g, pieces) =
+            curve_face_gap_bound_within_counted(&k, &b, *f, circle, *range, 1e-8, within).unwrap();
+        let cut = std::cell::Cell::new(0);
+        let alone =
+            bisected_face_gap_bound(&k, &b, *f, circle, *range, 1e-8, within, &cut).unwrap();
+        assert_eq!(g.map(f64::to_bits), alone.map(f64::to_bits));
+        assert_eq!(pieces, cut.get());
     }
 
     /// The plane bound holds only for positive weights and control points whose projections
