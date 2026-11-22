@@ -36,9 +36,9 @@ use super::vec::{v3, VecExt};
 use super::{Axes, Curve, Curve2, CurveEval, EvalError, Surface, SurfaceEval};
 use crate::math::Vec3;
 use crate::nurbs::crv_basic::Curve as NlCurve;
-use crate::nurbs::crv_deviation::certified_distance;
+use crate::nurbs::crv_deviation::{certified_distance, norm_up};
 use crate::nurbs::math::{gamma, CPoint, NOW, UNIT};
-use crate::nurbs::srf_basic::Direction;
+use crate::nurbs::srf_basic::{Direction, Surface as NlSurface};
 use crate::nurbs::srf_tool::p1::extract_iso_crv;
 use crate::SolidError;
 
@@ -190,6 +190,9 @@ const CHECKS: usize = 16;
 /// How close, against the geometry's size, a closed-form pcurve must lift onto its edge to be
 /// taken as exact (rounding, well inside any tolerance).
 const EXACT: f64 = 1e-9;
+/// The largest tolerance (mm) a pcurve is asked at, whether it is the face's, an edge record's own
+/// ([`each_pcurve`]) or one covered for a proved boundary gap ([`boundary_covered`]).
+const MAX_EDGE_TOLERANCE: f64 = 1e3;
 /// An edge's tolerance over its largest distance from a face's surface: a pcurve is accepted
 /// within half its edge's tolerance ([`pcurves_within`]), as SMLib's zone tolerance is half the
 /// record's, so a tolerance that covers a gap goes past twice it.
@@ -263,6 +266,9 @@ pub struct BoundaryIso {
     /// every parameter: the largest distance between the edge and the boundary curve at the
     /// same parameters.
     pub gap: f64,
+    /// Which side of the patch it is: 0 and 1 the u-curves at the least and greatest v, 2 and 3
+    /// the v-curves at the least and greatest u.
+    pub side: usize,
 }
 
 /// The pcurve of an edge that is a whole boundary curve of the polynomial patch `surface`, with
@@ -296,6 +302,19 @@ pub fn boundary_iso(
         )));
     }
     super::check::surface(surface).map_err(|e| Error::Invalid(e.to_string()))?;
+    check_boundary_curve(curve)?;
+    Ok(match SurfaceEval::new(surface)? {
+        SurfaceEval::Eval(EvalSurface::Nurbs(n), _) => {
+            check_boundary_net(&n)?;
+            // No face box here: any side of the patch is a candidate.
+            boundary_of(&n, curve, interval, cap, None)
+        }
+        _ => None,
+    })
+}
+
+/// A curve record the boundary proofs take: well formed, every number finite.
+fn check_boundary_curve(curve: &Curve) -> Result<()> {
     super::check::curve(curve).map_err(|e| Error::Invalid(e.to_string()))?;
     let finite = match curve {
         Curve::Line { start, end } => start.iter().chain(end).all(|x| x.is_finite()),
@@ -309,19 +328,19 @@ pub fn boundary_iso(
             "boundary pcurve of a curve with a number not finite".into(),
         ));
     }
-    Ok(match SurfaceEval::new(surface)? {
-        SurfaceEval::Eval(EvalSurface::Nurbs(n), _) => {
-            let finite = n.ctrl().iter().flatten().all(|x| x.is_finite())
-                && n.knots().iter().flatten().all(|x| x.is_finite());
-            if !finite {
-                return Err(Error::Invalid(
-                    "boundary pcurve on a patch with a number not finite".into(),
-                ));
-            }
-            boundary_of(&n, curve, interval, cap)
-        }
-        _ => None,
-    })
+    Ok(())
+}
+
+/// A patch the boundary proofs take: every number of its net and knots finite.
+fn check_boundary_net(n: &Nurbs) -> Result<()> {
+    let finite = n.ctrl().iter().flatten().all(|x| x.is_finite())
+        && n.knots().iter().flatten().all(|x| x.is_finite());
+    if !finite {
+        return Err(Error::Invalid(
+            "boundary pcurve on a patch with a number not finite".into(),
+        ));
+    }
+    Ok(())
 }
 
 /// The proved gap (mm) of an edge `curve` on its `interval` that is a whole boundary curve of
@@ -332,10 +351,12 @@ pub fn boundary_iso(
 /// lowered from `tolerance`, the largest of the face's and the edge's) before it asks for pcurves,
 /// and asks within `covered`: this is the one question of both. The bound is [`boundary_iso`]'s
 /// within `max_tolerance / margin`, and the answer is `Some` only where `covered` is within
-/// `max_tolerance` and the line, taken at `covered` exactly as `exact_pcurves` takes it (the
+/// `max_tolerance` (and within the most an edge's tolerance is ever honoured at, 10³ mm, as
+/// [`pcurves`] reads it) and the line, taken at `covered` exactly as `exact_pcurves` takes it (the
 /// proof again within half of it, then the lift checked against the edge), is accepted: a
 /// tolerance raised for a line that is then not taken would hold the edge and its vertices wider
-/// than the kernel's pcurves ask.
+/// than the kernel's pcurves ask. This is the per-edge primitive; [`boundary_covers`] asks it of
+/// a whole face.
 ///
 /// # Errors
 /// [`Error::Invalid`] for a malformed surface or curve, an interval that is not finite and
@@ -348,7 +369,17 @@ pub fn boundary_covered(
     margin: f64,
     max_tolerance: f64,
 ) -> Result<Option<f64>> {
-    #[allow(clippy::neg_cmp_op_on_partial_ord)] // NaN-refusing
+    check_cover_numbers(tolerance, margin, max_tolerance)?;
+    super::check::surface(surface).map_err(|e| Error::Invalid(e.to_string()))?;
+    let on = On::new(surface)?;
+    if let SurfaceEval::Eval(EvalSurface::Nurbs(n), _) = &on.surface {
+        check_boundary_net(n)?;
+    }
+    Ok(covered_on(&on, curve, interval, tolerance, margin, max_tolerance)?.map(|(gap, _)| gap))
+}
+
+#[allow(clippy::neg_cmp_op_on_partial_ord)] // NaN-refusing
+fn check_cover_numbers(tolerance: f64, margin: f64, max_tolerance: f64) -> Result<()> {
     if !([tolerance, margin, max_tolerance]
         .iter()
         .all(|x| x.is_finite() && *x > 0.0))
@@ -357,22 +388,142 @@ pub fn boundary_covered(
             "boundary cover of tolerance {tolerance}, margin {margin}, at most {max_tolerance}"
         )));
     }
-    let Some(found) = boundary_iso(surface, curve, interval, max_tolerance / margin)? else {
+    Ok(())
+}
+
+/// [`boundary_covered`] on a prepared surface (whose net is checked by the caller), with the side
+/// of the patch the line runs along.
+fn covered_on(
+    on: &On,
+    curve: &Curve,
+    interval: [f64; 2],
+    tolerance: f64,
+    margin: f64,
+    max_tolerance: f64,
+) -> Result<Option<(f64, usize)>> {
+    let [t0, t1] = interval;
+    let cap = max_tolerance / margin;
+    #[allow(clippy::neg_cmp_op_on_partial_ord)] // NaN-refusing
+    if !(t0.is_finite() && t1.is_finite() && t0 < t1 && cap.is_finite() && cap > 0.0) {
+        return Err(Error::Invalid(format!(
+            "boundary pcurve of [{t0}, {t1}] within {cap}"
+        )));
+    }
+    check_boundary_curve(curve)?;
+    let SurfaceEval::Eval(EvalSurface::Nurbs(n), _) = &on.surface else {
+        return Ok(None);
+    };
+    let Some(found) = boundary_of(n, curve, interval, cap, on.face) else {
         return Ok(None);
     };
     let covered = tolerance.max(margin * found.gap);
-    if covered > max_tolerance {
+    if covered > max_tolerance.min(MAX_EDGE_TOLERANCE) {
         return Ok(None);
     }
-    let on = On::new(surface)?;
     let eval = CurveEval::new(curve)?;
     Ok(on
         .boundary_line(curve, &eval, interval, covered)
-        .map(|_| found.gap))
+        .map(|b| (found.gap, b.side)))
 }
 
-/// [`boundary_iso`] on a patch already evaluated, the numbers checked.
-fn boundary_of(n: &Nurbs, curve: &Curve, [t0, t1]: [f64; 2], cap: f64) -> Option<BoundaryIso> {
+/// The proved gaps of a face's uses, where the face is the whole polynomial patch `surface`: its
+/// four edges each the whole of one of the patch's four boundary curves, one use of each, every
+/// one [covered](boundary_covered) at its own `tolerance` (the one the importer asks at: the
+/// largest of the face's and its edge's), in `uses`' order. `None` for anything else: not exactly
+/// four uses, an edge used twice, two edges on one side, a side with no edge, a use the per-edge
+/// proof does not cover, a surface that is not a polynomial spline patch, or (where `domain`, the
+/// face's parameter box, is given) a box that is not the patch's whole natural box within
+/// 10⁻⁹ (1 + its range): a trimmed face, whose edges may run along the boundary where the trim
+/// does not. A given `domain` also drops, before the sides are ranked, the sides it excludes.
+///
+/// The surface is checked and prepared once for the face's uses. The honest limit: with no
+/// `domain` a face of four uses on the four natural sides is read as the whole patch, and a
+/// sliver face whose trim lies within the proof cap of a natural side cannot be told apart from
+/// exporter rounding.
+///
+/// # Errors
+/// [`Error::Invalid`] for a malformed surface or curve, an interval that is not finite and
+/// increasing, or a tolerance, `margin` or `max_tolerance` that is not positive and finite.
+pub fn boundary_covers(
+    surface: &Surface,
+    uses: &[EdgeUse<'_>],
+    domain: Option<[[f64; 2]; 2]>,
+    margin: f64,
+    max_tolerance: f64,
+) -> Result<Option<Vec<f64>>> {
+    for u in uses {
+        check_cover_numbers(u.tolerance, margin, max_tolerance)?;
+    }
+    check_cover_numbers(1.0, margin, max_tolerance)?;
+    super::check::surface(surface).map_err(|e| Error::Invalid(e.to_string()))?;
+    let on = On::new(surface)?.within(domain);
+    let SurfaceEval::Eval(EvalSurface::Nurbs(n), _) = &on.surface else {
+        return Ok(None);
+    };
+    check_boundary_net(n)?;
+    if uses.len() != 4 {
+        return Ok(None);
+    }
+    if let Some(b) = domain {
+        let Some(natural) = n.nl_surface().and_then(patch_box) else {
+            return Ok(None);
+        };
+        let same = b.iter().zip(natural).all(|(x, r)| {
+            let pad = box_pad(r);
+            (x[0] - r[0]).abs() <= pad && (x[1] - r[1]).abs() <= pad
+        });
+        if !same {
+            return Ok(None);
+        }
+    }
+    let (mut edges, mut sides, mut gaps) = (Vec::new(), [false; 4], Vec::new());
+    for u in uses {
+        if edges.contains(&u.edge) {
+            return Ok(None);
+        }
+        edges.push(u.edge);
+        let Some((gap, side)) =
+            covered_on(&on, u.curve, u.interval, u.tolerance, margin, max_tolerance)?
+        else {
+            return Ok(None);
+        };
+        match sides.get_mut(side) {
+            Some(seen) if !*seen => *seen = true,
+            _ => return Ok(None),
+        }
+        gaps.push(gap);
+    }
+    Ok(Some(gaps))
+}
+
+/// How far outside a parameter range of a box a parameter is still inside it, as
+/// [`On::project_in`] pads.
+fn box_pad(r: [f64; 2]) -> f64 {
+    1e-9 * (1.0 + (r[1] - r[0]).abs())
+}
+
+/// A clamped patch's natural parameter box, u then v: its knots' ends, each end knot repeated
+/// as often as its degree needs, so that the boundary is a copy of a control row.
+fn patch_box(nl: &NlSurface) -> Option<[[f64; 2]; 2]> {
+    let (p, q) = nl.degrees();
+    let ends = |k: &[f64], d: usize| -> Option<[f64; 2]> {
+        let (a, b) = (*k.first()?, *k.last()?);
+        let clamped =
+            k.get(d) == Some(&a) && k.len().checked_sub(d + 1).and_then(|i| k.get(i)) == Some(&b);
+        (clamped && a < b).then_some([a, b])
+    };
+    Some([ends(nl.u_knots(), p)?, ends(nl.v_knots(), q)?])
+}
+
+/// [`boundary_iso`] on a patch already evaluated, the numbers checked, with the sides outside
+/// the face's parameter box `face` (where it has one) dropped before they are ranked.
+fn boundary_of(
+    n: &Nurbs,
+    curve: &Curve,
+    [t0, t1]: [f64; 2],
+    cap: f64,
+    face: Option<[[f64; 2]; 2]>,
+) -> Option<BoundaryIso> {
     // A periodic direction has no boundary to be the edge of (its two ends are one curve, and
     // the loop's pcurves run round it), a rational patch no polynomial control net.
     if n.closed().iter().any(|c| *c) || n.ctrl().iter().any(|h| h[3] != 1.0) {
@@ -383,16 +534,15 @@ fn boundary_of(n: &Nurbs, curve: &Curve, [t0, t1]: [f64; 2], cap: f64) -> Option
     }
     let nl = n.nl_surface()?;
     let (edge, moved) = edge_form(curve, [t0, t1])?;
-    let (p, q) = nl.degrees();
-    let ends = |k: &[f64], d: usize| -> Option<[f64; 2]> {
-        let (a, b) = (*k.first()?, *k.last()?);
-        // Clamped, so the boundary is the knots' ends and its extraction a copy.
-        let clamped =
-            k.get(d) == Some(&a) && k.len().checked_sub(d + 1).and_then(|i| k.get(i)) == Some(&b);
-        (clamped && a < b).then_some([a, b])
+    // Clamped, so the boundary is the knots' ends and its extraction a copy.
+    let [[u0, u1], [v0, v1]] = patch_box(nl)?;
+    let inside = |q: [f64; 2]| {
+        face.is_none_or(|b| {
+            q.iter()
+                .zip(b)
+                .all(|(x, r)| *x >= r[0] - box_pad(r) && *x <= r[1] + box_pad(r))
+        })
     };
-    let [u0, u1] = ends(nl.u_knots(), p)?;
-    let [v0, v1] = ends(nl.v_knots(), q)?;
     let sides = [
         (Direction::U, v0, [u0, v0], [u1, v0]),
         (Direction::U, v1, [u0, v1], [u1, v1]),
@@ -404,7 +554,11 @@ fn boundary_of(n: &Nurbs, curve: &Curve, [t0, t1]: [f64; 2], cap: f64) -> Option
         point_of(edge.cpts().last()?),
     );
     let mut best: Option<BoundaryIso> = None;
-    for (dir, at, a, b) in sides {
+    for (side, (dir, at, a, b)) in sides.into_iter().enumerate() {
+        // A side the face's box does not hold is no boundary of the face.
+        if !(inside(a) && inside(b)) {
+            continue;
+        }
         let Ok(iso) = extract_iso_crv(nl, at, dir) else {
             continue;
         };
@@ -415,8 +569,7 @@ fn boundary_of(n: &Nurbs, curve: &Curve, [t0, t1]: [f64; 2], cap: f64) -> Option
             if !(s.dist(e0) <= cap && e.dist(e1) <= cap) {
                 continue;
             }
-            let Some(gap) = boundary_gap_of(&edge, moved, &iso, reversed, [t0, t1], p.max(q))
-            else {
+            let Some(gap) = boundary_gap_of(&edge, moved, &iso, reversed, [t0, t1]) else {
                 continue;
             };
             if gap <= cap && best.as_ref().is_none_or(|b| gap < b.gap) {
@@ -427,6 +580,7 @@ fn boundary_of(n: &Nurbs, curve: &Curve, [t0, t1]: [f64; 2], cap: f64) -> Option
                         points: vec![from, to],
                     },
                     gap,
+                    side,
                 });
             }
         }
@@ -546,9 +700,14 @@ fn edge_form(curve: &Curve, [t0, t1]: [f64; 2]) -> Option<(NlCurve, f64)> {
 /// contiguous range found by two pointers, and its weight is a difference of prefix sums. Each
 /// window is widened by `2 δ + 4 u M` (`M` the largest knot, so the rounding of its ends, at
 /// most `u M`, cannot narrow it below `δ`; the windows are taken closed). Roundings: each leg's
-/// weight is a norm (`γ₅`), a quotient and a product (`γ₂`) and the prefix sums add `γ_(n)` each
-/// side of a difference, so the result is `(best + 2 γ_(n+2) Σ w)(1 + γ₁₆)`, plus one subnormal
-/// step a leg for an underflowed weight.
+/// length is `norm_up` of the coordinate differences, scaled by the largest so that nothing
+/// underflows and rounded up (`γ₈`, its three subtractions included), the share is a subtraction
+/// of knots, a product and a quotient (`γ₃`) and the weight one more product (`γ₁`), so each
+/// weight is within `γ₁₂ ≤ γ₁₆` of its exact value, and the prefix sums add `γ_(n)` each side of a
+/// difference: the result is `(best + 2 γ_(n+2) Σ w)(1 + γ₁₆)`, plus one subnormal step a leg for
+/// a weight that underflows (a product with a share below one is the one thing `norm_up` does not
+/// scale). A leg whose coordinates differ by so little that their squares underflow
+/// is read as its true length, not as zero.
 fn knot_shift_bound(points: &[CPoint], knots: &[f64], degree: usize, delta: f64) -> Option<f64> {
     let n = points.len();
     #[allow(clippy::neg_cmp_op_on_partial_ord)] // NaN-refusing
@@ -567,7 +726,8 @@ fn knot_shift_bound(points: &[CPoint], knots: &[f64], degree: usize, delta: f64)
     let (mut lo, mut hi, mut weight) = (Vec::new(), Vec::new(), Vec::new());
     for (i, w) in points.windows(2).enumerate() {
         let (c, e) = (w.first()?, w.get(1)?);
-        let step = point_of(c).dist(point_of(e));
+        // Scaled and rounded up, so a leg of tiny coordinates is not read as zero.
+        let step = norm_up(e.x - c.x, e.y - c.y, e.z - c.z)?;
         let (first, last) = (*knots.get(i + 1)?, *knots.get(i + degree + 1)?);
         let gap = last - first;
         let share = if gap > 0.0 {
@@ -617,11 +777,11 @@ fn knot_shift_bound(points: &[CPoint], knots: &[f64], degree: usize, delta: f64)
 ///    comparison is inside it, `nurbs::crv_deviation`);
 /// 3. `shifted`: `placed` against the same row on the exactly mapped knots, which is
 ///    `iso ∘ s` (a B-spline's affine reparametrisation is its knots' image, exactly);
-/// 4. `extraction`: the iso against the patch's row. `extract_iso_crv` at the end of a clamped
-///    range returns a copy of the control row and the knots (its boundary branch, `srf_tool::p1`),
-///    so this is 0, pinned by `the_extracted_boundary_is_a_copy_of_the_net_s_row`; the allowance
-///    `4 γ_(12 (d + 1)) S` (the rounding of an extraction by de Boor's levels, `S` the largest
-///    coordinate) is kept, not needed, so that a changed extraction fails the test, not a proof.
+/// 4. `extraction`: the iso against the patch's row, exactly 0. `extract_iso_crv` at the end of a
+///    clamped range returns a copy of the control row and the knots (its boundary branch,
+///    `srf_tool::p1`), with no arithmetic, so there is no rounding to allow for; the copy is
+///    pinned by `the_extracted_boundary_is_a_copy_of_the_net_s_row`, on all four sides, so a
+///    changed extraction fails that test, not a proof.
 ///
 /// The knot map is `fl(t₀ + fl(fl(x − a) / fl(b − a)) · fl(t₁ − t₀))` for the knot `x` of the
 /// range `[a, b]` (`fl(b − x)` reversed), the ends mapped to the ends exactly and the result put
@@ -638,14 +798,13 @@ fn knot_shift_bound(points: &[CPoint], knots: &[f64], degree: usize, delta: f64)
 /// same domain as the edge. The shift of `placed` against `iso ∘ s` is then [`knot_shift_bound`]
 /// with that `δ`.
 ///
-/// The sum is rounded up by `γ₈` (three additions, and each term is itself a rounded product).
+/// The sum is rounded up by `γ₈` (two additions, and each term is itself a rounded product).
 fn boundary_gap_of(
     edge: &NlCurve,
     moved: f64,
     iso: &NlCurve,
     reversed: bool,
     [t0, t1]: [f64; 2],
-    surface_degree: usize,
 ) -> Option<f64> {
     let k = iso.knots();
     let (a, b) = (*k.first()?, *k.last()?);
@@ -687,21 +846,14 @@ fn boundary_gap_of(
     let p = iso.degree();
     let placed = NlCurve::new(pw, p, knots).ok()?;
     let certified = certified_distance(edge, &placed).ok()?;
-    // The size of what the roundings are counted on.
-    let size = [edge, &placed]
-        .iter()
-        .flat_map(|c| c.cpts().iter())
-        .flat_map(|c| [c.x.abs(), c.y.abs(), c.z.abs()])
-        .fold(0.0_f64, f64::max);
-    let extraction = 4.0 * gamma(12 * (surface_degree + 1)) * size;
     let delta = gamma(7) * (t0.abs().max(t1.abs()) + span) + 4.0 * f64::from_bits(1);
     let shifted = knot_shift_bound(placed.cpts(), placed.knots(), p, delta)?;
-    let bound = (certified + extraction + shifted + moved) * (1.0 + gamma(8));
+    let bound = (certified + shifted + moved) * (1.0 + gamma(8));
     bound.is_finite().then_some(bound)
 }
 
 fn check_size(loops: &[Vec<EdgeUse<'_>>], tolerance: f64) -> Result<()> {
-    if !(tolerance.is_finite() && tolerance > 0.0 && tolerance <= 1e3) {
+    if !(tolerance.is_finite() && tolerance > 0.0 && tolerance <= MAX_EDGE_TOLERANCE) {
         return Err(Error::Invalid(format!("pcurve tolerance {tolerance}")));
     }
     let uses = loops
@@ -752,7 +904,7 @@ fn each_pcurve(
             let c = CurveEval::new(u.curve)?;
             // An edge record that holds a looser tolerance than the face's (another kernel's
             // approximated edge) is checked against its own, up to the same cap.
-            let own = if u.tolerance.is_finite() && u.tolerance <= 1e3 {
+            let own = if u.tolerance.is_finite() && u.tolerance <= MAX_EDGE_TOLERANCE {
                 tolerance.max(u.tolerance)
             } else {
                 tolerance
@@ -962,13 +1114,12 @@ impl On {
         curve: &CurveEval,
         range: [f64; 2],
         tol: f64,
-    ) -> Option<Curve2> {
+    ) -> Option<BoundaryIso> {
         let SurfaceEval::Eval(EvalSurface::Nurbs(n), _) = &self.surface else {
             return None;
         };
-        boundary_of(n, record, range, 0.5 * tol)
-            .map(|b| b.pcurve)
-            .filter(|pc| self.lifts(pc, curve, range, 0.5 * tol))
+        boundary_of(n, record, range, 0.5 * tol, self.face)
+            .filter(|b| self.lifts(&b.pcurve, curve, range, 0.5 * tol))
     }
 
     /// The closed-form pcurve where there is one (unchecked).
@@ -1100,7 +1251,7 @@ impl On {
                 // never raised to (the importer raises an edge's tolerance to cover the proved
                 // bound before it asks).
                 match self.boundary_line(record, curve, [t0, t1], tol) {
-                    Some(pc) => Some(pc),
+                    Some(b) => Some(b.pcurve),
                     None => self.along(curve, [t0, t1], tol),
                 }
             }

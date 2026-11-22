@@ -2615,6 +2615,15 @@ fn boundary_proofs_of_hostile_records_give_errors_or_none() {
         };
         let r = boundary_iso(&patch, &curve, [0., 1.], 1e-3);
         assert!(matches!(r, Err(_) | Ok(None | Some(_))), "{scale}: {r:?}");
+        // Where a proof is returned, its bound is a number and positive, at every scale: a leg of
+        // coordinates whose squares underflow is not read as no length at all.
+        if let Ok(Some(found)) = &r {
+            assert!(
+                found.gap.is_finite() && found.gap > 0.0,
+                "{scale}: {}",
+                found.gap
+            );
+        }
     }
     // An edge with more control points than the proof refines.
     let n = MAX_BOUNDARY_POINTS + 1;
@@ -2881,8 +2890,36 @@ fn the_knot_shift_bound_holds_where_the_knots_of_a_cubic_cluster() {
     }
 }
 
+/// A leg of tiny coordinates counts its length: the squares of `5e-170` underflow to 0, and a
+/// bound that read the leg as no length at all would sit below the displacement (a degree-1 curve
+/// whose middle knot moves by δ is displaced at that knot by `|ΔP₀| δ / (0.5 + δ)`, in closed form:
+/// the point is `P₁` on one knot vector and a convex combination on the other).
+#[test]
+fn the_knot_shift_bound_counts_a_leg_of_tiny_coordinates() {
+    let cp = |x: f64, y: f64| CPoint::new(x, y, 0.0, NOW);
+    for scale in [1.0, 1e-100, 1e-170] {
+        let points = [
+            cp(0.0, 0.0),
+            cp(3.0 * scale, 4.0 * scale),
+            cp(6.0 * scale, 8.0 * scale),
+        ];
+        let knots = [0.0, 0.0, 0.5, 1.0, 1.0];
+        let leg = (3.0 * scale).hypot(4.0 * scale);
+        for delta in [1e-12, 1e-6, 1e-3] {
+            let displacement = leg * delta / (0.5 + delta);
+            let bound = knot_shift_bound(&points, &knots, 1, delta).unwrap();
+            assert!(bound.is_finite() && bound > 0.0, "{scale} {delta}: {bound}");
+            assert!(
+                bound >= displacement,
+                "{scale} {delta}: the bound {bound} is under the displacement {displacement}"
+            );
+        }
+    }
+}
+
 /// `extract_iso_crv` at the end of a clamped range returns the net's end row and the knots
-/// themselves, bit for bit: the extraction term of a boundary proof is 0 (kept as an allowance).
+/// themselves, bit for bit, on all four sides (the u-curves at the least and greatest v, the
+/// v-curves at the least and greatest u): the extraction term of a boundary proof is exactly 0.
 #[test]
 fn the_extracted_boundary_is_a_copy_of_the_net_s_row() {
     let u_knots = vec![0.0, 0.0, 0.0, 0.0, 0.37, 0.81, 1.0, 1.0, 1.0, 1.0];
@@ -2916,11 +2953,13 @@ fn the_extracted_boundary_is_a_copy_of_the_net_s_row() {
     assert_eq!(u_end.knots(), &u_knots[..]);
     let v_end = extract_iso_crv(nl, 1.5, Direction::U).unwrap();
     assert_eq!(row(&v_end), points.iter().map(|r| r[3]).collect::<Vec<_>>());
+    assert_eq!(v_end.knots(), &u_knots[..]);
     let first = extract_iso_crv(nl, 0.0, Direction::V).unwrap();
     assert_eq!(row(&first), points[0]);
     assert_eq!(first.knots(), &v_knots[..]);
     let last = extract_iso_crv(nl, 1.0, Direction::V).unwrap();
     assert_eq!(row(&last), points[5]);
+    assert_eq!(last.knots(), &v_knots[..]);
 }
 
 /// A cubic patch of 168 poles along u (uneven knots) over a bilinear v, whose four edges are its
@@ -3120,4 +3159,253 @@ fn a_patch_closed_in_one_direction_has_no_boundary_proof_on_its_seam() {
                 .filter(|pc| on.lifts(pc, &eval, *interval, 0.5 * tol))
         );
     }
+}
+
+/// A patch of 10 m (the twisted one, in millimetres), and its side v = 0 as an edge `off` mm above
+/// it.
+fn metres_edge(off: f64) -> (Surface, Curve) {
+    let k = 1000.0;
+    let at = |x: f64, y: f64, z: f64| [x * k, y * k, z * k];
+    let surface = Surface::Spline {
+        u_knots: vec![0., 0., 1., 1.],
+        v_knots: vec![0., 0., 1., 1.],
+        points: vec![
+            vec![at(0., 0., 0.), at(0., 10., 0.)],
+            vec![at(10., 0., 0.), at(10., 10., 2.)],
+        ],
+    };
+    let edge = Curve::Spline {
+        knots: vec![0., 0., 1., 1.],
+        points: vec![[0., 0., off], [10. * k, 0., off]],
+    };
+    (surface, edge)
+}
+
+/// No edge tolerance past 10³ mm is honoured, the face's or an edge record's (the largest
+/// `pcurves` takes): a cover that would ask for one is none, whatever `max_tolerance` allows.
+#[test]
+fn a_boundary_is_not_covered_at_a_tolerance_past_what_an_edge_is_honoured_at() {
+    let (most, margin) = (2e3, 1.0);
+    // An edge 400 mm off a patch 10 m across, covered at 900 mm: within the ceiling, and taken.
+    let (surface, near) = metres_edge(400.0);
+    let found = boundary_covered(&surface, &near, [0., 1.], 900.0, margin, most).unwrap();
+    assert!(
+        found.is_some_and(|g| (400.0..401.0).contains(&g)),
+        "{found:?}"
+    );
+    // An edge 1200 mm off, covered at 3000 mm: the proof holds and 3000 is within `max_tolerance`,
+    // but is past the ceiling, so no cover.
+    let (surface, far) = metres_edge(1200.0);
+    assert!(boundary_iso(&surface, &far, [0., 1.], most)
+        .unwrap()
+        .is_some());
+    assert_eq!(
+        boundary_covered(&surface, &far, [0., 1.], 3000.0, margin, 4e3).unwrap(),
+        None
+    );
+    // The same edge at the ceiling itself is covered.
+    assert!(
+        boundary_covered(&surface, &far, [0., 1.], 1000.0, margin, 4e3)
+            .unwrap()
+            .is_none(),
+        "half of 1000 mm is under the 1200 mm gap"
+    );
+    let (surface, mid) = metres_edge(450.0);
+    assert!(
+        boundary_covered(&surface, &mid, [0., 1.], 1000.0, margin, 4e3)
+            .unwrap()
+            .is_some()
+    );
+}
+
+/// A face's parameter box drops the sides it does not hold before they are ranked: the line is the
+/// face's boundary only where the box holds it.
+#[test]
+fn a_side_outside_the_faces_box_is_no_boundary_of_it() {
+    let surface = twisted(2.);
+    let tol = 1e-3;
+    for (side, (from, to)) in SIDES.iter().enumerate() {
+        let edge = boundary_edge(2., *from, *to, 2e-5);
+        let eval = CurveEval::new(&edge).unwrap();
+        let line = |face: Option<[[f64; 2]; 2]>| {
+            On::new(&surface)
+                .unwrap()
+                .within(face)
+                .boundary_line(&edge, &eval, [0., 1.], tol)
+        };
+        // The whole box, a padded one, and none: the side is found, and said to be the one it is.
+        for face in [
+            None,
+            Some([[0., 1.], [0., 1.]]),
+            Some([[-1e-12, 1.], [0., 1. + 1e-12]]),
+            Some([[-1., 2.], [-1., 2.]]),
+        ] {
+            assert_eq!(line(face).map(|b| b.side), Some(side), "{side} in {face:?}");
+        }
+        // A box that does not reach the side: not chosen. Each of the four halves of the patch
+        // holds two sides whole and the ends of the others.
+        for (name, half) in [
+            ("v from 0.5", [[0., 1.], [0.5, 1.]]),
+            ("v to 0.5", [[0., 1.], [0., 0.5]]),
+            ("u from 0.5", [[0.5, 1.], [0., 1.]]),
+            ("u to 0.5", [[0., 0.5], [0., 1.]]),
+        ] {
+            let holds = [from, to]
+                .iter()
+                .all(|q| q.iter().zip(half).all(|(x, r)| *x >= r[0] && *x <= r[1]));
+            assert_eq!(line(Some(half)).is_some(), holds, "side {side} in {name}");
+        }
+    }
+    // The ranking is among the sides the box holds: a box over the v = 1 half, where v = 0's
+    // edge is no candidate, gives the edge of the side v = 1 its own side, and v = 0's nothing.
+    let top = Some([[0., 1.], [0.5, 1.]]);
+    let low = boundary_edge(2., [0., 0.], [1., 0.], 0.);
+    let (on, eval) = (
+        On::new(&surface).unwrap().within(top),
+        CurveEval::new(&low).unwrap(),
+    );
+    assert_eq!(on.boundary_line(&low, &eval, [0., 1.], tol), None);
+    let found = |face| {
+        covered_on(
+            &On::new(&surface).unwrap().within(face),
+            &low,
+            [0., 1.],
+            1e-6,
+            SURFACE_GAP_MARGIN,
+            1.0,
+        )
+        .unwrap()
+    };
+    assert!(found(None).is_some_and(|(_, side)| side == 0));
+    assert_eq!(found(top), None);
+}
+
+/// The four sides of [`twisted`] as the face's one loop: each `off` mm above its side, edge ids
+/// 0 to 3 in the order of `order` (indices into [`SIDES`]), each running `reversed` where it says.
+fn whole_patch(off: f64, order: [usize; 4], reversed: [bool; 4]) -> Vec<(Curve, [f64; 2])> {
+    order
+        .iter()
+        .zip(reversed)
+        .map(|(k, r)| {
+            let (from, to) = SIDES[*k];
+            let (a, b) = if r { (to, from) } else { (from, to) };
+            (boundary_edge(2., a, b, off), [0., 1.])
+        })
+        .collect()
+}
+
+fn uses_of<'a>(edges: &'a [(Curve, [f64; 2])], ids: &[u32]) -> Vec<EdgeUse<'a>> {
+    edges
+        .iter()
+        .zip(ids)
+        .map(|((curve, interval), edge)| EdgeUse {
+            edge: *edge,
+            curve,
+            interval: *interval,
+            forward: true,
+            tolerance: 1e-6,
+            given: None,
+        })
+        .collect()
+}
+
+/// A face is read as the whole patch only where its uses are exactly the four natural sides, one
+/// each, each covered: in any order or direction it gives the four gaps (each what the per-edge
+/// question gives); three uses, a side used twice, an edge used twice, a side with no edge, an
+/// edge on no side, a box that is a part of the patch, a rational patch or a plane give none.
+#[test]
+fn a_face_is_the_whole_patch_only_as_its_four_natural_sides() {
+    let surface = twisted(2.);
+    let margin = SURFACE_GAP_MARGIN;
+    let covers = |s: &Surface, uses: &[EdgeUse<'_>], domain| {
+        boundary_covers(s, uses, domain, margin, 1.0).unwrap()
+    };
+    let ids = [10, 11, 12, 13];
+    for (order, reversed) in [
+        ([0, 1, 2, 3], [false; 4]),
+        ([3, 2, 1, 0], [true; 4]),
+        ([2, 0, 3, 1], [true, false, false, true]),
+    ] {
+        let edges = whole_patch(2e-5, order, reversed);
+        let uses = uses_of(&edges, &ids);
+        let gaps =
+            covers(&surface, &uses, None).unwrap_or_else(|| panic!("{order:?} {reversed:?}"));
+        assert_eq!(gaps.len(), 4);
+        for (g, (edge, interval)) in gaps.iter().zip(&edges) {
+            let one = boundary_covered(&surface, edge, *interval, 1e-6, margin, 1.0).unwrap();
+            assert_eq!(Some(*g), one, "{order:?}");
+            assert!(*g >= 2e-5 && *g <= 2e-5 + 1e-9, "{g}");
+        }
+        // The natural box, as it is or padded, is the whole patch; a part of it is a trimmed face.
+        let natural = Some([[0., 1.], [0., 1.]]);
+        assert_eq!(covers(&surface, &uses, natural), Some(gaps.clone()));
+        assert_eq!(
+            covers(&surface, &uses, Some([[0., 1. + 1e-12], [0., 1.]])),
+            Some(gaps.clone())
+        );
+        for part in [
+            [[0., 1.], [0., 0.5]],
+            [[0.1, 1.], [0., 1.]],
+            [[0., 1.], [0., 1.1]],
+            [[0., 1.], [f64::NAN, 1.]],
+        ] {
+            assert_eq!(covers(&surface, &uses, Some(part)), None, "{part:?}");
+        }
+        // Three uses, none, or five.
+        assert_eq!(covers(&surface, &uses[..3], None), None);
+        assert_eq!(covers(&surface, &[], None), None);
+        let mut five = edges.clone();
+        five.push(five[0].clone());
+        assert_eq!(
+            covers(&surface, &uses_of(&five, &[10, 11, 12, 13, 14]), None),
+            None
+        );
+        // An edge used twice (the same id, so four uses of three edges), or a side twice (two
+        // edges on one side, and none on another).
+        assert_eq!(
+            covers(&surface, &uses_of(&edges, &[10, 11, 12, 12]), None),
+            None
+        );
+        let mut twice = edges.clone();
+        twice[3] = twice[0].clone();
+        assert_eq!(covers(&surface, &uses_of(&twice, &ids), None), None);
+        // An edge that is no boundary, or off by more than the cap.
+        let mut trimmed = edges.clone();
+        trimmed[2] = (
+            Curve::Spline {
+                knots: vec![0., 0., 1., 1.],
+                points: vec![[5., 0., 0.], [5., 10., 1.]],
+            },
+            [0., 1.],
+        );
+        assert_eq!(covers(&surface, &uses_of(&trimmed, &ids), None), None);
+        let mut far = edges.clone();
+        far[1] = whole_patch(0.5, order, reversed).swap_remove(1);
+        assert_eq!(covers(&surface, &uses_of(&far, &ids), None), None);
+    }
+    // Not a polynomial patch: a plane, a rational net.
+    let edges = whole_patch(0., [0, 1, 2, 3], [false; 4]);
+    let uses = uses_of(&edges, &ids);
+    let plane = Surface::Plane {
+        origin: [0.; 3],
+        u_axis: [10., 0., 0.],
+        v_axis: [0., 10., 0.],
+    };
+    let rational = Surface::RationalSpline {
+        u_knots: vec![0., 0., 1., 1.],
+        v_knots: vec![0., 0., 1., 1.],
+        homogeneous: vec![
+            vec![[0., 0., 0., 1.], [0., 10., 0., 1.]],
+            vec![[10., 0., 0., 1.], [20., 20., 4., 2.]],
+        ],
+    };
+    assert_eq!(covers(&plane, &uses, None), None);
+    assert_eq!(covers(&rational, &uses, None), None);
+    // Numbers that are not numbers are errors, never a panic.
+    for (margin, most) in [(f64::NAN, 1.0), (3.0, 0.0), (-3.0, 1.0)] {
+        assert!(boundary_covers(&surface, &uses, None, margin, most).is_err());
+    }
+    let mut bad = uses.clone();
+    bad[0].tolerance = f64::NAN;
+    assert!(boundary_covers(&surface, &bad, None, margin, 1.0).is_err());
 }

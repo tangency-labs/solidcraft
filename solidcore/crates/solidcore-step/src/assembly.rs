@@ -498,14 +498,14 @@ impl<'t> Assembly<'t> {
     /// torus) the edge's distance from it is measured along the edge before its pcurve is made,
     /// and the edge's tolerance covers it. A spline face's gaps are measured on the pcurves its
     /// kernel makes (`raise_edges`): an iterative nearest point may settle elsewhere on it.
-    fn measure_edges(&mut self, surface: &BSurface, edge_loops: &[Vec<(u32, bool)>]) -> R<()> {
+    fn measure_edges(&mut self, surface: &BSurface, edge_loops: &[Vec<(u32, bool)>], domain: Option<[[f64; 2]; 2]>, loop_count: usize) -> R<()> {
         // Only where the nearest point is in closed form: on a spline the search may settle on
         // another part of the surface, or on its boundary for a point a hair past it, and report a
         // gap the edge does not have (2.9 mm on Poppy Humanoid's leg shells, whose edges lie within
         // 0.003 mm), widening tolerances past what SMLib takes. A spline face's gaps are measured
         // on the pcurves its kernel makes (`raise_edges`).
         if matches!(surface, BSurface::Spline { .. }) {
-            return self.measure_boundary_edges(surface, edge_loops);
+            return self.measure_boundary_edges(surface, edge_loops, domain, loop_count);
         }
         if !matches!(
             surface,
@@ -542,28 +542,44 @@ impl<'t> Assembly<'t> {
         Ok(())
     }
 
-    /// A whole polynomial spline patch's edge that runs along one of the patch's boundary curves
-    /// holds the bound a proof of that puts on its distance from them ([`pcurve::boundary_gap`]),
-    /// before the pcurves are asked for: the pcurve is then the straight line along the boundary,
-    /// whatever the few micrometres the file's edge stands off it, with no kernel in between.
-    /// Only an edge that gets that line is raised (the call asks for it at the raised tolerance,
-    /// as the pcurves are asked for), so none is held wider for a pcurve the kernel makes.
-    /// Nothing else is measured on a spline (see [`Self::measure_edges`]); an edge the proof does
-    /// not cover is left as it is, and its pcurve is made as it was.
-    fn measure_boundary_edges(&mut self, surface: &BSurface, edge_loops: &[Vec<(u32, bool)>]) -> R<()> {
-        for l in edge_loops {
-            for &(e, _) in l {
-                let edge = self.edges.get(e as usize).ok_or("edge reference")?;
-                let (curve, interval) = match &edge.form {
-                    Some((c, i)) => (c, *i),
-                    None => (&edge.curve, edge.interval),
-                };
-                // As `exact_pcurves` takes it: within the larger of the face's and the edge's.
-                let tolerance = self.tol.max(edge.tolerance);
-                if let Ok(Some(gap)) = pcurve::boundary_gap(surface, curve, interval, tolerance, pcurve::SURFACE_GAP_MARGIN, MAX_TOLERANCE) {
-                    self.cover_edge(e, gap, pcurve::SURFACE_GAP_MARGIN)?;
-                }
-            }
+    /// A face that is a whole polynomial spline patch holds, on each of its four edges, the bound a
+    /// proof puts on that edge's distance from the patch's boundary curve it runs along
+    /// ([`pcurve::boundary_covers`]), before the pcurves are asked for: the pcurve is then the
+    /// straight line along the boundary, whatever the few micrometres the file's edge stands off
+    /// it, with no kernel in between. The face is asked as a whole, once: only a face of exactly
+    /// one loop of four uses (`loop_count` counts every loop of the face, vertex loops too),
+    /// whose edges are four, on the patch's four sides, each taken as the line at the tolerance
+    /// the raise gives, and (where `domain` is known) whose box is the patch's, is raised, so no
+    /// edge is held wider for a pcurve the kernel makes, nor for a trimmed face's. Nothing else is
+    /// measured on a spline (see [`Self::measure_edges`]); a face the proof does not cover is left
+    /// as it is, and its pcurves are made as they were.
+    ///
+    /// The honest limit: with no `domain` supplied, a face of four uses on the four natural sides
+    /// is read as the whole patch, and a sliver face whose trim lies within the proof's cap of a
+    /// natural side cannot be told apart from an exporter's rounding.
+    fn measure_boundary_edges(
+        &mut self,
+        surface: &BSurface,
+        edge_loops: &[Vec<(u32, bool)>],
+        domain: Option<[[f64; 2]; 2]>,
+        loop_count: usize,
+    ) -> R<()> {
+        if loop_count != 1 || edge_loops.len() != 1 || edge_loops.first().map(Vec::len) != Some(4) {
+            return Ok(());
+        }
+        // As `exact_pcurves` takes it: within the larger of the face's and the edge's.
+        let mut uses = uses_of(&self.edges, edge_loops, None)?;
+        for u in uses.iter_mut().flatten() {
+            u.tolerance = self.tol.max(u.tolerance);
+        }
+        let Some(uses) = uses.first() else { return Ok(()) };
+        let gaps = match pcurve::boundary_covers(surface, uses, domain, pcurve::SURFACE_GAP_MARGIN, MAX_TOLERANCE) {
+            Ok(Some(gaps)) => gaps,
+            _ => return Ok(()),
+        };
+        let edges: Vec<u32> = uses.iter().map(|u| u.edge).collect();
+        for (e, gap) in edges.into_iter().zip(gaps) {
+            self.cover_edge(e, gap, pcurve::SURFACE_GAP_MARGIN)?;
         }
         Ok(())
     }
@@ -1469,7 +1485,7 @@ impl<'t> Assembly<'t> {
         // no analytic surface has it (SMLib's cylinder is one turn), so it is a spline face.
         let wound = extent.is_some_and(crate::kernel::form::winds);
         // How far each edge lies off this surface, so its closed form is checked at that.
-        self.measure_edges(&label, &edge_loops)?;
+        self.measure_edges(&label, &edge_loops, box_on_form, face.loops.len())?;
         // Closed forms where the geometry has them; the kernel makes the rest (`trims`).
         let mut exact = pcurve::exact_pcurves(&surface, &uses_of(&self.edges, &edge_loops, None)?, tol, box_on_form).map_err(|e| e.to_string())?;
         // On a form of many turns a closed form does not say which turn each of its ends is on:

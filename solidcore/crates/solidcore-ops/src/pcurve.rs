@@ -163,32 +163,30 @@ pub fn exact_pcurves(
         .collect())
 }
 
-/// A proved bound (mm) of how far a B-spline or line edge `curve` on its `interval` lies from
-/// the boundary curve of the polynomial spline patch `surface` it is a whole copy of, `None`
-/// where it is not proved, or where [`exact_pcurves`] would not then take the straight line along
-/// that boundary for it ([`solidcore::eval::pcurve::boundary_covered`]): the importer's edge
-/// covers it (`margin` times, within `max_tolerance`, over its `tolerance`, the largest of the
-/// face's and its own) before its pcurve is asked for, and only for an edge that gets the line.
+/// The proved gaps (mm) of a face's edge uses where the face is the whole polynomial spline patch
+/// `surface` and each use is a whole copy of one of its four boundary curves, one of each, every
+/// one taken by [`exact_pcurves`] as the straight line along it: `None` otherwise
+/// ([`solidcore::eval::pcurve::boundary_covers`]). `uses` are the face's one loop, each with the
+/// tolerance the importer asks at (the largest of the face's and its edge's), covered `margin`
+/// times within `max_tolerance`; `domain` is the face's parameter box where it has one. The
+/// surface is checked and converted once for the face, each curve once.
 ///
 /// # Errors
 /// [`Error::Invalid`] for a malformed record, an interval, a tolerance, a margin or a maximum that
 /// is not valid.
-pub fn boundary_gap(
+pub fn boundary_covers(
     surface: &Surface,
-    curve: &Curve,
-    interval: [f64; 2],
-    tolerance: f64,
+    uses: &[EdgeUse<'_>],
+    domain: Option<[[f64; 2]; 2]>,
     margin: f64,
     max_tolerance: f64,
-) -> Result<Option<f64>> {
-    let invalid = |e: solidcore_record::brep::Invalid| Error::Invalid(e.to_string());
-    let mut budget = Budget::input();
-    check_surface(surface, &mut budget).map_err(invalid)?;
-    check_curve(curve, &mut budget).map_err(invalid)?;
-    check_interval(&interval, curve.natural()).map_err(invalid)?;
-    let surface = solidcore_convert::surface(surface).map_err(invalid)?;
-    let curve = solidcore_convert::curve(curve).map_err(invalid)?;
-    k::boundary_covered(&surface, &curve, interval, tolerance, margin, max_tolerance)
+) -> Result<Option<Vec<f64>>> {
+    let face = Converted::new(surface, &[uses.to_vec()])?;
+    let loops = face.loops();
+    let Some(converted) = loops.first() else {
+        return Ok(None);
+    };
+    k::boundary_covers(&face.surface, converted, domain, margin, max_tolerance)
 }
 
 /// The pcurve on a cylinder or cone face `label` (on its NURBS form `form` when the face has
