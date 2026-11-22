@@ -997,21 +997,22 @@ fn bezier_block(span: &str, split: f64) -> String {
 /// block it is, as it does with the knots (0, 20).
 #[test]
 fn a_micro_edge_on_a_bezier_with_a_tiny_knot_span_keeps_the_block() {
+    // At 1.283 nm on the knots (0, 1.02e-7) the micro edge lies on [0, 6.549e-15] of the file's
+    // parameter, below SMLib's knot resolution (1e-12); the reader rescales such a curve's
+    // parameter exactly (#16441), so that block too is the closed 20 × 30 × 10 = 6000 mm³ block.
     for span in ["20.", "1.020781457822E-07"] {
-        let case = format!("knots (0, {span})");
-        let imp = step_import(&bezier_block(span, 1.26e-3)).unwrap_or_else(|e| panic!("{case}: {e}"));
-        assert_eq!(imp.bodies.len(), 1, "{case}: {:?}", imp.warnings);
-        let b = &imp.bodies[0];
-        assert!(b.closed, "{case}: open");
-        crate::validation::check_kept(&b.body).unwrap_or_else(|e| panic!("{case}: {e}"));
-        let m = measure(&b.body).unwrap();
-        assert!(rel(m.volume, 6000.0) < 1e-9, "{case}: volume {}", m.volume);
-        assert_eq!(m.faces, 6, "{case}");
+        for split in [1.26e-3, 1.283e-6] {
+            let case = format!("knots (0, {span}), micro edge {split} mm");
+            let imp = step_import(&bezier_block(span, split)).unwrap_or_else(|e| panic!("{case}: {e}"));
+            assert_eq!(imp.bodies.len(), 1, "{case}: {:?}", imp.warnings);
+            let b = &imp.bodies[0];
+            assert!(b.closed, "{case}: open");
+            crate::validation::check_kept(&b.body).unwrap_or_else(|e| panic!("{case}: {e}"));
+            let m = measure(&b.body).unwrap();
+            assert!(rel(m.volume, 6000.0) < 1e-9, "{case}: volume {}", m.volume);
+            assert_eq!(m.faces, 6, "{case}");
+        }
     }
-    // At 1.283 nm the micro edge lies on [0, 6.549e-15], below SMLib's knot resolution (1e-12):
-    // the solid is refused with that interval named, not taken as a body SMLib's check fails.
-    let e = step_import(&bezier_block("1.020781457822E-07", 1.283e-6)).map(|i| i.bodies.len()).unwrap_err().to_string();
-    assert!(e.contains("no longer than SMLib's knot resolution (1e-12)"), "{e}");
 }
 
 /// [`bezier_block`] (split at 1 µm) with its first edge's curve, which the micro edge and the
@@ -5609,4 +5610,54 @@ fn a_cap_whose_rim_is_one_closed_edge_measures_its_whole_volume() {
     let text = e.solid(&[cap, base]);
     // The hemisphere: 2 pi R^3 / 3.
     assert_closed_solid(&text, 2, 2.0 * std::f64::consts::PI * 100.0_f64.powi(3) / 3.0);
+}
+
+/// A cylinder (radius 2, height 3) whose top is one circle starting at angle 0 and whose bottom is
+/// four quarter arcs starting `shift` radians on from it, as a file written to its own rounding
+/// has them. The side face winds round its axis, so a seam is added between the two start vertices.
+fn cylinder_with_bottom_vertices_shifted(shift: f64) -> String {
+    let (r, h) = (2.0_f64, 3.0_f64);
+    let f = |x: f64| format!("{x:.17E}");
+    let mut t = String::from(HEAD);
+    t += "#10=CARTESIAN_POINT('',(0.,0.,0.));\n#11=CARTESIAN_POINT('',(0.,0.,3.));\n#12=DIRECTION('',(0.,0.,1.));\n#13=DIRECTION('',(1.,0.,0.));\n";
+    t += "#14=AXIS2_PLACEMENT_3D('',#10,#12,#13);\n#15=AXIS2_PLACEMENT_3D('',#11,#12,#13);\n";
+    t += &format!("#16=CYLINDRICAL_SURFACE('',#14,{});\n#17=PLANE('',#14);\n#18=PLANE('',#15);\n", f(r));
+    // The top's one vertex, then the bottom's four.
+    t += &format!("#20=CARTESIAN_POINT('',({},0.,{}));\n#21=VERTEX_POINT('',#20);\n", f(r), f(h));
+    t += &format!("#22=CIRCLE('',#15,{});\n#23=EDGE_CURVE('',#21,#21,#22,.T.);\n", f(r));
+    for k in 0..4 {
+        let a = shift + f64::from(k) * std::f64::consts::FRAC_PI_2;
+        t += &format!("#{}=CARTESIAN_POINT('',({},{},0.));\n#{}=VERTEX_POINT('',#{});\n", 30 + k, f(r * a.cos()), f(r * a.sin()), 40 + k, 30 + k);
+        t += &format!("#{}=CIRCLE('',#14,{});\n#{}=EDGE_CURVE('',#{},#{},#{},.T.);\n", 50 + k, f(r), 60 + k, 40 + k, 40 + (k + 1) % 4, 50 + k);
+    }
+    let bottom = |sense: &str| (0..4).map(|k| format!("#{}=ORIENTED_EDGE('',*,*,#{},{});\n", 70 + k, 60 + k, sense)).collect::<String>();
+    t += "#80=ORIENTED_EDGE('',*,*,#23,.F.);\n#81=EDGE_LOOP('',(#80));\n#82=FACE_OUTER_BOUND('',#81,.T.);\n";
+    t += &bottom(".T.");
+    t += "#83=EDGE_LOOP('',(#70,#71,#72,#73));\n#84=FACE_BOUND('',#83,.T.);\n#85=ADVANCED_FACE('',(#82,#84),#16,.T.);\n";
+    t += "#86=ORIENTED_EDGE('',*,*,#23,.T.);\n#87=EDGE_LOOP('',(#86));\n#88=FACE_OUTER_BOUND('',#87,.T.);\n#89=ADVANCED_FACE('',(#88),#18,.T.);\n";
+    t += "#90=ORIENTED_EDGE('',*,*,#63,.F.);\n#91=ORIENTED_EDGE('',*,*,#62,.F.);\n#92=ORIENTED_EDGE('',*,*,#61,.F.);\n#93=ORIENTED_EDGE('',*,*,#60,.F.);\n";
+    t += "#94=EDGE_LOOP('',(#90,#91,#92,#93));\n#95=FACE_OUTER_BOUND('',#94,.T.);\n#96=ADVANCED_FACE('',(#95),#17,.F.);\n";
+    t += "#97=CLOSED_SHELL('',(#85,#89,#96));\n#98=MANIFOLD_SOLID_BREP('Cyl',#97);\n#99=SHAPE_REPRESENTATION('',(#98),#100);\n";
+    t += &context(100, "(LENGTH_UNIT()NAMED_UNIT(*)SI_UNIT(.MILLI.,.METRE.))");
+    t += TAIL;
+    t
+}
+
+/// A cylinder whose bottom circle's start vertices sit 7e-8 mm round the axis from the top
+/// circle's: the seam between them is the ruling through the top's vertex, and the bottom's
+/// vertex is put on it. Run between the two points, the seam slanted across the surface's seam by
+/// that hair, and SMLib's check failed the solid ("Face Near missing Seam"), so every boolean on
+/// it was refused (a salad fork from a public corpus did this).
+#[test]
+fn a_cylinder_whose_circles_start_a_hair_apart_gets_a_seam_that_passes_the_check() {
+    for shift in [0.0, 3.5e-8] {
+        let imp = step_import(&cylinder_with_bottom_vertices_shifted(shift)).unwrap();
+        assert_eq!(imp.bodies.len(), 1, "shift {shift}: {:?}", imp.warnings);
+        assert!(imp.bodies[0].closed, "shift {shift}");
+        assert!(!imp.warnings.iter().any(|w| w.contains("needs repair")), "shift {shift}: {:?}", imp.warnings);
+        let body = &imp.bodies[0].body;
+        assert_eq!(crate::validation::failing_check(body).unwrap().map(|c| c.to_string()), None, "shift {shift}");
+        let m = measure(body).unwrap();
+        assert!(rel(m.volume, 12.0 * std::f64::consts::PI) < 1e-6, "shift {shift}: volume {}", m.volume);
+    }
 }
