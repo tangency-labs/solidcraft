@@ -1189,6 +1189,11 @@ fn run_param_names_an_unknown_parameter_and_a_script_with_no_design() {
     let none = cli().arg("run").arg(scratch.script()).args(["--param", "width=30mm"]).arg("--save").arg(&bad_name).output().unwrap();
     assert!(!none.status.success() && !bad_name.exists());
     assert!(String::from_utf8_lossy(&none.stderr).contains("--param"), "{}", String::from_utf8_lossy(&none.stderr));
+    // A command script given as `--in` would run as it loads, before the override: refused, and
+    // nothing it would save is written.
+    let as_in = cli().arg("run").arg("--in").arg(scratch.script()).args(["--param", "width=30mm"]).arg("--save").arg(&bad_name).output().unwrap();
+    assert!(!as_in.status.success() && !bad_name.exists());
+    assert!(String::from_utf8_lossy(&as_in.stderr).contains("--param"), "{}", String::from_utf8_lossy(&as_in.stderr));
 }
 
 #[test]

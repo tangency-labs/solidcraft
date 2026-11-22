@@ -662,6 +662,8 @@ fn cmd_run(args: &[String]) -> Result<(), String> {
     let (mut s, results) = if want_results || timings {
         // Collect every command's result or time (scripts only), then process requested files too.
         let mut s = match base {
+            // A command script as `--in` runs as it loads, before any override could be set.
+            Some(b) if !overrides.is_empty() && is_script(b) => return Err(overrides_need_design("run")),
             Some(b) => {
                 let mut s = load_with(b, check, validation)?;
                 apply_overrides("run", &mut s, &overrides)?;
@@ -796,6 +798,8 @@ fn open_overriding(
 ) -> Result<Session, String> {
     let load = |p: &str| load_with(p, check, validation);
     match (base, path) {
+        // A command script as `--in` runs as it loads, before any override could be set.
+        (Some(b), _) if !overrides.is_empty() && is_script(b) => Err(overrides_need_design(cmd)),
         (Some(b), Some(p)) => {
             let mut s = load(b)?;
             apply_overrides(cmd, &mut s, overrides)?;
