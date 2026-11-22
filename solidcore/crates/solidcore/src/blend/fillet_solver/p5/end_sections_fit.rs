@@ -15,12 +15,15 @@
 //! in no body, is classified through [`RailClassificationContext::classify_free_curve`]
 //! (`SmFace::CurveOnClassify`). There is no recursion.
 
-use super::{RailClassificationContext, OP};
+use super::{
+    RailClassificationContext, LENT_CLASSIFICATION, OP, RAIL, RAIL_CURVE, RAIL_EDGE_USE, RAIL_FACE,
+};
 use crate::blend::fillet_geom::p1::{FilletBrep, FilletGeomType};
 use crate::blend::fillet_geom::p2::{srf_srf_intersection, SrfSrfOptions};
 use crate::blend::fillet_solver::p1::{
     test_manifold_tangent_rollover, FilletSolver, FilletSolverOps,
 };
+use crate::error::blend::SolverFailure;
 use crate::error::{EntityRef, Result, SolidError};
 use crate::geom::axis2_placement::Axis2Placement;
 use crate::geom::extent1d::Extent1d;
@@ -275,12 +278,11 @@ impl FilletSolver {
         context: &mut impl RailClassificationContext,
     ) -> Result<bool> {
         let mut fit = true;
-        let fil_eu = solver
-            .solver()
-            .edgeuse(0)?
-            .ok_or_else(|| SolidError::blend_missing(OP, "the solver's first edge use"))?;
+        let fil_eu = solver.solver().edgeuse(0)?.ok_or_else(|| {
+            SolidError::blend_solver(OP, SolverFailure::SolverEdgeUseMissing { index: 0 })
+        })?;
         let fil_edge = eu::edge(target, fil_eu)?
-            .ok_or_else(|| SolidError::blend_missing(OP, "the filleted edge use's edge"))?;
+            .ok_or_else(|| SolidError::blend_solver(OP, SolverFailure::EdgeUseWithoutEdge))?;
         // A sheet's edge bounds no material: no end section can run off its end face under
         // material, and there is no body to subtract an overflow from, so the corner trims
         // the fillet as it does any other (not the fork's, whose `IsConcaveEdge` fails there,
@@ -302,12 +304,23 @@ impl FilletSolver {
             let fillet_surface = fillets
                 .geom(id)?
                 .fillet_surface(None)?
-                .ok_or_else(|| SolidError::blend_missing(OP, "the fillet surface"))?
+                .ok_or_else(|| {
+                    SolidError::blend_null_defect(
+                        OP,
+                        "a default fillet geometry has no fillet surface after its solve: the \
+                         solve traces a surface for every default geometry, and the executive \
+                         asks whether the end sections fit only after the solve succeeds",
+                    )
+                })?
                 .clone();
             let (start, end) = edge::start_end_vertices(target, fil_edge)?;
             for v in [start, end] {
-                let v =
-                    v.ok_or_else(|| SolidError::blend_missing(OP, "the filleted edge's vertex"))?;
+                let v = v.ok_or_else(|| {
+                    SolidError::blend_solver(
+                        OP,
+                        SolverFailure::EdgeWithoutVertex { edge: fil_edge },
+                    )
+                })?;
                 let corner = context.corner_of_vertex(v)?;
                 let vertex_edges = vertex::edges(target, v, None)?;
                 // the fork's IsEndOnEndFace() (53c47b8; WR-697): the Nx1 corner pinned
@@ -328,21 +341,21 @@ impl FilletSolver {
                     if !both {
                         break;
                     }
-                    let rail = fillets.geom(id)?.rail(ii).ok_or_else(|| {
-                        SolidError::blend_missing(OP, "the fillet geometry's rail")
-                    })?;
+                    let rail = fillets
+                        .geom(id)?
+                        .rail(ii)
+                        .ok_or_else(|| SolidError::blend_null_defect(OP, RAIL))?;
                     let curve = edge::curve(fillets.brep(), rail)?
-                        .ok_or_else(|| SolidError::blend_missing(OP, "the rail's curve"))?
+                        .ok_or_else(|| SolidError::blend_null_defect(OP, RAIL_CURVE))?
                         .clone();
                     let face = fillets
                         .fillet_edge(rail)?
                         .original_face()
-                        .ok_or_else(|| SolidError::blend_missing(OP, "the rail's original face"))?;
-                    let primary = eu::primary_edgeuse(fillets.brep(), rail)?.ok_or_else(|| {
-                        SolidError::blend_missing(OP, "the rail's primary edge use")
-                    })?;
+                        .ok_or_else(|| SolidError::blend_null_defect(OP, RAIL_FACE))?;
+                    let primary = eu::primary_edgeuse(fillets.brep(), rail)?
+                        .ok_or_else(|| SolidError::blend_null_defect(OP, RAIL_EDGE_USE))?;
                     let mate = eu::mate(fillets.brep(), primary)?
-                        .ok_or_else(|| SolidError::blend_missing(OP, "the rail edge use's mate"))?;
+                        .ok_or_else(|| SolidError::blend_null_defect(OP, RAIL_EDGE_USE))?;
                     let mut side = None;
                     for &e in &vertex_edges {
                         let faces = edge::faces(target, e, None)?;
@@ -397,9 +410,8 @@ impl FilletSolver {
                         .map(|cc| cc.intervals().to_vec());
                     fillets.fillet_edge_mut(rail)?.curve_class = attached;
                     classified?;
-                    let intervals = intervals.ok_or_else(|| {
-                        SolidError::blend_missing(OP, "the rail's curve classification")
-                    })?;
+                    let intervals = intervals
+                        .ok_or_else(|| SolidError::blend_null_defect(OP, LENT_CLASSIFICATION))?;
                     let mut nearest = BIG_DOUBLE;
                     for ivl in &intervals {
                         for (pc, t) in [
@@ -512,9 +524,13 @@ impl FilletSolver {
                     ang_tol,
                     SrfSrfOptions::default(),
                 )?;
-                let section = curves
-                    .curve_3d
-                    .ok_or_else(|| SolidError::blend_missing(OP, "the end section's 3D curve"))?;
+                let section = curves.curve_3d.ok_or_else(|| {
+                    SolidError::blend_null_defect(
+                        OP,
+                        "the end section's intersection succeeded without a 3D curve: \
+                             `srf_srf_intersection` returns its 3D curve on every success",
+                    )
+                })?;
                 // the section from one crossing to the other (the intersection may run
                 // on past them)
                 let mut ends = [0.0; 2];
@@ -528,10 +544,19 @@ impl FilletSolver {
                         None,
                         SolverOperation::Minimize,
                     )?;
-                    if !dropped.success || dropped.distance > 10.0 * approx_tol {
-                        return Err(SolidError::blend_failed(
+                    if !dropped.success {
+                        return Err(SolidError::blend_solver(
                             OP,
-                            "the crossing does not drop onto the end section",
+                            SolverFailure::CrossingDoesNotDropOnEndSection,
+                        ));
+                    }
+                    if dropped.distance > 10.0 * approx_tol {
+                        return Err(SolidError::blend_solver(
+                            OP,
+                            SolverFailure::CrossingOffEndSection {
+                                distance: dropped.distance,
+                                limit: 10.0 * approx_tol,
+                            },
                         ));
                     }
                     *at = dropped.parameter;
@@ -578,9 +603,11 @@ impl FilletSolver {
                             continue;
                         };
                         let EntityRef::Edge(e) = o.target_entity()? else {
-                            return Err(SolidError::blend_missing(
+                            return Err(SolidError::blend_null_defect(
                                 OP,
-                                "the classification's side edge",
+                                "an edge point of the section's classification is on an entity \
+                                 that is not an edge: the classification marks a point as on \
+                                 an edge only with that edge as its object",
                             ));
                         };
                         if boundary_requires_cut(k, target, e, end_face, !concave, tangency_tol)? {

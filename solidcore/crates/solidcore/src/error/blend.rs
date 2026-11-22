@@ -719,6 +719,76 @@ pub enum SolverFailure {
     /// The two offset surfaces' normals at a tangent intersection point are parallel, so
     /// their cross product gives the curve no direction ([`ErrorKind::Degenerate`]).
     OffsetNormalsParallel,
+    /// An edge of the caller's body lacks a start or end vertex: the caller's input
+    /// ([`ErrorKind::InvalidInput`]); status `SM_ERR_NULL_POINTER`.
+    EdgeWithoutVertex {
+        /// The edge.
+        edge: crate::topology::EdgeId,
+    },
+    /// A vertex use of the caller's body has no vertex: the caller's input
+    /// ([`ErrorKind::InvalidInput`]); status `SM_ERR_NULL_POINTER`.
+    VertexUseWithoutVertex,
+    /// A rail's crossing of its side edge does not drop onto the end section (the
+    /// intersection of the fillet surface and the end face's surface): an empty search
+    /// ([`ErrorKind::NotFound`]).
+    CrossingDoesNotDropOnEndSection,
+    /// A rail's crossing of its side edge drops onto the end section `distance` away,
+    /// farther than `limit` (ten times the solver's 3D tolerance): not within tolerance
+    /// ([`ErrorKind::NotWithinTolerance`]).
+    CrossingOffEndSection {
+        /// The distance from the crossing to its foot on the end section.
+        distance: f64,
+        /// The largest distance accepted.
+        limit: f64,
+    },
+    /// The edge bounds no material (no use of it lies in a loop of a shell of a region
+    /// that is not a void, as a sheet's edge), so it is neither concave nor convex: a case
+    /// the concavity test does not handle ([`ErrorKind::Unsupported`]).
+    EdgeBoundsNoMaterial {
+        /// The edge.
+        edge: crate::topology::EdgeId,
+    },
+    /// The point drops onto no edge of the face that has a curve: an empty search
+    /// ([`ErrorKind::NotFound`]); status `SM_ERR_NULL_POINTER`.
+    PointDropsOnNoFaceEdge,
+    /// The rail's point where it leaves its face does not drop onto the filleted edge: an
+    /// empty search ([`ErrorKind::NotFound`]).
+    LeavePointDoesNotDropOnEdge,
+    /// The filleted edge's middle does not drop onto a rail that is nowhere on its face:
+    /// an empty search ([`ErrorKind::NotFound`]).
+    EdgeMiddleDoesNotDropOnRail,
+    /// The roll-over was given a rail with no curve classification: the caller's input
+    /// ([`ErrorKind::InvalidInput`]); status `SM_ERR_NULL_POINTER`.
+    RailNotClassified {
+        /// The rail, 0 or 1.
+        which: usize,
+    },
+    /// The closed roll-over needs the corner at rail 0's start vertex, and the caller's
+    /// fillet vertex there has none: the caller's input ([`ErrorKind::InvalidInput`]);
+    /// status `SM_ERR_NULL_POINTER`.
+    RolloverCornerMissing,
+    /// A closed rail runs off its face, and the corner at its start is not one closed
+    /// blend meeting itself (of type `corner_type`): the full roll-over handles only that
+    /// corner ([`ErrorKind::Unsupported`]).
+    ClosedBlendDoesNotMeetItself {
+        /// The corner's type.
+        corner_type: crate::blend::fillet_geom::p1::FilletCornerType,
+    },
+    /// The solve of the roll-over's corner vertex did not converge (the vertex is marked
+    /// so): no numbers are kept ([`ErrorKind::NotConverged`]).
+    CornerVertexNotConverged,
+    /// The rail rolls over side edge `edge`, which has no face beyond the rail's face (an
+    /// edge of a sheet's boundary): nothing to roll onto, a case the roll-over does not
+    /// handle ([`ErrorKind::Unsupported`]); status `SM_ERR_NULL_POINTER`.
+    RolloverHasNoFaceBeyond {
+        /// The side edge.
+        edge: crate::topology::EdgeId,
+    },
+    /// The last piece of the roll-over runs off its face over a corner of the body, as a
+    /// cliff it does not trim; the last piece is not split, so no vertex starts the
+    /// corner's support edge: a case the roll-over does not handle
+    /// ([`ErrorKind::Unsupported`]); status `SM_ERR_NULL_POINTER`.
+    CliffCornerOnLastPiece,
 }
 
 /// The analytic shape a fillet solver routine builds
@@ -774,16 +844,20 @@ impl SolverFailure {
             | Self::NoTracePoints
             | Self::NoCenterLineTraced
             | Self::SplitPointDoesNotDropOnRail { .. }
-            | Self::NeighbourPointsNotFound => ErrorKind::NotFound,
+            | Self::NeighbourPointsNotFound
+            | Self::CrossingDoesNotDropOnEndSection
+            | Self::PointDropsOnNoFaceEdge
+            | Self::LeavePointDoesNotDropOnEdge
+            | Self::EdgeMiddleDoesNotDropOnRail => ErrorKind::NotFound,
             Self::RailTangentZero { .. }
             | Self::OffsetNormalVanishes { .. }
             | Self::RadiusVanishes { .. }
             | Self::SweepAngleTooSmall { .. }
             | Self::EdgeEndOnAxis { .. }
             | Self::OffsetNormalsParallel => ErrorKind::Degenerate,
-            Self::PiecesTooFarApart { .. } | Self::TraceEndOffBall { .. } => {
-                ErrorKind::NotWithinTolerance
-            }
+            Self::PiecesTooFarApart { .. }
+            | Self::TraceEndOffBall { .. }
+            | Self::CrossingOffEndSection { .. } => ErrorKind::NotWithinTolerance,
             Self::GeneratorBuildsNoSurface
             | Self::BaseSolverMethod(_)
             | Self::AnalyticShapeDoesNotApply { .. }
@@ -795,8 +869,12 @@ impl SolverFailure {
             | Self::TangentRolloverUnhandled
             | Self::EdgeCurveNotBSpline { .. }
             | Self::BaseSurfaceNotBSpline
-            | Self::TraceTouchesBoundaryAgain => ErrorKind::Unsupported,
-            Self::TraceLoopLimit { .. } => ErrorKind::NotConverged,
+            | Self::TraceTouchesBoundaryAgain
+            | Self::EdgeBoundsNoMaterial { .. }
+            | Self::ClosedBlendDoesNotMeetItself { .. }
+            | Self::RolloverHasNoFaceBeyond { .. }
+            | Self::CliffCornerOnLastPiece => ErrorKind::Unsupported,
+            Self::TraceLoopLimit { .. } | Self::CornerVertexNotConverged => ErrorKind::NotConverged,
             Self::GnSideInputMissing { .. }
             | Self::ExtensionCornerMissing
             | Self::TooManySolverValues { .. }
@@ -806,7 +884,11 @@ impl SolverFailure {
             | Self::EdgeUseWithoutMate
             | Self::EdgeUseWithoutFace
             | Self::SolverEdgeUseMissing { .. }
-            | Self::EdgeUseWithoutEdge => ErrorKind::InvalidInput,
+            | Self::EdgeUseWithoutEdge
+            | Self::EdgeWithoutVertex { .. }
+            | Self::VertexUseWithoutVertex
+            | Self::RailNotClassified { .. }
+            | Self::RolloverCornerMissing => ErrorKind::InvalidInput,
             Self::JacobianNotLoaded
             | Self::SupportIntersectionFailed
             | Self::SurfaceCacheNotBuilt => ErrorKind::Failed,
@@ -830,7 +912,14 @@ impl SolverFailure {
             | Self::EdgeUseWithoutEdge
             | Self::EdgeCurveNotBSpline { .. }
             | Self::BaseSurfaceNotBSpline
-            | Self::NoCenterLineTraced => SM_ERR_NULL_POINTER,
+            | Self::NoCenterLineTraced
+            | Self::EdgeWithoutVertex { .. }
+            | Self::VertexUseWithoutVertex
+            | Self::PointDropsOnNoFaceEdge
+            | Self::RailNotClassified { .. }
+            | Self::RolloverCornerMissing
+            | Self::RolloverHasNoFaceBeyond { .. }
+            | Self::CliffCornerOnLastPiece => SM_ERR_NULL_POINTER,
             Self::CrossSectionPointNotFound { .. }
             | Self::RailTangentZero { .. }
             | Self::PiecesTooFarApart { .. }
@@ -869,7 +958,14 @@ impl SolverFailure {
             | Self::TraceTouchesBoundaryAgain
             | Self::SplitPointDoesNotDropOnRail { .. }
             | Self::NeighbourPointsNotFound
-            | Self::OffsetNormalsParallel => SM_ERR,
+            | Self::OffsetNormalsParallel
+            | Self::CrossingDoesNotDropOnEndSection
+            | Self::CrossingOffEndSection { .. }
+            | Self::EdgeBoundsNoMaterial { .. }
+            | Self::LeavePointDoesNotDropOnEdge
+            | Self::EdgeMiddleDoesNotDropOnRail
+            | Self::ClosedBlendDoesNotMeetItself { .. }
+            | Self::CornerVertexNotConverged => SM_ERR,
         }
     }
 }
@@ -1053,6 +1149,56 @@ impl core::fmt::Display for SolverFailure {
             }
             Self::OffsetNormalsParallel => f.write_str(
                 "the offset surfaces' normals are parallel at the tangent intersection point",
+            ),
+            Self::EdgeWithoutVertex { edge } => {
+                write!(f, "edge {} of the body lacks a vertex", edge.index())
+            }
+            Self::VertexUseWithoutVertex => f.write_str("a vertex use of the body has no vertex"),
+            Self::CrossingDoesNotDropOnEndSection => {
+                f.write_str("the rail's crossing does not drop onto the end section")
+            }
+            Self::CrossingOffEndSection { distance, limit } => write!(
+                f,
+                "the rail's crossing drops onto the end section {distance} away, farther than \
+                 {limit}"
+            ),
+            Self::EdgeBoundsNoMaterial { edge } => write!(
+                f,
+                "edge {} bounds no material, so it is neither concave nor convex",
+                edge.index()
+            ),
+            Self::PointDropsOnNoFaceEdge => f.write_str("the point drops onto no edge of the face"),
+            Self::LeavePointDoesNotDropOnEdge => f.write_str(
+                "the point where the rail leaves its face does not drop onto the filleted edge",
+            ),
+            Self::EdgeMiddleDoesNotDropOnRail => {
+                f.write_str("the filleted edge's middle does not drop onto the rail")
+            }
+            Self::RailNotClassified { which } => {
+                write!(
+                    f,
+                    "rail {which} of the roll-over has no curve classification"
+                )
+            }
+            Self::RolloverCornerMissing => {
+                f.write_str("the closed roll-over's start vertex has no corner")
+            }
+            Self::ClosedBlendDoesNotMeetItself { corner_type } => write!(
+                f,
+                "the corner of the closed roll-over ({corner_type:?}) is not one blend meeting \
+                 itself"
+            ),
+            Self::CornerVertexNotConverged => {
+                f.write_str("the solve of the roll-over's corner vertex did not converge")
+            }
+            Self::RolloverHasNoFaceBeyond { edge } => write!(
+                f,
+                "side edge {} has no face beyond the rail's face to roll onto",
+                edge.index()
+            ),
+            Self::CliffCornerOnLastPiece => f.write_str(
+                "the last piece of the roll-over runs over a corner, with no split vertex to \
+                 start the corner's support edge",
             ),
         }
     }
