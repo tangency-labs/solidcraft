@@ -69,19 +69,58 @@ fn loop_patch(s: &mut Session, p: &Value) -> Result<Value> {
         ends.push((first.start(), last.end()));
     }
     // Two boundaries are the two sides of a bridge, which do not meet; three or four run round a
-    // loop, so each has to end where the next begins.
+    // loop, so each has to end where the next begins (whichever way each was drawn).
     let scale = ends.iter().map(|(a, b)| a.dist(*b)).fold(1.0_f64, f64::max);
     let tol = scale * 1e-4 + 1e-9;
-    for i in 0..if curves.len() >= 3 { ends.len() } else { 0 } {
-        let next = (i + 1) % ends.len();
-        let (Some(end), Some(start)) = (ends.get(i).map(|e| e.1), ends.get(next).map(|e| e.0)) else {
+    if curves.len() >= 3 {
+        let (Some(&e0), Some(&e1)) = (ends.first(), ends.get(1)) else {
             return Err(bad(cmd, "a curve is missing its ends"));
         };
-        let gap = end.dist(start);
-        if gap > tol {
+        let d_b0_a1 = e0.1.dist(e1.0);
+        let d_b0_b1 = e0.1.dist(e1.1);
+        let d_a0_a1 = e0.0.dist(e1.0);
+        let d_a0_b1 = e0.0.dist(e1.1);
+
+        let min_d01 = d_b0_a1.min(d_b0_b1).min(d_a0_a1).min(d_a0_b1);
+        if min_d01 > tol {
             return Err(bad(
                 cmd,
-                format!("curve `{}` ends {gap:.4} mm from where `{}` starts: list the curves in loop order", curves[i], curves[next]),
+                format!("curve `{}` ends {min_d01:.4} mm from where `{}` starts: list the curves in loop order", curves[0], curves[1]),
+            ));
+        }
+
+        // Determine orientation of curve 0:
+        // p_start is the start vertex of curve 0, p_curr is the junction vertex with curve 1.
+        let (p_start, p_curr) = if d_b0_a1.min(d_b0_b1) <= d_a0_a1.min(d_a0_b1) { (e0.0, e0.1) } else { (e0.1, e0.0) };
+
+        // Determine the other endpoint of curve 1 (advancing along the loop):
+        let mut p_curr = if e1.0.dist(p_curr) <= e1.1.dist(p_curr) { e1.1 } else { e1.0 };
+
+        // Chain through remaining curves (from 2 up to curves.len() - 1):
+        for i in 2..ends.len() {
+            let Some(&ei) = ends.get(i) else {
+                return Err(bad(cmd, "a curve is missing its ends"));
+            };
+            let d_a = ei.0.dist(p_curr);
+            let d_b = ei.1.dist(p_curr);
+            let gap = d_a.min(d_b);
+            if gap > tol {
+                let prev = i - 1;
+                return Err(bad(
+                    cmd,
+                    format!("curve `{}` ends {gap:.4} mm from where `{}` starts: list the curves in loop order", curves[prev], curves[i]),
+                ));
+            }
+            p_curr = if d_a <= d_b { ei.1 } else { ei.0 };
+        }
+
+        // Closing check: the end of the last curve must meet p_start:
+        let gap = p_curr.dist(p_start);
+        if gap > tol {
+            let last = curves.len() - 1;
+            return Err(bad(
+                cmd,
+                format!("curve `{}` ends {gap:.4} mm from where `{}` starts: list the curves in loop order", curves[last], curves[0]),
             ));
         }
     }

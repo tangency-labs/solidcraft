@@ -10,17 +10,32 @@ use std::collections::HashSet;
 use solidcore_ops::pcurve::{SURFACE_GAP_MARGIN, TrimFace, Trims};
 use solidcore_record::brep::{self as b, Curve2, EdgeUseRef, Loop, OrientedEdge, OrientedFace, Region, Shell, Vertex};
 
-/// [`Trims`] by SMLib.
+/// [`Trims`] by SMLib, with #18166's proved raise: every caller, the repair of a face included.
 #[derive(Clone, Copy, Debug, Default)]
 pub struct SmlibTrims;
 
 impl Trims for SmlibTrims {
     fn trims(&self, face: &TrimFace<'_>) -> Result<Vec<Vec<Curve2>>, String> {
-        trims(face).map_err(|e| format!("SMLib pcurves: {e}"))
+        trims(face, false).map_err(|e| format!("SMLib pcurves: {e}"))
     }
 }
 
-fn trims(face: &TrimFace<'_>) -> Result<Vec<Vec<Curve2>>, String> {
+/// [`SmlibTrims`] of a file's translation: a file builds every trim of every face it reads,
+/// so its trims raise their edges by upstream's sampled distance, not a proved one, which
+/// cost many times the translation. A repair keeps [`SmlibTrims`]'s proved raise: it rebuilds
+/// one face, and #18166 fixed the tolerance growth of repeated refits.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct SmlibImportTrims;
+
+impl Trims for SmlibImportTrims {
+    fn trims(&self, face: &TrimFace<'_>) -> Result<Vec<Vec<Curve2>>, String> {
+        trims(face, true).map_err(|e| format!("SMLib pcurves: {e}"))
+    }
+}
+
+/// `sampled`: raise the trims' edges by upstream's sampled distance, as a file import asks
+/// ([`SmlibImportTrims`]); else by #18166's proved one ([`SmlibTrims`]).
+fn trims(face: &TrimFace<'_>, sampled: bool) -> Result<Vec<Vec<Curve2>>, String> {
     let (record, bare) = sheet(face)?;
     let mut arrays = crate::import::arrays_with_bare_uses(&record, &bare).map_err(|e| e.to_string())?;
     let import = |a: &crate::import::Arrays| crate::Brep::from_arrays(a).map_err(|e| e.to_string());
@@ -28,7 +43,11 @@ fn trims(face: &TrimFace<'_>) -> Result<Vec<Vec<Curve2>>, String> {
     if cover_gaps(&body, face, &bare, &mut arrays)? {
         body = import(&arrays)?;
     }
-    let (out, order) = body.to_native_ordered().map_err(|e| e.to_string())?;
+    let (out, order) = if sampled {
+        body.to_native_ordered_sampled_trims().map_err(|e| e.to_string())?
+    } else {
+        body.to_native_ordered().map_err(|e| e.to_string())?
+    };
     let [made] = out.faces.as_slice() else { return Err(format!("SMLib made {} faces of one", out.faces.len())) };
     let made_uses: Vec<&OrientedEdge> = made
         .loops
