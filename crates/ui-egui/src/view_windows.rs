@@ -761,6 +761,7 @@ fn close(app: &mut SolveApp, id: WindowId, toast: bool) -> Result<Vec<u64>, Stri
         return Err("sketch could not be finished".into());
     }
     let ids = app.docs.views.close_window(id).ok_or("no_such_window")?;
+    app.sketch_notices.close_window(app.session.uid, id);
     if toast {
         let tab = app.docs.active_tab();
         app.view_windows.returned = Some(Returned { tab, design: app.session.doc.name.clone(), window, expires: app.now + 8.0 });
@@ -1531,6 +1532,7 @@ fn window_content(app: &mut SolveApp, ui: &mut Ui, id: WindowId, chrome: Chrome,
         crate::viewport::show_host_controls(app, &mut controls, rect);
     }
     crate::view_tiles::focus_pressed(app);
+    crate::sketch_view::show_notice(app, ui);
     crate::view_tiles::placement_overlay(app, ui.ctx());
     app.resolve_fit(ui.ctx());
     documents::sync_linked_active(app);

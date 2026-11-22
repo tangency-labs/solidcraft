@@ -4023,7 +4023,7 @@ fn sheet_sketch_provider_extract_is_read_only_and_steps_one_sketch_at_a_time() {
     assert_eq!((s.drawing_scenes.sketch_solves, s.drawing_scenes.projections), (2, 0));
     assert!(Arc::ptr_eq(&doc, &s.doc) && Arc::ptr_eq(&model, &s.model.state()));
     assert_eq!((s.undo.len(), s.redo.len(), s.evaluations, s.revision), history);
-    assert!(s.model.is_stale() && s.active_sketch == Some(model_sketch));
+    assert!(s.active_sketch.is_none(), "starting the sheet sketch finished the model sketch before the extracts ran");
 }
 
 #[test]
