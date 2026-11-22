@@ -232,61 +232,84 @@ fn shown_component(components: &[solidcraft_engine::doc::Component], id: u64) ->
     0
 }
 
-/// The component folders of the Model Parameters list: each component's children in the
-/// design's order, and the components that hold a listed row themselves or below them. Built
-/// once per frame from the parent links, so drawing walks only the occupied branches.
-struct Folders {
-    children: std::collections::HashMap<u64, Vec<(u64, String)>>,
-    occupied: std::collections::HashSet<u64>,
-    /// The narrowest a row's name column is drawn (`model_group`).
-    name_floor: f32,
+/// One entry of the Model Parameters list, in the order it is drawn.
+#[derive(Debug, PartialEq)]
+enum Entry {
+    /// The model group at this index of the sections' groups.
+    Group(usize),
+    /// A component's folder, holding its own groups and then its child components' folders.
+    Folder { id: u64, name: String, entries: Vec<Entry> },
 }
 
-impl Folders {
-    fn new(components: &[solidcraft_engine::doc::Component], groups: &[(&str, Vec<&Row>)], name_floor: f32) -> Self {
-        let mut children: std::collections::HashMap<u64, Vec<(u64, String)>> = Default::default();
-        let mut parent: std::collections::HashMap<u64, u64> = Default::default();
-        for c in components.iter().filter(|c| c.id != 0 && c.id != c.parent) {
-            children.entry(c.parent).or_default().push((c.id, c.name.clone()));
-            parent.insert(c.id, c.parent);
+/// The order the Model Parameters list is drawn in (#20648). `group_components` is each group's
+/// component (0 = the top level) in listing order; `components` is every component as
+/// (id, parent, name) in the design's order. With `grouped` off the list is flat. Otherwise the
+/// top-level groups come first (so do groups whose component is not in the tree, so a row is
+/// never lost), then a folder per component with groups in it or below it, nested like the
+/// components, a component's own groups before its child folders.
+fn listing_order(group_components: &[u64], components: &[(u64, u64, &str)], grouped: bool) -> Vec<Entry> {
+    if !grouped {
+        return (0..group_components.len()).map(Entry::Group).collect();
+    }
+    let mut children: std::collections::HashMap<u64, Vec<(u64, &str)>> = Default::default();
+    for (id, parent, name) in components.iter().filter(|(id, parent, _)| *id != 0 && id != parent) {
+        children.entry(*parent).or_default().push((*id, *name));
+    }
+    let mut by_component: std::collections::HashMap<u64, Vec<usize>> = Default::default();
+    for (index, component) in group_components.iter().enumerate().filter(|(_, c)| **c != 0) {
+        by_component.entry(*component).or_default().push(index);
+    }
+    fn build(
+        parent: u64,
+        children: &std::collections::HashMap<u64, Vec<(u64, &str)>>,
+        by_component: &std::collections::HashMap<u64, Vec<usize>>,
+        seen: &mut std::collections::HashSet<u64>,
+    ) -> Vec<Entry> {
+        let mut folders = Vec::new();
+        for (id, name) in children.get(&parent).into_iter().flatten() {
+            // A component is visited once, so a damaged parent loop ends.
+            if !seen.insert(*id) {
+                continue;
+            }
+            let mut entries: Vec<Entry> = by_component.get(id).into_iter().flatten().map(|i| Entry::Group(*i)).collect();
+            entries.extend(build(*id, children, by_component, seen));
+            if !entries.is_empty() {
+                folders.push(Entry::Folder { id: *id, name: (*name).to_owned(), entries });
+            }
         }
-        let mut occupied: std::collections::HashSet<u64> = Default::default();
-        for id in groups.iter().filter_map(|(_, m)| m.first().map(|r| r.component)) {
-            // Each step up is a new component, so a walk is at most as long as the tree.
-            let mut at = id;
-            for _ in 0..=components.len() {
-                if at == 0 || !occupied.insert(at) {
-                    break;
+        folders
+    }
+    let folders = build(0, &children, &by_component, &mut Default::default());
+    fn placed(entries: &[Entry], into: &mut std::collections::HashSet<usize>) {
+        for entry in entries {
+            match entry {
+                Entry::Group(i) => {
+                    into.insert(*i);
                 }
-                at = parent.get(&at).copied().unwrap_or(0);
+                Entry::Folder { entries, .. } => placed(entries, into),
             }
         }
-        Folders { children, occupied, name_floor }
     }
+    let mut inside: std::collections::HashSet<usize> = Default::default();
+    placed(&folders, &mut inside);
+    let mut order: Vec<Entry> = (0..group_components.len()).filter(|i| !inside.contains(i)).map(Entry::Group).collect();
+    order.extend(folders);
+    order
 }
 
-/// The model groups of the components under `parent`, nested the way the components are. A
-/// component with no listed rows (and none below it) gets no folder.
-fn component_folders(
-    app: &mut SolveApp,
-    ui: &mut egui::Ui,
-    d: &mut ParamsDialog,
-    folders: &Folders,
-    parent: u64,
-    groups: &[(&str, Vec<&Row>)],
-    depth: usize,
-) {
-    let Some(children) = folders.children.get(&parent) else { return };
-    if depth > folders.children.len() {
-        return;
-    }
-    for (id, name) in children.iter().filter(|(id, _)| folders.occupied.contains(id)) {
-        ui_kit::section(ui, ("pcomponent", *id), name, true, |ui| {
-            for (group, members) in groups.iter().filter(|(_, m)| m.first().is_some_and(|r| r.component == *id)) {
-                model_group(app, ui, d, group, members, folders.name_floor);
+/// Draw `entries`: each group as a table, each folder as a section around its own entries.
+fn draw_entries(app: &mut SolveApp, ui: &mut egui::Ui, d: &mut ParamsDialog, entries: &[Entry], groups: &[(&str, Vec<&Row>)], name_floor: f32) {
+    for entry in entries {
+        match entry {
+            Entry::Group(i) => {
+                if let Some((group, members)) = groups.get(*i) {
+                    model_group(app, ui, d, group, members, name_floor);
+                }
             }
-            component_folders(app, ui, d, folders, *id, groups, depth + 1);
-        });
+            Entry::Folder { id, name, entries } => {
+                ui_kit::section(ui, ("pcomponent", *id), name, true, |ui| draw_entries(app, ui, d, entries, groups, name_floor));
+            }
+        }
     }
 }
 
@@ -473,17 +496,12 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
                             // Top-level features first, then a folder per component, nested like
                             // the component tree (#20648). Off in Preferences › Design, the list
                             // is flat in listing order, as before.
-                            if app.preferences.params_group_by_component {
-                                for (group, members) in groups.iter().filter(|(_, m)| m.first().is_none_or(|r| r.component == 0)) {
-                                    model_group(app, ui, &mut d, group, members, name_floor);
-                                }
-                                let folders = Folders::new(&app.session.doc.components, &groups, name_floor);
-                                component_folders(app, ui, &mut d, &folders, 0, &groups, 0);
-                            } else {
-                                for (group, members) in &groups {
-                                    model_group(app, ui, &mut d, group, members, name_floor);
-                                }
-                            }
+                            let order = {
+                                let components: Vec<_> = app.session.doc.components.iter().map(|c| (c.id, c.parent, c.name.as_str())).collect();
+                                let of_group: Vec<u64> = groups.iter().map(|(_, m)| m.first().map_or(0, |r| r.component)).collect();
+                                listing_order(&of_group, &components, app.preferences.params_group_by_component)
+                            };
+                            draw_entries(app, ui, &mut d, &order, &groups, name_floor);
                         });
                     });
                 });
@@ -2706,6 +2724,31 @@ mod tests {
         assert!(crate::scenario::handle_at(&format!("param:{last}")).is_some());
     }
 
+    /// #20648: the order the list is drawn in. Top level first, components in the design's order,
+    /// folders nested like the components, empty components skipped, flat when grouping is off.
+    #[test]
+    fn the_model_list_is_ordered_by_component() {
+        use super::Entry::{Folder, Group};
+        // Components: 1 Frame, 2 Lid, 3 Hinge (in Frame), 4 Empty, 5 Pin (in Hinge).
+        let components = [(1, 0, "Frame"), (2, 0, "Lid"), (3, 1, "Hinge"), (4, 0, "Empty"), (5, 3, "Pin")];
+        // Groups in listing order: Lid, Pin, top level, Frame, Frame.
+        let of_group = [2, 5, 0, 1, 1];
+        let folder = |id: u64, name: &str, entries| Folder { id, name: name.into(), entries };
+        assert_eq!(
+            listing_order(&of_group, &components, true),
+            vec![
+                Group(2),
+                folder(1, "Frame", vec![Group(3), Group(4), folder(3, "Hinge", vec![folder(5, "Pin", vec![Group(1)])])]),
+                folder(2, "Lid", vec![Group(0)]),
+            ]
+        );
+        assert_eq!(listing_order(&of_group, &components, false), (0..5).map(Group).collect::<Vec<_>>(), "flat when grouping is off");
+        assert_eq!(listing_order(&[], &components, true), vec![], "nothing listed, nothing drawn");
+        // A group whose component is unknown, or whose parents loop, is still drawn at the top.
+        let broken = [(1, 2, "A"), (2, 1, "B")];
+        assert_eq!(listing_order(&[1, 9, 0], &broken, true), vec![Group(0), Group(1), Group(2)]);
+    }
+
     /// #20648: model parameters sit under the component their feature belongs to: top-level
     /// features first, then a folder per component; a design without components stays flat.
     #[test]
@@ -2724,30 +2767,22 @@ mod tests {
             }
         }
         let mut h = crate::scenario::Harness::new();
-        // Tall enough that every group is on screen: an off-screen group is not drawn.
-        h.call("ui.resize", json!({"width": 1600, "height": 1400}));
         h.app.home.open = false;
         h.app.session = solidcraft_engine::Session::new(doc);
         // Grouping is opt-in (Preferences › Design).
         h.app.preferences.params_group_by_component = true;
         h.app.start("parameters.change");
         h.frames(5);
-        let y_of = |h: &crate::scenario::Harness, group: &str| {
-            let listed = &h.app.params.as_ref().unwrap().listed.as_ref().unwrap().1;
-            let row = listed.iter().find(|r| r.group == group).unwrap();
-            crate::scenario::handle_at(&format!("param:{}", row.name)).unwrap().y
-        };
         let listed = h.app.params.as_ref().unwrap().listed.as_ref().unwrap().1.clone();
-        let component = |group: &str| listed.iter().find(|r| r.group == group).unwrap().component;
-        assert_eq!((component("PlaneTop"), component("PlaneA"), component("PlaneB")), (0, a, b));
-        let (top, frame, lid) = (y_of(&h, "PlaneTop"), y_of(&h, "PlaneA"), y_of(&h, "PlaneB"));
-        assert!(top < frame && top < lid, "the top-level feature stays first: {top} {frame} {lid}");
-        assert!(frame < lid, "each component's rows follow the component order");
-        // Off (the default), the list is flat in listing order, as before.
-        h.app.preferences.params_group_by_component = false;
-        h.frames(3);
-        let (top, frame, lid) = (y_of(&h, "PlaneTop"), y_of(&h, "PlaneA"), y_of(&h, "PlaneB"));
-        assert!(lid < frame && frame < top, "flat, in listing order: {lid} {frame} {top}");
+        let row_of = |group: &str| listed.iter().find(|r| r.group == group).unwrap().clone();
+        assert_eq!((row_of("PlaneTop").component, row_of("PlaneA").component, row_of("PlaneB").component), (0, a, b));
+        // A group off the dialog's visible part is not drawn, so scroll the body to the end: the
+        // last folder's row must then be drawn, inside the dialog.
+        let viewport = crate::scenario::rect_of("dialog:body:viewport").unwrap();
+        h.call("ui.scroll", json!({"x":viewport.center().x,"y":viewport.center().y,"delta":-100_000}));
+        h.frames(10);
+        let at = crate::scenario::handle_at(&format!("param:{}", row_of("PlaneB").name)).unwrap();
+        assert!(crate::scenario::rect_of("dialog:body:viewport").unwrap().contains(at), "a row inside a component folder is drawn");
         h.app.preferences.params_group_by_component = true;
 
         let mut flat = Document::default();
