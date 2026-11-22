@@ -1518,7 +1518,11 @@ fn edit_sketch(s: &mut Session, p: &Value) -> Result<Value> {
         s.active_component = component;
         s.active_occurrence_path = (!path.is_empty()).then_some(path);
     }
-    if s.active_sketch != Some(id) || s.sketch_entry.as_ref().is_none_or(|entry| entry.sketch != id) {
+    // An entry copied from a longer history than this session has (a worker's scratch copy starts with
+    // none) can never lead back, so opening the sketch again takes a fresh one, as a scratch session did
+    // before it copied the entry: Cancel Sketch then works after a plugin's or agent's Edit Sketch.
+    let outlives_history = s.sketch_entry.as_ref().is_some_and(|entry| entry.sketch == id && entry.undo_len > s.undo.len());
+    if s.active_sketch != Some(id) || outlives_history || s.sketch_entry.as_ref().is_none_or(|entry| entry.sketch != id) {
         let restore_marker = match requested {
             Some(crate::schema::sketch::EditMarker::Restore(marker)) => Some(marker),
             Some(crate::schema::sketch::EditMarker::InPlace) => None,
