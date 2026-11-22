@@ -1579,7 +1579,7 @@ fn c2_trace_to_edge_ends(
             &crate::curve::curve::p1::GlobalPointSolveOptions::default(),
         )?;
         let sol = sols
-            .first()
+            .get(0)
             .ok_or_else(|| fail(SolverFailure::NoSingleCurveFoot { count: 0 }))?;
         let end_param = if end == 0 { st.ivl.min() } else { st.ivl.max() };
         let at = st.edge_curve.evaluate_point(cx.k, sol.start.param(0)?)?;
@@ -4484,7 +4484,7 @@ mod tests_c6 {
             e,
             SolidError::blend_solver(
                 "blend::fillet_solver::p1",
-                crate::error::blend::SolverFailure::BaseSolverMethod(
+                SolverFailure::BaseSolverMethod(
                     crate::error::blend::BaseSolverMethod::SetupOffsetValues
                 )
             )
