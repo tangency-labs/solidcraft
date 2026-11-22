@@ -5456,6 +5456,138 @@ fn recipe_of(tools: &[Traced]) -> Option<u64> {
 /// more complex body for every tool (#261, #368). Tools that may meet are left as they are.
 /// More than [`MAX_JOINED_TOOLS`] tools are joined in even groups, one tool for each (#8765).
 fn clear_tools_as_one(tools: Vec<Traced>) -> Result<Vec<Traced>> {
+    // Counted as before: the tools a cut of eight or more is made with.
+    #[cfg(test)]
+    let many = tools.len() >= 8;
+    let out = clear_tools_in_layers(tools)?;
+    #[cfg(test)]
+    if many {
+        cost_tests::count(|c| c.cut_tools += out.len());
+    }
+    Ok(out)
+}
+
+/// [`clear_tools_as_one`]'s work.
+fn clear_tools_in_layers(tools: Vec<Traced>) -> Result<Vec<Traced>> {
+    // Tools of which some meet (each copy of a countersunk hole is its cone and its bore, which
+    // overlap) are cut in layers of tools apart from each other, each layer in one go (#2358).
+    // Only when they cannot all be joined as they are: tools whose boxes meet may still be apart
+    // (copies of a hole close together on a circle, #9007), and are then cut in one go.
+    let limit = joined_tools_limit().max(1);
+    if let Some((layers, meets)) = (limit >= 8).then(|| apart_layers(&tools)).flatten() {
+        // Two tools known to meet cannot be joined as they are. Otherwise the groups are joined as
+        // they are, until one cannot be: then the tools are layered.
+        if !meets {
+            let size = tools.len().div_ceil(tools.len().div_ceil(limit));
+            let mut joined = Vec::new();
+            let mut all = true;
+            for group in tools.chunks(size) {
+                let one = clear_group_as_one(group.to_vec())?;
+                if one.len() != 1 {
+                    all = false;
+                    break;
+                }
+                joined.extend(one);
+            }
+            if all {
+                return Ok(joined);
+            }
+        }
+        let mut slots: Vec<Option<Traced>> = tools.into_iter().map(Some).collect();
+        let mut out = Vec::new();
+        for layer in layers {
+            let group: Vec<Traced> = layer.iter().filter_map(|&i| slots.get_mut(i).and_then(Option::take)).collect();
+            out.extend(clear_ungrouped_as_one(group)?);
+        }
+        return Ok(out);
+    }
+    clear_ungrouped_as_one(tools)
+}
+
+/// The most pairs of tools whose boxes meet that [`apart_layers`] sorts into layers.
+const MAX_LAYERED_TOOL_PAIRS: usize = 16_384;
+
+/// `tools` sorted into layers of tools whose exact boxes, grown as [`more::boxes_apart`] grows
+/// them, meet no other's in the layer, in the order they are to be cut: the layers in turn, each
+/// in the tools' own order. A tool's layer comes after the layer of each tool before it whose box
+/// it meets, so tools that may overlap are still cut in the order they were given, and only
+/// tools that cannot meet change places, which leaves what is cut as it was. `None` where that
+/// does not help: no two boxes meet (the tools are joined as they are), no layer has enough
+/// tools to join, a tool has no exact box, a mesh tool, or too many pairs meet. With the layers,
+/// whether two of the tools are known to meet: a point inside both, the middle of where their
+/// boxes meet (a countersink's cone and its bore share their axis, and the middle lies on it).
+fn apart_layers(tools: &[Traced]) -> Option<(Vec<Vec<usize>>, bool)> {
+    if tools.len() < 16 || tools.len() > 10_000 || tools.iter().any(|t| t.body.is_mesh()) {
+        return None;
+    }
+    let boxes = tools.iter().map(|t| more::exact_box(&t.body)).collect::<Option<Vec<_>>>()?;
+    let mut order: Vec<usize> = (0..boxes.len()).collect();
+    order.sort_by(|&i, &j| boxes.get(i).map_or(0.0, |b| b.min.x).total_cmp(&boxes.get(j).map_or(0.0, |b| b.min.x)));
+    // For each tool, the tools before it whose boxes meet its own.
+    let mut before: Vec<Vec<usize>> = vec![Vec::new(); boxes.len()];
+    let mut pairs = 0usize;
+    for (k, &i) in order.iter().enumerate() {
+        let a = boxes.get(i)?;
+        for &j in order.iter().skip(k + 1) {
+            let b = boxes.get(j)?;
+            if b.min.x > a.max.x {
+                break;
+            }
+            if more::boxes_apart(&Some(*a), &Some(*b)) {
+                continue;
+            }
+            pairs += 1;
+            if pairs > MAX_LAYERED_TOOL_PAIRS {
+                return None;
+            }
+            before.get_mut(i.max(j))?.push(i.min(j));
+        }
+    }
+    if pairs == 0 {
+        return None;
+    }
+    let mut level = vec![0usize; boxes.len()];
+    for j in 0..boxes.len() {
+        let l = before.get(j)?.iter().filter_map(|&i| level.get(i)).map(|l| l + 1).max().unwrap_or(0);
+        *level.get_mut(j)? = l;
+    }
+    let count = level.iter().max().map_or(1, |m| m + 1);
+    let mut layers: Vec<Vec<usize>> = vec![Vec::new(); count];
+    for (i, l) in level.iter().enumerate() {
+        layers.get_mut(*l)?.push(i);
+    }
+    // Only worth it when a layer is as many tools as a joined tool is made of.
+    if !layers.iter().any(|l| l.len() >= 8) {
+        return None;
+    }
+    // A few pairs are enough to tell: tools that meet are usually each copy's own.
+    let (mut meets, mut tested) = (false, 0usize);
+    'pairs: for (j, earlier) in before.iter().enumerate() {
+        for &i in earlier {
+            if tested == MEETING_PAIRS_TESTED {
+                break 'pairs;
+            }
+            tested += 1;
+            let (Some(a), Some(b), Some(ta), Some(tb)) = (boxes.get(i), boxes.get(j), tools.get(i), tools.get(j)) else { continue };
+            let lo = Vec3::new(a.min.x.max(b.min.x), a.min.y.max(b.min.y), a.min.z.max(b.min.z));
+            let hi = Vec3::new(a.max.x.min(b.max.x), a.max.y.min(b.max.y), a.max.z.min(b.max.z));
+            let mid = (lo + hi) * 0.5;
+            let inside = |t: &Traced| matches!(t.body.classify_point(mid), Ok(kernel::PointClass::Inside));
+            if inside(ta) && inside(tb) {
+                meets = true;
+                break 'pairs;
+            }
+        }
+    }
+    Some((layers, meets))
+}
+
+/// The most pairs of tools [`apart_layers`] tests for a point inside both.
+const MEETING_PAIRS_TESTED: usize = 8;
+
+/// [`clear_tools_as_one`] for tools not sorted into layers: joined in even groups of at most
+/// [`MAX_JOINED_TOOLS`].
+fn clear_ungrouped_as_one(tools: Vec<Traced>) -> Result<Vec<Traced>> {
     let limit = joined_tools_limit().max(1);
     if tools.len() <= limit {
         return clear_group_as_one(tools);
@@ -5487,8 +5619,6 @@ fn clear_group_as_one(tools: Vec<Traced>) -> Result<Vec<Traced>> {
         None if tools_clearly_apart(&bodies) => kernel::join_apart(&bodies).ok().flatten(),
         None => None,
     };
-    #[cfg(test)]
-    cost_tests::count(|c| c.cut_tools += one.as_ref().map_or(tools.len(), |_| 1));
     Ok(match one {
         // Each piece's faces keep the names of the tool it is.
         Some(one) => {
@@ -7631,6 +7761,65 @@ fn hole_axis_size(st: &ModelState, position: &Vec3, dir: Vec3) -> f64 {
 /// tools' run-on (to half the gap, never under 0.1 mm); closer material is cut out of the tools.
 const RUN_ON_CLEAR: f64 = 0.2;
 
+/// The fewest copies of a hole for which [`hole_tools_as_one`] joins its tools: as many as a cut
+/// joins into one tool ([`clear_tools_as_one`]), below which each tool is cut on its own anyway.
+const HOLE_COPIES_AS_ONE: usize = 8;
+
+/// A hole's `tools` (a countersink's cone and its bore, a counterbore's pocket and its bore) as
+/// one body, their union, when the kernel makes one solid of them; else as they are. They are
+/// cut from the same material one after the other, so their union cuts what they cut: the copies
+/// of a hole made of several tools, which overlap, were cut tool by tool, two booleans a copy
+/// each dearer than the last (#2358). Each face of the union keeps the name of the tool it is
+/// of. Not where a cut is made tool by tool ([`joined_tools_limit`] under 8).
+fn hole_tools_as_one(tools: Vec<Traced>) -> Vec<Traced> {
+    if tools.len() < 2 || joined_tools_limit() < 8 || tools.iter().any(|t| t.body.is_mesh() || t.body.is_surface()) {
+        return tools;
+    }
+    let mut parts = tools.iter();
+    let Some(first) = parts.next() else { return tools };
+    let mut one = first.clone();
+    for t in parts {
+        match kernel::boolean(&one.body, &t.body, BoolOp::Union) {
+            Ok(Some(u)) => one = Traced::step(u, &[&one, t]),
+            _ => return tools,
+        }
+    }
+    // One solid, as the tools were: a union in pieces (tools that do not meet) is left as it was.
+    if !one.body.lumps().is_ok_and(|l| l.len() == 1) {
+        return tools;
+    }
+    #[cfg(test)]
+    cost_tests::count(|c| c.joined_hole_tools += 1);
+    vec![one]
+}
+
+/// Measures the exact box of each of a pattern's cut `tools` before they are moved to the copies:
+/// a copy moved by a translation then has the box moved with it, and a cut's copies are each
+/// asked for theirs (whether it takes material, whether the copies are apart). Best effort: a
+/// tool the kernel cannot measure is measured, or not, when asked, as before.
+fn measure_before_moving(tools: &[Traced]) {
+    for t in tools.iter().filter(|t| !t.body.is_mesh()) {
+        let _ = t.body.exact_bounds();
+    }
+}
+
+/// The box of the solid cylinder of radius `radius` on the disc about `base` square to the unit
+/// `axis`, running `height` along it, grown as [`more::exact_box`] grows a body's (by twice its
+/// tolerance), here by more than any tolerance a tool's column takes: everything the column's
+/// exact box holds, without building the column. `None` for a degenerate cylinder.
+fn cylinder_box(base: Vec3, axis: Vec3, radius: f64, height: f64) -> Option<solidcraft_geom::Aabb3> {
+    if !(radius.is_finite() && height.is_finite() && radius >= 0.0 && base.is_finite() && axis.is_finite()) {
+        return None;
+    }
+    // Across axis i the disc reaches `radius` times the sine of the angle between the axis and
+    // that direction.
+    let across = |a: f64| radius * (1.0 - a * a).max(0.0).sqrt();
+    let r = Vec3::new(across(axis.x), across(axis.y), across(axis.z));
+    let top = base + axis * height;
+    let b: solidcraft_geom::Aabb3 = [base - r, base + r, top - r, top + r].into_iter().collect();
+    Some(b.inflated(1e-4 + 1e-6 * (radius + height.abs())))
+}
+
 /// How far a hole's tools run on above its entry face, and the material there they must leave
 /// (#10695). Each tool starts `top` above the face so that it passes cleanly through it, but the
 /// material within `reach` of the axis there is not the hole's to cut: a body floating over the
@@ -7645,9 +7834,15 @@ const RUN_ON_CLEAR: f64 = 0.2;
 /// effort: where the kernel cannot answer for a body (or for the column), that body keeps the
 /// run-on in its way as before, so a hole that drilled before never fails over a neighbour.
 fn hole_run_on(st: &ModelState, plane: &Plane, reach: f64, top: f64) -> (f64, Vec<(Body, f64)>) {
-    let disc = Region2 { outer: solidcore_record::Loop2::circle_from(Vec2::ZERO, reach, 0.0), holes: vec![] };
-    let Some(column) = kernel::extrude(plane, &[disc], 0.0, top).ok().and_then(|mut c| c.pop()) else { return (top, Vec::new()) };
-    let column_box = more::exact_box(&column);
+    // The column itself is built only for a body whose box meets the column's: each copy of a
+    // patterned hole built one, at about 60 ms, only to find its box apart from the plate's
+    // (#2358). Its box is the cylinder's own, grown by more than the tolerance its exact box is.
+    let column_box = cylinder_box(plane.origin, plane.normal(), reach, top);
+    let column = std::cell::OnceCell::new();
+    let build_column = || {
+        let disc = Region2 { outer: solidcore_record::Loop2::circle_from(Vec2::ZERO, reach, 0.0), holes: vec![] };
+        kernel::extrude(plane, &[disc], 0.0, top).ok().and_then(|mut c| c.pop())
+    };
     let (o, n, x) = (plane.origin, plane.normal(), plane.x);
     let y = n.cross(x);
     // Into the hole's frame: x and y across the axis, z the height above the face.
@@ -7680,9 +7875,12 @@ fn hole_run_on(st: &ModelState, plane: &Plane, reach: f64, top: f64) -> (f64, Ve
         if kernel::transform_matrix(&b.body, frame).and_then(|t| t.exact_bounds()).is_ok_and(|t| t.max.z <= 2.0 * slack) {
             continue;
         }
+        // A column the kernel cannot build leaves the run-on as it is, in every body's way, as
+        // before.
+        let Some(column) = column.get_or_init(build_column) else { return (top, Vec::new()) };
         // The piece of the body in the column and how high its lowest point is, or nothing.
         let found = || -> Result<Option<(Body, f64)>> {
-            let Some(piece) = kernel::boolean(&b.body, &column, BoolOp::Intersect)? else { return Ok(None) };
+            let Some(piece) = kernel::boolean(&b.body, column, BoolOp::Intersect)? else { return Ok(None) };
             // The body being drilled, around the entry point: drilled as before. The entry point
             // lies on the face, or just inside the body under a curved face's rim (a counterbore
             // on a round bar measures from the rim's lowest point): the piece over it is the
@@ -10457,6 +10655,7 @@ fn count_copy_misses(
     f: &Feature,
     targets: &[String],
     copies: &[Traced],
+    sources: &[Option<(Body, Mat)>],
     instances: &[std::ops::Range<usize>],
     axes: &[Vec<(Vec3, Vec3)>],
 ) -> (usize, usize) {
@@ -10465,12 +10664,140 @@ fn count_copy_misses(
     let (mut missed, mut total) = (0, 0);
     // The copies the point test cannot place: they are asked about together.
     let mut unsure: Vec<&[Traced]> = Vec::new();
-    for (k, tools) in instances.iter().enumerate().filter_map(|(k, i)| Some((k, copies.get(i.clone())?))) {
-        total += 1;
-        let lines = axes.get(k).map_or(&[][..], Vec::as_slice);
-        let takes = tools.iter().any(|t| {
+    let copied: Vec<(usize, &[Traced])> = instances.iter().enumerate().filter_map(|(k, i)| Some((k, copies.get(i.clone())?))).collect();
+    // Where each copy's tools start in `copies` (and `sources`).
+    let starts: Vec<usize> = instances.iter().filter(|i| copies.get((*i).clone()).is_some()).map(|i| i.start).collect();
+    // The points each copy's test asks a target about first, all asked in one call a target: the
+    // kernel makes the target's copy and its search structures for each call, and a pattern of
+    // many copies asked a call a copy (#2358). A copy with one of them in the target's material
+    // takes material, as its own test would have found first; the others are tested as before.
+    // The first line of each copy's first tool on the first target, where that tool was moved
+    // from another: the points of all of them are asked of the tool they were moved from in one
+    // call, moved back (#2358). Each of those calls made the copy's own tool into the kernel's
+    // form and its search structures, one copy at a time.
+    let mut batched: Vec<Option<Vec<Vec3>>> = vec![None; copied.len()];
+    let mut by_source: Vec<(&Body, Vec<(usize, Vec<Vec3>)>)> = Vec::new();
+    if let Some((b, target_box)) = scope.first() {
+        for (c, ((k, tools), start)) in copied.iter().zip(&starts).enumerate() {
+            let (Some(t), Some(Some((body, _)))) = (tools.first(), sources.get(*start)) else { continue };
+            let lines = axes.get(*k).map_or(&[][..], Vec::as_slice);
             let tool_box = (!t.body.is_mesh()).then(|| more::exact_box(&t.body)).flatten();
-            scope.iter().any(|(b, target_box)| shares_material(&b.body, target_box.as_ref(), &t.body, tool_box.as_ref(), lines))
+            let Some(line) = probe_lines(&b.body, target_box.as_ref(), &t.body, tool_box.as_ref(), lines).and_then(|l| l.first().copied()) else {
+                continue;
+            };
+            let points = line_samples(line);
+            let at = match by_source.iter().position(|(s, _)| s.solid_id() == body.solid_id()) {
+                Some(at) => at,
+                None => {
+                    by_source.push((body, Vec::new()));
+                    by_source.len() - 1
+                }
+            };
+            if let Some((_, asked)) = by_source.get_mut(at) {
+                asked.push((c, points));
+            }
+        }
+    }
+    for (body, asked) in &by_source {
+        // Each copy's own inverse moves its points back onto the tool.
+        let back: Vec<Vec3> = asked
+            .iter()
+            .flat_map(|(c, points)| {
+                let inverse = starts.get(*c).and_then(|s| sources.get(*s)).and_then(Option::as_ref).map(|(_, m)| *m);
+                points.iter().map(move |p| inverse.map_or(*p, |m| crate::apply_point(&m, *p)))
+            })
+            .collect();
+        // The copies of one tool mostly ask about the same points of it: each is asked once. Points
+        // within a billionth of a millimetre of each other count as one, far inside the kernel's
+        // tolerance, within which it answers alike.
+        let key = |p: &Vec3| [p.x, p.y, p.z].map(|v| (v * 1e9).round() as i64);
+        let mut distinct: Vec<Vec3> = Vec::new();
+        let mut index: std::collections::HashMap<[i64; 3], usize> = std::collections::HashMap::new();
+        let slots: Vec<usize> = back
+            .iter()
+            .map(|p| {
+                // A point not finite (or too far out to key) is asked on its own.
+                if !(p.is_finite() && [p.x, p.y, p.z].iter().all(|v| v.abs() < 1e9)) {
+                    distinct.push(*p);
+                    return distinct.len() - 1;
+                }
+                *index.entry(key(p)).or_insert_with(|| {
+                    distinct.push(*p);
+                    distinct.len() - 1
+                })
+            })
+            .collect();
+        let answers = classified_inside(body, &distinct);
+        let inside: Vec<bool> = slots.iter().map(|&s| answers.get(s).copied().unwrap_or(false)).collect();
+        let mut at = 0;
+        for (c, points) in asked {
+            let wanted: Vec<Vec3> = points.iter().zip(inside.get(at..).unwrap_or(&[])).filter(|&(_, &x)| x).map(|(p, _)| *p).collect();
+            at += points.len();
+            if let Some(slot) = batched.get_mut(*c) {
+                *slot = Some(wanted);
+            }
+        }
+    }
+    // Each copy's first points: (its tool, the target, the line) they are of, and the points. A
+    // copy whose first line was asked above and has none goes on from the line after it, as its
+    // own test would have.
+    let first_points: Vec<Option<(usize, usize, usize, Vec<Vec3>)>> = copied
+        .iter()
+        .zip(&starts)
+        .zip(&batched)
+        .map(|(((k, tools), start), batched)| {
+            if let Some(points) = batched.as_ref().filter(|p| !p.is_empty()) {
+                return Some((0, 0, 0, points.clone()));
+            }
+            let lines = axes.get(*k).map_or(&[][..], Vec::as_slice);
+            tools.iter().enumerate().find_map(|(ti, t)| {
+                let tool_box = (!t.body.is_mesh()).then(|| more::exact_box(&t.body)).flatten();
+                let source = sources.get(start + ti).and_then(Option::as_ref);
+                scope.iter().enumerate().find_map(|(i, (b, target_box))| {
+                    let after = if ti == 0 && i == 0 && batched.is_some() { 1 } else { 0 };
+                    first_shared_points(&b.body, target_box.as_ref(), &t.body, tool_box.as_ref(), source, lines, after).map(|(li, p)| (ti, i, li, p))
+                })
+            })
+        })
+        .collect();
+    let mut taken = vec![false; copied.len()];
+    for (i, (b, _)) in scope.iter().enumerate() {
+        let asked: Vec<(usize, &Vec<Vec3>)> =
+            first_points.iter().enumerate().filter_map(|(c, f)| f.as_ref().filter(|(_, at, _, _)| *at == i).map(|(_, _, _, p)| (c, p))).collect();
+        if asked.is_empty() {
+            continue;
+        }
+        let points: Vec<Vec3> = asked.iter().flat_map(|(_, p)| p.iter().copied()).collect();
+        let inside = classified_inside(&b.body, &points);
+        let mut at = 0;
+        for (c, p) in asked {
+            if inside.get(at..at + p.len()).is_some_and(|s| s.iter().any(|&x| x))
+                && let Some(t) = taken.get_mut(c)
+            {
+                *t = true;
+            }
+            at += p.len();
+        }
+    }
+    for (c, (k, tools)) in copied.iter().enumerate() {
+        total += 1;
+        if taken.get(c).copied().unwrap_or(false) {
+            continue;
+        }
+        let lines = axes.get(*k).map_or(&[][..], Vec::as_slice);
+        // The test goes on from where its first points left it, as it would have: the lines after
+        // theirs, of their tool and target, then the targets and tools after theirs. A copy with
+        // no first points asked about none: nothing is left to test.
+        let Some((t0, i0, l0, _)) = first_points.get(c).and_then(Option::as_ref) else {
+            unsure.push(tools);
+            continue;
+        };
+        let takes = tools.iter().enumerate().skip(*t0).any(|(ti, t)| {
+            let tool_box = (!t.body.is_mesh()).then(|| more::exact_box(&t.body)).flatten();
+            scope.iter().enumerate().skip(if ti == *t0 { *i0 } else { 0 }).any(|(i, (b, target_box))| {
+                let after = if ti == *t0 && i == *i0 { l0 + 1 } else { 0 };
+                shares_material(&b.body, target_box.as_ref(), &t.body, tool_box.as_ref(), lines, after)
+            })
         });
         if !takes {
             unsure.push(tools);
@@ -10535,41 +10862,88 @@ fn count_copy_misses(
 /// as when it can't be worked out, is no answer. `false` says nothing.
 /// The points of a line are classified in one call for the tool and one for the target
 /// ([`classified_inside`]), not one call a point: the kernel makes the body's copy and its
-/// search structures once for all the points of a call.
+/// search structures once for all the points of a call. It starts at the line numbered `after` of
+/// those it samples on: the lines before it were asked about already (0 for all of them).
 fn shares_material(
     target: &Body,
     target_box: Option<&solidcraft_geom::Aabb3>,
     tool: &Body,
     tool_box: Option<&solidcraft_geom::Aabb3>,
     lines: &[(Vec3, Vec3)],
+    after: usize,
 ) -> bool {
-    if target.is_mesh() || tool.is_mesh() {
-        return false;
-    }
-    let (Some(a), Some(b)) = (target_box, tool_box) else { return false };
-    let both = a.intersection(b);
-    if both.is_empty() {
-        return false;
-    }
-    let c = both.center();
-    let mut all = lines.to_vec();
-    all.extend(round_face_axes(tool, MAX_PROBED_FACES));
-    all.extend([(c, Vec3::X), (c, Vec3::Y), (c, Vec3::Z)]);
-    all.iter().any(|&(o, d)| {
-        let Some((lo, hi)) = line_in_box(&both, o, d) else { return false };
-        let points: Vec<Vec3> = (0..SAMPLES_PER_LINE).map(|k| o + d * (lo + (hi - lo) * (k as f64 + 0.5) / SAMPLES_PER_LINE as f64)).collect();
+    let Some(lines) = probe_lines(target, target_box, tool, tool_box, lines) else { return false };
+    lines.iter().skip(after).any(|&line| {
+        let wanted = tool_points_on(tool, None, line);
         // The points of the line are classified in one call for the tool and one for the
         // target: the kernel makes the body's copy and its search structures once for all
         // the points of a call, and again for every call a point makes on its own (#11257:
         // the six copies of the pattern of the report asked for 130 classifications, against
         // ten).
-        let in_tool = classified_inside(tool, &points);
-        let wanted: Vec<Vec3> = points.iter().zip(&in_tool).filter(|&(_, &b)| b).map(|(p, _)| *p).collect();
-        if wanted.is_empty() {
-            return false;
-        }
-        classified_inside(target, &wanted).iter().any(|&b| b)
+        !wanted.is_empty() && classified_inside(target, &wanted).iter().any(|&b| b)
     })
+}
+
+/// The points [`shares_material`] asks `target` about first, and the number of their line among
+/// those it samples: the sample points in `tool`'s material of the first of its lines that has
+/// any. `None` where it asks about none.
+fn first_shared_points(
+    target: &Body,
+    target_box: Option<&solidcraft_geom::Aabb3>,
+    tool: &Body,
+    tool_box: Option<&solidcraft_geom::Aabb3>,
+    source: Option<&(Body, Mat)>,
+    lines: &[(Vec3, Vec3)],
+    after: usize,
+) -> Option<(usize, Vec<Vec3>)> {
+    probe_lines(target, target_box, tool, tool_box, lines)?
+        .into_iter()
+        .enumerate()
+        .skip(after)
+        .map(|(i, line)| (i, tool_points_on(tool, source, line)))
+        .find(|(_, p)| !p.is_empty())
+}
+
+/// The lines [`shares_material`] samples, each cut to the box both exact boxes hold, in the order
+/// it samples them; `None` where it samples none (a mesh, a box unknown, boxes apart).
+fn probe_lines(
+    target: &Body,
+    target_box: Option<&solidcraft_geom::Aabb3>,
+    tool: &Body,
+    tool_box: Option<&solidcraft_geom::Aabb3>,
+    lines: &[(Vec3, Vec3)],
+) -> Option<Vec<(Vec3, Vec3, f64, f64)>> {
+    if target.is_mesh() || tool.is_mesh() {
+        return None;
+    }
+    let (Some(a), Some(b)) = (target_box, tool_box) else { return None };
+    let both = a.intersection(b);
+    if both.is_empty() {
+        return None;
+    }
+    let c = both.center();
+    let mut all = lines.to_vec();
+    all.extend(round_face_axes(tool, MAX_PROBED_FACES));
+    all.extend([(c, Vec3::X), (c, Vec3::Y), (c, Vec3::Z)]);
+    Some(all.into_iter().filter_map(|(o, d)| line_in_box(&both, o, d).map(|(lo, hi)| (o, d, lo, hi))).collect())
+}
+
+/// The points [`shares_material`] samples on `line` (as [`probe_lines`] gives it).
+fn line_samples((o, d, lo, hi): (Vec3, Vec3, f64, f64)) -> Vec<Vec3> {
+    (0..SAMPLES_PER_LINE).map(|k| o + d * (lo + (hi - lo) * (k as f64 + 0.5) / SAMPLES_PER_LINE as f64)).collect()
+}
+
+/// The sample points of `line` (as [`probe_lines`] gives it) in `tool`'s material. With `source`,
+/// `tool` is that body moved, and the points are classified on it, moved back by the inverse
+/// given: each copy of a pattern's tool was made into the kernel's form of its own to be asked,
+/// where the tool it was moved from has one already (#2358).
+fn tool_points_on(tool: &Body, source: Option<&(Body, Mat)>, line: (Vec3, Vec3, f64, f64)) -> Vec<Vec3> {
+    let points = line_samples(line);
+    let in_tool = match source {
+        Some((body, back)) => classified_inside(body, &points.iter().map(|p| crate::apply_point(back, *p)).collect::<Vec<_>>()),
+        None => classified_inside(tool, &points),
+    };
+    points.iter().zip(&in_tool).filter(|&(_, &b)| b).map(|(p, _)| *p).collect()
 }
 
 /// Which of `points` lie in the material of `body`: the kernel classifies them all in one
@@ -11049,6 +11423,9 @@ fn replay(
         let present: Vec<String> = targets.iter().filter(|t| st.bodies.iter().any(|b| &b.name == *t)).cloned().collect();
         let targets = if present.is_empty() { targets } else { present };
         let mut copies = Vec::new();
+        // For each tool of `copies` that is another tool moved, that tool and the inverse of the
+        // move: the copies' points are classified on it, moved back (#2358).
+        let mut sources: Vec<Option<(Body, Mat)>> = Vec::new();
         let mut instances = Vec::with_capacity(mats.len());
         // Each hole copy's axes (spot and direction), where the check for copies that miss looks
         // for material first.
@@ -11097,6 +11474,8 @@ fn replay(
                     let tools = match built.as_ref().filter(|b| movable && b.dir == d && b.depth == depth && b.reach.moves_to(&reach)) {
                         Some(b) => {
                             let to_here = translation(at - b.at);
+                            let back = translation(b.at - at);
+                            sources.extend(b.tools.iter().map(|t| Some((t.body.clone(), back))));
                             b.tools
                                 .iter()
                                 .map(|t| Ok(Traced { lineage: t.lineage.clone(), body: kernel::transform_matrix(&t.body, to_here)?, recipe: None }))
@@ -11105,9 +11484,16 @@ fn replay(
                         None => {
                             let tools: Vec<Traced> =
                                 hole_tools_reaching(vals, st, &at, d, diameter, &depth, hole, &reach)?.into_iter().map(|(tool, _)| tool).collect();
+                            // Moved to many copies, a hole's tools go as one: each copy is then one
+                            // tool to cut, as a plain hole's is (#2358).
+                            let tools = if movable && mats.len() * spots.len() >= HOLE_COPIES_AS_ONE { hole_tools_as_one(tools) } else { tools };
                             if movable {
+                                // Measured once here, each copy's box is this one moved, not
+                                // measured again for each copy (#2358).
+                                measure_before_moving(&tools);
                                 built = Some(HoleBuilt { at, dir: d, depth: depth.clone(), reach, tools: tools.clone() });
                             }
+                            sources.extend(tools.iter().map(|_| None));
                             tools
                         }
                     };
@@ -11129,6 +11515,7 @@ fn replay(
                     // Each copy's faces are named as the rib's, with the instance.
                     let t = Traced::unnamed(body);
                     copies.push(Traced { lineage: t.lineage.map(|l| l.copied(src.id, first + k + 1)), body: t.body, recipe: None });
+                    sources.push(None);
                 }
             }
         } else {
@@ -11148,11 +11535,16 @@ fn replay(
                 None => with_named_face_points(doc, vals, named_from.as_ref().unwrap_or(st), src)?.map(|(g, _)| g),
             };
             let tools = feature_tools_with_constructor(doc, vals, moved.as_ref().unwrap_or(src), st, &mut None, &mut None, &mut None)?;
+            if op == Operation::Cut {
+                measure_before_moving(&tools);
+            }
             for (k, m) in mats.iter().enumerate() {
                 let start = copies.len();
+                let back = crate::mat_inverse(m);
                 for t in &tools {
                     let recipe = t.recipe.map(|r| moved_recipe(r, m, src.id, first + k + 1));
                     copies.push(t.copied(kernel::transform_matrix(&t.body, *m)?, src.id, first + k + 1).with_recipe(recipe));
+                    sources.push(back.map(|back| (t.body.clone(), back)));
                 }
                 instances.push(start..copies.len());
             }
@@ -11174,7 +11566,7 @@ fn replay(
             f
         };
         if op == Operation::Cut {
-            let (m, t) = count_copy_misses(st, f, &targets, &copies, &instances, &axes);
+            let (m, t) = count_copy_misses(st, f, &targets, &copies, &sources, &instances, &axes);
             missed += m;
             total += t;
         }

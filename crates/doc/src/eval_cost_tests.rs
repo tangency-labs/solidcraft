@@ -59,6 +59,7 @@ pub(crate) struct Counts {
     pub blends: usize,
     pub fit_searches: usize,
     pub classifications: usize,
+    pub joined_hole_tools: usize,
 }
 
 thread_local! {
@@ -93,6 +94,7 @@ thread_local! {
             blends: 0,
             fit_searches: 0,
             classifications: 0,
+            joined_hole_tools: 0,
         })
     };
 }
@@ -2879,6 +2881,12 @@ fn a_circular_pattern_of_a_coil_cut_cuts_its_copies_at_once() {
 /// A 100 x 100 x 2 plate with a 3 mm hole at (5, 5) drilled from its top, in a 10 x 9 grid on a
 /// 10 mm pitch: the plate's volume, the holes' and the work.
 fn plate_with_hole_grid(hole: serde_json::Value) -> (f64, f64, Counts) {
+    let (model, work) = plate_with_hole_grid_model(hole);
+    (disc_volume(&model), std::f64::consts::PI * 1.5 * 1.5 * 2.0, work)
+}
+
+/// [`plate_with_hole_grid`]'s model, and the work.
+fn plate_with_hole_grid_model(hole: serde_json::Value) -> (Model, Counts) {
     let mut doc = Document::new("perforated");
     let plate: FeatureKind = serde_json::from_value(serde_json::json!({
         "type": "box", "corner": [0, 0, 0], "length": "100", "width": "100", "height": "2",
@@ -2899,7 +2907,7 @@ fn plate_with_hole_grid(hole: serde_json::Value) -> (f64, f64, Counts) {
     let mut model = Model::new();
     let work = counted(|| model.evaluate(&doc));
     assert!(model.results.iter().all(|r| r.error.is_none() && r.warning.is_none()), "{:?}", model.results);
-    (disc_volume(&model), std::f64::consts::PI * 1.5 * 1.5 * 2.0, work)
+    (model, work)
 }
 
 /// A pattern of a hole builds its tools once when every copy is drilled the same way, and for
@@ -2922,6 +2930,137 @@ fn copies_of_a_plain_hole_move_its_tools_and_a_drill_point_drills_each() {
     let drilled = serde_json::json!({"depth": "1", "hole": {"type": "drilled", "tip_angle": "118 deg"}});
     let (_, _, work) = plate_with_hole_grid(drilled);
     assert_eq!(work.hole_tools, 90, "{work:?}");
+}
+
+/// [`plate_with_hole_grid`] with `hole`, cut as a pattern cuts it and tool by tool, one boolean a
+/// tool, as before #2358: the work of each, after checking that both leave the same plate (the
+/// same volume, the same faces, named the same).
+fn hole_grid_both_ways(hole: serde_json::Value) -> (Counts, Counts) {
+    let plate = |limit: usize| {
+        super::JOINED_TOOLS_LIMIT.with(|l| l.set(limit));
+        let (model, work) = plate_with_hole_grid_model(hole.clone());
+        super::JOINED_TOOLS_LIMIT.with(|l| l.set(super::MAX_JOINED_TOOLS));
+        let st = model.state();
+        assert_eq!(st.bodies.len(), 1);
+        let mut names = crate::naming::face_names(&st.bodies[0]).to_vec();
+        names.sort();
+        (disc_volume(&model), st.bodies[0].body.face_count(), names, work)
+    };
+    let (v, faces, names, work) = plate(super::MAX_JOINED_TOOLS);
+    let (one_v, one_faces, one_names, one_work) = plate(1);
+    let hole = std::f64::consts::PI * 1.5 * 1.5 * 2.0;
+    assert!((v - one_v).abs() < 1e-6 * hole, "{v} vs {one_v}");
+    assert_eq!(faces, one_faces);
+    assert_eq!(names, one_names);
+    // Each of the 89 copies' two tools was cut on its own.
+    assert_eq!(one_work.cut_tools, 178, "{one_work:?}");
+    (work, one_work)
+}
+
+/// A pattern of a countersunk hole cuts its copies 32 at a time, as a plain hole's, not one tool
+/// at a time (#2358). Each hole is cut with two tools, its cone and its bore, which overlap, so
+/// the copies' tools together were never apart and each was cut on its own: two booleans a copy,
+/// each dearer as the plate gained holes. The cone and the bore are joined once, and moved to each
+/// copy as one tool. A counterbore's pocket and bore are too.
+#[test]
+fn a_pattern_of_a_countersunk_or_counterbored_hole_cuts_its_copies_at_once() {
+    let csink = serde_json::json!({"hole": {"type": "countersink", "cs_diameter": "6", "cs_angle": "90 deg"}});
+    let (work, _) = hole_grid_both_ways(csink.clone());
+    // 89 copies of one tool, cut in 3 groups; no union run to tell the copies apart.
+    assert_eq!((work.cut_tools, work.joined_hole_tools, work.apart_unions), (3, 1, 0), "{work:?}");
+    // The plate less 90 bores and 90 cones over them (a 90 deg cone from 6 mm on the face down to
+    // the 3 mm bore: 1.5 mm deep).
+    let (model, _) = plate_with_hole_grid_model(csink);
+    let hole = std::f64::consts::PI * 1.5 * 1.5 * 2.0;
+    let cone = std::f64::consts::PI * 1.5 / 3.0 * (3.0 * 3.0 + 3.0 * 1.5 + 1.5 * 1.5) - std::f64::consts::PI * 1.5 * 1.5 * 1.5;
+    let v = disc_volume(&model);
+    assert!((v - (20_000.0 - 90.0 * (hole + cone))).abs() < 1e-3 * hole, "{v}");
+    let cbore = serde_json::json!({"hole": {"type": "counterbore", "cb_diameter": "5", "cb_depth": "1"}});
+    let (work, _) = hole_grid_both_ways(cbore);
+    assert_eq!((work.cut_tools, work.joined_hole_tools, work.apart_unions), (3, 1, 0), "{work:?}");
+}
+
+/// A circular pattern of a countersunk hole turns its one tool to each copy (no box moves with a
+/// turn: each copy's is measured) and leaves the disc that cutting each tool on its own leaves
+/// (#2358).
+#[test]
+fn a_circular_pattern_of_a_countersunk_hole_cuts_its_copies_at_once() {
+    let disc = |limit: usize| {
+        super::JOINED_TOOLS_LIMIT.with(|l| l.set(limit));
+        let mut doc = Document::new("countersunk ring");
+        let disc = FeatureKind::Cylinder {
+            base: point_expr(Vec3::ZERO),
+            axis: Dir(Vec3::Z),
+            radius: "50".into(),
+            height: "3".into(),
+            operation: Operation::NewBody,
+            references: Vec::new(),
+        };
+        doc.add_feature(disc, Some("Disc")).unwrap();
+        let hole: FeatureKind = serde_json::from_value(serde_json::json!({
+            "type": "hole", "position": [30, 0, 3], "direction": [0, 0, -1], "diameter": "3.5",
+            "hole": {"type": "countersink", "cs_diameter": "6", "cs_angle": "90 deg"},
+        }))
+        .unwrap();
+        let hole = doc.add_feature(hole, Some("Hole")).unwrap();
+        hole_pattern(&mut doc, hole, 24);
+        let mut model = Model::new();
+        let work = counted(|| model.evaluate(&doc));
+        super::JOINED_TOOLS_LIMIT.with(|l| l.set(super::MAX_JOINED_TOOLS));
+        assert!(model.results.iter().all(|r| r.error.is_none() && r.warning.is_none()), "{:?}", model.results);
+        let st = model.state();
+        assert_eq!(st.bodies.len(), 1);
+        let mut names = crate::naming::face_names(&st.bodies[0]).to_vec();
+        names.sort();
+        (disc_volume(&model), st.bodies[0].body.face_count(), names, work)
+    };
+    let (v, faces, names, work) = disc(super::MAX_JOINED_TOOLS);
+    let (one_v, one_faces, one_names, one_work) = disc(1);
+    assert_eq!((work.cut_tools, work.joined_hole_tools), (1, 1), "{work:?}");
+    assert_eq!(one_work.cut_tools, 46, "{one_work:?}");
+    assert!((v - one_v).abs() < 1e-6 * v, "{v} vs {one_v}");
+    assert_eq!(faces, one_faces);
+    assert_eq!(names, one_names);
+}
+
+/// Copies whose tools are built at each copy (a blind countersink with a drill point, which looks
+/// at the material there) are not joined: their cones are cut together, then their bores, each
+/// in groups of 32, as each copy cuts its own (#2358). A cone and its bore are known to meet (a
+/// point on their axis lies inside both), so no union is run to find out that the copies' tools
+/// cannot all be joined as they are.
+#[test]
+fn copies_of_a_hole_built_at_each_copy_cut_their_tools_in_layers() {
+    let drilled =
+        serde_json::json!({"depth": "1.5", "hole": {"type": "countersink", "cs_diameter": "6", "cs_angle": "90 deg", "tip_angle": "118 deg"}});
+    let (work, _) = hole_grid_both_ways(drilled);
+    assert_eq!(work.hole_tools, 90, "{work:?}");
+    assert_eq!((work.cut_tools, work.joined_hole_tools, work.apart_unions), (6, 0, 0), "{work:?}");
+}
+
+/// The box a hole's run-on column is tested by, without building it (#2358), holds the exact box
+/// of the column built, and is no more than a hair larger than the cylinder: along axes square
+/// to the coordinate axes and slanted ones, small and large.
+#[test]
+fn a_run_on_columns_box_holds_the_column_built() {
+    let axes = [Vec3::Z, Vec3::X * -1.0, Vec3::new(1.0, 2.0, 3.0), Vec3::new(-0.3, 0.05, -1.0), Vec3::new(1.0, 1.0, 0.0)];
+    for axis in axes {
+        let axis = axis.normalized().unwrap();
+        for (radius, height) in [(4.5, 0.12), (0.25, 0.1), (60.0, 3.0)] {
+            let base = Vec3::new(9.0, -3.5, 12.0);
+            let plane = Plane::from_normal(base, axis).unwrap();
+            let disc = solidcore_record::Region2 { outer: solidcore_record::Loop2::circle_from(Vec2::ZERO, radius, 0.0), holes: vec![] };
+            let column = kernel::extrude(&plane, &[disc], 0.0, height).unwrap().pop().unwrap();
+            let built = super::more::exact_box(&column).unwrap();
+            let computed = super::cylinder_box(base, axis, radius, height).unwrap();
+            assert!(computed.contains(built.min) && computed.contains(built.max), "{axis:?} r {radius} h {height}: {computed:?} against {built:?}");
+            // The cylinder's own box, tight: each face of it touched by the disc at one end.
+            let slack = 2e-4 + 1e-6 * (radius + height);
+            for (lo, hi) in [(computed.min.x, built.min.x), (computed.min.y, built.min.y), (computed.min.z, built.min.z)] {
+                assert!(hi - lo <= slack + 1e-9 * radius.max(1.0), "{axis:?} r {radius}: {computed:?} against {built:?}");
+            }
+        }
+    }
+    assert!(super::cylinder_box(Vec3::ZERO, Vec3::Z, f64::NAN, 1.0).is_none());
 }
 
 /// A copy of a hole with material just above its spot, which is cut out of its tools there, has
@@ -3813,8 +3952,10 @@ fn a_pattern_probes_its_copies_with_one_classification_a_line() {
     // The ten grooves of the pattern notch the same round bore: the probe's points lie on the
     // bore's surface, where they are not inside the ring, so the probe tries every line it
     // has before it finds the ring's material. It asked the kernel for 370 classifications,
-    // one a point, and asks for 36.
+    // one a point, then 36, and asks for 20: the nine copies' first points are asked of the
+    // groove they were turned from in one call, and of the ring in one, not one call a copy each
+    // (#2358): 36 - 2 x (9 - 1).
     let (faces, work) = grooved_ring_faces();
     assert_eq!(faces, 24, "the ring comes out as it did");
-    assert_eq!(work.classifications, 36, "{work:?}");
+    assert_eq!(work.classifications, 20, "{work:?}");
 }
