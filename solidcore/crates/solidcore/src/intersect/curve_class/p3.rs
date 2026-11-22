@@ -2257,6 +2257,9 @@ impl<O: ClassObject> CurveClassification<O> {
     /// classify it. A certified distance below the band classifies it here. Every candidate
     /// edge is tried before a raise is returned: an edge the interval runs along as it is wins
     /// over one that needs a raise, and of those the first in candidate order is returned.
+    /// A classification that may not set tolerances ([`Self::ok_to_set_tolerance`] false, as
+    /// the seam checks) never gets a raise: such an interval is left unclassified, for the
+    /// face classification, and no B-rep tolerance changes.
     ///
     /// # Errors
     ///
@@ -2374,7 +2377,9 @@ impl<O: ClassObject> CurveClassification<O> {
                         k.work_counters.add_curved_edge_run();
                         return Ok(None);
                     }
-                    if first_raise.is_none() {
+                    // a classification that may not set tolerances (the seam checks) gets
+                    // no raise: the interval is left for the face classification
+                    if first_raise.is_none() && self.ok_to_set_tolerance() {
                         first_raise = Some(EdgeToleranceRaise {
                             index,
                             edge,
@@ -2943,10 +2948,9 @@ impl PlaneFrame {
     /// Errors: `p - c` is rounded by at most `u |v|∞` per coordinate (`u` the unit roundoff)
     /// and each product with an axis by `γ3 |v|∞ ‖axis‖1`, so the two coordinates move by at
     /// most `ε = 8 u |v|∞ l1` together. At a measured radius `r > 4 ε` the true radius is above
-    /// `r / 2`, and the angle moves by at most `asin(2 ε / r) ≤ 3 ε / r`, plus `16 u` for
-    /// `atan2`. That last is an assumption on the platform's libm, not proved here: Rust's
-    /// `atan2` is the C library's, and the libms targeted (glibc, musl, the macOS, Windows
-    /// and wasm ones) are within a few ulps (of `π`'s last place at most). The frame's skew
+    /// `r / 2`, and the angle moves by at most `asin(2 ε / r) ≤ 3 ε / r`, plus
+    /// [`ATAN2_ERR`] for the angle's own evaluation ([`atan2_enclosed`], basic operations
+    /// only: no claim on the platform's libm, whose `atan2` accuracy Rust does not specify). The frame's skew
     /// `g` maps a vector of the orthonormal frame to the measured coordinates within `3 g` of
     /// its length, moving its angle by at most `4 g`. `None` when the radius is not above
     /// `4 ε` or a value is not finite.
@@ -2956,16 +2960,104 @@ impl PlaneFrame {
         let size = v.x.abs().max(v.y.abs()).max(v.z.abs());
         let eps = 8.0 * ROUNDOFF * size * self.l1;
         let radius = (x * x + y * y).sqrt();
-        let angle = y.atan2(x);
+        let angle = atan2_enclosed(y, x)?;
         if !(radius > 4.0 * eps && radius.is_finite() && angle.is_finite()) {
             return None;
         }
         Some(Polar {
             angle,
             radius,
-            angle_err: 3.0 * eps / radius + 16.0 * ROUNDOFF + 4.0 * self.skew,
+            angle_err: 3.0 * eps / radius + ATAN2_ERR + 4.0 * self.skew,
         })
     }
+}
+
+/// The bound [`atan2_enclosed`] is within: `64 u`.
+const ATAN2_ERR: f64 = 64.0 * ROUNDOFF;
+
+/// `tan(π/8)` (rounded): [`atan2_enclosed`] reduces a ratio above it about `π/4`.
+const TAN_PI_8: f64 = 0.414_213_562_373_095_03;
+
+/// Not upstream (#18065): `atan2(y, x)` within [`ATAN2_ERR`] (`64 u`) of the true angle, in
+/// `[-π, π]` with `atan2`'s signs, computed from basic operations only (each correctly
+/// rounded, IEEE 754), so the bound does not rest on the platform's libm, whose accuracy
+/// Rust does not specify. `None` when either is not finite or both are zero.
+///
+/// **Method.** With `z = min / max` of `|x|`, `|y|` in `[0, 1]`, `atan z` is
+/// `π/4 + atan w`, `w = (z - 1) / (z + 1)`, when `z > tan(π/8)`, else `atan w`, `w = z`; so
+/// `|w| ≤ tan(π/8) < 0.4143`. `atan w` is its Taylor series `Σ (-1)^k w^(2k+1) / (2k+1)`
+/// to `k = 21` (Horner in `w²`); then `π/2 -` for `|y| > |x|`, `π -` for `x < 0`, and `y`'s
+/// sign.
+///
+/// **Bound** (`u` the unit roundoff; atan is 1-Lipschitz): the ratio `z` rounded, `u`
+/// (plus `2^-1074` should it be subnormal); `w` in three roundings, `γ3 |w| ≤ 1.25 u`; the
+/// series' remainder, alternating and decreasing, below its first omitted term
+/// `0.4143^45 / 45 < 0.01 u`; Horner over 22 coefficients (each rounded) at `w² ≤ 0.1717`,
+/// `γ_46 Σ|c_k| w^2k ≤ 46.1 u · 1.21` plus `0.25 u` for `w²`'s own rounding, times
+/// `|w|` and that product's rounding, `≤ 24 u`; `π/4`, `π/2`, `π` as doubles, `0.5 u`,
+/// `u`, `2 u`; the three additions, each below `u` times its result (at most `3π/8`,
+/// `π/2`, `π`), `≤ 5.9 u`. In all below `37 u`, counted as `64 u`.
+fn atan2_enclosed(y: f64, x: f64) -> Option<f64> {
+    use core::f64::consts::{FRAC_PI_2, FRAC_PI_4, PI};
+    if !(x.is_finite() && y.is_finite()) || (x == 0.0 && y == 0.0) {
+        return None;
+    }
+    let (ax, ay) = (x.abs(), y.abs());
+    let swap = ay > ax;
+    let z = if swap { ax / ay } else { ay / ax };
+    let (base, w) = if z > TAN_PI_8 {
+        (FRAC_PI_4, (z - 1.0) / (z + 1.0))
+    } else {
+        (0.0, z)
+    };
+    // the bound's premise, checked (it holds for every `z` in `[0, 1]`; a NaN refuses)
+    if w.abs().partial_cmp(&0.4143) != Some(core::cmp::Ordering::Less) {
+        return None;
+    }
+    let w2 = w * w;
+    let mut p = 0.0_f64;
+    for k in (0..22_u32).rev() {
+        let c = 1.0 / f64::from(2 * k + 1);
+        p = p * w2 + if k % 2 == 0 { c } else { -c };
+    }
+    let a = base + w * p;
+    let a = if swap { FRAC_PI_2 - a } else { a };
+    let a = if x < 0.0 { PI - a } else { a };
+    Some(if y.is_sign_negative() { -a } else { a })
+}
+
+/// Not upstream (#18065): a lower bound of `cos x` for `0 ≤ x < π/2`, from basic operations
+/// only (not the platform's libm). `None` outside that range or for a NaN.
+///
+/// **Bound.** `T(x) = Σ_(k=0..11) (-1)^k x^(2k) / (2k)!` ends on a negative term, so
+/// `cos x - T(x) = cos ξ x^24 / 24!` (Lagrange, `ξ` in `[0, x]`) is not negative: `T ≤ cos`.
+/// The factorials are exact (each `n!`, `n ≤ 22`, is a double: its odd part is below
+/// `2^53`), their reciprocals rounded once. `T = 1 - S`, `S = x² (c_1 - x² (c_2 - …))` by
+/// Horner: `S`'s error is below `γ_22 + 11 u + u` (Horner, `x²`'s rounding through the
+/// degree, the last product) times `Σ_(k≥1) x^(2k)/(2k)! = cosh x - 1 ≤ x² cosh(π/2) / 2
+/// ≤ 1.26 x²`, so below `43 u x²`; `1 - S` and the final subtraction round once each, below
+/// `u` (results at most 1). The pad `u (3 + 48 x²)` covers all of it (its own two roundings
+/// within its slack).
+fn cos_lower(x: f64) -> Option<f64> {
+    use core::f64::consts::FRAC_PI_2;
+    if !(0.0..FRAC_PI_2).contains(&x) {
+        return None;
+    }
+    let x2 = x * x;
+    let mut p = 0.0_f64;
+    let mut factorial = [1.0_f64; 12];
+    let mut f = 1.0_f64;
+    for (k, slot) in factorial.iter_mut().enumerate().skip(1) {
+        let k = k as f64;
+        f = f * (2.0 * k - 1.0) * (2.0 * k);
+        *slot = f;
+    }
+    for (k, &f) in factorial.iter().enumerate().skip(1).rev() {
+        let c = 1.0 / f;
+        p = if k % 2 == 1 { p * x2 + c } else { p * x2 - c };
+    }
+    let one_minus_s = 1.0 - x2 * p;
+    Some((one_minus_s - ROUNDOFF * (3.0 + 48.0 * x2)).max(0.0))
 }
 
 /// An angle difference in `[-2π, 2π]` wrapped to `(-π, π]`.
@@ -3173,15 +3265,23 @@ fn radial_deviation(
         if wmin.partial_cmp(&0.0) != Some(core::cmp::Ordering::Greater) {
             return None;
         }
+        // `W²`'s bounds, each within `u` of itself only when normal: an overflow (weights
+        // near `1e155`) would make a quotient `0`, an underflow lose its relative bound. (A
+        // quotient that itself underflows is off by at most `2^-1075`, far inside the `8 u`
+        // pads on the radii in [`circle_arcs_within`].)
+        let (wmin2, wmax2) = (wmin * wmin, wmax * wmax);
+        if !(wmin2.is_normal() && wmax2.is_normal()) {
+            return None;
+        }
         let up = if n_hi >= 0.0 {
-            n_hi / (wmin * wmin)
+            n_hi / wmin2
         } else {
-            n_hi / (wmax * wmax)
+            n_hi / wmax2
         };
         let down = if n_lo >= 0.0 {
-            n_lo / (wmax * wmax)
+            n_lo / wmax2
         } else {
-            n_lo / (wmin * wmin)
+            n_lo / wmin2
         };
         if !(up.is_finite() && down.is_finite()) {
             return None;
@@ -3374,15 +3474,19 @@ fn circle_arcs_within(
                 return false;
             }
             let e = polar.angle_err + 2.0 * slack / polar.radius + pd.angle_err;
-            let gamma = wrap_angle(polar.angle - pd.angle).abs() + e + 8.0 * ROUNDOFF;
+            // the difference (below `2π`) rounded, `6.3 u`; its wrap, `2π` as a double, `4 u`
+            // (the subtraction is exact, Sterbenz); the two additions below `π/2`, `3.1 u`
+            let gamma = wrap_angle(polar.angle - pd.angle).abs() + e + 16.0 * ROUNDOFF;
             if gamma.partial_cmp(&FRAC_PI_2) != Some(core::cmp::Ordering::Less) {
                 return false;
             }
             widest = widest.max(gamma);
         }
-        // `cos` within `4 u` of itself (an assumption on the platform's libm, as for
-        // `atan2` in [`PlaneFrame::polar`]) and decreasing on `[0, π/2]`; `|δ|` within `4 u`
-        let cos_lo = (widest.cos() - 4.0 * ROUNDOFF).max(0.0);
+        // `cos` bounded from below ([`cos_lower`], no libm) and decreasing on `[0, π/2]`;
+        // `|δ|` within `4 u`
+        let Some(cos_lo) = cos_lower(widest) else {
+            return false;
+        };
         let d_lo = offset_len * (1.0 - 4.0 * ROUNDOFF);
         let sq = (d_lo * d_lo + s_lo * s_lo + 2.0 * s_lo * d_lo * cos_lo) * (1.0 - 8.0 * ROUNDOFF);
         sq.sqrt() * (1.0 - 4.0 * ROUNDOFF)
@@ -4807,5 +4911,116 @@ mod tests {
             tol
         ));
         assert!(!curve_runs_along(&k, &boss, &piece, &edge, &piece, tol).expect("run"));
+    }
+
+    /// #20543: a NURB's equal weights scaled by `2^513` (the same curve) square past the
+    /// doubles' range; `W²` overflowing made the radial bound `0` for a NURB bulging `1e-6`
+    /// off its circle. It is refused instead.
+    #[test]
+    fn a_nurb_whose_weights_square_past_the_doubles_is_not_bounded() {
+        use crate::curve::ellipse::{Ellipse, EllipseOptions};
+        let k = Kernel::default();
+        let r = 0.05;
+        let (x, y) = (Vec3::new(1.0, 0.0, 0.0), Vec3::new(0.0, 1.0, 0.0));
+        let circle = |r: f64, nurb: Option<&crate::nurbs::b_spline_curve::BSplineCurve>| {
+            Curve::from(
+                Ellipse::new_circle(
+                    &k,
+                    Point3::ZERO,
+                    x,
+                    y,
+                    Extent1d::from_raw(0.0, 360.0),
+                    r,
+                    &EllipseOptions {
+                        nurb,
+                        ..EllipseOptions::default()
+                    },
+                )
+                .expect("circle"),
+            )
+        };
+        let larger = circle(r + 1.0e-6, None);
+        let mut scaled = larger.b_spline_base().expect("a NURB").clone_exact();
+        let scale = 2.0_f64.powi(513);
+        for p in scaled.get_or_create_gw_nurb().expect("nurb").cpts_mut() {
+            assert!(
+                p.w != crate::nurbs::math::NOW,
+                "a circle's NURB is rational"
+            );
+            p.x *= scale;
+            p.y *= scale;
+            if p.z != crate::nurbs::math::NOZ {
+                p.z *= scale;
+            }
+            p.w *= scale;
+        }
+        let range = [0.001, 0.003];
+        let unscaled = circle(r, larger.b_spline_base());
+        let (_, outward) = radial_deviation(&unscaled, (Point3::ZERO, r), (x, y), range)
+            .expect("the unscaled NURB is bounded");
+        assert!(outward >= 0.9e-6, "the bulge is counted: {outward:e}");
+        let boss = circle(r, Some(&scaled));
+        let mid = boss.evaluate_point(&k, 0.002).expect("mid");
+        assert!(mid.length() > r + 0.9e-6, "the same curve: {mid:?}");
+        match radial_deviation(&boss, (Point3::ZERO, r), (x, y), range) {
+            None => {}
+            Some((_, outward)) => assert!(outward >= 0.9e-6, "the bulge is lost: {outward:e}"),
+        }
+    }
+
+    /// #20543: a classification that may not set tolerances (the seam checks) gets no raise
+    /// for a piece that would raise its edge: the interval is left for the face classification.
+    #[test]
+    fn a_classification_that_may_not_set_tolerances_gets_no_raise() {
+        let (k, geo, mut cc, _) = tangent_tail_to_the_corner(1.5e-5, 2e-5);
+        cc.set_ok_to_set_tolerance(false);
+        let raise = cc.classify_edge_interval(&k, &geo, 0).expect("classify");
+        assert_eq!(raise, None);
+        assert_eq!(
+            cc.at(0).expect("interval").mid.point_class(),
+            PointClassType::Unknown
+        );
+    }
+
+    /// #20543: the angle and cosine the circle certificate uses come from basic operations,
+    /// within their stated bounds: exact angles, and the platform's values as a cross-check
+    /// (within the two bounds together, as the platform's are within a few ulps).
+    #[test]
+    fn the_enclosed_angle_and_cosine_bound_their_values() {
+        use core::f64::consts::{FRAC_PI_2, FRAC_PI_4, PI};
+        for (y, x, exact) in [
+            (1.0, 1.0, FRAC_PI_4),
+            (1.0, 0.0, FRAC_PI_2),
+            (0.0, -1.0, PI),
+            (-0.0, -1.0, -PI),
+            (-3.0, 0.0, -FRAC_PI_2),
+            (0.0, 2.0, 0.0),
+        ] {
+            let a = atan2_enclosed(y, x).expect("an angle");
+            assert!((a - exact).abs() <= ATAN2_ERR, "atan2({y}, {x}) = {a}");
+        }
+        assert_eq!(atan2_enclosed(0.0, 0.0), None);
+        assert_eq!(atan2_enclosed(f64::NAN, 1.0), None);
+        let mut state = 0x9e37_79b9_7f4a_7c15_u64;
+        for _ in 0..10_000 {
+            state = state
+                .wrapping_mul(6_364_136_223_846_793_005)
+                .wrapping_add(1_442_695_040_888_963_407);
+            let t = (state >> 11) as f64 / (1_u64 << 53) as f64;
+            let (y, x) = ((t * 7.0).sin() * (1.0 + t), (t * 7.0).cos() * (2.0 - t));
+            let a = atan2_enclosed(y, x).expect("an angle");
+            assert!(
+                (a - y.atan2(x)).abs() <= ATAN2_ERR + 8.0 * ROUNDOFF,
+                "{y} {x}"
+            );
+            let g = t * FRAC_PI_2;
+            let c = cos_lower(g).expect("a cosine");
+            assert!(c <= g.cos() + 4.0 * ROUNDOFF, "{g}: {c} above {}", g.cos());
+            let pad = ROUNDOFF * (8.0 + 48.0 * g * g);
+            assert!(c >= g.cos() - pad, "{g}: {c} far below {}", g.cos());
+        }
+        assert_eq!(cos_lower(0.0), Some(1.0 - 3.0 * ROUNDOFF));
+        assert_eq!(cos_lower(FRAC_PI_2), None);
+        assert_eq!(cos_lower(-1.0), None);
     }
 }
