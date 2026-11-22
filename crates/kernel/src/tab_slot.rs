@@ -36,15 +36,15 @@ fn kernel_error(e: solidcore_ops::Error) -> KernelError {
 }
 
 /// One plate as solidcore-ops' body: refused for a mesh body or one the kernel cannot take.
-fn ops_of<'a>(b: &'a Body, name: &str) -> Result<&'a solidcore_ops::Body> {
+fn ops_of(b: &Body, name: &str) -> Result<crate::body::OpsForm> {
     if b.is_mesh() {
         return Err(KernelError::Invalid(format!("{WHAT}: the {name} plate is a mesh body, not a solid")));
     }
-    b.ops_body().map(|(o, _)| o).ok_or_else(|| KernelError::Failed(format!("{WHAT}: the kernel could not take the {name} plate")))
+    b.ops_body().ok_or_else(|| KernelError::Failed(format!("{WHAT}: the kernel could not take the {name} plate")))
 }
 
 /// Both plates as solidcore-ops' bodies: refused for a mesh body or one the kernel cannot take.
-fn ops_pair<'a>(tab: &'a Body, slot: &'a Body) -> Result<(&'a solidcore_ops::Body, &'a solidcore_ops::Body)> {
+fn ops_pair(tab: &Body, slot: &Body) -> Result<(crate::body::OpsForm, crate::body::OpsForm)> {
     Ok((ops_of(tab, "tab")?, ops_of(slot, "slot")?))
 }
 
@@ -63,6 +63,7 @@ fn back(b: &solidcore_ops::Body) -> Result<Body> {
 /// kernel panic.
 pub fn plan(tab: &Body, slot: &Body, p: Plane, spec: TabSlotSpec, tol: f64) -> Result<TabSlotPlan> {
     let (t, s) = ops_pair(tab, slot)?;
+    let (t, s) = (&t.0, &s.0);
     guard(WHAT, || t.tab_slot_plan(s, p, spec, tol).map_err(kernel_error))
 }
 
@@ -74,6 +75,7 @@ pub fn plan(tab: &Body, slot: &Body, p: Plane, spec: TabSlotSpec, tol: f64) -> R
 /// cannot carry.
 pub fn cut(tab: &Body, slot: &Body, p: Plane, spec: TabSlotSpec, tol: f64) -> Result<core::result::Result<TabSlotCut, PairSkip>> {
     let (t, s) = ops_pair(tab, slot)?;
+    let (t, s) = (&t.0, &s.0);
     guard(WHAT, || match t.tab_slot_cut(s, p, spec, tol).map_err(kernel_error)? {
         Err(skip) => Ok(Err(skip)),
         Ok(c) => Ok(Ok(TabSlotCut { tab_plate: back(&c.tab_plate)?, slot_plate: back(&c.slot_plate)?, plan: c.plan })),
@@ -109,6 +111,7 @@ pub fn slot_planes(slot: &Body, tol: f64) -> Vec<Plane> {
 /// [`KernelError::Internal`] for a kernel panic.
 pub fn joint_plane(tab: &Body, slot: &Body, near: Option<solidcore_record::Vec3>, tol: f64) -> Result<NearPair> {
     let (t, s) = ops_pair(tab, slot)?;
+    let (t, s) = (&t.0, &s.0);
     let planes = slot_planes(slot, tol);
     let near = near.map(|q| solidcore::Point3::new(q.x, q.y, q.z));
     guard(WHAT, || t.plate_pair_near(s, &planes, near, tol).map_err(kernel_error))
@@ -127,7 +130,7 @@ pub fn joint_plane(tab: &Body, slot: &Body, near: Option<solidcore_record::Vec3>
 pub fn joints(plates: &[&Body], joints: &[(usize, usize, Plane)], spec: TabSlotSpec, tol: f64) -> Result<(Vec<Option<JointSkip>>, Vec<usize>)> {
     let ops = plates.iter().map(|b| ops_of(b, "joint")).collect::<Result<Vec<_>>>()?;
     guard(WHAT, || {
-        let owned = ops.iter().map(|b| b.copy().map_err(kernel_error)).collect::<Result<Vec<_>>>()?;
+        let owned = ops.iter().map(|b| b.0.copy().map_err(kernel_error)).collect::<Result<Vec<_>>>()?;
         solidcore_ops::plate_contact::tab_slot_tool_faces(&owned, joints, spec, tol).map_err(kernel_error)
     })
 }
@@ -146,7 +149,7 @@ pub fn joints_each(
 ) -> Result<(Vec<Option<JointSkip>>, Vec<usize>)> {
     let ops = plates.iter().map(|b| ops_of(b, "joint")).collect::<Result<Vec<_>>>()?;
     guard(WHAT, || {
-        let owned = ops.iter().map(|b| b.copy().map_err(kernel_error)).collect::<Result<Vec<_>>>()?;
+        let owned = ops.iter().map(|b| b.0.copy().map_err(kernel_error)).collect::<Result<Vec<_>>>()?;
         solidcore_ops::plate_contact::tab_slot_tool_faces_each(&owned, joints, specs, tol).map_err(kernel_error)
     })
 }
