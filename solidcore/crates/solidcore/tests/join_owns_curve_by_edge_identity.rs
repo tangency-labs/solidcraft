@@ -5,6 +5,9 @@
 //! (`Brep::owner_identity`); before, it kept the kernel key and the check reported
 //! `Test #61` (`pE->ValidateGeometry(FALSE)`) on it (found on solidcraft#4492's mitred
 //! rounds, `offset::offset_faces`).
+//!
+//! The join and the split set their edges' intervals through `edge::set_interval`, which
+//! clears the gaps cached over the old interval (#20939).
 #![allow(
     clippy::unwrap_used,
     clippy::expect_used,
@@ -13,13 +16,16 @@
 )] // test helpers
 
 use solidcore::curve::curve::Curve;
+use solidcore::geom::extent1d::Extent1d;
 use solidcore::geom::object::ObjectRef;
 use solidcore::math::Point3;
 use solidcore::primitive::api_primitives::create_box;
 use solidcore::topology::brep::validation::{check_brep, CheckLevel};
 use solidcore::topology::brep::{p2, p5, p9};
+use solidcore::topology::edgeuse::p1 as eu1;
 use solidcore::topology::loopuse::notify_ref;
 use solidcore::topology::Brep;
+use solidcore::topology::{edge, vertexuse};
 use solidcore::{EntityRef, Kernel};
 
 /// The level-2 check's lines and the edges whose curve owner is not their identity.
@@ -79,4 +85,50 @@ fn a_joined_edge_curve_is_owned_by_its_edge() {
         (vec![], vec![]),
         "the joined B-rep ({naming:?}) is valid"
     );
+}
+
+/// #20939: `edge::set_interval` clears every gap cached over the old interval. A box edge is
+/// shortened by a tenth at each end; its edge uses' edge/face and edge/edge gaps, its
+/// clockwise neighbours' edge/edge gaps (to its start) and its vertex uses' vertex/edge gaps
+/// then read as their recalculation. Before, each kept the gap of the whole edge: 0 where the
+/// shortened edge is a tenth of its length (1) from its neighbours and vertices.
+#[test]
+fn set_interval_clears_the_gaps_of_the_old_interval() {
+    let mut k = Kernel::default();
+    let mut b = create_box(&mut k, Point3::new(0.0, 0.0, 0.0), 10.0, 10.0, 10.0).unwrap();
+    let e = b.edge_list()[0];
+    let uses = b.edge(e).unwrap().edgeuses.clone();
+    assert_eq!(uses.len(), 2);
+    let gaps = |k: &Kernel, b: &mut Brep, force: bool| -> Vec<String> {
+        let mut out = Vec::new();
+        for &eu in &uses {
+            let (cw, vu) = {
+                let r = b.edgeuse(eu).unwrap();
+                (r.cw.unwrap(), r.vertexuse.unwrap())
+            };
+            let face = eu1::max_edge_face_gap(k, b, eu, force).unwrap();
+            let edge = eu1::edge_ccw_edge_gap(k, b, eu, force).unwrap();
+            let neighbour = eu1::edge_ccw_edge_gap(k, b, cw, force).unwrap();
+            let vertex = vertexuse::vertex_edge_gap(k, b, vu, force).unwrap();
+            out.push(format!(
+                "{eu:?}: edge/face {:?}, edge/edge {:?}, clockwise {cw:?} edge/edge {:?}, vertex/edge {:?}",
+                face.map(|g| g.gap_3d),
+                edge.map(|g| g.gap_3d),
+                neighbour.map(|g| g.gap_3d),
+                vertex.map(|g| g.gap_3d),
+            ));
+        }
+        out
+    };
+    // every cache filled over the whole edge
+    let whole = gaps(&k, &mut b, false);
+    let ivl = edge::interval(&b, e).unwrap();
+    let tenth = 0.1 * ivl.length();
+    let shortened = Extent1d::from_min_max(ivl.min() + tenth, ivl.max() - tenth);
+    edge::set_interval(&mut b, e, &shortened).unwrap();
+    let cached = gaps(&k, &mut b, false);
+    let recalculated = gaps(&k, &mut b, true);
+    assert_eq!(cached, recalculated);
+    // the edit moved the gaps (else the comparison shows nothing)
+    assert_ne!(whole, recalculated);
 }
