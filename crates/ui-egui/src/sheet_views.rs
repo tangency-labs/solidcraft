@@ -118,10 +118,17 @@ pub(crate) fn focus(app: &mut SolveApp, view: &DesignView) -> Result<(), String>
 /// Open beside the focused view, or focus this window's existing view of the sheet.
 pub(crate) fn open_in(app: &mut SolveApp, drawing: u64, sheet: u64, new: bool) -> Result<u64, String> {
     let window = crate::view_windows::opening_window(app);
-    crate::view_windows::with_strip(app, Some(window), |app| open_local(app, drawing, sheet, new))
+    crate::view_windows::with_strip(app, Some(window), |app| open_local(app, drawing, sheet, new, false))
 }
 
-fn open_local(app: &mut SolveApp, drawing: u64, sheet: u64, new: bool) -> Result<u64, String> {
+/// [`open_in`] for a sheet sketch that needs a view of its own: the view shown stays, with the
+/// Sheet in a card beside it, so starting the sketch doesn't take the person's view away.
+pub(crate) fn open_beside(app: &mut SolveApp, drawing: u64, sheet: u64) -> Result<u64, String> {
+    let window = crate::view_windows::opening_window(app);
+    crate::view_windows::with_strip(app, Some(window), |app| open_local(app, drawing, sheet, false, true))
+}
+
+fn open_local(app: &mut SolveApp, drawing: u64, sheet: u64, new: bool, beside: bool) -> Result<u64, String> {
     let subject = subject(drawing, sheet);
     resolve(app, Some(&subject))?;
     if !new
@@ -142,13 +149,14 @@ fn open_local(app: &mut SolveApp, drawing: u64, sheet: u64, new: bool) -> Result
         return Err(app.tr("sheet_views.limit").to_owned());
     }
     let previous = app.docs.views.active().id;
+    let tiled = app.docs.views.is_tiled();
     let window = app.view_windows.current_window();
     let reply = app.run("tab.view.open", serde_json::json!({"kind":"sheet","subject":subject,"reuse":false,"window":window}))?;
     let id = reply.get("id").and_then(serde_json::Value::as_u64).ok_or_else(|| app.tr("sheet_views.missing").to_owned())?;
     // Drawing keeps the whole free sheet area (docs/design/drawing-ui D05, D07, D22): a new
     // Sheet becomes the view shown. Only where the person has tiled views does the existing
     // ground keep its place, with the Sheet in a neighbouring card.
-    if previous != id && app.docs.views.is_tiled() && app.docs.views.get(previous).is_some_and(|view| view.kind.can_tile()) {
+    if previous != id && (tiled || beside) && app.docs.views.get(previous).is_some_and(|view| view.kind.can_tile()) {
         crate::documents::view_activate(app, previous);
         crate::documents::change_views(app, |views| {
             let mut next = views.clone();

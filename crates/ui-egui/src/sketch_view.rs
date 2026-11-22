@@ -468,7 +468,7 @@ pub(crate) fn prepare_sheet_start(app: &mut SolveApp, command: &str, params: &mu
     };
     let target = match target {
         Some(view) => view,
-        None => crate::sheet_views::open_in(app, drawing, sheet, false)?,
+        None => crate::sheet_views::open_beside(app, drawing, sheet)?,
     };
     let descriptor = crate::view_windows::layout_views(app)
         .into_iter()
