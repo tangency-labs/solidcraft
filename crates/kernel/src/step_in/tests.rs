@@ -997,21 +997,22 @@ fn bezier_block(span: &str, split: f64) -> String {
 /// block it is, as it does with the knots (0, 20).
 #[test]
 fn a_micro_edge_on_a_bezier_with_a_tiny_knot_span_keeps_the_block() {
+    // At 1.283 nm on the knots (0, 1.02e-7) the micro edge lies on [0, 6.549e-15] of the file's
+    // parameter, below SMLib's knot resolution (1e-12); the reader rescales such a curve's
+    // parameter exactly (#16441), so that block too is the closed 20 × 30 × 10 = 6000 mm³ block.
     for span in ["20.", "1.020781457822E-07"] {
-        let case = format!("knots (0, {span})");
-        let imp = step_import(&bezier_block(span, 1.26e-3)).unwrap_or_else(|e| panic!("{case}: {e}"));
-        assert_eq!(imp.bodies.len(), 1, "{case}: {:?}", imp.warnings);
-        let b = &imp.bodies[0];
-        assert!(b.closed, "{case}: open");
-        crate::validation::check_kept(&b.body).unwrap_or_else(|e| panic!("{case}: {e}"));
-        let m = measure(&b.body).unwrap();
-        assert!(rel(m.volume, 6000.0) < 1e-9, "{case}: volume {}", m.volume);
-        assert_eq!(m.faces, 6, "{case}");
+        for split in [1.26e-3, 1.283e-6] {
+            let case = format!("knots (0, {span}), micro edge {split} mm");
+            let imp = step_import(&bezier_block(span, split)).unwrap_or_else(|e| panic!("{case}: {e}"));
+            assert_eq!(imp.bodies.len(), 1, "{case}: {:?}", imp.warnings);
+            let b = &imp.bodies[0];
+            assert!(b.closed, "{case}: open");
+            crate::validation::check_kept(&b.body).unwrap_or_else(|e| panic!("{case}: {e}"));
+            let m = measure(&b.body).unwrap();
+            assert!(rel(m.volume, 6000.0) < 1e-9, "{case}: volume {}", m.volume);
+            assert_eq!(m.faces, 6, "{case}");
+        }
     }
-    // At 1.283 nm the micro edge lies on [0, 6.549e-15], below SMLib's knot resolution (1e-12):
-    // the solid is refused with that interval named, not taken as a body SMLib's check fails.
-    let e = step_import(&bezier_block("1.020781457822E-07", 1.283e-6)).map(|i| i.bodies.len()).unwrap_err().to_string();
-    assert!(e.contains("no longer than SMLib's knot resolution (1e-12)"), "{e}");
 }
 
 /// [`bezier_block`] (split at 1 µm) with its first edge's curve, which the micro edge and the
