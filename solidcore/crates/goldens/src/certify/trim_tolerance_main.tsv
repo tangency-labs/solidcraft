@@ -189,7 +189,7 @@ offset.offset_executive_p2	f2d62f772f5ebd2f
 offset.offset_geometry_creation	e8c98d82f6680670
 primitive.api_curve_ops	631989d29fe6f1dc
 primitive.api_curves	b384f5e70c20e9db
-primitive.api_primitives	eeb3268ad6487712
+primitive.api_primitives	135f2a1c6d123a62
 primitive.api_surface_ops	ac33d130cc4294e6
 primitive.api_trim_ops	47800bedbb5aa14a
 primitive.primitive_creation_p1	1ee2418a9fa4c07b
