@@ -672,3 +672,17 @@ fn a_face_with_too_many_edges_is_refused_with_its_count_and_the_limit() {
     let none = super::profile_edge_count("solid.revolve", 0).unwrap_err().to_string();
     assert!(none.contains("the face has no usable boundary"), "{none}");
 }
+
+/// #20496: Offset Face with a distance of 0 is refused before the kernel, naming the distance; a
+/// distance that is an expression evaluating to 0 is refused the same way, and nothing is added.
+#[test]
+fn offset_face_refuses_a_zero_distance_in_plain_words() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length":20,"width":20,"height":10}));
+    for d in [json!(0), json!("0 mm"), json!("5 mm - 5 mm")] {
+        let err = s.execute("solid.offset_face", &json!({"faces":[[10,10,10]],"distance":d})).unwrap_err().to_string();
+        assert!(err.contains("the distance must not be zero"), "{d}: {err}");
+        assert!(!err.contains("SMLib"), "{d}: {err}");
+    }
+    run(&mut s, "solid.offset_face", json!({"faces":[[10,10,10]],"distance":1}));
+}

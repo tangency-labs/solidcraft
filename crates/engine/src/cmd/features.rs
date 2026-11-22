@@ -4810,7 +4810,11 @@ fn offset_face(s: &mut Session, p: &Value) -> Result<Value> {
     let faces = face_points(s, p, cmd)?;
     let picked = faces_body(s, p, &faces);
     let distance = req_expr(cmd, p, "distance")?;
-    check_expr(s, &distance, Kind::Length, cmd, "distance")?;
+    let d = s.doc.eval(&distance, Kind::Length).map_err(|e| bad(cmd, format!("distance: {e}")))?;
+    // A zero distance moves nothing; the kernel refuses it with a message that does not name it (#20496).
+    if d.abs() < 1e-9 {
+        return Err(bad(cmd, "the distance must not be zero"));
+    }
     add_face_feature(
         &picked,
         s,
