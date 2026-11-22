@@ -229,7 +229,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .enabled(in_sketch)
         .contract(&POLYGON_CIRCUMSCRIBED_CONTRACT)
         .output(output_schema_for::<PolygonResult>)
-        .params(concat!("center, radius (to edge midpoints), sides, angle?: deg", connect_doc!(), created_doc!())),
+        .params(concat!("center, radius | diameter (to edge midpoints): number or expression (an expression naming a parameter is a dimension driven by it, so the polygon follows the parameter), sides: number or expression (read when drawn, it does not follow a later change), angle?: deg", connect_doc!(), created_doc!())),
     CommandSpec::new("sketch.polygon.edge", "Edge Polygon", crate::checked!("sketch.polygon.edge", polygon_edge))
         .in_sketch_part()
         .at("SKETCH", "CREATE")
@@ -2650,9 +2650,23 @@ fn arc_center(s: &mut Session, p: &Value) -> Result<Value> {
     draw_reply(out, info)
 }
 
-fn polygon(s: &mut Session, p: &Value, cmd: &str, center: Vec2, r_vertex: f64, start: f64, n: usize, inscribed: bool) -> Result<Value> {
+/// A polygon's corners on a circle of `r_vertex` round `center`, `n` of them, the first at angle
+/// `start`. `size` is the expression the size was typed as when it names parameters (with whether
+/// it is a diameter): the construction circle that holds the polygon to its centre then gets a
+/// dimension driven by it, so the polygon follows the parameters (#20920).
+fn polygon(
+    s: &mut Session,
+    p: &Value,
+    cmd: &str,
+    center: Vec2,
+    r_vertex: f64,
+    start: f64,
+    n: usize,
+    inscribed: bool,
+    size: Option<(String, bool)>,
+) -> Result<Value> {
     let mut support_circle = String::new();
-    let (out, info) = draw(s, p, cmd, |sk, _| {
+    let (out, info) = draw(s, p, cmd, |sk, doc| {
         let corners: Vec<Vec2> = (0..n).map(|i| center + Vec2::from_angle(start + std::f64::consts::TAU * i as f64 / n as f64) * r_vertex).collect();
         let (l, pts) = polygon_lines(sk, &corners)?;
         let mut cons = Vec::new();
@@ -2689,6 +2703,12 @@ fn polygon(s: &mut Session, p: &Value, cmd: &str, center: Vec2, r_vertex: f64, s
                 cons.push(add_c(sk, ConstraintKind::Tangent { a: *first, b: circ })?);
             }
         }
+        if let Some((e, diameter)) = &size {
+            let unit = solidcraft_doc::expr::length_unit_or_mm(&doc.units).to_string();
+            let pname = doc.new_model_param(e, &unit);
+            let kind = if *diameter { ConstraintKind::Diameter { c: circ, value: 2.0 * rc } } else { ConstraintKind::Radius { c: circ, value: rc } };
+            cons.push(sk.add_constraint(kind, Some(pname))?);
+        }
         Ok((ids_of(sk, &l), cons))
     })?;
     let reply = PolygonResult { curves: out.0, constraints: out.1, sketch: info, support_circle, created: None, param_warnings: Vec::new() };
@@ -2696,7 +2716,22 @@ fn polygon(s: &mut Session, p: &Value, cmd: &str, center: Vec2, r_vertex: f64, s
 }
 
 fn sides(p: &Value, cmd: &str) -> Result<usize> {
-    let n = num(p, "sides").unwrap_or(6.0);
+    sides_count(num(p, "sides").unwrap_or(6.0), cmd)
+}
+
+/// `sides` of a polygon typed as an expression over the design's parameters, or as a number. The
+/// count is read when the polygon is drawn: the sketch has no way to add or remove sides when a
+/// parameter changes later (a circular sketch pattern's `count` is what follows one).
+fn sides_expr(s: &Session, p: &Value, cmd: &str) -> Result<usize> {
+    if !p.get("sides").is_some_and(Value::is_string) {
+        return sides(p, cmd);
+    }
+    let e = req_expr(cmd, p, "sides")?;
+    let n = s.doc.eval(&e, Kind::Unitless).map_err(|e| bad(cmd, format!("sides: {e}")))?;
+    sides_count(n, cmd)
+}
+
+fn sides_count(n: f64, cmd: &str) -> Result<usize> {
     if !(3.0..=200.0).contains(&n) || n.fract() != 0.0 {
         return Err(bad(cmd, "sides must be an integer from 3 to 200"));
     }
@@ -2709,16 +2744,16 @@ fn polygon_inscribed(s: &mut Session, p: &Value) -> Result<Value> {
     let r = radius_arg(p, cmd)?;
     let n = sides(p, cmd)?;
     let a = num(p, "angle").unwrap_or(90.0).to_radians();
-    polygon(s, p, cmd, c, r, a, n, true)
+    polygon(s, p, cmd, c, r, a, n, true, None)
 }
 
 fn polygon_circumscribed(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "sketch.polygon.circumscribed";
     let c = req_vec2(cmd, p, "center")?;
-    let r = radius_arg(p, cmd)?;
-    let n = sides(p, cmd)?;
+    let (r, size) = circle_size(s, p, cmd)?;
+    let n = sides_expr(s, p, cmd)?;
     let a = num(p, "angle").unwrap_or(90.0).to_radians();
-    polygon(s, p, cmd, c, r / (std::f64::consts::PI / n as f64).cos(), a + std::f64::consts::PI / n as f64, n, false)
+    polygon(s, p, cmd, c, r / (std::f64::consts::PI / n as f64).cos(), a + std::f64::consts::PI / n as f64, n, false, size)
 }
 
 fn polygon_edge(s: &mut Session, p: &Value) -> Result<Value> {
@@ -2735,7 +2770,7 @@ fn polygon_edge(s: &mut Session, p: &Value) -> Result<Value> {
     let dir = (b - a).normalized().unwrap_or(Vec2::X);
     let center = mid + dir.perp() * apothem;
     let start = (a - center).angle();
-    polygon(s, p, cmd, center, rv, start, n, true)
+    polygon(s, p, cmd, center, rv, start, n, true, None)
 }
 
 /// The centre point of arc `a` (`None`: not an arc).

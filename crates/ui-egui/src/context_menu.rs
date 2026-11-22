@@ -471,7 +471,7 @@ pub fn items(app: &SolveApp, target: &Target) -> Vec<Item> {
         Target::Timeline { feature } => crate::timeline::feature_items(app, *feature),
         Target::Workspace => {
             let rendering = crate::render_workspace::active(app);
-            let drawing = crate::drawing_workspace::active(app);
+            let drawing = crate::drawing_workspace::active(app) || crate::workspace::sheet_scope(app);
             // Design, then Drawing (the owner's order), then Render: the workspaces there are. Ones still
             // to come aren't listed.
             vec![
