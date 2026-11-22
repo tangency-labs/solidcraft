@@ -311,9 +311,12 @@ picked in the browser, or on the first joint that moves when none is picked.
 grabbed follows the pointer in the plane through it that faces the view, the joints on the
 part's chain take the values that bring it nearest, within their limits, through motion links,
 and with closed loops kept closed, and a four-bar's rocker stops at the end of its swing. The
-whole drag is one undo step. A grounded part, or one its joints hold fixed, is not moved; a drag
-on it draws a selection box. Each frame runs `joint.reach`, which scripts and agents use
-directly to put a part's point somewhere: `joint.reach {occurrence, point}` moves the joints on
+whole drag is one undo step, and Escape puts the part back. A grounded part, or one its joints
+hold fixed, is not moved; a drag on it draws a selection box. While you drag, the part is only
+shown moving (the design, and what depends on where parts are, follow when you let go). With
+contact sets on, each step of the drag changes the design instead, so that the drag stops where
+two parts of a set touch, and Escape leaves the part where it is. The
+release runs `joint.reach` once, which scripts and agents use directly to put a part's point somewhere: `joint.reach {occurrence, point}` moves the joints on
 its chain from where they are to the nearest pose (the arm keeps its elbow up or down, and a
 linkage stays on its branch). `at` picks the part's point (the centre of its bodies by
 default), `z` with `axis` also turns one of its axes, and `joints` names the only joints to
@@ -494,7 +497,9 @@ Preferences › Design › **Insert Design lists the designs open in other tabs 
 off. A STEP or mesh file picked there is inserted as **Insert STEP** or **Insert
 Mesh** would. The part's solid bodies come
 in as they sit in that design, and they are kept in the assembly, so it opens even without the
-part file. The link is stored relative to the assembly's folder once the assembly is saved.
+part file. Its mesh bodies, such as the parts of a KiCad board, come in too, in the same linked
+component, and **Update Links** follows them as well. A design with mesh bodies only can't be
+linked yet. The link is stored relative to the assembly's folder once the assembly is saved.
 For scripts, `translate: [x,y,z]` places the design's origin in millimetres from the destination
 parent's origin (the active component unless `parent` is supplied). It defaults to `[0,0,0]`.
 With `reuse: true`, insertion reuses the existing linked component but uses the same coordinates;

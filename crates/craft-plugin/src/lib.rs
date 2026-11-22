@@ -23,10 +23,12 @@ pub const MAX_IMPORT_CHUNK_BYTES: usize = 1024 * 1024;
 pub const MAX_IMPORT_INPUT_BYTES: u64 = 1024 * 1024 * 1024;
 /// The largest design an importer may write.
 pub const MAX_IMPORT_DESIGN_BYTES: usize = 256 * 1024 * 1024;
+/// The largest file an exporter may return (RFC 0015 §4: 256 MiB output).
+pub const MAX_EXPORT_FILE_BYTES: usize = 256 * 1024 * 1024;
 /// A command entry finishes within 30 s; an importer converting a large assembly may take minutes.
 pub const MAX_COMMAND_DEADLINE_MS: u64 = 30_000;
 pub const MAX_IMPORTER_DEADLINE_MS: u64 = 600_000;
-/// The most extensions one importer entry claims.
+/// The most extensions one import or export slot claims.
 pub const MAX_EXTENSIONS: usize = 32;
 /// Memory32 has at most 65536 pages of 64 KiB.
 pub const MAX_MEMORY_MIB: usize = 4096;
@@ -299,6 +301,20 @@ pub trait PluginHost {
     }
     fn log(&mut self, message: &str);
     fn progress(&mut self, fraction: f32, message: &str);
+    /// Writes the running plugin's file `name` in the open design from its bytes, as they are
+    /// (`storage@0.1`, the `storage` interface's `put-blob`); `append` adds them to its end. The
+    /// file's size. An app that keeps no plugin data refuses, as here.
+    fn storage_put_blob(&mut self, _name: &str, _data: &[u8], _cache: bool, _append: bool) -> Result<u64> {
+        Err(HostError::PermissionDenied { permission: "storage: this app keeps no plugin data".into() })
+    }
+    /// Up to `len` bytes of a plugin's file from `offset` (`get-blob`).
+    fn storage_get_blob(&mut self, _plugin: Option<&str>, _name: &str, _offset: u64, _len: u32) -> Result<Vec<u8>> {
+        Err(HostError::PermissionDenied { permission: "storage: this app keeps no plugin data".into() })
+    }
+    /// Up to `len` bytes of a plugin's main document, its saved JSON, from `offset` (`get-document`).
+    fn storage_get_document(&mut self, _plugin: Option<&str>, _offset: u64, _len: u32) -> Result<Vec<u8>> {
+        Err(HostError::PermissionDenied { permission: "storage: this app keeps no plugin data".into() })
+    }
     fn is_cancelled(&self) -> bool {
         false
     }
@@ -443,14 +459,22 @@ fn empty_input_schema() -> Value {
     serde_json::json!({"type":"object","properties":{}})
 }
 
-/// What an entry is: a command the plugin runs on the open design, or an importer that turns a
-/// file of a claimed extension into a new design.
+/// What an entry is: a command the plugin runs on the open design, or a file-format slot (RFC
+/// 0015 §4): an importer turns a file of a claimed extension into a new design, and an exporter
+/// writes the open design as a file of a claimed extension.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Deserialize, Serialize, JsonSchema)]
 #[serde(rename_all = "lowercase")]
 pub enum EntryKind {
     #[default]
     Command,
     Importer,
+    Exporter,
+}
+impl EntryKind {
+    /// An import or export slot: it claims file extensions.
+    pub fn is_format(self) -> bool {
+        matches!(self, Self::Importer | Self::Exporter)
+    }
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
@@ -458,9 +482,20 @@ pub enum EntryKind {
 pub struct Entry {
     pub name: String,
     pub kind: EntryKind,
-    /// The file extensions an importer claims: lowercase, without the dot. Empty for a command.
+    /// The file extensions an import or export slot claims: lowercase, without the dot. Empty for
+    /// a command.
     pub extensions: Vec<String>,
+    /// A format slot's name in the app's Open and Export lists ("Sample mesh"). Empty: the
+    /// plugin's name.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub label: String,
+    /// Export slots only: the export also reads the design's own data of this plugin (RFC 0015
+    /// §5). Accepted now; the data is passed once per-design plugin data lands.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub needs_plugin_data: bool,
     pub effect: Effect,
+    /// The entry's options, as an object schema. A format slot's options are drawn as a form
+    /// before the import or export.
     pub input_schema: Value,
     /// Opt in to the read-only dialog-provider export (dialog@0.1).
     pub dialog_hook: bool,
@@ -470,8 +505,15 @@ pub struct Entry {
 impl Entry {
     /// Whether this importer claims `path`'s extension (ignoring case).
     pub fn claims(&self, path: &Path) -> bool {
+        self.kind == EntryKind::Importer && self.has_extension_of(path)
+    }
+    /// Whether this exporter writes files with `path`'s extension (ignoring case).
+    pub fn writes(&self, path: &Path) -> bool {
+        self.kind == EntryKind::Exporter && self.has_extension_of(path)
+    }
+    fn has_extension_of(&self, path: &Path) -> bool {
         let extension = path.extension().and_then(|e| e.to_str()).unwrap_or_default();
-        self.kind == EntryKind::Importer && !extension.is_empty() && self.extensions.iter().any(|e| e.eq_ignore_ascii_case(extension))
+        !extension.is_empty() && self.extensions.iter().any(|e| e.eq_ignore_ascii_case(extension))
     }
 }
 
@@ -489,8 +531,13 @@ struct DeclaredEntry {
     kind: EntryKind,
     #[serde(default)]
     extensions: Vec<String>,
-    /// A command's effect is `edit` unless it says `read`; an importer's is `open`. An importer that
-    /// says `edit` (the only effect it could state before `open` existed) still opens a new design.
+    #[serde(default)]
+    label: String,
+    #[serde(default)]
+    needs_plugin_data: bool,
+    /// A command's effect is `edit` unless it says `read`; an exporter's is `read`; an importer's is
+    /// `open`. An importer that says `edit` (the only effect it could state before `open` existed)
+    /// still opens a new design.
     #[serde(default)]
     effect: Option<Effect>,
     #[serde(default = "empty_input_schema")]
@@ -507,6 +554,8 @@ impl From<EntryDeclaration> for Entry {
                 name,
                 kind: EntryKind::Command,
                 extensions: Vec::new(),
+                label: String::new(),
+                needs_plugin_data: false,
                 effect: Effect::Edit,
                 input_schema: empty_input_schema(),
                 dialog_hook: false,
@@ -516,9 +565,12 @@ impl From<EntryDeclaration> for Entry {
                 name: value.name,
                 kind: value.kind,
                 extensions: value.extensions,
+                label: value.label.trim().to_string(),
+                needs_plugin_data: value.needs_plugin_data,
                 effect: match (value.kind, value.effect) {
                     (EntryKind::Importer, None | Some(Effect::Edit)) => Effect::Open,
                     (_, Some(effect)) => effect,
+                    (EntryKind::Exporter, None) => Effect::Read,
                     (EntryKind::Command, None) => Effect::Edit,
                 },
                 input_schema: value.input_schema,
@@ -546,7 +598,7 @@ pub struct Manifest {
     pub runtime: Option<RuntimeManifest>,
 }
 
-/// A read-only entry called after a coalesced whole-document invalidation. Listeners refresh
+/// A read-only entry called after a coalesced design or linked-file invalidation. Listeners refresh
 /// their own caches or panel data; they do not edit, write files or start background work.
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
@@ -579,13 +631,17 @@ pub struct RuntimeManifest {
 }
 impl RuntimeManifest {
     /// Whether this runtime is an importer (world `importer-plugin`). A runtime's entries are all
-    /// commands or all importers.
+    /// commands, all importers or all exporters.
     pub fn is_importer(&self) -> bool {
         self.entries.first().is_some_and(|e| e.kind == EntryKind::Importer)
     }
-    /// The largest component this runtime may ship.
+    /// Whether this runtime is an exporter (world `exporter-plugin`).
+    pub fn is_exporter(&self) -> bool {
+        self.entries.first().is_some_and(|e| e.kind == EntryKind::Exporter)
+    }
+    /// The largest component this runtime may ship: a format converter may be larger.
     pub fn max_component_bytes(&self) -> usize {
-        if self.is_importer() { MAX_IMPORTER_COMPONENT_BYTES } else { MAX_COMPONENT_BYTES }
+        if self.is_importer() || self.is_exporter() { MAX_IMPORTER_COMPONENT_BYTES } else { MAX_COMPONENT_BYTES }
     }
     /// The importer entry that claims `path`'s extension, if any.
     pub fn importer_for(&self, path: &Path) -> Option<&Entry> {
@@ -624,11 +680,17 @@ impl RuntimeManifest {
         let mut listeners = BTreeSet::new();
         for listener in &self.listeners {
             let entry = self.entries.iter().find(|entry| entry.name == listener.entry);
+            let mut events = BTreeSet::new();
+            let valid_events = !listener.on.is_empty()
+                && listener.on.iter().all(|event| matches!(event.as_str(), "design.changed" | "design.links_changed") && events.insert(event));
             if !listeners.insert(&listener.entry)
-                || listener.on.as_slice() != ["design.changed"]
+                || !valid_events
                 || entry.is_none_or(|entry| entry.kind != EntryKind::Command || entry.effect != Effect::Read)
             {
-                return Err(invalid("runtime.listeners", "distinct read command entries listening to [\"design.changed\"] are required"));
+                return Err(invalid(
+                    "runtime.listeners",
+                    "distinct read command entries listening to a nonempty, unique selection of design.changed and design.links_changed are required",
+                ));
             }
         }
         if self.commands.len() > 128 || self.commands.iter().any(|id| !valid_command_name(id)) {
@@ -643,6 +705,15 @@ impl RuntimeManifest {
             if !self.permissions.files.is_empty() || !self.permissions.command_groups.is_empty() {
                 return Err(invalid("runtime.permissions", "an importer reads only its file and, with input_folder, the files beside it"));
             }
+        } else if self.is_exporter() {
+            // An exporter reads the design through read-only commands and returns the file's
+            // bytes; the app writes them to the path the user chose. It reaches no file itself.
+            if !self.permissions.files.is_empty() || !self.permissions.command_groups.is_empty() || self.permissions.input_folder {
+                return Err(invalid(
+                    "runtime.permissions",
+                    "an exporter reads the design through commands and writes only the file the user chooses; it asks for no files, command groups or input_folder",
+                ));
+            }
         } else {
             if self.permissions.input_folder {
                 return Err(invalid("runtime.permissions.input_folder", "only an importer reads the folder of the file it imports"));
@@ -655,31 +726,46 @@ impl RuntimeManifest {
     }
 }
 
-/// An importer entry claims 1..32 distinct lowercase extensions and edits (it makes a design);
-/// a command claims none. One runtime does not mix the two: they are different worlds.
+/// A format slot (importer or exporter) claims 1..32 distinct lowercase extensions; an importer
+/// edits (it makes a design) and an exporter reads. A command claims none. One runtime does not
+/// mix kinds: they are different worlds.
 fn validate_kind(runtime: &RuntimeManifest, entry: &Entry) -> Result<()> {
     let field = format!("runtime.entries.{}", entry.name);
     if runtime.entries.iter().any(|other| other.kind != entry.kind) {
-        return Err(invalid("runtime.entries", "entries are all commands or all importers; ship an importer as a plugin of its own"));
+        return Err(invalid(
+            "runtime.entries",
+            "entries are all commands, all importers or all exporters; ship an importer or exporter as a plugin of its own",
+        ));
+    }
+    if !entry.label.is_empty() && !plain(&entry.label, 80) {
+        return Err(invalid(format!("{field}.label"), "a slot's label is 1..80 printable characters"));
+    }
+    if entry.needs_plugin_data && entry.kind != EntryKind::Exporter {
+        return Err(invalid(format!("{field}.needs_plugin_data"), "only an export slot reads the design's plugin data"));
     }
     match entry.kind {
-        EntryKind::Command if !entry.extensions.is_empty() => Err(invalid(format!("{field}.extensions"), "only an importer claims file extensions")),
+        EntryKind::Command if !entry.extensions.is_empty() || !entry.label.is_empty() => {
+            Err(invalid(format!("{field}.extensions"), "only an import or export slot claims file extensions and has a label"))
+        }
         EntryKind::Command if entry.effect == Effect::Open => {
             Err(invalid(format!("{field}.effect"), "only an importer opens a file as a new design; a command's effect is read or edit"))
         }
         EntryKind::Command => Ok(()),
-        EntryKind::Importer => {
+        EntryKind::Importer | EntryKind::Exporter => {
             let mut seen = BTreeSet::new();
             let valid = |e: &String| (1..=16).contains(&e.len()) && e.bytes().all(|c| c.is_ascii_lowercase() || c.is_ascii_digit());
             if entry.extensions.is_empty() || entry.extensions.len() > MAX_EXTENSIONS || !entry.extensions.iter().all(|e| valid(e) && seen.insert(e))
             {
                 return Err(invalid(
                     format!("{field}.extensions"),
-                    "an importer claims 1..32 distinct lowercase extensions without the dot, such as \"f3d\"",
+                    "an import or export slot claims 1..32 distinct lowercase extensions without the dot, such as \"f3d\"",
                 ));
             }
-            if entry.effect != Effect::Open {
+            if entry.kind == EntryKind::Importer && entry.effect != Effect::Open {
                 return Err(invalid(format!("{field}.effect"), "an importer opens a file as a new design: its effect is open"));
+            }
+            if entry.kind == EntryKind::Exporter && entry.effect != Effect::Read {
+                return Err(invalid(format!("{field}.effect"), "an exporter only reads the design: its effect is read"));
             }
             Ok(())
         }
@@ -776,7 +862,7 @@ fn plain(value: &str, max: usize) -> bool {
 }
 
 /// A plugin that keeps data in designs asks for `storage@0.1` and says its data's format number;
-/// only a command plugin does: an importer makes a new design and keeps nothing in the open one.
+/// only a command plugin does: an importer makes a new design and an exporter only reads it.
 fn check_storage(manifest: &Manifest) -> Result<()> {
     let storage = manifest.capabilities.iter().any(|capability| capability.starts_with("storage@"));
     let runtime = manifest.runtime.as_ref();
@@ -790,10 +876,10 @@ fn check_storage(manifest: &Manifest) -> Result<()> {
         }
         return Ok(());
     }
-    if runtime.is_none_or(RuntimeManifest::is_importer) {
+    if runtime.is_none_or(|runtime| runtime.is_importer() || runtime.is_exporter()) {
         return Err(invalid(
             "capabilities",
-            "storage keeps a command plugin's data in the open design; an importer or a plugin without a runtime has none",
+            "storage keeps a command plugin's data in the open design; an importer, exporter or a plugin without a runtime has none",
         ));
     }
     if !format.is_some_and(|format| (1..=MAX_DATA_FORMAT).contains(&format)) {
@@ -858,9 +944,12 @@ pub fn parse_manifest_for(text: &[u8], folder: &str, app: &str) -> Result<Manife
         if runtime.entries.iter().any(|entry| entry.dialog_hook) && !manifest.capabilities.iter().any(|c| c.starts_with("dialog@")) {
             return Err(invalid("capabilities", "a dialog hook needs the dialog capability: dialog@0.1"));
         }
-        if runtime.is_importer() {
+        if runtime.is_importer() || runtime.is_exporter() {
             if !manifest.capabilities.iter().any(|capability| capability.starts_with("formats@")) {
-                return Err(invalid("capabilities", "an importer needs the formats capability: \"capabilities\": [\"formats@0.1\"]"));
+                return Err(invalid("capabilities", "an importer or exporter needs the formats capability: \"capabilities\": [\"formats@0.1\"]"));
+            }
+            if runtime.is_exporter() && manifest.capabilities.iter().any(|capability| capability.starts_with("evaluate@")) {
+                return Err(invalid("capabilities", "evaluate checks an importer's result: only an importer asks for it"));
             }
         } else if manifest.capabilities.iter().any(|capability| capability.starts_with("evaluate@")) {
             return Err(invalid("capabilities", "evaluate checks an importer's result: only an importer (formats) asks for it"));

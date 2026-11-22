@@ -178,7 +178,15 @@ pub fn recall(dir: &Path, path: &str) -> Option<Value> {
 /// subject), as a set of their own; the closed ones are not brought back. None when the saved form
 /// is not a set or no view is left.
 pub fn restorable(saved: &Value, can_show: impl Fn(ViewKind, Option<&str>) -> bool) -> Option<ViewSet> {
-    let mut set = saved.clone();
+    // Keep legacy Sketch tabs until migration has chosen their Model fallback. Continue to
+    // ignore unavailable or foreign kinds before validating the remembered layout.
+    let mut readable = saved.clone();
+    readable.get_mut("views")?.as_array_mut()?.retain(|view| {
+        let kind = view.get("kind").and_then(Value::as_str);
+        kind == Some("sketch") || kind.and_then(ViewKind::from_key).is_some_and(|kind| can_show(kind, view.get("subject").and_then(Value::as_str)))
+    });
+    readable.as_object_mut()?.remove("closed");
+    let mut set = ViewSet::from_json(&readable)?.to_json();
     let views = set.get_mut("views")?.as_array_mut()?;
     views.retain(|view| {
         let kind = view.get("kind").and_then(Value::as_str).and_then(ViewKind::from_key);
@@ -201,9 +209,9 @@ mod tests {
         dir
     }
 
-    fn set_with_sketch() -> ViewSet {
+    fn set_with_render() -> ViewSet {
         let mut set = ViewSet::new();
-        set.open(ViewKind::Sketch, Some("7".into()), true);
+        set.open(ViewKind::Render, Some("7".into()), true);
         set.open(ViewKind::Sheet, Some("d1".into()), true);
         set
     }
@@ -266,9 +274,9 @@ mod tests {
     fn a_design_gets_back_the_views_it_was_closed_with_and_the_newest_wins() {
         let dir = folder("roundtrip");
         assert_eq!(recall(&dir, "a.scd"), None, "nothing yet");
-        remember(&dir, "a.scd", set_with_sketch().to_json()).unwrap();
+        remember(&dir, "a.scd", set_with_render().to_json()).unwrap();
         remember(&dir, "b.scd", ViewSet::new().to_json()).unwrap();
-        assert_eq!(ViewSet::from_json(&recall(&dir, "a.scd").unwrap()), Some(set_with_sketch()));
+        assert_eq!(ViewSet::from_json(&recall(&dir, "a.scd").unwrap()), Some(set_with_render()));
         remember(&dir, "a.scd", ViewSet::new().to_json()).unwrap();
         assert_eq!(ViewSet::from_json(&recall(&dir, "a.scd").unwrap()), Some(ViewSet::new()));
         assert_eq!(recall(&dir, "c.scd"), None);
@@ -301,14 +309,34 @@ mod tests {
     }
 
     #[test]
+    fn restoring_migrates_legacy_sketch_tabs_before_filtering_workspaces() {
+        let saved = json!({"views":[
+            {"id":1,"kind":"sheet","name":"Drawing"},
+            {"id":2,"kind":"sketch","name":"Old sketch"}
+        ], "active":2});
+        let restored = restorable(&saved, |kind, _| kind == ViewKind::Model).unwrap();
+        assert_eq!(restored.len(), 1);
+        assert_eq!(restored.active().kind, ViewKind::Model);
+        assert!(restored.active().id > 2);
+        assert!(!restored.can_reopen());
+        assert!(restorable(&saved, |_, _| false).is_none());
+    }
+
+    #[test]
     fn restoring_drops_views_that_cannot_be_shown_and_stale_json() {
-        let saved = set_with_sketch().to_json();
+        let saved = set_with_render().to_json();
         let all = restorable(&saved, |_, _| true).unwrap();
         assert_eq!(all.len(), 3);
-        let some = restorable(&saved, |kind, subject| kind == ViewKind::Model || (kind == ViewKind::Sketch && subject == Some("7"))).unwrap();
-        assert_eq!(some.views().iter().map(|view| view.kind).collect::<Vec<_>>(), [ViewKind::Model, ViewKind::Sketch]);
+        let some = restorable(&saved, |kind, subject| kind == ViewKind::Model || (kind == ViewKind::Render && subject == Some("7"))).unwrap();
+        assert_eq!(some.views().iter().map(|view| view.kind).collect::<Vec<_>>(), [ViewKind::Model, ViewKind::Render]);
         assert_eq!(some.active().kind, ViewKind::Model, "the active view was dropped: the first one shows");
         assert!(restorable(&saved, |_, _| false).is_none(), "nothing left");
+        let foreign = json!({"views":[
+            {"id":1,"kind":"model","name":"Model"},
+            {"id":2,"kind":"unknown","name":"Foreign"},
+            {"id":3,"kind":"sheet","name":""}
+        ]});
+        assert_eq!(restorable(&foreign, |kind, _| kind == ViewKind::Model).unwrap().len(), 1, "unavailable entries cannot poison a usable Model");
         for hostile in [json!(null), json!(5), json!({"views": 3}), json!({"views": [{"kind": 4}]}), json!({"views": []})] {
             assert!(restorable(&hostile, |_, _| true).is_none(), "{hostile}");
         }

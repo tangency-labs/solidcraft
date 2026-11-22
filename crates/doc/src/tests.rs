@@ -107,6 +107,7 @@ fn plate_doc() -> (Document, u64) {
                 direction: Direction::Positive,
                 distance2: None,
                 start_offset: None,
+                symmetric_offset: false,
                 through_all: false,
                 second_follows_first: false,
                 taper: None,
@@ -216,6 +217,7 @@ fn an_outline_closed_by_point_on_curve_tangent_joints_extrudes() {
                 direction: Direction::Positive,
                 distance2: None,
                 start_offset: None,
+                symmetric_offset: false,
                 through_all: false,
                 second_follows_first: false,
                 taper: None,
@@ -976,6 +978,7 @@ fn box_fillet_cut_timeline() {
                 direction: Direction::Positive,
                 distance2: None,
                 start_offset: None,
+                symmetric_offset: false,
                 through_all: false,
                 second_follows_first: false,
                 taper: None,
@@ -1440,10 +1443,11 @@ fn a_design_saved_before_the_midplane_frame_change_keeps_its_old_frame() {
     assert!(built.origin.dist(Vec3::new(0., 0., 20.)) < 1e-9, "the midplane takes the world XY frame: {built:?}");
     assert!(built.x.dist(Vec3::X) < 1e-9 && built.y.dist(Vec3::Y) < 1e-9, "the midplane takes the world XY frame: {built:?}");
 
-    // The design as an older build saved it: the format before this one, and no list of the
-    // changes it has, so the pending change is applied to it as it opens.
+    // The design as an older build saved it: format 63, the one before the midplane change
+    // (`format/v64/midplane-old-frame.rs`), and no list of the changes it has, so the change is
+    // applied to it as it opens. Not `FORMAT - 1`: another pending change moves `FORMAT` on.
     let mut saved: serde_json::Value = serde_json::from_str(&doc.to_json()).unwrap();
-    saved["format"] = serde_json::json!(crate::format::format_string(crate::format::FORMAT - 1));
+    saved["format"] = serde_json::json!(crate::format::format_string(63));
     saved.as_object_mut().unwrap().remove("format_pending");
     let older = crate::format::read(&serde_json::to_string(&saved).unwrap()).unwrap();
     let built = plane_of(&older);
@@ -1795,6 +1799,7 @@ fn a_split_of_a_body_of_two_pieces_gives_the_halves_of_both() {
                 direction: Direction::Positive,
                 distance2: None,
                 start_offset: None,
+                symmetric_offset: false,
                 through_all: false,
                 second_follows_first: false,
                 taper: None,
@@ -1826,6 +1831,8 @@ fn a_split_of_a_body_of_two_pieces_gives_the_halves_of_both() {
                 plane: PlaneRef::Offset { base: Box::new(PlaneRef::Origin { name: "XY".into() }), distance: "5".into() },
                 tool: None,
                 tool_plane: false,
+                tool_sheet: Default::default(),
+                tool_faces: Vec::new(),
                 sketch: None,
                 line: None,
             },
@@ -2248,6 +2255,7 @@ fn an_extruded_ellipse_or_spline_is_one_wall_named_by_its_curve() {
             direction: Direction::Positive,
             distance2: None,
             start_offset: None,
+            symmetric_offset: false,
             through_all: false,
             second_follows_first: false,
             taper: None,
