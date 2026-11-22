@@ -6,8 +6,10 @@
 //! An assembly keeps its shape (#5296): each occurrence a body is placed through is a node named
 //! after it, placed in its parent as the occurrence is, and the body's node sits under it with its
 //! mesh in the component's frame. A viewer can then pick and move a part on its own, turning it
-//! about the component's origin. Without `hierarchy`, every body is a node of the root in world
-//! coordinates under its world name, as SolidCraft 0.40 wrote it.
+//! about the component's origin. Occurrences of one part (a reused component, #19468) write its
+//! mesh once and their body nodes all point at it, since the mesh is in the component's frame.
+//! Without `hierarchy`, every body is a node of the root in world coordinates under its world
+//! name, as SolidCraft 0.40 wrote it.
 //!
 //! A look that is not opaque is alpha blended (#5296). Glass a render setup gives a body is
 //! written with glTF's transmission, IOR and volume extensions, and dispersion and a thin film
@@ -311,16 +313,23 @@ pub fn export_glb(doc: &Document, model: &ModelState, world: &ModelState, bodies
         };
         let mut faces = BTreeMap::new();
         let material = match opts.glass.get(&b.name) {
-            Some(optics) => add(GlbMaterial::of_glass(&b.name, optics, &mesh)?),
+            Some(optics) => {
+                // Named as its part names the body, as the plain material is below.
+                let mut glass = GlbMaterial::of_glass(&b.name, optics, &mesh)?;
+                glass.name = b.definition_name().to_string();
+                add(glass)
+            }
             None => {
                 let material = match doc.model_body_look(b) {
                     Some(look) => GlbMaterial::of_look(&look),
                     None => {
+                        // Named as its part names the body, so the placements of a part share one
+                        // material (and so one mesh, #19468).
                         let to8 = |v: f32| (v.clamp(0.0, 1.0) * 255.0).round() as u8;
                         let color = doc.body_color(b).map_or(DEFAULT_COLOR, |c| c.map(to8));
                         let alpha = unit(doc.model_body_opacity(b));
                         GlbMaterial {
-                            name: b.name.clone(),
+                            name: b.definition_name().to_string(),
                             color,
                             metallic: PLAIN_METALLIC,
                             roughness: PLAIN_ROUGHNESS,
@@ -410,6 +419,38 @@ fn arrays(b: &GlbBody, materials: usize) -> Result<Arrays> {
     Ok(Arrays { positions, min, max, normals, groups })
 }
 
+impl Arrays {
+    /// Whether `other` writes the same mesh: the same triangles per material and the same points
+    /// and normals, to within the rounding a placement's inverse leaves behind (a quarter turn
+    /// leaves 1e-16 where the other occurrence has 0), far below what an f32 file can show.
+    fn same_as(&self, other: &Arrays) -> bool {
+        let close = |a: &[[f32; 3]], b: &[[f32; 3]], abs: f32, rel: f32| {
+            a.len() == b.len() && a.iter().flatten().zip(b.iter().flatten()).all(|(x, y)| (x - y).abs() <= abs + rel * x.abs().max(y.abs()))
+        };
+        let normals = match (&self.normals, &other.normals) {
+            (Some(a), Some(b)) => close(a, b, 1e-5, 0.0),
+            (None, None) => true,
+            _ => false,
+        };
+        normals && self.groups == other.groups && close(&self.positions, &other.positions, 1e-6, 2e-6)
+    }
+}
+
+/// A hash of what two bodies' meshes share when they are the same: name, point count, whether
+/// there are normals, and the triangles per material (points and normals are compared after).
+fn mesh_hash(name: &str, a: &Arrays) -> u64 {
+    use std::hash::{Hash, Hasher};
+    let mut h = std::hash::DefaultHasher::new();
+    name.hash(&mut h);
+    a.positions.len().hash(&mut h);
+    a.normals.is_some().hash(&mut h);
+    for (material, tris) in &a.groups {
+        material.hash(&mut h);
+        tris.hash(&mut h);
+    }
+    h.finish()
+}
+
 /// Why `body` is not written: the file would pass [`MAX_GLB_BYTES`].
 fn too_large(body: &str) -> IoError {
     IoError::Invalid(format!(
@@ -496,9 +537,19 @@ pub(crate) fn glb(name: &str, tree: &[GlbNode], bodies: &[GlbBody], materials: &
         nodes.push(json!({"name": n.name, "matrix": n.matrix.iter().flatten().collect::<Vec<_>>()}));
     }
     let mut meshes = Vec::new();
+    // Meshes written so far, by hash, as (name, arrays, mesh index): a body whose name, points,
+    // normals and triangles per material are exactly those of one written (a reused component's
+    // other occurrences) points its node at that mesh instead of writing it again.
+    let mut written: std::collections::HashMap<u64, Vec<(&str, Arrays, usize)>> = std::collections::HashMap::new();
     for b in bodies {
         let a = arrays(b, materials.len())?;
         if a.groups.is_empty() {
+            continue;
+        }
+        let hash = mesh_hash(&b.name, &a);
+        if let Some((_, _, mesh)) = written.get(&hash).and_then(|c| c.iter().find(|(n, w, _)| *n == b.name && w.same_as(&a))) {
+            nodes.push(json!({"name": b.name, "mesh": mesh}));
+            children[slot(b.parent)?].push(nodes.len());
             continue;
         }
         let view = chunk.vec3s(&a.positions)?;
@@ -525,6 +576,7 @@ pub(crate) fn glb(name: &str, tree: &[GlbNode], bodies: &[GlbBody], materials: &
             primitives.push(json!({"attributes": attributes, "indices": indices, "material": material}));
         }
         meshes.push(json!({"name": b.name, "primitives": primitives}));
+        written.entry(hash).or_default().push((&b.name, a, meshes.len() - 1));
         nodes.push(json!({"name": b.name, "mesh": meshes.len() - 1}));
         children[slot(b.parent)?].push(nodes.len());
     }

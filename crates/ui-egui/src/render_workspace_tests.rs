@@ -1963,7 +1963,7 @@ fn product_gpu_buffers_preserve_opacity_and_never_contain_overlays() {
     );
     assert!(gpu.lines.is_empty() && gpu.overlay.is_empty() && gpu.under.is_empty() && gpu.hidden.is_empty() && gpu.ghost.is_empty());
     s.selection = vec![solidcraft_engine::Sel::Body { name: "Glass".into() }];
-    s.section = Some((solidcore_record::Vec3::ZERO, solidcore_record::Vec3::X));
+    s.section = vec![solidcraft_engine::SectionPlane { id: 1, origin: solidcore_record::Vec3::ZERO, normal: solidcore_record::Vec3::X }];
     let after = solidcraft_engine::product_scene::extract(&s).unwrap();
     assert_eq!(gpu_scene(&after).unwrap().0, key);
     s.execute("appearance.assign", &json!({"bodies":["Glass"],"color":"#336699","opacity":0.0})).unwrap();
@@ -3646,6 +3646,24 @@ fn gpu_material_recipes_use_exact_linear_absorption_without_changing_saved_appea
 }
 
 #[test]
+fn render_only_revisions_preserve_model_source_bindings() {
+    let mut h = Harness::new();
+    h.app.run("solid.box", json!({"length":10,"width":10,"height":3,"body_name":"Target"})).unwrap();
+    enter(&mut h.app, true).unwrap();
+    select_image_method(&mut h.app, ImageMethod::CpuRaytrace);
+    setups::save(&mut h.app).unwrap();
+    let source = h.app.session.doc.clone();
+    let token = h.app.session.design_token();
+    let before = setups::draft(&h.app).unwrap();
+    h.app.render_workspace.view.draft.exposure_ev += 0.25;
+    setups::persist_editor(&mut h.app, &before).unwrap();
+    assert_ne!(h.app.session.design_token(), token, "saved Render settings are a committed edit");
+    assert!(setups::same_model_source(&h.app, &Arc::downgrade(&source)), "history tracking does not change derived geometry");
+    h.app.run("appearance.assign", json!({"bodies":["Target"],"color":"#123456"})).unwrap();
+    assert!(!setups::same_model_source(&h.app, &Arc::downgrade(&source)), "material changes still invalidate the source");
+}
+
+#[test]
 fn numeric_editor_save_refreshes_only_unchanged_runtime_binding_sources() {
     use solidcraft_engine::render::job::ReflectionMode;
     for (method, change_geometry) in
@@ -3705,6 +3723,21 @@ fn numeric_editor_save_refreshes_only_unchanged_runtime_binding_sources() {
         setups::persist_editor(&mut h.app, &before).unwrap();
         assert!(image_request(&h.app).is_err(), "hidden or moved targets must remain stale");
     }
+}
+
+/// The CPU render's body picker takes any body name a rename takes: a hundred CJK characters
+/// are 300 bytes, which the picker greyed out when it counted 128 bytes.
+#[test]
+fn a_body_with_a_long_multibyte_name_can_be_a_reflection_target() {
+    use solidcraft_engine::render::job::ReflectionMode;
+    let mut h = Harness::new();
+    let long = "中".repeat(100);
+    h.app.run("solid.box", json!({"length":10,"width":10,"height":3,"body_name":long})).unwrap();
+    enter(&mut h.app, true).unwrap();
+    select_image_method(&mut h.app, ImageMethod::CpuRaytrace);
+    cpu::set_reflection(&mut h.app, &long, Some(ReflectionMode::Mirror)).unwrap();
+    let bodies = h.app.render_workspace.view.raytrace.reflections.as_ref().map(|r| r.bodies.iter().map(|b| b.body.clone()).collect::<Vec<_>>());
+    assert_eq!(bodies, Some(vec![long]));
 }
 
 #[test]
@@ -4549,12 +4582,12 @@ fn hdr_ui_save_embeds_once_without_a_host_and_reload_never_reopens_the_source_pa
     let cpu = h.app.session.doc.render.setups.get("HDR CPU").unwrap().clone();
     assert!(matches!(&cpu.job, Some(RenderJob::CpuRaytrace { options, .. })
         if options.hdr.unwrap().samples == 64 && options.progressive.unwrap().samples_per_pixel == 7 && options.progressive.unwrap().seed == 84));
-    let encoded = h.app.session.doc.to_json();
-    assert!(!encoded.contains("original-embedded.hdr"), "the document never stores the source path");
+    assert!(!h.app.session.doc.to_json().contains("original-embedded.hdr"), "the document never stores the source path");
+    let encoded = solidcraft_engine::io::write_design_container(&h.app.session.doc).unwrap();
     std::fs::remove_file(&path).unwrap();
 
     for (name, expected, target) in [("HDR GPU", gpu, hdr::Target::Gpu), ("HDR CPU", cpu, hdr::Target::Cpu)] {
-        let loaded = solidcraft_engine::doc::Document::from_json(&encoded).unwrap();
+        let loaded = solidcraft_engine::io::read_design(&encoded).unwrap();
         h.app.session = Session::new(loaded);
         h.app.render_workspace.view.name = name.into();
         setups::load(&mut h.app);
@@ -5880,6 +5913,38 @@ fn render_workspace_pick_stage_tools_filter_sample_clicks_with_shots_shown_and_h
     assert!(h.app.tool.is_none() && h.app.dialog.is_none());
 }
 
+/// Whatever Modelling's selection mode, even one Render's filter has no button for (Features,
+/// Sketch geometry, Components), a click in Render picks what Render's own filter shows (#17512).
+/// Leaving Render, the mode is what it was.
+#[test]
+fn render_picks_as_its_filter_shows_and_keeps_the_mode() {
+    use solidcraft_engine::{PickMode, Sel};
+    let (mut h, occurrence) = render_pick_sample();
+    for (mode, filter) in [(PickMode::Features, "face"), (PickMode::Sketch, "component"), (PickMode::Components, "body")] {
+        enter(&mut h.app, false).unwrap();
+        h.frames(2);
+        crate::selection_mode::set(&mut h.app, mode);
+        enter(&mut h.app, true).unwrap();
+        h.settle();
+        h.step(&json!({"click":{"handle":format!("render:pick:{filter}")}})).unwrap();
+        assert_eq!(h.app.pick_mode(), filter);
+        let at = product_pick_point(&h);
+        h.step(&json!({"move":[at.x,at.y]})).unwrap();
+        h.step(&json!({"click":[at.x,at.y]})).unwrap();
+        match (filter, h.app.session.selection.as_slice()) {
+            ("body", [Sel::Body { name }]) => assert_eq!(name, "Plate"),
+            ("face", [Sel::Face { body, .. }]) => assert_eq!(body, "Plate"),
+            ("component", [Sel::Occurrence { path }]) => assert_eq!(path, &[occurrence]),
+            (_, other) => panic!("{mode:?}: the filter shows {filter}, a click picked {other:?}"),
+        }
+        enter(&mut h.app, false).unwrap();
+        h.frames(2);
+        assert_eq!(h.app.ui.pick_mode, mode, "Render leaves the setting as it was");
+        enter(&mut h.app, true).unwrap();
+        h.settle();
+    }
+}
+
 #[test]
 fn render_pick_choice_stays_in_render_and_modelling_keeps_picking_faces() {
     // Render's Body / Face / Component switches used to write Modelling's pick mode: a Body or
@@ -5897,9 +5962,9 @@ fn render_pick_choice_stays_in_render_and_modelling_keeps_picking_faces() {
         enter(&mut h.app, false).unwrap();
         h.settle();
         assert_eq!(h.app.pick_mode(), "face", "Modelling keeps picking faces after Render {render_choice}");
-        assert!(!h.app.ui.pick_bodies && !h.app.ui.pick_components);
+        assert_eq!(h.app.ui.pick_mode, solidcraft_engine::PickMode::Faces);
         let prefs: serde_json::Value = serde_json::from_str(&h.app.prefs()).unwrap();
-        assert_eq!(prefs["pick_bodies"], false, "Render's choice must not reach the preferences file");
+        assert_eq!(prefs["pick_mode"], "faces", "Render's choice must not reach the preferences file");
 
         // With no command running, hovering a face lights that face and a click picks it.
         let proj = crate::viewport::projection(&h.app, h.app.viewport.rect.unwrap());
@@ -5927,7 +5992,10 @@ fn render_pick_choice_stays_in_render_and_modelling_keeps_picking_faces() {
         h.step(&json!({"click":{"handle":"tab:VIEW"}})).unwrap();
         h.step(&json!({"click":{"handle":"panel:VIEW:SELECT"}})).unwrap();
         let check = |h: &Harness, body: bool, component: bool| {
-            assert_eq!((h.app.ui.pick_bodies, h.app.ui.pick_components), (body, component));
+            assert_eq!(
+                (h.app.ui.pick_mode == solidcraft_engine::PickMode::Bodies, h.app.ui.pick_mode == solidcraft_engine::PickMode::Parts),
+                (body, component)
+            );
             let tree = h.output.accesskit_update.as_ref().unwrap();
             for (label, on) in [(BODY, body), (COMPONENT, component)] {
                 let node = tree.nodes.iter().find(|(_, n)| n.role() == Role::CheckBox && n.label() == Some(label));
@@ -6020,14 +6088,22 @@ fn render_workspace_selection_overlay_never_changes_started_frames_png_or_retain
 fn render_workspace_pick_filter_rejects_invalid_requests_atomically() {
     let mut h = Harness::new();
     let doc = h.app.session.doc.clone();
-    for mode in ["body", "face", "component"] {
+    // The filter sets the one selection mode (#4255): a component is the innermost placement,
+    // the Parts mode, as Render picked before; and the mode reads back as the same filter.
+    for (mode, pick) in [
+        ("body", solidcraft_engine::PickMode::Bodies),
+        ("face", solidcraft_engine::PickMode::Faces),
+        ("component", solidcraft_engine::PickMode::Parts),
+    ] {
+        h.app.ui.pick_off = vec!["faces".into()];
         assert_eq!(h.app.run("select.filter", json!({"mode":mode})).unwrap()["mode"], mode);
-        assert_eq!(h.app.ui.pick_bodies, mode == "body");
-        assert_eq!(h.app.ui.pick_components, mode == "component");
+        assert_eq!(h.app.ui.pick_mode, pick);
+        assert!(h.app.ui.pick_off.is_empty(), "every filter picks through faces");
+        assert_eq!(crate::selection_mode::render_filter(h.app.ui.pick_mode), mode);
     }
     for request in [json!({}), json!({"mode":"edge"}), json!({"mode":"body","extra":true})] {
         assert!(h.app.run("select.filter", request).is_err());
-        assert!(!h.app.ui.pick_bodies && h.app.ui.pick_components);
+        assert_eq!(h.app.ui.pick_mode, solidcraft_engine::PickMode::Parts);
     }
     assert!(Arc::ptr_eq(&doc, &h.app.session.doc));
     assert!(h.app.session.undo.is_empty());
@@ -7785,6 +7861,8 @@ fn render_assign_gestures_grid_drag_modifiers_cancel_and_context_menu() {
     h.app.run("edit.undo", json!({})).unwrap();
     assert_eq!(h.app.session.doc.to_json(), doc.to_json());
     assign::tile(&mut h.app, json!({"appearance":"ABS - Red"}), true).unwrap();
+    // The undo left no walk of the placements; the drag's start makes the one a Ctrl-drop needs.
+    assert_eq!(crate::selection_mode::part_of(&h.app, "Plate"), solidcraft_engine::Sel::Occurrence { path: vec![occurrence] });
     h.step(&json!({"move":[at.x,at.y]})).unwrap();
     h.step(&json!({"key":"Escape"})).unwrap();
     assert!(assign::preview(&h.app).is_none());
@@ -8949,6 +9027,7 @@ fn current_live_pixels_use_only_the_depth_correct_feedback_callback_and_stale_pi
         samples: 1,
         tess: false,
         oit: false,
+        edges: false,
     });
     h.app.render_workspace.host = Some(host_executor(4096, true, 1).unwrap());
     sync_backend(&mut h.app);
@@ -9140,15 +9219,21 @@ fn live_image_imported_mesh_keeps_selected_and_hovered_face_and_body_feedback() 
         255,
     ];
 
-    // Expand actual highlighted placements too: an empty CPU triangle list alone
-    // does not mean that a whole-body GPU highlight is missing.
+    // Count the triangles and check the palette colour of both copied and shared feedback.
     let filled_vertices = |app: &SolveApp, expected_color: [u8; 4]| {
         let feedback = crate::viewport::build_highlight(app).merged();
         assert!(feedback.overlay.is_empty() && feedback.xray.is_empty(), "feedback must remain depth-tested");
         assert!(feedback.selected_planned.is_empty() && feedback.hover_planned.is_empty());
         assert!(feedback.selected_blocks.is_empty() && feedback.hover_blocks.is_empty() && feedback.recoloured.is_empty());
+        if active(app) {
+            assert!(feedback.selected_face_instanced.is_empty(), "Render keeps the selected face in its own feedback geometry");
+        } else if app.viewport.gpu.is_some() {
+            let [face] = feedback.selected_face_instanced.as_slice() else { panic!("Design draws one selected reference mesh") };
+            assert!(Arc::ptr_eq(&face.tris, &reference_shared), "Design shares the model's reference triangles");
+            assert_eq!(face.count(), 1, "Design tints the reference at one placement");
+        }
         let mut tris = feedback.tris.clone();
-        for mesh in feedback.selected_instanced.iter().chain(&feedback.hover_instanced) {
+        for mesh in feedback.selected_instanced.iter().chain(&feedback.hover_instanced).chain(&feedback.selected_face_instanced) {
             mesh.expand_into(&mut tris);
         }
         let vertices = tris.as_chunks::<{ crate::gpu::TRI_SIZE }>().0;
@@ -16345,6 +16430,10 @@ fn render_quality_denoise_mask_displays_categorical_receipt_exports_and_returns_
     let host = CpuHost::for_platform().unwrap();
     h.app.session.set_render_job_host(Some(host.clone())).unwrap();
     h.app.render_workspace.image_host = Some(host);
+    if image_host(&h.app, ImageMethod::CpuRaytrace).is_err() {
+        eprintln!("render quality denoise mask test requires raytrace-cpu");
+        return;
+    }
     h.app.run("solid.box", json!({"length":5,"width":4,"height":3,"body_name":"Mask subject"})).unwrap();
     let request = json!({"settings":{"width":16,"height":8,"camera":h.app.cam,"job":{"method":"cpu_raytrace",
         "options":{"threads":1,"progressive":{"samples_per_pixel":2,"seed":81},

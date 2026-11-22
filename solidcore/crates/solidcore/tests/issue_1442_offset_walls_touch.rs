@@ -147,11 +147,16 @@ fn issue_1442_plate_hole_crossing_side_still_resolved() {
     // to the integrator's 1e-6, and main's value (bit-identical with the flag on and off
     // there) to 1e-12. Main's value was 4554.583387224843 (7.1e-9 short of the closed form)
     // until `brep_volume` closed the tolerant edges' gaps (#16735); now 2.1e-9 short
-    // (MEASURED), the move within the old leak bound.
+    // (MEASURED), the move within the old leak bound. Since the trim pieces integrate by
+    // Gauss-Kronrod (#14460) it is the closed form to 1.0e-15, held to 1e-14 below (forced to
+    // accuracy 1e-11 and 1e-12 Gauss-Kronrod gives the same bits, the earlier Runge-Kutta
+    // trim pieces forced to 1e-12 3.6e-15 short); before the gap closure this integrator gave
+    // 4554.583397012052, the figure the move is checked from.
     assert!((v - want).abs() <= 1e-6 * want, "{v} vs {want}");
-    let pinned = 4_554.583_409_746_097_f64;
+    assert!((v - want).abs() <= 1e-14 * want, "{v} vs {want}");
+    let pinned = 4_554.583_419_533_318_f64;
     assert!((v - pinned).abs() <= 1e-12 * pinned, "{v} vs {pinned}");
-    volume_leak::assert_moved_by_the_old_leak(&k, &mut b, 4_554.583_387_224_843, pinned, 1e-6);
+    volume_leak::assert_moved_by_the_old_leak(&k, &mut b, 4_554.583_397_012_052, pinned, 1e-6);
 }
 
 #[test]

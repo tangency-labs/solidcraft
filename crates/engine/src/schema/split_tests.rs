@@ -12,7 +12,7 @@ use crate::schema::{ParamCheck, input_schema_for, output_schema_for};
 fn schemas_and_the_key_check_agree() {
     assert_keys(
         input_schema_for::<SplitBodyParams>(),
-        &["body", "body_name", "body_names", "line", "name", "participants", "plane", "sketch", "tool"],
+        &["body", "body_name", "body_names", "line", "name", "participants", "plane", "sketch", "tool", "tool_plane"],
     );
     assert_keys(
         input_schema_for::<SplitFaceParams>(),
@@ -127,6 +127,8 @@ fn the_check_takes_what_the_schema_allows() {
             true,
         ),
         ("solid.split_body", &body, json!({"body": "B", "tool": {"body": "T", "point": [0, 0, 0]}}), true),
+        ("solid.split_body", &body, json!({"body": "B", "tool": {"body": "T", "point": [0, 0, 0]}, "tool_plane": true}), true),
+        ("solid.split_body", &body, json!({"body": "B", "tool_plane": "yes"}), false),
         ("solid.split_body", &body, json!({"body": "B", "tool": {"body": "T", "point": {"x": 0, "y": 0, "z": 0}, "side": 1}}), true),
         ("solid.split_body", &body, json!({"body": "B", "sketch": 4, "line": "cut", "participants": ["*"]}), true),
         ("solid.split_body", &body, json!({"body": "B", "sketch": null, "line": null, "tool": null, "plane": null}), true),
@@ -194,6 +196,7 @@ fn split_body_and_split_face_reply_with_feature_result() {
         ("solid.split_body", json!({"body": "B", "plane": mid, "name": "Halves"})),
         ("solid.split_body", json!({"body": "B", "plane": "Mid", "tool": null, "sketch": null, "line": null})),
         ("solid.split_body", json!({"body": "B", "tool": {"body": "Tool", "point": [20, 10, 27]}})),
+        ("solid.split_body", json!({"body": "B", "tool": {"body": "Tool", "point": [20, 10, 27]}, "tool_plane": true})),
         ("solid.split_body", json!({"body": "B", "sketch": cuts, "line": "cut"})),
     ];
     for (id, p) in calls {
@@ -210,4 +213,15 @@ fn split_body_and_split_face_reply_with_feature_result() {
             assert!(count("created_bodies") >= 1 && count("created_bodies") + count("changed_bodies") == 2, "{id} {p}: {r}");
         }
     }
+}
+
+#[test]
+fn a_planar_split_tool_refuses_a_curved_face_without_changing_the_design() {
+    let mut s = Session { param_check: ParamCheck::Strict, ..Session::default() };
+    s.execute("solid.box", &json!({"length":40,"width":30,"height":20,"body_name":"Target"})).unwrap();
+    s.execute("solid.cylinder", &json!({"diameter":20,"height":40,"base":[20,15,-10],"operation":"new","body_name":"Tool"})).unwrap();
+    let before = s.doc.to_json();
+    let error = s.execute("solid.split_body", &json!({"body":"Target","tool":{"body":"Tool","point":[30,15,5]},"tool_plane":true})).unwrap_err();
+    assert!(error.to_string().contains("no longer planar"), "{error}");
+    assert_eq!(s.doc.to_json(), before);
 }

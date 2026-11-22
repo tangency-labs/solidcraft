@@ -434,7 +434,7 @@ fn one_wall_per_circle(k: &Kernel, given: &[Profile], curves: Vec<Curve>, tol: f
 
 /// Runs a call that makes a new body: the kernel locked, its own status as the capi passes it.
 fn making(call: &'static str, f: impl FnOnce(&mut Kernel) -> solidcore::Result<Out<Brep>>) -> Result<Body> {
-    run(call, f)?.map(Body::new)
+    run(call, f)?.map(Body::from_kernel)
 }
 
 /// `smlib_planar_faces`: a sheet of planar faces bounded by the closed `loops`
@@ -951,7 +951,9 @@ pub(crate) fn sweep_placed(profile: &[Profile], path: &[Profile], frame: SweepFr
             if closed {
                 let tol = b.tolerance();
                 match stitch_faces(k, &mut b, tol, None, false) {
-                    Ok(s) if s.lamina_edges != 0 => return Ok(Err(Error::NotSolid)),
+                    // A solid asked for has no free edge left; a sheet (an open profile, or one
+                    // not capped) keeps the profile's own ends free (#17828).
+                    Ok(s) if cap && s.lamina_edges != 0 => return Ok(Err(Error::NotSolid)),
                     Ok(_) => b.refresh_cached_topology(),
                     Err(e) => return Ok(Err(status(e))),
                 }

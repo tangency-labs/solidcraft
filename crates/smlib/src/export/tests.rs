@@ -575,10 +575,44 @@ mod mapped_tests {
         let line = |b: f64| b::Curve2::Spline { knots: vec![0.0, 0.0, b, b], points: vec![[0.0, 0.0], [b, 0.0]] };
         for t in [6.5490500023792094e-15, 1e-12] {
             let e = mapped(&line(t), true, [1.0, 0.0], [0.0, t], &|_, _| true).unwrap_err();
-            assert!(e.to_string().contains(&format!("its edge on [0, {t}]")), "{e}");
+            let e = e.to_string();
+            assert!(e.contains(&format!("its edge on [0, {t}]")) && e.contains("no longer than SMLib's knot resolution"), "{e}");
         }
         let out = mapped(&line(2e-12), true, [1.0, 0.0], [0.0, 2e-12], &|_, _| false).unwrap();
         check_curve2(&out, &mut Budget::input()).unwrap();
+        // Each other refusal says which end is off, not the knot resolution.
+        let e = mapped(&line(1.0), true, [1.0, 0.0], [0.0, 0.5], &|_, _| false).unwrap_err().to_string();
+        assert!(e.contains("its end 0.5 from the edge's") && !e.contains("its start") && !e.contains("knot resolution"), "{e}");
+    }
+
+    /// An edge on a spline whose knots run from 5e-12 to 2.5e-4 (a file may write knots in
+    /// metres), its start vertex projecting 4e-12 inside the curve's first knot (0.29 nm along
+    /// it), and SMLib's trim of the use against it starting on that knot: one point of the edge, so
+    /// the trim is the edge's. Reversing the trim took its start to (k + 2.5e-4) − 2.5e-4, 2e-20
+    /// below the knot and off the curve, so it was not found on the edge and the solid came in as
+    /// no body.
+    #[test]
+    fn a_reversed_trim_starting_on_its_curves_first_knot_near_zero_is_the_edges() {
+        let (k0, k1) = (5e-12, 2.5e-4);
+        let edge = [k0 + 4e-12, k1];
+        let curve = b::Curve::Spline {
+            knots: vec![k0, k0, k0, k0, k1, k1, k1, k1],
+            points: vec![[0.0, 0.0, 0.0], [6.0, 1.0, 0.0], [6.0, 9.0, 0.0], [0.0, 10.0, 0.0]],
+        };
+        assert!((k0 + edge[1]) - edge[1] < k0, "the rounding this case is about");
+        let on_edge = |s: f64, t: f64| match (point3(&curve, s), point3(&curve, t)) {
+            (Some(p), Some(q)) => (0..3).map(|c| (p[c] - q[c]).powi(2)).sum::<f64>().sqrt() <= 2.5e-3,
+            _ => false,
+        };
+        // SMLib's trim, along the use (against the edge): from the edge's end to the curve's knot.
+        let (a, z) = (k0, edge[1]);
+        let trim = b::Curve2::Spline { knots: vec![a, a, a, a, z, z, z, z], points: vec![[3.0, 2.5], [2.0, 2.4], [1.0, 2.2], [0.0, 2.0]] };
+        let out = mapped(&trim, false, [1.0, 0.0], edge, &on_edge).unwrap_or_else(|e| panic!("{e}"));
+        check_curve2(&out, &mut Budget::input()).unwrap();
+        assert_eq!(out.interval(), Some(edge));
+        // Reversed: the use's end is the edge's start.
+        assert_eq!(eval(&out, edge[0]), eval(&trim, z));
+        assert_eq!(eval(&out, edge[1]), eval(&trim, a));
     }
 
     /// A trim already on its edge is left as it is.

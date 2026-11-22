@@ -4,6 +4,7 @@
 //! and context item publishes its rect to the widget registry while it is drawn.
 use crate::{BackingTooltipExt as _, Container, NavigationEdge, NavigationIdle, NavigationKind, NavigationSize, Surface};
 use egui::{Align2, Rect, pos2, vec2};
+use solidcraft_theme::Tokens;
 
 /// One slot as the bar draws it.
 #[derive(Clone, Debug)]
@@ -32,6 +33,8 @@ pub struct SlotView<'a> {
     pub rect: Rect,
     /// A second registry name its handle is published under, wherever it is drawn.
     pub alias: Option<&'a str>,
+    /// A small dot at the icon's corner: something the slot holds is not at its default.
+    pub dot: bool,
 }
 
 /// Labels of the bar's own controls, in the app's language.
@@ -75,6 +78,18 @@ pub enum MenuEntry {
     Heading(String),
     Separator,
     Row(MenuRow),
+    Percent {
+        value: u32,
+        label: String,
+        target: String,
+    },
+    /// A segmented choice (the picked one is item `{id}:{index}`).
+    Segments {
+        id: String,
+        options: Vec<String>,
+        selected: usize,
+        targets: Vec<String>,
+    },
 }
 
 /// One row of a slot's menu.
@@ -90,8 +105,14 @@ pub struct MenuRow {
     pub tip: Option<String>,
     /// The registry name its rect is published under.
     pub target: String,
-    /// Rows of the menu this row opens (empty: the row is picked itself).
-    pub submenu: Vec<MenuRow>,
+    /// A checkbox in place of the icon (its state), for a row that switches a setting.
+    pub check: Option<bool>,
+    /// Nested under the row above it.
+    pub indent: bool,
+    /// Entries of the menu this row opens (empty: the row is picked itself).
+    pub submenu: Vec<MenuEntry>,
+    /// A pick in that menu leaves it open, for choices made several at a time.
+    pub keep_open: bool,
 }
 
 impl MenuRow {
@@ -119,6 +140,10 @@ pub enum NavAction {
     Item {
         menu: String,
         item: String,
+    },
+    Percent {
+        menu: String,
+        tenths: u32,
     },
     Context(ContextItem),
 }
@@ -176,6 +201,13 @@ pub fn paint_slots(
         if editing.is_some() {
             crate::navigation_edit_outline(ui, slot.rect, slot.hidden, chosen);
         }
+        if slot.dot && editing.is_none() {
+            let t = Tokens::get();
+            let icon = crate::NavigationMetrics::for_size(size).icon;
+            let at = pos2(slot.rect.left() + crate::NAV_MENU_LEFT + icon - 1.0, slot.rect.center().y - icon / 2.0 + 1.0);
+            ui.painter().circle_filled(at, 3.8, t.dialog_body);
+            ui.painter().circle_filled(at, 2.7, t.form_primary);
+        }
         crate::navigation_tooltip(&response, rect, edge, &slot.tip, slot.key.as_deref());
         responses.push(response);
     }
@@ -209,7 +241,7 @@ pub fn show(ui: &mut egui::Ui, bar: &Bar<'_>, menu: impl FnOnce(&str) -> Menu) -
             if let Some(alias) = slot.alias {
                 solidcraft_ui_registry::publish_handle(alias, response.rect.center());
             }
-            context_menu(&response, Some(slot.index), &bar.labels, &mut action);
+            context_menu(&response, (slot.index != usize::MAX).then_some(slot.index), &bar.labels, &mut action);
             if response.clicked() && slot.kind != NavigationKind::Separator {
                 if slot.kind == NavigationKind::Menu {
                     open = if open == slot.id { String::new() } else { slot.id.to_owned() };
@@ -260,11 +292,11 @@ pub fn show(ui: &mut egui::Ui, bar: &Bar<'_>, menu: impl FnOnce(&str) -> Menu) -
                     None => overflow_menu(ui, bar, &mut open, &mut action),
                     Some(m) if m.entries.is_empty() => open.clear(),
                     Some(m) => {
-                        if let Some(item) = menu_rows(ui, &m.entries) {
-                            action = Some(NavAction::Item { menu: open.clone(), item });
-                            if m.close_on_pick {
+                        if let Some((picked, closes)) = menu_rows(ui, &open, &m.entries, false) {
+                            if m.close_on_pick && closes && matches!(picked, NavAction::Item { .. }) {
                                 open.clear();
                             }
+                            action = Some(picked);
                         }
                     }
                 });
@@ -320,7 +352,7 @@ fn overflow_menu(ui: &mut egui::Ui, bar: &Bar<'_>, open: &mut String, action: &m
             item.selected = slot.selected;
         }
         let response = item.show(ui);
-        context_menu(&response, Some(slot.index), &bar.labels, action);
+        context_menu(&response, (slot.index != usize::MAX).then_some(slot.index), &bar.labels, action);
         solidcraft_ui_registry::publish_target(&format!("nav:slot:{}", slot.id), response.rect);
         if let Some(alias) = slot.alias {
             solidcraft_ui_registry::publish_handle(alias, response.rect.center());
@@ -337,27 +369,56 @@ fn overflow_menu(ui: &mut egui::Ui, bar: &Bar<'_>, open: &mut String, action: &m
     }
 }
 
-/// A menu's rows; the id of the row picked, if any.
-fn menu_rows(ui: &mut egui::Ui, entries: &[MenuEntry]) -> Option<String> {
+/// A menu's rows; what was picked, if anything, and whether that pick may close the menu (a pick
+/// in a submenu that keeps itself open may not).
+fn menu_rows(ui: &mut egui::Ui, menu: &str, entries: &[MenuEntry], keep_open: bool) -> Option<(NavAction, bool)> {
     let mut picked = None;
     for entry in entries {
         match entry {
             MenuEntry::Heading(title) => crate::navigation_menu_heading(ui, title),
             MenuEntry::Separator => crate::navigation_menu_separator(ui),
+            MenuEntry::Percent { value, label, target } => {
+                let mut percent = *value as f32 / 10.0;
+                let response = crate::number_field(ui, &mut percent, 5.0..=3200.0, 1.0, " %").backing_on_hover_text(label);
+                solidcraft_ui_registry::publish_target(target, response.rect);
+                if response.changed() {
+                    picked = Some((NavAction::Percent { menu: menu.to_owned(), tenths: (percent * 10.0).round() as u32 }, !keep_open));
+                }
+            }
+            MenuEntry::Segments { id, options, selected, targets } => {
+                let labels: Vec<&str> = options.iter().map(String::as_str).collect();
+                let targets: Vec<&str> = targets.iter().map(String::as_str).collect();
+                let mut chosen = *selected;
+                let t = Tokens::get();
+                let margin = egui::Margin::symmetric(t.space_8 as i8, t.space_2 as i8);
+                let changed = egui::Frame::NONE
+                    .inner_margin(margin)
+                    .show(ui, |ui| {
+                        crate::segmented(ui, &mut chosen, &labels, crate::Segments { compact: true, targets: &targets, ..Default::default() })
+                    })
+                    .inner;
+                if changed {
+                    picked = Some((NavAction::Item { menu: menu.to_owned(), item: format!("{id}:{chosen}") }, !keep_open));
+                }
+            }
             MenuEntry::Row(row) => {
                 let response = menu_row(ui, row);
                 if row.submenu.is_empty() {
                     if response.clicked() {
-                        picked = Some(row.id.clone());
+                        picked = Some((NavAction::Item { menu: menu.to_owned(), item: row.id.clone() }, !keep_open));
                     }
                     continue;
                 }
-                Container::new(ui.ctx(), Surface::Popup).menu(&response).frame(crate::navigation_popup_frame()).show(|ui| {
+                let mut popup = Container::new(ui.ctx(), Surface::Popup).menu(&response).frame(crate::navigation_popup_frame());
+                if row.keep_open {
+                    popup = popup.close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside);
+                }
+                popup.show(|ui| {
                     ui.set_width(crate::NAV_POPUP_WIDTH - 2.0 * (f32::from(crate::NAV_POPUP_PADDING) + crate::NAV_BORDER));
                     ui.spacing_mut().item_spacing.y = 0.0;
-                    for sub in &row.submenu {
-                        if menu_row(ui, sub).clicked() {
-                            picked = Some(sub.id.clone());
+                    if let Some((action, closes)) = menu_rows(ui, menu, &row.submenu, row.keep_open) {
+                        picked = Some((action, closes));
+                        if !row.keep_open {
                             ui.close();
                         }
                     }
@@ -374,6 +435,8 @@ fn menu_row(ui: &mut egui::Ui, row: &MenuRow) -> egui::Response {
     item.enabled = row.enabled;
     item.detail = row.detail.as_deref();
     item.submenu = !row.submenu.is_empty();
+    item.check = row.check;
+    item.indent = row.indent;
     let response = item.show(ui);
     let response = match &row.tip {
         Some(tip) => response.backing_on_hover_text(tip),
