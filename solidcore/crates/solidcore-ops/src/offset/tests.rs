@@ -2424,6 +2424,102 @@ mod drafts {
         let report = b.check(crate::CheckLevel::All).unwrap();
         assert_eq!(report.failures, 0, "{}", report.text);
     }
+
+    /// A finite radial removal leaves an overhang above the fixed top plane and
+    /// removes a shallow blind hole wholly outside the new conical wall.
+    #[test]
+    fn a_drafted_cylinder_keeps_its_boss_and_loses_a_hole_beyond_the_new_wall() {
+        all_fixes();
+        let cylinder = make_cylinder([0.0; 3], 1.5, 4.0).unwrap();
+        let boss = make_box([1.02, -0.36, 4.0], [0.36, 0.72, 0.36]).unwrap();
+        let b = crate::boolean::boolean(cylinder, boss, crate::BooleanOp::Union)
+            .unwrap()
+            .unwrap();
+        let hole = make_cylinder([-1.4, 0.0, 3.8], 0.05, 0.2).unwrap();
+        let b = crate::boolean::boolean(b, hole, crate::BooleanOp::Subtract)
+            .unwrap()
+            .unwrap();
+        let o = order(&b);
+        let outer = face(&b, &o, |bx| {
+            bx.min().x < 0.0 && bx.max().x > 0.0 && bx.max().z > bx.min().z
+        });
+        draft(&b, &o, &[outer], [0.0; 3], Z, Z, THREE).unwrap();
+        // The hole's nearest radius is 1.35, beyond r(3.8) < 1.301. None
+        // survives. Above z = 4 the entire boss stays, including its overhang.
+        let small = 1.5 - 4.0 * TAN_THREE;
+        let expected =
+            PI * 4.0 * (1.5 * 1.5 + 1.5 * small + small * small) / 3.0 + 0.36 * 0.72 * 0.36;
+        assert!(rel(volume(&b), expected) < 1e-9);
+        assert_eq!(b.counts().unwrap()[0], 9);
+        b.check_solid().unwrap();
+        let report = b.check(crate::CheckLevel::All).unwrap();
+        assert_eq!(report.failures, 0, "{}", report.text);
+    }
+
+    /// S1767 of the public stress corpus: two touching pads, the second 0.00002
+    /// taller, stay above the cylinder's top while its side drafts under their feet.
+    #[test]
+    #[ignore = "S1767: the joined input fails draft's solid precondition (#18805)"]
+    fn a_cylinder_with_touching_stepped_bosses_drafts_under_both() {
+        all_fixes();
+        let cylinder = make_cylinder([0.0; 3], 1.5, 4.0).unwrap();
+        let first = make_box([1.02, -0.18, 4.0], [0.36, 0.36, 0.36]).unwrap();
+        let second = make_box([1.02, 0.18, 4.0], [0.36, 0.36, 0.36002]).unwrap();
+        let b = crate::boolean::boolean(cylinder, first, crate::BooleanOp::Union)
+            .unwrap()
+            .unwrap();
+        let b = crate::boolean::boolean(b, second, crate::BooleanOp::Union)
+            .unwrap()
+            .unwrap();
+        let o = order(&b);
+        draft(&b, &o, &[curved(&b, &o)], [0.0; 3], Z, Z, THREE).unwrap();
+        // The entire pads stay unchanged above z = 4. Their shared face has no volume.
+        let small = 1.5 - 4.0 * TAN_THREE;
+        let expected = PI * 4.0 * (1.5 * 1.5 + 1.5 * small + small * small) / 3.0
+            + 0.36 * 0.36 * (0.36 + 0.36002);
+        assert!(rel(volume(&b), expected) < 1e-9);
+        assert!(b.is_manifold_solid().unwrap());
+        b.check_solid().unwrap();
+        let report = b.check(crate::CheckLevel::All).unwrap();
+        assert_eq!(report.failures, 0, "{}", report.text);
+    }
+
+    /// S8075 of the public stress corpus: drafting the outer wall opens the three
+    /// blind holes through the side. Their walls must be trimmed against the cone.
+    #[test]
+    fn a_cylinder_with_three_blind_holes_drafts_through_the_hole_walls() {
+        all_fixes();
+        let mut b = make_cylinder([0.0; 3], 600.0, 2400.0).unwrap();
+        for y in [-180.0, 0.0, 180.0] {
+            let hole = make_cylinder([-480.0, y, 1920.0], 60.0, 480.0).unwrap();
+            b = crate::boolean::boolean(b, hole, crate::BooleanOp::Subtract)
+                .unwrap()
+                .unwrap();
+        }
+        let o = order(&b);
+        let outer = face(&b, &o, |bx| {
+            bx.min().x < 0.0 && bx.max().x > 0.0 && bx.max().z > bx.min().z
+        });
+        draft(&b, &o, &[outer], [0.0; 3], Z, Z, THREE).unwrap();
+        // r(z) = 600 - z tan(3 degrees). Below the blind floors (-480, 0)
+        // is material; above them each hole remains void on its inward side.
+        // At z = 2000 the cone radius is between 495 and 496, so (500, 0)
+        // is outside although it was inside the original cylinder.
+        for (point, wanted) in [
+            ([-480.0, 0.0, 1900.0], crate::PointClass::Inside),
+            ([500.0, 0.0, 2000.0], crate::PointClass::Outside),
+            ([-410.0, 0.0, 2300.0], crate::PointClass::Inside),
+            ([-430.0, -180.0, 2300.0], crate::PointClass::Outside),
+            ([-430.0, 0.0, 2300.0], crate::PointClass::Outside),
+            ([-430.0, 180.0, 2300.0], crate::PointClass::Outside),
+        ] {
+            assert_eq!(b.classify_point(point).unwrap(), wanted, "{point:?}");
+        }
+        assert!(b.is_manifold_solid().unwrap());
+        b.check_solid().unwrap();
+        let report = b.check(crate::CheckLevel::All).unwrap();
+        assert_eq!(report.failures, 0, "{}", report.text);
+    }
 }
 
 /// Kernel diagnostics cross the application seam here; the app receives only ops
@@ -2651,14 +2747,20 @@ fn a_countersinks_cone_moves_into_the_material_over_the_well() {
 /// (it was refused late, as a body that fails its check). Moved the other way the cone meets
 /// the hole r 2 at z = 3.5 - δ / sin θ and the ring's plane at r = 3.99 - δ / cos θ: the cone
 /// itself closes at δ = 2 sin θ, so +2 is refused naming the cone and 2 sin θ (it was refused
-/// for a reach with no certified bound).
+/// for a reach with no certified bound). Moved +4 the same: the cone closes at the same
+/// 2 sin θ, at r 2, though by the end of the move its crossing with the ring's plane,
+/// r = 3.99 - 4 / cos θ = -1.65, has passed the axis.
 #[test]
 #[allow(clippy::disallowed_methods)] // closed-form oracle, not ops geometry
 fn a_ring_beside_a_countersinks_cone_that_the_move_closes_is_refused_naming_it() {
     all_fixes();
     let side = (1.99_f64 * 1.99 + 4.0).sqrt();
     let (sin, cos) = (1.99 / side, 2.0 / side);
-    for (distance, closes, largest) in [(-2.0, "ring", 0.01 * cos), (2.0, "cone", 2.0 * sin)] {
+    for (distance, closes, largest) in [
+        (-2.0, "ring", 0.01 * cos),
+        (2.0, "cone", 2.0 * sin),
+        (4.0, "cone", 2.0 * sin),
+    ] {
         let b = countersunk_block(3.99);
         let o = order(&b);
         let cone = countersink_cone(&b, &o, 3.99);
