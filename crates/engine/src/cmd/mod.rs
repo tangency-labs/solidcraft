@@ -196,6 +196,7 @@ pub(crate) use sketch_project::{MAX_PROJECTED_ENTITIES, RefForm, model_ref, ref_
 mod sketch_rational;
 pub mod sketch_selection;
 mod sketch_store;
+mod stretch;
 mod surface;
 mod surface_analysis;
 mod surface_boundary;
@@ -501,6 +502,7 @@ pub fn command_specs() -> Vec<&'static CommandSpec> {
     v.extend(features_more::COMMANDS.iter());
     v.extend(cell_grid::COMMANDS.iter());
     v.extend(mesh::COMMANDS.iter());
+    v.extend(stretch::COMMANDS.iter());
     v.extend(construct_auto::COMMANDS.iter());
     v.extend(plugin::COMMANDS.iter());
     v.extend(plugin_storage::COMMANDS.iter());

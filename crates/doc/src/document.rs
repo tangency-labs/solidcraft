@@ -2483,6 +2483,64 @@ pub enum FeatureKind {
         #[serde(default, skip_serializing_if = "std::ops::Not::not")]
         patch_holes: bool,
     },
+    /// Stretch (#20512): `body` cut across square to `direction`, `at` in from its side that
+    /// stays put, and the part beyond moved along `direction` by `distance` (a shrink when
+    /// negative), the gap filled by the body's own section (`kernel::stretch`).
+    Stretch {
+        body: BodyName,
+        direction: StretchDirection,
+        #[walk(length = "Cut at")]
+        at: Expr,
+        #[walk(length = "Distance")]
+        distance: Expr,
+    },
+}
+
+/// The way the moving side of a Stretch goes: along one of its component's axes.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum StretchDirection {
+    PlusX,
+    MinusX,
+    PlusY,
+    MinusY,
+    PlusZ,
+    MinusZ,
+}
+
+impl StretchDirection {
+    pub const ALL: [StretchDirection; 6] = [Self::PlusX, Self::MinusX, Self::PlusY, Self::MinusY, Self::PlusZ, Self::MinusZ];
+
+    /// The unit vector the moving side goes along.
+    pub fn vector(self) -> solidcore_record::Vec3 {
+        use solidcore_record::Vec3;
+        match self {
+            Self::PlusX => Vec3::X,
+            Self::MinusX => Vec3::X * -1.0,
+            Self::PlusY => Vec3::Y,
+            Self::MinusY => Vec3::Y * -1.0,
+            Self::PlusZ => Vec3::Z,
+            Self::MinusZ => Vec3::Z * -1.0,
+        }
+    }
+
+    /// As commands and the design write it: `+x`, `-x`, … `-z`.
+    pub fn key(self) -> &'static str {
+        match self {
+            Self::PlusX => "+x",
+            Self::MinusX => "-x",
+            Self::PlusY => "+y",
+            Self::MinusY => "-y",
+            Self::PlusZ => "+z",
+            Self::MinusZ => "-z",
+        }
+    }
+
+    /// From [`Self::key`] (case and spaces ignored).
+    pub fn parse(s: &str) -> Option<Self> {
+        let s = s.trim().to_ascii_lowercase();
+        Self::ALL.into_iter().find(|d| d.key() == s)
+    }
 }
 
 /// A fillet corner set back: the vertex at `vertex`, where every edge is rounded, has its corner
@@ -3289,6 +3347,7 @@ impl FeatureKind {
             FeatureKind::MeshImport { .. } => "MeshFeature",
             FeatureKind::MeshConvert { .. } => "MeshConvertFeature",
             FeatureKind::Repair { .. } => "RepairFeature",
+            FeatureKind::Stretch { .. } => "StretchFeature",
         }
     }
 
@@ -3376,6 +3435,7 @@ impl FeatureKind {
             FeatureKind::MeshConvert { .. } => "mesh_convert",
             FeatureKind::MeshImport { .. } => "mesh_import",
             FeatureKind::Repair { .. } => "repair",
+            FeatureKind::Stretch { .. } => "stretch",
         }
     }
 
@@ -3462,6 +3522,7 @@ impl FeatureKind {
             "MeshFeature" => "mesh_import",
             "MeshConvertFeature" => "mesh_convert",
             "RepairFeature" => "repair",
+            "StretchFeature" => "stretch",
             _ => return None,
         })
     }
@@ -3552,6 +3613,7 @@ impl FeatureKind {
             FeatureKind::MeshImport { .. } => "Mesh",
             FeatureKind::MeshConvert { .. } => "ConvertMesh",
             FeatureKind::Repair { .. } => "Repair",
+            FeatureKind::Stretch { .. } => "Stretch",
         }
     }
 }
