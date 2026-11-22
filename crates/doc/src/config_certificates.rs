@@ -828,22 +828,34 @@ impl Document {
     /// The pick point is NOT moved twice: it is compared directly against the current (already
     /// offset) plane, whose distance from the original pick point is exactly `offset_dist`.
     fn is_current_offset_face(&self, body: &ModelBody, index: usize, _point: solidcore_record::Vec3) -> Option<FaceCertificate> {
-        let _tolerance = (body.body.size() * 1e-3).max(1e-3);
-        let _plane = body.body.face_plane(index);
+        let plane = body.body.planar_face(index)?;
+        let tolerance = (body.body.size() * 1e-3).max(1e-3);
 
         for feature in &self.features {
-            if let FeatureKind::OffsetFace { faces, distance, body: _offset_body } = &feature.kind {
+            if let FeatureKind::OffsetFace { faces, distance, body: offset_body } = &feature.kind {
+                // When the feature targets a specific body by name, only consider it for this body.
+                if let Some(offset_body_name) = offset_body.as_ref()
+                    && offset_body_name != body.definition_name()
+                {
+                    continue;
+                }
+
                 let d: f64 = self.eval(distance, crate::walk::Kind::Length).ok()?;
                 if d.abs() < 1e-9 {
                     continue;
                 }
-                // The OffsetFace feature exists with a non-zero distance, so this
-                // face is a candidate for Lineage attachment via geometric continuity
-                // rather than name matching. The pick point is recorded on the original
-                // face plane; the offset moves the face by `d`, so the pick point is
-                // `d` away from the current plane.
-                if faces.iter().next().is_some() {
-                    return Some(FaceCertificate::Lineage);
+
+                // The pick point was on the original face; after offsetting by `d`,
+                // the face moves by `d` along its normal, so the pick point is `|d|`
+                // away from the current plane. Verify geometric continuity: this face
+                // is the offset's output only if a recorded pick point lies at that
+                // distance from its plane.
+                for face_pick in faces {
+                    let pick_point: solidcore_record::Vec3 = (*face_pick).into();
+                    let signed_dist = (pick_point - plane.origin).dot(plane.normal());
+                    if (signed_dist.abs() - d.abs()).abs() <= tolerance {
+                        return Some(FaceCertificate::Lineage);
+                    }
                 }
             }
         }
@@ -1210,7 +1222,7 @@ mod tests {
         // Offset the -Y face by 5mm
         let _offset_id = doc
             .add_feature(
-                FeatureKind::OffsetFace { faces: vec![FacePick(Vec3::new(25., 0., 15.))], distance: "5".into(), body: Some("Base".into()) },
+                FeatureKind::OffsetFace { faces: vec![FacePick(Vec3::new(25., 0., 15.))], distance: "5".into(), body: None },
                 Some("OffsetFace1"),
             )
             .unwrap();
@@ -1223,18 +1235,23 @@ mod tests {
         assert_eq!(state.bodies.len(), 1);
         let body = &state.bodies[0];
 
-        // Find the offset face (the -Y face at y=-5)
-        let idx = body
-            .body
-            .face_sources()
-            .unwrap()
-            .iter()
-            .enumerate()
-            .find(|(_, s)| matches!(s, Some(solidcraft_kernel::FaceSource::Box { axis: 1, high: false, .. })))
-            .map(|(i, _)| i)
-            .unwrap();
+        // Find the offset face: after offsetting the -Y face (y=0) by 5mm in -Y direction,
+        // the face moves to y=-5. Search face planes for one at y ≈ -5.
+        let tolerance = (body.body.size() * 1e-3).max(1e-3);
+        let mut offset_idx = None;
+        if let Ok(faces) = body.body.faces(tolerance) {
+            for (i, _) in faces.iter().enumerate() {
+                if let Some(plane) = body.body.planar_face(i) {
+                    if plane.origin.y < -4.0 && plane.origin.y > -6.0 {
+                        offset_idx = Some(i);
+                        break;
+                    }
+                }
+            }
+        }
+        let idx = offset_idx.expect("should find the offset face at y ≈ -5");
 
-        let picked = body.body.face_plane(idx).unwrap();
+        let picked = body.body.planar_face(idx).unwrap();
 
         // Directly test is_current_offset_face: the OffsetFace feature exists with
         // a non-zero distance, so the face is a candidate for Lineage attachment.
@@ -1273,7 +1290,7 @@ mod tests {
         // Offset the -Y face by 5mm
         let _offset_id = doc
             .add_feature(
-                FeatureKind::OffsetFace { faces: vec![FacePick(Vec3::new(25., 0., 15.))], distance: "5".into(), body: Some("Base".into()) },
+                FeatureKind::OffsetFace { faces: vec![FacePick(Vec3::new(25., 0., 15.))], distance: "5".into(), body: None },
                 Some("OffsetFace1"),
             )
             .unwrap();
@@ -1286,18 +1303,22 @@ mod tests {
         assert_eq!(state.bodies.len(), 1);
         let body = &state.bodies[0];
 
-        // Find the offset face (the -Y face at y=-5)
-        let idx = body
-            .body
-            .face_sources()
-            .unwrap()
-            .iter()
-            .enumerate()
-            .find(|(_, s)| matches!(s, Some(solidcraft_kernel::FaceSource::Box { axis: 1, high: false, .. })))
-            .map(|(i, _)| i)
-            .unwrap();
+        // Find the offset face (y ≈ -5)
+        let tolerance = (body.body.size() * 1e-3).max(1e-3);
+        let mut offset_idx = None;
+        if let Ok(faces) = body.body.faces(tolerance) {
+            for (i, _) in faces.iter().enumerate() {
+                if let Some(plane) = body.body.planar_face(i) {
+                    if plane.origin.y < -4.0 && plane.origin.y > -6.0 {
+                        offset_idx = Some(i);
+                        break;
+                    }
+                }
+            }
+        }
+        let idx = offset_idx.expect("should find the offset face at y ≈ -5");
 
-        let picked = body.body.face_plane(idx).unwrap();
+        let picked = body.body.planar_face(idx).unwrap();
 
         // The actual offset face should attach successfully
         let anchor = doc.capture_face_anchor(body, idx, &picked, &[], 0, &[]);
@@ -1311,22 +1332,84 @@ mod tests {
             9999, // different feature id
         );
 
-        // The fake body's -Y face (axis=1, high=false) will have a similar name pattern
-        // but is NOT the output of the OffsetFace feature
+        // The fake body's -Y face will have a similar plane but is NOT the output of the OffsetFace feature
+        // The pick point (25, 0, 15) is 10 units from the fake body's -Y face plane (y=0), not 5.
         let fake_idx = fake_body
             .body
-            .face_sources()
-            .unwrap()
-            .iter()
-            .enumerate()
-            .find(|(_, s)| matches!(s, Some(solidcraft_kernel::FaceSource::Box { axis: 1, high: false, .. })))
-            .map(|(i, _)| i)
-            .unwrap();
+            .faces(tolerance)
+            .ok()
+            .and_then(|fs| {
+                fs.iter().enumerate().find_map(|(i, _)| {
+                    let plane = fake_body.body.planar_face(i)?;
+                    if plane.origin.y.abs() < 1e-6 && plane.normal().y < 0.0 { Some(i) } else { None }
+                })
+            })
+            .expect("should find the fake body's -Y face");
 
-        let fake_picked = fake_body.body.face_plane(fake_idx).unwrap();
+        let fake_picked = fake_body.body.planar_face(fake_idx).unwrap();
 
         // This should FAIL because the face is not actually the output of the OffsetFace feature
         let result = doc.capture_face_anchor(&fake_body, fake_idx, &fake_picked, &[], 0, &[]);
         assert!(result.is_err(), "face from different body with matching name should be rejected: {:?}", result);
+    }
+
+    /// Test: a face on the SAME body that is NOT the offset's output must be refused.
+    /// The is_current_offset_face check must verify geometry (pick point at `distance`
+    /// from the face plane), not just the existence of any OffsetFace feature.
+    #[test]
+    fn offset_face_same_body_not_output_rejected() {
+        let mut doc = Document::default();
+        let _box_id = doc
+            .add_feature(
+                FeatureKind::Box {
+                    corner: ["0".into(), "0".into(), "0".into()],
+                    length: "50".into(),
+                    width: "40".into(),
+                    height: "30".into(),
+                    operation: Operation::NewBody,
+                    centred: false,
+                },
+                Some("Base"),
+            )
+            .unwrap();
+
+        // Offset the -Y face (y=0) by 5mm
+        let _offset_id = doc
+            .add_feature(
+                FeatureKind::OffsetFace { faces: vec![FacePick(Vec3::new(25., 0., 15.))], distance: "5".into(), body: None },
+                Some("OffsetFace1"),
+            )
+            .unwrap();
+
+        let mut model = Model::new();
+        model.evaluate(&doc);
+        let state = model.state();
+
+        assert_eq!(state.bodies.len(), 1);
+        let body = &state.bodies[0];
+
+        // Find a face on the SAME body that is NOT the offset's output.
+        // The +Y face is at y=40 (box height 30, so y goes from 0 to 30... wait, the box
+        // is 50x40x30, so y goes from 0 to 40). Find a face at y ≈ 40.
+        let tolerance = (body.body.size() * 1e-3).max(1e-3);
+        let mut other_idx = None;
+        if let Ok(faces) = body.body.faces(tolerance) {
+            for (i, _) in faces.iter().enumerate() {
+                if let Some(plane) = body.body.planar_face(i) {
+                    if plane.origin.y > 39.0 && plane.origin.y < 41.0 {
+                        other_idx = Some(i);
+                        break;
+                    }
+                }
+            }
+        }
+        let idx = other_idx.expect("should find a non-offset face on the same body at y ≈ 40");
+
+        let picked = body.body.planar_face(idx).unwrap();
+
+        // The OffsetFace feature exists with non-zero distance, but this face is not its
+        // output: the pick point (25, 0, 15) is about 40 units from this plane, not 5.
+        let cert = doc.is_current_offset_face(body, idx, picked.origin);
+        assert!(cert.is_none(), "non-offset face on same body must not get Lineage: {:?}", cert);
     }
 }
