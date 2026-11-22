@@ -71,6 +71,43 @@ pub fn classify_cubic(points: [[f64; 3]; 4]) -> Result<CubicStanding> {
     })
 }
 
+/// One piece of an imported cubic Bezier curve ([`cubic_pieces`]): the cubic Bezier curve through
+/// `points` on `[0, 1]` and what it stands as.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct CubicPiece {
+    /// Its four control points.
+    pub points: [[f64; 3]; 4],
+    /// What it stands as in the model.
+    pub standing: CubicStanding,
+}
+
+impl crate::session::Answer for Vec<CubicPiece> {}
+
+/// The cubic Bezier curve through `points` on `[0, 1]` as pieces the model can keep, in order:
+/// the whole curve unless the B-spline curve check refuses it, else the same curve split exactly
+/// (de Casteljau) into pieces that each pass the check or lie within the zone tolerance of their
+/// chord, or the whole curve, refused, when no such split exists
+/// ([`solidcore::curve::hermite_curve::cubic_pieces`]).
+///
+/// # Errors
+/// [`Error::Argument`] if a coordinate is not finite or exceeds the coordinate bound; those of
+/// the session.
+pub fn cubic_pieces(points: [[f64; 3]; 4]) -> Result<Vec<CubicPiece>> {
+    if !points.iter().all(|p| coord_ok(p)) {
+        return Err(Error::Argument);
+    }
+    run("cubic_pieces", |k| {
+        let pieces = solidcore::curve::hermite_curve::cubic_pieces(k, points.map(point))?;
+        Ok(pieces
+            .into_iter()
+            .map(|p| CubicPiece {
+                points: p.points.map(|q| [q.x, q.y, q.z]),
+                standing: p.standing,
+            })
+            .collect())
+    })
+}
+
 /// Which end of a curve a blend meets, and how ([`blend_curve`]).
 pub use solidcore::curve::blend::{Contact, End};
 

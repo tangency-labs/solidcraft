@@ -31,6 +31,33 @@ fn acceptance_preserves_file_history_and_prepared_world_without_evaluation() {
 }
 
 #[test]
+fn prepared_preview_includes_visibility_and_command_replies() {
+    let mut session = Session::default();
+    session.execute("solid.box", &json!({"length":1,"width":1,"height":1,"body_name":"Hidden"})).unwrap();
+    session.execute("browser.visibility", &json!({"items":["Hidden"],"visible":false})).unwrap();
+    let history = session.undo.len();
+    let document = session.doc.clone();
+    let prepared = session.scratch().compute_commands(&commands(), None).unwrap();
+
+    let preview = prepared.preview_visible_world().unwrap();
+    assert!(preview.before.bodies.is_empty());
+    assert_eq!(preview.after.bodies.len(), 1);
+    assert_eq!(preview.replies.as_slice(), std::slice::from_ref(&prepared.steps[0].reply));
+    assert!(prepared.changes_document());
+    assert!(Arc::ptr_eq(&document, &session.doc));
+    assert_eq!(session.undo.len(), history);
+}
+
+#[test]
+fn an_equal_document_in_a_new_allocation_is_unchanged() {
+    let session = Session::default();
+    let mut prepared = session.scratch().compute_commands(&[], None).unwrap();
+    prepared.computed.doc = Arc::new((*prepared.computed.doc).clone());
+    assert!(!Arc::ptr_eq(&prepared.source.doc, &prepared.computed.doc));
+    assert!(!prepared.changes_document());
+}
+
+#[test]
 fn failure_discards_the_entire_batch() {
     let session = Session::default();
     let document = session.doc.clone();
@@ -179,6 +206,19 @@ fn editor_display_changes_allow_apply_and_cancel() {
 }
 
 #[test]
+fn cancelling_a_previewed_editor_restores_authored_bytes_with_a_fresh_plugin_token() {
+    let (mut session, source, original, commands) = extrusion_editor();
+    let bytes = original.doc.to_json();
+    let historical = original.design_token();
+    let rolled_back = session.design_token();
+    session.preview(&commands).unwrap();
+    session.restore_editor(&source, original).unwrap();
+    assert_eq!(session.doc.to_json(), bytes);
+    assert_ne!(session.design_token(), historical);
+    assert_ne!(session.design_token(), rolled_back);
+}
+
+#[test]
 fn editor_visibility_changes_allow_cancel_and_keep_undo_and_redo_at_the_original_marker() {
     for undo_hide in [false, true] {
         let (mut session, source, original, _) = extrusion_editor();
@@ -317,6 +357,43 @@ fn an_editor_accepts_the_placements_rolling_the_marker_solves() {
     session.accept_commands(prepared).unwrap();
     assert_eq!(session.doc.marker, None);
     assert_eq!(occurrence(&session, "B").transform, moved);
+}
+
+/// #18695: editing a feature in a design with joints whose values or expressions are re-solved
+/// when the marker rolls back accepts the re-solved values: the editor's pinned model differs
+/// from its source there, and OK still applies without "original editor model does not match".
+#[test]
+fn an_editor_accepts_the_joint_values_rolling_the_marker_solves() {
+    let mut session = Session::default();
+    for (name, x) in [("A", 0), ("B", 20)] {
+        session.execute("component.activate", &json!({"component": "root"})).unwrap();
+        session.execute("component.create", &json!({"name": name})).unwrap();
+        session.execute("solid.box", &json!({"length": 10, "width": 10, "height": 10, "corner": [x, 0, 0]})).unwrap();
+    }
+    let component = |s: &Session, name: &str| s.doc.components.iter().find(|c| c.name == name).map(|c| c.id).unwrap();
+    let occurrence = |s: &Session, name: &str| {
+        let component = component(s, name);
+        s.doc.occurrences.iter().find(|o| o.component == component).cloned().unwrap()
+    };
+    session.execute("occurrence.ground", &json!({"occurrence": occurrence(&session, "A").id, "grounded": true})).unwrap();
+    session
+        .execute("joint.create", &json!({"type": "slider", "a": {"face": [5, 5, 10]}, "b": {"face": [25, 5, 0]}, "offset": "5 mm", "name": "Slide"}))
+        .unwrap();
+    session.execute("joint.drive", &json!({"joint": "Slide", "value": 15})).unwrap();
+    assert_eq!(session.doc.assembly.joints[0].values, vec![15.0]);
+
+    session.execute("component.activate", &json!({"component": "A"})).unwrap();
+    let a = component(&session, "A");
+    let body = session.model.state().bodies.iter().find(|b| b.component == a).map(|b| b.name.clone()).unwrap();
+    session.execute("solid.move", &json!({"bodies": [body], "translate": [30, 0, 0]})).unwrap();
+
+    let original = session.scratch();
+    session.execute("timeline.roll_to", &json!({"position": 2})).unwrap();
+    let source = session.scratch();
+
+    let prepared = session.scratch().compute_editor_commands(&[], &source, original).unwrap();
+    session.accept_commands(prepared).unwrap();
+    assert_eq!(session.doc.marker, None);
 }
 
 /// Cancel on a computing OK (solidcore#3247): a dialog's computation of a long Combine Cut (a

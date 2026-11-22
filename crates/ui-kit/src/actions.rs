@@ -134,6 +134,37 @@ pub fn icon_button_at(ui: &mut Ui, rect: egui::Rect, icon: &str, label: &str) ->
     icon_button_colored(ui, rect, icon, label, None)
 }
 
+/// What [`filter_button_at`] drew: the button, its badge (when something is picked) and what the
+/// open list's `add` returned.
+pub struct FilterButton<R> {
+    pub response: Response,
+    pub badge: Option<egui::Rect>,
+    pub inner: Option<R>,
+}
+
+/// A filter's icon button inside `rect`: it opens a list of choices that stays open for clicks
+/// inside it (as `add_column_button`'s), and a badge at its corner counts the `picked` choices.
+/// Tokens: icon button tokens; `accent, on_accent, font_small, space_4`.
+pub fn filter_button_at<R>(ui: &mut Ui, rect: egui::Rect, icon: &str, label: &str, picked: usize, add: impl FnOnce(&mut Ui) -> R) -> FilterButton<R> {
+    let t = Tokens::get();
+    let response = icon_button_at(ui, rect, icon, label);
+    let badge = (picked > 0).then(|| {
+        let galley = ui.painter().layout_no_wrap(picked.to_string(), egui::FontId::proportional(t.font_small), t.on_accent);
+        let size = vec2((galley.size().x + t.space_4).max(galley.size().y), galley.size().y);
+        let badge = egui::Rect::from_min_size(egui::pos2(rect.right() - size.x, rect.top()), size);
+        ui.painter().rect_filled(badge, size.y / 2.0, t.accent);
+        ui.painter().galley(badge.center() - galley.size() / 2.0, galley, t.on_accent);
+        badge
+    });
+    let popup = crate::Container::new(ui.ctx(), crate::Surface::Popup).menu(&response).close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside);
+    let open = popup.is_open();
+    let inner = popup.show(|ui| crate::scope(ui, add)).map(|r| r.inner);
+    if open {
+        ui.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Escape));
+    }
+    FilterButton { response, badge, inner }
+}
+
 /// Quiet secondary action: a small, muted glyph with the normal full-size hit target.
 pub fn quiet_icon_button_at(ui: &mut Ui, rect: egui::Rect, icon: &str, label: &str) -> Response {
     icon_button_presentation(ui, rect, icon, label, None, true, false)
@@ -409,13 +440,8 @@ fn action_button(ui: &mut Ui, label: &str, kind: Action, look: &ActionLook, padd
     };
     // Style after add_enabled sets the state, preserving the native button's ID and layout.
     let response = ui.add_enabled(live, |ui: &mut Ui| {
-        ui.add(
-            styled_button(ui, if primary && ok_enabled { text.bold_face().into() } else { text.into() }, tone)
-                .selected(marked && !primary)
-                .wrap_mode(egui::TextWrapMode::Extend)
-                .corner_radius(t.control_radius)
-                .min_size(vec2(min_width, t.form_button_height)),
-        )
+        let text = if primary && ok_enabled { text.bold_face() } else { text };
+        ui.add(form_action_widget(ui, text, tone, marked && !primary, vec2(min_width, t.form_button_height)))
     });
     t.button_bevel(ui, &response, false);
     pointer_on_hover(ui, &response);
@@ -426,6 +452,34 @@ fn action_button(ui: &mut Ui, label: &str, kind: Action, look: &ActionLook, padd
     };
     solidcraft_ui_registry::publish_target(key, response.rect);
     solidcraft_ui_registry::publish_handle(&format!("dialog:{label}"), response.rect.center());
+    response
+}
+
+fn form_action_widget(ui: &Ui, text: RichText, tone: ButtonTone, selected: bool, min_size: egui::Vec2) -> egui::Button<'static> {
+    styled_button(ui, text.into(), tone)
+        .selected(selected)
+        .wrap_mode(egui::TextWrapMode::Extend)
+        .corner_radius(Tokens::get().control_radius)
+        .min_size(min_size)
+}
+
+/// A full-width form action for entry cards, with the same control styling as dialog actions.
+pub fn wide_form_button(ui: &mut Ui, label: &str, primary: bool, enabled: bool) -> Response {
+    let t = Tokens::get();
+    let size = vec2(dimension(ui.available_width()), t.form_button_height + t.space_8);
+    let response = ui
+        .allocate_ui_with_layout(size, egui::Layout::centered_and_justified(egui::Direction::LeftToRight), |ui| {
+            ui.spacing_mut().button_padding = vec2(t.space_12, 0.0);
+            ui.add_enabled(enabled, |ui: &mut Ui| {
+                let text = RichText::new(label).size(t.font_button);
+                let text = if primary && enabled { text.semibold() } else { text };
+                let tone = if primary && enabled { ButtonTone::Primary } else { ButtonTone::Normal };
+                ui.add(form_action_widget(ui, text, tone, false, size))
+            })
+        })
+        .inner;
+    t.button_bevel(ui, &response, false);
+    pointer_on_hover(ui, &response);
     response
 }
 

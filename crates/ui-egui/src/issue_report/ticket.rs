@@ -14,8 +14,16 @@ use super::Draft;
 use crate::tickets::{self, Outcome, api, payload};
 use crate::{SolveApp, ui_kit};
 
-/// How many lines of the log go with a report.
-pub const LOG_LINES: usize = 300;
+/// How many lines of the log go with a report, and at most how many bytes of them.
+pub const LOG_LINES: usize = 500;
+pub const LOG_BYTES: u64 = 128 << 10;
+/// Commands a report keeps as its recent steps (`repro.steps`).
+pub const MAX_STEPS: usize = 50;
+/// A recent step's parameters longer than this (as JSON) are left out.
+const MAX_STEP_PARAMS: usize = 2048;
+/// An unsent design left for recovery is attached in place of a new, empty one only when it was
+/// autosaved this recently (seconds).
+const RECOVERY_FRESH_SECS: u64 = 24 * 3600;
 
 /// What the report form holds besides the shared draft.
 pub struct TicketDraft {
@@ -83,16 +91,24 @@ pub fn system(app: &SolveApp, ctx: Option<&egui::Context>) -> (serde_json::Map<S
     (f, s)
 }
 
-/// The last lines of the log (the design's command log, then the Messages), home folder as `~`.
+/// `s` as a report carries it: at most `limit` bytes, the home folder as `~`.
+fn clean(s: &str, home: Option<&str>, limit: usize) -> String {
+    let s = super::limited(s, limit);
+    match home {
+        Some(h) => s.replace(h, "~"),
+        None => s,
+    }
+}
+
+/// The last lines of the app's log on disk (`log_file`), home folder as `~`. Without one (the
+/// web build) the design's command log and the Messages.
 pub fn log_lines(app: &SolveApp) -> Vec<String> {
     let home = super::home_text();
-    let clean = |s: &str| {
-        let s = super::limited(s, 2000);
-        match home.as_deref() {
-            Some(h) => s.replace(h, "~"),
-            None => s,
-        }
-    };
+    let file = crate::log_file::tail(LOG_LINES, LOG_BYTES);
+    if !file.is_empty() {
+        return file.iter().map(|l| clean(l, home.as_deref(), 2000)).collect();
+    }
+    let clean = |s: &str| clean(s, home.as_deref(), 2000);
     let mut lines: Vec<String> = app.session.log.iter().flat_map(|l| l.lines().map(clean).collect::<Vec<_>>()).collect();
     for m in app.messages.iter() {
         let level = if m.error { "error" } else { "info" };
@@ -117,6 +133,170 @@ fn design_name(app: &SolveApp) -> String {
         })
 }
 
+/// Commands whose parameters name files or folders: a step keeps only the file's name.
+fn names_files(id: &str) -> bool {
+    ["file.", "doc.", "plugin.", "cloud.", "library."].iter().any(|p| id.starts_with(p))
+}
+
+/// Every string in `v` with the home folder as `~`.
+fn scrub(v: &mut Value, home: &str) {
+    match v {
+        Value::String(s) => *s = s.replace(home, "~"),
+        Value::Array(a) => a.iter_mut().for_each(|v| scrub(v, home)),
+        Value::Object(o) => o.values_mut().for_each(|v| scrub(v, home)),
+        _ => {}
+    }
+}
+
+/// One recent step as a report carries it: the command, whether it worked and why not, and its
+/// parameters, unless they are large or name files (then only the file's name).
+pub fn step(id: &str, params: Option<&Value>, error: Option<&str>, home: Option<&str>) -> Value {
+    let mut s = json!({ "command": super::limited(id, 200), "ok": error.is_none() });
+    if let Some(e) = error {
+        s["error"] = json!(clean(e, home, 2000));
+    }
+    let Some(p) = params.filter(|p| !p.is_null() && p.as_object().is_none_or(|o| !o.is_empty())) else { return s };
+    if names_files(id) {
+        if let Some(path) = p.get("path").and_then(Value::as_str) {
+            let name = path.rsplit(['/', '\\']).next().unwrap_or_default();
+            s["file"] = json!(super::limited(name, 200));
+        }
+        if id == "file.import" {
+            // Preserve the importer slot and option names without leaking option values.
+            // Plugin options can contain local paths or private configuration (#18760).
+            if let Some(importer) = p.get("format").and_then(Value::as_str) {
+                s["importer"] = json!(importer.chars().filter(|c| !c.is_control()).take(120).collect::<String>());
+            }
+            if let Some(options) = p.get("options").and_then(Value::as_object) {
+                s["option_keys"] = json!(
+                    options.keys().take(32).map(|key| key.chars().filter(|c| !c.is_control()).take(100).collect::<String>()).collect::<Vec<_>>()
+                );
+            }
+        }
+        return s;
+    }
+    if serde_json::to_string(p).map_or(usize::MAX, |t| t.len()) > MAX_STEP_PARAMS {
+        s["params_omitted"] = json!(true);
+        return s;
+    }
+    let mut p = p.clone();
+    if let Some(h) = home {
+        scrub(&mut p, h);
+    }
+    s["params"] = p;
+    s
+}
+
+/// A command ran with the result `r`: it is one of the steps a report lists (`repro.steps`),
+/// opens, saves and selections included, and a line of the log. A gesture's frames are not.
+pub(crate) fn record_step(app: &mut SolveApp, id: &str, r: &Result<Value, String>) {
+    if r.as_ref().is_ok_and(|v| v.get("continuous").and_then(Value::as_bool) == Some(true)) {
+        return;
+    }
+    match r {
+        Ok(_) => log::info!("command {id}"),
+        Err(e) => log::warn!("command {id} failed: {e}"),
+    }
+    let home = super::home_text();
+    let steps = &mut app.issue_report.steps;
+    steps.push_back(step(id, None, r.as_ref().err().map(String::as_str), home.as_deref()));
+    while steps.len() > MAX_STEPS {
+        steps.pop_front();
+    }
+}
+
+/// The parameters of the step just recorded ([`record_step`]), when it was command `id`.
+pub(crate) fn step_params(app: &mut SolveApp, id: &str, params: &Value) {
+    let id = solidcraft_engine::find_command(id).map_or(id, |spec| spec.id);
+    let Some(last) = app.issue_report.steps.back_mut() else { return };
+    if last.get("command").and_then(Value::as_str) != Some(id) || last.get("params").is_some() || last.get("file").is_some() {
+        return;
+    }
+    let error = last.get("error").and_then(Value::as_str).map(str::to_string);
+    *last = step(id, Some(params), error.as_deref(), super::home_text().as_deref());
+}
+
+/// The steps a crash report recorded before the crash (`recent_commands`), as a report carries them.
+fn crash_steps(report: &Value) -> Vec<Value> {
+    let home = super::home_text();
+    report
+        .get("recent_commands")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .take(MAX_STEPS)
+        .filter_map(|c| {
+            let id = c.get("command")?.as_str()?;
+            let failed = c.get("ok").and_then(Value::as_bool) == Some(false);
+            let error = failed.then(|| c.get("error").and_then(Value::as_str).unwrap_or("failed"));
+            Some(step(id, c.get("params"), error, home.as_deref()))
+        })
+        .collect()
+}
+
+/// A file of at most `max` bytes, or nothing.
+fn read_bounded(path: &std::path::Path, max: usize) -> Option<Vec<u8>> {
+    let m = std::fs::metadata(path).ok()?;
+    (m.is_file() && m.len() <= max as u64).then(|| std::fs::read(path).ok()).flatten()
+}
+
+/// The design a report is about, its name, where it came from (a message id the dialog shows),
+/// and how the report says so (`repro.design`).
+type DesignChoice = (Option<(String, Vec<u8>)>, Option<&'static str>, Option<&'static str>);
+
+/// The design a report attaches.
+/// - About a crash: the crash report's copy of the crashed session's design (its last autosave,
+///   or its file), never the one open now; none when the crash left no copy.
+/// - Otherwise the open design, unless it is new and empty while a design left by a run that
+///   ended (a crash, a lost graphics device) waits for recovery: then that one.
+fn design_for(app: &SolveApp, crash: Option<&Value>) -> DesignChoice {
+    if let Some(report) = crash {
+        let path = report.get("design_path").and_then(Value::as_str).map(std::path::PathBuf::from);
+        let Some(bytes) = path.and_then(|p| read_bounded(&p, solidcraft_engine::crash::MAX_DESIGN_BYTES)) else {
+            return (None, Some("report.design_none_crash"), Some("none: the crashed session left no saved copy of its design"));
+        };
+        let base = report.get("base").and_then(|b| b.get("file")).and_then(Value::as_str);
+        let name = base
+            .and_then(|f| f.rsplit(['/', '\\']).next())
+            .filter(|n| n.ends_with(".sc"))
+            .map_or_else(|| "crashed-session.sc".to_string(), |n| super::limited(n, 120));
+        return (Some((name, bytes)), Some("report.design_from_crash"), Some("the crashed session's design, from the crash report"));
+    }
+    let blank = app.session.path.is_none() && app.session.doc.features.is_empty();
+    if blank && let Some(dir) = app.autosave.as_ref().map(|a| a.dir.as_path()) {
+        let now = web_time::SystemTime::now().duration_since(web_time::UNIX_EPOCH).map_or(0, |d| d.as_secs());
+        let left = app.recoverable.first().cloned().or_else(|| {
+            solidcraft_engine::recovery::orphans(dir).into_iter().next().filter(|e| now.saturating_sub(e.saved_at) <= RECOVERY_FRESH_SECS)
+        });
+        if let Some(entry) = left
+            && let Ok((doc, _)) = solidcraft_engine::recovery::load(dir, &entry.id)
+        {
+            let name: String = entry.name.chars().filter(|c| !matches!(c, '/' | '\\' | ':' | '*' | '?' | '"' | '<' | '>' | '|')).take(80).collect();
+            let name = format!("{}.sc", if name.trim().is_empty() { "recovered" } else { name.trim() });
+            // A container, as the design's own file is: it carries binary data a JSON design can't.
+            if let Ok(bytes) = solidcraft_engine::io::write_design_container(&doc) {
+                return (
+                    Some((name, bytes)),
+                    Some("report.design_from_recovery"),
+                    Some("the design kept for recovery when the last run ended, not opened"),
+                );
+            }
+        }
+    }
+    // A container, as the design's own file is: it carries binary data a JSON design can't.
+    (solidcraft_engine::io::write_design_container(&app.session.doc).ok().map(|bytes| (design_name(app), bytes)), None, None)
+}
+
+/// A failed importer reads a separate file; its error does not require the open design.
+fn failed_plugin_import(app: &SolveApp, failing: Option<&payload::Failing>) -> bool {
+    match failing {
+        Some(f) if f.command.is_some() => f.command.as_deref() == Some("file.import"),
+        _ => app.issue_report.steps.back().is_some_and(|step| {
+            step.get("command").and_then(Value::as_str) == Some("file.import") && step.get("ok").and_then(Value::as_bool) == Some(false)
+        }),
+    }
+}
+
 /// Everything the boxes can attach, collected when the report opens. `failing`: the operation
 /// the report is about, if any.
 pub fn evidence(
@@ -125,16 +305,44 @@ pub fn evidence(
     failing: Option<payload::Failing>,
     crash: Option<(String, String)>,
 ) -> payload::Evidence {
-    let design = solidcraft_engine::io::write_design(&app.session.doc);
+    // A crash report that does not read is still about the crash: it then has no design to give.
+    let report: Option<Value> = crash.as_ref().map(|(_, json)| serde_json::from_str(json).unwrap_or(Value::Null));
+    let import_failed = report.is_none() && failed_plugin_import(app, failing.as_ref());
+    let (design, design_from, design_said) = if import_failed {
+        // The failed plugin read a different input file. Offering the open design risks sharing
+        // unrelated private work and cannot reproduce the failure (#18760).
+        (None, Some("report.design_unrelated_import"), Some("none: the failed plugin import read a separate input file"))
+    } else {
+        design_for(app, report.as_ref())
+    };
     // How to get back to where the failure happened: the design (its history is in the file)
     // plus the one failed operation, on this exact build.
     let mut session = serde_json::Map::new();
-    session.insert("session_start".into(), json!(if app.session.path.is_some() { "opened" } else { "new" }));
-    session.insert("design_sha256".into(), json!(api::sha256_hex(&design)));
+    let start = match (&report, design_from) {
+        (Some(_), _) => "crashed",
+        (None, Some("report.design_unrelated_import")) if app.session.path.is_some() => "opened",
+        (None, Some("report.design_unrelated_import")) => "new",
+        (None, Some(_)) => "recovered",
+        (None, None) if app.session.path.is_some() => "opened",
+        (None, None) => "new",
+    };
+    session.insert("session_start".into(), json!(start));
+    if let Some((_, bytes)) = &design {
+        session.insert("design_sha256".into(), json!(api::sha256_hex(bytes)));
+    }
+    if let Some(said) = design_said {
+        session.insert("design".into(), json!(said));
+    }
     session.insert("format_version".into(), json!(solidcraft_engine::doc::format::FORMAT));
-    session.insert("undo_steps".into(), json!(app.session.undo.len()));
-    session.insert("redo_steps".into(), json!(app.session.redo.len()));
+    if report.is_none() {
+        session.insert("undo_steps".into(), json!(app.session.undo.len()));
+        session.insert("redo_steps".into(), json!(app.session.redo.len()));
+    }
     session.insert("commit".into(), json!(crate::help::COMMIT));
+    let steps = match &report {
+        Some(r) => crash_steps(r),
+        None => app.issue_report.steps.iter().cloned().collect(),
+    };
     let (system_fields, system_text) = system(app, ctx);
     payload::Evidence {
         system: system_text,
@@ -143,16 +351,18 @@ pub fn evidence(
         os: format!("{} {}", std::env::consts::OS, std::env::consts::ARCH),
         session,
         failing,
+        steps,
         log: log_lines(app),
         screenshot: None,
-        design: Some((design_name(app), design)),
+        design,
+        design_from,
         crash,
     }
 }
 
 /// The failed operation a draft was made for: its command and parameters as the command API
 /// took them, and its error.
-fn failing_of(draft: &Draft) -> Option<payload::Failing> {
+fn failing_of(app: &SolveApp, draft: &Draft) -> Option<payload::Failing> {
     if let Some((id, json)) = &draft.crash {
         let v: Value = serde_json::from_str(json).unwrap_or_default();
         let command = v.get("command").and_then(|c| c.get("command")).and_then(Value::as_str).map(str::to_string);
@@ -167,11 +377,22 @@ fn failing_of(draft: &Draft) -> Option<payload::Failing> {
             _ => None,
         };
         let code = (!kind.is_empty()).then(|| format!("{kind} ({id})"));
-        return Some(payload::Failing { command, params, error, origin, code });
+        return Some(payload::Failing { command, params, error, origin, code, failure_code: None });
     }
     let super::Origin::View { error: Some(error) } = &draft.origin else { return None };
     let (command, params) = draft.failed_command.clone().map_or((None, None), |(c, p)| (Some(c), Some(p)));
-    Some(payload::Failing { command, params, error: error.clone(), origin: None, code: None })
+    // The kernel call the error was made from, by its stable code: as a failed command or a
+    // preview gave it, else as a feature of the timeline that fails with this error keeps it.
+    let failure_code = solidcraft_engine::failure_code_of(error).or_else(|| {
+        let error = error.trim();
+        app.session
+            .model
+            .results
+            .iter()
+            .find(|r| r.error.as_deref().is_some_and(|e| !e.is_empty() && error.contains(e)))
+            .and_then(|r| r.error_code.clone())
+    });
+    Some(payload::Failing { command, params, error: error.clone(), origin: None, code: None, failure_code })
 }
 
 /// The description a failed operation's report starts with: what failed, how, and a line
@@ -181,7 +402,8 @@ fn template(label: &str, failing: &payload::Failing) -> String {
     if let Some(c) = &failing.command {
         s.push_str(&format!(" (`{c}`)"));
     }
-    s.push_str(&format!("\n**Error:** {}\n", super::limited(&failing.error, 1000)));
+    // Cut where a reader can tell it was cut; the whole error is in the report details.
+    s.push_str(&format!("\n**Error:** {}\n", readable(&failing.error, 1000)));
     if let Some(Value::Object(p)) = &failing.params {
         // The settings a person reads; the full parameters go in the report details.
         let key: Vec<String> = p.iter().filter(|(_, v)| !v.is_object() && !v.is_array()).take(8).map(|(k, v)| format!("{k} = {v}")).collect();
@@ -229,13 +451,13 @@ pub fn outgoing(draft: &Draft, ticket: &TicketDraft) -> payload::Outgoing {
 
 /// The form for a draft, pre-filled with what the app knows.
 pub fn new_ticket(app: &mut SolveApp, draft: &Draft, ctx: Option<&egui::Context>) -> TicketDraft {
-    let failing = failing_of(draft);
+    let failing = failing_of(app, draft);
     let evidence = evidence(app, ctx, failing.clone(), draft.crash.clone());
     let label = draft.title_prefix.trim_end_matches(": ").to_string();
     let (title, description) = match &failing {
         Some(f) if draft.crash.is_none() => {
             let first = f.error.lines().next().unwrap_or_default();
-            (super::limited(&format!("{label}: {first}"), payload::MAX_TITLE), template(&label, f))
+            (readable(&format!("{label}: {first}"), payload::MAX_TITLE), template(&label, f))
         }
         _ => (draft.title.clone(), draft.description.clone()),
     };
@@ -282,10 +504,19 @@ fn shown(ui: &mut Ui, id: &str, title: &str, text: &str) {
 /// The model box, right under the description where it is seen: what it holds, who sees it,
 /// and what a report about a failure loses without it.
 fn model_box(ticket: &mut TicketDraft, ui: &mut Ui) {
-    let Some((name, bytes)) = ticket.evidence.design.clone() else { return };
+    let Some((name, bytes)) = ticket.evidence.design.clone() else {
+        // Said rather than attaching the design open now, which is not the one it is about.
+        if let Some(id) = ticket.evidence.design_from {
+            note(ui, "report.design_from", tr(id));
+        }
+        return;
+    };
     check(ui, "report.design", &mut ticket.ticks.design);
     note(ui, "report.design_note", tr("report.design_note"));
     note(ui, "report.design_file", &format("report.design_file", &[("name", &name), ("size", &payload::size_text(bytes.len()))]));
+    if let Some(id) = ticket.evidence.design_from {
+        note(ui, "report.design_from", tr(id));
+    }
     if !ticket.ticks.design {
         if ticket.from_failure {
             ui_kit::text(ui, tr("report.design_warning"), ui_kit::Text::Error("report.design_warning"));
@@ -326,7 +557,7 @@ fn attachments(app: &SolveApp, draft: &mut Draft, ticket: &mut TicketDraft, ui: 
 
     check(ui, "report.repro", &mut ticket.ticks.repro);
     note(ui, "report.repro_note", tr("report.repro_note"));
-    shown(ui, "report-repro", tr("report.repro_show"), &payload::repro_text(ev));
+    shown(ui, "report-repro", tr("report.repro_show"), &payload::repro_text(ev, ticket.ticks.design && ev.design.is_some()));
 
     if ev.crash.is_some() {
         check(ui, "report.crash", &mut ticket.ticks.crash);
@@ -343,7 +574,42 @@ pub fn title_or_default(title: &str, description: &str) -> String {
     }
     let first = description.lines().map(str::trim).find(|l| !l.is_empty() && !l.starts_with("**")).unwrap_or_default();
     let first = first.trim_start_matches('#').trim();
-    if first.is_empty() { tr("report.default_title").to_string() } else { super::limited(first, 120) }
+    if first.is_empty() { tr("report.default_title").to_string() } else { readable(first, 120) }
+}
+
+/// The form as it goes: the question the description ends with dropped when it was left
+/// unanswered, and a title made from the description when there is none.
+pub fn ready_to_send(form: &mut payload::Form) {
+    form.description = without_unanswered(&form.description);
+    form.title = title_or_default(&form.title, &form.description);
+}
+
+/// `text` in at most `max` characters, cut at a line break or a space and ended with "…" when
+/// it is longer: never in the middle of a word ("…Surface Natur").
+pub fn readable(text: &str, max: usize) -> String {
+    if text.chars().count() <= max {
+        return text.to_string();
+    }
+    let keep = max.saturating_sub(1);
+    let end = text.char_indices().nth(keep).map_or(text.len(), |(i, _)| i);
+    let head = text.get(..end).unwrap_or_default();
+    // A boundary in the first half would throw away too much: cut the word then.
+    let half = head.len() / 2;
+    let cut = head.rfind('\n').filter(|&i| i >= half).or_else(|| head.rfind(char::is_whitespace).filter(|&i| i >= half)).unwrap_or(head.len());
+    let head = head.get(..cut).unwrap_or(head).trim_end_matches(|c: char| c.is_whitespace() || matches!(c, ',' | ';' | ':' | '-' | '('));
+    format!("{head}…")
+}
+
+/// The description without the "What were you trying to do?" line it started with, when nothing
+/// was written after it.
+pub fn without_unanswered(description: &str) -> String {
+    let question = tr("report.trying_to_do").trim();
+    let trimmed = description.trim_end();
+    match trimmed.rsplit_once('\n') {
+        Some((before, last)) if last.trim() == question => format!("{}\n", before.trim_end()),
+        None if trimmed.trim() == question => String::new(),
+        _ => description.to_string(),
+    }
 }
 
 /// What the dialog shows instead of the form once Send was pressed.
@@ -525,20 +791,20 @@ pub(super) fn show(app: &mut SolveApp, draft: &mut Draft, ctx: &egui::Context) -
         });
     if action == ui_kit::Action::Ok && on_form && app.tickets.sending.is_none() {
         // Never refused for a missing title: one is made from the description.
-        ticket.form.title = title_or_default(&ticket.form.title, &ticket.form.description);
+        ready_to_send(&mut ticket.form);
         let report = outgoing(draft, &ticket);
         tickets::send_for(app, report, ticket.id);
     }
     if retake {
         // Retake brings the whole report up to date, not only its picture; what was typed and
         // ticked stays.
-        ticket.evidence = evidence(app, Some(ctx), failing_of(draft), draft.crash.clone());
+        ticket.evidence = evidence(app, Some(ctx), failing_of(app, draft), draft.crash.clone());
     }
     if github {
         // The public GitHub draft, as before tickets: same answers.
         draft.github = true;
         draft.title.clone_from(&ticket.form.title);
-        draft.description.clone_from(&ticket.form.description);
+        draft.description = without_unanswered(&ticket.form.description);
     }
     draft.ticket = Some(ticket);
     let close = closed || action == ui_kit::Action::Cancel;

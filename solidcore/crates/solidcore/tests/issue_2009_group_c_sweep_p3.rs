@@ -1,8 +1,8 @@
 //! #2009 group C (fork c8f6a31): the curve sweep, revolve and offset-ruled-surface
-//! statuses SMLib drops and the SolidCraft fork passes on, behind
-//! `UpstreamFixes::sweep_statuses_pass_on` (WR-662). No valid input fails these calls,
-//! so each test injects the callee's failure (a curve without NURB data, a path
-//! without tangent) and compares the flag on with the flag off.
+//! statuses SMLib drops and the SolidCraft fork passes on (WR-662), as the port now always
+//! does (#14246 batch S5 retired `UpstreamFixes::sweep_statuses_pass_on`). No valid input
+//! fails these calls, so each test injects the callee's failure (a curve without NURB
+//! data, a path without tangent) and checks that its error reaches the caller.
 
 #![allow(clippy::expect_used, clippy::indexing_slicing)] // test helpers
 
@@ -17,10 +17,8 @@ use solidcore::primitive::primitive_creation::p3::{
 use solidcore::primitive::primitive_creation::SweepOptions;
 use solidcore::{Kernel, SolidError};
 
-fn kernel(pass_on: bool) -> Kernel {
-    let mut k = Kernel::default();
-    k.fixes.sweep_statuses_pass_on = pass_on;
-    k
+fn kernel() -> Kernel {
+    Kernel::default()
 }
 
 fn operation(r: &Result<impl std::fmt::Debug, SolidError>) -> String {
@@ -38,9 +36,9 @@ fn line(a: Vec3, b: Vec3) -> BSplineCurve {
 fn curve_sweep_passes_on_a_failed_profile_split() {
     let path = line(Vec3::ZERO, Vec3::Z);
     let profiles = [Some(Curve::from(BSplineCurve::new(3)))];
-    let run = |pass_on| {
+    let run = || {
         prepare_curve_sweep(
-            &kernel(pass_on),
+            &kernel(),
             &profiles,
             &path,
             None,
@@ -54,11 +52,9 @@ fn curve_sweep_passes_on_a_failed_profile_split() {
         )
         .map(|_| ())
     };
-    let (off, on) = (run(false), run(true));
-    eprintln!("off {} / on {}", operation(&off), operation(&on));
+    let on = run();
     // SubdivideAtDiscontinuity fails building the missing NURB.
     assert!(operation(&on).contains("make_nurb"), "{on:?}");
-    assert!(off.is_ok(), "{off:?}");
 }
 
 /// fork c8f6a31 (`CreateCurveSweep`, `SER(sNurbs[0]->EvaluatePoint(.., sProfileRefPt))`):
@@ -68,9 +64,9 @@ fn curve_sweep_passes_on_a_failed_profile_split() {
 fn curve_sweep_passes_on_a_failed_profile_reference_point() {
     let path = line(Vec3::ZERO, Vec3::Z);
     let profiles = [Some(Curve::from(BSplineCurve::new(3)))];
-    let run = |pass_on| {
+    let run = || {
         prepare_curve_sweep(
-            &kernel(pass_on),
+            &kernel(),
             &profiles,
             &path,
             None,
@@ -80,12 +76,10 @@ fn curve_sweep_passes_on_a_failed_profile_reference_point() {
         )
         .map(|_| ())
     };
-    let (off, on) = (run(false), run(true));
-    eprintln!("off {} / on {}", operation(&off), operation(&on));
+    let on = run();
     // EvaluatePoint fails building the missing NURB (before the profile's transform,
     // which would fail in `BSplineCurve::transform`).
     assert!(operation(&on).contains("make_nurb"), "{on:?}");
-    assert!(off.is_ok(), "{off:?}");
 }
 
 /// fork c8f6a31 (`CreateCurveSweep`, `SER(sPathPtAndDir[1].MakeUnitOrthoVectors(..))`):
@@ -95,9 +89,9 @@ fn curve_sweep_passes_on_a_failed_profile_reference_point() {
 fn curve_sweep_passes_on_a_failed_path_frame() {
     let path = BSplineCurve::create_point_curve(Vec3::ZERO).expect("point curve");
     let profiles = [Some(Curve::from(line(Vec3::ZERO, Vec3::X)))];
-    let run = |pass_on| {
+    let run = || {
         prepare_curve_sweep(
-            &kernel(pass_on),
+            &kernel(),
             &profiles,
             &path,
             None,
@@ -107,11 +101,9 @@ fn curve_sweep_passes_on_a_failed_path_frame() {
         )
         .map(|_| ())
     };
-    let (off, on) = (run(false), run(true));
-    eprintln!("off {} / on {}", operation(&off), operation(&on));
+    let on = run();
     // MakeUnitOrthoVectors fails unitizing the zero tangent.
     assert!(operation(&on).contains("Vec3::unitize"), "{on:?}");
-    assert!(off.is_ok(), "{off:?}");
 }
 
 /// fork c8f6a31 (`sm_CreateRuledSurfaceFromOffsetCurve`,
@@ -120,13 +112,13 @@ fn curve_sweep_passes_on_a_failed_path_frame() {
 /// fork returns the reduction's error.
 #[test]
 fn ruled_surface_passes_on_a_failed_degree_reduction() {
-    let run = |pass_on| {
+    let run = || {
         let mut offset = BSplineCurve::new(3);
         let mut generators = [line(Vec3::ZERO, Vec3::X)];
         let mut unmarried = [true];
         let mut missing = false;
         ruled_surface_from_offset(
-            &kernel(pass_on),
+            &kernel(),
             &mut offset,
             None,
             &mut generators,
@@ -144,13 +136,8 @@ fn ruled_surface_passes_on_a_failed_degree_reduction() {
         )
         .map(|_| ())
     };
-    let (off, on) = (run(false), run(true));
-    eprintln!("off {} / on {}", operation(&off), operation(&on));
+    let on = run();
     assert!(operation(&on).contains("degree_reduction"), "{on:?}");
-    assert!(
-        operation(&off).contains("ruled_surface_from_offset"),
-        "{off:?}"
-    );
 }
 
 /// fork c8f6a31 (`CreateRotationalSweep`, `SER(((SmBSplineCurve*)r3DCurves[i])->SubdivideAtDiscontinuity(..))`):
@@ -159,8 +146,8 @@ fn ruled_surface_passes_on_a_failed_degree_reduction() {
 #[test]
 fn rotational_sweep_passes_on_a_failed_profile_split() {
     let curve = Curve::from(BSplineCurve::new(3));
-    let run = |pass_on| {
-        let mut k = kernel(pass_on);
+    let run = || {
+        let mut k = kernel();
         solidcore::sweep::api_brep::create_rotational_sweep(
             &mut k,
             &[Some(&curve)],
@@ -171,11 +158,6 @@ fn rotational_sweep_passes_on_a_failed_profile_split() {
         )
         .map(|_| ())
     };
-    let (off, on) = (run(false), run(true));
-    eprintln!("off {} / on {}", operation(&off), operation(&on));
+    let on = run();
     assert!(operation(&on).contains("make_nurb"), "{on:?}");
-    assert!(
-        operation(&off).contains("degenerate revolved curve"),
-        "{off:?}"
-    );
 }

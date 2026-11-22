@@ -135,9 +135,11 @@ fn exact_round_builds() {
     // (#14460): forced to accuracy 1e-11 and 1e-12 Gauss-Kronrod gives it to 1 ulp and the
     // earlier Runge-Kutta trim pieces forced to 1e-12 give the same bits; with Runge-Kutta at
     // this 1e-6 it was 3581.9837215948937, 5.4e-10 low. Before #16735 this integrator gave
-    // 3581.9837295899465, the figure the move is checked from.
+    // 3581.9837295899465, the figure the move is checked from. It was 3581.9837235113127, one
+    // ulp higher, until each trim point's iso-curve integral took the 15-point Gauss-Kronrod
+    // rule in place of the 7-point one (the same accuracy and error scale).
     let v = fillet(0.0).unwrap();
-    let pinned = 3_581.983_723_511_312_7_f64;
+    let pinned = 3_581.983_723_511_312_3_f64;
     assert_eq!(v.to_bits(), pinned.to_bits(), "{v} vs {pinned}");
     let (k, mut body) = filleted(0.0).unwrap();
     volume_leak::assert_moved_by_the_old_leak(&k, &mut body, 3_581.983_729_589_946_5, v, 1e-6);

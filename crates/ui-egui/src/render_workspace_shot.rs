@@ -513,6 +513,9 @@ pub(crate) fn overlay_visible(app: &SolveApp) -> bool {
 /// Actual output-camera frame, independent of inspector focus and transient guides.
 /// Retained result/compare views use their captured image dimensions separately.
 pub(crate) fn render_rect(app: &SolveApp, viewport: Rect) -> Rect {
+    if super::tiled(app) && (!app.preferences.render_legacy_image_defaults || overlay_visible(app)) {
+        return frame_rect(super::image_aspect(&app.render_workspace.view.draft), viewport).unwrap_or(viewport);
+    }
     if app.preferences.render_legacy_image_defaults {
         return preview_rect(app, viewport).unwrap_or(viewport);
     }
@@ -535,7 +538,7 @@ pub(crate) fn preview_rect(app: &SolveApp, viewport: Rect) -> Option<Rect> {
         .get(index)
         .filter(|(_, _, height, _)| *height > 0)
         .map_or(f64::from(saved.width) / f64::from(saved.height), |(_, width, height, _)| f64::from(*width) / f64::from(*height));
-    let free = crate::shell::workspace_content(app, crate::render_ui::canvas(app, viewport));
+    let free = if super::tiled(app) { viewport } else { crate::shell::workspace_content(app, crate::render_ui::canvas(app, viewport)) };
     frame_rect(aspect, free.shrink(Tokens::get().space_8))
 }
 

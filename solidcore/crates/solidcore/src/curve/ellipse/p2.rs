@@ -855,6 +855,22 @@ pub struct Ellipse {
 }
 
 impl Ellipse {
+    /// Not upstream: the same ellipse by definition, exactly (IEEE `==`; a NaN
+    /// refuses): the same B-spline part ([`BSplineCurve::same_definition`]), and
+    /// placement, domain, radii, polar conversion table, `inside_out` and the circle
+    /// marker equal.
+    #[must_use]
+    pub fn same_definition(&self, other: &Self) -> bool {
+        self.base.same_definition(&other.base)
+            && self.position == other.position
+            && self.anal_domain == other.anal_domain
+            && self.radius_x == other.radius_x
+            && self.radius_y == other.radius_y
+            && self.polar == other.polar
+            && self.inside_out == other.inside_out
+            && self.circle == other.circle
+    }
+
     /// Exact evaluation copy without the B-spline copy constructor's knot fix-up.
     pub(crate) fn clone_exact_bounded(&self) -> Self {
         Self {

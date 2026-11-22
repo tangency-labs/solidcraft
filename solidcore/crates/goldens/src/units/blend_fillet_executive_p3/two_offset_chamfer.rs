@@ -517,8 +517,8 @@ mod round_definition_rows {
                 }
             }
             let blends = certified_blends(&k, &mut done.body, name);
-            volume_band(&k, &mut done.body, &blends, old, name);
-            mass_bands(&k, &mut done.body, name);
+            let estimates = volume_band(&k, &mut done.body, &blends, old, name);
+            mass_bands(&k, &mut done.body, &estimates, name);
         }
     }
 }
