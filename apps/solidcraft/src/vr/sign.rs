@@ -210,7 +210,12 @@ impl Painter {
                             );
                         }
                         Some(name) => {
-                            let label = painter.layout_job(wrapped(&short(text, BUBBLE_CHARS), t.font_small * scale, ink, inside.width(), 1));
+                            // One line under the pictogram: a word too long for it ("Show/Hide",
+                            // "Zusammensetzen") is set smaller before it is cut.
+                            let words = short(text, BUBBLE_CHARS);
+                            let natural = painter.layout_no_wrap(words.clone(), egui::FontId::proportional(t.font_small * scale), ink).size().x;
+                            let size = fit_size(natural, inside.width(), t.font_small * scale);
+                            let label = painter.layout_job(wrapped(&words, size, ink, inside.width(), 1));
                             let gap = t.space_2 * scale;
                             let side = (inside.height() - label.size().y - gap).min(inside.width() * 0.6).max(0.0);
                             let top = inside.center().y - (side + gap + label.size().y) * 0.5;
@@ -304,6 +309,19 @@ fn wrapped(text: &str, size: f32, ink: egui::Color32, width: f32, rows: usize) -
     job
 }
 
+/// The smallest share of its size a bubble's line of words is set at to fit; below it, the
+/// words are cut with an ellipsis instead.
+const BUBBLE_MIN_SHRINK: f32 = 0.7;
+
+/// The size to set a line `natural` wide at `size` in, so it fits in `width`: `size` where it
+/// fits, smaller where not, never below [`BUBBLE_MIN_SHRINK`] of it.
+fn fit_size(natural: f32, width: f32, size: f32) -> f32 {
+    if !(natural.is_finite() && width.is_finite() && natural > width && width > 0.0) {
+        return size;
+    }
+    size * (width / natural).max(BUBBLE_MIN_SHRINK)
+}
+
 /// `text` on one line, at most `max` characters (the last an ellipsis when cut).
 fn short(text: &str, max: usize) -> String {
     let line: String = text.split_whitespace().collect::<Vec<_>>().join(" ");
@@ -321,6 +339,18 @@ mod tests {
 
     /// A sign's words are put on one line (runs of spaces and line breaks made one space) and
     /// cut at the most characters with an ellipsis, counting characters, not bytes.
+    /// A bubble's line that is too wide is set smaller to fit, but never below the floor; one
+    /// that fits, or a width that is no width, keeps its size.
+    #[test]
+    fn a_bubbles_long_word_is_set_smaller_before_it_is_cut() {
+        assert_eq!(fit_size(80.0, 100.0, 20.0), 20.0);
+        assert!((fit_size(125.0, 100.0, 20.0) - 16.0).abs() < 1e-4);
+        assert!((fit_size(1000.0, 100.0, 20.0) - 20.0 * BUBBLE_MIN_SHRINK).abs() < 1e-4);
+        for (natural, width) in [(f32::NAN, 100.0), (125.0, 0.0), (125.0, f32::INFINITY), (f32::INFINITY, 100.0)] {
+            assert_eq!(fit_size(natural, width, 20.0), 20.0, "{natural} in {width}");
+        }
+    }
+
     #[test]
     fn a_signs_words_are_put_on_one_line_and_cut_with_an_ellipsis() {
         assert_eq!(short("Bracket  left\n\tside ", 40), "Bracket left side");
