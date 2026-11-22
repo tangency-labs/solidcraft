@@ -186,12 +186,6 @@ impl SurfaceFailure {
     pub(crate) const fn comparison_status(&self) -> i32 {
         match self {
             Self::Missing(_) | Self::NoNurb => SM_ERR_NULL_POINTER,
-            Self::Failed(_)
-            | Self::Defect { .. }
-            | Self::NoCommonEllipsePlane
-            | Self::EllipseBoundsNotCertified
-            | Self::EllipsesNotOnOneExactPlane
-            | Self::PlaneCanvasNotFinite => SM_ERR,
             Self::InvalidValue(_) => SM_ERR_INVALID_INPUT,
             Self::OutsideDomain(_) => SM_ERR_OUTSIDE_OF_DOMAIN,
             Self::OffSurface(_) => SM_ERR_NOT_WITHIN_TOLERANCE,
