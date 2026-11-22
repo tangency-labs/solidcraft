@@ -1524,6 +1524,13 @@ pub enum AnalyticSupport {
     },
 }
 
+/// The frame precision accepted by the analytic support's definition check.
+pub(crate) fn orthonormal_placement(p: &Axis2Placement) -> bool {
+    let ulps = 8.0 * f64::EPSILON;
+    let unit = |v: Vec3| (v.length() - 1.0).abs() <= ulps;
+    unit(p.x_axis()) && unit(p.y_axis()) && p.x_axis().dot(p.y_axis()).abs() <= ulps
+}
+
 impl AnalyticSupport {
     /// The analytic kind of a surface, if it is a plane, cylinder, cone, sphere or torus.
     #[must_use]
@@ -1663,10 +1670,7 @@ impl AnalyticSupport {
             | Self::Sphere { placement, .. }
             | Self::Torus { placement, .. } => placement,
         };
-        let ulps = 8.0 * f64::EPSILON;
-        let unit = |v: Vec3| (v.length() - 1.0).abs() <= ulps;
-        let square = p.x_axis().dot(p.y_axis()).abs() <= ulps;
-        if !(unit(p.x_axis()) && unit(p.y_axis()) && square) {
+        if !orthonormal_placement(p) {
             return Err(SolidError::invalid_input(
                 OP_BUILD,
                 "a support's placement is not orthonormal",
