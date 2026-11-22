@@ -1295,6 +1295,17 @@ fn face_body_reached(s: &Session, sketch: u64) -> Result<Option<String>> {
     if !s.doc.component_within(component, s.active_component) {
         return Ok(None);
     }
+    body_reachable(s, &body.name, &anchor.path)?;
+    Ok(Some(body.name.clone()))
+}
+
+/// Refuses a join or cut into `body_name` that can't be made in its component: its bodies come
+/// from a linked design file, or `path` (the placement picked; empty for none) is not the first
+/// placement of a component placed more than once.
+fn body_reachable(s: &Session, body_name: &str, path: &[u64]) -> Result<()> {
+    let st = s.model.state();
+    let Some(body) = st.body(body_name) else { return Ok(()) };
+    let component = s.doc.model_body_component(body);
     let name = |c: u64| s.doc.components.iter().find(|x| x.id == c).map_or_else(|| format!("component {c}"), |x| x.name.clone());
     let mut c = component;
     for _ in 0..1000 {
@@ -1313,7 +1324,7 @@ fn face_body_reached(s: &Session, sketch: u64) -> Result<Option<String>> {
             None => break,
         }
     }
-    if !anchor.path.is_empty() && anchor.path != s.doc.first_path(component) {
+    if !path.is_empty() && path != s.doc.first_path(component) {
         return Err(EngineError::Other(format!(
             "`{}` is in {}, which is placed more than once, and the sketch is on another placement than the first: activate that placement of {} to cut or join it there",
             body.name,
@@ -1321,7 +1332,7 @@ fn face_body_reached(s: &Session, sketch: u64) -> Result<Option<String>> {
             name(component)
         )));
     }
-    Ok(Some(body.name.clone()))
+    Ok(())
 }
 
 /// A hole's face points, named on the bodies it drills where one of theirs holds the point
@@ -1570,8 +1581,17 @@ fn revolve(s: &mut Session, p: &Value) -> Result<Value> {
     };
     let operation = operation(p, cmd)?;
     let mut targets = face_join_targets(s, p, operation, &[sketch], cmd)?;
+    let unnamed = targets.is_empty() && string_list(cmd, p, "participants")?.is_empty();
+    if let Some(body) = face_body.as_deref().filter(|_| unnamed && operation != Operation::NewBody) {
+        // A cut changes the picked body only inside the active component (`cut_scope`).
+        let st = s.model.state();
+        let inside = st.body(body).is_some_and(|b| s.doc.component_within(s.doc.model_body_component(b), s.active_component));
+        if operation == Operation::Join || inside {
+            body_reachable(s, body, &[])?;
+        }
+    }
     // A fixed plane keeps no attachment to the face, so its body is the one picked.
-    if targets.is_empty() && operation == Operation::Join && string_list(cmd, p, "participants")?.is_empty() {
+    if unnamed && operation == Operation::Join {
         targets.extend(face_body.clone().map(BodyName));
     }
     // From a profile on a body's face in a component inside the active one, a cut changes that
