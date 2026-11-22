@@ -77,6 +77,7 @@ use crate::surface::surface::p5::DropPointOptions;
 use crate::surface::surface::Surface;
 use crate::topology::brep::p1;
 use crate::topology::edge::{self, NotifyEnv};
+use crate::topology::edgeuse::p1 as eu1;
 use crate::topology::{vertex, Brep, EdgeId, FaceId, VertexId};
 
 const OP: &str = "heal::reseat";
@@ -123,6 +124,9 @@ pub enum Refusal {
     /// The curve already lies on its faces, and its tolerance, which the check takes, is kept
     /// as the file states it.
     AlreadyOnFaces,
+    /// The trims made from the new curve grow the edge's tolerance or a vertex's past what it
+    /// was: the edge is left as it was.
+    TrimsGrow,
 }
 
 /// An edge re-seated.
@@ -154,6 +158,73 @@ pub struct ReseatReport {
     pub refused: Vec<(EdgeId, Refusal)>,
     /// Vertices of re-seated edges whose tolerances shrank: the vertex, before, after.
     pub vertices: Vec<(VertexId, f64, f64)>,
+}
+
+/// An edge as it was before a re-seat: its curve, its interval, its edge uses' trims and its
+/// own and its vertices' tolerances, to put back exactly.
+struct Kept {
+    curve: Option<Curve>,
+    interval: crate::geom::extent1d::Extent1d,
+    tolerance: f64,
+    trims: Vec<(crate::topology::EdgeuseId, Curve)>,
+    vertices: Vec<(VertexId, f64)>,
+}
+
+impl Kept {
+    fn of(b: &Brep, e: EdgeId) -> Result<Kept> {
+        let mut trims = Vec::new();
+        for eu in edge::edgeuses(b, e, None, None)? {
+            if let Some(c) = eu1::uv_trim_curve_pointer(b, eu)? {
+                trims.push((eu, c.clone()));
+            }
+        }
+        let (s, t) = edge::start_end_vertices(b, e)?;
+        let mut vertices = Vec::new();
+        for v in [s, t].into_iter().flatten() {
+            vertices.push((v, vertex::tolerance(b, v)?));
+        }
+        Ok(Kept {
+            curve: edge::curve(b, e)?.cloned(),
+            interval: edge::interval(b, e)?,
+            tolerance: edge::tolerance(b, e)?,
+            trims,
+            vertices,
+        })
+    }
+
+    /// Whether the edge's tolerance or one of its vertices' is now past what it was.
+    fn grew(&self, b: &Brep, e: EdgeId) -> Result<bool> {
+        if edge::tolerance(b, e)? > self.tolerance {
+            return Ok(true);
+        }
+        for &(v, t) in &self.vertices {
+            if vertex::tolerance(b, v)? > t {
+                return Ok(true);
+            }
+        }
+        Ok(false)
+    }
+
+    /// Puts the edge back as it was.
+    fn restore(self, b: &mut Brep, e: EdgeId, env: &mut NotifyEnv<'_>) -> Result<()> {
+        edge::replace_3d_curve(b, e, self.curve, env)?;
+        edge::set_interval(b, e, &self.interval)?;
+        for (eu, trim) in self.trims {
+            eu1::set_uv_trim_curve(
+                b,
+                eu,
+                eu1::UvTrimCurveArg::New(Box::new(trim)),
+                0.0,
+                true,
+                None,
+            )?;
+        }
+        b.edge_mut(e)?.tolerance = self.tolerance;
+        for (v, t) in self.vertices {
+            b.vertex_mut(v)?.tolerance = t;
+        }
+        Ok(())
+    }
 }
 
 /// The B-spline that [`curve_face_gap_bound`] encloses for `c`: a line's own B-spline part, a
@@ -380,34 +451,30 @@ pub fn reseat_edge(
     if !(lo.is_finite() && hi.is_finite() && hi > lo) {
         return Ok(Err(Refusal::NoCurve));
     }
+    // What the curve as it is needs: its certified gap to its faces, twice ([`GAP_SHARE`]).
+    let old_gap = match b_spline_of(&curve) {
+        Some(own) => curve_gap(k, b, [f1, f2], own, [lo, hi])?,
+        None => None,
+    };
+    let need = old_gap.map_or(before, |g| (g / GAP_SHARE).max(floor).max(before));
     // A curve already on its faces keeps its geometry: only its tolerance shrinks to the gap.
-    if let Some(own) = b_spline_of(&curve) {
-        let mut gap: Option<f64> = Some(0.0);
-        for f in [f1, f2] {
-            let g = curve_face_gap_bound(k, b, f, own, [lo, hi], floor / 100.0)?;
-            gap = match (gap, g) {
-                (Some(a), Some(c)) => Some(a.max(c)),
-                _ => None,
-            };
-        }
-        if let Some(g) = gap {
-            let after = (g / GAP_SHARE).max(floor);
-            if after <= GAIN * before {
-                // A tolerance stated by the file is its accuracy, and is kept, unless the check
-                // refuses it as too wide (Test #59).
-                if before < wide(b) {
-                    return Ok(Err(Refusal::AlreadyOnFaces));
-                }
-                b.edge_mut(e)?.tolerance = after;
-                return Ok(Ok(Reseated {
-                    edge: e,
-                    before,
-                    after,
-                    gap: g,
-                    moved: 0.0,
-                    samples: 0,
-                }));
+    if let Some(g) = old_gap {
+        let after = (g / GAP_SHARE).max(floor);
+        if after <= GAIN * before {
+            // A tolerance stated by the file is its accuracy, and is kept, unless the check
+            // refuses it as too wide (Test #59).
+            if before < wide(b) {
+                return Ok(Err(Refusal::AlreadyOnFaces));
             }
+            b.edge_mut(e)?.tolerance = after;
+            return Ok(Ok(Reseated {
+                edge: e,
+                before,
+                after,
+                gap: g,
+                moved: 0.0,
+                samples: 0,
+            }));
         }
     }
     // The approximation tolerance of the targets: well under the body's tolerance, so the fit,
@@ -448,7 +515,10 @@ pub fn reseat_edge(
         }
         let after = gap.map(|g| (g / GAP_SHARE).max(floor));
         if let (Some(g), Some(after)) = (gap, after) {
-            if after <= GAIN * before {
+            // No tolerance grows, and the new curve needs at most [`GAIN`] times what the old
+            // one did: a curve off its faces by more than its tolerance covers is brought back
+            // within it.
+            if after <= before && after <= GAIN * need {
                 let moved = match (b_spline_of(&curve).and_then(polynomial), fitted.nurb_ref()) {
                     (Some(old), Ok(new)) => old
                         .nurb_ref()
@@ -459,9 +529,16 @@ pub fn reseat_edge(
                 let Some(moved) = moved else {
                     return Ok(Err(Refusal::NotEnclosed));
                 };
+                let kept = Kept::of(b, e)?;
                 edge::replace_3d_curve(b, e, Some(Curve::from(fitted)), env)?;
                 b.edge_mut(e)?.tolerance = after;
                 remake_trims(k, b, e, &gaps)?;
+                // SMLib's trim maker, off a plane, raises the tolerances it needs: where that
+                // grows one, the edge goes back as it was.
+                if kept.grew(b, e)? {
+                    kept.restore(b, e, env)?;
+                    return Ok(Err(Refusal::TrimsGrow));
+                }
                 return Ok(Ok(Reseated {
                     edge: e,
                     before,
@@ -479,8 +556,47 @@ pub fn reseat_edge(
     }
 }
 
+/// The certified gap of the B-spline `s` over `range` to the faces `faces`: the larger of the
+/// two bounds, `None` when one is missing.
+fn curve_gap(
+    k: &Kernel,
+    b: &Brep,
+    faces: [FaceId; 2],
+    s: &BSplineCurve,
+    range: [f64; 2],
+) -> Result<Option<f64>> {
+    let floor = b.tolerance();
+    let mut gap: Option<f64> = Some(0.0);
+    for f in faces {
+        let g = curve_face_gap_bound(k, b, f, s, range, floor / 100.0)?;
+        gap = match (gap, g) {
+            (Some(a), Some(c)) => Some(a.max(c)),
+            _ => None,
+        };
+    }
+    Ok(gap)
+}
+
+/// Whether edge `e`'s curve lies off one of its faces by more than half its tolerance (the
+/// share the check holds a gap to) by the check's own measure: the largest of its sampled
+/// edge/face gaps, cached on its edge uses ([`eu1::max_edge_face_gap`]), which Test #4 reads.
+/// Only a filter: a re-seat is decided on certified bounds.
+fn off_its_tolerance(k: &Kernel, b: &mut Brep, e: EdgeId) -> Result<bool> {
+    let tol = edge::tolerance(b, e)?;
+    for eu in edge::edgeuses(b, e, None, None)? {
+        if let Some(gap) = eu1::max_edge_face_gap(k, b, eu, false)? {
+            if gap.gap_3d.is_finite() && gap.gap_3d > GAP_SHARE * tol {
+                return Ok(true);
+            }
+        }
+    }
+    Ok(false)
+}
+
 /// [`reseat_edge`] on every edge of `b` whose tolerance is above `threshold` times the body's,
-/// in edge order: what was re-seated and what was refused. Run inside an edit.
+/// or whose curve lies off its faces by more than its tolerance covers (by the check's sampled
+/// gap, [`off_its_tolerance`]), in edge order:
+/// what was re-seated and what was refused. Run inside an edit.
 ///
 /// # Errors
 ///
@@ -500,7 +616,7 @@ pub fn reseat_edges(
     let mut touched = Vec::new();
     for e in edges {
         k.check_cancelled(OP)?;
-        if edge::tolerance(b, e)? <= threshold * floor {
+        if edge::tolerance(b, e)? <= threshold * floor && !off_its_tolerance(k, b, e)? {
             continue;
         }
         match reseat_edge(k, b, env, e)? {

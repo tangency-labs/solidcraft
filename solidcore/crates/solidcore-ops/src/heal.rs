@@ -175,6 +175,9 @@ fn reseat_refusal_text(r: &ReseatRefusal) -> String {
             "the curve fitted between the faces has no certified gap to them".into()
         }
         ReseatRefusal::NotEnclosed => "how far the curve would move could not be bounded".into(),
+        ReseatRefusal::TrimsGrow => {
+            "the trims made from the new curve would grow a tolerance".into()
+        }
         ReseatRefusal::AlreadyOnFaces => {
             "the curve already lies on its faces; its stated tolerance is kept".into()
         }
