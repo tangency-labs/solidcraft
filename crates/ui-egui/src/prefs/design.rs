@@ -21,24 +21,27 @@ pub(super) fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
         ui_kit::settings_heading(ui, app.tr("prefs.design"), app.tr("prefs.design_note"));
         ui_kit::settings_section(ui, "units", app.tr("prefs.units_precision"), |ui| {
             ui_kit::settings_form(ui, label_width, |ui| {
+                let locked = app.policy.locks("default_units");
                 ui_kit::row(ui, app.tr("ui.units_of_new_designs"), |ui| {
                     let mut selected = UNITS.iter().position(|u| *u == app.preferences.default_units).unwrap_or(0);
-                    ui_kit::segmented(
-                        ui,
-                        &mut selected,
-                        UNITS,
-                        ui_kit::Segments {
-                            intrinsic: true,
-                            targets: &[
-                                "prefs:default_units:mm",
-                                "prefs:default_units:cm",
-                                "prefs:default_units:m",
-                                "prefs:default_units:in",
-                                "prefs:default_units:ft",
-                            ],
-                            ..Default::default()
-                        },
-                    );
+                    crate::policy::row(ui, locked, |ui| {
+                        ui_kit::segmented(
+                            ui,
+                            &mut selected,
+                            UNITS,
+                            ui_kit::Segments {
+                                intrinsic: true,
+                                targets: &[
+                                    "prefs:default_units:mm",
+                                    "prefs:default_units:cm",
+                                    "prefs:default_units:m",
+                                    "prefs:default_units:in",
+                                    "prefs:default_units:ft",
+                                ],
+                                ..Default::default()
+                            },
+                        )
+                    });
                     if let Some(unit) = UNITS.get(selected)
                         && app.preferences.default_units != *unit
                     {

@@ -456,6 +456,90 @@ pub fn point_displacement(from: [f64; 2], to: [f64; 2]) -> Result<[f64; 2]> {
         .map_err(status)
 }
 
+/// Axis-aligned bounding box `(min, max)` of a 2D polyline.
+pub fn polyline_2d_bounds(points: &[[f64; 2]]) -> Result<Option<([f64; 2], [f64; 2])>> {
+    let pts: Vec<_> = points
+        .iter()
+        .copied()
+        .map(point2)
+        .collect::<Result<Vec<_>>>()?;
+    Ok(q::polyline_2d_bounds(&pts)
+        .map_err(status)?
+        .map(|(lo, hi)| (lo.to_array(), hi.to_array())))
+}
+
+/// Distance and closest point from `point` to a 2D polyline.
+pub fn polyline_2d_closest_point(
+    point: [f64; 2],
+    points: &[[f64; 2]],
+) -> Result<Option<(f64, [f64; 2])>> {
+    let p = point2(point)?;
+    let pts: Vec<_> = points
+        .iter()
+        .copied()
+        .map(point2)
+        .collect::<Result<Vec<_>>>()?;
+    Ok(q::polyline_2d_closest_point(p, &pts)
+        .map_err(status)?
+        .map(|(d, q)| (d, q.to_array())))
+}
+
+/// Intersection point of two 2D segments within tolerance `tol`.
+pub fn segment_2d_intersection(
+    a1: [f64; 2],
+    a2: [f64; 2],
+    b1: [f64; 2],
+    b2: [f64; 2],
+    tol: f64,
+) -> Result<Option<[f64; 2]>> {
+    Ok(
+        q::segment_2d_intersection(point2(a1)?, point2(a2)?, point2(b1)?, point2(b2)?, tol)
+            .map_err(status)?
+            .map(solidcore::Point2::to_array),
+    )
+}
+
+/// All segment-segment intersections between two 2D polylines within tolerance `tol`.
+pub fn polyline_2d_crossings(a: &[[f64; 2]], b: &[[f64; 2]], tol: f64) -> Result<Vec<[f64; 2]>> {
+    let pa: Vec<_> = a.iter().copied().map(point2).collect::<Result<Vec<_>>>()?;
+    let pb: Vec<_> = b.iter().copied().map(point2).collect::<Result<Vec<_>>>()?;
+    Ok(q::polyline_2d_crossings(&pa, &pb, tol)
+        .map_err(status)?
+        .into_iter()
+        .map(solidcore::Point2::to_array)
+        .collect())
+}
+
+/// Analytic 2D tangent contact point between segment `[a, b]` and circle `(center, radius)`.
+pub fn tangent_contact_line_circle_2d(
+    a: [f64; 2],
+    b: [f64; 2],
+    center: [f64; 2],
+    radius: f64,
+    tol: f64,
+) -> Result<Option<[f64; 2]>> {
+    Ok(
+        q::tangent_contact_line_circle_2d(point2(a)?, point2(b)?, point2(center)?, radius, tol)
+            .map_err(status)?
+            .map(solidcore::Point2::to_array),
+    )
+}
+
+/// Analytic 2D tangent contact point between two circles `(c1, r1)` and `(c2, r2)`.
+pub fn tangent_contact_circle_circle_2d(
+    c1: [f64; 2],
+    r1: f64,
+    c2: [f64; 2],
+    r2: f64,
+    tol: f64,
+) -> Result<Option<[f64; 2]>> {
+    Ok(
+        q::tangent_contact_circle_circle_2d(point2(c1)?, r1, point2(c2)?, r2, tol)
+            .map_err(status)?
+            .map(solidcore::Point2::to_array),
+    )
+}
+
 /// The largest distance from `p` to a point of the box `[lo, hi]`: to its farthest corner
 /// (`query::api_queries::box_max_distance_to_point`).
 ///
@@ -2879,5 +2963,52 @@ pub(crate) mod tests {
         let ball_order = kernel_order(&ball);
         let whole = faces_on(&ball, &ball_order, |s| matches!(s, SurfaceKind::Sphere(_)));
         assert_eq!(ball.rim_edges(&ball_order, &whole), Ok(Vec::new()));
+    }
+
+    #[test]
+    fn curve_arc_length_and_2d_polyline_ops_wrappers_round_trip() {
+        let line = solidcore_record::brep::Curve::Line {
+            start: [0.0, 0.0, 0.0],
+            end: [6.0, 8.0, 0.0],
+        };
+        let len = crate::curve::arc_length(&line, None).unwrap();
+        assert!((len - 10.0).abs() < 1e-9, "{len}");
+        let mid = crate::curve::point_at_arc_length(&line, None, false, 5.0).unwrap();
+        assert!((mid.point[0] - 3.0).abs() < 1e-9 && (mid.point[1] - 4.0).abs() < 1e-9);
+        let from_end = crate::curve::point_at_arc_length(&line, None, true, 2.0).unwrap();
+        assert!((from_end.point[0] - 4.8).abs() < 1e-9 && (from_end.point[1] - 6.4).abs() < 1e-9);
+
+        let poly = solidcore_record::brep::Curve::Polyline {
+            points: vec![[0.0, 0.0, 0.0], [3.0, 0.0, 0.0], [3.0, 4.0, 0.0]],
+        };
+        let (total, samples) =
+            crate::curve::samples_at_fractions(&poly, None, &[0.0, 0.5, 1.0]).unwrap();
+        assert!((total - 7.0).abs() < 1e-9);
+        assert_eq!(samples.len(), 3);
+        assert!(
+            (samples[1].point[0] - 3.0).abs() < 1e-6 && (samples[1].point[1] - 0.5).abs() < 1e-6
+        );
+
+        let b = polyline_2d_bounds(&[[1.0, 2.0], [4.0, -1.0]])
+            .unwrap()
+            .unwrap();
+        assert_eq!(b, ([1.0, -1.0], [4.0, 2.0]));
+        let (d, p) = polyline_2d_closest_point([2.0, 3.0], &[[0.0, 0.0], [4.0, 0.0]])
+            .unwrap()
+            .unwrap();
+        assert!((d - 3.0).abs() < 1e-9 && (p[0] - 2.0).abs() < 1e-9);
+        let cross =
+            polyline_2d_crossings(&[[0.0, 0.0], [10.0, 0.0]], &[[5.0, -2.0], [5.0, 2.0]], 1e-6)
+                .unwrap();
+        assert_eq!(cross.len(), 1);
+        assert!((cross[0][0] - 5.0).abs() < 1e-9 && cross[0][1].abs() < 1e-9);
+        let lc = tangent_contact_line_circle_2d([0.0, 0.0], [10.0, 0.0], [4.0, 3.0], 3.0, 1e-6)
+            .unwrap()
+            .unwrap();
+        assert!((lc[0] - 4.0).abs() < 1e-9 && lc[1].abs() < 1e-9);
+        let cc = tangent_contact_circle_circle_2d([0.0, 0.0], 2.0, [5.0, 0.0], 3.0, 1e-6)
+            .unwrap()
+            .unwrap();
+        assert!((cc[0] - 2.0).abs() < 1e-9 && cc[1].abs() < 1e-9);
     }
 }
