@@ -3059,7 +3059,12 @@ fn a_long_note_wraps_inside_its_box() {
     let note = &out[0];
     assert!(note.galley.rows.len() > 1, "a sentence wider than the callout wraps");
     assert!(note.galley.size().x <= NOTE_WRAP_WIDTH + 0.5);
-    // The text drawn (the same galley, at the box's inner corner) stays inside the box.
-    let drawn = Rect::from_min_size(note.text_rect.min + vec2(6.0, 4.0), note.galley.size());
-    assert!(note.text_rect.expand(0.5).contains_rect(drawn), "text {drawn:?} inside box {:?}", note.text_rect);
+    // What draw_notes actually paints: the wrapped text, inside the callout box.
+    let output = draw(&h.ctx, |ui| draw_notes(&h.app, ui.painter(), &proj));
+    let texts: Vec<_> = output.shapes.iter().filter_map(|s| if let Shape::Text(t) = &s.shape { Some(t) } else { None }).collect();
+    assert_eq!(texts.len(), 1, "one note, one text shape");
+    let painted = texts[0];
+    assert!(painted.galley.rows.len() > 1, "the painted text wraps");
+    let drawn = Rect::from_min_size(painted.pos, painted.galley.size());
+    assert!(note.text_rect.expand(0.5).contains_rect(drawn), "painted text {drawn:?} inside box {:?}", note.text_rect);
 }
