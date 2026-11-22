@@ -201,7 +201,10 @@ pub(super) fn eval(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, 
                 let i = st.bodies.iter().position(|b| &b.name == n).ok_or_else(|| DocError::Unknown(format!("body `{n}`")))?;
                 if let Some(mb) = st.bodies.get_mut(i) {
                     let nb = kernel::transform_matrix(&mb.body, m)?;
-                    *mb = ModelBody::new(mb.name.clone(), nb, mb.feature);
+                    // A rigid alignment keeps each face's identity. Carry the transform's
+                    // exact history, as Move does, instead of naming the result by overlap
+                    // with the body still at its old position (#20288).
+                    *mb = mb.remade(Traced::step(nb, &[&mb.traced()]));
                 }
             }
             Ok(())
@@ -997,32 +1000,53 @@ fn no_free_edge(st: &ModelState, body: &Option<crate::BodyName>, pick: Option<Ve
     }
 }
 
-/// The sheet made from surfaces a fold is on, and its line's ends where they are now: the sketch
-/// line's, or the points given. The named body's sheet, or the first whose flat panel the line
-/// lies on.
+fn relative_transform(doc: &Document, from: u64, to: u64) -> Option<crate::Mat> {
+    if from == to {
+        return Some(crate::IDENTITY);
+    }
+    let m_from = doc.component_transform(from);
+    let m_to = doc.component_transform(to);
+    let inv_to = crate::mat_inverse(&m_to)?;
+    Some(crate::mat_mul(&inv_to, &m_from))
+}
+
+/// The sheet made from surfaces a fold is on, and its line's ends in that sheet's component frame.
+/// The named body's sheet, or the first whose flat panel the line lies on.
 fn surface_fold_sheet(
+    doc: &Document,
     st: &ModelState,
     body: &Option<crate::BodyName>,
     sketch: &Option<crate::SketchId>,
     curve: &Option<String>,
     a: &crate::Position,
     b: &crate::Position,
+    author_comp: u64,
 ) -> Option<(usize, Vec3, Vec3)> {
-    let (a, b) = match (sketch, curve) {
+    let (source_a, source_b, source_comp) = match (sketch, curve) {
         (Some(sk), Some(c)) => {
             let ss = st.sketch(sk.0)?;
             let ci = ss.sketch.curve_index(c)?;
+            let comp = doc.feature(sk.0).map(|f| f.component).unwrap_or(author_comp);
             match ss.sketch.segs(ci).as_slice() {
-                [Seg2::Line { a, b }] => (ss.plane.to_world(*a), ss.plane.to_world(*b)),
+                [Seg2::Line { a, b }] => (ss.plane.to_world(*a), ss.plane.to_world(*b), comp),
                 _ => return None,
             }
         }
-        _ => (a.0, b.0),
+        _ => (a.0, b.0, author_comp),
     };
     if let Some(n) = body {
-        return st.surface_sheets.iter().position(|s| &s.body == n).map(|i| (i, a, b));
+        let i = st.surface_sheets.iter().position(|s| &s.body == n)?;
+        let s = &st.surface_sheets[i];
+        let sheet_comp = st.body(&s.body).map(|b| doc.model_body_component(b)).unwrap_or(author_comp);
+        let m = relative_transform(doc, source_comp, sheet_comp).unwrap_or(crate::IDENTITY);
+        return Some((i, apply_point(&m, source_a), apply_point(&m, source_b)));
     }
-    st.surface_sheets.iter().position(|s| s.fold_panel_at(a, b)).map(|i| (i, a, b))
+    st.surface_sheets.iter().enumerate().find_map(|(i, s)| {
+        let sheet_comp = st.body(&s.body).map(|b| doc.model_body_component(b)).unwrap_or(author_comp);
+        let m = relative_transform(doc, source_comp, sheet_comp).unwrap_or(crate::IDENTITY);
+        let (sheet_a, sheet_b) = (apply_point(&m, source_a), apply_point(&m, source_b));
+        if s.fold_panel_at(sheet_a, sheet_b) { Some((i, sheet_a, sheet_b)) } else { None }
+    })
 }
 
 impl Document {
@@ -1030,9 +1054,9 @@ impl Document {
     /// sheet as `st` has it before the fold: by its `fixed` point, else as the sheet joins on
     /// either side ([`crate::SurfaceSheet::fold_side`]). None for a feature that is no fold on a
     /// sheet made from surfaces.
-    pub fn fold_side_at(&self, st: &ModelState, kind: &FeatureKind) -> Result<Option<crate::FoldSide>> {
+    pub fn fold_side_at(&self, st: &ModelState, kind: &FeatureKind, component: u64) -> Result<Option<crate::FoldSide>> {
         let FeatureKind::SheetFold { sketch, curve, a, b, angle, radius, position, flip, fixed, body, .. } = kind else { return Ok(None) };
-        let Some((i, a, b)) = surface_fold_sheet(st, body, sketch, curve, a, b) else { return Ok(None) };
+        let Some((i, a, b)) = surface_fold_sheet(self, st, body, sketch, curve, a, b, component) else { return Ok(None) };
         let Some(sk) = st.surface_sheets.get(i).filter(|sk| !sk.unfolded) else { return Ok(None) };
         let vals = self.evaluation_values();
         let ang = val(&vals, angle, Kind::Angle)?;
@@ -1040,18 +1064,24 @@ impl Document {
             Some(e) => val(&vals, e, Kind::Length)?,
             None => self.rule_values_at(&vals, &self.sheet_rule(Some(&sk.rule)), Some(sk.thickness))?.bend_radius,
         };
-        sk.fold_side(a, b, ang, rr, position, *flip, fixed.map(Vec3::from)).map(Some)
+        let sheet_comp = st.body(&sk.body).map(|b| self.model_body_component(b)).unwrap_or(component);
+        let m = relative_transform(self, component, sheet_comp).unwrap_or(crate::IDENTITY);
+        let fixed_sheet = fixed.map(|p| apply_point(&m, p.0));
+        sk.fold_side(a, b, ang, rr, position, *flip, fixed_sheet).map(Some)
     }
 
     /// Whether a fold's `fixed` point touches no material of the sheet made from surfaces the
     /// fold is on, as `st` has it before the fold (see `SurfaceSheet::touches`): such a
     /// point picks no side, and the `sheet.fold` command refuses it (#263). False for a fold with
     /// no fixed point, or one on no folded sheet (which fails as it is evaluated).
-    pub fn fold_fixed_off_sheet(&self, st: &ModelState, kind: &FeatureKind) -> bool {
+    pub fn fold_fixed_off_sheet(&self, st: &ModelState, kind: &FeatureKind, component: u64) -> bool {
         let FeatureKind::SheetFold { sketch, curve, a, b, fixed: Some(p), body, .. } = kind else { return false };
-        let Some((i, _, _)) = surface_fold_sheet(st, body, sketch, curve, a, b) else { return false };
+        let Some((i, _, _)) = surface_fold_sheet(self, st, body, sketch, curve, a, b, component) else { return false };
         let Some(sk) = st.surface_sheets.get(i).filter(|sk| !sk.unfolded) else { return false };
-        !sk.touches(p.0, (sk.thickness * 1e-3).max(1e-6))
+        let sheet_comp = st.body(&sk.body).map(|b| self.model_body_component(b)).unwrap_or(component);
+        let m = relative_transform(self, component, sheet_comp).unwrap_or(crate::IDENTITY);
+        let p_sheet = apply_point(&m, p.0);
+        !sk.touches(p_sheet, (sk.thickness * 1e-3).max(1e-6))
     }
 
     /// This design with each fold that keeps no side that stays (a design saved before folds
@@ -1062,7 +1092,7 @@ impl Document {
         let mut out: Option<Document> = None;
         for f in &self.features {
             let FeatureKind::SheetFold { stays: None, .. } = &f.kind else { continue };
-            let Ok(Some(side)) = self.fold_side_at(&model.state_before(f.id), &f.kind) else { continue };
+            let Ok(Some(side)) = self.fold_side_at(&model.state_before(f.id), &f.kind, f.component) else { continue };
             let doc = out.get_or_insert_with(|| self.clone());
             if let Some(FeatureKind::SheetFold { stays, .. }) = doc.feature_mut(f.id).map(|x| &mut x.kind) {
                 *stays = Some(side);
@@ -1418,9 +1448,9 @@ pub(super) fn sheet_eval(
         }
         FeatureKind::SheetHem { edges, body, .. } => Err(no_free_edge(st, body, edges.first().map(|p| p.0))),
         FeatureKind::SheetFold { sketch, curve, a, b, angle, radius, position, flip, fixed, stays, body }
-            if surface_fold_sheet(st, body, sketch, curve, a, b).is_some() =>
+            if surface_fold_sheet(doc, st, body, sketch, curve, a, b, f.component).is_some() =>
         {
-            let (i, a, b) = surface_fold_sheet(st, body, sketch, curve, a, b).ok_or_else(|| DocError::Invalid("sheet".into()))?;
+            let (i, a, b) = surface_fold_sheet(doc, st, body, sketch, curve, a, b, f.component).ok_or_else(|| DocError::Invalid("sheet".into()))?;
             let sk = st.surface_sheets.get(i).ok_or_else(|| DocError::Invalid("sheet".into()))?;
             if sk.unfolded {
                 return Err(DocError::Invalid("refold the sheet before folding it".into()));
@@ -1435,7 +1465,12 @@ pub(super) fn sheet_eval(
             // fixed point where it has one, wherever that point lies now.
             let stays = match stays {
                 Some(side) => *side,
-                None => sk.fold_side(a, b, ang, rr, position, *flip, fixed.map(Vec3::from))?,
+                None => {
+                    let sheet_comp = st.body(&sk.body).map(|b| doc.model_body_component(b)).unwrap_or(f.component);
+                    let m = relative_transform(doc, f.component, sheet_comp).unwrap_or(crate::IDENTITY);
+                    let fixed_sheet = fixed.map(|p| apply_point(&m, p.0));
+                    sk.fold_side(a, b, ang, rr, position, *flip, fixed_sheet)?
+                }
             };
             if let Some(sk) = st.surface_sheets.get_mut(i) {
                 let before = sk.clone();

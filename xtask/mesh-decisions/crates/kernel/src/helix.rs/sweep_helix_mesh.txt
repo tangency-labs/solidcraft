@@ -1,0 +1,1 @@
+models a thread as a triangle mesh for faceted booleans

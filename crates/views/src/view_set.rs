@@ -1,4 +1,4 @@
-//! The views of one design: Model, Sketch, Sheet, Render and Animation, shown as sub-tabs of the
+//! The views of one design: Model, Sheet, Render and Animation, shown as sub-tabs of the
 //! design's tab. Pure data and small functions, no egui, so the strip, the commands, the menus
 //! and the saved form all read the same [`ViewSet`]. A view change reaches the app through
 //! `documents::apply_view`, the one place that knows what a kind means for the window.
@@ -12,7 +12,7 @@ use crate::tiles::{Edge, Placement, Preset, Rect, Tiles};
 pub const MAX_VIEWS: usize = 64;
 /// Longest view name, in characters (what `tab.view.rename` takes too).
 pub const MAX_NAME: usize = 64;
-/// Longest subject (the id of the sketch or sheet a view shows), in bytes.
+/// Longest subject (the id of the sheet a view shows), in bytes.
 const MAX_SUBJECT: usize = 256;
 /// Closed views kept for Reopen Closed View.
 const CLOSED_CAP: usize = 16;
@@ -23,7 +23,6 @@ const MAX_ID: u64 = 1 << 53;
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum ViewKind {
     Model,
-    Sketch,
     Sheet,
     Render,
     Animation,
@@ -31,7 +30,7 @@ pub enum ViewKind {
 
 impl ViewKind {
     /// Every kind, in the order the "+" menu lists them.
-    pub const ALL: [ViewKind; 5] = [ViewKind::Model, ViewKind::Sketch, ViewKind::Sheet, ViewKind::Render, ViewKind::Animation];
+    pub const ALL: [ViewKind; 4] = [ViewKind::Model, ViewKind::Sheet, ViewKind::Render, ViewKind::Animation];
 
     /// This workspace can draw its contents in the frame of a tile.
     pub fn can_tile(self) -> bool {
@@ -42,7 +41,6 @@ impl ViewKind {
     pub fn key(self) -> &'static str {
         match self {
             ViewKind::Model => "model",
-            ViewKind::Sketch => "sketch",
             ViewKind::Sheet => "sheet",
             ViewKind::Render => "render",
             ViewKind::Animation => "animation",
@@ -58,7 +56,6 @@ impl ViewKind {
     fn label(self) -> &'static str {
         match self {
             ViewKind::Model => "Model",
-            ViewKind::Sketch => "Sketch",
             ViewKind::Sheet => "Sheet",
             ViewKind::Render => "Render",
             ViewKind::Animation => "Animation",
@@ -66,15 +63,23 @@ impl ViewKind {
     }
 }
 
+/// A model sketch being edited in one view. Runtime state, never saved with a layout.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct SketchSession {
+    pub sketch: u64,
+}
+
 /// One view of a design.
 #[derive(Clone, Debug, PartialEq)]
 pub struct DesignView {
+    pub editing: Option<SketchSession>,
+    pub compass: bool,
     /// Unique within its design for as long as the set lives; never reused.
     pub id: u64,
     pub kind: ViewKind,
-    /// What the sub-tab says: the default ("Sketch 2") until renamed.
+    /// What the sub-tab says: the default ("Sheet 2") until renamed.
     pub name: String,
-    /// The sketch or sheet this view shows (its id); none for Model, Render and Animation.
+    /// The sheet this view shows (its id); none for Model, Render and Animation.
     pub subject: Option<String>,
     /// How this view looks at the model (its own camera). None until the view is first left: the
     /// front end then shows it from where the design looks now.
@@ -108,6 +113,18 @@ impl WindowLevel {
     fn from_key(key: &str) -> Option<Self> {
         [Self::ViewsOnly, Self::Clean, Self::Full].into_iter().find(|level| level.key() == key)
     }
+}
+
+/// An arrangement of existing views in one window.
+#[derive(Clone, Debug, PartialEq)]
+pub struct WindowArrangement {
+    pub panel_layout: Option<Value>,
+    pub options: super::WindowOptions,
+    pub views: Vec<u64>,
+    pub active: Option<u64>,
+    pub tiles: Option<Tiles>,
+    pub level: WindowLevel,
+    pub placement: Option<WindowPlacement>,
 }
 
 /// Logical window coordinates relative to the selected display.
@@ -187,6 +204,8 @@ fn anchored_window_axis(wanted: f32, room: f32, snap: bool) -> f32 {
 /// A pop-out holds its own strip, active view and layout for this design.
 #[derive(Clone, Debug, PartialEq)]
 pub struct PopOut {
+    pub panel_layout: Option<Value>,
+    pub options: super::WindowOptions,
     pub id: WindowId,
     pub level: WindowLevel,
     pub placement: Option<WindowPlacement>,
@@ -242,6 +261,16 @@ impl MoveError {
         }
     }
 }
+/// Camera components shared by the visible Model views in a window.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum CameraLinkMode {
+    #[default]
+    Off,
+    Orientation,
+    Zoom,
+    Both,
+}
+
 /// The views of a design in tab order, the active one, and the views closed lately.
 #[derive(Clone, Debug, PartialEq)]
 pub struct ViewSet {
@@ -251,12 +280,14 @@ pub struct ViewSet {
     closed: Vec<(usize, DesignView)>,
     next_id: u64,
     window_id: WindowId,
+    window_name: Option<String>,
     windows: Vec<PopOut>,
     next_window: WindowId,
     /// Open views belonging to another window of the same design.
     elsewhere: usize,
     /// How the window lays its views out side by side. Dormant while the active view is outside it.
     tiles: Option<Tiles>,
+    camera_link: CameraLinkMode,
 }
 
 impl Default for ViewSet {
@@ -268,12 +299,97 @@ impl Default for ViewSet {
 impl ViewSet {
     /// A design's first views: one Model view, active.
     pub fn new() -> Self {
-        let model = DesignView { id: 1, kind: ViewKind::Model, name: ViewKind::Model.label().into(), subject: None, spec: None };
+        let model = DesignView {
+            editing: None,
+            id: 1,
+            kind: ViewKind::Model,
+            name: ViewKind::Model.label().into(),
+            subject: None,
+            spec: None,
+            compass: true,
+        };
         Self::strip(vec![model], 1, 2, 0)
     }
 
     fn strip(views: Vec<DesignView>, active: u64, next_id: u64, window_id: WindowId) -> Self {
-        Self { views, active, closed: Vec::new(), next_id, window_id, windows: Vec::new(), next_window: 1, elsewhere: 0, tiles: None }
+        Self {
+            views,
+            active,
+            closed: Vec::new(),
+            next_id,
+            window_id,
+            window_name: None,
+            windows: Vec::new(),
+            next_window: 1,
+            elsewhere: 0,
+            tiles: None,
+            camera_link: CameraLinkMode::Off,
+        }
+    }
+
+    /// Arrange the live views in their new strips, reusing existing window identities in order.
+    /// The input must assign each open view exactly once and leave at least one in the main window.
+    pub fn arrange_windows(&mut self, groups: Vec<WindowArrangement>) -> bool {
+        if self.window_id != 0 || groups.is_empty() || groups.len() > MAX_POPOUTS + 1 {
+            return false;
+        }
+        let all = std::iter::once(&*self).chain(self.windows.iter().map(|window| &window.views));
+        let mut unassigned: std::collections::BTreeMap<_, _> = all.flat_map(|strip| strip.views.iter().map(|view| (view.id, view.clone()))).collect();
+        let mut assigned = Vec::new();
+        for group in groups {
+            if group.views.is_empty() || group.placement.as_ref().is_some_and(|placement| !placement.is_valid()) {
+                return false;
+            }
+            let views = group.views.iter().map(|id| unassigned.remove(id)).collect::<Option<Vec<_>>>();
+            let Some(views) = views else { return false };
+            assigned.push((group, views));
+        }
+        if !unassigned.is_empty() {
+            return false;
+        }
+        let mut assigned = assigned.into_iter();
+        let Some((main, views)) = assigned.next() else { return false };
+        self.apply_arrangement(main, views);
+        let mut old = std::mem::take(&mut self.windows).into_iter();
+        for (group, views) in assigned {
+            let mut window = old.next().unwrap_or_else(|| {
+                let id = self.allocate_window_id();
+                PopOut {
+                    panel_layout: None,
+                    options: super::WindowOptions::default(),
+                    id,
+                    level: WindowLevel::ViewsOnly,
+                    placement: None,
+                    views: Self::strip(Vec::new(), 0, self.next_id, id),
+                }
+            });
+            window.level = group.level;
+            window.options = group.options;
+            window.panel_layout.clone_from(&group.panel_layout);
+            if let Some(placement) = &group.placement {
+                window.placement = Some(placement.clone());
+            }
+            window.views.apply_arrangement(group, views);
+            self.put_window(window);
+        }
+        for window in old {
+            self.closed.extend(window.views.closed);
+        }
+        let excess = self.closed.len().saturating_sub(CLOSED_CAP);
+        self.closed.drain(..excess);
+        true
+    }
+
+    fn apply_arrangement(&mut self, group: WindowArrangement, views: Vec<DesignView>) {
+        self.views = views;
+        let requested = group.active.unwrap_or(self.active);
+        if self.get(requested).is_some() {
+            self.active = requested;
+        } else if let Some(first) = self.views.first() {
+            self.active = first.id;
+        }
+        self.tiles = group.tiles;
+        self.prune_tiles();
     }
 
     /// The open pop-outs in this design. The main strip is this ViewSet itself.
@@ -291,6 +407,19 @@ impl ViewSet {
         // A caller may allocate directly through the mutable strip, without a take/put cycle.
         window.views.next_id = window.views.next_id.max(next_id);
         Some(window)
+    }
+
+    pub fn window_name(&self) -> Option<&str> {
+        self.window_name.as_deref()
+    }
+
+    pub fn rename_window(&mut self, name: &str) -> bool {
+        let Some(name) = valid_name(name) else { return false };
+        if self.window_id == 0 {
+            return false;
+        }
+        self.window_name = Some(name.to_owned());
+        true
     }
 
     pub fn views_of(&self, id: WindowId) -> Option<&ViewSet> {
@@ -374,7 +503,14 @@ impl ViewSet {
         };
         if created {
             let views = Self::strip(vec![moved], view, self.next_id, window);
-            self.put_window(PopOut { id: window, level: WindowLevel::ViewsOnly, placement: result.placement.clone(), views });
+            self.put_window(PopOut {
+                panel_layout: None,
+                options: super::WindowOptions::default(),
+                id: window,
+                level: WindowLevel::ViewsOnly,
+                placement: result.placement.clone(),
+                views,
+            });
         } else {
             let strip = self.strip_mut(window).ok_or(MoveError::NoSuchWindow)?;
             let at = index.unwrap_or(strip.len()).min(strip.len());
@@ -578,6 +714,36 @@ impl ViewSet {
         self.closed.drain(..excess);
     }
 
+    /// Reflect the engine's single sketch owner across this design's open windows. A missing or
+    /// unsupported target leaves the previous state intact. Closing or duplicating a view never
+    /// creates a second editing session; moving the original carries its state with it.
+    pub fn set_editing(&mut self, editing: Option<(u64, SketchSession)>) -> bool {
+        if let Some((id, _)) = editing
+            && !self
+                .window_of(id)
+                .and_then(|window| self.views_of(window))
+                .and_then(|views| views.get(id))
+                .is_some_and(|view| view.kind == ViewKind::Model)
+        {
+            return false;
+        }
+        for view in &mut self.views {
+            view.editing = editing.filter(|(id, _)| *id == view.id).map(|(_, state)| state);
+        }
+        for (_, view) in &mut self.closed {
+            view.editing = None;
+        }
+        for window in &mut self.windows {
+            for view in &mut window.views.views {
+                view.editing = editing.filter(|(id, _)| *id == view.id).map(|(_, state)| state);
+            }
+            for (_, view) in &mut window.views.closed {
+                view.editing = None;
+            }
+        }
+        true
+    }
+
     /// The views in tab order (never empty).
     pub fn views(&self) -> &[DesignView] {
         &self.views
@@ -620,7 +786,7 @@ impl ViewSet {
 
     /// Open a view of `kind` showing `subject` and make it the active one. With `reuse`, a view
     /// already showing the same kind and subject is activated instead. A new view is named by
-    /// kind and number ("Sketch 2") and goes last. Full (`MAX_VIEWS`): the active view stays.
+    /// kind and number ("Sheet 2") and goes last. Full (`MAX_VIEWS`): the active view stays.
     /// An oversized subject or exhausted id space also keeps the active view unchanged.
     /// Returns the id of the view that is active now.
     pub fn open(&mut self, kind: ViewKind, subject: Option<String>, reuse: bool) -> u64 {
@@ -636,7 +802,7 @@ impl ViewSet {
         }
         let Some(id) = self.take_id() else { return self.active };
         let name = self.default_name(kind);
-        self.views.push(DesignView { id, kind, name, subject, spec: None });
+        self.views.push(DesignView { editing: None, id, kind, name, subject, spec: None, compass: true });
         self.active = id;
         id
     }
@@ -723,7 +889,15 @@ impl ViewSet {
         let fallback = self.views.iter().take(left).rev().find(|view| keep(view)).map(|view| view.id);
         self.views.retain(keep);
         if let Some(id) = replacement {
-            self.views.push(DesignView { id, kind: ViewKind::Model, name: ViewKind::Model.label().into(), subject: None, spec: None });
+            self.views.push(DesignView {
+                editing: None,
+                id,
+                kind: ViewKind::Model,
+                name: ViewKind::Model.label().into(),
+                subject: None,
+                spec: None,
+                compass: true,
+            });
         }
         if self.get(self.active).is_none() {
             self.active = fallback.or_else(|| self.views.first().map(|view| view.id)).unwrap_or(self.active);
@@ -769,6 +943,24 @@ impl ViewSet {
         Some(id)
     }
 
+    /// Set the compass on the named view without changing which view is active.
+    pub fn set_compass(&mut self, id: u64, on: bool) -> bool {
+        let Some(window) = self.window_of(id) else { return false };
+        let strip = if window == 0 {
+            self
+        } else if let Some(window) = self.window_mut(window) {
+            &mut window.views
+        } else {
+            return false;
+        };
+        let Some(view) = strip.views.iter_mut().find(|view| view.id == id) else { return false };
+        if !view.kind.can_tile() {
+            return false;
+        }
+        view.compass = on;
+        true
+    }
+
     /// Keep `spec` as how the view `id` looks at the model. False when there is no such view.
     pub fn set_spec(&mut self, id: u64, spec: ViewSpec) -> bool {
         match self.views.iter_mut().find(|view| view.id == id) {
@@ -801,7 +993,8 @@ impl ViewSet {
             return None;
         }
         let (kind, subject, spec) = (self.views[i].kind, self.views[i].subject.clone(), self.views[i].spec);
-        let copy = DesignView { id: self.take_id()?, kind, name: self.default_name(kind), subject, spec };
+        let compass = self.views[i].compass;
+        let copy = DesignView { editing: None, id: self.take_id()?, kind, name: self.default_name(kind), subject, spec, compass };
         self.active = copy.id;
         self.views.insert(i + 1, copy);
         Some(self.active)
@@ -968,6 +1161,19 @@ impl ViewSet {
         self.tiles.as_mut().is_some_and(|tiles| tiles.set_ratio(splitter, ratio))
     }
 
+    /// Give every tile the same share of the available area without moving views between cells.
+    pub fn equal_sizes(&mut self) -> bool {
+        self.tiles.as_mut().is_some_and(Tiles::equal_sizes)
+    }
+
+    pub fn camera_link(&self) -> CameraLinkMode {
+        self.camera_link
+    }
+
+    pub fn set_camera_link(&mut self, mode: CameraLinkMode) {
+        self.camera_link = mode;
+    }
+
     /// Swap the places of two shown views.
     pub fn swap_tiles(&mut self, a: u64, b: u64) -> bool {
         self.tiles.as_mut().is_some_and(|tiles| tiles.swap(a, b))
@@ -1008,10 +1214,10 @@ impl ViewSet {
         }
     }
 
-    /// The set as saved with the design. Window ids on the flat view list maintain compatibility
+    /// The set as remembered in user settings for a design. Window ids on the flat view list maintain compatibility
     /// with older readers, which ignore them and show all the views in their main window.
     pub fn to_json(&self) -> Value {
-        let view_json = |view: &DesignView, window| json!({"id": view.id, "kind": view.kind.key(), "name": view.name, "subject": view.subject, "spec": view.spec, "window": window});
+        let view_json = |view: &DesignView, window| json!({"id": view.id, "kind": view.kind.key(), "name": view.name, "subject": view.subject, "spec": view.spec, "window": window, "compass": view.compass});
         let strips = std::iter::once(self).chain(self.windows.iter().map(|window| &window.views));
         json!({
             "active": self.active,
@@ -1022,7 +1228,10 @@ impl ViewSet {
             "tiles": self.tiles.as_ref().map(Tiles::to_json),
             "windows": self.windows.iter().map(|window| json!({
                 "id": window.id,
+                "name": window.views.window_name(),
                 "level": window.level.key(),
+                "options": window.options,
+                "panel_layout": window.panel_layout,
                 "active": window.views.active,
                 "tiles": window.views.tiles().map(Tiles::to_json),
                 "placement": window.placement.as_ref().map(WindowPlacement::to_json),
@@ -1032,7 +1241,20 @@ impl ViewSet {
 
     /// Read a saved set. Keep the original validation on view identities and names. Broken
     /// window references fall back to the main strip and empty windows are ignored.
+    /// Keep an opaque, bounded UI panel record without parsing panel internals.
+    pub fn read_panel_layout(value: &Value) -> Option<Value> {
+        // The panel preferences keep their catalogue as an object, older records as its text.
+        let size = match value.get("catalogue")? {
+            Value::String(record) => record.len(),
+            catalogue @ Value::Object(_) => serde_json::to_string(catalogue).ok()?.len(),
+            _ => return None,
+        };
+        (size <= 256 * 1024).then(|| value.clone())
+    }
+
     pub fn from_json(value: &Value) -> Option<ViewSet> {
+        let migrated = migrate_sketch_views(value)?;
+        let value = &migrated;
         let views = value.get("views")?.as_array()?;
         if views.is_empty() || views.len() > MAX_VIEWS {
             return None;
@@ -1102,10 +1324,15 @@ impl ViewSet {
         };
         let mut set = read_strip(0, value)?;
         for (id, item) in window_records {
-            let Some(views) = read_strip(id, item) else { continue };
+            let Some(mut views) = read_strip(id, item) else { continue };
+            if let Some(name) = item.get("name").and_then(Value::as_str) {
+                views.rename_window(name);
+            }
             let level = item.get("level").and_then(Value::as_str).and_then(WindowLevel::from_key).unwrap_or_default();
             let placement = item.get("placement").and_then(WindowPlacement::from_json);
-            set.put_window(PopOut { id, level, placement, views });
+            let options = item.get("options").cloned().and_then(|value| serde_json::from_value(value).ok()).unwrap_or_default();
+            let panel_layout = item.get("panel_layout").and_then(Self::read_panel_layout);
+            set.put_window(PopOut { panel_layout, options, id, level, placement, views });
         }
         for (owner, entry) in closed {
             let strip = set.windows.iter_mut().find(|window| window.id == owner).map_or(&mut set.closed, |window| &mut window.views.closed);
@@ -1140,7 +1367,7 @@ impl ViewSet {
         Some(id)
     }
 
-    /// "Sketch 1", "Sketch 2"…: the first name of the kind no open view has. The first Model
+    /// "Sheet 1", "Sheet 2"…: the first name of the kind no open view has. The first Model
     /// and Render views go without a number.
     fn default_name(&self, kind: ViewKind) -> String {
         (1..)
@@ -1172,6 +1399,144 @@ fn valid_name(name: &str) -> Option<&str> {
     (!name.is_empty() && name.chars().count() <= MAX_NAME && !name.chars().any(char::is_control)).then_some(name)
 }
 
+/// Remove the old Sketch tab kind from remembered UI layouts. Features live in the design
+/// document and are never changed here. Reserve removed identities so future tabs cannot inherit
+/// their stale camera or placement references.
+fn migrate_sketch_views(value: &Value) -> Option<std::borrow::Cow<'_, Value>> {
+    let original = value.get("views")?.as_array()?;
+    if original.is_empty() || original.len() > MAX_VIEWS {
+        return None;
+    }
+    let closed = value.get("closed").and_then(Value::as_array).map(Vec::as_slice).unwrap_or_default();
+    let oldest = closed.len().saturating_sub(CLOSED_CAP * (1 + MAX_POPOUTS));
+    let history = closed.get(oldest..)?;
+    let legacy = |view: &Value| view.get("kind").and_then(Value::as_str) == Some("sketch");
+    if !original.iter().any(legacy) && !history.iter().filter_map(|entry| entry.get("view")).any(legacy) {
+        return Some(std::borrow::Cow::Borrowed(value));
+    }
+    // Clone only the history the reader can use. Cloning the entire value before trimming
+    // duplicated an arbitrarily large discarded prefix whenever a legacy tab was present.
+    let mut saved = Value::Object(
+        value
+            .as_object()?
+            .iter()
+            .map(|(key, item)| {
+                let item = if key == "closed" && item.is_array() { Value::Array(history.to_vec()) } else { item.clone() };
+                (key.clone(), item)
+            })
+            .collect(),
+    );
+    let mut used = Vec::new();
+    for view in original {
+        let mut readable = view.clone();
+        if legacy(view) {
+            readable["kind"] = json!("model");
+        }
+        let parsed = view_from_json(&readable)?;
+        if used.contains(&parsed.id) {
+            return None;
+        }
+        used.push(parsed.id);
+    }
+    let mut removed = Vec::new();
+    let window = |view: &Value| view.get("window").and_then(Value::as_u64).unwrap_or(0);
+    let windows = value.get("windows").and_then(Value::as_array);
+    let mut known_windows = Vec::new();
+    for entry in windows.into_iter().flatten().take(MAX_VIEWS) {
+        if let Some(id) = entry.get("id").and_then(Value::as_u64).filter(|id| *id != 0 && WindowId::try_from(*id).is_ok())
+            && !known_windows.contains(&id)
+            && original.iter().any(|view| window(view) == id)
+        {
+            known_windows.push(id);
+        }
+        if known_windows.len() >= MAX_POPOUTS {
+            break;
+        }
+    }
+    let owner = |view: &Value| {
+        let id = window(view);
+        if known_windows.contains(&id) { id } else { 0 }
+    };
+    let mut retained: Vec<Value> = original
+        .iter()
+        .filter_map(|view| {
+            if legacy(view) {
+                removed.push((owner(view), view["id"].as_u64()?));
+                None
+            } else {
+                Some(view.clone())
+            }
+        })
+        .collect();
+    // Match the reader's bounded, first-valid closed history. Removed Sketch identities still
+    // reserve their place, so a duplicate closed record cannot resurrect them as another kind.
+    let keep_closed: Vec<_> = history
+        .iter()
+        .map(|entry| {
+            if entry.get("at").and_then(Value::as_u64).and_then(|at| usize::try_from(at).ok()).is_none() {
+                return false;
+            }
+            let Some(view) = entry.get("view") else { return false };
+            let mut readable = view.clone();
+            if legacy(view) {
+                readable["kind"] = json!("model");
+            }
+            let Some(parsed) = view_from_json(&readable) else { return false };
+            if used.contains(&parsed.id) {
+                return false;
+            }
+            used.push(parsed.id);
+            !legacy(view)
+        })
+        .collect();
+    if let Some(entries) = saved.get_mut("closed").and_then(Value::as_array_mut) {
+        let mut keep = keep_closed.into_iter();
+        entries.retain(|_| keep.next().unwrap_or(false));
+    }
+    let mut next = value.get("next_id").and_then(Value::as_u64).unwrap_or(0).clamp(used.iter().copied().max().unwrap_or(0) + 1, MAX_ID + 1);
+    let mut owners = Vec::new();
+    for (id, _) in &removed {
+        if !owners.contains(id) {
+            owners.push(*id);
+        }
+    }
+    for id in owners {
+        let data = if id == 0 { value } else { windows?.iter().find(|entry| entry.get("id").and_then(Value::as_u64) == Some(id))? };
+        let active = data.get("active").and_then(Value::as_u64);
+        let active_removed = removed.iter().any(|(window, view)| *window == id && Some(*view) == active);
+        if !active_removed && retained.iter().any(|view| owner(view) == id) {
+            continue;
+        }
+        let model = retained.iter().find(|view| owner(view) == id && view.get("kind").and_then(Value::as_str) == Some("model"));
+        let model_id = if let Some(model) = model {
+            model["id"].as_u64()?
+        } else {
+            if next > MAX_ID {
+                return None;
+            }
+            let name = (1..=MAX_VIEWS + 1).map(|n| if n == 1 { "Model".to_owned() } else { format!("Model {n}") }).find(|name| {
+                retained.iter().filter(|view| owner(view) == id).all(|view| view.get("name").and_then(Value::as_str) != Some(name.as_str()))
+            })?;
+            let model_id = next;
+            next += 1;
+            retained.push(json!({"id": model_id, "kind": "model", "name": name, "window": id}));
+            model_id
+        };
+        if id == 0 {
+            saved["active"] = json!(model_id);
+        } else if let Some(entry) = saved
+            .get_mut("windows")
+            .and_then(Value::as_array_mut)
+            .and_then(|entries| entries.iter_mut().find(|entry| entry.get("id").and_then(Value::as_u64) == Some(id)))
+        {
+            entry["active"] = json!(model_id);
+        }
+    }
+    saved["views"] = Value::Array(retained);
+    saved["next_id"] = json!(next);
+    Some(std::borrow::Cow::Owned(saved))
+}
+
 fn view_from_json(value: &Value) -> Option<DesignView> {
     let id = value.get("id")?.as_u64().filter(|id| (1..=MAX_ID).contains(id))?;
     let kind = ViewKind::from_key(value.get("kind")?.as_str()?)?;
@@ -1184,7 +1549,8 @@ fn view_from_json(value: &Value) -> Option<DesignView> {
     // A spec that does not read back, or holds numbers a camera cannot use, is dropped: the view
     // then starts from where the design looks.
     let spec = value.get("spec").and_then(|spec| serde_json::from_value::<ViewSpec>(spec.clone()).ok()).filter(ViewSpec::is_valid);
-    Some(DesignView { id, kind, name, subject, spec })
+    let compass = value.get("compass").and_then(Value::as_bool).unwrap_or(true);
+    Some(DesignView { editing: None, id, kind, name, subject, spec, compass })
 }
 
 #[cfg(test)]
@@ -1195,12 +1561,232 @@ mod tests {
         set.views().iter().map(|view| view.name.as_str()).collect()
     }
 
-    fn sketches(n: usize) -> ViewSet {
+    #[test]
+    fn legacy_sketch_tabs_are_removed_from_every_window_and_closed_history() {
+        let spec = ViewSpec::new(solidcraft_viewport::Camera { yaw: 0.7, ..Default::default() });
+        let saved = json!({
+            "views": [
+                {"id": 1, "kind": "model", "name": "Angle", "compass": false, "spec": spec},
+                {"id": 2, "kind": "sketch", "name": "Sketch 1", "subject": "7"},
+                {"id": 3, "kind": "render", "name": "Beauty"},
+                {"id": 5, "kind": "model", "name": "Side", "window": 1},
+                {"id": 6, "kind": "sketch", "name": "Sketch 2", "window": 1},
+                {"id": 7, "kind": "sheet", "name": "Drawing", "subject": "d1", "window": 1}
+            ],
+            "active": 2,
+            "tiles": {"axis": "row", "ratio": 0.375, "first": {"view": 1}, "second": {
+                "axis": "column", "ratio": 0.6, "first": {"view": 2}, "second": {"view": 3}
+            }},
+            "windows": [{"id": 1, "active": 6, "name": "Details", "level": "normal"}],
+            "closed": [
+                {"at": 1, "view": {"id": 8, "kind": "render", "name": "Closed render"}},
+                {"at": 0, "view": {"id": 90, "kind": "sketch", "name": "Closed sketch"}},
+                {"at": 0, "view": {"id": 91, "kind": "sketch", "name": "Closed sketch", "window": 1}}
+            ]
+        });
+        let mut set = ViewSet::from_json(&saved).unwrap();
+        assert_eq!(set.views().iter().map(|view| view.id).collect::<Vec<_>>(), [1, 3]);
+        assert_eq!(set.active().id, 1);
+        assert!(!set.active().compass);
+        assert_eq!(set.active().spec, Some(spec));
+        assert_eq!(set.tiles().unwrap().views(), [1, 3]);
+        assert_eq!(set.tiles().unwrap().to_json(), json!({"axis":"row", "ratio":0.375, "first":{"view":1}, "second":{"view":3}}));
+        let child = &set.window(1).unwrap().views;
+        assert_eq!(child.views().iter().map(|view| view.id).collect::<Vec<_>>(), [5, 7]);
+        assert_eq!(child.active().id, 5);
+        assert_eq!(child.window_name(), Some("Details"));
+        assert_eq!(child.get(7).unwrap().subject.as_deref(), Some("d1"));
+        assert!(!child.can_reopen());
+        assert_eq!(ViewSet::from_json(&set.to_json()), Some(set.clone()));
+        assert!(!set.to_json().to_string().contains("sketch"));
+        assert_eq!(set.reopen(), Some(8));
+        assert!(!set.can_reopen());
+        assert!(set.open(ViewKind::Model, None, false) > 91, "removed identities stay reserved");
+    }
+
+    #[test]
+    fn legacy_sketch_only_windows_get_a_fresh_model_without_moving_other_views() {
+        let saved = json!({
+            "views": [
+                {"id": 10, "kind": "sketch", "name": "Sketch 1"},
+                {"id": 20, "kind": "sketch", "name": "Sketch 2", "window": 1},
+                {"id": 30, "kind": "render", "name": "Beauty", "window": 2}
+            ],
+            "active": 10,
+            "windows": [{"id": 1, "active": 20, "name": "Editing"}, {"id": 2, "active": 30}],
+            "next_id": 40
+        });
+        let set = ViewSet::from_json(&saved).unwrap();
+        assert_eq!((set.active().id, set.active().kind), (40, ViewKind::Model));
+        assert_eq!((set.window(1).unwrap().views.active().id, set.window(1).unwrap().views.active().kind), (41, ViewKind::Model));
+        assert_eq!(set.window(1).unwrap().views.window_name(), Some("Editing"));
+        assert_eq!(set.window(2).unwrap().views.active().id, 30);
+        assert_eq!(set.window_of(30), Some(2));
+        assert_eq!(set.next_id(), 42);
+        assert_eq!(ViewSet::from_json(&set.to_json()), Some(set));
+    }
+
+    #[test]
+    fn legacy_kind_migration_preserves_validation_and_non_sketch_focus() {
+        assert_eq!(ViewKind::from_key("sketch"), None);
+        let mut saved = json!({"views":[
+            {"id":1,"kind":"model","name":"Model"},
+            {"id":2,"kind":"sketch","name":"Sketch 1"},
+            {"id":3,"kind":"render","name":"Render"}
+        ], "active":3});
+        assert_eq!(ViewSet::from_json(&saved).unwrap().active().id, 3);
+        saved["views"][1]["id"] = json!(1);
+        assert!(ViewSet::from_json(&saved).is_none(), "a removed kind cannot hide duplicate identities");
+        saved["views"][1]["id"] = json!(2);
+        saved["views"][1]["name"] = json!("");
+        assert!(ViewSet::from_json(&saved).is_none(), "legacy tabs retain input validation");
+        saved["views"][1]["name"] = json!("Old");
+        saved["views"][1]["kind"] = json!("unknown");
+        assert!(ViewSet::from_json(&saved).is_none(), "only the known legacy kind migrates");
+        let exhausted = json!({"views":[{"id":MAX_ID,"kind":"sketch","name":"Old"}]});
+        assert!(ViewSet::from_json(&exhausted).is_none(), "hostile identity exhaustion never overflows");
+    }
+
+    #[test]
+    fn legacy_migration_never_resurrects_duplicate_closed_identities() {
+        let saved = json!({
+            "views": [
+                {"id":1,"kind":"model","name":"Model"},
+                {"id":2,"kind":"sketch","name":"Open legacy"}
+            ],
+            "active":2,
+            "closed": [
+                {"at":1,"view":{"id":2,"kind":"render","name":"Duplicate of open legacy"}},
+                {"at":1,"view":{"id":3,"kind":"sketch","name":"First closed legacy"}},
+                {"at":1,"view":{"id":3,"kind":"render","name":"Duplicate of closed legacy"}},
+                {"at":"invalid","view":{"id":4,"kind":"sketch","name":"Invalid entry"}},
+                {"at":1,"view":{"id":4,"kind":"render","name":"First valid four"}},
+                {"at":1,"view":{"id":5,"kind":"render","name":"First valid five"}},
+                {"at":1,"view":{"id":5,"kind":"sketch","name":"Later legacy duplicate"}},
+                {"at":1,"view":{"id":6,"kind":"render","name":"First valid six"}},
+                {"at":1,"view":{"id":6,"kind":"render","name":"Later duplicate"}}
+            ]
+        });
+        let mut set = ViewSet::from_json(&saved).unwrap();
+        assert_eq!(set.active().id, 1);
+        assert_eq!(set.next_id(), 7);
+        assert_eq!(set.to_json()["closed"].as_array().unwrap().len(), 3);
+        for (id, name) in [(6, "First valid six"), (5, "First valid five"), (4, "First valid four")] {
+            assert_eq!(set.reopen(), Some(id));
+            assert_eq!(set.active().name, name);
+        }
+        assert_eq!(set.reopen(), None, "removed open and closed Sketch identities never reappear");
+        assert!(set.get(2).is_none() && set.get(3).is_none());
+        assert_eq!(ViewSet::from_json(&set.to_json()), Some(set));
+    }
+
+    #[test]
+    fn legacy_migration_bounds_copied_history_and_keeps_window_and_unknown_metadata() {
+        let mut history = vec![json!({
+            "at": 0,
+            "view": {"id": MAX_ID, "kind": "render", "name": "Ancient", "unused": vec![Value::Null; 8192]}
+        })];
+        history.extend((0..CLOSED_CAP * (1 + MAX_POPOUTS)).map(|_| Value::Null));
+        history.extend([
+            json!({"at": 1, "view": {"id": 99, "kind": "sketch", "name": "Closed legacy"}}),
+            json!({"at": 1, "view": {"id": 77, "kind": "render", "name": "Closed root"}}),
+            json!({"at": 1, "view": {"id": 88, "kind": "sheet", "name": "Closed child", "window": 1}}),
+        ]);
+        let saved = json!({
+            "views": [
+                {"id": 1, "kind": "model", "name": "Main"},
+                {"id": 2, "kind": "sketch", "name": "Root legacy"},
+                {"id": 3, "kind": "sketch", "name": "Child legacy", "window": 1},
+                {"id": 4, "kind": "model", "name": "Side", "window": 1}
+            ],
+            "active": 2,
+            "next_id": 0,
+            "windows": [{"id": 1, "active": 3, "name": "Details", "level": "full", "extension": {"retained": true}}],
+            "closed": history,
+            "extension": {"retained": ["metadata", 42]}
+        });
+        let migrated = migrate_sketch_views(&saved).unwrap();
+        assert!(matches!(&migrated, std::borrow::Cow::Owned(_)));
+        assert_eq!(migrated["extension"], saved["extension"]);
+        assert_eq!(migrated["windows"][0]["extension"], saved["windows"][0]["extension"]);
+        assert_eq!(migrated["windows"][0]["name"], "Details");
+        assert_eq!(migrated["active"], 1);
+        assert_eq!(migrated["windows"][0]["active"], 4);
+        let copied = migrated["closed"].as_array().unwrap();
+        assert_eq!(copied.iter().map(|entry| entry["view"]["id"].as_u64().unwrap()).collect::<Vec<_>>(), [77, 88]);
+        assert_eq!(saved["closed"].as_array().unwrap().len(), 1 + CLOSED_CAP * (1 + MAX_POPOUTS) + 3, "the caller's history stays untouched");
+        let set = ViewSet::from_json(&migrated).unwrap();
+        assert_eq!(set.next_id(), 100, "removed recent identities stay reserved; discarded ancient ones do not");
+        assert_eq!(ViewSet::from_json(&set.to_json()).unwrap().to_json(), set.to_json());
+    }
+    #[test]
+    fn legacy_migration_ignores_closed_records_outside_the_readers_valid_history() {
+        let mut closed = vec![json!({"at":0,"view":{"id":MAX_ID,"kind":"render","name":"Old"}})];
+        closed.extend((0..CLOSED_CAP * (1 + MAX_POPOUTS)).map(|_| Value::Null));
+        closed.push(json!({"at":"invalid","view":{"id":MAX_ID,"kind":"sketch","name":"Invalid"}}));
+        let saved = json!({"views":[{"id":5,"kind":"sketch","name":"Old"}], "active":5, "closed":closed});
+        let set = ViewSet::from_json(&saved).unwrap();
+        assert_eq!(set.active().id, 6);
+        assert!(!set.can_reopen());
+
+        let mut ancient = vec![json!({"at":0,"view":{"id":MAX_ID,"kind":"sketch","name":"Ancient"}})];
+        ancient.extend((0..CLOSED_CAP * (1 + MAX_POPOUTS)).map(|_| Value::Null));
+        let saved = json!({"views":[{"id":1,"kind":"model","name":"Model"}], "closed":ancient});
+        assert!(matches!(migrate_sketch_views(&saved), Some(std::borrow::Cow::Borrowed(_))), "ancient closed tabs never trigger migration");
+        let set = ViewSet::from_json(&saved).unwrap();
+        assert_eq!(set.next_id(), 2);
+        assert!(!set.can_reopen());
+        assert!(
+            migrate_sketch_views(&json!({"views": vec![Value::Null; MAX_VIEWS + 1]})).is_none(),
+            "oversized open lists are refused before scanning for legacy kinds"
+        );
+    }
+
+    #[test]
+    fn sketch_editing_is_runtime_only_and_follows_the_original_view() {
+        let mut set = ViewSet::new();
+        let original = set.active().id;
+        let editing = SketchSession { sketch: 42 };
+        assert!(set.set_editing(Some((original, editing))));
+        let copy = set.duplicate(original).unwrap();
+        assert_eq!(set.get(original).unwrap().editing, Some(editing));
+        assert_eq!(set.get(copy).unwrap().editing, None);
+        assert_eq!(ViewSet::from_json(&set.to_json()).unwrap().get(original).unwrap().editing, None);
+        assert!(set.to_json()["views"].as_array().unwrap().iter().all(|view| view.get("editing").is_none()));
+        let moved = set.move_to_window(original, WindowTarget::New { placement: None }).unwrap();
+        assert_eq!(set.views_of(moved.window).unwrap().get(original).unwrap().editing, Some(editing));
+        assert!(set.set_editing(Some((copy, SketchSession { sketch: 43 }))));
+        assert_eq!(set.views_of(moved.window).unwrap().get(original).unwrap().editing, None);
+        assert_eq!(set.get(copy).unwrap().editing, Some(SketchSession { sketch: 43 }));
+        let render = set.open(ViewKind::Render, None, false);
+        assert!(!set.set_editing(Some((render, editing))));
+        assert!(!set.set_editing(Some((999, editing))));
+        assert_eq!(set.get(copy).unwrap().editing, Some(SketchSession { sketch: 43 }));
+        assert!(set.set_editing(None));
+        assert_eq!(set.get(copy).unwrap().editing, None);
+    }
+
+    fn sheets(n: usize) -> ViewSet {
         let mut set = ViewSet::new();
         for i in 0..n {
-            set.open(ViewKind::Sketch, Some(format!("s{i}")), false);
+            set.open(ViewKind::Sheet, Some(format!("s{i}")), false);
         }
         set
+    }
+
+    #[test]
+    fn camera_link_is_local_to_the_window() {
+        let mut main = ViewSet::new();
+        let second = main.duplicate(main.active().id).unwrap();
+        main.set_camera_link(CameraLinkMode::Orientation);
+
+        let moved = main.move_to_window(second, new_window()).unwrap();
+        let pop_out = main.window_mut(moved.window).unwrap();
+        assert_eq!(pop_out.views.camera_link(), CameraLinkMode::Off);
+        pop_out.views.set_camera_link(CameraLinkMode::Zoom);
+
+        assert_eq!(main.camera_link(), CameraLinkMode::Orientation);
+        assert_eq!(main.views_of(moved.window).unwrap().camera_link(), CameraLinkMode::Zoom);
     }
 
     #[test]
@@ -1326,6 +1912,21 @@ mod tests {
     }
 
     #[test]
+    fn a_pop_out_name_round_trips_without_renaming_its_views() {
+        let mut set = models(2);
+        let moved = set.move_to_window(2, new_window()).unwrap();
+        let child = &mut set.window_mut(moved.window).unwrap().views;
+        let view_name = child.active().name.clone();
+        assert!(child.rename_window(" Inspection "));
+        assert!(!child.rename_window(" "));
+        let restored = ViewSet::from_json(&set.to_json()).unwrap();
+        let child = restored.views_of(moved.window).unwrap();
+        assert_eq!(child.window_name(), Some("Inspection"));
+        assert_eq!(child.active().name, view_name);
+        assert_eq!(restored.window_name(), None);
+    }
+
+    #[test]
     fn moving_the_last_view_out_of_main_is_refused() {
         let mut set = ViewSet::new();
         assert_eq!(set.move_to_window(1, new_window()), Err(MoveError::LastViewOfMainWindow));
@@ -1441,12 +2042,14 @@ mod tests {
         assert_eq!(child.views.set_layout(Preset::SideBySide), 2);
         set.put_window(child);
         set.set_layout_padded(Preset::SideBySide);
+        set.window_mut(id).unwrap().options.card_headers = crate::CardHeaders::Hidden;
         let child = set.window(id).unwrap().clone();
         assert_eq!(set.close_window(id), Some(vec![2, other]));
         assert_eq!(set.views().iter().map(|view| view.id).collect::<Vec<_>>(), [1, 2, other]);
         assert_eq!(set.tiles().unwrap().views(), [1, 2]);
         assert!(set.rename(2, "Returned name"));
         assert!(set.restore_window(child));
+        assert_eq!(set.window(id).unwrap().options.card_headers, crate::CardHeaders::Hidden);
         assert_eq!(set.views_of(id).unwrap().get(2).unwrap().name, "Returned name");
         assert_eq!(set.views_of(id).unwrap().tiles().unwrap().views(), [2, other]);
         assert!(set.check());
@@ -1473,8 +2076,27 @@ mod tests {
         let placement =
             WindowPlacement { display: Some("Display 2".into()), x: -25.0, y: 16.0, w: 700.0, h: 500.0, maximised: false, fullscreen: false };
         let id = set.move_to_window(2, WindowTarget::New { placement: Some(placement) }).unwrap().window;
+        let options = crate::WindowOptions {
+            card_headers: crate::CardHeaders::Hover,
+            keep_on_top: true,
+            interface_size: crate::InterfaceSize::try_from(150).unwrap(),
+            ..crate::WindowOptions::new_pop_out()
+        };
+        let child = set.window_mut(id).unwrap();
+        child.options = options;
+        child.panel_layout = Some(json!({"catalogue":"opaque workspace positions"}));
         let mut saved = set.to_json();
-        assert_eq!(ViewSet::from_json(&saved).unwrap().to_json(), saved);
+        let restored = ViewSet::from_json(&saved).unwrap();
+        assert_eq!(restored.to_json(), saved);
+        assert_eq!(restored.window(id).unwrap().options, options);
+        assert_eq!(restored.window(id).unwrap().panel_layout, Some(json!({"catalogue":"opaque workspace positions"})));
+        saved["windows"][0]["options"] = json!({"card_headers":"hover","keep_on_top":true});
+        let old_options = ViewSet::from_json(&saved).unwrap().window(id).unwrap().options;
+        assert!(!old_options.ribbon && old_options.ribbon_auto_hide);
+        assert_eq!(old_options.card_headers, crate::CardHeaders::Hover);
+        assert_eq!(old_options.interface_size, crate::InterfaceSize::default());
+        saved["windows"][0].as_object_mut().unwrap().remove("options");
+        saved["windows"][0]["panel_layout"] = json!({"catalogue": []});
         saved["windows"][0]["active"] = json!(5);
         saved["windows"][0]["level"] = json!("unknown future mode");
         saved["windows"][0]["placement"]["h"] = json!(-5);
@@ -1483,7 +2105,9 @@ mod tests {
         assert_eq!(repaired.window_of(1), Some(0));
         assert_eq!(repaired.views_of(id).unwrap().active().id, 2);
         assert_eq!(repaired.window(id).unwrap().level, WindowLevel::ViewsOnly);
+        assert_eq!(repaired.window(id).unwrap().options, crate::WindowOptions::default());
         assert_eq!(repaired.window(id).unwrap().placement, None);
+        assert_eq!(repaired.window(id).unwrap().panel_layout, None);
         assert!(repaired.check());
     }
 
@@ -1546,35 +2170,35 @@ mod tests {
     #[test]
     fn open_numbers_names_per_kind_and_activates() {
         let mut set = ViewSet::new();
-        let a = set.open(ViewKind::Sketch, Some("a".into()), false);
-        let b = set.open(ViewKind::Sketch, Some("b".into()), false);
+        let a = set.open(ViewKind::Sheet, Some("a".into()), false);
+        let b = set.open(ViewKind::Sheet, Some("b".into()), false);
         let r = set.open(ViewKind::Render, None, false);
         let m = set.open(ViewKind::Model, None, false);
-        assert_eq!(names(&set), ["Model", "Sketch 1", "Sketch 2", "Render", "Model 2"]);
+        assert_eq!(names(&set), ["Model", "Sheet 1", "Sheet 2", "Render", "Model 2"]);
         assert_eq!(set.active().id, m);
         assert!(a != b && b != r && r != m);
         set.close(a);
-        assert_eq!(set.open(ViewKind::Sheet, None, false), set.active().id);
-        assert_eq!(set.open(ViewKind::Sketch, Some("c".into()), false), set.active().id);
-        assert_eq!(set.active().name, "Sketch 1", "a freed name is used again");
+        assert_eq!(set.open(ViewKind::Animation, None, false), set.active().id);
+        assert_eq!(set.open(ViewKind::Sheet, Some("c".into()), false), set.active().id);
+        assert_eq!(set.active().name, "Sheet 1", "a freed name is used again");
     }
 
     #[test]
     fn open_reuses_a_view_of_the_same_kind_and_subject_only_when_asked() {
         let mut set = ViewSet::new();
-        let a = set.open(ViewKind::Sketch, Some("a".into()), true);
+        let a = set.open(ViewKind::Sheet, Some("a".into()), true);
         set.open(ViewKind::Render, None, true);
-        assert_eq!(set.open(ViewKind::Sketch, Some("a".into()), true), a);
+        assert_eq!(set.open(ViewKind::Sheet, Some("a".into()), true), a);
         assert_eq!((set.len(), set.active().id), (3, a));
-        assert_ne!(set.open(ViewKind::Sketch, Some("a".into()), false), a);
-        assert_ne!(set.open(ViewKind::Sketch, Some("b".into()), true), a);
+        assert_ne!(set.open(ViewKind::Sheet, Some("a".into()), false), a);
+        assert_ne!(set.open(ViewKind::Sheet, Some("b".into()), true), a);
         assert_eq!(set.len(), 5);
         assert_eq!(set.open(ViewKind::Model, None, true), set.views()[0].id, "the first Model view is reused");
     }
 
     #[test]
     fn open_stops_at_the_most_views() {
-        let mut set = sketches(MAX_VIEWS - 1);
+        let mut set = sheets(MAX_VIEWS - 1);
         assert_eq!(set.len(), MAX_VIEWS);
         let active = set.active().id;
         assert_eq!(set.open(ViewKind::Render, None, false), active);
@@ -1584,7 +2208,7 @@ mod tests {
 
     #[test]
     fn activate_by_id_and_by_index() {
-        let mut set = sketches(2);
+        let mut set = sheets(2);
         let first = set.views()[0].id;
         assert!(set.activate(first) && set.active().id == first);
         assert!(set.activate_index(2) && set.active().id == set.views()[2].id);
@@ -1597,8 +2221,8 @@ mod tests {
         let mut set = ViewSet::new();
         let only = set.active().id;
         assert!(!set.close(only) && set.len() == 1);
-        let a = set.open(ViewKind::Sketch, Some("a".into()), false);
-        let b = set.open(ViewKind::Sketch, Some("b".into()), false);
+        let a = set.open(ViewKind::Sheet, Some("a".into()), false);
+        let b = set.open(ViewKind::Sheet, Some("b".into()), false);
         assert!(set.close(b));
         assert_eq!(set.active().id, a, "the left neighbour takes over");
         assert!(set.activate(only) && set.close(only));
@@ -1609,7 +2233,7 @@ mod tests {
 
     #[test]
     fn drop_views_removes_open_and_closed_views_and_never_empties_the_set() {
-        let mut set = sketches(3);
+        let mut set = sheets(3);
         let ids: Vec<u64> = set.views().iter().map(|view| view.id).collect();
         assert!(set.close(ids[2]));
         assert!(set.activate(ids[3]));
@@ -1627,15 +2251,29 @@ mod tests {
 
     #[test]
     fn closing_an_inactive_view_keeps_the_active_one() {
-        let mut set = sketches(2);
+        let mut set = sheets(2);
         let (first, last) = (set.views()[0].id, set.views()[2].id);
         assert!(set.close(first));
         assert_eq!(set.active().id, last);
     }
 
     #[test]
+    fn compass_visibility_is_saved_per_view_and_defaults_to_on() {
+        let mut set = ViewSet::new();
+        let first = set.active().id;
+        let second = set.open(ViewKind::Model, None, false);
+        assert!(set.set_compass(first, false));
+        let mut saved = set.to_json();
+        assert_eq!(ViewSet::from_json(&saved).as_ref(), Some(&set));
+        assert!(!set.get(first).unwrap().compass);
+        assert!(set.get(second).unwrap().compass);
+        saved["views"][0].as_object_mut().unwrap().remove("compass");
+        assert!(ViewSet::from_json(&saved).unwrap().get(first).unwrap().compass);
+    }
+
+    #[test]
     fn close_others_and_close_right_of() {
-        let mut set = sketches(4);
+        let mut set = sheets(4);
         let ids: Vec<u64> = set.views().iter().map(|view| view.id).collect();
         set.close_right_of(ids[2]);
         assert_eq!(set.views().iter().map(|view| view.id).collect::<Vec<_>>(), &ids[..3], "the active one went: the pivot takes over");
@@ -1654,7 +2292,7 @@ mod tests {
 
     #[test]
     fn reopen_restores_the_latest_closed_view_in_its_place() {
-        let mut set = sketches(3);
+        let mut set = sheets(3);
         let ids: Vec<u64> = set.views().iter().map(|view| view.id).collect();
         assert!(!set.can_reopen());
         set.close(ids[1]);
@@ -1669,7 +2307,7 @@ mod tests {
 
     #[test]
     fn the_closed_stack_keeps_the_latest_sixteen() {
-        let mut set = sketches(20);
+        let mut set = sheets(20);
         let ids: Vec<u64> = set.views().iter().map(|view| view.id).collect();
         for id in &ids[1..] {
             assert!(set.close(*id));
@@ -1699,11 +2337,11 @@ mod tests {
 
     #[test]
     fn duplicate_goes_next_to_the_original_with_a_new_name() {
-        let mut set = sketches(1);
-        let (model, sketch) = (set.views()[0].id, set.views()[1].id);
-        let copy = set.duplicate(sketch).unwrap();
+        let mut set = sheets(1);
+        let (model, sheet) = (set.views()[0].id, set.views()[1].id);
+        let copy = set.duplicate(sheet).unwrap();
         assert_eq!(set.active().id, copy);
-        assert_eq!(names(&set), ["Model", "Sketch 1", "Sketch 2"]);
+        assert_eq!(names(&set), ["Model", "Sheet 1", "Sheet 2"]);
         assert_eq!(set.views()[2].subject, set.views()[1].subject);
         let model_copy = set.duplicate(model).unwrap();
         assert_eq!(set.index_of(model_copy), Some(1));
@@ -1713,7 +2351,7 @@ mod tests {
 
     #[test]
     fn move_view_reorders_and_keeps_the_active_view() {
-        let mut set = sketches(3);
+        let mut set = sheets(3);
         let ids: Vec<u64> = set.views().iter().map(|view| view.id).collect();
         set.activate(ids[1]);
         set.move_view(0, 3);
@@ -1882,7 +2520,7 @@ mod tests {
     }
     #[test]
     fn json_round_trips_views_active_closed_and_ids() {
-        let mut set = sketches(3);
+        let mut set = sheets(3);
         set.open(ViewKind::Render, None, false);
         let ids: Vec<u64> = set.views().iter().map(|view| view.id).collect();
         set.rename(ids[2], "Profile");
@@ -1913,7 +2551,7 @@ mod tests {
             json!({"views": [view(json!(1), "model", json!(""))]}),
             json!({"views": [view(json!(1), "model", json!(7))]}),
             json!({"views": [view(json!(1), "model", json!("x".repeat(65)))]}),
-            json!({"views": [view(json!(1), "model", json!("A")), view(json!(1), "sketch", json!("B"))]}),
+            json!({"views": [view(json!(1), "model", json!("A")), view(json!(1), "sheet", json!("B"))]}),
             json!({"views": [{"id": 1, "kind": "model", "name": "A", "subject": 3}]}),
             json!({"views": [{"id": 1, "kind": "model", "name": "A", "subject": "s".repeat(257)}]}),
             json!({"views": vec![view(json!(1), "model", json!("A")); MAX_VIEWS + 1]}),
@@ -1922,7 +2560,7 @@ mod tests {
         }
         let repaired = ViewSet::from_json(&json!({
             "active": "nope", "next_id": 0,
-            "views": [view(json!(5), "model", json!("A")), view(json!(9), "sketch", json!(" B "))],
+            "views": [view(json!(5), "model", json!("A")), view(json!(9), "sheet", json!(" B "))],
             "closed": [
                 {"at": u64::MAX, "view": view(json!(5), "model", json!("dup"))},
                 {"at": 1, "view": view(json!(2), "bogus", json!("bad"))},
@@ -1973,7 +2611,7 @@ mod tests {
     #[test]
     fn a_layout_shows_the_model_views_in_tab_order() {
         let mut set = models(3);
-        set.open(ViewKind::Sketch, None, false);
+        set.open(ViewKind::Sheet, None, false);
         set.activate_index(1);
         assert_eq!(set.set_layout(Preset::Grid), 3, "three Model views fill three of the four places");
         assert!(set.is_tiled());
@@ -2026,17 +2664,17 @@ mod tests {
     }
 
     #[test]
-    fn a_sketch_is_never_tiled_and_leaves_the_layout_dormant() {
+    fn a_sheet_is_never_tiled_and_leaves_the_layout_dormant() {
         let mut set = models(2);
-        let sketch = set.open(ViewKind::Sketch, None, false);
+        let sheet = set.open(ViewKind::Sheet, None, false);
         assert_eq!(set.set_layout(Preset::SideBySide), 1, "the active view is not a Model view");
         set.activate_index(0);
         set.set_layout(Preset::SideBySide);
-        set.activate(sketch);
-        assert!(set.tiles().is_some() && !set.is_tiled(), "the layout waits while a Sketch shows alone");
+        set.activate(sheet);
+        assert!(set.tiles().is_some() && !set.is_tiled(), "the layout waits while a Sheet shows alone");
         set.activate_index(0);
         assert!(set.is_tiled());
-        assert!(!set.show_beside(sketch, Edge::Right), "only implemented canvases are shown beside");
+        assert!(!set.show_beside(sheet, Edge::Right), "only implemented canvases are shown beside");
     }
 
     #[test]

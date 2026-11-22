@@ -65,8 +65,16 @@ pub struct Grants {
 pub struct AppState {
     /// Listener failures are application state, displayed in Preferences, never design data.
     pub listener_failures: BTreeMap<String, String>,
+    /// Diagnostics by package and listener entry. A different entry's success cannot clear them.
+    pub listener_entry_failures: BTreeMap<String, BTreeMap<String, String>>,
     /// Last successful listener result; the future panel adapter may consume this data.
     pub listener_data: std::sync::Arc<BTreeMap<String, Value>>,
+    /// Latest linked-file observations, outside saved designs and undo snapshots.
+    pub link_changes: std::sync::Arc<BTreeMap<u64, LinkChange>>,
+    /// Successful source reads performed in this evaluation; scratch sessions start empty.
+    pub(crate) link_reads: std::sync::Arc<BTreeSet<u64>>,
+    /// Observations at the start of this evaluation, before any source reads or disk checks.
+    pub(crate) link_read_source: std::sync::Arc<BTreeMap<u64, LinkChange>>,
     /// Host-only authority marker and event payload for a listener invocation.
     pub(crate) listener_design: Option<Option<DesignToken>>,
     pub packages: BTreeMap<String, String>,
@@ -88,6 +96,22 @@ pub struct AppState {
 }
 
 impl AppState {
+    /// History restores authored links, not observations of a different source or version.
+    pub(crate) fn prune_link_changes(&mut self, doc: &solidcraft_doc::Document) {
+        let current = |component: &u64, change: &LinkChange| {
+            doc.links
+                .get(component)
+                .is_some_and(|link| link.path == change.path && change.read == (link.file_sha256.as_ref() == Some(&change.digest)))
+        };
+        if self.link_changes.iter().any(|(component, change)| !current(component, change)) {
+            std::sync::Arc::make_mut(&mut self.link_changes).retain(|component, change| current(component, change));
+        }
+        let read = |component: &u64| self.link_changes.get(component).is_some_and(|change| change.read);
+        if self.link_reads.iter().any(|component| !read(component)) {
+            std::sync::Arc::make_mut(&mut self.link_reads).retain(read);
+        }
+    }
+
     /// Background cache/panel updates do not revoke an in-flight command's authority.
     pub(crate) fn same_execution_context(&self, other: &Self) -> bool {
         self.packages == other.packages
@@ -221,7 +245,16 @@ const FILE_COMMANDS: &[&str] = &[
 /// Only reviewed input readers can access a folder granted for read without write.
 /// A new command defaults to needing both permissions until its file effects are audited.
 fn input_only_command(id: &str) -> bool {
-    matches!(id, "file.insert_step" | "file.insert_mesh" | "file.insert_gerber" | "file.gerber_files" | "sketch.insert_dxf" | "sketch.insert_svg")
+    matches!(
+        id,
+        "component.insert_design"
+            | "file.insert_step"
+            | "file.insert_mesh"
+            | "file.insert_gerber"
+            | "file.gerber_files"
+            | "sketch.insert_dxf"
+            | "sketch.insert_svg"
+    )
 }
 
 /// Both the manifest and the user must approve a folder for the intended access.
@@ -460,8 +493,10 @@ fn run_package(session: &mut Session, package: Package, entry: &str, params: &se
             || session.active_sketch != host.session.active_sketch
             || session.pending_moves != host.session.pending_moves
         {
-            session.accept_computed(host.session);
+            session.accept_computed(host.session)?;
         } else {
+            session.plugin_state.link_changes = host.session.plugin_state.link_changes;
+            std::sync::Arc::make_mut(&mut session.plugin_state.link_reads).extend(host.session.plugin_state.link_reads.iter().copied());
             for message in host.session.log {
                 session.echo(message);
             }
@@ -484,7 +519,8 @@ fn run_package(session: &mut Session, package: Package, entry: &str, params: &se
 
 pub mod check;
 mod events;
-pub use events::design_changed;
+pub use events::{LinkChange, design_changed, design_notifications};
+pub(crate) use events::{record_changed_link_reads, record_link_change, record_link_reads};
 mod form;
 pub mod grant_store;
 pub use form::form_errors;
@@ -541,6 +577,18 @@ impl SolidCraftHost {
     }
 }
 
+/// A storage call's error as the plugin gets it: the host's own (a permission, a limit) as it is,
+/// a bad name or range as invalid input it can act on, anything else as the call failing.
+fn storage_error(call: &str, error: crate::EngineError) -> HostError {
+    if let Some(host) = error.host_error() {
+        return host.clone();
+    }
+    match error {
+        crate::EngineError::BadParams { .. } => HostError::InvalidInput { field: call.into(), reason: error.to_string() },
+        error => HostError::CommandFailed { command: call.into(), reason: error.to_string() },
+    }
+}
+
 /// The commands an importer may run on its own design to check it: they read the model, and
 /// `timeline.roll_to` moves only that private session's marker.
 pub const EVALUATE_COMMANDS: &[&str] = &["document.inspect", "inspect.measure", "model.edges", "model.faces", "timeline.roll_to"];
@@ -572,6 +620,21 @@ impl PluginHost for SolidCraftHost {
     }
     fn evaluate_close(&mut self) {
         self.evaluation = None;
+    }
+    fn storage_put_blob(&mut self, name: &str, data: &[u8], cache: bool, append: bool) -> craft_plugin::Result<u64> {
+        let s = self
+            .transaction
+            .as_mut()
+            .ok_or_else(|| HostError::CommandFailed { command: "storage.put-blob".into(), reason: "no active transaction".into() })?;
+        storage::write_blob(s, name, data, cache, append).map_err(|e| storage_error("storage.put-blob", e))
+    }
+    fn storage_get_blob(&mut self, plugin: Option<&str>, name: &str, offset: u64, len: u32) -> craft_plugin::Result<Vec<u8>> {
+        let s = self.transaction.as_ref().unwrap_or(&self.session);
+        storage::read_blob(s, plugin, name, offset, len).map(|read| read.data).map_err(|e| storage_error("storage.get-blob", e))
+    }
+    fn storage_get_document(&mut self, plugin: Option<&str>, offset: u64, len: u32) -> craft_plugin::Result<Vec<u8>> {
+        let s = self.transaction.as_ref().unwrap_or(&self.session);
+        storage::read_document(s, plugin, offset, len).map(|(data, _)| data).map_err(|e| storage_error("storage.get-document", e))
     }
     fn command_catalog(&self) -> Vec<CommandSchema> {
         crate::command_specs()
@@ -657,8 +720,12 @@ impl PluginHost for SolidCraftHost {
             || self.session.active_sketch != computed.active_sketch
             || self.session.pending_moves != computed.pending_moves
         {
-            self.session.accept_computed(computed);
+            self.session
+                .accept_computed(computed)
+                .map_err(|error| HostError::InvalidInput { field: "transaction".into(), reason: error.to_string() })?;
         } else {
+            self.session.plugin_state.link_changes = computed.plugin_state.link_changes;
+            std::sync::Arc::make_mut(&mut self.session.plugin_state.link_reads).extend(computed.plugin_state.link_reads.iter().copied());
             for message in computed.log {
                 self.session.echo(message);
             }

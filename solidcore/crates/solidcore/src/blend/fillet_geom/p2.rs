@@ -108,8 +108,10 @@
 //!   face tolerance (`clone_for_evaluation`, not the copy constructor), through
 //!   `BrepFaceServices` with the face's handle, so the surface cache is the face's
 //!   trimmed one made on `target`, as `smsurf_GetSurfaceCache` finds it through
-//!   `GetFace()`. The drop, the lift and the re-drop share one services object, so the
-//!   cache the first one makes is the one the others use. Upstream keeps that cache in
+//!   `GetFace()`. The drop and the re-drop share one services object, so the cache the
+//!   first one makes is the one the other uses; the lifts read the surface's own
+//!   continuities and make no cache (upstream's `LiftCurve` reads the cache's arrays
+//!   through `smsurf_GetSurfaceCache`). Upstream keeps that cache in
 //!   the surface's slot (`GetCacheObj`; `SM_USE_GLOBAL_CACHE` is off), even when it is
 //!   the plain cache `smsurf_GetSurfaceCache` falls back to after a failed trimmed
 //!   build: `CacheMakeOrValidate(SM_OC_TRIMSRF, ..)` returns it as it is, and remakes
@@ -117,10 +119,9 @@
 //!   changes `target` between these calls. The lift of the concave `NxN` cubic
 //!   interpolant runs after `sm_CreateCubicRailRailInterpolant`, which may change
 //!   `target` (its `ComputeUVPoint` can make UV trim curves, and `RailRailIntersect`
-//!   runs on it). A `BrepFaceServices` keeps its caches only over an unchanged B-rep,
-//!   so that lift makes the face's cache again from the face as it is then; upstream
-//!   reuses the slot's cache unless the face was marked modified. The difftest does
-//!   not reach that lift (the shim's corner is `SM_FCR_UNKNOWN`). The copy keeps the
+//!   runs on it). Upstream's lift reuses the slot's cache there unless the face was
+//!   marked modified; the port's makes none. The difftest does not reach that lift (the
+//!   shim's corner is `SM_FCR_UNKNOWN`). The copy keeps the
 //!   face tolerance it had when copied: a cache build whose `CreateUVTrimCurves` raises
 //!   the face's tolerance (even on failure) leaves later calls reading the old value
 //!   through the copy, where `pSurf` reads `GetFace()->GetTolerance()` live
@@ -3869,7 +3870,7 @@ impl FilletBrep {
     /// curve; `SM_ERR` when a vertex does not drop onto its rail within 100 times the
     /// tolerance or a drop gives other than one UV curve; those of the evaluations,
     /// constructions, lifts and `SmSurface::DropCurve` (and of the face's surface cache
-    /// they make); those of [`CornerLookup::corner`] (`corners`
+    /// the drops make); those of [`CornerLookup::corner`] (`corners`
     /// resolves `opt_corner`) and of the corner's `TestRailRailInterpolationCurve`.
     pub fn calc_rail_rail_interpolation(
         &mut self,
@@ -3992,7 +3993,7 @@ impl FilletBrep {
             .original_face()
             .ok_or_else(|| missing(OP))?;
         // the face's own surface (evaluated as a copy that keeps its owner and the face
-        // tolerance: the drops and lifts below make its trimmed surface cache on `target`
+        // tolerance: the drops below make its trimmed surface cache on `target`
         // through the face, as `smsurf_GetSurfaceCache` reaches `GetFace()`; the cubic
         // interpolant needs the target B-rep mutably)
         let face_srf = face2::surface(target, face)?
@@ -4144,10 +4145,10 @@ impl FilletBrep {
             )?
         };
 
-        // The drop, the lift and the re-drop share the face's surface cache: upstream
-        // keeps it in the surface's cache slot, the plain cache smsurf_GetSurfaceCache
-        // falls back to when the trimmed build fails included, and nothing edits the face
-        // between these calls
+        // The drop and the re-drop share the face's surface cache (the lift reads the
+        // surface's own continuities and makes none): upstream keeps it in the surface's
+        // cache slot, the plain cache smsurf_GetSurfaceCache falls back to when the
+        // trimmed build fails included, and nothing edits the face between these calls
         let mut services = BrepFaceServices::new(target);
 
         // p3DCurve, an SmBSplineCurve: a B-spline, or the line / conic iso curve
@@ -4186,15 +4187,13 @@ impl FilletBrep {
         if !create_crv_on_3d || project_and_lift {
             // Lift the 3d curve
             let uv = uv_curve.as_ref().ok_or_else(|| missing(OP))?;
-            let lifted = face_srf.lift_curve_with_context(
+            let lifted = face_srf.lift_curve(
                 k,
                 &uv_domain,
                 uv,
                 &uv.natural_interval(),
                 approx_tol3d(k, tol),
                 false,
-                &mut services,
-                handle,
             )?;
             let mut c3 = lifted.curve;
 
@@ -4285,19 +4284,17 @@ impl FilletBrep {
                         )
                     })?;
                     let new_uv = Curve::from(new_uv);
-                    // Lift the UV-curve (on the face's surface again; the interpolant
-                    // may have changed `target`, so its cache is made again from the
-                    // face as it is now, where upstream reuses the one its surface keeps
-                    // unless the face was marked modified)
-                    let lifted = face_srf.lift_curve_with_context(
+                    // Lift the UV-curve (on the face's surface again; the lift reads the
+                    // surface's own continuities and makes no cache, where upstream's
+                    // reuses the cache its surface keeps unless the face was marked
+                    // modified)
+                    let lifted = face_srf.lift_curve(
                         k,
                         &uv_domain,
                         &new_uv,
                         &new_uv.natural_interval(),
                         approx_tol3d(k, tol),
                         false,
-                        &mut BrepFaceServices::new(target),
-                        handle,
                     )?;
                     curve_3d = Some(lifted.curve);
                     uv_curve = Some(new_uv);
