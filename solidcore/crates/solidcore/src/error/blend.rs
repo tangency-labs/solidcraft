@@ -1480,8 +1480,8 @@ pub enum SolverFailure {
         fillet_geom: crate::blend::fillet_geom::p1::FilletGeomId,
     },
     /// Rail `side` of the caller's fillet geometry has a curve not of a B-spline class (a
-    /// rail edge with no curve is [`FilletSetUp::RailCurve`]): the caller's solver set-up
-    /// ([`ErrorKind::InvalidInput`]); status `SM_ERR_NULL_POINTER`.
+    /// rail edge with no curve is [`FilletSetUp::RailCurve`]): a kind the routine cannot
+    /// handle ([`ErrorKind::Unsupported`]); status `SM_ERR_NULL_POINTER`.
     RailNotBSpline {
         /// The fillet geometry.
         fillet_geom: crate::blend::fillet_geom::p1::FilletGeomId,
@@ -1501,8 +1501,8 @@ impl SolverFailure {
             | Self::SolverEdgeUseMissing { .. }
             | Self::FilletGeomWithoutRail { .. }
             | Self::FilletGeomWithoutSurface { .. }
-            | Self::FilletGeomWithoutSolver { .. }
-            | Self::RailNotBSpline { .. } => ErrorKind::InvalidInput,
+            | Self::FilletGeomWithoutSolver { .. } => ErrorKind::InvalidInput,
+            Self::RailNotBSpline { .. } => ErrorKind::Unsupported,
         }
     }
 
