@@ -641,12 +641,15 @@ pub fn normalize_command_id(id: &str) -> Option<&str> {
 /// The end of an unknown command's error: up to three ids like `id`. Alternative verbs in
 /// the same namespace (`note.create` → `note.add`) come first. Otherwise, ids a few
 /// letters away (`solid.extrud` → `solid.extrude`) come before ids that end in the same word
-/// (`file.open` → `doc.open`). Empty when nothing is close.
+/// (`file.open` → `doc.open`). The command an MCP tool of that name stands for comes first
+/// (`set_parameter` → `parameters.change`). Empty when nothing is close.
 pub(crate) fn did_you_mean(id: &str) -> String {
     let id = id.to_ascii_lowercase();
     if id.len() > 64 {
         return String::new();
     }
+    let tool_name = id.replace(['-', ' '], "_");
+    let tool = crate::agent_tools::tool_command(&tool_name);
     let last = |s: &str| s.rsplit('.').next().unwrap_or(s).to_string();
     let near = (id.chars().count() / 4).max(2);
     let mut found: Vec<(bool, bool, usize, &str)> = command_specs()
@@ -657,7 +660,11 @@ pub(crate) fn did_you_mean(id: &str) -> String {
             (alternative || d <= near || last(&id) == last(c.id)).then_some((!alternative, d > near, d, c.id))
         })
         .collect();
+    if let Some(c) = tool {
+        found.push((false, false, 0, c));
+    }
     found.sort();
+    found.dedup_by_key(|(_, _, _, c)| *c);
     let ids: Vec<String> = found.iter().take(3).map(|(_, _, _, c)| format!("`{c}`")).collect();
     match ids.as_slice() {
         [] => String::new(),

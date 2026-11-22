@@ -691,6 +691,13 @@ fn unknown_command_suggests_the_closest_id() {
         "{}",
         String::from_utf8_lossy(&output.stderr)
     );
+    // An MCP tool's name suggests the command it stands for (#20925).
+    for (tool, command) in [("set_parameter", "parameters.change"), ("measure", "inspect.measure"), ("inspect-design", "document.inspect")] {
+        let output = cli().args(["exec", tool]).output().unwrap();
+        assert_eq!(output.status.code(), Some(1));
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert!(stderr.contains(&format!("(did you mean `{command}`")), "{tool}: {stderr}");
+    }
 }
 
 /// #1833: `--timings` reports each command's time instead of the measurement, `--profile` adds
