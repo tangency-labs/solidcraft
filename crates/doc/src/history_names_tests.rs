@@ -342,12 +342,12 @@ fn a_face_named_by_its_index_never_qualifies_an_exact_piece() {
 /// made only of such a tool's faces still has none (#20594).
 #[test]
 fn a_top_face_keeps_its_exact_name_after_a_thread_narrows_the_hole() {
-    let doc_of = |height: &str| {
+    let doc_of = |height: f64| {
         let doc = crate::Document {
             features: serde_json::from_value(serde_json::json!([
-                {"id": 1, "name": "Cyl", "type": "cylinder", "base": [0, 0, 0], "radius": "25", "height": height},
+                {"id": 1, "name": "Cyl", "type": "cylinder", "base": [0, 0, 0], "radius": "25", "height": height.to_string()},
                 {"id": 2, "name": "Bore", "type": "hole", "position": [0, 0, height], "direction": [0, 0, -1], "diameter": "8", "depth": "15"},
-                {"id": 3, "name": "Tap", "type": "thread", "face": [4, 0, 20], "designation": "M8", "modeled": true}
+                {"id": 3, "name": "Tap", "type": "thread", "face": [4, 0, height - 5.0], "designation": "M8", "modeled": true}
             ]))
             .unwrap(),
             ..crate::Document::default()
@@ -362,7 +362,7 @@ fn a_top_face_keeps_its_exact_name_after_a_thread_narrows_the_hole() {
         (body, tops)
     };
 
-    let doc = doc_of("25");
+    let doc = doc_of(25.0);
     let mut model = crate::Model::new();
     model.evaluate(&doc);
     assert!(model.results.iter().all(|r| r.error.is_none()), "the thread builds");
@@ -373,7 +373,7 @@ fn a_top_face_keeps_its_exact_name_after_a_thread_narrows_the_hole() {
     let target = doc.lineage_face_target(&body, tops[0], solidcore_record::Vec3::new(10.0, 0.0, 25.0)).expect("a sketch can attach to the top face");
 
     // A taller part: the attachment finds the top face at its new height.
-    let taller = doc_of("35");
+    let taller = doc_of(35.0);
     let mut model = crate::Model::new();
     model.evaluate(&taller);
     let (body, tops) = top_of(&model, 35.0);
