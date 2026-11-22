@@ -183,6 +183,19 @@ fn polyline_3d_curve(poly: &[[f64; 2]]) -> Option<solidcore_record::brep::Curve>
     (points.len() >= 2).then_some(solidcore_record::brep::Curve::Polyline { points })
 }
 
+pub(crate) fn poly_point_at_frac(poly: &[Vec2], frac: f64) -> Option<(Vec2, Option<Vec2>)> {
+    let pts: Vec<[f64; 2]> = poly.iter().copied().map(to_arr).collect();
+    let Some(curve) = polyline_3d_curve(&pts) else {
+        return poly.first().copied().map(|p| (p, None));
+    };
+    if let Ok((_, samples)) = solidcore_ops::curve::samples_at_fractions(&curve, None, &[frac])
+        && let Some(s) = samples.first()
+    {
+        return Some((Vec2::new(s.point[0], s.point[1]), s.tangent.map(|t| Vec2::new(t[0], t[1]))));
+    }
+    poly.first().copied().map(|p| (p, None))
+}
+
 fn same_point_or_cluster(sk: &Sketch, parent: &mut [usize], p: usize, q: usize) -> bool {
     p == q
         || find_point_cluster(parent, p) == find_point_cluster(parent, q)

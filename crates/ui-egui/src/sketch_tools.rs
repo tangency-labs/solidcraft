@@ -10,9 +10,10 @@ use solidcraft_ui_text::tr;
 use std::cell::{Cell, RefCell};
 
 pub use crate::constraint_glyphs::{
-    CONSTRAINT_GROUP_NEVER, CONSTRAINT_GROUP_THRESHOLD_RANGE, GLYPH_SCALES, MIN_GLYPH_PX_PER_MM, MIN_GLYPH_SPAN_PX, active_glyph_deletion,
-    clear_clicked_constraint, click_group_badge, constraint_glyphs_visible_at_scale, delete_glyph, format_group_threshold, glyph_at, glyph_deletion,
-    glyph_group, glyph_positions, note_clicked_constraint, over_constraint_ui, over_group_badge_or_expanded,
+    CONSTRAINT_GROUP_NEVER, CONSTRAINT_GROUP_THRESHOLD_RANGE, GLYPH_SCALES, MIN_GLYPH_PX_PER_MM, MIN_GLYPH_SPAN_PX, activate_tool_at,
+    active_glyph_deletion, break_symmetry_at, clear_clicked_constraint, click_group_badge, constraint_glyphs_visible_at_scale, delete_glyph,
+    delete_glyph_at, detach_simulated_at, format_group_threshold, glyph_at, glyph_deletion, glyph_group, glyph_positions, note_clicked_constraint,
+    over_constraint_ui, over_group_badge_or_expanded, record_history_constraint_diff, snapshot_active_constraints,
 };
 
 use egui::{Pos2, Stroke};

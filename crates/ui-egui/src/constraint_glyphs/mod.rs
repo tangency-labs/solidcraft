@@ -1,4 +1,4 @@
-//! Sketch constraint glyph grouping, collision-free layout, badge expansion, and rendering.
+//! Sketch constraint glyph grouping, collision-free layout, hover/click interaction, and rendering.
 
 mod actions;
 mod grouping;
@@ -11,11 +11,13 @@ use std::cell::RefCell;
 use std::collections::HashMap;
 
 use egui::Pos2;
+use solidcore_record::Vec2;
 use solidcraft_engine::sketch::Sketch;
 
 pub use actions::{
-    active_glyph_deletion, clear_clicked_constraint, click_group_badge, delete_glyph, glyph_at, glyph_positions, note_clicked_constraint,
-    over_constraint_ui, over_group_badge_or_expanded,
+    HistoryConstraintSnapshot, activate_tool_at, active_glyph_deletion, break_symmetry_at, clear_clicked_constraint, click_group_badge, delete_glyph,
+    delete_glyph_at, detach_simulated_at, glyph_at, glyph_positions, note_clicked_constraint, over_constraint_ui, over_group_badge_or_expanded,
+    record_history_constraint_diff, snapshot_active_constraints,
 };
 pub use grouping::{glyph_deletion, glyph_group};
 pub use render::show;
@@ -63,8 +65,10 @@ pub fn constraint_glyphs_visible_at_scale(px_per_mm: f32, hide_when_zoomed_out: 
 
 pub(crate) const BADGE_HOVER_DELAY_SECS: f64 = 0.200;
 pub(crate) const VC_HOVER_DELAY_SECS: f64 = 0.400;
+pub(crate) const HISTORY_FLASH_MS: f64 = 700.0;
+pub(crate) const HISTORY_FADE_MS: f64 = 300.0;
 
-/// Generic dwell-timer state shared by badge expansion and virtual-corner hover.
+/// Generic dwell-timer state shared by badge expansion, geometry hover, and virtual-corner hover.
 #[derive(Clone, Debug)]
 pub(crate) struct HoverDelay<K: Copy + Eq> {
     pub(crate) pending: Option<(K, f64)>,
@@ -121,6 +125,48 @@ pub(crate) struct DrawnRelInfo {
     pub(crate) all_constraint_ids: Vec<String>,
 }
 
+#[derive(Clone, Debug)]
+pub(crate) struct DetachPreview {
+    pub(crate) curve_id: String,
+    pub(crate) point_id: String,
+    pub(crate) point_rect: egui::Rect,
+    pub(crate) glyph_rect: egui::Rect,
+    pub(crate) distance_mm: f64,
+}
+
+#[derive(Clone, Debug)]
+pub(crate) struct SymmetryBreakPreview {
+    pub(crate) point_id: String,
+    pub(crate) constraint_id: String,
+    pub(crate) axis_curve: usize,
+    pub(crate) other_point: usize,
+    pub(crate) glyph_rect: egui::Rect,
+    pub(crate) prev_dir: egui::Vec2,
+}
+
+#[derive(Clone, Debug)]
+pub(crate) struct ConstraintFlashGhost {
+    pub(crate) id: String,
+    pub(crate) kind_name: &'static str,
+    pub(crate) pattern_icon: Option<&'static str>,
+    pub(crate) at: Vec2,
+    pub(crate) dir: Option<Vec2>,
+    pub(crate) is_added: bool,
+    pub(crate) expires_ms: f64,
+}
+
+pub(crate) struct HistoryFlashState {
+    pub(crate) sketch: Option<u64>,
+    pub(crate) added: HashMap<String, f64>,
+    pub(crate) ghosts: Vec<ConstraintFlashGhost>,
+}
+
+impl HistoryFlashState {
+    pub(crate) fn new() -> Self {
+        Self { sketch: None, added: HashMap::new(), ghosts: Vec::new() }
+    }
+}
+
 /// Cohesive per-frame & cross-frame state for sketch constraint overlays.
 pub(crate) struct OverlayState {
     pub(crate) glyphs: Vec<(String, Pos2)>,
@@ -133,8 +179,12 @@ pub(crate) struct OverlayState {
     pub(crate) badge_hover: HoverDelay<AnchorKey>,
     pub(crate) vc_hover: HoverDelay<usize>,
     pub(crate) vc_boxes: Vec<(usize, egui::Rect)>,
+    pub(crate) detach_preview: Option<DetachPreview>,
+    pub(crate) sym_break_previews: Vec<SymmetryBreakPreview>,
     pub(crate) prev_anchor_dirs: HashMap<AnchorKey, egui::Vec2>,
+    pub(crate) history_flash: HistoryFlashState,
     pub(crate) glyph_px: f32,
+    pub(crate) last_px_per_mm: f32,
     pub(crate) published_view: Option<ViewKey>,
 }
 
@@ -151,8 +201,12 @@ impl OverlayState {
             badge_hover: HoverDelay::new(),
             vc_hover: HoverDelay::new(),
             vc_boxes: Vec::new(),
+            detach_preview: None,
+            sym_break_previews: Vec::new(),
             prev_anchor_dirs: HashMap::new(),
+            history_flash: HistoryFlashState::new(),
             glyph_px: GLYPH,
+            last_px_per_mm: 1.0,
             published_view: None,
         }
     }
@@ -167,6 +221,8 @@ impl OverlayState {
         self.badge_hover.clear();
         self.vc_hover.clear();
         self.vc_boxes.clear();
+        self.detach_preview = None;
+        self.sym_break_previews.clear();
         self.prev_anchor_dirs.clear();
         self.published_view = None;
     }

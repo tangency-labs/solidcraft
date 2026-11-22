@@ -229,7 +229,7 @@ fn expanded_container_encloses_badge_and_nudges_neighbors_clear() {
 }
 
 #[test]
-fn constraint_grouping_hover_and_click_expand_flow() {
+fn constraint_grouping_hover_click_and_right_click_delete_flow() {
     use serde_json::json;
     let mut h = crate::scenario::Harness::new();
     h.app.home.open = false;
@@ -262,12 +262,19 @@ fn constraint_grouping_hover_and_click_expand_flow() {
         }
     }
 
-    // Move away so the first badge collapses again, then click the second badge to expand immediately.
-    h.step(&json!({"move": [10.0, 10.0]})).unwrap();
+    let target = opened[0].1;
+    let before_count = {
+        let st = crate::open_meshing::session_world(&h.app.session);
+        let sid = h.app.session.active_sketch.unwrap();
+        st.sketch(sid).unwrap().sketch.constraints.len()
+    };
+    h.step(&json!({"click": [target.x, target.y], "button": "right"})).unwrap();
     h.frames(2);
-    assert!(glyph_positions().is_empty(), "moving away collapses the expanded box");
-    let second_badge = OVERLAY.with(|c| c.borrow().collapsed_badges[1].1.center());
-    h.step(&json!({"click": [second_badge.x, second_badge.y]})).unwrap();
-    h.frames(1);
-    assert_eq!(glyph_positions().len(), 3, "clicking a collapsed badge expands it immediately");
+    let after_count = {
+        let st = crate::open_meshing::session_world(&h.app.session);
+        let sid = h.app.session.active_sketch.unwrap();
+        st.sketch(sid).unwrap().sketch.constraints.len()
+    };
+    assert_eq!(after_count + 1, before_count, "right-click deleted one constraint");
+    assert!(h.app.viewport.context_menu.is_none(), "right-click did not open context menu");
 }

@@ -2128,6 +2128,8 @@ preference_settings! {
     /// Group constraint glyphs on the same curve or coincident point cluster when more than this
     /// many share the geometry (`10` = Never, preserving the ungrouped view).
     constraint_group_threshold: u8 = 2, PAGE_SKETCH, accept(crate::sketch_tools::CONSTRAINT_GROUP_THRESHOLD_RANGE) => slider("prefs.constraint_group_threshold", crate::sketch_tools::CONSTRAINT_GROUP_THRESHOLD_RANGE, 1.0, crate::sketch_tools::format_group_threshold, "prefs:constraint_group_threshold");
+    /// Right-clicking a constraint glyph deletes it directly instead of opening its context menu.
+    right_click_deletes_constraint: bool = true, PAGE_SKETCH;
     /// Drive Joints shows the moved parts' old place as a ghost (its Show ghost box, #5905).
     drive_joints_ghost: bool = true, PAGE_TOOLS => check_tr("prefs.design_tools.ghost");
     /// While Move's triad drags a component drawn as a layer of its own, what is under the pointer
@@ -7532,6 +7534,7 @@ mod tests {
             ("hide_constraint_glyphs_zoomed_out", json!(false), PAGE_SKETCH),
             ("constraint_glyph_scale", json!(2.0), PAGE_SKETCH),
             ("constraint_group_threshold", json!(5), PAGE_SKETCH),
+            ("right_click_deletes_constraint", json!(false), PAGE_SKETCH),
             ("suppress_sketch_snap", json!(ModifierCombo::NONE), PAGE_SKETCH),
             ("sketch_state_icons", json!(false), PAGE_SKETCH),
             ("sketch_mirror_auto_line", json!(false), PAGE_SKETCH),
@@ -9157,6 +9160,7 @@ mod tests {
                 ("prefer_free_sketch_points", "prefs.sketch.prefer_free_points"),
                 ("select_3d_curve_points", "prefs.sketch.select_3d_curve_points"),
                 ("select_other_hidden", "prefs.sketch.select_other_hidden"),
+                ("right_click_deletes_constraint", "prefs.right_click_deletes_constraint"),
                 ("manipulator_free_alt", "prefs.alt_frees_manipulators"),
             ] {
                 h.app.prefs_window.shell.filter = h.app.tr(label).into();
@@ -13064,6 +13068,7 @@ mod tests {
     #[test]
     fn constraint_group_threshold_stays_in_range_and_formats_never() {
         assert_eq!(Prefs::default().constraint_group_threshold, 2);
+        assert!(Prefs::default().right_click_deletes_constraint);
         let mut app = SolveApp::new(solidcraft_engine::Session::default(), Default::default());
         set(&mut app, &json!({"constraint_group_threshold": 10})).unwrap();
         assert_eq!(app.preferences.constraint_group_threshold, 10);

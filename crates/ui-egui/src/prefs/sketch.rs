@@ -442,6 +442,13 @@ fn marks(app: &mut SolveApp, ui: &mut egui::Ui) {
             setting::constraint_glyph_scale(app, ui).backing_on_hover_text(app.tr("prefs.constraint_glyph_size_note"));
             setting::constraint_group_threshold(app, ui).backing_on_hover_text(app.tr("prefs.constraint_group_threshold_note"));
         });
+        check(
+            ui,
+            "right_click_deletes_constraint",
+            "prefs.right_click_deletes_constraint",
+            Some("prefs.right_click_deletes_constraint_note"),
+            &mut app.preferences.right_click_deletes_constraint,
+        );
     });
 }
 
