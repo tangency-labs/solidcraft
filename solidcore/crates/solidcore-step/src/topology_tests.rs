@@ -4053,10 +4053,10 @@ fn bent_wire_sweeps_keep_their_closed_profiles() {
                         let repeated = eval.point(next_turn).unwrap();
                         assert!(repeated.dist(actual) < rounding, "{seam}, {uv:?}: {actual:?} vs {repeated:?}");
                     }
-}
-}
-}
-}
+                }
+            }
+        }
+    }
 }
 
 /// The unit box's top is the spline S(u,v) = (u, v + 0.016 u(1-u), 1). Its
@@ -4295,7 +4295,7 @@ fn an_oblique_circular_extrusion_with_a_seam_near_a_quarter_line_imports_closed(
         let volume = body.volume(1e-9).unwrap();
         let expected = std::f64::consts::PI * radius * radius * height;
         assert!((volume - expected).abs() < 1e-8 * expected, "{angle}: {volume} vs {expected}");
-}
+    }
 }
 
 #[test]
