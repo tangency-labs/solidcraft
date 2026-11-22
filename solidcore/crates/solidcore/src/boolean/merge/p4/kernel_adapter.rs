@@ -29,6 +29,7 @@ use crate::boolean::merge::p2::{self, MergeContext, MergeOperand, TopologyCopy};
 use crate::boolean::merge::p5;
 use crate::boolean::topology_intersector::p1::TopologyIntersector;
 use crate::boolean::topology_intersector::p1::{set_subset_objects, Relations};
+use crate::error::boolean::BooleanFailure;
 use crate::error::{Result, SolidError};
 use crate::geom::a_object::{BooleanOperation, REGION_TYPE};
 use crate::geom::attribute::{ids, AttributeStore, ObjectKey};
@@ -775,7 +776,7 @@ impl<'keys> ManifoldKernelAdapter<'keys> {
             .face(face)?
             .surface
             .as_ref()
-            .ok_or_else(|| SolidError::entity_missing(OP, "the face has no surface"))?;
+            .ok_or_else(|| SolidError::boolean(OP, BooleanFailure::FaceWithoutSurface))?;
         Ok(surface
             .owner()
             .unwrap_or_else(|| arena_identity(CacheObject::Face(face))))
@@ -1624,7 +1625,7 @@ mod tests {
             )
             .unwrap_err();
         assert_eq!(error.sm_status(), Some(crate::error::SM_ERR_NULL_POINTER));
-        assert_eq!(error.kind(), crate::error::ErrorKind::Missing);
+        assert_eq!(error.kind(), crate::error::ErrorKind::Failed);
         assert!(made);
         assert!(deleted.0.is_empty() && deleted.1.is_empty());
         assert!(!adapter.topology_deleted());

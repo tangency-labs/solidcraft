@@ -1680,6 +1680,7 @@ fn main() -> eframe::Result {
             }
             // The administrator's policy holds in safe mode too.
             app.policy = solidcraft_ui_egui::policy::load();
+            solidcraft_ui_egui::policy::enforce(&mut app);
             #[cfg(feature = "usage-stats")]
             app.load_usage_stats(cc.storage.and_then(|s| s.get_string(solidcraft_ui_egui::usage_stats::STORAGE_KEY)).as_deref());
             if let Some(path) = &theme_file

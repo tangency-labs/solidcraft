@@ -46,7 +46,7 @@ const REPLACE_WITH_LINK_CONTRACT: TypedContract<ReplaceWithLinkParams> = TypedCo
 const LINKS_CONTRACT: TypedContract<LinksParams> = TypedContract::new();
 
 pub static COMMANDS: &[CommandSpec] = &[
-    CommandSpec::new("component.insert_design", "Insert Design", crate::checked!("component.insert_design", insert_design))
+    CommandSpec::new("component.insert_design", "Insert Design", crate::checked!("component.insert_design", insert_design)).begins_edit()
         .at("SOLID", "ASSEMBLE")
         .icon("component")
         .contract(&INSERT_DESIGN_CONTRACT)

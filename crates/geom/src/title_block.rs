@@ -8,9 +8,9 @@
 //! [`default_block`] is the built-in definition. [`TitleBlock::validate`] checks a definition on
 //! its own, as when one is read, and
 //! [`TitleBlock::layout`] places it on one sheet by the cell text rule: each cell's rectangle, where
-//! its label goes and the box its value goes in, and [`TitleBlockLayout::paper`] draws its lines and
-//! the projection symbol ([`projection_symbol`]) in the drawing's projection. Text values are set in
-//! their boxes once the paper scene has text.
+//! its label goes and the box its value goes in, and [`TitleBlockLayout::paper`] draws its lines. The
+//! drawing draws the projection symbol in the cells that hold it, at the size the layout gives, in its
+//! projection. Text values are set in their boxes once the paper scene has text.
 //!
 //! The outline is drawn `outline_line_mm` wide and the lines between cells `cell_line_mm`, each
 //! centred on its edge. The block's right and bottom edges lie on the drawing border, whose line is
@@ -21,7 +21,7 @@
 use serde::{Deserialize, Serialize};
 
 use crate::Aabb2;
-use crate::cell::{self, Content, Fit, Format, HAlign, Part, Projection, Source, is_snake_case};
+use crate::cell::{self, Content, Fit, Format, HAlign, Part, Source, is_snake_case};
 use crate::drawing_sheet::SheetLayout;
 use crate::paper::{Group, Item, MAX_LINE_MM, ObjectKind};
 use solidcore_record::{Loop2, Seg2, Vec2};
@@ -31,9 +31,11 @@ pub const MAX_CELLS: usize = 64;
 const MIN_BLOCK_SIDE_MM: f64 = 1.0;
 const MAX_BLOCK_SIDE_MM: f64 = 1000.0;
 
-/// The projection symbol's sizes (ISO 5456-2, table A.1): `h`, the diameter of the cone's smaller
-/// end, which is also the height of the capital letters it goes with.
-pub const SYMBOL_SIZES_MM: [f64; 6] = [3.5, 5.0, 7.0, 10.0, 14.0, 20.0];
+/// The projection symbol's sizes: `h`, the diameter of the cone's smaller end, which is also the
+/// height of the capital letters it goes with. ISO 5456-2's table A.1 gives 3.5 to 20 mm; 2.5 mm,
+/// ISO 3098's lettering size below them, keeps every cell that held the 3.5 mm symbol at its old
+/// `4.4 h` by `2.1 h` holding one at its `5.5 h` by `2.5 h` (13.75 by 6.25 mm, inside 15.4 by 7.35).
+pub const SYMBOL_SIZES_MM: [f64; 7] = [2.5, 3.5, 5.0, 7.0, 10.0, 14.0, 20.0];
 
 /// A title block's definition.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -140,35 +142,11 @@ impl Cell {
     }
 }
 
-/// The largest of [`SYMBOL_SIZES_MM`] whose symbol fits `room`: `4.3 h` by `2 h` on its lines'
-/// centres, so `4.4 h` by `2.1 h` with its `h / 10` lines.
+/// The largest of [`SYMBOL_SIZES_MM`] whose symbol fits `room`: `5.5 h` by `2.5 h` to its centre
+/// lines' ends, which run `h / 4` past its outlines (`5 h` by `2 h` on their lines' centres, so
+/// `5.1 h` by `2.1 h` with their `h / 10` lines).
 fn symbol_size(room: Vec2) -> Option<f64> {
-    SYMBOL_SIZES_MM.into_iter().rev().find(|h| 4.4 * h <= room.x && 2.1 * h <= room.y)
-}
-
-/// The projection symbol in `projection`, `h` across the cone's smaller end and centred on `centre`
-/// (ISO 5456-2, figures A.1 and A.2): a truncated cone `2 h` long, from its `h` end on the left to its
-/// `2 h` end, and the cone seen end on, circles `2 h` and `h` across, `3 h / 10` from it: on the right
-/// in first angle, on the left in third. Its lines are `h / 10` wide. The centrelines, which the
-/// standard lets go, are left out.
-pub fn projection_symbol(projection: Projection, h: f64, centre: Vec2) -> [Item; 3] {
-    let gap = 0.3 * h;
-    let left = centre.x - (4.0 * h + gap) / 2.0;
-    let (cone_at, circles_at) = match projection {
-        Projection::First => (left, left + 3.0 * h + gap),
-        Projection::Third => (left + 2.0 * h + gap, left + h),
-    };
-    let y = centre.y;
-    let cone = [(cone_at, y - h / 2.0), (cone_at + 2.0 * h, y - h), (cone_at + 2.0 * h, y + h), (cone_at, y + h / 2.0)];
-    let cone = Loop2::polygon(&cone.map(|(x, y)| Vec2::new(x, y)));
-    let circles = Vec2::new(circles_at, y);
-    let stroke = |path: Loop2| Item::Stroke { path: path.segs, closed: true, width_mm: h / 10.0, pattern: None };
-    // Two half circles, as the symbol has always been drawn: `Loop2::circle` is one whole arc now.
-    let circle = |radius: f64| {
-        let half = |start: f64| Seg2::Arc { center: circles, radius, start, sweep: std::f64::consts::PI };
-        Loop2 { segs: vec![half(0.0), half(std::f64::consts::PI)] }
-    };
-    [stroke(cone), stroke(circle(h)), stroke(circle(h / 2.0))]
+    SYMBOL_SIZES_MM.into_iter().rev().find(|h| 5.5 * h <= room.x && 2.5 * h <= room.y)
 }
 
 /// The built-in block, 180 x 49 mm: the twelve cells of the layout approved on #3875, each under a
@@ -242,7 +220,7 @@ impl TitleBlock {
                 }
                 CellKind::ProjectionSymbol => {
                     let size = symbol_size(room);
-                    require(size.is_some(), "a projection symbol's cell has room for its smallest size, 15.4 x 7.35 mm")?;
+                    require(size.is_some(), "a projection symbol's cell has room for its smallest size, 13.75 x 6.25 mm")?;
                     size
                 }
             };
@@ -316,11 +294,10 @@ impl TitleBlock {
 impl TitleBlockLayout {
     /// The block as one paper group of `object` (its sheet): the outline as a closed stroke
     /// `outline_line_mm` wide, then every cell edge inside it `cell_line_mm` wide, across from the top
-    /// down and then up and down from the left, then the projection symbol in `projection` centred
-    /// in each cell that holds it. Each line is drawn once, centred on its edge: neighbours' shared
-    /// edges, and edges that meet end to end along one line, are one stroke. The cells' text isn't
-    /// here yet.
-    pub fn paper(&self, object: u64, projection: Projection) -> Group {
+    /// down and then up and down from the left. Each line is drawn once, centred on its edge:
+    /// neighbours' shared edges, and edges that meet end to end along one line, are one stroke. The
+    /// cells' text and the projection symbol aren't here.
+    pub fn paper(&self, object: u64) -> Group {
         let Aabb2 { min, max } = self.outline;
         let corners = [min, Vec2::new(max.x, min.y), max, Vec2::new(min.x, max.y)];
         let mut items = vec![Item::Stroke { path: Loop2::polygon(&corners).segs, closed: true, width_mm: self.outline_line_mm, pattern: None }];
@@ -335,11 +312,6 @@ impl TitleBlockLayout {
         let line = |a, b| Item::Stroke { path: vec![Seg2::Line { a, b }], closed: false, width_mm: self.cell_line_mm, pattern: None };
         items.extend(joined(&across).into_iter().map(|(y, x0, x1)| line(Vec2::new(x0, y), Vec2::new(x1, y))));
         items.extend(joined(&down).into_iter().map(|(x, y0, y1)| line(Vec2::new(x, y0), Vec2::new(x, y1))));
-        for cell in &self.cells {
-            if let Some(h) = cell.symbol_mm {
-                items.extend(projection_symbol(projection, h, cell.value_box.center()));
-            }
-        }
         Group { object, kind: ObjectKind::TitleBlock, items }
     }
 }
