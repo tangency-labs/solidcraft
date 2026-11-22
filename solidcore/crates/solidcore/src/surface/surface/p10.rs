@@ -886,26 +886,42 @@ impl<'t, 's, O: SolutionObject + 't> LsiGlobalSolver<'t, 's, O> {
         if !moving {
             return Ok(());
         }
+        // the line's own interval, as `add_certified_root` bounds it: the solve's line
+        // interval, and a ray's hits from just behind its start
+        let behind = if self.ray_fire {
+            -EFF_ZERO * (1.0 + self.line_point.max_dimension())
+        } else {
+            f64::NEG_INFINITY
+        };
+        let span = match &self.line_interval {
+            Some(ivl) => [max2(ivl.min(), behind), ivl.max()],
+            None => [behind, f64::INFINITY],
+        };
+        let line = certified_line::PassLine {
+            point: self.line_point,
+            vector: self.line_vector,
+            span,
+            solve_domain: self.uv_domain,
+            tol,
+        };
         for job in leaves {
             let found = certified_line::isolate(
                 net,
-                self.line_point,
-                self.line_vector,
+                &line,
                 &job.domain,
                 &job.interval,
-                tol,
                 self.base.cancel.as_ref(),
             )?;
             k.work_counters.add_line_pass(
                 u64::try_from(found.boxes).unwrap_or(u64::MAX),
                 u64::try_from(found.unshown).unwrap_or(u64::MAX),
-                found.finished,
+                found.stop,
             );
-            // A leaf the pass did not finish adds nothing: it may hold a crossing the pass
-            // never reached, and adding one of two crossings it did reach would turn the
-            // guesses' even count (a ray passing near a crown seam, both crossings missed)
-            // into an odd one. Its answer stays the guesses'.
-            if found.roots.is_empty() || !found.finished {
+            // Only a leaf the pass finished adds crossings: one stopped at the limit may
+            // hold a crossing the pass never reached, and adding one of two crossings it
+            // did reach would turn the guesses' even count (a ray passing near a crown
+            // seam, both crossings missed) into an odd one. Its answer stays the guesses'.
+            if found.roots.is_empty() || found.stop != certified_line::Stop::Finished {
                 continue;
             }
             let leaf = LsiLeaf {
@@ -2197,5 +2213,23 @@ mod tests {
             })
             .count();
         assert_ne!(crossings, 1, "one crossing of two: {:?}", sols.as_slice());
+    }
+
+    /// The solve's leaves are counted by how their pass ended: on the line dipping below
+    /// the crown where it meets the seam, some stop at the limit, the others finish, and
+    /// none is counted as not run (every leaf's line and domain can be searched).
+    #[test]
+    fn the_leaves_are_counted_by_how_their_pass_ended() {
+        let k = Kernel::default();
+        let s = torus(&k);
+        let p = Vec3::new(30.0, -10.0, 5.0 - 2.0e-6);
+        let d = Vec3::new(0.0, 20.0, 0.0);
+        let domain = s.natural_uv_domain_with_nurb(&k).unwrap();
+        k.work_counters.reset();
+        s.base_global_line_intersect::<H>(&k, H(0), &domain, p, d, None, false, 1.0e-6)
+            .unwrap();
+        assert!(k.work_counters.line_leaves_at_limit() > 0);
+        assert!(k.work_counters.line_leaves_finished() > 0);
+        assert_eq!(k.work_counters.line_leaves_not_run(), 0);
     }
 }

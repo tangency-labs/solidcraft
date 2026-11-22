@@ -24,35 +24,44 @@
 //! 0. **Cut at a knot line** inside it, so that every box enclosed lies on one polynomial
 //!    piece of the net (a box whose enclosure is refused, weights not proved positive over
 //!    it, is halved).
-//! 1. **Excluded** when its enclosure proves every point of the surface over it farther
-//!    than the tolerance from the line, or its line parameters outside the leaf's interval.
-//!    The tolerance is the leaf solve's own: a line passing within it is a hit there
-//!    (`SmSurface::LocalCurveIntersect`), so a box is never dropped for merely missing the
-//!    line.
+//! 1. **Excluded by distance** when its enclosure proves every point of the surface over it
+//!    farther than the tolerance from the line. The tolerance is the leaf solve's own: a
+//!    line passing within it is a hit there (`SmSurface::LocalCurveIntersect`), so a box is
+//!    never dropped for merely missing the line. **Excluded by t** when its line parameters
+//!    (the feet of its points, widened by the tolerance) lie wholly outside the line's own
+//!    interval: the solve's line interval, and for a ray the parameters from just behind its
+//!    start (the bound a ray's hit is skipped by). With neither, nothing is excluded by t.
+//!    The leaf's interval is a slab test of rounded boxes, no proof, and excludes nothing.
 //! 2. **Regular** when the contraction `q = ‖I − Y F′(X)‖` of Krawczyk's operator over the
 //!    box is below 1: every matrix of the interval Jacobian is then nonsingular, `F` is
 //!    injective on the box (`F(a) − F(b) = A (a − b)` with each row of `A` a gradient at its
 //!    own point of the box, so `A` lies in the hull: the reason a normal map at single points
 //!    proves nothing), and the box holds at most one root, with any line parameter (`F′`
 //!    does not depend on `t`). Krawczyk's operator then decides: its image apart from the
-//!    box, no root; strictly inside, exactly one. A root on the box's border passes neither
-//!    test from inside: it is certified in a small box about it
+//!    box, **no root**; strictly inside, exactly one. A root on the box's border passes
+//!    neither test from inside: it is certified in a small box about it
 //!    ([`crate::geom::krawczyk::krawczyk_region`], epsilon-inflation), and the box is
-//!    decided once the hull of the two is regular too.
+//!    decided once the hull of the two is regular too. A box with no root holds no
+//!    interior local minimum of the gap to the line either (`[S_u S_v −D]` would be singular
+//!    there), so the least gap over it lies on its border: it ends the search for roots, but
+//!    it is no proof that the line passes farther than the tolerance.
 //! 3. **Left** when it is neither and is at the floor: its image is no larger than the
-//!    tolerance, it cannot be halved, or the line runs along the surface there. That last
-//!    is a box over which the surface lies within the tolerance of a plane through the line
-//!    and the contact is not an isolated one: the system of the line's fold on the surface,
-//!    `f₁ = 0`, `∂(f₁, f₂)/∂(u, v) = 0` (`f₁`, `f₂` the distances from two perpendicular
-//!    planes through the line, the first holding the surface normal at the box's middle),
-//!    has no regular interval Jacobian over the box. An isolated tangent contact, a near
-//!    miss or the stretch between the two crossings of a shallow secant has one (the fold
-//!    is a point there), and such a box is halved on, so that two crossings a hair apart are
+//!    tolerance, it cannot be halved, or the cutting stops there because the line runs along
+//!    the surface or touches it in a degenerate contact. That last is a box over which the
+//!    surface lies within the tolerance of a plane through the line and the system of the
+//!    line's fold on the surface, `f₁ = 0`, `∂(f₁, f₂)/∂(u, v) = 0` (`f₁`, `f₂` the
+//!    distances from two perpendicular planes through the line, the first holding the
+//!    surface normal at the box's middle), has no regular interval Jacobian over the box. A
+//!    non-degenerate isolated contact (a tangent contact whose fold is regular), a near miss
+//!    or the stretch between the two crossings of a shallow secant has one (the fold is a
+//!    point there), and such a box is halved on, so that two crossings a hair apart are
 //!    still certified one by one; along a line lying in the surface, or beside it, the
-//!    determinant vanishes identically and no halving ever would decide the box. A box left
-//!    holds what Krawczyk's test cannot decide (a tangent contact, a pole, an apex, a line
-//!    in the surface); this pass reports nothing for it, and the guesses' answer for it
-//!    stands as it was.
+//!    determinant vanishes identically and no halving ever would decide the box. So does a
+//!    degenerate isolated contact (a line tangent to a torus's crown circle: the
+//!    determinant vanishes on two curves crossing at the contact), so a box left is no proof
+//!    that the line lies in the surface. A box left holds what Krawczyk's test cannot decide
+//!    (a tangent contact, a pole, an apex, a line in the surface); this pass reports nothing
+//!    for it, and the guesses' answer for it stands as it was.
 //! 4. **Halved** otherwise, across the parameter direction that carries the surface farther
 //!    from the line over the box (the larger of `|S_u × D| Δu` and `|S_v × D| Δv`): seen
 //!    along the line the halves are then about as wide as they are long, which is what
@@ -61,18 +70,31 @@
 //!    floor's size and is not cut again (both there: step 3).
 //!
 //! A certified root is refined by Newton's method inside the box it is the only root of,
-//! and reported only when the gap `|S − L|` at the reported point is itself enclosed within
-//! the tolerance.
+//! and reported only when it lies on the leaf's line interval and the gap `|S − L|` at the
+//! reported point is itself enclosed within the tolerance; otherwise it is unshown.
+//!
+//! **What the pass decided.** Each pass ends in a [`Stop`]: not run (a line or domain
+//! nothing can be proved of), finished (every box decided, excluded or left), or at the
+//! limit. It records every box it did not exclude by distance as a [`FloorBox`]: its
+//! `(u, v)` box, its line parameters and a [`FloorKind`] (excluded by t, left, no root,
+//! edge, root, unshown, or unvisited: the boxes still to visit when the pass stopped at the
+//! limit). An edge box is a box with no root one of whose sides lies on a border where a
+//! path down the gap to the line can end without a root: the net's knot range, the solve's
+//! `(u, v)` domain, or an interior knot line of multiplicity at least the degree (the net
+//! below `C¹` in parameter there, a crease not proved `G¹`). A line passing within the
+//! tolerance just beyond such a border, with no root on either side, leaves only boxes with
+//! no root about it; their record is what keeps that contact. A box that is no edge and has
+//! no root needs a neighbour's record for its contact. Nothing reads the records yet.
 //!
 //! | Rust | Upstream |
 //! |------|----------|
-//! | [`LineNet`], [`isolate`], [`CertifiedRoot`], [`Isolation`] | (not upstream) |
+//! | [`LineNet`], [`isolate`], [`PassLine`], [`CertifiedRoot`], [`Isolation`], [`Stop`], [`FloorBox`], [`FloorKind`] | (not upstream) |
 //!
 //! Deviations: none (no upstream counterpart). Bounds: no recursion (a work list); a box is
 //! halved until its middle is one of its ends; at most [`MAX_SCRATCH_BOXES`] boxes a leaf,
 //! past which the pass stops for that leaf and reports what it has certified (each root
-//! stands on its own proof); at most [`crate::geom::krawczyk::KRAWCZYK_STEPS`] Krawczyk
-//! steps a box.
+//! stands on its own proof), so a leaf's records are at most that many and the boxes left
+//! to visit; at most [`crate::geom::krawczyk::KRAWCZYK_STEPS`] Krawczyk steps a box.
 
 #![allow(clippy::neg_cmp_op_on_partial_ord)] // NaN-refusing tests
 
@@ -109,6 +131,9 @@ pub(crate) struct LineNet {
     net: Nurbs,
     /// The knots' range in u and in v.
     range: [[f64; 2]; 2],
+    /// The interior knots of multiplicity at least the degree, in u and in v: the knot lines
+    /// across which the net is below `C¹` in parameter (each once, ascending).
+    creases: [Vec<f64>; 2],
 }
 
 impl LineNet {
@@ -137,7 +162,26 @@ impl LineNet {
         let (Some(u), Some(v)) = (ends(&net.u, net.p, net.nu), ends(&net.v, net.q, net.nv)) else {
             return Ok(None);
         };
-        Ok(Some(Self { net, range: [u, v] }))
+        let creases = [creases(&net.u, net.p, u), creases(&net.v, net.q, v)];
+        Ok(Some(Self {
+            net,
+            range: [u, v],
+            creases,
+        }))
+    }
+
+    /// Whether a side of the `(u, v)` box `b` lies on a border where a path down the gap to
+    /// the line can end without a root (module docs, "What the pass decided"): the knots'
+    /// range, the solve's `(u, v)` domain `solve` (on it or past it: a leaf is trimmed to it,
+    /// but a leaf within a rounding of it is kept whole), or a crease knot line (step 0 cuts
+    /// boxes exactly there).
+    fn on_a_border(&self, solve: &Extent2d, b: Scratch) -> bool {
+        let [[u0, u1], [v0, v1]] = self.range;
+        let [cu, cv] = &self.creases;
+        let (lo, hi) = (solve.min(), solve.max());
+        let on_u = |x: f64| x <= u0 || x >= u1 || x <= lo.x || x >= hi.x || cu.contains(&x);
+        let on_v = |y: f64| y <= v0 || y >= v1 || y <= lo.y || y >= hi.y || cv.contains(&y);
+        on_u(b.u.lo) || on_u(b.u.hi) || on_v(b.v.lo) || on_v(b.v.hi)
     }
 
     /// The first knot of the net strictly inside `u` (in u) or, with none there, strictly
@@ -195,6 +239,24 @@ impl LineNet {
         let out = i3(p.at(0, 0));
         out.iter().all(|x| x.is_finite()).then_some(out)
     }
+}
+
+/// The knots of `knots` (degree `degree`) strictly inside `range` whose multiplicity is at
+/// least the degree, each once: the net is `C^(degree − multiplicity)` across a knot, so
+/// below `C¹` there.
+fn creases(knots: &[f64], degree: usize, [lo, hi]: [f64; 2]) -> Vec<f64> {
+    let mut out: Vec<f64> = Vec::new();
+    let mut i = 0;
+    while let Some(&k) = knots.get(i) {
+        let run = knots
+            .get(i..)
+            .map_or(0, |rest| rest.iter().take_while(|&&x| x == k).count());
+        if k > lo && k < hi && run >= degree {
+            out.push(k);
+        }
+        i += run.max(1);
+    }
+    out
 }
 
 /// The components of a vector of intervals.
@@ -286,8 +348,10 @@ struct ScratchLine {
     d: [f64; 3],
     /// `|D|²`, enclosed.
     d2: Ivl,
-    /// The leaf's line interval.
+    /// The leaf's line interval: a root off it is unshown.
     interval: [f64; 2],
+    /// The line's own interval ([`PassLine::span`]): a box off it is excluded by t.
+    span: [f64; 2],
     /// The tolerance as a distance, and as a stretch of the line's parameter (rounded up).
     tol: f64,
     tol_t: f64,
@@ -325,6 +389,72 @@ pub(crate) struct CertifiedRoot {
     pub unique: [Ivl; 2],
 }
 
+/// The line every leaf's pass of one solve searches, with what bounds it.
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct PassLine {
+    /// The line's point: the line is `point + t vector`.
+    pub point: Point3,
+    /// The line's vector.
+    pub vector: Vec3,
+    /// The line's own interval of `t` (module docs, step 1): the solve's line interval
+    /// where it has one, from just behind the start for a ray; an end without a bound is
+    /// infinite.
+    pub span: [f64; 2],
+    /// The solve's `(u, v)` domain, whose border is an edge's ([`FloorKind::Edge`]).
+    pub solve_domain: Extent2d,
+    /// The tolerance: a line passing within it of the surface is a hit.
+    pub tol: f64,
+}
+
+/// How a leaf's pass ended.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub(crate) enum Stop {
+    /// Not run: nothing can be proved of the line or the domain (no tolerance, a line of no
+    /// length, a domain off the net's knots, an empty interval). The guesses alone answer.
+    #[default]
+    NotRun,
+    /// Every box was decided, excluded or left.
+    Finished,
+    /// Stopped at [`MAX_SCRATCH_BOXES`] with boxes still to visit ([`FloorKind::Unvisited`]).
+    AtLimit,
+}
+
+/// What a box the pass did not exclude by distance is (module docs, "What the pass
+/// decided").
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) enum FloorKind {
+    /// Its line parameters lie wholly outside the line's own interval (step 1).
+    ExcludedByT,
+    /// Left at the floor (step 3).
+    Left,
+    /// No root (step 2), with a side on a border where a path down the gap can end.
+    Edge,
+    /// No root (step 2), and no side on such a border.
+    NoRoot,
+    /// Its root, certified and reported, the only one in `unique` with any line parameter.
+    Root { unique: [Ivl; 2] },
+    /// Its root, certified but not reported ([`Isolation::unshown`]), the only one in
+    /// `unique`.
+    Unshown { unique: [Ivl; 2] },
+    /// Not visited: the pass stopped at [`MAX_SCRATCH_BOXES`] first.
+    Unvisited,
+}
+
+/// A box the pass did not exclude by distance, as it decided it.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) struct FloorBox {
+    /// The box in u.
+    pub u: Ivl,
+    /// The box in v.
+    pub v: Ivl,
+    /// Its line parameters: the feet of its points on the line, widened by the tolerance;
+    /// `None` for a box whose line parameters were never enclosed (unvisited, or left
+    /// because its enclosure was refused or not finite).
+    pub t: Option<Ivl>,
+    /// What the pass decided of it.
+    pub kind: FloorKind,
+}
+
 /// What one leaf's pass found.
 #[derive(Debug, Clone, Default, PartialEq)]
 pub(crate) struct Isolation {
@@ -337,9 +467,11 @@ pub(crate) struct Isolation {
     /// Certified roots not reported because the gap at Newton's point was not enclosed
     /// within the tolerance, or the point lies off the leaf's line interval.
     pub unshown: usize,
-    /// Whether every box was decided, excluded or left: false when the pass stopped at
-    /// [`MAX_SCRATCH_BOXES`].
-    pub finished: bool,
+    /// How the pass ended.
+    pub stop: Stop,
+    /// Every box not excluded by distance, in the order decided, then the boxes still to
+    /// visit at the limit.
+    pub floor: Vec<FloorBox>,
 }
 
 /// What Krawczyk's test says of a regular box.
@@ -359,46 +491,56 @@ struct Scratch {
     v: Ivl,
 }
 
-/// The certified crossings of the line `point + t vector` with the surface of `net` over
-/// `domain`, for `t` in `interval`, within `tol` (module docs).
+/// The certified crossings of `line` with the surface of `net` over the leaf's `domain`,
+/// reported for `t` in the leaf's `interval` (module docs), with what the pass decided of
+/// every box.
 ///
 /// # Errors
 ///
 /// A cancel.
 pub(crate) fn isolate(
     net: &LineNet,
-    point: Point3,
-    vector: Vec3,
+    line: &PassLine,
     domain: &Extent2d,
     interval: &Extent1d,
-    tol: f64,
     cancel: Option<&CancelToken>,
 ) -> Result<Isolation> {
     let mut out = Isolation::default();
-    let d = f3(vector);
+    let tol = line.tol;
+    let d = f3(line.vector);
     let d2 = length_squared(&d.map(Ivl::from));
     let usable = tol > 0.0 && tol.is_finite() && d2.lo > 0.0 && d2.is_finite();
     let (lo, hi) = (domain.min(), domain.max());
     let (u, v) = (Ivl::new(lo.x, hi.x), Ivl::new(lo.y, hi.y));
-    if !usable || !net.holds(u, v) || !(interval.min() <= interval.max()) {
+    let [s0, s1] = line.span;
+    if !usable || !net.holds(u, v) || !(interval.min() <= interval.max()) || !(s0 <= s1) {
         // nothing can be proved of such a line or domain: the guesses alone answer
         return Ok(out);
     }
     let tol_i = Ivl::from(tol);
+    let solve_domain = line.solve_domain;
     let line = ScratchLine {
-        p: f3(point),
+        p: f3(line.point),
         d,
         d2,
         interval: [interval.min(), interval.max()],
+        span: line.span,
         tol,
         tol_t: (tol_i / d2.sqrt()).hi,
         tol_cross2: (tol_i * tol_i * d2).hi,
     };
     let mut work = vec![Scratch { u, v }];
-    out.finished = true;
+    out.stop = Stop::Finished;
     while let Some(b) = work.pop() {
         if out.boxes >= MAX_SCRATCH_BOXES {
-            out.finished = false;
+            out.stop = Stop::AtLimit;
+            work.push(b);
+            out.floor.extend(work.iter().map(|w| FloorBox {
+                u: w.u,
+                v: w.v,
+                t: None,
+                kind: FloorKind::Unvisited,
+            }));
             break;
         }
         if out.boxes % 64 == 0 {
@@ -407,9 +549,18 @@ pub(crate) fn isolate(
             }
         }
         out.boxes += 1;
-        match visit(net, &line, b) {
-            Visit::Done(None) => {}
-            Visit::Done(Some(root)) => {
+        let (kind, t) = match visit(net, &line, b) {
+            Visit::ExcludedByDistance => continue,
+            Visit::ExcludedByT(t) => (FloorKind::ExcludedByT, Some(t)),
+            Visit::NoRoot(t) => {
+                let kind = if net.on_a_border(&solve_domain, b) {
+                    FloorKind::Edge
+                } else {
+                    FloorKind::NoRoot
+                };
+                (kind, Some(t))
+            }
+            Visit::Root(root, t) => {
                 // one root, however many boxes hold it on their borders: the same root
                 // when its enclosure lies in a box another is the only root of (Rump,
                 // Thm 13.3), or when the hull of the two enclosures is regular (it then
@@ -423,29 +574,52 @@ pub(crate) fn isolate(
                             && meet(rv, sv).is_some()
                             && regular_over(net, &line, ru.hull(su), rv.hull(sv)))
                 });
+                let unique = root.unique;
                 if !known {
                     out.roots.push(root);
                 }
+                (FloorKind::Root { unique }, Some(t))
             }
-            Visit::Left => out.left += 1,
-            Visit::Unshown => out.unshown += 1,
+            Visit::Unshown(unique, t) => {
+                out.unshown += 1;
+                (FloorKind::Unshown { unique }, Some(t))
+            }
+            Visit::Left(t) => {
+                out.left += 1;
+                (FloorKind::Left, t)
+            }
             Visit::Halve(first, second) => {
                 work.push(second);
                 work.push(first);
+                continue;
             }
-        }
+        };
+        out.floor.push(FloorBox {
+            u: b.u,
+            v: b.v,
+            t,
+            kind,
+        });
     }
     Ok(out)
 }
 
-/// What a box of the work list becomes.
+/// What a box of the work list becomes; each verdict but the first and the halving carries
+/// the box's line parameters (the feet of its points widened by the tolerance).
 enum Visit {
-    /// Decided or excluded, with its root if it has one.
-    Done(Option<CertifiedRoot>),
-    /// A certified root that is not reported ([`Isolation::unshown`]).
-    Unshown,
-    /// At the floor.
-    Left,
+    /// Proved farther than the tolerance from the line (step 1).
+    ExcludedByDistance,
+    /// Its line parameters wholly outside the line's own interval (step 1).
+    ExcludedByT(Ivl),
+    /// Regular, and Krawczyk's test proves it holds no root (step 2).
+    NoRoot(Ivl),
+    /// Regular, with its one root, certified and shown.
+    Root(CertifiedRoot, Ivl),
+    /// Regular, with its one root certified but not reported ([`Isolation::unshown`]), and
+    /// the `(u, v)` box that root is the only one in.
+    Unshown([Ivl; 2], Ivl),
+    /// At the floor (step 3), with its line parameters where it was enclosed.
+    Left(Option<Ivl>),
     /// Its two halves, the first to visit first.
     Halve(Scratch, Scratch),
 }
@@ -482,7 +656,7 @@ fn visit(net: &LineNet, line: &ScratchLine, b: Scratch) -> Visit {
     // a box that cannot be enclosed is halved across its wider side (left where it cannot)
     let halved = || {
         let split_u = b.u.hi - b.u.lo >= b.v.hi - b.v.lo;
-        halves(b, split_u, if split_u { um } else { vm })
+        halves(b, split_u, if split_u { um } else { vm }, None)
     };
     // the surface's point at the box's middle, about which the box is enclosed: the
     // quotient's terms are then of the size of the box, not of its distance from the origin
@@ -497,25 +671,34 @@ fn visit(net: &LineNet, line: &ScratchLine, b: Scratch) -> Visit {
     };
     let r = line.off_the_start(&s, about);
 
-    // 1. farther than the tolerance from the line everywhere, or off the leaf's interval
+    // 1. farther than the tolerance from the line everywhere, or off the line's own interval
     if length_squared(&cross(line.d, &r)).lo > line.tol_cross2 {
-        return Visit::Done(None);
+        return Visit::ExcludedByDistance;
     }
     let foot = line.parameter(&r);
+    // (Krawczyk's steps start from `t`; the verdicts read its enclosure `feet`)
     let t = Ivl::new(foot.lo - line.tol_t, foot.hi + line.tol_t);
-    let [t0, t1] = line.interval;
-    if !(t.hi >= t0 && t.lo <= t1) {
-        return Visit::Done(None);
+    let feet = Ivl::new(
+        round_down(foot.lo - line.tol_t),
+        round_up(foot.hi + line.tol_t),
+    );
+    if !feet.is_finite() {
+        // nothing is proved of a box whose line parameters cannot be enclosed
+        return Visit::Left(None);
+    }
+    let [s0, s1] = line.span;
+    if feet.hi < s0 || feet.lo > s1 {
+        return Visit::ExcludedByT(feet);
     }
 
     // 2. a regular interval Jacobian: at most one root, and Krawczyk's test for it
     if let Some(found) = regular(net, line, b, &s_mid, [&s_u, &s_v], t) {
         match found {
-            Regular::Empty => return Visit::Done(None),
+            Regular::Empty => return Visit::NoRoot(feet),
             Regular::Root(enclosure, unique) => {
                 return match refined(net, line, enclosure, unique) {
-                    Some(root) => Visit::Done(Some(root)),
-                    None => Visit::Unshown,
+                    Some(root) => Visit::Root(root, feet),
+                    None => Visit::Unshown(unique, feet),
                 };
             }
             Regular::Open => {}
@@ -535,7 +718,7 @@ fn visit(net: &LineNet, line: &ScratchLine, b: Scratch) -> Visit {
         length_squared(&cross(line.d, &s_v)).hi.sqrt() * dv,
     );
     if !(along_u.is_finite() && along_v.is_finite() && off_u.is_finite() && off_v.is_finite()) {
-        return Visit::Left;
+        return Visit::Left(Some(feet));
     }
     // a direction is cut while the box's image along it is longer than half the tolerance
     let (cut_u, cut_v) = (
@@ -543,11 +726,11 @@ fn visit(net: &LineNet, line: &ScratchLine, b: Scratch) -> Visit {
         round_up(along_v + along_v) > line.tol,
     );
     if !cut_u && !cut_v {
-        return Visit::Left;
+        return Visit::Left(Some(feet));
     }
     if let Some(m) = in_a_plane_through_the_line(line, &r, t, [&s_u, &s_v]) {
         if fold_is_a_point(net, line, b, about, m, [&s_u, &s_v]) == Some(false) {
-            return Visit::Left;
+            return Visit::Left(Some(feet));
         }
     }
 
@@ -560,19 +743,20 @@ fn visit(net: &LineNet, line: &ScratchLine, b: Scratch) -> Visit {
     } else {
         along_u >= along_v
     };
-    halves(b, split_u, if split_u { um } else { vm })
+    halves(b, split_u, if split_u { um } else { vm }, Some(feet))
 }
 
 /// The two halves of `b` cut at `mid` in u (`split_u`) or in v; the box is left where
-/// `mid` is not strictly inside it (a box one rounding wide).
-fn halves(b: Scratch, split_u: bool, mid: f64) -> Visit {
+/// `mid` is not strictly inside it (a box one rounding wide), with its line parameters `t`
+/// where it was enclosed.
+fn halves(b: Scratch, split_u: bool, mid: f64, t: Option<Ivl>) -> Visit {
     let (lo, hi) = if split_u {
         (b.u.lo, b.u.hi)
     } else {
         (b.v.lo, b.v.hi)
     };
     if !(mid > lo && mid < hi) {
-        return Visit::Left;
+        return Visit::Left(t);
     }
     let (first, second) = (Ivl::new(lo, mid), Ivl::new(mid, hi));
     if split_u {
@@ -828,12 +1012,34 @@ mod tests {
     use crate::surface::cone::Cone;
     use crate::surface::torus::{Torus, TorusOptions};
 
-    /// The pass over the whole of `s`, for `t` in `[t0, t1]`.
+    /// The pass over the whole of `s`, for `t` in `[t0, t1]` (the line's interval and the
+    /// leaf's).
     fn pass(k: &Kernel, s: &Surface, p: Vec3, d: Vec3, [t0, t1]: [f64; 2], tol: f64) -> Isolation {
+        pass_in(k, s, p, d, [t0, t1], [t0, t1], tol)
+    }
+
+    /// The pass over the whole of `s`, the line's own interval `span` and the leaf's
+    /// `[t0, t1]`.
+    fn pass_in(
+        k: &Kernel,
+        s: &Surface,
+        p: Vec3,
+        d: Vec3,
+        span: [f64; 2],
+        [t0, t1]: [f64; 2],
+        tol: f64,
+    ) -> Isolation {
         let net = LineNet::of(k, s).unwrap().unwrap();
         let domain = s.natural_uv_domain_with_nurb(k).unwrap();
         let interval = Extent1d::from_min_max(t0, t1);
-        isolate(&net, p, d, &domain, &interval, tol, None).unwrap()
+        let line = PassLine {
+            point: p,
+            vector: d,
+            span,
+            solve_domain: domain,
+            tol,
+        };
+        isolate(&net, &line, &domain, &interval, None).unwrap()
     }
 
     /// The line parameters of the certified roots, in order.
@@ -899,7 +1105,7 @@ mod tests {
             -0.049_801_099_552_871_67,
         );
         let found = pass(&k, &s, p, d, [99.0, 105.0], 2.0e-5);
-        assert!(found.finished);
+        assert_eq!(found.stop, Stop::Finished);
         let t = parameters(&found);
         assert_eq!(t.len(), 2, "{t:?}");
         assert!((t[0] - 100.409_930_808).abs() < 1.0e-8, "{t:?}");
@@ -923,7 +1129,7 @@ mod tests {
             let y = 1.0 - f64::from(11 - step) * STEP;
             let (p, d) = across(y);
             let found = pass(&k, &s, p, d, [0.0, 1.0], TOL);
-            assert!(found.finished);
+            assert_eq!(found.stop, Stop::Finished);
             let half = (1.0 - y * y).sqrt() / 2.0;
             let t = parameters(&found);
             assert_eq!(t.len(), 2, "step {step}: {t:?}");
@@ -941,7 +1147,7 @@ mod tests {
         for step in [0, 1, 10] {
             let (p, d) = across(1.0 + f64::from(step) * STEP);
             let found = pass(&k, &s, p, d, [0.0, 1.0], TOL);
-            assert!(found.finished);
+            assert_eq!(found.stop, Stop::Finished);
             assert!(found.roots.is_empty(), "step {step}: {:?}", found.roots);
             assert!(found.left > 0, "step {step}");
         }
@@ -955,7 +1161,7 @@ mod tests {
         let s = cylinder(&k);
         let (p, d) = across(1.0 + 2.0 * TOL);
         let found = pass(&k, &s, p, d, [0.0, 1.0], TOL);
-        assert!(found.finished);
+        assert_eq!(found.stop, Stop::Finished);
         assert!(found.roots.is_empty());
         assert_eq!(found.left, 0);
     }
@@ -975,7 +1181,7 @@ mod tests {
             [0.0, 1.0],
             1.0e-5,
         );
-        assert!(found.finished);
+        assert_eq!(found.stop, Stop::Finished);
         assert!(found.roots.is_empty(), "{:?}", found.roots);
         assert!(found.left > 0);
         assert!(found.boxes < 500, "{} boxes", found.boxes);
@@ -995,7 +1201,7 @@ mod tests {
             [0.0, 1.0],
             1.0e-5,
         );
-        assert!(found.finished);
+        assert_eq!(found.stop, Stop::Finished);
         let t = parameters(&found);
         assert_eq!(t.len(), 2, "{t:?}");
         assert!(
@@ -1033,7 +1239,12 @@ mod tests {
             // along x at y = 3, z = 4 + gap: tangent to the sphere at (0, 3, 4) for no gap
             let p = Vec3::new(-10.0, 3.0 * (1.0 + gap / 5.0), 4.0 * (1.0 + gap / 5.0));
             let found = pass(&k, &s, p, Vec3::new(20.0, 0.0, 0.0), [0.0, 1.0], tol);
-            assert!(found.finished, "gap {gap}: {} boxes", found.boxes);
+            assert_eq!(
+                found.stop,
+                Stop::Finished,
+                "gap {gap}: {} boxes",
+                found.boxes
+            );
             assert!(found.roots.is_empty(), "gap {gap}: {:?}", found.roots);
             assert!(found.left > 0, "gap {gap}");
             assert!(
@@ -1050,7 +1261,7 @@ mod tests {
             [0.0, 1.0],
             tol,
         );
-        assert!(found.finished, "{} boxes", found.boxes);
+        assert_eq!(found.stop, Stop::Finished, "{} boxes", found.boxes);
         assert!(found.boxes < MAX_SCRATCH_BOXES / 2, "{} boxes", found.boxes);
         for t in parameters(&found) {
             assert!(
@@ -1089,9 +1300,194 @@ mod tests {
             [0.0, 1.0],
             1.0e-5,
         );
-        assert!(found.finished, "{} boxes", found.boxes);
+        assert_eq!(found.stop, Stop::Finished, "{} boxes", found.boxes);
         assert!(found.roots.is_empty(), "{:?}", found.roots);
         assert!(found.left > 0);
         assert!(found.boxes < 500, "{} boxes", found.boxes);
+    }
+    /// The torus of radii 30 and 5 about z, whole: its net has knots at the quarters of
+    /// both parameters, each of multiplicity 2 at degree 2 (below `C¹` in parameter).
+    fn torus(k: &Kernel) -> Surface {
+        let mut torus = Torus::new(
+            k,
+            Vec3::ZERO,
+            Vec3::X,
+            Vec3::Y,
+            Extent2d::from_bounds(0.0, 0.0, 360.0, 360.0),
+            30.0,
+            5.0,
+            TorusOptions::default(),
+        )
+        .unwrap();
+        torus.make_nurb(k).unwrap();
+        Surface::from(torus)
+    }
+
+    /// A line through the cylinder's axis along x, at a height of half and nine tenths of
+    /// the tolerance above its top rim, passes within the tolerance of the rim at x = ±1
+    /// (t = 0.25 and 0.75) with no root on the surface. The boxes about those points have
+    /// no root, and their side on the top rim (the end of the net's knots in v) keeps
+    /// them as edge boxes: not one of them is a plain box with no root.
+    #[test]
+    fn a_line_just_beyond_a_rim_is_kept_in_edge_boxes() {
+        let k = Kernel::default();
+        let s = cylinder(&k);
+        for h in [0.5, 0.9] {
+            let found = pass(
+                &k,
+                &s,
+                Vec3::new(-2.0, 0.0, 1.0 + h * TOL),
+                Vec3::new(4.0, 0.0, 0.0),
+                [0.0, 1.0],
+                TOL,
+            );
+            assert_eq!(found.stop, Stop::Finished);
+            assert!(found.roots.is_empty(), "h {h}: {:?}", found.roots);
+            for at in [0.25, 0.75] {
+                let near: Vec<&FloorBox> = found
+                    .floor
+                    .iter()
+                    .filter(|r| r.t.is_some_and(|t| t.lo <= at && at <= t.hi))
+                    .collect();
+                assert!(!near.is_empty(), "h {h}, t {at}: {:?}", found.floor);
+                for r in near {
+                    assert_eq!(r.kind, FloorKind::Edge, "h {h}, t {at}: {r:?}");
+                    assert_eq!(r.v.hi, 1.0, "h {h}, t {at}: {r:?}");
+                }
+            }
+        }
+    }
+
+    /// A line along the torus's radius at 90° in its middle plane crosses the tube where
+    /// u = 0.25, a quarter knot, at the inner equator (t = 0.25) and at the outer one
+    /// (t = 0.75, where v starts and ends). Boxes with no root beside the crossings that
+    /// touch u = 0.25 but neither end of the knots are kept as edge boxes by that knot
+    /// alone.
+    #[test]
+    fn a_torus_quarter_knot_keeps_edge_boxes() {
+        let k = Kernel::default();
+        let s = torus(&k);
+        let found = pass(
+            &k,
+            &s,
+            Vec3::new(0.0, 20.0, 0.0),
+            Vec3::new(0.0, 20.0, 0.0),
+            [0.0, 1.0],
+            1.0e-6,
+        );
+        assert_eq!(found.stop, Stop::Finished);
+        let by_the_knot = found.floor.iter().filter(|r| {
+            r.kind == FloorKind::Edge
+                && (r.u.lo == 0.25 || r.u.hi == 0.25)
+                && r.u.lo > 0.0
+                && r.u.hi < 1.0
+                && r.v.lo > 0.0
+                && r.v.hi < 1.0
+        });
+        assert!(by_the_knot.count() > 0, "{:?}", found.floor);
+        // and no box with no root touching the knot is a plain one
+        assert!(!found
+            .floor
+            .iter()
+            .any(|r| r.kind == FloorKind::NoRoot && (r.u.lo == 0.25 || r.u.hi == 0.25)));
+    }
+
+    /// A line tangent to the torus's crown circle at 45° touches it at one point with a
+    /// gap of fourth order; the fold is singular along the crown, so the pass halves the
+    /// boxes along it down to the floor's size and stops at its bound. What it did not
+    /// reach is recorded as unvisited, never as excluded.
+    #[test]
+    fn a_pass_at_its_limit_records_the_boxes_it_did_not_visit() {
+        let k = Kernel::default();
+        let s = torus(&k);
+        let c = 30.0 / 2.0_f64.sqrt();
+        let along = Vec3::new(-1.0, 1.0, 0.0) * (1.0 / 2.0_f64.sqrt());
+        let found = pass(
+            &k,
+            &s,
+            Vec3::new(c, c, 5.0) - 10.0 * along,
+            20.0 * along,
+            [0.0, 1.0],
+            1.0e-6,
+        );
+        assert_eq!(found.stop, Stop::AtLimit);
+        assert_eq!(found.boxes, MAX_SCRATCH_BOXES);
+        let unvisited: Vec<&FloorBox> = found
+            .floor
+            .iter()
+            .filter(|r| r.kind == FloorKind::Unvisited)
+            .collect();
+        assert!(!unvisited.is_empty());
+        assert!(unvisited.iter().all(|r| r.t.is_none()));
+        // the boxes still to visit come last
+        let first = found.floor.len() - unvisited.len();
+        assert!(found.floor[first..]
+            .iter()
+            .all(|r| r.kind == FloorKind::Unvisited));
+        // a finished pass leaves none
+        let (p, d) = across(0.5);
+        let done = pass(&k, &cylinder(&k), p, d, [0.0, 1.0], TOL);
+        assert_eq!(done.stop, Stop::Finished);
+        assert!(!done.floor.iter().any(|r| r.kind == FloorKind::Unvisited));
+    }
+
+    /// A pass that nothing can be proved of (no tolerance, a line of no length) does not
+    /// run, and is counted as not run: not as stopped at the limit, not as finished.
+    #[test]
+    fn a_pass_that_does_not_run_is_not_counted_at_the_limit() {
+        let k = Kernel::default();
+        let s = cylinder(&k);
+        let (p, d) = across(0.5);
+        for (d, tol) in [(d, 0.0), (Vec3::ZERO, TOL), (d, f64::NAN)] {
+            let found = pass(&k, &s, p, d, [0.0, 1.0], tol);
+            assert_eq!(found.stop, Stop::NotRun);
+            assert_eq!(found.boxes, 0);
+            assert!(found.floor.is_empty() && found.roots.is_empty());
+            k.work_counters.add_line_pass(0, 0, found.stop);
+        }
+        assert_eq!(k.work_counters.line_leaves_not_run(), 3);
+        assert_eq!(k.work_counters.line_leaves_at_limit(), 0);
+        assert_eq!(k.work_counters.line_leaves_finished(), 0);
+    }
+
+    /// The line across the cylinder at y = 0.5 meets it at t = 0.5 ∓ √0.75 / 2. With the
+    /// leaf's interval [0, 0.5] inside the line's [0, 1], the second root is certified but
+    /// lies off the leaf: it is unshown, not excluded. With the line's own interval [0, 0.5]
+    /// the boxes wholly past it are excluded by t, and no box that is not wholly past it
+    /// is.
+    #[test]
+    fn excluded_by_t_reads_the_line_s_interval_not_the_leaf_s() {
+        let k = Kernel::default();
+        let s = cylinder(&k);
+        let (p, d) = across(0.5);
+        let half = 0.75_f64.sqrt() / 2.0;
+        let (near, far) = (0.5 - half, 0.5 + half);
+        let holds = |r: &FloorBox, at: f64| r.t.is_some_and(|t| t.lo <= at && at <= t.hi);
+
+        let found = pass_in(&k, &s, p, d, [0.0, 1.0], [0.0, 0.5], TOL);
+        assert_eq!(found.stop, Stop::Finished);
+        let t = parameters(&found);
+        assert_eq!(t.len(), 1, "{t:?}");
+        assert!((t[0] - near).abs() < 1.0e-12, "{t:?}");
+        assert!(found.unshown > 0);
+        assert!(found
+            .floor
+            .iter()
+            .any(|r| matches!(r.kind, FloorKind::Unshown { .. }) && holds(r, far)));
+        assert!(!found
+            .floor
+            .iter()
+            .any(|r| r.kind == FloorKind::ExcludedByT && holds(r, far)));
+
+        let found = pass_in(&k, &s, p, d, [0.0, 0.5], [0.0, 0.5], TOL);
+        assert_eq!(found.stop, Stop::Finished);
+        let t = parameters(&found);
+        assert_eq!(t.len(), 1, "{t:?}");
+        assert!((t[0] - near).abs() < 1.0e-12, "{t:?}");
+        assert!(found.floor.iter().any(|r| r.kind == FloorKind::ExcludedByT));
+        for r in &found.floor {
+            let past = r.t.is_some_and(|t| t.lo > 0.5 || t.hi < 0.0);
+            assert_eq!(past, r.kind == FloorKind::ExcludedByT, "{r:?}");
+        }
     }
 }

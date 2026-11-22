@@ -204,7 +204,9 @@ pub struct WorkCounters {
     seam_tests: Cell<u64>,
     line_scratch_boxes: Cell<u64>,
     line_roots_added: Cell<u64>,
-    line_leaves_unfinished: Cell<u64>,
+    line_leaves_not_run: Cell<u64>,
+    line_leaves_finished: Cell<u64>,
+    line_leaves_at_limit: Cell<u64>,
     line_roots_unshown: Cell<u64>,
 }
 
@@ -380,11 +382,26 @@ impl WorkCounters {
         self.line_roots_added.get()
     }
 
-    /// Leaves whose certified pass stopped at its bound on boxes
-    /// (`certified_line::MAX_SCRATCH_BOXES`) before deciding every box. Not the fork's.
+    /// Leaves whose certified pass did not run: nothing could be proved of the line or the
+    /// leaf's domain (`certified_line::Stop::NotRun`). Not the fork's.
     #[must_use]
-    pub fn line_leaves_unfinished(&self) -> u64 {
-        self.line_leaves_unfinished.get()
+    pub fn line_leaves_not_run(&self) -> u64 {
+        self.line_leaves_not_run.get()
+    }
+
+    /// Leaves whose certified pass decided, excluded or left every box
+    /// (`certified_line::Stop::Finished`). Not the fork's.
+    #[must_use]
+    pub fn line_leaves_finished(&self) -> u64 {
+        self.line_leaves_finished.get()
+    }
+
+    /// Leaves whose certified pass stopped at its bound on boxes
+    /// (`certified_line::MAX_SCRATCH_BOXES`) with boxes still to visit
+    /// (`certified_line::Stop::AtLimit`). Not the fork's.
+    #[must_use]
+    pub fn line_leaves_at_limit(&self) -> u64 {
+        self.line_leaves_at_limit.get()
     }
 
     /// Certified roots the pass did not report because the gap at the point to report
@@ -455,7 +472,9 @@ impl WorkCounters {
         self.ball_certified_roots.set(0);
         self.line_scratch_boxes.set(0);
         self.line_roots_added.set(0);
-        self.line_leaves_unfinished.set(0);
+        self.line_leaves_not_run.set(0);
+        self.line_leaves_finished.set(0);
+        self.line_leaves_at_limit.set(0);
         self.line_roots_unshown.set(0);
         self.curved_edge_runs.set(0);
         self.blends_recertified.set(0);
@@ -581,16 +600,24 @@ impl WorkCounters {
     }
 
     /// Counts one leaf's certified line pass: the boxes it enclosed, the roots it left
-    /// unreported, and whether it stopped at its bound.
-    pub(crate) fn add_line_pass(&self, boxes: u64, unshown: u64, finished: bool) {
+    /// unreported, and how it ended.
+    pub(crate) fn add_line_pass(
+        &self,
+        boxes: u64,
+        unshown: u64,
+        stop: crate::surface::surface::certified_line::Stop,
+    ) {
+        use crate::surface::surface::certified_line::Stop;
         self.line_scratch_boxes
             .set(self.line_scratch_boxes.get().saturating_add(boxes));
         self.line_roots_unshown
             .set(self.line_roots_unshown.get().saturating_add(unshown));
-        if !finished {
-            self.line_leaves_unfinished
-                .set(self.line_leaves_unfinished.get().saturating_add(1));
-        }
+        let leaves = match stop {
+            Stop::NotRun => &self.line_leaves_not_run,
+            Stop::Finished => &self.line_leaves_finished,
+            Stop::AtLimit => &self.line_leaves_at_limit,
+        };
+        leaves.set(leaves.get().saturating_add(1));
     }
 
     /// Counts one crossing the certified line pass added.
