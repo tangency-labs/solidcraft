@@ -1464,7 +1464,8 @@ mod tests {
     #[test]
     fn drawing_undo_and_redo_keys_act_on_the_open_drawing_only() {
         fn sheets(h: &mut crate::scenario::Harness) -> usize {
-            h.app.run("drawing.inspect", json!({})).unwrap()["sheets"].as_array().map_or(0, Vec::len)
+            // Read from the design: the command refuses when the sheet on screen was undone away.
+            h.app.session.doc.drawings.iter().map(|drawing| drawing.sheets.len()).sum()
         }
         let mut h = crate::scenario::Harness::new();
         h.app.run("solid.box", json!({"length":40,"width":20,"height":3})).unwrap();

@@ -626,7 +626,7 @@ fn double_click_edits_a_dimensions_or_a_notes_text_in_place() {
     let type_over = |h: &mut Harness, at: [f32; 2], text: &str, end: &str| {
         h.step(&json!({"click": at, "double": true})).unwrap();
         h.frames(4);
-        assert!(crate::dim_view::editing(), "the double-click opens the box");
+        assert!(crate::dim_view::editing(), "the double-click opens the box ({text:?} {end})");
         assert!(!crate::drawing_workspace::inspector_visible(&h.app), "not the side panel");
         h.step(&json!({"key": "A", "cmd": true})).unwrap();
         if text.is_empty() {

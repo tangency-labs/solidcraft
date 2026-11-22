@@ -315,7 +315,7 @@ pub(crate) fn escape_panel(app: &mut SolveApp) -> bool {
 /// shows its own, and they go when it is no longer the selection. A tool in hand, the sheet's
 /// settings or a panel opened another way stays as it is; the panel closed by hand stays closed
 /// until the selection changes.
-fn follow_selection(app: &mut SolveApp) {
+pub(crate) fn follow_selection(app: &mut SolveApp) {
     let one = match &app.session.selection[..] {
         [solidcraft_engine::Sel::Drawing { drawing, object }] if app.session.open_drawing == Some(*drawing) => Some(*object),
         _ => None,

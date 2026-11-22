@@ -5241,6 +5241,8 @@ mod tests {
             views.iter().map(|v| (v["kind"].as_str().unwrap().into(), v["name"].as_str().unwrap().into(), v["active"] == true)).collect()
         };
         let model = ("model".to_owned(), "Model".to_owned(), true);
+        h.app.run("solid.box", json!({"length":40,"width":20,"height":3})).unwrap();
+        h.app.session.mark_saved();
         assert_eq!(list(&mut h), std::slice::from_ref(&model), "a new design has its Model view only");
         h.app.run("drawing.create", json!({})).unwrap();
         let drawing = h.app.session.drawing("drawing.inspect").unwrap();

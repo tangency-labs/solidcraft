@@ -263,6 +263,16 @@ pub(crate) fn retire_closed(app: &mut SolveApp) {
 
 /// Scope passive painting to an exact sheet. Focus, history and the command receiver return intact.
 pub(crate) fn show_view(app: &mut SolveApp, ui: &mut egui::Ui, id: u64) -> bool {
+    let shown = show_view_page(app, ui, id);
+    // The focused sheet shows the options of what is selected on it, as the Drawing workspace does,
+    // once the frame's clicks have been dealt with.
+    if shown && crate::view_windows::focused_view(app) == id && app.session.open_drawing.is_some() {
+        crate::drawing_workspace::follow_selection(app);
+    }
+    shown
+}
+
+fn show_view_page(app: &mut SolveApp, ui: &mut egui::Ui, id: u64) -> bool {
     let descriptor = crate::view_windows::layout_views(app)
         .into_iter()
         .find(|(_, view)| view.id == id && view.kind == solidcraft_views::ViewKind::Sheet)
