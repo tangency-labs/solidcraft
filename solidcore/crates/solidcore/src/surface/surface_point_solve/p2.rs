@@ -79,6 +79,7 @@ use crate::math::{min2, BIG_DOUBLE, EFF_ZERO, EFF_ZERO_PARAM, EFF_ZERO_SQ, EFF_Z
 use crate::nurbs::b_spline_surface::{BSplineSurface, SurfParamType};
 use crate::surface::procedural_blend::NetScope;
 use crate::surface::surface::p2::SurfaceEval;
+use crate::surface::surface::p7::chained;
 use crate::surface::surface::{Surface, SurfaceKind};
 
 use super::p1::{control_point, ErrorNormType, SurfPtGlobalSolver, SurfPtSolveStepper};
@@ -181,7 +182,6 @@ impl SurfPtGlobalSolver<'_> {
 
         let mut sub_domain = domain;
         let mut grid_uv_guess = Point2::UNDEF;
-        let mut grid_ok = false;
 
         let mut best_func_val = BIG_DOUBLE;
 
@@ -196,7 +196,6 @@ impl SurfPtGlobalSolver<'_> {
                 &mut grid_uv_guess,
                 &mut best_func_val,
             )?;
-            grid_ok = true;
             if grid_size_u < 2 || grid_size_v < 2 {
                 break; // Just to be safe.
             }
@@ -226,8 +225,10 @@ impl SurfPtGlobalSolver<'_> {
         }
 
         // If guesses from both FindPolygonGuess() and RefinePatchByGrid(), pick the
-        // better one.
-        if poly_ok && grid_ok {
+        // better one. (The grid loop above always runs, and its refinement returns on
+        // failure, so the grid guess is always made: upstream's "both failed" branch
+        // cannot be taken and is not ported.)
+        if poly_ok {
             let poly_dist = self.calc_func_val(k, uv)?;
             let grid_dist = self.calc_func_val(k, grid_uv_guess)?;
 
@@ -240,11 +241,8 @@ impl SurfPtGlobalSolver<'_> {
             if grid_dist < poly_dist {
                 uv = grid_uv_guess;
             }
-        } else if grid_ok {
-            uv = grid_uv_guess;
         } else {
-            // both failed
-            return Err(SolidError::surface(OP_ROUGH, SurfaceFailure::NoRoughGuess));
+            uv = grid_uv_guess;
         }
 
         Ok(RoughGuess {
@@ -328,9 +326,9 @@ impl SurfPtGlobalSolver<'_> {
 
         // Next try: Iter every ControlPoint and find the one closest to the target
         let rational = bspl.is_rational();
-        let (num_u, num_v, cpts) = bspl.control_points().map_err(|e| {
-            SolidError::surface_caused_by(OP_POLY, SurfaceFailure::NoControlPoints, e)
-        })?;
+        let (num_u, num_v, cpts) = bspl
+            .control_points()
+            .map_err(|e| chained(OP_POLY, SurfaceFailure::NoControlPoints, e))?;
 
         let mut tied: Option<(usize, usize)> = None;
         let mut num_ties: usize = 0;
@@ -1033,13 +1031,7 @@ impl SurfPtGlobalSolver<'_> {
         let rough = match NetScope::with_net(k, || self.find_rough_guess(k)) {
             Ok(r) => r,
             Err(e) if e.is_unported_or_cancelled() => return Err(e),
-            Err(e) => {
-                return Err(SolidError::surface_caused_by(
-                    OP_SOLVE,
-                    SurfaceFailure::NoRoughGuess,
-                    e,
-                ))
-            }
+            Err(e) => return Err(chained(OP_SOLVE, SurfaceFailure::NoRoughGuess, e)),
         };
         let (best_idx_u, best_idx_v) = (rough.best_idx_u, rough.best_idx_v);
 

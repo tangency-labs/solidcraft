@@ -2598,7 +2598,7 @@ fn solve_surface_cache_with<O: SolutionObject>(
 /// The failure of `op` as `failure`, with `e` (the failure that stopped it) as its cause,
 /// unless `e` is a port failure: chaining one would make the answer a port failure, which
 /// the bare status it replaces was not (`SolidError::is_status_answer`).
-pub(super) fn chained(op: &'static str, failure: SurfaceFailure, e: SolidError) -> SolidError {
+pub(crate) fn chained(op: &'static str, failure: SurfaceFailure, e: SolidError) -> SolidError {
     let failure = Failure::new(op, failure);
     if e.is_port_failure() {
         failure.into_error()

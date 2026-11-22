@@ -92,6 +92,7 @@ use crate::nurbs::b_spline_surface::BSplineSurface;
 use crate::nurbs::b_spline_surface::SurfParamType;
 use crate::nurbs::math::CPoint;
 use crate::surface::surface::p2::SurfaceEval;
+use crate::surface::surface::p7::chained;
 use crate::surface::surface::{Surface, SurfaceKind};
 
 const OP_CPTS: &str = "surface::surface_point_solve::p1::control_point";
@@ -641,9 +642,9 @@ impl<'s> SurfPtGlobalSolver<'s> {
         let (best_idx_u, best_idx_v) = best_idx;
         let mut best_idx_u = best_idx_u;
         let mut best_idx_v = best_idx_v;
-        let (num_u, num_v, cpts) = bspl.control_points().map_err(|e| {
-            SolidError::surface_caused_by(OP_TRI, SurfaceFailure::NoControlPoints, e)
-        })?;
+        let (num_u, num_v, cpts) = bspl
+            .control_points()
+            .map_err(|e| chained(OP_TRI, SurfaceFailure::NoControlPoints, e))?;
         let rational = bspl.is_rational();
         let mut best_dist = BIG_DOUBLE;
         let mut this_local_u = -1.0;
@@ -788,9 +789,9 @@ impl<'s> SurfPtGlobalSolver<'s> {
             ));
         }
 
-        let (num_u, num_v, cpts) = bspl.control_points().map_err(|e| {
-            SolidError::surface_caused_by(OP_LEG, SurfaceFailure::NoControlPoints, e)
-        })?;
+        let (num_u, num_v, cpts) = bspl
+            .control_points()
+            .map_err(|e| chained(OP_LEG, SurfaceFailure::NoControlPoints, e))?;
         let rational = bspl.is_rational();
 
         let best_pt = control_point(&cpts, num_v, best_idx_u, best_idx_v, rational)?;

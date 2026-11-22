@@ -818,7 +818,7 @@ impl PatchBoundaryBoundingPlanes {
         let tolerance = 0.0001;
 
         // local
-        bspline_of(surface)
+        let checked = bspline_of(surface)
             .ok_or_else(|| SolidError::surface(OP_PLANES, SurfaceFailure::SurfaceNotBSplineKind))?;
         // (the control point count and the canonical form read the NURB, made through
         // the virtual GetOrCreateGwNurbPointer when missing: a plane's, a cone's,
@@ -828,13 +828,8 @@ impl PatchBoundaryBoundingPlanes {
             SurfaceKind::SurfOfExtrusion(_) => match surface.extrusion_base_with_nurb(k) {
                 Ok(base) => base,
                 Err(e) if e.is_unported_or_cancelled() => return Err(e),
-                Err(e) => std::borrow::Cow::Borrowed(bspline_of(surface).ok_or_else(|| {
-                    SolidError::surface_caused_by(
-                        OP_PLANES,
-                        SurfaceFailure::SurfaceNotBSplineKind,
-                        e,
-                    )
-                })?),
+                // the kind check above already gave the extrusion's B-spline
+                Err(_) => std::borrow::Cow::Borrowed(checked),
             },
             made => std::borrow::Cow::Borrowed(bspline_of_kind(made).ok_or_else(|| {
                 Failure::new(

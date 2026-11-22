@@ -99,7 +99,7 @@
 use crate::curve::curve::Curve;
 use crate::curve::curve_cache::{CurveCache, CurveCacheOptions};
 use crate::error::surface::SurfaceFailure;
-use crate::error::{Failure, Result, SolidError, SM_ERR_NULL_POINTER};
+use crate::error::{Result, SolidError};
 use crate::geom::extent1d::Extent1d;
 use crate::geom::extent2d::Extent2d;
 use crate::geom::extent3d::Extent3d;
@@ -1319,16 +1319,12 @@ impl<O: Copy + PartialEq> TrimSrfCache<O> {
                                 Some(child),
                             )
                         } else {
-                            Err(Failure::new(
+                            // an edge use handle inserted directly into the base
+                            // lists (through `base_mut`) has no implanted curve
+                            Err(SolidError::surface(
                                 OP_EU,
-                                SurfaceFailure::Defect {
-                                    why: "every edge use in a node's list was implanted, which \
-                                          retains its curve, so an edge use without one is \
-                                          the kernel's",
-                                },
-                            )
-                            .with_status(SM_ERR_NULL_POINTER)
-                            .into_error())
+                                SurfaceFailure::EdgeuseHasNoTrimCurve,
+                            ))
                         };
                         if let Err(e) = r {
                             if e.is_unported_or_cancelled() {

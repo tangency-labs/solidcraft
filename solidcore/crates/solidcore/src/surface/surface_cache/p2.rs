@@ -59,7 +59,7 @@
 use crate::curve::curve::Curve;
 use crate::curve::iso_curve::IsoCurve;
 use crate::error::surface::SurfaceFailure;
-use crate::error::{Failure, Result, SolidError, SM_ERR_NULL_POINTER};
+use crate::error::{Result, SolidError};
 use crate::geom::extent2d::Extent2d;
 use crate::geom::extent3d::Extent3d;
 use crate::geom::pseudo_box::PseudoBox;
@@ -400,8 +400,9 @@ impl<O: Copy + PartialEq> SurfaceCache<O> {
     ///
     /// # Errors
     ///
-    /// `SM_ERR` when more than `SM_MAX_ALT_CACHES` caches are held (cannot happen
-    /// through this method).
+    /// `SM_ERR` ([`SurfaceFailure::AltCachesFull`]) when more than `SM_MAX_ALT_CACHES`
+    /// caches are held: this method's eviction never allows it, but a caller can push
+    /// past the limit through [`SurfaceCache::alt_caches_mut`].
     pub fn add_curves_to_cache(
         &mut self,
         cache_type: AltSrfCacheType,
@@ -413,13 +414,7 @@ impl<O: Copy + PartialEq> SurfaceCache<O> {
     ) -> Result<()> {
         let caches = self.alt_caches_mut();
         if caches.len() > MAX_ALT_CACHES {
-            return Err(SolidError::surface(
-                OP_ADD,
-                SurfaceFailure::Defect {
-                    why: "the cache holds more alternate caches than its limit, which this \
-                          method's eviction of the oldest never allows",
-                },
-            ));
+            return Err(SolidError::surface(OP_ADD, SurfaceFailure::AltCachesFull));
         }
 
         if caches.len() == MAX_ALT_CACHES {
@@ -476,19 +471,13 @@ impl<O: Copy + PartialEq> SurfaceCache<O> {
         if aux_type != AuxDataType::BezierSurface && aux_type != AuxDataType::AuxData {
             return Err(SolidError::surface(
                 OP_TEST,
-                SurfaceFailure::Defect {
-                    why: "the tree build and the tessellator test only the surface nodes of \
-                          the cache's own tree, so a node of another kind is the kernel's",
-                },
+                SurfaceFailure::NodeNotSurfaceNode,
             ));
         }
         if has_child {
             return Err(SolidError::surface(
                 OP_TEST,
-                SurfaceFailure::Defect {
-                    why: "the tree build and the tessellator test only leaf nodes, before they \
-                          split them, so a node with children is the kernel's",
-                },
+                SurfaceFailure::NodeHasChildren,
             ));
         }
         let fields = fields.ok_or_else(|| invalid(OP_TEST, "node has no surface data"))?;
@@ -867,17 +856,9 @@ impl<O: Copy + PartialEq> SurfaceCache<O> {
                 _ => return Err(invalid(OP_BLOCK, "node has no surface data")),
             }
         };
-        let handle = fields.surface.ok_or_else(|| {
-            Failure::new(
-                OP_BLOCK,
-                SurfaceFailure::Defect {
-                    why: "the cache gives every surface node it makes the surface it \
-                              covers, so a node without one is the kernel's",
-                },
-            )
-            .with_status(SM_ERR_NULL_POINTER)
-            .into_error()
-        })?;
+        let handle = fields
+            .surface
+            .ok_or_else(|| SolidError::surface(OP_BLOCK, SurfaceFailure::NodeHasNoSurface))?;
         // upstream works on the node's surface itself (`pAux->mBA_pSurface`); the cache is
         // edited below, so an evaluation copy (exact knots, owner kept) stands for it: the
         // copy constructor's knot fix-up would move near-coincident knots and so the splits.
@@ -1374,6 +1355,9 @@ mod tests {
             .subdivide_by_block(&Kernel::default(), NodeId(0))
             .expect_err("null");
         assert_eq!(e.upstream_status(), Some(1006));
+        // the node is the caller's: a refusal of its input, not a kernel defect
+        assert_eq!(e.kind(), crate::error::ErrorKind::InvalidInput);
+        assert!(!e.is_defect());
     }
 
     #[test]
