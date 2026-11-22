@@ -1366,20 +1366,18 @@ fn curve_ends(k: &Kernel, curve: &Curve) -> Result<(Extent1d, Point3, Point3)> {
 
 impl FilletBrep {
     /// The fillet surface and solver tolerances of the fillet geometry of edge use
-    /// `eu`.
+    /// `eu` (`missing` names the link when `eu` spans no fillet geometry: a
+    /// cross-section's or another fillet edge's).
     #[track_caller]
     fn eu_geom_solver_with<'s>(
         &self,
         eu: EdgeuseId,
         context: &'s impl super::p5::FilletEdgeContext,
         op: &'static str,
+        missing: FilletSetUp,
     ) -> Result<(FilletGeomId, &'s FilletSolver)> {
         let Some(g) = self.fillet_edgeuse(eu)?.fillet_geom() else {
-            return Err(set_up(
-                op,
-                FilletSetUp::EdgeUseGeom,
-                Some(EntityRef::Edgeuse(eu)),
-            ));
+            return Err(set_up(op, missing, Some(EntityRef::Edgeuse(eu))));
         };
         let Some(sid) = self.geom(g)?.fillet_solver() else {
             return Err(no_solver(op, g));
@@ -1500,7 +1498,12 @@ impl FilletBrep {
                             Some(EntityRef::Edge(e)),
                         )
                     })?;
-                    let (g, fs) = self.eu_geom_solver_with(prim, context, OP_NX2)?;
+                    let (g, fs) = self.eu_geom_solver_with(
+                        prim,
+                        context,
+                        OP_NX2,
+                        FilletSetUp::CrossSectionGeom,
+                    )?;
                     approx_tol = smin(approx_tol, fs.approx_tol_3d);
                     ang_tol = smin(ang_tol, fs.ang_tol_rad);
                     if fillet_surface1.is_none() {
@@ -1702,8 +1705,10 @@ impl FilletBrep {
             };
             // The solvers are dereferenced only past the surface test (upstream
             // fetches the pointers before it but does not use them)
-            let (_, fs1) = self.eu_geom_solver_with(prim, context, OP_INT2)?;
-            let (_, fs2) = self.eu_geom_solver_with(mate, context, OP_INT2)?;
+            let (_, fs1) =
+                self.eu_geom_solver_with(prim, context, OP_INT2, FilletSetUp::EdgeUseGeom)?;
+            let (_, fs2) =
+                self.eu_geom_solver_with(mate, context, OP_INT2, FilletSetUp::EdgeUseGeom)?;
 
             let approx_tol = smin(fs1.approx_tol_3d, fs2.approx_tol_3d);
             let ang_tol = smin(fs1.ang_tol_rad, fs2.ang_tol_rad);
@@ -1865,7 +1870,7 @@ impl FilletBrep {
     /// [`BlendFailure::FilletSetUpInvalid`] for a missing cross-section edge, fillet
     /// geometry, classification or extended surface (and a missing primary edge use),
     /// [`crate::error::blend::SolverFailure::FilletGeomWithoutSolver`] for a geometry
-    /// without its solver, [`BlendFailure::EdgeUseWithoutRadial`] or
+    /// without its solver, [`BlendFailure::FilletSetUpInvalid`] or
     /// [`crate::error::blend::SolverFailure::EdgeUseWithoutFace`] for the body's side edge
     /// use without a radial use or a face, and
     /// [`crate::error::blend::SolverFailure::SolverEdgeUseMissing`] for a solver without
@@ -1981,9 +1986,11 @@ impl FilletBrep {
         };
         let mut sf = eu1::face(target, side_eu)?;
         let radial = eu1::radial(target, side_eu)?.ok_or_else(|| {
-            Failure::new(OP_EXT, BlendFailure::EdgeUseWithoutRadial)
-                .at(EntityRef::Edgeuse(side_eu))
-                .into_error()
+            set_up(
+                OP_EXT,
+                FilletSetUp::RadialEdgeUse,
+                Some(EntityRef::Edgeuse(side_eu)),
+            )
         })?;
         let mut of = eu1::face(target, radial)?;
         for kk in 0..2 {
@@ -2139,7 +2146,7 @@ impl FilletBrep {
         let fillet_geom = self.fillet_edgeuse(rib_eu)?.fillet_geom().ok_or_else(|| {
             set_up(
                 OP,
-                FilletSetUp::CrossSectionGeom,
+                FilletSetUp::EdgeUseGeom,
                 Some(EntityRef::Edgeuse(rib_eu)),
             )
         })?;
@@ -2155,13 +2162,10 @@ impl FilletBrep {
         let end_surface = if let Some(cap) = corner.end_cap.as_ref() {
             cap.clone()
         } else {
-            let end_face = self.fillet_edge(rib)?.original_face().ok_or_else(|| {
-                set_up(
-                    OP,
-                    FilletSetUp::FilletEdgeOriginalFace,
-                    Some(EntityRef::Edge(rib)),
-                )
-            })?;
+            let end_face = self
+                .fillet_edge(rib)?
+                .original_face()
+                .ok_or_else(|| set_up(OP, FilletSetUp::OriginalFace, Some(EntityRef::Edge(rib))))?;
             match context.extended_surface(corner, end_face)? {
                 Some(s) => s.clone(),
                 None => target
@@ -2997,7 +3001,7 @@ impl FilletBrep {
         let face = self.fillet_edge(rail)?.original_face().ok_or_else(|| {
             set_up(
                 OP_BLEND,
-                FilletSetUp::FilletEdgeOriginalFace,
+                FilletSetUp::OriginalFace,
                 Some(EntityRef::Edge(rail)),
             )
         })?;
@@ -3207,7 +3211,7 @@ impl FilletBrep {
                     let face = self.fillet_edge(fe)?.original_face().ok_or_else(|| {
                         set_up(
                             OP_BLEND,
-                            FilletSetUp::FilletEdgeOriginalFace,
+                            FilletSetUp::OriginalFace,
                             Some(EntityRef::Edge(fe)),
                         )
                     })?;
@@ -3220,7 +3224,7 @@ impl FilletBrep {
                     let fg = self.fillet_edgeuse(prim)?.fillet_geom().ok_or_else(|| {
                         set_up(
                             OP_BLEND,
-                            FilletSetUp::EdgeUseGeom,
+                            FilletSetUp::CrossSectionGeom,
                             Some(EntityRef::Edgeuse(prim)),
                         )
                     })?;
@@ -3615,6 +3619,77 @@ mod tests {
             )
         );
         assert_eq!(e.kind(), ErrorKind::InvalidInput);
+        assert!(!e.is_defect());
+    }
+
+    /// A side edge without a curve, set up by a caller through the public API (the
+    /// fillet B-rep's body, a geometry's rails and side edge uses), reaches the face's
+    /// loop through the side-edge join (p6 pushes the side edge's curve unchecked):
+    /// the caller's input, an [`BlendFailure::EdgeWithoutCurve`] with no entity (the
+    /// curve list keeps no edge ids), not a defect.
+    #[test]
+    fn make_face_with_a_curveless_side_edge_is_the_callers_input() {
+        use crate::blend::fillet_geom::p1::{FilletGeomType, FilletSolverId};
+        let mut k = kernel();
+        let solvers = [FilletSolver::new(1e-6, 1e-3, 1e-3)];
+        let mut fb = FilletBrep::new();
+        *fb.brep_mut() =
+            crate::primitive::api_primitives::create_box(&mut k, Point3::ZERO, 1.0, 1.0, 1.0)
+                .unwrap();
+        // one face of the box: two opposite edges as the rails, the other two as the
+        // side edges, both without their curves
+        let face = fb.brep().face_list()[0];
+        let lp = fb.brep().face(face).unwrap().loops[0];
+        let edges: Vec<EdgeId> = fb
+            .brep()
+            .loop_(lp)
+            .unwrap()
+            .edges
+            .iter()
+            .map(|u| u.edge)
+            .collect();
+        assert_eq!(edges.len(), 4);
+        let mut side_eus = Vec::new();
+        for &side in &[edges[1], edges[3]] {
+            side_eus.push(primary_edgeuse(fb.brep(), side).unwrap().unwrap());
+            fb.brep_mut().edge_mut(side).unwrap().curve = None;
+        }
+        let mut geom = FilletGeom::new(
+            &k,
+            Some((FilletSolverId(0), &solvers[0])),
+            FilletGeomType::CliffSidePatch,
+        )
+        .unwrap();
+        geom.set_fillet_surface(Some(plane_patch(1.0)));
+        geom.rails = [Some(edges[0]), Some(edges[2])];
+        geom.side_eus = side_eus;
+        let g = fb.add_geom(geom);
+        let mut b = Brep::new();
+        let mut records = crate::topology::topology::NotifyRecords::new();
+        let mut attributes = crate::geom::attribute::AttributeStore::default();
+        let key_of = |_e: EntityRef| crate::geom::object::ObjectRef {
+            type_code: 0,
+            key: crate::geom::attribute::ObjectKey(0),
+        };
+        let mut env = edge::NotifyEnv {
+            records: &mut records,
+            attributes: &mut attributes,
+            context: None,
+            key_of: &key_of,
+        };
+        let e = fb
+            .make_face_brep(&mut k, g, &solvers, &mut b, &mut env)
+            .unwrap_err();
+        assert_eq!(
+            failure(&e),
+            (
+                OP_FACE,
+                Some(&BlendFailure::EdgeWithoutCurve),
+                Some(SM_ERR_NULL_POINTER)
+            )
+        );
+        assert_eq!(e.kind(), ErrorKind::InvalidInput);
+        assert_eq!(e.entity(), None);
         assert!(!e.is_defect());
     }
 
