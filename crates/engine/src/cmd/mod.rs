@@ -110,6 +110,7 @@ pub use view_navigation::standard_view;
 mod component_link;
 pub use component_link::resolve_design_links;
 mod config;
+mod design_internal;
 mod design_link;
 mod file;
 mod file_library;

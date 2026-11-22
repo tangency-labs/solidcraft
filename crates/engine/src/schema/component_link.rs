@@ -508,6 +508,64 @@ pub struct BreakLinkResult {
     pub param_warnings: Vec<String>,
 }
 
+/// Store a linked component's design inside this design's file (experimental, #6892): the linked
+/// file is copied in as a part of this design, unpacked beside it while it is open, and the
+/// component follows that copy from then on. The file it came from is left as it is. One undo step.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[schemars(deny_unknown_fields, transform = component_required)]
+pub struct MakeInternalParams {
+    // Optional in the type and required in the schema (`component_required`).
+    /// The linked component, by id or name.
+    #[serde(default, deserialize_with = "component", skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "ComponentRef")]
+    pub component: Option<ComponentRef>,
+}
+
+/// What `component.make_internal` returns.
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct MakeInternalResult {
+    /// The component, by id.
+    pub component: u64,
+    /// The name the part has inside this design's file, which is its unpacked file's name.
+    pub member: String,
+    /// The unpacked file, whole: the one to open to edit the part.
+    pub file: String,
+    /// The file it was linked to, as the link stored it.
+    pub previous_path: String,
+    /// In the warn parameter-check mode: what the call's parameters got wrong.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub param_warnings: Vec<String>,
+}
+
+/// Settle a recovery component (experimental, #6892): `component.restore_recovery` and
+/// `component.discard_recovery` take the same parameter.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[schemars(deny_unknown_fields, transform = component_required)]
+pub struct RecoveryParams {
+    // Optional in the type and required in the schema (`component_required`).
+    /// The recovery component, by id or name.
+    #[serde(default, deserialize_with = "component", skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "ComponentRef")]
+    pub component: Option<ComponentRef>,
+}
+
+/// What `component.restore_recovery` and `component.discard_recovery` return.
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct RecoveryResult {
+    /// The component, by id.
+    pub component: u64,
+    /// The internal component's name inside this design's file.
+    pub member: String,
+    /// Its unpacked file, whole.
+    pub file: String,
+    /// After a discard: where the dropped work was kept, beside the unpacked file.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub backup: Option<String>,
+    /// In the warn parameter-check mode: what the call's parameters got wrong.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub param_warnings: Vec<String>,
+}
+
 /// `component.links` takes no parameters.
 #[derive(Debug, Deserialize, JsonSchema)]
 #[schemars(deny_unknown_fields)]
@@ -545,6 +603,17 @@ pub enum LinkInfo {
         /// Whether the file is no longer what this design last read (`component.update_links`
         /// reads it again); null when it is not found or the link is older than this record.
         changed: Option<bool>,
+        /// Experimental (#6892): `true` for an internal component, one stored inside this
+        /// design's file, whose `file` is where it is unpacked while the design is open.
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        internal: bool,
+        /// Experimental (#6892): `true` for a recovery component, an internal component whose
+        /// unpacked file was found differing from the design's file when the design opened. It
+        /// shows what the design's file holds until `component.restore_recovery` takes the
+        /// unpacked file's work or `component.discard_recovery` drops it; `changed` is then about
+        /// that unpacked file.
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        recovery: bool,
         /// Why the file can't be reached: `missing`, `unreadable` or `not_allowed`. Left out
         /// when it can be read.
         #[serde(default, skip_serializing_if = "Option::is_none")]

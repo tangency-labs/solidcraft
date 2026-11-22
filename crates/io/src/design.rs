@@ -469,6 +469,11 @@ fn write_container(
     for (key, data) in &doc.plugin_data {
         writer.part(&format!("{}{key}", solidcraft_doc::plugin_data::PREFIX), data, true)?;
     }
+    // The internal components (experimental, #6892): each is a design file of its own,
+    // compressed already, so it goes in as it is.
+    for (name, data) in &doc.internal {
+        writer.part(&format!("{}{name}", solidcraft_doc::internal::PREFIX), data, false)?;
+    }
     // The signature binds every authoritative part written above (never the optional caches), and
     // is written before them so their budget sees its bytes.
     if let Some(save) = provenance {
@@ -1183,7 +1188,8 @@ fn hydrate_newer<R: Read + Seek>(doc: &mut Document, metadata: &Value, container
         let ours = matches!(name.as_str(), "document.json" | "container.json")
             || name.starts_with("cache/")
             || name.starts_with("drawings/")
-            || plugin_part(&name).is_some();
+            || plugin_part(&name).is_some()
+            || internal_part(&name).is_some();
         let unused_blob = name.starts_with("blobs/") && !file.mentions(&name) && !foreign_mentions(&doc.features, &name);
         if !ours && !unused_blob {
             file.parts.push((name.clone(), reader.limited_part(&name, part_limit(&name))?.into()));
@@ -1209,6 +1215,26 @@ fn hydrate_plugin_data<R: Read + Seek>(doc: &mut Document, reader: &mut PackageR
         }
         if let Ok(bytes) = reader.limited_part(&name, part_limit(&name)) {
             doc.plugin_data.insert(key.to_string(), bytes.into());
+        }
+    }
+}
+
+/// The name of a part stored inside the file, for a container part under `internal/` that is one.
+fn internal_part(name: &str) -> Option<&str> {
+    name.strip_prefix(solidcraft_doc::internal::PREFIX).filter(|member| solidcraft_doc::internal::valid_name(member))
+}
+
+/// The internal components (experimental, #6892): each `internal/<name>` part, as its
+/// bytes. One that does not read is left out; the design opens all the same, and the component
+/// that shows it keeps the bodies its link holds.
+fn hydrate_internal<R: Read + Seek>(doc: &mut Document, reader: &mut PackageReader<R>) {
+    for name in reader.part_names() {
+        let Some(member) = internal_part(&name) else { continue };
+        if doc.internal.len() >= solidcraft_doc::internal::MAX_FILES {
+            break;
+        }
+        if let Ok(bytes) = reader.limited_part(&name, part_limit(&name)) {
+            doc.internal.insert(member.to_string(), bytes.into());
         }
     }
 }
@@ -1320,6 +1346,7 @@ fn read_document<R: Read + Seek>(reader: &mut PackageReader<R>) -> Result<Docume
         hydrate_newer(&mut doc, &metadata, container, reader)?;
     }
     hydrate_plugin_data(&mut doc, reader);
+    hydrate_internal(&mut doc, reader);
     for (index, feature) in doc.features.iter_mut().enumerate() {
         let value = metadata.get("features").and_then(|v| v.get(index)).ok_or_else(|| invalid("missing feature metadata"))?;
         match &mut feature.kind {
@@ -2953,6 +2980,39 @@ mod tests {
             let import = saved["features"].as_array().unwrap().iter().find(|f| f.get("records").is_some_and(|r| !r.is_null())).unwrap();
             assert_eq!(import["records"], newer, "the inline records are kept as the file has them");
         }
+    }
+
+    /// The parts stored inside a design file (`internal/<name>`) open as their bytes and save back
+    /// byte for byte; a design without any has no `internal/` part, a part whose name is not a
+    /// member's is not taken as one, and a plain JSON design refuses to save them.
+    #[test]
+    fn parts_stored_inside_a_design_round_trip_untouched() {
+        let doc = document();
+        let without = parts(&write_design_container(&doc).unwrap());
+        assert!(without.keys().all(|name| !name.starts_with("internal/")));
+        assert!(crate::read_design(&package(&without)).unwrap().internal.is_empty());
+
+        // A member is a design file of its own: its bytes are a container's.
+        let part = write_design_container(&doc).unwrap();
+        let mut entries = without.clone();
+        entries.insert("internal/Top.scprt".into(), part.clone());
+        entries.insert("internal/Shelf Bracket.scprt".into(), b"not a design, kept all the same".to_vec());
+        entries.insert("internal/notes.txt".into(), b"no".to_vec());
+        entries.insert("internal/.hidden.scprt".into(), b"no".to_vec());
+        let opened = crate::read_design(&package(&entries)).unwrap();
+        assert_eq!(opened.features, doc.features);
+        assert_eq!(opened.internal.keys().map(String::as_str).collect::<Vec<_>>(), ["Shelf Bracket.scprt", "Top.scprt"]);
+        assert_eq!(opened.internal["Top.scprt"].as_bytes(), part);
+
+        let resaved = parts(&write_design_container(&opened).unwrap());
+        assert_eq!(resaved["internal/Top.scprt"], part);
+        assert_eq!(resaved["internal/Shelf Bracket.scprt"], b"not a design, kept all the same");
+        assert_eq!(resaved.keys().filter(|name| name.starts_with("internal/")).count(), 2);
+        assert_eq!(crate::read_design(&package(&resaved)).unwrap(), opened);
+
+        let refused = crate::write_design(&opened).unwrap_err().to_string();
+        assert!(refused.contains("internal components") && refused.contains(".sc"), "{refused}");
+        assert!(!opened.to_json().contains("Top.scprt"), "never written as text");
     }
 
     /// Plugin data under `plugins/<plugin-id>/` opens and saves back byte for byte with no plugin

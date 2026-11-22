@@ -192,6 +192,8 @@ fn replies_match_the_output_schema() {
         sheet_metal: None,
         kind_note: None,
         missing_links: Vec::new(),
+        recovery_components: vec!["Top.scprt".into()],
+        internal_not_unpacked: Vec::new(),
     };
     matches(output_schema_for::<OpenResult>(), "doc.open", &serde_json::to_value(OpenResult::Design(busy)).unwrap_or_default());
     // A design a newer SolidCraft saved: the notice and what wasn't read.
@@ -216,6 +218,8 @@ fn replies_match_the_output_schema() {
         sheet_metal: None,
         kind_note: None,
         missing_links: Vec::new(),
+        recovery_components: vec!["Top.scprt".into()],
+        internal_not_unpacked: Vec::new(),
     };
     matches(output_schema_for::<OpenResult>(), "doc.open", &serde_json::to_value(OpenResult::Design(newer)).unwrap_or_default());
     let warned = run(&mut s, "doc.open", json!({"path": at("part.sc"), "pathh": 1}));

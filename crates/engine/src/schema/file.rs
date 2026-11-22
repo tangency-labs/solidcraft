@@ -762,6 +762,16 @@ pub struct OpenedDesign {
     /// at its file.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub missing_links: Vec<MissingLink>,
+    /// Experimental (#6892): the internal components whose unpacked file beside the design
+    /// was already there and differs from what the design's file holds, by name: work saved in
+    /// the part and not yet in the design's file (after a crash, for one). The unpacked file is
+    /// left as it is, the design reads it, and the next save of the design stores it.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub recovery_components: Vec<String>,
+    /// Experimental (#6892): the internal components that could not be unpacked beside
+    /// the design, each with why. The design reads them from its file.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub internal_not_unpacked: Vec<String>,
     /// In the warn parameter-check mode: what the call's parameters got wrong.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub param_warnings: Vec<String>,
@@ -776,6 +786,11 @@ pub struct MissingLink {
     pub name: String,
     /// The file the link looked for, whole.
     pub path: String,
+    /// `true` for an internal component (one stored inside this design's file) that the file no
+    /// longer holds and that is not unpacked either: replace it with another file
+    /// (`component.relink`) or take it again from the design it came from.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub internal: bool,
 }
 
 /// What a signature check found: the reply of `file.verify`, and part of `doc.open`'s when it

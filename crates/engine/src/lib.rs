@@ -786,6 +786,10 @@ pub struct Session {
     /// The kind of design its file holds (experimental, #6892; `cmd/file_kind.rs`): read from the
     /// file's header on open and written back by every save. A new design is a single design.
     pub design_kind: solidcraft_io::DesignKind,
+    /// The internal components (experimental, #6892; `cmd/design_internal.rs`) whose unpacked file was
+    /// found differing from the design's file when it opened, by name: recovery components. Until
+    /// each is restored or discarded, the design reads and saves what its file holds for it.
+    pub recovery_components: std::collections::BTreeSet<String>,
     /// The provenance records the open file carries; a signed save appends one to them.
     pub provenance_chain: Option<solidcraft_io::ProvenanceChain>,
     /// The last provenance verification of this design, when one was asked for.
@@ -1338,6 +1342,7 @@ impl Session {
             disk: None,
             read_only: false,
             design_kind: solidcraft_io::DesignKind::Single,
+            recovery_components: Default::default(),
             provenance_chain: None,
             provenance: None,
             signing_allowed: false,
@@ -3222,6 +3227,7 @@ impl Session {
             disk: self.disk,
             read_only: self.read_only,
             design_kind: self.design_kind,
+            recovery_components: self.recovery_components.clone(),
             provenance_chain: self.provenance_chain.clone(),
             provenance: self.provenance.clone(),
             signing_allowed: false,
@@ -4066,8 +4072,10 @@ fn same_but_features(a: &Document, b: &Document) -> bool {
         drawings,
         next_component_color_index,
         plugin_data,
+        internal,
     } = a;
     *plugin_data == b.plugin_data
+        && *internal == b.internal
         && *render == b.render
         && *format == b.format
         && *format_pending == b.format_pending

@@ -170,6 +170,8 @@ fn same_geometry_inputs(a: &Document, b: &Document) -> bool {
         notes: _,
         // Plugin data is kept beside the design; no feature reads it.
         plugin_data: _,
+        // A stored part feeds the design only through its link's Import feature.
+        internal: _,
     } = a;
     (Arc::ptr_eq(render, &b.render) || *render == b.render)
         && *format == b.format

@@ -22,8 +22,8 @@ use super::design_link::{LinkState, absolute, link_presence, link_target, read_l
 use crate::params::{bad, str_, vec3};
 use crate::schema::component_link::{
     BreakLinkParams, BreakLinkResult, CopiesParams, CopiesResult, DesignInserted, ExtractParams, ExtractResult, InsertDesignParams,
-    InsertDesignResult, JointDiagnostic, LinkFailure, LinkInfo, LinksParams, LinksResult, RelinkParams, RelinkResult, ReplaceWithLinkParams,
-    ReplaceWithLinkResult, UpdateLinksParams, UpdateLinksResult,
+    InsertDesignResult, JointDiagnostic, LinkFailure, LinkInfo, LinksParams, LinksResult, MakeInternalParams, MakeInternalResult, RecoveryParams,
+    RecoveryResult, RelinkParams, RelinkResult, ReplaceWithLinkParams, ReplaceWithLinkResult, UpdateLinksParams, UpdateLinksResult,
 };
 use crate::schema::{TypedContract, output_schema_for};
 use crate::{EngineError, Result, Session};
@@ -44,6 +44,8 @@ const EXTRACT_CONTRACT: TypedContract<ExtractParams> = TypedContract::new();
 const COPIES_CONTRACT: TypedContract<CopiesParams> = TypedContract::new();
 const REPLACE_WITH_LINK_CONTRACT: TypedContract<ReplaceWithLinkParams> = TypedContract::new();
 const LINKS_CONTRACT: TypedContract<LinksParams> = TypedContract::new();
+const MAKE_INTERNAL_CONTRACT: TypedContract<MakeInternalParams> = TypedContract::new();
+const RECOVERY_CONTRACT: TypedContract<RecoveryParams> = TypedContract::new();
 
 pub static COMMANDS: &[CommandSpec] = &[
     CommandSpec::new("component.insert_design", "Insert Design", crate::checked!("component.insert_design", insert_design)).begins_edit()
@@ -83,6 +85,15 @@ pub static COMMANDS: &[CommandSpec] = &[
         .contract(&BREAK_LINK_CONTRACT)
         .output(output_schema_for::<BreakLinkResult>)
         .params("component: id or name of a linked component — keeps its bodies as they are and forgets the design file"),
+    CommandSpec::new("component.make_internal", "Make Internal", crate::checked!("component.make_internal", make_internal))
+        .icon("chain")
+        .contract(&MAKE_INTERNAL_CONTRACT)
+        .output(output_schema_for::<MakeInternalResult>)
+        .params(
+        "component: id or name of a linked component — experimental (Parts and assemblies): copies its design file into this design's file as a \
+         stored part, unpacked beside this design while it is open, and links the component to that copy; the file it came from is left as it is; \
+         this design must be saved; returns member (the part's name inside the file), file (the unpacked file to open and edit) and previous_path",
+    ),
     CommandSpec::new("component.extract", "Extract to File", crate::checked!("component.extract", extract::extract))
         .icon("export")
         .contract(&EXTRACT_CONTRACT)
@@ -108,6 +119,25 @@ pub static COMMANDS: &[CommandSpec] = &[
         "component or components: [ids or names] of components that are not linked; with: a linked component, or path: a .sc design \
          (its link here, else a new linked component) → each component's history goes and its placements become placements of the linked \
          component; refused when its bodies are not the same as the link's; returns component, name, replaced and warnings",
+    ),
+    CommandSpec::new("component.restore_recovery", "Restore Recovery Component", crate::checked!("component.restore_recovery", restore_recovery))
+        .icon("update")
+        .noundo()
+        .contract(&RECOVERY_CONTRACT)
+        .output(output_schema_for::<RecoveryResult>)
+        .params(
+        "component: id or name of a recovery component (an internal component whose unpacked file differed from the design's file when the \
+         design opened; component.links marks it recovery) — keeps the unpacked file's work: the component is then out of date, and \
+         component.update_links brings that work into the design",
+    ),
+    CommandSpec::new("component.discard_recovery", "Discard Recovery Component", crate::checked!("component.discard_recovery", discard_recovery))
+        .icon("break")
+        .noundo()
+        .contract(&RECOVERY_CONTRACT)
+        .output(output_schema_for::<RecoveryResult>)
+        .params(
+        "component: id or name of a recovery component — drops the unpacked file's work and unpacks what the design's file holds again; the \
+         dropped work is kept beside it (backup)",
     ),
     CommandSpec::new("component.links", "List Links", crate::checked!("component.links", list_links))
         .icon("chain")
@@ -1093,9 +1123,19 @@ fn read_linked(s: &Session, comp: u64, link: &DesignLink, notes: &mut Vec<String
     };
     link_refused(s.path.as_deref(), &link.path).map_err(|e| e.to_string())?;
     let mut file = resolve(s.path.as_deref(), &link.path);
+    // A part stored inside this design that isn't unpacked (a read-only folder, the browser): the
+    // bytes this design's file held.
+    // A recovery component is read as the file holds it too, until it is restored or discarded.
+    let member = solidcraft_doc::internal::linked(&link.path);
+    let unpacked = solidcraft_io::vfs::design_path_is_file(&file.to_string_lossy(), s.path.as_deref()) == Some(true);
+    if let Some(kept) = member.filter(|name| s.recovery_components.contains(*name) || !unpacked).and_then(|name| s.doc.internal.get(name)) {
+        return Ok(((old.clone(), records.clone()), file, kept.as_bytes().to_vec()));
+    }
     // Not where the link says: a library folder may have it (experimental, #6892). The link keeps
     // naming its own file; the note says where this read came from.
-    if let Some((found, folder)) = super::design_link::found_in_library(&file) {
+    if member.is_none()
+        && let Some((found, folder)) = super::design_link::found_in_library(&file)
+    {
         let name = s.doc.components.iter().find(|c| c.id == comp).map_or("the part", |c| c.name.as_str());
         notes.push(format!("{name}: not at {}; found in the library folder {} as {}", file.display(), folder.display(), found.display()));
         file = found;
@@ -1325,6 +1365,76 @@ fn break_link(s: &mut Session, p: &Value) -> Result<Value> {
     reply(cmd, BreakLinkResult { component: comp, path, param_warnings: Vec::new() })
 }
 
+/// `component.make_internal`: the linked design becomes a part stored inside this design's file
+/// (`cmd/design_internal.rs`), and the component links that copy.
+fn make_internal(s: &mut Session, p: &Value) -> Result<Value> {
+    let cmd = "component.make_internal";
+    if !super::experimental_file_kinds() {
+        return Err(bad(cmd, "storing a part inside a design is experimental: turn on Parts and assemblies in Preferences › General › Environment"));
+    }
+    if cfg!(target_arch = "wasm32") {
+        return Err(bad(cmd, "storing a part inside a design needs a folder to unpack it to, which the browser does not have"));
+    }
+    let comp = component_key(s, p, "component", cmd)?;
+    let link = s.doc.links.get(&comp).cloned().ok_or_else(|| bad(cmd, "that component is not linked to a design"))?;
+    if solidcraft_doc::internal::linked(&link.path).is_some() {
+        return Err(bad(cmd, "that part is already stored inside this design"));
+    }
+    let own = s.path.clone().ok_or_else(|| bad(cmd, "save this design first: the part is stored inside its file"))?;
+    if s.read_only {
+        return Err(bad(cmd, "this design was opened read-only"));
+    }
+    link_refused(Some(&own), &link.path).map_err(|e| bad(cmd, e.to_string()))?;
+    let source = resolve(Some(&own), &link.path);
+    let previous_path = stored(Some(&own), &source);
+    let bytes = read_link(&source, Some(&own)).map_err(|e| bad(cmd, e.to_string()))?;
+    let member = super::design_internal::free_name(&s.doc, &own, &source);
+    let file =
+        super::design_internal::work_file(Some(&own), &member).ok_or_else(|| bad(cmd, "this design's file has no folder to unpack the part to"))?;
+    super::design_internal::write(&file, &bytes).map_err(|why| bad(cmd, why))?;
+    if let Some(kept) = s.doc_mut().links.get_mut(&comp) {
+        kept.path = solidcraft_doc::internal::link(&member);
+        // The copy is what the component shows now, so it is up to date with it.
+        kept.file_sha256 = Some(DesignLink::file_digest(&bytes));
+    }
+    reply(cmd, MakeInternalResult { component: comp, member, file: file.to_string_lossy().into_owned(), previous_path, param_warnings: Vec::new() })
+}
+
+fn restore_recovery(s: &mut Session, p: &Value) -> Result<Value> {
+    settle_recovery(s, p, "component.restore_recovery", true)
+}
+
+fn discard_recovery(s: &mut Session, p: &Value) -> Result<Value> {
+    settle_recovery(s, p, "component.discard_recovery", false)
+}
+
+/// Settle a recovery component (`cmd/design_internal.rs`): `restore` keeps its unpacked file's
+/// work, which the design then finds out of date; otherwise what the design's file holds is
+/// unpacked over it, the dropped work kept beside it as a backup.
+fn settle_recovery(s: &mut Session, p: &Value, cmd: &str, restore: bool) -> Result<Value> {
+    let comp = component_key(s, p, "component", cmd)?;
+    let member = s
+        .doc
+        .links
+        .get(&comp)
+        .and_then(|link| solidcraft_doc::internal::linked(&link.path))
+        .filter(|member| s.recovery_components.contains(*member))
+        .map(str::to_string)
+        .ok_or_else(|| bad(cmd, "that component is not a recovery component"))?;
+    let file = super::design_internal::work_file(s.path.as_deref(), &member).ok_or_else(|| bad(cmd, "this design has no file"))?;
+    let mut backup = None;
+    if !restore {
+        let held =
+            s.doc.internal.get(&member).cloned().ok_or_else(|| bad(cmd, "this design's file holds no copy of that component to go back to"))?;
+        solidcraft_io::vfs::check_new(&file.to_string_lossy()).map_err(|e| bad(cmd, e.to_string()))?;
+        // Atomic, and the work being dropped stays beside it as `<file>.bak`.
+        solidcraft_io::write_atomic(&file, held.as_bytes(), true).map_err(|e| bad(cmd, format!("{}: {e}", file.display())))?;
+        backup = Some(format!("{}.bak", file.display()));
+    }
+    s.recovery_components.remove(&member);
+    reply(cmd, RecoveryResult { component: comp, member, file: file.to_string_lossy().into_owned(), backup, param_warnings: Vec::new() })
+}
+
 fn list_links(s: &mut Session, _p: &Value) -> Result<Value> {
     let mut observations = Vec::new();
     let links: Vec<LinkInfo> = s
@@ -1356,7 +1466,22 @@ fn list_links(s: &mut Session, _p: &Value) -> Result<Value> {
                         Some(why) => (Some(why.state), Some(why.reason)),
                         None => (None, None),
                     };
-                    LinkInfo::Looked { component: *c, configuration: l.configuration, name, path, file: shown, found, changed, state, reason }
+                    // An internal component, and whether it waits as a recovery component (#6892).
+                    let internal = solidcraft_doc::internal::linked(&l.path);
+                    let recovery = internal.is_some_and(|member| s.recovery_components.contains(member));
+                    LinkInfo::Looked {
+                        component: *c,
+                        configuration: l.configuration,
+                        name,
+                        path,
+                        file: shown,
+                        found,
+                        changed,
+                        internal: internal.is_some(),
+                        recovery,
+                        state,
+                        reason,
+                    }
                 }
                 Some(solidcraft_io::vfs::Remote::Network(host)) => LinkInfo::Network {
                     component: *c,

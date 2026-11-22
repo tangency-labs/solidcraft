@@ -1548,6 +1548,120 @@ fn a_part_moved_into_a_library_folder_is_found_there_and_said_so() {
     let _ = std::fs::remove_dir_all(root);
 }
 
+/// A part stored inside a design's file (#6892): `component.make_internal` copies a linked part in,
+/// unpacked beside the design, and the component follows that copy. The design's file holds the
+/// part, so it opens complete somewhere else with nothing beside it and unpacks the part again. An
+/// edit saved in the unpacked part is reported out of date, comes in with Update Links, and is in
+/// the design's file after its next save. A read-only open unpacks nothing and still reads the part.
+#[test]
+fn a_part_stored_inside_a_design_travels_in_its_file_and_is_edited_unpacked() {
+    crate::set_experimental_file_kinds(true);
+    let root = folder("stored-inside");
+    let (job, away) = (root.join("job"), root.join("away"));
+    std::fs::create_dir_all(job.join("parts")).unwrap();
+    std::fs::create_dir_all(&away).unwrap();
+    let bracket = job.join("parts").join("bracket.scprt");
+    part(&bracket, 10);
+    let mut s = Session::default();
+    // An unsaved design has no file to store a part in.
+    run(&mut s, "component.insert_design", json!({"path": bracket}));
+    let refused = s.execute("component.make_internal", &json!({"component": "bracket"})).unwrap_err().to_string();
+    assert!(refused.contains("save this design first"), "{refused}");
+    run(&mut s, "file.save", json!({"path": job.join("counter.sc")}));
+    let stored = run(&mut s, "component.make_internal", json!({"component": "bracket"}));
+    assert_eq!(stored["member"], "bracket.scprt", "{stored}");
+    assert_eq!(stored["previous_path"], "parts/bracket.scprt", "{stored}");
+    let work = PathBuf::from(stored["file"].as_str().unwrap());
+    assert_eq!(work, job.join(".~counter.sc.parts").join("bracket.scprt"));
+    assert_eq!(std::fs::read(&work).unwrap(), std::fs::read(&bracket).unwrap(), "the unpacked part is the linked file's bytes");
+    let again = s.execute("component.make_internal", &json!({"component": "bracket"})).unwrap_err().to_string();
+    assert!(again.contains("already stored"), "{again}");
+    let links = run(&mut s, "component.links", json!({}));
+    assert_eq!(links["links"][0]["path"], ".~internal/bracket.scprt", "{links}");
+    assert!(links["links"][0]["found"] == true && links["links"][0]["changed"] == false, "{links}");
+    run(&mut s, "file.save", json!({}));
+    let full = volume(&mut s);
+
+    // The design's file alone, somewhere else: it opens complete and unpacks its part there.
+    std::fs::copy(job.join("counter.sc"), away.join("counter.sc")).unwrap();
+    let mut elsewhere = Session::default();
+    let reply = run(&mut elsewhere, "doc.open", json!({"path": away.join("counter.sc")}));
+    assert!(reply.get("missing_links").is_none() && reply.get("recovery_components").is_none(), "{reply}");
+    let unpacked = away.join(".~counter.sc.parts").join("bracket.scprt");
+    assert_eq!(std::fs::read(&unpacked).unwrap(), std::fs::read(&work).unwrap());
+    assert!((volume(&mut elsewhere) - full).abs() < 1e-6);
+    let updated = run(&mut elsewhere, "component.update_links", json!({}));
+    assert_eq!(updated["unchanged"], json!(["bracket"]), "{updated}");
+
+    // The unpacked part is edited and saved: out of date, then taken, then in the design's file.
+    part(&unpacked, 25);
+    let links = run(&mut elsewhere, "component.links", json!({}));
+    assert_eq!(links["links"][0]["changed"], true, "{links}");
+    let updated = run(&mut elsewhere, "component.update_links", json!({}));
+    assert_eq!(updated["updated"], json!(["bracket"]), "{updated}");
+    assert!((volume(&mut elsewhere) - 5000.0).abs() < 1e-6, "{}", volume(&mut elsewhere));
+    run(&mut elsewhere, "file.save", json!({}));
+    let saved = solidcraft_io::read_design(&std::fs::read(away.join("counter.sc")).unwrap()).unwrap();
+    assert_eq!(saved.internal["bracket.scprt"].as_bytes(), std::fs::read(&unpacked).unwrap(), "the save packed the edited part");
+
+    // Opened again with the unpacked part edited but the design not saved, as a crash leaves it: a
+    // recovery component. It is named and marked, and until it is settled the design shows, updates
+    // from and saves what its file holds.
+    part(&unpacked, 40);
+    let held = saved.internal["bracket.scprt"].clone();
+    let mut crashed = Session::default();
+    let reply = run(&mut crashed, "doc.open", json!({"path": away.join("counter.sc")}));
+    assert_eq!(reply["recovery_components"], json!(["bracket.scprt"]), "{reply}");
+    let link = run(&mut crashed, "component.links", json!({}))["links"][0].clone();
+    assert!(link["internal"] == true && link["recovery"] == true && link["changed"] == true, "{link}");
+    assert_eq!(run(&mut crashed, "component.update_links", json!({}))["unchanged"], json!(["bracket"]));
+    assert!((volume(&mut crashed) - 5000.0).abs() < 1e-6, "{}", volume(&mut crashed));
+    run(&mut crashed, "file.save", json!({}));
+    let resaved = solidcraft_io::read_design(&std::fs::read(away.join("counter.sc")).unwrap()).unwrap();
+    assert_eq!(resaved.internal["bracket.scprt"], held, "a save takes no recovery file unasked");
+    // Restored: the unpacked work stays, the component is out of date, and Update Links takes it.
+    let restored = run(&mut crashed, "component.restore_recovery", json!({"component": "bracket"}));
+    assert_eq!(restored["member"], "bracket.scprt", "{restored}");
+    let link = run(&mut crashed, "component.links", json!({}))["links"][0].clone();
+    assert!(link.get("recovery").is_none() && link["changed"] == true, "{link}");
+    assert_eq!(run(&mut crashed, "component.update_links", json!({}))["updated"], json!(["bracket"]));
+    assert!((volume(&mut crashed) - 8000.0).abs() < 1e-6, "{}", volume(&mut crashed));
+    let refused = crashed.execute("component.restore_recovery", &json!({"component": "bracket"})).unwrap_err().to_string();
+    assert!(refused.contains("not a recovery component"), "{refused}");
+    run(&mut crashed, "file.save", json!({}));
+    // Discarded: what the design's file holds is unpacked again, and the dropped work is kept beside it.
+    let before = std::fs::read(&unpacked).unwrap();
+    part(&unpacked, 55);
+    let dropped = std::fs::read(&unpacked).unwrap();
+    let mut again = Session::default();
+    let reply = run(&mut again, "doc.open", json!({"path": away.join("counter.sc")}));
+    assert_eq!(reply["recovery_components"], json!(["bracket.scprt"]), "{reply}");
+    let discarded = run(&mut again, "component.discard_recovery", json!({"component": "bracket"}));
+    assert_eq!(std::fs::read(&unpacked).unwrap(), before, "the design's copy is unpacked again");
+    assert_eq!(std::fs::read(discarded["backup"].as_str().unwrap()).unwrap(), dropped, "the dropped work is kept");
+    let link = run(&mut again, "component.links", json!({}))["links"][0].clone();
+    assert!(link.get("recovery").is_none() && link["changed"] == false, "{link}");
+    assert!((volume(&mut again) - 8000.0).abs() < 1e-6);
+
+    // Read-only, with nothing unpacked beside it: nothing is written, and the part still reads.
+    let bare = root.join("bare");
+    std::fs::create_dir_all(&bare).unwrap();
+    std::fs::copy(away.join("counter.sc"), bare.join("counter.sc")).unwrap();
+    let mut read_only = Session::default();
+    let reply = run(&mut read_only, "doc.open", json!({"path": bare.join("counter.sc"), "read_only": true}));
+    assert!(reply.get("missing_links").is_none(), "{reply}");
+    assert!(!bare.join(".~counter.sc.parts").exists(), "a read-only open unpacks nothing");
+    let updated = run(&mut read_only, "component.update_links", json!({}));
+    assert_eq!(updated["unchanged"], json!(["bracket"]), "{updated}");
+
+    // Save As: the part is unpacked beside the new file too, and the new file holds it.
+    std::fs::create_dir_all(root.join("copy")).unwrap();
+    run(&mut elsewhere, "file.save_as", json!({"path": root.join("copy").join("line.sc")}));
+    assert!(root.join("copy").join(".~line.sc.parts").join("bracket.scprt").is_file());
+    assert_eq!(run(&mut elsewhere, "component.links", json!({}))["links"][0]["found"], true);
+    let _ = std::fs::remove_dir_all(root);
+}
+
 /// Missing files on open (#6892, slice 4b): under Parts and assemblies, an assembly whose part
 /// file has gone opens with its last bodies, and `doc.open` names that part with the file it
 /// looked for. Relinking it to where the file went brings it back, stored relative to the

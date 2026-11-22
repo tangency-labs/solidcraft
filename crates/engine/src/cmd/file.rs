@@ -1629,6 +1629,12 @@ fn opened_design(
     s.replace_design(opened);
     s.disk = disk;
     s.read_only = read_only;
+    // The internal components are unpacked beside it where they are not yet (#6892). A
+    // design opened read-only writes nothing and reads them from its file.
+    let unpacked = if read_only { super::design_internal::Unpacked::default() } else { super::design_internal::unpack(&s.doc, path) };
+    // An unpacked file that differs from the design's file is a recovery component: held as the
+    // file has it until `component.restore_recovery` or `component.discard_recovery` settles it.
+    s.recovery_components = unpacked.differ.iter().cloned().collect();
     let (kind, kind_note) = kind::opened(path);
     s.design_kind = kind;
     // Both from the reading the design came from (`read_design`): the signature check, when it
@@ -1670,6 +1676,8 @@ fn opened_design(
         sheet_metal: kind::sheet_metal_mark(s),
         kind_note,
         missing_links: kind::missing_links(s),
+        recovery_components: unpacked.differ,
+        internal_not_unpacked: unpacked.failed,
         param_warnings: Vec::new(),
     }))
 }
@@ -2016,6 +2024,11 @@ fn write_bytes(
     // Atomic, keeping the version being replaced as `<file>.bak`; a watched save reports how far
     // the write is and stops on Cancel until the file is replaced.
     solidcraft_io::write_atomic(std::path::Path::new(path), &bytes, true).map_err(|e| EngineError::Other(format!("{path}: {e}")))?;
+    // A first save or a Save As: the internal components are unpacked beside the new file
+    // too, so its links find them (#6892). The file itself holds them either way.
+    for why in super::design_internal::carry(&s.doc, s.path.as_deref(), path) {
+        notes.push(format!("A part stored inside the design was not unpacked beside {path}: {why}"));
+    }
     s.path = Some(path.to_string());
     s.disk = solidcraft_io::design_lock::stamp(path);
     s.read_only = false;
@@ -2389,7 +2402,9 @@ impl Session {
         cache: bool,
         provenance: Option<&solidcraft_io::ProvenanceSave<'_>>,
     ) -> solidcraft_io::Result<Vec<u8>> {
-        let design = self.design_at(path);
+        let mut design = self.design_at(path);
+        // The internal components go in from the files they are unpacked to (#6892).
+        super::design_internal::pack(&mut design, self.path.as_deref(), &self.recovery_components);
         let geometry = cache.then(|| saved_geometry(self, &design)).flatten();
         let preview = preview.then(|| saved_preview(self)).flatten();
         let thumbnail = cache.then(|| thumbnail::saved(self)).flatten();

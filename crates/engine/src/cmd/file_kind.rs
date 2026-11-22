@@ -216,12 +216,17 @@ pub(super) fn missing_links(s: &Session) -> Vec<crate::schema::file::MissingLink
         .links
         .iter()
         .filter_map(|(component, link)| {
+            // A part stored inside the design is in its file, unpacked or not.
+            if solidcraft_doc::internal::linked(&link.path).is_some_and(|member| s.doc.internal.contains_key(member)) {
+                return None;
+            }
             let file = super::super::design_link::resolve(s.path.as_deref(), &link.path);
             let problem = super::super::design_link::link_presence(&file, s.path.as_deref())?;
             let missing =
                 problem.state == super::super::design_link::LinkState::Missing && super::super::design_link::found_in_library(&file).is_none();
             let name = s.doc.components.iter().find(|c| c.id == *component).map(|c| c.name.clone())?;
-            missing.then(|| crate::schema::file::MissingLink { component: *component, name, path: file.display().to_string() })
+            let internal = solidcraft_doc::internal::linked(&link.path).is_some();
+            missing.then(|| crate::schema::file::MissingLink { component: *component, name, path: file.display().to_string(), internal })
         })
         .collect()
 }

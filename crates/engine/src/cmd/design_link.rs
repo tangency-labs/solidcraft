@@ -89,6 +89,10 @@ fn relative(base: &Path, target: &Path) -> Option<PathBuf> {
 
 /// How a link stores `file` for a design saved at `design` (`None`: not saved yet).
 pub(super) fn stored(design: Option<&str>, file: &Path) -> String {
+    // The work file of a part stored inside the design: the link names the part.
+    if let Some(member) = super::design_internal::member_at(design, file) {
+        return solidcraft_doc::internal::link(&member);
+    }
     let whole = absolute(file);
     let Some(base) = base_dir(design) else {
         return whole.to_string_lossy().into_owned();
@@ -107,6 +111,10 @@ pub(super) fn link_target(file: &Path) -> PathBuf {
 
 /// The file a stored link path names, for a design saved at `design`.
 pub(super) fn resolve(design: Option<&str>, link: &str) -> PathBuf {
+    // A part stored inside the design (experimental, #6892): the file it is unpacked to.
+    if let Some(file) = solidcraft_doc::internal::linked(link).and_then(|member| super::design_internal::work_file(design, member)) {
+        return file;
+    }
     let p = Path::new(link);
     match p.is_relative().then(|| base_dir(design)).flatten() {
         // Browser storage keys do not let the OS resolve `..` for us.
@@ -160,7 +168,9 @@ type Mapped = (Option<BTreeMap<u64, DesignLink>>, Option<Vec<Arc<Drawing>>>);
 
 /// What `map` makes of `doc`'s link paths ([`map_paths`]): the one list of the kinds of link path.
 fn mapped(doc: &Document, map: &impl Fn(&str) -> String) -> Mapped {
-    let links: BTreeMap<u64, DesignLink> = doc.links.iter().map(|(c, l)| (*c, DesignLink { path: map(&l.path), ..l.clone() })).collect();
+    // A link to a part stored inside the design names the part, wherever the design is saved.
+    let through = |path: &str| if solidcraft_doc::internal::linked(path).is_some() { path.to_string() } else { map(path) };
+    let links: BTreeMap<u64, DesignLink> = doc.links.iter().map(|(c, l)| (*c, DesignLink { path: through(&l.path), ..l.clone() })).collect();
     let mut drawings = doc.drawings.clone();
     let sources = sources_through(&mut drawings, map);
     ((links != doc.links).then_some(links), sources.then_some(drawings))

@@ -3977,6 +3977,12 @@ pub struct Document {
     /// copies the design does not copy a plugin's large files.
     #[serde(default, skip_serializing, deserialize_with = "crate::plugin_data::deserialize")]
     pub plugin_data: std::collections::BTreeMap<String, crate::blob::Blob>,
+    /// The parts stored inside this design's file, by name, each a whole design file's bytes
+    /// ([`crate::internal`], experimental, #6892): as the file held them when it was opened. A
+    /// container keeps each under `internal/` beside the design; a plain JSON design holds none.
+    /// A save packs them again from the files they were unpacked to.
+    #[serde(skip)]
+    pub internal: std::collections::BTreeMap<String, crate::blob::Blob>,
 }
 
 /// The browser's view of a design: items and folders hidden or shown, sketch profiles and
@@ -4279,6 +4285,7 @@ impl Document {
             visibility: Visibility::default(),
             drawings: Vec::new(),
             plugin_data: Default::default(),
+            internal: Default::default(),
         }
     }
 
@@ -4785,6 +4792,9 @@ impl Document {
         }
         if !self.plugin_data.is_empty() {
             kinds.push("plugin files");
+        }
+        if !self.internal.is_empty() {
+            kinds.push("internal components");
         }
         kinds
     }
