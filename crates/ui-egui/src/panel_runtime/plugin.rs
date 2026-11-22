@@ -410,13 +410,8 @@ pub(super) fn draw(ui: &mut egui::Ui, panel: &PanelSnapshot, index: u32, actions
         model::Widget::Tabs(tabs) => {
             let id = ui.scope_id().with("plugin-tabs");
             let mut active = ui.ctx().data_mut(|data| data.get_temp::<usize>(id).filter(|index| *index < tabs.len()).unwrap_or_default());
-            ui.horizontal_wrapped(|ui| {
-                for (index, tab) in tabs.iter().enumerate() {
-                    if ui.selectable_label(index == active, &tab.label).clicked() {
-                        active = index;
-                    }
-                }
-            });
+            let labels: Vec<&str> = tabs.iter().map(|tab| tab.label.as_str()).collect();
+            crate::ui_kit::segmented(ui, &mut active, &labels, crate::ui_kit::Segments { compact: true, ..Default::default() });
             ui.ctx().data_mut(|data| data.insert_temp(id, active));
             if let Some(tab) = tabs.get(active) {
                 draw(ui, panel, tab.child, actions, units, depth + 1);
@@ -480,7 +475,9 @@ pub(super) fn draw(ui: &mut egui::Ui, panel: &PanelSnapshot, index: u32, actions
                 Some(model::UiValue::Integer(value)) => *value as f64,
                 _ => 0.0,
             };
-            ui.add(egui::ProgressBar::new(amount.clamp(0.0, 1.0) as f32).show_percentage());
+            let fraction = amount.clamp(0.0, 1.0) as f32;
+            crate::ui_kit::progress(ui, &format!("plugin_panel:{}:{}", panel.plugin, panel.panel.id), fraction);
+            ui.label(format!("{:.0} %", fraction * 100.0));
         }
         model::Widget::ItemTree(_) | model::Widget::Chart(_) | model::Widget::Unknown => {
             ui.label(solidcraft_ui_text::tr("ui.plugin_panel_newer"));
