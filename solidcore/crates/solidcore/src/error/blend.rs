@@ -30,6 +30,7 @@
 //! | [`BlendFailure::NotCertified`]         | [`ErrorKind::NotWithinTolerance`] (9): neither defect nor refusal |
 //! | [`BlendFailure::BandInputMissing`]     | [`ErrorKind::Missing`]: neither defect nor refusal |
 //! | the fillet executive's checks of the caller's arguments and body ([`BlendFailure::NoEdgesGiven`], [`BlendFailure::SizeBelowResolution`], [`BlendFailure::PerEdgeListLength`], [`BlendFailure::ParameterListSizes`], [`BlendFailure::FaceHasNoSurface`], [`BlendFailure::NoFirstBody`], [`BlendFailure::TargetNotGiven`], [`BlendFailure::EdgeNotInTarget`], [`BlendFailure::EdgeNotFilletable`], [`BlendFailure::GnSectionInvalid`], [`BlendFailure::CrossSectionTypeUnknown`], [`BlendFailure::RadiusTypeNotForEdges`], [`BlendFailure::VariableRadiusLawsNotGiven`], [`BlendFailure::VariableRadiusLawMissing`], [`BlendFailure::BevelVertexNotFilleted`], [`BlendFailure::LawIntervalEmpty`], [`BlendFailure::EdgeWithoutCurve`]) | [`ErrorKind::InvalidInput`] (1) |
+//! | [`BlendFailure::CornerInputInvalid`]: a fillet corner step's check of the corner and pseudo-B-rep a caller gives it | [`ErrorKind::InvalidInput`] (1) |
 //! | [`BlendFailure::LawHasNoValue`], [`BlendFailure::SequenceCurveNotBSpline`], [`BlendFailure::JoinCurveNotBSpline`], [`BlendFailure::FilletCrossesItself`] | [`ErrorKind::Unsupported`] (5) |
 //! | [`BlendFailure::CornerRefused`], [`BlendFailure::ExecutiveStepFailed`] | [`ErrorKind::Failed`] (6): neither defect nor refusal, so a kept cause decides |
 //! | the phrase causes ([`BlendFailure::Failed`], [`BlendFailure::Missing`], ...) | their status's kind, as before the record; neither defect nor refusal |
@@ -44,6 +45,7 @@
 //! | [`BlendFailure::NoRoom`], [`BlendFailure::RemovalRefused`], [`BlendFailure::StationDidNotConverge`], [`BlendFailure::TrimLoopOpen`], [`BlendFailure::TrimLoopDoesNotSeparate`], [`BlendFailure::StageFailed`], [`BlendFailure::Defect`], [`BlendFailure::SkinPastStationCap`], [`BlendFailure::SkinMeasureNotFinite`], [`BlendFailure::BallsNest`], [`BlendFailure::CreasePieceEndUnbuildable`], [`BlendFailure::PlaneCurveTouches`], [`BlendFailure::PlaneCurveEndOff`], [`BlendFailure::PlaneCurveLeavesDomain`], [`BlendFailure::PlaneCurveStepVanished`], [`BlendFailure::PlaneCurveFitCap`], [`BlendFailure::CornerPointDropUnresolved`] | `SM_ERR` |
 //! | [`BlendFailure::CornerShapeNotBuilt`]  | the shape's ([`CornerShape::upstream_status`]) |
 //! | [`BlendFailure::CornerPatchNotMade`]   | the miss's ([`CornerPatchMiss::upstream_status`]) |
+//! | [`BlendFailure::CornerInputInvalid`]   | the input's ([`CornerInput::upstream_status`]) |
 //! | [`BlendFailure::Failed`], [`BlendFailure::LawIntervalEmpty`], [`BlendFailure::LawHasNoValue`], [`BlendFailure::FilletCrossesItself`], [`BlendFailure::CornerRefused`], [`BlendFailure::ExecutiveStepFailed`] | `SM_ERR` |
 //! | [`BlendFailure::Missing`], [`BlendFailure::BandInputMissing`], [`BlendFailure::VariableRadiusLawsNotGiven`], [`BlendFailure::BevelVertexNotFilleted`], [`BlendFailure::EdgeWithoutCurve`], [`BlendFailure::SequenceCurveNotBSpline`], [`BlendFailure::JoinCurveNotBSpline`] | `SM_ERR_NULL_POINTER` |
 //! | [`BlendFailure::InvalidValue`], the fillet executive's other checks of the caller's arguments | `SM_ERR_INVALID_INPUT` |
@@ -464,6 +466,96 @@ pub enum BlendFailure {
     /// named. Its class and status are the miss's ([`CornerPatchMiss::class`],
     /// [`CornerPatchMiss::upstream_status`]).
     CornerPatchNotMade(CornerPatchMiss),
+    /// A fillet corner step is given a corner, or a pseudo-B-rep, that is not as the corner
+    /// topology makes it: `input` names what it lacks or holds otherwise, `entity` the
+    /// entity it is about (of the pseudo-B-rep, of the target body, or the corner's vertex)
+    /// where the step has one. A check of the caller's corner ([`ErrorKind::InvalidInput`]):
+    /// the corner steps (`crate::blend::fillet_corner`) are public and read a `FilletCorner`
+    /// and a `FilletBrep` that a caller can build part by part, while the fillet executive
+    /// builds them whole before it runs the steps. Status that of the site it replaces
+    /// ([`CornerInput::upstream_status`] unless the site says otherwise).
+    CornerInputInvalid {
+        /// What the corner or its pseudo-B-rep lacks or holds otherwise.
+        input: CornerInput,
+        /// The entity it is about, where the step has one.
+        entity: Option<EntityRef>,
+    },
+}
+
+/// What a fillet corner given to a corner step lacks, or holds otherwise than the corner
+/// topology makes it ([`BlendFailure::CornerInputInvalid`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum CornerInput {
+    /// An Nx2 corner of kind `kind` with no filleted edge uses.
+    FilletedEdgeusesNotGiven {
+        /// The corner's kind.
+        kind: crate::blend::fillet_corner::p3::FilletCornerKind,
+    },
+    /// An Nx2 corner of kind `kind` with `given` filleted edge uses, not two.
+    FilletedEdgeusesNotTwo {
+        /// The corner's kind.
+        kind: crate::blend::fillet_corner::p3::FilletCornerKind,
+        /// The filleted edge uses it holds.
+        given: usize,
+    },
+    /// A concave corner with no rail-edge-use vertex between two fillet geometries.
+    NoRailEdgeuseVertex,
+    /// A vertex of a convex `NxN` corner of at most three vertices that is not where two
+    /// rails cross.
+    VertexNotRailRail,
+    /// A rail-rail vertex of a convex `NxN` corner that is not on a face.
+    VertexNotOnFace,
+    /// An edge use with no fillet geometry (nor its mate, where the step reads the mate's).
+    EdgeuseWithoutFilletGeometry,
+    /// An edge with no curve.
+    EdgeWithoutCurve,
+    /// A face with no surface.
+    FaceWithoutSurface,
+    /// A vertex with no use at the rail end of a blend.
+    NoRailEndUse,
+    /// A fillet geometry with no fillet surface.
+    GeometryWithoutFilletSurface,
+    /// A fillet edge with no primary edge use.
+    EdgeWithoutPrimaryEdgeuse,
+    /// A fillet edge use with no mate.
+    EdgeuseWithoutMate,
+    /// A 3x2 corner of four edges with no on-edge edge.
+    MixedCornerWithoutOnEdgeEdge,
+    /// A 3x2 corner of four edges with no on-extended-edge edge.
+    MixedCornerWithoutOnExtendedEdgeEdge,
+    /// A 3x2 corner whose on-edge edge does not start at an on-vertex vertex where the
+    /// on-extended-edge edge ends.
+    MixedCornerEdgesDoNotMeet,
+    /// A 3x2 corner whose on-vertex vertex is not among its vertices.
+    MixedCornerVertexNotInCorner,
+}
+
+impl CornerInput {
+    /// The status the site it replaces returned unless the site says otherwise: `SM_ERR`
+    /// where the C++ reports a failed state check (`SE(SM_ERR)`), else
+    /// `SM_ERR_NULL_POINTER` for what it dereferences and does not find (`NER`).
+    #[must_use]
+    pub const fn upstream_status(self) -> i32 {
+        match self {
+            Self::FilletedEdgeusesNotTwo { .. }
+            | Self::VertexNotRailRail
+            | Self::MixedCornerEdgesDoNotMeet
+            | Self::MixedCornerVertexNotInCorner => SM_ERR,
+            Self::FilletedEdgeusesNotGiven { .. }
+            | Self::NoRailEdgeuseVertex
+            | Self::VertexNotOnFace
+            | Self::EdgeuseWithoutFilletGeometry
+            | Self::EdgeWithoutCurve
+            | Self::FaceWithoutSurface
+            | Self::NoRailEndUse
+            | Self::GeometryWithoutFilletSurface
+            | Self::EdgeWithoutPrimaryEdgeuse
+            | Self::EdgeuseWithoutMate
+            | Self::MixedCornerWithoutOnEdgeEdge
+            | Self::MixedCornerWithoutOnExtendedEdgeEdge => SM_ERR_NULL_POINTER,
+        }
+    }
 }
 
 /// A shape of the edges at a filleted vertex that the fillet corner topology
@@ -956,6 +1048,7 @@ impl BlendFailure {
             | Self::JoinCurveNotBSpline { .. } => SM_ERR_NULL_POINTER,
             Self::CornerShapeNotBuilt(shape) => shape.upstream_status(),
             Self::CornerPatchNotMade(miss) => miss.upstream_status(),
+            Self::CornerInputInvalid { input, .. } => input.upstream_status(),
             Self::NoEdgesGiven
             | Self::SizeBelowResolution { .. }
             | Self::PerEdgeListLength { .. }
@@ -1043,7 +1136,8 @@ impl BlendFailure {
             | Self::VariableRadiusLawMissing { .. }
             | Self::BevelVertexNotFilleted
             | Self::LawIntervalEmpty
-            | Self::EdgeWithoutCurve => ErrorKind::InvalidInput,
+            | Self::EdgeWithoutCurve
+            | Self::CornerInputInvalid { .. } => ErrorKind::InvalidInput,
             Self::ClosedCliffWouldNotSplit { .. }
             | Self::CornerRefused
             | Self::ExecutiveStepFailed => ErrorKind::Failed,
@@ -1089,6 +1183,7 @@ impl BlendFailure {
             | Self::CornerShapeNotBuilt(_)
             | Self::CornerPointDropUnresolved { .. }
             | Self::CornerPatchNotMade(_)
+            | Self::CornerInputInvalid { .. }
             | Self::NoEdgesGiven
             | Self::SizeBelowResolution { .. }
             | Self::PerEdgeListLength { .. }
@@ -1157,6 +1252,7 @@ impl BlendFailure {
             | Self::CornerShapeNotBuilt(_)
             | Self::CornerPointDropUnresolved { .. }
             | Self::CornerPatchNotMade(_)
+            | Self::CornerInputInvalid { .. }
             | Self::NoEdgesGiven
             | Self::SizeBelowResolution { .. }
             | Self::PerEdgeListLength { .. }
@@ -1406,6 +1502,10 @@ impl core::fmt::Display for BlendFailure {
             Self::Inconsistent(what) => write!(f, "a consistency check failed: {what}"),
             Self::CornerShapeNotBuilt(shape) => write!(f, "{}: {shape:?}", self.class()),
             Self::CornerPatchNotMade(miss) => write!(f, "{}: {miss:?}", self.class()),
+            // (the entity is the failure's site, which the failure prints)
+            Self::CornerInputInvalid { input, .. } => {
+                write!(f, "{}: the fillet corner given: {input:?}", self.class())
+            }
             Self::CornerPointDropUnresolved { solutions } => write!(
                 f,
                 "{}: the corner's vertex drops onto the surface at {solutions} points, not one",
@@ -1969,6 +2069,68 @@ mod tests {
         );
     }
 
+    /// A corner step's check of the corner a caller gives it is invalid input, never a
+    /// defect, with the status of the site it replaces and the entity it names.
+    #[test]
+    fn a_corner_input_invalid_is_invalid_input_with_its_sites_status() {
+        use crate::blend::fillet_corner::p3::FilletCornerKind;
+        use CornerInput as I;
+        let inputs = [
+            (
+                I::FilletedEdgeusesNotGiven {
+                    kind: FilletCornerKind::NByTwo,
+                },
+                SM_ERR_NULL_POINTER,
+            ),
+            (
+                I::FilletedEdgeusesNotTwo {
+                    kind: FilletCornerKind::NByTwo,
+                    given: 1,
+                },
+                SM_ERR,
+            ),
+            (I::NoRailEdgeuseVertex, SM_ERR_NULL_POINTER),
+            (I::VertexNotRailRail, SM_ERR),
+            (I::VertexNotOnFace, SM_ERR_NULL_POINTER),
+            (I::EdgeuseWithoutFilletGeometry, SM_ERR_NULL_POINTER),
+            (I::EdgeWithoutCurve, SM_ERR_NULL_POINTER),
+            (I::FaceWithoutSurface, SM_ERR_NULL_POINTER),
+            (I::NoRailEndUse, SM_ERR_NULL_POINTER),
+            (I::GeometryWithoutFilletSurface, SM_ERR_NULL_POINTER),
+            (I::EdgeWithoutPrimaryEdgeuse, SM_ERR_NULL_POINTER),
+            (I::EdgeuseWithoutMate, SM_ERR_NULL_POINTER),
+            (I::MixedCornerWithoutOnEdgeEdge, SM_ERR_NULL_POINTER),
+            (I::MixedCornerWithoutOnExtendedEdgeEdge, SM_ERR_NULL_POINTER),
+            (I::MixedCornerEdgesDoNotMeet, SM_ERR),
+            (I::MixedCornerVertexNotInCorner, SM_ERR),
+        ];
+        for (input, status) in inputs {
+            let cause = BlendFailure::CornerInputInvalid {
+                input,
+                entity: None,
+            };
+            assert!(!cause.is_phrase() && cause.replaces_upstream_status());
+            let e = SolidError::blend("blend::fillet_corner", cause);
+            assert_eq!(e.kind(), ErrorKind::InvalidInput, "{input:?}");
+            assert_eq!(e.upstream_status(), Some(status), "{input:?}");
+            assert!(!e.is_defect(), "{input:?}");
+        }
+        let at = EntityRef::Edge(crate::topology::EdgeId::from_index(3));
+        let e = SolidError::blend_at(
+            "blend::op",
+            BlendFailure::CornerInputInvalid {
+                input: I::EdgeWithoutCurve,
+                entity: Some(at),
+            },
+            at,
+        );
+        assert_eq!(e.entity(), Some(at));
+        assert_eq!(
+            e.to_string(),
+            "blend::op: invalid_input: the fillet corner given: EdgeWithoutCurve (edge 3)"
+        );
+    }
+
     #[test]
     fn only_a_stage_failure_built_on_purpose_is_a_defect() {
         // a refusal not yet on the record, as `record_no_room` returns it: a phrase cause
@@ -2448,7 +2610,7 @@ mod tests {
     /// The number of `BlendFailure` variants. Adding a variant means adding an arm to
     /// `variant_index_and_phrase_name` (the compiler asks for it), with the next index, and
     /// raising this number; the test below then fails until `causes` holds the new variant.
-    const VARIANTS: usize = 55;
+    const VARIANTS: usize = 56;
 
     /// Each variant's distinct index in `0..VARIANTS`, and the variant name of a phrase cause
     /// (`None` for any other cause). The match has no wildcard, so it is the inventory of
@@ -2510,6 +2672,7 @@ mod tests {
             BlendFailure::CornerPointDropUnresolved { .. } => (52, None),
             BlendFailure::CornerPatchNotMade(_) => (53, None),
             BlendFailure::JoinCurveNotBSpline { .. } => (54, None),
+            BlendFailure::CornerInputInvalid { .. } => (55, None),
         }
     }
 
@@ -2584,6 +2747,10 @@ mod tests {
             BlendFailure::CornerShapeNotBuilt(CornerShape::MoreThanFourEdges),
             BlendFailure::CornerPointDropUnresolved { solutions: 0 },
             BlendFailure::CornerPatchNotMade(CornerPatchMiss::FaceNotMade),
+            BlendFailure::CornerInputInvalid {
+                input: CornerInput::NoRailEndUse,
+                entity: None,
+            },
             BlendFailure::StageFailed,
             BlendFailure::Defect { why: "x" },
             BlendFailure::NotCertified {
