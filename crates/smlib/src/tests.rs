@@ -799,7 +799,7 @@ fn a_token_under_another_stops_when_either_does() {
 /// depends on them answers the same on any kernel of the pool.
 #[test]
 fn every_call_starts_clean_on_any_kernel() {
-    let draw = |k: &mut solidcore::kernel::Kernel| Ok(k.rng.next_f64());
+    let draw = |k: &mut solidcore::kernel::Kernel| Ok(k.seeded_rng().next_f64());
     let first = core::run("draw", draw).unwrap();
     assert_eq!(core::run("draw", draw).unwrap(), first, "the same kernel, later");
     let held = hold_a_kernel();

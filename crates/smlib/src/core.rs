@@ -10,7 +10,7 @@ use std::sync::{Mutex, PoisonError};
 
 use solidcore::geom::attribute::{AttributeStore, ObjectKey};
 use solidcore::geom::vector3d::Vec3;
-use solidcore::kernel::{CancelToken, Kernel, KernelOptions, Rng, UpstreamFixes};
+use solidcore::kernel::{CancelToken, Kernel, KernelOptions, UpstreamFixes};
 use solidcore::mass::integrator::properties::{PropertyAttributes, brep_volume};
 use solidcore::primitive::api_primitives as primitives;
 
@@ -153,13 +153,13 @@ fn put_kernel(k: Option<Kernel>) {
 }
 
 /// What a call must not find from the calls before it: the same operation on the same bodies
-/// answers the same on any kernel, however much that kernel did first. (Its draws of random rays,
-/// the stations it remembers; marks, identities and what is only kept to reuse memory change no
-/// answer. The certificates it finished, kept by the exact content of their inputs
+/// answers the same on any kernel, however much that kernel did first. (The stations it
+/// remembers; marks, identities and what is only kept to reuse memory change no answer, and a
+/// kernel holds no position in a random sequence: each sampling call draws from the start of the
+/// seed's. The certificates it finished, kept by the exact content of their inputs
 /// (`recertify_memo`, the curve analyses), are the answers running them again gives, so they
 /// stay. Tolerances and fixes are the same on every kernel.)
 fn start_clean(k: &mut Kernel) {
-    k.rng = Rng::new(KernelOptions::default().seed);
     *k.blend_station_memo.borrow_mut() = Default::default();
     k.fillet_point_step.set(None);
     k.upstream_ub_passed.clear();
