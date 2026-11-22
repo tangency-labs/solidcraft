@@ -1,7 +1,7 @@
 {
   "en": {
     "ui.cell_grid_title": "CELL GRID",
-    "ui.cell_grid.anchor_tip": "The point a cell centre sits on: a corner, the origin, a snap point, a sketch point or a construction point. None picked: the sketch origin.",
+    "ui.cell_grid.anchor_tip": "The point a cell center sits on: a corner, the origin, a snap point, a sketch point or a construction point. None picked: the sketch origin.",
     "ui.cell_grid.hexagon": "Hexagon",
     "ui.cell_grid.triangle": "Triangle",
     "ui.cell_grid.sides": "Sides",
