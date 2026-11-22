@@ -480,8 +480,9 @@ impl SurfOfRevolution {
         for sp in self.start_plane_sides(point_on_surf, tol_3d)? {
             let solve =
                 self.solve_on_generator(k, self.is_out_of_bounds_enabled(), sp.point, tol_3d)?;
-            if !solve.2.is_empty() {
-                on_generator = Some((sp, solve));
+            if let Some(first) = solve.2.first() {
+                let v0 = first.start.param(0)?;
+                on_generator = Some((sp, solve, v0));
                 break;
             }
         }
@@ -489,7 +490,7 @@ impl SurfOfRevolution {
         // error - rotated point not on GenCurve (told apart from failures by
         // `is_off_generator`; the public inversion answers it, with the fork's fix, as
         // SM_ERR_NOT_WITHIN_TOLERANCE)
-        let Some((sp, (gen, ivl, solutions))) = on_generator else {
+        let Some((sp, (gen, ivl, solutions), v0)) = on_generator else {
             return Err(SolidError::surface(
                 OP_STEP_INV,
                 SurfaceFailure::PointNotOnGenerator,
@@ -537,17 +538,8 @@ impl SurfOfRevolution {
             }
         }
 
-        // set output V coordinate
-        let first = solutions.first().ok_or_else(|| {
-            SolidError::surface(
-                OP_STEP_INV,
-                SurfaceFailure::Defect {
-                    why: "the generator inversion's solutions are empty, though the side \
-                          was chosen above only for a non-empty solve",
-                },
-            )
-        })?;
-        let mut v = first.start.param(0)?;
+        // set output V coordinate (the first solution's, read where the side was chosen)
+        let mut v = v0;
 
         // for points on closed genCurve seams - update point classification
         if solutions.len() > 1

@@ -283,11 +283,20 @@ impl SurfOfRevolution {
             ignore_status(made.clone())?;
         }
         let Some(sur) = self.base.nurb.as_mut() else {
-            return Err(SolidError::surface_nurb_not_made(
-                OP_REPARAM,
-                SM_ERR_NULL_POINTER,
-                made,
-            ));
+            return Err(match made {
+                Err(e) => {
+                    SolidError::surface_nurb_not_made(OP_REPARAM, SM_ERR_NULL_POINTER, Err(e))
+                }
+                Ok(()) => Failure::new(
+                    OP_REPARAM,
+                    SurfaceFailure::Defect {
+                        why: "the NURB is missing after make_nurb returned success, which on \
+                              success sets the NURB",
+                    },
+                )
+                .with_status(SM_ERR_NULL_POINTER)
+                .into_error(),
+            });
         };
 
         // set NURB Surface domain parameterization - no change in shape
@@ -786,9 +795,11 @@ impl SurfOfRevolution {
                                 return Err(SolidError::surface(
                                     OP_DROP,
                                     SurfaceFailure::Defect {
-                                        why: "the inversion of a point onto its own iso circle \
-                                              did not converge, though the point was evaluated \
-                                              on that circle just before",
+                                        why: "the inversion of the surface's own point at the \
+                                              drop's angle and generator parameter onto the \
+                                              NURB's iso circle at that parameter found no \
+                                              answer; point and circle both come from this \
+                                              surface, not from the caller",
                                     },
                                 ))
                             }
@@ -1227,13 +1238,13 @@ impl SurfOfRevolution {
                     db.go_to_next_line();
                     Ok(v != 0)
                 };
+                let dbl = |db: &mut DatabaseReader| -> Result<f64> {
+                    ascii(db.in_stream_mut().and_then(InputStream::extract_double))
+                };
                 let vec = |db: &mut DatabaseReader| -> Result<Vec3> {
-                    let s = db.in_stream_mut().ok_or_else(|| {
-                        SolidError::surface(OP_READ, SurfaceFailure::NoInputStream)
-                    })?;
-                    let a = ascii(s.extract_double())?;
-                    let b = ascii(s.extract_double())?;
-                    let c = ascii(s.extract_double())?;
+                    let a = dbl(db)?;
+                    let b = dbl(db)?;
+                    let c = dbl(db)?;
                     db.go_to_next_line();
                     Ok(Vec3::new(a, b, c))
                 };
@@ -1242,13 +1253,10 @@ impl SurfOfRevolution {
                 let orig = vec(db)?;
                 let x = vec(db)?;
                 let y = vec(db)?;
-                let s = db
-                    .in_stream_mut()
-                    .ok_or_else(|| SolidError::surface(OP_READ, SurfaceFailure::NoInputStream))?;
-                let a = ascii(s.extract_double())?;
-                let b = ascii(s.extract_double())?;
-                let c = ascii(s.extract_double())?;
-                let d = ascii(s.extract_double())?;
+                let a = dbl(db)?;
+                let b = dbl(db)?;
+                let c = dbl(db)?;
+                let d = dbl(db)?;
                 db.go_to_next_line();
                 let swap_uv = flag(db)?;
                 (
@@ -1643,6 +1651,49 @@ mod tests {
 
     fn k() -> Kernel {
         Kernel::default()
+    }
+
+    /// Read from the code, not from a run: an empty surface has no generator, so its
+    /// make fails in `gen()`, and its NURB has degree 0 and no weights; a domain past the
+    /// natural one is the caller's trim.
+    #[test]
+    fn empty_surface_and_oversized_trim_name_their_causes() {
+        let k = k();
+        let mut empty = SurfOfRevolution::empty();
+        let mut unit = Extent2d::new();
+        unit.add_point(Point2::new(0.0, 0.0));
+        unit.add_point(Point2::new(1.0, 1.0));
+        let e = empty.reparameterize(&k, &unit).unwrap_err();
+        assert_eq!(e.operation(), OP_REPARAM);
+        assert_eq!(e.surface_failure(), Some(&SurfaceFailure::NurbNotMade));
+        assert_eq!(e.sm_status(), Some(SM_ERR_NULL_POINTER));
+        assert_eq!(
+            e.cause().and_then(SolidError::surface_failure),
+            Some(&SurfaceFailure::SurfaceWithoutGenerator)
+        );
+
+        let e = SurfOfRevolution::empty()
+            .rebuild_step_from_nurb_parameters(&k)
+            .unwrap_err();
+        assert_eq!(
+            e.surface_failure(),
+            Some(&SurfaceFailure::NurbNotAnalytic {
+                check: AnalyticCheck::DegreeAndRationality
+            })
+        );
+
+        let mut s = cone();
+        let mut big = s.base().natural_uv_domain();
+        big.expand_absolute(1.0);
+        let e = s.trim_with_domain(&k, &big).unwrap_err();
+        assert_eq!(
+            e.surface_failure(),
+            Some(&SurfaceFailure::TrimDomainOutside)
+        );
+        assert_eq!(
+            e.upstream_status(),
+            Some(crate::error::SM_ERR_OUTSIDE_OF_DOMAIN)
+        );
     }
 
     fn cone() -> SurfOfRevolution {

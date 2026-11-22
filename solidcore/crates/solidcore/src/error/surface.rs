@@ -301,7 +301,8 @@ pub enum SurfaceFailure {
     /// [`ErrorKind::OutsideDomain`].
     DomainPastApex,
     /// The iso curve asked for has zero length (its parameter range on the surface is
-    /// degenerate). [`ErrorKind::InvalidInput`].
+    /// degenerate), or both sweep circles the polar converter's rebuild tries are
+    /// degenerate (status `SM_ERR`). [`ErrorKind::InvalidInput`].
     DegenerateIsoCurve,
     /// The surface of revolution has no polar converter circle (its NURB form was never
     /// made or read, or both sweep iso curves were degenerate when it was, which the make
@@ -337,7 +338,7 @@ pub enum SurfaceFailure {
     /// The on-axis tolerance given is not a finite, non-negative distance.
     /// [`ErrorKind::InvalidInput`].
     ToleranceNotADistance,
-    /// The generator line given lies on the axis of revolution, so it sweeps no surface.
+    /// The generator given lies on the axis of revolution, so it sweeps no surface.
     /// [`ErrorKind::InvalidInput`].
     GeneratorOnAxis,
     /// The generator parameter given is outside the generator's natural interval.
@@ -350,11 +351,13 @@ pub enum SurfaceFailure {
     /// inversion's answer (status `SM_ERR_NOT_WITHIN_TOLERANCE`, the SolidCraft fork's).
     PointOffSurface,
     /// The point given lies outside the sweep of the surface of revolution (its angle about
-    /// the axis is outside the surface's angle interval): an inversion's answer.
+    /// the axis is outside the surface's angle interval): an inversion's answer; the fast
+    /// drop reports it with `SM_ERR`, and its callers then run the general solver.
     /// [`ErrorKind::OutsideDomain`].
     PointOutsideSweep,
-    /// The surface of revolution has no polar conversion (its generator is not planar),
-    /// which the routine's closed form needs. [`ErrorKind::Unsupported`].
+    /// The surface of revolution's polar converter is not set up (its NURB was never
+    /// made, or the sweep circle has no exact conversion table), which the routine's
+    /// closed form needs. [`ErrorKind::Unsupported`].
     PolarConversionImpossible,
     /// The generator of the surface of revolution is not planar, which the routine's
     /// closed form needs. [`ErrorKind::Unsupported`].
@@ -362,8 +365,6 @@ pub enum SurfaceFailure {
     /// The inversion of a point onto an iso curve of the surface failed (its error is the
     /// cause). Class `failed`; whether it is a defect or a refusal is its cause's.
     CurveInversionFailed,
-    /// The database reader given has no input stream open. [`ErrorKind::InvalidInput`].
-    NoInputStream,
 }
 
 /// The test of an analytic kind a NURB failed ([`SurfaceFailure::NurbNotAnalytic`]).
@@ -462,8 +463,7 @@ impl SurfaceFailure {
             | Self::SolveCacheNotMade
             | Self::NoNurb
             | Self::SurfaceWithoutGenerator
-            | Self::NoPolarConverter
-            | Self::NoInputStream => SM_ERR_NULL_POINTER,
+            | Self::NoPolarConverter => SM_ERR_NULL_POINTER,
             Self::InvalidValue(_)
             | Self::LineDirectionZero
             | Self::DomainPastApex
@@ -504,8 +504,7 @@ impl SurfaceFailure {
             | Self::LeanNotFinite
             | Self::ToleranceNotADistance
             | Self::GeneratorOnAxis
-            | Self::ParameterOutsideGenerator
-            | Self::NoInputStream => ErrorKind::InvalidInput,
+            | Self::ParameterOutsideGenerator => ErrorKind::InvalidInput,
             Self::BoxOutsideBendHalfSpace { .. }
             | Self::BoxOutsideZeroPeriod { .. }
             | Self::PointOutsideVolumeDomain { .. }
@@ -742,7 +741,6 @@ impl core::fmt::Display for SurfaceFailure {
             Self::CurveInversionFailed => {
                 f.write_str("the inversion of a point onto an iso curve failed")
             }
-            Self::NoInputStream => f.write_str("the reader has no input stream"),
         }
     }
 }
@@ -1242,11 +1240,6 @@ mod tests {
                 SurfaceFailure::CurveInversionFailed,
                 SM_ERR,
                 ErrorKind::Failed,
-            ),
-            (
-                SurfaceFailure::NoInputStream,
-                SM_ERR_NULL_POINTER,
-                ErrorKind::InvalidInput,
             ),
         ];
         for (failure, status, kind) in cases {
