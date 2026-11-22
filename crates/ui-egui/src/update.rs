@@ -969,13 +969,16 @@ pub fn restart_graphics(app: &mut SolveApp) {
     }
 }
 
-/// Connect to VR (Preferences › XR): VR is chosen when the window opens (the VR software makes
-/// the graphics device the window draws with), so the app restarts as a graphics change does
-/// (asking about unsaved designs, reopening the saved ones) with `--vr` for that one start. The
-/// saved "Start in VR" stays as it is. Nothing happens where the host cannot restart itself.
-pub fn restart_into_vr(app: &mut SolveApp) {
+/// Restart now beside Start in VR (Preferences › XR): VR is chosen when the window opens (the VR
+/// software makes the graphics device the window draws with), so the app restarts as a graphics
+/// change does (asking about unsaved designs, reopening the saved ones), with VR as the saved tick
+/// says: `--vr` when it is on (also over a `SOLIDCRAFT_VR=0` this run was started with), none
+/// when it is off, whatever this run was started with. Nothing happens where the host cannot
+/// restart itself.
+pub fn restart_for_vr(app: &mut SolveApp) {
     if let Some((program, mut args)) = app.services.graphics_restart.clone() {
-        if !args.iter().any(|a| a == "--vr") {
+        args.retain(|a| a != "--vr");
+        if app.preferences.vr_headset {
             args.push("--vr".into());
         }
         app.updater.launch = Some((program, args));

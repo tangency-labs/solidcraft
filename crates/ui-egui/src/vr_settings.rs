@@ -668,7 +668,6 @@ impl VrSettings {
 pub(crate) fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
     let tr = |k: &str| solidcraft_ui_text::tr(k).to_string();
     // Older layouts were migrated when the settings were read (`VrSettings::from_saved`).
-    ui_kit::text(ui, &tr("prefs.vr.note"), ui_kit::Text::Hint("vr_settings_note"));
     ui_kit::settings_section(ui, "vr_buttons", &tr("prefs.vr.sec_buttons"), |ui| buttons(app, ui));
     ui_kit::settings_section(ui, "vr_ring", &tr("prefs.vr.sec_ring"), |ui| ring_settings(app, ui));
     let s = &mut app.preferences.vr;

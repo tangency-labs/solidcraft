@@ -337,8 +337,6 @@ fn short(text: &str, max: usize) -> String {
 mod tests {
     use super::*;
 
-    /// A sign's words are put on one line (runs of spaces and line breaks made one space) and
-    /// cut at the most characters with an ellipsis, counting characters, not bytes.
     /// A bubble's line that is too wide is set smaller to fit, but never below the floor; one
     /// that fits, or a width that is no width, keeps its size.
     #[test]
@@ -351,6 +349,8 @@ mod tests {
         }
     }
 
+    /// A sign's words are put on one line (runs of spaces and line breaks made one space) and
+    /// cut at the most characters with an ellipsis, counting characters, not bytes.
     #[test]
     fn a_signs_words_are_put_on_one_line_and_cut_with_an_ellipsis() {
         assert_eq!(short("Bracket  left\n\tside ", 40), "Bracket left side");

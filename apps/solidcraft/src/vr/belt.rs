@@ -458,7 +458,39 @@ impl Layout {
         let uv = self.bend.on_area(&area, point);
         (uv.iter().all(|v| (0.0..=1.0).contains(v))).then_some((uv, t))
     }
+
+    /// `at`, the middle of a sign `height` tall, moved up clear of the belt's bubbles and box
+    /// when it would stand in front of them: signs are drawn over everything, so the scale shown
+    /// between the hands at hip height hid the bubbles (bluechetti's note on #18712). Elsewhere,
+    /// or for a point or height that is no number, `at` as it is.
+    pub fn clear_of(&self, at: [f64; 3], height: f64) -> [f64; 3] {
+        if !(at.iter().all(|v| v.is_finite()) && height.is_finite() && height >= 0.0) {
+            return at;
+        }
+        let half = self.bubble * 0.5;
+        let (mut low, mut high, mut near) = (f64::INFINITY, f64::NEG_INFINITY, false);
+        // A sign's words are a few times wider than it is tall.
+        let reach = self.bubble + 4.0 * height;
+        let spots = self.groups.iter().chain(&self.items).map(|p| (*p, half));
+        for (p, up) in spots.chain(std::iter::once((self.panel.middle, self.panel.height * 0.5))) {
+            if !p.iter().all(|v| v.is_finite()) {
+                continue;
+            }
+            low = low.min(p[1] - up);
+            high = high.max(p[1] + up);
+            near |= (p[0] - at[0]).hypot(p[2] - at[2]) < reach;
+        }
+        let over = at[1] - height * 0.5 < high && at[1] + height * 0.5 > low;
+        if near && over {
+            [at[0], high + height * 0.5 + GAP, at[2]]
+        } else {
+            at
+        }
+    }
 }
+
+/// How far above the belt a sign moved clear of it stands (metres).
+const GAP: f64 = 0.01;
 
 #[cfg(test)]
 mod tests {
@@ -781,5 +813,26 @@ mod tests {
         assert!(layout.window_hit([f64::NAN; 3], to).is_none());
         belt.window = false;
         assert!(put(&mut belt, 0, [None, None]).window_hit(HEAD, to).is_none(), "closed");
+    }
+
+    /// The scale between the hands, at belt height in front of the bubbles, moves up clear of
+    /// them; above the belt, off to the side, or no number at all, it stays where it is.
+    #[test]
+    fn a_sign_in_front_of_the_belt_moves_up_clear_of_it() {
+        let mut belt = Belt::default();
+        let layout = put(&mut belt, 3, [None, None]);
+        let height = 0.03;
+        let top = layout.groups.iter().chain(&layout.items).map(|p| p[1] + layout.bubble * 0.5).fold(f64::NEG_INFINITY, f64::max);
+        let on = layout.groups[0];
+        let moved = layout.clear_of(on, height);
+        assert!(moved[1] - height * 0.5 >= top.max(layout.panel.middle[1] + layout.panel.height * 0.5) - 1e-9, "{moved:?} over the belt's top {top}");
+        assert_eq!([moved[0], moved[2]], [on[0], on[2]], "only up");
+        let above = [on[0], moved[1] + 0.2, on[2]];
+        assert_eq!(layout.clear_of(above, height), above);
+        let aside = [on[0] + 3.0, on[1], on[2]];
+        assert_eq!(layout.clear_of(aside, height), aside);
+        let lost = [f64::NAN, on[1], on[2]];
+        assert!(layout.clear_of(lost, height)[0].is_nan());
+        assert_eq!(layout.clear_of(on, f64::NAN), on);
     }
 }

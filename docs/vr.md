@@ -13,7 +13,9 @@ Off by default. Nothing of it runs, and no VR software is touched, unless it is 
 1. Start the VR software (SteamVR, or Meta Quest Link). The [OpenXR loader](#the-openxr-loader)
    must be beside the program.
 2. Start SolidCraft with `--vr`, or with `SOLIDCRAFT_VR=1`, or turn on Preferences › XR
-   › **Start in VR** and restart. `SOLIDCRAFT_VR=0` turns a saved choice off for one run.
+   › **Start in VR** and press **Restart now** beside it (it shows where a restart would change
+   something: ticked and VR not running, or VR running and not ticked). **Disconnect** ends a
+   running VR view without a restart. `SOLIDCRAFT_VR=0` turns a saved choice off for one run.
 3. Put the headset on. Once a design with a model is open in the design view, the model appears
    about 0.6 m in front of you and a little below your eyes, about 0.4 m across, upright, with
    the side the window's camera shows toward you.

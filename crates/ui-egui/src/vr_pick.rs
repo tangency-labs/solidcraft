@@ -237,7 +237,7 @@ pub fn hide(app: &mut SolveApp, parts: &[Part]) -> Result<(), String> {
 pub fn isolate(app: &mut SolveApp, parts: &[Part]) -> Result<(), String> {
     let items = bodies_of(parts);
     if items.is_empty() {
-        return Err("nothing to isolate".into());
+        return Err(solidcraft_ui_text::tr("vr.nothing_to_isolate").to_string());
     }
     app.run("browser.visibility", serde_json::json!({ "items": items, "visible": true, "isolate": true })).map(|_| ())
 }

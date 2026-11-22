@@ -10250,6 +10250,49 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
     }
 
+    /// Preferences › XR › Start: Restart now stands beside Start in VR only where a restart would
+    /// change what this run does (ticked and no VR, or VR running and not ticked), and the restart
+    /// starts as the tick says, `--vr` put on or taken off whatever this run was started with.
+    /// Where the app can't restart itself, the "Restart needed" badge stands there instead.
+    #[test]
+    fn restart_now_beside_start_in_vr_starts_as_the_tick_says() {
+        use crate::scenario::handle_at;
+        let mut h = crate::scenario::Harness::new();
+        h.app.services.vr_status = Some(String::new());
+        let program = std::env::current_exe().unwrap();
+        h.app.services.graphics_restart = Some((program.clone(), vec!["--vr".into(), "--sample".into()]));
+        h.call("ui.prefs", serde_json::json!({"language": "en", "open": "XR"}));
+        let shown = |h: &mut crate::scenario::Harness| {
+            h.frames(2);
+            super::reveal_preference(h, "prefs:vr_headset");
+            handle_at("prefs:vr_restart").is_some()
+        };
+        assert!(!shown(&mut h), "not ticked, no VR: nothing to restart for");
+        h.app.preferences.vr_headset = true;
+        assert!(shown(&mut h), "ticked, no VR: Restart now");
+        h.app.services.vr_connected = true;
+        assert!(!shown(&mut h), "ticked and running: nothing to restart for");
+        assert!(handle_at("prefs:vr_disconnect").is_some(), "running: Disconnect, which is no restart");
+        h.app.preferences.vr_headset = false;
+        assert!(shown(&mut h), "running, not ticked: Restart now");
+
+        // The restart starts as the tick says.
+        crate::update::restart_for_vr(&mut h.app);
+        assert_eq!(crate::update::take_launch(&mut h.app), Some((program.clone(), vec!["--sample".to_string()])), "not ticked: no --vr");
+        h.app.services.graphics_restart = Some((program.clone(), vec!["--sample".into()]));
+        h.app.preferences.vr_headset = true;
+        crate::update::restart_for_vr(&mut h.app);
+        assert_eq!(crate::update::take_launch(&mut h.app), Some((program, vec!["--sample".to_string(), "--vr".to_string()])), "ticked: --vr, once");
+
+        // No restart here: the badge says one is needed, and the restart does nothing.
+        h.app.services.graphics_restart = None;
+        h.app.services.vr_connected = false;
+        assert!(!shown(&mut h));
+        assert!(h.widget("Restart needed").is_some());
+        crate::update::restart_for_vr(&mut h.app);
+        assert_eq!(crate::update::take_launch(&mut h.app), None);
+    }
+
     /// Preferences › General › Largest file to open (#4086): the defaults are the limits there always
     /// were; `ui.prefs` raises both, up to 16 GB and never below the defaults; a saved value out of
     /// range reads back in range, and General's Restore Defaults puts them back.

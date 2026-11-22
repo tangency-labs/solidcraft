@@ -4,23 +4,33 @@
 //! XR later, go here too.
 use super::*;
 
-/// Connect (a restart into VR, as VR is chosen when the window opens) or, while a session is open,
-/// Disconnect (it ends; the window goes on). Connect is offered only where the app can restart
-/// itself.
-fn connect_row(app: &mut SolveApp, ui: &mut egui::Ui) {
+/// Beside Start in VR, where a restart would change what this run does about VR (ticked and VR
+/// not running, or not ticked and running): Restart now, which starts as the tick says (it is
+/// saved as it changes), or the "Restart needed" badge where the app can't restart itself.
+fn restart_beside(app: &mut SolveApp, ui: &mut egui::Ui) {
+    if app.preferences.vr_headset == app.services.vr_connected {
+        return;
+    }
+    if app.services.graphics_restart.is_none() {
+        ui_kit::settings_badge(ui, app.tr("prefs.graphics_page.restart"), true);
+        return;
+    }
+    let response =
+        ui_kit::button(ui, app.tr("prefs.vr_page.restart"), ui_kit::Button::Normal).backing_on_hover_text(app.tr("prefs.vr_page.restart_help"));
+    crate::scenario::publish_target("prefs:vr_restart", response.rect);
+    if response.clicked() {
+        crate::update::restart_for_vr(app);
+    }
+}
+
+/// While a session is open: Disconnect (it ends; the window goes on, no restart).
+fn disconnect_row(app: &mut SolveApp, ui: &mut egui::Ui) {
     if app.services.vr_connected {
         let response = ui_kit::button(ui, app.tr("prefs.vr_page.disconnect"), ui_kit::Button::Normal)
             .backing_on_hover_text(app.tr("prefs.vr_page.disconnect_help"));
         crate::scenario::publish_target("prefs:vr_disconnect", response.rect);
         if response.clicked() {
             app.services.vr_disconnect = true;
-        }
-    } else if app.services.graphics_restart.is_some() {
-        let response =
-            ui_kit::button(ui, app.tr("prefs.vr_page.connect"), ui_kit::Button::Normal).backing_on_hover_text(app.tr("prefs.vr_page.connect_help"));
-        crate::scenario::publish_target("prefs:vr_connect", response.rect);
-        if response.clicked() {
-            crate::update::restart_into_vr(app);
         }
     }
 }
@@ -37,14 +47,14 @@ pub(super) fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
             ui.horizontal_wrapped(|ui| {
                 let response = setting::vr_headset(app, ui).backing_on_hover_text(app.tr("prefs.vr_headset_help"));
                 crate::scenario::publish_target("prefs:vr_headset", response.rect);
-                ui_kit::settings_badge(ui, app.tr("prefs.graphics_page.restart"), true);
+                restart_beside(app, ui);
             });
             if !status.is_empty() {
                 ui_kit::text(ui, &status, ui_kit::Text::Hint("vr_status"));
             }
-            connect_row(app, ui);
+            disconnect_row(app, ui);
         });
-        // How VR works: applied at once, also with the headset on, in sections of their own.
+        // How VR works, in sections of their own.
         crate::vr_settings::show(app, ui);
     });
 }

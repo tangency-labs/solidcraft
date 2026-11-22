@@ -980,6 +980,8 @@ impl Vr {
             HandInput { grip: hands[i].grip.filter(|_| !modelled[i]), ..hands[i] }
         });
         let words = stick_words.map(|w| w.filter(|_| set.stick_labels));
+        // The scale clear of the belt: drawn over everything, it would hide its bubbles.
+        let readout = readout.map(|(text, at)| (text, layout.as_ref().map_or(at, |l| l.clear_of(at, READOUT_HEIGHT))));
         let mut boards = boards(&self.pointer, self.menu.as_ref(), &hands, sticks, words, readout, &set);
         if let Some(layout) = &layout {
             belt_boards(&mut boards, layout, &self.belt, &belt_state, set.fade);

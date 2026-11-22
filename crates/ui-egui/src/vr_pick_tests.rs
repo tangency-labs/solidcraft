@@ -186,12 +186,14 @@ fn showing_what_shows_already_changes_nothing() {
     assert_eq!(h.app.session.visibility, before);
 }
 
-/// Isolating nothing is refused with a reason, and the design keeps what it shows.
+/// Isolating nothing is refused with a reason in the user's language (the catalogue's words,
+/// not English written in), and the design keeps what it shows.
 #[test]
 fn isolating_nothing_is_refused() {
     let (mut h, _, _) = body_and_placement();
     let before = h.app.session.visibility.clone();
-    assert!(vr_pick::isolate(&mut h.app, &[]).is_err());
+    let why = vr_pick::isolate(&mut h.app, &[]).expect_err("isolating nothing is refused");
+    assert_eq!(why, solidcraft_ui_text::tr("vr.nothing_to_isolate"));
     assert_eq!(h.app.session.visibility, before);
 }
 
