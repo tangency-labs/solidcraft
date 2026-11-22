@@ -59,6 +59,66 @@ pub struct BodyListParams {
     pub body: String,
 }
 
+/// Maximum points in one exact classification request.
+pub const MAX_CLASSIFY_POINTS: usize = 256;
+
+/// Classify world-space points against an exact body at its modelling tolerance.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[schemars(deny_unknown_fields)]
+pub struct ClassifyPointsParams {
+    /// The body's name (1–512 UTF-8 bytes), including a placed copy's name for an occurrence.
+    #[schemars(length(min = 1, max = 512))]
+    pub body: String,
+    /// One to 256 world-space points in mm. Coordinates must be finite and below 1e9 in size.
+    #[serde(deserialize_with = "classification_points")]
+    #[schemars(length(min = 1, max = 256))]
+    pub points: Vec<super::types::Point3>,
+    /// A face name from model.faces or a point on the face, in world coordinates.
+    /// Default: the first face in model.faces order containing each boundary point.
+    /// Selects the normal's face for every `on` point; inside/outside classes remain body-wide.
+    #[serde(default, deserialize_with = "super::types::present", skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "super::types::FaceRef")]
+    pub face: Option<super::types::FaceRef>,
+}
+
+fn classification_points<'de, D: Deserializer<'de>>(d: D) -> Result<Vec<super::types::Point3>, D::Error> {
+    let value = Value::deserialize(d)?;
+    let points = value.as_array().ok_or_else(|| D::Error::custom("must be a list of points"))?;
+    if points.is_empty() || points.len() > MAX_CLASSIFY_POINTS {
+        return Err(D::Error::custom("must contain 1 to 256 points"));
+    }
+    points.iter().map(|p| serde_json::from_value(p.clone()).map_err(D::Error::custom)).collect()
+}
+
+/// Exact point classes, in input order.
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct ClassifyPointsResult {
+    /// The body's world-space name.
+    pub body: String,
+    /// One answer per input point. A cavity is outside the material.
+    pub results: Vec<ClassifiedPoint>,
+    /// In the warn parameter-check mode: what the call's parameters got wrong.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub param_warnings: Vec<String>,
+}
+
+/// A point's relation to material, with the named face and outward unit normal on its boundary.
+#[derive(Debug, Serialize, JsonSchema)]
+#[serde(tag = "class", rename_all = "snake_case")]
+pub enum ClassifiedPoint {
+    /// In the body's material.
+    Inside,
+    /// Outside the body or in a hole or cavity.
+    Outside,
+    /// On a trimmed boundary face within the body's modelling tolerance.
+    On {
+        /// Persistent face name, as model.faces lists it.
+        face: String,
+        /// Outward unit normal in world coordinates, away from material (into a hole).
+        normal: [f64; 3],
+    },
+}
+
 /// List the design's cosmetic threads.
 #[derive(Debug, Deserialize, JsonSchema)]
 #[schemars(deny_unknown_fields)]
@@ -781,7 +841,7 @@ pub struct DocumentRevisionParams {}
 /// What `document.revision` returns.
 #[derive(Debug, Serialize, JsonSchema)]
 pub struct RevisionResult {
-    /// This open design's id: kept while it stays open, another for each design started or opened.
+    /// The design's persistent identity, kept through saving and reopening.
     pub document_id: String,
     /// What the design was last seen under: a new number whenever the design, what is hidden or a
     /// component's uncaptured position changes, never on a selection or a view; from one counter

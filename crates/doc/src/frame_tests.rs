@@ -364,6 +364,66 @@ fn default_radii_shrink_to_fit_thick_sections() {
     );
 }
 
+/// The 600 × 400 rectangle `a b c d` (corner points `p0`… from the origin round), a line `e`
+/// standing on `a`'s middle (a T, no corner) and a free point `m` on `d`'s middle, as an
+/// evaluated design: (its state, the sketch's id).
+fn corner_sketch() -> (std::sync::Arc<crate::ModelState>, u64) {
+    let mut sk = solidcraft_sketch::Sketch::new();
+    let p: Vec<usize> = [(0.0, 0.0), (600.0, 0.0), (600.0, 400.0), (0.0, 400.0), (300.0, 0.0), (300.0, 400.0), (0.0, 200.0)]
+        .iter()
+        .zip(["p0", "p1", "p2", "p3", "t0", "t1", "m"])
+        .map(|(&(x, y), id)| sk.add_point(Vec2::new(x, y), Some(id)).unwrap())
+        .collect();
+    for (a, b, id) in [(0, 1, "a"), (1, 2, "b"), (2, 3, "c"), (3, 0, "d"), (4, 5, "e")] {
+        sk.add_line_pts(p[a], p[b], Some(id)).unwrap();
+    }
+    let mut doc = crate::Document::default();
+    let plane = crate::PlaneRef::Custom { plane: solidcore_record::Plane::XY };
+    let id = doc.add_feature(crate::FeatureKind::Sketch { plane, sketch: sk }, Some("Frame")).unwrap();
+    let mut model = crate::Model::new();
+    model.evaluate(&doc);
+    (model.state(), id)
+}
+
+#[test]
+fn corner_at_point_finds_the_two_lines() {
+    let (st, sketch) = corner_sketch();
+    let s = |v: [&str; 2]| v.map(str::to_string);
+    let all: &[String] = &[];
+    assert_eq!(corner_at_point(&st, sketch, all, "p0", false).unwrap(), s(["a", "d"]));
+    assert_eq!(corner_at_point(&st, sketch, all, "p2", false).unwrap(), s(["b", "c"]));
+    // A line's end on another's middle (a T) and a point on a line's middle are no corners.
+    for point in ["t0", "t1", "m"] {
+        let e = corner_at_point(&st, sketch, all, point, false).unwrap_err().to_string();
+        assert!(e.contains("corner"), "{point}: {e}");
+    }
+    // Only the lines that are members count: without `d`, `a` ends alone at p0.
+    let ab = ["a".to_string(), "b".to_string()];
+    assert!(corner_at_point(&st, sketch, &ab, "p0", false).is_err());
+    assert_eq!(corner_at_point(&st, sketch, &ab, "p1", false).unwrap(), s(["a", "b"]));
+    assert!(corner_at_point(&st, sketch, all, "nowhere", false).is_err());
+    assert!(corner_at_point(&st, sketch + 1000, all, "p0", false).is_err());
+    // Auto takes every line ending there, and still no T, no line's middle and no lone end.
+    assert_eq!(corner_at_point(&st, sketch, all, "p0", true).unwrap(), s(["a", "d"]));
+    for point in ["t0", "t1", "m"] {
+        let e = corner_at_point(&st, sketch, all, point, true).unwrap_err().to_string();
+        assert!(e.contains("two or more members end"), "{point}: {e}");
+    }
+    assert!(corner_at_point(&st, sketch, &ab, "p0", true).is_err());
+}
+
+#[test]
+fn corner_point_finds_their_shared_end() {
+    let (st, sketch) = corner_sketch();
+    let s = |v: [&str; 2]| v.map(str::to_string);
+    assert_eq!(corner_point(&st, sketch, &s(["a", "d"])).as_deref(), Some("p0"));
+    assert_eq!(corner_point(&st, sketch, &s(["c", "b"])).as_deref(), Some("p2"));
+    // Lines that don't meet, a line twice and an unknown line have no corner.
+    for pair in [["a", "c"], ["a", "a"], ["a", "zz"]] {
+        assert_eq!(corner_point(&st, sketch, &s(pair)), None, "{pair:?}");
+    }
+}
+
 #[test]
 fn radii_given_too_large_or_too_small_are_refused_by_name() {
     for (j, name) in [

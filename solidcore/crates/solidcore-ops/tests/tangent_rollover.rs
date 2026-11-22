@@ -1352,6 +1352,10 @@ fn a_corner_round_whose_rail_ends_on_the_top_s_edge_builds() {
 /// -65 - r4 = -90 + sqrt 205.
 const CORNER_ROUND_REACHES_W: f64 = 25.0 - 14.317_821_063_276_353;
 
+/// Width of the certified volume enclosure asked of the round built next to W: asked for 1e-2,
+/// the enclosure stops at 0.16 there; the round adds 122.5.
+const NEXT_TO_W_ENCLOSURE: f64 = 0.2;
+
 /// The corner round `r4` on [`arm_boss_foot_only`] (or on `b`), with the corpus's fix set
 /// (`corpus`) or none, under [`Contract::Proved`]: its result, the fix set restored after.
 fn corner_round(b: &Body, r4: f64, corpus: bool) -> Result<(), Error> {
@@ -1369,23 +1373,97 @@ fn corner_round(b: &Body, r4: f64, corpus: bool) -> Result<(), Error> {
     result.map(|_| ())
 }
 
-/// Next to r4 = 25 - sqrt 205, where the rail meets z = 5 at W, main's outcome stands:
-/// - 1e-3 past it, R lies past W by 1e-3 but within the body's tolerance of the side's edge
-///   on the foot round, which leaves W tangent to the top's edge (the side's lobe is thinner
-///   than the tolerance there): R is not inside the side, the turned-back end is not taken,
-///   and the rounds are refused as crossing at R, as on main;
+/// Next to r4 = 25 - sqrt 205, where the rail meets z = 5 at W:
+/// - 1e-3 past it, R = (-36, -65 - r4, 5) lies past W by 1e-3, 6.2e-4 inside the contact
+///   circle, where the side's lobe under the foot round is 3.875e-8 thick (the torus on
+///   x = -36 at R is at z = 5 + (5 - sqrt(25 - (23 - rho)^2)), rho = sqrt(18^2 + (y + 90)^2)).
+///   The rail and the lobe's edge END there, 3.9e-8 apart: the rounds meet, they do not cross
+///   (the corner round's material is at x >= -36, z <= 5, the foot round's at x <= -36,
+///   z >= 5; they share only the side's segment from R to W on z = 5).
+///   - Without the corpus's fixes the round builds, as it does past W by more
+///     ([`a_corner_round_whose_rail_ends_past_the_top_under_the_foot_round_builds`]): valid at
+///     the full check, its rails on edges and its cap edge on z = 5 next to R, and the
+///     kernel's certified enclosure of its volume, at most [`NEXT_TO_W_ENCLOSURE`] wide, holds
+///     the closed form (the input's plus 5 r4^2 (1 - pi / 4)), as does the computed volume.
+///     (The round adds 122.5: an enclosure that narrow rules out a round lost, doubled or
+///     cut by more than that width.) Main refused it
+///     as the rounds crossing at R: the joint there is judged by the vertex, left at W (1e-3
+///     from R) under the vertex's tolerance, and the lobe's edge kept 4.6e-5 under a trim that
+///     upstream's corner fix (`sm_FixUVTrimCurves`) had moved 1e-3 off its curve, uncovered.
+///     Its tolerance now covers its trim (#18166), and the joint at R is seen.
+///   - With them it is still refused as crossing at R, as on main. By the geometry above that
+///     refusal is a false one (the rounds meet at R); it is pinned here as main's outcome so
+///     that a change to it is seen, not as the right answer.
 /// - 5e-6 past it, within the body's tolerance (1e-5), R is not past W: the rail ends on the
 ///   top's edge as on main, and the round builds valid (its volume, MEASURED, 1.4e-5 from the
 ///   closed form, which the end at W within the tolerance does not bound).
 #[test]
-fn a_corner_round_whose_rail_meets_the_top_next_to_w_keeps_main_s_outcome() {
+fn a_corner_round_whose_rail_meets_the_top_next_to_w_builds_where_the_rounds_meet() {
     let w = top_end_on_side();
     assert!((-65.0 - CORNER_ROUND_REACHES_W - w).abs() < 1e-12);
     for corpus in [true, false] {
         let r4 = CORNER_ROUND_REACHES_W + 1e-3;
-        match corner_round(&arm_boss_foot_only(), r4, corpus) {
-            Err(Error::RoundsCross { .. }) => {}
-            other => panic!("r4 {r4} corpus {corpus}: {other:?}"),
+        let b = arm_boss_foot_only();
+        let before = b.volume(1e-9).unwrap();
+        match (corpus, corner_round(&b, r4, corpus)) {
+            (true, Err(Error::RoundsCross { .. })) => {}
+            (false, Ok(())) => {
+                let report = b.check(CheckLevel::All).unwrap();
+                assert!(report.is_valid(), "r4 {r4} corpus {corpus}: {report}");
+                let expected = before + 5.0 * r4 * r4 * (1.0 - PI / 4.0);
+                let after = b.volume(1e-9).unwrap();
+                let ry = -65.0 - r4;
+                let (k, mut brep) = common::kernel_copy(&b);
+                let on_edge = |brep: &solidcore::Brep, p: [f64; 3], within: f64| {
+                    let q = solidcore::Vec3::new(p[0], p[1], p[2]);
+                    brep.edge_list().iter().any(|&e| {
+                        solidcore::query::api_queries::edge_closest_point(&k, brep, e, q)
+                            .unwrap()
+                            .closest
+                            .distance
+                            < within
+                    })
+                };
+                for (x, y) in [(-36.0 + r4, -65.0), (-36.0, ry)] {
+                    for z in [0.5, 2.5, 4.5] {
+                        assert!(
+                            on_edge(&brep, [x, y, z], 1e-7),
+                            "r4 {r4} corpus {corpus}: no rail through ({x}, {y}, {z})"
+                        );
+                    }
+                }
+                // The cap edge lies on z = 5 exactly (the top's plane). The foot round's contact
+                // edge on the side, which the round keeps (its material is at z >= 5), runs
+                // above it by (23 - rho)^2 / 10: 3.1e-8 a tenth of the way from R to W, so a
+                // point there within 1e-9 of an edge is on the cap edge, not on that one.
+                let near_r = ry + 0.1 * (w - ry);
+                assert!(
+                    on_edge(&brep, [-36.0, near_r, 5.0], 1e-9),
+                    "r4 {r4} corpus {corpus}: no cap edge through (-36, {near_r}, 5)"
+                );
+                let e =
+                    solidcore::mass::enclosure::enclose_volume(&k, &mut brep, NEXT_TO_W_ENCLOSURE)
+                        .unwrap();
+                assert!(
+                    e.hi - e.lo <= NEXT_TO_W_ENCLOSURE,
+                    "r4 {r4}: enclosure [{}, {}] wider than {NEXT_TO_W_ENCLOSURE}",
+                    e.lo,
+                    e.hi
+                );
+                assert!(
+                    e.lo <= expected && expected <= e.hi,
+                    "r4 {r4}: closed form {expected} outside [{}, {}]",
+                    e.lo,
+                    e.hi
+                );
+                assert!(
+                    e.lo <= after && after <= e.hi,
+                    "r4 {r4}: volume {after} outside [{}, {}]",
+                    e.lo,
+                    e.hi
+                );
+            }
+            (_, other) => panic!("r4 {r4} corpus {corpus}: {other:?}"),
         }
         let r4 = CORNER_ROUND_REACHES_W + 5e-6;
         let b = arm_boss_foot_only();
@@ -2039,18 +2117,36 @@ fn seam_reach() -> f64 {
 /// 6.03 on the closed surface's domain end), builds, checks valid at every level, and has the
 /// closed-form volume: the lobes' section plus the round's area, times the height. The round's
 /// rails lie at the ball's contacts.
+///
+/// Also every radius from 6.001 to 6.015 in steps of 0.001, and 6.025 to 6.04: just past the
+/// reach the rail on the ø60 wall lies 0.0005 to 0.03 past the seam, and the round's cap edges
+/// run along the body's cap edge between the seam's vertex and the rail's for that short
+/// length. That run was dropped as a tangent touch, being under a twentieth of the cap edge, and
+/// the piece then classified by a point test on the cap's boundary: by rounding outside the
+/// cap, when the trim collected the whole body and was refused as leaking ("the faces the rails
+/// enclose reach past the rails"; 12 to 22 of the radii 5.980 to 6.040, both modes, depending on
+/// rounding). Past the reach the round takes the seam's edge with the sliver: no edge runs through
+/// the seam's line, and the body has 6 faces (each lobe's wall in two, less the sliver, the round
+/// and the caps); below it, the seam's edge stays and the sliver's remainder makes 7.
 #[test]
 fn a_lone_round_between_two_cylinders_rolls_over_the_seam_of_one() {
     use solidcore::query::api_queries::edge_closest_point;
     let reach = seam_reach();
     assert!((reach - 6.0024).abs() < 1e-4, "seam reach {reach}");
+    let band = (1..=15).map(|i| 6.0 + 0.001 * f64::from(i));
+    let radii: Vec<f64> = [2.0, 5.0, 5.99, 6.0, 6.01, 6.02, 6.03, 6.1, 8.0, 10.0, 14.0]
+        .into_iter()
+        .chain(band)
+        .chain([6.025, 6.035, 6.04])
+        .collect();
+    let seam = on_second_lobe(LOBE_SEAM.to_degrees());
     for corpus in [true, false] {
         if corpus {
             fixes();
         } else {
             session::set_thread_fixes(std::iter::empty::<&str>()).unwrap();
         }
-        for r in [2.0, 5.0, 5.99, 6.0, 6.01, 6.02, 6.03, 6.1, 8.0, 10.0, 14.0] {
+        for &r in &radii {
             let b = two_lobes();
             let (px, py) = lobe_crossing();
             let e = edge_at(&b, [px, py, LOBE_HEIGHT / 2.0]);
@@ -2086,6 +2182,18 @@ fn a_lone_round_between_two_cylinders_rolls_over_the_seam_of_one() {
                     );
                 }
             }
+            // the seam's edge, kept below the reach and taken by the round past it
+            let q = solidcore::Vec3::new(seam.0, seam.1, 7.5);
+            let seam_edge = brep.edge_list().iter().any(|&e| {
+                edge_closest_point(&k, &brep, e, q)
+                    .unwrap()
+                    .closest
+                    .distance
+                    < 1e-7
+            });
+            assert_eq!(seam_edge, r < reach, "corpus {corpus} r {r}: seam edge");
+            let faces = if r < reach { 7 } else { 6 };
+            assert_eq!(brep.face_list().len(), faces, "corpus {corpus} r {r}");
         }
     }
 }

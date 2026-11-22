@@ -9,6 +9,7 @@ use wasmtime::{Engine, Store};
 mod bindings {
     wasmtime::component::bindgen!({ path: "../craft-plugin/wit-0.1", world: "command-plugin" });
 }
+include!(concat!(env!("OUT_DIR"), "/dialog_0_1.rs"));
 mod importer_bindings {
     wasmtime::component::bindgen!({
         path: "../craft-plugin/wit-0.1",
@@ -125,7 +126,16 @@ impl<H: PluginHost> old_formats::evaluate::Host for State<H> {
 }
 
 /// Links a 0.1 component against its world without instantiating it (`plugin check`).
-pub(super) fn check_link<H: PluginHost + 'static>(engine: &Engine, component: &Component, importer: bool) -> wasmtime::Result<()> {
+pub(super) fn check_link<H: PluginHost + 'static>(engine: &Engine, component: &Component, importer: bool, dialog: bool) -> wasmtime::Result<()> {
+    let mut linker = Linker::<State<H>>::new(engine);
+    if dialog {
+        if importer {
+            importer_bindings::ImporterPlugin::add_to_linker::<_, HasSelf<_>>(&mut linker, |s| s)?;
+        } else {
+            dialog_bindings::DialogPlugin::add_to_linker::<_, HasSelf<_>>(&mut linker, |s| s)?;
+        }
+        dialog_bindings::DialogPluginPre::new(linker.instantiate_pre(component)?)?;
+    }
     let mut linker = Linker::<State<H>>::new(engine);
     if importer {
         importer_bindings::ImporterPlugin::add_to_linker::<_, HasSelf<_>>(&mut linker, |s| s)?;
@@ -149,6 +159,25 @@ pub(super) fn call_entry<H: PluginHost + 'static>(
     bindings::CommandPlugin::add_to_linker::<_, HasSelf<_>>(&mut linker, |s| s)?;
     let guest = bindings::CommandPlugin::instantiate(&mut *store, component, &linker)?;
     Ok(guest.craft_plugin_entry().call_execute(&mut *store, entry, &params.to_owned())?.map_err(newer))
+}
+
+/// Calls the additive 0.1 hook without changing the legacy command world.
+pub(super) fn call_dialog<H: PluginHost + 'static>(
+    engine: &Engine,
+    store: &mut Store<State<H>>,
+    component: &Component,
+    entry: &str,
+    values: &str,
+    importer: bool,
+) -> wasmtime::Result<Result<String, HostError>> {
+    let mut linker = Linker::new(engine);
+    if importer {
+        importer_bindings::ImporterPlugin::add_to_linker::<_, HasSelf<_>>(&mut linker, |s| s)?;
+    } else {
+        dialog_bindings::DialogPlugin::add_to_linker::<_, HasSelf<_>>(&mut linker, |s| s)?;
+    }
+    let guest = dialog_bindings::DialogPlugin::instantiate(&mut *store, component, &linker)?;
+    Ok(guest.craft_plugin_dialog_provider().call_update_fields(&mut *store, entry, &values.to_owned())?.map_err(newer))
 }
 
 /// Instantiates a 0.1 importer and converts `file`.

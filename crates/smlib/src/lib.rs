@@ -51,6 +51,12 @@ pub enum Error {
     /// crossing, a hole's wall offset just reaching a side's, so the result would pinch to
     /// nothing along a line. A thinner or a thicker wall builds.
     WallsTouch,
+    /// A shell or offset that failed on a body with a face whose outline touches itself at
+    /// `at`: a corner of one of its loops on another loop, within the two's tolerances (a pad
+    /// or hole whose corner reaches the face's edge there). The walls offset from the two
+    /// would meet at that point, which the offset does not build. Moved clear of the edge,
+    /// or across it, the feature shells. `detail` is the kernel's own failure, kept whole.
+    OutlineTouches { at: [f64; 3], detail: String },
     /// A blend larger than its faces allow, refused with the largest size that builds it
     /// (solidcore's fit, `SolidError::FilletRefused`): the size, what it sizes, a point at the
     /// middle of the edge it was found for, a point on the limiting face, and why there is no room,
@@ -67,7 +73,7 @@ pub enum Error {
     /// folds (solidcore's `OffsetFailure::Folds`). The largest wall that works,
     /// when solidcore names one.
     WallFolds { largest: Option<f64> },
-    /// SMLib cannot build this exactly yet (a variable radius whose law has a corner).
+    /// SMLib cannot build this operation exactly.
     Unsupported,
     /// A face move whose tangent blends cannot follow the moved faces, with solidcore's reason
     /// (`SmOffsetFacesExecutive`'s refusal comment): `exact` false where the blend cannot be taken
@@ -89,6 +95,9 @@ pub enum Error {
     /// SMLib reported success but the operation did nothing: a blend that made no face, a face
     /// move or draft that moved no face.
     NoEffect,
+    /// A split tool runs into a face and ends inside it, leaving a crack, and no tool cuts any
+    /// face through: the tool, taken over its whole surface, does not reach across.
+    ToolStopsShort,
     /// The answer is not exact in the input's geometry (a box that would wrap round its
     /// surface, an analytic surface whose speed across a side varies along it).
     NotExact,
@@ -138,6 +147,10 @@ impl std::fmt::Display for Error {
             Error::Ambiguous { point } => write!(f, "selection point {} is equally near to two edges or faces", point + 1),
             Error::NoRoom => write!(f, "there is no room for it: an offset leaves none inside the body, or a blend is larger than its faces allow"),
             Error::WallsTouch => write!(f, "the offset's walls would meet along a line, which leaves no solid there"),
+            Error::OutlineTouches { at: [x, y, z], detail } => write!(
+                f,
+                "a face's outline touches itself at ({x:.5}, {y:.5}, {z:.5}), where a corner of one of its loops lies on another, and the offset does not build walls that meet at a point; the kernel's failure: {detail}"
+            ),
             Error::TooLarge { size, kind, at, face, why } => {
                 write!(f, "the blend is larger than its faces allow")?;
                 if let Some([x, y, z]) = at {
@@ -193,6 +206,7 @@ impl std::fmt::Display for Error {
                 corner + 1
             ),
             Error::NoEffect => write!(f, "SMLib made no change: it reported success, but the operation did nothing"),
+            Error::ToolStopsShort => write!(f, "the tool runs into the face but ends inside it, so it cuts nothing off"),
             Error::NotExact => write!(f, "SMLib cannot build this exactly in the input's geometry"),
             Error::Corner { why, at } => {
                 let at = format!("({:.4}, {:.4}, {:.4})", at[0], at[1], at[2]);
@@ -267,6 +281,8 @@ pub fn crash_test() -> Result<()> {
 /// A B-rep. Immutable: operations return new bodies.
 pub struct Brep {
     body: core::Body,
+    /// Every bounded region with more than one shell had its outer shell confirmed on import.
+    enclosing_shell_order_proven: bool,
     /// The body's number in a trace ([`trace`]).
     id: u64,
 }
@@ -280,7 +296,7 @@ impl std::fmt::Debug for Brep {
 impl Brep {
     /// A body solidcore made.
     fn made_core(body: core::Body) -> Brep {
-        Brep { body, id: trace::next_id() }
+        Brep { body, enclosing_shell_order_proven: false, id: trace::next_id() }
     }
 
     /// solidcore's body.

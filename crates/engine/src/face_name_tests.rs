@@ -687,3 +687,30 @@ fn a_chamfer_saved_on_a_rounds_edge_with_its_number_at_the_end_is_found_at_its_p
         assert!(result.error.as_deref().is_some_and(|e| e.contains(&asked)), "{at:?}: {:?}", result.error);
     }
 }
+
+/// A face that `model.faces` marks `exact` has its exact area. On a 30 x 30 x 5 plate with a
+/// radius 5 hole the hole's wall reads 156.83 for 2π·5·5 = 157.08 and the top face 821.97 for
+/// 900 - 25π = 821.46, both marked exact, because they come from the mesh
+/// ([T-93](https://tickets.solidcraft.io/t/93), #17588).
+#[test]
+fn faces_marked_exact_report_their_exact_area() {
+    let mut s = Session::default();
+    plate_with_hole(&mut s, 30.0, 30.0, 5.0);
+    let mut checked = 0;
+    for f in faces(&mut s, "Plate") {
+        let want = if f.get("cylinder").is_some() {
+            2.0 * PI * 5.0 * 5.0
+        } else if f["plane_normal"][2].as_f64().is_some_and(|z| z.abs() > 0.99) {
+            900.0 - 25.0 * PI
+        } else {
+            30.0 * 5.0
+        };
+        if f["exact"] == true {
+            let got = f["area"].as_f64().unwrap();
+            assert!((got - want).abs() < 1e-6 * want, "{}: {got} vs {want}", f["name"]);
+            checked += 1;
+        }
+    }
+    // The four sides, at least, are exact.
+    assert!(checked >= 4, "{checked}");
+}

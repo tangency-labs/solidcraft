@@ -1065,6 +1065,27 @@ fn an_edge_flange_can_carry_further_bends() {
 }
 
 #[test]
+fn an_edge_flange_with_further_bends_returns_the_named_feature_or_the_last_bend() {
+    for (name, returned_bend) in [(Some(" Sides "), 0), (None, 1), (Some("  "), 1)] {
+        let mut s = Session::default();
+        wall_bracket(&mut s);
+        let start = s.doc.features.len();
+        let mut params = json!({"edges": [[1, 0, 20]], "height": 40, "angle": "45 deg", "then": [{"angle": "45 deg", "height": 80}]});
+        if let Some(name) = name {
+            params["name"] = json!(name);
+        }
+        let reply = run(&mut s, "sheet.flange", params);
+        let bends = &s.doc.features[start..];
+        assert_eq!(bends.len(), 2);
+        if returned_bend == 0 {
+            assert_eq!(bends[0].name, "Sides");
+        }
+        assert_eq!(reply["feature"], bends[returned_bend].id, "{name:?}");
+        assert_eq!(reply["name"], bends[returned_bend].name, "{name:?}");
+    }
+}
+
+#[test]
 fn further_bends_are_checked_before_anything_is_made() {
     let mut s = Session::default();
     wall_bracket(&mut s);
@@ -2965,7 +2986,7 @@ fn flat_dxf_preserves_exact_cutout_entities() {
         let mut sk = s.model.state().surface_sheets[0].clone();
         sk.sheet.panels[0].region.holes = vec![hole];
         sk.build().unwrap();
-        super::surface_dxf(s, &sk, &super::DxfOptions::default()).unwrap()
+        super::surface_dxf(s, &sk, &super::DxfOptions::default(), None).unwrap()
     };
     let dxf =
         with_hole(&s, Loop2 { segs: vec![Seg2::Arc { center: Vec2::new(40.0, -30.0), radius: 5.0, start: PI, sweep: 2.0 * PI }] }.ccw().reversed());
@@ -4503,6 +4524,11 @@ fn fold_with_its_fixed_point_on_the_tongue_is_refused() {
     tongue_plate(&mut s, true, false);
     let e = s.execute("sheet.fold", &json!({"points": [[-8, -15, 2], [-8, 15, 2]], "fixed": [10, 0, 2], "angle": "45 deg"})).unwrap_err().to_string();
     assert!(e.contains("fixed point lies on a piece the fold frees"), "{e}");
+    // The fixed point on the tongue just past the line, inside the tongue's bend zone (x -9.12 …
+    // -6.88 at 45°): the bend would turn the material there, so it is refused the same way.
+    let e =
+        s.execute("sheet.fold", &json!({"points": [[-8, -15, 2], [-8, 15, 2]], "fixed": [-7.5, 0, 2], "angle": "45 deg"})).unwrap_err().to_string();
+    assert!(e.contains("fixed point lies on a piece the fold frees"), "{e}");
 }
 
 /// A plate cut by a sketch drawn on its top face after the base flange: each closed loop of
@@ -4611,6 +4637,40 @@ fn fold_beside_a_slanted_slit() {
     al2_plate(&mut s, slit, &[], &[]);
     let e = s.execute("sheet.fold", &json!({"points": [[-60, 0, 2], [60, 0, 2]], "fixed": [0, -30, 2], "angle": "45 deg"})).unwrap_err().to_string();
     assert!(e.contains("lie beside each other along it"), "{e}");
+    // A fold at its `start` or `end` puts the line on an edge of the zone, where the slit is not
+    // where it is in the zone's middle: drawn from the right edge to just right of the slit on
+    // the line (x 10.5), it takes the plate right of the slit alone.
+    for position in ["start", "end"] {
+        let mut s = Session::default();
+        al2_plate(&mut s, json!([[-60, -40], [60, -40], [60, 40], [50.5, 40], [0.5, -10], [0, -10], [50, 40], [-60, 40]]), &[], &[]);
+        let before = volume(&mut s);
+        run(&mut s, "sheet.fold", json!({"points": [[60, 0, 2], [10.6, 0, 2]], "fixed": [0, -30, 2], "angle": "45 deg", "position": position}));
+        assert!(rel(volume(&mut s), before) < 1e-3, "{position}: a fold keeps the material");
+        let bends = flat(&mut s)["bends"].as_array().map_or(0, Vec::len);
+        let bb = bbox(&mut s);
+        assert!(
+            bends == 1 && at(coord(&bb, "min", 0), -60.0) && coord(&bb, "max", 2) > 20.0,
+            "{position}: the plate right of the slit alone: {bends}: {bb}"
+        );
+    }
+}
+
+/// A bar held to the plate by two bridges across the fold's line, with 16 tabs off the plate
+/// beside the drawn bridge, nearer it than the far bridge: more chords than are tried in every
+/// combination. The line drawn on the near bridge bends the two bridges alone; the tabs, which
+/// part nothing the bar needs, stay flat.
+#[test]
+fn fold_past_many_tabs_bends_only_the_chords_that_part_the_panel() {
+    let mut outline =
+        vec![json!([-110, -30]), json!([110, -30]), json!([110, 20]), json!([-110, 20]), json!([-110, 3]), json!([-38, 3]), json!([-38, -3])];
+    for i in (0..16).rev() {
+        let x = -104.0 + 4.0 * f64::from(i);
+        outline.extend([json!([x + 2.0, -3]), json!([x + 2.0, 2]), json!([x, 2]), json!([x, -3])]);
+    }
+    outline.push(json!([-110, -3]));
+    let slot = json!([[-32, -3], [96, -3], [96, 3], [-32, 3]]);
+    let (bb, bends) = al2_fold(json!(outline), &[slot], &[], json!([[-37, 0, 2], [-33, 0, 2]]), json!([0, -20, 2]));
+    assert!(bends == 2 && coord(&bb, "max", 2) > 10.0, "the two bridges alone: {bends}: {bb}");
 }
 
 /// A round hole reaching into a straight-ended bend's zone leaves the zone's ends on the plate's
@@ -10305,4 +10365,42 @@ fn a_spline_sheet_with_a_notch_at_its_edge_folds() {
         let folded = sheet(Some(depth), true);
         assert!((folded - flat - bend).abs() < 1e-3, "depth {depth}: the fold adds {} not {bend}", folded - flat);
     }
+}
+
+/// #20417: a sheet metal sheet in a moved component folds where its sketch line lies in the
+/// world, not where the line would lie before the move. Sketched outside the moved sheet the
+/// fold is refused; sketched on the moved sheet the sheet folds there.
+#[test]
+fn a_fold_line_sketched_outside_a_moved_component_acts_where_it_lies() {
+    let mut s = Session::default();
+    run(&mut s, "sheet.manage_rules", json!({"name": "Plate", "active": true, "thickness": "2 mm", "k_factor": 0.4, "bend_radius": "2 mm"}));
+    run(&mut s, "component.create", json!({"name": "P", "grounded": false}));
+    run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Base"}));
+    run(&mut s, "sketch.rectangle.two_point", json!({"p0": [0, 0], "p1": [120, 60]}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "sheet.flange", json!({"sketch": "Base", "name": "Plate"}));
+    run(&mut s, "component.activate", json!({"component": "root"}));
+    run(&mut s, "occurrence.move", json!({"occurrence": "P", "translate": [200, 0, 0]}));
+    run(&mut s, "component.capture_position", json!({}));
+    run(&mut s, "component.activate", json!({"component": "root"}));
+
+    // Sketched at world x = 50: does not touch the sheet at world x in [200, 320].
+    run(&mut s, "sketch.create", json!({"plane": "XY", "offset": 2, "name": "FL_Off"}));
+    run(&mut s, "sketch.line", json!({"points": [[50, 0], [50, 60]]}));
+    run(&mut s, "sketch.finish", json!({}));
+    let err = s.execute("sheet.fold", &json!({"sketch": "FL_Off", "curve": "l1"})).unwrap_err().to_string();
+    assert!(err.contains("the fold line must lie on a flat face of the sheet"), "{err}");
+
+    // Sketched at world x = 250: lies directly on the sheet (local x = 50 in component P).
+    run(&mut s, "sketch.create", json!({"plane": "XY", "offset": 2, "name": "FL_On"}));
+    run(&mut s, "sketch.line", json!({"points": [[250, 0], [250, 60]]}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "sheet.fold", json!({"sketch": "FL_On", "curve": "l1"}));
+
+    let m = run(&mut s, "inspect.measure", json!({}));
+    let bb = &m["bodies"][0]["bbox"];
+    let min_x = bb["min"][0].as_f64().unwrap();
+    let max_x = bb["max"][0].as_f64().unwrap();
+    assert!(min_x > 240.0 && min_x < 250.0, "min_x: {min_x}");
+    assert!(max_x > 310.0 && max_x < 325.0, "max_x: {max_x}");
 }

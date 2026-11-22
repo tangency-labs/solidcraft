@@ -34,6 +34,8 @@ pub fn dimension_roles(creator: &str) -> Option<&'static [&'static str]> {
         "sketch.arc.center_point" => &["radius", "sweep"],
         "sketch.ellipse" => &["major_radius", "minor_radius"],
         "sketch.slot.center_to_center" | "sketch.slot.overall" | "sketch.slot.center_point" => &["length", "width"],
+        // The first edge's whole length, and the width across from it (#4798).
+        "sketch.rectangle.edge_center" => &["length", "width"],
         "sketch.slot.arc_center" => &["radius", "sweep", "width"],
         "sketch.slot.arc_three_point" => &["width"],
         "sketch.polygon.inscribed" | "sketch.polygon.circumscribed" => &["radius"],
@@ -164,6 +166,9 @@ pub(super) fn draw(s: &mut Session, p: &Value) -> Result<Value> {
                     |k: &str| out["sides"].get(k).filter(|v| v.is_string()).cloned().ok_or_else(|| bad(cmd, "creator did not return its sides"));
                 (vec![side(a)?, side(b)?], "distance")
             }
+            // The anchored edge (whole length) and the side running out from it.
+            ("sketch.rectangle.edge_center", "length") => (vec![curve(0)?], "length"),
+            ("sketch.rectangle.edge_center", "width") => (vec![curve(1)?], "length"),
             (c, "width" | "height") if c.starts_with("sketch.rectangle.") => (vec![curve(usize::from(role == "height"))?], "length"),
             (c, "radius" | "diameter") if c.starts_with("sketch.circle.") => (vec![curve(0)?], role),
             ("sketch.arc.center_point", "radius" | "sweep") => (vec![curve(0)?], role),
@@ -230,7 +235,7 @@ pub(super) fn draw(s: &mut Session, p: &Value) -> Result<Value> {
     }
     // Session::execute records the wrapper's before snapshot. Nested history must not leak.
     scratch.undo.clear();
-    s.accept_computed(scratch);
+    s.accept_computed(scratch)?;
     let reply = DrawDimensionedResult::new(out, added, defined, locate.then_some(located));
     serde_json::to_value(reply).map_err(|e| bad(cmd, e.to_string()))
 }
