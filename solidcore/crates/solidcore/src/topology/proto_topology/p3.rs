@@ -2905,6 +2905,10 @@ mod tests {
     fn no_mates_has_no_relationship_to_remove() {
         let e = Mates::<H>::remove_relationship(&mut NoMates, vtx(0), vtx(1)).unwrap_err();
         assert_eq!(e.upstream_status(), Some(crate::error::SM_ERR));
+        assert!(
+            e.to_string().contains("not related to each other"),
+            "the intersector's own failure for an unrelated pair: {e}"
+        );
         assert_eq!(
             e.topology_failure(),
             Some(&crate::error::topology::TopologyFailure::Failed(

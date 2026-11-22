@@ -5637,6 +5637,8 @@ mod tests {
             let err = result.unwrap_err();
             assert_eq!(err.operation(), OP_RESOLVE_PE, "{err}");
             assert_eq!(err.sm_status(), Some(1001), "{err}");
+            assert_eq!(err.kind(), crate::error::ErrorKind::Failed, "{err}");
+            assert!(!err.is_defect(), "{err}");
             // kept for the Boolean, whose resolution only warns on a proto edge's error
             assert_eq!(m.take_self_loop_refusal(), Some(err));
             assert_eq!(m.take_self_loop_refusal(), None);
@@ -5845,6 +5847,8 @@ mod tests {
 
         let err = self_loop(&mut m, 1).unwrap_err();
         assert!(err.to_string().contains("absorbed a curve"), "{err}");
+        assert_eq!(err.kind(), crate::error::ErrorKind::Failed, "{err}");
+        assert!(!err.is_defect(), "{err}");
         assert!(m.take_self_loop_refusal().is_some(), "kept for the Boolean");
         assert_eq!(m.proto_vertex(pv).unwrap().vertex_definitions(), &[vd]);
         let def = m.vertex_def(vd).unwrap();
@@ -6164,6 +6168,8 @@ mod tests {
             if refused {
                 let err = refusal.expect("kept for the Boolean");
                 assert!(err.to_string().contains("another vertex"), "{err}");
+                assert_eq!(err.kind(), crate::error::ErrorKind::Failed, "{err}");
+                assert!(!err.is_defect(), "{err}");
                 if pass {
                     assert_eq!(result.unwrap_err(), err);
                 } else {
@@ -6519,6 +6525,7 @@ mod tests {
             .update_edges(&k, &mut geo, 1, Some(e_old), &[e_new, e_new], Some(calling))
             .unwrap_err();
         assert_eq!(e.upstream_status(), Some(crate::error::SM_ERR_NULL_POINTER));
+        assert_eq!(e.kind(), crate::error::ErrorKind::InvalidInput, "{e}");
         assert_eq!(
             e.topology_failure(),
             Some(&crate::error::topology::TopologyFailure::Missing(

@@ -4852,6 +4852,48 @@ mod tests {
         );
     }
 
+    /// An entry the caller names that is not on the list, or a proto vertex that is
+    /// neither end of the proto edge, is the caller's argument: class `invalid_input`,
+    /// with the status upstream reports (`SM_ERR`).
+    #[test]
+    fn a_list_entry_or_end_the_caller_names_wrongly_is_invalid_input() {
+        use crate::error::{ErrorKind, SM_ERR};
+        let k = Kernel::default();
+        let mut m = manager(&k);
+        let pv = m.new_proto_vertex(Point3::ZERO, 1e-5).unwrap();
+        let other = m.new_proto_vertex(Point3::X, 1e-5).unwrap();
+        let pe = m
+            .new_proto_edge(&k, Some(pv), None, Extent1d::from_raw(0.0, 1.0))
+            .unwrap();
+        let errors = [
+            m.proto_vertex_mut(pv)
+                .unwrap()
+                .remove_vertex_definition(VertexDefId::from_index(7))
+                .unwrap_err(),
+            m.proto_vertex_mut(pv)
+                .unwrap()
+                .remove_proto_edge(ProtoEdgeId::from_index(7))
+                .unwrap_err(),
+            m.proto_edge_mut(pe)
+                .unwrap()
+                .remove_edge_definition(EdgeDefId::from_index(7))
+                .unwrap_err(),
+            m.proto_edge_mut(pe)
+                .unwrap()
+                .remove_proto_vertex(Some(other))
+                .unwrap_err(),
+            m.remove_proto_vertex(ProtoVertexId::from_index(99))
+                .unwrap_err(),
+            m.remove_proto_edge(&k, ProtoEdgeId::from_index(99))
+                .unwrap_err(),
+        ];
+        for e in errors {
+            assert_eq!(e.kind(), ErrorKind::InvalidInput, "{e}");
+            assert_eq!(e.upstream_status(), Some(SM_ERR), "{e}");
+            assert!(!e.is_defect(), "{e}");
+        }
+    }
+
     #[test]
     fn deleting_a_closed_proto_edge_unlinks_both_incident_entries() {
         let k = Kernel::default();
