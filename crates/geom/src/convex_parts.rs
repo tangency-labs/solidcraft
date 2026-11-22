@@ -10,7 +10,8 @@
 
 use std::collections::{HashMap, HashSet};
 
-use crate::Vec2;
+use crate::prelude::*;
+use solidcore_record::Vec2;
 
 /// Most boundary points [`convex_parts`] takes (clipping ears is quadratic in them).
 pub const MAX_CONVEX_POINTS: usize = 10_000;

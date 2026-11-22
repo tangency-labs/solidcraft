@@ -157,8 +157,8 @@ fn mesh_of(b: &ModelBody, settings: &Settings) -> std::result::Result<(Arc<LiveM
             None => settings.quality.chord(size),
         };
         let angle = settings.angle.unwrap_or_else(|| settings.quality.angle());
-        definition.display_plan_angular(chord, angle).ok().and_then(|plan| {
-            let mesh = definition.display_mesh_of(&plan).ok()?;
+        definition.mesh_plan(&solidcraft_kernel::MeshTolerance { chord, angle: Some(angle) }).ok().and_then(|plan| {
+            let mesh = definition.mesh_of(&plan).ok()?;
             Some((Arc::new(plan), Arc::new(mesh)))
         })
     };
@@ -201,7 +201,7 @@ fn run(s: &mut Session, p: &Value) -> Result<Value> {
     let only: HashSet<&str> = bodies.iter().map(String::as_str).collect();
     let have: HashSet<&str> = have.iter().map(String::as_str).collect();
 
-    let world = s.world_state();
+    let world = s.world_state()?;
     let mut objects = Vec::new();
     let mut meshes = Vec::new();
     let mut pending = Vec::new();

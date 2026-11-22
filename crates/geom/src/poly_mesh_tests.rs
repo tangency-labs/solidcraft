@@ -1,5 +1,5 @@
 use super::*;
-use crate::tess::FacePlan;
+use crate::tess::{FacePlan, to_kernel};
 
 /// A planar face through `pts` (all fixed), on a plane whose normal is `normal`.
 fn planar_face(plan: &mut TessPlan, face: u32, pts: &[Vec3], normal: Vec3, triangles: Vec<[u32; 3]>) {
@@ -7,20 +7,20 @@ fn planar_face(plan: &mut TessPlan, face: u32, pts: &[Vec3], normal: Vec3, trian
     let dv = normal.cross(du);
     let origin = pts.first().copied().unwrap_or(Vec3::ZERO);
     let s = plan.surfaces.len() as u32;
-    plan.surfaces.push(EvalSurface::Plane { origin, du, dv });
+    plan.surfaces.push(EvalSurface::Plane { origin: to_kernel(origin), du: to_kernel(du), dv: to_kernel(dv) });
     let uv = pts.iter().map(|p| [(*p - origin).dot(du), (*p - origin).dot(dv)]).collect();
-    plan.faces.push(FacePlan { face, surface: Some(s), uv, fixed: pts.to_vec(), normals: vec![], flip: false, triangles });
+    plan.faces.push(FacePlan { face, surface: Some(s), uv, fixed: pts.to_vec(), normals: vec![], flip: false, triangles, poles: vec![] });
 }
 
 /// A face with no evaluable surface: every position and normal given.
 fn free_face(plan: &mut TessPlan, face: u32, pts: Vec<Vec3>, normals: Vec<Vec3>, triangles: Vec<[u32; 3]>) {
     let uv = vec![[0.0, 0.0]; pts.len()];
-    plan.faces.push(FacePlan { face, surface: None, uv, fixed: pts, normals, flip: false, triangles });
+    plan.faces.push(FacePlan { face, surface: None, uv, fixed: pts, normals, flip: false, triangles, poles: vec![] });
 }
 
 /// The plan evaluated with every edge flagged as a crease, as a body would flag a box.
 fn creased(plan: &TessPlan) -> Mesh {
-    let mut m = plan.evaluate();
+    let mut m = plan.evaluate().0;
     let n = plan.edges.len();
     (m.seams, m.smooth_edges, m.sharp_edges) = (vec![false; n], vec![false; n], vec![false; n]);
     m
@@ -102,7 +102,7 @@ fn a_box_from_its_display_mesh_is_the_same() {
 #[test]
 fn edges_without_flags_are_judged_from_the_normals() {
     let plan = box_plan(1.0, 1.0, 1.0);
-    let p = PolyMesh::from_plan(&plan, &plan.evaluate(), &PolyOptions::default()).unwrap();
+    let p = PolyMesh::from_plan(&plan, &plan.evaluate().0, &PolyOptions::default()).unwrap();
     assert_eq!(p.edges.len(), 12);
     assert!(p.edge_flags.iter().all(|&f| f == edge_flag::BREP | edge_flag::SHARP));
 }
@@ -130,12 +130,12 @@ fn faces_that_meet_smoothly_have_a_tangent_edge() {
         (90f64.to_radians(), edge_flag::SHARP),
     ] {
         let plan = hinge(angle);
-        let p = PolyMesh::from_plan(&plan, &plan.evaluate(), &PolyOptions::default()).unwrap();
+        let p = PolyMesh::from_plan(&plan, &plan.evaluate().0, &PolyOptions::default()).unwrap();
         assert_eq!(p.edge_flags, vec![edge_flag::BREP | flag], "{}°", angle.to_degrees());
     }
     // What the body says wins: a seam, then a certified crease, then a certified tangent join.
     let plan = hinge(0.0);
-    let mut m = plan.evaluate();
+    let mut m = plan.evaluate().0;
     for ((seam, smooth, sharp), flag) in
         [((true, false, true), edge_flag::SURFACE_SEAM), ((false, true, true), edge_flag::SHARP), ((false, true, false), edge_flag::TANGENT)]
     {
@@ -194,7 +194,7 @@ fn a_planar_face_with_inner_points_is_one_ngon() {
     let tris = (0..6u32).map(|k| [6, k, (k + 1) % 6]).collect();
     let mut plan = TessPlan::default();
     planar_face(&mut plan, 3, &pts, Vec3::Z, tris);
-    let p = PolyMesh::from_plan(&plan, &plan.evaluate(), &PolyOptions::default()).unwrap();
+    let p = PolyMesh::from_plan(&plan, &plan.evaluate().0, &PolyOptions::default()).unwrap();
     check_invariants(&p);
     assert_eq!(p.poly_sizes, vec![6]);
     assert_eq!(p.positions.len(), 6, "the centre is dropped");
@@ -267,7 +267,7 @@ fn ring_face(plan: &mut TessPlan, face: u32, z: f64, down: bool) {
 fn a_planar_face_with_a_hole_is_a_few_convex_ngons() {
     let mut plan = TessPlan::default();
     ring_face(&mut plan, 0, 0.0, false);
-    let p = PolyMesh::from_plan(&plan, &plan.evaluate(), &PolyOptions::default()).unwrap();
+    let p = PolyMesh::from_plan(&plan, &plan.evaluate().0, &PolyOptions::default()).unwrap();
     check_invariants(&p);
     assert_convex(&p);
     assert!((area(&p) - 12.0).abs() < 1e-9, "{}", area(&p));
@@ -277,7 +277,7 @@ fn a_planar_face_with_a_hole_is_a_few_convex_ngons() {
     assert!(p.poly_face.iter().all(|&f| f == 0));
     assert!(p.loop_normals.iter().all(|n| n.dist(Vec3::Z) < 1e-12));
     // As quads, the band points stay.
-    let quads = PolyMesh::from_plan(&plan, &plan.evaluate(), &PolyOptions { topology: PolyTopology::Quads, ..PolyOptions::default() }).unwrap();
+    let quads = PolyMesh::from_plan(&plan, &plan.evaluate().0, &PolyOptions { topology: PolyTopology::Quads, ..PolyOptions::default() }).unwrap();
     assert_eq!(quads.positions.len(), 16);
 }
 
@@ -349,7 +349,7 @@ fn grid_plan(n: u32, flip: bool) -> TessPlan {
 fn a_structured_grid_becomes_its_cells() {
     for flip in [false, true] {
         let plan = grid_plan(3, flip);
-        let p = PolyMesh::from_plan(&plan, &plan.evaluate(), &PolyOptions::default()).unwrap();
+        let p = PolyMesh::from_plan(&plan, &plan.evaluate().0, &PolyOptions::default()).unwrap();
         check_invariants(&p);
         assert_eq!(p.stats, PolyStats { triangles: 0, quads: 9, ngons: 0, open_edges: 12 }, "flip {flip}");
         assert_eq!(p.positions.len(), 16);
@@ -361,7 +361,7 @@ fn a_structured_grid_becomes_its_cells() {
         assert!((b - a).cross(c - b).z * up > 0.0);
     }
     let plan = grid_plan(3, false);
-    let tris = PolyMesh::from_plan(&plan, &plan.evaluate(), &PolyOptions { topology: PolyTopology::Triangles, ..PolyOptions::default() }).unwrap();
+    let tris = PolyMesh::from_plan(&plan, &plan.evaluate().0, &PolyOptions { topology: PolyTopology::Triangles, ..PolyOptions::default() }).unwrap();
     assert_eq!(tris.stats.triangles, 18);
 }
 
@@ -371,13 +371,13 @@ fn skewed_pairs_stay_triangles() {
     let pts = vec![Vec3::new(0.0, 0.0, 0.0), Vec3::new(10.0, 0.0, 0.0), Vec3::new(11.0, 0.5, 0.0), Vec3::new(1.0, 0.5, 0.0)];
     let mut plan = TessPlan::default();
     free_face(&mut plan, 0, pts, vec![Vec3::Z; 4], vec![[0, 1, 2], [0, 2, 3]]);
-    let p = PolyMesh::from_plan(&plan, &plan.evaluate(), &PolyOptions::default()).unwrap();
+    let p = PolyMesh::from_plan(&plan, &plan.evaluate().0, &PolyOptions::default()).unwrap();
     assert_eq!(p.stats.triangles, 2);
     // Folded pairs too.
     let pts = vec![Vec3::new(0.0, 0.0, 0.0), Vec3::new(1.0, 0.0, 0.0), Vec3::new(1.0, 1.0, 1.0), Vec3::new(0.0, 1.0, 0.0)];
     let mut plan = TessPlan::default();
     free_face(&mut plan, 0, pts, vec![Vec3::Z; 4], vec![[0, 1, 2], [0, 2, 3]]);
-    let p = PolyMesh::from_plan(&plan, &plan.evaluate(), &PolyOptions::default()).unwrap();
+    let p = PolyMesh::from_plan(&plan, &plan.evaluate().0, &PolyOptions::default()).unwrap();
     assert_eq!(p.stats.triangles, 2);
 }
 
@@ -408,7 +408,7 @@ fn tube(seg: u32, rows: u32) -> TessPlan {
 #[test]
 fn a_tube_closes_across_its_seam() {
     let plan = tube(16, 3);
-    let p = PolyMesh::from_plan(&plan, &plan.evaluate(), &PolyOptions::default()).unwrap();
+    let p = PolyMesh::from_plan(&plan, &plan.evaluate().0, &PolyOptions::default()).unwrap();
     check_invariants(&p);
     assert_eq!(p.stats, PolyStats { triangles: 0, quads: 48, ngons: 0, open_edges: 32 });
     assert_eq!(p.positions.len(), 16 * 4);
@@ -438,7 +438,7 @@ fn a_pole_is_a_fan_of_triangles() {
     }
     let mut plan = TessPlan::default();
     free_face(&mut plan, 0, pts, normals, tris);
-    let p = PolyMesh::from_plan(&plan, &plan.evaluate(), &PolyOptions::default()).unwrap();
+    let p = PolyMesh::from_plan(&plan, &plan.evaluate().0, &PolyOptions::default()).unwrap();
     check_invariants(&p);
     assert_eq!(p.stats, PolyStats { triangles: 8, quads: 0, ngons: 0, open_edges: 8 });
     assert_eq!(p.positions.len(), 9);
@@ -448,7 +448,7 @@ fn a_pole_is_a_fan_of_triangles() {
 fn hostile_plans_never_panic() {
     let nan = f64::NAN;
     let mut plan = TessPlan::default();
-    plan.surfaces.push(EvalSurface::Plane { origin: Vec3::ZERO, du: Vec3::X, dv: Vec3::Y });
+    plan.surfaces.push(EvalSurface::Plane { origin: to_kernel(Vec3::ZERO), du: to_kernel(Vec3::X), dv: to_kernel(Vec3::Y) });
     // Parameters that are not numbers, indices out of range, more fixed points than vertices,
     // a surface that is not there, triangles with no area and repeated corners.
     plan.faces.push(FacePlan {
@@ -459,6 +459,7 @@ fn hostile_plans_never_panic() {
         normals: vec![],
         flip: false,
         triangles: vec![[0, 1, 2], [1, 2, 99], [2, 2, 3], [1, 2, 3], [u32::MAX, 0, 1]],
+        poles: vec![],
     });
     plan.faces.push(FacePlan {
         face: 1,
@@ -468,6 +469,7 @@ fn hostile_plans_never_panic() {
         normals: vec![Vec3::new(nan, 0.0, 0.0)],
         flip: true,
         triangles: vec![[0, 1, 0], [0, 0, 0]],
+        poles: vec![],
     });
     plan.faces.push(FacePlan {
         face: 2,
@@ -477,6 +479,7 @@ fn hostile_plans_never_panic() {
         normals: vec![Vec3::ZERO; 3],
         flip: false,
         triangles: vec![[0, 1, 2]],
+        poles: vec![],
     });
     // Planar faces with more than one loop that are not one outer loop around holes: two
     // squares side by side, a "hole" outside its outer loop, a hole crossing it.
@@ -501,8 +504,8 @@ fn hostile_plans_never_panic() {
         for weld_eps in [0.0, nan, -1.0, f64::INFINITY, 1e300] {
             let o = PolyOptions { topology, weld_eps, max_corner_dev: nan, max_fold: nan, tangent_angle: nan };
             check_invariants(&PolyMesh::from_plan(&plan, &Mesh::default(), &o).unwrap());
-            check_invariants(&PolyMesh::from_plan(&plan, &plan.evaluate(), &o).unwrap());
-            check_invariants(&PolyMesh::from_mesh(&plan.evaluate(), &o).unwrap());
+            check_invariants(&PolyMesh::from_plan(&plan, &plan.evaluate().0, &o).unwrap());
+            check_invariants(&PolyMesh::from_mesh(&plan.evaluate().0, &o).unwrap());
         }
     }
     let m = Mesh { positions: vec![Vec3::new(nan, 0.0, 0.0), Vec3::X, Vec3::Y], triangles: vec![[0, 1, 2], [5, 6, 7], [1, 2, 2]], ..Mesh::default() };
@@ -513,7 +516,7 @@ fn hostile_plans_never_panic() {
 #[test]
 fn the_same_plan_gives_the_same_mesh() {
     let plan = tube(12, 2);
-    let a = PolyMesh::from_plan(&plan, &plan.evaluate(), &PolyOptions::default()).unwrap();
-    let b = PolyMesh::from_plan(&plan, &plan.evaluate(), &PolyOptions::default()).unwrap();
+    let a = PolyMesh::from_plan(&plan, &plan.evaluate().0, &PolyOptions::default()).unwrap();
+    let b = PolyMesh::from_plan(&plan, &plan.evaluate().0, &PolyOptions::default()).unwrap();
     assert_eq!(a, b);
 }

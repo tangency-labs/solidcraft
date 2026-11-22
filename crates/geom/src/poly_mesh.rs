@@ -13,9 +13,11 @@
 
 use std::collections::{HashMap, HashSet};
 
+use crate::Mesh;
 use crate::convex_parts::convex_parts;
+use crate::prelude::*;
 use crate::tess::{EvalSurface, TessPlan};
-use crate::{Mesh, Vec2, Vec3};
+use solidcore_record::{Vec2, Vec3};
 
 /// Most vertices a polygon mesh may be made from (the plan's or mesh's vertices).
 pub const MAX_POLY_VERTICES: usize = 1 << 24;
@@ -176,7 +178,7 @@ impl PolyMesh {
         let m = if matches {
             evaluated
         } else {
-            own = plan.evaluate();
+            own = plan.evaluate().0;
             &own
         };
         let mut w = Welder::default();

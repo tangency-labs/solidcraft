@@ -3,7 +3,8 @@ use std::collections::HashMap;
 use serde_json::{Value, json};
 
 use crate::Session;
-use crate::geom::Vec3;
+use solidcore_record::Vec3;
+use solidcraft_geom::prelude::*;
 
 fn decode(s: &str) -> Vec<u8> {
     const B64: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
@@ -280,7 +281,8 @@ fn a_sketch_being_dragged_is_meshed_as_it_stands() {
         ("sketch.rectangle.two_point", json!({"p0":[5,5],"p1":[25,20]})),
         ("sketch.finish", json!({})),
         ("solid.extrude", json!({"distance":5})),
-        ("sketch.edit", json!({"sketch":"Sketch1"})),
+        // The timeline left in place, so the extrude rebuilds with every sketch command.
+        ("sketch.edit", json!({"sketch":"Sketch1","restore_marker":false})),
         ("sketch.drag", json!({"entity":"l1.start","from":[5,5],"to":[4,5],"live":true})),
     ] {
         s.execute(id, &p).unwrap();

@@ -9,9 +9,10 @@
 
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
+use solidcore_record::Vec3;
 use solidcraft_doc::canvas::base64_encode;
-use solidcraft_geom::Vec3;
 use solidcraft_geom::poly_mesh::PolyMesh;
+use solidcraft_geom::prelude::*;
 
 /// The format tag a live-link mesh carries.
 pub const LIVE_MESH_FORMAT: &str = "solidcraft.live-mesh";
