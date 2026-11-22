@@ -340,7 +340,6 @@ fn a_chord_on_a_hemisphere_s_rim_is_equal_straight_setbacks() {
         let mut s = FilletSession::new(&mut k, &mut b).unwrap();
         s.prepare_chamfers(&k, &[rim], &[ChamferSize::Chord(1.8_f64.sqrt())])
             .unwrap();
-        assert_eq!(s.straight_setback_edges(), 1);
         s.create_corners(&k, None).unwrap();
         for id in s.fillet_corners().unwrap() {
             s.set_corner_bevel(id, true).unwrap();

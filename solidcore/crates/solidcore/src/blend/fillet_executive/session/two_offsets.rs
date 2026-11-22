@@ -651,13 +651,8 @@ impl FilletSession<'_> {
             first.push(r1);
             second.push(r2);
             chamfers.push(Some(chamfer));
-            let leg = if self.objects.straight_setbacks {
-                let target: &mut crate::Brep = &mut *self.objects.target;
-                straight_setback_leg(k, target, id, u0, u1, size, on_second)
-            } else {
-                None
-            };
-            legs.push(leg);
+            let target: &mut crate::Brep = &mut *self.objects.target;
+            legs.push(straight_setback_leg(k, target, id, u0, u1, size, on_second));
         }
         // a group of one size on a tangent chain is one chamfer: it takes the straight-setback
         // pair only where every member has one, one of them is curved and they agree, all
@@ -735,7 +730,6 @@ impl FilletSession<'_> {
                     *c = Some(definition);
                 }
             }
-            self.objects.straight_setback_edges += group.len();
         }
         let offsets: Vec<[f64; 2]> = first.iter().zip(&second).map(|(&a, &b)| [a, b]).collect();
         let solvers_before = self.objects.solvers.len();

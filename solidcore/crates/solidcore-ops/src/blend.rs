@@ -814,16 +814,7 @@ fn prepare(
             s.prepare_per_edge_constant_distance(k, edges, sizes, &circular, 1, 1.0)
         }
         (Section::Chamfer { sizes, along }, _) => {
-            let state = STRAIGHT_SETBACKS.with(std::cell::Cell::get);
-            s.set_straight_setbacks(!state.off);
-            let prepared = s.prepare_chamfers_along(k, edges, sizes, along).map(|_| ());
-            let taken = s.straight_setback_edges();
-            STRAIGHT_SETBACKS.with(|c| {
-                let mut now = c.get();
-                now.taken = now.taken.saturating_add(taken);
-                c.set(now);
-            });
-            prepared
+            s.prepare_chamfers_along(k, edges, sizes, along).map(|_| ())
         }
     }
 }
@@ -1623,63 +1614,6 @@ pub fn blend_with(
 
 /// [`blend`] and [`blend_ordered`]: the edges and setback vertices picked natively or through
 /// `order`, blended with every pass turning and chamfers closing as `options` says.
-/// #13710 phase 1: a chamfer call's straight setbacks, on this thread. `off` while the call is
-/// rerun with today's conversion; `taken`, how many edges its passes gave straight-setback
-/// offsets.
-#[derive(Debug, Clone, Copy, Default)]
-struct StraightSetbacks {
-    off: bool,
-    taken: usize,
-}
-
-thread_local! {
-    static STRAIGHT_SETBACKS: std::cell::Cell<StraightSetbacks> =
-        const { std::cell::Cell::new(StraightSetbacks { off: false, taken: 0 }) };
-}
-
-/// How many chamfer calls `with_straight_setback_retry` has rerun with today's conversion.
-static STRAIGHT_SETBACK_RETRIES: std::sync::atomic::AtomicUsize =
-    std::sync::atomic::AtomicUsize::new(0);
-
-/// How many chamfer calls, since the process started, were refused or failed with straight
-/// setbacks (#13710 phase 1) and were rerun with today's conversion of the sizes to offsets:
-/// for the kernel-case rigs' counts. Phase 2 removes the retry.
-#[must_use]
-pub fn straight_setback_retries() -> usize {
-    STRAIGHT_SETBACK_RETRIES.load(std::sync::atomic::Ordering::Relaxed)
-}
-
-/// Runs a chamfer call, and where it is refused or fails after any of its edges took
-/// straight-setback offsets (#13710 phase 1), runs it once more with today's conversion and
-/// returns that. A longer leg can meet geometry today's missed, so a refusal is always today's,
-/// with today's fit size, and valid input never becomes one. Per call, not per chain: a call's
-/// edges and corners are solved together. `with_body` puts the body back after a refusal or a
-/// failure, so the rerun starts from the body as it came in. A cancelled call is not rerun.
-fn with_straight_setback_retry<T>(run: impl Fn() -> Result<Result<T>>) -> Result<Result<T>> {
-    let before = STRAIGHT_SETBACKS.with(std::cell::Cell::get);
-    STRAIGHT_SETBACKS.with(|c| c.set(StraightSetbacks::default()));
-    let first = run();
-    let taken = STRAIGHT_SETBACKS.with(|c| c.get().taken);
-    let failed = match &first {
-        Err(_) => !crate::cancel::is_cancelled(),
-        Ok(r) => r.is_err(),
-    };
-    let result = if failed && taken > 0 {
-        STRAIGHT_SETBACK_RETRIES.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-        STRAIGHT_SETBACKS.with(|c| {
-            c.set(StraightSetbacks {
-                off: true,
-                taken: 0,
-            });
-        });
-        run()
-    } else {
-        first
-    };
-    STRAIGHT_SETBACKS.with(|c| c.set(before));
-    result
-}
-
 fn blend_impl(
     body: &Body,
     order: Option<&crate::Order>,
@@ -1741,11 +1675,7 @@ fn blend_impl(
             }))
         })
     };
-    if kind == Blend::Chamfer {
-        with_straight_setback_retry(run)?
-    } else {
-        run()?
-    }
+    run()?
 }
 
 /// [`blend_impl`] on the kernel's body: every pass, its corners and refusals, the body
@@ -2949,7 +2879,7 @@ fn chamfer_sides_impl(
             done(k, b, expect, contract)
         })
     };
-    with_straight_setback_retry(run)?
+    run()?
 }
 
 /// A radius law's data checked: a clamped B-spline of `degree` 1 to 3 from 0 to 1, 2 to
