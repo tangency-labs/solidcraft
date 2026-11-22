@@ -917,7 +917,7 @@ mod tests {
             assert_eq!(typed.surface_failure(), Some(&failure));
             assert!(!typed.to_string().is_empty());
         }
-        // a caught cause is chained, unless it is a port failure
+        // a caught cause is chained, a port failure too (which makes the answer one)
         let cause = SolidError::surface("surface::inner", F::NoRoughGuess);
         let caught = chained("surface::op", F::NoRoughGuess, cause);
         assert_eq!(caught.sm_status(), Some(SM_ERR));
@@ -927,11 +927,11 @@ mod tests {
             Some(&F::NoRoughGuess)
         );
         let port = SolidError::unported("x", "y");
-        let alone = chained("surface::op", F::NoControlPoints, port);
-        assert_eq!(alone.sm_status(), Some(SM_ERR));
-        assert!(!alone.is_port_failure());
-        assert!(alone.is_status_answer());
-        assert!(alone.cause().is_none());
+        let kept = chained("surface::op", F::NoControlPoints, port.clone());
+        assert_eq!(kept.sm_status(), Some(SM_ERR));
+        assert_eq!(kept.cause(), Some(&port));
+        assert!(kept.is_port_failure());
+        assert!(!kept.is_status_answer());
     }
 
     /// The sites that build a surface phrase cause only fall:
