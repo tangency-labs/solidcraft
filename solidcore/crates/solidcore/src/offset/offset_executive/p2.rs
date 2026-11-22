@@ -95,7 +95,6 @@ use crate::sweep::topology_sweep::store::SweepIdentities;
 use crate::topology::edge::{NotificationStores, NotifyState};
 use crate::topology::edgeuse::{p1 as eu, p2 as eu2};
 use crate::topology::face::p2 as face;
-#[cfg(test)]
 use crate::topology::topology::Topology;
 use crate::topology::{Brep, BrepId, EdgeId, EdgeuseId, FaceId, FaceuseId, RegionId, VertexId};
 
@@ -993,6 +992,7 @@ impl OffsetExecutive {
             }
         }
 
+        self.remove_extinct_branches(kernel, original, notifications)?;
         let mapped = order_edgeuses_by_brep(original, &self.mapped_original_edgeuses())?;
         // (not upstream) a local operation's edges whose surfaces all stay are kept
         self.keep_unmoved_edges(original)?;
@@ -1234,6 +1234,7 @@ impl OffsetExecutive {
             // offset's vertex where two consecutive edges' offsets run parallel), then split
             // the edges that run past a step wall's corner (after WR-531's caps below, in the
             // fork's order)
+            self.reconstruct_periodic_boundaries(kernel, original, notifications)?;
             self.close_loop_gaps(kernel, original, notifications)?;
 
             // Not upstream (WR-531; the fork's tangency-labs/smlib@d5dadaa): a vertex where
@@ -1386,13 +1387,41 @@ impl OffsetExecutive {
                     select = false;
                 }
             }
+            // (not upstream, #18570) a local operation (Offset Face, Draft) keeps the body's
+            // cavities: `make_manifold` with no regions given keeps every finite region and
+            // deletes the faces between two of them, the walls of a hollowed body's cavity
+            // among them, which filled the cavity in. The regions kept are the material
+            // ones, read from the faces ([`p5::alternating_void_flags`]); the cavity's
+            // walls stay, between a kept region and one that is not.
+            let material: Vec<RegionId> =
+                if !select && self.operation() == OffsetOperation::LocalOperation {
+                    crate::topology::brep::p5::alternating_void_flags(&result)?
+                        .filter(|flags| flags.values().filter(|&&v| v).count() > 1)
+                        .map(|flags| {
+                            flags
+                                .into_iter()
+                                .filter(|&(_, v)| !v)
+                                .map(|(r, _)| r)
+                                .collect()
+                        })
+                        .unwrap_or_default()
+                } else {
+                    Vec::new()
+                };
+            let keep = if select {
+                Some(cavities.as_slice())
+            } else if material.is_empty() {
+                None
+            } else {
+                Some(material.as_slice())
+            };
             // MakeManifold exists in p5, but its remaining metadata/topology
             // adapters must still propagate Unported even though native ignores
             // ordinary errors. Do not turn that partial path into empty success.
             if crate::error::ignored(crate::topology::brep::p5::make_manifold(
                 kernel,
                 &mut result,
-                select.then_some(cavities.as_slice()),
+                keep,
                 false,
             ))?
             .is_some()
@@ -1413,6 +1442,10 @@ impl OffsetExecutive {
                 for region in bp1::regions(&result, None)? {
                     let is_void = Some(region) == result.infinite_region();
                     result.region_mut(region)?.is_void = i32::from(is_void);
+                }
+                // (not upstream, #18570) the cavities kept above are void again
+                if !material.is_empty() {
+                    crate::topology::brep::p5::set_alternating_void_flags(&mut result)?;
                 }
             }
             let _ = self.take_offset_brep();
@@ -2129,7 +2162,9 @@ pub fn offset_brep_simple(
 /// with notification identities of its own, as [`offset_brep_simple`]: for a caller that
 /// keeps no notification stores (`SmBrep::LocalOperation` on a B-rep of the caller's).
 /// The B-rep's attributes stay on its faces as upstream's notifications carry them; its
-/// [`Brep::key`] is restored.
+/// [`Brep::key`] is restored. A complete inward cylindrical draft with fixed axial
+/// end planes uses its exact closed radial removal volume before the executive;
+/// this also trims intervening walls against the drafted support.
 ///
 /// # Errors
 ///
@@ -2140,6 +2175,13 @@ pub fn local_operation_simple(
     faces: &[FaceId],
     surfaces: Vec<crate::surface::surface::Surface>,
 ) -> Result<()> {
+    if crate::topology::brep::local_operation::contract_complete_cylinder(
+        kernel, b, faces, &surfaces,
+    )?
+    .is_some()
+    {
+        return Ok(());
+    }
     let saved_key = b.key();
     b.set_key(attributes::original_key(EntityRef::Brep(BrepId::from_index(0))).key);
     let mut records = attributes::simple_records(b);
@@ -2166,6 +2208,34 @@ pub fn local_operation_simple(
     result
 }
 
+/// Carries the selected face's own attributes onto a static local operation's
+/// swept wall, using the normal Copy handlers and disjoint source/result identities.
+pub(crate) fn copy_local_sweep_attributes(
+    kernel: &mut Kernel,
+    source: &Brep,
+    face: FaceId,
+    target: &mut Brep,
+    wall: FaceId,
+) -> Result<()> {
+    let mut store = AttributeStore::default();
+    attributes::seed_attributes(source, &attributes::original_key, &mut store)?;
+    let from = attributes::original_key(EntityRef::Face(face));
+    let to = attributes::result_key(EntityRef::Face(wall));
+    let mut records = attributes::simple_records(source);
+    records.insert(to.key, Topology::new());
+    crate::topology::topology::notify(
+        &mut records,
+        &mut store,
+        Some(&mut kernel.context),
+        NotifyOperation::Copy,
+        from,
+        Some(to),
+        None,
+        None,
+    )?;
+    attributes::write_back_attributes(target, &attributes::result_key, &store)
+}
+
 /// (not upstream) [`api_shell_brep_full`] with notification identities of its own,
 /// on faces of `original` (`faces` removed: open faces; empty: a closed shell). The
 /// source's attributes reach the result as upstream's notifications carry them; the
@@ -2181,7 +2251,10 @@ pub fn shell_brep_simple(
     faces: &[FaceId],
 ) -> Result<Brep> {
     let source_id = BrepId::from_index(0);
-    let mut source = original.clone_standing_for_self()?;
+    // The working copy keeps the faces' definitions (not upstream: an exact round's
+    // definition rides beside its net, #2485), so that a round offsets by its definition
+    // (#2487: the round of the moved radius on the offset supports), never by its net.
+    let mut source = original.clone_standing_for_self_keeping_definitions()?;
     source.set_key(attributes::original_key(EntityRef::Brep(source_id)).key);
     let mut records = attributes::simple_records(&source);
     let mut store = AttributeStore::default();

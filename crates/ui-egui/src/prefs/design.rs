@@ -21,24 +21,27 @@ pub(super) fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
         ui_kit::settings_heading(ui, app.tr("prefs.design"), app.tr("prefs.design_note"));
         ui_kit::settings_section(ui, "units", app.tr("prefs.units_precision"), |ui| {
             ui_kit::settings_form(ui, label_width, |ui| {
+                let locked = app.policy.locks("default_units");
                 ui_kit::row(ui, app.tr("ui.units_of_new_designs"), |ui| {
                     let mut selected = UNITS.iter().position(|u| *u == app.preferences.default_units).unwrap_or(0);
-                    ui_kit::segmented(
-                        ui,
-                        &mut selected,
-                        UNITS,
-                        ui_kit::Segments {
-                            intrinsic: true,
-                            targets: &[
-                                "prefs:default_units:mm",
-                                "prefs:default_units:cm",
-                                "prefs:default_units:m",
-                                "prefs:default_units:in",
-                                "prefs:default_units:ft",
-                            ],
-                            ..Default::default()
-                        },
-                    );
+                    crate::policy::row(ui, locked, |ui| {
+                        ui_kit::segmented(
+                            ui,
+                            &mut selected,
+                            UNITS,
+                            ui_kit::Segments {
+                                intrinsic: true,
+                                targets: &[
+                                    "prefs:default_units:mm",
+                                    "prefs:default_units:cm",
+                                    "prefs:default_units:m",
+                                    "prefs:default_units:in",
+                                    "prefs:default_units:ft",
+                                ],
+                                ..Default::default()
+                            },
+                        )
+                    });
                     if let Some(unit) = UNITS.get(selected)
                         && app.preferences.default_units != *unit
                     {
@@ -121,14 +124,6 @@ pub(super) fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
             ui_kit::text(ui, app.tr("prefs.validation_note"), ui_kit::Text::Hint("validation"));
         });
         ui_kit::settings_section(ui, "drawings", app.tr("prefs.drawings"), |ui| {
-            let response = setting::drawings_preview(app, ui);
-            crate::scenario::publish_target("prefs:drawings_preview", response.rect);
-            if response.changed() && !app.preferences.drawings_preview {
-                let _ = crate::drawing_workspace::enter(app, false);
-            }
-            if !app.preferences.drawings_preview {
-                return;
-            }
             ui_kit::settings_form(ui, t.space_24 * 7.0 + t.space_2, |ui| {
                 ui_kit::row(ui, app.tr("ui.projection_of_new_drawings"), |ui| {
                     let projections = [Projection::First, Projection::Third];
@@ -158,8 +153,6 @@ pub(super) fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
                 }
                 let label = app.tr("ui.sheet_page.colour").to_owned();
                 ui_kit::row(ui, &label, |ui| crate::drawing_sheet_page::colour_choice(app, ui));
-                let label = app.tr("ui.drawing_backdrop.label").to_owned();
-                ui_kit::row(ui, &label, |ui| crate::drawing_sheet_page::backdrop_choice(app, ui));
                 let label = app.tr("ui.drawing_sheets.visibility").to_string();
                 ui_kit::row(ui, &label, |ui| crate::drawing_workspace::sheets_visibility_choice(app, ui));
                 setting::drawing_calibration(app, ui);
@@ -239,6 +232,8 @@ pub(super) fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
                     }
                 }
             });
+            let heal = setting::heal_tolerance_defects(app, ui).on_hover_text(app.tr("prefs.heal_tolerance_defects_note"));
+            crate::scenario::publish_target("prefs:heal_tolerance_defects", heal.rect);
         });
         export_name(app, ui, label_width);
         origin_plane_names(app, ui, label_width);

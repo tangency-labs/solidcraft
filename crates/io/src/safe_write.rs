@@ -36,22 +36,51 @@ pub(crate) fn cancelled() -> bool {
 }
 
 /// Write `bytes` to a new file at `path` and flush it, a piece at a time: a watched write
-/// ([`solidcraft_kernel::watch`]) reports how far it is (`report`) and stops when cancelled.
-fn write_synced(path: &Path, bytes: &[u8], report: bool) -> std::io::Result<()> {
+/// ([`solidcraft_kernel::watch`]) reports how far it is (`report`) and stops when cancelled. A write
+/// that fails or is cancelled removes the file it made; a name it could not create (`create_new`
+/// refuses anything already there) is left as it is.
+/// `like`: the permissions of the file it will replace. The new file takes them before a byte is
+/// written (on Unix it is created no more open than they are), so a private design is never
+/// readable by others part way through a save; failing to set them fails the write.
+fn write_synced(path: &Path, bytes: &[u8], report: bool, like: Option<&fs::Permissions>) -> std::io::Result<()> {
     let watch = solidcraft_kernel::watch::current();
-    let mut f = OpenOptions::new().write(true).create_new(true).open(path)?;
-    let mut done = 0usize;
-    for chunk in bytes.chunks(CHUNK) {
-        if watch.as_ref().is_some_and(|w| w.cancelled()) {
-            return Err(cancelled_error());
-        }
-        f.write_all(chunk)?;
-        done = done.saturating_add(chunk.len());
-        if report && let Some(w) = &watch {
-            w.progress("writing", done, bytes.len());
-        }
+    let mut options = OpenOptions::new();
+    options.write(true).create_new(true);
+    #[cfg(unix)]
+    if let Some(p) = like {
+        use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
+        options.mode(p.mode() & 0o777);
     }
-    flush(&f)
+    #[cfg(not(unix))]
+    let _ = like;
+    // The file closes at the end of this block, before a failed one is removed.
+    let written = {
+        let mut f = options.open(path)?;
+        // Unix: exactly the old mode (the umask may have narrowed it), through the open handle.
+        #[cfg(unix)]
+        let kept = like.map_or(Ok(()), |p| f.set_permissions(p.clone()));
+        #[cfg(not(unix))]
+        let kept = Ok(());
+        let mut done = 0usize;
+        kept.and_then(|_| {
+            bytes.chunks(CHUNK).try_for_each(|chunk| {
+                if watch.as_ref().is_some_and(|w| w.cancelled()) {
+                    return Err(cancelled_error());
+                }
+                f.write_all(chunk)?;
+                done = done.saturating_add(chunk.len());
+                if report && let Some(w) = &watch {
+                    w.progress("writing", done, bytes.len());
+                }
+                Ok(())
+            })
+        })
+        .and_then(|_| flush(&f))
+    };
+    if written.is_err() {
+        let _ = fs::remove_file(path);
+    }
+    written
 }
 
 /// Flush a written file to the disk. On Apple systems `sync_all` asks the drive itself to flush
@@ -110,10 +139,13 @@ fn resolve_links(path: &Path) -> std::io::Result<PathBuf> {
 }
 
 /// Give the file that replaces `old` the permissions `old` had (a private `0600` design must not
-/// come back readable by everyone, a group's `0664` must not lose the group's write access).
-fn keep_permissions(old: &Option<fs::Permissions>, new: &Path) {
-    if let Some(p) = old {
-        let _ = fs::set_permissions(new, p.clone());
+/// come back readable by everyone, a group's `0664` must not lose the group's write access). On
+/// Unix [`write_synced`] already gave them; elsewhere (a read-only attribute) they are set once the
+/// file is written. An error fails the save, which then replaces nothing.
+fn keep_permissions(old: &Option<fs::Permissions>, new: &Path) -> std::io::Result<()> {
+    match old {
+        Some(p) if cfg!(not(unix)) => fs::set_permissions(new, p.clone()),
+        _ => Ok(()),
     }
 }
 
@@ -215,11 +247,10 @@ fn open_to_flush(path: &Path) -> std::io::Result<fs::File> {
 fn write_steps(path: &Path, bytes: &[u8], backup: bool, stop: Option<Step>) -> std::io::Result<()> {
     let permissions = fs::metadata(path).ok().filter(|m| m.is_file()).map(|m| m.permissions());
     let tmp = temp_beside(path, "new");
-    if let Err(e) = write_synced(&tmp, bytes, true) {
+    if let Err(e) = write_synced(&tmp, bytes, true, permissions.as_ref()).and_then(|_| keep_permissions(&permissions, &tmp)) {
         let _ = fs::remove_file(&tmp);
         return Err(e);
     }
-    keep_permissions(&permissions, &tmp);
     if stop == Some(Step::TempWritten) {
         return Ok(());
     }
@@ -244,8 +275,8 @@ fn write_steps(path: &Path, bytes: &[u8], backup: bool, stop: Option<Step>) -> s
         let bak_tmp = temp_beside(path, "bak");
         // The last moment Cancel stops it: nothing has been replaced yet.
         let r = old
-            .and_then(|old| write_synced(&bak_tmp, &old, false))
-            .map(|_| keep_permissions(&permissions, &bak_tmp))
+            .and_then(|old| write_synced(&bak_tmp, &old, false, permissions.as_ref()))
+            .and_then(|_| keep_permissions(&permissions, &bak_tmp))
             .and_then(|_| if cancelled() { Err(cancelled_error()) } else { Ok(()) })
             .and_then(|_| replace_synced(&bak_tmp, &backup_path(path)));
         if let Err(e) = r {
@@ -307,11 +338,11 @@ pub fn write_atomic_no_follow(path: &Path, bytes: &[u8]) -> std::io::Result<()> 
         return Err(std::io::Error::new(std::io::ErrorKind::InvalidInput, format!("{}: not a regular file", path.display())));
     }
     let tmp = temp_beside(path, "new");
-    if let Err(e) = write_synced(&tmp, bytes, false) {
+    let permissions = there.map(|m| m.permissions());
+    if let Err(e) = write_synced(&tmp, bytes, false, permissions.as_ref()).and_then(|_| keep_permissions(&permissions, &tmp)) {
         let _ = fs::remove_file(&tmp);
         return Err(e);
     }
-    keep_permissions(&there.map(|m| m.permissions()), &tmp);
     // A rename replaces the name itself, so a link put there since the check above goes, and the
     // file it pointed to stays as it was.
     if let Err(e) = replace_synced(&tmp, path) {
@@ -324,7 +355,12 @@ pub fn write_atomic_no_follow(path: &Path, bytes: &[u8]) -> std::io::Result<()> 
 }
 
 /// Publish a complete new file without replacing an existing destination, even if another
-/// writer creates it after this call starts. Unsupported filesystems return an error.
+/// writer creates it after this call starts. The whole file is written beside it, then moved to
+/// the name in one step that fails if anything has the name, so the name only ever holds the whole
+/// file. Only a drive without that step (`refused_by_the_drive`) gets the file written in place
+/// with `create_new`: it still never replaces or follows anything at the name, but a crash part way
+/// can leave a short file there. Any other refusal is reported, after the waits a save gives a file
+/// another program holds on Windows.
 pub fn create_atomic(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
     if cfg!(target_arch = "wasm32") {
         let name = path.to_string_lossy();
@@ -334,18 +370,70 @@ pub fn create_atomic(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
         return crate::vfs::write(&name, bytes);
     }
     let tmp = temp_beside(path, "create");
-    // Only remove a temporary file that this invocation successfully created.
-    // The file closes at the end of this block, before it is linked into place.
-    let result = {
-        let mut file = OpenOptions::new().write(true).create_new(true).open(&tmp)?;
-        file.write_all(bytes).and_then(|_| flush(&file))
+    write_synced(&tmp, bytes, false, None)?;
+    // From here the temporary file is the rename's: moved to the name, or removed when refused.
+    let result = match rename_no_replace(&tmp, path) {
+        // Written at the name itself; `create_new` refuses a file, folder or link already there.
+        Err(e) if refused_by_the_drive(&e) => write_synced(path, bytes, false, None),
+        published => published.map_err(|e| explain_refusal(e, cfg!(windows), false)),
     };
-    let result = result.and_then(|_| fs::hard_link(&tmp, path));
-    let _ = fs::remove_file(&tmp);
     if result.is_ok() {
         sync_dir(path);
     }
     result
+}
+
+/// Whether `error` says the drive lacks the step itself (the no-replace rename, or the hard link
+/// tempfile tries where the system lacks the rename's flag), not that it refuses this file now: the
+/// system's "not supported" (`Unsupported`: ENOSYS), EOPNOTSUPP or ENOTSUP, Windows'
+/// ERROR_NOT_SUPPORTED, and os error 1 (EPERM from Linux's `link` on a file system without links,
+/// ERROR_INVALID_FUNCTION from a Windows share without the call). A held file, a missing folder or a
+/// full or read-only drive are not.
+fn refused_by_the_drive(error: &std::io::Error) -> bool {
+    // EOPNOTSUPP on Linux and Android; ENOTSUP on Apple systems and the BSDs; ERROR_NOT_SUPPORTED.
+    const NOT_SUPPORTED: i32 = if cfg!(any(target_os = "linux", target_os = "android")) {
+        95
+    } else if cfg!(unix) {
+        45
+    } else {
+        50
+    };
+    error.kind() == std::io::ErrorKind::Unsupported || matches!(error.raw_os_error(), Some(1 | NOT_SUPPORTED))
+}
+
+/// Give `tmp` the name `path` in one step that fails if anything has the name: tempfile's
+/// no-replace rename (`MoveFileExW` without replacing on Windows, `renameat2(RENAME_NOREPLACE)` on
+/// Linux and Android, `renameatx_np(RENAME_EXCL)` on Apple systems, a hard link where those are
+/// missing). A rename needs no hard link, so exFAT, FAT32 and ReFS drives take it (#16243). A
+/// rename Windows refuses while another program holds the file is tried again, as a save's is
+/// ([`rename_with_retry`]). The temporary file is moved, or removed when the rename is refused (the
+/// last refusal's `TempPath` is dropped).
+#[cfg(not(target_arch = "wasm32"))]
+fn rename_no_replace(tmp: &Path, path: &Path) -> std::io::Result<()> {
+    let mut pending = Some(tempfile::TempPath::try_from_path(tmp).inspect_err(|_| {
+        let _ = fs::remove_file(tmp);
+    })?);
+    // A refused attempt hands the temporary file back, so the next one can try again.
+    let attempt = || -> std::io::Result<()> {
+        let Some(tmp) = pending.take() else { return Err(std::io::ErrorKind::NotFound.into()) };
+        #[cfg(test)]
+        if let Some(e) = tests::no_replace_fails() {
+            pending = Some(tmp);
+            return Err(e);
+        }
+        tmp.persist_noclobber(path).map_err(|refused| {
+            pending = Some(refused.path);
+            refused.error
+        })
+    };
+    rename_with_retry(attempt, cfg!(windows), std::thread::sleep)
+}
+
+/// The browser's host stores files itself; [`create_atomic`] never gets here.
+#[cfg(target_arch = "wasm32")]
+fn rename_no_replace(tmp: &Path, _: &Path) -> std::io::Result<()> {
+    let _ = fs::remove_file(tmp);
+    Err(std::io::ErrorKind::Unsupported.into())
 }
 
 /// Leftover temporary files of saves that never finished (a crash part way), next to `path`
@@ -376,6 +464,32 @@ mod tests {
         /// This thread's saves find hard links refused ([`link_backup`]), as on a FAT drive: the
         /// backup is copied, exactly as it is there.
         pub(super) static LINKS_REFUSED: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+        /// This thread's no-replace renames ([`create_atomic`]) fail this many times in a row, with
+        /// this error, before the drive is asked: as on a drive that takes neither the rename nor a
+        /// hard link, or while another program holds the new file. Set with [`fail_no_replace`].
+        static NO_REPLACE_FAILS: std::cell::Cell<(u32, fn() -> std::io::Error)> =
+            const { std::cell::Cell::new((0, drive_refuses as fn() -> std::io::Error)) };
+    }
+
+    /// The next `times` no-replace renames on this thread fail with `error` (`u32::MAX`: all of them).
+    fn fail_no_replace(times: u32, error: fn() -> std::io::Error) {
+        NO_REPLACE_FAILS.with(|f| f.set((times, error)));
+    }
+
+    /// The hook's next failure, while any are left.
+    pub(super) fn no_replace_fails() -> Option<std::io::Error> {
+        NO_REPLACE_FAILS.with(|f| {
+            let (times, error) = f.get();
+            (times > 0).then(|| {
+                f.set((times - 1, error));
+                error()
+            })
+        })
+    }
+
+    /// What a drive that takes neither a no-replace rename nor a hard link answers.
+    fn drive_refuses() -> std::io::Error {
+        std::io::Error::new(std::io::ErrorKind::Unsupported, "this drive refuses a no-replace rename")
     }
 
     /// A new, empty folder of its own for one test (nothing in it is removed).
@@ -595,28 +709,144 @@ mod tests {
         fs::remove_dir_all(d).unwrap();
     }
 
+    /// Two creators at once publish one whole file, the other told it exists, whether the drive
+    /// takes a no-replace rename or the file is written in place.
     #[test]
     fn concurrent_creators_publish_exactly_one_whole_file() {
-        let d = dir("create-race");
-        let p = d.join("render.png");
-        let gate = std::sync::Arc::new(std::sync::Barrier::new(2));
-        let workers: Vec<_> = [b"first image".as_slice(), b"second image".as_slice()]
-            .into_iter()
-            .map(|bytes| {
-                let gate = gate.clone();
-                let p = p.clone();
-                std::thread::spawn(move || {
-                    gate.wait();
-                    create_atomic(&p, bytes)
+        for refused in [false, true] {
+            let d = dir(if refused { "create-race-in-place" } else { "create-race" });
+            let p = d.join("render.png");
+            let gate = std::sync::Arc::new(std::sync::Barrier::new(2));
+            let workers: Vec<_> = [b"first image".as_slice(), b"second image".as_slice()]
+                .into_iter()
+                .map(|bytes| {
+                    let gate = gate.clone();
+                    let p = p.clone();
+                    std::thread::spawn(move || {
+                        fail_no_replace(if refused { u32::MAX } else { 0 }, drive_refuses);
+                        gate.wait();
+                        create_atomic(&p, bytes)
+                    })
                 })
-            })
-            .collect();
-        let results: Vec<_> = workers.into_iter().map(|w| w.join().unwrap()).collect();
-        assert_eq!(results.iter().filter(|r| r.is_ok()).count(), 1);
-        assert_eq!(results.iter().filter_map(|r| r.as_ref().err()).next().unwrap().kind(), std::io::ErrorKind::AlreadyExists);
-        let bytes = fs::read(&p).unwrap();
-        assert!(bytes == b"first image" || bytes == b"second image");
-        assert!(stale_temps(&p).is_empty());
+                .collect();
+            let results: Vec<_> = workers.into_iter().map(|w| w.join().unwrap()).collect();
+            assert_eq!(results.iter().filter(|r| r.is_ok()).count(), 1, "refused {refused}");
+            assert_eq!(results.iter().filter_map(|r| r.as_ref().err()).next().unwrap().kind(), std::io::ErrorKind::AlreadyExists);
+            let bytes = fs::read(&p).unwrap();
+            assert!(bytes == b"first image" || bytes == b"second image");
+            assert!(stale_temps(&p).is_empty());
+            fs::remove_dir_all(d).unwrap();
+        }
+    }
+
+    /// #16243: a drive that takes neither a hard link nor a no-replace rename (exFAT or FAT32 where
+    /// the rename is refused too) still gets the new file, written in place: whole, with no
+    /// temporary file left, and never in place of a file, a folder or a link already at the name.
+    /// It is told so in each of the ways such a drive says it: the system's "not supported" by kind
+    /// (ENOSYS) or by number (EOPNOTSUPP, ENOTSUP, ERROR_NOT_SUPPORTED), and os error 1 (EPERM from
+    /// Linux's `link` on a file system without links, ERROR_INVALID_FUNCTION on Windows).
+    #[test]
+    fn create_works_where_the_drive_refuses_links_and_no_replace_renames() {
+        const NOT_SUPPORTED: i32 = if cfg!(windows) {
+            50
+        } else if cfg!(any(target_os = "linux", target_os = "android")) {
+            95
+        } else {
+            45
+        };
+        let refusals: [fn() -> std::io::Error; 3] =
+            [drive_refuses, || std::io::Error::from_raw_os_error(NOT_SUPPORTED), || std::io::Error::from_raw_os_error(1)];
+        for (i, refusal) in refusals.into_iter().enumerate() {
+            fail_no_replace(u32::MAX, refusal);
+            let d = dir(&format!("create-in-place-{i}"));
+            let p = d.join("library.json");
+            create_atomic(&p, b"whole library").unwrap();
+            assert_eq!(fs::read(&p).unwrap(), b"whole library", "refusal {i}");
+            assert_eq!(create_atomic(&p, b"replacement").unwrap_err().kind(), std::io::ErrorKind::AlreadyExists, "refusal {i}");
+            assert_eq!(fs::read(&p).unwrap(), b"whole library", "refusal {i}");
+            let folder = d.join("folder.json");
+            fs::create_dir(&folder).unwrap();
+            assert!(create_atomic(&folder, b"x").is_err(), "refusal {i}");
+            assert!(folder.is_dir() && fs::read_dir(&folder).unwrap().next().is_none(), "the folder is as it was, refusal {i}");
+            #[cfg(unix)]
+            {
+                let theirs = d.join("elsewhere.json");
+                fs::write(&theirs, b"theirs").unwrap();
+                let link = d.join("link.json");
+                std::os::unix::fs::symlink(&theirs, &link).unwrap();
+                assert!(create_atomic(&link, b"ours").is_err(), "refusal {i}");
+                assert_eq!(fs::read(&theirs).unwrap(), b"theirs", "the file a link names is never written, refusal {i}");
+            }
+            assert!(stale_temps(&p).is_empty() && stale_temps(&folder).is_empty(), "no temporary file is left, refusal {i}");
+            fs::remove_dir_all(d).unwrap();
+        }
+        fail_no_replace(0, drive_refuses);
+    }
+
+    /// A rename Windows refuses while another program holds the new file for a moment (an antivirus
+    /// or indexer, #8104) is tried again, as a save's is, and the file is published whole in one
+    /// step: never written in place, which would give up the crash safety on a drive that has it.
+    /// Held for good, it is reported in a save's words. Elsewhere the same numbers are other errors
+    /// (EIO, EPIPE), reported as they are.
+    #[test]
+    fn create_tries_a_held_rename_again_and_never_writes_it_in_place() {
+        let held: [fn() -> std::io::Error; 2] = [|| std::io::Error::from_raw_os_error(5), || std::io::Error::from_raw_os_error(32)];
+        for (code, error) in [5, 32].into_iter().zip(held) {
+            let d = dir(&format!("create-held-{code}"));
+            let p = d.join("render.exr");
+            fail_no_replace(2, error);
+            let result = create_atomic(&p, b"whole image");
+            let left = NO_REPLACE_FAILS.with(|f| f.get().0);
+            if cfg!(windows) {
+                assert!(result.is_ok() && left == 0, "os error {code}: {result:?}, {left} refusals not tried again");
+                assert_eq!(fs::read(&p).unwrap(), b"whole image");
+            } else {
+                assert_eq!(result.map_err(|e| e.raw_os_error()), Err(Some(code)));
+                assert!(!p.exists(), "nothing written in place, os error {code}");
+            }
+            assert!(stale_temps(&p).is_empty(), "no temporary file is left, os error {code}");
+            fs::remove_dir_all(d).unwrap();
+        }
+        #[cfg(windows)]
+        {
+            let d = dir("create-held-for-good");
+            let p = d.join("render.exr");
+            fail_no_replace(u32::MAX, held[1]);
+            let result = create_atomic(&p, b"whole image");
+            assert!(result.as_ref().is_err_and(|e| e.to_string().contains("another program may have it open")), "{result:?}");
+            assert!(!p.exists() && stale_temps(&p).is_empty(), "nothing at the name, no temporary file");
+            fs::remove_dir_all(d).unwrap();
+        }
+        fail_no_replace(0, drive_refuses);
+    }
+
+    /// Any other refused rename (here the temporary file gone, os error 2 on every system) is
+    /// reported as it is: the file is not written in place instead.
+    #[test]
+    fn create_reports_any_other_refused_rename() {
+        let d = dir("create-other-error");
+        let p = d.join("library.json");
+        fail_no_replace(1, || std::io::Error::from_raw_os_error(2));
+        let result = create_atomic(&p, b"whole library");
+        fail_no_replace(0, drive_refuses);
+        assert_eq!(result.map_err(|e| e.kind()), Err(std::io::ErrorKind::NotFound));
+        assert!(!p.exists(), "nothing written in place");
+        assert!(stale_temps(&p).is_empty(), "no temporary file is left");
+        fs::remove_dir_all(d).unwrap();
+    }
+
+    /// A new file whose watch asks it to stop (Cancel on a large render export) stops at the next
+    /// piece, as a save does: refused as cancelled, nothing at the name and no temporary file left.
+    #[test]
+    fn create_cancelled_while_it_writes_makes_no_file() {
+        let d = dir("create-cancelled");
+        let p = d.join("render.exr");
+        let watch = watched(usize::MAX);
+        watch.cancelled.store(true, std::sync::atomic::Ordering::Relaxed);
+        let result = solidcraft_kernel::watch::watching(watch, || create_atomic(&p, &vec![5u8; 2 * CHUNK]));
+        assert_eq!(result.map_err(|e| e.kind()), Err(std::io::ErrorKind::Interrupted));
+        assert!(!p.exists(), "nothing has the name");
+        assert!(stale_temps(&p).is_empty(), "no temporary file is left");
         fs::remove_dir_all(d).unwrap();
     }
 
@@ -889,6 +1119,36 @@ mod tests {
             LINKS_REFUSED.with(|r| r.set(false));
         }
 
+        /// The temporary copy a save writes is never more open than the design it replaces, even
+        /// while it is being written: it is created with the design's mode, whatever the umask.
+        #[test]
+        fn the_temporary_copy_is_never_more_open_than_the_design() {
+            let d = dir("tempmode");
+            for want in [0o600, 0o640, 0o664, 0o444] {
+                let p = d.join(format!("t{want:o}.solidcraft"));
+                write_atomic(&p, b"one", false).unwrap();
+                fs::set_permissions(&p, fs::Permissions::from_mode(want)).unwrap();
+                // The moment the temporary file exists, before anything else is done to it.
+                let tmp = d.join(format!("t{want:o}.tmp"));
+                write_synced(&tmp, b"two", false, Some(&fs::metadata(&p).unwrap().permissions())).unwrap();
+                assert_eq!(mode(&tmp), want, "temp {want:o}");
+                assert_eq!(fs::read(&tmp).unwrap(), b"two");
+                let _ = fs::set_permissions(&tmp, fs::Permissions::from_mode(0o644));
+                let _ = fs::remove_file(&tmp);
+                write_atomic(&p, b"three", true).unwrap();
+                assert_eq!((mode(&p), mode(&backup_path(&p))), (want, want), "saved {want:o}");
+                // The same for the app's own small files beside a design.
+                let q = d.join(format!("n{want:o}.json"));
+                write_atomic_no_follow(&q, b"one").unwrap();
+                fs::set_permissions(&q, fs::Permissions::from_mode(want)).unwrap();
+                write_atomic_no_follow(&q, b"two").unwrap();
+                assert_eq!(mode(&q), want, "no-follow {want:o}");
+                let _ = fs::set_permissions(&p, fs::Permissions::from_mode(0o644));
+                let _ = fs::set_permissions(&q, fs::Permissions::from_mode(0o644));
+            }
+            let _ = fs::remove_dir_all(&d);
+        }
+
         #[test]
         fn a_save_through_a_link_keeps_the_targets_permissions() {
             let d = dir("linkmode");
@@ -976,7 +1236,7 @@ mod rename_retry_tests {
         let old = directory.join("image.png");
         let pending = directory.join("completed.tmp");
         fs::write(&old, b"old complete image").unwrap();
-        write_synced(&pending, b"new complete image", false).unwrap();
+        write_synced(&pending, b"new complete image", false, None).unwrap();
         let mut reader = Some(OpenOptions::new().read(true).share_mode(1).open(&old).unwrap());
         let error = fs::rename(&pending, &old).unwrap_err();
         assert!(matches!(error.raw_os_error(), Some(5 | 32)), "{error}");

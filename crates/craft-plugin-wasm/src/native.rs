@@ -22,6 +22,19 @@ use wasmtime::{Config, Engine, Store, StoreLimits, StoreLimitsBuilder, UpdateDea
 mod bindings {
     wasmtime::component::bindgen!({ path: "../craft-plugin/wit", world: "command-plugin" });
 }
+mod dialog_bindings {
+    wasmtime::component::bindgen!({
+        path: "../craft-plugin/wit", world: "dialog-plugin",
+        with: {
+            "craft:plugin/types": super::bindings::craft::plugin::types,
+            "craft:plugin/commands": super::bindings::craft::plugin::commands,
+            "craft:plugin/log": super::bindings::craft::plugin::log,
+            "craft:plugin/control": super::bindings::craft::plugin::control,
+            "craft:plugin/files": super::bindings::craft::plugin::files,
+            "craft:plugin/clock": super::bindings::craft::plugin::clock,
+        },
+    });
+}
 include!(concat!(env!("OUT_DIR"), "/aliases.rs"));
 include!(concat!(env!("OUT_DIR"), "/importer.rs"));
 
@@ -58,6 +71,9 @@ fn trap(reason: impl Into<String>) -> HostError {
 }
 fn wit_error(error: HostError) -> PluginError {
     match error {
+        error @ HostError::StaleRevision { .. } => {
+            PluginError::CommandFailed(types::CommandFailure { command: "plugin.run".into(), reason: error.to_string() })
+        }
         HostError::PermissionDenied { permission } => PluginError::PermissionDenied(permission),
         HostError::CommandFailed { command, reason } => PluginError::CommandFailed(types::CommandFailure { command, reason }),
         HostError::LimitExceeded { limit } => PluginError::LimitExceeded(limit),
@@ -67,6 +83,7 @@ fn wit_error(error: HostError) -> PluginError {
         HostError::Cancelled => PluginError::Cancelled,
         HostError::UnsupportedCapability { reason, .. } => PluginError::InvalidManifest(types::FieldFailure { field: "capabilities".into(), reason }),
         HostError::Unsupported { reason } => PluginError::Unsupported(reason),
+        error @ HostError::InteractiveRequired { .. } => PluginError::Unsupported(error.to_string()),
         error @ (HostError::OverCeiling { .. } | HostError::Exhausted { .. }) => PluginError::LimitExceeded(error.to_string()),
     }
 }
@@ -98,9 +115,11 @@ struct State<H> {
     /// Sensitive command groups both the manifest requests and the app grants.
     groups: BTreeSet<String>,
     effect: Effect,
+    design_tokens: bool,
     folders: BTreeMap<String, Folder>,
     staged: BTreeMap<(String, PathBuf), PendingWrite>,
     clock: bool,
+    forms: bool,
     limits: StoreLimits,
     failed: Option<HostError>,
     calls: usize,
@@ -208,6 +227,20 @@ impl<H: PluginHost> commands::Host for State<H> {
         Ok(text)
     }
 }
+impl<H: PluginHost> design_state::Host for State<H> {
+    fn get_token(&mut self) -> std::result::Result<String, PluginError> {
+        self.check()?;
+        if !self.design_tokens {
+            return Err(self.fail(HostError::PermissionDenied { permission: "design@0.1 capability is required".into() }));
+        }
+        let token = self.host.design_token().map_err(|error| self.fail(error))?;
+        let text = serde_json::to_string(&token).map_err(|error| self.fail(trap(error.to_string())))?;
+        if text.len() > MAX_JSON_BYTES {
+            return Err(self.fail(limit("design token JSON size")));
+        }
+        Ok(text)
+    }
+}
 impl<H: PluginHost> log::Host for State<H> {
     fn log(&mut self, _level: log::Level, message: String) {
         if self.check().is_err() {
@@ -243,12 +276,65 @@ impl<H: PluginHost> control::Host for State<H> {
         cancelled
     }
 }
+impl<H: PluginHost> forms::Host for State<H> {
+    fn open(&mut self, entry: String, params: String) -> std::result::Result<(), PluginError> {
+        self.check()?;
+        if !self.forms {
+            return Err(self.fail(HostError::PermissionDenied { permission: "forms@0.1 is not declared".into() }));
+        }
+        if !craft_plugin::valid_id(&entry) || params.len() > MAX_JSON_BYTES {
+            return Err(self.fail(HostError::InvalidInput { field: "form".into(), reason: "invalid entry or parameters exceed 1 MiB".into() }));
+        }
+        let value: Value =
+            serde_json::from_str(&params).map_err(|e| self.fail(HostError::InvalidInput { field: "params".into(), reason: e.to_string() }))?;
+        self.host.open_form(&entry, &value).map_err(|e| self.fail(e))
+    }
+}
+
 impl<H: PluginHost> clock::Host for State<H> {
     fn now(&mut self) -> u64 {
         if !self.clock || self.check().is_err() {
             return 0;
         }
         SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or_default()
+    }
+}
+impl<H: PluginHost> storage::Host for State<H> {
+    fn put_blob(&mut self, name: String, data: Vec<u8>, cache: bool, append: bool) -> std::result::Result<u64, PluginError> {
+        // A read entry stays read-only in every way: no change to the plugin's data either.
+        if self.effect == Effect::Read {
+            self.check()?;
+            return Err(self.fail(craft_plugin::read_entry_refusal("storage.put-blob")));
+        }
+        self.check()?;
+        if data.len() > MAX_JSON_BYTES {
+            return Err(self.fail(limit("storage write size")));
+        }
+        self.host.storage_put_blob(&name, &data, cache, append).map_err(|error| self.storage_error(error))
+    }
+    fn get_blob(&mut self, plugin: Option<String>, name: String, offset: u64, len: u32) -> std::result::Result<Vec<u8>, PluginError> {
+        self.check()?;
+        if len as usize > MAX_JSON_BYTES {
+            return Err(self.fail(limit("storage read size")));
+        }
+        self.host.storage_get_blob(plugin.as_deref(), &name, offset, len).map_err(|error| self.storage_error(error))
+    }
+    fn get_document(&mut self, plugin: Option<String>, offset: u64, len: u32) -> std::result::Result<Vec<u8>, PluginError> {
+        self.check()?;
+        if len as usize > MAX_JSON_BYTES {
+            return Err(self.fail(limit("storage read size")));
+        }
+        self.host.storage_get_document(plugin.as_deref(), offset, len).map_err(|error| self.storage_error(error))
+    }
+}
+impl<H: PluginHost> State<H> {
+    /// A storage call's error: a file that isn't there or an argument out of range is an answer the
+    /// plugin can act on; anything else (a permission, a limit) fails the run.
+    fn storage_error(&mut self, error: HostError) -> PluginError {
+        match error {
+            HostError::InvalidInput { .. } => wit_error(error),
+            error => self.fail(error),
+        }
     }
 }
 impl<H: PluginHost> files::Host for State<H> {
@@ -650,20 +736,72 @@ fn check_imports(engine: &Engine, component: &Component) -> Result<Wit> {
 }
 
 pub(super) fn run<H: PluginHost + 'static>(
-    mut host: H,
+    host: H,
     manifest: &Manifest,
     bytes: &[u8],
     entry: &str,
     params: &Value,
     options: RuntimeOptions,
 ) -> (H, Result<Value>) {
+    run_mode(host, manifest, bytes, entry, params, options, false)
+}
+
+pub(super) fn dialog_fields<H: PluginHost + 'static>(
+    host: H,
+    manifest: &Manifest,
+    bytes: &[u8],
+    entry: &str,
+    params: &Value,
+    ceilings: craft_plugin::HostLimits,
+) -> (H, Result<String>) {
+    let mut manifest = manifest.clone();
+    if let Err(error) = ceilings.validate() {
+        return (host, Err(error));
+    }
+    if !manifest.capabilities.iter().any(|c| c.starts_with("dialog@")) {
+        return (host, Err(component_error("dialog@0.1 is not declared")));
+    }
+    let Some(runtime) = manifest.runtime.as_mut() else {
+        return (host, Err(component_error("no runtime")));
+    };
+    if !runtime.entries.iter().any(|e| e.name == entry && e.dialog_hook) {
+        return (host, Err(component_error("entry has no dialog hook")));
+    }
+    runtime.limits.fuel = runtime.limits.fuel.min(ceilings.max_fuel).min(10_000_000);
+    runtime.limits.memory_mib = runtime.limits.memory_mib.min(ceilings.max_memory_mib).min(16);
+    runtime.limits.deadline_ms = runtime.limits.deadline_ms.min(250);
+    runtime.limits.stack_kib = runtime.limits.stack_kib.map(|kib| kib.min(512));
+    for file in &mut runtime.permissions.files {
+        file.write = false;
+    }
+    runtime.permissions.files.retain(|file| file.read);
+    let (host, result) = run_mode(host, &manifest, bytes, entry, params, RuntimeOptions::default(), true);
+    (host, result.and_then(|value| value.as_str().map(str::to_owned).ok_or_else(|| component_error("hook result is not text"))))
+}
+
+#[allow(clippy::too_many_arguments)]
+fn run_mode<H: PluginHost + 'static>(
+    mut host: H,
+    manifest: &Manifest,
+    bytes: &[u8],
+    entry: &str,
+    params: &Value,
+    options: RuntimeOptions,
+    dialog: bool,
+) -> (H, Result<Value>) {
     let prepared = (|| {
+        // A direct runtime caller may not have used parse_manifest. Validate only this new
+        // capability here, preserving older imports' existing validated-manifest contract.
+        let design_capabilities: Vec<String> =
+            manifest.capabilities.iter().filter(|capability| capability.split('@').next() == Some("design")).take(17).cloned().collect();
+        craft_plugin::check_capabilities(&design_capabilities, "the host")?;
+        let design_tokens = !design_capabilities.is_empty();
         let runtime = manifest
             .runtime
             .as_ref()
             .ok_or_else(|| HostError::InvalidManifest { field: "runtime".into(), reason: "no executable runtime".into() })?;
         runtime.validate()?;
-        if runtime.is_importer() {
+        if runtime.is_importer() && !dialog {
             return Err(HostError::InvalidInput { field: "entry".into(), reason: "an importer converts a file; open the file instead".into() });
         }
         if bytes.len() > runtime.max_component_bytes() {
@@ -680,6 +818,7 @@ pub(super) fn run<H: PluginHost + 'static>(
         }
         let stack = stack_bytes(&runtime.limits, options, false)?;
         let (engine, component) = compile(bytes, stack)?;
+        check_dialog_export(manifest, &engine, &component)?;
         let commands = host.command_catalog().into_iter().filter(|s| runtime.commands.contains(&s.name)).map(|s| (s.name.clone(), s)).collect();
         let groups: BTreeSet<String> = host.granted_command_groups().intersection(&runtime.permissions.command_groups).cloned().collect();
         let mut folders = BTreeMap::new();
@@ -697,13 +836,26 @@ pub(super) fn run<H: PluginHost + 'static>(
             return Err(HostError::Cancelled);
         }
         host.begin_transaction()?;
-        Ok((runtime, entry, params, (engine, component, stack), (commands, groups), folders))
+        Ok((runtime, entry, params, (engine, component, stack), (commands, groups, design_tokens), folders))
     })();
     let (runtime, entry, params, compiled, commands, folders) = match prepared {
         Ok(prepared) => prepared,
         Err(error) => return (host, Err(error)),
     };
-    let (mut state, outcome) = execute(host, runtime, entry, params, compiled, commands, folders);
+    let (mut state, outcome) = execute(
+        host,
+        runtime,
+        entry,
+        params,
+        compiled,
+        commands,
+        folders,
+        manifest
+            .capabilities
+            .iter()
+            .any(|c| c.split_once('@').is_some_and(|(name, version)| name == "forms" && craft_plugin::capability_version(version) == Some((0, 1)))),
+        dialog,
+    );
     let result = (|| match outcome {
         Ok(value) => match state.host.commit_transaction() {
             Ok(()) => state.publish_writes().map(|()| value),
@@ -728,18 +880,22 @@ fn execute<H: PluginHost + 'static>(
     entry: &craft_plugin::Entry,
     params: String,
     (engine, component, stack): (Engine, Component, usize),
-    (commands, groups): (BTreeMap<String, CommandSchema>, BTreeSet<String>),
+    (commands, groups, design_tokens): (BTreeMap<String, CommandSchema>, BTreeSet<String>, bool),
     folders: BTreeMap<String, Folder>,
+    forms: bool,
+    dialog: bool,
 ) -> (State<H>, Result<Value>) {
     let limits = &runtime.limits;
     let state = State {
         host,
         commands,
         groups,
-        effect: entry.effect,
+        effect: if dialog { Effect::Read } else { entry.effect },
+        design_tokens,
         folders,
         staged: BTreeMap::new(),
         clock: runtime.permissions.clock,
+        forms: forms && !dialog,
         failed: None,
         calls: 0,
         max_calls: MAX_CALLS,
@@ -753,7 +909,19 @@ fn execute<H: PluginHost + 'static>(
         prepare_store(&mut store, limits)?;
         let wit = check_imports(&engine, &component)?;
         let response = with_interrupts(&engine, || match wit {
+            Wit::V0_1 if dialog => v0_1::call_dialog(&engine, &mut store, &component, &entry.name, &params, runtime.is_importer()),
             Wit::V0_1 => v0_1::call_entry(&engine, &mut store, &component, &entry.name, &params),
+            Wit::Current if dialog => {
+                let mut linker = Linker::new(&engine);
+                if runtime.is_importer() {
+                    importer_bindings::ImporterPlugin::add_to_linker::<_, wasmtime::component::HasSelf<_>>(&mut linker, |s| s)?;
+                } else {
+                    // Command hooks may also import design-state or forms; the hook-only WIT world stays unchanged.
+                    bindings::CommandPlugin::add_to_linker::<_, wasmtime::component::HasSelf<_>>(&mut linker, |s| s)?;
+                }
+                let guest = dialog_bindings::DialogPlugin::instantiate(&mut store, &component, &linker)?;
+                Ok(guest.craft_plugin_dialog_provider().call_update_fields(&mut store, &entry.name, &params)?.map_err(host_error))
+            }
             Wit::Current => {
                 let mut linker = Linker::new(&engine);
                 bindings::CommandPlugin::add_to_linker::<_, wasmtime::component::HasSelf<_>>(&mut linker, |s| s)?;
@@ -775,8 +943,12 @@ fn execute<H: PluginHost + 'static>(
         if Instant::now() >= store.data().deadline {
             return Err(deadline());
         }
-        let value = serde_json::from_str(&text)
-            .map_err(|e| HostError::InvalidInput { field: "result".into(), reason: format!("entry result is not JSON: {e}") })?;
+        let value = if dialog {
+            Value::String(text)
+        } else {
+            serde_json::from_str(&text)
+                .map_err(|e| HostError::InvalidInput { field: "result".into(), reason: format!("entry result is not JSON: {e}") })?
+        };
         if let Ok(remaining) = store.get_fuel() {
             ::log::debug!(
                 target: "craft_plugin_wasm",
@@ -788,7 +960,10 @@ fn execute<H: PluginHost + 'static>(
         }
         Ok(value)
     })();
-    (store.into_data(), outcome.map_err(|error| with_limits(error, limits)))
+    // Fuel can run out between epoch ticks. If a hook has also crossed its deadline, report
+    // the typed timeout even when the fuel trap was the first opportunity to stop it.
+    let expired = dialog && Instant::now() >= store.data().deadline;
+    (store.into_data(), outcome.map_err(|error| with_limits(if expired { deadline() } else { error }, limits)))
 }
 
 fn store_limits(limits: &Limits, table_elements: usize) -> StoreLimits {
@@ -891,6 +1066,17 @@ fn component_error(reason: impl Into<String>) -> HostError {
     HostError::InvalidInput { field: "component".into(), reason: reason.into() }
 }
 
+/// Optional exports are checked before either ordinary execution or a field hook can run.
+fn check_dialog_export(manifest: &Manifest, engine: &Engine, component: &Component) -> Result<bool> {
+    let declared = manifest.capabilities.iter().any(|c| c.starts_with("dialog@"));
+    let hook = manifest.runtime.as_ref().is_some_and(|r| r.entries.iter().any(|e| e.dialog_hook));
+    let exported = component.component_type().exports(engine).any(|(name, _)| name.starts_with("craft:plugin/dialog-provider@"));
+    if exported && !declared || hook && !exported {
+        return Err(component_error("dialog-provider export requires dialog@0.1 and is required by dialog_hook entries"));
+    }
+    Ok(hook)
+}
+
 pub(super) fn check_component(manifest: &Manifest, bytes: &[u8], options: RuntimeOptions) -> Result<()> {
     let runtime =
         manifest.runtime.as_ref().ok_or_else(|| HostError::InvalidManifest { field: "runtime".into(), reason: "no executable runtime".into() })?;
@@ -905,8 +1091,18 @@ pub(super) fn check_component(manifest: &Manifest, bytes: &[u8], options: Runtim
     let (engine, component) = compile_with(bytes, stack_bytes(&runtime.limits, options, importer)?)?;
     let wit = check_imports(&engine, &component)?;
     let link = |e: wasmtime::Error| component_error(format!("{e:#}"));
+    let hook = check_dialog_export(manifest, &engine, &component)?;
     if wit == Wit::V0_1 {
-        return v0_1::check_link::<Inert>(&engine, &component, importer).map_err(link);
+        return v0_1::check_link::<Inert>(&engine, &component, importer, hook).map_err(link);
+    }
+    if hook {
+        let mut linker = Linker::<State<Inert>>::new(&engine);
+        if importer {
+            importer_bindings::ImporterPlugin::add_to_linker::<_, wasmtime::component::HasSelf<_>>(&mut linker, |s| s).map_err(link)?;
+        } else {
+            bindings::CommandPlugin::add_to_linker::<_, wasmtime::component::HasSelf<_>>(&mut linker, |s| s).map_err(link)?;
+        }
+        dialog_bindings::DialogPluginPre::new(linker.instantiate_pre(&component).map_err(link)?).map_err(link)?;
     }
     let mut linker = Linker::<State<Inert>>::new(&engine);
     if importer {
@@ -1054,6 +1250,7 @@ pub(super) fn run_import<H: PluginHost + 'static>(
         }
         let stack = stack_bytes(&runtime.limits, runtime_options, true)?;
         let (engine, component) = compile(bytes, stack)?;
+        check_dialog_export(manifest, &engine, &component)?;
         let import = ImportState {
             dir,
             name: name.clone(),
@@ -1080,9 +1277,11 @@ pub(super) fn run_import<H: PluginHost + 'static>(
         commands: BTreeMap::new(),
         groups: BTreeSet::new(),
         effect: Effect::Open,
+        design_tokens: false,
         folders: BTreeMap::new(),
         staged: BTreeMap::new(),
         clock: runtime.permissions.clock,
+        forms: false,
         failed: None,
         calls: 0,
         max_calls: MAX_IMPORT_CALLS,

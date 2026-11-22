@@ -1873,39 +1873,44 @@ fn thread_size_suggestion_follows_picks_without_overwriting_manual_sizes() {
     assert_eq!(apply_commands(&app, &d).unwrap()[0].1["designation"], "M8x1");
 }
 
-/// Explicitly adding faces keeps automatic sizing separate for different shaft diameters.
+/// Preselection and explicit additions keep automatic sizing separate for different shaft diameters.
 #[test]
 fn threads_on_different_selected_diameters_keep_each_faces_automatic_size() {
-    let mut app = app_with(json!([
-        {"command":"solid.cylinder","params":{"radius":4,"height":10}},
-        {"command":"solid.cylinder","params":{"base":[30,0,0],"radius":10,"height":10}}
-    ]));
-    let small = thread_face(&app, "Body1");
-    let large = thread_face(&app, "Body2");
-    let before = app.session.doc.to_json();
-    let mut d = start(&mut app, vec![small.clone(), large.clone()], "solid.thread");
-    assert!(!d.inputs[0].multi);
-    assert_eq!(d.inputs[0].items, vec![small.clone()]);
-    d.take_box(&app.session, vec![large.clone()], true);
-    assert!(d.inputs[0].multi);
-    assert_eq!(d.inputs[0].items, vec![small, large]);
-    assert!(matches!(&d.kind, Kind::Thread { designation, .. } if designation == "M8"));
-    assert_eq!(app.session.doc.to_json(), before, "suggesting a size is read-only");
-    let commands = apply_commands(&app, &d).unwrap();
-    assert_eq!(commands.len(), 1);
-    let (command, params) = &commands[0];
-    assert_eq!(command, "solid.thread");
-    assert_eq!(params["faces"].as_array().unwrap().len(), 2);
-    assert!(params.get("designation").is_none(), "each face must keep automatic sizing");
-    let reply = app.session.execute(command, params).unwrap();
-    let id = reply["feature"].as_u64().unwrap();
-    let state = app.session.model.state();
-    assert_eq!(state.threads.len(), 2);
-    for (thread, (body, expected)) in state.threads.iter().zip([("Body1", "M8"), ("Body2", "M20")]) {
-        assert_eq!(thread.body, body);
-        assert_eq!(thread.designation, expected);
-        assert!(!thread.internal);
-        assert_eq!(thread.feature, id, "different automatic sizes still belong to one feature");
+    for preselect_both in [false, true] {
+        let mut app = app_with(json!([
+            {"command":"solid.cylinder","params":{"radius":4,"height":10}},
+            {"command":"solid.cylinder","params":{"base":[30,0,0],"radius":10,"height":10}}
+        ]));
+        let small = thread_face(&app, "Body1");
+        let large = thread_face(&app, "Body2");
+        let before = app.session.doc.to_json();
+        let selection = if preselect_both { vec![small.clone(), large.clone()] } else { vec![small.clone()] };
+        let mut d = start(&mut app, selection, "solid.thread");
+        if !preselect_both {
+            assert!(!d.inputs[0].multi);
+            assert_eq!(d.inputs[0].items, vec![small.clone()]);
+            d.take_box(&app.session, vec![large.clone()], true);
+        }
+        assert!(d.inputs[0].multi);
+        assert_eq!(d.inputs[0].items, vec![small, large]);
+        assert!(matches!(&d.kind, Kind::Thread { designation, .. } if designation == "M8"));
+        assert_eq!(app.session.doc.to_json(), before, "suggesting a size is read-only");
+        let commands = apply_commands(&app, &d).unwrap();
+        assert_eq!(commands.len(), 1);
+        let (command, params) = &commands[0];
+        assert_eq!(command, "solid.thread");
+        assert_eq!(params["faces"].as_array().unwrap().len(), 2);
+        assert!(params.get("designation").is_none(), "each face must keep automatic sizing");
+        let reply = app.session.execute(command, params).unwrap();
+        let id = reply["feature"].as_u64().unwrap();
+        let state = app.session.model.state();
+        assert_eq!(state.threads.len(), 2);
+        for (thread, (body, expected)) in state.threads.iter().zip([("Body1", "M8"), ("Body2", "M20")]) {
+            assert_eq!(thread.body, body);
+            assert_eq!(thread.designation, expected);
+            assert!(!thread.internal);
+            assert_eq!(thread.feature, id, "different automatic sizes still belong to one feature");
+        }
     }
 }
 
@@ -3254,6 +3259,63 @@ fn split_body_by_a_curved_face_sends_it_as_a_tool() {
     assert!(p["tool"]["point"].is_array() && p.get("plane").is_none(), "{p}");
 }
 
+/// #9305: the Split Body panel cuts with a surface body's picked faces as they are, or with the
+/// whole surface body. A 10 mm cube from (0, 0, 5), and a sheet of two faces across it: y = 5
+/// for x -3…5, then rising 1 in 2 to (13, 9), 20 mm high. "Whole surface body" sends the tool
+/// face alone; "Picked faces" sends the other face too, and the cube splits into
+/// 437.5 and 562.5 mm³ (the first face extended would halve it). Editing the split shows the
+/// choice and the other face again, and running it keeps the parts.
+#[test]
+fn split_body_panel_sends_picked_faces_or_the_whole_surface_body() {
+    use crate::dialogs::{Kind, SPLIT_TOOL_FACES};
+    let mut app = app_with(json!([
+        {"command": "solid.box", "params": {"corner": [0, 0, 5], "length": 10, "width": 10, "height": 10, "body_name": "Cube"}}
+    ]));
+    app.session.execute("sketch.create", &json!({"plane": "XY", "name": "Bend"})).unwrap();
+    let curves = app.session.execute("sketch.line", &json!({"points": [[-3, 5], [5, 5], [13, 9]]})).unwrap()["created"]["curves"].clone();
+    app.session.execute("sketch.finish", &json!({})).unwrap();
+    app.session.execute("surface.extrude", &json!({"sketch": "Bend", "curves": curves, "distance": 20, "body_name": "Sheet"})).unwrap();
+    let pick = |app: &SolveApp, p: Vec3| {
+        let st = app.session.model.state();
+        let index = solidcraft_engine::doc::appearance::face_index_at(st.body("Sheet").unwrap(), p).unwrap();
+        Sel::Face { body: "Sheet".into(), index, point: p }
+    };
+    let first = pick(&app, Vec3::new(1.0, 5.0, 10.0));
+    let second = pick(&app, Vec3::new(9.0, 7.0, 10.0));
+    let Sel::Face { index: second_index, .. } = second.clone() else { panic!("a face") };
+    let volumes = |app: &SolveApp| {
+        let state = app.session.model.state();
+        let mut v = ["Cube", "Cube (1)"].map(|name| solidcraft_engine::kernel::measure(&state.body(name).unwrap().body).unwrap().volume);
+        v.sort_by(f64::total_cmp);
+        v
+    };
+    let parts = |v: [f64; 2]| v.iter().zip([437.5, 562.5]).all(|(a, b)| (a - b).abs() < 1e-6);
+
+    let mut d = start(&mut app, vec![Sel::Body { name: "Cube".into() }, first], "solid.split_body");
+    d.kind = Kind::Split { sheet: 2 };
+    let p = apply_commands(&app, &d).unwrap().remove(0).1;
+    assert_eq!((p["tool_sheet"].as_str(), p.get("tool_faces")), (Some("body"), None), "{p}");
+    d.kind = Kind::Split { sheet: 1 };
+    let mut more = crate::selection::SelInput::new(SPLIT_TOOL_FACES, crate::selection::FACES, true);
+    more.items = vec![second];
+    d.inputs.push(more);
+    let (command, p) = apply_commands(&app, &d).unwrap().remove(0);
+    let sent: Vec<f64> = p["tool_faces"][0].as_array().unwrap().iter().filter_map(serde_json::Value::as_f64).collect();
+    assert_eq!((p["tool_sheet"].as_str(), sent), (Some("faces"), vec![9.0, 7.0, 10.0]), "{p}");
+    let split = app.session.execute(&command, &p).unwrap()["feature"].as_u64().unwrap();
+    assert!(parts(volumes(&app)), "{:?}", volumes(&app));
+
+    app.edit_feature(split);
+    let d = app.dialog.take().unwrap();
+    assert!(matches!(d.kind, Kind::Split { sheet: 1 }));
+    let refilled = d.inputs.iter().find(|inp| inp.label == SPLIT_TOOL_FACES).map(|inp| inp.items.clone()).unwrap_or_default();
+    assert!(matches!(refilled.as_slice(), [Sel::Face { index, .. }] if *index == second_index), "{refilled:?}");
+    crate::dialogs::run_dialog(&mut app, &d).unwrap();
+    app.editing_state = None;
+    assert!(app.session.model.results.iter().all(|r| r.error.is_none()), "{:?}", app.session.model.results);
+    assert!(parts(volumes(&app)), "{:?}", volumes(&app));
+}
+
 /// Runs a primitive's dialog with `sels` pre-selected and returns the new body's centroid.
 fn primitive_on(app: &mut SolveApp, sels: Vec<Sel>, id: &str, edit: impl FnOnce(&mut Dialog)) -> (serde_json::Value, Vec3) {
     let mut d = start(app, sels, id);
@@ -4304,6 +4366,31 @@ fn model_bounds_are_kept_until_the_model_changes() {
     assert!((far.max.x - 505.0).abs() < 1e-6, "a new sketch grows the box: {far:?}");
 }
 
+/// What the refinement reads of each body whatever the view (its id, whether it may be refined,
+/// the ids of every body) is taken once per model, not each time the view rests: the same
+/// state gives the same record, and a new body makes a new one with it.
+#[test]
+fn the_refinements_record_of_the_bodies_is_kept_until_the_model_changes() {
+    let mut app = boxed();
+    let record = |app: &SolveApp| {
+        let st = crate::open_meshing::shown_world(app);
+        let bounds = crate::viewport::body_bounds(app, &st);
+        (st.clone(), crate::viewport::lod_bodies(app, &st, &bounds))
+    };
+    let (st, one) = record(&app);
+    assert_eq!(one.bodies.len(), 1);
+    assert_eq!(one.bodies[0], (crate::display_lod::body_id(&st.bodies[0]).0, true), "a solid may be refined");
+    assert!(one.live.contains(&one.bodies[0].0));
+    assert!(std::sync::Arc::ptr_eq(&one, &record(&app).1), "the same state gives the same record");
+    app.run("solid.box", json!({"length": 5, "width": 5, "height": 5, "corner": [100, 0, 0], "operation": "new"})).unwrap();
+    let (st, two) = record(&app);
+    assert_eq!(two.bodies.len(), 2, "a new body makes a new record");
+    for (b, (id, refined)) in st.bodies.iter().zip(&two.bodies) {
+        assert_eq!(*id, crate::display_lod::body_id(b).0);
+        assert!(*refined && two.live.contains(id));
+    }
+}
+
 /// #2747: the Revolve window takes a planar body face as its profile, as the engine already
 /// does: the box's front face (on Y = 0, from the Z axis to X = 40) turned about Z is a
 /// Ø80 × 20 cylinder.
@@ -5001,6 +5088,27 @@ fn shell_lists_the_faces_its_chip_counts() {
     h.frames(2);
     assert_eq!(h.app.dialog.as_ref().unwrap().inputs[0].items, vec![back]);
     assert!(h.widget("1 selected").is_some());
+}
+
+/// A selected point and circle go to Coincident from the toolbar at once, as before the quick
+/// menu (#5501): the point is put on the circle.
+#[test]
+fn coincident_takes_a_point_with_a_circle() {
+    let mut h = crate::scenario::Harness::new();
+    h.app.run("sketch.create", json!({"plane": "XY"})).unwrap();
+    h.app.run("sketch.point", json!({"point": [30, 0], "id": "q"})).unwrap();
+    let c1 = h.app.run("sketch.circle.center", json!({"center": [0, 0], "radius": 10})).unwrap()["curves"][0].as_str().unwrap().to_string();
+    h.app.session.selection = vec![Sel::SketchPoint { id: "q".into() }, Sel::SketchCurve { id: c1.clone(), sketch: None }];
+    h.app.start("sketch.constraint.coincident");
+    let sk = h.app.session.doc.sketch(h.app.session.active_sketch.unwrap()).unwrap();
+    let (q, c) = (sk.point_index("q").unwrap(), sk.curve_index(&c1).unwrap());
+    assert!(
+        sk.constraints.iter().any(|k| matches!(k.kind, solidcraft_engine::sketch::ConstraintKind::PointOnCurve { p, c: on } if p == q && on == c)),
+        "the point is put on the circle: {:?} ({:?})",
+        sk.constraints,
+        h.app.status
+    );
+    assert!(h.app.tool.is_none(), "no pick tool is left waiting");
 }
 
 /// #11663: Fix started with only points selected (no curve to fix them through) gives each of

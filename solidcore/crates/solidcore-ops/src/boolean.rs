@@ -20,11 +20,13 @@ use solidcore::boolean::operand_tolerances::matched_tolerances;
 use solidcore::geom::a_object::BooleanOperation;
 use solidcore::kernel::Kernel;
 use solidcore::primitive::primitive_creation::p1::Boolean2d;
+use solidcore::topology::brep::p3::brep_copy;
 use solidcore::topology::brep::validation::update_tolerances_after_boolean;
 use solidcore::Brep;
 use solidcore::Result as KernelResult;
 
 use crate::body::{finish_under, Body, Contract, Expect, Outward, Proof};
+use crate::measure::{locate_points, Located};
 use crate::session::run_taking;
 use crate::{Error, Result};
 
@@ -48,9 +50,9 @@ enum Done {
 }
 
 impl crate::session::Answer for Done {
-    fn refusal(&self) -> Option<String> {
+    fn refusal(&self) -> Option<Error> {
         match self {
-            Done::Refused(e) => Some(e.to_string()),
+            Done::Refused(e) => Some(e.clone()),
             _ => None,
         }
     }
@@ -137,10 +139,11 @@ fn result(d: Done, empty: Result<Option<Body>>) -> Result<Option<Body>> {
 
 /// `a` op `b` (`SmApiBoolean`) under [`Contract::Closed`]: `None` when the result is empty,
 /// [`Error::NotSolid`] when solid operands give a body that is not closed (solids touching
-/// along an edge or at a vertex are closed).
+/// along an edge or at a vertex are closed). An empty difference or intersection of solids is
+/// [`Error::EmptyRefuted`] where a vertex of an operand shows the result holds material.
 ///
 /// # Errors
-/// [`Error::NotSolid`]; the kernel's error.
+/// [`Error::NotSolid`]; [`Error::EmptyRefuted`]; the kernel's error.
 pub fn boolean(a: Body, b: Body, op: BooleanOp) -> Result<Option<Body>> {
     boolean_with(a, b, op, Contract::Closed)
 }
@@ -159,11 +162,55 @@ pub fn boolean_with(a: Body, b: Body, op: BooleanOp, contract: Contract) -> Resu
         let expect = expect_of(k, &mut operands, contract)?;
         let [(mut ca, _), (mut cb, _)] = operands;
         matched_tolerances(k, &mut ca, &mut cb)?;
+        let witnesses = Witnesses::of(k, &ca, &cb, op, expect)?;
         let mut r = sm::boolean(k, ca, cb, operation(op))?.result;
         after_boolean(k, &mut r)?;
-        finished(k, r, expect, contract)
+        Ok(match finished(k, r, expect, contract)? {
+            Done::Empty => witnesses.refute(k),
+            d => d,
+        })
     })?;
     result(d, Ok(None))
+}
+
+/// Each operand's vertices with a copy of the other operand, which the boolean consumes, and
+/// the side of it (material or void) on which a vertex proves the result is not empty.
+struct Witnesses(Vec<(Vec<[f64; 3]>, Brep, bool)>);
+
+impl Witnesses {
+    fn of(k: &mut Kernel, a: &Brep, b: &Brep, op: BooleanOp, expect: Expect) -> KernelResult<Self> {
+        if !expect.solid() {
+            return Ok(Self(Vec::new()));
+        }
+        let pairs: &[(&Brep, &Brep, bool)] = match op {
+            BooleanOp::Union => &[],
+            BooleanOp::Subtract => &[(a, b, false)],
+            BooleanOp::Intersect => &[(a, b, true), (b, a, true)],
+        };
+        let mut held = Vec::new();
+        for &(from, against, material) in pairs {
+            held.push((vertices(from)?, brep_copy(k, against)?, material));
+        }
+        Ok(Self(held))
+    }
+
+    fn refute(self, k: &Kernel) -> Done {
+        for (points, against, material) in &self.0 {
+            let located = locate_points(k, against, points);
+            let on_its_side = |l: &std::result::Result<Located, _>| matches!(l, Ok(Located::InRegion { material: Some(m), .. }) if m == material);
+            if let Some((&at, _)) = points.iter().zip(located).find(|(_, l)| on_its_side(l)) {
+                return Done::Refused(Error::EmptyRefuted { at });
+            }
+        }
+        Done::Empty
+    }
+}
+
+fn vertices(b: &Brep) -> KernelResult<Vec<[f64; 3]>> {
+    b.vertex_list()
+        .iter()
+        .map(|&v| b.vertex(v).map(|v| [v.point.x, v.point.y, v.point.z]))
+        .collect()
 }
 
 /// The union of `bodies` under [`Contract::Closed`], pairwise level by level (an odd one

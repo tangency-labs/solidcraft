@@ -163,7 +163,7 @@ use crate::curve::curve::p1::GlobalPointSolveOptions;
 use crate::curve::curve::{p2 as curve2, Curve, CurveKind};
 use crate::curve::line::Line;
 use crate::error::EntityRef;
-use crate::error::{Result, SolidError};
+use crate::error::{Failure, Result, SolidError};
 use crate::geom::extent1d::{Extent1d, ExtentNd};
 use crate::geom::extent2d::Extent2d;
 use crate::geom::geom_utility::p1::line_closest_point;
@@ -1505,11 +1505,16 @@ impl FilletCorner {
                 {
                     return Err(e)
                 }
-                Err(_) => {
-                    return Err(SolidError::blend_failed(
+                // the calculator's error is kept as the cause (#13790)
+                Err(e) => {
+                    return Err(Failure::new(
                         OP_VERT_GEOM,
-                        "a corner vertex's geometry could not be calculated",
-                    ))
+                        crate::error::blend::BlendFailure::Failed(
+                            "a corner vertex's geometry could not be calculated",
+                        ),
+                    )
+                    .caused_by(e)
+                    .into_error())
                 }
             }
         }
@@ -2042,19 +2047,24 @@ impl FilletCorner {
                     return calc;
                 }
             }
-            if calc.is_err() {
+            if let Err(cause) = calc {
                 // CalcCornerEdgeGeom() failed
 
                 // Error out if m_bDoGlobalMerge is FALSE or the type of edge is not
-                // qualify for global merge afterwards.
+                // qualify for global merge afterwards (the calculator's error is kept as
+                // the cause, #13790).
                 if !global_merge(context)
                     || pseudo(context).fillet_edge(curr_edge)?.edge_type
                         != FilletEdgeType::FilletXSideFace
                 {
-                    return Err(SolidError::blend_failed(
+                    return Err(Failure::new(
                         OP_EDGE_GEOM,
-                        "a corner edge's geometry could not be calculated",
-                    ));
+                        crate::error::blend::BlendFailure::Failed(
+                            "a corner edge's geometry could not be calculated",
+                        ),
+                    )
+                    .caused_by(cause)
+                    .into_error());
                 }
                 // pCurrEdge->GetBrep()->DeleteEdge(pCurrEdge): the pseudo-B-rep's
                 delete_edge(context, curr_edge)?;
@@ -3277,19 +3287,19 @@ impl FilletCorner {
         // Compute marching direction for solver
         let mid_pnt = base_arc.evaluate_point(env.k, base_arc.natural_interval().evaluate(0.5))?;
         let march_dir = mid_pnt - opposite_pnt;
-        match env.pseudo.re_calc_fillet_geom(
-            env.k,
-            new_fg,
-            &mut new_fs,
-            env.target,
-            false,
-            Some(march_dir),
-            Some(&center_curve),
-        ) {
-            Ok(()) => {}
-            Err(e) if e.is_unported_or_cancelled() => return Err(e),
-            Err(_) => return Err(sm_err()), // Unable to convert
-        }
+        // Unable to convert when the re-solve fails (its error is kept as the cause)
+        re_solved(
+            env.pseudo.re_calc_fillet_geom(
+                env.k,
+                new_fg,
+                &mut new_fs,
+                env.target,
+                false,
+                Some(march_dir),
+                Some(&center_curve),
+            ),
+            sm_err,
+        )?;
 
         // EdgeUse current UVTrimCurves
         let rail_curve = |pseudo: &FilletBrep, e: EdgeId| -> Result<Curve> {
@@ -3673,6 +3683,39 @@ fn make_face(
     Ok(made.face)
 }
 
+/// `error`, a failure this module builds in place of a routine's error, keeping `cause`,
+/// that routine's error (guide rule 6, #13790). Its operation, reason and status stay
+/// `error`'s.
+///
+/// **An `error` that is not a [`SolidError::Failed`] is returned as it is and `cause` is
+/// dropped**: only the record of a `Failed` holds a cause. No information is lost today:
+/// every caller passes a failure `SolidError::blend_failed` builds, which is always a
+/// `Failed` ([`re_solved`] at the two corner conversions, their local `sm_err` closure's;
+/// the fillet executive's stage failures and the session's "the fillet body is not built").
+/// A new caller must pass a `Failed` too.
+pub(in crate::blend) fn keeping_cause(error: SolidError, cause: SolidError) -> SolidError {
+    match error {
+        SolidError::Failed(failure) => (*failure).caused_by(cause).into_error(),
+        other => other,
+    }
+}
+
+/// The result of a corner conversion's re-solve (`ReCalcFilletGeom`, whose failure means
+/// the corner cannot be converted): an unported call, a cancellation or a certificate past
+/// its work budget ([`SolidError::is_unported_or_cancelled`]) passes on as it is; any other
+/// error becomes `unable()`, the conversion's own failure, keeping the re-solve's error as
+/// its cause ([`keeping_cause`]).
+///
+/// # Errors
+/// As above.
+pub(super) fn re_solved(result: Result<()>, unable: impl FnOnce() -> SolidError) -> Result<()> {
+    match result {
+        Ok(()) => Ok(()),
+        Err(e) if e.is_unported_or_cancelled() => Err(e),
+        Err(e) => Err(keeping_cause(unable(), e)),
+    }
+}
+
 /// What [`FilletCorner::drop_end_rib`] did with an Nx1 corner's end rib.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum EndRibDrop {
@@ -3813,6 +3856,199 @@ mod tests {
         assert!(!context.0.fillet_vertex(second).unwrap().is_processed());
         assert!(!context.0.fillet_vertex(third).unwrap().is_processed());
         assert!(!context.2);
+    }
+
+    /// Calculator errors: a refusal, a stage failure (a defect), a solidcore-side failure
+    /// and a bare status (no class).
+    fn calculator_errors() -> [SolidError; 4] {
+        use crate::error::blend::BlendFailure;
+        [
+            SolidError::blend(
+                "calculator",
+                BlendFailure::NoRoom(crate::blend::fillet_executive::NoRoomReason::BallDoesNotFit),
+            ),
+            SolidError::blend("calculator", BlendFailure::StageFailed),
+            SolidError::PreparationRequired {
+                operation: "calculator",
+            },
+            SolidError::sm_err("calculator"),
+        ]
+    }
+
+    /// `e` is the corner failure `operation` reports with `phrase`, as before its cause was
+    /// kept (the same failure, operation and status), now with `cause` as its cause: its
+    /// class is the cause's (#13790).
+    fn assert_corner_failure_keeps(
+        e: &SolidError,
+        operation: &str,
+        phrase: &'static str,
+        cause: &SolidError,
+    ) {
+        use crate::error::blend::BlendFailure;
+        assert_eq!(e.operation(), operation, "{e:?}");
+        assert_eq!(
+            e.blend_failure(),
+            Some(&BlendFailure::Failed(phrase)),
+            "{e:?}"
+        );
+        assert_eq!(e.sm_status(), Some(SM_ERR), "{e:?}");
+        assert_eq!(e.upstream_status(), Some(SM_ERR), "{e:?}");
+        assert_eq!(
+            e.kind(),
+            crate::error::ErrorKind::of_status(SM_ERR),
+            "{e:?}"
+        );
+        assert_eq!(e.cause(), Some(cause), "{e:?}");
+        let source = std::error::Error::source(e.failure().unwrap()).map(ToString::to_string);
+        assert_eq!(source, Some(cause.to_string()));
+        assert_eq!(
+            e.to_string(),
+            format!("{operation}: {phrase}; caused by {cause}")
+        );
+        assert_eq!(e.is_refusal(), cause.is_refusal(), "{e:?}");
+        assert_eq!(e.is_defect(), cause.is_defect(), "{e:?}");
+        assert_eq!(e.sized(), cause.sized(), "{e:?}");
+        assert_eq!(e.is_port_failure(), cause.is_port_failure(), "{e:?}");
+    }
+
+    /// A corner vertex whose calculation fails is reported as before, keeping the
+    /// calculator's error as its cause.
+    #[test]
+    fn a_failed_corner_vertex_keeps_the_calculators_error() {
+        for cause in calculator_errors() {
+            assert_corner_failure_keeps(
+                &corner_vertex_failure(&cause),
+                OP_VERT_GEOM,
+                "a corner vertex's geometry could not be calculated",
+                &cause,
+            );
+        }
+        // the class the cause gives: a refusal under it reads as the refusal, a stage
+        // failure as a defect, a solidcore-side failure as no status answer; a bare status
+        // leaves it unclassed, as it was without its cause
+        let [refusal, stage, port, bare] =
+            calculator_errors().map(|cause| corner_vertex_failure(&cause));
+        assert!(refusal.is_refusal() && !refusal.is_defect() && refusal.sized());
+        assert!(refusal.is_status_answer());
+        assert!(stage.is_defect() && !stage.is_refusal() && stage.is_status_answer());
+        assert!(port.is_port_failure() && !port.is_status_answer());
+        assert!(!port.is_defect() && !port.is_refusal());
+        assert!(!bare.is_defect() && !bare.is_refusal() && bare.is_status_answer());
+    }
+
+    /// The corner vertex failure of a calculator that fails with `cause`.
+    fn corner_vertex_failure(cause: &SolidError) -> SolidError {
+        use crate::blend::fillet_geom::p1::FilletVertex;
+
+        let k = Kernel::default();
+        let mut pseudo = FilletBrep::new();
+        let vertex = pseudo.brep_mut().add_vertex(Point3::ZERO).unwrap();
+        pseudo.insert_fillet_vertex(vertex, FilletVertex::new(&k, None));
+        let mut corner = FilletCorner::new(FilletCornerKind::NByOne, None, None, None, 1e-3, 0.1);
+        corner.vertices = vec![vertex];
+        corner
+            .calc_corner_vert_geom_with(
+                &mut pseudo,
+                |pseudo, vertex| Ok(pseudo.fillet_vertex(vertex)?.is_processed()),
+                |_, _| Err(cause.clone()),
+                |_, _, _| Ok(()),
+            )
+            .unwrap_err()
+    }
+
+    /// A corner edge whose calculation fails, outside a global merge, is reported as
+    /// before, keeping the calculator's error as its cause.
+    #[test]
+    fn a_failed_corner_edge_keeps_the_calculators_error() {
+        use crate::blend::fillet_geom::p1::FilletCornerId;
+
+        for cause in calculator_errors() {
+            let mut pseudo = FilletBrep::new();
+            let start = pseudo.brep_mut().add_vertex(Point3::ZERO).unwrap();
+            let end = pseudo
+                .brep_mut()
+                .add_vertex(Point3::new(1.0, 0.0, 0.0))
+                .unwrap();
+            let edge = pseudo
+                .new_fillet_edge(start, end, Some(FilletCornerId(0)))
+                .unwrap();
+            let mut corner =
+                FilletCorner::new(FilletCornerKind::NByOne, None, None, None, 1e-3, 0.1);
+            corner.edges = vec![edge];
+            let e = corner
+                .calc_corner_edge_geom_with(
+                    &mut pseudo,
+                    |_, _, _| Err(cause.clone()),
+                    |_| false,
+                    |pseudo| pseudo,
+                    |_, _| Ok(()),
+                )
+                .unwrap_err();
+            assert_corner_failure_keeps(
+                &e,
+                OP_EDGE_GEOM,
+                "a corner edge's geometry could not be calculated",
+                &cause,
+            );
+        }
+    }
+
+    /// A calculator error whose own cause chain holds a cancellation: the corner failure
+    /// keeps it, so the failure is no longer a status answer (it was one without its
+    /// cause), while its status and class stay as the outer error reports them.
+    #[test]
+    fn a_failed_corner_vertex_over_a_cancellation_is_no_status_answer() {
+        let cancelled = SolidError::Cancelled {
+            operation: "re-solve",
+        };
+        let cause = Failure::new(
+            "calculator",
+            crate::error::blend::BlendFailure::Failed("the calculation stopped"),
+        )
+        .caused_by(cancelled.clone())
+        .into_error();
+        // the site passes on only a cancellation itself, not one beneath another error
+        assert!(!cause.is_unported_or_cancelled());
+        let e = corner_vertex_failure(&cause);
+        assert_corner_failure_keeps(
+            &e,
+            OP_VERT_GEOM,
+            "a corner vertex's geometry could not be calculated",
+            &cause,
+        );
+        assert_eq!(e.root_cause(), &cancelled);
+        assert_eq!(e.sm_status(), Some(SM_ERR));
+        assert!(!e.is_status_answer(), "{e:?}");
+        assert!(!e.is_port_failure() && !e.is_defect() && !e.is_refusal());
+    }
+
+    /// A constant-radius conversion whose re-solve fails is reported as before (the
+    /// failure `unable` builds, here the conversion's `sm_err` failure), keeping the
+    /// re-solve's error as its cause; an unported call, a cancellation or a certificate
+    /// past its budget passes on as it is, and a re-solve that succeeds goes on.
+    #[test]
+    fn a_failed_constant_radius_re_solve_keeps_its_error() {
+        let phrase = "the corner cannot be made a constant-radius fillet";
+        let sm_err = || SolidError::blend_failed(OP_CONST_RAD, phrase);
+        for cause in calculator_errors() {
+            let e = re_solved(Err(cause.clone()), sm_err).unwrap_err();
+            assert_corner_failure_keeps(&e, OP_CONST_RAD, phrase, &cause);
+        }
+        assert_eq!(re_solved(Ok(()), sm_err), Ok(()));
+        for passed in [
+            SolidError::unported("ReCalcFilletGeom", "blend.fillet_geom_p3"),
+            SolidError::Cancelled {
+                operation: "re-solve",
+            },
+        ] {
+            assert_eq!(re_solved(Err(passed.clone()), sm_err), Err(passed));
+        }
+        // an error without a record has no cause to keep (no caller passes one)
+        let bare = SolidError::sm_err(OP_CONST_RAD);
+        assert_eq!(
+            keeping_cause(bare.clone(), SolidError::sm_err("re-solve")),
+            bare
+        );
     }
 
     /// `SqueezeEdge` moves one rail vertex use at a time: a closed rail at the vertex to

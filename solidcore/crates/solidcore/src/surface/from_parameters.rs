@@ -22,6 +22,7 @@
 //!
 //! Deviations: none (no upstream counterpart). No recursion.
 
+use crate::error::surface::SurfaceFailure;
 use crate::error::{Result, SolidError};
 use crate::eval::{Frame, Surface as Record};
 use crate::geom::axis2_placement::Axis2Placement;
@@ -317,7 +318,14 @@ fn evaluates_as_record(
         crate::eval::SurfaceEval::new(record).map_err(|_| bad("the record does not evaluate"))?;
     let net = form
         .gw_nurb()
-        .ok_or_else(|| SolidError::surface_failed(OP, "the B-spline form has no NURB"))?;
+        .ok_or_else(|| {
+            SolidError::surface(
+                OP,
+                SurfaceFailure::Defect {
+                    why: "the B-spline form has no NURB, though `lies_on` read the same form's NURB before this check and returned an error without it",
+                },
+            )
+        })?;
     let (p, q) = net.degrees();
     let size = net.rows().flatten().fold(0.0_f64, |m, c| {
         let w = if c.w == crate::nurbs::math::NOW {
@@ -853,14 +861,17 @@ mod tests {
         AnalyticSupport::check(&k, &back).unwrap();
     }
 
-    /// The conversion failures keep the operation, status, kind and entity of the bare
-    /// `Upstream` statuses they replace (a sample).
+    /// The conversion failures keep the operation, status and entity of the bare
+    /// `Upstream` statuses they replace (a sample); the reviewed defect is class
+    /// `stage_failed`.
     #[test]
     fn typed_surface_failures_keep_their_upstream_answers() {
         use crate::error::surface::SurfaceFailure;
         let samples: [(&'static str, SurfaceFailure, i32); 1] = [(
             OP,
-            SurfaceFailure::Failed("the B-spline form has no NURB"),
+            SurfaceFailure::Defect {
+                why: "the B-spline form has no NURB, though `lies_on` read it",
+            },
             crate::error::SM_ERR,
         )];
         for (operation, failure, code) in samples {
@@ -872,7 +883,12 @@ mod tests {
             };
             assert_eq!(typed.sm_status(), before.sm_status(), "{typed:?}");
             assert_eq!(typed.upstream_status(), Some(code), "{typed:?}");
-            assert_eq!(typed.kind(), before.kind(), "{typed:?}");
+            assert_eq!(
+                typed.kind(),
+                crate::error::ErrorKind::StageFailed,
+                "{typed:?}"
+            );
+            assert!(typed.is_defect(), "{typed:?}");
             assert_eq!(typed.operation(), before.operation(), "{typed:?}");
             assert_eq!(typed.entity(), None, "{typed:?}");
             assert_eq!(typed.is_port_failure(), before.is_port_failure());

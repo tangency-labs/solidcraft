@@ -100,6 +100,19 @@ impl GltfImport {
         if let solidcraft_doc::FeatureKind::MeshImport { meshes, .. } = &mut self.feature.kind {
             for (m, slot) in meshes.iter_mut().zip(&self.plan.bodies) {
                 let Some(frame) = slot.and_then(|s| world.get(s).copied().flatten()) else { continue };
+                // Placements are rigid, so shading normals turn with the rotation alone.
+                if !m.corner_normals.is_empty() {
+                    m.corner_normals = m
+                        .corner_normals
+                        .as_chunks::<3>()
+                        .0
+                        .iter()
+                        .flat_map(|n| {
+                            let v = solidcraft_doc::apply_vector(&frame, Vec3::new(n[0], n[1], n[2]));
+                            [v.x, v.y, v.z]
+                        })
+                        .collect();
+                }
                 m.positions = m
                     .positions
                     .as_chunks::<3>()

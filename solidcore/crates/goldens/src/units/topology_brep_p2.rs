@@ -1180,6 +1180,8 @@ fn merge_ssi_rust(
         let t = solidcore::topology::vertex::tolerance(b, v).map_err(h)?;
         out.extend([p.x, p.y, p.z, t]);
     }
+    #[cfg(test)]
+    crate::certify::written(b);
     Ok(Output::new().values("out", out))
 }
 

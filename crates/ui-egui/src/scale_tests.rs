@@ -367,6 +367,8 @@ pub(crate) fn view_frame(
         selection_tint: [0.4, 0.6, 0.9],
         hatch: Default::default(),
         moving: None,
+        motions: Default::default(),
+        ground: None,
     }
 }
 
@@ -535,8 +537,14 @@ fn whole_body_highlight_cost_from_the_models_own_triangles() {
     let bodies = names.len();
     h.app.viewport.hover_bodies = names;
     let copied = ms(|| drop(crate::viewport::build_highlight(&h.app)));
-    h.app.viewport.gpu =
-        Some(crate::gpu::GpuTarget { format: egui_wgpu::wgpu::TextureFormat::Rgba8Unorm, depth: None, samples: 1, tess: true, oit: false });
+    h.app.viewport.gpu = Some(crate::gpu::GpuTarget {
+        format: egui_wgpu::wgpu::TextureFormat::Rgba8Unorm,
+        depth: None,
+        samples: 1,
+        tess: true,
+        oit: false,
+        edges: false,
+    });
     let planned = ms(|| drop(crate::viewport::build_highlight(&h.app)));
     println!("HIGHLIGHT bodies={bodies} triangles={triangles} cpu_copy_ms={copied:.2} model_triangles_ms={planned:.2}");
 }
@@ -713,8 +721,14 @@ fn many_selected_bodies_hover_cost() {
     };
     let modes: [(&str, Option<bool>); 3] = [("headless", None), ("gpu_plans", Some(true)), ("gpu_blocks", Some(false))];
     for (mode, tess) in modes {
-        h.app.viewport.gpu =
-            tess.map(|tess| crate::gpu::GpuTarget { format: egui_wgpu::wgpu::TextureFormat::Rgba8Unorm, depth: None, samples: 1, tess, oit: false });
+        h.app.viewport.gpu = tess.map(|tess| crate::gpu::GpuTarget {
+            format: egui_wgpu::wgpu::TextureFormat::Rgba8Unorm,
+            depth: None,
+            samples: 1,
+            tess,
+            oit: false,
+            edges: false,
+        });
         drop(crate::viewport::build_scene(&h.app));
         for (selected, biggest) in [(false, false), (true, false), (false, true), (true, true)] {
             h.app.session.selection =
@@ -853,7 +867,14 @@ fn orbit_frame_cost() {
     let mut frames = crate::gpu::OffscreenFrames::new(SIZE, true);
     h.app.viewport.gpu = match &frames {
         Some(f) => f.target(),
-        None => Some(crate::gpu::GpuTarget { format: egui_wgpu::wgpu::TextureFormat::Rgba8Unorm, depth: None, samples: 1, tess: true, oit: false }),
+        None => Some(crate::gpu::GpuTarget {
+            format: egui_wgpu::wgpu::TextureFormat::Rgba8Unorm,
+            depth: None,
+            samples: 1,
+            tess: true,
+            oit: false,
+            edges: false,
+        }),
     };
     h.app.fit_view();
     h.frames(5);
@@ -991,4 +1012,32 @@ fn product_preview_rebuild_cost() {
             instanced.blocks.iter().map(|b| b.bytes.vertices.len()).sum::<usize>(),
         );
     }
+}
+
+#[test]
+fn pop_out_interface_scales_only_its_own_viewport_and_pointer() {
+    let ctx = egui::Context::default();
+    let child = egui::ViewportId::from_hash_of("scaled pop-out");
+    let screen = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(800.0, 600.0));
+    let pointer = egui::pos2(400.0, 200.0);
+    let input = |viewport_id| {
+        let mut raw =
+            egui::RawInput { viewport_id, screen_rect: Some(screen), events: vec![egui::Event::PointerMoved(pointer)], ..Default::default() };
+        raw.viewports.entry(viewport_id).or_default().native_pixels_per_point = Some(1.0);
+        raw
+    };
+    crate::view_window_scale::in_window(&ctx, child, 2.0, || {
+        ctx.run_ui(input(child), |ui| {
+            assert_eq!(ui.ctx().pixels_per_point(), 2.0);
+            assert_eq!(ui.ctx().content_rect().size(), egui::vec2(400.0, 300.0));
+            assert_eq!(ui.input(|i| i.pointer.hover_pos()), Some(egui::pos2(200.0, 100.0)));
+        })
+        .drop_without_applying_deltas();
+    });
+    ctx.run_ui(input(egui::ViewportId::ROOT), |ui| {
+        assert_eq!(ui.ctx().pixels_per_point(), 1.0);
+        assert_eq!(ui.ctx().content_rect(), screen);
+        assert_eq!(ui.input(|i| i.pointer.hover_pos()), Some(pointer));
+    })
+    .drop_without_applying_deltas();
 }
