@@ -751,6 +751,16 @@ fn several_features_from_one_used_sketch_with_apply() {
         for (index, step) in [(1, "apply"), (2, last)] {
             h.app.dialog.as_mut().unwrap().inputs[0].items = vec![Sel::Profile { sketch, index }];
             h.settle();
+            // The preview computes off the window thread and the window is taller while it says so:
+            // wait for it, as a person does, so the click lands where the button now is.
+            for _ in 0..3000 {
+                if !h.app.preview.busy && h.app.applying.is_none() {
+                    break;
+                }
+                h.frames(1);
+                std::thread::sleep(std::time::Duration::from_millis(10));
+            }
+            h.frames(2);
             let action = match step {
                 "apply" => json!({"click": {"handle": "dialog:apply"}}),
                 "OK" => json!({"key": "Enter"}),
