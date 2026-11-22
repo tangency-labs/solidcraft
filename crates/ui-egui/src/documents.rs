@@ -2045,7 +2045,10 @@ pub(crate) fn command(app: &mut SolveApp, id: &str, p: &Value) -> Result<Value, 
         .ok_or("document.activate: no open design has that document_id (document.list names the open designs)")?;
     // The folder limits that opening the file would meet, as `reuse_path` applies them.
     if let Some(path) = open_sessions(app)[at].path.as_deref() {
-        solidcraft_engine::io::vfs::check(path).map_err(|e| e.to_string())?;
+        // A fixed message: `vfs::check`'s names the path, which `document.list` leaves out.
+        if solidcraft_engine::io::vfs::check(path).is_err() {
+            return Err("document.activate: that design is outside the folders this caller may use".into());
+        }
     }
     if app.agent_chat.following_document && at != app.docs.active {
         return Err("the design is already open in another tab; select that tab to continue in its own conversation".into());
@@ -6017,7 +6020,9 @@ mod tests {
         assert_eq!(rows[1]["document_id"], json!(ids[1]), "the design itself is still listed");
         assert_eq!(rows[1]["name"], json!("b"), "a saved design is named by its file");
 
-        assert!(vfs::scoped(scope(), || a.run("document.activate", json!({"document_id": ids[1]}))).is_err());
+        let refused = vfs::scoped(scope(), || a.run("document.activate", json!({"document_id": ids[1]}))).unwrap_err();
+        assert!(refused.contains("outside the folders this caller may use"), "{refused}");
+        assert!(!refused.contains(&text(&theirs)) && !refused.contains("b.solidcraft"), "the refusal names the hidden path: {refused}");
         assert_eq!(a.docs.active, 2, "a refused design is not shown");
         vfs::scoped(scope(), || a.run("document.activate", json!({"document_id": ids[0]}))).unwrap();
         assert_eq!(a.docs.active, 0);
