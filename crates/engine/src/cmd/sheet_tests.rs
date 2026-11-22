@@ -10559,7 +10559,7 @@ fn walls_on_the_outside_of_a_bend_are_left_open_and_unfold() {
     run(&mut s, "sheet.unfold", json!({}));
     let laid = &s.model.state().bodies[0].body;
     assert!(laid.validity().is_empty() && laid.shell_count() == 1);
-    run(&mut s, "sheet.unfold", json!({"refold": true}));
+    run(&mut s, "sheet.refold", json!({}));
     assert!(rel(volume(&mut s), formed) < 1e-6);
 }
 
