@@ -1803,7 +1803,7 @@ fn prim_cone(s: &mut Session, p: &Value) -> Result<Value> {
 
 /// What [`edge_points`] found: a point on each edge, in its body's frame, and the body the
 /// feature keeps (`None`: each edge is looked up on its own).
-pub(crate) struct EdgePicks {
+struct EdgePicks {
     points: Vec<Vec3>,
     body: Option<String>,
 }
@@ -1830,7 +1830,7 @@ struct RowHit {
 }
 
 /// How many bodies a refusal names before "and N more".
-const NAMED_BODIES: usize = 8;
+pub(crate) const NAMED_BODIES: usize = 8;
 
 /// A body's size, its edges' polylines and which of them are seams.
 type EdgeShape = (f64, Vec<Vec<Vec3>>, Vec<bool>, Option<solidcraft_geom::Mesh>);
@@ -1841,7 +1841,7 @@ fn polyline_dist(points: &[Vec3], q: Vec3) -> f64 {
 }
 
 /// How far from an edge of a body this big a pick still means it.
-fn edge_reach(size: f64) -> f64 {
+pub(crate) fn edge_reach(size: f64) -> f64 {
     size * 0.05 + 1e-3
 }
 
@@ -1851,16 +1851,12 @@ fn edge_reach(size: f64) -> f64 {
 /// whose edge is in the same place only in its own frame is not in the way, and two bodies
 /// with an edge there make it ambiguous. The polylines short-list the edges; which body a pick
 /// means is decided on the exact curves.
-pub(crate) fn edge_points(s: &Session, p: &Value, cmd: &str) -> Result<EdgePicks> {
+fn edge_points(s: &Session, p: &Value, cmd: &str) -> Result<EdgePicks> {
     let a = p.get("edges").and_then(Value::as_array).ok_or_else(|| bad(cmd, "`edges` must be a list"))?;
     if a.is_empty() || a.len() > 1000 {
         return Err(bad(cmd, "select 1…1000 edges"));
     }
-    let verb = match cmd {
-        "solid.chamfer" => "chamfer",
-        c if c.starts_with("sketch.") => "project",
-        _ => "round",
-    };
+    let verb = if cmd == "solid.chamfer" { "chamfer" } else { "round" };
     let st = s.model.state();
     // A picked point must lie on an edge (within the distance the kernel re-finds an edge from)
     // of the body the feature names, or of any body: a pick far from every edge would round
@@ -2154,7 +2150,7 @@ pub(crate) fn edge_points(s: &Session, p: &Value, cmd: &str) -> Result<EdgePicks
 }
 
 /// "A", "A and B", "A, B and C", and past `most` names "A, B and 3 more".
-fn and_list(names: &[String], most: usize) -> String {
+pub(crate) fn and_list(names: &[String], most: usize) -> String {
     let mut shown: Vec<String> = names.iter().take(most).cloned().collect();
     if names.len() > most {
         shown.push(format!("{} more", names.len() - most));
@@ -2168,7 +2164,7 @@ fn and_list(names: &[String], most: usize) -> String {
 
 /// The distance from `q` to edge `index` of `body` on its exact curve, and the point there:
 /// samples, then a golden-section search between the best one's neighbours.
-fn edge_foot(body: &solidcraft_kernel::Body, index: usize, q: Vec3) -> Option<(f64, Vec3)> {
+pub(crate) fn edge_foot(body: &solidcraft_kernel::Body, index: usize, q: Vec3) -> Option<(f64, Vec3)> {
     const SAMPLES: usize = 32;
     const STEPS: usize = 40;
     let e = body.record().edges.get(index)?;
