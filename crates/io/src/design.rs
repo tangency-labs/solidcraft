@@ -219,10 +219,12 @@ pub fn write_design_container_as_is(doc: &Document) -> Result<Vec<u8>> {
 }
 
 /// Design file bytes, refused when this build would not open them again (a value a command let
-/// through that the reader refuses, a design past the size limit): the save says why instead of
-/// writing a file that will not reopen. They are read exactly as opening the file reads them.
+/// through that the reader refuses): the save says why instead of writing a file that will not
+/// reopen. They are read as opening the file reads them, but without the size limits for opening
+/// a file: a save is never refused for its size (#18686).
 pub(crate) fn reopens(bytes: Vec<u8>) -> Result<Vec<u8>> {
-    crate::read_design(&bytes).map_err(|e| IoError::Invalid(format!("this design would not open again, so it was not written: {e}")))?;
+    crate::limits::reading_back(|| crate::read_design(&bytes))
+        .map_err(|e| IoError::Invalid(format!("this design would not open again, so it was not written: {e}")))?;
     Ok(bytes)
 }
 
@@ -1656,7 +1658,11 @@ mod tests {
         let bytes = write_design_container(&doc).unwrap();
         assert!(bytes.len() > max_design(), "{} bytes is not past the limit", bytes.len());
         assert!(is_design_container(&bytes));
+        // Opening it is refused under this limit, so the save's check that it opens again
+        // (`reopens`) reads it without the limits for opening a file.
+        assert!(crate::read_design(&bytes).unwrap_err().to_string().contains("too large"));
         crate::limits::test_cap::set(None);
+        assert!(crate::read_design(&bytes).is_ok());
     }
 
     #[test]
