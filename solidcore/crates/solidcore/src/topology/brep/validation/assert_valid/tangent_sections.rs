@@ -23,6 +23,8 @@
 //! edge where one of those conditions fails, keeps WR-540's reading. No recursion, and a
 //! fixed amount of work per edge use.
 
+use std::cmp::Ordering;
+
 use crate::curve::curve::CurveKind;
 use crate::error::Result;
 use crate::geom::extent3d::Extent3d;
@@ -156,7 +158,7 @@ impl Section {
     /// `asin(|foot| / s)`, and a circle's chord turns from its tangent by `asin(s / 2r)`.
     fn drift(&self, s: f64) -> Option<f64> {
         let f = self.foot().length();
-        if !(f < s) {
+        if f.partial_cmp(&s) != Some(Ordering::Less) {
             return None;
         }
         let turn = match *self {
@@ -369,13 +371,20 @@ fn choose_step(
         let (pa, pb) = (a.point(sigma), b.point(sigma));
         let turn = cross(pa, pb);
         if p.tangent {
-            if !(turn.abs() > slack * (pa.length() + pb.length())) {
+            if turn
+                .abs()
+                .partial_cmp(&(slack * (pa.length() + pb.length())))
+                != Some(Ordering::Greater)
+            {
                 return None;
             }
             for (x, px, py, sign) in [(a, pa, pb, 1.0), (b, pb, pa, -1.0)] {
                 let grad = x.gradient(px)?;
                 let lean = cross(px, grad) / px.length();
-                if !(lean.abs() >= 0.5) {
+                if !matches!(
+                    lean.abs().partial_cmp(&0.5),
+                    Some(Ordering::Greater | Ordering::Equal)
+                ) {
                     return None;
                 }
                 let want = x.gap(py).signum() * lean.signum();
@@ -397,7 +406,10 @@ fn choose_step(
             if read < 0.0 {
                 read += 2.0 * PI;
             }
-            if !((read - at_edge).abs() <= drift) {
+            if !matches!(
+                (read - at_edge).abs().partial_cmp(&drift),
+                Some(Ordering::Less | Ordering::Equal)
+            ) {
                 return None;
             }
         }
@@ -418,7 +430,7 @@ fn section(
     let [t, e1, e2] = frame;
     let b2 = Vec2::new(binormal.dot(e1), binormal.dot(e2));
     let bl = b2.length();
-    if !(bl > 0.0) {
+    if bl.partial_cmp(&0.0) != Some(Ordering::Greater) {
         return None;
     }
     let side = |tangent: Vec2| {
@@ -431,7 +443,10 @@ fn section(
             let o = plane.position().origin();
             let n = Vec2::new(n3.dot(e1), n3.dot(e2));
             let nl = n.length();
-            if !(nl >= 0.5) {
+            if !matches!(
+                nl.partial_cmp(&0.5),
+                Some(Ordering::Greater | Ordering::Equal)
+            ) {
                 return None;
             }
             let c = n3.dot(o - p);
@@ -457,7 +472,7 @@ fn section(
             }
             let w = o + (t.dot(p - o) / t.dot(a)) * a - p;
             let centre = Vec2::new(w.dot(e1), w.dot(e2));
-            if !(centre.length() > 0.0) {
+            if centre.length().partial_cmp(&0.0) != Some(Ordering::Greater) {
                 return None;
             }
             let foot_angle = (-centre.y).atan2(-centre.x);
@@ -636,7 +651,7 @@ pub(super) fn tangent_directions(
     ) else {
         return Ok(None);
     };
-    let mut out = Vec::with_capacity(uses.len());
+    let mut out = Vec::new();
     for (&eu, s) in uses.iter().zip(&sections) {
         let q = s.point(sigma);
         let Ok(d) = (q.x * e1 + q.y * e2).unitize() else {
