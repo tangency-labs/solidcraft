@@ -92,7 +92,8 @@ pub struct RecordMesh {
 /// [`ImportRecords::bodies`] as read, refused at the first body past [`super::MAX_BODIES`], which
 /// [`records_import`] refuses in any case. A body takes a dozen bytes of text and over 500 in
 /// memory, so records of millions of tiny bodies, small once compressed in a design, would
-/// otherwise take tens of gigabytes before any check ran.
+/// otherwise take tens of gigabytes before any check ran. Only this list is bounded as it is read.
+/// The other lists of records cost what parsing their JSON costs.
 fn bounded_bodies<'de, D: serde::Deserializer<'de>>(deserializer: D) -> std::result::Result<Vec<RecordBody>, D::Error> {
     struct Bodies;
     impl<'de> serde::de::Visitor<'de> for Bodies {
@@ -108,6 +109,9 @@ fn bounded_bodies<'de, D: serde::Deserializer<'de>>(deserializer: D) -> std::res
                 }
                 bodies.push(body);
             }
+            // The list keeps no spare room, so it takes the memory of its bodies and no more (a
+            // design reader bounds the bodies it keeps by their count).
+            bodies.shrink_to_fit();
             Ok(bodies)
         }
     }
