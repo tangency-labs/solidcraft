@@ -348,15 +348,15 @@ fn the_bevel_between_a_ball_and_a_plate_leaves_one_sharp_circle() {
     use solidcore::Vec3;
     use std::f64::consts::PI;
 
-    // The second model has a small closed cavity well below the restored plate top.
-    for radius in [0.0_f64, 0.1] {
+    // Both cavities stay below the restored top; the closer one clears it by 0.005.
+    for (radius, z) in [(0.0_f64, -1.0), (0.1, -1.0), (0.1, -0.105)] {
         let mut k = Kernel {
             fixes: UpstreamFixes::all(),
             ..Kernel::default()
         };
         let mut b = beveled_ball_on_plate(&mut k);
         if radius > 0.0 {
-            let cavity = create_sphere(&mut k, Vec3::new(3.4, 0.0, -1.0), radius).unwrap();
+            let cavity = create_sphere(&mut k, Vec3::new(3.4, 0.0, z), radius).unwrap();
             b = boolean_difference(&mut k, b, cavity).unwrap();
         }
         let mut ex = feature_at(&mut k, &mut b, Vec3::new(0.0, 3.5, 0.5));
@@ -365,7 +365,7 @@ fn the_bevel_between_a_ball_and_a_plate_leaves_one_sharp_circle() {
         let repeated = ex.do_defeature(&mut k);
         assert!(
             repeated.as_ref().is_ok_and(Vec::is_empty),
-            "repeated with cavity radius {radius}: {repeated:?}"
+            "repeated with cavity radius {radius} at z = {z}: {repeated:?}"
         );
         assert_eq!(ex.features().len(), 1);
         assert!(
@@ -423,8 +423,8 @@ fn the_bevel_between_a_ball_and_a_plate_leaves_one_sharp_circle() {
     }
 }
 
-/// A small cavity crosses the closing plate at z = 0. At z = 0.25 it lies
-/// wholly in the bevel material. Neither edit may strand its spherical shell.
+/// A small cavity touches the new plate at one point when its centre is at
+/// z = -0.1, crosses it at z = 0, and lies wholly in the bevel at z = 0.25.
 #[test]
 fn a_cavity_in_the_removed_bevel_keeps_the_original_body() {
     use solidcore::boolean::api_brep::boolean_difference;
@@ -432,16 +432,41 @@ fn a_cavity_in_the_removed_bevel_keeps_the_original_body() {
     use solidcore::primitive::api_primitives::create_sphere;
     use solidcore::Vec3;
 
-    for z in [0.0, 0.25] {
+    for (z, turn_sphere) in [(-0.1, false), (-0.1, true), (0.0, false), (0.25, false)] {
         let mut k = Kernel {
             fixes: UpstreamFixes::all(),
             ..Kernel::default()
         };
-        let input = beveled_ball_on_plate(&mut k);
-        let sphere = create_sphere(&mut k, Vec3::new(3.4, 0.0, z), 0.1).unwrap();
+        let mut input = beveled_ball_on_plate(&mut k);
+        let mut sphere = if turn_sphere {
+            // Same cavity, with the tangency in the face interior instead of at a pole vertex.
+            let mut s = create_sphere(&mut k, Vec3::ZERO, 0.1).unwrap();
+            let placement = [
+                [1.0, 0.0, 0.0, 0.0],
+                [0.0, 0.0, 1.0, 0.0],
+                [0.0, -1.0, 0.0, 0.0],
+                [3.4, 0.0, z, 1.0],
+            ];
+            solidcore::topology::brep::mirror::transform_matrix(&mut k, &mut s, &placement, true)
+                .unwrap();
+            s
+        } else {
+            create_sphere(&mut k, Vec3::new(3.4, 0.0, z), 0.1).unwrap()
+        };
+        if z < 0.0 {
+            // The old outer boundary clears the spherical cavity before a new
+            // plane is extended to its top point (3.4, 0, 0).
+            let clearance =
+                solidcore::query::contact::boundary_distance(&k, &mut input, &mut sphere, 0.2)
+                    .unwrap();
+            assert!(clearance.lower > 0.1, "original clearance {clearance:?}");
+        }
         let mut b = boolean_difference(&mut k, input, sphere).unwrap();
         let obstacle = faces_at(&k, &mut b, Vec3::new(3.4, 0.1, z));
         assert_eq!(obstacle.len(), 1);
+        if z < 0.0 {
+            assert_eq!(faces_at(&k, &mut b, Vec3::new(3.4, 0.0, 0.0)), obstacle);
+        }
         let mut ex = feature_at(&mut k, &mut b, Vec3::new(0.0, 3.5, 0.5));
         let before = native_body(&k, ex.base_brep());
         let error = ex
@@ -455,7 +480,7 @@ fn a_cavity_in_the_removed_bevel_keeps_the_original_body() {
         };
         assert!(
             matches!(error, SolidError::Failed(ref f) if f.reason == Reason::Defeature(expected)),
-            "expected {expected:?}, got {error:?}"
+            "at z = {z}, sphere turned = {turn_sphere}: expected {expected:?}, got {error:?}"
         );
         assert!(ex.features().is_empty(), "a refused feature was published");
         let after = native_body(&k, ex.base_brep());

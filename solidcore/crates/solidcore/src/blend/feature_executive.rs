@@ -74,8 +74,9 @@
 //! - **`ValidatePatch`'s intersection test.** Upstream compares
 //!   `sPtClass.GetClassType()` (the static class id) with `SM_PC_FACE`, so the test never
 //!   rejects a patch (WR-640). The port keeps this except when two independently
-//!   closed patches intersect. Their joint reconstruction must also clear the
-//!   retained faces, proved by the trimmed intersection intervals on both sides.
+//!   closed patches intersect. Their joint reconstruction checks the trimmed
+//!   intersection intervals on both faces and rejects isolated contacts with
+//!   retained faces away from the original rims.
 //! - **Open base.** Upstream's `DoDefeature` returns success when a feature's base patch
 //!   could not be built, with the feature's faces cut out of the base and the hole open
 //!   (WR-656), for the caller to put back with `RestoreFeatures`.
@@ -1796,7 +1797,13 @@ fn apply_patch_faces(
         keep_unported(copy_faces_carrying(k, patch, &faces, target, true).map(drop))?;
         return Ok(Vec::new());
     }
-    let copies = crate::topology::brep::p7::copy_faces_carrying(k, patch, &faces, target)?;
+    let copies = crate::topology::brep::p7::copy_faces_carrying_checked(
+        k,
+        patch,
+        &faces,
+        target,
+        |face, cause| limit_error(DefeatureFailure::PatchFaceNotCopied { face }, Some(cause)),
+    )?;
     copied_patch_faces(target, &faces, copies)
 }
 
@@ -2138,9 +2145,13 @@ fn on_loop_curve(k: &Kernel, b: &Brep, e: EdgeId, curves: &[LoopCurve], tol: f64
                  along surfaces and copied from edges that have curves",
         )
     })?;
-    let crv_pt = curve.evaluate_point(k, r.interval.mid())?;
+    on_loop_point(k, curve.evaluate_point(k, r.interval.mid())?, curves, tol)
+}
+
+/// Whether `point` lies on one of the original rim's trimmed edge curves.
+fn on_loop_point(k: &Kernel, point: Point3, curves: &[LoopCurve], tol: f64) -> Result<bool> {
     for (orig, ivl) in curves {
-        let drop = orig.drop_point(k, ivl, crv_pt, None, tol, None, SolverOperation::Intersect)?;
+        let drop = orig.drop_point(k, ivl, point, None, tol, None, SolverOperation::Intersect)?;
         if drop.success {
             return Ok(true);
         }
@@ -2214,6 +2225,7 @@ fn validate_patch(
             }
             // intersect the faces (Method shouldn't force ApproxTol3d)
             let options = FaceIntersectOptions {
+                want_points: crossing,
                 want_this_classes: true,
                 want_other_classes: crossing,
                 want_cc_curves: true,
@@ -2229,7 +2241,7 @@ fn validate_patch(
                 20.0,
                 &options,
             )?;
-            if crossing && intersects_both_interiors(&out) {
+            if crossing && patch_meets_face(k, &out, loop_curves, tol)? {
                 return Err(limit_error(
                     DefeatureFailure::PatchIntersectsFace { face: f },
                     None,
@@ -2262,6 +2274,26 @@ fn validate_patch(
         }
     }
     Ok(())
+}
+
+/// Whether the new patch meets a retained face away from its original rim.
+fn patch_meets_face(
+    k: &Kernel,
+    intersection: &FaceIntersection,
+    rim: &[LoopCurve],
+    tol: f64,
+) -> Result<bool> {
+    if intersects_both_interiors(intersection) {
+        return Ok(true);
+    }
+    // FaceIntersect classified these points on both trimmed faces, including
+    // poles and seam vertices. A new point contact would pinch the solid.
+    for &point in intersection.points_3d.as_deref().unwrap_or_default() {
+        if !on_loop_point(k, point, rim, tol)? {
+            return Ok(true);
+        }
+    }
+    Ok(false)
 }
 
 /// `SmFeatureExecutive::RebuildBrep`: dispatches on the rebuild type
@@ -2947,7 +2979,7 @@ mod tests {
     use crate::primitive::api_primitives::{create_box, create_cylinder};
 
     #[test]
-    fn a_crossing_patch_names_the_face_the_merge_skipped() {
+    fn a_failed_crossing_patch_copy_names_its_face_and_preserves_the_merge_error() {
         let mut k = Kernel::default();
         let mut patch = create_box(&mut k, Point3::ZERO, 20.0, 20.0, 20.0).unwrap();
         let face = bp1::faces(&patch, None).unwrap()[0];
@@ -2958,6 +2990,15 @@ mod tests {
             limit_of(&error),
             Some(DefeatureFailure::PatchFaceNotCopied { face })
         );
+        assert!(matches!(
+            error.cause(),
+            Some(SolidError::InvalidInput {
+                operation: "boolean::merge::p2::make_faceuse",
+                reason: "face without surface",
+            })
+        ));
+        assert!(error.is_defect());
+        assert_eq!(error.sm_status(), Some(SM_ERR));
     }
 
     #[test]
