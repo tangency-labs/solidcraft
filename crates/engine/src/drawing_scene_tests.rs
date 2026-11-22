@@ -3751,11 +3751,11 @@ fn notes_are_drawn_on_the_sheet_and_on_their_views() {
     let (texts, tips) = text_and_tips(group_of(&built.scene, edge));
     assert_eq!(texts, vec!["Deburr".to_string()]);
     assert!(tips.len() == 1 && tips[0].dist(Vec2::new(150.0, 145.0)) < 1e-9, "{tips:?}");
-    // Its text centred on its place from the view's centre, (150, 150) + (60, -40): one line, its
-    // capitals 3.5 mm high, so its baseline 1.75 mm below the middle.
+    // Its text starts at its place from the view's centre, (150, 150) + (60, -40), as a new note's
+    // does (left): one line, its capitals 3.5 mm high, so its baseline 1.75 mm below the middle.
     let starts: Vec<Vec2> =
         group_of(&built.scene, edge).items.iter().filter_map(|i| if let Item::Text(run) = i { Some(run.origin) } else { None }).collect();
-    assert!(starts.len() == 1 && (starts[0].y - 108.25).abs() < 1e-9 && starts[0].x < 210.0, "{starts:?}");
+    assert!(starts.len() == 1 && (starts[0].y - 108.25).abs() < 1e-9 && (starts[0].x - 210.0).abs() < 1e-9, "{starts:?}");
     assert!(built.notes.iter().all(|n| n.drawn && n.status == solidcraft_doc::drawing::dimension::Status::Ok), "{:?}", built.notes);
     assert_eq!(built.notes.last().map(|n| (n.note, n.view)), Some((general, None)));
 
@@ -3770,7 +3770,11 @@ fn notes_are_drawn_on_the_sheet_and_on_their_views() {
     assert!(notes.contains(&(json!(ids::encode(general)), None)) && notes.contains(&(json!(ids::encode(edge)), Some(json!(ids::encode(front))))));
     let export = run(&mut s, "drawing.export", json!({"sheet": ids::encode(sheet)}));
     assert_eq!(export["notes"], reply["notes"]);
-    let hit = run(&mut s, "drawing.scene.hit", json!({"sheet": ids::encode(sheet), "point_mm": [60.0, 40.0]}));
+    // The general note starts at its place, (60, 40), so the middle of its text is half its width on.
+    let ends =
+        group_of(&built.scene, general).items.iter().filter_map(|i| if let Item::Text(run) = i { Some(run.origin.x + run.reach()) } else { None });
+    let middle = 60.0 + (ends.fold(0.0, f64::max) - 60.0) / 2.0;
+    let hit = run(&mut s, "drawing.scene.hit", json!({"sheet": ids::encode(sheet), "point_mm": [middle, 40.0]}));
     assert_eq!((&hit["hit"]["object"], &hit["hit"]["kind"]), (&json!(ids::encode(general)), &json!("note")), "{hit}");
 }
 

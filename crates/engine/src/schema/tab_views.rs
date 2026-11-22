@@ -1,5 +1,5 @@
 //! Contracts and result types for the commands in `cmd/tab_views.rs`: the views of a design
-//! (Model, Sketch, Sheet, Render, Animation), shown as sub-tabs of the design's tab. The engine
+//! (Model, Sheet, Render, Animation), shown as sub-tabs of the design's tab. The engine
 //! holds one design and no tabs: it checks the request and echoes it, and the window, which owns
 //! the views, makes the change and fills in what it did.
 
@@ -14,7 +14,6 @@ pub const MAX_NAME: usize = solidcraft_views::MAX_NAME;
 #[serde(rename_all = "lowercase")]
 pub enum TabViewKind {
     Model,
-    Sketch,
     Sheet,
     Render,
     Animation,
@@ -171,7 +170,7 @@ pub struct TabViewOpenParams {
     /// What the view shows. Default: the kind of the view that is active now.
     #[serde(default)]
     pub kind: Option<TabViewKind>,
-    /// The sketch or sheet the view shows (its id, at most 256 bytes); none for the other kinds.
+    /// The sheet the view shows (its id, at most 256 bytes); none for the other kinds.
     #[serde(default)]
     pub subject: Option<String>,
     /// True shows a view that already has this kind and subject instead of opening another.
@@ -254,7 +253,7 @@ pub struct TabViewInfo {
     pub id: u64,
     pub kind: TabViewKind,
     pub name: String,
-    /// The sketch or sheet it shows, when it shows one.
+    /// The sheet it shows, when it shows one.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub subject: Option<String>,
     /// Whether it is the view shown.

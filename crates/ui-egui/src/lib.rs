@@ -398,6 +398,8 @@ mod view_tiles;
 mod view_window_drag;
 mod view_window_scale;
 pub mod view_windows;
+#[cfg(test)]
+mod view_windows_tests;
 pub mod viewport;
 mod viewport_details;
 mod viewport_layout;
