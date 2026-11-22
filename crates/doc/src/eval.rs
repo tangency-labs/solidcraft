@@ -9142,7 +9142,20 @@ fn feature_tools_with_constructor(
             Ok(vec![crate::lineage::ProfileRoles::swept(Some(ss), Some(r)).tool(body, None)])
         }
         FeatureKind::Coil {
-            base, axis, diameter, pitch, turns, section_size, section, position, start_angle, clockwise, sketch, profiles, ..
+            base,
+            axis,
+            diameter,
+            pitch,
+            turns,
+            section_size,
+            section,
+            position,
+            start_angle,
+            clockwise,
+            end_cut,
+            sketch,
+            profiles,
+            ..
         } => {
             let base = &point(vals, base)?;
             let k = axis.normalized().ok_or_else(|| DocError::Invalid("coil axis".into()))?;
@@ -9153,10 +9166,12 @@ fn feature_tools_with_constructor(
                     || section_size.is_some()
                     || start_angle.is_some()
                     || !matches!(section, crate::CoilSection::Circular)
-                    || *position != 0)
+                    || *position != 0
+                    || !matches!(end_cut, crate::CoilEndCut::Axial))
             {
                 return Err(DocError::Invalid(
-                    "a coil with a `sketch` cannot also set `diameter`, `section_size`, `section`, `section_position` or `start_angle`".into(),
+                    "a coil with a `sketch` cannot also set `diameter`, `section_size`, `section`, `section_position`, `start_angle` or `end_cut`"
+                        .into(),
                 ));
             }
             if sketch.is_none() && !matches!(profiles, ProfileSel::All) {
@@ -9194,7 +9209,19 @@ fn feature_tools_with_constructor(
             let x0 = if k.cross(Vec3::X).len() > 1e-6 { (Vec3::X - k * k.dot(Vec3::X)).normalized() } else { Some(k.any_perp()) };
             let x0 = x0.ok_or_else(|| DocError::Invalid("coil axis".into()))?;
             let x = x0 * a0.cos() + k.cross(x0) * a0.sin();
-            let plane = Plane { origin: *base, x, y: k };
+            let axis = if *clockwise { k * -1.0 } else { k };
+            // A left-handed coil turns about −axis and climbs along +axis: mirror the pitch.
+            let pitch = if *clockwise { -p } else { p };
+            // Square ends: the section lies across the helix's tangent at the start, and the screw
+            // motion keeps it so, out to the other end.
+            let y = match end_cut {
+                crate::CoilEndCut::Axial => k,
+                crate::CoilEndCut::Square => {
+                    let t = (axis.cross(x) * (std::f64::consts::TAU * r) + axis * pitch).normalized();
+                    t.and_then(|t| (k - t * k.dot(t)).normalized()).ok_or_else(|| DocError::Invalid("coil axis".into()))?
+                }
+            };
+            let plane = Plane { origin: *base, x, y };
             let c = Vec2::new(r, 0.0);
             let outer = match section {
                 crate::CoilSection::Circular => solidcore_record::Loop2::circle(c, s / 2.0),
@@ -9204,9 +9231,6 @@ fn feature_tools_with_constructor(
                 }
             };
             let region = Region2 { outer, holes: Vec::new() };
-            let axis = if *clockwise { k * -1.0 } else { k };
-            // A left-handed coil turns about −axis and climbs along +axis: mirror the pitch.
-            let pitch = if *clockwise { -p } else { p };
             let coil = Traced::unnamed(kernel::sweep_helix(&plane, &region, *base, axis, pitch, n)?);
             Ok(vec![coil.with_recipe(tool_recipe(doc, f, vals))])
         }
