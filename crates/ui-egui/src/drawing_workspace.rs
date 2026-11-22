@@ -65,7 +65,8 @@ pub fn active(app: &SolveApp) -> bool {
 
 pub fn enter(app: &mut SolveApp, drawing: bool) -> Result<(), String> {
     if drawing {
-        if app.session.active_sketch.is_some() || app.tool.is_some() || app.dialog.is_some() || app.file_load.busy() {
+        let preserved_sketch = app.preferences.workspace_follows_view && app.session.active_sketch.is_some();
+        if (!preserved_sketch && (app.session.active_sketch.is_some() || app.tool.is_some())) || app.dialog.is_some() || app.file_load.busy() {
             return Err("Finish the current operation before entering Drawing".into());
         }
         if !active(app) {
@@ -122,10 +123,14 @@ fn open_a_drawing(app: &mut SolveApp) {
 /// workspace being left: picking on a sheet never changes what Design has selected, and the
 /// reverse. Drawing's own is kept only while its objects are still there.
 pub(crate) fn swap_selection(app: &mut SolveApp) {
-    if app.drawing_workspace.selection_is_drawings == active(app) {
+    select_receiver(app, active(app));
+}
+
+pub(crate) fn select_receiver(app: &mut SolveApp, drawings: bool) {
+    if app.drawing_workspace.selection_is_drawings == drawings {
         return;
     }
-    app.drawing_workspace.selection_is_drawings = active(app);
+    app.drawing_workspace.selection_is_drawings = drawings;
     let mut back = std::mem::take(&mut app.drawing_workspace.selection_away);
     let session = &app.session;
     back.retain(|item| match item {
@@ -140,7 +145,11 @@ pub(crate) fn swap_selection(app: &mut SolveApp) {
 /// Undo and redo take the steps of the workspace shown: the open drawing's in Drawing, the
 /// model's everywhere else, a drawing open or not.
 pub(crate) fn sync_history(app: &mut SolveApp) {
-    app.session.model_focus = !active(app);
+    sync_history_for(app, active(app));
+}
+
+pub(crate) fn sync_history_for(app: &mut SolveApp, drawing: bool) {
+    app.session.model_focus = !drawing;
 }
 
 pub fn reset_document(app: &mut SolveApp) {
@@ -256,6 +265,23 @@ fn follow_selection(app: &mut SolveApp) {
     }
 }
 
+fn prepare_editor(app: &mut SolveApp, command: &str) -> bool {
+    prepare_editor_with(app, command, &serde_json::Value::Null)
+}
+
+fn prepare_editor_with(app: &mut SolveApp, command: &str, params: &serde_json::Value) -> bool {
+    match crate::sketch_view::prepare_edit(app, command, params) {
+        Ok(_) => {
+            app.prepared_edit_starts.insert(app.session.uid, command.into());
+            true
+        }
+        Err(error) => {
+            app.set_status(error, true);
+            false
+        }
+    }
+}
+
 /// Toolbar clicks inspect options. Engine execution still uses command parameters directly.
 pub fn start(app: &mut SolveApp, id: &str) -> bool {
     // Select All selects what is on the sheet shown.
@@ -273,6 +299,17 @@ pub fn start(app: &mut SolveApp, id: &str) -> bool {
     if !active(app) || !can_open_options(id) {
         return false;
     }
+    let command = match id {
+        "drawing.view.base.planned" => "drawing.view.base",
+        "drawing.view.projected.planned" => "drawing.view.projected",
+        "drawing.dimension" => "drawing.dimension.add",
+        "drawing.note" => "drawing.note.add",
+        "drawing.parts_list" => "drawing.table.add",
+        command => command,
+    };
+    if !prepare_editor(app, command) {
+        return true;
+    }
     close_panel(app);
     match id {
         "drawing.sheet.add" => open_add_sheet(app),
@@ -287,6 +324,9 @@ pub fn start(app: &mut SolveApp, id: &str) -> bool {
 }
 
 pub(crate) fn start_projected(app: &mut SolveApp, parent: u64) -> bool {
+    if !prepare_editor(app, "drawing.view.projected") {
+        return false;
+    }
     let Some(tool) = placement::Placement::from_parent(app, parent) else { return false };
     close_panel(app);
     app.drawing_workspace.placement = Some(tool);
@@ -347,6 +387,17 @@ pub(crate) fn edit_in_place(app: &mut SolveApp, object: u64, at: egui::Pos2) -> 
     } else {
         return false;
     };
+    let encode = solidcraft_engine::doc::ids::encode;
+    let (command, params) = match &target {
+        SheetText::Dimension(id) => ("drawing.dimension.edit", serde_json::json!({"dimension": encode(*id), "set": {"override_text": &text}})),
+        SheetText::Note(id) => ("drawing.note.edit", serde_json::json!({"note": encode(*id), "set": {"content": &text}})),
+        SheetText::TitleCell { .. } => return false,
+    };
+    // Check the actual, already validated receiver before committing the prior sketch. The
+    // parameters describe editor entry only; opening the field never changes its text.
+    if app.session.open_drawing != Some(drawing.id) || !prepare_editor_with(app, command, &params) {
+        return false;
+    }
     // The Dimension tool stays in hand while one of its sheet's dimensions is edited, as in a
     // sketch; any other panel gives way to the box.
     if !placing_dimension(app) {
@@ -379,12 +430,43 @@ pub(crate) fn edit_title_cell(app: &mut SolveApp, sheet: u64, point: Vec2, at: e
         .and_then(|c| c["text"].as_str().map(str::to_owned));
     let Some(text) = text.filter(|text| !text.contains('\n')) else { return false };
     let title = cell.label.as_ref().map_or(cell.name.as_str(), |label| label.text.as_str()).to_owned();
+    let mut overrides = serde_json::Map::new();
+    overrides.insert(cell.name.clone(), serde_json::json!(&text));
+    let params = serde_json::json!({"sheet": encode(sheet), "title_block_overrides": overrides});
+    if app.session.open_drawing != Some(drawing.id) || !prepare_editor_with(app, "drawing.sheet.set", &params) {
+        return false;
+    }
     close_panel(app);
     crate::dim_view::edit_sheet_text(crate::dim_view::SheetText::TitleCell { sheet, cell: cell.name.clone() }, &title, text, at);
     true
 }
 
 pub(super) fn edit_object(app: &mut SolveApp, kind: &str, object: u64) {
+    let (command, receiver) = match kind {
+        "view" => ("drawing.view.edit", "view"),
+        "dimension" => ("drawing.dimension.edit", "dimension"),
+        "note" => ("drawing.note.edit", "note"),
+        "parts_list" => ("drawing.table.edit", "table"),
+        _ => return,
+    };
+    let Ok(drawing) = app.session.drawing(command) else { return };
+    let exists = match kind {
+        "view" => drawing.view(object).is_some(),
+        "dimension" => drawing.dimension(object).is_some(),
+        "note" => drawing.notes.by_id(object).is_some(),
+        "parts_list" => drawing.tables.by_id(object).is_some(),
+        _ => false,
+    };
+    if !exists {
+        return;
+    }
+    let params = serde_json::Value::Object(serde_json::Map::from_iter([
+        (receiver.into(), serde_json::json!(solidcraft_engine::doc::ids::encode(object))),
+        ("set".into(), serde_json::json!({})),
+    ]));
+    if !prepare_editor_with(app, command, &params) {
+        return;
+    }
     let tool = match kind {
         "view" => Tool::Edit(Some(object)),
         "dimension" => Tool::Dimension(Some(object)),
@@ -517,8 +599,7 @@ pub(crate) fn sheets_section(app: &mut SolveApp, ui: &mut egui::Ui) {
     let t = Tokens::get();
     let selected = active_sheet(app);
     let top = ui.next_widget_position().y;
-    let limit = t.space_24 * 9.0;
-    let body = egui::ScrollArea::vertical().id_salt(id).min_scrolled_height(0.0).max_height(limit).show(ui, |ui| {
+    let body = egui::ScrollArea::vertical().id_salt(id).min_scrolled_height(0.0).show(ui, |ui| {
         for pair in drawing.sheets.chunks(2) {
             ui.spacing_mut().item_spacing.x = t.space_4;
             ui.columns(2, |columns| {
@@ -529,7 +610,7 @@ pub(crate) fn sheets_section(app: &mut SolveApp, ui: &mut egui::Ui) {
             });
         }
     });
-    crate::panel_runtime::report_content_extent(ui, top, body.content_size.y.min(limit), false);
+    crate::panel_runtime::report_content_extent(ui, top, body.content_size.y, false);
 }
 
 fn sheet_card(
@@ -1091,6 +1172,114 @@ mod tests {
     use super::*;
     use crate::scenario::Harness;
 
+    #[test]
+    fn inline_sheet_object_editors_finish_the_previous_sketch_at_entry() {
+        use serde_json::json;
+        for dimension in [false, true] {
+            crate::dim_view::cancel();
+            let mut h = Harness::new();
+            drawing_with_a_view(&mut h).unwrap();
+            let view = h.app.session.drawing("test").unwrap().views[0].id;
+            let object = if dimension {
+                h.app
+                    .run("drawing.dimension.add", json!({"view":solidcraft_engine::doc::ids::encode(view),"kind":{"length":{"edge":[20,0,3]}}}))
+                    .unwrap();
+                h.app.session.drawing("test").unwrap().dimensions[0].id
+            } else {
+                h.app.run("drawing.note.add", json!({"anchor":{"sheet":"Sheet 1"},"at":[10,10],"content":"Entry keeps this text"})).unwrap();
+                h.app.session.drawing("test").unwrap().notes[0].id
+            };
+            h.app.run("sketch.create", json!({"plane":"XY","name":"Before inline edit"})).unwrap();
+            h.app.run("sketch.line", json!({"points":[[0,0],[10,0]]})).unwrap();
+            let sketch = h.app.session.active_sketch;
+            assert!(sketch.is_some());
+            assert!(!edit_in_place(&mut h.app, u64::MAX, egui::Pos2::ZERO));
+            assert_eq!(h.app.session.active_sketch, sketch, "an invalid object cannot finish a sketch");
+            let drawing = h.app.session.drawing("test").unwrap().clone();
+            assert!(edit_in_place(&mut h.app, object, egui::Pos2::ZERO));
+            assert!(h.app.session.active_sketch.is_none(), "the sketch finishes before the text field opens");
+            let target = crate::dim_view::sheet_editing().unwrap();
+            assert_eq!(target, if dimension { crate::dim_view::SheetText::Dimension(object) } else { crate::dim_view::SheetText::Note(object) });
+            assert_eq!(h.app.session.drawing("test").unwrap().as_ref(), drawing.as_ref(), "entering the editor does not author drawing text");
+            crate::dim_view::cancel();
+        }
+    }
+
+    #[test]
+    fn a_refused_inline_editor_keeps_the_previous_sketch_open() {
+        use serde_json::json;
+        crate::dim_view::cancel();
+        let mut h = Harness::new();
+        drawing_with_a_view(&mut h).unwrap();
+        h.app.run("drawing.note.add", json!({"anchor":{"sheet":"Sheet 1"},"at":[10,10],"content":"Protected"})).unwrap();
+        let object = h.app.session.drawing("test").unwrap().notes[0].id;
+        h.app.run("sketch.create", json!({"plane":"XY"})).unwrap();
+        h.app.run("sketch.line", json!({"points":[[0,0],[10,0]]})).unwrap();
+        let sketch = h.app.session.active_sketch;
+        let bound = solidcraft_engine::doc::ids::encode(object);
+        let seen = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+        let observed = seen.clone();
+        let protected = bound.clone();
+        h.app.session.set_command_check(Some(std::sync::Arc::new(move |command, params, _| {
+            if command == "drawing.note.edit" {
+                observed.lock().unwrap().push(params.clone());
+                if params["note"].as_str() == Some(protected.as_str()) {
+                    return Err("refused test editor".into());
+                }
+            }
+            Ok(())
+        })));
+        h.app.viewport.rect = Some(egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1000.0, 1000.0)));
+        let at = egui::pos2(900.0, 900.0);
+        assert!(!crate::shell::covered(&h.app, at), "the public path attempts the inline editor first");
+        let before = (h.app.session.doc.to_json(), h.app.session.undo.len(), h.app.session.redo.len());
+        edit(&mut h.app, object, at);
+        let calls = seen.lock().unwrap();
+        assert_eq!(calls.len(), 2, "the inline path and its options fallback are both checked");
+        assert!(calls.iter().all(|params| params["note"].as_str() == Some(bound.as_str())), "both authorization checks name the receiver");
+        assert_eq!(h.app.session.active_sketch, sketch);
+        assert_eq!((h.app.session.doc.to_json(), h.app.session.undo.len(), h.app.session.redo.len()), before);
+        assert!(crate::dim_view::sheet_editing().is_none());
+        assert!(h.app.drawing_workspace.options.is_none() && h.app.dialog.is_none(), "refusal opens no alternative editor");
+        crate::dim_view::cancel();
+    }
+
+    #[test]
+    fn inline_title_cell_entry_finishes_the_sketch_but_renaming_the_sheet_does_not() {
+        use serde_json::json;
+        use solidcraft_engine::doc::ids::encode;
+        crate::dim_view::cancel();
+        let mut h = Harness::new();
+        drawing_with_a_view(&mut h).unwrap();
+        h.app.run("drawing.sheet.set", json!({"sheet":"Sheet 1","title_block":"built-in"})).unwrap();
+        let drawing = h.app.session.drawing("test").unwrap().clone();
+        let record = &drawing.sheets[0];
+        let layout = record.title_block_layout().unwrap().unwrap();
+        let (cell, placed) = record
+            .title_block
+            .as_ref()
+            .unwrap()
+            .cells
+            .iter()
+            .zip(&layout.cells)
+            .find(|(cell, _)| matches!(cell.kind, solidcraft_engine::geom::title_block::CellKind::Text(_)))
+            .unwrap();
+        let (sheet, name, point) = (record.id, cell.name.clone(), placed.rect.center());
+        let overrides = record.title_block_overrides.clone();
+        h.app.run("sketch.create", json!({"plane":"XY"})).unwrap();
+        h.app.run("sketch.line", json!({"points":[[0,0],[10,0]]})).unwrap();
+        let sketch = h.app.session.active_sketch;
+        assert!(prepare_editor_with(&mut h.app, "drawing.sheet.set", &json!({"sheet":encode(sheet),"name":"Only rename"})));
+        assert_eq!(h.app.session.active_sketch, sketch, "rename-only entry preserves the current edit");
+        assert!(!edit_title_cell(&mut h.app, sheet, Vec2::new(-1e8, -1e8), egui::Pos2::ZERO));
+        assert_eq!(h.app.session.active_sketch, sketch);
+        assert!(edit_title_cell(&mut h.app, sheet, point, egui::Pos2::ZERO));
+        assert!(h.app.session.active_sketch.is_none());
+        assert_eq!(crate::dim_view::sheet_editing(), Some(crate::dim_view::SheetText::TitleCell { sheet, cell: name }));
+        assert_eq!(h.app.session.drawing("test").unwrap().sheets[0].title_block_overrides, overrides);
+        crate::dim_view::cancel();
+    }
+
     /// The Drawing workspace is a normal workspace: it opens with default preferences.
     #[test]
     fn drawing_workspace_opens_with_default_preferences() {
@@ -1116,6 +1305,7 @@ mod tests {
 
     /// A box in Drawing, with a drawing of one base view open: its id.
     fn drawing_with_a_view(h: &mut Harness) -> Option<u64> {
+        h.app.preferences.workspace_follows_view = false;
         h.app.home.open = false;
         h.app.run("solid.box", serde_json::json!({"length":40,"width":20,"height":3})).unwrap();
         crate::workspace::enter(&mut h.app, "drawing").unwrap();
@@ -1146,9 +1336,7 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
     }
 
-    /// Leaving Drawing leaves the drawing open: the model changes in Design with it open, and coming
-    /// back finds the same drawing. Undo takes the steps of the workspace shown: the drawing's in
-    /// Drawing, the model's in Design and Render.
+    /// Leaving Drawing retains its document; undo follows the workspace receiving the command.
     #[test]
     fn leaving_drawing_keeps_the_drawing_open_and_each_workspace_undoes_its_own() {
         let mut h = Harness::new();
@@ -1253,34 +1441,34 @@ mod tests {
         assert_eq!(h.app.session.open_drawing, Some(first), "a fresh start opens the design's first drawing");
     }
 
-    /// A sheet sketch being edited never holds Design: Drawing can be left with it open, the
-    /// model's commands and sketch tools work on the model there, undo takes the model's steps, and
-    /// back in Drawing the sheet sketch is still being edited.
+    /// A sheet sketch being edited never holds Design: the model's commands and sketch tools work on
+    /// the model there, a model command ends the sheet sketch as Finish would, and undo takes the
+    /// model's steps.
     #[test]
-    fn a_sheet_sketch_stays_open_in_drawing_while_design_changes_the_model() {
+    fn a_sheet_sketch_stays_open_when_leaving_drawing_then_finishes_before_a_model_edit() {
         let mut h = Harness::new();
         let drawing = drawing_with_a_view(&mut h);
         let sheet = h.app.session.drawing("test").unwrap().sheets[0].id;
         h.app.run("drawing.sketch.create", serde_json::json!({"owner": solidcraft_engine::doc::ids::encode(sheet)})).unwrap();
-        let sketch = h.app.session.active_sheet_sketch.clone();
         crate::workspace::enter(&mut h.app, "design").unwrap();
         assert!(!active(&h.app));
         assert_eq!(h.app.session.open_drawing, drawing);
+        assert!(h.app.session.active_sheet_sketch.is_some(), "focus changes do not finish a sketch");
         let features = h.app.session.doc.features.len();
         h.app.run("solid.box", serde_json::json!({"length":5,"width":5,"height":5})).unwrap();
-        assert_eq!(h.app.session.doc.features.len(), features + 1, "the model changes with the sheet sketch open");
+        assert!(h.app.session.active_sheet_sketch.is_none(), "slice3 one-edit authority finishes the sheet sketch");
+        assert_eq!(h.app.session.open_drawing, drawing);
+        assert_eq!(h.app.session.doc.features.len(), features + 1);
         h.app.run("edit.undo", serde_json::json!({})).unwrap();
         assert_eq!(h.app.session.doc.features.len(), features, "undo in Design takes back the model's step");
-        assert_eq!(h.app.session.active_sheet_sketch, sketch, "and leaves the sheet sketch being edited");
+        assert!(h.app.session.active_sheet_sketch.is_none(), "and the sheet sketch stays finished");
         h.app.run("sketch.create", serde_json::json!({"plane": "XY"})).unwrap();
         h.app.run("sketch.circle.center", serde_json::json!({"center": [0, 0], "radius": 3})).unwrap();
         h.app.run("sketch.finish", serde_json::json!({})).unwrap();
         assert!(h.app.session.active_sketch.is_none(), "Finish in Design finishes the model's sketch");
-        assert_eq!(h.app.session.active_sheet_sketch, sketch, "and leaves the sheet sketch alone");
+        assert!(h.app.session.active_sheet_sketch.is_none(), "the sheet sketch was finished when the model command started");
         crate::workspace::enter(&mut h.app, "drawing").unwrap();
-        assert!(h.app.session.sheet_sketching(), "back in Drawing the sheet sketch is still being edited");
-        h.app.run("sketch.finish", serde_json::json!({})).unwrap();
-        assert!(h.app.session.active_sheet_sketch.is_none());
+        assert!(!h.app.session.sheet_sketching(), "back in Drawing no sheet sketch is being edited");
     }
 
     #[test]
@@ -1703,6 +1891,32 @@ mod tests {
         h.app.run("drawing.close", serde_json::json!({})).unwrap();
         h.frames(2);
         assert!(h.widget("Inspection sheet").is_none());
+    }
+
+    /// The Sheets panel grows with its sheets up to the room the window gives it (#19998): with
+    /// five sheets in a tall window every card can be clicked without scrolling.
+    #[test]
+    fn sheets_panel_grows_with_its_sheets_instead_of_stopping_at_two_rows() {
+        let mut h = Harness::new();
+        h.app.home.open = false;
+        h.app.ui.show_browser = true;
+        h.call("ui.resize", serde_json::json!({"width":1400,"height":1000}));
+        h.app.run("solid.box", serde_json::json!({"length":40,"width":20,"height":3})).unwrap();
+        enter(&mut h.app, true).unwrap();
+        h.app.run("drawing.create", serde_json::json!({})).unwrap();
+        let mut ids = Vec::new();
+        for _ in 0..4 {
+            let added = h.app.run("drawing.sheet.add", serde_json::json!({})).unwrap();
+            ids.push(added["sheet"].as_str().unwrap().to_string());
+        }
+        h.frames(6);
+        assert_eq!(h.app.session.drawing("drawing.inspect").unwrap().sheets.len(), 5);
+        for key in ids.iter().rev() {
+            h.step(&serde_json::json!({"click":{"handle":format!("drawing:sheets:sheet:{key}")}})).unwrap();
+            h.frames(3);
+            let selected = active_sheet(&h.app).map(solidcraft_engine::doc::ids::encode);
+            assert_eq!(selected.as_deref(), Some(key.as_str()), "the card of sheet {key} is on screen and takes the click");
+        }
     }
 
     #[test]

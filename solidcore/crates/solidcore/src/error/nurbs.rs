@@ -52,6 +52,8 @@
 //! routine of the port stores them.
 
 use super::{ErrorKind, Failure, Reason, SM_ERR, SM_ERR_INVALID_INPUT, SM_ERR_NULL_POINTER};
+use crate::geom::geom_utility::p2::ContinuityType;
+use crate::nurbs::b_spline_surface::SurfParamType;
 
 /// Why a NURBS routine fails.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -202,6 +204,189 @@ pub enum BSplineFailure {
         /// The step that failed, and why that is the kernel's fault.
         why: &'static str,
     },
+    /// The continuity asked of a curve extension is not one it keeps (G1, G1G2 or
+    /// C-infinity). [`ErrorKind::InvalidInput`].
+    ContinuityNotExtendable {
+        /// The continuity asked for.
+        continuity: ContinuityType,
+    },
+    /// The method takes only a rational curve, and this one is not.
+    /// [`ErrorKind::Unsupported`].
+    NotRational,
+    /// The points are said to be of dimension `dim`; the method takes 2 or 3.
+    /// [`ErrorKind::InvalidInput`].
+    DimensionNot2Or3 {
+        /// The dimension given.
+        dim: u64,
+    },
+    /// `given` end vectors are given; the fit takes at most two (a start and an end
+    /// derivative), or, when interpolating more than two points, one per point.
+    /// [`ErrorKind::InvalidInput`].
+    TooManyVectors {
+        /// The number of vectors given.
+        given: usize,
+    },
+    /// The fit is asked for no control points (a count of 0). [`ErrorKind::InvalidInput`].
+    NoControlPoints,
+    /// The degree cannot be reduced by one within the `tolerance` asked for: the reduction's
+    /// error bound reached `error` (for a rational curve the bound is that of the homogeneous
+    /// points, measured against the tolerance scaled by the weights), or a weight is outside
+    /// the range the reduction takes. [`ErrorKind::NotWithinTolerance`].
+    DegreeNotReducible {
+        /// The error bound of the reduction.
+        error: f64,
+        /// The tolerance asked for.
+        tolerance: f64,
+    },
+    /// The curve is of degree `degree`, 1 or less, and has no lower degree to reduce to.
+    /// [`ErrorKind::InvalidInput`].
+    DegreeTooLowToReduce {
+        /// The curve's degree.
+        degree: usize,
+    },
+    /// The method works only on a surface-intersection approximation (a piecewise C0 curve
+    /// of degree 3), and the curve is not one. [`ErrorKind::Unsupported`].
+    NotIntersectionCurve,
+    /// The projection onto its surface of a point the method puts on the curve leaves the
+    /// residual `residual` (the surface point solve's value), more than `tolerance`.
+    /// [`ErrorKind::NotWithinTolerance`].
+    PointOffSurface {
+        /// The residual of the point's projection onto the surface.
+        residual: f64,
+        /// The residual allowed.
+        tolerance: f64,
+    },
+    /// The start tangent is asked to be the one given, and none is given.
+    /// [`ErrorKind::InvalidInput`].
+    StartTangentNotGiven,
+    /// The end tangent is asked to be the one given, and none is given.
+    /// [`ErrorKind::InvalidInput`].
+    EndTangentNotGiven,
+    /// The spans the interval meets hold no control point of the curve (for example a point
+    /// interval at an interior knot of multiplicity degree + 1). [`ErrorKind::InvalidInput`].
+    IntervalSelectsNoControlPoints,
+    /// An end weight of the curves to join is zero, so no scaling makes the weights at the
+    /// joint agree. [`ErrorKind::InvalidInput`].
+    JoinEndWeightZero,
+    /// The curves must have the same number of control points: this one has `ours`, the
+    /// other `theirs`. [`ErrorKind::InvalidInput`].
+    ControlPointCountsDiffer {
+        /// This curve's control points.
+        ours: usize,
+        /// The other curve's control points.
+        theirs: usize,
+    },
+    /// The degree `given` is below the curve's degree `current`; an elevation only raises
+    /// it. [`ErrorKind::InvalidInput`].
+    DegreeBelowCurrent {
+        /// The degree asked for.
+        given: usize,
+        /// The curve's degree.
+        current: usize,
+    },
+    /// The control point `index` is past the last of the `count` control points.
+    /// [`ErrorKind::InvalidInput`].
+    ControlPointIndex {
+        /// The index given.
+        index: usize,
+        /// The number of control points.
+        count: usize,
+    },
+    /// The span `span` of a degree-`degree` curve reads control points `span - degree` to
+    /// `span`, and the curve has only `count`: its control points, knots and degree do not
+    /// agree. [`ErrorKind::InvalidInput`].
+    ControlPointsShort {
+        /// The span the parameter falls in.
+        span: usize,
+        /// The curve's degree.
+        degree: usize,
+        /// The curve's number of control points.
+        count: usize,
+    },
+    /// A sphere is made from three arcs (or four that close a loop), and `given` are given.
+    /// [`ErrorKind::InvalidInput`].
+    SphereArcCount {
+        /// The number of curves given.
+        given: usize,
+    },
+    /// A curve given as an arc is not one (within the tolerance). [`ErrorKind::InvalidInput`].
+    NotAnArc,
+    /// An arc's radius `other` differs from the first arc's `radius` by more than
+    /// `tolerance`. [`ErrorKind::InvalidInput`].
+    ArcRadiiDiffer {
+        /// The first arc's radius.
+        radius: f64,
+        /// This arc's radius.
+        other: f64,
+        /// The tolerance they must agree within.
+        tolerance: f64,
+    },
+    /// An arc's centre is `distance` from the first arc's, more than `tolerance`.
+    /// [`ErrorKind::InvalidInput`].
+    ArcCentresApart {
+        /// The distance between the centres.
+        distance: f64,
+        /// The tolerance they must agree within.
+        tolerance: f64,
+    },
+    /// The arcs do not meet end to end: with three, the largest arc and its larger
+    /// neighbour share no end; with four, an end does not meet exactly one other arc's end.
+    /// [`ErrorKind::InvalidInput`].
+    ArcsDoNotMeet,
+    /// An arc is of a curve kind with no B-spline or ellipse data to revolve.
+    /// [`ErrorKind::Unsupported`].
+    ArcKindUnsupported,
+    /// The four arcs' common `radius`, or the length `facing` of the sum of their ends'
+    /// directions from the centre (which says the side of the sphere the loop faces), is not
+    /// above `tolerance`, so no sphere follows from them. [`ErrorKind::Degenerate`].
+    ArcLoopDegenerate {
+        /// The arcs' radius.
+        radius: f64,
+        /// The length of the sum of the end directions.
+        facing: f64,
+        /// The tolerance both must exceed.
+        tolerance: f64,
+    },
+    /// Every control point of the curve to revolve is on the axis, so the revolution sweeps
+    /// no area. [`ErrorKind::Degenerate`].
+    GeneratorOnAxis,
+    /// A curve to bound the plane stands farther than `tolerance` from the plane of the
+    /// ruled surface between the two curves (its tangent plane at the middle).
+    /// [`ErrorKind::InvalidInput`].
+    CurvesNotCoplanar {
+        /// The distance a curve may stand off the plane.
+        tolerance: f64,
+    },
+    /// The control point (`u_index`, `v_index`) is past the last one, (`u_last`, `v_last`).
+    /// [`ErrorKind::InvalidInput`].
+    NetIndexOutside {
+        /// The u index given.
+        u_index: usize,
+        /// The v index given.
+        v_index: usize,
+        /// The last u index.
+        u_last: usize,
+        /// The last v index.
+        v_last: usize,
+    },
+    /// The direction is `direction`; the method takes u or v. [`ErrorKind::InvalidInput`].
+    DirectionNotUOrV {
+        /// The direction given.
+        direction: SurfParamType,
+    },
+    /// The degree `given` does not fit this platform's index type. [`ErrorKind::InvalidInput`].
+    DegreeTooLarge {
+        /// The degree given.
+        given: u64,
+    },
+    /// The grid of points has `rows` rows and `columns` columns, and the fit needs at least
+    /// one of each. [`ErrorKind::InvalidInput`].
+    EmptyGrid {
+        /// The rows given.
+        rows: usize,
+        /// The columns given.
+        columns: usize,
+    },
 }
 
 impl BSplineFailure {
@@ -215,12 +400,45 @@ impl BSplineFailure {
     }
 
     /// The failure's stable [`ErrorKind`]: [`ErrorKind::StageFailed`] for
-    /// [`BSplineFailure::StageFailed`] and [`BSplineFailure::Defect`], a defect; the kind of
-    /// its status otherwise.
+    /// [`BSplineFailure::StageFailed`] and [`BSplineFailure::Defect`], a defect;
+    /// [`ErrorKind::InvalidInput`] for a check of the caller's arguments or curve,
+    /// [`ErrorKind::Unsupported`] for a curve the method does not take,
+    /// [`ErrorKind::NotWithinTolerance`] for a result outside the tolerance asked for; the
+    /// kind of its status otherwise.
     #[must_use]
     pub const fn kind(&self) -> ErrorKind {
         match self {
             Self::StageFailed | Self::Defect { .. } => ErrorKind::StageFailed,
+            Self::ContinuityNotExtendable { .. }
+            | Self::DimensionNot2Or3 { .. }
+            | Self::TooManyVectors { .. }
+            | Self::NoControlPoints
+            | Self::DegreeTooLowToReduce { .. }
+            | Self::StartTangentNotGiven
+            | Self::EndTangentNotGiven
+            | Self::IntervalSelectsNoControlPoints
+            | Self::JoinEndWeightZero
+            | Self::ControlPointCountsDiffer { .. }
+            | Self::DegreeBelowCurrent { .. }
+            | Self::ControlPointIndex { .. }
+            | Self::ControlPointsShort { .. }
+            | Self::SphereArcCount { .. }
+            | Self::NotAnArc
+            | Self::ArcRadiiDiffer { .. }
+            | Self::ArcCentresApart { .. }
+            | Self::ArcsDoNotMeet
+            | Self::CurvesNotCoplanar { .. }
+            | Self::NetIndexOutside { .. }
+            | Self::DirectionNotUOrV { .. }
+            | Self::DegreeTooLarge { .. }
+            | Self::EmptyGrid { .. } => ErrorKind::InvalidInput,
+            Self::NotRational | Self::NotIntersectionCurve | Self::ArcKindUnsupported => {
+                ErrorKind::Unsupported
+            }
+            Self::ArcLoopDegenerate { .. } | Self::GeneratorOnAxis => ErrorKind::Degenerate,
+            Self::DegreeNotReducible { .. } | Self::PointOffSurface { .. } => {
+                ErrorKind::NotWithinTolerance
+            }
             _ => ErrorKind::of_status(self.comparison_status()),
         }
     }
@@ -253,6 +471,118 @@ impl core::fmt::Display for BSplineFailure {
             ),
             Self::StageFailed => write!(f, "{}", ErrorKind::StageFailed),
             Self::Defect { why } => write!(f, "{}: {why}", ErrorKind::StageFailed),
+            Self::ContinuityNotExtendable { continuity } => write!(
+                f,
+                "an extension keeps G1, G1G2 or C-infinity continuity, not {continuity:?}"
+            ),
+            Self::NotRational => f.write_str("the curve is not rational"),
+            Self::DimensionNot2Or3 { dim } => {
+                write!(f, "the points are of dimension {dim}, not 2 or 3")
+            }
+            Self::TooManyVectors { given } => {
+                write!(f, "{given} end vectors are given, more than two")
+            }
+            Self::NoControlPoints => f.write_str("no control points are asked for"),
+            Self::DegreeNotReducible { error, tolerance } => write!(
+                f,
+                "the degree cannot be reduced by one within the tolerance {tolerance} (error \
+                 bound {error})"
+            ),
+            Self::DegreeTooLowToReduce { degree } => {
+                write!(f, "a curve of degree {degree} has no lower degree")
+            }
+            Self::NotIntersectionCurve => {
+                f.write_str("the curve is not a piecewise degree-3 intersection curve")
+            }
+            Self::PointOffSurface {
+                residual,
+                tolerance,
+            } => write!(
+                f,
+                "a point projects onto its surface with residual {residual}, more than \
+                 {tolerance}"
+            ),
+            Self::StartTangentNotGiven => {
+                f.write_str("the start tangent is specified but not given")
+            }
+            Self::EndTangentNotGiven => f.write_str("the end tangent is specified but not given"),
+            Self::IntervalSelectsNoControlPoints => {
+                f.write_str("the interval selects no control point")
+            }
+            Self::JoinEndWeightZero => f.write_str("an end weight of the curves to join is zero"),
+            Self::ControlPointCountsDiffer { ours, theirs } => write!(
+                f,
+                "the curves have {ours} and {theirs} control points, not the same number"
+            ),
+            Self::DegreeBelowCurrent { given, current } => {
+                write!(f, "degree {given} is below the curve's degree {current}")
+            }
+            Self::ControlPointIndex { index, count } => write!(
+                f,
+                "control point {index} is past the last of {count} control points"
+            ),
+            Self::ControlPointsShort {
+                span,
+                degree,
+                count,
+            } => write!(
+                f,
+                "span {span} of a degree-{degree} curve needs more than its {count} control \
+                 points"
+            ),
+            Self::SphereArcCount { given } => {
+                write!(f, "a sphere is made from three or four arcs, not {given}")
+            }
+            Self::NotAnArc => f.write_str("a boundary curve is not an arc"),
+            Self::ArcRadiiDiffer {
+                radius,
+                other,
+                tolerance,
+            } => write!(
+                f,
+                "the arcs have radii {radius} and {other}, farther apart than {tolerance}"
+            ),
+            Self::ArcCentresApart {
+                distance,
+                tolerance,
+            } => write!(
+                f,
+                "the arcs' centres are {distance} apart, farther than {tolerance}"
+            ),
+            Self::ArcsDoNotMeet => f.write_str("the arcs do not meet end to end"),
+            Self::ArcKindUnsupported => f.write_str("an arc is neither a B-spline nor an ellipse"),
+            Self::ArcLoopDegenerate {
+                radius,
+                facing,
+                tolerance,
+            } => write!(
+                f,
+                "the arcs' radius {radius} or their facing {facing} is not above {tolerance}"
+            ),
+            Self::GeneratorOnAxis => {
+                f.write_str("every control point of the generating curve is on the axis")
+            }
+            Self::CurvesNotCoplanar { tolerance } => {
+                write!(f, "a curve is not on the plane within {tolerance}")
+            }
+            Self::NetIndexOutside {
+                u_index,
+                v_index,
+                u_last,
+                v_last,
+            } => write!(
+                f,
+                "control point ({u_index}, {v_index}) is past the last, ({u_last}, {v_last})"
+            ),
+            Self::DirectionNotUOrV { direction } => {
+                write!(f, "the direction is {direction:?}, not U or V")
+            }
+            Self::DegreeTooLarge { given } => {
+                write!(f, "degree {given} does not fit an index here")
+            }
+            Self::EmptyGrid { rows, columns } => {
+                write!(f, "the grid has {rows} rows and {columns} columns")
+            }
         }
     }
 }
@@ -405,6 +735,21 @@ impl crate::SolidError {
         Failure::new(operation, NurbsFailure::BSpline(failure)).into_error()
     }
 
+    /// [`crate::SolidError::b_spline`] reporting `status` instead of the cause's own: a site
+    /// whose status upstream differs from the cause's (for example `SM_ERR_NULL_POINTER` for
+    /// a [`BSplineFailure::NoNurbsForm`] where upstream's `NER` returns it).
+    #[must_use]
+    #[track_caller]
+    pub(crate) fn b_spline_with_status(
+        operation: &'static str,
+        failure: BSplineFailure,
+        status: i32,
+    ) -> Self {
+        Failure::new(operation, NurbsFailure::BSpline(failure))
+            .with_status(status)
+            .into_error()
+    }
+
     /// Maps the error of a failed NLib call inside a B-spline method (upstream
     /// `if (NL_YES == N_...) SER(SM_ERR)`) to a [`BSplineFailure::RoutineFailed`] of
     /// `operation` that keeps the call's error as its cause. [`crate::SolidError::Unported`],
@@ -468,6 +813,110 @@ mod tests {
         }
     }
 
+    /// The named causes that replace phrase sites keep the phrase's status, so
+    /// `upstream_status()` reads as before, and carry the class of what they check.
+    #[test]
+    fn the_named_causes_keep_the_phrase_status_and_name_their_class() {
+        let invalid = [
+            BSplineFailure::ContinuityNotExtendable {
+                continuity: ContinuityType::C0,
+            },
+            BSplineFailure::DimensionNot2Or3 { dim: 4 },
+            BSplineFailure::TooManyVectors { given: 3 },
+            BSplineFailure::NoControlPoints,
+            BSplineFailure::DegreeTooLowToReduce { degree: 1 },
+            BSplineFailure::StartTangentNotGiven,
+            BSplineFailure::EndTangentNotGiven,
+            BSplineFailure::IntervalSelectsNoControlPoints,
+            BSplineFailure::JoinEndWeightZero,
+            BSplineFailure::ControlPointCountsDiffer { ours: 5, theirs: 2 },
+            BSplineFailure::DegreeBelowCurrent {
+                given: 2,
+                current: 3,
+            },
+            BSplineFailure::ControlPointIndex { index: 9, count: 5 },
+            BSplineFailure::ControlPointsShort {
+                span: 2,
+                degree: 3,
+                count: 2,
+            },
+            BSplineFailure::SphereArcCount { given: 2 },
+            BSplineFailure::NotAnArc,
+            BSplineFailure::ArcRadiiDiffer {
+                radius: 1.0,
+                other: 2.0,
+                tolerance: 1e-6,
+            },
+            BSplineFailure::ArcCentresApart {
+                distance: 1.0,
+                tolerance: 1e-6,
+            },
+            BSplineFailure::ArcsDoNotMeet,
+            BSplineFailure::CurvesNotCoplanar { tolerance: 1e-6 },
+            BSplineFailure::NetIndexOutside {
+                u_index: 5,
+                v_index: 0,
+                u_last: 2,
+                v_last: 2,
+            },
+            BSplineFailure::DirectionNotUOrV {
+                direction: SurfParamType::Both,
+            },
+            BSplineFailure::DegreeTooLarge { given: u64::MAX },
+            BSplineFailure::EmptyGrid {
+                rows: 0,
+                columns: 4,
+            },
+        ];
+        let unsupported = [
+            BSplineFailure::NotRational,
+            BSplineFailure::NotIntersectionCurve,
+            BSplineFailure::ArcKindUnsupported,
+        ];
+        let degenerate = [
+            BSplineFailure::ArcLoopDegenerate {
+                radius: 0.0,
+                facing: 1.0,
+                tolerance: 1e-6,
+            },
+            BSplineFailure::GeneratorOnAxis,
+        ];
+        let tolerance = [
+            BSplineFailure::DegreeNotReducible {
+                error: 0.5,
+                tolerance: 0.01,
+            },
+            BSplineFailure::PointOffSurface {
+                residual: 0.5,
+                tolerance: 1e-8,
+            },
+        ];
+        for (causes, kind) in [
+            (&invalid[..], ErrorKind::InvalidInput),
+            (&unsupported[..], ErrorKind::Unsupported),
+            (&degenerate[..], ErrorKind::Degenerate),
+            (&tolerance[..], ErrorKind::NotWithinTolerance),
+        ] {
+            for &cause in causes {
+                let e = SolidError::b_spline("nurbs::op", cause);
+                assert_eq!(e.upstream_status(), Some(SM_ERR), "{cause:?}");
+                assert_eq!(e.sm_status(), Some(SM_ERR), "{cause:?}");
+                assert_eq!(e.kind(), kind, "{cause:?}");
+                assert!(!e.is_defect() && !e.is_refusal(), "{cause:?}");
+                assert_eq!(nlib_number(&e), None, "{cause:?}");
+            }
+        }
+        // the numbers land in the text in their order
+        assert_eq!(
+            BSplineFailure::ControlPointCountsDiffer { ours: 5, theirs: 2 }.to_string(),
+            "the curves have 5 and 2 control points, not the same number"
+        );
+        assert_eq!(
+            BSplineFailure::ControlPointIndex { index: 9, count: 5 }.to_string(),
+            "control point 9 is past the last of 5 control points"
+        );
+    }
+
     /// A reviewed defect is of class 127 with the stage failure's status, and says why.
     #[test]
     fn a_reviewed_defect_is_class_127_with_its_reason() {
@@ -523,14 +972,9 @@ mod tests {
         };
         #[rustfmt::skip] // one file per line, so conversions in parallel merge cleanly
         const PINNED: &[(&str, usize)] = &[
-            ("solidcore/src/nurbs/b_spline_curve/p2.rs", 6),
-            ("solidcore/src/nurbs/b_spline_curve_n_lib.rs", 14),
             ("solidcore/src/nurbs/b_spline_surface/p1.rs", 2),
-            ("solidcore/src/nurbs/b_spline_surface/p2.rs", 16),
-            ("solidcore/src/nurbs/b_spline_surface_n_lib/approx.rs", 3),
             ("solidcore/src/nurbs/b_spline_surface_n_lib/p1.rs", 7),
             ("solidcore/src/nurbs/b_spline_surface_n_lib/p2.rs", 33),
-            ("solidcore/src/nurbs/nurbs_crv.rs", 2),
         ];
         assert_pinned(
             "B-spline phrase-cause sites",

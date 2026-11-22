@@ -105,6 +105,7 @@ pub(super) fn local_geometry(f: &Feature, components: &std::collections::HashMap
                 direction: _,
                 distance2: _,
                 start_offset: _,
+                symmetric_offset: _,
                 through_all,
                 second_follows_first: _,
                 taper: _,

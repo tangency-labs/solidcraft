@@ -27,7 +27,8 @@ use crate::*;
 /// import feature, the tight boxes the kernel was asked for, the flats of sheets made from
 /// surfaces laid out (their pieces cut), the blends the kernel was asked for, the searches for
 /// the radius that fits, the meshes a cam's profile was read from, and the kernel's point
-/// classifications a pattern's copies were probed with.
+/// classifications a pattern's copies were probed with, and the bodies a hole's points were
+/// classified in.
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub(crate) struct Counts {
     pub moved: usize,
@@ -59,6 +60,7 @@ pub(crate) struct Counts {
     pub blends: usize,
     pub fit_searches: usize,
     pub classifications: usize,
+    pub hole_points: usize,
 }
 
 thread_local! {
@@ -93,6 +95,7 @@ thread_local! {
             blends: 0,
             fit_searches: 0,
             classifications: 0,
+            hole_points: 0,
         })
     };
 }
@@ -899,6 +902,50 @@ fn a_tool_cutting_another_part_cuts_again_when_that_part_moves() {
     model.evaluate(&doc);
     assert_eq!(model.last_recomputed, 0);
     assert!((volume(&model, &body) - (400.0 - 16.0)).abs() < 1e-6, "{}", volume(&model, &body));
+}
+
+/// A combine whose tool is a further placement's body (`Bit (Drill:2)`) reads that placement
+/// alone. A component or another placement added elsewhere keeps the combine's result; moving
+/// the tool's own placement cuts again. Reading every placement cut each such combine again
+/// for every occurrence added anywhere in the design.
+#[test]
+fn a_combine_with_a_placed_copys_tool_keeps_its_result_when_other_placements_are_added() {
+    let boxed = |corner: Vec3, length: &str, height: &str| FeatureKind::Box {
+        corner: point_expr(corner),
+        length: length.into(),
+        width: length.into(),
+        height: height.into(),
+        operation: Operation::NewBody,
+        centred: false,
+    };
+    let mut doc = Document::new("copy tool");
+    let board = doc.add_feature(boxed(Vec3::ZERO, "100", "10"), None).unwrap();
+    let drill = doc.add_component(Some("Drill"), 0).unwrap();
+    let bit = doc.add_feature(boxed(Vec3::new(-50.0, -50.0, 5.0), "10", "5"), None).unwrap();
+    doc.feature_mut(bit).unwrap().component = drill;
+    let copy = doc.add_occurrence(drill, 0, rigid(Vec3::new(70.0, 70.0, 0.0), Vec3::ZERO, Vec3::Z, 0.0)).unwrap();
+    let mut model = Model::new();
+    model.evaluate(&doc);
+    let st = model.state();
+    let name_of = |id: u64| st.bodies.iter().find(|b| b.feature == id).unwrap().name.clone();
+    let (board, tool) = (name_of(board), crate::WorldNames::new(&doc, &st).name(&name_of(bit), drill, &[copy]));
+    let kind = FeatureKind::Combine { target: board.clone().into(), tools: vec![tool.into()], operation: Operation::Cut, keep_tools: true };
+    let combine = doc.add_feature(kind, None).unwrap();
+    model.evaluate(&doc);
+    assert!(model.result(combine).is_some_and(|r| r.error.is_none()), "{:?}", model.result(combine));
+    assert!((volume(&model, &board) - (100_000.0 - 500.0)).abs() < 1e-6, "{}", volume(&model, &board));
+    // A new component and another placement of the drill, away from the board: nothing to cut again.
+    doc.add_component(Some("Other"), 0).unwrap();
+    model.evaluate(&doc);
+    assert_eq!(model.last_recomputed, 0, "component added");
+    doc.add_occurrence(drill, 0, rigid(Vec3::new(500.0, 0.0, 0.0), Vec3::ZERO, Vec3::Z, 0.0)).unwrap();
+    model.evaluate(&doc);
+    assert_eq!(model.last_recomputed, 0, "placement added");
+    // The tool's own placement moved off the board: the hole goes with it.
+    doc.occurrences.iter_mut().find(|o| o.id == copy).unwrap().transform = rigid(Vec3::new(300.0, 300.0, 0.0), Vec3::ZERO, Vec3::Z, 0.0);
+    model.evaluate(&doc);
+    assert_eq!(model.last_recomputed, 1, "tool moved");
+    assert!((volume(&model, &board) - 100_000.0).abs() < 1e-6, "{}", volume(&model, &board));
 }
 
 /// A root design with two 10 x 10 x 4 mm plates, "Plate" at the origin and "Other" 30 mm along Y,
@@ -2902,6 +2949,62 @@ fn plate_with_hole_grid(hole: serde_json::Value) -> (f64, f64, Counts) {
     (disc_volume(&model), std::f64::consts::PI * 1.5 * 1.5 * 2.0, work)
 }
 
+/// A hole as deep as its plate, after `others` boxes 300 mm and more away and, with `under`, a
+/// slab touching the plate's bottom face: the plate's and slab's volumes and the work.
+fn plate_hole_among_bodies(others: usize, under: bool) -> (f64, Option<f64>, Counts) {
+    let mut doc = Document::new("bodies");
+    let solid = |corner: [f64; 3], length: f64, height: f64| -> FeatureKind {
+        serde_json::from_value(serde_json::json!({
+            "type": "box", "corner": corner, "length": length.to_string(), "width": length.to_string(), "height": height.to_string(),
+        }))
+        .unwrap()
+    };
+    for i in 0..others {
+        doc.add_feature(solid([300.0 + 30.0 * i as f64, 0.0, 0.0], 20.0, 20.0), Some(&format!("Far{i}"))).unwrap();
+    }
+    if under {
+        doc.add_feature(solid([0.0, 0.0, -5.0], 100.0, 5.0), Some("Under")).unwrap();
+    }
+    doc.add_feature(solid([0.0, 0.0, 0.0], 100.0, 2.0), Some("Plate")).unwrap();
+    let hole: FeatureKind = serde_json::from_value(serde_json::json!({
+        "type": "hole", "position": [50, 50, 2], "direction": [0, 0, -1], "diameter": "3", "depth": "2",
+    }))
+    .unwrap();
+    doc.add_feature(hole, Some("Hole")).unwrap();
+    let mut model = Model::new();
+    let work = counted(|| model.evaluate(&doc));
+    assert!(model.results.iter().all(|r| r.error.is_none() && r.warning.is_none()), "{:?}", model.results);
+    let st = model.state();
+    // The plate is the body from z = 0 to 2 at the origin, the slab the one below it.
+    let volume = |top: f64| {
+        st.bodies
+            .iter()
+            .find(|b| b.body.exact_bounds().is_ok_and(|bb| bb.min.x.abs() < 1e-6 && (bb.max.z - top).abs() < 1e-6))
+            .map(|b| kernel::measure(&b.body).unwrap().volume)
+    };
+    (volume(2.0).unwrap(), volume(0.0), work)
+}
+
+/// A hole with a depth looks for material and air either side of its bottom, to know whether it
+/// comes out there (#17873), in the bodies whose boxes hold those points only (#19946). It
+/// classified both points in every body of the design: 2 x 21 classifications with 20 boxes far
+/// away, which in a design of hundreds of imported parts cost minutes for each evaluation of its
+/// holes. A body touching the plate where the hole ends is still asked.
+#[test]
+fn a_hole_classifies_its_bottom_in_the_bodies_there_only() {
+    let through = 20_000.0 - std::f64::consts::PI * 1.5 * 1.5 * 2.0;
+    for others in [0, 20] {
+        let (plate, under, work) = plate_hole_among_bodies(others, false);
+        assert!((plate - through).abs() < 1e-6 * through, "{others} boxes: {plate}");
+        assert_eq!(under, None);
+        assert_eq!(work.hole_points, 2, "{others} boxes: {work:?}");
+    }
+    let (plate, under, work) = plate_hole_among_bodies(20, true);
+    assert!((plate - through).abs() < 1e-6 * through, "{plate}");
+    assert!((under.unwrap() - 50_000.0).abs() < 1e-6 * 50_000.0, "the slab is not drilled: {under:?}");
+    assert_eq!(work.hole_points, 4, "{work:?}");
+}
+
 /// A pattern of a hole builds its tools once when every copy is drilled the same way, and for
 /// each copy when the tools look at the material there (#7942).
 #[test]
@@ -3465,6 +3568,39 @@ fn a_heal_the_next_read_finds_again_is_told_once() {
     model.evaluate(&doc);
     assert_eq!(model.last_recomputed, 0);
     assert_eq!(model.results.iter().map(|r| r.fingerprint).collect::<Vec<_>>(), fingerprints);
+}
+
+/// #20133: a save while an import's SMLib check of its parts runs does not wait for it. The
+/// model is left out of the save (the design is rebuilt when it opens), since what the check
+/// finds is part of the model; once the check ends, the model is kept with what it found.
+#[test]
+fn a_save_while_an_import_is_checked_keeps_no_model_and_does_not_wait() {
+    let doc = placed_imports(1);
+    let mut model = Model::new();
+    model.evaluate(&doc);
+    let import = doc.features[0].id;
+    let (checks, end) = kernel::ImportChecks::running_for_tests();
+    let r = model.results.iter_mut().find(|r| r.id == import).unwrap();
+    r.import_report = Some(Arc::new(kernel::ImportReport { parts: 2, solids: 2, issues: Vec::new(), single_root: false, checks }));
+    assert!(model.checking_imports());
+    // (were it to wait, this would never return: nothing else ends the check)
+    assert!(model.saved_if_checked(&doc).is_none(), "no model while the check runs");
+    let issue = kernel::ImportIssue {
+        kind: kernel::IssueKind::NeedsRepair,
+        item: Some(1),
+        part: String::new(),
+        paths: Vec::new(),
+        faces: 0,
+        times: 1,
+        detail: "fails SMLib's check".into(),
+    };
+    end(vec![issue]);
+    assert!(!model.checking_imports());
+    let saved = model.saved_if_checked(&doc).expect("the model once the check has ended");
+    let feature = &saved.records["features"][0];
+    assert_eq!(feature["warning"], serde_json::json!(crate::eval::import_warning(&["fails SMLib's check"])));
+    assert_eq!(feature["import_report"]["issues"][0]["detail"], "fails SMLib's check", "kept with what the check found");
+    assert_eq!(saved.records, model.saved(&doc).unwrap().records, "as a save that waited keeps it");
 }
 
 /// The tolerance heal preference is part of an import's and a Repair's fingerprint, and of no

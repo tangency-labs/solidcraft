@@ -127,6 +127,18 @@ impl Brep {
         r
     }
 
+    /// [`Brep::to_native_ordered`] of a sheet made only to read a file's trims from
+    /// ([`crate::pcurves`]): the trims SMLib builds for it raise their edges by upstream's
+    /// sampled distance, not a proved one (see [`crate::core::to_arrays_sampled_trims`] and
+    /// [`solidcore::Kernel::with_sampled_trim_raise`]).
+    pub(crate) fn to_native_ordered_sampled_trims(&self) -> std::result::Result<(b::Brep, Order), ExportError> {
+        let arrays = crate::core::to_arrays_sampled_trims(self.core()).map_err(ExportError::Smlib)?;
+        native_ordered(&arrays).and_then(|(mut brep, _, order)| {
+            self.with_definitions(&mut brep, &order)?;
+            Ok((brep, order))
+        })
+    }
+
     /// Export the canonical record and, when a complex shell order was already confirmed,
     /// prepare its runtime body for the STEP import's modelling check. The runtime body
     /// is built from this export so it agrees with the body reconstructed from a saved file.

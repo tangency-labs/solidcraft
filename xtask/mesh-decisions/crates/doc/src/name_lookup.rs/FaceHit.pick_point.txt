@@ -1,0 +1,1 @@
+finds a point that picks a face again on the display mesh

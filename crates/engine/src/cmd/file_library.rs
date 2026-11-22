@@ -3,32 +3,43 @@ use super::CommandSpec;
 use crate::{
     EngineError, Result, Session,
     params::{bad, str_},
+    schema::file_library::{FileTransferParams, FileTransferResult, FileTrashParams, FileTrashResult},
+    schema::{TypedContract, output_schema_for},
 };
-use serde_json::{Value, json};
+use serde_json::Value;
 use std::path::Path;
 
+const TRANSFER_CONTRACT: TypedContract<FileTransferParams> = TypedContract::new();
+const TRASH_CONTRACT: TypedContract<FileTrashParams> = TypedContract::new();
+
 pub static COMMANDS: &[CommandSpec] = &[
-    CommandSpec::new("file.copy", "Copy Design File", copy)
+    CommandSpec::new("file.copy", "Copy Design File", crate::checked!("file.copy", copy))
         .icon("copy")
         .noundo()
         .doc_only()
+        .contract(&TRANSFER_CONTRACT)
+        .output(output_schema_for::<FileTransferResult>)
         .params("path, destination; copies the saved design without replacing an existing file; rebases linked designs"),
-    CommandSpec::new("file.move", "Move Design File", move_file)
+    CommandSpec::new("file.move", "Move Design File", crate::checked!("file.move", move_file))
         .icon("move")
         .noundo()
         .doc_only()
+        .contract(&TRANSFER_CONTRACT)
+        .output(output_schema_for::<FileTransferResult>)
         .params("path, destination; also renames; refuses the current design or its linked files; never replaces an existing file"),
-    CommandSpec::new("file.trash", "Move Design File to Trash", trash)
+    CommandSpec::new("file.trash", "Move Design File to Trash", crate::checked!("file.trash", trash))
         .icon("delete")
         .noundo()
         .doc_only()
+        .contract(&TRASH_CONTRACT)
+        .output(output_schema_for::<FileTrashResult>)
         .params("path; refuses the current design or its linked files; system Trash only, never permanent deletion"),
 ];
 
+/// One of the two path parameters. The command is not named here: the engine names the one that
+/// ran (`Session::execute`, #6651), which is also what the contract check uses.
 fn arg<'a>(p: &'a Value, key: &str) -> Result<&'a str> {
-    str_(p, key)
-        .filter(|s| !s.trim().is_empty() && s.len() < 4096 && !s.contains('\0'))
-        .ok_or_else(|| bad("file", format!("A valid {key} is required")))
+    str_(p, key).filter(|s| !s.trim().is_empty() && s.len() < 4096 && !s.contains('\0')).ok_or_else(|| bad("", format!("A valid {key} is required")))
 }
 
 pub(crate) fn same_file(a: &str, b: &str) -> bool {
@@ -78,7 +89,7 @@ fn transfer(s: &mut Session, p: &Value, moving: bool) -> Result<Value> {
     }
     if !solidcraft_io::is_design_path(path) || !solidcraft_io::is_design_path(destination) {
         let extensions = solidcraft_io::DESIGN_EXTS.iter().copied().chain(["json"]).map(|ext| format!(".{ext}")).collect::<Vec<_>>().join(", ");
-        return Err(bad("file", format!("Keep a supported design extension ({extensions})")));
+        return Err(bad("", format!("Keep a supported design extension ({extensions})")));
     }
     let original = solidcraft_io::vfs::read(path, solidcraft_io::MAX_DESIGN_BYTES).map_err(|e| EngineError::Other(e.to_string()))?;
     // Validate before a filesystem mutation, and keep external component links pointing
@@ -94,7 +105,8 @@ fn transfer(s: &mut Session, p: &Value, moving: bool) -> Result<Value> {
     };
     solidcraft_io::library_files::transfer(path, destination, &original, &contents, moving)
         .map_err(|e| EngineError::Other(format!("File operation failed: {e}")))?;
-    Ok(json!({"path":path, "destination":destination}))
+    let reply = FileTransferResult { path: path.into(), destination: destination.into(), param_warnings: Vec::new() };
+    serde_json::to_value(reply).map_err(|e| EngineError::Other(e.to_string()))
 }
 fn copy(s: &mut Session, p: &Value) -> Result<Value> {
     transfer(s, p, false)
@@ -109,13 +121,15 @@ fn trash(s: &mut Session, p: &Value) -> Result<Value> {
         return Err(bad("file.trash", "Choose a design file"));
     }
     solidcraft_io::library_files::trash(path).map_err(|e| EngineError::Other(e.to_string()))?;
-    Ok(json!({"path":path,"trashed":true}))
+    let reply = FileTrashResult { path: path.into(), trashed: true, param_warnings: Vec::new() };
+    serde_json::to_value(reply).map_err(|e| EngineError::Other(e.to_string()))
 }
 
 #[cfg(all(test, not(target_arch = "wasm32")))]
 #[allow(clippy::unwrap_used)]
 mod tests {
     use super::*;
+    use serde_json::json;
     static NEXT_FIXTURE: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
     struct Fixture(std::path::PathBuf);
     impl Fixture {
@@ -210,6 +224,27 @@ mod tests {
         assert_eq!(s.doc.to_json(), before);
         assert_eq!(s.undo.len(), undo);
         assert!(s.is_dirty());
+    }
+
+    #[test]
+    fn library_copy_keeps_authored_bytes_and_model_cache_with_a_fresh_session_identity() {
+        let f = Fixture::new();
+        let source = f.0.join("Source.sc");
+        let destination = f.0.join("Copy.sc");
+        let mut original = session();
+        original.execute("solid.box", &json!({"length": 1, "width": 1, "height": 1})).unwrap();
+        let source_bytes = original.design_container(solidcraft_io::DesignCompression::Fast, false, true).unwrap();
+        std::fs::write(&source, &source_bytes).unwrap();
+        session().execute("file.copy", &json!({"path": source, "destination": destination})).unwrap();
+        assert_eq!(std::fs::read(&source).unwrap(), source_bytes);
+        let copied_bytes = std::fs::read(&destination).unwrap();
+        assert_eq!(copied_bytes, source_bytes);
+        let mut reader = solidcraft_io::DesignContainerReader::new(std::io::Cursor::new(copied_bytes)).unwrap();
+        let saved = reader.geometry().unwrap();
+        let copied = reader.read_document().unwrap();
+        let reopened = Session::opened(copied, Some(&saved));
+        assert_ne!(reopened.design_token().document_id, original.design_token().document_id);
+        assert_eq!(reopened.model.last_recomputed, 0, "the saved model remains adoptable");
     }
 
     #[test]

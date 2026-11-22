@@ -300,6 +300,45 @@ fn remembered_preference_fixture() -> crate::SolveApp {
 }
 
 #[test]
+fn detached_panel_host_follows_workspace_and_remembers_its_own_placement() {
+    let mut app = crate::SolveApp::new(solidcraft_engine::Session::default(), Default::default());
+    super::production::enable_production(&mut app).unwrap();
+    let root = app.panel_runtime().unwrap().environment().window.clone();
+    let review = WorkspaceId::new("solidcraft.review").unwrap();
+    let rect = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1280.0, 800.0));
+    let ctx = egui::Context::default();
+    let mut detached = PopOutPanels::default();
+    detached.swap(&mut app);
+    assert!(app.panel_runtime().is_none());
+    let mut remembered = None;
+    let _ = ctx.run_ui(egui::RawInput { screen_rect: Some(rect), ..Default::default() }, |ui| {
+        assert!(prepare_pop_out_panels(&mut app, ui, rect, Some(&review), "detached.review", &remembered));
+    });
+    let live = app.panel_runtime().unwrap();
+    assert_eq!(live.layout().layout().workspace, review);
+    assert_ne!(live.environment().window, root);
+    let browser = live.layout().layout().containing(&InstanceId::new("browser").unwrap()).unwrap().id.clone();
+    app.dispatch_panel_layout(LayoutAction::Apply {
+        expected_revision: None,
+        mutations: vec![Mutation::Collapse { section: browser.clone(), collapsed: true }],
+    })
+    .unwrap();
+    detached.save(&app, &mut remembered);
+    assert!(remembered.is_some());
+    detached.swap(&mut app);
+    assert_eq!(app.panel_runtime().unwrap().environment().window, root);
+    let mut reopened = PopOutPanels::default();
+    reopened.swap(&mut app);
+    let _ = ctx.run_ui(egui::RawInput { screen_rect: Some(rect), ..Default::default() }, |ui| {
+        assert!(prepare_pop_out_panels(&mut app, ui, rect, Some(&review), "detached.review", &remembered));
+    });
+    let live = app.panel_runtime().unwrap();
+    assert_eq!(live.layout().layout().workspace, review);
+    assert!(live.layout().layout().section(&browser).unwrap().collapsed);
+    reopened.swap(&mut app);
+}
+
+#[test]
 fn application_panel_preferences_round_trip_named_layouts_columns_and_expansion() {
     let mut app = remembered_preference_fixture();
     assert!(app.panel_runtime().unwrap().layout().inspect().capabilities.persistence);
@@ -317,7 +356,8 @@ fn application_panel_preferences_round_trip_named_layouts_columns_and_expansion(
     app.run_panel_command("layout.save", &serde_json::json!({"name":"My arrangement"})).unwrap();
     let layout = app.panel_runtime().unwrap().layout().layout().clone();
     let saved = app.prefs();
-    assert!(serde_json::from_str::<serde_json::Value>(&saved).unwrap()[PREFERENCES_KEY]["catalogue"].is_string());
+    let stored = serde_json::from_str::<serde_json::Value>(&saved).unwrap()[PREFERENCES_KEY]["catalogue"].clone();
+    assert!(stored["users"].is_array() && stored["builtins"].is_array(), "the catalogue is plain JSON, never base64: {stored}");
     assert!(std::sync::Arc::ptr_eq(&document, &app.session.doc));
     assert_eq!(revision, app.session.revision);
     let mut restored = crate::SolveApp::new(solidcraft_engine::Session::default(), Default::default());
@@ -377,18 +417,12 @@ fn future_application_panel_record_is_retained_without_legacy_reimport() {
 
 #[test]
 fn unreadable_saved_layout_is_reset_on_its_own_and_the_rest_is_kept() {
-    use solidcraft_engine::doc::canvas::{base64_decode, base64_encode};
     let mut app = remembered_preference_fixture();
     app.run_panel_command("layout.save", &serde_json::json!({"name":"Break me"})).unwrap();
     app.run_panel_command("layout.save", &serde_json::json!({"name":"Keep me"})).unwrap();
     let layout = app.panel_runtime().unwrap().layout().layout().clone();
     let mut value = preferences_value(&app).unwrap();
-    let mut bytes = base64_decode(value["catalogue"].as_str().unwrap()).unwrap();
-    let name = bytes.windows(8).position(|window| window == b"Break me").unwrap();
-    let format = b"solidcraft.panel-layout";
-    let at = name + bytes[name..].windows(format.len()).position(|window| window == format).unwrap();
-    bytes[at] = b'x';
-    value["catalogue"] = base64_encode(&bytes).into();
+    corrupt_saved_preset(&mut value, "Break me");
     let mut restored = crate::SolveApp::new(solidcraft_engine::Session::default(), Default::default());
     restored.load_prefs(&serde_json::json!({"panel_layout":value}).to_string());
     super::specimen::control_specimen(&mut restored, &serde_json::json!({"preset":"docks","remember":true})).unwrap();
@@ -399,14 +433,27 @@ fn unreadable_saved_layout_is_reset_on_its_own_and_the_rest_is_kept() {
     assert!(notice.contains("Break me"), "the notice names what was reset: {notice}");
 }
 
+/// An older build packed the catalogue as base64 text: it still reads, its layouts and all, and is
+/// saved again as plain JSON.
+#[test]
+fn an_older_base64_catalogue_still_reads_and_saves_as_plain_json() {
+    let mut app = remembered_preference_fixture();
+    app.run_panel_command("layout.save", &serde_json::json!({"name":"Kept"})).unwrap();
+    let mut value = preferences_value(&app).unwrap();
+    let bytes = solidcraft_engine::panels::commands::snapshot_from_value(&value["catalogue"]).unwrap();
+    value["catalogue"] = solidcraft_engine::doc::canvas::base64_encode(&bytes).into();
+    let restored = start_with_saved_layouts(&value);
+    assert_eq!(user_preset_names(&restored), ["Kept"]);
+    let again = preferences_value(&restored).unwrap();
+    assert!(again["catalogue"]["users"].is_array(), "saved again as plain JSON: {}", again["catalogue"]);
+}
+
+/// Breaks the stored preset `name`'s record (its format name), leaving the rest of the catalogue.
 fn corrupt_saved_preset(value: &mut serde_json::Value, name: &str) {
-    use solidcraft_engine::doc::canvas::{base64_decode, base64_encode};
-    let mut bytes = base64_decode(value["catalogue"].as_str().unwrap()).unwrap();
-    let at = bytes.windows(name.len()).position(|window| window == name.as_bytes()).unwrap();
-    let format = b"solidcraft.panel-layout";
-    let at = at + bytes[at..].windows(format.len()).position(|window| window == format).unwrap();
-    bytes[at] = b'x';
-    value["catalogue"] = base64_encode(&bytes).into();
+    let presets = value["catalogue"]["users"].as_array_mut().unwrap();
+    let preset = presets.iter_mut().find(|preset| preset["name"] == name).unwrap();
+    let text = preset["record"]["text"].as_str().unwrap().replacen("solidcraft.panel-layout", "xolidcraft.panel-layout", 1);
+    preset["record"]["text"] = text.into();
 }
 
 fn start_with_saved_layouts(value: &serde_json::Value) -> crate::SolveApp {
@@ -460,15 +507,16 @@ fn over_the_cap_the_saved_record_is_left_byte_identical() {
     corrupt_saved_preset(&mut value, "Break me");
     // Kept entries that leave no room for one more.
     let mut kept: Vec<UnreadEntry> =
-        (0..3).map(|n| UnreadEntry::native(&WorkspaceId::new(format!("kept.{n}")).unwrap(), &vec![0_u8; 4_000_000])).collect();
+        (0..4).map(|n| UnreadEntry::native(&WorkspaceId::new(format!("kept.{n}")).unwrap(), &vec![b'a'; 4_000_000])).collect();
     let used: usize = kept.iter().map(UnreadEntry::size).sum();
     let filler = UnreadEntry::native(&WorkspaceId::new("kept.fill").unwrap(), &[]);
     let room = MAX_REJECTED_RECORD_BYTES - used - filler.size() - 16;
-    kept.push(UnreadEntry::native(&WorkspaceId::new("kept.fill").unwrap(), &vec![0_u8; room / 4 * 3]));
+    // Stored as its text, one byte a character: exactly the room left.
+    kept.push(UnreadEntry::native(&WorkspaceId::new("kept.fill").unwrap(), &vec![b'a'; room]));
     value["unread"] = serde_json::json!(kept);
     let mut session = start_with_saved_layouts(&value);
     assert!(user_preset_names(&session).is_empty(), "the repaired catalogue is used in memory");
-    assert!(session.status.as_ref().is_some_and(|status| status.0.contains("left as they were")));
+    assert!(session.status.as_ref().is_some_and(|status| status.0.contains("left as they were")), "{:?}", session.status);
     let saved: serde_json::Value = serde_json::from_str(&session.prefs()).unwrap();
     assert_eq!(saved["panel_layout"], value, "nothing was written over the stored record");
     // Preferences opens (snapshot), a layout changes, Cancel restores the snapshot: the original stays.
@@ -14293,4 +14341,27 @@ fn header_content_takes_the_titles_place_after_the_grip() {
         assert!(c.tab_strip.is_some() && c.header_content.is_none(), "a group keeps its tabs in the header");
         raw.host.set_header_content(id("lone"), None);
     }
+}
+
+#[test]
+fn pop_out_browser_draws_after_the_main_browser_without_replacing_its_rows() {
+    use crate::semantic_content::{self, ContentOwner, ContentRequest};
+
+    let mut app = crate::SolveApp::new(solidcraft_engine::Session::default(), Default::default());
+    let ctx = egui::Context::default();
+    let mut detached = semantic_content::Detached::default();
+    let request = ContentRequest::Browser { shrink_height: true };
+    ctx.run_ui(egui::RawInput::default(), |ui| {
+        semantic_content::begin(&mut app, ui.ctx());
+        semantic_content::show(&mut app, ui, ContentOwner::BROWSER, request);
+        semantic_content::finalize(&mut app, ui.ctx());
+        let main_rows = semantic_content::output(ContentOwner::BROWSER).rows;
+        assert!(!main_rows.is_empty());
+        detached.show(&mut app, ui, |app, ui| {
+            semantic_content::show(app, ui, ContentOwner::BROWSER, request);
+            assert!(!semantic_content::output(ContentOwner::BROWSER).rows.is_empty());
+        });
+        assert_eq!(semantic_content::output(ContentOwner::BROWSER).rows, main_rows);
+    })
+    .drop_without_applying_deltas();
 }
