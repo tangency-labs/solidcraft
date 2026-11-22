@@ -1,0 +1,21 @@
+{
+  "upstream": "tangency-labs/solidcraft",
+  "stable": {
+    "tag": "v0.46.2",
+    "version": "0.46.2",
+    "rev": "f4990915b4a91c3c82bab0745dd521f95078a2ac",
+    "hash": "sha256-KE+7LzAB/QUaRNJZvsQutNNDrgubfBnPoA/WkTVbQzM=",
+    "cargoHash": "sha256-TK9N4WPJNP7OsXzuvir+E6NUNtc6WWNtS1677lEdggw=",
+    "rustVersion": "1.95",
+    "toolchain": "1.99.1"
+  },
+  "prerelease": {
+    "tag": "v0.46.2-nightly.20261122.155.1",
+    "version": "0.46.2-nightly.20261122.155.1",
+    "rev": "0d7e855a396951dca7ba9d71396965f64807feb6",
+    "hash": "sha256-TLImeisnDKBPkpUVyZyxowKRdpLvOZ6hvWCLLqBPbA8=",
+    "cargoHash": "sha256-TK9N4WPJNP7OsXzuvir+E6NUNtc6WWNtS1677lEdggw=",
+    "rustVersion": "1.95",
+    "toolchain": "1.99.1"
+  }
+}

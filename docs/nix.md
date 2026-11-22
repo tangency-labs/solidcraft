@@ -56,6 +56,56 @@ nix run github:bherbruck/solidcraft#solidcraft -- --version
 An unrelated old executable on `PATH` is not updated by `nix build`.
 Use the flake app or `./result/bin/solidcraft` to verify the package you just built.
 
+## Pinned releases and Home Manager
+
+`.#solidcraft` builds whatever commit the flake reference points at, which is `main` by
+default. For a released version, the flake also has two packages pinned to upstream release
+commits:
+
+| Package | What it builds |
+|---|---|
+| `solidcraft-stable` | The release marked Latest on GitHub. |
+| `solidcraft-prerelease` | The newest published release of any kind: usually the nightly, built daily from `main`, or a release candidate. It is never older than `solidcraft-stable`. |
+| `solidcraft` | The commit the flake input is locked to. |
+
+`nix/sources.json` records each release's tag, commit, source hash and Cargo dependency hash.
+The build uses this flake's locked nixpkgs and its Rust compiler. It still compiles on your
+machine: there is no binary cache.
+
+```sh
+nix run github:tangency-labs/solidcraft#stable -- --sample
+nix profile install github:tangency-labs/solidcraft#solidcraft-stable
+```
+
+In a Home Manager flake, add the input:
+
+```nix
+inputs.solidcraft.url = "github:tangency-labs/solidcraft";
+```
+
+Then either install a package directly:
+
+```nix
+home.packages = [ inputs.solidcraft.packages.${pkgs.stdenv.hostPlatform.system}.solidcraft-stable ];
+```
+
+or import the module, which installs the stable release unless you choose another channel:
+
+```nix
+imports = [ inputs.solidcraft.homeManagerModules.default ];
+programs.solidcraft.enable = true;
+# programs.solidcraft.channel = "prerelease";  # or "main"
+```
+
+Do not add `inputs.nixpkgs.follows = "nixpkgs"` to the SolidCraft input. That replaces the
+compiler that the pinned releases were checked with, and an older Rust compiler has failed on a
+release before ([#19911](https://github.com/tangency-labs/solidcraft/issues/19911)).
+
+`nix flake update solidcraft` picks up new pins once they land on `main`. To refresh the pins
+yourself, run `nix/update.sh` in a checkout. It reads the upstream releases (set
+`SOLIDCRAFT_NIX_UPSTREAM=owner/repo` to read another repository) and rewrites
+`nix/sources.json` only when a release changed.
+
 ## Graphics and file dialogs
 
 The app wrapper includes Wayland, X11, xkbcommon, EGL, Vulkan-loader and D-Bus

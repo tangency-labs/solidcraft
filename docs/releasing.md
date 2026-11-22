@@ -382,6 +382,14 @@ After publishing a stable release, bump the cask: set `version` and the `sha256`
 `livecheck` follows the latest GitHub release, so `brew livecheck --cask tangency-labs/tap/solidcraft`
 shows when the tap is behind. Skip prereleases and nightlies.
 
+## Nix flake channels
+
+The flake's `solidcraft-stable` and `solidcraft-prerelease` packages build the commits pinned in
+`nix/sources.json` ([nix.md](nix.md#pinned-releases-and-home-manager)). After publishing a
+release, run `nix/update.sh` and land the changed `nix/sources.json` in a normal PR. The script
+reads the published releases of `tangency-labs/solidcraft`, so it gives the same result from a
+fork.
+
 ## Update signing
 
 The app's **Update now** (docs/book/src/guide/updates.md) only installs a package whose SHA-256
