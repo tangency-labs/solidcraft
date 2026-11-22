@@ -493,7 +493,7 @@ fn run_package(session: &mut Session, package: Package, entry: &str, params: &se
             || session.active_sketch != host.session.active_sketch
             || session.pending_moves != host.session.pending_moves
         {
-            session.accept_computed(host.session);
+            session.accept_computed(host.session)?;
         } else {
             session.plugin_state.link_changes = host.session.plugin_state.link_changes;
             std::sync::Arc::make_mut(&mut session.plugin_state.link_reads).extend(host.session.plugin_state.link_reads.iter().copied());
@@ -720,7 +720,9 @@ impl PluginHost for SolidCraftHost {
             || self.session.active_sketch != computed.active_sketch
             || self.session.pending_moves != computed.pending_moves
         {
-            self.session.accept_computed(computed);
+            self.session
+                .accept_computed(computed)
+                .map_err(|error| HostError::InvalidInput { field: "transaction".into(), reason: error.to_string() })?;
         } else {
             self.session.plugin_state.link_changes = computed.plugin_state.link_changes;
             std::sync::Arc::make_mut(&mut self.session.plugin_state.link_reads).extend(computed.plugin_state.link_reads.iter().copied());

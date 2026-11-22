@@ -2152,7 +2152,7 @@ fn many_waiting_agent_commands_keep_the_panel_and_fold_into_one_row() {
     // The summary row's X cancels those past the shown ones, and only them.
     crate::operations::cancel(&mut h.app, "agent:held:more").unwrap();
     let status = h.app.status.as_ref().map(|s| s.0.clone());
-    assert_eq!(status.as_deref(), Some("36 waiting commands cancelled"), "one message for the whole action");
+    assert_eq!(status.as_deref(), Some("36 waiting commands canceled"), "one message for the whole action");
     for (i, w) in waiting.iter().enumerate() {
         match w.try_recv() {
             Ok(r) => assert!(i >= MAX_WAITING_SHOWN && r["cancelled"] == true, "{i}: {r}"),
