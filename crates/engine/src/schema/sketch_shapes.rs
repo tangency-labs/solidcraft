@@ -17,7 +17,7 @@ use crate::params;
 /// What the coordinates of a point typed as text must be.
 const POINT_MUST: &str = "a point's coordinates must be numbers or expressions over the design's parameters";
 /// The most points a line takes.
-const MAX_LINE_POINTS: usize = 10_000;
+pub(crate) const MAX_LINE_POINTS: usize = 10_000;
 
 /// The forms of a point argument: [`SketchPoint`] and [`SnapPoint`] differ in the snaps.
 fn point_arg_schema(generator: &mut SchemaGenerator, snaps: bool) -> Schema {
@@ -110,6 +110,18 @@ impl JsonSchema for PlainPoint {
     }
 }
 
+/// Why a line of `n` points is refused, if it is: too few, or more than one line takes (the
+/// count is said, so a long polyline is not taken for a short one).
+pub(crate) fn line_points_refusal(n: usize) -> Option<String> {
+    if n < 2 {
+        Some("a line needs 2 or more points".to_string())
+    } else if n > MAX_LINE_POINTS {
+        Some(format!("a line takes at most {MAX_LINE_POINTS} points, {n} were given: draw it in several `sketch.line` calls"))
+    } else {
+        None
+    }
+}
+
 /// The points of a line: a list of [`SnapPoint`]s, 2 to 10 000.
 #[derive(Clone, Debug, PartialEq)]
 pub struct LinePoints(pub Vec<Value>);
@@ -119,8 +131,8 @@ impl<'de> Deserialize<'de> for LinePoints {
         let Value::Array(list) = Value::deserialize(d)? else {
             return Err(D::Error::custom(whole("`points` must be a list")));
         };
-        if list.len() < 2 || list.len() > MAX_LINE_POINTS {
-            return Err(D::Error::custom(whole("a line needs 2 or more points")));
+        if let Some(why) = line_points_refusal(list.len()) {
+            return Err(D::Error::custom(whole(&why)));
         }
         for v in &list {
             crate::cmd::point_arg_form(v, true).map_err(|why| D::Error::custom(whole(why)))?;
