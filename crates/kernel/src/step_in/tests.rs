@@ -1387,6 +1387,15 @@ fn heal_run(body: &Body, placements: &[M4], workers: usize) -> (Vec<ImportIssue>
     ((*issues).clone(), checks.heals())
 }
 
+/// A check outcome's failure standing in for SMLib's check of a part as read (one failed test,
+/// named `as read`), for tests that give the import's heal the checks' outcomes.
+fn failed_as_read() -> crate::CheckFailure {
+    crate::CheckFailure {
+        failures: 1,
+        tests: vec![crate::validation::FailedTest { name: "as read".into(), number: None, owners: Vec::new(), times: 1 }],
+    }
+}
+
 /// The one body of the lifted block (failing SMLib's check when `fails`) and of the block as
 /// written (passing it).
 fn checked_blocks() -> (Body, Body) {
@@ -5343,7 +5352,7 @@ fn an_imported_part_whose_check_fails_is_healed_where_it_is_read() {
     assert_eq!(faces, 8);
     let origin: Vec<u64> = (100..100 + faces as u64).collect();
     let part = Part { body, closed: true, file_faces: faces, face_origin: origin.clone(), refused: None };
-    let read = heal(&part, 7);
+    let read = heal(&part, 7, None);
     assert_eq!(part.body.record(), &source, "the part read stays as it was");
     let Healed::Kept(part, note, check, face_source) = read else { panic!("kept") };
     assert_eq!(part.body.face_count(), 7);
@@ -5383,7 +5392,7 @@ fn an_imported_part_whose_check_fails_is_healed_where_it_is_read() {
     let clean = hair_step_body(3e-3, 1e-3);
     assert_eq!(crate::validation::failing_check(&clean).unwrap(), None);
     let part = Part { body: clean, closed: true, file_faces: 8, face_origin: origin.clone(), refused: None };
-    assert!(matches!(heal(&part, 7), Healed::NotKept));
+    assert!(matches!(heal(&part, 7, None), Healed::NotKept));
 }
 
 /// Repair heals a part's tolerance-scale defects first: the hair step's riser, its end edges
@@ -5495,7 +5504,7 @@ fn a_stopped_heal_changes_nothing() {
     stop.stop();
     assert_eq!(stop.within(|| crate::heal_tolerance_defects(&hair)).err(), Some(KernelError::Heal(crate::HealFailure::Stopped)));
     let part = Part { closed: true, file_faces: 8, face_origin: (0..8).collect(), refused: None, body: hair.clone() };
-    assert!(matches!(stop.within(|| heal(&part, 7)), Healed::Stopped));
+    assert!(matches!(stop.within(|| heal(&part, 7, None)), Healed::Stopped));
     assert_eq!(part.body.record(), &source);
     // In the import's checks: a stopped run heals nothing and says it was stopped.
     for m in [IDENTITY, translation([10.0, 0.0, 0.0])] {
@@ -5507,7 +5516,7 @@ fn a_stopped_heal_changes_nothing() {
     let repaired = stop.within(|| crate::repair(&hair, &crate::RepairOptions { gap: 0.01, patch_holes: false, heal_first: true }));
     assert_eq!(repaired.err(), Some(KernelError::Heal(crate::HealFailure::Stopped)));
     // Not stopped, the same heal is kept.
-    let Healed::Kept(healed, ..) = heal(&part, 7) else { panic!("kept") };
+    let Healed::Kept(healed, ..) = heal(&part, 7, None) else { panic!("kept") };
     assert_eq!(healed.body.face_count(), 7);
 }
 
@@ -5524,6 +5533,79 @@ fn a_healed_part_keeps_its_regularization_protection() {
         let (repaired, report) = crate::repair(&hair, &crate::RepairOptions { gap: 0.01, patch_holes: false, heal_first: true }).unwrap();
         assert!(report.healed.is_some(), "Repair healed first");
         assert_eq!(repaired.regularization_protected, protected);
+    }
+}
+
+/// The hair-step box (`hair_step_body(3e-4, 1e-3)`) with its corner (10, 0, 0) lifted 4e-4 off
+/// the bottom: the heal takes the riser away, as on the hair step alone, and leaves the gaps
+/// at the lifted corner, which no tolerance-scale heal reaches (the corner sits off its edges
+/// and faces by more than their tolerance).
+fn hair_step_with_a_lifted_corner() -> Body {
+    let h = 10.0 + 3e-4;
+    let corners = [
+        [0.0, 0.0, 0.0],
+        [10.0, 0.0, 0.0],
+        [10.0, 10.0, 0.0],
+        [0.0, 10.0, 0.0],
+        [0.0, 0.0, 10.0],
+        [10.0, 0.0, 10.0],
+        [10.0, 5.0, 10.0],
+        [0.0, 5.0, 10.0],
+        [0.0, 5.0, h],
+        [10.0, 5.0, h],
+        [10.0, 10.0, h],
+        [0.0, 10.0, h],
+    ];
+    let cycles: [&[usize]; 8] =
+        [&[0, 3, 2, 1], &[4, 5, 6, 7], &[7, 6, 9, 8], &[8, 9, 10, 11], &[0, 1, 5, 4], &[2, 3, 11, 10], &[1, 2, 10, 9, 6, 5], &[0, 4, 7, 8, 11, 3]];
+    // the corner is lifted after the faces are made, so their planes stay the box's
+    let mut rec = polyhedron_record(&corners, &cycles, 1e-3);
+    if let Some(v) = rec.vertices.iter_mut().find(|v| v.point == [10.0, 0.0, 0.0]) {
+        v.point = [10.0, 0.0, 4e-4];
+    }
+    Body::from_record(rec).unwrap()
+}
+
+/// The import's heal of a part it betters but leaves failing reuses the import's own check of
+/// the part, which the heal compares the healed part with, rather than run it again on the
+/// same body. SMLib's checks per import of such a part (each a `check` call of SMLib, counted
+/// by the profiler): the import's check of the part (1), the heal's check of the healed part
+/// (1; the import's check again of the healed part at the identity is that one), and the part's
+/// own check, which the heal used to run again (1, now 0): 2, was 3. The heal kept is the same
+/// either way: given the import's check or running its own, the heal decides on the same check
+/// of the same body.
+#[test]
+fn the_heal_of_an_imported_part_reuses_the_imports_check_of_it() {
+    let part = hair_step_with_a_lifted_corner();
+    let own = crate::validation::failing_check(&part).unwrap().expect("the part fails the check");
+    let kinds = |c: &crate::CheckFailure| c.tests.iter().map(|t| t.name.clone()).collect::<std::collections::BTreeSet<_>>();
+    // what the hair step alone fails, which the heal removes (`repair_heals_a_hair_step_that_fails_the_check`)
+    let hair = crate::validation::failing_check(&hair_step_body(3e-4, 1e-3)).unwrap().expect("the hair step fails");
+    let gaps: std::collections::BTreeSet<String> = kinds(&own).difference(&kinds(&hair)).cloned().collect();
+    assert!(!gaps.is_empty() && gaps.iter().all(|k| k.contains("Gap")), "the lifted corner fails gap tests: {own}");
+
+    // The heal given the import's check decides as the heal that runs it.
+    let (computed, given) = (crate::heal_tolerance_defects(&part).unwrap(), crate::tolerance_heal::heal_given_check(&part, Some(&own)).unwrap());
+    let ((by_itself, heal), (body, given)) = (computed.expect("kept"), given.expect("kept"));
+    assert_eq!(heal, given);
+    assert_eq!(by_itself.record(), body.record());
+    let left = heal.check.as_ref().expect("the healed part still fails");
+    assert_eq!(kinds(left), gaps, "the riser's failures go, the corner's stay");
+    // The check given is the one compared with: a given check the healed part does not better
+    // keeps the part as it was.
+    assert!(crate::tolerance_heal::heal_given_check(&part, Some(left)).unwrap().is_none());
+
+    solidcraft_profile::set_enabled(true);
+    for workers in [1, 2] {
+        let mark = solidcraft_profile::mark();
+        let (issues, heals) = heal_run(&part, &[IDENTITY], workers);
+        let rep = mark.report();
+        let checks = rep.rows.iter().filter(|r| r.category == "solidcore" && r.name == "check").map(|r| r.count).sum::<u64>();
+        assert_eq!(checks, 2, "{workers} workers: the import's check of the part and the heal's of the healed part");
+        assert_eq!(heals.expect("healed").body(0).expect("the instance is healed").body.record(), body.record());
+        let kinds: Vec<IssueKind> = issues.iter().map(|i| i.kind).collect();
+        assert_eq!(kinds, [IssueKind::Repaired, IssueKind::NeedsRepair], "{issues:?}");
+        assert!(issues[1].detail.ends_with(&format!("SMLib's check fails it: {left}")), "{issues:?}");
     }
 }
 
@@ -5694,7 +5776,7 @@ fn a_placement_the_healed_part_fails_keeps_the_part_as_read() {
         source: first.source.clone(),
     };
     jobs.push(second);
-    let outcomes = vec![checks::Outcome::NeedsRepair("as read".into()), checks::Outcome::Passes];
+    let outcomes = vec![checks::Outcome::NeedsRepair(failed_as_read()), checks::Outcome::Passes];
     let run = ImportChecks::ran(&jobs, outcomes, &heals);
     assert!(!run.stopped());
     assert!(run.heals().is_none(), "the heal is not kept");
@@ -5703,7 +5785,7 @@ fn a_placement_the_healed_part_fails_keeps_the_part_as_read() {
     assert!(issues.iter().any(|i| i.kind == IssueKind::NeedsRepair && i.detail.contains("as read")), "{issues:?}");
     // The same part at the identity alone heals: the placement is what kept it as read.
     let (jobs, heals) = part_jobs(&hair, &[IDENTITY]);
-    let run = ImportChecks::ran(&jobs, vec![checks::Outcome::NeedsRepair("as read".into())], &heals);
+    let run = ImportChecks::ran(&jobs, vec![checks::Outcome::NeedsRepair(failed_as_read())], &heals);
     assert!(run.heals().is_some());
 }
 
@@ -5740,7 +5822,7 @@ fn a_heal_stopped_with_one_worker_fails_the_import_uncached() {
         // The part the read checks is the hair step, failing its check.
         let (jobs, heals) = part_jobs(&hair, &[IDENTITY]);
         reading.rd.check_jobs = jobs;
-        reading.rd.check_outcomes = vec![checks::Outcome::NeedsRepair("as read".into())];
+        reading.rd.check_outcomes = vec![checks::Outcome::NeedsRepair(failed_as_read())];
         reading.rd.instances = heals.instances;
         reading.rd.uses = heals.uses;
         (text_key(&text), reading)
@@ -5781,7 +5863,7 @@ fn with_the_heal_preference_off_a_failing_part_stays_as_read() {
             let (jobs, heals) = part_jobs(&hair, &[IDENTITY]);
             reading.rd.check_jobs = jobs;
             if reading.single {
-                reading.rd.check_outcomes = vec![checks::Outcome::NeedsRepair("SMLib's check fails it: as read".into())];
+                reading.rd.check_outcomes = vec![checks::Outcome::NeedsRepair(failed_as_read())];
             }
             reading.rd.instances = heals.instances;
             reading.rd.uses = heals.uses;
