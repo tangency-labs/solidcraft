@@ -375,9 +375,10 @@ pub enum BlendFailure {
     /// the cause. [`ErrorKind::Failed`], neither a defect nor a refusal on its own, so the
     /// kept cause decides ([`crate::SolidError::is_defect`]); status `SM_ERR`.
     ExecutiveStepFailed,
-    /// A face or edge the cliff overflow reads lacks the input named (a face's surface, an
-    /// edge's curve or one of its vertices); the failure is at the entity. The overflow's
-    /// helpers read the caller's body and the sheet the executive built alike, so the cause
+    /// A face or edge a blend's overflow reads lacks the input named (a face's surface, an
+    /// edge's curve or one of its vertices); the failure is at the entity. The overflows'
+    /// helpers, which the trims at creases and the kept features share, read the caller's
+    /// body and the sheet the executive built alike, so the cause
     /// names what is missing and leaves the blame open, as [`BlendFailure::CliffInputMissing`]
     /// does: status `SM_ERR_NULL_POINTER` (upstream `NER`) and the kind of that status
     /// ([`ErrorKind::Missing`]), neither a defect nor a refusal.
@@ -484,7 +485,7 @@ impl CliffInput {
     }
 }
 
-/// What a face or edge the cliff overflow reads lacks ([`BlendFailure::OverflowInputMissing`]).
+/// What a face or edge a blend's overflow reads lacks ([`BlendFailure::OverflowInputMissing`]).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum OverflowInput {
@@ -503,12 +504,12 @@ pub enum OverflowInput {
 impl OverflowInput {
     const fn what(self) -> &'static str {
         match self {
-            Self::FaceSurface => "a face the cliff overflow reads has no surface",
-            Self::EdgeCurve => "an edge the cliff overflow reads has no curve",
-            Self::EdgeStartVertex => "an edge the cliff overflow reads has no start vertex",
-            Self::EdgeEndVertex => "an edge the cliff overflow reads has no end vertex",
+            Self::FaceSurface => "a face a blend's overflow reads has no surface",
+            Self::EdgeCurve => "an edge a blend's overflow reads has no curve",
+            Self::EdgeStartVertex => "an edge a blend's overflow reads has no start vertex",
+            Self::EdgeEndVertex => "an edge a blend's overflow reads has no end vertex",
             Self::EdgeOtherVertex => {
-                "an edge the cliff overflow walks has no vertex at its other end"
+                "an edge a blend's overflow walks has no vertex at its other end"
             }
         }
     }
@@ -2152,7 +2153,7 @@ mod tests {
         );
     }
 
-    /// #19825: each cause the cliff overflow names is no phrase, replaces the status it
+    /// #19825: each cause the overflows name is no phrase, replaces the status it
     /// keeps, has its class (a missing input is `Missing`, neither a defect nor a refusal:
     /// the overflow's helpers read the caller's body and the executive's sheet alike), and
     /// is worded with its class.
@@ -2207,7 +2208,7 @@ mod tests {
         }
         assert_eq!(
             BlendFailure::OverflowInputMissing(OverflowInput::FaceSurface).to_string(),
-            "missing: a face the cliff overflow reads has no surface"
+            "missing: a face a blend's overflow reads has no surface"
         );
     }
 
