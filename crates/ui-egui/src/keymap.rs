@@ -771,7 +771,7 @@ pub fn page(app: &mut SolveApp, ui: &mut egui::Ui) {
             .filter_map(|c| {
                 let keys = keys_for_spec(app, c);
                 let displayed: Vec<_> = keys.iter().map(|key| crate::ui_kit::chord_label(key)).collect();
-                let label = app.tr_label(c.label);
+                let label = app.tr_command(c.id, c.label);
                 let group = shortcut_group(c);
                 let hit = if filtering {
                     crate::ui_kit::settings_search::shows_all(ui)

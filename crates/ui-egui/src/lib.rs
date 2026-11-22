@@ -187,6 +187,15 @@ mod status_tests {
             );
         }
         assert_eq!(super::friendly_error("edit.undo", "nothing to undo"), "Undo: nothing to undo");
+        {
+            // The label is the command's own: "Export" is also the caption of the settings
+            // profile's button, "Exportar perfil" in Spanish (#20610).
+            let _spanish = solidcraft_ui_text::scope("es");
+            assert_eq!(
+                super::friendly_error("file.export", "nothing to export: the design has no bodies"),
+                "Exportar: nothing to export: the design has no bodies"
+            );
+        }
         let mut app = super::SolveApp::new(solidcraft_engine::Session::default(), Default::default());
         app.run("solid.box", serde_json::json!({"length": 5, "width": 5, "height": 5})).unwrap();
         assert_eq!(app.session.log.last().map(String::as_str), Some("Box done"));
@@ -1253,6 +1262,13 @@ impl SolveApp {
     /// Translate a display label supplied by the engine, without changing its identifier.
     pub fn tr_label<'a>(&self, text: &'a str) -> &'a str {
         solidcraft_ui_text::Locale::for_language(&self.preferences.language).label(text)
+    }
+
+    /// The label of the command `id`, from the command's own catalog entry
+    /// (`solidcraft_ui_text::Locale::command`): `label` is its English label, or what it
+    /// shows in its place.
+    pub fn tr_command<'a>(&self, id: &str, label: &'a str) -> &'a str {
+        solidcraft_ui_text::Locale::for_language(&self.preferences.language).command(id, label)
     }
 
     /// Draw the viewport on the GPU (eframe's wgpu render state, with the app's depth and
@@ -2461,7 +2477,7 @@ impl SolveApp {
         if let Some(info) = solidcraft_engine::find_command(id).map(|c| c.info(&self.session))
             && let Some(why) = info.disabled_reason
         {
-            let label = self.tr_label(info.label).to_string();
+            let label = self.tr_command(id, info.label).to_string();
             let why = self.tr_label(&why).to_string();
             self.set_status(format!("{label}: {why}"), true);
             return;
@@ -4786,7 +4802,7 @@ pub fn command_label(id: &str) -> &str {
 /// An engine error with the command's label instead of its id: "Shell: offset must be …".
 /// The command label and catalogued engine messages follow the interface language.
 pub fn friendly_error(id: &str, e: &str) -> String {
-    let label = solidcraft_ui_text::tr_label(command_label(id));
+    let label = solidcraft_ui_text::tr_command(id, command_label(id));
     let msg = e.replace(&format!("invalid parameters for `{id}`: "), "").replace(&format!("{id}: "), "").replace(&format!("`{id}`"), label);
     let msg = i18n::tr_engine_error(&msg);
     let msg = solidcraft_ui_text::tr_label(&msg);
