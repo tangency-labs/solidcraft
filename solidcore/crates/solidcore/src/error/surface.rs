@@ -238,15 +238,6 @@ impl SurfaceFailure {
     /// The status the C++ reports for the failure (a comparison detail).
     pub(crate) const fn comparison_status(&self) -> i32 {
         match self {
-            Self::Failed(_)
-            | Self::Defect { .. }
-            | Self::ScaleNotUniform
-            | Self::NurbNotMade
-            | Self::RadiusNotPositive
-            | Self::DerivativeOrderTooHigh { .. }
-            | Self::NurbNotAnalytic { .. }
-            | Self::CentreHasNoParameters
-            | Self::ConeBoundaryOnAxis => SM_ERR,
             Self::Missing(_)
             | Self::NoNurb
             | Self::SurfaceWithoutGenerator
@@ -274,7 +265,11 @@ impl SurfaceFailure {
             | Self::UnknownVolumeType { .. }
             | Self::NoNurb
             | Self::CurveWithoutNurb
-            | Self::CurveWithoutControlPoints => ErrorKind::InvalidInput,
+            | Self::CurveWithoutControlPoints
+            | Self::ScaleNotUniform
+            | Self::RadiusNotPositive
+            | Self::SurfaceWithoutGenerator
+            | Self::ConeBoundaryOnAxis => ErrorKind::InvalidInput,
             Self::BoxOutsideBendHalfSpace { .. }
             | Self::BoxOutsideZeroPeriod { .. }
             | Self::PointOutsideVolumeDomain { .. }
@@ -283,17 +278,14 @@ impl SurfaceFailure {
             | Self::PseudoBoxOutsideDomain => ErrorKind::OutsideDomain,
             Self::DerivativeCombinationUnsupported { .. }
             | Self::PlainVolume
-            | Self::BSplineVolumeUnsupported => ErrorKind::Unsupported,
+            | Self::BSplineVolumeUnsupported
+            | Self::NurbNotAnalytic { .. } => ErrorKind::Unsupported,
             Self::PointInBendSingularity | Self::ZeroVolumeTangent { .. } => ErrorKind::Degenerate,
-            Self::NoVolumeInverse | Self::CallFailed => ErrorKind::Failed,
-            Self::ScaleNotUniform
-            | Self::RadiusNotPositive
-            | Self::SurfaceWithoutGenerator
-            | Self::ConeBoundaryOnAxis => ErrorKind::InvalidInput,
-            Self::NurbNotAnalytic { .. } => ErrorKind::Unsupported,
-            Self::NurbNotMade | Self::GeneratorNotMade | Self::CentreHasNoParameters => {
-                ErrorKind::Failed
-            }
+            Self::NoVolumeInverse
+            | Self::CallFailed
+            | Self::NurbNotMade
+            | Self::GeneratorNotMade
+            | Self::CentreHasNoParameters => ErrorKind::Failed,
             _ => ErrorKind::of_status(self.comparison_status()),
         }
     }
