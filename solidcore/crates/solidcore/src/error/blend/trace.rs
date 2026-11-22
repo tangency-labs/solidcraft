@@ -297,6 +297,7 @@ mod tests {
             ),
             (TraceFailure::TraceBuiltNoSurface, SM_ERR_NULL_POINTER),
             (TraceFailure::SurfaceGeneratorMissing, SM_ERR_NULL_POINTER),
+            (TraceFailure::SmoothedCurveMissing, SM_ERR_NULL_POINTER),
             (TraceFailure::TraceHasNoPoints, SM_ERR_NULL_POINTER),
             (TraceFailure::SkinningFailed, SM_ERR),
             (TraceFailure::ChordTooShort { length: 0.0 }, SM_ERR),
