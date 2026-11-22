@@ -58,7 +58,7 @@ mod tests {
     use super::*;
 
     fn note(id: u64) -> Note {
-        Note { id, anchor: Vec3::new(1.0, 2.0, 3.0), text: format!("Check clearance here.\nLine {id}"), hidden: false }
+        Note { id, anchor: Vec3::new(1.0, 2.0, 3.0), text: format!("Check clearance here.\nLine {id}"), hidden: false, done: false, target: None }
     }
 
     #[test]
@@ -89,8 +89,10 @@ mod tests {
         doc.notes.push(note(1));
         let json = serde_json::to_string(&doc).unwrap();
         assert!(!json.contains("hidden"));
-        assert!(!json.contains("done"));
-        assert!(!json.contains("target"));
+        // Only the note itself: other parts of a document may have their own `done` or `target`.
+        let note_json = serde_json::to_string(&doc.notes[0]).unwrap();
+        assert!(!note_json.contains("done"));
+        assert!(!note_json.contains("target"));
         assert!(serde_json::from_str::<crate::Document>(&json).unwrap().notes[0].text.starts_with("Check"));
     }
 
