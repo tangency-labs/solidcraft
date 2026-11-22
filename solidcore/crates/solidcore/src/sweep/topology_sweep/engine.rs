@@ -33,7 +33,8 @@ use super::access::{
 use super::geometry::SweepGeometry;
 use super::{SweepEntity as E, TopologySweep, OP};
 use crate::curve::curve::Curve;
-use crate::error::{ignore_status, Result, SolidError};
+use crate::error::sweep::SweepFailure;
+use crate::error::{ignore_status, Result, SolidError, SM_ERR_NULL_POINTER};
 use crate::geom::attribute::{tag_ids, TagData};
 use crate::geom::tol::ZONE_TOL_3D;
 use crate::math::Point3;
@@ -62,9 +63,34 @@ pub fn check_sweep_repetitions(repetitions: u64) -> Result<()> {
     Ok(())
 }
 
-fn required<T>(value: Option<T>) -> Result<T> {
-    value.ok_or_else(|| SolidError::sweep_missing(OP, "an entity the topology sweep needs"))
+/// A topology link the sweep follows: upstream dereferences it unchecked, so its absence
+/// is a reviewed defect with upstream's `SM_ERR_NULL_POINTER` (`why` says why the kernel
+/// keeps the link).
+fn linked<T>(value: Option<T>, why: &'static str) -> Result<T> {
+    value.ok_or_else(|| SolidError::sweep_null_defect(OP, why))
 }
+/// An entity the caller's sweep targets name ([`SweepFailure::NullTarget`]).
+fn target<T>(value: Option<T>) -> Result<T> {
+    value.ok_or_else(|| SolidError::sweep(OP, SweepFailure::NullTarget))
+}
+/// Why an edge's vertex is linked: every edge of a B-rep the kernel keeps has its
+/// vertices through its edge uses (its start vertex again when closed).
+const EDGE_VERTEX: &str = "every edge of a B-rep the kernel keeps reaches its vertices through its edge uses (its start vertex again when closed)";
+/// Why an edge use's links are present.
+const EDGEUSE_LINK: &str =
+    "every edge use of a B-rep the kernel keeps has its edge, vertex use and mate";
+/// Why a vertex use's vertex is present.
+const VERTEXUSE_VERTEX: &str = "every vertex use of a B-rep the kernel keeps belongs to a vertex";
+/// Why a face's upward faceuse is present.
+const FACE_FACEUSE: &str = "every face of a B-rep the kernel keeps has its upward faceuse";
+/// Why a vertex loop's vertex use is present.
+const VERTEX_LOOP_USE: &str = "a vertex loop of a B-rep the kernel keeps holds its one vertex use";
+/// Why the new face has a vertex loop for each of the original face's.
+const NEW_VERTEX_LOOPS: &str = "the new face was built with a vertex loop for each vertex loop of the original face, after its edge loops";
+/// Why the silhouette edges' mates are present.
+const SILHOUETTE: &str = "move_back_faces is called with a non-empty edge list, and copy_faces records a mate for every edge of the faces it copies, the silhouette edges among them";
+/// Why a swept image is of its entity's kind.
+const IMAGE_KIND: &str = "the sweep records each entity's same-dimension image as an entity of that kind, built by the sweep itself";
 fn v(v: VertexRef) -> E {
     E::Vertex(v.0, v.1)
 }
@@ -78,25 +104,22 @@ fn mapped_vertex(value: Option<E>) -> Result<Option<VertexRef>> {
     match value {
         None => Ok(None),
         Some(E::Vertex(b, i)) => Ok(Some((b, i))),
-        _ => Err(SolidError::sweep_failed(
-            OP,
-            "a vertex's swept image is not a vertex",
-        )),
+        _ => Err(SolidError::sweep_defect(OP, IMAGE_KIND)),
     }
 }
 fn mapped_edge(value: Option<E>) -> Result<Option<EdgeRef>> {
     match value {
         None => Ok(None),
         Some(E::Edge(b, i)) => Ok(Some((b, i))),
-        _ => Err(SolidError::sweep_failed(
-            OP,
-            "an edge's swept image is not an edge",
-        )),
+        _ => Err(SolidError::sweep_defect(OP, IMAGE_KIND)),
     }
 }
 fn endpoints(a: &impl SweepAccess, edge: EdgeRef) -> Result<(VertexRef, VertexRef)> {
-    let first = required(edge::start_vertex(a.brep(edge.0)?, edge.1)?)?;
-    let second = required(edge::other_vertex(a.brep(edge.0)?, edge.1, Some(first))?)?;
+    let first = linked(edge::start_vertex(a.brep(edge.0)?, edge.1)?, EDGE_VERTEX)?;
+    let second = linked(
+        edge::other_vertex(a.brep(edge.0)?, edge.1, Some(first))?,
+        EDGE_VERTEX,
+    )?;
     Ok(((edge.0, first), (edge.0, second)))
 }
 fn set_edge_tolerance(a: &mut impl SweepAccess, edge: EdgeRef, tolerance: f64) -> Result<()> {
@@ -172,9 +195,9 @@ impl SweepTargets {
             if let E::Face(b, i) = image {
                 Ok((b, i))
             } else {
-                Err(SolidError::sweep_failed(
+                Err(SolidError::sweep_defect(
                     OP,
-                    "a face's swept image is not a face",
+                    "the sweep records each entity's higher- and same-dimension images as entities of the kinds it built",
                 ))
             }
         };
@@ -182,9 +205,9 @@ impl SweepTargets {
             if let E::Edge(b, i) = image {
                 Ok((b, i))
             } else {
-                Err(SolidError::sweep_failed(
+                Err(SolidError::sweep_defect(
                     OP,
-                    "an edge's swept image is not an edge",
+                    "the sweep records each entity's higher- and same-dimension images as entities of the kinds it built",
                 ))
             }
         };
@@ -192,9 +215,9 @@ impl SweepTargets {
             if let E::Vertex(b, i) = image {
                 Ok((b, i))
             } else {
-                Err(SolidError::sweep_failed(
+                Err(SolidError::sweep_defect(
                     OP,
-                    "a vertex's swept image is not a vertex",
+                    "the sweep records each entity's higher- and same-dimension images as entities of the kinds it built",
                 ))
             }
         };
@@ -243,7 +266,7 @@ impl TopologySweep {
             .flatten()
             .chain(targets.faces_same.iter().flatten());
         for (i, id) in faces.copied().enumerate() {
-            let id = required(id)?;
+            let id = target(id)?;
             for edge in a.face_edges(id)? {
                 add_unique(&mut edges, Some((id.0, edge)));
             }
@@ -261,7 +284,7 @@ impl TopologySweep {
             }
         }
         for (i, id) in edges.into_iter().enumerate() {
-            let id = required(id)?;
+            let id = target(id)?;
             if a.tag(e(id))?.is_none() {
                 let tag = if let Some(curve) = a.curve_tag(id)? {
                     TagData {
@@ -362,13 +385,19 @@ impl TopologySweep {
         original: EdgeuseRef,
         existing: &mut Option<EdgeRef>,
     ) -> Result<EdgeuseRef> {
-        let edge_id = required(eu::edge(a.brep(original.0)?, original.1)?)?;
+        let edge_id = linked(eu::edge(a.brep(original.0)?, original.1)?, EDGEUSE_LINK)?;
         let old = (original.0, edge_id);
         *existing = mapped_edge(self.get_to_same(Some(e(old))))?;
         let (curve, tolerance) = g.edge_sweep_same(a.kernel(region.0)?, a.brep(old.0)?, old.1)?;
-        let vu = required(eu::vertexuse(a.brep(original.0)?, original.1)?)?;
-        let first = required(a.brep(original.0)?.vertexuse(vu)?.vertex)?;
-        let second = required(edge::other_vertex(a.brep(old.0)?, old.1, Some(first))?)?;
+        let vu = linked(
+            eu::vertexuse(a.brep(original.0)?, original.1)?,
+            EDGEUSE_LINK,
+        )?;
+        let first = linked(a.brep(original.0)?.vertexuse(vu)?.vertex, VERTEXUSE_VERTEX)?;
+        let second = linked(
+            edge::other_vertex(a.brep(old.0)?, old.1, Some(first))?,
+            EDGE_VERTEX,
+        )?;
         let orientation = eu::orientation(a.brep(original.0)?, original.1)?;
         let (first, second) = if orientation == OrientType::Opposite {
             (second, first)
@@ -377,25 +406,27 @@ impl TopologySweep {
         };
         let first = (old.0, first);
         let second = (old.0, second);
-        let mut new_first = mapped_vertex(self.get_to_same(Some(v(first))))?;
-        let mut new_second = mapped_vertex(self.get_to_same(Some(v(second))))?;
-        if new_first.is_none() {
-            let new = self.sweep_vertex_same(a, g, region, first)?;
-            self.set_same(Some(v(first)), Some(v(new)));
-            new_first = Some(new);
-        }
-        if edge::is_closed(a.brep(old.0)?, old.1)? {
-            new_second = new_first;
-        } else if new_second.is_none() {
-            let new = self.sweep_vertex_same(a, g, region, second)?;
-            self.set_same(Some(v(second)), Some(v(new)));
-            new_second = Some(new);
-        }
-        let (Some(new_first), Some(new_second)) = (new_first, new_second) else {
-            return Err(SolidError::sweep_failed(
-                OP,
-                "the swept edge's end vertices were not built",
-            ));
+        let mapped_first = mapped_vertex(self.get_to_same(Some(v(first))))?;
+        let mapped_second = mapped_vertex(self.get_to_same(Some(v(second))))?;
+        let new_first = match mapped_first {
+            Some(new) => new,
+            None => {
+                let new = self.sweep_vertex_same(a, g, region, first)?;
+                self.set_same(Some(v(first)), Some(v(new)));
+                new
+            }
+        };
+        let new_second = if edge::is_closed(a.brep(old.0)?, old.1)? {
+            new_first
+        } else {
+            match mapped_second {
+                Some(new) => new,
+                None => {
+                    let new = self.sweep_vertex_same(a, g, region, second)?;
+                    self.set_same(Some(v(second)), Some(v(new)));
+                    new
+                }
+            }
         };
         let interval = curve.natural_interval();
         let new = a.make_wire_edge(
@@ -406,11 +437,17 @@ impl TopologySweep {
             interval,
             OrientType::Same,
         )?;
-        let peu = required(eu::primary_edgeuse(a.brep(new.0)?, new.1)?)?;
+        let peu = linked(
+            eu::primary_edgeuse(a.brep(new.0)?, new.1)?,
+            "make_wire_edge built the edge with its pair of edge uses",
+        )?;
         let result = if orientation == OrientType::Same {
             peu
         } else {
-            required(eu::mate(a.brep(new.0)?, peu)?)?
+            linked(
+                eu::mate(a.brep(new.0)?, peu)?,
+                "make_wire_edge built the edge with its pair of edge uses",
+            )?
         };
         self.set_same(Some(e(old)), Some(e(new)));
         set_edge_tolerance(a, new, tolerance)?;
@@ -431,11 +468,17 @@ impl TopologySweep {
             if self.get_to_same(Some(e(original))).is_some() {
                 continue;
             }
-            let peu = required(eu::primary_edgeuse(a.brep(original.0)?, original.1)?)?;
+            let peu = linked(
+                eu::primary_edgeuse(a.brep(original.0)?, original.1)?,
+                "every edge of a B-rep the kernel keeps has its primary edge use",
+            )?;
             let mut existing = None;
             self.sweep_edge_same(a, g, region, (original.0, peu), &mut existing)?;
             if existing.is_some() {
-                return Err(SolidError::sweep_failed(OP, "a loop edge was swept again"));
+                return Err(SolidError::sweep_defect(
+                    OP,
+                    "edges already swept are skipped above, and the primary edge use's edge is the edge itself, so its image did not exist",
+                ));
             }
         }
         Ok(())
@@ -461,9 +504,9 @@ impl TopologySweep {
             return Ok(());
         };
         if swept.trim_curves.is_empty() {
-            return Err(SolidError::sweep_failed(
+            return Err(SolidError::sweep(
                 OP,
-                "the swept edge has no trimming curves",
+                SweepFailure::SweptFaceWithoutBoundary,
             ));
         }
         // `EdgeSweepHigher`'s `CreateNaturalUVTrimCurves` made the NURB of a recognised
@@ -500,26 +543,30 @@ impl TopologySweep {
         })?;
         // pStrutC is always NULL: its only assignment is in the upstream #if 0.
         self.set_higher(Some(e(original)), Some(f(built.face)));
-        let owner = |index: usize| required(built.curve_edges.get(index).copied().flatten());
         // `s3DCurves.FindElement(curve)`: MakeFaceWithCurves deleted (and nulled the
         // slot of) a degenerate curve or one coincident with an earlier edge: stale
-        let live = |index: usize| built.curve_edges.get(index).copied().flatten().is_some();
+        let live = |index: usize| built.curve_edges.get(index).copied().flatten();
         if let Some(index) = swept.start_curve {
-            set_edge_tolerance(a, owner(index)?, swept.start_curve_tol)?;
+            let new = live(index)
+                .ok_or_else(|| SolidError::sweep(OP, SweepFailure::SweptEdgeCurveDropped))?;
+            set_edge_tolerance(a, new, swept.start_curve_tol)?;
         }
-        if let Some(index) = swept.far_end_curve.filter(|&i| i < curve_count && live(i)) {
-            let new = owner(index)?;
+        if let Some(new) = swept
+            .far_end_curve
+            .filter(|&i| i < curve_count)
+            .and_then(live)
+        {
             set_edge_tolerance(a, new, swept.edge_tol)?;
             self.set_same(Some(e(original)), Some(e(new)));
             result.far_edge = Some(new);
         } else {
             self.set_same(Some(e(original)), Some(e(original)));
         }
-        if let Some(index) = swept
+        if let Some(new) = swept
             .start_vert_curve
-            .filter(|&i| i < curve_count && live(i))
+            .filter(|&i| i < curve_count)
+            .and_then(live)
         {
-            let new = owner(index)?;
             set_edge_tolerance(a, new, swept.start_vert_edge_tol)?;
             let (s, t) = endpoints(a, new)?;
             let p = vertex::point(a.brep(start.0)?, start.1)?;
@@ -539,8 +586,11 @@ impl TopologySweep {
         } else {
             self.set_same(Some(v(start)), Some(v(start)));
         }
-        if let Some(index) = swept.end_vert_curve.filter(|&i| i < curve_count && live(i)) {
-            let new = owner(index)?;
+        if let Some(new) = swept
+            .end_vert_curve
+            .filter(|&i| i < curve_count)
+            .and_then(live)
+        {
             set_edge_tolerance(a, new, swept.end_vert_edge_tol)?;
             let (s, t) = endpoints(a, new)?;
             let p = vertex::point(a.brep(end.0)?, end.1)?;
@@ -584,7 +634,8 @@ impl TopologySweep {
             if self.do_tagging {
                 let tag = a.tag(e(original))?;
                 for entity in result.far_edge.map(e).into_iter().chain(result.face.map(f)) {
-                    let mut tag = required(tag)?;
+                    let mut tag =
+                        tag.ok_or_else(|| SolidError::sweep(OP, SweepFailure::UntaggedEdge))?;
                     tag.primary_ordinal =
                         tag.primary_ordinal.wrapping_add(tag_ids::SWEEP_STEP_DELTA);
                     a.add_tag(entity, tag)?;
@@ -607,9 +658,12 @@ impl TopologySweep {
         };
         a.brep(region.0)?.region(region.1)?;
         if self.get_to_same(Some(f(original))).is_some() {
-            return Err(SolidError::sweep_failed(OP, "the face was already swept"));
+            return Err(SolidError::sweep(OP, SweepFailure::FaceAlreadySwept));
         }
-        let fu = required(face::upward_faceuse(a.brep(original.0)?, original.1)?)?;
+        let fu = linked(
+            face::upward_faceuse(a.brep(original.0)?, original.1)?,
+            FACE_FACEUSE,
+        )?;
         let loops = eu::faceuse_loopuses(a.brep(original.0)?, fu, false, None)?;
         let mut loop_counts = Vec::new();
         let mut loop_points = Vec::new();
@@ -627,7 +681,7 @@ impl TopologySweep {
                 loop_counts.push(edges.len());
             }
             for edgeuse in edges {
-                let edge = required(eu::edge(a.brep(original.0)?, edgeuse)?)?;
+                let edge = linked(eu::edge(a.brep(original.0)?, edgeuse)?, EDGEUSE_LINK)?;
                 let (curve, tolerance) =
                     g.edge_sweep_same(a.kernel(region.0)?, a.brep(original.0)?, edge)?;
                 originals.push((original.0, edge));
@@ -637,8 +691,8 @@ impl TopologySweep {
             }
             if is_vertex {
                 let uses = loopuse::vertexuses(a.brep(original.0)?, lu, None)?;
-                let vu = required(uses.first().copied().flatten())?;
-                let vertex = required(a.brep(original.0)?.vertexuse(vu)?.vertex)?;
+                let vu = linked(uses.first().copied().flatten(), VERTEX_LOOP_USE)?;
+                let vertex = linked(a.brep(original.0)?.vertexuse(vu)?.vertex, VERTEXUSE_VERTEX)?;
                 let vertex = (original.0, vertex);
                 let point = if let Some(new) = mapped_vertex(self.get_to_same(Some(v(vertex))))? {
                     vertex::point(a.brep(new.0)?, new.1)?
@@ -648,8 +702,9 @@ impl TopologySweep {
                 loop_points.push(point);
             }
         }
-        let (surface, tolerance) =
-            required(g.face_sweep_same(a.kernel(region.0)?, a.brep(original.0)?, original.1)?)?;
+        let (surface, tolerance) = g
+            .face_sweep_same(a.kernel(region.0)?, a.brep(original.0)?, original.1)?
+            .ok_or_else(|| SolidError::sweep(OP, SweepFailure::FaceCopyByFullTurn))?;
         let domain = surface.natural_uv_domain_with_nurb(a.kernel(region.0)?)?;
         let built = a.make_face(FaceInput {
             region,
@@ -663,11 +718,15 @@ impl TopologySweep {
             orientation: OrientType::Same,
         })?;
         a.set_face_tolerance(built.face, tolerance)?;
-        for (i, old) in originals.into_iter().enumerate() {
-            let Some(new) = required(built.curve_edges.get(i).copied())? else {
+        for (i, (old, tolerance)) in originals.into_iter().zip(tolerances).enumerate() {
+            let Some(new) = linked(
+                built.curve_edges.get(i).copied(),
+                "make_face gives one owner slot for each curve it was given",
+            )?
+            else {
                 continue;
             };
-            set_edge_tolerance(a, new, required(tolerances.get(i).copied())?)?;
+            set_edge_tolerance(a, new, tolerance)?;
             self.set_same(Some(e(old)), Some(e(new)));
             let (s, t) = endpoints(a, old)?;
             let (ns, nt) = endpoints(a, new)?;
@@ -679,7 +738,10 @@ impl TopologySweep {
         self.map_vertex_loops(a, original, &built)?;
         self.set_same(Some(f(original)), Some(f(built.face)));
         if self.do_tagging {
-            let mut tag = required(a.tag(f(original))?)?;
+            let mut tag = linked(
+                a.tag(f(original))?,
+                "tag_profile tags every face the sweep selects before it sweeps them",
+            )?;
             tag.primary_ordinal = tag.primary_ordinal.wrapping_sub(tag_ids::SWEEP_STEP_DELTA);
             a.add_tag(f(built.face), tag)?;
         }
@@ -692,8 +754,14 @@ impl TopologySweep {
         original: FaceRef,
         built: &FaceBuild,
     ) -> Result<()> {
-        let old_fu = required(face::upward_faceuse(a.brep(original.0)?, original.1)?)?;
-        let new_fu = required(face::upward_faceuse(a.brep(built.face.0)?, built.face.1)?)?;
+        let old_fu = linked(
+            face::upward_faceuse(a.brep(original.0)?, original.1)?,
+            FACE_FACEUSE,
+        )?;
+        let new_fu = linked(
+            face::upward_faceuse(a.brep(built.face.0)?, built.face.1)?,
+            FACE_FACEUSE,
+        )?;
         let new_loops = eu::faceuse_loopuses(a.brep(built.face.0)?, new_fu, false, None)?;
         let mut first = None;
         for (index, &lu) in new_loops.iter().enumerate() {
@@ -713,22 +781,35 @@ impl TopologySweep {
             ) {
                 continue;
             }
-            let index = required(first)?
+            let index = linked(first, NEW_VERTEX_LOOPS)?
                 .checked_add(offset)
-                .ok_or_else(|| SolidError::sweep_failed(OP, "the loop index overflows"))?;
-            let new_lu = required(new_loops.get(index).copied())?;
+                .ok_or_else(|| {
+                    SolidError::sweep_defect(
+                        OP,
+                        "the loop index is below the new face's loop count, a vector's length",
+                    )
+                })?;
+            let new_lu = linked(new_loops.get(index).copied(), NEW_VERTEX_LOOPS)?;
             offset += 1;
             let old_uses = loopuse::vertexuses(a.brep(original.0)?, old_lu, None)?;
             let new_uses = loopuse::vertexuses(a.brep(built.face.0)?, new_lu, None)?;
-            let old = required(
+            let old = linked(
                 a.brep(original.0)?
-                    .vertexuse(required(old_uses.first().copied().flatten())?)?
+                    .vertexuse(linked(
+                        old_uses.first().copied().flatten(),
+                        VERTEX_LOOP_USE,
+                    )?)?
                     .vertex,
+                VERTEXUSE_VERTEX,
             )?;
-            let new = required(
+            let new = linked(
                 a.brep(built.face.0)?
-                    .vertexuse(required(new_uses.first().copied().flatten())?)?
+                    .vertexuse(linked(
+                        new_uses.first().copied().flatten(),
+                        VERTEX_LOOP_USE,
+                    )?)?
                     .vertex,
+                VERTEXUSE_VERTEX,
             )?;
             self.set_same(Some(v((original.0, old))), Some(v((built.face.0, new))));
         }
@@ -772,26 +853,17 @@ impl TopologySweep {
             let ds = (point - start).length();
             let dt = (point - end).length();
             if ds < tolerance && dt < tolerance {
-                return Err(SolidError::sweep_failed(
-                    OP,
-                    "a face vertex is within tolerance of both ends of the sweep",
-                ));
+                return Err(SolidError::sweep(OP, SweepFailure::BaseCurveEndsCoincide));
             }
             if ds < tolerance {
                 if vs.is_some() {
-                    return Err(SolidError::sweep_failed(
-                        OP,
-                        "two face vertices are within tolerance of the sweep's start",
-                    ));
+                    return Err(SolidError::sweep(OP, SweepFailure::FaceVerticesCoincide));
                 }
                 vs = Some((face.0, id));
             }
             if dt < tolerance {
                 if vt.is_some() {
-                    return Err(SolidError::sweep_failed(
-                        OP,
-                        "two face vertices are within tolerance of the sweep's end",
-                    ));
+                    return Err(SolidError::sweep(OP, SweepFailure::FaceVerticesCoincide));
                 }
                 vt = Some((face.0, id));
             }
@@ -830,7 +902,7 @@ impl TopologySweep {
         destination: Option<RegionRef>,
         targets: &mut SweepTargets,
     ) -> Result<()> {
-        let original = required(original)?;
+        let original = target(original)?;
         check_sweep_repetitions(self.repetitions)?;
         let mut destination = match destination {
             Some(r) => r,
@@ -902,13 +974,14 @@ impl TopologySweep {
                 } else {
                     self.sweep_selected(a, g, region, closed, targets)?;
                 }
-                if self.do_merge {
+                // `temporary` is set exactly when merging (above)
+                if let (true, Some(temporary)) = (self.do_merge, temporary) {
                     let _ = a.set_editing(destination_brep, true)?;
                     let tolerance = a.brep(destination_brep)?.tolerance();
                     a.with_merge(
                         destination_brep,
                         destination_brep,
-                        required(temporary)?,
+                        temporary,
                         tolerance,
                         20.0 * crate::math::PI / 180.0,
                         |a, merge| a.piecewise_merge(merge, true, true),
@@ -936,7 +1009,13 @@ impl TopologySweep {
                     ignore_status(orient)?;
                 }
                 if let WireSweep::Brep(wire_brep) = wire {
-                    let geometry_copy = required(g.copy_for_sweep())?;
+                    let geometry_copy = g.copy_for_sweep().ok_or_else(|| {
+                        SolidError::sweep_with_status(
+                            OP,
+                            SweepFailure::BaseGeometryBuildsNothing,
+                            SM_ERR_NULL_POINTER,
+                        )
+                    })?;
                     let mut sweeper = Self::new(super::TopologySweepOptions {
                         stitching: self.do_stitching,
                         merge: self.do_merge,
@@ -1022,8 +1101,8 @@ impl TopologySweep {
         let mut edges = targets.edges_higher.clone().unwrap_or_default();
         let mut vertices = Vec::new();
         if let Some(faces) = &targets.faces_higher {
-            for face in faces {
-                let face = required(*face)?;
+            // tag_profile (above) refused a null face
+            for face in faces.iter().flatten().copied() {
                 for edge in a.face_edges(face)? {
                     add_unique(&mut edges, Some((face.0, edge)));
                 }
@@ -1041,8 +1120,7 @@ impl TopologySweep {
         }
         if let Some(faces) = &targets.faces_higher {
             if closed {
-                for face in faces {
-                    let face = required(*face)?;
+                for face in faces.iter().flatten().copied() {
                     self.set_same(Some(f(face)), Some(f(face)));
                 }
             } else {
@@ -1225,18 +1303,21 @@ impl TopologySweep {
         frame: crate::geom::axis2_placement::Axis2Placement,
         edges: &[Option<EdgeRef>],
     ) -> Result<()> {
-        let first = required(edges.first().copied().flatten())?;
+        let first = linked(edges.first().copied().flatten(), SILHOUETTE)?;
         let mark = a.lock_mark(first.0, crate::geom::context::ALL_MARKS)?;
         let result = (|| {
             for edge in edges {
-                a.mark(e(required(*edge)?), mark)?;
+                a.mark(e(linked(*edge, SILHOUETTE)?), mark)?;
             }
             let mut backs = Vec::new();
             loop {
                 let mut start = None;
                 for edge in edges {
-                    let edge = required(*edge)?;
-                    let peu = required(eu::primary_edgeuse(a.brep(edge.0)?, edge.1)?)?;
+                    let edge = linked(*edge, SILHOUETTE)?;
+                    let peu = linked(
+                        eu::primary_edgeuse(a.brep(edge.0)?, edge.1)?,
+                        "every edge of a B-rep the kernel keeps has its primary edge use",
+                    )?;
                     let interval = edge::interval(a.brep(edge.0)?, edge.1)?;
                     let mut point = Point3::ZERO;
                     let mut binormal = Point3::ZERO;
@@ -1251,10 +1332,16 @@ impl TopologySweep {
                     let face = if binormal.dot(frame.z_axis()) >= 0.0 {
                         eu::face(a.brep(edge.0)?, peu)?
                     } else {
-                        let radial = required(eu::radial(a.brep(edge.0)?, peu)?)?;
+                        let radial = linked(
+                            eu::radial(a.brep(edge.0)?, peu)?,
+                            "a silhouette edge of the copied closed body lies on two faces, so its edge use has a radial",
+                        )?;
                         eu::face(a.brep(edge.0)?, radial)?
                     };
-                    let face = (edge.0, required(face)?);
+                    let face = (
+                        edge.0,
+                        linked(face, "every edge use of a silhouette edge lies on a face")?,
+                    );
                     if !a.is_marked(f(face), mark)? {
                         start = Some(face);
                         break;

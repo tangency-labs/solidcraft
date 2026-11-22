@@ -34,6 +34,7 @@ use super::SweepEntity;
 use crate::blend::hcr::{Hcr, HcrOptions};
 use crate::boolean::merge::p4::{notification_key, KernelManifoldIntersector};
 use crate::curve::curve::Curve;
+use crate::error::sweep::SweepFailure;
 use crate::error::{EntityRef, Result, SolidError};
 use crate::geom::attribute::{
     ids, Attribute, AttributeStore, AttributeValue, Behavior, ObjectKey, TagData,
@@ -633,7 +634,12 @@ impl<'a> SweepStore<'a> {
                 use_existing_topology,
                 create_new_breps_for_faces,
             )?
-            .ok_or_else(|| SolidError::sweep_missing(OP, "the merge's result"))
+            .ok_or_else(|| {
+                SolidError::sweep_null_defect(
+                    OP,
+                    "the piecewise merge keeps its result operand; only an extraction into separate bodies clears it, and this merge does none",
+                )
+            })
         })
     }
 
@@ -658,7 +664,12 @@ impl<'a> SweepStore<'a> {
                 use_existing_topology,
                 create_new_breps_for_faces,
             )?
-            .ok_or_else(|| SolidError::sweep_missing(OP, "the merge's result"))
+            .ok_or_else(|| {
+                SolidError::sweep_null_defect(
+                    OP,
+                    "the piecewise merge keeps its result operand; only an extraction into separate bodies clears it, and this merge does none",
+                )
+            })
         })
     }
 
@@ -784,7 +795,9 @@ impl<'a> SweepStore<'a> {
             .edge(edge.1)?
             .curve
             .as_ref()
-            .ok_or_else(|| SolidError::sweep_missing(OP, "the edge's curve"))?;
+            .ok_or_else(|| {
+                SolidError::sweep(OP, SweepFailure::EdgeWithoutCurve { edge: edge.1 })
+            })?;
         if let Some(provider) = self.identities.0 {
             return Ok(provider.curve(edge.0, edge.1, curve));
         }

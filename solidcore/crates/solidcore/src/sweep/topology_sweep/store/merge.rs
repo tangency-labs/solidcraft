@@ -42,6 +42,12 @@ use crate::topology::topology::Topology;
 use crate::topology::{Brep, BrepId, FaceId};
 use std::collections::BTreeMap;
 
+/// Why the merge's primary operand missing at a merge call is the kernel's fault (a
+/// reviewed defect).
+const NO_PRIMARY: &str = "the merge session holds its primary body from its setup to its end; set_operands restores it after each call";
+/// Why the merge's other operand missing at a merge call is the kernel's fault.
+const NO_OTHER: &str = "the merge session holds its other body from its setup to its end; set_operands restores it after each call";
+
 #[derive(Debug)]
 pub(super) struct Session {
     context: ContextId,
@@ -90,9 +96,9 @@ impl Session {
     pub(super) fn operands(&self) -> Result<(BrepId, BrepId)> {
         Ok((
             self.primary
-                .ok_or_else(|| SolidError::sweep_missing(OP, "the merge's primary body"))?,
+                .ok_or_else(|| SolidError::sweep_null_defect(OP, NO_PRIMARY))?,
             self.other
-                .ok_or_else(|| SolidError::sweep_missing(OP, "the merge's other body"))?,
+                .ok_or_else(|| SolidError::sweep_null_defect(OP, NO_OTHER))?,
         ))
     }
 }
@@ -303,7 +309,12 @@ impl Driver<'_, '_> {
             None,
         );
         self.set_operands(primary, other);
-        result?.ok_or_else(|| SolidError::sweep_missing(OP, "the union's result"))
+        result?.ok_or_else(|| {
+            SolidError::sweep_null_defect(
+                OP,
+                "the manifold union keeps its result in the primary operand, which it was given",
+            )
+        })
     }
 
     fn surface_face(&self, surface: ObjectRef) -> Result<(BrepId, FaceId)> {
@@ -506,8 +517,7 @@ impl BooleanDriver for Driver<'_, '_> {
         angle: f64,
         options: Option<&MergeOptions>,
     ) -> Result<()> {
-        let id =
-            primary.ok_or_else(|| SolidError::sweep_missing(OP, "the merge's primary body"))?;
+        let id = primary.ok_or_else(|| SolidError::sweep_null_defect(OP, NO_PRIMARY))?;
         let source = other
             .map(|id| self.body(id).map(|body| (body, MergeOperand::Other)))
             .transpose()?;
@@ -536,8 +546,8 @@ impl BooleanDriver for Driver<'_, '_> {
         operation: BooleanOperation,
         lock: Option<&mut MarkLock>,
     ) -> Result<Option<BrepId>> {
-        let a = primary.ok_or_else(|| SolidError::sweep_missing(OP, "the merge's primary body"))?;
-        let b = other.ok_or_else(|| SolidError::sweep_missing(OP, "the merge's other body"))?;
+        let a = primary.ok_or_else(|| SolidError::sweep_null_defect(OP, NO_PRIMARY))?;
+        let b = other.ok_or_else(|| SolidError::sweep_null_defect(OP, NO_OTHER))?;
         let (source, destination) = body_pair_mut(self.bodies, b, a)?;
         // `SmMerge::ManifoldBoolean` edits its operands in place: an owned body or a
         // caller-borrowed one (`DoSweep`'s merge into `pBrepToSweepInto`), never a
