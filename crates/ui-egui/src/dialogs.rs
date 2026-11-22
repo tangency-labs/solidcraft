@@ -4682,6 +4682,12 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
                     crate::ui_kit::Action::Apply => {
                         ok = true;
                         apply_again = true;
+                        // The click leaves the Apply button holding the keyboard, and Enter only
+                        // runs OK with nothing focused: hand it back so the next Enter or Done
+                        // after Apply ends the run (#6940).
+                        if let Some(id) = ctx.memory(|m| m.focused()) {
+                            ctx.memory_mut(|m| m.surrender_focus(id));
+                        }
                     }
                     crate::ui_kit::Action::None => {}
                 }
