@@ -77,6 +77,7 @@ mod fill;
 pub mod fold;
 pub mod image;
 pub mod note;
+pub mod projection_symbol;
 pub mod sheet_set;
 mod sketch;
 pub mod symbol;
