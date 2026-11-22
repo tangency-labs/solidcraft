@@ -387,8 +387,9 @@ fn a_caret_key_in_a_following_value_box_keeps_its_value_to_add_to() {
 
 /// An L of two 50 mm lines meeting at the origin, with the 3-Point Arc started and its ends
 /// clicked on the lines' free ends (#20719).
-fn l_with_arc_ends() -> Harness {
+fn l_with_arc_ends(tangent_snap: bool) -> Harness {
     let mut h = Harness::new();
+    h.app.preferences.sketch_arc_tangent_snap = tangent_snap;
     h.app.run("sketch.create", json!({"plane":"XY"})).unwrap();
     h.app.run("sketch.line", json!({"points":[[0,0],[0,50]]})).unwrap();
     h.app.run("sketch.line", json!({"points":[[0,0],[50,0]]})).unwrap();
@@ -415,7 +416,7 @@ fn arc_numbers(h: &Harness) -> (f64, f64, Vec2) {
 
 #[test]
 fn three_point_arc_third_point_offers_radius_and_sweep_boxes() {
-    let mut h = l_with_arc_ends();
+    let mut h = l_with_arc_ends(false);
     h.step(&json!({"move":{"sketch":[10.0, 10.0]}})).unwrap();
     h.frames(2);
     let labels: Vec<_> = h.app.tool.as_ref().unwrap().dims.iter().map(|d| d.label).collect();
@@ -432,7 +433,7 @@ fn three_point_arc_third_point_offers_radius_and_sweep_boxes() {
 
 #[test]
 fn three_point_arc_typed_sweep_gives_that_sweep_and_too_small_a_radius_is_refused() {
-    let mut h = l_with_arc_ends();
+    let mut h = l_with_arc_ends(false);
     h.step(&json!({"move":{"sketch":[10.0, 10.0]}})).unwrap();
     h.frames(2);
     h.step(&json!({"key":"Tab"})).unwrap();
@@ -444,7 +445,7 @@ fn three_point_arc_typed_sweep_gives_that_sweep_and_too_small_a_radius_is_refuse
     let (radius, ..) = arc_numbers(&h);
     assert!((radius - 50.0).abs() < 1e-6, "{radius}");
 
-    let mut small = l_with_arc_ends();
+    let mut small = l_with_arc_ends(false);
     small.step(&json!({"move":{"sketch":[10.0, 10.0]}})).unwrap();
     small.frames(2);
     type_value(&mut small, "20");
@@ -467,7 +468,7 @@ fn three_point_arc_typed_sweep_gives_that_sweep_and_too_small_a_radius_is_refuse
 
 #[test]
 fn three_point_arc_snaps_tangent_to_both_lines_of_the_l() {
-    let mut h = l_with_arc_ends();
+    let mut h = l_with_arc_ends(true);
     // A little off the tangent arc's middle, (14.64, 14.64).
     let off = [14.9, 14.4];
     h.step(&json!({"move":{"sketch":off}})).unwrap();
@@ -499,4 +500,55 @@ fn three_point_arc_centre_is_the_circle_through_its_points_and_centre_point_arc_
     assert_eq!(labels("sketch.arc.center_point", 2), ["Sweep"]);
     assert_eq!(labels("sketch.arc.three_point", 1), Vec::<&str>::new());
     assert_eq!(labels("sketch.arc.three_point", 2), ["Radius", "Sweep"]);
+}
+
+/// The tangent snap is opt-in: with the preference off the same hover and click take the snap the
+/// arc had before, on no tangent circle, and add no Tangent constraint (#20719).
+#[test]
+fn three_point_arc_tangent_snap_is_off_unless_turned_on() {
+    assert!(!crate::prefs::Prefs::default().sketch_arc_tangent_snap);
+    let mut h = l_with_arc_ends(false);
+    let off = [14.9, 14.4];
+    h.step(&json!({"move":{"sketch":off}})).unwrap();
+    h.frames(2);
+    let hover = h.app.tool.as_ref().unwrap().hover.clone().unwrap();
+    assert!((hover.0.dist(Vec2::new(50.0, 50.0)) - 50.0).abs() > 1e-6, "not snapped tangent: {:?}", hover.0);
+    h.step(&json!({"click":{"sketch":off}})).unwrap();
+    h.frames(2);
+    assert!(!constraints(&h).iter().any(|k| matches!(k, ConstraintKind::Tangent { .. })));
+}
+
+/// #20719: a click commits the point the hover showed. An arc ends at (10, 0) with its centre
+/// below; the new arc runs from (0, 1) to (10, 0). The Line tool's tangent snap would put the click
+/// on the horizontal line (5, 0) instead of the tangent circle's point near (5, 0.25).
+#[test]
+fn three_point_arc_click_commits_the_tangent_point_the_hover_showed() {
+    let mut h = Harness::new();
+    h.app.preferences.sketch_arc_tangent_snap = true;
+    h.app.run("sketch.create", json!({"plane":"XY"})).unwrap();
+    let k = 100.0 * 0.5f64.sqrt();
+    h.app.run("sketch.arc.three_point", json!({"start":[10,0],"end":[110,-100],"through":[10.0 + k, -100.0 + k]})).unwrap();
+    h.app.cam.distance = 150.0;
+    h.settle();
+    h.step(&json!({"start":"sketch.arc.three_point"})).unwrap();
+    for at in [[0.0, 1.0], [10.0, 0.0]] {
+        h.step(&json!({"move":{"sketch":at}})).unwrap();
+        h.frames(2);
+        h.step(&json!({"click":{"sketch":at}})).unwrap();
+        h.frames(2);
+    }
+    let cursor = [5.0, 0.25];
+    h.step(&json!({"move":{"sketch":cursor}})).unwrap();
+    h.frames(2);
+    let hover = h.app.tool.as_ref().unwrap().hover.clone().unwrap();
+    // The circle through (0, 1) and (10, 0) tangent to the arc at (10, 0): centre (10, 50.5).
+    assert!((hover.0.dist(Vec2::new(10.0, 50.5)) - 50.5).abs() < 1e-6, "{:?}", hover.0);
+    h.step(&json!({"click":{"sketch":cursor}})).unwrap();
+    h.frames(2);
+    let st = h.app.session.world_state().unwrap();
+    let sk = &st.sketch(h.app.session.active_sketch.unwrap()).unwrap().sketch;
+    let new_arc = sk.curves.iter().rposition(|c| matches!(c.kind, CurveKind::Arc { .. })).expect("the new arc");
+    let (centre, radius) = (sk.center(new_arc).unwrap(), sk.radius(new_arc).unwrap());
+    assert!(centre.dist(Vec2::new(10.0, 50.5)) < 1e-3 && (radius - 50.5).abs() < 1e-3, "{centre:?} {radius}");
+    assert!(constraints(&h).iter().any(|k| matches!(k, ConstraintKind::Tangent { .. })));
 }

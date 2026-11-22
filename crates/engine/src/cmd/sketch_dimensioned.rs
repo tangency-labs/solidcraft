@@ -78,15 +78,17 @@ pub(super) fn draw(s: &mut Session, p: &Value) -> Result<Value> {
     let roles = dimension_roles(create).or_else(|| typed_roles(create)).ok_or_else(|| bad(cmd, "unsupported sketch creator"))?;
     // A typed-only creator ignores both: it has no sizes as drawn to place.
     let placeable = dimension_roles(create).is_some();
-    let as_drawn = placeable && bool_(p, "as_drawn").unwrap_or(false);
-    let locate = placeable && bool_(p, "locate").unwrap_or(false);
+    let asked_as_drawn = bool_(p, "as_drawn").unwrap_or(false);
+    let asked_locate = bool_(p, "locate").unwrap_or(false);
+    let as_drawn = placeable && asked_as_drawn;
+    let locate = placeable && asked_locate;
     if on_sheet && (as_drawn || locate) {
         return Err(bad(cmd, "not supported yet: automatic dimensions and origin location in a sheet sketch; provide explicit dimensions"));
     }
     let mut params = p.get("params").filter(|v| v.is_object()).cloned().ok_or_else(|| bad(cmd, "`params` must be an object"))?;
     let none = Map::new();
     let dimensions = match p.get("dimensions") {
-        None if as_drawn || locate => &none,
+        None if asked_as_drawn || asked_locate => &none,
         given => given.and_then(Value::as_object).ok_or_else(|| bad(cmd, "`dimensions` must be an object"))?,
     };
     if on_sheet {

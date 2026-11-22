@@ -147,7 +147,7 @@ fn arc_through(s: Vec2, e: Vec2, h: Vec2, radius: Option<f64>, sweep: Option<f64
         }
         let half = sweep * 0.5;
         let r = len / (2.0 * half.sin());
-        return Some(mid + n * (sign(n.dot(h - mid)) * r * (1.0 - half.cos())));
+        return Some(mid + n * (sign(n.dot(h - mid)) * r * 2.0 * (half * 0.5).sin().powi(2)));
     }
     let r = radius?;
     if !r.is_finite() || r * 2.0 < len - 1e-9 {

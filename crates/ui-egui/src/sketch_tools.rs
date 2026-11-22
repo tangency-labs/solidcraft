@@ -712,7 +712,10 @@ pub fn refine_snap(
         None => TOOL.with(|c| c.borrow().clone()),
     };
     // With `sketch_align_points` off, a click takes the Line tool's inferences, as before.
+    // The 3-Point Arc takes none of them, on hover or on click, when its tangent snap is on (#20719).
+    let arc_snap = arc_tool && app.preferences.sketch_arc_tangent_snap;
     let line_tool = if app.preferences.sketch_align_points { line_tool } else { app.tool.as_ref().is_none_or(|t| t.cmd == "sketch.line") };
+    let line_tool = line_tool && !arc_snap;
     let prev = own.last().copied();
     // Line tool: the tangent point of a circle or arc, then a line through its centre
     // (before plain "on the curve", which would leave a chord free to miss the centre).
@@ -737,7 +740,7 @@ pub fn refine_snap(
     // on (#20719), exact: the point of that tangent circle nearest the cursor.
     if !mid_only
         && best.is_none()
-        && arc_tool
+        && arc_snap
         && let [start, end] = own[..]
         && let Some(i) = crate::inference::arc_tangent(sk, start, end, lp, tol)
     {
