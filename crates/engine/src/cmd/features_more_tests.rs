@@ -2966,7 +2966,7 @@ fn a_coil_edge_pick_is_named_where_the_moved_edge_is() {
 
     // A second placement of A has the same edge names: the pick on it finds that placement's edge.
     let a = s.doc.find_component("A").unwrap();
-    run(&mut s, "occurrence.copy", json!({"component":a,"translate":[30,0,0]}));
+    let copy = run(&mut s, "occurrence.copy", json!({"component":a,"translate":[30,0,0]}))["occurrence"].as_u64().unwrap();
     let second = [a_min[0] + 30.0, a_min[1]];
     run(
         &mut s,
@@ -2976,6 +2976,12 @@ fn a_coil_edge_pick_is_named_where_the_moved_edge_is() {
     let (min, max) = bbox(&mut s, "Second");
     let centre = [(min[0] + max[0]) / 2.0, (min[1] + max[1]) / 2.0];
     assert!((centre[0] - second[0]).abs() < 0.5 && (centre[1] - second[1]).abs() < 0.5, "the Coil winds about A's second placement: {centre:?}");
+
+    // Moved off the picked point, the second placement keeps its Coil: the pick names its placement.
+    run(&mut s, "occurrence.move", json!({"occurrence":copy,"translate":[12,0,0]}));
+    let (min, max) = bbox(&mut s, "Second");
+    let centre = [(min[0] + max[0]) / 2.0, (min[1] + max[1]) / 2.0];
+    assert!((centre[0] - second[0] - 12.0).abs() < 0.5 && (centre[1] - second[1]).abs() < 0.5, "the Coil follows the moved placement: {centre:?}");
 }
 
 #[test]

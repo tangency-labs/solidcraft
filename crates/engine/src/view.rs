@@ -1592,6 +1592,9 @@ pub fn coil_axis_reference(s: &Session, axis: &serde_json::Value) -> Option<soli
     if crate::cmd::axis_dir_form(axis).is_ok() {
         return None;
     }
+    if let Some(geo) = crate::cmd::coil_placed_edge(s, Some(axis), "solid.coil").ok()? {
+        return Some(solidcraft_doc::AxisRef::Model { geo });
+    }
     crate::cmd::axis_param(s, 0, &serde_json::json!({ "axis": axis }), "solid.coil").ok()
 }
 

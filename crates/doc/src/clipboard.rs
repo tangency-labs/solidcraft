@@ -235,6 +235,18 @@ fn remap_geo(
         GeoRef::Face { name: Some(n), .. } | GeoRef::Edge { name: Some(n), .. } => *n = remap_topology(n, ids, bodies),
         GeoRef::PlacedEdge { path, author_path, name, .. } => {
             *name = remap_topology(name, ids, bodies);
+            // The copy has one placement, so an edge on a sibling placement of the copied
+            // component cannot keep its offset from the placement the feature is written in.
+            if let Some(p) = placements {
+                let root_of = |path: &[u64]| path.iter().find(|id| p.source_roots.contains(id)).copied();
+                if let (Some(edge), Some(author)) = (root_of(path), root_of(author_path))
+                    && edge != author
+                {
+                    return Err(crate::DocError::Invalid(
+                        "a copied reference picks an edge on another placement of the copied component: pick the edge again on this placement".into(),
+                    ));
+                }
+            }
             if !path.is_empty() {
                 remap_occurrence_path(path, placements, true)?;
             }
@@ -607,6 +619,22 @@ mod clone_tests {
         assert!(remap_occurrence_path(&mut broken, Some(&placements), true).is_err());
         let other_document = ClonePlacements { same_document: false, ..placements };
         assert!(remap_occurrence_path(&mut path, Some(&other_document), true).is_err());
+    }
+
+    #[test]
+    fn an_edge_on_a_sibling_placement_of_the_copied_component_is_refused() {
+        let doc = crate::Document::new("sibling placements");
+        let roots = BTreeSet::from([1, 2]);
+        let placements = ClonePlacements { occurrences: &BTreeMap::new(), source_roots: &roots, root_path: &[9], doc: &doc, same_document: true };
+        let mut edge = crate::construct::GeoRef::PlacedEdge {
+            body: "Box".into(),
+            path: vec![2],
+            author_path: vec![1],
+            at: solidcore_record::Vec3::ZERO,
+            name: "e".into(),
+        };
+        let error = remap_geo(&mut edge, &BTreeMap::new(), &BTreeMap::new(), 0, Some(&placements)).unwrap_err();
+        assert!(error.to_string().contains("another placement"), "{error}");
     }
 
     #[test]

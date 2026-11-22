@@ -186,6 +186,11 @@ fn coil_reference_frame(app: &SolveApp, value: &Value) -> Option<(Vec3, Vec3)> {
             let direction = serde_json::from_value::<solidcraft_engine::schema::AxisDir>(value.get("dir")?.clone()).ok()?;
             Some((origin, direction.0))
         }
+        // A dialog pick of a placement's edge: the marker stands where a fresh pick of it would.
+        AxisRef::Model { geo: geo @ construct::GeoRef::PlacedEdge { .. } } => {
+            let (body, index, point) = construct::placed_edge_pick(&s.placed_document(), &s.model.state(), geo)?;
+            crate::dialogs::coil_axis_preview(app, &Sel::Edge { body, index, point })
+        }
         AxisRef::Model { geo } => construct::model_axis_in(Some(&s.doc), &crate::open_meshing::session_world(s), geo, 0).ok(),
         AxisRef::Construction { name } => {
             let geo = construct::GeoRef::Axis { name: name.clone() };

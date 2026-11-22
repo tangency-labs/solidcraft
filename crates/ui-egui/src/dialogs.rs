@@ -1502,9 +1502,11 @@ impl Dialog {
         }
     }
 
-    /// Make the first single input still empty (after the filled ones) active.
+    /// Make the first single input still empty (after the filled ones) active. Coil's Axis is
+    /// optional and stays unvisited, so another profile click replaces the profile.
     fn advance(&mut self) {
-        if let Some(i) = self.inputs.iter().position(|i| i.items.is_empty()) {
+        let optional = |index: usize| index == 1 && matches!(self.kind, Kind::Primitive { cmd: "solid.coil", .. });
+        if let Some(i) = self.inputs.iter().enumerate().position(|(index, i)| i.items.is_empty() && !optional(index)) {
             self.active = i;
         } else {
             self.active = self.active.min(self.inputs.len().saturating_sub(1));
@@ -3627,6 +3629,16 @@ pub(crate) fn line_axis_value(s: &Session, frame: &solidcraft_engine::doc::Mat, 
         Ok(at) => json!({"origin": pt(solidcraft_engine::doc::apply_point(frame, at)), "dir": dir_world}),
         Err(_) => json!({"origin": origin, "dir": dir_world}),
     }
+}
+
+/// A Coil's saved axis line in world coordinates, its origin still written as the expressions it
+/// was given so that editing another field leaves it following its parameters.
+fn coil_line_axis_value(frame: &solidcraft_engine::doc::Mat, origin: &solidcraft_engine::doc::PointExpr, dir: Vec3) -> Value {
+    let mut origin = origin.clone();
+    if !solidcraft_engine::doc::is_identity(frame) {
+        solidcraft_engine::doc::map_point_expr(frame, &mut origin);
+    }
+    json!({"origin": origin, "dir": pt(solidcraft_engine::doc::apply_vector(frame, dir))})
 }
 
 fn stored_revolve_axis(kind: &Kind) -> Option<&Value> {
@@ -8737,7 +8749,7 @@ pub fn for_feature(app: &SolveApp, id: u64, marker: Option<usize>) -> Option<Dia
                         (serde_json::to_value(geo).ok()?, pick)
                     }
                     (_, Some(pick)) => (coil_axis_param(app, &pick, profile_sketch).ok()?, Some(pick)),
-                    (AxisRef::Line { origin, dir }, None) => (line_axis_value(s, &feature_frame(s, f.component), origin, dir.0), None),
+                    (AxisRef::Line { origin, dir }, None) => (coil_line_axis_value(&feature_frame(s, f.component), origin, dir.0), None),
                     (AxisRef::Model { geo }, None) => (serde_json::to_value(geo).ok()?, None),
                     _ => return None,
                 };

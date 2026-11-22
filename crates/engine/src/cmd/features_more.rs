@@ -100,10 +100,7 @@ fn coil(s: &mut Session, p: &Value) -> Result<Value> {
             && (v.as_str().is_some_and(|name| !name.trim().is_empty())
                 || v.is_object() && ["origin", "dir", "curve", "edge", "face", "type"].iter().any(|key| v.get(*key).is_some()))
     });
-    let (axis, axis_ref) = if let Some(value) = p.get("axis").filter(|axis| str_(axis, "type") == Some("placed_edge")) {
-        let geo = super::construct::geo(s, Some(value), cmd, "axis")?;
-        solidcraft_doc::construct::model_axis_in(Some(&s.placed_document()), &s.model.state(), &geo, s.active_component)
-            .map_err(|error| bad(cmd, format!("`axis`: {error}")))?;
+    let (axis, axis_ref) = if let Some(geo) = coil_placed_edge(s, p.get("axis"), cmd)? {
         (Vec3::Z, Some(solidcraft_doc::AxisRef::Model { geo }))
     } else if reference {
         (Vec3::Z, Some(super::features::axis_param(s, sketch.map_or(0, |id| id.0), p, cmd)?))
@@ -755,4 +752,14 @@ fn boundary_fill(s: &mut Session, p: &Value) -> Result<Value> {
             remove_tools: bool_(p, "remove_tools").unwrap_or(false),
         },
     )
+}
+
+/// A Coil axis saved as the edge of a picked placement (`{type: placed_edge, …}`), checked to
+/// resolve as the Coil reads it; `None` for any other form of `axis`.
+pub(crate) fn coil_placed_edge(s: &Session, v: Option<&Value>, cmd: &str) -> Result<Option<solidcraft_doc::construct::GeoRef>> {
+    let Some(value) = v.filter(|axis| str_(axis, "type") == Some("placed_edge")) else { return Ok(None) };
+    let geo = super::construct::geo(s, Some(value), cmd, "axis")?;
+    solidcraft_doc::construct::model_axis_in(Some(&s.placed_document()), &s.model.state(), &geo, s.active_component)
+        .map_err(|error| bad(cmd, format!("`axis`: {error}")))?;
+    Ok(Some(geo))
 }

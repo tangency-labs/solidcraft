@@ -426,6 +426,20 @@ fn coil_marker_follows_typed_axis_references() {
         h.app.dialog.as_mut().unwrap().extra.insert("axis".into(), axis);
         assert_eq!(frame(&h.app, h.app.dialog.as_ref().unwrap()), Some((base, Vec3::Y)));
     }
+    // An edit dialog gives back a picked edge as the placement's edge; the marker reads it too.
+    let edge = h.app.session.model.state().body("Shaft").and_then(|body| {
+        let names = solidcraft_engine::doc::naming::edge_names(body);
+        names.into_iter().find_map(|name| {
+            solidcraft_engine::doc::construct::named_edge_pick(&h.app.session.model.state(), Vec3::new(105.0, 0.0, 0.0), &name)
+                .filter(|(_, _, point)| point.dist(Vec3::new(105.0, 0.0, 0.0)) < 1e-6)
+                .map(|_| name)
+        })
+    });
+    let edge = edge.expect("the Shaft's end circle has a name");
+    let axis = json!({"type":"placed_edge","body":"Shaft","path":[],"at":[105,0,0],"name":edge});
+    h.app.dialog.as_mut().unwrap().extra.insert("axis".into(), axis);
+    let (base, direction) = frame(&h.app, h.app.dialog.as_ref().unwrap()).expect("a marker");
+    assert!(base.dist(Vec3::new(100.0, 0.0, 0.0)) < 1e-6 && direction.dist(Vec3::Y) < 1e-9, "{base:?} {direction:?}");
 }
 
 #[test]

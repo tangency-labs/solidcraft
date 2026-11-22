@@ -1541,6 +1541,19 @@ fn coil_axis_field_passes_named_and_custom_directions_with_a_profile() {
 }
 
 #[test]
+fn coil_profile_stays_active_after_a_profile_pick() {
+    let h = fixture();
+    let sketch = crate::open_meshing::session_world(&h.app.session).sketches[0].feature;
+    let mut d = Dialog::for_command(&h.app, "solid.coil").unwrap();
+    d.active = 0;
+    d.pick(&h.app.session, Sel::Profile { sketch, index: 0 });
+    assert_eq!(d.active, 0, "the optional Axis is not visited, so the next profile click replaces this one");
+    d.pick(&h.app.session, Sel::Profile { sketch, index: 0 });
+    assert_eq!(d.inputs[0].items, vec![Sel::Profile { sketch, index: 0 }]);
+    assert!(d.inputs[1].items.is_empty());
+}
+
+#[test]
 fn coil_picks_reference_axes_in_the_browser_and_viewport() {
     for browser in [true, false] {
         let mut h = Harness::new();
@@ -1715,6 +1728,25 @@ fn coil_edits_keep_whole_sketch_profiles_until_the_user_picks_them_explicitly() 
     let mut d = for_feature(&h.app, feature, None).unwrap();
     d.remove_listed(s, 0, 0, &profile);
     assert!(d.profile_selection_changed);
+}
+
+#[test]
+fn coil_edits_keep_the_expressions_of_an_axis_origin() {
+    let mut h = Harness::new();
+    h.app.run("parameters.add", json!({"name":"axis_offset","expression":"20 mm"})).unwrap();
+    let axis = json!({"origin":["axis_offset", 0, 0], "dir":[0, 0, 1]});
+    let feature =
+        h.app.run("solid.coil", json!({"axis":axis,"diameter":10,"pitch":8,"revolutions":2,"section_size":2})).unwrap()["feature"].as_u64().unwrap();
+    let d = for_feature(&h.app, feature, None).unwrap();
+    let commands = apply_commands(&h.app, &d).unwrap();
+    assert_eq!(commands[0].1["params"]["axis"]["origin"][0], json!("axis_offset"), "{}", commands[0].1);
+    for (cmd, params) in commands {
+        h.app.run(&cmd, params).unwrap();
+    }
+    h.app.run("parameters.change", json!({"name":"axis_offset","expression":"30 mm"})).unwrap();
+    let f = h.app.session.doc.feature(feature).unwrap();
+    let FeatureKind::Coil { axis_ref: Some(AxisRef::Line { origin, .. }), .. } = &f.kind else { panic!("a Coil about a line: {:?}", f.kind) };
+    assert_eq!(h.app.session.doc.eval_point(origin).unwrap(), Vec3::new(30.0, 0.0, 0.0));
 }
 
 #[test]
