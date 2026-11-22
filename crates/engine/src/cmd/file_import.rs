@@ -544,6 +544,7 @@ pub(crate) fn add_in_component(
     if let Some(prepared) = prepared {
         s.model.prime_mesh_import(id, prepared);
     }
+    s.sketching_view = None;
     s.refresh();
     if let Some(e) = s.model.result(id).and_then(|r| r.error.clone()) {
         return Err(EngineError::Other(e));
@@ -705,6 +706,7 @@ pub(crate) fn add_design(s: &mut Session, design: &solidcraft_io::NativeDesign, 
         made.push(id);
     }
     s.active_sketch = None;
+    s.sketching_view = None;
     s.refresh();
     if let Some(e) = made.iter().find_map(|id| s.model.result(*id).and_then(|r| r.error.clone())) {
         return Err(EngineError::Other(e));

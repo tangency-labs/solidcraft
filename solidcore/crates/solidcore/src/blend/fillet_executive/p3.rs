@@ -155,7 +155,7 @@ pub enum NoRoomReason {
     /// ([`Self::ConcaveOverflow`] and the others).
     RailLeavesFace,
     /// The blends take the whole of a face they roll on, some at an angle to it (the fork's
-    /// `FacesOutlastTheirBlends`; `fixes.fillet_refuse_face_consuming_blends`, WR-320).
+    /// `FacesOutlastTheirBlends`; WR-320).
     FaceConsumed,
     /// A blend's rail runs inside the band another blend takes off a face they share (the
     /// fork's `BandsClearOtherRails`; `fixes.fillet_refuse_overlapping_bands`, WR-542).
@@ -2923,7 +2923,7 @@ pub trait SolverGeometryAccess<O: ClassObject + SolutionObject + Ord> {
         ))
     }
     /// The fork's `SmFilletExecutive::FacesOutlastTheirBlends` over `solvers` (not
-    /// upstream; opt-in `fixes.fillet_refuse_face_consuming_blends`, WR-320): `false`
+    /// upstream; WR-320): `false`
     /// when the blends take the whole of a face they roll on, some at an angle to it.
     ///
     /// # Errors
@@ -3431,7 +3431,7 @@ impl<O: ClassObject + SolutionObject + Ord> FilletExecutive<O> {
     }
 
     /// Refuse blends that take the whole of a face they roll on, some meeting it at an angle
-    /// (not upstream; opt-in `fixes.fillet_refuse_face_consuming_blends`, WR-320, #879:
+    /// (not upstream; WR-320, #879:
     /// `SmFilletExecutive::FacesOutlastTheirBlends`). The fork calls it in `CreateFilletBrep`
     /// after the fillet faces are built and before they are stitched (the diff in #879),
     /// on the trimmed rails; here it runs once the geometry exists, which is earlier. The
@@ -3447,9 +3447,7 @@ impl<O: ClassObject + SolutionObject + Ord> FilletExecutive<O> {
         k: &mut Kernel,
         access: &mut impl BrepCreationAccess<O>,
     ) -> Result<()> {
-        if k.fixes.fillet_refuse_face_consuming_blends
-            && !access.geometry_faces_outlast(k, &self.solvers)?
-        {
+        if !access.geometry_faces_outlast(k, &self.solvers)? {
             // the fork's 49f393d, a3d6d81 and 5e8c9c1 (WR-696): the largest radius that leaves
             // some of the face, for a polygon with every edge blended
             // (NoteFitOfPolygonsTakenWhole) and a plane bounded by one blended circle (the ball
@@ -3473,9 +3471,9 @@ impl<O: ClassObject + SolutionObject + Ord> FilletExecutive<O> {
         Ok(())
     }
 
-    /// Not the fork's (#2401, with `fixes.fillet_refuse_face_consuming_blends`): a plane face bounded by straight edges,
-    /// each blended with a constant ball, is taken whole once the least of its balls reaches
-    /// the radius that leaves some of it (`NoteFitOfPolygonsTakenWhole`'s bound, the deepest
+    /// Not the fork's (#2401, with WR-320's refusal): a plane face bounded by straight
+    /// edges, each blended with a constant ball, is taken whole once the least of its balls
+    /// reaches the radius that leaves some of it (`NoteFitOfPolygonsTakenWhole`'s bound, the deepest
     /// point of the face in the balls' terms), to within the blended edge's tolerance (a face
     /// of no extent). That is the face's own event, judged from its geometry before the
     /// corners and the trace, whose rails would have no length there; the refusal is
@@ -4495,9 +4493,7 @@ impl<O: ClassObject + SolutionObject + Ord> FilletExecutive<O> {
         self.refuse_blends_breaking_through(k, access)?;
         // not the fork's (#2401): a polygon face its blends take whole, refused before the
         // trace that its rails of no length would fail
-        if k.fixes.fillet_refuse_face_consuming_blends {
-            self.refuse_polygons_taken_whole(k, access)?;
-        }
+        self.refuse_polygons_taken_whole(k, access)?;
 
         // Not the fork's (#2546, WR-739): a rail whose ends would be one vertex, or that
         // lies past its arc's axis

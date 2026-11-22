@@ -53,6 +53,84 @@ pub enum NavButton {
     Left,
     Middle,
     Right,
+    /// The side "back" button (it still goes Back on a plain click).
+    Extra1,
+    /// The side "forward" button.
+    Extra2,
+}
+
+impl NavButton {
+    pub const ALL: [NavButton; 5] = [NavButton::Left, NavButton::Middle, NavButton::Right, NavButton::Extra1, NavButton::Extra2];
+
+    /// The name the setting and the control channel use.
+    pub fn id(self) -> &'static str {
+        match self {
+            NavButton::Left => "left",
+            NavButton::Middle => "middle",
+            NavButton::Right => "right",
+            NavButton::Extra1 => "extra1",
+            NavButton::Extra2 => "extra2",
+        }
+    }
+}
+
+/// A drag the user chose for a button in Preferences › Navigation: the action and the keys that
+/// must be held. `mode: None` is "Nothing".
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct NavChoice {
+    pub keys: NavKeys,
+    pub mode: Option<NavMode>,
+}
+
+impl NavChoice {
+    /// The setting's text: `orbit`, `pan`, `zoom` or `none`, after the keys (`shift+`, `ctrl+`, `alt+`).
+    pub fn parse(text: &str) -> Option<NavChoice> {
+        let mut keys = NavKeys::NONE;
+        let mut rest = text;
+        loop {
+            if let Some(r) = rest.strip_prefix("shift+") {
+                keys.shift = true;
+                rest = r;
+            } else if let Some(r) = rest.strip_prefix("ctrl+") {
+                keys.ctrl = true;
+                rest = r;
+            } else if let Some(r) = rest.strip_prefix("alt+") {
+                keys.alt = true;
+                rest = r;
+            } else {
+                break;
+            }
+        }
+        let mode = match rest {
+            "orbit" => Some(NavMode::Orbit),
+            "pan" => Some(NavMode::Pan),
+            "zoom" => Some(NavMode::Zoom),
+            "none" => None,
+            _ => return None,
+        };
+        Some(NavChoice { keys, mode })
+    }
+
+    pub fn text(self) -> String {
+        let mut out = String::new();
+        for (on, name) in [(self.keys.shift, "shift+"), (self.keys.ctrl, "ctrl+"), (self.keys.alt, "alt+")] {
+            if on {
+                out.push_str(name);
+            }
+        }
+        out.push_str(match self.mode {
+            Some(NavMode::Orbit) => "orbit",
+            Some(NavMode::Pan) => "pan",
+            Some(NavMode::Zoom) => "zoom",
+            None => "none",
+        });
+        out
+    }
+}
+
+/// What the user chose for dragging `button` in Preferences, if anything (the preset decides otherwise).
+pub fn nav_choice(prefs: &Prefs, button: NavButton) -> Option<NavChoice> {
+    prefs.nav_button_map.get(button.id()).and_then(|text| NavChoice::parse(text))
 }
 
 /// Modifier keys a binding needs held (others may be held too).
@@ -1760,6 +1838,10 @@ preference_settings! {
     /// (`link_folders_prompt`): those the user answered Load for. Kept in the user's settings,
     /// never in a design.
     linked_file_folders: Vec<String> = Vec::new(), PAGE_GENERAL;
+    /// What dragging a mouse button does when the user has chosen it, by button (`left`, `middle`,
+    /// `right`, `extra1`, `extra2`): `orbit`, `pan`, `zoom` or `none`, after any keys (`shift+`,
+    /// `ctrl+`, `alt+`). A button that is absent follows the mouse mapping. Empty by default.
+    nav_button_map: std::collections::BTreeMap<String, String> = std::collections::BTreeMap::new(), PAGE_NAVIGATION;
     /// What a middle-button double-click in the view does: `home`, `fit` or `off`.
     middle_double_click: String = "home".into(), PAGE_NAVIGATION;
     /// A view chosen on the navigator (a face, corner or arrow, an axis tip) also frames the
@@ -2885,6 +2967,10 @@ pub fn nav_mode(app: &SolveApp, button: NavButton, mods: Modifiers) -> Option<Na
     // With mouse gestures on, the right button opens the ring of tools instead of orbiting.
     if button == NavButton::Right && crate::mouse_gesture::active(app) {
         return None;
+    }
+    // A button the user mapped in Preferences takes that choice instead of the preset's bindings.
+    if let Some(choice) = nav_choice(&app.preferences, button) {
+        return choice.mode.filter(|_| choice.keys.held(mods));
     }
     let mode = nav_preset(&app.preferences.nav).mode(button, mods);
     // "Right drag orbits" off leaves the right button to the context menu (#6492).
@@ -4911,6 +4997,11 @@ fn prepare_preferences(
     }
     if MiddleDoubleClick::parse(&new.middle_double_click).is_none() {
         return Err("`middle_double_click` must be home, fit or off".into());
+    }
+    for (button, choice) in &new.nav_button_map {
+        if !NavButton::ALL.iter().any(|b| b.id() == button) || NavChoice::parse(choice).is_none() {
+            return Err("`nav_button_map` maps left, middle, right, extra1 or extra2 to orbit, pan, zoom or none, after shift+, ctrl+ or alt+".into());
+        }
     }
     let mut new = new;
     for grants in new.plugin_grants.values_mut() {

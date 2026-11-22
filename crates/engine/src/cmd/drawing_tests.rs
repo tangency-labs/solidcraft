@@ -1645,7 +1645,7 @@ fn sheet_editor_computed_creation_never_reuses_a_retired_sketch_id() {
         } else {
             let mut computed = s.scratch();
             let made = run(&mut computed, "drawing.sketch.create", params.clone());
-            s.accept_computed(computed);
+            s.accept_computed(computed).unwrap();
             made
         };
         assert_eq!(made["sketch"], discarded_id, "discarding a scratch consumes no id");
@@ -2183,7 +2183,7 @@ fn sheet_next_accept_computed_adopts_the_open_owner_entry_and_cancel_boundary() 
     assert_ne!(s.open_drawing, computed.open_drawing);
     let entry = computed.active_sheet_sketch.clone();
     let additional_steps = computed.undo.len();
-    s.accept_computed(computed);
+    s.accept_computed(computed).unwrap();
     assert_eq!(s.open_drawing, Some(drawing));
     assert_eq!(s.active_sheet_sketch, entry);
     assert_eq!(s.path.as_deref(), Some("computed-sheet.synthetic.solidcraft"));
@@ -2200,7 +2200,7 @@ fn sheet_next_accept_computed_adopts_the_open_owner_entry_and_cancel_boundary() 
     let mut closed = s.scratch();
     run(&mut closed, "sketch.finish", json!({}));
     run(&mut closed, "drawing.close", json!({}));
-    s.accept_computed(closed);
+    s.accept_computed(closed).unwrap();
     assert!(s.open_drawing.is_none() && s.active_sheet_sketch.is_none());
     run(&mut s, "edit.restore_checkpoint", json!({"checkpoint":checkpoint}));
     assert_eq!(s.open_drawing, Some(ids::decode(a["id"].as_str().unwrap()).unwrap()));
@@ -3781,7 +3781,7 @@ fn sheet_batch_compound_edits_preserve_foreign_redo_and_refuse_atomically() {
         // adopting the unchanged failed attempt must preserve every old redo branch.
         let mut failed_attempt = s.scratch();
         refused(&mut failed_attempt, command, failed);
-        s.accept_computed(failed_attempt);
+        s.accept_computed(failed_attempt).unwrap();
         assert!(Arc::ptr_eq(&s.doc, &before), "{command}");
         assert!(Arc::ptr_eq(&s.model.state(), &model), "{command}");
         assert_eq!(s.active_sheet_sketch, entry, "{command}");
@@ -3853,7 +3853,7 @@ fn sheet_batch_computed_history_replaces_each_touched_owner_only() {
     let mut read_only = s.scratch();
     run(&mut read_only, "drawing.open", the(bid));
     run(&mut read_only, "drawing.inspect", json!({}));
-    s.accept_computed(read_only);
+    s.accept_computed(read_only).unwrap();
     assert_eq!(s.open_drawing, Some(bid));
     assert!(Arc::ptr_eq(&s.doc, &before_read));
     same_redo(&s, &redos);
@@ -3871,7 +3871,7 @@ fn sheet_batch_computed_history_replaces_each_touched_owner_only() {
     assert!(rolled_back.doc.drawings.is_empty());
     run(&mut rolled_back, "edit.restore_checkpoint", json!({"checkpoint":checkpoint}));
     assert!(Arc::ptr_eq(&rolled_back.doc, &s.doc));
-    s.accept_computed(rolled_back);
+    s.accept_computed(rolled_back).unwrap();
     same_redo(&s, &redos);
 
     let mut computed = s.scratch();
@@ -3894,9 +3894,9 @@ fn sheet_batch_computed_history_replaces_each_touched_owner_only() {
     run(&mut nested, "sketch.finish", json!({}));
     run(&mut nested, "drawing.open", the(bid));
     assert!(nested.undo.is_empty() && nested.redo.is_empty());
-    computed.accept_computed(nested);
+    computed.accept_computed(nested).unwrap();
     assert!(computed.undo.iter().all(|step| step.part == Some(bid)), "neither A nor C survives in retained history");
-    s.accept_computed(computed);
+    s.accept_computed(computed).unwrap();
     assert_eq!(s.open_drawing, Some(bid));
     assert_eq!(s.doc.drawing(aid).unwrap().name, "A new");
     assert_eq!(s.doc.drawing(bid).unwrap().name, format!("B new{}", crate::MAX_UNDO));
@@ -3957,7 +3957,7 @@ fn sheet_batch_computed_visibility_invalidates_model_redo_after_history_eviction
     assert_eq!(rolled_back.visibility, changed_visibility, "a refused visibility edit is atomic");
     run(&mut rolled_back, "edit.restore_checkpoint", json!({"checkpoint":checkpoint}));
     assert_eq!(rolled_back.visibility, original_visibility);
-    s.accept_computed(rolled_back);
+    s.accept_computed(rolled_back).unwrap();
     assert_eq!(s.redo.len(), redos.len());
     for (after, before) in s.redo.iter().zip(&redos) {
         assert_eq!((&after.label, after.part), (&before.label, before.part));
@@ -3977,7 +3977,7 @@ fn sheet_batch_computed_visibility_invalidates_model_redo_after_history_eviction
     }
     assert_eq!(computed.undo.len(), crate::MAX_UNDO);
     assert!(computed.undo.iter().all(|step| step.part == Some(aid)), "the model visibility snapshot really was evicted");
-    s.accept_computed(computed);
+    s.accept_computed(computed).unwrap();
     assert_eq!(s.redo.len(), 1, "the stale model future was invalidated");
     assert_eq!(s.redo[0].part, Some(bid));
     assert!(Arc::ptr_eq(&s.redo[0].doc, &b_redo.doc), "the unrelated drawing future was retained");
