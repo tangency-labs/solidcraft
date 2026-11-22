@@ -323,6 +323,8 @@ fn either_reader_names_the_program_and_its_up_axis() {
             }
         }
     }
+    let _ = std::fs::remove_dir_all(&dir);
+}
 
 // Rhino export through cadmpeg (`file.export` to `.3dm`), read back through the Rhino import
 // above. Expected volumes and boxes come from the designs' dimensions.

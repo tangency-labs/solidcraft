@@ -2894,7 +2894,7 @@ fn export(s: &mut Session, p: &Value) -> Result<Value> {
     let setup = render_setup_arg(p, cmd, format)?;
     // OpenUSD's purpose sets the defaults of its exact shapes and pictures; each given option
     // overrides it.
-    let purpose = usd_purpose(p, cmd, format)?;
+    let purpose = crate::schema::file::usd_purpose(p.get("purpose"), format).map_err(|e| bad(cmd, e))?.unwrap_or_default();
     let usd_flag = |key: &str| -> Result<Option<bool>> {
         match p.get(key) {
             None | Some(Value::Null) => Ok(None),
@@ -2932,7 +2932,7 @@ fn export(s: &mut Session, p: &Value) -> Result<Value> {
         return export_laid(s, path, format, &bodies, &parts, quality);
     }
     // Pictures are written only when asked (or for distribution), as URDF's are.
-    let distribution = purpose == UsdPurpose::Distribution;
+    let distribution = purpose == crate::schema::file::UsdPurpose::Distribution;
     let images = format == Format::Usd && usd_flag("images")?.unwrap_or(distribution);
     let meshes_only = format == Format::Usd && !exact_brep.unwrap_or(!distribution);
     if written_by_cadmpeg(format) {
@@ -3179,27 +3179,6 @@ struct CadmpegChoices<'a> {
     setup: Option<&'a str>,
     images: bool,
     meshes_only: bool,
-}
-
-/// What an OpenUSD file is for: the defaults of what it holds.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-enum UsdPurpose {
-    /// For another CAD program: each body's exact shape beside its mesh.
-    #[default]
-    Interchange,
-    /// For a viewer, a game engine or a store: meshes only, with the pictures shown on the model.
-    Distribution,
-}
-
-/// `purpose` as `file.export` reads it. Only OpenUSD takes it.
-fn usd_purpose(p: &Value, cmd: &str, format: Format) -> Result<UsdPurpose> {
-    match p.get("purpose") {
-        None | Some(Value::Null) => Ok(UsdPurpose::Interchange),
-        Some(_) if format != Format::Usd => Err(bad(cmd, "`purpose` is for OpenUSD: other formats written here have one form")),
-        Some(Value::String(s)) if s == "interchange" => Ok(UsdPurpose::Interchange),
-        Some(Value::String(s)) if s == "distribution" => Ok(UsdPurpose::Distribution),
-        Some(_) => Err(bad(cmd, "`purpose` must be interchange or distribution")),
-    }
 }
 
 /// The design's shown decals for an OpenUSD export, each in its component's frame and the world.

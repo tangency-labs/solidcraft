@@ -50,6 +50,32 @@ pub enum ExportWriter {
     Cadmpeg,
 }
 
+/// What an OpenUSD file is for: the defaults of what it holds.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Deserialize, JsonSchema)]
+#[serde(rename_all = "lowercase")]
+pub enum UsdPurpose {
+    /// For another CAD program: each body's exact shape beside its mesh (the default).
+    #[default]
+    Interchange,
+    /// For a viewer, a game engine or a store: meshes only, with the pictures shown on the model.
+    Distribution,
+}
+
+/// `purpose` as `file.export` reads it: `None` when left out (interchange); refused for a format
+/// other than OpenUSD, and for any other word.
+pub(crate) fn usd_purpose(value: Option<&Value>, format: Format) -> Result<Option<UsdPurpose>, String> {
+    let purpose = match value {
+        None | Some(Value::Null) => return Ok(None),
+        Some(_) if format != Format::Usd => {
+            return Err("`purpose` is for OpenUSD: other formats written here have one form".into());
+        }
+        Some(Value::String(s)) if s == "interchange" => UsdPurpose::Interchange,
+        Some(Value::String(s)) if s == "distribution" => UsdPurpose::Distribution,
+        Some(_) => return Err("`purpose` must be interchange or distribution".into()),
+    };
+    Ok(Some(purpose))
+}
+
 /// `writer` as `file.export` reads it for `format`: `None` when left out (SolidCraft's own writer);
 /// refused for a format other than STEP and IGES, and for any other word.
 pub(crate) fn export_writer(value: Option<&Value>, format: Format) -> Result<Option<ExportWriter>, String> {
@@ -276,7 +302,7 @@ pub struct ExportParams {
     /// with the pictures shown on the model). `exact_brep` and `images` override it. Default:
     /// interchange.
     #[serde(default)]
-    pub purpose: Option<String>,
+    pub purpose: Option<UsdPurpose>,
     /// OpenUSD only: write each body's exact shape (B-rep) beside its mesh. Default: from
     /// `purpose` (true for interchange, false for distribution).
     #[serde(default)]
@@ -432,12 +458,7 @@ impl<'de> Deserialize<'de> for ExportParams {
             Some(_) => return Err(refuse("`render_setup` must be the name of a render setup")),
         };
         // Read before URDF and SDF return, so neither takes an OpenUSD option silently.
-        out.purpose = match m.get("purpose") {
-            None | Some(Value::Null) => None,
-            Some(_) if format != Format::Usd => return Err(refuse("`purpose` is for OpenUSD: other formats written here have one form")),
-            Some(Value::String(s)) if s == "interchange" || s == "distribution" => Some(s.clone()),
-            Some(_) => return Err(refuse("`purpose` must be interchange or distribution")),
-        };
+        out.purpose = usd_purpose(m.get("purpose"), format).map_err(refuse::<D::Error>)?;
         out.exact_brep = match m.get("exact_brep") {
             None | Some(Value::Null) => None,
             Some(Value::Bool(b)) if format == Format::Usd => Some(*b),

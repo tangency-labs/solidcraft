@@ -5,7 +5,7 @@ use serde_json::{Value, json};
 use super::{
     Export3mfParams, ExportMeshParams, ExportParams, ExportSdfParams, ExportStepParams, ExportStlParams, ExportUrdfParams, FileExportResult,
     NewerFileReport, OpenElsewhere, OpenParams, OpenResult, OpenedDesign, RecoverParams, RecoverResult, RecoveryDiscardParams, RecoveryDiscardResult,
-    RecoveryListParams, RecoveryListResult,
+    RecoveryListParams, RecoveryListResult, UsdPurpose,
 };
 use crate::Session;
 use crate::recovery::Autosaver;
@@ -409,6 +409,10 @@ fn the_export_type_reads_each_key_only_for_its_format() {
     }
     let e = read(json!({"path": "a.stl", "lay_on_print_faces": "yes"})).expect_err("a string");
     assert!(e.contains("must be true or false"), "{e}");
+    // `purpose` is one of OpenUSD's two forms, as the type, the schema and the handler read it.
+    assert_eq!(ok(json!({"path": "a.usda", "purpose": "distribution"})).purpose, Some(UsdPurpose::Distribution));
+    let e = read(json!({"path": "a.usda", "purpose": "viewer"})).expect_err("a purpose OpenUSD does not have");
+    assert!(e.contains("`purpose` must be interchange or distribution"), "{e}");
 }
 
 /// OpenUSD's `purpose` and `exact_brep` are refused for every other format, URDF, SDF and laid-out
@@ -448,6 +452,7 @@ fn the_export_schema_takes_what_the_handler_reads() {
         (json!({"path": "a.stl", "lay_on_print_faces": true}), true),
         (json!({"path": "a.step", "writer": "cadmpeg"}), true),
         (json!({"path": "a.igs", "writer": "solidcraft"}), true),
+        (json!({"path": "a.usda", "purpose": "distribution"}), true),
         (json!({}), false),
         (json!({"path": "a.stl", "lay_on_print_faces": "yes"}), false),
         (json!({"path": "a.stl", "bodies": [1]}), false),
@@ -455,6 +460,29 @@ fn the_export_schema_takes_what_the_handler_reads() {
     ] {
         assert_eq!(conforms(schema, schema, &p), takes, "{p}");
     }
+    // OpenUSD's `purpose` offers its two forms in the schema, not any string.
+    let mut allowed = allows(schema, &schema["properties"]["purpose"]);
+    allowed.sort();
+    assert_eq!(allowed, ["distribution", "interchange"], "{:?}", schema["properties"]["purpose"]);
+}
+
+/// The string values a property's schema allows, through a `$ref` and an `Option`'s, an `enum`'s
+/// and a closed list's branches.
+fn allows(root: &Value, node: &Value) -> Vec<String> {
+    let node =
+        node.get("$ref").and_then(Value::as_str).and_then(|r| r.strip_prefix("#/$defs/")).and_then(|name| root["$defs"].get(name)).unwrap_or(node);
+    if let Some(list) = node.get("enum").and_then(Value::as_array) {
+        return list.iter().filter_map(Value::as_str).map(str::to_string).collect();
+    }
+    if let Some(only) = node.get("const").and_then(Value::as_str) {
+        return vec![only.to_string()];
+    }
+    ["anyOf", "oneOf"]
+        .into_iter()
+        .filter_map(|key| node.get(key).and_then(Value::as_array))
+        .flatten()
+        .flat_map(|branch| allows(root, branch))
+        .collect()
 }
 
 /// Real exports of every format in warn: no `param_warnings`, and each reply matches the output

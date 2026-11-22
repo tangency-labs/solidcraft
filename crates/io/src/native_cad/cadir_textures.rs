@@ -22,7 +22,6 @@ use cadmpeg_ir::scalar::{Angle, FiniteReal, Length};
 use cadmpeg_ir::tessellation::{TextureCoordinateAddressing, TextureCoordinates};
 use cadmpeg_ir::units::FinitePoint2;
 use solidcraft_doc::{Mat, apply_point, apply_vector};
-use solidcraft_geom::prelude::*;
 
 use crate::SurfacePlan;
 
@@ -35,7 +34,9 @@ pub(super) fn coordinates(positions: &[solidcore_record::Vec3], plan: &SurfacePl
     let v3 = |a: [f64; 3]| solidcore_record::Vec3::new(a[0], a[1], a[2]);
     let origin = apply_point(to_mesh, v3(plan.origin));
     let (u, v) = (apply_vector(to_mesh, v3(plan.u)), apply_vector(to_mesh, v3(plan.v)));
-    let (uu, vv) = (u.dot(u), v.dot(v));
+    // The projection's own layout maths, written out: no model decision is made here.
+    let dot = |a: solidcore_record::Vec3, b: solidcore_record::Vec3| a.x * b.x + a.y * b.y + a.z * b.z;
+    let (uu, vv) = (dot(u, u), dot(v, v));
     if !(uu > 0.0 && vv > 0.0 && uu.is_finite() && vv.is_finite()) {
         return None;
     }
@@ -43,8 +44,8 @@ pub(super) fn coordinates(positions: &[solidcore_record::Vec3], plan: &SurfacePl
     values.try_reserve_exact(positions.len()).ok()?;
     for p in positions {
         let d = *p - origin;
-        let s = d.dot(u) / uu;
-        let along_v = d.dot(v) / vv;
+        let s = dot(d, u) / uu;
+        let along_v = dot(d, v) / vv;
         let t = if plan.flip_v { along_v } else { -along_v };
         values.push(FinitePoint2::new(cadmpeg_ir::math::Point2::new(s, t))?);
     }

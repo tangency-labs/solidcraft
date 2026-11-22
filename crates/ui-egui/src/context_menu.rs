@@ -2033,7 +2033,9 @@ pub fn run_item(app: &mut SolveApp, item: &Item, at: Pos2) {
                 let Some(path) = path else { return };
                 let mut params = json!({"bodies": bodies, "path": path, "hierarchy": app.preferences.glb_export_hierarchy});
                 crate::toolbar::with_export_writer(app, &path, &mut params);
-                let _ = app.run("file.export", params);
+                if let Ok(result) = app.run("file.export", params) {
+                    crate::toolbar::exported(app, &path, &result);
+                }
             });
         }
         "ui.findBrowser" => {

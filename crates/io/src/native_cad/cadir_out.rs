@@ -1078,7 +1078,8 @@ impl<'a> Builder<'a> {
         let written = self.tessellation(&prefix, id.as_ref(), &mesh, &face_looks, coordinates);
         if written.is_err() {
             // Not written, so its size is not the file's.
-            self.refund(mesh.positions.len(), mesh.triangles.len());
+            let solidcraft_geom::Mesh { triangles, .. } = mesh;
+            self.refund(mesh.positions.len(), triangles.len());
         }
         match written {
             Ok(()) => {
@@ -1143,10 +1144,11 @@ impl<'a> Builder<'a> {
     /// `geometry`'s mesh at the export's quality, within the file's size cap.
     fn mesh(&mut self, geometry: &solidcraft_kernel::Body, shown: &str) -> Result<solidcraft_geom::Mesh, Unmeshed> {
         let mesh = crate::display_mesh_at(geometry, self.quality).map_err(|e| Unmeshed::Failed(format!("could not be meshed: {e}")))?;
-        if mesh.triangles.is_empty() {
+        let solidcraft_geom::Mesh { triangles, .. } = &mesh;
+        if triangles.is_empty() {
             return Err(Unmeshed::Failed("could not be meshed: no face gave triangles".into()));
         }
-        self.charge(mesh.positions.len(), mesh.triangles.len()).ok_or_else(|| {
+        self.charge(mesh.positions.len(), triangles.len()).ok_or_else(|| {
             Unmeshed::TooLarge(format!(
                 "{shown}: the meshes are too large for the file (at most {} MiB); export fewer bodies or use standard quality",
                 MAX_BYTES >> 20
@@ -1185,7 +1187,8 @@ impl<'a> Builder<'a> {
         face_looks: &BTreeMap<u32, AppearanceId>,
         coordinates: Option<cadmpeg_ir::tessellation::TextureCoordinates>,
     ) -> Result<(), String> {
-        if mesh.triangles.is_empty() {
+        let solidcraft_geom::Mesh { triangles, tri_face, .. } = mesh;
+        if triangles.is_empty() {
             return Err("its mesh has no triangles".into());
         }
         let id = cadmpeg_ir::tessellation::TessellationId::try_from(format!("{prefix}:tessellation#0"))
@@ -1194,14 +1197,14 @@ impl<'a> Builder<'a> {
         let normals: Option<Vec<Vector3>> = (mesh.normals.len() == mesh.positions.len()
             && mesh.normals.iter().all(|n| n.x.is_finite() && n.y.is_finite() && n.z.is_finite()))
         .then(|| mesh.normals.iter().map(|n| Vector3::new(n.x, n.y, n.z)).collect());
-        let lanes = TessellationMesh::from_list_lanes(positions, mesh.triangles.clone(), normals).map_err(|e| e.to_string())?;
+        let lanes = TessellationMesh::from_list_lanes(positions, triangles.clone(), normals).map_err(|e| e.to_string())?;
         let mut t = Tessellation::new(id.clone(), lanes, Vec::new()).map_err(|e| e.to_string())?.with_body(body.cloned());
         if let Some(coordinates) = coordinates {
             t = t.with_texture_coordinates(vec![coordinates]).map_err(|e| e.to_string())?;
         }
-        if !face_looks.is_empty() && mesh.tri_face.len() == mesh.triangles.len() {
+        if !face_looks.is_empty() && tri_face.len() == triangles.len() {
             let mut groups: BTreeMap<Option<u32>, Vec<u32>> = BTreeMap::new();
-            for (i, f) in mesh.tri_face.iter().enumerate() {
+            for (i, f) in tri_face.iter().enumerate() {
                 let Ok(i) = u32::try_from(i) else { return Err("its mesh has too many triangles".into()) };
                 let group = face_looks.contains_key(f).then_some(*f);
                 groups.entry(group).or_default().push(i);

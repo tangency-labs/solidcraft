@@ -714,13 +714,47 @@ fn a_face_with_its_own_look_gets_its_own_material() {
     assert_eq!(red_bindings, 1, "{text}");
 }
 
-/// A placement that mirrors, or is not a finite number, is never written as one and never
-/// panics: the bodies are written where the world has them, with a warning naming the occurrence.
+/// A placement that is not a rigid one is never written as one: the bodies are written where the
+/// world has them, with a warning naming the occurrence.
 #[test]
-fn hostile_placements_never_panic() {
+fn a_placement_that_is_not_rigid_is_written_where_the_world_has_it() {
     let (doc, model) = galvanometer();
     let st = model.state();
-    for bad in [-1.0, f64::NAN, f64::INFINITY] {
+    let mut doc = doc.clone();
+    let o = doc.occurrences.iter_mut().find(|o| o.name.starts_with("Needle")).unwrap();
+    o.transform[0][0] = -1.0;
+    let name = o.name.clone();
+    let world = solidcraft_doc::world_state(&doc, &st).unwrap();
+    let (bytes, warnings) =
+        crate::usd_from_design(&doc, &st, &world, &[], &crate::CadmpegOptions::default(), "mirror.usda", crate::MeshQuality::Standard).unwrap();
+    assert!(warnings.iter().any(|w| w.contains(&name)), "{warnings:?}");
+    let mut want: Vec<[[f64; 3]; 2]> = world
+        .bodies
+        .iter()
+        .map(|b| {
+            let bb = solidcraft_kernel::measure(&b.body).unwrap().bbox;
+            [[bb.min.x, bb.min.y, bb.min.z], [bb.max.x, bb.max.y, bb.max.z]]
+        })
+        .collect();
+    want.sort_by(|a, b| a.partial_cmp(b).unwrap());
+    let (g, _) = crate::read_usd(&bytes, "mirror.usda").unwrap();
+    let got = boxes(g);
+    assert_eq!(got.len(), want.len(), "{got:?} vs {want:?}");
+    for (got, want) in got.iter().zip(&want) {
+        for (g, w) in got.iter().flatten().zip(want.iter().flatten()) {
+            // USD mesh points are single precision.
+            assert!((g - w).abs() < 1e-3, "{got:?} is not {want:?}");
+        }
+    }
+}
+
+/// A placement that is not a finite number is never written as one and never panics: the bodies
+/// are written where the world has them, with a warning naming the occurrence.
+#[test]
+fn nonfinite_placements_never_panic() {
+    let (doc, model) = galvanometer();
+    let st = model.state();
+    for bad in [f64::NAN, f64::INFINITY] {
         let mut doc = doc.clone();
         let o = doc.occurrences.iter_mut().find(|o| o.name.starts_with("Needle")).unwrap();
         o.transform[0][0] = bad;

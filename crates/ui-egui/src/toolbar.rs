@@ -1031,12 +1031,32 @@ fn export_as(app: &mut SolveApp, ext: &str, format: Option<&str>) {
         // GLB only, and not read for the other formats.
         params["hierarchy"] = json!(app.preferences.glb_export_hierarchy);
         if let Ok(result) = app.run("file.export", params) {
-            let skipped =
-                result.get("skipped").and_then(Value::as_array).map_or(Vec::new(), |a| a.iter().filter_map(Value::as_str).collect::<Vec<_>>());
-            let line = if skipped.is_empty() { format!("Exported {path}") } else { format!("Exported {path} (skipped {})", skipped.join(", ")) };
-            app.set_status(line, false);
+            exported(app, &path, &result);
         }
     });
+}
+
+/// The status line after an export: where the file went, with the bodies the exporter skipped and
+/// the first warning its writer gave. Each warning is kept in Messages, so what the file leaves out
+/// stays readable after the chip fades.
+pub(crate) fn exported(app: &mut SolveApp, path: &str, result: &Value) {
+    let listed = |key: &str| -> Vec<String> {
+        result.get(key).and_then(Value::as_array).map(|a| a.iter().filter_map(Value::as_str).map(str::to_string).collect()).unwrap_or_default()
+    };
+    let warnings = listed("warnings");
+    for warning in &warnings {
+        let text = crate::i18n::tr_diagnostic(warning);
+        app.messages.push(&text, false, crate::now_ms());
+    }
+    let mut line = format!("Exported {path}");
+    if let Some(first) = warnings.first() {
+        line.push_str(&format!(" with {} warning(s): {first}", warnings.len()));
+    }
+    let skipped = listed("skipped");
+    if !skipped.is_empty() {
+        line.push_str(&format!(" (skipped {})", skipped.join(", ")));
+    }
+    app.set_status(line, false);
 }
 
 /// Commands opt into persistent presentation; the engine status list remains the only truth.
@@ -3518,6 +3538,28 @@ mod header_report_tests {
         crate::keymap::press(&mut h.app, "Alt+Shift+F8", false);
         assert_eq!(h.app.dialog.as_ref().and_then(|d| d.command()), Some("file.save_mesh"), "STL opens Save As Mesh");
         crate::dialogs::cancel(&mut h.app);
+    }
+
+    /// What an exporter leaves out is said on the status line, and each warning stays in Messages
+    /// once the chip has faded; an export with nothing left out still says just where it went.
+    #[test]
+    fn an_export_with_warnings_says_so_and_keeps_them_in_messages() {
+        let mut h = crate::scenario::Harness::new();
+        let result = json!({
+            "path": "part.3dm",
+            "warnings": ["Pin: written as its mesh, without its name or colour", "Loose: written as its mesh"],
+            "skipped": ["Hidden"]
+        });
+        exported(&mut h.app, "part.3dm", &result);
+        let (line, _, error) = h.app.status.clone().expect("a status line");
+        assert_eq!(line, "Exported part.3dm with 2 warning(s): Pin: written as its mesh, without its name or colour (skipped Hidden)");
+        assert!(!error, "a warning, not a failure");
+        let messages: Vec<String> = h.app.messages.iter().map(|m| m.text.clone()).collect();
+        assert!(messages.iter().any(|m| m.contains("Pin: written as its mesh")), "{messages:?}");
+        assert!(messages.iter().any(|m| m.contains("Loose: written as its mesh")), "{messages:?}");
+
+        exported(&mut h.app, "part.step", &json!({"path": "part.step"}));
+        assert_eq!(h.app.status.as_ref().map(|s| s.0.as_str()), Some("Exported part.step"));
     }
 
     /// New designs are saved as `.sc`. A design opened from a `.solidcraft` file is saved back to

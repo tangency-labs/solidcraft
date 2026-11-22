@@ -1290,7 +1290,7 @@ fn add_cylinder(doc: &mut solidcraft_doc::Document) {
     doc.add_feature(
         solidcraft_doc::FeatureKind::Cylinder {
             base: solidcraft_doc::point_expr(solidcore_record::Vec3::new(80.0, 0.0, 0.0)),
-            axis: solidcraft_doc::Dir(solidcore_record::Vec3::Z),
+            axis: solidcraft_doc::dir_expr(solidcore_record::Vec3::Z),
             radius: "6".into(),
             height: "15".into(),
             operation: solidcraft_doc::Operation::NewBody,
@@ -1533,7 +1533,8 @@ fn iges_by_cadmpeg(bytes: &[u8]) -> crate::StepFeature {
     let (format, decoded) = convert::decode_at("x.igs", "igs", bytes, &["iges"], cadmpeg_core::decode::DecodeDepth::Full).unwrap();
     assert_eq!(format, "iges");
     let records = cadir_records(&decoded.into_parts().0, "x", "", true);
-    crate::records_import_feature((records, Vec::new(), false), "x.igs", crate::StepNames::default()).unwrap()
+    let read = crate::RecordsRead { records, warnings: Vec::new(), freecad: false, preprocessor: String::new(), description: String::new() };
+    crate::records_import_feature(read, "x.igs", crate::StepNames::default()).unwrap()
 }
 
 /// An imported body's colour: its own, else the one colour every face of it has (cadmpeg's STEP
