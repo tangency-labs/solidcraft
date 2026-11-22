@@ -418,15 +418,15 @@ fn a_fillet_or_chamfer_brings_two_separate_lines_to_where_they_meet() {
     run(&mut s, "edit.undo", json!({}));
     assert_eq!(sk(&s).curves.len(), 2, "undo brings back the two separate lines");
 
-    // Refused: parallel lines, an end joined to a third line, a dimensioned length.
+    // Refused: an end joined to a third line, a dimensioned length. (Two parallel lines are
+    // joined by a half circle instead, #16238: see `a_fillet_of_two_parallel_lines_is_a_half_circle`.)
     let mut s = new_sketch();
-    let (pa, pb) = lines(&mut s, [[0.0, 0.0], [10.0, 0.0]], [[0.0, 5.0], [10.0, 5.0]]);
     let (la, lb) = lines(&mut s, [[0.0, 20.0], [10.0, 20.0]], [[20.0, 25.0], [20.0, 40.0]]);
     run(&mut s, "sketch.line", json!({"points": [format!("{la}.end"), [10, 30]], "connect": false}));
     let (da, db) = lines(&mut s, [[0.0, 50.0], [10.0, 50.0]], [[20.0, 55.0], [20.0, 70.0]]);
     run(&mut s, "sketch.dimension", json!({"entities": [da], "value": 10}));
     let before = sk(&s);
-    for (a, b, why) in [(&pa, &pb, "parallel"), (&la, &lb, "held by other geometry"), (&da, &db, "length is held")] {
+    for (a, b, why) in [(&la, &lb, "held by other geometry"), (&da, &db, "length is held")] {
         let e = s.execute("sketch.fillet", &json!({"a": a, "b": b, "radius": 2})).unwrap_err().to_string();
         assert!(e.contains(why), "{a}, {b}: {e}");
     }
