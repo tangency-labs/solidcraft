@@ -980,6 +980,50 @@ mod tests {
     /// escapes and test modules are handled, and calls inside macros count too. UI-kit calls that
     /// translate their label themselves (`row`, imported as `form_row`, and the rest of
     /// `KIT_CALLS`) are read at the same argument positions the kit translates.
+    /// A command's label comes from its own entry, in every language (#20610). The English
+    /// text of a command's label can be the text of other entries too ("Export": the
+    /// command, the start page's button and two of Preferences'; "Ground": the command and
+    /// a render scene's floor), and the label adapter takes one of them by id order, so the
+    /// Spanish Export command read "Exportar perfil". For every command with an entry of
+    /// its own (`cmd.<id>`, or with its dots as underscores) whose English text is the
+    /// command's label, and every language that has that entry, `command` gives that
+    /// entry's text; a command without one, a label shown in a command's place and an id
+    /// that is no command's go by the label as before.
+    #[test]
+    fn a_command_is_labelled_from_its_own_entry_in_every_language() {
+        install();
+        let english = ENGLISH.messages();
+        let own_entry = |id: &str, label: &str| {
+            [format!("cmd.{id}"), format!("cmd.{}", id.replace('.', "_"))].into_iter().find(|key| english.get(key).is_some_and(|text| text == label))
+        };
+        let commands = solidcraft_engine::command_specs();
+        let mut told_apart = Vec::new();
+        for catalog in LOCALES {
+            let locale = Locale::new(catalog);
+            for command in &commands {
+                match own_entry(command.id, command.label).filter(|key| catalog.messages().contains_key(key)) {
+                    Some(key) => {
+                        assert_eq!(locale.command(command.id, command.label), locale.text(&key), "{}: {}", catalog.id, command.id);
+                        if locale.label(command.label) != locale.text(&key) {
+                            told_apart.push((catalog.id, command.id));
+                        }
+                    }
+                    None => assert_eq!(locale.command(command.id, command.label), locale.label(command.label), "{}: {}", catalog.id, command.id),
+                }
+            }
+        }
+        // the reported one, and that it is not the only one
+        assert!(told_apart.contains(&("es", "file.export")), "{told_apart:?}");
+        assert!(told_apart.len() > 100, "{}", told_apart.len());
+        let spanish = Locale::for_language("es");
+        assert_eq!(spanish.command("file.export", "Export"), "Exportar");
+        assert_eq!(spanish.command("occurrence.ground", "Ground"), "Fijar");
+        assert_eq!(spanish.command("file.export", "Preferences"), spanish.label("Preferences"));
+        assert_eq!(spanish.command("no.such_command", "Export"), spanish.label("Export"));
+        let _spanish = scope("es");
+        assert_eq!(solidcraft_ui_text::tr_command("file.export", "Export"), "Exportar");
+    }
+
     #[test]
     fn english_only_render_aliases_do_not_hide_existing_label_translations() {
         install();
