@@ -6074,8 +6074,8 @@ fn enter_and_the_control_channel_send_the_box_with_its_pills() {
     let Some(Item::User { text, context, .. }) = last_user(&h) else { panic!("Enter sent it: {:?}", h.app.agent_chat.input) };
     assert!(text.contains("«1: Body1»") && context.groups.len() == 1, "{text}");
     assert!(h.app.agent_chat.input.is_empty() && h.app.agent_chat.pills.is_empty());
-    // The same through the control channel.
-    h.app.agent_chat.items.clear();
+    // Start a separate conversation to send through the control channel as well.
+    new_chat(&mut h.app);
     h.app.agent_chat.input = "again ".into();
     pick_pill(&mut h.app, 6, &sels[3..]);
     let reply = h.call("ui.agent_chat", json!({}));
