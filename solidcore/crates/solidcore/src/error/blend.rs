@@ -244,7 +244,8 @@ pub enum BlendFailure {
         minimum: f64,
     },
     /// The crossing's Hermite fit still has spans farther than a tenth of the tolerance
-    /// from the exact curve when its station cap or its 20 refinement passes ran out.
+    /// from the exact curve when its station cap or its 20 refinement passes ran out, or
+    /// when a pass found no point to split any of them at.
     /// Not within tolerance ([`ErrorKind::NotWithinTolerance`]); status `SM_ERR`.
     PlaneCurveFitCap {
         /// The stations held when fitting stopped.
