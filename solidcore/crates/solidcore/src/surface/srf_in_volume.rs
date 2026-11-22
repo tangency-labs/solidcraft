@@ -1155,10 +1155,7 @@ impl SrfInVolume {
         if self.owns_surface() {
             Ok(())
         } else {
-            Err(SolidError::surface(
-                OP,
-                SurfaceFailure::BaseSurfaceNotOwned,
-            ))
+            Err(SolidError::surface(OP, SurfaceFailure::BaseSurfaceNotOwned))
         }
     }
 

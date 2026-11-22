@@ -883,7 +883,11 @@ mod tests {
             };
             assert_eq!(typed.sm_status(), before.sm_status(), "{typed:?}");
             assert_eq!(typed.upstream_status(), Some(code), "{typed:?}");
-            assert_eq!(typed.kind(), crate::error::ErrorKind::StageFailed, "{typed:?}");
+            assert_eq!(
+                typed.kind(),
+                crate::error::ErrorKind::StageFailed,
+                "{typed:?}"
+            );
             assert!(typed.is_defect(), "{typed:?}");
             assert_eq!(typed.operation(), before.operation(), "{typed:?}");
             assert_eq!(typed.entity(), None, "{typed:?}");

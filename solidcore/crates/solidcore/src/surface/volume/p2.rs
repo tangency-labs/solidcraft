@@ -94,7 +94,6 @@ use super::p1::{
 const OP_BOX: &str = "surface::volume::p2::Volume::evaluate_bounding_box";
 const OP_MAP_BOX: &str = "surface::volume::p2::Volume::map_pseudo_box";
 const OP_INV: &str = "surface::volume::p2::Volume::inv_evaluate_point";
-const OP_SOLVE: &str = "surface::volume::p2::Volume::global_point_solve";
 const OP_READ: &str = "surface::volume::p2::Volume::read_from_db";
 const OP_WRITE: &str = "surface::volume::p2::Volume::write_to_db";
 

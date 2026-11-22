@@ -205,9 +205,7 @@ impl SurfaceFailure {
             Self::DerivativeCombinationUnsupported { .. }
             | Self::PlainVolume
             | Self::BSplineVolumeUnsupported => ErrorKind::Unsupported,
-            Self::PointInBendSingularity | Self::ZeroVolumeTangent { .. } => {
-                ErrorKind::Degenerate
-            }
+            Self::PointInBendSingularity | Self::ZeroVolumeTangent { .. } => ErrorKind::Degenerate,
             Self::NoVolumeInverse | Self::CallFailed => ErrorKind::Failed,
             _ => ErrorKind::of_status(self.comparison_status()),
         }
