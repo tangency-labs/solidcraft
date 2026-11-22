@@ -25,6 +25,12 @@ pub const MAX_KICAD_BYTES: usize = 128 << 20;
 const MAX_TOKENS: usize = 2_000_000;
 const MAX_DEPTH: usize = 128;
 const MAX_FOOTPRINTS: usize = 100_000;
+/// Fields kept per footprint for its text variables.
+const MAX_FOOTPRINT_FIELDS: usize = 256;
+/// Characters a text may grow to as its variables are expanded; the rest stays as written.
+const MAX_EXPANDED_TEXT: usize = 4096;
+/// How deep variables inside a variable's name are expanded (`${${REFERENCE}}`).
+const MAX_VARIABLE_DEPTH: usize = 8;
 const MAX_MODELS: usize = 500_000;
 const MAX_OUTLINE_SEGMENTS: usize = 500_000;
 const MAX_OUTLINE_POINTS: usize = 500_000;
@@ -180,6 +186,10 @@ pub struct KicadBoard {
 pub struct KicadFootprint {
     pub reference: String,
     pub value: String,
+    /// The footprint's library name, `Library:Footprint` (or just `Footprint`).
+    pub name: String,
+    /// Every field (property) by its name, hidden ones too: what `${NAME}` in its text reads.
+    pub fields: Vec<(String, String)>,
     pub layer: String,
     /// Board X/Y in millimetres and footprint rotation in degrees.
     pub at: [f64; 3],
@@ -533,7 +543,165 @@ pub fn parse_kicad_board_with(bytes: &[u8], file: &str, options: KicadOptions) -
     if extra_text_seen {
         board.warnings.push("text boxes, dimensions and tables are not modeled yet".into());
     }
+    expand_text_variables(&mut board, &root);
     Ok(board)
+}
+
+/// Put each text's variables in, as KiCad draws them: `${REVISION}` and the title block's other
+/// names, `${LAYER}`, and in a footprint's text its fields (`${REFERENCE}`, `${VALUE}`, any field by
+/// its exact name, hidden ones too), `${FOOTPRINT_NAME}` and `${FOOTPRINT_LIBRARY}`; `${R7:VALUE}`
+/// reads another footprint's. Names are case-sensitive; an unknown one stays as written. A text
+/// that comes out empty (a revision the board never set) is dropped.
+fn expand_text_variables(board: &mut KicadBoard, root: &Expr<'_>) {
+    let title = title_block_variables(root);
+    let layers = layer_names(root);
+    let vars = TextVariables { title: &title, layers: &layers, footprints: &board.footprints };
+    let expand_all = |texts: &[KicadText], footprint: Option<&KicadFootprint>| -> Vec<KicadText> {
+        texts
+            .iter()
+            .filter_map(|text| {
+                let resolve = |name: &str| vars.resolve(name, &text.layer, footprint);
+                let expanded = expand_variables(&text.text, 0, &resolve);
+                (!expanded.trim().is_empty()).then(|| KicadText { text: expanded, ..text.clone() })
+            })
+            .collect()
+    };
+    let board_texts = expand_all(&board.texts, None);
+    let footprint_texts: Vec<Vec<KicadText>> = board.footprints.iter().map(|footprint| expand_all(&footprint.texts, Some(footprint))).collect();
+    board.texts = board_texts;
+    for (footprint, texts) in board.footprints.iter_mut().zip(footprint_texts) {
+        footprint.texts = texts;
+    }
+}
+
+/// What a board's text variables read: its title block, its layers' names, its footprints.
+struct TextVariables<'a> {
+    title: &'a [(String, String)],
+    layers: &'a std::collections::HashMap<String, String>,
+    footprints: &'a [KicadFootprint],
+}
+
+impl TextVariables<'_> {
+    /// The value of the variable `name` in a text on `layer` (in `footprint`'s text, or the
+    /// board's for `None`); `None` when there is no such variable.
+    fn resolve(&self, name: &str, layer: &str, footprint: Option<&KicadFootprint>) -> Option<String> {
+        if let Some((reference, rest)) = name.split_once(':') {
+            let Some(other) = self.footprints.iter().find(|f| f.reference == reference) else {
+                return Some(format!("<Unknown reference: {reference}>"));
+            };
+            return self.resolve(rest, &other.layer, Some(other));
+        }
+        if let Some(footprint) = footprint {
+            let (library, part) = footprint.name.split_once(':').unwrap_or(("", footprint.name.as_str()));
+            match name {
+                "REFERENCE" => return Some(footprint.reference.clone()),
+                "VALUE" => return Some(footprint.value.clone()),
+                "FOOTPRINT_NAME" => return Some(part.to_string()),
+                "FOOTPRINT_LIBRARY" => return Some(library.to_string()),
+                _ => {}
+            }
+            if let Some((_, value)) = footprint.fields.iter().find(|(key, _)| key == name) {
+                return Some(value.clone());
+            }
+        }
+        if name == "LAYER" {
+            return Some(self.layers.get(layer).cloned().unwrap_or_else(|| default_layer_name(layer).to_string()));
+        }
+        self.title.iter().find(|(key, _)| key == name).map(|(_, value)| value.clone())
+    }
+}
+
+/// `text` with each `${NAME}` that `resolve` knows replaced by its value; a name is expanded
+/// first (`${${REFERENCE}}` reads the variable named by the reference), and a `${` that is never
+/// closed runs to the end of the text, as KiCad reads it.
+fn expand_variables(text: &str, depth: usize, resolve: &dyn Fn(&str) -> Option<String>) -> String {
+    let mut out = String::with_capacity(text.len());
+    let mut rest = text;
+    while let Some(at) = rest.find("${") {
+        if out.len() > MAX_EXPANDED_TEXT {
+            break;
+        }
+        out.push_str(&rest[..at]);
+        let after = &rest[at + 2..];
+        let mut open = 1usize;
+        let mut end = None;
+        for (index, ch) in after.char_indices() {
+            if after[index..].starts_with("${") {
+                open += 1;
+            } else if ch == '}' {
+                open -= 1;
+                if open == 0 {
+                    end = Some(index);
+                    break;
+                }
+            }
+        }
+        let (inner, next) = match end {
+            Some(index) => (&after[..index], &after[index + 1..]),
+            None => (after, ""),
+        };
+        let name = if depth < MAX_VARIABLE_DEPTH { expand_variables(inner, depth + 1, resolve) } else { inner.to_string() };
+        match resolve(&name) {
+            Some(value) => out.push_str(&value),
+            None => {
+                out.push_str("${");
+                out.push_str(&name);
+                if end.is_some() {
+                    out.push('}');
+                }
+            }
+        }
+        rest = next;
+    }
+    out.push_str(rest);
+    out
+}
+
+/// The title block's text variables; each is defined (empty when the board does not set it).
+fn title_block_variables(root: &Expr<'_>) -> Vec<(String, String)> {
+    let block = field(root, "title_block");
+    let entry = |key: &str| block.and_then(|b| field(b, key)).and_then(|e| children(e).get(1)).and_then(atom).unwrap_or_default().to_string();
+    let mut vars = vec![
+        ("TITLE".to_string(), entry("title")),
+        ("ISSUE_DATE".to_string(), entry("date")),
+        ("REVISION".to_string(), entry("rev")),
+        ("COMPANY".to_string(), entry("company")),
+    ];
+    for n in 1..=9 {
+        let comment = block
+            .map(children)
+            .unwrap_or_default()
+            .iter()
+            .filter(|e| head(e) == Some("comment"))
+            .find(|e| children(e).get(1).and_then(atom) == Some(n.to_string().as_str()))
+            .and_then(|e| children(e).get(2))
+            .and_then(atom)
+            .unwrap_or_default()
+            .to_string();
+        vars.push((format!("COMMENT{n}"), comment));
+    }
+    vars
+}
+
+/// The names the board gives its layers (`(5 "F.SilkS" user "Top silk")`), by their canonical name.
+fn layer_names(root: &Expr<'_>) -> std::collections::HashMap<String, String> {
+    let mut names = std::collections::HashMap::new();
+    for entry in field(root, "layers").map(children).unwrap_or_default() {
+        let parts = children(entry);
+        if let (Some(canonical), Some(user)) = (parts.get(1).and_then(atom), parts.get(3).and_then(atom)) {
+            names.insert(canonical.to_string(), user.to_string());
+        }
+    }
+    names
+}
+
+/// The name KiCad shows for a layer the board's layer table does not name.
+fn default_layer_name(layer: &str) -> &str {
+    match layer {
+        "F.SilkS" => "F.Silkscreen",
+        "B.SilkS" => "B.Silkscreen",
+        other => other,
+    }
 }
 
 /// The matrix that maps a board point (KiCad's Y down) to SolidCraft's Y up.
@@ -3154,6 +3322,22 @@ fn parse_footprint(
     let layer = layer_of(expr).unwrap_or_default();
     let reference = property(expr, "Reference").or_else(|| fp_text(expr, "reference")).unwrap_or_default();
     let value = property(expr, "Value").or_else(|| fp_text(expr, "value")).unwrap_or_default();
+    let name = children(expr).get(1).and_then(atom).unwrap_or_default().to_string();
+    let mut fields: Vec<(String, String)> = Vec::new();
+    for child in children(expr).iter().filter(|e| head(e) == Some("property")) {
+        if let (Some(key), Some(text)) = (children(child).get(1).and_then(atom), children(child).get(2).and_then(atom))
+            && fields.len() < MAX_FOOTPRINT_FIELDS
+            && !fields.iter().any(|(k, _)| k == key)
+        {
+            fields.push((key.to_string(), text.to_string()));
+        }
+    }
+    // Older files keep the reference and value as `fp_text`, not properties.
+    for (key, text) in [("Reference", &reference), ("Value", &value)] {
+        if !fields.iter().any(|(k, _)| k == key) {
+            fields.push((key.to_string(), text.clone()));
+        }
+    }
     let mut models = Vec::new();
     let mut pads = Vec::new();
     let mut graphics = Vec::new();
@@ -3231,7 +3415,7 @@ fn parse_footprint(
         pad.at[2] -= position[2];
     }
     position[2] = position[2].rem_euclid(360.0);
-    Ok(KicadFootprint { reference, value, layer, at: position, models, pads, graphics, texts })
+    Ok(KicadFootprint { reference, value, name, fields, layer, at: position, models, pads, graphics, texts })
 }
 
 fn parse_pad(expr: &Expr<'_>) -> std::result::Result<KicadPad, String> {

@@ -63,6 +63,8 @@ fn models_stand_on_the_board_face_they_are_on() {
     let footprint = |layer: &str| KicadFootprint {
         reference: String::new(),
         value: String::new(),
+        name: String::new(),
+        fields: Vec::new(),
         layer: layer.into(),
         at: [10.0, 20.0, 90.0],
         models: Vec::new(),
@@ -884,6 +886,98 @@ fn unlocked_written_in_the_position_keeps_the_position() {
     assert_eq!(footprint.texts.len(), 1, "{:?}", footprint.texts);
     assert_eq!(footprint.texts[0].at, [3.0, 1.0, 180.0]);
     assert!(footprint.texts[0].unlocked);
+}
+
+/// The board text and each footprint's text, after the variables are put in.
+fn texts_of(items: &str) -> (Vec<String>, Vec<Vec<String>>) {
+    let source = format!(r#"(kicad_pcb (general (thickness 1.6)) (gr_rect (start -20 -20) (end 20 20) (layer "Edge.Cuts")) {items})"#);
+    let board = parse_kicad_board(source.as_bytes(), "vars.kicad_pcb").unwrap();
+    let texts = |list: &[KicadText]| list.iter().map(|t| t.text.clone()).collect::<Vec<_>>();
+    (texts(&board.texts), board.footprints.iter().map(|f| texts(&f.texts)).collect())
+}
+
+const VAR_FONT: &str = "(effects (font (size 1 1) (thickness 0.15)))";
+
+const TITLE_BLOCK: &str = r#"(title_block (title "Probe board") (date "2026-01-02") (rev "B2") (company "Acme") (comment 1 "first"))"#;
+
+/// A footprint R7 (value 10k, a hidden MPN field) from library `Lib`, with one silk text `text`.
+fn footprint_with_text(text: &str) -> String {
+    format!(
+        r#"(footprint "Lib:Part" (layer "F.Cu") (at 0 0)
+          (property "Reference" "R7" (at 0 -3) (layer "F.Fab") (hide yes) {VAR_FONT})
+          (property "Value" "10k" (at 0 3) (layer "F.Fab") (hide yes) {VAR_FONT})
+          (property "MPN" "XQ-12" (at 0 0) (layer "F.Fab") (hide yes) {VAR_FONT})
+          (fp_text user "{text}" (at 0 0) (layer "F.SilkS") {VAR_FONT}))"#
+    )
+}
+
+/// Each name and its value, as KiCad 10 draws them (checked against kicad-cli renders): the title
+/// block anywhere, and in a footprint's text its reference, value, any field by name (hidden ones
+/// too), its library and name, and the text's layer by the name KiCad shows.
+#[test]
+fn reference_and_title_block_variables_are_expanded() {
+    let board_text = |text: &str| format!(r#"(gr_text "{text}" (at 0 0) (layer "F.SilkS") {VAR_FONT})"#);
+    let (board, _) = texts_of(&format!("{TITLE_BLOCK} {}", board_text("${TITLE} rev ${REVISION}, ${ISSUE_DATE}, ${COMPANY}, ${COMMENT1}, ${LAYER}")));
+    assert_eq!(board, vec!["Probe board rev B2, 2026-01-02, Acme, first, F.Silkscreen"]);
+    let (_, footprints) = texts_of(&format!(
+        "{TITLE_BLOCK} {}",
+        footprint_with_text("${REFERENCE}=${VALUE} ${MPN} ${FOOTPRINT_LIBRARY}/${FOOTPRINT_NAME} ${LAYER} ${REVISION}")
+    ));
+    assert_eq!(footprints, vec![vec!["R7=10k XQ-12 Lib/Part F.Silkscreen B2"]]);
+}
+
+/// `${R7:VALUE}` reads another footprint's field, from board text or another footprint's; a
+/// reference no footprint has reads as KiCad shows it.
+#[test]
+fn a_text_variable_can_read_another_footprints_field() {
+    let (board, _) = texts_of(&format!(
+        r#"{TITLE_BLOCK} {} (gr_text "${{R7:VALUE}} ${{R7:REVISION}} ${{R9:VALUE}}" (at 0 0) (layer "F.SilkS") {VAR_FONT})"#,
+        footprint_with_text("x")
+    ));
+    assert_eq!(board, vec!["10k B2 <Unknown reference: R9>"]);
+}
+
+/// A layer the board's layer table names is shown by that name.
+#[test]
+fn the_layer_variable_reads_the_boards_own_layer_name() {
+    let (board, _) = texts_of(&format!(r#"(layers (5 "F.SilkS" user "Top silk")) (gr_text "${{LAYER}}" (at 0 0) (layer "F.SilkS") {VAR_FONT})"#));
+    assert_eq!(board, vec!["Top silk"]);
+}
+
+/// A title-block name the board never set is empty, so a text made only of it draws nothing; a
+/// text with other characters keeps them.
+#[test]
+fn empty_text_variables_draw_nothing() {
+    let (board, _) = texts_of(&format!(
+        r#"(gr_text "${{REVISION}}" (at 0 0) (layer "F.SilkS") {VAR_FONT}) (gr_text "${{ISSUE_DATE}} " (at 0 5) (layer "F.SilkS") {VAR_FONT}) (gr_text "Rev ${{REVISION}}" (at 0 9) (layer "F.SilkS") {VAR_FONT})"#
+    ));
+    assert_eq!(board, vec!["Rev "]);
+}
+
+/// Unknown names, names in the wrong case, a footprint's names in board text and a cross
+/// reference to a field the footprint lacks stay as written; a `${` never closed runs to the end
+/// of the text, and a name is expanded first, as KiCad reads them.
+#[test]
+fn unknown_text_variables_stay_literal() {
+    let (board, footprints) = texts_of(&format!(
+        r#"{TITLE_BLOCK} {} (gr_text "${{NOSUCH}} ${{revision}} ${{REFERENCE}} ${{R7:NOSUCH}}" (at 0 0) (layer "F.SilkS") {VAR_FONT})"#,
+        footprint_with_text("${mpn} ${${REFERENCE}} x${REFERENCE")
+    ));
+    assert_eq!(board, vec!["${NOSUCH} ${revision} ${REFERENCE} ${R7:NOSUCH}"]);
+    assert_eq!(footprints, vec![vec!["${mpn} ${R7} xR7"]]);
+}
+
+/// A text that names a long title many times grows only so far.
+#[test]
+fn expanded_text_has_a_length_limit() {
+    let title = "T".repeat(1000);
+    let text = "${TITLE}".repeat(1000);
+    let (board, _) = texts_of(&format!(r#"(title_block (title "{title}")) (gr_text "{text}" (at 0 0) (layer "F.SilkS") {VAR_FONT})"#));
+    let [expanded] = board.as_slice() else { panic!("one text: {board:?}") };
+    // It stops past 4096 characters; the names after that stay as written.
+    assert!(expanded.len() > 4096 && expanded.len() < 4096 + 1000 + 8000, "{}", expanded.len());
+    assert!(expanded.starts_with(&title), "the first names are expanded");
+    assert!(expanded.ends_with("${TITLE}"), "the rest stays as written");
 }
 
 #[test]
