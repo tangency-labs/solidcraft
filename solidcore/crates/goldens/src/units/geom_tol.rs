@@ -338,7 +338,7 @@ fn rust_brep(i: &Inputs) -> Result<Output, HarnessError> {
         Err(o) => return Ok(o),
     };
     let mut b = m.brep;
-    let mut k = kernel(i.model, i.ratio);
+    let k = kernel(i.model, i.ratio);
     let small = SmallTopoType::from_code(i.small)
         .ok_or_else(|| HarnessError::new(format!("small {}", i.small)))?;
     let a = brep_args(i);
