@@ -94,6 +94,7 @@ pub use joints::{MAX_REACH_JOINTS, reach_from, reach_preview};
 pub use parts::part_length_label;
 pub use sketch::dimension_roles;
 pub(crate) use sketch::face::face_pick_form;
+pub(crate) use sketch::finish_model_edit;
 pub use sketch_construction::{
     ConstructionLine, construction_line_choice, construction_line_mode, construction_line_solutions, construction_line_takes_length,
     construction_segment,
@@ -252,6 +253,8 @@ pub struct CommandSpec {
     pub enabled: Enabled,
     pub run: Run,
     pub undoable: bool,
+    /// Reviewed edit entry semantics, independent of undoability or authority.
+    pub edit_start: crate::EditStart,
     /// Command authority, independent of undo history. New commands require edit authority.
     pub effect: craft_plugin::Effect,
     /// What runs instead of `run` when the command is given `live: true` (a frame of an
@@ -287,6 +290,7 @@ impl CommandSpec {
             enabled: always,
             run,
             undoable: true,
+            edit_start: crate::EditStart::Preserve,
             effect: craft_plugin::Effect::Edit,
             live: None,
             reads_model: true,
@@ -297,6 +301,25 @@ impl CommandSpec {
             part: Part::Model,
         }
     }
+    /// This registered operation starts a new edit and commits any open sketch first.
+    pub const fn begins_edit(mut self) -> Self {
+        self.edit_start = crate::EditStart::Begin;
+        self
+    }
+    /// Mixed setters use an explicit reviewed parameter predicate for edit entry.
+    pub const fn begins_edit_when(mut self, predicate: fn(&Value) -> bool) -> Self {
+        self.edit_start = crate::EditStart::Conditional(predicate);
+        self
+    }
+    /// Whether this request enters an edit; toolbar/effect metadata never decides this.
+    pub fn starts_edit(&self, params: &Value) -> bool {
+        self.edit_start.starts(params)
+    }
+    pub(crate) const fn selection_edit(mut self) -> Self {
+        self.edit_start = crate::EditStart::SelectionDelete;
+        self
+    }
+
     /// Not built yet; `issue` tracks building it.
     pub const fn planned(mut self, issue: &'static str) -> Self {
         self.planned = Some(issue);
@@ -401,13 +424,11 @@ impl CommandSpec {
     /// Run inside another command: when it is allowed, its `run` (the caller's command owns the
     /// undo step and the evaluation).
     pub(crate) fn run_nested(&self, s: &mut Session, p: &Value) -> Result<Value> {
-        self.allowed(s).map_err(|why| crate::EngineError::Disabled(self.id.to_string(), why))?;
-        let r = (self.run)(s, p);
-        // A parameter error that did not name the command names it here (see `Session::execute`).
-        match r {
-            Err(crate::EngineError::BadParams { cmd, msg }) if cmd.is_empty() => Err(crate::EngineError::BadParams { cmd: self.id.to_string(), msg }),
-            other => other,
-        }
+        s.run_nested_edit(self, p, false)
+    }
+    /// Rebuild/continue an existing operation without entering another edit mode.
+    pub(crate) fn run_nested_continuing(&self, s: &mut Session, p: &Value) -> Result<Value> {
+        s.run_nested_edit(self, p, true)
     }
     /// The refusal this command gives when it is not available in this session: none when it
     /// is. It is the engine's own wording (`EngineError::Disabled`), so a caller that only has

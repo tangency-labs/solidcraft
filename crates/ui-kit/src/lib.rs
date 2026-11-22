@@ -173,6 +173,7 @@ pub use text::ellipsize_middle;
 pub use text::paint_text;
 pub use text_menu::menu_open as text_menu_open;
 pub use theme_picker::*;
+pub use toast::measure_inline_notice;
 pub use tree::*;
 pub use value_focus::*;
 pub use viewport_status::*;
