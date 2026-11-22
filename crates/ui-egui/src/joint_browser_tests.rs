@@ -652,7 +652,7 @@ fn edit_joint_limits_opens_the_limits_and_has_its_own_id() {
 #[test]
 fn a_history_joint_renames_in_its_row_and_opens_the_browsers_menu() {
     let mut h = harness();
-    h.app.preferences.timeline_left = true;
+    h.app.run("view.history_layout", json!({"dock":"left"})).unwrap();
     h.frames(3);
     let hinge = id(&h, "Hinge");
 

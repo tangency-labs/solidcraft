@@ -1700,7 +1700,7 @@ mod tests {
     #[test]
     fn a_history_feature_renames_in_its_row_on_a_slow_second_click() {
         let mut harness = Harness::new();
-        harness.app.preferences.timeline_left = true;
+        harness.app.run("view.history_layout", json!({"dock":"left"})).unwrap();
         let feature =
             harness.app.run("solid.box", json!({"length": 10, "width": 10, "height": 10, "name": "Feature"})).unwrap()["feature"].as_u64().unwrap();
         harness.frames(4);
@@ -1733,7 +1733,7 @@ mod tests {
     #[test]
     fn a_history_folder_renames_in_its_row_on_a_slow_second_click() {
         let mut harness = Harness::new();
-        harness.app.preferences.timeline_left = true;
+        harness.app.run("view.history_layout", json!({"dock":"left"})).unwrap();
         harness.app.run("solid.box", json!({"length": 10, "width": 10, "height": 10, "name": "Feature"})).unwrap();
         let group = harness.app.run("timeline.group", json!({"name": "Folder", "features": ["Feature"]})).unwrap()["group"].as_u64().unwrap();
         harness.frames(4);
