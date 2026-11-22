@@ -20,6 +20,7 @@
 //! | [`SweepFailure::BrepWithoutInfiniteRegion`] | `SM_ERR_NULL_POINTER` |
 //! | [`SweepFailure::UntaggedSilhouetteEdge`] | `SM_ERR_NULL_POINTER` |
 //! | [`SweepFailure::FaceCopyByFullTurn`]  | `SM_ERR_NULL_POINTER`    |
+//! | [`SweepFailure::UntaggedFace`]        | `SM_ERR_NULL_POINTER`    |
 //! | [`SweepFailure::SweptEdgeCurveDropped`] | `SM_ERR_NULL_POINTER`  |
 //! | [`SweepFailure::Defect`]              | `SM_ERR` (or the site's, through `with_status`) |
 //! | every other cause                     | `SM_ERR` (or the site's, through `with_status`) |
@@ -49,6 +50,20 @@ pub enum SweepRecord {
     FromLowerSweep,
     /// Each has a swept image of one dimension higher (`GetToHigher`).
     HigherSweptImage,
+}
+
+/// The kind of a topology sweep entity ([`SweepFailure::SweepImageOfOtherKind`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum SweptKind {
+    /// A vertex.
+    Vertex,
+    /// An edge.
+    Edge,
+    /// A face.
+    Face,
+    /// A region.
+    Region,
 }
 
 /// The step on a profile curve that failed ([`SweepFailure::ProfileCurveStepFailed`]).
@@ -128,6 +143,23 @@ pub enum SweepFailure {
     /// A face to copy by a rotation of a full turn: its image is the face itself, so the
     /// rotation gives no surface to copy. [`ErrorKind::InvalidInput`].
     FaceCopyByFullTurn,
+    /// A face given to a tagging face copy (`TopologySweep::sweep_face_same` with tagging on)
+    /// has no tag: `tag_profile` was not run on it. [`ErrorKind::InvalidInput`].
+    UntaggedFace {
+        /// The face.
+        face: FaceId,
+    },
+    /// A same-dimension image recorded in the sweep's maps (which a caller can fill through
+    /// `TopologySweep::set_same` or the public maps) is of another kind than the entity it
+    /// is the image of. [`ErrorKind::InvalidInput`].
+    SweepImageOfOtherKind {
+        /// The recorded image.
+        image: EntityRef,
+        /// The kind it should have: its original's.
+        expected: SweptKind,
+        /// The kind it has.
+        found: SweptKind,
+    },
     /// A face the caller asked to sweep was already swept in this sweep (it is listed
     /// twice, or as the image of another). [`ErrorKind::InvalidInput`].
     FaceAlreadySwept,
@@ -258,11 +290,13 @@ impl SweepFailure {
             | Self::BrepWithoutInfiniteRegion { .. }
             | Self::UntaggedSilhouetteEdge { .. }
             | Self::FaceCopyByFullTurn
+            | Self::UntaggedFace { .. }
             | Self::SweptEdgeCurveDropped => SM_ERR_NULL_POINTER,
             Self::RailPastStationCap { .. }
             | Self::LoftSectionsTooLarge { .. }
             | Self::LoftMatchTooLarge { .. }
             | Self::FaceAlreadySwept
+            | Self::SweepImageOfOtherKind { .. }
             | Self::SweepTooShort { .. }
             | Self::RotationPastFullTurn { .. }
             | Self::PointOnRotationAxis { .. }
@@ -297,7 +331,9 @@ impl SweepFailure {
             | Self::FaceWithoutSurface { .. }
             | Self::BrepWithoutInfiniteRegion { .. }
             | Self::FaceCopyByFullTurn
+            | Self::UntaggedFace { .. }
             | Self::FaceAlreadySwept
+            | Self::SweepImageOfOtherKind { .. }
             | Self::SweepTooShort { .. }
             | Self::RotationPastFullTurn { .. }
             | Self::PointOnRotationAxis { .. }
@@ -351,6 +387,17 @@ impl core::fmt::Display for SweepRecord {
     }
 }
 
+impl core::fmt::Display for SweptKind {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.write_str(match self {
+            Self::Vertex => "vertex",
+            Self::Edge => "edge",
+            Self::Face => "face",
+            Self::Region => "region",
+        })
+    }
+}
+
 impl core::fmt::Display for ProfileCurveStep {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         f.write_str(match self {
@@ -381,7 +428,20 @@ impl core::fmt::Display for SweepFailure {
             Self::FaceCopyByFullTurn => f.write_str(
                 "a rotation of a full turn copies no face: the face's image is the face itself",
             ),
+            Self::UntaggedFace { face } => write!(
+                f,
+                "face {} has no tag to copy: tag the sweep's targets before a tagging sweep",
+                face.index()
+            ),
             Self::FaceAlreadySwept => f.write_str("the face was already swept"),
+            Self::SweepImageOfOtherKind {
+                image,
+                expected,
+                found,
+            } => write!(
+                f,
+                "the recorded same-dimension image {image} is a {found}, not a {expected}"
+            ),
             Self::SweepTooShort { moved, least } => write!(
                 f,
                 "the sweep moves an entity {moved:e}, less than the {least:e} its tolerance needs"
@@ -576,7 +636,23 @@ mod tests {
                 ErrorKind::InvalidInput,
             ),
             (
+                SweepFailure::UntaggedFace {
+                    face: FaceId::from_index(2),
+                },
+                SM_ERR_NULL_POINTER,
+                ErrorKind::InvalidInput,
+            ),
+            (
                 SweepFailure::FaceAlreadySwept,
+                SM_ERR,
+                ErrorKind::InvalidInput,
+            ),
+            (
+                SweepFailure::SweepImageOfOtherKind {
+                    image: EntityRef::Edge(edge),
+                    expected: SweptKind::Vertex,
+                    found: SweptKind::Edge,
+                },
                 SM_ERR,
                 ErrorKind::InvalidInput,
             ),

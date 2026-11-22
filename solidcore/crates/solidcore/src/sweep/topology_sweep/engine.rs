@@ -33,8 +33,8 @@ use super::access::{
 use super::geometry::SweepGeometry;
 use super::{SweepEntity as E, TopologySweep, OP};
 use crate::curve::curve::Curve;
-use crate::error::sweep::SweepFailure;
-use crate::error::{ignore_status, Result, SolidError, SM_ERR_NULL_POINTER};
+use crate::error::sweep::{SweepFailure, SweptKind};
+use crate::error::{ignore_status, EntityRef, Result, SolidError, SM_ERR_NULL_POINTER};
 use crate::geom::attribute::{tag_ids, TagData};
 use crate::geom::tol::ZONE_TOL_3D;
 use crate::math::Point3;
@@ -89,8 +89,6 @@ const VERTEX_LOOP_USE: &str = "a vertex loop of a B-rep the kernel keeps holds i
 const NEW_VERTEX_LOOPS: &str = "the new face was built with a vertex loop for each vertex loop of the original face, after its edge loops";
 /// Why the silhouette edges' mates are present.
 const SILHOUETTE: &str = "move_back_faces is called with a non-empty edge list, and copy_faces records a mate for every edge of the faces it copies, the silhouette edges among them";
-/// Why a swept image is of its entity's kind.
-const IMAGE_KIND: &str = "the sweep records each entity's same-dimension image as an entity of that kind, built by the sweep itself";
 fn v(v: VertexRef) -> E {
     E::Vertex(v.0, v.1)
 }
@@ -100,18 +98,37 @@ fn e(e: EdgeRef) -> E {
 fn f(f: FaceRef) -> E {
     E::Face(f.0, f.1)
 }
+/// [`SweepFailure::SweepImageOfOtherKind`]: a recorded same-dimension `image` that is not
+/// of its original's `expected` kind. The maps are public and `set_same` does not check
+/// kinds, so a caller can record one.
+fn image_of_other_kind(image: E, expected: SweptKind) -> SolidError {
+    let (image, found) = match image {
+        E::Vertex(_, i) => (EntityRef::Vertex(i), SweptKind::Vertex),
+        E::Edge(_, i) => (EntityRef::Edge(i), SweptKind::Edge),
+        E::Face(_, i) => (EntityRef::Face(i), SweptKind::Face),
+        E::Region(_, i) => (EntityRef::Region(i), SweptKind::Region),
+    };
+    SolidError::sweep(
+        OP,
+        SweepFailure::SweepImageOfOtherKind {
+            image,
+            expected,
+            found,
+        },
+    )
+}
 fn mapped_vertex(value: Option<E>) -> Result<Option<VertexRef>> {
     match value {
         None => Ok(None),
         Some(E::Vertex(b, i)) => Ok(Some((b, i))),
-        _ => Err(SolidError::sweep_defect(OP, IMAGE_KIND)),
+        Some(other) => Err(image_of_other_kind(other, SweptKind::Vertex)),
     }
 }
 fn mapped_edge(value: Option<E>) -> Result<Option<EdgeRef>> {
     match value {
         None => Ok(None),
         Some(E::Edge(b, i)) => Ok(Some((b, i))),
-        _ => Err(SolidError::sweep_defect(OP, IMAGE_KIND)),
+        Some(other) => Err(image_of_other_kind(other, SweptKind::Edge)),
     }
 }
 fn endpoints(a: &impl SweepAccess, edge: EdgeRef) -> Result<(VertexRef, VertexRef)> {
@@ -195,30 +212,21 @@ impl SweepTargets {
             if let E::Face(b, i) = image {
                 Ok((b, i))
             } else {
-                Err(SolidError::sweep_defect(
-                    OP,
-                    "the sweep records each entity's higher- and same-dimension images as entities of the kinds it built",
-                ))
+                Err(image_of_other_kind(image, SweptKind::Face))
             }
         };
         let edge = |image| {
             if let E::Edge(b, i) = image {
                 Ok((b, i))
             } else {
-                Err(SolidError::sweep_defect(
-                    OP,
-                    "the sweep records each entity's higher- and same-dimension images as entities of the kinds it built",
-                ))
+                Err(image_of_other_kind(image, SweptKind::Edge))
             }
         };
         let vertex = |image| {
             if let E::Vertex(b, i) = image {
                 Ok((b, i))
             } else {
-                Err(SolidError::sweep_defect(
-                    OP,
-                    "the sweep records each entity's higher- and same-dimension images as entities of the kinds it built",
-                ))
+                Err(image_of_other_kind(image, SweptKind::Vertex))
             }
         };
         update(&mut self.faces_higher, sweep, f, face)?;
@@ -740,10 +748,11 @@ impl TopologySweep {
         self.map_vertex_loops(a, original, &built)?;
         self.set_same(Some(f(original)), Some(f(built.face)));
         if self.do_tagging {
-            let mut tag = linked(
-                a.tag(f(original))?,
-                "tag_profile tags every face the sweep selects before it sweeps them",
-            )?;
+            // do_sweep's tag_profile tags every face it selects first; a direct caller of
+            // this pub fn with tagging on may give an untagged face
+            let mut tag = a.tag(f(original))?.ok_or_else(|| {
+                SolidError::sweep(OP, SweepFailure::UntaggedFace { face: original.1 })
+            })?;
             tag.primary_ordinal = tag.primary_ordinal.wrapping_sub(tag_ids::SWEEP_STEP_DELTA);
             a.add_tag(f(built.face), tag)?;
         }
@@ -1404,6 +1413,40 @@ mod tests {
     use crate::sweep::topology_sweep::access::{SweepMergeId, SweepScene};
     use crate::sweep::trans_sweep_geometry::TranslationalSweepGeometry;
     use crate::topology::{Brep, BrepId, EdgeId, FaceId, Region, RegionId, ShellId};
+
+    /// A caller can record, through the public `set_same`, a same-dimension image of
+    /// another kind than its original; updating the targets refuses it as the caller's
+    /// input (`SweepImageOfOtherKind`, status `SM_ERR`), not as a kernel defect.
+    #[test]
+    fn a_recorded_image_of_another_kind_is_refused_as_input() {
+        use crate::error::sweep::{SweepFailure, SweptKind};
+        use crate::error::{ErrorKind, SM_ERR};
+        use crate::topology::VertexId;
+        let b = BrepId::from_index(0);
+        let v0 = VertexId::from_index(0);
+        let e0 = EdgeId::from_index(0);
+        let mut sweep = TopologySweep::default();
+        sweep.set_same(Some(E::Vertex(b, v0)), Some(E::Edge(b, e0)));
+        let mut targets = SweepTargets {
+            vertices_same: Some(vec![Some((b, v0))]),
+            ..SweepTargets::default()
+        };
+        let err = targets.update(&sweep).unwrap_err();
+        assert_eq!(err.kind(), ErrorKind::InvalidInput, "{err}");
+        assert_eq!(err.upstream_status(), Some(SM_ERR));
+        assert_eq!(
+            err.sweep_failure(),
+            Some(&SweepFailure::SweepImageOfOtherKind {
+                image: EntityRef::Edge(e0),
+                expected: SweptKind::Vertex,
+                found: SweptKind::Edge,
+            })
+        );
+        // the same record read by a sweep routine's image lookup
+        let err = mapped_vertex(sweep.get_to_same(Some(E::Vertex(b, v0)))).unwrap_err();
+        assert_eq!(err.kind(), ErrorKind::InvalidInput, "{err}");
+        assert_eq!(err.upstream_status(), Some(SM_ERR));
+    }
 
     #[derive(Default)]
     struct Access {
