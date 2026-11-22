@@ -504,14 +504,14 @@
       }
     },
     "threads": {
-      "cases": 31,
+      "cases": 32,
       "chain": {
         "4": 1,
-        "7": 23
+        "7": 24
       },
-      "expressible": 24,
+      "expressible": 25,
       "not_expressible": 7,
-      "operation_expressible": 24,
+      "operation_expressible": 25,
       "reasons": {
         "refused or failed in SolidCraft, not in a kernel operation": 7
       },

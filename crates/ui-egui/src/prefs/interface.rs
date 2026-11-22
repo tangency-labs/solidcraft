@@ -422,6 +422,8 @@ pub(super) fn layout(app: &mut SolveApp, ui: &mut egui::Ui) {
                 &mut app.preferences.show_design_view_switcher,
                 "show_design_view_switcher",
             );
+            let response = setting::workspace_follows_view(app, ui);
+            crate::scenario::publish_target("prefs:workspace_follows_view", response.rect);
             layout_check(
                 ui,
                 app.tr("prefs.clear_view_tabs"),
@@ -435,13 +437,6 @@ pub(super) fn layout(app: &mut SolveApp, ui: &mut egui::Ui) {
                 app.tr("prefs.design_sub_tab_sheets_note"),
                 &mut app.preferences.design_sub_tab_sheets,
                 "design_sub_tab_sheets",
-            );
-            layout_check(
-                ui,
-                app.tr("prefs.design_sub_tab_sketches"),
-                app.tr("prefs.design_sub_tab_sketches_note"),
-                &mut app.preferences.design_sub_tab_sketches,
-                "design_sub_tab_sketches",
             );
             layout_check(
                 ui,
