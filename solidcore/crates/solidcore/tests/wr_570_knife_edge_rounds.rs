@@ -206,6 +206,7 @@ fn wr_570_a_lamina_edge_is_not_a_cusp() {
 fn wr_570_a_closed_face_seam_is_not_a_cusp() {
     let mut k = Kernel::default();
     let mut b = create_cylinder(&mut k, Point3::new(0.0, 0.0, 0.0), 10.0, 20.0).unwrap();
+    assert!(is_manifold_solid(&b).unwrap(), "the cylinder is a solid");
     let eus: Vec<EdgeuseId> = b.edgeuses().iter().map(|(id, _)| id).collect();
     let mut seams = 0;
     for eu in eus {
