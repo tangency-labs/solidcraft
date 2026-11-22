@@ -10979,13 +10979,14 @@ fn replay(
         // An Offset Face repeats at the copied faces of the body they lie on.
         if let FeatureKind::OffsetFace { faces, distance, body } = &src.kind {
             let d = val(vals, distance, Kind::Length)?;
-            if d.abs() < 1e-9 {
-                return Err(DocError::Invalid("the offset distance must not be zero".into()));
-            }
             let picked = crate::plain(faces);
             for m in mats {
                 let moved: Vec<Vec3> = picked.iter().map(|p| crate::apply_point(m, *p)).collect();
                 let i = body_at(st, body, &moved)?;
+                // A distance of 0 leaves the faces where they are (#20496).
+                if d.abs() < 1e-9 {
+                    continue;
+                }
                 let Some(mb) = st.bodies.get(i).cloned() else { return Err(DocError::Invalid("body".into())) };
                 let nb = mb.traced().then(kernel::offset_faces(&mb.body, &moved, d)?);
                 if let Some(slot) = st.bodies.get_mut(i) {
@@ -13257,10 +13258,12 @@ fn eval_feature_kind(
         }
         FeatureKind::OffsetFace { faces, distance, body } => {
             let d = val(vals, distance, Kind::Length)?;
-            if d.abs() < 1e-9 {
-                return Err(DocError::Invalid("the offset distance must not be zero".into()));
-            }
             let i = body_at(st, body, &crate::plain(faces))?;
+            // A distance of 0 leaves the faces where they are, as Offset Plane does; a parameter
+            // can pass through 0 without the design failing to rebuild (#20496).
+            if d.abs() < 1e-9 {
+                return Ok(());
+            }
             let Some(mb) = st.bodies.get(i).cloned() else { return Err(DocError::Invalid("body".into())) };
             let nb = Traced::step(kernel::offset_faces(&mb.body, &crate::plain(faces), d)?, &[&mb.traced()]);
             if let Some(slot) = st.bodies.get_mut(i) {
