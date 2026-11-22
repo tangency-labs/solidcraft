@@ -2412,8 +2412,8 @@ fn verify_face_copies(
 
 /// `CopyFaces(crFaces, pDest)` with its defaults (the merge) between two B-reps' own
 /// attribute stores (`p2::CopyNotifyState`), `SM_ERR` where a face is not copied (the
-/// fork's `SER`).
-fn copy_faces_carrying(
+/// fork's `SER`). Each returned pair identifies the source of a new destination face.
+pub(crate) fn copy_faces_carrying(
     k: &mut Kernel,
     src: &mut Brep,
     faces: &[FaceId],

@@ -16,6 +16,7 @@
 //! | [`DefeatureFailure::LoopNotPlanar`]          | `SM_ERR` (WR-656)        |
 //! | [`DefeatureFailure::NotEnclosed`]            | `SM_ERR` (WR-656)        |
 //! | [`DefeatureFailure::PatchEnclosesFace`]      | no upstream counterpart  |
+//! | [`DefeatureFailure::PatchFaceNotCopied`]     | no upstream counterpart  |
 //! | [`DefeatureFailure::PatchIntersectsFace`]    | no upstream counterpart  |
 //! | [`DefeatureFailure::TangentNeighbours`]      | `SM_ERR` (WR-656)        |
 //!
@@ -68,9 +69,14 @@ pub enum DefeatureFailure {
         /// How far the faces were extended, when the patch was built in this call.
         extended_by: Option<f64>,
     },
-    /// The patch would bury another shell's face within the rebuilt material.
+    /// A retained shell would cease to separate material from void after the patch.
     PatchEnclosesFace {
         /// A retained face that would cease to separate material from void.
+        face: crate::topology::FaceId,
+    },
+    /// A face of the replacement patch is missing all or part of its copy in the target B-rep.
+    PatchFaceNotCopied {
+        /// The face of the patch that could not be transferred.
         face: crate::topology::FaceId,
     },
     /// A face outside the feature and its supports obstructs the proposed patch.
@@ -100,6 +106,7 @@ impl DefeatureFailure {
             | Self::LoopNotPlanar
             | Self::NotEnclosed { .. }
             | Self::PatchEnclosesFace { .. }
+            | Self::PatchFaceNotCopied { .. }
             | Self::PatchIntersectsFace { .. }
             | Self::TangentNeighbours { .. } => SM_ERR,
         }
@@ -115,6 +122,7 @@ impl DefeatureFailure {
             | Self::LoopNotPlanar
             | Self::NotEnclosed { .. }
             | Self::PatchEnclosesFace { .. }
+            | Self::PatchFaceNotCopied { .. }
             | Self::PatchIntersectsFace { .. }
             | Self::TangentNeighbours { .. } => ErrorKind::Unsupported,
         }
@@ -150,6 +158,9 @@ impl core::fmt::Display for DefeatureFailure {
             ),
             Self::NotEnclosed { extended_by: None } => {
                 f.write_str("the faces along the loop, extended, do not enclose it")
+            }
+            Self::PatchFaceNotCopied { face } => {
+                write!(f, "the repair could not copy patch face {}", face.index())
             }
             Self::ExtensionWithinTolerance {
                 extended_by,
