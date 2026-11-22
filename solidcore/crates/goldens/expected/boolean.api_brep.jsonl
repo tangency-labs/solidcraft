@@ -1085,7 +1085,7 @@
 {"case":"torus_guard_horn_box_intersection","deferred":null,"error":null,"ints":{"record":{"blocks":[[70,559]],"n":18},"status":[0]},"topology":null,"values":{"measures":[0.0,33.85730136634499,9.0,2.453822826591404,2.4538228265914053,2.4538228265914848,2.453822826591485,8.999999999999996,10.24565844712486,10.245658447124935,10.806300274853784,10.806300274853788]}}
 {"case":"torus_guard_huge_scale_box_difference","deferred":null,"error":null,"ints":{"record":{"blocks":[[72,553]],"n":18},"status":[0]},"topology":null,"values":{"measures":[0.0,1.7025167815728364e+18,8.0,995770855530.365,995770855530.3749,999999999999.9999,1000000000000.0,1668521304856.8179,1668521304856.8198,1998248966849.2056,2000000000000.0]}}
 {"case":"torus_guard_huge_scale_box_intersection","deferred":null,"error":null,"ints":{"record":{"blocks":[[46,379]],"n":18},"status":[0]},"topology":null,"values":{"measures":[0.0,2.9748321842716346e+17,6.0,875516575.3973191,875516575.3973856,331478695143.182,331478695143.18414,995770855530.365,995770855530.3749]}}
-{"case":"torus_guard_major_2x_eff_zero","deferred":null,"error":null,"ints":{"record":[],"status":[1007]},"topology":null,"values":{}}
+{"case":"torus_guard_major_2x_eff_zero","deferred":null,"error":null,"ints":{"record":[2],"status":[1007]},"topology":null,"values":{}}
 {"case":"torus_guard_major_eff_zero","deferred":null,"error":null,"ints":{"record":[2],"status":[1001]},"topology":null,"values":{}}
 {"case":"torus_guard_major_negative","deferred":null,"error":null,"ints":{"record":[2],"status":[1001]},"topology":null,"values":{}}
 {"case":"torus_guard_minor_2x_eff_zero","deferred":null,"error":null,"ints":{"record":[2],"status":[1001]},"topology":null,"values":{}}
