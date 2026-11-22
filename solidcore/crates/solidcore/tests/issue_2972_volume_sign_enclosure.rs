@@ -301,7 +301,8 @@ fn face_areas_are_enclosed_one_face_at_a_time() {
 ///   at most `rel` of their upper end wide, holding their closed forms `20 pi` and `16 pi`
 ///   (the sphere's cells take their partials about the cell, so 1e-4 converges in budget);
 /// - the sphere at 1e-12 spends the cell budget first (its poles converge slowly): it ends
-///   at `Budget` within one check of [`CELL_BUDGET`] cells, wider than asked, and its band
+///   at `Budget` within one check of [`CELL_BUDGET`] cells past its starting cells (a sphere's
+///   are few), wider than asked, and its band
 ///   still holds `16 pi`;
 /// - a `rel` that is not positive (or NaN), and no faces, are refused.
 #[test]
@@ -347,7 +348,12 @@ fn a_face_area_is_enclosed_relative_to_itself_in_one_refinement() {
     assert!(holds(&e, 16.0 * PI), "sphere 1e-4: {e:?}");
     let e = enclose_face_area_relative(&k, &mut s, &all, 1e-12).unwrap();
     assert_eq!(e.stop, EnclosureStop::Budget, "sphere 1e-12: {e:?}");
-    assert!(e.counts.cells <= CELL_BUDGET + 1, "sphere 1e-12: {e:?}");
+    // the budget is the cells cut past the starting ones, a sphere's few (7 measured): the run
+    // ends a few cells over CELL_BUDGET
+    assert!(
+        (CELL_BUDGET..=CELL_BUDGET + 1 + 16).contains(&e.counts.cells),
+        "sphere 1e-12: {e:?}"
+    );
     assert!(e.width() > 1e-12 * e.hi, "sphere 1e-12: {e:?}");
     assert!(e.hi.is_finite(), "sphere 1e-12: {e:?}");
     assert!(holds(&e, 16.0 * PI), "sphere 1e-12: {e:?}");
