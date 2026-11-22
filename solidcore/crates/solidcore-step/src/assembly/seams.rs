@@ -824,7 +824,7 @@ impl Assembly<'_> {
             }
         }
         let i = index(self.edges.len())?;
-        self.edges.push(EdgeB { curve, interval, vertices, tolerance: self.tol, form: None });
+        self.edges.push(EdgeB { curve, interval, vertices, tolerance: self.tol, pcurve_tolerance: self.pcurve_tolerance(), form: None });
         Ok(i)
     }
 
@@ -2152,6 +2152,7 @@ impl Assembly<'_> {
         let c = CurveEval::new(&edge.curve).map_err(|m| m.to_string())?;
         let p = c.point(t).ok_or("split point")?;
         let (curve, [lo, hi], [a, b], tolerance) = (edge.curve.clone(), edge.interval, edge.vertices, edge.tolerance);
+        let pcurve_tolerance = edge.pcurve_tolerance;
         if !(t > lo && t < hi) {
             return Err("a split outside its edge".into());
         }
@@ -2162,7 +2163,7 @@ impl Assembly<'_> {
             x.interval = [lo, t];
             x.vertices = [a, v];
         }
-        self.edges.push(EdgeB { curve, interval: [t, hi], vertices: [v, b], tolerance, form: None });
+        self.edges.push(EdgeB { curve, interval: [t, hi], vertices: [v, b], tolerance, pcurve_tolerance, form: None });
         for f in &mut self.faces {
             for l in &mut f.loops {
                 let Bound::Edges(es) = l else { continue };

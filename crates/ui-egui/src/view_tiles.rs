@@ -1280,12 +1280,13 @@ mod tests {
         let owner = h.app.session.sketching_view.unwrap();
         assert_ne!(owner, render);
         assert_eq!(h.app.docs.views.active().id, render);
-        h.app.ui.tab = "SKETCH".into();
         assert!(shown(&h.app));
         h.frame();
         assert_eq!(h.app.docs.views.active().id, render);
         assert_eq!(h.app.docs.views.get(render).unwrap().kind, ViewKind::Render);
-        assert_eq!(h.app.ui.tab, "SKETCH", "painting scopes the Render context without changing the ribbon");
+        // #19655: the focused view picks the workspace and ribbon (workspace_follows_view, owner-approved),
+        // so the Render view keeps its own ribbon and the Model card's sketch does not bring the SKETCH tab.
+        assert!(crate::workspace::render_tab(&h.app.ui.tab), "the focused Render view owns the ribbon: {}", h.app.ui.tab);
         let card = h.app.viewport.cards.iter().find(|(id, _)| *id == owner).unwrap().1;
         let render_frame = crate::scenario::rect_of("render:product:frame").expect("the ground painted the Render canvas");
         assert!(!card.contains(render_frame.center()), "the Render canvas remains the ground, not the Model card");

@@ -101,6 +101,35 @@ impl Session {
         }
     }
 
+    fn edit_receiver_is_focused(&self) -> bool {
+        if let Some(entry) = &self.active_sheet_sketch {
+            !self.model_focus && self.open_drawing == Some(entry.drawing)
+        } else {
+            (self.model_focus || self.open_drawing.is_none()) && self.sketching_view.is_none_or(|view| view == self.view_context.focused())
+        }
+    }
+
+    /// Lifecycle commands address the one active edit while preserving the host's receiver.
+    pub(crate) fn with_sketch_exit_receiver<T>(&mut self, command: &str, run: impl FnOnce(&mut Self) -> Result<T>) -> Result<T> {
+        if !matches!(command, "sketch.finish" | "sketch.cancel") || (self.active_sketch.is_none() && self.active_sheet_sketch.is_none()) {
+            return run(self);
+        }
+        let previous = (self.open_drawing, self.model_focus);
+        let selection = (!self.edit_receiver_is_focused()).then(|| self.selection.clone());
+        if let Some(entry) = &self.active_sheet_sketch {
+            self.open_drawing = Some(entry.drawing);
+            self.model_focus = false;
+        } else {
+            self.model_focus = true;
+        }
+        let result = run(self);
+        (self.open_drawing, self.model_focus) = previous;
+        if let Some(selection) = selection {
+            self.selection = selection;
+        }
+        result
+    }
+
     /// Semantic metadata for a command, including the selected receiver of Delete.
     pub fn command_starts_edit(&self, spec: &CommandSpec, params: &Value) -> bool {
         if self.canvas_continues_model_sketch(spec.id, params) {
@@ -242,6 +271,16 @@ impl Session {
     }
 
     fn finish_open_edits(&mut self) -> Result<Option<SketchFinishEvent>> {
+        let selection = ((self.active_sketch.is_some() || self.active_sheet_sketch.is_some()) && !self.edit_receiver_is_focused())
+            .then(|| self.selection.clone());
+        let result = self.finish_edit_receivers();
+        if let Some(selection) = selection {
+            self.selection = selection;
+        }
+        result
+    }
+
+    fn finish_edit_receivers(&mut self) -> Result<Option<SketchFinishEvent>> {
         let mut first = None;
         if let Some(sketch) = self.active_sketch {
             let mut event = SketchFinishEvent {
@@ -288,6 +327,10 @@ impl Session {
     }
 
     pub(crate) fn run_nested_edit(&mut self, spec: &CommandSpec, params: &Value, continuation: bool) -> Result<Value> {
+        self.with_sketch_exit_receiver(spec.id, |session| session.run_nested_edit_in_receiver(spec, params, continuation))
+    }
+
+    fn run_nested_edit_in_receiver(&mut self, spec: &CommandSpec, params: &Value, continuation: bool) -> Result<Value> {
         self.check_command(spec, params)?;
         let depth = self.edit_entry_depth;
         if continuation {
