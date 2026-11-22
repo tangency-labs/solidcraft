@@ -1,0 +1,12 @@
+[package]
+name = "solidcraft-nest"
+description = "Deterministic, bounded cut-to-length and guillotine stock packing"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+solidcraft-geom = { workspace = true }

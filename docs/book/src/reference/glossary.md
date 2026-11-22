@@ -211,6 +211,18 @@ A sketch entity that is not a point: a line, an arc, a circle, an ellipse, a spl
 - **Elsewhere:** curve, sketch curve, segment.
 - **For translators:** not an edge of a body.
 
+### cut list
+
+A list of physical pieces to cut from stock, grouped by size and material, with the quantity of each.
+
+- **In SolidCraft:** `cutlist.parts` lists loose bodies and placed component bodies, excluding purchased and reference components.
+
+### cutting plan
+
+An assignment of each physical cut part to purchasable stock, with its position and cutting order.
+
+- **In SolidCraft:** `cutlist.layout` derives the plan from `cutlist.parts`; plans are not stored in designs.
+
 ### design
 
 The model that is open in SolidCraft: its timeline, components, bodies, sketches, parameters and
@@ -259,6 +271,12 @@ rectangular or round and need not follow the profile.
 - **Elsewhere:** end cap, end plate, cap plate.
 - **For translators:** a closing plate on a tube's end, not a cap of a sketch or surface.
 
+### end trim, edge trim
+
+An allowance removed from each end of length stock (end trim) or from each sheet edge (edge trim).
+
+- **In SolidCraft:** `cutlist.layout.trim` applies twice along each usable stock dimension; trim is waste, not a reusable offcut.
+
 ### equation curve
 
 A sketch curve whose shape comes from formulas over a range of one variable.
@@ -305,6 +323,12 @@ Radius of the surface neighbourhood used to estimate illumination from nearby ph
 
 - **In SolidCraft:** Caustics `radius_mm`; smaller values preserve sharper details and require more photons to reduce noise.
 
+### grain direction
+
+The direction of the fibres in wood relative to a part's stock dimensions.
+
+- **In SolidCraft:** the cut list names the stock side the grain runs along (length, width or thickness, or oblique) and leaves it empty until a body has a grain direction; `cutlist.layout` keeps the grain along the stock's length.
+
 ### group
 
 A named container that someone makes, in the browser or in the timeline, to keep items together.
@@ -319,6 +343,12 @@ features are computed.
 - **Don't use:** feature folder, folder (for a group).
 - **Elsewhere:** folder, group.
 - **For translators:** not a rigid group (a joint) and not a fixed browser *folder*.
+
+### guillotine cut
+
+A cut that runs from one edge of the current stock rectangle to its opposite edge.
+
+- **In SolidCraft:** each numbered kerf band in `cutlist.layout` splits a remaining rectangle before the next cut.
 
 ### item number
 
@@ -335,6 +365,12 @@ a new row takes the next number at its level. A row listed under another reads a
 - **Don't use:** position, balloon number, find number; index.
 - **Elsewhere:** item number, item, find number, balloon number.
 - **For translators:** a label, not a quantity or a count; not a part number.
+
+### kerf
+
+The width of material removed by a saw cut.
+
+- **In SolidCraft:** `cutlist.layout.kerf` is a positive length in millimetres.
 
 ### leader
 
@@ -388,6 +424,12 @@ overlap are all multi-trims; `frame.multi_trim` sets how one corner of a frame i
 - **Elsewhere:** member trim, coping, end fitting.
 - **For translators:** not a sketch's trim of a curve and not a surface trim.
 
+### nesting
+
+Assigning parts to stock with their allowed orientations to reduce the stock used.
+
+- **In SolidCraft:** `cutlist.layout` packs lengths and rectangles with bounded, deterministic work.
+
 ### note
 
 Text on a sheet or a view of a drawing, in its fields and its words, that may point at the model
@@ -413,6 +455,12 @@ component changes every copy. The browser names occurrences with a number, such 
 - **Don't use:** instance, placement.
 - **Elsewhere:** occurrence, instance, component instance.
 - **For translators:** not a *pattern instance*.
+
+### offcut
+
+Usable stock left after the parts, trim and kerf are removed.
+
+- **In SolidCraft:** `cutlist.layout` reports offcut positions and sizes for reuse as stock choices.
 
 ### opaque path lighting
 
@@ -614,6 +662,12 @@ flange slope.
 - **Elsewhere:** standard section, section size, section designation.
 - **For translators:** a steel section's size by name, not a dimension and not a standard part.
 
+### stock size
+
+The length, width and thickness of a blank that encloses a part along its own directions.
+
+- **In SolidCraft:** `cutlist.parts` reports millimetres, with the longest side as length and an exact or approximate box indicator.
+
 ### thin-film interference
 
 Interference between coherent optical waves reflected at the interfaces of a thin layer.
@@ -689,6 +743,18 @@ The space left between frame members where they meet, for a weld to fill.
 - **Elsewhere:** weld gap, root gap, root opening.
 - **For translators:** not a sheet metal hem gap and not a clearance.
 
+### workshop mark
+
+A name for one physical piece in a cutting plan and on its label.
+
+- **In SolidCraft:** letters name the cut-list row and the number names its piece, for example `A-1`.
+
+### yield
+
+The finished part length or area divided by the gross stock length or area.
+
+- **In SolidCraft:** `cutlist.layout` reports yield per stock piece; trim and kerf count in the gross stock.
+
 ## Words with more than one meaning
 
 An English word that means two things can be translated correctly for only one of them while both
@@ -755,3 +821,13 @@ its display name. Replies and scripts use the design-file key (`timeline.inspect
 - **British or American spelling** in the docs. The labels are settled: `en.json` is American
   English, and English (UK) (`en-GB.json`, #2501) holds the British spelling. The docs still use
   both (colour and color, centre and center); ids and keys use American spelling.
+
+## Wood grain
+
+**Wood grain**: The direction in which a piece of timber’s fibres run.
+
+Manufacturing grain belongs to the body and follows its movements and copies; it is separate from texture mapping. A frame member defaults to its member axis. Other bodies have no manufacturing grain until it is set.
+
+**Stock length along grain**: The distance between the two parallel planes perpendicular to the wood grain that enclose the body.
+
+The length comes from exact body geometry.

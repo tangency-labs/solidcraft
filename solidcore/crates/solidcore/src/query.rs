@@ -26,6 +26,7 @@ pub mod point_identity;
 pub mod poly;
 pub mod poly_properties;
 pub mod seam_bound;
+pub mod stock;
 pub mod tangent_edge;
 pub mod tess;
 pub mod vertex_meet;
