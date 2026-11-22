@@ -267,6 +267,10 @@ pub enum IntersectFailure {
         /// The points the approach put before the snapped point.
         points: usize,
     },
+    /// The caller asked to reverse a curve with no points. The kernel's own callers reverse
+    /// only a curve they put points on (`trace_back` skips an empty one, WR-80), so only a
+    /// caller reaches it (upstream's `SM_ERR_NULL_POINTER`). [`ErrorKind::InvalidInput`].
+    NoCurveToReverse,
     /// The basic intersector was asked for a law point's delta step, which only the
     /// advanced intersectors compute. [`ErrorKind::Unsupported`].
     DeltaStepUnsupported,
@@ -347,7 +351,8 @@ impl IntersectFailure {
             | Self::CurveNotBSpline
             | Self::SurfaceCacheNotBuilt
             | Self::NoSurfaceCaches
-            | Self::SurfaceNotOffset { .. } => SM_ERR_NULL_POINTER,
+            | Self::SurfaceNotOffset { .. }
+            | Self::NoCurveToReverse => SM_ERR_NULL_POINTER,
             Self::OutsideDomain(_) | Self::SeamJumpNotSnapped => SM_ERR_OUTSIDE_OF_DOMAIN,
             Self::Inconsistent(_) => SM_ERR_ASSERT_FAILURE,
         }
@@ -383,7 +388,8 @@ impl IntersectFailure {
             | Self::EdgeNotSplit
             | Self::NoSurfaceCaches
             | Self::PointCountNotTaken { .. }
-            | Self::PointNotOnBothSurfaces => ErrorKind::InvalidInput,
+            | Self::PointNotOnBothSurfaces
+            | Self::NoCurveToReverse => ErrorKind::InvalidInput,
             Self::UnsupportedObjectKind
             | Self::CurveNotBSpline
             | Self::SingularPointInside
@@ -541,6 +547,7 @@ impl core::fmt::Display for IntersectFailure {
                 f,
                 "the boundary curve dropped onto {found} uv curves, neither one nor two"
             ),
+            Self::NoCurveToReverse => f.write_str("the curve to reverse has no points"),
             Self::DeltaStepUnsupported => {
                 f.write_str("the basic intersector does not compute a law point's delta step")
             }
@@ -903,6 +910,7 @@ pub(super) mod tests {
             (F::ApproachStepNotFound { tries: 9 }, SM_ERR, K::Failed),
             (F::ApproachHitBoundary, SM_ERR, K::Failed),
             (F::ApproachNotCertified { points: 16 }, SM_ERR, K::Failed),
+            (F::NoCurveToReverse, SM_ERR_NULL_POINTER, K::InvalidInput),
             (F::DeltaStepUnsupported, SM_ERR, K::Unsupported),
             (F::PointAtEye, SM_ERR, K::Degenerate),
             (F::TracerHasNoPointValues, SM_ERR, K::Unsupported),
