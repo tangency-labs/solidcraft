@@ -98,9 +98,13 @@ fn trims(face: &TrimFace<'_>, sampled: bool) -> Result<Vec<Vec<Curve2>>, String>
 /// The work SMLib may do making a face's trims, in the kernel's checks for a stop. A drop that
 /// succeeds takes a few checks a span of its edge's curve; the limit is far above that, and
 /// grows with the knots the edges' curves have.
+// Measured on GitHub's runners on the five spring-wire files of #20575 (one face of about 115 edge
+// knots, so 8000 + 100 per knot was ~19500 checks): faces that trim in a second used 8698, 15742,
+// 20116 and 44828 checks, so that limit refused two good faces. Ten times it leaves more than four
+// times the largest good count, and the face that never finishes is still refused in about 13 s.
 fn work_limit(face: &TrimFace<'_>) -> u64 {
-    const BASE: u64 = 8_000;
-    const PER_KNOT: u64 = 100;
+    const BASE: u64 = 80_000;
+    const PER_KNOT: u64 = 1_000;
     let knots = face.edges.iter().fold(0u64, |sum, e| {
         let count = match e.nurbs.unwrap_or(e.curve) {
             b::Curve::Spline { knots, .. } | b::Curve::RationalSpline { knots, .. } => knots.len(),
