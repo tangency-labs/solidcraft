@@ -3901,6 +3901,7 @@ impl Model {
                 solids: 0,
                 issues: Vec::new(),
                 single_root: true,
+                split_edges: 0,
                 checks: checks.clone(),
             });
             r.import_report = Some(std::sync::Arc::new(kernel::ImportReport { checks, ..report }));
