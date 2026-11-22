@@ -659,6 +659,12 @@ fn missing_set_up(op: &'static str, part: FilletSetUp) -> SolidError {
         .into_error()
 }
 
+/// The edge use `eu` of the target body has no edge (`NER` of `GetEdge()`):
+/// [`BlendFailure::EdgeUseWithoutEdge`] at the edge use, status `SM_ERR_NULL_POINTER`.
+fn edge_use_without_edge(op: &'static str, eu: EdgeuseId) -> SolidError {
+    SolidError::blend_at(op, BlendFailure::EdgeUseWithoutEdge, EntityRef::Edgeuse(eu))
+}
+
 /// [`missing_set_up`] where upstream returns `SM_ERR`: a set-up the routine is given that
 /// is not as its kind needs (a vertex without the geometries its kind joins, an edge
 /// outside its corner, ...).
@@ -2456,8 +2462,7 @@ impl FilletBrep {
         for ((slot, end), (fs, index)) in uv.iter_mut().zip(ends.iter_mut()).zip(pairs) {
             let offset_distance = solver_surface(fs, index, OP)?.offset_distance().abs();
             let eu = solver_edgeuse(fs, index, OP)?;
-            let e = eu1::edge(target, eu)?
-                .ok_or_else(|| missing_set_up(OP, FilletSetUp::EdgeUseEdge))?;
+            let e = eu1::edge(target, eu)?.ok_or_else(|| edge_use_without_edge(OP, eu))?;
             let ivl = edge::interval(target, e)?;
             let curve = edge::curve(target, e)?.ok_or_else(|| edge_without_curve(OP, e))?;
             let owner_zone_tol_3d = Some(edge::tolerance(target, e)?);
@@ -2725,8 +2730,8 @@ impl FilletBrep {
         // Set dGuessEdgeParameters to run from one edgeEnd to the other
         let side_eu1 =
             side_eu1.ok_or_else(|| missing_set_up(OP, FilletSetUp::PointClassEdgeUse))?;
-        let side_edge = eu1::edge(target, side_eu1)?
-            .ok_or_else(|| missing_set_up(OP, FilletSetUp::EdgeUseEdge))?;
+        let side_edge =
+            eu1::edge(target, side_eu1)?.ok_or_else(|| edge_use_without_edge(OP, side_eu1))?;
         let ivl = edge::interval(target, side_edge)?;
 
         // side edgeuse was carefully selected based on its orientation
@@ -3106,8 +3111,8 @@ impl FilletBrep {
             let pnt = with_out_of_bounds_enabled_in_place(base, || base.evaluate_point(k, uv))?;
 
             // project it onto the side edge's curve
-            let side_e = eu1::edge(target, side_eu1)?
-                .ok_or_else(|| missing_set_up(OP, FilletSetUp::EdgeUseEdge))?;
+            let side_e =
+                eu1::edge(target, side_eu1)?.ok_or_else(|| edge_use_without_edge(OP, side_eu1))?;
             let curve =
                 edge::curve(target, side_e)?.ok_or_else(|| edge_without_curve(OP, side_e))?;
             let (_found, solution) = curve.local_point_solve::<()>(
@@ -3358,8 +3363,7 @@ impl FilletBrep {
         let s1 = self.geom_solver_id(fillet_geom1, OP)?;
         let fs1 = solvers.solver(s1)?;
         let eu = solver_edgeuse(fs1, 0, OP)?;
-        let e =
-            eu1::edge(target, eu)?.ok_or_else(|| missing_set_up(OP, FilletSetUp::EdgeUseEdge))?;
+        let e = eu1::edge(target, eu)?.ok_or_else(|| edge_use_without_edge(OP, eu))?;
         let ivl = edge::interval(target, e)?;
         let owner_zone_tol_3d = Some(edge::tolerance(target, e)?);
         let mut vert_at_edge_start = true;
@@ -3641,8 +3645,7 @@ impl FilletBrep {
             let sid = self.geom_solver_id(g, OP)?;
             let fs = solvers.solver(sid)?;
             let eu = solver_edgeuse(fs, 0, OP)?;
-            let e = eu1::edge(target, eu)?
-                .ok_or_else(|| missing_set_up(OP, FilletSetUp::EdgeUseEdge))?;
+            let e = eu1::edge(target, eu)?.ok_or_else(|| edge_use_without_edge(OP, eu))?;
             let curve = edge::curve(target, e)?
                 .ok_or_else(|| edge_without_curve(OP, e))?
                 .clone();
@@ -3944,8 +3947,7 @@ impl FilletBrep {
         let si = self.geom_solver_id(fillet_geom, OP)?;
         let fs = solvers.solver(si)?;
         let eu = solver_edgeuse(fs, 0, OP)?;
-        let e =
-            eu1::edge(target, eu)?.ok_or_else(|| missing_set_up(OP, FilletSetUp::EdgeUseEdge))?;
+        let e = eu1::edge(target, eu)?.ok_or_else(|| edge_use_without_edge(OP, eu))?;
         // each edge's own (the fork's 61547af, GetSetBackDistAlong; the corner's one setback
         // elsewhere)
         let set_back_dist = corners.corner(corner)?.set_back_dist_along(target, e)?;
