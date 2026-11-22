@@ -95,6 +95,7 @@ use crate::blend::fillet_geom::p3::{NoCorners, SplitCorners};
 use crate::blend::fillet_intersector::{FilletIntersector, StepSolve as StepSolveFlags};
 use crate::blend::fillet_solver::p1::NoExtensionCorners;
 use crate::curve::curve::{Curve, CurveKind};
+use crate::error::blend::BlendFailure;
 use crate::error::{Result, SolidError};
 use crate::geom::extent1d::Extent1d;
 use crate::geom::extent2d::Extent2d;
@@ -105,6 +106,7 @@ use crate::math::{Point3, Vec3};
 use crate::nurbs::b_spline_curve::BSplineCurve;
 use crate::nurbs::knots::Side;
 use crate::surface::surface::p4::NoObject;
+use crate::surface::surface::p5::DropPointOptions;
 use crate::surface::surface::p7::drop_vectors_at;
 use crate::surface::surface::{Surface, SurfaceKind};
 use crate::topology::edgeuse::p1 as eu;
@@ -637,6 +639,20 @@ fn add_fillet_geom(ops: &mut dyn FilletSolverOps, id: FilletGeomId) {
 /// `base0` (`pBaseSrf1->DropVectors(uv, TRUE, TRUE, ..)`) from the binormal's UV
 /// point, evaluated on `GetSurface(0)`. Returns the guess point and the edge-use
 /// tangent (`sTangent`).
+///
+/// Not the fork's: where `base0`'s parameterisation is singular at the binormal's UV point
+/// (`Surface::is_singularity`: a sphere's pole), the step has no first-order image in the
+/// parameters (at a pole the image of a step off it is 0: the guess stays on the pole, and
+/// the section solve seeded there, where the longitude is undetermined, finds no section).
+/// There the step is taken to the surface in 3D, as the point of `base0` nearest the
+/// binormal's point stepped along it, solved from its UV point (as
+/// `FilletBrep::calc_join_section` finds a join's feet, #18826). Elsewhere the step is the
+/// fork's, as it is where the predicate cannot evaluate.
+///
+/// # Errors
+///
+/// [`BlendFailure::Defect`] where the stepped point at a singular point does not drop onto
+/// `base0`; those of the binormal, the drops and the evaluation.
 fn binormal_guess_point(
     ops: &mut dyn FilletSolverOps,
     cx: &mut Cx<'_>,
@@ -654,11 +670,43 @@ fn binormal_guess_point(
     if half {
         bin_vec *= 0.5;
     }
-    let uv_dir = drop_vectors_at(cx.k, base0, b.uv, Side::Left, Side::Left, &[bin_vec])?
-        .first()
-        .copied()
-        .ok_or_else(|| invalid("short drop result"))?;
-    let uv = b.uv + uv_dir;
+    // A predicate that cannot evaluate keeps the fork's step: that is the guess this point had
+    // before the 3D step existed, so a blend that built still builds (propagating the error
+    // would refuse it). The 3D step is taken only where the predicate finds a singularity.
+    let singular = match base0.is_singularity(cx.k, b.uv, crate::math::EFF_ZERO, false) {
+        Ok(sing) => sing.singular,
+        Err(e) if e.is_unported_or_cancelled() => return Err(e),
+        Err(_) => false,
+    };
+    let uv = if singular {
+        let domain = base0.natural_uv_domain_with_nurb(cx.k)?;
+        let dropped = base0.drop_point::<NoObject>(
+            cx.k,
+            b.point + bin_vec,
+            &domain,
+            &DropPointOptions {
+                guess_uv: Some(b.uv),
+                ..DropPointOptions::default()
+            },
+        )?;
+        if !dropped.success {
+            return Err(SolidError::blend(
+                OP,
+                BlendFailure::Defect {
+                    why: "the drop of the binormal's step from a singular point onto the \
+                          face's surface found no nearest point, though the surface's \
+                          natural domain is closed and bounded, so one exists",
+                },
+            ));
+        }
+        dropped.result_uv
+    } else {
+        let uv_dir = drop_vectors_at(cx.k, base0, b.uv, Side::Left, Side::Left, &[bin_vec])?
+            .first()
+            .copied()
+            .ok_or_else(|| invalid("short drop result"))?;
+        b.uv + uv_dir
+    };
     let pnt = offset_evaluate_point(cx.k, ops, 0, uv)?;
     Ok((pnt, b.tangent))
 }
