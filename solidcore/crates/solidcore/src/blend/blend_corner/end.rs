@@ -22,6 +22,7 @@
 //! | [`end_awaits_rollover`], [`end_can_await_rollover`], [`end_past_tangent_edge`], `end_rolls_over`, `ends_in_tangent_edge` (private) | none (#2406: the End's rail rolls over a tangent edge first) |
 //! | [`side_edgeuse_across_rolled_edge`] | none (solidcore-native tangent rollover: a rail rolled over a tangent edge the whole length ends on the next side edge) |
 //! | `rail_rolls_on_past_side_edge` (private) | none (#15767: a rail past a side edge's end that rolls on over a smooth edge there) |
+//! | `end_section_rolls_over` (private) | none (#15767: the roll-over lies wholly before the end face) |
 //! | [`place_rolled_rail_end`]         | none (#2406: a rail end not reached on the End's plane before the rollover) |
 //! | `side_edge_in_cap` (private)      | none (#2406: a cap edge along a side edge in the cap's plane) |
 //! | [`EndEdges`], `end_face_runs_on_past_side_edge`, `rail_face` (private) | none: an end face running on tangentially past the side edge is the global merge's, not refused |
@@ -738,6 +739,93 @@ fn rail_rolls_on_past_side_edge(
     };
     // the continuation lies on the end face: the face rolled over is F's neighbour
     Ok(eu1::face(target, beyond)? != Some(rail_face))
+}
+
+/// Not the fork's (#15767): whether the cross-section of the round at its other rail's end
+/// (`g_end`, the rail end on the fillet's other face G at the end face) has already rolled
+/// over the tangent edge the rail on F (`rail_face`) runs on past: the ball of the round's
+/// radius touching G at that point (its centre offset along G's normal as the solver offsets
+/// G) touches F's surface off the face F. Only then does the whole roll-over lie before the
+/// end face, so the rolled rail ends on the edge beyond (`rail_rolls_on_past_side_edge`) and
+/// the fillet's pieces each keep four sides. Where that ball still touches F inside the
+/// face, the section through the roll-over point square to the edge meets G past the end
+/// face, the seam between the round's pieces crosses the end face and the piece rolled over
+/// is three-sided, which the corner's pieces do not represent: the End is then refused as
+/// one whose rail runs past its side edge.
+///
+/// # Errors
+/// `SM_ERR_NULL_POINTER` without solver surface; those of the drops and the classification.
+#[allow(clippy::too_many_arguments)]
+fn end_section_rolls_over(
+    k: &Kernel,
+    target: &mut Brep,
+    pseudo: &FilletBrep,
+    solvers: &dyn SweptSolvers,
+    fil_eu: EdgeuseId,
+    other_face: FaceId,
+    rail_face: FaceId,
+    g_end: VertexId,
+) -> Result<bool> {
+    if !pseudo.fillet_vertex(g_end)?.is_processed() {
+        return Ok(true);
+    }
+    let fs = solvers.solver_of_edgeuse(fil_eu)?;
+    let mut g_index = 2;
+    let mut f_index = 2;
+    for ii in 0..2 {
+        let face = face_of(target, fs.edgeuse(ii)?.ok_or_else(nul)?)?;
+        if face == other_face {
+            g_index = ii;
+        } else if face == rail_face {
+            f_index = ii;
+        }
+    }
+    if g_index > 1 || f_index > 1 {
+        return Ok(true);
+    }
+    let offset_g = &fs.surface(g_index)?.ok_or_else(nul)?.surface;
+    let g = offset_g.base_surface();
+    let sign = if offset_g.offset_distance() < 0.0 {
+        -1.0
+    } else {
+        1.0
+    };
+    let p = pseudo.vertex_point(g_end)?;
+    let on_g = g.drop_point::<NoObject>(
+        k,
+        p,
+        &g.natural_uv_domain_with_nurb(k)?,
+        &DropPointOptions::default(),
+    )?;
+    if !on_g.success {
+        return Ok(true);
+    }
+    let normal = g.evaluate_normal(k, on_g.result_uv, Side::Left, Side::Left)?;
+    let centre = p + normal * (sign * offset_g.offset_distance().abs());
+    let f = fs.surface(f_index)?.ok_or_else(nul)?.surface.base_surface();
+    let on_f = f.drop_point::<NoObject>(
+        k,
+        centre,
+        &f.natural_uv_domain_with_nurb(k)?,
+        &DropPointOptions::default(),
+    )?;
+    if !on_f.success {
+        return Ok(true);
+    }
+    let foot = f.evaluate_point(k, on_f.result_uv)?;
+    let zone = zone_tol3d(k, target.face(rail_face)?.tolerance);
+    let mut class = PointClassification::new(zone);
+    point_3d_classify(
+        k,
+        target,
+        rail_face,
+        foot,
+        zone,
+        true,
+        &mut class,
+        Point3dClassifyOptions::default(),
+    )?;
+    Ok(class.point_class() != PointClassType::Face)
 }
 
 /// Not the fork's (SolidCraft's `smooth_edges_and_unfinished_tangent_chains_are_refused_saying_why`,
@@ -2659,6 +2747,20 @@ pub fn calc_end_edge_geom(
             corner,
             side_eu,
             rail_face(fil_faces, side_faces),
+        )?
+        && end_section_rolls_over(
+            k,
+            target,
+            pseudo,
+            solvers,
+            fil_eu,
+            other_face,
+            rail_face(fil_faces, side_faces),
+            if miss_fv == start_fv {
+                end_fv
+            } else {
+                start_fv
+            },
         )?
     {
         // Not the fork's (#15767): the rail runs past P because the rail's face runs on
