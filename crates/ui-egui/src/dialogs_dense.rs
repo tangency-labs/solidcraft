@@ -1714,7 +1714,12 @@ fn additional_rows(app: &mut SolveApp, d: &mut Dialog, ui: &mut egui::Ui) -> boo
                 d.extra.insert("up_to".into(), Value::Null);
             }
         }
-        Kind::Sheet(k) => enter |= crate::dialogs_sheet::rows(app, ui, k, &mut d.inputs),
+        Kind::Sheet(_) => {
+            crate::dialogs_sheet::discover_flange_corners(app, d);
+            if let Kind::Sheet(k) = &mut d.kind {
+                enter |= crate::dialogs_sheet::rows(app, ui, k, &mut d.inputs, &d.extra);
+            }
+        }
         Kind::Plastic(k) => enter |= crate::dialogs_plastic::rows(app, ui, k, &d.inputs),
         Kind::Frame(_) => enter |= crate::dialogs_frame::rows(app, ui, d),
         Kind::EndCap(k) => enter |= crate::dialogs_end_cap::rows(app, ui, k, &d.inputs),

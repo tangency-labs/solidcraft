@@ -3509,7 +3509,19 @@ fn redefine(s: &mut Session, p: &Value) -> Result<Value> {
     if new.kind.names_feature(old.id, &old.name) {
         return Err(bad(cmd, format!("{} can't be built on itself: pick another plane or face", old.name)));
     }
-    if let (FeatureKind::SheetFlange { corners, .. }, Some(saved)) = (&mut new.kind, flange_corners) {
+    if let (FeatureKind::SheetFlange { corners, .. }, Some(mut saved)) = (&mut new.kind, flange_corners) {
+        if s.doc.units.trim() != "mm" {
+            for corner in &mut saved {
+                if corner.kind == solidcraft_doc::CornerJoinKind::PartialOverlap
+                    && let Some(overlap) = &mut corner.overlap
+                {
+                    *overlap = s.doc.with_design_unit(overlap, solidcraft_doc::expr::Kind::Length).into();
+                }
+                if let Some(gap) = &mut corner.gap {
+                    *gap = s.doc.with_design_unit(gap, solidcraft_doc::expr::Kind::Length).into();
+                }
+            }
+        }
         *corners = saved;
     }
     // Optional inputs can move other inputs' positions (e.g. Distance 2 goes before Taper).

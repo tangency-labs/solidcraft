@@ -104,7 +104,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .contract(&CORNER_JOIN_CONTRACT)
         .output(output_schema_for::<FeatureResult>)
         .params(
-            "covering, covered: source sheet rim names <panel>:rim.<rim>:top|bottom; kind?: butt (default), partial_overlap or full_overlap; \
+            "covering, covered: central edge names <face>|<face>, e.g. F7:top(F1:side:l1)|F7:bend.inner(F1:side:l1); kind?: butt (default), partial_overlap or full_overlap; \
              overlap: length expression for partial_overlap only; gap?: length expression (default: sheet rule); body?: sheet body; name?",
         ),
     CommandSpec::new("sheet.perforate", "Perforate", crate::checked!("sheet.perforate", perforate)).begins_edit()
@@ -719,7 +719,7 @@ fn corner_join(s: &mut Session, p: &Value) -> Result<Value> {
 
 fn read_corner_join(s: &Session, p: &Value, cmd: &str) -> Result<solidcraft_doc::CornerJoinParams> {
     let source = |key| {
-        let text = str_(p, key).ok_or_else(|| bad(cmd, format!("{key}: a sheet rim name is required")))?;
+        let text = str_(p, key).ok_or_else(|| bad(cmd, format!("{key}: a central sheet edge name is required")))?;
         SheetEdgeName::parse(text).map_err(|error| bad(cmd, format!("{key}: {error}")))
     };
     let covering = source("covering")?;

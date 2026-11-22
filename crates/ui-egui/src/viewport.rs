@@ -6650,9 +6650,13 @@ fn seen_edge_lines(sc: &mut GpuScene, e: &[Vec3], cols: EdgeColours, w: f32, nor
 /// over a face seen at a grazing angle (`GpuScene::lifted_line`). One pass over the mesh's
 /// vertices: the tessellation shares the edge's points with the faces on either side.
 fn edge_normals(m: &solidcraft_engine::geom::Mesh, e: &[Vec3]) -> Vec<[[f32; 3]; 2]> {
+    edge_normal_lookup(m, [e])(e)
+}
+
+fn edge_normal_lookup<'a>(m: &solidcraft_engine::geom::Mesh, edges: impl IntoIterator<Item = &'a [Vec3]>) -> impl Fn(&[Vec3]) -> Vec<[[f32; 3]; 2]> {
     let tol = m.bounds().diagonal().max(1.0) * 1e-7;
-    let key = |p: Vec3| ((p.x / tol).round() as i64, (p.y / tol).round() as i64, (p.z / tol).round() as i64);
-    let mut at: std::collections::HashMap<(i64, i64, i64), Vec<Vec3>> = e.iter().map(|p| (key(*p), Vec::new())).collect();
+    let key = move |p: Vec3| ((p.x / tol).round() as i64, (p.y / tol).round() as i64, (p.z / tol).round() as i64);
+    let mut at: std::collections::HashMap<(i64, i64, i64), Vec<Vec3>> = edges.into_iter().flatten().map(|p| (key(*p), Vec::new())).collect();
     for (p, n) in m.positions.iter().zip(&m.normals) {
         if let Some(list) = at.get_mut(&key(*p))
             && list.len() < 8
@@ -6660,17 +6664,19 @@ fn edge_normals(m: &solidcraft_engine::geom::Mesh, e: &[Vec3]) -> Vec<[[f32; 3];
             list.push(*n);
         }
     }
-    e.windows(2)
-        .map(|w| {
-            let mut found: Vec<Vec3> = Vec::new();
-            for p in w {
-                found.extend(at.get(&key(*p)).into_iter().flatten().copied());
-            }
-            let Some(first) = found.first().copied() else { return [[0.0; 3]; 2] };
-            let other = found.iter().copied().min_by(|a, b| a.dot(first).total_cmp(&b.dot(first))).unwrap_or(first);
-            [first.to_f32(), other.to_f32()]
-        })
-        .collect()
+    move |edge| {
+        edge.windows(2)
+            .map(|w| {
+                let mut found: Vec<Vec3> = Vec::new();
+                for p in w {
+                    found.extend(at.get(&key(*p)).into_iter().flatten().copied());
+                }
+                let Some(first) = found.first().copied() else { return [[0.0; 3]; 2] };
+                let other = found.iter().copied().min_by(|a, b| a.dot(first).total_cmp(&b.dot(first))).unwrap_or(first);
+                [first.to_f32(), other.to_f32()]
+            })
+            .collect()
+    }
 }
 
 /// The outline of a highlighted face where the model hides it (dimmed).
@@ -7764,12 +7770,21 @@ fn build_highlight_with_projection(app: &SolveApp, projection: impl FnOnce() -> 
         mesh_tris(&mut feedback, &corner.mesh, [r.saturating_add(lift), g.saturating_add(lift), b.saturating_add(lift), 255], true, |face| {
             faces.contains(&(face as usize))
         });
-        for (index, edge) in corner.mesh.edges.iter().enumerate() {
-            if corner.mesh.edge_pickable(index)
-                && corner.mesh.edge_faces.get(index).is_some_and(|adjacent| adjacent.iter().any(|face| faces.contains(&(*face as usize))))
-            {
-                edge_lines(&mut feedback, edge, hover_edge, 1.5, &edge_normals(&corner.mesh, edge));
-            }
+        let edges = || {
+            corner
+                .mesh
+                .edges
+                .iter()
+                .enumerate()
+                .filter(|(index, _)| {
+                    corner.mesh.edge_pickable(*index)
+                        && corner.mesh.edge_faces.get(*index).is_some_and(|adjacent| adjacent.iter().any(|face| faces.contains(&(*face as usize))))
+                })
+                .map(|(_, edge)| edge.as_slice())
+        };
+        let normals = edge_normal_lookup(&corner.mesh, edges());
+        for edge in edges() {
+            edge_lines(&mut feedback, edge, hover_edge, 1.5, &normals(edge));
         }
     }
     // Print faces (#8429): tinted towards the colour section views give cut faces, and outlined,

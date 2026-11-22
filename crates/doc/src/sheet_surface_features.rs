@@ -10,11 +10,13 @@
 //!
 //! Not built yet: flanges on a curved edge or a roll's edge.
 
-use solidcore_record::{Loop2, Region2, Seg2, Vec2, Vec3};
+use solidcore_record::{Loop2, Plane, Region2, Seg2, Vec2, Vec3};
 use solidcraft_develop::Cut;
 use solidcraft_develop::prelude::*;
 use solidcraft_develop::set_back_past;
-use solidcraft_develop::{Anchor, Bend, Datum, Joint, JointKind, Lap, Panel, Relief, Rigid3, Rip, Sheet, Surface, Tail, ZoneEnds, develop};
+use solidcraft_develop::{
+    Anchor, Bend, Datum, Development, Joint, JointKind, Lap, Panel, Relief, Rigid3, Rip, Sheet, Surface, Tail, ZoneEnds, develop,
+};
 use solidcraft_geom::prelude::*;
 use solidcraft_kernel::BoolOp;
 
@@ -25,6 +27,22 @@ use crate::{DocError, FoldSide, Result, SurfaceSheet};
 
 fn err<T>(msg: impl Into<String>) -> Result<T> {
     Err(DocError::Invalid(msg.into()))
+}
+
+fn panel_overlap(first: &[solidcraft_kernel::Body], second: &[solidcraft_kernel::Body]) -> Result<f64> {
+    let mut volume = 0.0;
+    for left in first {
+        for right in second {
+            if let Some(common) = solidcraft_kernel::boolean(left, right, BoolOp::Intersect)? {
+                volume += common
+                    .volume_at(1e-8)
+                    .filter(|value| value.is_finite())
+                    .ok_or_else(|| DocError::Invalid("could not measure the corner's overlap with another panel".into()))?
+                    .abs();
+            }
+        }
+    }
+    Ok(volume)
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -495,17 +513,10 @@ impl SurfaceSheet {
             let (Some(&start), Some(&end)) = (edge.first(), edge.last()) else {
                 return err("the corner has no edge");
             };
-            let distance = |point: Vec2| anchor.dir.cross(point - anchor.origin).abs();
-            let (from, end) = if distance(start) <= distance(end) { (start, end) } else { (end, start) };
-            let direction = (end - from).normalized().ok_or_else(|| DocError::Invalid("the corner has no length".into()))?;
-            let along = if (from - anchor.origin).dot(anchor.dir) < bend.length / 2.0 { anchor.dir } else { -anchor.dir };
-            let into = (along - direction * along.dot(direction))
-                .normalized()
-                .ok_or_else(|| DocError::Invalid("the corner side runs along its bend".into()))?;
-            let rise_axis = if along.perp().dot(direction) > 0.0 { along.perp() } else { -along.perp() };
             let target = next.panels.get_mut(panel).ok_or_else(|| DocError::Invalid("the corner panel is no longer present".into()))?;
-            target.region = solidcraft_develop::retarget_corner_tail(&target.region, from, end, into, rise_axis, old_cut, new_cut)
-                .map_err(|reason| DocError::Invalid(reason.into()))?;
+            target.region =
+                solidcraft_develop::retarget_corner_tail(&target.region, [start, end], anchor.origin, anchor.dir, bend.length, old_cut, new_cut)
+                    .map_err(|reason| DocError::Invalid(reason.into()))?;
         }
         let Some(Joint { kind: JointKind::Rip(rip), .. }) = next.joints.get_mut(joint) else {
             return err("the corner joint is no longer present");
@@ -513,9 +524,65 @@ impl SurfaceSheet {
         rip.lap = lap;
         let mut candidate = self.clone();
         candidate.sheet = next;
-        candidate.develop().map_err(|e| DocError::Invalid(e.to_string()))?;
+        let dev = candidate.develop().map_err(|e| DocError::Invalid(e.to_string()))?;
+        self.check_corner_neighbours(&candidate, &dev, [a.panel, b.panel])?;
         *self = candidate;
         Ok(())
+    }
+
+    fn check_corner_neighbours(&self, candidate: &Self, dev: &Development, joined: [usize; 2]) -> Result<()> {
+        if self.unfolded
+            || !self.sheet.panels.iter().enumerate().any(|(index, panel)| !joined.contains(&index) && matches!(panel.surface, Surface::Plane))
+        {
+            return Ok(());
+        }
+        let after = candidate.corner_panel_solids(dev)?;
+        let mut before = None;
+        for selected in joined {
+            let Some(changed) = after.get(selected) else { continue };
+            for (index, neighbour) in after.iter().enumerate().filter(|(index, _)| !joined.contains(index)) {
+                let volume = panel_overlap(changed, neighbour)?;
+                if volume <= 1e-9 {
+                    continue;
+                }
+                if before.is_none() {
+                    let dev = self.develop().map_err(|e| DocError::Invalid(e.to_string()))?;
+                    before = Some(self.corner_panel_solids(&dev)?);
+                }
+                let Some(previous) = &before else { continue };
+                let old = panel_overlap(
+                    previous.get(selected).map(Vec::as_slice).unwrap_or_default(),
+                    previous.get(index).map(Vec::as_slice).unwrap_or_default(),
+                )?;
+                if volume - old > 1e-9_f64.max(volume * 1e-9) {
+                    let name = self.sheet.panels.get(index).map_or("another panel", |panel| panel.name.as_str());
+                    return err(format!("the corner join interferes with panel {name}"));
+                }
+            }
+        }
+        Ok(())
+    }
+
+    fn corner_panel_solids(&self, dev: &Development) -> Result<Vec<Vec<solidcraft_kernel::Body>>> {
+        use crate::sheet_surface::Piece;
+
+        let folded = crate::sheet_surface_convert::fold_onto(&self.sheet, dev, &self.places)?;
+        let mut solids = vec![Vec::new(); self.sheet.panels.len()];
+        for (piece, region) in crate::sheet_surface::pieces(dev, &mut crate::sheet::FlatWork::new())? {
+            let (Piece::Panel(index) | Piece::Tab(_, index)) = piece else { continue };
+            if !matches!(self.sheet.panels.get(index).map(|panel| &panel.surface), Some(Surface::Plane)) {
+                continue;
+            }
+            let (Some(slot), Some(at), Some(place)) =
+                (solids.get_mut(index), dev.placements.get(index).copied().flatten(), folded.places.get(index).copied().flatten())
+            else {
+                continue;
+            };
+            let frame = crate::sheet_surface_cuts::lift(&place, &at.inverse());
+            let plane = Plane::new(frame.shift, frame.x, frame.y).ok_or_else(|| DocError::Invalid("a corner panel has no plane".into()))?;
+            slot.push(solidcraft_kernel::extrude_planar_regions(&plane, &[region], 0.0, self.sheet.thickness)?);
+        }
+        Ok(solids)
     }
 
     /// The free edge of the sheet nearest the point `p` (the body's coordinates), on a face of a
@@ -4548,7 +4615,7 @@ mod tests {
             "body": "corner",
             "rule": "rule",
             "sheet": sheet,
-            "places": [null, null, null],
+            "places": [Rigid3::IDENTITY, null, null],
             "flat": Rigid3::IDENTITY,
             "thickness": 2.0,
             "k_factor": 0.5,
@@ -4822,6 +4889,26 @@ mod tests {
         let covering = sheet.add_flange_on(first, first_height, turn, 2.0, "inside", HeightFrom::Outer, true).unwrap();
         let covered = sheet.add_flange_on(second, second_height, turn, 2.0, "inside", HeightFrom::Outer, true).unwrap();
         (sheet, [covering, covered])
+    }
+
+    #[test]
+    fn corner_join_refuses_new_overlap_with_a_third_panel_atomically() {
+        let (mut sheet, [covering, covered]) = unequal_corner(40.0, 20.0, std::f64::consts::FRAC_PI_2);
+        let index = sheet.sheet.joints[covering].b.panel;
+        let dev = sheet.develop().unwrap();
+        let place = crate::sheet_surface_convert::fold_onto(&sheet.sheet, &dev, &sheet.places).unwrap().places[index];
+        let mut obstacle = sheet.sheet.panels[index].clone();
+        obstacle.name = "third panel".into();
+        obstacle.region = Region2 {
+            outer: Loop2::polygon(&[Vec2::new(119.0, -35.0), Vec2::new(119.5, -35.0), Vec2::new(119.5, -34.0), Vec2::new(119.0, -34.0)]),
+            holes: Vec::new(),
+        };
+        sheet.sheet.panels.push(obstacle);
+        sheet.places.push(place);
+        let before = sheet.clone();
+        let why = sheet.set_corner_join([covering, covered], covering, CornerJoinKind::FullOverlap, None, None).unwrap_err();
+        assert!(why.to_string().contains("interferes with panel third panel"), "{why}");
+        assert_eq!(sheet, before);
     }
 
     #[test]

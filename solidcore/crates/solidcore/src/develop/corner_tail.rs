@@ -25,7 +25,11 @@ pub fn set_back_past(
         .enumerate()
         .find(|(_, g)| matches!(**g, Seg2::Line { a, b } if (same(a, from) && same(b, top)) || (same(a, top) && same(b, from))))?;
     let up = matches!(*side, Seg2::Line { a, .. } if same(a, from));
-    let past_at = if up { (k + 1) % n } else { (k + n - 1) % n };
+    let past_at = if up {
+        k.checked_add(1).filter(|next| *next < n).unwrap_or(0)
+    } else {
+        previous(k, n).unwrap_or(0)
+    };
     let Seg2::Line { a: pa, b: pb } = *segs.get(past_at)? else {
         return None;
     };
@@ -73,11 +77,50 @@ pub fn set_back_past(
     })
 }
 
+fn previous(index: usize, count: usize) -> Option<usize> {
+    index.checked_sub(1).or_else(|| count.checked_sub(1))
+}
+
 /// Restores a previous corner setback and applies the new setback to the same side.
 ///
 /// # Errors
 /// The contour cannot be edited unambiguously or with straight edges.
 pub fn retarget_corner_tail(
+    region: &Region2,
+    edge: [Vec2; 2],
+    anchor_origin: Vec2,
+    anchor_direction: Vec2,
+    bend_length: f64,
+    old_cut: f64,
+    new_cut: f64,
+) -> Result<Region2, &'static str> {
+    let [start, end] = edge;
+    let distance = |point: Vec2| anchor_direction.cross(point - anchor_origin).abs();
+    let (from, end) = if distance(start) <= distance(end) {
+        (start, end)
+    } else {
+        (end, start)
+    };
+    let direction = (end - from)
+        .normalized()
+        .ok_or("the corner has no length")?;
+    let along = if (from - anchor_origin).dot(anchor_direction) < bend_length / 2.0 {
+        anchor_direction
+    } else {
+        -anchor_direction
+    };
+    let into = (along - direction * along.dot(direction))
+        .normalized()
+        .ok_or("the corner side runs along its bend")?;
+    let rise_axis = if along.perp().dot(direction) > 0.0 {
+        along.perp()
+    } else {
+        -along.perp()
+    };
+    replace_setback(region, from, end, into, rise_axis, old_cut, new_cut)
+}
+
+fn replace_setback(
     region: &Region2,
     from: Vec2,
     end: Vec2,
@@ -110,7 +153,7 @@ pub fn retarget_corner_tail(
                 return Err("the corner's previous side trim is ambiguous");
             }
             let count = region.outer.segs.len();
-            let start = (step + count - 1) % count;
+            let start = previous(step, count).ok_or("the corner has no contour")?;
             let mut segments: Vec<_> = region
                 .outer
                 .segs
@@ -213,12 +256,14 @@ pub fn retarget_corner_tail(
             .then_some(rise)
     });
     let Some(rise) = sides.next() else {
-        if restored
-            .outer
-            .segs
-            .iter()
-            .any(|segment| (segment.start() - end).dot(rise_axis) > tolerance)
-        {
+        if restored.outer.segs.iter().any(|segment| {
+            let start = segment.start();
+            let finish = segment.end();
+            [end, old_end].into_iter().any(|tip| {
+                (same(start, tip) && (finish - tip).dot(rise_axis) > tolerance)
+                    || (same(finish, tip) && (start - tip).dot(rise_axis) > tolerance)
+            })
+        }) {
             return Err("the corner's taller side was modified; its trim cannot be changed");
         }
         return Ok(restored);
@@ -231,4 +276,56 @@ pub fn retarget_corner_tail(
     }
     set_back_past(&restored, from, direction, rise, height, into, new_cut)
         .ok_or("the edge past the corner's taller side is not straight")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn region(points: &[[f64; 2]]) -> Region2 {
+        let segs = points
+            .iter()
+            .zip(points.iter().cycle().skip(1))
+            .map(|(&[ax, ay], &[bx, by])| Seg2::Line {
+                a: Vec2::new(ax, ay),
+                b: Vec2::new(bx, by),
+            })
+            .collect();
+        Region2 {
+            outer: Loop2 { segs },
+            holes: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn corner_tail_ignores_unrelated_high_material_but_refuses_a_modified_continuation() {
+        let from = Vec2::new(0.0, 0.0);
+        let end = Vec2::new(0.0, 2.0);
+        let run = |region: &Region2| {
+            retarget_corner_tail(
+                region,
+                [from, end],
+                from,
+                Vec2::new(1.0, 0.0),
+                10.0,
+                0.5,
+                1.0,
+            )
+        };
+        for (points, refused) in [
+            (
+                [[0.0, 0.0], [0.0, 2.0], [3.0, 2.0], [3.0, 4.0], [6.0, 0.0]],
+                false,
+            ),
+            (
+                [[0.0, 0.0], [0.0, 2.0], [0.5, 2.25], [0.5, 4.0], [6.0, 0.0]],
+                true,
+            ),
+        ] {
+            let mut panel = region(&points);
+            assert_eq!(run(&panel).is_err(), refused);
+            panel.outer = panel.outer.reversed();
+            assert_eq!(run(&panel).is_err(), refused);
+        }
+    }
 }

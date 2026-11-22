@@ -1444,7 +1444,7 @@ fn a_lapped_rip_out_of_range_is_refused() {
 /// A plate whose top is a half round of radius 27.5 about (0, 23), ripped from a roll along
 /// that arc and cut back 3, its edge given at 33 points and, where `exact`, as the arc itself:
 /// the plate's flat outline, each edge with what it is.
-fn half_round_cut(exact: bool) -> Vec<(Seg2, EdgeFrom)> {
+fn half_round_sheet(exact: bool, lap: Lap) -> Sheet {
     let (r, c) = (27.5, Vec2::new(0.0, 23.0));
     let arc = Seg2::Arc {
         center: c,
@@ -1480,7 +1480,7 @@ fn half_round_cut(exact: bool) -> Vec<(Seg2, EdgeFrom)> {
         .map(|k| Vec2::new(0.0, PI * k as f64 / (n - 1) as f64))
         .collect();
     let curves = (if exact { vec![arc] } else { Vec::new() }, Vec::new());
-    let sheet = Sheet {
+    Sheet {
         thickness: T,
         k_factor: K,
         panels: vec![
@@ -1506,12 +1506,16 @@ fn half_round_cut(exact: bool) -> Vec<(Seg2, EdgeFrom)> {
                 edges: (along, round),
                 curves,
                 turns: vec![-FRAC_PI_2; n],
-                lap: Lap::Cut(3.0, 0.0),
+                lap,
             }),
         }],
         corners: Vec::new(),
         cuts: Vec::new(),
-    };
+    }
+}
+
+fn half_round_cut(exact: bool) -> Vec<(Seg2, EdgeFrom)> {
+    let sheet = half_round_sheet(exact, Lap::Cut(3.0, 0.0));
     let dev = develop(&sheet, &[(0, Rigid2::IDENTITY)]).unwrap_or_default();
     assert!(dev.trims.is_empty(), "{:?}", dev.trims);
     let Some(Some(plate)) = dev.panels.first() else {
@@ -1519,6 +1523,31 @@ fn half_round_cut(exact: bool) -> Vec<(Seg2, EdgeFrom)> {
     };
     let from = plate.origins.first().cloned().unwrap_or_default();
     plate.region.outer.segs.iter().copied().zip(from).collect()
+}
+
+#[test]
+fn full_overlap_rejects_a_collapsed_exact_arc_and_mixed_turns() {
+    let lap = Lap::Overlap {
+        covering_a: false,
+        amount: None,
+        gap: 30.0,
+    };
+    let mut sheet = half_round_sheet(true, lap);
+    assert!(matches!(
+        develop(&sheet, &[(0, Rigid2::IDENTITY)]),
+        Err(Refusal::Joint { joint: 0, why: JointRefusal::OverlapArcRadius { radius } }) if radius < 0.0
+    ));
+    let JointKind::Rip(rip) = &mut sheet.joints[0].kind else {
+        panic!("expected rip")
+    };
+    rip.turns[1] = FRAC_PI_2;
+    assert_eq!(
+        develop(&sheet, &[(0, Rigid2::IDENTITY)]),
+        Err(Refusal::Joint {
+            joint: 0,
+            why: JointRefusal::OverlapTurn
+        })
+    );
 }
 
 /// A rip follows its edge wherever it runs: given only as points along the half round, the

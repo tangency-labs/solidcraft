@@ -11119,10 +11119,10 @@ mod refused_ok_tests {
                 .bend_face_indices(body, &source)
                 .into_iter()
                 .find_map(|index| {
-                    let face = body.body.record().faces.get(index)?;
-                    let surface = solidcraft_engine::geom::brep::eval::SurfaceEval::new(face.parameters()).ok()?;
-                    let point = surface.point(face.domain.map(|[lo, hi]| 0.5 * (lo + hi)))?;
-                    let distances = query.face_distances(&order, index, &[[point.x, point.y, point.z]]).unwrap();
+                    let centroid = query.face_centroid(&order, index, 1e-6).ok()?.centroid;
+                    let [x, y, z] = centroid;
+                    let point = Vec3::new(x, y, z);
+                    let distances = query.face_distances(&order, index, &[centroid]).unwrap();
                     let distance = distances.first().copied().flatten().expect("the trimmed face distance is answered");
                     (distance.is_finite() && (0.0..=1e-6).contains(&distance)).then_some((index, point))
                 })
@@ -11396,6 +11396,37 @@ mod refused_ok_tests {
             let preview = session.preview(&edit).unwrap();
             assert_eq!(crate::dialogs_sheet::flange_corner_sources(&preview.before, &preview.after, Some(feature)), sources);
         }
+    }
+
+    #[test]
+    fn flange_corner_discovery_ignores_preview_toggle_and_discards_unmatched_overrides() {
+        use crate::dialogs_sheet::{FlangeCorner, Sm, discover_flange_corners};
+
+        let mut session = Session::default();
+        for (command, params) in [
+            ("sketch.create", json!({"plane": "XY", "name": "Base"})),
+            ("sketch.rectangle.two_point", json!({"p0": [0, 0], "p1": [100, 60]})),
+            ("sketch.finish", json!({})),
+            ("sheet.flange", json!({"sketch": "Base"})),
+        ] {
+            session.execute(command, &params).unwrap();
+        }
+        let app = SolveApp::new(session, Default::default());
+        let body = app.session.model.state().surface_sheets[0].body.clone();
+        let mut dialog = Dialog::for_command(&app, "sheet.flange").unwrap();
+        dialog.preview_enabled = false;
+        dialog.inputs[0].items =
+            [Vec3::new(50.0, 0.0, 0.0), Vec3::new(100.0, 30.0, 0.0)].map(|point| Sel::Edge { body: body.clone(), index: 0, point }).to_vec();
+        discover_flange_corners(&app, &mut dialog);
+        let Kind::Sheet(Sm::Flange { corners, corner_pairs, .. }) = &mut dialog.kind else { panic!("expected flange") };
+        assert_eq!(corner_pairs.len(), 1);
+        corners.push(FlangeCorner { sources: corner_pairs[0].clone(), kind: 0, overlap: String::new(), gap: "MissingParameter".into() });
+        discover_flange_corners(&app, &mut dialog);
+        assert!(matches!(&dialog.kind, Kind::Sheet(Sm::Flange { corners, corner_pairs, .. }) if corners.len() == 1 && corner_pairs.len() == 1));
+        dialog.inputs[0].items.truncate(1);
+        discover_flange_corners(&app, &mut dialog);
+        assert!(matches!(&dialog.kind, Kind::Sheet(Sm::Flange { corners, corner_pairs, .. }) if corners.is_empty() && corner_pairs.is_empty()));
+        assert!(preview_commands(&app, &dialog).unwrap()[0].1.get("corners").is_none());
     }
 
     #[test]

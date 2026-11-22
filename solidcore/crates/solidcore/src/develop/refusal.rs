@@ -6,7 +6,7 @@
 //! Deviations: none (no upstream counterpart). No recursion.
 
 /// Why a sheet is not laid out ([`super::develop`]) or folded ([`super::fold`]).
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub enum Refusal {
     /// An anchor, a cut or the call names a panel the sheet does not have.
     NoPanel(usize),
@@ -52,7 +52,7 @@ pub enum PanelRefusal {
 }
 
 /// Why a joint is not laid out.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub enum JointRefusal {
     /// An anchor's direction has no length where the layout reads it.
     NoDirection,
@@ -81,6 +81,11 @@ pub enum JointRefusal {
     /// An overlap where the sheet runs straight on or turns a half turn: it has no corner for
     /// one panel to cover the other at.
     OverlapTurn,
+    /// A planar full overlap would collapse or invert a circular edge.
+    OverlapArcRadius {
+        /// The resulting nonpositive radius, in millimetres.
+        radius: f64,
+    },
     /// A rip's edge that leaves its panel's surface where it is cut back.
     RipOffSurface,
     /// A rip's edge that is not on its panel's outline.

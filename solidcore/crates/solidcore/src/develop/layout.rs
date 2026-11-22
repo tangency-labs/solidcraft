@@ -704,6 +704,9 @@ fn check_joint(sheet: &Sheet, j: usize, joint: &Joint) -> Result<(), Refusal> {
                         .turns
                         .iter()
                         .all(|turn| turn.abs() > UNIT_TOL && turn.abs() < PI - UNIT_TOL)
+                        || rip.turns.windows(2).any(|pair| {
+                            matches!(pair, [first, second] if first.is_sign_positive() != second.is_sign_positive())
+                        })
                     {
                         return Err(Refusal::Joint {
                             joint: j,
@@ -799,7 +802,23 @@ fn rip_bands(
             .first()
             .filter(|d0| depth.iter().all(|d| (*d - **d0).abs() <= RIP_TOL));
         let exact = match (surface, even) {
-            (Surface::Plane, Some(d)) => moved(curve, side * d),
+            (Surface::Plane, Some(d)) => {
+                let offset = side * d;
+                if matches!(rip.lap, Lap::Overlap { amount: None, .. }) {
+                    for span in curve {
+                        if let Seg2::Arc { radius, sweep, .. } = *span {
+                            let shifted = radius - offset * sweep.signum();
+                            if shifted <= 0.0 {
+                                return Err(Refusal::Joint {
+                                    joint: j,
+                                    why: JointRefusal::OverlapArcRadius { radius: shifted },
+                                });
+                            }
+                        }
+                    }
+                }
+                moved(curve, offset)
+            }
             _ => None,
         };
         if let Some(inner) = exact {

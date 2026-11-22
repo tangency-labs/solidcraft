@@ -617,6 +617,9 @@ impl PreviewState {
             // A constraint's reply says how free its part is with the inputs it was for: with other
             // picks it would describe the wrong rule, so the dialog falls back to the saved design.
             self.placed = None;
+            if !self.flange_corners.is_empty() || !self.flange_faces.is_empty() {
+                self.shown_key = None;
+            }
             self.flange_corners.clear();
             self.flange_faces.clear();
             self.hovered_corner = None;
@@ -643,6 +646,9 @@ impl PreviewState {
                 if k == key || intermediate {
                     self.apply(k, job);
                     if k != key {
+                        if !self.flange_corners.is_empty() || !self.flange_faces.is_empty() {
+                            self.shown_key = None;
+                        }
                         self.flange_corners.clear();
                         self.flange_faces.clear();
                         self.hovered_corner = None;
@@ -2299,16 +2305,29 @@ mod tests {
         let mut preview = PreviewState::default();
         preview.apply(1, Ok(built()));
         assert_eq!(preview.flange_corners, sources);
+        let (pending, receiver) = std::sync::mpsc::channel();
+        preview.running = Some((2, receiver));
         preview.poll(2, None);
         assert!(preview.flange_corners.is_empty(), "changed inputs must not offer old corners");
         assert!(preview.active, "the last good geometry can stay visible");
+        preview.poll(1, None);
+        assert!(preview.running.is_some(), "the stale worker is still allowed to finish");
+        assert_ne!(preview.shown_key, Some(1), "returning to A must rebuild its discarded metadata");
+        pending.send(Ok(built())).unwrap();
+        preview.poll(1, None);
+        assert!(preview.running.is_none() && preview.flange_corners.is_empty());
+        let (sender, receiver) = std::sync::mpsc::channel();
+        preview.running = Some((1, receiver));
+        sender.send(Ok(built())).unwrap();
+        preview.poll(1, None);
+        assert_eq!(preview.flange_corners, sources, "the rebuilt A offers its metadata again");
 
         let (sender, receiver) = std::sync::mpsc::channel();
         preview.running = Some((1, receiver));
         sender.send(Ok(built())).unwrap();
         preview.poll(2, None);
         assert!(preview.flange_corners.is_empty(), "an obsolete result must be discarded");
-        assert_eq!(preview.shown_key, Some(1));
+        assert_eq!(preview.shown_key, None);
 
         let (sender, receiver) = std::sync::mpsc::channel();
         preview.running = Some((2, receiver));
@@ -2325,6 +2344,7 @@ mod tests {
             preview.poll(2, stream);
             assert!(preview.active, "successful intermediate geometry may still be shown");
             assert!(preview.flange_corners.is_empty(), "intermediate geometry cannot offer obsolete corners");
+            assert_eq!(preview.shown_key, None, "returning to the intermediate key also needs a rebuild");
         }
 
         for failure in [Err("invalid expression".into()), Ok(Built { error: Some("invalid tool".into()), ..built() })] {

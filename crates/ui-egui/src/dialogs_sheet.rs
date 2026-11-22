@@ -448,6 +448,7 @@ crate::dialog_descriptor::dialog_descriptors! {
                 /// Last discovered pairs for these picks, retained while a value is refused.
                 corner_pairs: Vec<[SheetEdgeName; 2]>,
                 corner_picks: Vec<Sel>,
+                corner_query: Option<(u64, Vec<(String, Value)>)>,
             },
             Unfold {
                 refold: bool,
@@ -579,6 +580,7 @@ fn new_flange(app: &SolveApp, ty: usize) -> Sm {
         corners: Vec::new(),
         corner_pairs: Vec::new(),
         corner_picks: Vec::new(),
+        corner_query: None,
     }
 }
 
@@ -739,13 +741,22 @@ pub(crate) fn swap_corner(saved: &mut Option<[SheetEdgeName; 2]>, inputs: &mut [
     }
 }
 
-fn corner_sheet_thickness(app: &SolveApp, inputs: &[SelInput]) -> Option<f64> {
+fn corner_sheet_thickness(app: &SolveApp, inputs: &[SelInput], join: bool, saved_body: Option<&str>) -> Option<f64> {
     let selected = inputs.iter().flat_map(|input| &input.items).find_map(|item| match item {
         Sel::Edge { body, .. } | Sel::Face { body, .. } => Some(body),
         _ => None,
     });
+    let world = (join && selected.is_some()).then(|| crate::open_meshing::session_world(&app.session));
+    let body_name = if let Some(world) = &world {
+        let body = world.bodies.iter().find(|body| Some(&body.name) == selected)?;
+        Some(body.source_name.as_deref().unwrap_or(&body.name))
+    } else if join {
+        Some(saved_body?)
+    } else {
+        selected.map(|body| body.as_str())
+    };
     let state = app.session.model.state();
-    let mut sheets = state.surface_sheets.iter().filter(|sheet| selected.is_none_or(|body| &sheet.body == body));
+    let mut sheets = state.surface_sheets.iter().filter(|sheet| body_name.is_none_or(|body| sheet.body == body));
     let sheet = sheets.next()?;
     if sheets.next().is_some() {
         return None;
@@ -794,19 +805,46 @@ fn same_corner(first: &[SheetEdgeName; 2], second: &[SheetEdgeName; 2]) -> bool 
     first == second || first.first() == second.get(1) && first.get(1) == second.first()
 }
 
+pub(crate) fn discover_flange_corners(app: &SolveApp, dialog: &mut Dialog) {
+    let Kind::Sheet(Sm::Flange { corners, .. }) = &mut dialog.kind else { return };
+    let saved = std::mem::take(corners);
+    let commands = (flange_type(&dialog.inputs) == 1).then(|| crate::dialogs::preview_commands(app, dialog));
+    let Kind::Sheet(Sm::Flange { corners, corner_pairs, corner_picks, corner_query, .. }) = &mut dialog.kind else { return };
+    *corners = saved;
+    let picks = dialog.inputs.first().map(|input| input.items.as_slice()).unwrap_or_default();
+    let changed_picks = !corner_picks.is_empty() && picks != corner_picks;
+    if picks != corner_picks {
+        *corner_picks = picks.to_vec();
+        corner_pairs.clear();
+        *corner_query = None;
+    }
+    let Some(Ok(commands)) = commands else {
+        if changed_picks {
+            corners.clear();
+        }
+        return;
+    };
+    let query = (app.session.revision, commands);
+    if corner_query.as_ref() == Some(&query) {
+        return;
+    }
+    if let Ok(preview) = app.session.preview(&query.1) {
+        *corner_pairs = flange_corner_sources(&preview.before, &preview.after, dialog.editing.map(|(id, _)| id));
+        corners.retain(|corner| corner_pairs.iter().any(|pair| same_corner(pair, &corner.sources)));
+    } else if changed_picks {
+        corners.clear();
+    }
+    *corner_query = Some(query);
+}
+
 fn flange_corner_rows(
     app: &mut SolveApp,
     ui: &mut egui::Ui,
     corners: &mut Vec<FlangeCorner>,
-    discovered: &mut Vec<[SheetEdgeName; 2]>,
+    discovered: &[[SheetEdgeName; 2]],
     thickness: Option<f64>,
 ) -> bool {
-    if !app.preview.flange_corners.is_empty() {
-        discovered.clone_from(&app.preview.flange_corners);
-    } else if !app.preview.busy && app.preview.error.is_none() {
-        discovered.clear();
-    }
-    let mut pairs = discovered.clone();
+    let mut pairs = discovered.to_vec();
     for corner in corners.iter() {
         if !pairs.iter().any(|pair| same_corner(pair, &corner.sources)) {
             pairs.push(corner.sources.clone());
@@ -873,10 +911,12 @@ fn flange_corner_rows(
 }
 
 /// The dialog's own rows (after the selection inputs); true when Enter was pressed in a value.
-pub fn rows(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut Sm, inputs: &mut Vec<SelInput>) -> bool {
+pub fn rows(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut Sm, inputs: &mut Vec<SelInput>, extra: &Map<String, Value>) -> bool {
     let t = Tokens::get();
     let mut enter = false;
-    let thickness = corner_sheet_thickness(app, inputs);
+    let join = matches!(k, Sm::CornerJoin { .. });
+    let saved_body = matches!(k, Sm::CornerJoin { saved: Some(_), .. }).then(|| extra.get("body").and_then(Value::as_str)).flatten();
+    let thickness = corner_sheet_thickness(app, inputs, join, saved_body);
     app.preview.hovered_corner = None;
     match k {
         Sm::CornerJoin { kind, overlap, gap, saved } => {
@@ -926,14 +966,9 @@ pub fn rows(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut Sm, inputs: &mut Vec<
             segments,
             corners,
             corner_pairs,
-            corner_picks,
+            ..
         } => {
             *ty = flange_type(inputs);
-            let picks = inputs.first().map(|input| input.items.as_slice()).unwrap_or_default();
-            if picks != corner_picks {
-                *corner_picks = picks.to_vec();
-                corner_pairs.clear();
-            }
             form_row(ui, "Type", |ui| {
                 ui.label(FLANGE_TYPES.get(*ty).copied().map(solidcraft_ui_text::tr).unwrap_or(""));
             });
@@ -2281,6 +2316,7 @@ pub fn for_feature(app: &SolveApp, kind: &FeatureKind) -> Option<(Kind, Vec<SelI
                     .collect(),
                 corner_pairs: Vec::new(),
                 corner_picks: Vec::new(),
+                corner_query: None,
             };
             (f, picked)
         }

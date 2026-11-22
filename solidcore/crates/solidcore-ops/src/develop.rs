@@ -60,19 +60,19 @@ pub fn set_back_past(
 /// The kernel could not restore or trim the contour unambiguously.
 pub fn retarget_corner_tail(
     region: &Region2,
-    from: Vec2,
-    end: Vec2,
-    into: Vec2,
-    rise_axis: Vec2,
+    edge: [Vec2; 2],
+    anchor_origin: Vec2,
+    anchor_direction: Vec2,
+    bend_length: f64,
     old_cut: f64,
     new_cut: f64,
 ) -> Result<Region2, &'static str> {
     k::retarget_corner_tail(
         &region2(region),
-        vec2(from),
-        vec2(end),
-        vec2(into),
-        vec2(rise_axis),
+        edge.map(vec2),
+        vec2(anchor_origin),
+        vec2(anchor_direction),
+        bend_length,
         old_cut,
         new_cut,
     )

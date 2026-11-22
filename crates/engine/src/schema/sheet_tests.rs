@@ -197,6 +197,32 @@ fn flange_corner_join_matches_a_separate_join_using_central_build_names() {
 }
 
 #[test]
+fn flange_corner_redefine_normalizes_bare_lengths_in_design_units() {
+    let mut source = sheet();
+    let mut corner = corner_join_params(&mut source);
+    corner.as_object_mut().unwrap().remove("name");
+    corner["kind"] = json!("partial_overlap");
+    corner["overlap"] = json!(0.04);
+    corner["gap"] = json!("0.5 mm");
+    let base = json!({"edges": [[50, 0, 0], [100, 30, 0]], "height": "20 mm", "name": "Flanges"});
+    let mut params = base.clone();
+    params["corners"] = json!([corner]);
+    let mut direct = sheet();
+    direct.execute("document.units", &json!({"units": "in"})).unwrap();
+    direct.execute("sheet.flange", &params).unwrap();
+    let expected = serde_json::to_value(&direct.doc.find_feature("Flanges").unwrap().kind).unwrap();
+    assert_eq!(expected["corners"][0]["overlap"], "0.04 in");
+    assert_eq!(expected["corners"][0]["gap"], "0.5 mm");
+
+    let mut edited = sheet();
+    let feature = edited.execute("sheet.flange", &base).unwrap()["feature"].clone();
+    edited.execute("document.units", &json!({"units": "in"})).unwrap();
+    edited.execute("timeline.redefine", &json!({"feature": feature, "command": "sheet.flange", "params": params})).unwrap();
+    let actual = serde_json::to_value(&edited.doc.find_feature("Flanges").unwrap().kind).unwrap();
+    assert_eq!(actual["corners"], expected["corners"]);
+}
+
+#[test]
 fn flange_corner_join_absent_null_and_empty_choices_keep_the_rule_corners() {
     let base = json!({"edges": [[50, 0, 0], [100, 30, 0]], "height": 20});
     let mut expected = sheet();
