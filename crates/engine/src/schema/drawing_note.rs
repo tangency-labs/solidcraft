@@ -10,7 +10,7 @@ use serde::{Deserialize, Deserializer, Serialize};
 use serde_json::Value;
 use solidcraft_geom::cell::{Content, HAlign, Part, Source};
 
-use super::drawing_dimension::{CandidateResult, CornerParam, EdgeParam};
+use super::drawing_dimension::{ArrowResult, CandidateResult, CornerParam, EdgeParam};
 use super::drawing_sheet::sheet_ref;
 use super::drawing_view::ViewIdParam;
 
@@ -230,6 +230,12 @@ pub struct NoteResult {
     /// Each field it reads, in order, as its sheet reads it now.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub fields: Vec<FieldResult>,
+    /// Where it sits on its sheet now, the model read as it is now; none when it isn't drawn.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub layout: Option<NoteLayoutResult>,
+    /// Why it has no layout, or no box for its text or a leader, when `status` doesn't already say it.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub layout_why: Option<String>,
     /// What to know about it: a view edited since to leave out what its leader points at, or its
     /// text running off the paper.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -237,6 +243,22 @@ pub struct NoteResult {
     /// In the warn parameter-check mode: what the call's parameters got wrong.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub param_warnings: Vec<String>,
+}
+
+/// Where a note's parts sit on its sheet, in paper millimetres from the sheet's lower-left corner (the
+/// frame of `drawing.scene`), as the sheet draws them.
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct NoteLayoutResult {
+    /// Each leader found, in order (its anchor's first, then its branches'): from its arrow's tip
+    /// through its elbow to its end by the text, its landing included, before the arrowhead stops its
+    /// line at its base.
+    pub leaders: Vec<Vec<[f64; 2]>>,
+    /// Each leader's arrowhead, in the same order.
+    pub arrows: Vec<ArrowResult>,
+    /// Its set text's box (its lines' height and measured width): start and end along its foot, then
+    /// end and start along its top. None when its text can't be set.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub text_box: Option<[[f64; 2]; 4]>,
 }
 
 /// One branch of a note, as the model has it now.

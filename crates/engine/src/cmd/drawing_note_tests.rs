@@ -1,7 +1,9 @@
 use serde_json::json;
+use solidcore_record::Vec2;
 use solidcraft_doc::drawing::view::{View, ViewKind, ViewPlace};
 use solidcraft_doc::drawing_view::{ViewDirection, ViewOverrides};
 use solidcraft_geom::drawing_view::NamedView;
+use solidcraft_geom::prelude::*;
 
 use super::*;
 use crate::drawing_scene::tests::in_the_model;
@@ -43,12 +45,12 @@ fn placed() -> (Session, u64, u64, [u64; 2]) {
     (s, sheet, id, [first, second])
 }
 
-/// A note on the Box's bottom front edge, through `occurrence`.
+/// A centred note on the Box's bottom front edge, through `occurrence`.
 fn on_edge(s: &mut Session, view: u64, occurrence: u64) -> Value {
     run(
         s,
         ADD,
-        json!({"anchor": {"edge": {"view": ids::encode(view), "edge": {"point": [40, 0, 0], "path": [occurrence]}}}, "at": [60, 40], "content": "Deburr"}),
+        json!({"anchor": {"edge": {"view": ids::encode(view), "edge": {"point": [40, 0, 0], "path": [occurrence]}}}, "at": [60, 40], "content": "Deburr", "align": "centre"}),
     )
 }
 
@@ -607,4 +609,330 @@ fn a_new_note_is_left_aligned_and_an_edit_sets_it() {
         refused(&mut s, EDIT, json!({"note": id, "set": {"align": bad}}));
         refused(&mut s, ADD, json!({"anchor": anchor, "at": [0, 0], "content": "x", "align": bad}));
     }
+}
+
+/// A point of a reply, `[x, y]`.
+fn xy(v: &Value) -> Vec2 {
+    Vec2::new(v[0].as_f64().unwrap(), v[1].as_f64().unwrap())
+}
+
+/// `reply`'s layout: its leaders point by point, its arrows (each tip and the unit direction it points
+/// in) and its text box's corners.
+fn laid_out(reply: &Value) -> (Vec<Vec<Vec2>>, Vec<(Vec2, Vec2)>, Option<Vec<Vec2>>) {
+    let layout = reply.get("layout").unwrap_or_else(|| panic!("no layout: {reply}"));
+    let points = |line: &Value| line.as_array().unwrap().iter().map(xy).collect::<Vec<_>>();
+    let leaders = layout["leaders"].as_array().unwrap().iter().map(points).collect();
+    let arrows = layout["arrows"].as_array().unwrap().iter().map(|arrow| (xy(&arrow["tip"]), xy(&arrow["points"]))).collect();
+    (leaders, arrows, layout.get("text_box").map(points))
+}
+
+/// The middle of a box's corners.
+fn middle(corners: &[Vec2]) -> Vec2 {
+    corners.iter().fold(Vec2::ZERO, |sum, p| sum + *p) * 0.25
+}
+
+/// Sheet 1 of the drawing open, drawn at once, as the sheet page and an export draw it.
+fn sheet_now(s: &Session) -> crate::drawing_scene::SheetScene {
+    let d = s.drawing("test").unwrap().clone();
+    crate::drawing_scene::build(s, &d, d.sheets[0].id).unwrap()
+}
+
+/// Sheet 1 of the drawing open as a command reads it: for a deferred drawing, what its last update drew.
+fn shown_now(s: &mut Session) -> crate::drawing_scene::SheetScene {
+    let d = s.drawing("test").unwrap().clone();
+    crate::drawing_scene::as_shown(s, &d, d.sheets[0].id).unwrap()
+}
+
+/// What the note `added` answered for draws on `sheet`: its strokes point by point, its arrowheads'
+/// tips and its text runs' origins.
+fn drawn_parts(sheet: &crate::drawing_scene::SheetScene, added: &Value) -> (Vec<Vec<Vec2>>, Vec<Vec2>, Vec<Vec2>) {
+    use solidcraft_geom::paper::Item;
+    let id = ids::decode(added["note"].as_str().unwrap()).unwrap();
+    let group = sheet.scene.groups.iter().find(|g| g.object == id).unwrap_or_else(|| panic!("{} isn't drawn", added["note"]));
+    let (mut strokes, mut tips, mut origins) = (Vec::new(), Vec::new(), Vec::new());
+    for item in &group.items {
+        match item {
+            Item::Stroke { path, .. } => strokes.push(std::iter::once(path[0].start()).chain(path.iter().map(|seg| seg.end())).collect()),
+            Item::Fill { region } => tips.push(region.outer.segs[0].start()),
+            Item::Text(text) => origins.push(text.origin),
+            Item::Picture(_) => {}
+        }
+    }
+    (strokes, tips, origins)
+}
+
+/// Where the note `added` answered for stands on `sheet`.
+fn state_of<'a>(sheet: &'a crate::drawing_scene::SheetScene, added: &Value) -> &'a crate::drawing_scene::NoteState {
+    let id = ids::decode(added["note"].as_str().unwrap()).unwrap();
+    sheet.notes.iter().find(|n| n.note == id).unwrap_or_else(|| panic!("{} isn't listed", added["note"]))
+}
+
+/// A note's layout is where the sheet draws it, in paper mm from the sheet's lower-left corner. The
+/// front view at 1:1 has the middle of the two copies' outline (x 90, z 15) on its centre (200, 150),
+/// so the Box's bottom front edge's middle (40, 0, 0) is at (150, 135): the leader's tip, its arrow
+/// pointing there from its elbow. The note sits 60 right of and 40 above the view's centre, at
+/// (260, 190): its leader comes from the left, to the landing's start, then along the landing to the
+/// text's gap, level with the text's middle. After its tip, each point is the drawn leader's (whose
+/// line starts at its arrowhead's base); the tip is the arrowhead's; the text box's first corner is the
+/// text run's origin; all exactly, as one function lays both out and both are moved by the view's
+/// centre. With the second copy moved 30 up and not captured, the sheet draws the design's places, and
+/// so does the layout.
+#[test]
+fn a_notes_layout_is_where_the_sheet_draws_it() {
+    let (mut s, _, view, [bracket, second]) = placed();
+    let added = on_edge(&mut s, view, bracket);
+    assert!(added.get("layout_why").is_none(), "{added}");
+    let (leaders, arrows, text_box) = laid_out(&added);
+    assert!(leaders.len() == 1 && leaders[0].len() == 3 && arrows.len() == 1, "{added}");
+    let (tip, elbow, end) = (leaders[0][0], leaders[0][1], leaders[0][2]);
+    assert!(tip.dist(Vec2::new(150.0, 135.0)) < 1e-9 && arrows[0].0 == tip, "{added}");
+    assert!(arrows[0].1.dist((tip - elbow) * (1.0 / tip.dist(elbow))) < 1e-12, "{added}");
+    assert!(elbow.y == 190.0 && end.y == 190.0 && elbow.x < end.x && end.x < 260.0, "{added}");
+    let corners = text_box.unwrap_or_else(|| panic!("no text box: {added}"));
+    assert!(middle(&corners).dist(Vec2::new(260.0, 190.0)) < 1e-9, "{added}");
+    let (strokes, tips, origins) = drawn_parts(&sheet_now(&s), &added);
+    assert!(strokes.len() == 1 && strokes[0][1..] == leaders[0][1..], "{strokes:?} {added}");
+    assert_eq!((tips, origins), (vec![tip], vec![corners[0]]));
+    assert_eq!(run(&mut s, INSPECT, json!({"note": added["note"]})), added, "inspect answers what add did");
+
+    let drawing = json!({"drawing": ids::encode(s.drawing("test").unwrap().id)});
+    run(&mut s, "drawing.close", json!({}));
+    run(&mut s, "occurrence.move", json!({"occurrence": second, "translate": [0, 0, 30], "capture": false, "move_grounded": true}));
+    run(&mut s, "drawing.open", drawing);
+    assert_eq!(s.pending_moves.len(), 1);
+    assert_eq!(run(&mut s, INSPECT, json!({"note": added["note"]}))["layout"], added["layout"], "where the design places its parts");
+}
+
+/// A note with no leader has its text box alone: on the sheet, centred on its place from the sheet's
+/// lower-left corner, unmoved; on a view, on its place from the view's centre (200, 150). Its box's
+/// first corner is where the sheet starts its text.
+#[test]
+fn a_note_with_no_leader_has_only_its_text_box() {
+    let (mut s, _, view, _) = placed();
+    let on_sheet = run(&mut s, ADD, json!({"anchor": {"sheet": "Sheet 1"}, "at": [20, 20], "content": "General note", "align": "centre"}));
+    let on_view = run(&mut s, ADD, json!({"anchor": {"view": ids::encode(view)}, "at": [0, -30], "content": "Chamfer", "align": "centre"}));
+    let sheet = sheet_now(&s);
+    for (reply, centre) in [(&on_sheet, Vec2::new(20.0, 20.0)), (&on_view, Vec2::new(200.0, 120.0))] {
+        let (leaders, arrows, text_box) = laid_out(reply);
+        assert!(leaders.is_empty() && arrows.is_empty() && reply.get("layout_why").is_none(), "{reply}");
+        let corners = text_box.unwrap_or_else(|| panic!("no text box: {reply}"));
+        assert!(middle(&corners).dist(centre) < 1e-9, "{reply}");
+        assert_eq!(drawn_parts(&sheet, reply).2, vec![corners[0]], "{reply}");
+    }
+}
+
+/// A note with three leaders, two from its left and one from its right, has three leaders and three
+/// arrows, in its leaders' order, each where the sheet draws it. The first from each side ends in that
+/// side's landing, its last two points level with the text's middle (y 190); the second from the left
+/// ends where that landing starts. The tips: the Box's bottom front edge's middle (40, 0, 0) at
+/// (150, 135), its corner (0, 0, 0) at (110, 135), and the second copy's corner (180, 0, 30) at
+/// (290, 165).
+#[test]
+fn a_note_with_three_leaders_lands_once_per_side() {
+    let (mut s, _, view, [bracket, second]) = placed();
+    let anchor = json!({"edge": {"view": ids::encode(view), "edge": {"point": [40, 0, 0], "path": [bracket]}}});
+    let branches = json!([{"corner": {"point": [0, 0, 0], "path": [bracket]}}, {"corner": {"point": [180, 0, 30], "path": [second]}}]);
+    let added = run(&mut s, ADD, json!({"anchor": anchor, "at": [60, 40], "content": "Deburr", "align": "centre", "branches": branches}));
+    let (leaders, arrows, _) = laid_out(&added);
+    let tips = [Vec2::new(150.0, 135.0), Vec2::new(110.0, 135.0), Vec2::new(290.0, 165.0)];
+    assert!(leaders.len() == 3 && arrows.len() == 3, "{added}");
+    for ((leader, (tip, _)), want) in leaders.iter().zip(&arrows).zip(tips) {
+        assert!(leader[0] == *tip && tip.dist(want) < 1e-9, "{added}");
+    }
+    let (left, next, right) = (&leaders[0], &leaders[1], &leaders[2]);
+    assert!(left.len() == 3 && next.len() == 2 && right.len() == 3, "{added}");
+    assert_eq!(next[1], left[1], "the second from the left meets the landing where it starts");
+    assert!(left[2].x < 260.0 && right[2].x > 260.0, "{added}");
+    assert!([left[1], left[2], right[1], right[2]].iter().all(|p| p.y == 190.0), "{added}");
+    let (strokes, drawn, _) = drawn_parts(&sheet_now(&s), &added);
+    assert_eq!(drawn, arrows.iter().map(|(tip, _)| *tip).collect::<Vec<_>>());
+    assert!(strokes.len() == 3 && strokes.iter().zip(&leaders).all(|(line, leader)| line[1..] == leader[1..]), "{strokes:?} {added}");
+}
+
+/// A note that isn't drawn has no layout, and says why where its status doesn't, in the sheet's words.
+/// Its view drawing nothing (both copies hidden, as a file can hold it: a placeholder) or one the sheet
+/// can't draw yet (shaded, in a position of its own): "its view isn't drawn", as the sheet says. Lost
+/// (its edge filleted away): its text box alone and nothing more than its status, as the sheet keeps
+/// its text without a leader. On an exploded view it is drawn where that view draws the moved copy
+/// (#13048): its arrow's tip is the sheet's.
+#[test]
+fn a_note_not_drawn_has_no_layout_and_says_why() {
+    let not_drawn = "its view isn't drawn";
+    let (mut s, _, view, [first, second]) = placed();
+    let added = on_edge(&mut s, view, first);
+    let mut d = (**s.drawing("test").unwrap()).clone();
+    let record = d.views.iter_mut().find(|v| v.id == view).unwrap();
+    Arc::make_mut(record).settings.hide = Some(vec![vec![first], vec![second]].into());
+    s.doc_mut().put_drawing(Arc::new(d));
+    let hidden = run(&mut s, INSPECT, json!({"note": added["note"]}));
+    assert!(hidden.get("layout").is_none() && hidden["layout_why"] == not_drawn, "{hidden}");
+    assert_eq!(state_of(&sheet_now(&s), &added).why.as_deref(), Some(not_drawn));
+
+    let (mut s, _, view, [first, _]) = placed();
+    let added = on_edge(&mut s, view, first);
+    crate::drawing_scene::tests::not_drawable_yet(&mut s, view);
+    let shaded = run(&mut s, INSPECT, json!({"note": added["note"]}));
+    assert!(shaded.get("layout").is_none() && shaded["layout_why"] == not_drawn, "{shaded}");
+    assert_eq!(state_of(&sheet_now(&s), &added).why.as_deref(), Some(not_drawn));
+
+    let (mut s, _, view, [first, _]) = placed();
+    let added = on_edge(&mut s, view, first);
+    let drawing = json!({"drawing": ids::encode(s.drawing("test").unwrap().id)});
+    run(&mut s, "drawing.close", json!({}));
+    run(&mut s, "component.activate", json!({"component": "Bracket"}));
+    run(&mut s, "solid.fillet", json!({"edges": [[40, 0, 0]], "radius": 2, "body": "Box"}));
+    run(&mut s, "component.activate", json!({"component": "root"}));
+    run(&mut s, "drawing.open", drawing);
+    let lost = run(&mut s, INSPECT, json!({"note": added["note"]}));
+    assert!(lost["status"] != "ok" && lost.get("layout_why").is_none(), "{lost}");
+    let (leaders, arrows, text_box) = laid_out(&lost);
+    assert!(leaders.is_empty() && arrows.is_empty(), "{lost}");
+    let corners = text_box.unwrap_or_else(|| panic!("no text box: {lost}"));
+    assert_eq!(drawn_parts(&sheet_now(&s), &lost).2, vec![corners[0]]);
+
+    let (mut s, _, view, [_, second]) = placed();
+    let drawing = json!({"drawing": ids::encode(s.drawing("test").unwrap().id)});
+    run(&mut s, "drawing.close", json!({}));
+    run(&mut s, "explode.create", json!({"name": "Apart", "moves": [{"occurrence": second, "translate": [0, 0, 50]}]}));
+    run(&mut s, "drawing.open", drawing);
+    let v = ids::encode(view);
+    run(&mut s, "drawing.view.edit", json!({"view": v, "set": {"exploded": "Apart"}}));
+    let edge = json!({"point": [140, 0, 0], "path": [second]});
+    let apart = run(&mut s, ADD, json!({"anchor": {"edge": {"view": v, "edge": edge}}, "at": [60, 40], "content": "Deburr"}));
+    assert!(apart.get("layout_why").is_none(), "{apart}");
+    let tips: Vec<Vec2> = laid_out(&apart).1.into_iter().map(|(tip, _)| tip).collect();
+    assert_eq!(drawn_parts(&sheet_now(&s), &apart).1, tips, "where the sheet draws the copy, moved apart");
+}
+
+/// A note whose text needs a font to fall back to never waits for the search, as add and its dry run
+/// run on the window thread: the reply has no layout and says its text waits. Once the sheet has drawn
+/// it, inspect has the layout. The character is this test's alone.
+#[test]
+fn a_notes_layout_never_waits_for_a_font() {
+    let (mut s, _, view, _) = placed();
+    let added = run(&mut s, ADD, json!({"anchor": {"view": ids::encode(view)}, "at": [0, -30], "content": "\u{30fd} 1"}));
+    let waits = "its text waits for a font to fall back to; drawing.scene draws it when one is found";
+    assert!(added.get("layout").is_none() && added["layout_why"] == waits, "{added}");
+    sheet_now(&s);
+    // Found, or known to be in no font: either way the answer is in, and the layout with it.
+    let inspected = run(&mut s, INSPECT, json!({"note": added["note"]}));
+    assert!(inspected.get("layout").is_some() && inspected["layout_why"] != waits, "{inspected}");
+}
+
+/// In a deferred drawing a note's layout reads the model as it is now, as its point does, while the
+/// sheet shows what its last update drew. The Box 20 longer, with the drawing closed, moves its corner
+/// (80, 0, 30) to (100, 0, 30) and the two copies' middle from x 90 to 100: the tip from
+/// x 200 + 80 - 90 = 190 to 200 + 100 - 100 = 200, at y 150 + 30 - 15 = 165, while the sheet still
+/// draws its update's. Updated, the sheet's arrowhead is where the layout's tip is.
+#[test]
+fn a_notes_layout_reads_the_model_now_in_a_deferred_drawing() {
+    let (mut s, _, view, [bracket, _]) = placed();
+    let corner = json!({"corner": {"view": ids::encode(view), "corner": {"point": [80, 0, 30], "path": [bracket]}}});
+    let added = run(&mut s, ADD, json!({"anchor": corner, "at": [60, 40], "content": "Here"}));
+    run(&mut s, "drawing.set", json!({"updates": "deferred"}));
+    run(&mut s, "drawing.update", json!({}));
+    let tip = |reply: &Value| laid_out(reply).1.first().map(|(tip, _)| *tip).unwrap_or_else(|| panic!("no arrow: {reply}"));
+    let was = tip(&added);
+    assert!(was.dist(Vec2::new(190.0, 165.0)) < 1e-9, "{added}");
+    // The sheet draws it at its update's place, as the sheet page does before the drawing is closed.
+    let before = drawn_parts(&shown_now(&mut s), &added).1;
+    assert!(before.len() == 1 && before[0].dist(was) < 1e-9, "{before:?}");
+    let drawing = json!({"drawing": ids::encode(s.drawing("test").unwrap().id)});
+    run(&mut s, "drawing.close", json!({}));
+    let block = s.doc.features[0].id;
+    run(&mut s, "timeline.edit", json!({"feature": block.to_string(), "set": {"length": 100}}));
+    run(&mut s, "drawing.open", drawing);
+    let now = tip(&run(&mut s, INSPECT, json!({"note": added["note"]})));
+    assert!(now.dist(Vec2::new(200.0, 165.0)) < 1e-9, "{now:?}");
+    let shown = drawn_parts(&shown_now(&mut s), &added).1;
+    assert!(shown.len() == 1 && shown[0].dist(was) < 1e-9, "the sheet holds its update's: {shown:?}");
+    run(&mut s, "drawing.update", json!({}));
+    let updated = drawn_parts(&shown_now(&mut s), &added).1;
+    assert!(updated.len() == 1 && updated[0].dist(now) < 1e-9, "{updated:?}");
+}
+
+/// A note the paper scene can't hold has no layout, and says why in the sheet's own words: a line of
+/// capitals 100 mm high, from the sheet's (5000, 5000), running past the paper's 1e5 mm coordinates.
+#[test]
+fn a_note_past_the_papers_coordinates_has_no_layout_and_says_why() {
+    let (mut s, ..) = placed();
+    let style = solidcraft_sketch::TextStyle::default();
+    let w = solidcraft_sketch::TextMetrics::new(&solidcraft_sketch::font_data(None).unwrap(), &style).unwrap().line_width("W", 100.0).unwrap();
+    let count = (1.25e5 / w).ceil() as usize;
+    assert!(count <= 1000, "a note's text is at most 1000 characters: {count}");
+    let content = "W".repeat(count);
+    let added = run(&mut s, ADD, json!({"anchor": {"sheet": "Sheet 1"}, "at": [5000, 5000], "content": content, "cap_mm": 100}));
+    let sheet = sheet_now(&s);
+    let state = state_of(&sheet, &added);
+    assert!(!state.drawn && state.why.is_some(), "the sheet leaves it out: {:?}", state.why);
+    assert!(added.get("layout").is_none() && added["layout_why"] == json!(state.why), "{added}");
+}
+
+/// A note on a sheet lays out where the Note tool's preview draws it, which is how the sheet will draw
+/// it once placed (#19543): its text box's first corner is the preview's text run's origin, exactly.
+#[test]
+fn a_sheet_notes_layout_is_where_its_preview_draws_it() {
+    use solidcraft_geom::paper::Item;
+    let (mut s, ..) = placed();
+    let params = json!({"anchor": {"sheet": "Sheet 1"}, "at": [20, 20], "content": "General note"});
+    let preview = crate::drawing_scene::note_preview_scene(&s, &params).unwrap();
+    let added = run(&mut s, ADD, params);
+    let corners = laid_out(&added).2.unwrap_or_else(|| panic!("no text box: {added}"));
+    let [group] = preview.groups.as_slice() else { panic!("one group: {}", preview.groups.len()) };
+    let origins: Vec<Vec2> = group.items.iter().filter_map(|item| if let Item::Text(text) = item { Some(text.origin) } else { None }).collect();
+    assert_eq!(origins, vec![corners[0]], "{added}");
+}
+
+/// A note on a view of another configuration row lays out as that row draws it, where the sheet draws
+/// it. The front view at 1:2 centres the block's outline: its far top corner (L, 0, 20) is 25 mm right
+/// of the view's centre at L = 100 mm, and 30 mm at Long's 120, so the arrow's tip moves 5 mm right,
+/// and is the sheet's arrowhead exactly.
+#[test]
+fn a_note_on_a_view_of_another_row_lays_out_as_the_row_draws_it() {
+    let (mut s, _, [front, _], _) = crate::drawing_scene::tests::configured_front_and_top();
+    let corner = json!({"corner": {"view": ids::encode(front), "corner": {"point": [100, 0, 20], "path": []}}});
+    let added = run(&mut s, ADD, json!({"anchor": corner, "at": [40, 30], "content": "Here"}));
+    let tip = |reply: &Value| laid_out(reply).1.first().map(|(tip, _)| *tip).unwrap_or_else(|| panic!("no arrow: {reply}"));
+    let designed = tip(&added);
+    run(&mut s, "drawing.view.edit", json!({"view": ids::encode(front), "set": {"configuration": "Long"}}));
+    let inspected = run(&mut s, INSPECT, json!({"note": added["note"]}));
+    let long = tip(&inspected);
+    assert!((long - designed).dist(Vec2::new(5.0, 0.0)) < 1e-9, "{designed:?} {long:?}");
+    assert_eq!(drawn_parts(&sheet_now(&s), &added).1, vec![long], "{inspected}");
+}
+
+/// A note's layout follows its alignment, as the sheet draws it (#20122). The same text at (100, 60)
+/// on the sheet has its box start there when left, centred on it when centre and end there when
+/// right, its middle level with it each time, and its first corner where the sheet starts the text.
+/// Edited to right, the left one's box ends there. A left note on a view lands before its text: its
+/// box starts at its place, (260, 190), and its leader's last point is left of the box, level with
+/// its middle.
+#[test]
+fn a_notes_layout_follows_its_alignment() {
+    let (mut s, _, view, [bracket, _]) = placed();
+    let at = Vec2::new(100.0, 60.0);
+    let add = |s: &mut Session, align: &str| {
+        run(s, ADD, json!({"anchor": {"sheet": "Sheet 1"}, "at": [at.x, at.y], "content": "General note", "align": align}))
+    };
+    let added = [add(&mut s, "left"), add(&mut s, "centre"), add(&mut s, "right")];
+    let sheet = sheet_now(&s);
+    // How far along the box's foot its place is: its start, its middle, its end.
+    for (reply, along) in added.iter().zip([0.0, 0.5, 1.0]) {
+        let corners = laid_out(reply).2.unwrap_or_else(|| panic!("no text box: {reply}"));
+        let x = corners[0].x + (corners[1].x - corners[0].x) * along;
+        assert!((x - at.x).abs() < 1e-9 && (middle(&corners).y - at.y).abs() < 1e-9, "{reply}");
+        assert_eq!(drawn_parts(&sheet, reply).2, vec![corners[0]], "{reply}");
+    }
+    run(&mut s, EDIT, json!({"note": added[0]["note"], "set": {"align": "right"}}));
+    let edited = run(&mut s, INSPECT, json!({"note": added[0]["note"]}));
+    let corners = laid_out(&edited).2.unwrap_or_else(|| panic!("no text box: {edited}"));
+    assert!((corners[1].x - at.x).abs() < 1e-9, "{edited}");
+
+    let anchor = json!({"edge": {"view": ids::encode(view), "edge": {"point": [40, 0, 0], "path": [bracket]}}});
+    let left = run(&mut s, ADD, json!({"anchor": anchor, "at": [60, 40], "content": "Deburr", "align": "left"}));
+    let (leaders, _, text_box) = laid_out(&left);
+    let corners = text_box.unwrap_or_else(|| panic!("no text box: {left}"));
+    assert!((corners[0].x - 260.0).abs() < 1e-9, "{left}");
+    let end = leaders.first().and_then(|leader| leader.last().copied()).unwrap_or_else(|| panic!("no leader: {left}"));
+    assert!(end.x < corners[0].x && (end.y - middle(&corners).y).abs() < 1e-9, "{left}");
 }

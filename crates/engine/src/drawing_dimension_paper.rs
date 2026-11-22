@@ -75,29 +75,33 @@ impl Text {
     }
 }
 
-/// What a line of a dimension's layout is.
+/// What a line of a dimension's or a note's layout is.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum LineRole {
     /// From near what it measures to past the dimension line.
     Extension,
     /// A dimension line or arc, from arrow tip to arrow tip, with any run-on to a text outside.
     Dimension,
+    /// A note's leader, from its arrow's tip through its elbow to its end by the text, its landing
+    /// included.
+    Leader,
 }
 
-/// Where a dimension's parts sit, centred on its view as its group is: its lines as laid out, before
-/// an arrowhead stops one at its base, a chain's shared extension line once.
+/// Where a dimension's or a note's parts sit, centred on its view as its group is (a note on a sheet,
+/// from the sheet's corner): its lines as laid out, before an arrowhead stops one at its base, a
+/// chain's shared extension line once.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct Layout {
     pub lines: Vec<(LineRole, Vec<Vec2>)>,
     /// Each arrowhead's tip and the unit direction it points in.
     pub arrows: Vec<(Vec2, Vec2)>,
-    /// Each set text's box: its cap height and measured width, as the arrows fit by, its corners
+    /// Each set text's box: its lines' height and measured width, as the arrows fit by, its corners
     /// in reading order: start and end on the line's side, then end and start on the far side. A
     /// text that isn't set has none.
     pub text_boxes: Vec<[Vec2; 4]>,
 }
 
-/// A dimension on paper.
+/// A dimension or a note on paper.
 pub struct OnPaper {
     pub group: Group,
     /// The fonts its text uses, in no order, the same one perhaps more than once.
@@ -106,7 +110,7 @@ pub struct OnPaper {
     pub why: Option<String>,
     /// Whether its text isn't there only until the search for a font to fall back to answers.
     pub pending: bool,
-    /// Where its parts sit ([`Layout`]): a note's and a balloon's are empty.
+    /// Where its parts sit ([`Layout`]): a balloon's is empty.
     pub layout: Layout,
 }
 

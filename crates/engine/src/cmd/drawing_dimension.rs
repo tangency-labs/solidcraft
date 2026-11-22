@@ -739,15 +739,22 @@ fn alone_on_sheet(
     let Some(paper) = paper_group(dimension, r, &on.frame, on.line_group, &PaperFonts::new(&d.font, &d.language, false)) else {
         return Err((!r.points.is_empty()).then(|| NO_PLACE.to_string()));
     };
-    // No layout at all until the font is found: a short span's lines depend on its text's width.
-    if paper.pending {
-        return Err(Some(TEXT_WAITS.to_string()));
-    }
-    // As the sheet takes it: alone on its sheet, its group must pass the paper scene's checks.
-    let mut alone = Scene::new(on.size, vec![moved(&paper.group, centre)]);
-    alone.add_fonts(paper.fonts.clone());
-    alone.validate().map_err(|e| Some(e.to_string()))?;
+    let alone = alone_scene(&paper, centre, on.size).map_err(Some)?;
     Ok((paper, centre, alone))
+}
+
+/// `paper` (a dimension's or a note's) alone on a sheet `size` in paper mm, moved to `centre`, as the
+/// sheet takes its group: a scene that passes the paper scene's checks, or the sheet's words for why
+/// not. None at all while its text waits for a font ([`TEXT_WAITS`]), as a short span's lines depend
+/// on its text's width. Inspect's layout is measured as it stands in this scene.
+pub(super) fn alone_scene(paper: &crate::drawing_dimension_paper::OnPaper, centre: Vec2, size: Vec2) -> std::result::Result<Scene, String> {
+    if paper.pending {
+        return Err(TEXT_WAITS.to_string());
+    }
+    let mut alone = Scene::new(size, vec![moved(&paper.group, centre)]);
+    alone.add_fonts(paper.fonts.clone());
+    alone.validate().map_err(|e| e.to_string())?;
+    Ok(alone)
 }
 
 /// The dimension `params` (as `drawing.dimension.add` takes them) would add, alone on its sheet and
