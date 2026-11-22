@@ -2132,3 +2132,55 @@ fn a_cone_lying_on_a_face_along_a_generator_touches_it_along_that_line() {
         }
     }
 }
+
+/// #18639: a box whose face x = 1 - d lies d inside the side of a cylinder of radius 1
+/// and height 1. Within the faces' zone tolerance (1e-5) the plane touches the
+/// cylinder's wall along one line (WR-510, docs/booleans.md §6), so the union is the
+/// body of the exact tangency d = 0: the same faces, edges, vertices and two solids
+/// sharing the tangent line, of volume pi + 1 - s, where the circular segment
+/// s = acos(1 - d) - (1 - d) sqrt(1 - (1 - d)^2) is under 3e-8 here. The plane crosses the
+/// cylinder sqrt(2d - d^2) (3.2e-3 at 5e-6) from the line, inside the band where the two
+/// faces are within the tolerance of each other, and Level 2 read their order at 20 edge
+/// tolerances, inside that band, as the box face lying inside the cylinder (`SmEdge` test 9).
+/// The test asks for the body of d = 0, clean at Level 2, in both operand orders.
+#[test]
+fn issue_18639_box_face_inside_a_cylinder_wall_unions_as_tangent() {
+    fn union(d: f64, cylinder_first: bool) -> (Kernel, Brep) {
+        let mut k = Kernel::default();
+        let c = api::create_cylinder(&mut k, Point3::new(0.0, 0.0, 0.0), 1.0, 1.0).unwrap();
+        let b = api::create_box(&mut k, Point3::new(1.0 - d, -0.5, 0.0), 1.0, 1.0, 1.0).unwrap();
+        let (x, y) = if cylinder_first { (c, b) } else { (b, c) };
+        let u = boolean_union(&mut k, x, y).unwrap();
+        (k, u)
+    }
+    fn solids(b: &Brep) -> usize {
+        solidcore::topology::brep::p1::regions(b, None)
+            .unwrap()
+            .into_iter()
+            .filter(|&r| Some(r) != b.infinite_region())
+            .count()
+    }
+    for cylinder_first in [true, false] {
+        let (_, tangent) = union(0.0, cylinder_first);
+        let want_counts = counts(&tangent);
+        let want_solids = solids(&tangent);
+        for d in [1e-6, 5e-6, 9e-6] {
+            let case = format!("d {d:e}, cylinder first {cylinder_first}");
+            let (mut k, mut u) = union(d, cylinder_first);
+            assert_eq!(counts(&u), want_counts, "{case}");
+            assert_eq!(solids(&u), want_solids, "{case}");
+            let lines = check_brep(&mut k, &mut u, CheckLevel::Level2)
+                .unwrap()
+                .lines();
+            assert!(lines.is_empty(), "{case}: {lines:?}");
+            let e: f64 = 1.0 - d;
+            let s = e.acos() - e * (1.0 - e * e).sqrt();
+            let want = PI + 1.0 - s;
+            let v = volume_of(&k, &mut u);
+            assert!(
+                (v - want).abs() <= VOLUME_REL_TOL * want,
+                "{case}: {v} against {want}"
+            );
+        }
+    }
+}
