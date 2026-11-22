@@ -365,6 +365,13 @@ impl GpuCull {
         self.kernel.clone()
     }
 
+    /// Whether a depth pyramid is bound ([`GpuCull::run`] with `hidden`): a frame drawn straight
+    /// into the window's pass binds the placeholder instead.
+    #[cfg(test)]
+    pub(super) fn pyramid_bound(&self) -> bool {
+        self.bound_hiz != 0
+    }
+
     /// Whether the triangles of the scene's instanced draw `draw` are culled here (else on the
     /// CPU: see-through, drawn back to front).
     pub(super) fn culls(&self, draw: &InstancedDraw) -> bool {
@@ -480,6 +487,16 @@ impl GpuCull {
             self.copy_pending = false;
         } else {
             self.copy_pending = true;
+        }
+    }
+
+    /// Move the statistics' readback along without a cull ([`GpuCull::collect`]), then copy the
+    /// last cull's arguments if it could not when they were made ([`GpuCull::copy_stats`]): a
+    /// frame that reuses the picture still returns the counts its last cull drew.
+    pub(super) fn advance_stats(&mut self, encoder: &mut wgpu::CommandEncoder, indirect: &mut indirect::Indirect, edges: Option<&mut edges::Edges>) {
+        self.collect(indirect, edges);
+        if self.copy_pending {
+            self.copy_stats(encoder);
         }
     }
 
@@ -664,13 +681,104 @@ mod tests {
         queue.submit([encoder.finish()]);
     }
 
+    /// Cull `batches` with the GPU cull for the view `vp` of `size` pixels, with or without the
+    /// last frame's depth pyramid, and read back how many placements it kept and the words of the
+    /// first placement it kept.
+    fn culled(
+        batches: &mut super::super::Batches,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        vp: &[[f32; 4]; 4],
+        size: [f32; 2],
+        hidden: Option<(&super::super::hiz::Hiz, bool)>,
+    ) -> (u32, Vec<u8>) {
+        use super::super::INSTANCE_SIZE;
+        let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor::default());
+        batches.cull(device, queue, &mut encoder, vp, size, &super::super::Motions::default(), hidden);
+        queue.submit([encoder.finish()]);
+        let Some(g) = batches.gpu_cull.as_ref() else { panic!("the GPU culls the scene") };
+        let out = batches.indirect.as_ref().and_then(|i| i.instances()).expect("placements");
+        let staging = device.create_buffer(&wgpu::BufferDescriptor {
+            label: None,
+            size: g.args.size(),
+            usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+        let placed = device.create_buffer(&wgpu::BufferDescriptor {
+            label: None,
+            size: out.size(),
+            usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+        let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor::default());
+        encoder.copy_buffer_to_buffer(&g.args, 0, &staging, 0, g.args.size());
+        encoder.copy_buffer_to_buffer(&out, 0, &placed, 0, out.size());
+        queue.submit([encoder.finish()]);
+        staging.slice(..).map_async(wgpu::MapMode::Read, |_| {});
+        placed.slice(..).map_async(wgpu::MapMode::Read, |_| {});
+        device.poll(wgpu::PollType::wait_indefinitely()).unwrap();
+        let bytes = staging.slice(..).get_mapped_range().unwrap().to_vec();
+        let outs = placed.slice(..).get_mapped_range().unwrap().to_vec();
+        let word = |b: &[u8], i: usize| u32::from_le_bytes(b[i * 4..i * 4 + 4].try_into().unwrap());
+        let entries = batches.indirect.as_ref().unwrap().entry_list().len();
+        let mut total = 0u32;
+        let mut survivor = Vec::new();
+        for n in 0..entries {
+            let count = word(&bytes, n * 5 + 1);
+            total += count;
+            if count == 1 {
+                let first = word(&bytes, n * 5 + 4) as usize;
+                survivor = outs[first * INSTANCE_SIZE..(first + 1) * INSTANCE_SIZE].to_vec();
+            }
+        }
+        (total, survivor)
+    }
+
+    /// A pipeline drawing a whole viewport at depth 0.9, writing no colour: a depth a placement
+    /// behind can be tested against.
+    fn plane_pipeline(device: &wgpu::Device) -> wgpu::RenderPipeline {
+        let module = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: None,
+            source: wgpu::ShaderSource::Wgsl(
+                r#"
+@vertex
+fn vs(@builtin(vertex_index) i: u32) -> @builtin(position) vec4<f32> {
+    let x = f32((i << 1u) & 2u);
+    let y = f32(i & 2u);
+    return vec4<f32>(x * 2.0 - 1.0, 1.0 - y * 2.0, 0.0, 1.0);
+}
+@fragment
+fn fs() -> @builtin(frag_depth) f32 {
+    return 0.9;
+}
+"#
+                .into(),
+            ),
+        });
+        device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label: Some("sc_test_plane"),
+            layout: None,
+            vertex: wgpu::VertexState { module: &module, entry_point: Some("vs"), buffers: &[], compilation_options: Default::default() },
+            fragment: Some(wgpu::FragmentState { module: &module, entry_point: Some("fs"), targets: &[], compilation_options: Default::default() }),
+            primitive: wgpu::PrimitiveState::default(),
+            depth_stencil: Some(wgpu::DepthStencilState {
+                format: wgpu::TextureFormat::Depth32Float,
+                depth_write_enabled: Some(true),
+                depth_compare: Some(wgpu::CompareFunction::Always),
+                stencil: wgpu::StencilState::default(),
+                bias: wgpu::DepthBiasState::default(),
+            }),
+            multisample: wgpu::MultisampleState::default(),
+            multiview_mask: None,
+            cache: None,
+        })
+    }
+
     /// While the view moves, a placement lying wholly behind the depth the last frame drew is
     /// left out, and one in front of it is drawn; without the last frame's depth both are.
     #[test]
     fn a_placement_behind_the_last_frames_depth_is_left_out_while_the_view_moves() {
-        use super::super::{
-            Batches, GpuScene, GpuTarget, INSTANCE_SIZE, InstanceLook, InstancedMesh, Motions, PaletteIndex, Renderer, SceneSlot, SharedTris, hiz,
-        };
+        use super::super::{Batches, GpuScene, GpuTarget, InstanceLook, InstancedMesh, PaletteIndex, Renderer, SceneSlot, SharedTris, hiz};
         use solidcore_record::Vec3;
         use std::sync::{Arc, Mutex};
         let Ok((_, device, queue)) = crate::open_headless(crate::test_env::policy()) else { return };
@@ -735,54 +843,101 @@ mod tests {
         let mut pyramid = hiz::Hiz::new(&device, &kernel, &depth_view, [64, 48], 1);
         pyramid.build(&queue, &kernel, &mut encoder, vp, false, 1);
         queue.submit([encoder.finish()]);
-        let drawn = |batches: &mut Batches, hidden: Option<(&hiz::Hiz, bool)>| -> (u32, Vec<u8>) {
-            let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor::default());
-            batches.cull(&device, &queue, &mut encoder, &vp, size, &Motions::default(), hidden);
-            queue.submit([encoder.finish()]);
-            let Some(g) = batches.gpu_cull.as_ref() else { panic!("the GPU culls the scene") };
-            let out = batches.indirect.as_ref().and_then(|i| i.instances()).expect("placements");
-            let staging = device.create_buffer(&wgpu::BufferDescriptor {
-                label: None,
-                size: g.args.size(),
-                usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
-                mapped_at_creation: false,
-            });
-            let placed = device.create_buffer(&wgpu::BufferDescriptor {
-                label: None,
-                size: out.size(),
-                usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
-                mapped_at_creation: false,
-            });
-            let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor::default());
-            encoder.copy_buffer_to_buffer(&g.args, 0, &staging, 0, g.args.size());
-            encoder.copy_buffer_to_buffer(&out, 0, &placed, 0, out.size());
-            queue.submit([encoder.finish()]);
-            staging.slice(..).map_async(wgpu::MapMode::Read, |_| {});
-            placed.slice(..).map_async(wgpu::MapMode::Read, |_| {});
-            device.poll(wgpu::PollType::wait_indefinitely()).unwrap();
-            let bytes = staging.slice(..).get_mapped_range().unwrap().to_vec();
-            let outs = placed.slice(..).get_mapped_range().unwrap().to_vec();
-            let word = |b: &[u8], i: usize| u32::from_le_bytes(b[i * 4..i * 4 + 4].try_into().unwrap());
-            let entries = batches.indirect.as_ref().unwrap().entry_list().len();
-            let mut total = 0u32;
-            let mut survivor = Vec::new();
-            for n in 0..entries {
-                let count = word(&bytes, n * 5 + 1);
-                total += count;
-                if count == 1 {
-                    let first = word(&bytes, n * 5 + 4) as usize;
-                    survivor = outs[first * INSTANCE_SIZE..(first + 1) * INSTANCE_SIZE].to_vec();
-                }
-            }
-            (total, survivor)
-        };
-        assert_eq!(drawn(&mut batches, None).0, 2, "a still view draws both");
-        let (count, survivor) = drawn(&mut batches, Some((&pyramid, false)));
+        assert_eq!(culled(&mut batches, &device, &queue, &vp, size, None).0, 2, "a still view draws both");
+        let (count, survivor) = culled(&mut batches, &device, &queue, &vp, size, Some((&pyramid, false)));
         assert_eq!(count, 1, "moving: the one behind the plane is left out");
         // The near placement's rows, [row][column]: the part at z -30, the one in front of the plane.
         let near: Vec<u8> =
             [[1.0f32, 0.0, 0.0, -5.0], [0.0, 1.0, 0.0, -5.0], [0.0, 0.0, 1.0, -30.0]].iter().flatten().flat_map(|v| v.to_le_bytes()).collect();
         assert_eq!(&survivor[..near.len()], &near[..], "the near placement survives, not the rear one");
-        assert_eq!(drawn(&mut batches, None).0, 2, "still again: both");
+        assert_eq!(culled(&mut batches, &device, &queue, &vp, size, None).0, 2, "still again: both");
+    }
+
+    /// An odd frame keeps its last row and column in the depth pyramid: a placement whose box
+    /// reaches the frame's edge, where the depth the last frame drew is clear, is drawn, though
+    /// the rest of the box lies behind that depth. A level that halved the level-0 texels without
+    /// rounding them up would have dropped the edge texels, and the placement with them.
+    #[test]
+    fn a_placement_reaching_an_odd_frames_clear_edge_is_not_left_out() {
+        use super::super::{Batches, GpuScene, GpuTarget, InstanceLook, InstancedMesh, PaletteIndex, Renderer, SceneSlot, SharedTris, hiz};
+        use solidcore_record::Vec3;
+        use std::sync::{Arc, Mutex};
+        let Ok((_, device, queue)) = crate::open_headless(crate::test_env::policy()) else { return };
+        if !super::supported(&device) {
+            return;
+        }
+        let Some(kernel) = hiz::Kernel::new(&device, 1) else { return };
+        let target = GpuTarget { format: wgpu::TextureFormat::Rgba8Unorm, depth: None, samples: 1, tess: false, oit: false, edges: false };
+        let r = Renderer::new(&device, target, None);
+        let mesh = solidcore_tess::Mesh {
+            positions: vec![Vec3::ZERO, Vec3::new(10.0, 0.0, 0.0), Vec3::new(0.0, 10.0, 0.0), Vec3::new(0.0, 0.0, 10.0)],
+            normals: vec![Vec3::Z; 4],
+            triangles: vec![[0, 1, 2], [0, 1, 3], [0, 2, 3], [1, 2, 3]],
+            tri_face: vec![0; 4],
+            ..Default::default()
+        };
+        // 9 × 5 pixels: level 0 is 8 × 4 texels, its last columns and rows padding that repeats
+        // the frame's edge. The plane, at depth 0.9 (10 mm from the eye), covers all but the last
+        // column and row; a part behind it reaches one of them, and its box's rest is drawn over.
+        let size = [9.0, 5.0];
+        let vp = [[1.0, 0.0, 0.0, 0.0], [0.0, 1.0, 0.0, 0.0], [0.0, 0.0, -1.0, -1.0], [0.0, 0.0, -1.0, 0.0]];
+        let plane = plane_pipeline(&device);
+        let cases = [
+            // Across pixels 5 to 8.7: 16.3 mm of x per millimetre of the part's 0 to 10 box,
+            // from x = 23.3 mm. The plane covers x 0 to 8 and y 0 to 4, so the last column is clear.
+            ("the clear last column", [8.0, 4.0], [[16.3, 0.0, 0.0, 23.3], [0.0, 1.0, 0.0, -5.0], [0.0, 0.0, 1.0, -210.0]]),
+            // Across rows 3 to 4.1: y' = 8.6 y - 126 for the part's 0 to 10 box. The plane covers
+            // every column and y 0 to 4, so the last row is clear.
+            ("the clear last row", [9.0, 4.0], [[14.0, 0.0, 0.0, -70.0], [0.0, 8.6, 0.0, -126.0], [0.0, 0.0, 1.0, -210.0]]),
+        ];
+        for (name, [covered_w, covered_h], rows) in cases {
+            let depth = device.create_texture(&wgpu::TextureDescriptor {
+                label: None,
+                size: wgpu::Extent3d { width: 9, height: 5, depth_or_array_layers: 1 },
+                mip_level_count: 1,
+                sample_count: 1,
+                dimension: wgpu::TextureDimension::D2,
+                format: wgpu::TextureFormat::Depth32Float,
+                usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING,
+                view_formats: &[],
+            });
+            let depth_view = depth.create_view(&Default::default());
+            let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor::default());
+            {
+                let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                    label: None,
+                    color_attachments: &[],
+                    depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
+                        view: &depth_view,
+                        depth_ops: Some(wgpu::Operations { load: wgpu::LoadOp::Clear(1.0), store: wgpu::StoreOp::Store }),
+                        stencil_ops: None,
+                    }),
+                    timestamp_writes: None,
+                    occlusion_query_set: None,
+                    multiview_mask: None,
+                });
+                pass.set_viewport(0.0, 0.0, covered_w, covered_h, 0.0, 1.0);
+                pass.set_pipeline(&plane);
+                pass.draw(0..3, 0..1);
+            }
+            let mut part = InstancedMesh {
+                key: 1,
+                tris: Arc::new(SharedTris::new(&mesh)),
+                instances: Vec::new(),
+                look: InstanceLook::Opaque,
+                levels: Vec::new(),
+                closed: true,
+                edges: None,
+            };
+            part.place(rows, PaletteIndex(0));
+            let mut batches = Batches::default();
+            let slot: SceneSlot = Arc::new(Mutex::new(Some(GpuScene { instanced: vec![part], ..GpuScene::default() })));
+            batches.take(&device, &queue, &r.uniform, &r.uniform_bgl, 1, &slot, None, false).unwrap();
+            let mut pyramid = hiz::Hiz::new(&device, &kernel, &depth_view, [9, 5], 1);
+            pyramid.build(&queue, &kernel, &mut encoder, vp, false, 1);
+            queue.submit([encoder.finish()]);
+            assert_eq!(culled(&mut batches, &device, &queue, &vp, size, None).0, 1, "{name}: a still view draws it");
+            assert_eq!(culled(&mut batches, &device, &queue, &vp, size, Some((&pyramid, false))).0, 1, "{name} keeps the placement drawn");
+        }
     }
 }

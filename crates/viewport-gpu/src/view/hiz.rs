@@ -296,8 +296,18 @@ mod tests {
         assert_eq!([w, h], [8, 4]);
         let levels = 32 - w.max(h).leading_zeros();
         let widths: Vec<u32> = (0..levels).map(|k| (w >> k).max(1)).collect();
-        assert_eq!(widths, [8, 4, 2, 1], "each level halves the one before");
+        assert_eq!(widths, [8, 4, 2, 1], "each level halves the width");
+        let heights: Vec<u32> = (0..levels).map(|k| (h >> k).max(1)).collect();
+        assert_eq!(heights, [4, 2, 1, 1], "each level halves the height");
         assert!(w * 2 >= 10 && h * 2 >= 7, "level 0 covers the frame");
-        assert_eq!(super::level0_size([64, 48]), [32, 24], "even frames unchanged");
+        for k in 0..levels {
+            for (last, dim) in [(w - 1, (w >> k).max(1)), (h - 1, (h >> k).max(1))] {
+                assert!(last >> k < dim, "level {k} keeps level 0's last texel");
+            }
+        }
+        // A half that is not itself a power of two is rounded up: 48 pixels is 24 level-0 texels,
+        // two of which a halving level would otherwise drop (the last covering the frame's edge).
+        assert_eq!(super::level0_size([64, 48]), [32, 32]);
+        assert_eq!(super::level0_size([1024, 512]), [512, 256], "powers of two unchanged");
     }
 }
