@@ -772,7 +772,7 @@ fn faces_named_from_geometry_give_unknown() {
     let line = line["created"]["curves"][0].as_str().unwrap().to_string();
     run(&mut s, "sketch.finish", json!({}));
     let strip = run(&mut s, "surface.extrude", json!({"sketch": "Line", "curves": [line], "distance": 20, "body_name": "Strip"}));
-    let block = id(&strip["feature"]);
+    let block = strip["feature"].as_u64().unwrap();
     run(&mut s, "surface.extend", json!({"body": "Strip", "edges": [[5, 0, 20]], "distance": "5 mm"}));
     let state = s.model.state();
     let from_geometry = state
