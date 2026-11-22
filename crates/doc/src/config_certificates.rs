@@ -858,6 +858,8 @@ impl Document {
     /// (a later join merged it into another face) the face that answers to it. Every one must
     /// follow exact history and lie on one oriented plane.
     pub(crate) fn lineage_face_indices(&self, body: &ModelBody, name: &str) -> Result<Vec<usize>> {
+        // Bodies are named in today's form; a design saved before format 52 holds the older one.
+        let name = &*crate::persistent_name::written_now(name);
         let names = crate::naming::names(body);
         // `face` is `name` itself or a piece of it (a piece of a piece, …).
         let piece_of = |face: &str| {

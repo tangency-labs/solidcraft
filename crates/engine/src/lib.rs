@@ -28,6 +28,7 @@ pub mod drawing_scene;
 mod drawing_table_paper;
 pub mod drawing_view;
 pub mod easyprint;
+mod edit_start;
 mod failure_codes;
 pub mod frames;
 pub mod fuzz;
@@ -79,6 +80,7 @@ pub use cmd::{
     Addition, CommandInfo, CommandSpec, FromSelection, LinkProblem, LinkState, OpenSteps, addition, auto_operation, command_specs, dimension_roles,
     extrude_reach, find_command, normalize_command_id, resolve_design_links, shown_scope, standard_view, use_import_cache_dir,
 };
+pub use edit_start::{EditStart, RefreshedSketchModel, SketchDomain, SketchFinishEvent};
 pub use solidcraft_doc as doc;
 pub use solidcraft_doc::Visibility;
 pub use solidcraft_geom as geom;
@@ -676,7 +678,7 @@ impl ComputedCommands {
         let source = &self.source;
         session.same_document_context(source)
             && session.checked_sketch_owner(self.computed.active_sketch, self.computed.sketching_view).is_ok()
-            && session.selection == source.selection
+            && self.selection_is_current(session)
             && (!self.steps.iter().any(|step| {
                 step.id.eq_ignore_ascii_case("plugin.run")
                     || step.id.split_once('.').is_some_and(|(package, _)| source.plugin_state.packages.contains_key(package))
@@ -694,6 +696,25 @@ impl ComputedCommands {
     /// the replies from its evaluation.
     pub fn preview_visible_world(&self) -> Result<Preview> {
         Preview::visible_world(&self.source, &self.computed, self.steps.iter().map(|step| step.reply.clone()).collect())
+    }
+
+    fn selection_is_current(&self, session: &Session) -> bool {
+        if session.selection == self.source.selection {
+            return true;
+        }
+        // A Model transaction keeps its captured picks when focus moves to the retained
+        // Drawing. That receiver's new picks neither change the Model inputs nor belong to
+        // the worker. Drawing/mixed transactions and same-receiver changes stay strict.
+        (self.source.model_focus || self.source.open_drawing.is_none())
+            && !session.model_focus
+            && session.open_drawing.is_some()
+            && self.steps.iter().all(|step| crate::find_command(&step.id).is_some_and(|spec| spec.part == cmd::Part::Model))
+            && session.selection.iter().all(|item| match item {
+                Sel::Drawing { drawing, object } if Some(*drawing) == session.open_drawing => {
+                    session.doc.drawing(*drawing).is_some_and(|record| record.has_object(*object))
+                }
+                _ => false,
+            })
     }
 
     /// Prepare display tessellation before returning the transaction to the window; a model that
@@ -739,6 +760,16 @@ pub struct Session {
     pub sketching_view: Option<u64>,
     /// Live host view identities; never restored from history or a worker snapshot.
     pub view_context: ViewContext,
+    sketch_finish_events: std::collections::VecDeque<SketchFinishEvent>,
+    sketch_finish_sequence: u64,
+    sketch_finish_pending: bool,
+    /// The sketch a person entered from the UI (not a command): finishing it empty deletes it.
+    sketch_by_person: Option<u64>,
+    edit_source_sketch: Option<u64>,
+    prepared_edit_source: Option<(String, SketchFinishEvent)>,
+    edit_entry_depth: u32,
+    edit_start_sequence: u64,
+    prepared_edit_intent: Option<String>,
     /// Explicitly owned sheet edit, independent of the model sketch being edited.
     pub active_sheet_sketch: Option<Arc<SheetSketchEdit>>,
     /// The drawing open (by id): drawing commands change it. The model's commands work with it
@@ -1300,6 +1331,15 @@ impl Session {
             active_sketch: None,
             sketching_view: None,
             view_context: ViewContext::default(),
+            sketch_finish_events: Default::default(),
+            sketch_finish_sequence: 0,
+            sketch_finish_pending: false,
+            sketch_by_person: None,
+            edit_source_sketch: None,
+            prepared_edit_source: None,
+            edit_entry_depth: 0,
+            edit_start_sequence: 0,
+            prepared_edit_intent: None,
             active_sheet_sketch: None,
             open_drawing: None,
             model_focus: false,
@@ -2071,7 +2111,14 @@ impl Session {
         self.evaluations
     }
 
+    /// The open sketch was entered by a person from the UI, not by a command: finishing it with
+    /// nothing drawn deletes it, where a sketch a script or an agent made stays.
+    pub fn mark_sketch_entered_by_person(&mut self) {
+        self.sketch_by_person = self.active_sketch;
+    }
+
     pub fn refresh(&mut self) {
+        self.sketch_finish_pending = false;
         let token_current = self.design_token_is_current();
         let _ = self.refresh_with_joint_report();
         if token_current {
@@ -2650,6 +2697,34 @@ impl Session {
         if let Some(call) = plugin::resolve_call(self, id, params)? {
             return self.execute("plugin.run", &call);
         }
+        let spec = find_command(id).ok_or_else(|| EngineError::UnknownCommand(id.into()))?;
+        self.with_sketch_exit_receiver(spec.id, |session| session.execute_registered(spec, params))
+    }
+
+    fn execute_registered(&mut self, spec: &CommandSpec, params: &Value) -> Result<Value> {
+        self.check_command(spec, params)?;
+        self.note_edit_entry(spec, params);
+        let event = self.prepare_command_edit(spec, params)?;
+        let prepared = self.take_prepared_edit_source(spec, params);
+        let event = event.or(prepared);
+        let source = self.edit_source_sketch;
+        let depth = self.edit_entry_depth;
+        if let Some(event) = event.as_ref().filter(|event| event.domain == SketchDomain::Model) {
+            self.edit_source_sketch = Some(event.sketch);
+        }
+        if self.command_starts_edit(spec, params) {
+            self.edit_entry_depth = depth.saturating_add(1);
+        }
+        let result = self.execute_command(spec.id, params);
+        self.edit_source_sketch = source;
+        self.edit_entry_depth = depth;
+        result.map(|value| edit_start::finished_reply(value, event.as_ref()))
+    }
+
+    fn execute_command(&mut self, id: &str, params: &Value) -> Result<Value> {
+        if let Some(call) = plugin::resolve_call(self, id, params)? {
+            return self.execute("plugin.run", &call);
+        }
         let spec = find_command(id).ok_or_else(|| EngineError::UnknownCommand(id.to_string()))?;
         if panels::commands::is_command(spec.id) {
             // Layout is application state. Even a missing capability must not
@@ -2674,13 +2749,12 @@ impl Session {
         self.model.settle_import_checks();
         if live.is_none() {
             self.live_links = None;
-            if reads_model && self.model.is_stale() {
+            if reads_model && (self.model.is_stale() || self.sketch_finish_pending) {
                 self.refresh();
             }
         }
         spec.allowed(self).map_err(|why| EngineError::Disabled(spec.id.to_string(), why))?;
         // Before anything changes: a refusal leaves the session exactly as it was.
-        self.check_command(spec, params)?;
         let open_drawing = self.open_drawing;
         let redo_watch_before = self.redo_watch.clone();
         let mut before = Snapshot {
@@ -3139,10 +3213,19 @@ impl Session {
             active_sketch: self.active_sketch,
             sketching_view: self.sketching_view,
             view_context: self.view_context.clone(),
+            sketch_finish_events: Default::default(),
+            sketch_finish_sequence: self.sketch_finish_sequence,
+            sketch_finish_pending: self.sketch_finish_pending,
+            sketch_by_person: self.sketch_by_person,
+            edit_source_sketch: self.edit_source_sketch,
+            prepared_edit_source: self.prepared_edit_source.clone(),
+            edit_entry_depth: 0,
+            edit_start_sequence: 0,
+            prepared_edit_intent: self.prepared_edit_intent.clone(),
             active_sheet_sketch: self.active_sheet_sketch.clone(),
             open_drawing: self.open_drawing,
             model_focus: self.model_focus,
-            sketch_entry: None,
+            sketch_entry: self.sketch_entry.clone(),
             feature_edit_sketch: self.feature_edit_sketch,
             selection: self.selection.clone(),
             path: None,
@@ -3649,7 +3732,9 @@ impl Session {
         self.open_drawing = computed.open_drawing;
         self.prune_sheet_sketch_edit();
         drawing_scene::forget_closed(self);
-        self.selection = computed.selection;
+        if self.model_focus == computed.model_focus {
+            self.selection = computed.selection;
+        }
         self.revision = computed.revision;
         self.invalidate_view(previous_revision);
         self.active_component = computed.active_component;
@@ -3663,6 +3748,14 @@ impl Session {
             if !self.visibility.hidden_joints.contains(&j) {
                 self.visibility.hidden_joints.push(j);
             }
+        }
+        self.sketch_finish_pending = computed.sketch_finish_pending;
+        self.sketch_by_person = computed.sketch_by_person;
+        self.prepared_edit_source = computed.prepared_edit_source;
+        self.prepared_edit_intent = computed.prepared_edit_intent;
+        self.edit_start_sequence = self.edit_start_sequence.saturating_add(computed.edit_start_sequence);
+        for event in computed.sketch_finish_events {
+            self.publish_sketch_finish(event);
         }
         for message in computed.log {
             self.echo(message);
@@ -3763,16 +3856,28 @@ impl Session {
     }
 
     fn run_script_with(&mut self, script: &Value, profile: Option<bool>, each: &mut dyn FnMut(usize, &Value)) -> Result<(Vec<Value>, Option<Value>)> {
+        let run = self.run_script_kept(script, profile, each)?;
+        match run.failure {
+            Some(f) => Err(f.into_error()),
+            None => Ok((run.results, run.timings)),
+        }
+    }
+
+    /// [`Session::run_script_each`], timing each command as [`Session::run_script_timed`] does
+    /// when `profile` is given, that keeps what ran when a step fails (#19964): the results of
+    /// the steps before it, the timings of those and of the failing one, and the failure. Only a
+    /// script that is not a list of steps is an error.
+    pub fn run_script_kept(&mut self, script: &Value, profile: Option<bool>, each: &mut dyn FnMut(usize, &Value)) -> Result<ScriptRun> {
         let list = script_steps(script)?;
-        let mut out = Vec::new();
+        let mut results = Vec::new();
         let mut steps = Vec::new();
+        let mut failure = None;
         let clock = timing::Clock::start();
         for (i, c) in list.iter().enumerate() {
-            let id = c
-                .get("command")
-                .or_else(|| c.get("id"))
-                .and_then(Value::as_str)
-                .ok_or_else(|| EngineError::Other(format!("script step {}: missing `command`", i + 1)))?;
+            let Some(id) = c.get("command").or_else(|| c.get("id")).and_then(Value::as_str) else {
+                failure = Some(StepFailure { index: i, command: None, error: EngineError::Other("missing `command`".into()) });
+                break;
+            };
             let p = c.get("params").cloned().unwrap_or(Value::Null);
             let r = match profile {
                 Some(profile) => {
@@ -3782,12 +3887,61 @@ impl Session {
                 }
                 None => self.execute(id, &p),
             };
-            let r = r.map_err(|e| EngineError::Other(format!("step {} ({id}): {e}", i + 1)))?;
-            each(i, &r);
-            out.push(r);
+            match r {
+                Ok(r) => {
+                    each(i, &r);
+                    results.push(r);
+                }
+                Err(error) => {
+                    failure = Some(StepFailure { index: i, command: Some(id.to_string()), error });
+                    break;
+                }
+            }
         }
         let timings = profile.map(|_| serde_json::json!({"timings": steps, "total_ms": timing::round_ms(clock.ms())}));
-        Ok((out, timings))
+        Ok(ScriptRun { results, timings, failure })
+    }
+}
+
+/// What [`Session::run_script_kept`] ran.
+#[derive(Debug)]
+pub struct ScriptRun {
+    /// The result of each step that worked, in order.
+    pub results: Vec<Value>,
+    /// When timed: `{"timings": [{"index", "command", "ms", "profile"?}], "total_ms"}`, the
+    /// failing step's time included.
+    pub timings: Option<Value>,
+    /// The step that failed, which ended the run; `None` when every step worked.
+    pub failure: Option<StepFailure>,
+}
+
+/// The step a script stopped at.
+#[derive(Debug)]
+pub struct StepFailure {
+    /// The step's index, from 0.
+    pub index: usize,
+    /// The command it named; `None` when it named none.
+    pub command: Option<String>,
+    /// Its error.
+    pub error: EngineError,
+}
+
+impl StepFailure {
+    /// `{"step": its number from 1, "command"?, "error": the error's words}`.
+    pub fn to_json(&self) -> Value {
+        let mut v = serde_json::json!({"step": self.index + 1, "error": self.error.to_string()});
+        if let (Some(o), Some(c)) = (v.as_object_mut(), &self.command) {
+            o.insert("command".into(), Value::String(c.clone()));
+        }
+        v
+    }
+
+    /// The error a script that stops here returns, named after the step, as it always was.
+    pub fn into_error(self) -> EngineError {
+        match self.command {
+            Some(id) => EngineError::Other(format!("step {} ({id}): {}", self.index + 1, self.error)),
+            None => EngineError::Other(format!("script step {}: {}", self.index + 1, self.error)),
+        }
     }
 }
 

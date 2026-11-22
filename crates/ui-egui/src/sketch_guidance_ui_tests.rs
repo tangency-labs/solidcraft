@@ -764,3 +764,26 @@ fn shift_makes_a_centre_rectangle_a_square() {
     assert!((w - 20.0).abs() < 1e-6 && (h - 20.0).abs() < 1e-6, "{w} x {h}");
     assert!(equal);
 }
+
+/// Finishing the sketch, by the command or either Finish button, closes an Offset dialog that
+/// was open in it: Offset needs the sketch, so its OK could only be refused (#7424).
+#[test]
+fn finishing_the_sketch_closes_its_offset_dialog() {
+    for finish in [None, Some("sketch_palette:finish"), Some("button:sketch.finish")] {
+        let mut h = fixture();
+        step(&mut h, json!({"call":"ui.camera","params":{"target":[-40,0,0],"distance":150}}));
+        step(&mut h, json!({"start":"sketch.offset"}));
+        step(&mut h, json!({"drag":[{"sketch":[-32,8]},{"sketch":[-13,27]}]}));
+        h.frames(3);
+        assert_eq!(h.app.dialog.as_ref().unwrap().inputs[0].items.len(), 2);
+        match finish {
+            None => {
+                h.app.run("sketch.finish", json!({})).unwrap();
+            }
+            Some(handle) => step(&mut h, json!({"click":{"handle":handle}})),
+        }
+        h.settle();
+        assert!(h.app.session.active_sketch.is_none(), "{finish:?}: the sketch is finished");
+        assert!(h.app.dialog.is_none(), "{finish:?}: the Offset dialog closed with the sketch");
+    }
+}

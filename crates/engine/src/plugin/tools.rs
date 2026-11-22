@@ -22,7 +22,7 @@ pub fn tools(session: &mut Session, name: Option<&str>) -> Vec<PluginTool> {
         let Ok(manifest) = with_installed(session, &folder, || import::read_manifest(&folder)) else { continue };
         let Some(runtime) = manifest.runtime.as_ref() else { continue };
         // A command entry runs through `<plugin>.<entry>`, which needs the package's hash.
-        let approval = if runtime.is_importer() || name.is_none() {
+        let approval = if runtime.is_importer() || runtime.is_exporter() || name.is_none() {
             None
         } else {
             let Ok(package) = with_installed(session, &folder, || read_package(&folder)) else { continue };
@@ -33,7 +33,8 @@ pub fn tools(session: &mut Session, name: Option<&str>) -> Vec<PluginTool> {
         for entry in &runtime.entries {
             let (kind, input_schema) = match entry.kind {
                 EntryKind::Command => (PluginToolKind::Command, tool_input(entry)),
-                EntryKind::Importer => (PluginToolKind::Importer, importer_schema(entry)),
+                EntryKind::Exporter => (PluginToolKind::Exporter, format_schema(entry)),
+                EntryKind::Importer => (PluginToolKind::Importer, format_schema(entry)),
             };
             found.push(PluginTool {
                 name: format!("{}.{}", manifest.id, entry.name),
@@ -80,8 +81,16 @@ pub(super) fn describe(session: &Session, id: &str) -> Result<Option<Value>> {
                 "tool":{"name":id,"input":inputs},
                 "output":{},"effect":entry.effect,"slots":entry.slots})
         }
+        EntryKind::Exporter => {
+            let tool = format_schema(entry);
+            json!({"id":id,"label":name,"kind":"exporter","plugin":plugin,"extensions":entry.extensions,
+                "params":format!("an exporter: write the open design with file.export {{path, format: \"{id}\", options}}, or call the tool {id} {{path, options}}"),
+                "input":tool.clone(),
+                "tool":{"name":id,"input":tool},
+                "output":{},"effect":entry.effect,"slots":entry.slots})
+        }
         EntryKind::Importer => {
-            let tool = importer_schema(entry);
+            let tool = format_schema(entry);
             json!({"id":id,"label":name,"kind":"importer","plugin":plugin,"extensions":entry.extensions,
                 "params":format!("an importer, not a command: open a file with file.import {{path, format: \"{id}\", options}} or doc.open {{path}}, or call the tool {id} {{path, options}}"),
                 "input":tool.clone(),
@@ -103,13 +112,14 @@ fn tool_input(entry: &Entry) -> Value {
     schema
 }
 
-/// An importer tool's arguments: the file, and the options the importer declares.
-fn importer_schema(entry: &Entry) -> Value {
+/// A format tool's arguments: the file, and the options the slot declares.
+fn format_schema(entry: &Entry) -> Value {
     let extensions: Vec<String> = entry.extensions.iter().map(|e| format!(".{e}")).collect();
+    let action = if entry.kind == EntryKind::Exporter { "write" } else { "open" };
     json!({
         "type": "object",
         "properties": {
-            "path": {"type": "string", "description": format!("The file to open ({})", extensions.join(", "))},
+            "path": {"type": "string", "description": format!("The file to {action} ({})", extensions.join(", "))},
             "options": tool_input(entry),
         },
         "required": ["path"],

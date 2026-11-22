@@ -226,6 +226,9 @@ pub fn parse_manifest(text: &[u8], folder: &str) -> Result<Manifest> {
                 format!("unknown command group `{group}`; SolidCraft has {}", COMMAND_GROUPS.join(", ")),
             ));
         }
+        if runtime.is_exporter() {
+            export::refuse_unreadable(runtime)?;
+        }
         let storage = manifest.granted_capabilities().iter().any(|capability| capability.starts_with("storage@"));
         for command in &runtime.commands {
             if command.starts_with("storage.") && !storage {
@@ -550,6 +553,9 @@ fn run_package(session: &mut Session, package: Package, entry: &str, params: &se
         session.plugin_state.pending_user_settings = host.session.plugin_state.pending_user_settings.clone();
         if !std::sync::Arc::ptr_eq(&session.doc, &host.session.doc)
             || session.active_sketch != host.session.active_sketch
+            || session.sketching_view != host.session.sketching_view
+            || !host.session.sketch_finish_events.is_empty()
+            || host.session.edit_start_sequence != 0
             || session.pending_moves != host.session.pending_moves
         {
             session.accept_computed(host.session)?;
@@ -578,6 +584,7 @@ fn run_package(session: &mut Session, package: Package, entry: &str, params: &se
 
 pub mod check;
 mod events;
+mod export;
 pub use events::{LinkChange, design_changed, design_notifications};
 pub(crate) use events::{record_changed_link_reads, record_link_change, record_link_reads};
 pub mod folders;
@@ -594,8 +601,10 @@ pub mod user_storage;
 #[cfg(not(target_arch = "wasm32"))]
 pub use package::{remove, store_grants, validate_grants};
 
+pub use export::{describe as describe_exporters, export_file, exporter_for, exporters};
 pub use import::{
-    ImportDialog, Importer, describe as describe_importers, file_facts, import_dialog, import_file, importer_for, importers, open_filters,
+    FormatSlot, ImportDialog, Importer, describe as describe_importers, file_facts, format_slots, import_dialog, import_file, importer_for,
+    importers, open_filters,
 };
 pub use messages::PluginFailure;
 #[cfg(test)]
@@ -790,6 +799,7 @@ impl PluginHost for SolidCraftHost {
             _ => Default::default(),
         };
         let s = self.transaction.as_mut().ok_or_else(|| HostError::CommandFailed { command: name.into(), reason: "no active transaction".into() })?;
+        let finish_sequence = s.sketch_finish_sequence;
         let camera_before = s.camera;
         let before = s.doc.clone();
         let previous: BTreeMap<_, _> = s.model.results.iter().map(|r| (r.id, r.error.clone())).collect();
@@ -805,6 +815,9 @@ impl PluginHost for SolidCraftHost {
             return Err(HostError::CommandFailed { command: name.into(), reason: failed.error.clone().unwrap_or_default() });
         }
         let camera_after = s.camera;
+        for event in s.sketch_finish_events.iter().filter(|event| event.sequence > finish_sequence && event.domain == crate::SketchDomain::Model) {
+            self.sketch_exits.push(Some(event.sketch));
+        }
         if matches!(name, "sketch.finish" | "sketch.cancel") {
             self.sketch_exits.push(reply.get("sketch").and_then(Value::as_u64));
         }
@@ -862,6 +875,9 @@ impl PluginHost for SolidCraftHost {
         // Session::execute(plugin.run) owns the one outer undo step.
         if !std::sync::Arc::ptr_eq(&self.session.doc, &computed.doc)
             || self.session.active_sketch != computed.active_sketch
+            || self.session.sketching_view != computed.sketching_view
+            || !computed.sketch_finish_events.is_empty()
+            || computed.edit_start_sequence != 0
             || self.session.pending_moves != computed.pending_moves
         {
             self.session
@@ -995,7 +1011,8 @@ pub fn resolve_call(s: &Session, id: &str, params: &Value) -> Result<Option<Valu
 }
 
 /// `engine.describe` of an installed, enabled plugin's entry: a command entry as the
-/// `<plugin>.<entry>` command, an importer as the tool that opens its files; each with the
+/// `<plugin>.<entry>` command, an importer as the tool that opens its files, or an exporter as
+/// the tool that writes the open design; each with the
 /// schema `tools/list` gives it. Read with the app's authority, whatever the caller's folders.
 pub fn describe_entry(s: &Session, id: &str) -> Result<Option<Value>> {
     tools::describe(s, id)
