@@ -1,7 +1,7 @@
 //! The Move window's main value: the one the canvas box shows and the keyboard types into.
 //! It follows the move type, because each type uses a different value.
 use serde_json::json;
-use solidcraft_engine::Session;
+use solidcraft_engine::{PickMode, Session};
 
 use super::*;
 use crate::Services;
@@ -619,8 +619,14 @@ fn triad_drag_ends_where_the_button_was_released() {
 #[test]
 fn a_triad_drag_on_a_gpu_moves_its_layer_and_uploads_nothing() {
     let mut h = crate::scenario::Harness::new();
-    h.app.viewport.gpu =
-        Some(crate::gpu::GpuTarget { format: egui_wgpu::wgpu::TextureFormat::Rgba8Unorm, depth: None, samples: 1, tess: false, oit: false });
+    h.app.viewport.gpu = Some(crate::gpu::GpuTarget {
+        format: egui_wgpu::wgpu::TextureFormat::Rgba8Unorm,
+        depth: None,
+        samples: 1,
+        tess: false,
+        oit: false,
+        edges: false,
+    });
     h.app.run("solid.box", json!({"length": 20, "width": 30, "height": 10})).unwrap();
     h.app.start("solid.move");
     {
@@ -670,8 +676,14 @@ fn a_triad_drag_on_a_gpu_moves_its_layer_and_uploads_nothing() {
 #[test]
 fn a_move_layer_hidden_for_a_pick_is_handed_over_again() {
     let mut h = translated_box();
-    h.app.viewport.gpu =
-        Some(crate::gpu::GpuTarget { format: egui_wgpu::wgpu::TextureFormat::Rgba8Unorm, depth: None, samples: 1, tess: false, oit: false });
+    h.app.viewport.gpu = Some(crate::gpu::GpuTarget {
+        format: egui_wgpu::wgpu::TextureFormat::Rgba8Unorm,
+        depth: None,
+        samples: 1,
+        tess: false,
+        oit: false,
+        edges: false,
+    });
     h.frames(3);
     let layer = h.app.preview.moving_layer().expect("the moved body is a layer");
     let still = h.app.preview.key;
@@ -708,8 +720,14 @@ fn a_typed_move_drawn_as_a_layer_lights_no_moved_triangles() {
     let lit = |h: &crate::scenario::Harness| crate::viewport::build_highlight(&h.app).merged().tris.len();
     h.frames(3);
     assert_eq!(lit(&h), 0, "without a layer the moved body is outlined, not lit whole");
-    h.app.viewport.gpu =
-        Some(crate::gpu::GpuTarget { format: egui_wgpu::wgpu::TextureFormat::Rgba8Unorm, depth: None, samples: 1, tess: false, oit: false });
+    h.app.viewport.gpu = Some(crate::gpu::GpuTarget {
+        format: egui_wgpu::wgpu::TextureFormat::Rgba8Unorm,
+        depth: None,
+        samples: 1,
+        tess: false,
+        oit: false,
+        edges: false,
+    });
     h.frames(3);
     let layer = h.app.preview.moving_layer().expect("the moved body is a layer").key;
     assert!(drawn_as_layer(&h.app));
@@ -953,13 +971,12 @@ fn part_harness() -> (crate::scenario::Harness, u64) {
     (h, made["occurrence"].as_u64().unwrap())
 }
 
-/// Opens Move/Copy with the viewport in component (`components`) or body pick mode, Create Copy
-/// ticked or not, then clicks the top of the cube. The pick mode is set first: Move/Copy's Object
+/// Opens Move/Copy with the viewport in the Parts (`components`) or Bodies selection mode, Create
+/// Copy ticked or not, then clicks the top of the cube. The mode is set first: Move/Copy's Object
 /// starts from it, and then decides what a click picks.
 fn click_cube_in_move(components: bool, copy: bool) -> (crate::scenario::Harness, u64) {
     let (mut h, occurrence) = part_harness();
-    h.app.ui.pick_components = components;
-    h.app.ui.pick_bodies = !components;
+    h.app.ui.pick_mode = if components { PickMode::Parts } else { PickMode::Bodies };
     h.app.start("solid.move");
     h.settle();
     if copy {
@@ -1382,14 +1399,13 @@ fn a_component_picked_before_create_copy_is_ticked_is_copied_as_a_component() {
 
 #[test]
 fn editing_a_move_never_takes_a_component_pick() {
-    // An existing move of another body is edited, and the component is clicked in component mode.
+    // An existing move of another body is edited, and the component is clicked in the Parts mode.
     let (mut h, _) = part_harness();
     h.app.run("solid.box", json!({"length": 10, "width": 10, "height": 10, "corner": [100, 0, 0], "body_name": "Plate"})).unwrap();
     let moved = h.app.run("solid.move", json!({"bodies": ["Plate"], "translate": [0, 0, 5]})).unwrap()["feature"].as_u64().unwrap();
     h.app.dialog = Some(crate::dialogs::for_feature(&h.app, moved, None).unwrap());
     h.settle();
-    h.app.ui.pick_components = true;
-    h.app.ui.pick_bodies = false;
+    h.app.ui.pick_mode = PickMode::Parts;
     h.step(&json!({"click": {"world": [10, 10, 20]}})).unwrap();
     let items = h.app.dialog.as_ref().unwrap().inputs[0].items.clone();
     assert!(items.iter().any(|s| matches!(s, Sel::Body { name } if name == "Peg")), "the click picks the body: {items:?}");

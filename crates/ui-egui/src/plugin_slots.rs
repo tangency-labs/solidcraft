@@ -240,6 +240,7 @@ impl RibbonGroup {
                     name: &entry.label,
                     icon: "prefs_plugins",
                     size: ribbon::ButtonSize { width: ribbon::button_width(ui.painter(), &entry.entry), min_width: ribbon::BUTTON_MIN_WIDTH },
+                    planned: false,
                     enabled: true,
                     pressed: false,
                     exit: false,
@@ -365,6 +366,7 @@ mod tests {
             disabled: false,
             groups: Default::default(),
             images: Default::default(),
+            swatches: Default::default(),
             entries: serde_json::from_value(json!([
                 {"name":"report","effect":"read","slots":[
                     {"kind":"menu","name":"Manufacturing"}, {"kind":"menu","name":"Plugins"},

@@ -66,6 +66,7 @@ pub fn effect(method: &str, params: &Value) -> Effect {
         "ui.screenshot" if params.get("path").is_some_and(|p| !p.is_null()) => Effect::WritesFile,
         "ui.screenshot" => Effect::ReadsOnly,
         "ui.help" if params.get("item").is_none_or(Value::is_null) => Effect::ReadsOnly,
+        "control.joint_drive" if params.get("action").and_then(Value::as_str) != Some("finish") => Effect::ReadsOnly,
         m if READ_METHODS.contains(&m) => Effect::ReadsOnly,
         _ => Effect::Changes,
     }
@@ -92,6 +93,14 @@ pub fn describe(method: &str, params: &Value) -> String {
 mod tests {
     use super::*;
     use serde_json::json;
+
+    #[test]
+    fn only_finishing_an_interactive_joint_drive_changes_the_design() {
+        for action in ["begin", "update", "cancel"] {
+            assert_eq!(effect("control.joint_drive", &json!({"action": action})), Effect::ReadsOnly);
+        }
+        assert_eq!(effect("control.joint_drive", &json!({"action": "finish"})), Effect::Changes);
+    }
 
     #[test]
     fn reads_are_told_from_changes() {
@@ -128,6 +137,7 @@ mod tests {
             ("app.quit", json!({})),
             ("document.import", json!({"text": "{}"})),
             ("document.saved", json!({"revision": 1})),
+            ("document.close", json!({"document_id": "current"})),
         ] {
             assert!(!reads_only(m, &p), "{m} {p}");
             assert_eq!(effect(m, &p), Effect::Changes, "{m} {p}");

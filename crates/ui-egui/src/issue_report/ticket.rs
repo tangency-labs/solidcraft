@@ -161,6 +161,18 @@ pub fn step(id: &str, params: Option<&Value>, error: Option<&str>, home: Option<
             let name = path.rsplit(['/', '\\']).next().unwrap_or_default();
             s["file"] = json!(super::limited(name, 200));
         }
+        if id == "file.import" {
+            // Preserve the importer slot and option names without leaking option values.
+            // Plugin options can contain local paths or private configuration (#18760).
+            if let Some(importer) = p.get("format").and_then(Value::as_str) {
+                s["importer"] = json!(importer.chars().filter(|c| !c.is_control()).take(120).collect::<String>());
+            }
+            if let Some(options) = p.get("options").and_then(Value::as_object) {
+                s["option_keys"] = json!(
+                    options.keys().take(32).map(|key| key.chars().filter(|c| !c.is_control()).take(100).collect::<String>()).collect::<Vec<_>>()
+                );
+            }
+        }
         return s;
     }
     if serde_json::to_string(p).map_or(usize::MAX, |t| t.len()) > MAX_STEP_PARAMS {
@@ -261,15 +273,28 @@ fn design_for(app: &SolveApp, crash: Option<&Value>) -> DesignChoice {
         {
             let name: String = entry.name.chars().filter(|c| !matches!(c, '/' | '\\' | ':' | '*' | '?' | '"' | '<' | '>' | '|')).take(80).collect();
             let name = format!("{}.sc", if name.trim().is_empty() { "recovered" } else { name.trim() });
-            let bytes = solidcraft_engine::io::write_design(&doc);
-            return (
-                Some((name, bytes)),
-                Some("report.design_from_recovery"),
-                Some("the design kept for recovery when the last run ended, not opened"),
-            );
+            // A container, as the design's own file is: it carries binary data a JSON design can't.
+            if let Ok(bytes) = solidcraft_engine::io::write_design_container(&doc) {
+                return (
+                    Some((name, bytes)),
+                    Some("report.design_from_recovery"),
+                    Some("the design kept for recovery when the last run ended, not opened"),
+                );
+            }
         }
     }
-    (Some((design_name(app), solidcraft_engine::io::write_design(&app.session.doc))), None, None)
+    // A container, as the design's own file is: it carries binary data a JSON design can't.
+    (solidcraft_engine::io::write_design_container(&app.session.doc).ok().map(|bytes| (design_name(app), bytes)), None, None)
+}
+
+/// A failed importer reads a separate file; its error does not require the open design.
+fn failed_plugin_import(app: &SolveApp, failing: Option<&payload::Failing>) -> bool {
+    match failing {
+        Some(f) if f.command.is_some() => f.command.as_deref() == Some("file.import"),
+        _ => app.issue_report.steps.back().is_some_and(|step| {
+            step.get("command").and_then(Value::as_str) == Some("file.import") && step.get("ok").and_then(Value::as_bool) == Some(false)
+        }),
+    }
 }
 
 /// Everything the boxes can attach, collected when the report opens. `failing`: the operation
@@ -282,12 +307,21 @@ pub fn evidence(
 ) -> payload::Evidence {
     // A crash report that does not read is still about the crash: it then has no design to give.
     let report: Option<Value> = crash.as_ref().map(|(_, json)| serde_json::from_str(json).unwrap_or(Value::Null));
-    let (design, design_from, design_said) = design_for(app, report.as_ref());
+    let import_failed = report.is_none() && failed_plugin_import(app, failing.as_ref());
+    let (design, design_from, design_said) = if import_failed {
+        // The failed plugin read a different input file. Offering the open design risks sharing
+        // unrelated private work and cannot reproduce the failure (#18760).
+        (None, Some("report.design_unrelated_import"), Some("none: the failed plugin import read a separate input file"))
+    } else {
+        design_for(app, report.as_ref())
+    };
     // How to get back to where the failure happened: the design (its history is in the file)
     // plus the one failed operation, on this exact build.
     let mut session = serde_json::Map::new();
     let start = match (&report, design_from) {
         (Some(_), _) => "crashed",
+        (None, Some("report.design_unrelated_import")) if app.session.path.is_some() => "opened",
+        (None, Some("report.design_unrelated_import")) => "new",
         (None, Some(_)) => "recovered",
         (None, None) if app.session.path.is_some() => "opened",
         (None, None) => "new",
@@ -328,7 +362,7 @@ pub fn evidence(
 
 /// The failed operation a draft was made for: its command and parameters as the command API
 /// took them, and its error.
-fn failing_of(draft: &Draft) -> Option<payload::Failing> {
+fn failing_of(app: &SolveApp, draft: &Draft) -> Option<payload::Failing> {
     if let Some((id, json)) = &draft.crash {
         let v: Value = serde_json::from_str(json).unwrap_or_default();
         let command = v.get("command").and_then(|c| c.get("command")).and_then(Value::as_str).map(str::to_string);
@@ -343,11 +377,22 @@ fn failing_of(draft: &Draft) -> Option<payload::Failing> {
             _ => None,
         };
         let code = (!kind.is_empty()).then(|| format!("{kind} ({id})"));
-        return Some(payload::Failing { command, params, error, origin, code });
+        return Some(payload::Failing { command, params, error, origin, code, failure_code: None });
     }
     let super::Origin::View { error: Some(error) } = &draft.origin else { return None };
     let (command, params) = draft.failed_command.clone().map_or((None, None), |(c, p)| (Some(c), Some(p)));
-    Some(payload::Failing { command, params, error: error.clone(), origin: None, code: None })
+    // The kernel call the error was made from, by its stable code: as a failed command or a
+    // preview gave it, else as a feature of the timeline that fails with this error keeps it.
+    let failure_code = solidcraft_engine::failure_code_of(error).or_else(|| {
+        let error = error.trim();
+        app.session
+            .model
+            .results
+            .iter()
+            .find(|r| r.error.as_deref().is_some_and(|e| !e.is_empty() && error.contains(e)))
+            .and_then(|r| r.error_code.clone())
+    });
+    Some(payload::Failing { command, params, error: error.clone(), origin: None, code: None, failure_code })
 }
 
 /// The description a failed operation's report starts with: what failed, how, and a line
@@ -406,7 +451,7 @@ pub fn outgoing(draft: &Draft, ticket: &TicketDraft) -> payload::Outgoing {
 
 /// The form for a draft, pre-filled with what the app knows.
 pub fn new_ticket(app: &mut SolveApp, draft: &Draft, ctx: Option<&egui::Context>) -> TicketDraft {
-    let failing = failing_of(draft);
+    let failing = failing_of(app, draft);
     let evidence = evidence(app, ctx, failing.clone(), draft.crash.clone());
     let label = draft.title_prefix.trim_end_matches(": ").to_string();
     let (title, description) = match &failing {
@@ -753,7 +798,7 @@ pub(super) fn show(app: &mut SolveApp, draft: &mut Draft, ctx: &egui::Context) -
     if retake {
         // Retake brings the whole report up to date, not only its picture; what was typed and
         // ticked stays.
-        ticket.evidence = evidence(app, Some(ctx), failing_of(draft), draft.crash.clone());
+        ticket.evidence = evidence(app, Some(ctx), failing_of(app, draft), draft.crash.clone());
     }
     if github {
         // The public GitHub draft, as before tickets: same answers.

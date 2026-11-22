@@ -29,7 +29,7 @@ fn check(s: &mut Session, body: &str, direction: [f64; 3], length: f64) {
 }
 
 fn reopen(s: &Session) -> Session {
-    let bytes = solidcraft_io::write_design(&s.doc);
+    let bytes = solidcraft_io::write_design(&s.doc).unwrap();
     Session::new(solidcraft_io::read_design(&bytes).unwrap())
 }
 
@@ -214,6 +214,7 @@ fn a_cache_from_before_grain_frames_rebuilds_frame_members_and_keeps_their_grain
     run(&mut s, "sketch.finish", json!({}));
     run(&mut s, "frame.member", json!({"sketch":"Path", "profile":{"kind":"bar", "width":30, "height":10}, "body_name":"Rail"}));
     let mut cache = s.model.saved(&s.doc).unwrap();
+    cache.records.as_object_mut().unwrap().remove("grain_frames");
     for b in cache.records["model_bodies"].as_array_mut().unwrap() {
         b.as_object_mut().unwrap().remove("grain_frame");
     }

@@ -21,7 +21,7 @@ use solidcore::primitive::primitive_creation::Boolean2d;
 use solidcore::prism::{extrude, measure, profile as kp, read, sheet};
 use solidcore::Brep;
 use solidcore_convert as convert;
-use solidcore_record::{Loop2, Plane, Region2, Seg2, Vec2};
+use solidcore_record::{Loop2, Plane, Region2, Seg2, Vec2, Vec3};
 
 pub use solidcore::prism::measure::Interval;
 pub use solidcore::prism::placement::LoopPlacement;
@@ -45,8 +45,8 @@ pub const EXTRUDE_TOLERANCE: f64 = 1e-7;
 struct Out<T>(std::result::Result<T, Error>);
 
 impl<T> Answer for Out<T> {
-    fn refusal(&self) -> Option<String> {
-        self.0.as_ref().err().map(ToString::to_string)
+    fn refusal(&self) -> Option<Error> {
+        self.0.as_ref().err().cloned()
     }
 }
 
@@ -428,6 +428,17 @@ pub fn loop_holds(lp: &Loop2, p: Vec2) -> Option<bool> {
     convert::loop2(lp).holds(convert::vec2(p))
 }
 
+/// Counter-clockwise angle between two planar rays, in radians modulo one turn.
+/// Equal rays give zero. Nonfinite and zero rays have no angle.
+#[must_use]
+pub fn counterclockwise_sweep(center: Vec2, start: Vec2, end: Vec2) -> Option<f64> {
+    kp::counterclockwise_sweep(
+        convert::vec2(center),
+        convert::vec2(start),
+        convert::vec2(end),
+    )
+}
+
 /// The directed parameter interval of a recognized ellipse arc, in the input plane.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct EllipseArc {
@@ -513,4 +524,29 @@ pub fn certified_round_wall_turn(points: &[Vec2], center: Vec2) -> Option<f64> {
 #[must_use]
 pub fn loop_placement(lp: &Loop2, other: &Loop2, tol: f64) -> Option<LoopPlacement> {
     convert::loop2(lp).placement(&convert::loop2(other), tol)
+}
+
+/// Positive and negative wing `(start, end)` intervals for a symmetric-offset extrude.
+#[must_use]
+pub fn symmetric_offset_intervals(gap: f64, half: f64) -> [(f64, f64); 2] {
+    extrude::symmetric_offset_intervals(gap, half)
+}
+
+/// Probe points along both wings of a symmetric-offset extrude for auto-operation detection.
+#[must_use]
+pub fn symmetric_offset_probe_points(
+    base: Vec3,
+    n: Vec3,
+    start: f64,
+    d: f64,
+    near_limit: f64,
+) -> [Vec3; 4] {
+    extrude::symmetric_offset_probe_points(
+        [base.x, base.y, base.z],
+        [n.x, n.y, n.z],
+        start,
+        d,
+        near_limit,
+    )
+    .map(|[x, y, z]| Vec3::new(x, y, z))
 }

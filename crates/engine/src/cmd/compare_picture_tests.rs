@@ -96,7 +96,17 @@ fn a_matching_picture_scores_high_with_flat_edges() {
             assert!(near(e, 0.0, 0.6), "edge {e:?}");
         }
     }
-    assert!(!out["overlay_png"].as_str().unwrap().is_empty());
+    assert!(out.get("overlay").is_none(), "no overlay unless asked for");
+    // Asked for, the overlay is a PNG file; the reply names it and never holds the picture.
+    let overlay = std::env::temp_dir().join(format!("solidcraft-compare-picture-{}-overlay.png", std::process::id())).to_string_lossy().into_owned();
+    let out = run(&mut s, "inspect.compare_picture", json!({"reference": path, "view": "front", "overlay": overlay}));
+    assert_eq!(out["overlay"], json!(overlay));
+    assert!(std::fs::read(&overlay).unwrap().starts_with(b"\x89PNG\r\n\x1a\n"));
+    assert!(out.get("overlay_png").is_none());
+    std::fs::remove_file(&overlay).unwrap();
+    for bad in [json!(true), json!("overlay.jpg"), json!(3)] {
+        assert!(s.execute("inspect.compare_picture", &json!({"reference": path, "view": "front", "overlay": bad})).is_err(), "{bad}");
+    }
 }
 
 #[test]
@@ -381,7 +391,7 @@ fn hostile_and_empty_references_fail_cleanly() {
     assert!(s.execute("inspect.compare_picture", &json!({"reference": path, "fit": "diagonal"})).is_err());
     // overlay: false leaves the PNG out.
     let out = run(&mut s, "inspect.compare_picture", json!({"reference": path, "view": "front", "overlay": false}));
-    assert!(out.get("overlay_png").is_none());
+    assert!(out.get("overlay").is_none() && out.get("overlay_png").is_none());
 }
 
 /// Reviewer re-test case: a 60 x 60 opaque PNG with a white 40 x 40 square and a single
@@ -487,4 +497,26 @@ fn a_light_jpeg_keeps_its_part() {
     );
     let out = run(&mut s, "inspect.compare_picture", json!({"reference": path, "view": "front", "overlay": false}));
     assert!(out["overlap"].as_f64().unwrap() > 0.9, "overlap {}", out["overlap"]);
+}
+
+/// #19138: a phone photo stored turned (EXIF orientation 6) is measured as it is shown: a 280 x 200
+/// file tagged "turn it" answers as the 200 x 280 picture, not as one lying on its side.
+#[test]
+fn an_exif_orientation_is_applied_to_the_reference() {
+    let mut s = Session::default();
+    box_body(&mut s, "Box", 20.0, 10.0, 30.0);
+    let part = |x0: usize, y0: usize, x1: usize, y1: usize| {
+        move |x: usize, y: usize| if (x0..x1).contains(&x) && (y0..y1).contains(&y) { [255, 255, 255] } else { [200, 200, 200] }
+    };
+    let plain = reference("upright.jpg", &jpeg(200, 280, part(20, 20, 180, 260)));
+    // The same part as it is stored turned a quarter: 280 wide, 200 tall.
+    let stored = crate::upright_image::tagged(&jpeg(280, 200, part(20, 20, 260, 180)), 6);
+    let turned = reference("exif6.jpg", &stored);
+    let mut size = |path: &str| {
+        let out = run(&mut s, "inspect.compare_picture", json!({"reference": path, "view": "front", "overlay": false}));
+        (out["picture"]["width"].as_u64().unwrap(), out["picture"]["height"].as_u64().unwrap())
+    };
+    let upright = size(&plain);
+    assert_eq!(size(&turned), upright, "the tagged file is the same picture as the upright one");
+    assert!(upright.1 > upright.0, "{upright:?}");
 }

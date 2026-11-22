@@ -1,0 +1,50 @@
+{
+  "en": {
+    "cmd.tab.view.close_others": "Close Other Views",
+    "cmd.tab.view.close_right": "Close Views to the Right",
+    "view_menu.open": "Open view menu",
+    "view_menu.return": "Return to this window"
+  },
+  "ar": {
+    "cmd.tab.view.close_others": "إغلاق العروض الأخرى",
+    "cmd.tab.view.close_right": "إغلاق العروض على اليمين",
+    "view_menu.open": "فتح قائمة العرض",
+    "view_menu.return": "العودة إلى هذه النافذة"
+  },
+  "de": {
+    "cmd.tab.view.close_others": "Andere Ansichten schließen",
+    "cmd.tab.view.close_right": "Ansichten rechts schließen",
+    "view_menu.open": "Ansichtsmenü öffnen",
+    "view_menu.return": "In dieses Fenster zurückholen"
+  },
+  "he": {
+    "cmd.tab.view.close_others": "סגירת התצוגות האחרות",
+    "cmd.tab.view.close_right": "סגירת התצוגות מימין",
+    "view_menu.open": "פתיחת תפריט התצוגה",
+    "view_menu.return": "החזרה לחלון זה"
+  },
+  "ja": {
+    "cmd.tab.view.close_others": "他のビューを閉じる",
+    "cmd.tab.view.close_right": "右側のビューを閉じる",
+    "view_menu.open": "ビューメニューを開く",
+    "view_menu.return": "このウィンドウに戻す"
+  },
+  "ko": {
+    "cmd.tab.view.close_others": "다른 뷰 닫기",
+    "cmd.tab.view.close_right": "오른쪽 뷰 닫기",
+    "view_menu.open": "뷰 메뉴 열기",
+    "view_menu.return": "이 창으로 돌아오기"
+  },
+  "vi": {
+    "cmd.tab.view.close_others": "Đóng các chế độ xem khác",
+    "cmd.tab.view.close_right": "Đóng các chế độ xem bên phải",
+    "view_menu.open": "Mở menu chế độ xem",
+    "view_menu.return": "Đưa về cửa sổ này"
+  },
+  "zh": {
+    "cmd.tab.view.close_others": "关闭其他视图",
+    "cmd.tab.view.close_right": "关闭右侧视图",
+    "view_menu.open": "打开视图菜单",
+    "view_menu.return": "移回此窗口"
+  }
+}

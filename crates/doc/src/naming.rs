@@ -33,8 +33,6 @@ pub struct NamingOrigin {
     pub depth: usize,
     /// Instance transforms of a pattern or mirror (its copies are named after their sources).
     pub mats: Vec<crate::Mat>,
-    /// The sheet metal bodies after a sheet feature (their folds place moved faces).
-    pub sheets: Vec<crate::sheet::SheetBody>,
 }
 
 /// The lazily computed names of a body, shared by its clones.
@@ -164,10 +162,6 @@ const MAX_DEPTH: usize = 400;
 
 /// Up to this many sample points per face.
 const SAMPLES: usize = 9;
-
-/// Up to this many sample points per face where a sheet's panel kept in place names the face it is
-/// part of (see [`geometric_names`]).
-const PANEL_SAMPLES: usize = 256;
 
 /// Unit normals of each face's triangles.
 fn normals(m: &Mesh, nf: usize) -> Vec<Vec<Vec3>> {
@@ -537,6 +531,96 @@ fn predecessor(b: &ModelBody) -> Option<&ModelBody> {
     o.before.body(&b.name)
 }
 
+/// The input of a non-copy rigid transform whose exact history keeps every face and edge
+/// one-to-one. Compatibility names may cross these steps, never a copy or a topology edit.
+pub(crate) fn rigid_predecessor(b: &ModelBody) -> Option<&ModelBody> {
+    use solidcraft_kernel::history::{EdgeOrigin, FaceOrigin};
+
+    let origin = b.names.origin.as_ref()?;
+    let bodies = match &origin.feature.kind {
+        FeatureKind::Move { bodies, copy: false, .. } | FeatureKind::Align { bodies, .. } => bodies,
+        _ => return None,
+    };
+    if !bodies.iter().any(|name| *name == b.name) {
+        return None;
+    }
+    let lineage = b.names.lineage.as_ref()?;
+    let [operand] = lineage.operands.as_slice() else { return None };
+    let crate::lineage::Operand::Body(name) = operand.as_ref() else { return None };
+    let source = origin.before.body(name)?;
+    let history = &lineage.history;
+    if history.operands != 1 || history.faces.len() != b.body.face_count() || history.edges.len() != b.body.edge_count() {
+        return None;
+    }
+    fn permutation(indices: impl Iterator<Item = Option<usize>>, count: usize) -> bool {
+        let mut seen = vec![false; count];
+        for index in indices {
+            let Some(slot) = index.and_then(|i| seen.get_mut(i)) else { return false };
+            if std::mem::replace(slot, true) {
+                return false;
+            }
+        }
+        seen.into_iter().all(|found| found)
+    }
+    let faces = history.faces.iter().map(|face| match face.origins.as_slice() {
+        [FaceOrigin::Face { operand: 0, face }] => Some(*face),
+        _ => None,
+    });
+    let edges = history.edges.iter().map(|edge| match edge.origins.as_slice() {
+        [EdgeOrigin::Edge { operand: 0, edge }] => Some(*edge),
+        _ => None,
+    });
+    (permutation(faces, source.body.face_count()) && permutation(edges, source.body.edge_count())).then_some(source)
+}
+
+/// An edge's direct source through a non-copy rigid transform or join. Like exact naming,
+/// follow only Body and intermediate Stage operands, never Copy, Inner or newly made geometry.
+pub(crate) fn inherited_edge_predecessor(b: &ModelBody, edge: usize) -> Option<(&ModelBody, usize)> {
+    use crate::Operation;
+    use crate::lineage::Operand;
+    use solidcraft_kernel::history::EdgeOrigin;
+
+    let origin = b.names.origin.as_ref()?;
+    match &origin.feature.kind {
+        FeatureKind::Move { copy: false, .. } | FeatureKind::Align { .. } => {
+            rigid_predecessor(b)?;
+        }
+        FeatureKind::Combine { operation: Operation::Join | Operation::NewBody, .. }
+        | FeatureKind::Box { operation: Operation::Join, .. }
+        | FeatureKind::Cylinder { operation: Operation::Join, .. }
+        | FeatureKind::Cone { operation: Operation::Join, .. }
+        | FeatureKind::Sphere { operation: Operation::Join, .. }
+        | FeatureKind::Torus { operation: Operation::Join, .. }
+        | FeatureKind::Extrude { operation: Operation::Join, .. }
+        | FeatureKind::Revolve { operation: Operation::Join, .. }
+        | FeatureKind::Sweep { operation: Operation::Join, .. }
+        | FeatureKind::Loft { operation: Operation::Join, .. }
+        | FeatureKind::Pipe { operation: Operation::Join, .. }
+        | FeatureKind::Coil { operation: Operation::Join, .. }
+        | FeatureKind::BoundaryFill { operation: Operation::Join, .. }
+        | FeatureKind::Thicken { operation: Operation::Join, .. }
+        | FeatureKind::SurfaceNetwork { operation: Operation::Join, .. } => {}
+        _ => return None,
+    }
+    let mut lineage = b.names.lineage.as_deref()?;
+    let mut edge = edge;
+    for _ in 0..MAX_DEPTH {
+        let [EdgeOrigin::Edge { operand, edge: source_edge }] = lineage.history.edges.get(edge)?.origins.as_slice() else { return None };
+        match lineage.operands.get(*operand)?.as_ref() {
+            Operand::Body(name) => {
+                let source = origin.before.body(name)?;
+                return (*source_edge < source.body.edge_count()).then_some((source, *source_edge));
+            }
+            Operand::Stage(stage) => {
+                edge = *source_edge;
+                lineage = &stage.lineage;
+            }
+            _ => return None,
+        }
+    }
+    None
+}
+
 /// Work out the names of the earlier versions of `b` that are not known yet, oldest first and
 /// every [`WARM_STEP`]th, so that naming `b` never recurses through more than that many of them.
 /// A body's names are found from the names of the body it was made from, which are found the
@@ -685,38 +769,6 @@ pub(crate) fn geometric_names(b: &ModelBody, o: &NamingOrigin, nf: usize) -> Vec
             names = got.into_iter().map(|n| n.map(|n| format!("{n}@F{fid}.{}", k + 1))).collect();
         }
     }
-    // A sheet feature that moved panels (a fold, an unfold): faces it carried along lie on the
-    // faces they were, taken back through the panel they are on.
-    if let (Some(after), Some(before), Some(input)) = (
-        o.sheets.iter().find(|s| s.body == b.name),
-        o.before.sheets.iter().find(|s| s.body == b.name),
-        inputs.iter().find(|(x, _, _)| x.name == b.name),
-    ) {
-        let input = std::slice::from_ref(input);
-        let mut dense: Option<Vec<Vec<Vec3>>> = None;
-        for (fi, (name, ps)) in names.iter_mut().zip(&pts).enumerate() {
-            if name.is_some() {
-                continue;
-            }
-            // The panel the feature kept in place (the base an unfold lays the flanges out beside)
-            // lies on its own face before, and that face names the whole face it is part of now:
-            // a flat face spans that panel, the panels laid out beside it and the bend strips
-            // between them, whatever share of it they take. The few sample points above may all
-            // miss it (a bend strip is many small triangles), so the face is looked at closer.
-            let dense = dense.get_or_insert_with(|| samples_up_to(&m, nf, PANEL_SAMPLES));
-            if let Some(kept) = dense.get(fi).and_then(|ps| plurality(ps, input, tol)) {
-                *name = Some(kept);
-                continue;
-            }
-            // A point on a bend lies on no panel and has no place before; the face's other points
-            // do. At least half of them must, so a face that is mostly bend is not named from a
-            // few points.
-            let back: Vec<Vec3> = ps.iter().filter_map(|p| after.point_before(before, *p)).collect();
-            if !back.is_empty() && back.len() * 2 >= ps.len() {
-                *name = vote(&back, input, tol, None);
-            }
-        }
-    }
     // A feature that built a tool and reported no history. Two meshes of one curved face are only
     // as close as their chord tolerances, which follow the body's size: a tool that makes the body
     // bigger divides its round walls differently, and those walls miss their own faces at `tol`.
@@ -831,28 +883,6 @@ fn vote(ps: &[Vec3], inputs: &[(&ModelBody, FaceIndex, Arc<Vec<String>>)], tol: 
     }
     votes.sort_by(|a, b| b.1.cmp(&a.1).then_with(|| a.0.cmp(&b.0)));
     votes.first().filter(|(_, n)| *n * 2 >= ps.len().max(1) && votes.get(1).is_none_or(|(_, other)| n > other)).map(|(n, _)| n.clone())
-}
-
-/// The input face the most of `ps` lie on (pieces counted as their face), if at least two and a
-/// sixteenth of them lie on one: the face a sheet's unmoved panel was part of.
-fn plurality(ps: &[Vec3], inputs: &[(&ModelBody, FaceIndex, Arc<Vec<String>>)], tol: f64) -> Option<String> {
-    let mut votes: Vec<(String, usize)> = Vec::new();
-    for p in ps {
-        for (_, idx, nm) in inputs {
-            if let Some(f) = idx.face_at(*p, tol)
-                && let Some(n) = nm.get(f)
-            {
-                let n = strip_piece(n);
-                match votes.iter_mut().find(|(v, _)| v == n) {
-                    Some(v) => v.1 += 1,
-                    None => votes.push((n.to_string(), 1)),
-                }
-                break;
-            }
-        }
-    }
-    votes.sort_by(|a, b| b.1.cmp(&a.1).then_with(|| a.0.cmp(&b.0)));
-    votes.first().filter(|(_, n)| *n >= 2 && *n * 16 >= ps.len()).map(|(n, _)| n.clone())
 }
 
 /// A face name without its piece qualifiers: the face it is a piece of (`F2:top` for
@@ -1418,6 +1448,41 @@ mod tests {
     }
 
     #[test]
+    fn rigid_predecessor_requires_a_non_copy_transform_and_bijective_history() {
+        use crate::lineage::Operand;
+        let body = solidcraft_kernel::box_solid(Vec3::ZERO, Vec3::new(4., 2., 1.)).unwrap();
+        let source = ModelBody::new("Box".into(), body.clone(), 1);
+        let before = Arc::new(ModelState::default().with_bodies(vec![source.clone()]));
+        let feature: Feature = serde_json::from_value(serde_json::json!({
+            "id": 2, "name": "Move", "type": "move", "bodies": ["Box"], "translate": ["0 mm", "0 mm", "0 mm"]
+        }))
+        .unwrap();
+        let mut lineage = Lineage::of(&body, Operand::Body("Box".into()));
+        // A rigid transform is allowed to reorder entities: the map must be bijective,
+        // rather than requiring that every index remain at its old position.
+        lineage.history.faces.swap(0, 1);
+        lineage.history.edges.swap(0, 1);
+        let made = |feature: Feature, lineage: Option<Lineage>| {
+            let mut moved = source.clone();
+            let origin = Arc::new(NamingOrigin { feature, before: before.clone(), depth: 1, mats: Vec::new() });
+            moved.names = NameCell::traced(Some(origin), lineage.map(Arc::new));
+            moved
+        };
+        assert!(rigid_predecessor(&made(feature.clone(), Some(lineage.clone()))).is_some());
+        assert!(rigid_predecessor(&made(feature.clone(), None)).is_none(), "no history is no proof");
+        let mut copied = feature.clone();
+        let FeatureKind::Move { copy, .. } = &mut copied.kind else { panic!("Move") };
+        *copy = true;
+        assert!(rigid_predecessor(&made(copied, Some(lineage.clone()))).is_none(), "a copy has its own names");
+        let mut duplicate = lineage.clone();
+        duplicate.history.faces[1].origins = duplicate.history.faces[0].origins.clone();
+        assert!(rigid_predecessor(&made(feature.clone(), Some(duplicate))).is_none(), "two faces from one source are not a rigid move");
+        let mut missing = lineage.clone();
+        missing.history.edges[0].origins.clear();
+        assert!(rigid_predecessor(&made(feature, Some(missing))).is_none(), "an edge with no source is not a rigid move");
+    }
+
+    #[test]
     fn cached_face_lookups_schedule_no_name_warmup() {
         let st = lookup_bodies();
         for b in &st.bodies {
@@ -1606,8 +1671,7 @@ mod tests {
         let mut weak = vec![Arc::downgrade(&state)];
         for depth in 0..count {
             let mut next = body.clone();
-            next.names =
-                NameCell::new(Some(Arc::new(NamingOrigin { feature: feature.clone(), before: state, depth, mats: Vec::new(), sheets: Vec::new() })));
+            next.names = NameCell::new(Some(Arc::new(NamingOrigin { feature: feature.clone(), before: state, depth, mats: Vec::new() })));
             let mut next_state = ModelState::default();
             next_state.bodies.push(next);
             state = Arc::new(next_state);

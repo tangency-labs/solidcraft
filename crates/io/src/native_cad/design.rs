@@ -364,6 +364,7 @@ impl Builder {
                 direction,
                 distance2: second.map(mm),
                 start_offset: None,
+                symmetric_offset: false,
                 through_all: through,
                 taper: None,
                 to: None,
@@ -622,6 +623,7 @@ impl Builder {
                     return Err(format!("{name}: a variable radius fillet is not rebuilt yet"));
                 }
                 FeatureKind::Fillet {
+                    edge_radii: Vec::new(),
                     edges,
                     radius: mm(f(r, "radius").ok_or_else(|| format!("{name}: no radius"))?),
                     body: Some(body.into()),

@@ -1,5 +1,8 @@
-;; Original test component. `home` inserts a box and calls view.home. `edit` inserts a box
-;; farther away and calls no view command. Any other entry calls view.home and then traps.
+;; Original test component. `fit` passes its parameters to solid.box, then calls view.home and
+;; view.fit (the last view command wins). `home` inserts a box and calls view.home. `edit` inserts a box
+;; farther away and calls no view command. `place` makes a component with a box in it and moves
+;; the component 100 mm along X. `move` only moves an existing component.
+;; `both` moves the existing component and makes a box. Any other entry calls view.home and then traps.
 (component
   (type $ty-PLUGIN_PACKAGE/types@PLUGIN_VERSION (;0;)
     (instance
@@ -9,7 +12,7 @@
       (export "command-failure" (type $command-failure-export (eq $command-failure)))
       (type $field-failure (record (field "field" string) (field "reason" string)))
       (export "field-failure" (type $field-failure-export (eq $field-failure)))
-      (type $plugin-error (variant (case "permission-denied" string) (case "command-failed" $command-failure-export) (case "limit-exceeded" string) (case "invalid-manifest" $field-failure-export) (case "invalid-input" $field-failure-export) (case "trap" string) (case "cancelled")))
+      (type $plugin-error (variant (case "permission-denied" string) (case "command-failed" $command-failure-export) (case "limit-exceeded" string) (case "invalid-manifest" $field-failure-export) (case "invalid-input" $field-failure-export) (case "trap" string) (case "cancelled") (case "unsupported" string)))
       (export "plugin-error" (type (eq $plugin-error)))
     )
   )
@@ -76,8 +79,154 @@
       i32.const 0
       call $run
     )
-    (func $execute (;5;) (type 1) (param i32 i32 i32 i32) (result i32)
+    (func $fit (type 2)
+      i32.const 660
+      i32.const 8
+      i32.const 1400
+      i32.const 2
+      i32.const 0
+      call $run
+    )
+    (func $place (;5;) (type 2)
+      i32.const 700
+      i32.const 16
+      i32.const 1500
+      i32.const 32
+      i32.const 0
+      call $run
+      call $box_origin
+      i32.const 760
+      i32.const 15
+      i32.const 1600
+      i32.const 45
+      i32.const 0
+      call $run
+    )
+    (func $move (type 2)
+      i32.const 760
+      i32.const 15
+      i32.const 1600
+      i32.const 45
+      i32.const 0
+      call $run
+    )
+    (func $sketch_far (type 2)
+      i32.const 1800
+      i32.const 13
+      i32.const 2000
+      i32.const 14
+      i32.const 0
+      call $run
+      i32.const 1830
+      i32.const 26
+      i32.const 2040
+      i32.const 29
+      i32.const 0
+      call $run
+      i32.const 1870
+      i32.const 13
+      i32.const 1400
+      i32.const 2
+      i32.const 0
+      call $run
+    )
+    (func $execute (;6;) (type 1) (param i32 i32 i32 i32) (result i32)
       (local i32)
+      ;; A consumed sketch's construction line must not widen Fit's extruded rectangle.
+      local.get 0
+      i32.load8_u
+      i32.const 99
+      i32.eq
+      if
+        i32.const 1800
+        i32.const 13
+        i32.const 2000
+        i32.const 14
+        i32.const 0
+        call $run
+        i32.const 1830
+        i32.const 26
+        i32.const 2200
+        i32.const 25
+        i32.const 0
+        call $run
+        i32.const 1900
+        i32.const 11
+        i32.const 2250
+        i32.const 50
+        i32.const 0
+        call $run
+        i32.const 1870
+        i32.const 13
+        i32.const 1400
+        i32.const 2
+        i32.const 0
+        call $run
+        i32.const 1920
+        i32.const 13
+        i32.const 2300
+        i32.const 15
+        i32.const 0
+        call $run
+        call $fit
+        i32.const 0
+        return
+      end
+      ;; Sketch/Fit and empty/Home entries switch to a solid when their sole field is true.
+      local.get 0
+      i32.load8_u
+      i32.const 115
+      i32.eq
+      local.get 0
+      i32.load8_u
+      i32.const 122
+      i32.eq
+      i32.or
+      if
+        local.get 2
+        i32.const 9
+        i32.add
+        i32.load8_u
+        i32.const 116
+        i32.eq
+        if
+          call $box_far
+        else
+          local.get 0
+          i32.load8_u
+          i32.const 115
+          i32.eq
+          if
+            call $sketch_far
+          end
+        end
+        local.get 0
+        i32.load8_u
+        i32.const 115
+        i32.eq
+        if
+          call $fit
+        else
+          call $home
+        end
+        i32.const 0
+        return
+      end
+      local.get 1
+      i32.const 3
+      i32.eq
+      if
+        i32.const 512
+        i32.const 9
+        local.get 2
+        local.get 3
+        i32.const 0
+        call $run
+        call $home
+        call $fit
+        i32.const 0
+        return
+      end
       local.get 0
       i32.load8_u
       local.tee 4
@@ -93,17 +242,54 @@
         if
           call $box_far
         else
-          call $home
-          unreachable
+          local.get 4
+          i32.const 112
+          i32.eq
+          if
+            call $place
+          else
+            local.get 4
+            i32.const 109
+            i32.eq
+            if
+              call $move
+            else
+              local.get 4
+              i32.const 98
+              i32.eq
+              if
+                call $move
+                call $box_far
+              else
+                call $home
+                unreachable
+              end
+            end
+          end
         end
       end
       i32.const 0
     )
     (data (;0;) (i32.const 512) "solid.box")
     (data (;1;) (i32.const 640) "view.home")
+    (data (i32.const 660) "view.fit")
     (data (;2;) (i32.const 1024) "{\22length\22:10,\22width\22:10,\22height\22:10,\22corner\22:[0,0,0],\22operation\22:\22new_body\22}")
     (data (;3;) (i32.const 1200) "{\22length\22:10,\22width\22:10,\22height\22:10,\22corner\22:[20,0,0],\22operation\22:\22new_body\22}")
     (data (;4;) (i32.const 1400) "{}")
+    (data (;5;) (i32.const 700) "component.create")
+    (data (;6;) (i32.const 760) "occurrence.move")
+    (data (;7;) (i32.const 1500) "{\22name\22:\22Part\22,\22grounded\22:false}")
+    (data (;8;) (i32.const 1600) "{\22occurrence\22:\22Part:1\22,\22translate\22:[100,0,0]}")
+    (data (i32.const 1800) "sketch.create")
+    (data (i32.const 1830) "sketch.rectangle.two_point")
+    (data (i32.const 1870) "sketch.finish")
+    (data (i32.const 2000) "{\22plane\22:\22XY\22}")
+    (data (i32.const 2040) "{\22p0\22:[100,20],\22p1\22:[120,30]}")
+    (data (i32.const 1900) "sketch.line")
+    (data (i32.const 1920) "solid.extrude")
+    (data (i32.const 2200) "{\22p0\22:[0,0],\22p1\22:[10,10]}")
+    (data (i32.const 2250) "{\22points\22:[[100,20],[120,30]],\22construction\22:true}")
+    (data (i32.const 2300) "{\22distance\22:10}")
     (@producers
       (processed-by "wit-component" "0.254.0")
     )

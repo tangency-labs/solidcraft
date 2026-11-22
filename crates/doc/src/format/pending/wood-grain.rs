@@ -2,3 +2,5 @@
 //! an explicit absence of grain. Older designs keep frame-member grain along their member
 //! axes and leave other bodies without grain. The last release warns about the newer format,
 //! opens what it understands and preserves the fields it cannot read on the next save.
+//! Model caches save a grain frame only for bodies that have grain and mark themselves with
+//! grain_frames; a cache without the mark predates grain frames.

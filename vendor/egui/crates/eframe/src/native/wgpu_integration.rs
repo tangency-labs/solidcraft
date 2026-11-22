@@ -526,7 +526,12 @@ impl WinitApp for WgpuWinitApp<'_> {
                         .values_mut()
                         .find_map(|viewport| viewport.on_mouse_motion(*delta))
                 })
-                && winit_integration::repaint_for_device_event(running.app.as_mut(), &event, true)
+                && winit_integration::repaint_for_device_event(
+                    running.app.as_mut(),
+                    &event,
+                    true,
+                    shared.viewport_from_window.get(&window_id).copied(),
+                )
             {
                 return Ok(EventResult::RepaintNext(window_id));
             }
@@ -1068,8 +1073,12 @@ impl WgpuWinitRunning<'_> {
             })
             .unwrap_or_default();
 
-        let repaint =
-            winit_integration::repaint_for_event(app.as_mut(), event, event_response.repaint);
+        let repaint = winit_integration::repaint_for_event(
+            app.as_mut(),
+            event,
+            event_response.repaint,
+            viewport_id,
+        );
 
         if integration.should_close() {
             EventResult::CloseRequested

@@ -1059,7 +1059,7 @@ fn round_trip(
 /// #16735: every `corpus.parity` volume the closure moved, as read and round-tripped,
 /// passes the three checks (module doc of `support/volume_leak.rs`). Heavy (116 files,
 /// each measured at four origins and its trims sampled): run with
-/// `cargo test --profile goldens -p solidcore --test issue_16735_volume_moves_are_the_old_leak -- --ignored`
+/// `cargo test --profile goldens -p solidcore --test blend -- --ignored issue_16735_volume_moves_are_the_old_leak::`
 /// from `solidcore/` with `upstream/` cloned (the goldens' own requirement).
 #[test]
 #[ignore = "heavy: 116 corpus files; needs upstream/TestFiles"]
