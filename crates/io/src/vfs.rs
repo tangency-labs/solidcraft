@@ -91,40 +91,43 @@ mod imp {
         touched();
         std::fs::create_dir_all(path)
     }
-    /// The paths of the regular files directly in a folder, sorted; at most `max` of them.
-    pub fn files_in(dir: &str, max: usize) -> Result<Vec<String>> {
+    /// The entries directly in a folder whose type `keep` takes, with their paths, sorted by path;
+    /// more than `max` of them is an error (`too_many`). A link's type is the link's, never its target's.
+    fn entries_in(dir: &str, max: usize, keep: fn(&std::fs::FileType) -> bool, too_many: &str) -> Result<Vec<(String, std::fs::DirEntry)>> {
         check(dir)?;
         touched();
         let mut out = Vec::new();
         for entry in std::fs::read_dir(dir)? {
             let entry = entry?;
-            if entry.file_type()?.is_file() {
-                out.push(entry.path().to_string_lossy().into_owned());
+            if keep(&entry.file_type()?) {
+                out.push((entry.path().to_string_lossy().into_owned(), entry));
                 if out.len() > max {
-                    return Err(Error::new(ErrorKind::InvalidData, "too many files in the folder"));
+                    return Err(Error::new(ErrorKind::InvalidData, too_many.to_string()));
                 }
             }
         }
-        out.sort();
+        out.sort_by(|a, b| a.0.cmp(&b.0));
         Ok(out)
+    }
+    /// The paths of the regular files directly in a folder, sorted; at most `max` of them.
+    pub fn files_in(dir: &str, max: usize) -> Result<Vec<String>> {
+        Ok(entries_in(dir, max, std::fs::FileType::is_file, "too many files in the folder")?.into_iter().map(|(path, _)| path).collect())
+    }
+    /// [`files_in`] with each file's length and modification time, from the listing itself (on
+    /// Windows the folder read already holds them; elsewhere one `stat` per file, no file opened).
+    pub fn stamped_files_in(dir: &str, max: usize) -> Result<Vec<Stamped>> {
+        entries_in(dir, max, std::fs::FileType::is_file, "too many files in the folder")?
+            .into_iter()
+            .map(|(path, entry)| {
+                let meta = entry.metadata()?;
+                Ok(Stamped { path, len: meta.len(), modified: meta.modified().ok() })
+            })
+            .collect()
     }
     /// The paths of the folders directly in a folder, sorted; at most `max` of them. A link to a
     /// folder is not one (its file type is the link's), so a listing never leaves `dir`.
     pub fn dirs_in(dir: &str, max: usize) -> Result<Vec<String>> {
-        check(dir)?;
-        touched();
-        let mut out = Vec::new();
-        for entry in std::fs::read_dir(dir)? {
-            let entry = entry?;
-            if entry.file_type()?.is_dir() {
-                out.push(entry.path().to_string_lossy().into_owned());
-                if out.len() > max {
-                    return Err(Error::new(ErrorKind::InvalidData, "too many folders in the folder"));
-                }
-            }
-        }
-        out.sort();
-        Ok(out)
+        Ok(entries_in(dir, max, std::fs::FileType::is_dir, "too many folders in the folder")?.into_iter().map(|(path, _)| path).collect())
     }
 }
 
@@ -203,6 +206,10 @@ mod imp {
         }
         Ok(out)
     }
+    /// [`files_in`] with each file's length; browser storage keeps no times.
+    pub fn stamped_files_in(dir: &str, max: usize) -> Result<Vec<Stamped>> {
+        Ok(files_in(dir, max)?.into_iter().map(|path| Stamped { len: len(&path).unwrap_or(0), path, modified: None }).collect())
+    }
     /// The folders directly in a folder, sorted; at most `max` of them. A folder here is a path
     /// part that some stored file sits under, so a folder no file sits under is not there.
     pub fn dirs_in(dir: &str, max: usize) -> Result<Vec<String>> {
@@ -223,6 +230,15 @@ mod imp {
 }
 
 pub use imp::*;
+
+/// A file in a folder listing, with what tells whether it changed: its length and its
+/// modification time (`None` where none is kept: browser storage, some drives).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Stamped {
+    pub path: String,
+    pub len: u64,
+    pub modified: Option<std::time::SystemTime>,
+}
 
 /// The folders an agent's commands may read, write and delete in (an MCP server's, see
 /// docs/mcp.md). While a scope is active on this thread ([`scoped`]), every file call here
@@ -604,7 +620,7 @@ pub fn windows_refusal(path: &str) -> Option<&'static str> {
 }
 
 /// Whether a file or folder name is one Windows keeps for a device (`NUL`, `com1.txt`, `Con .x`).
-fn device_name(name: &str) -> bool {
+pub(crate) fn device_name(name: &str) -> bool {
     let stem = name.split('.').next().unwrap_or("").trim_end_matches([' ', '.']).to_uppercase();
     let numbered =
         |p: &str| stem.strip_prefix(p).is_some_and(|n| matches!(n, "0" | "1" | "2" | "3" | "4" | "5" | "6" | "7" | "8" | "9" | "¹" | "²" | "³"));
@@ -756,6 +772,15 @@ pub fn check_design_path(path: &str, design: Option<&str>) -> Result<()> {
     check(path)
 }
 
+/// [`check_design_path`] for a file or folder about to be made: judged from its text the same
+/// way, then the agent's scope as a new destination ([`check_new`]), whose folders need not exist.
+pub fn check_new_design_path(path: &str, design: Option<&str>) -> Result<()> {
+    if let Some(why) = design_path_refusal(path, design) {
+        return Err(design_path_error(path, &why));
+    }
+    check_new(path)
+}
+
 /// [`read`] of a path a design names ([`check_design_path`] first).
 pub fn read_design_path(path: &str, design: Option<&str>, max: usize) -> Result<Vec<u8>> {
     check_design_path(path, design)?;
@@ -793,8 +818,15 @@ fn touched() {
 }
 
 /// Whether a file or folder name looks like a short (8.3) name: a `~` and a digit (`PROGRA~1`).
-fn short_name(name: &str) -> bool {
+pub(crate) fn short_name(name: &str) -> bool {
     name.as_bytes().windows(2).any(|w| w[0] == b'~' && w[1].is_ascii_digit())
+}
+
+/// Whether `c` is a format character (Unicode category Cf: the bidirectional controls, zero-width
+/// joiners, the byte order mark): it shows nothing, so a name holding one can read as another.
+pub(crate) fn invisible(c: char) -> bool {
+    use unicode_properties::{GeneralCategory, UnicodeGeneralCategory};
+    c.general_category() == GeneralCategory::Format
 }
 
 /// `path` spelled with long names, for the folders SolidCraft derives from the environment

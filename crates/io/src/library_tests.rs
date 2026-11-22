@@ -737,4 +737,353 @@ fn hostile_place_lists_and_library_files_are_refused_with_a_reason() {
         });
         put(&file, &good);
     }
+
+    // Writes with hostile names: each is refused with a reason, or reads back as it was written.
+    let writes = dir.path().join("writes");
+    shop(&writes, ID);
+    let mut libraries = libraries_of(vec![row(Place::Library(path(&writes)))]);
+    for name in names.iter().chain(["CON", "..", "a/b", "\u{202e}gpj.exe", "~1", "Steel", "steel"].iter()) {
+        let definition = Definition::Material(LibraryMaterial { name: name.to_string(), density_g_cm3: 1.0, appearance: None, physical_card: None });
+        match libraries.add_entry(ID, definition.clone(), Provenance::default()) {
+            Err(why) => assert!(!why.is_empty(), "{name:?}"),
+            Ok((next, written)) => {
+                let entry = next.set().get(written.entry.as_deref().unwrap_or_default()).unwrap_or_else(|| panic!("{name:?}: {written:?}"));
+                assert_eq!(entry.definition, definition, "{name:?}");
+                assert!(writes.join(&written.file).is_file(), "{name:?}: {written:?}");
+                libraries = next;
+            }
+        }
+    }
+}
+/// The libraries of `rows`, each place scanned, as a session holds them.
+fn libraries_of(rows: Vec<PlaceRow>) -> Libraries {
+    let scans: Vec<Arc<Scanned>> = rows.iter().map(|r| Arc::new(scan(&r.place))).collect();
+    Libraries::new(Arc::new(scan(&Place::BuiltIn)), None, rows, &scans, &[])
+}
+fn library_in<'a>(libraries: &'a Libraries, id: &str) -> Option<&'a Library> {
+    libraries.set().libraries().find(|(l, _)| l.id() == Some(id)).map(|(l, _)| l)
+}
+fn steel(density: f64) -> Definition {
+    Definition::Material(LibraryMaterial { name: "Steel".into(), density_g_cm3: density, appearance: None, physical_card: None })
+}
+
+/// A new library gets a folder of its own in a folder place, or takes an empty library place, and
+/// the next command finds it. A name made twice gets a second folder and id, never the first's.
+#[test]
+fn a_new_library_is_made_in_its_own_folder_and_read_back_at_once() {
+    let dir = tempfile::tempdir().unwrap();
+    let place = path(&dir.path().join("libraries"));
+    let libraries = libraries_of(vec![row(Place::Folder(place.clone()))]);
+    let (libraries, made) = libraries.create_library(&place, "Shop", Provenance::default()).unwrap();
+    let expected = write::Written { library: "user.shop".into(), entry: None, revision: None, file: "Shop.sclibrary.json".into() };
+    assert_eq!(made, expected);
+    let folder = dir.path().join("libraries").join("Shop");
+    assert!(folder.join("Shop.sclibrary.json").is_file() && folder.join("materials").is_dir() && folder.join("appearances").is_dir());
+    assert_eq!(library_in(&libraries, "user.shop").and_then(Library::folder), Some(path(&folder).as_str()));
+    let (libraries, again) = libraries.create_library(&place, "shop", Provenance::default()).unwrap();
+    assert_eq!(again.library, "user.shop-2");
+    assert!(dir.path().join("libraries/shop (2)/shop.sclibrary.json").is_file());
+    assert_eq!(libraries.set().libraries().filter(|(_, s)| **s == Status::Available).count(), 3, "the built-in library and both");
+
+    // A library place: an empty folder becomes the library; a second one there, or a folder with
+    // anything in it, is refused.
+    let empty = dir.path().join("empty");
+    let full = dir.path().join("full");
+    std::fs::create_dir_all(&empty).unwrap();
+    put(&full.join("notes.txt"), b"someone's folder");
+    let places = [&empty, &full].map(|d| row(Place::Library(path(d))));
+    let libraries = libraries_of(places.to_vec());
+    let (libraries, _) = libraries.create_library(&path(&empty), "Bench", Provenance::default()).unwrap();
+    assert!(empty.join("Bench.sclibrary.json").is_file());
+    let err = libraries.create_library(&path(&empty), "Other", Provenance::default()).unwrap_err();
+    assert!(err.contains("holds a library already"), "{err}");
+    let err = libraries.create_library(&path(&full), "Other", Provenance::default()).unwrap_err();
+    assert!(err.contains("isn't empty"), "{err}");
+    assert_eq!(std::fs::read_dir(&full).unwrap().count(), 1, "nothing written");
+
+    // Refused before anything is written: a read-only place, a place not listed, a bad name.
+    let locked = dir.path().join("locked");
+    let libraries = libraries_of(vec![PlaceRow { place: Place::Folder(path(&locked)), read_only: true }]);
+    assert!(libraries.create_library(&path(&locked), "Shop", Provenance::default()).unwrap_err().contains("read-only"));
+    assert!(!locked.exists());
+    assert!(libraries.create_library(&path(&dir.path().join("elsewhere")), "Shop", Provenance::default()).unwrap_err().contains("no place"));
+    for name in [String::new(), "n".repeat(129)] {
+        assert!(libraries_of(vec![row(Place::Folder(place.clone()))]).create_library(&place, &name, Provenance::default()).is_err(), "{name:?}");
+    }
+}
+
+/// An entry is added under a new id, changed and removed only from the revision the caller read,
+/// and copied with its provenance; a removed file goes to the library's bin, which no scan reads.
+#[test]
+fn entries_are_added_changed_copied_and_moved_to_the_bin_by_the_revision_read() {
+    let dir = tempfile::tempdir().unwrap();
+    shop(dir.path(), ID);
+    let libraries = libraries_of(vec![row(Place::Library(path(dir.path())))]);
+    let (libraries, added) = libraries.add_entry(ID, steel(7.85), Provenance::default()).unwrap();
+    assert_eq!((added.entry.as_deref(), added.file.as_str()), (Some("user.shop/material-steel"), "materials/Steel.json"));
+    let revision = added.revision.clone().unwrap();
+    assert_eq!(libraries.set().get("user.shop/material-steel").map(|e| &e.revision), Some(&revision), "the next command sees it");
+    let (libraries, twin) = libraries.add_entry(ID, steel(7.85), Provenance::default()).unwrap();
+    assert_eq!((twin.entry.as_deref(), twin.file.as_str()), (Some("user.shop/material-steel-2"), "materials/Steel (2).json"));
+
+    // A change names the revision it was made from: any other is refused, and the file stays.
+    let stale = "0".repeat(64);
+    let err = libraries.edit_entry("user.shop/material-steel", &stale, steel(7.9), None).unwrap_err();
+    assert!(err.contains("changed since it was read"), "{err}");
+    let (libraries, edited) = libraries.edit_entry("user.shop/material-steel", &revision, steel(7.9), None).unwrap();
+    assert_eq!((edited.entry.as_deref(), edited.file.as_str()), (Some("user.shop/material-steel"), "materials/Steel.json"));
+    assert_ne!(edited.revision.as_ref(), Some(&revision), "the id stays, the revision follows the content");
+    assert!(libraries.edit_entry("user.shop/material-steel", &revision, steel(8.0), None).is_err(), "the old revision is stale now");
+    let blue = look(ID, "x", "Blue").definition;
+    let current = edited.revision.clone().unwrap();
+    assert!(libraries.edit_entry("user.shop/material-steel", &current, blue, None).unwrap_err().contains("kind can't change"));
+
+    // A copy from the built-in library keeps its definition and provenance, under an id of this library.
+    let source = libraries.set().entries().filter(|(l, _)| l.id() == Some(BUILT_IN_ID)).find_map(|(_, e)| e.entry().ok()).unwrap().clone();
+    let (libraries, copied) = libraries.copy_entry(&source.id, ID).unwrap();
+    let copy = libraries.set().get(copied.entry.as_deref().unwrap()).unwrap();
+    assert!(copy.id.starts_with("user.shop/"));
+    assert_eq!((&copy.definition, &copy.provenance), (&source.definition, &source.provenance));
+
+    // Removed: into the bin, out of every list. A second file of the same name never replaces it there.
+    assert!(libraries.remove_entry("user.shop/material-steel", &revision).unwrap_err().contains("changed since it was read"));
+    let (libraries, removed) = libraries.remove_entry("user.shop/material-steel", &current).unwrap();
+    assert_eq!(removed.file, format!("{}/materials/Steel.json", write::BIN));
+    assert!(!dir.path().join("materials/Steel.json").exists());
+    assert!(libraries.set().get("user.shop/material-steel").is_none());
+    let (libraries, again) = libraries.add_entry(ID, steel(7.7), Provenance::default()).unwrap();
+    assert_eq!(again.file, "materials/Steel.json");
+    let (libraries, _) = libraries.remove_entry(again.entry.as_deref().unwrap(), again.revision.as_deref().unwrap()).unwrap();
+    let bin = dir.path().join(write::BIN).join("materials");
+    assert_eq!(std::fs::read_dir(&bin).unwrap().count(), 2);
+    assert!(bin.join("Steel (2).json").is_file());
+    // The bin is not a library's: a fresh scan lists only the kind folders.
+    let fresh = library_at(dir.path());
+    assert_eq!(fresh.entries().len(), library_in(&libraries, ID).unwrap().entries().len());
+}
+
+/// Writes go only where they may, and only over the file a scan read: never the built-in library,
+/// a read-only place, an unavailable library, a file changed or removed since, nor past a cap.
+#[test]
+fn writes_refuse_read_only_places_the_built_in_library_and_files_changed_since_they_were_read() {
+    let dir = tempfile::tempdir().unwrap();
+    let (open, locked, twin) = (dir.path().join("open"), dir.path().join("locked"), dir.path().join("twin"));
+    shop(&open, ID);
+    shop(&locked, "user.locked");
+    shop(&twin, ID);
+    let rows =
+        vec![row(Place::Library(path(&open))), PlaceRow { place: Place::Library(path(&locked)), read_only: true }, row(Place::Library(path(&twin)))];
+    let libraries = libraries_of(rows);
+    let files = |d: &Path| std::fs::read_dir(d.join("materials")).unwrap().count();
+
+    assert!(libraries.add_entry("user.locked", steel(7.85), Provenance::default()).unwrap_err().contains("read-only place"));
+    assert_eq!(files(&locked), 2);
+    assert_eq!(libraries.add_entry(BUILT_IN_ID, steel(7.85), Provenance::default()).unwrap_err(), Reason::BuiltIn.to_string());
+    assert!(libraries.add_entry("user.nobody", steel(7.85), Provenance::default()).unwrap_err().contains("no library"));
+    // The second library with an id is unavailable, so the first is the one written.
+    let (_, written) = libraries.add_entry(ID, steel(7.85), Provenance::default()).unwrap();
+    assert_eq!((files(&open), files(&twin)), (3, 2), "{written:?}");
+
+    // Changed or removed behind the session's back: refused, the file as the other writer left it.
+    let pla = material(ID, "pla", "PLA", 1.24);
+    put_json(&open.join("materials/PLA.json"), &material(ID, "pla", "PLA", 1.3));
+    let err = libraries.edit_entry(&pla.id, &pla.revision, steel(1.0), None).unwrap_err();
+    assert!(err.contains("changed since it was read"), "{err}");
+    assert_eq!(std::fs::read(open.join("materials/PLA.json")).unwrap(), serde_json::to_vec_pretty(&material(ID, "pla", "PLA", 1.3)).unwrap());
+    std::fs::remove_file(open.join("materials/PLA.json")).unwrap();
+    assert!(libraries.remove_entry(&pla.id, &pla.revision).unwrap_err().contains("removed since it was read"));
+
+    // A write that would take the library past its cap would leave it unavailable: refused. Files a
+    // scan refuses still count, as a scan counts every byte it reads.
+    let full = dir.path().join("full");
+    shop(&full, "user.full");
+    let room = |used: u64| (LIMITS.library_bytes - used) as usize;
+    let used = || library_in(&libraries_of(vec![row(Place::Library(path(&full)))]), "user.full").unwrap().bytes;
+    for i in 0..15 {
+        put(&full.join(format!("materials/pad-{i:02}.json")), vec![b' '; LIMITS.entry_bytes as usize]);
+    }
+    put(&full.join("materials/pad-last.json"), vec![b' '; room(used()) - 100]);
+    let libraries = libraries_of(vec![row(Place::Library(path(&full)))]);
+    assert!(library_in(&libraries, "user.full").is_some_and(|l| l.status() == &Status::Available), "at its cap, still read");
+    assert!(libraries.add_entry("user.full", steel(7.85), Provenance::default()).unwrap_err().contains("would be larger"));
+
+    // A kind folder at its cap: one more file would make the library unavailable.
+    let many = dir.path().join("many");
+    shop(&many, "user.many");
+    for i in 0..LIMITS.entries_per_kind - 2 {
+        put(&many.join(format!("materials/{i:04}.txt")), b"");
+    }
+    let libraries = libraries_of(vec![row(Place::Library(path(&many)))]);
+    assert!(libraries.add_entry("user.many", steel(7.85), Provenance::default()).unwrap_err().contains("holds the most entries"));
+}
+
+/// A library place on a network location takes no write either, and nothing is asked of the network.
+#[test]
+fn a_library_cannot_be_made_on_a_network_location() {
+    let place = r"\\evil.example\libs";
+    let libraries = libraries_of(vec![row(Place::Folder(place.into()))]);
+    let calls = crate::vfs::file_calls();
+    let err = libraries.create_library(place, "Shop", Provenance::default()).unwrap_err();
+    assert!(err.contains(r"network location \\evil.example"), "{err}");
+    assert_eq!(crate::vfs::file_calls(), calls);
+}
+
+/// A change never writes through a link at the entry's name, even one to a file with the same
+/// content: the file the link points at stays as it was.
+#[cfg(unix)]
+#[test]
+fn a_change_never_writes_through_a_link_at_the_entrys_name() {
+    let dir = tempfile::tempdir().unwrap();
+    let lib = dir.path().join("lib");
+    shop(&lib, ID);
+    let libraries = libraries_of(vec![row(Place::Library(path(&lib)))]);
+    let pla = material(ID, "pla", "PLA", 1.24);
+    let outside = dir.path().join("outside.json");
+    std::fs::copy(lib.join("materials/PLA.json"), &outside).unwrap();
+    let before = std::fs::read(&outside).unwrap();
+    std::fs::remove_file(lib.join("materials/PLA.json")).unwrap();
+    std::os::unix::fs::symlink(&outside, lib.join("materials/PLA.json")).unwrap();
+    let _ = libraries.edit_entry(&pla.id, &pla.revision, steel(1.0), None);
+    let _ = libraries.remove_entry(&pla.id, &pla.revision);
+    assert_eq!(std::fs::read(&outside).unwrap(), before, "the linked file is untouched");
+}
+
+/// A new file's name works on every system SolidCraft runs on, hides no format character, and is
+/// never one the folder has, whatever the case.
+#[test]
+fn a_new_files_name_is_safe_on_every_system_and_never_one_already_there() {
+    let free = |_: &str| false;
+    for (name, file) in [
+        ("Steel S275", "Steel S275.json"),
+        ("a/b\\c:d*e?f\"g<h>i|j", "a_b_c_d_e_f_g_h_i_j.json"),
+        ("CON", "_CON.json"),
+        ("com1.x", "_com1.x.json"),
+        (" .hidden. ", "hidden.json"),
+        ("", "entry.json"),
+        ("...", "entry.json"),
+        ("PROGRA~1", "PROGRA-1.json"),
+        ("left\u{202e}txt.exe", "left_txt.exe.json"),
+        ("zero\u{200b}width\u{feff}", "zero_width_.json"),
+        ("tab\there", "tab_here.json"),
+    ] {
+        assert_eq!(write::file_name(name, free).as_deref(), Some(file), "{name:?}");
+    }
+    let long = write::file_name(&"é".repeat(300), free).unwrap();
+    assert!(long.len() <= 105 && long.ends_with(".json"), "{long}");
+    assert_eq!(write::file_name("Steel", |n| n == "steel.json").as_deref(), Some("Steel (2).json"));
+    assert_eq!(write::file_name("Steel", |_| true), None);
+}
+
+/// A changed-only refresh scans a place again only when a listing its scan made comes out
+/// different: an entry file's length or time, a file or folder added or gone, in a library place
+/// and in a folder place. A place whose files are as they were keeps its scan.
+#[test]
+fn a_place_is_scanned_again_only_when_a_listing_changed() {
+    let dir = tempfile::tempdir().unwrap();
+    let lib = dir.path().join("Shop");
+    shop(&lib, ID);
+    let first = scan(&Place::Library(path(&lib)));
+    assert_eq!(rescan_if_changed(&first), None, "nothing changed");
+    put_json(&lib.join("materials/PLA.json"), &material(ID, "pla", "PLA, dried", 1.25));
+    let edited = rescan_if_changed(&first).expect("an edited entry file");
+    assert_ne!(edited, first);
+    assert_eq!(rescan_if_changed(&edited), None, "the new scan's own listings");
+    // The same length, a later time: the time alone tells.
+    let file = lib.join("materials/PLA.json");
+    let text = std::fs::read_to_string(&file).unwrap().replace("1.25", "1.26");
+    let later = std::fs::metadata(&file).unwrap().modified().unwrap() + std::time::Duration::from_secs(5);
+    std::fs::write(&file, text).unwrap();
+    std::fs::File::options().write(true).open(&file).unwrap().set_modified(later).unwrap();
+    let edited = rescan_if_changed(&edited).expect("an edit that kept the length");
+    put_json(&lib.join("appearances/Red.json"), &look(ID, "red", "Red"));
+    let added = rescan_if_changed(&edited).expect("a new entry file");
+    assert_eq!(added.libraries()[0].entries().len(), 4);
+    std::fs::remove_file(lib.join("appearances/Red.json")).unwrap();
+    let removed = rescan_if_changed(&added).expect("an entry file gone");
+    std::fs::create_dir(lib.join("textures")).unwrap();
+    assert!(rescan_if_changed(&removed).is_some(), "a new folder beside the manifest");
+
+    // A folder place: a new library, and a folder that becomes one when a manifest appears in it.
+    let folder = dir.path().join("all");
+    shop(&folder.join("a"), "user.a");
+    let first = scan(&Place::Folder(path(&folder)));
+    assert_eq!(rescan_if_changed(&first), None);
+    std::fs::create_dir_all(folder.join("b")).unwrap();
+    let empty = rescan_if_changed(&first).expect("a new subfolder");
+    assert_eq!(empty.libraries().len(), 1, "a folder with no manifest isn't a library");
+    put_json(&folder.join("b/B.sclibrary.json"), &header("user.b"));
+    assert_eq!(rescan_if_changed(&empty).expect("a manifest in the subfolder").libraries().len(), 2);
+    assert_eq!(rescan_if_changed(&scan(&Place::BuiltIn)), None, "the built-in library never changes");
+}
+
+/// A place that goes missing, turns unreadable or goes over a cap between the scan and the check
+/// counts as changed, and so does one that comes back: the check lists through the scan's own path
+/// checks and caps, so it reaches the same outcome the next scan would.
+#[test]
+fn a_place_that_turns_unreadable_or_over_a_cap_or_comes_back_counts_as_changed() {
+    let dir = tempfile::tempdir().unwrap();
+    let lib = dir.path().join("Shop");
+    shop(&lib, ID);
+    let place = Place::Library(path(&lib));
+    let first = scan(&place);
+    let away = dir.path().join("away");
+    std::fs::rename(&lib, &away).unwrap();
+    let missing = rescan_if_changed(&first).expect("the folder gone");
+    assert_eq!(unavailable(missing.status()), Reason::Missing);
+    assert_eq!(rescan_if_changed(&missing), None, "still missing: nothing changed");
+    put(&lib, b"a file where the folder was");
+    let unreadable = rescan_if_changed(&missing).expect("unreadable now");
+    assert!(matches!(unavailable(unreadable.status()), Reason::Unreadable(_)), "{unreadable:?}");
+    assert_eq!(rescan_if_changed(&unreadable), None, "the same reason again");
+    std::fs::remove_file(&lib).unwrap();
+    std::fs::rename(&away, &lib).unwrap();
+    assert_eq!(rescan_if_changed(&unreadable).expect("back").status(), &Status::Available);
+
+    // Over a cap: the check uses the cap the scan used, both ways.
+    // Two subfolders and the manifest: within two of each.
+    let small = Limits { files_beside_manifest: 2, ..LIMITS };
+    let within = scan_with(&place, &small);
+    assert_eq!(within.libraries()[0].status(), &Status::Available);
+    put(&lib.join("notes.txt"), b"a second file");
+    assert_eq!(rescan_with(&within, &small).expect("a file more").status(), &Status::Available);
+    let within = scan_with(&place, &small);
+    put(&lib.join("more notes.txt"), b"a third file");
+    let over = rescan_with(&within, &small).expect("over the cap");
+    assert_eq!(unavailable(over.status()), Reason::OverLimit { cap: Cap::FilesBesideManifest, limit: 2 });
+    assert_eq!(rescan_with(&over, &small), None, "still over");
+    std::fs::remove_file(lib.join("more notes.txt")).unwrap();
+    assert_eq!(rescan_with(&over, &small).expect("within again").status(), &Status::Available);
+}
+
+/// The limit of a changed-only check, kept on purpose: an edit that keeps a file's length and its
+/// time (a drive that keeps time in 2 s steps, FAT, and an edit inside one step) isn't seen. The
+/// Refresh button scans again in full; this test pins the limit so a change to it is a choice.
+#[test]
+fn a_same_length_edit_at_the_same_time_is_left_to_the_full_rescan() {
+    let dir = tempfile::tempdir().unwrap();
+    shop(dir.path(), ID);
+    let file = dir.path().join("materials/PLA.json");
+    let when = std::fs::metadata(&file).unwrap().modified().unwrap();
+    let first = scan(&Place::Library(path(dir.path())));
+    let text = std::fs::read_to_string(&file).unwrap().replace("1.24", "1.25");
+    std::fs::write(&file, text).unwrap();
+    std::fs::File::options().write(true).open(&file).unwrap().set_modified(when).unwrap();
+    assert_eq!(rescan_if_changed(&first), None);
+    let full = scan(first.place());
+    assert_ne!(full, first, "the full rescan reads the edit");
+}
+
+/// A write leaves its place's scan current: the check after it finds nothing to scan again, so a
+/// window that checks on focus doesn't read a library it just wrote.
+#[test]
+fn a_write_leaves_its_place_current_for_the_check() {
+    let dir = tempfile::tempdir().unwrap();
+    let folder = dir.path().join("libraries");
+    shop(&folder.join("Shop"), ID);
+    let libraries = libraries_of(vec![row(Place::Folder(path(&folder)))]);
+    let (libraries, _) = libraries.add_entry(ID, steel(7.85), Provenance::default()).unwrap();
+    let written = libraries.set().places().get(1).unwrap();
+    assert_eq!(rescan_if_changed(written), None, "an added entry");
+    let (libraries, _) = libraries.create_library(&path(&folder), "Bench", Provenance::default()).unwrap();
+    assert_eq!(rescan_if_changed(libraries.set().places().get(1).unwrap()), None, "a new library");
 }

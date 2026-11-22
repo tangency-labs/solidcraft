@@ -55,6 +55,9 @@ gerber_parser = { version = "0.5.0", default-features = false }
 # Exact area of Gerber copper, mask and silkscreen layers (src/gerber_area.rs): closed polylines
 # with arc segments and booleans on them; pure Rust, no unsafe, MIT OR Apache-2.0.
 cavalier_contours = { version = "0.9.0", default-features = false }
+# Names SolidCraft makes for library files hide no format characters (src/vfs.rs, `invisible`);
+# already in the tree through stringprep.
+unicode-properties = { version = "0.1.5", default-features = false, features = ["general-category"] }
 # Sheet PDFs (src/paper/pdf.rs).
 pdf-writer = { workspace = true }
 flate2 = { workspace = true }

@@ -6346,6 +6346,7 @@ dependencies = [
  "tiny-skia",
  "trash",
  "unicode-normalization",
+ "unicode-properties",
  "zip",
 ]
 

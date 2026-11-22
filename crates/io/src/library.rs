@@ -1,5 +1,6 @@
 //! Material and appearance libraries read from their places (#12982): the built-in "SolidCraft"
-//! library, one library folder, or a folder of library folders. This module only reads.
+//! library, one library folder, or a folder of library folders. This module reads; [`write`]
+//! makes libraries and changes their entries.
 //!
 //! A library folder holds `<Library name>.sclibrary.json` (the library's id, name and provenance)
 //! and one JSON file per entry in `materials/` and `appearances/`, each in the catalog's entry
@@ -208,6 +209,13 @@ pub enum Kind {
     Appearance,
 }
 impl Kind {
+    /// The kind as entries and commands name it: `material` or `appearance`.
+    pub fn name(self) -> &'static str {
+        match self {
+            Self::Material => "material",
+            Self::Appearance => "appearance",
+        }
+    }
     fn folder(self) -> &'static str {
         match self {
             Self::Material => "materials",
@@ -240,6 +248,15 @@ impl Listed {
     pub fn entry(&self) -> Result<&Entry, &Reason> {
         self.state.as_ref()
     }
+    /// Its file from the library's folder: `materials/Steel.json`.
+    pub fn file(&self) -> String {
+        entry_file(self.kind, &self.label)
+    }
+}
+
+/// An entry file's name from its library's folder, with `/` between names on every system.
+fn entry_file(kind: Kind, label: &str) -> String {
+    format!("{}/{label}", kind.folder())
 }
 
 /// One library as a scan found it. Only a scan makes one, so what it says is what was read.
@@ -250,10 +267,12 @@ pub struct Library {
     status: Status,
     read_only: Option<Reason>,
     entries: Vec<Listed>,
+    /// The bytes read: the manifest and every entry file (0 for the built-in library).
+    bytes: u64,
 }
 impl Library {
     fn unavailable(folder: &str, reason: Reason) -> Self {
-        Self { folder: Some(folder.to_string()), header: None, status: Status::Unavailable(reason), read_only: None, entries: Vec::new() }
+        Self { folder: Some(folder.to_string()), header: None, status: Status::Unavailable(reason), read_only: None, entries: Vec::new(), bytes: 0 }
     }
     /// The library's own folder; `None` for the built-in library.
     pub fn folder(&self) -> Option<&str> {
@@ -293,6 +312,8 @@ pub struct Scanned {
     place: Place,
     status: Status,
     libraries: Vec<Library>,
+    /// Every listing the scan made, for [`rescan_if_changed`].
+    seen: Seen,
 }
 impl Scanned {
     pub fn place(&self) -> &Place {
@@ -315,31 +336,124 @@ pub fn scan(place: &Place) -> Scanned {
 
 /// [`scan`] with other limits, for tests at the limits' boundaries.
 pub(crate) fn scan_with(place: &Place, limits: &Limits) -> Scanned {
-    let found = |libraries| Scanned { place: place.clone(), status: Status::Available, libraries };
-    let failed = |reason| Scanned { place: place.clone(), status: Status::Unavailable(reason), libraries: Vec::new() };
-    if let Some(why) = place.path().and_then(place_refusal) {
-        return failed(Reason::Unreadable(why.into()));
+    let mut seen = Seen::default();
+    let found = match (place, place.path().and_then(place_refusal)) {
+        (_, Some(why)) => Err(Reason::Unreadable(why.into())),
+        (Place::BuiltIn, None) => Ok(vec![built_in()]),
+        (Place::Library(dir), None) => list(dir, limits, &mut seen).map(|listing| vec![read_library(dir, listing, limits, &mut seen)]),
+        (Place::Folder(dir), None) => seen.folders(dir, Cap::LibrariesPerFolder, limits.libraries_per_folder).map(|dirs| {
+            dirs.iter()
+                .filter_map(|d| match list(d, limits, &mut seen) {
+                    // Listed, not skipped: a subfolder that can't be listed may be a library.
+                    Err(reason) => Some(Library::unavailable(d, reason)),
+                    // A subfolder with no manifest isn't a library; one with two is listed as broken.
+                    Ok(listing) if listing.manifests.is_empty() => None,
+                    Ok(listing) => Some(read_library(d, listing, limits, &mut seen)),
+                })
+                .collect()
+        }),
+    };
+    let (status, libraries) = match found {
+        Ok(libraries) => (Status::Available, libraries),
+        Err(reason) => (Status::Unavailable(reason), Vec::new()),
+    };
+    Scanned { place: place.clone(), status, libraries, seen }
+}
+
+/// `scan` made again when its place's files may have changed since; `None` keeps it (and the
+/// same `Arc`, so nothing that holds it reads again). Every listing the scan made is made again,
+/// through the same path checks and within the same caps ([`Seen`]), and compared with what the
+/// scan saw: a file's length and time, a file or folder added or gone, a folder that went missing,
+/// turned unreadable, went over a cap or came back. Nothing is opened.
+///
+/// What it can't see, on purpose: an edit that keeps a file's length and its time. A drive that
+/// keeps time in steps (FAT: 2 s) can hide an edit made inside one step; the Refresh button scans
+/// in full for that. A file with no time (browser storage) counts as changed.
+pub fn rescan_if_changed(scan: &Scanned) -> Option<Scanned> {
+    rescan_with(scan, &LIMITS)
+}
+
+/// [`rescan_if_changed`] whose new scan uses other limits (tests); the check uses the scan's own.
+pub(crate) fn rescan_with(scan: &Scanned, limits: &Limits) -> Option<Scanned> {
+    scan.seen.changed().then(|| scan_with(&scan.place, limits))
+}
+
+/// Every listing a scan made, in its order: what the scan saw of its place's files. A listing
+/// holds no more than its cap allows (past it, only the reason), so the record is at most the
+/// names and stamps the caps let one scan list.
+#[derive(Clone, Debug, Default, PartialEq)]
+struct Seen(Vec<Look>);
+
+#[derive(Clone, Debug, PartialEq)]
+struct Look {
+    dir: String,
+    list: List,
+    cap: Cap,
+    limit: usize,
+    found: Result<Found, Reason>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+enum List {
+    Folders,
+    Files,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+enum Found {
+    Folders(Vec<String>),
+    Files(Vec<crate::vfs::Stamped>),
+}
+
+/// The two ways a scan, or the check after it, lists a folder: through the scan's path check
+/// ([`checked`]), within `limit`, a failure named for `cap`.
+fn folders_in(dir: &str, cap: Cap, limit: usize) -> Result<Vec<String>, Reason> {
+    checked::dirs_in(dir, limit).map_err(|e| listing_reason(&e, cap, limit))
+}
+fn files_in(dir: &str, cap: Cap, limit: usize) -> Result<Vec<crate::vfs::Stamped>, Reason> {
+    checked::stamped_files_in(dir, limit).map_err(|e| listing_reason(&e, cap, limit))
+}
+
+impl Look {
+    /// The same listing made now.
+    fn again(&self) -> Result<Found, Reason> {
+        match self.list {
+            List::Folders => folders_in(&self.dir, self.cap, self.limit).map(Found::Folders),
+            List::Files => files_in(&self.dir, self.cap, self.limit).map(Found::Files),
+        }
     }
-    match place {
-        Place::BuiltIn => found(vec![built_in()]),
-        Place::Library(dir) => match list(dir, limits) {
-            Err(reason) => failed(reason),
-            Ok(listing) => found(vec![read_library(dir, listing, limits)]),
-        },
-        Place::Folder(dir) => match checked::dirs_in(dir, limits.libraries_per_folder) {
-            Err(e) => failed(listing_reason(&e, Cap::LibrariesPerFolder, limits.libraries_per_folder)),
-            Ok(dirs) => found(
-                dirs.iter()
-                    .filter_map(|d| match list(d, limits) {
-                        // Listed, not skipped: a subfolder that can't be listed may be a library.
-                        Err(reason) => Some(Library::unavailable(d, reason)),
-                        // A subfolder with no manifest isn't a library; one with two is listed as broken.
-                        Ok(listing) if listing.manifests.is_empty() => None,
-                        Ok(listing) => Some(read_library(d, listing, limits)),
-                    })
-                    .collect(),
-            ),
-        },
+    /// A file with no time: a change to it may keep its length, so it is never taken as unchanged.
+    fn timeless(&self) -> bool {
+        matches!(&self.found, Ok(Found::Files(files)) if files.iter().any(|f| f.modified.is_none()))
+    }
+}
+
+impl Seen {
+    fn folders(&mut self, dir: &str, cap: Cap, limit: usize) -> Result<Vec<String>, Reason> {
+        let found = folders_in(dir, cap, limit);
+        self.0.push(Look { dir: dir.to_string(), list: List::Folders, cap, limit, found: found.clone().map(Found::Folders) });
+        found
+    }
+    /// The files' paths; their stamps stay in the record.
+    fn files(&mut self, dir: &str, cap: Cap, limit: usize) -> Result<Vec<String>, Reason> {
+        let found = files_in(dir, cap, limit);
+        self.0.push(Look { dir: dir.to_string(), list: List::Files, cap, limit, found: found.clone().map(Found::Files) });
+        found.map(|files| files.into_iter().map(|f| f.path).collect())
+    }
+    fn changed(&self) -> bool {
+        self.0.iter().any(|look| look.timeless() || look.again() != look.found)
+    }
+    /// The listings of the library in `folder` (its own and its kind folders') swapped for `new`,
+    /// where the old ones were: the order a fresh scan of the place would have.
+    fn replace(&mut self, folder: &str, new: Seen) {
+        let folder = std::path::Path::new(folder);
+        let inside = |look: &Look| {
+            let dir = std::path::Path::new(&look.dir);
+            dir == folder || dir.parent() == Some(folder)
+        };
+        let at = self.0.iter().position(inside).unwrap_or(self.0.len());
+        self.0.retain(|look| !inside(look));
+        self.0.splice(at..at, new.0);
     }
 }
 
@@ -357,6 +471,10 @@ mod checked {
         check_design_path(dir, None)?;
         vfs::files_in(dir, max)
     }
+    pub(super) fn stamped_files_in(dir: &str, max: usize) -> Result<Vec<vfs::Stamped>> {
+        check_design_path(dir, None)?;
+        vfs::stamped_files_in(dir, max)
+    }
     pub(super) fn len(path: &str) -> Result<u64> {
         check_design_path(path, None)?;
         vfs::len(path)
@@ -373,11 +491,11 @@ struct Listing {
     folders: Vec<String>,
 }
 
-fn list(dir: &str, limits: &Limits) -> Result<Listing, Reason> {
+fn list(dir: &str, limits: &Limits, seen: &mut Seen) -> Result<Listing, Reason> {
     // Folders first: in the browser only the folder listing can tell a missing folder from an empty one.
     let (cap, limit) = (Cap::FilesBesideManifest, limits.files_beside_manifest);
-    let folders = checked::dirs_in(dir, limit).map_err(|e| listing_reason(&e, cap, limit))?;
-    let files = checked::files_in(dir, limit).map_err(|e| listing_reason(&e, cap, limit))?;
+    let folders = seen.folders(dir, cap, limit)?;
+    let files = seen.files(dir, cap, limit)?;
     Ok(Listing { manifests: files.into_iter().filter(|p| ends_with(p, MANIFEST_SUFFIX)).collect(), folders })
 }
 
@@ -441,7 +559,7 @@ fn read_entry(bytes: &[u8], kind: Kind, library_id: &str) -> Result<Entry, Reaso
     Ok(entry)
 }
 
-fn read_library(dir: &str, listing: Listing, limits: &Limits) -> Library {
+fn read_library(dir: &str, listing: Listing, limits: &Limits, seen: &mut Seen) -> Library {
     let unavailable = |reason| Library::unavailable(dir, reason);
     let manifest = match listing.manifests.as_slice() {
         [] => return unavailable(Reason::NoManifest),
@@ -461,9 +579,9 @@ fn read_library(dir: &str, listing: Listing, limits: &Limits) -> Library {
     for kind in [Kind::Material, Kind::Appearance] {
         // Only a real folder: a link named `materials` is not one, so a library can't reach outside.
         let Some(sub) = listing.folders.iter().find(|f| file_label(f) == kind.folder()) else { continue };
-        let files = match checked::files_in(sub, limits.entries_per_kind) {
+        let files = match seen.files(sub, Cap::EntriesPerKind(kind), limits.entries_per_kind) {
             Ok(files) => files,
-            Err(e) => return unavailable(listing_reason(&e, Cap::EntriesPerKind(kind), limits.entries_per_kind)),
+            Err(reason) => return unavailable(reason),
         };
         for path in files.iter().filter(|p| ends_with(p, ".json")) {
             let state = read_capped(path, Cap::EntryBytes, limits.entry_bytes).and_then(|bytes| {
@@ -477,7 +595,7 @@ fn read_library(dir: &str, listing: Listing, limits: &Limits) -> Library {
         }
     }
     refuse_duplicate_entries(&mut entries);
-    Library { folder: Some(dir.to_string()), header: Some(header), status: Status::Available, read_only: None, entries }
+    Library { folder: Some(dir.to_string()), header: Some(header), status: Status::Available, read_only: None, entries, bytes: used }
 }
 
 fn read_capped(path: &str, cap: Cap, limit: u64) -> Result<Vec<u8>, Reason> {
@@ -503,8 +621,7 @@ fn refuse_duplicate_entries(entries: &mut [Listed]) {
         }
     }
     for indices in seen.values().filter(|v| v.len() > 1) {
-        let names: Vec<(usize, String)> =
-            indices.iter().filter_map(|&i| entries.get(i).map(|l| (i, format!("{}/{}", l.kind.folder(), l.label)))).collect();
+        let names: Vec<(usize, String)> = indices.iter().filter_map(|&i| entries.get(i).map(|l| (i, l.file()))).collect();
         for &(i, _) in &names {
             let others = names.iter().filter(|(j, _)| *j != i).map(|(_, name)| name.as_str()).collect::<Vec<_>>().join(", ");
             if let Some(listed) = entries.get_mut(i) {
@@ -719,6 +836,7 @@ fn built_in() -> Library {
         status: Status::Available,
         read_only: Some(Reason::BuiltIn),
         entries,
+        bytes: 0,
     }
 }
 
@@ -734,6 +852,9 @@ fn slug(name: &str) -> String {
     }
     out.trim_end_matches('-').to_string()
 }
+
+#[path = "library_write.rs"]
+pub mod write;
 
 #[cfg(test)]
 #[path = "library_tests.rs"]
