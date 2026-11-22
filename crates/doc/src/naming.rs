@@ -254,8 +254,8 @@ impl FaceIndex {
         FaceIndex { faces }
     }
 
-    /// The face a point lies on (within `tol`).
-    fn face_at(&self, p: Vec3, tol: f64) -> Option<usize> {
+    /// The face a point lies on (within `tol`) and its distance to the point.
+    fn face_and_dist_at(&self, p: Vec3, tol: f64) -> Option<(f64, usize)> {
         let mut best: Option<(f64, usize)> = None;
         for (i, (bounds, tris)) in self.faces.iter().enumerate() {
             if !bounds.inflated(tol).contains(p) {
@@ -266,7 +266,12 @@ impl FaceIndex {
                 best = Some((d, i));
             }
         }
-        best.map(|(_, i)| i)
+        best
+    }
+
+    /// The face a point lies on (within `tol`).
+    fn face_at(&self, p: Vec3, tol: f64) -> Option<usize> {
+        self.face_and_dist_at(p, tol).map(|(_, i)| i)
     }
 }
 
@@ -1271,14 +1276,21 @@ pub(crate) fn vertex_index_at(b: &ModelBody, at: Vec3) -> Option<usize> {
 pub fn face_names_at(st: &ModelState, pts: &[Vec3]) -> Vec<String> {
     pts.iter()
         .map(|p| {
+            let mut best: Option<(f64, String)> = None;
             for b in st.bodies.iter().filter(|b| !b.body.is_mesh()) {
                 let tol = (b.body.size() * 1e-3).max(1e-3);
                 let idx = FaceIndex::new(&b.mesh(), face_count(b));
-                if let Some(f) = idx.face_at(*p, tol) {
-                    return face_names(b).get(f).cloned().unwrap_or_default();
+                if let Some((d, f)) = idx.face_and_dist_at(*p, tol)
+                    && best.as_ref().is_none_or(|(bd, _)| d < *bd)
+                {
+                    let name = face_names(b).get(f).cloned().unwrap_or_default();
+                    best = Some((d, name));
+                    if d == 0.0 {
+                        break;
+                    }
                 }
             }
-            String::new()
+            best.map(|(_, name)| name).unwrap_or_default()
         })
         .collect()
 }
@@ -1790,5 +1802,23 @@ mod tests {
         let body = ModelBody::new("Cube".into(), body, 1);
         let pairs = mesh_adjacency(&body);
         assert_eq!(pairs.len(), 12);
+    }
+
+    #[test]
+    fn face_names_at_chooses_nearest_face_across_all_bodies() -> Result<(), Box<dyn std::error::Error>> {
+        let body1 = solidcraft_kernel::box_solid(Vec3::new(-22.3, 0.0, 0.0), Vec3::new(-22.3 + 200.0, 100.0, 20.0))?;
+        let mb1 = ModelBody::new("Body1".into(), body1, 1);
+
+        let body2 = solidcraft_kernel::box_solid(Vec3::new(-37.5, 0.0, 0.0), Vec3::new(-37.5 + 15.0, 100.0, 20.0))?;
+        let mb2 = ModelBody::new("Body2".into(), body2, 2);
+
+        let st = ModelState::default().with_bodies(vec![mb1.clone(), mb2.clone()]);
+
+        let pt = Vec3::new(-22.5, 50.0, 10.0);
+        let names = face_names_at(&st, &[pt]);
+        assert_eq!(names.len(), 1);
+        let body2_faces = face_names(&mb2);
+        assert!(body2_faces.contains(&names[0]), "expected a face belonging to Body2, got '{}'", names[0]);
+        Ok(())
     }
 }

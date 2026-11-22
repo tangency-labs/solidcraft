@@ -47,7 +47,8 @@ use crate::blend::fillet_geom::p1::{FilStatus, FilletCornerType, FilletEdgeType,
 use crate::blend::fillet_solver::p1::FilletSurfaceGenerator;
 use crate::blend::fillet_solver::p5::RailsFit;
 use crate::boolean::topology_intersector::p1::TopologyIntersector;
-use crate::error::{Result, SolidError};
+use crate::error::blend::BlendFailure;
+use crate::error::{Failure, Result, SolidError, SM_ERR, SM_ERR_NULL_POINTER};
 use crate::geom::assert_array::c_general;
 use crate::geom::object::NotifyOperation;
 use crate::geom::solution_array::SolutionObject;
@@ -71,7 +72,14 @@ fn smos_max(a: f64, b: f64) -> f64 {
 /// `FILEXEC_ERR` (`SM_ERR`): a step of the executive failed; the executive's error info
 /// says which.
 fn failure() -> SolidError {
-    SolidError::blend_failed(OP, "a step of the fillet executive failed")
+    SolidError::blend(OP, BlendFailure::ExecutiveStepFailed)
+}
+
+/// `SM_ERR_NULL_POINTER` (upstream's `NER`): the executive is run with no target body.
+fn no_target() -> SolidError {
+    Failure::new(OP, BlendFailure::TargetNotGiven)
+        .with_status(SM_ERR_NULL_POINTER)
+        .into_error()
 }
 
 fn invalid(reason: &'static str) -> SolidError {
@@ -118,14 +126,7 @@ pub(super) fn caught<T>(result: Result<T>) -> Result<Result<T>> {
 /// among its causes is kept as the cause of the corner's failure, not passed on.
 fn caught_but_refusal(result: Result<()>) -> Result<Result<()>> {
     match result {
-        Err(error)
-            if matches!(
-                error.blend_failure(),
-                Some(crate::error::blend::BlendFailure::NoRoom(_))
-            ) =>
-        {
-            Err(error)
-        }
+        Err(error) if matches!(error.blend_failure(), Some(BlendFailure::NoRoom(_))) => Err(error),
         result => caught(result),
     }
 }
@@ -3706,8 +3707,7 @@ impl<O: ClassObject + SolutionObject + Ord> FilletExecutive<O> {
         A: CornerAdjustmentAccess<O> + RailTrimAccess<O>,
     {
         // NER: upstream returns SM_ERR_NULL_POINTER, not invalid input.
-        self.target
-            .ok_or_else(|| SolidError::blend_missing(OP, "the target B-rep"))?;
+        self.target.ok_or_else(no_target)?;
         // Process corners by calculating the vertices first.
         let mut index = 0;
         while let Some(corner) = self.corners.get(index).copied() {
@@ -3741,7 +3741,10 @@ impl<O: ClassObject + SolutionObject + Ord> FilletExecutive<O> {
         // bTrimRails: always
         self.trim_solver_rails(k, access)?;
         if self.solvers.is_empty() {
-            return Err(SolidError::blend_failed(OP, "the executive has no solvers"));
+            // solvers are only added (by setting up edges), so none were set up
+            return Err(Failure::new(OP, BlendFailure::NoEdgesGiven)
+                .with_status(SM_ERR)
+                .into_error());
         }
         Ok(())
     }
@@ -3824,9 +3827,7 @@ impl<O: ClassObject + SolutionObject + Ord> FilletExecutive<O> {
         access: &mut impl FaceConstructionAccess<O>,
     ) -> Result<O> {
         crate::profile::profile_scope!(k, "blend::executive::build_faces");
-        let target = self
-            .target
-            .ok_or_else(|| SolidError::blend_missing(OP, "the target B-rep"))?;
+        let target = self.target.ok_or_else(no_target)?;
         let fillet = access.faces_new_brep(k)?;
         self.fillet = Some(fillet);
         let tolerance = access.faces_tolerance(k, target)?;
@@ -3940,9 +3941,17 @@ impl<O: ClassObject + SolutionObject + Ord> FilletExecutive<O> {
         };
         let mut per_unit = 1.0;
         if kind == FitKind::Scale {
-            let [d0, d1] = fit
-                .offsets
-                .ok_or_else(|| SolidError::blend_missing(OP, "the fit's offsets"))?;
+            let [d0, d1] = fit.offsets.ok_or_else(|| {
+                Failure::new(
+                    OP,
+                    BlendFailure::Defect {
+                        why: "a loaded solver's fit has no offsets: loading a solver checks \
+                                  both its rail surfaces, and its fit carries their offsets",
+                    },
+                )
+                .with_status(SM_ERR_NULL_POINTER)
+                .into_error()
+            })?;
             per_unit = smos_max(d0.abs(), d1.abs());
             if per_unit.partial_cmp(&0.0) != Some(std::cmp::Ordering::Greater) {
                 return Ok(());
@@ -4457,8 +4466,7 @@ impl<O: ClassObject + SolutionObject + Ord> FilletExecutive<O> {
     ) -> Result<()> {
         crate::profile::profile_scope!(k, "blend::executive::create_fillet_brep");
         // NER: upstream returns SM_ERR_NULL_POINTER, not invalid input.
-        self.target
-            .ok_or_else(|| SolidError::blend_missing(OP, "the target B-rep"))?;
+        self.target.ok_or_else(no_target)?;
         ignore(access.creation_smooth(k, self))?;
 
         // Opt-in, not upstream (`fixes.fillet_trace_reaches_rails`, WR-609/WR-610; the
