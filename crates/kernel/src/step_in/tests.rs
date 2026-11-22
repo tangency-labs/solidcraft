@@ -403,6 +403,165 @@ fn a_ball_written_as_a_cap_and_the_rest_round_it_imports_whole() {
     }
 }
 
+/// Two rings (tori about z: R 20 at the origin and R 30 at x = 52, both r 5) written as one
+/// body or as their overlap, each of the two faces a torus less or within a disc cut out of it
+/// by the curve the surfaces meet in: two cubic B-spline edges between (21, 0, ±4.899), built
+/// here as chains of Hermite pieces from the exact intersection. No seam edges are written.
+/// `lens` writes the loops the way the overlap needs them (the faces are the two discs);
+/// otherwise each loop runs the other way and each face is its torus less its disc.
+fn two_rings_step(lens: bool) -> String {
+    use std::f64::consts::{FRAC_PI_2, PI};
+    let (ra, rb, r, cb) = (20.0_f64, 30.0_f64, 5.0_f64, 52.0_f64);
+    // On torus A at longitude u and tube angle v.
+    let on_a = |u: f64, v: f64| [(ra + r * v.cos()) * u.cos(), (ra + r * v.cos()) * u.sin(), r * v.sin()];
+    // Negative inside torus B.
+    let in_b = |p: [f64; 3]| ((p[0] - cb).hypot(p[1]) - rb).powi(2) + p[2] * p[2] - r * r;
+    // The tubes' surfaces meet in the plane y = 0 where cos v = (cb - ra - rb) / (2 r).
+    let v0 = ((cb - ra - rb) / (2.0 * r)).acos();
+    // The longitude along torus A, beyond the plane, at which the tube angle `v` meets torus B.
+    let longitude = |v: f64| {
+        let (mut lo, mut hi) = (0.0_f64, FRAC_PI_2);
+        for _ in 0..100 {
+            let mid = 0.5 * (lo + hi);
+            if in_b(on_a(mid, v)) < 0.0 {
+                lo = mid;
+            } else {
+                hi = mid;
+            }
+        }
+        0.5 * (lo + hi)
+    };
+    // The curve as a function of t: t in [-pi/2, 3pi/2] goes once round, through y > 0 first.
+    // The tube angle follows v0 sin t, so the curve is smooth where it turns at its two ends.
+    let curve = |t: f64| {
+        let u = if t.cos().abs() < 1e-12 {
+            0.0
+        } else if t.cos() > 0.0 {
+            longitude(v0 * t.sin())
+        } else {
+            -longitude(v0 * t.sin())
+        };
+        on_a(u, v0 * t.sin())
+    };
+    let slope = |t: f64| {
+        let h = 1e-4;
+        let (p, q) = (curve(t - h), curve(t + h));
+        [(q[0] - p[0]) / (2.0 * h), (q[1] - p[1]) / (2.0 * h), (q[2] - p[2]) / (2.0 * h)]
+    };
+    let mut lines: Vec<String> = Vec::new();
+    fn add(lines: &mut Vec<String>, body: String) -> usize {
+        lines.push(format!("#{}={body};\n", lines.len() + 1));
+        lines.len()
+    }
+    fn point(lines: &mut Vec<String>, p: [f64; 3]) -> usize {
+        add(lines, format!("CARTESIAN_POINT('',({:.16},{:.16},{:.16}))", p[0], p[1], p[2]))
+    }
+    fn direction(lines: &mut Vec<String>, d: [f64; 3]) -> usize {
+        add(lines, format!("DIRECTION('',({:.1},{:.1},{:.1}))", d[0], d[1], d[2]))
+    }
+    // One edge: the curve over `[t0, t0 + pi]` in `pieces` Hermite pieces, between two vertices.
+    let pieces: usize = 24;
+    let edge = |lines: &mut Vec<String>, t0: f64| {
+        let step = PI / pieces as f64;
+        let mut ids = Vec::new();
+        for i in 0..pieces {
+            let (ta, tb) = (t0 + step * i as f64, t0 + step * (i + 1) as f64);
+            let (pa, pb, da, db) = (curve(ta), curve(tb), slope(ta), slope(tb));
+            let third = step / 3.0;
+            let mut four = vec![pa, [pa[0] + da[0] * third, pa[1] + da[1] * third, pa[2] + da[2] * third]];
+            four.push([pb[0] - db[0] * third, pb[1] - db[1] * third, pb[2] - db[2] * third]);
+            four.push(pb);
+            // The piece's first point is the one before's last.
+            for (k, q) in four.into_iter().enumerate() {
+                if i > 0 && k == 0 {
+                    continue;
+                }
+                ids.push(point(lines, q));
+            }
+        }
+        let mut multiplicities = vec!["4".to_string()];
+        multiplicities.extend((1..pieces).map(|_| "3".to_string()));
+        multiplicities.push("4".to_string());
+        let knots: Vec<String> = (0..=pieces).map(|k| format!("{k}.0")).collect();
+        let refs: Vec<String> = ids.iter().map(|i| format!("#{i}")).collect();
+        let spline = add(
+            lines,
+            format!(
+                "B_SPLINE_CURVE_WITH_KNOTS('',3,({}),.UNSPECIFIED.,.F.,.F.,({}),({}),.UNSPECIFIED.)",
+                refs.join(","),
+                multiplicities.join(","),
+                knots.join(",")
+            ),
+        );
+        (spline, curve(t0), curve(t0 + PI))
+    };
+    // Bottom to top through y > 0, then top to bottom through y < 0.
+    let (c1, bottom, top) = edge(&mut lines, -FRAC_PI_2);
+    let (c2, _, _) = edge(&mut lines, FRAC_PI_2);
+    let vb = point(&mut lines, bottom);
+    let vb = add(&mut lines, format!("VERTEX_POINT('',#{vb})"));
+    let vt = point(&mut lines, top);
+    let vt = add(&mut lines, format!("VERTEX_POINT('',#{vt})"));
+    let e1 = add(&mut lines, format!("EDGE_CURVE('',#{vb},#{vt},#{c1},.T.)"));
+    let e2 = add(&mut lines, format!("EDGE_CURVE('',#{vt},#{vb},#{c2},.T.)"));
+    let torus = |lines: &mut Vec<String>, centre: [f64; 3], major: f64| {
+        let (c, z, x) = (point(lines, centre), direction(lines, [0.0, 0.0, 1.0]), direction(lines, [1.0, 0.0, 0.0]));
+        let frame = add(lines, format!("AXIS2_PLACEMENT_3D('',#{c},#{z},#{x})"));
+        add(lines, format!("TOROIDAL_SURFACE('',#{frame},{major:.1},{r:.1})"))
+    };
+    let (ta, tb) = (torus(&mut lines, [0.0, 0.0, 0.0], ra), torus(&mut lines, [cb, 0.0, 0.0], rb));
+    // Torus A's loop goes top to bottom through y > 0 and back through y < 0, the face on its
+    // left seen from outside: the edges backwards. Torus B's loop is that one reversed. The
+    // overlap has each loop the other way.
+    let (a_uses, b_uses) = if lens { ([(e1, 'T'), (e2, 'T')], [(e2, 'F'), (e1, 'F')]) } else { ([(e1, 'F'), (e2, 'F')], [(e2, 'T'), (e1, 'T')]) };
+    let face = |lines: &mut Vec<String>, uses: [(usize, char); 2], surface: usize| {
+        let oriented: Vec<String> = uses.iter().map(|&(e, s)| format!("#{}", add(lines, format!("ORIENTED_EDGE('',*,*,#{e},.{s}.)")))).collect();
+        let lp = add(lines, format!("EDGE_LOOP('',({}))", oriented.join(",")));
+        let bound = add(lines, format!("FACE_BOUND('',#{lp},.T.)"));
+        add(lines, format!("ADVANCED_FACE('',(#{bound}),#{surface},.T.)"))
+    };
+    let (fa, fb) = (face(&mut lines, a_uses, ta), face(&mut lines, b_uses, tb));
+    let shell = add(&mut lines, format!("CLOSED_SHELL('',(#{fa},#{fb}))"));
+    let solid = add(&mut lines, format!("MANIFOLD_SOLID_BREP('rings',#{shell})"));
+    let ctx = lines.len() as u64 + 2;
+    add(&mut lines, format!("ADVANCED_BREP_SHAPE_REPRESENTATION('',(#{solid}),#{ctx})"));
+    let mut t = String::from(HEAD);
+    t += &lines.concat();
+    t += &context(ctx, "(LENGTH_UNIT()NAMED_UNIT(*)SI_UNIT(.MILLI.,.METRE.))");
+    t += TAIL;
+    t
+}
+
+/// Two rings joined into one body, written as two faces that each have one loop and no seam edge
+/// (#20550): torus A less the disc of it inside torus B, and torus B less the disc of it inside
+/// torus A. Each loop runs clockwise about its face's normal round the disc, so the face is the
+/// rest of its torus; it was read as the disc turned over, both faces on discs and no volume.
+/// The rings' volume is 2π²r²(R₁ + R₂) = 2500π² less the overlap's 1051.39224 (worked out by
+/// integrating over z the overlap of the two cross-section annuli), the area 1000π² less the
+/// overlap's 635.62684. Written the other way round, the same faces are the two discs, the
+/// overlap itself, and stay so.
+#[test]
+fn two_rings_written_as_a_torus_less_a_disc_each_import_whole() {
+    use std::f64::consts::PI;
+    let (lens_volume, lens_area) = (1051.39223963_f64, 635.62684119_f64);
+    for (what, lens, volume, area) in
+        [("the rings joined", false, 2500.0 * PI * PI - lens_volume, 1000.0 * PI * PI - lens_area), ("their overlap", true, lens_volume, lens_area)]
+    {
+        let imp = step_import(&two_rings_step(lens)).unwrap_or_else(|e| panic!("{what}: {e}"));
+        assert_eq!(imp.bodies.len(), 1, "{what}: {:?}", imp.warnings);
+        assert!(
+            !imp.warnings.iter().any(|w| w.contains("turned over") || w.contains("left out") || w.contains("repair")),
+            "{what}: {:?}",
+            imp.warnings
+        );
+        assert!(imp.bodies[0].closed, "{what}: {:?}", imp.warnings);
+        let m = measure(&imp.bodies[0].body).unwrap_or_else(|e| panic!("{what}: {e}"));
+        assert_eq!((m.faces, m.shells), (2, 1), "{what}");
+        assert!(rel(m.volume, volume) < 1e-5, "{what}: volume {} vs {volume}", m.volume);
+        assert!(rel(m.area, area) < 1e-5, "{what}: area {} vs {area}", m.area);
+    }
+}
+
 /// A 30 × 30 × 10 block with a Ø14 hole through it, its top edge rounded at 1 mm, as SolidCraft
 /// 0.30.1 wrote it after reading its own file (#17929): the round on a SURFACE_OF_REVOLUTION of
 /// a rational circle, which got no pcurves, so the block came in open. The round reads as a
@@ -3477,7 +3636,82 @@ fn a_closed_spline_wall_with_a_curved_seam_keeps_all_faces() {
         let m = measure(&imp.bodies[0].body).unwrap();
         assert_eq!(m.faces, 3);
         assert!(rel(m.volume, 100.0 * std::f64::consts::PI) < 1e-6, "{}", m.volume);
+        assert_periodic_trim_domains_and_seams(&imp.bodies[0].body);
+        let check = imp.bodies[0].body.smlib().unwrap().check(solidcraft_smlib::CheckLevel::All).unwrap();
+        assert!(check.is_valid(), "start {start}: {check}");
     }
+}
+
+/// Containment of the positive-weight control hull proves containment of the entire stored
+/// trim, including between samples. Seam uses share an edge and its vertices, run oppositely,
+/// and lie on opposite sides of the surface's base period.
+fn assert_periodic_trim_domains_and_seams(body: &Body) {
+    use solidcore_record::brep::{Curve2, Loop};
+
+    let controls = |pc: &Curve2| -> Vec<[f64; 2]> {
+        match pc {
+            Curve2::Spline { points, .. } => points.clone(),
+            Curve2::RationalSpline { homogeneous, .. } => homogeneous
+                .iter()
+                .map(|h| {
+                    assert!(h[2].is_finite() && h[2] > 0.0);
+                    [h[0] / h[2], h[1] / h[2]]
+                })
+                .collect(),
+        }
+    };
+    let record = body.record();
+    let mut seams = 0;
+    for (fi, face) in record.faces.iter().enumerate() {
+        let domain = solidcraft_geom::brep::eval::SurfaceEval::new(face.nurbs.as_ref().unwrap_or(&face.surface)).unwrap().domain();
+        for l in &face.loops {
+            let Loop::Edges { edges } = l else { continue };
+            for u in edges {
+                let points = controls(&u.pcurve);
+                assert!(!points.is_empty());
+                for p in &points {
+                    for (d, range) in domain.range.iter().enumerate() {
+                        if let Some((lo, hi)) = range {
+                            // Only floating-point rounding at a cut, never the edge's model tolerance.
+                            let round = 1e-9 * (hi - lo).abs().max(1.0);
+                            assert!(
+                                p[d].is_finite() && p[d] >= lo - round && p[d] <= hi + round,
+                                "face {fi}, edge {}: {p:?} outside {range:?}",
+                                u.edge
+                            );
+                        }
+                    }
+                }
+            }
+        }
+        for (ei, edge) in record.edges.iter().enumerate() {
+            let [a, b] = edge.uses.as_slice() else { continue };
+            if a.face as usize != fi || b.face as usize != fi {
+                continue;
+            }
+            let use_at = |r: &solidcore_record::brep::EdgeUseRef| {
+                let Loop::Edges { edges } = &face.loops[r.r#loop as usize] else { panic!("a seam use must be on an edge loop") };
+                &edges[r.position as usize]
+            };
+            let (a_use, b_use) = (use_at(a), use_at(b));
+            assert_eq!(a_use.edge as usize, ei);
+            assert_eq!(b_use.edge as usize, ei);
+            assert_ne!(a_use.forward, b_use.forward);
+            assert_eq!(a.upper, !a_use.forward);
+            assert_eq!(b.upper, !b_use.forward);
+            assert_ne!(edge.vertices[0], edge.vertices[1]);
+            let (a_points, b_points) = (controls(&a_use.pcurve), controls(&b_use.pcurve));
+            let on_cut = (0..2).any(|d| {
+                let (Some(period), Some((lo, hi))) = (domain.period[d], domain.range[d]) else { return false };
+                let round = 1e-9 * period;
+                let at = |points: &[[f64; 2]], side: f64| points.iter().all(|p| (p[d] - side).abs() <= round);
+                (at(&a_points, lo) && at(&b_points, hi)) || (at(&a_points, hi) && at(&b_points, lo))
+            });
+            assert!(on_cut, "face {fi}, seam edge {ei}: its uses must lie on the two sides of the base period");
+            seams += 1;
+        }
+    }
+    assert!(seams > 0, "the closed spline wall must have a seam edge");
 }
 
 /// The volume of the one solid `solidcore_step::topology` reads from `text` into schema 4,

@@ -3492,7 +3492,9 @@ fn placement_digest(doc: &Document, f: &Feature, st: Option<&ModelState>) -> u64
                 }
             }
         }
-        FeatureKind::Split { body, tool: Some(tool), tool_plane: true, .. } => {
+        // A plane taken from a face, or tool faces used as they are (#9305), is moved from the
+        // tool's frame into the body's.
+        FeatureKind::Split { body, tool: Some(tool), tool_plane, tool_sheet, .. } if *tool_plane || !tool_sheet.is_extended() => {
             frame = st.and_then(|st| st.body(body)).map(|b| body_world(doc, b));
             reads.placed_body(st, body);
             reads.placed_body(st, &tool.body);
@@ -12803,7 +12805,7 @@ fn eval_feature_kind(
             }
             Ok(())
         }
-        FeatureKind::Split { body, plane, tool, tool_plane, sketch, line } => {
+        FeatureKind::Split { body, plane, tool, tool_plane, tool_sheet, tool_faces, sketch, line } => {
             let i = st.bodies.iter().position(|b| &b.name == body).ok_or_else(|| DocError::Unknown(format!("body `{body}`")))?;
             let Some(mb) = st.bodies.get(i).cloned() else { return Err(DocError::Unknown(format!("body `{body}`"))) };
             let input = mb.traced();
@@ -12834,8 +12836,43 @@ fn eval_feature_kind(
                         };
                         split_by_plane_traced(&input, &plane)?
                     } else {
+                        // Faces used as they are cut where they are shown: a tool placed
+                        // differently from the body is moved into the body's frame (#9305).
+                        // Moving keeps the face numbers, so `face` still names the same face.
+                        let sheet = |tb: &ModelBody| -> Result<kernel::Body> {
+                            let source = body_world(doc, tb);
+                            let target = body_world(doc, &mb);
+                            if source == target {
+                                return Ok(tb.body.clone());
+                            }
+                            let inverse = crate::mat_inverse(&target)
+                                .ok_or_else(|| DocError::Invalid(format!("the component holding `{body}` has a singular placement")))?;
+                            Ok(kernel::transform_matrix(&tb.body, crate::mat_mul(&inverse, &source))?)
+                        };
+                        let parts = match tool_sheet {
+                            crate::SplitSheet::Extended => kernel::split_body(&mb.body, &kernel::SplitTool::Face { body: &tb.body, face })?,
+                            // The picked faces as they are, never extended (#9305).
+                            crate::SplitSheet::Faces => {
+                                let faces = tool_faces
+                                    .iter()
+                                    .map(|p| {
+                                        crate::appearance::face_index_at(tb, p.0)
+                                            .ok_or_else(|| DocError::Invalid(format!("no face of `{}` at a tool point", t.body)))
+                                    })
+                                    .collect::<Result<Vec<_>>>()?;
+                                kernel::split_body_by_faces(&mb.body, &sheet(tb)?, face, &faces)?
+                            }
+                            // Every face of a surface body as it is (#9305).
+                            crate::SplitSheet::Body => {
+                                if !tb.body.is_surface() {
+                                    return Err(DocError::Invalid(format!("`{}` is not a surface body, so it cannot split as a whole", t.body)));
+                                }
+                                let faces: Vec<usize> = (0..tb.body.face_count()).collect();
+                                kernel::split_body_by_faces(&mb.body, &sheet(tb)?, face, &faces)?
+                            }
+                        };
                         // The pieces keep the planar roles of the faces they share with the body (#565).
-                        kernel::split_body(&mb.body, &kernel::SplitTool::Face { body: &tb.body, face })?
+                        parts
                             .into_iter()
                             .map(|part| Ok(Traced::step(part.with_preserved_planar_sources(&mb.body)?, &[&input])))
                             .collect::<Result<Vec<_>>>()?
