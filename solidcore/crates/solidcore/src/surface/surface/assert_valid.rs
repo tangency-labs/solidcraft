@@ -147,6 +147,7 @@ use crate::math::{
     EFF_ZERO_SQ, EFF_ZERO_SQRT, PI, UNDEF_DOUBLE,
 };
 use crate::nurbs::b_spline_curve::BSplineCurve;
+use crate::nurbs::b_spline_surface::p1::ControlPointNet;
 use crate::nurbs::b_spline_surface::{BSplineSurface, SurfParamType};
 use crate::nurbs::b_spline_surface_n_lib::p2::EvaluateFlags;
 use crate::nurbs::knots::Side;
@@ -832,10 +833,113 @@ fn b_spline_surface_assert_valid(k: &Kernel, s: &Surface, r: &mut Reporter<'_>) 
             closed_row,
             closed_col,
         )?;
+        let non_monotonic =
+            non_monotonic && (closed_row || closed_col || !certify_monotone_net(&part, &net)?);
         rtn &= r.report(B_SPLINE_SURFACE_TYPE, 5, 0, !non_monotonic, UNDEF, UNDEF)?;
     }
 
     Ok(rtn)
+}
+
+/// With positive weights a control line whose successive points advance along
+/// its chord has a monotone projection. Require a margin for the Euclidean
+/// conversion, the two differences and their dot product.
+fn advancing_control_lines(net: &ControlPointNet, interior: bool) -> bool {
+    let (nu, nv) = (net.u_count, net.v_count);
+    if nu < 2 || nv < 2 {
+        return false;
+    }
+    let advances = |start: usize, stride: usize, count: usize| {
+        let line = || net.points.iter().skip(start).step_by(stride).take(count);
+        let Some((&a, &b)) = line().next().zip(line().next_back()) else {
+            return false;
+        };
+        let chord = b - a;
+        let length = chord.length();
+        line().zip(line().skip(1)).all(|(&p, &q)| {
+            let step = q - p;
+            step.dot(chord)
+                > step_within_rounding(p, q) * length
+                    + step.length() * step_within_rounding(a, b)
+                    + gamma(5) * step.length() * length
+        })
+    };
+    let skip = usize::from(interior);
+    (skip..nu - skip).all(|u| advances(u * nv, 1, nv))
+        && (skip..nv - skip).all(|v| advances(v, nv, nu))
+}
+
+/// Knot insertion preserves the surface and its parameterization. A high-degree
+/// control polygon may zigzag although the curve it controls is strictly monotone.
+/// Only accept the second representation when every open control line advances
+/// strictly along its chord and passes the original turns test.
+fn certify_monotone_net(part: &BSplineSurface, original: &ControlPointNet) -> Result<bool> {
+    const MAX_POINTS: usize = 32_768;
+    // Only exterior control lines are boundary curves of a clamped patch.
+    // A reversal in an interior control line retains the original rejection.
+    if original.points.len() > MAX_POINTS
+        || original.weights.iter().any(|w| !w.is_finite() || *w <= 0.0)
+        || !advancing_control_lines(original, true)
+    {
+        return Ok(false);
+    }
+    for direction in [SurfParamType::U, SurfParamType::V] {
+        let (_, multiplicities) = part.knots(direction, None)?;
+        let end = Some(part.degree(direction) + 1);
+        if multiplicities.first().copied() != end || multiplicities.last().copied() != end {
+            return Ok(false);
+        }
+    }
+    let mut refined = part.clone();
+    for (direction, transverse) in [
+        (SurfParamType::V, SurfParamType::U),
+        (SurfParamType::U, SurfParamType::V),
+    ] {
+        let degree = refined.degree(direction);
+        if degree < 3 {
+            continue;
+        }
+        for _ in 0..3 {
+            let (knots, _) = refined.knots(direction, None)?;
+            let along = refined.number_control_points(direction);
+            let across = refined.number_control_points(transverse);
+            let extra = knots.len().saturating_sub(1).saturating_mul(degree);
+            if along.saturating_add(extra).saturating_mul(across) > MAX_POINTS {
+                break;
+            }
+            let mut insert = Vec::new();
+            for pair in knots.windows(2) {
+                let &[lo, hi] = pair else { continue };
+                let mid = lo + (hi - lo) * 0.5;
+                if lo < mid && mid < hi {
+                    insert.extend(std::iter::repeat_n(mid, degree));
+                }
+            }
+            if insert.is_empty() {
+                break;
+            }
+            match refined.insert_knots(direction, &insert) {
+                Ok(()) => {}
+                Err(e) if e.is_unported_or_cancelled() => return Err(e),
+                Err(_) => break,
+            }
+            let net = refined.control_point_net()?;
+            if net.weights.iter().any(|w| !w.is_finite() || *w <= 0.0) {
+                return Ok(false);
+            }
+            if advancing_control_lines(&net, false)
+                && !grid_has_non_monotonic_points_to_rounding(
+                    &net.points,
+                    net.v_count,
+                    false,
+                    false,
+                )?
+            {
+                return Ok(true);
+            }
+        }
+    }
+    Ok(false)
 }
 
 /// `SmBSplineSurface::HasKnotMultiplicityGreaterThanDegree`
@@ -3208,6 +3312,33 @@ mod tests {
     fn a_patch_whose_first_points_differ_is_not_a_pole() {
         assert!(!first_points_differ(false));
         assert!(!first_points_differ(true));
+    }
+
+    #[test]
+    fn boundary_control_polygon_can_reverse_on_a_monotone_curve() {
+        let k = Kernel::default();
+        // In v the last row is a cubic. For the first polygon the derivative
+        // has positive minimum at its middle. The second truly turns back.
+        for (ys, valid) in [([0.0, 0.6, 0.4, 1.0], true), ([0.0, 2.0, -1.0, 1.0], false)] {
+            let points: Vec<_> = [0.0, 1.0]
+                .into_iter()
+                .flat_map(|x| {
+                    let y = if x == 0.0 { [0.0, 0.3, 0.7, 1.0] } else { ys };
+                    y.map(move |v| [x, v, 0.0])
+                })
+                .collect();
+            let s = bspline(1, 3, &[0.0, 0.0, 1.0, 1.0], &BEZ3, &points);
+            let part = make_nurb(&k, &s).unwrap().unwrap();
+            let net = part.control_point_net().unwrap();
+            assert!(grid_has_non_monotonic_points_to_rounding(
+                &net.points,
+                net.v_count,
+                false,
+                false
+            )
+            .unwrap());
+            assert_eq!(certify_monotone_net(&part, &net).unwrap(), valid);
+        }
     }
 
     #[test]
