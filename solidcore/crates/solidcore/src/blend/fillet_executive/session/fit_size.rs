@@ -161,7 +161,9 @@ impl Through {
 /// # Errors
 ///
 /// Those of the drops and evaluations; `SM_ERR_NULL_POINTER` without both offset surfaces
-/// or an edge curve.
+/// or an edge curve;
+/// [`BlendFailure::SolverFaceIndexInvalid`](crate::error::blend::BlendFailure::SolverFaceIndexInvalid)
+/// for `lk` past 1.
 pub fn ball_through(
     k: &Kernel,
     target: &Brep,
@@ -186,9 +188,9 @@ fn ball_through_at(
     ratio: Option<[f64; 2]>,
 ) -> Result<Option<(f64, f64, f64)>> {
     if lk > 1 {
-        return Err(SolidError::invalid_input(
+        return Err(SolidError::blend(
             OP,
-            "the face the ball touches is the solver's first (0) or second (1)",
+            BlendFailure::SolverFaceIndexInvalid { index: lk },
         ));
     }
     let ratio = ratio.unwrap_or([1.0, 1.0]);
@@ -1508,5 +1510,48 @@ mod tests {
         assert!((at(-TIP, 0.0) - TIP * TIP / (4.0 * R)).abs() <= 1e-12 * TIP * TIP);
         assert!((at(-R, -R) - R).abs() <= 1e-12 * R);
         assert!((at(-TIP, -R) - 184.033_068_783_068_8).abs() < 1e-9);
+    }
+
+    /// A face index past the solver's two is the caller's input, refused before it is read:
+    /// `1 - lk` would underflow (a debug panic, a release wrap to a missing surface's
+    /// `SM_ERR_NULL_POINTER`). Review of #20927.
+    #[test]
+    fn a_face_index_past_the_solvers_two_is_invalid_input() {
+        use crate::blend::fillet_executive::session::SolverObject;
+        use crate::blend::fillet_solver::p1::FilletSolver;
+        use crate::blend::fillet_standard_solver::p1::ConstantDistanceFs;
+        let k = crate::Kernel::default();
+        let target = crate::Brep::new();
+        let mut solver = SolverObject::ConstantDistance(Box::new(ConstantDistanceFs {
+            solver: FilletSolver::new(1e-6, 0.5, 0.03),
+            distance: 1.0,
+        }));
+        for lk in [2, 7, usize::MAX] {
+            let e = super::ball_through(
+                &k,
+                &target,
+                &mut solver,
+                lk,
+                crate::math::Point3::new(0.0, 0.0, 0.0),
+                1.0,
+                None,
+            )
+            .unwrap_err();
+            assert_eq!(
+                e.blend_failure(),
+                Some(&crate::error::blend::BlendFailure::SolverFaceIndexInvalid { index: lk }),
+                "{e:?}"
+            );
+            assert_eq!(
+                e.kind(),
+                crate::error::ErrorKind::InvalidInput,
+                "lk {lk}: {e:?}"
+            );
+            assert_eq!(
+                e.upstream_status(),
+                Some(crate::error::SM_ERR_INVALID_INPUT),
+                "lk {lk}: {e:?}"
+            );
+        }
     }
 }
