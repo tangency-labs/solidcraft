@@ -111,15 +111,13 @@ impl SessionObjects<'_> {
         }
         let mut normals = [Vec3::UNDEF; 2];
         for (rail, normal) in normals.iter_mut().enumerate() {
-            let offset = base
-                .surface(rail)?
-                .ok_or_else(|| {
-                    null_defect(
-                        "a loaded solver has no offset surface for a rail: the solver set-up \
+            let offset = base.surface(rail)?.ok_or_else(|| {
+                null_defect(
+                    "a loaded solver has no offset surface for a rail: the solver set-up \
                          gives each rail the offset of its face's surface before the solver is \
                          loaded",
-                    )
-                })?;
+                )
+            })?;
             let planar = offset.surface.base_surface().is_planar(k, EFF_ZERO)?;
             if !planar.is_planar {
                 return Ok(true);
@@ -135,12 +133,9 @@ impl SessionObjects<'_> {
             return Ok(true);
         };
         let fillet = fillet.clone_for_evaluation()?;
-        let eu = base
-            .edgeuse(0)?
-            .ok_or_else(|| null_defect(SOLVER_EDGE))?;
+        let eu = base.edgeuse(0)?.ok_or_else(|| null_defect(SOLVER_EDGE))?;
         let target = &*self.target;
-        let e = eu1::edge(target, eu)?
-            .ok_or_else(|| null_defect(SOLVER_EDGE))?;
+        let e = eu1::edge(target, eu)?.ok_or_else(|| null_defect(SOLVER_EDGE))?;
         let curve = edge::curve(target, e)?.ok_or_else(|| {
             SolidError::blend_at(
                 OP,

@@ -97,12 +97,14 @@ fn null_defect(why: &'static str) -> SolidError {
 }
 
 /// Why `IsPlanar`'s normal of a planar surface is never zero.
-pub(crate) const PLANAR_NORMAL: &str = "a surface found planar has a zero normal: `IsPlanar` gives a \
+pub(crate) const PLANAR_NORMAL: &str =
+    "a surface found planar has a zero normal: `IsPlanar` gives a \
      plane's unit z axis, or its pseudo box's normal across a flat interval, the cross product \
      of two of the box's unit axes";
 
 /// Why a unit normal crossed with the coordinate axis it leans on least is never zero.
-pub(crate) const PLANE_AXIS: &str = "a plane's first axis, its unit normal crossed with the coordinate \
+pub(crate) const PLANE_AXIS: &str =
+    "a plane's first axis, its unit normal crossed with the coordinate \
      axis it leans on least, is zero: that axis holds at most 1/sqrt(3) of the normal, so the \
      cross product is at least sqrt(2/3) long";
 
@@ -143,14 +145,11 @@ pub fn plane_of(k: &Kernel, surface: &Surface) -> Result<Option<(Point3, Vec3)>>
     if !planar.is_planar {
         return Ok(None);
     }
-    let normal = planar
-        .normal
-        .unitize()
-        .map_err(|e| {
-            Failure::new(OP, BlendFailure::Defect { why: PLANAR_NORMAL })
-                .caused_by(e)
-                .into_error()
-        })?;
+    let normal = planar.normal.unitize().map_err(|e| {
+        Failure::new(OP, BlendFailure::Defect { why: PLANAR_NORMAL })
+            .caused_by(e)
+            .into_error()
+    })?;
     Ok(Some((planar.point, normal)))
 }
 
@@ -906,10 +905,7 @@ pub fn extend(
     let (x, y) = plane_axes(normal)?;
     let face_edges = face::p4::edges(target, f, None, false, None)?;
 
-    let run = |i: usize| -> Result<&OffRun> {
-        runs.get(i)
-            .ok_or_else(|| null_defect(CHAIN_RUNS))
-    };
+    let run = |i: usize| -> Result<&OffRun> { runs.get(i).ok_or_else(|| null_defect(CHAIN_RUNS)) };
     let mut extensions = Vec::new();
     // the chains of runs, joined at the sheet's vertices; each run once
     let mut used = vec![false; runs.len()];
@@ -967,12 +963,8 @@ pub fn extend(
             }
         }
         // the chain's two ends: [0] its start, [1] its end
-        let &(first, first_rev) = chain
-            .first()
-            .ok_or_else(|| null_defect(CHAIN_RUNS))?;
-        let &(last, last_rev) = chain
-            .last()
-            .ok_or_else(|| null_defect(CHAIN_RUNS))?;
+        let &(first, first_rev) = chain.first().ok_or_else(|| null_defect(CHAIN_RUNS))?;
+        let &(last, last_rev) = chain.last().ok_or_else(|| null_defect(CHAIN_RUNS))?;
         let (rf, rl) = (run(first)?, run(last)?);
         let ends = [pick(&rf.ends, first_rev), pick(&rl.ends, !last_rev)];
         let verts = [pick(&rf.vertices, first_rev), pick(&rl.vertices, !last_rev)];
@@ -1178,10 +1170,7 @@ pub fn extend(
             chain_loop(&mut ext)?;
             // the end to the way's first vertex
             let here = ends[1];
-            let first_v = way
-                .verts
-                .first()
-                .ok_or_else(|| null_defect(WAY_VERTS))?;
+            let first_v = way.verts.first().ok_or_else(|| null_defect(WAY_VERTS))?;
             let first_p = vertex::point(target, *first_v)?;
             if here.distance(first_p) > tol {
                 let piece = if let Some(c) = crosses[1] {
@@ -1201,22 +1190,15 @@ pub fn extend(
             for (i, &e) in way.edges.iter().enumerate() {
                 let curve = edge_curve(k, target, e)?;
                 let (va, vb) = (
-                    way.verts
-                        .get(i)
-                        .ok_or_else(|| null_defect(WAY_VERTS))?,
-                    way.verts
-                        .get(i + 1)
-                        .ok_or_else(|| null_defect(WAY_VERTS))?,
+                    way.verts.get(i).ok_or_else(|| null_defect(WAY_VERTS))?,
+                    way.verts.get(i + 1).ok_or_else(|| null_defect(WAY_VERTS))?,
                 );
                 let (pa, pb) = (vertex::point(target, *va)?, vertex::point(target, *vb)?);
                 add_curve(k, &mut ext.lp, curve, pa, pb)?;
                 ext.along.push(e);
             }
             // the way's last vertex to the start
-            let last_v = way
-                .verts
-                .last()
-                .ok_or_else(|| null_defect(WAY_VERTS))?;
+            let last_v = way.verts.last().ok_or_else(|| null_defect(WAY_VERTS))?;
             let last_p = vertex::point(target, *last_v)?;
             if last_p.distance(ends[0]) > tol {
                 let piece = if let Some(c) = crosses[0] {
@@ -1274,9 +1256,7 @@ fn takes_off(
     let mut uv = Vec::new();
     loop_polygon(k, &ext.lp, at, x, y, &mut uv)?;
     let area = twice_area(&uv);
-    let &(r, rev) = chain
-        .first()
-        .ok_or_else(|| null_defect(CHAIN_RUNS))?;
+    let &(r, rev) = chain.first().ok_or_else(|| null_defect(CHAIN_RUNS))?;
     let mid_run = runs.get(r).ok_or_else(|| null_defect(CHAIN_RUNS))?;
     let ivl = mid_run.curve.natural_interval();
     let d = mid_run

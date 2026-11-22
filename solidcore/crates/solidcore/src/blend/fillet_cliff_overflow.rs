@@ -54,9 +54,9 @@ use std::collections::BTreeSet;
 
 use crate::blend::fillet_executive::p3::NoRoomReason;
 use crate::blend::fillet_geom::p1::FilletErrorType;
+use crate::blend::fillet_overflow::{PLANAR_NORMAL, PLANE_AXIS};
 use crate::curve::curve::Curve;
 use crate::curve::line::Line;
-use crate::blend::fillet_overflow::{PLANAR_NORMAL, PLANE_AXIS};
 use crate::error::blend::{BlendFailure, OverflowDrop, OverflowInput};
 use crate::error::{EntityRef, Failure, Result, SolidError, SM_ERR_NULL_POINTER};
 use crate::geom::extent2d::Extent2d;
@@ -819,15 +819,12 @@ pub fn section_end(
     let derivs = edge::curve(target, fil_edge)?
         .ok_or_else(|| input_missing(OverflowInput::EdgeCurve, EntityRef::Edge(fil_edge)))?
         .evaluate(k, t, 1, true, true)?;
-    let tangent = derivs
-        .get(1)
-        .copied()
-        .ok_or_else(|| {
-            null_defect(
-                "the filleted edge's curve evaluated with one derivative gives no tangent: a \
+    let tangent = derivs.get(1).copied().ok_or_else(|| {
+        null_defect(
+            "the filleted edge's curve evaluated with one derivative gives no tangent: a \
                  curve's evaluation returns its point and each derivative asked for",
-            )
-        })?;
+        )
+    })?;
     let length = tangent.length();
     if length <= EFF_ZERO {
         return Ok(None);
@@ -892,12 +889,19 @@ mod tests {
     #[test]
     fn a_refusal_is_noted_and_a_typed_failure() {
         let mut note = None;
-        let error = refuse::<()>(&mut note, NoRoomReason::CliffBoundaryBranches, BRANCHES.comment)
-            .unwrap_err();
+        let error = refuse::<()>(
+            &mut note,
+            NoRoomReason::CliffBoundaryBranches,
+            BRANCHES.comment,
+        )
+        .unwrap_err();
         assert_eq!(note, Some(BRANCHES));
         assert_eq!(
             error,
-            SolidError::blend(OP, BlendFailure::NoRoom(NoRoomReason::CliffBoundaryBranches))
+            SolidError::blend(
+                OP,
+                BlendFailure::NoRoom(NoRoomReason::CliffBoundaryBranches)
+            )
         );
         assert!(error.is_refusal(), "{error:?}");
         assert_eq!(error.upstream_status(), Some(crate::error::SM_ERR));
