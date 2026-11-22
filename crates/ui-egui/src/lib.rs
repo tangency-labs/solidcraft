@@ -340,6 +340,7 @@ pub mod sketch_modify_ui;
 mod sketch_modify_ui_tests;
 #[cfg(test)]
 mod sketch_moving_click_tests;
+mod sketch_notice;
 pub mod sketch_palette;
 mod sketch_pattern_tree;
 pub mod sketch_report;
@@ -677,6 +678,12 @@ pub struct SolveApp {
     /// A view change in progress (axis view, Home, Fit); any mouse navigation cancels it.
     pub cam_anim: Option<CameraAnim>,
     pub(crate) sketch_camera_target: Option<Camera>,
+    pub(crate) sketch_notices: sketch_notice::State,
+    pub(crate) prepared_edit_starts: std::collections::BTreeMap<u64, String>,
+    pub(crate) sketch_finish_processing: bool,
+    pub(crate) sketch_refreshes: std::collections::BTreeMap<u64, sketch_view::ModelRefresh>,
+    pub(crate) stopped_sketch_refreshes: std::collections::BTreeSet<u64>,
+    pub(crate) sketch_edit_sequences: std::collections::BTreeMap<u64, u64>,
     /// The custom view navigator's body (kept with the preferences).
     pub view_gizmo: view_gizmo::State,
     /// Seconds since start, as of this frame.
@@ -793,7 +800,7 @@ pub struct SolveApp {
     pub deferred_queue: Vec<(String, Value, u64)>,
     /// A feature started from a sketch while the marker rolls back, and that sketch: it starts
     /// once the marker is back.
-    pub start_after_roll: Option<(String, u64)>,
+    pub start_after_roll: Option<(String, Option<u64>)>,
     /// The ribbon tab before the current `start` moved it to the command's home tab. A command
     /// that starts nothing (refused with a parameter or status error) puts it back (#10540).
     pub(crate) command_tab_before_start: Option<String>,
@@ -1082,6 +1089,12 @@ impl SolveApp {
             cam: Camera::default(),
             cam_anim: None,
             sketch_camera_target: None,
+            sketch_notices: Default::default(),
+            prepared_edit_starts: Default::default(),
+            sketch_edit_sequences: Default::default(),
+            sketch_finish_processing: false,
+            sketch_refreshes: Default::default(),
+            stopped_sketch_refreshes: Default::default(),
             view_gizmo: view_gizmo::State::default(),
             now: 0.0,
             pre_sketch_cam: None,
@@ -1627,6 +1640,7 @@ impl SolveApp {
         let id = solidcraft_engine::find_command(id).map_or(id, |spec| spec.id);
         crate::sketch_view::sync(self)?;
         self.sketch_view_named = params.get("view").is_some_and(|view| !view.is_null());
+        let finished_sketch = crate::sketch_view::prepare_edit(self, id, &params)?;
         if matches!(id, "sketch.create" | "sketch.edit") {
             let explicit = match params.get("view") {
                 None | Some(Value::Null) => None,
@@ -1703,6 +1717,14 @@ impl SolveApp {
             self.library.refresh();
         }
         self.big_operation |= now_ms() - t0 >= recovery_ui::BIG_OPERATION_MS;
+        let r = r.map(|mut reply| {
+            if let Some(event) = finished_sketch
+                && let Some(reply) = reply.as_object_mut()
+            {
+                reply.insert("finished_sketch".into(), json!(event.name));
+            }
+            reply
+        });
         self.after_command(id, &params, revision, selected_before, r)
     }
 
@@ -1771,6 +1793,10 @@ impl SolveApp {
 
     /// Host effects shared by directly executed and already evaluated commands.
     pub(crate) fn command_completed(&mut self, id: &str, r: Result<Value, String>) -> Result<Value, String> {
+        if self.dialog.as_ref().is_some_and(|dialog| dialog.command() == Some(id)) {
+            self.sketch_edit_sequences.insert(self.session.uid, self.session.edit_start_sequence());
+        }
+        crate::sketch_view::consume_finishes(self);
         // The engine has no edit in place to start or finish; the window does, and says when it can't.
         let r = match solidcraft_engine::find_command(id).map(|spec| spec.id) {
             // `queued`: it waits for the end of the agent's turn.
@@ -2013,6 +2039,12 @@ impl SolveApp {
             Ok(value)
         });
         crate::sketch_view::project(self);
+        if r.is_ok() && self.session.active_sketch.is_some() && !self.sketch_finish_processing {
+            // A sketch some command left open: remember the view to go back to, as a command run from
+            // a script does. Only the UI turns the view, and only when it starts the sketch.
+            let before = self.settled_cam();
+            self.open_sketch_camera(before, false);
+        }
         self.finish_command(id, &r);
         plugin_events::command_completed(self, id, r.is_ok());
         if matches!(id, "select.mode" | "select.filter") {
@@ -2837,29 +2869,33 @@ impl SolveApp {
         if interactive && (self.editing_state.is_some() || self.applying.is_some()) {
             dialogs::cancel(self);
         }
-        let finished_sketch = self.session.active_sketch.filter(|_| ends_sketch(id) && self.interactive(id));
-        // The sketch's end may turn the view (Preferences › Sketch); Extrude goes back to the view
-        // it was clicked in, so take that one before the turn starts (#10571).
-        self.pre_command_cam = finished_sketch.is_some().then(|| self.settled_cam());
-        if finished_sketch.is_some() {
-            // A point picked in the sketch being finished stays a pick of that sketch: its
-            // placement reads where the sketch puts it once the sketch is no longer the open one.
-            if let (Some(sketch), "solid.box" | "solid.sphere" | "solid.torus") = (finished_sketch, id) {
-                for sel in self.session.selection.iter_mut() {
-                    if let solidcraft_engine::Sel::SketchPoint { id } = sel {
-                        *sel = solidcraft_engine::Sel::ExternalSketchPoint { sketch, id: id.clone() };
-                    }
+        let starts_edit = solidcraft_engine::find_command(id).is_some_and(|spec| self.session.command_starts_edit(spec, &Value::Null));
+        let previous_sketch = self.session.active_sketch.filter(|_| starts_edit);
+        self.pre_command_cam = previous_sketch.is_some().then(|| self.settled_cam());
+        if let (Some(sketch), "solid.box" | "solid.sphere" | "solid.torus") = (previous_sketch, id) {
+            for sel in &mut self.session.selection {
+                if let solidcraft_engine::Sel::SketchPoint { id } = sel {
+                    *sel = solidcraft_engine::Sel::ExternalSketchPoint { sketch, id: id.clone() };
                 }
             }
-            self.finish_sketch();
-            // A feature committed before the marker is back would go in where the sketch was.
-            if self.deferred.is_some() {
-                self.start_after_roll = finished_sketch.map(|sketch| (id.to_string(), sketch));
-                // The sketch already took the ribbon back through `sketch_return_tab`; the
-                // deferred start must not undo that when it eventually runs (#10540).
-                self.command_tab_before_start = None;
+        }
+        self.prepared_edit_starts.remove(&self.session.uid);
+        let finished = match crate::sketch_view::prepare_edit(self, id, &Value::Null) {
+            Ok(event) => event,
+            Err(error) => {
+                self.set_status(error, true);
                 return;
             }
+        };
+        let finished_sketch = finished.filter(|event| matches!(event.domain, solidcraft_engine::SketchDomain::Model)).map(|event| event.sketch);
+        if starts_edit {
+            self.prepared_edit_starts.insert(self.session.uid, id.into());
+        }
+        crate::sketch_view::refresh_model(self);
+        if self.session.needs_sketch_finish_evaluation() {
+            self.start_after_roll = Some((id.to_string(), finished_sketch));
+            self.command_tab_before_start = None;
+            return;
         }
         self.start_interactive(id, finished_sketch);
     }
@@ -3103,8 +3139,17 @@ impl SolveApp {
         }
         let Some(idx) = self.session.doc.feature_index(id) else { return };
         let marker = self.finish_sketch_for_edit();
+        let prepared = self.session.prepare_feature_edit_start(id).map_err(|error| error.to_string());
+        if prepared.is_ok() {
+            self.sketch_notices.dismiss(self.session.uid);
+        }
+        crate::sketch_view::consume_finishes(self);
+        if let Err(error) = prepared {
+            self.set_status(error, true);
+            return;
+        }
         self.tool = None;
-        if self.session.doc.marker != marker {
+        if self.session.doc.marker != marker || self.session.needs_sketch_finish_evaluation() {
             self.prepare_feature_edit(id, idx, marker);
             return;
         }
@@ -3178,6 +3223,10 @@ impl SolveApp {
     /// sketch row inside a component in the browser): that component is active while the sketch
     /// is open, and the one active before comes back when the sketch ends (#8127).
     pub fn edit_sketch_in(&mut self, id: u64, placement: Option<(u64, &[u64])>) {
+        self.edit_sketch_at_view(id, placement, None);
+    }
+
+    pub(crate) fn edit_sketch_at_view(&mut self, id: u64, placement: Option<(u64, &[u64])>, view: Option<u64>) {
         let activate = |app: &mut Self| {
             if let Some((component, path)) = placement {
                 let _ = app.run("component.activate", json!({"component": component, "occurrence": path.last(), "path": path}));
@@ -3198,12 +3247,17 @@ impl SolveApp {
             return;
         }
         let marker = self.finish_sketch_for_edit();
+        if let Err(error) = crate::sketch_view::prepare_edit(self, "sketch.edit", &json!({"sketch":id})) {
+            self.set_status(error, true);
+            return;
+        }
+        self.prepared_edit_starts.insert(self.session.uid, "sketch.edit".into());
         let before = self.settled_cam();
         let context = (self.session.active_component, self.session.active_occurrence_path.clone());
         self.tool = None;
         self.dialog = None;
         activate(self);
-        if self.run("sketch.edit", json!({ "sketch": id, "restore_marker": marker })).is_err() {
+        if self.run("sketch.edit", json!({ "sketch": id, "restore_marker": marker, "view": view })).is_err() {
             self.restore_component(context.0, context.1);
             return;
         }
@@ -3231,6 +3285,9 @@ impl SolveApp {
     /// opens" preference is off, and remember the view from `before` it and the one facing it for
     /// when the sketch ends (#7038). Returns whether the view turned.
     pub(crate) fn look_at_opened_sketch(&mut self, before: Camera) -> bool {
+        // Only the UI calls this: the person is the one sketching, so an empty sketch goes when
+        // it finishes.
+        self.session.mark_sketch_entered_by_person();
         self.open_sketch_camera(before, true)
     }
 
@@ -3288,17 +3345,10 @@ impl SolveApp {
     /// Pass the original marker to the next editor. Restoring it between editors could finish
     /// in the background after the next rollback, moving the marker out from under that edit.
     fn finish_sketch_for_edit(&mut self) -> Option<usize> {
-        let marker = self
-            .pending_feature_edit
+        self.pending_feature_edit
             .take()
             .map(|pending| pending.marker)
-            .unwrap_or_else(|| self.session.sketch_restore_marker().unwrap_or(self.session.doc.marker));
-        if self.session.active_sketch.is_some() {
-            let command = self.take_sketch_exit().unwrap_or_else(|| "sketch.finish".into());
-            self.prepare_sketch_exit();
-            let _ = self.run(&command, json!({"restore_marker": false}));
-        }
-        marker
+            .unwrap_or_else(|| self.session.sketch_restore_marker().unwrap_or(self.session.doc.marker))
     }
 
     /// Finish the active sketch: stop editing and restore the history marker Edit Sketch moved.
@@ -3336,6 +3386,10 @@ impl SolveApp {
 
     /// Successful UI and programmatic exits share the same window cleanup.
     fn sketch_closed(&mut self, open: Option<u64>) {
+        self.sketch_closed_in(open, None);
+    }
+
+    fn sketch_closed_in(&mut self, open: Option<u64>, owner: Option<u64>) {
         self.take_sketch_exit();
         self.tool = None;
         dim_view::cancel();
@@ -3344,7 +3398,7 @@ impl SolveApp {
             self.restore_component(pre.component, pre.path);
         }
         // Only the views saved when this sketch opened: one opened another way saved none.
-        if let Some(view) = self.pre_sketch_cam.take().filter(|v| Some(v.sketch) == open) {
+        if let Some(view) = self.pre_sketch_cam.take().filter(|v| Some(v.sketch) == open && owner.is_none_or(|owner| owner == v.view)) {
             let _ = documents::with_sketch_camera(self, view.view, |app| {
                 if let Some(to) = app.preferences.sketch_exit_view.view_after(view.before, view.facing, app.settled_cam()) {
                     app.sketch_camera_target = Some(to);
@@ -4554,6 +4608,7 @@ impl SolveApp {
                 viewport::show_host_controls(app, &mut controls, rect);
             });
         }
+        crate::sketch_view::show_notice(self, ui);
         view_tiles::placement_overlay(self, ui.ctx());
         self.resolve_fit(ui.ctx());
         panel_runtime::finish_app_host(self, ui);
@@ -4818,12 +4873,3 @@ pub fn now_ms() -> f64 {
 mod picker_test_support;
 #[cfg(test)]
 mod test_support;
-
-/// Toolbar panels whose commands build features from the model; they finish an open sketch first.
-/// Construct, Inspect and Insert keep the sketch open.
-const SKETCH_ENDING_PANELS: [&str; 3] = ["CREATE", "MODIFY", "ASSEMBLE"];
-const SKETCH_TAB: &str = "SKETCH";
-
-fn ends_sketch(id: &str) -> bool {
-    solidcraft_engine::find_command(id).is_some_and(|c| c.tab != SKETCH_TAB && SKETCH_ENDING_PANELS.contains(&c.panel) && c.id != "sketch.create")
-}
