@@ -156,7 +156,8 @@
 use crate::curve::crv_on_surf::CrvOnSurf;
 use crate::curve::curve::p2::CurveKind;
 use crate::curve::curve::Curve;
-use crate::error::{EntityRef, Result, SolidError};
+use crate::error::topology::TopologyFailure;
+use crate::error::{EntityRef, Failure, Result, SolidError, SM_ERR, SM_ERR_NULL_POINTER};
 use crate::geom::a_object;
 use crate::geom::extent1d::Extent1d;
 use crate::geom::extent2d::Extent2d;
@@ -1581,15 +1582,21 @@ fn internal_point<B: QueryBrep>(k: &Kernel, b: B, f: FaceId) -> Result<Point3> {
 
     // no work - no surface
     let Some(surf) = face.surface.as_ref() else {
-        return Err(SolidError::topology_failed(OP, "the face has no surface"));
+        return Err(Failure::new(OP, TopologyFailure::FaceWithoutSurface)
+            .with_status(SM_ERR)
+            .into_error());
     };
 
     // no work - Bspline surface with no owner
     if surf.owner().is_none() {
-        return Err(SolidError::topology_failed(
+        return Err(Failure::new(
             OP,
-            "the face's surface has no owner",
-        ));
+            TopologyFailure::Defect {
+                why: "the face's surface names no owner; the kernel sets a surface's \
+                    owner when it attaches the surface to its face",
+            },
+        )
+        .into_error());
     }
 
     let mut classification: CurveClassification<UvLineHandle> = CurveClassification::new(k);
@@ -1638,7 +1645,16 @@ fn internal_point<B: QueryBrep>(k: &Kernel, b: B, f: FaceId) -> Result<Point3> {
                     // pSurface: the face's surface, read after the classification's
                     // edits (it stays the same surface)
                     let Some(surf) = uv_objects.brep().face(f)?.surface.as_ref() else {
-                        return Err(SolidError::topology_failed(OP, "the face has no surface"));
+                        return Err(Failure::new(
+                            OP,
+                            TopologyFailure::Defect {
+                                why: "the face has no surface after a UV line was \
+                                    classified against it, though it had one \
+                                    before; the classification adds UV trim \
+                                    curves and does not change a face's surface",
+                            },
+                        )
+                        .into_error());
                     };
                     let Ok(p) = surf.evaluate_point(k, Point2::new(uv3.x, uv3.y)) else {
                         continue;
@@ -1650,10 +1666,7 @@ fn internal_point<B: QueryBrep>(k: &Kernel, b: B, f: FaceId) -> Result<Point3> {
     }
 
     // arrive here when no curve classify to face
-    Err(SolidError::topology_failed(
-        OP,
-        "no line interval classifies into the face",
-    ))
+    Err(SolidError::topology(OP, TopologyFailure::NoInteriorPoint))
 }
 
 /// The result of [`points_in_face`].
@@ -1710,9 +1723,9 @@ pub fn points_in_face(
     let u_len = u_interval.length();
     let mut v_inc = v_interval.length();
     if u_len <= EFF_ZERO || v_inc <= EFF_ZERO {
-        return Err(SolidError::topology_failed(
+        return Err(SolidError::topology(
             OP,
-            "the face's UV domain is degenerate",
+            TopologyFailure::DegenerateUvDomain,
         ));
     }
     if point_count == 0 {
@@ -1784,8 +1797,10 @@ pub fn points_in_face(
             Point3::new(uv_start.x, uv_start.y, 0.0),
             Point3::new(uv_end.x, uv_end.y, 0.0),
         )
-        .map_err(|_| {
-            SolidError::topology_failed(OP, "the iso-parameter UV line could not be made")
+        .map_err(|e| {
+            Failure::new(OP, TopologyFailure::IsoLineNotMade)
+                .caused_by(e)
+                .into_error()
         })?;
 
         // for all u values of interest - see if any map to inside the face
@@ -1825,9 +1840,9 @@ pub fn points_in_face(
 
         // if we failed to find any U Params inside the face quit
         if classes.is_empty() {
-            return Err(SolidError::topology_failed(
+            return Err(SolidError::topology(
                 OP,
-                "no iso-parameter line crosses the face",
+                TopologyFailure::NoIsoLineCrossesFace,
             ));
         }
 
@@ -2473,10 +2488,15 @@ pub fn trim_curve_breaks(
     let ivl = uv_curve.natural_interval();
     let (knots, _) = uv_curve.knots(k, Some(&ivl))?;
     if knots.len() < 2 {
-        return Err(SolidError::topology_failed(
+        return Err(Failure::new(
             "topology::face::trim_curve_breaks",
-            "the trim curve has fewer than two knots",
-        ));
+            TopologyFailure::Defect {
+                why: "the UV trim curve has fewer than two knots in its natural \
+                    interval; a B-spline curve has at least the knots at its two \
+                    ends",
+            },
+        )
+        .into_error());
     }
     let req = crate::nurbs::b_spline_curve::p2::BoundingBoxRequest {
         normal: true,
@@ -2858,10 +2878,7 @@ pub fn create_curves_from_face(
     // check state
     if !want_3d && !want_uv {
         // Need one or the other
-        return Err(SolidError::topology_failed(
-            OP,
-            "neither 3D nor UV curves are asked for",
-        ));
+        return Err(SolidError::topology(OP, TopologyFailure::NoCurvesAskedFor));
     }
 
     // init outputs
@@ -2942,10 +2959,16 @@ pub fn create_curves_from_face(
                 let copy = uv_curve.copy(k)?;
                 // NER(SM_CAST_PTR(SmBSplineCurve, pNewUV))
                 if bspline_slice(&copy).is_none() {
-                    return Err(SolidError::topology_missing(
+                    return Err(Failure::new(
                         OP,
-                        "the B-spline form of the UV trim curve's copy",
-                    ));
+                        TopologyFailure::Defect {
+                            why: "the copy of the edge use's UV trim curve is not a B-spline \
+                                curve; the kernel makes UV trim curves only as B-spline curves \
+                                and a copy keeps its curve's kind",
+                        },
+                    )
+                    .with_status(SM_ERR_NULL_POINTER)
+                    .into_error());
                 }
                 if let Some(list) = out.uv_curves.as_mut() {
                     list.push(copy);
@@ -4253,14 +4276,14 @@ mod tests {
             calculate_an_internal_point(&k, &mut b, f)
                 .err()
                 .and_then(|e| e.upstream_status()),
-            Some(crate::error::SM_ERR)
+            Some(SM_ERR)
         );
         b.face_mut(f).unwrap().surface = Some(plane());
         assert_eq!(
             calculate_an_internal_point(&k, &mut b, f)
                 .err()
                 .and_then(|e| e.upstream_status()),
-            Some(crate::error::SM_ERR)
+            Some(SM_ERR)
         );
         b.face_mut(f)
             .unwrap()
@@ -4282,7 +4305,7 @@ mod tests {
             calculate_an_internal_point(&k, &mut b, f)
                 .err()
                 .and_then(|e| e.upstream_status()),
-            Some(crate::error::SM_ERR)
+            Some(SM_ERR)
         );
     }
 
