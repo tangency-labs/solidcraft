@@ -939,16 +939,13 @@ fn a_mixed_record_with_breaks_of_two_curves_a_rounding_apart_is_invalid_input() 
                             let what = format!(
                                 "xsect {xsect} side {i} curve {which} read {read} t {t} d {d}"
                             );
-                            match corner_rebuild(&k, &CornerRecord::Mixed(off)) {
-                                Err(e) => {
-                                    assert!(read, "{what}: an unread curve is refused: {e}");
-                                    assert_eq!(e.kind(), ErrorKind::InvalidInput, "{what}: {e}");
-                                    read_runs += 1;
-                                }
-                                Ok(_) => {
-                                    assert!(!read, "{what}: a read curve rebuilds");
-                                    unread_runs += 1;
-                                }
+                            if let Err(e) = corner_rebuild(&k, &CornerRecord::Mixed(off)) {
+                                assert!(read, "{what}: an unread curve is refused: {e}");
+                                assert_eq!(e.kind(), ErrorKind::InvalidInput, "{what}: {e}");
+                                read_runs += 1;
+                            } else {
+                                assert!(!read, "{what}: a read curve rebuilds");
+                                unread_runs += 1;
                             }
                         }
                     }
