@@ -70,6 +70,7 @@ impl Walk for crate::document::CoilSection {}
 impl Walk for crate::document::ThinSide {}
 impl Walk for crate::document::PickedPlacement {}
 impl Walk for crate::document::ExtendMode {}
+impl Walk for crate::document::SplitSheet {}
 impl Walk for crate::document::RuledMode {}
 impl Walk for crate::document::RuledCorners {}
 impl Walk for crate::document::ExtrudeConvention {}

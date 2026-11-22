@@ -163,6 +163,9 @@ job (§5.1).
 | `OffsetFailure::WallsTouch`, `LoopsCross` | an offset face's loops touch or cross | the face | per their flags | `error/offset.rs` |
 | `OffsetFailure::EdgeVanishes` | a vertex moves to or past its edge's end and the edge cannot be squeezed out | the original edge, or the face when available | during loop-gap closure | `offset_executive/step_gaps.rs` |
 | `OffsetFailure::LoopGapUncertified` | the loop-gap solve could not establish a boundary within tolerance | the original input face, when available | always | `offset_executive/step_gaps.rs` |
+| `OffsetFailure::LoopGapPassLimit` | the gap search, one gap closed per pass, reaches its 64 passes on a face | the original input face, when available, and the limit | during loop-gap closure | `offset_executive/step_gaps.rs` |
+| `OffsetFailure::LoopGapEndsAmbiguous` | both ends of a gap longer than its tolerance are at the shared vertex, or neither is | the face, both ends' distances and the tolerance | during loop-gap closure | `offset_executive/step_gaps.rs` |
+| `OffsetFailure::SplitAtEdgeEnd` | the edge a gap's bridge or a step corner splits takes the point for one of its ends | the face, when available, and the end vertices' larger tolerance | during loop-gap closure and step corners | `offset_executive/step_gaps.rs` |
 
 The static `offset_brep` entry point reports an ordinary failure of `do_solid_offset` with
 status `SM_ERR` and retains the stage's original error as its cause

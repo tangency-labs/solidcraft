@@ -7,7 +7,7 @@ use solidcraft_doc::{
     AxisRef, Direction, Expr, Extent, FeatureKind, Operation, PointExpr, ProfileSel, RailFit, SweepOrientation, SweepRail, ThinSide, ThinWall,
     Touching, expr::Kind, point_expr,
 };
-use solidcraft_doc::{BodyName, FeatureName, SketchId};
+use solidcraft_doc::{BodyName, FeatureName, SketchId, SplitSheet};
 use solidcraft_doc::{Dir, FacePick, Position};
 use solidcraft_geom::prelude::*;
 
@@ -3528,6 +3528,8 @@ fn split_body(s: &mut Session, p: &Value) -> Result<Value> {
                 plane: solidcraft_doc::PlaneRef::Origin { name: "XY".into() },
                 tool: None,
                 tool_plane: false,
+                tool_sheet: SplitSheet::Extended,
+                tool_faces: Vec::new(),
                 sketch: Some(solidcraft_doc::SketchId(sketch)),
                 line: Some(line),
             },
@@ -3542,6 +3544,44 @@ fn split_body(s: &mut Session, p: &Value) -> Result<Value> {
         if solidcraft_doc::appearance::face_index_at(tbody, point).is_none() {
             return Err(bad(cmd, "`tool.point` is not on a face of the tool body"));
         }
+        let tool_plane = bool_(p, "tool_plane").unwrap_or(false);
+        // What of the tool body cuts (#9305): the face extended, the picked faces, or the body.
+        let tool_sheet = match p.get("tool_sheet").filter(|v| !v.is_null()) {
+            None => SplitSheet::Extended,
+            Some(v) => match v.as_str() {
+                Some("extended") => SplitSheet::Extended,
+                Some("faces") => SplitSheet::Faces,
+                Some("body") => SplitSheet::Body,
+                _ => return Err(bad(cmd, "`tool_sheet` must be \"extended\", \"faces\" or \"body\"")),
+            },
+        };
+        let tool_faces = match p.get("tool_faces").filter(|v| !v.is_null()) {
+            None => Vec::new(),
+            Some(v) => {
+                let points = v.as_array().ok_or_else(|| bad(cmd, "`tool_faces` must be a list of points [x, y, z]"))?;
+                if points.len() > MAX_SPLIT_TOOL_FACES {
+                    return Err(bad(cmd, format!("`tool_faces` takes at most {MAX_SPLIT_TOOL_FACES} points")));
+                }
+                let mut faces = Vec::with_capacity(points.len());
+                for q in points {
+                    let q = crate::params::vec3(q).ok_or_else(|| bad(cmd, "`tool_faces` must be a list of points [x, y, z]"))?;
+                    if solidcraft_doc::appearance::face_index_at(tbody, q).is_none() {
+                        return Err(bad(cmd, "a `tool_faces` point is not on a face of the tool body"));
+                    }
+                    faces.push(Position(q));
+                }
+                faces
+            }
+        };
+        if tool_sheet != SplitSheet::Faces && !tool_faces.is_empty() {
+            return Err(bad(cmd, "`tool_faces` needs `tool_sheet` \"faces\""));
+        }
+        if tool_plane && tool_sheet != SplitSheet::Extended {
+            return Err(bad(cmd, "`tool_plane` splits with one face's plane, so it takes no `tool_sheet`"));
+        }
+        if tool_sheet == SplitSheet::Body && !tbody.body.is_surface() {
+            return Err(bad(cmd, format!("`{tb}` is not a surface body, so it cannot split as a whole")));
+        }
         return add_feature(
             s,
             p,
@@ -3549,15 +3589,33 @@ fn split_body(s: &mut Session, p: &Value) -> Result<Value> {
                 body: BodyName(body),
                 plane: solidcraft_doc::PlaneRef::Origin { name: "XY".into() },
                 tool: Some(solidcraft_doc::FaceAt { body: BodyName(tb), point: Position(point) }),
-                tool_plane: bool_(p, "tool_plane").unwrap_or(false),
+                tool_plane,
+                tool_sheet,
+                tool_faces,
                 sketch: None,
                 line: None,
             },
         );
     }
     let plane = plane_param(s, p.get("plane"), cmd)?;
-    add_feature(s, p, FeatureKind::Split { body: BodyName(body), plane, tool: None, tool_plane: false, sketch: None, line: None })
+    add_feature(
+        s,
+        p,
+        FeatureKind::Split {
+            body: BodyName(body),
+            plane,
+            tool: None,
+            tool_plane: false,
+            tool_sheet: SplitSheet::Extended,
+            tool_faces: Vec::new(),
+            sketch: None,
+            line: None,
+        },
+    )
 }
+
+/// The most other faces one Split Body by faces takes (`tool_faces`).
+const MAX_SPLIT_TOOL_FACES: usize = 1024;
 
 /// The fits [`clearance_diameter`] knows (close, normal, loose, and their older names).
 const CLEARANCE_FITS: [&str; 6] = ["close", "fine", "normal", "medium", "loose", "coarse"];
