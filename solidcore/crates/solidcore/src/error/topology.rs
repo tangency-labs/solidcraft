@@ -116,6 +116,13 @@
 //! | [`TopologyFailure::NoFiniteRegion`] | `SM_ERR` |
 //! | [`TopologyFailure::FaceStitchFailed`] | `SM_ERR` |
 //! | [`TopologyFailure::SurfaceNotTransformable`] | `SM_ERR` |
+//! | [`TopologyFailure::NoTrimmedBSpline`] | `SM_ERR_INVALID_INPUT` |
+//! | [`TopologyFailure::FaceListedTwice`] | `SM_ERR` |
+//! | [`TopologyFailure::EdgesNotSharingVertices`] | `SM_ERR` |
+//! | [`TopologyFailure::NoSectorForNewEdgeuse`] | `SM_ERR` |
+//! | [`TopologyFailure::NoClassifiablePoint`] | `SM_ERR` |
+//! | [`TopologyFailure::UvTrimCurvesNotMade`] | `SM_ERR` |
+//! | [`TopologyFailure::FacesNotCopiedOnce`] | `SM_ERR` |
 //!
 //! A named cause keeps the status of the phrase it replaced, unless its site overrides it
 //! through `with_status`.
