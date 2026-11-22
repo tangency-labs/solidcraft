@@ -3923,10 +3923,12 @@ fn redefining_a_sketch_onto_a_parallel_plane_keeps_its_points_where_they_were() 
     let spline = created["curves"].as_array().unwrap().iter().find(|c| c["type"] == "spline").unwrap().clone();
     let ends = spline["points"].as_array().unwrap();
     let side = |x: f64| {
-        created["curves"].as_array().unwrap().iter().find(|c| {
-            c["type"] == "line" && c["start_at"][0].as_f64() == Some(x) && c["end_at"][0].as_f64() == Some(x)
-        })
-        .unwrap()["id"]
+        created["curves"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|c| c["type"] == "line" && c["start_at"][0].as_f64() == Some(x) && c["end_at"][0].as_f64() == Some(x))
+            .unwrap()["id"]
             .clone()
     };
     run(&mut s, "sketch.constraint.coincident", json!({"a": ends[0], "b": side(0.0)}));
