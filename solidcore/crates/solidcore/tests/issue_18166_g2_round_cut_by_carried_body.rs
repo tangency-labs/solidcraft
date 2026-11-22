@@ -56,7 +56,6 @@ const SOLIDCRAFT_FIXES: &[&str] = &[
     "keep_exact_pcurves",
     "closed_smooth_pole_tangent_limit",
     "fillet_chamfer_corner",
-    "brep_ray_classifies_current_trims",
 ];
 
 fn kernel() -> Kernel {
