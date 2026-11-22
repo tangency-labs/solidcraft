@@ -5752,7 +5752,7 @@ pub(crate) fn dialog_pick(app: &mut SolveApp, hit: &Hit, sel: Sel) {
         d.extra.remove("path");
     }
     // Split Body's sketch line keeps the sketch it was picked in (curve ids repeat across sketches).
-    if matches!(d.kind, crate::dialogs::Kind::Split) {
+    if matches!(d.kind, crate::dialogs::Kind::Split { .. }) {
         if let Hit::SketchCurve { sketch, .. } = hit {
             d.extra.insert("tool_sketch".into(), serde_json::json!(sketch));
         } else {
