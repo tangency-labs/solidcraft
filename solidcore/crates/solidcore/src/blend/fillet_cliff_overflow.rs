@@ -127,12 +127,6 @@ fn input_missing(input: OverflowInput) -> SolidError {
     SolidError::blend(OP, BlendFailure::OverflowInputMissing(input))
 }
 
-/// A step that cannot fail did ([`BlendFailure::Defect`], status `SM_ERR`), `why` saying
-/// why it is the kernel's fault.
-fn defect(why: &'static str) -> SolidError {
-    SolidError::blend(OP, BlendFailure::Defect { why })
-}
-
 /// A missing thing this module built ([`BlendFailure::Defect`] keeping the upstream `NER`
 /// status `SM_ERR_NULL_POINTER`), `why` saying why it is always there.
 fn null_defect(why: &'static str) -> SolidError {
@@ -678,13 +672,8 @@ fn face_of_loop(
         }
     }
     let mut area = 0.0;
-    for (i, a) in uvs.iter().enumerate() {
-        let Some(b) = uvs.get((i + 1) % uvs.len()) else {
-            return Err(null_defect(
-                "a loop point's successor is not there: its index is taken modulo the number \
-                 of points, and the loop runs over those points",
-            ));
-        };
+    // each point and its successor, the last point's the first
+    for (a, b) in uvs.iter().zip(uvs.iter().cycle().skip(1)) {
         area += a.x * b.y - b.x * a.y;
     }
     if area < 0.0 {
@@ -757,32 +746,29 @@ pub fn section_end_face(
         b.ok_or_else(|| input_missing(OverflowInput::EdgeEndVertex))?,
     )?;
     let mut lp: Vec<LoopCurve> = Vec::new();
-    add_curve(k, &mut lp, edge_curve(k, region, section)?, a, b)?;
+    let section_curve = edge_curve(k, region, section)?;
+    // the box starts at the section curve's first sample (`samples`' point at 0), so it is
+    // never empty: adding that sample again below leaves it as it is
+    let first = section_curve.evaluate_point(k, section_curve.natural_interval().evaluate(0.0))?;
+    add_curve(k, &mut lp, section_curve, a, b)?;
     for (from, to) in [(b, end.at), (end.at, a)] {
         if !same(from, to, on_tol) {
             add_curve(k, &mut lp, line(from, to), from, to)?;
         }
     }
     let [_, x, y] = end.normal.make_unit_ortho_vectors(None)?;
-    let mut bbox: Option<Extent2d> = None;
+    let in_plane = |p: Point3| {
+        let d = p - end.at;
+        Point2::new(d.dot(x), d.dot(y))
+    };
+    let mut bbox = Extent2d::from_points(in_plane(first), in_plane(first));
     for c in &lp {
         let mut points = Vec::new();
         samples(k, &c.curve, 8, &mut points)?;
         for p in points {
-            let d = p - end.at;
-            let uv = Point2::new(d.dot(x), d.dot(y));
-            match bbox.as_mut() {
-                None => bbox = Some(Extent2d::from_points(uv, uv)),
-                Some(bx) => bx.add_point(uv),
-            }
+            bbox.add_point(in_plane(p));
         }
     }
-    let Some(bbox) = bbox else {
-        return Err(defect(
-            "a section end's loop gives no points: it holds the section's curve, sampled at \
-             nine points",
-        ));
-    };
     let margin = 0.01 * bbox.size().length() + on_tol;
     let domain = Extent2d::from_bounds(
         bbox.min().x - margin,
