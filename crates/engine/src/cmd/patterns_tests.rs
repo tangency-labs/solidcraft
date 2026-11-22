@@ -1987,7 +1987,6 @@ fn placing_a_part_many_times_moves_no_record_until_one_is_needed() {
     for k in 1..=10 {
         run(&mut s, "occurrence.copy", json!({"component": c["component"], "translate": [0, 40 * k, 0]}));
     }
-    let before = solidcraft_kernel::lazy_moves_made();
     let world = s.world_state().unwrap();
     assert_eq!(world.bodies.len(), 3 * 11);
     // Their shapes are drawn, named and framed from the part's: meshes, face counts, outlines,
@@ -1995,11 +1994,11 @@ fn placing_a_part_many_times_moves_no_record_until_one_is_needed() {
     for b in &world.bodies {
         let _ = (b.body.face_count(), b.mesh_in_place(), b.outline_bounds(), b.is_closed());
     }
-    assert_eq!(solidcraft_kernel::lazy_moves_made(), before, "no placement's record moved to place or draw it");
+    assert!(world.bodies.iter().all(|b| !b.body.lazy_move_made()), "no placement's record moved to place or draw it");
     // A measure of one placement needs its own geometry: that one is moved, once.
     let placed = world.bodies.iter().find(|b| b.placed_definition().is_some()).unwrap();
     let _ = placed.body.record();
-    assert_eq!(solidcraft_kernel::lazy_moves_made(), before + 1);
+    assert!(placed.body.lazy_move_made());
 }
 
 /// Review of #18732: a per-edge fillet whose picks include a smooth edge (dropped, with a note)
@@ -2021,4 +2020,28 @@ fn a_mirror_of_a_per_edge_fillet_with_a_dropped_smooth_pick_keeps_each_edges_rad
     run(&mut s, "solid.mirror", json!({"features": ["Each"], "plane": {"origin": [0, 20, 0], "normal": [0, 1, 0]}}));
     let v = volume(&mut s);
     assert!((v - 71575.08836352694).abs() < 1e-6 * v, "{v}");
+}
+
+/// #14407: copies of a split pipe surface (2 faces, 6 edges) showed 1 face and 2 edges, their split
+/// lines dropped by the move.
+#[test]
+fn a_body_pattern_of_a_split_surface_copies_its_split_faces() {
+    let mut s = Session::default();
+    run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Round"}));
+    run(&mut s, "sketch.circle.center", json!({"center": [30, 0], "radius": 12.5}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "surface.extrude", json!({"sketch": "Round", "distance": "20 mm", "name": "Pipe", "body_name": "Pipe"}));
+    run(&mut s, "solid.split_face", json!({"body": "Pipe", "faces": [[42.5, 0, 10]], "plane": {"origin": [30, 0, 0], "normal": [1, 0, 0]}}));
+    run(&mut s, "solid.pattern.circular", json!({"bodies": ["Pipe"], "axis": "Z", "count": 3}));
+    let st = s.model.state();
+    let shown: Vec<(String, usize, usize)> = st
+        .bodies
+        .iter()
+        .map(|b| {
+            let t = solidcraft_kernel::merged_topology(&b.body).unwrap();
+            (b.name.clone(), t.faces, t.edges)
+        })
+        .collect();
+    assert_eq!(shown.len(), 3, "{shown:?}");
+    assert!(shown.iter().all(|(_, faces, edges)| (*faces, *edges) == (2, 6)), "{shown:?}");
 }

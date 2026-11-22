@@ -69,9 +69,14 @@ fn plate() -> (Session, Value) {
 /// in every other cell, with nothing typed over any (a new sheet's template types its tolerances
 /// note over one); and a front view at 1:1. The sheet and the view.
 fn drawn(s: &mut Session) -> (u64, u64) {
+    drawn_with(s, ["name", "part_number"])
+}
+
+/// [`drawn`], the block's first two text cells reading the component's fields `keys`.
+fn drawn_with(s: &mut Session, keys: [&str; 2]) -> (u64, u64) {
     let sheet = id(&run(s, "drawing.create", json!({}))["sheets"][0]["id"]);
     let mut block = default_block();
-    let mut fields = [(Source::Component, "name"), (Source::Component, "part_number")].into_iter();
+    let mut fields = keys.map(|key| (Source::Component, key)).into_iter();
     for cell in &mut block.cells {
         if let CellKind::Text(text) = &mut cell.kind {
             text.content = Content(vec![match fields.next() {
@@ -138,6 +143,34 @@ fn a_lost_dimension_and_an_empty_part_number_are_listed_and_nothing_else() {
     let plate = s.doc.features[0].id;
     assert_eq!(coverage(&reply), [(plate, "covered".to_string(), vec![named("dimension", &width)])], "{reply}");
     assert_eq!(reply["coverage_counts"], json!([{"state": "covered", "count": 1}]), "{reply}");
+}
+
+/// A title block's sheet metal fields on a part that isn't sheet metal are listed as empty, each by
+/// its key; on a sheet metal part they read the sheet and nothing is listed.
+#[test]
+fn sheet_metal_fields_are_empty_on_a_part_that_isnt_sheet_metal() {
+    let (mut s, _) = plate();
+    let (sheet, _) = drawn_with(&mut s, ["thickness", "sheet_rule"]);
+    let reply = checked(&mut s, json!({}));
+    let on = json!(ids::encode(sheet));
+    let mut empty: Vec<String> = reply["findings"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|f| f["kind"] == "empty_field" && f["sheet"] == on)
+        .map(|f| f["field"].as_str().unwrap().to_string())
+        .collect();
+    empty.sort();
+    assert_eq!(empty, ["component.sheet_rule", "component.thickness"], "{reply}");
+    // A 100 x 60 base flange of the default rule: both read, so neither is listed.
+    let mut s = Session::default();
+    run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Base"}));
+    run(&mut s, "sketch.rectangle.two_point", json!({"p0": [0, 0], "p1": [100, 60]}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "sheet.flange", json!({"sketch": "Base"}));
+    drawn_with(&mut s, ["thickness", "sheet_rule"]);
+    let reply = checked(&mut s, json!({}));
+    assert!(of_kind(&reply, "empty_field").is_empty(), "{reply}");
 }
 
 /// Typed text over a value hides it; typed into an empty field, it fills it and is no finding. A
@@ -680,12 +713,11 @@ fn suppressed_and_rolled_back_features_are_not_applicable() {
     }
 }
 
-/// A block lifted by an operation that reports no history has no face named from exact history:
-/// the block's coverage is unknown, with why, and no feature is not covered. A body imported from
-/// STEP is the other way: the import names the faces it made from its own history
-/// (`F<import>:face:<k>`), so they are exact, and an import nothing points at is not covered.
+/// A body imported from STEP names the faces it made from its own history (`F<import>:face:<k>`),
+/// so they are exact, and an import nothing points at is not covered. A block lifted by Align keeps
+/// its faces' exact names too (#20288), so it is not covered either, rather than unknown.
 #[test]
-fn faces_not_named_from_exact_history_give_unknown() {
+fn imported_and_aligned_faces_are_named_from_exact_history() {
     let mut source = Session::default();
     run(&mut source, "solid.box", json!({"length": 100, "width": 60, "height": 10, "body_name": "Plate"}));
     let step = solidcraft_io::export(&source.model.state(), &[], solidcraft_io::Format::Step, "Plate").unwrap();
@@ -703,17 +735,14 @@ fn faces_not_named_from_exact_history_give_unknown() {
     let block = s.doc.features[0].id;
     drawn(&mut s);
     let reply = checked(&mut s, json!({}));
-    let entry = coverage_of(&reply, block);
-    assert_eq!(entry["state"], json!("unknown"), "{reply}");
-    assert!(!entry["why"].as_str().unwrap().is_empty(), "{reply}");
-    assert!(coverage(&reply).iter().all(|(_, state, _)| state != "not_covered"), "{reply}");
+    assert_eq!(coverage_of(&reply, block)["state"], json!("not_covered"), "{reply}");
 }
 
-/// A feature one body draws from exact history and another, moved since, from geometry: its exact
-/// faces can be dimensioned, so it is not covered, not unknown. The plate is split across X and one
-/// piece lifted.
+/// A feature drawn by two bodies, one of them moved since by Align: both keep the feature's exact
+/// face names (#20288), so its faces can be dimensioned and it is not covered. The plate is split
+/// across X and one piece lifted.
 #[test]
-fn a_feature_drawn_both_exactly_and_from_geometry_is_not_covered() {
+fn a_feature_drawn_by_a_split_and_aligned_plate_is_not_covered() {
     let mut s = Session::default();
     run(&mut s, "solid.box", json!({"length": 100, "width": 60, "height": 10, "body_name": "Plate"}));
     run(&mut s, "solid.split_body", json!({"body": "Plate", "plane": {"origin": [50, 0, 0], "normal": [1, 0, 0]}}));
@@ -726,7 +755,7 @@ fn a_feature_drawn_both_exactly_and_from_geometry_is_not_covered() {
             naming::face_names(b).iter().enumerate().any(|(i, name)| made_by_block(name) && naming::face_name_exact(b, i) == exact)
         })
     };
-    assert!(drawn_so(true) && drawn_so(false), "the block is drawn both ways");
+    assert!(drawn_so(true) && !drawn_so(false), "both pieces keep the block's exact names");
     drawn(&mut s);
     let reply = checked(&mut s, json!({}));
     assert_eq!(coverage_of(&reply, block)["state"], json!("not_covered"), "{reply}");
@@ -911,4 +940,24 @@ fn a_note_on_an_exploded_view_is_checked_as_any_views_and_covers_its_feature() {
     let reply = checked(&mut s, json!({}));
     assert!(whys(&reply, "out_of_date").is_empty(), "{reply}");
     assert_eq!(coverage_of(&reply, plate)["by"], json!([{"kind": "note", "id": note}]), "{reply}");
+}
+
+/// A note is held to the paper by the extent its alignment gives it: one at 15 mm from the sheet's
+/// edge is on it when it starts there, and half off it when it is centred there or ends there; starting
+/// 34 mm from the right edge of the A2 sheet (594 mm) it runs off that side.
+#[test]
+fn a_note_is_checked_where_its_alignment_puts_it() {
+    let (mut s, _, _, _) = assembly();
+    let params = json!({"anchor": {"sheet": "Sheet 1"}, "at": [15, 60], "content": "2 x 8.5mm Holes - Smooth Bore"});
+    let note = run(&mut s, "drawing.note.add", params)["note"].clone();
+    let reply = checked(&mut s, json!({}));
+    assert!(of_kind(&reply, "outside_sheet").is_empty(), "{reply}");
+    for align in ["centre", "right"] {
+        run(&mut s, "drawing.note.edit", json!({"note": note, "set": {"align": align}}));
+        let reply = checked(&mut s, json!({}));
+        assert_eq!(of_kind(&reply, "outside_sheet"), [named("note", &note)], "{align}: {reply}");
+    }
+    run(&mut s, "drawing.note.edit", json!({"note": note, "set": {"align": "left", "at": [560, 60]}}));
+    let reply = checked(&mut s, json!({}));
+    assert_eq!(of_kind(&reply, "outside_sheet"), [named("note", &note)], "{reply}");
 }

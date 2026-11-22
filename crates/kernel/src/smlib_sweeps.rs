@@ -576,7 +576,8 @@ mod imp {
         for (f, face) in r.faces.iter().enumerate() {
             let on_it = on(face, start)
                 && (edges.is_empty() || touched.contains(&f) || {
-                    let (ops, order) = ops()?;
+                    let form = ops()?;
+                    let (ops, order) = &*form;
                     let ds =
                         ops.face_distances(order, f, &points(edges)).map_err(|e| KernelError::Failed(format!("sweep history: face {f}: {e}")))?;
                     ds.iter().any(|d| d.is_some_and(|d| d <= reach))
@@ -598,7 +599,8 @@ mod imp {
         // Inside the walls: the faces nearest each point, as trimmed (a point on the edge between
         // two faces of one wall lies on both).
         if !inside.is_empty() {
-            let (ops, order) = ops()?;
+            let form = ops()?;
+            let (ops, order) = &*form;
             let points = points(inside);
             // Only a face within `reach` of a point can claim it below or be its nearest, so the
             // seam is asked about those alone and answers `None` for the rest: every face against

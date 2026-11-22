@@ -346,6 +346,18 @@ fn write_container(
     if let Some(object) = metadata.as_object_mut() {
         object.remove("drawings");
         object.remove("plugin_data");
+        // The parts the drawings' images are, named where a release that can't read the drawings'
+        // records (0.45.0) looks before it keeps a part, so its save keeps them.
+        let mut parts: Vec<String> = doc
+            .drawings
+            .iter()
+            .flat_map(|d| d.images.iter().map(|i| solidcraft_doc::blob::part_name(&i.data, &i.format)).collect::<Vec<_>>())
+            .collect();
+        parts.sort();
+        parts.dedup();
+        if !parts.is_empty() {
+            object.insert("drawing_parts".into(), json!(parts));
+        }
     }
     solidcraft_doc::newer_file::restore(doc, &mut metadata);
     let metadata = serde_json::to_vec(&metadata).map_err(invalid)?;
@@ -909,6 +921,58 @@ pub fn read_design_file(path: &str, notify: Option<impl FnOnce(DesignPreview)>) 
     }
 }
 
+/// A design container already in memory, with the model it keeps as [`read_design_file`] reads
+/// it, except that a container with a provenance entry gives no model: a signed design is
+/// evaluated from its timeline, never from a cache its signature does not cover. The entry and
+/// the model come from the same bytes, so the decision is about the file the model came from.
+pub fn read_design_with_model(bytes: &[u8]) -> Result<(Document, Option<solidcraft_doc::SavedModel>)> {
+    let _span = solidcraft_profile::span("io", "read_design_file");
+    let mut reader = DesignContainerReader::new(Cursor::new(bytes))?;
+    let model = if reader.has_provenance() { None } else { reader.geometry_before_document() };
+    Ok((reader.read_document()?, model))
+}
+
+/// A design file read for opening ([`read_design_file_once`]): its document, the model it keeps,
+/// whether it is signed, its provenance records and, when asked, the signature check, all from
+/// one reading of the file.
+pub struct DesignFile {
+    pub doc: Document,
+    /// The model the file keeps; `None` for a signed file, which is evaluated from its timeline
+    /// (its signature does not cover the cache).
+    pub model: Option<solidcraft_doc::SavedModel>,
+    /// The file has a provenance entry.
+    pub signed: bool,
+    /// Its provenance records, unverified: what a save appends to.
+    pub chain: Option<ProvenanceChain>,
+    /// The signature check, when asked for; `None` for a file without an entry.
+    pub report: Option<ProvenanceReport>,
+}
+
+/// [`read_design_file`] for opening a design: the document, model, signature presence,
+/// provenance records and (with `verify`) the signature check all come from one open file, so
+/// they describe the same bytes.
+pub fn read_design_file_once(path: &str, notify: Option<impl FnOnce(DesignPreview)>, verify: bool) -> Result<DesignFile> {
+    let _span = solidcraft_profile::span("io", "read_design_file");
+    let mut source = open_regular_file(path)?;
+    if !is_container_source(&mut source)? {
+        let mut bytes = Vec::new();
+        source.take((max_design() as u64).saturating_add(1)).read_to_end(&mut bytes).map_err(invalid)?;
+        return Ok(DesignFile { doc: crate::read_design(&bytes)?, model: None, signed: false, chain: None, report: None });
+    }
+    let mut reader = DesignContainerReader::new(source)?;
+    let signed = reader.has_provenance();
+    let model = if signed { None } else { reader.geometry_before_document() };
+    if let Some(notify) = notify
+        && model.is_none()
+        && let Ok(preview) = read_preview(&mut reader.reader)
+    {
+        notify(preview);
+    }
+    let chain = reader.provenance_chain();
+    let report = if verify { reader.provenance() } else { None };
+    Ok(DesignFile { doc: reader.read_document()?, model, signed, chain, report })
+}
+
 #[cfg(not(target_arch = "wasm32"))]
 type FileSource = std::fs::File;
 #[cfg(target_arch = "wasm32")]
@@ -1089,6 +1153,9 @@ fn read_document<R: Read + Seek>(reader: &mut PackageReader<R>) -> Result<Docume
     }
     let bytes = reader.document(max_design())?;
     let mut metadata: Value = serde_json::from_slice(&bytes).map_err(invalid)?;
+    // What the drawings' images are, for a release that can't read the drawings: this build reads
+    // them from the drawings and writes the list again on every save.
+    let named_drawing_parts = metadata.as_object_mut().and_then(|object| object.remove("drawing_parts")).is_some();
     // A newer build's file opens whatever it holds: what doesn't read here is kept (`newer_file`).
     let container: Value = serde_json::from_slice(&reader.limited_part("container.json", 4096)?).map_err(invalid)?;
     let newer_container = !is_known_container(&container);
@@ -1096,21 +1163,25 @@ fn read_document<R: Read + Seek>(reader: &mut PackageReader<R>) -> Result<Docume
     // HDR's typed JSON representation is deliberately strict: no empty placeholders or
     // container-only blob fields may reach the document deserializer. A newer build's section that
     // doesn't pass stays as it is, which the document reader then leaves out.
+    // Their files are the container's parts, handed to the reader as bytes: never text.
+    let mut parts = solidcraft_doc::render_resources::ContainerParts::default();
     let hydrated = if newer {
         let mut copy = metadata.clone();
+        let mut found = solidcraft_doc::render_resources::ContainerParts::default();
         let done = check_hdr_manifest(&bytes).and_then(|()| check_texture_manifest(&bytes)).and_then(|()| {
-            let hdr = hydrate_hdr_resources(&mut copy, reader)?;
-            Ok(hydrate_texture_resources(&mut copy, reader)? || hdr)
+            let hdr = hydrate_hdr_resources(&mut copy, reader, &mut found)?;
+            Ok(hydrate_texture_resources(&mut copy, reader, &mut found)? || hdr)
         });
         if done.is_ok() {
             metadata = copy;
+            parts = found;
         }
         done.unwrap_or(false)
     } else {
         check_hdr_manifest(&bytes)?;
         check_texture_manifest(&bytes)?;
-        let hdr = hydrate_hdr_resources(&mut metadata, reader)?;
-        hydrate_texture_resources(&mut metadata, reader)? || hdr
+        let hdr = hydrate_hdr_resources(&mut metadata, reader, &mut parts)?;
+        hydrate_texture_resources(&mut metadata, reader, &mut parts)? || hdr
     };
     // A cloud's points are in its blob, so its segments, triangles and properties are read and
     // checked with them below (`decode_cloud`), not against the empty points the metadata holds
@@ -1118,7 +1189,7 @@ fn read_document<R: Read + Seek>(reader: &mut PackageReader<R>) -> Result<Docume
     // reads them as before: what doesn't read here is kept whole (`newer_file`), unknown fields too.
     let complexes = if newer { Vec::new() } else { take_cloud_complexes(&mut metadata) };
     let hydrated_text;
-    let text = if hydrated || !complexes.is_empty() {
+    let text = if hydrated || named_drawing_parts || !complexes.is_empty() {
         hydrated_text = serde_json::to_string(&metadata).map_err(invalid)?;
         &hydrated_text
     } else {
@@ -1126,7 +1197,7 @@ fn read_document<R: Read + Seek>(reader: &mut PackageReader<R>) -> Result<Docume
     };
     // Migrations and all document validation run on the small parametric metadata.
     // Binary arrays have their own equivalent numeric/index validation below.
-    let mut doc = Document::from_json(text)?;
+    let mut doc = solidcraft_doc::render_resources::with_container_parts(parts, || Document::from_json(text))?;
     if !doc.drawings.is_empty() {
         return Err(invalid("ambiguous drawings in document.json and in their own entries"));
     }
@@ -1202,7 +1273,29 @@ fn read_document<R: Read + Seek>(reader: &mut PackageReader<R>) -> Result<Docume
         let value = metadata.get("point_clouds").and_then(|v| v.get(index)).ok_or_else(|| invalid("missing point cloud metadata"))?;
         decode_cloud(reader.blob(value, "points_blob", "points")?, cloud)?;
     }
-    doc.drawings = drawing::read(reader)?;
+    let (drawings, kept) = drawing::read(reader)?;
+    doc.drawings = drawings;
+    // A drawing a newer build saved that this build can't read is kept as it came: the rest of the
+    // design opens, the notice names it, and saving writes it and its parts back.
+    if !kept.is_empty() {
+        let file = doc.newer_file.get_or_insert_with(|| {
+            let current = solidcraft_doc::format::FORMAT;
+            Arc::new(solidcraft_doc::newer_file::newer_file(&solidcraft_doc::format::Newer {
+                format: current,
+                reads_up_to: current,
+                unknown_changes: vec!["a newer drawing format".into()],
+            }))
+        });
+        let file = Arc::make_mut(file);
+        for drawing in kept {
+            file.not_understood.push(drawing.note);
+            for (name, bytes) in drawing.parts {
+                if !file.parts.iter().any(|(known, _)| *known == name) {
+                    file.parts.push((name, bytes));
+                }
+            }
+        }
+    }
     Ok(doc)
 }
 
@@ -1288,8 +1381,13 @@ fn check_hdr_manifest(bytes: &[u8]) -> Result<()> {
     Ok(())
 }
 
-fn hydrate_hdr_resources<R: Read + Seek>(metadata: &mut Value, reader: &mut PackageReader<R>) -> Result<bool> {
-    use solidcraft_doc::render_resources::{HdrId, MAX_HDR_RESOURCE_BYTES, MAX_HDR_RESOURCES, encode_hdr_base64};
+/// Takes each HDR's part out for the reader (`parts`), leaving its record `{kind, data: ""}`.
+fn hydrate_hdr_resources<R: Read + Seek>(
+    metadata: &mut Value,
+    reader: &mut PackageReader<R>,
+    parts: &mut solidcraft_doc::render_resources::ContainerParts,
+) -> Result<bool> {
+    use solidcraft_doc::render_resources::{HdrId, MAX_HDR_RESOURCE_BYTES, MAX_HDR_RESOURCES};
 
     let Some(resources) = metadata.get_mut("render").and_then(|render| render.get_mut("resources")) else {
         return Ok(false);
@@ -1313,10 +1411,9 @@ fn hydrate_hdr_resources<R: Read + Seek>(metadata: &mut Value, reader: &mut Pack
             return Err(invalid("HDR resource key does not match its blob hash"));
         }
         total = total.checked_add(bytes.len()).ok_or_else(|| invalid("HDR resource size overflow"))?;
-        let encoded = encode_hdr_base64(bytes).map_err(invalid)?;
-        let fields = value.as_object_mut().ok_or_else(|| invalid("invalid HDR metadata"))?;
-        fields.remove("hdr_blob");
-        fields.insert("data".into(), Value::String(encoded));
+        // The record keeps naming its part: a newer build's section this build keeps as it came
+        // still says which part it needs, so saving keeps the part too.
+        parts.hdr.insert(id, bytes.to_vec());
     }
     Ok(!resources.is_empty())
 }
@@ -1415,9 +1512,14 @@ fn check_texture_manifest(bytes: &[u8]) -> Result<()> {
     let Metadata { render: Render { texture_resources: () } } = serde_json::from_slice(bytes).map_err(invalid)?;
     Ok(())
 }
-fn hydrate_texture_resources<R: Read + Seek>(metadata: &mut Value, reader: &mut PackageReader<R>) -> Result<bool> {
+/// Takes each texture's part out for the reader (`parts`), as [`hydrate_hdr_resources`].
+fn hydrate_texture_resources<R: Read + Seek>(
+    metadata: &mut Value,
+    reader: &mut PackageReader<R>,
+    parts: &mut solidcraft_doc::render_resources::ContainerParts,
+) -> Result<bool> {
     use solidcraft_doc::{
-        render_resources::{HdrId, encode_hdr_base64},
+        render_resources::HdrId,
         render_texture_resources::{MAX_TEXTURE_BYTES, MAX_TEXTURE_RESOURCE_BYTES, MAX_TEXTURE_RESOURCES},
     };
     let Some(resources) = metadata.get_mut("render").and_then(|render| render.get_mut("texture_resources")) else {
@@ -1442,10 +1544,7 @@ fn hydrate_texture_resources<R: Read + Seek>(metadata: &mut Value, reader: &mut 
             return Err(invalid("texture resource key does not match its blob hash"));
         }
         total = total.checked_add(bytes.len()).ok_or_else(|| invalid("texture resource size overflow"))?;
-        let encoded = encode_hdr_base64(bytes).map_err(invalid)?;
-        let fields = value.as_object_mut().ok_or_else(|| invalid("invalid texture metadata"))?;
-        fields.remove("texture_blob");
-        fields.insert("data".into(), Value::String(encoded));
+        parts.textures.insert(id, bytes.to_vec());
     }
     Ok(!resources.is_empty())
 }
@@ -3393,7 +3492,8 @@ mod tests {
         doc.render = Arc::new(render);
         let bytes = write_design_container(&doc).unwrap();
         assert_eq!(crate::read_design(&bytes).unwrap(), doc);
-        assert_eq!(crate::read_design(&crate::write_design(&without_images(&doc)).unwrap()).unwrap(), without_images(&doc));
+        // A plain JSON design can't hold the file: saving one is refused, naming it.
+        assert!(crate::write_design(&without_images(&doc)).unwrap_err().to_string().contains("render environments and textures"));
         let original = parts(&bytes);
         let blob = format!("blobs/{id}.hdr");
         assert_eq!(original.keys().filter(|name| name.ends_with(".hdr")).count(), 1);
@@ -3426,6 +3526,48 @@ mod tests {
         let duplicate = format!("{{\"render\":{{\"resources\":{{\"{id}\":{entry},\"{id}\":{entry}}}}}}}");
         entries.insert("document.json".into(), duplicate.into_bytes());
         assert!(crate::read_design(&package(&entries)).unwrap_err().to_string().contains("duplicate"));
+    }
+
+    /// A newer build's file whose render section this build can't read keeps that section as it
+    /// came, and with it the HDR and texture parts it names: saved again, the parts are the same bytes
+    /// and the section still names them. Nothing is dropped on save.
+    #[test]
+    fn a_newer_files_unread_render_section_keeps_its_hdr_and_texture_parts() {
+        use solidcraft_doc::render_resources::HdrResource;
+        use solidcraft_doc::render_texture_resources::{TextureProvenance, TextureResource};
+        let mut hdr = b"#?RADIANCE\nFORMAT=32-bit_rle_rgbe\nPRIMARIES=0.64 0.33 0.30 0.60 0.15 0.06 0.3127 0.3290\n\n-Y 2 +X 4\n".to_vec();
+        for _ in 0..8 {
+            hdr.extend_from_slice(&[128, 64, 32, 129]);
+        }
+        let texture = include_bytes!("../../../assets/render/starter/materials/exports/SURF-027/base_color.png").to_vec();
+        let provenance = TextureProvenance {
+            author: "Original SolidCraft test".into(),
+            source: "original bundled diagnostic".into(),
+            license: "MIT OR Apache-2.0".into(),
+        };
+        let mut doc = document();
+        let render = Arc::make_mut(&mut doc.render);
+        let hdr_id = render.resources.insert(HdrResource::new(hdr.clone()).unwrap()).unwrap();
+        let texture_id = render.texture_resources.insert(TextureResource::new(texture.clone(), provenance).unwrap()).unwrap();
+        let mut entries = parts(&write_design_container(&doc).unwrap());
+        let (hdr_part, texture_part) = (format!("blobs/{hdr_id}.hdr"), format!("blobs/{texture_id}.texture"));
+        assert_eq!((&entries[&hdr_part], &entries[&texture_part]), (&hdr, &texture));
+        // A newer build saved it with a render setup this build can't read.
+        let mut metadata: Value = serde_json::from_slice(&entries["document.json"]).unwrap();
+        metadata["format"] = json!(solidcraft_doc::format::format_string(solidcraft_doc::format::FORMAT + 1));
+        metadata["render"]["setups"] = json!({"Future": {"job": {"method": "a_future_renderer"}}});
+        let section = metadata["render"].clone();
+        entries.insert("document.json".into(), serde_json::to_vec(&metadata).unwrap());
+
+        let opened = crate::read_design(&package(&entries)).unwrap();
+        assert!(opened.newer_file.is_some());
+        let resaved = parts(&write_design_container(&opened).unwrap());
+        assert_eq!(resaved.get(&hdr_part), Some(&hdr), "the HDR's bytes survive the save");
+        assert_eq!(resaved.get(&texture_part), Some(&texture), "the texture's bytes survive the save");
+        let again: Value = serde_json::from_slice(&resaved["document.json"]).unwrap();
+        assert_eq!(again["render"], section, "the section comes back as it came, naming its parts");
+        // And it opens again with them.
+        crate::read_design(&package(&resaved)).unwrap();
     }
 
     #[test]
@@ -3475,7 +3617,8 @@ mod tests {
         render.setups.insert("Wood".into(), setup);
         let bytes = write_design_container(&doc).unwrap();
         assert_eq!(crate::read_design(&bytes).unwrap(), doc);
-        assert_eq!(crate::read_design(&crate::write_design(&without_images(&doc)).unwrap()).unwrap(), without_images(&doc));
+        // A plain JSON design can't hold the file: saving one is refused, naming it.
+        assert!(crate::write_design(&without_images(&doc)).unwrap_err().to_string().contains("render environments and textures"));
         let original = parts(&bytes);
         let blob = format!("blobs/{id}.texture");
         assert_eq!(original.keys().filter(|name| name.ends_with(".texture")).count(), 1);

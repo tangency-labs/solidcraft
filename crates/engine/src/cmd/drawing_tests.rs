@@ -78,6 +78,37 @@ fn a_drawing_starts_from_a_template() {
     assert_eq!(tolerances(&made), json!(template::ASSEMBLY_NOTE));
 }
 
+/// A one-part STEP draws as a part (#19753), rounded or not; two parts, or one beside a body, as an assembly.
+#[test]
+fn an_opened_step_part_draws_from_the_part_template() {
+    let folder = Folder::new("drawing-step-part");
+    let step = folder.path("plate.step");
+    run(&mut design(), "file.export", json!({"path": step}));
+    let made = |s: &mut Session| {
+        let made = run(s, "drawing.create", json!({}));
+        run(s, "drawing.close", json!({}));
+        (made["sheets"][0]["size_mm"].clone(), tolerances(&made))
+    };
+    let part = (json!([420.0, 297.0]), json!(template::PART_NOTE));
+    let assembly = (json!([594.0, 420.0]), json!(template::ASSEMBLY_NOTE));
+
+    let mut s = Session::default();
+    run(&mut s, "doc.open", json!({"path": step}));
+    assert_eq!(s.doc.occurrences.len(), 1);
+    assert_eq!(made(&mut s), part, "one imported part");
+    run(&mut s, "solid.fillet", json!({"edges": [[40, 15, 10]], "radius": 2}));
+    run(&mut s, "solid.hole", json!({"position": [10, 10, 10], "direction": [0, 0, -1], "diameter": 4, "depth": 5}));
+    assert!(s.doc.features.iter().all(|f| f.component != 0), "a round and a hole go in their body's component");
+    assert_eq!(made(&mut s), part, "one imported part, rounded and drilled with the root active");
+
+    run(&mut s, "file.insert_step", json!({"path": step}));
+    assert_eq!(made(&mut s), assembly, "two imported parts");
+
+    let mut s = design();
+    run(&mut s, "file.insert_step", json!({"path": step}));
+    assert_eq!(made(&mut s), assembly, "an imported part beside the design's own body");
+}
+
 #[test]
 fn a_drawing_with_standard_views_is_one_model_undo_step() {
     let mut s = design();
@@ -167,7 +198,7 @@ fn a_template_applied_restyles_the_sheets_and_moves_nothing() {
 fn a_template_file_saves_and_starts_drawings() {
     let (mut s, _) = crate::cmd::drawing_view::tests::three_views();
     let folder = Folder::new("drawing-template");
-    let path = folder.path("company-a3.json");
+    let path = folder.path("company-a3.scdwg");
     // The company's name written into the built-in block, and its general tolerances typed over it.
     let mut block = solidcraft_geom::title_block::default_block();
     let owner = block.cells.iter_mut().find(|cell| cell.name == "legal_owner").unwrap();
@@ -195,8 +226,8 @@ fn a_template_file_saves_and_starts_drawings() {
     let applied = run(&mut s, "drawing.template.apply", json!({"template": path, "dry_run": true}));
     assert_eq!(applied["changed"], json!([]), "the file now holds this drawing's own format: {applied}");
     for (command, p, why) in [
-        ("drawing.template.save", json!({"path": folder.path("company.txt")}), "`path` must be a .json file"),
-        ("drawing.template.save", json!({}), "`path` must be a .json file"),
+        ("drawing.template.save", json!({"path": folder.path("company.txt")}), "`path` must be a .json or .scdwg file"),
+        ("drawing.template.save", json!({}), "`path` must be a .json or .scdwg file"),
         ("drawing.create", json!({"template": folder.path("missing.json")}), "template `"),
         ("drawing.create", json!({"template": "company"}), "no template `company`"),
     ] {
@@ -214,7 +245,8 @@ fn a_template_file_saves_and_starts_drawings() {
         let refusal = refused(&mut s, "drawing.create", json!({"template": path}));
         assert!(refusal.contains("outside the folders this agent may use"), "{refusal}");
     });
-    assert!(std::path::Path::new(&inside.path("ok.json")).is_file() && !std::path::Path::new(&outside.path("no.json")).exists());
+    // A .json name gets the .scdwg file beside it, inside the scope as the name asked.
+    assert!(std::path::Path::new(&inside.path("ok.scdwg")).is_file() && !std::path::Path::new(&outside.path("no.scdwg")).exists());
 }
 
 /// The drawing open, as the design holds it.

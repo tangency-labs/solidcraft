@@ -104,6 +104,44 @@ pub(crate) struct Frame {
     finalized: bool,
 }
 
+/// A pop-out Browser has its own frame and pointer captures while sharing the design tree.
+#[derive(Default)]
+pub(crate) struct Detached {
+    frame: Frame,
+    eye: Option<EyeCapture>,
+    row: Option<RowCapture>,
+}
+
+impl Detached {
+    pub(crate) fn show(&mut self, app: &mut SolveApp, ui: &mut Ui, draw: impl FnOnce(&mut SolveApp, &mut Ui)) {
+        let ctx = ui.ctx().clone();
+        let published = PUBLISHED.with(|outputs| std::mem::take(&mut *outputs.borrow_mut()));
+        self.swap(app, &ctx);
+        begin(app, &ctx);
+        draw(app, ui);
+        finalize(app, &ctx);
+        self.swap(app, &ctx);
+        PUBLISHED.with(|outputs| *outputs.borrow_mut() = published);
+    }
+
+    fn swap(&mut self, app: &mut SolveApp, ctx: &egui::Context) {
+        std::mem::swap(&mut self.frame, &mut app.tree.content);
+        ctx.data_mut(|data| {
+            exchange_capture(data, capture_id(), &mut self.eye);
+            exchange_capture(data, row_capture_id(), &mut self.row);
+        });
+    }
+}
+
+fn exchange_capture<T: Copy + Send + Sync + 'static>(data: &mut egui::util::IdTypeMap, id: egui::Id, retained: &mut Option<T>) {
+    let current = data.get_temp::<T>(id);
+    if let Some(retained) = std::mem::replace(retained, current) {
+        data.insert_temp(id, retained);
+    } else {
+        data.remove::<T>(id);
+    }
+}
+
 impl Frame {
     pub(crate) fn owner(&self, owner: ContentOwner) -> Option<&OwnerState> {
         self.owners.get(&owner)
@@ -230,13 +268,6 @@ pub(crate) fn ensure_session(app: &mut SolveApp, ctx: &egui::Context) {
         app.tree.content.session = Some(app.session.uid);
     }
     app.tree.content.context = Some(ctx.clone());
-}
-
-/// An external producer replaced this slot. Its ownership supersedes our previous write even
-/// when the new vector contains precisely the same names (Select Other is one such producer).
-pub(crate) fn set_external_body_hover(app: &mut SolveApp, bodies: Vec<String>) {
-    app.tree.content.last_bodies.clear();
-    app.viewport.hover_bodies = bodies;
 }
 
 /// The timeline's own write of the hovered feature. A Browser row that lit the same feature a
