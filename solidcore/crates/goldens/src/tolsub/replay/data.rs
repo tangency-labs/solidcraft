@@ -2040,7 +2040,7 @@ pub(super) static DATA: &[Row] = &[
     (
         "corpus.parity",
         "Solids__revolution_mold.smb",
-        0xd982fdcebefb778d,
+        0x48eacf7c0f3dedff,
         3,
         &[
             (0, false, 26, 0x3f1aaa861a91e08a, 0x3f180b6f6975736c),

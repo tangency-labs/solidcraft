@@ -151,7 +151,7 @@ fn started(app: &SolveApp) -> Value {
         "tool": app.tool.as_ref().map(|t| t.cmd),
         "dialog": dialog_state(app),
         "windows": open_windows(app),
-        "pending": app.pending_feature_edit.is_some() || app.start_after_roll.is_some(),
+        "pending": app.pending_feature_edit.is_some() || app.start_after_roll.is_some() || app.sketch_refreshes.contains_key(&app.session.uid),
         "status": app.status.as_ref().map(|(text, _, error)| json!({"text": text, "error": error})),
     })
 }
