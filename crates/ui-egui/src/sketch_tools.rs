@@ -737,23 +737,24 @@ pub fn refine_snap(
         mid_of = i.arg;
     }
     // 3-Point Arc: the third point that makes the arc tangent to a line or arc it starts or ends
-    // on (#20719), exact: the point of that tangent circle nearest the cursor.
+    // on (#20719), exact: the point of that tangent circle nearest the cursor. It and the centre
+    // snap below win over an earlier alignment snap when their point is nearer the cursor.
     if !mid_only
-        && best.is_none()
         && arc_snap
         && let [start, end] = own[..]
         && let Some(i) = crate::inference::arc_tangent(sk, start, end, lp, tol)
+        && best.as_ref().is_none_or(|b| i.at.dist(lp) < b.0)
     {
-        best = Some((i.dist, i.label(), i.at));
+        best = Some((i.at.dist(lp), i.label(), i.at));
     }
     // 3-Point Arc: the centre lands on a sketch point (#20719); the click keeps it there.
     if !mid_only
-        && best.is_none()
         && arc_snap
         && let [start, end] = own[..]
         && let Some(i) = crate::inference::arc_centre(sk, start, end, lp, tol)
+        && best.as_ref().is_none_or(|b| i.at.dist(lp) < b.0)
     {
-        best = Some((i.dist, i.label(), i.at));
+        best = Some((i.at.dist(lp), i.label(), i.at));
     }
     // On a curve (coincident with it). A spline, ellipse or conic has no exact shape here: the
     // nearest point of the polyline it is drawn with, which the click's point-on-curve
