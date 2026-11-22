@@ -936,6 +936,13 @@ fn timeline_ok(s: &Session, skip_newer_features: bool, what_now: &str) -> Result
 fn cmd_commands(args: &[String]) -> Result<(), String> {
     use std::io::Write as _;
     known_args("commands", args, &["--id"], &[], true)?;
+    let ids = args.iter().filter(|a| *a == "--id").count();
+    if ids > 1 {
+        return Err("commands takes one --id".into());
+    }
+    if args.len().saturating_sub(2 * ids) > 1 {
+        return Err("commands takes one filter word".into());
+    }
     let filter = positional(args);
     let id = flag(args, "--id");
     if filter.is_some() && id.is_some() {

@@ -54,4 +54,10 @@ fn commands_filter_and_describe_one_command() {
     assert!(String::from_utf8_lossy(&output.stderr).contains("did you mean `solid.box`"), "{}", String::from_utf8_lossy(&output.stderr));
     assert_eq!(cli_output(&["commands", "config", "--id", "config.column"]).status.code(), Some(1));
     assert_eq!(cli_output(&["commands", "--bogus"]).status.code(), Some(1));
+    let two_words = cli_output(&["commands", "config", "solid"]);
+    assert_eq!(two_words.status.code(), Some(1));
+    assert!(String::from_utf8_lossy(&two_words.stderr).contains("one filter word"), "{}", String::from_utf8_lossy(&two_words.stderr));
+    let two_ids = cli_output(&["commands", "--id", "solid.box", "--id", "config.column"]);
+    assert_eq!(two_ids.status.code(), Some(1));
+    assert!(String::from_utf8_lossy(&two_ids.stderr).contains("one --id"), "{}", String::from_utf8_lossy(&two_ids.stderr));
 }
