@@ -47,6 +47,19 @@ pub struct Analysis {
     plot: Option<(u64, Result<Value, String>)>,
     /// The last collision check's answer and what it was for.
     collisions: Option<(u64, Result<Value, String>)>,
+    /// The collision check under way, off the window thread.
+    check: Option<Check>,
+}
+
+/// A collision check under way, off the window thread: where it leaves its reply, what it was
+/// for (the key of the study and the parts it checks), the design it is for (the reply of a
+/// design changed since is dropped), and when it started.
+#[derive(Clone, Debug)]
+pub struct Check {
+    reply: std::sync::Arc<std::sync::Mutex<Option<Result<Value, String>>>>,
+    key: u64,
+    design: std::sync::Weak<solidcraft_engine::doc::Document>,
+    started: f64,
 }
 
 /// What the chart can show: (label, what).
@@ -258,6 +271,26 @@ fn collision_rows(
     if a.collisions.as_ref().is_some_and(|(k, _)| *k != key) {
         a.collisions = None;
     }
+    // A check under way: its reply when it is in, and what it was for.
+    if let Some(c) = a.check.take() {
+        match c.reply.lock().map(|mut r| r.take()).map_err(|_| ()) {
+            Ok(Some(r)) => {
+                // A reply of a design changed since (a script, the control channel, undo) is
+                // dropped: it says nothing about the design as it is now.
+                if c.key == key && c.design.upgrade().is_some_and(|d| std::sync::Arc::ptr_eq(&d, &app.session.doc)) {
+                    a.collisions = Some((key, r));
+                }
+                ui.ctx().request_repaint();
+            }
+            // Still running: it comes in a later frame.
+            Ok(None) => {
+                a.check = Some(c);
+                ui.ctx().request_repaint_after(std::time::Duration::from_millis(100));
+            }
+            // A poisoned lock (its thread panicked) leaves nothing.
+            Err(()) => {}
+        }
+    }
     crate::ui_kit::section(ui, "motion_collisions", "Collisions", true, |ui| {
         ui.horizontal(|ui| {
             if sets && parts.is_empty() {
@@ -265,19 +298,31 @@ fn collision_rows(
                     combo(ui, "ms_among", &["All components", "Contact sets"], &mut a.among)
                 });
             }
-            let button = crate::ui_kit::button(ui, "Check collisions", crate::ui_kit::Button::Enabled(check.is_some()));
-            crate::scenario::publish_handle("motion:check", button.rect.center());
-            if button.clicked()
-                && let Some((st, mut p)) = check
-            {
-                let mut sc = app.session.scratch();
-                let r = super::scratch_study(&mut sc, &st).and_then(|id| {
-                    p["study"] = id;
-                    sc.execute("motion.interference", &p).map_err(|e| e.to_string())
-                });
-                a.collisions = Some((key, r));
+            if a.check.is_some() {
+                // The check runs off the window thread: Cancel where the button was.
+                if crate::ui_kit::button(ui, solidcraft_ui_text::tr("ui.cancel"), crate::ui_kit::Button::Normal).clicked() {
+                    // Its thread finishes the check; the reply is left unread.
+                    a.check = None;
+                }
+            } else {
+                let button = crate::ui_kit::button(ui, "Check collisions", crate::ui_kit::Button::Enabled(check.is_some()));
+                crate::scenario::publish_handle("motion:check", button.rect.center());
+                if button.clicked()
+                    && let Some((st, p)) = check
+                {
+                    a.collisions = None;
+                    a.check = Some(start_check(app, &st, p, key));
+                }
             }
         });
+        // While it checks: the seconds so far.
+        if let Some(c) = a.check.as_ref() {
+            let seconds = ((crate::now_ms() - c.started) / 1000.0).floor().max(0.0);
+            ui.horizontal(|ui| {
+                ui.add(egui::Spinner::new().size(t.font_small));
+                ui.label(RichText::new(solidcraft_ui_text::format("dialog.computing", &[("seconds", &format!("{seconds:.0}"))])).color(t.text_dim));
+            });
+        }
     });
     match a.collisions.as_ref().map(|(_, r)| r) {
         Some(Ok(v)) => {
@@ -323,6 +368,49 @@ fn collision_rows(
         }
         None => {}
     }
+}
+
+/// Start the collision check of the study `st` and the parts `p` names: off the window thread, on
+/// a kernel thread, so a slow pair does not freeze the window until the app is closed (#15333).
+/// The reply comes in a later frame. With no threads (the browser) the check runs here.
+fn start_check(app: &SolveApp, st: &Value, p: Value, key: u64) -> Check {
+    let check = Check { reply: Default::default(), key, design: std::sync::Arc::downgrade(&app.session.doc), started: crate::now_ms() };
+    let out = check.reply.clone();
+    #[cfg(not(target_arch = "wasm32"))]
+    if app.apply_off_thread.is_some() {
+        let (st, p, out) = (st.clone(), p.clone(), out.clone());
+        let sc = app.session.scratch();
+        #[cfg(test)]
+        let gate = app.apply_gate.clone();
+        let spawned = solidcraft_engine::kernel::kernel_thread("motion interference").spawn(move || {
+            let r = check_now(sc, &st, p);
+            // Tests hold the reply until let go (`apply_gate`).
+            #[cfg(test)]
+            if let Some(gate) = gate {
+                let _ = gate.lock().unwrap().recv();
+            }
+            if let Ok(mut slot) = out.lock() {
+                *slot = Some(r);
+            }
+        });
+        if spawned.is_ok() {
+            return check;
+        }
+    }
+    let r = check_now(app.session.scratch(), st, p);
+    if let Ok(mut slot) = out.lock() {
+        *slot = Some(r);
+    }
+    check
+}
+
+/// The collision check of the study `st` and the parts `p` names, on a copy of the session: the
+/// study as the dialog has it, then `motion.interference` on it.
+fn check_now(mut sc: Session, st: &Value, mut p: Value) -> Result<Value, String> {
+    super::scratch_study(&mut sc, st).and_then(|id| {
+        p["study"] = id;
+        sc.execute("motion.interference", &p).map_err(|e| e.to_string())
+    })
 }
 
 /// The Plot rows: what to chart, and the chart (a click on it moves the step).
