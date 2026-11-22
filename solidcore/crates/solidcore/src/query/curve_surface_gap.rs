@@ -1441,7 +1441,86 @@ fn plane_face_gap_bound(
     let Some(net) = NetSurface::of(k, surface, &corners)? else {
         return Ok(None);
     };
-    Ok(plane_gap_bound(cn, &net.net, range))
+    // (the bound is on the distance to the net: the net's own distance to the surface added)
+    let (Some(g), Some(off)) = (
+        plane_gap_bound(cn, &net.net, range),
+        net_to_surface_bound(surface, &net.net),
+    ) else {
+        return Ok(None);
+    };
+    let bound = (Ivl::from(g) + Ivl::from(off)).hi;
+    Ok(bound.is_finite().then_some(bound))
+}
+
+/// Not upstream (#20373): an upper bound on the distance from each point of the net `net`
+/// (the net [`NetSurface::of`] takes for `surface`) over its parameter box to `surface` at the
+/// same parameters, for a bound taken on the net ([`plane_gap_bound`],
+/// [`structured_trim_gap_bound`]) to hold for the surface: `0` for a surface that evaluates by
+/// that net (a B-spline, a ball patch, a sphere, a torus, a surface of revolution or of
+/// extrusion: [`Surface::evaluate`] and `as_b_spline` take the same net); for a plane, which
+/// evaluates by its analytic formula `O + u s_u X + v s_v Y`, the largest distance at the
+/// net's four corners, enclosed in outward-rounded interval arithmetic. The net bilinear
+/// (degree 1 by 1, two by two points of one weight, clamped knots: [`bilinear_net`]), the
+/// difference of net and plane is bilinear in `(u, v)` over the box, so each of its values is
+/// a convex combination of its corner values and its length is at most the largest corner
+/// length. A cone (and cylinder) evaluates its point by its STEP formula at the parameters
+/// converted from its net's, its net's point up to the rounding of its stored control points
+/// and of that evaluation, neither enclosed: `0`, the net taken as the surface as
+/// [`NetSurface::of`] and the bisection take it, the two agreeing at the probes to `1e-9`
+/// relative (an open limit, #20373 review). `None` for any other
+/// surface, any other net of a plane, and a plane whose box is not inside its analytic domain
+/// while it clamps its parameters there (the plane then not affine over the box).
+fn net_to_surface_bound(surface: &Surface, net: &Nurbs) -> Option<f64> {
+    use crate::surface::surface::SurfaceKind;
+    let plane = match surface.kind() {
+        SurfaceKind::BSpline(_)
+        | SurfaceKind::BallPatch(_)
+        | SurfaceKind::Sphere(_)
+        | SurfaceKind::Torus(_)
+        | SurfaceKind::SurfOfRevolution(_)
+        | SurfaceKind::SurfOfExtrusion(_)
+        | SurfaceKind::Cone(_) => return Some(0.0),
+        SurfaceKind::Plane(p) => p,
+        _ => return None,
+    };
+    bilinear_net(net)?;
+    let (&u0, &u1, &v0, &v1) = (net.u.get(1)?, net.u.get(2)?, net.v.get(1)?, net.v.get(2)?);
+    let ivl3 = |p: crate::math::Vec3| V3 {
+        x: Ivl::from(p.x),
+        y: Ivl::from(p.y),
+        z: Ivl::from(p.z),
+    };
+    let position = plane.position();
+    let (o, x, y) = (
+        ivl3(position.origin()),
+        ivl3(position.x_axis()),
+        ivl3(position.y_axis()),
+    );
+    let scale = plane.uv_scale();
+    let mut worst = 0.0_f64;
+    // (the net's control points: u-major, `P_ij` at `(i nv + j) 4`)
+    for (i, u) in [u0, u1].into_iter().enumerate() {
+        for (j, v) in [v0, v1].into_iter().enumerate() {
+            if !plane.is_out_of_bounds_enabled()
+                && !plane
+                    .step_uv_domain()
+                    .contains_point(Point2::new(u, v), 0.0)
+            {
+                return None;
+            }
+            let s = net.pw.get(4 * (2 * i + j)..4 * (2 * i + j) + 4)?;
+            let on_net = point_of([*s.first()?, *s.get(1)?, *s.get(2)?, *s.get(3)?])?;
+            let on_plane = plus(
+                o,
+                plus(
+                    scaled(x, Ivl::from(u) * Ivl::from(scale.x)),
+                    scaled(y, Ivl::from(v) * Ivl::from(scale.y)),
+                ),
+            );
+            worst = worst.max(norm_upper(minus(on_net, on_plane))?);
+        }
+    }
+    worst.is_finite().then_some(worst)
 }
 
 /// Not upstream (#20373): a proved bound on the distance from every point of the curve `cn`
@@ -1552,16 +1631,50 @@ pub(crate) fn structured_trim_gap_bound(
     if !(lo.is_finite() && hi.is_finite() && lo < hi) {
         return None;
     }
+    if cn.pw.len() != 4 * cn.n || wn.pw.len() != 4 * wn.n {
+        return None;
+    }
+    // (a plane net: the curve's own structure; where that does not apply, the iso case below
+    // may)
+    if let Some(bound) = bilinear_trim_gap_bound(cn, wn, net, [lo, hi]) {
+        return Some(bound);
+    }
+    // (an iso line along the `u` side of a net of degree 1 in `v`, or along the `v` side of
+    // one of degree 1 in `u`: the same line on the net with `u` and `v` swapped)
+    if net.q == 1 {
+        if let Some(bound) = iso_row_gap_bound(cn, wn, net, [lo, hi]) {
+            return Some(bound);
+        }
+    }
+    if net.p == 1 {
+        let (net, wn) = swapped_uv(net, wn)?;
+        return iso_row_gap_bound(cn, &wn, &net, [lo, hi]);
+    }
+    None
+}
+
+/// The first case of [`structured_trim_gap_bound`]: a trim on a bilinear net with the curve's
+/// knots and weights. Every trim point `q_i = (x_i, y_i) / w_i` must lie in the net's box
+/// `[u_0, u_1] x [v_0, v_1]` (the convex hull, so `|a b T| <= |T|`); that is decided from the
+/// stored data, `u_0 w_i <= x_i <= u_1 w_i` (and so in `v`, `w_i > 0`): exactly for `w_i = 1`
+/// and for a product that rounds to itself (a zero factor, or a zero fused residual),
+/// otherwise with the product enclosed (outward-rounded, so a point is taken as inside only
+/// where it is). A point on the box's edge (an extrude's side, whose trims run along its net's
+/// edges: #20373) is inside; an enclosure of its fraction `(x_i / w_i - u_0) / (u_1 - u_0)`
+/// rounds past `[0, 1]`, so the fractions only enclose `F(q_i)`. `None` where it does not apply.
+fn bilinear_trim_gap_bound(
+    cn: &NurbsCurve,
+    wn: &NurbsCurve,
+    net: &Nurbs,
+    [lo, hi]: [f64; 2],
+) -> Option<f64> {
     let point = |pw: &[f64], i: usize| -> Option<(V3<Ivl>, f64)> {
         let s = pw.get(4 * i..4 * i + 4)?;
         let [x, y, z, w] = [*s.first()?, *s.get(1)?, *s.get(2)?, *s.get(3)?];
         Some((point_of([x, y, z, w])?, w))
     };
-    if cn.pw.len() != 4 * cn.n || wn.pw.len() != 4 * wn.n {
-        return None;
-    }
-    // (a plane net: the curve's own structure)
-    if let Some((corners, twist)) = bilinear_net(net) {
+    {
+        let (corners, twist) = bilinear_net(net)?;
         if !(wn.p == cn.p && wn.n == cn.n && wn.u == cn.u) {
             return None;
         }
@@ -1575,7 +1688,32 @@ pub(crate) fn structured_trim_gap_bound(
         if !(du.is_positive() && dv.is_positive()) {
             return None;
         }
-        let inside = |x: Ivl| x.lo >= 0.0 && x.hi <= 1.0;
+        // (`x / w` in `[a, b]` for `w > 0`, from the stored `x` and `w`: `a w <= x <= b w`,
+        // each product compared exactly where it rounds to itself, enclosed otherwise)
+        let product = |a: f64, w: f64| {
+            let r = a * w;
+            // (the fused residual is the product's exact error for a normal product above the
+            // underflow of its residual; a zero factor gives an exact zero)
+            let exact = a == 0.0
+                || (r.is_finite()
+                    && r.abs() >= f64::MIN_POSITIVE / f64::EPSILON
+                    && a.mul_add(w, -r) == 0.0);
+            let enclosed = Ivl::from(a) * Ivl::from(w);
+            if exact {
+                (r, r)
+            } else {
+                (enclosed.lo, enclosed.hi)
+            }
+        };
+        let within = |x: f64, w: f64, a: f64, b: f64| {
+            if !(w > 0.0 && w.is_finite()) {
+                return false;
+            }
+            if w == 1.0 {
+                return a <= x && x <= b;
+            }
+            product(a, w).1 <= x && x <= product(b, w).0
+        };
         let mut worst = 0.0_f64;
         let mut any = false;
         for i in 0..cn.n {
@@ -1587,12 +1725,13 @@ pub(crate) fn structured_trim_gap_bound(
             if wc.to_bits() != wq.to_bits() {
                 return None;
             }
-            let alpha = (q.x - Ivl::from(u0)) / du;
-            let beta = (q.y - Ivl::from(v0)) / dv;
             // (every point of the trim: the hull's, so the twist term is at most `|T|`)
-            if !(inside(alpha) && inside(beta)) {
+            let s = wn.pw.get(4 * i..4 * i + 2)?;
+            if !(within(*s.first()?, wq, u0, u1) && within(*s.get(1)?, wq, v0, v1)) {
                 return None;
             }
+            let alpha = (q.x - Ivl::from(u0)) / du;
+            let beta = (q.y - Ivl::from(v0)) / dv;
             if !(a <= hi && b >= lo) {
                 continue;
             }
@@ -1601,18 +1740,8 @@ pub(crate) fn structured_trim_gap_bound(
             any = true;
         }
         let bound = (Ivl::from(worst) + Ivl::from(twist)).hi;
-        return (any && bound.is_finite()).then_some(bound);
+        (any && bound.is_finite()).then_some(bound)
     }
-    // (an iso line along the `u` side of a net of degree 1 in `v`, or along the `v` side of
-    // one of degree 1 in `u`: the same line on the net with `u` and `v` swapped)
-    if net.q == 1 {
-        return iso_row_gap_bound(cn, wn, net, [lo, hi]);
-    }
-    if net.p == 1 {
-        let (net, wn) = swapped_uv(net, wn)?;
-        return iso_row_gap_bound(cn, &wn, &net, [lo, hi]);
-    }
-    None
 }
 
 /// The net `net` with `u` and `v` swapped, `S'(a, b) = S(b, a)`, and the trim `wn` with its
@@ -3147,6 +3276,7 @@ impl TrimPair {
 /// `None` where it does not apply or is not finite, and for an offset surface's pair (its
 /// net is its base's, not the surface's: [`NetSurface::of_exact`]).
 fn structured_pair_bound(
+    surface: &Surface,
     cn: &NurbsCurve,
     c_slack: f64,
     wn: &NurbsCurve,
@@ -3158,7 +3288,13 @@ fn structured_pair_bound(
         return None;
     }
     let g = structured_trim_gap_bound(cn, wn, &net.net, range)?;
-    let bound = (Ivl::from(g) + Ivl::from(c_slack)).hi;
+    // (the bound is on the net's image: the net's own distance to the surface added)
+    let off = net_to_surface_bound(surface, &net.net)?;
+    let mut bound = Ivl::from(g) + Ivl::from(c_slack);
+    if off > 0.0 {
+        bound = bound + Ivl::from(off);
+    }
+    let bound = bound.hi;
     bound.is_finite().then_some(bound)
 }
 
@@ -3180,7 +3316,7 @@ pub(crate) fn structured_trim_image_gap_bound(
         return Ok(None);
     };
     Ok(structured_pair_bound(
-        &p.cn, p.c_slack, &p.wn, &p.net, range,
+        surface, &p.cn, p.c_slack, &p.wn, &p.net, range,
     ))
 }
 
@@ -3227,7 +3363,7 @@ pub fn trim_image_gap_bound_within(
     // at most `enough` (and `over`) it is the answer, otherwise the bisection runs as without
     // it)
     if enough.is_finite() {
-        if let Some(bound) = structured_pair_bound(&cn, c_slack, &wn, &net, range) {
+        if let Some(bound) = structured_pair_bound(surface, &cn, c_slack, &wn, &net, range) {
             if bound <= enough && bound <= over {
                 return Ok(Some(bound));
             }
@@ -4797,6 +4933,78 @@ mod tests {
         assert_eq!(pieces, cut.get());
     }
 
+    /// `surface` (a plane) with its stored net moved `dz` along z at each corner.
+    fn lifted_plane(surface: &Surface, dz: f64) -> Surface {
+        use crate::nurbs::b_spline_curve::p2::ControlPointForm;
+        use crate::surface::surface::SurfaceKind;
+        let mut surface = surface.clone();
+        let SurfaceKind::Plane(plane) = surface.kind_mut() else {
+            panic!("a cap is a plane");
+        };
+        let net = plane.base_mut();
+        for (i, j) in [(0, 0), (0, 1), (1, 0), (1, 1)] {
+            let (p, w) = net
+                .control_point(ControlPointForm::NonRational, i, j)
+                .unwrap();
+            let moved = Point3::new(p.x, p.y, p.z + dz);
+            net.set_control_point(ControlPointForm::NonRational, i, j, moved, w)
+                .unwrap();
+        }
+        surface
+    }
+
+    /// #20373 review: a plane whose stored net is `1e-8` off it, within the corner probes'
+    /// `1e-9 (1 + |x| + |y| + |z|)` (the net still taken), and a circle moved `1e-8` with it:
+    /// the circle lies in the net but `1e-8` off the plane. The plane bound and the structured
+    /// trim bound each add the net's distance to the plane ([`net_to_surface_bound`], the
+    /// largest at the corners), so both are at least `1e-8`; on the net alone each is a
+    /// rounding.
+    #[test]
+    fn a_plane_net_off_its_plane_within_the_probes_is_counted_in_the_bounds() {
+        use crate::surface::surface::SurfaceKind;
+        let lift = 1e-8;
+        let (k, b, caps) = cap_circles();
+        let (f, circle, range) = caps.first().unwrap();
+        let cn = NurbsCurve::of(circle).unwrap();
+        let off = NurbsCurve::of(&moved(&cn, lift)).unwrap();
+        let surface = lifted_plane(b.face(*f).unwrap().surface.as_ref().unwrap(), lift);
+        let (u, v) = NetSurface::of(&k, &surface, &[]).unwrap().unwrap().domain();
+        let corners = [
+            Point2::new(u.lo, v.lo),
+            Point2::new(u.hi, v.lo),
+            Point2::new(u.lo, v.hi),
+            Point2::new(u.hi, v.hi),
+        ];
+        let net = NetSurface::of(&k, &surface, &corners).unwrap().unwrap().net;
+        assert!(plane_gap_bound(&off, &net, *range).unwrap() < 1e-10);
+        let to_plane = net_to_surface_bound(&surface, &net).unwrap();
+        assert!(to_plane >= lift && to_plane <= lift * 1.01, "{to_plane:e}");
+        let g = plane_face_gap_bound(&k, &surface, &off, *range)
+            .unwrap()
+            .unwrap();
+        assert!(g >= lift, "{g:e}");
+        // the structured trim bound of a cap trim, the circle and the net moved alike
+        let (k, trims) = cylinder_trims();
+        let mut seen = 0;
+        for (s, curve, trim, range) in &trims {
+            if !matches!(s.kind(), SurfaceKind::Plane(_)) {
+                continue;
+            }
+            let lifted = lifted_plane(s, lift);
+            let crate::curve::curve::CurveKind::Ellipse(el) = curve.kind() else {
+                continue;
+            };
+            let up = Curve::from(moved(&NurbsCurve::of(el.base()).unwrap(), lift));
+            let Some(g) = structured_trim_image_gap_bound(&k, &lifted, &up, trim, *range).unwrap()
+            else {
+                continue;
+            };
+            assert!(g >= lift, "{g:e}");
+            seen += 1;
+        }
+        assert!(seen >= 2, "{seen} cap trims structured");
+    }
+
     /// The plane bound holds only for positive weights and control points whose projections
     /// lie in the net's box; otherwise it gives none and the bisection decides.
     #[test]
@@ -4989,8 +5197,8 @@ mod tests {
     }
 
     /// That [`trim_image_gap_bound_within`] answers `[1e-5, ∞)` with the structured bound `g`
-    /// (an edge curve's slack 0 added, rounded up) for a trim the bisection bounds at `g` or
-    /// above.
+    /// (an edge curve's slack 0 and the net's distance to the surface added, rounded up:
+    /// [`structured_trim_image_gap_bound`]) for a trim the bisection bounds at `g` or above.
     fn assert_trim_answered(
         k: &Kernel,
         s: &Surface,
@@ -5011,7 +5219,14 @@ mod tests {
             None,
         )
         .unwrap();
-        let answer = (Ivl::from(g) + Ivl::from(0.0)).hi;
+        let answer = structured_trim_image_gap_bound(k, s, curve, trim, range)
+            .unwrap()
+            .unwrap();
+        assert!(
+            answer >= (Ivl::from(g) + Ivl::from(0.0)).hi,
+            "{answer:e} against {g:e}"
+        );
+        assert!(answer <= 1e-9, "{answer:e}");
         assert_eq!(within, Some(answer), "the structured bound is the answer");
         let bisected = trim_image_gap_bound_within(
             k,
@@ -5097,6 +5312,151 @@ mod tests {
         let (fwd, _, _) = trim_data(&k, &s, &Curve::from(row), &trim, [0.0, 1.0]);
         let g = structured_trim_gap_bound(&fwd, &wn, &probed, [0.0, 1.0]).unwrap();
         assert!(g >= 25.0, "{g:e}");
+    }
+
+    /// The unit square net in `z = 0`, degree 1 by 1, its knots `[0, 0, 1, 1]` both ways.
+    fn unit_plane_net() -> Nurbs {
+        let mut pw = Vec::new();
+        for (x, y) in [(0.0, 0.0), (0.0, 1.0), (1.0, 0.0), (1.0, 1.0)] {
+            pw.extend_from_slice(&[x, y, 0.0, 1.0]);
+        }
+        Nurbs {
+            p: 1,
+            q: 1,
+            nu: 2,
+            nv: 2,
+            u: vec![0.0, 0.0, 1.0, 1.0],
+            v: vec![0.0, 0.0, 1.0, 1.0],
+            pw,
+        }
+    }
+
+    /// A curve of degree 1 over `[0, 1]` through `points`, `(x, y, z, w)` homogeneous.
+    fn segment(points: [[f64; 4]; 2]) -> NurbsCurve {
+        NurbsCurve {
+            p: 1,
+            n: 2,
+            u: vec![0.0, 0.0, 1.0, 1.0],
+            pw: points.concat(),
+        }
+    }
+
+    /// #20373 (an extrude's rectangle sides): a trim whose points lie on its plane net's box
+    /// edge is in the box, decided from the stored data, so the plane case bounds it (its
+    /// fractions' enclosures round past `[0, 1]`, which refused it before). A side
+    /// `(0, 0) -> (0, 1)`, a diagonal `(0, 0) -> (1, 1)` (no iso line: only the plane case
+    /// takes it) and the diagonal with weights 2 (the box decided with enclosed products) each
+    /// get a bound of a rounding, and a trim an ulp past the box gets none from the plane case.
+    #[test]
+    fn a_trim_on_its_plane_nets_edge_is_in_the_box() {
+        let net = unit_plane_net();
+        for (a, b, w) in [
+            ([0.0, 0.0], [0.0, 1.0], 1.0),
+            ([0.0, 0.0], [1.0, 1.0], 1.0),
+            ([0.0, 0.0], [1.0, 1.0], 2.0),
+        ] {
+            let trim = segment([[a[0] * w, a[1] * w, 0.0, w], [b[0] * w, b[1] * w, 0.0, w]]);
+            let curve = trim.clone();
+            let plane = bilinear_trim_gap_bound(&curve, &trim, &net, [0.0, 1.0]);
+            assert!(
+                plane.is_some_and(|g| g <= 64.0 * f64::EPSILON),
+                "{a:?} {b:?} {w}: {plane:?}"
+            );
+            let g = structured_trim_gap_bound(&curve, &trim, &net, [0.0, 1.0]);
+            assert_eq!(g, plane);
+        }
+        let past = segment([[0.0, 0.0, 0.0, 1.0], [1.0, f64::EPSILON + 1.0, 0.0, 1.0]]);
+        assert_eq!(
+            bilinear_trim_gap_bound(&past, &past, &net, [0.0, 1.0]),
+            None
+        );
+    }
+
+    /// #20373 (the reporter's rectangle extrudes): a rectangle profile swept along a straight
+    /// line (`create_linear_sweep`, as SolidCraft extrudes it) has every UV trim of its edges,
+    /// on its sides (whose trims run along their nets' box edges) and on its caps, answered by
+    /// the structured bound at once, a rounding: the bisection that cut each side trim into
+    /// 32 pieces (about 1 ms each, 1040 of them in the reported case) is not reached.
+    #[test]
+    fn an_extruded_rectangles_trims_are_answered_at_once() {
+        let mut k = Kernel::default();
+        let c = [
+            Point3::new(0.0, -3.0, -2.0),
+            Point3::new(0.0, 3.0, -2.0),
+            Point3::new(0.0, 3.0, 2.0),
+            Point3::new(0.0, -3.0, 2.0),
+        ];
+        // (the sketch's sides as degree-1 B-splines, as SolidCraft hands them over: their trims
+        // are B-splines too, evaluated exactly)
+        let profile: Vec<Curve> = (0..4)
+            .map(|i| {
+                let cps = vec![CPoint::from_point(c[i]), CPoint::from_point(c[(i + 1) % 4])];
+                let side = NurbCurve::new(cps, 1, vec![0.0, 0.0, 1.0, 1.0]).unwrap();
+                Curve::from(BSplineCurve::from_nurb(side, 3, false))
+            })
+            .collect();
+        let refs: Vec<Option<&Curve>> = profile.iter().map(Some).collect();
+        let b = crate::sweep::api_brep::create_linear_sweep(
+            &mut k,
+            &refs,
+            crate::math::Vec3::new(1.0, 0.0, 0.0),
+            5.0,
+            true,
+        )
+        .unwrap();
+        let mut trims = 0;
+        for e in crate::query::api_queries::get_edges(&b).unwrap() {
+            let rec = b.edge(e).unwrap();
+            let Some(curve) = rec.curve.as_ref() else {
+                continue;
+            };
+            for &eu in &rec.edgeuses {
+                let Some(trim) = b.edgeuse(eu).unwrap().uv_trim_curve.as_ref() else {
+                    continue;
+                };
+                let f = crate::topology::edgeuse::p1::face(&b, eu).unwrap().unwrap();
+                let mut s = b
+                    .face(f)
+                    .unwrap()
+                    .surface
+                    .as_ref()
+                    .unwrap()
+                    .clone_for_evaluation()
+                    .unwrap();
+                let _ = s.set_owner(None);
+                let range = [rec.interval.min(), rec.interval.max()];
+                // (the stitch bounds each side trim as the degree-1 B-spline of its stored
+                // points, evaluated exactly: the line it becomes carries its own rounding)
+                let spline;
+                let trim = match trim.kind() {
+                    crate::curve::curve::CurveKind::Line(l) => {
+                        spline = Curve::from(l.base().clone_exact());
+                        &spline
+                    }
+                    _ => trim,
+                };
+                let g = structured_trim_image_gap_bound(&k, &s, curve, trim, range)
+                    .unwrap()
+                    .unwrap_or_else(|| {
+                        panic!("edge {} trim on {:?} not structured", e.index(), s.kind())
+                    });
+                assert!(g <= 1e-9, "{g:e}");
+                let within = trim_image_gap_bound_within(
+                    &k,
+                    &s,
+                    curve,
+                    trim,
+                    range,
+                    1e-8,
+                    [1e-5, f64::INFINITY],
+                    Some(0),
+                )
+                .unwrap();
+                assert_eq!(within, Some(g), "edge {}: no bisection", e.index());
+                trims += 1;
+            }
+        }
+        assert!(trims >= 16, "{trims} trims");
     }
 
     /// The trim of degree 1 from `(u0, v)` to `(u1, v)` over `[0, 1]`.
