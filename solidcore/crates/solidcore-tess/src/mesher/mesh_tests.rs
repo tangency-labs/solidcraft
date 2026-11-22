@@ -462,8 +462,8 @@ fn a_cylinder_wall_on_the_mesh_path_is_shaped() {
 /// halved those sides round after round, and the walls' with them, toward the crescent's width,
 /// until edge 20 passed 20000 nodes and its faces were refused. Meshed at SolidCraft's export
 /// spec (a chord of 1/5000 of its size), a triangle of boundary nodes narrower than the chord is
-/// left as it is: the body meshes, nothing folds, the mesh is closed, a face is named short of
-/// its shape for being narrower than the chord, and no edge is near the node bound.
+/// left as it is: the body meshes, nothing folds, the mesh is closed, every face short of its
+/// shape is named for a sharp corner or a few degrees, and no edge is near the node bound.
 #[test]
 fn a_sliver_narrower_than_the_chord_is_not_split_without_end_on_the_mesh_path() {
     let b = crate::fixtures::fixture("rig_join_cap_touching_lips_base");
@@ -499,12 +499,17 @@ fn a_sliver_narrower_than_the_chord_is_not_split_without_end_on_the_mesh_path() 
     let (w, refused) = plan.welded().unwrap();
     assert!(refused.is_empty(), "{refused:?}");
     assert_closed(&w, "lips on a base");
-    // Faces 11 and 17, the lips' end walls (1 x 18 mm), each have a side 0.0001 mm long at a
-    // corner, beside which the triangles are narrower than the chord: they are named. Their ears
-    // (two sides on the boundary) are still split, so they keep a smallest angle near the spec's.
-    for face in [11, 17] {
-        let u = stats.unshaped.iter().find(|u| u.face == face);
-        assert!(u.is_some_and(|u| u.limits.contains(&crate::ShapeLimit::Narrow) && u.smallest_angle > 15.0), "face {face}: {u:?}");
+    // The faces named short of their shape, as measured: the crescent's faces 9, 10 and 16 for
+    // corners sharper than the spec, and faces 5 and 7 for the shaping's rounds alone, with a
+    // smallest angle of 25.05 degrees. Faces 11 and 17, the lips' end walls (1 x 18 mm, a side
+    // 0.0001 mm long at a corner), reach the spec at the longest side the body's extent gives with
+    // its edges counted.
+    let named: Vec<usize> = stats.unshaped.iter().map(|u| u.face).collect();
+    assert_eq!(named, [5, 7, 9, 10, 16], "{:?}", stats.unshaped);
+    for u in &stats.unshaped {
+        let corner = u.limits.contains(&crate::ShapeLimit::Corner);
+        assert_eq!(corner, [9, 10, 16].contains(&u.face), "{u:?}");
+        assert!(corner || u.smallest_angle > 25.05, "{u:?}");
     }
     let most = plan.edges.iter().map(Vec::len).max().unwrap_or(0);
     assert!(most < edges::MAX_EDGE_NODES / 10, "an edge has {most} nodes");

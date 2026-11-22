@@ -87,7 +87,8 @@ impl<'a> DistanceShape<'a> {
     /// within rounding tolerance. The kernel query respects the outer loop and every hole;
     /// nearby display triangles cannot establish membership at a concave corner.
     fn on_face(&self, face: u32, p: Vec3) -> Result<bool> {
-        let (body, order) = self.body.ops_body().ok_or_else(|| crate::KernelError::Failed("body distance: exact face query unavailable".into()))?;
+        let form = self.body.ops_body().ok_or_else(|| crate::KernelError::Failed("body distance: exact face query unavailable".into()))?;
+        let (body, order) = &*form;
         let distances = body
             .face_distances(order, face as usize, &[[p.x, p.y, p.z]])
             .map_err(|e| crate::KernelError::Failed(format!("body distance: trimmed face: {e}")))?;
@@ -268,7 +269,8 @@ pub enum Members<'a> {
 /// [`KernelError::Failed`] for a B-rep body the kernel can't take, and when the kernel finds no
 /// closest points or refuses the solve.
 pub fn edges_closest(a: &Body, edges: &[usize], b: &Body, to: Members) -> Result<Option<BodyDistance>> {
-    let (Some((ops_a, order_a)), Some((ops_b, order_b))) = (exact_body(a)?, exact_body(b)?) else { return Ok(None) };
+    let (Some(form_a), Some(form_b)) = (exact_body(a)?, exact_body(b)?) else { return Ok(None) };
+    let ((ops_a, order_a), (ops_b, order_b)) = (&*form_a, &*form_b);
     let (faces, to_edges) = members(to);
     let mut best: Option<BodyDistance> = None;
     for &edge in edges {
@@ -292,7 +294,8 @@ pub fn faces_closest(a: &Body, faces: &[usize], b: &Body, to: &[usize]) -> Resul
     if a.is_mesh() || b.is_mesh() {
         return Ok(None);
     }
-    let (Some((ops_a, order_a)), Some((ops_b, order_b))) = (exact_body(a)?, exact_body(b)?) else { return Ok(None) };
+    let (Some(form_a), Some(form_b)) = (exact_body(a)?, exact_body(b)?) else { return Ok(None) };
+    let ((ops_a, order_a), (ops_b, order_b)) = (&*form_a, &*form_b);
     let c = ops_a.closest_faces(order_a, faces, ops_b, order_b, to).map_err(|e| failed(&e))?;
     Ok(Some(BodyDistance { distance: c.distance, from: Vec3::from(c.from), to: Vec3::from(c.to), exact: true }))
 }
@@ -305,7 +308,8 @@ pub fn faces_closest(a: &Body, faces: &[usize], b: &Body, to: &[usize]) -> Resul
 /// [`KernelError::Failed`] for a B-rep body the kernel can't take, and when the kernel finds no
 /// closest point or refuses the solve.
 pub fn point_closest(p: Vec3, b: &Body, to: Members) -> Result<Option<BodyDistance>> {
-    let Some((ops_b, order_b)) = exact_body(b)? else { return Ok(None) };
+    let Some(form_b) = exact_body(b)? else { return Ok(None) };
+    let (ops_b, order_b) = &*form_b;
     let (faces, edges) = members(to);
     let c = ops_b.closest_to_point(order_b, faces, edges, [p.x, p.y, p.z]).map_err(|e| failed(&e))?;
     let c = c.ok_or_else(|| KernelError::Failed("measure: the kernel found no closest point".into()))?;
@@ -315,7 +319,7 @@ pub fn point_closest(p: Vec3, b: &Body, to: Members) -> Result<Option<BodyDistan
 /// `body`'s exact B-rep for a measurement: `None` for a mesh body, whose triangles are its
 /// geometry, and an error for a B-rep body the kernel can't take, which is never measured on its
 /// display mesh instead.
-fn exact_body(body: &Body) -> Result<Option<&(solidcore_ops::Body, solidcore_ops::Order)>> {
+fn exact_body(body: &Body) -> Result<Option<crate::body::OpsForm>> {
     if body.is_mesh() {
         return Ok(None);
     }

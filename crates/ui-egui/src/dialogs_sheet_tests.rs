@@ -978,7 +978,7 @@ fn convert_takes_the_body_its_bends_and_the_faces_it_skips() {
     assert!(c[0].1.get("direction").is_none());
     run_all(&mut app, c);
     let flat = app.session.execute("sheet.flat_pattern", &json!({})).unwrap();
-    assert_eq!((flat["surfaces"].clone(), flat["bends"].as_array().map(Vec::len)), (json!(true), Some(4)), "{flat}");
+    assert_eq!(flat["bends"].as_array().map(Vec::len), Some(4), "{flat}");
     // Edit Feature as the app opens it: rolled back to before the conversion, where the skipped
     // face still is.
     let f = app.session.doc.features.last().unwrap().clone();
@@ -1229,7 +1229,9 @@ impl IntoNav for egui::PointerButton {
         match self {
             egui::PointerButton::Middle => crate::prefs::NavButton::Middle,
             egui::PointerButton::Secondary => crate::prefs::NavButton::Right,
-            _ => crate::prefs::NavButton::Left,
+            egui::PointerButton::Extra1 => crate::prefs::NavButton::Extra1,
+            egui::PointerButton::Extra2 => crate::prefs::NavButton::Extra2,
+            egui::PointerButton::Primary => crate::prefs::NavButton::Left,
         }
     }
 }

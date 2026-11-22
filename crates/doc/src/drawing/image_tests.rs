@@ -6,6 +6,7 @@ use solidcraft_geom::drawing_sheet::{self, Orientation, PaperSize};
 use solidcraft_geom::title_block::CellKind;
 
 use super::*;
+use crate::canvas::base64_encode;
 use crate::ids::IdSource;
 
 const RECT: [f64; 4] = [10.0, 20.0, 60.0, 45.0];
@@ -46,8 +47,23 @@ fn drawing_sheet_copy(d: &Drawing, id: u64) -> crate::drawing::Sheet {
     crate::drawing::Sheet { id, name: "Sheet 2".into(), ..(*d.sheets[0]).clone() }
 }
 
+/// The drawing as an older file holds it: its images in `images` and `sheet_images` and its logo
+/// cells naming theirs, each image's bytes as base64 in its record.
 fn file(d: &Drawing) -> Value {
-    serde_json::from_str(&d.to_json().unwrap()).unwrap()
+    let mut v: Value = serde_json::from_str(&d.to_json().unwrap()).unwrap();
+    super::take_back(&mut v);
+    for (i, image) in d.images.iter().enumerate() {
+        v["images"][i]["data"] = base64_encode(&image.data).into();
+        v["images"][i].as_object_mut().unwrap().remove("part");
+    }
+    v
+}
+
+/// The drawing saved into a container and read back: its record, and its images as the parts it
+/// names.
+fn reopen(d: &Drawing) -> Drawing {
+    let (text, parts) = crate::blob::collecting_parts(|| d.to_json());
+    crate::blob::with_parts(parts.into_iter().collect(), || Drawing::from_json(&text.unwrap())).unwrap()
 }
 
 fn refused(d: &Drawing, edit: impl FnOnce(&mut Value)) -> String {
@@ -60,13 +76,26 @@ fn refused(d: &Drawing, edit: impl FnOnce(&mut Value)) -> String {
 fn an_image_is_saved_with_its_bytes_and_reads_back_the_same() {
     let bytes = png(640, 480);
     let (d, image, placed) = pictured(&bytes);
-    let saved = d.to_json().unwrap();
-    let read = Drawing::from_json(&saved).unwrap();
+    // Saved into a container, the record names the part that holds the bytes; never base64 text.
+    let (saved, parts) = crate::blob::collecting_parts(|| d.to_json());
+    let saved = saved.unwrap();
+    assert_eq!(parts.len(), 1);
+    assert_eq!(parts[0].1.as_bytes(), bytes);
+    let record: Value = serde_json::from_str(&saved).unwrap();
+    // Where a release that can't read image parts (0.45.0) sets them aside: fields of their own.
+    assert!(record.get("images").is_none() && record.get("sheet_images").is_none(), "{record}");
+    assert_eq!((record["image_files"][0]["data"].clone(), record["image_files"][0]["part"].clone()), (json!(""), json!(parts[0].0)));
+    assert_eq!(record["placed_images"][0]["image"], json!(crate::ids::encode(image)));
+    assert!(parts[0].0.starts_with("blobs/") && parts[0].0.ends_with(".png"));
+    let read = crate::blob::with_parts(parts.into_iter().collect(), || Drawing::from_json(&saved)).unwrap();
     assert_eq!(read, d);
-    assert_eq!(read.to_json().unwrap(), saved);
+    assert_eq!(crate::blob::collecting_parts(|| read.to_json()).0.unwrap(), saved);
+    assert!(Drawing::from_json(&saved).unwrap_err().to_string().contains("missing"), "no part, no file");
+    // An older drawing's base64 reads the same.
+    assert_eq!(Drawing::from_json(&file(&d).to_string()).unwrap(), d);
     let found = read.images.by_id(image).unwrap();
     assert_eq!((found.format.as_str(), found.pixels), ("png", [640, 480]));
-    assert_eq!(base64_decode(&found.data).unwrap(), bytes);
+    assert_eq!(found.data.as_bytes(), bytes);
     assert_eq!(read.sheet_images.by_id(placed).map(|i| (i.rect_mm, i.image)), Some((RECT, image)));
     assert!(read.images.by_id(placed).is_none() && read.sheet_images.by_id(image).is_none());
 }
@@ -89,9 +118,9 @@ fn one_file_on_two_sheets_is_saved_once() {
     }
     d.validate().unwrap();
     assert_eq!((d.images.len(), d.sheet_images.len()), (1, 21));
-    let read = Drawing::from_json(&d.to_json().unwrap()).unwrap();
-    assert_eq!(read, d);
-    assert!(d.to_json().unwrap().len() < 2 << 20, "the bytes are there once");
+    assert_eq!(reopen(&d), d);
+    let (text, parts) = crate::blob::collecting_parts(|| d.to_json());
+    assert!(text.unwrap().len() < 64 << 10 && parts.len() == 1, "the bytes are there once, as a part");
     assert_eq!(d.images_in_use(), BTreeSet::from([image]));
 
     // The first sheet's going leaves the file for the second's, and the second's takes it.
@@ -198,7 +227,7 @@ fn a_rectangle_is_on_paper_and_has_a_size() {
 fn a_drawings_images_keep_their_counts() {
     let (d, image, placed) = pictured(&png(1, 1));
     // A file and something to use it, ids after the first ones.
-    let again = |d: &mut Drawing, n: u64, data: &str| {
+    let again = |d: &mut Drawing, n: u64, data: &[u8]| {
         let mut file = (*d.images[0]).clone();
         file.id = image + 2 * n;
         file.data = data.into();
@@ -206,21 +235,21 @@ fn a_drawings_images_keep_their_counts() {
         d.images.add([Arc::new(file)]);
         d.sheet_images.add([Arc::new(use_of)]);
     };
-    // One file's cap and the cap between them, checked on every edit from the text's length alone.
+    // One file's cap and the cap between them, checked on every edit from the files' sizes alone.
     let mut big = d.clone();
-    Arc::make_mut(&mut big.images[0]).data = "A".repeat(encoded(MAX_IMAGE_BYTES) + 1);
+    Arc::make_mut(&mut big.images[0]).data = vec![0; MAX_IMAGE_BYTES + 1].into();
     assert!(big.validate().is_err_and(|e| e.to_string().contains("its file")));
     let mut many = d.clone();
-    let full = "A".repeat(encoded(MAX_IMAGE_BYTES));
-    Arc::make_mut(&mut many.images[0]).data.clone_from(&full);
+    let full = vec![0; MAX_IMAGE_BYTES];
+    Arc::make_mut(&mut many.images[0]).data = full.as_slice().into();
     again(&mut many, 1, &full);
-    let room = encoded(MAX_IMAGES_BYTES) - 2 * full.len();
-    again(&mut many, 2, &"A".repeat(room));
+    let room = MAX_IMAGES_BYTES - 2 * full.len();
+    again(&mut many, 2, &vec![0; room]);
     many.validate().unwrap();
-    again(&mut many, 3, "A");
+    again(&mut many, 3, b"A");
     assert!(many.validate().is_err_and(|e| e.to_string().contains("between them")));
     let mut crowd = d.clone();
-    (1..=MAX_IMAGES as u64).for_each(|n| again(&mut crowd, n, "AAAA"));
+    (1..=MAX_IMAGES as u64).for_each(|n| again(&mut crowd, n, b"AAAA"));
     assert!(crowd.validate().is_err_and(|e| e.to_string().contains("at most")));
     let mut placements = d.clone();
     let logo = placements.sheet_images[0].clone();
@@ -267,8 +296,8 @@ fn a_logo_is_a_use_of_its_file() {
     d.set_logo(None, "title", Some(again)).unwrap();
     assert_eq!(d.images.iter().count(), 1, "the same bytes are one file");
 
-    let back = Drawing::from_json(&d.to_json().unwrap()).unwrap();
-    assert_eq!((logo_of(&back, 0), base64_decode(&back.images.by_id(id).unwrap().data).unwrap()), (Some(id), bytes.clone()));
+    let back = reopen(&d);
+    assert_eq!((logo_of(&back, 0), back.images.by_id(id).unwrap().data.to_vec()), (Some(id), bytes.clone()));
 
     d.set_logo(None, "title", None).unwrap();
     let first = d.sheets[0].id;
@@ -345,9 +374,10 @@ fn a_template_carries_its_logos_file() {
     let saved = template::from_drawing(&d).unwrap();
     assert!(saved.sheet_images.is_empty());
     assert_eq!(saved.images.iter().count(), 1);
-    let read = template::read(&saved.to_json().unwrap()).unwrap();
+    let read = reopen(&saved);
+    template::check(&read).unwrap();
     let made = template::instantiate(&read, "From a template", &BTreeSet::new(), &mut id_source).unwrap();
-    assert_eq!(base64_decode(&made.images.by_id(logo_of(&made, 0).unwrap()).unwrap().data).unwrap(), logo);
+    assert_eq!(made.images.by_id(logo_of(&made, 0).unwrap()).unwrap().data.to_vec(), logo);
 
     // The drawing has another file under the template's file's id.
     let (mut other, _, _) = pictured(&png(99, 99));
@@ -370,8 +400,8 @@ fn a_template_carries_its_logos_file() {
     assert_eq!(changed.len(), 1);
     let shown = logo_of(&applied, 0).unwrap();
     assert_ne!(shown, taken);
-    assert_eq!(base64_decode(&applied.images.by_id(shown).unwrap().data).unwrap(), logo);
-    assert_eq!(base64_decode(&applied.images.by_id(taken).unwrap().data).unwrap(), png(99, 99), "the placed image keeps its own");
+    assert_eq!(applied.images.by_id(shown).unwrap().data.to_vec(), logo);
+    assert_eq!(applied.images.by_id(taken).unwrap().data.to_vec(), png(99, 99), "the placed image keeps its own");
     assert!(applied.sheet_images.by_id(placement).is_some());
     let (again, changed) = template::apply(&applied, &clash, &mut seeded).unwrap();
     assert_eq!((changed.len(), again.images.iter().count()), (0, 2), "the same bytes are the same file");
@@ -397,4 +427,32 @@ fn a_template_brings_each_logo_file_in_once() {
     let first = target.allocate_id(&mut once).unwrap();
     assert_eq!((logo_of(&applied, 0), logo_of(&applied, 1), applied.images.iter().count()), (Some(first), Some(first), 1));
     assert_eq!(applied.allocate_id(&mut seeded).unwrap(), applied.allocate_id(&mut once).unwrap(), "one id was taken");
+}
+
+/// A drawing with images keeps them, their placements and its logos in fields a release that can't
+/// read them sets aside, its logo cells showing only their text; read back, they are where they were.
+/// One that release changed around them reads all the same: a placement on a sheet it removed, or a
+/// logo for a cell that is gone, is left out with the file nothing then uses.
+#[test]
+fn images_and_logos_are_set_aside_for_an_older_release_and_read_back() {
+    let (mut d, mut id_source) = with_blocks();
+    let id = d.allocate_id(&mut id_source).unwrap();
+    d.set_logo(None, "title", Some(ImageFile::from_file(id, &png(8, 8)).unwrap())).unwrap();
+    let (text, parts) = crate::blob::collecting_parts(|| d.to_json());
+    let mut record: Value = serde_json::from_str(&text.unwrap()).unwrap();
+    assert!(record.pointer("/sheets/0/title_block/cells/0/kind/text/image").is_none(), "the cell keeps its text only");
+    assert_eq!(record["logo_cells"].as_array().map(Vec::len), Some(2), "{}", record["logo_cells"]);
+    let parts: std::collections::BTreeMap<_, _> = parts.into_iter().collect();
+    let read = |v: &Value| crate::blob::with_parts(parts.clone(), || Drawing::from_value(v.clone()));
+    assert_eq!(read(&record).unwrap(), d);
+    // An older release took the second sheet's title block away: its logo is left out, the first
+    // sheet's kept.
+    record["sheets"][1]["title_block"] = Value::Null;
+    let changed = read(&record).unwrap();
+    let logo = |d: &Drawing, sheet: usize| d.sheets[sheet].title_block.as_ref().and_then(|b| b.logos().next());
+    assert_eq!((logo(&changed, 0), logo(&changed, 1)), (Some(id), None));
+    // And with no logo left, the file goes too.
+    record["sheets"][0]["title_block"] = Value::Null;
+    let bare = read(&record).unwrap();
+    assert!(bare.images.is_empty() && logo(&bare, 0).is_none());
 }

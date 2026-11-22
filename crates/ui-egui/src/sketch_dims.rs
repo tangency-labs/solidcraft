@@ -70,6 +70,9 @@ pub fn boxes_for(cmd: &str, n: usize) -> Vec<DimBox> {
         // By side: the side from the first click to the second (#11271).
         ("sketch.polygon.edge", 1) => vec![b("Length", Length), b("Sides", Unitless)],
         ("sketch.slot.center_to_center" | "sketch.slot.overall" | "sketch.slot.center_point", 1) => vec![b("Length", Length)],
+        // The whole first edge, then the width across from it (#4798).
+        ("sketch.rectangle.edge_center", 1) => vec![b("Length", Length)],
+        ("sketch.rectangle.edge_center", 2) => vec![b("Width", Length)],
         ("sketch.conic", 2) => vec![b("Rho", Unitless)],
         ("sketch.slot.center_to_center" | "sketch.slot.overall" | "sketch.slot.center_point", 2)
         | ("sketch.slot.arc_center" | "sketch.slot.arc_three_point", 3) => vec![b("Width", Length)],
@@ -141,6 +144,20 @@ pub fn effective(app: &SolveApp, t: &Tool, h: Vec2) -> Vec2 {
             let d = h - a;
             Vec2::new(a.x + lk("Width").map_or(d.x, |w| w * 0.5 * sign(d.x)), a.y + lk("Height").map_or(d.y, |hh| hh * 0.5 * sign(d.y)))
         }
+        // The edge's end: its box is the whole edge, centred on the first point.
+        ("sketch.rectangle.edge_center", 1) => {
+            let v = h - a;
+            let ang = if t.hover.as_ref().is_some_and(|x| x.1.is_some()) { v.angle() } else { snap_axis(v.angle()) };
+            a + Vec2::from_angle(ang) * lk("Length").map_or(v.len(), |l| l * 0.5)
+        }
+        ("sketch.rectangle.edge_center", 2) => match lk("Width") {
+            Some(w) => {
+                let c0 = t.pts.first().map(|p| p.0).unwrap_or(a);
+                let n = dir_or_x(a - c0).perp();
+                c0 + n * (w * sign(n.dot(h - c0)))
+            }
+            None => h,
+        },
         ("sketch.circle.center", 1) => a + dir_or_x(h - a) * lk("Diameter").map_or((h - a).len(), |d| d * 0.5),
         ("sketch.circle.two_point", 1) => a + dir_or_x(h - a) * lk("Diameter").unwrap_or((h - a).len()),
         ("sketch.slot.center_point", 1) => a + dir_or_x(h - a) * lk("Length").map_or((h - a).len(), |l| l * 0.5),
@@ -361,6 +378,15 @@ fn live(app: &SolveApp, t: &Tool, e: Vec2, px: f64) -> Vec<(f64, Vec2)> {
             let (sx, sy) = (sign(d.x), sign(d.y));
             vec![(2.0 * d.x.abs(), Vec2::new(a.x, a.y - d.y - sy * off)), (2.0 * d.y.abs(), Vec2::new(a.x + d.x + sx * 2.0 * off, a.y))]
         }
+        ("sketch.rectangle.edge_center", 1) => {
+            let n = dir_or_x(e - a).perp();
+            vec![(2.0 * (e - a).len(), (a + e) * 0.5 + n * off)]
+        }
+        ("sketch.rectangle.edge_center", 2) => {
+            let n = dir_or_x(a - first).perp();
+            let w = n.dot(e - first);
+            vec![(w.abs(), e + n * (sign(w) * 2.5 * off))]
+        }
         ("sketch.circle.center", 1) => vec![(2.0 * (e - a).len(), (a + e) * 0.5 + dir_or_x(e - a).perp() * off)],
         ("sketch.circle.two_point", 1) => vec![((e - a).len(), (a + e) * 0.5 + dir_or_x(e - a).perp() * off)],
         ("sketch.ellipse", 1) => vec![((e - a).len(), (a + e) * 0.5 + dir_or_x(e - a).perp() * off)],
@@ -528,6 +554,7 @@ pub fn sync(t: &mut Tool) {
                 t.cmd,
                 "sketch.arc.center_point"
                     | "sketch.ellipse"
+                    | "sketch.rectangle.edge_center"
                     | "sketch.slot.center_to_center"
                     | "sketch.slot.overall"
                     | "sketch.slot.center_point"
@@ -775,6 +802,19 @@ fn boxes(app: &SolveApp, ui: &mut egui::Ui, proj: &Proj, t: &mut Tool) -> Option
             };
         }
     }
+    let sizes: Vec<_> = t
+        .dims
+        .iter()
+        .map(|b| crate::ui_kit::placement_field_content_size(ui, &b.value) + vec2(2.0 * tk.form_inset, 0.0) + field_frame.total_margin().sum())
+        .collect();
+    // Rectangle dimensions belong to their edges, not to the pointer. Keep them near
+    // those anchors when a border or panel leaves no room at the preferred position.
+    let rectangle_positions = if matches!(t.cmd, "sketch.rectangle.two_point" | "sketch.rectangle.center" | "sketch.rectangle.rounded") {
+        let anchors: Option<Vec<_>> = lv.iter().map(|(_, at)| proj.to_screen(plane.to_world(*at)).map(|p| p + vec2(-34.0, -11.0))).collect();
+        anchors.map(|anchors| rectangle_input_positions(&anchors, &sizes, view, ui.ctx().pointer_latest_pos()))
+    } else {
+        None
+    };
     // Polygon values used to sit inside the radius, so both boxes covered a small polygon
     // and each other. Place them together outside its projected outline, in screen space:
     // their separation must not shrink with the shape or a tilted sketch plane.
@@ -783,11 +823,6 @@ fn boxes(app: &SolveApp, ui: &mut egui::Ui, proj: &Proj, t: &mut Tool) -> Option
             .unwrap_or_else(|| t.pts.iter().map(|p| p.0).chain(std::iter::once(e)).collect());
         let points: Vec<_> = corners.iter().filter_map(|p| proj.to_screen(plane.to_world(*p))).collect();
         let bounds = egui::Rect::from_points(&points);
-        let sizes: Vec<_> = t
-            .dims
-            .iter()
-            .map(|b| crate::ui_kit::placement_field_content_size(ui, &b.value) + vec2(2.0 * tk.form_inset, 0.0) + field_frame.total_margin().sum())
-            .collect();
         bounds.is_finite().then(|| polygon_input_positions(bounds, &sizes, view, tk.space_8))
     } else {
         None
@@ -812,13 +847,6 @@ fn boxes(app: &SolveApp, ui: &mut egui::Ui, proj: &Proj, t: &mut Tool) -> Option
             if !start.is_finite() || !end.is_finite() || !(end - start).length().is_finite() {
                 return None;
             }
-            let sizes: Vec<_> = t
-                .dims
-                .iter()
-                .map(|b| {
-                    crate::ui_kit::placement_field_content_size(ui, &b.value) + vec2(2.0 * tk.form_inset, 0.0) + field_frame.total_margin().sum()
-                })
-                .collect();
             Some(line_input_positions([start, end], &sizes, view, tk.space_8))
         })
     } else {
@@ -894,6 +922,19 @@ fn boxes(app: &SolveApp, ui: &mut egui::Ui, proj: &Proj, t: &mut Tool) -> Option
         if construction && b.label == "Length" && text.is_empty() {
             text = INFINITE.to_owned();
         }
+        // A key that moves the caret (Left, Right, Home, End) in a box that follows the cursor
+        // keeps its value where it is, so the caret can move into it and the user can add to
+        // it (`50.00` then `-5`); otherwise the next frame selects the whole text again and
+        // typing replaces it (#20607).
+        if has_focus
+            && !b.locked
+            && !b.value.is_empty()
+            && ui.input(|input| {
+                [egui::Key::ArrowLeft, egui::Key::ArrowRight, egui::Key::Home, egui::Key::End].into_iter().any(|key| input.key_pressed(key))
+            })
+        {
+            b.locked = true;
+        }
         // While a box follows the cursor its whole text is selected, so typing replaces it.
         if (has_focus || (focus && i == 0)) && !b.locked {
             let mut s = egui::text_edit::TextEditState::load(ui.ctx(), id).unwrap_or_default();
@@ -905,6 +946,7 @@ fn boxes(app: &SolveApp, ui: &mut egui::Ui, proj: &Proj, t: &mut Tool) -> Option
             line_positions
                 .as_ref()
                 .or(polygon_positions.as_ref())
+                .or(rectangle_positions.as_ref())
                 .and_then(|positions| positions.get(i).copied())
                 .or(apart.get(i).copied().flatten())
                 .unwrap_or_else(|| in_view(sp + vec2(-34.0, -11.0), view, ui.ctx().pointer_latest_pos()))
@@ -956,6 +998,35 @@ fn boxes(app: &SolveApp, ui: &mut egui::Ui, proj: &Proj, t: &mut Tool) -> Option
     // A box waiting before the first click only places on Enter once it has the keyboard.
     let nothing = ui.ctx().memory(|m| m.focused().is_none()) && !(construction && t.pts.is_empty());
     (enter && (any_focused || nothing)).then_some(e)
+}
+
+/// Place measured rectangle fields nearest their edge anchors, keeping the pointer and
+/// earlier fields clear. Use the full free region, including space beside floating panels.
+fn rectangle_input_positions(anchors: &[Pos2], sizes: &[egui::Vec2], view: Option<Room>, pointer: Option<Pos2>) -> Vec<Pos2> {
+    use crate::panel_runtime::{egui_rect, logical_rect, resolve_usable_region};
+    use solidcraft_engine::panels::{Point, Size};
+
+    let Some(view) = view else { return anchors.to_vec() };
+    let domain = view.free.map_or_else(|| logical_rect(view.view), |free| free.domain);
+    let mut obstacles = view.free.map_or_else(Vec::new, |free| free.obstacles.clone());
+    if let Some(pointer) = pointer {
+        obstacles.push(logical_rect(egui::Rect::from_center_size(pointer, vec2(2.0 * POINTER_GAP, 2.0 * POINTER_GAP))));
+    }
+    anchors
+        .iter()
+        .zip(sizes)
+        .map(|(&anchor, &size)| {
+            let wanted = egui::Rect::from_min_size(anchor, size);
+            let center = wanted.center();
+            let placed = resolve_usable_region(domain, &obstacles)
+                .ok()
+                .and_then(|free| free.place_footprint(Size { width: size.x, height: size.y }, Point { x: center.x, y: center.y }, 0.0))
+                .map(egui_rect)
+                .unwrap_or_else(|| view.clamp(wanted));
+            obstacles.push(logical_rect(placed.expand(2.0)));
+            placed.min
+        })
+        .collect()
 }
 
 /// Keep measured Length and Angle fields clear of the projected line and each other.

@@ -10,7 +10,7 @@ use crate::measure;
 /// The records the STEP reader assembles from `text`, kept as an import.
 fn kept(text: &str) -> ImportRecords {
     let ex = solidcore_step::p21::parse(text).unwrap();
-    let read = solidcore_step::topology::read_solids_with(&ex, &solidcraft_smlib::pcurves::SmlibTrims);
+    let read = solidcore_step::topology::read_solids_with(&ex, &solidcraft_smlib::pcurves::SmlibImportTrims);
     assert!(read.failures.is_empty(), "{:?}", read.failures);
     let bodies: Vec<RecordBody> = read
         .solids
@@ -27,6 +27,7 @@ fn kept(text: &str) -> ImportRecords {
             face_origin: s.face_origin,
             sheet: s.sheet,
             copy_of: None,
+            mesh: None,
         })
         .collect();
     let tree = vec![StepNode {

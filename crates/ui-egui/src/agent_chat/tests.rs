@@ -585,6 +585,8 @@ fn merging_finds_the_turns_start_when_the_history_was_trimmed() {
         label: String::new(),
         doc: d.clone(),
         active_sketch: None,
+        sketching_view: None,
+        sketch_restore_marker: None,
         active_sheet_sketch: None,
         pending_moves: Default::default(),
         part: None,
@@ -862,6 +864,49 @@ fn permission_modes_decide_what_asks() {
     let crash = ask(&tx, "engine.execute", json!({"command": "diagnostics.crash_reports"}));
     frame(&mut app);
     assert_eq!(crash.recv_timeout(std::time::Duration::from_secs(5)).unwrap()["ok"], false);
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// "Always allow" on a modelling batch covers modelling batches only: a later batch that saves
+/// still asks, and allowing that one always remembers the save, not "batch".
+#[test]
+fn always_allowing_one_batch_does_not_allow_a_later_batchs_file_steps() {
+    let (mut app, tx) = app_in_a_turn();
+    app.agent_chat.running_id = "claude".into();
+    app.preferences.ai_permissions = agents::Mode::Ask;
+    let modelling = json!({"commands": [{"command": "solid.box", "params": {"length": 1, "width": 1, "height": 1}}]});
+    let first = ask(&tx, "engine.batch", modelling.clone());
+    frame(&mut app);
+    assert_eq!(app.agent_chat.waiting(), 1, "a modelling batch asks");
+    let id = app.agent_chat.held[0].id;
+    approve_always(&mut app, id);
+    frame(&mut app);
+    assert_eq!(first.recv_timeout(std::time::Duration::from_secs(30)).unwrap()["ok"], true);
+    assert!(agents::always_allowed(&app.preferences, "claude", "batch"));
+    let _second = ask(&tx, "engine.batch", modelling);
+    frame(&mut app);
+    assert_eq!(app.agent_chat.waiting(), 0, "modelling batches are remembered");
+    let dir = solidcraft_engine::io::vfs::temp_dir().join(format!("sc-agent-chat-batch-always-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let saving = json!({
+        "commands": [{"command": "solid.box"}, {"command": "FILE.SAVE", "params": {"path": dir.join("x.solidcraft").to_string_lossy()}}],
+        "allow_paths": [dir.to_string_lossy()],
+    });
+    let _third = ask(&tx, "engine.batch", saving.clone());
+    frame(&mut app);
+    assert_eq!(app.agent_chat.waiting(), 1, "a batch that saves still asks");
+    let id = app.agent_chat.held[0].id;
+    approve_always(&mut app, id);
+    assert!(agents::always_allowed(&app.preferences, "claude", "file.save"));
+    decline_all(&mut app, "test");
+    let _fourth = ask(&tx, "engine.batch", saving);
+    frame(&mut app);
+    assert_eq!(app.agent_chat.waiting(), 0, "the save itself was allowed always");
+    let exporting = json!({"commands": [{"command": "file.export", "params": {"path": dir.join("x.stl").to_string_lossy()}}], "allow_paths": [dir.to_string_lossy()]});
+    let _fifth = ask(&tx, "engine.batch", exporting);
+    frame(&mut app);
+    assert_eq!(app.agent_chat.waiting(), 1, "an export was never allowed");
+    decline_all(&mut app, "test");
     let _ = std::fs::remove_dir_all(&dir);
 }
 
@@ -5567,6 +5612,20 @@ fn a_prompt_at_the_top_of_the_conversation_is_as_tall_as_its_content() {
     let row = solidcraft_theme::Tokens::get().control_height;
     assert!(prompt.bottom() - button.y < row, "the bubble ends {} below its button", prompt.bottom() - button.y);
     assert!(reply.top() - button.y < 2.0 * row, "the reply starts {} below the prompt's button", reply.top() - button.y);
+}
+
+/// A short prompt's bubble is as wide as its lines and its Copy message button, at the right
+/// edge of the conversation, instead of spanning most of the panel (#14738).
+#[test]
+fn a_short_prompt_has_a_bubble_as_wide_as_its_content() {
+    // Kept to the end: the published handles and rects are its last frame's.
+    let _h = chat_with_copiable_messages();
+    let bubble = solidcraft_ui_registry::rect_of("agent_chat:bubble:0").expect("the prompt's bubble");
+    let button = solidcraft_ui_registry::handle_at("agent_chat:copy:0").expect("the prompt's Copy message button");
+    let reply = solidcraft_ui_registry::rect_of("agent_chat:msg:1").expect("the reply's message area");
+    assert!(bubble.width() < 0.5 * reply.width(), "the bubble is {} wide in a conversation {} wide", bubble.width(), reply.width());
+    assert!((bubble.right() - reply.right()).abs() < 1.0, "the bubble ends at {}, the conversation at {}", bubble.right(), reply.right());
+    assert!(bubble.contains(button), "the Copy message button {button:?} is in the bubble {bubble:?}");
 }
 
 /// The visible button on a reply copies its original Markdown: heading, paragraphs, list and

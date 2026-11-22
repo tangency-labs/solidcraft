@@ -691,13 +691,29 @@ impl On {
             points: vec![a, b],
         };
         let mut candidates = Vec::new();
-        let ends = (self.project_in(p0, exact), self.project_in(p1, exact));
+        let middle = self.project_in(pm, exact);
+        // Each end on the sheet of the edge's middle: an end on the seam of a closed form projects
+        // to either side of it, and on the far side the segment between the ends runs the wrong
+        // way round. A segment that missed for that left the ones below, whose ends are placed
+        // from the middle, to fit the edge within the tolerance with ends off its vertices.
+        let sheet = |mut q: [f64; 2]| {
+            if let Some(m) = middle {
+                for ((x, near), period) in q.iter_mut().zip(m).zip(self.dom.period) {
+                    *x = uv::unwrap(*x, near, period);
+                }
+            }
+            q
+        };
+        let ends = (
+            self.project_in(p0, exact).map(sheet),
+            self.project_in(p1, exact).map(sheet),
+        );
         if let (Some(a), Some(b)) = ends {
             candidates.push(line(a, b));
         }
         // One parameter fixed where the edge's middle is (an end on a seam or at an apex may
         // project anywhere along it), the other from the ends.
-        if let (Some(a), Some(b), Some(m)) = (ends.0, ends.1, self.project_in(pm, exact)) {
+        if let (Some(a), Some(b), Some(m)) = (ends.0, ends.1, middle) {
             candidates.push(line([m[0], a[1]], [m[0], b[1]]));
             candidates.push(line([a[0], m[1]], [b[0], m[1]]));
         }
@@ -792,11 +808,18 @@ impl On {
     }
 
     /// The loop's uses moved by whole periods so each starts where the one before it ends (in
-    /// loop order and direction), then all together into the surface's base period where the
-    /// loop's lowest point allows. Where uses meet at a pole (within `tol`) the periodic
-    /// parameter is free: there the offsets that turn the loop counter-clockwise in (u, v) (a
-    /// face boundary seen from the natural normal) by more than rounding are taken, else the
-    /// nearest. A seam used twice from pole to pole thus encloses its face, never nothing.
+    /// loop order and direction), then all together into the surface's base period. Which
+    /// translate depends on whether the loop's control hull fits in the surface's range, to
+    /// within how far its uses miss each other at its vertices away from a pole and a billionth
+    /// of the period at each end. A loop that fits goes where its lowest point allows; one that
+    /// lies outside the range there but within it a period lower, to that rounding, goes there
+    /// (and may start below the range by that). A loop wider than that, which no translate puts
+    /// in the range, goes where its hull's midpoint allows: a small overrun at either seam must
+    /// not move the rest of a full-period loop one whole period outside the patch.
+    /// Where uses meet at a pole (within `tol`) the periodic parameter is free: there the offsets
+    /// that turn the loop counter-clockwise in (u, v) (a face boundary seen from the natural
+    /// normal) by more than rounding are taken, else the nearest. A seam used twice from pole to
+    /// pole thus encloses its face, never nothing.
     fn close(&self, uses: &mut [(Curve2, bool)], tol: f64) -> Result<()> {
         let n = uses.len();
         let mut ends = Vec::new();
@@ -914,16 +937,53 @@ impl On {
                 .copied()
                 .flatten()
                 .map_or(0.0, |(a, b)| a.min(b));
-            let low = uses
+            let (low, high) = uses
                 .iter()
                 .zip(&shift)
                 .flat_map(|((c, _), s)| points(c).into_iter().map(move |q| at(q, d) + s))
-                .fold(f64::INFINITY, f64::min);
-            let base = if low.is_finite() {
-                ((low - lo) / period + 1e-9).floor() * period
+                .fold((f64::INFINITY, f64::NEG_INFINITY), |(a, b), x| {
+                    (a.min(x), b.max(x))
+                });
+            // Its uses meet at its vertices only to within their rounding: how far apart they
+            // are there, short of whole periods, but at a pole, where the parameter is free.
+            let slack = (0..n)
+                .filter(|&k| !at_pole.get(k).copied().unwrap_or(true))
+                .filter_map(|k| {
+                    let before = k.checked_sub(1).or_else(|| n.checked_sub(1))?;
+                    let (start, _) = ends.get(k)?;
+                    let (_, end) = ends.get(before)?;
+                    let gap = at(*start, d) + shift.get(k)? - at(*end, d) - shift.get(before)?;
+                    Some((gap - (gap / period).round() * period).abs())
+                })
+                .fold(0.0, f64::max);
+            let hi = self
+                .dom
+                .range
+                .get(d)
+                .copied()
+                .flatten()
+                .map_or(lo + period, |(a, b)| a.max(b));
+            let room = slack + 1e-9 * period;
+            // A loop that fits in the range to that rounding is placed by its lowest point; one
+            // wider, which no translate puts in the range, by its midpoint, so an overrun at
+            // either seam leaves the rest of it in the range (#19560).
+            let anchor = if high - low <= hi - lo + 2.0 * room {
+                low
+            } else {
+                0.5 * low + 0.5 * high
+            };
+            let mut base = if anchor.is_finite() {
+                ((anchor - lo) / period + 1e-9).floor() * period
             } else {
                 0.0
             };
+            // A loop that lies outside the range where its lowest point puts it, but within it a
+            // period lower to that rounding and the base's own (above), lies there: its lowest
+            // point is a rounding short of a period's start (#19315).
+            let inside = |by: f64| low - by >= lo - room && high - by <= hi + room;
+            if low.is_finite() && !inside(base) && inside(base + period) {
+                base += period;
+            }
             for (((c, _), s), (st, en)) in uses.iter_mut().zip(&shift).zip(ends.iter_mut()) {
                 let by = s - base;
                 if by != 0.0 {
