@@ -8853,8 +8853,13 @@ pub fn for_feature(app: &SolveApp, id: u64, marker: Option<usize>) -> Option<Dia
                 inp.items = sections
                     .iter()
                     .flat_map(|sec| {
+                        // A point section (the apex the loft closes to) is its sketch point, not
+                        // the sketch's profiles (#20971).
+                        if let Some(point) = &sec.point {
+                            return vec![Sel::SketchPoint { id: format!("{}:{point}", sec.sketch.0) }];
+                        }
                         let idx = st.sketch(sec.sketch.0).map(|ss| profile_indices(ss, &sec.profiles)).unwrap_or_default();
-                        idx.into_iter().map(move |index| Sel::Profile { sketch: sec.sketch.0, index })
+                        idx.into_iter().map(|index| Sel::Profile { sketch: sec.sketch.0, index }).collect()
                     })
                     .collect();
             }

@@ -280,6 +280,33 @@ fn an_unchanged_loft_edit_keeps_a_section_of_all_profiles() {
     assert_eq!(sections(&h), stored);
 }
 
+/// A loft to a point (a pyramid's apex) lists both sections when it is reopened, the point as its
+/// own sketch point, and applying without a change rebuilds the same loft (#20971).
+#[test]
+fn a_loft_to_a_point_lists_the_point_when_edited() {
+    let mut h = Harness::new();
+    let square = [("sketch.rectangle.two_point", json!({"p0": [-10, -10], "p1": [10, 10]}))];
+    let base = sketch_at(&mut h, "Base", 0, &square);
+    let apex = sketch_at(&mut h, "Apex", 30, &[("sketch.point", json!({"point": [0, 0], "id": "tip"}))]);
+    h.app.run("solid.loft", json!({"sections": [{"sketch": base, "profiles": [0]}, {"sketch": apex, "point": "tip"}]})).unwrap();
+    let name = h.app.session.doc.features.last().unwrap().name.clone();
+    let stored = |h: &Harness| match &h.app.session.doc.find_feature(&name).unwrap().kind {
+        FeatureKind::Loft { sections, .. } => sections.clone(),
+        k => panic!("{k:?}"),
+    };
+    let before = stored(&h);
+    assert_eq!(before.len(), 2);
+    assert_eq!(before[1].point.as_deref(), Some("tip"));
+    h.step(&json!({"call":"ui.editFeature","params":{"feature":name}})).unwrap();
+    h.frames(8);
+    let d = h.app.dialog.as_ref().unwrap();
+    assert_eq!(d.inputs[0].items, vec![Sel::Profile { sketch: base, index: 0 }, Sel::SketchPoint { id: format!("{apex}:tip") }]);
+    let commands = crate::dialogs::apply_commands(&h.app, h.app.dialog.as_ref().unwrap()).unwrap();
+    assert_eq!(commands[0].1["params"]["sections"], json!([{"sketch": base, "profiles": [0]}, {"sketch": apex, "point": "tip"}]));
+    ok(&mut h);
+    assert_eq!(stored(&h), before);
+}
+
 /// Surface Loft accepts body edge chains as sections (#11838): picking a body edge and a sketch
 /// curve produces valid sections parameters, and editing the feature round-trips correctly.
 #[test]
