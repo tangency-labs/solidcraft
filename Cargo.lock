@@ -6629,7 +6629,7 @@ dependencies = [
 
 [[package]]
 name = "solidcraft-vr"
-version = "0.46.0"
+version = "0.46.1"
 dependencies = [
  "gltf",
  "image",
@@ -6659,7 +6659,7 @@ dependencies = [
 
 [[package]]
 name = "solidcraft-xr"
-version = "0.46.0"
+version = "0.46.1"
 dependencies = [
  "ash",
  "log",
