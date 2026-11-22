@@ -2204,7 +2204,7 @@ pub fn paint_sketch_header_owner(painter: &Painter, rect: Rect, name: &str, edit
         return;
     }
     let t = Tokens::get();
-    let text = painter.layout_no_wrap(owner.to_owned(), crate::type_face::semibold(11.0), t.text);
+    let text = painter.layout_no_wrap(owner.to_owned(), crate::type_face::semibold(t.font_small), t.text);
     let width = (text.size().x + 16.0).min(rect.width() * 0.45);
     let left = Rect::from_min_max(rect.min, pos2((rect.right() - width - 6.0).max(rect.left()), rect.bottom()));
     paint_sketch_header(painter, left, name, editing);
@@ -2221,7 +2221,7 @@ pub fn paint_view_chips(painter: &Painter, rect: Rect, labels: &[&str]) -> f32 {
     let t = Tokens::get();
     let mut right = rect.right();
     for label in labels.iter().rev() {
-        let galley = painter.layout_no_wrap((*label).to_owned(), crate::type_face::semibold(11.0), t.text);
+        let galley = painter.layout_no_wrap((*label).to_owned(), crate::type_face::semibold(t.font_small), t.text);
         let width = galley.size().x + t.space_12;
         if right - width < rect.left() {
             break;

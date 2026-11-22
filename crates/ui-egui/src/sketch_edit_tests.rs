@@ -1512,8 +1512,9 @@ fn sheet_sketch_drawing_view_owner_is_distinct_from_the_sheet_tile_id() {
     let made =
         app.run("drawing.view.base", json!({"sheet":solidcraft_engine::doc::ids::encode(sheet),"position_mm":[100,100],"scale":"1:1"})).unwrap();
     let view = solidcraft_engine::doc::ids::decode(made["view"].as_str().unwrap()).unwrap();
-    app.drawing_workspace.sheet_selection.insert((drawing, sheet), view);
-    app.session.selection.clear();
+    // Setup only: the sheet shown is the selection receiver, so a picked drawing view lives in
+    // session.selection (the per-sheet sheet_selection map is no longer read).
+    app.session.selection = vec![solidcraft_engine::Sel::Drawing { drawing, object: view }];
     app.start("drawing.sketch.create");
     let entry = app.session.active_sheet_sketch.as_ref().unwrap();
     assert_eq!(entry.owner, solidcraft_engine::doc::drawing::Owner::View(view));

@@ -16693,6 +16693,15 @@ fn render_views_keep_product_and_completed_image_framing_through_focus_changes()
     let model_camera = h.app.cam;
     let first_camera = Camera { yaw: 0.4, fov: 0.0, ..model_camera };
     let second_camera = Camera { yaw: 1.2, fov: 0.6, ..model_camera };
+    // Setup only: each Render view is left with its own lens and the projection option that goes
+    // with it (as a user leaves it), so a hidden card paints the lens it was left with.
+    for (id, camera) in [(first, first_camera), (second, second_camera)] {
+        assert!(crate::documents::view_activate(&mut h.app, id));
+        h.app.cam = camera;
+        h.app.ui.perspective = camera.fov > 0.0;
+        assert!(crate::documents::view_activate(&mut h.app, model));
+    }
+    assert_eq!(h.app.cam, model_camera);
     h.app.docs.views.set_spec(first, solidcraft_viewport::ViewSpec::new(first_camera));
     h.app.docs.views.set_spec(second, solidcraft_viewport::ViewSpec::new(second_camera));
 

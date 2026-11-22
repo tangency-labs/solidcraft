@@ -507,7 +507,7 @@ pub const SECTIONS: &[Section] = &[
         promoted: 1,
         ids: &["drawing.views.align", "drawing.view.move_to_sheet.planned", "drawing.view.copy_to_sheet.planned"],
     },
-    Section { tab: "DRAWING LAYOUT", panel: "INSERT", promoted: 3, ids: &["drawing.image", "drawing.sketch.create", "drawing.hatch"] },
+    Section { tab: "DRAWING LAYOUT", panel: "INSERT", promoted: 3, ids: &["drawing.image", "drawing.sheet_sketch", "drawing.hatch"] },
     Section {
         tab: "DRAWING ANNOTATE",
         panel: "MEASURE",

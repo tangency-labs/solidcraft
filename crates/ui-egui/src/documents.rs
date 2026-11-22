@@ -1121,7 +1121,17 @@ pub(crate) fn with_view_look<T>(app: &mut SolveApp, id: u64, draw: impl FnOnce(&
         return out;
     }
     let shown = (app.cam, app.session.inspect());
-    let mut look = app.docs.navigation.remove(&id).unwrap_or_else(|| ViewLook::from_ui(&app.ui));
+    let mut look = app.docs.navigation.remove(&id).unwrap_or_else(|| {
+        let mut look = ViewLook::from_ui(&app.ui);
+        // A Render view never shown yet starts with the projection of its own saved lens, as a
+        // restored one does, so painting it does not re-project that lens to the app options.
+        if view.kind == ViewKind::Render
+            && let Some(spec) = view.spec
+        {
+            look.options.perspective = spec.camera.fov > 0.0;
+        }
+        look
+    });
     look.swap(app);
     show_look(app, &view);
     let previous_compass = app.viewport.compass_view.replace(id);
@@ -5242,10 +5252,14 @@ mod tests {
         };
         let model = ("model".to_owned(), "Model".to_owned(), true);
         assert_eq!(list(&mut h), std::slice::from_ref(&model), "a new design has its Model view only");
+        // Setup only: drawing.create refuses an empty design ("nothing to draw yet"), so the drawing needs a body to show.
+        h.app.run("solid.box", json!({"length": 10, "width": 10, "height": 10})).unwrap();
         h.app.run("drawing.create", json!({})).unwrap();
         let drawing = h.app.session.drawing("drawing.inspect").unwrap();
         let subject = crate::sheet_views::subject(drawing.id, drawing.sheets[0].id);
         h.app.run("drawing.close", json!({})).unwrap();
+        // Setup only: the box and drawing made the design unsaved, and closing an unsaved design asks first; Ctrl+Shift+W below closes it outright.
+        h.app.session.mark_saved();
         let opened = call(&mut h, "tab.view.open", json!({"kind": "sheet", "subject": subject}));
         assert_eq!(opened["ok"], true, "{opened}");
         let sheet = opened["result"]["id"].as_u64().unwrap();
