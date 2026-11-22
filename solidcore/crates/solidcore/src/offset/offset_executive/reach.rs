@@ -2885,7 +2885,13 @@ pub fn local_extension_reach(
                         PlanePair::Line => (
                             hull(&|x| line_distance(x, a, c))?,
                             false,
-                            plane_crossing_override(k, b, [own_face, other_face], tangent_sine, tolerance)?,
+                            plane_crossing_override(
+                                k,
+                                b,
+                                [own_face, other_face],
+                                tangent_sine,
+                                tolerance,
+                            )?,
                         ),
                         PlanePair::One => (hull(&|x| plane_distance(x, a))?, false, false),
                         PlanePair::Apart => (0.0, true, false),
