@@ -248,8 +248,10 @@ pub fn app_bar(app: &mut SolveApp, ui: &mut egui::Ui) {
                 let keys = keys.iter().map(|key| crate::ui_kit::chord_label(key)).collect::<Vec<_>>().join(", ");
                 if shown { format!("{label} ({keys})") } else { solidcraft_ui_text::format("ui.needs_design", &[("command", label)]) }
             };
-            let (save_tip, undo_tip, redo_tip) =
-                (tip("ui.save", &["Ctrl+S"]), tip("ui.undo", &["Ctrl+Z"]), tip("ui.redo", &["Ctrl+Y", "Ctrl+Shift+Z"]));
+            let (undo_keys, redo_keys) = (crate::keymap::keys(app, "edit.undo"), crate::keymap::keys(app, "edit.redo"));
+            let (undo_keys, redo_keys): (Vec<&str>, Vec<&str>) =
+                (undo_keys.iter().map(String::as_str).collect(), redo_keys.iter().map(String::as_str).collect());
+            let (save_tip, undo_tip, redo_tip) = (tip("ui.save", &["Ctrl+S"]), tip("ui.undo", &undo_keys), tip("ui.redo", &redo_keys));
             let prefs_tip = if cfg!(target_os = "macos") {
                 format!("{} (Cmd+,)", app.tr("ui.preferences"))
             } else {
@@ -3028,14 +3030,19 @@ pub fn shortcuts(app: &mut SolveApp, ctx: &egui::Context) {
                         drop(app.run("tab.view.close", json!({})));
                     }
                 }
-                // Ctrl+Shift+Z redoes like Ctrl+Y (#12902): it used to fall into Undo, Shift ignored.
-                Key::Z if mods.shift => drop(app.run("edit.redo", json!({}))),
-                Key::Z => {
-                    if !crate::tools::undo_spline_point(app) {
-                        drop(app.run("edit.undo", json!({})));
+                // Undo and Redo run from whatever keys they are bound to (Ctrl+Z, Ctrl+Y and
+                // Ctrl+Shift+Z by default, #12902): the exact chord decides, so a rebound or
+                // removed key never falls into the other one.
+                Key::Z | Key::Y => {
+                    let key = crate::keymap::key_name(k, mods);
+                    if crate::keymap::commands_for(app, &key).contains(&"edit.undo") && crate::tools::undo_spline_point(app) {
+                        continue;
+                    }
+                    match crate::keymap::command_for(app, &key) {
+                        Some(id @ ("edit.undo" | "edit.redo")) => drop(app.run(id, json!({}))),
+                        _ => crate::keymap::press(app, &key, repeat),
                     }
                 }
-                Key::Y => drop(app.run("edit.redo", json!({}))),
                 // Copy, Cut and Paste, and Paste New with Shift (`edit_clipboard::handle`).
                 Key::C | Key::X if !mods.shift && !mods.alt => {}
                 Key::V if !mods.alt => {}
