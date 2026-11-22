@@ -319,8 +319,8 @@ fn field(key: &str, property: &Value, required: bool) -> Option<(Field, Input)> 
         }
         "boolean" => (Kind::Boolean, Input::Boolean(default.and_then(Value::as_bool).unwrap_or(false))),
         "string" if choice => {
-            let (values, titles, pictures) = choices(p)?;
-            images = pictures;
+            let (values, titles, listed) = choices(p)?;
+            images = listed;
             let named = |key: &str| -> Vec<Option<String>> {
                 p.get("oneOf")
                     .and_then(Value::as_array)
