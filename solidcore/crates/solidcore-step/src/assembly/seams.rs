@@ -1661,10 +1661,16 @@ impl Assembly<'_> {
                 if from == la { (k, at) } else { (at, k) }
             }
             None => {
-                let middle = blocked
+                let widest = blocked
                     .as_ref()
                     .and_then(Blocked::widest_clear)
                     .ok_or_else(|| unsupported("a band whose other loops leave its seam no angle"))?;
+                // The middle of the widest clear range is only as exact as the arcs round it, which
+                // are the loops' own rounding wide: a seam there lies a hair off the quarter line
+                // its frame has nearby (beyond what the form's range takes as on it), and a face
+                // whose loops a hole crosses over reads as the wrong solid. Where a quarter line
+                // is clear with room to spare, the seam is on it.
+                let middle = blocked.as_ref().map_or(widest, |b| b.on_quarter_line(widest, offset));
                 let target = middle + offset;
                 let (ea, ta, pa) = self.meets(&a_es, d, target, ax.period, eval)?.ok_or_else(|| unsupported("a band whose bounds share no angle"))?;
                 let (eb, tb, pb) = self.meets(&b_es, d, target, ax.period, eval)?.ok_or_else(|| unsupported("a band whose bounds share no angle"))?;
@@ -2533,6 +2539,42 @@ impl Blocked {
     /// `angle` is outside every arc.
     pub(crate) fn clear(&self, angle: f64) -> bool {
         self.arcs.iter().all(|[a, b]| (angle - a).rem_euclid(TAU) > b - a)
+    }
+
+    /// How far `angle` is from the nearest arc (nothing at all if it is inside one); a half turn
+    /// where there are no arcs.
+    fn room(&self, angle: f64) -> f64 {
+        self.arcs
+            .iter()
+            .map(|[a, b]| {
+                let along = (angle - a).rem_euclid(TAU);
+                if along <= b - a { 0.0 } else { (along - (b - a)).min(TAU - along) }
+            })
+            .fold(PI, f64::min)
+    }
+
+    /// `middle` (an angle about the axis, the middle of the widest clear range) moved onto the
+    /// nearest quarter line of the surface's frame, where `offset` is the surface's parameter less
+    /// the frame's angle, that has at least half the room `middle` has; `middle` itself where no
+    /// quarter line does, or where no arc blocks any angle.
+    fn on_quarter_line(&self, middle: f64, offset: f64) -> f64 {
+        if self.arcs.is_empty() {
+            return middle;
+        }
+        let room = self.room(middle);
+        let mut best: Option<(f64, f64)> = None;
+        for k in 0..4 {
+            let angle = f64::from(k) * FRAC_PI_2 - offset;
+            let here = self.room(angle);
+            if !(here > 0.0 && here >= 0.5 * room) {
+                continue;
+            }
+            let away = wrap_by(angle - middle, TAU).abs();
+            if best.is_none_or(|(nearest, _)| away < nearest) {
+                best = Some((away, angle));
+            }
+        }
+        best.map_or(middle, |(_, angle)| angle)
     }
 
     /// The middle of the widest range of angles no arc reaches, if any is left (with no arcs,

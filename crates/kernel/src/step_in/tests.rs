@@ -5610,3 +5610,122 @@ fn a_cap_whose_rim_is_one_closed_edge_measures_its_whole_volume() {
     // The hemisphere: 2 pi R^3 / 3.
     assert_closed_solid(&text, 2, 2.0 * std::f64::consts::PI * 100.0_f64.powi(3) / 3.0);
 }
+
+/// #20551: a rod across which a bore passes, its two rims written as closed splines through the
+/// exact intersection of the two cylinders (the entry rim two edges, the exit rim one closed edge
+/// whose vertex is part-way round its curve), the rod's two circles starting on the seam of its
+/// cylinder face. The seam the importer gives that face runs where no rim reaches, in the
+/// middle of the widest such gap, which a rim written a hair off its true place (the bore's axis
+/// a few nano-radians off the rod's x axis, as a fitted curve is) leaves a hair off a quarter
+/// line of the cylinder's frame. Read before the fix, such a seam left the face's box a hair past
+/// one turn and the solid closed with a fraction of its volume (875 mm3 for 61819 mm3).
+#[test]
+fn a_rod_with_a_cross_bore_whose_rims_are_splines_imports_its_whole_volume() {
+    use std::f64::consts::{FRAC_PI_2, PI, TAU};
+    let (radius, bore, half) = (15.0_f64, 10.0_f64, 50.0_f64);
+    // The rod less the bore: pi r^2 (2 half) less 4 times the integral over y of the bore's height
+    // and the rod's length at y, with y = bore sin(phi), by Simpson's rule.
+    let steps = 20_000;
+    let h = PI / f64::from(steps);
+    let f = |phi: f64| bore * bore * phi.cos().powi(2) * (radius * radius - bore * bore * phi.sin().powi(2)).sqrt();
+    let mut integral = f(-FRAC_PI_2) + f(FRAC_PI_2);
+    for k in 1..steps {
+        integral += f(-FRAC_PI_2 + f64::from(k) * h) * if k % 2 == 1 { 4.0 } else { 2.0 };
+    }
+    let want = PI * radius * radius * 2.0 * half - 4.0 * integral * h / 3.0;
+    // The bore's axis turned by `eps` about the rod's, and where the exit rim's curve starts.
+    for (eps, start) in [(0.0, 1.0), (1.5e-8, 1.0), (-1.5e-8, 1.0), (1.5e-8, PI), (1.5e-8, 4.0)] {
+        let (sin, cos) = f64::sin_cos(eps);
+        let (along, across) = ([cos, sin, 0.0], [-sin, cos, 0.0]);
+        let reach = |t: f64| (radius * radius - bore * bore * t.cos().powi(2)).sqrt();
+        // The rim at the bore's angle `t`, on the side `s` (+1 the entry, -1 the exit), and its rate.
+        let point = |s: f64, t: f64| {
+            let (x, y, z) = (s * reach(t), bore * t.cos(), bore * t.sin());
+            [x * along[0] + y * across[0], x * along[1] + y * across[1], z]
+        };
+        let rate = |s: f64, t: f64| {
+            let (x, y, z) = (s * bore * bore * t.cos() * t.sin() / reach(t), -bore * t.sin(), bore * t.cos());
+            [x * along[0] + y * across[0], x * along[1] + y * across[1], z]
+        };
+        let mut e = Entities::default();
+        // A closed rim, or half of one, as cubic Bezier pieces joined with the exact rate.
+        let spline = |e: &mut Entities, s: f64, t0: f64, t1: f64, closed: bool| -> usize {
+            let pieces = (((t1 - t0) / TAU * 90.0).round() as usize).max(2);
+            let at = |i: usize| t0 + (t1 - t0) * i as f64 / pieces as f64;
+            let mut poles = vec![point(s, t0)];
+            for i in 0..pieces {
+                let (a, b) = (at(i), at(i + 1));
+                let step = (b - a) / 3.0;
+                let (p, q) = (rate(s, a), rate(s, b));
+                let (from, to) = (point(s, a), point(s, b));
+                poles.push([from[0] + p[0] * step, from[1] + p[1] * step, from[2] + p[2] * step]);
+                poles.push([to[0] - q[0] * step, to[1] - q[1] * step, to[2] - q[2] * step]);
+                poles.push(to);
+            }
+            if closed && let (Some(first), Some(last)) = (poles.first().copied(), poles.last_mut()) {
+                *last = first;
+            }
+            let ids: Vec<String> =
+                poles.iter().map(|p| format!("#{}", e.add(format!("CARTESIAN_POINT('',({:?},{:?},{:?}))", p[0], p[1], p[2])))).collect();
+            let mults: Vec<&str> = (0..=pieces).map(|i| if i == 0 || i == pieces { "4" } else { "3" }).collect();
+            let knots: Vec<String> = (0..=pieces).map(|i| format!("{:?}", at(i))).collect();
+            e.add(format!(
+                "B_SPLINE_CURVE_WITH_KNOTS('',3,({}),.UNSPECIFIED.,.F.,.F.,({}),({}),.UNSPECIFIED.)",
+                ids.join(","),
+                mults.join(","),
+                knots.join(",")
+            ))
+        };
+        let ring = |e: &mut Entities, z: f64| {
+            let a = e.axis([0.0, 0.0, z], [0.0, 0.0, 1.0], [1.0, 0.0, 0.0]);
+            let c = e.add(format!("CIRCLE('',#{a},{radius:?})"));
+            let v = e.vertex([radius, 0.0, z]);
+            e.add(format!("EDGE_CURVE('',#{v},#{v},#{c},.T.)"))
+        };
+        let (low, high) = (ring(&mut e, -half), ring(&mut e, half));
+        // The entry rim from the bore's top to its bottom and back, the exit rim all the way round
+        // from its vertex at the bore's angle PI.
+        let (top, bottom) = (e.vertex(point(1.0, FRAC_PI_2)), e.vertex(point(1.0, 3.0 * FRAC_PI_2)));
+        let (front, back) = (spline(&mut e, 1.0, FRAC_PI_2, 3.0 * FRAC_PI_2, false), spline(&mut e, 1.0, 3.0 * FRAC_PI_2, 5.0 * FRAC_PI_2, false));
+        let entry_front = e.add(format!("EDGE_CURVE('',#{top},#{bottom},#{front},.T.)"));
+        let entry_back = e.add(format!("EDGE_CURVE('',#{bottom},#{top},#{back},.T.)"));
+        let exit_vertex = e.vertex(point(-1.0, PI));
+        let exit_curve = spline(&mut e, -1.0, start, start + TAU, true);
+        let exit = e.add(format!("EDGE_CURVE('',#{exit_vertex},#{exit_vertex},#{exit_curve},.T.)"));
+        let bound = |e: &mut Entities, uses: &[(usize, bool)]| -> usize {
+            let oes: Vec<String> =
+                uses.iter().map(|&(x, o)| format!("#{}", e.add(format!("ORIENTED_EDGE('',*,*,#{x},.{}.)", if o { "T" } else { "F" })))).collect();
+            let l = e.add(format!("EDGE_LOOP('',({}))", oes.join(",")));
+            e.add(format!("FACE_BOUND('',#{l},.T.)"))
+        };
+        let face = |e: &mut Entities, bounds: &[usize], surface: usize, same: bool| -> usize {
+            let list: Vec<String> = bounds.iter().map(|b| format!("#{b}")).collect();
+            e.add(format!("ADVANCED_FACE('',({}),#{surface},.{}.)", list.join(","), if same { "T" } else { "F" }))
+        };
+        // The rod's wall, bounded by its two circles and both rims, none of them the file's outer bound.
+        let wall_axis = e.axis([0.0, 0.0, 0.0], [0.0, 0.0, 1.0], [1.0, 0.0, 0.0]);
+        let wall = e.add(format!("CYLINDRICAL_SURFACE('',#{wall_axis},{radius:?})"));
+        let bounds = [
+            bound(&mut e, &[(low, true)]),
+            bound(&mut e, &[(high, false)]),
+            bound(&mut e, &[(entry_back, false), (entry_front, false)]),
+            bound(&mut e, &[(exit, true)]),
+        ];
+        let rod = face(&mut e, &bounds, wall, true);
+        let a = e.axis([0.0, 0.0, -half], [0.0, 0.0, -1.0], [1.0, 0.0, 0.0]);
+        let plane = e.add(format!("PLANE('',#{a})"));
+        let b = bound(&mut e, &[(low, false)]);
+        let bottom_face = face(&mut e, &[b], plane, true);
+        let a = e.axis([0.0, 0.0, half], [0.0, 0.0, 1.0], [1.0, 0.0, 0.0]);
+        let plane = e.add(format!("PLANE('',#{a})"));
+        let b = bound(&mut e, &[(high, true)]);
+        let top_face = face(&mut e, &[b], plane, true);
+        // The bore's wall, its normal pointing into the bore.
+        let bore_axis = e.axis([0.0, 0.0, 0.0], [along[0], along[1], 0.0], [across[0], across[1], 0.0]);
+        let bore_wall = e.add(format!("CYLINDRICAL_SURFACE('',#{bore_axis},{bore:?})"));
+        let bounds = [bound(&mut e, &[(entry_front, true), (entry_back, true)]), bound(&mut e, &[(exit, false)])];
+        let hole = face(&mut e, &bounds, bore_wall, false);
+        let text = e.solid(&[rod, bottom_face, top_face, hole]);
+        assert_closed_solid(&text, 4, want);
+    }
+}
