@@ -33,6 +33,8 @@
 //! | [`BlendFailure::OverflowInputMissing`] | [`ErrorKind::Missing`]: neither defect nor refusal |
 //! | [`BlendFailure::OverflowPointDoesNotDrop`], [`BlendFailure::NoBlendedEdgeNearExtension`] | [`ErrorKind::NotFound`] (2) |
 //! | [`BlendFailure::ExtensionEndOnTwoSideLines`] | [`ErrorKind::Unsupported`] (5) |
+//! | [`BlendFailure::KeptFeatureNotBuilt`] | its stop's kind ([`KeepStop`]): [`ErrorKind::NotFound`] (2), [`ErrorKind::Unsupported`] (5) or [`ErrorKind::Failed`] (6) |
+//! | [`BlendFailure::CreaseTrimNotBuilt`] | its stop's kind ([`CreaseTrimStop`]): [`ErrorKind::NotFound`] (2), [`ErrorKind::Degenerate`] (3), [`ErrorKind::Unsupported`] (5) or [`ErrorKind::Failed`] (6) |
 //! | the phrase causes ([`BlendFailure::Failed`], [`BlendFailure::Missing`], ...) | their status's kind, as before the record; neither defect nor refusal |
 //!
 //! **Statuses.** Each failure also records, for difftest and the goldens only, the status
@@ -44,7 +46,7 @@
 //! |----------------------------------------|-----------------------------------|
 //! | [`BlendFailure::NoRoom`], [`BlendFailure::RemovalRefused`], [`BlendFailure::StationDidNotConverge`], [`BlendFailure::TrimLoopOpen`], [`BlendFailure::TrimLoopDoesNotSeparate`], [`BlendFailure::StageFailed`], [`BlendFailure::Defect`], [`BlendFailure::SkinPastStationCap`], [`BlendFailure::SkinMeasureNotFinite`], [`BlendFailure::BallsNest`], [`BlendFailure::CreasePieceEndUnbuildable`], [`BlendFailure::PlaneCurveTouches`], [`BlendFailure::PlaneCurveEndOff`], [`BlendFailure::PlaneCurveLeavesDomain`], [`BlendFailure::PlaneCurveStepVanished`], [`BlendFailure::PlaneCurveFitCap`] | `SM_ERR` |
 //! | [`BlendFailure::Failed`], [`BlendFailure::LawIntervalEmpty`], [`BlendFailure::LawHasNoValue`], [`BlendFailure::FilletCrossesItself`], [`BlendFailure::CornerRefused`], [`BlendFailure::ExecutiveStepFailed`] | `SM_ERR` |
-//! | [`BlendFailure::OverflowPointDoesNotDrop`], [`BlendFailure::ExtensionEndOnTwoSideLines`], [`BlendFailure::NoBlendedEdgeNearExtension`] | `SM_ERR` |
+//! | [`BlendFailure::OverflowPointDoesNotDrop`], [`BlendFailure::ExtensionEndOnTwoSideLines`], [`BlendFailure::NoBlendedEdgeNearExtension`], [`BlendFailure::KeptFeatureNotBuilt`], [`BlendFailure::CreaseTrimNotBuilt`] | `SM_ERR` |
 //! | [`BlendFailure::Missing`], [`BlendFailure::BandInputMissing`], [`BlendFailure::VariableRadiusLawsNotGiven`], [`BlendFailure::BevelVertexNotFilleted`], [`BlendFailure::EdgeWithoutCurve`], [`BlendFailure::SequenceCurveNotBSpline`], [`BlendFailure::OverflowInputMissing`] | `SM_ERR_NULL_POINTER` |
 //! | [`BlendFailure::InvalidValue`], the fillet executive's other checks of the caller's arguments | `SM_ERR_INVALID_INPUT` |
 //! | [`BlendFailure::Inconsistent`]         | `SM_ERR_ASSERT_FAILURE`           |
@@ -396,6 +398,15 @@ pub enum BlendFailure {
     /// side the blend takes off from is not known. An empty search ([`ErrorKind::NotFound`]);
     /// status `SM_ERR`.
     NoBlendedEdgeNearExtension,
+    /// A round kept round a feature standing in its band (the fork's `KeepFeaturesInBands`)
+    /// is not built ([`KeepStop`] says why, and gives the kind). The executive notes the
+    /// refusal in its error info as well; status `SM_ERR`.
+    KeptFeatureNotBuilt(KeepStop),
+    /// A blend trimmed at its creases (the fork's `TrimAtCreases`, the bound of its open ends
+    /// included) is not built for a reason with no blend-too-large reason
+    /// ([`CreaseTrimStop`] says why, and gives the kind). The executive notes the refusal in
+    /// its error info as well; status `SM_ERR`.
+    CreaseTrimNotBuilt(CreaseTrimStop),
     /// The routine could not continue, as the phrase says (for example "the fillet's law
     /// has no value at the base"). Upstream `return SE(SM_ERR)`. A phrase cause
     /// ([`BlendFailure::is_phrase`]).
@@ -510,6 +521,128 @@ impl OverflowInput {
             Self::EdgeEndVertex => "an edge a blend's overflow reads has no end vertex",
             Self::EdgeOtherVertex => {
                 "an edge a blend's overflow walks has no vertex at its other end"
+            }
+        }
+    }
+}
+
+/// Why a round kept round a feature is not built ([`BlendFailure::KeptFeatureNotBuilt`]),
+/// each with its kind ([`KeepStop::class`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum KeepStop {
+    /// The walls of a kept boss are not upright to the planar face it stands on: their
+    /// continuation down is not built ([`ErrorKind::Unsupported`]; noted `NotExact`).
+    WallsNotUpright,
+    /// The faces of a boss's walls swept down are not all copied into the sheet
+    /// ([`ErrorKind::Failed`]).
+    WallsNotAllCopied,
+    /// A kept boss's wall continued down meets no round ([`ErrorKind::NotFound`]; noted
+    /// `BadMerge`).
+    WallMeetsNoRound,
+    /// The kept round's rails and creases enclose no part of the body, or all of it
+    /// ([`ErrorKind::NotFound`]; noted `BadMerge`).
+    RoundNotClosed,
+    /// The kept round does not sew into the body as a manifold solid
+    /// ([`ErrorKind::Failed`]; noted `BadMerge`).
+    RoundNotSewn,
+}
+
+impl KeepStop {
+    /// The kind of the failure.
+    #[must_use]
+    pub const fn class(self) -> ErrorKind {
+        match self {
+            Self::WallsNotUpright => ErrorKind::Unsupported,
+            Self::WallMeetsNoRound | Self::RoundNotClosed => ErrorKind::NotFound,
+            Self::WallsNotAllCopied | Self::RoundNotSewn => ErrorKind::Failed,
+        }
+    }
+
+    const fn what(self) -> &'static str {
+        match self {
+            Self::WallsNotUpright => {
+                "a kept boss's walls are not upright to the planar face it stands on"
+            }
+            Self::WallsNotAllCopied => "not every face of a kept boss's walls continued is copied",
+            Self::WallMeetsNoRound => "a kept boss's wall continued down meets no round",
+            Self::RoundNotClosed => "a round kept round a feature does not close on the body",
+            Self::RoundNotSewn => "a round kept round a feature does not sew into the body",
+        }
+    }
+}
+
+/// Why a blend trimmed at its creases is not built ([`BlendFailure::CreaseTrimNotBuilt`]),
+/// each with its kind ([`CreaseTrimStop::class`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum CreaseTrimStop {
+    /// The filleted edge has no tangent at an open end's vertex, so no section through the
+    /// vertex ends the round there ([`ErrorKind::Degenerate`]).
+    NoSectionThroughEndVertex,
+    /// A piece of a blend past its faces lies on the body's boundary away from its creases
+    /// ([`ErrorKind::Unsupported`]; noted `BadMerge`).
+    PieceOnBoundaryAwayFromCreases,
+    /// A corner's face between blends that add and blends that take off material, past their
+    /// faces or at an open setback ([`ErrorKind::Unsupported`]; noted `CornerUnsupported`).
+    CornerBetweenAddingAndTaking,
+    /// A round's section end lies along an edge of the body its rail does not cut
+    /// ([`ErrorKind::Unsupported`]; noted `BadMerge`).
+    SectionEndAlongUncutEdge,
+    /// The trim takes off nothing round the blended edges ([`ErrorKind::NotFound`]; noted
+    /// `BadMerge`).
+    TakesOffNothing,
+    /// The creases and rails enclose no part of the body: the trim reaches every face
+    /// ([`ErrorKind::NotFound`]; noted `BadMerge`).
+    ReachesEveryFace,
+    /// A body edge moved onto a crease leaves geometry the trim does not take off
+    /// ([`ErrorKind::Failed`]; noted `BadMerge`).
+    MovedEdgeLeavesGeometry,
+    /// The trimmed sheet does not sew into the body as a manifold solid
+    /// ([`ErrorKind::Failed`]; noted `BadMerge`).
+    NotSewn,
+}
+
+impl CreaseTrimStop {
+    /// The kind of the failure.
+    #[must_use]
+    pub const fn class(self) -> ErrorKind {
+        match self {
+            Self::NoSectionThroughEndVertex => ErrorKind::Degenerate,
+            Self::PieceOnBoundaryAwayFromCreases
+            | Self::CornerBetweenAddingAndTaking
+            | Self::SectionEndAlongUncutEdge => ErrorKind::Unsupported,
+            Self::TakesOffNothing | Self::ReachesEveryFace => ErrorKind::NotFound,
+            Self::MovedEdgeLeavesGeometry | Self::NotSewn => ErrorKind::Failed,
+        }
+    }
+
+    const fn what(self) -> &'static str {
+        match self {
+            Self::NoSectionThroughEndVertex => {
+                "the filleted edge has no tangent at an open end's vertex, so no section ends \
+                 the round there"
+            }
+            Self::PieceOnBoundaryAwayFromCreases => {
+                "a blend past its faces lies on the body's boundary away from its creases"
+            }
+            Self::CornerBetweenAddingAndTaking => {
+                "a corner's face between blends that add and blends that take off material is \
+                 not built"
+            }
+            Self::SectionEndAlongUncutEdge => {
+                "a round's section end lies along an edge of the body that its rail does not cut"
+            }
+            Self::TakesOffNothing => "a blend past its faces takes off nothing round its edges",
+            Self::ReachesEveryFace => {
+                "a blend past its faces reaches every face of the body (its creases and rails \
+                 enclose no part of it)"
+            }
+            Self::MovedEdgeLeavesGeometry => {
+                "a body edge moved onto a blend's crease leaves geometry the trim does not take off"
+            }
+            Self::NotSewn => {
+                "a blend past its faces does not sew into the body along its creases and rails"
             }
         }
     }
@@ -781,6 +914,8 @@ impl BlendFailure {
             | Self::OverflowPointDoesNotDrop(_)
             | Self::ExtensionEndOnTwoSideLines
             | Self::NoBlendedEdgeNearExtension
+            | Self::KeptFeatureNotBuilt(_)
+            | Self::CreaseTrimNotBuilt(_)
             | Self::Failed(_) => SM_ERR,
             Self::Missing(_)
             | Self::BandInputMissing(_)
@@ -859,6 +994,8 @@ impl BlendFailure {
             Self::OverflowPointDoesNotDrop(_) | Self::NoBlendedEdgeNearExtension => {
                 ErrorKind::NotFound
             }
+            Self::KeptFeatureNotBuilt(stop) => stop.class(),
+            Self::CreaseTrimNotBuilt(stop) => stop.class(),
             Self::NoEdgesGiven
             | Self::SizeBelowResolution { .. }
             | Self::PerEdgeListLength { .. }
@@ -944,6 +1081,8 @@ impl BlendFailure {
             | Self::OverflowPointDoesNotDrop(_)
             | Self::ExtensionEndOnTwoSideLines
             | Self::NoBlendedEdgeNearExtension
+            | Self::KeptFeatureNotBuilt(_)
+            | Self::CreaseTrimNotBuilt(_)
             | Self::NotCertified { .. } => false,
             Self::Failed(_)
             | Self::Missing(_)
@@ -1012,6 +1151,8 @@ impl BlendFailure {
             | Self::OverflowPointDoesNotDrop(_)
             | Self::ExtensionEndOnTwoSideLines
             | Self::NoBlendedEdgeNearExtension
+            | Self::KeptFeatureNotBuilt(_)
+            | Self::CreaseTrimNotBuilt(_)
             | Self::Failed(_)
             | Self::Missing(_)
             | Self::InvalidValue(_)
@@ -1235,6 +1376,8 @@ impl core::fmt::Display for BlendFailure {
                 "{}: no blended edge takes the drop of the middle of an extension's chain",
                 self.class()
             ),
+            Self::KeptFeatureNotBuilt(stop) => write!(f, "{}: {}", self.class(), stop.what()),
+            Self::CreaseTrimNotBuilt(stop) => write!(f, "{}: {}", self.class(), stop.what()),
             Self::Failed(what)
             | Self::InvalidValue(what)
             | Self::BadIntersections(what)
@@ -2212,10 +2355,68 @@ mod tests {
         );
     }
 
+    /// #19825: each cause of a kept feature or a trim at the creases that is not built is no
+    /// phrase, replaces the status `SM_ERR` it keeps, has its stop's class (none a defect or
+    /// a refusal), and is worded with its class.
+    #[test]
+    fn the_kept_feature_and_crease_trim_causes_keep_their_status_and_class() {
+        let mut rows = Vec::new();
+        for (stop, class) in [
+            (KeepStop::WallsNotUpright, ErrorKind::Unsupported),
+            (KeepStop::WallsNotAllCopied, ErrorKind::Failed),
+            (KeepStop::WallMeetsNoRound, ErrorKind::NotFound),
+            (KeepStop::RoundNotClosed, ErrorKind::NotFound),
+            (KeepStop::RoundNotSewn, ErrorKind::Failed),
+        ] {
+            rows.push((BlendFailure::KeptFeatureNotBuilt(stop), class));
+        }
+        for (stop, class) in [
+            (
+                CreaseTrimStop::NoSectionThroughEndVertex,
+                ErrorKind::Degenerate,
+            ),
+            (
+                CreaseTrimStop::PieceOnBoundaryAwayFromCreases,
+                ErrorKind::Unsupported,
+            ),
+            (
+                CreaseTrimStop::CornerBetweenAddingAndTaking,
+                ErrorKind::Unsupported,
+            ),
+            (
+                CreaseTrimStop::SectionEndAlongUncutEdge,
+                ErrorKind::Unsupported,
+            ),
+            (CreaseTrimStop::TakesOffNothing, ErrorKind::NotFound),
+            (CreaseTrimStop::ReachesEveryFace, ErrorKind::NotFound),
+            (CreaseTrimStop::MovedEdgeLeavesGeometry, ErrorKind::Failed),
+            (CreaseTrimStop::NotSewn, ErrorKind::Failed),
+        ] {
+            rows.push((BlendFailure::CreaseTrimNotBuilt(stop), class));
+        }
+        for (cause, class) in rows {
+            assert!(!cause.is_phrase(), "{cause:?}");
+            assert!(cause.replaces_upstream_status(), "{cause:?}");
+            assert_eq!(cause.class(), class, "{cause:?}");
+            assert_eq!(cause.comparison_status(), SM_ERR, "{cause:?}");
+            let text = cause.to_string();
+            assert!(text.starts_with(&format!("{class}: ")), "{text}");
+            let error = SolidError::blend("blend::op", cause);
+            assert_eq!(error.kind(), class, "{error:?}");
+            assert_eq!(error.upstream_status(), Some(SM_ERR), "{error:?}");
+            assert!(!error.is_defect() && !error.is_refusal(), "{error:?}");
+        }
+        assert_eq!(
+            BlendFailure::CreaseTrimNotBuilt(CreaseTrimStop::NotSewn).to_string(),
+            "failed: a blend past its faces does not sew into the body along its creases and \
+             rails"
+        );
+    }
+
     /// The number of `BlendFailure` variants. Adding a variant means adding an arm to
     /// `variant_index_and_phrase_name` (the compiler asks for it), with the next index, and
     /// raising this number; the test below then fails until `causes` holds the new variant.
-    const VARIANTS: usize = 55;
+    const VARIANTS: usize = 57;
 
     /// Each variant's distinct index in `0..VARIANTS`, and the variant name of a phrase cause
     /// (`None` for any other cause). The match has no wildcard, so it is the inventory of
@@ -2277,6 +2478,8 @@ mod tests {
             BlendFailure::OverflowPointDoesNotDrop(_) => (52, None),
             BlendFailure::ExtensionEndOnTwoSideLines => (53, None),
             BlendFailure::NoBlendedEdgeNearExtension => (54, None),
+            BlendFailure::KeptFeatureNotBuilt(_) => (55, None),
+            BlendFailure::CreaseTrimNotBuilt(_) => (56, None),
         }
     }
 
@@ -2409,6 +2612,8 @@ mod tests {
             BlendFailure::OverflowPointDoesNotDrop(OverflowDrop::EdgePieceEndOntoEdge),
             BlendFailure::ExtensionEndOnTwoSideLines,
             BlendFailure::NoBlendedEdgeNearExtension,
+            BlendFailure::KeptFeatureNotBuilt(KeepStop::RoundNotSewn),
+            BlendFailure::CreaseTrimNotBuilt(CreaseTrimStop::NotSewn),
         ];
         let mut names = Vec::new();
         let mut indices = Vec::new();
