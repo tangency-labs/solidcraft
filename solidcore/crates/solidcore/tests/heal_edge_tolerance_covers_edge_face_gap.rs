@@ -693,6 +693,14 @@ fn corpus_mass(name: &str, lower: Option<(Tolerances<'_>, Tolerances<'_>)>) -> (
 /// points move, each by at most 1.86e-17 times its point's magnitude: below one unit
 /// roundoff of that magnitude, at rounding (MEASURED; the same test pins the net on a grid
 /// of `2^-44` of each point's magnitude).
+///
+/// `Fillet/sphere_plane.smb`'s rebuilding-read digest and `Solids/revolution_mold.smb`'s
+/// lazy-trims and rebuilding-read digests and area bits are #18490's: with upstream's
+/// fitted sphere NURB put back ([`with_fitted_spheres`]) the read drops the file's trims
+/// onto that sphere and rebuilds them, and #18490 subdivides the drop's spans that its
+/// enclosure proves off the curve, so those rebuilt sphere trims carry more control
+/// points (`revolution_mold`'s area, integrated over them, moves by 1 ulp). The as-read
+/// digests, which keep the file's NURB and trims, are unchanged.
 const MAIN: [(&str, [u64; 5]); 28] = [
     (
         "Fillet/blade_hub_1.smb",
@@ -859,7 +867,7 @@ const MAIN: [(&str, [u64; 5]); 28] = [
         [
             0xb3a46ba2e4d3817b,
             0x894d776ca5ba209d,
-            0xfea47f8f2838bbe2,
+            0xf6a7f474bf962518,
             0x40735d27cb8cc80f,
             0x7ff8000000000000,
         ],
@@ -968,9 +976,9 @@ const MAIN: [(&str, [u64; 5]); 28] = [
         "Solids/revolution_mold.smb",
         [
             0x462faca60ad813f0,
-            0x88a9396a602fe93c,
-            0x692f780f5f318bf3,
-            0x40d2a6a844e34874,
+            0xaf0de1993588154f,
+            0xc0352fed2c49b9a0,
+            0x40d2a6a844e34873,
             0x40f8a3124b22bf69,
         ],
     ),

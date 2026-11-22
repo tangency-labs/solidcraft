@@ -25,6 +25,16 @@ pub struct AssistantResult {}
 #[schemars(deny_unknown_fields)]
 pub struct AppBarResetParams {}
 
+/// Validate access to the app-owned editor. Only an interactive start toggles its tray.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[schemars(deny_unknown_fields)]
+pub struct AppBarCustomizeParams {}
+
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct AppBarCustomizeResult {
+    pub available: bool,
+}
+
 /// Validated reset request; the connected app applies it to its toolbar preferences.
 #[derive(Debug, Serialize, JsonSchema)]
 pub struct AppBarResetResult {
@@ -1617,6 +1627,23 @@ mod tests {
     use crate::{PickMode, Session};
 
     #[test]
+    fn app_bar_customize_has_an_empty_contract_and_typed_reply() {
+        let spec = crate::find_command("ui.appBarCustomize").unwrap();
+        let contract = spec.contract.unwrap();
+        assert!(contract.allowed_keys().is_empty());
+        assert!(contract.check(&json!({})).is_empty());
+        for input in [json!({"open":true}), json!([]), json!(false), json!(5), json!("customize")] {
+            assert!(!contract.check(&input).is_empty(), "{input}");
+        }
+        let mut session = Session { param_check: ParamCheck::Strict, ..Session::default() };
+        assert!(session.execute(spec.id, &json!({"open":true})).is_err());
+        let reply = session.execute(spec.id, &json!({})).unwrap();
+        let output = spec.output.unwrap()();
+        assert_eq!(reply, json!({"available":true}));
+        assert!(conforms(output.as_value(), output.as_value(), &reply));
+    }
+
+    #[test]
     fn app_bar_reset_has_an_empty_contract_and_a_typed_reply() {
         let spec = crate::find_command("ui.appBarReset").unwrap();
         let contract = spec.contract.unwrap();
@@ -1638,6 +1665,7 @@ mod tests {
 
     #[test]
     fn schemas_and_the_key_check_agree() {
+        assert_keys(input_schema_for::<super::AppBarCustomizeParams>(), &[]);
         assert_keys(input_schema_for::<super::AppBarResetParams>(), &[]);
         assert_keys(input_schema_for::<RepeatParams>(), &[]);
         assert_keys(input_schema_for::<AssistantParams>(), &[]);

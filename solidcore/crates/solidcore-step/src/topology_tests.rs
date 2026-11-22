@@ -1032,6 +1032,52 @@ fn rising_quarters(w: &mut W, r: f64, from: f64, z: f64, rise: f64, pieces: usiz
     (curve, [at(0), at(2 * pieces)])
 }
 
+/// A cylinder strip between two rational-quadratic helices, 24 turns of pitch 1.25 mm
+/// and 0.5 mm apart. The context's 0.1 mm uncertainty is much coarser than the 0.001 mm
+/// pcurve construction tolerance. Counting at the source tolerance can miss the splits
+/// needed by the tighter fit; count and construct at the same tolerance instead.
+#[test]
+fn a_long_wound_rational_edge_with_coarse_accuracy_is_split_for_its_pcurve_fit() {
+    use crate::assembly::MAX_SPLINE_POINTS;
+    let mut w = W::default();
+    let (radius, rise, pieces) = (4.2, 1.25 / 4.0, 96);
+    let (low_curve, [low_start, low_end]) = rising_quarters(&mut w, radius, 0.0, 0.0, rise, pieces);
+    let (high_curve, [high_start, high_end]) = rising_quarters(&mut w, radius, 0.0, 0.5, rise, pieces);
+    let (ls, le, hs, he) = (w.vertex(low_start), w.vertex(low_end), w.vertex(high_start), w.vertex(high_end));
+    let low = w.add(format!("EDGE_CURVE('',#{ls},#{le},#{low_curve},.T.)"));
+    let high = w.add(format!("EDGE_CURVE('',#{hs},#{he},#{high_curve},.T.)"));
+    let start = w.line_edge((ls, low_start), (hs, high_start), true, 1.0);
+    let end = w.line_edge((le, low_end), (he, high_end), true, 1.0);
+    let axis = w.axis([0.0; 3], [0.0, 0.0, 1.0], [1.0, 0.0, 0.0]);
+    let cylinder = w.add(format!("CYLINDRICAL_SURFACE('',#{axis},{})", real(radius)));
+    let uses = [(low, true), (end, true), (high, false), (start, false)].map(|(e, forward)| w.oe(e, forward));
+    let bound = w.bound(&uses, true, true);
+    let face = w.face(&[bound], cylinder, true);
+    let shell = w.add(format!("OPEN_SHELL('',(#{face}))"));
+    let model = w.add(format!("SHELL_BASED_SURFACE_MODEL('wound strip',(#{shell}))"));
+    // one_solid asserts that import has no refusals and validates the complete record.
+    let s = one_solid(&w.file_with_uncertainty(&[model], 0.1));
+    assert!(s.sheet);
+    assert_eq!(s.brep.tolerance, 0.1);
+    assert_eq!(s.brep.faces.len(), 1);
+    assert!(s.notes.iter().any(|n| n.contains("edges of faces that wind round their axis split")), "{:?}", s.notes);
+    assert!(s.brep.edges.len() > 4, "the long helices need splitting at their construction tolerance");
+    assert!(s.brep.edges.iter().any(|e| matches!(e.curve, BCurve::RationalSpline { .. })));
+    let mut pcurves = 0;
+    for l in &s.brep.faces[0].loops {
+        let Loop::Edges { edges } = l else { panic!("edge loop") };
+        for u in edges {
+            let points = match &u.pcurve {
+                Curve2::Spline { points, .. } => points.len(),
+                Curve2::RationalSpline { homogeneous, .. } => homogeneous.len(),
+            };
+            assert!(points <= MAX_SPLINE_POINTS, "edge {}: {points} pcurve control points", u.edge);
+            pcurves += 1;
+        }
+    }
+    assert_eq!(pcurves, s.brep.edges.len(), "every split edge keeps its pcurve");
+}
+
 /// A thread's crest in a bore: one cylinder face (radius 5) from a circle at z = 0 up to a rim at
 /// z = 8, less the thread's groove, 1 high, which starts at a wall along the axis from z = 2 to 3
 /// and winds a turn and a half up (4 a turn) to run out through the rim. The face's second loop
@@ -3959,4 +4005,286 @@ fn restarted_curve_errors_keep_their_step_messages() {
     assert_eq!(crate::kernel::restart_curve(&closed, 0.).unwrap_err(), "spline restart outside the open domain");
     let open = BCurve::Polyline { points: vec![[0.; 3], [1.; 3], [2.; 3]] };
     assert_eq!(crate::kernel::restart_curve(&open, 0.5).unwrap_err(), "spline seam endpoints do not coincide");
+}
+
+/// The unit box's top is the spline S(u,v) = (u, v + 0.016 u(1-u), 1). Its
+/// horizontal edges have quadratic pcurves v = y - 0.016 u(1-u). A straight pcurve
+/// between their ends misses the edge by 0.004 mm, inside half a 0.01 mm source uncertainty
+/// but outside half the importer's default precision. Supply the exact quadratic when asked.
+struct ParabolicTrims(std::sync::atomic::AtomicUsize);
+
+impl Trims for ParabolicTrims {
+    fn trims(&self, face: &TrimFace<'_>) -> std::result::Result<Vec<Vec<Curve2>>, String> {
+        assert!(face.tolerance <= DEFAULT_TOLERANCE);
+        let mut out = Vec::new();
+        for l in &face.loops {
+            let mut pcs = Vec::new();
+            for u in l {
+                if let Some(pc) = &u.pcurve {
+                    pcs.push(pc.clone());
+                    continue;
+                }
+                self.0.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                let e = &face.edges[u.edge as usize];
+                assert!(e.tolerance <= DEFAULT_TOLERANCE);
+                let curve = CurveEval::new(e.nurbs.unwrap_or(e.curve)).unwrap();
+                let [a, z] = e.interval;
+                let inverse = |t| {
+                    let p = curve.point(t).unwrap();
+                    [p.x, p.y - 0.016 * p.x * (1.0 - p.x)]
+                };
+                let (p, m, q) = (inverse(a), inverse(0.5 * (a + z)), inverse(z));
+                // A quadratic Bezier's middle coefficient is 2 C(1/2) - (C(0)+C(1))/2.
+                pcs.push(Curve2::Spline { knots: vec![a, a, a, z, z, z], points: vec![p, [0, 1].map(|d| 2.0 * m[d] - 0.5 * (p[d] + q[d])), q] });
+            }
+            out.push(pcs);
+        }
+        Ok(out)
+    }
+}
+
+#[test]
+fn a_spline_face_imported_with_coarse_distance_accuracy_keeps_its_boundary() {
+    for uncertainty in [0.01, 0.005] {
+        let mut w = W::default();
+        let faces = box_faces(&mut w, [0.0; 3], [1.0; 3], BoxStyle::default(), &mut |_, _| Vec::new());
+        let top = w.s.lines().rfind(|l| l.contains("=PLANE(")).unwrap().to_string();
+        let id = top.split_once('=').unwrap().0;
+        let rows: Vec<String> = [(0.0, 0.0), (0.5, 0.008), (1.0, 0.0)]
+            .into_iter()
+            .map(|(x, bump)| {
+                let (a, z) = (w.pt([x, -0.016 + bump, 1.0]), w.pt([x, 1.0 + bump, 1.0]));
+                format!("(#{a},#{z})")
+            })
+            .collect();
+        let spline = format!(
+            "{id}=B_SPLINE_SURFACE_WITH_KNOTS('',2,1,({}),.UNSPECIFIED.,.F.,.F.,.F.,(3,3),(2,2),(0.,1.),(-0.016,1.),.UNSPECIFIED.);",
+            rows.join(",")
+        );
+        w.s = w.s.replace(&top, &spline);
+        let shell = closed_shell(&mut w, &faces);
+        let solid = w.add(format!("MANIFOLD_SOLID_BREP('spline box',#{shell})"));
+        let trims = ParabolicTrims(std::sync::atomic::AtomicUsize::new(0));
+        let read = read_solids_with(&w.file_with_uncertainty(&[solid], uncertainty), &trims);
+        assert!(read.failures.is_empty(), "{:?}", read.failures);
+        assert_eq!(read.solids.len(), 1);
+        let s = &read.solids[0];
+        assert!(!s.sheet);
+        assert_eq!(counts(&s.brep), [2, 1, 6, 12, 8]);
+        assert_eq!(s.brep.tolerance, uncertainty, "source tolerance is retained for accepting data");
+        assert!(trims.0.load(std::sync::atomic::Ordering::Relaxed) >= 2, "the horizontal boundaries need quadratic pcurves");
+        let f = s.brep.faces.iter().find(|f| matches!(f.surface, BSurface::Spline { .. })).unwrap();
+        let surface = SurfaceEval::new(f.parameters()).unwrap();
+        for l in &f.loops {
+            let Loop::Edges { edges } = l else { panic!("edge loop") };
+            for u in edges {
+                let e = &s.brep.edges[u.edge as usize];
+                let curve = CurveEval::new(e.parameters()).unwrap();
+                for k in 0..=16 {
+                    let t = e.interval[0] + (e.interval[1] - e.interval[0]) * f64::from(k) / 16.0;
+                    let q = solidcore_ops::pcurve::eval(&u.pcurve, t).unwrap();
+                    let gap = surface.point(q).unwrap().dist(curve.point(t).unwrap());
+                    assert!(gap < 1e-9, "accuracy {uncertainty}: the exact boundary lifts with gap {gap}");
+                }
+            }
+        }
+    }
+}
+
+/// A 20 × 30 × 10 mm block (mm, uncertainty 1e-6 mm) whose 12 edges are straight cubic Béziers
+/// on the knots (0, `span`), as Siemens NX writes them (`span` 1.020781457822e-7), and whose edge
+/// from (0, 0, 0) to (20, 0, 0) is split `split` mm from its start: a micro edge and the rest,
+/// both on that edge's curve, in its place in both its faces' loops.
+fn bezier_block(span: f64, split: f64) -> p21::Exchange {
+    let mut w = W::default();
+    let size = [20.0, 30.0, 10.0];
+    let corner = |i: usize| -> V {
+        let c = [[0, 0, 0], [1, 0, 0], [1, 1, 0], [0, 1, 0], [0, 0, 1], [1, 0, 1], [1, 1, 1], [0, 1, 1]][i];
+        [f64::from(c[0]) * size[0], f64::from(c[1]) * size[1], f64::from(c[2]) * size[2]]
+    };
+    let vs: Vec<u64> = (0..8).map(|i| w.vertex(corner(i))).collect();
+    let cut = w.vertex([split, 0.0, 0.0]);
+    let pairs = [(0, 1), (1, 2), (2, 3), (3, 0), (4, 5), (5, 6), (6, 7), (7, 4), (0, 4), (1, 5), (2, 6), (3, 7)];
+    let mut edges = Vec::new();
+    for (k, &(a, z)) in pairs.iter().enumerate() {
+        let (p, q) = (corner(a), corner(z));
+        let pts: Vec<u64> = (0..4)
+            .map(|j| {
+                let t = f64::from(j) / 3.0;
+                w.pt([p[0] + t * (q[0] - p[0]), p[1] + t * (q[1] - p[1]), p[2] + t * (q[2] - p[2])])
+            })
+            .collect();
+        let c = w.add(format!(
+            "B_SPLINE_CURVE_WITH_KNOTS('',3,({}),.UNSPECIFIED.,.F.,.F.,(4,4),(0.,{}),.PIECEWISE_BEZIER_KNOTS.)",
+            list(&pts),
+            real(span)
+        ));
+        if k == 0 {
+            edges.push(w.add(format!("EDGE_CURVE('',#{},#{cut},#{c},.T.)", vs[0])));
+            let rest = w.add(format!("EDGE_CURVE('',#{cut},#{},#{c},.T.)", vs[1]));
+            edges.push(rest);
+        } else {
+            edges.push(w.add(format!("EDGE_CURVE('',#{},#{},#{c},.T.)", vs[a], vs[z])));
+        }
+    }
+    // `edges[0]` is the micro edge and `edges[1]` the rest of that edge; the others follow.
+    let e = |k: usize| if k == 0 { 0 } else { k + 1 };
+    // Loops counter-clockwise seen from outside: (edge index into `pairs`, or 12 for the rest of
+    // edge 0; forward), then the plane's origin and normal.
+    let faces: [(&[(usize, bool)], V, V); 6] = [
+        (&[(3, false), (2, false), (1, false), (12, false), (0, false)], [0.0; 3], [0.0, 0.0, -1.0]),
+        (&[(4, true), (5, true), (6, true), (7, true)], [0.0, 0.0, 10.0], [0.0, 0.0, 1.0]),
+        (&[(0, true), (12, true), (9, true), (4, false), (8, false)], [0.0; 3], [0.0, -1.0, 0.0]),
+        (&[(1, true), (10, true), (5, false), (9, false)], [20.0, 0.0, 0.0], [1.0, 0.0, 0.0]),
+        (&[(2, true), (11, true), (6, false), (10, false)], [20.0, 30.0, 0.0], [0.0, 1.0, 0.0]),
+        (&[(3, true), (8, true), (7, false), (11, false)], [0.0, 30.0, 0.0], [-1.0, 0.0, 0.0]),
+    ];
+    let mut ids = Vec::new();
+    for (lp, o, n) in faces {
+        let oes: Vec<u64> = lp.iter().map(|&(k, fwd)| w.oe(edges[if k == 12 { 1 } else { e(k) }], fwd)).collect();
+        let bound = w.bound(&oes, true, true);
+        let x = if n[0] == 0.0 { [1.0, 0.0, 0.0] } else { [0.0, 1.0, 0.0] };
+        let plane = w.plane(o, n, x);
+        ids.push(w.face(&[bound], plane, true));
+    }
+    let shell = closed_shell(&mut w, &ids);
+    let solid = w.add(format!("MANIFOLD_SOLID_BREP('block',#{shell})"));
+    w.file_with_uncertainty(&[solid], 1e-6)
+}
+
+/// A micro edge cut from the start of a straight cubic Bézier whose knots span 1.02e-7 (Siemens
+/// NX writes both) lies on [0, 6.5e-15] of the file's parameter at 1.283e-6 mm: no more than the
+/// kernel's knot resolution (1e-12), so its trims' end knots were one and the kernel's check
+/// failed the block (and with a 1.26e-3 mm micro edge, [0, 6.4e-12], only 6.4 times it). Such a
+/// curve's parameter is rescaled where it is read, exactly, and every one of these blocks is the
+/// closed 6000 mm³ block the kernel's check passes, as with the knots (0, 20).
+#[test]
+fn a_micro_edge_on_a_bezier_with_a_tiny_knot_span_reads_as_the_block() {
+    for span in [20.0, 1.020781457822e-7] {
+        for split in [1.283e-6, 1.26e-3] {
+            let case = format!("knots (0, {span}), micro edge {split} mm");
+            let s = one_solid(&bezier_block(span, split));
+            assert!(!s.sheet, "{case}");
+            // The record as read, without the kernel's healer (which takes the split vertex off
+            // the straight edge): the kernel's check of the reader's own trims.
+            let (body, _) = solidcore_ops::body::Body::from_record(&s.brep, true).unwrap_or_else(|e| panic!("{case}: {e}"));
+            assert!(body.is_manifold_solid().unwrap(), "{case}");
+            let report = body.check(solidcore_ops::check::CheckLevel::All).unwrap();
+            assert!(report.is_valid(), "{case}: {report}");
+            assert_eq!(body.counts().unwrap(), [6, 13, 9], "{case}");
+            let mass = body.mass_properties(1e-9).unwrap();
+            assert!((mass.volume - 6000.0).abs() <= 1e-9 * 6000.0, "{case}: volume {}", mass.volume);
+            // Each edge's curve is its cubic with the file's control points, on the file's knots
+            // (0, 20) as written, and on (0, 1.02e-7) scaled by the least power of two at or above
+            // the curve's speed, its length L over the span (3 |P_{i+1} − P_i| / span, exact
+            // thirds); every edge then spans more than the knot resolution.
+            for e in &s.brep.edges {
+                let solidcore_record::brep::Curve::Spline { knots, points } = &e.curve else { panic!("{case}: {:?}", e.curve) };
+                let (Some(p0), Some(p3)) = (points.first(), points.last()) else { panic!("{case}") };
+                let length = ((p3[0] - p0[0]).powi(2) + (p3[1] - p0[1]).powi(2) + (p3[2] - p0[2]).powi(2)).sqrt();
+                let end = *knots.last().unwrap();
+                assert_eq!(&knots[..4], &[0.0; 4], "{case}");
+                assert!(knots[4..].iter().all(|k| *k == end), "{case}: {knots:?}");
+                if span == 20.0 {
+                    assert_eq!(end, 20.0, "{case}");
+                } else {
+                    let scale = end / span;
+                    assert_eq!(scale, 2f64.powi(scale.log2().round() as i32), "{case}: {knots:?}");
+                    let speed = length / span;
+                    assert!(scale >= speed && scale < 2.0 * speed * (1.0 + 1e-12), "{case}: {scale} for {speed}");
+                }
+                assert!(e.interval[1] - e.interval[0] > 1e-12, "{case}: {:?}", e.interval);
+            }
+        }
+    }
+}
+
+#[test]
+fn a_small_cylinder_imported_with_coarse_distance_accuracy_keeps_its_cylinder() {
+    for uncertainty in [0.01, 0.005] {
+        let mut w = W::default();
+        let (r, h) = (0.05, 0.1);
+        let c = cylinder(&mut w, [0.0; 2], r, [0.0, h]);
+        let wall = side(&mut w, &c, true);
+        let cap = |w: &mut W, k: usize| {
+            let plane = w.plane([0.0, 0.0, k as f64 * h], [0.0, 0.0, 1.0], [1.0, 0.0, 0.0]);
+            let oe = w.oe(c.circles[k], k == 1);
+            let bound = w.bound(&[oe], true, true);
+            w.face(&[bound], plane, k == 1)
+        };
+        let (bottom, top) = (cap(&mut w, 0), cap(&mut w, 1));
+        let shell = closed_shell(&mut w, &[bottom, wall, top]);
+        let solid = w.add(format!("MANIFOLD_SOLID_BREP('small cylinder',#{shell})"));
+        let s = one_solid(&w.file_with_uncertainty(&[solid], uncertainty));
+        assert!(!s.sheet);
+        assert_eq!(counts(&s.brep), [2, 1, 3, 3, 2]);
+        assert_eq!(s.brep.tolerance, uncertainty);
+        assert!(s.brep.faces.iter().any(|f| matches!(f.surface, BSurface::Cylinder { .. })));
+    }
+}
+
+/// A 2 um edge/plane gap inside a 10 um declaration still needs a 6 um allowance
+/// (SURFACE_GAP_MARGIN = 3), even though fitting new curves asks for only 1 um.
+#[test]
+fn a_measured_gap_smaller_than_source_uncertainty_keeps_its_pcurve_allowance() {
+    use crate::assembly::{Assembly, Bound, Kind};
+    let mut a = Assembly::new(0.01, None);
+    let points = [[0.0, 0.0, 0.002], [1.0, 0.0, 0.002], [1.0, 1.0, 0.002], [0.0, 1.0, 0.002]];
+    let vs: Vec<u32> = points.iter().map(|&p| a.add_vertex(p).unwrap()).collect();
+    let mut edges = Vec::new();
+    for k in 0..4 {
+        let next = (k + 1) % 4;
+        edges.push(a.add_edge(k as u64, BCurve::Line { start: points[k], end: points[next] }, [0.0, 1.0], [vs[k], vs[next]]).unwrap());
+    }
+    let plane = BSurface::Plane { origin: [0.0; 3], u_axis: [1.0, 0.0, 0.0], v_axis: [0.0, 1.0, 0.0] };
+    let f = a.add_face(1, plane, vec![Bound::Edges(edges)], Some(0), true).unwrap();
+    let s = a.finish(1, "offset boundary".into(), vec![vec![(f, true)]], Kind::Model).unwrap();
+    assert!(s.sheet);
+    assert_eq!(s.brep.tolerance, 0.01);
+    let f = &s.brep.faces[0];
+    let surface = SurfaceEval::new(f.parameters()).unwrap();
+    let Loop::Edges { edges } = &f.loops[0] else { panic!("edge loop") };
+    for u in edges {
+        let e = &s.brep.edges[u.edge as usize];
+        let curve = CurveEval::new(e.parameters()).unwrap();
+        let q = solidcore_ops::pcurve::eval(&u.pcurve, 0.5).unwrap();
+        let gap = surface.point(q).unwrap().dist(curve.point(0.5).unwrap());
+        assert!((gap - 0.002).abs() < 1e-12, "the source geometry keeps its real gap");
+        assert_eq!(e.tolerance, 0.01);
+    }
+}
+
+/// A cubic rational spline with 101 control points 10 mm apart along a 1000 mm line, weights
+/// alternating 1 and 0.9, on uniform knots over [0, 1]: its speed is about 1000, so a 5e-8 mm edge
+/// spans 5e-11 of its parameter, which the kernel resolves, and its knots stay the file's bit for
+/// bit. Its local bound is `3 · 1.9 · 50 / 0.9 / (3 / 98)`, about 1.0e4 (the box of the 6 points
+/// each derivative term spans, 50 mm); the whole curve's box (1000 mm) would give 2.1e5, past the
+/// threshold (5e4), and a 2^18 rescale it does not need. On [0, 1e-7] it is rescaled, exactly.
+#[test]
+fn a_rational_curve_that_resolves_its_edges_keeps_its_knots() {
+    let n = 101;
+    let homogeneous: Vec<[f64; 4]> = (0..n)
+        .map(|i| {
+            let w = if i % 2 == 0 { 1.0 } else { 0.9 };
+            [w * 10.0 * f64::from(i), 0.0, 0.0, w]
+        })
+        .collect();
+    let knots = |end: f64| -> Vec<f64> {
+        let mut k = vec![0.0; 4];
+        k.extend((1..98).map(|j| end * f64::from(j) / 98.0));
+        k.extend([end; 4]);
+        k
+    };
+    let curve = BCurve::RationalSpline { knots: knots(1.0), homogeneous: homogeneous.clone() };
+    assert_eq!(super::resolvable(curve.clone()).unwrap(), curve);
+    let fast = knots(1e-7);
+    let BCurve::RationalSpline { knots: scaled, homogeneous: same } =
+        super::resolvable(BCurve::RationalSpline { knots: fast.clone(), homogeneous: homogeneous.clone() }).unwrap()
+    else {
+        panic!("not a rational spline")
+    };
+    assert_eq!(same, homogeneous);
+    let scale = scaled.last().unwrap() / 1e-7;
+    assert_eq!(scale, 2f64.powi(scale.log2().round() as i32), "{scale}");
+    assert!(scaled.iter().zip(&fast).all(|(s, f)| *s == f * scale), "{scaled:?}");
 }

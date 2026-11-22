@@ -71,6 +71,7 @@ use crate::curve::crv_on_surf::CrvOnSurf;
 use crate::curve::curve::p2::{
     self as curve_base, at, Curve, CurveEvaluate, CRV_ON_SURF_TYPE, TANGENT_FIELD_TYPE,
 };
+use crate::error::curve::CurveFailure;
 use crate::error::{ignore_status, Result, SolidError};
 use crate::geom::extent1d::Extent1d;
 use crate::geom::extent2d::Extent2d;
@@ -401,9 +402,12 @@ fn end_tangents(
     let dist = at(&pv, 0).distance(start_pnt);
     if dist > approx_tol_3d {
         // Ends don't match
-        return Err(SolidError::curve_failed(
+        return Err(SolidError::curve(
             OP_CREATE,
-            "the start points do not match",
+            CurveFailure::StartsApart {
+                gap: dist,
+                tolerance: approx_tol_3d,
+            },
         ));
     }
 
@@ -421,9 +425,12 @@ fn end_tangents(
     let dist = at(&pv, 0).distance(end_pnt);
     if dist > approx_tol_3d {
         // Ends don't match
-        return Err(SolidError::curve_failed(
+        return Err(SolidError::curve(
             OP_CREATE,
-            "the end points do not match",
+            CurveFailure::EndsApart {
+                gap: dist,
+                tolerance: approx_tol_3d,
+            },
         ));
     }
 
@@ -498,9 +505,12 @@ fn field_evaluate(
         return Ok(vec![p0, diff / delta_t]);
     }
     // Can not go higher than 1st derivative
-    Err(SolidError::curve_failed(
+    Err(SolidError::curve(
         OP_EVALUATE,
-        "more than one derivative was asked",
+        CurveFailure::TooManyDerivatives {
+            asked: num_derivs,
+            most: 1,
+        },
     ))
 }
 
@@ -981,7 +991,15 @@ mod tests {
         assert_eq!(tf.evaluate_point(k, 1.0).unwrap(), e);
         let d = tf.evaluate(k, 1.0, 1).unwrap();
         assert_eq!(d[1], Vec3::new(0.0, 0.0, 0.0));
-        assert!(tf.evaluate(k, 0.0, 2).is_err());
+        let err = tf.evaluate(k, 0.0, 2).unwrap_err();
+        assert_eq!(
+            err.curve_failure(),
+            Some(&CurveFailure::TooManyDerivatives { asked: 2, most: 1 })
+        );
+        assert_eq!(
+            crate::error::upstream_status(&err),
+            Some(crate::error::SM_ERR)
+        );
         // inside the interval: the surface normal (surface::surface::p7) is available
         assert!(tf.evaluate_point(k, 0.5).is_ok());
         // without a domain: the surface's natural UV domain
@@ -1084,6 +1102,20 @@ mod tests {
         assert!(matches!(
             TangentField::create(k, 1e-6, &base, &uv, &srf, start, bad),
             Err(e) if crate::error::upstream_status(&e) == Some(1001)
+                && matches!(e.curve_failure(), Some(CurveFailure::EndsApart { gap, tolerance })
+                    if *gap > 1e-6 && *tolerance == 1e-6)
+        ));
+        // and so is a mismatched start
+        let bad_start = CurveEnd {
+            curve: &sc,
+            param: 1.0,
+            opposite: false,
+        };
+        assert!(matches!(
+            TangentField::create(k, 1e-6, &base, &uv, &srf, bad_start, end),
+            Err(e) if crate::error::upstream_status(&e) == Some(1001)
+                && matches!(e.curve_failure(), Some(CurveFailure::StartsApart { gap, tolerance })
+                    if *gap > 1e-6 && *tolerance == 1e-6)
         ));
     }
 

@@ -9,7 +9,7 @@
 //! tables, each where its record places it, with its words, read with the title block's text
 //! ([`crate::drawing_table_paper`]); the notes and revision tags on the sheet itself
 //! ([`crate::drawing_revision_paper`]); then its title block's logos, lines and projection symbol, in
-//! the drawing's projection ([`TitleBlockLayout::paper`]), with its labels and values set on them
+//! the drawing's projection ([`title_block_paper`]), with its labels and values set on them
 //! ([`title_block_text`]). Within a band, groups paint in the order they join: views by id, their
 //! dimensions, notes and balloons by view and id. A shaded view's group holds its pictures under its lines;
 //! [`build`] draws no pixels: each writer asks for them ([`crate::drawing_picture`]).
@@ -66,7 +66,7 @@
 //!
 //! [`SheetLayout::paper`]: solidcraft_geom::drawing_sheet::SheetLayout::paper
 //! [`groups`]: crate::drawing_pictures::groups
-//! [`TitleBlockLayout::paper`]: solidcraft_geom::title_block::TitleBlockLayout::paper
+//! [`title_block_paper`]: solidcraft_doc::drawing::projection_symbol::title_block_paper
 
 use std::borrow::Borrow;
 use std::collections::{BTreeMap, BTreeSet};
@@ -1710,7 +1710,7 @@ fn assemble<D: Borrow<Drawn>>(
     let (block, fonts) = match (&record.title_block, &layout) {
         (Some(block), Some(layout)) => {
             let placed = block.layout(layout).map_err(|e| bad(CMD, e.to_string()))?;
-            let mut group = placed.paper(record.id, projection);
+            let mut group = solidcraft_doc::drawing::projection_symbol::title_block_paper(&placed, record.id, projection);
             group.items.splice(0..0, logos.iter().cloned());
             group.items.extend(text.runs.iter().cloned().map(Item::Text));
             (Some(group), text.fonts.clone())

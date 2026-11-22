@@ -997,21 +997,22 @@ fn bezier_block(span: &str, split: f64) -> String {
 /// block it is, as it does with the knots (0, 20).
 #[test]
 fn a_micro_edge_on_a_bezier_with_a_tiny_knot_span_keeps_the_block() {
+    // At 1.283 nm on the knots (0, 1.02e-7) the micro edge lies on [0, 6.549e-15] of the file's
+    // parameter, below SMLib's knot resolution (1e-12); the reader rescales such a curve's
+    // parameter exactly (#16441), so that block too is the closed 20 × 30 × 10 = 6000 mm³ block.
     for span in ["20.", "1.020781457822E-07"] {
-        let case = format!("knots (0, {span})");
-        let imp = step_import(&bezier_block(span, 1.26e-3)).unwrap_or_else(|e| panic!("{case}: {e}"));
-        assert_eq!(imp.bodies.len(), 1, "{case}: {:?}", imp.warnings);
-        let b = &imp.bodies[0];
-        assert!(b.closed, "{case}: open");
-        crate::validation::check_kept(&b.body).unwrap_or_else(|e| panic!("{case}: {e}"));
-        let m = measure(&b.body).unwrap();
-        assert!(rel(m.volume, 6000.0) < 1e-9, "{case}: volume {}", m.volume);
-        assert_eq!(m.faces, 6, "{case}");
+        for split in [1.26e-3, 1.283e-6] {
+            let case = format!("knots (0, {span}), micro edge {split} mm");
+            let imp = step_import(&bezier_block(span, split)).unwrap_or_else(|e| panic!("{case}: {e}"));
+            assert_eq!(imp.bodies.len(), 1, "{case}: {:?}", imp.warnings);
+            let b = &imp.bodies[0];
+            assert!(b.closed, "{case}: open");
+            crate::validation::check_kept(&b.body).unwrap_or_else(|e| panic!("{case}: {e}"));
+            let m = measure(&b.body).unwrap();
+            assert!(rel(m.volume, 6000.0) < 1e-9, "{case}: volume {}", m.volume);
+            assert_eq!(m.faces, 6, "{case}");
+        }
     }
-    // At 1.283 nm the micro edge lies on [0, 6.549e-15], below SMLib's knot resolution (1e-12):
-    // the solid is refused with that interval named, not taken as a body SMLib's check fails.
-    let e = step_import(&bezier_block("1.020781457822E-07", 1.283e-6)).map(|i| i.bodies.len()).unwrap_err().to_string();
-    assert!(e.contains("no longer than SMLib's knot resolution (1e-12)"), "{e}");
 }
 
 /// [`bezier_block`] (split at 1 µm) with its first edge's curve, which the micro edge and the
@@ -3476,14 +3477,89 @@ fn a_closed_spline_wall_with_a_curved_seam_keeps_all_faces() {
         let m = measure(&imp.bodies[0].body).unwrap();
         assert_eq!(m.faces, 3);
         assert!(rel(m.volume, 100.0 * std::f64::consts::PI) < 1e-6, "{}", m.volume);
+        assert_periodic_trim_domains_and_seams(&imp.bodies[0].body);
+        let check = imp.bodies[0].body.smlib().unwrap().check(solidcraft_smlib::CheckLevel::All).unwrap();
+        assert!(check.is_valid(), "start {start}: {check}");
     }
+}
+
+/// Containment of the positive-weight control hull proves containment of the entire stored
+/// trim, including between samples. Seam uses share an edge and its vertices, run oppositely,
+/// and lie on opposite sides of the surface's base period.
+fn assert_periodic_trim_domains_and_seams(body: &Body) {
+    use solidcore_record::brep::{Curve2, Loop};
+
+    let controls = |pc: &Curve2| -> Vec<[f64; 2]> {
+        match pc {
+            Curve2::Spline { points, .. } => points.clone(),
+            Curve2::RationalSpline { homogeneous, .. } => homogeneous
+                .iter()
+                .map(|h| {
+                    assert!(h[2].is_finite() && h[2] > 0.0);
+                    [h[0] / h[2], h[1] / h[2]]
+                })
+                .collect(),
+        }
+    };
+    let record = body.record();
+    let mut seams = 0;
+    for (fi, face) in record.faces.iter().enumerate() {
+        let domain = solidcraft_geom::brep::eval::SurfaceEval::new(face.nurbs.as_ref().unwrap_or(&face.surface)).unwrap().domain();
+        for l in &face.loops {
+            let Loop::Edges { edges } = l else { continue };
+            for u in edges {
+                let points = controls(&u.pcurve);
+                assert!(!points.is_empty());
+                for p in &points {
+                    for (d, range) in domain.range.iter().enumerate() {
+                        if let Some((lo, hi)) = range {
+                            // Only floating-point rounding at a cut, never the edge's model tolerance.
+                            let round = 1e-9 * (hi - lo).abs().max(1.0);
+                            assert!(
+                                p[d].is_finite() && p[d] >= lo - round && p[d] <= hi + round,
+                                "face {fi}, edge {}: {p:?} outside {range:?}",
+                                u.edge
+                            );
+                        }
+                    }
+                }
+            }
+        }
+        for (ei, edge) in record.edges.iter().enumerate() {
+            let [a, b] = edge.uses.as_slice() else { continue };
+            if a.face as usize != fi || b.face as usize != fi {
+                continue;
+            }
+            let use_at = |r: &solidcore_record::brep::EdgeUseRef| {
+                let Loop::Edges { edges } = &face.loops[r.r#loop as usize] else { panic!("a seam use must be on an edge loop") };
+                &edges[r.position as usize]
+            };
+            let (a_use, b_use) = (use_at(a), use_at(b));
+            assert_eq!(a_use.edge as usize, ei);
+            assert_eq!(b_use.edge as usize, ei);
+            assert_ne!(a_use.forward, b_use.forward);
+            assert_eq!(a.upper, !a_use.forward);
+            assert_eq!(b.upper, !b_use.forward);
+            assert_ne!(edge.vertices[0], edge.vertices[1]);
+            let (a_points, b_points) = (controls(&a_use.pcurve), controls(&b_use.pcurve));
+            let on_cut = (0..2).any(|d| {
+                let (Some(period), Some((lo, hi))) = (domain.period[d], domain.range[d]) else { return false };
+                let round = 1e-9 * period;
+                let at = |points: &[[f64; 2]], side: f64| points.iter().all(|p| (p[d] - side).abs() <= round);
+                (at(&a_points, lo) && at(&b_points, hi)) || (at(&a_points, hi) && at(&b_points, lo))
+            });
+            assert!(on_cut, "face {fi}, seam edge {ei}: its uses must lie on the two sides of the base period");
+            seams += 1;
+        }
+    }
+    assert!(seams > 0, "the closed spline wall must have a seam edge");
 }
 
 /// The volume of the one solid `solidcore_step::topology` reads from `text` into schema 4,
 /// measured as the body of that record.
 pub(super) fn schema_4_volume(text: &str) -> f64 {
     let ex = solidcore_step::p21::parse(text).unwrap();
-    let r = solidcore_step::topology::read_solids_with(&ex, &solidcraft_smlib::pcurves::SmlibTrims);
+    let r = solidcore_step::topology::read_solids_with(&ex, &solidcraft_smlib::pcurves::SmlibImportTrims);
     assert!(r.failures.is_empty() && r.solids.len() == 1, "{:?}", r.failures);
     measure(&Body::from_record(r.solids[0].brep.clone()).unwrap()).unwrap().volume
 }
@@ -5609,4 +5685,54 @@ fn a_cap_whose_rim_is_one_closed_edge_measures_its_whole_volume() {
     let text = e.solid(&[cap, base]);
     // The hemisphere: 2 pi R^3 / 3.
     assert_closed_solid(&text, 2, 2.0 * std::f64::consts::PI * 100.0_f64.powi(3) / 3.0);
+}
+
+/// A cylinder (radius 2, height 3) whose top is one circle starting at angle 0 and whose bottom is
+/// four quarter arcs starting `shift` radians on from it, as a file written to its own rounding
+/// has them. The side face winds round its axis, so a seam is added between the two start vertices.
+fn cylinder_with_bottom_vertices_shifted(shift: f64) -> String {
+    let (r, h) = (2.0_f64, 3.0_f64);
+    let f = |x: f64| format!("{x:.17E}");
+    let mut t = String::from(HEAD);
+    t += "#10=CARTESIAN_POINT('',(0.,0.,0.));\n#11=CARTESIAN_POINT('',(0.,0.,3.));\n#12=DIRECTION('',(0.,0.,1.));\n#13=DIRECTION('',(1.,0.,0.));\n";
+    t += "#14=AXIS2_PLACEMENT_3D('',#10,#12,#13);\n#15=AXIS2_PLACEMENT_3D('',#11,#12,#13);\n";
+    t += &format!("#16=CYLINDRICAL_SURFACE('',#14,{});\n#17=PLANE('',#14);\n#18=PLANE('',#15);\n", f(r));
+    // The top's one vertex, then the bottom's four.
+    t += &format!("#20=CARTESIAN_POINT('',({},0.,{}));\n#21=VERTEX_POINT('',#20);\n", f(r), f(h));
+    t += &format!("#22=CIRCLE('',#15,{});\n#23=EDGE_CURVE('',#21,#21,#22,.T.);\n", f(r));
+    for k in 0..4 {
+        let a = shift + f64::from(k) * std::f64::consts::FRAC_PI_2;
+        t += &format!("#{}=CARTESIAN_POINT('',({},{},0.));\n#{}=VERTEX_POINT('',#{});\n", 30 + k, f(r * a.cos()), f(r * a.sin()), 40 + k, 30 + k);
+        t += &format!("#{}=CIRCLE('',#14,{});\n#{}=EDGE_CURVE('',#{},#{},#{},.T.);\n", 50 + k, f(r), 60 + k, 40 + k, 40 + (k + 1) % 4, 50 + k);
+    }
+    let bottom = |sense: &str| (0..4).map(|k| format!("#{}=ORIENTED_EDGE('',*,*,#{},{});\n", 70 + k, 60 + k, sense)).collect::<String>();
+    t += "#80=ORIENTED_EDGE('',*,*,#23,.F.);\n#81=EDGE_LOOP('',(#80));\n#82=FACE_OUTER_BOUND('',#81,.T.);\n";
+    t += &bottom(".T.");
+    t += "#83=EDGE_LOOP('',(#70,#71,#72,#73));\n#84=FACE_BOUND('',#83,.T.);\n#85=ADVANCED_FACE('',(#82,#84),#16,.T.);\n";
+    t += "#86=ORIENTED_EDGE('',*,*,#23,.T.);\n#87=EDGE_LOOP('',(#86));\n#88=FACE_OUTER_BOUND('',#87,.T.);\n#89=ADVANCED_FACE('',(#88),#18,.T.);\n";
+    t += "#90=ORIENTED_EDGE('',*,*,#63,.F.);\n#91=ORIENTED_EDGE('',*,*,#62,.F.);\n#92=ORIENTED_EDGE('',*,*,#61,.F.);\n#93=ORIENTED_EDGE('',*,*,#60,.F.);\n";
+    t += "#94=EDGE_LOOP('',(#90,#91,#92,#93));\n#95=FACE_OUTER_BOUND('',#94,.T.);\n#96=ADVANCED_FACE('',(#95),#17,.F.);\n";
+    t += "#97=CLOSED_SHELL('',(#85,#89,#96));\n#98=MANIFOLD_SOLID_BREP('Cyl',#97);\n#99=SHAPE_REPRESENTATION('',(#98),#100);\n";
+    t += &context(100, "(LENGTH_UNIT()NAMED_UNIT(*)SI_UNIT(.MILLI.,.METRE.))");
+    t += TAIL;
+    t
+}
+
+/// A cylinder whose bottom circle's start vertices sit 7e-8 mm round the axis from the top
+/// circle's: the seam between them is the ruling through the top's vertex, and the bottom's
+/// vertex is put on it. Run between the two points, the seam slanted across the surface's seam by
+/// that hair, and SMLib's check failed the solid ("Face Near missing Seam"), so every boolean on
+/// it was refused (a salad fork from a public corpus did this).
+#[test]
+fn a_cylinder_whose_circles_start_a_hair_apart_gets_a_seam_that_passes_the_check() {
+    for shift in [0.0, 3.5e-8] {
+        let imp = step_import(&cylinder_with_bottom_vertices_shifted(shift)).unwrap();
+        assert_eq!(imp.bodies.len(), 1, "shift {shift}: {:?}", imp.warnings);
+        assert!(imp.bodies[0].closed, "shift {shift}");
+        assert!(!imp.warnings.iter().any(|w| w.contains("needs repair")), "shift {shift}: {:?}", imp.warnings);
+        let body = &imp.bodies[0].body;
+        assert_eq!(crate::validation::failing_check(body).unwrap().map(|c| c.to_string()), None, "shift {shift}");
+        let m = measure(body).unwrap();
+        assert!(rel(m.volume, 12.0 * std::f64::consts::PI) < 1e-6, "shift {shift}: volume {}", m.volume);
+    }
 }
