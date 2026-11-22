@@ -898,10 +898,19 @@ impl SurfaceSheet {
         };
         let n = if moves_across { f.across } else { -f.across };
         let at = (&f.place, f.places.as_slice());
+        // Whether a plan turns the material at `q`: a piece that moves holds it, or the zone of
+        // that piece's bend does.
+        let turns = |plan: &FoldPlan, q: Vec2| {
+            let s = q.dot(plan.n) - plan.s0;
+            plan.moves.iter().any(|m| {
+                let t = q.dot(plan.u) - m.start;
+                crate::sheet_surface_cuts::region_holds(&m.region, q) || (s > -1e-9 && s < plan.ba + 1e-9 && t > -1e-9 && t < m.bend.length + 1e-9)
+            })
+        };
         let n = match self.plan_fold(f.i, at, (&f.region, &f.cuts), f.line, n, &f.bend, position)? {
             Ok(_) => n,
             Err(why) => match self.plan_fold(f.i, at, (&f.region, &f.cuts), f.line, -n, &f.bend, position) {
-                Ok(Ok(plan)) if fixed.is_none_or(|q| !plan.moves.iter().any(|m| crate::sheet_surface_cuts::region_holds(&m.region, q))) => -n,
+                Ok(Ok(plan)) if fixed.is_none_or(|q| !turns(&plan, q)) => -n,
                 // Only the side the fixed point lies on frees anything (it lies on a tongue the
                 // line frees): the fold can't keep it still.
                 Ok(Ok(_)) => return err(FOLD_FIXED_ON_FREED),
@@ -1217,10 +1226,30 @@ impl SurfaceSheet {
             let l = line[0].dot(n);
             if l > s0 + tol && l < s0 + ba - tol { l } else { s0 + ba / 2.0 }
         };
+        // A line on one of the zone's edges (a fold at its `start` or `end`) reads where each chord
+        // meets that edge, not the zone's middle, which a slanted cut-out shifts along the line.
+        let edge = {
+            let l = line[0].dot(n);
+            if (l - s0).abs() <= tol {
+                Some(&near)
+            } else if (l - s0 - ba).abs() <= tol {
+                Some(&far)
+            } else {
+                None
+            }
+        };
         let on_line: Vec<Option<(f64, f64)>> = chords
             .iter()
             .enumerate()
-            .map(|(c, ch)| if is_chord(c) { crate::sheet_surface_convert::extent_across(ch, (n * level, u)) } else { None })
+            .map(|(c, ch)| {
+                if !is_chord(c) {
+                    return None;
+                }
+                match edge.and_then(|e| e.get(c)) {
+                    Some(es) => es.iter().fold(None, |acc: Option<(f64, f64)>, &(a, b)| Some(acc.map_or((a, b), |(lo, hi)| (lo.min(a), hi.max(b))))),
+                    None => crate::sheet_surface_convert::extent_across(ch, (n * level, u)),
+                }
+            })
             .collect();
         let gap_of = |s: (f64, f64)| (s.0 - drawn.1).max(drawn.0 - s.1).max(0.0);
         let gap = |c: usize| on_line.get(c).copied().flatten().map_or(f64::INFINITY, gap_of);
@@ -1348,7 +1377,25 @@ impl SurfaceSheet {
                     }
                 }
             } else {
-                found = (1..=rest.len()).map(|k| with(&rest.iter().take(k).copied().collect::<Vec<_>>())).find(|more| parts(more));
+                // The nearest one, two, ... until they part the panel; then each of them, farthest
+                // first, left out again where the panel parts without it, so that no chord bends
+                // that the parting doesn't need (a tab beside the line nearer than the chord that
+                // frees the piece).
+                found = (1..=rest.len()).map(|k| (k, with(&rest.iter().take(k).copied().collect::<Vec<_>>()))).find(|(_, more)| parts(more)).map(
+                    |(k, mut more)| {
+                        for c in rest.iter().take(k).rev() {
+                            if let Some(slot) = more.get_mut(*c) {
+                                *slot = false;
+                            }
+                            if !parts(&more)
+                                && let Some(slot) = more.get_mut(*c)
+                            {
+                                *slot = true;
+                            }
+                        }
+                        more
+                    },
+                );
             }
             found
         };
@@ -2653,7 +2700,8 @@ const FOLD_FIXED_ON_FREED: &str = "the fold's fixed point lies on a piece the fo
 
 /// How many chords past the ones a fold's line is drawn across are tried in every combination for
 /// the fewest that part the panel (see [`SurfaceSheet::plan_fold`]), each try a walk over the
-/// pieces the chords leave; past them, the nearest one, two, and so on.
+/// pieces the chords leave; past them, the nearest one, two, and so on, less each of those the
+/// panel parts without.
 const MOST_CHORDS_TRIED: usize = 16;
 
 /// A fold's zone reaching a joint of its panel that can't go with either side: a bend, or

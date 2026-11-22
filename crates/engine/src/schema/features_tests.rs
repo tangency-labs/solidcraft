@@ -64,6 +64,7 @@ fn schemas_and_the_key_check_agree() {
             "side",
             "sketch",
             "start_offset",
+            "symmetric_offset",
             "taper",
             "targets",
             "thickness",

@@ -332,7 +332,7 @@ impl Product {
                     .collect()
             }
             Self::Browser => {
-                presentation.status = Some(crate::browser_search::body_count(&app.session));
+                presentation.status = Some(crate::browser_search::body_count(app));
                 vec![RuntimeAction {
                     id: ControlId("magnifier".into()),
                     label: solidcraft_ui_text::tr("ui.browser_search_hint").into(),
@@ -446,6 +446,16 @@ impl ProductionState {
 }
 
 pub(crate) fn enable_production(app: &mut crate::SolveApp) -> PanelResult<()> {
+    enable_production_for(app, VIEWPORT, None)
+}
+
+pub(super) fn enable_pop_out_production(app: &mut crate::SolveApp, window: &str, remembered: Option<Value>) -> PanelResult<()> {
+    let mut preferences = PanelLayoutPreferences::default();
+    preferences.record = remembered;
+    enable_production_for(app, window, Some(&preferences))
+}
+
+fn enable_production_for(app: &mut crate::SolveApp, window: &str, pop_out: Option<&PanelLayoutPreferences>) -> PanelResult<()> {
     if app.panel_runtime.is_some() {
         return Err(error(Rule::Lifecycle, "application panel runtime is already enabled"));
     }
@@ -453,7 +463,8 @@ pub(crate) fn enable_production(app: &mut crate::SolveApp) -> PanelResult<()> {
     let registry = registry()?;
     let workspace = WorkspaceId::new(WORKSPACES[0].0)?;
     let defaults = crate::prefs::Prefs::default();
-    let placement = if app.panel_layout_preferences.record.is_none() { &app.preferences } else { &defaults };
+    let settings = pop_out.unwrap_or(&app.panel_layout_preferences);
+    let placement = if settings.record.is_none() { &app.preferences } else { &defaults };
     let layout = default_layout(app, placement, workspace.clone(), &registry)?;
     let mut runtime = PanelRuntime::new(
         LayoutService::new(
@@ -461,15 +472,15 @@ pub(crate) fn enable_production(app: &mut crate::SolveApp) -> PanelResult<()> {
             layout,
             HostCapabilities {
                 persistence: true,
-                native_windows: cfg!(not(target_arch = "wasm32")),
-                max_native_hosts: if cfg!(target_arch = "wasm32") { 0 } else { MAX_SECTIONS },
+                native_windows: pop_out.is_none() && cfg!(not(target_arch = "wasm32")),
+                max_native_hosts: if pop_out.is_some() || cfg!(target_arch = "wasm32") { 0 } else { MAX_SECTIONS },
             },
         )?,
         RuntimeEnvironment {
             workspace: workspace.clone(),
             document: Some(DocumentId::new(app.session.document_id.clone())?),
-            window: HostId::new(VIEWPORT)?,
-            viewport: ViewportId::new(VIEWPORT)?,
+            window: HostId::new(window)?,
+            viewport: ViewportId::new(window)?,
             direction: crate::i18n::panel_direction(&app.preferences.language),
             motion: Motion::Animated,
         },
@@ -490,7 +501,7 @@ pub(crate) fn enable_production(app: &mut crate::SolveApp) -> PanelResult<()> {
         local: ProductionLocal {
             workspace,
             document: DocumentId::new(app.session.document_id.clone())?,
-            viewport: ViewportId(VIEWPORT.into()),
+            viewport: ViewportId(window.into()),
             keyboard: None,
         },
     };
@@ -512,10 +523,12 @@ pub(crate) fn enable_production(app: &mut crate::SolveApp) -> PanelResult<()> {
             default_preset: name.into(),
         })?;
     }
-    let repaired = super::preferences::configure_preferences(&mut integration, &app.panel_layout_preferences, &mut catalogue)?;
+    let repaired = super::preferences::configure_preferences(&mut integration, settings, &mut catalogue)?;
     app.panel_runtime = Some(integration);
-    crate::bom_panel::set_focus_pending(app, true);
-    if repaired {
+    if pop_out.is_none() {
+        crate::bom_panel::set_focus_pending(app, true);
+    }
+    if repaired && pop_out.is_none() {
         super::preferences::report_notice(app);
     }
     Ok(())
