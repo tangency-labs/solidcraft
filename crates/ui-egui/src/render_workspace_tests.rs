@@ -16589,3 +16589,62 @@ fn render_backend_save_failure_does_not_schedule_a_restart() {
     assert!(!h.app.quit_requested && h.app.docs.quitting.is_none());
     assert!(crate::update::take_launch(&mut h.app).is_none());
 }
+
+#[test]
+fn render_canvas_tab_can_reach_the_finished_sketch_notice_without_toggling_focus_mode() {
+    let mut h = Harness::new();
+    h.app.home.open = false;
+    let owner = h.app.docs.views.active().id;
+    let sketch = h.app.run("sketch.create", json!({"plane":"XY"})).unwrap()["sketch"].as_u64().unwrap();
+    h.app.run("sketch.line", json!({"points":[[0,0],[10,0]]})).unwrap();
+    assert!(h.app.run("solid.extrude", json!({"distance":0})).is_err());
+    let event = h.app.sketch_notices.latest_for(h.app.session.uid, 0).unwrap().clone();
+    enter(&mut h.app, true).unwrap();
+    h.app.sketch_notices.enqueue(h.app.session.uid, 0, event);
+    h.frames(3);
+    let link = h
+        .output
+        .accesskit_update
+        .as_ref()
+        .unwrap()
+        .nodes
+        .iter()
+        .find(|(_, node)| node.role() == egui::accesskit::Role::Link && node.label() == Some(h.app.tr("sketch_finish.edit")))
+        .map(|(id, _)| *id)
+        .expect("visible notice exposes a link");
+    h.ctx.memory_mut(|memory| {
+        if let Some(id) = memory.focused() {
+            memory.surrender_focus(id);
+        }
+    });
+    let buttons = h.output.accesskit_update.as_ref().unwrap().nodes.iter().filter(|(_, node)| node.role() == egui::accesskit::Role::Button).count();
+    assert!(buttons > 120, "the real appearance catalogue makes sequential traversal too long for a six-second notice");
+    let tap = |h: &mut Harness, modifiers| {
+        h.frame_with(vec![
+            egui::Event::Key { key: egui::Key::Tab, physical_key: None, pressed: true, repeat: false, modifiers },
+            egui::Event::Key { key: egui::Key::Tab, physical_key: None, pressed: false, repeat: false, modifiers },
+        ]);
+    };
+    tap(&mut h, egui::Modifiers::NONE);
+    assert!(!h.app.shell.render_focus, "Tab enters the notice while it is visible");
+    assert!(
+        h.ctx.memory(|memory| memory.focused().is_some_and(|id| id.accesskit_id() == link)),
+        "the first Tab from the canvas reaches the actual notice link"
+    );
+    // Once a widget owns focus, normal traversal resumes: go to the preceding
+    // control and back to the exact same accessible notice link.
+    tap(&mut h, egui::Modifiers::SHIFT);
+    h.frame();
+    assert!(
+        h.ctx.memory(|memory| memory.focused().is_some_and(|id| id.accesskit_id() != link)),
+        "Shift+Tab leaves the notice through ordinary widget order"
+    );
+    tap(&mut h, egui::Modifiers::NONE);
+    assert!(
+        h.ctx.memory(|memory| memory.focused().is_some_and(|id| id.accesskit_id() == link)),
+        "ordinary Tab returns from the preceding control to the notice"
+    );
+    h.step(&json!({"key":"Enter"})).unwrap();
+    assert_eq!(h.app.session.active_sketch, Some(sketch));
+    assert_eq!(h.app.session.sketching_view, Some(owner));
+}
