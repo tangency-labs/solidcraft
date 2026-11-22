@@ -163,9 +163,10 @@ crate::dialog_descriptor::dialog_descriptors! {
             factor_y: String = "2".into() => factors.as_ref().map_or_else(|| factor.to_string(), |f| f[1].to_string()),
             factor_z: String = "2".into() => factors.as_ref().map_or_else(|| factor.to_string(), |f| f[2].to_string()),
         } => if *per_axis { json!({"factors": [factor, factor_y, factor_z]}) } else { json!({"factor": factor}) };
-        // Stretch (#20512): the body, the way its moving side goes (`STRETCH_DIRECTIONS`), the cut
-        // plane's distance from the side that stays put (empty: the body's middle) and how far.
-        Stretch("solid.stretch", "STRETCH", [("Body", BODIES, false)],
+        // Stretch (#20512): the body, the way its moving side goes, an optional face the cut is
+        // measured from, the cut's distance from it (empty: the middle of the body's longest
+        // plain stretch, `stretch_cut`) and how far.
+        Stretch("solid.stretch", "STRETCH", [("Body", BODIES, false), ("Cut from face", PLANAR_FACES, false)],
             FeatureKind::Stretch { direction, at, distance, .. }) {
             direction: usize = 0 => solidcraft_engine::doc::StretchDirection::ALL.iter().position(|d| d == direction).unwrap_or(0),
             distance: String = "10 mm".into() => shown_expr(distance, ValueKind::Length),
@@ -6933,12 +6934,24 @@ fn dialog_commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value)>, S
             need(0, "bodies")?;
             ("solid.scale", json!({"bodies": sels(d, 0).body_names()}))
         }
-        Kind::Stretch { .. } => {
+        Kind::Stretch { direction, at, .. } => {
             need(0, "the body to stretch")?;
-            match sels(d, 0).body_names().as_slice() {
-                [name] => ("solid.stretch", json!({"body": name})),
+            let name = match sels(d, 0).body_names().as_slice() {
+                [name] => name.clone(),
                 _ => return Err("pick one body to stretch".into()),
+            };
+            let mut p = json!({"body": name});
+            match sels(d, 1).first() {
+                Some(Sel::Face { point, .. }) => p["from"] = pt3(*point),
+                // No face and no Cut At: the middle of the longest plain stretch, kept as a number.
+                _ if at.trim().is_empty() => {
+                    if let Some(cut) = crate::canvas::stretch_cut(app, &name, *direction) {
+                        p["at"] = json!(crate::canvas::format_len(&app.session.doc, cut));
+                    }
+                }
+                _ => {}
             }
+            ("solid.stretch", p)
         }
         Kind::OffsetFaces { .. } => {
             need(0, "faces")?;
@@ -9118,11 +9131,14 @@ pub fn for_feature(app: &SolveApp, id: u64, marker: Option<usize>) -> Option<Dia
             }
             d
         }
-        FeatureKind::Stretch { body, .. } => {
+        FeatureKind::Stretch { body, from, .. } => {
             let mut d = start("solid.stretch")?;
             d.kind = Kind::simple_restore(&f.kind)?;
             if let Some(inp) = d.inputs.first_mut() {
                 inp.items = vec![Sel::Body { name: body.to_string() }];
+            }
+            if let (Some(from), Some(inp)) = (from, d.inputs.get_mut(1)) {
+                inp.items = body_face_sels(s, Some(body.0.as_str()), std::slice::from_ref(from));
             }
             d
         }

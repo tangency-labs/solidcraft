@@ -798,15 +798,12 @@ fn draw(app: &SolveApp, ui: &mut egui::Ui, painter: &egui::Painter, proj: &Proj,
     if let Some(frame) = stretch_frame(app, d)
         && let Kind::Stretch { at, .. } = &mut d.kind
     {
-        let cut = if at.trim().is_empty() {
-            frame.length / 2.0
-        } else {
-            crate::length_input::eval(&app.session.doc, at, ValueKind::Length).unwrap_or(frame.length / 2.0)
-        };
-        if let Some(q) = offset_plane_quad(proj, frame.fixed + frame.n * cut, frame.n, frame.width) {
+        let cut =
+            if at.trim().is_empty() { frame.auto } else { crate::length_input::eval(&app.session.doc, at, ValueKind::Length).unwrap_or(frame.auto) };
+        if let Some(q) = offset_plane_quad(proj, frame.from + frame.n * cut, frame.n, frame.width) {
             painter.extend(projected_polygon(&q, t.construction_plane, Stroke::new(1.2, t.origin_plane_edge)));
         }
-        if let Some(fs) = proj.to_screen(frame.fixed) {
+        if let Some(fs) = proj.to_screen(frame.from) {
             let mut shown = if at.trim().is_empty() { format_len(&app.session.doc, cut) } else { at.clone() };
             let before = shown.clone();
             drag_arrow(
@@ -814,11 +811,11 @@ fn draw(app: &SolveApp, ui: &mut egui::Ui, painter: &egui::Painter, proj: &Proj,
                 ui,
                 painter,
                 proj,
-                frame.fixed,
+                frame.from,
                 fs,
                 frame.n,
                 cut,
-                false,
+                true,
                 egui::Id::unique("sc_manipulator2"),
                 half_height,
                 0.0,
@@ -2364,16 +2361,17 @@ pub(crate) fn projected_rotation_angle(
     }
     Some((a + b) / 2.0)
 }
-/// Where Stretch's handles stand on its picked body (#20512): the middle of the side that stays
-/// put, the middle of the side that moves, the unit direction the moving side goes, the body's
-/// length along it and half its widest size across (for the cut plane's square). From the shown
-/// body's box: these place handles, they decide nothing about the model.
+/// Where Stretch's handles stand on its picked body (#20512): the middle of the side that moves,
+/// the unit direction the moving side goes, half the body's widest size across (for the cut
+/// plane's square), and where the cut is measured from (the picked face's point, else the side that stays put). From the shown
+/// body's box: these place handles; the stretch itself is decided on the exact body.
 struct StretchFrame {
-    fixed: Vec3,
     moving: Vec3,
     n: Vec3,
-    length: f64,
     width: f64,
+    /// Where Cut At is measured from, and the distance to the cut when Cut At is empty.
+    from: Vec3,
+    auto: f64,
 }
 
 fn stretch_frame(app: &SolveApp, d: &Dialog) -> Option<StretchFrame> {
@@ -2392,7 +2390,49 @@ fn stretch_frame(app: &SolveApp, d: &Dialog) -> Option<StretchFrame> {
     let centre_level = c.dot(n);
     let size = b.max - b.min;
     let width = (size.x.abs().max(size.y.abs()).max(size.z.abs())) * 0.6;
-    Some(StretchFrame { fixed: c + n * (lo - centre_level), moving: c + n * (hi - centre_level), n, length, width })
+    let fixed = c + n * (lo - centre_level);
+    let face = d.inputs.get(1).and_then(|i| i.items.first()).and_then(|x| if let Sel::Face { point, .. } = x { Some(*point) } else { None });
+    let (from, auto) = match face {
+        Some(p) => (fixed + n * (p.dot(n) - lo), 0.0),
+        None => (fixed, stretch_cut(app, name, *direction).unwrap_or(length / 2.0)),
+    };
+    Some(StretchFrame { moving: c + n * (hi - centre_level), n, width, from, auto })
+}
+
+/// Where Stretch cuts `body` along `direction` when nothing says where (#20512): the middle of
+/// the longest stretch where every face crossing it runs along the direction (flat walls and
+/// round walls along it), as a distance from the side that stays put. From the shown mesh: a
+/// proposal the user sees and can move; the stretch checks the exact body at the cut it gets.
+/// `None` when the body has no such stretch.
+pub(crate) fn stretch_cut(app: &SolveApp, body: &str, direction: usize) -> Option<f64> {
+    let st = app.session.model.state();
+    let m = st.body(body)?.mesh();
+    let n = solidcraft_engine::doc::StretchDirection::ALL.get(direction)?.vector();
+    let b = m.bounds();
+    let lo = b.min.dot(n).min(b.max.dot(n));
+    let hi = b.min.dot(n).max(b.max.dot(n));
+    // Per face: whether every triangle stands along the direction, and its levels' range.
+    let mut faces: std::collections::BTreeMap<u32, (bool, f64, f64)> = std::collections::BTreeMap::new();
+    for (t, face) in m.triangles.iter().zip(&m.tri_face) {
+        let Some([a, b2, c]) = m.tri(t) else { continue };
+        let along = (b2 - a).cross(c - a).normalized().is_none_or(|normal| normal.dot(n).abs() < 1e-3);
+        let levels = [a.dot(n), b2.dot(n), c.dot(n)];
+        let (tlo, thi) = (levels.iter().copied().fold(f64::INFINITY, f64::min), levels.iter().copied().fold(f64::NEG_INFINITY, f64::max));
+        let e = faces.entry(*face).or_insert((true, f64::INFINITY, f64::NEG_INFINITY));
+        *e = (e.0 && along, e.1.min(tlo), e.2.max(thi));
+    }
+    let mut busy: Vec<(f64, f64)> = faces.values().filter(|(along, ..)| !along).map(|(_, a, b)| (*a, *b)).collect();
+    busy.sort_by(|a, b| a.0.total_cmp(&b.0));
+    let mut best: Option<(f64, f64)> = None;
+    let mut reached = lo;
+    for (a, b) in busy.into_iter().chain([(hi, hi)]) {
+        if a > reached && best.is_none_or(|(x, y)| a - reached > y - x) {
+            best = Some((reached, a));
+        }
+        reached = reached.max(b);
+    }
+    let (a, b) = best.filter(|(a, b)| b - a > (hi - lo) * 1e-3)?;
+    Some((a + b) / 2.0 - lo)
 }
 
 fn arrow(painter: &egui::Painter, a: Pos2, b: Pos2, col: Color32) {

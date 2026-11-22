@@ -13379,7 +13379,7 @@ fn eval_feature_kind(
             *target = result;
             Ok(())
         }
-        FeatureKind::Stretch { body, direction, at, distance } => {
+        FeatureKind::Stretch { body, direction, from, at, distance } => {
             let at = val(vals, at, Kind::Length)?;
             let distance = val(vals, distance, Kind::Length)?;
             let index = st.bodies.iter().position(|b| &b.name == body).ok_or_else(|| DocError::Unknown(format!("body `{body}`")))?;
@@ -13387,13 +13387,17 @@ fn eval_feature_kind(
             if source.body.is_mesh() {
                 return Err(DocError::Invalid("Stretch takes a solid, not a mesh body: convert the mesh first".into()));
             }
-            // The cut is `at` in from the side that stays put: the body's least level along the
-            // direction the moving side goes.
+            // The cut is `at` along the direction from the picked face's level, or, with no face,
+            // from the side that stays put: the body's least level along the direction.
             let n = direction.vector();
-            let bounds = source.body.exact_bounds()?;
-            let corners = [bounds.min, bounds.max];
-            let fixed = corners.iter().map(|c| c.dot(n)).fold(f64::INFINITY, f64::min);
-            let stretched = kernel::stretch(&source.body, n * (fixed + at), n, distance)?;
+            let base = match from {
+                Some(face) => face.0.dot(n),
+                None => {
+                    let bounds = source.body.exact_bounds()?;
+                    [bounds.min, bounds.max].iter().map(|c| c.dot(n)).fold(f64::INFINITY, f64::min)
+                }
+            };
+            let stretched = kernel::stretch(&source.body, n * (base + at), n, distance)?;
             let stretched = stretched.with_color(source.body.color());
             let result = ModelBody::new(source.name.clone(), stretched, source.feature);
             let target = st.bodies.get_mut(index).ok_or_else(|| DocError::Unknown(format!("body `{body}`")))?;

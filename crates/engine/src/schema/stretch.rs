@@ -4,7 +4,7 @@
 use schemars::JsonSchema;
 use serde::Deserialize;
 
-use super::types::{LengthExpr, StringList};
+use super::types::{LengthExpr, Point3, StringList};
 
 /// Make a solid longer or shorter along one of its component's axes, keeping its details their
 /// size (#20512). The body is cut across at a plane square to the direction, `at` in from the side
@@ -22,8 +22,12 @@ pub struct StretchParams {
     /// The way the moving side goes: `+x`, `-x`, `+y`, `-y`, `+z` or `-z`, in the body's
     /// component. The opposite side stays where it is.
     pub direction: String,
-    /// How far the cut plane is from the side that stays put. Default: half the body's size
-    /// along the direction.
+    /// A point on a face to measure the cut from, usually a flat face square to the direction:
+    /// the cut is `at` past that face's level. Default: the side that stays put.
+    #[serde(default)]
+    pub from: Option<Point3>,
+    /// How far the cut plane is along the direction from `from`, or from the side that stays put.
+    /// Default: half the body's size along the direction (only without `from`; with it, 0).
     #[serde(default)]
     pub at: Option<LengthExpr>,
     /// How far the moving side goes: a stretch when positive, a shrink when negative.

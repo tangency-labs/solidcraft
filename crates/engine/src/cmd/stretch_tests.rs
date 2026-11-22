@@ -84,3 +84,22 @@ fn bad_input_is_refused_and_leaves_the_design_as_it_was() {
     assert!(err.contains("takes out everything in front of the cut plane"), "{err}");
     assert_eq!(s.doc.to_json(), before);
 }
+
+#[test]
+fn a_cut_measured_from_a_picked_face_follows_that_face() {
+    let mut s = block();
+    // A 10 mm boss on top (z 20…30) over x 0…10: the plain stretch along +X is past x = 10.
+    run(&mut s, "solid.box", json!({"corner": [0, 0, 20], "length": 10, "width": 30, "height": 10, "body_name": "Boss"}));
+    run(&mut s, "solid.combine", json!({"target": "Block", "tools": ["Boss"], "operation": "join"}));
+    // Cut 5 mm past the boss's side face at x = 10: x = 15, clear of the boss.
+    run(&mut s, "solid.stretch", json!({"body": "Block", "direction": "+x", "from": [10, 15, 25], "at": 5, "distance": 10}));
+    let (_, max, volume) = size(&s);
+    assert!((max.x - 50.0).abs() < 1e-6, "{max:?}");
+    assert!((volume - (50.0 * 30.0 * 20.0 + 10.0 * 30.0 * 10.0)).abs() < 1e-6, "{volume}");
+    // The same cut measured from the side that stays put (x = 0) gives the same body.
+    let mut other = block();
+    run(&mut other, "solid.box", json!({"corner": [0, 0, 20], "length": 10, "width": 30, "height": 10, "body_name": "Boss"}));
+    run(&mut other, "solid.combine", json!({"target": "Block", "tools": ["Boss"], "operation": "join"}));
+    run(&mut other, "solid.stretch", json!({"body": "Block", "direction": "+x", "at": 15, "distance": 10}));
+    assert!((size(&other).2 - volume).abs() < 1e-6);
+}

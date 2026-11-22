@@ -16,7 +16,7 @@ use crate::schema::stretch::StretchParams;
 use crate::schema::{TypedContract, output_schema_for};
 use crate::{
     Result, Sel, Session,
-    params::{bad, expr, str_},
+    params::{bad, expr, str_, vec3},
 };
 
 const STRETCH_CONTRACT: TypedContract<StretchParams> = TypedContract::new();
@@ -26,7 +26,7 @@ pub static COMMANDS: &[CommandSpec] = &[CommandSpec::new("solid.stretch", "Stret
     .icon("move")
     .contract(&STRETCH_CONTRACT)
     .output(output_schema_for::<FeatureResult>)
-    .params("body?: solid name (default: the selected body); direction: +x|-x|+y|-y|+z|-z (the way the moving side goes, in the body's component; the opposite side stays put); at?: length expr (the cut plane's distance from the side that stays put; default: half the body's size along the direction); distance: length expr (positive stretches, negative shrinks by taking a slice out): the body is cut square to the direction and the part beyond moves, the gap filled with the body's own section, so holes, rounds and walls keep their size. Refused, naming the face, where the body is not the same shape all along the direction at the cut; a refused shrink says how far it can go. A Stretch feature in the body's component; name?")];
+    .params("body?: solid name (default: the selected body); direction: +x|-x|+y|-y|+z|-z (the way the moving side goes, in the body's component; the opposite side stays put); from?: [x,y,z] (a point on a face the cut is measured from; default: the side that stays put); at?: length expr (the cut plane's distance along the direction from `from`, or from the side that stays put; default: half the body's size along the direction, or 0 past `from`); distance: length expr (positive stretches, negative shrinks by taking a slice out): the body is cut square to the direction and the part beyond moves, the gap filled with the body's own section, so holes, rounds and walls keep their size. Refused, naming the face, where the body is not the same shape all along the direction at the cut; a refused shrink says how far it can go. A Stretch feature in the body's component; name?")];
 
 /// The body to stretch: `body`, else the one selected body.
 fn target(s: &Session, p: &Value, cmd: &str) -> Result<String> {
@@ -55,8 +55,13 @@ fn stretch(s: &mut Session, p: &Value) -> Result<Value> {
         str_(p, "direction").and_then(StretchDirection::parse).ok_or_else(|| bad(cmd, "`direction` must be one of +x, -x, +y, -y, +z, -z"))?;
     let distance = expr(p, "distance").ok_or_else(|| bad(cmd, "`distance` must be a length"))?;
     check_expr(s, &distance, Kind::Length, cmd, "distance")?;
+    let from = match p.get("from").filter(|v| !v.is_null()) {
+        Some(v) => Some(vec3(v).filter(|p| p.is_finite()).ok_or_else(|| bad(cmd, "`from` must be a point [x, y, z] on a face"))?),
+        None => None,
+    };
     let at = match expr(p, "at") {
         Some(at) => at,
+        None if from.is_some() => "0 mm".into(),
         None => {
             let n = direction.vector();
             let b = source.body.exact_bounds().map_err(|e| bad(cmd, e.to_string()))?;
@@ -73,7 +78,7 @@ fn stretch(s: &mut Session, p: &Value) -> Result<Value> {
     // The stretch edits the component definition, independent of its occurrence placement.
     let active_component = std::mem::replace(&mut s.active_component, owner);
     let active_occurrence_path = s.active_occurrence_path.take();
-    let result = add_feature(s, p, FeatureKind::Stretch { body: body.into(), direction, at, distance });
+    let result = add_feature(s, p, FeatureKind::Stretch { body: body.into(), direction, from: from.map(solidcraft_doc::FacePick), at, distance });
     s.active_component = active_component;
     s.active_occurrence_path = active_occurrence_path;
     result

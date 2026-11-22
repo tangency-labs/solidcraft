@@ -2483,12 +2483,15 @@ pub enum FeatureKind {
         #[serde(default, skip_serializing_if = "std::ops::Not::not")]
         patch_holes: bool,
     },
-    /// Stretch (#20512): `body` cut across square to `direction`, `at` in from its side that
-    /// stays put, and the part beyond moved along `direction` by `distance` (a shrink when
-    /// negative), the gap filled by the body's own section (`kernel::stretch`).
+    /// Stretch (#20512): `body` cut across square to `direction`, `at` along it from the face
+    /// picked at `from` (or, with none, from the body's side that stays put), and the part beyond
+    /// moved along `direction` by `distance` (a shrink when negative), the gap filled by the
+    /// body's own section (`kernel::stretch`).
     Stretch {
         body: BodyName,
         direction: StretchDirection,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        from: Option<FacePick>,
         #[walk(length = "Cut at")]
         at: Expr,
         #[walk(length = "Distance")]
