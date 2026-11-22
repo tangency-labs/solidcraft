@@ -84,6 +84,42 @@ pub const MODIFIERS: &[ToolModifiers] = &[
 
 pub(crate) const OPS: [&str; 4] = ["new", "join", "cut", "intersect"];
 pub(crate) const OP_LABELS: [&str; 4] = ["New Body", "Join", "Cut", "Intersect"];
+
+/// Whether `kind` is a feature whose command takes `body_name`, and if so whether its operation is
+/// New Body: only then does the feature name a body of its own (#20776).
+pub(crate) fn body_name_slot(kind: &Kind) -> Option<bool> {
+    let operation = match kind {
+        Kind::Extrude { operation, .. }
+        | Kind::Revolve { operation, .. }
+        | Kind::Loft { operation, .. }
+        | Kind::Sweep { operation, .. }
+        | Kind::Primitive { operation, .. } => *operation,
+        _ => return None,
+    };
+    Some(OPS.get(operation).copied().unwrap_or("new") == "new")
+}
+
+/// The body name typed in a dialog's Body Name row: what a New Body feature names its body. Empty
+/// is no name, so the command names the body as it always has.
+pub(crate) fn typed_body_name(d: &Dialog) -> Option<&str> {
+    d.extra.get("body_name").and_then(Value::as_str).map(str::trim).filter(|name| !name.is_empty())
+}
+
+/// Send the typed body name as `body_name` when the operation is New Body, and no stale one
+/// (from a feature opened for editing, then switched to Join or Cut) otherwise.
+fn apply_body_name(d: &Dialog, cmds: &mut [(String, Value)]) {
+    let Some(new_body) = body_name_slot(&d.kind) else { return };
+    let Some(map) = cmds.first_mut().and_then(|(_, params)| params.as_object_mut()) else { return };
+    match typed_body_name(d).filter(|_| new_body) {
+        Some(name) => {
+            map.insert("body_name".into(), json!(name));
+        }
+        None => {
+            map.remove("body_name");
+        }
+    }
+}
+
 const DIRS: [&str; 5] = ["positive", "negative", "symmetric", "positive", "negative"];
 /// The "Two sides" direction (a second distance the other way).
 pub const TWO_SIDES: usize = 3;
@@ -6066,6 +6102,7 @@ pub fn apply_commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value)>
     }
     crate::length_input::extra(&mut normalized.extra, |e| crate::length_input::expression(&app.session.doc, e, ValueKind::Length));
     let mut cmds = dialog_commands(app, &normalized)?;
+    apply_body_name(d, &mut cmds);
     exact_regions(d, &mut cmds);
     crate::op_auto::scope_targets(app, d, &mut cmds)?;
     if crate::hole_folder::active(d) {
@@ -9227,6 +9264,12 @@ pub fn for_feature(app: &SolveApp, id: u64, marker: Option<usize>) -> Option<Dia
                 _ => break,
             }
         }
+    }
+    // The name the feature gave its body, if it gave one: shown in Body Name, kept on OK.
+    if body_name_slot(&d.kind).is_some()
+        && let Some(name) = f.body_names.first().filter(|name| !name.trim().is_empty())
+    {
+        d.extra.insert("body_name".into(), json!(name));
     }
     d.editing = Some((id, marker));
     d.active = 0;

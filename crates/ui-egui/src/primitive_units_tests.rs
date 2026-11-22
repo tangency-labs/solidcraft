@@ -1122,3 +1122,62 @@ fn the_point_input_of_the_box_sphere_and_torus_takes_snap_points() {
         assert!(!crate::snap_wake::wanted(&h.app), "{cmd}");
     }
 }
+
+/// Whether the open dialog shows its Body Name row (#20776).
+fn shows_body_name(h: &Harness) -> bool {
+    let label = solidcraft_ui_text::tr("ui.body_name");
+    h.output.accesskit_update.as_ref().unwrap().nodes.iter().any(|(_, n)| n.role() == egui::accesskit::Role::TextInput && n.label() == Some(label))
+}
+
+/// The `body_name` the open dialog's OK sends, if any.
+fn sent_body_name(h: &Harness) -> Option<String> {
+    // A refusal (a Cut with nothing to cut) sends nothing, so no name either.
+    let (_, params) = apply_commands(&h.app, h.app.dialog.as_ref().unwrap()).ok()?.into_iter().next()?;
+    params.get("body_name").and_then(Value::as_str).map(str::to_string)
+}
+
+#[test]
+fn the_body_name_row_shows_for_new_body_only_and_a_typed_name_names_the_body() {
+    for (cmd, _) in PRIMITIVES {
+        let mut h = design("mm");
+        h.app.start(cmd);
+        h.frames(3);
+        assert!(shows_body_name(&h), "{cmd}: New Body shows Body Name");
+        assert_eq!(sent_body_name(&h), None, "{cmd}: empty sends no body_name");
+        for operation in [1, 2] {
+            if let Some(Kind::Primitive { operation: op, .. }) = h.app.dialog.as_mut().map(|d| &mut d.kind) {
+                *op = operation;
+            }
+            h.app.dialog.as_mut().unwrap().extra.insert("body_name".into(), json!("Ignored"));
+            h.frames(2);
+            assert!(!shows_body_name(&h), "{cmd}: operation {operation} hides Body Name");
+            assert_eq!(sent_body_name(&h), None, "{cmd}: operation {operation} sends no body_name");
+        }
+        if let Some(Kind::Primitive { operation, .. }) = h.app.dialog.as_mut().map(|d| &mut d.kind) {
+            *operation = 0;
+        }
+        h.app.dialog.as_mut().unwrap().extra.insert("body_name".into(), json!("  Lid "));
+        h.frames(2);
+        assert!(shows_body_name(&h), "{cmd}: back to New Body shows it again");
+        assert_eq!(sent_body_name(&h).as_deref(), Some("Lid"), "{cmd}: a typed name is sent");
+    }
+    let mut h = design("mm");
+    h.app.start("solid.box");
+    h.frames(3);
+    h.app.dialog.as_mut().unwrap().extra.insert("body_name".into(), json!("Lid"));
+    h.frames(2);
+    ok(&mut h);
+    assert!(h.app.session.world_state().unwrap().body("Lid").is_some(), "the box's body is named Lid");
+}
+
+#[test]
+fn editing_a_primitive_shows_the_name_its_body_was_given() {
+    let mut h = design("mm");
+    h.app.run("solid.box", json!({"length": 10, "width": 10, "height": 10, "body_name": "Frame"})).unwrap();
+    h.frames(2);
+    let id = h.app.session.doc.features[0].id;
+    h.app.edit_feature(id);
+    h.frames(3);
+    assert!(shows_body_name(&h));
+    assert_eq!(sent_body_name(&h).as_deref(), Some("Frame"));
+}

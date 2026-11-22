@@ -815,7 +815,27 @@ pub(super) fn rows(app: &mut SolveApp, ctx: &egui::Context, d: &mut Dialog, ui: 
         }
         _ => enter |= additional_rows(app, d, ui),
     }
+    enter |= body_name_row(d, ui);
     error_rows(app, ctx, d, ui);
+    enter
+}
+
+/// The Body Name row of a feature that makes a body of its own (New Body): empty names it as the
+/// command always has, a typed name is sent as `body_name` (#20776).
+fn body_name_row(d: &mut Dialog, ui: &mut egui::Ui) -> bool {
+    if body_name_slot(&d.kind) != Some(true) {
+        return false;
+    }
+    let mut name = d.extra.get("body_name").and_then(Value::as_str).unwrap_or_default().to_string();
+    let mut enter = false;
+    form_row(ui, "ui.body_name", |ui| {
+        enter = ui_kit::text_field(ui, &mut name, tr("ui.body_name_hint")).0;
+    });
+    if name.trim().is_empty() {
+        d.extra.remove("body_name");
+    } else {
+        d.extra.insert("body_name".into(), json!(name));
+    }
     enter
 }
 
