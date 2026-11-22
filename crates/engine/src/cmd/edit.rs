@@ -37,6 +37,14 @@ pub static COMMANDS: &[CommandSpec] = &[
         .contract(&ASSISTANT_CONTRACT)
         .output(crate::schema::output_schema_for::<crate::schema::edit::AssistantResult>)
         .params("Show or hide Assistant in the app. Headless calls are refused without changing the design"),
+    CommandSpec::new("ui.appBarCustomize", "Customize App Bar...", crate::checked!("ui.appBarCustomize", app_bar_customize))
+        .any_part()
+        .icon("settings")
+        .noundo()
+        .doc_only()
+        .contract(&APP_BAR_CUSTOMIZE_CONTRACT)
+        .output(crate::schema::output_schema_for::<crate::schema::edit::AppBarCustomizeResult>)
+        .params("Validate access to the application bar editor; returns {available: true}. Only an interactive start toggles tray edit mode; programmatic calls never open dialogs"),
     CommandSpec::new("ui.appBarReset", "Reset App Bar", crate::checked!("ui.appBarReset", app_bar_reset))
         .any_part()
         .icon("restore")
@@ -338,6 +346,12 @@ fn assistant(_s: &mut Session, _p: &Value) -> Result<Value> {
 }
 
 const APP_BAR_RESET_CONTRACT: crate::schema::TypedContract<crate::schema::edit::AppBarResetParams> = crate::schema::TypedContract::new();
+
+const APP_BAR_CUSTOMIZE_CONTRACT: crate::schema::TypedContract<crate::schema::edit::AppBarCustomizeParams> = crate::schema::TypedContract::new();
+
+fn app_bar_customize(_s: &mut Session, _p: &Value) -> Result<Value> {
+    reply("ui.appBarCustomize", crate::schema::edit::AppBarCustomizeResult { available: true })
+}
 
 fn app_bar_reset(_s: &mut Session, _p: &Value) -> Result<Value> {
     reply("ui.appBarReset", crate::schema::edit::AppBarResetResult { reset: true })

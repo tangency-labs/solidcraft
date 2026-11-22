@@ -1,14 +1,21 @@
 # main ee673a19bf
+# boolean.topology_intersector_p2: #18065 moves gen0433 (WR-305, two curved pieces certified on their edges; gen0433_puts_two_certified_curved_pieces_on_their_edges); the digest is the branch file
 # topology.brep_validation: main's file without the coincidence search (WR-798): its 43 search cases and the `pairs` key gone, and the 7 generated cases that drew the search checking their bodies' pointers instead
+# offset.offset_geometry_creation: continuity reads make no surface cache (#20054): gen0152, gen0266, gen0462, gen0678 and gen0760 are this branch's lines. Tolerances they move against this main: gen0266's extended edge 8.102267117225637e-3 -> 4.0511335586128185e-3 (its ExtendTrimEdges now refuses and keeps its input); gen0462's edge 1.0661352728003874 -> 2e-5 (0.9939759047276184 after #18166) and gen0760's 1.0842329970128302 -> 1e-5, where ExtendTrimEdges refuses on both kernels and no longer leaves the lift's trim and raise on its input; none in gen0152 and gen0678. gen0462's row is removed: its output now changes outside its tolerances
+# surface.surface_p1: continuity answers no longer depend on the cache history, and a curve-bounded surface answers for its basis (#20054): 8 cases are this branch's lines (domhist0017, 0052, 0070, 0074, 0075, 0078, 0083 and gen0471; 0052, 0074 and 0075 are failed-history markers followed by their query's record), and 30 DomCont cases shown wrong are known failing with no line (#20239: 12 this branch changes, 18 unchanged from main); no tolerance moves
 # offset.offset_executive_p2: main's file with the offset-role attribute (#3138): the `attributes` key of its 30 cases that mark roles, the attribute-only rows
-blend.feature_executive	9ca7c0200e1392d9
+# blend.feature_executive, blend.fillet_executive_p3, corpus.parity, topology.brep_p10, topology.face_p3: main's files with the rows #17739's healed vertex tolerances move (a vertex covers twice its gap, tangency-labs/solidcraft#18667)
+# blend.fillet_executive_p3: main's file with the halved span's early stop (#13692): sweep5-nurb_box1-all-r0.5's edge [0, 18.0943] listed 24th instead of 1st, the topology and geometry blocks that follow it, and four mass-properties entries an ulp or two off (summation order)
+# surface.surface_point_solve_p2: main's file without the lines of gen0072 and gen0546, Solve maxima a witness grid refutes, now known failing (#13684)
+# surface.surface_point_solve_p3: main's file without the lines of 51 global point solves a witness grid refutes, now known failing (#13684)
+blend.feature_executive	2a4bd65805caa498
 blend.fillet_corner_p1	b2b709c01153c4b4
 blend.fillet_corner_p2	6d62684209753123
 blend.fillet_corner_p3	41ff3e1d687449c4
 blend.fillet_custom_solver	d5a7b6227772dc0a
 blend.fillet_executive_p1	86854330a700f392
 blend.fillet_executive_p2	68a6e765f600c883
-blend.fillet_executive_p3	ec9b6ecdf818171d
+blend.fillet_executive_p3	01bd061d3eaea1f0
 blend.fillet_geom_p1	82c1f975f967a59d
 blend.fillet_geom_p2	b536f37946629dc4
 blend.fillet_geom_p3	15646cd3bfb41d7e
@@ -33,9 +40,9 @@ boolean.merge_p3	0a6b36b7967dcf31
 boolean.merge_p4	bf8ba2db8a9be781
 boolean.merge_p5	bdfc40139f7e400b
 boolean.topology_intersector_p1	d480c2ec4731fa77
-boolean.topology_intersector_p2	a5adff2d8d1aa348
+boolean.topology_intersector_p2	35e1425fea2f8feb
 boolean.topology_intersector_p3	6047fab1fddd550d
-corpus.parity	446a9aa2553dd78d
+corpus.parity	8acf1f90618ef76c
 curve.composite_curve_p1	1b0a64a4a148983b
 curve.composite_curve_p2	4fa0f15e4b4a048b
 curve.conic	4955fffee7af9409
@@ -175,7 +182,7 @@ nurbs.nurbs_crv	c78af304772ea823
 nurbs.nurbs_srf	5ea987b73e360223
 offset.offset_executive_p1	369d6f853189d32e
 offset.offset_executive_p2	b91d8c7ba88fdca3
-offset.offset_geometry_creation	4d4f0c63c3072eb9
+offset.offset_geometry_creation	2c440b64ff708928
 primitive.api_curve_ops	631989d29fe6f1dc
 primitive.api_curves	b384f5e70c20e9db
 primitive.api_primitives	eeb3268ad6487712
@@ -218,7 +225,7 @@ surface.surface_assert_valid	d9eaf9799f02d1ab
 surface.surface_cache_p1	36658877fe9eeb92
 surface.surface_cache_p2	d1495af52c276267
 surface.surface_cache_p3	c8c671adf2960218
-surface.surface_p1	18393fbdd3f836ba
+surface.surface_p1	eff5ae65d43de6d5
 surface.surface_p10	4c4881a050a1ae8a
 surface.surface_p11	4813228760084e49
 surface.surface_p2	be0e87faaf6b9c35
@@ -230,8 +237,8 @@ surface.surface_p7	6619493f96d9d624
 surface.surface_p8	8c429b3fc714a3d3
 surface.surface_p9	f2fca09a332c9f42
 surface.surface_point_solve_p1	4c854434083b74bd
-surface.surface_point_solve_p2	93e2c5b6169847de
-surface.surface_point_solve_p3	2cde20342ed8b4f9
+surface.surface_point_solve_p2	44853fdb11f55ee8
+surface.surface_point_solve_p3	47b41b54631f9cd9
 surface.torus	3bc22a9cc79e4e78
 surface.trim_srf_cache	655dddeca4f5ba3b
 surface.twist_volume	185622854f391b03
@@ -253,7 +260,7 @@ topology.brep_data	cd9a3471ed924772
 topology.brep_local_operation	00c1f7e94a38480a
 topology.brep_mirror	718965df3039bddd
 topology.brep_p1	5f0dfd9dc7c0575b
-topology.brep_p10	4def5cf0011e24f6
+topology.brep_p10	f99cdbfd5bb734b6
 topology.brep_p2	3243a0a3d5597f36
 topology.brep_p3	55661c22ae62a97f
 topology.brep_p4	2b2814e782d110c9
@@ -271,7 +278,7 @@ topology.edgeuse_p2	4b628e0b414efcc0
 topology.edgeuse_p3	2fa671be5fe983ba
 topology.face_p1	eae7279ae1704f4d
 topology.face_p2	3d9f19f33644771c
-topology.face_p3	7567416bb65167f9
+topology.face_p3	100eae05c5608203
 topology.face_p4	539b264456215c71
 topology.loopuse	a5205f3ad278e686
 topology.part_file	059f0c49211cb6c3

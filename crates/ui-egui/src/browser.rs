@@ -3769,7 +3769,7 @@ pub fn dims_overlay(app: &SolveApp, painter: &egui::Painter, proj: &crate::viewp
     let rect = painter.clip_rect();
     let mut drawn = Vec::new();
     let tk = Tokens::get();
-    let st = crate::open_meshing::session_world(&app.session);
+    let st = crate::open_meshing::still_world(app);
     for id in app
         .session
         .visibility
