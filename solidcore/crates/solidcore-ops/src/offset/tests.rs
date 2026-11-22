@@ -2424,6 +2424,51 @@ mod drafts {
         let report = b.check(crate::CheckLevel::All).unwrap();
         assert_eq!(report.failures, 0, "{}", report.text);
     }
+    /// #20767 (stress corpus S8188): a cone r 2 at z = 0 to r 1 at z = 3 shelled 0.12 in to a
+    /// closed cavity, its side drafted 3 degrees about its base, leaning in going up. The side's
+    /// wall is 0.12 / cos(atan(1/3)) = 0.04 sqrt(10) across, horizontally, so the cavity's rim at
+    /// z = 2.88 has radius 2 - 0.04 sqrt(10) - 0.96. Drafted by theta the side is
+    /// r = 2 - z tan(atan(1/3) + theta), which reaches the rim at
+    /// theta = atan((2 - rim) / 2.88) - atan(1/3), 2.234 degrees: 3 degrees would carry the side
+    /// through the cavity. Refused naming that angle, the body as it came in (the cone's
+    /// 7 pi less the cavity, pi 0.92 (R^2 + R rim + rim^2), R = rim + 0.92 the radius at
+    /// z = 0.12). With a 0.5 wall the rim is reached only at 10.118 degrees, and 3 degrees builds
+    /// the drafted cone, top radius 2 - 3 tan(atan(1/3) + 3 degrees), less the cavity.
+    #[test]
+    fn a_shelled_cones_side_drafted_into_its_cavity_is_refused_naming_the_largest_angle() {
+        // atan((2 - rim) / 2.88) - atan(1/3), rim = 2 - 0.04 sqrt(10) - 0.96
+        const LARGEST: f64 = 0.038_994_633_885_685_75;
+        // 7 pi less the cavity, rim and R = rim + 0.92 as above
+        const SHELLED: f64 = 5.021_880_973_325_445;
+        // the 0.5 wall's: the drafted cone less the cavity z 0.5 to 2.5,
+        // rim 2 - sqrt(10) / 6 - 2.5 / 3
+        const DRAFTED: f64 = 13.675_559_992_581_547;
+        all_fixes();
+        for (wall, drafts) in [(0.12, false), (0.5, true)] {
+            let c = make_cone([0.0; 3], 2.0, 1.0, 3.0).unwrap();
+            crate::offset::shell(&c, &order(&c), &[], -wall).unwrap();
+            let o = order(&c);
+            let side = face(&c, &o, |bx| bx.max().x > 1.99 && bx.max().z > 2.99);
+            let got = draft(&c, &o, &[side], [0.0; 3], Z, Z, THREE);
+            if drafts {
+                assert_eq!(got, Ok(()));
+                assert!(rel(volume(&c), DRAFTED) < 1e-9, "{}", volume(&c));
+                assert!(c.is_manifold_solid().unwrap());
+                continue;
+            }
+            match got {
+                Err(Error::OffsetRefused {
+                    face,
+                    why: crate::OffsetRefusal::DraftClosesWall { largest },
+                }) => {
+                    assert_eq!(face, Some(side));
+                    assert!((largest - LARGEST).abs() < 1e-12, "{largest}");
+                }
+                other => panic!("{other:?}"),
+            }
+            assert!(rel(volume(&c), SHELLED) < 1e-9, "{}", volume(&c));
+        }
+    }
 }
 
 /// Kernel diagnostics cross the application seam here; the app receives only ops

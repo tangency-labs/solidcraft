@@ -29,6 +29,7 @@ use solidcore::nurbs::b_spline_curve::ControlPointForm;
 use solidcore::nurbs::b_spline_surface::p1::SurfParamType;
 use solidcore::nurbs::b_spline_surface_n_lib::p2::OrientType;
 use solidcore::nurbs::knots::Side;
+use solidcore::offset::draft::{Draft, refuse_closing_wall};
 use solidcore::offset::offset_executive::p2::{OffsetOptions, ShellOptions, local_operation_simple, offset_brep_simple};
 use solidcore::offset::offset_faces::{OffsetFacesExecutive, OffsetFacesRefusal};
 use solidcore::query::api_queries::{face_bounding_box, face_classify_uv, face_closest_point_in_shape, face_internal_point};
@@ -622,6 +623,7 @@ pub(crate) fn draft(
             Err(m) => return Ok(Err(face_miss(m))),
         };
         // `draft_faces`.
+        let Ok(the_draft) = Draft::new(p3(neutral_origin), normal, along, angle) else { return Ok(Err(Error::Argument)) };
         let mut surfaces = Vec::with_capacity(picked.len());
         for &f in &picked {
             let fu = outer_faceuse(&w, f)?;
@@ -641,6 +643,11 @@ pub(crate) fn draft(
                 match drafted_cone(k, &cyl, n, inside, p3(neutral_origin), normal, along, angle)? {
                     Ok(cone) => surfaces.push(Surface::from(cone)),
                     Err(e) => return Ok(Err(e)),
+                }
+                // A drafted cone that would reach a cavity's wall closes the wall: refused with the
+                // largest angle that keeps it (#20767), before anything changes.
+                if let Err(e) = called(refuse_closing_wall(k, &w, f, &the_draft))? {
+                    return Ok(Err(e));
                 }
                 continue;
             }

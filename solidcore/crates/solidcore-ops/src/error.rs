@@ -586,6 +586,13 @@ pub enum OffsetRefusal {
         /// How far the face could move and still meet the face beside it.
         largest: f64,
     },
+    /// A draft that would carry the drafted face (a cone or cylinder about the pull) into
+    /// another shell of the body, a cavity's wall or another lump, closing the wall between
+    /// them. `largest` is the largest draft angle that keeps a wall, radians.
+    DraftClosesWall {
+        /// The largest draft angle that keeps a wall, radians.
+        largest: f64,
+    },
     /// How far the surfaces beside an edge or at a vertex of the face must be extended to
     /// meet has no certified bound (a pair or corner of kinds it does not bound yet): refused
     /// before anything changed.
@@ -659,6 +666,11 @@ impl std::fmt::Display for OffsetRefusal {
                 f,
                 "it would move past where the curved face beside it ends; it meets that face \
                  only while it moves less than {largest}"
+            ),
+            OffsetRefusal::DraftClosesWall { largest } => write!(
+                f,
+                "the drafted face would reach another shell of the body, closing the wall \
+                 between them; the largest draft angle that keeps a wall is {largest} rad"
             ),
             OffsetRefusal::ReachUncertified => {
                 write!(

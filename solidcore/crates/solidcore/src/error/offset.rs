@@ -23,6 +23,7 @@
 //! | [`OffsetFailure::LooseTangentEdge`]    | `SM_ERR` (WR-530, solidcore-native)       |
 //! | [`OffsetFailure::FacesApart`]          | `SM_ERR` (solidcore-native)               |
 //! | [`OffsetFailure::PastSide`]            | `SM_ERR` (#18564, solidcore-native)       |
+//! | [`OffsetFailure::DraftClosesWall`]     | `SM_ERR` (#20767, solidcore-native)       |
 //! | [`OffsetFailure::ReachUncertified`]    | `SM_ERR` (solidcore-native)               |
 //! | [`OffsetFailure::LoopGapUncertified`]  | `SM_ERR` (solidcore-native)               |
 //! | [`OffsetFailure::Unsound`]             | `SM_ERR` (solidcore-native)               |
@@ -227,6 +228,20 @@ pub enum OffsetFailure {
         /// How far the face could move and still meet the side.
         largest: f64,
     },
+    /// A draft of `face`, a cone or cylinder about the pull, would carry its drafted cone
+    /// into another shell of the body (a cavity's wall, or another lump), first at `wall`,
+    /// a face of that shell: the wall between them would close, and the faces cross.
+    /// `largest` is the largest draft angle that keeps a wall, radians
+    /// ([`crate::offset::draft::largest_clear_angle`], #20767). Refused before anything
+    /// changes.
+    DraftClosesWall {
+        /// The drafted face, of the operation's input.
+        face: FaceId,
+        /// The face of the other shell the drafted cone reaches first.
+        wall: FaceId,
+        /// The largest draft angle that keeps a wall, radians.
+        largest: f64,
+    },
     /// In a local operation, a surface beside an edge or at a vertex of `face` moves, and
     /// how far the surfaces there must be extended to meet has no certified bound
     /// ([`crate::offset::offset_executive::reach::local_extension_reach`]): a pair or corner
@@ -403,6 +418,7 @@ impl OffsetFailure {
             | Self::SeamOpened { face }
             | Self::FacesApart { face }
             | Self::PastSide { face, .. }
+            | Self::DraftClosesWall { face, .. }
             | Self::ReachUncertified { face } => Some(EntityRef::Face(face)),
             Self::WallsTouch { face, .. } | Self::LoopsCross { face, .. } => {
                 face.map(EntityRef::Face)
@@ -471,6 +487,7 @@ impl OffsetFailure {
             | Self::PeriodicBranchAmbiguous
             | Self::FacesApart { .. }
             | Self::PastSide { .. }
+            | Self::DraftClosesWall { .. }
             | Self::ReachUncertified { .. }
             | Self::LoopGapUncertified { .. }
             | Self::Unsound { .. }
@@ -509,6 +526,7 @@ impl OffsetFailure {
             | Self::PeriodicBranchAmbiguous
             | Self::FacesApart { .. }
             | Self::PastSide { .. }
+            | Self::DraftClosesWall { .. }
             | Self::ReachUncertified { .. }
             | Self::LoopGapUncertified { .. }
             | Self::Unsound { .. }
@@ -528,6 +546,7 @@ impl OffsetFailure {
             | Self::SeamOpened { .. }
             | Self::FacesApart { .. }
             | Self::PastSide { .. }
+            | Self::DraftClosesWall { .. }
             | Self::ReachUncertified { .. }
             | Self::ExactCurveUncut
             | Self::TangentEndOffCurve
@@ -563,6 +582,7 @@ impl OffsetFailure {
             Self::SeamOpened { .. }
             | Self::FacesApart { .. }
             | Self::PastSide { .. }
+            | Self::DraftClosesWall { .. }
             | Self::ReachUncertified { .. }
             | Self::ExactCurveUncut
             | Self::TangentEndOffCurve
@@ -802,6 +822,19 @@ impl core::fmt::Display for OffsetFailure {
                  that side only while it moves less than {largest}",
                 face.index(),
                 side.index()
+            ),
+            Self::DraftClosesWall {
+                face,
+                wall,
+                largest,
+            } => write!(
+                f,
+                "drafted, face {} reaches face {} of another shell of the body, closing the \
+                 wall between them: the largest draft angle that keeps a wall is {largest} \
+                 radians ({} degrees)",
+                face.index(),
+                wall.index(),
+                largest.to_degrees()
             ),
             Self::ReachUncertified { face } => write!(
                 f,
@@ -1152,6 +1185,16 @@ mod tests {
             ),
             // a failure reviewed as the kernel's fault, with its reason
             (O::Defect { why: "x" }, ErrorKind::StageFailed, false, true),
+            (
+                O::DraftClosesWall {
+                    face,
+                    wall: face,
+                    largest: 0.04,
+                },
+                ErrorKind::Unsupported,
+                false,
+                false,
+            ),
         ];
         let row = |o: &O| -> usize {
             match o {
@@ -1181,6 +1224,7 @@ mod tests {
                 O::PastSide { .. } => 23,
                 O::PeriodicBranchAmbiguous => 24,
                 O::Defect { .. } => 25,
+                O::DraftClosesWall { .. } => 26,
             }
         };
         for (i, (o, class, phrase, defect)) in pinned.iter().enumerate() {

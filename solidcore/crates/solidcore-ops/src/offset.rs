@@ -21,7 +21,7 @@
 use solidcore::error::offset::OffsetFailure;
 use solidcore::error::{ErrorKind, Reason};
 use solidcore::geom::attribute::{ids, Attribute, Behavior};
-use solidcore::offset::draft::{draft_surface, Draft, DraftRefusal};
+use solidcore::offset::draft::{draft_surface, refuse_closing_wall, Draft, DraftRefusal};
 use solidcore::offset::offset_executive::p2::{
     local_operation_simple, offset_brep_simple, OffsetOptions, ShellOptions,
 };
@@ -230,6 +230,9 @@ fn offset_refused(
         OffsetFailure::ExactCurveUncut => OffsetRefusal::ExactCurveUncut,
         OffsetFailure::FacesApart { .. } => OffsetRefusal::FacesApart,
         OffsetFailure::PastSide { largest, .. } => OffsetRefusal::PastSide { largest },
+        OffsetFailure::DraftClosesWall { largest, .. } => {
+            OffsetRefusal::DraftClosesWall { largest }
+        }
         OffsetFailure::ReachUncertified { .. } => OffsetRefusal::ReachUncertified,
         OffsetFailure::LoopGapUncertified { .. } => OffsetRefusal::LoopGapUncertified,
         OffsetFailure::Unsound { what } => match unsound(what, index) {
@@ -617,8 +620,9 @@ fn refused(r: DraftRefusal) -> Error {
 /// neutral plane for a plane face;
 /// [`Error::Unsupported`] for a face the kernel cannot draft (what it is), or a face drafted past
 /// where its neighbours meet; [`Error::NoEffect`] for a draft that moved no face;
-/// [`Error::OffsetRefused`] for a face the kernel refuses with a reason; the kernel's other
-/// errors; those of [`finish`].
+/// [`Error::OffsetRefused`] for a face the kernel refuses with a reason (a drafted cone that
+/// would reach a cavity's wall: [`OffsetRefusal::DraftClosesWall`], the largest angle that keeps
+/// the wall); the kernel's other errors; those of [`finish`].
 pub fn draft(
     body: &Body,
     order: &Order,
@@ -654,6 +658,11 @@ pub fn draft(
                 Ok(Ok(s)) => surfaces.push(s),
                 Ok(Err(r)) => return Ok(Err(refused(r))),
                 Err(e) => return Ok(Err(status(e, &in_order(order)))),
+            }
+            // a drafted cone that would reach a cavity's wall closes the wall: refused with
+            // the largest angle that keeps it, before anything changes
+            if let Err(e) = refuse_closing_wall(k, b, f, &the_draft) {
+                return Ok(Err(status(e, &in_order(order))));
             }
         }
         // the marks live for this call only: put on the picked faces, read and removed once the
