@@ -817,12 +817,23 @@ fn outline_cell(point: [f64; 2]) -> (i64, i64) {
 }
 
 /// Take a joined segment's ends out of the grid: it holds only the segments not joined yet.
-fn forget_outline_segment(cells: &mut std::collections::HashMap<(i64, i64), Vec<usize>>, segment: ([f64; 2], [f64; 2]), index: usize) {
+/// Returns how many entries it looked through, which counts toward the join's work limit.
+fn forget_outline_segment(cells: &mut std::collections::HashMap<(i64, i64), Vec<usize>>, segment: ([f64; 2], [f64; 2]), index: usize) -> usize {
+    let mut looked = 0usize;
     for end in [segment.0, segment.1] {
         if let Some(cell) = cells.get_mut(&outline_cell(end)) {
+            looked = looked.saturating_add(cell.len());
             cell.retain(|other| *other != index);
         }
     }
+    looked
+}
+
+/// What the outline join gives when it passes its work limit: no outline at all (not the
+/// contours closed before it), and the warning that says why.
+fn outline_join_given_up(warnings: &mut Vec<String>) -> Vec<Vec<[f64; 2]>> {
+    warnings.push("the Edge.Cuts outline has too many ends in one place to join".into());
+    Vec::new()
 }
 
 fn join_outline_segments(segments: Vec<([f64; 2], [f64; 2])>, warnings: &mut Vec<String>) -> Vec<Vec<[f64; 2]>> {
@@ -841,11 +852,10 @@ fn join_outline_segments(segments: Vec<([f64; 2], [f64; 2])>, warnings: &mut Vec
             continue;
         }
         if work > MAX_OUTLINE_JOIN_WORK {
-            warnings.push("the Edge.Cuts outline has too many ends in one place to join".into());
-            break;
+            return outline_join_given_up(warnings);
         }
         used[index] = true;
-        forget_outline_segment(&mut cells, segments[index], index);
+        work = work.saturating_add(forget_outline_segment(&mut cells, segments[index], index));
         let (start, end) = segments[index];
         let mut contour = vec![start, end];
         let mut closed = near2(start, end);
@@ -879,11 +889,11 @@ fn join_outline_segments(segments: Vec<([f64; 2], [f64; 2])>, warnings: &mut Vec
             }
             let Some((_, next_index, forward)) = best else { break };
             if work > MAX_OUTLINE_JOIN_WORK {
-                break;
+                return outline_join_given_up(warnings);
             }
             let (Some(taken), Some(segment)) = (used.get_mut(next_index), segments.get(next_index).copied()) else { break };
             *taken = true;
-            forget_outline_segment(&mut cells, segment, next_index);
+            work = work.saturating_add(forget_outline_segment(&mut cells, segment, next_index));
             contour.push(if forward { segment.1 } else { segment.0 });
             if contour.len() > MAX_OUTLINE_POINTS {
                 contour.clear();

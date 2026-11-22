@@ -201,8 +201,10 @@ fn an_outline_piece_shorter_than_the_joining_distance_is_kept() {
 #[test]
 fn an_outline_with_its_ends_piled_in_one_place_is_given_up_not_searched_forever() {
     // 12,000 short pieces zigzag inside one 0.01 mm square, so every step of the join would look at
-    // every end left: about 144 million looks. The join stops at its limit and says so.
-    let mut source = String::from("(kicad_pcb (general (thickness 1.6))\n");
+    // every end left: about 144 million looks. The join stops at its limit and says so. A closed
+    // square drawn before the pile is not kept either: the board gets no outline, not part of one.
+    let given_up = "the Edge.Cuts outline has too many ends in one place to join";
+    let mut source = String::from("(kicad_pcb (general (thickness 1.6))\n(gr_rect (start 10 10) (end 20 20) (layer \"Edge.Cuts\"))\n");
     let point = |i: usize| (0.002 + 0.002 * (i % 2) as f64, 0.0005 + 5e-7 * i as f64);
     for i in 0..12_000 {
         let ((x0, y0), (x1, y1)) = (point(i), point(i + 1));
@@ -211,7 +213,21 @@ fn an_outline_with_its_ends_piled_in_one_place_is_given_up_not_searched_forever(
     source.push(')');
     let board = parse_kicad_board(source.as_bytes(), "pile.kicad_pcb").unwrap();
     assert!(board.outlines.is_empty(), "{} outlines", board.outlines.len());
-    assert!(board.warnings.iter().any(|w| w == "the Edge.Cuts outline has too many ends in one place to join"), "{:?}", board.warnings);
+    assert!(board.warnings.iter().any(|w| w == given_up), "{:?}", board.warnings);
+
+    // Pieces of no length skip the search for a next piece, but taking each one out of the grid
+    // still looks through every end in its cell: 100,000 of them in one spot is 2 × 10¹⁰ looks
+    // unless that counts toward the limit too.
+    let mut source = String::from("(kicad_pcb (general (thickness 1.6))\n");
+    for _ in 0..100_000 {
+        source.push_str("(gr_line (start 0.005 0.005) (end 0.005 0.005) (layer \"Edge.Cuts\"))\n");
+    }
+    source.push(')');
+    let started = std::time::Instant::now();
+    let board = parse_kicad_board(source.as_bytes(), "points.kicad_pcb").unwrap();
+    assert!(board.outlines.is_empty(), "{} outlines", board.outlines.len());
+    assert!(board.warnings.iter().any(|w| w == given_up), "{:?}", board.warnings.iter().take(3).collect::<Vec<_>>());
+    assert!(started.elapsed() < std::time::Duration::from_secs(30), "{:?}", started.elapsed());
 }
 
 #[test]
