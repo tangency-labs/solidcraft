@@ -144,7 +144,7 @@ fn insert_atomic(s: &mut Session, p: &Value) -> Result<Value> {
     computed.active_component = s.active_component;
     computed.active_occurrence_path = s.active_occurrence_path.clone();
     computed.active_sketch = s.active_sketch.filter(|id| computed.doc.feature(*id).is_some());
-    s.accept_computed(computed);
+    s.accept_computed(computed)?;
     Ok(result)
 }
 
@@ -298,7 +298,7 @@ fn edit_atomic(s: &mut Session, p: &Value) -> Result<Value> {
     computed.active_component = s.active_component;
     computed.active_occurrence_path = s.active_occurrence_path.clone();
     computed.active_sketch = s.active_sketch.filter(|id| computed.doc.feature(*id).is_some());
-    s.accept_computed(computed);
+    s.accept_computed(computed)?;
     Ok(result)
 }
 
