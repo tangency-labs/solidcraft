@@ -535,20 +535,12 @@ pub enum BlendFailure {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum FilletSetUp {
-    /// A fillet geometry's solver.
-    GeomSolver,
-    /// One of a fillet solver's two edge uses.
-    SolverEdgeUse,
     /// One of a fillet solver's two offset surfaces.
     SolverOffsetSurface,
     /// The offset surface of a fillet geometry's rail, its own or its solver's.
     RailOffsetSurface,
-    /// The edge of an edge use of the body.
-    EdgeUseEdge,
     /// The vertex use an edge use of the body starts at.
     EdgeUseVertexUse,
-    /// The face an edge use of the body lies in.
-    EdgeUseFace,
     /// The face use of a vertex use of a face's loop.
     VertexUseFaceUse,
     /// The body vertex a fillet corner rounds.
@@ -595,15 +587,11 @@ impl FilletSetUp {
     /// What is wrong, as a clause.
     const fn what(self) -> &'static str {
         match self {
-            Self::GeomSolver => "a fillet geometry has no solver",
-            Self::SolverEdgeUse => "a fillet solver lacks one of its two edge uses",
             Self::SolverOffsetSurface => "a fillet solver lacks one of its two offset surfaces",
             Self::RailOffsetSurface => {
                 "a rail of a fillet geometry has no offset surface, of its own or its solver's"
             }
-            Self::EdgeUseEdge => "an edge use of the body belongs to no edge",
             Self::EdgeUseVertexUse => "an edge use of the body starts at no vertex use",
-            Self::EdgeUseFace => "an edge use of the body lies in no face",
             Self::VertexUseFaceUse => "a vertex use of a face's loop is in no face use",
             Self::CornerVertex => "the fillet corner records no body vertex it rounds",
             Self::PointClassFace => "a fillet vertex is not classified to a face",
@@ -3074,7 +3062,7 @@ mod tests {
                 input: CornerInput::EdgeWithoutCurve,
                 entity: None,
             },
-            BlendFailure::FilletSetUpInvalid(FilletSetUp::GeomSolver),
+            BlendFailure::FilletSetUpInvalid(FilletSetUp::SolverOffsetSurface),
             BlendFailure::StageFailed,
             BlendFailure::Defect { why: "x" },
             BlendFailure::NotCertified {
