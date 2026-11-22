@@ -1251,6 +1251,8 @@ fn deleting_sketch_entities_ignores_a_canvas_removed_by_undo() {
         app.tree.picked_canvases = vec![removed];
         app.run("edit.undo", json!({})).unwrap();
         assert!(!app.session.doc.canvases.iter().any(|canvas| canvas.id == removed));
+        // Inserting a canvas ended the sketch; open it again to delete from it.
+        app.run("sketch.edit", json!({"sketch": sketch})).unwrap();
         app.run("select.set", json!({"items": [{"type": "sketch_curve", "id": line}]})).unwrap();
         if include_existing_canvas {
             app.tree.picked_canvases.push(kept);
