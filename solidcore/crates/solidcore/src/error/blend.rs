@@ -30,6 +30,9 @@
 //! | the fillet executive's checks of the caller's arguments and body ([`BlendFailure::NoEdgesGiven`], [`BlendFailure::SizeBelowResolution`], [`BlendFailure::PerEdgeListLength`], [`BlendFailure::ParameterListSizes`], [`BlendFailure::FaceHasNoSurface`], [`BlendFailure::NoFirstBody`], [`BlendFailure::TargetNotGiven`], [`BlendFailure::EdgeNotInTarget`], [`BlendFailure::EdgeNotFilletable`], [`BlendFailure::GnSectionInvalid`], [`BlendFailure::CrossSectionTypeUnknown`], [`BlendFailure::RadiusTypeNotForEdges`], [`BlendFailure::VariableRadiusLawsNotGiven`], [`BlendFailure::VariableRadiusLawMissing`], [`BlendFailure::BevelVertexNotFilleted`], [`BlendFailure::LawIntervalEmpty`], [`BlendFailure::EdgeWithoutCurve`]) | [`ErrorKind::InvalidInput`] (1) |
 //! | [`BlendFailure::LawHasNoValue`], [`BlendFailure::SequenceCurveNotBSpline`], [`BlendFailure::FilletCrossesItself`] | [`ErrorKind::Unsupported`] (5) |
 //! | [`BlendFailure::CornerRefused`], [`BlendFailure::ExecutiveStepFailed`] | [`ErrorKind::Failed`] (6): neither defect nor refusal, so a kept cause decides |
+//! | [`BlendFailure::OverflowInputMissing`] | [`ErrorKind::Missing`]: neither defect nor refusal |
+//! | [`BlendFailure::OverflowPointDoesNotDrop`], [`BlendFailure::NoBlendedEdgeNearExtension`] | [`ErrorKind::NotFound`] (2) |
+//! | [`BlendFailure::ExtensionEndOnTwoSideLines`] | [`ErrorKind::Unsupported`] (5) |
 //! | the phrase causes ([`BlendFailure::Failed`], [`BlendFailure::Missing`], ...) | their status's kind, as before the record; neither defect nor refusal |
 //!
 //! **Statuses.** Each failure also records, for difftest and the goldens only, the status
@@ -41,7 +44,8 @@
 //! |----------------------------------------|-----------------------------------|
 //! | [`BlendFailure::NoRoom`], [`BlendFailure::RemovalRefused`], [`BlendFailure::StationDidNotConverge`], [`BlendFailure::TrimLoopOpen`], [`BlendFailure::TrimLoopDoesNotSeparate`], [`BlendFailure::StageFailed`], [`BlendFailure::Defect`], [`BlendFailure::SkinPastStationCap`], [`BlendFailure::SkinMeasureNotFinite`], [`BlendFailure::BallsNest`], [`BlendFailure::CreasePieceEndUnbuildable`], [`BlendFailure::PlaneCurveTouches`], [`BlendFailure::PlaneCurveEndOff`], [`BlendFailure::PlaneCurveLeavesDomain`], [`BlendFailure::PlaneCurveStepVanished`], [`BlendFailure::PlaneCurveFitCap`] | `SM_ERR` |
 //! | [`BlendFailure::Failed`], [`BlendFailure::LawIntervalEmpty`], [`BlendFailure::LawHasNoValue`], [`BlendFailure::FilletCrossesItself`], [`BlendFailure::CornerRefused`], [`BlendFailure::ExecutiveStepFailed`] | `SM_ERR` |
-//! | [`BlendFailure::Missing`], [`BlendFailure::BandInputMissing`], [`BlendFailure::VariableRadiusLawsNotGiven`], [`BlendFailure::BevelVertexNotFilleted`], [`BlendFailure::EdgeWithoutCurve`], [`BlendFailure::SequenceCurveNotBSpline`] | `SM_ERR_NULL_POINTER` |
+//! | [`BlendFailure::OverflowPointDoesNotDrop`], [`BlendFailure::ExtensionEndOnTwoSideLines`], [`BlendFailure::NoBlendedEdgeNearExtension`] | `SM_ERR` |
+//! | [`BlendFailure::Missing`], [`BlendFailure::BandInputMissing`], [`BlendFailure::VariableRadiusLawsNotGiven`], [`BlendFailure::BevelVertexNotFilleted`], [`BlendFailure::EdgeWithoutCurve`], [`BlendFailure::SequenceCurveNotBSpline`], [`BlendFailure::OverflowInputMissing`] | `SM_ERR_NULL_POINTER` |
 //! | [`BlendFailure::InvalidValue`], the fillet executive's other checks of the caller's arguments | `SM_ERR_INVALID_INPUT` |
 //! | [`BlendFailure::Inconsistent`]         | `SM_ERR_ASSERT_FAILURE`           |
 //! | [`BlendFailure::BadIntersections`]     | `SM_ERR_BAD_INTERSECTIONS`        |
@@ -371,6 +375,26 @@ pub enum BlendFailure {
     /// the cause. [`ErrorKind::Failed`], neither a defect nor a refusal on its own, so the
     /// kept cause decides ([`crate::SolidError::is_defect`]); status `SM_ERR`.
     ExecutiveStepFailed,
+    /// A face or edge the cliff overflow reads lacks the input named (a face's surface, an
+    /// edge's curve or one of its vertices); the failure is at the entity. The overflow's
+    /// helpers read the caller's body and the sheet the executive built alike, so the cause
+    /// names what is missing and leaves the blame open, as [`BlendFailure::CliffInputMissing`]
+    /// does: status `SM_ERR_NULL_POINTER` (upstream `NER`) and the kind of that status
+    /// ([`ErrorKind::Missing`]), neither a defect nor a refusal.
+    OverflowInputMissing(OverflowInput),
+    /// A point of the cliff overflow does not drop onto the geometry named
+    /// ([`OverflowDrop`]): the closest-point search found no foot (within ten tolerances, for
+    /// an edge's curve). An empty search ([`ErrorKind::NotFound`]); status `SM_ERR`.
+    OverflowPointDoesNotDrop(OverflowDrop),
+    /// The end of a kept rail's run past a face's boundary lies on the lines of two side
+    /// edges of the face (straight edges that are not blended), and the extension joins the
+    /// end to one side line only; the failure is at the face. A construction the overflow
+    /// does not build ([`ErrorKind::Unsupported`]); status `SM_ERR`.
+    ExtensionEndOnTwoSideLines,
+    /// No blended edge's curve takes the drop of the middle of an extension's chain, so the
+    /// side the blend takes off from is not known. An empty search ([`ErrorKind::NotFound`]);
+    /// status `SM_ERR`.
+    NoBlendedEdgeNearExtension,
     /// The routine could not continue, as the phrase says (for example "the fillet's law
     /// has no value at the base"). Upstream `return SE(SM_ERR)`. A phrase cause
     /// ([`BlendFailure::is_phrase`]).
@@ -456,6 +480,64 @@ impl CliffInput {
             Self::Surface => "surface",
             Self::Plane => "plane",
             Self::OutwardFaceUse => "outward face use",
+        }
+    }
+}
+
+/// What a face or edge the cliff overflow reads lacks ([`BlendFailure::OverflowInputMissing`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum OverflowInput {
+    /// A face's surface.
+    FaceSurface,
+    /// An edge's curve.
+    EdgeCurve,
+    /// An edge's start vertex.
+    EdgeStartVertex,
+    /// An edge's end vertex.
+    EdgeEndVertex,
+    /// An edge's vertex at its other end from a vertex on it.
+    EdgeOtherVertex,
+}
+
+impl OverflowInput {
+    const fn what(self) -> &'static str {
+        match self {
+            Self::FaceSurface => "a face the cliff overflow reads has no surface",
+            Self::EdgeCurve => "an edge the cliff overflow reads has no curve",
+            Self::EdgeStartVertex => "an edge the cliff overflow reads has no start vertex",
+            Self::EdgeEndVertex => "an edge the cliff overflow reads has no end vertex",
+            Self::EdgeOtherVertex => {
+                "an edge the cliff overflow walks has no vertex at its other end"
+            }
+        }
+    }
+}
+
+/// What a point of the cliff overflow does not drop onto
+/// ([`BlendFailure::OverflowPointDoesNotDrop`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum OverflowDrop {
+    /// An end of a piece of the body's edge an extension runs along, onto the edge's curve
+    /// (within ten tolerances).
+    EdgePieceEndOntoEdge,
+    /// The middle of the filleted edge, onto a fillet face cut at an open end.
+    EdgeMiddleOntoFilletFace,
+    /// A sample of a closing face's loop, onto the face's surface.
+    LoopSampleOntoSurface,
+}
+
+impl OverflowDrop {
+    const fn what(self) -> &'static str {
+        match self {
+            Self::EdgePieceEndOntoEdge => "an end of an edge's piece does not drop onto the edge",
+            Self::EdgeMiddleOntoFilletFace => {
+                "the filleted edge's middle does not drop onto a fillet face cut at an open end"
+            }
+            Self::LoopSampleOntoSurface => {
+                "a sample of a closing face's loop does not drop onto its surface"
+            }
         }
     }
 }
@@ -695,10 +777,14 @@ impl BlendFailure {
             | Self::FilletCrossesItself { .. }
             | Self::CornerRefused
             | Self::ExecutiveStepFailed
+            | Self::OverflowPointDoesNotDrop(_)
+            | Self::ExtensionEndOnTwoSideLines
+            | Self::NoBlendedEdgeNearExtension
             | Self::Failed(_) => SM_ERR,
             Self::Missing(_)
             | Self::BandInputMissing(_)
             | Self::CliffInputMissing { .. }
+            | Self::OverflowInputMissing(_)
             | Self::VariableRadiusLawsNotGiven
             | Self::BevelVertexNotFilleted
             | Self::EdgeWithoutCurve
@@ -764,8 +850,14 @@ impl BlendFailure {
             Self::CreasePieceEndUnbuildable { .. }
             | Self::LawHasNoValue
             | Self::SequenceCurveNotBSpline { .. }
-            | Self::FilletCrossesItself { .. } => ErrorKind::Unsupported,
-            Self::BandInputMissing(_) | Self::CliffInputMissing { .. } => ErrorKind::Missing,
+            | Self::FilletCrossesItself { .. }
+            | Self::ExtensionEndOnTwoSideLines => ErrorKind::Unsupported,
+            Self::BandInputMissing(_)
+            | Self::CliffInputMissing { .. }
+            | Self::OverflowInputMissing(_) => ErrorKind::Missing,
+            Self::OverflowPointDoesNotDrop(_) | Self::NoBlendedEdgeNearExtension => {
+                ErrorKind::NotFound
+            }
             Self::NoEdgesGiven
             | Self::SizeBelowResolution { .. }
             | Self::PerEdgeListLength { .. }
@@ -847,6 +939,10 @@ impl BlendFailure {
             | Self::FilletCrossesItself { .. }
             | Self::CornerRefused
             | Self::ExecutiveStepFailed
+            | Self::OverflowInputMissing(_)
+            | Self::OverflowPointDoesNotDrop(_)
+            | Self::ExtensionEndOnTwoSideLines
+            | Self::NoBlendedEdgeNearExtension
             | Self::NotCertified { .. } => false,
             Self::Failed(_)
             | Self::Missing(_)
@@ -911,6 +1007,10 @@ impl BlendFailure {
             | Self::FilletCrossesItself { .. }
             | Self::CornerRefused
             | Self::ExecutiveStepFailed
+            | Self::OverflowInputMissing(_)
+            | Self::OverflowPointDoesNotDrop(_)
+            | Self::ExtensionEndOnTwoSideLines
+            | Self::NoBlendedEdgeNearExtension
             | Self::Failed(_)
             | Self::Missing(_)
             | Self::InvalidValue(_)
@@ -1117,6 +1217,21 @@ impl core::fmt::Display for BlendFailure {
             Self::ExecutiveStepFailed => write!(
                 f,
                 "{}: a step of the fillet executive failed (the error info says which)",
+                self.class()
+            ),
+            Self::OverflowInputMissing(input) => write!(f, "{}: {}", self.class(), input.what()),
+            Self::OverflowPointDoesNotDrop(drop) => {
+                write!(f, "{}: {}", self.class(), drop.what())
+            }
+            Self::ExtensionEndOnTwoSideLines => write!(
+                f,
+                "{}: the end of a rail's run past a face's boundary lies on the lines of two of \
+                 the face's side edges",
+                self.class()
+            ),
+            Self::NoBlendedEdgeNearExtension => write!(
+                f,
+                "{}: no blended edge takes the drop of the middle of an extension's chain",
                 self.class()
             ),
             Self::Failed(what)
@@ -2037,10 +2152,69 @@ mod tests {
         );
     }
 
+    /// #19825: each cause the cliff overflow names is no phrase, replaces the status it
+    /// keeps, has its class (a missing input is `Missing`, neither a defect nor a refusal:
+    /// the overflow's helpers read the caller's body and the executive's sheet alike), and
+    /// is worded with its class.
+    #[test]
+    fn the_cliff_overflow_causes_keep_their_status_and_class() {
+        let mut rows = Vec::new();
+        for input in [
+            OverflowInput::FaceSurface,
+            OverflowInput::EdgeCurve,
+            OverflowInput::EdgeStartVertex,
+            OverflowInput::EdgeEndVertex,
+            OverflowInput::EdgeOtherVertex,
+        ] {
+            rows.push((
+                BlendFailure::OverflowInputMissing(input),
+                ErrorKind::Missing,
+                SM_ERR_NULL_POINTER,
+            ));
+        }
+        for drop in [
+            OverflowDrop::EdgePieceEndOntoEdge,
+            OverflowDrop::EdgeMiddleOntoFilletFace,
+            OverflowDrop::LoopSampleOntoSurface,
+        ] {
+            rows.push((
+                BlendFailure::OverflowPointDoesNotDrop(drop),
+                ErrorKind::NotFound,
+                SM_ERR,
+            ));
+        }
+        rows.push((
+            BlendFailure::ExtensionEndOnTwoSideLines,
+            ErrorKind::Unsupported,
+            SM_ERR,
+        ));
+        rows.push((
+            BlendFailure::NoBlendedEdgeNearExtension,
+            ErrorKind::NotFound,
+            SM_ERR,
+        ));
+        for (cause, class, status) in rows {
+            assert!(!cause.is_phrase(), "{cause:?}");
+            assert!(cause.replaces_upstream_status(), "{cause:?}");
+            assert_eq!(cause.class(), class, "{cause:?}");
+            assert_eq!(cause.comparison_status(), status, "{cause:?}");
+            let text = cause.to_string();
+            assert!(text.starts_with(&format!("{class}: ")), "{text}");
+            let error = SolidError::blend("blend::op", cause);
+            assert_eq!(error.kind(), class, "{error:?}");
+            assert_eq!(error.upstream_status(), Some(status), "{error:?}");
+            assert!(!error.is_defect(), "{error:?}");
+        }
+        assert_eq!(
+            BlendFailure::OverflowInputMissing(OverflowInput::FaceSurface).to_string(),
+            "missing: a face the cliff overflow reads has no surface"
+        );
+    }
+
     /// The number of `BlendFailure` variants. Adding a variant means adding an arm to
     /// `variant_index_and_phrase_name` (the compiler asks for it), with the next index, and
     /// raising this number; the test below then fails until `causes` holds the new variant.
-    const VARIANTS: usize = 51;
+    const VARIANTS: usize = 55;
 
     /// Each variant's distinct index in `0..VARIANTS`, and the variant name of a phrase cause
     /// (`None` for any other cause). The match has no wildcard, so it is the inventory of
@@ -2098,6 +2272,10 @@ mod tests {
             BlendFailure::FilletCrossesItself { .. } => (48, None),
             BlendFailure::CornerRefused => (49, None),
             BlendFailure::ExecutiveStepFailed => (50, None),
+            BlendFailure::OverflowInputMissing(_) => (51, None),
+            BlendFailure::OverflowPointDoesNotDrop(_) => (52, None),
+            BlendFailure::ExtensionEndOnTwoSideLines => (53, None),
+            BlendFailure::NoBlendedEdgeNearExtension => (54, None),
         }
     }
 
@@ -2226,6 +2404,10 @@ mod tests {
             },
             BlendFailure::CornerRefused,
             BlendFailure::ExecutiveStepFailed,
+            BlendFailure::OverflowInputMissing(OverflowInput::EdgeCurve),
+            BlendFailure::OverflowPointDoesNotDrop(OverflowDrop::EdgePieceEndOntoEdge),
+            BlendFailure::ExtensionEndOnTwoSideLines,
+            BlendFailure::NoBlendedEdgeNearExtension,
         ];
         let mut names = Vec::new();
         let mut indices = Vec::new();
