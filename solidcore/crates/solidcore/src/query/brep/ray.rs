@@ -516,22 +516,22 @@ mod tests {
         );
     }
 
-    /// During a Boolean operation `smsurf_GetSurfaceCache` defers the tree build
-    /// (`CacheMakeOrValidate`), so `GlobalPointSolve`'s fast-drop face test reads the
-    /// `SmTrimSrfCache` constructor's state bits until a solve's `GetTree` builds the
-    /// tree, whose build turns point testing off on a face without loops (the
+    /// #20179: whether `GlobalPointSolve`'s fast-drop face test runs depends only on
+    /// the face, not on when its cache was built. During a Boolean operation
+    /// `smsurf_GetSurfaceCache` defers the tree build (`CacheMakeOrValidate`), so the
+    /// cache keeps the `SmTrimSrfCache` constructor's state until a solve's `GetTree`
+    /// builds the tree; upstream's build then turns point testing off on a face without
+    /// loop uses, so the same face rejected every candidate (a face without loop uses
+    /// classifies every point as unknown) before the build and kept them after (the
     /// `blend.fillet_executive_p3` rollover-404 case, a merged face without loop uses).
     /// On a full torus whose face's loops are unlinked from it (`RemoveLoop`: a face
-    /// without loop uses, as the merged face mid-Boolean is) the context reader
-    /// ([`SurfaceSolveContext::surface_cache_without_get_tree`]) and the live reader
-    /// (`live_face_fast_drop_test`) both see point testing on while the tree is
-    /// deferred, as upstream does (main's answer in the rollover case). Outside a
-    /// Boolean operation both readers make the cache with its tree, so both see point
-    /// testing off. The test pins what the readers do and that they agree; which value
-    /// the bit should have on a face without loops is the open question of the
-    /// point-test follow-up issue.
+    /// without loop uses) the context reader
+    /// ([`SurfaceSolveContext::surface_cache_without_get_tree`] read through
+    /// [`SurfaceCache::point_test_with`]) and the live reader
+    /// (`live_face_fast_drop_test`) keep the point in both orders: while the tree is
+    /// deferred and once it is built.
     #[test]
-    fn fast_drop_point_test_on_a_face_without_loops_while_the_tree_is_deferred() {
+    fn fast_drop_point_test_on_a_face_without_loops_does_not_depend_on_the_tree_build() {
         let mut k = Kernel::default();
         // a torus whose single face has its loops unlinked
         let loopless = |k: &mut Kernel| {
@@ -588,13 +588,21 @@ mod tests {
             .surface_cache_without_get_tree(&k, &surface, handle)
             .unwrap();
         assert!(state.tree().is_none());
+        // the cache still reads as trimmed with point testing on, but the face has no
+        // loop uses: the point is kept, not classified
         assert!(on(&state));
-        assert_eq!(live_on, Some(on(&state)));
+        assert_eq!(
+            state
+                .point_test_with(&k, uv, Some(1e-6), Some(&services))
+                .unwrap(),
+            (true, None)
+        );
+        assert_eq!(live_on, Some(false));
         drop(services);
 
         // outside a Boolean operation, on fresh B-reps (no cache kept from the first half):
         // both readers make the face's cache with its tree, whose build on a face without
-        // loops leaves it untrimmed and turns point testing off
+        // loops leaves it untrimmed (no trim test); the answer is the same
         let mut k = Kernel::default();
         let (mut b, face) = loopless(&mut k);
         let (mut live_b, _) = loopless(&mut k);
@@ -622,7 +630,6 @@ mod tests {
             .unwrap();
         assert!(state.tree().is_some());
         assert!(!state.is_trimmed());
-        assert!(!state.point_test_enabled);
         assert!(!on(&state));
         assert_eq!(live_on, Some(false));
     }

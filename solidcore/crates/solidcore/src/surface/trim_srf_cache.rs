@@ -1776,12 +1776,18 @@ mod tests {
             (true, None)
         );
         c.base_mut().point_test_enabled = true;
-        // no face to classify against (SM_ERR_NULL_POINTER)
+        // no face: no trim boundaries, every point is kept (#20179). Upstream returns
+        // SM_ERR_NULL_POINTER here only before the tree is built; its build of a
+        // faceless cache turns testing off, after which the same point is kept. The
+        // answer no longer depends on whether the tree was built.
         assert_eq!(
-            c.point_test(&k, Point2::new(5.0, 5.0), None)
-                .unwrap_err()
-                .upstream_status(),
-            Some(1006)
+            c.point_test(&k, Point2::new(5.0, 5.0), None).unwrap(),
+            (true, None)
+        );
+        c.build_tree(&k).unwrap();
+        assert_eq!(
+            c.point_test(&k, Point2::new(5.0, 5.0), None).unwrap(),
+            (true, None)
         );
     }
 
@@ -2278,7 +2284,11 @@ mod tests {
         base.get_tree(&k).unwrap();
         assert!(base.is_trimmed());
         assert!(base.process_boundary_curves);
-        assert!(!base.point_test_enabled);
+        // no build writes the point-test bit (#20179); a cache with no face keeps
+        // every point, in and out of its domain
+        assert!(base.point_test_enabled);
+        assert!(base.point_test(Point2::new(0.5, 0.5)).unwrap());
+        assert!(base.point_test(Point2::new(2.0, 2.0)).unwrap());
         assert!(!base.have_t_surface_cache);
         assert_eq!(base.face_containment_done, FaceContainment::NotDone);
     }
