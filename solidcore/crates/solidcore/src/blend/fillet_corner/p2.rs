@@ -93,9 +93,7 @@ use crate::blend::fillet_corner::p3::{
     move_vertexuse, primary_eu, set_vertex_point, CornerEnv, CornerPatchEnv, FilletCorner,
     FilletExecutiveData,
 };
-use crate::blend::fillet_corner::topology::{
-    corner_input, no_original_face, set_up, shape_not_built,
-};
+use crate::blend::fillet_corner::topology::{corner_input, no_original_face, set_up};
 use crate::blend::fillet_custom_solver::SurfaceId;
 use crate::blend::fillet_executive::p3::{ErrorInfo, FilletExecutive};
 use crate::blend::fillet_geom::p1::FilletErrorType;
@@ -113,9 +111,7 @@ use crate::blend::fillet_solver::p1::{
 use crate::blend::fillet_standard_solver::p1::{FilletLaw, VariableRadiusFs};
 use crate::curve::curve::p1::GlobalPointSolveOptions;
 use crate::curve::curve::{Curve, CurveKind};
-use crate::error::blend::{
-    BlendFailure, CornerInput, CornerPatchMiss, CornerShape, FilletSetUp, SolverFailure,
-};
+use crate::error::blend::{BlendFailure, CornerInput, CornerPatchMiss, FilletSetUp, SolverFailure};
 use crate::error::{ignored, EntityRef, Failure, Result, SolidError, SM_ERR, SM_ERR_NULL_POINTER};
 use crate::geom::global_solver::{SolutionRequested, SolverOperation};
 use crate::geom::solution_array::SolutionObject;
@@ -1205,9 +1201,10 @@ impl FilletCorner {
     /// centre line or the opposite fillet or onto an iso line, a vanished opposite normal,
     /// an opposite radius not larger than both cross-section radii, a linear opposite
     /// fillet, a failed recalculation (its error kept as the cause), a rail-rail curve the
-    /// (concave `NxN`) corner intersects or a rail off the opposite fillet; a ring of edge
-    /// uses that share no face ([`BlendFailure::CornerShapeNotBuilt`]); invalid input,
-    /// with the C++ status and at the entity it is about, for a missing fillet geometry
+    /// (concave `NxN`) corner intersects or a rail off the opposite fillet; invalid input,
+    /// with the C++ status and at the entity it is about, for an interpolating edge
+    /// without its original face ([`BlendFailure::FilletSetUpInvalid`]:
+    /// [`FilletSetUp::OriginalFace`], `SM_ERR_NULL_POINTER`), for a missing fillet geometry
     /// or corner-edge curve ([`BlendFailure::CornerInputInvalid`]:
     /// [`CornerInput::EdgeUseWithoutFilletGeometry`], [`CornerInput::EdgeWithoutCurve`]),
     /// for a fillet geometry without its fillet surface ([`BlendFailure::Solver`]:
@@ -2432,13 +2429,11 @@ mod tests {
         let e = inner.unwrap_err();
         assert_eq!(
             e.blend_failure(),
-            Some(&BlendFailure::FilletSetUpInvalid(
-                crate::error::blend::FilletSetUp::OriginalFace
-            )),
+            Some(&BlendFailure::FilletSetUpInvalid(FilletSetUp::OriginalFace)),
             "{e:?}"
         );
         assert_eq!(e.entity(), Some(EntityRef::Edge(c.edges[0])), "{e:?}");
-        assert_eq!(e.kind(), ErrorKind::InvalidInput, "{e:?}");
+        assert_eq!(e.kind(), crate::error::ErrorKind::InvalidInput, "{e:?}");
         assert_eq!(e.upstream_status(), Some(SM_ERR_NULL_POINTER));
         assert!(pseudo.brep().edge(c.edges[0]).unwrap().curve.is_none());
 
