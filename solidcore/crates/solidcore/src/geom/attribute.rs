@@ -110,6 +110,7 @@
 use core::any::Any;
 use std::collections::BTreeMap;
 
+use crate::error::geom::GeomFailure;
 use crate::error::{Result, SolidError};
 use crate::geom::object;
 use crate::math::Vec3;
@@ -522,9 +523,12 @@ impl MergeRegionData {
     ) -> Result<()> {
         const OP: &str = "geom::attribute::MergeRegionData::set_regions";
         if index >= self.this_regions.len() {
-            return Err(SolidError::geom_failed(
+            return Err(SolidError::geom(
                 OP,
-                "the region index is out of range",
+                GeomFailure::IndexOutOfRange {
+                    index,
+                    len: self.this_regions.len(),
+                },
             ));
         }
         let (Some(tr), Some(tt), Some(or), Some(ot)) = (
@@ -2056,12 +2060,7 @@ fn append_new_regions(
 
 /// `GOTO_NEXT_ATTLINE`: consume through the next `'\n'`.
 fn goto_next_attline(s: &mut InputStream) -> Result<()> {
-    let err = || {
-        SolidError::geom_failed(
-            "geom::attribute::AttributeStore::read_indexed_attributes_from_db",
-            "the attribute line does not end",
-        )
-    };
+    const OP: &str = "geom::attribute::AttributeStore::read_indexed_attributes_from_db";
     let mut count = 0u32;
     loop {
         // `(signed char)rFileIn.get()`: EOF and a 0xFF byte both become -1.
@@ -2071,10 +2070,22 @@ fn goto_next_attline(s: &mut InputStream) -> Result<()> {
         }
         count += 1;
         if count > 1000 {
-            return Err(err());
+            return Err(SolidError::geom(
+                OP,
+                GeomFailure::AttributeLineUnterminated {
+                    bytes: count,
+                    end_of_input: false,
+                },
+            ));
         }
         if ch == -1 {
-            return Err(err());
+            return Err(SolidError::geom(
+                OP,
+                GeomFailure::AttributeLineUnterminated {
+                    bytes: count,
+                    end_of_input: true,
+                },
+            ));
         }
     }
 }
