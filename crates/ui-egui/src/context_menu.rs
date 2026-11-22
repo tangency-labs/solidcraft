@@ -4412,6 +4412,9 @@ mod workspace_menu_tests {
     #[test]
     fn workspace_rows_keep_switching_handles_and_disabled_render_behavior() {
         let mut h = Harness::new();
+        // The classic switcher, which this test covers: since #19655 the default lets the focused
+        // view choose the workspace (`workspace_follows_view`).
+        h.app.preferences.workspace_follows_view = false;
         h.call("ui.resize", json!({"width":1200,"height":1000}));
         h.step(&json!({"click":{"handle":"ribbon:workspace"}})).unwrap();
         let opener = rect_of("ribbon:workspace").unwrap();
@@ -4442,6 +4445,9 @@ mod workspace_menu_tests {
     #[test]
     fn render_row_opens_while_isocurve_analysis_is_on() {
         let mut h = Harness::new();
+        // The classic switcher, which this test covers: since #19655 the default lets the focused
+        // view choose the workspace (`workspace_follows_view`).
+        h.app.preferences.workspace_follows_view = false;
         h.call("ui.resize", json!({"width":1200,"height":1000}));
         h.app.run("solid.cylinder", json!({"radius": 10, "height": 30})).unwrap();
         h.settle();

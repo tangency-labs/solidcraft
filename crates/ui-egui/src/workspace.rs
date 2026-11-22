@@ -1357,6 +1357,9 @@ mod tests {
     #[test]
     fn drawing_uses_the_ribbon_without_changing_the_source_design() {
         let mut h = crate::scenario::Harness::new();
+        // The classic switcher, which this test covers: since #19655 the default lets the focused
+        // view choose the workspace (`workspace_follows_view`), so Back returns to the view's own tab.
+        h.app.preferences.workspace_follows_view = false;
         h.app.run("solid.box", json!({"length":40,"width":20,"height":3})).unwrap();
         h.app.ui.tab = "SURFACE".into();
         let before = h.app.session.doc.clone();
