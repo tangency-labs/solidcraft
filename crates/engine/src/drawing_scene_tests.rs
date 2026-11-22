@@ -3,6 +3,7 @@ use std::sync::Arc;
 use serde_json::{Value, json};
 use solidcraft_doc::MAX_PLACEMENT_DEPTH;
 use solidcraft_doc::drawing::DEFAULT_DPI;
+use solidcraft_doc::drawing::projection_symbol::title_block_paper;
 use solidcraft_doc::drawing::view::{View, ViewKind, ViewPlace};
 use solidcraft_doc::drawing_view::{Exploded, ViewDirection, ViewOverrides};
 use solidcraft_geom::cell::Projection;
@@ -555,7 +556,8 @@ fn a_sheets_title_block_is_drawn_after_its_views() {
     assert_eq!(scene.groups.iter().map(|g| (g.object, g.kind)).collect::<Vec<_>>(), expected);
     let d = s.drawing("test").unwrap();
     let record = d.sheets.iter().find(|x| x.id == sheet).unwrap();
-    let drawn = block.layout(&record.border.as_ref().unwrap().layout(&record.sheet).unwrap()).unwrap().paper(sheet, Projection::Third);
+    let placed = block.layout(&record.border.as_ref().unwrap().layout(&record.sheet).unwrap()).unwrap();
+    let drawn = title_block_paper(&placed, sheet, Projection::Third);
     assert_eq!(serde_json::to_string(&without_text(scene.groups.last().unwrap())).unwrap(), serde_json::to_string(&drawn).unwrap());
     let reply = run(&mut s, CMD, json!({"sheet": ids::encode(sheet)}));
     let schema = output_schema_for::<SheetSceneResult>();
@@ -581,7 +583,7 @@ fn the_title_blocks_symbol_follows_the_drawings_projection() {
         let d = s.drawing("test").unwrap();
         let record = d.sheets.iter().find(|x| x.id == sheet).unwrap();
         let border = record.border.as_ref().unwrap().layout(&record.sheet).unwrap();
-        serde_json::to_string(&record.title_block.as_ref().unwrap().layout(&border).unwrap().paper(sheet, projection)).unwrap()
+        serde_json::to_string(&title_block_paper(&record.title_block.as_ref().unwrap().layout(&border).unwrap(), sheet, projection)).unwrap()
     };
     let third = settled(&mut s, sheet);
     assert_eq!(serde_json::to_string(&without_text(third.scene.groups.last().unwrap())).unwrap(), block_of(&s, Projection::Third));
@@ -4023,7 +4025,7 @@ fn sheet_sketch_provider_extract_is_read_only_and_steps_one_sketch_at_a_time() {
     assert_eq!((s.drawing_scenes.sketch_solves, s.drawing_scenes.projections), (2, 0));
     assert!(Arc::ptr_eq(&doc, &s.doc) && Arc::ptr_eq(&model, &s.model.state()));
     assert_eq!((s.undo.len(), s.redo.len(), s.evaluations, s.revision), history);
-    assert!(s.model.is_stale() && s.active_sketch == Some(model_sketch));
+    assert!(s.active_sketch.is_none(), "starting the sheet sketch finished the model sketch before the extracts ran");
 }
 
 #[test]

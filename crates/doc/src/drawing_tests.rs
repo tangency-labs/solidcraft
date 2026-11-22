@@ -1908,3 +1908,28 @@ fn sheet_sketch_unsupported_equations_and_centerlines_are_refused_before_solving
         assert!(refusal(&raw).contains(expected));
     }
 }
+
+/// A drawing saved with a projection cell at the old smallest room (15.4 by 7.35 mm, which held the
+/// 3.5 mm symbol before it grew to 5.5 h by 2.5 h) opens as before, and its cell holds the 2.5 mm symbol.
+#[test]
+fn a_drawing_saved_with_the_old_smallest_symbol_cell_opens() {
+    let mut d = Drawing::new(
+        "Old block",
+        "en",
+        "Sheet",
+        drawing_sheet::Sheet::standard(PaperSize::A3, Orientation::Landscape),
+        Some(DrawingBorderProfile::iso()),
+        &BTreeSet::new(),
+        &mut IdSource::seeded(SEED),
+    )
+    .unwrap();
+    let mut block = solidcraft_geom::title_block::default_block();
+    let cell = &mut block.cells[11];
+    assert_eq!(cell.name, "projection");
+    cell.label = Some(solidcraft_geom::title_block::Label { text: "Projection".into(), cap_mm: 4.125 });
+    cell.rect_mm[0] = -17.925;
+    Arc::make_mut(&mut d.sheets[0]).title_block = Some(block);
+    let read = Drawing::from_json(&d.to_json().unwrap()).unwrap();
+    let layout = read.sheets[0].title_block_layout().unwrap().unwrap();
+    assert_eq!(layout.cells.iter().filter_map(|c| c.symbol_mm).collect::<Vec<_>>(), [2.5]);
+}
