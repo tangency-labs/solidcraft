@@ -2468,6 +2468,19 @@ mod drafts {
                 other => panic!("{other:?}"),
             }
             assert!(rel(volume(&c), SHELLED) < 1e-9, "{}", volume(&c));
+            // the cavity's side drafted with it: the cavity's undrafted vertices no longer say
+            // where the walls meet, so no bound is named (the local operation's check judges it)
+            let cavity = face(&c, &o, |bx| {
+                bx.min().z > 0.11 && bx.max().z - bx.min().z > 1.0
+            });
+            let k = solidcore::Kernel::default();
+            let brep = c.lock();
+            let check = |faces: &[usize]| {
+                let faces: Vec<_> = faces.iter().map(|&i| o.faces[i]).collect();
+                crate::offset::refuse_draft_closing_wall(&k, &brep, &faces, [0.0; 3], Z, Z, THREE)
+            };
+            assert!(check(&[side]).is_err());
+            assert!(check(&[side, cavity]).is_ok());
         }
     }
 

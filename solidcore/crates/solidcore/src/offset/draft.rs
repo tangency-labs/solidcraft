@@ -897,8 +897,22 @@ pub fn draft_surface(
 /// A shell of another kind is not bounded here (the local operation's check still
 /// judges the body built).
 ///
+/// "About the same axis" is held to the body's tolerance over the shell's own extent, not to
+/// a direction's rounding: a cone's axis may leave the drafted axis by no more than the
+/// tolerance beside each of its vertices (the departure is linear along it, so largest at
+/// the ends of its span), and the tilt of a cone's axis or a plane's normal, times the
+/// farthest of its points from the axis, may move them along the pull by no more than the
+/// tolerance. A shell coaxial only to a direction's rounding (a radius-9 circle 900 up an
+/// axis 4e-5 off sits 0.036 off the axis) gets no bound: on a circle off the axis ψ is not
+/// constant, and its least could lie between the circle's vertices.
+///
+/// A shell holding a face of `drafted` (the faces the same call drafts) gets no bound: its
+/// faces move too, so its undrafted vertices say nothing of where the drafted walls meet.
+/// Such a draft is left to the local operation's check.
+///
 /// The angle is computed as the doubles give it, not enclosed: a draft within rounding of
-/// it may be decided either way, as at that angle the wall is a line wide.
+/// it may be decided either way, as at that angle the wall is a line wide. A shell off the
+/// axis by up to the tolerance moves the angle by about tolerance / h.
 ///
 /// # Errors
 ///
@@ -908,6 +922,7 @@ pub fn largest_clear_angle(
     k: &Kernel,
     b: &Brep,
     f: FaceId,
+    drafted: &[FaceId],
     draft: &Draft,
 ) -> Result<Option<(f64, FaceId)>> {
     use crate::topology::face::p4::vertices;
@@ -931,9 +946,10 @@ pub fn largest_clear_angle(
         let r = p - d.centre;
         (r - d.along * r.dot(d.along)).length()
     };
-    let parallel = |v: Vec3| {
+    // the sine of the angle between a direction and the axis, `None` for no direction
+    let tilt = |v: Vec3| {
         let len = v.length();
-        len > 0.0 && ((v.dot(d.along) / len).abs() - 1.0).abs() <= AXIS_ALONG_PULL
+        (len > 0.0 && len.is_finite()).then(|| (v.cross(d.along).length() / len).min(1.0))
     };
     // the face's span of heights, from its vertices (its edges are circles about the axis or
     // generators)
@@ -967,26 +983,48 @@ pub fn largest_clear_angle(
     let tolerance = b.tolerance();
     let mut least: Option<(f64, FaceId)> = None;
     'shells: for faces in others.values() {
+        if faces.iter().any(|g| drafted.contains(g)) {
+            continue;
+        }
         let mut shell_least: Option<(f64, FaceId)> = None;
         let mut side = 0.0;
         for &g in faces {
             let Some(surface) = b.face(g)?.surface.as_ref() else {
                 continue 'shells;
             };
+            let mut points = Vec::new();
+            for v in vertices(b, g, None, false, None)? {
+                points.push(b.vertex(v)?.point);
+            }
+            let reach = points.iter().fold(0.0_f64, |m, &p| m.max(off_axis(p)));
             let about_axis = match surface.kind_with_nurb(k)? {
-                SurfaceKind::Plane(plane) => parallel(plane.position().z_axis()),
+                // a plane across the axis: its tilt moves no point of it (within `reach` of
+                // the axis, its origin's distance more) along the pull past the tolerance
+                SurfaceKind::Plane(plane) => {
+                    let frame = plane.position();
+                    tilt(frame.z_axis())
+                        .is_some_and(|t| t * (reach + off_axis(frame.origin())) <= tolerance)
+                }
+                // a cone about the axis: its axis beside each vertex within the tolerance of
+                // the drafted axis, and its tilt moving no point along the pull past it
                 SurfaceKind::Cone(cone) => {
                     let frame = cone.canonical().origin;
-                    parallel(frame.x_axis().cross(frame.y_axis()))
-                        && off_axis(frame.origin()) <= tolerance
+                    let z = frame.x_axis().cross(frame.y_axis());
+                    let o = frame.origin();
+                    tilt(z).is_some_and(|t| {
+                        let z = z * (1.0 / z.length());
+                        t * reach <= tolerance
+                            && points
+                                .iter()
+                                .all(|&p| off_axis(o + z * (p - o).dot(z)) <= tolerance)
+                    })
                 }
                 _ => false,
             };
             if !about_axis {
                 continue 'shells;
             }
-            for v in vertices(b, g, None, false, None)? {
-                let p = b.vertex(v)?.point;
+            for p in points {
                 let h = height(p);
                 // on one side of the neutral plane, off it by more than the tolerance, inside
                 // the face's span
@@ -1009,28 +1047,34 @@ pub fn largest_clear_angle(
     Ok(least)
 }
 
-/// Not upstream (#20767): refuses the draft of face `f` of `b` by `draft` where its drafted
-/// cone would reach another shell of the body, closing the wall between them
-/// ([`largest_clear_angle`]): [`OffsetFailure::DraftClosesWall`] with the largest angle
-/// that keeps the wall. A face of another kind, or a shell the bound does not cover, passes.
+/// Not upstream (#20767): refuses the draft of `faces` of `b` by `draft` where the drafted
+/// cone of one of them would reach another shell of the body, closing the wall between them
+/// ([`largest_clear_angle`], each face against the shells none of `faces` lies on):
+/// [`OffsetFailure::DraftClosesWall`] with the largest angle that keeps the wall, for the
+/// first of `faces` that reaches one. A face of another kind, or a shell the bound does not
+/// cover, passes.
 ///
 /// # Errors
 ///
 /// [`OffsetFailure::DraftClosesWall`]; those of [`largest_clear_angle`].
-pub fn refuse_closing_wall(k: &Kernel, b: &Brep, f: FaceId, draft: &Draft) -> Result<()> {
-    match largest_clear_angle(k, b, f, draft)? {
-        Some((largest, wall)) if draft.angle.abs() >= largest => Err(Failure::new(
-            OP,
-            OffsetFailure::DraftClosesWall {
-                face: f,
-                wall,
-                largest,
-            },
-        )
-        .at(EntityRef::Face(f))
-        .into_error()),
-        _ => Ok(()),
+pub fn refuse_closing_wall(k: &Kernel, b: &Brep, faces: &[FaceId], draft: &Draft) -> Result<()> {
+    for &f in faces {
+        if let Some((largest, wall)) = largest_clear_angle(k, b, f, faces, draft)? {
+            if draft.angle.abs() >= largest {
+                return Err(Failure::new(
+                    OP,
+                    OffsetFailure::DraftClosesWall {
+                        face: f,
+                        wall,
+                        largest,
+                    },
+                )
+                .at(EntityRef::Face(f))
+                .into_error());
+            }
+        }
     }
+    Ok(())
 }
 
 #[cfg(test)]

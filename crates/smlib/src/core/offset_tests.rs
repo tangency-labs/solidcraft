@@ -714,39 +714,34 @@ fn a_draft_past_the_neighbours_meeting_is_refused_as_an_edge_that_vanishes() {
 }
 
 /// Stress corpus S8188 (#20767): a cone r 2 at z = 0 to r 1 at z = 3, shelled 0.12 in to a closed
-/// cavity, its side drafted 3 degrees about its base, leaning in going up. The side's wall is
-/// 0.12 / cos(atan(1/3)) = 0.04 sqrt(10) across, horizontally, so the cavity's rim at z = 2.88 has
-/// radius 2 - 0.04 sqrt(10) - 0.96. Drafted by theta the side is r = 2 - z tan(atan(1/3) + theta),
-/// which reaches the rim at theta = atan((2 - rim) / 2.88) - atan(1/3), 2.234 degrees: 3 degrees
-/// would carry the side through the cavity (0.45.0 built that body, its volume the drafted cone's
-/// plus the cavity's). Refused naming that angle, not as a body that fails its check. With a 0.5
-/// wall the rim is reached only at 10.118 degrees: 3 degrees builds the drafted cone less the cavity.
+/// cavity, its side drafted 3 degrees about its base, leaning in going up, through the kernel
+/// wrapper's draft. The kernel's test (solidcore-ops `offset/tests.rs`,
+/// `a_shelled_cones_side_drafted_into_its_cavity_is_refused_naming_the_largest_angle`) derives
+/// the closed forms used here: the side reaches the cavity's rim at
+/// atan((2 - rim) / 2.88) - atan(1/3) = 0.038994633885685748 rad (2.234 degrees), rim =
+/// 2 - 0.04 sqrt(10) - 0.96, so 3 degrees is refused naming that angle, not as a body that fails
+/// its check. With a 0.5 wall the rim is reached only at 10.118 degrees, and 3 degrees builds the
+/// drafted cone less the cavity, 13.675559992581547.
 #[test]
 fn a_draft_into_a_shelled_cones_cavity_is_refused_naming_the_largest_angle() {
+    const LARGEST: f64 = 0.038_994_633_885_685_75;
+    const DRAFTED: f64 = 13.675_559_992_581_547;
+    // 3 degrees, radians
+    const THREE: f64 = 0.052_359_877_559_829_89;
     let z = [0.0, 0.0, 1.0];
-    let slope = (1.0f64 / 3.0).atan();
-    let frustum = |big: f64, small: f64, h: f64| PI * h * (big * big + big * small + small * small) / 3.0;
     for wall in [0.12, 0.5] {
         let cone = super::make_cone([0.0; 3], 2.0, 1.0, 3.0).unwrap();
         let shelled = shell(&cone, &[], TOL, -wall).unwrap();
-        let across = wall / slope.cos();
-        let (low, high) = (wall, 3.0 - wall);
-        let rim = 2.0 - across - high / 3.0;
-        let largest = ((2.0 - rim) / high).atan() - slope;
-        let three = 3f64.to_radians();
-        let drafted = draft(&shelled, &[[0.0, -1.5, 1.5]], TOL, [0.0; 3], z, z, three);
+        let drafted = draft(&shelled, &[[0.0, -1.5, 1.5]], TOL, [0.0; 3], z, z, THREE);
         if wall == 0.12 {
             let Some(Error::RefusedWithDiagnostic { refusal, diagnostic }) = drafted.as_ref().err() else { panic!("{drafted:?}") };
-            let solidcore_ops::Error::OffsetRefused { why: solidcore_ops::OffsetRefusal::DraftClosesWall { largest: named }, .. } = refusal else {
+            let solidcore_ops::Error::OffsetRefused { why: solidcore_ops::OffsetRefusal::DraftClosesWall { largest }, .. } = refusal else {
                 panic!("{refusal}")
             };
-            assert!((named - largest).abs() < 1e-9, "{named} vs {largest}: {diagnostic}");
-            assert!((named.to_degrees() - 2.234).abs() < 1e-3, "{named}");
+            assert!((largest - LARGEST).abs() < 1e-12, "{largest}: {diagnostic}");
         } else {
-            let top = 2.0 - 3.0 * (slope + three).tan();
-            let want = frustum(2.0, top, 3.0) - frustum(2.0 - across - low / 3.0, rim, high - low);
             let got = volume(&drafted.unwrap(), 1e-8).unwrap();
-            assert!(largest > three && rel(got, want) < 1e-9, "{got} vs {want}");
+            assert!(rel(got, DRAFTED) < 1e-9, "{got}");
         }
     }
 }

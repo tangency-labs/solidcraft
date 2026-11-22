@@ -57,6 +57,32 @@ pub fn refusal(e: &SolidError) -> Option<Error> {
     typed(e, &|_| None)
 }
 
+/// (#20767) The wall check of a draft of `faces` of `b` by `angle` radians about the neutral
+/// plane through `neutral_origin` with normal `neutral_normal`, pulled along `pull`, as
+/// [`draft`] runs it before its local operation: a cone or cylinder about the pull whose
+/// drafted cone would reach another shell of the body (a cavity's wall) is refused with the
+/// largest angle that keeps the wall (the kernel's `OffsetFailure::DraftClosesWall`, which
+/// [`diagnostic`] gives as [`OffsetRefusal::DraftClosesWall`]). For a caller that drafts the
+/// faces itself (the kernel wrapper's `smlib_draft`).
+///
+/// # Errors
+///
+/// The kernel's `DraftClosesWall`; an invalid input for a neutral normal or pull not finite or
+/// not longer than 1e-12, or an origin or angle not finite; those of the kernel's check.
+pub fn refuse_draft_closing_wall(
+    k: &Kernel,
+    b: &Brep,
+    faces: &[FaceId],
+    neutral_origin: [f64; 3],
+    neutral_normal: [f64; 3],
+    pull: [f64; 3],
+    angle: f64,
+) -> solidcore::Result<()> {
+    let v = |a: [f64; 3]| Vec3::new(a[0], a[1], a[2]);
+    let the_draft = Draft::new(v(neutral_origin), v(neutral_normal), v(pull), angle)?;
+    refuse_closing_wall(k, b, faces, &the_draft)
+}
+
 /// (#18568) For a shell that failed without saying why: where a face of `b` has an outline
 /// that touches itself. That is a loop that passes through one vertex twice (not a seam's end),
 /// or a vertex of one loop that is a vertex of another loop of the face too, or lies on one of
@@ -659,11 +685,11 @@ pub fn draft(
                 Ok(Err(r)) => return Ok(Err(refused(r))),
                 Err(e) => return Ok(Err(status(e, &in_order(order)))),
             }
-            // a drafted cone that would reach a cavity's wall closes the wall: refused with
-            // the largest angle that keeps it, before anything changes
-            if let Err(e) = refuse_closing_wall(k, b, f, &the_draft) {
-                return Ok(Err(status(e, &in_order(order))));
-            }
+        }
+        // a drafted cone that would reach a cavity's wall closes the wall: refused with the
+        // largest angle that keeps it, before anything changes
+        if let Err(e) = refuse_closing_wall(k, b, &picked, &the_draft) {
+            return Ok(Err(status(e, &in_order(order))));
         }
         // the marks live for this call only: put on the picked faces, read and removed once the
         // kernel has moved them (a refused call puts the body back as it came in, unmarked)

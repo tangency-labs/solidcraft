@@ -356,7 +356,9 @@ cylinders and planes about the same axis, on one side of the neutral plane and w
 heights, is first reached at a vertex, so the least |ψ| of its vertices is the largest angle that
 keeps a wall. A draft at or past it is refused before the local operation as
 `OffsetFailure::DraftClosesWall` naming that angle (ops' `OffsetRefusal::DraftClosesWall`), in
-place of a body whose faces cross; a shell of another kind is left to the local operation's check.
+place of a body whose faces cross. "About the same axis" holds to the body's tolerance over the shell's
+extent; a shell of another kind, or one holding a face the same call drafts, is left to the local
+operation's check.
 
 ## 7. Shell and thicken
 
