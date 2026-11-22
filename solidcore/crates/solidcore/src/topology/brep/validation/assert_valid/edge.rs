@@ -9,7 +9,7 @@
 //! | `assert_test_edge14` | `sm_AssertTestEdge14` |
 //! | `edgeuse` | `SmEdgeuse::AssertValid` |
 //! | `edge_ends`, `faces_tangent_at` (fork, WR-668) | the edge lookups of `sm_IsZeroSpeedTangentEnd` |
-//! | `tangent_sector_step` (not upstream, #18639) | none: the step of test 9 over tangent faces |
+//! | `tangent_sections::tangent_directions` (not upstream, #18639) | none: test 9's directions past the contact band of tangent planes and cylinders |
 //! | `curve`, `curve_in_walk` | the virtual `SmCurve::AssertValid` (`m_pCurve->AssertValid`, `m_pUVTrimCurve->AssertValid`; the compound and Hermite overrides are in `curves`) |
 //!
 //! Deviations: the radial edge-use walks are bounded by the edge's use count (upstream
@@ -22,9 +22,10 @@
 //! `IsAnalytic` and `IsBounded`. Not upstream (WR-540, #383): where two faces round an
 //! edge leave it within `SM_ANG_TOL_DEG` of each other, test 9 orders every face by the
 //! direction to its point 20 edge tolerances into the face, square to the edge (the
-//! fork's tangency-labs/smlib@5533bbb), stepping further, up to 12 triplings, while
-//! those faces' points are within twice the edge tolerance of each other (#18639,
-//! `tangent_sector_step`). Not upstream (WR-668, tangency-labs/smlib
+//! fork's tangency-labs/smlib@5533bbb). Not upstream (#18639): round a line edge whose
+//! faces are all planes and cylinders along it, test 9 reads them instead at the step
+//! `tangent_sections` certifies in closed form, past the band in which the tangent faces
+//! are within the contact tolerance of each other, wherever one is certified. Not upstream (WR-668, tangency-labs/smlib
 //! ecf1963, the default since its flag was retired): the edge check and edge-use
 //! check build the edge's [`EdgeEnds`] (its interval and whether its faces are tangent
 //! at each end) before checking its curve or a UV trim, since a Rust curve does not
@@ -379,7 +380,8 @@ fn edge_point(k: &Kernel, b: &Brep, e: EdgeId, t: f64) -> Result<Point3> {
 /// The direction edge use `eu`'s face leaves the edge in at `t` (with its point,
 /// tangent and face normal): its binormal, or with `step_off` (WR-540) the direction to
 /// its point `step_off_dist` into the face, square to the edge (kept as the binormal when
-/// the step or a unitisation fails).
+/// the step or a unitisation fails); with `certified` (#18639) the direction it holds for
+/// `eu`.
 fn sector_direction(
     k: &Kernel,
     b: &mut Brep,
@@ -388,9 +390,14 @@ fn sector_direction(
     options: BinormalOptions,
     step_off: bool,
     step_off_dist: f64,
+    certified: Option<&[(EdgeuseId, crate::math::Vec3)]>,
 ) -> Result<crate::topology::edgeuse::p2::BinormalEval> {
     use crate::topology::edgeuse::p2::{evaluate_binormal_step_off, StepOffOptions};
     let mut eval = evaluate_binormal(k, b, eu, t, true, &options)?;
+    if let Some(&(_, dir)) = certified.and_then(|c| c.iter().find(|(u, _)| *u == eu)) {
+        eval.binormal = dir;
+        return Ok(eval);
+    }
     if !step_off {
         return Ok(eval);
     }
@@ -415,66 +422,6 @@ fn sector_direction(
     }
     Ok(eval)
 }
-
-/// The step at which test 9 measures the faces of an edge with tangent sectors (not
-/// upstream; WR-540, #18639). WR-540 steps 20 edge tolerances into every face. Two
-/// tangent faces whose step points are still within twice the edge tolerance of each
-/// other there are one surface under the tolerance (each lies within the edge tolerance
-/// of the edge), and their side of each other is not yet read: a box face 5e-6 inside a
-/// cylinder of radius 1 crosses it 3.2e-3 from the tangent edge, inside that band, and
-/// at 2e-4 it reads as lying inside the cylinder although it leaves it everywhere past
-/// the band. The step is tripled, as `RadialSectorClassify` grows its steps, until the
-/// step points of every tangent pair (`ties`, edge uses and their radial partners) are
-/// more than twice the edge tolerance apart, the sum `RadialSectorClassify` reads for
-/// faces round one edge. Faces that do not part within [`MAX_TANGENT_STEP_ROUNDS`]
-/// rounds, or that a step leaves first, keep the 20 edge tolerances.
-///
-/// Two faces at the edge are within twice the edge tolerance of each other, so step
-/// points more than that apart lie on the sides the faces keep past any crossing within
-/// the band: the order read there is the one the tolerance gives the faces.
-fn tangent_sector_step(
-    k: &Kernel,
-    b: &mut Brep,
-    ties: &[(EdgeuseId, EdgeuseId)],
-    t: f64,
-    edge_tol: f64,
-) -> Result<f64> {
-    use crate::topology::edgeuse::p2::{evaluate_binormal_step_off, StepOffOptions};
-    let first = 20.0 * edge_tol;
-    let apart = 2.0 * edge_tol;
-    let mut dist = first;
-    for _ in 0..MAX_TANGENT_STEP_ROUNDS {
-        let mut parted = true;
-        for &(eu, rad) in ties {
-            let step = |b: &mut Brep, eu: EdgeuseId| {
-                crate::error::ignored(evaluate_binormal_step_off(
-                    k,
-                    b,
-                    eu,
-                    t,
-                    dist,
-                    &StepOffOptions::default(),
-                ))
-            };
-            let (Some(p0), Some(p1)) = (step(b, eu)?, step(b, rad)?) else {
-                return Ok(first);
-            };
-            if p0.point.distance(p1.point) <= apart {
-                parted = false;
-                break;
-            }
-        }
-        if parted {
-            return Ok(dist);
-        }
-        dist *= 3.0;
-    }
-    Ok(first)
-}
-
-/// The rounds [`tangent_sector_step`] triples its step (3^12 times 20 edge tolerances
-/// is over 10^7 edge tolerances, past any face a tolerance-scale band fits in).
-const MAX_TANGENT_STEP_ROUNDS: usize = 12;
 
 /// The radial edge-use walk of `SmEdge::AssertValid` (tests 8-11).
 fn radial_order(
@@ -510,13 +457,15 @@ fn radial_order(
     // binormal angles tie (or differ by rounding, either way round) and cannot show the
     // order. Where any sector is that narrow, every face is measured by the direction from
     // the edge to its point a short step into the face (20 edge tolerances, as
-    // IsConvexRadialSector steps), or further out where the tangent faces are still within
-    // the tolerance of each other there (`tangent_sector_step`, #18639).
+    // IsConvexRadialSector steps). Not upstream (#18639): round a line edge whose faces
+    // are planes and cylinders along it, every face is read instead at the step that
+    // `tangent_sections` certifies past the tangent faces' contact band, where one is.
     let seq_param = extent.evaluate(0.456);
     let edge_tol = tedge::tolerance(b, e)?;
+    let step_off_dist = 20.0 * edge_tol;
     let tie_dot = (ANG_TOL_DEG * PI / 180.0).cos();
     let num_eus = b.edge(e)?.edgeuses.len();
-    let mut ties: Vec<(EdgeuseId, EdgeuseId)> = Vec::new();
+    let mut walked: Vec<(EdgeuseId, EdgeuseId, bool)> = Vec::new();
     let mut eu = target;
     let mut sectors = 0usize;
     while let Some(rad) = eu1::radial(b, eu)? {
@@ -525,24 +474,24 @@ fn radial_order(
         }
         let b0 = crate::error::ignored(evaluate_binormal(k, b, eu, seq_param, true, &options))?;
         let b1 = crate::error::ignored(evaluate_binormal(k, b, rad, seq_param, true, &options))?;
+        let mut tie = false;
         if let (Some(b0), Some(b1)) = (b0, b1) {
             if let (Ok(u0), Ok(u1)) = (b0.binormal.unitize(), b1.binormal.unitize()) {
-                if u0.dot(u1) > tie_dot {
-                    ties.push((eu, rad));
-                }
+                tie = u0.dot(u1) > tie_dot;
             }
         }
+        walked.push((eu, rad, tie));
         sectors += 1;
         match eu1::mate(b, rad)? {
             Some(next) if next != target && sectors < num_eus => eu = next,
             _ => break,
         }
     }
-    let step_off = !ties.is_empty();
-    let step_off_dist = if step_off {
-        tangent_sector_step(k, b, &ties, seq_param, edge_tol)?
+    let step_off = walked.iter().any(|s| s.2);
+    let certified = if step_off {
+        super::tangent_sections::tangent_directions(k, b, e, seq_param, edge_tol, &walked)?
     } else {
-        20.0 * edge_tol
+        None
     };
 
     let mut steps = 0;
@@ -563,8 +512,11 @@ fn radial_order(
             ));
         }
         let t = extent.evaluate(0.456);
-        let target_eval = sector_direction(k, b, target, t, options, step_off, step_off_dist)?;
-        let radial_eval = sector_direction(k, b, radial, t, options, step_off, step_off_dist)?;
+        let certified = certified.as_deref();
+        let target_eval =
+            sector_direction(k, b, target, t, options, step_off, step_off_dist, certified)?;
+        let radial_eval =
+            sector_direction(k, b, radial, t, options, step_off, step_off_dist, certified)?;
 
         // 1st iteration save variables
         if primary.is_none() {
