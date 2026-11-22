@@ -741,10 +741,9 @@ fn centroid(section: &[CurveN<4>]) -> Option<Vec3> {
     if length > 0.0 {
         return sum.is_finite().then(|| sum * (1.0 / length));
     }
-    // A section shrunk to a point (the apex of a loft to a point): that point.
-    let (pts, _) = section.first().map(points)?;
-    let p = *pts.first()?;
-    section.iter().flat_map(|c| points(c).0).all(|q| q.dist(p) <= 1e-12 * (1.0 + p.len())).then_some(p)
+    // A section of no length is one point (the apex of a loft to a point, every control point
+    // on it): that point.
+    section.first().and_then(|c| points(c).0.first().copied())
 }
 
 /// The move that puts a station's guided points onto the rails (`pairs`: each point with its

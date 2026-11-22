@@ -1470,3 +1470,43 @@ fn loft_to_point_through_a_bulge_and_its_refusals() {
         assert!(refused(&bulge, apex, params), "{params:?}");
     }
 }
+
+/// A square whose corners take different weights from the two lines that meet there (each line
+/// weight 1 at its start and 2 at its end), through the same square halved at half height, to
+/// the apex: neighbouring walls meet on the same curves because each corner keeps one ratio of
+/// weights through the rows, so the walls stitch into the plain pyramid, A h / 3 = 200.
+#[test]
+fn loft_to_point_through_corners_of_different_weights_stitch() {
+    rig_fixes();
+    let weighted = |pts: [[f64; 3]; 4]| -> Vec<Curve> {
+        (0..4)
+            .map(|i| {
+                let (a, b) = (pts[i], pts[(i + 1) % 4]);
+                Curve::Nurbs {
+                    degree: 1,
+                    points: vec![[a[0], a[1], a[2], 1.0], [b[0], b[1], b[2], 2.0]],
+                    knots: vec![0.0, 0.0, 1.0, 1.0],
+                }
+            })
+            .collect()
+    };
+    let base = weighted([
+        [0.0, 0.0, 0.0],
+        [10.0, 0.0, 0.0],
+        [10.0, 10.0, 0.0],
+        [0.0, 10.0, 0.0],
+    ]);
+    let half = weighted([
+        [2.5, 2.5, 3.0],
+        [7.5, 2.5, 3.0],
+        [7.5, 7.5, 3.0],
+        [2.5, 7.5, 3.0],
+    ]);
+    let b = loft_to_point_through(&[base, half], [5.0, 5.0, 6.0], &[0.0, 0.5, 1.0]).unwrap();
+    assert!(
+        b.check(CheckLevel::All).unwrap().is_valid(),
+        "a closed valid solid"
+    );
+    let v = b.volume(1e-8).unwrap();
+    assert!(rel(v, 200.0) < 1e-9, "volume {v} vs 200");
+}

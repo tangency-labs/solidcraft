@@ -1330,8 +1330,10 @@ pub fn loft_to_point(section: &[Curve], apex: [f64; 3]) -> Result<Body> {
 /// surface's whole box; stitched and oriented. `params` places each row along the loft, the
 /// sections' then the apex's (increasing, from 0 at the first section to 1 at the apex): every
 /// wall is skinned at those parameters, so neighbouring walls, whose curves share their ends,
-/// meet on the same boundary curves. A loft to a point that follows guide rails gives the
-/// stations and where they lie.
+/// meet on the same boundary curves. They do as long as, at each corner, the weights of the two
+/// curves that meet there keep one ratio through the rows, as rows moved from one profile (its
+/// weights kept) do; walls that do not meet leave no solid, and the call is refused. A loft to a
+/// point that follows guide rails gives the stations and where they lie.
 ///
 /// # Errors
 /// [`Error::Argument`] for fewer than two sections or more than [`MAX_STATIONS`], sections of
