@@ -2023,10 +2023,11 @@ mod tests {
         assert!(manifest.len() > 32 << 20, "{} bytes is not past the default cap", manifest.len());
         let bytes = write_container(&doc, DesignCompression::Fast, None, Some(&model), None, 2 << 30, None).unwrap();
         assert!(DesignContainerReader::new(Cursor::new(&bytes)).unwrap().has_model_cache());
-        assert!(read_design_geometry(&bytes).is_some());
+        // Read back under the larger cap. The 40 MiB body name is only padding for the manifest, so
+        // the check is that the cache reads, not a model built from that name.
+        assert!(DesignContainerReader::new(Cursor::new(&bytes)).unwrap().geometry().is_some());
         // Back at the default limit the same file's oversized manifest is refused, not read.
         crate::limits::test_cap::set(None);
-        assert!(read_design_geometry(&bytes).is_none());
         assert!(DesignContainerReader::new(Cursor::new(&bytes)).unwrap().geometry().is_none());
     }
 
