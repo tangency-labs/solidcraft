@@ -5940,7 +5940,7 @@ fn a_rational_net_ending_just_short_of_its_edge_within_the_tolerance_imports_clo
 
 /// A 10 mm cube whose top is a cubic B-spline net with a raised middle (its boundary rows straight
 /// at z = 10) and whose front top edge is split 0.0002 mm before its end, the short piece a cubic
-/// on the knot range `knots`, lying on the face (within the file's tolerance).
+/// on the knot range `knots`, its inner control points 0.002 mm above the face.
 fn cube_with_short_edge_on_spline_top(knots: (f64, f64)) -> String {
     let l = 10.0_f64;
     let mut w = Entities::default();
@@ -5956,11 +5956,13 @@ fn cube_with_short_edge_on_spline_top(knots: (f64, f64)) -> String {
     };
     let e_long = step_line_edge(&mut w, (verts[4], corner(4)), (vq, q));
     let p5 = corner(5);
-    // The edge lies on the face: the net's row at y = 0 is straight at z = 10, with x running
-    // linearly in the first parameter, so every control point on that line (unevenly spaced, so
-    // the cubic is a true cubic and not a straight run) keeps the whole edge on the surface.
-    let on_row = |t: f64| [q[0] + (p5[0] - q[0]) * t, 0.0, l];
-    let pts: Vec<usize> = [0.0, 0.2, 0.7, 1.0].iter().map(|t| step_point(&mut w, on_row(*t))).collect();
+    // The net's row at y = 0 is straight at z = 10, with x running linearly in the first
+    // parameter. The two inner control points lie `LIFT` above it, so the edge runs up to 1.5e-3 mm off
+    // the face: further than SMLib tolerates, which is when it gives the edge's trim on [0, 1]
+    // whatever the edge's own knot range is.
+    const LIFT: f64 = 2e-3;
+    let on_row = |t: f64, lift: f64| [q[0] + (p5[0] - q[0]) * t, 0.0, l + lift];
+    let pts: Vec<usize> = [(0.0, 0.0), (0.2, LIFT), (0.7, LIFT), (1.0, 0.0)].iter().map(|(t, lift)| step_point(&mut w, on_row(*t, *lift))).collect();
     let curve = w.add(format!(
         "B_SPLINE_CURVE_WITH_KNOTS('',3,(#{},#{},#{},#{}),.UNSPECIFIED.,.F.,.F.,(4,4),({:?},{:?}),.UNSPECIFIED.)",
         pts[0], pts[1], pts[2], pts[3], knots.0, knots.1
