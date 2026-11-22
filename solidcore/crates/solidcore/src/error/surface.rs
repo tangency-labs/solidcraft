@@ -369,33 +369,6 @@ impl SurfaceFailure {
     /// The status the C++ reports for the failure (a comparison detail).
     pub(crate) const fn comparison_status(&self) -> i32 {
         match self {
-            Self::Failed(_)
-            | Self::Defect { .. }
-            | Self::ScaleNotUniform
-            | Self::BallDefinitionUnreadable
-            | Self::PointOnAxis
-            | Self::IsoCircleUndefined
-            | Self::ExtensionNotMadeInBracket
-            | Self::BlendCurveNotBSpline
-            | Self::BlendDefinitionUnreadable
-            | Self::NetNotCertified
-            | Self::CurveDimensionTooLarge
-            | Self::NoBSplineForm
-            | Self::DoesNotContinueAsItself
-            | Self::OffsetNestedTooDeep
-            | Self::DerivativeOrderTooHigh { .. }
-            | Self::NoNormal
-            | Self::InvertedPointOffOffset
-            | Self::ExtensionTowardFailed
-            | Self::RevolutionArcOutOfRange
-            | Self::ExtensionSpanNotPositive
-            | Self::ExtensionSpansPastBound
-            | Self::AsItselfNetUnexpected
-            | Self::RevolutionAxisDegenerate
-            | Self::GeneratorCircleUndefined
-            | Self::AsItselfWeightNotPositive
-            | Self::RotationSenseUndefined
-            | Self::NoNonsingularStepoff => SM_ERR,
             Self::Missing(_)
             | Self::SolverWithout { .. }
             | Self::SolveCacheNotMade
