@@ -4348,13 +4348,15 @@ impl Model {
                         moved.push((f.id, bodies));
                         reuse = true;
                     }
+                    // Not kept in the cached result: its notes follow the sketches as they are now.
+                    let warning = if c.error.is_none() { with_retained_notes(doc, c.warning, f, &state) } else { c.warning };
                     out.push(FeatureResult {
                         id: f.id,
                         name: f.name.clone(),
                         error: c.error,
                         error_code: c.error_code,
                         internal: false,
-                        warning: c.warning,
+                        warning,
                         import_report: c.import_report,
                         repair: c.repair,
                         lost_projections: c.lost_projections,
@@ -4387,7 +4389,8 @@ impl Model {
                         state = r.state.clone();
                     }
                     reuse &= r.error.is_none();
-                    out.push(FeatureResult { state: state.clone(), unkept: false, ..r.clone() });
+                    let warning = if r.error.is_none() { with_retained_notes(doc, r.warning.clone(), f, &state) } else { r.warning.clone() };
+                    out.push(FeatureResult { state: state.clone(), unkept: false, warning, ..r.clone() });
                     continue;
                 }
                 // Or what it changed when what it reads was as it is now, made again on the rest of the
@@ -4638,6 +4641,8 @@ impl Model {
                     // Held while a check before it, or its own, runs.
                     checks.store(i, entry, &self.cache, &self.kept);
                 }
+                // Not in the cached result: its notes follow the sketches as they are now.
+                let warning = if error.is_none() { with_retained_notes(doc, warning, f, &state) } else { warning };
                 reuse &= error.is_none();
                 if reusing
                     && error.is_none()
@@ -4792,6 +4797,12 @@ impl Model {
                 })
                 .clone();
             r.state = state;
+        }
+        // A note naming the sketch follows its new name.
+        for (r, f) in self.results.iter_mut().zip(&doc.features).skip(at) {
+            if r.error.is_none() && !r.skipped {
+                r.warning = with_retained_notes(doc, r.warning.take(), f, &r.state);
+            }
         }
         self.refingerprint(doc);
         true
@@ -8449,6 +8460,62 @@ pub(crate) fn thin_regions(vals: &BTreeMap<String, Value>, ss: &SolvedSketch, th
 /// How far apart (mm) profiles must stay for their extruded tools to be cut as one.
 const APART_GAP: f64 = 1e-3;
 
+/// The most shells one tool of profiles apart holds: a body's record takes no more, so a sketch
+/// of 1369 separate squares, joined into one tool, failed with "shell count" (#20398).
+const MAX_JOINED_SHELLS: usize = solidcore_record::brep::MAX_SHELLS;
+
+#[cfg(test)]
+thread_local! {
+    /// [`MAX_JOINED_SHELLS`] for this thread's tests: a test splits a few profiles into groups.
+    static JOINED_SHELLS_LIMIT: std::cell::Cell<usize> = const { std::cell::Cell::new(MAX_JOINED_SHELLS) };
+}
+
+#[cfg(test)]
+fn joined_shells_limit() -> usize {
+    JOINED_SHELLS_LIMIT.with(std::cell::Cell::get)
+}
+
+#[cfg(not(test))]
+fn joined_shells_limit() -> usize {
+    MAX_JOINED_SHELLS
+}
+
+/// Tools apart from each other (extruded from profiles apart in the sketch) as one tool, so the
+/// body is cut or joined once rather than once per profile. Tools of more than
+/// [`MAX_JOINED_SHELLS`] shells together are joined in even groups, one tool for each, and the
+/// body is cut or joined once per group (#20398). Tools the kernel does not join (meshes) are
+/// left as they are.
+fn join_apart_tools(tools: Vec<Traced>) -> Result<Vec<Traced>> {
+    let limit = joined_shells_limit().max(1);
+    let shells: Vec<usize> = tools.iter().map(|t| t.body.record().shells.len().max(1)).collect();
+    let total: usize = shells.iter().sum();
+    // Even groups: as many as the limit asks for, each holding about as many shells.
+    let most = total.div_ceil(total.div_ceil(limit).max(1));
+    let mut groups: Vec<Vec<Traced>> = Vec::new();
+    let mut held = 0;
+    for (tool, n) in tools.into_iter().zip(shells) {
+        match groups.last_mut() {
+            Some(group) if held + n <= most => {
+                group.push(tool);
+                held += n;
+            }
+            _ => {
+                groups.push(vec![tool]);
+                held = n;
+            }
+        }
+    }
+    let mut out = Vec::with_capacity(groups.len());
+    for group in groups {
+        let bodies: Vec<Body> = group.iter().map(|t| t.body.clone()).collect();
+        match kernel::join_apart(&bodies)? {
+            Some(one) => out.push(Traced::step(one, &group.iter().collect::<Vec<_>>())),
+            None => out.extend(group),
+        }
+    }
+    Ok(out)
+}
+
 /// The tool bodies a feature adds or removes (extrude, revolve, primitives), in the current state.
 /// `to_body` is the body a To Object extent runs to (an extrude), when it found one.
 fn feature_tools_with_constructor(
@@ -8691,10 +8758,7 @@ fn feature_tools_with_constructor(
                     _ => false,
                 };
                 if at_once && tools.len() > 1 && regions_apart(&regions, APART_GAP + 2.0 * growth) {
-                    let bodies: Vec<Body> = tools.iter().map(|t| t.body.clone()).collect();
-                    if let Some(one) = kernel::join_apart(&bodies)? {
-                        tools = vec![Traced::step(one, &tools.iter().collect::<Vec<_>>())];
-                    }
+                    tools = join_apart_tools(tools)?;
                 }
                 if let Some(((tb, (_, fi)), p)) = target {
                     tools = trim_to_curved_face(tools, tb, fi, p.0, to_offset, &ss.plane, base, base + sign * len)?;
@@ -8830,10 +8894,7 @@ fn feature_tools_with_constructor(
                 _ => false,
             };
             if at_once && tools.len() > 1 && !is_symmetric_offset && regions_apart(&regions, APART_GAP) {
-                let bodies: Vec<Body> = tools.iter().map(|t| t.body.clone()).collect();
-                if let Some(one) = kernel::join_apart(&bodies)? {
-                    tools = vec![Traced::step(one, &tools.iter().collect::<Vec<_>>())];
-                }
+                tools = join_apart_tools(tools)?;
             }
             if let Some(tb) = curved.and_then(|bi| tst.bodies.get(bi))
                 && let Some((_, fi)) = to_face
@@ -11069,6 +11130,10 @@ fn replay(
             for m in mats {
                 let moved: Vec<Vec3> = picked.iter().map(|p| crate::apply_point(m, *p)).collect();
                 let i = body_at(st, body, &moved)?;
+                // A distance of 0 leaves the faces where they are (#20496).
+                if d.abs() < 1e-9 {
+                    continue;
+                }
                 let Some(mb) = st.bodies.get(i).cloned() else { return Err(DocError::Invalid("body".into())) };
                 let nb = mb.traced().then(kernel::offset_faces(&mb.body, &moved, d)?);
                 if let Some(slot) = st.bodies.get_mut(i) {
@@ -12273,6 +12338,54 @@ fn eval_feature(
     r
 }
 
+/// The start and end of the note a feature built from a sketch with a lost link carries.
+const RETAINED_NOTE_START: &str = "built from Sketch ";
+const RETAINED_NOTE_END: &str = "'s last outline: its projected geometry could not be updated; pick the face again in the sketch";
+
+/// A note for each sketch the feature is built from whose linked outline could not be refreshed
+/// (a link marked lost keeps its last geometry): the feature then follows that old outline, and
+/// says so on its own row, not only on the sketch's. `st` is the state after the feature.
+fn retained_outline_notes(doc: &Document, f: &Feature, st: &ModelState) -> Vec<String> {
+    let mut ids = f.kind.input_sketches();
+    ids.sort_unstable();
+    ids.dedup();
+    ids.into_iter()
+        .filter_map(|id| st.sketch(id))
+        .filter(|ss| ss.sketch.links.iter().any(|l| l.lost))
+        // The sketch's name in the design now: a state restored from before a rename holds the old one.
+        .map(|ss| format!("{RETAINED_NOTE_START}{}{RETAINED_NOTE_END}", doc.feature(ss.feature).map_or(ss.name.as_str(), |k| k.name.as_str())))
+        .collect()
+}
+
+/// `warning` without the retained-outline notes it holds. They are never kept in a cached result,
+/// since they follow the sketches' names and links as they are now.
+pub(crate) fn without_retained_notes(warning: Option<String>) -> Option<String> {
+    let mut s = warning?;
+    while let Some(a) = s.match_indices(RETAINED_NOTE_START).map(|(i, _)| i).find(|&i| i == 0 || s[..i].ends_with("; ")) {
+        let Some(rel) = s[a..].find(RETAINED_NOTE_END) else { break };
+        let b = a + rel + RETAINED_NOTE_END.len();
+        let (from, to) = if a >= 2 {
+            (a - 2, b)
+        } else if s[b..].starts_with("; ") {
+            (a, b + 2)
+        } else {
+            (a, b)
+        };
+        s.replace_range(from..to, "");
+    }
+    (!s.is_empty()).then_some(s)
+}
+
+/// `warning` with the retained-outline notes the feature has now (replacing any it held), read
+/// from `st`, the state after it: a saved model or a rename cannot leave an old one.
+pub(crate) fn with_retained_notes(doc: &Document, warning: Option<String>, f: &Feature, st: &ModelState) -> Option<String> {
+    let mut warning = without_retained_notes(warning);
+    for note in retained_outline_notes(doc, f, st) {
+        append_warning(&mut warning, note);
+    }
+    warning
+}
+
 /// [`eval_feature`] for one kind of feature. `heal` is the tolerance heal preference the
 /// evaluation read once ([`Model::heals`]): Repair heals first as it says, whatever the
 /// preference became since.
@@ -13376,6 +13489,11 @@ fn eval_feature_kind(
         FeatureKind::OffsetFace { faces, distance, body } => {
             let d = val(vals, distance, Kind::Length)?;
             let i = body_at(st, body, &crate::plain(faces))?;
+            // A distance of 0 leaves the faces where they are, as Offset Plane does; a parameter
+            // can pass through 0 without the design failing to rebuild (#20496).
+            if d.abs() < 1e-9 {
+                return Ok(());
+            }
             let Some(mb) = st.bodies.get(i).cloned() else { return Err(DocError::Invalid("body".into())) };
             let nb = Traced::step(kernel::offset_faces(&mb.body, &crate::plain(faces), d)?, &[&mb.traced()]);
             if let Some(slot) = st.bodies.get_mut(i) {
