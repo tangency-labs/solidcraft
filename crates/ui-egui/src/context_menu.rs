@@ -634,6 +634,11 @@ pub fn items(app: &SolveApp, target: &Target) -> Vec<Item> {
             item.children.push(cmd(app, "appearance.assign", "Remove override").key("").with(targets));
         }
     });
+    // Render's Fit frames the whole scene whatever is selected, so its component and
+    // occurrence menus do not offer Zoom to Selection.
+    if crate::render_workspace::active(app) {
+        v.retain(|item| item.id != "ui.zoomTo");
+    }
     v
 }
 
@@ -2056,8 +2061,13 @@ pub fn run_item(app: &mut SolveApp, item: &Item, at: Pos2) {
         // Only the row right-clicked is framed unless it is one of several selected rows.
         "ui.zoomTo" => {
             let items: Vec<Sel> = p.get("items").cloned().and_then(|v| serde_json::from_value(v).ok()).unwrap_or_default();
-            if !items.is_empty() && !items.iter().all(|i| app.session.selection.contains(i)) {
-                let _ = app.run("select.set", json!({ "items": items }));
+            if !items.is_empty()
+                && !items.iter().all(|i| app.session.selection.contains(i))
+                && app.run("select.set", json!({ "items": items })).is_err()
+            {
+                // The selection stays as it was (select.set takes at most 10,000 items): framing
+                // it would frame something the row is not.
+                return;
             }
             app.animate_view("fit");
         }
@@ -3660,6 +3670,58 @@ mod tests {
         assert!(h.app.cam.target.x > 400.0, "{:?}", h.app.cam.target);
         // The viewport's own body menu keeps its entries.
         assert!(!body_items(&h.app, &bodies[..1], false).iter().any(|i| i.id == "ui.zoomTo"));
+    }
+
+    /// #18263 review: a sketch or construction plane row frames that sketch or plane, not the
+    /// whole scene, when other geometry lies far from it.
+    #[test]
+    fn browser_menu_zoom_to_selection_frames_an_isolated_sketch_and_plane() {
+        let mut h = crate::scenario::Harness::new();
+        h.app.home.open = false;
+        h.app.preferences.look_at_anim = false;
+        h.app.run("solid.box", json!({"length":10,"width":10,"height":10})).unwrap();
+        h.app.run("sketch.create", json!({"plane":"XY"})).unwrap();
+        h.app.run("sketch.line", json!({"points":[[800,0],[820,10]],"infer":false})).unwrap();
+        h.app.run("sketch.finish", json!({})).unwrap();
+        let sketch = h.app.session.doc.features.last().map(|f| f.id).unwrap();
+        h.app.run("construct.plane.offset", json!({"base": "XY", "offset": 25, "name": "Far"})).unwrap();
+        let plane = h.app.session.doc.find_feature("Far").map(|f| f.id).unwrap();
+        h.app.run("select.clear", json!({})).unwrap();
+        h.frames(3);
+        let whole = crate::viewport::view_bounds(&h.app);
+        assert!(whole.max.x > 700.0, "the sketch is part of the whole scene: {whole:?}");
+
+        let zoom =
+            items(&h.app, &Target::Sketch { id: sketch }).into_iter().find(|i| i.id == "ui.zoomTo").expect("Zoom to Selection in the sketch menu");
+        run_item(&mut h.app, &zoom, Pos2::ZERO);
+        h.frames(2);
+        let framed = crate::viewport::selection_bounds(&h.app).expect("the sketch has bounds");
+        assert!(framed.min.x > 700.0 && framed.max.x < 830.0, "{framed:?}");
+        assert!(h.app.cam.target.x > 700.0, "{:?}", h.app.cam.target);
+
+        h.app.run("select.clear", json!({})).unwrap();
+        h.app.run("view.home", json!({})).unwrap();
+        h.frames(3);
+        let zoom =
+            items(&h.app, &Target::Plane { id: plane }).into_iter().find(|i| i.id == "ui.zoomTo").expect("Zoom to Selection in the plane menu");
+        run_item(&mut h.app, &zoom, Pos2::ZERO);
+        h.frames(2);
+        let framed = crate::viewport::selection_bounds(&h.app).expect("the plane has bounds");
+        assert!((framed.min.z - 25.0).abs() < 1e-6 && (framed.max.z - 25.0).abs() < 1e-6, "{framed:?}");
+        assert!(framed.max.x < whole.max.x, "the plane square is not the whole scene: {framed:?} {whole:?}");
+    }
+
+    /// #18263 review: Render's Fit frames every visible body, so its component menu offers no
+    /// Zoom to Selection.
+    #[test]
+    fn render_component_menu_has_no_zoom_to_selection() {
+        let mut h = crate::scenario::Harness::new();
+        h.app.home.open = false;
+        h.app.run("solid.box", json!({"length":10,"width":10,"height":10})).unwrap();
+        assert!(items(&h.app, &Target::Component { id: 0 }).iter().any(|i| i.id == "ui.zoomTo"));
+        h.app.ui.tab = "RENDER".into();
+        assert!(crate::render_workspace::active(&h.app));
+        assert!(!items(&h.app, &Target::Component { id: 0 }).iter().any(|i| i.id == "ui.zoomTo"));
     }
 
     #[test]

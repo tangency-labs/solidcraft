@@ -5288,7 +5288,35 @@ pub(crate) fn displayed_selection(app: &SolveApp, item: &Sel) -> Vec<Sel> {
 /// The box around what is selected (bodies, faces, edges, vertices, sketch curves and the
 /// bodies of selected features), where it is shown.
 pub fn selection_bounds(app: &SolveApp) -> Option<solidcraft_engine::geom::Aabb3> {
-    bounds_of(app, app.session.selection.iter().flat_map(|item| displayed_selection(app, item)))
+    let mut b =
+        bounds_of(app, app.session.selection.iter().flat_map(|item| displayed_selection(app, item))).unwrap_or(solidcraft_engine::geom::Aabb3::EMPTY);
+    let st = crate::open_meshing::shown_world(app);
+    let (origin, construction) = (origin_planes(app), construction_quads(app));
+    for item in &app.session.selection {
+        // A sketch row: the box of the sketch itself, where its plane puts it.
+        if let Sel::Feature { id } = item
+            && let Some(ss) = st.sketch(*id)
+            && let Some((lo, hi)) = ss.sketch.bounds()
+        {
+            for p in [lo, hi, solidcore_record::Vec2::new(lo.x, hi.y), solidcore_record::Vec2::new(hi.x, lo.y)] {
+                b.add(ss.plane.to_world(p));
+            }
+        }
+        // A plane, or the Browser row of a construction plane: the square it is drawn as.
+        for piece in displayed_selection(app, item) {
+            if let Sel::Plane { name } = piece {
+                let quad = origin
+                    .iter()
+                    .find(|(n, ..)| *n == name)
+                    .map(|(.., q)| q)
+                    .or_else(|| construction.iter().find(|(n, ..)| *n == name).map(|(.., q)| q));
+                for p in quad.into_iter().flatten() {
+                    b.add(*p);
+                }
+            }
+        }
+    }
+    (!b.is_empty()).then_some(b)
 }
 
 /// The box around the geometry a feature made (its bodies, or its faces on bodies later features
