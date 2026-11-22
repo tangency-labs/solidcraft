@@ -923,14 +923,16 @@ impl<O: LoopObject> HealData<O> {
             // can follow interval/curve edits, so do not continue with stale properties.
             if !split.split {
                 // the split declines with editing off (the caller's state; only
-                // `heal_targets` enables it) or a parameter outside the edge's interval
+                // `heal_targets` enables it), a parameter outside the edge's interval,
+                // or a parameter at an end the edge has no vertex for
                 if !b.editing_enabled() {
                     return Err(SolidError::topology(OP, TopologyFailure::EditingDisabled));
                 }
                 return Err(defect(
                     "the edge split was declined without naming an end, on a B-rep open for \
-                     editing, so the pole's parameter lies outside the edge's interval, \
-                     though the healer takes it from a crossing on that edge",
+                     editing, so the pole's parameter lies outside the edge's interval or at \
+                     an end with no vertex, though the healer takes it from a crossing on an \
+                     edge of a face's loop, which has both its vertices",
                 ));
             }
             // UpdateTargetLists deletes old properties. Reacquire the next candidate.
