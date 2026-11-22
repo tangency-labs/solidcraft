@@ -111,9 +111,10 @@ into `upstream/` (see README): it is the reading reference, and many cases read 
       tagged with the owning unit from `harness/callgraph/units.json`; co-ports are
       recorded as `CO-PORTED` in that unit's `plan/units/<id>.toml` notes.
 6. **Finish the PR**: bring your branch up to date with the latest `origin/main` by
-   rebasing or by merging `main` in; both are fine. Rebasing is preferred for your own PR
-   branch (push it with `--force-with-lease`); never force-push a branch someone else
-   builds on, or `main`. Re-verify,
+   merging `main` in or by rebasing; both are fine. Merging costs less CI (a merge that
+   leaves your change as it was carries the earlier passing run); a rebase re-runs the full
+   suite and needs `--force-with-lease`. Never force-push a branch someone else builds on,
+   or `main`. Re-verify,
    set the unit's `status` to `"green"` or `"partial"` in
    `plan/units/<unit id>.toml` with case/deferred counts in `notes` (plus the files of
    any units you promoted), commit, push, and mark the PR ready. Put the goldens summary lines
