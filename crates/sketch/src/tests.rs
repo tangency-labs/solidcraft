@@ -2934,3 +2934,25 @@ fn removing_a_point_from_a_spline_with_its_own_knots_is_refused() {
     let CurveKind::Spline { pts: kept, nurbs: Some(now), .. } = &sk.curves[c].kind else { panic!("{:?}", sk.curves[c].kind) };
     assert_eq!((kept.len(), now), (7, &nurbs));
 }
+
+/// A circle just inside a hexagon's corners (a hex socket drawn with a circle nearly through its
+/// corners, #20661): the circle crosses each side twice, close to the corner. The sketch keeps
+/// the central region and a sliver at each corner, so a point at the centre finds a profile.
+#[test]
+fn circle_just_inside_hexagon_corners_keeps_the_regions() {
+    let big = 1.1547;
+    for gap in [0.0, 2e-4, 5e-4, 1e-3] {
+        let mut sk = Sketch::new();
+        let corners: Vec<Vec2> = (0..6).map(|i| v(big * (PI / 3.0 * i as f64).cos(), big * (PI / 3.0 * i as f64).sin())).collect();
+        let pts: Vec<usize> = corners.iter().map(|c| sk.add_point(*c, None).unwrap()).collect();
+        for i in 0..6 {
+            sk.add_line_pts(pts[i], pts[(i + 1) % 6], None).unwrap();
+        }
+        sk.add_circle(v(0.0, 0.0), big - gap, None, None).unwrap();
+        let ps = find_profiles(&sk);
+        assert!(profile_at_point(&ps, v(0.0, 0.0)).is_some(), "gap {gap}: no profile at the centre ({} profiles)", ps.len());
+        let slivers = ps.iter().filter(|p| p.area < 1e-3).count();
+        let expected = if gap == 0.0 { 0 } else { 6 };
+        assert_eq!(slivers, expected, "gap {gap}: {:?}", ps.iter().map(|p| p.area).collect::<Vec<_>>());
+    }
+}
