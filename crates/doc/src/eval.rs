@@ -11671,7 +11671,8 @@ fn copy_targets<'a>(st: &ModelState, f: &'a Feature, src: &Feature) -> (Operatio
 
 /// The frame `src`'s geometry is kept in, in component `own`'s frame, when it is another
 /// (#19451): its tools' component's ([`tools_component`]), a pattern's or mirror's own
-/// component's (its copies' transforms), else that of the body it picked on or made. Nothing,
+/// component's (its copies' transforms), the first of a moved copy's or a frame member's bodies
+/// kept in another (each is copied from its own), else that of the body it picked on. Nothing,
 /// without measuring a body, when nothing is placed.
 fn kept_in(doc: &Document, st: &ModelState, own: u64, src: &Feature) -> Option<Mat> {
     if doc.occurrences.is_empty() && doc.body_offsets.is_empty() {
@@ -11682,13 +11683,15 @@ fn kept_in(doc: &Document, st: &ModelState, own: u64, src: &Feature) -> Option<M
         (FeatureKind::Pattern { bodies, .. } | FeatureKind::Mirror { bodies, .. }, None) if bodies.is_empty() => {
             component_in(doc, own, src.component)
         }
+        (FeatureKind::Move { copy: true, .. } | FeatureKind::FrameMember { .. }, None) => {
+            st.bodies.iter().filter(|b| b.feature == src.id).find_map(|b| body_in(doc, own, b))
+        }
         _ => body_in(doc, own, st.bodies.get(picked_body(doc, st, src)?)?),
     }
 }
 
 /// The body `src`'s picks are kept in the frame of: the body it names; else, by box from its
-/// first pick, the nearest of the bodies holding it (its own component's first), else of all. The
-/// first body it made for a moved copy or a frame member.
+/// first pick, the nearest of the bodies holding it (its own component's first), else of all.
 fn picked_body(doc: &Document, st: &ModelState, src: &Feature) -> Option<usize> {
     let (named, p) = match &src.kind {
         FeatureKind::Fillet { edges, body, .. } | FeatureKind::Chamfer { edges, body, .. } => {
@@ -11703,7 +11706,6 @@ fn picked_body(doc: &Document, st: &ModelState, src: &Feature) -> Option<usize> 
             Some(position.0),
         ),
         FeatureKind::Thread { face, target_bodies, .. } => (target_bodies.first().map(|n| &**n), Some(face.0)),
-        FeatureKind::Move { copy: true, .. } | FeatureKind::FrameMember { .. } => return st.bodies.iter().position(|b| b.feature == src.id),
         _ => return None,
     };
     if let Some(n) = named {

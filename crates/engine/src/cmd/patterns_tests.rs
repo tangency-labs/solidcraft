@@ -1831,6 +1831,49 @@ fn a_mirrored_picked_hole_in_a_turned_and_lifted_part_lands_at_its_world_image()
     assert!(rel(b, 16000.0 - 10.0 * PI) < 1e-6 && ends.len() == 2 && ends.iter().zip(want).all(|((_, at), w)| near(*at, w)), "{b} {ends:?}");
 }
 
+/// #20208 review: a root pattern of a root Move copy of Left and Right, whose copy of Right a
+/// transfer moved into Part, placed lifted 20, copies each copy where it is shown, and moving
+/// Part after the pattern gives what moving it first gives. The pattern read where the first
+/// copy, Left's, is kept, the root, and so kept the copy of Right's copy where Part had been.
+#[test]
+fn a_pattern_of_a_moved_copy_follows_the_part_its_second_copy_was_moved_into() {
+    let setup = || {
+        let mut s = Session::default();
+        run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10, "corner": [0, 0, 0], "body_name": "Left"}));
+        run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10, "corner": [20, 0, 0], "operation": "new", "body_name": "Right"}));
+        run(&mut s, "solid.move", json!({"bodies": ["Left", "Right"], "translate": [0, 30, 0], "copy": true, "name": "Copy"}));
+        let copy = s.doc.features.iter().find(|f| f.name == "Copy").unwrap().id;
+        let made: Vec<String> = s.model.state().bodies.iter().filter(|b| b.feature == copy).map(|b| b.name.clone()).collect();
+        assert_eq!(made.len(), 2, "{made:?}");
+        run(&mut s, "component.create", json!({"name": "Part", "parent": "root", "grounded": false, "activate": false}));
+        run(&mut s, "component.move_bodies", json!({"bodies": [made[1]], "component": "Part"}));
+        run(&mut s, "occurrence.move", json!({"occurrence": "Part:1", "translate": [0, 0, 20]}));
+        s
+    };
+    let pattern = json!({"features": ["Copy"], "dir1": [1, 0, 0], "count1": 2, "spacing1": 100, "name": "Pat"});
+    let copies = |s: &Session| {
+        let pat = s.doc.features.iter().find(|f| f.name == "Pat").unwrap().id;
+        let st = s.model.state();
+        let centroid = |b: &solidcraft_doc::ModelBody| b.measure().map(|m| [m.centroid.x, m.centroid.y, m.centroid.z]).unwrap();
+        let mut at: Vec<[f64; 3]> = st.bodies.iter().filter(|b| b.feature == pat).map(centroid).collect();
+        at.sort_by(|a, b| a[0].total_cmp(&b[0]));
+        at
+    };
+    let later_move = json!({"occurrence": "Part:1", "translate": [0, 0, 40]});
+    let mut s = setup();
+    run(&mut s, "solid.pattern.rectangular", pattern.clone());
+    let before = copies(&s);
+    assert!(before.len() == 2 && near(before[0], [105.0, 35.0, 5.0]) && near(before[1], [125.0, 35.0, 25.0]), "{before:?}");
+    run(&mut s, "occurrence.move", later_move.clone());
+    let later = copies(&s);
+    let mut first = setup();
+    run(&mut first, "occurrence.move", later_move);
+    run(&mut first, "solid.pattern.rectangular", pattern);
+    let moved_first = copies(&first);
+    assert!(near(moved_first[1], [125.0, 35.0, 65.0]), "{moved_first:?}");
+    assert!(later.len() == 2 && later.iter().zip(&moved_first).all(|(a, b)| near(*a, *b)), "moved after {later:?}, before {moved_first:?}");
+}
+
 /// A disc with an off-centre hole whose top and bottom edges are chamfered.
 fn disc_with_chamfered_hole() -> Session {
     let mut s = Session::default();
