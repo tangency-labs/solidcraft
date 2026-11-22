@@ -1141,8 +1141,8 @@ fn a_ball_offsets_as_a_sheet() {
 }
 
 /// A Y of three walls meeting along one edge (a sheet, not manifold there): thickened, its
-/// result is no closed solid. Refused as `NotSolid` (with the input's contract it passed, the
-/// input being a sheet), the sheet as it came in.
+/// result is no closed solid. Refused as `NotSolidBecause(NotManifold)` (with the input's
+/// contract it passed, the input being a sheet), the sheet as it came in.
 #[test]
 fn a_thickened_sheet_that_is_no_solid_is_refused() {
     all_fixes();
@@ -1172,7 +1172,10 @@ fn a_thickened_sheet_that_is_no_solid_is_refused() {
     .map(Body::new)
     .unwrap();
     let before = y.to_smb(false).unwrap();
-    assert_eq!(thicken(&y, 1.0, false), Err(Error::NotSolid));
+    assert_eq!(
+        thicken(&y, 1.0, false),
+        Err(Error::NotSolidBecause(crate::SolidTest::NotManifold))
+    );
     assert_eq!(y.to_smb(false).unwrap(), before);
 }
 

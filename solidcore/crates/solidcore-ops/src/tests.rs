@@ -616,8 +616,9 @@ fn a_face_merge_by_delete_edge_keeps_both_faces_provenance() {
     );
 }
 
-/// A solid input must give a solid: an empty result is `Empty`, a box turned inside out is
-/// `NotSolid`, a box is a solid. What is expected comes from the input.
+/// A solid input must give a solid: an empty result is `Empty`, a box with its faces flipped
+/// is `NotSolidBecause` naming the pointer check, a box is a solid. What is expected comes
+/// from the input.
 #[test]
 fn the_result_contract() {
     all_fixes();
@@ -656,13 +657,66 @@ fn the_result_contract() {
     .unwrap();
     assert_eq!(
         out,
-        Some((Some(Error::Empty), Some(Error::NotSolid), true, true))
+        Some((
+            Some(Error::Empty),
+            Some(Error::NotSolidBecause(crate::SolidTest::PointersInvalid)),
+            true,
+            true
+        ))
     );
+}
+
+/// The result check of a proved operation names the test it fails, as `check_solid` does
+/// (#15035's rule for every result check): `finish_under` under [`Contract::Proved`] returns
+/// `NotSolidBecause(test)`, and `not_solid_test` reads the test. The helper is the check every
+/// proved operation's result runs; no cheap operation makes its own result fail here.
+#[test]
+fn a_proved_result_names_the_test_it_fails() {
+    use crate::body::{finish_under, Contract};
+    use crate::SolidTest;
+    use solidcore::primitive::api_primitives::create_box;
+    use solidcore::topology::brep::p1::regions;
+    all_fixes();
+    let out = run("proved result", |k| {
+        let mut flipped = create_box(k, solidcore::Vec3::new(0.0, 0.0, 0.0), 1.0, 1.0, 1.0)?;
+        for f in flipped.face_list().to_vec() {
+            flip_face_orientation(&mut flipped, f)?;
+        }
+        let mut inside_out = create_box(k, solidcore::Vec3::new(0.0, 0.0, 0.0), 1.0, 1.0, 1.0)?;
+        for r in regions(&inside_out, None)? {
+            let g = inside_out.region_mut(r)?;
+            g.is_void = 1 - g.is_void;
+        }
+        let proven =
+            |k: &mut solidcore::Kernel, b| finish_under(k, b, Expect::SOLID, Contract::Proved);
+        Ok(Some([
+            proven(k, flipped)?.err(),
+            proven(k, inside_out)?.err(),
+        ]))
+    })
+    .unwrap()
+    .unwrap();
+    assert_eq!(
+        out,
+        [
+            Some(Error::NotSolidBecause(SolidTest::PointersInvalid)),
+            Some(Error::NotSolidBecause(SolidTest::VolumeNegative)),
+        ]
+    );
+    assert_eq!(
+        out.each_ref()
+            .map(|e| e.as_ref().and_then(Error::not_solid_test)),
+        [
+            Some(SolidTest::PointersInvalid),
+            Some(SolidTest::VolumeNegative)
+        ]
+    );
+    assert_eq!(Error::Argument.not_solid_test(), None);
 }
 
 /// `check_solid` names the test a body fails (#15035): a box passes; a sheet is not manifold; a
 /// box with every face flipped fails the pointer check; a box with its material outside is
-/// proved inside out. The body checked is unchanged.
+/// proved inside out. The body checked is unchanged, and `not_solid_test` reads each test.
 #[test]
 fn check_solid_names_the_test_a_body_fails() {
     use crate::SolidTest;
@@ -697,6 +751,16 @@ fn check_solid_names_the_test_a_body_fails() {
             Some(Error::NotSolidBecause(SolidTest::NotManifold)),
             Some(Error::NotSolidBecause(SolidTest::PointersInvalid)),
             Some(Error::NotSolidBecause(SolidTest::VolumeNegative)),
+        ]
+    );
+    assert_eq!(
+        tests
+            .each_ref()
+            .map(|e| e.as_ref().and_then(Error::not_solid_test)),
+        [
+            Some(SolidTest::NotManifold),
+            Some(SolidTest::PointersInvalid),
+            Some(SolidTest::VolumeNegative),
         ]
     );
     assert_eq!(bodies.each_ref().map(|b| b.to_smb(true).unwrap()), before);
@@ -796,7 +860,7 @@ fn scramble(br: &mut Brep) {
 }
 
 /// A refused edit leaves the body exactly as it came in: a result with no faces
-/// ([`Error::Empty`]), a solid's result that is no solid ([`Error::NotSolid`]), and a kernel
+/// ([`Error::Empty`]), a solid's result that is no solid ([`Error::NotSolidBecause`]), and a kernel
 /// error after the body was edited. Each edit first changes what the body carries.
 #[test]
 fn a_refused_edit_leaves_the_body_as_it_was() {
@@ -821,7 +885,10 @@ fn a_refused_edit_leaves_the_body_as_it_was() {
         Ok(finish(k, sheet, expect)?.map(|r| *br = r))
     })
     .unwrap();
-    assert_eq!(opened, Err(Error::NotSolid));
+    assert_eq!(
+        opened,
+        Err(Error::NotSolidBecause(crate::SolidTest::NotManifold))
+    );
     assert_eq!(as_it_is(&b), before);
     let failed: crate::Result<()> = with_body("fails after an edit", &b, |_, br| {
         scramble(br);
@@ -885,7 +952,7 @@ fn an_edit_without_a_snapshot_is_refused_up_front() {
 }
 
 /// An operation that makes a solid from a sheet states it ([`Expect::SOLID`]): a sheet's
-/// result that is no solid is `NotSolid`, the body as it came in.
+/// result that is no solid is `NotSolidBecause(NotManifold)`, the body as it came in.
 #[test]
 fn a_result_stated_solid_must_be_one() {
     all_fixes();
@@ -897,7 +964,10 @@ fn a_result_stated_solid_must_be_one() {
         Ok(finish(k, sheet, Expect::SOLID)?.map(|r| *br = r))
     })
     .unwrap();
-    assert_eq!(r, Err(Error::NotSolid));
+    assert_eq!(
+        r,
+        Err(Error::NotSolidBecause(crate::SolidTest::NotManifold))
+    );
     assert_eq!(b.to_smb(false).unwrap(), before);
 }
 
