@@ -307,6 +307,65 @@ pub enum SurfaceFailure {
     /// made or read, or both sweep iso curves were degenerate when it was, which the make
     /// does not report). Class `failed`.
     NoPolarConverter,
+    /// The surface is not a cylinder with a radius above the kernel's zero, which the
+    /// routine takes. [`ErrorKind::Unsupported`].
+    NotACylinder,
+    /// The cone the routine would build passes its apex within the surface's span: its
+    /// radius at a control point of the net is not above the kernel's zero. Class `failed`.
+    ConeClosesWithinSpan,
+    /// The NURB is not of the analytic kind the routine tests it for or rebuilds from it
+    /// (an edited NURB that is no longer its surface's kind, or a NURB recognised as one):
+    /// `check` says which test it failed. [`ErrorKind::Unsupported`].
+    NurbNotAnalytic {
+        /// The test of the analytic kind the NURB failed.
+        check: AnalyticCheck,
+    },
+}
+
+/// The test of an analytic kind a NURB failed ([`SurfaceFailure::NurbNotAnalytic`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum AnalyticCheck {
+    /// Its degrees and rationality are not the kind's (a cone's are 1 by 2, rational).
+    DegreeAndRationality,
+    /// Its iso curves at the two ends are not circular arcs.
+    EndsNotCircular,
+    /// Its end arcs' start or end angles differ by more than the tolerance.
+    EndArcsTwisted,
+    /// The distance between its end arcs' centres is degenerate.
+    HeightDegenerate,
+    /// The plane of its bottom arc is not perpendicular to the axis.
+    BottomNotSquareToAxis,
+    /// The plane of its top arc is not perpendicular to the axis.
+    TopNotSquareToAxis,
+    /// It is a cylinder's, and its end radii differ by more than the cylinder's tolerance.
+    RadiiDiffer,
+    /// Moved onto the mean-radius cylinder, its net would have a radius not above zero at
+    /// a control point.
+    NetRadiusNotPositive,
+    /// Moved onto the mean-radius cylinder, its net is not on that cylinder (its end
+    /// circles are turned against each other or off the axis).
+    NetOffCylinder,
+}
+
+impl core::fmt::Display for AnalyticCheck {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.write_str(match self {
+            Self::DegreeAndRationality => "its degrees or rationality are not the kind's",
+            Self::EndsNotCircular => "its end iso curves are not circular",
+            Self::EndArcsTwisted => "its end arcs' angles differ by more than the tolerance",
+            Self::HeightDegenerate => "its height is degenerate",
+            Self::BottomNotSquareToAxis => {
+                "its bottom arc's plane is not perpendicular to the axis"
+            }
+            Self::TopNotSquareToAxis => "its top arc's plane is not perpendicular to the axis",
+            Self::RadiiDiffer => "its top and bottom radii differ",
+            Self::NetRadiusNotPositive => {
+                "its net has no positive radius at a control point on the mean-radius cylinder"
+            }
+            Self::NetOffCylinder => "its moved net is not on the mean-radius cylinder",
+        })
+    }
 }
 
 /// What a solver lacks ([`SurfaceFailure::SolverWithout`]).
@@ -392,7 +451,9 @@ impl SurfaceFailure {
             Self::IsoCurveKindNotLiftable
             | Self::DerivativeCombinationUnsupported { .. }
             | Self::PlainVolume
-            | Self::BSplineVolumeUnsupported => ErrorKind::Unsupported,
+            | Self::BSplineVolumeUnsupported
+            | Self::NotACylinder
+            | Self::NurbNotAnalytic { .. } => ErrorKind::Unsupported,
             Self::PointInBendSingularity
             | Self::ZeroVolumeTangent { .. }
             | Self::LineCrossingSingular
@@ -569,6 +630,15 @@ impl core::fmt::Display for SurfaceFailure {
             Self::DegenerateIsoCurve => f.write_str("the iso curve has zero length"),
             Self::NoPolarConverter => {
                 f.write_str("the surface of revolution has no polar converter circle")
+            }
+            Self::NotACylinder => {
+                f.write_str("the surface is not a cylinder with a positive radius")
+            }
+            Self::ConeClosesWithinSpan => {
+                f.write_str("the cone would pass its apex within the surface's span")
+            }
+            Self::NurbNotAnalytic { check } => {
+                write!(f, "the NURB is not of the analytic kind: {check}")
             }
         }
     }
@@ -1000,6 +1070,19 @@ mod tests {
                 SM_ERR_NULL_POINTER,
                 ErrorKind::Failed,
             ),
+            (SurfaceFailure::NotACylinder, SM_ERR, ErrorKind::Unsupported),
+            (
+                SurfaceFailure::ConeClosesWithinSpan,
+                SM_ERR,
+                ErrorKind::Failed,
+            ),
+            (
+                SurfaceFailure::NurbNotAnalytic {
+                    check: AnalyticCheck::EndArcsTwisted,
+                },
+                SM_ERR,
+                ErrorKind::Unsupported,
+            ),
         ];
         for (failure, status, kind) in cases {
             let e = SolidError::surface(op, failure);
@@ -1014,6 +1097,16 @@ mod tests {
             assert_eq!(e.surface_failure(), Some(&failure));
             assert!(!e.is_defect() && !e.is_refusal(), "{failure:?}");
         }
+        assert_eq!(
+            SolidError::surface(
+                op,
+                SurfaceFailure::NurbNotAnalytic {
+                    check: AnalyticCheck::HeightDegenerate
+                }
+            )
+            .to_string(),
+            "surface::op: the NURB is not of the analytic kind: its height is degenerate"
+        );
         // a NURB not made keeps the site's status, and its make's defect decides the class
         let made = Err(SolidError::surface(op, SurfaceFailure::Defect { why: "x" }));
         let e = SolidError::surface_nurb_not_made(op, SM_ERR_NULL_POINTER, made);
@@ -1082,7 +1175,6 @@ mod tests {
         #[rustfmt::skip] // one file per line, so conversions in parallel merge cleanly
         const PINNED: &[(&str, usize)] = &[
             ("solidcore/src/surface/ball_patch.rs", 8),
-            ("solidcore/src/surface/cone/p2.rs", 14),
             ("solidcore/src/surface/cone/p3.rs", 3),
             ("solidcore/src/surface/extend.rs", 2),
             ("solidcore/src/surface/extend/analytic.rs", 25),

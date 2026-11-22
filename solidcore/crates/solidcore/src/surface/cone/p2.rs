@@ -96,7 +96,8 @@ use super::Cone;
 use crate::curve::curve::Curve;
 use crate::curve::ellipse::{Ellipse, EllipseOptions};
 use crate::curve::line::{BoundedLineOptions, Line};
-use crate::error::{ignore_status, ignored, Result, SolidError};
+use crate::error::surface::{AnalyticCheck, SurfaceFailure};
+use crate::error::{ignore_status, ignored, Failure, Result, SolidError, SM_ERR_NULL_POINTER};
 use crate::geom::axis2_placement::Axis2Placement;
 use crate::geom::extent1d::Extent1d;
 use crate::geom::extent2d::Extent2d;
@@ -579,17 +580,12 @@ impl Cone {
     /// `SM_ERR` unless this is a cylinder with a NURB whose radius stays positive; those of
     /// the control point edits and of the rebuild.
     pub fn lean_cylinder(&self, k: &Kernel, slope: f64, neutral_height: f64) -> Result<Cone> {
-        let err = || {
-            SolidError::surface_failed(
-                "surface::cone::p2::Cone::lean_cylinder",
-                "the surface is not a cylinder with a NURB whose radius stays positive",
-            )
-        };
+        const OP_LEAN: &str = "surface::cone::p2::Cone::lean_cylinder";
         let canonical = self.canonical();
         if !self.is_cylinder()
             || canonical.radius.partial_cmp(&EFF_ZERO) != Some(core::cmp::Ordering::Greater)
         {
-            return Err(err());
+            return Err(SolidError::surface(OP_LEAN, SurfaceFailure::NotACylinder));
         }
         let origin = canonical.origin.origin();
         let axis = canonical.origin.x_axis().cross(canonical.origin.y_axis());
@@ -614,7 +610,10 @@ impl Cone {
                 let height = d.dot(axis);
                 let radius = canonical.radius + slope * (height - neutral_height);
                 if radius.partial_cmp(&EFF_ZERO) != Some(core::cmp::Ordering::Greater) {
-                    return Err(err());
+                    return Err(SolidError::surface(
+                        OP_LEAN,
+                        SurfaceFailure::ConeClosesWithinSpan,
+                    ));
                 }
                 let moved =
                     origin + axis * height + (d - axis * height) * (radius / canonical.radius);
@@ -649,11 +648,26 @@ impl Cone {
     /// [`crate::surface::surf_of_revolution::SurfOfRevolution::reparameterize`].
     pub fn reparameterize(&mut self, k: &Kernel, trim_domain: &Extent2d) -> Result<()> {
         // GetOrCreateGwNurbPointer (the virtual MakeNurb with the cone's iso curves)
+        let mut made = Ok(());
         if self.rev.base.gw_nurb().is_none() {
-            ignore_status(self.make_nurb(k))?;
+            made = self.make_nurb(k);
+            ignore_status(made.clone())?;
         }
         if self.rev.base.gw_nurb().is_none() {
-            return Err(SolidError::surface_missing(OP_REPARAM, "the cone's NURB"));
+            return Err(match made {
+                Err(e) => {
+                    SolidError::surface_nurb_not_made(OP_REPARAM, SM_ERR_NULL_POINTER, Err(e))
+                }
+                Ok(()) => Failure::new(
+                    OP_REPARAM,
+                    SurfaceFailure::Defect {
+                        why: "the NURB is missing after make_nurb returned success, which on \
+                              success sets the NURB",
+                    },
+                )
+                .with_status(SM_ERR_NULL_POINTER)
+                .into_error(),
+            });
         }
         let inside_out = self.inside_out;
         self.rev
@@ -860,7 +874,15 @@ impl Cone {
                 tgt_nurb_domain.v_interval()
             };
             let gen = off_cone.rev.gen_curve.as_mut().ok_or_else(|| {
-                SolidError::surface_missing(OP_OFFSET, "the offset cone's generator curve")
+                Failure::new(
+                    OP_OFFSET,
+                    SurfaceFailure::Defect {
+                        why: "the offset cone has no generator, though create_canonical \
+                              built it above with its generator line",
+                    },
+                )
+                .with_status(SM_ERR_NULL_POINTER)
+                .into_error()
             })?;
             ignore_status(gen.edit_parameterization(k, &tgt_gen_nurb_ivl))?;
 
@@ -958,8 +980,9 @@ impl Cone {
         // translate the NewCone->GenCurve from current center line (status ignored)
         let mut mv = Axis2Placement::IDENTITY;
         mv.translate(off_vec);
+        // (the offset cone is a copy of this one: its generator is this cone's)
         let gen = off_cone.rev.gen_curve.as_mut().ok_or_else(|| {
-            SolidError::surface_missing(OP_OFFSET, "the offset cone's generator curve")
+            SolidError::surface(OP_OFFSET, SurfaceFailure::SurfaceWithoutGenerator)
         })?;
         ignore_status(gen.transform(k, &mv, None))?;
 
@@ -1210,8 +1233,8 @@ impl Cone {
     /// # Errors
     ///
     /// Upstream's `SER` statuses (returned as a `TRUE` result without cylinder): those
-    /// of the iso curves; those of the degeneracy and arc tests;
-    /// `SM_ERR_NULL_POINTER` for a surface without NURB (upstream copies the null NURB).
+    /// of the iso curves; those of the degeneracy and arc tests. A surface without NURB
+    /// is not a cylinder (`Ok(None)`).
     pub fn is_nurb_surface_cylinder(
         k: &Kernel,
         test_surface: &BSplineSurface,
@@ -1449,7 +1472,15 @@ impl Cone {
 
         // the cylinder's NURB is a copy of the tested one
         let nurb = test_surface.gw_nurb().ok_or_else(|| {
-            SolidError::surface_missing(OP_NURB_CYLINDER, "the tested surface's NURB")
+            Failure::new(
+                OP_NURB_CYLINDER,
+                SurfaceFailure::Defect {
+                    why: "the tested surface has no NURB, though its degrees summed to 3 \
+                          above, which a surface without NURB cannot",
+                },
+            )
+            .with_status(SM_ERR_NULL_POINTER)
+            .into_error()
         })?;
         cylinder.rev.base.nurb = Some(copy_nurb_surface(nurb)).into();
         cylinder.rev.base.nurb_is_borrowed = false;
@@ -1505,9 +1536,11 @@ impl Cone {
                 let h = d.dot(z);
                 let here = bot_radius + (top_radius - bot_radius) * (h / height);
                 if !(here > 0.0 && here.is_finite()) {
-                    return Err(SolidError::surface_failed(
+                    return Err(SolidError::surface(
                         OP_REBUILD,
-                        "the cylinder's net has no positive radius at a control point",
+                        SurfaceFailure::NurbNotAnalytic {
+                            check: AnalyticCheck::NetRadiusNotPositive,
+                        },
                     ));
                 }
                 moved.push((i, j, centre + z * h + (d - z * h) * (radius / here), w));
@@ -1548,10 +1581,11 @@ impl Cone {
             tan_angle: 0.0,
         };
         if !implicit::lies_on(&base, &cylinder)? {
-            return Err(SolidError::surface_failed(
+            return Err(SolidError::surface(
                 OP_REBUILD,
-                "the cylinder's moved net is not on the mean-radius cylinder (its end \
-                 circles are turned against each other or off the axis)",
+                SurfaceFailure::NurbNotAnalytic {
+                    check: AnalyticCheck::NetOffCylinder,
+                },
             ));
         }
         Ok(base)
@@ -1594,9 +1628,11 @@ impl Cone {
             || linear_iso_param == SurfParamType::Neither
         {
             // Modified Nurb SmCone: no longer has degree 1 and 2 basis functions
-            return Err(SolidError::surface_failed(
+            return Err(SolidError::surface(
                 OP_REBUILD,
-                "the NURB is no longer of degree 1 by 2 and rational",
+                SurfaceFailure::NurbNotAnalytic {
+                    check: AnalyticCheck::DegreeAndRationality,
+                },
             ));
         }
 
@@ -1643,18 +1679,22 @@ impl Cone {
         )?
         else {
             // Modified Nurb SmCone: no longer has circular top and bottom IsoParamCurves
-            return Err(SolidError::surface_failed(
+            return Err(SolidError::surface(
                 OP_REBUILD,
-                "the NURB's top and bottom iso curves are not circular",
+                SurfaceFailure::NurbNotAnalytic {
+                    check: AnalyticCheck::EndsNotCircular,
+                },
             ));
         };
 
         // not a cone - top/bot start angles or top/bot end angles vary by more than
         // tolerance
         if twisted(&top, &bot, ang_tol)? {
-            return Err(SolidError::surface_failed(
+            return Err(SolidError::surface(
                 OP_REBUILD,
-                "the top and bottom arcs' angles differ by more than the tolerance",
+                SurfaceFailure::NurbNotAnalytic {
+                    check: AnalyticCheck::EndArcsTwisted,
+                },
             ));
         }
 
@@ -1667,18 +1707,22 @@ impl Cone {
 
         // not a cone - height of cone is degenerate (cone is a disk)
         if height < Self::MIN_HEIGHT {
-            return Err(SolidError::surface_failed(
+            return Err(SolidError::surface(
                 OP_REBUILD,
-                "the cone's height is degenerate",
+                SurfaceFailure::NurbNotAnalytic {
+                    check: AnalyticCheck::HeightDegenerate,
+                },
             ));
         }
         nurb_z_axis = nurb_z_axis.unitize_or_z();
 
         // not a cone - bottom arc's plane is not perpendicular to cone axis
         if !nurb_z_axis.is_parallel_to(bot.frame.z_axis(), ang_tol) {
-            return Err(SolidError::surface_failed(
+            return Err(SolidError::surface(
                 OP_REBUILD,
-                "the bottom arc's plane is not perpendicular to the axis",
+                SurfaceFailure::NurbNotAnalytic {
+                    check: AnalyticCheck::BottomNotSquareToAxis,
+                },
             ));
         }
         // Not upstream (#16982 review): nor the top arc's. `twisted` compares only the
@@ -1688,9 +1732,11 @@ impl Cone {
         // circle's tilt from the centre line is below `ang_tol` degrees (the far circle's
         // from the recorded axis, below `2 ang_tol`)
         if !nurb_z_axis.is_parallel_to(top.frame.z_axis(), ang_tol) {
-            return Err(SolidError::surface_failed(
+            return Err(SolidError::surface(
                 OP_REBUILD,
-                "the top arc's plane is not perpendicular to the axis",
+                SurfaceFailure::NurbNotAnalytic {
+                    check: AnalyticCheck::TopNotSquareToAxis,
+                },
             ));
         }
 
@@ -1719,9 +1765,11 @@ impl Cone {
                 bot.radius = mean;
                 top.radius = mean;
             } else {
-                return Err(SolidError::surface_failed(
+                return Err(SolidError::surface(
                     OP_REBUILD,
-                    "the cylinder's top and bottom radii differ",
+                    SurfaceFailure::NurbNotAnalytic {
+                        check: AnalyticCheck::RadiiDiffer,
+                    },
                 ));
             }
         }
@@ -2773,7 +2821,13 @@ mod tests {
                         let top = radius + sign * EFF_ZERO_SQRT * (1.0 + radius);
                         let mut c = edited_cylinder(&k, radius, top, swap, inside);
                         let before = c.clone();
-                        assert!(c.rebuild_step_from_nurb_parameters(&k).is_err());
+                        let e = c.rebuild_step_from_nurb_parameters(&k).unwrap_err();
+                        assert_eq!(
+                            e.surface_failure(),
+                            Some(&SurfaceFailure::NurbNotAnalytic {
+                                check: AnalyticCheck::RadiiDiffer
+                            })
+                        );
                         assert_eq!(c.base_radius(), before.base_radius());
                         assert_eq!(c.semi_angle_deg(), before.semi_angle_deg());
                         assert_eq!(c.rev().position(), before.rev().position());
@@ -2814,6 +2868,21 @@ mod tests {
                     let before = c.clone();
                     let result = c.rebuild_step_from_nurb_parameters(&k);
                     assert_eq!(result.is_err(), refused, "{tilt_deg} {swap} {inside}");
+                    // the tilted row is the NURB's last; with swap and inside the rebuild
+                    // reads it as its bottom or its top arc, so one of the two
+                    // square-to-axis checks refuses it
+                    if let Err(e) = &result {
+                        assert!(
+                            matches!(
+                                e.surface_failure(),
+                                Some(&SurfaceFailure::NurbNotAnalytic {
+                                    check: AnalyticCheck::BottomNotSquareToAxis
+                                        | AnalyticCheck::TopNotSquareToAxis
+                                })
+                            ),
+                            "{swap} {inside}: {e}"
+                        );
+                    }
                     if refused {
                         assert_eq!(c.base_radius(), before.base_radius());
                         assert_eq!(c.semi_angle_deg(), before.semi_angle_deg());
@@ -3353,8 +3422,18 @@ mod tests {
                 assert!(d_old.cross(d_new).length() < 1e-9 * 25.0, "{uv:?}");
             }
         }
-        // a radius that would go through the axis is refused
-        assert!(cylinder.lean_cylinder(&k, 2.0, 4.0).is_err());
+        // a radius that would go through the axis is refused, and so is a surface that is
+        // not a cylinder
+        let e = cylinder.lean_cylinder(&k, 2.0, 4.0).unwrap_err();
+        assert_eq!(e.sm_status(), Some(crate::error::SM_ERR));
+        assert_eq!(
+            e.surface_failure(),
+            Some(&SurfaceFailure::ConeClosesWithinSpan)
+        );
+        let e = cone.lean_cylinder(&k, slope, 4.0).unwrap_err();
+        assert_eq!(e.sm_status(), Some(crate::error::SM_ERR));
+        assert_eq!(e.surface_failure(), Some(&SurfaceFailure::NotACylinder));
+        assert_eq!(e.kind(), crate::error::ErrorKind::Unsupported);
     }
 
     /// Two end arcs of a short cylinder differ by two ulps at one control point. Their
