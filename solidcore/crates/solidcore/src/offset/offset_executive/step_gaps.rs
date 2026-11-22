@@ -295,8 +295,12 @@ impl OffsetExecutive {
     ///
     /// # Errors
     ///
-    /// `SM_ERR` for a gap neither end of which is at the vertex, or more than
-    /// [`MAX_GAP_PASSES`] gaps on one face;
+    /// [`crate::error::offset::OffsetFailure::LoopGapEndsAmbiguous`] for a gap both or neither
+    /// end of which is at the vertex,
+    /// [`crate::error::offset::OffsetFailure::LoopGapPassLimit`] for a face still searched
+    /// after [`MAX_GAP_PASSES`] passes, and
+    /// [`crate::error::offset::OffsetFailure::SplitAtEdgeEnd`] where the bridged edge is not
+    /// split at the joint (each `SM_ERR`);
     /// [`crate::error::offset::OffsetFailure::LoopGapUncertified`] where the straight
     /// segment to the gap could not be established within tolerance;
     /// [`crate::error::offset::OffsetFailure::EdgeVanishes`] where the vertex moved to or past the edge's other
@@ -773,7 +777,7 @@ impl OffsetExecutive {
             // the joint lies within an end vertex's tolerance along the edge, which only
             // the gap's length (more than `tol`) was checked against
             return Err(gap_failure(
-                OffsetFailure::SplitWithinVertexTolerance {
+                OffsetFailure::SplitAtEdgeEnd {
                     face: self.original_face(original, f),
                     vertex_tolerance: end_vertex_tolerance(b, e)?,
                 },
@@ -927,7 +931,7 @@ impl OffsetExecutive {
                     // kept `tol` from the ends by distance, the point is within an end
                     // vertex's tolerance along the edge
                     return Err(gap_failure(
-                        OffsetFailure::SplitWithinVertexTolerance {
+                        OffsetFailure::SplitAtEdgeEnd {
                             face: None,
                             vertex_tolerance: end_vertex_tolerance(b, e)?,
                         },

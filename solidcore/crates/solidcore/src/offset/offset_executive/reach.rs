@@ -2649,8 +2649,8 @@ pub fn local_extension_reach(
         None => Failure::new(
             LOCAL_OP,
             OffsetFailure::Defect {
-                why: "the face use being moved has no face, though the kernel links every face \
-                      use to its face",
+                why: "the face use whose extension reach is asked has no face, though the kernel \
+                      links every face use to its face",
             },
         )
         .with_status(crate::error::SM_ERR_NULL_POINTER)

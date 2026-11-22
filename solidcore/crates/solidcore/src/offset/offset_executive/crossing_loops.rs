@@ -521,21 +521,25 @@ fn present<T>(value: Option<T>, why: &'static str) -> Result<T> {
 const INDEX_PAST_END: &str = "an index into the crossings' own lists is past their end, though \
                               every index is taken from those lists";
 
+#[track_caller]
 fn at<T>(v: &[T], i: usize) -> Result<&T> {
     present(v.get(i), INDEX_PAST_END)
 }
 
+#[track_caller]
 fn at_mut<T>(v: &mut [T], i: usize) -> Result<&mut T> {
     present(v.get_mut(i), INDEX_PAST_END)
 }
 
+#[track_caller]
 fn index_i64(i: usize) -> Result<i64> {
-    i64::try_from(i).map_err(|_| {
-        defect(
+    match i64::try_from(i) {
+        Ok(n) => Ok(n),
+        Err(_) => Err(defect(
             "an edge use's index does not fit a node number, though a list holds no more \
              entries than an i64 counts",
-        )
-    })
+        )),
+    }
 }
 
 /// Why the offset B-rep is not there.
@@ -588,14 +592,17 @@ fn vertex_node(k: usize) -> Result<i64> {
     Ok(-1 - index_i64(k)?)
 }
 
+#[track_caller]
 fn edge_of(b: &Brep, edgeuse: EdgeuseId) -> Result<EdgeId> {
     present(eu::edge(b, edgeuse)?, EU_NO_EDGE)
 }
 
+#[track_caller]
 fn edge_curve(b: &Brep, e: EdgeId) -> Result<&Curve> {
     present(b.edge(e)?.curve.as_ref(), EDGE_NO_CURVE)
 }
 
+#[track_caller]
 fn vertex_point(b: &Brep, v: Option<crate::topology::VertexId>) -> Result<Point3> {
     Ok(b.vertex(present(v, EDGE_NO_VERTEX)?)?.point)
 }

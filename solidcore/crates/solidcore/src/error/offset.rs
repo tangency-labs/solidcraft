@@ -34,9 +34,9 @@
 //! | [`OffsetFailure::Defect`]              | the site's (`SM_ERR`, or another through `with_status`) |
 //! | [`OffsetFailure::LoopGapPassLimit`]    | `SM_ERR`                                  |
 //! | [`OffsetFailure::LoopGapEndsAmbiguous`] | `SM_ERR`                                 |
-//! | [`OffsetFailure::SplitWithinVertexTolerance`] | `SM_ERR`                           |
+//! | [`OffsetFailure::SplitAtEdgeEnd`]      | `SM_ERR`                                  |
 //! | [`OffsetFailure::FaceHasNoSurface`]    | `SM_ERR_NULL_POINTER`, or the site's through `with_status` |
-//! | [`OffsetFailure::FaceHasNoOuterFaceuse`]    | `SM_ERR_NULL_POINTER`, or the site's through `with_status` |
+//! | [`OffsetFailure::FaceHasNoOuterFaceuse`] | `SM_ERR_NULL_POINTER`, or the site's through `with_status` |
 //!
 //! A stage of an offset routine that fails with no reason the kernel names is an
 //! [`OffsetFailure::StageFailed`], a defect ([`ErrorKind::StageFailed`], #15034), keeping the
@@ -46,7 +46,8 @@
 //! `docs/failure-codes-and-reproduction.md` §6).
 //!
 //! Deviations: not upstream. Entity ids are those of the operation's input B-rep. The
-//! last four describe, in a phrase, the failures of offset routines that returned a bare
+//! four phrase causes ([`OffsetFailure::Failed`], [`OffsetFailure::Missing`],
+//! [`OffsetFailure::InvalidValue`], [`OffsetFailure::Inconsistent`]) describe, in a phrase, the failures of offset routines that returned a bare
 //! status ([`OffsetFailure::replaces_upstream_status`]); the failure's `operation` path
 //! says which routine and its entity, where the site named one, which face. The files
 //! with open work elsewhere (`offset_executive/{p1,p2}`, `offset_faces`) do not use
@@ -282,9 +283,10 @@ pub enum OffsetFailure {
         /// The step that failed, and why that is the kernel's fault.
         why: &'static str,
     },
-    /// The gap search of an offset face's loops closes one gap per pass and stopped after
-    /// `limit` passes with a gap still open (the fork's `lGuard`): the face's loops have that
-    /// many gaps or more. A face with fewer passes.
+    /// The gap search of an offset face's loops closes one gap per pass and reached its
+    /// limit of `limit` passes before a pass found no gap (the fork's `lGuard`): the face's
+    /// loops had `limit` gaps or more, or a gap a pass did not really close was found again.
+    /// A face with fewer gaps, each closed once, passes.
     LoopGapPassLimit {
         /// The face, of the operation's input, whose offset left the gaps, where it comes
         /// from one.
@@ -308,11 +310,12 @@ pub enum OffsetFailure {
         tolerance: f64,
     },
     /// An offset edge that a loop gap's bridge or a step corner must split is not split at
-    /// the point: the point lies, along the edge, within the tolerance of one of the edge's
-    /// end vertices, which can exceed the distance (ten times the edge's tolerance) the
-    /// caller kept the point from them. `vertex_tolerance` is the larger of the two end
-    /// vertices' tolerances.
-    SplitWithinVertexTolerance {
+    /// the point: the edge split takes the point for one of the edge's ends (within an end
+    /// vertex's tolerance along the edge, or at an end of its parameter interval), though the
+    /// caller kept the point farther than ten times the edge's tolerance from both end
+    /// vertices. `vertex_tolerance`, the larger of the two end vertices' tolerances, says how
+    /// far along the edge an end reaches at most.
+    SplitAtEdgeEnd {
         /// The face, of the operation's input, whose offset holds the edge, where it comes
         /// from one.
         face: Option<FaceId>,
@@ -466,7 +469,7 @@ impl OffsetFailure {
             Self::LoopGapUncertified { face }
             | Self::LoopGapPassLimit { face, .. }
             | Self::LoopGapEndsAmbiguous { face, .. }
-            | Self::SplitWithinVertexTolerance { face, .. } => face.map(EntityRef::Face),
+            | Self::SplitAtEdgeEnd { face, .. } => face.map(EntityRef::Face),
             Self::FaceHasNoSurface { face } | Self::FaceHasNoOuterFaceuse { face } => {
                 Some(EntityRef::Face(face))
             }
@@ -492,7 +495,7 @@ impl OffsetFailure {
     /// [`OffsetFailure::InvalidValue`], [`OffsetFailure::Inconsistent`],
     /// [`OffsetFailure::StageFailed`], [`OffsetFailure::Defect`]), or a cause named at a site
     /// that returned one ([`OffsetFailure::LoopGapPassLimit`],
-    /// [`OffsetFailure::LoopGapEndsAmbiguous`], [`OffsetFailure::SplitWithinVertexTolerance`],
+    /// [`OffsetFailure::LoopGapEndsAmbiguous`], [`OffsetFailure::SplitAtEdgeEnd`],
     /// [`OffsetFailure::FaceHasNoSurface`], [`OffsetFailure::FaceHasNoOuterFaceuse`]): it answers
     /// with that status as the `Upstream` it replaced did. The other refusals replaced none.
     #[must_use]
@@ -507,7 +510,7 @@ impl OffsetFailure {
                 | Self::Defect { .. }
                 | Self::LoopGapPassLimit { .. }
                 | Self::LoopGapEndsAmbiguous { .. }
-                | Self::SplitWithinVertexTolerance { .. }
+                | Self::SplitAtEdgeEnd { .. }
                 | Self::FaceHasNoSurface { .. }
                 | Self::FaceHasNoOuterFaceuse { .. }
         )
@@ -545,7 +548,7 @@ impl OffsetFailure {
             | Self::Defect { .. }
             | Self::LoopGapPassLimit { .. }
             | Self::LoopGapEndsAmbiguous { .. }
-            | Self::SplitWithinVertexTolerance { .. }
+            | Self::SplitAtEdgeEnd { .. }
             | Self::FaceHasNoSurface { .. }
             | Self::FaceHasNoOuterFaceuse { .. } => false,
             Self::Failed(_) | Self::Missing(_) | Self::InvalidValue(_) | Self::Inconsistent(_) => {
@@ -586,7 +589,7 @@ impl OffsetFailure {
             | Self::Unsound { .. }
             | Self::LoopGapPassLimit { .. }
             | Self::LoopGapEndsAmbiguous { .. }
-            | Self::SplitWithinVertexTolerance { .. }
+            | Self::SplitAtEdgeEnd { .. }
             | Self::FaceHasNoSurface { .. }
             | Self::FaceHasNoOuterFaceuse { .. }
             | Self::Failed(_)
@@ -618,7 +621,7 @@ impl OffsetFailure {
             | Self::Defect { .. }
             | Self::LoopGapPassLimit { .. }
             | Self::LoopGapEndsAmbiguous { .. }
-            | Self::SplitWithinVertexTolerance { .. } => SM_ERR,
+            | Self::SplitAtEdgeEnd { .. } => SM_ERR,
             Self::Missing(_)
             | Self::FaceHasNoSurface { .. }
             | Self::FaceHasNoOuterFaceuse { .. } => SM_ERR_NULL_POINTER,
@@ -654,7 +657,7 @@ impl OffsetFailure {
             | Self::LoopGapUncertified { .. }
             | Self::LoopGapPassLimit { .. }
             | Self::LoopGapEndsAmbiguous { .. }
-            | Self::SplitWithinVertexTolerance { .. }
+            | Self::SplitAtEdgeEnd { .. }
             | Self::Unsound { .. } => ErrorKind::Unsupported,
             Self::DistanceUnresolved { .. }
             | Self::ToleranceUnresolved { .. }
@@ -947,8 +950,8 @@ impl core::fmt::Display for OffsetFailure {
             // (these name their face through the failure's entity, said after the text)
             Self::LoopGapPassLimit { limit, .. } => write!(
                 f,
-                "the gap search of an offset face's loops closes one gap per pass and stopped \
-                 after {limit} passes with a gap still open"
+                "the gap search of an offset face's loops closes one gap per pass and reached \
+                 its limit of {limit} passes before a pass found no gap"
             ),
             Self::LoopGapEndsAmbiguous {
                 end_distance,
@@ -961,13 +964,13 @@ impl core::fmt::Display for OffsetFailure {
                  its ends are {end_distance:e} and {start_distance:e} from it, against \
                  {tolerance:e}"
             ),
-            Self::SplitWithinVertexTolerance {
+            Self::SplitAtEdgeEnd {
                 vertex_tolerance, ..
             } => write!(
                 f,
                 "an offset edge could not be split where a loop gap or a step corner needs \
-                 it: the point lies within an end vertex's tolerance ({vertex_tolerance:e}) \
-                 along the edge"
+                 it: the split takes the point for an end of the edge (its end vertices' \
+                 tolerance is up to {vertex_tolerance:e})"
             ),
             Self::FaceHasNoSurface { .. } => f.write_str("invalid input: the face has no surface"),
             Self::FaceHasNoOuterFaceuse { .. } => {
@@ -1015,9 +1018,10 @@ mod tests {
     use super::*;
     use crate::SolidError;
 
-    /// The offset failures that replaced a bare status or a stage failure keep its status,
-    /// operation and entity, and answer as the status did; their class is their own (a
-    /// defect's is [`ErrorKind::StageFailed`]). A sample of each converted file
+    /// The offset failures that replaced a bare status or a stage failure keep its status and
+    /// operation, and answer as the status did; their class is their own (a defect's is
+    /// [`ErrorKind::StageFailed`]), and so is their entity (the input face a cause names, where
+    /// the stage failure named none). A sample of each converted file
     /// (`offset_executive/{crossing_loops,cavity,reach,step_gaps}`, `draft`).
     #[test]
     fn offset_failures_keep_the_status_of_the_upstream_they_replace() {
@@ -1077,7 +1081,7 @@ mod tests {
             ),
             (
                 "offset::offset_executive::step_gaps",
-                OffsetFailure::SplitWithinVertexTolerance {
+                OffsetFailure::SplitAtEdgeEnd {
                     face: None,
                     vertex_tolerance: 1e-3,
                 },
@@ -1146,7 +1150,7 @@ mod tests {
             )
             .to_string(),
             "offset::op: the gap search of an offset face's loops closes one gap per pass and \
-             stopped after 64 passes with a gap still open (face 3)"
+             reached its limit of 64 passes before a pass found no gap (face 3)"
         );
         // a refusal replaced no status and does not answer as one
         let folds = SolidError::offset(
@@ -1339,7 +1343,7 @@ mod tests {
                 false,
             ),
             (
-                O::SplitWithinVertexTolerance {
+                O::SplitAtEdgeEnd {
                     face: None,
                     vertex_tolerance: 1e-3,
                 },
@@ -1390,7 +1394,7 @@ mod tests {
                 O::Defect { .. } => 25,
                 O::LoopGapPassLimit { .. } => 26,
                 O::LoopGapEndsAmbiguous { .. } => 27,
-                O::SplitWithinVertexTolerance { .. } => 28,
+                O::SplitAtEdgeEnd { .. } => 28,
                 O::FaceHasNoSurface { .. } => 29,
                 O::FaceHasNoOuterFaceuse { .. } => 30,
             }
@@ -1411,7 +1415,7 @@ mod tests {
                             | O::Defect { .. }
                             | O::LoopGapPassLimit { .. }
                             | O::LoopGapEndsAmbiguous { .. }
-                            | O::SplitWithinVertexTolerance { .. }
+                            | O::SplitAtEdgeEnd { .. }
                             | O::FaceHasNoSurface { .. }
                             | O::FaceHasNoOuterFaceuse { .. }
                     ),
