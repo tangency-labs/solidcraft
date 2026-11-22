@@ -1516,25 +1516,28 @@ preference_settings! {
     /// A double-click on a design tab renames the design in the tab; off, it maximizes the window
     /// as the rest of the title bar does, as before.
     tab_double_click_renames: bool = true, PAGE_LAYOUT;
-    /// A design's views (Model, Sketch, Sheet, Render, Animation) are tabs inside its tab; off, the
+    /// A design's views (Model, Sheet, Render, Animation) are tabs inside its tab; off, the
     /// design keeps one tab and a view switcher lists them.
     design_views_as_tabs: bool = false, PAGE_LAYOUT;
     /// With views as tabs off, a design's tab always shows its view switcher (even with one view),
-    /// and entering a sketch or Render opens a view of its own, as in 0.43.0. Off: the tab looks as
+    /// and entering Render opens a view of its own, as in 0.43.0. Off: the tab looks as
     /// it did before design views, with no switcher until the user opens a second view.
     show_design_view_switcher: bool = false, PAGE_LAYOUT;
     /// Use distinct tab treatments for the focused view, cards, hidden views, and pop-outs.
     clear_view_tabs: bool = true, PAGE_LAYOUT;
     /// A drawing sheet opens as a view (a sub-tab) of its design.
     design_sub_tab_sheets: bool = true, PAGE_LAYOUT;
-    /// Editing a sketch opens it as a view of its design; Finish Sketch returns to the previous view.
-    design_sub_tab_sketches: bool = true, PAGE_LAYOUT;
     /// Render and Animate open as views of their design.
     design_sub_tab_render: bool = true, PAGE_LAYOUT;
-    /// Opening a sheet, sketch or workspace that a view already shows activates that view.
+    /// Opening a sheet or workspace that a view already shows activates that view.
     design_reuse_views: bool = true, PAGE_LAYOUT;
     /// A design opens with the views it had when it was last closed.
     design_reopen_views: bool = false, PAGE_LAYOUT;
+    /// Display defaults copied into a newly detached design window.
+    #[serde(deserialize_with = "pop_out_window_defaults")]
+    pop_out_window_defaults: solidcraft_views::WindowOptions = solidcraft_views::WindowOptions::new_pop_out(), PAGE_LAYOUT;
+    /// Named, app-wide arrangements of design windows.
+    view_window_setups: BTreeMap<String, serde_json::Value> = BTreeMap::new();
     /// Windows only: while the window is dragged by its title bar, nothing is drawn, so the window
     /// follows the pointer smoothly; animations and progress pause and the picture catches up when
     /// the drag ends (#13991). Off (the default): the window keeps drawing during the drag and
@@ -2321,8 +2324,10 @@ impl Snapshot {
         let update = std::mem::take(&mut app.preferences.update);
         let stand_up_answers = std::mem::take(&mut app.preferences.stand_up_answers);
         let plugin_grants = std::mem::take(&mut app.preferences.plugin_grants);
+        let view_window_setups = std::mem::take(&mut app.preferences.view_window_setups);
         app.preferences = self.prefs;
         app.preferences.plugin_grants = plugin_grants;
+        app.preferences.view_window_setups = view_window_setups;
         crate::plugins::sync_policy(app);
         self.panel_visibility.restore(app);
         sync_surface_analysis(app);
@@ -2390,6 +2395,7 @@ impl Snapshot {
             held.update.clone_from(&app.preferences.update);
             held.stand_up_answers.clone_from(&app.preferences.stand_up_answers);
             held.plugin_grants.clone_from(&app.preferences.plugin_grants);
+            held.view_window_setups.clone_from(&app.preferences.view_window_setups);
             held == app.preferences
         };
         same_prefs
@@ -2426,6 +2432,7 @@ pub(crate) fn held_overlay(app: &SolveApp) -> Option<serde_json::Map<String, ser
     prefs.update.clone_from(&app.preferences.update);
     prefs.stand_up_answers.clone_from(&app.preferences.stand_up_answers);
     prefs.plugin_grants.clone_from(&app.preferences.plugin_grants);
+    prefs.view_window_setups.clone_from(&app.preferences.view_window_setups);
     let mut shortcut_box = app.sbox.prefs();
     if let Some(o) = shortcut_box.as_object_mut() {
         o.insert("pinned".into(), serde_json::json!(s.favourites));
@@ -4626,6 +4633,15 @@ fn limit_toolbar_tabs(mut p: Prefs) -> Prefs {
 /// Whether `name` is one of the built-in templates of an assembly's drawings (`assembly`) or a part's.
 pub(crate) fn is_template_for(name: &str, assembly: bool) -> bool {
     template::BUILT_INS.contains(&name) && template::assembly(name) == Some(assembly)
+}
+
+/// Preferences create future windows; a missing ribbon value here uses the new default.
+fn pop_out_window_defaults<'de, D: serde::Deserializer<'de>>(deserializer: D) -> Result<solidcraft_views::WindowOptions, D::Error> {
+    let mut value = serde_json::Value::deserialize(deserializer)?;
+    if let Some(fields) = value.as_object_mut() {
+        fields.entry("ribbon").or_insert(serde_json::Value::Bool(true));
+    }
+    serde_json::from_value(value).map_err(serde::de::Error::custom)
 }
 
 /// Saved preferences, keeping every one that still reads. A value this version doesn't
@@ -7347,7 +7363,6 @@ mod tests {
             ("show_design_view_switcher", json!(true), PAGE_LAYOUT),
             ("clear_view_tabs", json!(false), PAGE_LAYOUT),
             ("design_sub_tab_sheets", json!(false), PAGE_LAYOUT),
-            ("design_sub_tab_sketches", json!(false), PAGE_LAYOUT),
             ("design_sub_tab_render", json!(false), PAGE_LAYOUT),
             ("design_reuse_views", json!(false), PAGE_LAYOUT),
             ("design_reopen_views", json!(true), PAGE_LAYOUT),
@@ -7835,7 +7850,7 @@ mod tests {
         assert_eq!(h.app.preferences.browser_bodies_folders, BodiesFolders::Several, "Interface's Restore Defaults");
     }
 
-    /// Design tabs: views shown as tabs, sub-tabs for sheets, sketches and Render, and reusing a
+    /// Design tabs: views shown as tabs, sub-tabs for sheets and Render, and reusing a
     /// view are on by default and reopening a design's views is off, also in preferences saved
     /// before them. Each is saved and read back, `ui.prefs` refuses a value that is not a boolean,
     /// the Layout page's Restore Defaults resets them, and one struct hands them to the tab strip.
@@ -7846,7 +7861,6 @@ mod tests {
         let keys = [
             "design_views_as_tabs",
             "design_sub_tab_sheets",
-            "design_sub_tab_sketches",
             "design_sub_tab_render",
             "design_reuse_views",
             "design_reopen_views",
@@ -7856,11 +7870,16 @@ mod tests {
         let on = DesignTabPrefs::from(&h.app.preferences);
         // Test change: the owner asked for "Show the design view switcher", off by default.
         assert_eq!(
-            [on.views_as_tabs, on.sub_tab_sheets, on.sub_tab_sketches, on.sub_tab_render, on.reuse_views, on.reopen_views, on.show_switcher],
-            [false, true, true, true, true, false, false]
+            [on.views_as_tabs, on.sub_tab_sheets, on.sub_tab_render, on.reuse_views, on.reopen_views, on.show_switcher],
+            [false, true, true, true, false, false]
         );
         let old = lenient(&json!({"theme": "light"}));
         assert_eq!(DesignTabPrefs::from(&old), on, "saved before they existed");
+        for obsolete in [false, true] {
+            let old = lenient(&json!({"design_sub_tab_sketches": obsolete}));
+            assert_eq!(DesignTabPrefs::from(&old), on, "the removed sketch-view setting is ignored");
+            assert!(serde_json::to_value(&old).unwrap().get("design_sub_tab_sketches").is_none());
+        }
         for key in keys {
             let value = !serde_json::to_value(&h.app.preferences).unwrap()[key].as_bool().unwrap();
             assert_eq!(control(&mut h.app, &json!({ key: value })).unwrap()[key], value, "{key}");
@@ -7875,16 +7894,8 @@ mod tests {
         }
         let flipped = DesignTabPrefs::from(&h.app.preferences);
         assert_eq!(
-            [
-                flipped.views_as_tabs,
-                flipped.sub_tab_sheets,
-                flipped.sub_tab_sketches,
-                flipped.sub_tab_render,
-                flipped.reuse_views,
-                flipped.reopen_views,
-                flipped.show_switcher
-            ],
-            [true, false, false, false, false, true, true]
+            [flipped.views_as_tabs, flipped.sub_tab_sheets, flipped.sub_tab_render, flipped.reuse_views, flipped.reopen_views, flipped.show_switcher],
+            [true, false, false, false, true, true]
         );
         defaults(&mut h.app, PAGE_LAYOUT);
         assert_eq!(DesignTabPrefs::from(&h.app.preferences), on, "Layout's Restore Defaults");
