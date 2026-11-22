@@ -405,6 +405,26 @@ pub fn overlay(app: &SolveApp, painter: &egui::Painter, proj: &Proj) {
     painter.line_segment([at - egui::vec2(0.0, 10.0), at + egui::vec2(0.0, 10.0)], Stroke::new(1.2, tk.accent));
 }
 
+/// Where the part of the component the card is about lives, when it is linked to a design file
+/// (#6892): an internal component is stored in this design's file, an external one is a file of
+/// its own. `None` for a body, the design itself and a component made in this design.
+fn component_file(app: &SolveApp, v: &Value) -> Option<String> {
+    let doc = &app.session.doc;
+    let component = match v["occurrence"].as_u64() {
+        Some(occurrence) => doc.occurrences.iter().find(|o| o.id == occurrence)?.component,
+        None => v["component"].as_u64()?,
+    };
+    let link = doc.links.get(&component)?;
+    Some(match solidcraft_engine::doc::internal::linked(&link.path) {
+        Some(name) => solidcraft_ui_text::format("ui.properties.component_internal", &[("name", name)]),
+        // The file's name: the whole path does not fit the card's value column.
+        None => {
+            let name = link.path.rsplit(['/', '\\']).next().unwrap_or(&link.path);
+            solidcraft_ui_text::format("ui.properties.component_external", &[("name", name)])
+        }
+    })
+}
+
 /// Draw the Properties window of the body or component the menu asked about (mass, volume,
 /// area, centre of mass, bounding box and counts; a component's first moments and moment of
 /// inertia), when it is open. Close dismisses it.
@@ -416,6 +436,9 @@ pub fn show_object(app: &mut SolveApp, ctx: &egui::Context) {
     let total = &v["total"];
     let bodies = v["bodies"].as_array().cloned().unwrap_or_default();
     let skipped = total["open_bodies_skipped"].as_u64().unwrap_or(0);
+    if let Some(file) = component_file(app, &v) {
+        rows.push(("ui.properties.component_file", file));
+    }
     if let [b] = bodies.as_slice()
         && b["closed"] == true
     {
@@ -714,6 +737,51 @@ mod tests {
         for (axis, want) in axes.iter().zip([Vec3::Z, Vec3::X, Vec3::Y]) {
             assert!((*axis - want).len() < 1e-9, "a round pin's axes are the world axes: {axes:?}");
         }
+    }
+
+    /// #6892: the card of a component linked to a design file says where its part lives: inside
+    /// this design's file (an internal component) or in a file of its own (an external one). A
+    /// component made in the design, and the design itself, have no such row.
+    #[test]
+    fn a_linked_components_card_says_whether_its_file_is_internal_or_external() {
+        solidcraft_engine::file_kinds_on_for_tests();
+        let dir = std::env::temp_dir().join(format!("solidcraft-properties-component-file-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        for name in ["bracket", "bolt"] {
+            let mut part = solidcraft_engine::Session::default();
+            part.execute("solid.box", &json!({"length": 2, "width": 3, "height": 4})).unwrap();
+            part.execute("file.save", &json!({"path": dir.join(format!("{name}.scprt")).to_string_lossy()})).unwrap();
+        }
+        let mut h = Harness::new();
+        h.app.run("file.save", json!({"path": dir.join("frame.scasm").to_string_lossy()})).unwrap();
+        let occurrence = |h: &mut Harness, name: &str| {
+            let path = dir.join(format!("{name}.scprt"));
+            h.app.run("component.insert_design", json!({"path": path.to_string_lossy()})).unwrap()["occurrence"].as_u64().unwrap()
+        };
+        let (bracket, bolt) = (occurrence(&mut h, "bracket"), occurrence(&mut h, "bolt"));
+        h.app.run("component.make_internal", json!({"component": "bracket"})).unwrap();
+        let spacer = h.app.run("component.create", json!({"name": "Spacer", "grounded": false})).unwrap()["occurrence"].as_u64().unwrap();
+        h.app.run("component.activate", json!({"component": "root"})).unwrap();
+
+        let placement = |h: &mut Harness, id: u64| h.app.session.execute("occurrence.properties", &json!({"occurrence": id})).unwrap();
+        let v = placement(&mut h, bracket);
+        assert_eq!(super::component_file(&h.app, &v).as_deref(), Some("Internal: bracket.scprt"));
+        let by_component = h.app.session.execute("component.properties", &json!({"component": "bracket"})).unwrap();
+        assert_eq!(super::component_file(&h.app, &by_component).as_deref(), Some("Internal: bracket.scprt"), "asked by component too");
+        let external = placement(&mut h, bolt);
+        assert_eq!(super::component_file(&h.app, &external).as_deref(), Some("External: bolt.scprt"), "the file's name, not its path");
+        let plain = placement(&mut h, spacer);
+        assert_eq!(super::component_file(&h.app, &plain), None, "made in this design: no file");
+        let design = h.app.session.execute("component.properties", &json!({"component": "root"})).unwrap();
+        assert_eq!(super::component_file(&h.app, &design), None, "the design itself");
+
+        h.app.menu.props = Some(("bracket:1".into(), v));
+        h.frames(2);
+        assert!(h.widget("Component file").is_some(), "the card has the row");
+        h.app.menu.props = Some(("Spacer:1".into(), plain));
+        h.frames(2);
+        assert!(h.widget("Component file").is_none(), "and none for a component without a file");
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     /// #5203: Properties on a large assembly took seconds on the window thread, which froze it.

@@ -11,7 +11,10 @@
     "cmd.component_make_internal": "Make Internal",
     "cmd.component_write_back": "Write Back Internal Component",
     "cmd.component_restore_recovery": "Restore Recovery Component",
-    "cmd.component_discard_recovery": "Discard Recovery Component"
+    "cmd.component_discard_recovery": "Discard Recovery Component",
+    "ui.properties.component_file": "Component file",
+    "ui.properties.component_internal": "Internal: {name}",
+    "ui.properties.component_external": "External: {name}"
   },
   "ar": {
     "recovery_components.title": "مكوّنات الاسترداد",
@@ -25,7 +28,10 @@
     "cmd.component_make_internal": "جعله داخليًا",
     "cmd.component_write_back": "إعادة كتابة المكوّن الداخلي",
     "cmd.component_restore_recovery": "استعادة مكوّن الاسترداد",
-    "cmd.component_discard_recovery": "تجاهل مكوّن الاسترداد"
+    "cmd.component_discard_recovery": "تجاهل مكوّن الاسترداد",
+    "ui.properties.component_file": "ملف المكوّن",
+    "ui.properties.component_internal": "داخلي: {name}",
+    "ui.properties.component_external": "خارجي: {name}"
   },
   "de": {
     "recovery_components.title": "Wiederherstellungskomponenten",
@@ -39,7 +45,10 @@
     "cmd.component_make_internal": "Intern machen",
     "cmd.component_write_back": "Interne Komponente zurückschreiben",
     "cmd.component_restore_recovery": "Wiederherstellungskomponente wiederherstellen",
-    "cmd.component_discard_recovery": "Wiederherstellungskomponente verwerfen"
+    "cmd.component_discard_recovery": "Wiederherstellungskomponente verwerfen",
+    "ui.properties.component_file": "Komponentendatei",
+    "ui.properties.component_internal": "Intern: {name}",
+    "ui.properties.component_external": "Extern: {name}"
   },
   "he": {
     "recovery_components.title": "רכיבי שחזור",
@@ -53,7 +62,10 @@
     "cmd.component_make_internal": "הפוך לפנימי",
     "cmd.component_write_back": "כתוב חזרה רכיב פנימי",
     "cmd.component_restore_recovery": "שחזר רכיב שחזור",
-    "cmd.component_discard_recovery": "בטל רכיב שחזור"
+    "cmd.component_discard_recovery": "בטל רכיב שחזור",
+    "ui.properties.component_file": "קובץ הרכיב",
+    "ui.properties.component_internal": "פנימי: {name}",
+    "ui.properties.component_external": "חיצוני: {name}"
   },
   "ja": {
     "recovery_components.title": "回復コンポーネント",
@@ -67,7 +79,10 @@
     "cmd.component_make_internal": "内部にする",
     "cmd.component_write_back": "内部コンポーネントを書き戻す",
     "cmd.component_restore_recovery": "回復コンポーネントを復元",
-    "cmd.component_discard_recovery": "回復コンポーネントを破棄"
+    "cmd.component_discard_recovery": "回復コンポーネントを破棄",
+    "ui.properties.component_file": "コンポーネントファイル",
+    "ui.properties.component_internal": "内部: {name}",
+    "ui.properties.component_external": "外部: {name}"
   },
   "ko": {
     "recovery_components.title": "복구 구성요소",
@@ -81,7 +96,10 @@
     "cmd.component_make_internal": "내부로 만들기",
     "cmd.component_write_back": "내부 구성요소 다시 쓰기",
     "cmd.component_restore_recovery": "복구 구성요소 복원",
-    "cmd.component_discard_recovery": "복구 구성요소 버리기"
+    "cmd.component_discard_recovery": "복구 구성요소 버리기",
+    "ui.properties.component_file": "구성 요소 파일",
+    "ui.properties.component_internal": "내부: {name}",
+    "ui.properties.component_external": "외부: {name}"
   },
   "vi": {
     "recovery_components.title": "Thành phần khôi phục",
@@ -95,7 +113,10 @@
     "cmd.component_make_internal": "Chuyển thành nội bộ",
     "cmd.component_write_back": "Ghi lại thành phần nội bộ",
     "cmd.component_restore_recovery": "Khôi phục thành phần khôi phục",
-    "cmd.component_discard_recovery": "Hủy bỏ thành phần khôi phục"
+    "cmd.component_discard_recovery": "Hủy bỏ thành phần khôi phục",
+    "ui.properties.component_file": "Tệp thành phần",
+    "ui.properties.component_internal": "Nội bộ: {name}",
+    "ui.properties.component_external": "Bên ngoài: {name}"
   },
   "zh": {
     "recovery_components.title": "恢复组件",
@@ -109,6 +130,9 @@
     "cmd.component_make_internal": "设为内部",
     "cmd.component_write_back": "写回内部组件",
     "cmd.component_restore_recovery": "恢复恢复组件",
-    "cmd.component_discard_recovery": "放弃恢复组件"
+    "cmd.component_discard_recovery": "放弃恢复组件",
+    "ui.properties.component_file": "组件文件",
+    "ui.properties.component_internal": "内部：{name}",
+    "ui.properties.component_external": "外部：{name}"
   }
 }
