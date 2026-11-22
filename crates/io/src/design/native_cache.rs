@@ -21,7 +21,7 @@ const MIN_MANIFEST: usize = 32 << 20;
 /// The cap on `cache/model.json`, saving and reading: an eighth of the design file limit in force
 /// (the default 256 MiB gives the 32 MiB it always was), so a design the user allows to be that
 /// large keeps its model cache (#20724). Still bounded by that limit, never unbounded.
-fn max_manifest() -> usize {
+pub(super) fn max_manifest() -> usize {
     MIN_MANIFEST.max(max_design() / 8)
 }
 
