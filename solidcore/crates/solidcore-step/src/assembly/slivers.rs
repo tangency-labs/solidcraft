@@ -17,6 +17,16 @@ use solidcore_record::Vec3;
 
 use super::{Assembly, Bound, R, index};
 
+/// The most pieces a certified length bound may halve an edge into, asked whether it is no
+/// longer than the tolerance ([`Assembly::edge_length_within`]): a sliver's short edge is at most
+/// the tolerance and the enclosure of the spans as written already settles that, or the enclosure
+/// 64 halvings on does (the kernel sums it every 64). A curve that settles neither is not proved
+/// short, and its face is kept, so the bound costs this many pieces at most. An edge whose chord
+/// lies within its own rounding carries no upper end at all (a degenerate curve), and asking it
+/// for a bracket narrowed to the tolerance would halve to the kernel's own cap of 65536 pieces
+/// without ever settling, on every such edge of every such file.
+const SHORT_EDGE_PIECES: usize = 64;
+
 /// Union-find root of `v` in `parent` (a vertex not in it is its own).
 fn root(parent: &HashMap<u32, u32>, mut v: u32) -> u32 {
     while let Some(&p) = parent.get(&v) {
@@ -192,7 +202,10 @@ impl Assembly<'_> {
     }
 
     /// Whether edge `e` is no longer than `tol`: its ends' gap, and a certified upper bound on
-    /// its length over its whole span ([`kernel::curve_length_upper`], never a sampled path).
+    /// its length over its whole span ([`kernel::curve_length_at_most`], never a sampled path),
+    /// settled rather than narrowed to `tol`, and within [`SHORT_EDGE_PIECES`] pieces: an edge
+    /// far longer than the tolerance is proved more instead of being halved towards a width it
+    /// can never reach, and a degenerate one is not proved short rather than halved to the cap.
     pub(crate) fn edge_length_within(&self, e: u32, tol: f64) -> R<bool> {
         let edge = self.edges.get(e as usize).ok_or("edge reference")?;
         let [p, q] = edge.vertices;
@@ -200,9 +213,8 @@ impl Assembly<'_> {
         if Vec3::from(vp.point).dist(Vec3::from(vq.point)) > tol {
             return Ok(false);
         }
-        // An edge the kernel cannot enclose is not proved short, and the face is kept.
-        let Some(upper) = kernel::curve_length_upper(&edge.curve, edge.interval, tol)? else { return Ok(false) };
-        Ok(upper <= tol)
+        // An edge the kernel cannot settle is not proved short, and the face is kept.
+        Ok(kernel::curve_length_at_most(&edge.curve, edge.interval, tol, SHORT_EDGE_PIECES)?.unwrap_or(false))
     }
 
     /// Whether the two long edges lie within `tol` of each other, both ways, and so how far

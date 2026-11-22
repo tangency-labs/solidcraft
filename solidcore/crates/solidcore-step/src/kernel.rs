@@ -24,20 +24,22 @@ pub(crate) fn radial_order(curve: &Curve, interval: [f64; 2], faces: &[(&Surface
     k::pcurve::radial_order(&curve, interval, &faces).map_err(|e| e.to_string())
 }
 
-/// A certified upper bound on `curve`'s length over `interval`, its ends and knots as given
-/// ([`solidcore::curve::curve::Curve::length_bound`], `width` the widest bracket asked): `None`
-/// where the kernel does not enclose that curve's kind or cannot make the curve.
-pub(crate) fn curve_length_upper(curve: &Curve, interval: [f64; 2], width: f64) -> Result<Option<f64>, Error> {
+/// Whether `curve`'s length over `interval`, its ends and knots as given, is proved at most
+/// `limit` ([`solidcore::curve::curve::Curve::proved_length_at_most`], settled rather than
+/// narrowed, within `most` pieces): `Some(true)` where it is, `Some(false)` where it is proved
+/// more, `None` where the kernel does not enclose that curve's kind, cannot make the curve, or
+/// settles neither within `most`.
+pub(crate) fn curve_length_at_most(curve: &Curve, interval: [f64; 2], limit: f64, most: usize) -> Result<Option<bool>, Error> {
     // A line record with one point is that point: its length is 0, while the kernel's line
     // constructor takes only a direction, which this one has none of.
     if matches!(curve, Curve::Line { start, end } if start == end) {
-        return Ok(Some(0.0));
+        return Ok(Some(0.0 <= limit));
     }
     let kernel = solidcore::kernel::Kernel::default();
     let Ok(record) = c::curve(curve) else { return Ok(None) };
     let Ok(made) = solidcore::curve::from_parameters::from_parameters(&kernel, &record, interval) else { return Ok(None) };
-    match made.curve.length_bound(&kernel, &made.interval, width) {
-        Ok(bracket) => Ok(Some(bracket.upper)),
+    match made.curve.proved_length_at_most(&kernel, &made.interval, limit, most) {
+        Ok(settled) => Ok(settled),
         Err(_) => Ok(None),
     }
 }
