@@ -988,6 +988,32 @@ fn a_contour_flange_of_one_half_turn_is_a_half_pipe() {
     }
 }
 
+/// A contour flange's arc is a roll: the sheet runs on into it, so the arc must run on into the
+/// curve beside it (#15576). An arc that turns away from the line beside it would bend on the
+/// edge of the roll, and no bend is laid out on a roll's edge, so the flange is refused, naming
+/// the arc, and the design keeps no sheet.
+#[test]
+fn a_contour_flange_refuses_an_arc_that_is_not_tangent_to_the_curve_beside_it() {
+    for flip in [false, true] {
+        let mut s = Session::default();
+        curved_contour_rule(&mut s);
+        run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Profile"}));
+        run(&mut s, "sketch.line", json!({"points": [[0, 0], [30, 0]], "ids": ["l1"]}));
+        // An arc from (30, 0) to (50, 20) that turns away from the line: its tangent at (30, 0)
+        // is not the line's own way, so it does not run on into it.
+        run(&mut s, "sketch.arc.three_point", json!({"start": [30, 0], "end": [50, 20], "through": [45, 5], "id": "a1"}));
+        run(&mut s, "sketch.line", json!({"points": [[50, 20], [50, 50]], "ids": ["l2"]}));
+        run(&mut s, "sketch.finish", json!({}));
+        let features = s.doc.features.len();
+        let flange = json!({"type": "contour", "sketch": "Profile", "curves": ["l1", "a1", "l2"], "distance": 30, "flip": flip});
+        let error = s.execute("sheet.flange", &flange).unwrap_err().to_string();
+        assert!(error.contains("the arc `a1` is not tangent to the curve beside it"), "flip {flip}: {error}");
+        assert!(error.contains("(#15576)"), "flip {flip}: {error}");
+        assert_eq!(s.doc.features.len(), features, "flip {flip}: the flange is not kept");
+        assert!(s.model.state().surface_sheets.is_empty(), "flip {flip}: no sheet");
+    }
+}
+
 /// A contour flange along a free-form curve is refused (#15743), and the design keeps no sheet. A
 /// quarter of the ellipse with half axes 40 and 20, from (40, 0) round to (0, 20), is the conic
 /// through the apex (40, 20) with ρ = √2 − 1, of weight ρ/(1 − ρ) = 1/√2. Pushed out 30, its panel
