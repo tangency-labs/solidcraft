@@ -213,6 +213,17 @@ pub(super) fn set_up(
     .into_error()
 }
 
+/// A fillet edge `e` without its original face ([`FilletSetUp::OriginalFace`] at the
+/// edge, `SM_ERR_NULL_POINTER`: upstream `NER`).
+pub(super) fn no_original_face(op: &'static str, e: EdgeId) -> SolidError {
+    set_up(
+        op,
+        FilletSetUp::OriginalFace,
+        Some(EntityRef::Edge(e)),
+        SM_ERR_NULL_POINTER,
+    )
+}
+
 fn edge_of(target: &Brep, eu: EdgeuseId) -> Result<EdgeId> {
     need(eu1::edge(target, eu)?, "edge use without edge")
 }

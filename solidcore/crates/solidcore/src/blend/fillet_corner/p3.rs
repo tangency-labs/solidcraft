@@ -88,7 +88,9 @@ use std::collections::BTreeMap;
 use crate::blend::blend_corner::{BlendCornerEvent, BlendEnd};
 use crate::blend::fillet_corner::p1;
 use crate::blend::fillet_corner::p2::find_concave_edgeuses;
-use crate::blend::fillet_corner::topology::{corner_input, set_up, shape_not_built};
+use crate::blend::fillet_corner::topology::{
+    corner_input, no_original_face, set_up, shape_not_built,
+};
 use crate::blend::fillet_executive::p3::ErrorInfo;
 use crate::blend::fillet_geom::p1::{
     FilStatus, FilletBrep, FilletCornerId, FilletCornerType, FilletEdgeType, FilletErrorType,
@@ -1994,9 +1996,8 @@ impl FilletCorner {
             .pseudo
             .fillet_edge(fe_on_extended_edge)?
             .original_face()
-            // the topology sets the edge on the face the unblended edge use and the blended
-            // one share, which it does not check is there
-            .ok_or_else(|| shape_not_built(OP_3X2, CornerShape::RingEdgesShareNoFace))?;
+            // NER on a fillet edge without its original face
+            .ok_or_else(|| no_original_face(OP_3X2, fe_on_extended_edge))?;
         let surface = env
             .target
             .face(orig_face)?

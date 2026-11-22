@@ -93,7 +93,9 @@ use crate::blend::fillet_corner::p3::{
     move_vertexuse, primary_eu, set_vertex_point, CornerEnv, CornerPatchEnv, FilletCorner,
     FilletExecutiveData,
 };
-use crate::blend::fillet_corner::topology::{corner_input, set_up, shape_not_built};
+use crate::blend::fillet_corner::topology::{
+    corner_input, no_original_face, set_up, shape_not_built,
+};
 use crate::blend::fillet_custom_solver::SurfaceId;
 use crate::blend::fillet_executive::p3::{ErrorInfo, FilletExecutive};
 use crate::blend::fillet_geom::p1::FilletErrorType;
@@ -1066,11 +1068,10 @@ impl FilletCorner {
                     == FilletEdgeType::RailRailInterpolation
                 {
                     // Get original face surface
-                    // the topology sets the edge on the face two ring edge uses share, which
-                    // it does not check is there (concave 4x2)
+                    // (NER on a fillet edge without its original face)
                     let orig_face = fe
                         .original_face()
-                        .ok_or_else(|| shape_not_built(OP, CornerShape::RingEdgesShareNoFace))?;
+                        .ok_or_else(|| no_original_face(OP, fillet_edge))?;
                     let s = env.target.face(orig_face)?.surface.clone();
                     (
                         s.ok_or_else(|| no_surface(OP, orig_face)),
@@ -1391,13 +1392,12 @@ impl FilletCorner {
         }
 
         // Find base surfaces for filleting
-        // (the topology sets the interpolating edge on the face two ring edge uses share,
-        // which it does not check is there: concave 4x2)
+        // (NER on the interpolating edge without its original face)
         let face = env
             .pseudo
             .fillet_edge(interpolate_edge)?
             .original_face()
-            .ok_or_else(|| shape_not_built(OP, CornerShape::RingEdgesShareNoFace))?;
+            .ok_or_else(|| no_original_face(OP, interpolate_edge))?;
         let orig_surface = env
             .target
             .face(face)?
@@ -2432,11 +2432,13 @@ mod tests {
         let e = inner.unwrap_err();
         assert_eq!(
             e.blend_failure(),
-            Some(&BlendFailure::CornerShapeNotBuilt(
-                CornerShape::RingEdgesShareNoFace
+            Some(&BlendFailure::FilletSetUpInvalid(
+                crate::error::blend::FilletSetUp::OriginalFace
             )),
             "{e:?}"
         );
+        assert_eq!(e.entity(), Some(EntityRef::Edge(c.edges[0])), "{e:?}");
+        assert_eq!(e.kind(), ErrorKind::InvalidInput, "{e:?}");
         assert_eq!(e.upstream_status(), Some(SM_ERR_NULL_POINTER));
         assert!(pseudo.brep().edge(c.edges[0]).unwrap().curve.is_none());
 
