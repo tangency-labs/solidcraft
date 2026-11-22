@@ -162,6 +162,7 @@ job (§5.1).
 | `DistanceUnresolved`, `ToleranceUnresolved` | \|d\| below the input's tolerance; an approximation tolerance in (0, 1e-12] | the distance and the tolerance | always | `p2.rs`, `check_resolvable` |
 | `OffsetFailure::WallsTouch`, `LoopsCross` | an offset face's loops touch or cross | the face | per their flags | `error/offset.rs` |
 | `OffsetFailure::EdgeVanishes` | a vertex moves to or past its edge's end and the edge cannot be squeezed out | the original edge, or the face when available | during loop-gap closure | `offset_executive/step_gaps.rs` |
+| `OffsetFailure::FaceCloses` | in a local operation, a band bounded by two faces (a ring, or a cone between a ring and a hole) whose surface and its two neighbours' are planes, cylinders and cones about one axis would close: its two sides, where the meridians of the new surfaces cross, pass over each other | the face, its two neighbours and the largest move, the fraction of the move at which the edges meet times the move | before the executive, decided in closed form | `topology/brep/local_operation.rs`, `closing_band` |
 | `OffsetFailure::LoopGapUncertified` | the loop-gap solve could not establish a boundary within tolerance | the original input face, when available | always | `offset_executive/step_gaps.rs` |
 
 The static `offset_brep` entry point reports an ordinary failure of `do_solid_offset` with

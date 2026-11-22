@@ -23,6 +23,7 @@
 //! | [`OffsetFailure::LooseTangentEdge`]    | `SM_ERR` (WR-530, solidcore-native)       |
 //! | [`OffsetFailure::FacesApart`]          | `SM_ERR` (solidcore-native)               |
 //! | [`OffsetFailure::PastSide`]            | `SM_ERR` (#18564, solidcore-native)       |
+//! | [`OffsetFailure::FaceCloses`]          | `SM_ERR` (#19904, solidcore-native)       |
 //! | [`OffsetFailure::ReachUncertified`]    | `SM_ERR` (solidcore-native)               |
 //! | [`OffsetFailure::LoopGapUncertified`]  | `SM_ERR` (solidcore-native)               |
 //! | [`OffsetFailure::Unsound`]             | `SM_ERR` (solidcore-native)               |
@@ -227,6 +228,22 @@ pub enum OffsetFailure {
         /// How far the face could move and still meet the side.
         largest: f64,
     },
+    /// In a local operation, `face`, a band bounded by the two faces `beside` (a ring between
+    /// a countersink's cone and the well below it, or the cone itself between the ring and
+    /// the hole above), closes to nothing as the faces move: its two sides, each where its
+    /// surface meets a neighbour's new surface, pass over each other, so keeping the face
+    /// would turn it inside out. Decided in closed form where
+    /// the three surfaces are planes, cylinders and cones about one axis, before anything
+    /// changes. `largest` is how far the faces could move before the band closes: the
+    /// fraction of the move at which its two edges meet, times the move (#19904).
+    FaceCloses {
+        /// The face that closes, of the operation's input.
+        face: FaceId,
+        /// The faces across its two edges, of the operation's input.
+        beside: [FaceId; 2],
+        /// How far the faces could move before it closes.
+        largest: f64,
+    },
     /// In a local operation, a surface beside an edge or at a vertex of `face` moves, and
     /// how far the surfaces there must be extended to meet has no certified bound
     /// ([`crate::offset::offset_executive::reach::local_extension_reach`]): a pair or corner
@@ -403,6 +420,7 @@ impl OffsetFailure {
             | Self::SeamOpened { face }
             | Self::FacesApart { face }
             | Self::PastSide { face, .. }
+            | Self::FaceCloses { face, .. }
             | Self::ReachUncertified { face } => Some(EntityRef::Face(face)),
             Self::WallsTouch { face, .. } | Self::LoopsCross { face, .. } => {
                 face.map(EntityRef::Face)
@@ -471,6 +489,7 @@ impl OffsetFailure {
             | Self::PeriodicBranchAmbiguous
             | Self::FacesApart { .. }
             | Self::PastSide { .. }
+            | Self::FaceCloses { .. }
             | Self::ReachUncertified { .. }
             | Self::LoopGapUncertified { .. }
             | Self::Unsound { .. }
@@ -509,6 +528,7 @@ impl OffsetFailure {
             | Self::PeriodicBranchAmbiguous
             | Self::FacesApart { .. }
             | Self::PastSide { .. }
+            | Self::FaceCloses { .. }
             | Self::ReachUncertified { .. }
             | Self::LoopGapUncertified { .. }
             | Self::Unsound { .. }
@@ -528,6 +548,7 @@ impl OffsetFailure {
             | Self::SeamOpened { .. }
             | Self::FacesApart { .. }
             | Self::PastSide { .. }
+            | Self::FaceCloses { .. }
             | Self::ReachUncertified { .. }
             | Self::ExactCurveUncut
             | Self::TangentEndOffCurve
@@ -563,6 +584,7 @@ impl OffsetFailure {
             Self::SeamOpened { .. }
             | Self::FacesApart { .. }
             | Self::PastSide { .. }
+            | Self::FaceCloses { .. }
             | Self::ReachUncertified { .. }
             | Self::ExactCurveUncut
             | Self::TangentEndOffCurve
@@ -802,6 +824,18 @@ impl core::fmt::Display for OffsetFailure {
                  that side only while it moves less than {largest}",
                 face.index(),
                 side.index()
+            ),
+            Self::FaceCloses {
+                face,
+                beside,
+                largest,
+            } => write!(
+                f,
+                "face {} between faces {} and {} closes to nothing as the faces move: its \
+                 edges pass over each other once they move more than {largest}",
+                face.index(),
+                beside[0].index(),
+                beside[1].index()
             ),
             Self::ReachUncertified { face } => write!(
                 f,
@@ -1152,6 +1186,16 @@ mod tests {
             ),
             // a failure reviewed as the kernel's fault, with its reason
             (O::Defect { why: "x" }, ErrorKind::StageFailed, false, true),
+            (
+                O::FaceCloses {
+                    face,
+                    beside: [face, face],
+                    largest: 0.5,
+                },
+                ErrorKind::Unsupported,
+                false,
+                false,
+            ),
         ];
         let row = |o: &O| -> usize {
             match o {
@@ -1181,6 +1225,7 @@ mod tests {
                 O::PastSide { .. } => 23,
                 O::PeriodicBranchAmbiguous => 24,
                 O::Defect { .. } => 25,
+                O::FaceCloses { .. } => 26,
             }
         };
         for (i, (o, class, phrase, defect)) in pinned.iter().enumerate() {
