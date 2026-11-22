@@ -1573,20 +1573,22 @@ mod tests {
         let q = face.offset(-0.3, 1e-12);
         let (at, normal) = (Point3::new(0.0, 0.5, 0.0), Vec3::new(0.0, 1.0, 0.0));
         let kc = plane_section(at, normal, &q).unwrap();
-        let refused = |r: Result<f64>| {
+        // the refusal's numbers: (length, discriminant, crossing)
+        let refused = |r: Result<f64>| -> (f64, f64, Option<f64>) {
             let e = r.unwrap_err();
-            assert!(
-                matches!(
-                    e.blend_failure(),
-                    Some(BlendFailure::ExactBlendAxisCannotPlaceEdge { .. })
-                ),
-                "{e:?}"
-            );
             assert_eq!(e.kind(), crate::error::ErrorKind::InvalidInput, "{e:?}");
             assert_eq!(e.sm_status(), Some(crate::error::SM_ERR), "{e:?}");
+            match e.blend_failure() {
+                Some(BlendFailure::ExactBlendAxisCannotPlaceEdge {
+                    length,
+                    discriminant,
+                    crossing,
+                }) => (*length, *discriminant, *crossing),
+                other => panic!("{other:?}"),
+            }
         };
-        // on the axis, 3 along it from the origin
-        refused(ellipse_param_about_axis(
+        // on the axis, 3 along it from the origin: no direction, no crossing computed
+        let (length, _, crossing) = refused(ellipse_param_about_axis(
             &kc,
             at,
             normal,
@@ -1594,13 +1596,15 @@ mod tests {
             &face,
             face.dir * 3.0,
         ));
+        assert!(length <= EFF_ZERO, "{length}");
+        assert_eq!(crossing, None);
         // a cylinder 10 off to the side: its axis crosses the plane outside the conic; a
         // point further out reads along a half-line pointing away from the conic (its line
         // crosses the conic behind the axis), and one off sideways along a half-line that
         // passes the conic by
         let mut far = q;
         far.point = Point3::new(10.0, 0.0, 0.0);
-        for x in [Point3::new(12.0, 0.0, 0.0), Point3::new(10.0, 0.0, 5.0)] {
+        let read = |x: Point3| {
             refused(ellipse_param_about_axis(
                 &kc,
                 at,
@@ -1608,8 +1612,14 @@ mod tests {
                 &far,
                 &face,
                 x + face.dir * 3.0,
-            ));
-        }
+            ))
+        };
+        let (_, discriminant, crossing) = read(Point3::new(12.0, 0.0, 0.0));
+        assert!(discriminant >= 0.0, "{discriminant}");
+        assert!(crossing.is_some_and(|mu| mu <= 0.0), "{crossing:?}");
+        let (_, discriminant, crossing) = read(Point3::new(10.0, 0.0, 5.0));
+        assert!(discriminant < 0.0, "{discriminant}");
+        assert_eq!(crossing, None);
     }
 
     /// A plane that meets the quadric in no conic says how it fails, with status `SM_ERR`.

@@ -357,10 +357,12 @@ pub enum BlendFailure {
     /// axis, so the exact blend is not the one of the edge the caller's solver names. A check
     /// of the caller's input ([`ErrorKind::InvalidInput`]); status `SM_ERR`.
     ExactBlendAxisCannotPlaceEdge {
-        /// The half-line's length, in the conic's own coordinates (where it is the unit
-        /// circle); no direction at or below the kernel's zero.
+        /// The distance from where the axis crosses the plane to the edge's middle moved onto
+        /// it, in the conic's own coordinates (where it is the unit circle); at or below the
+        /// kernel's zero the half-line has no direction.
         length: f64,
-        /// The discriminant of the half-line's line crossing the conic; negative: it misses.
+        /// The discriminant of the half-line's line crossing the conic; negative: it misses
+        /// (meaningless when `length` is at or below the kernel's zero).
         discriminant: f64,
         /// Where the half-line crosses the conic, in half-line lengths from the axis, when
         /// the crossing was computed; not positive: behind the axis.
@@ -1264,14 +1266,14 @@ impl core::fmt::Display for BlendFailure {
             } => {
                 write!(
                     f,
-                    "{}: the exact blend given cannot place the edge's middle round its axis \
-                     (half-line length {length}, discriminant {discriminant}",
+                    "{}: the exact blend given cannot place the edge's middle round the cylinder's or \
+                     cone's axis (distance {length}, discriminant {discriminant}",
                     self.class()
                 )?;
                 if let Some(mu) = crossing {
                     write!(f, ", crossing at {mu}")?;
                 }
-                write!(f, "), so it is not the blend of this edge")
+                write!(f, "), so the blend given does not match this edge")
             }
             Self::EdgeWithoutCurve => write!(
                 f,
@@ -2230,6 +2232,7 @@ mod tests {
                 ErrorKind::InvalidInput,
                 SM_ERR,
             ),
+            // not the executive's: the rational round's check of the exact blend it is given
             (
                 BlendFailure::ExactBlendAxisCannotPlaceEdge {
                     length: 0.0,
