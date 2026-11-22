@@ -10,7 +10,8 @@
     "Cut from face": "切断の基準面",
     "Cut at": "切断位置",
     "cmd.solid_stretch": "ストレッチ",
-    "ui.feature_kind.stretch": "ストレッチ"
+    "ui.feature_kind.stretch": "ストレッチ",
+    "help.solid.stretch": "ボディを横切って切断し、その隙間をボディ自身の形状で埋めることで、ボディを長く、広く、または高くします。穴、丸み、壁の寸法は変わりません。スケッチに戻らずに部品のサイズを変えるときに使います。"
   },
   "de": {
     "Cut from face": "Schnitt ab Fläche",
@@ -29,5 +30,12 @@
     "Cut at": "Cortar a",
     "cmd.solid_stretch": "Estirar",
     "ui.feature_kind.stretch": "Estirar"
+  },
+  "zh": {
+    "Cut from face": "从面切割",
+    "Cut at": "切割位置",
+    "cmd.solid_stretch": "伸长",
+    "ui.feature_kind.stretch": "伸长",
+    "help.solid.stretch": "将实体横向切开，并用实体自身的形状填补间隙，使其变长、变宽或变高，孔、圆角和壁的尺寸保持不变。用于在不返回草图的情况下调整零件尺寸。"
   }
 }
