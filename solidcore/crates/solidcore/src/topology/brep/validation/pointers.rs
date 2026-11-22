@@ -716,8 +716,9 @@ pub(crate) fn validate_pointers_traced(
         for j in (1..uses.len()).step_by(2) {
             let eu0 = *uses.get(j - 1).ok_or_else(|| invalid("edge list"))?;
             let eu1 = *uses.get(j).ok_or_else(|| invalid("edge list"))?;
-            let next = *uses
-                .get((j + 1) % uses.len())
+            let next = *(j + 1)
+                .checked_rem(uses.len())
+                .and_then(|k| uses.get(k))
                 .ok_or_else(|| invalid("edge list"))?;
             r.check(
                 b,
