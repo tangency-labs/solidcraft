@@ -20,7 +20,7 @@
 
 use super::{invalid, FilletObject, FilletSession};
 use crate::error::blend::BlendFailure;
-use crate::error::{EntityRef, Failure, Result, SM_ERR_NULL_POINTER};
+use crate::error::{EntityRef, Result, SolidError};
 use crate::geom::attribute::{ids, Attribute, AttributeValue, Behavior, TagData};
 use crate::topology::brep::p1;
 use crate::topology::FaceId;
@@ -136,17 +136,11 @@ impl FilletSession<'_> {
                 .get(index)
                 .copied()
                 .filter(|&face| body.face(face).is_ok())
+                // the corner's face build may give no face for a surface
+                // (`make_face` returning `None` is not an error there), so the search can come
+                // up empty
                 .ok_or_else(|| {
-                    Failure::new(
-                        OP,
-                        BlendFailure::Defect {
-                            why: "a corner patch surface's recorded face is not live in the \
-                                  intermediate body: the corner records the face it makes for \
-                                  each patch surface, and nothing deletes it before the merge",
-                        },
-                    )
-                    .with_status(SM_ERR_NULL_POINTER)
-                    .into_error()
+                    SolidError::blend(OP, BlendFailure::CornerPatchFaceNotFound { surface: index })
                 })?;
             faces.push(face);
         }

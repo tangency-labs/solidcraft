@@ -72,7 +72,11 @@ fn null_defect(why: &'static str) -> SolidError {
 }
 
 /// A face of the target without a surface ([`BlendFailure::FaceHasNoSurface`] at the face;
-/// status `SM_ERR_NULL_POINTER`, upstream `NER` of `GetSurface()`).
+/// status `SM_ERR_NULL_POINTER`, upstream `NER` of `GetSurface()`). After the merge the
+/// target holds the caller's faces and the fillet faces merged in. Each fillet face was made
+/// on its surface (`make_face_with_curves` takes the `Surface` by value and sets it), and the
+/// merge moves or splits faces together with their surfaces, so a face here without one is
+/// one of the caller's faces.
 fn face_without_surface(face: FaceId) -> SolidError {
     Failure::new(OP, BlendFailure::FaceHasNoSurface)
         .with_status(SM_ERR_NULL_POINTER)

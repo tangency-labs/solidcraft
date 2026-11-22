@@ -192,7 +192,7 @@ impl TopologyObjects<FilletObject> for InsertionGeometry<'_> {
         InsertionGeometry::face_surface(self, face)
             .ok_or_else(|| invalid("not an actual Face handle"))?
             .ok_or_else(|| match InsertionGeometry::topology(face) {
-                Some((role, EntityRef::Face(id))) => super::face_without_surface(role, id),
+                Some((_, EntityRef::Face(id))) => super::face_without_surface(id),
                 _ => invalid("not an actual Face handle"),
             })
     }

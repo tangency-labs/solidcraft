@@ -69,10 +69,16 @@ fn null_defect(why: &'static str) -> SolidError {
         .into_error()
 }
 
-/// Why a band-cut solver's edge use has its edge: the solver was set up on that edge use of
-/// the filleted edge.
-const SOLVER_EDGE: &str = "a band-cut solver's first edge use has no edge: the solver was set up \
-     on that edge use of the filleted edge";
+/// The solver's first edge use, `edgeuse`, has no edge. The caller passes both the body and
+/// the solver (whose edge uses are public), so this is the caller's input:
+/// [`BlendFailure::EdgeUseWithoutEdge`] at the edge use, status `SM_ERR_NULL_POINTER`.
+fn edge_use_without_edge(edgeuse: crate::topology::EdgeuseId) -> SolidError {
+    SolidError::blend_at(
+        OP,
+        BlendFailure::EdgeUseWithoutEdge,
+        EntityRef::Edgeuse(edgeuse),
+    )
+}
 
 /// Why a ball section's solver has both offset surfaces: the section was found on them
 /// ([`ball_section_at`] reads both), and nothing between takes one away.
@@ -1775,7 +1781,7 @@ pub(crate) fn band_cuts_the_part_cached(
     let Some(edgeuse) = base.edgeuse(0)? else {
         return Ok(None);
     };
-    let edge_id = eu::edge(target, edgeuse)?.ok_or_else(|| null_defect(SOLVER_EDGE))?;
+    let edge_id = eu::edge(target, edgeuse)?.ok_or_else(|| edge_use_without_edge(edgeuse))?;
     let curve = filleted_edge_curve(target, edge_id)?;
     let ivl = edge::interval(target, edge_id)?;
     let (rolls, on_edge) = rolls_a_ball(solver);
@@ -1967,7 +1973,7 @@ pub(crate) fn band_breaks_through_the_part_cached(
     let Some(edgeuse) = base.edgeuse(0)? else {
         return Ok(None);
     };
-    let edge_id = eu::edge(target, edgeuse)?.ok_or_else(|| null_defect(SOLVER_EDGE))?;
+    let edge_id = eu::edge(target, edgeuse)?.ok_or_else(|| edge_use_without_edge(edgeuse))?;
     let curve = filleted_edge_curve(target, edge_id)?;
     let ivl = edge::interval(target, edge_id)?;
     let (rolls, on_edge) = rolls_a_ball(solver);
@@ -2203,5 +2209,61 @@ mod tests {
         assert!(least_on_arc(1.0, 1.0, 0.0, f64::NAN, 1.0).is_nan());
         assert!(least_on_arc(1.0, 1.0, 0.0, 0.0, f64::NAN).is_nan());
         assert!(!(least_on_arc(1.0, f64::NAN, 0.0, 0.0, 1.0) >= 0.0));
+    }
+
+    /// #19824 review: the caller passes both the body and the solver, so a solver whose
+    /// first edge use has no edge in the body is the caller's input
+    /// (`BlendFailure::EdgeUseWithoutEdge` at the edge use, `SM_ERR_NULL_POINTER`), not a
+    /// defect, for both entries.
+    #[test]
+    fn a_solver_edge_use_without_an_edge_is_the_callers_input() {
+        use crate::blend::fillet_executive::session::SolverObject;
+        use crate::blend::fillet_geom::p1::{FilletBrep, FilletSolverId};
+        use crate::blend::fillet_standard_solver::p1::constant_radius_from_edgeuse;
+        use crate::error::{EntityRef, ErrorKind, SM_ERR_NULL_POINTER};
+        use crate::primitive::api_primitives::create_box;
+        use crate::topology::edgeuse::p1 as eu;
+        use crate::Kernel;
+
+        let mut k = Kernel::default();
+        let mut b = create_box(&mut k, Point3::new(0.0, 0.0, 0.0), 10.0, 10.0, 10.0).unwrap();
+        let e = b.edges().ids().next().unwrap();
+        let edgeuse = eu::primary_edgeuse(&b, e).unwrap().unwrap();
+        let mut pseudo = FilletBrep::new();
+        let solver = constant_radius_from_edgeuse(
+            &k,
+            &mut b,
+            &mut pseudo,
+            FilletSolverId(0),
+            1e-6,
+            0.5,
+            0.03,
+            1.0,
+            edgeuse,
+            None,
+        )
+        .unwrap();
+        let mut solver = SolverObject::ConstantRadius(Box::new(solver));
+        b.edgeuse_mut(edgeuse).unwrap().edge = None;
+        for breaks in [false, true] {
+            let error = if breaks {
+                super::band_breaks_through_the_part(&k, &mut b, &mut solver)
+            } else {
+                super::band_cuts_the_part(&k, &mut b, &mut solver)
+            }
+            .unwrap_err();
+            assert_eq!(error.kind(), ErrorKind::InvalidInput, "{error:?}");
+            assert!(!error.is_defect(), "{error:?}");
+            assert_eq!(
+                error.entity(),
+                Some(EntityRef::Edgeuse(edgeuse)),
+                "{error:?}"
+            );
+            assert_eq!(
+                error.upstream_status(),
+                Some(SM_ERR_NULL_POINTER),
+                "{error:?}"
+            );
+        }
     }
 }
