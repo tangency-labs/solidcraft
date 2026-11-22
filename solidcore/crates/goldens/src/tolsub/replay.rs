@@ -448,10 +448,12 @@ const TRIM_COVER_REFIT: &[(&str, &str)] = &[
 
 /// The [`TRIM_COVER`] rows whose cover raises the WR-493 retirement moves by less than the
 /// goldens' comparator (the cover measures the kept trims on the file's NURB here, on the
-/// fitted NURB on main): their committed line stays main's.
+/// fitted NURB on main): their committed line stays main's. (#20179 re-blessed
+/// `corpus.parity`'s `Fillet__sphere_diff_3cylinders.smb` and `topology.face_p3`'s
+/// `uv_trim_f0`/`f1`/`f4`/`f5`/`f8`/`f9`, which its classified trims move: their put-back
+/// above is main's hash, and their committed line is now this branch's run.)
 const TRIM_COVER_WITHIN_COMPARATOR: &[(&str, &str)] = &[
     ("blend.fillet_removal", "nurb_fillet_face18"),
-    ("corpus.parity", "Fillet__sphere_diff_3cylinders.smb"),
     ("heal.stitch_p1", "file_boolean_trees_result.smb_advanced"),
     ("heal.stitch_p1", "file_nurb_fillet.smb_advanced"),
     (
@@ -485,31 +487,7 @@ const TRIM_COVER_WITHIN_COMPARATOR: &[(&str, &str)] = &[
     ),
     (
         "topology.face_p3",
-        "own_reader_sphere_diff_3cylinders_uv_trim_f0",
-    ),
-    (
-        "topology.face_p3",
-        "own_reader_sphere_diff_3cylinders_uv_trim_f1",
-    ),
-    (
-        "topology.face_p3",
-        "own_reader_sphere_diff_3cylinders_uv_trim_f4",
-    ),
-    (
-        "topology.face_p3",
-        "own_reader_sphere_diff_3cylinders_uv_trim_f5",
-    ),
-    (
-        "topology.face_p3",
         "own_reader_sphere_diff_3cylinders_uv_trim_f6",
-    ),
-    (
-        "topology.face_p3",
-        "own_reader_sphere_diff_3cylinders_uv_trim_f8",
-    ),
-    (
-        "topology.face_p3",
-        "own_reader_sphere_diff_3cylinders_uv_trim_f9",
     ),
 ];
 
