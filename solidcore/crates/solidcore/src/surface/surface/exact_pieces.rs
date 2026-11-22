@@ -775,13 +775,15 @@ pub(crate) fn exact_nurbs_curve_data(
         if !(w.is_finite() && w > 0.0 && cp.x.is_finite() && cp.y.is_finite() && z.is_finite()) {
             return Err(bad());
         }
-        let (ux, vy) = if rational {
+        // Division by one is exact. Preserve a coordinate on a periodic seam when
+        // a record stores a polynomial trim with explicit unit weights.
+        let (ux, vy) = if w == 1.0 {
+            (Ivl::from(cp.x), Ivl::from(cp.y))
+        } else {
             (
                 Ivl::from(cp.x) / Ivl::from(w),
                 Ivl::from(cp.y) / Ivl::from(w),
             )
-        } else {
-            (Ivl::from(cp.x), Ivl::from(cp.y))
         };
         if !(ux.lo.is_finite() && ux.hi.is_finite() && vy.lo.is_finite() && vy.hi.is_finite()) {
             return Err(bad());
@@ -2034,6 +2036,25 @@ pub(crate) fn certified_lift(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_unit_weight_ruling_stays_on_the_exact_periodic_seam() {
+        use crate::nurbs::crv_basic::Curve as NlCurve;
+        use crate::nurbs::math::CPoint;
+
+        let net = NlCurve::new(
+            vec![
+                CPoint::new(1.0, 0.0, NOZ, 1.0),
+                CPoint::new(1.0, 2.0, NOZ, 1.0),
+            ],
+            1,
+            vec![0.0, 0.0, 2.0, 2.0],
+        )
+        .unwrap();
+        let curve = BSplineCurve::from_nurb(net, 2, false);
+        let (_, _, _, min, max) = exact_nurbs_curve_data(&curve, true).unwrap();
+        assert_eq!((min.x, max.x), (1.0, 1.0));
+    }
 
     /// Of a piece and its UV curves, only the last trimmed has a knot a rounding past the
     /// interval's end, which its trim snaps the end onto. The three are trimmed to the one

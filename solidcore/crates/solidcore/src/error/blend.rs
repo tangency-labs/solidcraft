@@ -707,6 +707,8 @@ pub enum RemovalRefusal {
     NotFourEdges,
     /// Two adjacent edges of the fillet face are both tangent.
     AdjacentEdgesTangent,
+    /// The selected faces do not form one connected strip with two rails.
+    NotOneTangentChain,
     /// The edge opposite the fillet face's tangent edge is not tangent.
     OppositeEdgeNotTangent,
     /// Neither of the fillet face's first two edges is tangent.
@@ -755,6 +757,7 @@ pub const fn removal_class(reason: RemovalRefusal) -> ErrorKind {
         | R::SeamTrimMissesNewVertex => ErrorKind::RemovalNotExact,
         R::NotFourEdges
         | R::AdjacentEdgesTangent
+        | R::NotOneTangentChain
         | R::OppositeEdgeNotTangent
         | R::NoTangentEdge
         | R::EdgeWithoutTwoVertices
@@ -1717,6 +1720,7 @@ mod tests {
             (R::SeamTrimMissesNewVertex, ErrorKind::RemovalNotExact),
             (R::NotFourEdges, ErrorKind::NotARemovableFillet),
             (R::AdjacentEdgesTangent, ErrorKind::NotARemovableFillet),
+            (R::NotOneTangentChain, ErrorKind::NotARemovableFillet),
             (R::OppositeEdgeNotTangent, ErrorKind::NotARemovableFillet),
             (R::NoTangentEdge, ErrorKind::NotARemovableFillet),
             (R::EdgeWithoutTwoVertices, ErrorKind::NotARemovableFillet),
