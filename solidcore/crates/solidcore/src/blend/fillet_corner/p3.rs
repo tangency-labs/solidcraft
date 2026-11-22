@@ -88,7 +88,7 @@ use std::collections::BTreeMap;
 use crate::blend::blend_corner::{BlendCornerEvent, BlendEnd};
 use crate::blend::fillet_corner::p1;
 use crate::blend::fillet_corner::p2::find_concave_edgeuses;
-use crate::blend::fillet_corner::topology::{corner_input, shape_not_built};
+use crate::blend::fillet_corner::topology::{corner_input, set_up, shape_not_built};
 use crate::blend::fillet_executive::p3::ErrorInfo;
 use crate::blend::fillet_geom::p1::{
     FilStatus, FilletBrep, FilletCornerId, FilletCornerType, FilletEdgeType, FilletErrorType,
@@ -96,7 +96,7 @@ use crate::blend::fillet_geom::p1::{
 };
 use crate::blend::fillet_solver::p1::{FilletSolver, FilletSolverOps, FilletSurfaceGeneratorType};
 use crate::curve::curve::{Curve, CurveKind};
-use crate::error::blend::{BlendFailure, CornerInput, CornerPatchMiss, CornerShape};
+use crate::error::blend::{BlendFailure, CornerInput, CornerPatchMiss, CornerShape, FilletSetUp};
 use crate::error::{ignored, EntityRef, Failure, Result, SolidError, SM_ERR, SM_ERR_NULL_POINTER};
 use crate::intersect::point_class::PointClassType;
 use crate::kernel::Kernel;
@@ -586,14 +586,14 @@ fn bspline_part(curve: &Curve) -> Option<BSplineCurve> {
 }
 
 /// The primary edge use of a pseudo-B-rep edge (`GetPrimaryEdgeuse`), required: a fillet
-/// edge without one is invalid input ([`CornerInput::EdgeWithoutPrimaryEdgeuse`] at the
-/// edge, `SM_ERR_NULL_POINTER`), as a caller can give the corner steps such an edge
+/// edge without one is invalid input ([`FilletSetUp::PrimaryEdgeUse`] at the edge,
+/// `SM_ERR_NULL_POINTER`), as a caller can give the corner steps such an edge
 /// (`FilletBrep::new`, a pub `FilletCorner::edges`).
 pub(super) fn primary_eu(pseudo: &FilletBrep, e: EdgeId, op: &'static str) -> Result<EdgeuseId> {
     eu1::primary_edgeuse(pseudo.brep(), e)?.ok_or_else(|| {
-        corner_input(
+        set_up(
             op,
-            CornerInput::EdgeWithoutPrimaryEdgeuse,
+            FilletSetUp::PrimaryEdgeUse,
             Some(EntityRef::Edge(e)),
             SM_ERR_NULL_POINTER,
         )
@@ -607,12 +607,12 @@ fn patch_miss(op: &'static str, miss: CornerPatchMiss) -> SolidError {
     SolidError::blend(op, BlendFailure::CornerPatchNotMade(miss))
 }
 
-/// A fillet edge use `eu` without its mate ([`CornerInput::EdgeuseWithoutMate`],
-/// `SM_ERR_NULL_POINTER`).
+/// A fillet edge's primary edge use `eu` without its mate
+/// ([`FilletSetUp::PrimaryEdgeUseMate`], `SM_ERR_NULL_POINTER`).
 fn no_mate(op: &'static str, eu: EdgeuseId) -> SolidError {
-    corner_input(
+    set_up(
         op,
-        CornerInput::EdgeuseWithoutMate,
+        FilletSetUp::PrimaryEdgeUseMate,
         Some(EntityRef::Edgeuse(eu)),
         SM_ERR_NULL_POINTER,
     )
@@ -741,8 +741,8 @@ impl FilletCorner {
     ///
     /// Invalid input ([`BlendFailure::CornerInputInvalid`], at the corner's vertex): a
     /// caller builds the corner ([`FilletCorner::new`] takes its solver edge uses), so
-    /// [`CornerInput::FilletedEdgeusesNotGiven`] (`SM_ERR_NULL_POINTER`) without solver edge
-    /// uses and [`CornerInput::FilletedEdgeusesNotTwo`] (`SM_ERR`) unless there are exactly
+    /// [`CornerInput::FilletedEdgeUsesNotGiven`] (`SM_ERR_NULL_POINTER`) without solver edge
+    /// uses and [`CornerInput::FilletedEdgeUsesNotTwo`] (`SM_ERR`) unless there are exactly
     /// two.
     pub fn filleted_edgeuses(&self) -> Result<(EdgeuseId, EdgeuseId)> {
         const OP: &str = "blend::fillet_corner::p3::filleted_edgeuses";
@@ -751,7 +751,7 @@ impl FilletCorner {
         let eus = self.solver_eus.as_ref().ok_or_else(|| {
             corner_input(
                 OP,
-                CornerInput::FilletedEdgeusesNotGiven { kind },
+                CornerInput::FilletedEdgeUsesNotGiven { kind },
                 at,
                 SM_ERR_NULL_POINTER,
             )
@@ -760,7 +760,7 @@ impl FilletCorner {
             [first, second] => Ok((*first, *second)),
             _ => Err(corner_input(
                 OP,
-                CornerInput::FilletedEdgeusesNotTwo {
+                CornerInput::FilletedEdgeUsesNotTwo {
                     kind,
                     given: eus.len(),
                 },
@@ -1706,7 +1706,7 @@ impl FilletCorner {
                             .ok_or_else(|| {
                                 corner_input(
                                     OP_PATCH,
-                                    CornerInput::EdgeuseWithoutFilletGeometry,
+                                    CornerInput::EdgeUseWithoutFilletGeometry,
                                     Some(EntityRef::Edgeuse(prim_eu)),
                                     SM_ERR_NULL_POINTER,
                                 )
@@ -2800,7 +2800,7 @@ mod tests {
         assert_eq!(
             e.blend_failure(),
             Some(&BlendFailure::CornerInputInvalid {
-                input: CornerInput::FilletedEdgeusesNotGiven {
+                input: CornerInput::FilletedEdgeUsesNotGiven {
                     kind: FilletCornerKind::NByTwo
                 },
                 entity: None,
@@ -2818,7 +2818,7 @@ mod tests {
             assert_eq!(
                 e.blend_failure(),
                 Some(&BlendFailure::CornerInputInvalid {
-                    input: CornerInput::FilletedEdgeusesNotTwo {
+                    input: CornerInput::FilletedEdgeUsesNotTwo {
                         kind: FilletCornerKind::NByTwo,
                         given,
                     },

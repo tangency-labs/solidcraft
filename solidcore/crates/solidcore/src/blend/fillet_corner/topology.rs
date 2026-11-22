@@ -58,7 +58,7 @@ use crate::blend::fillet_geom::p1::{
     CornerLookup, FilletBrep, FilletCornerId, FilletEdgeType, FilletVertex, FilletVertexType,
 };
 use crate::blend::fillet_solver::p1::FilletSolver;
-use crate::error::blend::{BlendFailure, CornerInput, CornerShape};
+use crate::error::blend::{BlendFailure, CornerInput, CornerShape, FilletSetUp};
 use crate::error::{EntityRef, Failure, Result, SolidError, SM_ERR_NULL_POINTER};
 use crate::intersect::point_class::PointClassType;
 use crate::kernel::Kernel;
@@ -186,6 +186,25 @@ pub(super) fn corner_input(
     status: i32,
 ) -> SolidError {
     let failure = Failure::new(op, BlendFailure::CornerInputInvalid { input, entity });
+    match entity {
+        Some(at) => failure.at(at),
+        None => failure,
+    }
+    .with_status(status)
+    .into_error()
+}
+
+/// A link of the fillet structures a corner step at `op` reads is not there
+/// ([`BlendFailure::FilletSetUpInvalid`]), about `entity` where the step has one: invalid
+/// input, as for [`corner_input`]. Status `status`, that of the site it replaces.
+#[track_caller]
+pub(super) fn set_up(
+    op: &'static str,
+    part: FilletSetUp,
+    entity: Option<EntityRef>,
+    status: i32,
+) -> SolidError {
+    let failure = Failure::new(op, BlendFailure::FilletSetUpInvalid(part));
     match entity {
         Some(at) => failure.at(at),
         None => failure,
