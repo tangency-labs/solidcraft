@@ -85,7 +85,7 @@ use crate::curve::curve::Curve;
 use crate::curve::iso_curve::IsoCurve;
 use crate::curve::line::Line;
 use crate::error::surface::{SolveInput, SurfaceFailure};
-use crate::error::{ignored, Failure, Result, SolidError};
+use crate::error::{ignored, Result, SolidError};
 use crate::geom::assert_array::ObjectKey;
 use crate::geom::axis2_placement::Axis2Placement;
 use crate::geom::extent1d::{Extent1d, ExtentNd};
@@ -1539,15 +1539,11 @@ impl DerivSurfDefinition<'_> {
                                 if e.is_unported_or_cancelled() {
                                     e
                                 } else {
-                                    let failure =
-                                        Failure::new(OP_SAMPLE, SurfaceFailure::NoParameterDirection);
-                                    // a port failure is not chained: it would make the
-                                    // answer a port failure, which the bare status was not
-                                    if e.is_port_failure() {
-                                        failure.into_error()
-                                    } else {
-                                        failure.caused_by(e).into_error()
-                                    }
+                                    super::p7::chained(
+                                        OP_SAMPLE,
+                                        SurfaceFailure::NoParameterDirection,
+                                        e,
+                                    )
                                 }
                             })?;
                         // (status ignored upstream; passed on as the fork does)

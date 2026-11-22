@@ -2595,16 +2595,12 @@ fn solve_surface_cache_with<O: SolutionObject>(
     }
 }
 
-/// The failure of `op` as `failure`, with `e` (the failure that stopped it) as its cause,
-/// unless `e` is a port failure: chaining one would make the answer a port failure, which
-/// the bare status it replaces was not (`SolidError::is_status_answer`).
+/// The failure of `op` as `failure`, with `e` (the failure that stopped it) as its cause.
+/// A port failure is chained too, so the answer is a port failure
+/// (`SolidError::is_port_failure`) and not a status answer: a solidcore-side failure is no
+/// answer of the operation on its input (#1452).
 pub(crate) fn chained(op: &'static str, failure: SurfaceFailure, e: SolidError) -> SolidError {
-    let failure = Failure::new(op, failure);
-    if e.is_port_failure() {
-        failure.into_error()
-    } else {
-        failure.caused_by(e).into_error()
-    }
+    Failure::new(op, failure).caused_by(e).into_error()
 }
 
 /// `dBestAnswerSoFarSq` of `GlobalCurveSolve` (and, with `signed_max`, of
@@ -5836,10 +5832,10 @@ mod tests {
         }
     }
 
-    /// A cache that could not be built keeps the failure that stopped it as its cause,
-    /// except a port failure, which would turn the status answer into a port failure.
+    /// A cache that could not be built keeps the failure that stopped it as its cause. A
+    /// port failure is kept too, and makes the answer a port failure, not a status answer.
     #[test]
-    fn a_cache_failure_chains_its_cause_but_not_a_port_failure() {
+    fn a_cache_failure_chains_its_cause_including_a_port_failure() {
         use crate::error::surface::SurfaceFailure;
         let inner = SolidError::sm_err("surface::inner");
         let e = chained(
@@ -5851,9 +5847,10 @@ mod tests {
         assert_eq!(e.cause(), Some(&inner));
         assert!(e.is_status_answer());
         let port = SolidError::port_invariant("surface::inner", "x");
-        let e = chained(OP_SOLVE, SurfaceFailure::SurfaceCacheNotBuilt, port);
-        assert_eq!(e.cause(), None);
-        assert!(e.is_status_answer());
-        assert!(!e.is_port_failure());
+        let e = chained(OP_SOLVE, SurfaceFailure::SurfaceCacheNotBuilt, port.clone());
+        assert_eq!(e.sm_status(), Some(SM_ERR_NULL_POINTER));
+        assert_eq!(e.cause(), Some(&port));
+        assert!(!e.is_status_answer());
+        assert!(e.is_port_failure());
     }
 }
