@@ -42,7 +42,8 @@ use crate::blend::fillet_solver::p1::{
     FilletSolver, FilletSolverOps, FilletSurfaceGeneratorType, SeamDomain,
 };
 use crate::curve::curve::Curve;
-use crate::error::{Result, SolidError};
+use crate::error::blend::BlendFailure;
+use crate::error::{EntityRef, Failure, Result, SolidError, SM_ERR_NULL_POINTER};
 use crate::geom::extent2d::Extent2d;
 use crate::geom::vector2d::Point2;
 use crate::intersect::surface_intersector::p1::{SrfIndex, TsectPnt};
@@ -58,6 +59,20 @@ use crate::topology::edgeuse::p1 as eu;
 use crate::topology::{edge, Brep};
 
 const OP: &str = "blend::fillet_executive::session::ball_regular";
+
+/// A reviewed defect: [`judge_ball_at`] reads an offset surface of the solver after checking
+/// both are there, and nothing between removes one (status `SM_ERR_NULL_POINTER`, the fork's
+/// `NER`, as the phrase cause it replaces had).
+fn surfaces_checked() -> SolidError {
+    Failure::new(
+        OP,
+        BlendFailure::Defect {
+            why: "both offset surfaces of the solver are checked present before the station reads one, and setting its offsets removes none",
+        },
+    )
+    .with_status(SM_ERR_NULL_POINTER)
+    .into_error()
+}
 
 /// `lSteps`: the sections along the edge.
 const STEPS: usize = 32;
@@ -460,7 +475,7 @@ pub fn judge_ball_at(k: &Kernel, solver: &mut SolverObject, pnt: &TsectPnt) -> R
             let slot = ops
                 .solver_mut()
                 .surface_mut(rail)?
-                .ok_or_else(|| SolidError::blend_missing(OP, "the solver's offset surface"))?;
+                .ok_or_else(surfaces_checked)?;
             *dst = slot.surface.surface.evaluate_point_extending(k, uv)?;
         }
         Ok(on)
@@ -476,10 +491,7 @@ pub fn judge_ball_at(k: &Kernel, solver: &mut SolverObject, pnt: &TsectPnt) -> R
     let mut jets: [Option<FaceJet>; 2] = [None, None];
     let mut offsets = [0.0_f64; 2];
     for rail in 0..2 {
-        let slot = ops
-            .solver()
-            .surface(rail)?
-            .ok_or_else(|| SolidError::blend_missing(OP, "the solver's offset surface"))?;
+        let slot = ops.solver().surface(rail)?.ok_or_else(surfaces_checked)?;
         let offset: &OffsetSurface = &slot.surface.surface;
         let uv = uvs.get(rail).copied().unwrap_or(Point2::UNDEF);
         let base = offset.base_surface();
@@ -916,10 +928,17 @@ pub fn ball_is_regular(
     let Some(edgeuse) = base.edgeuse(0)? else {
         return Ok(first);
     };
-    let edge_id = eu::edge(target, edgeuse)?
-        .ok_or_else(|| SolidError::blend_missing(OP, "the edge use's edge"))?;
+    let edge_id = eu::edge(target, edgeuse)?.ok_or_else(|| {
+        SolidError::blend_at(
+            OP,
+            BlendFailure::EdgeUseWithoutEdge,
+            EntityRef::Edgeuse(edgeuse),
+        )
+    })?;
     let curve = edge::evaluation_curve(target, edge_id)?
-        .ok_or_else(|| SolidError::blend_missing(OP, "the edge's curve"))?
+        .ok_or_else(|| {
+            SolidError::blend_at(OP, BlendFailure::EdgeWithoutCurve, EntityRef::Edge(edge_id))
+        })?
         .clone();
     let ivl = edge::interval(target, edge_id)?;
     let closed = edge::is_closed(target, edge_id)?;

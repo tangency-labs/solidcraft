@@ -3855,12 +3855,13 @@ fn a_session_failure_says_what_its_session_noted() {
     let e = s.do_filleting(&mut k, None).unwrap_err();
     assert_eq!(
         blend::failure(&e).unwrap().to_string(),
-        "the blend failed (status 1001): the fillet body has no faces"
+        "the blend failed (status 1001): failed: a step of the fillet executive failed (the \
+         error info says which)"
     );
     assert_eq!(
         blend::session_failure(&s, &e).unwrap().to_string(),
-        "the blend failed (status 1001): the fillet body has no faces: Fillet Surface \
-         Computation Failure: no fillet faces were made"
+        "the blend failed (status 1001): failed: a step of the fillet executive failed (the \
+         error info says which): Fillet Surface Computation Failure: no fillet faces were made"
     );
 }
 

@@ -26,14 +26,58 @@ use crate::topology::edgeuse::p3::{evaluate_binormal, BinormalOptions};
 use crate::topology::{edge, EdgeId, EdgeuseId};
 use crate::{EntityRef, Kernel, Result, SolidError};
 
-/// `SM_ERR_INVALID_INPUT`: a value the two-offset preparation is given is not usable, as
-/// the phrase says.
-fn invalid(what: &'static str) -> SolidError {
-    SolidError::blend_invalid_value(
-        "blend::fillet_executive::session::prepare_per_edge_two_offsets",
-        what,
+const OP: &str = "blend::fillet_executive::session::prepare_per_edge_two_offsets";
+
+/// A reviewed defect: a list entry, edge use or definition the preparation checked or built
+/// itself before reading it, `why` saying why it is there. Status `SM_ERR_INVALID_INPUT`, as
+/// the phrase cause it replaces had.
+fn defect(why: &'static str) -> SolidError {
+    crate::error::Failure::new(OP, crate::error::blend::BlendFailure::Defect { why })
+        .with_status(crate::error::SM_ERR_INVALID_INPUT)
+        .into_error()
+}
+
+/// The caller's chamfer size for edge `id` is not one it can take.
+fn size_invalid(id: EdgeId) -> SolidError {
+    SolidError::blend_at(
+        OP,
+        crate::error::blend::BlendFailure::ChamferSizeInvalid,
+        EntityRef::Edge(id),
     )
 }
+
+/// The caller's lists for `edges` edges: none empty where a value is needed (`lengths`
+/// each with whether it may be empty), else one value or one per edge.
+fn check_lists(edges: usize, lengths: &[(usize, bool)]) -> Result<()> {
+    if edges == 0 {
+        return Err(SolidError::blend(
+            OP,
+            crate::error::blend::BlendFailure::NoEdgesGiven,
+        ));
+    }
+    for &(given, may_be_empty) in lengths {
+        if !(given == edges || given == 1 || (may_be_empty && given == 0)) {
+            return Err(SolidError::blend(
+                OP,
+                crate::error::blend::BlendFailure::PerEdgeListLength { edges, given },
+            ));
+        }
+    }
+    Ok(())
+}
+
+/// Why a list entry is there: the caller's lists are checked one value or one per edge
+/// ([`check_lists`]) before any is read, and the run-on edges added take one each.
+const LISTS_CHECKED: &str = "the lists are checked one value or one per edge before any entry is read, and each run-on edge added takes one";
+
+/// Why an edge's per-edge entry is there: the preparation pushes one per edge in order.
+const ONE_PER_EDGE: &str =
+    "the preparation pushes one wedge, measure and chain entry per edge, in the edges' order";
+
+/// Why an edge's radial edge use is there: [`FilletSession::blendable_edgeuse`] has just
+/// returned its blend edge use, which it refuses for an edge without two faces (a lamina).
+const RADIAL_OF_BLENDABLE: &str =
+    "the edge's blend edge use was just found, which needs the edge to lie between two faces";
 
 /// The support a chamfer's first size is along: one of its edge's two faces, as the
 /// caller named it, or support 1 or 2 of the edge's blend edge use.
@@ -54,7 +98,7 @@ fn value<T: Copy>(values: &[T], index: usize) -> Result<T> {
     values
         .get(if values.len() == 1 { 0 } else { index })
         .copied()
-        .ok_or_else(|| invalid("a value for the edge"))
+        .ok_or_else(|| defect(LISTS_CHECKED))
 }
 
 /// The refusal of `size` on edge `id` at `wedge`, which [`ChamferDefinition::new`] refused:
@@ -79,7 +123,7 @@ fn refused_size(id: EdgeId, size: ChamferSize, wedge: f64) -> SolidError {
                 crate::error::SM_ERR_INVALID_INPUT,
             )
         }
-        _ => invalid("the chamfer size"),
+        _ => size_invalid(id),
     }
 }
 
@@ -111,7 +155,7 @@ fn chain_wedge(
     let own = wedges
         .get(index)
         .copied()
-        .ok_or_else(|| invalid("the edge's wedge"))?;
+        .ok_or_else(|| defect(ONE_PER_EDGE))?;
     if between_planes.get(index).copied().unwrap_or(false) {
         return Ok(own);
     }
@@ -199,16 +243,20 @@ impl FilletSession<'_> {
         second: &[f64],
         generators: &[FilletSurfaceGenerator],
     ) -> Result<()> {
-        if edges.is_empty()
-            || [first.len(), second.len(), generators.len()]
-                .into_iter()
-                .any(|len| len != 1 && len != edges.len())
-        {
-            return Err(invalid("the edge, offset and generator lists"));
-        }
+        check_lists(
+            edges.len(),
+            &[
+                (first.len(), false),
+                (second.len(), false),
+                (generators.len(), false),
+            ],
+        )?;
         let live_edges = crate::topology::brep::edges(self.target(), None)?;
-        if edges.iter().any(|id| !live_edges.contains(id)) {
-            return Err(invalid("an edge that is not live"));
+        if let Some(index) = edges.iter().position(|id| !live_edges.contains(id)) {
+            return Err(SolidError::blend(
+                OP,
+                crate::error::blend::BlendFailure::EdgeNotInTarget { index },
+            ));
         }
 
         self.executive.initialized = false;
@@ -346,11 +394,15 @@ impl FilletSession<'_> {
         sizes: &[ChamferSize],
         along: &[crate::topology::FaceId],
     ) -> Result<Vec<[f64; 2]>> {
-        if edges.is_empty()
-            || !(sizes.len() == 1 || sizes.len() == edges.len())
-            || !(along.is_empty() || along.len() == edges.len())
-        {
-            return Err(invalid("the edge, size and face lists"));
+        check_lists(edges.len(), &[(sizes.len(), false)])?;
+        if !(along.is_empty() || along.len() == edges.len()) {
+            return Err(SolidError::blend(
+                OP,
+                crate::error::blend::BlendFailure::PerEdgeListLength {
+                    edges: edges.len(),
+                    given: along.len(),
+                },
+            ));
         }
         let (edges, sizes, along) = self.chamfers_run_on(k, edges, sizes, along)?;
         let (edges, sizes, along) = (edges.as_slice(), sizes.as_slice(), along.as_slice());
@@ -361,8 +413,7 @@ impl FilletSession<'_> {
         for &id in edges {
             let u0 = self.blendable_edgeuse(k, id)?;
             let target: &mut crate::Brep = &mut *self.objects.target;
-            let u1 =
-                eu1::radial(target, u0)?.ok_or_else(|| invalid("the edge's radial edge use"))?;
+            let u1 = eu1::radial(target, u0)?.ok_or_else(|| defect(RADIAL_OF_BLENDABLE))?;
             // a knife edge has no wedge: none to measure, and none its chain could take
             let is_knife = is_knife_edge(k, target, id, knife_tol)?;
             knife.push(is_knife);
@@ -373,7 +424,9 @@ impl FilletSession<'_> {
             }
             let t = target
                 .edge(id)
-                .map_err(|_| invalid("an edge that is not live"))?
+                .map_err(|_| {
+                    defect("the edge's blend edge use was just found, so the edge is live")
+                })?
                 .interval
                 .evaluate(0.5);
             wedges.push(wedge_at(k, target, u0, u1, t)?);
@@ -408,10 +461,9 @@ impl FilletSession<'_> {
                 if d1 != d2 {
                     let mut tolerance = 0.0_f64;
                     for &other in &on_chain {
-                        let id = edges
-                            .get(other)
-                            .copied()
-                            .ok_or_else(|| invalid("the neighbouring edge"))?;
+                        let id = edges.get(other).copied().ok_or_else(|| {
+                            defect("the chain's members are indices of the edges")
+                        })?;
                         tolerance = tolerance.max(edge::tolerance(target, id)?);
                     }
                     // the bound's gap moves the fold test's numerator by at most `|d_2 - d_1
@@ -420,10 +472,9 @@ impl FilletSession<'_> {
                     let gap = tolerance / (d1 + d2);
                     let mut opens = wedge;
                     for &other in &on_chain {
-                        let id = edges
-                            .get(other)
-                            .copied()
-                            .ok_or_else(|| invalid("the neighbouring edge"))?;
+                        let id = edges.get(other).copied().ok_or_else(|| {
+                            defect("the chain's members are indices of the edges")
+                        })?;
                         let w = match widest.get(other).copied().flatten() {
                             Some(w) => w,
                             None => widest_wedge_bound(k, target, id, gap)?.wedge,
@@ -446,8 +497,7 @@ impl FilletSession<'_> {
         for (index, &id) in edges.iter().enumerate() {
             let u0 = self.blendable_edgeuse(k, id)?;
             let target: &crate::Brep = &*self.objects.target;
-            let u1 =
-                eu1::radial(target, u0)?.ok_or_else(|| invalid("the edge's radial edge use"))?;
+            let u1 = eu1::radial(target, u0)?.ok_or_else(|| defect(RADIAL_OF_BLENDABLE))?;
             // the support the first size is along: 1 unless `along` names support 2
             let on_second = match value(along, index)? {
                 Along::Support { second } => second,
@@ -463,7 +513,11 @@ impl FilletSession<'_> {
                     } else if face_of(u1)? == Some(face) {
                         true
                     } else {
-                        return Err(invalid("a face that is neither of its edge's"));
+                        return Err(SolidError::blend_at(
+                            OP,
+                            crate::error::blend::BlendFailure::ChamferFaceNotOfEdge,
+                            EntityRef::Edge(id),
+                        ));
                     }
                 }
             };
@@ -473,10 +527,10 @@ impl FilletSession<'_> {
             // sizes have no such chord
             if knife.get(index).copied().unwrap_or(false) {
                 let ChamferSize::Distances([d, d2]) = value(sizes, index)? else {
-                    return Err(invalid("a knife edge's chamfer size"));
+                    return Err(size_invalid(id));
                 };
                 if !(d == d2 && d.is_finite() && d > 0.0) {
-                    return Err(invalid("a knife edge's chamfer distances"));
+                    return Err(size_invalid(id));
                 }
                 first.push(d);
                 second.push(d);
@@ -487,7 +541,7 @@ impl FilletSession<'_> {
             let wedge = measured
                 .get(index)
                 .copied()
-                .ok_or_else(|| invalid("the edge's measured wedge"))?;
+                .ok_or_else(|| defect(ONE_PER_EDGE))?;
             let asked =
                 ChamferDefinition::new(size, wedge).map_err(|_| refused_size(id, size, wedge))?;
             let chamfer = if on_second {
@@ -500,13 +554,13 @@ impl FilletSession<'_> {
                     chord @ ChamferSize::Chord(_) => chord,
                 };
                 ChamferDefinition::new(size, wedge)
-                    .map_err(|_| invalid("the chamfer size along the second face"))?
+                    .map_err(|_| {
+                        defect("the setbacks of a chamfer accepted at this wedge, swapped, are positive and finite")
+                    })?
             } else {
                 asked
             };
-            let [r1, r2] = chamfer
-                .offsets()
-                .map_err(|_| invalid("the chamfer's offsets"))?;
+            let [r1, r2] = chamfer.offsets().map_err(|_| size_invalid(id))?;
             first.push(r1);
             second.push(r2);
             chamfers.push(Some(chamfer));
@@ -525,7 +579,9 @@ impl FilletSession<'_> {
             .filter(|&i| matches!(self.objects.solvers.get(i), Some(Some(_))))
             .collect();
         if made.len() != chamfers.len() {
-            return Err(invalid("a solver for each chamfer"));
+            return Err(defect(
+                "the two-offset preparation makes one solver per edge, each one blendable",
+            ));
         }
         for (i, chamfer) in made.into_iter().zip(chamfers) {
             if let Some(Some(solver)) = self.objects.solvers.get_mut(i) {
@@ -559,7 +615,7 @@ mod tests {
         let cases = [
             (
                 session.prepare_per_edge_two_offsets(&k, &[], &[1.0], &[1.0], &[]),
-                "the edge, offset and generator lists",
+                BlendFailure::NoEdgesGiven,
             ),
             (
                 session.prepare_per_edge_two_offsets(
@@ -569,24 +625,82 @@ mod tests {
                     &[1.0],
                     &[FilletSurfaceGenerator::Linear],
                 ),
-                "an edge that is not live",
+                BlendFailure::EdgeNotInTarget { index: 0 },
             ),
             (
                 session
                     .prepare_chamfers_along(&k, &[], &[ChamferSize::Distances([1.0; 2])], &[])
                     .map(|_| ()),
-                "the edge, size and face lists",
+                BlendFailure::NoEdgesGiven,
+            ),
+            (
+                session.prepare_per_edge_two_offsets(
+                    &k,
+                    &[dead, dead, dead],
+                    &[1.0],
+                    &[1.0, 2.0],
+                    &[FilletSurfaceGenerator::Linear],
+                ),
+                BlendFailure::PerEdgeListLength { edges: 3, given: 2 },
             ),
         ];
-        for (result, what) in cases {
+        for (result, cause) in cases {
             let e = result.unwrap_err();
-            assert_eq!(
-                e.blend_failure(),
-                Some(&BlendFailure::InvalidValue(what)),
-                "{e:?}"
-            );
+            assert_eq!(e.blend_failure(), Some(&cause), "{e:?}");
+            assert_eq!(e.kind(), crate::error::ErrorKind::InvalidInput, "{e:?}");
             assert_eq!(
                 e.upstream_status(),
+                Some(crate::error::SM_ERR_INVALID_INPUT)
+            );
+        }
+    }
+
+    /// A chamfer size an edge cannot take, and a face for the first size that is not one of
+    /// the edge's, are the caller's input: named causes at the edge, status
+    /// `SM_ERR_INVALID_INPUT` (#19824).
+    #[test]
+    fn a_bad_chamfer_size_or_face_is_named_at_its_edge() {
+        use crate::error::blend::BlendFailure;
+        let mut k = Kernel::default();
+        let mut body = crate::primitive::api_primitives::create_box(
+            &mut k,
+            crate::math::Point3::new(0.0, 0.0, 0.0),
+            1.0,
+            1.0,
+            1.0,
+        )
+        .unwrap();
+        let e = crate::topology::brep::p1::edges(&body, None).unwrap()[0];
+        let of_edge = edge::faces(&body, e, None).unwrap();
+        let other = crate::topology::brep::p1::faces(&body, None)
+            .unwrap()
+            .into_iter()
+            .find(|f| !of_edge.contains(f))
+            .unwrap();
+        let mut session = FilletSession::new(&mut k, &mut body).unwrap();
+        let cases = [
+            (
+                session.prepare_chamfers(&k, &[e], &[ChamferSize::Distances([-1.0, 0.1])]),
+                BlendFailure::ChamferSizeInvalid,
+            ),
+            (
+                session
+                    .prepare_chamfers_along(&k, &[e], &[ChamferSize::Distances([0.1; 2])], &[other])
+                    .map(|_| ()),
+                BlendFailure::ChamferFaceNotOfEdge,
+            ),
+        ];
+        for (result, cause) in cases {
+            let e_err = result.unwrap_err();
+            assert_eq!(e_err.blend_failure(), Some(&cause), "{e_err:?}");
+            assert_eq!(
+                e_err.kind(),
+                crate::error::ErrorKind::InvalidInput,
+                "{e_err:?}"
+            );
+            assert_eq!(e_err.entity(), Some(EntityRef::Edge(e)), "{e_err:?}");
+            assert_eq!(
+                e_err.upstream_status(),
                 Some(crate::error::SM_ERR_INVALID_INPUT)
             );
         }
