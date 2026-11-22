@@ -1263,18 +1263,13 @@ impl<'a> Work<'a> {
         zcap: &mut [f64; 3],
     ) -> Result<()> {
         use crate::topology::edgeuse::p1 as eu1;
-        let up = crate::topology::face::p2::upward_faceuse(b, f)?.ok_or_else(|| {
-            null_defect(
-                "the face has no upward face use, though the kernel makes every face \
-                     with its two face uses",
-            )
-        })?;
-        let mate = b.faceuse(up)?.mate.ok_or_else(|| {
-            null_defect(
-                "the face use has no mate, though the kernel makes a face's two uses \
-                     as each other's mates",
-            )
-        })?;
+        // the caller's body: its links are public, and `enclose_volume` does not validate it
+        let up = crate::topology::face::p2::upward_faceuse(b, f)?
+            .ok_or_else(|| SolidError::mass(OP, MassFailure::FaceWithoutFaceuse))?;
+        let mate = b
+            .faceuse(up)?
+            .mate
+            .ok_or_else(|| SolidError::mass(OP, MassFailure::FaceuseWithoutMate))?;
         let material = |fu| -> Result<bool> {
             match eu1::faceuse_region(b, fu)? {
                 Some(r) => region_material(b, r),
@@ -1327,12 +1322,10 @@ impl<'a> Work<'a> {
                 } else {
                     -1.0
                 };
-                let e = b.edgeuse(eu)?.edge.ok_or_else(|| {
-                    null_defect(
-                        "an edge use of the face's loop has no edge, though the kernel \
-                             makes every edge use of a loop on its edge",
-                    )
-                })?;
+                let e = b
+                    .edgeuse(eu)?
+                    .edge
+                    .ok_or_else(|| SolidError::mass(OP, MassFailure::EdgeuseWithoutEdge))?;
                 lp.push((e, pcurve(k, b, eu)?, dir));
             }
             loops.push(lp);
@@ -2818,6 +2811,28 @@ mod tests {
             ),
             "{r:?}"
         );
+    }
+
+    /// A body whose face use has no mate (the B-rep's links are public, and the enclosure
+    /// does not validate the body) is the caller's: a named invalid-input cause with
+    /// `SM_ERR_NULL_POINTER`, not a defect.
+    #[test]
+    fn a_face_use_without_its_mate_is_refused_by_name() {
+        let mut k = Kernel::default();
+        let mut b =
+            crate::primitive::api_primitives::create_box(&mut k, Point3::ZERO, 1.0, 1.0, 1.0)
+                .unwrap();
+        let f = b.faces().ids().next().unwrap();
+        let fu = b.face(f).unwrap().faceuse.unwrap();
+        b.faceuse_mut(fu).unwrap().mate = None;
+        let err = enclose_volume(&k, &mut b, 1e-6).unwrap_err();
+        assert_eq!(
+            err.mass_failure(),
+            Some(&MassFailure::FaceuseWithoutMate),
+            "{err}"
+        );
+        assert_eq!(err.upstream_status(), Some(SM_ERR_NULL_POINTER));
+        assert!(!err.is_defect(), "{err}");
     }
 
     /// The moments hold the closed forms.
