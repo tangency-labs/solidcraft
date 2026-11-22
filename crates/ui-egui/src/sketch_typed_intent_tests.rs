@@ -405,6 +405,20 @@ fn l_with_arc_ends(tangent_snap: bool) -> Harness {
     h
 }
 
+/// Whether a Coincident constraint holds the (first) arc's centre point on another point. Its
+/// ends are held on the L's line ends by the clicks that placed them, so only the centre tells.
+fn centre_held(h: &Harness) -> bool {
+    let st = h.app.session.world_state().unwrap();
+    let sk = &st.sketch(h.app.session.active_sketch.unwrap()).unwrap().sketch;
+    let Some(centre) = sk.curves.iter().find_map(|c| match c.kind {
+        CurveKind::Arc { c, .. } => Some(c),
+        _ => None,
+    }) else {
+        return false;
+    };
+    sk.constraints.iter().any(|k| matches!(k.kind, ConstraintKind::Coincident { p, q } if p == centre || q == centre))
+}
+
 fn arc_numbers(h: &Harness) -> (f64, f64, Vec2) {
     let st = h.app.session.world_state().unwrap();
     let sk = &st.sketch(h.app.session.active_sketch.unwrap()).unwrap().sketch;
@@ -576,7 +590,7 @@ fn three_point_arc_centre_snaps_to_the_corner_of_the_l() {
     let sk = &st.sketch(h.app.session.active_sketch.unwrap()).unwrap().sketch;
     let arc = sk.curves.iter().position(|c| matches!(c.kind, CurveKind::Arc { .. })).expect("the arc");
     assert!(sk.center(arc).unwrap().len() < 1e-6, "{:?}", sk.center(arc));
-    assert!(constraints(&h).iter().any(|k| matches!(k, ConstraintKind::Coincident { .. })), "the centre is held on the corner");
+    assert!(centre_held(&h), "the centre is held on the corner");
 
     // No point near the arc's centre: the plain arc through the pointer, and no constraint.
     let mut plain = l_with_arc_ends(true);
@@ -587,7 +601,7 @@ fn three_point_arc_centre_snaps_to_the_corner_of_the_l() {
     assert!(hover.0.dist(Vec2::new(40.0, 40.0)) < 0.5, "{:?}", hover.0);
     plain.step(&json!({"click":{"sketch":[40.0, 40.0]}})).unwrap();
     plain.frames(2);
-    assert!(!constraints(&plain).iter().any(|k| matches!(k, ConstraintKind::Coincident { .. })));
+    assert!(!centre_held(&plain), "a plain arc's centre is held on nothing");
 
     // The tool's snaps off: the corner pulls nothing.
     let mut off = l_with_arc_ends(false);
@@ -597,5 +611,5 @@ fn three_point_arc_centre_snaps_to_the_corner_of_the_l() {
     assert!((hover.0.len() - 50.0).abs() > 1e-6 || hover.0.dist(Vec2::new(near_corner[0], near_corner[1])) < 0.5, "{:?}", hover.0);
     off.step(&json!({"click":{"sketch":near_corner}})).unwrap();
     off.frames(2);
-    assert!(!constraints(&off).iter().any(|k| matches!(k, ConstraintKind::Coincident { .. })));
+    assert!(!centre_held(&off), "with the snaps off the centre is held on nothing");
 }
