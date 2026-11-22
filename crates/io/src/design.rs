@@ -1019,6 +1019,8 @@ fn is_container_source(source: &mut FileSource) -> Result<bool> {
 /// again, they are what the file has (serde passes over a field this build does not have, which
 /// a save would then drop).
 fn records_read_whole(text: &[u8]) -> Result<()> {
+    // As records first, which refuses more bodies than an import makes before the text is read
+    // as values.
     let records: solidcraft_kernel::ImportRecords = serde_json::from_slice(text).map_err(invalid)?;
     let original: Value = serde_json::from_slice(text).map_err(invalid)?;
     let again: Value = serde_json::from_str(&solidcraft_kernel::records_text(&records)?).map_err(invalid)?;
@@ -1239,6 +1241,8 @@ fn read_document<R: Read + Seek>(reader: &mut PackageReader<R>) -> Result<Docume
                     if records.is_some() {
                         return Err(invalid("ambiguous embedded import records and blob"));
                     }
+                    // Records of more bodies than an import makes are refused as they are read,
+                    // as other damaged records are.
                     let text = reader.blob(value, "records_blob", "records")?;
                     *records = Some(Arc::new(serde_json::from_slice(text).map_err(invalid)?));
                 }
@@ -2747,6 +2751,75 @@ mod tests {
             let saved: Value = serde_json::from_slice(&parts(&write_design_container(&opened).unwrap())["document.json"]).unwrap();
             let import = saved["features"].as_array().unwrap().iter().find(|f| f.get("records").is_some_and(|r| !r.is_null())).unwrap();
             assert_eq!(import["records"], newer, "the inline records are kept as the file has them");
+        }
+    }
+
+    /// Import records hold no more bodies than an import makes. A records part of millions of
+    /// tiny bodies is small once compressed but took tens of gigabytes to read, before the
+    /// import's own check of its bodies ran. One body past the bound is refused as the records
+    /// are read, so the design is refused with the reason, as other damaged records are, and a
+    /// newer build's design keeps that import as the file has it. Records at the bound read as
+    /// they always did.
+    #[test]
+    fn import_records_of_more_bodies_than_an_import_makes_are_refused_as_they_are_read() {
+        let max = solidcraft_kernel::IMPORT_MAX_BODIES;
+        let tiny = solidcraft_kernel::RecordBody {
+            name: String::new(),
+            path: Vec::new(),
+            instance: None,
+            color: None,
+            paint: None,
+            hidden: false,
+            placement: None,
+            brep: None,
+            face_origin: Vec::new(),
+            mesh: None,
+            copy_of: None,
+            sheet: false,
+        };
+        // The records of `count` tiny bodies and the parts of a design whose import keeps them,
+        // with the name and text of its records part.
+        let design = |count: usize, newer: bool| {
+            let records =
+                solidcraft_kernel::ImportRecords { bodies: vec![tiny.clone(); count], tree: Vec::new(), warnings: Vec::new(), system: String::new() };
+            let records = Arc::new(records);
+            let mut doc = Document::new("Records");
+            let kind = FeatureKind::Import {
+                file: "many.FCStd".into(),
+                step: "".into(),
+                components: Vec::new(),
+                skip: Vec::new(),
+                records: Some(records.clone()),
+            };
+            doc.add_feature(kind, Some("Many bodies")).unwrap();
+            let mut entries = parts(&write_design_container(&doc).unwrap());
+            if newer {
+                entries.insert("container.json".into(), br#"{"format":"solidcraft-container/2"}"#.to_vec());
+            }
+            let (name, text) = entries.iter().find(|(name, _)| name.ends_with(".records")).map(|(n, t)| (n.clone(), t.clone())).unwrap();
+            assert!(text.starts_with(br#"{"bodies":[{"name":""},{"name":""},"#), "each body is a dozen bytes");
+            (records, entries, name, text)
+        };
+        for newer in [false, true] {
+            let (records, entries, _, text) = design(max, newer);
+            assert!(records_read_whole(&text).is_ok());
+            let opened = crate::read_design(&package(&entries)).unwrap();
+            let Some(FeatureKind::Import { records: Some(read), .. }) = opened.features.first().map(|f| &f.kind) else { panic!("no records") };
+            assert_eq!(**read, *records, "records at the bound read as written");
+
+            let (_, entries, name, text) = design(max + 1, newer);
+            let why = records_read_whole(&text).unwrap_err().to_string();
+            assert!(why.contains(&format!("more than {max} bodies")), "{why}");
+            if newer {
+                let opened = crate::read_design(&package(&entries)).unwrap();
+                assert!(matches!(opened.features[0].kind, FeatureKind::NewerFileFeature { .. }));
+                let said = &opened.newer_file.as_ref().unwrap().not_understood;
+                assert!(said.iter().any(|what| what.contains("Many bodies") && what.contains(&format!("more than {max} bodies"))), "{said:?}");
+                assert_eq!(parts(&write_design_container(&opened).unwrap())[&name], text, "the records are kept as the file has them");
+            } else {
+                let why = crate::read_design(&package(&entries)).unwrap_err().to_string();
+                assert!(why.contains(&format!("more than {max} bodies")), "{why}");
+            }
         }
     }
 
