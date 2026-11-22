@@ -1357,7 +1357,7 @@ mod tests {
     }
 
     #[test]
-    fn an_offset_of_a_smooth_closed_chain_keeps_its_seam_tangent() {
+    fn an_offset_of_a_smooth_closed_chain_keeps_its_periodic_fit() {
         let (mut sk, order) = chain_of(&[
             [(30.0, 0.0), (30.0, 8.0), (14.0, 16.0), (0.0, 16.0)],
             [(0.0, 16.0), (-12.0, 16.0), (-30.0, 10.0), (-30.0, 0.0)],
@@ -1367,13 +1367,13 @@ mod tests {
         let outputs = sk.offset_freeform_chain(&order, -3.0).unwrap();
         let &[rim] = outputs.as_slice() else { panic!("one smooth rim") };
         sk.record_freeform_chain_offset(&order, &outputs, -3.0).unwrap();
-        let assert_seam = |sk: &Sketch| {
-            let pieces = sk.exact_segs(rim).unwrap();
-            let start = pieces.first().unwrap().derivatives(0.0, 1).unwrap()[0].normalized().unwrap();
-            let end = pieces.last().unwrap().derivatives(1.0, 1).unwrap()[0].normalized().unwrap();
-            assert!(start.dist(end) < 1e-9, "tangents at the seam differ: {start:?}, {end:?}");
+        let assert_periodic = |sk: &Sketch| {
+            let CurveKind::Spline { periodic, pts, .. } = &sk.curves[rim].kind else { panic!("spline rim") };
+            assert!(*periodic);
+            assert_eq!(pts.first(), pts.last());
+            assert!(!pts[1..pts.len() - 1].contains(&pts[0]), "the seam point belongs only at the ends");
         };
-        assert_seam(&sk);
+        assert_periodic(&sk);
 
         // Rebuild an older nonperiodic output with fewer interior nodes.
         let CurveKind::Spline { periodic, pts, .. } = &mut sk.curves[rim].kind else { panic!("spline rim") };
@@ -1381,7 +1381,7 @@ mod tests {
         pts.drain(1..3);
         sk.refresh_freeform_chain_offsets().unwrap();
         sk.validate_periodic_splines().unwrap();
-        assert_seam(&sk);
+        assert_periodic(&sk);
     }
 
     /// An outline like an imported SVG: real corners both ways, a joint with a tiny kink,
