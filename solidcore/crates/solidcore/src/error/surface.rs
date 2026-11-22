@@ -14,7 +14,7 @@
 //! | [`SurfaceFailure::OutsideDomain`]  | `SM_ERR_OUTSIDE_OF_DOMAIN`     |
 //! | [`SurfaceFailure::OffSurface`]     | `SM_ERR_NOT_WITHIN_TOLERANCE`  |
 //! | [`SurfaceFailure::Defect`]         | `SM_ERR` (or the site's, through `with_status`) |
-//! | the named causes of the volume surfaces and the implicit checks | `SM_ERR` |
+//! | the named causes of the volume surfaces and the implicit checks | `SM_ERR`, except [`SurfaceFailure::NoNurb`]: `SM_ERR_NULL_POINTER` (a site that reported `SM_ERR` keeps it through `with_status`) |
 //!
 //! [`SurfaceFailure::Defect`] is a failure reviewed at its site as the kernel's fault, with its
 //! reason: a defect ([`ErrorKind::StageFailed`], class 127). The phrase causes are sites
@@ -92,8 +92,9 @@ pub enum SurfaceFailure {
         /// The type read.
         volume_type: i64,
     },
-    /// The caller's B-spline surface has no NURB data. [`ErrorKind::InvalidInput`].
-    SurfaceWithoutNurb,
+    /// The surface given has no NURB form, which the routine reads.
+    /// [`ErrorKind::InvalidInput`].
+    NoNurb,
     /// The caller's B-spline curve has no NURB data. [`ErrorKind::InvalidInput`].
     CurveWithoutNurb,
     /// The caller's B-spline curve has no control points. [`ErrorKind::InvalidInput`].
@@ -171,7 +172,7 @@ impl SurfaceFailure {
     /// The status the C++ reports for the failure (a comparison detail).
     pub(crate) const fn comparison_status(&self) -> i32 {
         match self {
-            Self::Missing(_) => SM_ERR_NULL_POINTER,
+            Self::Missing(_) | Self::NoNurb => SM_ERR_NULL_POINTER,
             Self::InvalidValue(_) => SM_ERR_INVALID_INPUT,
             Self::OutsideDomain(_) => SM_ERR_OUTSIDE_OF_DOMAIN,
             Self::OffSurface(_) => SM_ERR_NOT_WITHIN_TOLERANCE,
@@ -193,7 +194,7 @@ impl SurfaceFailure {
             | Self::BaseSurfaceNotOwned
             | Self::DerivativeOrderTooHigh { .. }
             | Self::UnknownVolumeType { .. }
-            | Self::SurfaceWithoutNurb
+            | Self::NoNurb
             | Self::CurveWithoutNurb
             | Self::CurveWithoutControlPoints => ErrorKind::InvalidInput,
             Self::BoxOutsideBendHalfSpace { .. }
@@ -237,7 +238,7 @@ impl core::fmt::Display for SurfaceFailure {
             Self::UnknownVolumeType { volume_type } => {
                 write!(f, "the volume type {volume_type} is unknown")
             }
-            Self::SurfaceWithoutNurb => f.write_str("the B-spline surface has no NURB"),
+            Self::NoNurb => f.write_str("the surface has no NURB form"),
             Self::CurveWithoutNurb => f.write_str("the B-spline curve has no NURB"),
             Self::CurveWithoutControlPoints => f.write_str("the curve has no control points"),
             Self::BoxOutsideBendHalfSpace { u_max, limit } => write!(

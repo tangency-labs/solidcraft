@@ -10,7 +10,7 @@
 
 use crate::blend::fillet_section::interval::Ivl;
 use crate::error::surface::SurfaceFailure;
-use crate::error::{Result, SolidError};
+use crate::error::{Failure, Result, SolidError, SM_ERR};
 use crate::geom::axis2_placement::Axis2Placement;
 use crate::geom::extent2d::Extent2d;
 use crate::kernel::Kernel;
@@ -183,9 +183,11 @@ impl BPoly {
 ///
 /// `SM_ERR` without NURB data; those of the Bézier decomposition.
 pub fn lies_on(form: &BSplineSurface, a: &Implicit) -> Result<bool> {
-    let nurb = form
-        .gw_nurb()
-        .ok_or_else(|| SolidError::surface(OP, SurfaceFailure::SurfaceWithoutNurb))?;
+    let nurb = form.gw_nurb().ok_or_else(|| {
+        Failure::new(OP, SurfaceFailure::NoNurb)
+            .with_status(SM_ERR)
+            .into_error()
+    })?;
     for row in decompose_to_bez(nurb)? {
         for patch in row {
             let (p, q) = patch.degrees();
@@ -415,9 +417,11 @@ pub fn distance_bound(form: &BSplineSurface, a: &Implicit, delta: [f64; 2]) -> R
         [lo, hi] if lo <= hi => (-lo).max(0.0),
         _ => return Ok(None),
     };
-    let nurb = form
-        .gw_nurb()
-        .ok_or_else(|| SolidError::surface(OP, SurfaceFailure::SurfaceWithoutNurb))?;
+    let nurb = form.gw_nurb().ok_or_else(|| {
+        Failure::new(OP, SurfaceFailure::NoNurb)
+            .with_status(SM_ERR)
+            .into_error()
+    })?;
     let mut bound = 0.0_f64;
     for row in decompose_to_bez(nurb)? {
         for patch in row {
@@ -590,9 +594,11 @@ pub(crate) fn off_surface_bound(
         }
         Implicit::Sphere { .. } | Implicit::Torus { .. } => return Ok(None),
     };
-    let nurb = form
-        .gw_nurb()
-        .ok_or_else(|| SolidError::surface(OP, SurfaceFailure::SurfaceWithoutNurb))?;
+    let nurb = form.gw_nurb().ok_or_else(|| {
+        Failure::new(OP, SurfaceFailure::NoNurb)
+            .with_status(SM_ERR)
+            .into_error()
+    })?;
     let origin = match *a {
         Implicit::Plane { origin, .. } | Implicit::Cone { origin, .. } => origin,
         Implicit::Sphere { centre, .. } | Implicit::Torus { centre, .. } => centre,
@@ -1362,9 +1368,11 @@ fn lies_on_canal(
     map: &LeaderMap,
     radius: f64,
 ) -> Result<bool> {
-    let nurb = form
-        .gw_nurb()
-        .ok_or_else(|| SolidError::surface(OP_EXACT, SurfaceFailure::SurfaceWithoutNurb))?;
+    let nurb = form.gw_nurb().ok_or_else(|| {
+        Failure::new(OP_EXACT, SurfaceFailure::NoNurb)
+            .with_status(SM_ERR)
+            .into_error()
+    })?;
     let (segs, o) = curve_segments(spine)?;
     // `curve_segments` above has returned `CurveWithoutNurb` for a spine without its NURB
     let spine_breaks = spine
