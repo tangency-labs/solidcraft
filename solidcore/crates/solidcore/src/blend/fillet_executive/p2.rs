@@ -1502,17 +1502,32 @@ impl<O: ClassObject + SolutionObject + Ord> FilletExecutive<O> {
             // Traverse forwards.
             if let Some(edge) = start_edge {
                 // fork 873c7c9 (SolidCraft change): GetFilletSolverOfEdge returns NULL
-                // when GetEdgeuses fails
+                // when GetEdgeuses fails; the failed lookup is kept as the cause
+                let mut lookup_failed = None;
                 fs = self
                     .fillet_solver_of_edge_with(edge, |e| match access.smooth_edge_edgeuses(e) {
-                        Err(err) if !err.is_unported_or_cancelled() => Ok(Vec::new()),
+                        Err(err) if !err.is_unported_or_cancelled() => {
+                            lookup_failed = Some(err);
+                            Ok(Vec::new())
+                        }
                         r => r,
                     })?
-                    .ok_or_else(|| {
-                        null_defect(
+                    .ok_or_else(|| match lookup_failed.take() {
+                        Some(cause) => Failure::new(
+                            OP,
+                            BlendFailure::Defect {
+                                why: "the edge uses of a law sequence's first edge could not \
+                                      be read: it is a filleted edge of the target, whose edge \
+                                      uses were read when its solver was set up",
+                            },
+                        )
+                        .with_status(SM_ERR_NULL_POINTER)
+                        .caused_by(cause)
+                        .into_error(),
+                        None => null_defect(
                             "a law sequence's first edge has no solver: every edge of a law \
                              sequence is a filleted edge, which has a solver",
-                        )
+                        ),
                     })?;
             }
 
@@ -2230,6 +2245,110 @@ impl DirectTemporaryRadiusChange {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+    struct H(u32);
+    impl ClassObject for H {
+        fn class_kind(&self) -> crate::intersect::point_class::ClassObjectKind {
+            crate::intersect::point_class::ClassObjectKind::Other
+        }
+    }
+    impl SolutionObject for H {
+        fn kind(&self) -> crate::geom::solution_array::ObjectKind {
+            crate::geom::solution_array::ObjectKind::Other
+        }
+    }
+
+    /// A smooth-sequence adapter whose edge-use lookup fails; the walk reaches nothing else.
+    struct FailingLookup;
+    impl SmoothSequenceAccess<H> for FailingLookup {
+        fn smooth_edge_edgeuses(&self, _: H) -> Result<Vec<H>> {
+            Err(SolidError::invalid_input(
+                "test::edgeuses",
+                "the lookup failed",
+            ))
+        }
+        fn smooth_solver_edge(&self, _: H) -> Result<H> {
+            Ok(H(100))
+        }
+        fn smooth_solver_corner(
+            &self,
+            _: &FilletExecutive<H>,
+            _: H,
+            _: usize,
+        ) -> Result<Option<H>> {
+            unreachable!("the walk fails before reading a corner")
+        }
+        fn smooth_corner_tangent_solver(
+            &self,
+            _: &Kernel,
+            _: &FilletExecutive<H>,
+            _: H,
+            _: H,
+        ) -> Result<Option<H>> {
+            unreachable!()
+        }
+        fn smooth_solver_edge0_id(&self, _: H) -> Result<crate::topology::EdgeId> {
+            unreachable!()
+        }
+        fn smooth_target_brep(&self) -> Result<&crate::topology::Brep> {
+            unreachable!()
+        }
+        fn smooth_with_target_mut<T>(
+            &mut self,
+            _: &[crate::topology::EdgeId],
+            _: impl FnOnce(&mut crate::topology::Brep) -> Result<T>,
+        ) -> Result<T> {
+            unreachable!()
+        }
+        fn smooth_set_edge_curve(
+            &mut self,
+            _: &mut Kernel,
+            _: crate::topology::EdgeId,
+            _: Curve,
+        ) -> Result<()> {
+            unreachable!()
+        }
+        fn smooth_solver_original_curve(&self, _: H) -> Result<Option<&Curve>> {
+            unreachable!()
+        }
+        fn smooth_set_solver_original_curve(&mut self, _: H, _: Curve) -> Result<()> {
+            unreachable!()
+        }
+        fn smooth_set_solver_law_interval(&mut self, _: H, _: Extent1d) -> Result<()> {
+            unreachable!()
+        }
+    }
+
+    /// #19823 review: where the edge-use lookup of a law sequence's first edge fails, the
+    /// walk still fails with `SM_ERR_NULL_POINTER` (the fork's NULL solver), now as a
+    /// `Defect` that keeps the failed lookup as its cause instead of dropping it.
+    #[test]
+    fn a_failed_edge_use_lookup_is_kept_as_the_cause() {
+        let k = Kernel::default();
+        let mut executive = FilletExecutive::new(
+            Some(H(1)),
+            crate::blend::fillet_executive::p1::ExecutiveObjects {
+                executive: H(9),
+                pseudo_brep: H(10),
+                edge_attribute: H(11),
+            },
+        );
+        executive.law_sequence_edges = vec![vec![H(100)]];
+        let mut solvers = vec![Some(H(5)), Some(H(6))];
+        let mut sequence = Vec::new();
+        let error = executive
+            .collect_tangent_edge_sequence_narrow(&k, &FailingLookup, &mut solvers, &mut sequence)
+            .unwrap_err();
+        assert!(
+            matches!(error.blend_failure(), Some(BlendFailure::Defect { .. })),
+            "{error:?}"
+        );
+        assert_eq!(error.sm_status(), Some(SM_ERR_NULL_POINTER), "{error:?}");
+        assert_eq!(error.operation(), OP);
+        let cause = error.cause().expect("the failed lookup is kept");
+        assert_eq!(cause.operation(), "test::edgeuses", "{cause:?}");
+    }
 
     /// #13790: `SetFilletParameters` refuses a G^n section of an order outside 2 to 4 with
     /// a typed blend failure that keeps the `SM_ERR_INVALID_INPUT` status of the bare
