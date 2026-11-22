@@ -3732,7 +3732,7 @@ mod tests {
     fn a_certificate_past_its_budget_passes_the_solver_s_status_filters() {
         let e = SolidError::blend(
             "t",
-            crate::error::blend::BlendFailure::NotCertified {
+            BlendFailure::NotCertified {
                 halvings: 1,
                 stations: 2,
             },
@@ -3743,9 +3743,7 @@ mod tests {
         let flat = as_sm_err(stage.clone(), "op");
         assert_eq!(
             flat.blend_failure(),
-            Some(&crate::error::blend::BlendFailure::Solver(
-                SolverFailure::JacobianNotLoaded
-            ))
+            Some(&BlendFailure::Solver(SolverFailure::JacobianNotLoaded))
         );
         assert_eq!(flat.upstream_status(), Some(crate::error::SM_ERR));
         assert_eq!(flat.cause(), Some(&stage));
@@ -3975,7 +3973,7 @@ mod tests {
         assert!(is_sm_err(&r), "{r:?}");
         assert_eq!(
             r.unwrap_err().blend_failure(),
-            Some(&crate::error::blend::BlendFailure::Solver(
+            Some(&BlendFailure::Solver(
                 SolverFailure::ClippedIsoMissesSurface { radius: 1.0 }
             ))
         );
@@ -3997,7 +3995,7 @@ mod tests {
         assert!(is_sm_err(&r), "{r:?}");
         assert_eq!(
             r.as_ref().unwrap_err().blend_failure(),
-            Some(&crate::error::blend::BlendFailure::Solver(
+            Some(&BlendFailure::Solver(
                 SolverFailure::ClippedIsoMissesSurface {
                     radius: 1.0 + ZONE_TOL_3D
                 }
