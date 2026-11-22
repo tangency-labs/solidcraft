@@ -54,7 +54,7 @@ pub(super) fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
                     });
                     ui.add_space(t.space_6);
                     let sample = format_length(
-                        12.5 * unit_scale(&app.preferences.default_units).0,
+                        12.5 / unit_scale(&app.preferences.default_units).0,
                         &app.preferences.default_units,
                         app.preferences.length_decimals,
                     );
