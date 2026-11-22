@@ -223,8 +223,7 @@ fn recover_positional_edge(b: &ModelBody, name: &str, near: Vec3) -> Option<Edge
     let mut on = b.body.record().edges.iter().enumerate().filter(|(i, e)| {
         let [p, q] = e.uses.as_slice() else { return false };
         let (p, q) = (p.face as usize, q.face as usize);
-        ((p, q) == (fa, fb) || (q, p) == (fa, fb))
-            && solidcraft_kernel::edge_distance(&b.body, *i, near).ok().flatten().is_some_and(|d| d <= reach)
+        ((p, q) == (fa, fb) || (q, p) == (fa, fb)) && solidcraft_kernel::edge_distance(&b.body, *i, near).ok().flatten().is_some_and(|d| d <= reach)
     });
     let edge = on.next().filter(|_| on.next().is_none())?.0;
     Some(EdgeHit { edge, point: near, verified: false, on_point: true })
@@ -236,7 +235,8 @@ fn recover_positional_face(st: &ModelState, name: &str, p: Vec3) -> Option<FaceH
     if !p.is_finite() {
         return None;
     }
-    let (body, b, face) = st.bodies.iter().enumerate().filter(|(_, b)| !b.body.is_mesh()).find_map(|(i, b)| Some((i, b, positional_face(b, name)?)))?;
+    let (body, b, face) =
+        st.bodies.iter().enumerate().filter(|(_, b)| !b.body.is_mesh()).find_map(|(i, b)| Some((i, b, positional_face(b, name)?)))?;
     let (_, point) = on_face(b, face, p)?;
     Some(FaceHit { body, face, point, verified: false, on_point: true })
 }
@@ -1153,12 +1153,10 @@ fn locate_face_with(st: &ModelState, name: &str, p: Vec3, round: bool) -> Option
     naming::warm_names(st.bodies.iter().filter(|b| !b.body.is_mesh()));
     match locate_in(st.bodies.iter().enumerate().filter(|(_, b)| !b.body.is_mesh()), name, p) {
         Ok(hit) => Some(hit),
-        Err(Miss::Gone) => {
-            recover_numbered_face_in(st, name, p, round)
-                .or_else(|| replaced_side_line(st, name, p))
-                .or_else(|| numbered_sheet_face(st, name, p))
-                .or_else(|| recover_positional_face(st, name, p))
-        }
+        Err(Miss::Gone) => recover_numbered_face_in(st, name, p, round)
+            .or_else(|| replaced_side_line(st, name, p))
+            .or_else(|| numbered_sheet_face(st, name, p))
+            .or_else(|| recover_positional_face(st, name, p)),
         Err(Miss::Several) => None,
     }
 }
