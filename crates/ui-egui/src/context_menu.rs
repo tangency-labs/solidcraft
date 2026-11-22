@@ -181,6 +181,22 @@ pub(crate) fn act(id: &str, label: &str, icon: &str) -> Item {
     Item::action(id, label, icon)
 }
 
+/// What the browser did with a right-click (#20011).
+///
+/// A browser may take a right-click for itself: Firefox takes a Shift+right-click, opens its own
+/// menu and never offers the page its context menu event, which no page can stop. The browser
+/// offers the event when the click is the page's, as Chrome, Edge and Safari always do.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum BrowserMenu {
+    /// The browser offered the page its context menu event: the click is the page's, and the app
+    /// may open its own menu.
+    #[default]
+    Offered,
+    /// The browser took the click and opened its own menu: the app opens no menu of its own
+    /// under the browser's.
+    Taken,
+}
+
 /// Menu state kept between frames. The anchor is `app.viewport.context_menu`.
 #[derive(Default)]
 pub struct MenuState {
@@ -235,6 +251,9 @@ pub struct MenuState {
     opener: Option<Rect>,
     /// The menu was on screen in an earlier frame. Until then a press is the opening click's own.
     shown: bool,
+    /// What the browser did with the last right-click (#20011): `Taken` when the browser opened
+    /// its own menu, so the app opens none of its own under it.
+    pub browser_menu: BrowserMenu,
     /// Clicks and selections the quick menu follows.
     pub(crate) quick: crate::quick_menu::Watch,
 }
@@ -2662,11 +2681,24 @@ fn in_selection(app: &SolveApp, sel: &Sel) -> bool {
     context_target_selected(&app.session.selection, sel) || pick_body(sel).is_some_and(|body| crate::selection::holds_body(&app.session, body))
 }
 
+/// The browser took the right-click and opened its own menu: the app opens no menu of its own
+/// under the browser's, and tells the user what to do instead (#20011).
+fn browser_took_the_click(app: &mut SolveApp) -> bool {
+    if app.menu.browser_menu != BrowserMenu::Taken {
+        return false;
+    }
+    app.set_status(app.tr("ui.context_menu_browser_took").to_owned(), false);
+    true
+}
+
 /// Open the viewport menu at a screen position. A right-click on something not selected
 /// selects it first, so the menu is about what is under the cursor; a face or edge already in a
 /// multi-selection keeps the whole selection (#3733), as does one of a selected body (#5849). `held`: the keys held at that click.
 /// On the view gizmo it opens the gizmo's own menu and leaves the selection alone.
 pub fn open(app: &mut SolveApp, at: Pos2, held: crate::tool_modifiers::Held) {
+    if browser_took_the_click(app) {
+        return;
+    }
     if crate::drawing_workspace::active(app) {
         let under = crate::drawing_sheet_page::hovered(app);
         return open_on_sheet(app, at, held, under);
@@ -2723,6 +2755,9 @@ fn select_under(app: &mut SolveApp, at: Pos2, before: Vec<Sel>, sel: Sel) {
 /// the object whose row in the browser was right-clicked, selected first unless it is already part
 /// of the selection. Empty paper keeps the selection, as empty space does in a sketch.
 pub(crate) fn open_on_sheet(app: &mut SolveApp, at: Pos2, held: crate::tool_modifiers::Held, under: Option<Sel>) {
+    if browser_took_the_click(app) {
+        return;
+    }
     app.menu.opened = Some((at, held));
     app.menu.picked = None;
     app.menu.over_geometry = false;
@@ -2741,6 +2776,9 @@ pub(crate) fn open_on_sheet(app: &mut SolveApp, at: Pos2, held: crate::tool_modi
 
 /// Open a menu for a target (the radial ring only for the viewport).
 pub fn open_for(app: &mut SolveApp, at: Pos2, target: Target) {
+    if browser_took_the_click(app) {
+        return;
+    }
     app.menu.key_row = None;
     app.menu.submenu.clear();
     app.menu.submenu_key = None;
@@ -2755,6 +2793,9 @@ pub fn open_for(app: &mut SolveApp, at: Pos2, target: Target) {
 
 /// A button's menu: a click opens it, and a click on the same button while it is open closes it.
 pub fn toggle_for(app: &mut SolveApp, opener: Rect, at: Pos2, target: Target) {
+    if browser_took_the_click(app) {
+        return;
+    }
     if open_from(app, opener, &target) {
         close(app);
     } else {
@@ -4075,6 +4116,26 @@ mod tests {
         assert_eq!(describe(&h.app)["radial"].as_array().unwrap().len(), DIRS);
         open_for(&mut h.app, pos2(point[0] as f32, point[1] as f32), Target::Origin);
         assert!(!h.app.menu.radial, "browser menus remain lists when radial menus are enabled");
+    }
+
+    /// #20011: in the browser, Firefox takes a Shift+right-click for itself: it opens its own
+    /// menu and never offers the page its context menu event, which no page can stop. SolidCraft
+    /// must open no menu of its own under the browser's, and the user is told what to do.
+    #[test]
+    fn a_right_click_the_browser_took_opens_no_menu() {
+        let mut h = crate::scenario::Harness::new();
+        h.app.home.open = false;
+        h.settle();
+        let point = h.at(&json!({"world":[0,0,0]})).unwrap();
+        h.step(&json!({"click":point,"button":"right"})).unwrap();
+        assert!(h.app.viewport.context_menu.is_some(), "an ordinary right-click opens the menu");
+        close(&mut h.app);
+        // The browser took this click for itself and opened its own menu.
+        h.app.menu.browser_menu = BrowserMenu::Taken;
+        h.step(&json!({"click":point,"button":"right"})).unwrap();
+        assert!(h.app.viewport.context_menu.is_none(), "the browser's menu is open: ours must not open under it");
+        let status = h.app.status.as_ref().map(|(text, _, _)| text.clone()).unwrap_or_default();
+        assert!(status.contains("browser"), "the user is told why: {status:?}");
     }
 
     #[test]
