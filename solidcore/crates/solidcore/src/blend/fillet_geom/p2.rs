@@ -667,6 +667,7 @@ fn missing_set_up(op: &'static str, part: FilletSetUp) -> SolidError {
 
 /// The edge use `eu` of the target body has no edge (`NER` of `GetEdge()`):
 /// [`BlendFailure::EdgeUseWithoutEdge`] at the edge use, status `SM_ERR_NULL_POINTER`.
+#[track_caller]
 fn edge_use_without_edge(op: &'static str, eu: EdgeuseId) -> SolidError {
     SolidError::blend_at(op, BlendFailure::EdgeUseWithoutEdge, EntityRef::Edgeuse(eu))
 }
@@ -4696,6 +4697,28 @@ mod tests {
     use crate::geom::axis2_placement::Axis2Placement;
     use crate::nurbs::b_spline_curve::BSplineCurve;
     use crate::surface::cone::Cone;
+
+    #[test]
+    fn an_edge_use_without_an_edge_records_the_lookup_that_failed() {
+        let eu = EdgeuseId::from_index(3);
+        let first = edge_use_without_edge("blend::fillet_geom::p2::a", eu);
+        let first_line = line!() - 1;
+        let second = edge_use_without_edge("blend::fillet_geom::p2::a", eu);
+        let second_line = line!() - 1;
+        for (e, line) in [(&first, first_line), (&second, second_line)] {
+            let origin = e.failure().unwrap().origin();
+            assert_eq!(origin.line(), line);
+            assert!(
+                std::path::Path::new(origin.file()).ends_with("fillet_geom/p2.rs"),
+                "{}",
+                origin.file()
+            );
+            assert_eq!(e.entity(), Some(EntityRef::Edgeuse(eu)));
+            assert_eq!(e.sm_status(), Some(SM_ERR_NULL_POINTER));
+        }
+        // where a failure was built is not part of what failed
+        assert_eq!(first, second);
+    }
 
     /// The cylinder of radius 10 about z, height 40, its seam at `seam_deg` degrees about z.
     fn seamed_cylinder(k: &Kernel, seam_deg: f64) -> Surface {
