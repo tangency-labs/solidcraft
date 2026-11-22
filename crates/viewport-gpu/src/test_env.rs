@@ -96,6 +96,13 @@ fn shared(sharers: Sharers, policy: Policy) -> crate::Result<std::sync::Arc<Open
         }
     };
     drop(shared);
+    // The last test thread to end closes the device from `HELD`'s destructor, and closing it
+    // takes wgpu's snatch lock. In a debug build that lock records itself in a thread-local of
+    // wgpu's, and a thread's thread-locals are destroyed in the reverse order of their first use
+    // (glibc). A thread that touched `HELD` before wgpu's thread-local destroyed wgpu's first, and
+    // the process aborted as the thread ended ("thread local panicked on drop", #10232). A poll
+    // takes the snatch lock, so wgpu's thread-local is in use before `HELD` and outlives it.
+    let _ = opened.1.poll(wgpu::PollType::Poll);
     HELD.with(|held| {
         let mut held = held.borrow_mut();
         if !held.iter().any(|mine| Arc::ptr_eq(mine, &opened)) {
