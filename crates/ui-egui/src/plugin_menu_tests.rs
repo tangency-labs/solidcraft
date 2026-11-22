@@ -595,6 +595,7 @@ fn font_dialog_filters_picks_with_keyboard_and_click_and_renders() {
     assert!(small.contains_rect(crate::scenario::rect_of("dialog:control:Font *").unwrap()), "the font control fits a small window");
 }
 
+#[test]
 fn shared_field_definitions_are_drawn_like_inline_fields() {
     let manifest = json!({"id":"sample","name":"Sample","version":"1","capabilities":["commands@0.1"],
         "$defs":{"angle":{"type":"string","title":"Angle","enum":["14.5","20","25"],"default":"20"}},
