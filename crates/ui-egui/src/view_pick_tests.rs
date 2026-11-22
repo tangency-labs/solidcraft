@@ -307,6 +307,29 @@ fn the_mouse_picker_stops_at_a_section_cap() {
     }
 }
 
+/// A closed profile lying on the section's own plane (#20638) stays pickable for a feature, and is
+/// drawn where it is: the section's cut face does not take the pick, and the profile's fill is
+/// not lifted off the plane, where the section would clip it or the cut face hide it.
+#[test]
+fn a_profile_on_the_section_plane_stays_pickable() {
+    use crate::viewport::{Hit, lies_on_section, pick, projection};
+    let mut h = top_view();
+    h.app.run("sketch.create", json!({"plane": "XY", "offset": 5, "name": "Middle"})).unwrap();
+    h.app.run("sketch.rectangle.two_point", json!({"p0": [2, 2], "p1": [8, 8]})).unwrap();
+    h.app.run("sketch.finish", json!({})).unwrap();
+    h.call("engine.execute", json!({"command": "inspect.section", "params": {"plane": {"origin": [0, 0, 5], "normal": [0, 0, 1]}}}));
+    h.app.start("solid.extrude");
+    h.settle();
+    let rect = egui::Rect::from_min_size(egui::pos2(0.0, 0.0), egui::vec2(600.0, 600.0));
+    let proj = projection(&h.app, rect);
+    let inside = proj.to_screen(Vec3::new(5.0, 5.0, 5.0)).unwrap();
+    assert!(matches!(pick(&h.app, &proj, inside).first(), Some(Hit::Profile { .. })), "{:?}", pick(&h.app, &proj, inside));
+    assert!(lies_on_section(&h.app, Vec3::new(0.0, 0.0, 5.0), Vec3::new(0.0, 0.0, 1.0)));
+    assert!(lies_on_section(&h.app, Vec3::new(3.0, 4.0, 5.0), Vec3::new(0.0, 0.0, -1.0)));
+    assert!(!lies_on_section(&h.app, Vec3::new(0.0, 0.0, 6.0), Vec3::new(0.0, 0.0, 1.0)));
+    assert!(!lies_on_section(&h.app, Vec3::new(0.0, 0.0, 5.0), Vec3::new(1.0, 0.0, 0.0)));
+}
+
 /// With a Section Analysis on, `view.pick` must not answer with edges or vertices in the
 /// half the section removes: the mouse picker has skipped them since #6722, and an agent
 /// must not get an answer the user cannot see (#10704).

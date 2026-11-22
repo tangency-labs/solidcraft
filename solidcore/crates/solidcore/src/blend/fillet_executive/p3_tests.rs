@@ -373,6 +373,10 @@ impl ExecutiveAccess<Handle> for Access {
             max_edge_gap: 0.0,
         })
     }
+    // the fake has no blend geometry: no face is taken whole (WR-320)
+    fn solvers_faces_outlast(&mut self, _: &mut Kernel, _: &[Handle]) -> Result<bool> {
+        Ok(true)
+    }
     fn piecewise_merge(&mut self, k: &mut Kernel, _: &mut FilletExecutive<Handle>) -> Result<()> {
         assert!(k.context.doing_boolean());
         assert!(self.editing);
@@ -1363,7 +1367,7 @@ fn failing_at(stage: &'static str, error: SolidError) -> (FilletExecutive<Handle
 fn stage_errors() -> [SolidError; 5] {
     use crate::error::blend::BlendFailure;
     let over = |cause: SolidError| {
-        crate::error::Failure::new("test::stage", BlendFailure::Failed("the stage failed"))
+        Failure::new("test::stage", BlendFailure::Failed("the stage failed"))
             .caused_by(cause)
             .into_error()
     };
@@ -1387,7 +1391,7 @@ fn assert_failure_keeps(e: &SolidError, cause: &SolidError) {
     let bare = failure();
     assert_eq!(e.operation(), OP, "{e:?}");
     assert_eq!(e.blend_failure(), bare.blend_failure(), "{e:?}");
-    assert_eq!(e.sm_status(), Some(crate::error::SM_ERR), "{e:?}");
+    assert_eq!(e.sm_status(), Some(SM_ERR), "{e:?}");
     assert_eq!(e.upstream_status(), bare.upstream_status(), "{e:?}");
     assert_eq!(e.kind(), bare.kind(), "{e:?}");
     assert_eq!(e.entity(), None, "{e:?}");

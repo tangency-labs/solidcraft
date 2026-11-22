@@ -161,7 +161,7 @@ pub(super) fn reparent(s: &mut Session, p: &Value) -> Result<Value> {
             return Err(bad(cmd, format!("moving {} would break {}: {error}", o.name, f.name)));
         }
     }
-    s.accept_computed(scratch);
+    s.accept_computed(scratch)?;
     follow_visibility(s, &old_path, &new_path);
     Ok(json!({"occurrence": id, "parent": to, "path": new_path, "transform": transform}))
 }

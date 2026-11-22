@@ -423,6 +423,14 @@ fn go_to(s: &mut Session, snap: Snapshot, cmd: &str) -> Result<Snapshot> {
         // A sheet sketch being edited stays as it is: the model's steps never end or start one.
         None => Snapshot { doc: drawings_from(snap.doc, &s.doc), active_sheet_sketch: s.active_sheet_sketch.clone(), ..snap },
     };
+    snap.sketching_view = s.historical_sketch_owner(snap.active_sketch, snap.sketching_view);
+    if snap.active_sketch.is_some() && snap.sketching_view.is_none() {
+        snap.active_sketch = None;
+        if let Some(marker) = snap.sketch_restore_marker {
+            let doc = Arc::make_mut(&mut snap.doc);
+            doc.marker = marker.filter(|position| *position < doc.features.len());
+        }
+    }
     snap.doc = Session::refreshed_sheet_fill_history_document(&s.doc, &snap.doc, snap.part, cmd)?;
     let same = Arc::ptr_eq(&s.doc, &snap.doc);
     let moved = s.active_sketch != snap.active_sketch || s.pending_moves != snap.pending_moves;
@@ -434,6 +442,7 @@ fn go_to(s: &mut Session, snap: Snapshot, cmd: &str) -> Result<Snapshot> {
     }
     s.doc = snap.doc;
     s.active_sketch = snap.active_sketch;
+    s.sketching_view = snap.sketching_view;
     s.active_sheet_sketch = snap.active_sheet_sketch;
     s.prune_sheet_sketch_edit();
     s.pending_moves = snap.pending_moves;
@@ -543,6 +552,7 @@ fn delete(s: &mut Session, p: &Value) -> Result<Value> {
     }
     if s.active_sketch.is_some_and(|a| gone.contains(&a)) {
         s.active_sketch = None;
+        s.sketching_view = None;
     }
     // An inserted file's feature takes its components with it.
     if s.active_component != 0 && !s.doc.components.iter().any(|c| c.id == s.active_component) {
@@ -2632,6 +2642,7 @@ fn redefine(s: &mut Session, p: &Value) -> Result<Value> {
         trial.active_occurrence_path = (!face.author_path.is_empty()).then(|| face.author_path.clone());
     }
     trial.active_sketch = None;
+    trial.sketching_view = None;
     trial.selection = s.selection.clone();
     // Keep the original identity as a suppressed placeholder. The constructor and
     // any ownership boundary it adds go AFTER this slot, so discarding its temporary
