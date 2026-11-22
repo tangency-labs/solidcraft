@@ -1347,24 +1347,24 @@ struct GoldenChange {
 const FILLET_UV_CHANGES: &[GoldenChange] = &[
     GoldenChange {
         case: "issue-880-half-arc-rim-0-setbacks-1-1",
-        old_hash: 0xb0e61815c7d93b13,
-        new_hash: 0x2e7fdccee3201ccc,
+        old_hash: 0x0c84b1bb5aabdeb6,
+        new_hash: 0x064c8b893b765eaf,
         reason: "Keep the domain-proved oblique UV jets on the procedural surface: the old \
                  boundary fix-up flattened slopes of 5.3e-5 to 8.5e-4 and moved control \
                  polygons by up to 2.2e-5 in UV without a bound on the procedural surface.",
     },
     GoldenChange {
         case: "issue-880-half-arc-rim-0-setbacks-1-2",
-        old_hash: 0x9ae25a8b1d9a6a99,
-        new_hash: 0x40f0fbb85329c802,
+        old_hash: 0x0c29e482175fe1e2,
+        new_hash: 0x94a9c0596e8f0db7,
         reason: "Keep the domain-proved oblique UV jets on the procedural surface for the \
                  unequal setbacks too; the old boundary flattening and polygon moves have \
                  no bound on that surface, and preserving the jets moves the mass integral.",
     },
     GoldenChange {
         case: "source-file-nurb_box-edge0",
-        old_hash: 0xddae5c6cc008ae31,
-        new_hash: 0xe3faf9d321c91634,
+        old_hash: 0xfa66dbe7062ca1e2,
+        new_hash: 0xdcf4807bfc81eec3,
         reason: "Preserve the procedural drop's transverse UV tangent (at most 7e-13) \
                  instead of zeroing it in four spans. The polygon stays unchanged; the \
                  resulting mass estimate moves far below its requested 1e-4 accuracy.",
