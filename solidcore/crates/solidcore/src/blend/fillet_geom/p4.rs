@@ -3220,6 +3220,13 @@ impl FilletBrep {
                         target.face(face)?.surface.as_ref(),
                     )
                 }
+                // Only the two cross-sections reach this arm: `cross_section_at` picks
+                // `start_edge`/`end_edge` by `FilletEdgeType::CrossSection`, and
+                // `resample_blending_rail` refuses a rail that is not a `BlendingRail`
+                // (`RailNotBlending`), so `rail1`/`rail2` always take the arm above.
+                // The missing link here is therefore always a cross-section's geometry.
+                // (A rail's 3D curve cannot be missing below either: the resampling has
+                // just stored the lifted curve on it.)
                 _ => {
                     let fg = self.fillet_edgeuse(prim)?.fillet_geom().ok_or_else(|| {
                         set_up(
