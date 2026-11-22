@@ -58,13 +58,14 @@ pub enum EdgeFrom {
 }
 
 /// A bend's zone in the flat frame: its region, its edge on the `a` panel's side (`near`) and on
-/// the `b` panel's side (`far`), each from the end at the anchors' origin to the other, and the
-/// panels on those sides. Its ends join `near[k]` to `far[k]`.
+/// the `b` panel's side (`far`), each from the end at the anchors' origin to the other, the
+/// panels on those sides, and what their outlines leave out under the bend. Its ends join
+/// `near[k]` to `far[k]`.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Zone {
     /// The bend's joint.
     pub joint: usize,
-    /// Its material, in the flat frame.
+    /// Its material between its ends, in the flat frame, before `cuts` are taken from it.
     pub region: Region2,
     /// Its edge on the `a` panel's side.
     pub near: [Vec2; 2],
@@ -72,6 +73,13 @@ pub struct Zone {
     pub far: [Vec2; 2],
     /// The `a` and `b` panels.
     pub panels: [usize; 2],
+    /// What the panels' outlines leave out under the bend, between a panel's tangent line and the
+    /// sharp (a hole there, or a notch in from the sharp), carried into the zone square through
+    /// the sheet as the bend lays the panel's surface out, in the flat frame: to be cut from
+    /// `region`. Before the tangent line each lies as the panel has it, so that it crosses the
+    /// zone's edge where the panel's own outline does; only what lies in `region` is cut. None
+    /// for a bend anchored at its tangent lines, which has nothing of its panels under it.
+    pub cuts: Vec<Region2>,
 }
 
 /// What a joint takes from a panel: the region to cut, and the line along which the panel's

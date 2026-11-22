@@ -188,9 +188,14 @@ pub enum Relief {
     #[default]
     None,
     /// Past the end both panels stop at their tangent lines: where the bend meets another at a
-    /// corner, where a rip cuts the panels beside it, or at a free end whose zone carries on both
-    /// panels' outlines, neither panel running on past it.
+    /// corner, or where a rip cuts the panels beside it. The zone's end runs straight from its
+    /// given end on the `a` panel's tangent line to its given end on the `b` panel's.
     Notch,
+    /// A free end, neither panel running on past it: past the end both panels stop at their
+    /// tangent lines, as at a notch, and the zone's end is each panel's outline from its tangent
+    /// line on to the sharp, carried into the zone square through the sheet (the kernel's
+    /// `develop::Relief::Outline`).
+    Outline,
     /// A bend relief in each panel that runs on past the end: a slot `width` along past the
     /// end, cut from `depth` inside the panel's tangent line out through its edge. None is cut
     /// in a panel that runs on less far than that.
@@ -320,8 +325,9 @@ pub enum EdgeFrom {
 }
 
 /// A bend's zone in the flat frame: its region, its edge on the `a` panel's side (`near`) and on
-/// the `b` panel's side (`far`), each from the end at the anchors' origin to the other, and the
-/// panels on those sides. Its ends join `near[k]` to `far[k]`.
+/// the `b` panel's side (`far`), each from the end at the anchors' origin to the other, the
+/// panels on those sides, and what their outlines leave out under the bend (`cuts`, carried into
+/// the zone, to be cut from its region). Its ends join `near[k]` to `far[k]`.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Zone {
     pub joint: usize,
@@ -329,6 +335,7 @@ pub struct Zone {
     pub near: [Vec2; 2],
     pub far: [Vec2; 2],
     pub panels: [usize; 2],
+    pub cuts: Vec<Region2>,
 }
 
 /// What a joint takes from a panel: the region to cut, and the line along which the panel's

@@ -290,6 +290,7 @@ fn relief(x: r::Relief) -> k::Relief {
     match x {
         r::Relief::None => k::Relief::None,
         r::Relief::Notch => k::Relief::Notch,
+        r::Relief::Outline => k::Relief::Outline,
         r::Relief::Slot { width, depth } => k::Relief::Slot { width, depth },
         r::Relief::Tear { normal, offset } => k::Relief::Tear {
             normal: vec3(normal),
@@ -302,6 +303,7 @@ fn record_relief(x: k::Relief) -> r::Relief {
     match x {
         k::Relief::None => r::Relief::None,
         k::Relief::Notch => r::Relief::Notch,
+        k::Relief::Outline => r::Relief::Outline,
         k::Relief::Slot { width, depth } => r::Relief::Slot { width, depth },
         k::Relief::Tear { normal, offset } => r::Relief::Tear {
             normal: record_vec3(normal),
@@ -385,6 +387,7 @@ pub fn development(d: &r::Development) -> k::Development {
                 near: z.near.map(vec2),
                 far: z.far.map(vec2),
                 panels: z.panels,
+                cuts: z.cuts.iter().map(region2).collect(),
             })
             .collect(),
         trims: d
@@ -453,6 +456,7 @@ pub fn zone(z: &r::Zone) -> k::Zone {
         near: z.near.map(vec2),
         far: z.far.map(vec2),
         panels: z.panels,
+        cuts: z.cuts.iter().map(region2).collect(),
     }
 }
 
@@ -465,6 +469,7 @@ pub fn record_zone(z: &k::Zone) -> r::Zone {
         near: z.near.map(record_vec2),
         far: z.far.map(record_vec2),
         panels: z.panels,
+        cuts: z.cuts.iter().map(record_region2).collect(),
     }
 }
 
