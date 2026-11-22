@@ -1925,10 +1925,16 @@ impl<'s> SurfaceIntersector<'s> {
     /// and reverses the curve point order. An empty curve is `SM_ERR_NULL_POINTER`.
     pub fn reverse_curve_direction(&mut self) -> Result<()> {
         if self.curve_points.is_empty() {
-            return Err(SolidError::intersect(
+            return Err(crate::error::Failure::new(
                 OP_REVERSE,
-                IntersectFailure::NoCurveToReverse,
-            ));
+                IntersectFailure::Defect {
+                    why: "the advanced trace reverses the curve its first trace left empty (a \
+                          tangent start on a found curve); trace_back skips that case (WR-80), \
+                          this caller does not",
+                },
+            )
+            .with_status(crate::error::SM_ERR_NULL_POINTER)
+            .into_error());
         }
         let pnts = core::mem::take(&mut self.curve_points);
 
@@ -3107,12 +3113,8 @@ mod tests {
         let d = Extent2d::from_bounds(0.0, 0.0, 1.0, 1.0);
         let mut si = SurfaceIntersector::new(k, &s1, &d, &s1, &d, false).unwrap();
         let e = si.reverse_curve_direction().unwrap_err();
-        assert_eq!(
-            e.intersect_failure(),
-            Some(&IntersectFailure::NoCurveToReverse)
-        );
+        assert!(e.is_defect());
         assert_eq!(e.upstream_status(), Some(1006));
-        assert!(!e.is_defect());
         // the basic intersector's unimplemented delta step answers SM_ERR, unsupported
         let e = si.compute_point_values_delta().unwrap_err();
         assert_eq!(

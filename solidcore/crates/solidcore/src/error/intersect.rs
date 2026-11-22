@@ -155,7 +155,7 @@ pub enum IntersectFailure {
         /// The number of control points the drop stops at.
         limit: usize,
     },
-    /// The surface has no normal at the dropped point (the cross product of its tangents and
+    /// The surface has no normal at the point (the cross product of its tangents and
     /// the evaluated normal are both shorter than the kernel's zero). [`ErrorKind::Degenerate`].
     NoSurfaceNormal,
     /// The curve to drop has no tangent to step along: its first derivative is zero where
@@ -181,12 +181,13 @@ pub enum IntersectFailure {
         budget: f64,
     },
     /// The surfaces meet at a singular or tangent point the intersector cannot trace
-    /// through: a contact it cannot prove, refused by name (`docs/ssi.md` §1), never a
-    /// defect. Where an override's attempt failed, its error is the cause. Class `failed`.
+    /// through: a contact it cannot prove, refused by name (`docs/ssi.md` §1), a defect only
+    /// through its cause: where an override's attempt failed, its error is the cause. Class
+    /// `failed`.
     Tangent,
-    /// No surface cache of a surface the routine intersects could be built, or its tree
-    /// could not (the build's error is the cause). Class `missing`; whether it is a defect
-    /// or a refusal is its cause's ([`crate::SolidError::is_defect`] follows the chain).
+    /// No surface cache of a surface the routine works on, or its tree, could be built (the
+    /// build's error is the cause). Class `missing`; whether it is a defect or a refusal is
+    /// its cause's ([`crate::SolidError::is_defect`] follows the chain).
     SurfaceCacheNotBuilt,
     /// The caller passed no surface caches to an intersection that runs on them.
     /// [`ErrorKind::InvalidInput`].
@@ -266,10 +267,6 @@ pub enum IntersectFailure {
         /// The points the approach put before the snapped point.
         points: usize,
     },
-    /// The traced curve has no points to reverse: a trace that starts on a curve already
-    /// found drops its points, and the trace back from it then reverses an empty curve
-    /// (upstream's `SM_ERR_NULL_POINTER`). Class `missing`.
-    NoCurveToReverse,
     /// The basic intersector was asked for a law point's delta step, which only the
     /// advanced intersectors compute. [`ErrorKind::Unsupported`].
     DeltaStepUnsupported,
@@ -327,8 +324,7 @@ impl IntersectFailure {
             | Self::CurveNotBSpline
             | Self::SurfaceCacheNotBuilt
             | Self::NoSurfaceCaches
-            | Self::SurfaceNotOffset { .. }
-            | Self::NoCurveToReverse => SM_ERR_NULL_POINTER,
+            | Self::SurfaceNotOffset { .. } => SM_ERR_NULL_POINTER,
             Self::OutsideDomain(_) | Self::SeamJumpNotSnapped => SM_ERR_OUTSIDE_OF_DOMAIN,
             Self::Inconsistent(_) => SM_ERR_ASSERT_FAILURE,
         }
@@ -442,7 +438,7 @@ impl core::fmt::Display for IntersectFailure {
                 f,
                 "the dropped curve reached {limit} control points, more than the drop builds"
             ),
-            Self::NoSurfaceNormal => f.write_str("the surface has no normal at the dropped point"),
+            Self::NoSurfaceNormal => f.write_str("the surface has no normal at the point"),
             Self::DegenerateTangent => f.write_str("the curve to drop has no tangent there"),
             Self::TangentAlongNormal { degrees } => write!(
                 f,
@@ -460,7 +456,7 @@ impl core::fmt::Display for IntersectFailure {
                 "the surfaces meet at a singular or tangent point the intersector cannot trace through",
             ),
             Self::SurfaceCacheNotBuilt => {
-                f.write_str("the surface cache or its tree could not be built")
+                f.write_str("no surface cache, or its tree, could be built")
             }
             Self::NoSurfaceCaches => f.write_str("no surface caches were given"),
             Self::SelfIntersectionUnsupported => {
@@ -506,7 +502,6 @@ impl core::fmt::Display for IntersectFailure {
                 f,
                 "no trace step toward the snapped point passes in {tries} tries"
             ),
-            Self::NoCurveToReverse => f.write_str("the traced curve has no points to reverse"),
             Self::DeltaStepUnsupported => {
                 f.write_str("the basic intersector does not compute a law point's delta step")
             }
@@ -869,7 +864,6 @@ pub(super) mod tests {
             (F::ApproachStepNotFound { tries: 9 }, SM_ERR, K::Failed),
             (F::ApproachHitBoundary, SM_ERR, K::Failed),
             (F::ApproachNotCertified { points: 16 }, SM_ERR, K::Failed),
-            (F::NoCurveToReverse, SM_ERR_NULL_POINTER, K::Missing),
             (F::DeltaStepUnsupported, SM_ERR, K::Unsupported),
         ];
         for (failure, status, kind) in cases {
