@@ -833,3 +833,31 @@ fn a_setback_set_on_a_corner_already_the_setback_builds_as_asked() {
     let r = blend_box_on_corner(&mut k, [20.0; 3], &SHORT_AT, &[2.0, 3.0, 4.0], &eased);
     built(&mut k, r, counts(&through_fill), want);
 }
+
+/// #16408 (review of #20697): eased setbacks of 6 over 1 and of 6 over 0.5 at the corner of
+/// [`a_setback_set_on_a_corner_already_the_setback_builds_as_asked`]. The G2 fill's interior
+/// map at its least degree left a setback patch whose control net turns back, and was taken:
+/// through the fill's door that body failed `check_brep` (`SmBSplineSurface` test #5), and
+/// through the corner's door, once the setback set there was read, the same body. A net that
+/// turns back is now not taken and the next degree is: both doors build one body, sound (no
+/// check lines), the corner's to the fill's counts and volume (measured on the fill's door).
+#[test]
+fn an_eased_setback_whose_least_degree_net_turns_back_builds_sound() {
+    let mut k = all_fixes();
+    for ease in [1.0, 0.5] {
+        let eased = SetbackAsk { ease, ..short(6.0) };
+        let mut through_fill = {
+            let r = blend_box(&mut k, [20.0; 3], &SHORT_AT, &[2.0, 3.0, 4.0], Some(&eased));
+            assert_eq!(r.code, 0, "{}", r.comment);
+            let mut b = r.body.unwrap();
+            let lines = check_brep(&mut k, &mut b, CheckLevel::Level2)
+                .unwrap()
+                .lines();
+            assert!(lines.is_empty(), "ease {ease}: {lines:?}");
+            b
+        };
+        let want = volume_at(&k, &mut through_fill, PIN_ACCURACY);
+        let r = blend_box_on_corner(&mut k, [20.0; 3], &SHORT_AT, &[2.0, 3.0, 4.0], &eased);
+        built(&mut k, r, counts(&through_fill), want);
+    }
+}
