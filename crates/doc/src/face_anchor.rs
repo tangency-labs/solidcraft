@@ -144,7 +144,7 @@ impl Document {
                         geometry(line, depth + 1, targets);
                     }
                 }
-                PlaneRef::Midplane { a, b } | PlaneRef::TwoEdges { a, b } => {
+                PlaneRef::Midplane { a, b, .. } | PlaneRef::TwoEdges { a, b } => {
                     geometry(a, depth + 1, targets);
                     geometry(b, depth + 1, targets);
                 }
