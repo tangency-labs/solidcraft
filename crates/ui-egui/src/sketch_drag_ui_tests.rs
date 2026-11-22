@@ -531,6 +531,69 @@ fn deferred_history_cancels_a_biarc_ratio_preview_before_the_pointer_releases() 
     drop(release_work);
 }
 
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn a_biarc_ratio_drag_cannot_start_while_history_is_computing() {
+    use crate::{scenario, sketch_biarc_edit, viewport};
+
+    let mut h = Harness::new();
+    h.app.home.open = false;
+    run(&mut h, "sketch.create", json!({"plane": "XY"}));
+    run(
+        &mut h,
+        "sketch.spline.biarc",
+        json!({"nodes": [
+            {"point": [2,4], "tangent": [6,0]},
+            {"point": [14,8], "tangent": [0,6]}
+        ]}),
+    );
+    h.call("ui.view", json!({"view": "top"}));
+    h.call("ui.camera", json!({"target": [8,5,0], "distance": 48}));
+    let sketch = h.app.session.active_sketch.unwrap();
+    let spline = h.app.session.doc.sketch(sketch).unwrap().biarc_splines[0].clone();
+    let selected = Sel::SketchCurve { id: spline.spans[0].curves[0].clone(), sketch: Some(sketch) };
+    h.app.session.selection = vec![selected.clone()];
+    h.frames(3);
+    let before = h.app.session.doc.to_json();
+    let undo = h.app.session.undo.len();
+    let from = scenario::handle_at("biarc-ratio").unwrap();
+    let to = screen(&mut h, 10.4, 6.8);
+    let projection = viewport::projection(&h.app, h.app.viewport.rect.unwrap());
+    // With the handle unavailable, this press is on empty canvas rather than another grip.
+    assert!(viewport::pick(&h.app, &projection, from).is_empty());
+
+    h.app.apply_off_thread = Some(std::time::Duration::ZERO);
+    let (release_work, wait_for_release) = std::sync::mpsc::channel();
+    h.app.apply_gate = Some(std::sync::Arc::new(std::sync::Mutex::new(wait_for_release)));
+    // The sender releases the worker on an assertion unwind too. Undo starts before the
+    // new press, so cancelling only a drag that already existed cannot protect this gesture.
+    h.step(&json!({"start": "edit.undo"})).unwrap();
+    assert!(h.app.computing_since().is_some(), "Undo waits for its worker");
+    let mut path = vec![from];
+    path.extend(steps(from, to, 4));
+    press_and_move(&mut h, &path);
+    release(&mut h, to);
+    assert!(h.app.computing_since().is_some(), "the fresh gesture happened before Undo could run");
+    assert_eq!(h.app.session.doc.to_json(), before, "a new ratio gesture cannot commit ahead of the pending Undo");
+    assert_eq!(h.app.session.undo.len(), undo);
+    assert!(!sketch_biarc_edit::dragging(&h.app));
+
+    // Cancelling the pending history action makes the same handle available again.
+    h.app.cancel_computing();
+    drop(release_work);
+    h.app.apply_gate = None;
+    h.app.apply_off_thread = None;
+    h.app.session.selection = vec![selected];
+    h.frames(2);
+    assert!(scenario::handle_at("biarc-ratio").is_some());
+    press_and_move(&mut h, &path);
+    assert!(sketch_biarc_edit::dragging(&h.app));
+    release(&mut h, to);
+    let edited = h.app.session.doc.sketch(sketch).unwrap().biarc_spline(&spline.id).unwrap();
+    assert!((edited.spans[0].ratio - 0.7).abs() < 0.015);
+    assert_eq!(h.app.session.undo.len(), undo + 1);
+}
+
 #[test]
 fn a_biarc_ratio_handle_stays_with_its_active_automatic_span() {
     use crate::{scenario, sketch_biarc_edit};

@@ -16,8 +16,24 @@ use crate::sketch::{Shape, Sketch};
 const MOST: usize = 200;
 
 /// The parameters `command` takes from `selection` in `sketch` (the sketch being edited), or
-/// `None` when the selection is not exactly what it takes.
+/// `None` when the selection is not exactly what it takes. Without the sketch's identity,
+/// only curves selected without an explicit sketch can be resolved here.
 pub fn constraint_params(command: &str, selection: &[Sel], sketch: Option<&Sketch>) -> Option<Value> {
+    constraint_params_in(command, selection, sketch, None)
+}
+
+/// Curve ids repeat between sketches (#3726); ownership is checked before resolving any id.
+fn curves_belong_to(selection: &[Sel], active: Option<u64>) -> bool {
+    selection.iter().all(|sel| match sel {
+        Sel::SketchCurve { sketch: Some(owner), .. } => Some(*owner) == active,
+        _ => true,
+    })
+}
+
+fn constraint_params_in(command: &str, selection: &[Sel], sketch: Option<&Sketch>, active: Option<u64>) -> Option<Value> {
+    if !curves_belong_to(selection, active) {
+        return None;
+    }
     use Sel::{SketchCurve, SketchPoint};
     let selected_ids = |curves_only: bool, minimum: usize| -> Option<Vec<&str>> {
         if !(minimum..=MOST).contains(&selection.len()) {
@@ -88,9 +104,7 @@ fn fix_preselection(selection: &[Sel]) -> Option<Vec<&str>> {
     let mut seen = std::collections::BTreeSet::new();
     for s in selection {
         let id = match s {
-            SketchCurve { id, sketch: None } | SketchPoint { id } => id.as_str(),
-            // A curve of another sketch: its id alone would name a curve of this one (#3726).
-            SketchCurve { .. } => return None,
+            SketchCurve { id, .. } | SketchPoint { id } => id.as_str(),
             SketchConstraint { .. } => continue,
             _ => return None,
         };
@@ -172,6 +186,10 @@ fn kind(sketch: &Sketch, sel: &Sel) -> Option<Kind> {
 /// round curves, or a point with any curve; Horizontal/Vertical a
 /// single line. An origin axis counts as a line. Entities of no sketch never fit.
 pub fn kinds_fit(command: &str, selection: &[Sel], sketch: &Sketch) -> bool {
+    curves_belong_to(selection, None) && kinds_fit_in(command, selection, sketch)
+}
+
+fn kinds_fit_in(command: &str, selection: &[Sel], sketch: &Sketch) -> bool {
     let Some(kinds) = selection.iter().map(|s| kind(sketch, s)).collect::<Option<Vec<Kind>>>() else { return false };
     let count = |k: Kind| kinds.iter().filter(|x| **x == k).count();
     let (n, p, l, r, c) = (kinds.len(), count(Kind::Point), count(Kind::Line), count(Kind::Round), count(Kind::Curve));
@@ -201,16 +219,20 @@ fn from_session(command: &str, s: &Session) -> Option<Value> {
 /// geometry of a selection that also boxed constraint icons, so those do not hide the
 /// constraints its lines and points take.
 pub fn params_for(command: &str, s: &Session, selection: &[Sel]) -> Option<Value> {
+    let active = super::sketch_store::active(s)?;
+    if !curves_belong_to(selection, Some(active)) {
+        return None;
+    }
     let state = s.world_state().ok()?;
-    let sketch = super::sketch_store::active(s).and_then(|id| state.sketch(id)).map(|ss| &ss.sketch)?;
+    let sketch = &state.sketch(active)?.sketch;
     // A selected curve the sketch no longer has says nothing of its kind: the command names it
     // in its error, where a pick tool would start over a selection that cannot be completed.
     let stale = selection.iter().any(|sel| matches!(sel, Sel::SketchCurve { id, .. } if sketch.curve_index(id).is_none()));
     // Fix reads its own selection: a box's dimensions and constraint icons come along (#11663).
-    if command != "sketch.constraint.fix" && !stale && !kinds_fit(command, selection, sketch) {
+    if command != "sketch.constraint.fix" && !stale && !kinds_fit_in(command, selection, sketch) {
         return None;
     }
-    constraint_params(command, selection, Some(sketch))
+    constraint_params_in(command, selection, Some(sketch), Some(active))
 }
 
 macro_rules! takes {

@@ -553,7 +553,7 @@ pub fn biarc(
         ratio,
     )
     .map(|(joint, pieces)| (record_vec2(joint), pieces.map(|piece| record_seg2(&piece))))
-    .map_err(biarc_error)
+    .map_err(crate::error::status)
 }
 
 /// An equal-distance biarc for a free-form approximation span with supplied unit tangents.
@@ -575,7 +575,7 @@ pub fn fit_biarc(
         vec2(end_tangent),
     )
     .map(|pieces| pieces.iter().map(record_seg2).collect())
-    .map_err(biarc_error)
+    .map_err(crate::error::status)
 }
 
 /// The joint and two analytic segments in start-to-end order, with a straight piece at
@@ -603,14 +603,7 @@ pub fn biarc_with_straight_piece(
         straight_start,
     )
     .map(|(joint, pieces)| (record_vec2(joint), pieces.map(|piece| record_seg2(&piece))))
-    .map_err(biarc_error)
-}
-
-fn biarc_error(error: SolidError) -> Error {
-    match error {
-        SolidError::InvalidInput { reason, .. } => Error::Unsupported(reason),
-        other => crate::error::status(other),
-    }
+    .map_err(crate::error::status)
 }
 
 /// [`circle_through`] (`closed`) and [`arc_through`].
@@ -1381,6 +1374,36 @@ pub fn stretch_cvs(
 #[allow(clippy::disallowed_methods)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn biarc_argument_errors_keep_the_kernel_operation_and_reason() {
+        use solidcore_record::Vec2;
+
+        for (result, operation, reason) in [
+            (
+                biarc(Vec2::ZERO, Vec2::ZERO, Vec2::X, Vec2::X, 0.5).map(|_| ()),
+                "prism::profile::biarc",
+                "tangents must be finite and nonzero",
+            ),
+            (
+                fit_biarc(Vec2::ZERO, Vec2::ZERO, Vec2::X, Vec2::X).map(|_| ()),
+                "prism::profile::fit_biarc",
+                "tangents must be finite unit vectors",
+            ),
+            (
+                biarc_with_straight_piece(Vec2::ZERO, Vec2::ZERO, Vec2::X, Vec2::X, 0.5, true)
+                    .map(|_| ()),
+                "prism::profile::biarc_with_straight_piece",
+                "tangents must be finite and nonzero",
+            ),
+        ] {
+            assert_eq!(result, Err(Error::Refused { operation, reason }));
+        }
+        assert!(matches!(
+            biarc(Vec2::ZERO, Vec2::Y, Vec2::X, Vec2::Y, 0.5),
+            Err(Error::Unsupported(_))
+        ));
+    }
 
     #[test]
     fn plane_crossings_keep_line_endpoints_and_refuse_hostile_inputs() {

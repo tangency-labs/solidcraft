@@ -79,12 +79,14 @@ pub fn left_unit_normal(a: Vec2, b: Vec2, minimum_length: f64) -> Option<Vec2> {
 }
 
 /// Place a tangent guide at the supplied vector length, or at the first allowed fallback length
-/// whose tip fits inside `coord_limit` and is distinct from `at`.
+/// whose tip fits inside `coord_limit` and retains the requested direction within half of
+/// `angle_tolerance` on the unit circle.
 #[must_use]
 pub fn tangent_guide_tip(
     at: Vec2,
     tangent: Vec2,
     min_length: f64,
+    angle_tolerance: f64,
     fallback_lengths: &[f64],
     coord_limit: f64,
 ) -> Option<Vec2> {
@@ -92,6 +94,7 @@ pub fn tangent_guide_tip(
         convert::vec2(at),
         convert::vec2(tangent),
         min_length,
+        angle_tolerance,
         fallback_lengths,
         coord_limit,
     )

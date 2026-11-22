@@ -2027,6 +2027,63 @@ fn biarc_fit_points_offer_tangent_from_the_shared_selection_rules() {
     }
 }
 
+#[test]
+fn constraint_preselection_rejects_foreign_sketch_curves_with_colliding_ids() {
+    use crate::Sel;
+    let mut s = new_sketch();
+    let foreign = s.active_sketch.unwrap();
+    run(&mut s, "sketch.circle.center", json!({"center": [100, 100], "radius": 8, "id": "c"}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "sketch.create", json!({"plane": "XY"}));
+    let active = s.active_sketch.unwrap();
+    assert_ne!(active, foreign);
+    run(&mut s, "sketch.circle.center", json!({"center": [0, 0], "radius": 30, "id": "c"}));
+    run(&mut s, "sketch.spline.biarc", json!({"nodes": [{"point": [-20, 0], "tangent": [1, 1]}, {"point": [20, 0], "tangent": [1, -1]}]}));
+    let node = sketch(&s).biarc_splines[0].nodes[0].point.clone();
+    let command = "sketch.constraint.tangent";
+    let spec = crate::find_command(command).unwrap();
+    let before = s.doc.to_json();
+    let history = (s.undo.len(), s.redo.len());
+    for reverse in [false, true] {
+        s.selection = vec![Sel::SketchPoint { id: node.clone() }, Sel::SketchCurve { id: "c".into(), sketch: Some(foreign) }];
+        if reverse {
+            s.selection.reverse();
+        }
+        let sk = sketch(&s);
+        assert!(super::super::sketch_selection::constraint_params(command, &s.selection, Some(&sk)).is_none());
+        assert!(!super::super::sketch_selection::kinds_fit(command, &s.selection, &sk));
+        assert!(spec.for_selection(&s).is_none(), "a foreign c must not select the active sketch's c: {:?}", s.selection);
+        let expected = if reverse { json!({"a": "c", "b": node}) } else { json!({"a": node, "b": "c"}) };
+        for owner in [None, Some(active)] {
+            for sel in &mut s.selection {
+                if let Sel::SketchCurve { sketch, .. } = sel {
+                    *sketch = owner;
+                }
+            }
+            assert_eq!(spec.for_selection(&s), Some(expected.clone()));
+        }
+    }
+    // Every constraint checks ownership before resolving a curve id, including Fix's own
+    // selection rules and curve-pair constraints.
+    let member = sketch(&s).biarc_splines[0].spans[0].curves[0].clone();
+    for (command, other) in [
+        ("sketch.constraint.fix", None),
+        ("sketch.constraint.concentric", Some(Sel::SketchPoint { id: "origin".into() })),
+        ("sketch.constraint.equal", Some(Sel::SketchCurve { id: member, sketch: None })),
+    ] {
+        let spec = crate::find_command(command).unwrap();
+        s.selection = vec![Sel::SketchCurve { id: "c".into(), sketch: Some(foreign) }];
+        s.selection.extend(other);
+        assert!(spec.for_selection(&s).is_none(), "{command} must reject the foreign c");
+        if let Sel::SketchCurve { sketch, .. } = &mut s.selection[0] {
+            *sketch = Some(active);
+        }
+        assert!(spec.for_selection(&s).is_some(), "{command} must accept c with its current sketch identity");
+    }
+    assert_eq!(s.doc.to_json(), before);
+    assert_eq!((s.undo.len(), s.redo.len()), history);
+}
+
 /// A point placed by a parameter expression (#16554): the inspection says why it is fixed,
 /// Unfix frees it as plain numbers, and moving it before that is refused with the expression.
 #[test]

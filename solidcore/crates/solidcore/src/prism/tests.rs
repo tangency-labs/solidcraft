@@ -114,27 +114,27 @@ fn a_tangent_guide_keeps_an_admitted_length_and_tries_fallbacks_in_order() {
     let fallbacks = [1.0, 0.1, 0.01];
     let at = p(0.0, 1.0);
     assert_eq!(
-        tangent_guide_tip(at, p(3.0, 4.0), 1e-6, &fallbacks, 10.0),
+        tangent_guide_tip(at, p(3.0, 4.0), 1e-6, 1e-6, &fallbacks, 10.0),
         Some(p(3.0, 5.0)),
     );
     assert_eq!(
-        tangent_guide_tip(p(9.5, 0.0), p(7.0, 0.0), 1e-6, &fallbacks, 10.0),
+        tangent_guide_tip(p(9.5, 0.0), p(7.0, 0.0), 1e-6, 1e-6, &fallbacks, 10.0),
         Some(p(9.6, 0.0)),
     );
     assert_eq!(
-        tangent_guide_tip(at, p(0.0, -1e-300), 1e-6, &fallbacks, 10.0),
+        tangent_guide_tip(at, p(0.0, -1e-300), 1e-6, 1e-6, &fallbacks, 10.0),
         Some(Vec2::ZERO),
     );
     assert_eq!(
-        tangent_guide_tip(at, Vec2::ZERO, 1e-6, &fallbacks, 10.0),
+        tangent_guide_tip(at, Vec2::ZERO, 1e-6, 1e-6, &fallbacks, 10.0),
         None
     );
     assert_eq!(
-        tangent_guide_tip(at, p(f64::NAN, 1.0), 1e-6, &fallbacks, 10.0),
+        tangent_guide_tip(at, p(f64::NAN, 1.0), 1e-6, 1e-6, &fallbacks, 10.0),
         None
     );
     assert_eq!(
-        tangent_guide_tip(p(9.99, 0.0), p(7.0, 0.0), 1e-6, &fallbacks, 10.0),
+        tangent_guide_tip(p(9.99, 0.0), p(7.0, 0.0), 1e-6, 1e-6, &fallbacks, 10.0),
         None,
     );
 
@@ -142,6 +142,35 @@ fn a_tangent_guide_keeps_an_admitted_length_and_tries_fallbacks_in_order() {
     assert_eq!(lengthened, p(6.0, 8.0));
     assert_eq!(lengthen_direction(p(3.0, 4.0), 2.0), p(3.0, 4.0));
     assert_eq!(lengthen_direction(Vec2::ZERO, 2.0), Vec2::ZERO);
+}
+
+#[test]
+fn a_tangent_guide_preserves_direction_after_coordinate_rounding() {
+    // At 2^29, an x displacement of 1e-8 is smaller than half an ulp and disappears.
+    // The original vector's direction is atan(1e-6 / 1e-8), about 0.01 rad from vertical.
+    let at = p(536_870_912.0, 0.0);
+    let tangent = p(1e-8, 1e-6);
+    let tolerance = 1e-6;
+    let tip = tangent_guide_tip(at, tangent, 1e-6, tolerance, &[1.0, 0.1, 0.01], 1e9)
+        .expect("the first fallback is representable within the contact tolerance");
+    assert!(tip.y > 0.5, "the short supplied tip lost its direction");
+    let placed = (tip - at).unitize().unwrap();
+    let wanted = tangent.unitize().unwrap();
+    assert!(placed.distance(wanted) <= 0.5 * tolerance);
+    assert_eq!(
+        tangent_guide_tip(at, tangent, 1e-6, tolerance, &[], 1e9),
+        None
+    );
+    assert_eq!(
+        tangent_guide_tip(at, tangent, 1e-6, tolerance, &[1e-6, 1e-7], 1e9),
+        None
+    );
+    for invalid in [0.0, -1.0, f64::NAN, f64::INFINITY] {
+        assert_eq!(
+            tangent_guide_tip(at, tangent, 1e-6, invalid, &[1.0], 1e9),
+            None
+        );
+    }
 }
 
 #[test]

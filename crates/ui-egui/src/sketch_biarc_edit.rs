@@ -85,9 +85,9 @@ impl Handle {
 }
 
 fn enabled_sketch(app: &SolveApp) -> Option<u64> {
-    app.session
-        .active_sketch
-        .filter(|_| app.tool.is_none() && app.dialog.is_none() && app.viewport.context_menu.is_none() && !crate::dim_view::editing())
+    app.session.active_sketch.filter(|_| {
+        app.deferred.is_none() && app.tool.is_none() && app.dialog.is_none() && app.viewport.context_menu.is_none() && !crate::dim_view::editing()
+    })
 }
 
 struct Preview {

@@ -175,6 +175,83 @@ fn invalid_biarc_edits_are_atomic_and_a_member_deletes_the_group() {
 }
 
 #[test]
+fn biarc_ratio_edits_respect_fixed_curves_at_derived_points() {
+    for share_center in [false, true] {
+        let mut sk = Sketch::new();
+        let spline = sk.add_biarc_spline(&[(Vec2::ZERO, Vec2::X), (v(10., 0.), Vec2::X)], None, false).unwrap();
+        let joint = sk.resolve_point(&format!("{}.end", spline.spans[0].curves[0])).unwrap();
+        let shared = if share_center { sk.point_index(spline.spans[0].centers[0].as_deref().unwrap()).unwrap() } else { joint };
+        let end = sk.add_point(v(5., 3.), None).unwrap();
+        let line = sk.add_line_pts(shared, end, None).unwrap();
+        sk.curves[line].fixed = true;
+        let before = sk.clone();
+        // Collinear pieces remain lines, but their joint and reserved centres move with the ratio.
+        assert!(sk.set_biarc_ratio(&spline.id, 0, 0.75).is_err());
+        assert_eq!(sk, before);
+
+        // A setting change with the same geometry is still valid for the fixed curve.
+        sk.set_biarc_span(&spline.id, 0, None, Some(BiarcSpanMode::StraightStart)).unwrap();
+        sk.refresh_biarc_splines().unwrap();
+        assert_eq!(sk.points[shared].pos, v(5., 0.));
+        assert_eq!(sk.curves[line], before.curves[line]);
+
+        sk.curves[line].fixed = false;
+        sk.set_biarc_ratio(&spline.id, 0, 0.75).unwrap();
+        assert_eq!(sk.points[joint].pos, v(7.5, 0.));
+        assert_eq!(sk.points[shared].pos, v(7.5, 0.));
+        assert!(sk.points[shared].fixed, "the spline still owns the derived point's lock");
+        sk.validate_biarc_splines().unwrap();
+    }
+}
+
+#[test]
+fn deleting_a_biarc_preserves_authored_locks_on_surviving_points() {
+    let mut sk = Sketch::new();
+    let spline = sk.add_biarc_spline(&[(Vec2::ZERO, Vec2::X), (v(10., 4.), Vec2::X)], None, false).unwrap();
+    let node = &spline.nodes[0];
+    let fit = sk.point_index(&node.point).unwrap();
+    let tip = sk.point_index(&node.handle.as_ref().unwrap().point).unwrap();
+    let joint = sk.resolve_point(&format!("{}.end", spline.spans[0].curves[0])).unwrap();
+    let center = sk.point_index(spline.spans[0].centers[0].as_deref().unwrap()).unwrap();
+    let authored = sk.add_line_pts(fit, tip, None).unwrap();
+    let derived = sk.add_line_pts(joint, center, None).unwrap();
+    let curve_ids = [sk.curves[authored].id.clone(), sk.curves[derived].id.clone()];
+    let point_ids = [fit, tip, joint, center].map(|p| sk.points[p].id.clone());
+    sk.points[fit].fixed = true;
+    sk.points[tip].fixed = true;
+    let private = sk.point_index(&spline.nodes[1].point).unwrap();
+    let private_id = sk.points[private].id.clone();
+    sk.points[private].fixed = true;
+
+    sk.remove_curves(&[sk.curve_index(&spline.spans[0].curves[0]).unwrap()]);
+    assert!(sk.biarc_splines.is_empty());
+    assert_eq!(sk.curves.len(), 2);
+    assert!(curve_ids.iter().all(|id| sk.curve_index(id).is_some()));
+    assert_eq!(sk.points.len(), 5, "only the origin and the four shared points remain");
+    assert!(sk.point_index(&private_id).is_none(), "an unreferenced fixed point is still removed with its spline");
+    for (i, id) in point_ids.iter().enumerate() {
+        let p = sk.point_index(id).unwrap();
+        assert_eq!(sk.points[p].fixed, i < 2, "only authored fit-point and guide-tip locks survive");
+        assert_eq!(sk.point_locked(p), i < 2);
+    }
+}
+
+#[test]
+fn readonly_biarc_tangency_residual_agrees_with_an_accepted_solve() {
+    let mut sk = Sketch::new();
+    let spline = sk.add_biarc_spline(&[(v(0., 15.), Vec2::X), (v(10., 15.), Vec2::X)], None, false).unwrap();
+    let [a, b] = spline.spans[0].curves.each_ref().map(|id| sk.curve_index(id).unwrap());
+    // Retain a stored tangent on a spline whose two pieces are straight.
+    sk.constraints.push(Constraint { id: "tangent".into(), kind: ConstraintKind::Tangent { a, b }, param: None, driven: false, text: None });
+    let report = solve(&mut sk);
+    assert!(report.ok(), "{report:?}");
+    assert!(report.max_residual < 1e-9, "{report:?}");
+    let residual = constraint_residual(&sk, 0).unwrap();
+    assert!(residual < 1e-9, "a tangent at y = 15 has residual {residual}");
+    assert!((residual - report.max_residual).abs() < 1e-9);
+}
+
+#[test]
 fn deleting_a_line_at_a_reserved_biarc_center_keeps_the_spline() {
     let mut sk = Sketch::new();
     let spline = sk.add_biarc_spline(&[(Vec2::ZERO, Vec2::X), (v(10., 0.), Vec2::X)], None, false).unwrap();

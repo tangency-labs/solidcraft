@@ -338,7 +338,7 @@ impl Layout {
             points: 0,
             slide: Vec::new(),
             heavy: Vec::new(),
-            biarc: BiarcLayout::default(),
+            biarc: BiarcLayout::new(sk),
         }
     }
 }

@@ -308,25 +308,33 @@ pub fn left_unit_normal(a: Point2, b: Point2, minimum_length: f64) -> Option<Vec
 /// Place a positive tangent guide. Use the supplied vector when its tip fits and its length
 /// reaches `min_length`. Otherwise try each permitted length along its direction in order.
 /// A tip fits when it is distinct from `at` and each coordinate's magnitude is below `coord_limit`.
+/// Its recovered unit direction must stay within half of `angle_tolerance`, measured as a chord
+/// of the unit circle, reserving the other half for reading the generated circular contact.
 #[must_use]
 pub fn tangent_guide_tip(
     at: Point2,
     tangent: Vec2,
     min_length: f64,
+    angle_tolerance: f64,
     fallback_lengths: &[f64],
     coord_limit: f64,
 ) -> Option<Point2> {
-    let usable = |tip: Point2| finite2(tip) && tip.max_dimension() < coord_limit && tip != at;
+    if !(angle_tolerance.is_finite() && angle_tolerance > 0.0) {
+        return None;
+    }
+    let op = "prism::profile::tangent_guide_tip";
+    let direction = biarc_direction(tangent, op).ok()?;
+    let usable = |tip: Point2| {
+        finite2(tip)
+            && tip.max_dimension() < coord_limit
+            && biarc_direction(tip - at, op).is_ok_and(|placed| {
+                placed.dot(direction) > 0.0 && biarc_near(placed, direction, 0.5 * angle_tolerance)
+            })
+    };
     let tip = at + tangent;
     if usable(tip) && length2d(tangent) >= min_length {
         return Some(tip);
     }
-    let scale = tangent.max_dimension();
-    if !(finite2(tangent) && scale > 0.0) {
-        return None;
-    }
-    let scaled = tangent / scale;
-    let direction = scaled / length2d(scaled);
     fallback_lengths
         .iter()
         .copied()

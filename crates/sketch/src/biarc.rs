@@ -237,8 +237,9 @@ fn add_handle(sk: &mut Sketch, node: usize, at: Vec2, tangent: Vec2, max_points:
     }
     // Tangent magnitude is immaterial to the interpolation. Use it as the drawn handle
     // length when it can be positioned at model precision.
-    let tip = prism::tangent_guide_tip(at, tangent, 1e-6, &[1.0, 0.1, 0.01, 0.001, 0.0001, 0.00001], crate::MAX_COORD)
-        .ok_or_else(|| invalid("cannot place a biarc tangent handle within sketch limits"))?;
+    let tip =
+        prism::tangent_guide_tip(at, tangent, 1e-6, crate::profiles::TANGENT_ANGLE_TOL, &[1.0, 0.1, 0.01, 0.001, 0.0001, 0.00001], crate::MAX_COORD)
+            .ok_or_else(|| invalid("cannot place a biarc tangent handle within sketch limits"))?;
     let point = sk.add_point_limited(tip, max_points)?;
     let id = sk.fresh("h")?;
     let curve = sk.add_line_pts(node, point, Some(&id))?;
@@ -417,7 +418,19 @@ impl Sketch {
         Ok(spline)
     }
 
-    fn check_biarc_edit(&self, retired: &HashSet<usize>, changed: &HashMap<usize, CurveKind>) -> Result<()> {
+    fn check_biarc_edit(&self, positions: &[(usize, Vec2)], retired: &HashSet<usize>, changed: &HashMap<usize, CurveKind>) -> Result<()> {
+        if !positions.is_empty() && self.curves.iter().any(|curve| curve.fixed) {
+            let members: HashSet<_> = self.biarc_splines.iter().flat_map(BiarcSpline::all_curves).collect();
+            let held: HashSet<_> = self
+                .curves
+                .iter()
+                .filter(|curve| curve.fixed && !members.contains(curve.id.as_str()))
+                .flat_map(|curve| curve.kind.point_ids())
+                .collect();
+            if positions.iter().any(|(index, position)| held.contains(index) && self.point(*index).is_some_and(|at| !same_position(at, *position))) {
+                return Err(invalid("a biarc edit cannot move a point shared with a fixed curve"));
+            }
+        }
         if changed.is_empty() {
             return Ok(());
         }
@@ -695,7 +708,7 @@ impl Sketch {
                 curves.push((index, kind, reversed));
             }
         }
-        self.check_biarc_edit(&retired, &changed)?;
+        self.check_biarc_edit(&points, &retired, &changed)?;
         // Each index was checked above, and no point or curve is added or removed here.
         for (index, position) in points {
             if let Some(point) = self.points.get_mut(index) {
@@ -842,10 +855,12 @@ impl Sketch {
         let selected = |spline: &BiarcSpline| spline.all_curves().any(|id| removed.contains(id));
         let released: HashSet<_> = self.biarc_splines.iter().filter(|spline| selected(spline)).flat_map(BiarcSpline::all_curves).collect();
         let reserved: HashSet<_> = self.biarc_splines.iter().filter(|spline| selected(spline)).flat_map(BiarcSpline::reserved_centers).collect();
+        let dependent = self.biarc_dependent_points();
         for curve in &self.curves {
             if released.contains(curve.id.as_str()) {
                 for index in curve.kind.point_ids() {
                     if index != 0
+                        && dependent.get(index).copied().unwrap_or(false)
                         && let Some(point) = self.points.get_mut(index)
                     {
                         point.fixed = false;

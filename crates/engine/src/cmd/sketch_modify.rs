@@ -2026,22 +2026,19 @@ fn uses(c: &Curve, p: usize) -> bool {
 // ---------------------------------------------------------------------------------------------
 // Corners: fillet and chamfer
 
-/// A corner drawn as two curves whose ends are separate points held together by a Coincident
-/// constraint (a line drawn to where an arc starts, #1208) becomes one shared point, so it can be
-/// rounded or cut like a corner drawn through one point. Only a partner held by nothing but that
-/// constraint is welded; anything else is left as it is.
-fn weld_corner(sk: &mut Sketch, p: &Value) {
+/// The point kept by a coincidence weld; curves already sharing a point need no weld.
+fn corner_weld_point(sk: &Sketch, p: &Value) -> Option<usize> {
     let ends = |sk: &Sketch, c: usize| match sk.curves.get(c).map(|c| &c.kind) {
         Some(CurveKind::Line { a, b }) | Some(CurveKind::Arc { a, b, .. }) => Some([*a, *b]),
         _ => None,
     };
-    let q = if let Some(r) = str_(p, "point") {
+    if let Some(r) = str_(p, "point") {
         sk.resolve_point(r)
     } else {
         let curve = |k: &str| str_(p, k).and_then(|i| sk.curve_index(i)).and_then(|c| ends(sk, c));
-        let (Some(ea), Some(eb)) = (curve("a"), curve("b")) else { return };
+        let (Some(ea), Some(eb)) = (curve("a"), curve("b")) else { return None };
         if ea.iter().any(|x| eb.contains(x)) {
-            return;
+            return None;
         }
         // The end of `a` held coincident with an end of `b`.
         ea.into_iter().find(|x| {
@@ -2049,27 +2046,39 @@ fn weld_corner(sk: &mut Sketch, p: &Value) {
                 .iter()
                 .any(|k| matches!(k.kind, ConstraintKind::Coincident { p, q } if (p == *x && eb.contains(&q)) || (q == *x && eb.contains(&p))))
         })
-    };
-    let Some(mut q) = q else { return };
+    }
+}
+
+/// The next partner the weld can merge into the corner. The preflight follows the same
+/// constraints with every point already reached standing for the one welded corner.
+fn corner_weld_partner(sk: &Sketch, at_corner: impl Fn(usize) -> bool) -> Option<usize> {
+    sk.constraints.iter().find_map(|k| {
+        let o = match k.kind {
+            ConstraintKind::Coincident { p, q } if at_corner(p) && !at_corner(q) => q,
+            ConstraintKind::Coincident { p, q } if at_corner(q) && !at_corner(p) => p,
+            _ => return None,
+        };
+        // What else holds the partner (a dimension measuring to the corner, #7507) holds
+        // the corner instead: the two are one place. Not where that would name the corner
+        // twice in one constraint (other than a repeat of this coincidence).
+        let twice = sk.constraints.iter().any(|other| {
+            let points = other.kind.indices().0;
+            !matches!(other.kind, ConstraintKind::Coincident { .. }) && points.contains(&o) && points.iter().any(|&p| at_corner(p))
+        });
+        let linked = (0..sk.curves.len()).any(|c| sk.is_linked_curve(c) && sk.curves.get(c).is_some_and(|x| x.kind.uses(o)));
+        (o != 0 && !twice && !linked).then_some(o)
+    })
+}
+
+/// A corner drawn as two curves whose ends are separate points held together by a Coincident
+/// constraint (a line drawn to where an arc starts, #1208) becomes one shared point, so it can be
+/// rounded or cut like a corner drawn through one point. Only a partner held by nothing but that
+/// constraint is welded; anything else is left as it is.
+fn weld_corner(sk: &mut Sketch, p: &Value) {
+    let Some(mut q) = corner_weld_point(sk, p) else { return };
     // Each pass welds one partner; a pass removes a constraint, so this ends.
     for _ in 0..sk.constraints.len() {
-        let partner = sk.constraints.iter().find_map(|k| {
-            let o = match k.kind {
-                ConstraintKind::Coincident { p, q: r } if p == q && r != q => r,
-                ConstraintKind::Coincident { p, q: r } if r == q && p != q => p,
-                _ => return None,
-            };
-            // What else holds the partner (a dimension measuring to the corner, #7507) holds
-            // the corner instead: the two are one place. Not where that would name the corner
-            // twice in one constraint (other than a repeat of this coincidence).
-            let twice = sk.constraints.iter().any(|other| {
-                let points = other.kind.indices().0;
-                !matches!(other.kind, ConstraintKind::Coincident { .. }) && points.contains(&o) && points.contains(&q)
-            });
-            let linked = (0..sk.curves.len()).any(|c| sk.is_linked_curve(c) && sk.curves.get(c).is_some_and(|x| x.kind.uses(o)));
-            (o != 0 && !twice && !linked).then_some(o)
-        });
-        let Some(o) = partner else { return };
+        let Some(o) = corner_weld_partner(sk, |p| p == q) else { return };
         for c in sk.curves.iter_mut() {
             c.kind.map_points(&|x| if x == o { q } else { x });
         }
@@ -2157,17 +2166,22 @@ fn release_corner_offsets(sk: &mut Sketch, doc: &solidcraft_doc::Document, corne
 }
 
 fn refuse_biarc_corner(sk: &Sketch, p: &Value, cmd: &str) -> Result<()> {
+    if sk.biarc_splines.is_empty() {
+        return Ok(());
+    }
     let mut points = std::collections::BTreeSet::new();
-    if let Some(point) = str_(p, "point").and_then(|id| sk.resolve_point(id)) {
+    if let Some(point) = corner_weld_point(sk, p) {
         points.insert(point);
-        for k in &sk.constraints {
-            if let ConstraintKind::Coincident { p, q } = k.kind {
-                if p == point {
-                    points.insert(q);
-                } else if q == point {
-                    points.insert(p);
-                }
-            }
+        for _ in 0..sk.constraints.len() {
+            let Some(partner) = corner_weld_partner(sk, |p| points.contains(&p)) else { break };
+            points.insert(partner);
+        }
+    } else {
+        // Curves already sharing their corner do not need a weld, but cutting that corner
+        // still changes every curve using it.
+        let ends = |key| str_(p, key).and_then(|id| sk.curve_index(id)).and_then(|c| sk.curves.get(c)).and_then(|c| c.kind.ends());
+        if let (Some((a, b)), Some((c, d))) = (ends("a"), ends("b")) {
+            points.extend([a, b].into_iter().filter(|&q| q == c || q == d));
         }
     }
     let names = ["a", "b"].into_iter().filter_map(|key| str_(p, key));
