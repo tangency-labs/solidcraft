@@ -1530,6 +1530,46 @@ impl Assembly<'_> {
         self.use_at(fi, li, v)
     }
 
+    /// Vertex `vb`, which the file puts a hair off the ruling through vertex `va` (within the
+    /// tolerance, as two loops' start vertices written to their own rounding are), moved onto that
+    /// ruling at its own height. The seam is then the ruling itself, an isoline of the surface,
+    /// with a vertex at each end. Left as the line between the two points, it slants across the
+    /// surface's seam by that hair, so the vertex that is off the seam line is a vertex "near the
+    /// seam" to SMLib's check ("Face Near missing Seam"), which the isoline's end vertices are
+    /// not. The vertex's tolerance is raised to cover its move and the ends of the edges that
+    /// already meet it, as a new edge's covers its gap.
+    /// A vertex already on the ruling (to 1e-10 mm), or one the surface cannot place there, stays as it is.
+    fn seat_on_ruling(&mut self, va: u32, vb: u32, d: usize, eval: &SurfaceEval) -> R<()> {
+        let (pa, pb) = (self.vpoint(va)?, self.vpoint(vb)?);
+        let Some(qa) = eval.project(pa, None, f64::INFINITY) else { return Ok(()) };
+        let Some(mut q) = eval.project(pb, Some(qa), f64::INFINITY) else { return Ok(()) };
+        let (Some(&ua), Some(slot)) = (qa.get(d), q.get_mut(d)) else { return Ok(()) };
+        // Along the ruling's own angle, by the short way round when the two sit either side of
+        // the surface's period.
+        *slot += wrap(ua - *slot);
+        let Some(on) = eval.point(q) else { return Ok(()) };
+        let gap = on.dist(pb);
+        if !(gap > 1e-10 && gap <= self.tol) {
+            return Ok(());
+        }
+        // The edges already ending at the vertex keep their ends where they were: its tolerance
+        // covers each end's distance from where the vertex now is, as `new_edge` covers a new one's.
+        let mut widest = 1.5 * gap;
+        for e in self.edges.iter().filter(|e| e.vertices.contains(&vb)) {
+            let c = CurveEval::new(&e.curve).map_err(|m| m.to_string())?;
+            for (t, v) in e.interval.into_iter().zip(e.vertices) {
+                if v == vb {
+                    let end = c.point(t).ok_or("edge end")?;
+                    widest = widest.max(1.5 * end.dist(on));
+                }
+            }
+        }
+        let x = self.vertices.get_mut(vb as usize).ok_or("vertex reference")?;
+        x.point = arr(on);
+        x.tolerance = x.tolerance.max(widest);
+        Ok(())
+    }
+
     /// Join loops `la` (running +u) and `lb` (running −u) of face `fi` by a seam.
     fn band_seam(&mut self, fi: usize, la: usize, lb: usize, ax: &Axis, eval: &SurfaceEval, splits: &mut usize) -> R<()> {
         // The parameter the loops wind in: u, or v round a torus's tube.
@@ -1630,6 +1670,10 @@ impl Assembly<'_> {
             }
         }
         if let Some((i, j)) = pair {
+            if ax.kind == Kind::Ruled {
+                let (va, vb) = (self.start(*a_es.get(i).ok_or("loop reference")?)?, self.start(*b_es.get(j).ok_or("loop reference")?)?);
+                self.seat_on_ruling(va, vb, d, eval)?;
+            }
             return self.join_by_seam(fi, la, lb, i, j, ax, eval);
         }
         // A vertex of one loop and where the ruling (or meridian) through it meets the other.
