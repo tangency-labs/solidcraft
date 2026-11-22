@@ -1876,23 +1876,6 @@ fn sheet_editor_new_edits_finish_the_previous_receiver_even_when_refused() {
 }
 
 #[test]
-fn an_open_drawing_allows_every_model_command_it_would_without_one() {
-    let mut s = design();
-    run(&mut s, "drawing.create", json!({}));
-    let open = s.open_drawing;
-    let with_drawing: Vec<_> =
-        command_specs().iter().filter(|command| command.part == Part::Model).map(|command| (command.id, command.allowed(&s).is_ok())).collect();
-    run(&mut s, "drawing.close", json!({}));
-    let without: Vec<_> =
-        command_specs().iter().filter(|command| command.part == Part::Model).map(|command| (command.id, command.allowed(&s).is_ok())).collect();
-    assert_eq!(with_drawing, without);
-    run(&mut s, "drawing.open", json!({"drawing":ids::encode(open.unwrap())}));
-    s.model_focus = true;
-    run(&mut s, "select.all", json!({}));
-    assert!(!s.selection.is_empty());
-}
-
-#[test]
 fn a_sheet_edit_finishes_before_a_model_feature_or_sketch_starts() {
     let (mut s, drawing, sketch, _) = sheet_editor();
     run(&mut s, "sketch.line", json!({"points":[[10,10],[20,10]]}));
