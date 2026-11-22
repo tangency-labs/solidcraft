@@ -970,6 +970,27 @@ fn a_hole_picked_on_a_turned_part_drills_it_past_other_parts_frames() {
     assert!(wrong.is_empty(), "{wrong:#?}");
 }
 
+/// Cap is turned 180° about Z and moved 10 mm along -X: its (x, y, z) is shown at (-x - 10, -y, z).
+#[test]
+fn a_hole_by_reference_edges_on_a_turned_part_finds_its_edges() {
+    let bore = std::f64::consts::PI * 2.0 * 2.0 * 5.0;
+    let mut s = Session::default();
+    run(&mut s, "component.create", json!({"name": "Base", "grounded": false}));
+    run(&mut s, "solid.box", json!({"length": 40, "width": 30, "height": 10, "body_name": "Base block"}));
+    run(&mut s, "component.create", json!({"name": "Cap", "parent": "root"}));
+    run(&mut s, "solid.box", json!({"length": 40, "width": 30, "height": 10, "body_name": "Cap block"}));
+    run(&mut s, "component.activate", json!({"component": "root"}));
+    run(&mut s, "occurrence.move", json!({"occurrence": "Cap:1", "axis": [0, 0, 1], "angle": "180 deg", "translate": [-10, 0, 0]}));
+    let references = json!([{"edge": [-10, -15, 10], "distance": 10}, {"edge": [-30, 0, 10], "distance": 12}]);
+    run(&mut s, "solid.hole", json!({"position": [-30, -15, 10], "diameter": 4, "depth": 5, "references": references, "name": "H"}));
+    let f = s.doc.find_feature("H").unwrap();
+    let solidcraft_doc::FeatureKind::Hole { position, .. } = &f.kind else { panic!("not a hole") };
+    assert!(near(position.0, Vec3::new(10.0, 12.0, 10.0)), "{:?}", position.0);
+    assert_eq!(body_volume(&s, "Base block"), BLOCK);
+    let cap = body_volume(&s, "Cap block");
+    assert!((cap - (BLOCK - bore)).abs() < 1e-6 * BLOCK, "{cap}");
+}
+
 /// Where the edges of two parts lie in one place in the world, a pick without `body` is refused,
 /// naming both; with `body`, or a pick's own `body`, the named part is cut.
 #[test]
