@@ -715,6 +715,76 @@ fn modern_property_fields_on_a_text_layer_are_text() {
     assert_eq!(footprint.texts[0].at, [0.0, -3.0, 0.0]);
 }
 
+/// The bounds of the front pads' copper when `footprint` is the only copper on a 40 mm board.
+fn front_pad_bounds(footprint: &str) -> [f64; 4] {
+    let source = format!(r#"(kicad_pcb (general (thickness 1.6)) (gr_rect (start -20 -20) (end 20 20) (layer "Edge.Cuts")) {footprint})"#);
+    let options = KicadOptions { copper: KicadCopper::Mesh, silkscreen: false, components: false, ..Default::default() };
+    let mut load = |_: &str| Err("not used".to_string());
+    let imported = read_kicad(source.as_bytes(), "pads.kicad_pcb", &options, &mut load).unwrap();
+    let solidcraft_doc::FeatureKind::MeshImport { meshes, .. } = imported.feature.kind else { panic!("expected a mesh import") };
+    // Plated pads have a body of their own; others are in the layer's copper.
+    let pads = meshes.iter().find(|m| m.name == "Copper F.Cu pads").or_else(|| meshes.iter().find(|m| m.name == "Copper F.Cu"));
+    bounds(pads.unwrap_or_else(|| panic!("no front copper: {:?}", meshes.iter().map(|m| &m.name).collect::<Vec<_>>())))
+}
+
+/// KiCad stores a pad's rotation on the board (the footprint's rotation already added), as KiCad
+/// 10 draws it: on a footprint turned a quarter turn, a 2 × 0.5 mm pad written at 90° stands up and
+/// one written at 0° lies flat. Its position still turns with the footprint: (3, 0) in a
+/// footprint turned 90° is 3 mm up the board.
+#[test]
+fn pads_on_a_turned_footprint_keep_their_own_rotation() {
+    let pad = |at: &str| {
+        front_pad_bounds(&format!(r#"(footprint "P" (layer "F.Cu") (at 0 0 90) (pad "1" smd rect (at {at}) (size 2 0.5) (layers "F.Cu")))"#))
+    };
+    let close = |a: [f64; 4], b: [f64; 4]| a.iter().zip(&b).all(|(x, y)| (x - y).abs() < 1e-6);
+    let upright = pad("0 0 90");
+    assert!(close(upright, [-0.25, -1.0, 0.25, 1.0]), "{upright:?}");
+    let flat = pad("0 0 0");
+    assert!(close(flat, [-1.0, -0.25, 1.0, 0.25]), "{flat:?}");
+    let moved = pad("3 0 90");
+    assert!(close(moved, [-0.25, 2.0, 0.25, 4.0]), "{moved:?}");
+}
+
+/// A slotted hole lies along its pad: on a footprint turned a quarter turn, an oval pad and its
+/// 2 × 0.8 mm slot written at 90° stand up. The drill's angle, the outline traces stop at, the hole
+/// cut through the board, the hole opened in the pad's copper and the pad itself are all checked.
+#[test]
+fn a_slot_on_a_turned_footprint_lies_along_its_pad() {
+    let source = r#"(kicad_pcb (general (thickness 1.6)) (gr_rect (start -20 -20) (end 20 20) (layer "Edge.Cuts"))
+      (footprint "S" (layer "F.Cu") (at 0 0 90)
+        (pad "1" thru_hole oval (at 0 0 90) (size 3 1.5) (drill oval 2 0.8) (layers "*.Cu" "*.Mask"))))"#;
+    let board = parse_kicad_board(source.as_bytes(), "slot.kicad_pcb").unwrap();
+    let [drill] = board.drills.as_slice() else { panic!("one drill: {:?}", board.drills) };
+    assert!((drill.angle.sin().abs() - 1.0).abs() < 1e-9, "the slot stands up the board: {drill:?}");
+    let [outline] = drill_outlines(&board).try_into().unwrap_or_else(|o: Vec<_>| panic!("one outline: {}", o.len()));
+    let (xs, ys): (Vec<f64>, Vec<f64>) = outline.iter().map(|p| (p[0], p[1])).unzip();
+    let width = xs.iter().cloned().fold(f64::MIN, f64::max) - xs.iter().cloned().fold(f64::MAX, f64::min);
+    let height = ys.iter().cloned().fold(f64::MIN, f64::max) - ys.iter().cloned().fold(f64::MAX, f64::min);
+    assert!((width - 0.8).abs() < 1e-3 && (height - 2.0).abs() < 1e-3, "{width} × {height}");
+    // The hole cut through the board and the hole opened in the pad's copper stand up too: both read
+    // the drill's angle, and a hole that ignored it would be 2 mm wide and 0.8 mm tall.
+    let corners = [[-20.0, -20.0], [20.0, -20.0], [20.0, 20.0], [-20.0, 20.0]];
+    let square = Loop2::polygon(&corners.map(|[x, y]| Vec2::new(x, y)));
+    let extent = |hole: &Loop2| {
+        let (xs, ys): (Vec<f64>, Vec<f64>) = hole.polyline(1e-3).to_vec().into_iter().map(|p| (p.x, p.y)).unzip();
+        let span = |v: &[f64]| v.iter().cloned().fold(f64::MIN, f64::max) - v.iter().cloned().fold(f64::MAX, f64::min);
+        (span(&xs), span(&ys))
+    };
+    let regions = regions_from_loops(vec![square.clone()], Some(&board.drills));
+    let [region] = regions.as_slice() else { panic!("one region: {}", regions.len()) };
+    let [board_hole] = region.holes.as_slice() else { panic!("one hole in the board: {}", region.holes.len()) };
+    let (w, h) = extent(board_hole);
+    assert!((w - 0.8).abs() < 1e-3 && (h - 2.0).abs() < 1e-3, "the hole through the board: {w} × {h}");
+    let pad_hole = pad_holes(&square, &corners, &board.drills);
+    let [pad_hole] = pad_hole.as_slice() else { panic!("one hole in the pad: {}", pad_hole.len()) };
+    let (w, h) = extent(pad_hole);
+    assert!((w - 0.8).abs() < 1e-3 && (h - 2.0).abs() < 1e-3, "the hole in the pad's copper: {w} × {h}");
+    let pads = front_pad_bounds(
+        r#"(footprint "S" (layer "F.Cu") (at 0 0 90) (pad "1" thru_hole oval (at 0 0 90) (size 3 1.5) (drill oval 2 0.8) (layers "*.Cu" "*.Mask")))"#,
+    );
+    assert!((pads[2] - pads[0] - 1.5).abs() < 1e-6 && (pads[3] - pads[1] - 3.0).abs() < 1e-6, "{pads:?}");
+}
+
 #[test]
 fn copper_overlay_is_a_flat_face_on_the_board() {
     let source = r#"(kicad_pcb (general (thickness 1.6))
