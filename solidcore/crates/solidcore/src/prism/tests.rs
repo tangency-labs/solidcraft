@@ -11,7 +11,7 @@
 
 use std::f64::consts::{FRAC_1_SQRT_2, FRAC_PI_2, PI, TAU};
 
-use super::extrude::extrude_region;
+use super::extrude::{extrude_region, symmetric_offset_intervals, symmetric_offset_probe_points};
 use super::measure::{equivalent, section};
 use super::placement::LoopPlacement;
 use super::profile::rational_curve;
@@ -44,6 +44,45 @@ fn xy() -> Frame {
 
 fn p(x: f64, y: f64) -> Point2 {
     Vec2::new(x, y)
+}
+
+#[test]
+fn chord_coordinates_preserve_aspect_ratio_and_refuse_unrepresentable_inputs() {
+    use super::import_geometry::chord_coordinates;
+
+    // c = 1.5 - 0.25 = 1.25; 0.625/c = 0.5, 0.15625/c = 0.125.
+    assert_eq!(
+        chord_coordinates(p(0.875, 0.15625), 0.25, 1.5).unwrap(),
+        p(0.5, 0.125)
+    );
+    assert_eq!(
+        chord_coordinates(p(0.25, 0.0), 0.25, 1.5).unwrap(),
+        Vec2::ZERO
+    );
+    assert_eq!(
+        chord_coordinates(p(1.5, 0.0), 0.25, 1.5).unwrap(),
+        p(1.0, 0.0)
+    );
+    assert_eq!(
+        chord_coordinates(p(0.5, -0.125), 0.0, 1.0).unwrap(),
+        p(0.5, -0.125)
+    );
+    for (point, leading, trailing) in [
+        (p(0.0, 0.0), 0.0, 0.0),
+        (p(0.0, 0.0), 1.0, 0.0),
+        (p(f64::NAN, 0.0), 0.0, 1.0),
+        (p(0.0, f64::INFINITY), 0.0, 1.0),
+        (p(0.0, 0.0), f64::NEG_INFINITY, 1.0),
+        (p(0.0, 0.0), 0.0, f64::INFINITY),
+        (p(0.0, 0.0), -f64::MAX, f64::MAX),
+        (p(f64::MAX, 0.0), -f64::MAX, 0.0),
+        (p(0.0, 1.0), 0.0, f64::from_bits(1)),
+    ] {
+        assert!(
+            chord_coordinates(point, leading, trailing).is_err(),
+            "{point:?}, {leading}, {trailing}"
+        );
+    }
 }
 
 fn polygon(pts: &[Point2]) -> Loop2 {
@@ -2906,4 +2945,31 @@ mod path_export_regressions {
         assert!(!pts.contains(&Vec2::new(0.0, -1.0)));
         assert_eq!(pts.len(), 5);
     }
+}
+
+#[test]
+fn symmetric_offset_intervals_and_probes_are_symmetric_about_sketch_plane() {
+    assert_eq!(
+        symmetric_offset_intervals(3.0, 5.0),
+        [(3.0, 8.0), (-8.0, -3.0)]
+    );
+    assert_eq!(
+        symmetric_offset_intervals(-3.0, 5.0),
+        [(3.0, 8.0), (-8.0, -3.0)]
+    );
+
+    // `base` in auto-operation is already shifted by `start` along `n`.
+    let n = [0.0, 0.0, 1.0];
+    let pos_start_probes = symmetric_offset_probe_points([0.0, 0.0, 3.0], n, 3.0, 10.0, 0.5);
+    assert_eq!(
+        pos_start_probes,
+        [
+            [0.0, 0.0, 3.5],
+            [0.0, 0.0, 5.5],
+            [0.0, 0.0, -3.5],
+            [0.0, 0.0, -5.5],
+        ]
+    );
+    let neg_start_probes = symmetric_offset_probe_points([0.0, 0.0, -3.0], n, -3.0, 10.0, 0.5);
+    assert_eq!(neg_start_probes, pos_start_probes);
 }

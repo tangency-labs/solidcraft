@@ -1308,7 +1308,7 @@
 {"case":"rational_kind9_1_seam_hi","deferred":null,"error":null,"ints":{"discrete":[0,2]},"topology":null,"values":{"geometry":[1.0,5.00000000000052e-13,0.0,1.0,0.5,8.838834764831846e-14,0.5,1.0]}}
 {"case":"rational_kind9_1_seam_lo","deferred":null,"error":null,"ints":{"discrete":[0,2]},"topology":null,"values":{"geometry":[1.0,0.0,0.0,1.0,0.5,0.0,0.5,0.9999999999999116]}}
 {"case":"rational_kind9_1_south","deferred":null,"error":null,"ints":{"discrete":[0,2]},"topology":null,"values":{"geometry":[0.0,0.0,-1.0,0.0,1.0,0.0,1.0,1.0]}}
-{"case":"rational_kind9_1e-05_axis","deferred":null,"error":null,"ints":{"discrete":[0,2]},"topology":null,"values":{"geometry":[2.303136548365852e-22,1.9141243980630548e-22,0.00001,9.999999999999999e-6,1.058791184067875e-17,0.1111111111111111,1.058791184067875e-17,1.0]}}
+{"case":"rational_kind9_1e-05_axis","deferred":null,"error":null,"ints":{"discrete":[0,2]},"topology":null,"values":{"geometry":[5.858159241598321e-22,1.0448680923778719e-21,9.999999999999999e-6,9.999999999999999e-6,4.2351647362715e-17,0.16666666666666666,4.2351647362715e-17,1.0]}}
 {"case":"rational_kind9_1e-05_north","deferred":null,"error":null,"ints":{"discrete":[0,2]},"topology":null,"values":{"geometry":[0.0,0.0,0.00001,0.0,0.0,0.0,0.0,1.0]}}
 {"case":"rational_kind9_1e-05_outside","deferred":null,"error":null,"ints":{"discrete":[0,2]},"topology":null,"values":{"geometry":[0.000010000000000000003,0.0,1.5700924586837757e-21,9.999999999999999e-6,0.49999999999999994,0.0,0.49999999999999994,1.0]}}
 {"case":"rational_kind9_1e-05_seam_hi","deferred":null,"error":null,"ints":{"discrete":[0,2]},"topology":null,"values":{"geometry":[0.00001,0.0,0.0,0.00001,0.5,0.0,0.5,1.0]}}

@@ -79,6 +79,10 @@
 //! completes the merged face's seam (`HasSeamProblem`, then `SplitAtSeam`:
 //! [`crate::topology::face::p1::complete_merged_face_seam`]), as the boolean cleanup does
 //! under WR-599: a merged face on a periodic surface keeps its seam whatever the fix set.
+//! Not upstream (#18166): [`stitch_and_orient`] keeps each edge its stitch raised covering
+//! the faces it holds no trim on across the orientation, which rewrites their surfaces
+//! (`StitchRaises`). Not upstream (#20373): after the orientation each edge the stitch
+//! joined covers its UV trims as the B-rep ends with them.
 
 use crate::curve::curve::Curve;
 use crate::error::{Result, SolidError};
@@ -98,7 +102,10 @@ use crate::topology::brep::p1::SetRegionVoidType;
 use crate::topology::brep::p2 as brep_p2;
 use crate::topology::face::p4 as face_p4;
 use crate::topology::VertexuseId;
-use crate::topology::{vertex, Brep, EdgeId, FaceId, LoopId, RegionId, ShellId, VertexId};
+use crate::topology::{
+    vertex, Brep, EdgeId, FaceId, FaceuseId, LoopId, RegionId, ShellId, VertexId,
+};
+use std::collections::BTreeMap;
 
 /// A pending topology allocation with attributes borrowed from a database reader.
 /// On failure/drop, detaches each attribute with native `bDoNotDelete = TRUE`
@@ -1092,8 +1099,9 @@ pub(crate) fn cover_joined_line_gaps(k: &Kernel, b: &mut Brep, e: EdgeId) -> Res
 /// curve over the stretch, which is the same curve exactly (WR-598); on a procedural
 /// blend, which evaluates its definition rather than its net, only while the net's
 /// certified bound is within `tolerance`, the joined edge's. Any other curve is `None`;
-/// upstream dereferences the null cast instead.
-fn exact_bspline_of_edge(
+/// upstream dereferences the null cast instead. Import seam completion also uses this
+/// extraction at tolerance zero, then maps the iso's parameter back onto its edge interval.
+pub(crate) fn exact_bspline_of_edge(
     k: &Kernel,
     b: &Brep,
     edge: EdgeId,
@@ -2463,6 +2471,74 @@ fn make_manifold_in(
     result
 }
 
+/// (not upstream, #18570) Whether each region of `b` is void, read from its faces: in a
+/// solid every face has material on one side and void on the other, so the flags
+/// alternate across faces, starting from the infinite region (void). A region of a
+/// hollowed body that only the cavity's faces bound is void; one that faces reach from
+/// the outside in one step is material. Regions no face reaches are left out. `None`
+/// where there is no infinite region, or where the faces do not alternate: a face with
+/// one region on both sides, or two regions a face divides that would both be void or
+/// both material.
+///
+/// # Errors
+///
+/// Those of the face, face use and shell queries.
+pub(crate) fn alternating_void_flags(b: &Brep) -> Result<Option<BTreeMap<RegionId, bool>>> {
+    let Some(infinite) = b.infinite_region() else {
+        return Ok(None);
+    };
+    let mut across: BTreeMap<RegionId, Vec<RegionId>> = BTreeMap::new();
+    for face in brep_faces(b)? {
+        let (first, last) = face_shells(b, face)?;
+        let (Some(r1), Some(r2)) = (b.shell(first)?.region, b.shell(last)?.region) else {
+            return Ok(None);
+        };
+        if r1 == r2 {
+            return Ok(None);
+        }
+        across.entry(r1).or_default().push(r2);
+        across.entry(r2).or_default().push(r1);
+    }
+    let mut void = BTreeMap::from([(infinite, true)]);
+    let mut todo = vec![infinite];
+    while let Some(region) = todo.pop() {
+        let flag = void.get(&region).copied().unwrap_or(true);
+        for &next in across.get(&region).map_or(&[][..], Vec::as_slice) {
+            match void.get(&next) {
+                Some(&other) if other == flag => return Ok(None),
+                Some(_) => {}
+                None => {
+                    void.insert(next, !flag);
+                    todo.push(next);
+                }
+            }
+        }
+    }
+    Ok(Some(void))
+}
+
+/// (not upstream, #18570) Sets each region's void flag as [`alternating_void_flags`]
+/// reads it, where it reads one; a region it does not reach, and every region where it
+/// reads none, keeps its flag. Whether any flag changed.
+///
+/// # Errors
+///
+/// Those of [`alternating_void_flags`].
+pub(crate) fn set_alternating_void_flags(b: &mut Brep) -> Result<bool> {
+    let Some(flags) = alternating_void_flags(b)? else {
+        return Ok(false);
+    };
+    let mut changed = false;
+    for (region, is_void) in flags {
+        let value = i32::from(is_void);
+        if b.region(region)?.is_void() != value {
+            b.region_mut(region)?.set_is_void(value);
+            changed = true;
+        }
+    }
+    Ok(changed)
+}
+
 /// Sets `m_bEditingEnabled`, returning the previous value.
 fn set_editing_enabled(b: &mut Brep, enabled: bool) -> bool {
     let previous = b.editing_enabled();
@@ -2838,7 +2914,153 @@ pub fn stitch_and_orient_with_identity(
     options: &StitchAndOrientOptions,
     identity: Option<crate::query::brep::BrepIdentity<'_>>,
 ) -> Result<()> {
+    stitch_and_orient_searching(k, b, options, identity, None, true)
+}
+
+/// [`stitch_and_orient_with_identity`] of the faces of one solid, in a B-rep that held
+/// nothing else, of which `outside` is a face use on the solid's outside. The glue that
+/// closes the solid's shell makes the half of the split region that face use is in the
+/// infinite one, where upstream's fires a ray to find it
+/// ([`crate::heal::stitch::p1::Stitch::outside`]); the stitch's end searches as ever. Not
+/// upstream. The caller answers for the premise, which is why this is not an option of
+/// [`StitchAndOrientOptions`]: a B-rep that already holds a face, a wire or a loose
+/// vertex has shells the closing glue's search places, and a face use that is not on the
+/// outside names the wrong half.
+///
+/// # Errors
+///
+/// Those of [`stitch_and_orient`].
+pub(crate) fn stitch_and_orient_one_solid(
+    k: &mut Kernel,
+    b: &mut Brep,
+    options: &StitchAndOrientOptions,
+    identity: Option<crate::query::brep::BrepIdentity<'_>>,
+    outside: FaceuseId,
+) -> Result<()> {
+    stitch_and_orient_searching(k, b, options, identity, Some(outside), true)
+}
+
+/// Not upstream (#18166): the edge tolerances of a B-rep before [`stitch_and_orient`]'s
+/// stitch, to find the edges the stitch raised. The stitch covers the faces its joins give an
+/// edge when it ends ([`crate::heal::stitch::p1::Stitch::finish_joins`]); the orientation
+/// that follows reverses surfaces (`OrientTrimmedSurfaces`), on which a face's proved bound
+/// comes out a rounding apart, so each raised edge's covered trimless faces are taken before
+/// the orientation ([`crate::topology::edgeuse::p3::covered_trimless_faces`]) and kept
+/// covered after it ([`crate::topology::edgeuse::p3::keep_trimless_faces_covered`]). Each
+/// edge the stitch joined (it holds more edge uses than before, or is new with two or more)
+/// covers its UV trims after the orientation, on the trims the B-rep ends with
+/// ([`crate::topology::edgeuse::p3::cover_joined_trims`], #20373).
+struct StitchRaises(BTreeMap<EdgeId, (u64, usize)>);
+
+impl StitchRaises {
+    /// The tolerance and the number of edge uses of every edge of `b`.
+    fn before(b: &Brep) -> Self {
+        Self(
+            b.edges()
+                .iter()
+                .map(|(e, rec)| (e, (rec.tolerance.to_bits(), rec.edgeuses.len())))
+                .collect(),
+        )
+    }
+
+    /// The edges of `b` the stitch joined, holding more edge uses than
+    /// [`StitchRaises::before`] (a new edge: two or more), whatever their tolerance did, in
+    /// the B-rep's edge order: an edge the join raised (`UpdateObjectTolerance`) but no face
+    /// bound did covers its trims nowhere else, and one a face bound raised covered them on
+    /// the trims before the orientation; covering again only raises where a trim needs it.
+    fn joined(&self, b: &Brep) -> Vec<EdgeId> {
+        b.edges()
+            .iter()
+            .filter(|(e, rec)| match self.0.get(e) {
+                Some(&(_, uses)) => rec.edgeuses.len() > uses,
+                None => rec.edgeuses.len() >= 2,
+            })
+            .map(|(e, _)| e)
+            .collect()
+    }
+
+    /// The faces each edge of `b` raised since [`StitchRaises::before`] (or made since)
+    /// covers without a trim; empty where they cannot be bounded (left as upstream).
+    ///
+    /// # Errors
+    ///
+    /// The kernel's unported and cancelled statuses.
+    fn covered(&self, k: &Kernel, b: &Brep) -> Result<Vec<(EdgeId, FaceId)>> {
+        let raised: Vec<EdgeId> = b
+            .edges()
+            .iter()
+            .filter(|(e, rec)| {
+                self.0
+                    .get(e)
+                    .is_none_or(|&(was, _)| rec.tolerance > f64::from_bits(was))
+            })
+            .map(|(e, _)| e)
+            .collect();
+        Ok(
+            crate::error::ignored(crate::topology::edgeuse::p3::covered_trimless_faces(
+                k, b, &raised,
+            ))?
+            .unwrap_or_default(),
+        )
+    }
+}
+
+/// Not upstream (#18166, #20373): [`StitchRaises`]' covers after the orientation: the
+/// trimless faces of the raised edges (`covered`), then the UV trims of the joined edges
+/// (`joined`).
+///
+/// # Errors
+///
+/// The kernel's unported and cancelled statuses.
+fn keep_stitch_raises(
+    k: &Kernel,
+    b: &mut Brep,
+    covered: &[(EdgeId, FaceId)],
+    joined: &[EdgeId],
+) -> Result<()> {
+    crate::error::ignored(crate::topology::edgeuse::p3::keep_trimless_faces_covered(
+        k, b, covered,
+    ))?;
+    crate::topology::edgeuse::p3::cover_joined_trims(k, b, joined)
+}
+
+/// [`stitch_and_orient_with_identity`] of faces whose lamina edges are the body's open
+/// boundary by construction: the first pass only. Upstream runs a second pass, at ten or
+/// twenty times the first's tolerance, whenever the first leaves more than one lamina
+/// edge, and that pass squeezes out every open edge shorter than its tolerance that is
+/// lamina or wire (`squeeze_small_edges`, with `making_manifold_solid` as the primitives
+/// stitch). For the walls of an uncapped sweep the lamina edges are the profile's copies
+/// at its ends, so the first pass's count says nothing about a gap. There the second pass
+/// squeezed out a profile edge between the two tolerances, and its wall's loop was left
+/// open by the edge's length in 3D and the wall's whole width in UV. Walls whose edges lie
+/// apart by more than the first tolerance stay apart, as an open slit; the second pass
+/// glued them without covering the gap, and the check refused the sheet. Not upstream
+/// (WR-18515); the caller answers for the premise.
+///
+/// # Errors
+///
+/// Those of [`stitch_and_orient`].
+pub(crate) fn stitch_and_orient_open(
+    k: &mut Kernel,
+    b: &mut Brep,
+    options: &StitchAndOrientOptions,
+    identity: Option<crate::query::brep::BrepIdentity<'_>>,
+) -> Result<()> {
+    stitch_and_orient_searching(k, b, options, identity, None, false)
+}
+
+/// The stitch passes and the orientation; with `second_pass`, a second pass at the larger
+/// tolerance when the first leaves more than one lamina edge.
+fn stitch_and_orient_searching(
+    k: &mut Kernel,
+    b: &mut Brep,
+    options: &StitchAndOrientOptions,
+    identity: Option<crate::query::brep::BrepIdentity<'_>>,
+    outside: Option<FaceuseId>,
+    second_pass: bool,
+) -> Result<()> {
     k.check_cancelled(OP)?;
+    let raises = StitchRaises::before(b);
     let mut lamina = 0;
     let mut tolerance = initial_stitch_tolerance(b.tolerance(), options.stitch_tolerance);
     stitch_faces(
@@ -2848,8 +3070,9 @@ pub fn stitch_and_orient_with_identity(
         options.allow_spine_edges,
         &mut lamina,
         identity,
+        outside,
     )?;
-    if lamina > 1 {
+    if second_pass && lamina > 1 {
         tolerance = if options.stitch_tolerance <= 0.0 {
             tolerance * 20.0
         } else {
@@ -2862,8 +3085,11 @@ pub fn stitch_and_orient_with_identity(
             options.allow_spine_edges,
             &mut lamina,
             identity,
+            outside,
         )?;
     }
+    let covered = raises.covered(k, b)?;
+    let joined = raises.joined(b);
     plain_edit(k, b, |k, b, env| {
         orient_trimmed_surfaces(
             k,
@@ -2874,7 +3100,8 @@ pub fn stitch_and_orient_with_identity(
             options.faces_to_swap.as_deref(),
         )?;
         Ok(())
-    })
+    })?;
+    keep_stitch_raises(k, b, &covered, &joined)
 }
 
 /// [`stitch_and_orient`] inside the caller's edit: the stitch passes and the orientation
@@ -2895,6 +3122,7 @@ pub(crate) fn stitch_and_orient_notified(
     curve_identity: crate::topology::brep::p9::CurveIdentity<'_>,
 ) -> Result<()> {
     k.check_cancelled(OP)?;
+    let raises = StitchRaises::before(b);
     let mut lamina = 0;
     let mut tolerance = initial_stitch_tolerance(b.tolerance(), options.stitch_tolerance);
     stitch_faces_notified(
@@ -2922,6 +3150,8 @@ pub(crate) fn stitch_and_orient_notified(
             curve_identity,
         )?;
     }
+    let covered = raises.covered(k, b)?;
+    let joined = raises.joined(b);
     orient_trimmed_surfaces(
         k,
         b,
@@ -2930,7 +3160,7 @@ pub(crate) fn stitch_and_orient_notified(
         options.just_unify.unwrap_or(lamina > 0),
         options.faces_to_swap.as_deref(),
     )?;
-    Ok(())
+    keep_stitch_raises(k, b, &covered, &joined)
 }
 
 /// [`stitch_faces`] editing through `env` ([`stitch_and_orient_notified`]).
@@ -2970,15 +3200,27 @@ fn stitch_faces(
     allow_spine: bool,
     lamina: &mut usize,
     identity: Option<crate::query::brep::BrepIdentity<'_>>,
+    outside: Option<FaceuseId>,
 ) -> Result<()> {
-    let out = crate::topology::brep::p4::stitch_faces_with_identity(
-        k,
-        b,
-        tolerance,
-        None,
-        allow_spine,
-        identity,
-    )?;
+    let out = if let Some(outside) = outside {
+        crate::topology::brep::p4::stitch_one_solid_with_identity(
+            k,
+            b,
+            tolerance,
+            allow_spine,
+            identity,
+            outside,
+        )?
+    } else {
+        crate::topology::brep::p4::stitch_faces_with_identity(
+            k,
+            b,
+            tolerance,
+            None,
+            allow_spine,
+            identity,
+        )?
+    };
     *lamina = usize::try_from(out.lamina_edges)
         .map_err(|_| SolidError::invalid_input(OP, "lamina edge count"))?;
     Ok(())
@@ -3018,7 +3260,10 @@ fn stitch_faces_reported(
 /// independent of the stitcher's sampled acceptance test and do not feed back
 /// into the construction. A caller decides whether the returned bounds suffice.
 /// On any error the B-rep is restored, including when certification fails after
-/// earlier closures. Errors are never suppressed by legacy status flags.
+/// earlier closures. Errors are never suppressed by legacy status flags. Not upstream
+/// (#20373): the B-rep ends with [`stitch_and_orient`]'s covers after the orientation
+/// (`StitchRaises`: the raised edges' trimless faces, the joined edges' trims), which the
+/// report, of the closures only, does not list.
 ///
 /// # Errors
 ///
@@ -3042,6 +3287,7 @@ fn stitch_and_orient_reported_inner(
     b: &mut Brep,
     options: &StitchAndOrientOptions,
 ) -> Result<Vec<ClosedGap>> {
+    let raises = StitchRaises::before(b);
     let mut lamina = 0;
     let mut gaps = Vec::new();
     let mut tolerance = initial_stitch_tolerance(b.tolerance(), options.stitch_tolerance);
@@ -3068,6 +3314,8 @@ fn stitch_and_orient_reported_inner(
             &mut gaps,
         )?;
     }
+    let covered = raises.covered(k, b)?;
+    let joined = raises.joined(b);
     plain_edit(k, b, |k, b, env| {
         orient_trimmed_surfaces(
             k,
@@ -3078,6 +3326,7 @@ fn stitch_and_orient_reported_inner(
             options.faces_to_swap.as_deref(),
         )
     })?;
+    keep_stitch_raises(k, b, &covered, &joined)?;
     Ok(gaps)
 }
 
@@ -3500,7 +3749,7 @@ fn turn_to_nurbs(
 ) -> Result<()> {
     with_p3_notifications(k, b, notifications, |k, b, env| {
         let key_of = env.key_of;
-        let mut selection = std::collections::BTreeMap::new();
+        let mut selection = BTreeMap::new();
         for entity in brep_faces(b)?
             .into_iter()
             .map(crate::EntityRef::Face)
@@ -3693,6 +3942,106 @@ mod tests {
             .expect("box")
     }
 
+    /// #20373: an edge the join itself raised (`UpdateObjectTolerance`), with
+    /// more edge uses than before the stitch, is one [`StitchRaises::joined`] gives, and
+    /// [`keep_stitch_raises`] (which the stitch runs after its orientation) covers its UV
+    /// trims and its vertices, though no face bound raised it. One of the box's line edges has a trim
+    /// moved `1e-4` off it in UV and its tolerance raised from the box's to twice that (as a
+    /// join raises it), below the moved trim's gap: the cover raises it over the gap. A
+    /// filter keeping only the joined edges whose tolerance did not rise left it uncovered.
+    #[test]
+    fn an_edge_the_join_raised_covers_its_trims() {
+        use crate::nurbs::b_spline_curve::BSplineCurve;
+        use crate::nurbs::crv_basic::Curve as NlCurve;
+        use crate::nurbs::math::{CPoint, NOW, NOZ};
+        let mut k = Kernel::default();
+        let mut b = status_box(&mut k);
+        let (e, x) = b
+            .edge_list()
+            .iter()
+            .find_map(|&e| {
+                let uses = &b.edge(e).unwrap().edgeuses;
+                let trimmed: Vec<crate::topology::EdgeuseId> = uses
+                    .iter()
+                    .copied()
+                    .filter(|&x| b.edgeuse(x).unwrap().uv_trim_curve.is_some())
+                    .collect();
+                (trimmed.len() >= 2).then(|| (e, trimmed[0]))
+            })
+            .expect("an edge trimmed on two faces");
+        let (iv, was) = {
+            let rec = b.edge(e).unwrap();
+            (rec.interval, rec.tolerance)
+        };
+        let [a, z] = [iv.min(), iv.max()].map(|t| {
+            b.edgeuse(x)
+                .unwrap()
+                .uv_trim_curve
+                .as_ref()
+                .unwrap()
+                .evaluate_point(&k, t)
+                .unwrap()
+        });
+        // Moved square to the trim, toward the middle of the plane's parameter box (a trim
+        // off the box is not bounded, and is left as upstream leaves it).
+        let f = crate::topology::edgeuse::p1::face(&b, x).unwrap().unwrap();
+        let surface = b.face(f).unwrap().surface.clone().unwrap();
+        let bx = surface.natural_uv_domain_if_built();
+        let (mx, my) = (0.5 * (bx.min.x + bx.max.x), 0.5 * (bx.min.y + bx.max.y));
+        let (nx, ny) = (a.y - z.y, z.x - a.x);
+        let len = (nx * nx + ny * ny).sqrt();
+        let toward = if (mx - a.x) * nx + (my - a.y) * ny >= 0.0 {
+            1.0
+        } else {
+            -1.0
+        };
+        let (dx, dy) = (toward * 1e-4 * nx / len, toward * 1e-4 * ny / len);
+        let pw = vec![
+            CPoint::new(a.x + dx, a.y + dy, NOZ, NOW),
+            CPoint::new(z.x + dx, z.y + dy, NOZ, NOW),
+        ];
+        let nl = NlCurve::new(pw, 1, vec![iv.min(), iv.min(), iv.max(), iv.max()]).unwrap();
+        let moved = Curve::from(BSplineCurve::from_nurb(nl, 2, false));
+        // The moved trim's gap from the edge, sampled.
+        let curve = b.edge(e).unwrap().curve.clone().unwrap();
+        let gap = (0..=16)
+            .map(|i| {
+                let t = iv.evaluate(f64::from(i) / 16.0);
+                let w = moved.evaluate_point(&k, t).unwrap();
+                let on = surface
+                    .evaluate_point(&k, crate::math::Point2::new(w.x, w.y))
+                    .unwrap();
+                curve.evaluate_point(&k, t).unwrap().distance(on)
+            })
+            .fold(0.0_f64, f64::max);
+        b.edgeuse_mut(x).unwrap().uv_trim_curve = Some(moved);
+        // The stitch's record: every other edge as it is, this one at the tolerance before
+        // and with one use fewer; then the join's raise.
+        let uses = b.edge(e).unwrap().edgeuses.len();
+        let mut raises = StitchRaises::before(&b);
+        raises.0.insert(e, (was.to_bits(), uses - 1));
+        let raised = 2.0 * was;
+        assert!(
+            raised < gap,
+            "the join's raise {raised:e} under the gap {gap:e}"
+        );
+        b.edge_mut(e).unwrap().tolerance = raised;
+        let joined = raises.joined(&b);
+        assert_eq!(joined, vec![e]);
+        keep_stitch_raises(&k, &mut b, &[], &joined).unwrap();
+        let tol = b.edge(e).unwrap().tolerance;
+        assert!(tol >= gap, "{tol:e} covers the trim's gap {gap:e}");
+        assert!(tol <= 2.0 * gap, "{tol:e} near the gap {gap:e}");
+        // (`cover_vertex_ends`: a vertex is kept at least its edges' tolerance)
+        for v in [
+            crate::topology::edge::start_vertex(&b, e).unwrap().unwrap(),
+            crate::topology::edge::end_vertex(&b, e).unwrap().unwrap(),
+        ] {
+            let vt = b.vertex(v).unwrap().tolerance;
+            assert!(vt >= tol, "vertex {} at {vt:e} under {tol:e}", v.index());
+        }
+    }
+
     /// #15718: when both ends of a joined line edge grow, each is judged against the
     /// other's grown tolerance. The box's 3-long edge on x = y = 0 has both vertices moved
     /// 0.8 off it, away from the box: each needs a tolerance of 1.6 to cover its gap, which
@@ -3786,6 +4135,7 @@ mod tests {
             tolerance,
             false,
             &mut lamina,
+            None,
             None,
         );
         let r = stitch_and_orient(&mut k, &mut b, &StitchAndOrientOptions::default());

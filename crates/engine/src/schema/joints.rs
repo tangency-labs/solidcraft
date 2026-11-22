@@ -1,6 +1,7 @@
 //! Contracts and result types for the commands in `cmd/joints.rs`.
 
 use std::borrow::Cow;
+use std::collections::BTreeMap;
 
 use schemars::{JsonSchema, Schema, SchemaGenerator, json_schema};
 use serde::de::Error as _;
@@ -961,6 +962,9 @@ pub struct SolveReport {
 pub struct SolveResult {
     #[serde(flatten)]
     pub solved: SolveReport,
+    /// With `dof_free_only`: how many occurrences were left out of `dof`. Left out when none were.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub omitted: Option<Omitted>,
     /// In the warn parameter-check mode: what the call's parameters got wrong.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub param_warnings: Vec<String>,
@@ -995,7 +999,7 @@ pub enum ValueUnit {
 }
 
 /// One of a joint's values, as `joint.list` gives it (rounded for reading).
-#[derive(Debug, Serialize, JsonSchema)]
+#[derive(Clone, Debug, Serialize, JsonSchema)]
 pub struct NamedValue {
     /// The coordinate's name (angle, distance, slide, …).
     pub name: String,
@@ -1205,20 +1209,144 @@ pub struct ListJointsResult {
     pub links: Vec<LinkInfo>,
     /// Every named joint origin.
     pub origins: Vec<ListedOrigin>,
-    /// Joint chains joined to nothing grounded.
+    /// Joint chains joined to nothing grounded (with a joint filter, only the chains holding a
+    /// joint it keeps).
     pub floating: Vec<FloatingChain>,
+    /// Every rigid group: the parts an import placed, held where they are in their parents, one
+    /// row however many parts it holds. Absent when there are none.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub rigid_groups: Vec<ListedRigidGroup>,
+    /// What the filters left out. Left out when nothing was.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub omitted: Option<Omitted>,
+    /// Every joint in a few numbers, with `summary`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub summary: Option<JointSummary>,
     /// In the warn parameter-check mode: what the call's parameters got wrong.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub param_warnings: Vec<String>,
 }
 
-/// List the joints, motion links and joint origins, with the solve.
+/// A rigid group as `joint.list` gives it.
+#[derive(Debug, Serialize, Deserialize, JsonSchema)]
+#[schemars(deny_unknown_fields)]
+pub struct ListedRigidGroup {
+    /// Its id.
+    pub id: u64,
+    /// Its name: the component's when it was made.
+    pub name: String,
+    /// The import's component; `component.unlock` on it releases the parts.
+    pub component: u64,
+    /// How many occurrences it holds.
+    pub members: usize,
+}
+
+/// The rows a filter left out of a reply, counted so that a caller knows they are there.
+#[derive(Debug, Default, Serialize, JsonSchema)]
+pub struct Omitted {
+    /// How many joints were left out.
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub joints: usize,
+    /// Those joints by type (as `type` names them).
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub by_type: BTreeMap<String, usize>,
+    /// How many floating chains were left out.
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub floating: usize,
+    /// How many occurrences were left out of `dof`.
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub dof: usize,
+}
+
+impl Omitted {
+    /// `Some` when something was left out.
+    pub fn some(self) -> Option<Self> {
+        (self.joints > 0 || self.floating > 0 || self.dof > 0).then_some(self)
+    }
+}
+
+fn is_zero(n: &usize) -> bool {
+    *n == 0
+}
+
+/// Every joint in a few numbers, for an assembly too large to read row by row.
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct JointSummary {
+    /// How many joints there are.
+    pub joints: usize,
+    /// How many of each type (as `type` names them).
+    pub by_type: BTreeMap<String, usize>,
+    /// How many are suppressed.
+    pub suppressed: usize,
+    /// The rigid joints that hold components' contents together (an imported assembly's
+    /// placements), one row per component: the innermost component holding both ends of each.
+    /// The largest first, at most 20.
+    pub rigid_groups: Vec<RigidGroupSummary>,
+    /// The components past the first 20 in `rigid_groups`, counted. Left out when there are none.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub more_rigid_groups: Option<MoreRigidGroups>,
+}
+
+/// The smaller rigid groups a summary counts instead of listing.
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct MoreRigidGroups {
+    /// How many components.
+    pub groups: usize,
+    /// How many rigid joints they hold between them.
+    pub joints: usize,
+}
+
+/// The rigid joints holding one component's contents together.
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct RigidGroupSummary {
+    /// The component, by id.
+    pub component: u64,
+    /// Its name.
+    pub name: String,
+    /// How many rigid joints hold its contents.
+    pub joints: usize,
+    /// How many occurrences they tie together.
+    pub members: usize,
+}
+
+/// List the joints, motion links and joint origins, with the solve. With no filter every joint is
+/// listed, as always; the filters keep a joint only when it passes all of them, and `omitted` then
+/// counts what they left out.
 #[derive(Debug, Deserialize, JsonSchema)]
 #[schemars(deny_unknown_fields)]
 pub struct ListJointsParams {
     /// Leave out `dof` and `fixed` in the reply. Default: false.
     #[serde(default)]
     pub quiet: Option<bool>,
+    /// Keep only joints of these types (as the reply's `type` names them). Default: every type.
+    #[serde(default)]
+    pub kinds: Option<Vec<JointTypeParam>>,
+    /// Leave out every rigid joint. Default: false.
+    #[serde(default)]
+    pub exclude_rigid: Option<bool>,
+    /// Leave out the rigid joints that hold a component's contents together (an imported
+    /// assembly's placements: both ends inside the same component other than the root, as
+    /// `component.unlock` removes them). Rigid joints between top-level parts stay. Default: false.
+    #[serde(default)]
+    pub exclude_rigid_groups: Option<bool>,
+    /// Keep only joints that let something move: leave out rigid joints and suppressed joints (a
+    /// suppressed joint places nothing). Default: false.
+    #[serde(default)]
+    pub moving_only: Option<bool>,
+    /// Keep only joints with an end at one of these occurrences (by id or name) or at an
+    /// occurrence placed inside one, at any depth (a component placed twice shares its contents,
+    /// so they count for both); `dof` then lists only those occurrences. The root (0) matches
+    /// only joints on the root itself. Default: every joint.
+    #[serde(default)]
+    pub occurrences: Option<Vec<OccurrenceKey>>,
+    /// In `dof`, list only the occurrences that can still move (dof above 0); `omitted.dof`
+    /// counts the others. Default: false.
+    #[serde(default)]
+    pub dof_free_only: Option<bool>,
+    /// Add `summary`: every joint counted by type, the suppressed ones, and the rigid joints that
+    /// hold components' contents, one row per component. Default: false.
+    #[serde(default)]
+    pub summary: Option<bool>,
 }
 
 /// Re-place the occurrences from the joints, and report conflicts, errors and degrees of freedom.
@@ -1228,6 +1356,10 @@ pub struct SolveJointsParams {
     /// Leave out `dof` and `fixed` in the reply. Default: false.
     #[serde(default)]
     pub quiet: Option<bool>,
+    /// In `dof`, list only the occurrences that can still move (dof above 0); `omitted.dof`
+    /// counts the others. Default: false.
+    #[serde(default)]
+    pub dof_free_only: Option<bool>,
 }
 
 /// Say what a joint is defined by and attached to: its two origins (the snap as saved, and the
@@ -1237,9 +1369,26 @@ pub struct SolveJointsParams {
 #[derive(Debug, Deserialize, JsonSchema)]
 #[schemars(deny_unknown_fields)]
 pub struct InspectJointParams {
-    /// The joint, by id or name. Default: every joint.
+    /// The joint, by id or name. Default: every joint the filters keep.
     #[serde(default)]
     pub joint: Option<JointKey>,
+    /// As `joint.list`'s: only joints of these types. Not used with `joint`.
+    #[serde(default)]
+    pub kinds: Option<Vec<JointTypeParam>>,
+    /// As `joint.list`'s: leave out every rigid joint. Not used with `joint`.
+    #[serde(default)]
+    pub exclude_rigid: Option<bool>,
+    /// As `joint.list`'s: leave out the rigid joints that hold a component's contents together.
+    /// Not used with `joint`.
+    #[serde(default)]
+    pub exclude_rigid_groups: Option<bool>,
+    /// As `joint.list`'s: leave out rigid and suppressed joints. Not used with `joint`.
+    #[serde(default)]
+    pub moving_only: Option<bool>,
+    /// As `joint.list`'s: only joints with an end at (or inside) one of these occurrences. Not
+    /// used with `joint`.
+    #[serde(default)]
+    pub occurrences: Option<Vec<OccurrenceKey>>,
 }
 
 /// What a face reference says about the feature that made the face.
@@ -1469,8 +1618,11 @@ pub struct InspectedJoint {
 /// What `joint.inspect` returns.
 #[derive(Debug, Serialize, JsonSchema)]
 pub struct InspectJointResult {
-    /// The joint asked for, or every joint.
+    /// The joint asked for, or every joint the filters keep.
     pub joints: Vec<InspectedJoint>,
+    /// What the filters left out. Left out when nothing was.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub omitted: Option<Omitted>,
     /// In the warn parameter-check mode: what the call's parameters got wrong.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub param_warnings: Vec<String>,
@@ -1757,6 +1909,43 @@ impl JsonSchema for JointKeyList {
             "description": "A list of joints, each by id or name.",
             "type": "array",
             "items": joint,
+            "maxItems": MAX_REACH_JOINTS
+        })
+    }
+}
+
+/// The values joints start from, as `joint.reach` reads `from`: `{joint, values}` items. The
+/// handler checks each item (its joint, and one finite value for each of the joint's coordinates).
+#[derive(Clone, Debug, PartialEq)]
+pub struct ReachStarts(pub Vec<Value>);
+
+impl ReachStarts {
+    /// `from` as the handler takes it: a list of at most [`MAX_REACH_JOINTS`] items.
+    fn read(v: &Value) -> Result<Self, String> {
+        match v {
+            Value::Array(items) if items.len() <= MAX_REACH_JOINTS => Ok(ReachStarts(items.clone())),
+            _ => Err(format!("`from` must be a list of {{joint, values}}, at most {MAX_REACH_JOINTS}")),
+        }
+    }
+}
+
+impl JsonSchema for ReachStarts {
+    fn schema_name() -> Cow<'static, str> {
+        "ReachStarts".into()
+    }
+    fn json_schema(generator: &mut SchemaGenerator) -> Schema {
+        let joint = generator.subschema_for::<JointKey>();
+        json_schema!({
+            "description": "Joints and the values each starts from, as joint.list gives them (degrees and mm), one value for each of the joint's coordinates.",
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "joint": joint,
+                    "values": {"type": "array", "items": {"type": "number", "exclusiveMinimum": -1e9, "exclusiveMaximum": 1e9}}
+                },
+                "required": ["joint", "values"]
+            },
             "maxItems": MAX_REACH_JOINTS
         })
     }
@@ -2286,7 +2475,8 @@ pub struct RigidGroupResult {
 
 /// Move an occurrence's point to a place in the world by changing the values of the joints on its
 /// chain, from where they are to the nearest pose within their limits, through motion links and
-/// keeping closed loops closed as joint.drive does (contact sets are not checked). With `z` the
+/// keeping closed loops closed as joint.drive does. With contact sets on, the joints stop where
+/// two parts of a set would pass into each other (`stopped_by_contact`). With `z` the
 /// occurrence's axis is turned to point that way too. Reaches as far as it can: the reply says how
 /// close it got and what stopped it.
 #[derive(Debug, JsonSchema)]
@@ -2322,6 +2512,13 @@ pub struct ReachParams {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[schemars(with = "JointKeyList")]
     pub joints: Option<JointKeyList>,
+    /// The values some joints start from instead of the design's (at most 1000): the pose the last
+    /// frame of a drag showed, so the one reach that applies the drag ends where the view showed
+    /// it. With contact sets on, refused unless every value is already the design's, as the move
+    /// to it would not be checked for contact. Default: every joint starts where the design has it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "ReachStarts")]
+    pub from: Option<ReachStarts>,
     /// Leave out `dof` and `fixed` in the reply. Default: false.
     #[serde(default)]
     pub quiet: Option<bool>,
@@ -2348,7 +2545,8 @@ impl<'de> Deserialize<'de> for ReachParams {
         let z = reach_vector(&m, "z", true)?;
         let axis = reach_vector(&m, "axis", true)?;
         let joints = given(&m, "joints", JointKeyList::read)?;
-        Ok(ReachParams { occurrence, point, at, z, axis, joints, quiet: flag(&m, "quiet")?, continuous: flag(&m, "continuous")? })
+        let from = given(&m, "from", ReachStarts::read)?;
+        Ok(ReachParams { occurrence, point, at, z, axis, joints, from, quiet: flag(&m, "quiet")?, continuous: flag(&m, "continuous")? })
     }
 }
 
@@ -2381,7 +2579,7 @@ pub struct ReachLoopStop {
 }
 
 /// A joint a reach moved.
-#[derive(Debug, Serialize, JsonSchema)]
+#[derive(Clone, Debug, Serialize, JsonSchema)]
 pub struct ReachedJoint {
     /// The joint, by id.
     pub joint: u64,

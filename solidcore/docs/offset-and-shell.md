@@ -163,6 +163,9 @@ job (§5.1).
 | `OffsetFailure::WallsTouch`, `LoopsCross` | an offset face's loops touch or cross | the face | per their flags | `error/offset.rs` |
 | `OffsetFailure::EdgeVanishes` | a vertex moves to or past its edge's end and the edge cannot be squeezed out | the original edge, or the face when available | during loop-gap closure | `offset_executive/step_gaps.rs` |
 | `OffsetFailure::LoopGapUncertified` | the loop-gap solve could not establish a boundary within tolerance | the original input face, when available | always | `offset_executive/step_gaps.rs` |
+| `OffsetFailure::LoopGapPassLimit` | the gap search, one gap closed per pass, reaches its 64 passes on a face | the original input face, when available, and the limit | during loop-gap closure | `offset_executive/step_gaps.rs` |
+| `OffsetFailure::LoopGapEndsAmbiguous` | both ends of a gap longer than its tolerance are at the shared vertex, or neither is | the face, both ends' distances and the tolerance | during loop-gap closure | `offset_executive/step_gaps.rs` |
+| `OffsetFailure::SplitAtEdgeEnd` | the edge a gap's bridge or a step corner splits takes the point for one of its ends | the face, when available, and the end vertices' larger tolerance | during loop-gap closure and step corners | `offset_executive/step_gaps.rs` |
 
 The static `offset_brep` entry point reports an ordinary failure of `do_solid_offset` with
 status `SM_ERR` and retains the stage's original error as its cause
@@ -246,6 +249,27 @@ the sheets cut space into cells, each cell has a winding number with respect to 
 sheets, and the result is the cells whose number passes the rule. Local folds and global
 self-intersections [10] are then one case, with no loop test. The rule, its ties at coincident
 sheets and its certificate are not designed in the code yet.
+
+The executive implements one exact empty-cell event before mating its sheets
+(`offset_executive/extinct_branches.rs`). A component attached through exactly one
+inner loop of an exterior planar support qualifies when all its straight-edged planar faces,
+together with the attachment polygon, bound a convex protrusion. Topology supplies incidence
+only: homogeneous exact expansion arithmetic reconstructs the vertices from triples of
+supporting planes. The first scope requires
+simple vertices and strict convex facet cycles, distinct vertices and independent edge planes.
+Every reconstructed vertex must lie on the support's outward side and in every exposed face's
+material halfspace. Toleranced stored vertices and trims do not decide this certificate.
+Opposite exposed planes whose actual offset definitions have crossed certify that their halfspaces have empty
+intersection. The branch contributes no cavity, so both its offset sheets and the support's
+attachment loop are removed. The attachment is an artificial cut, not an exposed face: it
+supplies no additional offset halfspace. Thus a short, wide boss can still contain cavity.
+
+This is an empty-cell certificate within the mitred construction, using outward-rounded
+interval inequalities and exact opposite normals, without a tolerance or an alternate
+construction. The source body remains intact for the shell difference. Curved or nonconvex
+branches, multiple attachments, cavity-shell branches, and infeasibility without an opposite
+plane pair still require the general arrangement and cavity rule. This event does not complete
+S3–S5 or change the existing refusal for exactly meeting planes.
 
 ### 5.2 Mitres and the reach, as they run today
 

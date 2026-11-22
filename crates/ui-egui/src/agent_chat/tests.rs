@@ -585,6 +585,8 @@ fn merging_finds_the_turns_start_when_the_history_was_trimmed() {
         label: String::new(),
         doc: d.clone(),
         active_sketch: None,
+        sketching_view: None,
+        sketch_restore_marker: None,
         active_sheet_sketch: None,
         pending_moves: Default::default(),
         part: None,
@@ -862,6 +864,49 @@ fn permission_modes_decide_what_asks() {
     let crash = ask(&tx, "engine.execute", json!({"command": "diagnostics.crash_reports"}));
     frame(&mut app);
     assert_eq!(crash.recv_timeout(std::time::Duration::from_secs(5)).unwrap()["ok"], false);
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// "Always allow" on a modelling batch covers modelling batches only: a later batch that saves
+/// still asks, and allowing that one always remembers the save, not "batch".
+#[test]
+fn always_allowing_one_batch_does_not_allow_a_later_batchs_file_steps() {
+    let (mut app, tx) = app_in_a_turn();
+    app.agent_chat.running_id = "claude".into();
+    app.preferences.ai_permissions = agents::Mode::Ask;
+    let modelling = json!({"commands": [{"command": "solid.box", "params": {"length": 1, "width": 1, "height": 1}}]});
+    let first = ask(&tx, "engine.batch", modelling.clone());
+    frame(&mut app);
+    assert_eq!(app.agent_chat.waiting(), 1, "a modelling batch asks");
+    let id = app.agent_chat.held[0].id;
+    approve_always(&mut app, id);
+    frame(&mut app);
+    assert_eq!(first.recv_timeout(std::time::Duration::from_secs(30)).unwrap()["ok"], true);
+    assert!(agents::always_allowed(&app.preferences, "claude", "batch"));
+    let _second = ask(&tx, "engine.batch", modelling);
+    frame(&mut app);
+    assert_eq!(app.agent_chat.waiting(), 0, "modelling batches are remembered");
+    let dir = solidcraft_engine::io::vfs::temp_dir().join(format!("sc-agent-chat-batch-always-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let saving = json!({
+        "commands": [{"command": "solid.box"}, {"command": "FILE.SAVE", "params": {"path": dir.join("x.solidcraft").to_string_lossy()}}],
+        "allow_paths": [dir.to_string_lossy()],
+    });
+    let _third = ask(&tx, "engine.batch", saving.clone());
+    frame(&mut app);
+    assert_eq!(app.agent_chat.waiting(), 1, "a batch that saves still asks");
+    let id = app.agent_chat.held[0].id;
+    approve_always(&mut app, id);
+    assert!(agents::always_allowed(&app.preferences, "claude", "file.save"));
+    decline_all(&mut app, "test");
+    let _fourth = ask(&tx, "engine.batch", saving);
+    frame(&mut app);
+    assert_eq!(app.agent_chat.waiting(), 0, "the save itself was allowed always");
+    let exporting = json!({"commands": [{"command": "file.export", "params": {"path": dir.join("x.stl").to_string_lossy()}}], "allow_paths": [dir.to_string_lossy()]});
+    let _fifth = ask(&tx, "engine.batch", exporting);
+    frame(&mut app);
+    assert_eq!(app.agent_chat.waiting(), 1, "an export was never allowed");
+    decline_all(&mut app, "test");
     let _ = std::fs::remove_dir_all(&dir);
 }
 
@@ -1786,10 +1831,37 @@ fn new_chat_clears_everything_and_keeps_the_agent_and_mode() {
     assert!(!new_chat_needs_confirm(&app));
 }
 
-/// With a real ACP agent, New chat sends `session/new` on the same process (no restart).
+#[test]
+fn a_failed_new_chat_does_not_hide_completion_notices_after_reconnecting() {
+    for (reason, message) in [("max_tokens", "ui.agent_chat_reply_cut_off"), ("refusal", "ui.agent_chat_reply_declined")] {
+        let (mut app, old, ctx) = app_with_script();
+        send(&mut app, &ctx, "first".into());
+        new_chat(&mut app);
+        old.report(Event::Exited { tail: vec!["replacement could not start".into()] });
+        poll(&mut app, &ctx);
+        assert_eq!(app.agent_chat.state(), State::Failed);
+        assert!(app.agent_chat.backend.is_none());
+        new_chat(&mut app);
+
+        let replacement = Script::default();
+        app.agent_chat.backend = Some(Box::new(replacement.clone()));
+        replacement.report(Event::Ready { agent: "replacement".into(), images: false });
+        poll(&mut app, &ctx);
+        send(&mut app, &ctx, "second".into());
+        ended(&replacement, reason);
+        poll(&mut app, &ctx);
+        assert_eq!(app.agent_chat.state(), State::Ready);
+        assert!(
+            app.agent_chat.items.iter().any(|item| matches!(item, Item::Notice { text, .. } if text == tr(message))),
+            "{reason} must remain visible"
+        );
+    }
+}
+
+/// New chat releases an ACP adapter's sessions by ending it before starting its replacement.
 #[cfg(unix)]
 #[test]
-fn new_chat_with_an_acp_agent_opens_a_new_session_on_the_same_process() {
+fn new_chat_with_an_acp_agent_restarts_the_process() {
     let dir = std::env::temp_dir().join(format!("sc-agent-chat-new-{}", std::process::id()));
     std::fs::create_dir_all(&dir).unwrap();
     let log = dir.join("received.log");
@@ -1801,7 +1873,7 @@ while IFS= read -r line; do
   case "$line" in
     *'"method":"initialize"'*) printf '{"jsonrpc":"2.0","id":%s,"result":{"agentInfo":{"name":"fake","version":"1"}}}\n' "$id" ;;
     *'"method":"session/new"'*) n=$((n+1)); printf '{"jsonrpc":"2.0","id":%s,"result":{"sessionId":"s%s"}}\n' "$id" "$n" ;;
-    *'"method":"session/prompt"'*) printf '{"jsonrpc":"2.0","id":%s,"result":{"stopReason":"end_turn"}}\n' "$id" ;;
+    *'"method":"session/prompt"'*) case "$line" in *stalled*) ;; *) printf '{"jsonrpc":"2.0","id":%s,"result":{"stopReason":"end_turn"}}\n' "$id" ;; esac ;;
   esac
 done
 "#;
@@ -1827,14 +1899,23 @@ done
     new_chat(&mut app);
     assert!(app.agent_chat.items.is_empty());
     until(&mut app, &|a| a.agent_chat.state() == State::Ready);
-    assert_eq!(app.agent_chat.backend.as_ref().and_then(|b| b.pid()), pid, "same process");
+    assert_ne!(app.agent_chat.backend.as_ref().and_then(|b| b.pid()), pid, "a fresh process owns the new chat");
     send(&mut app, &ctx, "again".into());
     until(&mut app, &|a| a.agent_chat.state() == State::Ready);
     let log_text = std::fs::read_to_string(&log).unwrap();
     let methods: Vec<String> =
         log_text.lines().filter_map(|l| serde_json::from_str::<Value>(l).ok()).filter_map(|v| v["method"].as_str().map(String::from)).collect();
-    assert_eq!(methods, ["initialize", "session/new", "session/prompt", "session/new", "session/prompt"]);
-    assert!(log_text.lines().last().is_some_and(|l| l.contains("\"s2\"")), "the prompt goes to the new session: {log_text}");
+    assert_eq!(methods, ["initialize", "session/new", "session/prompt", "session/cancel", "initialize", "session/new", "session/prompt"]);
+    assert!(log_text.lines().last().is_some_and(|l| l.contains("\"s1\"")), "the prompt goes to the replacement's session: {log_text}");
+    send(&mut app, &ctx, "stalled".into());
+    assert_eq!(app.agent_chat.state(), State::Busy);
+    new_chat(&mut app);
+    new_chat(&mut app);
+    until(&mut app, &|a| a.agent_chat.state() == State::Ready);
+    assert!(!app.agent_chat.discard_end, "even repeated New chat retires the cancelled turn");
+    assert!(app.agent_chat.items.is_empty(), "the cancelled conversation contributes no late notices");
+    send(&mut app, &ctx, "after cancellation".into());
+    until(&mut app, &|a| a.agent_chat.state() == State::Ready);
     disconnect(&mut app);
     let _ = std::fs::remove_dir_all(&dir);
 }
@@ -1859,7 +1940,8 @@ while IFS= read -r line; do
 done
 "#;
     let argv = vec!["sh".to_string(), "-c".to_string(), script.to_string(), "fake-agent".to_string(), log.to_string_lossy().into_owned()];
-    let start = backend::StartContext { cwd: dir.clone(), bridge: None, tools: None, wake: Box::new(|| {}) };
+    let bridge = acp::McpBridge { cli: dir.join("solidcraft-cli"), port: 7878 };
+    let start = backend::StartContext { cwd: dir.clone(), bridge: Some(bridge.clone()), tools: None, wake: Box::new(|| {}) };
     let mut app = SolveApp::new(solidcraft_engine::Session::default(), crate::Services::default());
     app.agent_chat.backend = Some(Box::new(acp_client::AcpBackend::start(&argv, start).unwrap()));
     app.agent_chat.state = Some(State::Starting);
@@ -1886,6 +1968,8 @@ done
     let notes = [acp::SYSTEM_NOTE.to_string(), acp::system_note("Print flat side down.")];
     for (session, note) in sessions.iter().zip(&notes) {
         assert_eq!(session.pointer("/params/systemPrompt/content/0/text").and_then(Value::as_str), Some(note.as_str()));
+        assert_eq!(session["params"]["cwd"], dir.to_string_lossy().as_ref());
+        assert_eq!(session["params"]["mcpServers"], json!([bridge.to_json()]));
     }
     disconnect(&mut app);
     let _ = std::fs::remove_dir_all(&dir);
@@ -5569,6 +5653,20 @@ fn a_prompt_at_the_top_of_the_conversation_is_as_tall_as_its_content() {
     assert!(reply.top() - button.y < 2.0 * row, "the reply starts {} below the prompt's button", reply.top() - button.y);
 }
 
+/// A short prompt's bubble is as wide as its lines and its Copy message button, at the right
+/// edge of the conversation, instead of spanning most of the panel (#14738).
+#[test]
+fn a_short_prompt_has_a_bubble_as_wide_as_its_content() {
+    // Kept to the end: the published handles and rects are its last frame's.
+    let _h = chat_with_copiable_messages();
+    let bubble = solidcraft_ui_registry::rect_of("agent_chat:bubble:0").expect("the prompt's bubble");
+    let button = solidcraft_ui_registry::handle_at("agent_chat:copy:0").expect("the prompt's Copy message button");
+    let reply = solidcraft_ui_registry::rect_of("agent_chat:msg:1").expect("the reply's message area");
+    assert!(bubble.width() < 0.5 * reply.width(), "the bubble is {} wide in a conversation {} wide", bubble.width(), reply.width());
+    assert!((bubble.right() - reply.right()).abs() < 1.0, "the bubble ends at {}, the conversation at {}", bubble.right(), reply.right());
+    assert!(bubble.contains(button), "the Copy message button {button:?} is in the bubble {bubble:?}");
+}
+
 /// The visible button on a reply copies its original Markdown: heading, paragraphs, list and
 /// fenced code, not the laid-out text.
 #[test]
@@ -6245,4 +6343,90 @@ fn plugin_runs_always_keep_per_run_consent() {
             assert!(reply.try_recv().is_err(), "consent must precede dispatch");
         }
     }
+}
+
+/// A plugin tool the agent calls by name (`<plugin>.<entry>`) waits for the user's answer in
+/// every mode, even one that allows everything or remembers the tool; listing the plugin tools
+/// asks nothing; legacy named calls pass undeclared arguments through after approval.
+#[test]
+fn plugin_tools_go_through_the_chats_approval_and_never_skip_it() {
+    let dir = std::env::temp_dir().join(format!("sc-agent-chat-plugin-tool-{}", std::process::id()));
+    let folder = dir.join("gears");
+    std::fs::create_dir_all(&folder).unwrap();
+    let manifest = json!({"id":"gears","name":"Gears","version":"1","capabilities":["commands@0.1"],"runtime":{
+        "module":"plugin.wasm","commands":["solid.box"],"limits":{"fuel":100000,"memory_mib":1,"deadline_ms":5000},
+        "entries":[{"name":"make","effect":"edit","input_schema":{"type":"object","properties":{"teeth":{"type":"integer"}}}}]}});
+    std::fs::write(folder.join("plugin.json"), manifest.to_string()).unwrap();
+    for mode in [agents::Mode::All, agents::Mode::Edits, agents::Mode::Ask] {
+        let (mut app, tx) = app_in_a_turn();
+        app.session.plugin_state.packages.insert("gears".into(), folder.to_string_lossy().into_owned());
+        app.agent_chat.running_id = "claude".into();
+        app.preferences.ai_permissions = mode;
+        agents::remember(&mut app.preferences, "claude", "gears.make");
+        agents::remember(&mut app.preferences, "claude", "plugin.run");
+        let call = ask(&tx, "engine.execute", json!({"command":"gears.make","params":{"approval":"hash","params":{"teeth":20}}}));
+        pump_tools(&mut app);
+        assert_eq!(app.agent_chat.waiting(), 1, "{mode:?}: an edit entry asks first");
+        assert!(call.try_recv().is_err(), "{mode:?}: nothing runs before the answer");
+        let undeclared = ask(&tx, "engine.execute", json!({"command":"gears.make","params":{"approval":"hash","params":{"colour":"red"}}}));
+        pump_tools(&mut app);
+        assert!(undeclared.try_recv().is_err(), "legacy named inputs still wait for approval");
+        assert_eq!(app.agent_chat.waiting(), 2, "{mode:?}: undeclared inputs pass through the legacy call");
+        let list = ask(&tx, "engine.execute", json!({"command":"plugin.tools"}));
+        pump_tools(&mut app);
+        assert_eq!(app.agent_chat.waiting(), 2, "{mode:?}: listing asks nothing");
+        drop(list);
+    }
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// An importer plugin's code runs only after the user's answer, in every mode and after "always
+/// allow": a plugin importer tool (`file.import`), and `doc.open` of a file an installed importer
+/// opens, and `file.export` through an exporter, alone or in a batch. A file SolidCraft reads or
+/// writes itself keeps the mode's answer.
+#[test]
+fn importer_plugins_always_ask_like_plugin_runs() {
+    let dir = std::env::temp_dir().join(format!("sc-agent-chat-importer-tool-{}", std::process::id()));
+    let folder = dir.join("plugins").join("smp");
+    std::fs::create_dir_all(&folder).unwrap();
+    let manifest = json!({"id":"smp","name":"Sample importer","version":"1","capabilities":["formats@0.1"],
+        "runtime":{"module":"plugin.wasm","commands":[],"entries":[{"name":"convert","kind":"importer","extensions":["smp"]}]}});
+    std::fs::write(folder.join("plugin.json"), manifest.to_string()).unwrap();
+    let exporter = dir.join("plugins").join("out");
+    std::fs::create_dir_all(&exporter).unwrap();
+    let manifest = json!({"id":"out","name":"Sample exporter","version":"1","capabilities":["formats@0.1"],
+        "runtime":{"module":"plugin.wasm","commands":[],"entries":[{"name":"convert","kind":"exporter","extensions":["smp"]}]}});
+    std::fs::write(exporter.join("plugin.json"), manifest.to_string()).unwrap();
+    let file = dir.join("part.smp").to_string_lossy().into_owned();
+    let (mut app, tx) = app_in_a_turn();
+    app.session.plugin_state.plugins_dir = Some(dir.join("plugins"));
+    app.agent_chat.running_id = "claude".into();
+    app.preferences.ai_permissions = agents::Mode::All;
+    for command in ["file.import", "doc.open", "file.export", "batch"] {
+        agents::remember(&mut app.preferences, "claude", command);
+    }
+    let calls = [
+        ask(&tx, "engine.execute", json!({"command":"file.import","params":{"path":file,"format":"smp.convert","options":{}}})),
+        ask(&tx, "engine.execute", json!({"command":"doc.open","params":{"path":file}})),
+        ask(&tx, "engine.batch", json!({"commands":[{"command":"solid.box","params":{}},{"command":"file.import","params":{"path":file}}]})),
+        ask(&tx, "engine.execute", json!({"command":"file.export","params":{"path":file}})),
+        ask(&tx, "engine.execute", json!({"command":"file.export","params":{"path":"/tmp/part.step","format":"out.convert"}})),
+        ask(&tx, "engine.batch", json!({"commands":[{"command":"file.export","params":{"path":file}}]})),
+    ];
+    pump_tools(&mut app);
+    assert_eq!(app.agent_chat.waiting(), 6, "each plugin import or export waits for an answer");
+    assert!(calls.iter().all(|c| c.try_recv().is_err()), "nothing runs before the answer");
+    let session = &app.session;
+    assert!(crate::plugins::runs_plugin_code(session, "engine.execute", &json!({"command":"doc.open","params":{"path":file}})));
+    assert!(!crate::plugins::runs_plugin_code(session, "engine.execute", &json!({"command":"doc.open","params":{"path":"/tmp/part.step"}})));
+    assert!(crate::plugins::runs_plugin_code(session, "engine.execute", &json!({"command":"file.export","params":{"path":file}})));
+    assert!(crate::plugins::runs_plugin_code(
+        session,
+        "engine.execute",
+        &json!({"command":"file.export","params":{"path":"/tmp/part.step","format":"out.convert"}})
+    ));
+    assert!(!crate::plugins::runs_plugin_code(session, "engine.execute", &json!({"command":"file.export","params":{"path":"/tmp/part.step"}})));
+    assert!(!crate::plugins::runs_plugin_code(session, "engine.execute", &json!({"command":"file.export","params":{"path":file,"format":"step"}})));
+    assert!(!crate::plugins::runs_plugin_code(session, "engine.execute", &json!({"command":"solid.box","params":{}})));
+    let _ = std::fs::remove_dir_all(&dir);
 }

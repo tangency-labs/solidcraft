@@ -7,6 +7,10 @@ frame_end_cap
     Inset Ratio = cap.ratio (Unitless)
     Corner Chamfer = cap.chamfer (Length)
   expressions: cap1.angle, cap1.offset, cap.thickness, cap.ratio, cap.chamfer, 0, 0, 0
+frame_member_turn
+  inputs:
+    Angle = turn.angle (Angle)
+  expressions: turn.angle
 body_transfer
 sketch
   inputs:
@@ -185,6 +189,7 @@ construction_plane
     Angle = cplane.angle (Angle)
     Offset = cplane.offset (Length)
   expressions: cplane.angle, cplane.offset, 0, 0, 0
+construction_plane_square_to_line
 split
   inputs:
     Angle = split.angle (Angle)
@@ -323,6 +328,8 @@ sheet_path
   expressions: path.radius
 sheet_unfold
 sheet_convert
+sheet_surface_convert
+sheet_recognize
 boss
   inputs:
     Diameter = boss.diameter (Length)

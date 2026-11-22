@@ -42,7 +42,7 @@ pub static COMMANDS: &[CommandSpec] = &[
              component: id (0 the design)}; excluded?: {count?, print?}; title_block_overrides?: {cell: text} (none of these unless given) → sheet: the new sheet's id, sheets. \
              One undo step.",
         ),
-    CommandSpec::new("drawing.sheet.set", "Sheet Settings", crate::checked!("drawing.sheet.set", set))
+    CommandSpec::new("drawing.sheet.set", "Sheet Settings", crate::checked!("drawing.sheet.set", set)).begins_edit_when(crate::edit_start::changes_editor_fields)
         .icon("settings")
         .in_drawing()
         .doc_only()

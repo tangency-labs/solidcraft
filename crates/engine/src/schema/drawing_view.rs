@@ -178,10 +178,11 @@ impl JsonSchema for ScaleParam {
         "DrawingScale".into()
     }
     fn json_schema(_: &mut SchemaGenerator) -> Schema {
+        let ws = super::types::whitespace_class();
         json_schema!({
-            "description": "The scale as paper:model text, such as \"1:2\" or \"5:1\", from 1:100000 to 1000:1. When not given, the largest ISO 5455 scale at which the view fits the sheet's drawing area.",
+            "description": "The scale as paper:model text, such as \"1:2\" or \"5:1\", from 1:100000 to 1000:1; spaces round each number are ignored. When not given, the largest ISO 5455 scale at which the view fits the sheet's drawing area.",
             "type": "string",
-            "pattern": "^[0-9]+(\\.[0-9]+)?:[0-9]+(\\.[0-9]+)?$"
+            "pattern": format!("^[{ws}]*[0-9]+(\\.[0-9]+)?[{ws}]*:[{ws}]*[0-9]+(\\.[0-9]+)?[{ws}]*$")
         })
     }
 }
@@ -825,6 +826,10 @@ pub struct EditResult {
     pub changed: Vec<String>,
     /// The other views whose resolved settings changed with it: the views projected from it.
     pub followers: Vec<String>,
+    /// It and the views lined up with it, when the edit moved it or changed its size and their
+    /// boundary leaves the sheet's drawing space or lies over its title block; none is moved back in.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub outside: Vec<OutsideResult>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub param_warnings: Vec<String>,
 }
@@ -1152,6 +1157,42 @@ pub struct ProjectionForResult {
     /// For `none`: on the parent's centre, or why no view is made from the parent.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub why: Option<String>,
+}
+
+/// What `drawing.view.detail` takes: its parent, the region of the parent it shows (on the parent's
+/// plane, or as drawn on the sheet), its scale and where it sits.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+#[schemars(deny_unknown_fields)]
+pub struct DetailParams {
+    pub parent: ViewIdParam,
+    /// The region on the parent's plane, in model millimetres from its origin (give this or
+    /// `boundary_mm`).
+    #[serde(default, deserialize_with = "super::present", skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "DetailBoundaryParam")]
+    pub boundary: Option<DetailBoundaryParam>,
+    /// The region as drawn round the parent on its sheet, in paper millimetres (give this or
+    /// `boundary`).
+    #[serde(default, deserialize_with = "super::present", skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "DetailBoundaryParam")]
+    pub boundary_mm: Option<DetailBoundaryParam>,
+    /// Its scale (twice its parent's when not given).
+    #[serde(default, deserialize_with = "super::present", skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "ScaleParam")]
+    pub scale: Option<ScaleParam>,
+    /// Where its centre sits on the sheet (right of its parent, a gap past the parent's boundary,
+    /// when not given).
+    #[serde(default, deserialize_with = "super::present", skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "PlaceParam")]
+    pub place: Option<PlaceParam>,
+}
+
+/// A detail's region: a circle or a rectangle with its sides along x and y.
+#[derive(Clone, Copy, Debug, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case", deny_unknown_fields)]
+pub enum DetailBoundaryParam {
+    Circle { centre: Point2, radius: f64 },
+    Rectangle { min: Point2, max: Point2 },
 }
 
 /// What `drawing.view.section` takes: its parent, the cutting line drawn across the parent, and

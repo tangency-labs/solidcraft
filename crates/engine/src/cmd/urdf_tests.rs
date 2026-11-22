@@ -121,6 +121,62 @@ fn stl_volume(bytes: &[u8]) -> Option<f64> {
     mesh.mass_properties().map(|m| m.volume)
 }
 
+/// A decal on a part goes to the part's link as a textured COLLADA visual, with its image beside
+/// it and its corners in the part's frame, lifted off the face. A shown canvas is written the same
+/// way; a hidden one is not.
+#[test]
+fn urdf_writes_decals_as_textured_visuals() {
+    use image::ImageEncoder;
+    let mut s = two_cubes();
+    run(&mut s, "component.activate", json!({"component": "B"}));
+    let mut png = Vec::new();
+    image::codecs::png::PngEncoder::new(&mut png).write_image(&[200u8; 4 * 8], 4, 2, image::ExtendedColorType::Rgba8).unwrap();
+    let png = crate::tests::image_file(&png);
+    run(&mut s, "canvas.decal", json!({"path": png, "face": [25, 5, 10], "width": 8, "name": "Logo"}));
+    run(&mut s, "canvas.insert", json!({"path": png, "plane": "XY", "width": 8, "name": "Tag"}));
+    run(&mut s, "canvas.insert", json!({"path": png, "plane": "XY", "width": 8, "name": "Hidden"}));
+    run(&mut s, "canvas.edit", json!({"canvas": "Hidden", "visible": false}));
+    // Asked for the usual way, the export writes no picture, as before.
+    let plain = temp("decal-plain");
+    run(&mut s, "file.export", json!({"path": plain.join("t.urdf").to_string_lossy()}));
+    let mut files: Vec<String> = std::fs::read_dir(&plain).unwrap().map(|e| e.unwrap().file_name().to_string_lossy().to_string()).collect();
+    files.sort();
+    assert_eq!(files, ["t-A.stl", "t-B.stl", "t.urdf"]);
+    let d = temp("decal");
+    let path = d.join("t.urdf");
+    let r = run(&mut s, "file.export", json!({"path": path.to_string_lossy(), "images": true}));
+    let mut files: Vec<String> = std::fs::read_dir(&d).unwrap().map(|e| e.unwrap().file_name().to_string_lossy().to_string()).collect();
+    files.sort();
+    assert_eq!(files, ["t-A.stl", "t-B-Logo.dae", "t-B-Logo.png", "t-B-Tag.dae", "t-B-Tag.png", "t-B.stl", "t.urdf"], "{r}");
+    let xml = std::fs::read_to_string(&path).unwrap();
+    let link_b = xml.split(r#"<link name="B">"#).nth(1).and_then(|x| x.split("</link>").next()).unwrap_or_default();
+    assert!(link_b.contains(r#"<mesh filename="t-B-Logo.dae"/>"#) && link_b.contains(r#"<mesh filename="t-B.stl"/>"#), "{xml}");
+    let dae = std::fs::read_to_string(d.join("t-B-Logo.dae")).unwrap();
+    assert!(dae.contains("<init_from>t-B-Logo.png</init_from>"), "{dae}");
+    // The front quad is the decal as SolidCraft shows it, in B's frame, in metres, 0.2 mm off the
+    // face along its normal; the back quad as far the other way.
+    let positions: Vec<f64> = dae
+        .split(r#"<float_array id="decal-positions-array" count="24">"#)
+        .nth(1)
+        .and_then(|x| x.split('<').next())
+        .map(|x| x.split_whitespace().filter_map(|v| v.parse().ok()).collect())
+        .unwrap_or_default();
+    assert_eq!(positions.len(), 24);
+    // Worked out by hand: B is placed where it was built, so its frame is the world's. The decal
+    // is 8 x 4 mm (the image is 2:1) about (25, 5) on B's top face at z = 10, along the face's
+    // axes either way round; the front quad 0.2 mm above the face, the back quad 0.2 mm below.
+    let corners: Vec<[f64; 3]> = positions.chunks(3).map(|p| [p[0] * 1e3, p[1] * 1e3, p[2] * 1e3]).collect();
+    let mut front: Vec<(i64, i64)> = corners[..4].iter().map(|p| ((p[0] * 1e3).round() as i64, (p[1] * 1e3).round() as i64)).collect();
+    front.sort();
+    let along_x = [(21000, 3000), (21000, 7000), (29000, 3000), (29000, 7000)];
+    let along_y = [(23000, 1000), (23000, 9000), (27000, 1000), (27000, 9000)];
+    assert!(front == along_x || front == along_y, "{corners:?}");
+    let mut back: Vec<(i64, i64)> = corners[4..].iter().map(|p| ((p[0] * 1e3).round() as i64, (p[1] * 1e3).round() as i64)).collect();
+    back.sort();
+    assert_eq!(back, front, "the back quad has the front's corners");
+    assert!(corners[..4].iter().all(|p| (p[2] - 10.2).abs() < 1e-9) && corners[4..].iter().all(|p| (p[2] - 9.8).abs() < 1e-9), "{corners:?}");
+}
+
 fn names(m: &UrdfModel) -> (Vec<&str>, Vec<&str>) {
     (m.links.iter().map(|l| l.name.as_str()).collect(), m.joints.iter().map(|j| j.name.as_str()).collect())
 }

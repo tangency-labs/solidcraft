@@ -113,6 +113,42 @@ mod tests {
     use crate::{BoolOp, boolean, cylinder, torus};
     use solidcraft_geom::prelude::*;
 
+    #[test]
+    fn selected_faces_skip_exact_conversion_for_either_mesh_operand() {
+        let mesh = crate::mesh_body(&[Vec3::ZERO, Vec3::X, Vec3::Y], &[[0, 1, 2]]).unwrap();
+        let exact = crate::box_solid(Vec3::ZERO, Vec3::new(1.0, 1.0, 1.0)).unwrap();
+        let mut unavailable = exact.clone();
+        // A cached refusal is how ops_body represents a B-rep it could not convert.
+        unavailable.ops = std::sync::Arc::new(crate::form_cell::FormCell::refused_for(()));
+        assert!(mesh.is_mesh() && !unavailable.is_mesh());
+        for (a, b) in [(&mesh, &unavailable), (&unavailable, &mesh)] {
+            assert_eq!(crate::faces_closest(a, &[0], b, &[0]).unwrap(), None);
+        }
+        for (a, b) in [(&exact, &unavailable), (&unavailable, &exact)] {
+            assert!(
+                matches!(crate::faces_closest(a, &[0], b, &[0]), Err(crate::KernelError::Failed(message)) if message.contains("exact measurement is unavailable"))
+            );
+        }
+    }
+
+    /// The selected sides of nested cylinders are their radii apart; whole-body distance
+    /// would instead see coincident caps. Both witnesses belong to the selected surfaces.
+    #[test]
+    fn selected_cylinder_faces_measure_their_exact_gap() {
+        let a = cylinder(Vec3::ZERO, Vec3::Z, 20.0, 5.0).unwrap();
+        let b = cylinder(Vec3::ZERO, Vec3::Z, 35.0, 5.0).unwrap();
+        let side = |b: &Body| {
+            (0..b.record().faces.len())
+                .filter(|&f| matches!(crate::face_surface(b, f), Some(crate::FaceSurface::Cylinder { .. })))
+                .collect::<Vec<_>>()
+        };
+        let (af, bf) = (side(&a), side(&b));
+        assert!(!af.is_empty() && !bf.is_empty());
+        let c = crate::faces_closest(&a, &af, &b, &bf).unwrap().unwrap();
+        assert!(c.exact && (c.distance - 15.0).abs() < 1e-9, "{c:?}");
+        assert!((c.from.x.hypot(c.from.y) - 20.0).abs() < 1e-9 && (c.to.x.hypot(c.to.y) - 35.0).abs() < 1e-9, "{c:?}");
+    }
+
     /// The mass properties alone are [`measure`]'s, to the bit; and on a curved intersection
     /// they are the textbook ones.
     #[test]
@@ -161,6 +197,24 @@ mod tests {
         let far = crate::box_solid(Vec3::new(300.0, 0.0, 0.0), Vec3::new(310.0, 10.0, 1.0)).unwrap();
         assert!(crate::apart(&plate, &far).unwrap());
         assert!(plate.bounds.lock().unwrap().is_some());
+    }
+
+    /// Bodies whose vertices' boxes meet are not joined apart, and no exact box is measured to
+    /// show it (a Combine join onto a rounded spline body measured it for tens of seconds);
+    /// bodies whose vertices' boxes do not meet are judged by the exact boxes, as before.
+    #[test]
+    fn bodies_among_each_others_vertices_are_not_joined_apart_without_measuring() {
+        let plate = crate::box_solid(Vec3::ZERO, Vec3::new(200.0, 100.0, 1.0)).unwrap();
+        let on_top = crate::box_solid(Vec3::new(10.0, 10.0, 1.0), Vec3::new(20.0, 20.0, 5.0)).unwrap();
+        let far = crate::box_solid(Vec3::new(300.0, 0.0, 0.0), Vec3::new(310.0, 10.0, 1.0)).unwrap();
+        assert!(crate::union_apart(&[plate.clone(), far.clone(), on_top.clone()]).unwrap().is_none());
+        assert_eq!(*plate.bounds.lock().unwrap(), None);
+        assert_eq!(*on_top.bounds.lock().unwrap(), None);
+        assert_eq!(*far.bounds.lock().unwrap(), None);
+        // Clear of each other: the exact boxes show it, measured as before, and they are joined.
+        let joined = crate::union_apart(&[plate.clone(), far.clone()]).unwrap().expect("apart");
+        assert_eq!(joined.lumps().map_or(0, |l| l.len()), 2);
+        assert!(plate.bounds.lock().unwrap().is_some() && far.bounds.lock().unwrap().is_some());
     }
 
     /// A cube 1000 mm from the origin with one 0.5 mm² facet left out: about the box's centre

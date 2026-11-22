@@ -865,12 +865,15 @@ fn an_occurrence_type_is_one_undo_step_is_saved_and_evaluates_nothing() {
         assert_eq!(occurrence_type(&back, "Gearbox:1"), Some(solidcraft_doc::BomType::Purchased), "{format}");
         assert_eq!(typed(&run(&mut back, "assembly.bom", json!({}))), typed(&run(&mut s, "assembly.bom", json!({}))), "{format}");
     }
-    // In the file: on that occurrence only, with the change listed as pending.
+    // In the file: on that occurrence only. The change is part of design format 59 (folded for
+    // 0.45.0-rc.1), so the file is written at 59 or later and no longer lists it as pending.
     let saved: Value = serde_json::from_str(&std::fs::read_to_string(dir.join("machine.json")).unwrap()).unwrap();
     let occurrences = saved["occurrences"].as_array().unwrap();
     let with_type: Vec<&str> = occurrences.iter().filter(|o| o.get("bom_type").is_some()).map(|o| o["name"].as_str().unwrap()).collect();
     assert_eq!(with_type, ["Gearbox:1"]);
-    assert!(saved["format_pending"].as_array().unwrap().contains(&json!("occurrence-bom-type")), "{}", saved["format_pending"]);
+    let format = saved["format"].as_str().and_then(solidcraft_doc::format::version_of);
+    assert!(format.is_some_and(|n| n >= 59), "{}", saved["format"]);
+    assert!(!saved["format_pending"].as_array().is_some_and(|names| names.contains(&json!("occurrence-bom-type"))), "{}", saved["format_pending"]);
     // A damaged word is refused as the design opens, never read as another type.
     let mut damaged = saved.clone();
     let i = occurrences.iter().position(|o| o.get("bom_type").is_some()).unwrap();

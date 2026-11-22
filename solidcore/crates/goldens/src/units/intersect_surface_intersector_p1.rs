@@ -1799,10 +1799,12 @@ mod wr51_tests {
     /// WR-51 over every case of the unit: each `IsPointOnStartPoint` answer is the
     /// definition (both surface points closer than the tolerance, as a real
     /// distance), and lists the cases where upstream's test (the squared distance
-    /// against the tolerance itself) answers differently: 26 answers in 25 cases. 21
-    /// of those cases are the records that moved when the flag was retired; the other
-    /// 4 (gen0450, gen0673, gen0942, gen1039) have golden blocks holding entries of
-    /// about 2e20, whose checksums round away a change of 1.
+    /// against the tolerance itself) answers differently: 25 answers in 24 cases. 4 of
+    /// them (gen0136, gen0450, gen0673, gen0942) have golden blocks holding entries of
+    /// about 2e20, whose checksums round away a change of 1. (At the first surface's
+    /// tolerance, the default before tangency-labs/solidcraft#17720, the list was 26
+    /// answers in 25 cases, 21 of them the records that moved when the flag was retired:
+    /// gen0552 and gen1039 flipped, gen0136 did not.)
     #[test]
     fn wr51_every_on_start_answer_is_a_real_distance_to_the_tolerance() {
         let ctx = CaseContext {
@@ -1908,9 +1910,10 @@ mod wr51_tests {
             (1510, 0, 0, 652),
             "cases, unbuilt, stopped, answers"
         );
-        let hidden = ["gen0450", "gen0673", "gen0942", "gen1039"];
+        let hidden = ["gen0136", "gen0450", "gen0673", "gen0942"];
         let expected: Vec<(String, usize, bool)> = [
             ("gen0135", 1),
+            ("gen0136", 1),
             ("gen0148", 1),
             ("gen0177", 1),
             ("gen0400", 1),
@@ -1920,7 +1923,6 @@ mod wr51_tests {
             ("gen0495", 1),
             ("gen0502", 1),
             ("gen0535", 1),
-            ("gen0552", 1),
             ("gen0666", 1),
             ("gen0673", 1),
             ("gen0749", 1),
@@ -1929,7 +1931,6 @@ mod wr51_tests {
             ("gen0806", 1),
             ("gen0881", 1),
             ("gen0942", 1),
-            ("gen1039", 1),
             ("gen1215", 1),
             ("gen1235", 1),
             ("gen1387", 2),

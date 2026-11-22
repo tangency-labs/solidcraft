@@ -21,6 +21,7 @@
 use super::PrimitiveCreationAccess;
 use crate::curve::curve::Curve;
 use crate::curve::ellipse::Ellipse;
+use crate::error::primitive::PrimitiveFailure;
 use crate::error::{Result, SolidError};
 use crate::geom::axis2_placement::Axis2Placement;
 use crate::geom::extent1d::Extent1d;
@@ -45,7 +46,7 @@ fn trimmed_edge_curve(
     let k = a.kernel(target)?;
     let source = a.brep(edge.0)?;
     let curve = crate::topology::edge::curve(source, edge.1)?
-        .ok_or_else(|| SolidError::primitive_missing(OP, "the edge's curve"))?;
+        .ok_or_else(|| SolidError::primitive(OP, PrimitiveFailure::EdgeWithoutCurve))?;
     let mut copy = curve.copy(k)?;
     let mut interval = crate::topology::edge::interval(source, edge.1)?;
     // fork c8f6a31 (WR-662): SER(pCrv->Trim(sInterval, FALSE)).
@@ -78,7 +79,7 @@ impl PrimitiveCreation {
     ) -> Result<()> {
         // Get Profile curves from input edges (in the target region's context)
         if self.region().is_none() {
-            return Err(SolidError::primitive_missing(OP, "the target region"));
+            return Err(SolidError::primitive(OP, PrimitiveFailure::NoRegion));
         }
         let mut curves = Vec::new();
         for &edge in edges {
@@ -126,7 +127,7 @@ impl PrimitiveCreation {
     ) -> Result<()> {
         // Get Profile curves from input faces (in the target region's context)
         if self.region().is_none() {
-            return Err(SolidError::primitive_missing(OP, "the target region"));
+            return Err(SolidError::primitive(OP, PrimitiveFailure::NoRegion));
         }
         let mut curves = Vec::new();
         for &face in input_faces {
@@ -180,7 +181,7 @@ impl PrimitiveCreation {
         side_faces.clear();
         end_faces.clear();
         if self.region().is_none() {
-            return Err(SolidError::primitive_missing(OP, "the target region"));
+            return Err(SolidError::primitive(OP, PrimitiveFailure::NoRegion));
         }
 
         // Get the Shape from the first pipe (its status is ignored upstream)
