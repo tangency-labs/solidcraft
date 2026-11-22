@@ -208,7 +208,7 @@ pub enum IntersectFailure {
         /// The largest parameter allowed.
         max: f64,
     },
-    /// No surface cache of the face's surface could be built, trimmed or plain (the plain
+    /// No surface cache of a surface the routine works on, or its tree, could be built (the
     /// build's error is the cause). Class `missing`; whether it is a defect or a refusal is
     /// its cause's ([`crate::SolidError::is_defect`] follows the chain).
     SurfaceCacheNotBuilt,
@@ -424,7 +424,7 @@ impl core::fmt::Display for IntersectFailure {
                 "the new interval end {param} is outside the range [{min}, {max}] its neighbours allow"
             ),
             Self::SurfaceCacheNotBuilt => {
-                f.write_str("no surface cache of the face's surface could be built")
+                f.write_str("no surface cache, or its tree, could be built")
             }
             Self::TouchesUnpaired { count } => write!(
                 f,
