@@ -380,7 +380,12 @@ pub fn app_bar(app: &mut SolveApp, ui: &mut egui::Ui) {
                         crate::links::run(ui.ctx(), id);
                     }
                     app_bar::BarAction::HidePill { id } => {
-                        crate::app_bar_custom::run(app, &json!({"item":if id == "kofi" { "donate" } else { id },"action":"hide"}));
+                        // A pill the organization's policy shows stays: say why instead.
+                        if crate::links::by_id(id).is_some_and(|link| app.policy.locks(link.pref)) {
+                            app.set_status(solidcraft_ui_text::tr("policy.set_by_organization").to_string(), false);
+                        } else {
+                            crate::app_bar_custom::run(app, &json!({"item":if id == "kofi" { "donate" } else { id },"action":"hide"}));
+                        }
                     }
                     app_bar::BarAction::Version => ui.ctx().open_url(egui::OpenUrl::new_tab(&url)),
                     app_bar::BarAction::App { id } => run_overflow_control(app, id),
@@ -2824,6 +2829,18 @@ pub(crate) fn cancel_unfinished(app: &mut SolveApp) -> bool {
 
 /// Global keyboard shortcuts (when no text field has focus).
 pub fn shortcuts(app: &mut SolveApp, ctx: &egui::Context) {
+    let sketch = app.session.active_sketch;
+    let held = if !crate::workspace::tool_receives_input(app) { app.tool.take() } else { None };
+    shortcuts_focused(app, ctx);
+    if let Some(tool) = held
+        && app.session.active_sketch == sketch
+        && app.tool.is_none()
+    {
+        app.tool = Some(tool);
+    }
+}
+
+fn shortcuts_focused(app: &mut SolveApp, ctx: &egui::Context) {
     if crate::view_window_drag::keyboard_active(app, ctx) {
         return;
     }
@@ -3112,7 +3129,7 @@ pub fn shortcuts(app: &mut SolveApp, ctx: &egui::Context) {
                     && !(crate::viewport_status::enabled(app) && crate::viewport_status::owns_escape(app))
                     && app.tool.is_none()
                     && app.dialog.is_none()
-                    && let Some(sketch) = app.session.active_sketch
+                    && let Some(sketch) = crate::workspace::focused_sketch(app)
                 {
                     app.last_escape = None;
                     // A sketch left blank is taken away instead, in one undo step, so no empty

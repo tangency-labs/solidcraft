@@ -4535,6 +4535,112 @@ impl Surface {
     }
 }
 
+/// A proved common ellipse plane with a canvas enclosing certified curve hulls.
+/// The caller supplies loop order independently; no sampled nesting is used here.
+///
+/// # Errors
+///
+/// A missing common ellipse support, unavailable certified curve bounds, or a
+/// degenerate or nonfinite canvas; errors from the curve bounds.
+pub(crate) fn plane_on_ellipses(k: &Kernel, curves: &[Curve]) -> Result<Surface> {
+    const OP: &str = "surface::plane_on_ellipses";
+    let frame = common_ellipse_plane(curves)?
+        .ok_or_else(|| SolidError::surface(OP, SurfaceFailure::NoCommonEllipsePlane))?;
+    let mut bounds = crate::geom::extent3d::Extent3d::new();
+    for curve in curves {
+        let extent = curve
+            .certified_bounding_box(k, &curve.natural_interval())?
+            .ok_or_else(|| SolidError::surface(OP, SurfaceFailure::EllipseBoundsNotCertified))?;
+        bounds = bounds.union(&extent);
+    }
+    ellipse_plane_canvas(frame, bounds)
+}
+
+fn ellipse_plane_canvas(
+    frame: Axis2Placement,
+    extent: crate::geom::extent3d::Extent3d,
+) -> Result<Surface> {
+    use crate::blend::fillet_section::interval::Ivl;
+    let sphere = extent.sphere_bound();
+    let (face_center, face_radius) = (sphere.center, sphere.radius);
+    let box_expansion = 1.1;
+    // The canvas grows the curves' bounding sphere by 10%, as
+    // `Surface::create_plane_with_3d_curves` does; the support S is the
+    // analytic curve's stored origin and axes.
+    let components = |v: Vec3| [Ivl::from(v.x), Ivl::from(v.y), Ivl::from(v.z)];
+    let norm = |v: [Ivl; 3]| {
+        v.into_iter()
+            .map(|v| v * v)
+            .fold(Ivl::from(0.0), |a, b| a + b)
+            .sqrt()
+    };
+    let [xx, xy, xz] = components(frame.x_axis());
+    let [yx, yy, yz] = components(frame.y_axis());
+    let normal_length = norm([xy * yz - xz * yy, xz * yx - xx * yz, xx * yy - xy * yx]);
+    let [cx, cy, cz] = components(face_center);
+    let [ox, oy, oz] = components(frame.origin());
+    let distance = norm([cx - ox, cy - oy, cz - oz]);
+    let radius = Ivl::from(box_expansion) * (Ivl::from(face_radius) + distance);
+    // Dual-basis bounds also cover stored frames whose axes are not
+    // exactly unit length or orthogonal. Rounded intervals enclose the
+    // division; they do not decide whether the curves share a plane.
+    let u = (radius * norm([yx, yy, yz]) / normal_length).hi;
+    let v = (radius * norm([xx, xy, xz]) / normal_length).hi;
+    if !(normal_length.lo > 0.0 && u.is_finite() && u > 0.0 && v.is_finite() && v > 0.0) {
+        return Err(SolidError::surface(
+            "surface::plane_on_ellipses",
+            SurfaceFailure::PlaneCanvasNotFinite,
+        ));
+    }
+    Ok(Surface::from(Plane::from_stored(
+        frame,
+        Vec2::new(1.0, 1.0),
+        Extent2d::from_bounds(-u, -v, u, v),
+        BSplineSurface::new(),
+    )))
+}
+
+/// The exact plane of an all-ellipse boundary (`None` when a curve is not an
+/// ellipse). Ellipses off the first one's stored plane are refused rather than
+/// fitted within a tolerance.
+fn common_ellipse_plane(curves: &[Curve]) -> Result<Option<Axis2Placement>> {
+    use crate::curve::curve::CurveKind;
+    use crate::geom::expansion as exact;
+    if !curves
+        .iter()
+        .all(|c| matches!(c.kind(), CurveKind::Ellipse(_)))
+    {
+        return Ok(None);
+    }
+    let Some(CurveKind::Ellipse(first)) = curves.first().map(Curve::kind) else {
+        return Ok(None);
+    };
+    let frame = *first.position();
+    let (x, y) = (frame.x_axis(), frame.y_axis());
+    let bad = || {
+        SolidError::surface(
+            "surface::plane_on_ellipses",
+            SurfaceFailure::EllipsesNotOnOneExactPlane,
+        )
+    };
+    let origin = exact::det3(x, y, frame.origin()).ok_or_else(bad)?;
+    for curve in curves {
+        let CurveKind::Ellipse(ellipse) = curve.kind() else {
+            return Err(bad());
+        };
+        let other = ellipse.position();
+        let in_plane = exact::det3(x, y, other.origin())
+            .is_some_and(|d| exact::is_zero(&exact::sub(&d, &origin)));
+        if !in_plane
+            || exact::det3(x, y, other.x_axis()).is_none_or(|d| !exact::is_zero(&d))
+            || exact::det3(x, y, other.y_axis()).is_none_or(|d| !exact::is_zero(&d))
+        {
+            return Err(bad());
+        }
+    }
+    Ok(Some(frame))
+}
+
 /// Not upstream (WR-405, tangency-labs/solidcore#892; the SolidCraft fork's
 /// `SmTrimmingTools::JoinTouchingLoops`): joins each loop that touches another loop
 /// of its outer loop's set at a vertex into that loop, so the face's boundary passes
@@ -8050,6 +8156,63 @@ mod tests {
                 }
             }
         }
+    }
+
+    #[test]
+    fn circular_boundaries_keep_their_exact_common_plane() {
+        use crate::curve::ellipse::{Ellipse, EllipseOptions};
+        let k = Kernel::default();
+        for radii in [vec![10.0], vec![10.0, 8.0]] {
+            let curves: Vec<_> = radii
+                .iter()
+                .map(|&radius| {
+                    Curve::from(
+                        Ellipse::new_circle(
+                            &k,
+                            Vec3::new(0.0, 0.0, 20.0),
+                            Vec3::X,
+                            Vec3::Y,
+                            Extent1d::from_min_max(0.0, 360.0),
+                            radius,
+                            &EllipseOptions::default(),
+                        )
+                        .unwrap(),
+                    )
+                })
+                .collect();
+            let plane = plane_on_ellipses(&k, &curves).unwrap();
+            let SurfaceKind::Plane(p) = plane.kind() else {
+                panic!("the boundary defines a plane");
+            };
+            assert_eq!(p.position().origin().z, 20.0);
+            assert_eq!(p.position().x_axis().z, 0.0);
+            assert_eq!(p.position().y_axis().z, 0.0);
+        }
+    }
+
+    #[test]
+    fn nearby_ellipse_planes_are_not_one_exact_plane() {
+        use crate::curve::ellipse::{Ellipse, EllipseOptions};
+        let k = Kernel::default();
+        let curves: Vec<_> = [20.0, f64::from_bits(20.0_f64.to_bits() + 1)]
+            .into_iter()
+            .zip([10.0, 8.0])
+            .map(|(height, radius)| {
+                Curve::from(
+                    Ellipse::new_circle(
+                        &k,
+                        Vec3::new(0.0, 0.0, height),
+                        Vec3::X,
+                        Vec3::Y,
+                        Extent1d::from_min_max(0.0, 360.0),
+                        radius,
+                        &EllipseOptions::default(),
+                    )
+                    .unwrap(),
+                )
+            })
+            .collect();
+        assert!(plane_on_ellipses(&k, &curves).is_err());
     }
 
     fn bilinear() -> Surface {

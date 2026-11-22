@@ -106,6 +106,7 @@
 use crate::error::nurbs::BSplineFailure;
 use crate::error::{nurbs::NurbsFailure, Result, SolidError};
 use crate::geom::axis2_placement::Axis2Placement;
+use crate::geom::certified::{next_down, next_up};
 use crate::geom::extent1d::Extent1d;
 use crate::geom::extent3d::Extent3d;
 use crate::geom::tol::{in_tol, scaled_zero, scaled_zero2};
@@ -2267,7 +2268,8 @@ pub(crate) fn crv_hull_points(cur: &Curve, ivl: &Extent1d) -> Option<Vec<(Vec3, 
 /// also covers the division by the weight.
 ///
 /// `None`, meaning no certified piece, when `cur` is not clamped, under the conditions of
-/// [`crv_hull_points`], or when a split fails.
+/// [`crv_hull_points`], when a knot-span subtraction is not finite, or when a split
+/// fails.
 ///
 /// Not upstream.
 #[must_use]
@@ -2277,7 +2279,12 @@ pub(crate) fn crv_piece_hull_points(cur: &Curve, ivl: &Extent1d) -> Option<Vec<(
     nonempty_spans(knots, p, n)?;
     let (lo, hi) = (ivl.min(), ivl.max());
     let (first, last) = (*knots.get(p)?, *knots.get(n.checked_add(1)?)?);
-    let inside = lo.is_finite() && hi.is_finite() && first <= lo && lo <= hi && hi <= last;
+    let inside = lo.is_finite()
+        && hi.is_finite()
+        && (last - first).is_finite()
+        && first <= lo
+        && lo <= hi
+        && hi <= last;
     if !inside || !is_clamped(knots, p) {
         return None;
     }
@@ -2299,30 +2306,54 @@ pub(crate) fn crv_piece_hull_points(cur: &Curve, ivl: &Extent1d) -> Option<Vec<(
         .collect()
 }
 
-/// Rounding allowance for boxes of pieces made by `levels` convex-combination steps
-/// from control points `cpts` (homogeneous, all weights positive): `16 * levels * eps *
-/// M * (wmax / wmin)`, with `M` the largest Euclidean coordinate magnitude.
+/// Rounding allowance for pieces made by `levels` convex-combination steps from
+/// homogeneous control points. Includes gradual underflow, with every bound rounded
+/// outward. A caller must exclude overflow in the split coefficient's knot arithmetic.
 ///
-/// Derivation: a step computes `(1-a) P + a Q` with `a` in `[0, 1]` itself rounded; its
-/// rounding error is at most about `5 eps` times the largest homogeneous component
-/// (`eps` for `a`, times `|Q - P|`, plus three roundings), and a later step cannot
-/// amplify an earlier error since the combination weights sum to one. So after
-/// `levels` steps each homogeneous component is off by at most `8 levels eps` times its
-/// bound, `wmax * M` for `w x` and `wmax` for `w`. Dividing by the piece's weight, at
-/// least `wmin` (a convex combination of weights), turns the `w x` error and `|x|` times
-/// the `w` error into at most `16 levels eps M wmax / wmin`; the division's own
-/// rounding is within that. `None` when a weight is not positive and finite.
+/// For each homogeneous component, a step's coefficient (two subtractions and a
+/// quotient), its complement and the two products and sum contribute at most
+/// `16u` times its largest input magnitude. With `N = 16 levels + 2`, their inherited
+/// error is bounded by `gamma(N) H + N eta (1 + gamma(N))`, where `H` is the largest
+/// component magnitude and `eta = 2^-1074` bounds each absolute underflow rounding.
+/// The extra two operations cover the initial Euclidean coordinate bound.
+///
+/// Let `dx` and `dw` bound the spatial and weight errors, `M` the largest exact
+/// Euclidean control coordinate, and `wmin` the smallest positive weight. The
+/// computed weight is at least `wmin - dw`, so the Euclidean error before the last
+/// division's rounding is at most `(dx + M dw) / (wmin - dw)`. Add that division's
+/// `gamma(1) (M + error) + eta`. `None` when the denominator cannot be proved
+/// positive, the operation count is too large, or any bound is not finite.
 #[must_use]
 pub(crate) fn piece_slack(cpts: impl IntoIterator<Item = CPoint>, levels: usize) -> Option<f64> {
-    let (mut scale, mut wmin, mut wmax) = (0.0_f64, f64::INFINITY, 0.0_f64);
+    let (mut scale, mut homogeneous, mut wmin, mut wmax) =
+        (0.0_f64, 0.0_f64, f64::INFINITY, 0.0_f64);
     for c in cpts {
         let p = hull_point(c)?;
         scale = scale.max(p.x.abs()).max(p.y.abs()).max(p.z.abs());
+        homogeneous = homogeneous.max(c.x.abs()).max(c.y.abs()).max(c.z.abs());
         let w = if c.w == NOW { 1.0 } else { c.w };
         wmin = wmin.min(w);
         wmax = wmax.max(w);
     }
-    let slack = 16.0 * levels as f64 * f64::EPSILON * scale * (wmax / wmin);
+    let scale = next_up(scale);
+    let steps = levels.checked_mul(16)?.checked_add(2)?;
+    let relative = next_up(gamma(steps));
+    // This also bounds steps below 2^52: its conversion to f64, multiplication by
+    // u, and subtraction from one are exact; next_up encloses gamma's division.
+    if !(relative > 0.0 && relative < 1.0 && wmin.is_finite()) {
+        return None;
+    }
+    let eta = f64::from_bits(1);
+    let absolute = next_up(next_up(steps as f64 * eta) * next_up(1.0 + relative));
+    let dx = next_up(next_up(relative * homogeneous) + absolute);
+    let dw = next_up(next_up(relative * wmax) + absolute);
+    let denominator = next_down(wmin - dw);
+    if !denominator.is_finite() || denominator <= 0.0 {
+        return None;
+    }
+    let error = next_up(next_up(dx + next_up(scale * dw)) / denominator);
+    let division = next_up(next_up(next_up(gamma(1)) * next_up(scale + error)) + eta);
+    let slack = next_up(error + division);
     slack.is_finite().then_some(slack)
 }
 
@@ -2651,7 +2682,7 @@ pub(crate) fn crv_accel_bound(cur: &Curve, ivl: &Extent1d) -> Option<f64> {
 
 /// Not upstream: a bound on the error of each coordinate of the point the evaluation
 /// returns at any parameter ([`crv_eval`] inside the domain, an end control point at an
-/// end): [`piece_slack`]'s `16 levels eps M (w_max / w_min)` with `2p + 2` levels, `M`
+/// end): `16 levels eps M (w_max / w_min)` with `2p + 2` levels, `M`
 /// the largest coordinate of all control points (a missing `z` is `0`).
 ///
 /// Derivation: the basis recursion runs `p` levels; each value is `saved + N (r / d)`
