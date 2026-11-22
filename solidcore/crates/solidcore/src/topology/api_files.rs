@@ -58,17 +58,6 @@ const OP_SLOTS: &str = "topology::api_files::add_curve_output_slots";
 /// `SM_BIG_ULONG` (`SmMath.h`): the size no `SmTArray` reaches.
 pub const BIG_ULONG: u64 = 99_999_999;
 
-/// The wrapper's own `SM_ERR_INVALID_INPUT`: an input it is given is not usable, as the
-/// phrase says.
-fn invalid(operation: &'static str, what: &'static str) -> SolidError {
-    SolidError::topology_invalid_value(operation, what)
-}
-
-/// The wrapper's own `SM_ERR_OUT_OF_MEMORY`, for the data the phrase names.
-fn out_of_memory(operation: &'static str, what: &'static str) -> SolidError {
-    SolidError::topology(operation, TopologyFailure::OutOfMemory(what))
-}
-
 /// `bAscii ? SM_ASCII : SM_BINARY`.
 const fn file_type(ascii: bool) -> FileType {
     if ascii {
@@ -96,7 +85,10 @@ pub fn read_brep_from_file(
     env: &mut TopologyEnv<'_>,
 ) -> Result<Brep> {
     let Some(data) = data else {
-        return Err(invalid(OP_READ_BREP, "no data is given"));
+        return Err(SolidError::topology(
+            OP_READ_BREP,
+            TopologyFailure::NoDataGiven,
+        ));
     };
 
     let mut brep = p3::new_brep(k, USE_DEFAULT, USE_DEFAULT)?;
@@ -130,19 +122,25 @@ pub fn read_part_from_file(
     env: &mut PartEnv<'_>,
 ) -> Result<()> {
     let Some(data) = data else {
-        return Err(invalid(OP_READ_PART, "no data is given"));
+        return Err(SolidError::topology(
+            OP_READ_PART,
+            TopologyFailure::NoDataGiven,
+        ));
     };
     if !out.curves.is_empty()
         || !out.surfaces.is_empty()
         || !out.boolean_tree_nodes.is_empty()
         || !out.breps.is_empty()
     {
-        return Err(invalid(OP_READ_PART, "the part to read into is not empty"));
+        return Err(SolidError::topology(
+            OP_READ_PART,
+            TopologyFailure::PartNotEmpty,
+        ));
     }
 
     let part = part_file::read_part_from_file(k, data, file_type(ascii), env)?;
 
-    let oom = |_| out_of_memory(OP_READ_PART, "the part's contents");
+    let oom = |_| SolidError::topology(OP_READ_PART, TopologyFailure::AllocationFailed);
     out.curves
         .try_reserve_exact(part.curves.len())
         .map_err(oom)?;
@@ -175,7 +173,10 @@ pub fn write_brep_to_file(
     ascii: bool,
 ) -> Result<Vec<u8>> {
     let Some(brep) = brep else {
-        return Err(invalid(OP_WRITE_BREP, "no B-rep is given"));
+        return Err(SolidError::topology(
+            OP_WRITE_BREP,
+            TopologyFailure::NoBrepGiven,
+        ));
     };
     brep_data_write::write_brep_to_file(k, brep, env, file_type(ascii))
 }
@@ -188,7 +189,7 @@ pub fn write_brep_to_file(
 /// `SM_ERR_INVALID_INPUT` for no B-rep; those of [`p5::turn_to_nurbs_plain`].
 pub fn turn_to_nurbs(k: &mut Kernel, brep: Option<&mut Brep>) -> Result<()> {
     let Some(brep) = brep else {
-        return Err(invalid(OP_TURN, "no B-rep is given"));
+        return Err(SolidError::topology(OP_TURN, TopologyFailure::NoBrepGiven));
     };
     p5::turn_to_nurbs_plain(k, brep)
 }
@@ -205,14 +206,24 @@ pub fn add_curve_output_slots<T>(curves: &mut Vec<Option<T>>, additional: u64) -
     if additional == 0 {
         return Ok(());
     }
+    // a size past SM_BIG_ULONG, or past what the platform can index, is too many
+    let too_many = || {
+        let fits_below = BIG_ULONG.wrapping_sub(old_size).min(usize::MAX as u64);
+        SolidError::topology(
+            OP_SLOTS,
+            TopologyFailure::TooManyOutputSlots {
+                asked: additional,
+                fits_below,
+            },
+        )
+    };
     if additional >= BIG_ULONG.wrapping_sub(old_size) {
-        return Err(out_of_memory(OP_SLOTS, "the curve output slots"));
+        return Err(too_many());
     }
-    let n = usize::try_from(additional)
-        .map_err(|_| out_of_memory(OP_SLOTS, "the curve output slots"))?;
+    let n = usize::try_from(additional).map_err(|_| too_many())?;
     curves
         .try_reserve_exact(n)
-        .map_err(|_| out_of_memory(OP_SLOTS, "the curve output slots"))?;
+        .map_err(|_| SolidError::topology(OP_SLOTS, TopologyFailure::AllocationFailed))?;
     curves.resize_with(curves.len() + n, || None);
     Ok(())
 }
