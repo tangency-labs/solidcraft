@@ -749,12 +749,16 @@ impl BiarcContacts {
         } else {
             Some((-b + (b * b + a * c).max(0.0).sqrt()) / a)
         };
-        if let Some(half) = direct {
+        let direct = direct.and_then(|half| {
             let total = 2.0 * half;
-            if total.is_finite()
-                && total > 0.0
-                && self.join_is_conditioned(self.local_chords(ratio, total))
-            {
+            if !(total.is_finite() && total > 0.0) {
+                return None;
+            }
+            let residual = self.join_residual(self.local_chords(ratio, total));
+            (residual <= EFF_ZERO * 0.5).then_some((total, residual))
+        });
+        if let Some((total, residual)) = direct {
+            if residual <= gamma(64) {
                 return Ok(total);
             }
         }
@@ -777,7 +781,59 @@ impl BiarcContacts {
         if !(total.is_finite() && total > 0.0) {
             return Err(biarc_precision_error(op));
         }
+        if let Some((candidate, _)) = direct {
+            if self.centres_within_roundoff(ratio, candidate, total) {
+                return Ok(candidate);
+            }
+        }
         Ok(total)
+    }
+
+    fn centres_within_roundoff(&self, ratio: f64, candidate: f64, reference: f64) -> bool {
+        let direct_chords = self.local_chords(ratio, candidate);
+        let reference_chords = self.local_chords(ratio, reference);
+        // Two root/chord/radius evaluations take fewer than 256 unit roundings,
+        // including two each for sqrt and hypot. This is the 128-EPSILON allowance
+        // used by the analytical circle check, before curvature conditioning.
+        let epsilon = gamma(256);
+        let model_tolerance = self.position_tolerance().max(MODEL_TOL);
+        direct_chords
+            .into_iter()
+            .zip(reference_chords)
+            .zip([self.first, self.last])
+            .all(|((direct, reference), tangent)| {
+                let direct_length = length2d(direct);
+                let reference_length = length2d(reference);
+                if !(direct_length.is_finite()
+                    && direct_length > 0.0
+                    && reference_length.is_finite()
+                    && reference_length > 0.0)
+                {
+                    return false;
+                }
+                let normal = Vec2::new(-tangent.y, tangent.x);
+                let direct_height = normal.dot(direct);
+                let reference_height = normal.dot(reference);
+                let sine = reference_height.abs() / reference_length;
+                if !(sine.is_finite() && sine > epsilon) {
+                    return false;
+                }
+                let direct_radius = (0.5 * direct_length) / (direct_height / direct_length);
+                let reference_radius =
+                    (0.5 * reference_length) / (reference_height / reference_length);
+                // R(h) = |h|²/(2 n·h). For |delta h| <= epsilon |h| and
+                // sine = |n·h|/|h|, the relative radius change is bounded by
+                // epsilon (2 + epsilon + 1/sine)/(1 - epsilon/sine).
+                // Both centres lie on the same endpoint normal. Account for supplied
+                // tangents being unit only to roundoff; bound both radius and centre.
+                let allowance = (reference_radius.abs() * epsilon * (2.0 + epsilon + 1.0 / sine)
+                    / (1.0 - epsilon / sine))
+                    .min(model_tolerance);
+                direct_radius.is_finite()
+                    && reference_radius.is_finite()
+                    && (direct_radius - reference_radius).abs() * length2d(tangent).max(1.0)
+                        <= allowance
+            })
     }
 
     fn local_chords(&self, ratio: f64, total: f64) -> [Vec2; 2] {
@@ -788,9 +844,8 @@ impl BiarcContacts {
 
     /// Reflection across a circular piece's chord gives its other endpoint tangent.
     /// Normalization, dot products and reflection contribute fewer than 24 rounding units per
-    /// side. Both sides and their cross product fit within `gamma(64)`, so the direct root must
-    /// have a residual indistinguishable from arithmetic roundoff.
-    fn join_is_conditioned(&self, [left, right]: [Vec2; 2]) -> bool {
+    /// side. Both sides and their cross product fit within `gamma(64)`.
+    fn join_residual(&self, [left, right]: [Vec2; 2]) -> f64 {
         let left_length = length2d(left);
         let right_length = length2d(right);
         if !(left_length.is_finite()
@@ -798,13 +853,17 @@ impl BiarcContacts {
             && right_length.is_finite()
             && right_length > 0.0)
         {
-            return false;
+            return f64::INFINITY;
         }
         let left = left / left_length;
         let right = right / right_length;
         let from_left = left * (2.0 * self.first.dot(left)) - self.first;
         let from_right = right * (2.0 * self.last.dot(right)) - self.last;
-        from_left.dot(from_right) > 0.0 && cross2(from_left, from_right).abs() <= gamma(64)
+        if from_left.dot(from_right) > 0.0 {
+            cross2(from_left, from_right).abs()
+        } else {
+            f64::INFINITY
+        }
     }
 
     /// Coordinate-rounding allowance shared by joint placement and exact piece validation.
