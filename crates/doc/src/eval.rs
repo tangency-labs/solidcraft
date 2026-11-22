@@ -15270,7 +15270,7 @@ fn separate_new_lumps(parts: Vec<Traced>, input: &Body) -> Result<Vec<Traced>> {
     let mut kept = Vec::with_capacity(parts.len());
     let mut more = Vec::new();
     for part in parts {
-        let lumps = part.body.lumps()?;
+        let lumps = part.body.lumps().unwrap_or_default();
         if lumps.len() < 2 {
             kept.push(part);
             continue;
