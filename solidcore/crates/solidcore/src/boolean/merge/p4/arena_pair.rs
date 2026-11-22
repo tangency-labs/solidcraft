@@ -1741,10 +1741,9 @@ impl IntersectorBrep<H> for ArenaPair<'_> {
             return Err(invalid("not a face handle"));
         }
         let b = face.b;
-        let surface = self
-            .face_surface_h(face)
-            .flatten()
-            .ok_or_else(|| SolidError::boolean(OP_FACE_CACHE, BooleanFailure::FaceWithoutSurface))?;
+        let surface = self.face_surface_h(face).flatten().ok_or_else(|| {
+            SolidError::boolean(OP_FACE_CACHE, BooleanFailure::FaceWithoutSurface)
+        })?;
         Ok(ti::FaceCacheTarget {
             brep: self.brep_m(face)?,
             face: fid(face),

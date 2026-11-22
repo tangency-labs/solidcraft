@@ -825,7 +825,9 @@ impl<O: ClassObject + SolutionObject + Ord> TopologyIntersector<O> {
                         && !contains(&squeezed.deleted_edges, &e2)
                     {
                         // create the Edge/Edge mate relationship
-                        if let Err(relate_error) = split_soft(self.relate(k, brep, Some(e1), Some(e2)))? {
+                        if let Err(relate_error) =
+                            split_soft(self.relate(k, brep, Some(e1), Some(e2)))?
+                        {
                             self.repair_edge_relation(
                                 k,
                                 brep,
@@ -1072,7 +1074,9 @@ impl<O: ClassObject + SolutionObject + Ord> TopologyIntersector<O> {
     ) -> Result<()> {
         let pairs = self
             .edge_vertices(k, brep, primary, other)?
-            .ok_or_else(|| SolidError::boolean(OP_CLASSES, BooleanFailure::CoincidentEdgeEndsDiffer))?;
+            .ok_or_else(|| {
+                SolidError::boolean(OP_CLASSES, BooleanFailure::CoincidentEdgeEndsDiffer)
+            })?;
         let first = pairs.first().copied();
         for (i, (v, w)) in pairs.into_iter().enumerate() {
             if i > 0 && first == Some((v, w)) {
@@ -1117,7 +1121,10 @@ impl<O: ClassObject + SolutionObject + Ord> TopologyIntersector<O> {
             }
         }
         if squeezed.deleted_edges.contains(&primary) || squeezed.deleted_edges.contains(&other) {
-            return Err(SolidError::boolean(OP_CLASSES, BooleanFailure::CoincidentEdgeCollapsed));
+            return Err(SolidError::boolean(
+                OP_CLASSES,
+                BooleanFailure::CoincidentEdgeCollapsed,
+            ));
         }
         self.relate(k, brep, Some(primary), Some(other))
     }
@@ -1193,9 +1200,11 @@ impl<O: ClassObject + SolutionObject + Ord> TopologyIntersector<O> {
 
             // if there is still a problem - signal an error
             if !fixed {
-                return Err(Failure::new(OP_CLASSES, BooleanFailure::EdgeRelationNotRepaired)
-                    .caused_by(relate_error)
-                    .into_error());
+                return Err(
+                    Failure::new(OP_CLASSES, BooleanFailure::EdgeRelationNotRepaired)
+                        .caused_by(relate_error)
+                        .into_error(),
+                );
             }
         }
         // when pE1 has a mate but pE2 does not - try to fix things by deleting unneeded
@@ -1226,9 +1235,11 @@ impl<O: ClassObject + SolutionObject + Ord> TopologyIntersector<O> {
                 }
             }
             if !fixed {
-                return Err(Failure::new(OP_CLASSES, BooleanFailure::EdgeRelationNotRepaired)
-                    .caused_by(relate_error)
-                    .into_error());
+                return Err(
+                    Failure::new(OP_CLASSES, BooleanFailure::EdgeRelationNotRepaired)
+                        .caused_by(relate_error)
+                        .into_error(),
+                );
             }
         }
         Ok(())
@@ -1492,7 +1503,10 @@ impl<O: ClassObject + SolutionObject + Ord> TopologyIntersector<O> {
         let partial = crv_class1.test_for_partial_coincident_edges(k, &*brep, &crv_class2)?;
         let new_tol = partial.max_partial_coin_gap;
         if new_tol < 0.0 {
-            return Err(SolidError::boolean(OP_ON_SURFACES, BooleanFailure::NoCommonSubinterval));
+            return Err(SolidError::boolean(
+                OP_ON_SURFACES,
+                BooleanFailure::NoCommonSubinterval,
+            ));
         }
 
         // when a coincident sub-interval curve was made

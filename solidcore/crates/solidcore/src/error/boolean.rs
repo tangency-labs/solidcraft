@@ -509,7 +509,11 @@ impl core::fmt::Display for BooleanFailure {
                  cannot be copied",
             ),
             Self::ClassificationStepFailed { step } => {
-                write!(f, "{} failed: {step} failed", BooleanStage::MergeClassifications)
+                write!(
+                    f,
+                    "{} failed: {step} failed",
+                    BooleanStage::MergeClassifications
+                )
             }
             Self::ExistingRelationBetter => f.write_str(
                 "the vertex is already related to a closer vertex, which the squeeze keeps",
@@ -545,9 +549,7 @@ impl core::fmt::Display for BooleanFailure {
             Self::NoCommonSubinterval => {
                 f.write_str("the partly coincident edges have no common sub-interval")
             }
-            Self::NotRelatedPair => {
-                f.write_str("the two entities are not related to each other")
-            }
+            Self::NotRelatedPair => f.write_str("the two entities are not related to each other"),
             Self::LoopVertexUnrelated => f.write_str(
                 "the vertex the intersection loop ends at has no related vertex in the other \
                  B-rep",
@@ -720,7 +722,11 @@ mod tests {
                 SM_ERR,
                 K::NotConverged,
             ),
-            (F::CoincidentFacesNotSettled { passes: 4 }, SM_ERR, K::NotConverged),
+            (
+                F::CoincidentFacesNotSettled { passes: 4 },
+                SM_ERR,
+                K::NotConverged,
+            ),
         ];
         for (failure, status, kind) in cases {
             let e = SolidError::boolean("boolean::op", failure);

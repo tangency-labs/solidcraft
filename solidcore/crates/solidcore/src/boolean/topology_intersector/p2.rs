@@ -277,10 +277,16 @@ impl<O: Ord + Copy> MapMates<O> {
     /// `RemoveRelationship`: `SM_ERR` unless the two are a mated pair.
     fn remove(&mut self, brep_entity: Option<O>, other_entity: Option<O>) -> Result<()> {
         let (Some(b), Some(o)) = (brep_entity, other_entity) else {
-            return Err(SolidError::boolean(OP_REMOVE, BooleanFailure::NotRelatedPair));
+            return Err(SolidError::boolean(
+                OP_REMOVE,
+                BooleanFailure::NotRelatedPair,
+            ));
         };
         if self.other(Some(b)) != Some(o) {
-            return Err(SolidError::boolean(OP_REMOVE, BooleanFailure::NotRelatedPair));
+            return Err(SolidError::boolean(
+                OP_REMOVE,
+                BooleanFailure::NotRelatedPair,
+            ));
         }
         if let Some(m) = self.b_to_o.as_mut() {
             m.remove(&b);
@@ -515,7 +521,10 @@ impl<O: ClassObject + SolutionObject + Ord> TopologyIntersector<O> {
         other_entity: Option<O>,
     ) -> Result<()> {
         if !self.is_mated_pair(brep_entity, other_entity) {
-            return Err(SolidError::boolean(OP_REMOVE, BooleanFailure::NotRelatedPair));
+            return Err(SolidError::boolean(
+                OP_REMOVE,
+                BooleanFailure::NotRelatedPair,
+            ));
         }
         if let (Some(m), Some(b)) = (self.b_to_o.as_mut(), brep_entity) {
             m.remove(&b);
@@ -1053,7 +1062,9 @@ impl<O: ClassObject + SolutionObject + Ord> TopologyIntersector<O> {
 
         // find mating vertex in m_pOther brep
         let other_vertex = Self::cast(self.other_mate(Some(brep_vertex)), ClassObjectKind::Vertex)
-            .ok_or_else(|| SolidError::boolean(OP_CLOSE_LOOP, BooleanFailure::LoopVertexUnrelated))?;
+            .ok_or_else(|| {
+                SolidError::boolean(OP_CLOSE_LOOP, BooleanFailure::LoopVertexUnrelated)
+            })?;
 
         // init output
         let mut made_new_topology = false;

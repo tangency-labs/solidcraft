@@ -779,7 +779,8 @@ pub fn make_faceuse_attempt_with(
         )?,
     };
     // error - unable to classify input OtherBrep faceuse into a Brep region
-    let region = region.ok_or_else(|| SolidError::boolean(OP_FACEUSE, BooleanFailure::FaceInNoRegion))?;
+    let region =
+        region.ok_or_else(|| SolidError::boolean(OP_FACEUSE, BooleanFailure::FaceInNoRegion))?;
 
     // Now merge all unrelated input face->vertices into Brep's Region as shell
     // vertices, and pick up the radial sector edge uses.

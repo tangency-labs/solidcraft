@@ -645,8 +645,8 @@ where
     D::Surface: Ord,
 {
     let (final_result, original_other) = driver.operands();
-    let final_result =
-        final_result.ok_or_else(|| SolidError::boolean(OP, BooleanFailure::MergeWithoutOperands))?;
+    let final_result = final_result
+        .ok_or_else(|| SolidError::boolean(OP, BooleanFailure::MergeWithoutOperands))?;
     let original_other = original_other
         .ok_or_else(|| SolidError::boolean(OP, BooleanFailure::MergeWithoutOperands))?;
     let surfaces = driver.surfaces(original_other)?;

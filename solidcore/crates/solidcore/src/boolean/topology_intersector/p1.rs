@@ -4251,15 +4251,14 @@ impl<O: ClassObject + SolutionObject + Ord, G: IntersectorBrep<O> + ?Sized> Surf
         if surface.face()?.is_none() {
             return surface_cache(k, surface, Some(handle));
         }
-        let face =
-            self.0.inner().surface_face(handle)?.ok_or_else(|| {
-                SolidError::boolean_null_defect(
-                    OP_FACE_CACHES,
-                    BooleanStage::Intersect,
-                    "the handle of a surface that has a face names no face, though the \
+        let face = self.0.inner().surface_face(handle)?.ok_or_else(|| {
+            SolidError::boolean_null_defect(
+                OP_FACE_CACHES,
+                BooleanStage::Intersect,
+                "the handle of a surface that has a face names no face, though the \
                      handle was made for that surface's face",
-                )
-            })?;
+            )
+        })?;
         match self.0.caches.built.get(&face) {
             Some(Ok(cache)) => {
                 self.0.caches.tree_requested.borrow_mut().insert(face);
@@ -4287,15 +4286,14 @@ impl<O: ClassObject + SolutionObject + Ord, G: IntersectorBrep<O> + ?Sized> Surf
         if surface.face()?.is_none() {
             return self.build_surface_cache(k, surface, Some(handle));
         }
-        let face =
-            self.0.inner().surface_face(handle)?.ok_or_else(|| {
-                SolidError::boolean_null_defect(
-                    OP_FACE_CACHES,
-                    BooleanStage::Intersect,
-                    "the handle of a surface that has a face names no face, though the \
+        let face = self.0.inner().surface_face(handle)?.ok_or_else(|| {
+            SolidError::boolean_null_defect(
+                OP_FACE_CACHES,
+                BooleanStage::Intersect,
+                "the handle of a surface that has a face names no face, though the \
                      handle was made for that surface's face",
-                )
-            })?;
+            )
+        })?;
         // after the attempt's first GetTree of the face's cache, upstream's cache has
         // its tree
         if self.0.caches.tree_requested.borrow().contains(&face) {
@@ -4667,15 +4665,14 @@ where
             Some((face, b, f))
         })
         .collect();
-    trim_owner_face(&candidates, |b| caches.trims.trim_requested_on(b), eu)
-        .ok_or_else(|| {
-            SolidError::boolean_null_defect(
-                OP_FACE_CACHES,
-                BooleanStage::Intersect,
-                "no classified face holds the edge use whose UV trim the classification asked \
+    trim_owner_face(&candidates, |b| caches.trims.trim_requested_on(b), eu).ok_or_else(|| {
+        SolidError::boolean_null_defect(
+            OP_FACE_CACHES,
+            BooleanStage::Intersect,
+            "no classified face holds the edge use whose UV trim the classification asked \
                  for, though it asks only for the trims of the faces it classified against",
-            )
-        })
+        )
+    })
 }
 
 /// The candidate face whose B-rep `requested_on` accepts and whose loop uses hold `eu`
@@ -4988,7 +4985,9 @@ pub fn intersect_wire_lamina_edges<O: ClassObject + SolutionObject + Ord>(
         }
 
         // Syncronize the two curve classifications.
-        if let Err(cause) = split_soft(cc_homogenize(k, geometry, &mut crv_class1, &mut crv_class2))? {
+        if let Err(cause) =
+            split_soft(cc_homogenize(k, geometry, &mut crv_class1, &mut crv_class2))?
+        {
             return Err(Failure::new(
                 OP,
                 BooleanFailure::ClassificationStepFailed {
