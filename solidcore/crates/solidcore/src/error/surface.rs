@@ -454,13 +454,10 @@ mod tests {
         assert_eq!(typed.is_status_answer(), before.is_status_answer());
     }
 
-    /// The surface routines describe their failures: their library code builds no bare
-    /// `Upstream` status, except the files listed (with the bare sites each may still hold)
-    /// whose conversion waits on other open work or a later part of the slice.
     /// Each named cause keeps the status of the phrase it replaced and says its class; a
     /// cause that chains the stage's error keeps it.
     #[test]
-    fn the_named_causes_keep_their_status_and_say_their_class() {
+    fn the_solver_causes_keep_their_status_and_say_their_class() {
         let op = "surface::op";
         let cases: [(SurfaceFailure, i32, ErrorKind); 17] = [
             (
@@ -581,6 +578,9 @@ mod tests {
         assert_eq!(e.cause(), Some(&stage));
     }
 
+    /// The surface routines describe their failures: their library code builds no bare
+    /// `Upstream` status, except the files listed (with the bare sites each may still hold)
+    /// whose conversion waits on other open work or a later part of the slice.
     #[test]
     fn the_surface_routines_build_no_bare_statuses() {
         super::super::bare_scan::assert_waiting("surface", 51, &[]);

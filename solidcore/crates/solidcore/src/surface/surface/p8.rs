@@ -2052,10 +2052,18 @@ impl Surface {
         let face_queries = context
             .as_deref()
             .and_then(SurfaceSolveContext::face_queries);
-        // (a cache a solve context built and kept may come without its tree)
-        let tree = cache
-            .tree()
-            .ok_or_else(|| Failure::new(OP_LINE, SurfaceFailure::SolveCacheNotMade).into_error())?;
+        let tree = cache.tree().ok_or_else(|| {
+            Failure::new(
+                OP_LINE,
+                SurfaceFailure::Defect {
+                    why: "the surface cache has no tree, though each source gives one: \
+                          GetTree builds it, or a solve context's build_surface_cache \
+                          returns its cache with the tree ready",
+                },
+            )
+            .with_status(SM_ERR_NULL_POINTER)
+            .into_error()
+        })?;
         let top = tree.top_node().ok_or_else(|| {
             Failure::new(
                 OP_LINE,
@@ -2849,8 +2857,9 @@ impl Surface {
             Failure::new(
                 OP_CURVE,
                 SurfaceFailure::Defect {
-                    why: "the surface cache has no tree, though it is used only once it has \
-                          one or GetTree built it",
+                    why: "the surface cache has no tree, though each source gives one: \
+                          GetTree builds it, or a solve context's build_surface_cache \
+                          returns its cache with the tree ready",
                 },
             )
             .with_status(SM_ERR_NULL_POINTER)
