@@ -535,13 +535,33 @@ mod tests {
     fn the_named_offset_and_blend_causes_keep_the_status_they_replaced() {
         use crate::error::ErrorKind as K;
         let cases = [
-            (SurfaceFailure::BlendCurveNotBSpline, SM_ERR, K::InvalidInput),
-            (SurfaceFailure::BlendDefinitionUnreadable, SM_ERR, K::InvalidInput),
-            (SurfaceFailure::CurveDimensionTooLarge, SM_ERR, K::InvalidInput),
+            (
+                SurfaceFailure::BlendCurveNotBSpline,
+                SM_ERR,
+                K::InvalidInput,
+            ),
+            (
+                SurfaceFailure::BlendDefinitionUnreadable,
+                SM_ERR,
+                K::InvalidInput,
+            ),
+            (
+                SurfaceFailure::CurveDimensionTooLarge,
+                SM_ERR,
+                K::InvalidInput,
+            ),
             (SurfaceFailure::NoBSplineForm, SM_ERR, K::InvalidInput),
-            (SurfaceFailure::DoesNotContinueAsItself, SM_ERR, K::InvalidInput),
+            (
+                SurfaceFailure::DoesNotContinueAsItself,
+                SM_ERR,
+                K::InvalidInput,
+            ),
             (SurfaceFailure::OffsetNestedTooDeep, SM_ERR, K::InvalidInput),
-            (SurfaceFailure::DerivativeOrderTooHigh, SM_ERR, K::InvalidInput),
+            (
+                SurfaceFailure::DerivativeOrderTooHigh,
+                SM_ERR,
+                K::InvalidInput,
+            ),
             (SurfaceFailure::BaseNotOwned, SM_ERR, K::InvalidInput),
             (
                 SurfaceFailure::RecordDoesNotRebuild,

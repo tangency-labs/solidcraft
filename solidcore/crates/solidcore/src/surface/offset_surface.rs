@@ -2013,10 +2013,7 @@ impl OffsetSurface {
             }
         } else {
             // Can not swap UV if I do not own the surface
-            return Err(SolidError::surface(
-                OP_EDIT,
-                SurfaceFailure::BaseNotOwned,
-            ));
+            return Err(SolidError::surface(OP_EDIT, SurfaceFailure::BaseNotOwned));
         }
         Ok(())
     }
@@ -2072,10 +2069,7 @@ impl OffsetSurface {
                 .transform_at_depth(k, rotate_n_move, scale, depth + 1)?;
         } else {
             // Can not transform if I do not own the surface
-            return Err(SolidError::surface(
-                OP_EDIT,
-                SurfaceFailure::BaseNotOwned,
-            ));
+            return Err(SolidError::surface(OP_EDIT, SurfaceFailure::BaseNotOwned));
         }
         Ok(())
     }
@@ -2108,10 +2102,7 @@ impl OffsetSurface {
             self.surface.trim_with_domain(k, trim_domain)?;
         }
         if !self.owns_surface {
-            return Err(SolidError::surface(
-                OP_EDIT,
-                SurfaceFailure::BaseNotOwned,
-            ));
+            return Err(SolidError::surface(OP_EDIT, SurfaceFailure::BaseNotOwned));
         }
         Ok(())
     }
@@ -2332,9 +2323,11 @@ fn extend_toward(k: &Kernel, surface: &Surface, uv: Point2) -> Result<Surface> {
     match eval_pt_derivs_unbounded(&sur, uv.x, uv.y, 0, ExtendContinuity::G1R, &mut esur) {
         Err(e) if e.is_unported_or_cancelled() => return Err(e),
         Err(e) => {
-            return Err(Failure::new(OP_EXTEND, SurfaceFailure::ExtensionTowardFailed)
-                .caused_by(e)
-                .into_error())
+            return Err(
+                Failure::new(OP_EXTEND, SurfaceFailure::ExtensionTowardFailed)
+                    .caused_by(e)
+                    .into_error(),
+            )
         }
         Ok(_) => {}
     }
@@ -3397,9 +3390,11 @@ fn extend_surface(
         match second {
             Err(e) if e.is_unported_or_cancelled() => return Err(e),
             Err(e) => {
-                return Err(Failure::new(OP_EXTEND, SurfaceFailure::ExtensionTowardFailed)
-                    .caused_by(e)
-                    .into_error())
+                return Err(
+                    Failure::new(OP_EXTEND, SurfaceFailure::ExtensionTowardFailed)
+                        .caused_by(e)
+                        .into_error(),
+                )
             }
             Ok(_) => {}
         }
@@ -4903,7 +4898,11 @@ mod tests {
         // a non-uniform scale
         let mut off = off;
         let e = off
-            .transform(&k, &Axis2Placement::default(), Some(Vec3::new(1.0, 2.0, 1.0)))
+            .transform(
+                &k,
+                &Axis2Placement::default(),
+                Some(Vec3::new(1.0, 2.0, 1.0)),
+            )
             .unwrap_err();
         check(
             e,
