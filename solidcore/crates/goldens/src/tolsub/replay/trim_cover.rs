@@ -472,12 +472,12 @@ pub(super) static TRIM_COVER: &[(&str, &str, u64)] = &[
     (
         "topology.edgeuse_p3",
         "own_reader_sphere_diff_3cylinders_create_eu0",
-        0x5f9c0efd55f2a7ee,
+        0x404e5286ab206093,
     ),
     (
         "topology.edgeuse_p3",
         "own_reader_sphere_diff_3cylinders_create_eu18",
-        0xcef4f4be4b337531,
+        0x5836f9ad361c74ac,
     ),
     (
         "topology.edgeuse_p3",
@@ -522,7 +522,7 @@ pub(super) static TRIM_COVER: &[(&str, &str, u64)] = &[
     (
         "topology.edgeuse_p3",
         "own_reader_sphere_diff_3cylinders_create_eu9",
-        0xcd26483f1ade8591,
+        0x22c0da2401323f52,
     ),
     (
         "topology.edgeuse_p3",
