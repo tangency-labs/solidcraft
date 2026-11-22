@@ -334,8 +334,19 @@ fn replay_trim_cover(unit_id: &str) -> usize {
             failures.push(format!("{name}: {reads} reads, {undone} put back, {f:?}"));
         }
         let committed = golden.get(name);
-        if hash(&line) != main_hash {
-            failures.push(format!("{name}: the row put back is not main's row"));
+        // (a row whose put-back run the joined-trims cover raises further: main's row with
+        // those raises, see [`TRIM_COVER_JOINED`])
+        let joined = TRIM_COVER_JOINED
+            .iter()
+            .find(|r| r.0 == unit_id && r.1 == name);
+        match joined {
+            Some(&(_, _, put_back_hash)) if hash(&line) != put_back_hash => failures.push(format!(
+                "{name}: the row put back is not main's row with the joined raises"
+            )),
+            None if hash(&line) != main_hash => {
+                failures.push(format!("{name}: the row put back is not main's row"));
+            }
+            _ => {}
         }
         let line = run(u.as_ref(), case);
         if TRIM_COVER_WITHIN_COMPARATOR.contains(&(unit_id, name)) {
@@ -576,6 +587,27 @@ replay_trim_cover_tests! {
     topology_edgeuse_p3_rows_move_only_through_the_trim_cover: "topology.edgeuse_p3", 16;
     topology_face_p3_rows_move_only_through_the_trim_cover: "topology.face_p3", 13;
 }
+
+/// [`TRIM_COVER`] rows whose put-back run moves further through the joined-trims cover
+/// (tangency-labs/solidcraft#20373, `cover_joined_trims` at the end of the stitch): unit,
+/// case, and the hash of this branch's row with the reads' cover raises put back. Their
+/// `TRIM_COVER` main hash is kept; run as is, each is still the committed golden line.
+///
+/// `extended_surface_9_Platte`: the put-back takes the read's cover raises off e145 and
+/// e151 (1.4508e-5 to 1e-5) and e217 and e219 (4.9059e-5 to 1e-5). The blend's edges e19
+/// and e33 then carry trims those uncovered edges leave farther from them than their
+/// tolerance (1e-5), and the joined cover raises both to their proved trim bound,
+/// 4.8984e-5. As is, the read's cover already covers those trims and the joined cover
+/// raises nothing. The put-back row differs from it with `cover_joined_trims` off (which
+/// gives main's hash) only in block 1 (entries 256..424) of `feature0_geometry`: its sum
+/// and absolute sum rise by 7.796797e-5 each and its weighted sum by 0.0115782 = 148.5 x
+/// 7.796797e-5. That is two adjacent entries (weights 148 and 149) each rising by
+/// 3.898398e-5 = 4.8984e-5 - 1e-5: exactly the two raised tolerances, nothing else.
+const TRIM_COVER_JOINED: &[(&str, &str, u64)] = &[(
+    "blend.feature_executive",
+    "extended_surface_9_Platte",
+    0x7a01_4961_6dc2_4b3a,
+)];
 
 /// Rows #18166 took out of [`TRIM_COVER`] that it does not move (see the module docs): unit,
 /// case, and the hash of main's committed line (`origin/main` ee673a19bf's expected file).
