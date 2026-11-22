@@ -528,6 +528,9 @@ impl Drop for App {
     /// `on_exit`, it read `app.ron` while the old process was still writing it, found it
     /// unreadable and moved it aside, resetting every setting (#9044).
     fn drop(&mut self) {
+        // A successor started below with design files would otherwise hand them back to this
+        // closing window and end (#19340).
+        single_instance::stop();
         if let Some(gpu) = &self.gpu
             && let Some(lost_at) = gpu.lost_at
         {
