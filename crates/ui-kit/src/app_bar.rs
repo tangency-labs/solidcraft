@@ -2752,6 +2752,7 @@ fn draw_clear_view(
     } else if response.secondary_clicked()
         || (response.has_focus() && ui.input_mut(|input| input.consume_key(egui::Modifiers::SHIFT, egui::Key::F10)))
     {
+        claim_tab_context_click(ui.ctx());
         pen.popup = Some((Popup::View(k), pos2(rect.left(), pen.below), rect, ui.ctx().cumulative_frame_nr()));
     } else if response.clicked() || key(egui::Key::Enter) {
         response.request_focus();
