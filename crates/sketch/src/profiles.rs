@@ -80,8 +80,8 @@ pub struct Profile {
 }
 
 impl Profile {
-    /// Whole source boundaries, certified by complete graph-piece coverage. Intersections,
-    /// missing spans and unknown sampled geometry cannot acquire this persistent identity.
+    /// Whole source boundaries, certified by complete graph-piece coverage. Crossings that
+    /// subdivide the boundary, missing spans and unknown sampled geometry cannot acquire it.
     pub fn whole_curve_boundaries(&self) -> Option<(Vec<String>, Vec<Vec<String>>)> {
         Some((self.complete_outer.clone()?, self.complete_holes.clone()?))
     }
@@ -1737,6 +1737,13 @@ fn island_loops(sk: &Sketch, curves: &[usize], max_edges: usize) -> Island {
                 .map(|_| (*ci, 0, 0, 1))
         });
         let coverage = if ts.is_empty() { coverage } else { None };
+        let mut split_coverage = |pieces| {
+            let split = analytic && !ts.is_empty();
+            if split {
+                expected.insert(*ci, vec![pieces]);
+            }
+            move |piece| if split { Some((*ci, 0, piece, pieces)) } else { coverage }
+        };
         match *sh {
             Shape::Line { a, b } => {
                 let mut ps = vec![a];
@@ -1748,6 +1755,7 @@ fn island_loops(sk: &Sketch, curves: &[usize], max_edges: usize) -> Island {
                 // starts or stops at such a crossing is never the whole segment there: it does not
                 // run from the segment's start to its end.
                 let tag = tags.get(k).copied().flatten();
+                let coverage = split_coverage(ps.len() - 1);
                 for (piece, w) in ps.windows(2).enumerate() {
                     let (p, q) = (w[0], w[1]);
                     if p.dist(q) > MERGE_TOL {
@@ -1755,7 +1763,16 @@ fn island_loops(sk: &Sketch, curves: &[usize], max_edges: usize) -> Island {
                         let last = piece + 2 == ps.len();
                         let u = node(p, first.then(|| endpoints.map(|(a, _)| a)).flatten());
                         let v = node(q, last.then(|| endpoints.map(|(_, b)| b)).flatten());
-                        edges.push(Edge { seg: Seg2::Line { a: p, b: q }, u, v, id: id.clone(), tag, coverage, analytic, curve: *ci });
+                        edges.push(Edge {
+                            seg: Seg2::Line { a: p, b: q },
+                            u,
+                            v,
+                            id: id.clone(),
+                            tag,
+                            coverage: coverage(piece),
+                            analytic,
+                            curve: *ci,
+                        });
                     }
                 }
             }
@@ -1786,6 +1803,7 @@ fn island_loops(sk: &Sketch, curves: &[usize], max_edges: usize) -> Island {
                     let first = bounds.first().copied().unwrap_or(0.0);
                     bounds.push(first + TAU);
                 }
+                let coverage = split_coverage(bounds.len() - 1);
                 for (piece, w) in bounds.windows(2).enumerate() {
                     let (t0, t1) = (w[0], w[1]);
                     if (t1 - t0) * r <= MERGE_TOL {
@@ -1796,7 +1814,7 @@ fn island_loops(sk: &Sketch, curves: &[usize], max_edges: usize) -> Island {
                     let last = !full && piece + 2 == bounds.len();
                     let u = node(seg.start(), first.then(|| endpoints.map(|(a, _)| a)).flatten());
                     let v = node(seg.end(), last.then(|| endpoints.map(|(_, b)| b)).flatten());
-                    edges.push(Edge { seg, u, v, id: id.clone(), tag: None, coverage, analytic, curve: *ci });
+                    edges.push(Edge { seg, u, v, id: id.clone(), tag: None, coverage: coverage(piece), analytic, curve: *ci });
                 }
             }
         }
@@ -1810,6 +1828,7 @@ fn island_loops(sk: &Sketch, curves: &[usize], max_edges: usize) -> Island {
         *between.entry((e.u.min(e.v), e.u.max(e.v))).or_default() += 1;
     }
     let mut short: Vec<usize> = (0..nodes.len()).collect();
+    let edge_count = edges.len();
     edges.retain(|e| {
         let length = match e.seg {
             Seg2::Line { a, b } => a.dist(b),
@@ -1829,7 +1848,8 @@ fn island_loops(sk: &Sketch, curves: &[usize], max_edges: usize) -> Island {
     let n = nodes.len();
     // One edge where pieces overlap, then prune dangling edges.
     let mut alive = without_overlaps(&edges, tol);
-    loop {
+    let unambiguous_splits = edges.len() == edge_count && alive.iter().all(|&kept| kept);
+    let degree = loop {
         let mut deg = vec![0usize; n];
         for (e, a) in edges.iter().zip(&alive) {
             if *a {
@@ -1849,7 +1869,22 @@ fn island_loops(sk: &Sketch, curves: &[usize], max_edges: usize) -> Island {
             }
         }
         if !changed {
-            break;
+            break deg;
+        }
+    };
+    // A split within an analytic curve is transparent to boundary identity only when its
+    // other incident edges were dangling. Collapsed or overlapping edges cannot supply
+    // that proof. Complete loop coverage still checks every piece in order.
+    for (e, &kept) in edges.iter_mut().zip(&alive) {
+        if !kept || !e.analytic {
+            continue;
+        }
+        let Some((ci, _, piece, pieces)) = e.coverage else { continue };
+        let closed = matches!(sk.curves[ci].kind, CurveKind::Circle { .. });
+        if (closed || pieces > 1)
+            && (!unambiguous_splits || ((closed || piece > 0) && degree[e.u] != 2) || ((closed || piece + 1 < pieces) && degree[e.v] != 2))
+        {
+            e.coverage = None;
         }
     }
 

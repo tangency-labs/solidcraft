@@ -358,6 +358,23 @@ fn feature_pattern_rejects_malformed_alignment_and_flip_atomically() {
 }
 
 #[test]
+fn circular_pattern_can_skip_a_closed_cut_profile_crossed_by_an_open_line() {
+    let mut s = plate_with_hole();
+    let mut params = json!({"features":["Hole1"], "axis":{"origin":[50,10,0],"dir":[0,0,1]}, "count":2});
+    let markers = s.pattern_markers("solid.pattern.circular", &params).unwrap();
+    assert_eq!(markers.len(), 1);
+    assert!(markers[0].positions.iter().any(|p| (p.x - 90.0).abs() < 1e-8 && (p.y - 10.0).abs() < 1e-8));
+
+    let mut unskipped = plate_with_hole();
+    run(&mut unskipped, "solid.pattern.circular", params.clone());
+    assert!((volume(&mut unskipped) - (PLATE - 2.0 * HOLE)).abs() < 1e-6);
+
+    params["skip_members"] = json!([[2, "Hole1", 0]]);
+    run(&mut s, "solid.pattern.circular", params);
+    assert!((volume(&mut s) - (PLATE - HOLE)).abs() < 1e-6);
+}
+
+#[test]
 fn circular_pattern_leaves_out_one_cut_profile_at_one_angle() {
     let mut s = Session::default();
     run(&mut s, "solid.cylinder", json!({"radius":56, "height":8, "axis":"Z", "body_name":"Plate"}));

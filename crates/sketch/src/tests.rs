@@ -822,6 +822,22 @@ fn id_set(sk: &Sketch, curves: &[usize]) -> Vec<String> {
     ids
 }
 
+#[test]
+fn open_line_preserves_whole_boundary_only_when_it_does_not_divide_the_region() {
+    for (end, profile_count) in [(v(5.0, 5.0), 1), (v(15.0, 5.0), 2)] {
+        let mut sk = Sketch::new();
+        let sides = rect(&mut sk, [v(0.0, 0.0), v(10.0, 0.0), v(10.0, 10.0), v(0.0, 10.0)]);
+        sk.add_line(v(-5.0, 5.0), end, None, None, None).unwrap();
+        let profiles = find_profiles(&sk);
+        assert_eq!(profiles.len(), profile_count);
+        if profile_count == 1 {
+            assert_eq!(profiles[0].whole_curve_boundaries(), Some((id_set(&sk, &sides), vec![])));
+        } else {
+            assert!(profiles.iter().all(|p| p.whole_curve_boundaries().is_none()));
+        }
+    }
+}
+
 /// A projected line of `a`–`b` in `sk`.
 fn reference_line(sk: &mut Sketch, a: Vec2, b: Vec2) -> usize {
     let link = sk.add_link(LinkKind::Project, LinkSource::SketchCurve { sketch: 1, curve: "edge".into() }, &[LinkGeom::Line(a, b)]).unwrap();
