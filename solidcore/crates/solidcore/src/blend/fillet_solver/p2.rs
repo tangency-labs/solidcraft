@@ -4140,10 +4140,7 @@ mod tests {
         let e = r.unwrap_err();
         assert_eq!(e.upstream_status(), Some(1006));
         assert!(
-            matches!(
-                e.blend_failure(),
-                Some(&crate::error::blend::BlendFailure::Defect { .. })
-            ),
+            matches!(e.blend_failure(), Some(&BlendFailure::Defect { .. })),
             "{e:?}"
         );
     }
