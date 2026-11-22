@@ -237,11 +237,15 @@ fn designs_survive_mutation() {
     survives("design container", &mutations(&container, false, 0xde5), usize::MAX, |b| {
         let _ = crate::read_design_preview(b);
         let _ = crate::read_design_thumbnail(b);
+        let _ = crate::design_text(b);
         crate::read_design(b).ok().map(|d| d.features.len())
     });
     let json = crate::write_design(&doc).unwrap();
     assert!(crate::read_design(&json).is_ok());
-    survives("design JSON", &mutations(&json, true, 0xde6), usize::MAX, |b| crate::read_design(b).ok().map(|d| d.features.len()));
+    survives("design JSON", &mutations(&json, true, 0xde6), usize::MAX, |b| {
+        let _ = crate::design_text(b);
+        crate::read_design(b).ok().map(|d| d.features.len())
+    });
 }
 
 /// A design with two drawings, each drawing it and another design's file, as a container and as
