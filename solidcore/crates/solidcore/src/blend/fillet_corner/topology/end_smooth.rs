@@ -22,7 +22,7 @@ use crate::blend::fillet_executive::session::SolverObject;
 use crate::blend::fillet_geom::p1::{
     CornerLookup, FilletBrep, FilletCornerId, FilletEdgeType, FilletSolverId, FilletVertexType,
 };
-use crate::error::{EntityRef, Result, SolidError};
+use crate::error::{EntityRef, Result};
 use crate::geom::extent2d::Extent2d;
 use crate::intersect::point_class::PointClassType;
 use crate::kernel::Kernel;

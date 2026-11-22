@@ -21,7 +21,7 @@ use crate::blend::fillet_geom::p1::{
     CornerLookup, FilletCornerId, FilletEdgeType, FilletVertexType,
 };
 use crate::blend::fillet_solver::p1::FilletSolver;
-use crate::error::{EntityRef, Result, SolidError};
+use crate::error::{EntityRef, Result};
 use crate::intersect::point_class::PointClassType;
 use crate::nurbs::b_spline_surface_n_lib::p2::OrientType;
 use crate::topology::edgeuse::p1 as eu1;

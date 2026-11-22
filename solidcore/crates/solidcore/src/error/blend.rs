@@ -673,13 +673,14 @@ impl BlendFailure {
             | Self::NotCertified { .. }
             | Self::PlaneCurveFitCap { .. } => ErrorKind::NotWithinTolerance,
             Self::PlaneCurveTouches { .. } => ErrorKind::Degenerate,
-            Self::PlaneCurveEndOff { .. } => ErrorKind::NotFound,
+            Self::PlaneCurveEndOff { .. } | Self::CornerPointDropUnresolved { .. } => {
+                ErrorKind::NotFound
+            }
             Self::PlaneCurveLeavesDomain { .. } => ErrorKind::OutsideDomain,
             Self::BallsNest { .. } => ErrorKind::BallsFold,
             Self::CreasePieceEndUnbuildable { .. } | Self::CornerShapeNotBuilt(_) => {
                 ErrorKind::Unsupported
             }
-            Self::CornerPointDropUnresolved { .. } => ErrorKind::NotFound,
             Self::BandInputMissing(_) | Self::CliffInputMissing { .. } => ErrorKind::Missing,
             Self::Failed(_)
             | Self::Missing(_)
