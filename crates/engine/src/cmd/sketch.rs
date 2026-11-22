@@ -1741,8 +1741,8 @@ fn draw_line(s: &mut Session, p: &Value) -> Result<Value> {
     // The shared preprocessor refuses model snaps before a sheet tool reads them.
     let p = &super::sketch_project::snap_points(s, p, cmd)?;
     let list = p.get("points").and_then(Value::as_array).cloned().ok_or_else(|| bad(cmd, "`points` must be a list"))?;
-    if list.len() < 2 || list.len() > 10_000 {
-        return Err(bad(cmd, "a line needs 2 or more points"));
+    if let Some(why) = crate::schema::sketch_shapes::line_points_refusal(list.len()) {
+        return Err(bad(cmd, why));
     }
     let closed = bool_(p, "closed").unwrap_or(false);
     let infer = bool_(p, "infer").unwrap_or(false);
