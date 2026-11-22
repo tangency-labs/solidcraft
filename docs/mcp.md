@@ -353,7 +353,9 @@ and `options`. Each has a `plugin` field (`{id, name, version, entry, kind, effe
 plugin's own description reaches the agent between `<plugin-text>` markers, as plugin text. A
 call runs without the plugin's dialogs, under its existing grants, as one undo step; arguments are
 checked as strictly as a command's; a missing grant or a `read` entry's refused import is an error
-naming it, also as `structuredContent.plugin_error`. See [Plugins as tools for
+naming it, also as `structuredContent.plugin_error`. For revision-aware edits, use
+`execute` with the namespaced command's `expected_design` precondition
+([design revisions](plugins.md#design-revisions-and-notifications)). See [Plugins as tools for
 agents](plugins.md#plugins-as-tools-for-agents).
 
 Ordinary tool calls do not query plugin tools. A bridge queries `plugin.tools` only when the
@@ -395,7 +397,7 @@ builds it.
 | `new_design` | `name?` | Start an empty design. |
 | `cancel` | — | Bridged: cancel this server's request that was still running in the app when its call returned (`control.cancel`, see [Cancelling a request](#cancelling-a-request)). Headless: an error, as nothing is ever left running. Not a `batch` step. |
 | `open` | `path` | Open a `.sc` design (or a `.solidcraft` one from an earlier release), a STEP file (`.step`/`.stp`) as a new design holding its bodies (an Import base feature), or a 3MF/STL file as mesh bodies. |
-| `save` | `path?` | Save the design (to its current file without `path`). |
+| `save` | `path?`, `format?` (container, json), `overwrite?` (default false) | Save the design (to its current file without `path`). A save over a design file that another program or computer changed since it was opened or saved is refused; `overwrite: true` replaces it. |
 
 `measure` with `items` reports each item under `items` (`length_mm`, `area_mm2` or `position`).
 A circle, arc, hole or other cylindrical face also gives `diameter`, `radius`, `center` and
@@ -429,9 +431,15 @@ To change a feature after it is made, read its definition with `execute` `timeli
 `{"extent": {"distance": "30"}}`). The fields per feature type are listed in the book's
 *Solid features* chapter.
 
-To tell whether the design changed since a call, without reading all of it again, `execute`
-`document.revision` answers `{document_id, revision}`: `revision` moves only when the design
-changes, and `document_id` names the open design (another one after `new_design` or `open`).
+To observe changes without reading the whole design again, `execute`
+`document.revision` answers `{document_id, revision}`. Its numeric observation revision
+also follows visibility and uncaptured positions. The document identity belongs to the
+open document's session; opening or importing a design creates a fresh identity,
+including when reopening the same file. Revision-aware plugin edits use the session's
+design-state token, whose revision is an opaque string. Saving preserves that token;
+each committed edit, undo and redo creates a fresh one. Neither token field is saved
+in authored document content or undo snapshots; see
+[design revisions](plugins.md#design-revisions-and-notifications).
 See [control-protocol.md](control-protocol.md#following-the-design).
 
 To compare design proposals with several parameter edits each, call `execute` with

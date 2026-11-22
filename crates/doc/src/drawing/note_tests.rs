@@ -42,7 +42,15 @@ fn noted() -> (Drawing, [u64; 3]) {
     let mut added = [0; 3];
     for (anchor, id) in anchors.into_iter().zip(&mut added) {
         *id = d.allocate_id(&mut id_source).unwrap();
-        d.notes.add([Arc::new(Note { id: *id, anchor, at: [40.0, 25.0], content: text("Break all edges"), cap_mm: None, branches: Vec::new() })]);
+        d.notes.add([Arc::new(Note {
+            id: *id,
+            anchor,
+            at: [40.0, 25.0],
+            content: text("Break all edges"),
+            cap_mm: None,
+            align: None,
+            branches: Vec::new(),
+        })]);
     }
     d.validate().unwrap();
     (d, added)
@@ -261,4 +269,27 @@ fn mutated_note_files_read_or_are_refused() {
             assert_eq!(Drawing::from_json(&read.to_json().unwrap()).unwrap(), read, "seed {seed}");
         }
     }
+}
+
+/// A note's alignment saves as `left`, `centre` or `right` and reads back; a note with none saves none,
+/// and a note saved without one has none, as before alignments, so an older drawing is the same bytes again.
+#[test]
+fn a_notes_alignment_saves_and_an_older_note_has_none() {
+    let (mut d, [on_sheet, on_view, on_edge]) = noted();
+    for (id, align) in [(on_sheet, Some(HAlign::Left)), (on_view, Some(HAlign::Right))] {
+        let at = d.notes.index_of(id).unwrap();
+        Arc::make_mut(d.notes.get_mut(at).unwrap()).align = align;
+    }
+    let mut v = file(&d);
+    assert_eq!(note(&mut v, &ids::encode(on_sheet))["align"], json!("left"));
+    assert_eq!(note(&mut v, &ids::encode(on_view))["align"], json!("right"));
+    assert_eq!(note(&mut v, &ids::encode(on_edge)).get("align"), None);
+    let reopened = Drawing::from_json(&d.to_json().unwrap()).unwrap();
+    assert_eq!(reopened, d);
+    assert_eq!(reopened.notes.by_id(on_edge).unwrap().align, None);
+    assert_eq!(reopened.to_json().unwrap(), d.to_json().unwrap());
+    note(&mut v, &ids::encode(on_sheet))["align"] = json!("centre");
+    assert_eq!(Drawing::from_json(&v.to_string()).unwrap().notes.by_id(on_sheet).unwrap().align, Some(HAlign::Centre));
+    note(&mut v, &ids::encode(on_sheet))["align"] = json!("middle");
+    assert!(Drawing::from_json(&v.to_string()).is_err());
 }

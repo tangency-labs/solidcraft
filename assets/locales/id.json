@@ -1012,6 +1012,7 @@
   "cmd.motion_list": "Daftar Studi Gerak",
   "cmd.motion_play": "Putar Studi Gerak",
   "cmd.motion_plot": "Plot Studi Gerak",
+  "cmd.motion_simulate": "Simulasikan gerakan",
   "cmd.motion_study": "Studi Gerak",
   "cmd.motion_trace": "Jejak Gerak",
   "cmd.motion_trace_edit": "Edit Jejak Gerakan",

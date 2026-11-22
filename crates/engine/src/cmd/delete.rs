@@ -20,7 +20,7 @@ use crate::{EngineError, Result, Sel, Session};
 const DELETE_CONTRACT: TypedContract<SelectionDeleteParams> = TypedContract::new();
 
 pub static COMMANDS: &[CommandSpec] = &[CommandSpec::new("selection.delete", "Delete", crate::checked!("selection.delete", delete))
-    .open_part()
+    .open_part().selection_edit()
     .icon("delete")
     .contract(&DELETE_CONTRACT)
     .output(output_schema_for::<SelectionDeleteResult>)
@@ -222,6 +222,7 @@ fn apply(s: &mut Session, p: &Value) -> Result<Value> {
                 None => faces.push((body.clone(), vec![*point])),
             },
             Sel::Edge { .. } | Sel::Vertex { .. } => skip("edges and vertices are deleted with their body or face".into()),
+            Sel::PointCloudPoint { .. } => skip("points belong to their point cloud".into()),
             // In the sketch being edited, a profile stands for the curves around it (#7107);
             // its holes are shapes of their own and stay. A letter's outline stands for its
             // whole text, so no counters are left behind.

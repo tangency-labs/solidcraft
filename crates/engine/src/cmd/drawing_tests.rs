@@ -78,6 +78,37 @@ fn a_drawing_starts_from_a_template() {
     assert_eq!(tolerances(&made), json!(template::ASSEMBLY_NOTE));
 }
 
+/// A one-part STEP draws as a part (#19753), rounded or not; two parts, or one beside a body, as an assembly.
+#[test]
+fn an_opened_step_part_draws_from_the_part_template() {
+    let folder = Folder::new("drawing-step-part");
+    let step = folder.path("plate.step");
+    run(&mut design(), "file.export", json!({"path": step}));
+    let made = |s: &mut Session| {
+        let made = run(s, "drawing.create", json!({}));
+        run(s, "drawing.close", json!({}));
+        (made["sheets"][0]["size_mm"].clone(), tolerances(&made))
+    };
+    let part = (json!([420.0, 297.0]), json!(template::PART_NOTE));
+    let assembly = (json!([594.0, 420.0]), json!(template::ASSEMBLY_NOTE));
+
+    let mut s = Session::default();
+    run(&mut s, "doc.open", json!({"path": step}));
+    assert_eq!(s.doc.occurrences.len(), 1);
+    assert_eq!(made(&mut s), part, "one imported part");
+    run(&mut s, "solid.fillet", json!({"edges": [[40, 15, 10]], "radius": 2}));
+    run(&mut s, "solid.hole", json!({"position": [10, 10, 10], "direction": [0, 0, -1], "diameter": 4, "depth": 5}));
+    assert!(s.doc.features.iter().all(|f| f.component != 0), "a round and a hole go in their body's component");
+    assert_eq!(made(&mut s), part, "one imported part, rounded and drilled with the root active");
+
+    run(&mut s, "file.insert_step", json!({"path": step}));
+    assert_eq!(made(&mut s), assembly, "two imported parts");
+
+    let mut s = design();
+    run(&mut s, "file.insert_step", json!({"path": step}));
+    assert_eq!(made(&mut s), assembly, "an imported part beside the design's own body");
+}
+
 #[test]
 fn a_drawing_with_standard_views_is_one_model_undo_step() {
     let mut s = design();
@@ -1614,7 +1645,7 @@ fn sheet_editor_computed_creation_never_reuses_a_retired_sketch_id() {
         } else {
             let mut computed = s.scratch();
             let made = run(&mut computed, "drawing.sketch.create", params.clone());
-            s.accept_computed(computed);
+            s.accept_computed(computed).unwrap();
             made
         };
         assert_eq!(made["sketch"], discarded_id, "discarding a scratch consumes no id");
@@ -1803,7 +1834,6 @@ fn sheet_editor_rejects_cross_targets_model_tools_and_source_mutation() {
         ("drawing.close", json!({})),
         ("drawing.open", json!({"drawing": made["drawing"]})),
         ("drawing.delete", json!({"drawing": made["drawing"]})),
-        ("drawing.sketch.create", json!({"owner": made["sheet"]})),
     ] {
         refused(&mut s, command, params);
         assert!(Arc::ptr_eq(&s.doc, &before), "{command}");
@@ -1817,6 +1847,32 @@ fn sheet_editor_rejects_cross_targets_model_tools_and_source_mutation() {
     assert!(result.unwrap_err().to_string().contains("cannot change the source design"));
     assert!(Arc::ptr_eq(&s.doc, &before) && Arc::ptr_eq(&s.model.state(), &state));
     assert_eq!(s.open_drawing, Some(d));
+}
+
+#[test]
+fn sheet_editor_new_edits_finish_the_previous_receiver_even_when_refused() {
+    for command in ["sketch.create", "drawing.sketch.create"] {
+        let (mut s, drawing, sketch, made) = sheet_editor();
+        run(&mut s, "sketch.line", json!({"points":[[10,10],[20,10]]}));
+        let evaluations = s.evaluations;
+        if command == "sketch.create" {
+            // A model sketch ends the sheet sketch first, then opens.
+            run(&mut s, command, json!({"plane":"XY"}));
+            assert!(s.active_sheet_sketch.is_none());
+            assert!(s.active_sketch.is_some());
+        } else {
+            let next = run(&mut s, command, json!({"owner":made["sheet"]}));
+            assert_ne!(next["sketch"], made["sketch"]);
+            assert_ne!(s.active_sheet_sketch.as_ref().unwrap().sketch, sketch);
+        }
+        let event = s.take_sketch_finish_event().unwrap();
+        assert_eq!(event.sketch, sketch);
+        assert!(matches!(event.domain, crate::SketchDomain::Sheet { drawing: owner, .. } if owner == drawing));
+        assert!(s.take_sketch_finish_event().is_none());
+        if command != "sketch.create" {
+            assert_eq!(s.evaluations, evaluations);
+        }
+    }
 }
 
 #[test]
@@ -1915,11 +1971,10 @@ fn sheet_editor_commands_and_refusals_do_not_evaluate_a_stale_model() {
     refused(&mut s, "drawing.close", json!({}));
     run(&mut s, "edit.undo", json!({}));
     run(&mut s, "edit.redo", json!({}));
-    run(&mut s, "sketch.finish", json!({}));
     assert!(s.model.is_stale());
     assert!(Arc::ptr_eq(&model, &s.model.state()));
     assert_eq!(s.evaluations, count);
-    assert_eq!(s.active_sketch, Some(model_sketch), "model active state was not overwritten");
+    assert!(s.active_sketch.is_none(), "entering the sheet sketch finished the model edit");
 }
 
 // W38a review: an unchanged Arc is not a validation certificate.
@@ -1999,7 +2054,7 @@ fn sheet_next_snap_directives_cannot_modify_an_active_model_sketch() {
             assert!(Arc::ptr_eq(&s.doc, &before));
             assert!(Arc::ptr_eq(&s.model.state(), &state));
             assert_eq!(s.active_sheet_sketch, entry);
-            assert_eq!(s.active_sketch, Some(model_id));
+            assert!(s.active_sketch.is_none());
             assert_eq!((s.undo.len(), s.redo.len(), s.evaluations), history);
         }
     }
@@ -2152,7 +2207,7 @@ fn sheet_next_accept_computed_adopts_the_open_owner_entry_and_cancel_boundary() 
     assert_ne!(s.open_drawing, computed.open_drawing);
     let entry = computed.active_sheet_sketch.clone();
     let additional_steps = computed.undo.len();
-    s.accept_computed(computed);
+    s.accept_computed(computed).unwrap();
     assert_eq!(s.open_drawing, Some(drawing));
     assert_eq!(s.active_sheet_sketch, entry);
     assert_eq!(s.path.as_deref(), Some("computed-sheet.synthetic.solidcraft"));
@@ -2169,7 +2224,7 @@ fn sheet_next_accept_computed_adopts_the_open_owner_entry_and_cancel_boundary() 
     let mut closed = s.scratch();
     run(&mut closed, "sketch.finish", json!({}));
     run(&mut closed, "drawing.close", json!({}));
-    s.accept_computed(closed);
+    s.accept_computed(closed).unwrap();
     assert!(s.open_drawing.is_none() && s.active_sheet_sketch.is_none());
     run(&mut s, "edit.restore_checkpoint", json!({"checkpoint":checkpoint}));
     assert_eq!(s.open_drawing, Some(ids::decode(a["id"].as_str().unwrap()).unwrap()));
@@ -3750,7 +3805,7 @@ fn sheet_batch_compound_edits_preserve_foreign_redo_and_refuse_atomically() {
         // adopting the unchanged failed attempt must preserve every old redo branch.
         let mut failed_attempt = s.scratch();
         refused(&mut failed_attempt, command, failed);
-        s.accept_computed(failed_attempt);
+        s.accept_computed(failed_attempt).unwrap();
         assert!(Arc::ptr_eq(&s.doc, &before), "{command}");
         assert!(Arc::ptr_eq(&s.model.state(), &model), "{command}");
         assert_eq!(s.active_sheet_sketch, entry, "{command}");
@@ -3822,7 +3877,7 @@ fn sheet_batch_computed_history_replaces_each_touched_owner_only() {
     let mut read_only = s.scratch();
     run(&mut read_only, "drawing.open", the(bid));
     run(&mut read_only, "drawing.inspect", json!({}));
-    s.accept_computed(read_only);
+    s.accept_computed(read_only).unwrap();
     assert_eq!(s.open_drawing, Some(bid));
     assert!(Arc::ptr_eq(&s.doc, &before_read));
     same_redo(&s, &redos);
@@ -3840,7 +3895,7 @@ fn sheet_batch_computed_history_replaces_each_touched_owner_only() {
     assert!(rolled_back.doc.drawings.is_empty());
     run(&mut rolled_back, "edit.restore_checkpoint", json!({"checkpoint":checkpoint}));
     assert!(Arc::ptr_eq(&rolled_back.doc, &s.doc));
-    s.accept_computed(rolled_back);
+    s.accept_computed(rolled_back).unwrap();
     same_redo(&s, &redos);
 
     let mut computed = s.scratch();
@@ -3863,9 +3918,9 @@ fn sheet_batch_computed_history_replaces_each_touched_owner_only() {
     run(&mut nested, "sketch.finish", json!({}));
     run(&mut nested, "drawing.open", the(bid));
     assert!(nested.undo.is_empty() && nested.redo.is_empty());
-    computed.accept_computed(nested);
+    computed.accept_computed(nested).unwrap();
     assert!(computed.undo.iter().all(|step| step.part == Some(bid)), "neither A nor C survives in retained history");
-    s.accept_computed(computed);
+    s.accept_computed(computed).unwrap();
     assert_eq!(s.open_drawing, Some(bid));
     assert_eq!(s.doc.drawing(aid).unwrap().name, "A new");
     assert_eq!(s.doc.drawing(bid).unwrap().name, format!("B new{}", crate::MAX_UNDO));
@@ -3926,7 +3981,7 @@ fn sheet_batch_computed_visibility_invalidates_model_redo_after_history_eviction
     assert_eq!(rolled_back.visibility, changed_visibility, "a refused visibility edit is atomic");
     run(&mut rolled_back, "edit.restore_checkpoint", json!({"checkpoint":checkpoint}));
     assert_eq!(rolled_back.visibility, original_visibility);
-    s.accept_computed(rolled_back);
+    s.accept_computed(rolled_back).unwrap();
     assert_eq!(s.redo.len(), redos.len());
     for (after, before) in s.redo.iter().zip(&redos) {
         assert_eq!((&after.label, after.part), (&before.label, before.part));
@@ -3946,7 +4001,7 @@ fn sheet_batch_computed_visibility_invalidates_model_redo_after_history_eviction
     }
     assert_eq!(computed.undo.len(), crate::MAX_UNDO);
     assert!(computed.undo.iter().all(|step| step.part == Some(aid)), "the model visibility snapshot really was evicted");
-    s.accept_computed(computed);
+    s.accept_computed(computed).unwrap();
     assert_eq!(s.redo.len(), 1, "the stale model future was invalidated");
     assert_eq!(s.redo[0].part, Some(bid));
     assert!(Arc::ptr_eq(&s.redo[0].doc, &b_redo.doc), "the unrelated drawing future was retained");
@@ -4005,6 +4060,14 @@ fn sheet_editor_model_cancel_refuses_foreign_drawing_changes_without_losing_them
             }
         }
         run(&mut s, "drawing.close", json!({}));
+        if scenario != "new drawing" {
+            assert!(s.active_sketch.is_none(), "entering the sheet editor finished the model sketch");
+            assert!(s.doc.feature(model_sketch).is_some());
+            let before = s.doc.clone();
+            refused(&mut s, "sketch.cancel", json!({}));
+            assert!(Arc::ptr_eq(&s.doc, &before), "Cancel cannot erase the completed sketch or drawing edits");
+            continue;
+        }
         assert_eq!(s.active_sketch, Some(model_sketch));
         let before = s.doc.clone();
         let model = s.model.state();
@@ -4082,7 +4145,7 @@ fn sheet_editor_post_publication_refusal_preserves_stale_model_and_history() {
     assert!(Arc::ptr_eq(&s.doc, &before));
     assert!(Arc::ptr_eq(&s.model.state(), &model), "a drawing-only refusal must not recompute its stale source");
     assert_eq!(s.active_sheet_sketch, entry);
-    assert_eq!(s.active_sketch, Some(model_sketch));
+    assert!(s.active_sketch.is_none(), "the sheet editor finished the earlier model edit");
     assert_eq!(s.open_drawing, ids::decode(made["drawing"].as_str().unwrap()));
     assert_eq!(s.evaluations, evaluations);
     assert!(s.model.is_stale());
@@ -4317,11 +4380,9 @@ fn sheet_sketch_creation_reserves_current_and_retired_image_ids() {
     }
 }
 
-/// A sheet sketch being edited holds no model command: one runs against the model with the
-/// sheet sketch still open, as its own model step, and the model's undo leaves the sheet sketch
-/// being edited. Entering a model sketch from a script (nothing shows the model) ends the sheet
-/// sketch as Finish would, since the shared sketch tools reach one sketch only; the model's
-/// command is never refused.
+/// A model command started while a sheet sketch is being edited ends that sheet sketch as Finish
+/// would (starting another edit finishes the open sketch), then runs as its own model step; the
+/// model's undo leaves the sheet sketch finished. The model's command is never refused.
 #[test]
 fn a_sheet_sketch_holds_no_model_command() {
     let mut s = design();
@@ -4333,13 +4394,13 @@ fn a_sheet_sketch_holds_no_model_command() {
     let features = s.doc.features.len();
     run(&mut s, "solid.box", json!({"length": 5, "width": 5, "height": 5, "corner": [60, 0, 0], "operation": "new"}));
     assert_eq!(s.doc.features.len(), features + 1, "the model changes under the sheet sketch");
-    assert_eq!(s.active_sheet_sketch, editing, "which stays open");
+    assert!(s.active_sheet_sketch.is_none(), "starting a model command ends the sheet sketch, as Finish would");
     assert_eq!(s.undo.last().unwrap().part, None, "the box is the model's step");
     s.model_focus = true;
     assert!(!s.sheet_sketching(), "with the model shown, the sketch tools are the model's");
     run(&mut s, "edit.undo", json!({}));
     assert_eq!(s.doc.features.len(), features, "the model's undo");
-    assert_eq!(s.active_sheet_sketch, editing, "leaves the sheet sketch being edited");
+    assert!(s.active_sheet_sketch.is_none(), "and the sheet sketch stays finished");
     s.model_focus = false;
     run(&mut s, "sketch.create", json!({"plane": "XY"}));
     assert!(s.active_sketch.is_some(), "the model's sketch is entered");

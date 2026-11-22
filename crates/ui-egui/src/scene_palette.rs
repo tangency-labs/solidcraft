@@ -5,13 +5,29 @@
 //! changes only palette entries — never a block's vertex bytes. Slots are append-only for the
 //! session and are reset when a different design replaces the one they belonged to.
 //!
+//! Each body also gets a slot of the renderer's motion table (`solidcraft_viewport_gpu::view::Motions`),
+//! named by every one of its palette entries: whatever is drawn in a body's colours can then be
+//! drawn moved by writing that slot's motion, without building anything again. A design with more
+//! bodies than the table has slots leaves the rest without one (`BodySlots::motion` 0).
+//!
+//! Copies of a part placed many times that look alike share their face entries
+//! ([`PaletteArena::shared`]): an entry per face of every copy filled the palette. Each copy still
+//! has its own colour, edge, hidden-edge and placement entries and its own motion slot, which
+//! those entries name and its instanced placements carry, so a joint drag moves one copy and not
+//! the others. The shared face entries name no motion: a copy drawn from its own triangles in
+//! them cannot be drawn moved ([`PaletteArena::motion`]).
+//!
+//! Entry 0 belongs to no body. The renderer and a full arena use it as the stand-in (the ground
+//! the ambient occlusion darkens, a body past the cap), and a stand-in must not move with
+//! whichever body was allocated first.
+//!
 //! The model scene needs at most one stable slot per visible body face (plus a few per body), so
 //! the arena is capped by [`MAX_PALETTE`]. Past the cap a face falls back to its body's slot:
 //! editing such a face once rebuilds that body's block (the build still succeeds).
 
 use std::collections::HashMap;
 
-use crate::gpu::{MAX_PALETTE, Material, PaletteIndex};
+use crate::gpu::{MAX_MOTIONS, MAX_PALETTE, Material, PaletteIndex, UNMOVED_SLOT};
 
 /// The stable slots of one body: its own colour, its face range, its edges and its instances.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -24,6 +40,10 @@ pub(crate) struct BodySlots {
     pub edge: PaletteIndex,
     pub hidden_edge: PaletteIndex,
     pub instance: PaletteIndex,
+    /// The body's slot in the motion table, which all its own palette entries name (not the face
+    /// entries it shares with other copies, [`PaletteArena::shared`]); [`UNMOVED_SLOT`] when the
+    /// table had none left or the arena was full: it cannot be drawn moved.
+    pub motion: u32,
 }
 
 impl BodySlots {
@@ -40,10 +60,16 @@ impl BodySlots {
 pub(crate) struct PaletteArena {
     entries: Vec<[u8; 4]>,
     bodies: HashMap<String, BodySlots>,
-    /// The bodies whose slots are another key's ([`Self::shared`]), by name.
+    /// The bodies whose face slots are another key's ([`Self::shared`]), by name.
     shared: std::collections::HashSet<String>,
+    /// The shared bodies the last scene drew from their own triangles in the shared face slots
+    /// ([`Self::drawn_in_shared`]): nothing moves them with their motion.
+    unmoved: std::collections::HashSet<String>,
     /// PBR finishes by slot (none past its end): the model and highlight scenes both draw them.
     materials: Vec<Material>,
+    /// The motion slot each entry names (none past its end), and how many slots bodies have taken.
+    motions: Vec<u32>,
+    motion_slots: u32,
     /// Bumped when the arena is reset (a different design); cached blocks must rebuild then.
     generation: u64,
 }
@@ -62,16 +88,31 @@ impl PaletteArena {
     /// that shared another key's slots until now ([`Self::shared`]) gets its own.
     pub fn body(&mut self, name: &str, face_count: usize) -> BodySlots {
         if self.shared.remove(name) {
-            self.bodies.remove(name);
+            self.unmoved.remove(name);
+            // Its own colour, edge and placement slots and its motion stay; only its faces get
+            // slots of their own (a new motion slot each time would use the table up).
+            if let Some(base) = self.bodies.remove(name) {
+                let slots = self.grow_faces(&BodySlots { faces: u32::MAX, face_capacity: 0, ..base }, face_count);
+                self.bodies.insert(name.to_string(), slots);
+                return slots;
+            }
         }
-        self.own(name, face_count)
+        self.own(name, face_count, true)
     }
 
-    /// Body `name` drawn in the slots of `key` (allocated the first time, as [`Self::body`]):
-    /// copies of one part placed many times share one set of slots, which a slot per face of
-    /// every placement would exhaust. Looking `name` up ([`Self::slots`]) finds them.
+    /// Body `name` drawn in the face slots of `key` (allocated the first time, as
+    /// [`Self::body`]): copies of one part placed many times share one face range, which a slot
+    /// per face of every placement would exhaust. Its colour, edge, hidden-edge and placement
+    /// slots and its motion slot stay its own (kept from its own slots when it had them), so it
+    /// is drawn moved apart from the other copies. Looking `name` up ([`Self::slots`]) finds them.
     pub fn shared(&mut self, name: &str, key: &str, face_count: usize) -> BodySlots {
-        let slots = self.own(key, face_count);
+        // The key is no body: its faces name no motion.
+        let faces = self.own(key, face_count, false);
+        let base = match self.bodies.get(name).copied() {
+            Some(slots) => slots,
+            None => self.base(true),
+        };
+        let slots = BodySlots { faces: faces.faces, face_capacity: faces.face_capacity, ..base };
         if self.bodies.get(name) != Some(&slots) {
             self.bodies.insert(name.to_string(), slots);
         }
@@ -82,7 +123,30 @@ impl PaletteArena {
         slots
     }
 
-    fn own(&mut self, name: &str, face_count: usize) -> BodySlots {
+    /// Whether the scene draws shared body `name` from its own triangles in the shared face slots
+    /// (`yes`), or otherwise (its placements, or its own colour): for [`Self::motion`].
+    pub fn drawn_in_shared(&mut self, name: &str, yes: bool) {
+        if yes && self.shared.contains(name) {
+            if !self.unmoved.contains(name) {
+                self.unmoved.insert(name.to_string());
+            }
+        } else if !self.unmoved.is_empty() {
+            self.unmoved.remove(name);
+        }
+    }
+
+    /// The motion slot that draws all of body `name` moved; [`UNMOVED_SLOT`] when it has none or
+    /// is drawn in face slots it shares with other copies, which name no motion.
+    pub fn motion(&self, name: &str) -> u32 {
+        if self.unmoved.contains(name) {
+            return UNMOVED_SLOT;
+        }
+        self.bodies.get(name).map_or(UNMOVED_SLOT, |s| s.motion)
+    }
+
+    /// The slots of `name` (a body, or a key whose face slots copies share: `moves` false, no
+    /// motion slot), allocated the first time.
+    fn own(&mut self, name: &str, face_count: usize, moves: bool) -> BodySlots {
         if let Some(slots) = self.bodies.get(name).copied() {
             let grown = self.grow_faces(&slots, face_count);
             // Written back only when it grew: most rebuilds find every body as it was.
@@ -93,14 +157,57 @@ impl PaletteArena {
             }
             return grown;
         }
+        let slots = self.base(moves);
+        let slots = self.grow_faces(&slots, face_count);
+        self.bodies.insert(name.to_string(), slots);
+        slots
+    }
+
+    /// New colour, edge, hidden-edge and placement slots, no faces yet, with a motion slot of
+    /// their own that they name when `moves`.
+    fn base(&mut self, moves: bool) -> BodySlots {
+        // Entry 0 is the stand-in: kept before the first body's entries, never named by a slot.
+        if self.entries.is_empty() {
+            self.entries.push([0; 4]);
+        }
+        // A body whose entries are its own gets a motion slot; one that has to share the stand-in
+        // (the arena full) gets none, so it is drawn where it was built.
+        let own = self.entries.len() + 4 <= MAX_PALETTE;
+        let motion = if moves && own && self.motion_slots + 1 < MAX_MOTIONS {
+            self.motion_slots += 1;
+            self.motion_slots
+        } else {
+            UNMOVED_SLOT
+        };
         let body = self.push();
         let edge = self.push();
         let hidden_edge = self.push();
         let instance = self.push();
-        let slots = BodySlots { body, faces: u32::MAX, face_capacity: 0, edge, hidden_edge, instance };
-        let slots = self.grow_faces(&slots, face_count);
-        self.bodies.insert(name.to_string(), slots);
-        slots
+        if motion != UNMOVED_SLOT {
+            for slot in [body, edge, hidden_edge, instance] {
+                self.name_motion(slot.0 as usize, 1, motion);
+            }
+        }
+        BodySlots { body, faces: u32::MAX, face_capacity: 0, edge, hidden_edge, instance, motion }
+    }
+
+    /// The `count` entries from `first` name motion slot `motion`.
+    fn name_motion(&mut self, first: usize, count: usize, motion: u32) {
+        let end = first.saturating_add(count).min(self.entries.len());
+        if motion == UNMOVED_SLOT || first >= end {
+            return;
+        }
+        if self.motions.len() < end {
+            self.motions.resize(end, UNMOVED_SLOT);
+        }
+        if let Some(named) = self.motions.get_mut(first..end) {
+            named.fill(motion);
+        }
+    }
+
+    /// The motion slot each stable entry names, for the scene's palette.
+    pub fn motions(&self) -> Vec<u32> {
+        self.motions.clone()
     }
 
     /// Extend a body's face range when its face count grew. The range is reused when it is at the
@@ -115,12 +222,16 @@ impl PaletteArena {
         let need = usize::try_from(want).unwrap_or(usize::MAX).saturating_sub(slots.face_capacity as usize);
         let at_end = slots.faces != u32::MAX && slots.faces as usize + slots.face_capacity as usize == self.entries.len();
         if at_end && need <= room {
-            self.entries.resize(self.entries.len() + need, [0; 4]);
+            let first = self.entries.len();
+            self.entries.resize(first + need, [0; 4]);
+            self.name_motion(first, need, slots.motion);
             return BodySlots { face_capacity: want, ..*slots };
         }
         if want as usize <= room {
-            let base = u32::try_from(self.entries.len()).unwrap_or(u32::MAX);
-            self.entries.resize(self.entries.len() + want as usize, [0; 4]);
+            let first = self.entries.len();
+            let base = u32::try_from(first).unwrap_or(u32::MAX);
+            self.entries.resize(first + want as usize, [0; 4]);
+            self.name_motion(first, want as usize, slots.motion);
             return BodySlots { faces: base, face_capacity: want, ..*slots };
         }
         // Out of room: every face falls back to the body's own slot.
@@ -188,8 +299,11 @@ impl PaletteArena {
         if !names.any(|n| self.bodies.contains_key(n)) {
             self.entries.clear();
             self.materials.clear();
+            self.motions.clear();
+            self.motion_slots = 0;
             self.bodies.clear();
             self.shared.clear();
+            self.unmoved.clear();
             self.generation = self.generation.wrapping_add(1);
         }
     }
@@ -232,6 +346,47 @@ mod tests {
         assert_eq!(arena.generation(), before);
     }
 
+    /// Each body gets a motion slot of its own that all its entries name, its faces added later
+    /// too; another design starts the slots again; a body that has to share entries (the arena
+    /// full) or comes after the table's last slot gets none, so it is never moved with another.
+    #[test]
+    fn each_body_names_its_own_motion_slot_in_all_its_entries() {
+        let mut arena = PaletteArena::default();
+        let (a, b) = (arena.body("A", 2), arena.body("B", 1));
+        assert!(a.motion != UNMOVED_SLOT && b.motion != UNMOVED_SLOT && a.motion != b.motion);
+        let named = |arena: &PaletteArena, slot: PaletteIndex| arena.motions().get(slot.0 as usize).copied().unwrap_or(UNMOVED_SLOT);
+        for slot in [a.body, a.edge, a.hidden_edge, a.instance, a.face(0), a.face(1)] {
+            assert_eq!(named(&arena, slot), a.motion);
+        }
+        for slot in [b.body, b.edge, b.hidden_edge, b.instance, b.face(0)] {
+            assert_eq!(named(&arena, slot), b.motion);
+        }
+        // A's faces grow past B's entries: the new range names A's slot, and A keeps it.
+        let grown = arena.body("A", 5);
+        assert_eq!(grown.motion, a.motion);
+        assert!((0..5).all(|f| named(&arena, grown.face(f)) == a.motion));
+        // Another design: the slots start again.
+        arena.sync(["C"]);
+        assert!(arena.motions().is_empty());
+        assert_eq!(arena.body("C", 1).motion, a.motion);
+        // Entry 0 is no body's: the stand-in names no slot, whichever body came first.
+        assert!(a.body.0 != 0 && named(&arena, PaletteIndex(0)) == UNMOVED_SLOT);
+        // A full arena beside a real first body: the late body shares the stand-in, gets no slot,
+        // and so is not moved with the first.
+        let mut full = PaletteArena::default();
+        let first = full.body("First", 1);
+        full.entries.resize(MAX_PALETTE, [0; 4]);
+        let late = full.body("Big", 3);
+        assert_eq!((late.motion, late.body), (UNMOVED_SLOT, PaletteIndex(0)));
+        assert_ne!(first.motion, UNMOVED_SLOT);
+        assert_eq!(named(&full, late.body), UNMOVED_SLOT, "the stand-in entry names no slot");
+        // The table's last slot taken: the next body gets none.
+        let mut last = PaletteArena { motion_slots: MAX_MOTIONS - 1, ..Default::default() };
+        let late = last.body("Late", 1);
+        assert_eq!(late.motion, UNMOVED_SLOT);
+        assert!(last.motions().is_empty());
+    }
+
     #[test]
     fn the_cap_falls_back_to_the_body_slot_without_panicking() {
         // The arena cannot allocate past MAX_PALETTE; simulate a full one by filling entries.
@@ -243,22 +398,58 @@ mod tests {
         assert_eq!(arena.push(), PaletteIndex(0));
     }
 
-    /// Placements of one part that look the same share one set of slots, found by each
-    /// placement's name; a placement that stops sharing gets slots of its own.
+    /// Placements of one part that look the same share one face range, found by each
+    /// placement's name, and keep their own colour, edge and placement slots and motion: a
+    /// placement takes four slots however many faces the part has. A placement that stops sharing
+    /// gets slots of its own.
     #[test]
-    fn placements_share_their_parts_slots_until_one_looks_different() {
+    fn placements_share_their_parts_face_slots_until_one_looks_different() {
         let mut arena = PaletteArena::default();
-        let a = arena.shared("Base (Bracket:1)", "part", 3);
-        let b = arena.shared("Base (Bracket:2)", "part", 3);
-        assert_eq!(a, b);
+        let a = arena.shared("Base (Bracket:1)", "part", 30);
+        let b = arena.shared("Base (Bracket:2)", "part", 30);
+        assert_eq!((a.faces, a.face_capacity), (b.faces, b.face_capacity));
+        assert_eq!(arena.shared("Base (Bracket:1)", "part", 30), a, "found again as it was");
         let used = arena.entries().len();
         for k in 3..100 {
-            arena.shared(&format!("Base (Bracket:{k})"), "part", 3);
+            arena.shared(&format!("Base (Bracket:{k})"), "part", 30);
         }
-        assert_eq!(arena.entries().len(), used, "more placements take no more slots");
-        assert_eq!(arena.slots("Base (Bracket:2)"), Some(a));
-        let own = arena.body("Base (Bracket:2)", 3);
-        assert_ne!(own, a);
+        assert_eq!(arena.entries().len(), used + 4 * 97, "more placements take four slots each, not one per face");
+        assert_eq!(arena.slots("Base (Bracket:2)"), Some(b));
+        let own = arena.body("Base (Bracket:2)", 30);
+        assert_ne!(own.faces, a.faces);
         assert_eq!(arena.slots("Base (Bracket:1)"), Some(a), "the others still share");
+    }
+
+    /// Each copy sharing a part's faces is moved on its own (a joint drag moves one copy, not
+    /// all of them): its own entries name a motion slot of its own, the shared faces name none.
+    /// One drawn in those shared faces cannot be drawn moved at all, until it is drawn otherwise
+    /// or stops sharing.
+    #[test]
+    fn copies_sharing_their_faces_each_have_their_own_motion() {
+        let mut arena = PaletteArena::default();
+        let a = arena.shared("Screw (Carriage:1)", "screw", 4);
+        let b = arena.shared("Screw (Frame:1)", "screw", 4);
+        assert!(a.motion != UNMOVED_SLOT && b.motion != UNMOVED_SLOT && a.motion != b.motion);
+        assert!([a.body, a.edge, a.hidden_edge, a.instance].iter().all(|e| ![b.body, b.edge, b.hidden_edge, b.instance].contains(e)));
+        let named = |arena: &PaletteArena, slot: PaletteIndex| arena.motions().get(slot.0 as usize).copied().unwrap_or(UNMOVED_SLOT);
+        for (copy, slots) in [(a.motion, a), (b.motion, b)] {
+            assert!([slots.body, slots.edge, slots.hidden_edge, slots.instance].iter().all(|e| named(&arena, *e) == copy));
+        }
+        assert!((0..4).all(|f| named(&arena, a.face(f)) == UNMOVED_SLOT), "the shared faces move no copy");
+        assert_eq!(arena.motion("Screw (Carriage:1)"), a.motion);
+        // Drawn in the shared faces (its own triangles, faces of their own looks): not moved.
+        arena.drawn_in_shared("Screw (Carriage:1)", true);
+        assert_eq!(arena.motion("Screw (Carriage:1)"), UNMOVED_SLOT);
+        assert_eq!(arena.motion("Screw (Frame:1)"), b.motion, "the other copy is not");
+        arena.drawn_in_shared("Screw (Carriage:1)", false);
+        assert_eq!(arena.motion("Screw (Carriage:1)"), a.motion);
+        // A body of its own is never held still that way, nor one that stops sharing.
+        let own = arena.body("Bracket", 2);
+        arena.drawn_in_shared("Bracket", true);
+        assert_eq!(arena.motion("Bracket"), own.motion);
+        arena.drawn_in_shared("Screw (Carriage:1)", true);
+        let alone = arena.body("Screw (Carriage:1)", 4);
+        assert_eq!(arena.motion("Screw (Carriage:1)"), alone.motion);
+        assert_ne!(alone.motion, UNMOVED_SLOT);
     }
 }
