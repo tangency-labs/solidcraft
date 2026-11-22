@@ -1279,7 +1279,7 @@ struct SavedSectionDraft {
 /// The design's saved Section Analyses (#20649): pick one to show it, save the section on show
 /// under a name, rename or delete one. Each action is a command.
 fn saved_section_rows(app: &mut SolveApp, d: &mut Dialog, ui: &mut egui::Ui) {
-    let id = ui.id().with("saved_sections");
+    let id = ui.scope_id().with("saved_sections");
     let mut draft: SavedSectionDraft = ui.data(|data| data.get_temp(id)).unwrap_or_default();
     let list = app.run("inspect.section.list", json!({})).unwrap_or(Value::Null);
     let shown = list.get("shown").and_then(Value::as_str).map(str::to_string);
