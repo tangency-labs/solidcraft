@@ -72,8 +72,6 @@ const PINNED: &[(&str, usize)] = &[
     ("solidcore/src/curve/curve/p3.rs", 2),
     ("solidcore/src/curve/curve/p7.rs", 3),
     ("solidcore/src/nurbs/b_spline_curve/p3.rs", 2),
-    ("solidcore/src/offset/offset_executive/reach.rs", 1),
-    ("solidcore/src/offset/offset_executive/step_gaps.rs", 5),
     ("solidcore/src/offset/offset_geometry_creation.rs", 17),
     ("solidcore/src/topology/proto_topology/p2.rs", 3),
 ];
