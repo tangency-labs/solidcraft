@@ -424,6 +424,14 @@ fn go_to(s: &mut Session, snap: Snapshot, cmd: &str) -> Result<Snapshot> {
         None => Snapshot { doc: drawings_from(snap.doc, &s.doc), active_sheet_sketch: s.active_sheet_sketch.clone(), ..snap },
     };
     snap.sketching_view = s.historical_sketch_owner(snap.active_sketch, snap.sketching_view);
+    // History restores geometry in its own part, never a second editor beside the current one.
+    if snap.active_sketch.is_some() && snap.active_sheet_sketch.is_some() {
+        if snap.part.is_some() {
+            snap.active_sheet_sketch = None;
+        } else {
+            snap.sketching_view = None;
+        }
+    }
     if snap.active_sketch.is_some() && snap.sketching_view.is_none() {
         snap.active_sketch = None;
         if let Some(marker) = snap.sketch_restore_marker {

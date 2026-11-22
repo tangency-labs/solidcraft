@@ -422,6 +422,8 @@ pub(super) fn layout(app: &mut SolveApp, ui: &mut egui::Ui) {
                 &mut app.preferences.show_design_view_switcher,
                 "show_design_view_switcher",
             );
+            let response = setting::workspace_follows_view(app, ui);
+            crate::scenario::publish_target("prefs:workspace_follows_view", response.rect);
             layout_check(
                 ui,
                 app.tr("prefs.clear_view_tabs"),
