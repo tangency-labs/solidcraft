@@ -5752,7 +5752,7 @@ pub(crate) fn dialog_pick(app: &mut SolveApp, hit: &Hit, sel: Sel) {
         d.extra.remove("path");
     }
     // Split Body's sketch line keeps the sketch it was picked in (curve ids repeat across sketches).
-    if matches!(d.kind, crate::dialogs::Kind::Split) {
+    if matches!(d.kind, crate::dialogs::Kind::Split { .. }) {
         if let Hit::SketchCurve { sketch, .. } = hit {
             d.extra.insert("tool_sketch".into(), serde_json::json!(sketch));
         } else {
@@ -8627,6 +8627,18 @@ fn quick_measure_readout(app: &mut SolveApp, ui: &egui::Ui, viewport: Rect) -> O
     crate::quick_measure::show(app, ui, view, &taken)
 }
 
+/// Window messages clear every tile's bottom navigation, independent of the last tile painted.
+fn window_message_rect(app: &SolveApp, viewport: Rect) -> Rect {
+    let mut view = crate::shell::bottom_readout_rect(app, crate::shell::content_rect(app, viewport));
+    if app.preferences.navigation_bar.edge == crate::ui_kit::NavigationEdge::Bottom {
+        let clearance = crate::ui_kit::NavigationMetrics::for_size(app.preferences.navigation_bar.size).height()
+            + crate::ui_kit::NAV_BOTTOM
+            + Tokens::get().space_8;
+        view.max.y = (view.bottom() - clearance).max(view.top());
+    }
+    view
+}
+
 /// A single visual pattern for ongoing work, the existing six-second status, the 3D mouse
 /// calibration offer and the stand-up note, stacked from the bottom of the free view. Returns the toasts' rects.
 /// The usage statistics notice is to show (`usage_stats::notice_pending`).
@@ -8672,7 +8684,7 @@ pub(crate) fn transient_messages(app: &mut SolveApp, ui: &egui::Ui, viewport: Re
     }
     obstacles.extend(readout);
     obstacles.extend(app.operations.rect);
-    let view = crate::shell::content_rect(app, viewport);
+    let view = window_message_rect(app, viewport);
     let mut free = crate::viewport_layout::free_rect(view, &obstacles).shrink(t.space_8);
     if ToastPlace::current(ui.ctx()) == ToastPlace::Corner {
         free = corner_free(view, &obstacles);
@@ -8805,7 +8817,9 @@ pub(crate) fn transient_messages(app: &mut SolveApp, ui: &egui::Ui, viewport: Re
         obstacles.push(r);
         free.max.y = r.top() - t.space_8;
     }
-    if let Some((msg, at, error)) = app.status.clone() {
+    if let Some((msg, at, error)) =
+        app.status.clone().filter(|(_, _, error)| *error || !app.status_is_tool_hint || crate::workspace::tool_receives_input(app))
+    {
         let shown_ms = crate::now_ms() - at;
         if shown_ms < STATUS_TOAST_MS {
             let undo = app.status_undo;
@@ -9929,8 +9943,7 @@ fn midpoint_marker(painter: &egui::Painter, at: Pos2, color: Color32) {
 
 /// The standalone points of the finished sketches shown (placed with Point, not a curve's
 /// ends or centres), in world space: they can still be picked (a hole's centre), so they are
-/// drawn too (#3267). Not the sketch's origin, projected points, or a sketch's points while it
-/// hides them.
+/// drawn too (#3267). Not the sketch's origin, or its points while it hides them.
 pub(crate) fn standalone_points(app: &SolveApp) -> Vec<Vec3> {
     let st = crate::open_meshing::shown_world(app);
     let mut out = Vec::new();
@@ -9949,7 +9962,7 @@ pub(crate) fn standalone_points(app: &SolveApp) -> Vec<Vec3> {
         let used: std::collections::HashSet<usize> = sk.curves.iter().flat_map(|c| c.kind.point_ids()).collect();
         let visible = solidcraft_engine::view::SketchPointVisibility::new(sk);
         for (i, p) in sk.points.iter().enumerate().skip(1) {
-            if !used.contains(&i) && p.link.is_none() && visible.takes(p) {
+            if !used.contains(&i) && !(p.link.is_some() && sk.view.hide_projected) && visible.takes(p) {
                 out.push(ss.plane.to_world(p.pos));
             }
         }
@@ -20433,6 +20446,26 @@ mod standalone_point_tests {
         assert!(points[0].dist(Vec3::new(5.0, 4.0, 0.0)) < 1e-9, "{points:?}");
         app.session.visibility.hidden_folders.push("c0/sketches".into());
         assert!(standalone_points(&app).is_empty(), "sketches hidden");
+    }
+
+    /// #15796: Intersect's points stay drawn after Finish Sketch, as they stay pickable.
+    #[test]
+    fn a_finished_sketch_shows_its_intersect_points() {
+        let mut app = SolveApp::new(solidcraft_engine::Session::default(), crate::Services::default());
+        app.run("sketch.create", json!({"plane": "XY", "name": "Source"})).unwrap();
+        let arc = app.run("sketch.arc.three_point", json!({"start": [-10, 0], "end": [10, 0], "through": [0, 10]})).unwrap();
+        let curve = arc["curves"][0].as_str().unwrap().to_string();
+        app.run("sketch.finish", json!({})).unwrap();
+        let section = app.run("sketch.create", json!({"plane": "XZ"})).unwrap()["sketch"].as_u64().unwrap();
+        app.run("sketch.intersect", json!({"refs": [{"sketch": "Source", "curve": curve}]})).unwrap();
+        app.run("sketch.finish", json!({})).unwrap();
+        let points = standalone_points(&app);
+        assert_eq!(points.len(), 2, "{points:?}");
+        for x in [-10.0, 10.0] {
+            assert!(points.iter().any(|p| p.dist(Vec3::new(x, 0.0, 0.0)) < 1e-9), "{points:?}");
+        }
+        app.run("sketch.options", json!({"sketch": section, "show_projected": false})).unwrap();
+        assert!(standalone_points(&app).is_empty(), "projected geometry hidden");
     }
 }
 

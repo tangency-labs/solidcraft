@@ -2,11 +2,22 @@
 //! boolean's operand (#14830), counted by the kernel's volume-sign decisions (feature
 //! `profile`: `mass::enclosure::volume_sign`, one call per decision).
 //!
-//! brep-bench's boolean/drilled-plate: a plate cut by nine drills, one after another. Each cut
-//! decides the sign of its two operands' volumes and of its result's: 9 cuts, 27 decisions.
-//! The first operand of cuts 2 to 9 is the cut before's result, which that cut's result
-//! contract proved: those 8 are taken from the proof, so 19 decisions remain (the plate, the 9
-//! drills, the 9 results). A primitive is not proved at creation, so its proof stays.
+//! A proved cut ([`Contract::Proved`]) decides a volume's sign only where it proves a body (the
+//! validity check, then one `volume_sign`): once for each operand that brings neither a proof
+//! that stands nor a template, and once for its solid result. The boolean itself decides none:
+//! it is the one the default contract runs, which decides none at all
+//! (`a_boolean_under_the_default_contract_proves_nothing`).
+//! A primitive operand (the plate, each drill) takes its facing from the template it was built
+//! from (`is_outward_primitive`: a certificate from the template's closed form, no volume).
+//! It certifies here: its bound is the template's volume (20000 for the plate, 48 pi for a
+//! drill) less terms of rounding size, the box's faces being planes through its own corners and
+//! the cylinder's only off by its rational circle's rounding. An operand a proved cut made
+//! brings that cut's proof.
+//!
+//! brep-bench's boolean/drilled-plate: a plate cut by nine drills, one after another. Each of
+//! the 9 cuts decides its result's sign: 9 decisions. The first operand of cuts 2 to 9 is the
+//! cut before's result, which holds that cut's proof; edited in between (which drops the proof),
+//! each of those 8 is decided again: 9 + 8 = 17. The 8 between the two are the proofs taken.
 #![cfg(feature = "profile")]
 #![allow(clippy::unwrap_used)]
 
@@ -80,9 +91,12 @@ fn a_drilled_plate_proves_each_cut_result_once() {
     all_fixes();
     let (kept, reused) = drilled(false);
     let (edited, every) = drilled(true);
-    assert_eq!(every, 27, "each cut proves both operands and its result");
     assert_eq!(
-        reused, 19,
+        every, 17,
+        "each cut proves its result, cuts 2 to 9 their edited first operand too"
+    );
+    assert_eq!(
+        reused, 9,
         "the 8 results proved by the cut before are not proved again"
     );
     // the same body either way
@@ -93,7 +107,8 @@ fn a_drilled_plate_proves_each_cut_result_once() {
     );
 }
 
-/// The decisions of cutting drill 2 from `first`, the plate less drill 1.
+/// The decisions of cutting drill 2 from `first`, the plate less drill 1: the result's, and
+/// `first`'s where it brings no proof that stands (drill 2 brings its template: none).
 fn second_cut(first: Body) -> u64 {
     let d = drill(2);
     let (_, calls) = session::profiled(|| cut(first, d));
@@ -103,11 +118,11 @@ fn second_cut(first: Body) -> u64 {
 #[test]
 fn a_proved_body_changed_since_is_proved_again() {
     all_fixes();
-    // unchanged: the result's proof stands, so the operand drill and the result are decided
-    assert_eq!(second_cut(cut(plate(), drill(1))), 2);
+    // unchanged: the first cut's proof stands, so only the result is decided
+    assert_eq!(second_cut(cut(plate(), drill(1))), 1);
     // transformed (here by the identity: any edit, through the body's lock, drops the proof
-    // whatever it changes): decided again
-    assert_eq!(second_cut(unproved(cut(plate(), drill(1)))), 3);
+    // whatever it changes): decided again, then the result
+    assert_eq!(second_cut(unproved(cut(plate(), drill(1)))), 2);
 }
 
 /// A copy of a proved body brings its proof: cut from, it is decided as often as the body
@@ -155,5 +170,6 @@ fn a_proof_made_under_other_fixes_is_not_taken() {
     session::set_thread_fixes(names.iter().copied().filter(|n| *n != dropped)).unwrap();
     let decided = second_cut(first);
     all_fixes();
-    assert_eq!(decided, 3);
+    // `first` decided again, then the result: one more than under the proof's own fixes
+    assert_eq!(decided, 2);
 }

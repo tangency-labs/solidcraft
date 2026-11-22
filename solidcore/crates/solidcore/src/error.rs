@@ -2004,6 +2004,10 @@ impl SolidError {
 
     /// [`SolidError::Failed`] for a stage that failed, as the phrase says, with status
     /// [`SM_ERR`] (upstream `return SE(SM_ERR)`).
+    ///
+    /// No library site builds it any more (the last ones went in #19856); the tests
+    /// keep it to check the phrase causes still on the wire.
+    #[cfg(test)]
     pub(crate) fn stage_failed(operation: &'static str, what: &'static str) -> Self {
         Failure::new(operation, Reason::Failed(what)).into_error()
     }
@@ -2011,6 +2015,10 @@ impl SolidError {
     /// [`SolidError::Failed`] for an entity a stage needs that is not there, as the phrase
     /// says, with status [`SM_ERR_NULL_POINTER`] (upstream `NER(ptr)` on a `NULL`
     /// pointer); its kind is [`ErrorKind::Missing`].
+    ///
+    /// No library site builds it any more (the last ones went in #19856); the tests
+    /// keep it to check the phrase causes still on the wire.
+    #[cfg(test)]
     pub(crate) fn entity_missing(operation: &'static str, what: &'static str) -> Self {
         Failure::new(operation, Reason::Failed(what))
             .with_status(SM_ERR_NULL_POINTER)
@@ -3474,17 +3482,6 @@ pub(crate) mod replaced_upstream_samples {
         };
         #[rustfmt::skip] // one file per line, so conversions in parallel merge cleanly
         const PINNED: &[(&str, usize)] = &[
-            ("solidcore/src/boolean/api_brep.rs", 2),
-            ("solidcore/src/boolean/merge/p1.rs", 17),
-            ("solidcore/src/boolean/merge/p2.rs", 4),
-            ("solidcore/src/boolean/merge/p3.rs", 15),
-            ("solidcore/src/boolean/merge/p4.rs", 5),
-            ("solidcore/src/boolean/merge/p4/arena_pair.rs", 2),
-            ("solidcore/src/boolean/merge/p4/kernel_adapter.rs", 1),
-            ("solidcore/src/boolean/merge/p5.rs", 11),
-            ("solidcore/src/boolean/topology_intersector/p1.rs", 10),
-            ("solidcore/src/boolean/topology_intersector/p2.rs", 4),
-            ("solidcore/src/boolean/topology_intersector/p3.rs", 10),
             ("solidcore/src/offset/offset_executive/p2.rs", 1),
         ];
         assert_pinned("generic phrase-cause sites", &crate_sites(&PHRASES), PINNED);
