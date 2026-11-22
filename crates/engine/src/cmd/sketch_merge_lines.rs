@@ -8,6 +8,8 @@
 //! still uses (another line ending there, a dimension) stays, held on the merged line.
 //! Frame Members built on the sketch name the merged line in place of the ones that went.
 
+use std::f64::consts::{PI, TAU};
+
 use serde_json::Value;
 use solidcraft_doc::{FeatureKind, SketchId};
 use solidcraft_geom::prelude::*;
@@ -38,7 +40,7 @@ pub static COMMANDS: &[CommandSpec] = &[CommandSpec::new("sketch.merge_lines", "
     .params(concat!(
         "curves: [line ids] (at least two, joined end to end on one straight line). The first keeps its id and runs from one outer end of the run to the other; the others go. ",
         "Direction relations of the pieces move onto it, their lengths go, and a point between pieces that another curve or a constraint uses stays on it. ",
-        "Frame Members built on the sketch name it in place of the lines that went. Returns line: the merged line's id, removed: [ids], frames: [Frame Members changed]",
+        "Frame Members built on the sketch name it in place of the lines that went, and Rotate steps on those lines turn it. Returns line: the merged line's id, removed: [ids], frames: [Frame Members and Rotate steps changed]",
         created_doc!()
     ))];
 
@@ -110,6 +112,8 @@ fn merge(sk: &mut Sketch, ids: &[String], cmd: &str) -> Result<(String, Vec<Stri
     }
     let dir = along * (1.0 / length);
     let mut pieces = Vec::new();
+    // The pieces drawn against the kept line's direction.
+    let mut reversed = Vec::new();
     for &c in &run {
         let (a, b) = line_ends(c).ok_or_else(|| bad(cmd, "curve"))?;
         let (qa, qb) = (pos(a)? - origin, pos(b)? - origin);
@@ -117,6 +121,9 @@ fn merge(sk: &mut Sketch, ids: &[String], cmd: &str) -> Result<(String, Vec<Stri
             return Err(bad(cmd, "these lines don't lie on one straight line"));
         }
         let (ta, tb) = (qa.dot(dir), qb.dot(dir));
+        if ta > tb {
+            reversed.push(c);
+        }
         pieces.push(if ta <= tb { Piece { lo: ta, hi: tb, p_lo: a, p_hi: b } } else { Piece { lo: tb, hi: ta, p_lo: b, p_hi: a } });
     }
     pieces.sort_by(|x, y| x.lo.total_cmp(&y.lo));
@@ -150,6 +157,16 @@ fn merge(sk: &mut Sketch, ids: &[String], cmd: &str) -> Result<(String, Vec<Stri
                 k.kind = ConstraintKind::PointOnCurve { p, c: kept };
             }
             ConstraintKind::Length { l, .. } if in_run(l) => return false,
+            // An angle measured along a piece drawn the other way is half a turn off on the kept line.
+            ConstraintKind::Angle { a, b, .. } if reversed.contains(&a) != reversed.contains(&b) => {
+                if let ConstraintKind::Angle { flip, .. } = &mut k.kind {
+                    *flip = !*flip;
+                }
+            }
+            ConstraintKind::LineAngle { l, .. } if reversed.contains(&l) && k.param.is_some() => return false,
+            ConstraintKind::LineAngle { l, value } if reversed.contains(&l) => {
+                k.kind = ConstraintKind::LineAngle { l, value: (value + 2.0 * PI).rem_euclid(TAU) - PI };
+            }
             ConstraintKind::Equal { a, b } | ConstraintKind::SlotOverallLength { a, b, .. } if in_run(a) || in_run(b) => return false,
             _ => {}
         }
@@ -219,15 +236,18 @@ fn merge(sk: &mut Sketch, ids: &[String], cmd: &str) -> Result<(String, Vec<Stri
 
 /// Frame Members built on sketch `sketch` that listed, named or finished a corner of a line that
 /// went: the line list names the merged line `kept` in its place, and its names and corner
-/// overrides go. The names of the Frame Members changed.
+/// overrides go. A Rotate step on a line that went turns the merged line. The names of the
+/// features changed.
 fn follow_frames(doc: &mut solidcraft_doc::Document, sketch: u64, kept: &str, removed: &[String]) -> Vec<String> {
     let gone = |l: &str| removed.iter().any(|r| r == l);
     let mut changed = Vec::new();
+    let mut frames = Vec::new();
     for f in &mut doc.features {
         let FeatureKind::FrameMember { path_sketch: Some(SketchId(id)), lines, names, corners, .. } = &mut f.kind else { continue };
         if *id != sketch {
             continue;
         }
+        frames.push(f.id);
         let touched = lines.iter().any(|l| gone(l)) || names.keys().any(|n| gone(n)) || corners.iter().any(|c| c.lines().any(gone));
         if !touched {
             continue;
@@ -243,6 +263,15 @@ fn follow_frames(doc: &mut solidcraft_doc::Document, sketch: u64, kept: &str, re
         names.retain(|n, _| !gone(n));
         corners.retain(|c| !c.lines().any(gone));
         changed.push(f.name.clone());
+    }
+    for f in &mut doc.features {
+        if let FeatureKind::FrameMemberTurn { member, .. } = &mut f.kind
+            && frames.contains(&member.feature.0)
+            && gone(&member.line)
+        {
+            member.line = kept.to_string();
+            changed.push(f.name.clone());
+        }
     }
     changed
 }

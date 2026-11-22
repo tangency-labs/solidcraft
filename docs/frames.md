@@ -31,7 +31,10 @@ full length, select the lines in the sketch and use **Merge Lines** (SKETCH › 
 right-click menu, `sketch.merge_lines`, #20317). The first selected line keeps its id and runs the
 whole length. Its direction relations stay and the pieces' lengths go. A line ending between the
 pieces stays on the merged line. A Frame Member already built on the sketch names the merged line
-in place of the ones that went, and drops their names and corner overrides.
+in place of the ones that went, and drops their names and corner overrides; a Rotate step on a
+line that went turns the merged member. Separate Frame Members on different lines of the run each
+name the merged line, so they overlap: delete the extra ones. Merge Lines takes lines of a 2D
+sketch; 3D sketch lines (`sketch.line3d`) are refused with `unknown curve`.
 
 ```json
 {"command": "sketch.merge_lines", "params": {"curves": ["l1", "l2", "l3"]}}

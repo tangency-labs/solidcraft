@@ -28,7 +28,8 @@ pub struct MergeLinesResult {
     pub line: String,
     /// The ids of the lines merged into it, now gone.
     pub removed: Vec<String>,
-    /// The Frame Members built on the run whose line lists now name the merged line instead.
+    /// The Frame Members built on the run whose line lists now name the merged line instead, and
+    /// the Rotate steps that now turn it.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub frames: Vec<String>,
     /// The sketch's solve: `{solved, dof}`.

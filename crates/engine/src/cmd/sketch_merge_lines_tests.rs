@@ -180,3 +180,55 @@ fn a_frame_member_on_the_run_becomes_one_tube() {
     });
     assert!(long, "one tube runs the whole 600 mm: {m}");
 }
+
+/// An angle to a piece drawn the other way is half a turn off on the merged line: it is flipped,
+/// so the line it measures to stays where it is.
+#[test]
+fn an_angle_to_a_reversed_piece_keeps_its_line_in_place() {
+    let mut s = new_sketch();
+    run(&mut s, "sketch.line", json!({"points": [[0, 5], [10, 5]], "infer": false}));
+    run(&mut s, "sketch.line", json!({"points": [[30, 5], [10, 5]], "infer": false}));
+    run(&mut s, "sketch.line", json!({"points": [[10, 5], [10, 15]], "infer": false}));
+    run(&mut s, "sketch.constraint.coincident", json!({"a": "l1.end", "b": "l2.end"}));
+    run(&mut s, "sketch.constraint.coincident", json!({"a": "l1.end", "b": "l3.start"}));
+    run(&mut s, "sketch.dimension", json!({"entities": ["l2", "l3"], "value": "90 deg"}));
+
+    run(&mut s, "sketch.merge_lines", json!({"curves": ["l1", "l2"]}));
+    let sk = sketch(&s);
+    assert!(sk.constraints.iter().any(|k| matches!(k.kind, ConstraintKind::Angle { .. })), "{:?}", sk.constraints);
+    let (a, b) = ends(&sk, "l3");
+    assert!(at(a, 10.0, 5.0) && at(b, 10.0, 15.0), "the cross line stays put: {a:?} {b:?}");
+}
+
+/// A Rotate step on a line that went turns the merged member instead of failing.
+#[test]
+fn a_rotate_step_on_a_merged_away_line_turns_the_merged_member() {
+    let mut s = Session::default();
+    run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Frame"}));
+    run(&mut s, "sketch.line", json!({"points": [[0, 0], [300, 0], [600, 0]], "infer": false}));
+    run(&mut s, "sketch.finish", json!({}));
+    let tube = json!({"kind": "rect_tube", "width": 40, "height": 40, "wall": 3, "outer_radius": 0});
+    run(&mut s, "frame.member", json!({"sketch": "Frame", "profile": tube, "names": {"l2": "Gone"}}));
+    let face = {
+        let st = s.model.state();
+        let b = st.body("Gone").unwrap();
+        let top = |i: usize| b.body.planar_face(i).is_some_and(|pl| pl.normal().z > 0.999 && (pl.origin.z - 20.0).abs() < 1e-6);
+        let i = (0..b.body.face_count()).find(|i| top(*i)).unwrap();
+        json!({"body": "Gone", "index": i, "face": [450, 0, 20]})
+    };
+    run(&mut s, "frame.rotate_member", json!({"face": face, "angle": "30 deg"}));
+
+    run(&mut s, "sketch.edit", json!({"sketch": "Frame"}));
+    let out = run(&mut s, "sketch.merge_lines", json!({"curves": ["l1", "l2"]}));
+    assert!(ids(&out["frames"]).iter().any(|f| f.starts_with("Rotate")), "{out}");
+    run(&mut s, "sketch.finish", json!({}));
+
+    let turn = s.doc.features.iter().find(|f| matches!(f.kind, solidcraft_doc::FeatureKind::FrameMemberTurn { .. })).unwrap();
+    let solidcraft_doc::FeatureKind::FrameMemberTurn { member, .. } = &turn.kind else { panic!("not a Rotate step") };
+    assert_eq!(member.line, "l1");
+    let m = run(&mut s, "inspect.measure", json!({}));
+    let bs = m["bodies"].as_array().unwrap();
+    assert_eq!(bs.len(), 1, "{m}");
+    let tall = bs[0]["bbox"]["max"][2].as_f64().unwrap() - bs[0]["bbox"]["min"][2].as_f64().unwrap();
+    assert!(tall > 41.0, "the 600 mm member is turned: {m}");
+}

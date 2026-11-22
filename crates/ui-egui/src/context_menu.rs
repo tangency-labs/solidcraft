@@ -1898,9 +1898,10 @@ fn sketch_entity_items(app: &SolveApp) -> Vec<Item> {
     if !lines.is_empty() {
         v.push(cmd(app, "sketch.infinite", "Infinite Line").with(json!({ "curves": lines })));
     }
-    // #20317: lines joined end to end on one straight line become one.
+    // #20317: lines joined end to end on one straight line become one. The whole selection goes,
+    // so an arc in it is refused rather than left out.
     if lines.len() >= 2 {
-        v.push(cmd(app, "sketch.merge_lines", "Merge Lines").with(json!({ "curves": lines })));
+        v.push(cmd(app, "sketch.merge_lines", "Merge Lines").with(json!({ "curves": curves })));
     }
     // Projected geometry: the whole projection, or just the selected members (Delete).
     let links = selected_links(&ss.sketch, &ents);
