@@ -226,9 +226,19 @@ fn a_distance_from_a_construction_line_toggles_to_a_diameter() {
     };
     assert!((x(&s) - 5.0).abs() < 1e-6, "the point stays put");
     // Saved and reopened, it is still a diameter.
+    // The reopened session edits no sketch: it is read by its feature id.
+    let sid = s.active_sketch.unwrap();
     let reopened = Session::new(solidcraft_doc::Document::from_json(&s.doc.to_json()).unwrap());
     assert!(
-        sketch(&reopened).constraints.iter().any(|c| matches!(c.kind, ConstraintKind::LinearDiameter { value, .. } if (value - 10.0).abs() < 1e-9)),
+        reopened
+            .model
+            .state()
+            .sketch(sid)
+            .unwrap()
+            .sketch
+            .constraints
+            .iter()
+            .any(|c| matches!(c.kind, ConstraintKind::LinearDiameter { value, .. } if (value - 10.0).abs() < 1e-9)),
         "the diameter survives save and reopen"
     );
     // Typing 12 moves the point to 6 mm.
