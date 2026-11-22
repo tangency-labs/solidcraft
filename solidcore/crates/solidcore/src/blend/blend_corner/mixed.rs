@@ -379,9 +379,9 @@ pub(crate) fn mixed_ring<S: Copy>(
 /// The face of `eu`'s sector other than `not`, where the sector holds `not`.
 fn other_face(b: &Brep, eu: EdgeuseId, not: FaceId) -> Result<Option<FaceId>> {
     let radial = eu1::radial(b, eu)?.ok_or_else(|| {
-        bad_input(
+        bad_setup(
             OP_CLASSIFY,
-            CornerInput::EdgeUseWithoutRadial,
+            FilletSetUp::RadialEdgeUse,
             Some(EntityRef::Edgeuse(eu)),
         )
     })?;
@@ -822,15 +822,7 @@ fn rails(
                 )
             })?;
             pseudo.brep().edge(rail)?.curve.clone().ok_or_else(|| {
-                solver_input(
-                    op,
-                    SolverFailure::RailNotBSpline {
-                        fillet_geom: g,
-                        side: idx,
-                        kind: None,
-                    },
-                    Some(EntityRef::Edge(rail)),
-                )
+                bad_setup(op, FilletSetUp::RailCurve, Some(EntityRef::Edge(rail)))
             })
         };
         let at = |side| RailAt {

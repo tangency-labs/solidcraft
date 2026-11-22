@@ -909,8 +909,9 @@ impl CornerStep {
 /// steps check. A missing link of the fillet structures that other routines read too (a
 /// fillet edge's primary edge use or its mate, a rail's end vertex use, a fillet vertex's
 /// face, a cross-section's fillet geometry, a rail's curve) is
-/// [`BlendFailure::FilletSetUpInvalid`] instead, and a target-body edge without curve is
-/// [`BlendFailure::EdgeWithoutCurve`].
+/// [`BlendFailure::FilletSetUpInvalid`] instead, a fillet geometry without its fillet
+/// surface the solver's ([`SolverFailure::FilletGeomWithoutSurface`]), and a target-body
+/// edge without curve is [`BlendFailure::EdgeWithoutCurve`].
 ///
 /// [`CornerInput::upstream_status`] is each kind's default status. A site whose C++ reports
 /// the condition otherwise (a failed state check, `SE(SM_ERR)`, where the default is
@@ -941,8 +942,6 @@ pub enum CornerInput {
     /// A corner edge of the pseudo-B-rep with no curve (a rail's is
     /// [`FilletSetUp::RailCurve`], a target-body edge's [`BlendFailure::EdgeWithoutCurve`]).
     EdgeWithoutCurve,
-    /// A fillet geometry with no fillet surface.
-    FilletGeomWithoutSurface,
     /// A 3x2 corner of four edges with no on-edge edge.
     MixedCornerWithoutOnEdgeEdge,
     /// A 3x2 corner of four edges with no on-extended-edge edge.
@@ -954,8 +953,6 @@ pub enum CornerInput {
     MixedCornerVertexNotInCorner,
     /// An edge of the body at a chamfer corner's vertex with no vertex at an end.
     EdgeWithoutVertex,
-    /// An edge use of a Mixed corner's ring with no radial.
-    EdgeUseWithoutRadial,
     /// A ball corner with no ring of edge uses.
     RingNotSet,
     /// A ball, chamfer or Mixed corner with no event of its kind (ball members, chamfer or
@@ -1004,11 +1001,9 @@ impl CornerInput {
             | Self::NoRailXEdgeUseVertex
             | Self::EdgeUseWithoutFilletGeometry
             | Self::EdgeWithoutCurve
-            | Self::FilletGeomWithoutSurface
             | Self::MixedCornerWithoutOnEdgeEdge
             | Self::MixedCornerWithoutOnExtendedEdgeEdge
             | Self::EdgeWithoutVertex
-            | Self::EdgeUseWithoutRadial
             | Self::RingNotSet
             | Self::EventNotSet
             | Self::FacetNormalNotSet
