@@ -1,5 +1,5 @@
 //! MJCF export (#20786, docs/mjcf.md): bodies, joints written at the current values, limits and
-//! loops closed by equality constraints.
+//! loops closed by equality constraints. `tools/mjcf-check` loads such assemblies in MuJoCo.
 
 use serde_json::{Value, json};
 use solidcraft_io::MjcfPackage;

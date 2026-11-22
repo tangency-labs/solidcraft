@@ -141,6 +141,6 @@ the copies move together, which a URDF could only express with `<mimic>`.) The e
 - `<mimic>` for motion links.
 - Simplified collision shapes: the collision mesh is the visual mesh.
 - Images wrapped around curved faces: a decal is a flat image on a plane.
-- SDF and MJCF export, and URDF import.
+- URDF import. (SDF and MJCF have exports of their own: [SDF](sdf.md), [MJCF](mjcf.md).)
 - Joint motion inside the copies of a component placed several times.
 - Drive dynamics: `effort` and `velocity` are limits you choose.

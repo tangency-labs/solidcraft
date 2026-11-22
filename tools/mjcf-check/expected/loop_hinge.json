@@ -1,0 +1,15 @@
+{
+ "why": "C hangs on A 1 mm above B, and BC closes the loop as a hinge on AB's own axis: two connect constraints on that axis leave B its turn, so started at 1 rad/s with no torque about the vertical axis it turns 1 rad in 1 s.",
+ "joints": {
+  "AB": {
+   "type": "hinge",
+   "ref": 0.0
+  }
+ },
+ "equalities": 2,
+ "spin": {
+  "joint": "AB",
+  "seconds": 1.0,
+  "turned": 1.0
+ }
+}

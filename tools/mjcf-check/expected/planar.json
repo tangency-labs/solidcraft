@@ -1,0 +1,29 @@
+{
+ "why": "B slides 2 and 3 mm in the plane of A's top face and turns 40 degrees in it: its centre stays at z 15 mm and moves sqrt(2² + 3²) = 3.606 mm off the axis through (5, 5).",
+ "joints": {
+  "J_dof1": {
+   "type": "slide",
+   "ref": 0.002
+  },
+  "J_dof2": {
+   "type": "slide",
+   "ref": 0.003
+  },
+  "J": {
+   "type": "hinge",
+   "ref": 0.6981317007977318
+  }
+ },
+ "equalities": 0,
+ "com_from": {
+  "B": {
+   "point": [
+    0.005,
+    0.005,
+    0.015
+   ],
+   "distance": 0.003605551275463989,
+   "dz": 0.0
+  }
+ }
+}
