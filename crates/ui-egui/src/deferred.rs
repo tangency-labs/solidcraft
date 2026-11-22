@@ -102,7 +102,7 @@ impl Deferred {
 pub struct DocJobs {
     deferred: Option<Deferred>,
     queue: Vec<(String, Value, u64)>,
-    start_after_roll: Option<(String, u64)>,
+    start_after_roll: Option<(String, Option<u64>)>,
     delete_check: Option<DeleteCheck>,
 }
 
@@ -295,6 +295,8 @@ impl SolveApp {
             self.deferred.as_ref().map(|d| d.started),
             self.delete_check.as_ref().map(|c| c.started),
             self.pending_feature_edit.as_ref().map(|edit| edit.started),
+            self.sketch_refreshes.get(&self.session.uid).map(|job| job.started),
+            self.start_after_roll.as_ref().and_then(|_| self.sketch_refreshes.values().map(|job| job.started).reduce(f64::min)),
         ];
         started.into_iter().flatten().reduce(f64::min)
     }
@@ -303,7 +305,10 @@ impl SolveApp {
     /// delete's check computing off the window thread. A feature edit applying has its own
     /// dialog, with its own Cancel.
     pub fn can_cancel_computing(&self) -> bool {
-        self.deferred.is_some() || self.delete_check.is_some()
+        self.deferred.is_some()
+            || self.delete_check.is_some()
+            || self.start_after_roll.is_some()
+            || self.sketch_refreshes.get(&self.session.uid).is_some_and(|job| !job.progress.is_cancelled())
     }
 
     /// Stop waiting for the history command, and the delete check, computing off the window thread
@@ -312,10 +317,10 @@ impl SolveApp {
     /// to the end of what they evaluate and their results are dropped (the same as Cancel while a
     /// feature is applying).
     pub fn cancel_computing(&mut self) {
+        crate::sketch_view::cancel_refresh(self);
         self.deferred = None;
         self.deferred_queue.clear();
         self.delete_check = None;
-        self.start_after_roll = None;
     }
 
     /// Run a delete's check `commands` and carry on with `then` once their replies are in: off
@@ -383,6 +388,7 @@ impl SolveApp {
 
     /// Each frame: a command whose evaluation is in runs, then the next one waiting starts.
     pub(crate) fn poll_deferred(&mut self, ctx: &egui::Context) {
+        crate::sketch_view::poll_refreshes(self, ctx);
         if let Some(job) = &mut self.deferred {
             if !job.finished() {
                 ctx.request_repaint_after(std::time::Duration::from_millis(100));
@@ -416,12 +422,14 @@ impl SolveApp {
             let _ = self.run_heavy_as(&id, params, serial);
         }
         if self.deferred.is_none()
+            && !self.session.needs_sketch_finish_evaluation()
             && self.deferred_queue.is_empty()
             && let Some((id, sketch)) = self.start_after_roll.take()
             && self.dialog.is_none()
             && self.tool.is_none()
+            && self.prepared_edit_starts.get(&self.session.uid).is_some_and(|prepared| prepared == &id)
         {
-            self.start_interactive(&id, Some(sketch));
+            self.start_interactive(&id, sketch);
         }
     }
 

@@ -1,0 +1,34 @@
+{
+  "ar": {
+    "sketch_finish.edit": "تعديل الرسم",
+    "sketch_finish.finished": "اكتمل {name}"
+  },
+  "de": {
+    "sketch_finish.edit": "Skizze bearbeiten",
+    "sketch_finish.finished": "{name} abgeschlossen"
+  },
+  "en": {
+    "sketch_finish.edit": "Edit sketch",
+    "sketch_finish.finished": "{name} finished"
+  },
+  "he": {
+    "sketch_finish.edit": "עריכת סקיצה",
+    "sketch_finish.finished": "{name} הושלמה"
+  },
+  "ja": {
+    "sketch_finish.edit": "スケッチを編集",
+    "sketch_finish.finished": "{name} が完了しました"
+  },
+  "ko": {
+    "sketch_finish.edit": "스케치 편집",
+    "sketch_finish.finished": "{name} 완료"
+  },
+  "vi": {
+    "sketch_finish.edit": "Chỉnh sửa phác thảo",
+    "sketch_finish.finished": "Đã hoàn tất {name}"
+  },
+  "zh": {
+    "sketch_finish.edit": "编辑草图",
+    "sketch_finish.finished": "{name} 已完成"
+  }
+}

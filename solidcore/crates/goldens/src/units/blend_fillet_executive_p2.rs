@@ -1449,7 +1449,9 @@ impl ExecutiveAccess<Handle> for Access {
 /// `-2`).
 const OP_P2: &str = "blend::fillet_executive::p2: ";
 
-/// The p2 module's operation: its null objects, typed, are `Missing` blend failures of it.
+/// The p2 module's operation: its null objects, typed, are blend failures of it that keep
+/// the status `SM_ERR_NULL_POINTER` (a `Defect` for an object the executive built, the
+/// named cause for the caller's missing law list; #19823).
 const P2_OP: &str = "blend::fillet_executive::p2";
 
 /// The `SmStatus` of a Rust error.
@@ -1458,13 +1460,11 @@ fn status_of(e: &SolidError) -> f64 {
         SolidError::Upstream {
             operation, code, ..
         } if *code == SM_ERR_NULL_POINTER && operation.starts_with(OP_P2) => NULL_DEREF,
-        // the p2 module's own null objects, typed (#13790): a `Missing` blend failure of
-        // the module's operation
+        // the p2 module's own null objects, typed (#13790, #19823): a blend failure of the
+        // module's operation keeping `SM_ERR_NULL_POINTER`
         e if e.operation() == P2_OP
-            && matches!(
-                e.blend_failure(),
-                Some(solidcore::error::blend::BlendFailure::Missing(_))
-            ) =>
+            && e.blend_failure().is_some()
+            && solidcore::error::upstream_status(e) == Some(SM_ERR_NULL_POINTER) =>
         {
             NULL_DEREF
         }
