@@ -716,30 +716,14 @@ pub(crate) fn surface_uses_approximate_net(s: &Surface) -> bool {
 /// Returns the exact rational B-spline representation of `s` when `s`'s point and
 /// derivative evaluations equal that NURBS net's everywhere on its natural domain (`eps = 0`),
 /// or `None` when `s` has no exact NURBS representation (`ProceduralBlend`,
-/// `ProceduralSweep`, power-basis `BSplineSurfaceForm::Polynomial`, `WR-713` asymmetric
-/// unbounded inside-out `Cone`, `OffsetSurface`, `CurveBounded`, `Step`, `SrfInVolume`).
+/// `ProceduralSweep`, power-basis `BSplineSurfaceForm::Polynomial`, `OffsetSurface`,
+/// `CurveBounded`, `Step`, `SrfInVolume`).
 pub(crate) fn exact_nurbs_surface<'a>(
     k: &Kernel,
     s: &'a Surface,
 ) -> Result<Option<Cow<'a, BSplineSurface>>> {
     if s.procedural_sweep().is_some() || matches!(s.kind(), SurfaceKind::ProceduralBlend(_)) {
         return Ok(None);
-    }
-    if let SurfaceKind::Cone(c) = s.kind_with_nurb(k)? {
-        if !c.rev.is_bounded()? && c.inside_out && !k.fixes.cone_unbounded_parameterized_as_nurb {
-            let step_ivl = c.rev.anal_uv_domain.v_interval();
-            let nurb_dom = c.rev.base().natural_uv_domain();
-            let nurb_ivl = if c.rev.swap_uv {
-                nurb_dom.u_interval()
-            } else {
-                nurb_dom.v_interval()
-            };
-            if nurb_ivl.min().to_bits() != (-step_ivl.max()).to_bits()
-                || nurb_ivl.max().to_bits() != (-step_ivl.min()).to_bits()
-            {
-                return Ok(None);
-            }
-        }
     }
     Ok(as_b_spline(k, s)?.filter(|b| b.form() != BSplineSurfaceForm::Polynomial))
 }
@@ -2858,30 +2842,12 @@ mod tests {
             Err(SolidError::Unsupported { operation: OP, .. })
         ));
 
-        // `WR-713`: asymmetric unbounded inside-out `Cone` without `cone_unbounded_parameterized_as_nurb`
+        // `WR-713`: an asymmetric unbounded inside-out `Cone` is parameterised as its NURB
         let cone_srf = Surface::from(
             Cone::new_unbounded(&k, Point3::ZERO, Vec3::X, Vec3::Y, 5.0, 30.0, false, true)
                 .unwrap(),
         );
-        assert!(exact_nurbs_surface(&k, &cone_srf).unwrap().is_none());
-        let mut k_fixed = Kernel::default();
-        k_fixed.fixes.cone_unbounded_parameterized_as_nurb = true;
-        let cone_fixed = Surface::from(
-            Cone::new_unbounded(
-                &k_fixed,
-                Point3::ZERO,
-                Vec3::X,
-                Vec3::Y,
-                5.0,
-                30.0,
-                false,
-                true,
-            )
-            .unwrap(),
-        );
-        assert!(exact_nurbs_surface(&k_fixed, &cone_fixed)
-            .unwrap()
-            .is_some());
+        assert!(exact_nurbs_surface(&k, &cone_srf).unwrap().is_some());
 
         // Rational curve homogeneous-to-Cartesian rounding and `LIFT_MAX_DEPTH` cap refusal:
         // with weight `3.0`, adjacent homogeneous coordinates `wx_a` and `wx_b` (`+1` ULP)

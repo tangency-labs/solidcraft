@@ -6,9 +6,9 @@
 //! is the caller's (the fork's C API), as for the overflowing edges.
 //!
 //! The part is WR-642's pocketed plate (60 x 40 x 10, a 30 x 20 pocket 5 deep): its four
-//! rim edges chamfered 3 meet in mitres at the pocket's four concave corners with
-//! `fillet_mitre_concave_face_corners`; without it upstream sweeps a 3-sided face there
-//! and no corner is a mitre.
+//! rim edges chamfered 3 meet in mitres at the pocket's four concave corners (WR-642,
+//! formerly `fillet_mitre_concave_face_corners`; upstream swept a 3-sided face there).
+//! A box's top rim meets at convex corners, none of them a mitre.
 
 #![allow(
     clippy::unwrap_used,
@@ -54,16 +54,27 @@ fn pocketed_plate(k: &mut Kernel) -> Brep {
 /// The rim's corners, in order round the pocket.
 const RIM: [(f64, f64); 4] = [(15.0, 10.0), (45.0, 10.0), (45.0, 30.0), (15.0, 30.0)];
 
-/// Chamfers the rim by 3 with classify only: the stop's code, the overflowing and the
-/// mitred edges, and the rim's edges in `RIM` order.
-fn classify(mitre: bool) -> (i32, Vec<EdgeId>, Vec<EdgeId>, Vec<EdgeId>) {
+/// The 60 x 40 x 10 box: its top rim's corners are convex.
+fn plain_plate(k: &mut Kernel) -> Brep {
+    create_box(k, Point3::ZERO, 60.0, 40.0, 10.0).unwrap()
+}
+
+/// The box's top rim corners, in order round it.
+const BOX_RIM: [(f64, f64); 4] = [(0.0, 0.0), (60.0, 0.0), (60.0, 40.0), (0.0, 40.0)];
+
+/// Chamfers the rim `corners` (at z = 10) of the body `make` builds by 3 with classify
+/// only: the stop's code, the overflowing and the mitred edges, and the rim's edges in
+/// `corners` order.
+fn classify(
+    make: fn(&mut Kernel) -> Brep,
+    corners: &[(f64, f64); 4],
+) -> (i32, Vec<EdgeId>, Vec<EdgeId>, Vec<EdgeId>) {
     let mut k = Kernel::default();
     k.fixes.fillet_trace_reaches_rails = true;
-    k.fixes.fillet_mitre_concave_face_corners = mitre;
-    let mut b = pocketed_plate(&mut k);
+    let mut b = make(&mut k);
     let rim: Vec<EdgeId> = (0..4)
         .map(|i| {
-            let (a, q) = (RIM[i], RIM[(i + 1) % 4]);
+            let (a, q) = (corners[i], corners[(i + 1) % 4]);
             edge_between(&k, &b, p(a.0, a.1, 10.0), p(q.0, q.1, 10.0))
         })
         .collect();
@@ -91,7 +102,7 @@ fn pairs(edges: &[EdgeId]) -> BTreeSet<BTreeSet<EdgeId>> {
 
 #[test]
 fn fork_9ba2b12_mitred_pairs_are_noted_at_the_stop() {
-    let (code, overflow, mitred, rim) = classify(true);
+    let (code, overflow, mitred, rim) = classify(pocketed_plate, &RIM);
     assert_eq!(code, FilletErrorType::OverflowFirst as i32);
     assert!(overflow.is_empty(), "chamfer 3 fits the 5 deep walls");
     // each corner of the pocket: the two rim edges meeting there
@@ -104,7 +115,7 @@ fn fork_9ba2b12_mitred_pairs_are_noted_at_the_stop() {
 
 #[test]
 fn fork_9ba2b12_no_mitred_pairs_without_mitres() {
-    let (code, _, mitred, _) = classify(false);
+    let (code, _, mitred, _) = classify(plain_plate, &BOX_RIM);
     assert_eq!(code, FilletErrorType::OverflowFirst as i32);
     assert!(mitred.is_empty(), "{mitred:?}");
 }

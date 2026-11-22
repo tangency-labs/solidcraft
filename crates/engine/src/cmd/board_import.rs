@@ -40,7 +40,7 @@ const CONTRACT: TypedContract<InsertGerberParams> = TypedContract::new();
 const FILES_CMD: &str = "file.gerber_files";
 const FILES_CONTRACT: TypedContract<GerberFilesParams> = TypedContract::new();
 
-pub static COMMANDS: &[CommandSpec] = &[CommandSpec::new("file.insert_gerber", "Insert PCB (Gerber)", crate::checked!("file.insert_gerber", insert_gerber))
+pub static COMMANDS: &[CommandSpec] = &[CommandSpec::new("file.insert_gerber", "Insert PCB (Gerber)", crate::checked!("file.insert_gerber", insert_gerber)).begins_edit()
     .at("SOLID", "INSERT")
     .icon("import")
     .contract(&CONTRACT)
@@ -966,7 +966,7 @@ impl Outline {
                 Geom2::Line(..) | Geom2::Arc { .. } | Geom2::Circle(..) => {
                     return Err(EngineError::Other("the board outline has a curve with a coordinate that is not a number".into()));
                 }
-                Geom2::Ellipse { .. } | Geom2::Spline { .. } | Geom2::Conic { .. } => {
+                Geom2::Ellipse { .. } | Geom2::Spline { .. } | Geom2::Nurbs { .. } | Geom2::Conic { .. } => {
                     return Err(EngineError::Other("the board outline has a curve that is not a line or an arc".into()));
                 }
             };

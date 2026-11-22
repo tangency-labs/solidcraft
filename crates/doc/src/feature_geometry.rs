@@ -84,7 +84,8 @@ impl FeatureKind {
             | FeatureKind::SurfaceMatch { .. }
             | FeatureKind::SurfaceFair { .. } => &["faces"],
             FeatureKind::SplitFace { .. } => &["faces", "tool"],
-            FeatureKind::Split { .. } | FeatureKind::SurfaceTrim { .. } => &["tool"],
+            FeatureKind::Split { .. } => &["tool", "tool_faces"],
+            FeatureKind::SurfaceTrim { .. } => &["tool"],
             FeatureKind::Hole { .. } => &["position", "to"],
             FeatureKind::Boss { .. } | FeatureKind::SnapFit { .. } | FeatureKind::Rest { .. } => &["position"],
             FeatureKind::Thread { .. } => &["face", "up_to"],
@@ -116,7 +117,10 @@ impl FeatureKind {
             | FeatureKind::Lip { body, .. }
             | FeatureKind::SnapFit { body, .. }
             | FeatureKind::Rest { body, .. } => body.as_deref(),
-            FeatureKind::SheetConvert { body, .. } | FeatureKind::SurfaceRuled { body, .. } => Some(body.as_ref()),
+            FeatureKind::SheetConvert { body, .. }
+            | FeatureKind::SheetSurfaceConvert { body, .. }
+            | FeatureKind::SheetRecognize { body, .. }
+            | FeatureKind::SurfaceRuled { body, .. } => Some(body.as_ref()),
             FeatureKind::SurfaceUntrim { face, .. } | FeatureKind::Split { tool: Some(face), .. } => Some(face.body.as_ref()),
             _ => None,
         }
