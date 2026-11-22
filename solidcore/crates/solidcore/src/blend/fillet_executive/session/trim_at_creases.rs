@@ -69,7 +69,7 @@ use crate::blend::fillet_overflow::{
 use crate::blend::fillet_solver::p5::is_concave_edge;
 use crate::curve::curve::{Curve, CurveKind};
 use crate::curve::line::Line;
-use crate::error::blend::{BlendFailure, CliffInput};
+use crate::error::blend::{BlendFailure, CliffInput, CrossingInput};
 use crate::error::{EntityRef, Result, SolidError};
 use crate::geom::attribute::ids;
 use crate::geom::global_solver::SolverOperation;
@@ -117,13 +117,25 @@ fn smos_min(a: f64, b: f64) -> f64 {
 
 /// `SmFilletSolver::IsTangentEdge` (the fork's bacd0bb): whether the two faces at the
 /// manifold edge `e` meet tangentially there (`sm_TestManifoldTangentRollover`).
-fn is_tangent_edge(k: &Kernel, b: &mut Brep, e: EdgeId, tangency_tol_rad: f64) -> Result<bool> {
+fn is_tangent_edge(
+    k: &Kernel,
+    b: &mut Brep,
+    e: EdgeId,
+    parameter: f64,
+    tangency_tol_rad: f64,
+) -> Result<bool> {
     if !edge::is_manifold(b, e)? {
         return Ok(false);
     }
     Ok(
-        crate::blend::fillet_solver::p1::test_manifold_tangent_rollover(k, b, e, tangency_tol_rad)?
-            .0,
+        crate::blend::fillet_solver::p1::test_manifold_tangent_rollover_at(
+            k,
+            b,
+            e,
+            parameter,
+            tangency_tol_rad,
+        )?
+        .0,
     )
 }
 
@@ -906,7 +918,7 @@ fn pieces_in_face_to_ends(
     tol: f64,
     pieces: &mut Vec<Curve>,
     along: &mut Vec<(Curve, bool)>,
-) -> Result<()> {
+) -> Result<Vec<(EdgeId, f64)>> {
     let natural = crease.natural_interval();
     let runs = face::p2::classify_free_curve_on_face(k, b, f, crease, natural, tol, true)?;
     // which runs a piece was run on over
@@ -983,7 +995,38 @@ fn pieces_in_face_to_ends(
         }
         along.push((piece, taken));
     }
-    Ok(())
+    let mut events: Vec<(EdgeId, f64)> = runs
+        .iter()
+        .flat_map(|run| {
+            [
+                run.start.1.zip(run.start_edge_param),
+                run.end.1.zip(run.end_edge_param),
+            ]
+            .into_iter()
+            .flatten()
+        })
+        .collect();
+    // A run end classified at a vertex names no edge, yet the crease leaves the face there
+    // across each of the face's own edges that meet it: each is an event, at the parameter
+    // of the vertex on it. Edges at the vertex that bound other faces only (a seam of the
+    // face next door, between two uses of that one face) separate no face from this one,
+    // so the crease crosses none of them out of this face (#2385's disc: a crease along
+    // the bottom edge through the vertex at the foot of the side face's seam).
+    for v in runs
+        .iter()
+        .flat_map(|run| [run.start_vertex, run.end_vertex])
+        .flatten()
+    {
+        for e in vertex::edges(b, v, Some(f))? {
+            let at_start = edge::start_vertex(b, e)? == Some(v);
+            let range = edge::interval(b, e)?;
+            let parameter = if at_start { range.min() } else { range.max() };
+            if !events.contains(&(e, parameter)) {
+                events.push((e, parameter));
+            }
+        }
+    }
+    Ok(events)
 }
 
 /// #17673: the pieces of the crease `crease` (on face `f` of `target`) that lie inside the
@@ -1216,6 +1259,56 @@ fn crease_piece(k: &Kernel, crease: &Curve, t0: f64, t1: f64) -> Result<Curve> {
     Ok(piece)
 }
 
+/// The refusal of a crease on the target face `f` whose rail leaves a face it rolls on (one
+/// of `rolled_supports`) across a tangent edge, with that face; `None` when no such edge is
+/// crossed. A face past a cliff meets the face the rail leaves at a sharp edge; one that
+/// runs on from it tangentially (a round already on the face) is no cliff: the rail would
+/// roll over onto it, and the ball does not fit between.
+///
+/// The edges the crease crosses (`seam_events`, each with the parameter it crosses at,
+/// each edge of `f` at a vertex it crosses through included) are judged where it crosses them,
+/// against the round's section budget `tangent_budget` (a spline seam's tangency varies
+/// along it). The face's other edges are judged as ever: at a fixed point of the edge,
+/// against the solvers' tangency tolerance `face_tangency`.
+fn crease_across_tangent_edge(
+    k: &Kernel,
+    target: &mut Brep,
+    f: FaceId,
+    seam_events: &[(EdgeId, f64)],
+    rolled_supports: &BTreeSet<FaceId>,
+    tangent_budget: f64,
+    face_tangency: f64,
+) -> Result<Option<(FaceId, Refusal)>> {
+    let mut judged: Vec<(EdgeId, f64, f64)> = seam_events
+        .iter()
+        .map(|&(e, parameter)| (e, parameter, tangent_budget))
+        .collect();
+    for e in face::p4::edges(target, f, None, false, None)? {
+        if !seam_events.iter().any(|&(crossed, _)| crossed == e) {
+            let parameter = edge::interval(target, e)?.evaluate(0.34);
+            judged.push((e, parameter, face_tangency));
+        }
+    }
+    for (e, parameter, budget) in judged {
+        for g in edge::faces(target, e, None)? {
+            if g != f
+                && rolled_supports.contains(&g)
+                && is_tangent_edge(k, target, e, parameter, budget)?
+            {
+                return Ok(Some((
+                    g,
+                    refusal(
+                        FilletErrorType::NoRoom,
+                        Some(NoRoomReason::CreaseAcrossTangentEdge),
+                        "Fillet Error: a rail leaves the face it rolls on across a tangent edge, onto a face it would cut (the blend is larger than the face allows)",
+                    ),
+                )));
+            }
+        }
+    }
+    Ok(None)
+}
+
 /// A refusal with its fillet error and typed reason.
 const fn refusal(
     code: FilletErrorType,
@@ -1383,7 +1476,10 @@ impl SessionObjects<'_> {
                         Some(NoRoomReason::TangentContinuationEndUnsupported),
                         "Fillet Error: a round ending where its edge runs on tangentially has no single section there",
                     ));
-                        return Err(SolidError::blend_failed(OP, "a round that ends where its edge runs on tangentially has no single section there"));
+                        return Err(SolidError::blend_failed(
+                            OP,
+                            "a round that ends where its edge runs on tangentially has no single section there",
+                        ));
                     };
                     section_end_face(k, &mut sheet, end, section, 10.0 * tol)?;
                 }
@@ -1794,15 +1890,23 @@ impl FilletSession<'_> {
         let mut faces_of: BTreeMap<FilletObject, Vec<(FilletGeomId, Option<FaceId>)>> =
             BTreeMap::new();
         let mut approx = Vec::new();
-        let mut tangency = 0.0;
+        let mut tangency = Vec::new();
+        let mut face_tangency = 0.0;
         let mut blended_edges: Vec<EdgeId> = Vec::new();
         for &solver in &solvers {
             let FilletObject::Solver(id) = solver else {
                 return Err(invalid("object is not a solver"));
             };
-            let base = self.objects.solver(id)?.base();
+            let active_solver = self.objects.solver(id)?;
+            let base = active_solver.base();
             approx.push(base.approx_tol_3d);
-            tangency = smos_max(tangency, base.tangency_tolerance());
+            let budget = if let Some(offsets) = active_solver.constant_offsets()? {
+                base.constant_offset_rollover_tolerance(k, self.objects.target, offsets)
+            } else {
+                base.tangency_tolerance()
+            };
+            tangency.push(budget);
+            face_tangency = smos_max(face_tangency, base.tangency_tolerance());
             let eu = base
                 .edgeuse(0)?
                 .ok_or_else(|| SolidError::blend_missing(OP, "the solver's edge use"))?;
@@ -1855,7 +1959,8 @@ impl FilletSession<'_> {
             &faces_of,
             &blended_edges,
             &approx,
-            tangency,
+            &tangency,
+            face_tangency,
             &section_ends,
             &mut note,
         );
@@ -1938,7 +2043,8 @@ impl FilletSession<'_> {
         faces_of: &BTreeMap<FilletObject, Vec<(FilletGeomId, Option<FaceId>)>>,
         blended_edges: &[EdgeId],
         approx: &[f64],
-        tangency: f64,
+        tangency: &[f64],
+        face_tangency: f64,
         section_ends: &[SectionEnd],
         note: &mut Option<Refusal>,
     ) -> Result<()> {
@@ -2032,6 +2138,15 @@ impl FilletSession<'_> {
         // WR-717: the body's edges those creases stand for
         let mut crease_edges: Vec<EdgeId> = Vec::new();
         for s in crate::topology::brep::p1::faces(&sheet, None)? {
+            // Each round uses its own section budget; a shared corner must meet all.
+            let tangent_budget = if let Some(&i) = round_of.get(&s) {
+                tangency.get(i).copied()
+            } else {
+                tangency.iter().copied().reduce(f64::min)
+            }
+            .ok_or_else(|| {
+                SolidError::blend_crossing_input_missing(OP, CrossingInput::SheetFaceTangencyBudget)
+            })?;
             let mut sheet_box =
                 crate::query::face::p1::calculate_bounding_box(k, &sheet, s, false)?;
             sheet_box.expand_absolute(on_tol);
@@ -2120,11 +2235,12 @@ impl FilletSession<'_> {
                 // each crease where it lies inside both faces
                 let mut in_face = Vec::new();
                 let mut along = Vec::new();
+                let mut seam_events = Vec::new();
                 if continues {
                     in_face = found;
                 } else {
                     for c in &found {
-                        pieces_in_face_to_ends(
+                        seam_events.extend(pieces_in_face_to_ends(
                             k,
                             c,
                             self.objects.target,
@@ -2132,7 +2248,7 @@ impl FilletSession<'_> {
                             tol,
                             &mut in_face,
                             &mut along,
-                        )?;
+                        )?);
                     }
                 }
                 // Not the fork's (WR-717, #2385): a crease that runs along an edge of the
@@ -2167,28 +2283,22 @@ impl FilletSession<'_> {
                     // rolls on) at a sharp edge. One that runs on from it tangentially (a
                     // round already on the face) is no cliff: the rail would roll over
                     // onto it, and the ball does not fit between.
-                    for e in face::p4::edges(self.objects.target, f, None, false, None)? {
-                        for g in edge::faces(self.objects.target, e, None)? {
-                            if g != f
-                                && supports.contains(&g)
-                                && rolled_on.contains(&g)
-                                && is_tangent_edge(k, self.objects.target, e, tangency)?
-                            {
-                                // the fork's NoteFitOnFace(g) (49f393d, WR-696)
-                                let face =
-                                    FilletObject::Topology(FilletBody::Target, EntityRef::Face(g));
-                                self.executive
-                                    .note_fit_on_face(k, &mut self.objects, face)?;
-                                return refuse(
-                                    note,
-                                    refusal(
-                                        FilletErrorType::NoRoom,
-                                        Some(NoRoomReason::CreaseAcrossTangentEdge),
-                                        "Fillet Error: a rail leaves the face it rolls on across a tangent edge, onto a face it would cut (the blend is larger than the face allows)",
-                                    ),
-                                );
-                            }
-                        }
+                    let rolled_supports: BTreeSet<FaceId> =
+                        supports.intersection(&rolled_on).copied().collect();
+                    if let Some((g, r)) = crease_across_tangent_edge(
+                        k,
+                        self.objects.target,
+                        f,
+                        &seam_events,
+                        &rolled_supports,
+                        tangent_budget,
+                        face_tangency,
+                    )? {
+                        // the fork's NoteFitOnFace(g) (49f393d, WR-696)
+                        let face = FilletObject::Topology(FilletBody::Target, EntityRef::Face(g));
+                        self.executive
+                            .note_fit_on_face(k, &mut self.objects, face)?;
+                        return refuse(note, r);
                     }
                     crossed += 1;
                     only = Some(
@@ -3006,6 +3116,137 @@ mod tests {
         assert!(bound > tol, "the gate refuses: bound {bound} > tol {tol}");
         // and the S is not taken as a straight edge
         assert!(straight_ends(&k, &c).unwrap().is_none());
+    }
+
+    /// A crease that crosses the top of a box at a corner vertex ends its run at that vertex,
+    /// which names no edge. The seam events still carry each edge of the top that meets the
+    /// vertex, at the vertex's parameter on it, so the tangent-edge refusal sees the
+    /// crossing; the vertical edge there bounds the two side faces only and is no event.
+    #[test]
+    fn a_crease_through_a_vertex_gives_a_seam_event_for_each_face_edge_there() {
+        use crate::primitive::api_primitives::create_box;
+        let mut k = Kernel::default();
+        let mut b = create_box(&mut k, Point3::ZERO, 40.0, 20.0, 10.0).unwrap();
+        let corner = Point3::new(40.0, 20.0, 10.0);
+        let v = b
+            .vertices()
+            .ids()
+            .find(|&v| b.vertex(v).unwrap().point.distance(corner) < 1e-9)
+            .unwrap();
+        // the top: the face at the corner whose two edges there both lie at z = 10
+        let top = edge_faces_at(&b, v)
+            .into_iter()
+            .find(|&f| {
+                let es = vertex::edges(&b, v, Some(f)).unwrap();
+                es.len() == 2
+                    && es.iter().all(|&e| {
+                        let other = edge::other_vertex(&b, e, Some(v)).unwrap().unwrap();
+                        (b.vertex(other).unwrap().point.z - 10.0).abs() < 1e-9
+                    })
+            })
+            .unwrap();
+        // in the plane of the top, from inside it through the corner and on past it
+        let crease: Curve = Line::from_points(
+            Point3::new(30.0, 10.0, 10.0),
+            Point3::new(50.0, 30.0, 10.0),
+            3,
+        )
+        .into();
+        let (mut in_face, mut along) = (Vec::new(), Vec::new());
+        let events =
+            pieces_in_face_to_ends(&k, &crease, &mut b, top, TOL, &mut in_face, &mut along)
+                .unwrap();
+        let of_top = vertex::edges(&b, v, Some(top)).unwrap();
+        for e in vertex::edges(&b, v, None).unwrap() {
+            let range = edge::interval(&b, e).unwrap();
+            let at = if edge::start_vertex(&b, e).unwrap() == Some(v) {
+                range.min()
+            } else {
+                range.max()
+            };
+            assert_eq!(
+                events.contains(&(e, at)),
+                of_top.contains(&e),
+                "edge {e:?} at the corner, parameter {at}, is a seam event exactly when it \
+                 bounds the top: {events:?}"
+            );
+        }
+    }
+
+    /// The faces the edges at `v` lie on.
+    fn edge_faces_at(b: &Brep, v: crate::topology::VertexId) -> Vec<FaceId> {
+        let mut out = Vec::new();
+        for e in vertex::edges(b, v, None).unwrap() {
+            for f in edge::faces(b, e, None).unwrap() {
+                if !out.contains(&f) {
+                    out.push(f);
+                }
+            }
+        }
+        out
+    }
+
+    /// #17016, #2385: a crease that leaves the top of a cylinder through the vertex where its
+    /// seam starts ends its run at that vertex, which names no edge. The seam, an edge of
+    /// the side face only (tangent to itself all along), touches the top at that vertex
+    /// alone and separates no face from the top: the crease leaves the top there across the
+    /// top's own circle, which is sharp, so it is not refused. (Judging the seam refused
+    /// #2385's disc, whose crease runs along the bottom edge through the seam's foot.)
+    #[test]
+    fn a_crease_through_a_seam_vertex_crosses_only_the_face_edges_there() {
+        use crate::primitive::api_primitives::create_cylinder;
+        let mut k = Kernel::default();
+        let mut b = create_cylinder(&mut k, Point3::ZERO, 10.0, 20.0).unwrap();
+        // the vertex of the top circle: the end of the seam at z = 20
+        let v = b
+            .vertices()
+            .ids()
+            .find(|&v| (b.vertex(v).unwrap().point.z - 20.0).abs() < 1e-9)
+            .unwrap();
+        let at = b.vertex(v).unwrap().point;
+        let (mut seam, mut circle) = (None, None);
+        for e in vertex::edges(&b, v, None).unwrap() {
+            if edge::other_vertex(&b, e, Some(v)).unwrap() == Some(v) {
+                circle = Some(e);
+            } else {
+                seam = Some(e);
+            }
+        }
+        let (seam, circle) = (seam.unwrap(), circle.unwrap());
+        let side = edge::faces(&b, seam, None).unwrap();
+        assert!(side.iter().all(|&g| g == side[0]), "the seam has one face");
+        let side = side[0];
+        let top = edge::faces(&b, circle, None)
+            .unwrap()
+            .into_iter()
+            .find(|&g| g != side)
+            .unwrap();
+        // in the plane of the top, from its centre out through the vertex and on past it
+        let centre = Point3::new(0.0, 0.0, 20.0);
+        let crease: Curve = Line::from_points(centre, centre + (at - centre) * 2.0, 3).into();
+        let (mut in_face, mut along) = (Vec::new(), Vec::new());
+        let events =
+            pieces_in_face_to_ends(&k, &crease, &mut b, top, TOL, &mut in_face, &mut along)
+                .unwrap();
+        // the circle is an event at the vertex's parameter on it; the seam is none
+        let range = edge::interval(&b, circle).unwrap();
+        assert!(events.contains(&(circle, range.min())), "{events:?}");
+        assert!(events.iter().all(|&(e, _)| e != seam), "{events:?}");
+        // the fillet's default tangency, 10 degrees (`edge_refusals::DEFAULT_TANGENCY`): the
+        // circle is sharp at 90 degrees, so any budget below that decides the same
+        let tangency = 10.0 * (crate::math::PI / 180.0);
+        let rolled_supports = BTreeSet::from([side]);
+        let refused = crease_across_tangent_edge(
+            &k,
+            &mut b,
+            top,
+            &events,
+            &rolled_supports,
+            tangency,
+            tangency,
+        )
+        .unwrap();
+        assert!(refused.is_none(), "the circle at the vertex is sharp");
     }
 
     /// The leftover check refuses what a move left off and passes a body that holds

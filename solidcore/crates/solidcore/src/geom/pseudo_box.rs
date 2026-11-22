@@ -91,6 +91,7 @@
 //!   flat along its first or second basis vector only (WR-790). A box flat along its last,
 //!   or not flat, keeps upstream's normal.
 
+use crate::error::geom::GeomFailure;
 use crate::error::{Result, SolidError, SM_ERR};
 use crate::geom::extent1d::{Extent1d, ExtentPointType};
 use crate::geom::extent3d::{BoundaryType, Extent3d};
@@ -457,12 +458,12 @@ impl PseudoBox {
     pub fn invert_absolute(&self, p: Point3) -> Result<Point3> {
         const OP: &str = "geom::pseudo_box::PseudoBox::invert_absolute";
         if !self.assert_defined() {
-            return Err(SolidError::geom_failed(OP, "the box is not defined"));
+            return Err(SolidError::geom(OP, GeomFailure::BoxNotSetUp));
         }
         let [b0, b1, b2] = self.basis;
         let det = determinant_3_vectors(b0, b1, b2);
         if is_zero(det) {
-            return Err(SolidError::geom_failed(OP, "the box's basis is singular"));
+            return Err(SolidError::geom(OP, GeomFailure::Singular { measure: det }));
         }
         Ok(Vec3::new(
             determinant_3_vectors(p, b1, b2) / det,
