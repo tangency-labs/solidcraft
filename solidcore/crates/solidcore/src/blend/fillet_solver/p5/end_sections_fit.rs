@@ -15,7 +15,9 @@
 //! in no body, is classified through [`RailClassificationContext::classify_free_curve`]
 //! (`SmFace::CurveOnClassify`). Not the fork's (#15767): a rail leaving its face across a
 //! smooth edge at a side edge's far end rolls on over it and judges no end section
-//! (`leaves_across_tangent_edge_at`). There is no recursion.
+//! (`leaves_across_tangent_edge_at`), unless the face beyond's offset by the ball folds at
+//! the crossing (`ball_folds_beyond`), where the ball cannot roll onto it. There is no
+//! recursion.
 
 use super::{RailClassificationContext, OP};
 use crate::blend::fillet_classification::FilletClassObject;
@@ -24,6 +26,7 @@ use crate::blend::fillet_geom::p2::{srf_srf_intersection, SrfSrfOptions};
 use crate::blend::fillet_solver::p1::{
     test_manifold_tangent_rollover, FilletSolver, FilletSolverOps,
 };
+use crate::curve::curve::Curve;
 use crate::error::{EntityRef, Result, SolidError};
 use crate::geom::axis2_placement::Axis2Placement;
 use crate::geom::extent1d::Extent1d;
@@ -35,8 +38,11 @@ use crate::intersect::curve_class::p2::ResetOptions;
 use crate::intersect::point_class::{PointClassType, PointClassification};
 use crate::kernel::Kernel;
 use crate::math::{Point3, Vec3, BIG_DOUBLE};
+use crate::nurbs::knots::Side;
 use crate::query::face::p1::{point_3d_classify, Point3dClassifyOptions};
 use crate::surface::plane::p1::Plane;
+use crate::surface::surface::p4::NoObject;
+use crate::surface::surface::p5::DropPointOptions;
 use crate::surface::surface::Surface;
 use crate::topology::{edge, edgeuse::p1 as eu, vertex, Brep, EdgeId, FaceId, VertexId};
 
@@ -104,7 +110,7 @@ impl SolutionObject for SectionOperand {
 /// the edge.
 fn rail_at_end_plane(
     k: &Kernel,
-    curve: &crate::curve::curve::Curve,
+    curve: &Curve,
     v_point: Point3,
     normal: Vec3,
     tol: f64,
@@ -250,12 +256,29 @@ fn boundary_requires_cut_at(
 /// beyond within `tangency_tol` (`sm_TestManifoldTangentRollover`): the rail rolls over that
 /// edge there, as `RailsFitTheirFaces` judges it (#15767).
 ///
+/// Only where the ball can roll onto the face beyond: `ball` is the rail's face's surface
+/// and the solver's offset distance d along its natural normal N, so the ball's centre over a
+/// point P of that face is `P + d N`. Across the tangent edge, at the rail's crossing X, the
+/// face beyond has the same normal line, so its offset by the ball is by `d_b = d (N . N_b)`
+/// along its natural normal `N_b`; that offset moves by `(1 - d_b k_i)` times the base's motion
+/// along each principal direction, `k_i` the principal curvature positive towards `N_b`
+/// (`EvaluateGeometric`'s convention). Where a factor is not positive at X the offset folds
+/// back or collapses there (the ball inside a convex cylinder narrower than itself:
+/// `1 - 3.5 / 3 < 0`): no ball of the round touches the face beyond next to the edge, the
+/// rail does not roll over it, and the end section is judged as on main (the app-built
+/// narrowing wall at radius 3.5, #20757's review). A crossing that does not drop onto
+/// either surface, or a solver without the rail's face's offset (`ball` `None`), proves
+/// nothing and keeps the roll-over.
+///
 /// # Errors
-/// Those of the topology queries and of the tangency test.
+/// Those of the topology queries, of the tangency test and of the surface evaluations.
 fn leaves_across_tangent_edge_at(
     k: &Kernel,
     target: &mut Brep,
     intervals: &[CurveInterval<FilletClassObject>],
+    curve: &Curve,
+    face: FaceId,
+    ball: Option<(&Surface, f64)>,
     at: VertexId,
     tangency_tol: f64,
 ) -> Result<bool> {
@@ -263,7 +286,10 @@ fn leaves_across_tangent_edge_at(
         if ivl.mid.point_class() != PointClassType::Unknown {
             continue;
         }
-        for pc in [&ivl.start, &ivl.end] {
+        for (pc, t) in [
+            (&ivl.start, ivl.interval.min()),
+            (&ivl.end, ivl.interval.max()),
+        ] {
             if pc.point_class() != PointClassType::Edge {
                 continue;
             }
@@ -276,12 +302,66 @@ fn leaves_across_tangent_edge_at(
             if !edge::vertices(target, e, None)?.contains(&Some(at)) {
                 continue;
             }
-            if test_manifold_tangent_rollover(k, target, e, tangency_tol)?.0 {
+            if !test_manifold_tangent_rollover(k, target, e, tangency_tol)?.0 {
+                continue;
+            }
+            let folds = match ball {
+                Some(ball) => {
+                    ball_folds_beyond(k, target, e, face, ball, curve.evaluate_point(k, t)?)?
+                }
+                None => false,
+            };
+            if !folds {
                 return Ok(true);
             }
         }
     }
     Ok(false)
+}
+
+/// Whether the ball, offset `ball.1` along the natural normal of the rail's face's surface
+/// `ball.0`, cannot touch the face across tangent edge `e` from `face` at the crossing `x`:
+/// the face beyond's offset by it folds or collapses there (see
+/// [`leaves_across_tangent_edge_at`]).
+fn ball_folds_beyond(
+    k: &Kernel,
+    target: &Brep,
+    e: EdgeId,
+    face: FaceId,
+    (base, d): (&Surface, f64),
+    x: Point3,
+) -> Result<bool> {
+    let Some(beyond) = edge::faces(target, e, None)?
+        .into_iter()
+        .find(|f| *f != face)
+    else {
+        return Ok(false);
+    };
+    let Some(surface) = crate::topology::face::p2::surface(target, beyond)? else {
+        return Ok(false);
+    };
+    let on_f = base.drop_point::<NoObject>(
+        k,
+        x,
+        &base.natural_uv_domain_with_nurb(k)?,
+        &DropPointOptions::default(),
+    )?;
+    let on_b = surface.drop_point::<NoObject>(
+        k,
+        x,
+        &surface.natural_uv_domain_with_nurb(k)?,
+        &DropPointOptions::default(),
+    )?;
+    if !on_f.success || !on_b.success {
+        return Ok(false);
+    }
+    let n_f = base.evaluate_normal(k, on_f.result_uv, Side::Left, Side::Left)?;
+    let n_b = surface.evaluate_normal(k, on_b.result_uv, Side::Left, Side::Left)?;
+    let g = surface.evaluate_geometric(k, on_b.result_uv, Side::Left, Side::Left)?;
+    let d_b = if n_f.dot(n_b) < 0.0 { -d } else { d };
+    Ok([g.principle_curvature1, g.principle_curvature2]
+        .into_iter()
+        .any(|kappa| 1.0 - d_b * kappa <= 0.0))
 }
 
 impl FilletSolver {
@@ -491,6 +571,24 @@ impl FilletSolver {
                                 }
                                 None => None,
                             };
+                            // the ball over the rail's face: its surface and the solver's
+                            // offset of it (#15767)
+                            let mut ball_slot = None;
+                            for j in 0..2 {
+                                let Some(seu) = solver.solver().edgeuse(j)? else {
+                                    continue;
+                                };
+                                if eu::face(target, seu)? != Some(face) {
+                                    continue;
+                                }
+                                if let Some(slot) = solver.solver().surface(j)? {
+                                    ball_slot = Some((
+                                        slot.surface.base_surface().clone(),
+                                        slot.surface.offset_distance(),
+                                    ));
+                                    break;
+                                }
+                            }
                             for &(_, far) in &run {
                                 // #15767: a rail that leaves its face across a smooth edge
                                 // ending at P rolls on over that edge onto the face beyond
@@ -501,6 +599,9 @@ impl FilletSolver {
                                     k,
                                     target,
                                     &intervals,
+                                    &curve,
+                                    face,
+                                    ball_slot.as_ref().map(|(base, d)| (base, *d)),
                                     far,
                                     tangency_tol,
                                 )? {

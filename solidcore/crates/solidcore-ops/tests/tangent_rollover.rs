@@ -3789,6 +3789,42 @@ fn a_round_whose_wall_contact_crosses_a_tangent_edge_partway_rolls_onto_the_cyli
 /// The fit margin: a thousand of the edge's tolerance, 1e-5.
 const NARROWING_FIT_MARGIN: f64 = 1000.0 * 1e-5;
 
+/// SolidCraft #15767 (review of #20757): the app-built [`narrowing_wall`] rounded wider than
+/// its R3 cylinder. The rail leaves the wall across the smooth edge onto the cylinder at the
+/// end face's side edge, but no ball of radius r > 3 touches the convex cylinder there from the
+/// round's side: the cylinder's offset by the ball, `1 - r / 3` times its motion around it,
+/// folds back. So the rail does not roll over there, and the round stays refused as on main,
+/// naming the radius on the wall of
+/// [`a_round_whose_rolled_rail_cannot_be_rolled_is_refused_naming_the_radius_on_the_wall`] with
+/// the same derivation and allowance (the app body's edge has the same length; measured: 4.5e-16
+/// from the test body's size at r 3.5). Before the fold test, r 3.5 rolled over and failed to
+/// build the round's side intersection (a bare `BlendFailed`).
+#[test]
+fn the_app_built_narrowing_wall_wider_than_its_cylinder_stays_refused_naming_the_radius_on_the_wall(
+) {
+    fixes();
+    let q = slope_q();
+    let want = 0.2 * q - NARROWING_FIT_MARGIN + 2e-9 * 32.0 * q * SLOPE;
+    for r in [3.25, 3.5, 3.75] {
+        let b = Body::from_smb(
+            include_bytes!("data/issue_15767_narrowing_wall_from_the_app.smb").to_vec(),
+            false,
+        )
+        .unwrap();
+        let before = b.volume(1e-9).unwrap();
+        let e = edge_at(&b, [10.0, 0.0, 1.9]);
+        match blend(&b, Blend::Round, &[e], &[r], &[], Corners::Filled) {
+            Err(Error::TooLarge { size, why, .. }) => {
+                assert_eq!(why, Some(RoomReason::RailLeavesFace), "r {r}");
+                assert!((size - want).abs() <= 1e-12, "r {r}: {size} against {want}");
+            }
+            Err(err) => panic!("r {r}: {err:?}"),
+            Ok(_) => panic!("r {r}: built"),
+        }
+        assert_eq!(b.volume(1e-9).unwrap().to_bits(), before.to_bits(), "r {r}");
+    }
+}
+
 /// SolidCraft #15767: a round of [`narrowing_wall`] whose rail, rolled onto the R3 cylinder,
 /// cannot be rolled (the rollover recovery fails: from r 2 on, past the largest radius
 /// `3.2 q / (1 + q)` = 1.605601 at which the ball, square to the edge at its end y = 16, still
