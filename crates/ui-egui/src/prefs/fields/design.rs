@@ -64,6 +64,9 @@ macro_rules! design_preferences {
             joint_drag_trackball: bool = true, PAGE_DESIGN => check_id("prefs.joint_drag_trackball");
             /// Decimals shown for lengths and angles.
             length_decimals: u8 = 2, PAGE_DESIGN;
+            /// Insert STEP keeps its disk source for Update Links and automatic refresh. Off: new
+            /// inserts are independent copies, as before; existing links are left alone.
+            link_step_inserts: bool = true, PAGE_DESIGN => check_id("settings.link_step_inserts");
             /// A saved design's tab and its Browser top row are named after its file, so a Save As or a
             /// renamed file shows (#7267). Off: both show the name stored in the design, as before.
             names_from_file: bool = true, PAGE_DESIGN => check_id("settings.names_from_file");
@@ -96,9 +99,6 @@ macro_rules! design_preferences {
             /// A design coming back to its tab reads again the linked designs whose files changed since
             /// it last read them. Off: they wait for Update Links, as before.
             update_changed_links: bool = true, PAGE_DESIGN => check_id("settings.update_changed_links");
-            /// Insert STEP keeps its disk source for Update Links and automatic refresh. Off: new
-            /// inserts are independent copies, as before; existing links are left alone.
-            link_step_inserts: bool = true, PAGE_DESIGN => check_id("settings.link_step_inserts");
             /// When SMLib's full check runs while features are computed (`diagnostics.validation`):
             /// `each_feature` (the default) checks the bodies each feature keeps once; `each_step`, as
             /// before, checks after every sweep, boolean and blend; `off` (experimental) never does.
