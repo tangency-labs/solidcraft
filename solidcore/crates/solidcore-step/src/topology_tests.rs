@@ -3307,6 +3307,116 @@ fn a_skewed_edge_past_the_quarter_line_a_face_form_ends_on_stays_in_the_face_dom
     solidcore_ops::record_check::agreement(b).unwrap();
 }
 
+/// A kernel making the missing pcurves of a torus face on its NURBS form: each a straight line
+/// in (u, v) between the true form parameters of its edge's ends (a closed edge a turn round),
+/// with no regard for the form's range, as SMLib's would be. It counts the uses it is asked for.
+struct TubeLines(std::sync::atomic::AtomicUsize);
+
+impl Trims for TubeLines {
+    fn trims(&self, face: &TrimFace<'_>) -> std::result::Result<Vec<Vec<Curve2>>, String> {
+        let BSurface::Torus { frame, major_radius, .. } = face.surface else { return Err("not a torus".into()) };
+        let (o, x, y) = (Vec3::from(frame.origin), Vec3::from(frame.x_axis), Vec3::from(frame.y_axis));
+        let z = x.cross(y);
+        let at = |p: Vec3| -> [f64; 2] {
+            let d = p - o;
+            let (dx, dy, dz) = (d.dot(x), d.dot(y), d.dot(z));
+            let tube = dz.atan2(dx.hypot(dy) - major_radius).rem_euclid(TAU);
+            [crate::kernel::form::param(dy.atan2(dx).rem_euclid(TAU)), crate::kernel::form::param(tube)]
+        };
+        let mut out = Vec::new();
+        for l in &face.loops {
+            let mut pcs = Vec::new();
+            for u in l {
+                if let Some(pc) = &u.pcurve {
+                    pcs.push(pc.clone());
+                    continue;
+                }
+                self.0.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                let e = face.edges.get(u.edge as usize).ok_or("edge")?;
+                let eval = CurveEval::new(e.nurbs.unwrap_or(e.curve)).map_err(|m| m.to_string())?;
+                let [t0, t1] = e.interval;
+                let (a, mut b) = (at(eval.point(t0).ok_or("start")?), at(eval.point(t1).ok_or("end")?));
+                if e.vertices[0] == e.vertices[1] {
+                    b[0] = a[0] + 4.0;
+                }
+                pcs.push(Curve2::Spline { knots: vec![t0, t0, t1, t1], points: vec![a, b] });
+            }
+            out.push(pcs);
+        }
+        Ok(out)
+    }
+}
+
+/// A cup (a torus of radii 4 and 1 mm about +z): its wall a quarter of the tube from its top
+/// circle (tube angle 90 degrees, radius 4 mm at z = 1 mm) round to a circle 2e-3 rad past its
+/// inner equator, its seam a tube circle edge in the plane y = 0, closed by a disc on each
+/// circle, in a file of uncertainty 0.01 mm. Every edge lies on the torus exactly. The wall's
+/// boundary ends 2e-3 rad (2e-3 mm along the tube) past the quarter line, within the file's
+/// uncertainty, so its form ends there. The bottom circle and the seam's end there lie
+/// that far off the form: the gap is measured and covered by their pcurve tolerances, so the
+/// two have their closed forms on the form (a parallel, and a line along the tube) and the kernel
+/// is asked for none. Without that, at the fitting tolerance of 1e-3 mm, the circle had none and
+/// the seam's closed form ran past the form's knot range, where its pole query on the rational
+/// net was refused ("off the surface's range ... rational net").
+#[test]
+fn a_torus_face_running_a_hair_past_the_quarter_line_its_form_ends_on_keeps_its_closed_form_pcurves() {
+    let (major, minor, past): (f64, f64, f64) = (4.0, 1.0, 2e-3);
+    let mut w = W::default();
+    let (rb, zb) = (major - minor * past.cos(), -minor * past.sin());
+    let (v_bottom, v_top) = (w.vertex([rb, 0.0, zb]), w.vertex([major, 0.0, minor]));
+    let ring = |w: &mut W, v: u64, r: f64, z: f64| {
+        let k = w.circle([0.0, 0.0, z], [0.0, 0.0, 1.0], [1.0, 0.0, 0.0], r);
+        w.add(format!("EDGE_CURVE('',#{v},#{v},#{k},.T.)"))
+    };
+    let (bottom, top) = (ring(&mut w, v_bottom, rb, zb), ring(&mut w, v_top, major, minor));
+    // The seam: the tube circle at angle 0 about the axis, from the bottom vertex over the inner
+    // equator to the top one (its own angle from pi - past to 3 pi / 2 about +y).
+    let k = w.circle([major, 0.0, 0.0], [0.0, 1.0, 0.0], [1.0, 0.0, 0.0], minor);
+    let seam = w.add(format!("EDGE_CURVE('',#{v_bottom},#{v_top},#{k},.T.)"));
+    let a = w.axis([0.0; 3], [0.0, 0.0, 1.0], [1.0, 0.0, 0.0]);
+    let torus = w.add(format!("TOROIDAL_SURFACE('',#{a},{},{})", real(major), real(minor)));
+    let oes = [w.oe(bottom, true), w.oe(seam, true), w.oe(top, false), w.oe(seam, false)];
+    let wall = w.bound(&oes, true, true);
+    let wall = w.face(&[wall], torus, false);
+    let disc = |w: &mut W, edge: u64, z: f64, up: bool| {
+        let plane = w.plane([0.0, 0.0, z], [0.0, 0.0, 1.0], [1.0, 0.0, 0.0]);
+        let oe = w.oe(edge, up);
+        let b = w.bound(&[oe], true, true);
+        w.face(&[b], plane, up)
+    };
+    let (floor, lid) = (disc(&mut w, bottom, zb, false), disc(&mut w, top, minor, true));
+    let shell = closed_shell(&mut w, &[wall, floor, lid]);
+    let solid = w.add(format!("MANIFOLD_SOLID_BREP('cup',#{shell})"));
+    let kernel = TubeLines(std::sync::atomic::AtomicUsize::new(0));
+    let read = read_solids_with(&w.file_with_uncertainty(&[solid], 1e-2), &kernel);
+    assert!(read.failures.is_empty(), "{:?}", read.failures);
+    assert_eq!(kernel.0.load(std::sync::atomic::Ordering::Relaxed), 0, "every pcurve of the wall is a closed form");
+    let b = &read.solids[0].brep;
+    assert_eq!(counts(b), [2, 1, 3, 3, 2]);
+    // The wall's form ends on the quarter line at the inner equator (form parameter 2 along the
+    // tube), and every pcurve lies in its face's domain.
+    let wall = b.faces.iter().find(|f| f.loops.iter().any(|l| matches!(l, Loop::Edges { edges } if edges.len() == 4))).unwrap();
+    assert!((wall.domain[1][1] - 2.0).abs() <= 1e-12, "{:?}", wall.domain);
+    for (i, f) in b.faces.iter().enumerate() {
+        let d = f.domain;
+        for l in &f.loops {
+            let Loop::Edges { edges } = l else { continue };
+            for u in edges {
+                let [t0, t1] = u.pcurve.interval().unwrap();
+                for t in [t0, t1] {
+                    let p = solidcore_ops::pcurve::eval(&u.pcurve, t).unwrap();
+                    let out = (d[0][0] - p[0]).max(p[0] - d[0][1]).max(d[1][0] - p[1]).max(p[1] - d[1][1]);
+                    assert!(out <= 1e-9, "face {i}, edge {}: {p:?} lies {out:e} outside the domain {d:?}", u.edge);
+                }
+            }
+        }
+    }
+    solidcore_ops::record_check::validate(b).unwrap();
+    solidcore_ops::record_check::agreement(b).unwrap();
+    let (body, _) = solidcore_ops::body::Body::from_record(b, false).unwrap();
+    body.check_solid().unwrap();
+}
+
 /// A wedge of a cylinder (radius 10 mm, 5 mm high) from -120 to 180 degrees about +z, in a file
 /// of uncertainty 0.02 mm, whose corner at the top of its 180 degree side lies 0.008 mm outside
 /// the cylinder, 1e-4 mm below the top and 1e-4 rad round past the side. The cylinder face is
