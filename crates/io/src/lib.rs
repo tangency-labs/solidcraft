@@ -16,6 +16,7 @@ mod design_metadata;
 mod dxf;
 mod dxf_out;
 mod e57;
+pub mod evaluation;
 mod excellon;
 pub mod formats;
 mod gerber;
