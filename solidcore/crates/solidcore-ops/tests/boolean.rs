@@ -213,7 +213,8 @@ fn the_box_a_face_is_paired_by_holds_the_face() {
                     );
                 }
             }
-            let Some(bx) = solidcore::query::face::p1::proved_bounding_box(&k, &b, f, &mut None).unwrap()
+            let Some(bx) =
+                solidcore::query::face::p1::proved_bounding_box(&k, &b, f, &mut None).unwrap()
             else {
                 continue;
             };

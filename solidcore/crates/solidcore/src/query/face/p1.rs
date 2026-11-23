@@ -648,18 +648,20 @@ pub fn calculate_bounding_box_in(
 /// revolution is boxed as the whole ring.
 ///
 /// The box is the certified box of the surface ([`Surface::certified_bounding_box`]) over
-/// the face's UV domain R, grown by the zone tolerance of the largest face, edge and vertex
+/// the face's UV domain R, grown by the zone tolerance of twice the largest face, edge and vertex
 /// tolerance (a point within an edge's tolerance of the face is on it). R is narrowed to
-/// R ∩ D, D the certified box of the face's existing UV trim curves
-/// ([`crate::topology::face::p1::certified_uv_trim_domain`]), when that is proved to hold the
+/// R ∩ D, D the certified box of the face's UV trim curves
+/// ([`crate::topology::face::p1::certified_uv_trim_domain`]; those missing made on the copy,
+/// below), when that is proved to hold the
 /// face: every loop lies in D, so whether a point is on the face cannot change across a strip
 /// of R outside D (no loop crosses it), and each such strip whose centre classifies outside
 /// the face ([`super::p2::point_classify_prepared`]: `Unknown`) lies outside it. A face whose
 /// trims leave its UV domain or the surface's natural domain (a periodic trim past the seam),
 /// or whose strip classifies any other way, keeps R. A face's missing UV trims are made on
-/// `scratch`, a copy standing for `b` ([`Brep::clone_standing_for_self`], made at its first
-/// need and kept for the next face of `b`), never on `b`; the surface's NURB is made where it
-/// is missing (as every evaluation of it makes it).
+/// `scratch`, a copy standing for `b` with its own trimmed-surface caches
+/// ([`Brep::clone_for_trial`]), made at its first need; the caller keeps one `scratch` per
+/// B-rep, and passes each face of that B-rep with it. Nothing is written on `b`, but the
+/// surface's NURB is made where it is missing (as every evaluation of it makes it).
 ///
 /// # Errors
 ///
@@ -698,7 +700,8 @@ pub fn proved_bounding_box(
         b
     } else {
         if scratch.is_none() {
-            *scratch = probe(b.clone_standing_for_self())?;
+            // its own trimmed-surface caches, so nothing built on it reaches `b`'s faces
+            *scratch = probe(b.clone_for_trial())?;
         }
         match scratch.as_mut() {
             Some(copy) => {
@@ -757,7 +760,9 @@ pub fn proved_bounding_box(
             tol = tol.max(t);
         }
     }
-    bx.expand_absolute(zone_tol3d(k, tol));
+    // twice it: the trims the intersections make on `b` later, which may differ from those
+    // made on the copy by up to their own raise of that tolerance, are covered too
+    bx.expand_absolute(zone_tol3d(k, 2.0 * tol));
     Ok(Some(bx))
 }
 
