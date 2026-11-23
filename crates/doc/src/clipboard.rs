@@ -402,7 +402,8 @@ impl crate::Feature {
                     checked_plane(&end.plane, 0)?;
                 }
             }
-            K::ConstructionPlane { plane }
+            K::FramePlate { plane, .. }
+            | K::ConstructionPlane { plane }
             | K::Split { plane, .. }
             | K::SplitFace { plane, .. }
             | K::Mirror { plane, .. }
@@ -488,7 +489,8 @@ impl crate::Feature {
                     remap_plane(&mut end.plane, ids, bodies, 0, placements)?;
                 }
             }
-            K::ConstructionPlane { plane }
+            K::FramePlate { plane, .. }
+            | K::ConstructionPlane { plane }
             | K::Split { plane, .. }
             | K::SplitFace { plane, .. }
             | K::Mirror { plane, .. }

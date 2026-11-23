@@ -206,6 +206,8 @@ fn main() -> ExitCode {
         eprintln!("error: {e}");
         return ExitCode::FAILURE;
     }
+    // Compiled plugins are kept in the per-user cache folder, as the desktop app keeps them.
+    solidcraft_engine::plugin::configure_compile_cache();
     let r = match args.first().map(String::as_str) {
         // Asked-for help is not an error: the command's usage on stdout, exit 0. It is read
         // before the command runs, so `--help` never starts a run (a fuzz run, a server).
@@ -1436,6 +1438,12 @@ pub(crate) fn cmd_bench_open(args: &[String]) -> Result<(), String> {
     let t = std::time::Instant::now();
     let step = solidcraft_engine::io::is_step_path(path);
     let kind = if step { solidcraft_engine::io::limits::Kind::Step } else { solidcraft_engine::io::limits::Kind::Design };
+    // As `doc.open` does: warned about, and read all the same, when it may need more memory than there is.
+    if let Ok(size) = std::fs::metadata(path).map(|m| m.len())
+        && let Some(warning) = solidcraft_engine::io::limits::memory_warning(path, size)
+    {
+        eprintln!("warning: {path}: {warning}");
+    }
     let bytes = solidcraft_engine::io::limits::read(path, kind).map_err(|e| format!("{path}: {e}"))?;
     let read_ms = t.elapsed().as_secs_f64() * 1000.0;
     println!("{}", json!({"step": "read", "ms": read_ms, "bytes": bytes.len()}));

@@ -1,4 +1,7 @@
 //! Each ribbon feature form keeps its parameter builder while sharing the dense layout.
+#[path = "../../../solidcore/crates/solidcore/tests/support/annular_samples.rs"]
+mod annular_samples;
+
 use super::*;
 use crate::scenario::{self, Harness};
 
@@ -582,6 +585,7 @@ fn check_form(command: &str, labels: &[&str]) {
         "joint.rack_pinion" | "joint.screw" => &["Reverse"],
         "joint.cam" => &["Other side"],
         "frame.member" => &["All Lines", "Mirror"],
+        "solid.pattern.path" => &["Flip direction"],
         "construct.plane.at_angle" => &["Use axis direction only"],
         _ => &[],
     };
@@ -622,14 +626,14 @@ fn control_role(command: &str, label: &str) -> Option<egui::accesskit::Role> {
     use egui::accesskit::Role;
     Some(match label {
         "Type" if matches!(command, "sheet.flange" | "sheet.hem" | "solid.revolve" | "solid.emboss" | "solid.scale") => return None,
-        "Direction" => return None, // segmented buttons, labelled by each choice
+        "Direction" | "pattern.start_point" => return None, // segmented buttons, labelled by each choice
         "ui.fair_strength" | "ui.fair_iterations" => return None,
         "Size" if matches!(command, "solid.cylinder" | "solid.sphere") => return None, // Diameter | Radius
         "Continuity" | "Corners" | "Cells" | "Profile" => return None,
         "Operation" if command == "solid.mirror" => return None,
         "Operation" | "Type" | "Orientation" | "Move Type" | "Object Type" | "Rule" | "Rim Edge" | "Catch Direction" | "Shape" | "Holes" | "Size"
         | "Bend Line Position" | "From Snap" | "To Snap" | "Joint" | "Joint 1" | "Joint 2" | "Gear 1" | "Gear 2" | "Pinion" | "Rack" | "Screw"
-        | "Nut" | "Cam" | "Follower" | "Anchor" => Role::ComboBox,
+        | "Nut" | "Cam" | "Follower" | "Anchor" | "Bolt Pattern" => Role::ComboBox,
         "Inset By" => Role::ComboBox,
         "Radius" if command == "joint.rack_pinion" => Role::Label,
         "Pitch" | "Form" | "Hand" | "Starts" | "Extent" | "Start" | "End" if command == "solid.thread" => Role::ComboBox,
@@ -914,9 +918,10 @@ fn align_components_mode_switches_and_aligns_only_selected_instance() {
     assert!((b2.min.x - 10.0).abs() < 1e-5 && (b2.max.x - 70.0).abs() < 1e-5, "{b2:?}");
 }
 form_case!(remove, "solid.remove", []);
-form_case!(path_pattern, "solid.pattern.path", ["Type", "Object Type", "Quantity", "Spacing"]);
+form_case!(path_pattern, "solid.pattern.path", ["Type", "Object Type", "Quantity", "Spacing", "pattern.start_point", "Orientation"]);
 form_case!(pipe, "solid.pipe", ["Diameter", "Wall", "Operation"]);
 form_case!(stock, "solid.bounding_solid", ["Margin"]);
+form_case!(frame_plate, "frame.plate", ["Shape", "Width", "Height", "Thickness", "Offset", "Bolt Pattern"]);
 form_case!(frame_member, "frame.member", ["All Lines", "Anchor", "Angle", "Mirror", "Name"]);
 form_case!(thread, "solid.thread", ["Form", "Size", "Pitch", "Designation", "Hand", "Starts", "Extent", "Start", "End"]);
 form_case!(primitive_box, "solid.box", ["ui.length", "ui.width", "ui.height", "Operation"]);
@@ -945,6 +950,7 @@ form_case!(surface_untrim, "surface.untrim", ["Holes"]);
 form_case!(split_face, "solid.split_face", []);
 form_case!(flange, "sheet.flange", ["Type", "Rule"]);
 form_case!(path_flange, "sheet.path_flange", ["Bend Radius"]);
+form_case!(tab, "sheet.tab", []);
 form_case!(hem, "sheet.hem", ["Type", "Length", "ui.sheet_gap"]);
 form_case!(fold, "sheet.fold", ["Bend Line Position", "Angle", "Bend Radius"]);
 form_case!(unfold, "sheet.unfold", []);
@@ -1427,6 +1433,39 @@ fn offset_face_dialog_moves_the_body_clicked_where_two_bodies_touch_flush() {
     assert!((volume("Big") - 24000.0).abs() < 1e-6, "{}", volume("Big"));
 }
 
+/// Mouse hits on curved faces are triangle points. The dialog keeps their face identity so
+/// neither name capture nor evaluation asks the approximate point to pick another face.
+#[test]
+fn offset_face_dialog_accepts_a_curved_display_triangle_hit() {
+    use solidcraft_engine::doc::naming;
+    let mut h = Harness::new();
+    h.app.run("solid.cylinder", json!({"radius": 10, "height": 20, "body_name": "Cylinder"})).unwrap();
+    let state = crate::open_meshing::session_world(&h.app.session);
+    let body = state.body("Cylinder").unwrap();
+    let index = body.body.face_at_point(Vec3::new(10.0, 0.0, 10.0)).unwrap().unwrap();
+    let name = naming::face_names(body)[index].clone();
+    let mesh = body.mesh();
+    let triangle = mesh.triangles.iter().zip(&mesh.tri_face).find_map(|(t, f)| if *f as usize == index { mesh.tri(t) } else { None }).unwrap();
+    let point = Vec3::from(annular_samples::triangle_centroid(triangle.map(|p| [p.x, p.y, p.z])));
+    assert_eq!(body.body.face_at_point(point).unwrap(), None, "the display hit is beyond modelling tolerance");
+    h.app.session.selection = vec![Sel::Face { body: "Cylinder".into(), index, point }];
+    let mut d = Dialog::for_command(&h.app, "solid.offset_face").unwrap();
+    d.kind = Kind::OffsetFaces { distance: "2".into() };
+    let commands = apply_commands(&h.app, &d).unwrap();
+    assert_eq!(preview_commands(&h.app, &d).unwrap(), commands);
+    let (command, params) = &commands[0];
+    assert_eq!(params["faces"], json!([name]));
+    assert_eq!(params["body"], "Cylinder");
+    h.app.run(command, params.clone()).unwrap();
+    let state = h.app.session.model.state();
+    let body = &state.body("Cylinder").unwrap().body;
+    assert!(h.app.session.model.results.iter().all(|r| r.error.is_none()), "{:?}", h.app.session.model.results);
+    assert!((0..body.face_count()).any(|f| matches!(
+        solidcraft_engine::kernel::face_surface(body, f),
+        Some(solidcraft_engine::kernel::FaceSurface::Cylinder { radius, .. }) if (radius - 12.0).abs() < 1e-6
+    )));
+}
+
 #[test]
 fn draft_rejects_faces_from_different_bodies() {
     let h = Harness::new();
@@ -1480,6 +1519,92 @@ fn solid_pattern_quantity_arrows_step_the_count_the_command_receives() {
         h.step(&json!({"click":{"handle":"dialog:cancel"}})).unwrap();
         h.settle();
     }
+}
+
+/// #6054: the Pattern on Path dialog sends its start point (a distance, or a fraction of the
+/// path's length), Orientation and Flip, and editing the pattern opens it with them again.
+#[test]
+fn path_pattern_dialog_sends_the_start_point_orientation_and_flip_and_reopens_with_them() {
+    let mut h = fixture();
+    let mut d = representative(&h, "solid.pattern.path");
+    // The pattern's parameters, also when an edit sends them through timeline.redefine.
+    fn sent(app: &SolveApp, d: &Dialog) -> Value {
+        let commands = apply_commands(app, d).unwrap();
+        let (id, p) = commands.first().cloned().unwrap();
+        if id == "timeline.redefine" { p["params"].clone() } else { p }
+    }
+    fn set(d: &mut Dialog, to: (&str, &str, &str, bool)) {
+        if let Kind::PathPattern { count, spacing, start, fraction } = &mut d.kind {
+            (*count, *spacing, *start, *fraction) = (to.0.into(), to.1.into(), to.2.into(), to.3);
+        }
+    }
+    // By default none of them is sent: the command's defaults keep today's result.
+    let p = sent(&h.app, &d);
+    for key in ["start", "start_fraction", "orientation", "flip"] {
+        assert!(p.get(key).is_none(), "{key}: {p}");
+    }
+    set(&mut d, ("2", "5 mm", "10 mm", false));
+    d.extra.insert("orientation".into(), json!("path"));
+    d.extra.insert("flip".into(), json!(true));
+    let p = sent(&h.app, &d);
+    assert_eq!((&p["start"], &p["orientation"], &p["flip"]), (&json!("10 mm"), &json!("path"), &json!(true)), "{p}");
+    assert!(p.get("start_fraction").is_none(), "{p}");
+    set(&mut d, ("2", "5 mm", "0.25", true));
+    let p = sent(&h.app, &d);
+    assert_eq!(p["start_fraction"], json!("0.25"), "{p}");
+    assert!(p.get("start").is_none(), "{p}");
+
+    h.app.run("solid.pattern.path", p.clone()).unwrap();
+    let id = h.app.session.doc.features.last().map(|f| f.id).unwrap();
+    let reopened = crate::dialogs::for_feature(&h.app, id, None).unwrap();
+    assert!(
+        matches!(&reopened.kind, Kind::PathPattern { count, spacing, start, fraction: true } if count == "2" && spacing == "5 mm" && start == "0.25"),
+        "{:?}",
+        reopened.kind
+    );
+    let again = sent(&h.app, &reopened);
+    for key in ["path", "path_sketch", "count", "spacing", "start_fraction", "orientation", "flip"] {
+        assert_eq!(again[key], p[key], "{key}: {again} vs {p}");
+    }
+}
+
+/// A Pattern on Path saved before the rotation-minimising frame (no `follow_frame`), opened in
+/// its dialog and OK'd unchanged, keeps building what it built: the edit does not give it the
+/// frame. Choosing Identical there is a new choice, and gives it.
+#[test]
+fn path_pattern_dialog_edit_keeps_an_older_designs_orientation() {
+    let mut h = fixture();
+    let mut d = representative(&h, "solid.pattern.path");
+    if let Kind::PathPattern { count, spacing, .. } = &mut d.kind {
+        (*count, *spacing) = ("2".into(), "5 mm".into());
+    }
+    d.extra.insert("orientation".into(), json!("path"));
+    let (_, p) = apply_commands(&h.app, &d).unwrap().first().cloned().unwrap();
+    h.app.run("solid.pattern.path", p).unwrap();
+    let id = h.app.session.doc.features.last().map(|f| f.id).unwrap();
+    let follows = |app: &SolveApp| match app.session.doc.feature(id).map(|f| &f.kind) {
+        Some(FeatureKind::Pattern { pattern: PatternKind::Path { follow_frame, .. }, .. }) => *follow_frame,
+        other => panic!("not a path pattern: {other:?}"),
+    };
+    assert!(follows(&h.app), "a pattern made now follows the frame");
+    if let Some(FeatureKind::Pattern { pattern: PatternKind::Path { follow_frame, .. }, .. }) =
+        h.app.session.doc_mut().feature_mut(id).map(|f| &mut f.kind)
+    {
+        *follow_frame = false;
+    }
+    h.app.session.refresh();
+    let ok = |app: &mut SolveApp, orientation: &str| {
+        let mut d = crate::dialogs::for_feature(app, id, None).unwrap();
+        d.extra.insert("orientation".into(), json!(orientation));
+        for (command, p) in apply_commands(app, &d).unwrap() {
+            assert_eq!(command, "timeline.redefine");
+            app.run(&command, p).unwrap();
+        }
+    };
+    ok(&mut h.app, "path");
+    assert!(!follows(&h.app), "OK on the older pattern kept its orientation");
+    ok(&mut h.app, "identical");
+    assert!(follows(&h.app), "a newly chosen orientation is the one patterns get now");
 }
 
 /// The Rectangular Pattern dialog shows each direction as its own group, with its pick, Quantity,

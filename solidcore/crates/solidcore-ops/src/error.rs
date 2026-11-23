@@ -38,7 +38,8 @@ pub enum Error {
     NotSolid,
     /// A body that is not a closed solid facing out, and the test it fails (the kernel's
     /// [`SolidTest`], the first that fails in the order the tests run). [`Error::NotSolid`]
-    /// stays for the calls that return it; [`crate::Body::check_solid`] returns this one.
+    /// stays for the calls that return it; [`crate::Body::check_solid`] and the result check of
+    /// an operation under [`crate::Contract::Proved`] return this one.
     #[non_exhaustive]
     NotSolidBecause(SolidTest),
     /// No room for the operation: an inward offset (a shell's wall, faces moved in) leaves none
@@ -465,6 +466,19 @@ impl std::fmt::Display for FailureCode {
 }
 
 impl Error {
+    /// The test a body failed where this is [`Error::NotSolidBecause`], and `None` for every
+    /// other error. A caller can then tell a body that is not a solid from one whose volume's
+    /// sign the kernel could not prove ([`SolidTest::VolumeUndecided`]), which is undecided
+    /// rather than refused. The variant is `#[non_exhaustive]`, so this is how a caller outside
+    /// this crate reads its test without naming its field.
+    #[must_use]
+    pub const fn not_solid_test(&self) -> Option<SolidTest> {
+        match self {
+            Error::NotSolidBecause(test) => Some(*test),
+            _ => None,
+        }
+    }
+
     /// The variant's name (`"TooLarge"`, `"Status"`, ...): a stable static string with nothing
     /// of the failure's values in it. A variant keeps its name once released.
     #[must_use]
@@ -601,6 +615,13 @@ pub enum OffsetRefusal {
         /// How far the faces could move before the face closes.
         largest: f64,
     },
+    /// A draft that would carry the drafted face (a cone or cylinder about the pull) into
+    /// another shell of the body, a cavity's wall or another lump, closing the wall between
+    /// them. `largest` is the largest draft angle that keeps a wall, radians.
+    DraftClosesWall {
+        /// The largest draft angle that keeps a wall, radians.
+        largest: f64,
+    },
     /// How far the surfaces beside an edge or at a vertex of the face must be extended to
     /// meet has no certified bound (a pair or corner of kinds it does not bound yet): refused
     /// before anything changed.
@@ -679,6 +700,11 @@ impl std::fmt::Display for OffsetRefusal {
                 f,
                 "it closes to nothing between the faces beside it as they move; it stays open \
                  only while they move less than {largest}"
+            ),
+            OffsetRefusal::DraftClosesWall { largest } => write!(
+                f,
+                "the drafted face would reach another shell of the body, closing the wall \
+                 between them; the largest draft angle that keeps a wall is {largest} rad"
             ),
             OffsetRefusal::ReachUncertified => {
                 write!(

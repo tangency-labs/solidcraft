@@ -337,7 +337,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .from_selection(super::sketch_selection::midpoint)
         .contract(&MIDPOINT_CONTRACT)
         .output(output_schema_for::<ConstraintResult>)
-        .params(concat!("point, line | a, b in pick order: a point and a line (either way round), or two lines whose midpoints meet (the first stays, the second moves)", model_operand_doc!())),
+        .params(concat!("point, line | a, b in pick order: a point and a line or an arc (either way round; on an arc the point sits halfway along it, not at the middle of its chord), or two lines whose midpoints meet (the first stays, the second moves)", model_operand_doc!())),
     CommandSpec::new("sketch.constraint.concentric", "Concentric", crate::checked!("sketch.constraint.concentric", c_concentric))
         .in_sketch_part()
         .at("SKETCH", "CONSTRAINTS")
@@ -1407,7 +1407,7 @@ pub(super) fn flip_param(s: &Session, p: &Value, plane: &PlaneRef, cmd: &str) ->
     Ok(Some(about_y))
 }
 
-/// Used only by face Extrude/Revolve/PressPull, preserving pre-certificate linked profiles.
+/// Used only by face Extrude/Revolve/Sweep/PressPull, preserving pre-certificate linked profiles.
 pub(super) fn create_face_profile(s: &mut Session, p: &Value, body: &str, index: usize) -> Result<Value> {
     let value = p.get("plane").ok_or_else(|| bad("face profile", "missing picked face plane"))?;
     let plane = face::capture_internal(s, value, "face profile")?;
@@ -3760,8 +3760,11 @@ fn c_midpoint(s: &mut Session, p: &Value) -> Result<Value> {
             }
         };
         let is_line = |sk: &Sketch, c: usize| matches!(sk.curves.get(c).map(|c| &c.kind), Some(CurveKind::Line { .. }));
+        let is_arc = |sk: &Sketch, c: usize| matches!(sk.curves.get(c).map(|c| &c.kind), Some(CurveKind::Arc { .. }));
         match (entity("a")?, entity("b")?) {
-            (Ent::Point(q), Ent::Curve(l)) | (Ent::Curve(l), Ent::Point(q)) if is_line(sk, l) => Ok(ConstraintKind::Midpoint { p: q, l }),
+            (Ent::Point(q), Ent::Curve(l)) | (Ent::Curve(l), Ent::Point(q)) if is_line(sk, l) || is_arc(sk, l) => {
+                Ok(ConstraintKind::Midpoint { p: q, l })
+            }
             // Two lines: their midpoints meet. One point sits at the middle of both, reusing
             // a midpoint either line already has, so nothing new is saved in the design.
             (Ent::Curve(a), Ent::Curve(b)) if is_line(sk, a) && is_line(sk, b) => {
@@ -3778,7 +3781,7 @@ fn c_midpoint(s: &mut Session, p: &Value) -> Result<Value> {
                 }
                 Ok(ConstraintKind::Midpoint { p: q, l })
             }
-            _ => Err(bad(cmd, "MidPoint needs a point and a line, or two lines")),
+            _ => Err(bad(cmd, "MidPoint needs a point and a line or an arc, or two lines")),
         }
     };
     constrain_reply(s, p, cmd, |sk| {
@@ -3791,6 +3794,11 @@ fn c_midpoint(s: &mut Session, p: &Value) -> Result<Value> {
         {
             return Err(bad(cmd, "a line's own end can't be its midpoint: the line would shrink to a point"));
         }
+        if let ConstraintKind::Midpoint { p: q, l } = k
+            && matches!(sk.curves.get(l).map(|c| &c.kind), Some(CurveKind::Arc { a, b, .. }) if *a == q || *b == q)
+        {
+            return Err(bad(cmd, "an arc's own end can't be its midpoint: the arc would shrink to a point"));
+        }
         Ok(k)
     })
 }
@@ -3801,10 +3809,31 @@ fn c_midpoint(s: &mut Session, p: &Value) -> Result<Value> {
 /// end of another line clicked, then the line it should sit in the middle of). The line still
 /// moves when the point can't.
 fn line_stays(s: &Session, p: &Value, cmd: &str) -> Value {
+    // `point` and `line` naming an arc (the context menu's form): the arc stays and the point goes
+    // to its middle, as if the arc had been picked first. Without an order the solver moved
+    // whichever was cheaper, and brought the arc to the point.
+    let arc_first = (|| {
+        if p.get("a").is_some() || p.get("b").is_some() {
+            return None;
+        }
+        let (point, line) = (p.get("point")?, p.get("line")?);
+        let sk = sketch_store::read(&s.doc, sketch_store::target(s, p, cmd).ok()?).ok()?;
+        sk.curve_index(line.as_str()?).filter(|c| matches!(sk.curves.get(*c).map(|c| &c.kind), Some(CurveKind::Arc { .. })))?;
+        let mut q = p.clone();
+        let object = q.as_object_mut()?;
+        object.remove("point");
+        object.remove("line");
+        object.insert("a".into(), line.clone());
+        object.insert("b".into(), point.clone());
+        Some(q)
+    })();
+    if let Some(q) = arc_first {
+        return q;
+    }
     let swapped = (|| {
         let sk = sketch_store::read_for_command(s, p, cmd).ok()?;
         let (a, b) = (p.get("a")?.as_str()?, p.get("b")?.as_str()?);
-        let line = sk.curve_index(b).filter(|c| matches!(sk.curves.get(*c).map(|c| &c.kind), Some(CurveKind::Line { .. })));
+        let line = sk.curve_index(b).filter(|c| matches!(sk.curves.get(*c).map(|c| &c.kind), Some(CurveKind::Line { .. } | CurveKind::Arc { .. })));
         (sk.curve_index(a).is_none() && sk.resolve_point(a).is_some() && line.is_some()).then(|| {
             let mut q = p.clone();
             q["a"] = json!(b);

@@ -14,10 +14,6 @@
 //!   [`most_idle`] kernels wait between calls, however many once ran side by side. A kernel
 //!   holds no global state and a body's identities are valid only in the kernel that issued
 //!   them, so any kernel takes any body.
-//! - **Process-lifetime state:** the state upstream keeps for the whole process (SMLib's context
-//!   is process-global) is the fillet solver's latched step. Every kernel the session makes
-//!   shares the process's ([`STEP`]): the first latch on any of them settles it, and every
-//!   latch after it, on any kernel and in any call, takes it, calls side by side included.
 //! - **Configuration:** the kernel runs with the opt-in fixes the application names
 //!   ([`set_fixes`], by `UpstreamFixes` flag name); which ones is the application's choice, never
 //!   ops'. Everything else about the kernel (its tolerances, context, caches) is the kernel's
@@ -61,11 +57,6 @@ use crate::{Error, FailureCode, Result};
 
 /// The kernels waiting between calls, the one given back last at the end.
 static IDLE: Mutex<Vec<Kernel>> = Mutex::new(Vec::new());
-/// The fillet solver's step for the process, settled by the first latch on any of the session's
-/// kernels ([`Kernel::process_fillet_point_step`], which each kernel [`fresh`] makes is handed).
-/// A cell the kernels share, rather than one the session copies into each kernel it takes, so
-/// that a kernel taken before the step was settled still latches the settled step (#18164).
-static STEP: OnceLock<f64> = OnceLock::new();
 static FIXES: Mutex<Option<UpstreamFixes>> = Mutex::new(None);
 
 /// A failed call, as the failure callback sees it. More fields come (the call's arguments,
@@ -204,13 +195,11 @@ pub(crate) fn counted<T>(counter: Counter, f: impl FnOnce() -> T) -> (T, u64) {
     (value, grew)
 }
 
-/// A kernel of the session's configuration: the kernel's default options, the fixes the
-/// application named and the process's fillet step ([`STEP`]). Every kernel the pool makes is
-/// made here, so they are configured alike.
+/// A kernel of the session's configuration: the kernel's default options and the fixes the
+/// application named. Every kernel the pool makes is made here, so they are configured alike.
 fn fresh() -> Kernel {
     let mut k = Kernel::new(&KernelOptions::default());
     k.fixes = current_fixes();
-    k.process_fillet_point_step = Some(&STEP);
     k
 }
 
@@ -708,16 +697,44 @@ pub(crate) fn with_body<T: Answer>(
         let mut b = body.lock();
         // the kernel puts the body back on a refusal or a panic; the panic is caught again
         // here only to release the body before it goes on
-        let r = catch_unwind(AssertUnwindSafe(|| {
-            b.with_rollback(
-                |br| f(k, br),
-                // a call cancelled part way returns no result ([`run_with`]): its edit goes too
-                |r| {
-                    let stopped = crate::cancel::is_cancelled();
-                    STOPPED.with(|d| d.set(Some(stopped)));
-                    r.as_ref().is_ok_and(|v| v.refusal().is_none()) && !stopped
-                },
-            )
+        let r = catch_unwind(AssertUnwindSafe(|| b.with_rollback(|br| f(k, br), kept)));
+        drop(b);
+        r.unwrap_or_else(|p| resume_unwind(p))
+    })
+}
+
+/// Whether [`with_body`] keeps the edit that answered `r`: an answer that is no refusal, of a
+/// call not cancelled part way (a call cancelled part way returns no result ([`run_with`]): its
+/// edit goes too).
+fn kept<T: Answer>(r: &solidcore::Result<T>) -> bool {
+    let stopped = crate::cancel::is_cancelled();
+    STOPPED.with(|d| d.set(Some(stopped)));
+    r.as_ref().is_ok_and(|v| v.refusal().is_none()) && !stopped
+}
+
+/// Runs a measure with a read-only form on the kernel, under one lock of `body`: `read`
+/// through the body's shared door, which leaves the body and its proof as they are; where it
+/// answers `None` (it found, before doing any work, that the body lacks what the read needs),
+/// `edit` as [`with_body`] runs it, under the same lock: the body's snapshot taken first and
+/// put back on a refusal, a failure or a panic. A panic leaves the body as it was and usable,
+/// released before the panic goes on.
+///
+/// # Errors
+/// As [`with_body`].
+pub(crate) fn read_else_edit<T: Answer>(
+    call: &'static str,
+    body: &Body,
+    read: impl FnOnce(&mut Kernel, &Brep) -> solidcore::Result<Option<T>>,
+    edit: impl FnOnce(&mut Kernel, &mut Brep) -> solidcore::Result<T>,
+) -> Result<T> {
+    if body.is_poisoned() {
+        return Err(unfinished(call));
+    }
+    run_on(call, &[("brep", body)], |k| {
+        let mut b = body.lock();
+        let r = catch_unwind(AssertUnwindSafe(|| match read(k, &b)? {
+            Some(v) => Ok(v),
+            None => b.with_rollback(|br| edit(k, br), kept),
         }));
         drop(b);
         r.unwrap_or_else(|p| resume_unwind(p))
@@ -750,12 +767,16 @@ pub(crate) fn read_held<T: Answer>(
     if body.is_poisoned() {
         return Err(unfinished(call));
     }
-    run_on(call, &[("brep", body)], |k| {
-        let b = body.lock();
-        let r = catch_unwind(AssertUnwindSafe(|| f(k, &b)));
-        drop(b);
-        r.unwrap_or_else(|p| resume_unwind(p))
-    })
+    run_on(call, &[("brep", body)], |k| read_locked(body, |b| f(k, b)))
+}
+
+/// Reads a body within a running kernel call. Release the unchanged body before sending
+/// a panic on to the session, so a failed read does not poison the input.
+pub(crate) fn read_locked<T>(body: &Body, f: impl FnOnce(&crate::body::BodyGuard<'_>) -> T) -> T {
+    let b = body.lock();
+    let r = catch_unwind(AssertUnwindSafe(|| f(&b)));
+    drop(b);
+    r.unwrap_or_else(|p| resume_unwind(p))
 }
 
 /// Runs `f`, a measure that takes the kernel's `&mut Brep` (for its caches) but answers about

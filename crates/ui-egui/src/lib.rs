@@ -21,6 +21,7 @@ pub mod broken_view_preview;
 pub mod browser;
 pub mod browser_canvas;
 mod browser_defects;
+pub mod browser_links;
 pub mod browser_prompts;
 pub mod browser_search;
 #[cfg(test)]
@@ -35,6 +36,9 @@ mod colour_vision_tests;
 pub mod command_help;
 pub mod context_menu;
 pub mod control;
+mod control_click;
+#[cfg(test)]
+mod control_click_view_tests;
 pub mod control_job;
 mod control_joint_drive;
 mod control_joint_pose;
@@ -54,6 +58,7 @@ pub mod dialogs_constrain;
 pub mod dialogs_coupling;
 pub mod dialogs_end_cap;
 pub mod dialogs_frame;
+pub mod dialogs_frame_plate;
 mod dialogs_hole;
 pub mod dialogs_insert_airfoil;
 pub mod dialogs_insert_drawing;
@@ -953,6 +958,7 @@ pub struct SolveApp {
     pub synthetic_mods: egui::Modifiers,
     /// A click that came in the same frame as typing before it, held for the next frame.
     held_click: Vec<egui::Event>,
+    control_click: control_click::ControlClick,
     /// Pen-tip release positions from the platform, for this frame and for a held click.
     pen_release: Option<egui::Pos2>,
     held_pen_release: Option<egui::Pos2>,
@@ -1229,6 +1235,7 @@ impl SolveApp {
             synthetic: Vec::new(),
             synthetic_mods: egui::Modifiers::default(),
             held_click: Vec::new(),
+            control_click: control_click::ControlClick::default(),
             pen_release: None,
             held_pen_release: None,
             synthetic_press: false,
@@ -1903,7 +1910,20 @@ impl SolveApp {
                 "view.navigation_bar" => {
                     self.ui.show_navigation_bar = v.get("visible").and_then(Value::as_bool).unwrap_or(!self.ui.show_navigation_bar)
                 }
+                // The Browser tree panel is a panel of the layout: closing it from its host menu
+                // leaves no way back, so this command opens it again (#16058). Closing it here
+                // closes it in the layout too, so a second toggle reads the closed state.
+                "view.browser" => {
+                    let visible = v.get("visible").and_then(Value::as_bool).unwrap_or(!browser::panel_open(self));
+                    self.ui.show_browser = visible;
+                    if visible {
+                        browser::reveal_shared_panel(self, "browser");
+                    } else {
+                        browser::close_shared_panel(self, "browser");
+                    }
+                }
                 "view.next_tab" | "view.previous_tab" => documents::cycle(self, id == "view.next_tab"),
+                "view.toolbar_reset_all" => toolbar_custom::reset_all(self),
                 "view.ribbon_tabs_only" => {
                     let on = v.get("on").and_then(Value::as_bool).unwrap_or(!self.preferences.ribbon_tabs_only);
                     self.preferences.ribbon_tabs_only = on;
@@ -2583,6 +2603,7 @@ impl SolveApp {
                 | "view.grid"
                 | "view.ground_shadow"
                 | "view.navigation_bar"
+                | "view.browser"
                 | "view.next_tab"
                 | "view.previous_tab"
                 | "tab.view.open"
@@ -4203,6 +4224,7 @@ impl SolveApp {
 
     /// Per-frame logic before layout.
     pub fn logic(&mut self, ctx: &egui::Context) {
+        self.control_click.enabled = ctx.os() == egui::os::OperatingSystem::Mac;
         params_dialog::install_expressions(ctx);
         ui_kit::set_viewport_half_height(ctx, self.cam.half_height());
         // Tab or Shift+Tab into any text or number box selects its text, app-wide.
@@ -4233,6 +4255,7 @@ impl SolveApp {
         verify_job::tick(self);
         timeline::tick_import_checks(self, ctx);
         edit_in_place::tick(self);
+        browser_links::refresh(self, ctx);
         let typing = ctx.egui_wants_keyboard_input();
         if ctx.input(|i| i.pointer.button_clicked(egui::PointerButton::Extra1) || (i.key_pressed(egui::Key::BrowserBack) && !typing)) {
             edit_in_place::back(self);
@@ -4350,9 +4373,11 @@ impl SolveApp {
     /// Process a frame with a platform-identified pen-tip release in egui coordinates.
     pub fn raw_input_hook_with_pen(&mut self, raw: &mut egui::RawInput, pen_release: Option<egui::Pos2>) {
         self.pen_release = pen_release;
+        let later = self.control_click.remap(&mut raw.events);
         self.synthetic_input(raw);
         finite_input(raw);
         self.hold_click_after_typing(raw);
+        self.held_click.extend(later);
         issue_report::hold_input(self, raw);
         // Over a quiet view, pointer motion asks egui for no frame after this one: the window
         // asked for this one only if the motion lit up something new
