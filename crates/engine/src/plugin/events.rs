@@ -92,10 +92,17 @@ pub fn design_notifications(session: &mut Session, design: Option<DesignToken>, 
         // Only the declaration included in the approved bytes authorizes invocations.
         let Some(runtime) = package.manifest.runtime.as_ref() else { continue };
         let granted = session.plugin_state.grants.get(&id).map(|grants| grants.folders.as_slice()).unwrap_or_default();
-        let scope = solidcraft_io::vfs::PathScope::new(approved_file_folders(granted, &runtime.permissions.files, false));
+        // Hidden names inside a granted folder stay out of reach, as they do for the package's reads.
+        let scope = solidcraft_io::vfs::PathScope::new(approved_file_folders(granted, &runtime.permissions.files, false)).without_hidden();
         // Unread disk state has the same folder boundary as the package's file reads.
         // Versions already read into the design remain visible without a file grant.
-        let links: Vec<_> = links.iter().filter(|link| link.read || scope.check(&link.path).is_ok()).collect();
+        // An unread source must lie inside both the plugin's approved read folders and the
+        // session's own scope (`--allow-path`), as `granted_folders` narrows file grants.
+        let session_scope = solidcraft_io::vfs::current_scope();
+        let links: Vec<_> = links
+            .iter()
+            .filter(|link| link.read || (scope.check(&link.path).is_ok() && session_scope.as_ref().is_none_or(|s| s.check(&link.path).is_ok())))
+            .collect();
         let listeners = runtime.listeners.clone();
         approved_listeners.extend(listeners.iter().map(|listener| format!("{id}.{}", listener.entry)));
         if let Some(failures) = session.plugin_state.listener_entry_failures.get_mut(&id) {
