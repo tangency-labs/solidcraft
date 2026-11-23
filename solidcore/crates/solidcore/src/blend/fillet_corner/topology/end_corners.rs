@@ -19,7 +19,10 @@
 //! no trim test, as upstream with `m_bPointTestEnabled` turned off. There is no
 //! recursion.
 
-use super::{find_side_edgeuse, need, new_corner_vertex, radial};
+use super::{
+    find_side_edgeuse, missing_defect, need, new_corner_vertex, radial, shape_not_built,
+    NO_SOLVER_OF_BLENDED_EU, NO_SOLVER_SURFACE,
+};
 use crate::blend::fillet_corner::p1::face_by_two_edgeuses;
 use crate::blend::fillet_corner::p3::{FilletCorner, FilletCornerKind};
 use crate::blend::fillet_executive::session::SolverObject;
@@ -28,6 +31,7 @@ use crate::blend::fillet_geom::p1::{
     FilletVertexType,
 };
 use crate::blend::fillet_solver::p1::{seam_periods, FilletSolver};
+use crate::error::blend::{BlendFailure, CornerShape};
 use crate::error::{EntityRef, Result, SolidError};
 use crate::geom::global_solver::{SolutionRequested, SolverOperation};
 use crate::geom::solution_array::{Solution, SolutionType};
@@ -139,9 +143,9 @@ pub struct EndCornerTopologyEnv<'a> {
     pub all_eu_solvers: Vec<Option<FilletSolverId>>,
 }
 
-/// The live solver `id` (`NULL`: `SM_ERR_NULL_POINTER`).
+/// The live solver `id` (`NULL`: a reviewed `Defect`, `SM_ERR_NULL_POINTER`).
 fn live(solvers: &[Option<SolverObject>], id: Option<FilletSolverId>) -> Result<&FilletSolver> {
-    let id = id.ok_or_else(|| SolidError::blend_missing(OP, "the edge use's solver"))?;
+    let id = id.ok_or_else(|| missing_defect(OP, NO_SOLVER_OF_BLENDED_EU))?;
     solvers
         .get(id.0 as usize)
         .and_then(Option::as_ref)
@@ -185,7 +189,9 @@ impl FilletCorner {
     /// if a later operation fails.
     ///
     /// # Errors
-    /// `SM_ERR_NULL_POINTER` without a neighbouring solver or common face; invalid
+    /// A reviewed `Defect` (`SM_ERR_NULL_POINTER`) without a neighbouring solver;
+    /// [`BlendFailure::CornerShapeNotBuilt`] (`SM_ERR_NULL_POINTER`) without a common face;
+    /// invalid
     /// topology or corner kind; those of the solver rail lookups and pseudo-topology
     /// operations.
     #[allow(clippy::too_many_lines)] // one upstream routine
@@ -244,10 +250,7 @@ impl FilletCorner {
                 let common_face = face_by_two_edgeuses(target, Some(curr_eu), Some(next_eu), None)?;
                 if common_face.is_none() {
                     // Unrecoverable error
-                    return Err(SolidError::blend_missing(
-                        OP,
-                        "the face between two of the corner's edge uses",
-                    ));
+                    return Err(shape_not_built(OP, CornerShape::RingEdgesShareNoFace));
                 }
                 {
                     let v = pseudo.fillet_vertex_mut(curr_fv)?;
@@ -351,7 +354,7 @@ impl FilletCorner {
     /// if a later operation fails.
     ///
     /// # Errors
-    /// `SM_ERR_NULL_POINTER` without the solver; invalid topology or corner kind; those
+    /// A reviewed `Defect` (`SM_ERR_NULL_POINTER`) without the solver; invalid topology or corner kind; those
     /// of the solver rail lookups and pseudo-topology operations.
     pub fn make_open_corner_topology(&mut self, env: EndCornerTopologyEnv<'_>) -> Result<()> {
         if self.kind != FilletCornerKind::Open {
@@ -420,9 +423,9 @@ impl FilletCorner {
     /// if a later operation fails.
     ///
     /// # Errors
-    /// `SM_ERR_NULL_POINTER` without the solver or a solver surface; `SM_ERR` unless each
-    /// drop has one solution or equivalent periodic-seam solutions with a unique trim-side
-    /// branch; invalid topology or corner kind; those of the
+    /// A reviewed `Defect` (`SM_ERR_NULL_POINTER`) without the solver or a solver surface;
+    /// [`BlendFailure::CornerPointDropUnresolved`] (`SM_ERR`) unless each drop has one
+    /// solution or equivalent periodic-seam solutions with a unique trim-side branch; invalid topology or corner kind; those of the
     /// drops, the solver rail lookups and pseudo-topology operations.
     pub fn make_degenerate_corner_topology(&mut self, env: EndCornerTopologyEnv<'_>) -> Result<()> {
         if self.kind != FilletCornerKind::Degenerate {
@@ -465,7 +468,7 @@ impl FilletCorner {
         for (ii, slot) in uv.iter_mut().enumerate() {
             let base = solver
                 .surface(ii)?
-                .ok_or_else(|| SolidError::blend_missing(OP, "the solver's surface"))?
+                .ok_or_else(|| missing_defect(OP, NO_SOLVER_SURFACE))?
                 .surface
                 .base_surface();
             // Point testing off: GlobalPointSolve keeps every point solution.
@@ -485,9 +488,11 @@ impl FilletCorner {
                 let edgeuse = need(solver.edgeuse(ii)?, "a solver rail without an edge use")?;
                 periodic_corner_drop(k, base, target, edgeuse, cp_vertex, solutions.as_slice())?
                     .ok_or_else(|| {
-                        SolidError::blend_failed(
+                        SolidError::blend(
                             OP,
-                            "the corner point does not drop onto the surface at exactly one point",
+                            BlendFailure::CornerPointDropUnresolved {
+                                solutions: solutions.len(),
+                            },
                         )
                     })?
             };

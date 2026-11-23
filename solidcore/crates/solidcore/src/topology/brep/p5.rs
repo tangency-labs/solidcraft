@@ -85,7 +85,8 @@
 //! joined covers its UV trims as the B-rep ends with them.
 
 use crate::curve::curve::Curve;
-use crate::error::{Result, SolidError};
+use crate::error::topology::TopologyFailure;
+use crate::error::{Failure, Result, SolidError, SM_ERR_NULL_POINTER};
 use crate::geom::axis2_placement::Axis2Placement;
 use crate::geom::context::{MarkLock, ALL_MARKS};
 use crate::geom::extent1d::Extent1d;
@@ -229,9 +230,75 @@ fn require_editing(enabled: bool) -> Result<()> {
     if enabled {
         Ok(())
     } else {
-        Err(SolidError::topology_failed(OP, "editing is not enabled"))
+        Err(SolidError::topology(OP, TopologyFailure::EditingDisabled))
     }
 }
+
+/// A named cause of this module's operation.
+#[track_caller]
+fn named(failure: TopologyFailure) -> SolidError {
+    Failure::new(OP, failure).into_error()
+}
+
+/// A defect ([`TopologyFailure::Defect`]) with the status `SM_ERR` of the `SER` it
+/// replaces.
+#[track_caller]
+fn defect(why: &'static str) -> SolidError {
+    named(TopologyFailure::Defect { why })
+}
+
+/// A defect of the B-rep's own links ([`TopologyFailure::Defect`]), `why` saying which link
+/// is missing, with the status `SM_ERR_NULL_POINTER` of the `NER` it replaces.
+#[track_caller]
+fn broken_link(why: &'static str) -> SolidError {
+    Failure::new(OP, TopologyFailure::Defect { why })
+        .with_status(SM_ERR_NULL_POINTER)
+        .into_error()
+}
+
+/// `failure`, with the error a step before it ignored as its cause when there is one
+/// (`docs/failure-codes-and-reproduction.md` §6, rule 6).
+#[track_caller]
+fn caused(failure: TopologyFailure, ignored: Option<SolidError>) -> SolidError {
+    let f = Failure::new(OP, failure);
+    match ignored {
+        Some(e) => f.caused_by(e),
+        None => f,
+    }
+    .into_error()
+}
+
+/// [`crate::error::ignored`], keeping the first error it ignores in `first` (to be the
+/// cause of the failure that follows, [`caused`]).
+fn ignored_keeping<T>(r: Result<T>, first: &mut Option<SolidError>) -> Result<Option<T>> {
+    match r {
+        Ok(v) => Ok(Some(v)),
+        Err(e) => {
+            crate::error::ignored(Err::<T, _>(e.clone()))?;
+            first.get_or_insert(e);
+            Ok(None)
+        }
+    }
+}
+
+/// Why a shell has no region.
+const SHELL_NO_REGION: &str =
+    "a shell has no region, though the kernel puts every shell of a B-rep in a region";
+/// Why a vertex use has no vertex.
+const VU_NO_V: &str =
+    "a vertex use has no vertex, though the kernel makes every vertex use on its vertex";
+/// Why the deleted edge has no far vertex.
+const NO_FAR_VERTEX: &str = "the deleted edge has no vertex at its far end, though it is one of \
+     the vertex's two edges and the kernel makes every edge with a vertex use at each end";
+/// Why a face has no face use on a side.
+const FACE_NO_FU: &str =
+    "a face has no face use on one side, though the kernel makes every face with its two";
+/// Why a face `surface_owners` listed has no surface.
+const SURFACE_OWNER_NO_SURFACE: &str =
+    "a face surface_owners listed has no surface, though it lists only faces with a surface";
+/// Why a face use has no shell.
+const FU_NO_SHELL: &str =
+    "a face use has no shell, though the kernel puts every face use of a B-rep in a shell";
 
 /// The position, tolerance and temporary-edge length threshold calculated before
 /// `CombineCoincidentVertices` modifies topology (`SM_USE_OLDTOL`).
@@ -317,7 +384,7 @@ pub fn combine_with_notifications(
             combine_with_notifications(k, b, survivor, deleted, deleted_edge, Some(env))
         });
     };
-    let mut notifications = Some(env);
+    let mut notifications = Some(&mut *env);
     *deleted_edge = None;
     let target = coincident_vertex_target(b, survivor, deleted)?;
     let edges = vertex::edges(b, survivor, None)?;
@@ -422,10 +489,7 @@ pub fn combine_with_notifications(
                         crate::topology::VertexuseOwner::Loopuse(_)
                     )
                 {
-                    return Err(SolidError::topology_failed(
-                        OP,
-                        "the vertices share a face the survivor bounds as a loop vertex",
-                    ));
+                    return Err(named(TopologyFailure::VertexLoopInSharedFace));
                 }
             }
             let start = b.vertex(survivor)?.point;
@@ -472,7 +536,7 @@ pub fn combine_with_notifications(
             notifications.as_deref_mut(),
         )?;
     }
-    set_vertex_point(k, b, survivor, target.point, notifications.as_deref_mut())?;
+    set_vertex_point(k, b, survivor, target.point, notifications)?;
     crate::error::ignore_status(vertex::set_tolerance(
         b,
         survivor,
@@ -480,8 +544,6 @@ pub fn combine_with_notifications(
         true,
         true,
     ))?;
-    let env = notifications
-        .ok_or_else(|| SolidError::topology_missing(OP, "the edit-notification environment"))?;
     crate::topology::brep::p1::update_vertex_edge_intervals(k, b, env, survivor)
 }
 
@@ -581,9 +643,9 @@ fn squeeze_edge(
 
 fn remove_vertexuse(b: &mut Brep, vertex: VertexId, vu: VertexuseId) -> Result<()> {
     if b.vertexuse(vu)?.vertex != Some(vertex) {
-        return Err(SolidError::topology_failed(
-            OP,
-            "the vertex use is not on the vertex",
+        return Err(defect(
+            "the vertex use to move is not on the vertex, though every caller took it from \
+             that vertex's list or a shell of it",
         ));
     }
     let index = b
@@ -592,7 +654,10 @@ fn remove_vertexuse(b: &mut Brep, vertex: VertexId, vu: VertexuseId) -> Result<(
         .iter()
         .position(|&id| id == vu)
         .ok_or_else(|| {
-            SolidError::topology_failed(OP, "the vertex does not list the vertex use")
+            defect(
+                "the vertex does not list a vertex use linked to it, though the kernel lists \
+                 every vertex use on the vertex it links it to",
+            )
         })?;
     b.vertex_mut(vertex)?.vertexuses.remove(index);
     b.vertexuse_mut(vu)?.vertex = None;
@@ -602,9 +667,9 @@ fn remove_vertexuse(b: &mut Brep, vertex: VertexId, vu: VertexuseId) -> Result<(
 fn post_insert_vertexuse(b: &mut Brep, vertex: VertexId, vu: VertexuseId) -> Result<()> {
     b.vertex(vertex)?;
     if b.vertexuse(vu)?.vertex.is_some() {
-        return Err(SolidError::topology_failed(
-            OP,
-            "the vertex use is already on a vertex",
+        return Err(defect(
+            "the vertex use to move is still on a vertex, though every caller has just \
+             removed it from its vertex",
         ));
     }
     b.vertex_mut(vertex)?.vertexuses.push(vu);
@@ -678,9 +743,11 @@ fn create_wire_edge_from_curve_in(
 ) -> Result<EdgeId> {
     let start = curve.evaluate_point(k, interval.min())?;
     let end = curve.evaluate_point(k, interval.max())?;
-    let region = b
-        .infinite_region()
-        .ok_or_else(|| SolidError::topology_missing(OP, "the B-rep's infinite region"))?;
+    let region = b.infinite_region().ok_or_else(|| {
+        Failure::new(OP, TopologyFailure::NoInfiniteRegion)
+            .with_status(SM_ERR_NULL_POINTER)
+            .into_error()
+    })?;
     let (first, edge, last) = with_p3_notifications(k, b, Some(&mut *env), |k, b, env| {
         let (_, first) = make_shell_vertex(b, region, start, env)?;
         let (edge, last) = make_wire_edge_vertex(
@@ -782,13 +849,12 @@ pub(crate) fn delete_topological_vertex_joining(
     let mut notifications = Some(env);
     require_editing(editing_enabled)?;
     crate::error::ignore_status(notify_pre_edit(k, b, notifications.as_deref_mut()))?;
-    let vertex = vertex.ok_or_else(|| SolidError::topology_missing(OP, "the vertex to delete"))?;
+    let vertex = vertex.ok_or_else(|| named(TopologyFailure::NoVertexGiven))?;
     let edges = vertex::edges(b, vertex, None)?;
     let [first, last] = edges.as_slice() else {
-        return Err(SolidError::topology_failed(
-            OP,
-            "the vertex is not on exactly two edges",
-        ));
+        return Err(named(TopologyFailure::VertexNotOnTwoEdges {
+            edges: edges.len(),
+        }));
     };
     let deleted = if let Some(edge) = edge {
         edge
@@ -806,10 +872,7 @@ pub(crate) fn delete_topological_vertex_joining(
         }
     };
     if deleted != *first && deleted != *last {
-        return Err(SolidError::topology_failed(
-            OP,
-            "the edge to delete is not on the vertex",
-        ));
+        return Err(named(TopologyFailure::EdgeNotOnVertex));
     }
     let survivor = if *first == deleted { *last } else { *first };
     let join_survivor = crate::topology::edge::start_vertex(b, survivor)? != Some(vertex);
@@ -847,30 +910,9 @@ pub(crate) fn delete_topological_vertex_joining(
         )?;
         if let [solution] = coincidence.solutions.as_slice() {
             if solution.solution_type == crate::geom::solution_array::SolutionType::RangeOfValues {
-                let ds0 = *solution.start.parameters.first().ok_or_else(|| {
-                    SolidError::topology_failed(
-                        OP,
-                        "the overlap has no start parameter on the deleted edge",
-                    )
-                })?;
-                let ds1 = *solution.end.parameters.first().ok_or_else(|| {
-                    SolidError::topology_failed(
-                        OP,
-                        "the overlap has no end parameter on the deleted edge",
-                    )
-                })?;
-                let ss0 = *solution.start.parameters.get(1).ok_or_else(|| {
-                    SolidError::topology_failed(
-                        OP,
-                        "the overlap has no start parameter on the surviving edge",
-                    )
-                })?;
-                let ss1 = *solution.end.parameters.get(1).ok_or_else(|| {
-                    SolidError::topology_failed(
-                        OP,
-                        "the overlap has no end parameter on the surviving edge",
-                    )
-                })?;
+                // each end's parameters on the deleted and the surviving curve
+                let [ds0, ss0, ..] = solution.start.parameters;
+                let [ds1, ss1, ..] = solution.end.parameters;
                 if (ds1 - ds0) * (ss1 - ss0) > 0.0 {
                     let far = if join_deleted {
                         deleted_interval.min()
@@ -880,12 +922,7 @@ pub(crate) fn delete_topological_vertex_joining(
                     if survivor_range.contains_value(far, crate::math::EFF_ZERO) {
                         let far_vertex =
                             crate::topology::edge::other_vertex(b, deleted, Some(vertex))?
-                                .ok_or_else(|| {
-                                    SolidError::topology_missing(
-                                        OP,
-                                        "the deleted edge's far vertex",
-                                    )
-                                })?;
+                                .ok_or_else(|| broken_link(NO_FAR_VERTEX))?;
                         let point = b.vertex(far_vertex)?.point;
                         // Native ignores EvaluatePoint's status (SM_UNDEF_DOUBLE on
                         // failure); it is passed on here (WR-658).
@@ -904,7 +941,9 @@ pub(crate) fn delete_topological_vertex_joining(
         } else {
             deleted_interval.min()
         };
-        b.edge_mut(survivor)?.interval.add_value(far);
+        let mut grown = b.edge(survivor)?.interval;
+        grown.add_value(far);
+        crate::topology::edge::set_interval(b, survivor, &grown)?;
     } else {
         // Upstream casts each copy to `SmBSplineCurve` and calls `Trim` through the
         // result unchecked, so an edge curve of another kind (an `SmCrvOnSurf`) is a null
@@ -916,33 +955,32 @@ pub(crate) fn delete_topological_vertex_joining(
         let Some(mut deleted_copy) =
             exact_bspline_of_edge(k, b, deleted, deleted_interval, joined_tolerance)?
         else {
-            return Err(SolidError::topology_failed(
-                OP,
-                "the deleted edge's curve has no exact B-spline form",
-            ));
+            return Err(named(TopologyFailure::EdgeCurveNotJoinable {
+                entity: Some(crate::error::EntityRef::Edge(deleted)),
+            }));
         };
         let Some(mut surviving_copy) =
             exact_bspline_of_edge(k, b, survivor, survivor_interval, joined_tolerance)?
         else {
-            return Err(SolidError::topology_failed(
-                OP,
-                "the surviving edge's curve has no exact B-spline form",
-            ));
+            return Err(named(TopologyFailure::EdgeCurveNotJoinable {
+                entity: Some(crate::error::EntityRef::Edge(survivor)),
+            }));
         };
-        if crate::error::ignored(join_copied_curves(
-            k,
-            &mut surviving_copy,
-            join_survivor,
-            &mut deleted_copy,
-            join_deleted,
-            max_gap,
-        ))?
+        let mut join_failure = None;
+        if ignored_keeping(
+            join_copied_curves(
+                k,
+                &mut surviving_copy,
+                join_survivor,
+                &mut deleted_copy,
+                join_deleted,
+                max_gap,
+            ),
+            &mut join_failure,
+        )?
         .is_none()
         {
-            return Err(SolidError::topology_failed(
-                OP,
-                "the edges' curves could not be joined",
-            ));
+            return Err(caused(TopologyFailure::CurvesNotJoined, join_failure));
         }
         remove_join_knot(&mut surviving_copy, b.vertex(vertex)?.point, max_gap)?;
         if let Some(analytic) =
@@ -960,7 +998,7 @@ pub(crate) fn delete_topological_vertex_joining(
             true,
             notifications.as_deref_mut(),
         )?;
-        b.edge_mut(survivor)?.interval = interval;
+        crate::topology::edge::set_interval(b, survivor, &interval)?;
         set_edge_curve_owner(b, survivor, notifications.as_deref_mut())?;
     }
     for eu in crate::topology::edge::edgeuses(b, survivor, None, None)? {
@@ -976,7 +1014,7 @@ pub(crate) fn delete_topological_vertex_joining(
         notifications.as_deref_mut(),
     ))?;
     let surviving_vertex = crate::topology::edge::other_vertex(b, deleted, Some(vertex))?
-        .ok_or_else(|| SolidError::topology_missing(OP, "the deleted edge's far vertex"))?;
+        .ok_or_else(|| broken_link(NO_FAR_VERTEX))?;
     squeeze_edge(
         k,
         b,
@@ -1080,7 +1118,7 @@ pub(crate) fn cover_joined_line_gaps(k: &Kernel, b: &mut Brep, e: EdgeId) -> Res
     if let Some((v, needed, fits_below)) = first_reaching(&growths) {
         return Err(SolidError::topology_at(
             OP,
-            crate::error::topology::TopologyFailure::JoinedVertexReaches { needed, fits_below },
+            TopologyFailure::JoinedVertexReaches { needed, fits_below },
             crate::EntityRef::Vertex(v),
         ));
     }
@@ -1207,7 +1245,7 @@ fn edge_curve(b: &Brep, edge: EdgeId) -> Result<&Curve> {
     b.edge(edge)?
         .curve
         .as_ref()
-        .ok_or_else(|| SolidError::topology_missing(OP, "the edge's curve"))
+        .ok_or_else(|| named(TopologyFailure::EdgeWithoutCurve))
 }
 
 /// An evaluation copy of the edge's curve carrying the edge's tolerance
@@ -1441,9 +1479,9 @@ fn bspline_curve_base_mut(curve: &mut Curve) -> Result<&mut BSplineCurve> {
         CurveKind::Ellipse(ellipse) => Ok(ellipse.base_mut()),
         CurveKind::Hyperbola(hyperbola) => Ok(hyperbola.base_mut()),
         CurveKind::Parabola(parabola) => Ok(parabola.base_mut()),
-        _ => Err(SolidError::topology_missing(
-            OP,
-            "the curve's B-spline form",
+        _ => Err(broken_link(
+            "a curve the join takes is of no B-spline kind, though both are copies that \
+             exact_bspline_of_edge made of B-spline kinds",
         )),
     }
 }
@@ -1509,11 +1547,12 @@ pub(super) fn set_edge_curve_owner(
                 (env.key_of)(entity)
             }
         };
-        let curve = b
-            .edge_mut(edge)?
-            .curve
-            .as_mut()
-            .ok_or_else(|| SolidError::topology_missing(OP, "the edge's curve"))?;
+        let curve = b.edge_mut(edge)?.curve.as_mut().ok_or_else(|| {
+            broken_link(
+                "the edge has no curve to own, though both callers have just set one on it \
+                 (set_joined_edge_curve with a curve)",
+            )
+        })?;
         let _ = curve.set_owner(Some(owner), Some(brep));
         b.set_geometry_owner_key(crate::error::EntityRef::Edge(edge), Some(owner));
         Ok(())
@@ -1560,8 +1599,8 @@ fn get_or_create_uv_trim_curve(
 ///
 /// # Errors
 ///
-/// Those of both callees; [`SolidError::InvalidInput`] when no region is found
-/// (upstream's `NER`).
+/// Those of both callees; [`TopologyFailure::InfiniteRegionNotFound`] with upstream's
+/// null-pointer status when no region is found (upstream's `NER`).
 pub fn find_and_set_infinite_region(
     k: &mut Kernel,
     b: &mut Brep,
@@ -1571,7 +1610,7 @@ pub fn find_and_set_infinite_region(
     bbox: Option<&Extent3d>,
 ) -> Result<()> {
     let region = crate::topology::brep::p9::find_infinite_region(k, b, query, shell, bbox)?
-        .ok_or_else(|| SolidError::topology_missing(OP, "the infinite region"))?;
+        .ok_or_else(|| named(TopologyFailure::InfiniteRegionNotFound))?;
     if let Some(shell) = shell {
         if shell_is_faceuse_shell(b, shell)? {
             void_setting = SetRegionVoidType::InfiniteRegionSwap;
@@ -1648,25 +1687,17 @@ fn glue_with_notification_identity(
             glue_with_notification_identity(k, b, survivor, deleted, wire_edges, Some(env), body)
         });
     };
-    let mut notifications = Some(env);
     if survivor == deleted {
         return Ok(());
     }
-    let survivor =
-        survivor.ok_or_else(|| SolidError::topology_missing(OP, "the surviving vertex"))?;
-    let deleted =
-        deleted.ok_or_else(|| SolidError::topology_missing(OP, "the vertex to glue away"))?;
-    crate::error::ignore_status(notify_pre_edit_with_body(
-        k,
-        b,
-        notifications.as_deref_mut(),
-        body,
-    ))?;
+    let survivor = survivor.ok_or_else(|| named(TopologyFailure::NoVertexGiven))?;
+    let deleted = deleted.ok_or_else(|| named(TopologyFailure::NoVertexGiven))?;
+    crate::error::ignore_status(notify_pre_edit_with_body(k, b, Some(&mut *env), body))?;
     crate::error::ignore_status(notify_vertex_pre_edit_with_body(
         k,
         b,
         survivor,
-        notifications.as_deref_mut(),
+        Some(&mut *env),
         body,
     ))?;
     crate::error::ignore_status(notify_merge_with_body(
@@ -1674,7 +1705,7 @@ fn glue_with_notification_identity(
         b,
         survivor,
         deleted,
-        notifications.as_deref_mut(),
+        Some(&mut *env),
         body,
     ))?;
     for face in vertex::faces(b, deleted)? {
@@ -1682,7 +1713,7 @@ fn glue_with_notification_identity(
             k,
             b,
             face,
-            notifications.as_deref_mut(),
+            Some(&mut *env),
             body,
         ))?;
     }
@@ -1704,41 +1735,43 @@ fn glue_with_notification_identity(
             }
         }
     }
-    let (first, last) = pair.ok_or_else(|| {
-        SolidError::topology_missing(OP, "a pair of shells in one region holding both vertices")
-    })?;
+    let (first, last) = pair.ok_or_else(|| named(TopologyFailure::VerticesShareNoRegion))?;
     let mut first = Some(first);
     let radius = distance + b.vertex(deleted)?.tolerance;
     if radius > b.vertex(survivor)?.tolerance {
         crate::error::ignore_status(vertex::set_tolerance(b, survivor, radius, true, true))?;
     }
     if vertex::is_shell_vertex(b, deleted)? {
-        delete_vertex(k, b, deleted, notifications)?;
+        delete_vertex(k, b, deleted, Some(env))?;
         return Ok(());
     }
-    if vertex::is_shell_vertex(b, survivor)? {
-        let vu = vertex::primary_vertexuse(b, survivor)?
-            .ok_or_else(|| SolidError::topology_missing(OP, "the surviving vertex's vertex use"))?;
-        let crate::topology::VertexuseOwner::Shell(shell) = b.vertexuse(vu)?.owner else {
-            return Err(SolidError::topology_failed(
-                OP,
-                "the surviving shell vertex's vertex use is not owned by a shell",
-            ));
-        };
-        let shell =
-            shell.ok_or_else(|| SolidError::topology_missing(OP, "the vertex use's shell"))?;
+    // `IsShellVertex`: the primary vertex use is owned by a shell
+    let shell_vertexuse_of_survivor = match vertex::primary_vertexuse(b, survivor)? {
+        Some(vu) => match b.vertexuse(vu)?.owner {
+            crate::topology::VertexuseOwner::Shell(shell) => Some((vu, shell)),
+            _ => None,
+        },
+        None => None,
+    };
+    if let Some((vu, shell)) = shell_vertexuse_of_survivor {
+        let shell = shell.ok_or_else(|| {
+            broken_link(
+                "a shell's vertex use names no shell, though the kernel makes a shell vertex's \
+                 vertex use in its shell",
+            )
+        })?;
         if shell_vertexuse(b, shell)? != Some(vu) {
-            return Err(SolidError::topology_failed(
-                OP,
-                "the shell's vertex use is not the surviving vertex's",
+            return Err(defect(
+                "the vertex shell does not hold its vertex's vertex use, though the kernel \
+                 makes a vertex shell with its vertex use",
             ));
         }
         let region = b
             .shell(shell)?
             .region
-            .ok_or_else(|| SolidError::topology_missing(OP, "the shell's region"))?;
+            .ok_or_else(|| broken_link(SHELL_NO_REGION))?;
         remove_region_shell(b, region, shell)?;
-        destroy_shell(k, b, notifications.as_deref_mut(), shell)?;
+        destroy_shell(k, b, &mut *env, shell)?;
         first = None;
         remove_vertexuse(b, survivor, vu)?;
         destroy_topology_record(b, crate::error::EntityRef::Vertexuse(vu))?;
@@ -1775,7 +1808,7 @@ fn glue_with_notification_identity(
             let vertex = b
                 .vertexuse(vu)?
                 .vertex
-                .ok_or_else(|| SolidError::topology_missing(OP, "the shell vertex use's vertex"))?;
+                .ok_or_else(|| broken_link(VU_NO_V))?;
             remove_vertexuse(b, vertex, vu)?;
             clear_shell_list(b, last)?;
             destroy_topology_record(b, crate::error::EntityRef::Vertexuse(vu))?;
@@ -1785,9 +1818,9 @@ fn glue_with_notification_identity(
         let region = b
             .shell(last)?
             .region
-            .ok_or_else(|| SolidError::topology_missing(OP, "the shell's region"))?;
+            .ok_or_else(|| broken_link(SHELL_NO_REGION))?;
         remove_region_shell(b, region, last)?;
-        destroy_shell(k, b, notifications.as_deref_mut(), last)?;
+        destroy_shell(k, b, &mut *env, last)?;
     }
     // WR-607: join the other regions' pairs as well.
     for (surv, del, other_wires) in others {
@@ -1795,9 +1828,9 @@ fn glue_with_notification_identity(
         let region = b
             .shell(del)?
             .region
-            .ok_or_else(|| SolidError::topology_missing(OP, "the shell's region"))?;
+            .ok_or_else(|| broken_link(SHELL_NO_REGION))?;
         remove_region_shell(b, region, del)?;
-        destroy_shell(k, b, notifications.as_deref_mut(), del)?;
+        destroy_shell(k, b, &mut *env, del)?;
     }
     Ok(())
 }
@@ -1935,11 +1968,9 @@ fn remove_region_shell(b: &mut Brep, region: RegionId, shell: ShellId) -> Result
 fn destroy_shell(
     k: &mut Kernel,
     b: &mut Brep,
-    env: Option<&mut EditNotifyEnv<'_>>,
+    env: &mut EditNotifyEnv<'_>,
     shell: ShellId,
 ) -> Result<()> {
-    let env =
-        env.ok_or_else(|| SolidError::topology_missing(OP, "the edit-notification environment"))?;
     crate::topology::shell::destroy(k, b, shell, env)
 }
 
@@ -2164,7 +2195,7 @@ pub(crate) fn make_edge_with_backend<B: FaceEdgeBackend>(
     output: &mut B::Output,
 ) -> Result<()> {
     require_editing(editing_enabled)?;
-    let f = face.ok_or_else(|| SolidError::topology_missing(OP, "the face"))?;
+    let f = face.ok_or_else(|| named(TopologyFailure::NoFaceGiven))?;
     b.validate_face(f)?;
     *output = B::Output::default();
     let (t_start, t_end, end_orientation) = if orientation == OrientType::Opposite {
@@ -2185,9 +2216,9 @@ pub(crate) fn make_edge_with_backend<B: FaceEdgeBackend>(
             false,
         )?
         .ok_or_else(|| {
-            SolidError::topology_missing(
+            SolidError::topology(
                 NO_VERTEX_SECTOR_OP,
-                "a vertex sector at the curve's start",
+                TopologyFailure::NoVertexSector { at_end: false },
             )
         })?;
     let last = b
@@ -2203,7 +2234,10 @@ pub(crate) fn make_edge_with_backend<B: FaceEdgeBackend>(
             false,
         )?
         .ok_or_else(|| {
-            SolidError::topology_missing(NO_VERTEX_SECTOR_OP, "a vertex sector at the curve's end")
+            SolidError::topology(
+                NO_VERTEX_SECTOR_OP,
+                TopologyFailure::NoVertexSector { at_end: true },
+            )
         })?;
     b.insert(
         f,
@@ -2311,7 +2345,7 @@ pub(crate) fn find_vertex_sector(
     all_sectors: bool,
 ) -> Result<Option<VertexuseId>> {
     // NER(cpVertex)
-    let vertex = v.ok_or_else(|| SolidError::topology_missing(OP, "the vertex"))?;
+    let vertex = v.ok_or_else(|| named(TopologyFailure::NoVertexGiven))?;
     let sector = face_p4::find_vertex_sector(
         k,
         b,
@@ -2409,10 +2443,7 @@ fn make_manifold_in(
 ) -> Result<()> {
     // The temporary editing change has no lasting effect on this early return.
     if regions_to_keep.is_some_and(<[RegionId]>::is_empty) {
-        return Err(SolidError::topology_failed(
-            OP,
-            "no regions to keep were given",
-        ));
+        return Err(named(TopologyFailure::NoRegionsToKeepGiven));
     }
     let previous = set_editing_enabled(b, true);
     let result = (|| {
@@ -2427,21 +2458,18 @@ fn make_manifold_in(
             all
         };
         if regions.is_empty() {
-            return Err(SolidError::topology_failed(
-                OP,
-                "the B-rep has no finite region to keep",
-            ));
+            return Err(named(TopologyFailure::NoFiniteRegion));
         }
         for face in brep_faces(b)? {
             let (first, last) = face_shells(b, face)?;
             let r1 = b
                 .shell(first)?
                 .region
-                .ok_or_else(|| SolidError::topology_missing(OP, "the first shell's region"))?;
+                .ok_or_else(|| broken_link(SHELL_NO_REGION))?;
             let r2 = b
                 .shell(last)?
                 .region
-                .ok_or_else(|| SolidError::topology_missing(OP, "the second shell's region"))?;
+                .ok_or_else(|| broken_link(SHELL_NO_REGION))?;
             let keep1 = regions.contains(&r1);
             let keep2 = regions.contains(&r2);
             if r1 != r2 && (keep1 != keep2 || (keep_interior_faces && keep1)) {
@@ -2560,15 +2588,15 @@ pub(super) fn brep_vertices(b: &Brep) -> Result<Vec<VertexId>> {
 }
 fn face_shells(b: &Brep, face: FaceId) -> Result<(ShellId, ShellId)> {
     let (a, z) = crate::topology::face::p2::faceuses(b, face)?;
-    let a = a.ok_or_else(|| SolidError::topology_missing(OP, "the face's first face use"))?;
-    let z = z.ok_or_else(|| SolidError::topology_missing(OP, "the face's second face use"))?;
+    let a = a.ok_or_else(|| broken_link(FACE_NO_FU))?;
+    let z = z.ok_or_else(|| broken_link(FACE_NO_FU))?;
     Ok((
         b.faceuse(a)?
             .shell
-            .ok_or_else(|| SolidError::topology_missing(OP, "the first face use's shell"))?,
+            .ok_or_else(|| broken_link(FU_NO_SHELL))?,
         b.faceuse(z)?
             .shell
-            .ok_or_else(|| SolidError::topology_missing(OP, "the second face use's shell"))?,
+            .ok_or_else(|| broken_link(FU_NO_SHELL))?,
     ))
 }
 /// `SmBrep::DeleteFace(face, bDeleteEdgesVertices, bDoRegionNesting, NULL,
@@ -2649,20 +2677,33 @@ pub fn remove_topological_with_notifications(
             if !topological.is_topological {
                 continue;
             }
+            // is_topological finds only a manifold edge (four edge uses) topological, with
+            // the face to keep, after reading both faces and their surfaces
             let keep = topological.surf_to_keep.ok_or_else(|| {
-                SolidError::topology_missing(OP, "the face whose surface is kept")
+                broken_link(
+                    "is_topological found the edge topological without the face to keep, \
+                     though it names that face whenever it finds an edge topological",
+                )
             })?;
             let edgeuses = crate::topology::edge::edgeuses(b, edge, None, None)?;
-            let first = *edgeuses
-                .first()
-                .ok_or_else(|| SolidError::topology_failed(OP, "the edge has no edge uses"))?;
-            let third = *edgeuses.get(2).ok_or_else(|| {
-                SolidError::topology_failed(OP, "the edge has fewer than three edge uses")
+            let [first, _, third, ..] = *edgeuses.as_slice() else {
+                return Err(defect(
+                    "an edge is_topological found topological has fewer than three edge uses, \
+                     though it finds only an edge with four topological",
+                ));
+            };
+            let face0 = crate::topology::edgeuse::p1::face(b, first)?.ok_or_else(|| {
+                broken_link(
+                    "an edge use of a topological edge has no face, though is_topological \
+                     has just read the faces of both",
+                )
             })?;
-            let face0 = crate::topology::edgeuse::p1::face(b, first)?
-                .ok_or_else(|| SolidError::topology_missing(OP, "the first edge use's face"))?;
-            let face1 = crate::topology::edgeuse::p1::face(b, third)?
-                .ok_or_else(|| SolidError::topology_missing(OP, "the third edge use's face"))?;
+            let face1 = crate::topology::edgeuse::p1::face(b, third)?.ok_or_else(|| {
+                broken_link(
+                    "an edge use of a topological edge has no face, though is_topological \
+                     has just read the faces of both",
+                )
+            })?;
             // A face owns one surface value. Equal owner metadata on two
             // values cannot establish pointer identity.
             let same_surface = face0 == face1;
@@ -2671,7 +2712,12 @@ pub fn remove_topological_with_notifications(
                     .face(keep)?
                     .surface
                     .as_ref()
-                    .ok_or_else(|| SolidError::topology_missing(OP, "the kept face's surface"))?
+                    .ok_or_else(|| {
+                        broken_link(
+                            "the face to keep has no surface, though is_topological has just \
+                             read the surfaces of both faces",
+                        )
+                    })?
                     .natural_uv_domain_with_nurb(k)?;
                 crate::topology::face::p2::set_uv_domain(b, keep, &domain)?;
                 let tolerance = b.face(keep)?.tolerance;
@@ -2757,7 +2803,10 @@ fn delete_edge_keep_surface(
         .into_iter()
         .find(|&f| b.face(f).is_ok_and(|r| r.surface.is_some()))
         .ok_or_else(|| {
-            SolidError::topology_missing(OP, "a face with a surface left after the edge deletion")
+            broken_link(
+                "no face with a surface is left after deleting the edge, though the deletion \
+                 keeps the kept surface on the face that survives",
+            )
         })
 }
 
@@ -3421,11 +3470,11 @@ pub(crate) fn squeeze_face_in(
             let r1 = b
                 .shell(shell1)?
                 .region
-                .ok_or_else(|| SolidError::topology_missing(OP, "the first shell's region"))?;
+                .ok_or_else(|| broken_link(SHELL_NO_REGION))?;
             let r2 = b
                 .shell(shell2)?
                 .region
-                .ok_or_else(|| SolidError::topology_missing(OP, "the second shell's region"))?;
+                .ok_or_else(|| broken_link(SHELL_NO_REGION))?;
             let n1 = region_size(b, r1)?;
             let n2 = region_size(b, r2)?;
             let keep_first = if region_is_infinite(b, r1)? {
@@ -3455,8 +3504,9 @@ pub(crate) fn squeeze_face_in(
         stitch.edits = Some(&mut edits);
         // After face deletion, ordinary stitch failures record SM_ERR but do
         // not suppress the remaining cleanup calls or their partially filled outputs.
-        let mut failed = false;
-        let vlist_opt = crate::error::ignored(stitch.stitch_vertex_list(k, b, &mut vertices))?;
+        let mut failed = None;
+        let vlist_opt =
+            ignored_keeping(stitch.stitch_vertex_list(k, b, &mut vertices), &mut failed)?;
         let (surviving, deleted_vertices, deleted_edges) = if let Some(vlist) = vlist_opt {
             (
                 vlist.surviving.into_iter().map(Some).collect::<Vec<_>>(),
@@ -3464,31 +3514,29 @@ pub(crate) fn squeeze_face_in(
                 vlist.deleted_edges,
             )
         } else {
-            failed = true;
             (Vec::new(), Vec::new(), Vec::new())
         };
         edges.retain(|edge| !edge.is_some_and(|e| deleted_edges.contains(&e)));
         output.deleted_edges.extend_from_slice(&deleted_edges);
         vertices.clone_from(&surviving);
 
-        let split_opt = crate::error::ignored(stitch.split_edges_with_vertices(
-            k,
-            b,
-            &mut vertices,
-            &mut edges,
-        ))?;
+        let split_opt = ignored_keeping(
+            stitch.split_edges_with_vertices(k, b, &mut vertices, &mut edges),
+            &mut failed,
+        )?;
         let mut new_edges = if let Some(res) = split_opt {
             res.new_edges
         } else {
-            failed = true;
             Vec::new()
         };
 
-        let edge_opt = crate::error::ignored(stitch.stitch_edges_of_vertices(k, b, &surviving))?;
+        let edge_opt = ignored_keeping(
+            stitch.stitch_edges_of_vertices(k, b, &surviving),
+            &mut failed,
+        )?;
         let mut deleted_edges = if let Some(res) = edge_opt {
             res.deleted
         } else {
-            failed = true;
             Vec::new()
         };
 
@@ -3502,13 +3550,9 @@ pub(crate) fn squeeze_face_in(
         output.deleted_vertices.extend(deleted_vertices);
         output.deleted_edges.extend(deleted_edges);
         output.new_edges.extend(new_edges);
-        if failed {
-            Err(SolidError::topology_failed(
-                OP,
-                "stitching the face's vertices and edges failed",
-            ))
-        } else {
-            Ok(())
+        match failed {
+            Some(e) => Err(caused(TopologyFailure::FaceStitchFailed, Some(e))),
+            None => Ok(()),
         }
     })();
     result
@@ -3522,16 +3566,6 @@ fn region_size(b: &Brep, region: RegionId) -> Result<usize> {
 }
 fn region_is_infinite(b: &Brep, region: RegionId) -> Result<bool> {
     Ok(b.region(region)?.is_infinite_region(b, region))
-}
-
-#[cfg(test)]
-fn cleanup_status(result: Result<()>, failed: &mut bool) -> Result<()> {
-    // After deleting the face, every native stitch failure sets SM_ERR but
-    // continues cleanup and output appends. Only missing implementation defers.
-    if crate::error::ignored(result)?.is_none() {
-        *failed = true;
-    }
-    Ok(())
 }
 
 /// Scales about the current origin then applies the placement. The identity exit
@@ -3619,11 +3653,12 @@ fn transform_in(
             edge,
             notifications.as_deref_mut(),
         ))?;
-        let curve = b
-            .edge_mut(edge)?
-            .curve
-            .as_mut()
-            .ok_or_else(|| SolidError::topology_missing(OP, "the edge's curve"))?;
+        let curve = b.edge_mut(edge)?.curve.as_mut().ok_or_else(|| {
+            broken_link(
+                "an edge curve_owners listed has no curve, though it lists only edges with \
+                     a curve",
+            )
+        })?;
         curve.transform(k, placement, scale)?;
     }
     let mut rectangular: Vec<_> = brep_faces(b)?.into_iter().map(Some).collect();
@@ -3647,23 +3682,22 @@ fn transform_in(
             face,
             notifications.as_deref_mut(),
         ))?;
-        let transformed = {
-            let surface = b
-                .face_mut(face)?
-                .surface
-                .as_mut()
-                .ok_or_else(|| SolidError::topology_missing(OP, "the face's surface"))?;
-            crate::error::ignored(surface.transform(k, placement, scale))?.is_some()
-        };
-        if !transformed {
-            let surface = b
-                .face_mut(face)?
-                .surface
-                .as_mut()
-                .ok_or_else(|| SolidError::topology_missing(OP, "the face's surface"))?;
-            let base = transformed_surface_base(k, surface)?.ok_or_else(|| {
-                SolidError::topology_failed(OP, "the face's surface could not be transformed")
-            })?;
+        let mut not_transformed = None;
+        let surface = b
+            .face_mut(face)?
+            .surface
+            .as_mut()
+            .ok_or_else(|| broken_link(SURFACE_OWNER_NO_SURFACE))?;
+        if ignored_keeping(surface.transform(k, placement, scale), &mut not_transformed)?.is_none()
+        {
+            let Some(base) = transformed_surface_base(k, surface)? else {
+                return Err(caused(
+                    TopologyFailure::SurfaceNotTransformable {
+                        entity: Some(crate::error::EntityRef::Face(face)),
+                    },
+                    not_transformed,
+                ));
+            };
             replace_surface(
                 k,
                 b,
@@ -3687,6 +3721,21 @@ fn transform_in(
             swap_reflection_shells(b, face)?;
         }
     }
+    // #20939: a scale changes every distance, and a scale that is not uniform and positive
+    // turns the geometry to NURBS with new parameters, so each edge use's cached largest
+    // edge/face gap and gap to its counter-clockwise neighbour (value and parameters) is
+    // wrong; they are cleared and measured again when next asked for. The vertex use gaps
+    // were cleared as each vertex moved. A placement alone (rotation and translation) keeps
+    // distances and parameters, so the caches stay. Upstream keeps them in every case.
+    if scale.is_some_and(|s| !s.approx_eq(Vec3::new(1.0, 1.0, 1.0))) {
+        for edge in brep_edges(b)? {
+            for eu in b.edge(edge)?.edgeuses.clone() {
+                let use_ = b.edgeuse_mut(eu)?;
+                use_.max_edge_face_gap = crate::heal::gap::EdgeFaceGap::new();
+                use_.edge_ccw_edge_gap = crate::heal::gap::EdgeEdgeGap::new();
+            }
+        }
+    }
     // WR-507 (#1520): a scale of 1 (a rotation or reflection) is no scale, and a scale s
     // keeps each tolerance at least its own times s; upstream sets every one to the body
     // tolerance whenever a scale is given.
@@ -3705,8 +3754,9 @@ fn transform_in(
             },
         )?;
         let size = model_box.size().length();
-        let zone = b.set_this_model_size_estimate(k, size);
-        crate::geom::tol::set_context_model_size_estimate(&mut k.context, size);
+        // (the scaled body's size is its own: upstream also stores it on the body's
+        // context, which here is every body's default)
+        let zone = b.set_this_model_size_estimate(size);
         for vertex in vertices {
             let tol = max2(zone, vertex::tolerance(b, vertex)? * tol_scale);
             crate::error::ignore_status(vertex::set_tolerance(b, vertex, tol, false, false))?;
@@ -4080,9 +4130,10 @@ mod tests {
         let Err(SolidError::Failed(f)) = &r else {
             panic!("a refusal, got {r:?}");
         };
-        let crate::error::Reason::Topology(
-            crate::error::topology::TopologyFailure::JoinedVertexReaches { needed, fits_below },
-        ) = f.reason
+        let crate::error::Reason::Topology(TopologyFailure::JoinedVertexReaches {
+            needed,
+            fits_below,
+        }) = f.reason
         else {
             panic!("a joined vertex that reaches, got {r:?}");
         };
@@ -4150,6 +4201,90 @@ mod tests {
         };
         assert!(box_error(&stitched), "{stitched:?}");
         assert!(box_error(&r), "{r:?}");
+    }
+
+    /// `MakeEdgeInFace` names the end whose vertex sector it did not find, and a missing
+    /// face, keeping the null-pointer status and the no-sector operation.
+    #[test]
+    fn a_missing_sector_names_its_end() {
+        use crate::error::SM_ERR_NULL_POINTER;
+        struct Backend {
+            calls: usize,
+            miss: usize,
+        }
+        impl FaceEdgeBackend for Backend {
+            type Face = ();
+            type Vertex = ();
+            type Curve = ();
+            type UvCurve = ();
+            type Vertexuse = ();
+            type Output = ();
+            fn validate_face(&self, (): ()) -> Result<()> {
+                Ok(())
+            }
+            fn tolerance(&self) -> Result<f64> {
+                Ok(1e-6)
+            }
+            fn sector(
+                &mut self,
+                (): (),
+                _vertex: Option<()>,
+                (): &(),
+                _uv: Option<&()>,
+                _start: f64,
+                _end: f64,
+                _orientation: OrientType,
+                _tolerance: f64,
+                _all: bool,
+            ) -> Result<Option<()>> {
+                self.calls += 1;
+                Ok((self.calls != self.miss).then_some(()))
+            }
+            fn insert(
+                &mut self,
+                (): (),
+                (): (),
+                (): (),
+                (): (),
+                _uv: Option<()>,
+                _interval: Extent1d,
+                _orientation: OrientType,
+                _max_gap: f64,
+                (): &mut (),
+            ) -> Result<()> {
+                Ok(())
+            }
+        }
+        let run = |face: Option<()>, miss: usize| {
+            let mut backend = Backend { calls: 0, miss };
+            make_edge_with_backend(
+                &mut backend,
+                true,
+                face,
+                Some(()),
+                Some(()),
+                (),
+                None,
+                Extent1d::from_min_max(0.0, 1.0),
+                OrientType::Same,
+                1e-7,
+                &mut (),
+            )
+        };
+        for (miss, at_end) in [(1, false), (2, true)] {
+            let e = run(Some(()), miss).unwrap_err();
+            assert_eq!(
+                e.topology_failure(),
+                Some(&TopologyFailure::NoVertexSector { at_end })
+            );
+            assert_eq!(e.upstream_status(), Some(SM_ERR_NULL_POINTER));
+            assert!(is_no_vertex_sector(&e), "{e}");
+        }
+        run(Some(()), 0).unwrap();
+        let e = run(None, 0).unwrap_err();
+        assert_eq!(e.topology_failure(), Some(&TopologyFailure::NoFaceGiven));
+        assert_eq!(e.upstream_status(), Some(SM_ERR_NULL_POINTER));
+        assert!(!is_no_vertex_sector(&e));
     }
 
     #[test]
@@ -4241,6 +4376,78 @@ mod tests {
         }
     }
 
+    /// The caller's argument and body causes, reached through the public entry points,
+    /// keep upstream's statuses.
+    #[test]
+    fn the_callers_input_is_refused_by_cause_with_upstreams_status() {
+        use crate::error::{SM_ERR, SM_ERR_NULL_POINTER};
+        let status = |e: &SolidError| (e.topology_failure().copied(), e.upstream_status());
+        let mut k = Kernel::default();
+
+        // no regions to keep given, and a B-rep with no finite region
+        let mut b = Brep::new();
+        let e = make_manifold(&mut k, &mut b, Some(&[]), false).unwrap_err();
+        assert_eq!(
+            status(&e),
+            (Some(TopologyFailure::NoRegionsToKeepGiven), Some(SM_ERR))
+        );
+        let e = make_manifold(&mut k, &mut b, None, false).unwrap_err();
+        assert_eq!(
+            status(&e),
+            (Some(TopologyFailure::NoFiniteRegion), Some(SM_ERR))
+        );
+
+        // a B-rep without an infinite region: the null-pointer status
+        let mut b = Brep::new();
+        assert!(b.infinite_region().is_none());
+        let line = Curve::from(
+            BSplineCurve::create_line_segment(3, Point3::ZERO, Point3::new(1.0, 0.0, 0.0)).unwrap(),
+        );
+        let interval = line.natural_interval();
+        let e = create_wire_edge_from_curve(&mut k, &mut b, line, interval).unwrap_err();
+        assert_eq!(
+            status(&e),
+            (
+                Some(TopologyFailure::NoInfiniteRegion),
+                Some(SM_ERR_NULL_POINTER)
+            )
+        );
+        assert_eq!(e.kind(), crate::error::ErrorKind::InvalidInput);
+
+        // no vertex given, and a vertex on no edge
+        let mut b = Brep::new();
+        let v = b.add_vertex_record(Vertex::default()).unwrap();
+        let e = glue_vertices(&mut k, &mut b, Some(v), None, None).unwrap_err();
+        assert_eq!(
+            status(&e),
+            (
+                Some(TopologyFailure::NoVertexGiven),
+                Some(SM_ERR_NULL_POINTER)
+            )
+        );
+        let e = delete_topological_vertex(&mut k, &mut b, true, None, None).unwrap_err();
+        assert_eq!(
+            status(&e),
+            (
+                Some(TopologyFailure::NoVertexGiven),
+                Some(SM_ERR_NULL_POINTER)
+            )
+        );
+        let e = delete_topological_vertex(&mut k, &mut b, true, Some(v), None).unwrap_err();
+        assert_eq!(
+            status(&e),
+            (
+                Some(TopologyFailure::VertexNotOnTwoEdges { edges: 0 }),
+                Some(SM_ERR)
+            )
+        );
+        let e = delete_topological_vertex(&mut k, &mut b, false, Some(v), None).unwrap_err();
+        assert_eq!(
+            status(&e),
+            (Some(TopologyFailure::EditingDisabled), Some(SM_ERR))
+        );
+    }
+
     #[test]
     fn squeeze_cleanup_continues_after_typed_native_failures() {
         let errors = [
@@ -4254,21 +4461,33 @@ mod tests {
                 entity: None,
             },
         ];
-        let mut failed = false;
+        // every native stitch failure is kept, the first one as the cause, and the
+        // cleanup goes on; an unported callee still propagates
+        let first = errors[0].clone();
+        let mut failed = None;
         for error in errors {
-            cleanup_status(Err(error), &mut failed).unwrap();
-            assert!(failed);
+            assert_eq!(ignored_keeping(Err::<(), _>(error), &mut failed), Ok(None));
+            assert_eq!(failed.as_ref(), Some(&first));
         }
-        cleanup_status(Ok(()), &mut failed).unwrap();
-        assert!(failed);
+        assert_eq!(ignored_keeping(Ok(()), &mut failed), Ok(Some(())));
+        assert_eq!(failed.as_ref(), Some(&first));
+        let e = caused(TopologyFailure::FaceStitchFailed, failed);
+        assert_eq!(e.cause(), Some(&first));
+        assert_eq!(e.upstream_status(), Some(crate::error::SM_ERR));
+        assert_eq!(
+            e.topology_failure(),
+            Some(&TopologyFailure::FaceStitchFailed)
+        );
 
-        let mut failed = false;
+        let mut failed = None;
         let missing = SolidError::unported("SmStitch::StitchVertexPairs", "heal.stitch_p2");
         assert_eq!(
-            cleanup_status(Err(missing.clone()), &mut failed),
+            ignored_keeping(Err::<(), _>(missing.clone()), &mut failed),
             Err(missing)
         );
-        assert!(!failed);
+        assert!(failed.is_none());
+        // with nothing kept, the failure has no cause
+        assert_eq!(caused(TopologyFailure::CurvesNotJoined, None).cause(), None);
     }
 
     #[test]
