@@ -364,6 +364,7 @@ impl Builder {
                 direction,
                 distance2: second.map(mm),
                 start_offset: None,
+                symmetric_offset: false,
                 through_all: through,
                 taper: None,
                 to: None,
@@ -514,6 +515,8 @@ impl Builder {
                     },
                     bodies: Vec::new(),
                     placements: Vec::new(),
+                    components: Vec::new(),
+                    occurrences: Vec::new(),
                 }
             }
             Some("circular") => {
@@ -539,6 +542,8 @@ impl Builder {
                     },
                     bodies: Vec::new(),
                     placements: Vec::new(),
+                    components: Vec::new(),
+                    occurrences: Vec::new(),
                 }
             }
             other => return Err(format!("{name}: a {} pattern is not rebuilt yet", other.unwrap_or("unknown").replace('_', " "))),

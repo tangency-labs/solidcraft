@@ -1,8 +1,9 @@
 //! Canvases (reference images on planes) and decals (images on planar faces).
 
 use serde_json::{Value, json};
-use solidcore_record::{Vec2, Vec3};
-use solidcraft_doc::canvas::{Canvas, CanvasAnchor, MAX_CANVAS_BYTES, base64_decode, base64_encode, image_info};
+use solidcore_record::{Plane, Vec2, Vec3};
+use solidcraft_doc::PlaneRef;
+use solidcraft_doc::canvas::{Canvas, CanvasAnchor, MAX_CANVAS_BYTES, image_info};
 use solidcraft_geom::prelude::*;
 
 use super::CommandSpec;
@@ -28,25 +29,25 @@ pub(super) fn canvas_reply(cmd: &str, r: impl serde::Serialize) -> Result<Value>
 }
 
 pub static COMMANDS: &[CommandSpec] = &[
-    CommandSpec::new("canvas.insert", "Canvas", crate::checked!("canvas.insert", add_canvas))
+    CommandSpec::new("canvas.insert", "Canvas", crate::checked!("canvas.insert", add_canvas)).begins_edit()
         .at("SKETCH", "INSERT")
         .icon("canvas")
         .contract(&INSERT_CONTRACT)
         .output(output_schema_for::<CanvasPlaced>)
-        .params("path | data (base64 PNG, JPEG or SVG; an SVG is drawn into a PNG); resolution?: pixels (an SVG's longest side, default 1024, at most 4096); plane?: XY|XZ|YZ|{face: [x,y,z]}|… (default XY); center?: [x,y] on the plane, or at?: [x,y,z]; width?: mm (default 100); angle?: deg; opacity?: 0…1 (default 0.5); flip?; name?; frame?: true ties the image to a construction rectangle around it (in the sketch being edited, which it must lie on, else in a new sketch), as canvas.frame_sketch does; \"auto\" frames it in the sketch being edited only when it lies on its plane"),
-    CommandSpec::new("canvas.decal", "Decal", crate::checked!("canvas.decal", add_decal))
+        .params("path: a PNG, JPEG or SVG file (an SVG is drawn into a PNG); resolution?: pixels (an SVG's longest side, default 1024, at most 4096); plane?: XY|XZ|YZ|{face: [x,y,z]}|… (default XY); center?: [x,y] on the plane, or at?: [x,y,z]; width?: mm (default 100); angle?: deg; opacity?: 0…1 (default 0.5); flip?; name?; frame?: true ties the image to a construction rectangle around it (in the sketch being edited, which it must lie on, else in a new sketch), as canvas.frame_sketch does; \"auto\" frames it in the sketch being edited only when it lies on its plane"),
+    CommandSpec::new("canvas.decal", "Decal", crate::checked!("canvas.decal", add_decal)).begins_edit()
         .at("SKETCH", "INSERT")
         .icon("decal")
         .contract(&DECAL_CONTRACT)
         .output(output_schema_for::<CanvasPlaced>)
-        .params("path | data (PNG, JPEG or SVG); resolution?: pixels (an SVG's longest side, default 1024); face: [x,y,z] on a planar face (the image is centred there), or the picked face as sketch.create's plane takes it ({face, body, index, path?}); width?: mm; angle?: deg; opacity?: (default 1); frame?: true ties the image to a construction rectangle around it, as canvas.frame_sketch does; \"auto\" only in the sketch being edited, when the face is on its plane. A decal is part of the model's look: URDF export writes it as a textured visual of its component's link"),
+        .params("path: a PNG, JPEG or SVG file; resolution?: pixels (an SVG's longest side, default 1024); face: [x,y,z] on a planar face (the image is centred there), or the picked face as sketch.create's plane takes it ({face, body, index, path?}); width?: mm; angle?: deg; opacity?: (default 1); frame?: true ties the image to a construction rectangle around it, as canvas.frame_sketch does; \"auto\" only in the sketch being edited, when the face is on its plane. A decal is part of the model's look: URDF export writes it as a textured visual of its component's link"),
     CommandSpec::new("canvas.edit", "Edit Canvas", crate::checked!("canvas.edit", edit_canvas))
         .at("SKETCH", "INSERT")
         .icon("canvas")
         .contract(&EDIT_CONTRACT)
         .output(output_schema_for::<CanvasEdited>)
         .params("canvas: id or name; center?, width?, angle?: deg, opacity?, flip?, visible?, name?, locked? (a locked canvas refuses center, width, angle, flip, Calibrate and Delete); anchor?: {sketch: id, bottom_left, bottom_right: point ids, top_left?: point id} | null (the sketch points the image's corners follow; without top_left the height follows the image; an anchored canvas refuses center, width, angle, Calibrate and Straighten)"),
-    CommandSpec::new("canvas.frame_sketch", "Frame Sketch", crate::checked!("canvas.frame_sketch", frame_sketch))
+    CommandSpec::new("canvas.frame_sketch", "Frame Sketch", crate::checked!("canvas.frame_sketch", frame_sketch)).begins_edit()
         .icon("canvas")
         .contract(&FRAME_SKETCH_CONTRACT)
         .output(output_schema_for::<CanvasFramed>)
@@ -68,24 +69,49 @@ pub static COMMANDS: &[CommandSpec] = &[
         .params("canvas: id or name"),
 ];
 
+/// The image file `path` names. An image is never taken as text in the parameters: a caller
+/// with the bytes in hand writes them to a file and gives its path.
 fn image_bytes(p: &Value, cmd: &str) -> Result<Vec<u8>> {
-    let b = if let Some(d) = str_(p, "data") {
-        if d.len() > MAX_CANVAS_BYTES * 4 / 3 + 16 {
-            return Err(bad(cmd, "the image is too large"));
+    if p.get("data").is_some() {
+        return Err(bad(cmd, "`data` is not taken: give the image file as `path`"));
+    }
+    let path = str_(p, "path").filter(|x| !x.trim().is_empty() && x.len() < 4096).ok_or_else(|| bad(cmd, "give the image file as `path`"))?;
+    let b = solidcraft_io::vfs::read(path, MAX_CANVAS_BYTES).map_err(|e| {
+        if e.kind() == std::io::ErrorKind::InvalidData && e.to_string() == "file too large" {
+            EngineError::Other(format!("{path}: {}", too_large(solidcraft_io::vfs::len(path).ok())))
+        } else {
+            EngineError::Other(format!("{path}: {e}"))
         }
-        base64_decode(d).ok_or_else(|| bad(cmd, "`data` is not base64"))?
-    } else {
-        let path = str_(p, "path").filter(|x| !x.trim().is_empty() && x.len() < 4096).ok_or_else(|| bad(cmd, "give `path` or `data`"))?;
-        solidcraft_io::vfs::read(path, MAX_CANVAS_BYTES).map_err(|e| EngineError::Other(format!("{path}: {e}")))?
-    };
+    })?;
     if b.len() > MAX_CANVAS_BYTES {
-        return Err(bad(cmd, "the image is too large"));
+        return Err(bad(cmd, too_large(Some(b.len() as u64))));
     }
     Ok(b)
 }
 
+/// The refusal of an image over [`MAX_CANVAS_BYTES`]: its size when known, the limit, and what to
+/// do about it (#17922).
+fn too_large(size: Option<u64>) -> String {
+    let megabytes = |bytes: u64| format!("{:.1} MB", bytes as f64 / f64::from(1u32 << 20));
+    let limit = megabytes(MAX_CANVAS_BYTES as u64);
+    let seen = size.map_or_else(String::new, |s| format!("{}; ", megabytes(s)));
+    format!(
+        "the image is too large ({seen}the limit for a canvas or decal image is {limit}). Use a smaller or more compressed image, for example by exporting the photo at a lower quality or resolution"
+    )
+}
+
 fn make(s: &mut Session, p: &Value, cmd: &str, decal: bool) -> Result<Value> {
-    let mut bytes = image_bytes(p, cmd)?;
+    let bytes = image_bytes(p, cmd)?;
+    place(s, p, cmd, decal, bytes)
+}
+
+/// Places the image `bytes` as `canvas.insert` (or, `decal`, `canvas.decal`) places a file, with
+/// the rest of `p`: for the app's own images (a board's printed look), which never pass through
+/// text.
+pub(crate) fn place(s: &mut Session, p: &Value, cmd: &str, decal: bool, mut bytes: Vec<u8>) -> Result<Value> {
+    if bytes.len() > MAX_CANVAS_BYTES {
+        return Err(bad(cmd, "the image is too large"));
+    }
     if super::canvas_svg::is_svg(&bytes) {
         let side = match p.get("resolution") {
             None | Some(Value::Null) => super::canvas_svg::DEFAULT_SIDE,
@@ -97,7 +123,17 @@ fn make(s: &mut Session, p: &Value, cmd: &str, decal: bool) -> Result<Value> {
         bytes = super::canvas_svg::rasterize(&bytes, side).map_err(|e| bad(cmd, e))?;
     }
     let (format, pixels) = image_info(&bytes).ok_or_else(|| bad(cmd, "only PNG, JPEG and SVG images can be inserted"))?;
-    let plane = super::sketch::plane_ref_numbers(s, p, cmd)?;
+    let mut plane = super::sketch::plane_ref_numbers(s, p, cmd)?;
+    let base = match &plane {
+        PlaneRef::Offset { base, .. } => base.as_ref(),
+        base => base,
+    };
+    if !decal && matches!(base, PlaneRef::Origin { name } if Plane::named(name) == Some(Plane::XZ)) {
+        // The sketch's XZ frame points down and away from Front view. Save the canvas's
+        // upright frame at insertion, leaving existing canvases and explicit frames alone.
+        // Flip the whole reference so an offset still moves along the original normal.
+        plane = PlaneRef::Flipped { base: Box::new(plane), about_y: false };
+    }
     let (vals, _) = s.doc.param_values();
     let pl = s.doc.resolve_plane_in(&vals, &plane, 0, s.active_component, Some(&s.model.state()))?;
     // A decal sits where the face was picked.
@@ -129,7 +165,7 @@ fn make(s: &mut Session, p: &Value, cmd: &str, decal: bool) -> Result<Value> {
         id,
         name: name.clone(),
         format: format.into(),
-        data: base64_encode(&bytes).into(),
+        data: bytes.into(),
         pixels,
         plane,
         center,
@@ -574,16 +610,124 @@ fn corners_in_sketch(s: &Session, c: &Canvas, sketch: u64, cmd: &str) -> Result<
 #[cfg(test)]
 mod tests {
     use serde_json::json;
-    use solidcraft_doc::canvas::base64_encode;
+    use solidcore_record::Vec3;
+    use solidcraft_geom::PlaneGeom as _;
 
     use crate::Session;
+    use crate::tests::image_file;
 
     fn png(w: u32, h: u32) -> String {
         let mut b = b"\x89PNG\r\n\x1a\n\0\0\0\rIHDR".to_vec();
         b.extend(w.to_be_bytes());
         b.extend(h.to_be_bytes());
         b.extend([8, 6, 0, 0, 0, 0, 0, 0, 0]);
-        base64_encode(&b)
+        image_file(&b)
+    }
+
+    #[test]
+    fn origin_plane_canvases_read_upright_from_their_named_views() {
+        for (name, right, up, normal) in [
+            ("XY", Vec3::X, Vec3::Y, Vec3::Z),
+            ("YZ", Vec3::Y, Vec3::Z, Vec3::X),
+            ("XZ", Vec3::X, Vec3::Z, -Vec3::Y),
+            ("front", Vec3::X, Vec3::Z, -Vec3::Y),
+        ] {
+            let mut s = Session::default();
+            s.execute("canvas.insert", &json!({"path": png(40, 20), "plane": name, "width": 40, "center": [3, 5]})).unwrap();
+            let check = |s: &Session| {
+                let canvas = &s.doc.canvases[0];
+                let (vals, _) = s.doc.param_values();
+                let plane = s.doc.canvas_plane(&vals, canvas, &s.model.state()).unwrap();
+                let [bl, br, tr, tl] = canvas.world_corners(&plane);
+                assert_eq!(br - bl, right * 40.0, "{name}: text reads left to right");
+                assert_eq!(tl - bl, up * 20.0, "{name}: the picture's top points up");
+                assert_eq!((bl + tr) * 0.5, right * 3.0 + up * 5.0, "{name}: centre follows the image axes");
+                assert_eq!(plane.normal(), normal, "{name}: the image faces its named view");
+            };
+            check(&s);
+            check(&Session::new(solidcraft_doc::Document::from_json(&s.doc.to_json()).unwrap()));
+        }
+    }
+
+    #[test]
+    fn front_canvases_keep_their_offset_pick_and_horizontal_flip_when_framed() {
+        for frame in [false, true] {
+            for flip in [false, true] {
+                let mut s = Session::default();
+                s.execute(
+                    "canvas.insert",
+                    &json!({
+                        "path": png(40, 20), "plane": "XZ", "offset": 7, "at": [3, 7, 5],
+                        "width": 40, "flip": flip, "frame": frame
+                    }),
+                )
+                .unwrap();
+                let check = |s: &Session| {
+                    let (vals, _) = s.doc.param_values();
+                    let canvas = &s.doc.canvases[0];
+                    assert_eq!(canvas.anchor.is_some(), frame);
+                    let [bl, br, tr, tl] = s.doc.canvas_corners(&vals, canvas, &s.model.state()).unwrap();
+                    assert_eq!((bl + tr) * 0.5, Vec3::new(3.0, 7.0, 5.0), "the picked centre and offset stay put");
+                    assert_eq!(br - bl, Vec3::X * if flip { -40.0 } else { 40.0 });
+                    assert_eq!(tl - bl, Vec3::Z * 20.0, "horizontal mirroring never turns the image upside down");
+                };
+                check(&s);
+                let reopened = solidcraft_io::read_design(&solidcraft_io::write_design_container(&s.doc).unwrap()).unwrap();
+                check(&Session::new(reopened));
+                s.execute("edit.undo", &json!({})).unwrap();
+                assert!(s.doc.canvases.is_empty());
+                assert!(s.doc.features.is_empty(), "the frame is part of the same undo step");
+            }
+        }
+    }
+
+    #[test]
+    fn saved_and_explicit_canvas_planes_keep_their_orientation() {
+        use solidcraft_doc::PlaneRef;
+
+        let mut s = Session::default();
+        s.execute("canvas.insert", &json!({"path": png(40, 20), "plane": "XZ", "width": 40})).unwrap();
+        // A canvas saved before the fix stores the original XZ plane, with its top along -Z.
+        s.doc_mut().canvases[0].plane = PlaneRef::Origin { name: "XZ".into() };
+        let reopened = solidcraft_io::read_design(&solidcraft_io::write_design_container(&s.doc).unwrap()).unwrap();
+        let mut s = Session::new(reopened);
+        s.execute(
+            "canvas.insert",
+            &json!({
+                "path": png(40, 20), "width": 40,
+                "plane": {"x_dir": [1, 0, 0], "y_dir": [0, 0, -1]}
+            }),
+        )
+        .unwrap();
+        s.execute("construct.plane.offset", &json!({"base": "XZ", "offset": 2, "name": "Reference"})).unwrap();
+        s.execute("canvas.insert", &json!({"path": png(40, 20), "plane": "Reference", "width": 40})).unwrap();
+        let (vals, _) = s.doc.param_values();
+        for canvas in &s.doc.canvases {
+            let plane = s.doc.canvas_plane(&vals, canvas, &s.model.state()).unwrap();
+            let [bl, _, _, tl] = canvas.world_corners(&plane);
+            assert_eq!(tl - bl, -Vec3::Z * 20.0, "saved, explicit and construction frames are not reoriented");
+        }
+    }
+
+    /// #17922: an image file over the cap says its size, the limit and what to do, for a decal and
+    /// a canvas alike.
+    #[test]
+    fn an_image_over_the_cap_says_its_size_and_the_limit() {
+        let dir = std::env::temp_dir().join(format!("sc-17922-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let big = dir.join("photo.jpg");
+        std::fs::write(&big, vec![0u8; 17 << 20]).unwrap();
+        let mut s = Session::default();
+        s.execute("solid.box", &json!({"length": 40, "width": 30, "height": 20})).unwrap();
+        let path = big.to_string_lossy();
+        for (command, params) in
+            [("canvas.decal", json!({"path": path, "face": [20, 15, 20]})), ("canvas.insert", json!({"path": path, "plane": "XY"}))]
+        {
+            let err = s.execute(command, &params).unwrap_err().to_string();
+            assert!(err.contains("17.0 MB") && err.contains("16.0 MB"), "{command}: {err}");
+            assert!(err.contains("smaller") && !err.contains("file too large"), "{command}: {err}");
+        }
+        std::fs::remove_dir_all(&dir).ok();
     }
 
     #[test]
@@ -595,10 +739,10 @@ mod tests {
             ("sketch.rectangle.two_point", json!({"p0": [0, 0], "p1": [40, 30]})),
             ("sketch.finish", json!({})),
             ("solid.extrude", json!({"distance": "height", "name": "Block"})),
-            ("canvas.insert", json!({"data": png(40, 20), "plane": {"face": [20, 15, 10]}, "name": "Face", "width": 20})),
-            ("canvas.decal", json!({"data": png(40, 20), "face": [20, 15, 10], "name": "Decal", "width": 20})),
-            ("canvas.insert", json!({"data": png(40, 20), "plane": {"face": [20, 15, 10]}, "offset": 2, "name": "Offset", "width": 20})),
-            ("canvas.insert", json!({"data": png(40, 20), "plane": {"face": [20, 15, 10], "fixed": true}, "name": "Fixed", "width": 20})),
+            ("canvas.insert", json!({"path": png(40, 20), "plane": {"face": [20, 15, 10]}, "name": "Face", "width": 20})),
+            ("canvas.decal", json!({"path": png(40, 20), "face": [20, 15, 10], "name": "Decal", "width": 20})),
+            ("canvas.insert", json!({"path": png(40, 20), "plane": {"face": [20, 15, 10]}, "offset": 2, "name": "Offset", "width": 20})),
+            ("canvas.insert", json!({"path": png(40, 20), "plane": {"face": [20, 15, 10], "fixed": true}, "name": "Fixed", "width": 20})),
         ] {
             s.execute(command, &params).unwrap_or_else(|e| panic!("{command}: {e}"));
         }
@@ -664,7 +808,7 @@ mod tests {
             s.execute(command, &params).unwrap_or_else(|e| panic!("{command}: {e}"));
         }
         for plane in ["XY", "Numeric", "Points", "Along", "AlongOffset", "Angled", "Derived"] {
-            s.execute("canvas.insert", &json!({"data": png(40, 20), "plane": plane, "name": plane, "width": 40})).unwrap();
+            s.execute("canvas.insert", &json!({"path": png(40, 20), "plane": plane, "name": plane, "width": 40})).unwrap();
         }
         let check = |s: &Session, station: f64| {
             let (vals, _) = s.doc.param_values();
@@ -711,7 +855,7 @@ mod tests {
     #[test]
     fn deleted_canvas_ids_are_not_reused_after_reopening() {
         let mut s = Session::default();
-        let params = json!({"data": png(10, 10)});
+        let params = json!({"path": png(10, 10)});
         let first = s.execute("canvas.insert", &params).unwrap()["canvas"].as_u64().unwrap();
         s.execute("canvas.delete", &json!({"canvas": first})).unwrap();
         let doc = solidcraft_doc::Document::from_json(&s.doc.to_json()).unwrap();
@@ -727,8 +871,8 @@ mod tests {
     #[test]
     fn a_locked_canvas_keeps_its_place_and_is_not_deleted() {
         let mut s = Session::default();
-        let id = s.execute("canvas.insert", &json!({"data": png(10, 10), "width": 50})).unwrap()["canvas"].as_u64().unwrap();
-        let other = s.execute("canvas.insert", &json!({"data": png(10, 10)})).unwrap()["canvas"].as_u64().unwrap();
+        let id = s.execute("canvas.insert", &json!({"path": png(10, 10), "width": 50})).unwrap()["canvas"].as_u64().unwrap();
+        let other = s.execute("canvas.insert", &json!({"path": png(10, 10)})).unwrap()["canvas"].as_u64().unwrap();
         s.execute("canvas.edit", &json!({"canvas": id, "locked": true})).unwrap();
         let locked = s.doc.canvases[0].clone();
         assert!(locked.locked);
@@ -767,7 +911,7 @@ mod tests {
     #[test]
     fn canvas_insert_edit_calibrate_save() {
         let mut s = Session::default();
-        let r = s.execute("canvas.insert", &json!({"data": png(400, 200), "plane": "XZ", "width": 80})).unwrap();
+        let r = s.execute("canvas.insert", &json!({"path": png(400, 200), "plane": "XZ", "width": 80})).unwrap();
         let id = r["canvas"].as_u64().unwrap();
         let c = s.doc.canvases[0].clone();
         assert_eq!(c.pixels, [400, 200]);
@@ -777,16 +921,19 @@ mod tests {
         assert!((s.doc.canvases[0].width - 200.0).abs() < 1e-9);
         s.execute("canvas.edit", &json!({"canvas": "Canvas1", "opacity": 0.8, "angle": 90})).unwrap();
         // Undo-able and saved with the design.
-        let back = solidcraft_doc::Document::from_json(&s.doc.to_json()).unwrap();
+        let back = solidcraft_io::read_design(&solidcraft_io::write_design_container(&s.doc).unwrap()).unwrap();
         assert_eq!(back.canvases, s.doc.canvases);
         s.execute("canvas.delete", &json!({"canvas": id})).unwrap();
         assert!(s.doc.canvases.is_empty());
         s.execute("edit.undo", &json!({})).unwrap();
         assert_eq!(s.doc.canvases.len(), 1);
-        assert!(s.execute("canvas.insert", &json!({"data": "bm9wZQ=="})).is_err());
+        // An image is a file: base64 text in `data` is not taken.
+        let refused = s.execute("canvas.insert", &json!({"data": "bm9wZQ=="})).unwrap_err().to_string();
+        assert!(refused.contains("data"), "{refused}");
+        assert!(s.execute("canvas.insert", &json!({"path": "bm9wZQ=="})).is_err());
         // A decal on the top face of a box.
         s.execute("solid.box", &json!({"length": 30, "width": 30, "height": 10})).unwrap();
-        let r = s.execute("canvas.decal", &json!({"data": png(10, 10), "face": [15, 15, 10], "width": 20})).unwrap();
+        let r = s.execute("canvas.decal", &json!({"path": png(10, 10), "face": [15, 15, 10], "width": 20})).unwrap();
         assert!(r["canvas"].is_u64());
     }
 
@@ -796,13 +943,13 @@ mod tests {
     fn a_decal_on_a_curved_face_says_the_face_is_curved() {
         let mut s = Session::default();
         s.execute("solid.cylinder", &json!({"radius": 10, "height": 10})).unwrap();
-        let curved = s.execute("canvas.decal", &json!({"data": png(10, 10), "face": [10, 0, 5], "width": 5})).unwrap_err().to_string();
+        let curved = s.execute("canvas.decal", &json!({"path": png(10, 10), "face": [10, 0, 5], "width": 5})).unwrap_err().to_string();
         assert!(curved.contains("curved or is not an exact plane"), "{curved}");
         assert!(!curved.contains("no longer exists"), "{curved}");
-        let nowhere = s.execute("canvas.decal", &json!({"data": png(10, 10), "face": [100, 100, 100], "width": 5})).unwrap_err().to_string();
+        let nowhere = s.execute("canvas.decal", &json!({"path": png(10, 10), "face": [100, 100, 100], "width": 5})).unwrap_err().to_string();
         assert!(nowhere.contains("no longer exists"), "{nowhere}");
         // The flat end of the same cylinder still takes a decal.
-        assert!(s.execute("canvas.decal", &json!({"data": png(10, 10), "face": [0, 0, 10], "width": 5})).is_ok());
+        assert!(s.execute("canvas.decal", &json!({"path": png(10, 10), "face": [0, 0, 10], "width": 5})).is_ok());
     }
 
     /// Where a point of the plane is on the image, as fractions (s, t) of its bottom and left
@@ -839,7 +986,7 @@ mod tests {
         ];
         for (flip, a, dir, target, turned) in cases {
             let mut s = Session::default();
-            s.execute("canvas.insert", &json!({"data": png(400, 200), "width": 80, "center": [10, 5], "angle": 12, "flip": flip})).unwrap();
+            s.execute("canvas.insert", &json!({"path": png(400, 200), "width": 80, "center": [10, 5], "angle": 12, "flip": flip})).unwrap();
             let before = s.doc.canvases[0].clone();
             let a = Vec2::new(a[0], a[1]);
             let b = a + Vec2::new(dir.cos(), dir.sin()) * 25.0;
@@ -869,7 +1016,7 @@ mod tests {
     #[test]
     fn canvas_straighten_refuses_bad_input_and_is_one_undo_step() {
         let mut s = Session::default();
-        s.execute("canvas.insert", &json!({"data": png(400, 200), "width": 80})).unwrap();
+        s.execute("canvas.insert", &json!({"path": png(400, 200), "width": 80})).unwrap();
         let before = s.doc.canvases.clone();
         for p in [
             json!({"canvas": "Canvas1", "a": [1, 1], "b": [1, 1]}),
@@ -934,7 +1081,7 @@ mod tests {
         s.execute("sketch.finish", &json!({})).unwrap();
         let corner = |k: &str| rect["corners"][k].as_str().unwrap().to_string();
         let id =
-            s.execute("canvas.insert", &json!({"data": png(40, 20), "plane": "XY", "width": 10, "name": "Pic"})).unwrap()["canvas"].as_u64().unwrap();
+            s.execute("canvas.insert", &json!({"path": png(40, 20), "plane": "XY", "width": 10, "name": "Pic"})).unwrap()["canvas"].as_u64().unwrap();
         let anchor =
             json!({"sketch": sketch, "bottom_left": corner("bottom_left"), "bottom_right": corner("bottom_right"), "top_left": corner("top_left")});
         s.execute("canvas.edit", &json!({"canvas": id, "anchor": anchor})).unwrap();
@@ -984,7 +1131,7 @@ mod tests {
         for flip in [false, true] {
             let mut s = Session::default();
             s.execute("solid.box", &json!({"length": 40, "width": 30, "height": 10, "corner": [0, 0, 0]})).unwrap();
-            let r = s.execute("canvas.decal", &json!({"data": png(40, 20), "face": [20, 15, 10], "width": 20, "angle": 30, "flip": flip})).unwrap();
+            let r = s.execute("canvas.decal", &json!({"path": png(40, 20), "face": [20, 15, 10], "width": 20, "angle": 30, "flip": flip})).unwrap();
             let id = r["canvas"].as_u64().unwrap();
             let before = world_corners(&s, id);
             let framed = s.execute("canvas.frame_sketch", &json!({"canvas": id})).unwrap();
@@ -1012,7 +1159,7 @@ mod tests {
         let sketch = s.execute("sketch.create", &json!({"plane": "XY"})).unwrap()["sketch"].as_u64().unwrap();
         s.execute("sketch.line", &json!({"points": [[-50, -50], [-40, -45]]})).unwrap();
         let curves = s.doc.sketch(sketch).unwrap().curves.len();
-        let r = s.execute("canvas.insert", &json!({"data": png(40, 20), "plane": "XY", "center": [30, 20], "width": 20, "frame": true})).unwrap();
+        let r = s.execute("canvas.insert", &json!({"path": png(40, 20), "plane": "XY", "center": [30, 20], "width": 20, "frame": true})).unwrap();
         let id = r["canvas"].as_u64().unwrap();
         assert_eq!(r["frame"]["sketch"].as_u64(), Some(sketch), "{r}");
         assert_eq!(s.active_sketch, Some(sketch), "the sketch stays open");
@@ -1045,7 +1192,9 @@ mod tests {
         assert!(s.doc.canvases.is_empty());
         assert_eq!(s.doc.sketch(sketch).unwrap().curves.len(), curves);
         // An image already on the open sketch's plane: Frame Sketch draws into that sketch.
-        let id = s.execute("canvas.insert", &json!({"data": png(40, 20), "plane": "XY", "width": 20})).unwrap()["canvas"].as_u64().unwrap();
+        let id = s.execute("canvas.insert", &json!({"path": png(40, 20), "plane": "XY", "width": 20})).unwrap()["canvas"].as_u64().unwrap();
+        assert!(s.active_sketch.is_none(), "standalone insertion finishes the previous sketch");
+        s.execute("sketch.edit", &json!({"sketch": sketch})).unwrap();
         let framed = s.execute("canvas.frame_sketch", &json!({"canvas": id})).unwrap();
         assert_eq!(framed["sketch"].as_u64(), Some(sketch), "{framed}");
         assert_eq!(s.doc.sketch(sketch).unwrap().curves.len(), curves + 4);
@@ -1055,16 +1204,16 @@ mod tests {
             (s.doc.canvases.len(), sk.points.len(), sk.curves.len(), sk.constraints.len())
         };
         let before = size(&s);
-        let e = s.execute("canvas.insert", &json!({"data": png(40, 20), "plane": "XZ", "width": 20, "frame": true})).unwrap_err().to_string();
+        let e = s.execute("canvas.insert", &json!({"path": png(40, 20), "plane": "XZ", "width": 20, "frame": true})).unwrap_err().to_string();
         assert!(e.contains("does not lie on the plane"), "{e}");
         assert_eq!(size(&s), before);
-        assert!(s.execute("canvas.insert", &json!({"data": png(40, 20), "frame": "yes"})).is_err());
+        assert!(s.execute("canvas.insert", &json!({"path": png(40, 20), "frame": "yes"})).is_err());
         // "auto", as the image tools send it: off the open sketch's plane the image is placed free,
         // on it the image is framed there.
-        let free = s.execute("canvas.insert", &json!({"data": png(40, 20), "plane": "XZ", "width": 20, "frame": "auto"})).unwrap();
+        let free = s.execute("canvas.insert", &json!({"path": png(40, 20), "plane": "XZ", "width": 20, "frame": "auto"})).unwrap();
         assert!(free.get("frame").is_none(), "{free}");
         let framed =
-            s.execute("canvas.insert", &json!({"data": png(40, 20), "plane": "XY", "center": [80, 20], "width": 20, "frame": "auto"})).unwrap();
+            s.execute("canvas.insert", &json!({"path": png(40, 20), "plane": "XY", "center": [80, 20], "width": 20, "frame": "auto"})).unwrap();
         assert_eq!(framed["frame"]["sketch"].as_u64(), Some(sketch), "{framed}");
     }
 
@@ -1079,7 +1228,7 @@ mod tests {
         let sketch = s.execute("sketch.create", &json!({"plane": "XY"})).unwrap()["sketch"].as_u64().unwrap();
         s.execute("sketch.rectangle.two_point", &json!({"p0": [0, 0], "p1": [50, 50]})).unwrap();
         let curves = s.doc.sketch(sketch).unwrap().curves.len();
-        let r = s.execute("canvas.insert", &json!({"data": png(40, 40), "plane": "XY", "center": [20, 30], "width": 100, "frame": true})).unwrap();
+        let r = s.execute("canvas.insert", &json!({"path": png(40, 40), "plane": "XY", "center": [20, 30], "width": 100, "frame": true})).unwrap();
         let id = r["canvas"].as_u64().unwrap();
         assert_eq!(r["frame"]["sketch"].as_u64(), Some(sketch), "{r}");
         assert_eq!(s.doc.sketch(sketch).unwrap().curves.len(), curves, "no rectangle of its own");
@@ -1091,19 +1240,97 @@ mod tests {
         );
     }
 
+    #[test]
+    fn framed_canvas_commands_continue_the_model_sketch_and_refusals_keep_its_history() {
+        for command in ["canvas.insert", "canvas.decal"] {
+            for frame in [json!(true), json!("auto")] {
+                let mut s = Session::default();
+                s.execute("solid.box", &json!({"length": 40, "width": 30, "height": 10, "corner": [0, 0, 0]})).unwrap();
+                let sketch = s.execute("sketch.create", &json!({"plane": {"face": [20, 15, 10]}})).unwrap()["sketch"].as_u64().unwrap();
+                s.execute("sketch.line", &json!({"points": [[-40, -30], [-30, -20]]})).unwrap();
+                assert!(s.prepare_edit_start(command, &json!({})).unwrap().is_none(), "the image form keeps its sketch receiver");
+                let svg =
+                    image_file(br#"<svg xmlns="http://www.w3.org/2000/svg" width="20" height="10"><rect width="20" height="10" fill="red"/></svg>"#);
+                let mut params = json!({"path": svg, "width": 10, "resolution": 32, "frame": frame});
+                if command == "canvas.decal" {
+                    params["face"] = json!([20, 15, 10]);
+                } else {
+                    params["plane"] = json!({"face": [20, 15, 10]});
+                }
+                assert!(s.prepare_edit_start(command, &params).unwrap().is_none());
+                let reply = s.execute(command, &params).unwrap();
+                assert_eq!(reply["frame"]["sketch"].as_u64(), Some(sketch), "{command}: {reply}");
+                assert_eq!(s.active_sketch, Some(sketch));
+                assert!(reply.get("finished_sketch").is_none());
+                assert!(s.take_sketch_finish_event().is_none());
+                let before = s.doc.to_json();
+                let history = (s.undo.len(), s.redo.len());
+                params["width"] = json!(0);
+                assert!(s.execute(command, &params).is_err());
+                assert_eq!(s.doc.to_json(), before);
+                assert_eq!((s.undo.len(), s.redo.len()), history);
+                assert_eq!(s.active_sketch, Some(sketch));
+                assert!(s.take_sketch_finish_event().is_none());
+            }
+        }
+    }
+
+    #[test]
+    fn standalone_canvas_commands_finish_the_current_model_sketch() {
+        for command in ["canvas.insert", "canvas.decal"] {
+            let mut s = Session::default();
+            s.execute("solid.box", &json!({"length": 40, "width": 30, "height": 10, "corner": [0, 0, 0]})).unwrap();
+            let sketch = s.execute("sketch.create", &json!({"plane": "XY"})).unwrap()["sketch"].as_u64().unwrap();
+            s.execute("sketch.line", &json!({"points": [[0, 0], [10, 0]]})).unwrap();
+            let mut params = json!({"path": png(40, 20), "width": 10});
+            if command == "canvas.decal" {
+                params["face"] = json!([20, 15, 10]);
+            }
+            let reply = s.execute(command, &params).unwrap();
+            assert!(s.active_sketch.is_none());
+            assert!(reply.get("finished_sketch").is_some());
+            assert_eq!(s.take_sketch_finish_event().unwrap().sketch, sketch);
+        }
+    }
+
+    #[test]
+    fn canvas_framing_finishes_a_sheet_sketch_before_creating_model_geometry() {
+        for command in ["canvas.insert", "canvas.decal", "canvas.frame_sketch"] {
+            let mut s = Session::default();
+            s.execute("solid.box", &json!({"length": 40, "width": 30, "height": 10, "corner": [0, 0, 0]})).unwrap();
+            let canvas = s.execute("canvas.insert", &json!({"path": png(40, 20), "plane": "XY", "width": 10})).unwrap()["canvas"].clone();
+            let drawing = s.execute("drawing.create", &json!({"name": "Paper"})).unwrap();
+            s.execute("drawing.sketch.create", &json!({"owner": drawing["sheets"][0]["id"], "name": "Sheet edit"})).unwrap();
+            s.execute("sketch.line", &json!({"points": [[10, 10], [20, 10]]})).unwrap();
+            // Focus the Model receiver while the Sheet editor remains open in its view.
+            s.model_focus = true;
+            let params = match command {
+                "canvas.frame_sketch" => json!({"canvas": canvas}),
+                "canvas.decal" => json!({"path": png(40, 20), "face": [20, 15, 10], "width": 10, "frame": true}),
+                _ => json!({"path": png(40, 20), "plane": "XY", "width": 10, "frame": true}),
+            };
+            let reply = s.execute(command, &params).unwrap();
+            assert_eq!(reply["finished_sketch"], "Sheet edit");
+            assert!(s.active_sheet_sketch.is_none());
+            assert!(s.active_sketch.is_none(), "the new Model frame is committed, with no overlapping edit");
+            assert!(matches!(s.take_sketch_finish_event().unwrap().domain, crate::SketchDomain::Sheet { .. }));
+            assert!(s.take_sketch_finish_event().is_none());
+        }
+    }
+
     /// An SVG decal is kept as the PNG it draws, at the resolution asked for.
     #[test]
     fn an_svg_decal_is_kept_as_the_png_it_draws() {
         let mut s = Session::default();
         s.execute("solid.box", &json!({"length": 40, "width": 30, "height": 10, "corner": [0, 0, 0]})).unwrap();
-        let svg = base64_encode(br#"<svg xmlns="http://www.w3.org/2000/svg" width="30" height="10"><rect width="30" height="10" fill="red"/></svg>"#);
-        let r = s.execute("canvas.decal", &json!({"data": svg, "face": [20, 15, 10], "width": 30, "resolution": 300})).unwrap();
+        let svg = image_file(br#"<svg xmlns="http://www.w3.org/2000/svg" width="30" height="10"><rect width="30" height="10" fill="red"/></svg>"#);
+        let r = s.execute("canvas.decal", &json!({"path": svg, "face": [20, 15, 10], "width": 30, "resolution": 300})).unwrap();
         assert_eq!(r["pixels"], json!([300, 100]));
         let c = s.doc.canvases.last().unwrap();
         assert_eq!(c.format, "png");
-        assert!(c.bytes().unwrap().starts_with(b"\x89PNG\r\n\x1a\n"));
+        assert!(c.bytes().starts_with(b"\x89PNG\r\n\x1a\n"));
         for resolution in [json!(0), json!(5000), json!("big")] {
-            assert!(s.execute("canvas.decal", &json!({"data": svg, "face": [20, 15, 10], "resolution": resolution})).is_err(), "{resolution}");
+            assert!(s.execute("canvas.decal", &json!({"path": svg, "face": [20, 15, 10], "resolution": resolution})).is_err(), "{resolution}");
         }
     }
 }

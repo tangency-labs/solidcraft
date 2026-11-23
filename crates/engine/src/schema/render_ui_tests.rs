@@ -64,7 +64,7 @@ fn result_view_schemas_and_the_key_check_agree() {
 
     let root = output_schema_for::<ResultViewResult>().as_value().clone();
     let keys: Vec<&String> = root["properties"].as_object().unwrap().keys().collect();
-    assert_eq!(keys, ["job", "view"], "the schema's keys, in its own order");
+    assert_eq!(keys, ["finished_sketch", "job", "view"], "the schema's keys, in its own order");
     assert_eq!(root["required"], json!(["view"]), "only the view is always there");
     // `job` is the identity the render commands already describe, and it is absent rather than null.
     let job = &root["properties"]["job"];

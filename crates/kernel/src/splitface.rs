@@ -452,7 +452,8 @@ fn tagged(name: &str, body: &Body) -> Result<(solidcraft_smlib::Brep, solidcraft
 }
 
 /// Split the given faces (indices in `body`'s face order) where the tool meets them. The solid
-/// is unchanged. A listed face the tool misses is an error naming it. The result's history is
+/// is unchanged. A listed face the tool misses is an error naming it; a tool that runs into the
+/// faces and ends inside them, cutting none through, is an error saying so. The result's history is
 /// over `[body]`: each piece of a split face is Split from it, every other face Kept.
 pub fn split_faces(body: &Body, faces: &[usize], tool: &SplitTool) -> Result<Body> {
     split_faces_with_map(body, faces, tool).map(|(b, _)| b)
@@ -468,8 +469,9 @@ pub fn split_faces_with_map(body: &Body, faces: &[usize], tool: &SplitTool) -> R
     Ok((b, map))
 }
 
-/// Split where the tool meets the listed faces (missing some is fine; missing all is an error),
-/// with the body face each face of the result came from.
+/// Split where the tool meets the listed faces (missing some is fine; missing all is an error,
+/// and so is stopping inside them without cutting any through), with the body face each face of
+/// the result came from.
 pub(crate) fn split_any(body: &Body, faces: &[usize], tool: &SplitTool) -> Result<(Body, Vec<usize>)> {
     split(body, faces, tool).map(|(b, map, _)| (b, map))
 }
@@ -500,7 +502,10 @@ fn split(body: &Body, faces: &[usize], tool: &SplitTool) -> Result<(Body, Vec<us
             .collect::<Option<_>>()
             .ok_or_else(|| failed(NAME, "a listed face is not in SMLib's body"))?;
         let refs: Vec<&solidcraft_smlib::ssi::Surface> = tools.iter().collect();
-        let (r, made) = sb.split_faces(&at, &refs).map_err(|e| failed(NAME, e))?.ok_or_else(missed)?;
+        let (r, made) = sb
+            .split_faces(&at, &refs)
+            .map_err(|e| if matches!(e, solidcraft_smlib::Error::ToolStopsShort) { stops_short(tool) } else { failed(NAME, e) })?
+            .ok_or_else(missed)?;
         let (out, h) = brought_back(NAME, body, &ob, &r)?;
         let map = h
             .faces
@@ -515,6 +520,17 @@ fn split(body: &Body, faces: &[usize], tool: &SplitTool) -> Result<(Body, Vec<us
         // An authored boundary: later rebuilds keep it.
         out.regularization_protected = true;
         Ok((out, map, made))
+    })
+}
+
+/// The refusal for a tool that runs into the faces and ends inside them, so it cuts nothing off.
+/// A face tool is already taken over its surface's whole extent ([`face_patch`]) and an open
+/// sketch curve past its ends, so extending them is no help.
+fn stops_short(tool: &SplitTool) -> KernelError {
+    invalid(match tool {
+        SplitTool::Face { .. } => "the tool face doesn't reach across the surface, even extended",
+        SplitTool::Curves { .. } => "the sketch curves don't reach across the surface, even extended",
+        SplitTool::Plane(_) => "the plane doesn't reach across the surface",
     })
 }
 
@@ -579,6 +595,28 @@ pub fn split_body(body: &Body, tool: &SplitTool) -> Result<Vec<Body>> {
     split_by_sheet(body, sheet, *face, &whole)
 }
 
+/// Split a body with faces of another body exactly as they are, bounded where they end and never
+/// extended (#9305): `faces` (in `sheet`'s face order) and `face` are the tool, and `face` gives
+/// the sides (parts on its back first, as [`split_body`]). The faces must join into one sheet:
+/// picks in separate pieces are refused. Faces that do not cut the body into closed solids (they
+/// end inside it, or miss it) are refused, so the body never comes back with a slit. Each part's history is over `[body]`.
+pub fn split_body_by_faces(body: &Body, sheet: &Body, face: usize, faces: &[usize]) -> Result<Vec<Body>> {
+    let _span = solidcraft_profile::span("kernel", "split_body_by_faces");
+    body.require_brep(SPLIT_BODY)?;
+    sheet.require_brep("a split tool")?;
+    let mut picked: Vec<usize> = faces.iter().copied().chain([face]).collect();
+    picked.sort_unstable();
+    picked.dedup();
+    if let Some(missing) = picked.iter().find(|f| **f >= sheet.face_count()) {
+        return Err(invalid(format!("the tool body has no face {missing}")));
+    }
+    let parts = split_by_sheet(body, sheet, face, &picked)?;
+    if !closed_solids(&parts)? {
+        return Err(invalid("the tool faces do not cut the body through"));
+    }
+    Ok(parts)
+}
+
 /// Whether `parts` are two or more parts, each one closed manifold solid (SMLib's exact
 /// topological test): a split that cut the body through.
 fn closed_solids(parts: &[Body]) -> Result<bool> {
@@ -621,7 +659,8 @@ fn split_by(body: &Body, tool: &SplitTool) -> Result<Vec<Body>> {
 /// The two heights are told apart by a tolerance of the body's own, never more than a quarter of
 /// the distance between them.
 pub fn face_split_if_on_face(tool: &Body, target: &Body, face: usize, plane: &Plane, start: f64, far: f64) -> Result<Option<Vec<Body>>> {
-    let (ops_target, order) = target.ops_body().ok_or_else(|| invalid("the To object is not a solid body"))?;
+    let target_form = target.ops_body().ok_or_else(|| invalid("the To object is not a solid body"))?;
+    let (ops_target, order) = &*target_form;
     let n = plane.normal();
     let mut out = Vec::new();
     for part in split_body(tool, &SplitTool::Face { body: target, face })? {
@@ -638,7 +677,8 @@ pub fn face_split_if_on_face(tool: &Body, target: &Body, face: usize, plane: &Pl
             .filter_map(|i| part.planar_face(i))
             .map(|p| solidcore_ops::cap::PlanarFace { origin: a3(p.origin), normal: a3(p.normal()) })
             .collect();
-        let (ops_part, part_order) = part.ops_body().ok_or_else(|| invalid("a piece of the prism is not a solid body"))?;
+        let part_form = part.ops_body().ok_or_else(|| invalid("a piece of the prism is not a solid body"))?;
+        let (ops_part, part_order) = &*part_form;
         match solidcore_ops::cap::prism_part(ops_target, order, face, ops_part, part_order, &planar, &section_edges(&part), &cut)
             .map_err(|e| KernelError::Failed(format!("split prism: {e}")))?
         {
@@ -1039,6 +1079,35 @@ mod tests {
         let v = volumes(&split_body(&cube, &SplitTool::Face { body: &sheet, face: leftmost(&sheet) }).unwrap());
         assert_eq!(v.len(), 2, "{v:?}");
         assert!(v.iter().all(|v| rel(*v, 500.0) < 1e-9), "{v:?}");
+    }
+
+    /// Split Body by picked faces as they are (#9305), against the picked face extended. The sheet
+    /// is a line at y = 5 from x = -3 to 5, then a line rising 1 in 2 to (13, 9), extruded from
+    /// z = -5 to 15; it crosses the cube 0…10 with a crease of about 26.6° at x = 5. The first
+    /// face extended is the plane y = 5: halves of 500. Both faces as they are leave under them
+    /// 10 · (5 · 5 + ∫ (5 + (x - 5) / 2) dx over x 5…10) = 10 · (25 + 25 + 6.25) = 562.5, and
+    /// 437.5 above. The first face alone ends inside the cube at x = 5, so it is refused, and a
+    /// face number the sheet does not have is refused.
+    #[test]
+    fn picked_faces_of_a_bent_sheet_split_as_they_are_not_extended() {
+        let p = |x: f64, y: f64| Vec2::new(x, y);
+        let chain = vec![Seg2::Line { a: p(-3.0, 5.0), b: p(5.0, 5.0) }, Seg2::Line { a: p(5.0, 5.0), b: p(13.0, 9.0) }];
+        let sheet = crate::extrude_sheet(&Plane::XY, &[chain], -5.0, 15.0).unwrap();
+        assert_eq!(sheet.face_count(), 2);
+        let first = leftmost(&sheet);
+        let second = 1 - first;
+        let cube = crate::box_solid(Vec3::ZERO, Vec3::new(10.0, 10.0, 10.0)).unwrap();
+        let extended = volumes(&split_body(&cube, &SplitTool::Face { body: &sheet, face: first }).unwrap());
+        assert!(extended.len() == 2 && extended.iter().all(|v| rel(*v, 500.0) < 1e-9), "{extended:?}");
+        for (face, faces) in [(first, vec![second]), (second, vec![first]), (first, vec![0, 1])] {
+            let parts = split_body_by_faces(&cube, &sheet, face, &faces).unwrap();
+            let v = volumes(&parts);
+            assert!(v.len() == 2 && rel(v[0], 437.5) < 1e-9 && rel(v[1], 562.5) < 1e-9, "{face} {faces:?}: {v:?}");
+            assert!(parts.iter().all(|b| b.smlib().unwrap().is_manifold_solid().unwrap()));
+        }
+        let e = split_body_by_faces(&cube, &sheet, first, &[]).unwrap_err().to_string();
+        assert!(e.contains("do not cut the body through"), "{e}");
+        assert!(split_body_by_faces(&cube, &sheet, first, &[7]).is_err());
     }
 
     /// A face of a creased sheet whose smooth part ends inside the body cuts with the whole sheet

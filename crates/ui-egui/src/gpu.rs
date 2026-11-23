@@ -9,9 +9,9 @@ use std::sync::{Arc, Mutex};
 use egui_wgpu::wgpu;
 pub use solidcraft_viewport_gpu::view::{
     AccessMap, BlockBuilder, BlockBytes, BlockTris, DrawStats, DrawStatsHandle, Frame, GpuImage, GpuScene, GpuTarget, INSTANCE_SIZE, InstanceLook,
-    InstancedMesh, LINE_SIZE, LOD_PX, LitEdges, MAX_PALETTE, Material, MovingLayer, PBR_SIZE, Palette, PaletteIndex, PlannedBody, Renderer,
-    SHARED_SIZE, SceneBlock, SceneSlot, SharedEdges, SharedTris, TRI_SIZE, TriClass, UploadError, extend_runs, level_for, lifted_width,
-    lit_line_style, placement_scale, runs_within, supersampled_size,
+    InstancedMesh, LINE_SIZE, LOD_PX, LitEdges, MAX_MOTIONS, MAX_PALETTE, Material, MotionRows, Motions, MovingLayer, PBR_SIZE, Palette,
+    PaletteIndex, PlannedBody, Renderer, SHARED_SIZE, SceneBlock, SceneSlot, SharedEdges, SharedTris, TRI_SIZE, TriClass, UNMOVED_SLOT, UploadError,
+    extend_runs, level_for, lifted_width, lit_line_style, placement_scale, runs_within, supersampled_size,
 };
 
 /// The part of a picture (as texture coordinates) that `rect` shows in a window `window`: the
@@ -778,12 +778,15 @@ fn offscreen(
         eye,
         ao_radius,
         ao_samples,
+        edge_px: solidcraft_viewport_gpu::view::EDGE_PX,
         ssaa,
         sky: [0.0; 4],
         hover_tint: [0.0; 3],
         selection_tint: [0.0; 3],
         hatch: Default::default(),
         moving: moving.map(|(scene, transform)| MovingLayer { key: 1, slot: Arc::new(Mutex::new(Some(scene))), transform }),
+        motions: Default::default(),
+        ground: None,
     });
     let texture = |format, usage| {
         device.create_texture(&wgpu::TextureDescriptor {

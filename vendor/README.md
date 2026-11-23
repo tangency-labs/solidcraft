@@ -75,6 +75,13 @@ SolidCraft changes to egui and eframe:
   hit test the next pass would start with, run between passes against the last pass's widgets
   (`begin_pass` and it share `prev_pass_hits`); `WidgetHits` is exported for it. Test:
   `widget_hits_at_matches_the_next_pass`.
+- `crates/eframe/src/native/file_storage.rs`, `crates/eframe/src/lib.rs`: `save_to_disk` writes
+  the settings (`app.ron`) to a temporary file beside them, syncs it and renames it over them, so
+  the file always holds one whole save. Two windows saving at once each truncated and wrote the
+  same file, and a shorter save left the tail of a longer one behind it (#4164). A rename the
+  system refuses is tried again for up to 150 ms (Windows refuses while another process has the
+  file open). `lib.rs` re-exports `save_to_disk`, hidden, for SolidCraft's tests
+  (`settings_saved_at_once_from_two_windows_stay_whole` in `apps/solidcraft/src/startup.rs`).
 
 The SolidCraft 3D view uses both to skip frames for pointer motion that changes nothing it
 draws (`viewport::follow_pointer_without_frame` in `crates/ui-egui`).
@@ -202,3 +209,23 @@ SolidCraft changes:
   device events (`Motion` x, `Motion` y, `MouseMotion`) per report on the window thread. The
   summed motion is exact; motion is flushed before a button or wheel change in the same report
   stream, so the order of events is kept.
+- `src/platform_impl/windows/event_loop.rs`, `dark_mode.rs`: on Windows 11, `WM_DPICHANGED`
+  applies the rect Windows suggests (`takes_suggested_rect`), for a window that isn't maximized
+  or fullscreen. The nudge loop took the monitor the window was still on for the new one and
+  pushed the rect back, so a window moved to a monitor with another scale stayed on the
+  boundary and its size drifted (#9336). Same behaviour as rust-windowing/winit#4341 (winit 0.31
+  only; the 0.30 backport rust-windowing/winit#4637 was closed), except that the maximized path
+  stays as it was. On this path a size the application writes through the `InnerSizeWriter` of
+  `ScaleFactorChanged` is not applied; nothing in SolidCraft writes one. The version query in
+  `dark_mode.rs` passes the structure size to `RtlGetVersion`, as its documentation requires,
+  since this choice depends on the build number it returns. eframe 0.37 requires
+  winit 0.30, so this cannot come from a newer winit.
+- `src/platform_impl/windows/monitor.rs` (`MonitorHandle::name`, `native_identifier`, `size`): a
+  monitor that has gone away (unplugged, a dock disconnected, a display change on resume) makes
+  `GetMonitorInfoW` fail with OS error 1461 (`ERROR_INVALID_MONITOR_HANDLE`), and these unwrapped
+  that error, so asking for the monitor list or going full screen ended the app (#20645). Now
+  `name` is `None`, `native_identifier` is empty and `size` is 0x0, the same kind of fallback
+  winit already uses in `position` ((0, 0)), `scale_factor` (96 DPI) and `video_modes` (none).
+- `src/platform_impl/windows/window.rs` (`set_fullscreen`): going full screen on such a monitor
+  would have sized the window 0x0, so it fills the monitor the window is on instead, and never
+  applies a zero-area size (#20645).

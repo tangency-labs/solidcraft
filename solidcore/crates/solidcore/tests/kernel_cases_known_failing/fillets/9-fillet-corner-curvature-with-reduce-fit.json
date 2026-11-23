@@ -1,0 +1,4 @@
+{
+  "issue": "tangency-labs/solidcraft#12645",
+  "reason": "solid.fillet builds `corner: g2` with `fit: exact` only"
+}

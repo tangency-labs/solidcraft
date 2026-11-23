@@ -2,7 +2,7 @@
   "cases": [
     {
       "name": "box_pointers_no_walk",
-      "upstream_ref": "source/SMLib/src/SmBrep.cpp:ValidatePointers/ContainsCoincidentTopology; tests/prog_test/src/smTopoTest.cpp:my_test_topology",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:ValidatePointers; tests/prog_test/src/smTopoTest.cpp:my_test_topology",
       "inputs": {
         "brep": {
           "kind": "box",
@@ -17,13 +17,12 @@
             3
           ]
         },
-        "coincidence": false,
         "walk": false
       }
     },
     {
       "name": "box_pointers_walk",
-      "upstream_ref": "source/SMLib/src/SmBrep.cpp:ValidatePointers/ContainsCoincidentTopology; tests/prog_test/src/smTopoTest.cpp:my_test_topology",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:ValidatePointers; tests/prog_test/src/smTopoTest.cpp:my_test_topology",
       "inputs": {
         "brep": {
           "kind": "box",
@@ -38,99 +37,32 @@
             3
           ]
         },
-        "coincidence": false,
-        "walk": true
-      }
-    },
-    {
-      "name": "box_coincidence_no_walk",
-      "upstream_ref": "source/SMLib/src/SmBrep.cpp:ValidatePointers/ContainsCoincidentTopology; tests/prog_test/src/smTopoTest.cpp:my_test_topology",
-      "inputs": {
-        "brep": {
-          "kind": "box",
-          "origin": [
-            0,
-            0,
-            0
-          ],
-          "size": [
-            1,
-            2,
-            3
-          ]
-        },
-        "coincidence": true,
-        "walk": false
-      }
-    },
-    {
-      "name": "box_coincidence_walk",
-      "upstream_ref": "source/SMLib/src/SmBrep.cpp:ValidatePointers/ContainsCoincidentTopology; tests/prog_test/src/smTopoTest.cpp:my_test_topology",
-      "inputs": {
-        "brep": {
-          "kind": "box",
-          "origin": [
-            0,
-            0,
-            0
-          ],
-          "size": [
-            1,
-            2,
-            3
-          ]
-        },
-        "coincidence": true,
         "walk": true
       }
     },
     {
       "name": "network_pointers_no_walk",
-      "upstream_ref": "source/SMLib/src/SmBrep.cpp:ValidatePointers/ContainsCoincidentTopology; tests/prog_test/src/smTopoTest.cpp:my_test_topology",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:ValidatePointers; tests/prog_test/src/smTopoTest.cpp:my_test_topology",
       "inputs": {
         "brep": {
           "kind": "network"
         },
-        "coincidence": false,
         "walk": false
       }
     },
     {
       "name": "network_pointers_walk",
-      "upstream_ref": "source/SMLib/src/SmBrep.cpp:ValidatePointers/ContainsCoincidentTopology; tests/prog_test/src/smTopoTest.cpp:my_test_topology",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:ValidatePointers; tests/prog_test/src/smTopoTest.cpp:my_test_topology",
       "inputs": {
         "brep": {
           "kind": "network"
         },
-        "coincidence": false,
-        "walk": true
-      }
-    },
-    {
-      "name": "network_coincidence_no_walk",
-      "upstream_ref": "source/SMLib/src/SmBrep.cpp:ValidatePointers/ContainsCoincidentTopology; tests/prog_test/src/smTopoTest.cpp:my_test_topology",
-      "inputs": {
-        "brep": {
-          "kind": "network"
-        },
-        "coincidence": true,
-        "walk": false
-      }
-    },
-    {
-      "name": "network_coincidence_walk",
-      "upstream_ref": "source/SMLib/src/SmBrep.cpp:ValidatePointers/ContainsCoincidentTopology; tests/prog_test/src/smTopoTest.cpp:my_test_topology",
-      "inputs": {
-        "brep": {
-          "kind": "network"
-        },
-        "coincidence": true,
         "walk": true
       }
     },
     {
       "name": "vertices_pointers_no_walk",
-      "upstream_ref": "source/SMLib/src/SmBrep.cpp:ValidatePointers/ContainsCoincidentTopology; tests/prog_test/src/smTopoTest.cpp:my_test_topology",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:ValidatePointers; tests/prog_test/src/smTopoTest.cpp:my_test_topology",
       "inputs": {
         "brep": {
           "kind": "vertices",
@@ -152,13 +84,12 @@
             ]
           ]
         },
-        "coincidence": false,
         "walk": false
       }
     },
     {
       "name": "vertices_pointers_walk",
-      "upstream_ref": "source/SMLib/src/SmBrep.cpp:ValidatePointers/ContainsCoincidentTopology; tests/prog_test/src/smTopoTest.cpp:my_test_topology",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:ValidatePointers; tests/prog_test/src/smTopoTest.cpp:my_test_topology",
       "inputs": {
         "brep": {
           "kind": "vertices",
@@ -180,69 +111,12 @@
             ]
           ]
         },
-        "coincidence": false,
-        "walk": true
-      }
-    },
-    {
-      "name": "vertices_coincidence_no_walk",
-      "upstream_ref": "source/SMLib/src/SmBrep.cpp:ValidatePointers/ContainsCoincidentTopology; tests/prog_test/src/smTopoTest.cpp:my_test_topology",
-      "inputs": {
-        "brep": {
-          "kind": "vertices",
-          "points": [
-            [
-              0,
-              0,
-              0
-            ],
-            [
-              1,
-              0,
-              0
-            ],
-            [
-              0,
-              0,
-              0
-            ]
-          ]
-        },
-        "coincidence": true,
-        "walk": false
-      }
-    },
-    {
-      "name": "vertices_coincidence_walk",
-      "upstream_ref": "source/SMLib/src/SmBrep.cpp:ValidatePointers/ContainsCoincidentTopology; tests/prog_test/src/smTopoTest.cpp:my_test_topology",
-      "inputs": {
-        "brep": {
-          "kind": "vertices",
-          "points": [
-            [
-              0,
-              0,
-              0
-            ],
-            [
-              1,
-              0,
-              0
-            ],
-            [
-              0,
-              0,
-              0
-            ]
-          ]
-        },
-        "coincidence": true,
         "walk": true
       }
     },
     {
       "name": "points_pointers_no_walk",
-      "upstream_ref": "source/SMLib/src/SmBrep.cpp:ValidatePointers/ContainsCoincidentTopology; tests/prog_test/src/smTopoTest.cpp:my_test_topology",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:ValidatePointers; tests/prog_test/src/smTopoTest.cpp:my_test_topology",
       "inputs": {
         "brep": {
           "kind": "points",
@@ -266,13 +140,12 @@
             ]
           ]
         },
-        "coincidence": false,
         "walk": false
       }
     },
     {
       "name": "points_pointers_walk",
-      "upstream_ref": "source/SMLib/src/SmBrep.cpp:ValidatePointers/ContainsCoincidentTopology; tests/prog_test/src/smTopoTest.cpp:my_test_topology",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:ValidatePointers; tests/prog_test/src/smTopoTest.cpp:my_test_topology",
       "inputs": {
         "brep": {
           "kind": "points",
@@ -296,67 +169,6 @@
             ]
           ]
         },
-        "coincidence": false,
-        "walk": true
-      }
-    },
-    {
-      "name": "points_coincidence_no_walk",
-      "upstream_ref": "source/SMLib/src/SmBrep.cpp:ValidatePointers/ContainsCoincidentTopology; tests/prog_test/src/smTopoTest.cpp:my_test_topology",
-      "inputs": {
-        "brep": {
-          "kind": "points",
-          "vertices": [
-            [
-              0.5,
-              0,
-              0,
-              1e-06
-            ]
-          ],
-          "lines": [
-            [
-              0,
-              0,
-              0,
-              1,
-              0,
-              0,
-              1e-06
-            ]
-          ]
-        },
-        "coincidence": true,
-        "walk": false
-      }
-    },
-    {
-      "name": "points_coincidence_walk",
-      "upstream_ref": "source/SMLib/src/SmBrep.cpp:ValidatePointers/ContainsCoincidentTopology; tests/prog_test/src/smTopoTest.cpp:my_test_topology",
-      "inputs": {
-        "brep": {
-          "kind": "points",
-          "vertices": [
-            [
-              0.5,
-              0,
-              0,
-              1e-06
-            ]
-          ],
-          "lines": [
-            [
-              0,
-              0,
-              0,
-              1,
-              0,
-              0,
-              1e-06
-            ]
-          ]
-        },
-        "coincidence": true,
         "walk": true
       }
     },
@@ -572,82 +384,37 @@
     },
     {
       "name": "grid_1_pointers",
-      "upstream_ref": "source/SMLib/src/SmBrepData.cpp:SmBrepConstructor; source/SMLib/src/SmBrep.cpp:ValidatePointers/ContainsCoincidentTopology",
+      "upstream_ref": "source/SMLib/src/SmBrepData.cpp:SmBrepConstructor; source/SMLib/src/SmBrep.cpp:ValidatePointers",
       "inputs": {
-        "grid_faces": 1,
-        "coincidence": false
-      }
-    },
-    {
-      "name": "grid_1_coincidence",
-      "upstream_ref": "source/SMLib/src/SmBrepData.cpp:SmBrepConstructor; source/SMLib/src/SmBrep.cpp:ValidatePointers/ContainsCoincidentTopology",
-      "inputs": {
-        "grid_faces": 1,
-        "coincidence": true
+        "grid_faces": 1
       }
     },
     {
       "name": "grid_2_pointers",
-      "upstream_ref": "source/SMLib/src/SmBrepData.cpp:SmBrepConstructor; source/SMLib/src/SmBrep.cpp:ValidatePointers/ContainsCoincidentTopology",
+      "upstream_ref": "source/SMLib/src/SmBrepData.cpp:SmBrepConstructor; source/SMLib/src/SmBrep.cpp:ValidatePointers",
       "inputs": {
-        "grid_faces": 2,
-        "coincidence": false
-      }
-    },
-    {
-      "name": "grid_2_coincidence",
-      "upstream_ref": "source/SMLib/src/SmBrepData.cpp:SmBrepConstructor; source/SMLib/src/SmBrep.cpp:ValidatePointers/ContainsCoincidentTopology",
-      "inputs": {
-        "grid_faces": 2,
-        "coincidence": true
+        "grid_faces": 2
       }
     },
     {
       "name": "grid_8_pointers",
-      "upstream_ref": "source/SMLib/src/SmBrepData.cpp:SmBrepConstructor; source/SMLib/src/SmBrep.cpp:ValidatePointers/ContainsCoincidentTopology",
+      "upstream_ref": "source/SMLib/src/SmBrepData.cpp:SmBrepConstructor; source/SMLib/src/SmBrep.cpp:ValidatePointers",
       "inputs": {
-        "grid_faces": 8,
-        "coincidence": false
-      }
-    },
-    {
-      "name": "grid_8_coincidence",
-      "upstream_ref": "source/SMLib/src/SmBrepData.cpp:SmBrepConstructor; source/SMLib/src/SmBrep.cpp:ValidatePointers/ContainsCoincidentTopology",
-      "inputs": {
-        "grid_faces": 8,
-        "coincidence": true
+        "grid_faces": 8
       }
     },
     {
       "name": "grid_32_pointers",
-      "upstream_ref": "source/SMLib/src/SmBrepData.cpp:SmBrepConstructor; source/SMLib/src/SmBrep.cpp:ValidatePointers/ContainsCoincidentTopology",
+      "upstream_ref": "source/SMLib/src/SmBrepData.cpp:SmBrepConstructor; source/SMLib/src/SmBrep.cpp:ValidatePointers",
       "inputs": {
-        "grid_faces": 32,
-        "coincidence": false
-      }
-    },
-    {
-      "name": "grid_32_coincidence",
-      "upstream_ref": "source/SMLib/src/SmBrepData.cpp:SmBrepConstructor; source/SMLib/src/SmBrep.cpp:ValidatePointers/ContainsCoincidentTopology",
-      "inputs": {
-        "grid_faces": 32,
-        "coincidence": true
+        "grid_faces": 32
       }
     },
     {
       "name": "grid_128_pointers",
-      "upstream_ref": "source/SMLib/src/SmBrepData.cpp:SmBrepConstructor; source/SMLib/src/SmBrep.cpp:ValidatePointers/ContainsCoincidentTopology",
+      "upstream_ref": "source/SMLib/src/SmBrepData.cpp:SmBrepConstructor; source/SMLib/src/SmBrep.cpp:ValidatePointers",
       "inputs": {
-        "grid_faces": 128,
-        "coincidence": false
-      }
-    },
-    {
-      "name": "grid_128_coincidence",
-      "upstream_ref": "source/SMLib/src/SmBrepData.cpp:SmBrepConstructor; source/SMLib/src/SmBrep.cpp:ValidatePointers/ContainsCoincidentTopology",
-      "inputs": {
-        "grid_faces": 128,
-        "coincidence": true
+        "grid_faces": 128
       }
     }
   ]

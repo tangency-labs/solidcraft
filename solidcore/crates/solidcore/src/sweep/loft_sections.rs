@@ -15,8 +15,9 @@
 //! | `circle_breaks` (private)  | (none; SolidCraft's `numbered::circle_breaks`) |
 //!
 //! **Winding.** Each section winds the way the section before it does about the normal they
-//! share (its plane's normal, turned over where it faces back from the one before), so sections
-//! whose planes turn on round the loft (a bar bent half a turn) keep one winding.
+//! share (its plane's normal, turned over where it faces back from the one before, as
+//! [`crate::geom::plane_height::faces_back`] decides), so sections whose planes turn on round the
+//! loft (a bar bent half a turn, a bend of a quarter turn) keep one winding.
 //!
 //! **Pairing.** A loft's side faces run from a point of one section to a point of the next, so
 //! every section needs the same number of vertices, in the same order round. Each section that
@@ -2025,9 +2026,13 @@ pub fn match_loft_sections(
     // takes one normal onto the other.
     let (mut normal, mut axis) = (first_normal, first.x);
     let mut wound: Vec<Wound> = Vec::new();
+    let mut before: Option<Vec3> = None;
     for s in sections {
         let pn = cross3(s.x, s.y);
-        let back = dot3(pn, normal) < 0.0;
+        let middle = to_world(s.origin, s.x, s.y, centroid(&s.segs));
+        let back =
+            before.is_some_and(|c| crate::geom::plane_height::faces_back(normal, c, pn, middle));
+        before = Some(middle);
         let n = if back { pn * -1.0 } else { pn };
         axis = carried(axis, normal, n);
         normal = n;

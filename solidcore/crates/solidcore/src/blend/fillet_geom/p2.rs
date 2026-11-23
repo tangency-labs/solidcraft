@@ -108,8 +108,10 @@
 //!   face tolerance (`clone_for_evaluation`, not the copy constructor), through
 //!   `BrepFaceServices` with the face's handle, so the surface cache is the face's
 //!   trimmed one made on `target`, as `smsurf_GetSurfaceCache` finds it through
-//!   `GetFace()`. The drop, the lift and the re-drop share one services object, so the
-//!   cache the first one makes is the one the others use. Upstream keeps that cache in
+//!   `GetFace()`. The drop and the re-drop share one services object, so the cache the
+//!   first one makes is the one the other uses; the lifts read the surface's own
+//!   continuities and make no cache (upstream's `LiftCurve` reads the cache's arrays
+//!   through `smsurf_GetSurfaceCache`). Upstream keeps that cache in
 //!   the surface's slot (`GetCacheObj`; `SM_USE_GLOBAL_CACHE` is off), even when it is
 //!   the plain cache `smsurf_GetSurfaceCache` falls back to after a failed trimmed
 //!   build: `CacheMakeOrValidate(SM_OC_TRIMSRF, ..)` returns it as it is, and remakes
@@ -117,10 +119,9 @@
 //!   changes `target` between these calls. The lift of the concave `NxN` cubic
 //!   interpolant runs after `sm_CreateCubicRailRailInterpolant`, which may change
 //!   `target` (its `ComputeUVPoint` can make UV trim curves, and `RailRailIntersect`
-//!   runs on it). A `BrepFaceServices` keeps its caches only over an unchanged B-rep,
-//!   so that lift makes the face's cache again from the face as it is then; upstream
-//!   reuses the slot's cache unless the face was marked modified. The difftest does
-//!   not reach that lift (the shim's corner is `SM_FCR_UNKNOWN`). The copy keeps the
+//!   runs on it). Upstream's lift reuses the slot's cache there unless the face was
+//!   marked modified; the port's makes none. The difftest does not reach that lift (the
+//!   shim's corner is `SM_FCR_UNKNOWN`). The copy keeps the
 //!   face tolerance it had when copied: a cache build whose `CreateUVTrimCurves` raises
 //!   the face's tolerance (even on failure) leaves later calls reading the old value
 //!   through the copy, where `pSurf` reads `GetFace()->GetTolerance()` live
@@ -3437,10 +3438,11 @@ impl FilletBrep {
             as_face(self.fillet_vertex(v)?.point_class_object(), OP)?.ok_or_else(|| missing(OP))?;
         let other_face = as_face(self.fillet_vertex(mate)?.point_class_object(), OP)?
             .ok_or_else(|| missing(OP))?;
-        let cp_vertex = corners
-            .corner(corner)?
-            .filleted_vertex()
-            .ok_or_else(|| missing(OP))?;
+        let owner = corners.corner(corner)?;
+        let at_cliff = owner
+            .blend
+            .is_some_and(crate::blend::blend_corner::BlendCorner::is_cliff_join);
+        let cp_vertex = owner.filleted_vertex().ok_or_else(|| missing(OP))?;
 
         let geoms = self.vertex_fillet_geoms(v)?;
         if geoms.is_empty() {
@@ -3497,6 +3499,15 @@ impl FilletBrep {
                 // surface the edge use's parameters are not on. Its foot is the vertex stepped
                 // into the edge use's face, taken to the nearest point of the rolled-over edge
                 // (on the face beyond) and dropped on that face's surface.
+                // The join is on the supports continued across the sharp rim.
+                // Project onto the infinite plane. A trimmed drop would pin this
+                // foot to the old rim and shorten the chord.
+                if at_cliff {
+                    if let SurfaceKind::Plane(plane) = base.kind() {
+                        *slot = plane.project_point_to_uv_domain(b.point + bin);
+                        continue;
+                    }
+                }
                 if let Some(onto) = fs.rolled_faces.get(ii).copied().flatten() {
                     let tangency = fs.tangency_tolerance;
                     let foot = b.point + bin;
@@ -3584,9 +3595,13 @@ impl FilletBrep {
 
             let (vu, tsect) = self.rail_end_tsect(v, Some(g), None, OP)?;
             let fs = solvers.solver(sid)?;
-            let domain1 = solver_surface(fs, 0, OP)?.natural_uv_domain_with_nurb(k)?;
-            let domain2 = solver_surface(fs, 1, OP)?.natural_uv_domain_with_nurb(k)?;
+            let mut domain1 = solver_surface(fs, 0, OP)?.natural_uv_domain_with_nurb(k)?;
+            let mut domain2 = solver_surface(fs, 1, OP)?.natural_uv_domain_with_nurb(k)?;
             let [uv0, uv1] = uvs;
+            if at_cliff {
+                domain1.add_point(uv0);
+                domain2.add_point(uv1);
+            }
             let (found, tsect) = point_on_plane_solve(
                 k,
                 solvers.solver_ops_mut(sid)?,
@@ -3639,10 +3654,17 @@ impl FilletBrep {
             if let Some(first) = first {
                 let uv_first = tsect.uv_pos(srf(first, OP)?);
                 let uv_other = tsect.uv_pos(other_srf(first, OP)?);
-                let p_first =
-                    face_surface(target, Some(first_face), OP)?.evaluate_point(k, uv_first)?;
-                let p_other =
-                    face_surface(target, Some(other_face), OP)?.evaluate_point(k, uv_other)?;
+                let foot_on_support = |face, uv| -> Result<Point3> {
+                    let surface = face_surface(target, Some(face), OP)?;
+                    if at_cliff && matches!(surface.kind(), SurfaceKind::Plane(_)) {
+                        let mut extended = surface.clone_for_evaluation()?;
+                        crate::surface::surface::p3::set_out_of_bounds_enabled(&mut extended, true);
+                        return extended.evaluate_point(k, uv);
+                    }
+                    surface.evaluate_point(k, uv)
+                };
+                let p_first = foot_on_support(first_face, uv_first)?;
+                let p_other = foot_on_support(other_face, uv_other)?;
                 self.set_processed(v, uv_first, p_first)?;
                 self.set_processed(mate, uv_other, p_other)?;
                 ended = true;
@@ -3848,7 +3870,7 @@ impl FilletBrep {
     /// curve; `SM_ERR` when a vertex does not drop onto its rail within 100 times the
     /// tolerance or a drop gives other than one UV curve; those of the evaluations,
     /// constructions, lifts and `SmSurface::DropCurve` (and of the face's surface cache
-    /// they make); those of [`CornerLookup::corner`] (`corners`
+    /// the drops make); those of [`CornerLookup::corner`] (`corners`
     /// resolves `opt_corner`) and of the corner's `TestRailRailInterpolationCurve`.
     pub fn calc_rail_rail_interpolation(
         &mut self,
@@ -3971,7 +3993,7 @@ impl FilletBrep {
             .original_face()
             .ok_or_else(|| missing(OP))?;
         // the face's own surface (evaluated as a copy that keeps its owner and the face
-        // tolerance: the drops and lifts below make its trimmed surface cache on `target`
+        // tolerance: the drops below make its trimmed surface cache on `target`
         // through the face, as `smsurf_GetSurfaceCache` reaches `GetFace()`; the cubic
         // interpolant needs the target B-rep mutably)
         let face_srf = face2::surface(target, face)?
@@ -4123,10 +4145,10 @@ impl FilletBrep {
             )?
         };
 
-        // The drop, the lift and the re-drop share the face's surface cache: upstream
-        // keeps it in the surface's cache slot, the plain cache smsurf_GetSurfaceCache
-        // falls back to when the trimmed build fails included, and nothing edits the face
-        // between these calls
+        // The drop and the re-drop share the face's surface cache (the lift reads the
+        // surface's own continuities and makes none): upstream keeps it in the surface's
+        // cache slot, the plain cache smsurf_GetSurfaceCache falls back to when the
+        // trimmed build fails included, and nothing edits the face between these calls
         let mut services = BrepFaceServices::new(target);
 
         // p3DCurve, an SmBSplineCurve: a B-spline, or the line / conic iso curve
@@ -4165,15 +4187,13 @@ impl FilletBrep {
         if !create_crv_on_3d || project_and_lift {
             // Lift the 3d curve
             let uv = uv_curve.as_ref().ok_or_else(|| missing(OP))?;
-            let lifted = face_srf.lift_curve_with_context(
+            let lifted = face_srf.lift_curve(
                 k,
                 &uv_domain,
                 uv,
                 &uv.natural_interval(),
                 approx_tol3d(k, tol),
                 false,
-                &mut services,
-                handle,
             )?;
             let mut c3 = lifted.curve;
 
@@ -4264,19 +4284,17 @@ impl FilletBrep {
                         )
                     })?;
                     let new_uv = Curve::from(new_uv);
-                    // Lift the UV-curve (on the face's surface again; the interpolant
-                    // may have changed `target`, so its cache is made again from the
-                    // face as it is now, where upstream reuses the one its surface keeps
-                    // unless the face was marked modified)
-                    let lifted = face_srf.lift_curve_with_context(
+                    // Lift the UV-curve (on the face's surface again; the lift reads the
+                    // surface's own continuities and makes no cache, where upstream's
+                    // reuses the cache its surface keeps unless the face was marked
+                    // modified)
+                    let lifted = face_srf.lift_curve(
                         k,
                         &uv_domain,
                         &new_uv,
                         &new_uv.natural_interval(),
                         approx_tol3d(k, tol),
                         false,
-                        &mut BrepFaceServices::new(target),
-                        handle,
                     )?;
                     curve_3d = Some(lifted.curve);
                     uv_curve = Some(new_uv);
@@ -4835,11 +4853,11 @@ mod tests {
             .unwrap_err();
         // the NULL corner (`CornerLookup::corner`, p1): a stage failure (#15034)
         assert_eq!(
-            (e.operation(), e.blend_failure()),
             (
-                "blend::fillet_geom::p1::CornerLookup::corner",
-                Some(&BlendFailure::StageFailed)
+                e.operation(),
+                e.kind() == crate::error::ErrorKind::StageFailed && e.is_defect()
             ),
+            ("blend::fillet_geom::p1::CornerLookup::corner", true),
             "{e:?}"
         );
         assert_eq!(e.upstream_status(), Some(SM_ERR_NULL_POINTER));
@@ -4849,11 +4867,11 @@ mod tests {
             .calc_set_back_vert(&k, v, CornerLookup::table(&[]), &mut solvers, &target)
             .unwrap_err();
         assert_eq!(
-            (e.operation(), e.blend_failure()),
             (
-                "blend::fillet_geom::p1::CornerLookup::corner",
-                Some(&BlendFailure::StageFailed)
+                e.operation(),
+                e.kind() == crate::error::ErrorKind::StageFailed && e.is_defect()
             ),
+            ("blend::fillet_geom::p1::CornerLookup::corner", true),
             "{e:?}"
         );
         assert_eq!(e.upstream_status(), Some(SM_ERR_NULL_POINTER));

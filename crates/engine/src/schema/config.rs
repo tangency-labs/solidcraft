@@ -179,6 +179,12 @@ pub struct ConfigRowEditParams {
     /// be deleted while the table has rules. Default: false.
     #[serde(default)]
     pub delete: Option<bool>,
+    /// Move the row, which must exist, to this place in the table (0 is the first row); the other
+    /// rows keep their order. `from`, `values` and `rename` are then not used. Default: the row
+    /// stays where it is.
+    #[serde(default, deserialize_with = "rule_index", skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "u64", range(min = 0))]
+    pub index: Option<u64>,
 }
 
 /// Add, replace, delete or move the configuration table's rules, which drive parameters and

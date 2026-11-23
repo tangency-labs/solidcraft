@@ -58,6 +58,7 @@
 //!   the `USE_VOLUMES` branch).
 
 use crate::curve::curve::p2::Curve;
+use crate::error::surface::SurfaceFailure;
 use crate::error::{ignore_status, Result, SolidError};
 use crate::geom::axis2_placement::Axis2Placement;
 use crate::geom::extent1d::Extent1d;
@@ -190,9 +191,9 @@ pub const fn are_equal_nurb_volumes(
 /// Always `SM_ERR`.
 pub fn load_nlib_transform(t: &Transform, volume: &mut BSplineVolume) -> Result<()> {
     let _ = (t, volume);
-    Err(SolidError::surface_failed(
+    Err(SolidError::surface(
         OP_LOAD,
-        "a B-spline volume cannot load a transform",
+        SurfaceFailure::BSplineVolumeUnsupported,
     ))
 }
 
@@ -316,9 +317,9 @@ impl BSplineVolume {
         opts: &EvalOptions,
     ) -> Result<Vec<Vec3>> {
         let _ = (param_point, n, opts);
-        Err(SolidError::surface_failed(
+        Err(SolidError::surface(
             OP_EVAL,
-            "a B-spline volume has no evaluation",
+            SurfaceFailure::BSplineVolumeUnsupported,
         ))
     }
 
@@ -430,9 +431,9 @@ impl BSplineVolume {
         param_domain: Option<&Extent3d>,
     ) -> Result<Curve> {
         let _ = (constant_params, iso_param1, iso_param2, tol3d, param_domain);
-        Err(SolidError::surface_failed(
+        Err(SolidError::surface(
             OP_ISO,
-            "a B-spline volume has no iso-parametric curves",
+            SurfaceFailure::BSplineVolumeUnsupported,
         ))
     }
 
@@ -569,9 +570,9 @@ impl BSplineVolume {
     /// Always `SM_ERR`.
     pub fn read_from_db(version: u64) -> Result<Self> {
         let _ = version;
-        Err(SolidError::surface_failed(
+        Err(SolidError::surface(
             OP_READ,
-            "a B-spline volume cannot be read",
+            SurfaceFailure::BSplineVolumeUnsupported,
         ))
     }
 }
