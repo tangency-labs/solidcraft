@@ -526,7 +526,18 @@ impl<'t> Assembly<'t> {
     /// torus) the edge's distance from it is measured along the edge before its pcurve is made,
     /// and the edge's tolerance covers it. A spline face's gaps are measured on the pcurves its
     /// kernel makes (`raise_edges`): an iterative nearest point may settle elsewhere on it.
-    fn measure_edges(&mut self, surface: &BSurface, edge_loops: &[Vec<(u32, bool)>]) -> R<()> {
+    ///
+    /// `form_box` is the face's box on its NURBS form where it has one (`form::surface_within`).
+    /// The form ends on a quarter line its boundary runs past by up to the file's tolerance, so
+    /// an edge that runs past lies off the face as the record keeps it (the label over the
+    /// form's box) by more than off the label: that gap is measured too, to the label's point at
+    /// the nearest parameters in the box, and the edge's pcurve tolerance covers it, as it covers
+    /// a gap to the label ([`Self::cover_edge`]), up to the file's tolerance: the form ends short
+    /// of the boundary by no more than that, and pcurves are never made looser than the file
+    /// states. Its closed-form pcurve then has its ends put in the box, which the pcurves'
+    /// construction asks for; the record's tolerances cover the move as before (`onto_form`,
+    /// `raise_edges`).
+    fn measure_edges(&mut self, surface: &BSurface, edge_loops: &[Vec<(u32, bool)>], form_box: Option<[[f64; 2]; 2]>) -> R<()> {
         // Only where the nearest point is in closed form: on a spline the search may settle on
         // another part of the surface, or on its boundary for a point a hair past it, and report a
         // gap the edge does not have (2.9 mm on Poppy Humanoid's leg shells, whose edges lie within
@@ -545,6 +556,41 @@ impl<'t> Assembly<'t> {
         }
         let on = SurfaceEval::new(surface).map_err(|m| m.to_string())?;
         let starts = crate::kernel::Starts::default();
+        let period = on.domain().period;
+        // The form's box in the label's angles, along the directions that are angles (a cylinder's
+        // or cone's height is the form's own parameter, and its form does not end short of it).
+        let angular = match surface {
+            BSurface::Cylinder { .. } | BSurface::Cone { .. } => [true, false],
+            BSurface::Sphere { .. } | BSurface::Torus { .. } => [true, true],
+            _ => [false, false],
+        };
+        let bounds = form_box.map(|d| {
+            [0, 1].map(|k| match (angular.get(k), d.get(k)) {
+                (Some(true), Some(&[a, b])) => Some([crate::kernel::form::angle(a), crate::kernel::form::angle(b)]),
+                _ => None,
+            })
+        });
+        // `q` moved to the nearest parameters in the box, where it lies past it.
+        let in_box = |q: [f64; 2]| -> Option<[f64; 2]> {
+            let bounds = bounds.as_ref()?;
+            let mut c = q;
+            let mut moved = false;
+            for ((x, range), p) in c.iter_mut().zip(bounds).zip(period) {
+                let Some([lo, hi]) = *range else { continue };
+                let y = crate::kernel::unwrap(*x, 0.5 * (lo + hi), p);
+                let z = if y < lo {
+                    lo
+                } else if y > hi {
+                    hi
+                } else {
+                    y
+                };
+                if z != y {
+                    (*x, moved) = (z, true);
+                }
+            }
+            moved.then_some(c)
+        };
         for l in edge_loops {
             for &(e, _) in l {
                 let edge = self.edges.get(e as usize).ok_or("edge reference")?;
@@ -553,14 +599,22 @@ impl<'t> Assembly<'t> {
                     None => (&edge.curve, edge.interval),
                 };
                 let eval = CurveEval::new(curve).map_err(|m| m.to_string())?;
-                let mut gap = 0.0f64;
+                let (mut gap, mut off_form) = (0.0f64, 0.0f64);
                 for t in gap_samples(curve, [t0, t1], matches!(surface, BSurface::Plane { .. } | BSurface::PlaneThrough { .. })) {
                     let Some(p) = eval.point(t) else { continue };
                     // A point with no nearest point is the pcurves' to refuse, with why.
-                    let Some(s) = on.project_with(&starts, p, None, f64::INFINITY).and_then(|q| on.point(q)) else { continue };
+                    let Some(q) = on.project_with(&starts, p, None, f64::INFINITY) else { continue };
+                    let Some(s) = on.point(q) else { continue };
                     gap = gap.max(s.dist(p));
+                    if let Some(s) = in_box(q).and_then(|c| on.point(c)) {
+                        off_form = off_form.max(s.dist(p));
+                    }
                 }
                 self.cover_edge(e, gap, pcurve::SURFACE_GAP_MARGIN)?;
+                let allowance = (pcurve::SURFACE_GAP_MARGIN * off_form).min(self.tol);
+                if let Some(x) = self.edges.get_mut(e as usize) {
+                    x.pcurve_tolerance = x.pcurve_tolerance.max(allowance);
+                }
             }
         }
         Ok(())
@@ -1556,7 +1610,7 @@ impl<'t> Assembly<'t> {
         let wound = extent.is_some_and(crate::kernel::form::winds);
         let mut extended = false;
         // How far each edge lies off this surface, so its closed form is checked at that.
-        self.measure_edges(&label, &edge_loops)?;
+        self.measure_edges(&label, &edge_loops, box_on_form.filter(|_| !wound))?;
         // Closed forms where the geometry has them; the kernel makes the rest (`trims`).
         let fit = self.pcurve_tolerance();
         let mut exact = pcurve::exact_pcurves(&surface, &uses_of(&self.edges, &edge_loops, None)?, fit, box_on_form).map_err(|e| e.to_string())?;
