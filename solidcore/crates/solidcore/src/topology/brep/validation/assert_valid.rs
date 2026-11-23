@@ -983,31 +983,9 @@ mod tests {
         assert_eq!(printed(&skipped), printed(&full));
     }
 
-    /// A 10 mm cube united with a cylinder of radius 4 standing on its x = 10 face, in a
-    /// kernel of its own: a boolean result whose new faces have no UV trim curves yet.
-    fn box_joined_to_cylinder() -> (Kernel, Brep) {
-        let mut k = Kernel::default();
-        let bx = crate::primitive::api_primitives::create_box(
-            &mut k,
-            crate::math::Point3::ZERO,
-            10.0,
-            10.0,
-            10.0,
-        )
-        .unwrap();
-        let cyl = crate::primitive::api_primitives::create_cylinder(
-            &mut k,
-            crate::math::Point3::new(10.0, 5.0, 0.0),
-            4.0,
-            10.0,
-        )
-        .unwrap();
-        let b = crate::boolean::api_brep::boolean_union(&mut k, bx, cyl).unwrap();
-        (k, b)
-    }
-
     /// What attaching a UV trim writes, entity by entity: each edge use's own trim slot and
-    /// drop record, and the edge and vertex tolerances an attached trim raises.
+    /// drop record, and the edge and vertex tolerances an attached trim raises. Not the gaps
+    /// ([`written_fields`]): #21105 keeps a check's stored gaps as derived values.
     fn trims_and_tolerances(b: &Brep) -> Vec<String> {
         let mut out = Vec::new();
         for &e in b.edge_list() {
@@ -1035,7 +1013,7 @@ mod tests {
     #[test]
     fn a_check_of_faces_without_trims_leaves_their_trims_and_tolerances() {
         for level in [CheckLevel::Level2, CheckLevel::Level0] {
-            let (mut k, mut b) = box_joined_to_cylinder();
+            let (mut k, mut b) = box_and_cylinder(true);
             let lacking = b
                 .face_list()
                 .iter()
@@ -1056,7 +1034,7 @@ mod tests {
             assert_eq!(printed(&second), printed(&first), "{level:?}");
             assert_eq!(trims_and_tolerances(&b), before, "{level:?}: second check");
         }
-        let (mut k, mut b) = box_joined_to_cylinder();
+        let (mut k, mut b) = box_and_cylinder(true);
         let before = trims_and_tolerances(&b);
         let naming = b.naming();
         let recorded = b.geometry_owner_keys().clone();
