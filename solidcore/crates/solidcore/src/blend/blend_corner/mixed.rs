@@ -165,6 +165,16 @@ fn bad_input(op: &'static str, input: CornerInput, entity: Option<EntityRef>) ->
     corner_input(op, input, entity).into_error()
 }
 
+/// [`bad_input`] with the site's own `status` where its C++ reports the condition otherwise
+/// than the kind's default ([`CornerInput::upstream_status`]): a failed state check,
+/// `SE(SM_ERR)`, where the default is `SM_ERR_NULL_POINTER`.
+#[track_caller]
+fn bad_input_status(op: &'static str, input: CornerInput, status: i32) -> SolidError {
+    corner_input(op, input, None)
+        .with_status(status)
+        .into_error()
+}
+
 /// The [`Failure`] of [`bad_input`], located at `entity` where there is one.
 #[track_caller]
 fn corner_input(op: &'static str, input: CornerInput, entity: Option<EntityRef>) -> Failure {
@@ -873,7 +883,8 @@ pub fn calc_mixed_vert_geom(
     let mixed = corner
         .mixed
         .as_ref()
-        .ok_or_else(|| bad_input(OP_VERT, CornerInput::EventNotSet, None))?;
+        // the site reports a missing Mixed event as a failed check, `SM_ERR`
+        .ok_or_else(|| bad_input_status(OP_VERT, CornerInput::EventNotSet, crate::error::SM_ERR))?;
     let &[x, a, p, v, q, bv] = corner.vertices.as_slice() else {
         return Err(bad_input(OP_VERT, CornerInput::TopologyMismatch, None));
     };
@@ -1069,7 +1080,12 @@ pub fn calc_mixed_edge_geom(
     solvers: &dyn SweptSolvers,
 ) -> Result<()> {
     let Some(mixed) = corner.mixed.as_mut() else {
-        return Err(bad_input(OP_EDGE, CornerInput::EventNotSet, None));
+        // the site reports a missing Mixed event as a failed check, `SM_ERR`
+        return Err(bad_input_status(
+            OP_EDGE,
+            CornerInput::EventNotSet,
+            crate::error::SM_ERR,
+        ));
     };
     let ring = mixed.ring;
     for &v in &corner.vertices {
@@ -1882,6 +1898,88 @@ pub fn create_mixed_patches(
 mod tests {
     use super::*;
     use crate::nurbs::nurbs_crv::allocate_nurb_curve;
+
+    /// Solvers the Mixed entry points below never reach: they refuse the corner first.
+    struct UnreachedSolvers;
+
+    impl SweptSolvers for UnreachedSolvers {
+        fn solver_of_edgeuse(&self, _: EdgeuseId) -> Result<&FilletSolver> {
+            Err(SolidError::null_pointer("test"))
+        }
+        fn offset_radii_can_change(&self, _: EdgeuseId) -> Result<bool> {
+            Err(SolidError::null_pointer("test"))
+        }
+        fn solver(&self, _: FilletSolverId) -> Result<&FilletSolver> {
+            Err(SolidError::null_pointer("test"))
+        }
+        fn constant_offsets(&self, _: FilletSolverId) -> Result<Option<[f64; 2]>> {
+            Err(SolidError::null_pointer("test"))
+        }
+    }
+
+    /// `err` is the caller's corner without its Mixed event, with the `SM_ERR` status the
+    /// site had before (a failed check, not the kind's `SM_ERR_NULL_POINTER` default;
+    /// #20725's third review).
+    fn assert_event_not_set_with_sm_err(err: &SolidError) {
+        assert_eq!(
+            err.blend_failure(),
+            Some(&BlendFailure::CornerInputInvalid {
+                input: CornerInput::EventNotSet,
+                entity: None,
+            }),
+            "{err:?}"
+        );
+        assert_eq!(
+            crate::error::upstream_status(err),
+            Some(crate::error::SM_ERR)
+        );
+    }
+
+    #[test]
+    fn a_corner_without_its_mixed_event_keeps_the_vertex_sites_status() {
+        use crate::blend::fillet_corner::p3::FilletCornerKind;
+        let corner = FilletCorner::new(
+            FilletCornerKind::ThreeByTwoMixed,
+            None,
+            None,
+            None,
+            1e-6,
+            1e-3,
+        );
+        let k = Kernel::default();
+        let err = calc_mixed_vert_geom(
+            &k,
+            &Brep::new(),
+            &mut FilletBrep::new(),
+            &corner,
+            &UnreachedSolvers,
+        )
+        .unwrap_err();
+        assert_event_not_set_with_sm_err(&err);
+    }
+
+    #[test]
+    fn a_corner_without_its_mixed_event_keeps_the_edge_sites_status() {
+        use crate::blend::fillet_corner::p3::FilletCornerKind;
+        let mut corner = FilletCorner::new(
+            FilletCornerKind::ThreeByTwoMixed,
+            None,
+            None,
+            None,
+            1e-6,
+            1e-3,
+        );
+        let k = Kernel::default();
+        let err = calc_mixed_edge_geom(
+            &k,
+            &mut Brep::new(),
+            &mut FilletBrep::new(),
+            &mut corner,
+            &UnreachedSolvers,
+        )
+        .unwrap_err();
+        assert_event_not_set_with_sm_err(&err);
+    }
 
     /// A unit box's first edge, its curve replaced by the polyline from its start
     /// vertex P0 through its end vertex P1 on to P1 + n, n square to the edge, with the

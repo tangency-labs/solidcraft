@@ -94,7 +94,7 @@ use crate::blend::fillet_solver::p5::is_concave_edge;
 use crate::curve::curve::Curve;
 use crate::curve::line::Line;
 use crate::error::blend::{BlendFailure, CornerInput, CornerStep, FilletSetUp, SolverFailure};
-use crate::error::{EntityRef, Failure, Result, SolidError, SM_ERR_NULL_POINTER};
+use crate::error::{EntityRef, Failure, Result, SolidError, SM_ERR, SM_ERR_NULL_POINTER};
 use crate::geom::extent2d::Extent2d;
 use crate::kernel::Kernel;
 use crate::math::{Point2, Point3, Vec2, Vec3, EFF_ZERO, EFF_ZERO_SQRT};
@@ -130,6 +130,16 @@ fn missing_defect(op: &'static str, why: &'static str) -> SolidError {
 #[track_caller]
 fn bad_input(op: &'static str, input: CornerInput, entity: Option<EntityRef>) -> SolidError {
     corner_input(op, input, entity).into_error()
+}
+
+/// [`bad_input`] with the site's own `status` where its C++ reports the condition otherwise
+/// than the kind's default ([`CornerInput::upstream_status`]): a failed state check,
+/// `SE(SM_ERR)`, where the default is `SM_ERR_NULL_POINTER`.
+#[track_caller]
+fn bad_input_status(op: &'static str, input: CornerInput, status: i32) -> SolidError {
+    corner_input(op, input, None)
+        .with_status(status)
+        .into_error()
 }
 
 /// The [`Failure`] of [`bad_input`], located at `entity` where there is one.
@@ -1314,7 +1324,8 @@ pub fn chamfer_corner_edge_geom(
     let normal = event
         .definition
         .facet_normal
-        .ok_or_else(|| bad_input(OP_EDGES, CornerInput::FacetNormalNotSet, None))?
+        // the site reports a missing facet normal as a failed check, `SM_ERR`
+        .ok_or_else(|| bad_input_status(OP_EDGES, CornerInput::FacetNormalNotSet, SM_ERR))?
         .unitize()
         .map_err(|cause| bad_input_caused(OP_EDGES, CornerInput::EventMalformed, None, cause))?;
     let count = xs.len();
@@ -1574,6 +1585,39 @@ mod tests {
             crate::error::upstream_status(&err),
             Some(SM_ERR_NULL_POINTER)
         );
+    }
+
+    /// A caller's facet event with no normal is refused as the caller's input with the
+    /// `SM_ERR` status the site had before (a failed check, not the kind's
+    /// `SM_ERR_NULL_POINTER` default; #20725's third review).
+    #[test]
+    fn a_facet_event_without_its_normal_keeps_the_sites_status() {
+        use crate::blend::fillet_corner::p3::FilletCornerKind;
+        let mut corner =
+            FilletCorner::new(FilletCornerKind::ConvexNByN, None, None, None, 1e-6, 1e-3);
+        corner.chamfer_corner = Some(ChamferCorner {
+            definition: ChamferCornerDefinition {
+                kind: BlendChamferCorner::Facet,
+                vertex: Point3::ZERO,
+                chamfers: Vec::new(),
+                crossings: Vec::new(),
+                mitre: None,
+                facet_normal: None,
+                patch: None,
+            },
+            faces: Vec::new(),
+        });
+        let k = Kernel::default();
+        let err = chamfer_corner_edge_geom(&k, &mut FilletBrep::new(), &mut corner).unwrap_err();
+        assert_eq!(
+            err.blend_failure(),
+            Some(&BlendFailure::CornerInputInvalid {
+                input: CornerInput::FacetNormalNotSet,
+                entity: None,
+            }),
+            "{err:?}"
+        );
+        assert_eq!(crate::error::upstream_status(&err), Some(SM_ERR));
     }
 
     /// The square corner's frame: the edges along u, v, w; face i between edges i - 1
