@@ -40,7 +40,8 @@
 //! | [`OffsetFailure::FaceMoveEmpty`]       | `SM_ERR_INVALID_INPUT` (the face move's)  |
 //! | [`OffsetFailure::EdgeHasNoCurve`], [`OffsetFailure::FaceHasNoSurface`], [`OffsetFailure::FaceHasNoOuterFaceuse`], [`OffsetFailure::VertexNotGiven`], [`OffsetFailure::EdgeuseNotGiven`], [`OffsetFailure::CurveKindUnsupported`], [`OffsetFailure::EdgeuseHasNoUvTrim`], [`OffsetFailure::UnnamedFaceHasNoSurface`] | `SM_ERR_NULL_POINTER`, or the site's through `with_status` |
 //! | the other causes of `offset_geometry_creation` ([`OffsetFailure::VertexCurveNotArc`] to [`OffsetFailure::VertexArcsNotOneSphere`]) | `SM_ERR` |
-//! | [`OffsetFailure::OffsetBaseKindUnsupported`] | `SM_ERR` (`offset_executive::p1`) |
+//! | [`OffsetFailure::OffsetBaseKindUnsupported`], [`OffsetFailure::GapCornerBlendNotMade`] | `SM_ERR` (`offset_executive::p1`) |
+//! | [`OffsetFailure::EdgeOffsetsUnpaired`], [`OffsetFailure::GapEndWithoutEdge`], [`OffsetFailure::FaceuseNotGiven`], [`OffsetFailure::SelfIntersectionWithoutUvCurve`] | `SM_ERR_NULL_POINTER` (`offset_executive::p1`) |
 //!
 //! A stage of an offset routine that fails with no reason the kernel names is an
 //! [`OffsetFailure::StageFailed`], a defect ([`ErrorKind::StageFailed`], #15034), keeping the
@@ -439,8 +440,9 @@ pub enum OffsetFailure {
     /// the offset does not close such a gap at the edge.
     TangentGapsAtConcaveEdge,
     /// An edge use of the edge `edge` has no UV trim curve (`None` where the handle names no
-    /// edge of the input), which the cap between the edge's offsets is made from (the
-    /// offset builds none).
+    /// edge of the input), which the cap between the edge's offsets is made from, and which
+    /// the matching of an offset face's edge uses to the input's drops onto (the offset
+    /// builds none).
     EdgeuseHasNoUvTrim {
         /// The edge, of the operation's input, where the handle names one.
         edge: Option<EdgeId>,
@@ -494,6 +496,28 @@ pub enum OffsetFailure {
         /// The base surface's class type (`GetType`).
         surface_type: i64,
     },
+    /// After the synchronization, the offset edge uses on one side of edge `edge` outnumber
+    /// those on the other: a split at the other side's break was refused (too near an end of
+    /// a piece), so the pieces do not pair one to one and the caps between them are not made.
+    EdgeOffsetsUnpaired {
+        /// The edge, of the operation's input.
+        edge: EdgeId,
+    },
+    /// A gap between an edge's offsets ends at a vertex of a face beside it that has no edge
+    /// (a vertex loop's, such as a cone's apex): the corner blend that would close the gap
+    /// has no edge to blend to.
+    GapEndWithoutEdge,
+    /// The corner blend that closes a gap between an edge's offsets could not be made
+    /// (`CreateCornerBlend`). [`ErrorKind::Failed`], neither a defect nor a refusal on its
+    /// own: the blend's error is kept as the cause and decides
+    /// ([`crate::SolidError::is_defect`]).
+    GapCornerBlendNotMade,
+    /// The face-use offset was given no face use.
+    FaceuseNotGiven,
+    /// A curve where the offset surface meets itself came without its UV curve on one side
+    /// (the intersection leaves the entry null), which the merge of the self-intersections
+    /// cuts the offset face along.
+    SelfIntersectionWithoutUvCurve,
 }
 
 /// What a local operation's or a solid offset's built body fails ([`OffsetFailure::Unsound`]).
@@ -639,7 +663,9 @@ impl OffsetFailure {
             | Self::CurveKindUnsupported { edge, .. }
             | Self::EdgeuseHasNoUvTrim { edge } => edge.map(EntityRef::Edge),
             Self::Unsound { what } => what.entity(),
-            Self::BlendRailWithoutSupport { edge } => Some(EntityRef::Edge(edge)),
+            Self::BlendRailWithoutSupport { edge } | Self::EdgeOffsetsUnpaired { edge } => {
+                Some(EntityRef::Edge(edge))
+            }
             Self::FacesMoveRefused { .. }
             | Self::FollowedBlendIncomplete
             | Self::FaceMoveEmpty { .. }
@@ -661,6 +687,10 @@ impl OffsetFailure {
             | Self::VertexArcsNotOneSphere
             | Self::UnnamedFaceHasNoSurface
             | Self::OffsetBaseKindUnsupported { .. }
+            | Self::GapEndWithoutEdge
+            | Self::GapCornerBlendNotMade
+            | Self::FaceuseNotGiven
+            | Self::SelfIntersectionWithoutUvCurve
             | Self::ExactCurveUncut
             | Self::TangentEndOffCurve
             | Self::TangentBranchUncertified
@@ -681,8 +711,9 @@ impl OffsetFailure {
     /// [`OffsetFailure::InvalidValue`], [`OffsetFailure::Inconsistent`],
     /// [`OffsetFailure::StageFailed`], [`OffsetFailure::Defect`]), or a cause named at a site
     /// that returned one ([`OffsetFailure::LoopGapPassLimit`],
-    /// [`OffsetFailure::LoopGapEndsAmbiguous`], [`OffsetFailure::SplitAtEdgeEnd`],
-    /// [`OffsetFailure::OffsetBaseKindUnsupported`] (`offset_executive::p1`), and those of
+    /// [`OffsetFailure::LoopGapEndsAmbiguous`], [`OffsetFailure::SplitAtEdgeEnd`], those of
+    /// `offset_executive::p1` ([`OffsetFailure::OffsetBaseKindUnsupported`] to
+    /// [`OffsetFailure::SelfIntersectionWithoutUvCurve`]), and those of
     /// [`OffsetFailure::is_named_at_a_status_site`]): it answers with
     /// that status as the `Upstream` it replaced did. The other refusals replaced none.
     #[must_use]
@@ -699,6 +730,11 @@ impl OffsetFailure {
                 | Self::LoopGapEndsAmbiguous { .. }
                 | Self::SplitAtEdgeEnd { .. }
                 | Self::OffsetBaseKindUnsupported { .. }
+                | Self::EdgeOffsetsUnpaired { .. }
+                | Self::GapEndWithoutEdge
+                | Self::GapCornerBlendNotMade
+                | Self::FaceuseNotGiven
+                | Self::SelfIntersectionWithoutUvCurve
         ) || self.is_named_at_a_status_site()
     }
 
@@ -802,7 +838,12 @@ impl OffsetFailure {
             | Self::LocalFaceNotListed
             | Self::VertexArcsNotOneSphere
             | Self::UnnamedFaceHasNoSurface
-            | Self::OffsetBaseKindUnsupported { .. } => false,
+            | Self::OffsetBaseKindUnsupported { .. }
+            | Self::EdgeOffsetsUnpaired { .. }
+            | Self::GapEndWithoutEdge
+            | Self::GapCornerBlendNotMade
+            | Self::FaceuseNotGiven
+            | Self::SelfIntersectionWithoutUvCurve => false,
             Self::Failed(_) | Self::Missing(_) | Self::InvalidValue(_) | Self::Inconsistent(_) => {
                 true
             }
@@ -873,7 +914,12 @@ impl OffsetFailure {
             | Self::LocalFaceNotListed
             | Self::VertexArcsNotOneSphere
             | Self::UnnamedFaceHasNoSurface
-            | Self::OffsetBaseKindUnsupported { .. } => false,
+            | Self::OffsetBaseKindUnsupported { .. }
+            | Self::EdgeOffsetsUnpaired { .. }
+            | Self::GapEndWithoutEdge
+            | Self::GapCornerBlendNotMade
+            | Self::FaceuseNotGiven
+            | Self::SelfIntersectionWithoutUvCurve => false,
         }
     }
 
@@ -918,7 +964,8 @@ impl OffsetFailure {
             | Self::CrossingUndecided
             | Self::LocalFaceNotListed
             | Self::VertexArcsNotOneSphere
-            | Self::OffsetBaseKindUnsupported { .. } => SM_ERR,
+            | Self::OffsetBaseKindUnsupported { .. }
+            | Self::GapCornerBlendNotMade => SM_ERR,
             Self::Missing(_)
             | Self::BlendRailWithoutSupport { .. }
             | Self::FollowedBlendIncomplete
@@ -929,7 +976,11 @@ impl OffsetFailure {
             | Self::EdgeuseNotGiven
             | Self::CurveKindUnsupported { .. }
             | Self::EdgeuseHasNoUvTrim { .. }
-            | Self::UnnamedFaceHasNoSurface => SM_ERR_NULL_POINTER,
+            | Self::UnnamedFaceHasNoSurface
+            | Self::EdgeOffsetsUnpaired { .. }
+            | Self::GapEndWithoutEdge
+            | Self::FaceuseNotGiven
+            | Self::SelfIntersectionWithoutUvCurve => SM_ERR_NULL_POINTER,
             Self::FaceMoveEmpty { .. } | Self::InvalidValue(_) => SM_ERR_INVALID_INPUT,
             Self::Inconsistent(_) => SM_ERR_ASSERT_FAILURE,
             Self::WallsTouch { .. } => SM_ERR_OFFSET_WALLS_TOUCH,
@@ -982,10 +1033,15 @@ impl OffsetFailure {
             | Self::ShellTangentVertexMoveTooFar { .. }
             | Self::LaminaEdgeOtherSide
             | Self::CrossingUndecided
-            | Self::OffsetBaseKindUnsupported { .. } => ErrorKind::Unsupported,
+            | Self::OffsetBaseKindUnsupported { .. }
+            | Self::EdgeOffsetsUnpaired { .. }
+            | Self::GapEndWithoutEdge
+            | Self::SelfIntersectionWithoutUvCurve => ErrorKind::Unsupported,
             // neither a defect nor a refusal: the failure keeps the error of the step that
             // failed, which decides (`SolidError::is_defect`, `is_refusal`)
-            Self::FaceDomainUnresolved | Self::VertexArcsNotOneSphere => ErrorKind::Failed,
+            Self::FaceDomainUnresolved
+            | Self::VertexArcsNotOneSphere
+            | Self::GapCornerBlendNotMade => ErrorKind::Failed,
             Self::DistanceUnresolved { .. }
             | Self::ToleranceUnresolved { .. }
             | Self::FollowedBlendIncomplete
@@ -996,7 +1052,8 @@ impl OffsetFailure {
             | Self::VertexNotGiven
             | Self::EdgeuseNotGiven
             | Self::LocalFaceNotListed
-            | Self::UnnamedFaceHasNoSurface => ErrorKind::InvalidInput,
+            | Self::UnnamedFaceHasNoSurface
+            | Self::FaceuseNotGiven => ErrorKind::InvalidInput,
             Self::StageFailed | Self::Defect { .. } => ErrorKind::StageFailed,
             Self::Failed(_) | Self::Missing(_) | Self::InvalidValue(_) | Self::Inconsistent(_) => {
                 ErrorKind::of_status(self.comparison_status())
@@ -1380,7 +1437,7 @@ impl core::fmt::Display for OffsetFailure {
             ),
             Self::EdgeuseHasNoUvTrim { .. } => f.write_str(
                 "an edge use has no UV trim curve, which the cap between the edge's offsets is \
-                 made from",
+                 made from and the matching of offset edge uses drops onto",
             ),
             Self::RailIntervalsDiffer { first, second } => write!(
                 f,
@@ -1416,6 +1473,24 @@ impl core::fmt::Display for OffsetFailure {
                 f,
                 "the base of an offset surface (type {surface_type}) has no B-spline form, which \
                  the approximation of its offset reads"
+            ),
+            Self::EdgeOffsetsUnpaired { .. } => f.write_str(
+                "the offset pieces on the two sides of an edge do not pair one to one (a split \
+                 near a piece's end was refused), so the caps between them are not made",
+            ),
+            Self::GapEndWithoutEdge => f.write_str(
+                "a gap between an edge's offsets ends at a vertex with no edge, so no corner \
+                 blend closes it",
+            ),
+            Self::GapCornerBlendNotMade => f.write_str(
+                "the corner blend that closes a gap between an edge's offsets could not be made",
+            ),
+            Self::FaceuseNotGiven => {
+                f.write_str("invalid input: the face-use offset was given no face use")
+            }
+            Self::SelfIntersectionWithoutUvCurve => f.write_str(
+                "a curve where the offset surface meets itself has no UV curve on one side, \
+                 so the offset face is not cut along it",
             ),
         }
     }
@@ -1966,6 +2041,24 @@ mod tests {
                 false,
                 false,
             ),
+            (
+                O::EdgeOffsetsUnpaired {
+                    edge: EdgeId::from_index(4),
+                },
+                ErrorKind::Unsupported,
+                false,
+                false,
+            ),
+            (O::GapEndWithoutEdge, ErrorKind::Unsupported, false, false),
+            // its cause decides
+            (O::GapCornerBlendNotMade, ErrorKind::Failed, false, false),
+            (O::FaceuseNotGiven, ErrorKind::InvalidInput, false, false),
+            (
+                O::SelfIntersectionWithoutUvCurve,
+                ErrorKind::Unsupported,
+                false,
+                false,
+            ),
         ];
         let row = |o: &O| -> usize {
             match o {
@@ -2027,6 +2120,11 @@ mod tests {
                 O::VertexArcsNotOneSphere => 55,
                 O::UnnamedFaceHasNoSurface => 56,
                 O::OffsetBaseKindUnsupported { .. } => 57,
+                O::EdgeOffsetsUnpaired { .. } => 58,
+                O::GapEndWithoutEdge => 59,
+                O::GapCornerBlendNotMade => 60,
+                O::FaceuseNotGiven => 61,
+                O::SelfIntersectionWithoutUvCurve => 62,
             }
         };
         for (i, (o, class, phrase, defect)) in pinned.iter().enumerate() {
@@ -2141,10 +2239,23 @@ mod tests {
                 SM_ERR_NULL_POINTER,
                 None,
             ),
-            // and that of `offset_executive::p1` (TE-O-18)
+            // and those of `offset_executive::p1` (TE-O-18)
             (
                 OffsetFailure::OffsetBaseKindUnsupported { surface_type: 7 },
                 SM_ERR,
+                None,
+            ),
+            (
+                OffsetFailure::EdgeOffsetsUnpaired { edge },
+                SM_ERR_NULL_POINTER,
+                Some(EntityRef::Edge(edge)),
+            ),
+            (OffsetFailure::GapEndWithoutEdge, SM_ERR_NULL_POINTER, None),
+            (OffsetFailure::GapCornerBlendNotMade, SM_ERR, None),
+            (OffsetFailure::FaceuseNotGiven, SM_ERR_NULL_POINTER, None),
+            (
+                OffsetFailure::SelfIntersectionWithoutUvCurve,
+                SM_ERR_NULL_POINTER,
                 None,
             ),
         ];
@@ -2173,6 +2284,7 @@ mod tests {
         for cause in [
             OffsetFailure::FaceDomainUnresolved,
             OffsetFailure::VertexArcsNotOneSphere,
+            OffsetFailure::GapCornerBlendNotMade,
         ] {
             let around = |inner: SolidError| {
                 Failure::new("offset::op", cause)
@@ -2263,10 +2375,7 @@ mod tests {
         super::super::bare_scan::assert_waiting(
             "offset",
             20,
-            &[
-                ("offset/offset_executive/p1.rs", 34),
-                ("offset/offset_executive/p2.rs", 57),
-            ],
+            &[("offset/offset_executive/p2.rs", 57)],
         );
     }
 
