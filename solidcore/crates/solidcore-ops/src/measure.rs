@@ -632,7 +632,13 @@ impl Body {
             self,
             |k, b| {
                 centroidal_properties(|attrs| {
-                    brep_mass_properties_estimated_prepared(k, b, relative_accuracy, &request, attrs)
+                    brep_mass_properties_estimated_prepared(
+                        k,
+                        b,
+                        relative_accuracy,
+                        &request,
+                        attrs,
+                    )
                 })
             },
             |k, b| {

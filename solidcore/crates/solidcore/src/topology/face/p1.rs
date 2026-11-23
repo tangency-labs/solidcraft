@@ -352,7 +352,9 @@ fn fetch_uv_trim_curve(
     eu: EdgeuseId,
 ) -> Result<(std::result::Result<(), SolidError>, Option<Curve>)> {
     let fetch = match b {
-        QueryTopology::Mutable(b) => eu3::get_or_create_uv_trim_curve(k, b, eu, false, false, true)?,
+        QueryTopology::Mutable(b) => {
+            eu3::get_or_create_uv_trim_curve(k, b, eu, false, false, true)?
+        }
         QueryTopology::Prepared(b) | QueryTopology::Requested(b, _) => {
             eu3::existing_uv_trim_curve(b, eu, false)?
                 .ok_or(SolidError::PreparationRequired { operation: OP })?

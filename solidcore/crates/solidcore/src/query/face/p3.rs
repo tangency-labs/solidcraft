@@ -163,8 +163,8 @@ use crate::query::brep::LazyBrep;
 use crate::query::edge as qe;
 use crate::query::face::p2::{
     curve_on_classify, curve_on_classify_cached, curve_on_classify_mut, face_vertices,
-    point_classify, point_classify_prepared, CurveOnClassifyBrep, CurveOnClassifyCache, CurveOnClassifyObjects,
-    PointClassifyOptions,
+    point_classify, point_classify_prepared, CurveOnClassifyBrep, CurveOnClassifyCache,
+    CurveOnClassifyObjects, PointClassifyOptions,
 };
 use crate::query::r#loop::contains_uv_point;
 use crate::surface::plane::Plane;
@@ -857,9 +857,9 @@ fn cell_directed_max(
             // trim cache's tree asks for the B-rep to be prepared
             LazyBrep::Prepared(b) => point_classify_prepared(k, b, f, uv, &mut pt_class, options)
                 .map_err(|e| match e {
-                    SolidError::Unported { .. } => {
-                        SolidError::PreparationRequired { operation: OP_TIGHT }
-                    }
+                    SolidError::Unported { .. } => SolidError::PreparationRequired {
+                        operation: OP_TIGHT,
+                    },
                     e => e,
                 }),
             _ => point_classify(k, lb.get_mut()?, f, uv, &mut pt_class, options),

@@ -2466,6 +2466,19 @@ fn require_uv_trims(b: &Brep, f: Option<FaceId>) -> Result<()> {
     }
 }
 
+/// [`SolidError::PreparationRequired`] when the tight box of the estimated entry could
+/// classify a point on a face whose surface's trimmed cache would have its tree built
+/// there ([`crate::query::face::p2::classification_builds_tree`]), which the read-only
+/// form does not do: decided before any work, so the form that takes the B-rep mutably
+/// then runs alone. A failure of the scan is the same signal.
+fn require_classification_trees(b: &Brep) -> Result<()> {
+    let builds = |f| crate::query::face::p2::classification_builds_tree(b, f).unwrap_or(true);
+    match faces(b) {
+        Ok(faces) if !faces.into_iter().any(builds) => Ok(()),
+        _ => Err(SolidError::PreparationRequired { operation: OP }),
+    }
+}
+
 /// The accuracy an estimated property is asked at: finite and positive, clamped to
 /// [[`ESTIMATE_ACCURACY_FINEST`], [`ESTIMATE_ACCURACY_COARSEST`]].
 ///
@@ -2786,6 +2799,7 @@ pub fn brep_mass_properties_estimated_prepared(
     attributes: &PropertyAttributes<'_>,
 ) -> Result<EstimatedMassProperties> {
     require_uv_trims(b, None)?;
+    require_classification_trees(b)?;
     let accuracy = estimate_accuracy(accuracy)?;
     no_unsure_region(b)?;
     estimate(

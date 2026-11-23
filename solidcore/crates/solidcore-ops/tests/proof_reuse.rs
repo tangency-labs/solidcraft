@@ -283,14 +283,14 @@ fn a_body_without_uv_trims_still_measures() {
         without.mass_properties(1e-9).unwrap(),
     );
     let near = |a: f64, b: f64| (a - b).abs() <= 1e-9 * b.abs().max(1.0);
-    assert!(near(m.volume, n.volume) && near(m.area, n.area), "{m:?} {n:?}");
+    assert!(
+        near(m.volume, n.volume) && near(m.area, n.area),
+        "{m:?} {n:?}"
+    );
     for i in 0..3 {
         assert!(near(m.centroid[i], n.centroid[i]), "{m:?} {n:?}");
     }
-    assert!(near(
-        with.area(1e-9).unwrap(),
-        without.area(1e-9).unwrap()
-    ));
+    assert!(near(with.area(1e-9).unwrap(), without.area(1e-9).unwrap()));
     // the trims are made: the edit door ran
     let b = without.kernel();
     assert!(b.edgeuses().iter().all(|(_, u)| u.uv_trim_curve.is_some()));
