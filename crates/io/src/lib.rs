@@ -1196,9 +1196,9 @@ fn stl_solid_name(raw: &str) -> String {
 /// A name already used in the file gets `_2`, `_3`, … after it, so names are unique and stable for
 /// a given design. A face without triangles has no block. Returns the bytes and what meshing the
 /// bodies reported.
-pub fn export_stl_face_solids(state: &ModelState, bodies: &[String], quality: MeshQuality, allow_missing: bool) -> Result<(Vec<u8>, Vec<String>)> {
+pub fn export_stl_face_solids(state: &ModelState, bodies: &[String], quality: MeshQuality) -> Result<(Vec<u8>, Vec<String>)> {
     let sel = selected(state, bodies)?;
-    let (items, notes) = per_placed_body(&sel, allow_missing, |b, body| {
+    let (items, notes) = per_placed_body(&sel, |b, body| {
         let (m, mut n) = body_mesh(b, body, quality)?;
         let count = u32::try_from(m.triangles.len()).map_err(|_| IoError::Invalid("mesh too large".into()))?;
         let (positions, triangles, origin) = threemf::weld_tagged(&m.positions, &m.triangles, &(0..count).collect::<Vec<_>>(), weld_eps(&b.body));
@@ -1431,24 +1431,12 @@ fn selected<'a>(state: &'a ModelState, bodies: &[String]) -> Result<Vec<&'a soli
 /// and the material library beside it, with the colour of each body. `mtl_name` is the name
 /// the `mtllib` line writes (the library's file name beside the mesh file).
 pub fn export_obj(state: &ModelState, bodies: &[String], mtl_name: &str, quality: MeshQuality) -> Result<ObjFiles> {
-    export_obj_allow_missing(state, bodies, mtl_name, quality, false)
-}
-
-/// OBJ export with explicit permission to omit bodies that cannot mesh. Every omission is
-/// reported in `warnings`; an export with no surviving bodies still fails.
-pub fn export_obj_allow_missing(
-    state: &ModelState,
-    bodies: &[String],
-    mtl_name: &str,
-    quality: MeshQuality,
-    allow_missing: bool,
-) -> Result<ObjFiles> {
-    obj_export(&selected(state, bodies)?, mtl_name, quality, allow_missing)
+    obj_export(&selected(state, bodies)?, mtl_name, quality)
 }
 
 /// The OBJ export of the given bodies: the mesh file and the material library beside it.
-fn obj_export(sel: &[&solidcraft_doc::ModelBody], mtl_name: &str, quality: MeshQuality, allow_missing: bool) -> Result<ObjFiles> {
-    let (items, warnings) = per_placed_body(sel, allow_missing, |b, body| body_mesh(b, body, quality))?;
+fn obj_export(sel: &[&solidcraft_doc::ModelBody], mtl_name: &str, quality: MeshQuality) -> Result<ObjFiles> {
+    let (items, warnings) = per_placed_body(sel, |b, body| body_mesh(b, body, quality))?;
     let bodies: Vec<ObjBody<'_>> = items.iter().map(|(b, mesh)| ObjBody { name: b.name.as_str(), mesh, color: b.body.color() }).collect();
     Ok(ObjFiles { warnings, ..obj_files(&bodies, mtl_name) })
 }
@@ -1458,6 +1446,10 @@ fn obj_export(sel: &[&solidcraft_doc::ModelBody], mtl_name: &str, quality: MeshQ
 /// chord from `size`, with its notes, each led by the body's name. A mesh it cannot make is an
 /// error led by the body's name too, so an export of several bodies says whose face it is.
 fn body_mesh(b: &solidcraft_doc::ModelBody, (body, size, part): &Placed, quality: MeshQuality) -> Result<(Mesh, Vec<String>)> {
+    #[cfg(test)]
+    if test_unmeshable::is(&b.name) {
+        return Err(IoError::Invalid(format!("{}: tessellation: face 7 (cylinder): boundary crosses itself", b.name)));
+    }
     let named = |e: IoError| match e {
         IoError::Kernel(k) => IoError::Invalid(format!("{}: {k}", b.name)),
         other => other,
@@ -1585,12 +1577,14 @@ fn placed_vertices_match(original: &solidcraft_kernel::Body, copy: &solidcraft_k
         && ba.max.dist(bb.max) <= eps
 }
 
-/// Mesh each placed body on threads, preserving body order. A failed body fails the export
-/// unless omissions were explicitly allowed; each omission then carries its meshing error.
-/// Even with that permission, an export with no surviving bodies fails.
+/// `f` for each body of an export and the body it is meshed as ([`shared_placements`]), on
+/// threads (a body at a time each), the results in the order of the bodies. The bodies are
+/// Mesh each placed body on threads. If a body fails to mesh (e.g. an untessellatable sliver face),
+/// but other bodies in the export succeed, the failing body is skipped with a warning note so the
+/// rest of the assembly can still be exported (#18780). If all bodies fail (or only one body was
+/// selected and failed), the first error is returned.
 fn per_placed_body<'a, R: Send>(
     sel: &[&'a solidcraft_doc::ModelBody],
-    allow_missing: bool,
     f: impl Fn(&solidcraft_doc::ModelBody, &Placed) -> Result<(R, Vec<String>)> + Sync,
 ) -> Result<(Vec<(&'a solidcraft_doc::ModelBody, R)>, Vec<String>)> {
     let meshed = shared_placements(sel);
@@ -1608,20 +1602,13 @@ fn per_placed_body<'a, R: Send>(
                 notes.extend(item_notes);
             }
             Some(Err(e)) => {
-                let e = IoError::Invalid(format!("{}: {e}", b.name));
-                if !allow_missing {
-                    return Err(e);
-                }
                 notes.push(format!("{}: skipped: meshing failed ({e})", b.name));
                 if first_err.is_none() {
                     first_err = Some(e);
                 }
             }
             None => {
-                let e = IoError::Invalid(format!("body {}: meshing worker failed before returning a face diagnostic", b.name));
-                if !allow_missing {
-                    return Err(e);
-                }
+                let e = IoError::Invalid(format!("body {}: meshing it failed", b.name));
                 notes.push(format!("{}: skipped: meshing failed ({e})", b.name));
                 if first_err.is_none() {
                     first_err = Some(e);
@@ -1745,29 +1732,12 @@ pub fn export_with_parts_noted(
     quality: MeshQuality,
     thumbnail: Option<&[u8]>,
 ) -> Result<(Vec<u8>, Vec<String>)> {
-    export_with_parts_allow_missing(state, bodies, parts, format, name, meta, quality, thumbnail, false)
-}
-
-/// [`export_with_parts_noted`] with explicit permission to omit bodies that cannot mesh.
-/// Every omission is returned as a warning naming its body and the original face diagnostic.
-#[allow(clippy::too_many_arguments)]
-pub fn export_with_parts_allow_missing(
-    state: &ModelState,
-    bodies: &[String],
-    parts: &[(String, Vec<String>)],
-    format: Format,
-    name: &str,
-    meta: &Metadata,
-    quality: MeshQuality,
-    thumbnail: Option<&[u8]>,
-    allow_missing: bool,
-) -> Result<(Vec<u8>, Vec<String>)> {
     let sel = selected(state, bodies)?;
     let (bytes, notes) = match format {
         Format::StlBinary | Format::StlAscii => {
             // Each body welded on its own (as for 3MF), so shared vertices are written identically
             // and the file is closed where faces meet.
-            let (items, notes) = per_placed_body(&sel, allow_missing, |b, body| {
+            let (items, notes) = per_placed_body(&sel, |b, body| {
                 let (m, mut n) = body_mesh(b, body, quality)?;
                 let (positions, triangles) = weld(&m.positions, &m.triangles, weld_eps(&b.body));
                 if !b.body.is_surface() && !b.body.is_mesh() {
@@ -1782,7 +1752,7 @@ pub fn export_with_parts_allow_missing(
         Format::Obj => {
             // One file, so no material library: a mesh file that names a library nobody wrote
             // would come out in the reader's default grey.
-            let (items, notes) = per_placed_body(&sel, allow_missing, |b, body| body_mesh(b, body, quality))?;
+            let (items, notes) = per_placed_body(&sel, |b, body| body_mesh(b, body, quality))?;
             let meshes: Vec<(String, Mesh)> = items.into_iter().map(|(b, m)| (b.name.clone(), m)).collect();
             (obj(&meshes).into_bytes(), notes)
         }
@@ -1797,7 +1767,7 @@ pub fn export_with_parts_allow_missing(
             (solidcraft_kernel::iges_export_bodies(&bs, &step_header(format!("{name}.igs"), meta))?.into_bytes(), Vec::new())
         }
         Format::ThreeMf | Format::ThreeMfTagged => {
-            let (items, notes) = per_placed_body(&sel, allow_missing, |b, body| mesh_object(b, body, format == Format::ThreeMfTagged, quality))?;
+            let (items, notes) = per_placed_body(&sel, |b, body| mesh_object(b, body, format == Format::ThreeMfTagged, quality))?;
             let (kept_bodies, objs): (Vec<_>, Vec<_>) = items.into_iter().unzip();
             let index = |n: &String| kept_bodies.iter().position(|b| &b.name == n);
             let parts: Vec<(String, Vec<usize>)> = parts.iter().map(|(p, names)| (p.clone(), names.iter().filter_map(index).collect())).collect();
@@ -2023,6 +1993,22 @@ pub fn civil(secs: u64) -> (i64, i64, i64, u64, u64, u64) {
     let d = doy - (153 * mp + 2) / 5 + 1;
     let m = if mp < 10 { mp + 3 } else { mp - 9 };
     (yoe + era * 400 + i64::from(m <= 2), m, d, rem / 3600, rem % 3600 / 60, rem % 60)
+}
+
+/// Tests: the name of a body that [`body_mesh`] fails on, as a body the kernel cannot tessellate does.
+#[cfg(test)]
+mod test_unmeshable {
+    static NAME: std::sync::Mutex<Option<String>> = std::sync::Mutex::new(None);
+
+    pub(super) fn set(name: Option<&str>) {
+        if let Ok(mut n) = NAME.lock() {
+            *n = name.map(str::to_string);
+        }
+    }
+
+    pub(super) fn is(name: &str) -> bool {
+        NAME.lock().is_ok_and(|n| n.as_deref() == Some(name))
+    }
 }
 
 #[cfg(test)]
@@ -2341,26 +2327,8 @@ mod tests {
         assert!(!model_xml(export(&m.state(), &[], Format::ThreeMf, "t").unwrap()).contains("Title"));
     }
 
-    /// A failed face must not silently remove a body from a multi-body export (#19215).
-    #[test]
-    fn failed_face_refuses_multi_body_export_by_default() {
-        let (_, m) = model();
-        let state = m.state();
-        let valid = &state.bodies[0];
-        let mut broken = valid.clone();
-        broken.name = "BrokenSliver".into();
-        let result = per_placed_body(&[valid, &broken], false, |b, body| {
-            if b.name == "BrokenSliver" {
-                Err(IoError::Invalid("BrokenSliver: tessellation: face 7: boundary crosses itself".into()))
-            } else {
-                body_mesh(b, body, MeshQuality::default())
-            }
-        });
-        let error = result.expect_err("a missing body must fail the export").to_string();
-        assert!(error.contains("BrokenSliver") && error.contains("face 7"), "{error}");
-    }
-
-    /// Explicit partial export keeps successful bodies and reports each failed body (#19215).
+    /// #18780: in an export of multiple bodies, if one body fails to mesh, it is skipped with a
+    /// warning note and the remaining valid bodies are exported.
     #[test]
     fn untessellated_body_is_skipped_with_warning_on_multi_body_export() -> Result<()> {
         let (_, m) = model();
@@ -2369,7 +2337,7 @@ mod tests {
         broken_model_body.name = "BrokenSliver".into();
 
         let sel = [valid_body, &broken_model_body];
-        let res = per_placed_body(&sel, true, |b, body| {
+        let res = per_placed_body(&sel, |b, body| {
             if b.name == "BrokenSliver" {
                 Err(IoError::Invalid("not supported yet: tessellation: face 0 (cylinder)".into()))
             } else {
@@ -2387,36 +2355,33 @@ mod tests {
 
         // However, if all bodies fail (or only the broken body is exported), it must return Err
         let only_broken = [&broken_model_body];
-        let err_res = per_placed_body(&only_broken, true, |_b, _body| -> Result<(Mesh, Vec<String>)> {
+        let err_res = per_placed_body(&only_broken, |_b, _body| -> Result<(Mesh, Vec<String>)> {
             Err(IoError::Invalid("not supported yet: tessellation".into()))
         });
         assert!(err_res.is_err(), "single failing body must fail the export");
         Ok(())
     }
 
+    /// A body that cannot be meshed does not stop the export: the file is written with the other
+    /// bodies and the note names the one left out (#19215), in each mesh format.
     #[test]
-    fn explicit_partial_export_reports_every_failed_body_and_face() {
+    fn an_unmeshable_body_is_named_and_the_rest_is_still_written() {
         let (_, m) = model();
-        let state = m.state();
-        let valid = &state.bodies[0];
-        let mut broken = valid.clone();
+        let mut state = (*m.state()).clone();
+        let mut broken = state.bodies[0].clone();
         broken.name = "BrokenSliver".into();
-        let mut second = valid.clone();
-        second.name = "SecondFailure".into();
-        let selection = [valid, &broken, &second];
-        let (items, warnings) = per_placed_body(&selection, true, |b, body| {
-            if b.name == "Body1" {
-                body_mesh(b, body, MeshQuality::default())
-            } else {
-                Err(IoError::Invalid("tessellation: face 7: boundary crosses itself".into()))
-            }
-        })
-        .unwrap();
-        assert_eq!(items.len(), 1);
-        assert_eq!(warnings.iter().filter(|w| w.contains("skipped: meshing failed")).count(), 2);
-        for name in ["BrokenSliver", "SecondFailure"] {
-            assert!(warnings.iter().any(|w| w.contains(name) && w.contains("face 7") && w.contains("boundary crosses itself")), "{warnings:?}");
+        state.bodies.push(broken);
+        let alone = export(&m.state(), &[], Format::StlBinary, "t").unwrap();
+        test_unmeshable::set(Some("BrokenSliver"));
+        for format in [Format::StlBinary, Format::StlAscii, Format::Obj, Format::ThreeMf, Format::ThreeMfTagged] {
+            let (bytes, notes) = export_with_parts_noted(&state, &[], &[], format, "t", &Metadata::default(), MeshQuality::default(), None)
+                .unwrap_or_else(|e| panic!("{format:?}: {e}"));
+            assert!(!bytes.is_empty(), "{format:?}");
+            assert!(notes.iter().any(|n| n.starts_with("BrokenSliver: skipped: meshing failed") && n.contains("face 7")), "{format:?}: {notes:?}");
         }
+        let (stl, _) = export_with_parts_noted(&state, &[], &[], Format::StlBinary, "t", &Metadata::default(), MeshQuality::default(), None).unwrap();
+        assert_eq!(read_stl(&stl).unwrap().len(), read_stl(&alone).unwrap().len(), "only the body that meshed is in the file");
+        test_unmeshable::set(None);
     }
 
     #[test]

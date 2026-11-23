@@ -1,7 +1,7 @@
 //! SolidCraft headless command line.
 //!
 //! ```text
-//! solidcraft-cli run <script.json|design.sc|part.step|mesh.3mf> [--in design|part.step|mesh.3mf] [--out FILE]... [--save FILE] [--quiet] [--results] [--timings] [--profile] [--json-out FILE] [--allow-errors] [--allow-missing]
+//! solidcraft-cli run <script.json|design.sc|part.step|mesh.3mf> [--in design|part.step|mesh.3mf] [--out FILE]... [--save FILE] [--quiet] [--results] [--timings] [--profile] [--json-out FILE] [--allow-errors]
 //!                    [--param-check off|warn|strict] [--script-relative]
 //! solidcraft-cli eval <script.json|design.sc|part.step> [--in design.sc|part.step] [--json-out FILE] [--allow-errors] (alias: inspect) measurements as JSON
 //! solidcraft-cli check <design.sc|script.json> [--drawing ID|NAME] [--sheet ID|NAME] [--json-out FILE] Check Drawing on its drawings; exit 1 on findings
@@ -72,7 +72,7 @@ struct Command {
 }
 
 /// `run`'s lines in the usage.
-const USAGE_RUN: &str = "  solidcraft-cli run <script.json|design.sc|part.step> [--in design.sc|part.step] [--out FILE]... [--save FILE] [--quiet] [--results] [--timings] [--profile] [--profile-out trace.json] [--json-out FILE] [--allow-errors] [--allow-missing] [--validation each_step|each_feature|off]\n                     [--param-check off|warn|strict] [--quality standard|fine|finest] [--script-relative]\n                     [--param NAME=EXPR]... [--params-file FILE.json]\n  solidcraft-cli run --in <design.sc|part.step> [--out FILE]...\n      (a timeline feature that fails fails the run and nothing is written; --allow-errors writes anyway)\n      (a step of the script that fails stops the run, with --allow-errors too: nothing is written, and --results\n       gives {results: those of the steps before it, error: {step, command, error}}, to --json-out FILE as well)\n      (--allow-missing lets mesh exports omit bodies that cannot mesh; each skipped body and face is reported on stderr)\n      (--quality: how closely an STL, OBJ or 3MF --out follows curved faces, as file.export's quality: a chord of\n       2e-4, 5e-5 or 1e-5 of each body's size, never under 1 µm, default standard)\n      (--validation: when SMLib's full check runs on the features computed (diagnostics.validation), default each_feature)\n      (--param-check checks each step against its command's contract: warn reports on stderr, strict stops the run)\n      (--param NAME=EXPR sets an existing parameter as parameters.change does, before the script's own commands run and without\n       touching the file; repeat it to set several, applied in the order given. --params-file FILE.json holds {\"NAME\": \"EXPR\", ...},\n       applied before any --param. Needs a design (the positional one, or --in); an unknown name, a missing `=` or a bad\n       expression fails the run. Also taken by eval)\n      (--script-relative runs command file paths from the positional script's folder; command-line file paths\n       stay relative to the caller's folder, which remains the default for scripts without this option)\n      (--timings prints {timings: [{index, command, ms}], total_ms} for a script, with --results its results too;\n       --profile adds each command's profile: {boolean_ms, tessellate_ms, other_ms}, the kernel's share)\n      (--profile also records where the time goes, SMLib's calls, kernel operations, features, commands and import stages,\n       and prints the table to stderr: count, total, self time and longest per span; --profile-out FILE writes the spans\n       as a Chrome trace for chrome://tracing or ui.perfetto.dev; SOLIDCRAFT_PROFILE=1 does the same for any command)\n";
+const USAGE_RUN: &str = "  solidcraft-cli run <script.json|design.sc|part.step> [--in design.sc|part.step] [--out FILE]... [--save FILE] [--quiet] [--results] [--timings] [--profile] [--profile-out trace.json] [--json-out FILE] [--allow-errors] [--validation each_step|each_feature|off]\n                     [--param-check off|warn|strict] [--quality standard|fine|finest] [--script-relative]\n                     [--param NAME=EXPR]... [--params-file FILE.json]\n  solidcraft-cli run --in <design.sc|part.step> [--out FILE]...\n      (a timeline feature that fails fails the run and nothing is written; --allow-errors writes anyway)\n      (a step of the script that fails stops the run, with --allow-errors too: nothing is written, and --results\n       gives {results: those of the steps before it, error: {step, command, error}}, to --json-out FILE as well)\n      (--quality: how closely an STL, OBJ or 3MF --out follows curved faces, as file.export's quality: a chord of\n       2e-4, 5e-5 or 1e-5 of each body's size, never under 1 µm, default standard)\n      (--validation: when SMLib's full check runs on the features computed (diagnostics.validation), default each_feature)\n      (--param-check checks each step against its command's contract: warn reports on stderr, strict stops the run)\n      (--param NAME=EXPR sets an existing parameter as parameters.change does, before the script's own commands run and without\n       touching the file; repeat it to set several, applied in the order given. --params-file FILE.json holds {\"NAME\": \"EXPR\", ...},\n       applied before any --param. Needs a design (the positional one, or --in); an unknown name, a missing `=` or a bad\n       expression fails the run. Also taken by eval)\n      (--script-relative runs command file paths from the positional script's folder; command-line file paths\n       stay relative to the caller's folder, which remains the default for scripts without this option)\n      (--timings prints {timings: [{index, command, ms}], total_ms} for a script, with --results its results too;\n       --profile adds each command's profile: {boolean_ms, tessellate_ms, other_ms}, the kernel's share)\n      (--profile also records where the time goes, SMLib's calls, kernel operations, features, commands and import stages,\n       and prints the table to stderr: count, total, self time and longest per span; --profile-out FILE writes the spans\n       as a Chrome trace for chrome://tracing or ui.perfetto.dev; SOLIDCRAFT_PROFILE=1 does the same for any command)\n";
 /// `eval`'s lines in the usage.
 const USAGE_EVAL: &str = "  solidcraft-cli eval <script.json|design.sc|part.step> [--in design.sc|part.step] [--json-out FILE] [--allow-errors] [--quiet] [--profile] [--profile-out trace.json] [--validation each_step|each_feature|off]     (alias: inspect)\n  solidcraft-cli eval --in <script.json|design.sc|part.step> [--json-out FILE]\n      (with both inputs, runs the positional script on --in before measuring; does not automatically save the modified design)\n      (--json-out FILE writes the JSON that run (with --results, else the measurement) and eval print to FILE instead of stdout,\n       as plain UTF-8: a shell's > can re-encode it, e.g. Windows PowerShell adds a byte-order mark)\n      (--profile, --profile-out and --validation as for run; --quiet prints no report to stdout, as for run: the exit status\n       still says whether a feature failed, and a --json-out file is still written)\n";
 /// `check`'s lines in the usage.
@@ -537,18 +537,8 @@ fn run_script_warning(s: &mut Session, path: &str, script: &Value) -> Result<Vec
     s.run_script_each(script, &mut |step, r| print_param_warnings(path, step, r)).map_err(|e| e.to_string())
 }
 
-/// Parameter warnings and explicit mesh omissions on stderr, named after the script and step.
+/// Step `step`'s `param_warnings` on stderr, one per line, named after the script at `path`.
 fn print_param_warnings(path: &str, step: usize, r: &Value) {
-    for w in r
-        .get("warnings")
-        .and_then(Value::as_array)
-        .into_iter()
-        .flatten()
-        .filter_map(Value::as_str)
-        .filter(|w| w.contains(": skipped: meshing failed"))
-    {
-        eprintln!("{path}: step {}: {w}", step + 1);
-    }
     for w in r.get("param_warnings").and_then(Value::as_array).into_iter().flatten() {
         solidcraft_engine::note!("{path}: step {}: {}", step + 1, w.as_str().unwrap_or_default());
     }
@@ -585,15 +575,7 @@ fn positional_index(args: &[String]) -> Option<usize> {
         if a.starts_with("--") {
             i += if matches!(
                 a.as_str(),
-                "--quiet"
-                    | "--results"
-                    | "--timings"
-                    | "--profile"
-                    | "--allow-errors"
-                    | "--allow-missing"
-                    | "--no-grid"
-                    | "--no-axes"
-                    | "--script-relative"
+                "--quiet" | "--results" | "--timings" | "--profile" | "--allow-errors" | "--no-grid" | "--no-axes" | "--script-relative"
             ) {
                 1
             } else {
@@ -652,7 +634,7 @@ fn cmd_run(args: &[String]) -> Result<(), String> {
         "run",
         args,
         &["--in", "--out", "--save", "--json-out", "--param-check", "--profile-out", "--validation", "--quality", "--param", "--params-file"],
-        &["--quiet", "--results", "--timings", "--profile", "--allow-errors", "--allow-missing", "--script-relative"],
+        &["--quiet", "--results", "--timings", "--profile", "--allow-errors", "--script-relative"],
         true,
     )?;
     let validation = validation_flag("run", args)?;
@@ -732,18 +714,20 @@ fn cmd_run(args: &[String]) -> Result<(), String> {
         if let Some(q) = quality {
             params["quality"] = json!(q);
         }
-        if args.iter().any(|a| a == "--allow-missing")
-            && let Some(params) = params.as_object_mut()
-        {
-            params.insert("allow_missing".into(), json!(true));
-        }
         let reply = s.execute("file.export", &params).map_err(|e| e.to_string())?;
         // What the export noted (a mesh that is not a clean closed surface, a face short of its
         // shape) goes to stderr, as a newer file's warnings do, unless --quiet: the file is
         // written, but not silently.
-        if !args.iter().any(|a| a == "--quiet") {
+        let quiet = args.iter().any(|a| a == "--quiet");
+        // A body left out of the file is said whatever --quiet says: a part is missing from it.
+        for line in skipped_body_lines(out, &reply) {
+            eprintln!("{line}");
+        }
+        if !quiet {
             for w in reply.get("warnings").and_then(Value::as_array).into_iter().flatten().filter_map(Value::as_str) {
-                eprintln!("{out}: warning: {w}");
+                if !w.contains(SKIPPED_NOTE) {
+                    eprintln!("{out}: warning: {w}");
+                }
             }
         }
     }
@@ -759,6 +743,23 @@ fn cmd_run(args: &[String]) -> Result<(), String> {
         print_json(&m, json_out)?;
     }
     Ok(())
+}
+
+/// What an export's note for a body it could not mesh has after the body's name.
+const SKIPPED_NOTE: &str = ": skipped: meshing failed";
+
+/// One line for each body the export of `out` left out because it could not be meshed, naming the
+/// body and why: `reply` is `file.export`'s.
+fn skipped_body_lines(out: &str, reply: &Value) -> Vec<String> {
+    let notes = reply.get("warnings").and_then(Value::as_array).into_iter().flatten().filter_map(Value::as_str);
+    notes
+        .filter_map(|w| w.split_once(SKIPPED_NOTE))
+        .map(|(body, why)| {
+            let why = why.trim().trim_start_matches('(').trim_end_matches(')');
+            let because = if why.is_empty() { String::new() } else { format!(": {why}") };
+            format!("{out}: warning: body {body} is NOT in this file, it could not be meshed{because}")
+        })
+        .collect()
 }
 
 /// Only this standalone CLI invocation changes directory, before the renderer or session starts.
@@ -1584,7 +1585,7 @@ mod tests {
     use serde_json::json;
     use solidcraft_engine::Session;
 
-    use super::read_session;
+    use super::{read_session, skipped_body_lines};
 
     /// A file removed when the test ends, failed or not.
     struct Temp(std::path::PathBuf);
@@ -1626,5 +1627,21 @@ mod tests {
             .unwrap();
         assert!(s.model.last_recomputed > 0, "evaluated while profiling");
         assert_eq!(volume(&s).to_bits(), volume(&built).to_bits());
+    }
+
+    /// A body left out of an export is named on its own line, with why, and the line is the same
+    /// whether or not the file's other notes are shown.
+    #[test]
+    fn a_body_left_out_of_an_export_is_named_on_stderr() {
+        let reply = json!({
+            "path": "out.stl",
+            "skipped": ["BrokenSliver"],
+            "warnings": ["Bolt: face 3 is short of its chord tolerance", "BrokenSliver: skipped: meshing failed (BrokenSliver: tessellation: face 7 (cylinder))"]
+        });
+        let lines = skipped_body_lines("out.stl", &reply);
+        assert_eq!(lines.len(), 1, "{lines:?}");
+        assert!(lines[0].starts_with("out.stl: warning: body BrokenSliver is NOT in this file"), "{lines:?}");
+        assert!(lines[0].contains("face 7"), "{lines:?}");
+        assert!(skipped_body_lines("out.stl", &json!({"path": "out.stl", "warnings": ["Bolt: a note"]})).is_empty());
     }
 }
