@@ -131,12 +131,12 @@ pub struct RadialFace<'a> {
 /// `x = b.dot(ray)` and `y = tangent.dot(b.cross(ray))`. Omitting normalization
 /// scales every y coordinate by the same positive factor, preserving cyclic order.
 /// The surface derivatives are evaluated directly, with no stepped probes or
-/// angular tolerance. Coincident rays need higher-order contact information and
-/// are refused rather than assigned an arbitrary order.
+/// geometric angular tolerance. Faces sharing a ray (up to [`RAY_ROUNDING`]) are ordered
+/// by [`bend`], and refused only where that is equal too.
 ///
 /// # Errors
 /// Malformed or unevaluable geometry, a vanishing tangent or inward ray, or faces
-/// whose radial directions cannot be distinguished.
+/// whose radial directions and bends cannot be distinguished.
 pub fn radial_order(
     curve: &Curve,
     interval: [f64; 2],
@@ -160,7 +160,8 @@ pub fn radial_order(
             .pcurve
             .eval(t)
             .ok_or_else(|| Error::Failed("cannot evaluate a radial face's pcurve".into()))?;
-        let (_, du, dv) = SurfaceEval::new(face.surface)?
+        let surface = SurfaceEval::new(face.surface)?;
+        let (_, du, dv) = surface
             .derivs(u, v)
             .ok_or_else(|| Error::Failed("cannot evaluate a radial face's normal".into()))?;
         let ray = du.cross(dv).cross(tangent);
@@ -178,17 +179,87 @@ pub fn radial_order(
         } else {
             angle
         };
-        angles.push((i, angle));
+        let angle = if std::f64::consts::TAU - angle <= RAY_ROUNDING {
+            0.0
+        } else {
+            angle
+        };
+        angles.push((i, angle, 0.0, (surface, [u, v], du, dv, ray)));
     }
-    angles.sort_unstable_by(|a, b| a.1.total_cmp(&b.1));
-    for pair in angles.windows(2) {
-        if matches!(pair, [a, b] if a.1 == b.1) {
-            return Err(Error::Failed(
-                "tangent faces do not determine a radial order from their inward directions".into(),
-            ));
+    let snapped: Vec<f64> = angles
+        .iter()
+        .map(|a| {
+            angles
+                .iter()
+                .map(|b| b.1)
+                .filter(|b| (a.1 - b).abs() <= RAY_ROUNDING)
+                .fold(a.1, f64::min)
+        })
+        .collect();
+    for (entry, angle) in angles.iter_mut().zip(snapped) {
+        entry.1 = angle;
+    }
+    let tangent_faces = || {
+        Error::Failed(
+            "tangent faces do not determine a radial order from their inward directions or bends"
+                .into(),
+        )
+    };
+    let tied: Vec<f64> = angles
+        .iter()
+        .filter(|a| angles.iter().filter(|b| b.1 == a.1).count() > 1)
+        .map(|a| a.1)
+        .collect();
+    let same_bend = |a: f64, b: f64| (a - b).abs() <= RAY_ROUNDING * a.abs().max(b.abs());
+    let mut reference_bend = None;
+    for entry in &mut angles {
+        if !tied.contains(&entry.1) {
+            continue;
+        }
+        let (surface, [u, v], du, dv, ray) = &entry.3;
+        entry.2 = bend(surface, *u, *v, *du, *dv, *ray, tangent).ok_or_else(tangent_faces)?;
+        // A face sharing the reference ray that bends back from it lies just short of a full turn.
+        if entry.1 == 0.0 {
+            let reference = *reference_bend.get_or_insert(entry.2);
+            if reference > entry.2 && !same_bend(reference, entry.2) {
+                entry.1 = std::f64::consts::TAU;
+            }
         }
     }
-    Ok(angles.into_iter().map(|(i, _)| i).collect())
+    angles.sort_unstable_by(|a, b| a.1.total_cmp(&b.1).then(a.2.total_cmp(&b.2)));
+    for pair in angles.windows(2) {
+        if matches!(pair, [a, b] if a.1 == b.1 && same_bend(a.2, b.2)) {
+            return Err(tangent_faces());
+        }
+    }
+    Ok(angles.into_iter().map(|(i, ..)| i).collect())
+}
+
+/// Rays this close in angle (radians) are one ray, and bends this close (relative) one bend: the
+/// rounding of this function's own arithmetic (S0332: 8.7e-17), far below any geometric gap.
+const RAY_ROUNDING: f64 = 64.0 * f64::EPSILON;
+
+/// How fast a face turns about the edge tangent, counter-clockwise, as it leaves the edge along
+/// `ray`: `t̂ · (r̂ × κ)`, with `κ` the surface's second derivative along the unit ray. A face
+/// leaving at angle θ is at θ + bend·s/2 a distance s out, so faces sharing a ray are ordered by it.
+fn bend(
+    surface: &SurfaceEval,
+    u: f64,
+    v: f64,
+    du: Vec3,
+    dv: Vec3,
+    ray: Vec3,
+    tangent: Vec3,
+) -> Option<f64> {
+    let (uu, uv, vv) = surface.second(u, v)?;
+    let (g11, g12, g22) = (du.dot(du), du.dot(dv), dv.dot(dv));
+    let det = g11 * g22 - g12 * g12;
+    let (p, q) = (du.dot(ray), dv.dot(ray));
+    let (a, b) = ((g22 * p - g12 * q) / det, (g11 * q - g12 * p) / det);
+    let curl = uu * (a * a) + uv * (2.0 * a * b) + vv * (b * b);
+    let scale = ray.len2() * ray.len2().sqrt() * tangent.len2().sqrt();
+    let bend = tangent.dot(ray.cross(curl)) / scale;
+    (det != 0.0 && bend.is_finite()).then_some(bend)
 }
 
 /// Knot spans a fitted pcurve may have (the schema takes 4096 control points).
