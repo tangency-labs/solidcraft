@@ -241,6 +241,15 @@ impl TimelineKind {
     }
 }
 
+/// The History menus' edit item, label and icon: a sketch says Edit Sketch, as its Browser row
+/// does (#14366); both open the same editor.
+pub(crate) fn edit_label(kind: TimelineKind) -> (&'static str, &'static str) {
+    match kind {
+        TimelineKind::Sketch => ("Edit Sketch", "sketch"),
+        _ => ("Edit Feature", "edit"),
+    }
+}
+
 pub(crate) fn icon_of(k: &FeatureKind) -> &'static str {
     match k {
         FeatureKind::Sketch { .. } => "sketch",
@@ -308,6 +317,7 @@ pub(crate) fn icon_of(k: &FeatureKind) -> &'static str {
         FeatureKind::FrameEndCap { .. } => "end_cap",
         FeatureKind::FrameMember { .. } => "frame_member",
         FeatureKind::FrameMemberTurn { .. } => "rotate_member",
+        FeatureKind::FramePlate { .. } => "frame_plate",
         FeatureKind::Emboss { .. } => "emboss",
         FeatureKind::ReplaceFace { .. } => "replace_face",
         FeatureKind::Align { .. } => "align",
@@ -540,7 +550,8 @@ pub(crate) fn feature_items(app: &SolveApp, id: u64) -> Vec<Item> {
     let refined_weld = matches!(&feature.kind, FeatureKind::Stitch { form_seam: Some(_), .. });
     let mut v = Vec::new();
     if !refined_weld {
-        v.push(Item::action("ui.editFeature", "Edit Feature", "edit").with(json!({ "feature": id })));
+        let (edit, icon) = edit_label(TimelineKind::of(&feature.kind));
+        v.push(Item::action("ui.editFeature", edit, icon).with(json!({ "feature": id })));
     }
     if matches!(feature.kind, FeatureKind::Sketch { .. }) {
         v.extend(
@@ -1865,6 +1876,9 @@ mod tests {
                 extent: false,
                 flip: false,
                 orient: false,
+                start: None,
+                start_fraction: None,
+                follow_frame: true,
             },
         };
         assert_eq!(super::icon_of(&feature), solidcraft_engine::find_command("solid.pattern.path").unwrap().icon);

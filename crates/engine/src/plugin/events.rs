@@ -92,7 +92,8 @@ pub fn design_notifications(session: &mut Session, design: Option<DesignToken>, 
         // Only the declaration included in the approved bytes authorizes invocations.
         let Some(runtime) = package.manifest.runtime.as_ref() else { continue };
         let granted = session.plugin_state.grants.get(&id).map(|grants| grants.folders.as_slice()).unwrap_or_default();
-        let scope = solidcraft_io::vfs::PathScope::new(approved_file_folders(granted, &runtime.permissions.files, false));
+        // Hidden names inside a granted folder stay out of reach, as they do for the package's reads.
+        let scope = solidcraft_io::vfs::PathScope::new(approved_file_folders(granted, &runtime.permissions.files, false)).without_hidden();
         // Unread disk state has the same folder boundary as the package's file reads.
         // Versions already read into the design remain visible without a file grant.
         let links: Vec<_> = links.iter().filter(|link| link.read || scope.check(&link.path).is_ok()).collect();
