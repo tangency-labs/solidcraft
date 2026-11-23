@@ -2908,7 +2908,11 @@ enum ChamferSecond {
     Angle(f64), // Degrees, as entered.
 }
 
-fn chamfer_model_param(doc: &mut solidcraft_doc::Document, base: &str, value: f64, unit: &str, cmd: &str) -> Result<String> {
+fn chamfer_dimension_binding(doc: &mut solidcraft_doc::Document, on_sheet: bool, base: &str, value: f64, unit: &str, cmd: &str) -> Result<String> {
+    let expression = format!("{value} {unit}");
+    if on_sheet {
+        return Ok(expression);
+    }
     let taken: std::collections::BTreeSet<_> = doc
         .params
         .iter()
@@ -2920,11 +2924,12 @@ fn chamfer_model_param(doc: &mut solidcraft_doc::Document, base: &str, value: f6
         .map(|index| if index == 1 { base.to_string() } else { format!("{base}_{index}") })
         .find(|name| !taken.contains(name.as_str()))
         .ok_or_else(|| bad(cmd, "no free chamfer parameter name"))?;
-    Ok(doc.new_named_model_param(&name, &format!("{value} {unit}"), unit)?)
+    Ok(doc.new_named_model_param(&name, &expression, unit)?)
 }
 
 fn chamfer(s: &mut Session, p: &Value, cmd: &str, distance: f64, second: ChamferSecond) -> Result<Value> {
     let corners = corner_list(p, cmd)?;
+    let on_sheet = s.sheet_sketching();
     let (out, info) = edit(s, p, cmd, false, |sk, doc| {
         // A corner symmetric to another is cut with it (#18075).
         let corners = symmetric_corners(sk, &corners, cmd);
@@ -2942,12 +2947,12 @@ fn chamfer(s: &mut Session, p: &Value, cmd: &str, distance: f64, second: Chamfer
                 return Err(bad(cmd, "a corner is listed twice"));
             }
         }
-        // One set of inputs drives all selected corners. Equal distances share a parameter.
-        let first = chamfer_model_param(doc, "chamfer_distance", distance, "mm", cmd)?;
+        // A drawing stores the expressions on the sheet. A model shares named parameters across the selected corners.
+        let first = chamfer_dimension_binding(doc, on_sheet, "chamfer_distance", distance, "mm", cmd)?;
         let other = match second {
             ChamferSecond::Equal => first.clone(),
-            ChamferSecond::Distance(value) => chamfer_model_param(doc, "chamfer_second_distance", value, "mm", cmd)?,
-            ChamferSecond::Angle(value) => chamfer_model_param(doc, "chamfer_angle", value, "deg", cmd)?,
+            ChamferSecond::Distance(value) => chamfer_dimension_binding(doc, on_sheet, "chamfer_second_distance", value, "mm", cmd)?,
+            ChamferSecond::Angle(value) => chamfer_dimension_binding(doc, on_sheet, "chamfer_angle", value, "deg", cmd)?,
         };
         let params = [first, other];
         let (mut lines, mut kept) = (Vec::new(), Vec::new());
