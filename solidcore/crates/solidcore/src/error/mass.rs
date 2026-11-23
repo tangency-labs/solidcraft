@@ -21,13 +21,14 @@
 //! [`MassFailure::Defect`] is a failure reviewed at its site as the kernel's fault, with its
 //! reason: a defect ([`ErrorKind::StageFailed`], class 127). The named causes from
 //! [`MassFailure::EdgeWithoutCurve`] on are the caller's body ([`ErrorKind::InvalidInput`])
-//! or its degenerate geometry. The phrase causes are sites not yet converted (the
-//! conversion guide: `docs/failure-codes-and-reproduction.md` §6).
+//! or its degenerate geometry. The phrase variants ([`MassFailure::Failed`],
+//! [`MassFailure::Missing`]) are no longer built here (the conversion guide:
+//! `docs/failure-codes-and-reproduction.md` §6).
 //!
-//! Deviations: not upstream. A failure says in a phrase (or by its variant) what went
-//! wrong; the failure's `operation` path says which routine. No failure names an
-//! entity: the sites they replace named none. Checks of a caller's arguments that
-//! report no status stay [`crate::SolidError::InvalidInput`].
+//! Deviations: not upstream. A failure says by its variant what went wrong; the failure's
+//! `operation` path says which routine. No failure names an entity: the sites they
+//! replace named none. Checks of a caller's arguments that report no status stay
+//! [`crate::SolidError::InvalidInput`].
 
 use super::{ErrorKind, Failure, Reason, SM_ERR, SM_ERR_NULL_POINTER};
 
@@ -177,22 +178,6 @@ impl crate::SolidError {
         Failure::new(operation, failure).into_error()
     }
 
-    /// [`crate::SolidError::Failed`] for a mass-property routine that could not
-    /// continue, as the phrase says, with status [`SM_ERR`] (upstream
-    /// `return SE(SM_ERR)`).
-    #[must_use]
-    pub(crate) fn mass_failed(operation: &'static str, what: &'static str) -> Self {
-        Self::mass(operation, MassFailure::Failed(what))
-    }
-
-    /// [`crate::SolidError::Failed`] for something a mass-property routine needs that is
-    /// not there, as the phrase says, with status [`SM_ERR_NULL_POINTER`] (upstream
-    /// `NER(ptr)` on a `NULL` pointer).
-    #[must_use]
-    pub(crate) fn mass_missing(operation: &'static str, what: &'static str) -> Self {
-        Self::mass(operation, MassFailure::Missing(what))
-    }
-
     /// The mass-property failure behind this error, for a [`crate::SolidError::Failed`]
     /// with a [`Reason::Mass`].
     #[must_use]
@@ -243,11 +228,11 @@ mod tests {
             assert_eq!(typed.mass_failure(), Some(&failure));
         }
         assert_eq!(
-            SolidError::mass_missing("mass::op", "the edge's curve").to_string(),
+            SolidError::mass("mass::op", MassFailure::Missing("the edge's curve")).to_string(),
             "mass::op: the edge's curve is missing"
         );
         assert_eq!(
-            SolidError::mass_failed("mass::op", "x").kind(),
+            SolidError::mass("mass::op", MassFailure::Failed("x")).kind(),
             ErrorKind::Failed
         );
         assert_eq!(SolidError::sm_err("mass::op").mass_failure(), None);
@@ -366,14 +351,11 @@ mod tests {
             builders: &[
                 Builder::Variant("MassFailure", "Failed"),
                 Builder::Variant("MassFailure", "Missing"),
-                Builder::Method("mass_failed", Some(1)),
-                Builder::Method("mass_missing", Some(1)),
             ],
             wrappers: Wrappers::Phrase,
         };
         #[rustfmt::skip] // one file per line, so conversions in parallel merge cleanly
         const PINNED: &[(&str, usize)] = &[
-            ("solidcore/src/mass/enclosure.rs", 24),
         ];
         assert_pinned(
             "mass-property phrase-cause sites",

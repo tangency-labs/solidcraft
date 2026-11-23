@@ -1035,6 +1035,24 @@ pub fn certify_regular(
     d: f64,
     uv_box: Option<[f64; 4]>,
 ) -> Result<Regularity> {
+    certify_regular_knowing(k, s, d, uv_box, None)
+}
+
+/// [`certify_regular`], given what [`least_wall`] found for the same `s`, `d` and
+/// `uv_box` (`None`: not looked for). A fold names that radius instead of searching for it
+/// again, so a caller that has run [`proved_singular`] on the face does not pay for the
+/// search twice.
+///
+/// # Errors
+///
+/// Those of [`certify_regular`].
+pub fn certify_regular_knowing(
+    k: &Kernel,
+    s: &Nurb,
+    d: f64,
+    uv_box: Option<[f64; 4]>,
+    least: Option<f64>,
+) -> Result<Regularity> {
     let b = Binomials::new();
     let region = patches_in(s, uv_box)?;
     // the face's net, for the fold witness (none: no fold is proved)
@@ -1082,7 +1100,10 @@ pub fn certify_regular(
     if !folds {
         return Ok(Regularity::Regular);
     }
-    let largest = largest_wall(&region, d.signum())?;
+    let largest = match least {
+        Some(largest) => largest,
+        None => largest_wall(&region, d.signum())?,
+    };
     Ok(if largest.is_finite() {
         Regularity::Folds { largest }
     } else {
@@ -1191,22 +1212,57 @@ pub fn proved_singular(
     uv_box: Option<[f64; 4]>,
     resolution: f64,
 ) -> Result<Option<Singular>> {
+    check_reach(d, resolution)?;
+    let Some(radius) = least_wall(s, d, uv_box)? else {
+        return Ok(None);
+    };
+    Ok(singular_at(radius, d, resolution))
+}
+
+/// [`proved_singular`]'s refusal of its inputs: a distance or resolution that is not
+/// finite, or a negative resolution.
+///
+/// # Errors
+///
+/// [`SolidError::InvalidInput`] for those.
+pub fn check_reach(d: f64, resolution: f64) -> Result<()> {
     if !d.is_finite() || !resolution.is_finite() || resolution < 0.0 {
+        return Err(invalid("a distance or resolution that is not finite"));
+    }
+    Ok(())
+}
+
+/// The least radius of curvature [`proved_singular`] samples on the side of `s` that `d`
+/// displaces it to, over `uv_box`: the radius it and [`certify_regular_knowing`] name.
+/// `None` for an empty region or a distance of zero, where neither looks for one.
+///
+/// # Errors
+///
+/// [`SolidError::InvalidInput`] for a distance that is not finite; those of the Bezier
+/// decomposition.
+pub fn least_wall(s: &Nurb, d: f64, uv_box: Option<[f64; 4]>) -> Result<Option<f64>> {
+    if !d.is_finite() {
         return Err(invalid("a distance or resolution that is not finite"));
     }
     let region = patches_in(s, uv_box)?;
     if region.is_empty() || !positive(d.abs()) {
         return Ok(None);
     }
-    let radius = largest_wall(&region, d.signum())?;
+    largest_wall(&region, d.signum()).map(Some)
+}
+
+/// [`proved_singular`]'s verdict for the least radius `radius` on the displaced side:
+/// `None` when the offset by `d` keeps more than `resolution` of it.
+#[must_use]
+pub fn singular_at(radius: f64, d: f64, resolution: f64) -> Option<Singular> {
     let reach = d.abs();
     if radius - reach > resolution {
-        return Ok(None);
+        return None;
     }
-    Ok(Some(Singular {
+    Some(Singular {
         radius,
         collapses: radius - reach >= -resolution,
-    }))
+    })
 }
 
 /// A patch's derivative nets up to second order, built once and evaluated at many
@@ -1724,6 +1780,41 @@ mod tests {
             panic!("an inset past the radius folds");
         };
         assert!((largest - 10.0).abs() < 1e-9, "{largest}");
+    }
+
+    /// The shell searches a face's least radius on the displaced side once
+    /// ([`least_wall`]) and both of its checks use it: given that radius,
+    /// [`certify_regular_knowing`] answers what [`certify_regular`] answers by searching, and
+    /// [`singular_at`] what [`proved_singular`] does, bit for bit.
+    #[test]
+    fn the_least_radius_found_once_serves_both_checks() {
+        let s = elevated_quarter_cylinder(7, 3);
+        let k = Kernel::default();
+        let res = 1e-6;
+        // the distances `a_septic_rational_patch_is_certified_as_its_cylinder` certifies
+        for d in [-10.5, -9.0, 2.0] {
+            let least = least_wall(&s, d, None).unwrap();
+            let searched = certify_regular(&k, &s, d, None).unwrap();
+            assert_eq!(
+                certify_regular_knowing(&k, &s, d, None, least).unwrap(),
+                searched,
+                "{d}"
+            );
+            if let Regularity::Folds { largest } = searched {
+                assert_eq!(least.map(f64::to_bits), Some(largest.to_bits()), "{d}");
+            }
+        }
+        // the collapse test at, short of and past the radius, and outwards
+        for d in [-10.5, -10.0, -9.0, 2.0] {
+            let least = least_wall(&s, d, None).unwrap();
+            assert_eq!(
+                least.and_then(|r| singular_at(r, d, res)),
+                proved_singular(&s, d, None, res).unwrap(),
+                "{d}"
+            );
+        }
+        assert_eq!(least_wall(&s, 0.0, None).unwrap(), None);
+        assert!(least_wall(&s, f64::NAN, None).is_err());
     }
 
     /// A cylinder of radius 10 offset towards its axis: by 10 the offset collapses onto
