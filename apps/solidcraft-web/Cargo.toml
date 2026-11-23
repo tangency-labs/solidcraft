@@ -46,7 +46,7 @@ web-sys = { version = "0.3", features = [
     "FileSystemHandle", "FileSystemDirectoryHandle", "FileSystemFileHandle", "FileSystemGetFileOptions", "FileSystemGetDirectoryOptions", "FileSystemWritableFileStream",
     "WritableStream", "File", "FileList", "Blob", "BlobPropertyBag", "Url", "HtmlAnchorElement", "HtmlInputElement", "Storage", "StorageEvent",
     "IdbFactory", "IdbDatabase", "IdbObjectStore", "IdbOpenDbRequest", "IdbRequest", "IdbTransaction", "IdbTransactionMode",
-    "Headers", "ReadableStream", "RequestCredentials", "ReadableStreamDefaultReader",
+    "Headers", "ReadableStream", "RequestCredentials", "RequestRedirect", "ReadableStreamDefaultReader",
     "BeforeUnloadEvent", "Event", "EventTarget", "KeyboardEvent", "Response", "FormData", "RequestInit", "MediaQueryList", "Gamepad", "Performance",
     "PointerEvent", "Node", "VisibilityState", "WheelEvent", "MouseEvent", "AddEventListenerOptions", "Touch", "TouchEvent", "TouchList",
 ] }

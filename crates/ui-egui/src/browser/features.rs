@@ -1446,7 +1446,7 @@ mod tests {
         let path = [assembly, part];
         let rows = [occurrence_key(&path[..1]), occurrence_key(&path), format!("{}/bodies", occurrence_key(&path))];
         h.app.ui.show_browser = false;
-        crate::timeline::find_in_browser(&mut h.app, feature);
+        crate::timeline::find_in_browser(&mut h.app, &[feature]);
         assert!(h.app.ui.show_browser);
         assert!(rows.iter().all(|key| row_open(&h.app, key)), "{rows:?}");
         assert_eq!(h.app.session.selection, [Sel::Body { name: "Plate".into() }]);
