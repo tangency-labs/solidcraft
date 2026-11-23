@@ -155,7 +155,9 @@ impl<'a, O: SolutionObject> LocalSolver<'a, O> {
 
     /// The error for a curve/vertex or curve/face solve with no curve: an edge solve
     /// set the curve from its edge's curve, and the caller's edge has none; otherwise
-    /// the caller did not set the curve (`set_curve`) before solving.
+    /// the caller did not set the curve (`set_curve`) before solving. An error from the
+    /// adapter's `edge_curve` is read as the latter: this site's status is upstream's
+    /// `SM_ERR_NULL_POINTER` either way, and the adapter's error is not what failed here.
     fn no_curve(&self, objects: &dyn TopologyObjects<O>, operation: &'static str) -> SolidError {
         let edge_without_curve = self
             .curve_edge
@@ -1193,6 +1195,48 @@ mod tests {
     use super::super::p1::tests::{scene, Obj};
     use super::*;
     use crate::math::BIG_DOUBLE;
+
+    #[test]
+    fn a_curve_solve_without_its_curve_names_the_missing_edge_curve_or_setup() {
+        let kernel = Kernel::default();
+        let objects = scene();
+        let check = |e: &SolidError, cause: &IntersectFailure| {
+            assert_eq!(
+                e.upstream_status(),
+                Some(crate::error::SM_ERR_NULL_POINTER),
+                "{e}"
+            );
+            assert_eq!(e.intersect_failure(), Some(cause), "{e}");
+            assert_eq!(e.kind(), crate::error::ErrorKind::InvalidInput, "{e}");
+        };
+        // through solve_it: a curve/vertex solve whose curve was never set
+        let mut solver = TopologySolver::new(
+            &kernel,
+            &objects,
+            SolverOperation::Minimize,
+            SolutionRequested::All,
+            1e-6,
+            BIG_DOUBLE,
+            &[],
+        );
+        let mut local = LocalSolver::new(LocalSolverKind::CurveVertex, false, None);
+        let e = local
+            .solve_it(&kernel, &mut solver, None, Some(Obj::Vertex(0)))
+            .unwrap_err();
+        check(&e, &IntersectFailure::NotSetUp);
+        // the curve edge has a curve: still not set up
+        local.set_curve_edge(Some(Obj::Edge(0)));
+        check(
+            &local.no_curve(&objects, OP_CV),
+            &IntersectFailure::NotSetUp,
+        );
+        // the curve edge has no curve (the test adapter has none for a non-edge object)
+        local.set_curve_edge(Some(Obj::Vertex(0)));
+        check(
+            &local.no_curve(&objects, OP_CF),
+            &IntersectFailure::EdgeWithoutCurve,
+        );
+    }
 
     #[test]
     fn nodes_without_object_lists_solve_as_empty_in_both_orders() {

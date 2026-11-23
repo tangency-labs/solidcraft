@@ -2124,7 +2124,8 @@ impl<'a, O: SolutionObject> LocalSolver<'a, O> {
 /// `CreateCurvesByTrimming` leaves on it; an adapter that resolves none returns
 /// [`SolidError::Unported`] for `SmFace::CreateCurvesByTrimming`. A trimmed UV curve
 /// that is not a B-spline (upstream caches it as NULL and `GetCopyOfCurves` fails
-/// on it) is `SM_ERR_NULL_POINTER`.
+/// on it) is a reviewed `Defect` that keeps upstream's `SM_ERR_NULL_POINTER`: the
+/// kernel builds every silhouette UV curve it trims as a B-spline.
 pub(super) fn face_silhouettes<O: SolutionObject>(
     k: &Kernel,
     objects: &dyn TopologyObjects<O>,
