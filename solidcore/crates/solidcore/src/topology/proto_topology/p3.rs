@@ -200,6 +200,9 @@ impl SolutionObject for CurveHandle {
     }
 }
 
+use crate::error::topology::TopologyFailure;
+use crate::error::{Failure, SM_ERR};
+
 /// A dereference of a null pointer or a deleted object upstream (undefined behaviour).
 const fn dangling(reason: &'static str) -> SolidError {
     SolidError::InvalidInput {
@@ -335,9 +338,9 @@ impl<O> Mates<O> for NoMates {
     }
 
     fn remove_relationship(&mut self, _brep_entity: O, _other_entity: O) -> Result<()> {
-        Err(SolidError::topology_failed(
+        Err(SolidError::topology(
             "topology::proto_topology::p3::remove_relationship",
-            "the two are not a mated pair",
+            TopologyFailure::NotAMatedPair,
         ))
     }
 }
@@ -771,14 +774,22 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
         }
 
         let mid_pv = mid_pv.ok_or(dangling("mid proto vertex is null"))?;
-        let (new_vd, created) = ignore_soft(passed_on(
+        // The definition's failure, which upstream reads only as a null result, is the
+        // cause; the errors that cannot be ignored pass on as they are.
+        let (new_vd, created) = match passed_on(
             self.add_vertex_definition_from_pcs(k, &*geometry, mid_pv, &mut pc1, &mut pc2),
             k.fixes.ssi_proto_topology_statuses_pass_on,
-        )?)?
-        .map_or((None, false), |(vd, created)| (Some(vd), created));
-        let new_vd = new_vd.ok_or_else(|| {
-            SolidError::topology_missing(OP_ED_SPLIT, "the vertex definition at the split")
-        })?;
+        )? {
+            Ok(added) => added,
+            Err(e) => {
+                ignore_soft(Err::<(), _>(e.clone()))?;
+                return Err(
+                    Failure::new(OP_ED_SPLIT, TopologyFailure::SplitDefinitionNotAdded)
+                        .caused_by(e)
+                        .into_error(),
+                );
+            }
+        };
 
         // For cleanup object: don't do it if it was 'found' (vs. created).
         let clean_vd = created.then_some(new_vd);
@@ -937,16 +948,13 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
         let c3 = d.xsect_curve_3d();
         let uvs = [d.xsect_uv_curve(1), d.xsect_uv_curve(2)];
         let copy = curve_of(&*geometry, c3)?.copy(k)?;
-        let handle = geometry.insert_curve(copy).ok_or_else(|| {
-            SolidError::topology_missing(OP_ED_SPLIT, "the copied 3D curve's handle")
-        })?;
+        let full = || SolidError::topology(OP_ED_SPLIT, TopologyFailure::CurveStoreFull);
+        let handle = geometry.insert_curve(copy).ok_or_else(full)?;
         self.set_ed_curve_3d(new_ed, Some(handle))?;
         for (which, uv) in [1, 2].into_iter().zip(uvs) {
             if uv.is_some() {
                 let copy = curve_of(&*geometry, uv)?.copy(k)?;
-                let handle = geometry.insert_curve(copy).ok_or_else(|| {
-                    SolidError::topology_missing(OP_ED_SPLIT, "the copied UV curve's handle")
-                })?;
+                let handle = geometry.insert_curve(copy).ok_or_else(full)?;
                 self.edge_def_mut(new_ed)
                     .ok_or(dangling("edge definition is deleted"))?
                     .set_xsect_curve_uv(which, Some(handle));
@@ -1225,10 +1233,11 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
         let (Some(&first1), Some(&first2)) =
             (e1.edge_definitions().first(), e2.edge_definitions().first())
         else {
-            return Err(SolidError::topology_failed(
-                OP_SPLIT_INT,
-                "a proto edge has no edge definitions",
-            )); // [Reg_091215_simon_closed]
+            return Err(
+                Failure::new(OP_SPLIT_INT, TopologyFailure::ProtoEdgeWithoutDefinitions)
+                    .with_status(SM_ERR)
+                    .into_error(),
+            ); // [Reg_091215_simon_closed]
         };
 
         // no work - Skip the pair if they're known to overlap. Handled during Resolve
@@ -1319,9 +1328,9 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
                 if self.overlap_collapses_to_an_end(k, &*geometry, pe1, t11, t12)?
                     || self.overlap_collapses_to_an_end(k, &*geometry, pe2, t21, t22)?
                 {
-                    return Err(SolidError::topology_failed(
+                    return Err(SolidError::topology(
                         OP_SPLIT_INT,
-                        "two proto edges overlap along less than their definitions can split",
+                        TopologyFailure::OverlapBelowSplitResolution,
                     ));
                 }
 
@@ -2904,17 +2913,9 @@ mod tests {
     #[test]
     fn no_mates_has_no_relationship_to_remove() {
         let e = Mates::<H>::remove_relationship(&mut NoMates, vtx(0), vtx(1)).unwrap_err();
-        assert_eq!(e.upstream_status(), Some(crate::error::SM_ERR));
-        assert!(
-            e.to_string().contains("not related to each other"),
-            "the intersector's own failure for an unrelated pair: {e}"
-        );
-        assert_eq!(
-            e.topology_failure(),
-            Some(&crate::error::topology::TopologyFailure::Failed(
-                "the two are not a mated pair"
-            ))
-        );
+        assert_eq!(e.upstream_status(), Some(SM_ERR));
+        assert_eq!(e.topology_failure(), Some(&TopologyFailure::NotAMatedPair));
+        assert_eq!(e.kind(), crate::error::ErrorKind::Failed, "{e}");
     }
 
     #[derive(Debug, Clone, Copy, PartialEq)]
@@ -3320,6 +3321,14 @@ mod tests {
         let (mut unset, mut set) = (on(6, false), on(4, true));
         let found = find_position_from_pcs(&k, &pool, &mut unset, &mut set).unwrap();
         assert_eq!(found.deviation, 0.0);
+        // with neither set there is no point to place the position at: the caller's input
+        let e =
+            find_position_from_pcs(&k, &pool, &mut on(6, false), &mut on(4, false)).unwrap_err();
+        assert_eq!(
+            e.topology_failure(),
+            Some(&TopologyFailure::ClassificationParametersUnset)
+        );
+        assert_eq!(e.upstream_status(), Some(SM_ERR));
         for (a, c) in [(false, true), (true, false)] {
             let (pv, created) = m
                 .find_or_create_proto_vertex_pcs(&k, &pool, &mut on(4, a), &mut on(6, c))

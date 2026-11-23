@@ -156,7 +156,8 @@
 use crate::curve::curve::p1::GlobalPointSolveOptions;
 use crate::curve::curve::p2::BSPLINE_CURVE_TYPE;
 use crate::curve::curve::p2::{Curve, CurveKind};
-use crate::error::boolean::BooleanStage;
+use crate::error::boolean::BooleanFailure;
+use crate::error::topology::TopologyFailure;
 use crate::error::EntityRef;
 use crate::error::{passed_on, Result, SolidError};
 use crate::geom::extent1d::Extent1d;
@@ -1046,9 +1047,11 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
                 let vertex = v.brep_point_classif(which).vertex_object();
                 v.set_final_vertex(which, vertex);
             } else {
-                return Err(SolidError::topology_failed(
+                return Err(SolidError::topology(
                     OP_IMPRINT_VD,
-                    "merging the point gave no single new vertex and it is not on a vertex",
+                    TopologyFailure::MergeGaveNoVertex {
+                        new_vertices: outputs.new_vertices.len(),
+                    },
                 ));
             }
 
@@ -1456,8 +1459,7 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
         let start_pv = self.pv_live(start_pv)?;
         let end_pv = self.pv_live(end_pv)?;
 
-        let null =
-            || SolidError::topology_missing(OP_IMPRINT_ED, "the proto vertex's final vertex");
+        let null = || SolidError::topology(OP_IMPRINT_ED, TopologyFailure::NoFinalVertexAtEnd);
         let start_vtx1 = self
             .proto_vertex_final_vertex(k, brep, start_pv, 1, ed, true)?
             .ok_or_else(null)?;
@@ -2322,12 +2324,9 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
         pc1: &mut PointClassification<O>,
         pc2: &mut PointClassification<O>,
     ) -> Result<(VertexDefId, bool)> {
-        let topo1 = as_topology(pc1.object()).ok_or_else(|| {
-            SolidError::topology_missing(OP_ADD_VD, "the first classification's topology")
-        })?;
-        let topo2 = as_topology(pc2.object()).ok_or_else(|| {
-            SolidError::topology_missing(OP_ADD_VD, "the second classification's topology")
-        })?;
+        let off = || SolidError::topology(OP_ADD_VD, TopologyFailure::ClassificationOffTopology);
+        let topo1 = as_topology(pc1.object()).ok_or_else(off)?;
+        let topo2 = as_topology(pc2.object()).ok_or_else(off)?;
 
         // no work - VertexDefintion with input Tgt SrcTopos already exists
         if let Some(vd) = self.find_matching_vertex_definition(pv, Some(topo1), Some(topo2))? {
@@ -2723,12 +2722,8 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
     /// to no finite distance from it), kept
     /// for the Boolean to return as the other self-loop refusals are.
     fn refuse_moving_absorbed(&mut self) -> SolidError {
-        let refusal = SolidError::boolean_stage_failed(
-            OP_RESOLVE_PE,
-            BooleanStage::Relate,
-            "a self-loop's split would move a vertex that absorbed a curve so far that \
-             covering the curve reaches another vertex",
-        );
+        let refusal =
+            SolidError::boolean(OP_RESOLVE_PE, BooleanFailure::SelfLoopSplitReachesVertex);
         self.note_self_loop_refusal(refusal.clone());
         refusal
     }
@@ -2738,11 +2733,8 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
     /// definition its tolerance kept clear of ([`Self::growth_reaches_another`]), kept for the
     /// Boolean to return as the self-loop refusals are.
     pub(crate) fn refuse_growth_overlap(&mut self) -> SolidError {
-        let refusal = SolidError::boolean_stage_failed(
-            OP_RESOLVE_PV,
-            BooleanStage::Relate,
-            "covering what a vertex absorbed would grow it to reach another vertex",
-        );
+        let refusal =
+            SolidError::boolean(OP_RESOLVE_PV, BooleanFailure::AbsorbedCoverReachesVertex);
         self.note_self_loop_refusal(refusal.clone());
         refusal
     }
@@ -2945,12 +2937,9 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
                             }
                         }
                         if !within {
-                            let refusal = SolidError::boolean_stage_failed(
+                            let refusal = SolidError::boolean(
                                 OP_RESOLVE_PE,
-                                BooleanStage::Relate,
-                                "an intersection curve from a vertex back to it leaves the \
-                                 reach of its ends, so it can be neither split onto the vertex \
-                                 nor dropped",
+                                BooleanFailure::SelfLoopLeavesReach,
                             );
                             // The Boolean's resolution only warns on a proto edge's error:
                             // the manager keeps the refusal for the Boolean to return.
@@ -3453,12 +3442,9 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
         }
 
         // Make an EdgeDefinition for the new ProtoEdge.
-        let topo1 = as_topology(ci1.mid.object()).ok_or_else(|| {
-            SolidError::topology_missing(OP_CREATE_PE, "the first intersection's topology")
-        })?;
-        let topo2 = as_topology(ci2.mid.object()).ok_or_else(|| {
-            SolidError::topology_missing(OP_CREATE_PE, "the second intersection's topology")
-        })?;
+        let off = || SolidError::topology(OP_CREATE_PE, TopologyFailure::ClassificationOffTopology);
+        let topo1 = as_topology(ci1.mid.object()).ok_or_else(off)?;
+        let topo2 = as_topology(ci2.mid.object()).ok_or_else(off)?;
         let start_pv = self.pv_live(start)?;
         let end_pv = self.pv_live(end)?;
 
@@ -3571,9 +3557,9 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
         } else if e1 == old_edge {
             e0
         } else {
-            return Err(SolidError::topology_missing(
+            return Err(SolidError::topology(
                 OP_UPDATE_EDGES,
-                "the old edge among the two new edges",
+                TopologyFailure::OldEdgeNotAmongSplit,
             ));
         };
         let unknown = || dangling("edge handle is unknown");
@@ -4152,7 +4138,10 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
         let v1 = self.vd_ref(vd1)?;
         let v2 = self.vd_ref(vd2)?;
         let null = || {
-            SolidError::topology_missing(OP_COMBINE_VD, "the vertex definition's source topology")
+            SolidError::topology(
+                OP_COMBINE_VD,
+                TopologyFailure::DefinitionWithoutSourceTopology,
+            )
         };
         let t11 = v1.src_topo(1).ok_or_else(null)?;
         let t12 = v1.src_topo(2).ok_or_else(null)?;
@@ -5796,10 +5785,25 @@ mod tests {
 
         let mut moved = def.clone();
         let before = moved.clone();
-        assert!(moved
+        let e = moved
             .set_position(&k, Point3::new(f64::NAN, 0.0, 0.0))
-            .is_err());
+            .unwrap_err();
+        assert_eq!(
+            e.topology_failure(),
+            Some(&TopologyFailure::AbsorbedCurveAtNoFiniteDistance)
+        );
+        assert_eq!(e.upstream_status(), Some(crate::error::SM_ERR));
         assert_eq!(moved, before, "a refused move changes nothing");
+        // a B-rep other than 1 and 2 is the caller's argument, and changes nothing
+        let e = moved
+            .set_src_topo(3, PointClassType::Vertex, None)
+            .unwrap_err();
+        assert_eq!(
+            e.topology_failure(),
+            Some(&TopologyFailure::BrepSideNotOneOrTwo { which: 3 })
+        );
+        assert_eq!(e.upstream_status(), Some(crate::error::SM_ERR));
+        assert_eq!(moved, before);
     }
 
     /// WR-306 (#17888 review): a split that would move an absorbing definition so far that
@@ -6528,9 +6532,7 @@ mod tests {
         assert_eq!(e.kind(), crate::error::ErrorKind::InvalidInput, "{e}");
         assert_eq!(
             e.topology_failure(),
-            Some(&crate::error::topology::TopologyFailure::Missing(
-                "the old edge among the two new edges"
-            ))
+            Some(&TopologyFailure::OldEdgeNotAmongSplit)
         );
         m.update_edges(&k, &mut geo, 1, Some(e_old), &[e_old, e_new], Some(calling))
             .unwrap();

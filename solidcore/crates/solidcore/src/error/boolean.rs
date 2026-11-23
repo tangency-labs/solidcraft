@@ -204,6 +204,20 @@ pub enum BooleanFailure {
         /// The tolerance that fits: anything below it reaches no vertex it does not bound.
         fits_below: Option<f64>,
     },
+    /// An intersection curve from a vertex back to it (a self-loop) was absorbed by a vertex
+    /// definition, and splitting the loop would move that definition so far that its
+    /// tolerance, grown to cover the curve, reaches another vertex definition (or the curve
+    /// is at no finite distance from the new place): vertices of the operands closer than
+    /// their tolerances (WR-306). Class `failed`.
+    SelfLoopSplitReachesVertex,
+    /// Growing a vertex definition or a proto vertex to cover the curves it absorbed would
+    /// reach another vertex definition its tolerance kept clear of: vertices of the operands
+    /// closer than their tolerances (#18312). Class `failed`.
+    AbsorbedCoverReachesVertex,
+    /// An intersection curve from a vertex back to it leaves the reach of its ends (the
+    /// vertex definition's tolerance, the proto edge's and the distance to its ends), so it
+    /// can be neither split onto the vertex nor dropped (WR-214). Class `failed`.
+    SelfLoopLeavesReach,
     /// A failure that is the kernel's fault, reviewed at its site, with the written reason:
     /// `why` names the step of `stage` that failed and why that is the kernel's fault, not
     /// the geometry's. A defect ([`ErrorKind::StageFailed`]); status `SM_ERR` unless its
@@ -334,6 +348,9 @@ impl BooleanFailure {
             | Self::EntityMissing { .. }
             | Self::RelateConflict { .. }
             | Self::MergedVertexReaches { .. }
+            | Self::SelfLoopSplitReachesVertex
+            | Self::AbsorbedCoverReachesVertex
+            | Self::SelfLoopLeavesReach
             | Self::Defect { .. }
             | Self::FaceWithoutSurface
             | Self::EdgeWithoutCurve
@@ -375,6 +392,9 @@ impl BooleanFailure {
             | Self::SolidLeaks { .. }
             | Self::RelateConflict { .. }
             | Self::MergedVertexReaches { .. }
+            | Self::SelfLoopSplitReachesVertex
+            | Self::AbsorbedCoverReachesVertex
+            | Self::SelfLoopLeavesReach
             | Self::Defect { .. }
             | Self::TreeOperatorWithoutOperands
             | Self::UnknownTreeOperator { .. }
@@ -423,6 +443,9 @@ impl BooleanFailure {
             | Self::SolidLeaks { .. }
             | Self::RelateConflict { .. }
             | Self::MergedVertexReaches { .. }
+            | Self::SelfLoopSplitReachesVertex
+            | Self::AbsorbedCoverReachesVertex
+            | Self::SelfLoopLeavesReach
             | Self::TreeBooleanFailed
             | Self::FaceInNoRegion
             | Self::VertexInNoRegion
@@ -504,6 +527,24 @@ impl core::fmt::Display for BooleanFailure {
                  gaps, which reaches a vertex it does not bound; no tolerance fits (a vertex \
                  it would reach lies within its own tolerance of it)",
                 BooleanStage::Imprint
+            ),
+            Self::SelfLoopSplitReachesVertex => write!(
+                f,
+                "{} failed: a self-loop's split would move a vertex that absorbed a curve so \
+                 far that covering the curve reaches another vertex",
+                BooleanStage::Relate
+            ),
+            Self::AbsorbedCoverReachesVertex => write!(
+                f,
+                "{} failed: covering what a vertex absorbed would grow it to reach another \
+                 vertex",
+                BooleanStage::Relate
+            ),
+            Self::SelfLoopLeavesReach => write!(
+                f,
+                "{} failed: an intersection curve from a vertex back to it leaves the reach \
+                 of its ends, so it can be neither split onto the vertex nor dropped",
+                BooleanStage::Relate
             ),
             Self::FaceWithoutSurface => f.write_str("a face of an operand has no surface"),
             Self::EdgeWithoutCurve => f.write_str("an edge of an operand has no curve"),
@@ -640,7 +681,10 @@ impl crate::SolidError {
     }
 
     /// [`crate::SolidError::Failed`] for a Boolean stage that could not continue, with
-    /// status [`SM_ERR`] (upstream `return SE(SM_ERR)`).
+    /// status [`SM_ERR`] (upstream `return SE(SM_ERR)`). No site builds this form any more
+    /// (#19837 named the proto topology's three); the class tests keep it until the variant
+    /// is retired.
+    #[cfg(test)]
     pub(crate) fn boolean_stage_failed(
         operation: &'static str,
         stage: BooleanStage,
@@ -746,6 +790,9 @@ mod tests {
             (F::EdgeRelationNotRepaired, SM_ERR, K::Failed),
             (F::NoCommonSubinterval, SM_ERR, K::Failed),
             (F::NotRelatedPair, SM_ERR, K::Failed),
+            (F::SelfLoopSplitReachesVertex, SM_ERR, K::Failed),
+            (F::AbsorbedCoverReachesVertex, SM_ERR, K::Failed),
+            (F::SelfLoopLeavesReach, SM_ERR, K::Failed),
             (F::LoopVertexUnrelated, NULL, K::Failed),
             (F::IntersectionCurveNotCopyable, SM_ERR, K::Unsupported),
             (F::DegenerateCurveOnEdges, SM_ERR, K::Unsupported),
