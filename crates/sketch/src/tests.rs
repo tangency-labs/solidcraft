@@ -3242,3 +3242,77 @@ fn the_duplicate_fold_is_reserved_in_the_tolerance_budget() {
     let fit = crate::fit_within_tolerance(&given, 0.0001, false).unwrap();
     assert!(fit.deviation <= 0.0001, "deviation {}", fit.deviation);
 }
+
+/// The numbering builds before 0.42.0 gave a sketch's profiles (#19163), for sketches whose
+/// arcs of different circles don't meet: lines crossing (a 300 mm square cut by its diagonals and
+/// its two middle lines, eight congruent triangles of 300²/8 = 11250 mm²), loops inside loops (a
+/// 400 mm square holding four rings of radii 60 and 40, each with a disc of radius 12.7 inside),
+/// and lines crossing a circle (radius 173.2 cut by x, y = −100, 0, 100). Those builds closed
+/// such profiles as this one does, so both numberings are the same (0.30.1 and 0.45.0 build the
+/// same regions from designs that pick these by index, on Windows and on Linux).
+#[test]
+fn profiles_whose_arcs_meet_no_other_circle_keep_their_numbering_before_0_42() {
+    let line = |sk: &mut Sketch, a: (f64, f64), b: (f64, f64)| {
+        sk.add_line(v(a.0, a.1), v(b.0, b.1), None, None, None).unwrap();
+    };
+    let square = |sk: &mut Sketch, h: f64| {
+        for (a, b) in [((-h, -h), (h, -h)), ((h, -h), (h, h)), ((h, h), (-h, h)), ((-h, h), (-h, -h))] {
+            line(sk, a, b);
+        }
+    };
+    let mut star = Sketch::new();
+    square(&mut star, 150.0);
+    for (a, b) in
+        [((-150.0, -150.0), (150.0, 150.0)), ((-150.0, 150.0), (150.0, -150.0)), ((0.0, -150.0), (0.0, 150.0)), ((-150.0, 0.0), (150.0, 0.0))]
+    {
+        line(&mut star, a, b);
+    }
+    let mut nested = Sketch::new();
+    square(&mut nested, 200.0);
+    for r in [60.0, 40.0, 12.7] {
+        for (x, y) in [(110.0, 110.0), (-110.0, 110.0), (-110.0, -110.0), (110.0, -110.0)] {
+            nested.add_circle(v(x, y), r, None, None).unwrap();
+        }
+    }
+    let mut grid = Sketch::new();
+    grid.add_circle(v(0.0, 0.0), 173.2, None, None).unwrap();
+    for t in [-100.0, 0.0, 100.0] {
+        line(&mut grid, (t, -200.0), (t, 200.0));
+        line(&mut grid, (-200.0, t), (200.0, t));
+    }
+    for (name, sk, count) in [("star", &star, 8), ("nested", &nested, 13), ("grid", &grid, 16)] {
+        let ps = find_profiles(sk);
+        assert_eq!(ps.len(), count, "{name}");
+        let older = profiles_in_order(sk, &ps, ProfileOrder::ExactCrossings);
+        assert_eq!(older, (0..count).map(Some).collect::<Vec<_>>(), "{name}");
+    }
+    let triangles = find_profiles(&star);
+    assert!(triangles.iter().all(|p| (p.area - 11250.0).abs() < 1e-6), "{:?}", triangles.iter().map(|p| p.area).collect::<Vec<_>>());
+}
+
+/// #19163: where eight circles of radius 4.3 cross one of radius 200, builds before 0.42.0 closed
+/// the corners of the 16 lenses at the circles' intersections and numbered the congruent lenses
+/// by the round-off that gave their areas; this build keeps the ends' midpoint (#16607), and the
+/// round-off differs. (Which lens each number names is that round-off, so it is not written down
+/// here.) The older numbering is a reordering of the same 17 profiles that keeps the
+/// disc first, the eight inner lenses (52.65 mm²) next and the eight outer ones last.
+#[test]
+fn the_numbering_before_0_42_reorders_congruent_lenses_only() {
+    let mut sk = Sketch::new();
+    sk.add_circle(v(0.0, 0.0), 200.0, None, None).unwrap();
+    for (x, y) in [(80.0, 180.0), (180.0, 80.0), (-80.0, 180.0), (-180.0, 80.0), (80.0, -180.0), (180.0, -80.0), (-80.0, -180.0), (-180.0, -80.0)] {
+        sk.add_circle(v(x, y), 4.3, None, None).unwrap();
+    }
+    let ps = find_profiles(&sk);
+    assert_eq!(ps.len(), 17);
+    let older: Vec<usize> = profiles_in_order(&sk, &ps, ProfileOrder::ExactCrossings).into_iter().map(Option::unwrap).collect();
+    let mut sorted = older.clone();
+    sorted.sort_unstable();
+    assert_eq!(sorted, (0..17).collect::<Vec<_>>(), "each profile once: {older:?}");
+    assert_eq!(older[0], 0, "the disc stays first");
+    for (range, area) in [(1..9, 52.6548), (9..17, 5.4333)] {
+        for k in range {
+            assert!((ps[older[k]].area - area).abs() < 1e-4, "profile {k} of the older numbering is {} mm²", ps[older[k]].area);
+        }
+    }
+}
