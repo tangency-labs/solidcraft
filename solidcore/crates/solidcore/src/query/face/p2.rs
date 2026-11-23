@@ -2505,7 +2505,9 @@ fn reset_classification<O: ClassObject>(k: &Kernel, cc: &mut CurveClassification
 }
 
 /// The face boundary's intersection with the 2D classification curve failed with `e`:
-/// upstream's `SM_ERR`, with `e` kept as the cause (its class carries through).
+/// upstream's `SM_ERR`, with `e` kept as the cause. Its own class is `failed`
+/// ([`SolidError::kind`]); whether it is a defect or a refusal is decided by its cause
+/// ([`SolidError::is_defect`] and [`SolidError::is_refusal`] follow the chain).
 fn boundary_not_intersected(e: SolidError) -> SolidError {
     crate::error::Failure::new(OP_CURVE, QueryFailure::BoundaryNotIntersected)
         .caused_by(e)
@@ -3481,7 +3483,11 @@ pub(crate) mod tests {
     #[test]
     fn a_failed_boundary_intersection_keeps_its_cause() {
         let cause = SolidError::query(OP_CURVE, QueryFailure::FaceWithoutSurface);
+        let refused = cause.is_refusal();
         let e = boundary_not_intersected(cause);
+        assert_eq!(e.kind(), crate::error::ErrorKind::Failed);
+        assert_eq!(e.is_refusal(), refused);
+        assert!(!e.is_defect());
         assert_eq!(
             e.query_failure(),
             Some(&QueryFailure::BoundaryNotIntersected)
@@ -3491,6 +3497,16 @@ pub(crate) mod tests {
             e.cause().and_then(SolidError::query_failure),
             Some(&QueryFailure::FaceWithoutSurface)
         );
+        let defect = crate::error::Failure::new(
+            OP_CURVE,
+            QueryFailure::Defect {
+                why: "a test defect",
+            },
+        )
+        .into_error();
+        let e = boundary_not_intersected(defect);
+        assert_eq!(e.kind(), crate::error::ErrorKind::Failed);
+        assert!(e.is_defect());
     }
 
     /// Each broken link of the caller's body the boundary walk reads is named, keeping
