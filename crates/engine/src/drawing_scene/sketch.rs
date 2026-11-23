@@ -11,6 +11,7 @@ use solidcore_record::Vec2;
 use solidcraft_doc::drawing::SolvedSheetSketch;
 use solidcraft_doc::ids;
 use solidcraft_geom::EPS;
+use solidcraft_geom::drawing_view::ViewFrame;
 use solidcraft_geom::paper::{Group, Item, MAX_LINE_MM, MAX_RECORDS, ObjectKind, Scene};
 use solidcraft_geom::prelude::*;
 use solidcraft_sketch::{Curve, CurveKind, MAX_CONSTRAINTS, MAX_COORD, MAX_CURVES, MAX_POINTS, MAX_SPLINE_POINTS, Sketch};
@@ -21,7 +22,8 @@ use crate::params::bad;
 /// Printable curves in authored order, in physical paper millimetres. Construction geometry
 /// (including infinite construction lines) is excluded independently of editor visibility.
 /// Centerline styling is not representable by a paper stroke yet, and is explicitly refused.
-/// The caller supplies the paper line width; no drawing or model display scale is applied.
+/// The caller supplies the paper line width; no drawing or model display scale is applied. A view's
+/// sketch comes out in its view plane's own coordinates, and [`through`] puts it on paper.
 pub fn paper_group(solved: &SolvedSheetSketch, width_mm: f64) -> Result<Group> {
     if !width_mm.is_finite() || width_mm <= 0.0 || width_mm > MAX_LINE_MM {
         return Err(error(solved, None, "paper line width must be finite, above zero and at most 10 mm"));
@@ -72,6 +74,24 @@ pub fn paper_group(solved: &SolvedSheetSketch, width_mm: f64) -> Result<Group> {
     let mut scene = Scene::new(Vec2::new(1.0, 1.0), vec![group]);
     scene.validate().map_err(|why| error(solved, None, why.to_string()))?;
     scene.groups.pop().ok_or_else(|| error(solved, None, "checked sketch disappeared"))
+}
+
+/// A view's sketch strokes ([`paper_group`]'s, in the view plane's own coordinates) on paper through
+/// the view's `frame`: its scale and where it puts the plane, centred on the view as the view's lines
+/// are. Widths are paper widths already, so they stay. [`paper_group`] makes strokes only: any other
+/// kind of item is refused, so none reaches paper in the plane's coordinates.
+pub fn through(group: &Group, frame: &ViewFrame) -> std::result::Result<Group, String> {
+    let item = |item: &Item| match item {
+        Item::Stroke { path, closed, width_mm, pattern } => Ok(Item::Stroke {
+            path: path.iter().map(|seg| frame.seg_to_paper(seg)).collect(),
+            closed: *closed,
+            width_mm: *width_mm,
+            pattern: pattern.clone(),
+        }),
+        Item::Fill { .. } | Item::Text(_) | Item::Picture(_) => Err("not supported yet: a fill, text or picture in a view's sketch".to_string()),
+    };
+    let items = group.items.iter().map(item).collect::<std::result::Result<_, _>>()?;
+    Ok(Group { items, ..*group })
 }
 
 /// Refuse the tiny nonzero sweep that the shared analytic helper widens to a full turn.

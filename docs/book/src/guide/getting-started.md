@@ -282,9 +282,9 @@ joystick instead of the mouse wheel. Delete the file to undo it.
 ### Shift+right-click in Firefox
 
 In Firefox, holding Shift while you right-click opens Firefox's own menu (Save Image As…,
-Inspect and so on), and a web page can't stop it. On Linux, SolidCraft doesn't see the click at
-all: the face isn't selected and SolidCraft's menu doesn't open. On Windows, SolidCraft selects
-the face and opens its menu, and Firefox's menu opens on top. Chrome, Edge and the desktop app
+Inspect and so on), and a web page can't stop it. SolidCraft opens no menu of its own under
+Firefox's, and says on the status line that the browser took the click. On Linux, SolidCraft
+doesn't see the click at all: the face isn't selected either. Chrome, Edge and the desktop app
 aren't affected.
 
 The gestures this blocks in Firefox, and what to use instead:
@@ -381,6 +381,21 @@ can come out the same. The default is `standard`.
 
 ```sh
 solidcraft-cli run --in part.sc --out part.stl --quality fine
+```
+
+`--param NAME=EXPR` sets a parameter of the design as `parameters.change` would, for this run
+only: the file on disk is not touched. Repeat it to set several; they apply in the order given,
+before the script's own commands run, so a later one can use an earlier one's value. `--params-file
+FILE.json` does the same from an object such as `{"width": "30 mm", "depth": 20}` and applies before
+any `--param`. The name must already be a parameter of the design (or of one of its features), so a
+typo fails the run and names the parameter, rather than adding a new one. Overrides need a design to
+act on: the positional design, or `--in` with a script on top; a script alone has no parameters yet
+(have it set them itself). A missing `=`, an empty name or expression, or an expression that does not
+evaluate fails the run with the command's own message, and nothing is written. `eval` takes the same
+two options.
+
+```sh
+solidcraft-cli run part.sc --param width=30mm --param depth=width/2 --out part.step
 ```
 
 `--param-check warn|strict` checks each step against its command's parameter contract, for the

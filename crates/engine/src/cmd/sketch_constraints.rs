@@ -84,7 +84,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .enabled(in_sketch)
         .contract(&TOGGLE_DIAMETER_CONTRACT)
         .output(output_schema_for::<ToggleDiameterResult>)
-        .params("constraint: a circle's or an arc's radius or diameter dimension id; diameter?: bool (default: the other one); sketch?: id|name (default: the one being edited). The circle stays the same size: its parameter is halved or doubled (a plain value is rewritten, an expression becomes `(e) / 2` or `2 * (e)`); refused when anything else uses that parameter"),
+        .params("constraint: a circle's or an arc's radius or diameter dimension id, or the distance from a point or line to a construction line, centreline or axis (shown as a diameter: twice the distance); diameter?: bool (default: the other one); sketch?: id|name (default: the one being edited). The circle stays the same size: its parameter is halved or doubled (a plain value is rewritten, an expression becomes `(e) / 2` or `2 * (e)`); refused when anything else uses that parameter"),
     CommandSpec::new("sketch.glyphs", "Constraint Glyphs", crate::checked!("sketch.glyphs", glyphs)).icon("eye")
         .enabled(in_sketch)
         .noundo().read_only()
@@ -337,6 +337,7 @@ fn auto_constrain_datum(s: &mut Session, p: &Value) -> Result<Value> {
 fn auto_constrain_finish(s: &mut Session, p: &Value) -> Result<Value> {
     let r = auto(s, p, "sketch.finish_auto_constrain")?;
     s.active_sketch = None;
+    s.sketching_view = None;
     s.revision += 1;
     Ok(r)
 }
@@ -487,6 +488,30 @@ fn toggle_driven(s: &mut Session, p: &Value) -> Result<Value> {
     reply(cmd, ToggleDrivenResult { constraint: cid, driven, sketch: info, created: None, param_warnings: Vec::new() })
 }
 
+/// What a radius / diameter toggle acts on.
+#[derive(Clone, Copy)]
+enum Target {
+    /// A circle or an arc.
+    Round(usize),
+    /// A point and the reference line it is measured from.
+    Linear(usize, usize),
+}
+
+/// Whether line `l` is a reference line a distance can be shown across as a diameter: a
+/// construction line, a centreline, or a sketch or origin axis.
+fn reference_line(sk: &Sketch, l: usize) -> bool {
+    let Some(c) = sk.curves.get(l) else {
+        return false;
+    };
+    matches!(c.kind, CurveKind::Line { .. })
+        && (c.construction
+            || c.centerline
+            || c.link
+                .as_deref()
+                .and_then(|k| sk.link(k))
+                .is_some_and(|k| matches!(k.source, solidcraft_sketch::LinkSource::Axis { .. } | solidcraft_sketch::LinkSource::SketchAxis { .. })))
+}
+
 fn toggle_diameter(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "sketch.toggle_diameter";
     let cid = str_(p, "constraint").ok_or_else(|| bad(cmd, "`constraint` must be a dimension id"))?.to_string();
@@ -495,19 +520,31 @@ fn toggle_diameter(s: &mut Session, p: &Value) -> Result<Value> {
     let (diameter, info) = edit(s, p, cmd, true, |sk, doc| {
         let c = sk.constraints.iter().find(|c| c.id == cid).cloned().ok_or_else(|| bad(cmd, format!("no constraint `{cid}`")))?;
         let round = |curve: usize| matches!(sk.curves.get(curve).map(|c| &c.kind), Some(CurveKind::Circle { .. } | CurveKind::Arc { .. }));
+        // A circle or arc (radius / diameter), or a point measured from a reference line (a
+        // construction line, a centreline or an axis): the distance, or twice it (#20660).
         let (curve, value, now) = match c.kind {
-            ConstraintKind::Radius { c, value } if round(c) => (c, value, false),
-            ConstraintKind::Diameter { c, value } if round(c) => (c, value, true),
-            _ => return Err(bad(cmd, format!("`{cid}` is not a circle's or an arc's radius or diameter dimension"))),
+            ConstraintKind::Radius { c, value } if round(c) => (Target::Round(c), value, false),
+            ConstraintKind::Diameter { c, value } if round(c) => (Target::Round(c), value, true),
+            ConstraintKind::PointLineDistance { p, l, value } if reference_line(sk, l) => (Target::Linear(p, l), value, false),
+            ConstraintKind::LinearDiameter { p, l, value } => (Target::Linear(p, l), value, true),
+            _ => {
+                return Err(bad(
+                    cmd,
+                    format!("`{cid}` is not a circle's or an arc's radius or diameter dimension, or a distance from a construction line"),
+                ));
+            }
         };
         let diameter = want.unwrap_or(!now);
         if diameter == now {
             return Ok(diameter);
         }
-        let (kind, value) = if diameter {
-            (ConstraintKind::Diameter { c: curve, value: 2.0 * value }, 2.0 * value)
-        } else {
-            (ConstraintKind::Radius { c: curve, value: value / 2.0 }, value / 2.0)
+        // The geometry keeps its size: the value shown doubles or halves.
+        let value = if diameter { 2.0 * value } else { value / 2.0 };
+        let kind = match (curve, diameter) {
+            (Target::Round(c), true) => ConstraintKind::Diameter { c, value },
+            (Target::Round(c), false) => ConstraintKind::Radius { c, value },
+            (Target::Linear(p, l), true) => ConstraintKind::LinearDiameter { p, l, value },
+            (Target::Linear(p, l), false) => ConstraintKind::PointLineDistance { p, l, value },
         };
         // Its parameter now holds the other measure, so the circle keeps its size; another user
         // of that parameter would change size with it.

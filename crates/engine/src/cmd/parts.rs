@@ -37,13 +37,13 @@ pub static COMMANDS: &[CommandSpec] = &[
         .contract(&LIBRARY_CONTRACT)
         .output(output_schema_for::<PartsLibrary>)
         .params("family? → families (name, standard, system: metric|inch, sizes, lengths) and, with family, each size's dimensions (mm)"),
-    CommandSpec::new("parts.fastener", "Insert Fastener", crate::checked!("parts.fastener", insert_atomic))
+    CommandSpec::new("parts.fastener", "Insert Fastener", crate::checked!("parts.fastener", insert_atomic)).begins_edit()
         .at("SOLID", "INSERT")
         .icon("fastener")
         .contract(&INSERT_CONTRACT)
         .output(output_schema_for::<InsertedPart>)
         .params("the Insert Part dialog's command (same as parts.insert): family, size, length?, at?|point?+direction? (from the shank's tip toward the head), flip?, name?"),
-    CommandSpec::new("parts.insert", "Insert Part", crate::checked!("parts.insert", insert_atomic))
+    CommandSpec::new("parts.insert", "Insert Part", crate::checked!("parts.insert", insert_atomic)).begins_edit()
         .icon("fastener")
         .contract(&INSERT_CONTRACT)
         .output(output_schema_for::<InsertedPart>)
@@ -67,7 +67,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .contract(&SEATS_CONTRACT)
         .output(output_schema_for::<PartsSeats>)
         .params("picks: face or edge selections on bore walls or rims; countersunk_shank_diameter?: mm for a 90-degree countersink → one named joint origin, world point and axes and signed shank offset per distinct hole"),
-    CommandSpec::new("parts.resize", "Change Part Size", crate::checked!("parts.resize", resize_atomic))
+    CommandSpec::new("parts.resize", "Change Part Size", crate::checked!("parts.resize", resize_atomic)).begins_edit()
         .icon("scale")
         .contract(&RESIZE_CONTRACT)
         .output(output_schema_for::<ResizedPart>)
@@ -1101,7 +1101,8 @@ fn insert_atomic(s: &mut Session, p: &Value) -> Result<Value> {
     computed.active_component = s.active_component;
     computed.active_occurrence_path = s.active_occurrence_path.clone();
     computed.active_sketch = s.active_sketch.filter(|id| computed.doc.feature(*id).is_some());
-    s.accept_computed(computed);
+    computed.sketching_view = computed.active_sketch.and(s.sketching_view);
+    s.accept_computed(computed)?;
     Ok(result)
 }
 
@@ -1452,7 +1453,8 @@ fn resize_atomic(s: &mut Session, p: &Value) -> Result<Value> {
     computed.active_component = s.active_component;
     computed.active_occurrence_path = s.active_occurrence_path.clone();
     computed.active_sketch = s.active_sketch.filter(|id| computed.doc.feature(*id).is_some());
-    s.accept_computed(computed);
+    computed.sketching_view = computed.active_sketch.and(s.sketching_view);
+    s.accept_computed(computed)?;
     Ok(result)
 }
 
@@ -2205,6 +2207,26 @@ mod tests {
         assert_eq!(r["directions"], json!([[0.0, 0.0, -1.0]]), "{r}");
         let (lo, hi) = bbox(&s, "SHCS M3x8");
         assert!((lo.z + 13.0).abs() < 1e-6 && (hi.z + 2.0).abs() < 1e-6, "{lo:?} {hi:?}");
+    }
+
+    /// #16688: a pick on the outer edge of a counterbore's floor seats the screw at the floor end
+    /// of the counterbore's wall, head down into the plate. `flip` turns it the right way up: the
+    /// head in the counterbore, the shank down the bore.
+    #[test]
+    fn flip_rights_a_screw_picked_at_a_counterbore_floor() {
+        let mut s = Session::default();
+        run(&mut s, "solid.box", json!({"length": 40, "width": 30, "height": 10, "body_name": "Plate"}));
+        run(&mut s, "solid.hole", json!({"position": [20, 15, 10], "type": "counterbore", "diameter": 6.6, "cb_diameter": 11, "cb_depth": 6.4}));
+        // The counterbore's floor is at z = 3.6; its outer edge is 5.5 mm from the axis.
+        let seat = |flip: bool| json!({"family": "socket_head_cap_screw", "size": "M6", "length": 20, "at": [25.5, 15, 3.6], "flip": flip});
+        let r = run(&mut s, "parts.insert", seat(false));
+        assert_eq!(r["directions"], json!([[0.0, 0.0, -1.0]]), "{r}");
+        run(&mut s, "edit.undo", json!({}));
+        let r = run(&mut s, "parts.insert", seat(true));
+        assert_eq!(r["directions"], json!([[0.0, 0.0, 1.0]]), "{r}");
+        // The 6 mm head on the floor, inside the counterbore; the 20 mm shank down through the bore.
+        let (lo, hi) = bbox(&s, "SHCS M6x20");
+        assert!((lo.z + 16.4).abs() < 1e-6 && (hi.z - 9.6).abs() < 1e-6, "{lo:?} {hi:?}");
     }
 
     /// #12150: `flip` turns a seated part over (head into the hole, shank out of the face) and a
