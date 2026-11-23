@@ -6,10 +6,11 @@
 use crate::blend::fillet_executive::NoRoomReason;
 use crate::error::ErrorKind;
 
-/// The class of a blend larger than its faces allow, for `reason`: one of the blend's
-/// refusal classes 101 to 124 (the cliff overflow's own refusals grouped by what decides
-/// them), [`ErrorKind::TangentContinuationEnd`] (128) or [`ErrorKind::OverflowKeepsNothing`]
-/// (129).
+/// The class of a blend larger than its faces allow, for `reason`:
+/// [`ErrorKind::FilletTooLarge`] (100) for a weld bead larger than its faces take, one of
+/// the blend's refusal classes 101 to 124 (the cliff overflow's own refusals grouped by
+/// what decides them), [`ErrorKind::TangentContinuationEnd`] (128) or
+/// [`ErrorKind::OverflowKeepsNothing`] (129).
 /// [`ErrorKind::CliffSubtractionLeavesNoSolid`] is the one defect among them.
 #[must_use]
 #[allow(

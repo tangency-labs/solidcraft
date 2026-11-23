@@ -395,9 +395,13 @@ pub enum BlendFailure {
     /// has none (it is itself that face, or a free surface). A check of the caller's
     /// arguments ([`ErrorKind::InvalidInput`]); status `SM_ERR_INVALID_INPUT`.
     NoFirstBody,
-    /// A blend larger than its faces allow, for the reason named (classes 101 to 124, 128
-    /// and 129; [`no_room_class`]). A refusal: the failure's fit, where the
-    /// check computed one, is the size that builds.
+    /// A blend larger than its faces allow, for the reason named (classes 100 to 124, 128
+    /// and 129; [`no_room_class`]): [`ErrorKind::FilletTooLarge`] (100) for a weld bead
+    /// larger than its faces take ([`NoRoomReason::BeadCutsFace`],
+    /// [`NoRoomReason::LegPastFace`], [`NoRoomReason::NoToeAtLeg`]). A refusal, but for
+    /// [`NoRoomReason::CliffSubtractionLeavesNoSolid`], a defect
+    /// ([`ErrorKind::CliffSubtractionLeavesNoSolid`]): the failure's fit, where the check
+    /// computed one, is the size that builds.
     /// Status `SM_ERR`.
     NoRoom(NoRoomReason),
     /// A blend surface not certified within its tolerance in the work its certificate is
@@ -2683,6 +2687,18 @@ mod tests {
                 .unwrap_or(text.len());
             &text[..end]
         }
+        /// The variant `Path::Name` that `text` starts with, and the text after it; `""` and
+        /// `text` where it starts with none.
+        fn variant(text: &str) -> (&str, &str) {
+            let path = ident(text);
+            match text[path.len()..].strip_prefix("::") {
+                Some(after) if !path.is_empty() => {
+                    let name = ident(after);
+                    (name, &after[name.len()..])
+                }
+                _ => ("", text),
+            }
+        }
         let blend = include_str!("blend.rs");
         let modules: Vec<String> = blend
             .lines()
@@ -2756,16 +2772,16 @@ mod tests {
                         i + 1
                     );
                     wildcard |= rest.starts_with("_ ");
+                    // a match arm's variant, and the variant nested in its payload
+                    // (`Self::WeldNotBuilt(WeldGap::CurvedJoint)`), each `Path::Name`
                     let name = if is_enum {
-                        ident(rest)
+                        (ident(rest), "")
                     } else {
-                        let path = ident(rest);
-                        match rest[path.len()..].strip_prefix("::") {
-                            Some(after) if !path.is_empty() => ident(after),
-                            _ => "",
-                        }
+                        let (outer, after) = variant(rest);
+                        let inner = after.strip_prefix('(').map_or("", |p| variant(p).0);
+                        (outer, inner)
                     };
-                    if name.starts_with(|c: char| c.is_ascii_uppercase()) {
+                    if name.0.starts_with(|c: char| c.is_ascii_uppercase()) {
                         names.push(name);
                     }
                 }
@@ -2775,7 +2791,7 @@ mod tests {
                 for w in names.windows(2) {
                     assert!(
                         w[0] < w[1] || (is_match && w[0] == w[1]),
-                        "{file}:{}: `{}` is before `{}`: keep them sorted by name",
+                        "{file}:{}: `{:?}` is before `{:?}`: keep them sorted by name",
                         i + 1,
                         w[0],
                         w[1]
