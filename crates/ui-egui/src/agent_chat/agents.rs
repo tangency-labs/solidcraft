@@ -303,6 +303,13 @@ pub fn mode_in_force(app: &crate::SolveApp, id: &str) -> Mode {
     if app.policy.locks("ai_permissions") { app.preferences.ai_permissions } else { mode_for(&app.preferences, id) }
 }
 
+/// The mode an agent's Permissions row shows: its own choice (None for "Same as above"), or, while
+/// the organization's policy sets `ai_permissions`, the mode in force. The agent's own choice is kept,
+/// unchanged, for when the policy goes.
+pub fn mode_shown(app: &crate::SolveApp, id: &str) -> Option<Mode> {
+    if app.policy.locks("ai_permissions") { Some(app.preferences.ai_permissions) } else { app.preferences.agent_permissions.get(id).copied() }
+}
+
 /// Whether an "always allow" answer lets `agent` use `tool` without asking. None does while the
 /// organization's policy sets `ai_permissions`: the answers are kept for when the policy goes.
 pub fn always_allowed_in_force(app: &crate::SolveApp, agent: &str, tool: &str) -> bool {

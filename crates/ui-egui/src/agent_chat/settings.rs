@@ -925,7 +925,7 @@ fn agents_section(app: &mut SolveApp, ui: &mut egui::Ui) {
                                 let locked = app.policy.locks("ai_permissions");
                                 ui_kit::row(ui, tr("ui.ai_permissions"), |ui| {
                                     crate::policy::row(ui, locked, |ui| {
-                                        let current = app.preferences.agent_permissions.get(&entry.id).copied();
+                                        let current = super::agents::mode_shown(app, &entry.id);
                                         let shown = current.map_or_else(|| tr("ui.ai_mode_global").to_owned(), |mode| mode.label().to_owned());
                                         let mut pick: Option<Option<Mode>> = None;
                                         let options: Vec<_> = std::iter::once(tr("ui.ai_mode_global")).chain(Mode::ALL.map(Mode::label)).collect();

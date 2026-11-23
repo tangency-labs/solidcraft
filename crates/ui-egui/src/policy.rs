@@ -678,17 +678,19 @@ mod tests {
 
     #[test]
     fn the_organizations_permissions_hold_for_every_agent_and_its_always_allowed_answers_wait() {
-        use crate::agent_chat::agents::{Mode, always_allowed_in_force, mode_in_force};
+        use crate::agent_chat::agents::{Mode, always_allowed_in_force, mode_in_force, mode_shown};
         let mut app = SolveApp::new(Default::default(), Default::default());
         app.preferences.ai_permissions = Mode::Edits;
         app.preferences.agent_permissions.insert("codex".into(), Mode::All);
         app.preferences.agent_always_allow.insert("claude".into(), vec!["file.save".into()]);
         assert_eq!(mode_in_force(&app, "codex"), Mode::All, "without a policy an agent's own mode holds");
         assert!(always_allowed_in_force(&app, "claude", "file.save"));
+        assert_eq!((mode_shown(&app, "codex"), mode_shown(&app, "claude")), (Some(Mode::All), None), "each agent's row shows its own choice");
         app.policy = Policy::from_json(r#"{"AiPermissions": "ask"}"#);
         enforce(&mut app);
         for agent in ["codex", "claude", "other"] {
             assert_eq!(mode_in_force(&app, agent), Mode::Ask, "{agent}");
+            assert_eq!(mode_shown(&app, agent), Some(Mode::Ask), "{agent}'s locked row shows the organization's mode");
         }
         assert!(!always_allowed_in_force(&app, "claude", "file.save"), "an Always allowed answer doesn't apply");
         // Kept for when the policy goes.
