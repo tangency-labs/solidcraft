@@ -506,6 +506,7 @@ tab.window.options                reads pop-out presentation settings; no geomet
 tab.window.rename                 changes a window label; no geometry
 tab.window.set_options            changes pop-out presentation settings; no geometry
 timeline.dependents               a listing of dependents
+timeline.effects                  a listing of the bodies a feature affects: crates/engine/src/cmd/edit_tests.rs
 timeline.export_script            writes the history as a script
 timeline.inspect                  a listing of the timeline
 timeline.play                     plays the history back in the view: no new geometry
