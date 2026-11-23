@@ -43,7 +43,8 @@ fn transparent(renderer: &crate::capture::Renderer, scene: &mut Scene, camera: &
 /// Saved (`exported` is None): the shown bodies' warm display meshes only. Exported: the bodies the
 /// file holds (none named, every body), meshed here when cold, as a headless export has drawn nothing.
 fn scene(s: &Session, zoom: f64, exported: Option<&[String]>) -> Option<(Scene, Camera)> {
-    if s.active_sketch.is_some() || !s.pending_moves.is_empty() || s.model.results.iter().any(|r| r.error.is_some()) {
+    // Nor while a joint drag shows a frame: the world placed for it is not the design's.
+    if s.active_sketch.is_some() || !s.pending_moves.is_empty() || !s.drag_moves().is_empty() || s.model.results.iter().any(|r| r.error.is_some()) {
         return None;
     }
     let world = s.cached_world_state()?;

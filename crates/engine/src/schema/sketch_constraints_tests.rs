@@ -312,7 +312,7 @@ fn replies_match_the_output_schema() {
     matches(output_schema_for::<GlyphsResult>(), &g);
     assert!(g["glyphs"].as_array().is_some_and(|l| l.len() > 5) && g["glyphs"][0]["at"].is_array(), "{g}");
     assert_eq!(keys(&g["glyphs"][0]), vec!["at", "dimension", "driven", "failing", "id", "name", "param", "redundant", "value"], "{g}");
-    assert_eq!(keys(&g), vec!["conflicts", "dof", "fully_constrained", "glyphs", "sketch"], "{g}");
+    assert_eq!(keys(&g), vec!["conflicts", "dof", "fully_constrained", "glyphs", "planar_dof", "sketch"], "{g}");
     let g = run(&mut s, "sketch.glyphs", json!({"sketch": sketch}));
     matches(output_schema_for::<GlyphsResult>(), &g);
     for p in [

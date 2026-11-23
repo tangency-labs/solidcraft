@@ -396,6 +396,49 @@ fn layout_picture_choices_wrap_inside_the_indexed_row_and_keep_real_targets() {
 }
 
 #[test]
+fn row_label_tooltips_override_full_label_text_only_inside_their_scope() {
+    let label = "A long parameter label that must elide";
+    let tip = "What this parameter controls";
+    let ctx = crate::test_support::context();
+    ctx.global_style_mut(|style| style.interaction.tooltip_delay = 0.0);
+    let draw = |ui: &mut Ui| {
+        with_row_label_tooltip(ui, tip, |ui| row(ui, label, |ui| ui.label("Value")));
+        row(ui, "Radius", |ui| ui.label("Value"));
+    };
+    let paint = |events| {
+        raw_frame(
+            &ctx,
+            egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(320.0, 400.0))),
+                time: Some(ctx.cumulative_frame_nr() as f64 / 15.0),
+                focused: true,
+                events,
+                ..Default::default()
+            },
+            |ui| {
+                ui.set_width(280.0);
+                scope(ui, draw);
+            },
+        )
+    };
+    for _ in 0..3 {
+        paint(vec![]);
+    }
+    for (name, expected) in [(label, tip), ("Radius", "Radius")] {
+        let output = paint(vec![egui::Event::PointerGone]);
+        let text = text_shapes(&output).find(|text| text.galley.text() == name).expect("painted row label");
+        let at = text.pos + text.galley.size() / 2.0;
+        paint(vec![egui::Event::PointerMoved(at)]);
+        for _ in 0..3 {
+            paint(vec![]);
+        }
+        let output = paint(vec![]);
+        let count = text_shapes(&output).filter(|text| text.galley.text() == expected).count();
+        assert_eq!(count, if name == "Radius" { 2 } else { 1 }, "{name}: only the intended tooltip is painted");
+    }
+}
+
+#[test]
 fn row_height_and_label_column_are_fixed_for_long_labels_and_expressions() {
     let ctx = crate::test_support::context();
     let mut value = "width / 2 + 10 mm".to_string();
@@ -516,4 +559,31 @@ fn short_labels_keep_the_designs_label_column_and_long_ones_widen_it_for_every_r
     let (a, b) = widths(["Edges", "Counterbore depth"]);
     assert_eq!(a, b, "one column per form");
     assert!(a > t.form_label_width && a <= t.form_label_width * 1.6, "{a}");
+}
+
+/// An action row is a button across the control column, lined up with the field rows above it,
+/// and says when it is clicked; only then.
+#[test]
+fn an_action_row_is_a_button_in_the_control_column_that_says_when_it_is_clicked() {
+    let ctx = crate::test_support::context();
+    let mut width = "20 mm".to_string();
+    let mut clicks = Vec::new();
+    let mut draw = |ui: &mut Ui| {
+        scope(ui, |ui| {
+            expr_row(ui, "Width", &mut width);
+            clicks.push(action_row(ui, "fit", "Fit to box"));
+        });
+    };
+    frame(&ctx, vec![], &mut draw);
+    let field = registry::rect_of("dialog:control:Width").unwrap();
+    let action = registry::rect_of("dialog:action:fit").unwrap();
+    assert!((action.left() - field.left()).abs() < 0.5, "{action:?} under {field:?}");
+    assert!((action.right() - field.right()).abs() < 0.5, "{action:?} under {field:?}");
+    assert!((action.height() - row_height()).abs() < 0.5, "{action:?}");
+    assert!(action.top() >= field.bottom(), "{action:?} below {field:?}");
+    let at = registry::handle_at("dialog:action:fit").unwrap();
+    frame(&ctx, pointer(at, true), &mut draw);
+    frame(&ctx, pointer(at, false), &mut draw);
+    frame(&ctx, vec![], &mut draw);
+    assert_eq!(clicks, [false, false, true, false]);
 }

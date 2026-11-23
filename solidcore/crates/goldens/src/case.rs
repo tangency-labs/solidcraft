@@ -137,3 +137,17 @@ pub fn repo_root() -> PathBuf {
         .and_then(Path::parent)
         .map_or_else(|| here.to_path_buf(), Path::to_path_buf)
 }
+
+/// Reconstructs one canonical fixture or fixed-seed case for a geometric regression.
+#[cfg(test)]
+pub(crate) fn regression_case(runner: &dyn crate::UnitDiff, name: &str) -> Case {
+    runner
+        .cases(&CaseContext {
+            root: repo_root(),
+            seeds: 16,
+        })
+        .unwrap()
+        .into_iter()
+        .find(|case| case.name == name)
+        .unwrap_or_else(|| panic!("missing {}/{name}", runner.id()))
+}

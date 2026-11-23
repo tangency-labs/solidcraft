@@ -210,6 +210,45 @@ fn a_uv_trim_curve_turning_along_a_pole_is_a_dog_leg() {
     assert!(!has_dog_leg_near_pole(&k, &b, eu).unwrap().has_dog_leg);
 }
 
+/// A repeated control point has no angle; it is skipped and the scan goes on to the
+/// turn after it (the fork stopped the whole scan there and showed no dog leg).
+#[test]
+fn a_repeated_control_point_does_not_hide_a_later_dog_leg() {
+    let mut k = Kernel::default();
+    let mut b = create_sphere(&mut k, Point3::ZERO, 5.0).unwrap();
+    let (eu, holder) = b
+        .edgeuses()
+        .ids()
+        .find_map(|eu| match eu1::uv_trim_curve(&b, eu).unwrap() {
+            (Some(_), Some(h)) => Some((eu, h)),
+            _ => None,
+        })
+        .expect("a sphere edge use with a UV trim curve");
+    let f = eu1::face(&b, eu).unwrap().unwrap();
+    let surface = b.face(f).unwrap().surface.clone().unwrap();
+    let tol = b.face(f).unwrap().tolerance;
+    let sing = surface
+        .get_singularities_of_face(&k, tol, false, false)
+        .unwrap()
+        .singular;
+    assert_ne!(
+        sing & (SS_VMIN | SS_VMAX),
+        0,
+        "the sphere's poles are V sides"
+    );
+    let d = surface.natural_uv_domain_with_nurb(&k).unwrap();
+    let (u0, u1, v0, v1) = (d.u_min(), d.u_max(), d.v_min(), d.v_max());
+    let (um, vm) = ((u0 + u1) / 2.0, (v0 + v1) / 2.0);
+    let lu = (u1 - u0) / 10.0;
+    let vp = if sing & SS_VMIN != 0 { v0 } else { v1 };
+    // down to the pole, a repeated point there, along the pole in U, back up
+    let pts = [[um, vm], [um, vp], [um, vp], [um + lu, vp], [um + lu, vm]];
+    b.edgeuse_mut(holder).unwrap().uv_trim_curve = Some(Curve::from(polyline(&pts)));
+    let dog = has_dog_leg_near_pole(&k, &b, eu).unwrap();
+    assert!(dog.has_dog_leg);
+    assert_eq!(dog.index, Some(3));
+}
+
 #[test]
 fn check_pointers_fails_on_a_broken_mate_link() {
     let mut k = Kernel::default();
@@ -294,4 +333,70 @@ fn the_downward_face_use_of_a_box_face_has_its_side_outside_the_surface() {
         .unwrap();
     assert_eq!(side.edgeuse_index, first_bad);
     assert!(side.on_natural_boundary);
+}
+
+/// Loop test 2 on the faces of `b` under a 0.005 face tolerance: every upward loop use passes,
+/// and the downward loop uses of every face (with `narrow_only`, of the faces narrower than
+/// the band of twice that tolerance) fail. How many faces are that narrow, by their corners.
+fn narrow_faces_keep_their_side(k: &Kernel, b: &mut Brep, narrow_only: bool) -> usize {
+    let tol = 0.005;
+    for f in b.face_list().to_vec() {
+        solidcore::topology::face::p3::set_tolerance(b, f, tol, true, true).unwrap();
+    }
+    let mut thin = 0;
+    for f in b.face_list().to_vec() {
+        // the face's extents along x, y and z, from its corners
+        let (mut lo, mut hi) = ([f64::INFINITY; 3], [f64::NEG_INFINITY; 3]);
+        for &l in &b.face(f).unwrap().loops {
+            for le in &b.loop_(l).unwrap().edges {
+                for v in b.edge(le.edge).unwrap().vertices {
+                    let p = b.vertex(v).unwrap().point;
+                    for (i, c) in [p.x, p.y, p.z].into_iter().enumerate() {
+                        lo[i] = lo[i].min(c);
+                        hi[i] = hi[i].max(c);
+                    }
+                }
+            }
+        }
+        let widths = [hi[0] - lo[0], hi[1] - lo[1], hi[2] - lo[2]];
+        let narrow = widths.iter().any(|&w| w > 0.0 && w < 2.0 * tol);
+        thin += usize::from(narrow);
+        let up = b.face(f).unwrap().faceuse.unwrap();
+        for &lu in &b.faceuse(up).unwrap().loopuses {
+            let side = is_loopuse_side_in_surface(k, b, lu, None, None).unwrap();
+            assert!(side.in_surface, "face {f:?} (widths {widths:?}): {side:?}");
+        }
+        if narrow || !narrow_only {
+            // the downward face use's loops run the other way round: still outside
+            let down = b.faceuse(up).unwrap().mate.unwrap();
+            for &lu in &b.faceuse(down).unwrap().loopuses {
+                let side = is_loopuse_side_in_surface(k, b, lu, None, None).unwrap();
+                assert!(!side.in_surface, "face {f:?} (widths {widths:?}): {side:?}");
+            }
+        }
+    }
+    thin
+}
+
+#[test]
+fn a_face_narrower_than_the_side_band_has_its_loop_side_in_the_surface() {
+    // #18540: a sample within twice the face tolerance of a side of the face's domain lies on
+    // that side. A face 0.008 across under a 0.005 tolerance, as a faceted STEP import has it,
+    // has every sample within that band of both opposite sides: each lies on the nearer, and
+    // the direction test holds each edge to its own side.
+    let mut k = Kernel::default();
+    // a plate: four of its faces are 0.008 across, two in U and two in V
+    let mut plate = create_box(&mut k, Point3::ZERO, 2.0, 0.008, 4.0).unwrap();
+    assert_eq!(
+        narrow_faces_keep_their_side(&k, &mut plate, false),
+        4,
+        "the plate's thin faces"
+    );
+    // a ring: its wall is 0.008 high, along V of a periodic surface
+    let mut ring = create_cylinder(&mut k, Point3::ZERO, 3.0, 0.008).unwrap();
+    assert_eq!(
+        narrow_faces_keep_their_side(&k, &mut ring, true),
+        1,
+        "the ring's wall"
+    );
 }

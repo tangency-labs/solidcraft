@@ -9,6 +9,7 @@
 pub mod a_object;
 pub mod assert_array;
 pub mod attribute;
+pub mod axial_section;
 pub mod axis2_placement;
 pub mod certified;
 pub mod context;
@@ -26,6 +27,7 @@ pub mod local_solve_nd;
 pub mod matrix;
 pub mod object;
 pub mod periodic_extent1d;
+pub mod plane_height;
 pub mod point_set;
 pub mod polar_box;
 pub mod polynomial;

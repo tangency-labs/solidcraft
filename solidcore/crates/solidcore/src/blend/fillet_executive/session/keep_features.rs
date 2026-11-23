@@ -294,6 +294,9 @@ struct Feature {
     walls: Vec<FaceId>,
     /// Where its walls meet the round.
     creases: Vec<Curve>,
+    /// A boss whose walls are not upright: its own walls in the target, which the band
+    /// reaches only where the round crosses one of them (nothing is continued from it).
+    tilted_walls: Vec<FaceId>,
 }
 
 /// The edit-notification reference of a new edge's curve in `b`.
@@ -475,6 +478,12 @@ const NOT_SEWN: &str =
     "Fillet Error: a round kept round a feature does not sew into the body along its rails and creases";
 
 impl FilletSession<'_> {
+    /// The refusal of a kept boss whose walls lean over the band.
+    fn not_upright(&mut self) -> SolidError {
+        self.note_keep_refusal(FilletErrorType::NotExact, NOT_UPRIGHT);
+        SolidError::blend_failed(OP, "a kept boss's walls are not upright")
+    }
+
     /// The fork's `SmFilletExecutive::KeepFeaturesInBands` (`eb883ad`): trim the rounds in place
     /// round the features their bands reach, and sew them into the target.
     ///
@@ -657,6 +666,7 @@ impl FilletSession<'_> {
                         boss,
                         walls,
                         creases: Vec::new(),
+                        tilted_walls: Vec::new(),
                     });
                     continue;
                 }
@@ -682,16 +692,21 @@ impl FilletSession<'_> {
                 } else {
                     -normal
                 };
-                if !is_upright {
-                    // judged below, only if the band reaches it
+                if frame.is_none() {
+                    // no plane to continue the walls along: judged below, only if the band
+                    // reaches it
                     features.push(Feature {
                         rim_curves,
                         boss,
                         walls: Vec::new(),
                         creases: Vec::new(),
+                        tilted_walls: Vec::new(),
                     });
                     continue;
                 }
+                // leaning walls: the footprint is swept all the same, to find whether the band
+                // takes the ground under it; the walls themselves are judged after
+                let leaning = if is_upright { Vec::new() } else { walls };
                 let mut depth = 0.0;
                 for &corner in &corners {
                     depth = smos_max(depth, (at - corner).dot(up));
@@ -717,12 +732,13 @@ impl FilletSession<'_> {
                 }
                 // Not the fork's (#2404): the walls are swept in a body of their own and
                 // copied into the sheet with their own topology (`sweep_walls`).
-                let walls = sweep_walls(k, sheet, profile, -up, depth)?;
+                let swept = sweep_walls(k, sheet, profile, -up, depth)?;
                 features.push(Feature {
                     rim_curves,
                     boss,
-                    walls,
+                    walls: swept,
                     creases: Vec::new(),
+                    tilted_walls: leaning,
                 });
             }
         }
@@ -766,11 +782,7 @@ impl FilletSession<'_> {
                     .iter()
                     .any(|b| !b.are_disjoint(&rim_box, on_tol))
                 {
-                    self.note_keep_refusal(FilletErrorType::NotExact, NOT_UPRIGHT);
-                    return Err(SolidError::blend_failed(
-                        OP,
-                        "a kept boss's walls are not upright",
-                    ));
+                    return Err(self.not_upright());
                 }
                 continue;
             }
@@ -822,6 +834,46 @@ impl FilletSession<'_> {
                                 }
                             }
                             feature.creases.push(piece);
+                        }
+                    }
+                }
+            }
+            // A boss with leaning walls cannot be carried to the round. Where the band takes the
+            // ground under its footprint (the walls continued straight down meet the round) it
+            // is refused; clear of the band it is refused only if the round crosses one of its
+            // own walls, a crease piece lying in both faces.
+            if !feature.tilted_walls.is_empty() {
+                let refuse = |this: &mut Self| this.not_upright();
+                if !feature.creases.is_empty() {
+                    return Err(refuse(self));
+                }
+                for &wall in &feature.tilted_walls {
+                    let (copy, wall_cache) = (&mut target_copy, &mut target_copy_cache);
+                    let wall_body: &Brep = if let Some(copy) = copy {
+                        copy
+                    } else {
+                        k.work_counters.add_wall_body_copy();
+                        copy.insert(self.objects.target.clone_standing_for_self()?)
+                    };
+                    let wall_box =
+                        crate::query::api_queries::face_bounding_box(k, wall_body, wall, false)?;
+                    for (sheet_box, &sheet_face) in sheet_boxes.iter().zip(&sheet_faces) {
+                        if sheet_box.are_disjoint(&wall_box, on_tol) {
+                            continue;
+                        }
+                        // the surfaces meet over both domains; the band reaches the wall only
+                        // where a piece of that crease lies in both faces
+                        let found = creases(k, sheet, sheet_face, wall_body, wall, crease_tol)?;
+                        for curve in &found {
+                            for piece in pieces_in_face(k, wall_body, wall, curve, tol, wall_cache)?
+                            {
+                                let mut fresh = CurveOnClassifyCache::default();
+                                if !pieces_in_face(k, sheet, sheet_face, &piece, tol, &mut fresh)?
+                                    .is_empty()
+                                {
+                                    return Err(refuse(self));
+                                }
+                            }
                         }
                     }
                 }

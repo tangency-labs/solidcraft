@@ -3,7 +3,7 @@ use crate::scenario::Harness;
 use crate::sketch_modify_ui::{Mod, candidate};
 use crate::viewport::Hit;
 use serde_json::{Value, json};
-use solidcore_record::Vec3;
+use solidcore_record::{Vec2, Vec3};
 use solidcraft_engine::Sel;
 use solidcraft_engine::geom::prelude::*;
 
@@ -590,6 +590,56 @@ fn a_point_on_a_midpoint_guide_stays_lined_up_with_the_midpoint() {
     }
 }
 
+/// #20859: a point placed where the guides from two edges' midpoints cross, at a rectangle's
+/// centre, stays plumb with the top edge's midpoint and level with the right edge's, also when
+/// "Snap to where two guides cross" takes the point there first, and not with a free point
+/// that happens to be level or plumb with it. With lining up off, the crossing snap only places
+/// the point, as before.
+#[test]
+fn a_point_where_two_midpoint_guides_cross_stays_lined_up_with_both() {
+    use solidcraft_engine::sketch::ConstraintKind::Midpoint;
+    for (aligning, crossing) in [(true, true), (true, false), (false, true)] {
+        let mut h = lining_up_fixture(&[
+            ("sketch.rectangle.two_point", json!({"p0":[20,10],"p1":[100,50]})),
+            ("sketch.point", json!({"point":[130,30]})),
+            ("sketch.point", json!({"point":[60,75]})),
+        ]);
+        h.app.preferences.sketch_align_points = aligning;
+        h.app.preferences.sketch_recent_snap = crossing;
+        h.app.preferences.sketch_tracking_guides = true;
+        h.call("ui.camera", json!({"target":[60,30,0],"distance":180}));
+        h.frames(2);
+        let undo = h.app.session.undo.len();
+        step(&mut h, json!({"start":"sketch.point"}));
+        step(&mut h, json!({"move":{"sketch":[60,50]}}));
+        step(&mut h, json!({"move":{"sketch":[100,30]}}));
+        step(&mut h, json!({"move":{"sketch":[60.3,30.2]}}));
+        step(&mut h, json!({"click":{"sketch":[60.3,30.2]}}));
+        let case = format!("aligning {aligning}, crossing {crossing}");
+        let Some((_, tied)) = point_and_alignments(&h, [60.0, 30.0]) else {
+            assert!(!aligning && !crossing, "{case}: the point lands on the centre");
+            continue;
+        };
+        if !aligning {
+            assert!(tied.is_empty(), "{case}: no constraint, {tied:?}");
+            continue;
+        }
+        let st = crate::open_meshing::session_world(&h.app.session);
+        let sk = &st.sketch(h.app.session.active_sketch.unwrap()).unwrap().sketch;
+        let at = |id: &str| sk.points.iter().position(|p| p.id == id).map(|i| (i, sk.points[i].pos));
+        let midpoint = |i: usize| sk.constraints.iter().any(|c| matches!(c.kind, Midpoint { p, .. } if p == i));
+        assert_eq!(tied.len(), 2, "{case}: {tied:?}");
+        for (kind, other) in &tied {
+            let (i, pos) = at(other).expect("the tied point is in the sketch");
+            assert!(midpoint(i), "{case}: {kind} ties to an edge's midpoint");
+            let expected = if *kind == "Vertical" { [60.0, 50.0] } else { [100.0, 30.0] };
+            assert!(pos.dist(solidcore_record::Vec2::new(expected[0], expected[1])) < 1e-6, "{case}: {kind} to {pos:?}");
+        }
+        drop(st);
+        assert_eq!(h.app.session.undo.len(), undo + 1, "{case}: the constraints are in the point's undo step");
+    }
+}
+
 /// #7828: a line kept horizontal from its start also lines up under a point above, and the
 /// click keeps both: the line's Horizontal and the end's alignment with that point.
 #[test]
@@ -688,4 +738,102 @@ fn shift_in_a_sketch_doesnt_keep_the_snap_points() {
     assert!(rim.is_some(), "{:?}", h.app.viewport.woken);
     step(&mut h, json!({"move":{"world":[40,0,10]},"shift":true}));
     assert!(h.app.viewport.woken.item.is_some() && h.app.viewport.woken.item != rim, "{:?}", h.app.viewport.woken);
+}
+
+/// Draws a rectangle from `a` to `b` with the tool `cmd`, Shift held for the second corner when
+/// `square` is set, and returns the corner points the new curves span (width, height) and whether
+/// the sketch holds an Equal constraint.
+fn drawn_rectangle(cmd: &str, a: [f64; 2], b: [f64; 2], square: bool, preference: bool) -> ((f64, f64), bool) {
+    let mut h = fixture();
+    h.app.preferences.sketch_square_rectangles = preference;
+    step(&mut h, json!({"start": cmd}));
+    step(&mut h, json!({"click":{"sketch":a}}));
+    step(&mut h, json!({"move":{"sketch":b},"shift":square}));
+    step(&mut h, json!({"click":{"sketch":b},"shift":square}));
+    let world = crate::open_meshing::session_world(&h.app.session);
+    let sketch = &world.sketch(h.app.session.active_sketch.unwrap()).unwrap().sketch;
+    // The fixture's three lines come first: the rectangle's curves follow them.
+    let mut lo = Vec2::new(f64::MAX, f64::MAX);
+    let mut hi = Vec2::new(f64::MIN, f64::MIN);
+    for curve in sketch.curves.iter().skip(3) {
+        for p in curve.kind.ends().into_iter().flat_map(|(a, b)| [sketch.point(a), sketch.point(b)]).flatten() {
+            lo = Vec2::new(lo.x.min(p.x), lo.y.min(p.y));
+            hi = Vec2::new(hi.x.max(p.x), hi.y.max(p.y));
+        }
+    }
+    let equal = sketch.constraints.iter().any(|k| matches!(k.kind, solidcraft_engine::sketch::ConstraintKind::Equal { .. }));
+    ((hi.x - lo.x, hi.y - lo.y), equal)
+}
+
+#[test]
+fn shift_makes_a_two_point_rectangle_a_square_with_equal_sides() {
+    let ((w, h), equal) = drawn_rectangle("sketch.rectangle.two_point", [20.0, -30.0], [50.0, -15.0], true, true);
+    assert!((w - 30.0).abs() < 1e-6 && (h - 30.0).abs() < 1e-6, "{w} x {h}");
+    assert!(equal, "a square keeps its sides equal");
+    let ((w, h), equal) = drawn_rectangle("sketch.rectangle.two_point", [20.0, -30.0], [50.0, -15.0], false, true);
+    assert!((w - 30.0).abs() < 1e-6 && (h - 15.0).abs() < 1e-6, "{w} x {h}");
+    assert!(!equal, "without Shift nothing changes");
+}
+
+#[test]
+fn square_rectangles_preference_off_keeps_shift_for_midpoints() {
+    let ((w, h), equal) = drawn_rectangle("sketch.rectangle.two_point", [20.0, -30.0], [50.0, -15.0], true, false);
+    assert!((w - 30.0).abs() < 1e-6 && (h - 15.0).abs() < 1e-6, "{w} x {h}");
+    assert!(!equal);
+}
+
+#[test]
+fn typed_sizes_win_over_shift_and_leave_no_failed_equal() {
+    let mut h = fixture();
+    h.app.preferences.sketch_square_rectangles = true;
+    step(&mut h, json!({"start": "sketch.rectangle.two_point"}));
+    step(&mut h, json!({"click":{"sketch":[20.0, -30.0]}}));
+    step(&mut h, json!({"move":{"sketch":[50.0, -15.0]},"shift":true}));
+    for (text, next) in [("10", Some("Tab")), ("25", None)] {
+        step(&mut h, json!({"key": "A", "cmd": true}));
+        step(&mut h, json!({"text": text}));
+        if let Some(key) = next {
+            step(&mut h, json!({"key": key}));
+        }
+    }
+    step(&mut h, json!({"key": "Enter","shift":true}));
+    h.settle();
+    assert!(!matches!(&h.app.status, Some((_, _, true))), "no error: {:?}", h.app.status);
+    let world = crate::open_meshing::session_world(&h.app.session);
+    let sketch = &world.sketch(h.app.session.active_sketch.unwrap()).unwrap().sketch;
+    assert!(sketch.curves.len() >= 7, "the 10 x 25 rectangle was drawn");
+    assert!(
+        !sketch.constraints.iter().any(|k| matches!(k.kind, solidcraft_engine::sketch::ConstraintKind::Equal { .. })),
+        "the typed sizes define it, no Equal beside them"
+    );
+}
+
+#[test]
+fn shift_makes_a_centre_rectangle_a_square() {
+    let ((w, h), equal) = drawn_rectangle("sketch.rectangle.center", [30.0, -30.0], [40.0, -25.0], true, true);
+    assert!((w - 20.0).abs() < 1e-6 && (h - 20.0).abs() < 1e-6, "{w} x {h}");
+    assert!(equal);
+}
+
+/// Finishing the sketch, by the command or either Finish button, closes an Offset dialog that
+/// was open in it: Offset needs the sketch, so its OK could only be refused (#7424).
+#[test]
+fn finishing_the_sketch_closes_its_offset_dialog() {
+    for finish in [None, Some("sketch_palette:finish"), Some("button:sketch.finish")] {
+        let mut h = fixture();
+        step(&mut h, json!({"call":"ui.camera","params":{"target":[-40,0,0],"distance":150}}));
+        step(&mut h, json!({"start":"sketch.offset"}));
+        step(&mut h, json!({"drag":[{"sketch":[-32,8]},{"sketch":[-13,27]}]}));
+        h.frames(3);
+        assert_eq!(h.app.dialog.as_ref().unwrap().inputs[0].items.len(), 2);
+        match finish {
+            None => {
+                h.app.run("sketch.finish", json!({})).unwrap();
+            }
+            Some(handle) => step(&mut h, json!({"click":{"handle":handle}})),
+        }
+        h.settle();
+        assert!(h.app.session.active_sketch.is_none(), "{finish:?}: the sketch is finished");
+        assert!(h.app.dialog.is_none(), "{finish:?}: the Offset dialog closed with the sketch");
+    }
 }

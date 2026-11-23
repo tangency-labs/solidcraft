@@ -224,12 +224,23 @@ impl SurfaceSurfaceFs {
 }
 
 impl FilletSolverOps for SurfaceSurfaceFs {
+    fn uses_constant_offset_equations(&self) -> bool {
+        true
+    }
+
     fn solver(&self) -> &FilletSolver {
         &self.base.solver
     }
 
     fn solver_mut(&mut self) -> &mut FilletSolver {
         &mut self.base.solver
+    }
+
+    fn rollover_tolerance(&self, k: &Kernel, b: &Brep) -> Result<f64> {
+        Ok(self
+            .base
+            .solver
+            .constant_offset_rollover_tolerance(k, b, self.base.oriented_offsets()?))
     }
 
     /// `SmConstantRadiusFS::GetJacobianSize` (inherited).

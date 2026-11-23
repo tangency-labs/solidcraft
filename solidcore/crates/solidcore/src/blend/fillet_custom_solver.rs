@@ -85,7 +85,7 @@ use crate::blend::fillet_standard_solver::p1::CONSTANT_RADIUS_ASSISTED_FS_TYPE;
 use crate::curve::curve::p1::GlobalPointSolveOptions;
 use crate::curve::curve::p5::is_arc_base;
 use crate::curve::curve::Curve;
-use crate::error::{ignore_status, Result, SolidError};
+use crate::error::{Result, SolidError};
 use crate::geom::axis2_placement::Axis2Placement;
 use crate::geom::extent1d::{Extent1d, ExtentNd};
 use crate::geom::extent2d::Extent2d;
@@ -775,18 +775,12 @@ fn initial_setup(
     let max = Point2::new(ivl_u.max(), ivl_v.max());
     // (status ignored upstream)
     // fork 66b02de passes this on (SER)
-    ignore_status(crate::error::passed_on(
-        domain1.set_min_max(min, max),
-        k.fixes.fillet_statuses_pass_on,
-    )?)?;
+    domain1.set_min_max(min, max)?;
     let size2: Vec2 = fs.solver.surface_extension_factor * domain2.size();
     let min = Point2::new(domain2.min().x - size2.x, domain2.min().y - size2.y);
     let max = Point2::new(domain2.max().x + size2.x, domain2.max().y + size2.y);
     // fork 66b02de passes this on (SER)
-    ignore_status(crate::error::passed_on(
-        domain2.set_min_max(min, max),
-        k.fixes.fillet_statuses_pass_on,
-    )?)?;
+    domain2.set_min_max(min, max)?;
 
     Ok(InitialSetup {
         surface2_rail: other_rail,
@@ -1408,18 +1402,12 @@ impl EiffelTowerCrossSectionFsg {
                 let uv_max = Point2::new(crv_ivl.max(), 1.0);
                 // (status ignored upstream)
                 // fork 66b02de passes this on (SER)
-                ignore_status(crate::error::passed_on(
-                    surf.adjust_step_uv_domain(k, &Extent2d::from_points(uv_min, uv_max)),
-                    k.fixes.fillet_statuses_pass_on,
-                )?)?;
+                surf.adjust_step_uv_domain(k, &Extent2d::from_points(uv_min, uv_max))?;
                 *slot = Some(surf);
             }
             // (statuses ignored upstream)
             // fork 66b02de passes this on (SER)
-            let knots_local =
-                crate::error::passed_on(rail1.knots(None), k.fixes.fillet_statuses_pass_on)?
-                    .map(|r| r.0)
-                    .unwrap_or_default();
+            let knots_local = rail1.knots(None)?.0;
             let knot = |i: usize| {
                 knots_local
                     .get(i)
@@ -1432,26 +1420,14 @@ impl EiffelTowerCrossSectionFsg {
             }
             let start_knot_mid = (knot(0)? + knot(1)?) / 2.0;
             // fork 66b02de passes this on (SER)
-            ignore_status(crate::error::passed_on(
-                rail1.insert_one_knot(start_knot_mid, 1),
-                k.fixes.fillet_statuses_pass_on,
-            )?)?;
+            rail1.insert_one_knot(start_knot_mid, 1)?;
             // fork 66b02de passes this on (SER)
-            ignore_status(crate::error::passed_on(
-                rail2.insert_one_knot(start_knot_mid, 1),
-                k.fixes.fillet_statuses_pass_on,
-            )?)?;
+            rail2.insert_one_knot(start_knot_mid, 1)?;
             let end_knot_mid = (knot(n - 2)? + knot(n - 1)?) / 2.0;
             // fork 66b02de passes this on (SER)
-            ignore_status(crate::error::passed_on(
-                rail1.insert_one_knot(end_knot_mid, 1),
-                k.fixes.fillet_statuses_pass_on,
-            )?)?;
+            rail1.insert_one_knot(end_knot_mid, 1)?;
             // fork 66b02de passes this on (SER)
-            ignore_status(crate::error::passed_on(
-                rail2.insert_one_knot(end_knot_mid, 1),
-                k.fixes.fillet_statuses_pass_on,
-            )?)?;
+            rail2.insert_one_knot(end_knot_mid, 1)?;
         }
         let [d0, d1] = &deriv_surfs;
         let opts = SkinnedSurfaceOptions {
@@ -2053,7 +2029,10 @@ macro_rules! fillet_intersector_ops {
                 points: &[TsectPnt],
                 uv1: &mut BSplineCurve,
                 uv2: &mut BSplineCurve,
-            ) -> Result<Option<Surface>> {
+            ) -> Result<(
+                Option<Surface>,
+                Option<crate::blend::law_corners::LawCornerPieces>,
+            )> {
                 IntersectorOps::create_fillet_surface(
                     &mut self.base,
                     k,
@@ -2064,6 +2043,17 @@ macro_rules! fillet_intersector_ops {
                     uv1,
                     uv2,
                 )
+            }
+
+            fn keep_law_corner_pieces(
+                &mut self,
+                pieces: crate::blend::law_corners::LawCornerPieces,
+            ) -> Result<()> {
+                IntersectorOps::keep_law_corner_pieces(&mut self.base, pieces)
+            }
+
+            fn skins_varying_balls(&self) -> Result<bool> {
+                IntersectorOps::skins_varying_balls(&self.base)
             }
 
             fn set_fillet_surface(
@@ -2130,6 +2120,10 @@ fn constant_radius_setup_offset_values(
 /// are `blend.fillet_standard_solver_p1`'s, `IsKindOf` and `LoadInitialValues`
 /// `_p2`'s, so none falls through to the base.
 impl FilletSolverOps for ConstantRadiusAssistedFs {
+    fn uses_constant_offset_equations(&self) -> bool {
+        true
+    }
+
     fn solver(&self) -> &FilletSolver {
         &self.solver
     }
@@ -2365,6 +2359,7 @@ mod tests {
         let mut fs = assisted_parallel_planes();
         let mut distance = -17.0;
         let ops: &mut dyn FilletSolverOps = &mut fs;
+        assert!(ops.uses_constant_offset_equations());
         assert_eq!(ops.jacobian_size().expect("size"), 4);
         assert!(!ops.offset_radii_can_change().expect("fixed radii"));
         assert_eq!(
@@ -2382,6 +2377,14 @@ mod tests {
             .expect("assisted type"));
         assert_eq!(fs.surface(0).expect("first rail").offset_distance(), 1.0);
         assert_eq!(fs.surface(1).expect("second rail").offset_distance(), -2.0);
+    }
+
+    #[test]
+    fn custom_constraints_do_not_inherit_affine_offset_equations() {
+        let tower = EiffelTowerFs::new(assisted_parallel_planes(), 0.5);
+        let secant = SecantConstantRadiusFs::new(assisted_parallel_planes(), 0.5);
+        assert!(!tower.uses_constant_offset_equations());
+        assert!(!secant.uses_constant_offset_equations());
     }
 
     #[test]
