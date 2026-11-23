@@ -257,8 +257,6 @@ fn solidcraft_flags(k: &mut Kernel) {
     k.fixes.linear_sweep_arc_is_cylinder = true;
     k.fixes.new_edge_vertex_tolerance_covers_gap = true;
     k.fixes.offset_analytic_mate_edges = true;
-    k.fixes.offset_extension_as_itself = true;
-    k.fixes.offset_extension_from_base = true;
     k.fixes.proto_vertex_miss_is_false = true;
     k.fixes.revolve_analytic_profile_faces = true;
     k.fixes.shell_edges_on_analytics_exact = true;

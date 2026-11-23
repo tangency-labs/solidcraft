@@ -1757,7 +1757,6 @@ fn enable_fix(k: &mut Kernel, name: &str) -> Result<(), String> {
     let field = match name {
         "analytic_copy_keeps_parameterization" => &mut k.fixes.analytic_copy_keeps_parameterization,
         "fillet_trace_reaches_rails" => &mut k.fixes.fillet_trace_reaches_rails,
-        "offset_extension_as_itself" => &mut k.fixes.offset_extension_as_itself,
         _ => k
             .fixes
             .flag_mut(name)
@@ -2478,9 +2477,9 @@ mod tests {
     #[test]
     fn fixes_are_enabled_by_name() {
         let mut k = Kernel::default();
-        enable_fix(&mut k, "offset_extension_as_itself").unwrap();
+        enable_fix(&mut k, "fillet_trace_reaches_rails").unwrap();
         enable_fix(&mut k, "analytic_copy_keeps_parameterization").unwrap();
-        assert!(k.fixes.offset_extension_as_itself);
+        assert!(k.fixes.fillet_trace_reaches_rails);
         assert!(k.fixes.analytic_copy_keeps_parameterization);
         assert!(enable_fix(&mut k, "no_such_fix").is_err());
     }

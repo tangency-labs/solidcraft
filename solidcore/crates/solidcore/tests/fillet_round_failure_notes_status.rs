@@ -6,8 +6,9 @@
 //! (first, then) pairs, and the part's own edges of both together. Where a round fails, the
 //! session's error info names it: a nonzero code and a comment.
 //!
-//! With `offset_extension_from_base`, `fillet_refuse_overlapping_bands` and
-//! `offset_extension_as_itself` (the least set under which it shows; any one of them off and the
+//! With `fillet_refuse_overlapping_bands` and the offsets extended from the base and continued
+//! as themselves (once two flags, now the only path, #18921; the least set under which it
+//! shows; any one of them off and the
 //! round builds), the arc's round followed by the front edge's fails in the rollover
 //! (`SM_ERR_NULL_POINTER` from `blend::fillet_solver::p5`) and noted nothing: code 0 and no
 //! comment. It now notes `SM_FILERR_EDGE_PROBLEM` (4) with what failed.
@@ -44,9 +45,7 @@ use solidcore::{Brep, Kernel};
 /// The default kernel with the three fixes under which the rollover failure shows.
 fn kernel() -> Kernel {
     let mut k = Kernel::default();
-    k.fixes.offset_extension_from_base = true;
     k.fixes.fillet_refuse_overlapping_bands = true;
-    k.fixes.offset_extension_as_itself = true;
     k
 }
 

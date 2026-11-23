@@ -64,8 +64,6 @@ const SOLIDCRAFT_C494A18: &[&str] = &[
     "local_surface_intersect_guards_max_boundary_retry",
     "new_edge_vertex_tolerance_covers_gap",
     "offset_analytic_mate_edges",
-    "offset_extension_as_itself",
-    "offset_extension_from_base",
     "point_class_gap_3d_propagates_no_drop_error",
     "proto_vertex_miss_is_false",
     "revolve_analytic_profile_faces",
@@ -150,10 +148,10 @@ fn solidcraft_profile_pipe_gn_round_completes() {
     check_round(SOLIDCRAFT_C494A18);
 }
 
-/// The flags the failure needed together with the passed-on query statuses
-/// (`offset_extension_from_base`, `offset_extension_as_itself`; it also needed
-/// `keep_operand_uv_trims`, always on since that flag was retired).
+/// The default kernel: the failure needed, together with the passed-on query statuses, the
+/// offsets extended from the base and continued as themselves (once two flags, now the only
+/// path, #18921) and `keep_operand_uv_trims`, always on since that flag was retired.
 #[test]
 fn reduced_profile_pipe_gn_round_completes() {
-    check_round(&["offset_extension_from_base", "offset_extension_as_itself"]);
+    check_round(&[]);
 }
