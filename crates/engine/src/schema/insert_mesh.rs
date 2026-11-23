@@ -32,7 +32,7 @@ use serde::{Deserialize, Deserializer, Serialize};
 use serde_json::Value;
 
 use super::check::{located, whole};
-use super::types::{not_blank_pattern, whitespace_class};
+use super::types::{LengthExpr, not_blank_pattern, whitespace_class};
 
 /// What the handler says of a `path` that is missing, not text, blank or too long.
 const PATH_REQUIRED: &str = "`path` is required";
@@ -167,6 +167,16 @@ pub struct InsertMeshKeys {
     #[serde(default, deserialize_with = "crease_angle_key", skip_serializing_if = "Option::is_none")]
     #[schemars(range(min = 0.0, max = 180.0))]
     pub crease_angle_degrees: Option<f64>,
+    /// Whether each mesh the file brings becomes a solid body where it can, as `mesh.convert`
+    /// does, so booleans, fillets, holes and a shell work on it. The reply names the ones it
+    /// converted as `solid_bodies`; a mesh it cannot convert stays a mesh body, with a warning,
+    /// and the import still succeeds. Default: false.
+    #[serde(default)]
+    pub as_solid: Option<bool>,
+    /// With `as_solid`: the length expression the conversion holds itself to. A point the mesh
+    /// gives up to this far from a plane still becomes that plane. Default: 0.05 mm.
+    #[serde(default)]
+    pub tolerance: Option<LengthExpr>,
     /// For an OpenUSD file only (any other file is refused it): what it brings in. `meshes` (the
     /// default) reads its meshes as mesh bodies, as before; `exact` reads its exact B-rep where it
     /// has one (a `BrepArray`'s solids and shells) as B-rep bodies of an Import
@@ -212,7 +222,7 @@ fn leave_unread(value: &mut Value) {
     };
     if !solidcraft_io::is_mesh_path(&path) && !solidcraft_io::is_ply_path(&path) {
         // Refused for its kind before anything else is read.
-        for key in ["name", "up", "names", "folder", "units", "origin", "crease_angle_degrees", "geometry"] {
+        for key in ["name", "up", "names", "folder", "units", "origin", "crease_angle_degrees", "as_solid", "tolerance", "geometry"] {
             keys.remove(key);
         }
         return;
@@ -383,8 +393,11 @@ pub struct MeshInserted {
     pub bodies: Vec<String>,
     /// The same names as `bodies`.
     pub created_bodies: Vec<String>,
-    /// What the file reader noticed and put right.
+    /// What the file reader noticed and put right, and the meshes `as_solid` could not convert.
     pub warnings: Vec<String>,
+    /// The bodies `as_solid` turned into solids, by name. Only when it converted some.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub solid_bodies: Vec<String>,
     /// The new component's id.
     pub component: u64,
     /// The new component's name.

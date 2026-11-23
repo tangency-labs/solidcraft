@@ -1,0 +1,6 @@
+{
+  "en": {
+    "prefs.import_meshes_as_solid": "Import meshes as solids",
+    "prefs.import_meshes_as_solid_help": "A 3MF, STL, OBJ, PLY or glTF file added to a design comes in as solid bodies where the conversion can take them, so booleans, fillets, holes and a shell work on them. A mesh that cannot be converted stays a mesh body, with a warning that names it."
+  }
+}

@@ -44,6 +44,7 @@ fn schemas_and_the_key_check_agree() {
     assert_keys(
         input_schema_for::<OpenParams>(),
         &[
+            "as_solid",
             "folder",
             "format",
             "geometry",
@@ -56,6 +57,7 @@ fn schemas_and_the_key_check_agree() {
             "read_only",
             "reader",
             "reuse_import",
+            "tolerance",
             "units",
             "up",
             "verify",

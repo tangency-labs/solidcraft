@@ -54,6 +54,11 @@ macro_rules! design_preferences {
             heal_tolerance_defects: bool = true, PAGE_DESIGN => check_id("prefs.heal_tolerance_defects");
             /// The browser's Origin folder starts hidden in designs that don't keep its eye themselves.
             hide_origin: bool = false, PAGE_DESIGN => check_tr("ui.hide_origin_by_default");
+            /// A 3MF, STL, OBJ, PLY or glTF file added to a design joins it as solid bodies where the
+            /// conversion can take them (`file.insert_mesh` and `doc.open` get `as_solid`), so booleans,
+            /// fillets, holes and a shell work on them (#1704). Off: the file joins as mesh bodies and
+            /// Convert Mesh makes a solid when asked.
+            import_meshes_as_solid: bool = false, PAGE_DESIGN => check_id_help("prefs.import_meshes_as_solid", "prefs.import_meshes_as_solid_help");
             /// Insert Design lists the designs open in other tabs, each inserted with one click, then
             /// Browse… for a file (#8570). Off: it opens the file picker at once, as before.
             insert_lists_open_designs: bool = true, PAGE_DESIGN => check_id("settings.insert_lists_open_designs");

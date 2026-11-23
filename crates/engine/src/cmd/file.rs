@@ -18,11 +18,13 @@ mod send;
 
 use serde_json::{Value, json};
 use solidcraft_doc::Document;
+use solidcraft_doc::expr::Kind;
 use solidcraft_io::Format;
 
 use super::CommandSpec;
+use super::features::check_expr;
 use super::print_face;
-use crate::params::{bad, bool_, num, str_, string_list};
+use crate::params::{bad, bool_, expr, num, str_, string_list};
 #[cfg(not(target_arch = "wasm32"))]
 use crate::schema::file::GpgKeyInfo;
 use crate::schema::file::{
@@ -68,6 +70,8 @@ pub static COMMANDS: &[CommandSpec] = &[
             "history?: features|solids for a FreeCAD file (see file.insert_step); ",
             "reader?: solidcraft|cadmpeg for a STEP, FreeCAD or Rhino file (see file.insert_step); ",
             "geometry?: meshes|exact for an OpenUSD file (see file.insert_mesh); ",
+            "as_solid?: bool for a 3MF, STL, OBJ, PLY or glTF file (default false: each mesh the file brings is turned into a solid body where the conversion can take it, as mesh.convert does, so booleans, fillets, holes and a shell work on it; a mesh it cannot convert stays a mesh body, with a warning, and the file still opens -> solid_bodies: the bodies converted); ",
+            "tolerance?: length expression for that conversion (default 0.05 mm); ",
             "for a KiCad PCB: thickness?: board thickness in mm (default from the board); ",
             "components?: bool (default true); ",
             "copper?: \"overlay\" (default: flat copper just above the board), \"none\" (leave the traces out) or \"mesh\" (modelled with thickness; true also means mesh; pads are included whenever copper is enabled); ",
@@ -107,6 +111,8 @@ pub static COMMANDS: &[CommandSpec] = &[
             "units?: mm|cm|m|in|ft for an STL or OBJ file, or a PLY file with faces (default mm): the unit its coordinates are in, scaled to millimetres as the file is read (a 3MF or glTF file states its own). The design keeps the millimetre mesh and not the unit, so insert the file again to try another; ",
             "origin?: bool (default false: the mesh keeps its file's coordinates; true: once read, scaled and stood up, the import's occurrence is moved so the box around its bodies is centred on X and Y of the active component with its lowest point on Z = 0 → moved_to_origin: [x, y, z], the shift made); ",
             "crease_angle_degrees?: 0..180 (0 clears imported shading normals for the previous flat-shading behavior; positive angles regenerate angle-weighted normals across manifold edges below this crease angle; omitted keeps authored OBJ normals/smoothing groups, or flat shading when absent; geometry stays unchanged); ",
+            "as_solid?: bool (default false: each mesh the file brings is turned into a solid body where the conversion can take it, as mesh.convert does, so booleans, fillets, holes and a shell work on it; a mesh it cannot convert stays a mesh body, with a warning, and the import still succeeds -> solid_bodies: the bodies converted); ",
+            "tolerance?: length expression for that conversion (default 0.05 mm); ",
             "geometry?: meshes|exact for an OpenUSD file (default meshes: its meshes as mesh bodies, a B-rep with no mesh left out; exact: its exact B-rep where it has one, a BrepArray's solids and shells, comes in as B-rep bodies of an Import feature, as file.insert_step brings a FreeCAD file read with reader: cadmpeg, its prims a product tree, a mesh that only shows a B-rep not read again, and only its meshes with no B-rep as mesh bodies → geometry: \"exact\"; up and origin work as for its meshes; crease_angle_degrees is refused)",
         )),
     CommandSpec::new("file.save", "Save", crate::checked!("file.save", save)).any_part()
@@ -912,6 +918,7 @@ fn add_mesh(
         bodies: bodies.clone(),
         created_bodies: bodies,
         warnings: mf.warnings,
+        solid_bodies: Vec::new(),
         component: placed.component,
         component_name: placed.name.clone(),
         occurrence: placed.occurrence,
@@ -1054,6 +1061,7 @@ fn insert_mesh(s: &mut Session, p: &Value) -> Result<Value> {
             name: step.name,
             bodies: step.bodies,
             created_bodies: step.created_bodies,
+            solid_bodies: Vec::new(),
             warnings: step.warnings,
             component: step.component,
             component_name: step.component_name,
@@ -1068,7 +1076,56 @@ fn insert_mesh(s: &mut Session, p: &Value) -> Result<Value> {
         };
         return serde_json::to_value(reply).map_err(|e| bad(cmd, e.to_string()));
     }
-    add_mesh(s, path, str_(p, "name"), up, unit, mesh_origin(p, cmd)?, crease_angle)
+    let mut out = add_mesh(s, path, str_(p, "name"), up, unit, mesh_origin(p, cmd)?, crease_angle)?;
+    if bool_(p, "as_solid").unwrap_or(false) {
+        convert_meshes(s, &mut out, p, cmd)?;
+    }
+    Ok(out)
+}
+
+/// Convert the mesh bodies an import made into solids, as `mesh.convert` does: the timeline gains one
+/// Convert Mesh per body, so a rebuild repeats the conversion, and a mesh the conversion cannot take
+/// stays a mesh body with a warning instead of failing the whole import.
+fn convert_meshes(s: &mut Session, out: &mut Value, p: &Value, cmd: &str) -> Result<()> {
+    let Some(feature) = out["feature"].as_u64() else { return Ok(()) };
+    let Some(component) = s.doc.feature(feature).map(|f| f.component) else { return Ok(()) };
+    let tolerance = expr(p, "tolerance").unwrap_or_else(|| "0.05 mm".into());
+    check_expr(s, &tolerance, Kind::Length, cmd, "tolerance")?;
+    // Bare lengths typed in an inch (or cm) design mean that unit, as a command would.
+    let tolerance = s.doc.with_design_unit(&tolerance, Kind::Length);
+    let millimetres = s.doc.eval(&tolerance, Kind::Length).map_err(|e| bad(cmd, e.to_string()))?;
+    let names: Vec<String> = out["created_bodies"].as_array().into_iter().flatten().filter_map(Value::as_str).map(str::to_string).collect();
+    let mut warnings: Vec<String> = out["warnings"].as_array().into_iter().flatten().filter_map(Value::as_str).map(str::to_string).collect();
+    let mut solids = Vec::new();
+    for name in names {
+        // Asked first whether the body converts, so one that cannot stays a mesh body without a
+        // feature that would fail on every rebuild.
+        let convertible = s.model.state().body(&name).map(|body| solidcraft_kernel::convert_prismatic_mesh(&body.body, millimetres));
+        match convertible {
+            Some(Ok(_)) => {
+                let kind = solidcraft_doc::FeatureKind::MeshConvert { body: name.clone().into(), tolerance: tolerance.clone().into() };
+                match s.doc_mut().add_feature(kind, None) {
+                    Ok(id) => {
+                        if let Some(f) = s.doc_mut().feature_mut(id) {
+                            f.component = component;
+                        }
+                        solids.push(name);
+                    }
+                    Err(e) => warnings.push(format!("{}: stayed a mesh body: {}", name, e)),
+                }
+            }
+            Some(Err(e)) => warnings.push(format!("{}: stayed a mesh body: {}", name, e)),
+            None => {}
+        }
+    }
+    s.refresh();
+    if !solids.is_empty() {
+        out["solid_bodies"] = json!(solids);
+    }
+    if !warnings.is_empty() {
+        out["warnings"] = json!(warnings);
+    }
+    Ok(())
 }
 
 /// The shading-only crease reader, shared by the handler and its typed contract.
@@ -1627,7 +1684,7 @@ fn open(s: &mut Session, p: &Value) -> Result<Value> {
     if solidcraft_io::is_step_path(path) || solidcraft_io::is_mesh_path(path) || solidcraft_io::is_kicad_path(path) {
         // A new, unsaved design holding the file's bodies.
         let stem = std::path::Path::new(path).file_stem().map(|x| x.to_string_lossy().to_string()).unwrap_or_else(|| "Untitled".into());
-        let (mut fresh, r) = if solidcraft_io::is_kicad_path(path) {
+        let (mut fresh, mut r) = if solidcraft_io::is_kicad_path(path) {
             // KiCad is read into a fresh design here, as a mesh file is.
             let mut fresh = Session::new(Document::new(&stem));
             fresh.set_validation(s.validation());
@@ -1652,6 +1709,9 @@ fn open(s: &mut Session, p: &Value) -> Result<Value> {
             fresh.active_component = c;
             fresh.active_occurrence_path = Some(fresh.doc.first_path(c));
         }
+        if bool_(p, "as_solid").unwrap_or(false) && solidcraft_io::is_mesh_path(path) {
+            convert_meshes(&mut fresh, &mut r, p, "doc.open")?;
+        }
         fresh.undo.clear();
         fresh.opened_from_import();
         s.replace_design(fresh);
@@ -1663,6 +1723,7 @@ fn open(s: &mut Session, p: &Value) -> Result<Value> {
             errors,
             bodies: r.bodies,
             warnings: r.warnings,
+            solid_bodies: r.solid_bodies,
             component: r.component,
             component_name: r.component_name,
             occurrence: r.occurrence,
@@ -1851,6 +1912,8 @@ struct CloudInserted {
 struct ImportedFile {
     bodies: Vec<String>,
     warnings: Vec<String>,
+    #[serde(default)]
+    solid_bodies: Vec<String>,
     component: u64,
     component_name: String,
     #[serde(default)]

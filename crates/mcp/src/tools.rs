@@ -484,12 +484,15 @@ pub fn tool_definitions_with(opts: Options) -> Vec<Value> {
              so it is turned by default (`up: \"z\"` keeps its axes). `names` picks what the bodies are named after when the solids' own names say nothing useful. \
              An OpenUSD file (.usd/.usda/.usdc/.usdz) opens as meshes, turned to Z up when the stage says Y is up; `geometry: \"exact\"` brings its exact B-rep \
              where it has one (as SolidCraft's own OpenUSD exports carry) as B-rep bodies of an Import feature instead. \
+             `as_solid: true` turns each mesh the file brings into a solid body where it can, as mesh.convert does (a mesh it cannot convert stays a mesh body, with a warning); `tolerance` is that conversion's, a length expression (default 0.05 mm). \
              A file of another kind opens with an installed importer plugin that claims its extension (the `<plugin>.<entry>` tools \
              titled \"Open .ext files with …\" list them).",
             object(
                 json!({
                     "path": string("Path to a .sc (or .solidcraft), .step/.stp, .3mf, .stl, .obj, .glb, .gltf or OpenUSD (.usd, .usda, .usdc, .usdz) file"),
                     "up": {"type": "string", "enum": ["z", "y"], "description": "STEP, glTF and OpenUSD only. z keeps the file's axes; y: the file has Y up, so its bodies are turned to stand Z up. Default: z for STEP, y for glTF, the stage's own up axis for OpenUSD"},
+                    "as_solid": {"type": "boolean", "description": "Mesh files only. true opens the file with each mesh it brings turned into a solid body where the conversion can take it, so booleans, fillets and holes work on it; a mesh it cannot convert stays a mesh body, with a warning (default false)"},
+                    "tolerance": string("Mesh files only, with as_solid: the conversion's tolerance (default 0.05 mm)"),
                     "geometry": {"type": "string", "enum": ["meshes", "exact"], "description": "OpenUSD only. meshes (default): its meshes as mesh bodies; exact: its exact B-rep where it has one as B-rep bodies of an Import feature, and only its meshes with no B-rep as mesh bodies"},
                     "names": {"type": "string", "enum": ["auto", "solid", "product", "instance"], "description": "STEP, IGES, FreeCAD and Rhino. auto (default): keep meaningful solid names, replace placeholders with the nearest named product, else instance; solid: the solid's own name; product: the part's name; instance: the occurrence's name, else the product's"},
                 }),
@@ -1150,7 +1153,7 @@ fn dispatch(b: &mut dyn Backend, name: &str, a: &Map<String, Value>) -> Result<V
         "undo" => exec(b, "edit.undo", json!({})),
         "redo" => exec(b, "edit.redo", json!({})),
         "new_design" => exec(b, "file.new", pick(a, &["name"])),
-        "open" => exec(b, "doc.open", pick(a, &["path", "up", "names", "geometry"])),
+        "open" => exec(b, "doc.open", pick(a, &["path", "up", "names", "as_solid", "tolerance", "geometry"])),
         "save" => exec(b, "file.save", pick(a, &["path", "format", "overwrite"])),
         other => Err(format!("unknown tool `{other}`")),
     }
@@ -1352,7 +1355,7 @@ fn batch_step(step: &Value) -> Result<(String, Value, Option<Narrow>), String> {
             pick(a, &["path", "format", "bodies", "mesh_prefix", "effort", "velocity", "hierarchy", "images", "name", "static", "model_uris"]),
         ),
         "save" => mapped("file.save", pick(a, &["path", "format", "overwrite"])),
-        "open" => mapped("doc.open", pick(a, &["path", "up", "names", "geometry"])),
+        "open" => mapped("doc.open", pick(a, &["path", "up", "names", "as_solid", "tolerance", "geometry"])),
         "new_design" => mapped("file.new", pick(a, &["name"])),
         "crash_reports" => match a.get("id") {
             Some(_) => mapped("diagnostics.crash_report", pick(a, &["id"])),
