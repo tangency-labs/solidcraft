@@ -7,7 +7,9 @@
 // e1-r0.1 entry 0 and e4-r0.1 entries 0 and 4 are moved by #18490 (the sphere drop's
 // spans proved off it are subdivided, so the round sits on finer sphere trims), not by
 // the retirement; they are EQUAL in `EXPECTED` too.
-static BEYOND_ROUNDING: [(&str, usize); 46] = [
+// e2-r0.1 entries 0 and 4, e5-r0.1 entry 0 and e5-r0.5 entry 0 are the rounds #18618
+// builds, on those finer trims; they are EQUAL in `EXPECTED` too.
+static BEYOND_ROUNDING: [(&str, usize); 50] = [
     ("stubs4-delete-edge-sphere_diff_3cylinders-e1-r0.1", 0),
     ("stubs4-delete-edge-sphere_diff_3cylinders-e1-r0.1", 5),
     ("stubs4-delete-edge-sphere_diff_3cylinders-e1-r0.1", 9),
@@ -18,6 +20,8 @@ static BEYOND_ROUNDING: [(&str, usize); 46] = [
     ("stubs4-delete-edge-sphere_diff_3cylinders-e1-r0.5", 9),
     ("stubs4-delete-edge-sphere_diff_3cylinders-e1-r0.5", 10),
     ("stubs4-delete-edge-sphere_diff_3cylinders-e1-r0.5", 11),
+    ("stubs4-delete-edge-sphere_diff_3cylinders-e2-r0.1", 0),
+    ("stubs4-delete-edge-sphere_diff_3cylinders-e2-r0.1", 4),
     ("stubs4-delete-edge-sphere_diff_3cylinders-e2-r0.1", 5),
     ("stubs4-delete-edge-sphere_diff_3cylinders-e2-r0.1", 9),
     ("stubs4-delete-edge-sphere_diff_3cylinders-e2-r0.1", 10),
@@ -34,10 +38,12 @@ static BEYOND_ROUNDING: [(&str, usize); 46] = [
     ("stubs4-delete-edge-sphere_diff_3cylinders-e4-r0.5", 9),
     ("stubs4-delete-edge-sphere_diff_3cylinders-e4-r0.5", 10),
     ("stubs4-delete-edge-sphere_diff_3cylinders-e4-r0.5", 11),
+    ("stubs4-delete-edge-sphere_diff_3cylinders-e5-r0.1", 0),
     ("stubs4-delete-edge-sphere_diff_3cylinders-e5-r0.1", 5),
     ("stubs4-delete-edge-sphere_diff_3cylinders-e5-r0.1", 9),
     ("stubs4-delete-edge-sphere_diff_3cylinders-e5-r0.1", 10),
     ("stubs4-delete-edge-sphere_diff_3cylinders-e5-r0.1", 11),
+    ("stubs4-delete-edge-sphere_diff_3cylinders-e5-r0.5", 0),
     ("stubs4-delete-edge-sphere_diff_3cylinders-e5-r0.5", 5),
     ("stubs4-delete-edge-sphere_diff_3cylinders-e5-r0.5", 9),
     ("stubs4-delete-edge-sphere_diff_3cylinders-e5-r0.5", 10),

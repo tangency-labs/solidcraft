@@ -4,7 +4,8 @@
 //!
 //! The `stubs4-delete-edge-sphere_diff_3cylinders` rows' main hashes are of main's
 //! run after #18971 (a fillet's rail cut near a knot snaps onto the knot), which moves
-//! those rows apart from the cover.
+//! those rows apart from the cover. Their `-e2-r0.1`, `-e5-r0.1` and `-e5-r0.5` hashes are
+//! of the run after #18618, which builds those three rounds (main refused them, 1001).
 //!
 //! The rows #17739's vertex step moves as well (19 `blend.fillet_executive_p3` bottle
 //! rows, `corpus.parity`'s `Fillet__bolt.smb`) are replayed from [`super::DATA`], with
@@ -44,17 +45,17 @@ pub(super) static TRIM_COVER: &[(&str, &str, u64)] = &[
     (
         "blend.fillet_executive_p3",
         "stubs4-delete-edge-sphere_diff_3cylinders-e2-r0.1",
-        0x519f703ce178594e,
+        0x6fc978efa2c35682,
     ),
     (
         "blend.fillet_executive_p3",
         "stubs4-delete-edge-sphere_diff_3cylinders-e5-r0.1",
-        0x900b3d0679ffb2d3,
+        0x90313c76ed61e306,
     ),
     (
         "blend.fillet_executive_p3",
         "stubs4-delete-edge-sphere_diff_3cylinders-e5-r0.5",
-        0xc87fb128a0e9c4c7,
+        0x6f9297c22827a8cd,
     ),
     (
         "blend.fillet_executive_p3",

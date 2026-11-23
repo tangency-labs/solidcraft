@@ -13,6 +13,9 @@
 //! The `blend.fillet_executive_p3` hashes are of those lines without the
 //! `fillet_point_step` key, which recorded the retired step latch (#18916); every other
 //! value is the line's.
+//!
+//! The `sphere_diff_3cylinders` `-e2-r0.1`, `-e5-r0.1` and `-e5-r0.5` hashes are of the run
+//! after #18618, which builds those three rounds (main refused them, 1001).
 
 use super::Row;
 
@@ -1013,7 +1016,7 @@ pub(super) static DATA: &[Row] = &[
     (
         "blend.fillet_executive_p3",
         "stubs4-delete-edge-sphere_diff_3cylinders-e2-r0.1",
-        0x405209a464313f0e,
+        0x5c511561bd9afe47,
     ),
     (
         "blend.fillet_executive_p3",
@@ -1028,12 +1031,12 @@ pub(super) static DATA: &[Row] = &[
     (
         "blend.fillet_executive_p3",
         "stubs4-delete-edge-sphere_diff_3cylinders-e5-r0.1",
-        0xffcf312d60cdb459,
+        0xc4bc7041d11cbc85,
     ),
     (
         "blend.fillet_executive_p3",
         "stubs4-delete-edge-sphere_diff_3cylinders-e5-r0.5",
-        0x06ddff56205be79d,
+        0xe3ea9f26bd774fe4,
     ),
     (
         "blend.fillet_executive_p3",
