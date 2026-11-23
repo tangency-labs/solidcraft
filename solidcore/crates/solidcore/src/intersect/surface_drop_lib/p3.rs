@@ -1808,6 +1808,7 @@ impl Surface {
                         let stretch_range = Extent1d::from_min_max(start.t, s_interval.max());
                         let skip_lead = sliver
                             && knots.is_empty()
+                            && lead.is_none()
                             && curve.speed_bound(&stretch_range).is_some();
                         let tail_bound = match (sliver && !knots.is_empty(), knots.len()) {
                             (true, n) if n >= 2 => {
@@ -1825,7 +1826,7 @@ impl Surface {
                             _ => None,
                         };
                         if skip_lead {
-                            lead = lead.or(Some(start.t));
+                            lead = Some(start.t);
                         } else if let Some(bound) = tail_bound {
                             if let Some(last) = knots.last_mut() {
                                 *last = end.t;

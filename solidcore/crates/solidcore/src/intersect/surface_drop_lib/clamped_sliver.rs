@@ -22,19 +22,23 @@
 //!
 //! **The rule here.** A span is a *clamped sliver* when
 //! 1. neither end is on a pole (the pole's dog-leg straightening moves those polygons),
-//! 2. the box of its four control points, each clamped into the domain, is no wider than
+//! 2. a control point of its polygon lies outside the domain (the span leaves it: a span
+//!    clamping never moves is a genuine piece of the trim, however short),
+//! 3. the box of its four control points, each clamped into the domain, is no wider than
 //!    the drop's UV tolerance in either coordinate: clamping is monotone in each
 //!    coordinate and the span lies in the convex hull of its polygon, so the span clamped
 //!    into the domain lies in that box (exact: the box is of the polygon `sm_AddToCurve`
 //!    would emit, made by the same operations), and
-//! 3. the curve piece it replaces lies in a box ([`Curve::certified_bounding_box`]) whose
+//! 4. the curve piece it replaces lies in a box ([`Curve::certified_bounding_box`]) whose
 //!    diagonal, rounded up, is within the drop's 3D tolerance.
 //!
 //! Such a span carries no trim information inside the domain: its clamped image is one
 //! UV point to within the UV tolerance. The drop leaves it out where it is the first or
-//! the last span of a trace, and the neighbouring span takes over its parameter range:
+//! the last span of a curve, and the neighbouring span takes over its parameter range:
 //! the polygon is unchanged and the knot at the joint moves to the sliver's far end. A
-//! sliver between two spans is added as before. The polygon then joins its neighbour at
+//! sliver between two spans is added as before, and so is any span after a first one
+//! was left out, so a curve keeps at least one span: at most one first span is left
+//! out, and a last span is left out only after another was added. The polygon then joins its neighbour at
 //! the clamped end point it already had.
 //!
 //! **The bound.** The stretched span keeps its image and is reparametrised linearly, so
@@ -58,7 +62,7 @@ use crate::kernel::Kernel;
 use super::p1::DropPt;
 
 /// Whether the span from `start` to `end` is a clamped sliver (module docs): its polygon
-/// clamped into `uv_domain` spans at most `uv_tol_x` by `uv_tol_y`, and the curve piece
+/// leaves `uv_domain`, clamped into it spans at most `uv_tol_x` by `uv_tol_y`, and the curve piece
 /// over it is proved within `tol_3d` across. `false` for a span of no length, a span with
 /// an end on a pole, and a curve with no certified box or speed bound.
 ///
@@ -90,7 +94,11 @@ pub(crate) fn is_clamped_sliver(
     let d2 = end.uv_pd[1] * scale;
     let p2 = p1 + d1 / 3.0;
     let p3 = p4 - d2 / 3.0;
-    if !clamped_box_within(uv_domain, [p1, p2, p3, p4], uv_tol_x, uv_tol_y) {
+    let polygon = [p1, p2, p3, p4];
+    if !polygon.iter().any(|&p| uv_domain.clamp_point(p) != p) {
+        return Ok(false);
+    }
+    if !clamped_box_within(uv_domain, polygon, uv_tol_x, uv_tol_y) {
         return Ok(false);
     }
     if curve
@@ -193,6 +201,18 @@ mod tests {
         let k = Kernel::default();
         let start = pt(0.0, Point2::new(0.25, 0.0), Vec2::new(0.0, 0.5));
         let end = pt(0.1, Point2::new(0.25, 0.05), Vec2::new(0.0, 0.5));
+        let c = line(1.0e-6);
+        assert!(!is_clamped_sliver(&k, &c, &unit(), &start, &end, 1e-9, 1e-9, 1e-5).unwrap());
+    }
+
+    /// A tiny span that stays inside the domain is kept: clamping moves none of its
+    /// points, so it is a genuine piece of the trim however short.
+    #[test]
+    fn a_tiny_span_inside_the_domain_is_kept() {
+        let k = Kernel::default();
+        let h = 4.2e-8;
+        let start = pt(0.5 - h, Point2::new(0.25, 0.5), Vec2::new(0.0, 0.5));
+        let end = pt(0.5, Point2::new(0.25, 0.5 + 2.1e-8), Vec2::new(0.0, 0.5));
         let c = line(1.0e-6);
         assert!(!is_clamped_sliver(&k, &c, &unit(), &start, &end, 1e-9, 1e-9, 1e-5).unwrap());
     }
