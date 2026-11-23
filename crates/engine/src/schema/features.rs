@@ -469,6 +469,20 @@ pub struct SweepParams {
     /// whole drawn profile. The dialogs send `true`: they highlight the regions they pick.
     #[serde(default)]
     pub exact_regions: Option<bool>,
+    /// A point on a planar body face to sweep instead of a sketch profile.
+    #[serde(default)]
+    pub face: Option<Point3>,
+    /// The body whose face to use, where faces of several bodies meet at `face`.
+    #[serde(default)]
+    pub face_body: Option<String>,
+    /// With `face`: the face's plane as a fixed plane, as `solid.extrude`'s.
+    #[serde(default)]
+    pub fixed: Option<bool>,
+    /// With `face`, among placed instances: the body whose placement `face` is read in (read by
+    /// the engine's frame mapping, before the command runs). Default: `face_body`, else the
+    /// body nearest the point.
+    #[serde(default)]
+    pub body: Option<String>,
     /// The sketch holding the path, by id or name. Not needed when the path is a body's edges.
     #[serde(default, deserialize_with = "present", skip_serializing_if = "Option::is_none")]
     #[schemars(with = "SketchRef")]
