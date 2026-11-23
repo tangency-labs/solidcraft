@@ -656,14 +656,20 @@ pub fn calculate_bounding_box_in(
 /// of R outside D (no loop crosses it), and each such strip whose centre classifies outside
 /// the face ([`super::p2::point_classify_prepared`]: `Unknown`) lies outside it. A face whose
 /// trims leave its UV domain or the surface's natural domain (a periodic trim past the seam),
-/// or whose strip classifies any other way, keeps R; so does a face an edge use of which has
-/// no UV trim curve. No trim is made; the surface's NURB is, where it is missing (as every
-/// evaluation of it makes it).
+/// or whose strip classifies any other way, keeps R. A face's missing UV trims are made on
+/// `scratch`, a copy standing for `b` ([`Brep::clone_standing_for_self`], made at its first
+/// need and kept for the next face of `b`), never on `b`; the surface's NURB is made where it
+/// is missing (as every evaluation of it makes it).
 ///
 /// # Errors
 ///
 /// Cancellation only: any other failure gives `None` or keeps R.
-pub fn proved_bounding_box(k: &Kernel, b: &Brep, f: FaceId) -> Result<Option<Extent3d>> {
+pub fn proved_bounding_box(
+    k: &Kernel,
+    b: &Brep,
+    f: FaceId,
+    scratch: &mut Option<Brep>,
+) -> Result<Option<Extent3d>> {
     // a box is only ever a saving: every failure but a cancellation gives none
     fn probe<T>(r: Result<T>) -> Result<Option<T>> {
         match r {
@@ -682,9 +688,31 @@ pub fn proved_bounding_box(k: &Kernel, b: &Brep, f: FaceId) -> Result<Option<Ext
     let Some(stored) = probe(fp2::uv_domain(b, f))? else {
         return Ok(None);
     };
+    // the face's trims as they are, or, where an edge use lacks one, on `scratch`, a copy
+    // standing for `b` (same ids) on which the missing ones are made as a classification
+    // makes them (`GetOrCreateUVTrimCurve`): `b` is never written
+    let complete = probe(crate::topology::trimming_tools::face_uv_curves_present(
+        b, f,
+    ))? == Some(true);
+    let trims_on: &Brep = if complete {
+        b
+    } else {
+        if scratch.is_none() {
+            *scratch = probe(b.clone_standing_for_self())?;
+        }
+        match scratch.as_mut() {
+            Some(copy) => {
+                make_missing_uv_trims(k, copy, f)?;
+                copy
+            }
+            None => b,
+        }
+    };
     let mut domain = stored;
     if let (Some(Some(trims)), Some(natural)) = (
-        probe(crate::topology::face::p1::certified_uv_trim_domain(k, b, f))?,
+        probe(crate::topology::face::p1::certified_uv_trim_domain(
+            k, trims_on, f,
+        ))?,
         probe(surface.natural_uv_domain_with_nurb(k))?,
     ) {
         // a margin far below any face's size, so a strip a rounding wide is no strip
@@ -693,7 +721,7 @@ pub fn proved_bounding_box(k: &Kernel, b: &Brep, f: FaceId) -> Result<Option<Ext
         grown.expand_absolute(margin);
         if trims.is_contained_by(&natural, margin) && trims.is_contained_by(&stored, margin) {
             if let Ok(narrowed) = grown.intersect(&stored) {
-                if trim_strips_outside(k, b, f, &stored, &narrowed)? {
+                if trim_strips_outside(k, trims_on, f, &stored, &narrowed)? {
                     domain = narrowed;
                 }
             }
@@ -702,29 +730,70 @@ pub fn proved_bounding_box(k: &Kernel, b: &Brep, f: FaceId) -> Result<Option<Ext
     let Some(Some(mut bx)) = probe(surface.certified_bounding_box(k, &domain))? else {
         return Ok(None);
     };
-    let Some(mut tol) = probe(fp2::tolerance(b, f))? else {
-        return Ok(None);
-    };
-    let Some(edges) = probe(topology_traverser::face_edges(b, f))? else {
-        return Ok(None);
-    };
-    for e in edges {
-        let Some(t) = probe(edge::tolerance(b, e))? else {
+    // the largest tolerance of the face, its edges and vertices, on `b` and where the trims
+    // were read (a trim made there can have raised its edge's tolerance to cover it)
+    let mut tol: f64 = 0.0;
+    for on in [b, trims_on] {
+        let Some(t) = probe(fp2::tolerance(on, f))? else {
             return Ok(None);
         };
         tol = tol.max(t);
-    }
-    let Some(vertices) = probe(super::p2::face_vertices(b, f, false, None))? else {
-        return Ok(None);
-    };
-    for v in vertices {
-        let Some(t) = probe(vertex::tolerance(b, v))? else {
+        let Some(edges) = probe(topology_traverser::face_edges(on, f))? else {
             return Ok(None);
         };
-        tol = tol.max(t);
+        for e in edges {
+            let Some(t) = probe(edge::tolerance(on, e))? else {
+                return Ok(None);
+            };
+            tol = tol.max(t);
+        }
+        let Some(vertices) = probe(super::p2::face_vertices(on, f, false, None))? else {
+            return Ok(None);
+        };
+        for v in vertices {
+            let Some(t) = probe(vertex::tolerance(on, v))? else {
+                return Ok(None);
+            };
+            tol = tol.max(t);
+        }
     }
     bx.expand_absolute(zone_tol3d(k, tol));
     Ok(Some(bx))
+}
+
+/// The UV trim curve of every edge use of face `f` of `b` that has none (nor its mate), made
+/// by `GetOrCreateUVTrimCurve` as a classification against the face makes it (`uv_space_ok`;
+/// it may raise the edge's tolerance to cover the trim). A trim that cannot be made is left
+/// unmade: only a cancellation fails.
+fn make_missing_uv_trims(k: &Kernel, b: &mut Brep, f: FaceId) -> Result<()> {
+    fn only_cancelled<T>(r: Result<T>) -> Result<Option<T>> {
+        match r {
+            Ok(v) => Ok(Some(v)),
+            Err(e) if e.is_cancelled() => Err(e),
+            Err(_) => Ok(None),
+        }
+    }
+    let Some(loopuses) = only_cancelled(crate::topology::face::p4::upward_loopuses(
+        b, f, false, None,
+    ))?
+    else {
+        return Ok(());
+    };
+    for lu in loopuses {
+        let Some(edgeuses) = only_cancelled(eu1::loopuse_edgeuses(b, lu))? else {
+            continue;
+        };
+        for eu in edgeuses {
+            let missing =
+                only_cancelled(eu1::uv_trim_curve(b, eu))?.is_some_and(|(c, _)| c.is_none());
+            if missing {
+                only_cancelled(crate::topology::edgeuse::p3::get_or_create_uv_trim_curve(
+                    k, b, eu, false, false, true,
+                ))?;
+            }
+        }
+    }
+    Ok(())
 }
 
 /// Whether every strip of `stored` outside `inner` (left, right, below and above it, each a
