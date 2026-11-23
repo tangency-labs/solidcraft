@@ -262,6 +262,30 @@ pub fn writes(id: &str) -> bool {
     id == "library.create" || (id.starts_with("library.entry.") && id != "library.entry.list")
 }
 
+/// What a library write changes, for the question the Assistant asks before it: the place and the
+/// new library's name, the library and the new entry's name, the entry (and its new name), or the
+/// entry and the library it is copied to. Each value as given, without control characters and at
+/// most 200 characters, as the gate shows a file. `None` when `id` writes no library or names nothing.
+pub fn write_names(id: &str, params: &Value) -> Option<String> {
+    if !writes(id) {
+        return None;
+    }
+    let text = |v: Option<&Value>| {
+        v.and_then(Value::as_str).map(|s| s.chars().filter(|c| !c.is_control()).take(200).collect::<String>()).filter(|s| !s.is_empty())
+    };
+    let named = |key: &str| text(params.get(key));
+    let entry_name = text(params.pointer("/definition/value/name"));
+    let names = match id {
+        "library.create" => [named("place"), named("name")],
+        "library.entry.add" => [named("library"), entry_name],
+        "library.entry.edit" => [named("entry"), entry_name],
+        "library.entry.copy" => [named("entry"), named("to")],
+        _ => [named("entry"), None],
+    };
+    let names: Vec<String> = names.into_iter().flatten().collect();
+    (!names.is_empty()).then(|| names.join(", "))
+}
+
 /// After a library write: take the session's libraries as they are, so the next frame keeps the
 /// write. Only a scanned place can be written, and a place being scanned has no scan in the set, so
 /// no scan still running can bring the old files back.

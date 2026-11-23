@@ -32,6 +32,13 @@ fn join(dir: &str, name: &str) -> String {
     Path::new(dir).join(name).to_string_lossy().into_owned()
 }
 
+/// `e`, a failed read or write at `path`, said with the path once: a folder check's refusal names
+/// the path it refused already, so it is left as it is.
+fn at(path: &str, e: impl std::fmt::Display) -> String {
+    let e = e.to_string();
+    if e.contains(path) { e } else { format!("{path}: {e}") }
+}
+
 /// The reads and writes a write makes, each checked first as a scan's reads are.
 mod checked_write {
     use crate::vfs::{self, check_design_path, check_new_design_path};
@@ -153,7 +160,7 @@ impl Libraries {
                 let taken = match checked::dirs_in(dir, LIMITS.libraries_per_folder) {
                     Ok(taken) => taken,
                     Err(e) if e.kind() == std::io::ErrorKind::NotFound => Vec::new(),
-                    Err(e) => return Err(format!("{dir}: {e}")),
+                    Err(e) => return Err(at(dir, e)),
                 };
                 if taken.len() >= LIMITS.libraries_per_folder {
                     return Err(format!("{dir} holds the most folders a place reads ({})", LIMITS.libraries_per_folder));
@@ -180,9 +187,9 @@ impl Libraries {
         let bytes = serde_json::to_vec_pretty(&header).map_err(|e| e.to_string())?;
         let manifest = join(&folder, &format!("{}{MANIFEST_SUFFIX}", stem(name)));
         for kind in [Kind::Material, Kind::Appearance] {
-            checked_write::make_dirs(&join(&folder, kind.folder())).map_err(|e| format!("{folder}: {e}"))?;
+            checked_write::make_dirs(&join(&folder, kind.folder())).map_err(|e| at(&folder, e))?;
         }
-        checked_write::create(&manifest, &bytes).map_err(|e| format!("{manifest}: {e}"))?;
+        checked_write::create(&manifest, &bytes).map_err(|e| at(&manifest, e))?;
         let written = Written { library: id, entry: None, revision: None, file: super::file_label(&manifest) };
         Ok((self.read_again(scan, None), written))
     }
@@ -225,7 +232,7 @@ impl Libraries {
         let entry = Entry::with_id(&library_id, local, definition, provenance.unwrap_or(old.provenance)).map_err(|e| e.to_string())?;
         let bytes = encode(&entry)?;
         within_library_cap(library, on_disk, bytes.len() as u64)?;
-        checked_write::replace(&path, &bytes).map_err(|e| format!("{path}: {e}"))?;
+        checked_write::replace(&path, &bytes).map_err(|e| at(&path, e))?;
         let file = listed.file();
         let written = Written { library: library_id, entry: Some(entry.id), revision: Some(entry.revision), file };
         Ok((self.read_again(scan, Some(folder)), written))
@@ -253,7 +260,7 @@ impl Libraries {
             Err(e) if e.kind() == std::io::ErrorKind::InvalidData => {
                 return Err(format!("{dir} holds the most entries a library reads ({})", LIMITS.entries_per_kind));
             }
-            Err(e) => return Err(format!("{dir}: {e}")),
+            Err(e) => return Err(at(&dir, e)),
         };
         if files.len() >= LIMITS.entries_per_kind {
             return Err(format!("{dir} holds the most entries a library reads ({})", LIMITS.entries_per_kind));
@@ -262,9 +269,9 @@ impl Libraries {
         let name = file_name(entry.definition.name(), |n| taken.iter().any(|t| t == n)).ok_or_else(|| format!("{dir}: every file name is taken"))?;
         let bytes = encode(entry)?;
         within_library_cap(library, 0, bytes.len() as u64)?;
-        checked_write::make_dirs(&dir).map_err(|e| format!("{dir}: {e}"))?;
+        checked_write::make_dirs(&dir).map_err(|e| at(&dir, e))?;
         let path = join(&dir, &name);
-        checked_write::create(&path, &bytes).map_err(|e| format!("{path}: {e}"))?;
+        checked_write::create(&path, &bytes).map_err(|e| at(&path, e))?;
         Ok(super::entry_file(kind, &name))
     }
 }
@@ -308,14 +315,14 @@ fn unchanged(path: &str, kind: Kind, library: &str, revision: &str) -> Result<u6
 /// is ever replaced. The one place a removal happens, so a different bin is a change here only.
 fn to_bin(path: &str, folder: &str, kind: Kind, label: &str) -> Result<String, String> {
     let bin = join(&join(folder, BIN), kind.folder());
-    checked_write::make_dirs(&bin).map_err(|e| format!("{bin}: {e}"))?;
+    checked_write::make_dirs(&bin).map_err(|e| at(&bin, e))?;
     let stem = label.get(..label.len().saturating_sub(5)).filter(|_| super::ends_with(label, ".json")).unwrap_or(label);
     for candidate in std::iter::once(stem.to_string()).chain((2..=LIMITS.entries_per_kind + 2).map(|n| format!("{stem} ({n})"))) {
         let name = format!("{candidate}.json");
         match checked_write::move_to(path, &join(&bin, &name)) {
             Ok(()) => return Ok(format!("{BIN}/{}", super::entry_file(kind, &name))),
             Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => continue,
-            Err(e) => return Err(format!("{path}: {e}")),
+            Err(e) => return Err(at(path, e)),
         }
     }
     Err(format!("{bin}: every name for {label} is taken"))
@@ -326,7 +333,7 @@ fn empty_or_missing(folder: &str) -> Result<bool, String> {
         Ok(dirs) => dirs,
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(true),
         Err(e) if e.kind() == std::io::ErrorKind::InvalidData => return Ok(false),
-        Err(e) => return Err(format!("{folder}: {e}")),
+        Err(e) => return Err(at(folder, e)),
     };
     let files = checked::files_in(folder, 1);
     Ok(dirs.is_empty() && files.is_ok_and(|f| f.is_empty()))

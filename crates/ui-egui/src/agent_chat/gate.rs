@@ -228,6 +228,10 @@ pub fn command(id: &str, params: &Value, undo_left: usize) -> Verdict {
     if id == "file.open_in_easyprint" {
         return Verdict::Ask(format!("{id}, upload the model to Printables' servers (EasyPrint)"));
     }
+    // A library write says which library and entry it changes, as a file command names its file.
+    if let Some(what) = crate::library_places::write_names(id, params) {
+        return Verdict::Ask(format!("{id}: {what}"));
+    }
     if let Some(p) = names_a_file(id, params) {
         return Verdict::Ask(with_slicer(format!("{id}: {p}")));
     }
@@ -466,19 +470,35 @@ mod tests {
         assert_eq!(exec("library.places.refresh", json!({})), Verdict::Run { change: true });
     }
 
-    /// A library write changes files though it names only ids, so each asks first; listing a
-    /// library's entries only reads.
+    /// A library write changes files though it names only ids, so each asks first, and its
+    /// question says what it changes; listing a library's entries only reads.
     #[test]
     fn library_writes_ask() {
-        for (id, p) in [
-            ("library.create", json!({"place": "/srv/lib", "name": "Shop"})),
-            ("library.entry.add", json!({"library": "user.shop", "definition": {}})),
-            ("library.entry.edit", json!({"entry": "user.shop/material-steel", "revision": "0", "definition": {}})),
-            ("library.entry.remove", json!({"entry": "user.shop/material-steel", "revision": "0"})),
-            ("library.entry.copy", json!({"entry": "solidcraft.builtin/material-steel", "to": "user.shop"})),
+        let steel = json!({"kind": "material", "value": {"name": "Steel"}});
+        let long = format!("Steel\u{7}{}", "x".repeat(300));
+        for (id, p, question) in [
+            ("library.create", json!({"place": "/srv/lib", "name": "Shop"}), "library.create: /srv/lib, Shop"),
+            ("library.entry.add", json!({"library": "user.shop", "definition": steel}), "library.entry.add: user.shop, Steel"),
+            ("library.entry.add", json!({"library": "user.shop", "definition": {}}), "library.entry.add: user.shop"),
+            (
+                "library.entry.edit",
+                json!({"entry": "user.shop/material-steel", "revision": "0", "definition": steel}),
+                "library.entry.edit: user.shop/material-steel, Steel",
+            ),
+            ("library.entry.remove", json!({"entry": "user.shop/material-steel", "revision": "0"}), "library.entry.remove: user.shop/material-steel"),
+            (
+                "library.entry.copy",
+                json!({"entry": "solidcraft.builtin/material-steel", "to": "user.shop"}),
+                "library.entry.copy: solidcraft.builtin/material-steel, user.shop",
+            ),
         ] {
-            assert!(matches!(exec(id, p.clone()), Verdict::Ask(_)), "{id} {p}");
+            assert_eq!(exec(id, p.clone()), Verdict::Ask(question.into()), "{id} {p}");
         }
+        // A hostile name is shown without its control characters and cut at 200 characters.
+        let Verdict::Ask(question) = exec("library.create", json!({"place": "/srv/lib", "name": long})) else { panic!("a write asks") };
+        assert_eq!(question, format!("library.create: /srv/lib, Steel{}", "x".repeat(195)));
+        // Nothing named: the command alone, as before.
+        assert_eq!(exec("library.entry.remove", json!({})), Verdict::Ask("library.entry.remove".into()));
         assert_eq!(exec("library.entry.list", json!({"library": "user.shop"})), Verdict::Run { change: false });
     }
 

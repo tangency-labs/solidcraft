@@ -812,6 +812,21 @@ fn a_new_library_is_made_in_its_own_folder_and_read_back_at_once() {
     }
 }
 
+/// A write outside the caller's folders is refused before anything is made, and the refusal names
+/// the folder once (the folder check's own words, not the path again in front of them).
+#[test]
+fn a_write_outside_the_callers_folders_names_its_folder_once() {
+    let dir = tempfile::tempdir().unwrap();
+    let place = dir.path().join("libraries");
+    std::fs::create_dir_all(&place).unwrap();
+    let libraries = libraries_of(vec![row(Place::Folder(path(&place)))]);
+    let elsewhere = crate::vfs::PathScope::new([dir.path().join("elsewhere")]);
+    let err = crate::vfs::scoped(Some(elsewhere), || libraries.create_library(&path(&place), "Shop", Provenance::default())).unwrap_err();
+    assert!(err.contains("outside the folders"), "{err}");
+    assert_eq!(err.matches(path(&place).as_str()).count(), 1, "{err}");
+    assert_eq!(std::fs::read_dir(&place).unwrap().count(), 0, "nothing written");
+}
+
 /// An entry is added under a new id, changed and removed only from the revision the caller read,
 /// and copied with its provenance; a removed file goes to the library's bin, which no scan reads.
 #[test]
