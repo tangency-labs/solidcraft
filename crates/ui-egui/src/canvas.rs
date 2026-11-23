@@ -641,7 +641,7 @@ fn draw_move_rotation(app: &SolveApp, ui: &mut egui::Ui, painter: &egui::Painter
 }
 
 /// Move/Copy Sketch Entities' triad at `pivot` moved so far, in the sketch's x, y and normal.
-fn sketch_move_triad(app: &SolveApp, d: &Dialog, pivot: Vec3) -> Option<crate::gizmo::Triad> {
+pub(crate) fn sketch_move_triad(app: &SolveApp, d: &Dialog, pivot: Vec3) -> Option<crate::gizmo::Triad> {
     if app.preferences.sketch_move_classic {
         return None;
     }

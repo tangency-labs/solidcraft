@@ -500,3 +500,94 @@ fn point3d_takes_a_model_edges_woken_middle() {
     let picked = crate::sketch3d::point_at(&h.app, &proj, egui::pos2(x as f32, y as f32));
     assert!(picked.is_some_and(|(q, _)| q.dist(Vec3::new(15.0, 0.0, 10.0)) < 1e-6), "{picked:?}");
 }
+
+fn drawn_point_move(copy: bool) -> (crate::scenario::Harness, [f64; 2]) {
+    let mut h = crate::scenario::Harness::new();
+    h.app.run("sketch.create", json!({"plane":"XY","name":"Top"})).unwrap();
+    h.app.session.visibility.origin_hidden = Some(true);
+    h.app.run("sketch.options", json!({"sketch_3d":true})).unwrap();
+    h.app.run("sketch.point3d", json!({"point":[10,5,20]})).unwrap();
+    h.call("ui.view", json!({"view":"home"}));
+    h.call("ui.view", json!({"view":"fit"}));
+    h.settle();
+    h.step(&json!({"start":"sketch.move"})).unwrap();
+    if let Some(crate::dialogs::Kind::SketchModify(crate::sketch_modify_ui::Mod::Move { copy: c, .. })) = h.app.dialog.as_mut().map(|d| &mut d.kind) {
+        *c = copy;
+    }
+    h.frames(2);
+    let at = h.at(&json!({"world":[10,5,20]})).unwrap();
+    (h, at)
+}
+
+/// The engine refuses copying drawn 3D points, so Create Copy does not take them as picks.
+#[test]
+fn create_copy_does_not_pick_a_drawn_3d_point() {
+    let (mut h, _) = drawn_point_move(false);
+    h.step(&json!({"click":{"world":[10,5,20]}})).unwrap();
+    assert_eq!(h.app.dialog.as_ref().unwrap().inputs[0].items.len(), 1, "a move picks the drawn point");
+    let (mut h, _) = drawn_point_move(true);
+    h.step(&json!({"click":{"world":[10,5,20]}})).unwrap();
+    assert!(h.app.dialog.as_ref().unwrap().inputs[0].items.is_empty(), "a copy does not");
+}
+
+/// While OK computes, the dialog's inputs hold: a click on a drawn point picks nothing.
+#[test]
+fn a_drawn_point_click_while_ok_computes_changes_nothing() {
+    let (mut h, _) = drawn_point_move(false);
+    let (_finish, done) = std::sync::mpsc::channel();
+    h.app.applying = Some(crate::dialogs::Applying {
+        done,
+        ready: None,
+        seen: true,
+        started: crate::now_ms(),
+        cmds: Vec::new(),
+        progress: Default::default(),
+        quality: Default::default(),
+    });
+    h.step(&json!({"click":{"world":[10,5,20]}})).unwrap();
+    assert!(h.app.dialog.as_ref().unwrap().inputs[0].items.is_empty(), "the inputs hold");
+}
+
+fn flat_move(units: &str) -> crate::scenario::Harness {
+    use solidcraft_engine::Sel;
+    let mut h = crate::scenario::Harness::new();
+    h.app.run("document.units", json!({"units":units})).unwrap();
+    let sketch = h.app.run("sketch.create", json!({"plane":"XY","name":"Flat"})).unwrap()["sketch"].as_u64().unwrap();
+    h.app.session.visibility.origin_hidden = Some(true);
+    let point = h.app.run("sketch.point", json!({"point":[10,5]})).unwrap()["point"].as_str().unwrap().to_string();
+    h.call("ui.view", json!({"view":"top"}));
+    h.call("ui.view", json!({"view":"fit"}));
+    h.settle();
+    h.step(&json!({"start":"sketch.move"})).unwrap();
+    h.app.dialog.as_mut().unwrap().inputs[0].items = vec![Sel::SketchPoint { id: format!("{sketch}:{point}") }];
+    h.frames(3);
+    h
+}
+
+fn move_triad_centre(h: &crate::scenario::Harness) -> solidcore_record::Vec3 {
+    let d = h.app.dialog.as_ref().unwrap();
+    let pivot = crate::canvas::anchor(&h.app, d).unwrap().0;
+    crate::canvas::sketch_move_triad(&h.app, d, pivot).unwrap().center
+}
+
+/// A bare number is in the design's units for the command, so for the triad too.
+#[test]
+fn move_copy_triad_reads_x_in_the_designs_units() {
+    let mut h = flat_move("in");
+    if let Some(crate::dialogs::Kind::SketchModify(crate::sketch_modify_ui::Mod::Move { x, .. })) = h.app.dialog.as_mut().map(|d| &mut d.kind) {
+        *x = "1".into();
+    }
+    let c = move_triad_centre(&h);
+    assert!((c.x - (10.0 + 25.4)).abs() < 1e-6 && (c.y - 5.0).abs() < 1e-6, "{c:?}");
+}
+
+/// The command turns the picked point about the sketch origin by Angle, then moves it.
+#[test]
+fn move_copy_triad_sits_where_the_turned_point_lands() {
+    let mut h = flat_move("mm");
+    if let Some(crate::dialogs::Kind::SketchModify(crate::sketch_modify_ui::Mod::Move { angle, .. })) = h.app.dialog.as_mut().map(|d| &mut d.kind) {
+        *angle = "90 deg".into();
+    }
+    let c = move_triad_centre(&h);
+    assert!((c.x + 5.0).abs() < 1e-6 && (c.y - 10.0).abs() < 1e-6, "{c:?}");
+}
