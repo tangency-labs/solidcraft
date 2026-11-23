@@ -2194,7 +2194,12 @@ fn island_loops(sk: &Sketch, curves: &[usize], max_edges: usize) -> Island {
                     slivers.push(ei);
                 }
             }
-            if lp.signed_area() > 1e-9 {
+            // A loop smaller than 1e-9 mm squared is still a region where it is wider than the
+            // merge tolerance: a circle crossing a polygon's sides a hair from a corner leaves a
+            // sliver of 5e-11 mm squared that is 3e-6 mm wide (#20992). Only a loop thinner than
+            // that (round-off) is no region.
+            let has_width = area > 0.0 && 2.0 * area / perimeter.max(1e-12) > MERGE_TOL;
+            if area > 1e-9 || has_width {
                 let c = edges.get(start / 2).map(|e| find(&mut comp, e.u)).unwrap_or(0);
                 let curve = edges.get(start / 2).map(|e| e.curve).unwrap_or(usize::MAX);
                 let complete = whole_graph_complete.then(|| complete_loop(&coverage_tags, &expected, sk)).flatten();
