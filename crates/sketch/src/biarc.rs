@@ -467,10 +467,10 @@ impl Sketch {
             | Vertical { l }
             | Length { l, .. }
             | LineAngle { l, .. }
-            | Midpoint { l, .. }
             | Symmetric { l, .. }
             | PointLineDistance { l, .. }
             | LinearDiameter { l, .. } => is_line(l),
+            Midpoint { l, .. } => is_line(l) || is_arc(l),
             ArcLength { c, .. } | ArcSweep { c, .. } => is_arc(c),
             Radius { c, .. } => is_round(c) || matches!(shape(c), Some(CurveKind::Ellipse { .. })),
             Diameter { c, .. } | PointCircleDistance { c, .. } => is_round(c),

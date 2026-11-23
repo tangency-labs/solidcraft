@@ -306,6 +306,72 @@ fn a_biarc_piece_can_change_between_an_arc_and_a_line() {
 }
 
 #[test]
+fn a_biarc_midpoint_survives_arc_and_line_transitions() {
+    let mut sk = Sketch::new();
+    let spline = sk.add_biarc_spline(&[(Vec2::ZERO, Vec2::X), (v(3., 1.), Vec2::Y)], None, false).unwrap();
+    let left = sk.curve_index(&spline.spans[0].curves[0]).unwrap();
+    let p = sk.add_point(v(1., 0.), None).unwrap();
+    let id = sk.add_constraint(ConstraintKind::Midpoint { p, l: left }, None).unwrap();
+    let points =
+        spline.nodes.iter().flat_map(|node| [&node.point, &node.handle.as_ref().unwrap().point]).map(|id| sk.point_index(id).unwrap()).collect();
+    let hold = Hold { points, ..Hold::default() };
+    assert!(matches!(sk.curves[left].kind, CurveKind::Line { .. }));
+
+    sk.set_biarc_ratio(&spline.id, 0, 0.25).unwrap();
+    assert!(matches!(sk.curves[left].kind, CurveKind::Arc { .. }));
+    // At ratio 1/4 the joint is (sqrt(6)/2, 1 - sqrt(6)/2), and the first arc has
+    // centre (0, -1 - sqrt(6)) and radius 1 + sqrt(6). Its middle bisects the end radials.
+    let root = 6.0_f64.sqrt();
+    let radius = 1.0 + root;
+    let center = v(0., -radius);
+    let joint = v(root * 0.5, 1.0 - root * 0.5);
+    let expected = center + ((Vec2::ZERO - center) + (joint - center)).normalized().unwrap() * radius;
+    let report = solve_with(&mut sk, &hold, None, Analysis::Full, None);
+    assert!(report.ok(), "{report:?}");
+    assert!(sk.points[p].pos.dist(expected) < 1e-8, "{:?} should be {expected:?}", sk.points[p].pos);
+    sk.validate_biarc_splines().unwrap();
+
+    sk.set_biarc_ratio(&spline.id, 0, 0.5).unwrap();
+    assert!(matches!(sk.curves[left].kind, CurveKind::Line { .. }));
+    let report = solve_with(&mut sk, &hold, None, Analysis::Full, None);
+    assert!(report.ok(), "{report:?}");
+    assert!(sk.points[p].pos.dist(v(1., 0.)) < 1e-8, "{:?}", sk.points[p].pos);
+    let ci = sk.constraints.iter().position(|constraint| constraint.id == id).unwrap();
+    assert!(constraint_residual(&sk, ci).unwrap() < 1e-8);
+    sk.validate_biarc_splines().unwrap();
+}
+
+#[test]
+fn a_biarc_midpoint_uses_the_trial_curve_kind() {
+    let mut sk = Sketch::new();
+    let spline = sk.add_biarc_spline(&[(Vec2::ZERO, Vec2::X), (v(4., 0.), Vec2::X)], None, false).unwrap();
+    let left = sk.curve_index(&spline.spans[0].curves[0]).unwrap();
+    let p = sk.add_point(v(1., 0.), None).unwrap();
+    let id = sk.add_constraint(ConstraintKind::Midpoint { p, l: left }, None).unwrap();
+    let node = &spline.nodes[1];
+    let end = sk.point_index(&node.point).unwrap();
+    let tip = sk.point_index(&node.handle.as_ref().unwrap().point).unwrap();
+    sk.points[end].pos = v(4., 4.);
+    sk.points[tip].pos = v(4., 5.);
+    // The contacts (0, 0), +X and (4, 4), +Y lie on the quarter circle about (0, 4),
+    // radius 4. Equal tangent distances split its 90-degree sweep into two 45-degree arcs.
+    // The first arc's middle is 22.5 degrees from the circle's bottom.
+    let expected = v(4.0 * (PI / 8.0).sin(), 4.0 - 4.0 * (PI / 8.0).cos());
+    sk.points[p].pos = expected;
+    assert!(matches!(sk.curves[left].kind, CurveKind::Line { .. }), "the trial has not been materialized");
+    let ci = sk.constraints.iter().position(|constraint| constraint.id == id).unwrap();
+    let residual = constraint_residual(&sk, ci).unwrap();
+    assert!(residual < 1e-9, "the circular trial's analytic midpoint has residual {residual}");
+    let points =
+        spline.nodes.iter().flat_map(|node| [&node.point, &node.handle.as_ref().unwrap().point]).map(|id| sk.point_index(id).unwrap()).collect();
+    let report = solve_with(&mut sk, &Hold { points, ..Hold::default() }, None, Analysis::Full, None);
+    assert!(report.ok(), "{report:?}");
+    assert!(matches!(sk.curves[left].kind, CurveKind::Arc { .. }));
+    assert!(sk.points[p].pos.dist(expected) < 1e-8, "{:?} should be {expected:?}", sk.points[p].pos);
+    sk.validate_biarc_splines().unwrap();
+}
+
+#[test]
 fn a_biarc_can_bend_slightly_and_return_to_straight() {
     let mut sk = Sketch::new();
     let spline = sk.add_biarc_spline(&[(v(0., 15.), v(2., 0.)), (v(4., 15.), v(2., 0.))], None, false).unwrap();
@@ -908,6 +974,32 @@ fn midpoint_symmetry_point_on_curve_arc() {
     let (ax, _) = line_pts(&sk, axis);
     assert!((sk.points[s1].pos.x + sk.points[s2].pos.x - 2.0 * ax.x).abs() < 1e-7);
     assert!((sk.points[s1].pos.y - sk.points[s2].pos.y).abs() < 1e-7);
+}
+
+/// Four closed strips laid out as a # shut off a 6 x 6 square inside none of them: the one gap
+/// (#19963). Four open lines laid out as a # close off the same square, which was drawn by them,
+/// so it is no gap; neither is a region inside a strip or where two strips cross.
+#[test]
+fn enclosed_gaps_are_regions_crossing_closed_loops_shut_off() {
+    let mut sk = Sketch::new();
+    for (x0, y0, x1, y1) in [(-6.0, 3.0, 6.0, 4.0), (-6.0, -4.0, 6.0, -3.0), (-4.0, -6.0, -3.0, 6.0), (3.0, -6.0, 4.0, 6.0)] {
+        rect(&mut sk, [v(x0, y0), v(x1, y0), v(x1, y1), v(x0, y1)]);
+    }
+    let ps = find_profiles(&sk);
+    let gaps = enclosed_gaps(&sk, &ps);
+    assert_eq!(gaps.len(), ps.len());
+    let found: Vec<f64> = ps.iter().zip(&gaps).filter(|(_, g)| **g).map(|(p, _)| p.area).collect();
+    assert_eq!(found.len(), 1, "{found:?}");
+    assert!((found[0] - 36.0).abs() < 1e-9, "{found:?}");
+    assert!(ps.iter().zip(&gaps).filter(|(_, g)| !**g).all(|(p, _)| !p.region.contains(v(0.0, 0.0))));
+
+    let mut open = Sketch::new();
+    for (a, b) in [(v(-6.0, 3.0), v(6.0, 3.0)), (v(-6.0, -3.0), v(6.0, -3.0)), (v(-3.0, -6.0), v(-3.0, 6.0)), (v(3.0, -6.0), v(3.0, 6.0))] {
+        open.add_line(a, b, None, None, None).unwrap();
+    }
+    let ps = find_profiles(&open);
+    assert_eq!(ps.len(), 1, "{ps:?}");
+    assert_eq!(enclosed_gaps(&open, &ps), [false]);
 }
 
 #[test]
@@ -2378,6 +2470,52 @@ fn a_fillet_follows_its_corner_when_the_corner_mirrors() {
 }
 
 #[test]
+fn a_midpoint_on_a_fillet_stays_satisfied_when_the_corner_mirrors() {
+    // The fillet carries a point at its middle. When the corner mirrors, the arc is stored the
+    // other way round (its ends swapped), which puts the middle at the opposite end of the
+    // circle: the solve must either keep the point at the middle of the arc or fail.
+    let (mut sk, _, arc, _, _, far2) = filleted_corner();
+    let m = sk.add_point(v(38.0, 12.0), None).unwrap();
+    let id = sk.add_constraint(ConstraintKind::Midpoint { p: m, l: arc }, None).unwrap();
+    let q = sk.add_point(v(40.0, -20.0), None).unwrap();
+    sk.points[q].fixed = true;
+    sk.add_constraint(ConstraintKind::Coincident { p: far2, q }, None).unwrap();
+    let rep = solve(&mut sk);
+    let ci = sk.constraints.iter().position(|c| c.id == id).unwrap();
+    let residual = constraint_residual(&sk, ci).unwrap();
+    assert!(!rep.ok() || residual < 1e-6, "reported ok with the midpoint {residual} off: {rep:?}");
+}
+
+#[test]
+fn a_midpoint_on_a_fillet_stays_satisfied_when_the_solve_swaps_its_ends() {
+    // The corner of `a_fillet_the_solve_leaves_in_place_keeps_its_short_arc_against_a_mirrored_reference`
+    // with a point at the arc's middle: judged against a mirrored reference the arc is swapped
+    // after the solve. The point must end at the middle of the arc that stays, or the solve fails.
+    let mut sk = Sketch::new();
+    let s = std::f64::consts::FRAC_1_SQRT_2;
+    let l1 = sk.add_line(v(10.0, 10.0), v(35.0, 10.0), None, None, None).unwrap();
+    let CurveKind::Line { b: ta, .. } = sk.curves[l1].kind else { panic!() };
+    let end = v(35.0 + 5.0 * s, 15.0 - 5.0 * s);
+    let arc = sk.add_arc(v(35.0, 15.0), v(35.0, 10.0), end, [None, Some(ta), None], None).unwrap();
+    let CurveKind::Arc { b: tb, .. } = sk.curves[arc].kind else { panic!() };
+    let l2 = sk.add_line(end, end + v(10.0, 10.0), Some(tb), None, None).unwrap();
+    sk.add_constraint(ConstraintKind::Radius { c: arc, value: 5.0 }, None).unwrap();
+    sk.add_constraint(ConstraintKind::Tangent { a: l1, b: arc }, None).unwrap();
+    sk.add_constraint(ConstraintKind::Tangent { a: l2, b: arc }, None).unwrap();
+    for p in &mut sk.points {
+        p.fixed = true;
+    }
+    let m = sk.add_point(v(37.0, 11.0), None).unwrap();
+    let id = sk.add_constraint(ConstraintKind::Midpoint { p: m, l: arc }, None).unwrap();
+    assert!(solve(&mut sk).ok());
+    let mirrored: Vec<Vec2> = sk.points.iter().map(|p| v(80.0 - p.pos.x, p.pos.y)).collect();
+    let rep = solve_with(&mut sk, &Hold::default(), Some(&mirrored), Analysis::Full, None);
+    let ci = sk.constraints.iter().position(|c| c.id == id).unwrap();
+    let residual = constraint_residual(&sk, ci).unwrap();
+    assert!(!rep.ok() || residual < 1e-6, "reported ok with the midpoint {residual} off: {rep:?}");
+}
+
+#[test]
 fn a_fillet_folded_through_flat_is_refused_like_a_fold() {
     // Without the horizontal and vertical, the second line turns about the corner: the arc
     // shrinks towards flat (the lines collinear) and the lines keep leaving it. Past flat the
@@ -3369,6 +3507,32 @@ fn circle_just_inside_hexagon_corners_keeps_the_regions() {
         assert_eq!(slivers, expected, "gap {gap}: {:?}", ps.iter().map(|p| p.area).collect::<Vec<_>>());
     }
 }
+
+/// A circle crossing a hexagon's sides a hair from their corners (#20992): a hexagon of apothem
+/// 1 mm and a concentric circle just short of its corners. The sketch has thirteen regions (the
+/// centre, a sliver at each corner and a segment outside each side), and the centre one is found,
+/// as for a circle well inside the corners.
+#[test]
+fn circle_crossing_hexagon_sides_near_the_corners_finds_every_region() {
+    // The corners of a regular hexagon of apothem 1, at radius 2/sqrt(3) = 1.1547005383792515.
+    let (big, half) = (1.154_700_538_379_251_5, 0.577_350_269_189_625_8);
+    let corners = [v(big, 0.0), v(half, 1.0), v(-half, 1.0), v(-big, 0.0), v(-half, -1.0), v(half, -1.0)];
+    for radius in [1.1, 1.1545, 1.15469] {
+        let mut sk = Sketch::new();
+        let pts: Vec<usize> = corners.iter().map(|c| sk.add_point(*c, None).unwrap()).collect();
+        for i in 0..6 {
+            sk.add_line_pts(pts[i], pts[(i + 1) % 6], None).unwrap();
+        }
+        sk.add_circle(v(0.0, 0.0), radius, None, None).unwrap();
+        let ps = find_profiles(&sk);
+        assert_eq!(ps.len(), 13, "radius {radius}: {:?}", ps.iter().map(|p| p.area).collect::<Vec<_>>());
+        assert!(profile_at_point(&ps, v(0.0, 0.0)).is_some(), "radius {radius}: no profile at the centre");
+        let biggest = ps.iter().map(|p| p.area).fold(0.0, f64::max);
+        let centre = profile_at_point(&ps, v(0.0, 0.0)).and_then(|i| ps.get(i)).map(|p| p.area).unwrap_or(0.0);
+        assert!((centre - biggest).abs() < 1e-12, "radius {radius}: the centre region ({centre}) is not the largest ({biggest})");
+    }
+}
+
 /// `bezier_distance` measures a point off a straight Bézier piece exactly (#20048): the piece
 /// whose controls all lie on a line is that line, so the distance is the perpendicular one.
 #[test]

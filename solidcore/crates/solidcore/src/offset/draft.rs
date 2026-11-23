@@ -9,6 +9,7 @@
 //! | [`Cone::drafted_about_plane`] | `drafted_cone` |
 //! | [`DraftDefinition`] | none: the drafted surface's definition (#2485's contract) |
 //! | [`DraftRefusal`] | the capi's `SMLIB_ERR_UNSUPPORTED` / `SMLIB_ERR_ARGUMENT` refusals in them |
+//! | [`largest_clear_angle`], [`refuse_closing_wall`] | none: a draft into a cavity's wall refused naming the largest angle (#20767) |
 //!
 //! **A plane** parallel to the pull turns about its hinge, the line where it meets the
 //! neutral plane (with n the face's outward normal and N the neutral normal, the line along
@@ -76,6 +77,10 @@ use crate::{Result, SolidError};
 
 const OP: &str = "offset::draft";
 const OP_RECERTIFY: &str = "offset::draft::DraftDefinition::recertify";
+
+/// The largest departure of |axis · pull| from 1 at which a cone's axis counts as along the
+/// pull (the capi's).
+const AXIS_ALONG_PULL: f64 = 1e-9;
 
 /// The largest |n · pull| at which a plane counts as parallel to the pull (the capi's input
 /// threshold, compared as computed).
@@ -366,8 +371,9 @@ fn plane_draft(
 }
 
 /// A cone's drafted cone: the hinge circle's centre and its height on the cone, the radius
-/// there, the drafted slope along the pull, and `sense`, the pull along the cone's axis
-/// (1) or against it (−1).
+/// there, the slope along the pull before and after the draft, `sense`, the pull along the
+/// cone's axis (1) or against it (−1), and `lean`, the face looking away from the axis (1)
+/// or towards it (−1).
 #[derive(Debug, Clone, Copy)]
 struct ConeDraft {
     /// The cone's own unit axis, the way the pull runs (the pull is along it within the
@@ -376,8 +382,10 @@ struct ConeDraft {
     centre: Point3,
     v0: f64,
     r0: f64,
+    slope: f64,
     turned: f64,
     sense: f64,
+    lean: f64,
 }
 
 /// The sign of `r . (S_u x S_v)` on the net `net` of a surface about the axis through
@@ -494,7 +502,7 @@ fn cone_draft(
     }
     let z = z * (1.0 / len);
     let sense = z.dot(pull);
-    if (sense.abs() - 1.0).abs() > 1e-9 {
+    if (sense.abs() - 1.0).abs() > AXIS_ALONG_PULL {
         return Ok(Err(DraftRefusal::AxisNotAlongPull));
     }
     let sense = sense.signum();
@@ -530,8 +538,10 @@ fn cone_draft(
         centre,
         v0,
         r0,
+        slope,
         turned,
         sense,
+        lean: s,
     }))
 }
 
@@ -868,6 +878,204 @@ pub fn draft_surface(
     definition.recertify(k, &drafted)?;
     drafted.set_draft_definition(definition);
     Ok(Ok(drafted))
+}
+
+/// Not upstream (#20767): the largest draft angle at which face `f` of `b`, a cone or
+/// cylinder about the pull, stays clear of another shell of the body (a cavity's wall, or
+/// another lump), with the face of that shell it meets first; `None` where no shell is
+/// reached by a draft the way `draft` leans, or none is of the kind the bound is exact for.
+///
+/// Drafted by θ, the face's cone is the radius r0 + h tan(atan t − s θ) at height h along
+/// the pull above its hinge circle (radius r0, slope t, sense s: the module's header). It
+/// passes through a point at height h and distance ρ from the axis where s θ is
+/// ψ = atan t − atan σ, σ = (ρ − r0) / h: as θ grows from 0 the cone sweeps, at each height,
+/// the points whose ψ lies between 0 and s θ, so it reaches a shell first at the least |ψ|
+/// of the shell's points on that side. For a shell all of whose faces are cones or cylinders
+/// about the same axis or planes across it, lying wholly on one side of the neutral plane
+/// and within the face's span of heights, that least |ψ| is at a vertex: on a plane across
+/// the axis σ is monotone in ρ; along a generator of a cone σ is a ratio of linear functions of
+/// h without a pole, so monotone; on a circle about the axis it is constant; and every
+/// edge of such a shell is a circle about the axis or a generator, each with its vertices.
+/// A shell of another kind is not bounded here (the local operation's check still
+/// judges the body built).
+///
+/// "About the same axis" is held to the body's tolerance over the shell's own extent, not to
+/// a direction's rounding: a cone's axis may leave the drafted axis by no more than the
+/// tolerance beside each of its vertices (the departure is linear along it, so largest at
+/// the ends of its span), and the tilt of a cone's axis or a plane's normal, times the
+/// farthest of its points from the axis, may move them along the pull by no more than the
+/// tolerance. A shell coaxial only to a direction's rounding (a radius-9 circle 900 up an
+/// axis 4e-5 off sits 0.036 off the axis) gets no bound: on a circle off the axis ψ is not
+/// constant, and its least could lie between the circle's vertices.
+///
+/// A shell holding a face of `drafted` (the faces the same call drafts) gets no bound: its
+/// faces move too, so its undrafted vertices say nothing of where the drafted walls meet.
+/// Such a draft is left to the local operation's check.
+///
+/// The angle is computed as the doubles give it, not enclosed: a draft within rounding of
+/// it may be decided either way, as at that angle the wall is a line wide. A shell off the
+/// axis by up to the tolerance moves the angle by about tolerance / h.
+///
+/// # Errors
+///
+/// `SM_ERR_INVALID_INPUT` for a face without a surface or an outer faceuse; those of the
+/// surfaces' kinds and of the topology queries.
+pub fn largest_clear_angle(
+    k: &Kernel,
+    b: &Brep,
+    f: FaceId,
+    drafted: &[FaceId],
+    draft: &Draft,
+) -> Result<Option<(f64, FaceId)>> {
+    use crate::topology::face::p4::vertices;
+    use std::collections::{BTreeMap, BTreeSet};
+    let fu = outer_faceuse(b, f)?;
+    let surf = b.face(f)?.surface.as_ref();
+    let (Some(surf), Some(fu)) = (surf, fu) else {
+        return Err(invalid(f, surf.is_none()));
+    };
+    let outward = b.faceuse(fu)?.orientation == OrientType::Same;
+    let d = match surf.kind_with_nurb(k)? {
+        SurfaceKind::Cone(cone) => match cone_draft(cone, outward, draft)? {
+            Ok(d) => d,
+            Err(_) => return Ok(None),
+        },
+        _ => return Ok(None),
+    };
+    let lean = d.lean * draft.angle;
+    let height = |p: Point3| (p - d.centre).dot(d.along);
+    let off_axis = |p: Point3| {
+        let r = p - d.centre;
+        (r - d.along * r.dot(d.along)).length()
+    };
+    // the sine of the angle between a direction and the axis, `None` for no direction
+    let tilt = |v: Vec3| {
+        let len = v.length();
+        (len > 0.0 && len.is_finite()).then(|| (v.cross(d.along).length() / len).min(1.0))
+    };
+    // the face's span of heights, from its vertices (its edges are circles about the axis or
+    // generators)
+    let (mut lo, mut hi) = (f64::INFINITY, f64::NEG_INFINITY);
+    for v in vertices(b, f, None, false, None)? {
+        let h = height(b.vertex(v)?.point);
+        lo = lo.min(h);
+        hi = hi.max(h);
+    }
+    // the shells a face's two faceuses lie in
+    let shells_of = |g: FaceId| -> Result<BTreeSet<crate::topology::ShellId>> {
+        let mut out = BTreeSet::new();
+        if let Some(use_) = b.face(g)?.faceuse {
+            let use_ = b.faceuse(use_)?;
+            out.extend(use_.shell);
+            if let Some(mate) = use_.mate {
+                out.extend(b.faceuse(mate)?.shell);
+            }
+        }
+        Ok(out)
+    };
+    let own = shells_of(f)?;
+    let mut others: BTreeMap<crate::topology::ShellId, Vec<FaceId>> = BTreeMap::new();
+    for g in crate::topology::brep::p1::faces(b, None)? {
+        for s in shells_of(g)? {
+            if !own.contains(&s) {
+                others.entry(s).or_default().push(g);
+            }
+        }
+    }
+    let tolerance = b.tolerance();
+    let mut least: Option<(f64, FaceId)> = None;
+    'shells: for faces in others.values() {
+        if faces.iter().any(|g| drafted.contains(g)) {
+            continue;
+        }
+        let mut shell_least: Option<(f64, FaceId)> = None;
+        let mut side = 0.0;
+        for &g in faces {
+            let Some(surface) = b.face(g)?.surface.as_ref() else {
+                continue 'shells;
+            };
+            let mut points = Vec::new();
+            for v in vertices(b, g, None, false, None)? {
+                points.push(b.vertex(v)?.point);
+            }
+            let reach = points.iter().fold(0.0_f64, |m, &p| m.max(off_axis(p)));
+            let about_axis = match surface.kind_with_nurb(k)? {
+                // a plane across the axis: its tilt moves no point of it (within `reach` of
+                // the axis, its origin's distance more) along the pull past the tolerance
+                SurfaceKind::Plane(plane) => {
+                    let frame = plane.position();
+                    tilt(frame.z_axis())
+                        .is_some_and(|t| t * (reach + off_axis(frame.origin())) <= tolerance)
+                }
+                // a cone about the axis: its axis beside each vertex within the tolerance of
+                // the drafted axis, and its tilt moving no point along the pull past it
+                SurfaceKind::Cone(cone) => {
+                    let frame = cone.canonical().origin;
+                    let z = frame.x_axis().cross(frame.y_axis());
+                    let o = frame.origin();
+                    tilt(z).is_some_and(|t| {
+                        let z = z * (1.0 / z.length());
+                        t * reach <= tolerance
+                            && points
+                                .iter()
+                                .all(|&p| off_axis(o + z * (p - o).dot(z)) <= tolerance)
+                    })
+                }
+                _ => false,
+            };
+            if !about_axis {
+                continue 'shells;
+            }
+            for p in points {
+                let h = height(p);
+                // on one side of the neutral plane, off it by more than the tolerance, inside
+                // the face's span
+                if !(h > lo && h < hi && h.abs() > tolerance) || h.signum() * side < 0.0 {
+                    continue 'shells;
+                }
+                side = h.signum();
+                let psi = d.slope.atan() - ((off_axis(p) - d.r0) / h).atan();
+                if psi * lean > 0.0 && shell_least.is_none_or(|(at, _)| psi.abs() < at) {
+                    shell_least = Some((psi.abs(), g));
+                }
+            }
+        }
+        if let Some((at, g)) = shell_least {
+            if least.is_none_or(|(was, _)| at < was) {
+                least = Some((at, g));
+            }
+        }
+    }
+    Ok(least)
+}
+
+/// Not upstream (#20767): refuses the draft of `faces` of `b` by `draft` where the drafted
+/// cone of one of them would reach another shell of the body, closing the wall between them
+/// ([`largest_clear_angle`], each face against the shells none of `faces` lies on):
+/// [`OffsetFailure::DraftClosesWall`] with the largest angle that keeps the wall, for the
+/// first of `faces` that reaches one. A face of another kind, or a shell the bound does not
+/// cover, passes.
+///
+/// # Errors
+///
+/// [`OffsetFailure::DraftClosesWall`]; those of [`largest_clear_angle`].
+pub fn refuse_closing_wall(k: &Kernel, b: &Brep, faces: &[FaceId], draft: &Draft) -> Result<()> {
+    for &f in faces {
+        if let Some((largest, wall)) = largest_clear_angle(k, b, f, faces, draft)? {
+            if draft.angle.abs() >= largest {
+                return Err(Failure::new(
+                    OP,
+                    OffsetFailure::DraftClosesWall {
+                        face: f,
+                        wall,
+                        largest,
+                    },
+                )
+                .into_error());
+            }
+        }
+    }
+    Ok(())
 }
 
 /// Points tried on each edge of a face by [`drafted_through`], its ends included.
