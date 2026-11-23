@@ -351,6 +351,7 @@ fn pinned() -> BTreeMap<String, BTreeSet<String>> {
                 "continuity/g1-patch-g3-at-a-corner-whose-rounds-clash.json:b13",
                 "continuity/g2-patch-g2-on-a-hole-in-one-sheet.json:b11",
                 "continuity/g3-patch-g3-on-a-hole-in-one-sheet.json:b11",
+                "fillets/9-fillet-corner-curvature-with-reduce-fit.json:b8",
                 "fillets/9-fillet-corner-r5-curvature-default-setback.json:b8",
                 "fillets/cov-fillet-g2-pocket-corner.json:b18",
                 "fillets/every-box-corner-three-edges-r3-curvature-setback-3-5.json:b8",
