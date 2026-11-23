@@ -7064,6 +7064,36 @@ fn roots_follow_nested_mappings_and_linked_representations() {
     assert_eq!(imp.tree.iter().map(|n| n.name.as_str()).collect::<Vec<_>>(), ["row"]);
 }
 
+fn nested_scaled_cube(mapped_items: &str) -> String {
+    let row = mapped_cube_row(MAPPED_CUBE_PRODUCT)
+        .replace("REPRESENTATION_MAP(#4000,#60)", "REPRESENTATION_MAP(#4000,#55)")
+        .replace("#5003,#5013,#5023,#5033,#4000", mapped_items)
+        .replace(
+            "#5001=AXIS2_PLACEMENT_3D('',#5000,$,$)",
+            "#5001=CARTESIAN_TRANSFORMATION_OPERATOR_3D_NON_UNIFORM('','',$,$,#4001,1.E160,$,1.E-80,1.E-80)",
+        )
+        .replace(
+            "#5011=AXIS2_PLACEMENT_3D('',#5010,$,$)",
+            "#5011=CARTESIAN_TRANSFORMATION_OPERATOR_3D_NON_UNIFORM('','',$,$,#4001,1.E-160,$,1.E80,1.E80)",
+        );
+    let nested = "\
+        #55=SHAPE_REPRESENTATION('module',(#5103),$);\n\
+        #5102=REPRESENTATION_MAP(#4000,#60);\n\
+        #5103=MAPPED_ITEM('',#5102,#5001);\n";
+    row.replace(TAIL, &format!("{nested}{TAIL}"))
+}
+
+#[test]
+fn a_later_placement_can_reach_the_cube_when_the_first_overflows() {
+    // The first outer scale and the nested scale multiply to a non-finite X scale.
+    // The second outer scale is the inverse of the nested one and leaves a unit cube.
+    let imp = step_import(&nested_scaled_cube("#5003,#5013")).unwrap();
+    assert_eq!(imp.bodies.len(), 1, "{:?}", imp.warnings);
+    assert_eq!(imp.bodies[0].path, ["row"]);
+    assert!((measure(&imp.bodies[0].body).unwrap().volume - 1.0).abs() < 1e-6);
+    assert!(imp.warnings.iter().any(|w| w.contains("mapped item #5103")));
+}
+
 #[test]
 fn a_product_with_an_unmapped_shape_stays_in_the_import() {
     let extra = format!(
@@ -7078,14 +7108,8 @@ fn a_product_with_an_unmapped_shape_stays_in_the_import() {
 
 #[test]
 fn failed_mappings_keep_the_source_product() {
-    let text = mapped_cube_row(MAPPED_CUBE_PRODUCT);
-    let missing = text.replace("REPRESENTATION_MAP(#4000,#60)", "REPRESENTATION_MAP(#99999,#60)");
-    // The individual placements are finite. The distance between them overflows.
-    let mut overflow = text.replace("#4001=CARTESIAN_POINT('',(0.,0.,0.))", "#4001=CARTESIAN_POINT('',(-1.E308,0.,0.))");
-    for (&id, &x) in [5000, 5010, 5020, 5030].iter().zip(&[0, 30, 60, 30]) {
-        overflow = overflow.replace(&format!("#{id}=CARTESIAN_POINT('',({x}.,0.,0.))"), &format!("#{id}=CARTESIAN_POINT('',(1.E308,0.,0.))"));
-    }
-    for text in [missing, overflow] {
+    let missing = mapped_cube_row(MAPPED_CUBE_PRODUCT).replace("REPRESENTATION_MAP(#4000,#60)", "REPRESENTATION_MAP(#99999,#60)");
+    for text in [missing, nested_scaled_cube("#5003")] {
         let imp = step_import(&text).unwrap();
         assert_eq!(imp.bodies.len(), 1, "{:?}", imp.warnings);
         assert_eq!(imp.bodies[0].path, ["cube"]);

@@ -312,6 +312,14 @@ type M4 = [[f64; 4]; 4];
 
 const IDENTITY: M4 = [[1.0, 0.0, 0.0, 0.0], [0.0, 1.0, 0.0, 0.0], [0.0, 0.0, 1.0, 0.0], [0.0, 0.0, 0.0, 1.0]];
 
+fn placement_key(m: &M4) -> [u64; 16] {
+    let mut key = [0; 16];
+    for (k, x) in key.iter_mut().zip(m.iter().flatten()) {
+        *k = (*x + 0.0).to_bits();
+    }
+    key
+}
+
 /// `a · b`.
 fn mat_mul(a: &M4, b: &M4) -> M4 {
     let mut out = [[0.0; 4]; 4];
@@ -940,20 +948,20 @@ impl Reader {
         let target = self.placement_matrix(map.target, units);
         let origin = self.placement_matrix(map.origin, source_units);
         let placement = mat_mul(world, &mat_mul(&target?, &placement_inverse(&origin?)));
-        let det = linear_det(&placement);
-        if !placement.iter().flatten().all(|v| v.is_finite()) || !det.is_finite() || det == 0.0 {
-            return Err("invalid composed placement".into());
+        if placement.iter().flatten().any(|v| !v.is_finite()) {
+            return Err("non-finite composed placement".into());
         }
         Ok(placement)
     }
 
     /// Shapes reached by a usable mapping, starting from product-owned representations.
-    /// Follow the shortest usable path first, within the depth of the import walk.
+    /// Visit each shape at each distinct placement, within the depth of the import walk.
     fn mapped_shapes(&mut self, reps: impl Iterator<Item = u64>, work: &mut usize) -> Option<HashSet<u64>> {
-        let mut seeded = HashSet::new();
-        let mut frontier: Vec<_> = reps.filter(|rep| seeded.insert(*rep)).map(|rep| (rep, IDENTITY)).collect();
-        let mut mapped = HashSet::new();
         let mut followed = HashSet::new();
+        let identity_key = placement_key(&IDENTITY);
+        let mut frontier: Vec<_> = reps.filter(|rep| followed.insert((*rep, identity_key))).map(|rep| (rep, IDENTITY)).collect();
+        let mut mapped = HashSet::new();
+        let mut closures = HashMap::new();
         for _ in 0..MAX_ASSEMBLY_DEPTH {
             let mut next = Vec::new();
             for (rep, world) in frontier {
@@ -968,17 +976,24 @@ impl Reader {
                 }
                 let units = self.units_of(rep);
                 for map in maps {
-                    if followed.contains(&map.rep) {
-                        continue;
-                    }
                     let Ok(placement) = self.mapped_placement(&map, units, &world) else { continue };
-                    followed.insert(map.rep);
-                    let shapes = self.rep_closure(&[map.rep]);
+                    // Only a regular placement covers a shape. A nested operator may
+                    // still undo an ill-conditioned scale, so keep walking the map.
+                    let regular = solidcore_ops::affine::inverse(&placement).is_ok();
+                    let key = placement_key(&placement);
+                    let shapes = closures.entry(map.rep).or_insert_with(|| self.rep_closure(&[map.rep]));
                     *work += shapes.len();
                     if *work > MAX_CLOSURE_WORK {
                         return None;
                     }
-                    next.extend(shapes.into_iter().filter(|shape| mapped.insert(*shape)).map(|shape| (shape, placement)));
+                    for &shape in shapes.iter() {
+                        if regular {
+                            mapped.insert(shape);
+                        }
+                        if followed.insert((shape, key)) {
+                            next.push((shape, placement));
+                        }
+                    }
                 }
             }
             if next.is_empty() {
@@ -1068,11 +1083,7 @@ impl Reader {
                         if self.node_items.contains(&item) {
                             continue;
                         }
-                        let mut key = [0u64; 16];
-                        for (k, x) in key.iter_mut().zip(m.iter().flatten()) {
-                            *k = (*x + 0.0).to_bits();
-                        }
-                        if !self.node_placed.insert((item, key)) {
+                        if !self.node_placed.insert((item, placement_key(m))) {
                             continue;
                         }
                         if self.bodies_so_far() >= MAX_BODIES {
