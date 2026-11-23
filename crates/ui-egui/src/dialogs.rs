@@ -9639,6 +9639,15 @@ pub fn for_feature(app: &SolveApp, id: u64, marker: Option<usize>) -> Option<Dia
     d.editing = Some((id, marker));
     d.active = 0;
     d.error = None;
+    // A pick in the numbering of builds before 0.42.0 that this sketch has no profile for shows
+    // no profile above; say why (#19163).
+    for (sketch, sel) in f.kind.profile_sels() {
+        if let (ProfileSel::Indices { indices, order }, Some(ss)) = (sel, st.sketch(sketch))
+            && let Err(e) = solidcraft_engine::doc::picked_indices(ss, indices, *order)
+        {
+            d.error = Some(e.to_string());
+        }
+    }
     Some(d)
 }
 
