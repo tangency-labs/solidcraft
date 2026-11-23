@@ -2,7 +2,7 @@
 //! their size. The body is cut across at a plane; the part on the plane's positive side moves
 //! along the normal by the distance, and the gap is filled by the body's own section there.
 //!
-//! The section is taken from a thin band of the body just behind the plane. Where every face
+//! The section is taken from a band of the body just behind the plane, as deep as it can be. Where every face
 //! crossing that band runs straight along the normal (a flat wall square to the plane, or a round
 //! wall whose axis is the normal), the band is a prism, and lengthening it along the normal gives
 //! exactly the body's section, as long as needed. A shrink takes out the slab in front of the
@@ -19,6 +19,8 @@ use crate::{Body, KernelError, Result, half_space, transform_matrix, union_all};
 const SQUARE: f64 = 1e-9;
 /// Steps of the search for the longest shrink that is possible, when a shrink is refused.
 const SHRINK_SEARCH_STEPS: usize = 12;
+/// The most one pass lengthens the band behind the cut by (its new length over its old one).
+const MAX_LENGTHEN: f64 = 8.0;
 
 /// `body` stretched by `distance` (mm) along unit `normal` at the plane through `at`: the part
 /// on `normal`'s side of the plane moves by `distance` (a negative distance shrinks it), the rest
@@ -44,18 +46,17 @@ pub fn stretch(body: &Body, at: Vec3, normal: Vec3, distance: f64) -> Result<Bod
     }
     let plane = |h: f64| Plane::from_normal(n * h, n).ok_or_else(|| KernelError::Invalid("the stretch direction has no length".into()));
     if distance > 0.0 {
-        // A band behind the plane: thin, but not so thin that lengthening it loses precision.
-        let band_depth = (size * 1e-3).max(1e-3).min((level - lo) / 2.0);
-        let base = level - band_depth;
-        let band = slab(body, &plane(base)?, &plane(level)?)?;
-        prism_along(&band, n, base, level, eps).map_err(|why| KernelError::Invalid(message(&why)))?;
-        let lengthened = transform_matrix(&band, scale_along(n, base, (band_depth + distance) / band_depth))?;
-        let behind = half_space(body, &plane(base)?, false)?.0;
-        let ahead =
-            half_space(body, &plane(level)?, true)?.0.ok_or_else(|| KernelError::Failed("nothing of the body lies ahead of the cut plane".into()))?;
-        let moved = transform_matrix(&ahead, translate(n * distance))?;
-        let parts: Vec<&Body> = behind.iter().chain([&lengthened, &moved]).collect();
-        return union_all(&parts);
+        let base_band = deepest_band(body, n, lo, level, size, eps, &plane)?;
+        // Lengthening the band scales its edges' tolerances with it: each pass lengthens it at
+        // most `MAX_LENGTHEN` times, and a long stretch takes several passes.
+        let mut stretched = body.clone();
+        let mut left = distance;
+        while left > eps {
+            let step = left.min(base_band * (MAX_LENGTHEN - 1.0));
+            stretched = lengthen(&stretched, n, level - base_band, level, step, &plane)?;
+            left -= step;
+        }
+        return Ok(stretched);
     }
     let shrink = -distance;
     if !(level + shrink < hi - eps) {
@@ -77,6 +78,35 @@ pub fn stretch(body: &Body, at: Vec3, normal: Vec3, distance: f64) -> Result<Bod
         .ok_or_else(|| KernelError::Failed("nothing of the body lies ahead of the slice".into()))?;
     let moved = transform_matrix(&ahead, translate(n * -shrink))?;
     union_all(&[&behind, &moved])
+}
+
+/// The deepest band behind the plane at `level` that is a prism along `n`, as a depth: from
+/// half of what lies behind the plane, halved until it is one (a deeper band needs fewer
+/// passes). Refused, naming the face, when not even a thin band is.
+fn deepest_band(body: &Body, n: Vec3, lo: f64, level: f64, size: f64, eps: f64, plane: &dyn Fn(f64) -> Result<Plane>) -> Result<f64> {
+    let thinnest = (size * 1e-3).max(1e-3).min((level - lo) / 2.0);
+    let mut depth = (level - lo) / 2.0;
+    loop {
+        let band = slab(body, &plane(level - depth)?, &plane(level)?)?;
+        match prism_along(&band, n, level - depth, level, eps) {
+            Ok(()) => return Ok(depth),
+            Err(why) if depth <= thinnest => return Err(KernelError::Invalid(message(&why))),
+            Err(_) => depth = (depth / 2.0).max(thinnest),
+        }
+    }
+}
+
+/// `body` with its band between levels `base` and `level` along `n` lengthened by `step`: the
+/// part ahead of `level` moves by `step`, and the band, scaled along `n`, fills the gap.
+fn lengthen(body: &Body, n: Vec3, base: f64, level: f64, step: f64, plane: &dyn Fn(f64) -> Result<Plane>) -> Result<Body> {
+    let band = slab(body, &plane(base)?, &plane(level)?)?;
+    let lengthened = transform_matrix(&band, scale_along(n, base, (level - base + step) / (level - base)))?;
+    let behind = half_space(body, &plane(base)?, false)?.0;
+    let ahead =
+        half_space(body, &plane(level)?, true)?.0.ok_or_else(|| KernelError::Failed("nothing of the body lies ahead of the cut plane".into()))?;
+    let moved = transform_matrix(&ahead, translate(n * step))?;
+    let parts: Vec<&Body> = behind.iter().chain([&lengthened, &moved]).collect();
+    union_all(&parts)
 }
 
 /// The body's least and greatest level along unit `n`, from its exact box.

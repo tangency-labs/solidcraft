@@ -102,3 +102,25 @@ fn hostile_input_is_refused_not_a_crash() {
     let same = stretch(&b, Vec3::new(10.0, 0.0, 0.0), Vec3::X, 0.0).unwrap();
     assert!(rel(measure(&same).unwrap().volume, 8000.0) < 1e-12);
 }
+
+#[test]
+fn a_long_stretch_is_one_valid_solid_whatever_the_distance() {
+    // A long stretch lengthens the band behind the cut many times over: its edges' tolerances
+    // must stay within the body's (an 80 mm stretch of a 112 mm enclosure was refused, #20512).
+    let outer = Loop2::polygon(&[Vec2::new(0.0, 0.0), Vec2::new(112.0, 0.0), Vec2::new(112.0, 60.0), Vec2::new(0.0, 60.0)]);
+    let inner = Loop2::polygon(&[Vec2::new(3.0, 3.0), Vec2::new(3.0, 57.0), Vec2::new(109.0, 57.0), Vec2::new(109.0, 3.0)]);
+    let wall = extrude(&Plane::XY, &[Region2 { outer: outer.clone(), holes: vec![inner] }], 0.0, 40.0).unwrap().pop().unwrap();
+    let floor = extrude(&Plane::XY, &[Region2 { outer, holes: vec![] }], 0.0, 3.0).unwrap().pop().unwrap();
+    let enclosure = crate::union_all(&[&wall, &floor]).unwrap();
+    let before = measure(&enclosure).unwrap().volume;
+    for distance in [80.0, 500.0] {
+        let s = stretch(&enclosure, Vec3::new(56.0, 0.0, 0.0), Vec3::X, distance).unwrap_or_else(|e| panic!("{distance}: {e}"));
+        let m = measure(&s).unwrap();
+        assert!((m.bbox.max.x - (112.0 + distance)).abs() < 1e-6, "{distance}: {:?}", m.bbox);
+        // The section at the cut: the floor (112 wide is along X; across it 60 x 3) and the two
+        // side walls above it (3 x 37 each).
+        let section = 60.0 * 3.0 + 2.0 * 3.0 * 37.0;
+        assert!(rel(m.volume, before + section * distance) < 1e-6, "{distance}: {} vs {}", m.volume, before + section * distance);
+        assert_eq!(m.shells, 1);
+    }
+}
