@@ -292,13 +292,101 @@ pub enum CurveFailure {
     /// The ellipse's NURB could not be transformed (the transform's error is the cause).
     /// [`ErrorKind::Failed`]; whether it is a defect is its cause's.
     NurbNotTransformed,
-    /// The ellipse has no NURB to set up its polar conversion from: an empty ellipse, or one
-    /// whose NURB build failed (the constructors ignore that status). [`ErrorKind::Degenerate`].
+    /// The ellipse has no NURB, which its polar conversion and its canonical form are made
+    /// from: an empty ellipse, or one whose NURB build failed (the constructors ignore that
+    /// status). [`ErrorKind::Degenerate`].
     EllipseWithoutNurb,
     /// The ellipse's NURB does not start and end in knots of full multiplicity (3), so
     /// its spans do not start at its ends and the polar conversion does not apply.
     /// [`ErrorKind::Unsupported`].
     EndKnotsNotClamped,
+    /// A polar conversion is asked of a table that was never set up from an ellipse.
+    /// Status `SM_ERR_NULL_POINTER`. The caller's state: [`ErrorKind::InvalidInput`].
+    PolarConversionNotSetUp,
+    /// A circle's radius given, `radius`, is not above the kernel's zero (or is not a
+    /// number). [`ErrorKind::InvalidInput`].
+    RadiusNotPositive {
+        /// The radius given.
+        radius: f64,
+    },
+    /// The circle's offset in its plane would have the radius `offset_radius`, below zero
+    /// by more than the tolerance `tolerance`: the offset distance passes the centre. An
+    /// offset distance that leaves the radius at least `-tolerance` passes.
+    /// [`ErrorKind::InvalidInput`].
+    OffsetRadiusNegative {
+        /// The radius the offset would have.
+        offset_radius: f64,
+        /// The tolerance.
+        tolerance: f64,
+    },
+    /// The curve to join on is not of this curve's kind. [`ErrorKind::Unsupported`].
+    JoinOtherKind,
+    /// The curve to join on differs from this one by `off` in `check`, more than the
+    /// tolerance `tolerance`: the two are not pieces of one curve.
+    /// [`ErrorKind::NotWithinTolerance`].
+    JoinMismatch {
+        /// What differs.
+        check: JoinCheck,
+        /// By how much (a distance, or for an axis the sine of the angle between them).
+        off: f64,
+        /// The tolerance.
+        tolerance: f64,
+    },
+    /// The curve to join on a line is not straight within the tolerance `tolerance`.
+    /// [`ErrorKind::NotWithinTolerance`].
+    JoinOtherNotStraight {
+        /// The tolerance.
+        tolerance: f64,
+    },
+    /// The offset curve has no base curve: it was made empty. Status
+    /// `SM_ERR_NULL_POINTER`. The caller's curve: [`ErrorKind::InvalidInput`].
+    OffsetWithoutBase,
+    /// The base curve's tangent at `t` is zero, or parallel to the offset normal (their
+    /// binormal is zero), so the offset has no direction there. [`ErrorKind::Degenerate`].
+    NoOffsetDirection {
+        /// The base curve's parameter the evaluation was asked at.
+        t: f64,
+    },
+    /// The offset curve's interval is not within its base curve's natural interval.
+    /// The caller's curve: [`ErrorKind::InvalidInput`].
+    IntervalOutsideBase,
+}
+
+/// What [`CurveFailure::JoinMismatch`] found different.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum JoinCheck {
+    /// The radius along the X axis.
+    RadiusX,
+    /// The radius along the Y axis.
+    RadiusY,
+    /// The centre.
+    Centre,
+    /// The normal, up to sign.
+    Normal,
+    /// The X axis, up to sign.
+    XAxis,
+    /// The Y axis, up to sign.
+    YAxis,
+    /// The points where the two are joined.
+    JoinPoint,
+    /// The line through both: the join point's distance from it.
+    Collinear,
+}
+
+impl core::fmt::Display for JoinCheck {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.write_str(match self {
+            Self::RadiusX => "the X radius",
+            Self::RadiusY => "the Y radius",
+            Self::Centre => "the centre",
+            Self::Normal => "the normal",
+            Self::XAxis => "the X axis",
+            Self::YAxis => "the Y axis",
+            Self::JoinPoint => "the join point",
+            Self::Collinear => "the line through both",
+        })
+    }
 }
 
 /// What the fast point drop ([`CurveFailure::FastDropUnavailable`]) lacks.
@@ -410,8 +498,18 @@ impl CurveFailure {
             | Self::PlacementNotSet
             | Self::NurbNotTransformed
             | Self::EllipseWithoutNurb
-            | Self::EndKnotsNotClamped => SM_ERR,
-            Self::Missing(_) | Self::PointSolveOptionMissing { .. } => SM_ERR_NULL_POINTER,
+            | Self::EndKnotsNotClamped
+            | Self::RadiusNotPositive { .. }
+            | Self::OffsetRadiusNegative { .. }
+            | Self::JoinOtherKind
+            | Self::JoinMismatch { .. }
+            | Self::JoinOtherNotStraight { .. }
+            | Self::NoOffsetDirection { .. }
+            | Self::IntervalOutsideBase => SM_ERR,
+            Self::Missing(_)
+            | Self::PointSolveOptionMissing { .. }
+            | Self::PolarConversionNotSetUp
+            | Self::OffsetWithoutBase => SM_ERR_NULL_POINTER,
             Self::ZeroDirection(_) | Self::AuxiliaryAlongProjection => SM_ERR_INVALID_INPUT,
         }
     }
@@ -435,7 +533,9 @@ impl CurveFailure {
             Self::LengthBelowFloor { .. }
             | Self::LengthPastPieceCap { .. }
             | Self::StartsApart { .. }
-            | Self::EndsApart { .. } => ErrorKind::NotWithinTolerance,
+            | Self::EndsApart { .. }
+            | Self::JoinMismatch { .. }
+            | Self::JoinOtherNotStraight { .. } => ErrorKind::NotWithinTolerance,
             Self::PieceOutsideSpan { .. } => ErrorKind::PortInvariant,
             Self::StageFailed | Self::Defect { .. } => ErrorKind::StageFailed,
             Self::PointSolveOptionMissing { .. }
@@ -453,13 +553,20 @@ impl CurveFailure {
             | Self::SpanNotBSpline
             | Self::ControlPolygonTooShort { .. }
             | Self::AngleOutsideArc { .. }
-            | Self::ZeroScale { .. } => ErrorKind::InvalidInput,
-            Self::NonUniformScale { .. }
+            | Self::ZeroScale { .. }
+            | Self::PolarConversionNotSetUp
+            | Self::RadiusNotPositive { .. }
+            | Self::OffsetRadiusNegative { .. }
+            | Self::OffsetWithoutBase
+            | Self::IntervalOutsideBase => ErrorKind::InvalidInput,
+            Self::JoinOtherKind
+            | Self::NonUniformScale { .. }
             | Self::NoEvaluationOfItsOwn
             | Self::CornerByCurveExtension
             | Self::FastDropUnavailable { .. }
             | Self::EndKnotsNotClamped => ErrorKind::Unsupported,
             Self::MidTangentOffChord { .. }
+            | Self::NoOffsetDirection { .. }
             | Self::NoOffsetCurve
             | Self::NoSpans
             | Self::TooFewKnots { .. }
@@ -529,7 +636,16 @@ impl CurveFailure {
             | Self::PlacementNotSet
             | Self::NurbNotTransformed
             | Self::EllipseWithoutNurb
-            | Self::EndKnotsNotClamped => true,
+            | Self::EndKnotsNotClamped
+            | Self::PolarConversionNotSetUp
+            | Self::RadiusNotPositive { .. }
+            | Self::OffsetRadiusNegative { .. }
+            | Self::JoinOtherKind
+            | Self::JoinMismatch { .. }
+            | Self::JoinOtherNotStraight { .. }
+            | Self::OffsetWithoutBase
+            | Self::NoOffsetDirection { .. }
+            | Self::IntervalOutsideBase => true,
         }
     }
 }
@@ -673,10 +789,46 @@ impl core::fmt::Display for CurveFailure {
             Self::PlacementNotSet => f.write_str("the ellipse's scaled placement could not be set"),
             Self::NurbNotTransformed => f.write_str("the ellipse's NURB could not be transformed"),
             Self::EllipseWithoutNurb => {
-                f.write_str("the ellipse has no NURB to set up its polar conversion from")
+                f.write_str("the ellipse has no NURB")
             }
             Self::EndKnotsNotClamped => {
                 f.write_str("the ellipse's NURB does not end in knots of full multiplicity")
+            }
+            Self::PolarConversionNotSetUp => {
+                f.write_str("the polar conversion was not set up from an ellipse")
+            }
+            Self::RadiusNotPositive { radius } => {
+                write!(f, "the radius {radius:e} is not above zero")
+            }
+            Self::OffsetRadiusNegative {
+                offset_radius,
+                tolerance,
+            } => write!(
+                f,
+                "the offset circle's radius would be {offset_radius:e}, below zero by more than the tolerance {tolerance:e}"
+            ),
+            Self::JoinOtherKind => {
+                f.write_str("the curve to join on is not of this curve's kind")
+            }
+            Self::JoinMismatch {
+                check,
+                off,
+                tolerance,
+            } => write!(
+                f,
+                "the curve to join on differs in {check} by {off:e}, more than the tolerance {tolerance:e}"
+            ),
+            Self::JoinOtherNotStraight { tolerance } => write!(
+                f,
+                "the curve to join on is not straight within the tolerance {tolerance:e}"
+            ),
+            Self::OffsetWithoutBase => f.write_str("the offset curve has no base curve"),
+            Self::NoOffsetDirection { t } => write!(
+                f,
+                "the base curve's tangent at t = {t} is zero or along the offset normal, so the offset has no direction"
+            ),
+            Self::IntervalOutsideBase => {
+                f.write_str("the offset curve's interval is not within its base curve's")
             }
         }
     }
@@ -1036,6 +1188,54 @@ mod tests {
                 SM_ERR,
                 ErrorKind::Unsupported,
             ),
+            (
+                CurveFailure::PolarConversionNotSetUp,
+                SM_ERR_NULL_POINTER,
+                ErrorKind::InvalidInput,
+            ),
+            (
+                CurveFailure::RadiusNotPositive { radius: 0.0 },
+                SM_ERR,
+                ErrorKind::InvalidInput,
+            ),
+            (
+                CurveFailure::OffsetRadiusNegative {
+                    offset_radius: -0.5,
+                    tolerance: 1e-4,
+                },
+                SM_ERR,
+                ErrorKind::InvalidInput,
+            ),
+            (CurveFailure::JoinOtherKind, SM_ERR, ErrorKind::Unsupported),
+            (
+                CurveFailure::JoinMismatch {
+                    check: JoinCheck::Centre,
+                    off: 1.0,
+                    tolerance: 1e-6,
+                },
+                SM_ERR,
+                ErrorKind::NotWithinTolerance,
+            ),
+            (
+                CurveFailure::JoinOtherNotStraight { tolerance: 1e-6 },
+                SM_ERR,
+                ErrorKind::NotWithinTolerance,
+            ),
+            (
+                CurveFailure::OffsetWithoutBase,
+                SM_ERR_NULL_POINTER,
+                ErrorKind::InvalidInput,
+            ),
+            (
+                CurveFailure::NoOffsetDirection { t: 0.5 },
+                SM_ERR,
+                ErrorKind::Degenerate,
+            ),
+            (
+                CurveFailure::IntervalOutsideBase,
+                SM_ERR,
+                ErrorKind::InvalidInput,
+            ),
         ];
         for (cause, status, kind) in cases {
             let e = SolidError::curve("curve::op", cause);
@@ -1072,7 +1272,7 @@ mod tests {
     /// whose conversion waits on other open work.
     #[test]
     fn the_curve_routines_build_no_bare_statuses() {
-        super::super::bare_scan::assert_waiting("curve", 31, &[("curve/ellipse/p1.rs", 13)]);
+        super::super::bare_scan::assert_waiting("curve", 31, &[]);
     }
 
     /// The sites that build a curve phrase cause only fall:
@@ -1103,8 +1303,6 @@ mod tests {
             ("solidcore/src/curve/curve/p6.rs", 2),
             ("solidcore/src/curve/curve/p8.rs", 8),
             ("solidcore/src/curve/curve/p9.rs", 5),
-            ("solidcore/src/curve/line.rs", 4),
-            ("solidcore/src/curve/offset_curve.rs", 8),
         ];
         assert_pinned("curve phrase-cause sites", &crate_sites(&PHRASES), PINNED);
     }

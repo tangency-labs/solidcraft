@@ -2627,6 +2627,7 @@ mod tests {
             (S::SideEdgeNotBesideBlend, SM_ERR_NULL_POINTER),
             (S::EndSideEdgesShareNoFace, SM_ERR),
             (S::EdgeNotBetweenTwoFaces, SM_ERR),
+            (S::EndFaceIsBlendFace, SM_ERR),
             (S::SeamCapEndFaceNotExtended, SM_ERR),
         ];
         for (shape, status) in shapes {
@@ -2716,6 +2717,37 @@ mod tests {
                 SM_ERR,
             ),
             (M::GapPatchNotFourEdges { edges: 3 }, K::Unsupported, SM_ERR),
+            (M::RevolutionMajorNotArc, K::Unsupported, SM_ERR),
+            (M::RevolutionOppositeNotArc, K::Unsupported, SM_ERR),
+            (M::RevolutionArcsDiffer, K::Unsupported, SM_ERR),
+            (M::RevolutionMissesOtherCurve, K::Unsupported, SM_ERR),
+            (
+                M::PlanarPatchPointCount { points: 5 },
+                K::Unsupported,
+                SM_ERR,
+            ),
+            (
+                M::RailRailCurveFootNotUnique { solutions: 2 },
+                K::NotFound,
+                SM_ERR,
+            ),
+            (M::VertexGeometryNotCalculated, K::Failed, SM_ERR),
+            (M::EdgeGeometryNotCalculated, K::Failed, SM_ERR),
+            (M::SeamPointOffSideEdges, K::NotFound, SM_ERR),
+            (M::SeamCapPartNormalVanished, K::Degenerate, SM_ERR),
+            (M::ConstantRadiusNotThreeSides, K::Unsupported, SM_ERR),
+            (M::ConstantRadiusSideNotCrossSection, K::Unsupported, SM_ERR),
+            (M::ConstantRadiusBaseNotArc, K::Unsupported, SM_ERR),
+            (
+                M::ConstantRadiusFootNotUnique { solutions: 0 },
+                K::NotFound,
+                SM_ERR,
+            ),
+            (M::ConstantRadiusGeneratorsDiffer, K::Unsupported, SM_ERR),
+            (M::ConstantRadiusBlendCurvesDiffer, K::Unsupported, SM_ERR),
+            (M::ConstantRadiusLinearGenerator, K::Unsupported, SM_ERR),
+            (M::ConstantRadiusReSolveFailed, K::Failed, SM_ERR),
+            (M::OrientationPointOffSurface, K::NotFound, SM_ERR),
         ];
         for (miss, kind, status) in misses {
             let cause = BlendFailure::CornerPatchNotMade(miss);
@@ -2763,6 +2795,14 @@ mod tests {
             (I::MixedCornerWithoutOnExtendedEdgeEdge, SM_ERR_NULL_POINTER),
             (I::MixedCornerEdgesDoNotMeet, SM_ERR),
             (I::MixedCornerVertexNotInCorner, SM_ERR),
+            (I::EdgeEndNotSet, SM_ERR_NULL_POINTER),
+            (I::SqueezedEdgeKeepsBothVertices, SM_ERR),
+            (I::EdgeNotInCorner, SM_ERR),
+            (I::VertexNotInCorner, SM_ERR),
+            (I::VertexUseWithoutEdgeParameter, SM_ERR_NULL_POINTER),
+            (I::NoOtherCornerVertex, SM_ERR_NULL_POINTER),
+            (I::EdgeWithoutVertex, SM_ERR_NULL_POINTER),
+            (I::SeamCapLoopOpen, SM_ERR),
         ];
         for (input, status) in inputs {
             let cause = BlendFailure::CornerInputInvalid {

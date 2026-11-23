@@ -83,7 +83,7 @@ struct Prepared {
     visibility: Vec<bool>,
     tangent: Vec<bool>,
     joins: Vec<[u32; 2]>,
-    triangles: usize,
+    triangle_count: usize,
 }
 
 pub(super) fn claim(counter: &AtomicUsize, amount: usize, limit: usize) -> bool {
@@ -240,7 +240,7 @@ fn prepare_placed(
         }
         let Some(item) = items.get(index) else { return Ok(Err(Refused::Invalid("missing export body"))) };
         let mut mesh = mesh_body(item, &tolerance)?;
-        let edges = prepared_edges(&mesh, mesh.triangles.len(), ask);
+        let edges = prepared_edges(&mesh, mesh.triangle_count(), ask);
         let geometry = if item.first {
             let shared = trim_mesh(&mut mesh, keeps_adjacency.get(index) == Some(&true));
             let geometry = buffer_bytes(&mesh);
@@ -294,10 +294,10 @@ fn prepare_placed(
                 ..Mesh::default()
             };
             item.body.body.flag_mesh_edges(&mut mesh);
-            prepared_edges(&mesh, source.triangles.len(), ask)
+            prepared_edges(&mesh, source.triangle_count(), ask)
         } else {
             let mesh = mesh_body(item, &tolerance)?;
-            prepared_edges(&mesh, mesh.triangles.len(), ask)
+            prepared_edges(&mesh, mesh.triangle_count(), ask)
         };
         if let Err(refused) = progress.advance(1) {
             return Ok(Err(refused));
@@ -317,7 +317,7 @@ fn prepare_placed(
         if meshes.get(item.group).is_none_or(|m| m.edges.len() != p.visibility.len()) {
             return Err(bad(cmd, "placed edge identity changed"));
         }
-        triangles = triangles.saturating_add(p.triangles);
+        triangles = triangles.saturating_add(p.triangle_count);
         placements.push(Placement {
             mesh: item.group,
             transform: item.transform,
@@ -333,7 +333,7 @@ fn prepare_placed(
 
 fn tessellate(item: &Placed<'_>, tolerance: &solidcraft_kernel::MeshTolerance) -> solidcraft_kernel::Result<Mesh> {
     let mesh = item.body.body.mesh(tolerance)?;
-    if mesh.triangles.is_empty() {
+    if mesh.triangle_count() == 0 {
         return Err(KernelError::Invalid(format!("{} has no surface to mesh", item.body.name)));
     }
     Ok(mesh)
@@ -352,10 +352,10 @@ fn shares_edge_order(source: &ModelBody, follower: &ModelBody) -> bool {
         && follower.body.display_share().is_none()
 }
 
-fn prepared_edges(mesh: &Mesh, triangles: usize, ask: Ask) -> Prepared {
+fn prepared_edges(mesh: &Mesh, triangle_count: usize, ask: Ask) -> Prepared {
     let (visibility, tangent) = drawn_edges(mesh, ask);
     let joins = drawn_joins(mesh, &visibility);
-    Prepared { visibility, tangent, joins, triangles }
+    Prepared { visibility, tangent, joins, triangle_count }
 }
 
 /// The bodies of `world` that `shown` keeps, in its order, each placed in a group that shares one
