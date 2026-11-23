@@ -1,0 +1,13 @@
+[package]
+name = "solidcraft-gear"
+description = "Gear geometry: involute (spur, helical, internal, rack), cycloidal, bevel, worm, crossed and skew gears, their mesh and checks; pure math, no dependencies"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+# Spans round the planning stages (nothing recorded unless the app's profiler is on).
+solidcraft-profile = { workspace = true }
