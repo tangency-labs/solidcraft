@@ -11,7 +11,7 @@ use std::io::Read as _;
 
 use serde_json::Value;
 use solidcore::topology::vertex::corner;
-use solidcore_ops::boolean::{boolean, imprint, union_all};
+use solidcore_ops::boolean::{boolean, imprint, union_all, union_copies};
 use solidcore_ops::prism::extrude_planar_regions;
 use solidcore_ops::sweep::{extrude, join_arcs, revolve, zone_tolerance, Curve, DraftCorner, Join};
 use solidcore_ops::{
@@ -45,6 +45,22 @@ fn two_overlapping_boxes() {
     assert!(near(volume(&d), 7.0), "{}", volume(&d));
     let i = boolean(a(), b(), BooleanOp::Intersect).unwrap().unwrap();
     assert!(near(volume(&i), 1.0), "{}", volume(&i));
+}
+
+/// The public repro in solidcraft#20408 joins two swept parts along their matching collars.
+#[test]
+fn a_union_of_overlapping_collars_keeps_both_input_bodies() {
+    all_fixes();
+    let a = Body::from_smb(include_bytes!("data/issue_20408_hoop.smb").to_vec(), false).unwrap();
+    let b = Body::from_smb(include_bytes!("data/issue_20408_back.smb").to_vec(), false).unwrap();
+    let before = [volume(&a), volume(&b)];
+    let joined = union_copies(&a, &b).unwrap().unwrap();
+    assert_eq!(joined.solid_count().unwrap(), 1);
+    assert!(joined.check(CheckLevel::Geometry).unwrap().is_valid());
+    let joined_volume = volume(&joined);
+    assert!(joined_volume > before[0].max(before[1]) && joined_volume < before.iter().sum());
+    assert!(near(volume(&a), before[0]));
+    assert!(near(volume(&b), before[1]));
 }
 
 #[test]

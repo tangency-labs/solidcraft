@@ -1561,6 +1561,64 @@ fn mirror_of_a_join_on_a_hollow_part_copies_the_whole_boss_across_a_custom_plane
     assert!(rel(volume(&mut s), 79500.0) < 1e-6, "mirrored copy lost material");
 }
 
+#[test]
+fn a_join_extrude_mirrors_only_where_the_copy_connects_to_the_target() {
+    for (left, joins) in [(-10, true), (-7, true), (-6, false), (-4, false)] {
+        let mut s = Session::default();
+        run(&mut s, "solid.box", json!({"length": 10-left, "width": 8, "height": 4, "corner": [left, -4, 0], "body_name": "Plate"}));
+        run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Tab"}));
+        // The seed overlaps x=6..8. Its copy runs from x=-8 to -6, with the
+        // bottom of its extrusion on the plate's top. At x=-6 it shares only
+        // an edge, and at x=-4 it is completely detached.
+        run(&mut s, "sketch.rectangle.two_point", json!({"p0": [6, -1], "p1": [8, 1]}));
+        run(&mut s, "sketch.finish", json!({}));
+        run(
+            &mut s,
+            "solid.extrude",
+            json!({
+                "sketch": "Tab", "start_offset": 4, "distance": 3, "operation": "join",
+                "targets": ["Plate"], "name": "Join Tab"
+            }),
+        );
+        let seed_volume = (10 - left) as f64 * 8.0 * 4.0 + 2.0 * 2.0 * 3.0;
+        assert!(rel(volume(&mut s), seed_volume) < 1e-9);
+        let feature_count = s.doc.features.len();
+        let result = s.execute("solid.mirror", &json!({"features": ["Join Tab"], "plane": "YZ"}));
+        if joins {
+            assert!(result.is_ok(), "left side {left}: {result:?}");
+            assert!(rel(volume(&mut s), seed_volume + 12.0) < 1e-9);
+        } else {
+            let error = result.unwrap_err().to_string();
+            assert!(error.contains("leaves a separate solid"), "left side {left}: {error}");
+            assert_eq!(s.doc.features.len(), feature_count);
+            assert!(rel(volume(&mut s), seed_volume) < 1e-9);
+        }
+        assert_eq!(s.model.state().bodies.len(), 1);
+        assert_eq!(s.model.state().bodies[0].body.lumps().unwrap().len(), 1);
+    }
+}
+
+#[test]
+fn a_mirrored_join_cannot_trade_a_bridge_for_a_detached_profile() {
+    let mut s = Session::default();
+    for (name, length, width, corner) in [("Left A", 3, 3, [-8, -5, 0]), ("Left B", 3, 3, [-8, 2, 0]), ("Right", 5, 12, [4, -6, 0])] {
+        run(&mut s, "solid.box", json!({"length": length, "width": width, "height": 4, "corner": corner, "body_name": name}));
+    }
+    run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Tabs"}));
+    // One reflected profile bridges Left A and Left B. The other stays apart from both.
+    run(&mut s, "sketch.rectangle.two_point", json!({"p0": [6, -3], "p1": [8, 3]}));
+    run(&mut s, "sketch.rectangle.two_point", json!({"p0": [6, 5.5], "p1": [8, 6.5]}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.extrude", json!({"sketch": "Tabs", "start_offset": 3, "distance": 3, "operation": "join", "name": "Join Tabs"}));
+    let old_volume = volume(&mut s);
+    let feature_count = s.doc.features.len();
+    let error = s.execute("solid.mirror", &json!({"features": ["Join Tabs"], "plane": "YZ"})).unwrap_err().to_string();
+    assert!(error.contains("leaves a separate solid"), "{error}");
+    assert_eq!(s.doc.features.len(), feature_count);
+    assert_eq!(s.model.state().bodies.len(), 3);
+    assert!(rel(volume(&mut s), old_volume) < 1e-9);
+}
+
 /// A pure translation loses the same slice: the copy must be congruent to the original,
 /// whatever filled the space where its tool was rebuilt (#6452).
 #[test]

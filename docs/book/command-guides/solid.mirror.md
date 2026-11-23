@@ -5,6 +5,7 @@ Copy bodies or features to the other side of a plane: model half of a symmetric 
 - Make the half (or the feature) you want to copy first.
 - Choose what to copy with Object Type. Bodies copies whole solid bodies. Features repeats a step from the History, such as a Hole or a cut Extrude, on the other side of the same body.
 - A sketch is neither. To mirror sketch curves, use the sketch's own Mirror, or extrude the sketch first.
+- With Features, a Join extrude must join the target on the reflected side. A gap or contact only at an edge or point leaves the copy separate, so Mirror refuses it.
 - You need a plane to mirror about: an origin plane (XY, XZ or YZ), a construction plane, or a flat face of the part.
 
 #### Options
