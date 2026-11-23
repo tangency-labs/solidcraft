@@ -231,7 +231,7 @@ impl EdgeSetup {
     /// The edge of `body` a pick at `at` takes, as the blend takes it.
     fn new(body: &Body, at: Vec3) -> Result<EdgeSetup> {
         let (picked, _) = crate::blend_smlib::picked_edges(body, &[at])?;
-        let edge = *picked.first().ok_or_else(|| KernelError::Invalid(format!("no edge at {at:?}")))?;
+        let edge = *picked.first().ok_or_else(|| KernelError::Invalid(format!("no edge at {at}")))?;
         let rec = Faces::of(body)?;
         if !rec.straight(edge) {
             return Err(unsupported("only straight edges take a variable radius"));

@@ -1096,11 +1096,32 @@ impl Body {
 
     /// The face of `self` nearest `p` and its exact distance, or `None` for a mesh body or empty body.
     pub fn nearest_face(&self, p: Vec3) -> Option<(f64, usize)> {
-        let form = self.ops_body()?;
-        let (ops, order) = &*form;
         let reach = self.size().max(1.0) * 100.0;
-        let dists = ops.face_distances_within(order, &[[p.x, p.y, p.z]], reach).ok()?;
-        dists.into_iter().enumerate().filter_map(|(f, row)| Some((row.first().copied().flatten()?, f))).min_by(|a, b| a.0.total_cmp(&b.0))
+        self.nearest_face_query(p, reach).ok().flatten()
+    }
+
+    /// The face holding `p` within the body's modelling tolerance. Distances are to the exact
+    /// trimmed faces, including their circular rims, never to display triangles. At a shared
+    /// edge the nearest face wins, with record order breaking an exact tie. A point away from
+    /// every face (or a mesh body) holds no B-rep face.
+    pub fn face_at_point(&self, p: Vec3) -> Result<Option<usize>> {
+        let tolerance = self.record.tolerance;
+        Ok(self.nearest_face_query(p, tolerance)?.filter(|(d, _)| *d <= tolerance).map(|(_, face)| face))
+    }
+
+    /// The face nearest `p` by exact trimmed-face distance, provided it lies within `reach`.
+    /// This is for a pick that must keep an older, wider reach: the exact distance only
+    /// chooses between the faces near a rim, so a point near a curved face's display triangle
+    /// still finds that face. A mesh body holds no B-rep face.
+    pub fn face_within(&self, p: Vec3, reach: f64) -> Result<Option<usize>> {
+        Ok(self.nearest_face_query(p, reach)?.filter(|(d, _)| *d <= reach).map(|(_, face)| face))
+    }
+
+    fn nearest_face_query(&self, p: Vec3, reach: f64) -> Result<Option<(f64, usize)>> {
+        let Some(form) = self.ops_body() else { return Ok(None) };
+        let (ops, order) = &*form;
+        let dists = ops.face_distances_within(order, &[[p.x, p.y, p.z]], reach).map_err(|e| KernelError::Failed(format!("face at point: {e}")))?;
+        Ok(dists.into_iter().enumerate().filter_map(|(f, row)| Some((row.first().copied().flatten()?, f))).min_by(|a, b| a.0.total_cmp(&b.0)))
     }
 
     /// Exact polyline samples for each non-seam edge bordering `face` of `self`.
@@ -2022,7 +2043,7 @@ impl Body {
     /// it an odd number of times.
     pub fn classify_point(&self, p: Vec3) -> Result<PointClass> {
         if !(p.x.is_finite() && p.y.is_finite() && p.z.is_finite()) {
-            return Err(KernelError::Invalid(format!("point classification: the point {p:?} is not finite")));
+            return Err(KernelError::Invalid(format!("point classification: the point {p} is not finite")));
         }
         if let Some(m) = &self.mesh {
             let mesh = m.to_mesh();
@@ -2104,7 +2125,7 @@ impl Body {
     /// point's own solve). The first point that cannot be classified fails them all.
     pub fn classify_points(&self, points: &[Vec3]) -> Result<Vec<PointClass>> {
         if let Some(p) = points.iter().find(|p| !(p.x.is_finite() && p.y.is_finite() && p.z.is_finite())) {
-            return Err(KernelError::Invalid(format!("point classification: the point {p:?} is not finite")));
+            return Err(KernelError::Invalid(format!("point classification: the point {p} is not finite")));
         }
         if self.mesh.is_some() || points.len() < 2 {
             return points.iter().map(|&p| self.classify_point(p)).collect();
@@ -2124,9 +2145,10 @@ impl Body {
     /// faces that turns most toward the ray.
     pub fn fire_ray(&self, origin: Vec3, dir: Vec3) -> Result<Option<RayPick>> {
         let finite = |v: Vec3| v.x.is_finite() && v.y.is_finite() && v.z.is_finite();
-        let d = dir.normalized().filter(|d| finite(origin) && finite(*d)).ok_or_else(|| {
-            KernelError::Invalid(format!("ray: the origin {origin:?} and direction {dir:?} must be finite, the direction not zero"))
-        })?;
+        let d = dir
+            .normalized()
+            .filter(|d| finite(origin) && finite(*d))
+            .ok_or_else(|| KernelError::Invalid(format!("ray: the origin {origin} and direction {dir} must be finite, the direction not zero")))?;
         if let Some(m) = &self.mesh {
             return Ok(crate::meshbody::mesh_ray(m, origin, d).map(|(t, normal)| RayPick {
                 face: 0,

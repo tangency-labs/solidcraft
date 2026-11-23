@@ -70,6 +70,7 @@ pub mod dialog;
 mod input;
 mod schema_refs;
 pub mod swatches;
+pub mod ui;
 pub use input::check_input;
 pub use input::prepare_input;
 pub use input::strict_input_schema;
@@ -160,6 +161,7 @@ pub const CAPABILITIES: &[(&str, (u32, u32))] = &[
     ("formats", (0, 2)),
     ("forms", (0, 1)),
     ("storage", (0, 1)),
+    ("ui", (0, 1)),
 ];
 /// Older versions of [`CAPABILITIES`] the host still serves: plugins built against
 /// `craft:plugin@0.1.0` ([`WIT_0_1`]) run unchanged.
@@ -260,6 +262,29 @@ pub struct FileGrant {
     pub write: bool,
 }
 
+/// Folder access ordered for install-review prefill, from no access through read to write.
+/// Write includes requests with both flags. This comparison never authorizes file operations:
+/// runtime checks still use the grant's exact `read` and `write` flags.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+pub enum FileAccess {
+    None,
+    Read,
+    Write,
+}
+
+impl FileGrant {
+    /// The highest requested or granted access, only for comparing review starting values.
+    pub fn access(&self) -> FileAccess {
+        if self.write {
+            FileAccess::Write
+        } else if self.read {
+            FileAccess::Read
+        } else {
+            FileAccess::None
+        }
+    }
+}
+
 /// A runtime brackets a whole plugin call in one transaction. Guest failures roll it back.
 /// The app must retain its original state until commit, including its undo history.
 /// Granted file writes are staged until the guest succeeds and the app commits; rollback
@@ -334,6 +359,19 @@ pub trait PluginHost {
     }
     /// Discards the session [`PluginHost::evaluate_open`] opened.
     fn evaluate_close(&mut self) {}
+    /// Stage data for one declared panel in the calling plugin's namespace. Rollback must
+    /// discard these updates; successful updates are adopted once per rendered frame.
+    fn ui_set_data(&mut self, _panel: &str, _updates: &[ui::Datum]) -> Result<()> {
+        Err(HostError::Unsupported { reason: "plugin panels are unavailable".into() })
+    }
+    /// Clear a declared panel's data, under the same transaction as the entry.
+    fn ui_clear_data(&mut self, _panel: &str) -> Result<()> {
+        Err(HostError::Unsupported { reason: "plugin panels are unavailable".into() })
+    }
+    /// Change visibility only for a panel the calling plugin declared.
+    fn ui_show_panel(&mut self, _panel: &str, _visible: bool) -> Result<()> {
+        Err(HostError::Unsupported { reason: "plugin panels are unavailable".into() })
+    }
 }
 
 /// User-owned ceilings, separate from the package's exact content-approved request.
@@ -631,6 +669,9 @@ pub struct RuntimeManifest {
     /// plugin to migrate it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub data_format: Option<u32>,
+    /// Static panel declarations listed before the plugin is enabled.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ui: Option<ui::Declarations>,
 }
 impl RuntimeManifest {
     /// Whether this runtime is an importer (world `importer-plugin`). A runtime's entries are all
@@ -698,6 +739,12 @@ impl RuntimeManifest {
         }
         if self.commands.len() > 128 || self.commands.iter().any(|id| !valid_command_name(id)) {
             return Err(invalid("runtime.commands", "requires at most 128 exact command names"));
+        }
+        if let Some(ui) = &self.ui {
+            if self.is_importer() {
+                return Err(invalid("runtime.ui", "panels require a command plugin runtime"));
+            }
+            ui.validate(self)?;
         }
         self.permissions.validate()?;
         self.limits.validate()?;
@@ -978,6 +1025,16 @@ pub fn parse_manifest_for(text: &[u8], folder: &str, app: &str) -> Result<Manife
         return Err(invalid("runtime.listeners", "design listeners require capability design@0.1"));
     }
     check_storage(&manifest)?;
+    let has_ui = manifest.capabilities.iter().any(|cap| cap.starts_with("ui@"));
+    if has_ui && manifest.runtime.as_ref().is_none_or(RuntimeManifest::is_importer) {
+        return Err(invalid("capabilities", "ui requires a command plugin runtime"));
+    }
+    if has_ui && manifest.runtime.as_ref().and_then(|runtime| runtime.ui.as_ref()).is_none() {
+        return Err(invalid("runtime.ui", "ui@0.1 requires static panel declarations"));
+    }
+    if manifest.runtime.as_ref().and_then(|runtime| runtime.ui.as_ref()).is_some() && !has_ui {
+        return Err(invalid("runtime.ui", "panel declarations require ui@0.1"));
+    }
     Ok(manifest)
 }
 
