@@ -510,7 +510,7 @@ fn a_body_behind_the_cut_does_not_colour_the_cap() {
 /// opaque. Its back face used to paint the cap in its own colour where it faced the eye, so the
 /// sheet showed through from one side and not the other. Seen from either side of the sheet,
 /// hatched and plain, orthographic and in perspective, on the GPU and the CPU, the picture is the
-/// solid's alone.
+/// solid's alone but for the sheet's cut outline, the line where the section plane meets it.
 #[test]
 fn a_surface_inside_a_cut_solid_hides_under_the_cap() {
     let Some(c) = capturer() else { return };
@@ -540,10 +540,27 @@ fn a_surface_inside_a_cut_solid_hides_under_the_cap() {
                 cam.fov = fov;
                 let picture = |s: &Session| {
                     let sc = view::scene_with_guides(s, &cam, &s.section, Guides { grid: false, axes: false }).unwrap();
-                    (c.rgba(&sc, &cam, 300, 220).unwrap(), solidcraft_viewport::render(&sc, &cam, 300, 220).rgba)
+                    (c.rgba(&sc, &cam, 300, 220).unwrap(), solidcraft_viewport::render(&sc, &cam, 300, 220).rgba, sc.radius)
                 };
-                let ((gpu, cpu), (want_gpu, want_cpu)) = (picture(&with), picture(&alone));
-                let differ = |a: &[u8], b: &[u8]| pixels(a).zip(pixels(b)).filter(|(p, q)| p.iter().zip(q).any(|(x, y)| x.abs_diff(*y) > 8)).count();
+                let ((gpu, cpu, radius), (want_gpu, want_cpu, _)) = (picture(&with), picture(&alone));
+                // The sheet stands at y = 20 from z = 0 to 20, so the plane x = 20 cuts it in this
+                // segment, drawn 1.6 px wide: its antialiased pixels lie within 3 px of it. The
+                // sheet's kept 15 mm reach some 20 px or more to its side.
+                let end = |z: f64| cam.to_screen(Vec3::new(20.0, 20.0, z), 300.0, 220.0, radius).unwrap();
+                let ((ax, ay, _), (bx, by, _)) = (end(0.0), end(20.0));
+                let on_outline = |i: usize| {
+                    let (px, py) = ((i % 300) as f64 + 0.5, (i / 300) as f64 + 0.5);
+                    let (dx, dy) = (bx - ax, by - ay);
+                    let t = (((px - ax) * dx + (py - ay) * dy) / (dx * dx + dy * dy)).clamp(0.0, 1.0);
+                    (px - ax - t * dx).hypot(py - ay - t * dy) <= 3.0
+                };
+                let differ = |a: &[u8], b: &[u8]| {
+                    pixels(a)
+                        .zip(pixels(b))
+                        .enumerate()
+                        .filter(|(i, (p, q))| !on_outline(*i) && p.iter().zip(q).any(|(x, y)| x.abs_diff(*y) > 8))
+                        .count()
+                };
                 assert_eq!(
                     (differ(&gpu, &want_gpu), differ(&cpu, &want_cpu)),
                     (0, 0),

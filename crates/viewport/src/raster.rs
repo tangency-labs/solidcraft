@@ -1008,6 +1008,10 @@ mod tests {
                 let mut cam = Camera { distance: if fov > 0.0 { 60.0 / (fov * 0.5).tan() } else { 120.0 }, fov, ..Default::default() };
                 cam = cam.looking_from(from);
                 let want = render(&Scene { meshes: vec![solid()], radius: 40.0, clip: clip.clone(), ..Default::default() }, &cam, 240, 240);
+                // The sheet's kept half, 15 x 10 mm facing Y, as the picture shows it: 355 pixels
+                // orthographic, 227 in perspective (measured at the target, within a tenth).
+                let px_per_mm = 120.0 / cam.half_height();
+                let kept = 15.0 * 10.0 * cam.back().y.abs() * px_per_mm * px_per_mm;
                 for flip in [false, true] {
                     let scene = Scene { meshes: vec![sheet(flip), solid()], radius: 40.0, clip: clip.clone(), ..Default::default() };
                     let c = render(&scene, &cam, 240, 240);
@@ -1015,7 +1019,10 @@ mod tests {
                     assert_eq!(differ, 0, "fov {fov}, from {from:?}, flipped {flip}: the sheet shows through the cap in {differ} pixels");
                     let alone = render(&Scene { meshes: vec![sheet(flip)], radius: 40.0, clip: clip.clone(), ..Default::default() }, &cam, 240, 240);
                     let (lit, cap) = (green(&alone), hatched(&alone));
-                    assert!(lit > 300 && cap == 0, "fov {fov}, from {from:?}, flipped {flip}: the kept sheet alone: {lit} lit, {cap} hatched pixels");
+                    assert!(
+                        (lit as f64 - kept).abs() < 0.1 * kept && cap == 0,
+                        "fov {fov}, from {from:?}, flipped {flip}: the kept sheet alone: {lit} of {kept:.0} lit, {cap} hatched pixels"
+                    );
                 }
             }
         }
