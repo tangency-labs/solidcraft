@@ -62,7 +62,9 @@ use solidcore_step::topology::{
 const MAX_LEFT_OUT_ROUNDS: usize = 8;
 
 use geometry::R;
-pub use write::{WriteError, Written, write_body};
+pub use write::WriteError;
+pub use write::Written;
+pub use write::write_body;
 
 /// One body region read into a record.
 #[derive(Clone, Debug)]

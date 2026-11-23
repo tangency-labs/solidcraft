@@ -10065,8 +10065,8 @@ mod tests {
 
     /// #17689: the tolerance heal is on by default, a saved choice reads back as saved, and the
     /// preference reaches the kernel, which every STEP read and Repair consult: set off, the
-    /// kernel stops healing; set on, it heals again. (The kernel's switch is the process's: the
-    /// test holds it, as every test that turns it does.)
+    /// kernel stops healing; set on, it heals again. (The test holds the kernel's switch, as
+    /// every test that turns it does, so it turns for the test's thread alone.)
     #[test]
     fn heal_tolerance_defects_is_on_by_default_and_reaches_the_kernel() {
         use serde_json::json;
