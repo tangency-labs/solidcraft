@@ -29,14 +29,7 @@ pub(super) fn exported(s: &Session, bodies: &[String]) -> Option<Vec<u8>> {
 
 /// `scene` drawn over black and over white, unblended to straight RGBA.
 fn transparent(renderer: &crate::capture::Renderer, scene: &mut Scene, camera: &Camera, size: u32) -> Option<Vec<u8>> {
-    let mut draw = |backdrop: Rgb| {
-        scene.background = Some((backdrop, backdrop));
-        crate::capture::rgba_with(Some(renderer), scene, camera, size, size).ok().map(|p| p.rgba)
-    };
-    let over_black = draw(Rgb(0, 0, 0))?;
-    let mut over_white = draw(Rgb(255, 255, 255))?;
-    solidcraft_viewport::unblend(&mut over_white, &over_black);
-    Some(over_white)
+    crate::capture::rgba_transparent_with(Some(renderer), scene, camera, size, size).ok().map(|p| p.rgba)
 }
 
 /// What the thumbnail shows, in the bodies' colours, iso, fitted with the distance scaled by `zoom`.

@@ -1055,10 +1055,11 @@ into THIRD-PARTY-LICENSES.txt when `main` regenerates it.
 
 ## FreeCAD, Rhino and OpenUSD library
 
-FreeCAD `.FCStd` and Rhino `.3dm` files are read, and OpenUSD files read and written, with
+FreeCAD `.FCStd` and Rhino `.3dm` files are read, OpenUSD files read and written, and STEP and IGES
+files read when "Import with cadmpeg" is chosen, with
 [cadmpeg](https://github.com/cadmpeg/cadmpeg) 0.6.12 (Apache-2.0), linked as the crates `cadmpeg-core`,
-`cadmpeg-ir`, `cadmpeg-registry`, `cadmpeg-container`, `cadmpeg-codec-freecad`, `cadmpeg-codec-rhino`,
-`cadmpeg-codec-step`, `cadmpeg-codec-usd` and `cadmpeg-tessellate`
+`cadmpeg-ir`, `cadmpeg-registry`, `cadmpeg-container`, `cadmpeg-codec-freecad`, `cadmpeg-codec-iges`,
+`cadmpeg-codec-rhino`, `cadmpeg-codec-step`, `cadmpeg-codec-usd` and `cadmpeg-tessellate`
 in native and browser builds (`crates/io/src/native_cad.rs`). Only those open-format codecs are built: no
 default features, so cadmpeg's codecs for commercial CAD formats and its ShapeManager/ACIS
 codec are not compiled in. Its licence text is in THIRD-PARTY-LICENSES.txt; no code from it is
