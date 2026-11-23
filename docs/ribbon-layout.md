@@ -10,7 +10,7 @@ SKETCH appears during sketch editing; with Preferences › Interface › **Keep 
 
 | Tab | Section | Command ids, in menu order |
 |---|---|---|
-| MODEL | SKETCH | **`sketch.create`**, **`sketch.create3d`**, `sketch.edit`, `sketch.line3d`, `sketch.arc3d`, `sketch.spline3d`, `sketch.point3d` |
+| MODEL | SKETCH | **`sketch.create`**, `sketch.create3d`, `sketch.edit`, `sketch.line3d`, `sketch.arc3d`, `sketch.spline3d`, `sketch.spline3d.control_point`, `sketch.point3d` |
 | MODEL | CREATE | **`solid.extrude`**, **`solid.revolve`**, **`solid.hole`**, `solid.sweep`, `solid.loft`, `solid.box`, `solid.cylinder`, `solid.sphere`, `solid.torus`, `solid.cone`, `solid.pipe`, `solid.bounding_solid`, `solid.thread`, `solid.boundary_fill`, `solid.coil`, `solid.rib`, `solid.web`, `solid.emboss`, `plastic.boss`, `plastic.lip`, `plastic.snap_fit`, `plastic.rest` |
 | MODEL | MODIFY | **`solid.fillet`**, **`solid.chamfer`**, **`solid.shell`**, **`solid.press_pull`**, `sheet.convert`, `solid.combine`, `solid.scale`, `solid.offset_face`, `solid.draft`, `solid.split_face`, `solid.split_body`, `solid.replace_face`, `solid.remove`, `timeline.delete`, `face.delete` |
 | MODEL | ARRANGE | **`solid.move`**, **`solid.mirror`**, **`solid.pattern.rectangular`**, `solid.align`, `solid.pattern.circular`, `solid.pattern.path` |
@@ -124,7 +124,7 @@ Explicit command-id lists override the default placement mapping. Shared command
 - Save As Mesh (`file.save_mesh`), previously MESH / MODIFY, is in INSERT / FILES. The existing File menu continues to offer it.
 - The selection filter, previously in SELECT on multiple tabs including UTILITIES, is in VIEW / SELECT. This is a populated control group, although it has no command ids.
 - MODEL’s Pattern button uses the existing `solid.pattern.rectangular` command; Circular and Path stay in its menu. No generic pattern command is registered.
-- 3D Sketch (`sketch.create3d`, #19426) starts a 3D sketch with no plane to choose and opens 3D Line in it. MODEL / SKETCH also lists the 3D line, arc, spline and point commands, which need a 3D sketch open. Infinite Line (`sketch.infinite`) is in SKETCH / CREATE.
+- 3D Sketch (`sketch.create3d`, #19426) starts a 3D sketch with no plane to choose and opens 3D Line in it. MODEL / SKETCH also lists the 3D line, arc, spline, control point spline and point commands, which need a 3D sketch open. Infinite Line (`sketch.infinite`) is in SKETCH / CREATE.
 - Physical Properties maps to the existing `component.properties` command. Material data checks map to `material.properties.validate`. Calibrate maps to the existing canvas editor (`canvas.edit`).
 - VIEW / VIEWS lists the existing named-view and navigation commands. Display, Show, Agent and Window are omitted: their requested settings have no engine commands. No Fit or Orientation commands were invented.
 - RENDER / IMAGE exposes the already registered `render.start`, which previously had no visible panel. The Render workspace and its existing SCENE command are preserved.

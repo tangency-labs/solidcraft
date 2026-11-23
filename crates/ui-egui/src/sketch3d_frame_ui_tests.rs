@@ -485,10 +485,10 @@ fn point3d_tool_places_points_and_stays() {
     assert!(h.app.tool.as_ref().is_some_and(|t| t.cmd == "sketch.point3d"), "the tool stays for the next point");
 }
 
-/// 3D Sketch (#19426): the ribbon button asks for no plane. A 3D sketch opens with 3D Line running
-/// in it, as one undo step, and the view stays where it was.
+/// 3D Sketch (#19426), in the menu of the Model tab's Sketch panel, asks for no plane. A 3D sketch
+/// opens with 3D Line running in it, as one undo step, and the view stays where it was.
 #[test]
-fn create3d_button_opens_a_3d_sketch_with_3d_line_and_no_plane_to_pick() {
+fn create3d_in_the_sketch_panel_menu_opens_a_3d_sketch_with_3d_line_and_no_plane_to_pick() {
     let mut h = crate::scenario::Harness::new();
     h.app.run("solid.box", json!({"corner":[10,0,5],"length":10,"width":10,"height":5,"body_name":"Create3d"})).unwrap();
     h.app.session.visibility.origin_hidden = Some(true);
@@ -497,7 +497,12 @@ fn create3d_button_opens_a_3d_sketch_with_3d_line_and_no_plane_to_pick() {
     h.frames(3);
     let before = h.app.settled_cam();
     let undo = h.app.session.undo.len();
-    h.step(&json!({"click": {"handle": "button:sketch.create3d"}})).unwrap();
+    // New Sketch stays the panel's only button: 3D Sketch is in the panel's menu.
+    assert!(crate::scenario::handle_at("button:sketch.create").is_some());
+    assert!(crate::scenario::handle_at("button:sketch.create3d").is_none(), "the default buttons are unchanged");
+    h.step(&json!({"click": {"handle": "panel:MODEL:SKETCH"}})).unwrap();
+    h.frames(4);
+    h.step(&json!({"click": {"handle": "dropdown:sketch.create3d"}})).unwrap();
     h.frames(3);
     assert!(h.app.dialog.is_none(), "3D Sketch asks for no plane");
     let sketch = h.app.session.active_sketch.expect("3D Sketch opens a sketch");

@@ -558,7 +558,7 @@ pub const SECTIONS: &[Section] = &[
     Section {
         tab: "MODEL",
         panel: "SKETCH",
-        promoted: 2,
+        promoted: 1,
         ids: &[
             "sketch.create",
             "sketch.create3d",
@@ -1700,7 +1700,7 @@ mod tests {
     fn model_defaults_and_shared_commands_follow_the_map() {
         let specs = solidcraft_engine::command_specs();
         for (panel, expected) in [
-            ("SKETCH", vec!["sketch.create", "sketch.create3d"]),
+            ("SKETCH", vec!["sketch.create"]),
             ("CREATE", vec!["solid.extrude", "solid.revolve", "solid.hole"]),
             ("MODIFY", vec!["solid.fillet", "solid.chamfer", "solid.shell", "solid.press_pull"]),
             ("ARRANGE", vec!["solid.move", "solid.mirror", "solid.pattern.rectangular"]),
@@ -1716,6 +1716,7 @@ mod tests {
             ("SHEET METAL", "CREATE", "sheet.convert"),
             ("SHEET METAL", "SKETCH", "sketch.create"),
             ("SURFACE", "SKETCH", "sketch.create"),
+            ("MODEL", "SKETCH", "sketch.create3d"),
             ("SKETCH", "REFERENCE", "canvas.insert"),
         ] {
             assert!(layout(tab, panel, &specs).unwrap().0.iter().any(|c| c.id == id));

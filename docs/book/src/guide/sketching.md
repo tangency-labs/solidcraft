@@ -398,11 +398,11 @@ point: the curve stays smooth along its whole length. The Control Point Spline t
 tab draws the same curve when a click leaves the sketch plane. Pipe, Sweep and Loft follow either
 kind of spline as a path or a rail.
 
-**3D Sketch** in the Model tab's Sketch panel starts such a sketch in one step: it asks for no
-plane, turns 3D Sketch on and starts 3D Line, and the view stays as it is. The sketch rests on
-the XY origin plane of the active component, so a click in empty space lands there. To leave
-that plane, snap to a vertex, edge or face of the model or to a point already drawn in 3D, or
-finish the line, click one of its points and drag the X, Y or Z arrow.
+**3D Sketch**, in the menu of the Model tab's Sketch panel, starts such a sketch in one step: it
+asks for no plane, turns 3D Sketch on and starts 3D Line, and the view stays as it is. The sketch
+rests on the XY origin plane of the active component, so a click in empty space lands there. To
+leave that plane, snap to a vertex, edge or face of the model or to a point already drawn in 3D,
+or finish the line, click one of its points and drag the X, Y or Z arrow.
 
 Enable **Select 3D sketch curve points** in **Preferences > Sketch** to show and select drawn
 3D curve points as construction references after finishing the sketch. This option is off by default.
