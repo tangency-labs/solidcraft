@@ -806,8 +806,7 @@ fn a_session_run_step_by_step_reads_its_rounds_as_do_fillet_does() {
         ),
         "step by step {step_counts:?}, do_fillet {whole_counts:?}"
     );
-    // both read the round through its net (the stations left are the trim curves' drops,
-    // solved on S)
+    // both read the round through its net
     assert!(
         whole_counts.net_evaluations > 0,
         "do_fillet {whole_counts:?}"
