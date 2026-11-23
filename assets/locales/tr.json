@@ -2980,7 +2980,7 @@
   "plugin_error.design_too_large": "oluşturduğu tasarım, bir eklentinin aktarabileceği en yüksek sınır olan {allowed} MiB boyutundan büyük.",
   "plugin_error.failed": "{plugin}: {reason}",
   "plugin_error.failed_file": "{plugin}, {file} dosyasını açamadı: {reason}",
-  "plugin_error.fuel_ceiling": "{requested} yakıt istiyor, eklentiler ise {allowed} kullanabilir. Tercihler › Eklentiler bölümünden Maks. eklenti yakıtı değerini yükseltin (solidcraft-cli içinde --plugin-limits dosyasındaki max_fuel).",
+  "plugin_error.fuel_ceiling": "{requested} yakıt istiyor, eklentiler ise {allowed} kullanabilir. Eklentiyi yeniden yükleyip yakıt isteğine izin verin veya Tercihler › Eklentiler bölümünden Maks. eklenti yakıtı değerini yükseltin (solidcraft-cli içinde --plugin-limits dosyasındaki max_fuel).",
   "plugin_error.memory_ceiling": "{requested} MiB bellek istiyor, eklentiler ise {allowed} MiB kullanabilir. Eklentiyi yeniden yükleyip bellek isteğine izin verin veya Tercihler › Eklentiler bölümünden Maks. eklenti belleği (MiB) değerini yükseltin (solidcraft-cli içinde --plugin-limits dosyasındaki max_memory_mib).",
   "plugin_error.out_of_fuel": "istediği {allowed} yakıtın tamamını kullandı ve durduruldu. Geliştiricisinden yakıt sınırını artırmasını isteyin.",
   "plugin_error.out_of_memory": "istediği {allowed} MiB bellekten daha fazlasına ihtiyaç duydu ve durduruldu. Geliştiricisinden bellek sınırını artırmasını isteyin.",

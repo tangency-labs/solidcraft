@@ -362,6 +362,10 @@ pub struct FilletCorner {
     /// two fillet edges, on the end face and on the wall, meeting at the seam, and the cap is
     /// two faces, one on each, split along the seam's line ([`FilletCorner::wide_cap`]).
     pub(crate) seam_cap: Option<SeamCap>,
+    /// Not upstream (#17605): the face of the target an Nx1 End ends on, set by its topology
+    /// (`finish_nx1_end`). The executive's extended surfaces are shared by all its corners, so
+    /// a face having one does not make it this corner's end face.
+    pub(crate) end_face: Option<FaceId>,
 }
 
 /// Not upstream (#10876): an Nx1 End whose rib and cap span the end face and the wall across
@@ -725,6 +729,7 @@ impl FilletCorner {
             turned_back_arcs: [None, None],
             roll_over: false,
             seam_cap: None,
+            end_face: None,
         }
     }
 
