@@ -1245,3 +1245,146 @@ fn an_exporter_reaches_no_file_even_through_a_command_its_manifest_lists() {
     let (_, failure) = crate::run_export(App::default(), &exporter_manifest(), &files_component(true, false), "copy", &json!({}));
     assert!(failure.is_err());
 }
+
+/// An empty folder for one compile-cache test. Wasmtime's cache wants an absolute path.
+fn cache_folder() -> PathBuf {
+    let root = std::env::temp_dir().join(format!("craft-plugin-cache-{}-{}", std::process::id(), NEXT_FILE.fetch_add(1, Ordering::Relaxed)));
+    std::fs::create_dir_all(&root).unwrap();
+    std::fs::canonicalize(root).unwrap()
+}
+/// The compiled entries Wasmtime's cache wrote under `root`, leaving out its usage-statistics files.
+fn cache_entries(root: &Path) -> Vec<PathBuf> {
+    let mut found = Vec::new();
+    let Ok(versions) = std::fs::read_dir(root.join("modules")) else { return found };
+    for version in versions.flatten() {
+        for entry in std::fs::read_dir(version.path()).unwrap().flatten() {
+            if !entry.file_name().to_string_lossy().contains('.') {
+                found.push(entry.path());
+            }
+        }
+    }
+    found.sort();
+    found
+}
+fn compile_cached(bytes: &[u8], cache: &wasmtime::Cache) -> Result<(Engine, Component)> {
+    compile_with(bytes, 512 * 1024, Some(cache.clone()))
+}
+#[test]
+fn a_compiled_component_is_read_back_from_the_disk_cache_by_a_new_engine() {
+    let root = cache_folder();
+    let cache = open_disk_cache(&root).unwrap();
+    let bytes = importer_component();
+    let (engine, component) = compile_cached(&bytes, &cache).unwrap();
+    let first = check_imports(&engine, &component).unwrap();
+    assert_eq!((cache.cache_hits(), cache.cache_misses(), cache_entries(&root).len()), (0, 1, 1));
+    // Every compile makes a new engine, as a new session does: this one reads the entry back.
+    let (engine, component) = compile_cached(&bytes, &cache).unwrap();
+    assert_eq!(check_imports(&engine, &component).unwrap(), first);
+    assert_eq!((cache.cache_hits(), cache.cache_misses(), cache_entries(&root).len()), (1, 1, 1));
+    // Entries live under a folder named for the compiler and its version, so another Wasmtime never reads them.
+    let versions: Vec<String> =
+        std::fs::read_dir(root.join("modules")).unwrap().flatten().map(|v| v.file_name().to_string_lossy().into_owned()).collect();
+    assert!(versions.len() == 1 && versions[0].starts_with("wasmtime-"), "{versions:?}");
+    let _ = std::fs::remove_dir_all(root); // best effort: Wasmtime's cache worker may still be writing here
+}
+#[test]
+fn a_changed_component_or_compile_setting_gets_its_own_cache_entry() {
+    let root = cache_folder();
+    let cache = open_disk_cache(&root).unwrap();
+    compile_cached(&importer_component(), &cache).unwrap();
+    // A plugin update: other bytes, another entry, never the old code.
+    compile_cached(&component("call $box"), &cache).unwrap();
+    assert_eq!((cache.cache_hits(), cache.cache_misses(), cache_entries(&root).len()), (0, 2, 2));
+    // The same module under another setting is another entry too: the key covers the
+    // configuration, fuel metering included.
+    let module = wat::parse_str(r#"(module (func (export "run") (loop br 0)))"#).unwrap();
+    for fuel in [true, false, true] {
+        let mut config = Config::new();
+        config.cache(Some(cache.clone())).consume_fuel(fuel).epoch_interruption(true);
+        wasmtime::Module::new(&Engine::new(&config).unwrap(), &module).unwrap();
+    }
+    assert_eq!((cache.cache_hits(), cache.cache_misses(), cache_entries(&root).len()), (1, 4, 4));
+    let _ = std::fs::remove_dir_all(root); // best effort: Wasmtime's cache worker may still be writing here
+}
+#[test]
+fn fuel_still_stops_code_read_back_from_the_disk_cache() {
+    let root = cache_folder();
+    let cache = open_disk_cache(&root).unwrap();
+    let module = wat::parse_str(r#"(module (func (export "run") (loop br 0)))"#).unwrap();
+    for _ in 0..2 {
+        let mut config = Config::new();
+        config.cache(Some(cache.clone())).consume_fuel(true).epoch_interruption(true);
+        let engine = Engine::new(&config).unwrap();
+        let module = wasmtime::Module::new(&engine, &module).unwrap();
+        let mut store = wasmtime::Store::new(&engine, ());
+        store.set_fuel(10_000).unwrap();
+        store.set_epoch_deadline(u64::MAX);
+        let instance = wasmtime::Instance::new(&mut store, &module, &[]).unwrap();
+        let run = instance.get_typed_func::<(), ()>(&mut store, "run").unwrap();
+        let failure = run.call(&mut store, ()).unwrap_err();
+        assert_eq!(failure.downcast_ref::<wasmtime::Trap>(), Some(&wasmtime::Trap::OutOfFuel));
+    }
+    assert_eq!((cache.cache_hits(), cache.cache_misses()), (1, 1));
+    let _ = std::fs::remove_dir_all(root); // best effort: Wasmtime's cache worker may still be writing here
+}
+#[test]
+fn a_damaged_or_mismatched_cache_entry_is_compiled_again() {
+    let root = cache_folder();
+    let cache = open_disk_cache(&root).unwrap();
+    let bytes = importer_component();
+    compile_cached(&bytes, &cache).unwrap();
+    let [entry] = cache_entries(&root).try_into().unwrap();
+    let good = std::fs::read(&entry).unwrap();
+    // An entry compiled under another configuration (no fuel metering), put where this one's
+    // key points: Wasmtime checks the settings recorded in it and refuses it.
+    let other_root = cache_folder();
+    let other = open_disk_cache(&other_root).unwrap();
+    let mut config = Config::new();
+    config.cache(Some(other)).consume_fuel(false).epoch_interruption(true).wasm_memory64(false).wasm_multi_memory(false).max_wasm_stack(512 * 1024);
+    config.async_stack_size(512 * 1024 + (1 << 20));
+    Component::from_binary(&Engine::new(&config).unwrap(), &bytes).unwrap();
+    let [mismatched] = cache_entries(&other_root).try_into().unwrap();
+    let mismatched = std::fs::read(mismatched).unwrap();
+    for (damage, contents) in [
+        ("not compressed data", b"not a cache entry".to_vec()),
+        ("cut short", good[..good.len() / 2].to_vec()),
+        ("empty", Vec::new()),
+        ("another configuration's code", mismatched),
+    ] {
+        std::fs::write(&entry, &contents).unwrap();
+        let misses = cache.cache_misses();
+        let (engine, component) = compile_cached(&bytes, &cache).unwrap_or_else(|e| panic!("{damage}: {e}"));
+        check_imports(&engine, &component).unwrap_or_else(|e| panic!("{damage}: {e}"));
+        assert_eq!(cache.cache_misses(), misses + 1, "{damage}");
+        // The compile wrote a good entry back in its place, which the next compile reads.
+        let hits = cache.cache_hits();
+        compile_cached(&bytes, &cache).unwrap();
+        assert_eq!(cache.cache_hits(), hits + 1, "{damage}");
+    }
+    let _ = std::fs::remove_dir_all(root); // best effort: Wasmtime's cache worker may still be writing here
+    let _ = std::fs::remove_dir_all(other_root); // best effort: Wasmtime's cache worker may still be writing here
+}
+#[test]
+fn a_cache_folder_that_cannot_be_made_or_written_still_compiles() {
+    let root = cache_folder();
+    // A file where the folder should be: the cache can't be opened, and compiling works as before.
+    let blocked = root.join("blocked");
+    std::fs::write(&blocked, b"a file").unwrap();
+    assert!(open_disk_cache(&blocked.join("plugin-compile")).is_none());
+    compile_with(&importer_component(), 512 * 1024, None).unwrap();
+    // A folder that opens but can't be written: every compile still succeeds.
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let read_only = root.join("read-only");
+        std::fs::create_dir_all(&read_only).unwrap();
+        let cache = open_disk_cache(&read_only).unwrap();
+        std::fs::set_permissions(&read_only, std::fs::Permissions::from_mode(0o555)).unwrap();
+        for _ in 0..2 {
+            let (engine, component) = compile_cached(&importer_component(), &cache).unwrap();
+            check_imports(&engine, &component).unwrap();
+        }
+        std::fs::set_permissions(&read_only, std::fs::Permissions::from_mode(0o755)).unwrap();
+    }
+    let _ = std::fs::remove_dir_all(root); // best effort: Wasmtime's cache worker may still be writing here
+}

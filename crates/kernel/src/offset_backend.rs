@@ -51,6 +51,17 @@ fn refused(op: &str, wall: Option<f64>, e: SmError) -> KernelError {
             let largest = largest.map(|w| format!("; the largest wall that works is {} mm", crate::blend::trimmed_mm(w))).unwrap_or_default();
             KernelError::Invalid(format!("{op}: the wall is thicker than a face curves, so the face's offset would fold{largest}"))
         }
+        // A face the drafted face runs into without meeting it, a hole's wall near the side
+        // (#19686): the draft trims only the faces around the drafted one.
+        SmError::DraftCutsThrough { at: [x, y, z], depth } => KernelError::Invalid(format!(
+            "{op}: the drafted face would cut through the face at ({}, {}, {}), which reaches at least {} mm past it \
+             without meeting it (a hole's or pocket's wall near the side); a draft only extends or trims the faces around \
+             the drafted face: use a smaller draft angle, or move that face farther from the drafted one",
+            crate::blend::trimmed_mm(x),
+            crate::blend::trimmed_mm(y),
+            crate::blend::trimmed_mm(z),
+            crate::blend::trimmed_mm(depth)
+        )),
         SmError::NoMatch { point } => KernelError::Invalid(format!("{op}: no face at selection point {}", point + 1)),
         SmError::Ambiguous { point } => KernelError::Invalid(format!("{op}: selection point {} is as near to two faces", point + 1)),
         SmError::Unsupported => KernelError::Failed(format!("not supported yet: SMLib {op} for this geometry")),
