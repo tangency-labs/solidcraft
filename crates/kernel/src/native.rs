@@ -98,8 +98,12 @@ pub(crate) fn body_from_smlib_ordered(brep: &solidcraft_smlib::Brep) -> Result<(
 /// order: SMLib's export of the imported body, checked to number every face, edge and vertex as
 /// the body's record does. `None` where it does not.
 pub(crate) fn smlib_body_ordered(body: &Body) -> Result<(solidcraft_smlib::Brep, Option<solidcraft_smlib::history::Order>)> {
-    let brep = smlib_body(body)?;
-    Ok((brep.try_clone().map_err(|e| KernelError::smlib("SMLib", e))?, numbering(body.record(), &brep)))
+    let _span = solidcraft_profile::span("kernel", "smlib_body");
+    // The numbering is read from the body's own SMLib form, which a copy of it numbers alike: one
+    // copy for the operation, not a second one only to be read.
+    let shared = body.smlib()?;
+    let order = numbering(body.record(), &shared);
+    Ok((shared.try_clone().map_err(|e| KernelError::smlib("SMLib", e))?, order))
 }
 
 /// `body` in SMLib as a boolean's operand with the solids it keeps apart where they touch along
