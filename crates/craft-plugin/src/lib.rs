@@ -32,6 +32,9 @@ pub const MAX_IMPORTER_DEADLINE_MS: u64 = 600_000;
 pub const MAX_EXTENSIONS: usize = 32;
 /// Memory32 has at most 65536 pages of 64 KiB.
 pub const MAX_MEMORY_MIB: usize = 4096;
+/// Hard ceiling for fuel approved at install: ten trillion fuel units (10^13).
+/// The user's Max plugin fuel remains the default for packages without an approval.
+pub const MAX_APPROVED_FUEL: u64 = 10_000_000_000_000;
 
 pub type Result<T> = std::result::Result<T, HostError>;
 
@@ -133,7 +136,12 @@ fn over_ceiling(limit: &str, requested: u64, allowed: u64) -> String {
         "memory_mib" => format!(
             "asks for {requested} MiB of memory, more than the {allowed} MiB plugins may use; allow its memory request when you install it, or raise the memory ceiling for plugins"
         ),
-        "fuel" => format!("asks for {requested} fuel, more than the {allowed} plugins may use; raise the fuel ceiling for plugins"),
+        "fuel" if requested > MAX_APPROVED_FUEL && allowed == MAX_APPROVED_FUEL => {
+            format!("asks for {requested} fuel, more than the hard host ceiling of {allowed} that may be approved at install")
+        }
+        "fuel" => format!(
+            "asks for {requested} fuel, more than the {allowed} plugins may use; allow its fuel request when you install it, or raise the fuel ceiling for plugins"
+        ),
         _ => format!("asks for {requested} {limit}, more than the {allowed} plugins may use"),
     }
 }
