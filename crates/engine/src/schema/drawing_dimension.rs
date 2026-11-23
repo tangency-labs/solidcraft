@@ -306,7 +306,7 @@ pub enum KindParam {
         #[schemars(with = "String")]
         reading: Option<Reading>,
     },
-    /// A straight edge's length.
+    /// A straight edge's length, or the length of the line a round edge the view sees edge-on draws.
     Length {
         edge: EdgeParam,
         #[serde(default, deserialize_with = "super::present", skip_serializing_if = "Option::is_none")]
@@ -573,10 +573,14 @@ pub struct DimensionResult {
     /// Whether a measured line leaves the view's plane, so the view shows it shorter.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub foreshortened: Option<bool>,
-    /// What it shows: the text given, else the number in the drawing's units; none for a chain,
-    /// which shows its members'.
+    /// What it shows: its text with `{value}` filled in, else the number in the drawing's units;
+    /// none for a chain, which shows its members'.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub text: Option<String>,
+    /// Its measured number as it reads with no text of its own, whenever it is measured: what a
+    /// dimension whose text hides it would show again.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub measured_text: Option<String>,
     /// A chain's members, from its first point to its last.
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub members: Vec<MemberResult>,

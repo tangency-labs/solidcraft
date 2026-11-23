@@ -379,10 +379,11 @@ fn restarted(surface: &BSurface, s: f64, period: f64) -> Option<BSurface> {
 
 impl Assembly<'_> {
     /// Start every B-spline surface closed around u that a face lies across the start of, without
-    /// winding round it, in the middle of the widest stretch of u the face leaves free: the face's
-    /// pcurves then run inside the surface's knots, as a kernel's trims have to (one crossing the
-    /// start had its pcurve clamped there, mm off its edge). Exact ([`restarted`]). Returns how
-    /// many surfaces were started anew.
+    /// winding round it, in the middle of the widest stretch of u the face leaves free, or at the
+    /// face's own seam where it goes once round bounded by one: the face's pcurves then run inside
+    /// the surface's knots, as a kernel's trims have to (one crossing the start had its pcurve
+    /// clamped there, mm off its edge). Exact ([`restarted`]). Returns how many surfaces were
+    /// started anew.
     pub(crate) fn start_splines_clear_of_faces(&mut self) -> R<usize> {
         let mut turned = 0;
         for fi in 0..self.faces.len() {
@@ -396,12 +397,13 @@ impl Assembly<'_> {
             let poles: Vec<Vec3> = spline_axis(&face.surface, &eval).iter().flat_map(|ax| ax.poles.iter().flatten().copied()).collect();
             // How far along u each loop of the face reaches, followed round from its first point
             // (unwrapped across the start); a face winding round is the seams' to handle. The
-            // widest loop bounds the face.
-            let mut widest: Option<(f64, f64)> = None;
+            // widest loop bounds the face, with the seam it has: an edge it uses twice.
+            let mut widest: Option<(f64, f64, Option<u32>)> = None;
             let mut winds = false;
             for l in &face.loops {
                 let Bound::Edges(es) = l else { continue };
                 winds |= self.winding(&eval, es, [Some(period), None], &poles)?[0] != 0;
+                let seam = es.iter().enumerate().find_map(|(i, &(e, _))| es.get(i + 1..)?.iter().any(|&(f, _)| f == e).then_some(e));
                 let mut last: Option<f64> = None;
                 let (mut lo, mut hi) = (f64::INFINITY, f64::NEG_INFINITY);
                 for &(e, _) in es {
@@ -416,22 +418,45 @@ impl Assembly<'_> {
                         last = Some(u);
                     }
                 }
-                if hi - lo > widest.map_or(f64::NEG_INFINITY, |(a, b)| b - a) {
-                    widest = Some((lo, hi));
+                if hi - lo > widest.map_or(f64::NEG_INFINITY, |(a, b, _)| b - a) {
+                    widest = Some((lo, hi, seam));
                 }
             }
-            let Some((lo, hi)) = widest else { continue };
+            let Some((lo, hi, seam)) = widest else { continue };
             // Across the start: a whole number of periods from it lies inside the reach, clear of
             // its ends (a face that only meets the start there runs inside the knots already).
             let start = u0 + ((hi - u0) / period).floor() * period;
             let clear = 1e-9 * period;
             let crossing = hi - start > clear && start - lo > clear;
-            if winds || !crossing || !(hi - lo < period) {
+            if winds {
                 continue;
             }
-            // The middle of the stretch the face leaves free.
-            let free = hi + 0.5 * (period - (hi - lo));
-            let at = u0 + (free - u0).rem_euclid(period);
+            let at = if hi - lo < period {
+                if !crossing {
+                    continue;
+                }
+                // The middle of the stretch the face leaves free.
+                let free = hi + 0.5 * (period - (hi - lo));
+                u0 + (free - u0).rem_euclid(period)
+            } else if let Some(e) = seam {
+                // A whole turn bounded by its own seam (the edges are followed along their
+                // curves, so a band's reach is two turns): started at the seam where that is off
+                // the start (a band round a hole as a general placement writes it, #18779), so
+                // the seam's two uses are the knots' two ends, a period apart. Off the start,
+                // both were given the seam's one u inside the knots, and the band enclosed no
+                // (u, v) area.
+                let edge = self.edges.get(e as usize).ok_or("edge reference")?;
+                let c = CurveEval::new(&edge.curve).map_err(|m| m.to_string())?;
+                let [a, b] = edge.interval;
+                let Some(q) = c.point(0.5 * (a + b)).and_then(|p| eval.project(p, None, f64::INFINITY)) else { continue };
+                let at = u0 + (q[0] - u0).rem_euclid(period);
+                if at - u0 <= clear || u0 + period - at <= clear {
+                    continue;
+                }
+                at
+            } else {
+                continue;
+            };
             let Some(surface) = restarted(&face.surface, at, period) else { continue };
             if let Some(f) = self.faces.get_mut(fi) {
                 f.surface = surface;
@@ -799,7 +824,7 @@ impl Assembly<'_> {
             }
         }
         let i = index(self.edges.len())?;
-        self.edges.push(EdgeB { curve, interval, vertices, tolerance: self.tol, form: None });
+        self.edges.push(EdgeB { curve, interval, vertices, tolerance: self.tol, pcurve_tolerance: self.pcurve_tolerance(), form: None });
         Ok(i)
     }
 
@@ -901,8 +926,9 @@ impl Assembly<'_> {
     /// rest so: read as the patch turned over, the solid came in with both faces on the patch
     /// and no volume. Turning such a face over is still right where the file has its loop the
     /// wrong way round, so a face is completed only where a face it shares an edge with lies on
-    /// the same torus facing the same way: then the patch is that face's, and this one is the
-    /// rest. The face gets the torus's two seams (a circle round the axis and one round the
+    /// a torus facing the same way: then the patch is that face's, and this one is the rest. That
+    /// torus may be another: two rings joined into one body are each the torus less the disc of
+    /// it inside the other (#20550). The face gets the torus's two seams (a circle round the axis and one round the
     /// tube, through a new vertex, in the middle of the widest stretches of longitude and tube
     /// angle its loops keep clear of, where its torus is turned to start) as its outer bound,
     /// and its loops become its holes. A face on a sphere is completed the same way
@@ -989,17 +1015,12 @@ impl Assembly<'_> {
                     break;
                 }
             }
-            let tol = self.tol;
-            let same = |s: &BSurface| match s {
-                BSurface::Torus { frame, major_radius: major, minor_radius: minor, .. } => {
-                    let (go, gz) = (Vec3::from(frame.origin), Vec3::from(frame.x_axis).cross(Vec3::from(frame.y_axis)));
-                    go.dist(o) <= tol
-                        && gz.cross(z).len() * (major_radius + minor_radius) <= tol
-                        && (major_radius - major).abs() <= tol
-                        && (minor_radius - minor).abs() <= tol
-                }
-                _ => false,
-            };
+            // The patch is a face of a torus facing the same way: this torus, or another (a union
+            // of two rings is the torus of each less the part inside the other, so each face's
+            // loop bounds a patch of the other's torus). Not a sphere: a sphere's face is completed
+            // only beside a sphere, so a torus beside a sphere would be completed alone and the
+            // pair would close as the torus less the sphere; such a pair stays refused.
+            let same = |s: &BSurface| matches!(s, BSurface::Torus { .. });
             if !outside || !self.patch_beside(fi, &loops, &users, same) {
                 continue;
             }
@@ -1505,6 +1526,46 @@ impl Assembly<'_> {
         self.use_at(fi, li, v)
     }
 
+    /// Vertex `vb`, which the file puts a hair off the ruling through vertex `va` (within the
+    /// tolerance, as two loops' start vertices written to their own rounding are), moved onto that
+    /// ruling at its own height. The seam is then the ruling itself, an isoline of the surface,
+    /// with a vertex at each end. Left as the line between the two points, it slants across the
+    /// surface's seam by that hair, so the vertex that is off the seam line is a vertex "near the
+    /// seam" to SMLib's check ("Face Near missing Seam"), which the isoline's end vertices are
+    /// not. The vertex's tolerance is raised to cover its move and the ends of the edges that
+    /// already meet it, as a new edge's covers its gap.
+    /// A vertex already on the ruling (to 1e-10 mm), or one the surface cannot place there, stays as it is.
+    fn seat_on_ruling(&mut self, va: u32, vb: u32, d: usize, eval: &SurfaceEval) -> R<()> {
+        let (pa, pb) = (self.vpoint(va)?, self.vpoint(vb)?);
+        let Some(qa) = eval.project(pa, None, f64::INFINITY) else { return Ok(()) };
+        let Some(mut q) = eval.project(pb, Some(qa), f64::INFINITY) else { return Ok(()) };
+        let (Some(&ua), Some(slot)) = (qa.get(d), q.get_mut(d)) else { return Ok(()) };
+        // Along the ruling's own angle, by the short way round when the two sit either side of
+        // the surface's period.
+        *slot += wrap(ua - *slot);
+        let Some(on) = eval.point(q) else { return Ok(()) };
+        let gap = on.dist(pb);
+        if !(gap > 1e-10 && gap <= self.tol) {
+            return Ok(());
+        }
+        // The edges already ending at the vertex keep their ends where they were: its tolerance
+        // covers each end's distance from where the vertex now is, as `new_edge` covers a new one's.
+        let mut widest = 1.5 * gap;
+        for e in self.edges.iter().filter(|e| e.vertices.contains(&vb)) {
+            let c = CurveEval::new(&e.curve).map_err(|m| m.to_string())?;
+            for (t, v) in e.interval.into_iter().zip(e.vertices) {
+                if v == vb {
+                    let end = c.point(t).ok_or("edge end")?;
+                    widest = widest.max(1.5 * end.dist(on));
+                }
+            }
+        }
+        let x = self.vertices.get_mut(vb as usize).ok_or("vertex reference")?;
+        x.point = arr(on);
+        x.tolerance = x.tolerance.max(widest);
+        Ok(())
+    }
+
     /// Join loops `la` (running +u) and `lb` (running −u) of face `fi` by a seam.
     fn band_seam(&mut self, fi: usize, la: usize, lb: usize, ax: &Axis, eval: &SurfaceEval, splits: &mut usize) -> R<()> {
         // The parameter the loops wind in: u, or v round a torus's tube.
@@ -1605,6 +1666,10 @@ impl Assembly<'_> {
             }
         }
         if let Some((i, j)) = pair {
+            if ax.kind == Kind::Ruled {
+                let (va, vb) = (self.start(*a_es.get(i).ok_or("loop reference")?)?, self.start(*b_es.get(j).ok_or("loop reference")?)?);
+                self.seat_on_ruling(va, vb, d, eval)?;
+            }
             return self.join_by_seam(fi, la, lb, i, j, ax, eval);
         }
         // A vertex of one loop and where the ruling (or meridian) through it meets the other.
@@ -1900,7 +1965,50 @@ impl Assembly<'_> {
                         b = m;
                     }
                 }
-                let t = 0.5 * (a + b);
+                let mut t = 0.5 * (a + b);
+                // The solve runs through the surface's projection, whose parameter carries its
+                // own rounding, so a crossing it lands a rounding away from where the edge's own
+                // form has a knot is read as that knot exactly. A knot is the crossing where it
+                // lies on the seam line itself, within the record's tolerance (the check a
+                // vertex of the loop is read by), and clear of the edge's ends by more than
+                // that tolerance along it, as the refined root itself must be; the nearest such
+                // knot takes the split, and without one the root keeps it. The split vertex
+                // then lies where the form has it, and the trims and the pcurves made beside
+                // the split agree with it exactly; a rounding apart, a loop that runs a whole
+                // turn of a form that closes comes off the pcurve maker a rounding wider than
+                // the form's range, and the clamp that then puts its end on the range leaves
+                // the rounding as a gap the record's check names. A spline's knots are its
+                // own; a circle's form is four quarter arcs, its knots the quarter turns of
+                // its parameter.
+                let inside = |k: f64| {
+                    k > lo
+                        && k < hi
+                        && c.point(k).zip(c.point(lo)).is_some_and(|(p, q)| p.dist(q) > self.tol)
+                        && c.point(k).zip(c.point(hi)).is_some_and(|(p, q)| p.dist(q) > self.tol)
+                };
+                let on_seam = |k: f64| {
+                    let Some(p) = c.point(k) else { return false };
+                    let Some(mut q) = eval.project(p, None, f64::INFINITY) else { return false };
+                    if let Some(x) = q.get_mut(at) {
+                        *x = target;
+                    }
+                    eval.point(q).is_some_and(|s| s.dist(p) <= self.tol)
+                };
+                let candidates: Vec<f64> = match &edge.curve {
+                    BCurve::Spline { knots, .. } | BCurve::RationalSpline { knots, .. } => knots.to_vec(),
+                    BCurve::Circle { .. } => {
+                        let first = (lo / FRAC_PI_2).floor() as i64;
+                        let last = (hi / FRAC_PI_2).ceil() as i64;
+                        (first..last).map(|k| k as f64 * FRAC_PI_2).collect()
+                    }
+                    _ => Vec::new(),
+                };
+                let root = t;
+                t = candidates
+                    .into_iter()
+                    .filter(|k| inside(*k) && on_seam(*k))
+                    .min_by(|x, y| (x - root).abs().total_cmp(&(y - root).abs()))
+                    .unwrap_or(root);
                 // Inside the edge by more than the tolerance along it, measured in length: a split
                 // nearer an end would leave an edge no longer than its tolerance (the end vertex
                 // is then the one on the line, within the tolerance).
@@ -2040,6 +2148,7 @@ impl Assembly<'_> {
         let c = CurveEval::new(&edge.curve).map_err(|m| m.to_string())?;
         let p = c.point(t).ok_or("split point")?;
         let (curve, [lo, hi], [a, b], tolerance) = (edge.curve.clone(), edge.interval, edge.vertices, edge.tolerance);
+        let pcurve_tolerance = edge.pcurve_tolerance;
         if !(t > lo && t < hi) {
             return Err("a split outside its edge".into());
         }
@@ -2050,7 +2159,7 @@ impl Assembly<'_> {
             x.interval = [lo, t];
             x.vertices = [a, v];
         }
-        self.edges.push(EdgeB { curve, interval: [t, hi], vertices: [v, b], tolerance, form: None });
+        self.edges.push(EdgeB { curve, interval: [t, hi], vertices: [v, b], tolerance, pcurve_tolerance, form: None });
         for f in &mut self.faces {
             for l in &mut f.loops {
                 let Bound::Edges(es) = l else { continue };

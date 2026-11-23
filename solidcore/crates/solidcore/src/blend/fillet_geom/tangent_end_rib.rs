@@ -13,7 +13,20 @@
 //! Deviations: out-params become return values (`None` for `rbFound == FALSE`); the
 //! context argument is dropped. No recursion: the station count doubles from 8 to 1024
 //! in a loop (a zero-speed rib's grows by the spans it halves, to at most 1024), each
-//! Newton solve takes at most 40 steps.
+//! Newton solve takes at most 40 steps. Not upstream: a tangent end whose end surface
+//! stands off it within the model's tolerances (its seam held as a touch) takes the rib of
+//! that standoff where the rib of the surfaces as they are is not certified ([`Standoff`]):
+//! at most one more pass of the same loop.
+//!
+//! Failures (#15034): no check here decides a refusal. A contact order that cannot be
+//! taken, and a rib that cannot be solved, fitted or certified within tolerance (an end
+//! off a surface or its rails, a singular tangent end, a station without its point, a
+//! rib that does not reach its other end, a stop of #10876 that does not fit) are each
+//! a [`BlendFailure::StageFailed`], a defect, built where it happens (its origin is that
+//! file and line), keeping upstream's status for the goldens: `SM_ERR_NULL_POINTER` for
+//! the missing surface generator (a `NER`), `SM_ERR` otherwise. The caller,
+//! `calc_fillet_int_side_face`, returns an order's failure at once and takes a rib's
+//! down its failure branch, as upstream.
 
 mod certificate;
 
@@ -21,9 +34,11 @@ use crate::blend::fillet_section::certificate::NurbsCurve;
 use crate::blend::fillet_section::section::GnSectionFsg;
 use crate::blend::fillet_solver::p1::{FilletSolver, FilletSurfaceGeneratorType};
 use crate::curve::curve::Curve;
-use crate::error::{Result, SolidError};
+use crate::error::blend::BlendFailure;
+use crate::error::{Failure, Result, SolidError, SM_ERR_NULL_POINTER};
 use crate::geom::global_solver::SolverOperation;
 use crate::geom::krawczyk::{inverse_of_columns3, newton, Linearised};
+use crate::geom::tol::within_contact_tol;
 use crate::geom::vector2d::Point2;
 use crate::kernel::Kernel;
 use crate::math::{Point3, Vec3, BIG_DOUBLE, EFF_ZERO, EFF_ZERO_SQRT};
@@ -60,15 +75,15 @@ fn smax(a: f64, b: f64) -> f64 {
 pub fn section_contact_order(solver: &FilletSolver) -> Result<u32> {
     let fsg = solver
         .fillet_surface_generator()
-        .ok_or_else(|| SolidError::blend_missing(OP_ORDER, "the solver's surface generator"))?;
+        .ok_or_else(|| missing(OP_ORDER))?;
     match fsg.fillet_surface_generator_type() {
         FilletSurfaceGeneratorType::Linear => Ok(1),
         FilletSurfaceGeneratorType::Circular => Ok(2),
         // ((SmBlendCurveCrossSectionFSG*)pFSG)->GetContinuity() + 1: that generator is
         // retired (WR-685); a G^n section's order is [`gn_section_contact_order`]'s
-        FilletSurfaceGeneratorType::BlendCurve | FilletSurfaceGeneratorType::Unknown => Err(
-            SolidError::blend_failed(OP_ORDER, "the surface generator has no known contact order"),
-        ),
+        FilletSurfaceGeneratorType::BlendCurve | FilletSurfaceGeneratorType::Unknown => {
+            Err(stage_failed(OP_ORDER))
+        }
     }
 }
 
@@ -81,7 +96,7 @@ pub fn section_contact_order(solver: &FilletSolver) -> Result<u32> {
 ///
 /// # Errors
 ///
-/// `SM_ERR` when `at` is on no rail within `tol` ("the point is on no rail"); those of
+/// `SM_ERR` when `at` is on no rail within `tol`; those of
 /// the drops, the evaluations and [`GnSectionFsg::contact_order_at`].
 #[allow(clippy::too_many_arguments)]
 pub fn gn_section_contact_order(
@@ -116,10 +131,7 @@ pub fn gn_section_contact_order(
     }
     if rail > 1 || best > tol {
         // "sm_SectionContactOrder(): the point is on no rail"
-        return Err(SolidError::blend_failed(
-            OP_ORDER,
-            "the point is on no rail",
-        ));
+        return Err(stage_failed(OP_ORDER));
     }
     let [uv0, uv1] = uvs;
     let [r0, r1] = rails;
@@ -128,9 +140,7 @@ pub fn gn_section_contact_order(
     let seed = [w0.x, w0.y, w1.x, w1.y];
     let points = [r0.evaluate_point(k, s)?, r1.evaluate_point(k, s)?];
     let order = g.contact_order_at(k, faces, center, s, seed, points, rail)?;
-    u32::try_from(order).map_err(|_| {
-        SolidError::blend_failed(OP_ORDER, "the contact order is negative or too large")
-    })
+    u32::try_from(order).map_err(|_| stage_failed(OP_ORDER))
 }
 
 /// `D[0][0]`, `D[1][0]` (u) and `D[0][1]` (v) of `surface` at `uv`
@@ -144,9 +154,10 @@ fn first_derivs(k: &Kernel, surface: &Surface, uv: Point2) -> Result<(Vec3, Vec3
     };
     let d = surface.evaluate(k, uv, 1, 1, flags)?;
     let at = |i: usize, j: usize| {
-        d.get(i).and_then(|row| row.get(j)).copied().ok_or_else(|| {
-            SolidError::blend_failed(OP_RIB, "the surface's evaluation has no first derivatives")
-        })
+        d.get(i)
+            .and_then(|row| row.get(j))
+            .copied()
+            .ok_or_else(|| stage_failed(OP_RIB))
     };
     Ok((at(0, 0)?, at(1, 0)?, at(0, 1)?))
 }
@@ -157,6 +168,10 @@ fn first_derivs(k: &Kernel, surface: &Surface, uv: Point2) -> Result<(Vec3, Vec3
 /// section parameter (0 = u, 1 = v), `alpha` the other one. Returns the solution
 /// `(alpha, end uv, point)`, or `None` when Newton does not converge in 40 steps or the
 /// system is singular.
+///
+/// Not upstream: with `shift` (a standoff's `lambda(t) n` at this section, [`Standoff`])
+/// the point is the fillet surface's point `X` with `X + shift` on the end surface.
+#[allow(clippy::too_many_arguments)]
 fn tangent_end_rib_point(
     k: &Kernel,
     fillet: &Surface,
@@ -165,6 +180,7 @@ fn tangent_end_rib_point(
     sigma: f64,
     alpha: f64,
     end_uv: Point2,
+    shift: Option<Vec3>,
 ) -> Result<Option<(f64, Point2, Point3)>> {
     let mut alpha = alpha;
     let mut end_uv = end_uv;
@@ -176,13 +192,17 @@ fn tangent_end_rib_point(
         };
         let (f, f_u, f_v) = first_derivs(k, fillet, fil_uv)?;
         let (e, e_u, e_v) = first_derivs(k, end, end_uv)?;
-        let r = f - e;
+        let r = match shift {
+            Some(shift) => f + shift - e,
+            None => f - e,
+        };
         let a = if section == 0 { f_v } else { f_u }; // d/d alpha
         let eu = -e_u;
         let ev = -e_v;
         let scale = smax(1.0, f.max_dimension());
         if r.length() <= 4.0 * EFF_ZERO * scale && iter > 0 {
-            return Ok(Some((alpha, end_uv, e)));
+            // the rib's point: on both surfaces, or with a standoff the fillet surface's
+            return Ok(Some((alpha, end_uv, if shift.is_some() { f } else { e })));
         }
         let det = a.dot(eu.cross(ev));
         if det.abs() <= EFF_ZERO * a.length() * eu.length() * ev.length() {
@@ -217,6 +237,7 @@ fn settled_point(
     section: usize,
     sigma: f64,
     (a, e, x): (f64, Point2, Point3),
+    shift: Option<Vec3>,
 ) -> Result<(f64, Point2, Point3)> {
     let settle = |y: [f64; 3]| -> Result<Linearised<3>> {
         let [a, u, v] = y;
@@ -232,7 +253,10 @@ fn settled_point(
             return Ok(None);
         };
         let f_a = if section == 0 { f_v } else { f_u };
-        let r = f - x;
+        let r = match shift {
+            Some(shift) => f + shift - x,
+            None => f - x,
+        };
         let col = |c: Vec3| [c.x, c.y, c.z];
         Ok(Some(([r.x, r.y, r.z], [col(f_a), col(-e_u), col(-e_v)])))
     };
@@ -241,7 +265,10 @@ fn settled_point(
         Some([a1, u, v]) if [a1, u, v] != start => {
             let e1 = Point2::new(u, v);
             let x1 = first_derivs(k, end, e1).ok().map(|(x1, _, _)| x1);
-            x1.map_or((a, e, x), |x1| (a1, e1, x1))
+            // (with a standoff the rib's point is the fillet surface's, `shift` back)
+            x1.map_or((a, e, x), |x1| {
+                (a1, e1, shift.map_or(x1, |shift| x1 - shift))
+            })
         }
         _ => (a, e, x),
     })
@@ -269,7 +296,103 @@ pub struct TangentEndRib {
     ///   within the tolerance (`t*` where the certificate's graded pieces stop): every other
     ///   part of the rib is certified within the tolerance as for `Some`, the first span is
     ///   compared at its midpoint as upstream, and `[0, t*]` carries no claim.
+    ///
+    /// With a [`Self::standoff`] the rib is the fillet surface's against the end surface
+    /// moved by `lambda(t) n` at section `t` ([`Standoff`]), and the end surface's UV
+    /// curve is bounded from that rib's foot on the end surface.
     pub bound: Option<f64>,
+    /// Not upstream: the standoff `lambda0` of the end surface from the tangent end the rib
+    /// was built with ([`Standoff`]), `None` for the rib of the surfaces as they are.
+    pub standoff: Option<f64>,
+}
+
+/// Not upstream: the standoff of the end surface at a tangent end whose seam the model
+/// holds as a touch.
+///
+/// Where the end face stands off the rail's face by up to what the model allows between
+/// their seam and the end face (a side a hair inside or outside a cylinder's tangent plane,
+/// joined along one line at the touch, `docs/booleans.md` §6), the tangent end `P`, where
+/// the rail crosses the seam, is on the fillet surface and `lambda0` off the end surface
+/// along its normal `n` there. The fillet surface `S` then meets the end surface `E` on a
+/// curve that misses `P`: it reaches the rail `sqrt(2 |lambda0| / dk)` along it from `P`,
+/// `dk` the faces' relative curvature across the seam, or not at all. No curve from `P` is
+/// within the tolerance of it near `P`.
+///
+/// The rib of such an end is the fillet surface's against the end surface moved to the
+/// touch, the move taken off toward the far rail: at the curves' parameter `t` the point
+/// `X` of the section `sigma(t)` of `S` with `X + lambda(t) n` on `E`,
+/// `lambda(t) = lambda0 (1 - s^q)`, `s` the section parameter normalised to `[0, 1]`
+/// (`t`, or `t^2` for an odd contact order) and `q` the contact order. It passes through
+/// `P`, where it is a true tangent end, and ends on `S ∩ E` at the far rail; `q` at least
+/// the contact order keeps the along offset's law `a ~ s^(k/2)` at `P`. Every point of
+/// the rib is within `|lambda(t)| <= |lambda0|` of `E`.
+#[derive(Debug, Clone, Copy)]
+pub(super) struct Standoff {
+    /// The end surface's unit normal at the tangent end's foot.
+    pub n: Vec3,
+    /// The end surface's foot less the tangent end, along `n`.
+    pub lambda0: f64,
+    /// `lambda(t) = lambda0 (1 - t^power)`: the contact order, twice it where the section
+    /// parameter runs as `t^2`.
+    pub power: i32,
+}
+
+impl Standoff {
+    /// `lambda(t)`.
+    fn at(&self, t: f64) -> f64 {
+        self.lambda0 * (1.0 - t.powi(self.power))
+    }
+
+    /// `lambda(t) n`.
+    fn shift(&self, t: f64) -> Vec3 {
+        self.n * self.at(t)
+    }
+}
+
+/// The standoff of `end` at `tangent_end` ([`Standoff`]) where it is one the rib is built
+/// with: not zero (past what two copies of one point differ by in rounding,
+/// [`within_contact_tol`]) and within `standoff_tol`, what the model allows between the
+/// seam and the end face. `None` otherwise.
+fn standoff_at(
+    k: &Kernel,
+    end: &Surface,
+    order: u32,
+    tangent_end: Point3,
+    standoff_tol: f64,
+) -> Result<Option<Standoff>> {
+    // (a NaN allows none)
+    if standoff_tol.is_nan() || standoff_tol <= 0.0 {
+        return Ok(None);
+    }
+    let dom = end.natural_uv_domain_with_nurb(k)?;
+    let foot = end.drop_point::<crate::surface::surface::p4::NoObject>(
+        k,
+        tangent_end,
+        &dom,
+        &DropPointOptions::default(),
+    )?;
+    if !foot.success {
+        return Ok(None);
+    }
+    let (at, e_u, e_v) = first_derivs(k, end, foot.result_uv)?;
+    let normal = e_u.cross(e_v);
+    let length = normal.length();
+    if length.is_nan() || length <= 0.0 {
+        return Ok(None);
+    }
+    let n = normal / length;
+    let lambda0 = (at - tangent_end).dot(n);
+    let size = smax(at.max_dimension(), tangent_end.max_dimension());
+    let odd = order % 2 == 1;
+    let Some(power) = i32::try_from(order)
+        .ok()
+        .and_then(|q| q.checked_mul(if odd { 2 } else { 1 }))
+    else {
+        return Ok(None);
+    };
+    let held = !within_contact_tol(lambda0.abs(), 0.0, size)
+        && within_contact_tol(lambda0.abs(), standoff_tol, size);
+    Ok(held.then_some(Standoff { n, lambda0, power }))
 }
 
 /// `sm_TangentEndRib`: the end rib of a fillet at a tangent end, the fillet surface's
@@ -302,20 +425,26 @@ pub struct TangentEndRib {
 /// the piece is solved and fitted from the tangent end to `stop` as the whole rib is to
 /// `other_end`; with `reverse` it runs from `stop` to the tangent end.
 ///
+/// Not upstream: `standoff_tol` is what the model allows between the tangent end's seam
+/// and the end face (the gap its edge check takes, 0 where the end surface is no face's). A
+/// rib that no station count certifies, at a tangent end the end surface stands off by a
+/// standoff within it, is the rib of that standoff ([`Standoff`]); every other rib is the
+/// rib of the surfaces as they are, built as without it.
+///
 /// # Errors
 ///
 /// `SM_ERR` when an end is off either surface, the ends are not on the fillet surface's
 /// two rails or lie on one section, the rib does not reach its other end, a station
 /// has no exact point, or (where a face is not enclosed) no station count gives the rib's
-/// midpoints within tolerance; [`crate::error::blend::BlendFailure::NotCertified`] (#17744)
+/// midpoints within tolerance; [`BlendFailure::NotCertified`] (#17744)
 /// where both faces are enclosed and no station count certifies the rib within tolerance;
 /// for a zero-speed rib, when the end surface is
 /// singular at the tangent end, the fillet surface's section leaves its tangent plane
 /// there, or an interpolation's second control point leaves its end; a stage failure
-/// ([`crate::error::blend::BlendFailure::StageFailed`], a defect) for a `stop` off either
+/// ([`BlendFailure::StageFailed`], a defect) for a `stop` off either
 /// surface or not strictly between the rails on the other rail's side; those of the drops,
 /// evaluations and fits.
-#[allow(clippy::too_many_arguments, clippy::too_many_lines)] // one upstream routine
+#[allow(clippy::too_many_arguments)]
 pub fn tangent_end_rib(
     k: &Kernel,
     fillet: &Surface,
@@ -326,11 +455,59 @@ pub fn tangent_end_rib(
     stop: Option<Point3>,
     reverse: bool,
     approx_tol: f64,
+    standoff_tol: f64,
 ) -> Result<TangentEndRib> {
-    let fail = |what| SolidError::blend_failed(OP_RIB, what);
-    // a stop (#10876) that does not fit the rib is a defect of the corner's construction
-    let stop_failed = || SolidError::blend(OP_RIB, crate::error::blend::BlendFailure::StageFailed);
+    let plain = rib_of(
+        k,
+        fillet,
+        end,
+        order,
+        tangent_end,
+        other_end,
+        stop,
+        reverse,
+        approx_tol,
+        None,
+    );
+    let not_certified = matches!(
+        &plain,
+        Err(e) if matches!(e.blend_failure(), Some(BlendFailure::NotCertified { .. }))
+    );
+    if !not_certified {
+        return plain;
+    }
+    let Some(standoff) = standoff_at(k, end, order, tangent_end, standoff_tol)? else {
+        return plain;
+    };
+    rib_of(
+        k,
+        fillet,
+        end,
+        order,
+        tangent_end,
+        other_end,
+        stop,
+        reverse,
+        approx_tol,
+        Some(standoff),
+    )
+}
 
+/// [`tangent_end_rib`]'s rib: of the surfaces as they are, or with `standoff` of the end
+/// surface moved by it ([`Standoff`]).
+#[allow(clippy::too_many_arguments, clippy::too_many_lines)] // one upstream routine
+fn rib_of(
+    k: &Kernel,
+    fillet: &Surface,
+    end: &Surface,
+    order: u32,
+    tangent_end: Point3,
+    other_end: Point3,
+    stop: Option<Point3>,
+    reverse: bool,
+    approx_tol: f64,
+    standoff: Option<Standoff>,
+) -> Result<TangentEndRib> {
     // both ends on the fillet surface and on the end surface
     let fil_dom = fillet.natural_uv_domain_with_nurb(k)?;
     let end_dom = end.natural_uv_domain_with_nurb(k)?;
@@ -342,7 +519,7 @@ pub fn tangent_end_rib(
             fillet.drop_point::<crate::surface::surface::p4::NoObject>(k, p, &fil_dom, &opts)?;
         if !d.success || d.gap > approx_tol {
             // an end of the rib is off the fillet surface
-            return Err(fail("an end of the rib is off the fillet surface"));
+            return Err(stage_failed(OP_RIB));
         }
         // with a stop, the other rail's end orients the section only: it is off the end
         // surface where the rib passes onto the next face before reaching it
@@ -355,7 +532,7 @@ pub fn tangent_end_rib(
         let e = end.drop_point::<crate::surface::surface::p4::NoObject>(k, p, &end_dom, &opts)?;
         if !e.success || e.gap > approx_tol {
             // an end of the rib is off the end surface
-            return Err(fail("an end of the rib is off the end surface"));
+            return Err(stage_failed(OP_RIB));
         }
         if let (Some(f), Some(g)) = (fil_uv.get_mut(kk), end_uv.get_mut(kk)) {
             *f = d.result_uv;
@@ -380,9 +557,7 @@ pub fn tangent_end_rib(
         1
     } else {
         // the rib's ends are not on the fillet surface's two rails
-        return Err(fail(
-            "the rib's ends are not on the fillet surface's two rails",
-        ));
+        return Err(stage_failed(OP_RIB));
     };
     let (sigma0, mut sigma1, alpha0, mut alpha1) = if section == 0 {
         (fil0.x, fil1.x, fil0.y, fil1.y)
@@ -396,12 +571,12 @@ pub fn tangent_end_rib(
         let d =
             fillet.drop_point::<crate::surface::surface::p4::NoObject>(k, stop, &fil_dom, &opts)?;
         if !d.success || d.gap > approx_tol {
-            return Err(stop_failed()); // the rib's stop is off the fillet surface
+            return Err(stage_failed(OP_RIB)); // the rib's stop is off the fillet surface
         }
         let e =
             end.drop_point::<crate::surface::surface::p4::NoObject>(k, stop, &end_dom, &opts)?;
         if !e.success || e.gap > approx_tol {
-            return Err(stop_failed()); // the rib's stop is off the end surface
+            return Err(stage_failed(OP_RIB)); // the rib's stop is off the end surface
         }
         let (sigma_stop, alpha_stop) = if section == 0 {
             (d.result_uv.x, d.result_uv.y)
@@ -415,7 +590,7 @@ pub fn tangent_end_rib(
             && (sigma1 - sigma_stop).abs() > tol_sigma
             && (sigma1 - sigma_stop) * (sigma1 - sigma0) > 0.0;
         if !between {
-            return Err(stop_failed()); // the rib's stop is not between the rails
+            return Err(stage_failed(OP_RIB)); // the rib's stop is not between the rails
         }
         sigma1 = sigma_stop;
         alpha1 = alpha_stop;
@@ -424,7 +599,7 @@ pub fn tangent_end_rib(
     }
     if (alpha1 - alpha0).abs() <= EFF_ZERO_SQRT * smax(1.0, alpha0.abs()) {
         // the rib's ends lie on one section
-        return Err(fail("the rib's ends lie on one section"));
+        return Err(stage_failed(OP_RIB));
     }
     let odd = order % 2 == 1;
     let sigma_at = |t: f64| sigma0 + (sigma1 - sigma0) * (if odd { t * t } else { t });
@@ -452,7 +627,7 @@ pub fn tangent_end_rib(
         let det = a * c - b * b;
         if det <= EFF_ZERO * a * c {
             // the end surface is singular at the tangent end
-            return Err(fail("the end surface is singular at the tangent end"));
+            return Err(stage_failed(OP_RIB));
         }
         let r_u = e_u.dot(d2_x);
         let r_v = e_v.dot(d2_x);
@@ -462,7 +637,7 @@ pub fn tangent_end_rib(
         if off_plane.length() > EFF_ZERO_SQRT * smax(1.0, d2_x.length()) {
             // the fillet surface's section leaves the end surface's tangent plane at the
             // tangent end
-            return Err(fail("the fillet surface's section leaves the end surface's tangent plane at the tangent end"));
+            return Err(stage_failed(OP_RIB));
         }
         (d2_x, d2_fil, d2_end)
     } else {
@@ -486,15 +661,13 @@ pub fn tangent_end_rib(
             // the interpolation's solve gives the second to rounding, and it is the
             // first.
             if c.number_control_points()? < 2 {
-                return Err(fail(
-                    "the zero-speed end's interpolation has fewer than two control points",
-                ));
+                return Err(stage_failed(OP_RIB));
             }
             let (cpt0, _) = c.control_point(ControlPointForm::NonRational, 0)?;
             let (cpt1, _) = c.control_point(ControlPointForm::NonRational, 1)?;
             if cpt1.distance(cpt0) > EFF_ZERO_SQRT * smax(1.0, cpt0.max_dimension()) {
                 // the zero-speed end's interpolation leaves its end
-                return Err(fail("the zero-speed end's interpolation leaves its end"));
+                return Err(stage_failed(OP_RIB));
             }
             c.set_control_point(ControlPointForm::NonRational, 1, cpt0, 1.0)?;
             return Ok(c);
@@ -519,11 +692,13 @@ pub fn tangent_end_rib(
     // where a face is not
     let solve = |t: f64, alpha: f64, uv: Point2| -> Result<Option<(f64, Point2, Point3)>> {
         let sigma = sigma_at(t);
-        let Some(point) = tangent_end_rib_point(k, fillet, end, section, sigma, alpha, uv)? else {
+        let shift = standoff.map(|s| s.shift(t));
+        let Some(point) = tangent_end_rib_point(k, fillet, end, section, sigma, alpha, uv, shift)?
+        else {
             return Ok(None);
         };
         let found = if certified {
-            settled_point(k, fillet, end, section, sigma, point)?
+            settled_point(k, fillet, end, section, sigma, point, shift)?
         } else {
             point
         };
@@ -584,9 +759,7 @@ pub fn tangent_end_rib(
                         es.get(jj - 1),
                         es.get(jj - 2),
                     ) else {
-                        return Err(fail(
-                            "the rib has fewer than two earlier points to extrapolate from",
-                        ));
+                        return Err(stage_failed(OP_RIB));
                     };
                     (
                         2.0 * a1 - a2,
@@ -610,12 +783,10 @@ pub fn tangent_end_rib(
                 spans *= 2;
                 continue;
             }
-            let last = xs
-                .get_mut(spans)
-                .ok_or_else(|| fail("the rib has no last point"))?;
+            let last = xs.get_mut(spans).ok_or_else(|| stage_failed(OP_RIB))?;
             if last.distance(last_point) > approx_tol {
                 // the rib does not reach its other end
-                return Err(fail("the rib does not reach its other end"));
+                return Err(stage_failed(OP_RIB));
             }
             *last = last_point;
             stations = true;
@@ -654,6 +825,7 @@ pub fn tangent_end_rib(
                     NurbsCurve::of(&c_fil)?,
                     NurbsCurve::of(&c_end)?,
                 ],
+                standoff,
             }),
             None => None,
         };
@@ -674,7 +846,7 @@ pub fn tangent_end_rib(
                 es.get(jj),
                 es.get(jj + 1),
             ) else {
-                return Err(fail("a span of the rib has no ends"));
+                return Err(stage_failed(OP_RIB));
             };
             let t = 0.5 * (t0 + t1);
             let alpha = 0.5 * (a0 + a1);
@@ -715,9 +887,12 @@ pub fn tangent_end_rib(
                 let on_end_uv = c_end.evaluate_point(t)?;
                 let on_fil = fillet.evaluate_point(k, Point2::new(on_fil_uv.x, on_fil_uv.y))?;
                 let on_end = end.evaluate_point(k, Point2::new(on_end_uv.x, on_end_uv.y))?;
+                // the rib's foot on the end surface: the rib's point, or with a standoff
+                // that point moved by it
+                let foot = standoff.map_or(exact, |s| exact + s.shift(t));
                 let off_mid = on_3d.distance(exact) > approx_tol
                     || on_fil.distance(exact) > approx_tol
-                    || on_end.distance(exact) > approx_tol;
+                    || on_end.distance(foot) > approx_tol;
                 if !off_mid {
                     continue;
                 }
@@ -739,6 +914,7 @@ pub fn tangent_end_rib(
                 fillet_uv: c_fil,
                 end_uv: c_end,
                 bound: (rib.is_some() && !open).then_some(bound),
+                standoff: standoff.map(|s| s.lambda0),
             });
         }
 
@@ -760,7 +936,7 @@ pub fn tangent_end_rib(
         for &(jj, alpha, uv, exact) in off.iter().rev() {
             let at = jj + 1;
             let (Some(&t0), Some(&t1)) = (ts.get(at - 1), ts.get(at)) else {
-                return Err(fail("a span of the rib has no ends"));
+                return Err(stage_failed(OP_RIB));
             };
             ts.insert(at, 0.5 * (t0 + t1));
             alphas.insert(at, alpha);
@@ -776,13 +952,29 @@ pub fn tangent_end_rib(
     if faces.is_some() && !unsolved {
         return Err(SolidError::blend(
             OP_RIB,
-            crate::error::blend::BlendFailure::NotCertified {
+            BlendFailure::NotCertified {
                 halvings,
                 stations: ts.len(),
             },
         ));
     }
-    Err(fail("no stations give the rib within the tolerance"))
+    // no station count gives the rib within the tolerance
+    Err(stage_failed(OP_RIB))
+}
+
+/// A step whose object is not there (upstream's `NER`): a defect keeping
+/// `SM_ERR_NULL_POINTER` (#15034).
+#[track_caller]
+fn missing(op: &'static str) -> SolidError {
+    Failure::new(op, BlendFailure::StageFailed)
+        .with_status(SM_ERR_NULL_POINTER)
+        .into_error()
+}
+
+/// A step that could not go on, with nothing finer to say (#15034 rule 2).
+#[track_caller]
+fn stage_failed(op: &'static str) -> SolidError {
+    SolidError::blend(op, BlendFailure::StageFailed)
 }
 
 #[cfg(test)]
@@ -795,8 +987,8 @@ mod tests {
         BSplineSurface, BSplineSurfaceForm, CanonicalSurfaceData,
     };
 
-    /// A solver without a surface generator has no contact order: a typed blend failure
-    /// that keeps the bare `Upstream`'s status (#13790).
+    /// A solver without a surface generator has no contact order: a stage failure, a
+    /// defect, that keeps the bare `Upstream`'s status (#13790, #15034).
     #[test]
     fn a_solver_without_surface_generator_has_no_contact_order() {
         let solver = FilletSolver::new(1e-5, 1e-3, 0.017);
@@ -804,10 +996,7 @@ mod tests {
         assert_eq!(e.operation(), OP_ORDER);
         assert_eq!(
             (e.blend_failure(), e.upstream_status()),
-            (
-                Some(&BlendFailure::Missing("the solver's surface generator")),
-                Some(SM_ERR_NULL_POINTER)
-            )
+            (Some(&BlendFailure::StageFailed), Some(SM_ERR_NULL_POINTER))
         );
     }
 
@@ -877,6 +1066,7 @@ mod tests {
             None,
             false,
             tol,
+            0.0,
         )
         .unwrap();
         let worst = farthest_off(&k, &rib, &fillet, &end);
@@ -980,7 +1170,7 @@ mod tests {
         let c = fillet.evaluate_point(&k, Point2::new(0.5, 0.5)).unwrap().z;
         let (p, q) = (Point3::new(-0.5, 0.0, c), Point3::new(0.5, 1.0, c));
         let tol = 1e-5;
-        let rib = tangent_end_rib(&k, &fillet, &end, 2, p, q, None, false, tol).unwrap();
+        let rib = tangent_end_rib(&k, &fillet, &end, 2, p, q, None, false, tol, 0.0).unwrap();
         assert_eq!(rib.bound, None);
         let worst = farthest_off(&k, &rib, &fillet, &end);
         assert!(worst <= tol, "{worst:e}");
@@ -1006,6 +1196,7 @@ mod tests {
             None,
             false,
             tol,
+            0.0,
         )
         .unwrap();
         let bound = rib.bound.unwrap();
@@ -1090,7 +1281,7 @@ mod tests {
         assert!(certificate::Face::of(&k, &fillet).unwrap().is_some());
         assert!(certificate::Face::of(&k, &end).unwrap().is_some());
         let p = Point3::new(0.0, 0.0, 0.0);
-        let rib = tangent_end_rib(&k, &fillet, &end, 2, p, other, None, false, tol).unwrap();
+        let rib = tangent_end_rib(&k, &fillet, &end, 2, p, other, None, false, tol, 0.0).unwrap();
         assert_eq!(rib.bound, None);
         let worst = farthest_off(&k, &rib, &fillet, &end);
         assert!(worst <= tol, "{worst:e}");
@@ -1111,7 +1302,7 @@ mod tests {
         let end = Surface::from(OffsetSurface::new(&k, 0.0, base, true, SS_UNKNOWN).unwrap());
         assert!(certificate::Face::of(&k, &end).unwrap().is_none());
         let p = Point3::new(0.0, 0.0, 0.0);
-        let rib = tangent_end_rib(&k, &fillet, &end, 2, p, other, None, false, tol).unwrap();
+        let rib = tangent_end_rib(&k, &fillet, &end, 2, p, other, None, false, tol, 0.0).unwrap();
         assert_eq!(rib.bound, None);
         // upstream's stations t = j / n (a cubic through n + 1 points has n + 1 control
         // points), each solved from the chord's guess, then the last two points carried
@@ -1155,13 +1346,13 @@ mod tests {
                 )
             };
             let sigma = f0.x + (f1.x - f0.x) * t;
-            let point = tangent_end_rib_point(&k, &fillet, &end, 0, sigma, alpha, uv)
+            let point = tangent_end_rib_point(&k, &fillet, &end, 0, sigma, alpha, uv, None)
                 .unwrap()
                 .unwrap();
             let (a, e, x) = point;
             alphas.push(a);
             es.push(e);
-            let settled = settled_point(&k, &fillet, &end, 0, sigma, point).unwrap();
+            let settled = settled_point(&k, &fillet, &end, 0, sigma, point, None).unwrap();
             moved = moved.max(settled.2.distance(x));
             if j < n {
                 off_main = off_main.max(rib.curve_3d.evaluate_point(t).unwrap().distance(x));
@@ -1190,13 +1381,216 @@ mod tests {
         let r = 1.0;
         let (fillet, end, other) = tangent_end_surfaces(r);
         let p = Point3::new(0.0, 0.0, 0.0);
-        let rib = tangent_end_rib(&k, &fillet, &end, 2, p, other, None, false, tol).unwrap();
+        let rib = tangent_end_rib(&k, &fillet, &end, 2, p, other, None, false, tol, 0.0).unwrap();
         let bound = rib.bound.unwrap();
         assert!(bound <= tol, "{bound:e}");
         let same = same_parameter_off(&k, &rib, &fillet, &end, &|t| {
             on_tangent_rib(&k, &fillet, r, t)
         });
         assert!(same <= bound + 1e-12, "{same:e} > {bound:e}");
+    }
+
+    /// [`tangent_end_surfaces`] with its end surface lifted by `d` along z, its normal at the
+    /// tangent end (the origin): `z = x² / (4 r) + y² / r + d`. It stands `d` off the tangent
+    /// end, as the end face of a seam held as a touch does. The fillet surface
+    /// (`z = r − sqrt(r² − x²)`) meets it on `y² = r z − x² / 4 − r d`: lowered (`d < 0`), a
+    /// curve that reaches the rail `sqrt(r |d|)` along it from the tangent end; lifted, one
+    /// that stops short of the rail, at `x ≈ 2 sqrt(r d)`. Returned with the rib's other
+    /// end, on the rail `x = z = r`.
+    fn standoff_surfaces(r: f64, d: f64) -> (Surface, Surface, Point3) {
+        let p = Point3::new;
+        let (fillet, _, _) = tangent_end_surfaces(r);
+        let (y0, c, b) = (-r, 1.0 / (4.0 * r), 1.0 / r);
+        let bern =
+            |k: f64, x0: f64, h: f64| [k * x0 * x0, k * x0 * (x0 + h), k * (x0 + h) * (x0 + h)];
+        let (x0, hx, hy) = (-0.25 * r, 1.5 * r, 2.0 * r);
+        let (zx, zy) = (bern(c, x0, hx), bern(b, y0, hy));
+        let mut pts = Vec::new();
+        let halves = [0.0, 0.5, 1.0];
+        for (fx, zi) in halves.iter().zip(zx) {
+            for (fy, zj) in halves.iter().zip(zy) {
+                pts.push(p(x0 + hx * fx, y0 + hy * fy, zi + zj + d));
+            }
+        }
+        let end = BSplineSurface::create_canonical(&CanonicalSurfaceData {
+            u_degree: 2,
+            v_degree: 2,
+            control_points: &pts,
+            form: BSplineSurfaceForm::Unspecified,
+            u_multiplicities: &[3, 3],
+            v_multiplicities: &[3, 3],
+            u_knots: &[0.0, 1.0],
+            v_knots: &[0.0, 1.0],
+            knot_type: KnotType::Unspecified,
+            weights: None,
+            uv_domain: None,
+        })
+        .unwrap();
+        let other = p(r, ((r - c * r * r - d) / b).sqrt(), r);
+        (fillet, Surface::from(end), other)
+    }
+
+    /// The point of [`standoff_surfaces`]' rib of the standoff `d` at `t`: on the fillet
+    /// surface's section `t`, with the point `d (1 − t²)` above it on the end surface
+    /// (contact order 2, the section parameter `t` itself): `y² = r z − x² / 4 − r d t²`.
+    fn on_standoff_rib(k: &Kernel, fillet: &Surface, r: f64, d: f64, t: f64) -> Point3 {
+        let q = fillet.evaluate_point(k, Point2::new(t, 0.5)).unwrap();
+        let y2 = r * q.z - q.x * q.x / 4.0 - r * d * t * t;
+        Point3::new(q.x, y2.max(0.0).sqrt(), q.z)
+    }
+
+    /// As [`same_parameter_off`] for a rib of a standoff: the 3D curve and the fillet UV
+    /// curve's point from the rib point `exact(t)`, the end UV curve's point from that
+    /// point's foot on the end surface, `exact(t) + shift(t)`.
+    fn standoff_parameter_off(
+        k: &Kernel,
+        rib: &TangentEndRib,
+        fillet: &Surface,
+        end: &Surface,
+        exact: &dyn Fn(f64) -> Point3,
+        shift: &dyn Fn(f64) -> Vec3,
+    ) -> f64 {
+        let ivl = rib.curve_3d.natural_interval();
+        let on = |c: &BSplineCurve, s: &Surface, t: f64| {
+            let p = c.evaluate_point(t).unwrap();
+            s.evaluate_point(k, Point2::new(p.x, p.y)).unwrap()
+        };
+        let mut worst: f64 = 0.0;
+        for i in 0..=1000 {
+            let t = ivl.min() + (ivl.max() - ivl.min()) * f64::from(i) / 1000.0;
+            let x = exact(t);
+            worst = worst
+                .max(rib.curve_3d.evaluate_point(t).unwrap().distance(x))
+                .max(on(&rib.fillet_uv, fillet, t).distance(x))
+                .max(on(&rib.end_uv, end, t).distance(x + shift(t)));
+        }
+        worst
+    }
+
+    /// A tangent end whose end surface stands off it, as a seam the model holds as a touch
+    /// leaves it (a side a hair inside or outside a cylinder's tangent plane), either way and
+    /// at two sizes. The surfaces as they are meet on a curve that misses the tangent end, so
+    /// no station count certifies a curve from it, and with no standoff allowed, or less
+    /// than the surface's, the rib is refused as before. With the standoff allowed it is the
+    /// rib of the end surface moved to the tangent end, the move taken off toward the other
+    /// rail: it runs from the tangent end to the other end exactly, each curve within the
+    /// bound (the tolerance where the rib claims none) of the closed-form rib at the same
+    /// parameter, the end surface's from that rib's foot on it; and no curve is farther
+    /// from either surface than that plus the standoff.
+    #[test]
+    fn a_rib_at_a_standoff_within_what_the_model_allows_is_the_rib_of_that_standoff() {
+        let k = Kernel::default();
+        let (tol, r) = (1e-5, 1.0);
+        let p = Point3::new(0.0, 0.0, 0.0);
+        for d in [-1e-7, 1e-7, -4e-6, 4e-6] {
+            let (fillet, end, other) = standoff_surfaces(r, d);
+            for allowed in [0.0, 0.5 * f64::abs(d)] {
+                let e = tangent_end_rib(&k, &fillet, &end, 2, p, other, None, false, tol, allowed)
+                    .unwrap_err();
+                assert!(
+                    matches!(e.blend_failure(), Some(BlendFailure::NotCertified { .. })),
+                    "{d:e} {allowed:e}: {e:?}"
+                );
+            }
+            let rib =
+                tangent_end_rib(&k, &fillet, &end, 2, p, other, None, false, tol, 2e-5).unwrap();
+            let lambda0 = rib.standoff.unwrap();
+            assert!((lambda0 - d).abs() <= 1e-15, "{d:e}: {lambda0:e}");
+            let ivl = rib.curve_3d.natural_interval();
+            assert_eq!(rib.curve_3d.evaluate_point(ivl.min()).unwrap(), p, "{d:e}");
+            assert_eq!(
+                rib.curve_3d.evaluate_point(ivl.max()).unwrap(),
+                other,
+                "{d:e}"
+            );
+            let limit = rib.bound.unwrap_or(tol);
+            assert!(limit <= tol, "{d:e}: {limit:e}");
+            let same = standoff_parameter_off(
+                &k,
+                &rib,
+                &fillet,
+                &end,
+                &|t| on_standoff_rib(&k, &fillet, r, d, t),
+                &|t| Vec3::new(0.0, 0.0, d * (1.0 - t * t)),
+            );
+            assert!(same <= limit + 1e-12, "{d:e}: {same:e} > {limit:e}");
+            let worst = farthest_off(&k, &rib, &fillet, &end);
+            assert!(worst <= limit + d.abs() + 1e-12, "{d:e}: {worst:e}");
+        }
+    }
+
+    /// Why a curve from the tangent end cannot be certified against the surfaces of a
+    /// standoff as they are ([`standoff_surfaces`], closed form). Lowered by `d`, the
+    /// surfaces meet at the section `t = 1/2048` at `y = sqrt(r z − x² / 4 + r d)`, at least
+    /// `sqrt(r d)` along the rail from the tangent end however near the section is to it
+    /// (316 times the tolerance of 1e-6 at `d` = 1e-7). Lifted by `d`, no point of the
+    /// section `t = 1/4096` is on the end surface: they meet only past `x ≈ 2 sqrt(r d)`.
+    #[test]
+    fn the_surfaces_of_a_standoff_meet_off_the_tangent_end() {
+        let k = Kernel::default();
+        let (r, d, t) = (1.0, 1e-7, 1.0 / 2048.0);
+        // the guesses: the fillet surface's v and the end surface's uv of (x, y)
+        let guess = |x: f64, y: f64| {
+            (
+                (y + r) / (2.0 * r),
+                Point2::new((x + 0.25 * r) / (1.5 * r), (y + r) / (2.0 * r)),
+            )
+        };
+        let (fillet, end, _) = standoff_surfaces(r, -d);
+        let q = fillet.evaluate_point(&k, Point2::new(t, 0.5)).unwrap();
+        let y = (r * q.z - q.x * q.x / 4.0 + r * d).sqrt();
+        assert!(y >= (r * d).sqrt() && (r * d).sqrt() > 316.0 * 1e-6);
+        let (alpha, uv) = guess(q.x, 1.1 * y);
+        let (_, _, x) = tangent_end_rib_point(&k, &fillet, &end, 0, t, alpha, uv, None)
+            .unwrap()
+            .unwrap();
+        assert!((x.y - y).abs() <= 1e-12, "{:e} {y:e}", x.y);
+        assert!((x.x - q.x).abs() <= 1e-12 && (x.z - q.z).abs() <= 1e-12);
+
+        // (a section nearer the rail: x is about sqrt(2) t there)
+        let t = 1.0 / 4096.0;
+        let (fillet, end, _) = standoff_surfaces(r, d);
+        let q = fillet.evaluate_point(&k, Point2::new(t, 0.5)).unwrap();
+        assert!(q.x < 2.0 * (r * d).sqrt());
+        assert!(r * q.z - q.x * q.x / 4.0 - r * d < 0.0);
+        let (alpha, uv) = guess(q.x, (r * d).sqrt());
+        assert!(
+            tangent_end_rib_point(&k, &fillet, &end, 0, t, alpha, uv, None)
+                .unwrap()
+                .is_none()
+        );
+    }
+
+    /// A rib that is certified against the surfaces as they are takes no standoff, however
+    /// much the model allows: the true tangent end of radius 1, and one whose end surface
+    /// is 1e-13 off it (under the tolerance's reach of the meeting curve), are built as
+    /// without the allowance, curve for curve.
+    #[test]
+    fn a_rib_that_is_certified_takes_no_standoff() {
+        let k = Kernel::default();
+        let (tol, r) = (1e-5, 1.0);
+        let p = Point3::new(0.0, 0.0, 0.0);
+        for d in [0.0, -1e-13] {
+            let (fillet, end, other) = standoff_surfaces(r, d);
+            let plain =
+                tangent_end_rib(&k, &fillet, &end, 2, p, other, None, false, tol, 0.0).unwrap();
+            let rib =
+                tangent_end_rib(&k, &fillet, &end, 2, p, other, None, false, tol, 2e-5).unwrap();
+            assert_eq!(rib.standoff, None, "{d:e}");
+            assert_eq!(rib.bound, plain.bound, "{d:e}");
+            let ivl = rib.curve_3d.natural_interval();
+            for i in 0..=100 {
+                let t = ivl.min() + (ivl.max() - ivl.min()) * f64::from(i) / 100.0;
+                assert_eq!(
+                    rib.curve_3d.evaluate_point(t).unwrap(),
+                    plain.curve_3d.evaluate_point(t).unwrap()
+                );
+                assert_eq!(
+                    rib.end_uv.evaluate_point(t).unwrap(),
+                    plain.end_uv.evaluate_point(t).unwrap()
+                );
+            }
+        }
     }
 
     /// An end surface with a kink: `x = y − 1/2 + d(y)`, `d` the tent of height 0.1 at
@@ -1244,6 +1638,7 @@ mod tests {
             None,
             false,
             1e-6,
+            0.0,
         )
         .unwrap_err();
         assert_eq!(e.operation(), OP_RIB);
@@ -1273,6 +1668,7 @@ mod tests {
                 None,
                 false,
                 1e-5,
+                0.0,
             );
             (token.polls().unwrap(), r)
         };

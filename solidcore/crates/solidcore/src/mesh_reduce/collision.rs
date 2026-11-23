@@ -802,7 +802,7 @@ mod tests {
             state = state
                 .wrapping_mul(6364136223846793005)
                 .wrapping_add(1442695040888963407);
-            ((state >> 32) as i32 as f64) / 1.0e8
+            f64::from((state >> 32) as i32) / 1.0e8
         };
         for _ in 0..1000 {
             let a = [next(), next(), next()];

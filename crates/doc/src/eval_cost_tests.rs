@@ -26,7 +26,9 @@ use crate::*;
 /// holes whose tools were built (not moved from another copy's), the imported files read for an
 /// import feature, the tight boxes the kernel was asked for, the flats of sheets made from
 /// surfaces laid out (their pieces cut), the blends the kernel was asked for, the searches for
-/// the radius that fits, and the meshes a cam's profile was read from.
+/// the radius that fits, the meshes a cam's profile was read from, and the kernel's point
+/// classifications a pattern's copies were probed with, and the bodies a hole's points were
+/// classified in.
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub(crate) struct Counts {
     pub moved: usize,
@@ -57,6 +59,8 @@ pub(crate) struct Counts {
     pub tight_boxes: usize,
     pub blends: usize,
     pub fit_searches: usize,
+    pub classifications: usize,
+    pub hole_points: usize,
 }
 
 thread_local! {
@@ -90,6 +94,8 @@ thread_local! {
             tight_boxes: 0,
             blends: 0,
             fit_searches: 0,
+            classifications: 0,
+            hole_points: 0,
         })
     };
 }
@@ -524,6 +530,45 @@ fn evaluations_that_move_nothing_keep_the_frame_bodies() {
     assert_eq!(work.moved, 0, "the edit after idle evaluations must reuse the moved plate: {work:?}");
 }
 
+/// A Frame Member is built turned by the Rotate steps after it, so their turns (and the
+/// parameters their angles use) are in its fingerprint and the key its result is cached under;
+/// with none left, the keys are what they were before, and designs without turns keep theirs.
+#[test]
+fn a_frame_without_turns_keeps_its_fingerprint() {
+    let kind = |v: serde_json::Value| serde_json::from_value::<FeatureKind>(v).unwrap();
+    let mut doc = Document::new("frame");
+    doc.set_param("tilt", "20 deg", None, None).unwrap();
+    let frame = doc
+        .add_feature(
+            kind(serde_json::json!({"type": "frame_member", "path_sketch": 1,
+                "profile": {"source": "library", "profile": {"kind": "rect_tube", "width": 40, "height": 40, "wall": 3}}})),
+            None,
+        )
+        .unwrap();
+    let key = |doc: &Document| {
+        let vals = super::evaluation_values(doc).0;
+        let f = doc.feature(frame).unwrap();
+        let steps = super::ImportDigests::default();
+        let fp = super::chain_fingerprint(doc, &vals, f, 0, false, &steps, None);
+        // And the key its result is cached under, which leaves the chain out.
+        (fp, super::EvalKey::new(doc, &vals, f, fp, 0, &ModelState::default(), &steps, 0).whole)
+    };
+    let before = key(&doc);
+    let turn = doc
+        .add_feature(kind(serde_json::json!({"type": "frame_member_turn", "member": {"feature": frame, "line": "l1"}, "angle": "tilt"})), None)
+        .unwrap();
+    let turned = key(&doc);
+    assert!(turned.0 != before.0 && turned.1 != before.1, "the turn is in the keys");
+    doc.set_param("tilt", "40 deg", None, None).unwrap();
+    let tilted = key(&doc);
+    assert!(tilted.0 != turned.0 && tilted.1 != turned.1, "so is the value of the parameter its angle uses");
+    doc.features.iter_mut().filter(|f| f.id == turn).for_each(|f| f.suppressed = true);
+    assert_eq!(key(&doc), before, "a suppressed turn isn't");
+    doc.features.iter_mut().filter(|f| f.id == turn).for_each(|f| f.suppressed = false);
+    doc.delete_feature(turn).unwrap();
+    assert_eq!(key(&doc), before);
+}
+
 #[test]
 fn an_imported_file_is_fingerprinted_by_its_text() {
     let doc = placed_imports(2);
@@ -859,6 +904,50 @@ fn a_tool_cutting_another_part_cuts_again_when_that_part_moves() {
     assert!((volume(&model, &body) - (400.0 - 16.0)).abs() < 1e-6, "{}", volume(&model, &body));
 }
 
+/// A combine whose tool is a further placement's body (`Bit (Drill:2)`) reads that placement
+/// alone. A component or another placement added elsewhere keeps the combine's result; moving
+/// the tool's own placement cuts again. Reading every placement cut each such combine again
+/// for every occurrence added anywhere in the design.
+#[test]
+fn a_combine_with_a_placed_copys_tool_keeps_its_result_when_other_placements_are_added() {
+    let boxed = |corner: Vec3, length: &str, height: &str| FeatureKind::Box {
+        corner: point_expr(corner),
+        length: length.into(),
+        width: length.into(),
+        height: height.into(),
+        operation: Operation::NewBody,
+        centred: false,
+    };
+    let mut doc = Document::new("copy tool");
+    let board = doc.add_feature(boxed(Vec3::ZERO, "100", "10"), None).unwrap();
+    let drill = doc.add_component(Some("Drill"), 0).unwrap();
+    let bit = doc.add_feature(boxed(Vec3::new(-50.0, -50.0, 5.0), "10", "5"), None).unwrap();
+    doc.feature_mut(bit).unwrap().component = drill;
+    let copy = doc.add_occurrence(drill, 0, rigid(Vec3::new(70.0, 70.0, 0.0), Vec3::ZERO, Vec3::Z, 0.0)).unwrap();
+    let mut model = Model::new();
+    model.evaluate(&doc);
+    let st = model.state();
+    let name_of = |id: u64| st.bodies.iter().find(|b| b.feature == id).unwrap().name.clone();
+    let (board, tool) = (name_of(board), crate::WorldNames::new(&doc, &st).name(&name_of(bit), drill, &[copy]));
+    let kind = FeatureKind::Combine { target: board.clone().into(), tools: vec![tool.into()], operation: Operation::Cut, keep_tools: true };
+    let combine = doc.add_feature(kind, None).unwrap();
+    model.evaluate(&doc);
+    assert!(model.result(combine).is_some_and(|r| r.error.is_none()), "{:?}", model.result(combine));
+    assert!((volume(&model, &board) - (100_000.0 - 500.0)).abs() < 1e-6, "{}", volume(&model, &board));
+    // A new component and another placement of the drill, away from the board: nothing to cut again.
+    doc.add_component(Some("Other"), 0).unwrap();
+    model.evaluate(&doc);
+    assert_eq!(model.last_recomputed, 0, "component added");
+    doc.add_occurrence(drill, 0, rigid(Vec3::new(500.0, 0.0, 0.0), Vec3::ZERO, Vec3::Z, 0.0)).unwrap();
+    model.evaluate(&doc);
+    assert_eq!(model.last_recomputed, 0, "placement added");
+    // The tool's own placement moved off the board: the hole goes with it.
+    doc.occurrences.iter_mut().find(|o| o.id == copy).unwrap().transform = rigid(Vec3::new(300.0, 300.0, 0.0), Vec3::ZERO, Vec3::Z, 0.0);
+    model.evaluate(&doc);
+    assert_eq!(model.last_recomputed, 1, "tool moved");
+    assert!((volume(&model, &board) - 100_000.0).abs() < 1e-6, "{}", volume(&model, &board));
+}
+
 /// A root design with two 10 x 10 x 4 mm plates, "Plate" at the origin and "Other" 30 mm along Y,
 /// and a sketch on origin plane `plane` of the rectangle `profile` spans (opposite corners, in mm):
 /// (the plate part, the other part, the sketch).
@@ -1153,6 +1242,38 @@ fn shared_imported_mesh_inputs_keep_payload_identity_and_invalidate_replacements
         assert_eq!(actual.normals, expected.normals);
         assert!(!model.evaluate_shared(&doc));
     }
+}
+
+#[test]
+fn mesh_import_reuses_the_validated_body_only_for_its_input_arrays() {
+    let mesh = crate::MeshData {
+        name: "Triangle".into(),
+        positions: vec![0., 0., 0., 1., 0., 0., 0., 1., 0.].into(),
+        triangles: vec![0, 1, 2].into(),
+        corner_normals: Default::default(),
+        color: None,
+    };
+    let mut doc = Document::default();
+    let id = doc.add_feature(FeatureKind::MeshImport { file: "triangle.stl".into(), meshes: vec![mesh.clone()] }, None).unwrap();
+    let prepared = PreparedMeshImport::build(std::slice::from_ref(&mesh)).unwrap();
+    let built = prepared.body(0, &mesh).unwrap().clone();
+
+    let mut model = Model::default();
+    model.prime_mesh_import(id, prepared);
+    model.evaluate(&doc);
+    assert!(model.state().bodies[0].body.same_shape(&built));
+    assert!(model.prepared_meshes.is_none());
+
+    // A prepared body for the same feature cannot replace new shading data.
+    let prepared = PreparedMeshImport::build(&[mesh]).unwrap();
+    let FeatureKind::MeshImport { meshes, .. } = &mut doc.feature_mut(id).unwrap().kind else { panic!("mesh import") };
+    meshes[0].corner_normals = vec![0., 0., 1., 0., 0., 1., 0., 0., 1.].into();
+    model.prime_mesh_import(id, prepared);
+    model.evaluate(&doc);
+    let state = model.state();
+    let body = &state.bodies[0].body;
+    assert!(!body.same_shape(&built));
+    assert_eq!(body.triangle_corner_normals().unwrap().len(), 1);
 }
 
 #[test]
@@ -1795,6 +1916,8 @@ fn a_pattern_replays_every_grouped_thread_pick_on_its_named_body() {
                 },
                 bodies: Vec::new(),
                 placements: Vec::new(),
+                components: Vec::new(),
+                occurrences: Vec::new(),
             },
             None,
         )
@@ -1843,6 +1966,8 @@ fn a_patterned_modelled_thread_reuses_its_final_check() {
                 },
                 bodies: Vec::new(),
                 placements: Vec::new(),
+                components: Vec::new(),
+                occurrences: Vec::new(),
             },
             None,
         )
@@ -2703,6 +2828,81 @@ fn many_copies_cut_in_groups_leave_what_one_cut_leaves() {
     assert_eq!(names, one_names);
 }
 
+/// A 60 x 60 x 3 plate cut through by one sketch of `n` x `n` separate 2 mm squares, 4 mm apart,
+/// with at most `shells` shells in one joined tool: the plate's volume, its face count and the
+/// extrude's error.
+fn plate_cut_by_squares(n: usize, shells: usize) -> (f64, usize, Option<String>) {
+    super::JOINED_SHELLS_LIMIT.with(|l| l.set(shells));
+    let mut doc = Document::new("squares");
+    let kind = FeatureKind::Box {
+        corner: point_expr(Vec3::ZERO),
+        length: "60".into(),
+        width: "60".into(),
+        height: "3".into(),
+        operation: Operation::NewBody,
+        centred: false,
+    };
+    doc.add_feature(kind, Some("Plate")).unwrap();
+    let mut sk = Sketch::new();
+    for (i, j) in (0..n).flat_map(|i| (0..n).map(move |j| (i, j))) {
+        let (x, y) = (2.0 + 4.0 * i as f64, 2.0 + 4.0 * j as f64);
+        let p = [(x, y), (x + 2.0, y), (x + 2.0, y + 2.0), (x, y + 2.0)].map(|(x, y)| sk.add_point(Vec2::new(x, y), None).unwrap());
+        for k in 0..4 {
+            sk.add_line_pts(p[k], p[(k + 1) % 4], None).unwrap();
+        }
+    }
+    let sketch = doc.add_feature(FeatureKind::Sketch { plane: PlaneRef::Origin { name: "XY".into() }, sketch: sk }, None).unwrap();
+    let kind = FeatureKind::Extrude {
+        thin: None,
+        sketch: SketchId(sketch),
+        profiles: ProfileSel::All,
+        extent: serde_json::from_value(serde_json::json!({"distance": "3"})).unwrap(),
+        operation: Operation::Cut,
+        targets: vec![],
+    };
+    doc.add_feature(kind, Some("Squares")).unwrap();
+    let mut model = Model::new();
+    model.evaluate(&doc);
+    super::JOINED_SHELLS_LIMIT.with(|l| l.set(super::MAX_JOINED_SHELLS));
+    let error = model.results.iter().find_map(|r| r.error.clone());
+    let st = model.state();
+    let faces = st.bodies.first().map_or(0, |b| b.body.face_count());
+    (disc_volume(&model), faces, error)
+}
+
+#[test]
+fn profiles_apart_past_one_tools_shells_cut_in_groups() {
+    // 25 squares apart, joined into tools of at most 8 shells: four tools, each cut in turn, as
+    // more than 1024 squares are cut with the kernel's own limit (#20398: 1369 squares ended in
+    // "pieces: portable B-rep: shell count"). The plate comes out as one cut of all of them
+    // leaves it.
+    let (volume, faces, error) = plate_cut_by_squares(5, 8);
+    let (one_volume, one_faces, one_error) = plate_cut_by_squares(5, usize::MAX);
+    assert_eq!((error, one_error), (None, None));
+    let plate = 60.0 * 60.0 * 3.0 - 25.0 * 4.0 * 3.0;
+    assert!((volume - plate).abs() < 1e-6 * plate && (one_volume - plate).abs() < 1e-6 * plate, "{volume} {one_volume} vs {plate}");
+    assert_eq!((faces, one_faces), (6 + 25 * 4, 6 + 25 * 4));
+}
+
+#[test]
+fn more_profiles_apart_than_one_record_holds_join_into_several_tools() {
+    // 1100 boxes apart, each one shell: more than one body's record takes, so they come out as
+    // two tools, each of at most that many shells, together all the boxes' faces.
+    let tools: Vec<crate::lineage::Traced> = (0..1100)
+        .map(|i| {
+            let (x, y) = (3.0 * (i % 40) as f64, 3.0 * (i / 40) as f64);
+            crate::lineage::Traced::unnamed(kernel::box_solid(Vec3::new(x, y, 0.0), Vec3::new(x + 1.0, y + 1.0, 1.0)).unwrap())
+        })
+        .collect();
+    let bodies: Vec<kernel::Body> = tools.iter().map(|t| t.body.clone()).collect();
+    let one = kernel::join_apart(&bodies).map(|_| ()).map_err(|e| e.to_string());
+    assert!(one.as_ref().is_err_and(|e| e.contains("shell count")), "{one:?}");
+    let joined = super::join_apart_tools(tools).unwrap();
+    let shells: Vec<usize> = joined.iter().map(|t| t.body.record().shells.len()).collect();
+    assert_eq!(shells, vec![550, 550]);
+    assert_eq!(joined.iter().map(|t| t.body.face_count()).sum::<usize>(), 6 * 1100);
+}
+
 /// A ring (25 mm outside, 16 mm bore, 55 mm high) with a blind groove, 8 mm wide and 30 mm deep,
 /// cut into its bore from below, in a circular pattern of ten about Z: their boxes, grown as the
 /// kernel grows them, meet, their exact shapes are 1.9 mm apart. The ring's faces counted as its
@@ -2826,6 +3026,62 @@ fn plate_with_hole_grid(hole: serde_json::Value) -> (f64, f64, Counts) {
     let work = counted(|| model.evaluate(&doc));
     assert!(model.results.iter().all(|r| r.error.is_none() && r.warning.is_none()), "{:?}", model.results);
     (disc_volume(&model), std::f64::consts::PI * 1.5 * 1.5 * 2.0, work)
+}
+
+/// A hole as deep as its plate, after `others` boxes 300 mm and more away and, with `under`, a
+/// slab touching the plate's bottom face: the plate's and slab's volumes and the work.
+fn plate_hole_among_bodies(others: usize, under: bool) -> (f64, Option<f64>, Counts) {
+    let mut doc = Document::new("bodies");
+    let solid = |corner: [f64; 3], length: f64, height: f64| -> FeatureKind {
+        serde_json::from_value(serde_json::json!({
+            "type": "box", "corner": corner, "length": length.to_string(), "width": length.to_string(), "height": height.to_string(),
+        }))
+        .unwrap()
+    };
+    for i in 0..others {
+        doc.add_feature(solid([300.0 + 30.0 * i as f64, 0.0, 0.0], 20.0, 20.0), Some(&format!("Far{i}"))).unwrap();
+    }
+    if under {
+        doc.add_feature(solid([0.0, 0.0, -5.0], 100.0, 5.0), Some("Under")).unwrap();
+    }
+    doc.add_feature(solid([0.0, 0.0, 0.0], 100.0, 2.0), Some("Plate")).unwrap();
+    let hole: FeatureKind = serde_json::from_value(serde_json::json!({
+        "type": "hole", "position": [50, 50, 2], "direction": [0, 0, -1], "diameter": "3", "depth": "2",
+    }))
+    .unwrap();
+    doc.add_feature(hole, Some("Hole")).unwrap();
+    let mut model = Model::new();
+    let work = counted(|| model.evaluate(&doc));
+    assert!(model.results.iter().all(|r| r.error.is_none() && r.warning.is_none()), "{:?}", model.results);
+    let st = model.state();
+    // The plate is the body from z = 0 to 2 at the origin, the slab the one below it.
+    let volume = |top: f64| {
+        st.bodies
+            .iter()
+            .find(|b| b.body.exact_bounds().is_ok_and(|bb| bb.min.x.abs() < 1e-6 && (bb.max.z - top).abs() < 1e-6))
+            .map(|b| kernel::measure(&b.body).unwrap().volume)
+    };
+    (volume(2.0).unwrap(), volume(0.0), work)
+}
+
+/// A hole with a depth looks for material and air either side of its bottom, to know whether it
+/// comes out there (#17873), in the bodies whose boxes hold those points only (#19946). It
+/// classified both points in every body of the design: 2 x 21 classifications with 20 boxes far
+/// away, which in a design of hundreds of imported parts cost minutes for each evaluation of its
+/// holes. A body touching the plate where the hole ends is still asked.
+#[test]
+fn a_hole_classifies_its_bottom_in_the_bodies_there_only() {
+    let through = 20_000.0 - std::f64::consts::PI * 1.5 * 1.5 * 2.0;
+    for others in [0, 20] {
+        let (plate, under, work) = plate_hole_among_bodies(others, false);
+        assert!((plate - through).abs() < 1e-6 * through, "{others} boxes: {plate}");
+        assert_eq!(under, None);
+        assert_eq!(work.hole_points, 2, "{others} boxes: {work:?}");
+    }
+    let (plate, under, work) = plate_hole_among_bodies(20, true);
+    assert!((plate - through).abs() < 1e-6 * through, "{plate}");
+    assert!((under.unwrap() - 50_000.0).abs() < 1e-6 * 50_000.0, "the slab is not drilled: {under:?}");
+    assert_eq!(work.hole_points, 4, "{work:?}");
 }
 
 /// A pattern of a hole builds its tools once when every copy is drilled the same way, and for
@@ -3313,7 +3569,8 @@ fn an_imports_healed_parts_replace_its_bodies_once_its_checks_end() {
         vec![kernel::HealedBody { index: 0, body: healed, face_origin, face_source: face_source.clone() }],
     );
     let r = model.results.iter_mut().find(|r| r.id == import).unwrap();
-    r.import_report = Some(Arc::new(kernel::ImportReport { parts: 2, solids: 2, issues: Vec::new(), single_root: false, checks: checks.clone() }));
+    r.import_report =
+        Some(Arc::new(kernel::ImportReport { parts: 2, solids: 2, issues: Vec::new(), single_root: false, split_edges: 0, checks: checks.clone() }));
 
     assert!(model.settle_import_checks(), "a heal changes the import");
     assert!(model.settle_import_checks(), "until an evaluation brings it in, it is still owed");
@@ -3332,7 +3589,7 @@ fn an_imports_healed_parts_replace_its_bodies_once_its_checks_end() {
 
     // The same heal settled again: nothing to do.
     let r = model.results.iter_mut().find(|r| r.id == import).unwrap();
-    r.import_report = Some(Arc::new(kernel::ImportReport { parts: 2, solids: 2, issues: Vec::new(), single_root: false, checks }));
+    r.import_report = Some(Arc::new(kernel::ImportReport { parts: 2, solids: 2, issues: Vec::new(), single_root: false, split_edges: 0, checks }));
     assert!(!model.settle_import_checks());
     model.evaluate(&doc);
     assert_eq!(model.last_recomputed, 0);
@@ -3376,7 +3633,8 @@ fn a_heal_the_next_read_finds_again_is_told_once() {
     };
     let ended = |model: &mut Model, checks: kernel::ImportChecks| {
         let r = model.results.iter_mut().find(|r| r.id == import).unwrap();
-        r.import_report = Some(Arc::new(kernel::ImportReport { parts: 2, solids: 2, issues: Vec::new(), single_root: false, checks }));
+        r.import_report =
+            Some(Arc::new(kernel::ImportReport { parts: 2, solids: 2, issues: Vec::new(), single_root: false, split_edges: 0, checks }));
     };
     ended(&mut model, run());
     assert!(model.settle_import_checks());
@@ -3391,6 +3649,39 @@ fn a_heal_the_next_read_finds_again_is_told_once() {
     model.evaluate(&doc);
     assert_eq!(model.last_recomputed, 0);
     assert_eq!(model.results.iter().map(|r| r.fingerprint).collect::<Vec<_>>(), fingerprints);
+}
+
+/// #20133: a save while an import's SMLib check of its parts runs does not wait for it. The
+/// model is left out of the save (the design is rebuilt when it opens), since what the check
+/// finds is part of the model; once the check ends, the model is kept with what it found.
+#[test]
+fn a_save_while_an_import_is_checked_keeps_no_model_and_does_not_wait() {
+    let doc = placed_imports(1);
+    let mut model = Model::new();
+    model.evaluate(&doc);
+    let import = doc.features[0].id;
+    let (checks, end) = kernel::ImportChecks::running_for_tests();
+    let r = model.results.iter_mut().find(|r| r.id == import).unwrap();
+    r.import_report = Some(Arc::new(kernel::ImportReport { parts: 2, solids: 2, issues: Vec::new(), single_root: false, split_edges: 0, checks }));
+    assert!(model.checking_imports());
+    // (were it to wait, this would never return: nothing else ends the check)
+    assert!(model.saved_if_checked(&doc).is_none(), "no model while the check runs");
+    let issue = kernel::ImportIssue {
+        kind: kernel::IssueKind::NeedsRepair,
+        item: Some(1),
+        part: String::new(),
+        paths: Vec::new(),
+        faces: 0,
+        times: 1,
+        detail: "fails SMLib's check".into(),
+    };
+    end(vec![issue]);
+    assert!(!model.checking_imports());
+    let saved = model.saved_if_checked(&doc).expect("the model once the check has ended");
+    let feature = &saved.records["features"][0];
+    assert_eq!(feature["warning"], serde_json::json!(crate::eval::import_warning(&["fails SMLib's check"])));
+    assert_eq!(feature["import_report"]["issues"][0]["detail"], "fails SMLib's check", "kept with what the check found");
+    assert_eq!(saved.records, model.saved(&doc).unwrap().records, "as a save that waited keeps it");
 }
 
 /// The tolerance heal preference is part of an import's and a Repair's fingerprint, and of no
@@ -3469,7 +3760,7 @@ fn a_heal_that_ends_after_the_preference_turned_off_leaves_no_healed_note() {
         vec![kernel::HealedBody { index: 0, body: healed, face_origin: vec![0; n], face_source: (0..n).collect() }],
     );
     let r = model.results.iter_mut().find(|r| r.id == import).unwrap();
-    r.import_report = Some(Arc::new(kernel::ImportReport { parts: 2, solids: 2, issues: Vec::new(), single_root: false, checks }));
+    r.import_report = Some(Arc::new(kernel::ImportReport { parts: 2, solids: 2, issues: Vec::new(), single_root: false, split_edges: 0, checks }));
 
     assert!(model.settle_import_checks_under(false), "an evaluation is owed: the import is read again");
     assert!(!model.has_import_heals(), "the heal is not taken");
@@ -3510,8 +3801,10 @@ fn a_cut_measures_the_tight_box_of_its_tool_only() {
     assert_eq!(work.cut, 1, "{work:?}");
     assert_eq!(model.state().bodies.len(), 1);
 
-    // A tool that reaches out of the body: the box can show it apart of the body, so
-    // it is measured.
+    // A tool that reaches out of the body but meets the box of its vertices: that box lies
+    // inside the body's exact box, so the exact box cannot show the tool apart of the body
+    // and is not measured either (a hole through a wall of a rounded spline body measured
+    // it for over a minute).
     let mut doc = Document::new("a cut through");
     block(&mut doc, "A", Vec3::ZERO, [20.0, 20.0, 20.0]);
     let kind = FeatureKind::Box {
@@ -3526,13 +3819,36 @@ fn a_cut_measures_the_tight_box_of_its_tool_only() {
     let mut model = Model::new();
     let work = counted(|| model.evaluate(&doc));
     assert!(model.result(cut).is_some_and(|r| r.error.is_none()), "{:?}", model.result(cut));
-    // The tool's tight box and the body's.
-    assert_eq!(work.tight_boxes, 2, "{work:?}");
+    // The tool's tight box, and no other.
+    assert_eq!(work.tight_boxes, 1, "{work:?}");
     assert_eq!(work.cut, 1, "{work:?}");
     let st = model.state();
     assert_eq!(st.bodies.len(), 1);
     // The tool crosses the top face: it takes 500 mm3 of the block with it.
     assert!((kernel::measure(&st.bodies[0].body).unwrap().volume - (8000.0 - 500.0)).abs() < 1e-6);
+
+    // A tool clear of the box of the body's vertices: only the exact box can show it apart of
+    // the body, so it is measured, and the body is left as it was without a boolean.
+    let mut doc = Document::new("a cut beside");
+    block(&mut doc, "A", Vec3::ZERO, [20.0, 20.0, 20.0]);
+    let kind = FeatureKind::Box {
+        corner: point_expr(Vec3::new(30.0, 5.0, 5.0)),
+        length: "10".into(),
+        width: "10".into(),
+        height: "10".into(),
+        operation: Operation::Cut,
+        centred: false,
+    };
+    let cut = doc.add_feature(kind, None).unwrap();
+    let mut model = Model::new();
+    let work = counted(|| model.evaluate(&doc));
+    assert!(model.result(cut).is_some(), "{:?}", model.result(cut));
+    // The tool's tight box and the body's.
+    assert_eq!(work.tight_boxes, 2, "{work:?}");
+    assert_eq!(work.cut, 0, "{work:?}");
+    let st = model.state();
+    assert_eq!(st.bodies.len(), 1);
+    assert!((kernel::measure(&st.bodies[0].body).unwrap().volume - 8000.0).abs() < 1e-6);
 }
 
 /// The design of #4282: a cube with a hole through it along each of the three axes, all of
@@ -3669,4 +3985,20 @@ fn a_round_refused_into_a_hollow_searches_for_the_largest_radius_that_fits() {
     assert!(error.contains("the largest radius that fits is 6.828 mm"), "{error}");
     assert_eq!(work.blends, 1, "{work:?}");
     assert_eq!(work.fit_searches, 1, "{work:?}");
+}
+
+/// A pattern's copies are probed with the kernel's point classifications, to know whether they
+/// take material without intersecting them with the body (#11257). The points of a line are
+/// classified in one call, not one call a point: the kernel makes the body's copy and its
+/// search structures once for all the points of a call, and again for every call a point makes
+/// on its own.
+#[test]
+fn a_pattern_probes_its_copies_with_one_classification_a_line() {
+    // The ten grooves of the pattern notch the same round bore: the probe's points lie on the
+    // bore's surface, where they are not inside the ring, so the probe tries every line it
+    // has before it finds the ring's material. It asked the kernel for 370 classifications,
+    // one a point, and asks for 36.
+    let (faces, work) = grooved_ring_faces();
+    assert_eq!(faces, 24, "the ring comes out as it did");
+    assert_eq!(work.classifications, 36, "{work:?}");
 }

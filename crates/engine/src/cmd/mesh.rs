@@ -20,7 +20,7 @@ const MESH_CONVERT_CONTRACT: TypedContract<MeshConvertParams> = TypedContract::n
 const MESH_REDUCE_CONTRACT: TypedContract<MeshReduceParams> = TypedContract::new();
 
 pub static COMMANDS: &[CommandSpec] = &[
-    CommandSpec::new("mesh.convert", "Convert Mesh", crate::checked!("mesh.convert", convert))
+    CommandSpec::new("mesh.convert", "Convert Mesh", crate::checked!("mesh.convert", convert)).begins_edit()
         .icon("import")
         .contract(&MESH_CONVERT_CONTRACT)
         .output(output_schema_for::<FeatureResult>)

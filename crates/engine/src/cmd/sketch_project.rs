@@ -268,8 +268,8 @@ fn state_for_sketch<'a>(
 /// name, component, occurrence path and frame.
 pub(super) type PlacedBodies = Vec<(String, String, u64, Vec<u64>, solidcraft_doc::Mat)>;
 
-/// Sketch links keep a further placement's body by the name the world gives it (`Block (Part:2)`,
-/// #9957), which a rename of the body or of its component changes: each link naming one of
+/// Sketch links and combine tools keep a further placement's body by the name the world gives it
+/// (`Block (Part:2)`, #9957), which a rename of the body or of its component changes: each link naming one of
 /// `before` (the placed bodies before the rename) now names what that body is called in `doc`.
 /// `renamed` is the body renamed (old name, new name), if one was.
 pub(super) fn follow_placed_renames(doc: &mut Document, st: &solidcraft_doc::ModelState, before: &PlacedBodies, renamed: Option<(&str, &str)>) {
@@ -292,10 +292,21 @@ pub(super) fn follow_placed_renames(doc: &mut Document, st: &solidcraft_doc::Mod
         return;
     }
     for f in &mut doc.features {
-        if let FeatureKind::Sketch { sketch, .. } = &mut f.kind {
-            for link in &mut sketch.links {
-                rename_link_body(&mut link.source, &renames);
+        match &mut f.kind {
+            FeatureKind::Sketch { sketch, .. } => {
+                for link in &mut sketch.links {
+                    rename_link_body(&mut link.source, &renames);
+                }
             }
+            // So do a combine's tools (#20040).
+            FeatureKind::Combine { tools, .. } => {
+                for tool in tools {
+                    if let Some(new) = renames.get(tool.0.as_str()) {
+                        tool.0.clone_from(new);
+                    }
+                }
+            }
+            _ => {}
         }
     }
 }
@@ -500,6 +511,9 @@ fn add_link_unless_present(
         None => Vec::new(),
     };
     let link = sk.add_link_with_wires(kind, r.source, &r.geom, &r.wires)?;
+    // A face's curves keep the names of the edges they stand for, which find them again when
+    // the face is read in another order (#18711).
+    sk.set_link_curve_edges(&link, &r.geom, &r.edge_names);
     // The wires' exact curves, as a refresh of the link gives them (an included edge's record
     // curve): a link made now is the one its sketch would resolve.
     sk.set_link_wire_curves(&link, &r.exact)?;
@@ -1030,6 +1044,7 @@ pub(super) fn project_internal_faces(s: &mut Session, id: u64, body: &str, indic
     for &index in indices {
         let resolved = solidcraft_doc::project::resolve_face_indices(&state, &plane, LinkKind::Project, body, &[index])?;
         let link = sk.add_link_with_wires(LinkKind::Project, resolved.source, &resolved.geom, &resolved.wires)?;
+        sk.set_link_curve_edges(&link, &resolved.geom, &resolved.edge_names);
         if let Some(entry) = sk.links.iter_mut().find(|entry| entry.id == link) {
             entry.face_name = names.get(index).cloned();
         }
@@ -1060,6 +1075,7 @@ pub(super) fn auto_project_face(s: &mut Session, id: u64, _at: Vec3) -> Result<O
     let resolved = solidcraft_doc::project::resolve_anchored_face(&doc, &state, &plane, LinkKind::Project, &anchor)?;
     let mut sk = sketch_store::read(&doc, id)?.clone();
     let link = sk.add_link_with_wires(LinkKind::Project, resolved.source, &resolved.geom, &resolved.wires)?;
+    sk.set_link_curve_edges(&link, &resolved.geom, &resolved.edge_names);
     if let Some(link) = sk.links.iter_mut().find(|entry| entry.id == link) {
         link.face_name = Some(anchor.target.name.clone());
         link.auto_face = true;

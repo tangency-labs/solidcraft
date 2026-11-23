@@ -24,6 +24,8 @@ pub mod dump;
 pub mod fixtures;
 pub mod flat;
 pub mod golden;
+#[cfg(test)]
+pub(crate) mod interval;
 pub mod jobs;
 pub mod json;
 #[cfg(test)]
@@ -32,6 +34,7 @@ pub mod output;
 pub(crate) mod own_builder;
 pub(crate) mod own_reader;
 pub mod plan;
+pub(crate) mod refit;
 pub mod rng;
 pub mod runner;
 pub mod script;
@@ -44,6 +47,8 @@ pub(crate) mod trim_hook;
 #[cfg(test)]
 pub(crate) mod trims_on_edges;
 pub mod util;
+#[cfg(test)]
+mod wr493_rows;
 #[cfg(test)]
 mod wr57_replay;
 

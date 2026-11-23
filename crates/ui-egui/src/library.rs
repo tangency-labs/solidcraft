@@ -1660,7 +1660,7 @@ mod tests {
                     let file = crate::scenario::rect_of("appbar:file").unwrap();
                     let home = crate::scenario::rect_of("appbar:home").unwrap();
                     assert!(toggle.right() < home.left());
-                    assert!(home.right() < file.left());
+                    assert!(home.right() <= file.left(), "Home may touch File but never overlap it: {home:?} {file:?}");
                     assert!(toggle.bottom() < panel.top());
                     let viewport = h.app.viewport.rect.unwrap();
                     assert!(viewport.left() >= panel.right(), "{panel:?} {viewport:?}");
@@ -1729,7 +1729,7 @@ mod tests {
     fn copy_and_move_commands_refresh_the_listing_without_touching_the_open_design() {
         let mut h = Harness::new();
         let source = h.dir.join("Original.solidcraft");
-        std::fs::write(&source, solidcraft_engine::io::write_design(&solidcraft_engine::doc::Document::new("Original"))).unwrap();
+        std::fs::write(&source, solidcraft_engine::io::write_design(&solidcraft_engine::doc::Document::new("Original")).unwrap()).unwrap();
         h.app.library.set_root(h.dir.clone());
         wait(&mut h.app);
         let doc = h.app.session.doc.to_json();
@@ -1753,7 +1753,7 @@ mod tests {
         let mut h = Harness::new();
         let source = h.dir.join("Original.solidcraft");
         let destination = h.dir.join("Partial.solidcraft");
-        std::fs::write(&source, solidcraft_engine::io::write_design(&solidcraft_engine::doc::Document::new("Original"))).unwrap();
+        std::fs::write(&source, solidcraft_engine::io::write_design(&solidcraft_engine::doc::Document::new("Original")).unwrap()).unwrap();
         h.app.library.set_root(h.dir.clone());
         wait(&mut h.app);
         let original_permissions = std::fs::metadata(&h.dir).unwrap().permissions();

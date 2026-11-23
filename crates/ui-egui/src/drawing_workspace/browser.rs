@@ -127,7 +127,13 @@ fn show_sheet(app: &mut SolveApp, rows: &mut Rows<'_>, drawing: &Drawing, sheet:
                 open = next;
                 rows.ui().data_mut(|data| data.insert_temp(id, open));
             }
-            Event::Click(_) | Event::Open(_) => select_sheet(app, sheet.id),
+            Event::Click(_) | Event::Open(_) => {
+                if !app.preferences.design_sub_tab_sheets {
+                    select_sheet(app, sheet.id);
+                } else if let Err(error) = crate::sheet_views::open_in(app, drawing.id, sheet.id, false) {
+                    app.set_status(error, true);
+                }
+            }
             Event::Menu { at, .. } => open_sheet_menu(app, drawing.id, sheet.id, Rect::from_min_max(at, at)),
             _ => {}
         }
@@ -237,9 +243,26 @@ fn show_views(app: &mut SolveApp, rows: &mut Rows<'_>, drawing: &Drawing, sheet:
     }
 }
 
-fn view_name(app: &SolveApp, drawing: &Drawing, view: &View, number: usize) -> String {
+/// View `id` of the open drawing as the browser calls it, for anything that names a view to the
+/// person at the screen: one name for a view everywhere.
+pub(crate) fn name_of(app: &SolveApp, id: u64) -> Option<String> {
+    let drawing = app.session.drawing("drawing.inspect").ok()?;
+    let view = drawing.view(id)?;
+    let number = drawing.views.iter().filter(|other| other.sheet == view.sheet).position(|other| other.id == id)? + 1;
+    Some(view_name(app, drawing, view, number))
+}
+
+pub(crate) fn view_name(app: &SolveApp, drawing: &Drawing, view: &View, number: usize) -> String {
+    // A view with a label is called what its label says: its name, else its words and letter
+    // (`DETAIL A`), never nothing.
     if let Some(label) = &view.label {
-        return label.name.clone();
+        if !label.name.is_empty() {
+            return label.name.clone();
+        }
+        let called = format!("{} {}", label.words, label.letter);
+        if !called.trim().is_empty() {
+            return called.trim().to_string();
+        }
     }
     if matches!(view.kind, ViewKind::Base { .. } | ViewKind::Projected { .. })
         && let Ok(resolved) = drawing.resolve_view(view.id)

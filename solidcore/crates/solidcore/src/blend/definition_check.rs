@@ -74,7 +74,7 @@ impl CornerKind {
             BlendCornerEvent::Ball => Self::Ball,
             BlendCornerEvent::Setback => Self::Setback,
             BlendCornerEvent::End => Self::End,
-            BlendCornerEvent::Join => Self::Join,
+            BlendCornerEvent::Join | BlendCornerEvent::CliffJoin { .. } => Self::Join,
             BlendCornerEvent::Turn => match blend.turn {
                 BlendTurn::Mitre => Self::Mitre,
                 BlendTurn::Swept => Self::Swept,

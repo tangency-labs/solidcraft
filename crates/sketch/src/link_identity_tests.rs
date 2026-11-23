@@ -300,6 +300,36 @@ fn touching_or_crossed_face_boundaries_refuse_without_retargeting_ids() {
 }
 
 #[test]
+fn face_with_two_inner_loops_meeting_at_one_corner_projects_and_refreshes() {
+    // A plate with a block and a pad joined on it: the pad's corner meets the block's corner
+    // (#20619). Both footprints are inner loops that share one vertex.
+    let rect = |x0: f64, y0: f64, x1: f64, y1: f64| {
+        let p = [Vec2::new(x0, y0), Vec2::new(x1, y0), Vec2::new(x1, y1), Vec2::new(x0, y1)];
+        (0..4).map(|i| LinkGeom::Line(p[i], p[(i + 1) % 4])).collect::<Vec<_>>()
+    };
+    let touching = |pad_x: f64| -> Vec<LinkGeom> {
+        let mut g = rect(0.0, 0.0, 50.0, 40.0);
+        g.extend(rect(15.0, 10.0, 30.0, 25.0));
+        g.extend(rect(pad_x, 25.0, pad_x + 6.0, 31.0));
+        g
+    };
+    let mut sk = Sketch::new();
+    let link = sk.add_link(LinkKind::Project, face(), &touching(30.0)).unwrap();
+    assert_eq!(sk.link_curves(&link).len(), 12);
+    // The corner is one shared point: 11 points, not 12.
+    assert_eq!(sk.link_points(&link).len(), 11);
+    // Re-reading the same face is not refused and keeps the link current.
+    assert!(!sk.update_link(&link, &touching(30.0)).unwrap());
+    assert!(!sk.link(&link).unwrap().lost);
+    // A pad that overlaps the block instead of touching it still refuses.
+    let saved = sk.clone();
+    assert!(sk.update_link(&link, &touching(29.0)).is_err());
+    assert_eq!(sk.points, saved.points);
+    assert_eq!(sk.curves, saved.curves);
+    assert!(sk.link(&link).unwrap().lost);
+}
+
+#[test]
 fn resized_rounded_rim_retains_inner_outer_roles_with_shared_arc_centres() {
     let rounded = |x: f64, y: f64, r: f64| {
         let centres = [Vec2::new(x - r, -y + r), Vec2::new(x - r, y - r), Vec2::new(-x + r, y - r), Vec2::new(-x + r, -y + r)];
@@ -509,6 +539,8 @@ fn edge_on_face_saved_as_a_line_pair_keeps_the_line_an_offset_follows() {
         face_name: None,
         edge_name: None,
         vertex_name: None,
+        curve_edges: Vec::new(),
+        profile_boundary: Vec::new(),
         auto_face: false,
         lost: false,
         name_dropped: false,
@@ -915,4 +947,55 @@ fn a_rebuilt_face_gives_an_unchanged_concentric_circle_its_own_id() {
     let four = id_of(&sk, 4.0).unwrap();
     assert!(sk.update_link(&link, &rings(&[1.0, 4.0, 6.0])).unwrap());
     assert_eq!(id_of(&sk, 4.0), Some(four), "the circle of radius 4 is where it was");
+}
+
+/// #18711: a face recorded with the names of its edges, read again sheared far out of its old
+/// box and with its edges in another order, is the same four lines: each keeps its id and goes
+/// where its edge went, and a point held on a corner follows it. Without the names the reading is
+/// matched by geometry alone, as before.
+#[test]
+fn a_face_read_by_its_edge_names_keeps_its_curves_through_any_order() {
+    let names: Vec<String> = ["F1:side:a|F1:top", "F1:side:b|F1:top", "F1:side:c|F1:top", "F1:side:d|F1:top"].map(String::from).to_vec();
+    let shear = |p: Vec2| Vec2::new(p.x + 3.0 * p.y, p.y);
+    let sheared: Vec<LinkGeom> = square(10.0)
+        .into_iter()
+        .map(|g| match g {
+            LinkGeom::Line(a, b) => LinkGeom::Line(shear(a), shear(b)),
+            _ => panic!(),
+        })
+        .collect();
+    // The same edges, the first one read last.
+    let order = [1, 2, 3, 0];
+    let fresh: Vec<LinkGeom> = order.iter().map(|i| sheared[*i].clone()).collect();
+    let fresh_names: Vec<String> = order.iter().map(|i| names[*i].clone()).collect();
+
+    let mut sk = Sketch::new();
+    let link = sk.add_link(LinkKind::Project, face(), &square(10.0)).unwrap();
+    sk.set_link_curve_edges(&link, &square(10.0), &names);
+    assert_eq!(sk.link(&link).unwrap().curve_edges, names);
+    let ids: Vec<String> = sk.link_curves(&link).iter().map(|c| sk.curves[*c].id.clone()).collect();
+    let corner = sk.link_points(&link).into_iter().find(|p| sk.points[*p].pos == Vec2::new(10.0, 10.0)).unwrap();
+    let free = sk.add_point(Vec2::new(10.0, 10.0), None).unwrap();
+    sk.add_constraint(ConstraintKind::Coincident { p: free, q: corner }, None).unwrap();
+    let unnamed = sk.clone();
+
+    assert_eq!(sk.update_link_named(&link, &fresh, &fresh_names).map_err(|e| e.to_string()), Ok(false));
+    assert!(!sk.link(&link).unwrap().lost);
+    assert_eq!(ids, sk.link_curves(&link).iter().map(|c| sk.curves[*c].id.clone()).collect::<Vec<_>>());
+    assert_eq!(sk.link(&link).unwrap().curve_edges, names, "the names stay with their curves");
+    assert_eq!(sk.points[corner].pos, shear(Vec2::new(10.0, 10.0)));
+    assert_eq!(sk.constraints.len(), 1);
+    assert!(solve(&mut sk).ok());
+    assert!(sk.points[free].pos.dist(shear(Vec2::new(10.0, 10.0))) < 1e-7);
+
+    // A link saved without the names is read as before: by geometry, and this reading is not one.
+    let mut old = unnamed.clone();
+    old.links.iter_mut().for_each(|l| l.curve_edges.clear());
+    let mut plain = old.clone();
+    let named = old.update_link_named(&link, &fresh, &fresh_names).map_err(|e| e.to_string());
+    let geometric = plain.update_link(&link, &fresh).map_err(|e| e.to_string());
+    assert_eq!(named, geometric);
+    assert_eq!(old.points, plain.points);
+    assert_eq!(old.curves, plain.curves);
+    assert_eq!(old.constraints, plain.constraints);
 }

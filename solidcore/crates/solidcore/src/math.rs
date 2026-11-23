@@ -567,6 +567,79 @@ fn finite3(v: Vec3) -> bool {
     v.x.is_finite() && v.y.is_finite() && v.z.is_finite()
 }
 
+/// Not upstream: the corners of a picture pinned to points on a plane, as an application ties
+/// a reference image to points of a sketch. Its bottom edge runs from `bl` to `br`; its top-left
+/// corner is `top_left` when the picture may stretch, and otherwise lies `aspect` (height over
+/// width) times the bottom edge's length from `bl`, square to the edge and on its left looking
+/// down `normal` (a unit normal of the plane). Returns bottom-left, bottom-right, top-right and
+/// top-left; `None` when the corners give no area: an edge not finite or shorter than a
+/// nanometre, or the two edges within a microradian of one line.
+#[must_use]
+pub fn picture_frame(
+    bl: Point3,
+    br: Point3,
+    top_left: Option<Point3>,
+    normal: Vec3,
+    aspect: f64,
+) -> Option<[Point3; 4]> {
+    let along = br - bl;
+    let up = match top_left {
+        Some(tl) => tl - bl,
+        None => normal.cross(along) * aspect,
+    };
+    let (width, height) = (along.length(), up.length());
+    let ok = width > 1e-9
+        && height > 1e-9
+        && width.is_finite()
+        && height.is_finite()
+        && along.cross(up).length() > 1e-6 * width * height;
+    if !ok {
+        return None;
+    }
+    Some([bl, br, br + up, bl + up])
+}
+
+/// Not upstream: how a picture `aspect` (height over width) times as high as wide fits a frame
+/// pinned at `bl`, `br` and `tl`: its width (the bottom edge's length), and whether `tl` lies off
+/// the picture's own top-left corner, square to the bottom edge on the frame's plane, by more
+/// than a millionth of (1 + its larger side): the frame stretches it. `None` when the frame gives
+/// no area, as [`picture_frame`] refuses it.
+#[must_use]
+pub fn picture_fit(bl: Point3, br: Point3, tl: Point3, aspect: f64) -> Option<(f64, bool)> {
+    let (along, up) = (br - bl, tl - bl);
+    let normal = along.cross(up).unitize().ok()?;
+    picture_frame(bl, br, Some(tl), normal, aspect)?;
+    let width = along.length();
+    let height = width * aspect;
+    let own = bl + normal.cross(along) * aspect;
+    let stretched = (tl - own).length() > 1e-6 * (1.0 + width.max(height));
+    Some((width, stretched))
+}
+
+/// Not upstream: a quad lifted clear of its own plane on both sides, as a decal is drawn just
+/// off the face it lies on so the face never hides it. `corners` are bottom-left, bottom-right,
+/// top-right and top-left; the normal is the unit cross product of the bottom edge with the left
+/// one. Returns that normal, the corners moved `lift` along it and the corners moved `lift`
+/// against it; `None` for a coordinate or lift not finite, or corners whose edges give no normal.
+#[must_use]
+pub fn lifted_quad(corners: [Point3; 4], lift: f64) -> Option<(Vec3, [Point3; 4], [Point3; 4])> {
+    if !(corners.iter().all(|p| finite3(*p)) && lift.is_finite()) {
+        return None;
+    }
+    let [bl, br, _, tl] = corners;
+    let normal = (br - bl).cross(tl - bl).unitize().ok()?;
+    let off = normal * lift;
+    Some((normal, corners.map(|p| p + off), corners.map(|p| p - off)))
+}
+
+/// Not upstream: the point `s` along the edge `u` and `t` along the edge `v` of the
+/// parallelogram with a corner at `corner`, `corner + s u + t v`, as a picture's texture
+/// coordinates place a point on the quad it is drawn on.
+#[must_use]
+pub fn parallelogram_point(corner: Point3, u: Vec3, v: Vec3, s: f64, t: f64) -> Point3 {
+    corner + u * s + v * t
+}
+
 /// Not upstream: the rigid motions and scalings an application asks for by their numbers
 /// (a turn about a line, a scale about a point, a mirror in a plane), built here so the
 /// layers above the kernel only pass the numbers on. Each is in the row-vector convention

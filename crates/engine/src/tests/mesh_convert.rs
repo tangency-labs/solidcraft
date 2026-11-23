@@ -79,6 +79,7 @@ fn reduction_persists_a_separate_mesh_for_conversion_and_undo() {
         assert_eq!(state.body("Mesh").unwrap().body.triangle_mesh().unwrap().1.len() as u64, original);
         let reduced = &state.body(&name).unwrap().body;
         assert_eq!(reduced.triangle_mesh().unwrap().1.len() as u64, achieved);
+        assert!(reduced.is_closed_mesh());
         assert_eq!(reduced.color(), Some([0.2, 0.5, 0.8]));
     };
     check(&s);

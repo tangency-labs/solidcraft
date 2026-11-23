@@ -6,11 +6,12 @@
 use super::super::{IDENTITY, StepNode, step_import};
 use super::{ImportRecords, RecordBody, records_import, records_noted};
 use crate::measure;
+use solidcore_record::brep::{self, Brep};
 
 /// The records the STEP reader assembles from `text`, kept as an import.
 fn kept(text: &str) -> ImportRecords {
     let ex = solidcore_step::p21::parse(text).unwrap();
-    let read = solidcore_step::topology::read_solids_with(&ex, &solidcraft_smlib::pcurves::SmlibTrims);
+    let read = solidcore_step::topology::read_solids_with(&ex, &solidcraft_smlib::pcurves::SmlibImportTrims);
     assert!(read.failures.is_empty(), "{:?}", read.failures);
     let bodies: Vec<RecordBody> = read
         .solids
@@ -27,6 +28,7 @@ fn kept(text: &str) -> ImportRecords {
             face_origin: s.face_origin,
             sheet: s.sheet,
             copy_of: None,
+            mesh: None,
         })
         .collect();
     let tree = vec![StepNode {
@@ -290,4 +292,125 @@ fn notes_about_the_file_are_its_imports_file_issues() {
     // The evaluation of the noted records finds this import.
     let shared = super::records_import_shared(&noted).unwrap();
     assert!(std::sync::Arc::ptr_eq(&shared, &noted_imp));
+}
+
+/// Check both display and export, including welded topology: a successful partial display is
+/// not a successful mesh of a closed imported solid.
+fn assert_closed_import_mesh(b: &Brep, size: f64, chord: f64) {
+    use solidcore_tess::{MeshSpec, MeshTolerance};
+    let plans = [
+        solidcore_tess::plan(b, &MeshTolerance::display(chord), size).unwrap(),
+        solidcore_tess::plan(b, &MeshTolerance::chord(chord), size).unwrap(),
+        solidcore_tess::mesh(b, &MeshSpec::chord(chord), size, None).unwrap(),
+    ];
+    for (plan, stats) in plans {
+        assert!(stats.unmeshed.is_empty(), "{stats:?}");
+        assert!(stats.lenient.is_empty(), "{stats:?}");
+        assert!(stats.edges_capped.is_empty(), "{stats:?}");
+        assert!(stats.over_tolerance.is_empty(), "{stats:?}");
+        let (mesh, refused) = plan.welded().unwrap();
+        assert!(refused.is_empty(), "{refused:?}");
+        assert!(!mesh.triangles.is_empty());
+        let mut sides: std::collections::BTreeMap<(u32, u32), (usize, i32)> = Default::default();
+        for t in &mesh.triangles {
+            assert!(t[0] != t[1] && t[1] != t[2] && t[2] != t[0], "{t:?}");
+            for k in 0..3 {
+                let (a, z) = (t[k], t[(k + 1) % 3]);
+                let s = sides.entry((a.min(z), a.max(z))).or_default();
+                s.0 += 1;
+                s.1 += if a < z { 1 } else { -1 };
+            }
+        }
+        assert!(sides.values().all(|s| *s == (2, 0)), "every mesh side has two opposing uses");
+        assert!((0..b.faces.len()).all(|f| mesh.tri_face.contains(&(f as u32))), "every imported face is meshed");
+    }
+}
+
+/// Write a synthetic solid with the requested STEP context accuracy, then import it through
+/// the production trim provider. The optional top is the same spline as the import-only
+/// regression in solidcore-step: S(u,v) = (u, v + 0.016 u(1-u), 1).
+fn coarse_accuracy_import(record: &Brep, accuracy: f64, spline_top: Option<usize>) -> Brep {
+    use solidcore_step::p21::Param;
+    use solidcore_step::write::{GeomWriter, Writer, topology};
+    let mut w = Writer::new();
+    let written = topology::brep(&mut GeomWriter::new(&mut w), record, "coarse accuracy").unwrap();
+    let spline = spline_top.map(|_| {
+        let surface = brep::Surface::Spline {
+            u_knots: vec![0.0, 0.0, 0.0, 1.0, 1.0, 1.0],
+            v_knots: vec![-0.016, -0.016, 1.0, 1.0],
+            points: [(0.0, 0.0), (0.5, 0.008), (1.0, 0.0)].into_iter().map(|(x, bump)| vec![[x, -0.016 + bump, 1.0], [x, 1.0 + bump, 1.0]]).collect(),
+        };
+        let (surface, _) = topology::surface(&surface).unwrap();
+        GeomWriter::new(&mut w).surface(&surface)
+    });
+    let empty = || Param::Str(String::new());
+    let mm = w.add_complex(&[
+        ("LENGTH_UNIT", vec![]),
+        ("NAMED_UNIT", vec![Param::Derived]),
+        ("SI_UNIT", vec![Param::Enum("MILLI".into()), Param::Enum("METRE".into())]),
+    ]);
+    let uncertainty = w.add(
+        "UNCERTAINTY_MEASURE_WITH_UNIT",
+        &[Param::Typed("LENGTH_MEASURE".into(), vec![Param::Real(accuracy)]), Param::Ref(mm), Param::Str("distance_accuracy_value".into()), empty()],
+    );
+    let context = w.add_complex(&[
+        ("GEOMETRIC_REPRESENTATION_CONTEXT", vec![Param::Int(3)]),
+        ("GLOBAL_UNCERTAINTY_ASSIGNED_CONTEXT", vec![Param::List(vec![Param::Ref(uncertainty)])]),
+        ("GLOBAL_UNIT_ASSIGNED_CONTEXT", vec![Param::List(vec![Param::Ref(mm)])]),
+        ("REPRESENTATION_CONTEXT", vec![empty(), empty()]),
+    ]);
+    w.add(
+        "ADVANCED_BREP_SHAPE_REPRESENTATION",
+        &[empty(), Param::List(written.solids.iter().copied().map(Param::Ref).collect()), Param::Ref(context)],
+    );
+    let mut ex = solidcore_step::p21::parse(&w.file("coarse accuracy", "AUTOMOTIVE_DESIGN")).unwrap();
+    if let (Some(top), Some(surface)) = (spline_top, spline) {
+        // Replace just the top's support; its edges still bound the unit square in 3D. The
+        // reader constructs pcurves from those edges, as in the STEP unit regression.
+        ex.entities.get_mut(&written.faces[top]).unwrap().records[0].params[2] = Param::Ref(surface);
+    }
+    let read = solidcore_step::topology::read_solids_with(&ex, &solidcraft_smlib::pcurves::SmlibTrims);
+    assert!(read.failures.is_empty(), "{:?}", read.failures);
+    assert_eq!(read.solids.len(), 1);
+    let solid = read.solids.into_iter().next().unwrap();
+    assert!(!solid.sheet);
+    assert_eq!(solid.brep.tolerance, accuracy);
+    solidcore_ops::record_check::validate(&solid.brep).unwrap();
+    solidcore_ops::record_check::agreement(&solid.brep).unwrap();
+    solid.brep
+}
+
+#[test]
+fn a_spline_face_imported_with_coarse_distance_accuracy_meshes() {
+    let record = solidcore_ops::make_box([0.0; 3], [1.0; 3]).unwrap().to_record().unwrap().0;
+    let top = record
+        .faces
+        .iter()
+        .position(|f| {
+            f.loops.iter().all(|l| match l {
+                brep::Loop::Edges { edges } => {
+                    edges.iter().all(|u| record.edges[u.edge as usize].vertices.iter().all(|v| record.vertices[*v as usize].point[2] == 1.0))
+                }
+                brep::Loop::Vertex { .. } => false,
+            })
+        })
+        .unwrap();
+    for accuracy in [0.01, 0.005] {
+        let b = coarse_accuracy_import(&record, accuracy, Some(top));
+        assert_eq!((b.regions.len(), b.shells.len(), b.faces.len(), b.edges.len(), b.vertices.len()), (2, 1, 6, 12, 8));
+        assert!(b.faces.iter().any(|f| matches!(f.surface, brep::Surface::Spline { .. })));
+        assert_closed_import_mesh(&b, 3f64.sqrt(), 1e-3);
+    }
+}
+
+#[test]
+fn a_small_cylinder_imported_with_coarse_distance_accuracy_meshes() {
+    let (r, h) = (0.05, 0.1);
+    let record = solidcore_ops::make_cylinder([0.0; 3], r, h).unwrap().to_record().unwrap().0;
+    for accuracy in [0.01, 0.005] {
+        let b = coarse_accuracy_import(&record, accuracy, None);
+        assert_eq!((b.regions.len(), b.shells.len(), b.faces.len(), b.edges.len(), b.vertices.len()), (2, 1, 3, 3, 2));
+        assert!(b.faces.iter().any(|f| matches!(f.surface, brep::Surface::Cylinder { .. })));
+        assert_closed_import_mesh(&b, (8.0 * r * r + h * h).sqrt(), 1e-4);
+    }
 }

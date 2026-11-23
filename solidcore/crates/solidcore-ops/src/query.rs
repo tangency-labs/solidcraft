@@ -125,24 +125,30 @@ impl<'a> Query<'a> {
             .map(|v| v.into_iter().map(|(t, p)| (t, record_vec3(p))).collect())
     }
 
-    /// The stretches of the body's edges on its outline seen along `view`, for a body of size
-    /// `size` (mm): edge by edge, each with its interval on the edge's parameter, its points at
-    /// the ends and whether it is the whole edge ([`solidcore::eval::outline::stretches`], where
-    /// what is outline is set out). Each edge's own tolerance is taken from the record. `None`
-    /// when an edge or face cannot be read, or an edge bounds more than two faces.
-    #[must_use]
-    pub fn outline_stretches(&self, view: Vec3, size: f64) -> Option<Vec<OutlineStretch>> {
+    /// The stretches of the body's edges on its outline seen along `view` (a unit vector toward
+    /// the viewer), for a body of size `size` (mm): edge by edge, each with its interval on the
+    /// edge's parameter, its points at the ends and whether it is the whole edge
+    /// ([`solidcore::eval::outline::stretches`], where what is outline is set out, and how far
+    /// its sampling sees). Each edge's own tolerance is taken from the record.
+    ///
+    /// # Errors
+    /// [`crate::Error::Refused`] for a `view` that is not a finite unit vector, a `size` that is
+    /// not finite and positive, an edge or face that cannot be read, or an edge that bounds more
+    /// than two faces.
+    pub fn outline_stretches(&self, view: Vec3, size: f64) -> crate::Result<Vec<OutlineStretch>> {
         let tolerance: Vec<f64> = self.record.edges.iter().map(|e| e.tolerance).collect();
-        solidcore::eval::outline::stretches(&self.inner, vec3(view), size, &tolerance).map(|v| {
-            v.into_iter()
-                .map(|s| OutlineStretch {
-                    edge: s.edge,
-                    range: s.range,
-                    ends: s.ends.map(record_vec3),
-                    whole: s.whole,
-                })
-                .collect()
-        })
+        solidcore::eval::outline::stretches(&self.inner, vec3(view), size, &tolerance)
+            .map_err(crate::error::status)
+            .map(|v| {
+                v.into_iter()
+                    .map(|s| OutlineStretch {
+                        edge: s.edge,
+                        range: s.range,
+                        ends: s.ends.map(record_vec3),
+                        whole: s.whole,
+                    })
+                    .collect()
+            })
     }
 
     /// How far `p` is from edge `e`.

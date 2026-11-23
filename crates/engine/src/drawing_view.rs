@@ -20,6 +20,7 @@ use solidcraft_doc::drawing::view::{Cut, ResolvedView, SetBy, View, ViewKind};
 use solidcraft_doc::drawing::{Drawing, Sheet};
 use solidcraft_doc::drawing_view::{Exploded, Pose, StudyStep, ViewConfiguration};
 use solidcraft_doc::{MAX_PLACEMENT_DEPTH, MAX_PLACEMENTS, ModelBody, ModelState, ids};
+use solidcraft_geom::drawing_detail::{Boundary, Shape};
 use solidcraft_geom::drawing_view::{Scale, ViewFrame};
 use solidcraft_geom::paper::line::LineGroup;
 use solidcraft_geom::{Aabb2, EPS};
@@ -155,10 +156,12 @@ impl From<&ResolvedView> for Styles {
 }
 
 impl Styles {
-    /// Leaves out a shaded part's own lines: its picture draws it, and it still hides what lies
-    /// behind it.
+    /// Leaves out the lines of a part shaded with no lines: its picture draws it, and it still
+    /// hides what lies behind it. A part shaded with its edges keeps its exact lines (visible, and
+    /// hidden too for shaded with hidden edges), drawn over its picture, so where the picture's
+    /// tessellated outline and the exact lines differ, the lines win.
     pub fn leave_shaded_to_pictures(&self, lines: &mut Lines) {
-        let shaded = |reference: bool| (if reference { self.reference } else { self.display }).is_shaded();
+        let shaded = |reference: bool| (if reference { self.reference } else { self.display }) == VisualStyle::Shaded;
         lines.lines.retain(|l| !shaded(l.reference));
         lines.threads.retain(|t| !shaded(t.reference));
     }
@@ -523,13 +526,6 @@ pub struct OnSheet {
     pub unmeasured: Option<Unmeasured>,
 }
 
-/// Why a view drawing in `display` and `reference` styles can't be drawn yet, if it can't: shaded
-/// views with lines need the view's exact lines. The snapshot and the sheet scene refuse alike.
-pub fn not_drawable(display: VisualStyle, reference: VisualStyle) -> Option<&'static str> {
-    let lined = |style: VisualStyle| style.is_shaded() && style != VisualStyle::Shaded;
-    (lined(display) || lined(reference)).then_some("not supported yet: shaded views with lines need the view's exact lines (W06)")
-}
-
 /// Why section view `view` can't be drawn yet, if it can't (#13046): only a full section's lines
 /// are cut so far, and a shaded part's picture isn't. The sheet scene refuses it; its settings stay
 /// editable. Pictures and dimensions leave out every section view for now.
@@ -700,6 +696,35 @@ pub fn frame(basis: Plane, scale: Scale, model: &Aabb2, centre: Vec2, cmd: &str)
     ViewFrame::new(basis, scale, model.center(), centre).map_err(|e| bad(cmd, e.to_string()))
 }
 
+/// The frame saved view `view` draws through, its middle at `centre` on paper: [`frame`]'s, the
+/// model's middle there, except a detail view's, whose boundary's centre is there, so the region
+/// it shows sits on its place whatever else the model holds.
+pub fn view_frame(view: &ResolvedView, model: &Aabb2, centre: Vec2, cmd: &str) -> Result<ViewFrame> {
+    match view.detail {
+        Some(boundary) => ViewFrame::new(view.basis, view.scale.value, boundary.centre(), centre).map_err(|e| bad(cmd, e.to_string())),
+        None => frame(view.basis, view.scale.value, model, centre, cmd),
+    }
+}
+
+/// A detail view's boundary as `frame` draws it: the window its lines are cut to, on paper.
+pub fn detail_window(boundary: &Boundary, frame: &ViewFrame) -> Shape {
+    let map = frame.paper_map();
+    match boundary.shape() {
+        Shape::Circle { centre, radius } => Shape::Circle { centre: map.apply(centre), radius: radius * map.scale() },
+        Shape::Rectangle(b) => {
+            let (a, c) = (map.apply(b.min), map.apply(b.max));
+            Shape::Rectangle(Aabb2 { min: Vec2::new(a.x.min(c.x), a.y.min(c.y)), max: Vec2::new(a.x.max(c.x), a.y.max(c.y)) })
+        }
+    }
+}
+
+/// Why detail view `view` can't be drawn yet, if it can't: its region is cut from its lines, and a
+/// shaded part's picture isn't cut yet.
+pub fn not_detailed_yet(view: &ResolvedView) -> Option<&'static str> {
+    let shaded = view.visual_style.value.is_shaded() || view.reference_style.value.is_shaded();
+    (view.detail.is_some() && shaded).then_some("not supported yet: a shaded detail view")
+}
+
 /// Saved view `id` of `drawing`, one of `s`'s design's drawings, on its sheet: the extents of what it
 /// shows on its plane ([`measured`]; a view's source is the design the drawing is in), grown by
 /// [`shows`], at its scale, with the model's middle on its centre ([`Drawing::view_centre`]); with nothing to
@@ -738,15 +763,14 @@ pub(crate) fn on_its_sheet(s: &Session, d: &Drawing, id: u64, cmd: &str) -> std:
     if d.view(id).and_then(no_model_edges).is_some() {
         return Err(NO_PLACE);
     }
-    let unstyled = not_drawable(view.visual_style.value, view.reference_style.value);
     // Not yet on a section view: its cut faces' edges are in no part (#13046).
-    if unstyled.or_else(|| not_drawable_apart(&view)).is_some() || view.cut.is_some() {
+    if not_drawable_apart(&view).is_some() || view.cut.is_some() {
         return Err(NOT_DRAWN);
     }
     let on = on_sheet(s, d, id, cmd).ok().filter(|on| on.unmeasured.is_none()).ok_or(NOT_DRAWN)?;
     let sheet = d.views.iter().find(|v| v.id == id).and_then(|v| d.sheets.iter().find(|sheet| sheet.id == v.sheet));
     let (Ok(through), Ok(centre), Some(Ok(size))) =
-        (frame(view.basis, view.scale.value, &on.extents.model, Vec2::ZERO, cmd), d.view_centre(id), sheet.map(|sheet| sheet.sheet.size_mm()))
+        (view_frame(&view, &on.extents.model, Vec2::ZERO, cmd), d.view_centre(id), sheet.map(|sheet| sheet.sheet.size_mm()))
     else {
         return Err(NOT_DRAWN);
     };
@@ -791,7 +815,9 @@ pub fn placed(view: &ResolvedView, measured: std::result::Result<(Extents, Aabb2
             (Extents { model, error_mm: 0.0, bodies: 0 }, model, Some(why))
         }
     };
-    let boundary = frame(view.basis, scale, &extents.model, centre, cmd)?.boundary(&shows).map_err(|e| bad(cmd, e.to_string()))?;
+    // A detail view's boundary is its region's: it shows nothing past it.
+    let shows = view.detail.map_or(shows, |region| region.shape().bounds());
+    let boundary = view_frame(view, &extents.model, centre, cmd)?.boundary(&shows).map_err(|e| bad(cmd, e.to_string()))?;
     Ok(OnSheet { boundary, extents, unmeasured })
 }
 

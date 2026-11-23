@@ -34,6 +34,7 @@ pub(super) fn fixtures() -> Vec<(&'static str, Value)> {
             "frame_end_cap",
             json!({"type":"frame_end_cap","ends":[{"plane":plane("cap1"),"member":{"feature":7,"line":"l1"}}],"thickness":"cap.thickness","ratio":"cap.ratio","chamfer":"cap.chamfer","direction":"inward"}),
         ),
+        ("frame_member_turn", json!({"type":"frame_member_turn","member":{"feature":7,"line":"l1"},"angle":"turn.angle"})),
         (
             "body_transfer",
             json!({"type": "body_transfer", "bodies": ["B"], "from": 0, "to": 1, "transform": [[1,0,0,0],[0,1,0,0],[0,0,1,0],[0,0,0,1]]}),
@@ -102,6 +103,11 @@ pub(super) fn fixtures() -> Vec<(&'static str, Value)> {
         ("shell", json!({"type": "shell", "faces": [o], "thickness": "shell.thickness"})),
         ("draft", json!({"type": "draft", "faces": [o], "angle": "draft.angle", "neutral": plane("draft_neutral"), "pull": [0, 0, 1]})),
         ("construction_plane", json!({"type": "construction_plane", "plane": plane("cplane")})),
+        (
+            "construction_plane_square_to_line",
+            json!({"type": "construction_plane", "plane": {"type": "square_to_line",
+                "line": {"type": "edge", "at": [1.0, 2.0, 3.0]}, "point": {"type": "point", "p": [4.0, 5.0, 6.0]}}}),
+        ),
         ("split", json!({"type": "split", "body": "B", "plane": plane("split")})),
         ("split_line", json!({"type": "split", "body": "B", "plane": plane("split_line")})),
         (
@@ -125,7 +131,8 @@ pub(super) fn fixtures() -> Vec<(&'static str, Value)> {
         (
             "frame_member",
             json!({"type": "frame_member", "path_sketch": 1, "lines": ["l1"],
-                "profile": {"source": "library", "profile": {"kind": "rect_tube", "width": 40, "height": 40, "wall": 3}}, "angle": "frame_member.angle"}),
+                "profile": {"source": "library", "profile": {"kind": "rect_tube", "width": 40, "height": 40, "wall": 3}}, "angle": "frame_member.angle",
+                "pairs": [{"id": "pair1", "a": {"type": "construct_point", "name": "CP"}, "b": {"type": "vertex", "at": o}}], "next_pair": 2}),
         ),
         (
             "frame_member_sketch",
