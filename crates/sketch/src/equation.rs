@@ -3,9 +3,14 @@
 //! (`solidcraft_doc::sketch_equation`), which places the points again before every solve. The
 //! points are fixed for the solver, so dragging never bends the curve, while other geometry can
 //! still share its end points.
+//!
+//! With a `z` formula (#12662) the curve leaves the plane: it is kept as a drawn 3D curve (a
+//! wire with fit points, as a 3D spline is), so a 3D sketch can give it a height that follows the
+//! design's parameters too. A 3D curve's coordinates are the sketch's own 3D coordinates, the
+//! space its other 3D curves are drawn in.
 
 use serde::{Deserialize, Serialize};
-use solidcore_record::Vec2;
+use solidcore_record::{Vec2, Vec3};
 
 use crate::model::{CurveKind, Result, Sketch, SketchError};
 
@@ -42,16 +47,23 @@ impl VariableUnit {
 /// out) the explicit y = f(x) over x from `start` to `end`. The formulas use the design's
 /// expression language and parameters; the variable is a plain number unless `variable_unit`
 /// says otherwise, so `sin(t)` reads it in radians, and a result without a unit is in the
-/// design's length unit.
+/// design's length unit. A `z` formula (#12662) lifts the curve off the plane into a 3D curve.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct EquationCurve {
-    /// The fit point spline it places (a curve id of the sketch).
+    /// The fit point spline it places (a curve id of the sketch), or the drawn 3D curve it
+    /// places when it has a `z` formula (a wire id of the sketch).
     pub curve: String,
     /// x(t). `None`: the explicit form, where the variable is x itself.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub x: Option<String>,
     /// y(t), or f(x) in the explicit form.
     pub y: String,
+    /// z(t): the height of the curve in the sketch's own 3D coordinates (#12662). `Some` makes
+    /// this a 3D curve, which the sketch keeps as a drawn 3D curve (a wire) instead of a plane
+    /// spline; it then needs the sketch's 3D Sketch option. The explicit form is a plane curve,
+    /// so it takes no `z`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub z: Option<String>,
     /// Where the variable starts and ends.
     pub start: String,
     pub end: String,
@@ -69,20 +81,31 @@ impl EquationCurve {
         if self.x.is_some() { "t" } else { "x" }
     }
 
+    /// Whether the curve leaves the sketch plane (it has a `z` formula, #12662).
+    pub fn is_3d(&self) -> bool {
+        self.z.is_some()
+    }
+
     /// The formulas, each with what it sets (for the parameters a sketch uses).
     pub fn list(&self) -> Vec<(&'static str, &String)> {
-        let mut out = Vec::with_capacity(4);
+        let mut out = Vec::with_capacity(5);
         if let Some(x) = &self.x {
             out.push(("Curve X", x));
         }
-        out.extend([("Curve Y", &self.y), ("Curve Start", &self.start), ("Curve End", &self.end)]);
+        out.push(("Curve Y", &self.y));
+        if let Some(z) = &self.z {
+            out.push(("Curve Z", z));
+        }
+        out.extend([("Curve Start", &self.start), ("Curve End", &self.end)]);
         out
     }
 
     /// Mutable view of [`EquationCurve::list`], for renaming the parameters they refer to.
     pub fn list_mut(&mut self) -> Vec<&mut String> {
         let mut out: Vec<&mut String> = self.x.iter_mut().collect();
-        out.extend([&mut self.y, &mut self.start, &mut self.end]);
+        out.push(&mut self.y);
+        out.extend(self.z.iter_mut());
+        out.extend([&mut self.start, &mut self.end]);
         out
     }
 }
@@ -196,6 +219,56 @@ impl Sketch {
             q.pos = p;
             q.fixed = true;
         }
+        Ok(())
+    }
+
+    /// Add a 3D equation curve (#12662): a drawn 3D curve through `at` (fit points, as a 3D
+    /// spline's), with `equation` kept beside it. Returns the wire's id. The curve closes
+    /// smoothly where its last point is its first again, and its coordinates are the sketch's own
+    /// 3D ones (the space a 3D spline is drawn in).
+    pub fn add_equation_wire(&mut self, at: &[Vec3], mut equation: EquationCurve) -> Result<String> {
+        let id = self.add_drawn_wire_in(at, crate::wire::WireSpace::Component)?;
+        equation.curve = id.clone();
+        self.equations.retain(|e| e.curve != id);
+        self.equations.push(equation);
+        Ok(id)
+    }
+
+    /// Give a 3D equation curve new points (its formulas were edited), keeping its id: the drawn
+    /// curve's fit points are replaced (however many the new formulas need) and its polyline is
+    /// made from them again.
+    pub fn replace_equation_wire(&mut self, wire: &str, at: &[Vec3], mut equation: EquationCurve) -> Result<()> {
+        let index = self.wire_index(wire).ok_or_else(|| SketchError::Invalid("unknown 3D curve".into()))?;
+        if self.wires.get(index).is_none_or(|w| w.link.is_some()) {
+            return Err(SketchError::Invalid("a linked 3D curve is not an equation curve".into()));
+        }
+        let pts = crate::wire::drawn_polyline(at)?;
+        self.wire_budget_for(Some(index), pts.len(), at.len())?;
+        if let Some(w) = self.wires.get_mut(index) {
+            w.fit = at.to_vec();
+            w.arc = None;
+            w.pts = pts;
+        }
+        equation.curve = wire.to_string();
+        self.equations.retain(|e| e.curve != wire);
+        self.equations.push(equation);
+        Ok(())
+    }
+
+    /// Move a 3D equation curve's fit points to `at`, one per fit point: the polyline follows
+    /// them, as `sketch.move3d` would have it. Used each time the formulas are worked out again.
+    pub fn place_equation_wire_points(&mut self, wire: usize, at: &[Vec3]) -> Result<()> {
+        let current = self.wires.get(wire).filter(|w| w.link.is_none()).map(|w| w.fit.len()).unwrap_or(0);
+        if current != at.len() || current == 0 {
+            return Err(SketchError::Invalid("the 3D equation curve's point count changed".into()));
+        }
+        let pts = crate::wire::drawn_polyline(at)?;
+        let Some(w) = self.wires.get_mut(wire) else {
+            return Err(SketchError::Invalid("unknown 3D curve".into()));
+        };
+        w.fit = at.to_vec();
+        w.arc = None;
+        w.pts = pts;
         Ok(())
     }
 

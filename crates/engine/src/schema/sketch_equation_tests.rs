@@ -9,9 +9,12 @@ use crate::schema::{ParamCheck, input_schema_for, output_schema_for};
 fn schemas_and_the_key_check_agree() {
     assert_keys(
         input_schema_for::<EquationCurveParams>(),
-        &["construction", "end", "explicit", "sketch", "start", "tolerance", "variable_unit", "x", "y"],
+        &["construction", "end", "explicit", "sketch", "start", "tolerance", "variable_unit", "x", "y", "z"],
     );
-    assert_keys(input_schema_for::<EquationEditParams>(), &["curve", "end", "explicit", "sketch", "start", "tolerance", "variable_unit", "x", "y"]);
+    assert_keys(
+        input_schema_for::<EquationEditParams>(),
+        &["curve", "end", "explicit", "sketch", "start", "tolerance", "variable_unit", "x", "y", "z"],
+    );
 }
 
 #[test]
@@ -27,8 +30,11 @@ fn strict_keeps_todays_errors() {
         ("sketch.equation_curve", json!({"x": "t", "y": "t", "start": 0, "end": 1, "variable_unit": "mm"})),
         ("sketch.equation_curve", json!({"x": "t", "y": "t", "start": 0, "end": 1, "variable_unit": true})),
         ("sketch.equation_curve", json!({"x": "t", "y": "t", "start": 0, "end": 1, "variable_unit": "range"})),
+        ("sketch.equation_curve", json!({"x": "t", "y": "t", "z": ["t"], "start": 0, "end": 1})),
+        ("sketch.equation_curve", json!({"explicit": true, "y": "x", "z": "x", "start": 0, "end": 1})),
         ("sketch.equation_curve.edit", json!({"curve": 7})),
         ("sketch.equation_curve.edit", json!({"curve": "nope", "y": "t"})),
+        ("sketch.equation_curve.edit", json!({"curve": "nope", "z": "t"})),
     ]);
 }
 

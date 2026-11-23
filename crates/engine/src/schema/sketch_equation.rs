@@ -117,7 +117,8 @@ impl JsonSchema for CurveId {
     }
 }
 
-/// Draw a curve from formulas: x(t) and y(t) over a range of t, or y = f(x) over a range of x.
+/// Draw a curve from formulas: x(t) and y(t) over a range of t, or y = f(x) over a range of x;
+/// with a `z` formula, a 3D curve of x(t), y(t) and z(t).
 #[derive(Debug, Deserialize, JsonSchema)]
 #[schemars(deny_unknown_fields)]
 pub struct EquationCurveParams {
@@ -127,6 +128,10 @@ pub struct EquationCurveParams {
     /// y(t), a formula of t; or f(x), a formula of x, with `explicit: true`. Required.
     #[serde(default)]
     pub y: Option<Formula>,
+    /// z(t), a formula of t: the curve leaves the sketch plane and becomes a 3D curve, which
+    /// needs the sketch's 3D Sketch option. The explicit form takes no `z`.
+    #[serde(default)]
+    pub z: Option<Formula>,
     /// The explicit form, y = f(x): `y` is a formula of x and `x` is left out. Default false.
     #[serde(default)]
     pub explicit: Option<bool>,
@@ -165,6 +170,10 @@ pub struct EquationEditParams {
     /// y(t), or f(x) for an explicit curve. Kept when left out.
     #[serde(default)]
     pub y: Option<Formula>,
+    /// z(t): the curve is a 3D curve (of x(t), y(t) and z(t)). Kept when left out; `explicit:
+    /// true` drops it, the explicit form being a plane curve.
+    #[serde(default)]
+    pub z: Option<Formula>,
     /// The explicit form, y = f(x). Kept when left out; false needs `x` (given or kept).
     #[serde(default)]
     pub explicit: Option<bool>,
@@ -193,7 +202,8 @@ pub struct EquationCurveResult {
     pub curves: Vec<String>,
     /// The new curve's id.
     pub curve: String,
-    /// How many points the spline goes through (a closed curve's start counted once).
+    /// How many points the spline goes through (a closed curve's start counted once), or how many
+    /// fit points a 3D curve is drawn through.
     pub points: usize,
     /// The curve ends where it starts and closes smoothly there.
     pub closed: bool,
@@ -212,9 +222,11 @@ pub struct EquationCurveResult {
 /// What `sketch.equation_curve.edit` returns.
 #[derive(Debug, Serialize, JsonSchema)]
 pub struct EquationEditResult {
-    /// The curve's id (unchanged).
+    /// The curve's id: unchanged, unless the edit changed the curve between a plane curve and a
+    /// 3D curve (giving `z` or `explicit: true`), which is a new curve of the sketch.
     pub curve: String,
-    /// How many points the spline now goes through (a closed curve's start counted once).
+    /// How many points the spline now goes through (a closed curve's start counted once), or how
+    /// many fit points a 3D curve is drawn through.
     pub points: usize,
     /// The curve ends where it starts and closes smoothly there.
     pub closed: bool,

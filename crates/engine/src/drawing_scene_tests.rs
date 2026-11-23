@@ -471,6 +471,7 @@ fn sheet_sketch_strokes_refuse_hostile_geometry_without_a_polyline_fallback() {
             curve: s.sketch.curves[0].id.clone(),
             x: None,
             y: "x".into(),
+            z: None,
             start: "0".into(),
             end: "1".into(),
             tolerance: 0.01,

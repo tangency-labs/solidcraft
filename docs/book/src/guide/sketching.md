@@ -381,6 +381,7 @@ point it lined up with, in the shape's undo step, unless the sketch already sets
 preference off, drawing lines up only with the previous point, one axis at a time.
 
 Enable **3D Sketch** in the Sketch Palette to draw lines, fit splines and points off the plane.
+An [equation curve](equation-curves.md) takes a third rule, **z(t)**, there too.
 
 Enable **Select 3D sketch curve points** in **Preferences > Sketch** to show and select drawn
 3D curve points as construction references after finishing the sketch. This option is off by default.
