@@ -718,13 +718,17 @@ fn a_line_started_on_a_rectangle_side_is_held_on_it() {
                 .unwrap_or_else(|| panic!("{rectangle}: no side at x {x}"))
         };
         let (left, right) = (side(-20.0), side(20.0));
-        let held = |p: usize, c: usize| sketch.constraints.iter().any(|k| matches!(k.kind, ConstraintKind::PointOnCurve { p: q, c: on } if q == p && on == c));
+        let held = |p: usize, c: usize| {
+            sketch.constraints.iter().any(|k| matches!(k.kind, ConstraintKind::PointOnCurve { p: q, c: on } if q == p && on == c))
+        };
         let kinds = || sketch.constraints.iter().map(|k| &k.kind).collect::<Vec<_>>();
         assert!(held(a, left), "{rectangle}: the line's start is not held on the left side: {:?}", kinds());
         assert!(held(b, right), "{rectangle}: the line's end is not held on the right side: {:?}", kinds());
-        // The start is on the side, not merely near it.
+        // The start is on the side, not merely near it: its x is the side's own. Its height is
+        // where the pointer was, and a click comes from an f32 screen position, so it is a hair
+        // off it (the same reason the test above measures an on-curve click in 1e-5).
         let start = sketch.point(a).unwrap();
-        assert!((start.x + 20.0).abs() < 1e-6 && (start.y - 6.0).abs() < 1e-6, "{rectangle}: the line's start is at {start:?}");
+        assert!((start.x + 20.0).abs() < 1e-6 && (start.y - 6.0).abs() < 1e-5, "{rectangle}: the line's start is at {start:?}");
     }
 }
 
