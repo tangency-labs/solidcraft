@@ -44,7 +44,9 @@ use solidcore::blend::blend_corner::rollover::{
     chain_off_seams, concave_chain, concave_chain_ends, has_end_arc, is_concave_chain, seams_back,
     RollOver,
 };
-use solidcore::blend::blend_corner::separate_ends::{independent_separate_ends, SeparateEndPair};
+use solidcore::blend::blend_corner::separate_ends::{
+    independent_separate_ends, SeparateEndFit, SeparateEndPair,
+};
 use solidcore::blend::blend_corner::BlendCornerEvent;
 use solidcore::blend::blend_refusal::{BlendRefusal, NotBlendable, SetbackTooShortWhy};
 use solidcore::blend::chamfer_side::{faces_along, wedge_at_middle};
@@ -1217,6 +1219,11 @@ fn untagged(b: &mut Brep) -> solidcore::Result<()> {
     Ok(())
 }
 
+struct SeparateEndPicks {
+    trailing: HashMap<usize, [f64; 3]>,
+    limit: Option<(f64, EdgeId)>,
+}
+
 /// Picks at separated ends must have no second picked neighbour at their far end. Passes that
 /// already need a shared corner at another vertex stay together.
 fn separated_end_picks(
@@ -1224,7 +1231,7 @@ fn separated_end_picks(
     b: &mut Brep,
     picked: &[EdgeId],
     sizes: &[f64],
-) -> solidcore::Result<Option<HashMap<usize, [f64; 3]>>> {
+) -> solidcore::Result<Option<SeparateEndPicks>> {
     let mut at_vertex: HashMap<VertexId, Vec<usize>> = HashMap::new();
     for (i, &e) in picked.iter().enumerate() {
         let (start, end) = edge::start_end_vertices(b, e)?;
@@ -1273,10 +1280,14 @@ fn separated_end_picks(
     }
     // Other blend workflows can couple picks away from their endpoints. Partition only
     // selections made entirely of independent pairs.
-    if pairs.len().checked_mul(2) != Some(picked.len()) || !independent_separate_ends(k, b, &pairs)?
-    {
+    if pairs.len().checked_mul(2) != Some(picked.len()) {
         return Ok(None);
     }
+    let limit = match independent_separate_ends(k, b, &pairs)? {
+        SeparateEndFit::NotApplicable => return Ok(None),
+        SeparateEndFit::Fits => None,
+        SeparateEndFit::Limited { size, edge } => Some((size, edge)),
+    };
     let trailing = trailing
         .into_iter()
         .map(|(i, v)| {
@@ -1284,11 +1295,10 @@ fn separated_end_picks(
             Ok((i, [p.x, p.y, p.z]))
         })
         .collect::<solidcore::Result<_>>()?;
-    Ok(Some(trailing))
+    Ok(Some(SeparateEndPicks { trailing, limit }))
 }
 
-/// Build the two groups of separated ends with the ordinary end construction. The first
-/// pass's faces do not extend the second pass: at the cutout the two bands end independently.
+/// Use separate Ends, or name a support limit only after the same operation builds at it.
 fn separated_end_passes(
     k: &mut Kernel,
     b: &mut Brep,
@@ -1297,9 +1307,85 @@ fn separated_end_passes(
     kind: Blend,
     contract: Contract,
 ) -> solidcore::Result<Option<Result<()>>> {
-    let Some(trailing) = separated_end_picks(k, b, picked, sizes)? else {
+    let Some(SeparateEndPicks { trailing, limit }) = separated_end_picks(k, b, picked, sizes)?
+    else {
         return Ok(None);
     };
+    if let Some((size, edge)) = limit {
+        if !separate_end_limit_builds(k, b, picked, &trailing, size, kind, contract)? {
+            return Ok(None);
+        }
+        let kind = if kind == Blend::Chamfer {
+            FitKind::Distance
+        } else {
+            FitKind::Radius
+        };
+        return Ok(Some(Err(Error::TooLarge {
+            size,
+            kind,
+            at: edge_point(k, b, edge)?,
+            face: None,
+            why: Some(RoomReason::RailLeavesFace),
+        })));
+    }
+    build_separated_end_groups(k, b, picked, sizes, kind, contract, &trailing).map(Some)
+}
+
+fn separate_end_limit_builds(
+    k: &mut Kernel,
+    b: &Brep,
+    picked: &[EdgeId],
+    trailing: &HashMap<usize, [f64; 3]>,
+    limit: f64,
+    kind: Blend,
+    contract: Contract,
+) -> solidcore::Result<bool> {
+    let log = k.blend_face_log.clone();
+    let note = crate::session::note();
+    let trial: solidcore::Result<bool> = (|| {
+        let mut copy = brep_copy(k, b)?;
+        let mapped: Option<Vec<_>> = picked
+            .iter()
+            .map(|edge| {
+                let index = b
+                    .edge_list()
+                    .iter()
+                    .position(|candidate| candidate == edge)?;
+                copy.edge_list().get(index).copied()
+            })
+            .collect();
+        let Some(mapped) = mapped else {
+            return Ok(false);
+        };
+        let expect = Expect::under(k, &mut copy, Proof::default(), contract)?;
+        let sizes = vec![limit; picked.len()];
+        if build_separated_end_groups(k, &mut copy, &mapped, &sizes, kind, contract, trailing)?
+            .is_err()
+        {
+            return Ok(false);
+        }
+        Ok(done(k, &mut copy, expect, contract)?.is_ok())
+    })();
+    k.blend_face_log = log;
+    crate::session::note_back(note);
+    match trial {
+        Err(e) if e.is_cancelled() => Err(e),
+        Ok(true) => Ok(true),
+        _ => Ok(false),
+    }
+}
+
+/// Build the two groups of separated ends with the ordinary end construction. The first
+/// pass's faces do not extend the second pass: at the cutout the two bands end independently.
+fn build_separated_end_groups(
+    k: &mut Kernel,
+    b: &mut Brep,
+    picked: &[EdgeId],
+    sizes: &[f64],
+    kind: Blend,
+    contract: Contract,
+    trailing: &HashMap<usize, [f64; 3]>,
+) -> solidcore::Result<Result<()>> {
     let pass_group = |k: &mut Kernel, b: &mut Brep, edges: &[EdgeId], sizes: &[f64]| {
         let chamfers: Vec<_> = if kind == Blend::Chamfer {
             sizes
@@ -1332,7 +1418,7 @@ fn separated_end_passes(
         }
     }
     if let Err(e) = pass_group(k, b, &lead, &lead_sizes)? {
-        return Ok(Some(Err(e)));
+        return Ok(Err(e));
     }
     let lost_pick = |i: usize| Error::CornerUnsupported {
         why: Some(
@@ -1344,7 +1430,7 @@ fn separated_end_passes(
     for &e in b.edge_list() {
         if let Some((_, i)) = picked_on(b, e) {
             if surviving.insert(i, e).is_some() {
-                return Ok(Some(Err(lost_pick(i))));
+                return Ok(Err(lost_pick(i)));
             }
         }
     }
@@ -1352,14 +1438,14 @@ fn separated_end_passes(
     for (i, &size) in sizes.iter().enumerate() {
         if trailing.contains_key(&i) {
             let Some(&e) = surviving.get(&i) else {
-                return Ok(Some(Err(lost_pick(i))));
+                return Ok(Err(lost_pick(i)));
             };
             tail.push(e);
             tail_sizes.push(size);
         }
     }
     untagged(b)?;
-    Ok(Some(pass_group(k, b, &tail, &tail_sizes)?.map(|_| ())))
+    Ok(pass_group(k, b, &tail, &tail_sizes)?.map(|_| ()))
 }
 
 /// The rounds of [`blend`] when blends of several edges overflow their faces (the first call

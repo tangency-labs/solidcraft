@@ -38,7 +38,28 @@ pub struct SeparateEndPair {
     pub sizes: [f64; 2],
 }
 
-/// Whether every pair can use separate Ends and the pairs' blend envelopes are disjoint.
+/// Whether separate Ends fit the selected geometry.
+pub enum SeparateEndFit {
+    /// The selection does not qualify for separate Ends.
+    NotApplicable,
+    /// Every pair fits and the blend envelopes are disjoint.
+    Fits,
+    /// A common size exceeds a support length. The candidate still has to build.
+    Limited {
+        /// The largest representable common size allowed by the supports.
+        size: f64,
+        /// The selected edge whose support limits the size.
+        edge: EdgeId,
+    },
+}
+
+struct Supports {
+    at: Point3,
+    ends: [Point3; 3],
+    span: Extent3d,
+}
+
+/// Qualifies separate Ends and finds a support limit for a common size.
 ///
 /// # Errors
 /// Propagates failures reading or evaluating the candidate geometry.
@@ -46,30 +67,74 @@ pub fn independent_separate_ends(
     k: &Kernel,
     b: &mut Brep,
     pairs: &[SeparateEndPair],
-) -> Result<bool> {
-    let mut envelopes = Vec::with_capacity(pairs.len());
+) -> Result<SeparateEndFit> {
+    let common = pairs
+        .first()
+        .is_some_and(|first| pairs.iter().all(|pair| pair.sizes == [first.sizes[0]; 2]));
+    let mut supports = Vec::with_capacity(pairs.len());
+    let mut limit: Option<(f64, EdgeId)> = None;
     for pair in pairs {
-        let Some(envelope) = classify_separate_ends(k, b, pair.vertex, pair.edges, pair.sizes)?
-        else {
-            return Ok(false);
+        let [a, z] = pair.sizes;
+        if !pair
+            .sizes
+            .into_iter()
+            .all(|size| size.is_finite() && size > 0.0)
+        {
+            return Ok(SeparateEndFit::NotApplicable);
+        }
+        let Some(geometry) = classify_separate_ends(k, b, pair.vertex, pair.edges)? else {
+            return Ok(SeparateEndFit::NotApplicable);
+        };
+        let size = a.max(z);
+        let [first, second] = pair.edges;
+        for (end, (width, edge)) in
+            geometry
+                .ends
+                .into_iter()
+                .zip([(a, first), (z, second), (size, first)])
+        {
+            match has_room(geometry.at, end, width) {
+                Some(true) => {}
+                Some(false) if common => {
+                    let Some(fit) = support_limit(geometry.at, end) else {
+                        return Ok(SeparateEndFit::NotApplicable);
+                    };
+                    if limit.is_none_or(|(old, _)| fit < old) {
+                        limit = Some((fit, edge));
+                    }
+                }
+                _ => return Ok(SeparateEndFit::NotApplicable),
+            }
+        }
+        supports.push((geometry.span, size));
+    }
+
+    let mut envelopes = Vec::with_capacity(supports.len());
+    for (span, requested) in supports {
+        let size = limit.map_or(requested, |(fit, _)| fit);
+        let Some(envelope) = swept_envelope(span, size) else {
+            return Ok(SeparateEndFit::NotApplicable);
         };
         if envelopes
             .iter()
             .any(|other| !envelope.are_disjoint(other, 0.0))
         {
-            return Ok(false);
+            return Ok(SeparateEndFit::NotApplicable);
         }
         envelopes.push(envelope);
     }
-    Ok(true)
+    Ok(match limit {
+        Some((size, edge)) => SeparateEndFit::Limited { size, edge },
+        None => SeparateEndFit::Fits,
+    })
 }
 
-/// Certifies separate Ends with square trim supports at `v`, for the given sizes.
+/// Recognizes separate Ends with square trim supports at `v` and records their lengths.
 ///
 /// A right-angle concave blend fits its trim support only up to the neighboring
 /// rim length and the post height. The far ends must also have square trim
 /// planes so the ordinary end construction stays inside the swept bounds.
-/// The returned box bounds the two sweeps for an interference check.
+/// The span encloses the two selected edges for a subsequent interference check.
 ///
 /// This checks a single closed manifold fan of straight edges and oriented exterior
 /// planes. The post and opening occupy opposite quadrants of the floor. At the
@@ -83,13 +148,8 @@ fn classify_separate_ends(
     b: &mut Brep,
     v: VertexId,
     picked: [EdgeId; 2],
-    sizes: [f64; 2],
-) -> Result<Option<Extent3d>> {
+) -> Result<Option<Supports>> {
     let [first, second] = picked;
-    let [size_a, size_b] = sizes;
-    if !sizes.into_iter().all(|size| size.is_finite() && size > 0.0) {
-        return Ok(None);
-    }
     let Some(fan) = vertex_fan(b, v, first)? else {
         return Ok(None);
     };
@@ -132,15 +192,6 @@ fn classify_separate_ends(
         }
     }
 
-    let size = size_a.max(size_b);
-    for (support, width) in [(rim_a, size_a), (rim_b, size_b), (up, size)] {
-        let Some(end) = other_end(b, support, v)? else {
-            return Ok(None);
-        };
-        if !has_room(at, end, width) {
-            return Ok(None);
-        }
-    }
     // With line edges and plane supports the oriented dihedral is constant.
     if !(is_concave_edge(k, b, first)? && is_concave_edge(k, b, second)?) {
         return Ok(None);
@@ -151,9 +202,24 @@ fn classify_separate_ends(
     ) else {
         return Ok(None);
     };
-    let extent = Extent3d::from_points(at, end_a).union(&Extent3d::from_point(end_b));
-    let lo = extent.min();
-    let hi = extent.max();
+    let (Some(rim_a), Some(rim_b), Some(up)) = (
+        other_end(b, rim_a, v)?,
+        other_end(b, rim_b, v)?,
+        other_end(b, up, v)?,
+    ) else {
+        return Ok(None);
+    };
+    let span = Extent3d::from_points(at, end_a).union(&Extent3d::from_point(end_b));
+    Ok(Some(Supports {
+        at,
+        ends: [rim_a, rim_b, up],
+        span,
+    }))
+}
+
+fn swept_envelope(span: Extent3d, size: f64) -> Option<Extent3d> {
+    let lo = span.min();
+    let hi = span.max();
     let outward_low = Point3::new(
         next_down(lo.x - size),
         next_down(lo.y - size),
@@ -165,7 +231,7 @@ fn classify_separate_ends(
         next_up(hi.z + size),
     );
     let envelope = Extent3d::from_points(outward_low, outward_high);
-    Ok(envelope.is_bounded().then_some(envelope))
+    envelope.is_bounded().then_some(envelope)
 }
 
 fn square_cap(
@@ -201,14 +267,17 @@ fn other_end(b: &Brep, e: EdgeId, v: VertexId) -> Result<Option<Point3>> {
 /// Compare squared lengths exactly when the distance bound straddles the requested
 /// size, including exact equality. Refuse an arithmetic range the expansion cannot
 /// represent.
-fn has_room(start: Point3, end: Point3, size: f64) -> bool {
+fn has_room(start: Point3, end: Point3, size: f64) -> Option<bool> {
     let measured = distance(start, end);
-    if measured.value.is_finite() && next_down(measured.value - measured.bound) >= size {
-        return true;
+    if measured.value.is_finite() {
+        if next_down(measured.value - measured.bound) >= size {
+            return Some(true);
+        }
+        if next_up(measured.value + measured.bound) < size {
+            return Some(false);
+        }
     }
-    let Some(size_squared) = expansion::product(size, size) else {
-        return false;
-    };
+    let size_squared = expansion::product(size, size)?;
     let slack = [(start.x, end.x), (start.y, end.y), (start.z, end.z)]
         .into_iter()
         .try_fold(expansion::sub(&[], &size_squared), |sum, (a, b)| {
@@ -217,9 +286,31 @@ fn has_room(start: Point3, end: Point3, size: f64) -> bool {
                 Some(expansion::add(&sum, &expansion::scale(&delta, term)?))
             })
         });
-    slack.is_some_and(|slack| {
-        slack.iter().all(|part| part.is_finite()) && expansion::sign(&slack) >= 0
-    })
+    slack
+        .filter(|slack| slack.iter().all(|part| part.is_finite()))
+        .map(|slack| expansion::sign(&slack) >= 0)
+}
+
+/// A distance's floating-point enclosure spans only a few values at ordinary scales.
+/// Find the last one that fits, keeping the upper endpoint strictly outside by rounding
+/// the enclosure outward.
+fn support_limit(start: Point3, end: Point3) -> Option<f64> {
+    let measured = distance(start, end);
+    let lower = next_down(measured.value - measured.bound);
+    let upper = next_up(measured.value + measured.bound);
+    if !(lower > 0.0 && upper.is_finite() && upper > lower) {
+        return None;
+    }
+    let (mut lo, mut hi) = (lower.to_bits(), upper.to_bits());
+    while hi - lo > 1 {
+        let mid = lo + (hi - lo) / 2;
+        if has_room(start, end, f64::from_bits(mid))? {
+            lo = mid;
+        } else {
+            hi = mid;
+        }
+    }
+    Some(f64::from_bits(lo))
 }
 
 /// Each sector lies between its outward edge and the next edge of the fan.
