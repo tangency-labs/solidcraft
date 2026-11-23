@@ -1480,6 +1480,7 @@ pub(super) fn run_export<H: PluginHost + 'static>(
         design_tokens: false,
         folders: BTreeMap::new(),
         staged: BTreeMap::new(),
+        created_dirs: Vec::new(),
         clock: runtime.permissions.clock,
         forms: false,
         failed: None,
