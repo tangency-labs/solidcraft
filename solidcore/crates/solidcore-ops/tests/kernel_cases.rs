@@ -219,8 +219,8 @@ fn known_failing() -> BTreeMap<String, Listed> {
                 p.display()
             );
             let text = std::fs::read_to_string(&p).unwrap();
-            let mut l: Listed = serde_json::from_str(&text)
-                .unwrap_or_else(|err| panic!("{}: {err}", p.display()));
+            let mut l: Listed =
+                serde_json::from_str(&text).unwrap_or_else(|err| panic!("{}: {err}", p.display()));
             l.case = p
                 .strip_prefix(root)
                 .unwrap()
