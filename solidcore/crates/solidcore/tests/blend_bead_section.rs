@@ -1339,6 +1339,35 @@ fn a_bead_body_runs_round_a_tube_joint() {
     assert!((got - 526.83).abs() <= 0.05, "{got}");
 }
 
+/// A rod of radius 15 standing on a plate (one body): the bead round its circular joint (the
+/// leader a rational circle) is a sound body, flat and convex, and the part's file is
+/// unchanged. Its section faces are fitted to the weld's fit tolerance, so their edges carry up
+/// to it; the body's own tolerance covers them. Flat, its volume is the triangle swept round
+/// the rod's axis: `L^2 / 2 * 2 pi (15 + L / 3)` (Pappus), to the fit.
+#[test]
+fn a_bead_round_a_rod_on_a_plate_is_sound() {
+    use solidcore::primitive::api_primitives::create_box;
+    let mut k = kernel();
+    let plate = create_box(&mut k, Point3::new(0.0, 0.0, 0.0), 100.0, 100.0, 10.0).unwrap();
+    let rod = create_cylinder(&mut k, Point3::new(50.0, 50.0, 10.0), 15.0, 40.0).unwrap();
+    let mut part = boolean_union(&mut k, plate, rod).unwrap();
+    let joint = pick(&k, &part, [65.0, 50.0, 10.0]);
+    let before = smb(&k, &part);
+    let l = 6.0;
+    let size = ChamferSize::Distances([l; 2]);
+    for h in [0.0, 1.0] {
+        let mut body =
+            weld_bead_body(&mut k, &mut part, &[joint], &[size], h, &[], &[], SQUARE).unwrap();
+        assert!(smb(&k, &part) == before, "the part changed");
+        assert_sound(&mut k, &mut body, "the bead round the rod");
+        if h == 0.0 {
+            let want = l * l / 2.0 * 2.0 * PI * (15.0 + l / 3.0);
+            let got = volume_to(&k, &mut body, 1e-5);
+            assert!((got - want).abs() < 1e-3 * want, "{got} {want}");
+        }
+    }
+}
+
 /// Two branches whose joint lines cross: their beads meet at vertices, so they are refused,
 /// and the tubes' file is unchanged.
 #[test]
