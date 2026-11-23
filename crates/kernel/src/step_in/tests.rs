@@ -1460,6 +1460,41 @@ fn a_stopped_import_stops_in_the_check() {
     assert_eq!(found.len(), 2);
 }
 
+/// A window asks for no frames while a check runs (#20633): the end of the run wakes it once, and
+/// a run that ended already wakes a window that asks later. Asking again while the same run is in
+/// flight is not kept twice, so the end still wakes once.
+#[test]
+fn the_end_of_an_imports_check_wakes_once_and_not_before() {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    let waker = |woke: &Arc<AtomicUsize>| -> Arc<dyn Fn() + Send + Sync> {
+        let w = woke.clone();
+        Arc::new(move || {
+            w.fetch_add(1, Ordering::SeqCst);
+        })
+    };
+    let (checks, end) = ImportChecks::running_for_tests();
+    let woke = Arc::new(AtomicUsize::new(0));
+    checks.on_end(waker(&woke));
+    checks.on_end(waker(&woke));
+    assert_eq!(woke.load(Ordering::SeqCst), 0, "nothing is asked of the window while the check runs");
+    end(Vec::new());
+    assert_eq!(woke.load(Ordering::SeqCst), 1, "the end of the check wakes it, once");
+    checks.on_end(waker(&woke));
+    assert_eq!(woke.load(Ordering::SeqCst), 2, "a window that asks after the end is woken at once");
+}
+
+/// A report with no run (nothing to check, or one read from a saved design) wakes nothing.
+#[test]
+fn an_import_with_no_check_wakes_nothing() {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    let woke = Arc::new(AtomicUsize::new(0));
+    let w = woke.clone();
+    ImportChecks::default().on_end(Arc::new(move || {
+        w.fetch_add(1, Ordering::SeqCst);
+    }));
+    assert_eq!(woke.load(Ordering::SeqCst), 0, "no run ends, so nothing is woken");
+}
+
 /// #17697 review: a part is checked once however often it is placed rigidly, and the warning
 /// counts every placement of it.
 #[test]

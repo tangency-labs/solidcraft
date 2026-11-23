@@ -834,18 +834,24 @@ pub(crate) fn import_warning_status(app: &SolveApp, reply: &Value) -> Option<Str
 
 /// SMLib's check of an import's parts runs on after the design shows (#17697). When it ends,
 /// what it found joins the import's result, so its History chip warns, and a part to repair is
-/// said on the status line, once per import, in history order. While a check runs the window
-/// looks again a few times a second.
+/// said on the status line, once per import, in history order.
+///
+/// A running check asks for no frames: it wakes the window once when it ends, for the frame its
+/// result needs. (Asking every frame it runs kept an untouched window redrawing at 4 Hz for the
+/// minutes a large import's parts take to check.)
 pub(crate) fn tick_import_checks(app: &mut SolveApp, ctx: &egui::Context) {
+    // Asked before the checks are settled: a check that ends between the two calls is woken for
+    // (or wakes at once), never left for the next frame nobody asks for.
+    if app.session.model.checking_imports() {
+        let ctx = ctx.clone();
+        app.session.model.on_import_checks_end(std::sync::Arc::new(move || ctx.request_repaint()));
+    }
     // Parts the checks healed: the import is its healed bodies from now on.
     app.session.settle_import_checks();
     for id in app.session.model.take_import_notices() {
         if let Some(summary) = app.session.model.result(id).and_then(|r| r.import_report.as_deref()).map(import_summary) {
             app.set_status(summary, false);
         }
-    }
-    if app.session.model.checking_imports() {
-        ctx.request_repaint_after(std::time::Duration::from_millis(250));
     }
 }
 
