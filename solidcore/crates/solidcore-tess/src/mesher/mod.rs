@@ -1692,7 +1692,9 @@ fn point_loop_has_area(s: &poles::Face, l: &seam::Loop) -> bool {
     let spans = |d: usize| {
         let (lo, hi) = l.uv.iter().map(|q| comp(q, d)).fold((f64::MAX, f64::MIN), |(lo, hi), x| (lo.min(x), hi.max(x)));
         let scale = dom.range.get(d).copied().flatten().map_or(1.0, |(a, b)| (b - a).abs().max(f64::MIN_POSITIVE));
-        hi - lo > scale * 1e-9
+        // Absent only to rounding of the coordinate itself (a pole line's nodes differ by an ulp or
+        // two): a span that is real, however small, bounds a patch.
+        hi - lo > 64.0 * f64::EPSILON * scale.max(lo.abs()).max(hi.abs())
     };
     if spans(0) && spans(1) {
         return true;

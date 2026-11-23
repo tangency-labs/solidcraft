@@ -767,6 +767,28 @@ fn a_tiny_open_patch_within_the_reach_is_never_given_an_empty_plan() {
     }
 }
 
+/// A flat open patch whose v span is 1e-10 of its domain (0.0005 mm by 2e-14 mm) has area: its
+/// nodes are within the reach of one point, but the span is no rounding of a pole line, so the
+/// mesh path never gives it an empty plan.
+#[test]
+fn an_open_patch_with_a_span_under_a_billionth_of_its_domain_is_never_given_an_empty_plan() {
+    let ctrl = vec![[0.0, 0.0, 0.0, 1.0], [5e-4, 0.0, 0.0, 1.0], [0.0, 2e-4, 0.0, 1.0], [5e-4, 2e-4, 0.0, 1.0]];
+    let s = EvalSurface::nurbs([1, 1], [vec![0.0, 0.0, 1.0, 1.0], vec![0.0, 0.0, 1.0, 1.0]], [2, 2], ctrl);
+    let face = poles::Face::new(s.clone(), 0.0);
+    let top = 1e-10;
+    let nodes: Vec<[f64; 2]> = vec![[0.0, 0.0], [0.5, 0.0], [1.0, 0.0], [1.0, top], [0.5, top], [0.0, top]];
+    let pts: Vec<Vec3> = nodes.iter().map(|q| s.derivs(q[0], q[1]).expect("evaluates").0).collect();
+    let thin = seam::Loop { uv: nodes, pts };
+    let rules = size::Rules::new(0.001, 22.9, None);
+    let (h, speed) = size::face_size(&s, &uv::domain(&s), &rules);
+    let shape = Shape { min_angle: 20.0, side: None, size_at: None, sides: Sides::Kept };
+    let mut stats = PlanStats::default();
+    let plan = plan_face(9, "spline", &face, std::slice::from_ref(&thin), &rules, (h, speed), 1e-3, &mut stats, Lenient::No, Purpose::Mesh(shape));
+    if let Ok(Planned::Face(fp)) = plan {
+        assert!(!fp.triangles.is_empty(), "a face with area was given an empty plan");
+    }
+}
+
 /// The (u, v) points and 3D points of a cap test: ring nodes 0..=5 along v = 0 from (0, 0) to
 /// (1, 0), and the run's nodes from 10 on, at the given (u, v) (their 3D points: the same, at
 /// z = 0).
