@@ -1763,6 +1763,46 @@ fn window_body_buttons_stay_visible_after_the_page_grows_from_nothing() {
 }
 
 #[test]
+fn a_wrapping_footer_keeps_the_native_actions_at_wide_and_narrow_widths() {
+    for (width, stacked) in [(620.0, false), (180.0, true)] {
+        let ctx = crate::test_support::context();
+        let screen = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(width, 250.0));
+        let run = |events| {
+            registry::clear_handles();
+            let mut action = Action::None;
+            raw_frame(&ctx, egui::RawInput { screen_rect: Some(screen), events, focused: true, ..Default::default() }, |ui| {
+                action = Window::new(egui::Id::unique("wrap_actions"), "update", "Update available")
+                    .cards(3.0)
+                    .actions("Install and close SolidCraft", "Remind me later", Some("Skip this version"))
+                    .wrap_actions()
+                    .show(ui.ctx(), true, |ui| {
+                        for _ in 0..30 {
+                            ui.label("Release note");
+                        }
+                    })
+                    .1;
+            });
+            action
+        };
+        for _ in 0..3 {
+            run(Vec::new());
+        }
+        let footer = registry::rect_of("dialog:footer").unwrap();
+        let targets = ["dialog:ok", "dialog:apply", "dialog:cancel"].map(|id| registry::rect_of(id).unwrap());
+        assert!(screen.contains_rect(footer), "{width}: {footer:?}");
+        assert!(targets.iter().all(|target| footer.contains_rect(*target)), "{width}: {targets:?} in {footer:?}");
+        if stacked {
+            assert!(targets.windows(2).all(|pair| pair[0].bottom() <= pair[1].top()), "{targets:?}");
+        } else {
+            assert_eq!(footer.height(), Tokens::get().form_footer_height);
+            assert!(targets.windows(2).all(|pair| pair[0].left() >= pair[1].right()), "{targets:?}");
+        }
+        assert_eq!(run(key(egui::Key::Enter)), Action::Ok);
+        assert_eq!(run(key(egui::Key::Escape)), Action::Cancel);
+    }
+}
+
+#[test]
 fn adjoining_compact_frames_share_one_stroke_and_only_exposed_corners_round() {
     use crate::DockEdges;
     use crate::{LayoutMode, frame::Side};

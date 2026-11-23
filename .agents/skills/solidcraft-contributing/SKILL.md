@@ -55,9 +55,10 @@ The PR workflow in detail: `.agents/skills/solidcraft-file-pr/SKILL.md` (writing
   (CodeRabbit threads resolved; CI or workflow changes need the owner's approval). The queue runs the
   full suite on each group before it lands on `main`. Never force-push `main`.
 - **Do not push only to catch up with `main`:** every push restarts the whole CI run, and `main`'s own
-  run catches what lands in between. When you push anyway, or GitHub reports a conflict, rebase onto
-  the latest `main` (preferred for your own branch; push it with `--force-with-lease`) or merge `main`
-  in; both are fine. Never force-push a branch someone else works on. Automation that updates your PR
+  run catches what lands in between. When you push anyway, or GitHub reports a conflict, merge `main`
+  in or rebase onto the latest `main`; both are fine. Merging costs less: when the PR already passed
+  and the merge leaves its own change as it was, CI carries the passing run and repeats only the
+  repository checks, while a rebase re-runs the full suite (push one with `--force-with-lease`). Never force-push a branch someone else works on. Automation that updates your PR
   merges `main` into your branch and never force-pushes over your history. Resolve conflicts without
   discarding others' work. Do not re-run CI on an unchanged commit: re-run only a job that runner
   trouble cancelled, with "Re-run failed jobs".
@@ -238,7 +239,7 @@ with `main`. Explain progress and ask before publishing each update.
 
 ### Faster local builds
 
-Both are opt-in tools on your machine. The repository doesn't require them, and CI builds without them.
+sccache is an opt-in tool on your machine. The repository doesn't require it, and CI builds without it.
 
 - **sccache** shares compiled crates across worktrees and branches, so a new worktree or a rebase
   recompiles only what changed. Install it with `cargo install sccache --locked` or your system's
@@ -251,15 +252,10 @@ Both are opt-in tools on your machine. The repository doesn't require them, and 
     build), so those are rebuilt as usual and the gain is in everything else. The usual
     combination is sccache plus debug info off (`CARGO_PROFILE_DEV_DEBUG=0`,
     `CARGO_PROFILE_TEST_DEBUG=0`): smaller targets and faster links.
-- **blaze** (https://github.com/indexable-inc/blaze, MIT or Apache-2.0) is an incremental build
-  daemon that keeps the workspace compiled in memory. Edit-build-test loops get much faster,
-  especially tests.
-  - Install it from crates.io (`cargo install cargo-blaze --locked`) or with Nix, as its README
-    describes. Prefer either over piping an install script from the web.
-  - Use it in the loop: `blaze check`, `blaze test`, `blaze run`, with cargo's usual flags.
-  - It uses its own code generation, so `cargo xtask fast`, `cargo xtask ci` and CI stay the
-    final word before you push.
-  - The daemon holds the project in memory (a few GB). Run one per machine, not one per worktree.
+- **blaze** (https://github.com/indexable-inc/blaze) doesn't build this workspace yet, so don't
+  plan around it. As of blaze 0.20261027 it stops on thread-local statics in tests
+  (`unsupported: writable static`) and on `unsupported: vector in the C ABI` in the app, and it
+  builds with its own toolchain instead of the pinned rustc. Keep sccache as the speed-up.
 
 ## 6. Show the result
 

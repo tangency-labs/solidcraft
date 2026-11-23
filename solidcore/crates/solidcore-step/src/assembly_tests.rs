@@ -32,6 +32,10 @@ fn assembled_box() -> R<(Solid, Vec<bool>)> {
 
 /// [`assembled_box`] finished as a record of `kind`.
 fn assembled_box_as(kind: Kind) -> R<(Solid, Vec<bool>)> {
+    assembled_box_with(kind, |from, to| Ok(BCurve::Line { start: corner(from), end: corner(to) }))
+}
+
+fn assembled_box_with(kind: Kind, curve: impl Fn(usize, usize) -> R<BCurve>) -> R<(Solid, Vec<bool>)> {
     let mut asm = Assembly::new(1e-6, None);
     let mut vertices = Vec::new();
     for c in 0..8 {
@@ -52,8 +56,7 @@ fn assembled_box_as(kind: Kind) -> R<(Solid, Vec<bool>)> {
                     let (a, z) = key;
                     // The one edge written backwards: its line runs from its second vertex.
                     let (from, to) = if key == (0, 1) { (z, a) } else { (a, z) };
-                    let line = BCurve::Line { start: corner(from), end: corner(to) };
-                    let (e, along) = asm.add_edge(key.0 as u64 * 8 + key.1 as u64, line, [0.0, 1.0], [vertices[a], vertices[z]])?;
+                    let (e, along) = asm.add_edge(key.0 as u64 * 8 + key.1 as u64, curve(from, to)?, [0.0, 1.0], [vertices[a], vertices[z]])?;
                     alongs.push(along);
                     let start = if along { a } else { z };
                     edges.insert(key, (e, start));
@@ -84,6 +87,31 @@ fn a_box_assembled_from_its_parts_is_a_closed_solid_record() {
     origins.sort_unstable();
     assert_eq!(origins, vec![0, 1, 2, 3, 4, 5]);
     assert!(solid.turned.is_empty(), "no face disagrees with its loops: {:?}", solid.turned);
+}
+
+/// The top face's cubic edge lies off its plane only between the 16 even gap samples (#11652).
+#[test]
+fn a_spline_edge_off_its_plane_between_the_even_samples_keeps_its_face() {
+    let knots = vec![0.0, 0.0, 0.0, 0.0, 0.95, 0.96, 0.97, 0.98, 0.99, 1.0, 1.0, 1.0, 1.0];
+    let lift = 1e-3;
+    let bent = |from: usize, to: usize| {
+        if (from, to) != (4, 5) {
+            return Ok(BCurve::Line { start: corner(from), end: corner(to) });
+        }
+        let points: Vec<[f64; 3]> = (0..9)
+            .map(|j| {
+                let x = 10.0 * knots[j + 1..j + 4].iter().sum::<f64>() / 3.0;
+                [x, 0.0, if j == 5 { 30.0 + lift } else { 30.0 }]
+            })
+            .collect();
+        spline_curve(3, knots.clone(), &points, None)
+    };
+    let (solid, _) = assembled_box_with(Kind::Solid, bent).unwrap();
+    assert!(!solid.sheet, "{:?}", solid.notes);
+    let brep = &solid.brep;
+    assert_eq!((brep.faces.len(), brep.edges.len(), brep.vertices.len()), (6, 12, 8));
+    let spline = brep.edges.iter().find(|e| matches!(e.curve, BCurve::Spline { .. })).unwrap();
+    assert!(spline.tolerance >= 0.667 * lift, "the tolerance {} covers the 0.667 µm the edge lies off its plane", spline.tolerance);
 }
 
 /// A solid's shell still closed when faces are left out bounds a region of its own: the
@@ -542,4 +570,118 @@ fn a_line_edges_length_does_not_depend_on_its_parameter_scale() {
         let line = BCurve::Line { start: [0.0, 0.0, 0.0], end: [end, 0.0, 0.0] };
         assert!(asm.add_edge_on(1, line, [a, b]).is_ok(), "a line to {end}");
     }
+}
+
+/// solidcore#3292 ([T-24](https://tickets.solidcraft.io/t/24)): a wall no wider than the
+/// tolerance, its two sides one line written twice, its ends closed edges that stay within the
+/// tolerance of their vertex, is left out. The 10 x 20 x 30 box at 0.01 mm with such a wall at
+/// its edge from corner 1 to corner 5: a cylinder 0.002 in radius touching that edge, bounded by
+/// the edge written twice (the y = 0 side uses one, the x = 10 side the other) and its two end
+/// circles, each closed at the edge's end and part of the top's and the bottom's loops. Kept,
+/// the face has coincident edges and the body fails the check whatever is done with it; left
+/// out, the circles drop out of the top and the bottom, the edge is one, and the record is the
+/// box: 6 faces, 12 edges, 8 vertices, 6000 mm³.
+#[test]
+fn a_wall_no_wider_than_the_tolerance_is_left_out() {
+    let tol = 0.01;
+    let mut asm = Assembly::new(tol, None);
+    let mut v = Vec::new();
+    for c in 0..8 {
+        v.push(asm.add_vertex(corner(c)).unwrap());
+    }
+    let line = || BCurve::Line { start: corner(1), end: corner(5) };
+    let (side_y, y_along) = asm.add_edge(100, line(), [0.0, 1.0], [v[1], v[5]]).unwrap();
+    let (side_x, x_along) = asm.add_edge(101, line(), [0.0, 1.0], [v[1], v[5]]).unwrap();
+    assert!(y_along && x_along);
+    let r = 0.002;
+    let frame = |z: f64| Frame { origin: [10.0 + r, 0.0, z], x_axis: [-1.0, 0.0, 0.0], y_axis: [0.0, -1.0, 0.0] };
+    let (bottom_ring, _) = asm.add_edge(102, BCurve::Circle { frame: frame(0.0), radius: r }, [0.0, TAU], [v[1], v[1]]).unwrap();
+    let (top_ring, _) = asm.add_edge(103, BCurve::Circle { frame: frame(30.0), radius: r }, [0.0, TAU], [v[5], v[5]]).unwrap();
+    let mut edges: HashMap<(usize, usize), u32> = HashMap::new();
+    let mut faces = Vec::new();
+    for (f, (corners, u_axis, v_axis)) in FACES.into_iter().enumerate() {
+        let mut uses = Vec::new();
+        for k in 0..4 {
+            let (i, j) = (corners[k], corners[(k + 1) % 4]);
+            let key = (i.min(j), i.max(j));
+            let e = if key == (1, 5) {
+                if f == 2 { side_y } else { side_x }
+            } else if let Some(e) = edges.get(&key) {
+                *e
+            } else {
+                let (e, _) = asm
+                    .add_edge(
+                        key.0 as u64 * 8 + key.1 as u64,
+                        BCurve::Line { start: corner(key.0), end: corner(key.1) },
+                        [0.0, 1.0],
+                        [v[key.0], v[key.1]],
+                    )
+                    .unwrap();
+                edges.insert(key, e);
+                e
+            };
+            uses.push((e, i < j));
+            // the rings, out at the edge's ends and back
+            if j == 1 && f == 0 {
+                uses.push((bottom_ring, true));
+            }
+            if j == 5 && f == 1 {
+                uses.push((top_ring, true));
+            }
+        }
+        let plane = BSurface::Plane { origin: corner(corners[0]), u_axis, v_axis };
+        faces.push((asm.add_face(f as u64, plane, vec![Bound::Edges(uses)], Some(0), true).unwrap(), true));
+    }
+    let wall = BSurface::Cylinder { frame: frame(0.0), radius: r };
+    let bound = Bound::Edges(vec![(side_y, true), (top_ring, true), (side_x, false), (bottom_ring, false)]);
+    faces.push((asm.add_face(6, wall, vec![bound], Some(0), true).unwrap(), true));
+    let solid = asm.finish(0, "box".into(), vec![faces], Kind::Solid).unwrap();
+    let brep = &solid.brep;
+    assert_eq!((brep.faces.len(), brep.edges.len(), brep.vertices.len()), (6, 12, 8));
+    assert!(!solid.sheet);
+    assert!(solid.notes.iter().any(|n| n.contains("1 walls no wider than 0.01 mm left out")), "{:?}", solid.notes);
+    let mut origins = solid.face_origin.clone();
+    origins.sort_unstable();
+    assert_eq!(origins, vec![0, 1, 2, 3, 4, 5]);
+    let vol = volume(&solid);
+    assert!((vol - 6000.0).abs() <= 1e-9 * 6000.0, "{vol}");
+}
+
+/// A circle of radius `r` about the origin as four rational quadratic quarter arcs, each with
+/// weights `[1, k/sqrt 2, k^2]`: the same circle for every `k > 0`, its parameter crowded towards
+/// the arcs' ends as `k` grows.
+fn rational_circle(r: f64, k: f64) -> Vec<Curve2> {
+    let corners = [[r, 0.0], [r, r], [0.0, r], [-r, r], [-r, 0.0], [-r, -r], [0.0, -r], [r, -r], [r, 0.0]];
+    let weights = [1.0, k * std::f64::consts::FRAC_1_SQRT_2, k * k];
+    (0..4)
+        .map(|q| Curve2::RationalSpline {
+            knots: vec![0.0, 0.0, 0.0, 1.0, 1.0, 1.0],
+            homogeneous: (0..3)
+                .map(|i| {
+                    let ([x, y], w) = (corners[2 * q + i], weights[i]);
+                    [x * w, y * w, w]
+                })
+                .collect(),
+        })
+        .collect()
+}
+
+/// #20514: of two nested loops of nearly one size, the larger is told whatever the loops'
+/// parameterisation: a ring 3.1 m across and 0.05 mm wide, its inner circle's arcs parameterised
+/// fifty times more unevenly than its outer circle's. Each area is the circle's to well within the
+/// ring's own area, with an error bound to match, so the outer loop is certainly the largest.
+#[test]
+fn nested_loops_of_nearly_one_size_are_told_apart_whatever_their_parameterisation() {
+    let (ro, ri) = (1550.0_f64, 1549.95_f64);
+    let uses: Vec<(u32, bool)> = (0..4).map(|e| (e, true)).collect();
+    let pi = std::f64::consts::PI;
+    let outer = loop_area_integrated(&uses, &rational_circle(ro, 1.0), pi * ro * ro).unwrap();
+    let inner = loop_area_integrated(&uses, &rational_circle(ri, 50.0), pi * ri * ri).unwrap();
+    let ring = pi * (ro * ro - ri * ri);
+    for ((area, error), r) in [(outer, ro), (inner, ri)] {
+        assert!((area - pi * r * r).abs() < 1e-3 * ring && error < 1e-3 * ring, "r {r}: area {area}, error {error}");
+    }
+    assert_eq!(largest_loop(&[Some(inner), Some(outer)]), Some(1));
+    // Two loops the bounds can't tell apart leave the choice to the file.
+    assert_eq!(largest_loop(&[Some((100.0, 1.0)), Some((100.5, 1.0))]), None);
 }

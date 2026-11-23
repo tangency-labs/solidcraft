@@ -213,6 +213,9 @@ fn a_step_file_too_large_for_the_memory_opens_with_a_warning() {
     // With the memory there, no warning.
     let mut s = Session::default();
     let reply = s.execute("file.insert_step", &json!({"path": path})).unwrap();
-    assert!(!reply["warnings"].as_array().is_some_and(|w| w.iter().any(|w| w.as_str().is_some_and(|w| w.contains("STEP file needs about")))), "{reply}");
+    assert!(
+        !reply["warnings"].as_array().is_some_and(|w| w.iter().any(|w| w.as_str().is_some_and(|w| w.contains("STEP file needs about")))),
+        "{reply}"
+    );
     let _ = std::fs::remove_file(path);
 }

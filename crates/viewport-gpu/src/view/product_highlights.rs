@@ -5,14 +5,19 @@ use super::*;
 const DEPTH_SHADER: &str = r#"
 struct U { vp: mat4x4<f32> };
 @group(0) @binding(0) var<uniform> u: U;
+// As viewport.wgsl's `FACE_PUSH` and `face_pushed` (`split_push`).
+override FACE_PUSH: f32 = 0.0;
+fn face_pushed(c: vec4<f32>) -> vec4<f32> {
+    return vec4<f32>(c.xy, c.z * (1.0 - FACE_PUSH * 1.1920929e-7), c.w);
+}
 @vertex
 fn vs(@location(0) p: vec3<f32>) -> @builtin(position) vec4<f32> {
-    return u.vp * vec4<f32>(p, 1.0);
+    return face_pushed(u.vp * vec4<f32>(p, 1.0));
 }
 @vertex
 fn vs_inst(@location(0) p: vec3<f32>, @location(3) r0: vec4<f32>, @location(4) r1: vec4<f32>, @location(5) r2: vec4<f32>) -> @builtin(position) vec4<f32> {
     let q = vec4<f32>(p, 1.0);
-    return u.vp * vec4<f32>(dot(r0,q), dot(r1,q), dot(r2,q), 1.0);
+    return face_pushed(u.vp * vec4<f32>(dot(r0,q), dot(r1,q), dot(r2,q), 1.0));
 }
 @fragment
 fn fs() -> @location(0) vec4<f32> { return vec4<f32>(0.0); }
@@ -38,6 +43,14 @@ impl DepthPipelines {
             immediate_size: 0,
         });
         let pipeline = |buffers: &[Option<wgpu::VertexBufferLayout<'_>>], instanced: bool| {
+            let (depth_stencil, push) = split_push(target.depth.map(|format| wgpu::DepthStencilState {
+                format,
+                depth_write_enabled: Some(true),
+                depth_compare: Some(depth_compare(target.reversed_depth(), wgpu::CompareFunction::Less)),
+                stencil: Default::default(),
+                bias: depth_bias(target.reversed_depth(), FACE_BIAS),
+            }));
+            let push = face_push(push);
             device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
                 label: Some("sc_product_highlight_depth"),
                 layout: Some(&layout),
@@ -45,16 +58,10 @@ impl DepthPipelines {
                     module: &module,
                     entry_point: Some(if instanced { "vs_inst" } else { "vs" }),
                     buffers,
-                    compilation_options: Default::default(),
+                    compilation_options: push_options(&push),
                 },
                 primitive: wgpu::PrimitiveState::default(),
-                depth_stencil: target.depth.map(|format| wgpu::DepthStencilState {
-                    format,
-                    depth_write_enabled: Some(true),
-                    depth_compare: Some(depth_compare(target.reversed_depth(), wgpu::CompareFunction::Less)),
-                    stencil: Default::default(),
-                    bias: depth_bias(target.reversed_depth(), FACE_BIAS),
-                }),
+                depth_stencil,
                 multisample: wgpu::MultisampleState { count: target.samples.max(1), mask: !0, alpha_to_coverage_enabled: false },
                 fragment: Some(wgpu::FragmentState {
                     module: &module,
@@ -74,6 +81,8 @@ impl DepthPipelines {
         });
         let feedback = |source: TriSource| {
             let fragment = source.fragment("fs_tri");
+            let (depth_stencil, push) = split_push(highlight_depth(target.depth));
+            let push = face_push(push);
             device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
                 label: Some("sc_product_highlight_instanced"),
                 layout: Some(&layout),
@@ -81,10 +90,10 @@ impl DepthPipelines {
                     module: &feedback_module,
                     entry_point: Some(source.entry()),
                     buffers: &[Some(shared_layout()), Some(instance_layout())],
-                    compilation_options: Default::default(),
+                    compilation_options: push_options(&push),
                 },
                 primitive: wgpu::PrimitiveState::default(),
-                depth_stencil: highlight_depth(target.depth),
+                depth_stencil,
                 multisample: wgpu::MultisampleState { count: target.samples.max(1), mask: !0, alpha_to_coverage_enabled: false },
                 fragment: Some(wgpu::FragmentState {
                     module: &feedback_module,
