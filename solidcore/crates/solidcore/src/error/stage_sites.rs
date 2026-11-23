@@ -3,8 +3,8 @@
 //! `BSplineFailure`, `OffsetFailure`, and `BooleanFailure::StageFailed { stage, what }`), the
 //! form of a defect built before its site was reviewed. The count only falls: a reviewed site
 //! builds the area's `Defect { why }` (the step that failed and why that is the kernel's
-//! fault), a named cause, or a refusal, and the PR that converts it lowers its file's count
-//! in [`PINNED`] (the conversion guide: `docs/failure-codes-and-reproduction.md` §6).
+//! fault), a named cause, or a refusal, and the PR that converts it lowers its file's pin
+//! (see [`PINS`]; the conversion guide: `docs/failure-codes-and-reproduction.md` §6).
 //!
 //! **What counts as one site**, in the library code of `solidcore` and `solidcore-ops`
 //! (comments, string contents and every `#[cfg(test)]` item blanked, test files skipped), as
@@ -47,35 +47,15 @@ pub(in crate::error) const STAGE: Scan = Scan {
     wrappers: Wrappers::Thin,
 };
 
-/// Every library file that builds an unreviewed stage failure, with its exact number of
-/// sites (see the module docs for what counts), sorted by path. Converting a site lowers its
-/// file's count here in the same PR, and a file that reaches 0 loses its line. The count
-/// never rises: new code builds `Defect { why }`, a named cause or a refusal. Code that moves
-/// between files moves its sites: the PR lowers one file's count and raises the other's by
-/// the same number.
-#[rustfmt::skip] // one file per line, so conversions in parallel merge cleanly
-const PINNED: &[(&str, usize)] = &[
-    ("solidcore/src/blend/blend_setback.rs", 3),
-    ("solidcore/src/blend/fillet_corner/p1.rs", 6),
-    ("solidcore/src/blend/fillet_corner/p3.rs", 1),
-    ("solidcore/src/blend/fillet_exact/rational.rs", 2),
-    ("solidcore/src/blend/fillet_executive/session.rs", 5),
-    ("solidcore/src/blend/fillet_executive/session/trim_at_creases.rs", 4),
-    ("solidcore/src/blend/fillet_geom/p1.rs", 62),
-    ("solidcore/src/blend/fillet_geom/p2.rs", 123),
-    ("solidcore/src/blend/fillet_geom/p3.rs", 47),
-    ("solidcore/src/blend/fillet_geom/p4.rs", 120),
-    ("solidcore/src/blend/fillet_geom/p5.rs", 131),
-    ("solidcore/src/blend/fillet_geom/p6.rs", 88),
-    ("solidcore/src/blend/fillet_geom/tangent_end_rib.rs", 22),
-    ("solidcore/src/blend/fillet_removal.rs", 20),
-    ("solidcore/src/curve/curve/p3.rs", 2),
-    ("solidcore/src/curve/curve/p7.rs", 3),
-    ("solidcore/src/intersect/surface_intersector/p1.rs", 5),
-    ("solidcore/src/intersect/surface_intersector/p5.rs", 6),
-    ("solidcore/src/nurbs/b_spline_curve/p3.rs", 2),
-    ("solidcore/src/topology/proto_topology/p2.rs", 3),
-];
+/// The pins of the unreviewed stage-failure sites: every library file that builds one has
+/// one file in `src/error/pins/stage/`, `<path>.pin` holding its exact number of sites (see
+/// the module docs for what counts; `site_scan::pins` for the layout). Converting a site
+/// lowers its file's pin in the same PR, and a file that reaches 0 loses its pin. The count
+/// never rises: new code builds `Defect { why }`, a named cause or a refusal. Code that
+/// moves between files moves its sites: the PR lowers one pin and raises the other by the
+/// same number. One file per pin, so conversions in different files never touch the same
+/// line.
+const PINS: &str = "stage";
 
 #[cfg(test)]
 mod tests {
@@ -85,10 +65,10 @@ mod tests {
     /// The number of sites that build an unreviewed stage failure only falls.
     #[test]
     fn the_unreviewed_stage_failure_sites_only_shrink() {
-        super::super::site_scan::assert_pinned(
+        super::super::site_scan::assert_pins(
             "unreviewed stage-failure sites",
             &crate_sites(&STAGE),
-            PINNED,
+            PINS,
         );
     }
 }

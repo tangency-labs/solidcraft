@@ -1888,6 +1888,10 @@ preference_settings! {
     /// design's and the exported body's names (`export_name`). Empty: each export offers the name
     /// it did before (the design's, or the first body's for a mesh).
     export_name: String = String::new(), PAGE_DESIGN;
+    /// GLB export writes each component occurrence as a named node holding its part's bodies, so a
+    /// viewer can move each part on its own (#5296). Off: every body under the root in world
+    /// coordinates, named as the model names it, as SolidCraft 0.40 wrote it.
+    glb_export_hierarchy: bool = true, PAGE_DESIGN => check_id_help("ui.glb_export_hierarchy", "ui.glb_export_hierarchy_help");
     /// Save as mesh: the last format (`stl` or `3mf`). Older versions also kept a "send to slicer"
     /// choice here (`save_mesh_send`, `save_mesh_slicer`); a settings file that still has them loads,
     /// and they are ignored.
@@ -10063,8 +10067,8 @@ mod tests {
 
     /// #17689: the tolerance heal is on by default, a saved choice reads back as saved, and the
     /// preference reaches the kernel, which every STEP read and Repair consult: set off, the
-    /// kernel stops healing; set on, it heals again. (The kernel's switch is the process's: the
-    /// test holds it, as every test that turns it does.)
+    /// kernel stops healing; set on, it heals again. (The test holds the kernel's switch, as
+    /// every test that turns it does, so it turns for the test's thread alone.)
     #[test]
     fn heal_tolerance_defects_is_on_by_default_and_reaches_the_kernel() {
         use serde_json::json;
