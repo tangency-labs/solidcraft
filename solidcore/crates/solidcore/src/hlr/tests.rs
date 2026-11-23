@@ -6199,3 +6199,57 @@ fn spline_points_and_hulls_come_from_their_own_knot_spans() {
         }
     }
 }
+
+#[test]
+fn a_body_with_a_freeform_face_is_found_before_its_faces_are_trimmed() {
+    let (patch, _) = twisted_patch().body();
+    let o = Options::default();
+    assert!(prepare_unless_freeform(&patch, &o, &never)
+        .unwrap()
+        .is_none());
+    let with = Options {
+        freeform: true,
+        ..Options::default()
+    };
+    let whole = prepare_unless_freeform(&patch, &with, &never).unwrap();
+    assert_eq!(whole.unwrap().report.freeform_faces, vec![0]);
+    let bad = Options {
+        trim_samples: 0,
+        ..Options::default()
+    };
+    assert!(matches!(
+        prepare_unless_freeform(&patch, &bad, &never),
+        Err(HlrError::Invalid("trim samples"))
+    ));
+}
+
+#[test]
+fn a_body_without_freeform_faces_is_prepared_and_drawn_as_before() {
+    let o = Options::default();
+    let bodies = [
+        cuboid([0.; 3], [2., 3., 4.]),
+        cylinder(2., 5.),
+        turned(1., 2., 3.),
+        sphere(2.),
+        torus(5., 1.),
+    ];
+    let mut before = Vec::new();
+    let mut after = Vec::new();
+    for b in &bodies {
+        let (body, _) = b.body();
+        let old = super::prepare_cancellable(&body, &o, &never).unwrap();
+        let new = prepare_unless_freeform(&body, &o, &never).unwrap().unwrap();
+        assert_eq!(format!("{:?}", old.report), format!("{:?}", new.report));
+        before.push(old);
+        after.push(new);
+    }
+    let scene: Vec<Placement> = (0..bodies.len())
+        .map(|i| identity(i, [3. * i as f64, 0.5 * i as f64, -(i as f64)]))
+        .collect();
+    let view = View::new(Vec3::new(0.3, -0.5, -1.), Vec3::new(0., 1., 0.)).unwrap();
+    let drawn = |defs: &[Prepared]| {
+        let d = hidden_lines(defs, &scene, &view, &o, &never).unwrap();
+        format!("{:?} {:?}", d.lines, d.unsupported)
+    };
+    assert_eq!(drawn(&before), drawn(&after));
+}
