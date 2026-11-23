@@ -281,11 +281,14 @@ fn simple_planar_rim(tensor: &Tensor, count: [usize; 2]) -> bool {
         _ => (nv - 1 - i) * nu,
     };
     let xy = |i: usize| {
-        let [x, y, z, w] = tensor.controls[i];
+        let &[x, y, z, w] = tensor.controls.get(i)?;
         let p = Vec3::new(x / w, y / w, z / w) - plane.origin;
-        [p.dot(plane.u), p.dot(plane.v)]
+        Some([p.dot(plane.u), p.dot(plane.v)])
     };
-    let corners = [0, 1, 2, 3].map(|side| xy(row(side, 0)));
+    let [Some(a), Some(b), Some(c), Some(d)] = [0, 1, 2, 3].map(|side| xy(row(side, 0))) else {
+        return false;
+    };
+    let corners = [a, b, c, d];
     let center = corners
         .iter()
         .fold([0.0; 2], |[x, y], p| [x + p[0] * 0.25, y + p[1] * 0.25]);
@@ -297,21 +300,26 @@ fn simple_planar_rim(tensor: &Tensor, count: [usize; 2]) -> bool {
         .map(f64::abs)
         .fold(0.0, f64::max);
     let margin = 128.0 * f64::EPSILON * scale * scale;
-    (0..4).all(|side| {
-        let len = if side % 2 == 0 { nu } else { nv };
-        let start = corners[side];
-        let end = corners[(side + 1) % 4];
-        let (a, b) = (sub(start, center), sub(end, center));
-        let chord = sub(end, start);
-        cross(a, b) > margin
-            && (1..len).all(|i| {
-                let p = xy(row(side, i));
-                let radial = sub(p, center);
-                let step = sub(p, xy(row(side, i - 1)));
-                step[0] * chord[0] + step[1] * chord[1] > margin
-                    && (i == len - 1 || (cross(a, radial) > margin && cross(radial, b) > margin))
-            })
-    })
+    corners
+        .iter()
+        .zip(corners.iter().cycle().skip(1))
+        .enumerate()
+        .all(|(side, (&start, &end))| {
+            let len = if side % 2 == 0 { nu } else { nv };
+            let (a, b) = (sub(start, center), sub(end, center));
+            let chord = sub(end, start);
+            cross(a, b) > margin
+                && (1..len).all(|i| {
+                    let (Some(p), Some(previous)) = (xy(row(side, i)), xy(row(side, i - 1))) else {
+                        return false;
+                    };
+                    let radial = sub(p, center);
+                    let step = sub(p, previous);
+                    step[0] * chord[0] + step[1] * chord[1] > margin
+                        && (i == len - 1
+                            || (cross(a, radial) > margin && cross(radial, b) > margin))
+                })
+        })
 }
 
 #[cfg(test)]

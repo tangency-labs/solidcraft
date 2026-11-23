@@ -507,8 +507,8 @@ pub fn nurbs_derivs<C>(
         let norm = |v: Vec3| v.x.abs().max(v.y.abs()).max(v.z.abs());
         let sum_abs = |b: &[f64]| b.iter().map(|x| x.abs()).sum::<f64>();
         let scale = (max_xyz + norm(point) * max_weight) / s[3].abs() * f64::EPSILON.sqrt();
-        if norm(du) > scale * sum_abs(&bu[1][..=pu]) * sum_abs(&bv[0][..=pv])
-            && norm(dv) > scale * sum_abs(&bv[1][..=pv]) * sum_abs(&bu[0][..=pu])
+        if norm(du) > scale * sum_abs(bu[1].get(..=pu)?) * sum_abs(bv[0].get(..=pv)?)
+            && norm(dv) > scale * sum_abs(bv[1].get(..=pv)?) * sum_abs(bu[0].get(..=pu)?)
         {
             return Some((point, du, dv));
         }

@@ -239,9 +239,9 @@ impl Curve2 {
         if let Self::Spline { points, .. } = self {
             let first = points.first()?;
             let last = points.last()?;
-            for (d, value) in uv.iter_mut().enumerate() {
-                if first[d] == last[d] && points.iter().all(|q| q[d] == first[d]) {
-                    *value = first[d];
+            for (d, ((value, start), end)) in uv.iter_mut().zip(first).zip(last).enumerate() {
+                if start == end && points.iter().all(|q| q.get(d) == Some(start)) {
+                    *value = *start;
                 }
             }
         }
