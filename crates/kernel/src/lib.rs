@@ -498,6 +498,7 @@ pub use surface_ruled::ruled_surface_with;
 pub use surface_trim::TrimKeep;
 pub use surface_trim::mutual_trim;
 pub use surface_trim::trim;
+pub use surface_trim::trim_dropped_keep;
 pub use surface_trim::trim_keep;
 pub use surface_untrim::UntrimHoles;
 pub use surface_untrim::untrim;
