@@ -424,6 +424,9 @@ fn go_to(s: &mut Session, snap: Snapshot, cmd: &str) -> Result<Snapshot> {
         None => Snapshot { doc: drawings_from(snap.doc, &s.doc), active_sheet_sketch: s.active_sheet_sketch.clone(), ..snap },
     };
     snap.sketching_view = s.historical_sketch_owner(snap.active_sketch, snap.sketching_view);
+    if s.checked_sheet_sketch_owner(&s.view_context, snap.active_sheet_sketch.as_deref(), &snap.doc).is_err() {
+        snap.active_sheet_sketch = None;
+    }
     // History restores geometry in its own part, never a second editor beside the current one.
     if snap.active_sketch.is_some() && snap.active_sheet_sketch.is_some() {
         if snap.part.is_some() {
@@ -2732,6 +2735,17 @@ fn redefine(s: &mut Session, p: &Value) -> Result<Value> {
         && after.to.is_some()
     {
         after.to_body_apart = before.to_body_apart;
+    }
+    // A Pattern on Path saved before the rotation-minimising frame keeps its copies where they
+    // were through an edit that leaves its orientation as it was; choosing the orientation again
+    // gives the frame every pattern made now has.
+    if let (
+        FeatureKind::Pattern { pattern: solidcraft_doc::PatternKind::Path { orient: was, follow_frame: before, .. }, .. },
+        FeatureKind::Pattern { pattern: solidcraft_doc::PatternKind::Path { orient: is, follow_frame: after, .. }, .. },
+    ) = (&old.kind, &mut new.kind)
+        && was == is
+    {
+        *after = *before;
     }
     keep_from_level_on_the_same_face(s, &old, &mut new);
     solidcraft_doc::keep_one_sided_direction(&s.model, &old, &mut new);

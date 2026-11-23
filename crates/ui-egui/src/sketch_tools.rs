@@ -698,15 +698,18 @@ pub fn refine_snap(
             }
         }
     }
-    // The two most recent midpoints or centres: snap where their axes meet. A free coordinate,
-    // so placing it adds no constraint. Off unless Sketch preferences ask for it. One reference
-    // stays a visual guide. Shift skips this.
+    // The two most recent midpoints or centres: snap where their axes meet. Off unless Sketch
+    // preferences ask for it. One reference stays a visual guide. Shift skips this. With
+    // `sketch_align_points` on, the point lines up with both references below, as it would
+    // without this snap (#20859); otherwise it is a free coordinate and adds no constraint.
+    let mut crossing = None;
     if !mid_only
         && app.preferences.sketch_recent_snap
         && best.is_none()
-        && let Some(at) = app.viewport.tracking.meeting(sk, plane, proj, a)
+        && let Some(meeting) = app.viewport.tracking.meeting_of(sk, plane, proj, a)
     {
-        best = Some((at.dist(lp), "+", at));
+        best = Some((meeting.at.dist(lp), "+", meeting.at));
+        crossing = Some(meeting);
     }
     // The tool's points and kind (a click takes the tool out of the app while it runs, so the
     // last hover's are kept: a rectangle's click takes no Line tool inference its hover didn't).
@@ -773,13 +776,22 @@ pub fn refine_snap(
     };
     // Points to line up with as well (#7828): with `sketch_align_points` off, none, so only the
     // previous point, one axis at a time, as before.
-    let mut targets = if app.preferences.sketch_align_points { align_targets(proj, sk, plane, &own) } else { Vec::new() };
     // A hovered line's midpoint guide lines up too, as the "mid:<line>" point the constraint
-    // command makes on that line (#13413).
+    // command makes on that line (#13413). It comes first: `line_up` keeps the first of equally
+    // near points, so a free point that happens to share the coordinate does not take its place.
+    let mut targets: Vec<(Option<String>, Vec2)> = Vec::new();
     if app.preferences.sketch_align_points {
         targets.extend(app.viewport.tracking.line_midpoints(sk).into_iter().map(|(line, at)| (Some(format!("mid:{line}")), at)));
+        targets.extend(align_targets(proj, sk, plane, &own));
     }
     let mut lined = Vec::new();
+    // Where two guides meet, the point lines up with the two references the guides come from:
+    // level with one and plumb with the other (#20859), never with another point that happens
+    // to share a coordinate.
+    if let Some(meeting) = crossing.filter(|_| app.preferences.sketch_align_points) {
+        lined.extend(meeting.level.map(|(id, at)| Lined { id: Some(id), at, horizontal: true }));
+        lined.extend(meeting.plumb.map(|(id, at)| Lined { id: Some(id), at, horizontal: false }));
+    }
     if !mid_only
         && best.is_none()
         && let Some(prev) = prev
