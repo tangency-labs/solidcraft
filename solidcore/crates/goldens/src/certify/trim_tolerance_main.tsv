@@ -13,6 +13,7 @@
 # boolean.api_brep: main's file with torus_guard_major_2x_eff_zero recording the constructor's refusal of its torus, whose tube crosses its axis (#20227): ints.record [] -> [2]
 # primitive.api_primitives: main's file with the 40 spheres of negative radius refused, each `{"rec":[1007.0]}` (#20227); the 14 of them that had rows (gen0244, gen0416, gen0419, gen0585, gen0598, gen0621, gen0769, gen0790, gen0893, gen0897, gen0957, gen1094, gen1206, gen1252) lose their rows, and gen0244's and gen0893's `rounding-bound` entries leave the open list, since a refused case has no body
 # blend.fillet_executive_p3, blend.fillet_geom_p2: main's files with the plane crossing's refit (tangency-labs/solidcraft#20237): p2's eight generated cases fitted with other stations, p3's four law-cube cases one result-geometry value 1e-9 to 3e-9 off, and the two law-box edge-map cases' lines with the lowered tolerances their rows hold
+# topology.brep_p1: main's file with the 141 SetSize rows whose kernel-context columns keep the defaults (50, 1e-5, 1000) after a B-rep size setter, which no longer writes the context (tangency-labs/solidcraft#20938)
 blend.feature_executive	2a4bd65805caa498
 blend.fillet_corner_p1	b2b709c01153c4b4
 blend.fillet_corner_p2	6d62684209753123
@@ -264,7 +265,7 @@ topology.brep_cutting	3e7e099756bce8b5
 topology.brep_data	cd9a3471ed924772
 topology.brep_local_operation	00c1f7e94a38480a
 topology.brep_mirror	718965df3039bddd
-topology.brep_p1	5f0dfd9dc7c0575b
+topology.brep_p1	6e3289ecf3e20a67
 topology.brep_p10	f99cdbfd5bb734b6
 topology.brep_p2	3243a0a3d5597f36
 topology.brep_p3	55661c22ae62a97f
