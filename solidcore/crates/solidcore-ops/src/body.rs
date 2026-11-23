@@ -16,7 +16,7 @@ use solidcore::nurbs::b_spline_surface_n_lib::p2::OrientType;
 use solidcore::primitive::api_primitives as primitives;
 use solidcore::query::api_queries::brep_is_closed_touching_solids;
 use solidcore::topology::brep::mirror::transform_matrix;
-use solidcore::topology::brep::p2::is_manifold_solid;
+use solidcore::topology::brep::p2::{create_missing_uv_trim_curves, is_manifold_solid};
 use solidcore::topology::brep::p3::{brep_copy, brep_copy_mapped};
 use solidcore::topology::brep::primitive_outward::{is_outward_primitive, Template};
 use solidcore::topology::brep::sheet::turn_over_sheet;
@@ -121,11 +121,33 @@ fn prove_naming(
     k: &mut Kernel,
     b: &mut Brep,
 ) -> solidcore::Result<std::result::Result<Outward, SolidTest>> {
+    give_missing_trims(k, b)?;
     match valid_and_outward_failure(k, b)? {
         None => Ok(Ok(Outward {
             settings: Box::new(Settings::of(k)),
         })),
         Some(test) => Ok(Err(test)),
+    }
+}
+
+/// The step a body takes before its proof (#21105): every use on a face gets its UV trim
+/// ([`create_missing_uv_trim_curves`]), once and in that call's order, as an edit of the body,
+/// with the tolerance raises attaching a trim makes. The validity check builds a missing trim
+/// only on a copy and leaves the body as it was, so without this step every proof of a body
+/// that lacks trims (one made by [`Body::from_record`], which makes none, or an operation's
+/// result) would build them again; after it the check runs on the body and builds none, nor
+/// does a later proof.
+///
+/// A trim that cannot be built stays missing (the call stops at the first one): the check then
+/// meets it on its copy, as it met it on the body before. A cancellation or an unported step
+/// stops the proof.
+///
+/// # Errors
+/// The kernel's cancellation and unported statuses.
+fn give_missing_trims(k: &Kernel, b: &mut Brep) -> solidcore::Result<()> {
+    match create_missing_uv_trim_curves(k, b) {
+        Err(e) if e.is_unported_or_cancelled() => Err(e),
+        Ok(()) | Err(_) => Ok(()),
     }
 }
 
@@ -562,8 +584,13 @@ impl Expect {
     /// # Errors
     /// The kernel's, from the solid test.
     pub(crate) fn of(k: &mut Kernel, input: &mut Brep) -> solidcore::Result<Expect> {
+        // (the trims only for a body the solid test will check: past its topology test)
+        let solid = is_manifold_solid(input)? && {
+            give_missing_trims(k, input)?;
+            is_outward_solid(k, input)?
+        };
         Ok(Expect {
-            solid: is_outward_solid(k, input)?,
+            solid,
             touching: false,
         })
     }
@@ -587,7 +614,10 @@ impl Expect {
         let solid = is_manifold_solid(input)?
             && (proof.outward.is_some_and(|o| o.holds(k))
                 || match proof.primitive {
-                    Some(t) => is_outward_primitive(k, input, &t)?,
+                    Some(t) => {
+                        give_missing_trims(k, input)?;
+                        is_outward_primitive(k, input, &t)?
+                    }
                     None => false,
                 }
                 || prove(k, input)?.is_some());
@@ -886,7 +916,6 @@ pub fn make_torus(center: [f64; 3], major_radius: f64, minor_radius: f64) -> Res
 mod tests {
     #![allow(clippy::unwrap_used)]
     use super::*;
-    use solidcore::topology::brep::p2::create_missing_uv_trim_curves;
     use solidcore::topology::trimming_tools::face_uv_curves_present;
 
     /// A 10 mm cube united with a cylinder of radius 4 standing on its x = 10 face: the
@@ -930,14 +959,30 @@ mod tests {
 
     /// #21105: the proof of a body that lacks UV trims gives it its trims once, before its
     /// validity check, so the check runs on the body: the first proof builds each missing trim
-    /// once, and a repeat proof builds none and computes no trim bound. For a boolean's result
-    /// and for the same body read from its record (`to_kernel` makes no trims).
+    /// once, and a repeat proof builds none and computes no trim bound. For a boolean's result,
+    /// and for the same body read from its record with no use's pcurve
+    /// (`to_kernel_with_bare_uses`: a record's pcurves become the body's trims, a bare use has
+    /// none).
     #[test]
     fn a_proof_builds_each_missing_trim_once() {
         let mut k = Kernel::default();
         let result = united(&mut k);
-        let (record, _) = to_record(&mut k, &mut result.clone_standing_for_self().unwrap()).unwrap();
-        let (read, _) = to_kernel(&mut k, &record, true).unwrap();
+        let (record, _) =
+            to_record(&mut k, &mut result.clone_standing_for_self().unwrap()).unwrap();
+        let mut bare = Vec::new();
+        for (f, face) in record.faces.iter().enumerate() {
+            for (l, lp) in face.loops.iter().enumerate() {
+                if let solidcore_record::brep::Loop::Edges { edges } = lp {
+                    for p in 0..edges.len() {
+                        let at = |i: usize| u32::try_from(i).unwrap();
+                        bare.push((at(f), at(l), at(p)));
+                    }
+                }
+            }
+        }
+        let (read, _) =
+            solidcore_convert::brep::to_kernel_with_bare_uses(&mut k, &record, true, &bare)
+                .unwrap();
         for (name, mut b) in [("boolean", result), ("record", read)] {
             assert!(lacking(&b) > 0, "{name}: the body already has every trim");
             let needed = missing_builds(&k, &b);

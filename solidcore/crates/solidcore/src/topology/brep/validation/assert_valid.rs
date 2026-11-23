@@ -412,6 +412,10 @@ fn check_brep_counted(
 /// `CheckFace`'s loop checks, so on the same body the second pass would report nothing,
 /// succeed and write nothing.
 ///
+/// (not upstream, #21105) Where a face of `b` lacks its UV trim curves, the whole check runs
+/// on a copy standing for `b` (`standing_where_trims_lack`), so the trims it builds and the
+/// tolerances their attaching raises stay off `b`.
+///
 /// # Errors
 ///
 /// Those of [`validate_pointers`](super::validate_pointers) and [`assert_valid`], including
@@ -449,6 +453,8 @@ fn check_with_keys_counted(
     keys: &dyn Fn(EntityRef) -> ObjectRef,
     scope: ValidityScope,
 ) -> Result<(BrepCheck, usize)> {
+    let mut standing = standing_where_trims_lack(b)?;
+    let b = standing.as_mut().unwrap_or(b);
     let mut pointer_reports = AssertArray::new();
     let before = b.write_stamps();
     let mut faces_whole = true;
@@ -498,7 +504,8 @@ fn check_with_keys_counted(
 /// classes, `ValidatePointers` at level 0, the validate-only tolerance pass, Brep
 /// tests 0-21; not upstream's `ContainsCoincidentTopology`, see `brep`) and, with `walk`,
 /// `AssertValid` of every region, shell, face, loop, edge and vertex. Failed checks are appended to `reports`
-/// in native order. `level` is `SM_LEVEL_0`..`SM_LEVEL_GIVEN` (0..4). `keys` gives the
+/// in native order. (not upstream, #21105) Where a face of `b` lacks its UV trim curves, it
+/// runs on a copy standing for `b`, as [`check_brep_with_keys`] does. `level` is `SM_LEVEL_0`..`SM_LEVEL_GIVEN` (0..4). `keys` gives the
 /// geometry owners' identities (as for [`validate_pointers`](super::validate_pointers)). Returns `false` when a
 /// check failed (at once when `ValidatePointers` does not succeed).
 ///
@@ -532,7 +539,31 @@ pub fn assert_valid_scoped(
     keys: &dyn Fn(EntityRef) -> ObjectRef,
     scope: ValidityScope,
 ) -> Result<bool> {
+    let mut standing = standing_where_trims_lack(b)?;
+    let b = standing.as_mut().unwrap_or(b);
     assert_valid_with(k, b, reports, level, walk, keys, scope, true)
+}
+
+/// (not upstream, #21105) The B-rep a check runs on in place of `b`: a copy standing for it,
+/// its faces' definitions kept ([`Brep::clone_standing_for_self_keeping_definitions`]), where
+/// one of its faces lacks UV trim curves
+/// ([`face_uv_curves_present`](crate::topology::trimming_tools::face_uv_curves_present)),
+/// else `None`, and the check runs on `b`. The walk builds a face's missing trims (`CheckFace`,
+/// a vertex use's UV point), and attaching a trim raises the tolerances of its edge and
+/// vertices by an amount that depends on the trims the edge already has, so a check run on
+/// `b` would leave those trims and raises, in the walk's order, on the body it was asked
+/// about. On the copy the check builds and reads the same trims and reports the same, and `b`
+/// keeps none of it: no trims, no raised tolerances, and none of the gaps or repairs the check
+/// stores. A body that has its trims, the one a caller makes once
+/// ([`create_missing_uv_trim_curves`](crate::topology::brep::p2::create_missing_uv_trim_curves)),
+/// is checked on itself and builds none.
+fn standing_where_trims_lack(b: &Brep) -> Result<Option<Brep>> {
+    for &f in b.face_list() {
+        if !crate::topology::trimming_tools::face_uv_curves_present(b, f)? {
+            return Ok(Some(b.clone_standing_for_self_keeping_definitions()?));
+        }
+    }
+    Ok(None)
 }
 
 /// [`assert_valid_scoped`]; without `pointers`, its `ValidatePointers` pass is taken as
@@ -983,7 +1014,10 @@ mod tests {
             out.push(format!("{e:?} {:x}", edge.tolerance.to_bits()));
             for &eu in &edge.edgeuses {
                 let u = b.edgeuse(eu).unwrap();
-                out.push(format!("{eu:?} {:?} {:?}", u.uv_trim_curve, u.drop_curve_fail));
+                out.push(format!(
+                    "{eu:?} {:?} {:?}",
+                    u.uv_trim_curve, u.drop_curve_fail
+                ));
             }
         }
         for &v in b.vertex_list() {
