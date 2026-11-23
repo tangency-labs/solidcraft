@@ -525,6 +525,64 @@ fn a_readable_newer_drawing_keeps_edits_and_opaque_records_in_plain_json() {
 }
 
 #[test]
+fn a_newer_drawing_keeps_opaque_record_text_in_every_file_form() {
+    let doc = plate();
+    let design = write_design(&doc).unwrap();
+    let mut value: Value = serde_json::from_slice(&design).unwrap();
+    let record = &mut value["drawings"][0];
+    let id = doc.drawings[0].id;
+    record["format"] = json!(DRAWING.format_string(DRAWING.current() + 1));
+    record["sketches"] = json!(["opaque fixture"]);
+    let opaque = r#"{ "text" : "\u0041", "wide" : 18446744073709551617,
+ "precision": 0.123456789012345678901234567890, "pairs": [ 3,2 ] }"#;
+    let drawing_text = record.to_string().replace(r#""opaque fixture""#, opaque);
+    let rename = |mut d: Drawing| {
+        assert!(d.sketches.is_empty());
+        d.name = "Renamed".into();
+        d
+    };
+    let drawing = rename(read_drawing(drawing_text.as_bytes()).unwrap());
+    let saved = drawing.to_json().unwrap();
+    assert!(saved.contains(opaque), "{saved}");
+    assert_eq!(read_drawing(saved.as_bytes()).unwrap().name, "Renamed");
+    let written = parts(&write_drawing_container(&drawing).unwrap());
+    let text = std::str::from_utf8(&written["drawing.json"]).unwrap();
+    assert!(text.contains(opaque), "{text}");
+    let mut standalone = written;
+    standalone.insert("drawing.json".into(), drawing_text.as_bytes().to_vec());
+    let reopened = read_drawing(&container(&standalone)).unwrap();
+    assert!(reopened.to_json().unwrap().contains(opaque));
+
+    for newer_design in [false, true] {
+        let mut design_record = value.clone();
+        if newer_design {
+            let design = solidcraft_doc::format::DESIGN;
+            design_record["format"] = json!(design.format_string(design.current() + 1));
+            design_record["foreign_design_data"] = json!({"example": [1, 2, 3]});
+        }
+        let design_text = design_record.to_string().replace(r#""opaque fixture""#, opaque);
+        let mut opened = read_design(design_text.as_bytes()).unwrap();
+        assert_eq!(opened.newer_file.is_some(), newer_design);
+        opened.put_drawing(Arc::new(rename((*opened.drawings[0]).clone())));
+        let saved = write_design(&opened).unwrap();
+        let text = std::str::from_utf8(&saved).unwrap();
+        assert!(text.contains(opaque), "{text}");
+        assert_eq!(read_design(&saved).unwrap().drawing(id).unwrap().name, "Renamed");
+        let saved: Value = serde_json::from_slice(&saved).unwrap();
+        assert_eq!(saved["foreign_design_data"], design_record["foreign_design_data"]);
+    }
+
+    let mut packed = parts(&write_design_container(&doc).unwrap());
+    packed.insert(entry(id), drawing_text.into_bytes());
+    let mut opened = read_design(&container(&packed)).unwrap();
+    opened.put_drawing(Arc::new(rename((*opened.drawings[0]).clone())));
+    let saved = write_design_container(&opened).unwrap();
+    let packed = parts(&saved);
+    assert!(std::str::from_utf8(&packed[&entry(id)]).unwrap().contains(opaque));
+    assert_eq!(read_design(&saved).unwrap().drawing(id).unwrap().name, "Renamed");
+}
+
+#[test]
 fn a_newer_drawing_keeps_unreadable_images_placements_and_container_parts() {
     let fixture = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/mixed-version/saved-by-main.sc");
     let original = parts(&std::fs::read(fixture).unwrap());
@@ -532,14 +590,17 @@ fn a_newer_drawing_keeps_unreadable_images_placements_and_container_parts() {
     let record: Value = serde_json::from_slice(&original[name]).unwrap();
     let payload = b"later drawing payload";
     let blob = solidcraft_doc::blob::part_name(&solidcraft_doc::blob::Blob::from(&payload[..]), "future");
+    let keyed_payload = b"later drawing payload named in a key";
+    let keyed_blob = solidcraft_doc::blob::part_name(&solidcraft_doc::blob::Blob::from(&keyed_payload[..]), "future");
 
     for (key, kind) in [("image_files", "image"), ("placed_images", "placed image"), ("logo_cells", "title block logo")] {
         let mut entries = original.clone();
         let mut record = record.clone();
         record["format"] = json!(DRAWING.format_string(DRAWING.current() + 1));
-        record[key][0]["future_channel"] = json!({"part": blob});
+        record[key][0]["future_channel"] = json!({"part": blob, (keyed_blob.as_str()): {"enabled": true}});
         entries.insert(name.clone(), serde_json::to_vec(&record).unwrap());
         entries.insert(blob.clone(), payload.to_vec());
+        entries.insert(keyed_blob.clone(), keyed_payload.to_vec());
 
         let opened = read_design(&container(&entries)).unwrap();
         let drawing = &opened.drawings[0];
@@ -558,6 +619,7 @@ fn a_newer_drawing_keeps_unreadable_images_placements_and_container_parts() {
             assert_eq!(resaved[part], entries[part]);
         }
         assert_eq!(resaved[&blob], payload);
+        assert_eq!(resaved[&keyed_blob], keyed_payload);
         assert!(read_design(&container(&resaved)).unwrap().drawings[0].newer_file.is_some());
 
         // A reader that understands the extra field can read all the records after our save.
@@ -582,12 +644,15 @@ fn a_newer_builds_unreadable_drawing_is_kept_and_the_rest_opens() {
     let mut record: Value = serde_json::from_slice(&entries[&name]).unwrap();
     let payload = b"a future drawing's part".to_vec();
     let blob = format!("blobs/{}.future", "ab".repeat(32));
+    let keyed_payload = b"a future drawing's part named in a key".to_vec();
+    let keyed_blob = solidcraft_doc::blob::part_name(&solidcraft_doc::blob::Blob::from(keyed_payload.as_slice()), "future");
     record["format"] = json!(DRAWING.format_string(DRAWING.current() + 1));
-    record["hologram"] = json!({"part": blob, "layers": 3});
+    record["hologram"] = json!({"part": blob, (keyed_blob.as_str()): {"layers": 3}});
     record["sheets"] = json!("in a shape this build can't read");
     let future = serde_json::to_vec(&record).unwrap();
     entries.insert(name.clone(), future.clone());
     entries.insert(blob.clone(), payload.clone());
+    entries.insert(keyed_blob.clone(), keyed_payload.clone());
 
     let opened = read_design(&container(&entries)).unwrap();
     assert_eq!(opened.drawings.len(), 1, "the drawing it can read");
@@ -597,6 +662,7 @@ fn a_newer_builds_unreadable_drawing_is_kept_and_the_rest_opens() {
     let resaved = parts(&write_design_container(&opened).unwrap());
     assert_eq!(resaved.get(&name), Some(&future), "the drawing's entry, as it came");
     assert_eq!(resaved.get(&blob), Some(&payload), "the part it names, as it came");
+    assert_eq!(resaved.get(&keyed_blob), Some(&keyed_payload), "the part named by a key, as it came");
     // Reopened, it is kept again.
     assert_eq!(read_design(&container(&resaved)).unwrap().drawings.len(), 1);
 

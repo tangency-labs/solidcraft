@@ -1902,10 +1902,7 @@ pub fn write_design(doc: &Document) -> Result<Vec<u8>> {
             binary.join(" and ")
         )));
     }
-    for drawing in doc.drawings.iter().filter(|drawing| drawing.newer_file.is_some()) {
-        drawing.validate()?;
-    }
-    Ok(doc.to_json().into_bytes())
+    Ok(doc.to_json_checked()?.into_bytes())
 }
 
 /// Parse a binary or ASCII STL (used by tests and round-trip checks): triangles.

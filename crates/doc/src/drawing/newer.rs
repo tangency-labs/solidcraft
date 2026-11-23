@@ -1,9 +1,10 @@
 //! Keep the parts of a newer drawing this build can't read, apart from the editable record.
 
 use std::collections::{BTreeMap, BTreeSet};
+use std::sync::Arc;
 
-use serde::Deserialize;
-use serde_json::Value;
+use serde::{Deserialize, Serialize};
+use serde_json::{Value, value::RawValue};
 use solidcraft_geom::revision::{self, RevisionRow, Tag};
 
 use super::image::{self, ImageFile, SheetImage};
@@ -28,12 +29,92 @@ pub struct NewerDrawing {
     pub unknown_changes: Vec<String>,
     /// What this build couldn't read, by name.
     pub not_understood: Vec<String>,
-    fields: Vec<(String, Value)>,
-    elements: BTreeMap<&'static str, Vec<(usize, Value)>>,
+    fields: Vec<(String, Retained)>,
+    elements: BTreeMap<&'static str, RetainedList>,
     protected: BTreeSet<u64>,
     pub(super) reserved: BTreeSet<u64>,
     parts: BTreeMap<String, Blob>,
 }
+
+/// The parsed value is used for validation and references. The original text travels with it.
+#[derive(Clone, Debug)]
+struct Retained {
+    value: Value,
+    raw: Option<Arc<RawValue>>,
+}
+
+impl PartialEq for Retained {
+    fn eq(&self, other: &Self) -> bool {
+        self.value == other.value && self.raw.as_deref().map(RawValue::get) == other.raw.as_deref().map(RawValue::get)
+    }
+}
+
+impl Retained {
+    fn new(value: Value, raw: Option<&RawValue>) -> Self {
+        // An upgrade can move or rewrite a legacy record. Only reuse text for the same value.
+        let raw = raw.filter(|raw| serde_json::from_str::<Value>(raw.get()).is_ok_and(|original| original == value));
+        Self { value, raw: raw.map(|raw| Arc::from(raw.to_owned())) }
+    }
+
+    fn saved(&self) -> SavedValue<'_> {
+        self.raw.as_deref().map_or_else(|| SavedValue::Value(self.value.clone()), SavedValue::Raw)
+    }
+}
+
+#[derive(Serialize)]
+#[serde(untagged)]
+pub(super) enum SavedValue<'a> {
+    Value(Value),
+    Raw(&'a RawValue),
+    List(Vec<SavedValue<'a>>),
+    Object(BTreeMap<String, SavedValue<'a>>),
+}
+
+type RecordKey = (u64, Option<String>);
+
+#[derive(Clone, Debug, PartialEq)]
+struct RetainedList {
+    limit: usize,
+    // Original readable neighbours, in file order. Unread records have no anchor of their own.
+    original: Vec<Option<RecordKey>>,
+    held: Vec<(usize, Retained)>,
+}
+
+impl RetainedList {
+    fn weave<'a, T>(&'a self, readable: Vec<Value>, live: impl Fn(Value) -> T, hold: impl Fn(&'a Retained) -> T) -> Vec<T> {
+        let current: BTreeMap<_, _> = readable.iter().enumerate().filter_map(|(i, value)| record_key(value).map(|key| (key, i))).collect();
+        let positions: Vec<_> = self.original.iter().map(|key| key.as_ref().and_then(|key| current.get(key)).copied()).collect();
+        let mut next = None;
+        let mut slots: Vec<_> = positions
+            .iter()
+            .rev()
+            .map(|position| {
+                next = position.iter().copied().chain(next).min();
+                next
+            })
+            .collect();
+        slots.reverse();
+        let mut previous = None;
+        for (slot, position) in slots.iter_mut().zip(positions) {
+            previous = position.into_iter().chain(previous).max();
+            *slot = slot.or(previous.map(|i| i + 1));
+        }
+        let mut remaining = readable.into_iter();
+        let mut combined = Vec::with_capacity(remaining.len() + self.held.len());
+        let mut copied = 0;
+        for (i, record) in &self.held {
+            let slot = slots.get(*i).copied().flatten().unwrap_or(0);
+            let count = slot.saturating_sub(copied);
+            combined.extend(remaining.by_ref().take(count).map(&live));
+            copied += count;
+            combined.push(hold(record));
+        }
+        combined.extend(remaining.map(live));
+        combined
+    }
+}
+
+type RawFields<'a> = BTreeMap<String, &'a RawValue>;
 
 impl NewerDrawing {
     pub(super) fn new(newer: Newer) -> Self {
@@ -58,13 +139,15 @@ impl NewerDrawing {
         )
     }
 
-    pub(super) fn salvage(&mut self, value: &mut Value) -> Result<()> {
+    pub(super) fn salvage(&mut self, value: &mut Value, text: Option<&str>) -> Result<()> {
+        let raw: RawFields<'_> = text.map(serde_json::from_str).transpose().map_err(damaged)?.unwrap_or_default();
         let top = value.as_object_mut().ok_or_else(|| damaged("expected a JSON object"))?;
         let keys: Vec<_> = top.keys().filter(|key| !RECORD_FIELDS.contains(&key.as_str())).cloned().collect();
         for key in keys {
             if let Some(value) = top.remove(&key) {
                 self.not_understood.push(format!("field `{key}`"));
-                self.fields.push((key, value));
+                let record = Retained::new(value, raw.get(&key).copied());
+                self.fields.push((key, record));
             }
         }
 
@@ -73,7 +156,7 @@ impl NewerDrawing {
         if !top.contains_key(image::FILES) && top.get("images").is_some_and(Value::is_array) {
             image::set_aside(value);
         }
-        super::sketch::check_raw(value).map_err(damaged)?;
+        super::sketch::check_raw_bounds(value).map_err(damaged)?;
         super::fill::check_raw(value).map_err(damaged)?;
         let mut plan = Salvage::default();
         plan.read(value, "sources", "source", super::MAX_SOURCES, |_: Source| [None, None])?;
@@ -126,7 +209,7 @@ impl NewerDrawing {
         })?;
         plan.follow_dependencies();
         plan.keep_unused_images(value);
-        plan.take(value, self);
+        plan.take(value, &raw, self);
 
         if let Some(revisions) = value.get("revisions")
             && RevisionRecord::deserialize(revisions).map_or(true, |record| record.per_sheet)
@@ -138,10 +221,11 @@ impl NewerDrawing {
                 if let Some(elements) = self.elements.remove(path)
                     && let Some((_, field)) = path.rsplit_once('/')
                 {
-                    restore_elements(&mut revisions[field], &elements);
+                    let readable = take_list(&mut revisions[field]);
+                    revisions[field] = Value::Array(elements.weave(readable, |value| value, |record| record.value.clone()));
                 }
             }
-            self.fields.push(("revisions".into(), revisions));
+            self.fields.push(("revisions".into(), Retained::new(revisions, raw.get("revisions").copied())));
             self.not_understood.push("revision record".into());
         }
         Ok(())
@@ -151,8 +235,10 @@ impl NewerDrawing {
         let visible: BTreeSet<_> = drawing.ids().collect();
         // We cannot know the fields of an opaque record. Treat every exact drawing id in it
         // as a potential reference, and never give its ids to a newly authored object.
-        for value in self.fields.iter().map(|(_, value)| value).chain(self.elements.values().flatten().map(|(_, value)| value)) {
-            visit_strings(value, &mut |text| {
+        for value in
+            self.fields.iter().map(|(_, value)| value).chain(self.elements.values().flat_map(|list| list.held.iter().map(|(_, record)| record)))
+        {
+            visit_strings(&value.value, &mut |text| {
                 if let Some(id) = ids::decode(text) {
                     if visible.contains(&id) {
                         self.protected.insert(id);
@@ -179,6 +265,15 @@ impl NewerDrawing {
         if self.fields.iter().any(|(field, _)| field == "revisions") && !super::no_revisions(&drawing.revisions) {
             return Err(DocError::Invalid("the revision record was saved by a newer SolidCraft. Update SolidCraft to edit it".into()));
         }
+        for (&path, list) in &self.elements {
+            let count = editable_count(drawing, path) + list.held.len();
+            if count > list.limit {
+                return Err(DocError::Invalid(format!(
+                    "{path} must be a list of at most {} records, including those from a newer SolidCraft",
+                    list.limit
+                )));
+            }
+        }
         Ok(())
     }
 
@@ -187,42 +282,85 @@ impl NewerDrawing {
         self.parts.keys().map(String::as_str)
     }
 
-    pub(super) fn restore(&self, value: &mut Value) {
-        for (key, field) in &self.fields {
-            value[key] = field.clone();
-        }
-        for (&path, elements) in &self.elements {
-            // A list with no readable elements is usually omitted by the serializer.
-            if let Some((_, field)) = path.rsplit_once('/') {
-                if value.get("revisions").is_none() {
-                    value["revisions"] = serde_json::json!({"rows": []});
+    pub(super) fn saved_record(&self, mut value: Value) -> Result<SavedValue<'_>> {
+        // Validate combined budgets for lists with limits beyond their number of records.
+        for path in ["sketches", "fills", "patterns"] {
+            if let Some(list) = self.elements.get(path) {
+                let readable = value[path].as_array().cloned().unwrap_or_default();
+                let records = list.weave(readable, |value| value, |record| record.value.clone());
+                let combined = serde_json::json!({(path): records});
+                if path == "sketches" {
+                    super::sketch::check_raw_bounds(&combined)?;
+                } else {
+                    super::fill::check_raw(&combined)?;
                 }
-                restore_elements(&mut value["revisions"][field], elements);
-            } else {
-                restore_elements(&mut value[path], elements);
             }
+        }
+        let mut revisions = value.get_mut("revisions").map(Value::take).unwrap_or_else(|| serde_json::json!({"rows": []}));
+        let mut saved_revisions = BTreeMap::new();
+        let mut restored = BTreeMap::new();
+        for (&path, list) in &self.elements {
+            if let Some((_, field)) = path.rsplit_once('/') {
+                let readable = take_list(&mut revisions[field]);
+                saved_revisions.insert(field.into(), SavedValue::List(list.weave(readable, SavedValue::Value, Retained::saved)));
+            } else {
+                let readable = take_list(&mut value[path]);
+                restored.insert(path.into(), SavedValue::List(list.weave(readable, SavedValue::Value, Retained::saved)));
+            }
+        }
+        if !saved_revisions.is_empty() {
+            merge_fields(revisions, &mut saved_revisions);
+            restored.insert("revisions".into(), SavedValue::Object(saved_revisions));
+        } else if let Some(revision) = value.get_mut("revisions") {
+            *revision = revisions;
+        }
+        merge_fields(value, &mut restored);
+        for (key, record) in &self.fields {
+            restored.insert(key.clone(), record.saved());
         }
         for (name, part) in &self.parts {
             blob::keep_part(name, part);
         }
+        Ok(SavedValue::Object(restored))
     }
 }
 
-/// Restore list order, including for sheets and revision rows, in one pass.
-fn restore_elements(list: &mut Value, elements: &[(usize, Value)]) {
-    let readable = match list.take() {
-        Value::Array(readable) => readable,
-        _ => Vec::new(),
-    };
-    let mut readable = readable.into_iter();
-    let mut combined = Vec::with_capacity(readable.len() + elements.len());
-    for (index, element) in elements {
-        let before = index.saturating_sub(combined.len());
-        combined.extend(readable.by_ref().take(before));
-        combined.push(element.clone());
+fn merge_fields<'a>(value: Value, fields: &mut BTreeMap<String, SavedValue<'a>>) {
+    if let Value::Object(object) = value {
+        for (key, value) in object {
+            fields.entry(key).or_insert(SavedValue::Value(value));
+        }
     }
-    combined.extend(readable);
-    *list = Value::Array(combined);
+}
+
+fn take_list(list: &mut Value) -> Vec<Value> {
+    match list.take() {
+        Value::Array(records) => records,
+        _ => Vec::new(),
+    }
+}
+
+fn editable_count(d: &Drawing, path: &str) -> usize {
+    match path {
+        "sources" => d.sources.len(),
+        "sheets" => d.sheets.len(),
+        "views" => d.views.len(),
+        "dimensions" => d.dimensions.len(),
+        "balloons" => d.balloons.len(),
+        "notes" => d.notes.len(),
+        "tables" => d.tables.len(),
+        "sketches" => d.sketches.len(),
+        "fills" => d.fills.len(),
+        "patterns" => d.patterns.len(),
+        "symbols" => d.symbols.len(),
+        image::FILES => d.images.len(),
+        image::PLACED => d.sheet_images.len(),
+        image::LOGOS => d.logos().count(),
+        "/revisions/rows" => d.revisions.rows().len(),
+        "/revisions/issued" => d.revisions.issued().len(),
+        "/revisions/tags" => d.revisions.tags().len(),
+        _ => 0,
+    }
 }
 
 fn visit_strings(value: &Value, visit: &mut impl FnMut(&str)) {
@@ -243,7 +381,7 @@ type Position = (&'static str, usize);
 /// either order. Validation still rejects missing ids that were never in the file.
 #[derive(Default)]
 struct Salvage {
-    labels: BTreeMap<&'static str, &'static str>,
+    lists: BTreeMap<&'static str, (&'static str, usize)>,
     unavailable: BTreeMap<Position, String>,
     ids: BTreeMap<Position, u64>,
     users: BTreeMap<u64, Vec<Position>>,
@@ -263,7 +401,7 @@ impl Salvage {
             .as_array()
             .filter(|list| list.len() <= limit)
             .ok_or_else(|| damaged(format!("{path} must be a list of at most {limit} records")))?;
-        self.labels.insert(path, one);
+        self.lists.insert(path, (one, limit));
         for (index, raw) in records.iter().enumerate() {
             let position = (path, index);
             // An issued copy deliberately shares its row's id. Losing the copy doesn't remove
@@ -273,7 +411,13 @@ impl Salvage {
             {
                 self.ids.insert(position, id);
             }
-            match DRAWING.check_numbers(raw, "properties").and_then(|()| T::deserialize(raw).map_err(damaged)) {
+            let readable = DRAWING.check_numbers(raw, "properties").and_then(|()| {
+                if path == "sketches" {
+                    super::sketch::check_raw_support(raw).map_err(damaged)?;
+                }
+                T::deserialize(raw).map_err(damaged)
+            });
+            match readable {
                 Ok(record) => {
                     for id in references(record).into_iter().flatten() {
                         self.users.entry(id).or_default().push(position);
@@ -315,7 +459,7 @@ impl Salvage {
         }
     }
 
-    fn take(self, value: &mut Value, file: &mut NewerDrawing) {
+    fn take(self, value: &mut Value, raw: &RawFields<'_>, file: &mut NewerDrawing) {
         let mut lists = BTreeMap::<&str, BTreeMap<usize, String>>::new();
         for ((path, index), why) in self.unavailable {
             lists.entry(path).or_default().insert(index, why);
@@ -323,19 +467,41 @@ impl Salvage {
         for (path, mut held) in lists {
             let list = if path.starts_with('/') { value.pointer_mut(path) } else { value.get_mut(path) };
             let Some(list) = list.and_then(Value::as_array_mut) else { continue };
+            let Some(&(one, limit)) = self.lists.get(path) else { continue };
+            let originals = raw_list(raw, path);
+            let mut retained = RetainedList { limit, original: Vec::with_capacity(list.len()), held: Vec::with_capacity(held.len()) };
             for (index, raw) in std::mem::take(list).into_iter().enumerate() {
                 if let Some(why) = held.remove(&index) {
-                    let one = self.labels.get(path).copied().unwrap_or(path);
+                    retained.original.push(None);
                     let name = ["name", "path", "id", "cell"].into_iter().find_map(|key| raw.get(key).and_then(Value::as_str)).unwrap_or("unnamed");
                     let name: String = name.chars().take(80).collect();
                     file.not_understood.push(format!("{one} `{name}` ({why})"));
-                    file.elements.entry(path).or_default().push((index, raw));
+                    retained.held.push((index, Retained::new(raw, originals.get(index).copied())));
                 } else {
+                    retained.original.push(record_key(&raw));
                     list.push(raw);
                 }
             }
+            file.elements.insert(path, retained);
         }
     }
+}
+
+fn raw_list<'a>(raw: &RawFields<'a>, path: &str) -> Vec<&'a RawValue> {
+    let raw = if let Some((_, field)) = path.rsplit_once('/') {
+        raw.get("revisions").and_then(|value| serde_json::from_str::<RawFields<'a>>(value.get()).ok()).and_then(|fields| fields.get(field).copied())
+    } else {
+        raw.get(path).copied()
+    };
+    raw.and_then(|value| serde_json::from_str(value.get()).ok()).unwrap_or_default()
+}
+
+fn record_key(record: &Value) -> Option<RecordKey> {
+    if let Some(id) = record_id(record) {
+        return Some((id, None));
+    }
+    let sheet = record.get("sheet").and_then(Value::as_str).and_then(ids::decode)?;
+    Some((sheet, Some(record.get("cell")?.as_str()?.into())))
 }
 
 fn record_id(record: &Value) -> Option<u64> {

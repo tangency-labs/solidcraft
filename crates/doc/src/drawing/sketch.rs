@@ -86,6 +86,15 @@ fn identity<'a>(seen: &mut BTreeSet<&'a str>, id: &'a str) -> Result<()> {
 /// Every collection is bounded before serde allocates the typed sketch payload.
 /// A raw JSON Value already exists here; the drawing reader separately caps encoded bytes.
 pub(super) fn check_raw(value: &Value) -> Result<()> {
+    check_raw_bounds(value)?;
+    for record in value.get("sketches").and_then(Value::as_array).into_iter().flatten() {
+        check_raw_support(record)?;
+    }
+    Ok(())
+}
+
+/// Bound the whole drawing's sketches, including any records the reader will set aside.
+pub(super) fn check_raw_bounds(value: &Value) -> Result<()> {
     let Some(records) = value.get("sketches") else { return Ok(()) };
     let records = records.as_array().ok_or_else(|| invalid("sketches must be an array"))?;
     require(records.len() <= MAX_SHEET_SKETCHES, || "too many sheet sketches".into())?;
@@ -103,9 +112,10 @@ pub(super) fn check_raw(value: &Value) -> Result<()> {
             }
         }
         for key in AUXILIARY {
-            if let Some(array) = sketch.get(key) {
-                let array = array.as_array().ok_or_else(|| invalid(format!("{key} must be an array")))?;
-                require(array.is_empty(), || format!("not supported yet: sheet sketch {key}"))?;
+            if let Some(array) = sketch.get(key)
+                && !array.is_array()
+            {
+                return Err(invalid(format!("{key} must be an array")));
             }
         }
         if let Some(curves) = sketch.get("curves").and_then(Value::as_array) {
@@ -119,6 +129,18 @@ pub(super) fn check_raw(value: &Value) -> Result<()> {
         if let Some(counters) = sketch.get("counters").and_then(Value::as_object) {
             require(counters.len() <= 64, || "sheet sketch counter prefix limit exceeded".into())?;
             require(counters.keys().all(|key| key.len() <= MAX_LOCAL_ID_BYTES), || "sheet sketch counter prefix too long".into())?;
+        }
+    }
+    Ok(())
+}
+
+/// Reject unsupported auxiliary arrays in one sketch after checking the drawing's raw bounds.
+pub(super) fn check_raw_support(record: &Value) -> Result<()> {
+    if let Some(sketch) = record.get("sketch") {
+        for key in AUXILIARY {
+            if let Some(array) = sketch.get(key).and_then(Value::as_array) {
+                require(array.is_empty(), || format!("not supported yet: sheet sketch {key}"))?;
+            }
         }
     }
     Ok(())

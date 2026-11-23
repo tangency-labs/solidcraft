@@ -172,6 +172,8 @@ fn open_record<R: Read + Seek>(reader: &mut PackageReader<R>, bytes: &[u8]) -> R
                 parts.insert(name.into(), solidcraft_doc::blob::Blob::from(bytes));
             }
         }
+        let text = std::str::from_utf8(bytes).map_err(invalid)?;
+        return Ok(solidcraft_doc::blob::with_parts(parts, || Drawing::from_json(text))?);
     }
     Ok(solidcraft_doc::blob::with_parts(parts, || Drawing::from_value(value))?)
 }
@@ -242,7 +244,14 @@ fn blob_names(value: &Value) -> std::collections::BTreeSet<&str> {
                 found.insert(s);
             }
             Value::Array(items) => items.iter().for_each(|v| named(v, found)),
-            Value::Object(map) => map.values().for_each(|v| named(v, found)),
+            Value::Object(map) => {
+                for (key, value) in map {
+                    if key.starts_with("blobs/") {
+                        found.insert(key);
+                    }
+                    named(value, found);
+                }
+            }
             _ => {}
         }
     }

@@ -480,15 +480,19 @@ impl Drawing {
             return Err(DocError::Invalid(format!("drawing too large (at most {} MiB)", MAX_DRAWING_BYTES >> 20)));
         }
         let v: Value = serde_json::from_str(s).map_err(|e| DocError::Invalid(format!("not a SolidCraft drawing: {e}")))?;
-        Drawing::from_value(v)
+        Self::read_value(v, Some(s))
     }
 
     /// Read a drawing from its JSON value, as a plain JSON design holds it: [`Drawing::from_json`]
     /// once the text is parsed.
-    pub fn from_value(mut v: Value) -> Result<Drawing> {
+    pub fn from_value(v: Value) -> Result<Drawing> {
+        Self::read_value(v, None)
+    }
+
+    pub(crate) fn read_value(mut v: Value, text: Option<&str>) -> Result<Drawing> {
         let (version, applied) = DRAWING.take_version(&mut v)?;
         if let Some(newer) = DRAWING.newer(version, applied.as_deref()) {
-            return Self::from_newer(v, version, applied, newer);
+            return Self::from_newer(v, version, applied, newer, text);
         }
         let d = Self::decode(v, version, applied.as_deref())?;
         Ok(Drawing { format: DRAWING.format_string(DRAWING.current()), format_pending: DRAWING.pending_names(), ..d })
@@ -524,11 +528,11 @@ impl Drawing {
     }
 
     /// Open the readable records of a newer drawing and keep the rest for the next save.
-    fn from_newer(mut v: Value, version: u32, applied: Option<Vec<String>>, newer: crate::format::Newer) -> Result<Drawing> {
+    fn from_newer(mut v: Value, version: u32, applied: Option<Vec<String>>, newer: crate::format::Newer, text: Option<&str>) -> Result<Drawing> {
         let mut file = NewerDrawing::new(newer);
         let d = DRAWING
             .upgrade(&mut v, version, applied.as_deref())
-            .and_then(|()| file.salvage(&mut v))
+            .and_then(|()| file.salvage(&mut v, text))
             .and_then(|()| DRAWING.check_numbers(&v, "properties"))
             .and_then(|()| Self::decode_record(v))
             .map_err(|why| {
@@ -555,19 +559,18 @@ impl Drawing {
     pub fn to_json(&self) -> Result<String> {
         self.validate()?;
         let unsaved = |e: serde_json::Error| DocError::Invalid(format!("drawing not saved: {e}"));
-        let value = self.saved_record().map_err(unsaved)?;
-        let text = serde_json::to_string_pretty(&value).map_err(unsaved)?;
+        let text = serde_json::to_string_pretty(&self.saved_record()?).map_err(unsaved)?;
         require(text.len() <= MAX_DRAWING_BYTES, || format!("drawing too large to save (at most {} MiB)", MAX_DRAWING_BYTES >> 20))?;
         Ok(text)
     }
 
-    fn saved_record(&self) -> serde_json::Result<Value> {
-        let mut value = serde_json::to_value(self)?;
+    fn saved_record(&self) -> Result<newer::SavedValue<'_>> {
+        let mut value = serde_json::to_value(self).map_err(|e| DocError::Invalid(format!("drawing not saved: {e}")))?;
         image::set_aside(&mut value);
-        if let Some(file) = &self.newer_file {
-            file.restore(&mut value);
+        match &self.newer_file {
+            Some(file) => file.saved_record(value),
+            None => Ok(newer::SavedValue::Value(value)),
         }
-        Ok(value)
     }
 
     /// Images and opaque container parts also need a container when the drawing is in a design.
@@ -811,12 +814,42 @@ pub(crate) fn serialize_inline<S: serde::Serializer>(drawings: &[Arc<Drawing>], 
     let mut seq = serializer.serialize_seq(Some(drawings.len()))?;
     for drawing in drawings {
         if drawing.newer_file.is_some() {
+            drawing.validate().map_err(S::Error::custom)?;
             seq.serialize_element(&drawing.saved_record().map_err(S::Error::custom)?)?;
         } else {
             seq.serialize_element(drawing)?;
         }
     }
     seq.end()
+}
+
+/// Serialize a newer design's restored metadata with its editable drawing records.
+pub(crate) struct InlineDocument<'a> {
+    pub fields: &'a serde_json::Map<String, Value>,
+    pub drawings: &'a [Arc<Drawing>],
+}
+
+impl Serialize for InlineDocument<'_> {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> std::result::Result<S::Ok, S::Error> {
+        use serde::ser::SerializeMap as _;
+
+        struct Drawings<'a>(&'a [Arc<Drawing>]);
+        impl Serialize for Drawings<'_> {
+            fn serialize<S: serde::Serializer>(&self, serializer: S) -> std::result::Result<S::Ok, S::Error> {
+                serialize_inline(self.0, serializer)
+            }
+        }
+
+        let mut map = serializer.serialize_map(Some(self.fields.len()))?;
+        for (key, value) in self.fields {
+            if key == "drawings" {
+                map.serialize_entry(key, &Drawings(self.drawings))?;
+            } else {
+                map.serialize_entry(key, value)?;
+            }
+        }
+        map.end()
+    }
 }
 
 /// Put a design's drawings in their order: by name, then id. Nothing stores the order, so two

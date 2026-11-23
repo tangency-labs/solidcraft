@@ -1036,6 +1036,66 @@ fn newer_drawing_list_elements_are_reported_and_restored() {
 }
 
 #[test]
+fn a_newer_drawing_counts_retained_sources_towards_the_edit_limit() {
+    let mut saved = file(&bare());
+    saved["format"] = json!(DRAWING.format_string(DRAWING.current() + 1));
+    let source = |i: u64| json!({"id": ids::encode(1000 + i), "path": format!("source-{i}.sc")});
+    let mut sources: Vec<_> = (0..MAX_SOURCES as u64).map(source).collect();
+    sources[0]["future_source"] = json!(true);
+    saved["sources"] = json!(sources);
+    let mut opened = read(&saved).unwrap();
+    assert_eq!(opened.sources.len(), MAX_SOURCES - 1);
+    opened.name = "Renamed at the limit".into();
+    assert_eq!(Drawing::from_json(&opened.to_json().unwrap()).unwrap().name, opened.name);
+    opened.sources.push(serde_json::from_value(source(MAX_SOURCES as u64)).unwrap());
+    let expected = format!("sources must be a list of at most {MAX_SOURCES} records");
+    assert!(opened.validate().unwrap_err().to_string().contains(&expected));
+    assert!(opened.to_json().unwrap_err().to_string().contains(&expected));
+}
+
+#[test]
+fn a_newer_drawing_keeps_an_unreadable_sheet_before_its_surviving_neighbour() {
+    let mut saved = file(&bare());
+    saved["format"] = json!(DRAWING.format_string(DRAWING.current() + 1));
+    let a = saved["sheets"][0].clone();
+    let mut future = a.clone();
+    future["id"] = json!(ids::encode(1000));
+    future["name"] = json!("Future");
+    future["future_layers"] = json!([1]);
+    let mut b = a.clone();
+    b["id"] = json!(ids::encode(1001));
+    b["name"] = json!("B");
+    saved["sheets"] = json!([a, future, b]);
+    let mut opened = read(&saved).unwrap();
+    let first = opened.sheets[0].id;
+    opened.remove_sheet(first);
+    assert_eq!(file(&opened)["sheets"], json!([future, b]));
+    assert_eq!(Drawing::from_json(&opened.to_json().unwrap()).unwrap().sheets[0].name, "B");
+}
+
+#[test]
+fn a_newer_drawing_withholds_an_unsupported_sketch_and_its_fill() {
+    let (doc, id, _) = w38d_record_fixture(false);
+    let mut saved = file(doc.drawing(id).unwrap());
+    let curve = saved["sketches"][0]["sketch"]["curves"][0]["id"].clone();
+    saved["sketches"][0]["sketch"]["equations"] = json!([{
+        "curve": curve, "y": "x", "start": "0", "end": "1", "tolerance": 0.01, "variable_unit": "number"
+    }]);
+    assert!(refusal(&saved).contains("not supported yet: sheet sketch equations"));
+    saved["format"] = json!(DRAWING.format_string(DRAWING.current() + 1));
+
+    let opened = read(&saved).unwrap();
+    assert!(!opened.sheets.is_empty());
+    assert!(opened.sketches.is_empty() && opened.fills.is_empty());
+    let notice = &opened.newer_file.as_ref().unwrap().not_understood;
+    assert!(notice.iter().any(|item| item.contains("sheet sketch equations")), "{notice:?}");
+    assert!(notice.iter().any(|item| item.starts_with("fill ") && item.contains("unavailable object")), "{notice:?}");
+    let written = file(&opened);
+    assert_eq!(written["sketches"], saved["sketches"]);
+    assert_eq!(written["fills"], saved["fills"]);
+}
+
+#[test]
 fn a_newer_drawing_leaves_out_a_view_and_its_dependents() {
     let drawing = plate();
     let mut saved = file(&drawing);
