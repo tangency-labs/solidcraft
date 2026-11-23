@@ -388,8 +388,8 @@ impl Harness {
         widget_near_centres(&self.output.accesskit_update.as_ref()?.nodes, text, near)
     }
 
-    /// Accessibility bounds include scrolled-out page content. Reveal that content with
-    /// wheel input before using its coordinates; window actions and navigation stay put.
+    /// Accessibility bounds include scrolled-out page and File menu content. Reveal that
+    /// content with wheel input before using its coordinates; window actions stay put.
     fn reveal_widget(&mut self, text: &str, near: Option<&str>) -> Result<[f64; 2], String> {
         let find = |h: &Self| match near {
             Some(label) => h.widget_near(text, label),
@@ -398,6 +398,18 @@ impl Harness {
         for _ in 0..32 {
             let point = find(self).ok_or_else(|| format!("no widget `{text}` on screen"))?;
             let at = egui::pos2(point[0] as f32, point[1] as f32);
+            let file_menu_open = self.ctx.data(|data| data.get_temp::<bool>(egui::Id::unique("sc_file_menu")).unwrap_or(false));
+            let menu_bottom = self.ctx.content_rect().bottom() - 32.0;
+            if file_menu_open && at.y > menu_bottom {
+                self.call("ui.scroll", json!({"x": at.x, "y": menu_bottom, "delta": -100}));
+                for _ in 0..120 {
+                    if self.ctx.input(|input| !input.is_scrolling()) {
+                        break;
+                    }
+                    self.frame();
+                }
+                continue;
+            }
             let page = self.app.prefs_window.shell.open.then(|| rect_of("prefs:page_body")).flatten();
             let chrome = ["prefs:ok", "prefs:apply", "prefs:cancel", "prefs:search"].iter().any(|key| handle_at(key) == Some(at));
             let Some(page) = page.filter(|page| !chrome && page.x_range().contains(at.x)) else { return Ok(point) };

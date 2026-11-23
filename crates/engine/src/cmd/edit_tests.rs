@@ -449,6 +449,37 @@ fn redefining_an_imported_repair_extrude_can_activate_it_in_place() {
 }
 
 #[test]
+fn activating_a_repaired_axis_updates_the_revolves_saved_axis_name() {
+    let mut s = Session::default();
+    let axis =
+        run(&mut s, "construct.axis.two_points", json!({"a":{"point":[0,0,0]},"b":{"point":[0,30,0]},"name":"Axis1 [Needs repair]"}))["feature"]
+            .as_u64()
+            .unwrap();
+    run(&mut s, "sketch.create", json!({"plane":"XY","name":"Profile"}));
+    run(&mut s, "sketch.rectangle.two_point", json!({"p0":[2,0],"p1":[4,3]}));
+    run(&mut s, "sketch.finish", json!({}));
+    let turn = run(
+        &mut s,
+        "solid.revolve",
+        json!({"sketch":"Profile","axis":"Axis1 [Needs repair]","angle":"180 deg","operation":"new","profiles":[0],"name":"Turn"}),
+    )["feature"]
+        .as_u64()
+        .unwrap();
+    run(&mut s, "timeline.suppress", json!({"feature":axis,"suppressed":true}));
+    run(
+        &mut s,
+        "timeline.redefine",
+        json!({"feature":axis,"command":"construct.axis.two_points","params":{"a":{"point":[0,0,0]},"b":{"point":[0,30,0]}},"activate":true}),
+    );
+    assert_eq!(s.doc.feature(axis).unwrap().name, "Axis1");
+    assert!(matches!(
+        &s.doc.feature(turn).unwrap().kind,
+        solidcraft_doc::FeatureKind::Revolve { axis: solidcraft_doc::AxisRef::Construction { name }, .. } if name == "Axis1"
+    ));
+    assert!(s.model.result(turn).is_some_and(|result| !result.skipped && result.error.is_none()));
+}
+
+#[test]
 fn redefining_a_shell_replaces_persistent_face_selection() {
     let mut s = Session::default();
     run(&mut s, "solid.box", json!({"length": 40, "width": 30, "height": 20, "name": "Base"}));

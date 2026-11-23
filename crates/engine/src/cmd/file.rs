@@ -1721,6 +1721,18 @@ fn import_freecad_sketches(s: &mut Session, p: &Value) -> Result<Value> {
                 if constraint.kind.is_angle() { (format!("{} deg", value.to_degrees()), "deg") } else { (format!("{value} mm"), "mm") };
             constraint.param = Some(s.doc_mut().new_model_param(&expression, unit));
         }
+        if preserve_planes && freecad_datum_has_in_plane_rotation(&source) {
+            let datum_label = source.datum.as_ref().map(|(_, label, _)| label.as_str()).unwrap_or("datum");
+            source.warnings.push(solidcraft_io::FreeCadWarning {
+                summary: "The rotated sketch plane is imported at its saved position.".into(),
+                detail: format!(
+                    "Sketch `{}` is rotated within datum plane `{datum_label}`. Its SolidCraft plane is fixed because this rotation cannot yet follow the datum. If the datum moves, redefine the sketch plane to restore the intended attachment.",
+                    source.label
+                ),
+                severity: solidcraft_io::FreeCadWarningSeverity::Warning,
+                context: Some(solidcraft_io::FreeCadIssueContext { sketch: source.source_name.clone(), references: Vec::new() }),
+            });
+        }
         let plane = if preserve_planes {
             freecad_sketch_plane(s, &source, component, &mut datum_planes)?
         } else {
@@ -1883,6 +1895,17 @@ fn freecad_feature_name(s: &Session, label: &str) -> String {
     name
 }
 
+fn freecad_datum_has_in_plane_rotation(source: &solidcraft_io::FreeCadSketch) -> bool {
+    let Some((_, _, datum)) = &source.datum else { return false };
+    let delta = source.plane.origin - datum.origin;
+    let distance = delta.dot(datum.normal());
+    if (delta - datum.normal() * distance).len() > 1e-7 || source.plane.normal().dot(datum.normal()) < 1.0 - 1e-10 {
+        return false;
+    }
+    let angle = datum.normal().dot(datum.x.cross(source.plane.x)).atan2(datum.x.dot(source.plane.x));
+    angle.abs() > 1e-9
+}
+
 fn freecad_sketch_plane(
     s: &mut Session,
     source: &solidcraft_io::FreeCadSketch,
@@ -1891,6 +1914,16 @@ fn freecad_sketch_plane(
 ) -> Result<solidcraft_doc::PlaneRef> {
     use solidcraft_doc::{FeatureKind, PlaneRef};
     let Some((source_name, label, datum)) = &source.datum else { return Ok(freecad_explicit_plane(source.plane)) };
+    let delta = source.plane.origin - datum.origin;
+    let distance = delta.dot(datum.normal());
+    if (delta - datum.normal() * distance).len() > 1e-7 || source.plane.normal().dot(datum.normal()) < 1.0 - 1e-10 {
+        return Ok(freecad_explicit_plane(source.plane));
+    }
+    // AtAngle stores its axis in world coordinates. An imported in-plane rotation must stay
+    // frozen until the plane model can express an axis that follows the datum's origin and normal.
+    if freecad_datum_has_in_plane_rotation(source) {
+        return Ok(freecad_explicit_plane(source.plane));
+    }
     let key = (component, source_name.clone());
     let id = if let Some(id) = datums.get(&key) {
         *id
@@ -1903,26 +1936,9 @@ fn freecad_sketch_plane(
         datums.insert(key, id);
         id
     };
-    let delta = source.plane.origin - datum.origin;
-    let distance = delta.dot(datum.normal());
-    if (delta - datum.normal() * distance).len() > 1e-7 || source.plane.normal().dot(datum.normal()) < 1.0 - 1e-10 {
-        return Ok(freecad_explicit_plane(source.plane));
-    }
     let mut plane = PlaneRef::Construction { feature: id.into(), placement: None };
     if distance.abs() > 1e-9 {
         plane = PlaneRef::Offset { base: Box::new(plane), distance: format!("{distance} mm").into() };
-    }
-    let angle = datum.normal().dot(datum.x.cross(source.plane.x)).atan2(datum.x.dot(source.plane.x));
-    if angle.abs() > 1e-9 {
-        plane = PlaneRef::AtAngle {
-            base: Box::new(plane),
-            axis_origin: solidcraft_doc::point_expr(source.plane.origin),
-            axis_dir: datum.normal(),
-            angle: format!("{} deg", angle.to_degrees()).into(),
-            line: None,
-            direction_only: false,
-            pivot: None,
-        };
     }
     Ok(plane)
 }
@@ -4712,7 +4728,7 @@ mod tests {
     fn freecad_datums_are_shared_and_offsets_and_rotations_keep_the_saved_frame() {
         use solidcore_record::{Plane, Vec3};
         let datum = Plane::new(Vec3::new(2.0, 3.0, 12.0), Vec3::X, Vec3::Y).unwrap();
-        let plane = Plane::new(Vec3::new(2.0, 3.0, 19.0), Vec3::Y, -Vec3::X).unwrap();
+        let plane = Plane::new(Vec3::new(2.0, 3.0, 19.0), Vec3::X, Vec3::Y).unwrap();
         let source = solidcraft_io::FreeCadSketch {
             source_name: "Sketch".into(),
             label: "Profile".into(),
@@ -4740,6 +4756,23 @@ mod tests {
         assert!((resolved.origin - plane.origin).len() < 1e-9);
         assert!((resolved.x - plane.x).len() < 1e-9);
         assert!((resolved.y - plane.y).len() < 1e-9);
+        let mut rotated = source.clone();
+        rotated.plane = Plane::new(plane.origin, Vec3::Y, -Vec3::X).unwrap();
+        let frozen = freecad_sketch_plane(&mut session, &rotated, 0, &mut datums).unwrap();
+        assert!(matches!(frozen, solidcraft_doc::PlaneRef::Custom { .. }), "an angled imported sketch cannot use a fixed world rotation axis");
+        assert_eq!(session.doc.features.len(), 1, "a frozen plane does not create an unused datum");
+        if let Some(feature) = session.doc_mut().feature_mut(datums[&(0, "Datum".into())]) {
+            feature.kind = solidcraft_doc::FeatureKind::ConstructionPlane {
+                plane: freecad_explicit_plane(Plane::new(Vec3::new(5.0, 6.0, 12.0), Vec3::X, Vec3::Y).unwrap()),
+            };
+        }
+        session.refresh();
+        let (values, _) = session.doc.param_values();
+        let moved = session.doc.resolve_plane(&values, &imported, 0).unwrap();
+        assert!((moved.origin - Vec3::new(5.0, 6.0, 19.0)).len() < 1e-9, "the unrotated sketch follows the datum");
+        let frozen_after = session.doc.resolve_plane(&values, &frozen, 0).unwrap();
+        assert!((frozen_after.origin - rotated.plane.origin).len() < 1e-9);
+        assert!((frozen_after.x - rotated.plane.x).len() < 1e-9);
         let mut different = source.clone();
         different.datum = Some(("AnotherDatum".into(), "Mounting plane".into(), datum));
         freecad_sketch_plane(&mut session, &different, 0, &mut datums).unwrap();

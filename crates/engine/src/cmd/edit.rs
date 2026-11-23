@@ -605,7 +605,12 @@ fn rename(s: &mut Session, p: &Value) -> Result<Value> {
     if name == old {
         return reply(cmd, TimelineRenameResult { feature: id, name: name.to_string(), param_warnings: Vec::new() });
     }
-    let names = BTreeMap::from([(old.clone(), name.to_string())]);
+    rename_feature_name(s, id, &old, name);
+    reply(cmd, TimelineRenameResult { feature: id, name: name.to_string(), param_warnings: Vec::new() })
+}
+
+fn rename_feature_name(s: &mut Session, id: u64, old: &str, name: &str) {
+    let names = BTreeMap::from([(old.to_string(), name.to_string())]);
     let sketches = BTreeMap::new();
     let doc = s.doc_mut();
     if let Some(f) = doc.feature_mut(id) {
@@ -614,7 +619,7 @@ fn rename(s: &mut Session, p: &Value) -> Result<Value> {
     for f in doc.features.iter_mut() {
         f.kind.remap_refs(&sketches, &names);
     }
-    doc.rename_feature_keys(&old, name);
+    doc.rename_feature_keys(old, name);
     // The hidden list follows in `Session::refresh_from` (undo and redo too).
     for sel in &mut s.selection {
         if let Sel::Plane { name: n } = sel
@@ -623,7 +628,6 @@ fn rename(s: &mut Session, p: &Value) -> Result<Value> {
             *n = name.to_string();
         }
     }
-    reply(cmd, TimelineRenameResult { feature: id, name: name.to_string(), param_warnings: Vec::new() })
 }
 
 fn timeline_group_id(s: &Session, p: &Value, cmd: &str) -> Result<u64> {
@@ -2947,8 +2951,6 @@ fn redefine(s: &mut Session, p: &Value) -> Result<Value> {
     // What this edit rebuilt: the trial computed the edited feature and the features after it. The
     // session's evaluation below only takes those results from what the trial kept, so its own
     // counters read as "nothing was rebuilt" (#5694).
-    let rebuilt = trial.model.last_recomputed;
-    let reused = trial.model.last_restored;
     if activate && trial.model.result(id).is_none_or(|r| r.skipped) {
         return Err(bad(cmd, "the rebuilt feature did not produce an active result"));
     }
@@ -2956,10 +2958,13 @@ fn redefine(s: &mut Session, p: &Value) -> Result<Value> {
         && old.suppressed
         && let Some(name) = old.name.strip_suffix(" [Needs repair]")
         && !trial.doc.features.iter().any(|feature| feature.id != id && feature.name == name)
-        && let Some(slot) = trial.doc_mut().feature_mut(id)
     {
-        slot.name = name.to_string();
+        // Keep references to the repaired feature in sync with its restored name.
+        rename_feature_name(&mut trial, id, &old.name, name);
+        trial.refresh();
     }
+    let rebuilt = trial.model.last_recomputed;
+    let reused = trial.model.last_restored;
     let original_ids: std::collections::BTreeSet<u64> = s.doc.features.iter().map(|feature| feature.id).collect();
     let added_ids: std::collections::BTreeSet<u64> =
         trial.doc.features.iter().filter(|feature| !original_ids.contains(&feature.id)).map(|feature| feature.id).collect();

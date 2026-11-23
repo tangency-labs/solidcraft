@@ -381,7 +381,7 @@ pub(crate) fn show(app: &mut SolveApp, ctx: &egui::Context) {
                     ui_kit::text(ui, "This project contains no Sketcher sketches.", ui_kit::Text::Report("empty", true));
                 }
             });
-            ui_kit::section(ui, "freecad_operations", "Operations", true, |ui| {
+            ui_kit::section(ui, "freecad_operations", app.tr("ui.freecad_operations"), true, |ui| {
                 if dialog.operations.is_empty() {
                     ui_kit::text(ui, "This project contains no recognized operations.", ui_kit::Text::Note("no_operations"));
                 } else {

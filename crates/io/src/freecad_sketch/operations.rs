@@ -53,9 +53,11 @@ pub(super) fn capture(object: &mut RawObject, tag: &[u8], property: &str, attrs:
             | "Reversed"
             | "Midplane"
             | "AlongSketchNormal"
+            | "UseCustomVector"
             | "Profile"
             | "BaseFeature"
             | "ReferenceAxis"
+            | "Type2"
             | "Origin"
             | "Suppressed"
             | "Base"
@@ -391,6 +393,12 @@ pub(super) fn collect(objects: &[RawObject], by_name: &HashMap<&str, &RawObject>
             if !(mode == 0.0 || mode == 4.0 || through_all) || ![0.0, 1.0, 2.0].contains(&side) {
                 operation.blockers.push(issue("The operation's extent requires manual repair.", format!("FreeCAD extent mode {mode}, side mode {side}. Fixed length/angle, symmetric, two-sided and through-all Pocket are supported. Up-to-face, up-to-first and other reference extents are preserved as suppressed fixed extents using the saved numeric values; edit them before enabling.")));
             }
+            if side == 1.0 && value(object, "Type2", 0.0) != Some(0.0) {
+                operation.blockers.push(issue(
+                    "The second side's extent requires manual repair.",
+                    "The second side does not use a fixed length. Its saved Length2 remains available, but the imported feature stays suppressed until the second extent is repaired.",
+                ));
+            }
             if object.links.get("Profile").is_some_and(|(_, subs)| subs.iter().any(|sub| !sub.is_empty())) {
                 operation.blockers.push(issue("The selected profile subelements require repair.", "This operation selects individual source profile subelements. The imported feature uses the sketch's complete profiles and is suppressed until its profile selection is repaired."));
             }
@@ -409,7 +417,10 @@ pub(super) fn collect(objects: &[RawObject], by_name: &HashMap<&str, &RawObject>
                     }
                 }
             } else {
-                if !flag(object, "AlongSketchNormal", true) {
+                if !flag(object, "AlongSketchNormal", true)
+                    || flag(object, "UseCustomVector", false)
+                    || object.links.get("ReferenceAxis").is_some_and(|(name, _)| !name.is_empty())
+                {
                     operation.blockers.push(issue("The custom extrusion direction requires repair.", "The imported feature is suppressed and uses the sketch normal. Edit the sketch plane or feature direction to reproduce the source operation before enabling it."));
                 }
                 let length = value(object, "Length", if through_all { 1.0 } else { f64::NAN });

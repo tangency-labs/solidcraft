@@ -487,6 +487,25 @@ fn freecad_pocket_without_a_base_solid_explains_why_its_pattern_cannot_run() {
 }
 
 #[test]
+fn freecad_baseless_pocket_cannot_cut_an_unrelated_pad_in_the_same_source_body() {
+    let xml = include_str!("../../../io/src/freecad_sketch/operations_fixture.xml")
+        .replace("<Property name=\"BaseFeature\"><Link value=\"Pad\"/></Property>", "<Property name=\"BaseFeature\"><Link value=\"\"/></Property>");
+    let (dir, path) = file("baseless-pocket-with-pad", "source.FCStd", &operations_archive(&xml));
+    let mut session = Session::default();
+    let imported =
+        run(&mut session, "file.import_freecad_sketches", json!({"path":path,"sketches":[],"import_operations":true,"operations":["Pad","Pocket"]}));
+    let operations = imported["operations"].as_array().unwrap();
+    assert_eq!(operations[0]["status"], "imported", "{imported}");
+    assert_eq!(operations[1]["status"], "needs_repair", "{imported}");
+    let pocket = session.doc.feature(operations[1]["feature"].as_u64().unwrap()).unwrap();
+    let solidcraft_doc::FeatureKind::Extrude { targets, .. } = &pocket.kind else { panic!("expected Pocket") };
+    assert!(pocket.suppressed);
+    assert!(targets.iter().all(|target| target.0 != "Plate"), "the source Body name is not a proven cut target");
+    assert!((volume(&mut session) - 6000.0).abs() < 1e-6, "the Pad remains untouched");
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[test]
 fn freecad_revolution_and_groove_keep_the_axis_sweep_and_dimensions() {
     let xml = include_str!("../../../io/src/freecad_sketch/operations_fixture.xml");
     let (dir, path) = file("revolve-operations", "source.FCStd", &operations_archive(xml));

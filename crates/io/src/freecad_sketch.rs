@@ -282,6 +282,7 @@ fn parse_document(xml: &[u8], file: &str) -> Result<FreeCadProject> {
     reader.config_mut().trim_text(true);
     let mut buf = Vec::new();
     let mut depth = 0usize;
+    let mut seen_document = false;
     let mut events = 0usize;
     let mut in_objects = false;
     let mut in_object_data = false;
@@ -300,6 +301,12 @@ fn parse_document(xml: &[u8], file: &str) -> Result<FreeCadProject> {
         let event = reader.read_event_into(&mut buf).map_err(|e| IoError::Invalid(format!("{file}: malformed Document.xml: {e}")))?;
         match event {
             Event::Start(ref e) => {
+                if depth == 0 {
+                    if seen_document || e.local_name().as_ref() != b"Document" {
+                        return Err(IoError::Invalid(format!("{file}: Document.xml has no Document root")));
+                    }
+                    seen_document = true;
+                }
                 depth = depth.saturating_add(1);
                 if depth > MAX_XML_DEPTH {
                     return Err(IoError::Invalid(format!("{file}: Document.xml is nested too deeply")));
@@ -328,6 +335,12 @@ fn parse_document(xml: &[u8], file: &str) -> Result<FreeCadProject> {
                 }
             }
             Event::Empty(ref e) => {
+                if depth == 0 {
+                    if seen_document || e.local_name().as_ref() != b"Document" {
+                        return Err(IoError::Invalid(format!("{file}: Document.xml has no Document root")));
+                    }
+                    seen_document = true;
+                }
                 if in_objects && !in_object_data && e.local_name().as_ref() == b"Object" {
                     if types.len() >= MAX_OBJECTS {
                         return Err(IoError::Invalid(format!("{file}: Document.xml has too many objects")));
@@ -360,7 +373,8 @@ fn parse_document(xml: &[u8], file: &str) -> Result<FreeCadProject> {
                 }
                 depth = depth.saturating_sub(1);
             }
-            Event::Eof if depth == 0 => break,
+            Event::Eof if depth == 0 && seen_document => break,
+            Event::Eof if depth == 0 => return Err(IoError::Invalid(format!("{file}: Document.xml has no Document root"))),
             Event::Eof => return Err(IoError::Invalid(format!("{file}: malformed Document.xml: unclosed element"))),
             _ => {}
         }
@@ -544,28 +558,48 @@ fn global_frame(name: &str, objects: &HashMap<&str, &RawObject>, parents: &HashM
     Some(frame)
 }
 
-fn datum_dependency_exception(name: &str, objects: &HashMap<&str, &RawObject>, depth: usize) -> Option<String> {
-    if depth >= 32 {
-        return Some("The datum support chain is cyclic or too deep.".into());
-    }
-    let object = objects.get(name)?;
-    if object.map_mode == 0 {
-        return None;
-    }
-    for (support, sub) in &object.support {
-        let Some(target) = objects.get(support.as_str()) else {
-            return Some(format!("The datum refers to missing support `{support}`."));
-        };
-        if !sub.is_empty() || !matches!(target.type_name.as_str(), "App::Plane" | "PartDesign::Plane") {
-            return Some(format!("The datum depends on `{support}` ({}) subelement `{sub}`.", target.type_name));
+fn datum_dependency_exception(name: &str, objects: &HashMap<&str, &RawObject>) -> Option<String> {
+    fn visit(
+        name: &str,
+        objects: &HashMap<&str, &RawObject>,
+        depth: usize,
+        active: &mut BTreeSet<String>,
+        complete: &mut BTreeSet<String>,
+    ) -> Option<String> {
+        if depth >= 32 {
+            return Some("The datum support chain is cyclic or too deep.".into());
         }
-        if target.type_name == "PartDesign::Plane"
-            && let Some(reason) = datum_dependency_exception(support, objects, depth + 1)
-        {
-            return Some(reason);
+        if !active.insert(name.to_string()) {
+            return Some("The datum support chain is cyclic or too deep.".into());
         }
+        if complete.contains(name) {
+            active.remove(name);
+            return None;
+        }
+        let object = objects.get(name)?;
+        if object.map_mode == 0 {
+            active.remove(name);
+            complete.insert(name.to_string());
+            return None;
+        }
+        for (support, sub) in &object.support {
+            let Some(target) = objects.get(support.as_str()) else {
+                return Some(format!("The datum refers to missing support `{support}`."));
+            };
+            if !sub.is_empty() || !matches!(target.type_name.as_str(), "App::Plane" | "PartDesign::Plane") {
+                return Some(format!("The datum depends on `{support}` ({}) subelement `{sub}`.", target.type_name));
+            }
+            if target.type_name == "PartDesign::Plane"
+                && let Some(reason) = visit(support, objects, depth + 1, active, complete)
+            {
+                return Some(reason);
+            }
+        }
+        active.remove(name);
+        complete.insert(name.to_string());
+        None
     }
-    None
+    visit(name, objects, 0, &mut BTreeSet::new(), &mut BTreeSet::new())
 }
 
 fn recover_plane(object: &RawObject, objects: &HashMap<&str, &RawObject>, parents: &HashMap<&str, &str>, sketch: &mut FreeCadSketch) {
@@ -582,6 +616,10 @@ fn recover_plane(object: &RawObject, objects: &HashMap<&str, &RawObject>, parent
     if object.map_mode != 0 && object.support.is_empty() {
         // A saved sketch may retain an active MapMode without a recorded support.
         // Its resolved Placement is still a complete, independent sketch plane.
+        if !matches!(object.placement, Some(Some(_))) || sketch.saved_plane.is_none() {
+            fallback(sketch, "The active attachment has no source support or saved resolved Placement.".into());
+            return;
+        }
         sketch.plane_description = "Saved sketch plane (source support not recorded)".into();
     } else if object.map_mode != 0 {
         if object.support.len() != 1 {
@@ -663,7 +701,7 @@ fn recover_plane(object: &RawObject, objects: &HashMap<&str, &RawObject>, parent
             let label = if support.label.is_empty() { support_name.clone() } else { support.label.clone() };
             sketch.datum = Some((support_name.clone(), label.clone(), frame));
             sketch.plane_description = format!("Datum plane: {label}");
-            if let Some(reason) = datum_dependency_exception(support_name, objects, 0) {
+            if let Some(reason) = datum_dependency_exception(support_name, objects) {
                 warn(
                     &mut sketch.warnings,
                     "The datum plane will retain its saved position, but its source dependency is removed.",
@@ -1187,15 +1225,18 @@ fn convert_constraint(c: &RawConstraint, maps: &[GeometryMap], sketch: &mut Sket
         5 => ConstraintKind::Tangent { a: first_curve()?, b: second_curve()? },
         6 if c.first_pos != 0 && c.second_pos != 0 => ConstraintKind::Distance { p: first_point()?, q: second_point()?, value: c.value.abs() },
         6 => ConstraintKind::Length { l: first_curve()?, value: c.value.abs() },
-        7 if c.first_pos != 0 && c.second_pos != 0 => ConstraintKind::DistanceX { p: first_point()?, q: second_point()?, value: c.value },
+        // SolidCraft stores the magnitude; the saved point positions retain the source side.
+        7 if c.first_pos != 0 && c.second_pos != 0 => ConstraintKind::DistanceX { p: first_point()?, q: second_point()?, value: c.value.abs() },
+        7 if c.first_pos != 0 && c.second == -2000 => ConstraintKind::DistanceX { p: 0, q: first_point()?, value: c.value.abs() },
         7 => {
             let (p, q) = line_points(maps, c.first)?;
-            ConstraintKind::DistanceX { p, q, value: c.value }
+            ConstraintKind::DistanceX { p, q, value: c.value.abs() }
         }
-        8 if c.first_pos != 0 && c.second_pos != 0 => ConstraintKind::DistanceY { p: first_point()?, q: second_point()?, value: c.value },
+        8 if c.first_pos != 0 && c.second_pos != 0 => ConstraintKind::DistanceY { p: first_point()?, q: second_point()?, value: c.value.abs() },
+        8 if c.first_pos != 0 && c.second == -2000 => ConstraintKind::DistanceY { p: 0, q: first_point()?, value: c.value.abs() },
         8 => {
             let (p, q) = line_points(maps, c.first)?;
-            ConstraintKind::DistanceY { p, q, value: c.value }
+            ConstraintKind::DistanceY { p, q, value: c.value.abs() }
         }
         9 if c.second >= 0 => ConstraintKind::Angle { a: first_curve()?, b: second_curve()?, value: c.value, flip: false },
         9 => ConstraintKind::LineAngle { l: first_curve()?, value: c.value },

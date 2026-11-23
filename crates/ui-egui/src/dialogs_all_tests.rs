@@ -458,6 +458,7 @@ fn imported_repair_extrude_edit_enables_the_existing_feature() {
     assert_eq!(commands.len(), 1);
     assert_eq!(commands[0].0, "timeline.redefine");
     assert_eq!(commands[0].1["activate"], true);
+    assert!(commands[0].1["params"].get("activate_repair").is_none());
     let dialog = h.app.dialog.take().unwrap();
     crate::dialogs::run_dialog(&mut h.app, &dialog).unwrap();
     assert!(!h.app.session.doc.feature(id).unwrap().suppressed);

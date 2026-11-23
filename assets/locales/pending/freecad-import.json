@@ -7,6 +7,7 @@
     "ui.freecad_flat_active_component": "Flat in active component",
     "ui.freecad_import": "Import",
     "ui.freecad_more": "More…",
+    "ui.freecad_operations": "Operations",
     "ui.freecad_original_name": "Original name",
     "ui.freecad_part_body_sketch_name": "Part — Body — Sketch",
     "ui.freecad_preserve_hierarchy": "Preserve FreeCAD hierarchy",
@@ -21,6 +22,7 @@
     "ui.freecad_flat_active_component": "アクティブなコンポーネントにフラットに配置",
     "ui.freecad_import": "インポート",
     "ui.freecad_more": "詳細…",
+    "ui.freecad_operations": "操作",
     "ui.freecad_original_name": "元の名前",
     "ui.freecad_part_body_sketch_name": "パート — ボディ — スケッチ",
     "ui.freecad_preserve_hierarchy": "FreeCAD の階層を保持",
@@ -35,6 +37,7 @@
     "ui.freecad_flat_active_component": "平铺到活动组件中",
     "ui.freecad_import": "导入",
     "ui.freecad_more": "更多…",
+    "ui.freecad_operations": "操作",
     "ui.freecad_original_name": "原始名称",
     "ui.freecad_part_body_sketch_name": "零件 — 实体 — 草图",
     "ui.freecad_preserve_hierarchy": "保留 FreeCAD 层级",
@@ -49,6 +52,7 @@
     "ui.freecad_flat_active_component": "مسطّح في المكوّن النشط",
     "ui.freecad_import": "استيراد",
     "ui.freecad_more": "المزيد…",
+    "ui.freecad_operations": "العمليات",
     "ui.freecad_original_name": "الاسم الأصلي",
     "ui.freecad_part_body_sketch_name": "قطعة — جسم — رسم",
     "ui.freecad_preserve_hierarchy": "الحفاظ على التسلسل الهرمي لـ FreeCAD",
@@ -63,6 +67,7 @@
     "ui.freecad_flat_active_component": "שטוח ברכיב הפעיל",
     "ui.freecad_import": "ייבוא",
     "ui.freecad_more": "עוד…",
+    "ui.freecad_operations": "פעולות",
     "ui.freecad_original_name": "שם מקורי",
     "ui.freecad_part_body_sketch_name": "חלק — גוף — סקיצה",
     "ui.freecad_preserve_hierarchy": "שמירת היררכיית FreeCAD",
@@ -77,10 +82,17 @@
     "ui.freecad_flat_active_component": "Dàn phẳng trong cụm chi tiết đang kích hoạt",
     "ui.freecad_import": "Nhập",
     "ui.freecad_more": "Xem thêm…",
+    "ui.freecad_operations": "Thao tác",
     "ui.freecad_original_name": "Tên gốc",
     "ui.freecad_part_body_sketch_name": "Chi tiết — Thân khối — Phác thảo",
     "ui.freecad_preserve_hierarchy": "Giữ nguyên cấu trúc phân cấp FreeCAD",
     "ui.freecad_save_as": "Lưu thành tệp mới…",
     "ui.freecad_sketch_names": "Tên phác thảo"
+  },
+  "de": {
+    "ui.freecad_operations": "Operationen"
+  },
+  "ko": {
+    "ui.freecad_operations": "작업"
   }
 }

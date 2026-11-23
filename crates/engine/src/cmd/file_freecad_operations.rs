@@ -340,7 +340,12 @@ pub(super) fn import(s: &mut Session, operations: &[FreeCadOperation], sketches:
                         let error = s
                             .model
                             .result(id)
-                            .and_then(|result| result.error.clone())
+                            .and_then(|result| {
+                                result
+                                    .error
+                                    .clone()
+                                    .or_else(|| result.skipped.then(|| "The imported transform was skipped during evaluation.".into()))
+                            })
                             .or_else(|| s.model.result(id).is_none().then(|| "The imported transform has no evaluation result.".into()))
                             .or_else(|| {
                                 (!op.body_allows_compound && !created.is_empty()).then(|| {
@@ -393,8 +398,15 @@ pub(super) fn import(s: &mut Session, operations: &[FreeCadOperation], sketches:
                 blockers.push(warning("The profile sketch needs repair before this operation can be enabled.", detail));
             }
             let cut = matches!(settings, FreeCadOperationSettings::Extrude { cut: true, .. } | FreeCadOperationSettings::Revolve { cut: true, .. });
+            if cut && op.base.is_none() {
+                outcome.bodies.clear();
+                blockers.push(warning(
+                    "The subtractive operation has no preceding BaseFeature.",
+                    "A FreeCAD Body name does not establish which solid this operation cuts. Select the correct target body and verify the source history before enabling this feature.",
+                ));
+            }
             let targets = if op.base.is_some() || cut {
-                if outcome.bodies.is_empty() {
+                if outcome.bodies.is_empty() || cut && op.base.is_none() {
                     blockers.push(warning("The target body could not be identified.", "An explicit unresolved target is retained so enabling this feature cannot accidentally modify other imported bodies. Select the correct target body before enabling it."));
                     vec![format!("Unresolved FreeCAD body ({})", op.source_name)]
                 } else {
@@ -447,7 +459,7 @@ pub(super) fn import(s: &mut Session, operations: &[FreeCadOperation], sketches:
                     s.refresh();
                     if blockers.is_empty() {
                         let error = match s.model.result(id) {
-                            Some(result) => result.error.clone(),
+                            Some(result) => result.error.clone().or_else(|| result.skipped.then(|| "The imported feature was skipped during evaluation.".into())),
                             None => Some("The imported feature has no evaluation result.".into()),
                         }
                         .or_else(|| {

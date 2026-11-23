@@ -435,6 +435,94 @@ fn malformed_and_missing_documents_are_errors() {
     let no_document = zip.finish().unwrap().into_inner();
     assert!(read_freecad_sketches(&no_document, "missing.FCStd").is_err());
     assert!(read_freecad_sketches(&archive(b"<Document><broken>"), "broken.FCStd").is_err());
+    assert!(read_freecad_sketches(&archive(b""), "empty.FCStd").is_err());
+    assert!(read_freecad_sketches(&archive(b"<Other/>"), "wrong-root.FCStd").is_err());
+}
+
+#[test]
+fn single_point_horizontal_and_vertical_distances_use_the_sketch_origin() {
+    let xml = r#"<Document><Objects><Object name="Sketch" type="Sketcher::SketchObject"/></Objects>
+      <ObjectData><Object name="Sketch"><Properties>
+        <Property name="Geometry"><GeometryList><Geometry type="Part::GeomCircle">
+          <Circle CenterX="-12" CenterY="7" Radius="2"/>
+        </Geometry></GeometryList></Property>
+        <Property name="Constraints"><ConstraintList>
+          <Constrain Type="7" Value="-12" First="0" FirstPos="3" Second="-2000" SecondPos="0"/>
+          <Constrain Type="8" Value="7" First="0" FirstPos="3" Second="-2000" SecondPos="0"/>
+        </ConstraintList></Property>
+      </Properties></Object></ObjectData></Document>"#;
+    let project = read_freecad_sketches(&archive(xml.as_bytes()), "single-point-dimensions.FCStd").unwrap();
+    let sketch = &project.sketches[0];
+    assert!(sketch.warnings.is_empty(), "both signed dimensions are preserved: {:?}", sketch.warnings);
+    let CurveKind::Circle { c: center, .. } = sketch.sketch.curves[0].kind else { panic!("expected a circle") };
+    assert!(matches!(sketch.sketch.constraints[0].kind, ConstraintKind::DistanceX { p: 0, q, value: 12.0 } if q == center));
+    assert!(matches!(sketch.sketch.constraints[1].kind, ConstraintKind::DistanceY { p: 0, q, value: 7.0 } if q == center));
+    assert_eq!(sketch.sketch.point(center), Some(Vec2::new(-12.0, 7.0)), "the signed source placement stays on the saved side");
+}
+
+#[test]
+fn unsupported_second_extent_and_custom_direction_stay_suppressed() {
+    let source = include_str!("operations_fixture.xml");
+    let pad_length = "<Property name=\"Length\"><Float value=\"10\"/></Property>";
+    let extra = [
+        (
+            "second extent",
+            "<Property name=\"SideType\"><Integer value=\"1\"/></Property><Property name=\"Type2\"><Integer value=\"2\"/></Property><Property name=\"Length2\"><Float value=\"3\"/></Property>",
+        ),
+        ("custom vector", "<Property name=\"UseCustomVector\"><Bool value=\"true\"/></Property>"),
+        ("reference axis", "<Property name=\"ReferenceAxis\"><LinkSub value=\"PadProfile\"><Sub value=\"N_Axis\"/></LinkSub></Property>"),
+    ];
+    for (case, properties) in extra {
+        let xml = source.replace(pad_length, &format!("{pad_length}{properties}"));
+        let project = read_freecad_sketches(&archive(xml.as_bytes()), "unsupported-extrusion.FCStd").unwrap();
+        let pad = project.operations.iter().find(|op| op.source_name == "Pad").unwrap();
+        assert!(!pad.blockers.is_empty(), "{case} must not rebuild as a supported fixed extrude");
+        assert!(pad.settings.is_some(), "{case} retains editable saved dimensions");
+    }
+}
+
+#[test]
+fn active_attachment_without_support_needs_a_real_saved_placement() {
+    let start = r#"<Document><Objects><Object name="Sketch" type="Sketcher::SketchObject"/></Objects>
+      <ObjectData><Object name="Sketch"><Properties>
+        <Property name="MapMode"><Integer value="5"/></Property>"#;
+    let end = "</Properties></Object></ObjectData></Document>";
+    for placement in
+        ["", "<Property name=\"Placement\"><PropertyPlacement Px=\"0\" Py=\"0\" Pz=\"0\" Q0=\"0\" Q1=\"0\" Q2=\"0\" Q3=\"0\"/></Property>"]
+    {
+        let xml = format!("{start}{placement}{end}");
+        let project = read_freecad_sketches(&archive(xml.as_bytes()), "missing-placement.FCStd").unwrap();
+        assert!(project.sketches[0].attachment_unresolved);
+    }
+    let valid = "<Property name=\"Placement\"><PropertyPlacement Px=\"5\" Py=\"0\" Pz=\"0\" Q0=\"0\" Q1=\"0\" Q2=\"0\" Q3=\"1\"/></Property>";
+    let xml = format!("{start}{valid}{end}");
+    let project = read_freecad_sketches(&archive(xml.as_bytes()), "saved-placement.FCStd").unwrap();
+    assert!(!project.sketches[0].attachment_unresolved);
+    assert_eq!(project.sketches[0].plane.origin, Vec3::new(5.0, 0.0, 0.0));
+}
+
+#[test]
+fn shared_datum_supports_are_traversed_once_and_cycles_are_reported() {
+    let mut objects = vec![RawObject { source_name: "Origin".into(), type_name: "App::Plane".into(), ..RawObject::default() }];
+    let mut previous = ["Origin".to_string(), "Origin".to_string()];
+    for level in 0..24 {
+        let next = [format!("Plane{level}A"), format!("Plane{level}B")];
+        for name in &next {
+            objects.push(RawObject {
+                source_name: name.clone(),
+                type_name: "PartDesign::Plane".into(),
+                map_mode: 5,
+                support: previous.iter().map(|source| (source.clone(), String::new())).collect(),
+                ..RawObject::default()
+            });
+        }
+        previous = next;
+    }
+    let references = objects.iter().map(|object| (object.source_name.as_str(), object)).collect();
+    assert_eq!(datum_dependency_exception(&previous[0], &references), None);
+    objects.last_mut().unwrap().support = vec![(previous[1].clone(), String::new())];
+    let references = objects.iter().map(|object| (object.source_name.as_str(), object)).collect();
+    assert!(datum_dependency_exception(&previous[1], &references).is_some(), "a cyclic datum still needs repair");
 }
 
 #[test]

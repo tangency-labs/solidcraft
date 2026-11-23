@@ -6323,6 +6323,9 @@ fn dialog_commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value)>, S
                 if let (Value::Object(m), Value::Object(e)) = (&mut p, extra) {
                     m.extend(e);
                     for (k, v) in &d.extra {
+                        if k == "activate_repair" {
+                            continue;
+                        }
                         // The edited targets are in Target Bodies, emptied or not.
                         if k == "targets" && extrude_targets.is_some() {
                             continue;
@@ -7344,6 +7347,9 @@ fn dialog_commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value)>, S
         // The dialog has no end cut control to clear one an edited coil kept.
         let profile_coil = matches!(d.kind, Kind::Primitive { cmd: "solid.coil", .. }) && m.contains_key("sketch");
         for (k, v) in &d.extra {
+            if k == "activate_repair" {
+                continue;
+            }
             // Saved selection mode is editor state, not a command parameter.
             if matches!(d.kind, Kind::Split { .. }) && k == "split_tool_mode" {
                 continue;
