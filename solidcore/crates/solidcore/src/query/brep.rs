@@ -9,6 +9,7 @@
 //! |----------------------------------------------|------------------------------------------------|
 //! | [`calculate_bounding_box`], [`BoundingBoxOptions`] | `SmBrep::CalculateBoundingBox`           |
 //! | [`calculate_tight_bounding_box`]             | `SmBrep::CalculateTightBoundingBox`            |
+//! | [`calculate_tight_bounding_box_prepared`]    | `SmBrep::CalculateTightBoundingBox` on a B-rep read only |
 //! | [`lock_bounding_box`]                        | `SmBrep::LockBoundingBox`                      |
 //! | [`unlock_bounding_box`]                      | `SmBrep::UnLockBoundingBox`                    |
 //! | [`BrepQuery::point_3d_classify`]             | `SmBrep::Point3DClassify`                      |
@@ -297,6 +298,33 @@ pub fn calculate_tight_bounding_box<'a>(
     }
 
     Ok(brep_bbox)
+}
+
+/// [`calculate_tight_bounding_box`] of a B-rep read only ([`LazyBrep::Prepared`]): the same
+/// box, bit for bit, with no copy of the B-rep and nothing made on it. It runs only where a
+/// scan of flags made before any work finds that every edge use of every face has its UV
+/// trim curve, its own or its mate's
+/// ([`crate::mass::integrator::properties::missing_uv_trim`]), and that no face's point
+/// classification would build its trimmed cache's tree
+/// ([`crate::query::face::p2::classification_builds_tree`]): what a classification on a
+/// copy would otherwise make. Where the scan finds either, or fails, nothing is computed.
+///
+/// # Errors
+///
+/// Those of [`calculate_tight_bounding_box`]; [`SolidError::PreparationRequired`] where the
+/// scan does not pass, or where a classification still finds a trim or a tree to make.
+pub fn calculate_tight_bounding_box_prepared(k: &Kernel, b: &Brep) -> Result<Extent3d> {
+    let builds = |f| crate::query::face::p2::classification_builds_tree(b, f).unwrap_or(true);
+    let prepared = matches!(
+        crate::mass::integrator::properties::missing_uv_trim(b, None),
+        Ok(None)
+    ) && bp1::faces(b, None).is_ok_and(|faces| !faces.into_iter().any(builds));
+    if !prepared {
+        return Err(SolidError::PreparationRequired {
+            operation: OP_TIGHT_BOX,
+        });
+    }
+    calculate_tight_bounding_box(k, LazyBrep::Prepared(b))
 }
 
 /// `SmBrep::LockBoundingBox(bTight)` (upstream default `FALSE`): unlocks the box, then
@@ -1799,6 +1827,99 @@ mod tests {
         own.get_mut().unwrap().vertex_mut(v).unwrap().tolerance = 0.5;
         drop(own);
         assert_eq!(b.vertex(v).unwrap().tolerance, 0.5);
+    }
+
+    /// What a classification on a B-rep may make: each edge use's UV trim, the edge and face
+    /// tolerances, and each face surface's trimmed cache slot.
+    fn trims_tolerances_and_caches(b: &Brep) -> String {
+        let mut out = Vec::new();
+        for (u, r) in b.edgeuses().iter() {
+            out.push(format!("{u:?} {}", r.uv_trim_curve.is_some()));
+        }
+        for (e, r) in b.edges().iter() {
+            out.push(format!("{e:?} {:?}", r.tolerance.to_bits()));
+        }
+        for (f, r) in b.faces().iter() {
+            let s = r.surface.as_ref().unwrap();
+            out.push(format!(
+                "{f:?} {:?} {} {}",
+                r.tolerance.to_bits(),
+                s.has_trim_cache(),
+                s.trim_cache_in_use()
+            ));
+        }
+        out.join("\n")
+    }
+
+    /// Curved primitives with their UV trims made, as a body an operation built has them.
+    fn prepared_bodies(k: &mut Kernel) -> Vec<Brep> {
+        use crate::primitive::api_primitives as p;
+        let mut bodies = vec![
+            p::create_box(k, Point3::new(1.0, -2.0, 3.0), 1.0, 2.0, 3.0).unwrap(),
+            p::create_cylinder(k, Point3::new(0.5, 0.0, -1.0), 2.0, 3.0).unwrap(),
+            p::create_sphere(k, Point3::new(1.0, 2.0, -3.0), 2.0).unwrap(),
+            p::create_torus(k, Point3::new(3.0, 0.0, -1.0), 4.0, 1.0).unwrap(),
+        ];
+        for b in &mut bodies {
+            bp2::create_missing_uv_trim_curves(k, b).unwrap();
+        }
+        bodies
+    }
+
+    /// On a B-rep whose UV trims exist and whose classifications build no tree, the tight
+    /// box's read-only form gives the box of the form that classifies on a copy, bit for
+    /// bit, and leaves the B-rep as it was. The form on a copy does copy it (on every curved
+    /// body here); the read-only form cannot (its `get_mut` refuses), so its answer is
+    /// itself the proof that no copy was made.
+    #[test]
+    fn the_prepared_tight_box_is_the_copied_one_without_a_copy() {
+        let mut k = Kernel::default();
+        let mut copied = 0;
+        for b in prepared_bodies(&mut k) {
+            let before = trims_tolerances_and_caches(&b);
+            let read = calculate_tight_bounding_box_prepared(&k, &b).unwrap();
+            assert_eq!(
+                trims_tolerances_and_caches(&b),
+                before,
+                "the body is unchanged"
+            );
+            let on_copy = calculate_tight_bounding_box(&k, &b).unwrap();
+            assert_eq!(format!("{read:?}"), format!("{on_copy:?}"));
+            // the form on a copy, face by face: whether a classification copied the B-rep
+            let mut lb = LazyBrep::from(&b);
+            for f in bp1::faces(&b, None).unwrap() {
+                let mut face_box = Extent3d::new();
+                qf3::calculate_tight_bounding_box_into(&k, &mut lb, f, &mut face_box).unwrap();
+            }
+            if matches!(lb, LazyBrep::Shared { copy: Some(_), .. }) {
+                copied += 1;
+            }
+            assert_eq!(trims_tolerances_and_caches(&b), before);
+        }
+        assert_eq!(
+            copied, 3,
+            "the cylinder, sphere and torus are copied on main's path"
+        );
+    }
+
+    /// With an edge's UV trims dropped, the read-only form makes nothing and asks for
+    /// preparation before any work; the form on a copy still boxes the B-rep.
+    #[test]
+    fn the_prepared_tight_box_asks_for_a_missing_trim() {
+        let mut k = Kernel::default();
+        for mut b in prepared_bodies(&mut k) {
+            let e = *bp1::edges(&b, None).unwrap().first().unwrap();
+            for u in edge::edgeuses(&b, e, None, None).unwrap() {
+                b.edgeuse_mut(u).unwrap().uv_trim_curve = None;
+            }
+            let before = trims_tolerances_and_caches(&b);
+            assert!(matches!(
+                calculate_tight_bounding_box_prepared(&k, &b),
+                Err(SolidError::PreparationRequired { .. })
+            ));
+            assert_eq!(trims_tolerances_and_caches(&b), before, "nothing is made");
+            calculate_tight_bounding_box(&k, &b).unwrap();
+        }
     }
 
     #[test]

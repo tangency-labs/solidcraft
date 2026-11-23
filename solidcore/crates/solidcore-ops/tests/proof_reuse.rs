@@ -312,6 +312,29 @@ fn a_read_of_a_proved_body_keeps_its_proof() {
     }
 }
 
+/// The exact box of a proved body whose UV trims exist (a boolean's result has them) keeps its
+/// proof and takes no copy of it: the kernel's read-only tight box, which has no copy to make,
+/// answers on the body, and `bounds` is that box bit for bit.
+#[test]
+fn bounds_of_a_prepared_body_keeps_its_proof_and_copies_nothing() {
+    all_fixes();
+    let first = cut(plate(), drill(1));
+    let (lo, hi) = first.bounds().unwrap();
+    let read = {
+        let b = first.kernel();
+        // a kernel as the session makes one: default options, every fix
+        let mut k = solidcore::Kernel::new(&solidcore::kernel::KernelOptions::default());
+        for name in solidcore::kernel::UpstreamFixes::NAMES {
+            *k.fixes.flag_mut(name).unwrap() = true;
+        }
+        solidcore::query::brep::calculate_tight_bounding_box_prepared(&k, &b).unwrap()
+    };
+    let bits = |v: [f64; 3]| v.map(f64::to_bits);
+    assert_eq!(bits(lo), bits([read.min().x, read.min().y, read.min().z]));
+    assert_eq!(bits(hi), bits([read.max().x, read.max().y, read.max().z]));
+    assert_eq!(second_cut(first), 1, "bounds dropped the proof");
+}
+
 /// A read hands back the same body: its content is what it was, and its counts, volume and
 /// bounds read the same after.
 #[test]
