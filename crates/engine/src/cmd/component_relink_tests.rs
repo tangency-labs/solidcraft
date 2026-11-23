@@ -1838,3 +1838,38 @@ fn a_linked_design_saved_without_bodies_reads_no_further_than_the_folders_allowe
     assert!(opened.execute("component.update_links", &json!({"linked_bodies": "some"})).is_err());
     let _ = std::fs::remove_dir_all(dir);
 }
+
+/// Eight designs saved without linked bodies, each linking the next twice and the last linking
+/// the first: there are 128 ways round the loop, and opening one ends after a bounded number of
+/// reads instead of following each.
+#[test]
+fn designs_linked_in_a_loop_by_two_links_each_open_after_a_bounded_number_of_reads() {
+    let dir = folder("left-out-wide-loop");
+    let file = |n: usize| dir.join(format!("d{n}.json"));
+    part(&file(1), 30);
+    let twice = |s: &mut Session, next: &Path| {
+        run(s, "component.insert_design", json!({"path": next}));
+        run(s, "component.insert_design", json!({"path": next, "translate": [500, 0, 0]}));
+    };
+    for n in (2..=8).rev() {
+        let mut s = Session::default();
+        twice(&mut s, &file(if n == 8 { 1 } else { n + 1 }));
+        run(&mut s, "file.save", json!({"path": file(n), "linked_bodies": false}));
+    }
+    let mut first = Session::default();
+    run(&mut first, "doc.open", json!({"path": file(1)}));
+    twice(&mut first, &file(2));
+    run(&mut first, "file.save", json!({"linked_bodies": false}));
+    assert_eq!(linked_payloads(&file(1)), [false, false]);
+
+    let read = || super::EVALUATED.with(|n| n.replace(0));
+    read();
+    let mut opened = Session::default();
+    let reply = run(&mut opened, "doc.open", json!({"path": file(1)}));
+    assert!(reply["warnings"].as_array().is_some_and(|w| !w.is_empty()), "{reply}");
+    let reads = read();
+    assert!(reads <= super::READ_AGAIN + 8, "{reads} reads");
+    // Its own 10 x 20 x 30 box is there whatever became of the links.
+    assert!(volume(&mut opened) >= 6000.0 - 1e-5);
+    let _ = std::fs::remove_dir_all(dir);
+}

@@ -240,6 +240,9 @@ struct Reading {
     refused: usize,
     /// Of `refused`, the links outside the folders `which` allows.
     outside: usize,
+    /// How many reads were not kept in `read` because of a refusal below them. Each may be made
+    /// again by another chain of links, so past [`READ_AGAIN`] no further design is read.
+    again: usize,
     /// What each linked design gave, by its file and configuration, so that a design many links
     /// lead to is read once: without it the reads grow with the number of ways to reach it.
     read: std::collections::HashMap<(PathBuf, Option<(u64, Option<u64>)>), ReadOnce>,
@@ -251,12 +254,18 @@ thread_local! {
         which: LinkedRead::All,
         refused: 0,
         outside: 0,
+        again: 0,
         read: std::collections::HashMap::new(),
     });
 }
 
 /// How many designs deep [`read_left_out_bodies`] follows links saved without bodies.
 const OPENING_DEPTH: usize = 32;
+
+/// How many reads one open makes that it cannot keep for the next chain of links
+/// ([`Reading::again`]). Designs that link each other in a loop, each by several links, would
+/// otherwise be read once for every way round it.
+const READ_AGAIN: usize = 64;
 
 /// One entry of [`Reading::opening`], taken off when it goes out of scope.
 pub(super) struct Opening;
@@ -271,6 +280,7 @@ impl Opening {
                 reading.which = which;
                 reading.refused = 0;
                 reading.outside = 0;
+                reading.again = 0;
                 reading.read.clear();
             }
             reading.opening.push(file.map(|file| absolute(Path::new(file))));
@@ -416,7 +426,16 @@ fn left_out_bodies(
     let read = match known {
         Some(read) => read,
         None => {
-            let refused = READING.with(|reading| reading.borrow().refused);
+            let (refused, again) = READING.with(|reading| {
+                let reading = reading.borrow();
+                (reading.refused, reading.again)
+            });
+            if again >= READ_AGAIN {
+                return refuse(format!(
+                    "{}: the linked designs saved without bodies link each other in too many ways to read them all; Update Links reads it once the loop is gone",
+                    file.display()
+                ));
+            }
             let read = read_once(&file, from, configuration, validation);
             // What a design gives after a link below it was refused for its place in this chain
             // is not what another chain gets.
@@ -424,6 +443,8 @@ fn left_out_bodies(
                 let mut reading = reading.borrow_mut();
                 if reading.refused == refused {
                     reading.read.insert(key, read.clone());
+                } else {
+                    reading.again += 1;
                 }
             });
             read
