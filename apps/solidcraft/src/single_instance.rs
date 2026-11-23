@@ -486,7 +486,7 @@ mod tests {
         let token = std::fs::read_to_string(&endpoint.token).unwrap();
         stop();
         let request = json!({ "token": token.trim(), "files": [file.to_string_lossy()] }).to_string();
-        assert!(!ask(&endpoint, &request), "a stopped instance took a hand-off");
+        assert!(!ask(&endpoint, &request, false), "a stopped instance took a hand-off");
         std::thread::sleep(Duration::from_millis(100));
         assert!(take().is_empty());
         std::fs::write(&endpoint.token, "next launch").unwrap();
