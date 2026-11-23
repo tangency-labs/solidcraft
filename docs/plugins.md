@@ -754,8 +754,35 @@ for field validation. Nothing runs until Apply or an explicit Preview request.
   camera alone, so you can move it freely. A run with no view command leaves the camera unchanged.
   Reopening the dialog starts fresh: its first preview applies its view command again.
 - The most recently opened dialog on the design is previewed (the one picking in the viewport,
-  when one is). While a native tool is open, its own preview is the one shown. Read entries and
+  when one is). While a native tool is open, its own preview is the one shown. Read entries, long jobs and
   importers are not previewed.
+
+## Long jobs
+
+A command entry that takes a while, such as computing a toolpath, declares `"job": true`:
+
+```json
+"entries": [{"name": "pocket", "job": true, "input_schema": {"type": "object", "properties": {}}}]
+```
+
+- **Time.** A job runs for up to ten minutes, a fixed limit. The runtime's
+  `deadline_ms` (at most 30 seconds) still applies to the plugin's other entries. Fuel and memory
+  limits are the same as for any entry. Each job has a limit of 1,048,576 host calls, including
+  progress reports.
+- **Where it shows.** Every plugin run started from its dialog or by an agent runs on a worker and
+  is a row in the operations panel at the bottom right of the view, named for the plugin and the
+  entry ("Gears: Pocket"). The step the plugin reports with `control.progress(fraction, message)`
+  is added to the name, and the fraction fills the row's bar. `ui.operations` lists it like any
+  other operation.
+- **Cancelling.** The row's red X (or `ui.operations` with `cancel`) stops it. A `control.cancelled()`
+  call made after cancelling returns true if the plugin reaches it. The host can stop the plugin
+  between host calls, within a few milliseconds, before it reaches that call. Cleanup must not
+  rely on `control.cancelled()` returning true. A cancelled run leaves the design and the undo
+  history as they were. A run whose design changed while it computed is not kept either.
+  Cancelling does not undo files the run already wrote, such as an export.
+- A job's dialog has no **Preview** box: a preview would run the whole job on every change.
+- An importer already runs this way (its deadline is up to ten minutes), so only a command is
+  declared a job.
 
 ## Versions
 
