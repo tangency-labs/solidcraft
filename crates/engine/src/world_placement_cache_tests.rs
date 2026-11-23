@@ -353,7 +353,7 @@ fn adopted_scratch_keeps_its_warm_geometry_and_history_stages_invalidate_it() {
     assert!(Arc::ptr_eq(&source, &session.world_state().unwrap()));
     assert!(source.body("Draft").is_none());
     let feature = warmed.body("Draft").unwrap().feature;
-    session.accept_computed(scratch);
+    session.accept_computed(scratch).unwrap();
     assert!(Arc::ptr_eq(&warmed, &session.world_state().unwrap()), "adoption/view revision must retain the worker's prepared geometry");
     session.invalidate_view(session.revision + 20);
     assert!(Arc::ptr_eq(&warmed, &session.world_state().unwrap()));

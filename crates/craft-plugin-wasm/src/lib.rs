@@ -19,6 +19,24 @@ impl Default for RuntimeOptions {
     }
 }
 
+/// Keeps compiled components in `dir` between sessions, with Wasmtime's own compilation cache, so
+/// a large plugin compiles once rather than in every session. Trusted app configuration: the folder
+/// is the app's per-user cache, never a plugin's or a project's. Set it once, before the first
+/// call; `None`, or never calling this, keeps compiled code in memory only. Returns `false` when
+/// it was already set. Anyone who can write to `dir` can change the machine code a plugin call
+/// runs, so it must be a folder only the user can write.
+pub fn set_compile_cache_dir(dir: Option<PathBuf>) -> bool {
+    #[cfg(any(target_arch = "x86_64", target_arch = "aarch64"))]
+    {
+        native::set_compile_cache_dir(dir)
+    }
+    #[cfg(not(any(target_arch = "x86_64", target_arch = "aarch64")))]
+    {
+        let _ = dir;
+        false
+    }
+}
+
 /// Runs with an owned host because Wasmtime store data must be `'static`.
 /// Returns the host on success and failure, after committing or rolling back.
 pub fn run<H: PluginHost + 'static>(host: H, manifest: &Manifest, component: &[u8], entry: &str, params: &Value) -> (H, Result<Value>) {
@@ -116,6 +134,22 @@ pub fn run_import<H: PluginHost + 'static>(
     #[cfg(not(any(target_arch = "x86_64", target_arch = "aarch64")))]
     {
         let _ = (manifest, component, entry, options, request);
+        (host, Err(craft_plugin::HostError::Trap { reason: "component execution requires an x86-64 or AArch64 native build".into() }))
+    }
+}
+
+/// Runs an export slot on the app's open design in a fresh instance and returns the file's bytes.
+/// The plugin reads the design through the read-only commands its manifest lists, in a
+/// transaction that is always rolled back, and reaches no file: the app writes the bytes to the
+/// path the user chose, and only when the whole call succeeds. A trap fails this call alone.
+pub fn run_export<H: PluginHost + 'static>(host: H, manifest: &Manifest, component: &[u8], slot: &str, options: &Value) -> (H, Result<Vec<u8>>) {
+    #[cfg(any(target_arch = "x86_64", target_arch = "aarch64"))]
+    {
+        native::run_export(host, manifest, component, slot, options, RuntimeOptions::default())
+    }
+    #[cfg(not(any(target_arch = "x86_64", target_arch = "aarch64")))]
+    {
+        let _ = (manifest, component, slot, options);
         (host, Err(craft_plugin::HostError::Trap { reason: "component execution requires an x86-64 or AArch64 native build".into() }))
     }
 }

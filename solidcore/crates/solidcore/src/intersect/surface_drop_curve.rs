@@ -53,7 +53,8 @@
 //!   `smsurf_GetSurfaceCache` is the cache passed to
 //!   [`SurfaceTrace::find_boundary_start_points`] and [`SurfaceTrace::do_trace`] (see
 //!   [`crate::intersect::surface_tracer`]); `SmCacheCheckOutIn` has no counterpart,
-//!   the cache flags `DoTrace` changes are restored on every exit. The curve cache
+//!   the cache flags `DoTrace` changes for the call are read by none of its steps,
+//!   so the cache keeps its own. The curve cache
 //!   of `GetOrCreateObjectCache(SM_OC_CURVE)` is built fresh
 //!   ([`make_curve_cache`]); a failed build is `SM_ERR_NULL_POINTER` (`NER`).
 //! - **Ignored statuses** stay ignored: the curve `GetKnots` into the knot vector
@@ -1088,11 +1089,14 @@ impl<'s> SurfaceDropCurve<'s> {
         let iso = cache.iso_boundary_curves(k, &uv_domain, cci_tol / 3.0)?;
         let mut iso_curves: Vec<Curve> = iso.curves.to_vec();
 
-        // add every Surface U internal continuity boundary to sIsoCurves array
-        let u_conts: Vec<ContinuityType> = cache.u_continuities().to_vec();
+        // add every Surface U internal continuity boundary to sIsoCurves array (the
+        // continuities of the cache's surface, its tree built or not: upstream reads the
+        // cache's arrays, empty until GetTree)
+        let conts = cache.surface().continuities(k)?;
+        let u_conts: &[ContinuityType] = &conts.u;
         let (u_knots, _) = surface.knots_with_nurb(k, SurfParamType::U, None)?;
         for ii in 1..u_conts.len().saturating_sub(1) {
-            if is_c0(&u_conts, ii)? {
+            if is_c0(u_conts, ii)? {
                 let value = index(&u_knots, ii)?;
                 iso_curves.push(create_iso_parametric_curve(
                     k,
@@ -1106,9 +1110,9 @@ impl<'s> SurfaceDropCurve<'s> {
 
         // add every surface V internal continuity boundary to sIsoCurves array
         let (v_knots, _) = surface.knots_with_nurb(k, SurfParamType::V, None)?;
-        let v_conts: Vec<ContinuityType> = cache.v_continuities().to_vec();
+        let v_conts: &[ContinuityType] = &conts.v;
         for ii in 1..v_conts.len().saturating_sub(1) {
-            if is_c0(&v_conts, ii)? {
+            if is_c0(v_conts, ii)? {
                 let value = index(&v_knots, ii)?;
                 iso_curves.push(create_iso_parametric_curve(
                     k,
@@ -1713,18 +1717,13 @@ impl<'s> SurfaceDropCurve<'s> {
             self.base.ang_tol_rad = ang;
         }
 
-        // temporarily turn off point testing and turn on boundary curve processing
-        let saved_point_test = cache.point_test_enabled;
-        let saved_boundary = cache.process_boundary_curves;
-        cache.point_test_enabled = false;
-        cache.process_boundary_curves = true;
-        let r = self.drop_trace_body(k, cache, context);
-        cache.point_test_enabled = saved_point_test;
-        cache.process_boundary_curves = saved_boundary;
-        r
+        // (upstream temporarily turns off point testing and turns on boundary curve
+        // processing: none of the steps reads either, and the drop's point solves run
+        // with point testing off themselves, so the cache keeps its flags)
+        self.drop_trace_body(k, cache, context)
     }
 
-    /// The part of [`SurfaceDropCurve::drop_trace`] run with the cache flags changed.
+    /// The part of [`SurfaceDropCurve::drop_trace`] after its tolerances.
     fn drop_trace_body<O: SolutionObject>(
         &mut self,
         k: &Kernel,

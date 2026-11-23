@@ -1,9 +1,10 @@
 use serde_json::{Value, json};
 
 use super::{
-    AppearanceAssignParams, AppearanceAssignResult, AppearanceCopyParams, AppearanceCopyResult, AppearanceFavoriteParams, AppearanceFavoriteResult,
-    AppearanceLibraryParams, AppearanceLibraryResult, AppearanceListParams, AppearanceListResult, AppearancePaintParams, AppearancePaintResult,
-    AppearancePickUpParams, AppearancePickUpResult, AppearanceReplaceParams, AppearanceReplaceResult, ChainTarget,
+    AppearanceAssignParams, AppearanceAssignResult, AppearanceChainParams, AppearanceChainResult, AppearanceCopyParams, AppearanceCopyResult,
+    AppearanceFavoriteParams, AppearanceFavoriteResult, AppearanceLibraryParams, AppearanceLibraryResult, AppearanceListParams, AppearanceListResult,
+    AppearancePaintParams, AppearancePaintResult, AppearancePasteParams, AppearancePickUpParams, AppearancePickUpResult, AppearanceReplaceParams,
+    AppearanceReplaceResult, ChainTarget,
 };
 use crate::Session;
 use crate::schema::tests::{assert_keys, assert_strict_keeps_todays_errors, conforms};
@@ -15,10 +16,12 @@ fn schemas_and_the_key_check_agree() {
         input_schema_for::<AppearanceAssignParams>(),
         &["appearance", "bodies", "body", "color", "components", "faces", "name", "opacity", "pbr"],
     );
+    assert_keys(input_schema_for::<AppearanceChainParams>(), &["target"]);
     assert_keys(input_schema_for::<AppearanceLibraryParams>(), &[]);
     assert_keys(input_schema_for::<AppearanceFavoriteParams>(), &["favorite", "look"]);
     assert_keys(input_schema_for::<AppearanceListParams>(), &["body"]);
     assert_keys(input_schema_for::<AppearancePaintParams>(), &["appearance", "color", "done", "name", "opacity", "pbr"]);
+    assert_keys(input_schema_for::<AppearancePasteParams>(), &["bodies", "body", "components", "faces"]);
     assert_keys(input_schema_for::<AppearancePickUpParams>(), &["target"]);
     assert_keys(input_schema_for::<AppearanceReplaceParams>(), &["from", "scope", "to"]);
 }
@@ -42,6 +45,7 @@ fn strict_keeps_todays_errors() {
         ("appearance.paint", json!({"appearance": "not in the library"})),
         // A target of the right shape that names no body is the handler's to refuse too.
         ("appearance.pick_up", json!({"target": {"body": "NoSuchBody"}})),
+        ("appearance.chain", json!({"target": {"body": "NoSuchBody"}})),
         // A favourite's look is read by the same parser, so an empty or unknown one is the
         // handler's to refuse in both modes; the contract only sees the two keys around it.
         ("appearance.favorite", json!({"look": {}, "favorite": true})),
@@ -160,6 +164,94 @@ fn the_target_is_read_as_the_chain_reads_it() {
     }
 }
 
+/// Reading a chain answers with the published output schema: the four steps in precedence order, the
+/// look where one is assigned and `null` where nothing is, and `active` naming the step that decides
+/// what the target shows. A target with nothing anywhere answers with four empty steps, since
+/// imported paint is a display fallback outside them. A key the command doesn't take is a warning,
+/// because the handler ignores it, and the chain is still read.
+#[test]
+fn a_chain_answers_with_its_schema() {
+    let mut s = Session { param_check: ParamCheck::Warn, ..Session::default() };
+    let mut run = |id: &str, p: Value| s.execute(id, &p).unwrap_or_else(|e| panic!("{id} {p}: {e}"));
+    let matches = |schema: schemars::Schema, id: &str, reply: &Value| {
+        let schema = schema.as_value();
+        assert!(conforms(schema, schema, reply), "{id}: {reply} doesn't match {schema}");
+    };
+    let described = run("engine.describe", json!({"command": "appearance.chain"}));
+    assert_eq!(described["input"]["required"], json!(["target"]), "a chain always names a target");
+    assert_eq!(described["input"]["additionalProperties"], false);
+    let empty = |steps: &[&str]| json!({"steps": steps.iter().map(|s| json!({"step": s, "look": null})).collect::<Vec<_>>(), "active": null});
+    run("solid.box", json!({"body_name": "Plain", "length": 10, "width": 10, "height": 10}));
+    let plain = run("appearance.chain", json!({"target": {"body": "Plain"}}));
+    assert_eq!(plain, empty(&["face", "body", "component", "material"]), "nothing assigned is four empty steps");
+    matches(output_schema_for::<AppearanceChainResult>(), "appearance.chain", &plain);
+    let warned = run("appearance.chain", json!({"target": {"body": "Plain"}, "targt": 1}));
+    assert_eq!(warned["steps"], plain["steps"], "{warned}");
+    assert!(warned["param_warnings"].as_array().is_some_and(|w| !w.is_empty()), "{warned}");
+    matches(output_schema_for::<AppearanceChainResult>(), "appearance.chain", &warned);
+    run("component.create", json!({"name": "Part"}));
+    run("solid.box", json!({"body_name": "Specimen", "length": 10, "width": 10, "height": 10}));
+    run("material.create", json!({"name": "Substrate", "density_g_cm3": 2.3, "appearance": "Steel - Satin PBR"}));
+    run("material.assign", json!({"bodies": ["Specimen"], "material": "Substrate"}));
+    run("appearance.assign", json!({"components": ["Part"], "appearance": "ABS - Blue"}));
+    run("appearance.assign", json!({"bodies": ["Specimen"], "color": "#345678", "name": "OnBody"}));
+    let face =
+        run("model.faces", json!({"body": "Specimen"}))["faces"].as_array().unwrap().iter().find(|f| f["point"][2] == 10.0).unwrap()["index"].clone();
+    run("appearance.assign", json!({"body": "Specimen", "faces": [[5, 5, 10]], "color": "#ff0000", "name": "OnFace"}));
+    let chain = run("appearance.chain", json!({"target": {"body": "Specimen", "face": face}}));
+    assert!(chain.get("param_warnings").is_none(), "{chain}");
+    assert_eq!(chain["active"], "face", "the face's own look decides");
+    let names = chain["steps"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|s| (s["step"].as_str().unwrap_or_default(), s["look"]["name"].as_str().unwrap_or_default()))
+        .collect::<Vec<_>>();
+    assert_eq!(names, [("face", "OnFace"), ("body", "OnBody"), ("component", "ABS - Blue"), ("material", "Steel - Satin PBR")], "{chain}");
+    matches(output_schema_for::<AppearanceChainResult>(), "appearance.chain", &chain);
+    // The same chain read from lower down: the step that decides moves with the target.
+    let body = run("appearance.chain", json!({"target": {"body": "Specimen"}}));
+    assert_eq!(body["active"], "body", "{body}");
+    assert_eq!(body["steps"][0], json!({"step": "face", "look": null}), "a body's chain has no face step filled in");
+    matches(output_schema_for::<AppearanceChainResult>(), "appearance.chain", &body);
+    let placed = run("appearance.chain", json!({"target": {"component": "Part"}}));
+    assert_eq!(placed["active"], "component", "{placed}");
+    matches(output_schema_for::<AppearanceChainResult>(), "appearance.chain", &placed);
+}
+
+/// A chain's own refusals name `appearance.chain` in every mode, because its handler reads the
+/// target itself: the contract describes the same three forms and says nothing about what a name
+/// must belong to. Strict only adds what is around the target, which the handler ignores, and names
+/// a call without one in its own words, since a chain has no form without a target.
+#[test]
+fn chain_refusals_name_the_chain() {
+    let error = |p: Value, level: ParamCheck| {
+        let mut s = Session { param_check: level, ..Session::default() };
+        s.execute("appearance.chain", &p).err().map(|e| e.to_string())
+    };
+    for level in [ParamCheck::Off, ParamCheck::Warn, ParamCheck::Strict] {
+        for (p, message) in [
+            (json!({"target": "Plain"}), "give one target object"),
+            (json!({"target": {}}), "target must be {body}, {body, face}, or {component}"),
+            (json!({"target": {"body": "Plain", "component": "Part"}}), "target must be {body}, {body, face}, or {component}"),
+            (json!({"target": {"body": ""}}), "target name must have 1..4096 bytes"),
+            (json!({"target": {"body": "Plain", "face": -1}}), "face must be a zero-based unsigned index"),
+        ] {
+            assert_eq!(error(p.clone(), level), bad_params("appearance.chain", message), "{p} {level:?}");
+        }
+    }
+    // A call with no target at all is the chain's below strict and the schema's in it: a chain has
+    // no form without one.
+    for level in [ParamCheck::Off, ParamCheck::Warn] {
+        assert_eq!(error(json!({}), level), bad_params("appearance.chain", "give one target object"), "{level:?}");
+    }
+    assert_eq!(error(json!({}), ParamCheck::Strict), bad_params("appearance.chain", "`target` is required"));
+    assert_eq!(
+        error(json!({"target": {"body": "Plain"}, "targt": 1}), ParamCheck::Strict),
+        bad_params("appearance.chain", "unknown key `targt`; did you mean `target`?")
+    );
+}
+
 /// What the two handlers read as nothing at all, the contract names: `done` as a boolean, and a
 /// target that isn't an object. The pick-up's message is the one difference on purpose: today it
 /// comes from the chain the request runs, strict names the command that was called.
@@ -226,7 +318,9 @@ fn the_gestures_answer_with_their_schemas() {
 /// Copying a look from a body and from one of its faces, in Warn: the look is the object the
 /// pick-up answers with, the reply matches the published output schema, and what was copied is what
 /// `appearance.paste` applies. The published input schema says the target is required, because a
-/// copy has no ask-the-UI form.
+/// copy has no ask-the-UI form. Pasting answers with `appearance.assign`'s object and takes the
+/// assignment targets only, so a look named on the paste call is a warning in Warn and a refusal in
+/// strict, and never changes what lands.
 #[test]
 fn a_copied_look_answers_with_its_schema() {
     assert_keys(input_schema_for::<AppearanceCopyParams>(), &["target"]);
@@ -252,15 +346,50 @@ fn a_copied_look_answers_with_its_schema() {
     assert_eq!(face, copied, "a face with no look of its own follows its body");
     let other = run("solid.box", json!({"length": 4, "width": 4, "height": 4, "corner": [20, 0, 0]}));
     let other = other["created_bodies"][0].as_str().unwrap_or_default().to_string();
-    run("appearance.paste", json!({"bodies": [other]}));
-    let pasted = run("appearance.pick_up", json!({"target": {"body": other}}));
-    assert_eq!(pasted["look"], copied["look"], "pasting applies the copied look");
+    let pasted = run("appearance.paste", json!({"bodies": [other]}));
+    assert!(pasted.get("param_warnings").is_none(), "{pasted}");
+    matches(output_schema_for::<AppearanceAssignResult>(), "appearance.paste", &pasted);
+    let sampled = run("appearance.pick_up", json!({"target": {"body": other}}));
+    assert_eq!(sampled["look"], copied["look"], "pasting applies the copied look");
+    // A look named on the paste call is the caller's mistake, not a second look: the clipboard's is
+    // what lands, as it always did.
+    let named = run("appearance.paste", json!({"bodies": [other], "color": "#ff0000"}));
+    assert!(named["param_warnings"].as_array().is_some_and(|w| !w.is_empty()), "{named}");
+    matches(output_schema_for::<AppearanceAssignResult>(), "appearance.paste", &named);
+    let sampled = run("appearance.pick_up", json!({"target": {"body": other}}));
+    assert_eq!(sampled["look"], copied["look"], "a look named on paste is not what lands");
     // A key the command doesn't take is a warning, not a refusal: the chain ignores it, as it does
     // with the pick-up.
     let warned = run("appearance.copy", json!({"target": {"body": body}, "targt": 1}));
     assert_eq!(warned["look"], copied["look"], "{warned}");
     assert!(warned["param_warnings"].as_array().is_some_and(|w| !w.is_empty()), "{warned}");
     matches(output_schema_for::<AppearanceCopyResult>(), "appearance.copy", &warned);
+}
+
+/// `appearance.paste` takes the assignment targets and no look of its own. With the check off or in
+/// Warn that changes nothing: a look key is dropped, as it always was, and the clipboard's look is
+/// what lands. In strict the contract answers first and names the command that was called.
+#[test]
+fn paste_takes_the_targets_and_no_look_of_its_own() {
+    let error = |p: Value, level: ParamCheck| {
+        let mut s = Session { param_check: level, ..Session::default() };
+        s.execute("appearance.paste", &p).err().map(|e| e.to_string())
+    };
+    for key in ["appearance", "color", "opacity", "name", "pbr"] {
+        let mut p = json!({"bodies": ["Box1"]});
+        p[key] = json!("#ff0000");
+        for level in [ParamCheck::Off, ParamCheck::Warn] {
+            // Below strict the handler still runs, and has no clipboard to read.
+            assert_eq!(error(p.clone(), level), bad_params("appearance.paste", "copy a look first"), "{p}");
+        }
+        assert_eq!(error(p.clone(), ParamCheck::Strict), bad_params("appearance.paste", &format!("unknown key `{key}`")), "{p}");
+    }
+    // A target key the assignment command doesn't take either is refused in strict under paste's id,
+    // and the contract's own help names the key that was meant.
+    assert_eq!(
+        error(json!({"bodiesy": ["Box1"]}), ParamCheck::Strict),
+        bad_params("appearance.paste", "unknown key `bodiesy`; did you mean `bodies`?")
+    );
 }
 
 /// A target the chain can't read keeps the chain's own message with the check off and in warn, which

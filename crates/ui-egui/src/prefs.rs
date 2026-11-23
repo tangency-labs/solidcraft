@@ -53,6 +53,84 @@ pub enum NavButton {
     Left,
     Middle,
     Right,
+    /// The side "back" button (it still goes Back on a plain click).
+    Extra1,
+    /// The side "forward" button.
+    Extra2,
+}
+
+impl NavButton {
+    pub const ALL: [NavButton; 5] = [NavButton::Left, NavButton::Middle, NavButton::Right, NavButton::Extra1, NavButton::Extra2];
+
+    /// The name the setting and the control channel use.
+    pub fn id(self) -> &'static str {
+        match self {
+            NavButton::Left => "left",
+            NavButton::Middle => "middle",
+            NavButton::Right => "right",
+            NavButton::Extra1 => "extra1",
+            NavButton::Extra2 => "extra2",
+        }
+    }
+}
+
+/// A drag the user chose for a button in Preferences › Navigation: the action and the keys that
+/// must be held. `mode: None` is "Nothing".
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct NavChoice {
+    pub keys: NavKeys,
+    pub mode: Option<NavMode>,
+}
+
+impl NavChoice {
+    /// The setting's text: `orbit`, `pan`, `zoom` or `none`, after the keys (`shift+`, `ctrl+`, `alt+`).
+    pub fn parse(text: &str) -> Option<NavChoice> {
+        let mut keys = NavKeys::NONE;
+        let mut rest = text;
+        loop {
+            if let Some(r) = rest.strip_prefix("shift+") {
+                keys.shift = true;
+                rest = r;
+            } else if let Some(r) = rest.strip_prefix("ctrl+") {
+                keys.ctrl = true;
+                rest = r;
+            } else if let Some(r) = rest.strip_prefix("alt+") {
+                keys.alt = true;
+                rest = r;
+            } else {
+                break;
+            }
+        }
+        let mode = match rest {
+            "orbit" => Some(NavMode::Orbit),
+            "pan" => Some(NavMode::Pan),
+            "zoom" => Some(NavMode::Zoom),
+            "none" => None,
+            _ => return None,
+        };
+        Some(NavChoice { keys, mode })
+    }
+
+    pub fn text(self) -> String {
+        let mut out = String::new();
+        for (on, name) in [(self.keys.shift, "shift+"), (self.keys.ctrl, "ctrl+"), (self.keys.alt, "alt+")] {
+            if on {
+                out.push_str(name);
+            }
+        }
+        out.push_str(match self.mode {
+            Some(NavMode::Orbit) => "orbit",
+            Some(NavMode::Pan) => "pan",
+            Some(NavMode::Zoom) => "zoom",
+            None => "none",
+        });
+        out
+    }
+}
+
+/// What the user chose for dragging `button` in Preferences, if anything (the preset decides otherwise).
+pub fn nav_choice(prefs: &Prefs, button: NavButton) -> Option<NavChoice> {
+    prefs.nav_button_map.get(button.id()).and_then(|text| NavChoice::parse(text))
 }
 
 /// Modifier keys a binding needs held (others may be held too).
@@ -1525,6 +1603,9 @@ preference_settings! {
     show_design_view_switcher: bool = false, PAGE_LAYOUT;
     /// Use distinct tab treatments for the focused view, cards, hidden views, and pop-outs.
     clear_view_tabs: bool = true, PAGE_LAYOUT;
+    /// Focused views choose the workspace; the switcher focuses a recent matching view.
+    /// Off retains the workspace switcher's independent, legacy behaviour.
+    workspace_follows_view: bool = true, PAGE_LAYOUT => check_id("prefs.workspace_follows_view");
     /// A drawing sheet opens as a view (a sub-tab) of its design.
     design_sub_tab_sheets: bool = true, PAGE_LAYOUT;
     /// Render and Animate open as views of their design.
@@ -1760,6 +1841,10 @@ preference_settings! {
     /// (`link_folders_prompt`): those the user answered Load for. Kept in the user's settings,
     /// never in a design.
     linked_file_folders: Vec<String> = Vec::new(), PAGE_GENERAL;
+    /// What dragging a mouse button does when the user has chosen it, by button (`left`, `middle`,
+    /// `right`, `extra1`, `extra2`): `orbit`, `pan`, `zoom` or `none`, after any keys (`shift+`,
+    /// `ctrl+`, `alt+`). A button that is absent follows the mouse mapping. Empty by default.
+    nav_button_map: std::collections::BTreeMap<String, String> = std::collections::BTreeMap::new(), PAGE_NAVIGATION;
     /// What a middle-button double-click in the view does: `home`, `fit` or `off`.
     middle_double_click: String = "home".into(), PAGE_NAVIGATION;
     /// A view chosen on the navigator (a face, corner or arrow, an axis tip) also frames the
@@ -1801,6 +1886,10 @@ preference_settings! {
     /// design's and the exported body's names (`export_name`). Empty: each export offers the name
     /// it did before (the design's, or the first body's for a mesh).
     export_name: String = String::new(), PAGE_DESIGN;
+    /// GLB export writes each component occurrence as a named node holding its part's bodies, so a
+    /// viewer can move each part on its own (#5296). Off: every body under the root in world
+    /// coordinates, named as the model names it, as SolidCraft 0.40 wrote it.
+    glb_export_hierarchy: bool = true, PAGE_DESIGN => check_id_help("ui.glb_export_hierarchy", "ui.glb_export_hierarchy_help");
     /// Save as mesh: the last format (`stl` or `3mf`). Older versions also kept a "send to slicer"
     /// choice here (`save_mesh_send`, `save_mesh_slicer`); a settings file that still has them loads,
     /// and they are ignored.
@@ -1941,6 +2030,11 @@ preference_settings! {
     /// Pressing an active tool or dialog's shortcut again closes it, as Esc does. Off: the key
     /// starts the tool or dialog again.
     shortcut_again_ends_tool: bool = true, PAGE_SKETCH;
+    /// A click inside a region for the Entities of Transform, Move/Copy, Scale, Mirror and the
+    /// sketch patterns also picks the curves of the region's holes (#8390). Off (the default):
+    /// it picks the region's outline, and a shape inside it is picked by a click inside that
+    /// shape (#14496).
+    region_pick_takes_holes: bool = false, PAGE_SKETCH;
     /// A sketch tool's shortcut pressed again before the first point steps to the tool's next
     /// creation mode (#2459). Off (the default): the key starts the tool again, as it always has.
     shortcut_cycles_modes: bool = false, PAGE_SKETCH;
@@ -2620,12 +2714,10 @@ fn defaults(app: &mut SolveApp, page: usize) {
     }
     let (msaa, window_system, adapter) = (app.preferences.msaa, app.preferences.window_system.clone(), app.preferences.graphics_adapter.clone());
     let units = app.preferences.default_units.clone();
-    let check_updates = app.preferences.check_updates;
     reset_preferences(&mut app.preferences, page);
-    // A setting the organization's policy locks keeps the person's choice for when the policy goes.
-    if app.policy.locks("check_updates") {
-        app.preferences.check_updates = check_updates;
-    }
+    // A setting the organization's policy sets keeps its value, and the person's own choice stays
+    // kept for when the policy goes.
+    crate::policy::enforce_after_reset(app);
     if page == PAGE_PLUGINS {
         app.prefs_window.plugin_limit_inputs = None;
     }
@@ -2853,7 +2945,7 @@ pub fn new_drawing_params(app: &SolveApp, mut params: Value) -> Value {
 }
 
 /// The new-design preference also applies to the blank, unsaved design already open.
-fn default_units_changed(app: &mut SolveApp) {
+pub(crate) fn default_units_changed(app: &mut SolveApp) {
     if crate::documents::active_is_blank(app) {
         apply_new_design(app);
     }
@@ -2885,6 +2977,10 @@ pub fn nav_mode(app: &SolveApp, button: NavButton, mods: Modifiers) -> Option<Na
     // With mouse gestures on, the right button opens the ring of tools instead of orbiting.
     if button == NavButton::Right && crate::mouse_gesture::active(app) {
         return None;
+    }
+    // A button the user mapped in Preferences takes that choice instead of the preset's bindings.
+    if let Some(choice) = nav_choice(&app.preferences, button) {
+        return choice.mode.filter(|_| choice.keys.held(mods));
     }
     let mode = nav_preset(&app.preferences.nav).mode(button, mods);
     // "Right drag orbits" off leaves the right button to the context menu (#6492).
@@ -3681,7 +3777,7 @@ fn button_job_label(app: &SolveApp, job: Option<&crate::space_mouse::ButtonJob>)
             ButtonKey::Alt => "Alt",
         }
         .to_string(),
-        Some(ButtonJob::Command(id)) => solidcraft_engine::find_command(id).map_or_else(|| id.clone(), |c| app.tr_label(c.label).to_string()),
+        Some(ButtonJob::Command(id)) => solidcraft_engine::find_command(id).map_or_else(|| id.clone(), |c| app.tr_command(c.id, c.label).to_string()),
     }
 }
 
@@ -3852,7 +3948,13 @@ pub fn control(app: &mut SolveApp, p: &serde_json::Value) -> Result<serde_json::
         o.insert("stand_up_note".into(), json!(app.stand_up.is_some() && app.stand_up_note));
         o.insert("dark".into(), json!(app.ui.dark));
         if app.policy.managed() {
-            let mut policy = json!({ "locked": app.policy.locked(), "check_updates": crate::policy::check_updates(app) });
+            // The settings report the person's stored choices; `policy` has the values in force.
+            crate::policy::own_values(app, o);
+            let mut policy = json!({
+                "locked": app.policy.locked(),
+                "check_updates": crate::policy::check_updates(app),
+                "settings": crate::policy::in_force(app),
+            });
             if let (Some(name), Some(p)) = (app.policy.organization(), policy.as_object_mut()) {
                 p.insert("organization".into(), json!(name));
             }
@@ -4690,8 +4792,11 @@ fn prepare_preferences(
             if !o.contains_key(k) {
                 return Err(format!("unknown preference `{k}`"));
             }
-            // Writing back the stored value is not a change (a client may send every setting it read).
-            if app.policy.locks(k) && o.get(k) != Some(v) {
+            // Writing back what was read is not a change (a client may send every setting it read).
+            if app.policy.locks(k) {
+                if crate::policy::unchanged(app, k, v) {
+                    continue;
+                }
                 return Err(format!("`{k}` is set by your organization's policy and cannot be changed here"));
             }
             if k == "custom_themes" {
@@ -4911,6 +5016,11 @@ fn prepare_preferences(
     }
     if MiddleDoubleClick::parse(&new.middle_double_click).is_none() {
         return Err("`middle_double_click` must be home, fit or off".into());
+    }
+    for (button, choice) in &new.nav_button_map {
+        if !NavButton::ALL.iter().any(|b| b.id() == button) || NavChoice::parse(choice).is_none() {
+            return Err("`nav_button_map` maps left, middle, right, extra1 or extra2 to orbit, pan, zoom or none, after shift+, ctrl+ or alt+".into());
+        }
     }
     let mut new = new;
     for grants in new.plugin_grants.values_mut() {
@@ -5695,6 +5805,7 @@ mod tests {
     #[test]
     fn layout_page_checkboxes_keep_their_labels_at_every_width() {
         let checks = [
+            ("workspace_follows_view", "prefs.workspace_follows_view"),
             ("history_play_button", "prefs.layout_page.play_history"),
             ("history_group_joints", "prefs.history_group_joints"),
             ("history_bar_groups", "prefs.history_bar_groups"),
@@ -7178,7 +7289,9 @@ mod tests {
             for unit in UNITS {
                 h.step(&json!({"click":{"handle":format!("prefs:default_units:{unit}")}})).unwrap();
                 h.frames(2);
-                let sample = format_length(12.5 * unit_scale(unit).0, unit, 2);
+                // 12.5 in the chosen unit; inches keep at least three decimals.
+                let sample = if *unit == "in" { "12.500 in".to_string() } else { format!("12.50 {unit}") };
+                assert_eq!(design::length_decimals_sample(unit, 2), sample);
                 assert!(h.widget(&sample).is_some(), "{theme}: {unit} uses the real unit-aware sample {sample}");
                 assert_eq!(h.app.session.doc.to_json(), doc);
             }
@@ -7192,7 +7305,7 @@ mod tests {
                 h.frames(2);
             }
             assert_eq!((h.app.preferences.length_decimals, h.app.preferences.angle_decimals, h.app.preferences.parameter_list_rows), (4, 3, 75));
-            assert!(h.widget(&format_length(12.5 * unit_scale("ft").0, "ft", 4)).is_some());
+            assert!(h.widget("12.5000 ft").is_some());
             assert!(h.widget("45.000°").is_some());
             assert_eq!(saved_prefs(&h.app)["preferences"]["length_decimals"], original.length_decimals);
             h.call("ui.prefs", json!({"button":"apply"}));
@@ -8061,6 +8174,16 @@ mod tests {
         h.frames(2);
         let hard = resolved_theme(&h.app.preferences, active_theme_file(&h.app).unwrap());
         assert_eq!((Tokens::get().panel, Tokens::get().viewport_top), (hard.panel, Tokens::light().viewport_top));
+        // Dark on a dark theme file is the built-in Dark view too, not the file's own: every choice shows something.
+        let builtin = Tokens::dark();
+        assert_ne!((hard.viewport_top, hard.body), (builtin.viewport_top, builtin.body), "the fixture's view differs from the built-in Dark");
+        for (view, want) in [("dark", (builtin.viewport_top, builtin.body)), ("theme", (hard.viewport_top, hard.body))] {
+            h.call("ui.prefs", json!({"viewport_theme": view}));
+            h.frames(2);
+            let (t, v) = (Tokens::get(), Tokens::view());
+            assert_eq!(t.panel, hard.panel, "{view}: the window keeps the theme file's colours");
+            assert_eq!(((t.viewport_top, t.body), (v.viewport_top, v.body)), (want, want), "{view}: the view");
+        }
 
         // Asked for, an unknown value is refused; read from saved preferences, it is the default.
         assert!(h.call("ui.prefs", json!({"viewport_theme": "dim"}))["error"].is_string());
@@ -9947,8 +10070,8 @@ mod tests {
 
     /// #17689: the tolerance heal is on by default, a saved choice reads back as saved, and the
     /// preference reaches the kernel, which every STEP read and Repair consult: set off, the
-    /// kernel stops healing; set on, it heals again. (The kernel's switch is the process's: the
-    /// test holds it, as every test that turns it does.)
+    /// kernel stops healing; set on, it heals again. (The test holds the kernel's switch, as
+    /// every test that turns it does, so it turns for the test's thread alone.)
     #[test]
     fn heal_tolerance_defects_is_on_by_default_and_reaches_the_kernel() {
         use serde_json::json;
@@ -14834,5 +14957,22 @@ mod kit_use_tests {
         assert_eq!(restored.ui.recent_colors.first(), Some(&[9, 8, 7]));
         assert_eq!(restored.ui.recent_colors.get(1), Some(&[1, 2, 3]));
         assert_eq!(restored.ui.recent_colors.len(), MAX_RECENT_COLORS);
+    }
+
+    #[test]
+    fn workspace_focus_preference_defaults_on_roundtrips_and_resets_on_layout_page() {
+        use super::{PAGE_LAYOUT, Prefs, defaults, set};
+        let mut app = crate::SolveApp::new(Default::default(), Default::default());
+        assert!(app.preferences.workspace_follows_view);
+        app.load_prefs(r#"{"preferences":{"default_units":"mm"}}"#);
+        assert!(app.preferences.workspace_follows_view, "older preference files receive the new default");
+        set(&mut app, &serde_json::json!({"workspace_follows_view":false})).unwrap();
+        assert!(!app.preferences.workspace_follows_view);
+        let saved = serde_json::to_value(&app.preferences).unwrap();
+        let restored: Prefs = serde_json::from_value(saved).unwrap();
+        assert!(!restored.workspace_follows_view);
+        assert!(set(&mut app, &serde_json::json!({"workspace_follows_view":"yes"})).is_err());
+        defaults(&mut app, PAGE_LAYOUT);
+        assert!(app.preferences.workspace_follows_view);
     }
 }
