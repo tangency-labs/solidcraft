@@ -21,7 +21,9 @@ use solidcore_step::read::R;
 
 use crate::body::Body;
 use crate::{KernelError, Result};
-pub use checks::{HealedBody, ImportChecks, ImportHeals};
+pub use checks::HealedBody;
+pub use checks::ImportChecks;
+pub use checks::ImportHeals;
 use p21::{Entity, Exchange, Param};
 
 /// The representation the file's unlisted topology is read as, under an id the reader keeps for
@@ -56,6 +58,9 @@ pub struct ImportedBody {
     pub face_origin: Vec<u64>,
     /// Solid name (the brep's label), else the product name.
     pub name: String,
+    /// Original face label shared by every imported face, when meaningful and unambiguous.
+    /// Kept separately so callers can still choose the source solid name.
+    pub common_face_name: Option<String>,
     pub body: Body,
     /// Surface colour (linear-ish RGB 0..1) from the file's presentation styles.
     pub color: Option<[f32; 3]>,
@@ -206,6 +211,10 @@ pub struct ImportReport {
     /// [`ImportIssue::paths`] entry is that root. Otherwise each root is a product below it.
     #[serde(default)]
     pub single_root: bool,
+    /// Edges that more than two faces of a surface model use, each counted once: the first two
+    /// uses keep it and every further use has a copy of its own, so the model is one open body.
+    #[serde(default)]
+    pub split_edges: usize,
     /// SMLib's check of the parts, which may still be running after the import
     /// ([`step_import_shared`]): what it finds follows `issues` ([`Self::current`]). Not saved:
     /// a saved report holds what the checks found in `issues` ([`Self::settled`]).
@@ -238,7 +247,14 @@ impl ImportReport {
     fn with_checks(&self, found: &[ImportIssue]) -> ImportReport {
         let mut issues = self.issues.clone();
         issues.extend(found.iter().cloned());
-        ImportReport { parts: self.parts, solids: self.solids, issues, single_root: self.single_root, checks: ImportChecks::default() }
+        ImportReport {
+            parts: self.parts,
+            solids: self.solids,
+            issues,
+            single_root: self.single_root,
+            split_edges: self.split_edges,
+            checks: ImportChecks::default(),
+        }
     }
 }
 
@@ -447,10 +463,15 @@ struct Reader {
     used_items: HashSet<u64>,
     /// Items already instanced for the product being read.
     node_items: HashSet<u64>,
+    /// Items already instanced for the product being read, each with the placement it got: one
+    /// solid mapped several times at different places is one body per place.
+    node_placed: HashSet<(u64, [u64; 16])>,
     /// Occurrences and mapped representations visited so far.
     visits: usize,
     /// Items whose meshing was checked.
     unmeshed_checked: HashSet<u64>,
+    /// Edges split for sheet faces ([`ImportReport::split_edges`]), over the parts read.
+    split_edges: usize,
     /// Items sent into SMLib as an operation would send them, to say which need repair: each
     /// once per class of the placements of its instances ([`check_class`]).
     modelling_checked: HashSet<(u64, Option<[u64; 16]>)>,
@@ -506,8 +527,10 @@ impl Reader {
             oriented: HashMap::new(),
             used_items: HashSet::new(),
             node_items: HashSet::new(),
+            node_placed: HashSet::new(),
             visits: 0,
             unmeshed_checked: HashSet::new(),
+            split_edges: 0,
             modelling_checked: HashSet::new(),
             check_jobs: Vec::new(),
             check_of: HashMap::new(),
@@ -951,7 +974,14 @@ impl Reader {
                     self.batches.push(Batch { m: *m, path: path.to_vec(), product: product.to_string(), instance: instance.map(str::to_string) });
                     for item in batch {
                         self.used_items.insert(item);
-                        if !self.node_items.insert(item) {
+                        if self.node_items.contains(&item) {
+                            continue;
+                        }
+                        let mut key = [0u64; 16];
+                        for (k, x) in key.iter_mut().zip(m.iter().flatten()) {
+                            *k = (*x + 0.0).to_bits();
+                        }
+                        if !self.node_placed.insert((item, key)) {
                             continue;
                         }
                         if self.bodies_so_far() >= MAX_BODIES {
@@ -1092,6 +1122,7 @@ impl Reader {
                 Ok(parallel::Made { body, missing, part, read }) => {
                     // What the read of the item found, reported once.
                     if let Some(failed) = read {
+                        self.split_edges += part.split_edges;
                         let label = self.label(item);
                         if let Some(why) = &part.refused {
                             self.note(IssueKind::ImportedAsSurfaces, Some(item), 0, format!("{label}: imported as surfaces: {why}"));
@@ -1107,12 +1138,15 @@ impl Reader {
                             self.note(IssueKind::OpenBody, Some(item), 0, format!("{label}: imported as an open body (the shell is not closed)"));
                         }
                     }
-                    if !self.once.contains(&item) {
+                    // A solid one walk maps at several placements is planned more than once although
+                    // its representation is walked once: keep it oriented for its later instances too.
+                    if !self.once.contains(&item) || self.uses.get(&item).is_some_and(|n| *n > 1) {
                         self.oriented.entry(item).or_insert_with(|| part.clone());
                     }
                     let (closed, file_faces, face_origin) = (part.closed, part.file_faces, part.face_origin.clone());
                     let own = e.params().first().and_then(Param::as_str).unwrap_or("").trim().to_string();
                     let name = if own.is_empty() { product.clone() } else { own };
+                    let common_face_name = ex.common_face_name(&face_origin).map(str::to_owned);
                     // Faces the mesher gives up on (or that the budget cut short) are reported.
                     if self.unmeshed_checked.insert(item) && missing > 0 {
                         self.note(
@@ -1178,6 +1212,7 @@ impl Reader {
                     self.instances.push((item, m));
                     self.bodies.push(ImportedBody {
                         name,
+                        common_face_name,
                         body,
                         color,
                         path: path.clone(),
@@ -1237,7 +1272,7 @@ impl Reader {
                 detail: detail.clone(),
             })
             .collect();
-        ImportReport { parts, solids, issues, single_root, checks: ImportChecks::default() }
+        ImportReport { parts, solids, issues, single_root, split_edges: self.split_edges, checks: ImportChecks::default() }
     }
 
     /// Planned-solid indices (a node's `bodies` after the walk) as body indices and the STEP
@@ -1355,6 +1390,7 @@ impl Reader {
         let reps = self.rep_closure(&own);
         let mut bodies = Vec::new();
         self.node_items.clear();
+        self.node_placed.clear();
         for r in &reps {
             self.rep_bodies(*r, &world, &path, &name, instance, &mut bodies, 0);
         }
@@ -1382,7 +1418,7 @@ impl Reader {
 /// the file does not parse or has no solid the reader can read.
 pub fn step_orientation_errors(text: &str) -> std::result::Result<Vec<String>, String> {
     let ex = p21::parse(text)?;
-    let read = solidcore_step::topology::read_solids_with(&ex, &solidcraft_smlib::pcurves::SmlibTrims);
+    let read = solidcore_step::topology::read_solids_with(&ex, &solidcraft_smlib::pcurves::SmlibImportTrims);
     if read.solids.is_empty() {
         return Err(read.failures.first().map_or_else(|| "the file has no solids".into(), |f| format!("solid #{}: {}", f.item, f.message)));
     }

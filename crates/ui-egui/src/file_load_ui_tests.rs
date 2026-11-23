@@ -1658,7 +1658,13 @@ fn programmatic_imports_use_only_explicit_options_and_schema_defaults() {
             h.app.preferences.plugin_remember_importer_options = true;
             let memory = h.app.preferences.plugin_importer_options.clone();
             // Scripts execute these same engine commands. The guest traps on any other options.
-            h.app.run(command, json!({"path":path,"options":options})).unwrap();
+            let run = h.app.run(command, json!({"path":path,"options":options}));
+            if options == json!({"size":null}) {
+                // An explicit null is the caller's own value; the schema refuses it, and no saved value replaces it.
+                assert!(run.is_err_and(|error| error.contains("integer")));
+            } else {
+                run.unwrap();
+            }
             assert!(h.app.plugin_menu.dialogs.is_empty());
             assert_eq!(h.app.preferences.plugin_importer_options, memory);
         }

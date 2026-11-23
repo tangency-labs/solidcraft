@@ -24,6 +24,9 @@ mod clouds;
 mod edges;
 mod indirect;
 pub use clouds::{CELL_SIZE, Cell, CloudFilter, CloudStyle, ColorMode, FILTERS, GpuCloud, cloud_cell};
+mod motions;
+use motions::MotionTable;
+pub use motions::{MAX_MOTIONS, MOTIONS_PER_ROW, MotionRows, Motions, UNMOVED, UNMOVED_SLOT};
 #[cfg(not(target_arch = "wasm32"))]
 mod msaa_check;
 mod oit;
@@ -48,8 +51,13 @@ pub const PBR_SIZE: usize = pbr::VERTEX_SIZE;
 pub const LINE_SIZE: usize = 32;
 /// Placement of an [`InstancedMesh`]: the rows of its rigid move (3 × 4 f32; a point's x, y and z
 /// are each row's dot product with (p, 1)), then its palette index (u32), then its edges' and its
-/// hidden edges' palette indices (u32 each; drawn from [`InstancedMesh::edges`]).
-pub const INSTANCE_SIZE: usize = 60;
+/// hidden edges' palette indices (u32 each; drawn from [`InstancedMesh::edges`]), then the slot of
+/// the motion it is drawn moved by (u32, at [`INSTANCE_MOTION_AT`]).
+pub const INSTANCE_SIZE: usize = 64;
+/// Where a placement keeps its motion slot ([`UNMOVED_SLOT`]: the one its palette entry names).
+/// Copies of a part placed many times share their palette entries, so each copy's own motion is
+/// named here.
+pub const INSTANCE_MOTION_AT: usize = 60;
 /// Model edges drawn this wide (pixels), as a body's edges in its block are.
 pub const EDGE_WIDTH: f32 = 1.3;
 /// Hidden model edges drawn this wide (pixels).
@@ -79,10 +87,14 @@ pub const MAX_PALETTE: usize = 1 << 20;
 #[derive(Clone, Debug, Default)]
 pub struct Palette {
     entries: Vec<[u8; 4]>,
-    lookup: std::collections::HashMap<[u8; 4], u32>,
+    /// The interned entries by colour and motion slot.
+    lookup: std::collections::HashMap<([u8; 4], u32), u32>,
     stable_len: usize,
     /// Per entry, 1 + its body's hatch, or 0 for the cap's own (empty: 0 for every entry).
     hatches: Vec<u8>,
+    /// Per entry, the slot of the motion its body is drawn moved by ([`Motions`]); entries past
+    /// its end have none ([`UNMOVED_SLOT`]).
+    motions: Vec<u32>,
     /// PBR materials by palette index ([`Material`]); entries past its end, or with no
     /// material, are not PBR. Only the product preview has any.
     materials: Vec<Material>,
@@ -121,7 +133,62 @@ impl Material {
 impl Palette {
     /// A palette whose entries are all stable (the model scene's body/face slots).
     pub fn with_stable(entries: Vec<[u8; 4]>) -> Palette {
-        Palette { stable_len: entries.len(), entries, lookup: std::collections::HashMap::new(), hatches: Vec::new(), materials: Vec::new() }
+        Palette {
+            stable_len: entries.len(),
+            entries,
+            lookup: std::collections::HashMap::new(),
+            hatches: Vec::new(),
+            motions: Vec::new(),
+            materials: Vec::new(),
+        }
+    }
+
+    /// This palette with each entry's motion slot by index (entries past `motions` have none).
+    /// A slot the table does not have counts as none.
+    pub fn with_motions(mut self, mut motions: Vec<u32>) -> Palette {
+        motions.truncate(self.entries.len());
+        motions.iter_mut().filter(|slot| **slot >= MAX_MOTIONS).for_each(|slot| *slot = UNMOVED_SLOT);
+        self.motions = motions;
+        // Interned colours are looked up by their slot too: keyed by the slots they now have.
+        let slots = &self.motions;
+        self.lookup = self
+            .lookup
+            .values()
+            .filter_map(|i| Some(((*self.entries.get(*i as usize)?, slots.get(*i as usize).copied().unwrap_or(UNMOVED_SLOT)), *i)))
+            .collect();
+        self
+    }
+
+    /// The slot of the motion entry `i`'s body is drawn moved by ([`UNMOVED_SLOT`]: none).
+    pub fn motion(&self, i: PaletteIndex) -> u32 {
+        self.motions.get(i.0 as usize).copied().unwrap_or(UNMOVED_SLOT)
+    }
+
+    /// Draw what entry `i` colours moved by the motion in `slot`; `false` when the palette has
+    /// no such entry or the table no such slot.
+    pub fn set_motion(&mut self, i: PaletteIndex, slot: u32) -> bool {
+        let at = i.0 as usize;
+        if at >= self.entries.len() || slot >= MAX_MOTIONS {
+            return false;
+        }
+        let was = self.motion(i);
+        if was == slot {
+            return true;
+        }
+        if self.motions.len() <= at {
+            self.motions.resize(at + 1, UNMOVED_SLOT);
+        }
+        let Some(held) = self.motions.get_mut(at) else { return false };
+        *held = slot;
+        // An interned entry is found again under the slot it now names, not the one it had.
+        if at >= self.stable_len
+            && let Some(rgba) = self.entries.get(at).copied()
+            && self.lookup.get(&(rgba, was)) == Some(&i.0)
+        {
+            self.lookup.remove(&(rgba, was));
+            self.lookup.insert((rgba, slot), i.0);
+        }
+        true
     }
 
     /// This palette with PBR `materials` by index.
@@ -162,13 +229,14 @@ impl Palette {
     pub fn set(&mut self, i: PaletteIndex, rgba: [u8; 4]) -> bool {
         let at = i.0 as usize;
         let ephemeral = at >= self.stable_len;
+        let motion = self.motion(i);
         let Some(slot) = self.entries.get_mut(at) else { return false };
         if ephemeral {
-            self.lookup.remove(slot);
+            self.lookup.remove(&(*slot, motion));
         }
         *slot = rgba;
         if ephemeral {
-            self.lookup.insert(rgba, i.0);
+            self.lookup.insert((rgba, motion), i.0);
         }
         true
     }
@@ -176,7 +244,17 @@ impl Palette {
     /// A colour's index in the per-build section, appended when it is new. At [`MAX_PALETTE`]
     /// the first entry stands in: far past what any real scene interns, and never a panic.
     pub fn intern(&mut self, rgba: [u8; 4]) -> PaletteIndex {
-        if let Some(&i) = self.lookup.get(&rgba) {
+        self.intern_moved(rgba, UNMOVED_SLOT)
+    }
+
+    /// [`Palette::intern`] for geometry that belongs to a body drawn moved by the motion in
+    /// `slot` (a face or an edge lit on it): the colour's entry for that slot, so what it colours
+    /// moves with the body. A slot the table does not have counts as none. At [`MAX_PALETTE`]
+    /// the first entry stands in, as for `intern`: its geometry is then drawn as that entry's is
+    /// (a palette whose first entry names no slot, as the model's is, draws it unmoved).
+    pub fn intern_moved(&mut self, rgba: [u8; 4], slot: u32) -> PaletteIndex {
+        let slot = if slot < MAX_MOTIONS { slot } else { UNMOVED_SLOT };
+        if let Some(&i) = self.lookup.get(&(rgba, slot)) {
             return PaletteIndex(i);
         }
         if self.entries.len() >= MAX_PALETTE {
@@ -184,7 +262,8 @@ impl Palette {
         }
         let i = u32::try_from(self.entries.len()).unwrap_or(0);
         self.entries.push(rgba);
-        self.lookup.insert(rgba, i);
+        self.lookup.insert((rgba, slot), i);
+        self.set_motion(PaletteIndex(i), slot);
         PaletteIndex(i)
     }
 
@@ -213,10 +292,11 @@ impl Palette {
     }
 
     /// Entry `i` as the shader's `Rg32Uint` texel: the rgba bytes packed little-endian, then
-    /// 1 + its hatch (0: the cap's own).
+    /// 1 + its hatch (0: the cap's own) in the low byte with its motion slot above it.
     fn texel(&self, i: usize) -> [u32; 2] {
         let colour = self.entries.get(i).map_or(0, |[r, g, b, a]| u32::from_le_bytes([*r, *g, *b, *a]));
-        [colour, u32::from(self.hatches.get(i).copied().unwrap_or(0))]
+        let motion = self.motions.get(i).copied().unwrap_or(UNMOVED_SLOT);
+        [colour, u32::from(self.hatches.get(i).copied().unwrap_or(0)) | (motion << 8)]
     }
 }
 
@@ -579,19 +659,29 @@ pub struct InstancedMesh {
 }
 
 impl InstancedMesh {
-    /// Add a placement: `rows` of its rigid move (see [`INSTANCE_SIZE`]) and its palette index.
+    /// Add a placement: `rows` of its rigid move (see [`INSTANCE_SIZE`]) and its palette index,
+    /// drawn moved by the motion its palette entry names.
     pub fn place(&mut self, rows: [[f32; 4]; 3], color: PaletteIndex) {
         self.place_edged(rows, color, PaletteIndex(0), PaletteIndex(0));
     }
 
     /// [`InstancedMesh::place`], with the palette indices its edges and hidden edges are drawn in.
     pub fn place_edged(&mut self, rows: [[f32; 4]; 3], color: PaletteIndex, edge: PaletteIndex, hidden: PaletteIndex) {
+        self.place_moved(rows, color, edge, hidden, UNMOVED_SLOT);
+    }
+
+    /// [`Self::place_edged`], drawn moved by the motion in `slot` ([`UNMOVED_SLOT`]: the one its
+    /// palette entry names): a copy of a part placed many times, whose entries the other copies
+    /// share.
+    pub fn place_moved(&mut self, rows: [[f32; 4]; 3], color: PaletteIndex, edge: PaletteIndex, hidden: PaletteIndex, slot: u32) {
         for v in rows.iter().flatten() {
             self.instances.extend_from_slice(&v.to_le_bytes());
         }
         for index in [color, edge, hidden] {
             self.instances.extend_from_slice(&index.0.to_le_bytes());
         }
+        let slot = if slot < MAX_MOTIONS { slot } else { UNMOVED_SLOT };
+        self.instances.extend_from_slice(&slot.to_le_bytes());
     }
 
     /// Its edges at every placement as line records ([`LINE_SIZE`]), in the placement's edge
@@ -681,6 +771,11 @@ pub struct SharedEdges {
 /// How far (pixels) a coarser level of a placement's edges may stray from its edges: as far as a
 /// body's edges in its block are simplified (`edge_detail::TOLERANCE_PX` in the UI).
 pub const EDGE_PX: f32 = 0.25;
+
+/// How far (pixels) a placement's edges may stray while the view moves ([`Frame::edge_px`]):
+/// orbiting a large assembly at [`EDGE_PX`] drew three times the segments, for a difference no
+/// moving picture shows; the fine edges come back once the view holds still.
+pub const EDGE_PX_MOVING: f32 = 1.0;
 
 impl SharedEdges {
     /// The edges of `mesh` (`shown`: which of its `edges` are drawn), each polyline's segments
@@ -994,6 +1089,9 @@ impl BlockBytes {
 pub struct BodySpan {
     pub vertices: std::ops::Range<u32>,
     pub bounds: [[f32; 3]; 2],
+    /// The slot of the motion the body is drawn moved by ([`Motions`]; [`UNMOVED_SLOT`]: none):
+    /// the one its palette entries name, so it is kept in a view it is moved into.
+    pub motion: u32,
 }
 
 /// `runs` without the vertices in `hidden` (both sorted and disjoint).
@@ -1051,6 +1149,8 @@ pub struct BlockBuilder {
     bodies: Vec<BodySpan>,
     /// The body being written: its first vertex and the box so far.
     spanning: Option<(u32, [[f32; 3]; 2])>,
+    /// The motion slot of the body being written ([`BlockBuilder::moved_by`]).
+    motion: u32,
     /// Where the body being written ended its edge lines ([`BlockBuilder::end_edges`]).
     edges_end: Option<u32>,
 }
@@ -1079,6 +1179,13 @@ impl BlockBuilder {
         self.edges_end = None;
         let at = u32::try_from(self.vertices.len() / TRI_SIZE).unwrap_or(u32::MAX);
         self.spanning = Some((at, [[f32::INFINITY; 3], [f32::NEG_INFINITY; 3]]));
+        self.motion = UNMOVED_SLOT;
+    }
+
+    /// The body being written is drawn moved by the motion in `slot`: the slot its palette
+    /// entries name ([`Palette::set_motion`]).
+    pub fn moved_by(&mut self, slot: u32) {
+        self.motion = if slot < MAX_MOTIONS { slot } else { UNMOVED_SLOT };
     }
 
     /// End the body [`BlockBuilder::begin_body`] began.
@@ -1086,7 +1193,7 @@ impl BlockBuilder {
         let Some((start, bounds)) = self.spanning.take() else { return };
         let end = u32::try_from(self.vertices.len() / TRI_SIZE).unwrap_or(u32::MAX);
         if end > start && bounds.iter().flatten().all(|x| x.is_finite()) {
-            self.bodies.push(BodySpan { vertices: start..end, bounds });
+            self.bodies.push(BodySpan { vertices: start..end, bounds, motion: self.motion });
         }
     }
 
@@ -1427,6 +1534,9 @@ pub struct Frame {
     /// Occlusion samples per shaded pixel: [`AO_SAMPLES`] for a still picture,
     /// [`AO_SAMPLES_MOVING`] while the view moves (#7165).
     pub ao_samples: u32,
+    /// How far (pixels) an instanced part's edges may stray where drawn: [`EDGE_PX`] for a still
+    /// picture, [`EDGE_PX_MOVING`] while the view moves.
+    pub edge_px: f32,
     /// Supersampling (#1288): draw the frame this many times the viewport's pixels in each
     /// direction and filter it down (1: off). Under 1 the frame is drawn smaller and filtered up
     /// (the product preview past its pixel budget, #1464).
@@ -1445,6 +1555,13 @@ pub struct Frame {
     pub sky: [f32; 4],
     /// Bodies being dragged (a component's Move triad), drawn moved; `None`: none.
     pub moving: Option<MovingLayer>,
+    /// Bodies drawn moved where they are, each by the motion in the slot its palette entries
+    /// name ([`Palette::set_motion`]); empty: none. Nothing is built or uploaded for them.
+    pub motions: Motions,
+    /// The ground the ambient occlusion darkens, when it is not the one the model scene was
+    /// built with ([`GpuScene::ground_ao`]): under bodies drawn moved, where they are drawn.
+    /// `None`: the model scene's.
+    pub ground: Option<GroundAo>,
 }
 
 /// The bodies a component's Move triad drags: a scene of their own, built once where the drag
@@ -2192,6 +2309,7 @@ impl PaletteGpu {
                 e4,
                 e5,
                 e6,
+                bgl.motions_entry(),
             ],
         });
         PaletteGpu { palette, _texture: texture, materials, material_rows, bind, rows }
@@ -2299,7 +2417,7 @@ struct Batches {
     glass_cpu: Vec<u8>,
     glass_sorted_for: Option<[f32; 3]>,
     /// The view the blocks' bodies were last culled for ([`Batches::cull`]).
-    blocks_culled_for: Option<[[f32; 4]; 4]>,
+    blocks_culled_for: Option<([[f32; 4]; 4], u64)>,
     lines: Option<Batch>,
     hidden: Option<Batch>,
     overlays: Option<Batch>,
@@ -2676,15 +2794,16 @@ impl Batches {
     /// Leave the blocks' bodies that are out of the view `vp` out of their draws: each class's
     /// runs without those bodies' vertices. Worked out again only when the view changes; a block
     /// with every body in view draws its runs as they are.
-    fn cull_blocks(&mut self, vp: &[[f32; 4]; 4]) {
-        if self.blocks_culled_for.as_ref() == Some(vp) {
+    fn cull_blocks(&mut self, vp: &[[f32; 4]; 4], motions: &Motions) {
+        let culled_for = (*vp, motions.key());
+        if self.blocks_culled_for == Some(culled_for) {
             return;
         }
-        self.blocks_culled_for = Some(*vp);
-        const ROWS: [[f32; 4]; 3] = [[1.0, 0.0, 0.0, 0.0], [0.0, 1.0, 0.0, 0.0], [0.0, 0.0, 1.0, 0.0]];
+        self.blocks_culled_for = Some(culled_for);
         for block in self.blocks.values_mut() {
+            // Each body where its motion draws it.
             let hidden: Vec<std::ops::Range<u32>> =
-                block.bytes.bodies.iter().filter(|b| !placed_box_in_view(&ROWS, &b.bounds, vp)).map(|b| b.vertices.clone()).collect();
+                block.bytes.bodies.iter().filter(|b| !placed_box_in_view(&motions.of(b.motion), &b.bounds, vp)).map(|b| b.vertices.clone()).collect();
             block.culled = (!hidden.is_empty()).then(|| {
                 [TriClass::Opaque, TriClass::Glass, TriClass::Faded, TriClass::Pbr].map(|class| runs_without(block.bytes.runs(class), &hidden))
             });
@@ -2697,10 +2816,25 @@ impl Batches {
     /// Each placement's level of detail is chosen here too: the coarsest whose error stays under
     /// [`LOD_PX`] where it is drawn ([`placement_scale`], [`level_for`]), in a view of `size`
     /// pixels.
-    fn cull(&mut self, device: &wgpu::Device, queue: &wgpu::Queue, vp: &[[f32; 4]; 4], size: [f32; 2]) {
-        self.cull_blocks(vp);
+    fn cull(&mut self, device: &wgpu::Device, queue: &wgpu::Queue, vp: &[[f32; 4]; 4], size: [f32; 2], motions: &Motions, edge_px: f32) {
+        self.cull_blocks(vp, motions);
         let mut changed = false;
         let f = |b: &[u8], i: usize| b.get(i..i + 4).and_then(|x| x.try_into().ok()).map_or(0.0, f32::from_le_bytes);
+        // A placement where its motion draws it: its rows, then the motion its own word names,
+        // else the one its palette entry (the word after the rows) names.
+        let palette = self.palette.as_ref().map(|p| p.palette.clone());
+        let placed = |p: &[u8]| {
+            let rows = [0, 1, 2].map(|r| [f(p, 16 * r), f(p, 16 * r + 4), f(p, 16 * r + 8), f(p, 16 * r + 12)]);
+            if motions.is_empty() {
+                return rows;
+            }
+            let word = |at: usize| p.get(at..at + 4).and_then(|x| x.try_into().ok()).map_or(0, u32::from_le_bytes);
+            let slot = match word(INSTANCE_MOTION_AT) {
+                UNMOVED_SLOT => palette.as_ref().map_or(UNMOVED_SLOT, |pal| pal.motion(PaletteIndex(word(48)))),
+                own => own,
+            };
+            if slot == UNMOVED_SLOT { rows } else { motions::after(&motions.of(slot), &rows) }
+        };
         let mut edges_changed = false;
         for (n, d) in self.instanced.iter_mut().enumerate() {
             let edge_levels = if self.edges.is_some() { d.edges.clone() } else { None };
@@ -2712,14 +2846,13 @@ impl Batches {
             let mut shown: Vec<(u32, u8)> = Vec::new();
             let mut edges_shown: Option<Vec<(u32, u8)>> = edge_levels.as_ref().map(|_| Vec::new());
             for (i, p) in d.placements.as_chunks::<INSTANCE_SIZE>().0.iter().enumerate() {
-                let rows = [0, 1, 2].map(|r| [f(&p[..], 16 * r), f(&p[..], 16 * r + 4), f(&p[..], 16 * r + 8), f(&p[..], 16 * r + 12)]);
-                let placed = PlacedBox::new(rows, &d.bounds, vp);
+                let placed = PlacedBox::new(placed(&p[..]), &d.bounds, vp);
                 if !placed.in_view() {
                     continue;
                 }
                 let axes = if finer { placed.axes(size) } else { None };
                 if let (Some(list), Some(e)) = (edges_shown.as_mut(), edge_levels.as_ref()) {
-                    list.push((i as u32, edges::level_for(e, PlacedBox::stretch_of(axes))));
+                    list.push((i as u32, edges::level_for(e, PlacedBox::stretch_of(axes), edge_px)));
                 }
                 let level = if errors.len() > 1 { level_for(&errors, PlacedBox::scale_of(axes)) } else { 0 };
                 shown.push((i as u32, u8::try_from(level).unwrap_or(0)));
@@ -2735,7 +2868,7 @@ impl Batches {
             if d.look != InstanceLook::Opaque {
                 let depth = |i: u32| {
                     let p = d.placements.get(i as usize * INSTANCE_SIZE..(i as usize + 1) * INSTANCE_SIZE).unwrap_or_default();
-                    let rows = [0, 1, 2].map(|r| [f(p, 16 * r), f(p, 16 * r + 4), f(p, 16 * r + 8), f(p, 16 * r + 12)]);
+                    let rows = placed(p);
                     let [lo, hi] = d.bounds;
                     let c = [0, 1, 2].map(|k| (lo[k] + hi[k]) * 0.5);
                     let w = rows.map(|r| r[0] * c[0] + r[1] * c[1] + r[2] * c[2] + r[3]);
@@ -3018,6 +3151,8 @@ pub struct Renderer {
     uniform: wgpu::Buffer,
     /// The layout of group 0 (the uniform and a palette), for per-scene bind groups.
     uniform_bgl: Group0,
+    /// The motions bodies are drawn moved by, on the GPU.
+    motions: MotionTable,
     /// Group 0 with a one-entry palette: draws that do not read colours (images, AO, depth).
     bind: wgpu::BindGroup,
     linear_out: bool,
@@ -3111,6 +3246,8 @@ struct Picture {
     sketch: Batches,
     highlight: Batches,
     ground_ao_key: Option<(u64, u64, bool, u32, bool)>,
+    /// The frame's own ground ([`Frame::ground`]) the receiver was last built for.
+    ground_ao_for: Option<GroundAo>,
     /// What the frame `prepare` drew offscreen (supersampled, or for see-through surfaces),
     /// published when `paint` copies it into the view.
     ss_stats: DrawStats,
@@ -3283,14 +3420,23 @@ fn access_texture(device: &wgpu::Device, queue: Option<&wgpu::Queue>, bgl: &wgpu
 
 pub const SHADER: &str = include_str!("../shaders/viewport.wgsl");
 
-/// The layout of group 0 (the uniform, a palette and its materials, the studio) with the studio
-/// every group-0 bind group carries.
+/// The layout of group 0 (the uniform, a palette and its materials, the studio, the motions)
+/// with the studio and the motion table every group-0 bind group carries.
 pub(crate) struct Group0 {
     pub layout: wgpu::BindGroupLayout,
     pub environment: Environment,
+    /// The motion table's view ([`MotionTable`]).
+    pub motions: wgpu::TextureView,
     /// Group 3 of the instanced edge pipelines (their segments), where the renderer draws
     /// instanced edges ([`edges`]).
     pub edges: Option<wgpu::BindGroupLayout>,
+}
+
+impl Group0 {
+    /// The motion table's entry in a group-0 bind group.
+    fn motions_entry(&self) -> wgpu::BindGroupEntry<'_> {
+        wgpu::BindGroupEntry { binding: 7, resource: wgpu::BindingResource::TextureView(&self.motions) }
+    }
 }
 
 fn tri_layout() -> wgpu::VertexBufferLayout<'static> {
@@ -3321,7 +3467,15 @@ fn shared_layout() -> wgpu::VertexBufferLayout<'static> {
 
 /// An instanced mesh's placements ([`INSTANCE_SIZE`]), one per instance.
 fn instance_layout() -> wgpu::VertexBufferLayout<'static> {
-    const A: [wgpu::VertexAttribute; 4] = wgpu::vertex_attr_array![3 => Float32x4, 4 => Float32x4, 5 => Float32x4, 6 => Uint32];
+    // The edge indices (52 and 56) are the edge shaders' (`edges::instance_layout`); the motion
+    // slot after them, at location 9 there too.
+    const A: [wgpu::VertexAttribute; 5] = [
+        wgpu::VertexAttribute { format: wgpu::VertexFormat::Float32x4, offset: 0, shader_location: 3 },
+        wgpu::VertexAttribute { format: wgpu::VertexFormat::Float32x4, offset: 16, shader_location: 4 },
+        wgpu::VertexAttribute { format: wgpu::VertexFormat::Float32x4, offset: 32, shader_location: 5 },
+        wgpu::VertexAttribute { format: wgpu::VertexFormat::Uint32, offset: 48, shader_location: 6 },
+        wgpu::VertexAttribute { format: wgpu::VertexFormat::Uint32, offset: INSTANCE_MOTION_AT as u64, shader_location: 9 },
+    ];
     wgpu::VertexBufferLayout { array_stride: INSTANCE_SIZE as u64, step_mode: wgpu::VertexStepMode::Instance, attributes: &A }
 }
 
@@ -3422,6 +3576,35 @@ pub fn depth_bias(reversed: bool, b: wgpu::DepthBiasState) -> wgpu::DepthBiasSta
     if reversed { wgpu::DepthBiasState { constant: -b.constant, slope_scale: -b.slope_scale, clamp: -b.clamp } } else { b }
 }
 
+/// `ds` with its constant depth bias taken off for the vertex shader to apply (`FACE_PUSH` in
+/// viewport.wgsl), and those steps (positive: away from the eye), where depth is reversed. A
+/// float buffer's constant bias counts steps at the triangle's largest depth, so a triangle
+/// reaching from near the eye (or cut by the near plane) to far away went back by a share of the
+/// depth range where it was near: about half a millimetre 20 mm from the eye, and the face behind
+/// it showed through (#21024). The shader takes the steps of each vertex's own depth instead.
+/// Other formats count steps evenly and keep the GPU's bias (0 steps).
+pub fn split_push(ds: Option<wgpu::DepthStencilState>) -> (Option<wgpu::DepthStencilState>, f64) {
+    match ds {
+        Some(d) if reversed_depth(Some(d.format)) && d.bias.constant != 0 => {
+            let steps = -f64::from(d.bias.constant);
+            (Some(wgpu::DepthStencilState { bias: wgpu::DepthBiasState { constant: 0, ..d.bias }, ..d }), steps)
+        }
+        ds => (ds, 0.0),
+    }
+}
+
+/// The vertex stage's options for a pipeline pushed `push[0].1` steps ([`split_push`]): the
+/// `FACE_PUSH` constant, or none at 0 (so a module without it can take them too).
+pub fn push_options<'a>(push: &'a [(&'static str, f64); 1]) -> wgpu::PipelineCompilationOptions<'a> {
+    let constants: &[(&str, f64)] = if push[0].1 == 0.0 { &[] } else { push };
+    wgpu::PipelineCompilationOptions { constants, ..Default::default() }
+}
+
+/// The `FACE_PUSH` constant for [`push_options`].
+pub fn face_push(steps: f64) -> [(&'static str, f64); 1] {
+    [("FACE_PUSH", steps)]
+}
+
 /// The depth of the far plane, which a depth buffer is cleared to.
 pub fn far_depth(reversed: bool) -> f32 {
     if reversed { 0.0 } else { 1.0 }
@@ -3497,8 +3680,11 @@ impl Renderer {
                 studio_layout[1],
                 studio_layout[2],
                 studio_layout[3],
+                // The motions bodies are drawn moved by (`MotionTable`).
+                MotionTable::layout_entry(),
             ],
         });
+        let motions = MotionTable::new(device);
         let environment = Environment::new(device);
         let layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: Some("sc_viewport"),
@@ -3527,6 +3713,7 @@ impl Renderer {
                 e4,
                 e5,
                 e6,
+                wgpu::BindGroupEntry { binding: 7, resource: wgpu::BindingResource::TextureView(motions.view()) },
             ],
         });
         let moving_uniform = device.create_buffer(&wgpu::BufferDescriptor {
@@ -3549,6 +3736,7 @@ impl Renderer {
                 e4,
                 e5,
                 e6,
+                wgpu::BindGroupEntry { binding: 7, resource: wgpu::BindingResource::TextureView(motions.view()) },
             ],
         });
         let reversed = t.reversed_depth();
@@ -3581,10 +3769,12 @@ impl Renderer {
                         buf: wgpu::VertexBufferLayout<'static>,
                         ds: Option<wgpu::DepthStencilState>,
                         blend: Option<wgpu::BlendState>| {
+            let (ds, push) = split_push(ds);
+            let push = face_push(push);
             device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
                 label: Some(label),
                 layout: Some(&layout),
-                vertex: wgpu::VertexState { module: &module, entry_point: Some(vs), buffers: &[Some(buf)], compilation_options: Default::default() },
+                vertex: wgpu::VertexState { module: &module, entry_point: Some(vs), buffers: &[Some(buf)], compilation_options: push_options(&push) },
                 primitive: wgpu::PrimitiveState { topology: wgpu::PrimitiveTopology::TriangleList, ..Default::default() },
                 depth_stencil: ds,
                 multisample: wgpu::MultisampleState { count: t.samples.max(1), mask: !0, alpha_to_coverage_enabled: false },
@@ -3750,6 +3940,8 @@ impl Renderer {
         // `colour`: whether the pipeline writes colour (the cap's depth pass writes none).
         let solid_writes = |label: &str, fs: &str, cull: Option<wgpu::Face>, ds: Option<wgpu::DepthStencilState>, source: TriSource, colour: bool| {
             let fs = source.fragment(fs);
+            let (ds, push) = split_push(ds);
+            let push = face_push(push);
             device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
                 label: Some(label),
                 layout: Some(&solid_layout),
@@ -3761,7 +3953,7 @@ impl Renderer {
                         TriSource::Planned => &evaluated[..],
                         TriSource::Instanced | TriSource::InstancedFlat => &placed[..],
                     },
-                    compilation_options: Default::default(),
+                    compilation_options: push_options(&push),
                 },
                 primitive: wgpu::PrimitiveState { topology: wgpu::PrimitiveTopology::TriangleList, cull_mode: cull, ..Default::default() },
                 depth_stencil: ds,
@@ -3960,6 +4152,8 @@ impl Renderer {
             )
         };
         let pbr = || {
+            let (instanced_depth, push) = split_push(opaque());
+            let push = face_push(push);
             (
                 pipeline("sc_pbr", "vs_pbr", "fs_pbr", pbr_layout(), opaque(), None),
                 pipeline("sc_pbr_palette", "vs_pbr_palette", "fs_pbr", tri_layout(), opaque(), None),
@@ -3970,10 +4164,10 @@ impl Renderer {
                         module: &module,
                         entry_point: Some("vs_pbr_inst"),
                         buffers: &[Some(shared_layout()), Some(instance_layout())],
-                        compilation_options: Default::default(),
+                        compilation_options: push_options(&push),
                     },
                     primitive: wgpu::PrimitiveState { topology: wgpu::PrimitiveTopology::TriangleList, ..Default::default() },
-                    depth_stencil: opaque(),
+                    depth_stencil: instanced_depth,
                     multisample: wgpu::MultisampleState { count: t.samples.max(1), mask: !0, alpha_to_coverage_enabled: false },
                     fragment: Some(wgpu::FragmentState {
                         module: &module,
@@ -4065,6 +4259,8 @@ impl Renderer {
                     immediate_size: 0,
                 });
                 let pipe_with = |label: &str, vs: &str, fs: &str, depth_stencil: Option<wgpu::DepthStencilState>, blend: Option<wgpu::BlendState>| {
+                    let (depth_stencil, push) = split_push(depth_stencil);
+                    let push = face_push(push);
                     device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
                         label: Some(label),
                         layout: Some(&layout),
@@ -4072,7 +4268,7 @@ impl Renderer {
                             module: &module,
                             entry_point: Some(vs),
                             buffers: &[Some(edges::instance_layout())],
-                            compilation_options: Default::default(),
+                            compilation_options: push_options(&push),
                         },
                         primitive: wgpu::PrimitiveState { topology: wgpu::PrimitiveTopology::TriangleList, ..Default::default() },
                         depth_stencil,
@@ -4188,7 +4384,13 @@ impl Renderer {
                 guide_trans: guide_trans.join(),
                 guide_line,
                 uniform,
-                uniform_bgl: Group0 { layout: bgl.clone(), environment: environment.clone(), edges: edge_layout.clone() },
+                uniform_bgl: Group0 {
+                    layout: bgl.clone(),
+                    environment: environment.clone(),
+                    motions: motions.view().clone(),
+                    edges: edge_layout.clone(),
+                },
+                motions,
                 bind,
                 linear_out: t.format.is_srgb(),
                 moving_uniform,
@@ -4581,6 +4783,13 @@ pub fn frame_key(cb: &Frame) -> u64 {
     cb.ao_radius.to_bits().hash(&mut h);
     cb.ao_samples.hash(&mut h);
     cb.ssaa.to_bits().hash(&mut h);
+    // The bodies drawn moved, and how, and the ground under them.
+    cb.motions.key().hash(&mut h);
+    // Formatted only while a frame brings its own ground (a drag), not on every still frame.
+    if let Some(ground) = &cb.ground {
+        format!("{ground:?}").hash(&mut h);
+    }
+    cb.edge_px.to_bits().hash(&mut h);
     // A drag's layer: the scene it holds and where it is drawn.
     match &cb.moving {
         Some(m) => {
@@ -4765,6 +4974,7 @@ impl Renderer {
             ));
         }
         res.uniform_bgl.environment.upload(queue);
+        res.motions.set(queue, &cb.motions);
         let tess = res.tess.as_ref().map(|t| (t, &mut *encoder));
         uploads.push(res.pic.model.take_sharing(
             device,
@@ -4820,19 +5030,19 @@ impl Renderer {
         if !see_through {
             res.pic.model.sort_glass(queue, cb.back);
         }
-        res.pic.model.cull(device, queue, &cb.view_proj, cb.size_px);
-        let ground_visible = res.pic.model.ground_input.is_some_and(|ground| ground.visible_from(cb.back));
+        res.pic.model.cull(device, queue, &cb.view_proj, cb.size_px, &cb.motions, cb.edge_px);
+        // The frame's own ground (under bodies drawn moved) before the model scene's.
+        let ground = cb.ground.or(res.pic.model.ground_input);
+        let ground_visible = ground.is_some_and(|ground| ground.visible_from(cb.back));
 
         let ground_key = (cb.key, cb.pv_key, cb.pv_hide, cb.ao_radius.to_bits(), ground_visible);
-        if res.pic.ground_ao_key != Some(ground_key) {
+        if res.pic.ground_ao_key != Some(ground_key) || res.pic.ground_ao_for != cb.ground {
             let preview = if cb.pv_hide { None } else { cb.preview_bounds };
-            res.pic.model.ground_ao = res
-                .pic
-                .model
-                .ground_input
+            res.pic.model.ground_ao = ground
                 .filter(|_| ground_visible)
                 .and_then(|ground| upload(device, "sc_ground_ao", &ground.vertices_with_radius(preview, cb.ao_radius), TRI_SIZE));
             res.pic.ground_ao_key = Some(ground_key);
+            res.pic.ground_ao_for = cb.ground;
         }
         queue.write_buffer(&res.uniform, 0, &uniform_bytes(cb, cb.size_px[0], cb.size_px[1], res.linear_out, res.target.reversed_depth()));
         if let Some(a) = &cb.access
@@ -5766,7 +5976,10 @@ fn uniform_bytes_placing(cb: &Frame, w: f32, h: f32, linear: bool, reversed: boo
     let gpu_vp = gpu_view_proj_turned(cb.view_proj, cb.turned_depth, reversed);
     let mut v: Vec<f32> = gpu_vp.iter().flatten().copied().collect();
     v.extend([cb.back[0], cb.back[1], cb.back[2], if linear { 1.0 } else { 0.0 }]);
-    v.extend([w.max(1.0), h.max(1.0), 0.0, if cb.outline { 1.0 } else { 0.0 }]);
+    // The third: one past the last motion slot that moves (0: none does), and `depth`'s fourth
+    // the first: the vertex stages read the motion table only for a body's slot between them.
+    let [first_moved, past_moved] = cb.motions.range();
+    v.extend([w.max(1.0), h.max(1.0), past_moved, if cb.outline { 1.0 } else { 0.0 }]);
     v.extend(cb.clip.iter().flatten());
     v.extend(cb.cap);
     v.extend(cb.analysis);
@@ -5780,7 +5993,7 @@ fn uniform_bytes_placing(cb: &Frame, w: f32, h: f32, linear: bool, reversed: boo
     v.extend(cb.eye);
     v.extend([cb.ao_radius, cb.ao_samples.clamp(1, AO_SAMPLES) as f32, 0.0, 0.0]);
     v.extend(cb.analysis_colors);
-    v.extend([if reversed { 1.0 } else { 0.0 }, FACE_STEPS as f32, FACE_SLOPE, 0.0]);
+    v.extend([if reversed { 1.0 } else { 0.0 }, FACE_STEPS as f32, FACE_SLOPE, first_moved]);
     v.extend(model.iter().flatten());
     v.extend([cb.hover_tint[0], cb.hover_tint[1], cb.hover_tint[2], 0.0]);
     v.extend([cb.selection_tint[0], cb.selection_tint[1], cb.selection_tint[2], 0.0]);
@@ -6404,10 +6617,13 @@ mod tests {
             selection_tint: [0.0; 3],
             hatch: Default::default(),
             moving: None,
+            motions: Default::default(),
+            ground: None,
             outline: false,
             eye: [0.0; 4],
             ao_radius: 0.0,
             ao_samples: crate::view::AO_SAMPLES,
+            edge_px: crate::view::EDGE_PX,
             sky: [0.0; 4],
             ssaa: 1.0,
         }
@@ -6433,6 +6649,102 @@ mod tests {
         for (what, changed) in [("no layer", key(None)), ("layer moved", key(Some(layer(5, 1.0)))), ("layer scene", key(Some(layer(6, 0.0))))] {
             assert_ne!(base, changed, "{what} must draw again");
         }
+    }
+
+    /// The motions bodies are drawn moved by are part of what a frame draws: a still frame is
+    /// not blitted from the picture drawn before a body moved, moved otherwise or went back.
+    #[test]
+    fn a_frame_is_redrawn_when_a_bodys_motion_changes() {
+        let shift = |x: f32| [[1.0, 0.0, 0.0, x], [0.0, 1.0, 0.0, 0.0], [0.0, 0.0, 1.0, 0.0]];
+        let key = |motions: super::Motions| {
+            let mut f = cached_frame();
+            f.motions = motions;
+            super::frame_key(&f)
+        };
+        let base = key(super::Motions::new([(3, shift(1.0))]));
+        assert_eq!(base, key(super::Motions::new([(3, shift(1.0))])), "the same motion draws the same picture");
+        for (what, changed) in [
+            ("no motion", key(super::Motions::default())),
+            ("another motion", key(super::Motions::new([(3, shift(2.0))]))),
+            ("another body", key(super::Motions::new([(4, shift(1.0))]))),
+        ] {
+            assert_ne!(base, changed, "{what} must draw again");
+        }
+        // The uniform carries the range of slots that move (`screen.z` one past the last,
+        // `depth.w` the first): the vertex stages read the table only for a slot within it.
+        let range = |motions: super::Motions| {
+            let mut f = cached_frame();
+            f.motions = motions;
+            let bytes = super::uniform_bytes(&f, 64.0, 64.0, false, false);
+            let at = |i: usize| bytes.get(i..i + 4).and_then(|b| b.try_into().ok()).map(f32::from_le_bytes);
+            // `depth` is the uniform's floats 112 to 115, `screen` its floats 20 to 23.
+            (at(4 * 115), at(4 * 22))
+        };
+        assert_eq!(range(super::Motions::default()), (Some(0.0), Some(0.0)));
+        assert_eq!(range(super::Motions::new([(3, shift(1.0)), (9, shift(1.0))])), (Some(3.0), Some(10.0)));
+    }
+
+    /// A palette entry names its body's motion slot above the hatch byte of its second word; a
+    /// colour interned for a moved body is another entry than the same colour unmoved; a slot
+    /// the table does not have is none.
+    #[test]
+    fn a_palette_entry_names_its_motion_slot() {
+        use super::{MAX_MOTIONS, Palette, PaletteIndex, UNMOVED_SLOT};
+        let mut p = Palette::with_stable(vec![[1, 2, 3, 255], [4, 5, 6, 255]]).with_motions(vec![0, 9, 77]);
+        assert_eq!((p.motion(PaletteIndex(0)), p.motion(PaletteIndex(1)), p.motion(PaletteIndex(2))), (UNMOVED_SLOT, 9, UNMOVED_SLOT));
+        assert!(p.set_hatch(PaletteIndex(1), solidcraft_viewport::hatch::Hatch(2)));
+        assert_eq!(p.texel(1)[1], 3 | (9 << 8), "the hatch byte, the slot above it");
+        assert_eq!(p.texel(0)[1], 0);
+        let plain = p.intern([9, 9, 9, 255]);
+        let moved = p.intern_moved([9, 9, 9, 255], 12);
+        assert_ne!(plain, moved);
+        assert_eq!(p.intern_moved([9, 9, 9, 255], 12), moved, "found again");
+        assert_eq!((p.motion(plain), p.motion(moved)), (UNMOVED_SLOT, 12));
+        assert_eq!(p.intern_moved([9, 9, 9, 255], MAX_MOTIONS), plain, "a slot past the table is none");
+        assert!(!p.set_motion(PaletteIndex(0), MAX_MOTIONS) && !p.set_motion(PaletteIndex(99), 1));
+        assert!(p.set_motion(PaletteIndex(0), 5));
+        assert_eq!(p.motion(PaletteIndex(0)), 5);
+        // A changed colour of a moved entry is still found under its slot.
+        assert!(p.set(moved, [8, 8, 8, 255]));
+        assert_eq!(p.intern_moved([8, 8, 8, 255], 12), moved);
+        assert_eq!(Palette::with_stable(vec![[0; 4]]).with_motions(vec![MAX_MOTIONS]).motion(PaletteIndex(0)), UNMOVED_SLOT);
+        // An interned entry given another slot is found under that slot, and the colour unmoved
+        // gets an entry of its own again.
+        let mut q = Palette::default();
+        let entry = q.intern([7, 7, 7, 255]);
+        assert!(q.set_motion(entry, 4));
+        assert_eq!(q.intern_moved([7, 7, 7, 255], 4), entry);
+        assert_ne!(q.intern([7, 7, 7, 255]), entry, "the unmoved colour is not the entry that now moves");
+        // `with_motions` on a palette that has interned colours keys them by their new slots too.
+        let mut r = Palette::default();
+        let red = r.intern([9, 9, 9, 255]);
+        let mut slots = vec![UNMOVED_SLOT; red.0 as usize + 1];
+        slots[red.0 as usize] = 6;
+        let mut r = r.with_motions(slots);
+        assert_eq!(r.intern_moved([9, 9, 9, 255], 6), red, "found under the slot it now has");
+        assert_ne!(r.intern([9, 9, 9, 255]), red, "and no longer as the unmoved colour");
+    }
+
+    /// A body's box is tested for the view where its motion draws it, and a placement's where the
+    /// motion draws the placement: built outside the view and moved into it, both are in view;
+    /// built in view and moved out of it, neither is. On the CPU, so it runs without a GPU.
+    #[test]
+    fn a_box_is_in_view_where_its_motion_draws_it() {
+        use super::{Motions, placed_box_in_view};
+        // Clip space is the world here: the view is the unit box around the origin.
+        let vp = [[1.0, 0.0, 0.0, 0.0], [0.0, 1.0, 0.0, 0.0], [0.0, 0.0, 1.0, 0.0], [0.0, 0.0, 0.0, 1.0]];
+        let shift = |x: f32| [[1.0, 0.0, 0.0, x], [0.0, 1.0, 0.0, 0.0], [0.0, 0.0, 1.0, 0.0]];
+        let far = [[40.0, -0.2, 0.2], [40.4, 0.2, 0.6]];
+        let near = [[-0.2, -0.2, 0.2], [0.2, 0.2, 0.6]];
+        let motions = Motions::new([(3, shift(-40.2)), (4, shift(40.0))]);
+        assert!(!placed_box_in_view(&motions.of(0), &far, &vp), "built outside the view, unmoved");
+        assert!(placed_box_in_view(&motions.of(3), &far, &vp), "moved into the view");
+        assert!(placed_box_in_view(&motions.of(0), &near, &vp), "built in the view, unmoved");
+        assert!(!placed_box_in_view(&motions.of(4), &near, &vp), "moved out of the view");
+        // A placement at `far`'s place of a part around its own origin, then the body's motion.
+        let placement = shift(40.2);
+        assert!(!placed_box_in_view(&placement, &near, &vp));
+        assert!(placed_box_in_view(&super::motions::after(&motions.of(3), &placement), &near, &vp), "the placement moved into the view");
     }
 
     fn image(version: u64) -> super::GpuImage {
@@ -6828,6 +7140,33 @@ mod glass_tests {
         assert_ne!(middle_pixel(scene(1.5, 0.0, true), false), Some(red), "no hidden marker where it is seen");
     }
 
+    /// A flat colour comes out as the same bytes whether the window's surface is sRGB or not,
+    /// near black too: the shader decodes for an sRGB surface with sRGB's straight segment, which
+    /// the surface's encoding then undoes. Without that segment, 1/255 showed as 13/255.
+    /// Skipped without a GPU.
+    #[test]
+    fn a_dark_colour_shows_the_same_on_an_srgb_surface() {
+        let marker = |grey: u8| {
+            let mut sc = GpuScene::with_palette(Palette::with_stable(vec![[grey, grey, grey, 255]]));
+            let mut b = BlockBuilder::default();
+            b.marker([0.0, 0.0, 0.0], PaletteIndex(0), 8.0, false);
+            sc.blocks.push(SceneBlock { key: 1, bytes: b.freeze() });
+            sc
+        };
+        for grey in [1u8, 3, 8, 10, 11, 64, 128, 250] {
+            let on = |format| middle_pixel_on(format, marker(grey), GpuScene::default(), false, 1, [0.0; 4]);
+            let Some(plain) = on(wgpu::TextureFormat::Rgba8Unorm) else {
+                eprintln!("skipping: no GPU adapter");
+                return;
+            };
+            let srgb = on(wgpu::TextureFormat::Rgba8UnormSrgb).unwrap_or_default();
+            assert_eq!(plain[..3], [grey; 3], "the plain surface shows the colour as given");
+            for (s, p) in srgb.iter().zip(&plain).take(3) {
+                assert!(s.abs_diff(*p) <= 1, "{grey}/255 on an sRGB surface: {srgb:?}, on a plain one: {plain:?}");
+            }
+        }
+    }
+
     /// A PBR triangle seen from its back: black with a one-sided material (no light reaches the
     /// side its normal turns from), lit as its front with a two-sided one (an open sheet's back).
     #[test]
@@ -6960,10 +7299,14 @@ mod glass_tests {
 
     /// [`middle_pixel_in_slots_with_samples`] with a section cut (`Frame::clip`).
     fn middle_pixel_cut(scene: GpuScene, sketch: GpuScene, oit: bool, samples: u32, clip: [f32; 4]) -> Option<[u8; 4]> {
+        middle_pixel_on(wgpu::TextureFormat::Rgba8Unorm, scene, sketch, oit, samples, clip)
+    }
+
+    /// [`middle_pixel_cut`] into a target of `format`.
+    fn middle_pixel_on(format: wgpu::TextureFormat, scene: GpuScene, sketch: GpuScene, oit: bool, samples: u32, clip: [f32; 4]) -> Option<[u8; 4]> {
         const SIZE: u32 = 64;
         let (_, device, queue) = crate::open_headless(crate::test_env::policy()).ok()?;
         let depth = crate::depth_format(&device, true);
-        let format = wgpu::TextureFormat::Rgba8Unorm;
         let mut r = Renderer::new(&device, GpuTarget { format, depth: Some(depth), samples, tess: false, oit: false, edges: false }, None);
         assert!(r.oit.is_some(), "this device does order-independent transparency");
         if !oit {
@@ -7004,12 +7347,15 @@ mod glass_tests {
             eye: [0.0, 0.0, 100.0, 0.0],
             ao_radius: 0.0,
             ao_samples: crate::view::AO_SAMPLES,
+            edge_px: crate::view::EDGE_PX,
             sky: [0.0; 4],
             ssaa: 1.0,
             hover_tint: [0.0; 3],
             selection_tint: [0.0; 3],
             hatch: Default::default(),
             moving: None,
+            motions: Default::default(),
+            ground: None,
         };
         let texture = |format, usage, sample_count| {
             device.create_texture(&wgpu::TextureDescriptor {
@@ -7205,10 +7551,13 @@ mod glass_tests {
             selection_tint: [0.0; 3],
             hatch: Default::default(),
             moving: None,
+            motions: Default::default(),
+            ground: None,
             outline: false,
             eye: [0.0, 0.0, 100.0, 0.0],
             ao_radius: 0.0,
             ao_samples: crate::view::AO_SAMPLES,
+            edge_px: crate::view::EDGE_PX,
             sky: [0.0; 4],
             ssaa,
         }
@@ -7608,6 +7957,59 @@ mod glass_tests {
         let img = draw(2, segments, Vec::new());
         assert!(green(&img, ahead.0, ahead.1), "the bead ahead");
         assert!(!green(&img, below.0, below.1), "no wedge of bead below the eye");
+    }
+
+    /// An opaque face that reaches behind the eye still hides a face just behind it (#21024).
+    /// With reversed float depth the GPU counted a face's constant bias in steps of its largest
+    /// depth, which the near plane makes 1 for a face it cuts; a millimetre-near view (the near
+    /// plane at 1 µm) then pushed such a face back by a share of the depth range, and the face
+    /// behind (a box's bottom, seen from above, along its front's lower edge) showed through. The
+    /// push now follows each point's own depth.
+    #[test]
+    fn a_face_reaching_behind_the_eye_still_hides_the_face_behind_it() {
+        let Some((_, device, queue)) = crate::open_headless(crate::test_env::policy()).ok() else { return };
+        let depth = crate::depth_format(&device, true);
+        if !reversed_depth(Some(depth)) {
+            eprintln!("skipping: no float depth with stencil, so depth is not reversed here");
+            return;
+        }
+        let format = wgpu::TextureFormat::Rgba8Unorm;
+        // Looking along -z from the origin, the near plane at 1 µm as `Camera::clip_bounds` puts
+        // it when the model reaches past the eye.
+        let (near, far) = (0.001f32, 1000.0f32);
+        let (a, b) = (-far / (far - near), -far * near / (far - near));
+        let green_surface = solidcraft_viewport::surface::OpaqueSurface::new(Vec3::new(0.1, 0.8, 0.1), 0.0, 0.6, 1.5).unwrap();
+        // The near floor drawn as a plain triangle and as a material (PBR) one: each kind of
+        // opaque face takes the push in its own vertex shader.
+        for pbr in [false, true] {
+            // A renderer of its own: one that drew the first scene keeps it (same frame key).
+            let mut renderer =
+                Renderer::new(&device, GpuTarget { format, depth: Some(depth), samples: 1, tess: false, oit: false, edges: false }, None);
+            let mut sc = GpuScene::default();
+            let (green, red) = (sc.color([0, 200, 0, 255]), sc.color([200, 0, 0, 255]));
+            // A floor at y = -1 running from ahead of the eye to behind it, and another 0.1%
+            // further along the view (y = -1.001) that stays ahead of it.
+            for p in [[-4.0, -1.0, -6.0], [4.0, -1.0, -6.0], [0.0, -1.0, 5.0]] {
+                if pbr {
+                    sc.pbr_tri(p, [0.0, 1.0, 0.0], green_surface);
+                } else {
+                    sc.tri(p, [0.0, 1.0, 0.0], green);
+                }
+            }
+            for p in [[-4.0, -1.001, -6.0], [4.0, -1.001, -6.0], [0.0, -1.001, -0.5]] {
+                sc.tri(p, [0.0, 1.0, 0.0], red);
+            }
+            let mut frame = test_frame(sc, 1.0);
+            frame.view_proj = [[1.0, 0.0, 0.0, 0.0], [0.0, 1.0, 0.0, 0.0], [0.0, 0.0, a, -1.0], [0.0, 0.0, b, 0.0]];
+            frame.eye = [0.0, 0.0, 0.0, 1.0];
+            let img = render_frame(&mut renderer, &device, &queue, &frame, true);
+            // Row 42 of the 64 by 64 picture, its middle column: the floor 3 units ahead.
+            let at = (42 * 64 + 32) * 4;
+            let p = img.get(at..at + 3).unwrap_or_default();
+            // The far floor is red; the near one green (a material floor shades dark here, the
+            // frame giving it no lights) and the background white: no red, and something drawn.
+            assert!(p.len() == 3 && p[0] < 40, "the near floor (pbr: {pbr}) hides the one behind it: {p:?}");
+        }
     }
 
     /// A still view shows the picture it drew last: a reused frame (whose filtered picture is

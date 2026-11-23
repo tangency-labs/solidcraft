@@ -23,6 +23,9 @@ enum K {
     Pick,
     /// A list of picks: `[[x,y,z]…]` or `[{point|face|edge: [x,y,z], body?}…]`.
     Picks,
+    /// A list of picks on the body `tool.body` names, not `body`: Split Body's other tool faces
+    /// lie on its tool, and `body` is what it cuts (#9305).
+    ToolPicks,
     /// A point that places new geometry: into the active component's frame.
     Make,
     /// A direction: turned with the command's frame.
@@ -64,6 +67,11 @@ fn table(id: &str) -> &'static [(&'static str, K)] {
             &[("face", Pick), ("faces", Picks), ("face_body", Body), ("from", Make), ("to", Make), ("targets", Body), ("participants", Body)]
         }
         "solid.revolve" => &[("face", Pick), ("axis", Axis), ("to", Make), ("targets", Body), ("participants", Body)],
+        // A sweep profile given as a body face: the face point, in the frame of the body under it.
+        // The sweep's own geometry (its path on a body's edges, the direction its profile follows)
+        // stays in the world, and goes into the active component's frame
+        // (`to_active_frame_geometry`).
+        "solid.sweep" => &[("face", Pick), ("face_body", Body)],
         // Edit Feature of a surface revolve (`map_local`): its `{origin, dir}` axis. A new surface
         // revolve has no entry, so it is taken into the active frame whole (`to_active_frame`),
         // picked edge and face axes too.
@@ -71,7 +79,7 @@ fn table(id: &str) -> &'static [(&'static str, K)] {
         "solid.box" | "solid.sphere" => &[("corner", Make), ("center", Make)],
         "solid.cylinder" | "solid.coil" | "solid.torus" | "solid.cone" => &[("base", Make), ("center", Make), ("axis", Dir)],
         "solid.fillet" | "solid.chamfer" => &[("edges", Picks), ("body", Body)],
-        "solid.hole" => &[("position", Pick), ("direction", Dir), ("body", Body)],
+        "solid.hole" => &[("position", Pick), ("references", Picks), ("direction", Dir), ("body", Body)],
         "solid.scale" => &[("origin", Make), ("bodies", Body)],
         "solid.offset_face" | "solid.shell" | "face.delete" => &[("faces", Picks), ("body", Body)],
         "solid.thread" => &[("face", Pick), ("faces", Picks), ("from", Pick), ("up_to", Plane)],
@@ -86,7 +94,7 @@ fn table(id: &str) -> &'static [(&'static str, K)] {
         // A mirror keeps the placement its bodies were picked at (`cmd::features::placed_bodies`);
         // its plane is in the active component, where the copies go.
         "solid.mirror" => &[("plane", HerePlane)],
-        "solid.split_body" => &[("plane", Plane), ("tool", Picks), ("bodies", Body), ("body", Body)],
+        "solid.split_body" => &[("plane", Plane), ("tool", Picks), ("tool_faces", ToolPicks), ("bodies", Body), ("body", Body)],
         "plastic.boss" | "plastic.snap_fit" | "plastic.rest" => {
             &[("position", Pick), ("direction", Dir), ("hook", Dir), ("along", Dir), ("body", Body)]
         }
@@ -944,13 +952,14 @@ fn map_local_with_input(
     for pass in [true, false] {
         for (k, kind) in keys {
             let Some(v) = obj.get(*k) else { continue };
-            let is_pick = matches!(kind, Pick | Picks | Plane | Here | HerePlane);
+            let is_pick = matches!(kind, Pick | Picks | ToolPicks | Plane | Here | HerePlane);
             if is_pick != pass {
                 continue;
             }
             let new = match kind {
                 Pick => m.pick(v, body.as_deref()),
                 Picks => m.picks(v, body.as_deref()),
+                ToolPicks => m.picks(v, obj.get("tool").and_then(|t| t.get("body")).and_then(Value::as_str)),
                 Make => m.make(v),
                 Dir => m.dir(v),
                 Delta => m.dir(v).or_else(|| {
