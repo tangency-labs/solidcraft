@@ -386,7 +386,15 @@ keeps the alignment: the new point gets a Horizontal or Vertical constraint with
 point it lined up with, in the shape's undo step, unless the sketch already sets it. With the
 preference off, drawing lines up only with the previous point, one axis at a time.
 
-Enable **3D Sketch** in the Sketch Palette to draw lines, fit splines and points off the plane.
+Enable **3D Sketch** in the Sketch Palette to draw lines, arcs, splines and points off the plane.
+
+A 3D sketch has two kinds of spline. **3D Spline** passes through every point you click.
+**3D Control Point Spline** starts on the first point you click and ends on the last; the points
+between are control points that pull the curve towards them without lying on it. A dashed
+polygon joins the control points. Drag a control point to reshape the curve, as you drag a fit
+point: the curve stays smooth along its whole length. The Control Point Spline tool on the Sketch
+tab draws the same curve when a click leaves the sketch plane. Pipe, Sweep and Loft follow either
+kind of spline as a path or a rail.
 
 Enable **Select 3D sketch curve points** in **Preferences > Sketch** to show and select drawn
 3D curve points as construction references after finishing the sketch. This option is off by default.
@@ -399,9 +407,10 @@ line, start Line and click an endpoint on each source sketch; each endpoint uses
 plane, even when that plane differs from the active sketch. These snaps capture positions;
 they do not create associative links to the source points.
 New 3D geometry follows its sketch's component placement, including the selected occurrence
-and pending position changes. Click a drawn fit point to show its move triad; its arrows move
-along world X, Y and Z. Scripts also supply world coordinates to `sketch.line3d`,
-`sketch.spline3d`, `sketch.point3d` and `sketch.move3d`. Activate the desired occurrence before
+and pending position changes. Click a drawn fit point or control point to show its move triad;
+its arrows move along world X, Y and Z. Scripts also supply world coordinates to `sketch.line3d`,
+`sketch.arc3d`, `sketch.spline3d`, `sketch.spline3d.control_point`, `sketch.point3d` and
+`sketch.move3d`. Activate the desired occurrence before
 editing an explicit sketch belonging to a component with multiple placements.
 
 Older drawn or detached 3D wires keep their saved world positions. Included and surface-linked

@@ -1463,6 +1463,19 @@ pub struct SketchWire {
     pub link: Option<String>,
     /// For an exact circular arc: its geometry; `null` otherwise.
     pub arc: Option<WireArcInfo>,
+    /// For a control point spline: its degree and control points; left out otherwise.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub control: Option<WireControlInfo>,
+}
+
+/// A control point spline of a 3D sketch: the B-spline over its control points.
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct WireControlInfo {
+    /// The degree of the curve (3: cubic). With fewer control points than the degree plus one,
+    /// the curve has one less than their count.
+    pub degree: u8,
+    /// The control points, in order. The curve passes through the first and the last only.
+    pub points: Vec<[f64; 3]>,
 }
 
 /// An exact circular arc of a 3D curve.

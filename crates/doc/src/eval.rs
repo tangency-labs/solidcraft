@@ -9707,7 +9707,8 @@ fn path_curves(doc: &Document, st: &ModelState, path: &[crate::PathEntry], path_
 /// A path that uses 3D sketch curves (wires), as one chain of pieces put in order from the end
 /// nearest `start` (no start: the first curve runs toward the second): each drawn 3D spline as
 /// its fit points (the kernel has its exact curve), each curve held exactly (a planar sketch
-/// curve, a linked curve with [`solidcraft_sketch::Wire::exact`]) as its path segments, and a
+/// curve, a drawn 3D control point spline, a linked curve with
+/// [`solidcraft_sketch::Wire::exact`]) as its path segments, and a
 /// linked curve known only as points as those points. `None` when the path is all planar curves.
 fn path_points(curves: &[PathCurve], start: Vec3) -> Result<Option<kernel::PointPath>> {
     if !curves.iter().any(|c| c.ss.sketch.wire_index(&c.id).is_some()) {
@@ -9728,6 +9729,12 @@ fn path_points(curves: &[PathCurve], start: Vec3) -> Result<Option<kernel::Point
                     let frame = solidcore_record::brep::Frame { origin: arc.center.into(), x_axis: x.into(), y_axis: y.into() };
                     let circle = solidcore_record::brep::Curve::Circle { frame, radius: arc.radius };
                     kernel::PathPiece::Segs(kernel::curve_path(&circle, [0.0, solidcraft_sketch::arc_sweep(arc)])?)
+                }
+                // A drawn control point spline is its B-spline, as its Bézier spans (a spline
+                // through its control points is another curve).
+                Some(w) if w.control.is_some() => {
+                    let c = w.control_curve().ok_or_else(|| DocError::Invalid(format!("3D control point spline `{}` has no curve", w.id)))?;
+                    kernel::PathPiece::Segs(kernel::curve_path(&c.curve, c.interval)?)
                 }
                 Some(w) if w.fit.len() >= 3 => kernel::PathPiece::Spline { fit: w.fit.clone(), reversed: false },
                 Some(w) if !w.exact.is_empty() => {
