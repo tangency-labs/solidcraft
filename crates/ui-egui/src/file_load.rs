@@ -115,7 +115,7 @@ pub struct Request {
     /// Open the file with an importer plugin (`file.import`) even when SolidCraft reads it too.
     pub plugin_import: bool,
     /// Consent from an entry dialog for this request only; never populated from command params.
-    pub(crate) plugin_folders: Option<solidcraft_engine::plugin::folders::DialogFolders>,
+    pub(crate) plugin_folders: Option<Box<solidcraft_engine::plugin::folders::DialogFolders>>,
     /// An export written to be printed: once written it opens in the system's PDF viewer
     /// ([`crate::drawing_workspace::print::written`]).
     pub print: bool,
@@ -913,7 +913,7 @@ fn start(app: &mut SolveApp) {
     scratch.set_validation(app.preferences.validation);
     // A file an importer plugin reads opens with the plugins the user installed and left on.
     scratch.plugin_state = app.session.plugin_state.clone();
-    scratch.plugin_state.dialog_folders = request.plugin_folders.clone();
+    scratch.plugin_state.user.dialog_folders = request.plugin_folders.as_deref().cloned();
     scratch.disabled_plugins = app.session.disabled_plugins.clone();
     scratch.plugin_limits = app.session.plugin_limits;
     crate::print_face_ui::sync(&mut scratch, &app.preferences);
@@ -2220,7 +2220,7 @@ mod tests {
             assert!(consent.folders[0].read && !consent.folders[0].write);
             assert!(h.app.plugin_menu.dialogs.is_empty());
             h.app.file_load.cancel();
-            assert!(h.app.file_load.idle() && h.app.session.plugin_state.dialog_folders.is_none());
+            assert!(h.app.file_load.idle() && h.app.session.plugin_state.user.dialog_folders.is_none());
         }
     }
 
@@ -2291,7 +2291,7 @@ mod tests {
         let doc = solidcraft_engine::doc::Document::new("Imported settings");
         std::fs::write(&path, solidcraft_engine::io::write_design(&doc).unwrap()).unwrap();
         h.app.session.plugin_state.plugins_dir = Some(h.dir.join("plugins"));
-        h.app.session.plugin_state.user_settings_dir = Some(h.dir.join("settings"));
+        h.app.session.plugin_state.user.user_settings_dir = Some(h.dir.join("settings"));
         let mut scratch = Session::default();
         scratch.plugin_state = h.app.session.plugin_state.clone();
         let request = Request::new(&path.to_string_lossy(), Kind::Open);

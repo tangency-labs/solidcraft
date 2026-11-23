@@ -3119,7 +3119,7 @@ mod native {
         run(&mut h.app).unwrap();
         settle(&mut h);
         assert!(h.app.plugin_menu.dialogs.is_empty(), "a successful edit must be accepted from its worker");
-        assert!(h.app.session.plugin_state.dialog_folders.is_none());
+        assert!(h.app.session.plugin_state.user.dialog_folders.is_none());
         assert!(h.app.session.plugin_state.grants.is_empty() && h.app.preferences.plugin_grants.is_empty());
         std::fs::remove_dir_all(root).unwrap();
     }

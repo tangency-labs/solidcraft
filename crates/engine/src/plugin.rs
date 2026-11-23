@@ -73,6 +73,20 @@ pub struct Grants {
     pub input_folder: bool,
 }
 
+/// The consent and per-user settings half of [`AppState`], behind a box.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct UserState {
+    /// One UI request's consent, never serialised or persisted. Consumed before entering a guest.
+    pub dialog_folders: Option<folders::DialogFolders>,
+    /// Settings location supplied by the app or tests; otherwise the user's native settings folder.
+    pub user_settings_dir: Option<PathBuf>,
+    /// The authenticated command plugin for this run, only when it requests user-storage.
+    pub user_storage_caller: Option<String>,
+    /// Worker-local settings travel with the candidate session until the app accepts it.
+    pub(crate) defer_user_settings: bool,
+    pub(crate) pending_user_settings: BTreeMap<String, (PathBuf, user_storage::Pending)>,
+}
+
 /// Trusted host state, never loaded from a design or supplied by guest code.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct AppState {
@@ -98,8 +112,6 @@ pub struct AppState {
     pub grants: BTreeMap<String, Grants>,
     /// Adapter folder grants for the active call; runtime calls use the package's approved grants.
     pub file_grants: Vec<FileGrant>,
-    /// One UI request's consent, never serialised or persisted. Consumed before entering a guest.
-    pub dialog_folders: Option<folders::DialogFolders>,
     /// Legacy embedding state. Runtime permissions come exclusively from grants bound to package hashes.
     pub command_groups: BTreeSet<String>,
     /// Where `plugin.install` writes and `plugin.list` looks; `None`: the per-user
@@ -108,13 +120,9 @@ pub struct AppState {
     /// The plugin whose run is under way, when it keeps data in designs (`storage@0.1`): the only
     /// one that may change plugin data, and only its own. Set by the host for that run alone.
     pub storage_caller: Option<storage::StorageCaller>,
-    /// Settings location supplied by the app or tests; otherwise the user's native settings folder.
-    pub user_settings_dir: Option<PathBuf>,
-    /// The authenticated command plugin for this run, only when it requests user-storage.
-    pub user_storage_caller: Option<String>,
-    /// Worker-local settings travel with the candidate session until the app accepts it.
-    pub(crate) defer_user_settings: bool,
-    pub(crate) pending_user_settings: BTreeMap<String, (PathBuf, user_storage::Pending)>,
+    /// Per-request consent and per-user settings state, boxed so a session stays small (sessions
+    /// are copied by value on deep call paths).
+    pub user: Box<UserState>,
     /// Set when `grants` is kept in the plugins folder's grant store between sessions (the command
     /// line and headless MCP with `--keep-plugin-approvals`): what this session last read from or wrote to it. `None`: the
     /// grants live only in this session, or the app keeps them itself (the desktop app).
@@ -124,15 +132,15 @@ pub struct AppState {
 impl AppState {
     /// Compute without publishing settings. Dropping the candidate discards its changes.
     pub fn defer_user_settings(&mut self) {
-        self.defer_user_settings = true;
+        self.user.defer_user_settings = true;
     }
 
     /// Call after final cancellation/context checks, immediately before adopting the candidate.
     /// A conflict leaves both the live design and all settings records unchanged.
     pub fn publish_user_settings(&mut self) -> craft_plugin::Result<()> {
-        user_storage::publish_all(&self.pending_user_settings)?;
-        self.pending_user_settings.clear();
-        self.defer_user_settings = false;
+        user_storage::publish_all(&self.user.pending_user_settings)?;
+        self.user.pending_user_settings.clear();
+        self.user.defer_user_settings = false;
         Ok(())
     }
 
@@ -153,7 +161,7 @@ impl AppState {
     }
 
     pub fn user_settings_dir(&self) -> Option<PathBuf> {
-        self.user_settings_dir.clone().or_else(user_storage::settings_dir)
+        self.user.user_settings_dir.clone().or_else(user_storage::settings_dir)
     }
 
     /// Listener caches and panel frame adoption do not revoke an in-flight command's authority.
@@ -163,12 +171,12 @@ impl AppState {
             && self.ui_caller == other.ui_caller
             && self.grants == other.grants
             && self.file_grants == other.file_grants
-            && self.dialog_folders == other.dialog_folders
+            && self.user.dialog_folders == other.user.dialog_folders
             && self.command_groups == other.command_groups
             && self.plugins_dir == other.plugins_dir
             && self.storage_caller == other.storage_caller
-            && self.user_settings_dir == other.user_settings_dir
-            && self.user_storage_caller == other.user_storage_caller
+            && self.user.user_settings_dir == other.user.user_settings_dir
+            && self.user.user_storage_caller == other.user.user_storage_caller
             && self.stored == other.stored
     }
     /// The installed plugins' folder, if this platform has one.
@@ -457,7 +465,7 @@ fn update_dialog_with_schema(
     #[cfg(all(feature = "plugins", any(target_arch = "x86_64", target_arch = "aarch64")))]
     let result = {
         let mut scratch = session.scratch();
-        scratch.plugin_state.user_storage_caller =
+        scratch.plugin_state.user.user_storage_caller =
             package.manifest.granted_capabilities().iter().any(|c| c.starts_with("user-storage@")).then(|| package.manifest.id.clone());
         let host = SolidCraftHost {
             session: scratch,
@@ -520,7 +528,7 @@ fn run_package(
     params: &serde_json::Value,
     ui_event: Option<&ui::UiEvent>,
 ) -> Result<crate::schema::plugin::RunResult> {
-    let consent = session.plugin_state.dialog_folders.take();
+    let consent = session.plugin_state.user.dialog_folders.take();
     session.plugin_state.refresh_stored();
     if session.disabled_plugins.contains(&package.manifest.id) {
         return Err(error("plugin is disabled"));
@@ -561,7 +569,7 @@ fn run_package(
         panels::register_package(&mut scratch, &package)?;
         scratch.plugin_state.ui_caller = Some(package.manifest.id.clone());
         scratch.plugin_state.file_grants = grants.folders;
-        scratch.plugin_state.user_storage_caller =
+        scratch.plugin_state.user.user_storage_caller =
             package.manifest.granted_capabilities().iter().any(|c| c.starts_with("user-storage@")).then(|| package.manifest.id.clone());
         scratch.plugin_state.storage_caller = rt
             .data_format
@@ -596,7 +604,7 @@ fn run_package(
             None => craft_plugin_wasm::run(host, &package.manifest, &package.component, entry, params),
         };
         let value = result?;
-        session.plugin_state.pending_user_settings = host.session.plugin_state.pending_user_settings.clone();
+        session.plugin_state.user.pending_user_settings = host.session.plugin_state.user.pending_user_settings.clone();
         session.plugin_state.panels.clone_from(&host.session.plugin_state.panels);
         if !std::sync::Arc::ptr_eq(&session.doc, &host.session.doc)
             || session.active_sketch != host.session.active_sketch
@@ -687,7 +695,7 @@ pub struct SolidCraftHost {
 impl SolidCraftHost {
     fn user_storage_identity(&self) -> craft_plugin::Result<(PathBuf, String)> {
         let id =
-            self.session.plugin_state.user_storage_caller.clone().filter(|id| valid_id(id)).ok_or_else(|| HostError::PermissionDenied {
+            self.session.plugin_state.user.user_storage_caller.clone().filter(|id| valid_id(id)).ok_or_else(|| HostError::PermissionDenied {
                 permission: "user-storage: only the plugin's own entries may access its data".into(),
             })?;
         let settings = self
@@ -703,7 +711,7 @@ impl SolidCraftHost {
         }
         let (settings, id) = self.user_storage_identity()?;
         if self.user_data.is_none() {
-            self.user_data = Some(match self.session.plugin_state.pending_user_settings.get(&id) {
+            self.user_data = Some(match self.session.plugin_state.user.pending_user_settings.get(&id) {
                 Some((folder, pending)) if folder == &settings => pending.clone(),
                 _ => user_storage::Pending::load(&settings, &id)?,
             });
@@ -891,12 +899,12 @@ impl PluginHost for SolidCraftHost {
         }
         // What the outer session had staged before this run; anything the transaction holds beyond
         // it was staged by a nested import (`doc.open`) and must survive the commit.
-        let base = self.session.plugin_state.pending_user_settings.clone();
+        let base = self.session.plugin_state.user.pending_user_settings.clone();
         let mut keep_for_publication = false;
         if let Some(data) = &self.user_data {
             let (settings, id) = self.user_storage_identity()?;
-            if self.session.plugin_state.defer_user_settings {
-                self.session.plugin_state.pending_user_settings.insert(id, (settings, data.clone()));
+            if self.session.plugin_state.user.defer_user_settings {
+                self.session.plugin_state.user.pending_user_settings.insert(id, (settings, data.clone()));
             } else {
                 // A stale record refuses the run now; the write waits for `publish_committed`, which
                 // runs only after the approved files are in place.
@@ -912,8 +920,8 @@ impl PluginHost for SolidCraftHost {
         // Merge, never replace: the transaction's own staged entries (a nested import's) join the
         // outer session's. An id staged by both is resolved in favour of the later, inner (nested)
         // stage; an inner entry identical to what it started from is not a stage and never wins.
-        let inner = std::mem::take(&mut computed.plugin_state.pending_user_settings);
-        let mut merged = self.session.plugin_state.pending_user_settings.clone();
+        let inner = std::mem::take(&mut computed.plugin_state.user.pending_user_settings);
+        let mut merged = self.session.plugin_state.user.pending_user_settings.clone();
         for (id, entry) in inner {
             // A clean inner record (a nested read) never replaces the outer's unpublished write.
             let outer_write = merged.get(&id).is_some_and(|(_, outer)| outer.is_dirty());
@@ -921,8 +929,8 @@ impl PluginHost for SolidCraftHost {
                 merged.insert(id, entry);
             }
         }
-        self.session.plugin_state.pending_user_settings = merged.clone();
-        computed.plugin_state.pending_user_settings = merged;
+        self.session.plugin_state.user.pending_user_settings = merged.clone();
+        computed.plugin_state.user.pending_user_settings = merged;
         computed.undo.clear();
         computed.redo.clear();
         self.session.plugin_state.panels.clone_from(&computed.plugin_state.panels);

@@ -1023,7 +1023,7 @@ mod native {
         let source = include_str!("../../../craft-plugin-wasm/src/user_storage_fixture.wat").replace("__CODE__", code);
         std::fs::write(f.0.join("sample/plugin.wasm"), wat::parse_str(source).unwrap()).unwrap();
         let mut session = Session::default();
-        session.plugin_state.user_settings_dir = Some(settings.clone());
+        session.plugin_state.user.user_settings_dir = Some(settings.clone());
         let approval = session.execute("plugin.inspect", &json!({"path":f.path()})).unwrap()["approval"].clone();
         let calls = vec![
             ("plugin.run".into(), json!({"path":f.path(),"approval":approval,"entry":"make","params":{}})),
@@ -1068,7 +1068,7 @@ mod native {
             std::fs::write(f.0.join("sample/plugin.wasm"), wat::parse_str(fixture.replace("__CODE__", code)).unwrap()).unwrap();
         };
         let mut first = Session::new(solidcraft_doc::Document::new("First design"));
-        first.plugin_state.user_settings_dir = Some(settings.clone());
+        first.plugin_state.user.user_settings_dir = Some(settings.clone());
         let before = first.doc.clone();
         put_component(write);
         f.run(&mut first).unwrap();
@@ -1076,7 +1076,7 @@ mod native {
         assert!(first.doc.plugin_data.is_empty());
         drop(first);
         let mut second = Session::new(solidcraft_doc::Document::new("Another design"));
-        second.plugin_state.user_settings_dir = Some(settings.clone());
+        second.plugin_state.user.user_settings_dir = Some(settings.clone());
         put_component("i32.const 512 i32.const 5 i32.const 128 call $get i32.const 132 i32.load i32.const 1 i32.ne if unreachable end");
         f.run(&mut second).unwrap();
         assert_eq!(user_storage::load(&settings, "sample").unwrap()["hinge"], json!(42));
@@ -1362,8 +1362,8 @@ mod native {
         std::fs::write(f.0.join("sample/plugin.wasm"), wat::parse_str(source).unwrap()).unwrap();
         let mut s = Session::default();
         let settings = f.0.join("settings");
-        s.plugin_state.user_settings_dir = Some(settings.clone());
-        s.plugin_state.user_storage_caller = Some("other".into());
+        s.plugin_state.user.user_settings_dir = Some(settings.clone());
+        s.plugin_state.user.user_storage_caller = Some("other".into());
         let saved = BTreeMap::from([("hinge".into(), json!(42))]);
         let other = BTreeMap::from([("hinge".into(), json!(17))]);
         user_storage::save(&settings, "sample", &saved).unwrap();
@@ -1373,7 +1373,7 @@ mod native {
         let update = update_dialog(&s, &package, "make", &json!({}), &BTreeSet::new(), false).unwrap();
         assert!(update.warning.is_none(), "{:?}", update.warning);
         assert_eq!(update.values, json!({}));
-        assert_eq!(s.plugin_state.user_storage_caller.as_deref(), Some("other"));
+        assert_eq!(s.plugin_state.user.user_storage_caller.as_deref(), Some("other"));
         assert_eq!(s.design_token(), before);
         assert!(s.undo.is_empty());
         assert_eq!(user_storage::load(&settings, "sample").unwrap(), saved);
@@ -1499,14 +1499,14 @@ mod native {
         let approval = s.execute("plugin.inspect", &json!({"path":f.path()})).unwrap()["approval"].clone();
         let args = json!({"path":f.path(),"approval":approval,"entry":"make","expected_design":s.design_token()});
         let prepared = s.scratch().compute_commands(&[("plugin.run".into(), args)], None).unwrap();
-        s.plugin_state.dialog_folders = Some(folders::DialogFolders {
+        s.plugin_state.user.dialog_folders = Some(folders::DialogFolders {
             plugin: "sample".into(),
             approval: approval.as_str().unwrap().into(),
             entry: "make".into(),
             folders: Vec::new(),
         });
         assert!(!prepared.is_current(&s), "changed folder consent invalidates the worker's execution context");
-        s.plugin_state.dialog_folders = None;
+        s.plugin_state.user.dialog_folders = None;
         std::sync::Arc::make_mut(&mut s.plugin_state.listener_data).insert("sample.refresh".into(), json!({"status":"updated"}));
         s.plugin_state.listener_failures.insert("another".into(), "refused edit".into());
         s.accept_commands(prepared).unwrap();
@@ -3083,7 +3083,7 @@ mod importers {
         std::fs::write(root.join("plugins/smp/plugin.json"), manifest.to_string()).unwrap();
         let fixture = include_str!("../../../craft-plugin-wasm/src/importer_storage_fixture.wat");
         std::fs::write(root.join("plugins/smp/importer.wasm"), wat::parse_str(fixture.replace("__CODE__", code)).unwrap()).unwrap();
-        s.plugin_state.user_settings_dir = Some(root.join("settings"));
+        s.plugin_state.user.user_settings_dir = Some(root.join("settings"));
         (s, root)
     }
 
@@ -3109,7 +3109,7 @@ mod importers {
         assert_eq!(dialog.file.extension, "smp");
         assert!(!dialog.hook);
         assert!(!root.join("settings/plugin-user-data/smp.json").exists(), "choosing a file executes no importer");
-        session.plugin_state.dialog_folders = Some(folders::DialogFolders {
+        session.plugin_state.user.dialog_folders = Some(folders::DialogFolders {
             plugin: "smp".into(),
             approval: package.approval,
             entry: "convert".into(),
@@ -3117,7 +3117,7 @@ mod importers {
         });
         session.execute("file.import", &json!({"path":file,"options":options})).unwrap();
         assert_eq!(user_storage::load(&root.join("settings"), "smp").unwrap()["hinge"], json!(42));
-        assert!(session.plugin_state.dialog_folders.is_none());
+        assert!(session.plugin_state.user.dialog_folders.is_none());
         assert!(session.doc.plugin_data.is_empty() && session.undo.is_empty());
         std::fs::remove_dir_all(root).unwrap();
     }
@@ -3154,7 +3154,7 @@ mod importers {
         drop(first);
         let mut second = Session::default();
         second.plugin_state.plugins_dir = Some(root.join("plugins"));
-        second.plugin_state.user_settings_dir = Some(settings.clone());
+        second.plugin_state.user.user_settings_dir = Some(settings.clone());
         let importer = importer_for(&second, &file, None).unwrap().unwrap();
         import_file(&mut second, &importer, &file, &json!({"again":true})).unwrap();
         assert!(second.undo.is_empty() && second.doc.plugin_data.is_empty());
@@ -3278,14 +3278,14 @@ mod importers {
         let importer = importer_for(&s, &file, None).unwrap().unwrap();
         let params = json!({"library":library});
         assert!(import_file(&mut s, &importer, &file, &params).is_err());
-        s.plugin_state.dialog_folders = Some(folders::DialogFolders {
+        s.plugin_state.user.dialog_folders = Some(folders::DialogFolders {
             plugin: "smp".into(),
             approval: package.approval,
             entry: "convert".into(),
             folders: vec![FileGrant { name: "library".into(), folder: library, read: true, write: false }],
         });
         assert!(import_file(&mut s, &importer, &file, &params).is_ok());
-        assert!(s.plugin_state.dialog_folders.is_none() && s.plugin_state.grants.is_empty());
+        assert!(s.plugin_state.user.dialog_folders.is_none() && s.plugin_state.grants.is_empty());
         assert!(import_file(&mut s, &importer, &file, &params).is_err(), "a later programmatic call gets no consent");
         std::fs::remove_dir_all(root).unwrap();
     }
@@ -3871,8 +3871,8 @@ mod install_zip {
     #[test]
     fn uninstall_keeps_user_data_unless_explicitly_removed() {
         let (mut s, root) = session("user-data-removal");
-        s.plugin_state.user_settings_dir = Some(root.join("settings"));
-        let settings = s.plugin_state.user_settings_dir.clone().unwrap();
+        s.plugin_state.user.user_settings_dir = Some(root.join("settings"));
+        let settings = s.plugin_state.user.user_settings_dir.clone().unwrap();
         user_storage::save(&settings, "sample", &BTreeMap::from([("hinge".into(), json!(42))])).unwrap();
         user_storage::save(&settings, "other", &BTreeMap::from([("keep".into(), json!(true))])).unwrap();
         for params in [json!({"id":"sample"}), json!({"id":"sample", "remove_user_data":false}), json!({"id":"sample", "remove_user_data":true})] {
@@ -3890,7 +3890,7 @@ mod install_zip {
         let (mut s, root) = session("user-data-removal-scope");
         let plugins = root.join("plugins");
         let settings = root.join("settings");
-        s.plugin_state.user_settings_dir = Some(settings.clone());
+        s.plugin_state.user.user_settings_dir = Some(settings.clone());
         s.plugin_state.stored = Some(Default::default());
         std::fs::create_dir_all(plugins.join("sample")).unwrap();
         let saved = BTreeMap::from([("hinge".into(), json!(42))]);
@@ -4363,8 +4363,8 @@ mod install_zip {
 
 fn user_storage_host(root: &Path, id: &str) -> SolidCraftHost {
     let mut session = Session::new(solidcraft_doc::Document::new("A different design"));
-    session.plugin_state.user_settings_dir = Some(root.to_path_buf());
-    session.plugin_state.user_storage_caller = Some(id.into());
+    session.plugin_state.user.user_settings_dir = Some(root.to_path_buf());
+    session.plugin_state.user.user_storage_caller = Some(id.into());
     SolidCraftHost {
         input_folders: Vec::new(),
         forms: Vec::new(),
@@ -4413,7 +4413,7 @@ fn user_storage_persists_across_sessions_and_designs_and_is_private_and_undo_fre
     reopened.commit_transaction().unwrap();
     reopened.publish_committed().unwrap();
     assert_eq!(user_storage::load(&root, "other").unwrap()["hinge"], json!(17));
-    host.session.plugin_state.user_storage_caller = None;
+    host.session.plugin_state.user.user_storage_caller = None;
     host.begin_transaction().unwrap();
     assert!(matches!(host.user_storage_list(), Err(HostError::PermissionDenied { .. })));
     assert!(user_storage::load(&root, "../other").is_err());
@@ -4868,7 +4868,7 @@ fn a_settings_batch_conflict_publishes_none_of_its_records() {
     for id in ["first", "last"] {
         let mut data = user_storage::Pending::load(&root, id).unwrap();
         data.set("candidate", &json!(true)).unwrap();
-        state.pending_user_settings.insert(id.into(), (root.clone(), data));
+        state.user.pending_user_settings.insert(id.into(), (root.clone(), data));
     }
     user_storage::save(&root, "last", &BTreeMap::from([("external".into(), json!(true))])).unwrap();
     assert!(matches!(state.publish_user_settings(), Err(HostError::UserStorageConflict { .. })));
@@ -4887,7 +4887,7 @@ fn a_failed_settings_save_in_a_batch_restores_the_records_already_replaced() {
     for id in ["first", "last"] {
         let mut data = user_storage::Pending::load(&root, id).unwrap();
         data.set("candidate", &json!(true)).unwrap();
-        state.pending_user_settings.insert(id.into(), (root.clone(), data));
+        state.user.pending_user_settings.insert(id.into(), (root.clone(), data));
     }
     // "first" saves, then the save of "last" fails.
     user_storage::fail_batch_save_at(Some(1));
@@ -4928,7 +4928,7 @@ fn settings_staged_by_a_nested_import_survive_the_outer_commit() {
     let root = solidcraft_io::vfs::temp_dir().join(format!("sc-settings-nested-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&root);
     let mut host = user_storage_host(&root, "gears");
-    host.session.plugin_state.defer_user_settings = true;
+    host.session.plugin_state.user.defer_user_settings = true;
     host.begin_transaction().unwrap();
     host.user_storage_set("outer", &json!(1)).unwrap();
     // A `doc.open` through an importer with user-storage stages its settings in the transaction.
@@ -4936,7 +4936,7 @@ fn settings_staged_by_a_nested_import_survive_the_outer_commit() {
     for (id, key) in [("nested", "inner"), ("gears", "inner")] {
         let mut data = user_storage::Pending::load(&root, id).unwrap();
         data.set(key, &json!(2)).unwrap();
-        transaction.plugin_state.pending_user_settings.insert(id.into(), (root.clone(), data));
+        transaction.plugin_state.user.pending_user_settings.insert(id.into(), (root.clone(), data));
     }
     host.commit_transaction().unwrap();
     assert!(user_storage::load(&root, "nested").unwrap().is_empty(), "deferred until the outer run is accepted");
@@ -4952,12 +4952,12 @@ fn a_clean_nested_settings_read_does_not_replace_the_outer_write() {
     let root = solidcraft_io::vfs::temp_dir().join(format!("sc-settings-nested-read-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&root);
     let mut host = user_storage_host(&root, "gears");
-    host.session.plugin_state.defer_user_settings = true;
+    host.session.plugin_state.user.defer_user_settings = true;
     host.begin_transaction().unwrap();
     host.user_storage_set("outer", &json!(1)).unwrap();
     // The nested entry only read the record: its staged copy is clean.
     let clean = user_storage::Pending::load(&root, "gears").unwrap();
-    host.transaction.as_mut().unwrap().plugin_state.pending_user_settings.insert("gears".into(), (root.clone(), clean));
+    host.transaction.as_mut().unwrap().plugin_state.user.pending_user_settings.insert("gears".into(), (root.clone(), clean));
     host.commit_transaction().unwrap();
     host.session.plugin_state.publish_user_settings().unwrap();
     assert_eq!(user_storage::load(&root, "gears").unwrap(), BTreeMap::from([("outer".into(), json!(1))]));
@@ -4976,7 +4976,7 @@ fn a_failed_batch_save_restores_a_formatted_record_so_the_batch_can_retry() {
     for id in ["first", "last"] {
         let mut data = user_storage::Pending::load(&root, id).unwrap();
         data.set("candidate", &json!(true)).unwrap();
-        state.pending_user_settings.insert(id.into(), (root.clone(), data));
+        state.user.pending_user_settings.insert(id.into(), (root.clone(), data));
     }
     user_storage::fail_batch_save_at(Some(1));
     assert!(state.publish_user_settings().is_err());
@@ -4985,4 +4985,11 @@ fn a_failed_batch_save_restores_a_formatted_record_so_the_batch_can_retry() {
     state.publish_user_settings().unwrap();
     assert_eq!(user_storage::load(&root, "first").unwrap()["candidate"], json!(true));
     std::fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn the_plugin_state_stays_small_because_sessions_are_copied_by_value() {
+    // Sessions move by value down deep call paths and sit in tests' stack frames; the consent and
+    // per-user settings state is boxed so they do not grow every one of those frames.
+    assert!(std::mem::size_of::<AppState>() <= 424, "AppState grew to {} bytes: box the new field", std::mem::size_of::<AppState>());
 }

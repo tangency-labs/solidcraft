@@ -976,7 +976,7 @@ mod tests {
             let root = h.dir.join("installed");
             let settings = h.dir.join("settings");
             h.app.session.plugin_state.plugins_dir = Some(root.clone());
-            h.app.session.plugin_state.user_settings_dir = Some(settings.clone());
+            h.app.session.plugin_state.user.user_settings_dir = Some(settings.clone());
             let path = package(&h, "workshop-helper");
             hand_install(&path, &root, "workshop-helper");
             let store = solidcraft_engine::plugin::user_storage::Data::from([("hinge".into(), json!(42))]);

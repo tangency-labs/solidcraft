@@ -165,7 +165,7 @@ pub fn describe(session: &Session) -> Vec<ImporterInfo> {
 /// Run `importer` on `path` and make its design this session's, as a new design that is not saved
 /// anywhere yet. Nothing changes unless the whole import succeeds; a failure names the plugin and file.
 pub fn import_file(session: &mut Session, importer: &Importer, path: &str, options: &Value) -> Result<ImportedDesign> {
-    let consent = session.plugin_state.dialog_folders.take();
+    let consent = session.plugin_state.user.dialog_folders.take();
     let file = Path::new(path).file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_else(|| path.into());
     convert(session, importer, path, options, consent.as_ref()).map_err(super::messages::named(&importer.name, Some(&file)))
 }
@@ -211,10 +211,10 @@ fn convert(
         let request = craft_plugin_wasm::ImportRequest { path: PathBuf::from(path), input_folder };
         let user_storage = package.manifest.granted_capabilities().iter().any(|c| c.starts_with("user-storage@"));
         let mut scratch = Session::default();
-        scratch.plugin_state.user_settings_dir = session.plugin_state.user_settings_dir();
-        scratch.plugin_state.user_storage_caller = user_storage.then(|| package.manifest.id.clone());
-        scratch.plugin_state.defer_user_settings = session.plugin_state.defer_user_settings;
-        scratch.plugin_state.pending_user_settings = session.plugin_state.pending_user_settings.clone();
+        scratch.plugin_state.user.user_settings_dir = session.plugin_state.user_settings_dir();
+        scratch.plugin_state.user.user_storage_caller = user_storage.then(|| package.manifest.id.clone());
+        scratch.plugin_state.user.defer_user_settings = session.plugin_state.user.defer_user_settings;
+        scratch.plugin_state.user.pending_user_settings = session.plugin_state.user.pending_user_settings.clone();
         let host = SolidCraftHost {
             session: scratch,
             input_folders,
@@ -274,7 +274,7 @@ fn convert(
         if user_storage {
             host.commit_transaction()?;
             host.publish_committed()?;
-            session.plugin_state.pending_user_settings = host.session.plugin_state.pending_user_settings;
+            session.plugin_state.user.pending_user_settings = host.session.plugin_state.user.pending_user_settings;
         }
         session.replace_design(fresh);
         Ok(ImportedDesign {
@@ -366,8 +366,8 @@ pub fn import_dialog(
     #[cfg(all(feature = "plugins", any(target_arch = "x86_64", target_arch = "aarch64")))]
     {
         let mut scratch = Session::default();
-        scratch.plugin_state.user_settings_dir = session.plugin_state.user_settings_dir();
-        scratch.plugin_state.user_storage_caller =
+        scratch.plugin_state.user.user_settings_dir = session.plugin_state.user_settings_dir();
+        scratch.plugin_state.user.user_storage_caller =
             package.manifest.granted_capabilities().iter().any(|c| c.starts_with("user-storage@")).then(|| package.manifest.id.clone());
         let host = SolidCraftHost {
             session: scratch,

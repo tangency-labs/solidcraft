@@ -2201,7 +2201,7 @@ pub(crate) fn dry_run(scratch: &mut solidcraft_engine::Session, id: &str) {
         grants.input_folder = false;
     }
     scratch.plugin_state.file_grants.clear();
-    scratch.plugin_state.dialog_folders = None;
+    scratch.plugin_state.user.dialog_folders = None;
 }
 
 /// Run the most recently opened dialog's entry.
@@ -2233,7 +2233,7 @@ pub(crate) fn run_dialog(app: &mut SolveApp, id: u64) -> Result<(), String> {
         let mut request = crate::file_load::Request::new(&source, crate::file_load::Kind::Open);
         request.scope = dialog.source_scope.clone();
         request.plugin_import = true;
-        request.plugin_folders = Some(consent);
+        request.plugin_folders = Some(Box::new(consent));
         request.options.insert("format".into(), json!(format!("{}.{}", dialog.plugin.id, dialog.entry)));
         request.options.insert("options".into(), params);
         crate::file_load::begin_request(app, request)?;
@@ -2250,7 +2250,7 @@ pub(crate) fn run_dialog(app: &mut SolveApp, id: u64) -> Result<(), String> {
             let mut request = crate::file_load::Request::new(&path, crate::file_load::Kind::Open);
             request.scope = scope;
             request.plugin_import = true;
-            request.plugin_folders = Some(consent);
+            request.plugin_folders = Some(Box::new(consent));
             request.options.insert("format".into(), json!(format));
             request.options.insert("options".into(), params);
             if let Err(error) = crate::file_load::begin_request(app, request) {

@@ -3495,7 +3495,7 @@ impl Session {
         computed.plugin_state.defer_user_settings();
         // UI consent travels to the worker invocation, never to the source identity that is
         // compared with the live session when accepting its result.
-        self.plugin_state.dialog_folders = None;
+        self.plugin_state.user.dialog_folders = None;
         let mut steps = Vec::new();
         if let Some(marker) = marker {
             let before = computed.doc.clone();
@@ -3563,7 +3563,7 @@ impl Session {
             }
             return Err(EngineError::Other("the design changed while the feature was computing".into()));
         }
-        if !self.plugin_state.defer_user_settings {
+        if !self.plugin_state.user.defer_user_settings {
             prepared.computed.plugin_state.publish_user_settings()?;
         }
         if let Some(original) = &prepared.editor_original {
@@ -3731,7 +3731,7 @@ impl Session {
         let owner = self.checked_sketch_owner(computed.active_sketch, computed.sketching_view)?;
         self.checked_sheet_sketch_owner(&self.view_context, computed.active_sheet_sketch.as_deref(), &computed.doc)?;
         computed.sketching_view = owner;
-        self.plugin_state.pending_user_settings = std::mem::take(&mut computed.plugin_state.pending_user_settings);
+        self.plugin_state.user.pending_user_settings = std::mem::take(&mut computed.plugin_state.user.pending_user_settings);
         // Audited direct-mutation jobs may not have passed through execute. Their
         // accepted document is still a new committed state with a fresh token.
         let newer = match (design_revision_generation(&computed.design_revision), design_revision_generation(&self.design_revision)) {
