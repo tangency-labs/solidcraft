@@ -57,6 +57,7 @@ pub mod error;
 pub mod export_geometry;
 pub mod extend;
 pub mod face_surface;
+pub mod faceted;
 pub mod file;
 pub mod fit_projection;
 pub mod hatch;
@@ -93,34 +94,96 @@ pub mod trim;
 pub mod untrim;
 pub mod vertex_meet;
 
-pub use blend::{
-    band_room, blend, blend_ordered, blend_with, carried_faces, carried_faces_ordered,
-    chamfer_sides, chamfer_sides_facing, chamfer_sides_facing_with, chamfer_sides_ordered,
-    chamfer_sides_ordered_with, chamfer_sides_with, edge_faces_along, edge_faces_along_ordered,
-    edges_share_wedge, fillet_variable, fillet_variable_from, fillet_variable_from_with,
-    fillet_variable_ordered, fillet_variable_ordered_with, fillet_variable_with, tangent_chain,
-    BandRoom, Blend, BlendOptions, Blended, CarriedFace, ChamferCorner, ChamferSecond, Corners,
-    EndRoom, Hole, HoleEdge, Room, SetBack, Turn,
-};
-pub use body::{
-    make_box, make_cone, make_cylinder, make_sphere, make_torus, Body, Contract, TurnedOver,
-};
+pub use blend::band_room;
+pub use blend::blend;
+pub use blend::blend_ordered;
+pub use blend::blend_with;
+pub use blend::carried_faces;
+pub use blend::carried_faces_ordered;
+pub use blend::chamfer_sides;
+pub use blend::chamfer_sides_facing;
+pub use blend::chamfer_sides_facing_with;
+pub use blend::chamfer_sides_ordered;
+pub use blend::chamfer_sides_ordered_with;
+pub use blend::chamfer_sides_with;
+pub use blend::edge_faces_along;
+pub use blend::edge_faces_along_ordered;
+pub use blend::edges_share_wedge;
+pub use blend::fillet_variable;
+pub use blend::fillet_variable_from;
+pub use blend::fillet_variable_from_with;
+pub use blend::fillet_variable_ordered;
+pub use blend::fillet_variable_ordered_with;
+pub use blend::fillet_variable_with;
+pub use blend::tangent_chain;
+pub use blend::BandRoom;
+pub use blend::Blend;
+pub use blend::BlendOptions;
+pub use blend::Blended;
+pub use blend::CarriedFace;
+pub use blend::ChamferCorner;
+pub use blend::ChamferSecond;
+pub use blend::Corners;
+pub use blend::EndRoom;
+pub use blend::Hole;
+pub use blend::HoleEdge;
+pub use blend::Room;
+pub use blend::SetBack;
+pub use blend::Turn;
+pub use body::make_box;
+pub use body::make_cone;
+pub use body::make_cylinder;
+pub use body::make_sphere;
+pub use body::make_torus;
+pub use body::Body;
+pub use body::Contract;
+pub use body::TurnedOver;
 pub use boolean::BooleanOp;
-pub use check::{CheckLevel, CheckReport};
+pub use check::CheckLevel;
+pub use check::CheckReport;
 pub use contact::Gap;
-pub use error::{
-    Error, FailureCode, FitKind, OffsetRefusal, RecordEntity, Result, RoomReason, SolidTest,
-    Unblendable, Unsoundness,
-};
-pub use measure::{
-    point_displacement, point_distance, point_set_summary, points_meet, Distance, EdgeCurve,
-    EdgePoint, EdgeRayPoint, FaceCentroid, FaceRayHit, GapSample, MassPropertiesEstimate,
-    MembersClosest, Normal, PointClass, PointSetSummary, RayEntity, RayHit, SquareFaceLevel,
-    EDGE_POINTS_MAX,
-};
-pub use offset::{draft, offset_faces, offset_sheet, shell, thicken};
+pub use error::Error;
+pub use error::FailureCode;
+pub use error::FitKind;
+pub use error::OffsetRefusal;
+pub use error::RecordEntity;
+pub use error::Result;
+pub use error::RoomReason;
+pub use error::SolidTest;
+pub use error::Unblendable;
+pub use error::Unsoundness;
+pub use faceted::faceted_volume;
+pub use measure::point_displacement;
+pub use measure::point_distance;
+pub use measure::point_set_summary;
+pub use measure::points_meet;
+pub use measure::ClassifiedPoint;
+pub use measure::Distance;
+pub use measure::EdgeCurve;
+pub use measure::EdgePoint;
+pub use measure::EdgeRayPoint;
+pub use measure::FaceCentroid;
+pub use measure::FaceRayHit;
+pub use measure::GapSample;
+pub use measure::MassPropertiesEstimate;
+pub use measure::MembersClosest;
+pub use measure::Normal;
+pub use measure::PointClass;
+pub use measure::PointNormalFace;
+pub use measure::PointSetSummary;
+pub use measure::RayEntity;
+pub use measure::RayHit;
+pub use measure::SquareFaceLevel;
+pub use measure::EDGE_POINTS_MAX;
+pub use offset::draft;
+pub use offset::offset_faces;
+pub use offset::offset_sheet;
+pub use offset::offset_surface;
+pub use offset::shell;
+pub use offset::thicken;
 pub use order::Order;
-pub use step_assembly::{placed_bodies, PlacedBody};
+pub use step_assembly::placed_bodies;
+pub use step_assembly::PlacedBody;
 
 #[cfg(test)]
 mod ball_corner_tests;

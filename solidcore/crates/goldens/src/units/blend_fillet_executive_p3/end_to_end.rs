@@ -1438,16 +1438,14 @@ pub(super) fn upstream_example(example: usize) -> Result<Option<Output>, Harness
             p1::vertices(&body, None)?.len() as f64,
         ])
     };
-    let result = run();
-    let step = super::rust_point_step(&k);
-    match result {
+    match run() {
         Ok(values) => {
             let mut out = Output::new();
             out.ints.insert(
                 "api_status_counts".into(),
                 values.into_iter().map(|v| v as i64).collect(),
             );
-            Ok(Some(super::with_point_step(out, step)))
+            Ok(Some(out))
         }
         Err(error) => match Output::unported(&error) {
             Some(deferred) => Ok(Some(deferred)),
@@ -1460,10 +1458,7 @@ pub(super) fn rust(input: &RealSolid) -> Result<Output, HarnessError> {
     if let Some(shell) = input.shell {
         let mut k = crate::runner_kernel();
         return match shell_rust(&mut k, input, shell) {
-            Ok(values) => Ok(super::with_point_step(
-                shell_output(&values)?,
-                super::rust_point_step(&k),
-            )),
+            Ok(values) => shell_output(&values),
             Err(error) => match Output::unported(&error) {
                 Some(deferred) => Ok(deferred),
                 None => Err(HarnessError::new(error.to_string())),
@@ -1474,12 +1469,11 @@ pub(super) fn rust(input: &RealSolid) -> Result<Output, HarnessError> {
     let body = build(&mut k, input)?;
     match run_rust(&mut k, body, input) {
         Ok(values) => {
-            let out = if input.checkpoint == Checkpoint::Full {
-                output(&values)?
+            if input.checkpoint == Checkpoint::Full {
+                output(&values)
             } else {
-                prefix::output(&values, input.checkpoint)?
-            };
-            Ok(super::with_point_step(out, super::rust_point_step(&k)))
+                prefix::output(&values, input.checkpoint)
+            }
         }
         Err(RealSolidRunError::Fixture(error)) => Err(error),
         Err(RealSolidRunError::Kernel(error)) => match Output::unported(&error) {
@@ -1574,10 +1568,8 @@ pub(super) fn surface_surface_rust(input: &SurfaceSurface) -> Result<Output, Har
         }
         Ok(values)
     };
-    let result = run();
-    let step = super::rust_point_step(&k);
-    match result {
-        Ok(values) => Ok(super::with_point_step(surface_surface_output(&values)?, step)),
+    match run() {
+        Ok(values) => surface_surface_output(&values),
         Err(error) => Output::unported(&error)
             .ok_or_else(|| HarnessError::new(error.to_string())),
     }
@@ -3411,33 +3403,13 @@ mod wr661_open_sheets {
         keeps_the_filleted_sheet("stubs4-shell_fillet2-e5-r0.5", 3);
     }
 
-    /// The open-shell sheet is open too, and its stitched result has its ends on the
-    /// sheet's boundary, but it fails the level-2 check (nine gaps beyond tolerance, up to
-    /// 3.0e-5: main's known-failing entry for this case, tangency-labs/solidcraft#13733), so
-    /// the pass-over does not keep it: the orientation's failure (1005) is returned and the
-    /// body is put back as it was.
+    /// The open-shell sheet is open too, and its stitched result has its ends on the sheet's
+    /// boundary. Its nine level-2 gaps (up to 3.0e-5, tangency-labs/solidcraft#13733) were
+    /// vertex and edge gaps the healer had left under their tolerances; with them covered
+    /// (#18230 for edges, #17739 for vertices) the result passes the check and is kept.
     #[test]
-    fn an_open_shell_sheet_fillet_that_fails_level_2_is_refused() {
-        let name = "stubs4-open_shell-e5-r0.5";
-        let input = inputs(name).real_solid.expect("a real solid");
-        let mut k = Kernel::default();
-        let mut body = build(&mut k, &input).unwrap().unwrap();
-        let faces = p1::faces(&body, None).unwrap();
-        assert_eq!(faces.len(), 6, "{name}");
-        assert!(!solidcore::topology::brep::p2::is_manifold_solid(&body).unwrap(), "{name}");
-        let (selected, _) = select_edges(&k, &body, &input).ok().unwrap();
-        let error = fillet_selected(&mut k, &mut body, &selected, &input)
-            .ok()
-            .unwrap()
-            .expect_err("the invalid open result is refused");
-        assert_eq!(solidcore::error::upstream_status(&error), Some(1005), "{name}: {error:?}");
-        // the closed-solid orientation's "gathered from both sides" failure, not another one
-        assert_eq!(
-            error.topology_failure(),
-            Some(&solidcore::error::topology::TopologyFailure::GatheredBothSides),
-            "{name}: {error:?}"
-        );
-        assert_eq!(p1::faces(&body, None).unwrap(), faces, "{name}: the body is put back");
+    fn an_open_shell_sheet_fillet_is_kept() {
+        keeps_the_filleted_sheet("stubs4-open_shell-e5-r0.5", 6);
     }
 }
 

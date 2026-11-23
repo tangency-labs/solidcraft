@@ -1496,6 +1496,7 @@ fn consumed_sketches(doc: &solidcraft_doc::Document) -> impl Iterator<Item = u64
         | FeatureKind::CellGrid { sketch, .. }
         | FeatureKind::SheetBase { sketch, .. }
         | FeatureKind::SheetContour { sketch, .. }
+        | FeatureKind::SheetTab { sketch, .. }
         | FeatureKind::Hole { points: Some(SketchPoints { sketch, single: false, .. }), .. }
         | FeatureKind::SheetPerforate { sketch: Some(sketch), .. } => Some(sketch.0),
         _ => None,
@@ -1620,7 +1621,8 @@ fn constructs(s: &Session) -> Vec<(u64, String, solidcraft_doc::construct::Const
         .iter()
         .filter_map(|c| {
             let f = s.doc.feature(c.feature).filter(|f| !f.suppressed)?;
-            let m = s.doc.component_transform(f.component);
+            // With a joint drag's shown frame, so it follows its part while that is dragged.
+            let m = s.shown_component_transform(f.component);
             if solidcraft_doc::is_identity(&m) {
                 return Some((c.feature, c.name.clone(), c.geom.clone()));
             }

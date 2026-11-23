@@ -246,10 +246,8 @@ pub(super) fn rust(input: &SurfaceSurfaceBodies) -> Result<Output, HarnessError>
         }
         Ok(values)
     };
-    let result = run();
-    let step = super::rust_point_step(&k);
-    match result {
-        Ok(values) => Ok(super::with_point_step(output(&values)?, step)),
+    match run() {
+        Ok(values) => output(&values),
         Err(error) => {
             Output::unported(&error).ok_or_else(|| HarnessError::new(error.to_string()))
         }

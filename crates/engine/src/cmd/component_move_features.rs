@@ -182,7 +182,7 @@ pub(super) fn move_features(s: &mut Session, p: &Value) -> Result<Value> {
     if let Some((name, error)) = broken {
         return Err(bad(cmd, format!("moving would break {name}: {error}")));
     }
-    s.accept_computed(scratch);
+    s.accept_computed(scratch)?;
     let names: Vec<&str> = moved.iter().map(|f| f.name.as_str()).collect();
     Ok(json!({"moved": names, "component": dest, "bodies": moved_bodies}))
 }

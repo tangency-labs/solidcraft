@@ -22,17 +22,30 @@ can run it.
 | Check for updates | `CheckForUpdates` | `REG_DWORD` | `1`: checks at start and once a day, and people cannot turn them off. `0`: no checks at all, as with `SOLIDCRAFT_UPDATE_CHECK=0` ([Updates and privacy](updates.md)). |
 | Anonymous usage statistics | `UsageStatistics` | `REG_DWORD` | `0`: SolidCraft sends no usage statistics, keeps none to send later and shows no notice about them, and people cannot turn them on. `1`: each person chooses. SolidCraft 0.46 or later; what is sent is in [Privacy](https://github.com/tangency-labs/solidcraft/blob/main/docs/privacy.md). |
 | Organization name | `OrganizationName` | `REG_SZ` | The name shown as **Managed by** and the name, up to 64 characters on one line. It changes no setting. |
+| Units of new designs | `DefaultUnits` | `REG_SZ` | `mm`, `cm`, `m`, `in` or `ft` (Preferences, Design). Designs that already exist keep their units. SolidCraft 0.46 or later. |
+| Interface language | `Language` | `REG_SZ` | `system` to follow the operating system, or the code of a language SolidCraft has, such as `en`, `de`, `fr`, `pt-BR` or `zh-TW` (Preferences, General, Language lists them). SolidCraft 0.46 or later. |
+| Reopen designs at start | `ReopenDesigns` | `REG_DWORD` | `1`: reopens the designs that were open when SolidCraft closed. `0`: does not, for example on shared computers. SolidCraft 0.46 or later. |
+| Show the Discord button | `ShowDiscordButton` | `REG_DWORD` | `1`: the application bar shows it and people cannot hide it. `0`: hidden. The Help menu keeps the link. SolidCraft 0.46 or later. |
+| Show the Donate button | `ShowDonateButton` | `REG_DWORD` | `1`: the application bar shows it and people cannot hide it. `0`: hidden. The Help menu keeps the link. SolidCraft 0.46 or later. |
+| Show AI features | `AiFeatures` | `REG_DWORD` | `1`: the Assistant button, shortcut, menu entry and chat panel show. `0`: no AI features, and SolidCraft looks for or starts no AI agent. SolidCraft 0.46 or later. |
+| Show the Assistant button | `AiToolbarButton` | `REG_DWORD` | `1`: the application bar shows it and people cannot hide it. `0`: hidden; the shortcut and View menu stay. SolidCraft 0.46 or later. |
+| AI agent permissions | `AiPermissions` | `REG_SZ` | `ask` (every change asks first), `edits` (modelling runs, files and destructive actions ask) or `all` (nothing asks). An agent's own permissions and the **Always allowed** answers don't apply while it is set. SolidCraft 0.46 or later. |
+| Changes per message | `AgentTurnLimit` | `REG_DWORD` | `1` to `200`: the most changes an agent in the chat makes for one message. `0`: no limit. SolidCraft 0.46 or later. |
+| Let AI agents connect | `AgentControl` | `REG_DWORD` | `1`: the control channel (MCP, this computer only) is on. `0`: SolidCraft opens no port for agents, not even one named with `--control` or `SOLIDCRAFT_CONTROL_PORT`. SolidCraft 0.46 or later. |
+| Add SolidCraft to AI apps | `ConnectAiApps` | `REG_DWORD` | `1`: SolidCraft adds its MCP server to the AI apps on the computer at start. `0`: it adds none and takes out the entries it added. SolidCraft 0.46 or later. |
 
 On Windows the values live in the key `Software\Policies\SolidCraft`:
 
 - under `HKEY_LOCAL_MACHINE` for everyone on the computer, or
 - under `HKEY_CURRENT_USER` for one person.
 
-When both hold a value, the computer's value wins. A value of another type, a number other
-than the ones listed, or an empty name counts as not set.
+When both hold a value, the computer's value wins. A value of another type, a number or text
+other than the ones listed, or an empty name counts as not set. Letter case and spaces around a
+text value do not matter.
 
 SolidCraft reads the policy when it starts. A change applies the next time SolidCraft starts.
-When a policy is removed, the person's own earlier choice is back.
+SolidCraft keeps each person's own choice for a setting under policy, and saves it: when the
+policy is removed, that choice is back.
 
 The same value names under `Software\Policies\SolidCraft\Recommended` are reserved for defaults
 that people may change. SolidCraft reads them and does not apply them yet.
@@ -64,6 +77,9 @@ result, for example:
 ```
 reg add HKLM\Software\Policies\SolidCraft /v CheckForUpdates /t REG_DWORD /d 0 /f
 reg add HKLM\Software\Policies\SolidCraft /v OrganizationName /t REG_SZ /d "Example Corp" /f
+reg add HKLM\Software\Policies\SolidCraft /v DefaultUnits /t REG_SZ /d in /f
+reg add HKLM\Software\Policies\SolidCraft /v ShowDonateButton /t REG_DWORD /d 0 /f
+reg add HKLM\Software\Policies\SolidCraft /v AiPermissions /t REG_SZ /d ask /f
 ```
 
 ## macOS
@@ -96,13 +112,18 @@ organization's name (**Managed by your organization** without `OrganizationName`
 window shows **Managed** or the briefcase alone, and the tooltip has the whole text. Clicking it
 opens Preferences, General. Preferences and About show the same line.
 
-Open Preferences, General, Updates. With `CheckForUpdates` set, **Check at start and once a day**
-is greyed out, shows the organization's choice, and says **Set by your organization**. With the
-value `0`, **Check now** is unavailable too.
+In Preferences, each setting a policy sets is greyed out, shows the organization's choice, and
+says **Set by your organization**: Updates, Language, Saving and Community on the General page,
+Units of new designs on the Design page, and the AI settings above on the Assistant page. With
+`AiPermissions` set, the Assistant page also says that each agent's own permissions and the
+**Always allowed** answers don't apply. With `CheckForUpdates` set to `0`, **Check now** is
+unavailable too. A Donate or Discord button the policy shows has no way to hide it: its × says
+**Set by your organization** instead.
 
 An agent or a script sees the same through the control channel: the reply of `ui.prefs` has a
-`policy` object that lists the locked settings and the organization's name, and a request that changes a locked setting is
-refused ([control protocol](https://github.com/tangency-labs/solidcraft/blob/main/docs/control-protocol.md)).
+`policy` object that lists the locked settings, their values in force (`settings`) and the
+organization's name. The settings themselves report each person's own stored choice, and a
+request that changes a locked setting is refused ([control protocol](https://github.com/tangency-labs/solidcraft/blob/main/docs/control-protocol.md)).
 
 ## A policy is not a launcher
 

@@ -16,6 +16,7 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use solidcore::geom::attribute::{ids, Attribute, Behavior};
 use solidcore::topology::face;
+use solidcore::topology::EdgeId;
 use solidcore::{Brep, EntityRef};
 
 use crate::body::Body;
@@ -140,6 +141,35 @@ pub fn recorded(
     Ok(history)
 }
 
+/// `op`, a call that makes a new body from `body` (and leaves `body` as it was, such as
+/// [`crate::offset_surface`]), run with `body`'s faces and edges tagged by their record indices
+/// (`order`), and the new body with its [`History`] relative to `body`, in the new body's record
+/// order. The tags and the offset roles are removed from both bodies before this returns,
+/// whether `op` succeeds or not.
+///
+/// # Errors
+/// `op`'s error; the kernel's, from the tags or the new body's record.
+pub fn recorded_into(
+    body: &Body,
+    order: &Order,
+    made: Made<'_>,
+    op: impl FnOnce() -> Result<Body>,
+) -> Result<(Body, History)> {
+    tag(body, order)?;
+    let done = op().and_then(|new| {
+        let (_, out) = new.to_record()?;
+        let history = read(&new.lock(), &out, made);
+        let cleared = clear(&mut new.lock());
+        let history = history?;
+        cleared?;
+        Ok((new, history))
+    });
+    let cleared = clear(&mut body.lock());
+    let result = done?;
+    cleared?;
+    Ok(result)
+}
+
 /// Every face and edge of `order` tagged with its index, after every ops tag the body carried
 /// is gone.
 fn tag(body: &Body, order: &Order) -> Result<()> {
@@ -157,8 +187,39 @@ fn tag(body: &Body, order: &Order) -> Result<()> {
     Ok(())
 }
 
+/// Every edge of `b` tagged as one it has now, after every ops tag it carried is gone: for a
+/// call that edits `b` and must then tell the edges it came in with, whole or in the pieces the
+/// kernel's splits make of them (which carry the tag), from the edges its edits made
+/// ([`untagged_edges`]). The caller removes the tags when it is done ([`clear`]).
+///
+/// # Errors
+/// The kernel's, from attaching a tag.
+pub(crate) fn tag_edges(b: &mut Brep) -> Result<()> {
+    clear(b)?;
+    let edges: Vec<EdgeId> = b.edge_list().to_vec();
+    for (i, e) in edges.into_iter().enumerate() {
+        b.add_attribute(
+            EntityRef::Edge(e),
+            Attribute::application(ids::OPS_HISTORY, Behavior::Copy, Carried(Operand(vec![i]))),
+        )
+        .map_err(status)?;
+    }
+    Ok(())
+}
+
+/// The edges of `b` that carry no ops tag: after [`tag_edges`] and the caller's edits, the
+/// edges those edits made, whole or in pieces (a piece split off a tagged edge carries its
+/// tag, so it is not one of them).
+pub(crate) fn untagged_edges(b: &Brep) -> Vec<EdgeId> {
+    b.edge_list()
+        .iter()
+        .copied()
+        .filter(|&e| tags(b, EntityRef::Edge(e)).is_empty())
+        .collect()
+}
+
 /// Every ops tag and offset role on `b`'s faces and edges removed.
-fn clear(b: &mut Brep) -> Result<()> {
+pub(crate) fn clear(b: &mut Brep) -> Result<()> {
     let entities: Vec<EntityRef> = b
         .face_list()
         .iter()

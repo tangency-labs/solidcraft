@@ -21,7 +21,7 @@
 use solidcore::error::offset::OffsetFailure;
 use solidcore::error::{ErrorKind, Reason};
 use solidcore::geom::attribute::{ids, Attribute, Behavior};
-use solidcore::offset::draft::{draft_surface, Draft, DraftRefusal};
+use solidcore::offset::draft::{draft_surface, refuse_closing_wall, Draft, DraftRefusal};
 use solidcore::offset::offset_executive::p2::{
     local_operation_simple, offset_brep_simple, OffsetOptions, ShellOptions,
 };
@@ -36,6 +36,11 @@ use crate::error::status as kernel_status;
 use crate::order::{self, Order};
 use crate::session::with_body;
 use crate::{Error, OffsetRefusal, RecordEntity, Result, Unsoundness};
+
+/// A face a draft of plane faces would cut through without meeting it (a hole's wall within the
+/// draft of the side), for a client that drafts through the kernel's local operation itself and
+/// names that face when the operation refuses ([`drafted_through`]).
+pub use solidcore::offset::draft::{drafted_through, DraftedThrough};
 
 /// The largest offset distance or wall the operations take.
 const MAX_DISTANCE: f64 = 1e6;
@@ -55,6 +60,32 @@ fn status(e: SolidError, index: &dyn Fn(EntityRef) -> Option<RecordEntity>) -> E
 #[must_use]
 pub fn refusal(e: &SolidError) -> Option<Error> {
     typed(e, &|_| None)
+}
+
+/// (#20767) The wall check of a draft of `faces` of `b` by `angle` radians about the neutral
+/// plane through `neutral_origin` with normal `neutral_normal`, pulled along `pull`, as
+/// [`draft`] runs it before its local operation: a cone or cylinder about the pull whose
+/// drafted cone would reach another shell of the body (a cavity's wall) is refused with the
+/// largest angle that keeps the wall (the kernel's `OffsetFailure::DraftClosesWall`, which
+/// [`diagnostic`] gives as [`OffsetRefusal::DraftClosesWall`]). For a caller that drafts the
+/// faces itself (the kernel wrapper's `smlib_draft`).
+///
+/// # Errors
+///
+/// The kernel's `DraftClosesWall`; an invalid input for a neutral normal or pull not finite or
+/// not longer than 1e-12, or an origin or angle not finite; those of the kernel's check.
+pub fn refuse_draft_closing_wall(
+    k: &Kernel,
+    b: &Brep,
+    faces: &[FaceId],
+    neutral_origin: [f64; 3],
+    neutral_normal: [f64; 3],
+    pull: [f64; 3],
+    angle: f64,
+) -> solidcore::Result<()> {
+    let v = |a: [f64; 3]| Vec3::new(a[0], a[1], a[2]);
+    let the_draft = Draft::new(v(neutral_origin), v(neutral_normal), v(pull), angle)?;
+    refuse_closing_wall(k, b, faces, &the_draft)
 }
 
 /// (#18568) For a shell that failed without saying why: where a face of `b` has an outline
@@ -230,6 +261,10 @@ fn offset_refused(
         OffsetFailure::ExactCurveUncut => OffsetRefusal::ExactCurveUncut,
         OffsetFailure::FacesApart { .. } => OffsetRefusal::FacesApart,
         OffsetFailure::PastSide { largest, .. } => OffsetRefusal::PastSide { largest },
+        OffsetFailure::FaceCloses { largest, .. } => OffsetRefusal::FaceCloses { largest },
+        OffsetFailure::DraftClosesWall { largest, .. } => {
+            OffsetRefusal::DraftClosesWall { largest }
+        }
         OffsetFailure::ReachUncertified { .. } => OffsetRefusal::ReachUncertified,
         OffsetFailure::LoopGapUncertified { .. } => OffsetRefusal::LoopGapUncertified,
         OffsetFailure::Unsound { what } => match unsound(what, index) {
@@ -481,7 +516,7 @@ pub fn offset_faces(body: &Body, order: &Order, faces: &[usize], distance: f64) 
 }
 
 /// The sheet `body` thickened by `thickness` along its normals, or (`symmetric`) moved back by
-/// half first: a closed solid ([`Expect::SOLID`], [`Error::NotSolid`] if not).
+/// half first: a closed solid ([`Expect::SOLID`], [`Error::NotSolidBecause`] if not).
 ///
 /// # Errors
 /// [`Error::Argument`] for a thickness not finite, zero or past 1e6, or a body that is a
@@ -617,8 +652,9 @@ fn refused(r: DraftRefusal) -> Error {
 /// neutral plane for a plane face;
 /// [`Error::Unsupported`] for a face the kernel cannot draft (what it is), or a face drafted past
 /// where its neighbours meet; [`Error::NoEffect`] for a draft that moved no face;
-/// [`Error::OffsetRefused`] for a face the kernel refuses with a reason; the kernel's other
-/// errors; those of [`finish`].
+/// [`Error::OffsetRefused`] for a face the kernel refuses with a reason (a drafted cone that
+/// would reach a cavity's wall: [`OffsetRefusal::DraftClosesWall`], the largest angle that keeps
+/// the wall); the kernel's other errors; those of [`finish`].
 pub fn draft(
     body: &Body,
     order: &Order,
@@ -656,6 +692,11 @@ pub fn draft(
                 Err(e) => return Ok(Err(status(e, &in_order(order)))),
             }
         }
+        // a drafted cone that would reach a cavity's wall closes the wall: refused with the
+        // largest angle that keeps it, before anything changes
+        if let Err(e) = refuse_closing_wall(k, b, &picked, &the_draft) {
+            return Ok(Err(status(e, &in_order(order))));
+        }
         // the marks live for this call only: put on the picked faces, read and removed once the
         // kernel has moved them (a refused call puts the body back as it came in, unmarked)
         mark_moved(b, &picked)?;
@@ -669,6 +710,9 @@ pub fn draft(
         replace(k, b, drafted, expect)
     })?
 }
+
+mod surface;
+pub use surface::offset_surface;
 
 #[cfg(test)]
 mod tests;

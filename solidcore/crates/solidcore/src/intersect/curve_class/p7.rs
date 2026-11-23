@@ -620,6 +620,19 @@ impl<O: ClassObject> CurveClassification<O> {
     /// [`SolidError::Unported`] for an interval end on an edge (`SmEdge::GetInterval`,
     /// unit `topology.edge`).
     pub fn is_crossed_by_edge(&self, geometry: &impl ClassGeometry<O>) -> Result<bool> {
+        self.is_crossed_by_edge_unless(geometry, |_| Ok(false))
+    }
+
+    /// The same topological crossing candidates, excluding only edges for which the
+    /// caller proves geometric separation from the classification curve.
+    ///
+    /// # Errors
+    /// Those of the edge intervals and the separation proof.
+    pub(crate) fn is_crossed_by_edge_unless(
+        &self,
+        geometry: &impl ClassGeometry<O>,
+        mut separated: impl FnMut(Option<O>) -> Result<bool>,
+    ) -> Result<bool> {
         let size = self.size();
 
         // for every classification interval
@@ -656,7 +669,9 @@ impl<O: ClassObject> CurveClassification<O> {
                 }
 
                 // an Edge was found crossing the Classification Curve
-                return Ok(true);
+                if !separated(edge)? {
+                    return Ok(true);
+                }
             }
 
             // When Interval ends on an Edge
@@ -689,7 +704,9 @@ impl<O: ClassObject> CurveClassification<O> {
                 }
 
                 // an Edge was found crossing the Classification Curve
-                return Ok(true);
+                if !separated(edge)? {
+                    return Ok(true);
+                }
             }
         }
 
@@ -1981,10 +1998,11 @@ fn classify_face_interval_on<O: ClassObject>(
         _ => {}
     }
 
-    // If a fillet rail leaves a vertex tangent to a boundary, that vertex's
-    // sector alone may vote outside while its other end lies inside the face.
-    // Confirm that unclassified end on the actual trim before testing the
-    // interval's interior.
+    // If a curve leaves a vertex tangent to a boundary, that vertex's sector
+    // alone may vote outside while its unclassified opposite end lies strictly
+    // inside the face (including fillet rails classified by `rails_fit` and
+    // `TestRollOver`, which run with `doing_fillets = false`). Confirm that
+    // unclassified end on the actual trim before testing the interval's interior.
     let opposite_end = match (did_min, did_max) {
         (true, false)
             if !min.inside
@@ -2003,7 +2021,7 @@ fn classify_face_interval_on<O: ClassObject>(
         _ => None,
     };
     let mut opposite_inside = false;
-    if ctx.doing_fillets && ctx.do_point_classify && ctx.uv_space_okay {
+    if ctx.do_point_classify && ctx.uv_space_okay {
         if let Some(t) = opposite_end {
             if let Some(curve) = context_uv_curve1(access.geometry(), ctx)? {
                 let p = curve.evaluate_point(k, t)?;
