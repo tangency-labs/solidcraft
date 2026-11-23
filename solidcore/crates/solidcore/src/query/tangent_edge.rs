@@ -35,7 +35,19 @@
 //! `1 + (2/pi) ln(D + 1)` (Rivlin, *An Introduction to the Approximation of Functions*, 1.4;
 //! rounded up). Since the `L_j` sum to 1, `Q(t) >= c - L r` for `c` the middle and `r` the
 //! half range of the hull of the `Q(t_j)`. Where that is positive, the faces' angle is at most
-//! `atan(L M / (c - L r))` all over the piece. Where it is not (a right angle or more somewhere
+//! `atan(L M / (c - L r))` all over the piece. That is never under `atan(L tan)` of the angle
+//! itself, however short the piece, so a second bound is taken from the same points and the
+//! smaller of the two kept. For any `u`, `E = u . P` and `R = P - E u` are polynomials of degree
+//! `D`, and `|P|^2 = (2 - |u|^2) E^2 + |R|^2` (as `u . R = (1 - |u|^2) E`). `|R|` is at most
+//! `L` times its largest, as `|P|` is. For any `s >= 0`, `G = s Q - E` is a polynomial of degree
+//! `D`, at least some `G_lo` over the piece, so with `Q_lo = c - L r > 0` of `Q`,
+//! `E = s Q - G <= (s + max(0, -G_lo) / Q_lo) Q`, and `-E <= max(0, -E_lo) / Q_lo Q`. So
+//! `|E| <= k Q`, `k` the larger, `|R| <= k_R Q`, and the angle is at most
+//! `atan(sqrt((2 - |u|^2) k^2 + k_R^2))`. `u`, along `P` at the middle point, and `s`, the largest
+//! `E / Q` at the points, are chosen, not proved (any are sound). `R` is of the order of the
+//! piece's width and enters squared, and what `P` and `Q` share cancels in `G`: where the
+//! angle is constant, or largest inside the piece, the bound is over it by the order of the
+//! width squared. Where `c - L r` is not positive (a right angle or more somewhere
 //! on the piece, or an enclosure too wide to tell), it is bounded from `P`'s part along a fixed
 //! direction: for any `e`, `E = e . P` is a polynomial of degree `D` too, and `E <= |e| |P|`.
 //! Where `E`'s lower end over the piece, `c - L r` of its values, is some `E_lo > 0`, take any
@@ -63,7 +75,7 @@
 //! `||P|| <= L (M + delta D^2 ||P||)`, that is `||P|| <= L M / (1 - L delta D^2)`, used in
 //! place of `L M` (refused, the piece undecided, where `L delta D^2 >= 1`). Likewise
 //! `Q(t) >= c - L (r + delta D^2 ||Q||)` with `||Q|| <= L A / (1 - L delta D^2)`, `A` the
-//! largest `|Q(t_j)|` enclosed, and `E` and `G` the same (`poly_range`).
+//! largest `|Q(t_j)|` enclosed, and each `E` and `G` the same (`poly_range`), `R` as `P`.
 //!
 //! **The pieces.** The edge is cut at the pcurves' knots (exact values: a pcurve's polynomial
 //! changes exactly there). A piece is taken as one polynomial only where both pcurves' `(u, v)`
@@ -1473,6 +1485,59 @@ fn piece_bound(nodes: &[Node], lebesgue: f64, eta: f64) -> Option<f64> {
     Some(ratio.hi.atan() * (1.0 + 8.0 * UNIT))
 }
 
+/// A bound on the angle all over a piece where `Q` is bounded away from 0, from its enclosed
+/// values at its rounded Chebyshev points, that goes to the angle as the piece gets short
+/// (module docs): `P` split along one fixed direction `u`, `|E| <= k Q` and `|R| <= k_R Q`
+/// proved all over the piece. `None` where `Q` is not bounded away from 0 or `P` is 0 at the
+/// middle point (no direction).
+fn acute_piece_bound(nodes: &[Node], lebesgue: f64, eta: f64) -> Option<f64> {
+    let q: Vec<Ivl> = nodes.iter().map(|n| n.q).collect();
+    let q_lo = Ivl::from(poly_range(&q, lebesgue, eta)?.lo);
+    if !q_lo.is_positive() {
+        return None;
+    }
+    let middle = nodes.get(nodes.len() / 2)?.p.map(Ivl::mid);
+    let length = norm(middle.map(Ivl::from)).mid();
+    if !(length > 0.0 && length.is_finite()) {
+        return None;
+    }
+    let u = middle.map(|x| Ivl::from(x / length));
+    let along: Vec<Ivl> = nodes.iter().map(|n| dot(n.p, u)).collect();
+    // Q is positive at every point: its floor over the piece is
+    let s = along
+        .iter()
+        .zip(&q)
+        .map(|(a, q)| a.mid() / q.mid())
+        .fold(0.0, f64::max);
+    let g: Vec<Ivl> = along
+        .iter()
+        .zip(&q)
+        .map(|(&a, &q)| Ivl::from(s) * q - a)
+        .collect();
+    let under = |x: Ivl| Ivl::from((-x.lo).max(0.0)) / q_lo;
+    let with = Ivl::from(s) + under(poly_range(&g, lebesgue, eta)?);
+    let against = under(poly_range(&along, lebesgue, eta)?);
+    let k = Ivl::from(with.hi.max(against.hi));
+    let rest = nodes
+        .iter()
+        .zip(&along)
+        .map(|(n, &a)| sub3(n.p, scale(u, a)));
+    let k_rest = Ivl::from(vec_norm_bound(rest, lebesgue, eta)?) / q_lo;
+    let share = Ivl::from((Ivl::from(2.0) - dot(u, u)).hi.max(0.0));
+    let tan = (share * square(k) + square(k_rest)).sqrt();
+    // atan within 2 ulps (the platform's)
+    tan.hi
+        .is_finite()
+        .then(|| tan.hi.atan() * (1.0 + 8.0 * UNIT))
+}
+
+/// The bound the decision takes on the angle all over a piece: [`piece_bound`], or
+/// [`acute_piece_bound`] where that is smaller (each is sound on its own).
+fn part_bound(nodes: &[Node], lebesgue: f64, eta: f64) -> Option<f64> {
+    let bound = piece_bound(nodes, lebesgue, eta)?;
+    Some(acute_piece_bound(nodes, lebesgue, eta).map_or(bound, |b| b.min(bound)))
+}
+
 /// The Chebyshev points of `[s0, s1]`, `n` of them.
 fn chebyshev(s0: f64, s1: f64, n: usize) -> impl Iterator<Item = f64> {
     let (m, h) = (0.5 * (s0 + s1), 0.5 * (s1 - s0));
@@ -1757,7 +1822,7 @@ fn decide(
                 let degree = (pair.nodes - 1) as f64;
                 // D^2 exact (D <= MAX_DEGREE), the product one rounding: gamma_2 covers it
                 let eta = node_error(s0, s1) * degree * degree * (1.0 + gamma(2));
-                piece_bound(&nodes, pair.lebesgue, eta)
+                part_bound(&nodes, pair.lebesgue, eta)
             } else {
                 // the piece meets a knot line: F is not one polynomial on it. Its enclosure
                 // over the whole piece (the hull over the cells it meets) bounds it directly
@@ -3346,7 +3411,7 @@ mod tests {
             let a = norm(p).lo.atan2(q.hi);
             a - 8.0 * UNIT * a.abs()
         };
-        let (mut obtuse, mut between, mut acute) = (0, 0, 0);
+        let (mut obtuse, mut between, mut acute, mut tighter) = (0, 0, 0, 0);
         for case in 0..20_000_usize {
             let degree = case % 7;
             // the constant terms of size about 1, the rest smaller or not
@@ -3386,10 +3451,12 @@ mod tests {
                     angle_lo(p, q)
                 })
                 .fold(0.0, f64::max);
+            let part = part_bound(&nodes, lebesgue(n), eta).unwrap();
             assert!(
-                worst <= bound,
-                "case {case}: {worst} over {bound} on [{s0}, {s1}]"
+                worst <= part && part <= bound,
+                "case {case}: {worst} over {part} or {bound} on [{s0}, {s1}]"
             );
+            tighter += usize::from(part < bound);
             let at_nodes = nodes.iter().filter_map(|n| n.angle_lo).fold(0.0, f64::max);
             if bound > std::f64::consts::FRAC_PI_2 {
                 obtuse += 1;
@@ -3398,11 +3465,11 @@ mod tests {
                 acute += 1;
             }
         }
-        eprintln!("{obtuse} obtuse, {between} of them between the points, {acute} acute");
+        eprintln!("{obtuse} obtuse, {between} of them between the points, {acute} acute, {tighter} of them tighter");
         // not vacuous
         assert!(
-            obtuse > 1000 && between > 500 && acute > 1000,
-            "{obtuse} obtuse, {between} between the points, {acute} acute"
+            obtuse > 1000 && between > 500 && acute > 1000 && tighter > 1000,
+            "{obtuse} obtuse, {between} between the points, {acute} acute, {tighter} tighter"
         );
     }
 
@@ -3450,6 +3517,176 @@ mod tests {
         }
         // the cylinder's two circles and the frustum's base
         assert_eq!(seen, 3);
+    }
+
+    /// `P` and `Q` constant and in proportion (`P = Q / 2`): `G` and `R` are 0, so the bound is
+    /// their angle, atan(1/2), whatever the points' number and rounding `eta`, where the bound
+    /// of `|P|` on its own is atan(L / 2) at the least. Never over it.
+    #[test]
+    #[allow(clippy::unwrap_used)]
+    fn p_and_q_in_proportion_are_bounded_by_their_acute_angle() {
+        let want = 0.5_f64.atan();
+        for n in [2, 3, 11] {
+            let lam = lebesgue(n);
+            for eta in [0.0, 0.01] {
+                let nodes = constant_nodes(n, 0.5, 1.0);
+                let got = part_bound(&nodes, lam, eta).unwrap();
+                assert!(
+                    got >= want && got <= want * (1.0 + 1e-12),
+                    "{n} {eta}: {got} vs {want}"
+                );
+                let alone = piece_bound(&nodes, lam, eta).unwrap();
+                assert!(alone >= (0.5 * lam).atan(), "{n} {eta}: {alone}");
+            }
+        }
+    }
+
+    /// `P = (1, a t, 0)`, `a = 1/10`, and `Q = 1` at the 3 Chebyshev points of `[-1, 1]` (0 and
+    /// +-sqrt(3)/2): along `u = (1, 0, 0)` `E` is 1 and `R = (0, a t, 0)`, at most
+    /// `L a sqrt(3)/2 / (1 - L eta)` long with the points' rounding `eta`, and
+    /// `Q >= 1 - L^2 eta / (1 - L eta)`, so the bound is atan(sqrt(1 + (that over this)^2)), over
+    /// the angle at `t = 1`, atan(sqrt(1 + a^2)).
+    #[test]
+    #[allow(clippy::unwrap_used)]
+    fn a_part_s_bound_counts_the_turning_of_p() {
+        let (n, a) = (3, 0.1);
+        let lam = lebesgue(n);
+        let nodes: Vec<Node> = chebyshev(-1.0, 1.0, n)
+            .map(|t| Node {
+                p: i3([1.0, a * t, 0.0]),
+                q: Ivl::from(1.0),
+                angle_lo: None,
+            })
+            .collect();
+        for eta in [0.0, 0.01] {
+            let room = 1.0 - lam * eta;
+            let r = lam * a * 0.75_f64.sqrt() / room / (1.0 - lam * eta * lam / room);
+            let want = (1.0 + r * r).sqrt().atan();
+            let got = part_bound(&nodes, lam, eta).unwrap();
+            assert!((got - want).abs() <= 1e-12, "{eta}: {got} vs {want}");
+            assert!(got >= (1.0 + a * a).sqrt().atan());
+        }
+    }
+
+    /// `P(t) = 1/10 - t^2` along one direction and `Q = 1`: at the middle point `P` is 1/10, at
+    /// the other two -0.65, so `E` is mostly against its direction: its size is bounded from its
+    /// lower end, `L` half ranges and the points' rounding, `L eta L 0.65 / (1 - L eta)`, under
+    /// its middle, over the 9/10 at `t = 1` (42 degrees; the points' own largest is 33).
+    #[test]
+    #[allow(clippy::unwrap_used)]
+    fn a_part_s_bound_counts_p_against_its_direction() {
+        let n = 3;
+        let lam = lebesgue(n);
+        let nodes: Vec<Node> = chebyshev(-1.0, 1.0, n)
+            .map(|t| Node {
+                p: i3([0.1 - t * t, 0.0, 0.0]),
+                q: Ivl::from(1.0),
+                angle_lo: None,
+            })
+            .collect();
+        for eta in [0.0, 0.01] {
+            let room = 1.0 - lam * eta;
+            let against = 0.275 + lam * (0.375 + eta * lam * 0.65 / room);
+            let want = (against / (1.0 - lam * eta * lam / room)).atan();
+            let got = part_bound(&nodes, lam, eta).unwrap();
+            assert!((got - want).abs() <= 1e-12, "{eta}: {got} vs {want}");
+            assert!(got >= 0.9_f64.atan(), "{eta}: {got}");
+        }
+    }
+
+    /// `P = 1/2` and `Q` 1, 1 and 2 at 3 points: `s` is 1/2 and `G = Q/2 - 1/2` 0, 0 and 1/2, so
+    /// `G >= 1/4 - L (1/4 + eta L (1/2) / (1 - L eta))`, and
+    /// `Q >= 3/2 - L (1/2 + eta L 2 / (1 - L eta))`: the points' rounding widens both.
+    #[test]
+    #[allow(clippy::unwrap_used)]
+    fn the_points_rounding_widens_a_part_s_bound() {
+        let n = 3;
+        let lam = lebesgue(n);
+        let bound = |eta: f64| {
+            let mut nodes = constant_nodes(n, 0.5, 1.0);
+            nodes.last_mut().unwrap().q = Ivl::from(2.0);
+            part_bound(&nodes, lam, eta).unwrap()
+        };
+        for eta in [0.0, 0.01] {
+            let room = 1.0 - lam * eta;
+            let under = lam * (0.25 + eta * lam * 0.5 / room) - 0.25;
+            let q_lo = 1.5 - lam * (0.5 + eta * lam * 2.0 / room);
+            let want = (0.5 + under / q_lo).atan();
+            let got = bound(eta);
+            assert!(
+                got >= want && got <= want * (1.0 + 1e-12),
+                "{eta}: {got} vs {want}"
+            );
+        }
+        assert!(bound(0.01) > bound(0.0));
+    }
+
+    /// The bound a part takes is `piece_bound`'s or a tighter one, and gives none where that
+    /// does: an obtuse piece, and one `P` is exactly 0 on.
+    #[test]
+    fn a_part_s_bound_is_the_piece_s_where_there_is_no_tighter() {
+        let lam = lebesgue(3);
+        for (p, q) in [(1.0, -1.0), (0.0, 1.0), (0.0, -1.0), (1.0, 0.0)] {
+            let nodes = constant_nodes(3, p, q);
+            assert_eq!(
+                part_bound(&nodes, lam, 0.0),
+                piece_bound(&nodes, lam, 0.0),
+                "{p} {q}"
+            );
+        }
+    }
+
+    /// The points an acute decision takes on a frustum's top circle, its side and top the same
+    /// angle apart all along it, against the budget of `MAX_POINTS` a piece: nearly flat ones
+    /// at 0.25 to 0.499 degrees asked half a degree, and a steep one at acos(3/5) (53.13
+    /// degrees) asked a little over it. With `|P|` bounded on its own no part's bound ever went
+    /// under atan(L tan) of the angle, `L` = 2.53 for its 11 points, however short: each was
+    /// halved `MAX_SPLITS` times over and left undecided.
+    #[test]
+    #[allow(clippy::unwrap_used)]
+    fn an_edge_under_the_angle_asked_is_decided_in_few_points() {
+        use crate::math::Point3;
+        use crate::primitive::api_primitives::create_cone;
+        use crate::query::api_queries::{edge_closest_point, get_edges};
+        let half = 0.5_f64.to_radians();
+        let steep = 0.6_f64.acos();
+        let mut k = Kernel::default();
+        // (the true angle, the angle asked)
+        let mut rows: Vec<(f64, f64)> = [0.25_f64, 0.3, 0.4, 0.49, 0.499]
+            .map(|deg| (deg.to_radians(), half))
+            .to_vec();
+        rows.extend([1e-1, 1e-2, 1e-4].map(|over| (steep, steep + over)));
+        for (angle, asked) in rows {
+            let h = 3.0 * angle.tan();
+            let o = Point3::new(0.0, 0.0, 0.0);
+            let mut b = create_cone(&mut k, o, 5.0, 2.0, h).unwrap();
+            let top = Point3::new(0.0, 2.0, h);
+            let mut found = 0;
+            for e in get_edges(&b).unwrap() {
+                let near = edge_closest_point(&k, &b, e, top).unwrap();
+                if near.closest.distance > 1e-9 {
+                    continue;
+                }
+                found += 1;
+                let mut counts = Counts::default();
+                let got = decide(&k, &mut b, e, asked, &mut counts).unwrap();
+                eprintln!("{angle} asked {asked}: {got:?}, {} points", counts.points);
+                assert_eq!(got, Some(Tangency::Tangent), "{angle} asked {asked}");
+                assert!(
+                    counts.points * 10 <= MAX_POINTS,
+                    "{angle} asked {asked}: {} points",
+                    counts.points
+                );
+                // and the angle itself is never under it
+                let under = angle * (1.0 - 1e-9);
+                assert_eq!(
+                    tangent_all_along(&k, &mut b, e, under).unwrap(),
+                    Some(Tangency::NotTangent),
+                    "{angle}"
+                );
+            }
+            assert_eq!(found, 1, "{angle}");
+        }
     }
 
     /// A pcurve running `1e-15` off the knot line `0.5` of a degree-1 net: its box, however

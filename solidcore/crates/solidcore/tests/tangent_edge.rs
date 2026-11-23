@@ -7,7 +7,8 @@
 //!   outward normals are 120 degrees apart there;
 //! - a thin wedge, its ridge's inside angle 5 degrees: 175 degrees apart;
 //! - a cylinder: its side meets its caps square, pi/2;
-//! - a cone's frustum: its side meets its base at acos(-3/5);
+//! - a cone's frustum: its side meets its base at acos(-3/5) and its top at acos(3/5), and
+//!   nearly flat ones their tops at just under and just over half a degree;
 //! - an oblique cylinder leaning 30 degrees: its side's angle with a cap runs from 60
 //!   degrees to 120 degrees round the cap's circle;
 //! - a box with one edge rounded: the round meets both its faces tangentially, so its two
@@ -164,6 +165,43 @@ fn a_frustum_s_side_meets_its_base_past_square() {
     let mut b = create_cone(&mut k, Point3::new(0.0, 0.0, 0.0), 5.0, 2.0, 4.0).unwrap();
     let base = pick(&k, &b, Point3::new(0.0, 5.0, 0.0));
     parts_by(&k, &mut b, base, (-0.6_f64).acos(), 1e-6);
+}
+
+/// The same frustum's top: its outward normal (0, 0, 1) is acos(3/5) (53.13 degrees) from the
+/// side's all along its circle.
+#[test]
+fn a_frustum_s_side_meets_its_top_under_square() {
+    let mut k = Kernel::default();
+    let mut b = create_cone(&mut k, Point3::new(0.0, 0.0, 0.0), 5.0, 2.0, 4.0).unwrap();
+    let top = pick(&k, &b, Point3::new(0.0, 2.0, 4.0));
+    parts_by(&k, &mut b, top, 0.6_f64.acos(), 1e-4);
+}
+
+/// Frustums from r 5 to r 2, 3 tan(a) high: the side and the top are `a` apart all along the
+/// top's circle. Asked half a degree, every `a` under it is tangent and every one over it not.
+#[test]
+fn a_shallow_frustum_s_top_is_smooth_under_half_a_degree() {
+    let mut k = Kernel::default();
+    for (deg, want) in [
+        (0.1, Tangency::Tangent),
+        (0.25, Tangency::Tangent),
+        (0.3, Tangency::Tangent),
+        (0.4, Tangency::Tangent),
+        (0.49, Tangency::Tangent),
+        (0.499, Tangency::Tangent),
+        (0.501, Tangency::NotTangent),
+        (0.51, Tangency::NotTangent),
+        (1.0, Tangency::NotTangent),
+    ] {
+        let h = 3.0 * f64::to_radians(deg).tan();
+        let mut b = create_cone(&mut k, Point3::new(0.0, 0.0, 0.0), 5.0, 2.0, h).unwrap();
+        let top = pick(&k, &b, Point3::new(0.0, 2.0, h));
+        assert_eq!(
+            tangent_all_along(&k, &mut b, top, SMOOTH).unwrap(),
+            Some(want),
+            "{deg}"
+        );
+    }
 }
 
 /// A circle r 3 at z = 0 swept 8 along (sin 30, 0, cos 30): the side's outward normal at the
