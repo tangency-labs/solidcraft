@@ -881,3 +881,71 @@ pub fn make_torus(center: [f64; 3], major_radius: f64, minor_radius: f64) -> Res
         )
     })
 }
+
+#[cfg(test)]
+mod tests {
+    #![allow(clippy::unwrap_used)]
+    use super::*;
+    use solidcore::topology::brep::p2::create_missing_uv_trim_curves;
+    use solidcore::topology::trimming_tools::face_uv_curves_present;
+
+    /// A 10 mm cube united with a cylinder of radius 4 standing on its x = 10 face: the
+    /// kernel's union, whose new faces have no UV trim curves yet.
+    fn united(k: &mut Kernel) -> Brep {
+        let bx = primitives::create_box(k, Vec3::ZERO, 10.0, 10.0, 10.0).unwrap();
+        let cyl = primitives::create_cylinder(k, Vec3::new(10.0, 5.0, 0.0), 4.0, 10.0).unwrap();
+        solidcore::boolean::api_brep::boolean_union(k, bx, cyl).unwrap()
+    }
+
+    /// The faces of `b` without their UV trims.
+    fn lacking(b: &Brep) -> usize {
+        b.face_list()
+            .iter()
+            .filter(|&&f| !face_uv_curves_present(b, f).unwrap())
+            .count()
+    }
+
+    /// The trims `b` lacks, counted as the builds that give a copy of it its missing trims.
+    fn missing_builds(k: &Kernel, b: &Brep) -> u64 {
+        let mut copy = b.clone_standing_for_self().unwrap();
+        let before = k.work_counters.uv_trim_builds();
+        create_missing_uv_trim_curves(k, &mut copy).unwrap();
+        k.work_counters.uv_trim_builds() - before
+    }
+
+    /// One proof of `b` ([`prove_naming`]), which must hold, with the UV trims it built and the
+    /// certified trim bounds it computed.
+    fn proved(k: &mut Kernel, b: &mut Brep) -> (u64, u64) {
+        let w = |k: &Kernel| {
+            (
+                k.work_counters.uv_trim_builds(),
+                k.work_counters.trim_deviation_bounds(),
+            )
+        };
+        let before = w(k);
+        assert_eq!(prove_naming(k, b).unwrap().err(), None);
+        let after = w(k);
+        (after.0 - before.0, after.1 - before.1)
+    }
+
+    /// #21105: the proof of a body that lacks UV trims gives it its trims once, before its
+    /// validity check, so the check runs on the body: the first proof builds each missing trim
+    /// once, and a repeat proof builds none and computes no trim bound. For a boolean's result
+    /// and for the same body read from its record (`to_kernel` makes no trims).
+    #[test]
+    fn a_proof_builds_each_missing_trim_once() {
+        let mut k = Kernel::default();
+        let result = united(&mut k);
+        let (record, _) = to_record(&mut k, &mut result.clone_standing_for_self().unwrap()).unwrap();
+        let (read, _) = to_kernel(&mut k, &record, true).unwrap();
+        for (name, mut b) in [("boolean", result), ("record", read)] {
+            assert!(lacking(&b) > 0, "{name}: the body already has every trim");
+            let needed = missing_builds(&k, &b);
+            assert!(needed > 0, "{name}");
+            let (builds, _) = proved(&mut k, &mut b);
+            assert_eq!(builds, needed, "{name}: the first proof's trim builds");
+            assert_eq!(lacking(&b), 0, "{name}: the proof left faces without trims");
+            assert_eq!(proved(&mut k, &mut b), (0, 0), "{name}: the repeat proof");
+        }
+    }
+}

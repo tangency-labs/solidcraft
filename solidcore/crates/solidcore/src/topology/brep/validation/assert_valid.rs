@@ -951,6 +951,90 @@ mod tests {
         assert_eq!(printed(&skipped), printed(&full));
     }
 
+    /// A 10 mm cube united with a cylinder of radius 4 standing on its x = 10 face, in a
+    /// kernel of its own: a boolean result whose new faces have no UV trim curves yet.
+    fn box_joined_to_cylinder() -> (Kernel, Brep) {
+        let mut k = Kernel::default();
+        let bx = crate::primitive::api_primitives::create_box(
+            &mut k,
+            crate::math::Point3::ZERO,
+            10.0,
+            10.0,
+            10.0,
+        )
+        .unwrap();
+        let cyl = crate::primitive::api_primitives::create_cylinder(
+            &mut k,
+            crate::math::Point3::new(10.0, 5.0, 0.0),
+            4.0,
+            10.0,
+        )
+        .unwrap();
+        let b = crate::boolean::api_brep::boolean_union(&mut k, bx, cyl).unwrap();
+        (k, b)
+    }
+
+    /// What attaching a UV trim writes, entity by entity: each edge use's own trim slot and
+    /// drop record, and the edge and vertex tolerances an attached trim raises.
+    fn trims_and_tolerances(b: &Brep) -> Vec<String> {
+        let mut out = Vec::new();
+        for &e in b.edge_list() {
+            let edge = b.edge(e).unwrap();
+            out.push(format!("{e:?} {:x}", edge.tolerance.to_bits()));
+            for &eu in &edge.edgeuses {
+                let u = b.edgeuse(eu).unwrap();
+                out.push(format!("{eu:?} {:?} {:?}", u.uv_trim_curve, u.drop_curve_fail));
+            }
+        }
+        for &v in b.vertex_list() {
+            let tolerance = b.vertex(v).unwrap().tolerance;
+            out.push(format!("{v:?} {:x}", tolerance.to_bits()));
+        }
+        out
+    }
+
+    /// #21105 step 1: a check never creates a UV trim on the body it was given. A body whose
+    /// faces lack trims keeps its trims and tolerances through `check_brep` at levels 2 and 0
+    /// and through `assert_valid` with the walk, and a second check reports what the first
+    /// did (invariant 11 of `docs/validity-and-tolerances.md`).
+    #[test]
+    fn a_check_of_faces_without_trims_leaves_their_trims_and_tolerances() {
+        for level in [CheckLevel::Level2, CheckLevel::Level0] {
+            let (mut k, mut b) = box_joined_to_cylinder();
+            let lacking = b
+                .face_list()
+                .iter()
+                .filter(|&&f| {
+                    !crate::topology::trimming_tools::face_uv_curves_present(&b, f).unwrap()
+                })
+                .count();
+            assert!(lacking > 0, "the united body already has every trim");
+            let before = trims_and_tolerances(&b);
+            let first = check_brep(&mut k, &mut b, level).unwrap();
+            assert!(first.is_valid(), "{level:?}: {:?}", first.lines());
+            assert_eq!(
+                trims_and_tolerances(&b),
+                before,
+                "{level:?}: the check wrote trims or tolerances on the body"
+            );
+            let second = check_brep(&mut k, &mut b, level).unwrap();
+            assert_eq!(printed(&second), printed(&first), "{level:?}");
+            assert_eq!(trims_and_tolerances(&b), before, "{level:?}: second check");
+        }
+        let (mut k, mut b) = box_joined_to_cylinder();
+        let before = trims_and_tolerances(&b);
+        let naming = b.naming();
+        let recorded = b.geometry_owner_keys().clone();
+        let keys =
+            |e: EntityRef| crate::topology::owner_identity_of(naming, recorded.get(&e).copied(), e);
+        assert!(assert_valid(&mut k, &mut b, None, 2, true, &keys).unwrap());
+        assert_eq!(
+            trims_and_tolerances(&b),
+            before,
+            "AssertValid with the walk wrote trims or tolerances on the body"
+        );
+    }
+
     /// Replaces the curve of the box's first edge by a cubic B-spline along the same line
     /// whose second control point lies 0.01 behind its start: `ValidatePointers` takes the
     /// polygon for a reversal and straightens it, a write to the body.
