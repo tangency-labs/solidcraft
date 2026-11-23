@@ -76,6 +76,7 @@ pub use glb::GlbOptions;
 pub use glb::MAX_GLB_BYTES;
 pub use glb::export_glb;
 mod legacy_dir;
+pub mod library;
 pub mod library_files;
 pub mod limits;
 #[cfg(test)]
@@ -83,7 +84,9 @@ mod mutate;
 mod native_cad;
 pub use native_cad::NATIVE_CAD_EXTS;
 pub use native_cad::NativeDesign;
+pub use native_cad::RecordsRead;
 pub use native_cad::USD_EXTS;
+pub use native_cad::cadmpeg_iges_records;
 pub use native_cad::cadmpeg_step_records;
 pub use native_cad::detects_freecad;
 pub use native_cad::is_freecad_path;
@@ -588,11 +591,14 @@ pub fn step_import_feature_named(bytes: &[u8], file: &str, names: StepNames) -> 
     step_import_feature_read(bytes, file, names, StepReader::SolidCraft)
 }
 
-/// [`step_import_feature_named`], a STEP, FreeCAD or Rhino file read by `reader`.
+/// [`step_import_feature_named`], a STEP, IGES, FreeCAD or Rhino file read by `reader`.
 pub fn step_import_feature_read(bytes: &[u8], file: &str, names: StepNames, reader: StepReader) -> Result<StepFeature> {
     let _span = solidcraft_profile::span("import", "step_import_feature_named");
     limits::check(limits::Kind::Step, bytes.len() as u64).map_err(IoError::Invalid)?;
-    if reader == StepReader::Cadmpeg && is_step_path(file) && !is_iges_path(file) && !is_native_cad_path(file) {
+    if reader == StepReader::Cadmpeg && is_iges_path(file) {
+        return records_import_feature(cadmpeg_iges_records(bytes, file).map_err(IoError::Invalid)?, file, names);
+    }
+    if reader == StepReader::Cadmpeg && is_step_path(file) && !is_native_cad_path(file) {
         return records_import_feature(cadmpeg_step_records(bytes, file).map_err(IoError::Invalid)?, file, names);
     }
     if reader == StepReader::Cadmpeg && is_native_cad_path(file) {
@@ -671,7 +677,8 @@ pub fn usd_import_feature(bytes: &[u8], file: &str, names: StepNames) -> Result<
     let _span = solidcraft_profile::span("import", "usd_import_feature");
     limits::check(limits::Kind::Step, bytes.len() as u64).map_err(IoError::Invalid)?;
     let (records, warnings, y_up) = usd_records(bytes, file).map_err(IoError::Invalid)?;
-    Ok((records_import_feature((records, warnings, false), file, names)?, y_up))
+    let read = RecordsRead { records, warnings, freecad: false, preprocessor: String::new(), description: String::new() };
+    Ok((records_import_feature(read, file, names)?, y_up))
 }
 
 /// A file read with [`StepReader::Cadmpeg`] (FreeCAD, Rhino or STEP) into an Import feature that
@@ -680,11 +687,19 @@ pub fn usd_import_feature(bytes: &[u8], file: &str, names: StepNames) -> Result<
 /// shows only through its body's own shape) are not built, unless nothing else is; a Rhino file's
 /// hidden objects are its user's own choice, so they are built and start hidden. The format is
 /// the one cadmpeg detects in the contents, not the file's name.
-fn records_import_feature(read: (solidcraft_kernel::ImportRecords, Vec<String>, bool), file: &str, names: StepNames) -> Result<StepFeature> {
-    let (records, decode_warnings, freecad) = read;
+fn records_import_feature(read: RecordsRead, file: &str, names: StepNames) -> Result<StepFeature> {
+    let RecordsRead { records, warnings: decode_warnings, freecad, preprocessor, description } = read;
     let text = solidcraft_kernel::records_text(&records)?;
     design::check_step_importable(&text)?;
-    let imp = solidcraft_kernel::records_import_shared(&records)?;
+    let mut imp = solidcraft_kernel::records_import_shared(&records)?;
+    // The rest of a STEP header, which the records do not keep, as a STEP import has it: with the
+    // program (the records' `system`) it says whether the file has Y up. A copy, so the shared
+    // import other reads of the same records find is not changed.
+    if imp.preprocessor != preprocessor || imp.description != description {
+        let mut own = (*imp).clone();
+        (own.preprocessor, own.description) = (preprocessor, description);
+        imp = std::sync::Arc::new(own);
+    }
     // Not one body made of the records: no feature, as a STEP file with no solids is refused.
     if imp.bodies.is_empty() {
         let why = imp.warnings.last().map(|w| format!(" ({w})")).unwrap_or_default();
@@ -2595,7 +2610,7 @@ mod tests {
         doc.add_feature(
             FeatureKind::Cylinder {
                 base: point_expr(Vec3::new(80.0, 0.0, 0.0)),
-                axis: solidcraft_doc::Dir(Vec3::Z),
+                axis: solidcraft_doc::dir_expr(Vec3::Z),
                 radius: "6".into(),
                 height: "15".into(),
                 operation: Operation::NewBody,
@@ -2740,7 +2755,7 @@ mod tests {
         });
         add(FeatureKind::Cylinder {
             base: point_expr(Vec3::new(40.0, 0.0, 0.0)),
-            axis: solidcraft_doc::Dir(Vec3::Z),
+            axis: solidcraft_doc::dir_expr(Vec3::Z),
             radius: "6".into(),
             height: "15".into(),
             operation: Operation::NewBody,
@@ -2780,7 +2795,7 @@ mod tests {
         doc.add_feature(
             FeatureKind::Cylinder {
                 base: point_expr(Vec3::ZERO),
-                axis: solidcraft_doc::Dir(Vec3::Z),
+                axis: solidcraft_doc::dir_expr(Vec3::Z),
                 radius: "6".into(),
                 height: "15".into(),
                 operation: Operation::NewBody,
