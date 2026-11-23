@@ -938,7 +938,7 @@ fn a_view_the_sheet_refuses_names_the_line() {
         owners: Some(Arc::new(owners)),
         why: None,
     };
-    let (_, states, ..) = assemble(&record, Projection::Third, &labels(&record), &[], &[], &[], [(7, Vec2::new(150.0, 150.0), &drawn)].into_iter())
+    let (_, states, ..) = assemble(&record, Projection::Third, &labels(&record), &[], &[], [(7, Vec2::new(150.0, 150.0), &drawn)].into_iter())
         .unwrap()
         .finish()
         .unwrap();
