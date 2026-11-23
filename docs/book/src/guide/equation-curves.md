@@ -126,10 +126,11 @@ An equation curve is an ordinary sketch curve, so you can build with it:
 
 ## Curves in 3D: a third rule, z(t)
 
-Turn on **3D Sketch** in the Sketch Palette (see [Sketching](sketching.md)) and the window shows
-a third rule, **z(t)**: *how high is the curve at each moment of the clock?* Leave it empty and
-the curve stays on the sketch plane, as always; fill it in and the curve becomes a **3D curve**
-that can leave the plane.
+Turn on **3D Sketch** in the Sketch Palette (see [Sketching](sketching.md)), set **Form** to
+**Parametric**, and the window shows a third rule, **z(t)**: *how high is the curve at each
+moment of the clock?* Leave it empty and the curve stays on the sketch plane, as always; fill it
+in and the curve becomes a **3D curve** that can leave the plane. The **Explicit** form, y = f(x),
+never takes z(t).
 
 A helix is a circle whose height grows with the clock:
 
@@ -151,8 +152,8 @@ of a sphere of radius 1 to the other in twenty-five turns: its distance from the
 |---|---|---|---|---|
 | `cos(50 * t) * cos(t)` | `sin(50 * t) * cos(t)` | `sin(t)` | `-pi / 2` | `pi / 2` |
 
-A 3D equation curve is a **3D sketch curve**, like a 3D Spline: you cannot turn it into a
-profile, but you can pick it as the **path** of a sweep or a pipe. The two forms have their
+A 3D equation curve is a **3D sketch curve**, like a 3D Spline: Extrude and Revolve do not take
+it as a profile, but you can pick it as the **path** of a sweep or a pipe. The two forms have their
 limits: **Explicit** is a plane curve and has no z(t). Editing a curve between the plane and 3D
 kinds (giving it a z(t), or setting **Form** back to **Explicit**) makes it a new curve, so a
 sketch tool that names it must be pointed at the new one.

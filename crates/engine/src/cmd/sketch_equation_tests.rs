@@ -528,6 +528,32 @@ fn giving_z_makes_a_3d_curve_and_the_explicit_form_turns_it_back() {
     assert_eq!(sk.equations.len(), 1);
 }
 
+/// The window's empty z(t) row on an edit sends `z: null`: the formula goes and the curve is a
+/// plane curve again (#12662), while leaving `z` out still keeps it.
+#[test]
+fn clearing_z_in_the_window_makes_the_curve_a_plane_one_again() {
+    let mut s = Session::default();
+    run(&mut s, "sketch.create", json!({"plane": "XY", "name": "S"}));
+    run(&mut s, "sketch.options", json!({"sketch_3d": true}));
+    let r = run(&mut s, "sketch.equation_curve", json!({"x": "10 * cos(t)", "y": "10 * sin(t)", "z": "5", "start": 0, "end": "2 * pi"}));
+    let wire = r["curve"].as_str().unwrap().to_string();
+    let f = s.doc.find_feature("S").unwrap().id;
+    // Leaving z out keeps it: the same curve, still a 3D one.
+    let r = run(&mut s, "sketch.equation_curve.edit", json!({"curve": wire, "end": "2 * pi"}));
+    assert_eq!(r["curve"].as_str(), Some(wire.as_str()), "{r}");
+    assert!(s.doc.sketch(f).unwrap().wire_index(&wire).is_some());
+    // An empty z row removes it: a new plane curve, and the 3D one is gone.
+    let r = run(&mut s, "sketch.equation_curve.edit", json!({"curve": wire, "z": null}));
+    let back = r["curve"].as_str().unwrap().to_string();
+    assert_ne!(back, wire, "{r}");
+    let sk = s.doc.sketch(f).unwrap();
+    assert!(sk.curve_index(&back).is_some() && sk.wire_index(&wire).is_none(), "{sk:?}");
+    assert!(sk.equation_of(&back).unwrap().z.is_none());
+    assert_eq!(sk.equations.len(), 1, "one curve, one equation");
+    run(&mut s, "sketch.finish", json!({}));
+    no_trouble(&s);
+}
+
 #[test]
 fn deleting_a_3d_curve_forgets_its_formulas() {
     let mut s = Session::default();

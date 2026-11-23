@@ -308,7 +308,9 @@ fn deviation3(vals: &BTreeMap<String, Value>, eq: &EquationCurve, (a, b): (f64, 
     let step = (b - a) / points.len().saturating_sub(1).max(1) as f64;
     let mut worst: f64 = 0.0;
     for (i, piece) in pieces.iter().enumerate() {
-        for k in [0.25, 0.5, 0.75] {
+        // Probes at fractions of a piece that the sample grid and the quarters never land on, so a
+        // spline that swings out between two samples is measured, not passed (#12662).
+        for k in [0.25, 0.382, 0.5, 0.618, 0.75] {
             let q = point_at3(vals, eq, a + step * (i as f64 + k), d)?;
             worst = worst.max(bezier_distance3(piece, q));
         }
@@ -442,8 +444,10 @@ impl crate::Document {
             if eq.is_3d() {
                 let Some(wi) = sk.wire_index(&eq.curve) else { continue };
                 let Some(w) = sk.wires.get(wi).filter(|w| w.link.is_none()) else { continue };
-                let (count, closed) = (w.fit.len(), catmull_rom::is_closed(&w.fit));
-                let fit = sample3(vals, &eq, count, Some(closed)).map_err(|e| DocError::Expr(format!("equation curve {}: {e}", eq.curve)))?;
+                // The same number of points, but whether the curve closes comes from the points
+                // the formulas give now, not from the ones it had (#12662).
+                let count = w.fit.len();
+                let fit = sample3(vals, &eq, count, None).map_err(|e| DocError::Expr(format!("equation curve {}: {e}", eq.curve)))?;
                 sk.place_equation_wire_points(wi, &fit.points)?;
                 continue;
             }

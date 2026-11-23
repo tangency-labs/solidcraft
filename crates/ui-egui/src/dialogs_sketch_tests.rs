@@ -1057,8 +1057,17 @@ fn equation_curve_window_lifts_the_curve_with_z_in_a_3d_sketch() {
     assert!(sk.wire_index(&eq.curve).is_some(), "a 3D curve");
     assert!(crate::sketch_modify_ui::edit_equation(&mut h.app, &eq.curve));
     h.settle();
-    let Some(Kind::SketchModify(Mod::Equation { z, .. })) = h.app.dialog.as_ref().map(|d| &d.kind) else { panic!("no equation window") };
+    let Some(Kind::SketchModify(Mod::Equation { z, .. })) = h.app.dialog.as_mut().map(|d| &mut d.kind) else { panic!("no equation window") };
     assert_eq!(z.as_str(), "t", "reopens on its z(t)");
+    // Clearing the row and pressing OK takes the formula away: the curve is a plane curve again.
+    z.clear();
+    h.settle();
+    h.step(&json!({"click":{"handle":"dialog:ok"}})).unwrap();
+    h.settle();
+    let sk = h.app.session.doc.sketch(sid).unwrap().clone();
+    assert!(sk.equations.iter().all(|e| e.z.is_none()), "z(t) is gone");
+    assert!(sk.wire_index(&eq.curve).is_none(), "the 3D curve is gone");
+    assert_eq!(sk.equations.len(), 1, "one curve, one equation");
 }
 
 /// A plane sketch's window offers no z(t): its curves stay on the plane.

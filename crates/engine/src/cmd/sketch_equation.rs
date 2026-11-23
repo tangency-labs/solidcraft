@@ -49,7 +49,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .output(output_schema_for::<EquationEditResult>)
         .params(
             "curve: an equation curve's id; x?, y?, z?, explicit?, start?, end?, tolerance?, variable_unit?: as in sketch.equation_curve, each kept when left out (explicit: true drops x and z; false needs x). \
-             Giving z makes a 3D curve, and explicit: true turns one back into a plane curve; such a change makes a new curve, whose id the reply names. \
+             Giving z makes a 3D curve; z: null (or \"\") drops z and makes the curve a plane one, and explicit: true turns a 3D curve back into a plane curve; such a change makes a new curve, whose id the reply names. \
              The points are chosen again for the new formulas; the curve's start point (and the end point of an open curve) keeps its id, so geometry joined there stays joined. Returns curve, points, closed, deviation",
         ),
 ];
@@ -66,6 +66,11 @@ fn text(p: &Value, cmd: &str, key: &str) -> Result<Option<String>> {
             .ok_or_else(|| bad(cmd, format!("`{key}` must be a finite number"))),
         Some(_) => Err(bad(cmd, format!("`{key}` must be a formula (a string) or a number"))),
     }
+}
+
+/// Whether a `z` parameter is there but empty: null, or a blank string.
+fn absent(v: &Value) -> bool {
+    matches!(v, Value::Null) || v.as_str().is_some_and(|s| s.trim().is_empty())
 }
 
 fn tolerance(p: &Value, cmd: &str) -> Result<Option<f64>> {
@@ -111,12 +116,15 @@ fn equation(p: &Value, cmd: &str, old: Option<&EquationCurve>) -> Result<Equatio
             None => return Err(bad(cmd, "needs `x` and `y` (formulas of t), or explicit: true and `y` (a formula of x)")),
         },
     };
-    // The explicit form is a plane curve: it has no z to keep or take (#12662).
-    let z = match (explicit, text(p, cmd, "z")?) {
-        (Some(true), Some(_)) => return Err(bad(cmd, "an explicit curve y = f(x) is a plane curve: leave out `z`")),
-        (Some(true), None) => None,
-        (_, Some(z)) => Some(z),
+    // The explicit form is a plane curve: it has no z to keep or take (#12662). On an edit an
+    // empty `z` (or null) is the window's empty row: it takes the formula away and the curve is a
+    // plane curve again, while leaving `z` out keeps it.
+    let z = match (explicit, p.get("z")) {
+        (Some(true), Some(v)) if !absent(v) => return Err(bad(cmd, "an explicit curve y = f(x) is a plane curve: leave out `z`")),
+        (Some(true), _) => None,
         (_, None) => old.and_then(|o| o.z.clone()),
+        (_, Some(v)) if absent(v) => None,
+        (_, Some(_)) => text(p, cmd, "z")?,
     };
     let pick = |key: &str, kept: Option<&String>| -> Result<String> {
         match text(p, cmd, key)? {

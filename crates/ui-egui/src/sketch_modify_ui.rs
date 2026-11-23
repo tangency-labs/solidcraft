@@ -1231,9 +1231,12 @@ pub fn commands(app: &SolveApp, k: &Mod, inputs: &[SelInput], extra: &Map<String
             let mut p = json!({"y": filled(if *form == 0 { "y(t)" } else { "y(x)" }, y)?, "start": filled("Start", start)?, "end": filled("End", end)?, "tolerance": tol});
             if *form == 0 {
                 p["x"] = json!(filled("x(t)", x)?);
-                // Empty leaves the curve on the sketch plane; a formula lifts it off (#12662).
+                // Empty leaves a new curve on the plane; on an edit it takes the formula away and
+                // the curve is a plane curve again, where leaving `z` out would keep it (#12662).
                 if !z.trim().is_empty() {
                     p["z"] = json!(filled("z(t)", z)?);
+                } else if extra.contains_key("curve") {
+                    p["z"] = json!(null);
                 }
             } else {
                 p["explicit"] = json!(true);
