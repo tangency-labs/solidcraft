@@ -764,33 +764,33 @@ fn ball_with_a_hole() -> solidcraft_kernel::Body {
     less(solidcraft_kernel::sphere(Vec3::ZERO, 5.0).unwrap(), solidcraft_kernel::cylinder(Vec3::new(3.0, 0.0, -10.0), Vec3::Z, 1.0, 20.0).unwrap())
 }
 
-/// `b`, and the rim of its faces on a `which` surface ([`rim`]).
-fn rimmed(b: &solidcraft_kernel::Body, which: fn(&Curved) -> bool) -> (ModelBody, Vec<usize>) {
+/// `b`, its faces on a `which` surface, and their rim ([`rim`]).
+fn rimmed(b: &solidcraft_kernel::Body, which: fn(&Curved) -> bool) -> (ModelBody, Vec<usize>, Vec<usize>) {
     let b = ModelBody::new("B".into(), b.clone(), 1);
     let faces: Vec<usize> = curved_of(&b).iter().enumerate().filter(|(_, c)| c.as_ref().is_some_and(which)).map(|(f, _)| f).collect();
     assert!(!faces.is_empty());
     let rim = rim(&b, &faces);
-    (b, rim)
+    (b, faces, rim)
 }
 
 /// The arc of the contour of the sphere of `radius` at the origin, seen on the plane of `x` and
 /// `y`, that its faces on `b` hold ([`contour_on`]).
 fn contour_arc(b: &solidcraft_kernel::Body, radius: f64, x: Vec3, y: Vec3) -> Option<(f64, f64)> {
-    let (b, rim) = rimmed(b, |c| matches!(c, Curved::Sphere(_)));
-    contour_on(&b, &Plane { origin: Vec3::ZERO, x, y }, &Sphere { center: Vec3::ZERO, radius }, &rim).unwrap()
+    let (b, faces, rim) = rimmed(b, |c| matches!(c, Curved::Sphere(_)));
+    contour_on(&b, &Plane { origin: Vec3::ZERO, x, y }, &Sphere { center: Vec3::ZERO, radius }, &faces, &rim).unwrap()
 }
 
 /// The piece of the silhouette from `apex` towards `towards`, of the cone along -z whose faces on
 /// `b` hold it ([`ray_on`]), as distances from the apex, out to 40.
 fn silhouette_piece(b: &solidcraft_kernel::Body, apex: Vec3, towards: Vec3) -> Option<(f64, f64)> {
-    let (b, rim) = rimmed(b, |c| matches!(c, Curved::Cone(_)));
-    ray_on(&b, apex, -Vec3::Z, (towards - apex).normalized().unwrap(), 40.0, &rim).unwrap()
+    let (b, faces, rim) = rimmed(b, |c| matches!(c, Curved::Cone(_)));
+    ray_on(&b, apex, -Vec3::Z, (towards - apex).normalized().unwrap(), 40.0, &faces, &rim).unwrap()
 }
 
 /// The largest tolerance of the edges of `rim` on `b`: how far its fitted curves may lie from
 /// where the surfaces meet.
 fn rim_tolerance(b: &solidcraft_kernel::Body, which: fn(&Curved) -> bool) -> f64 {
-    let (b, rim) = rimmed(b, which);
+    let (b, _, rim) = rimmed(b, which);
     rim.iter().filter_map(|e| b.body.record().edges.get(*e)).map(|e| e.tolerance).fold(0.0, f64::max)
 }
 
@@ -942,11 +942,24 @@ fn a_ball_with_a_hole_above_its_middle_reads_the_arc_below() {
 /// read, as before.
 #[test]
 fn faces_ending_at_too_many_edges_are_refused() {
-    let (b, _) = rimmed(&ball_on_boss(6.0), |c| matches!(c, Curved::Sphere(_)));
+    let (b, faces, _) = rimmed(&ball_on_boss(6.0), |c| matches!(c, Curved::Sphere(_)));
     let many: Vec<usize> = (0..=MAX_RIM_EDGES).collect();
     let seen = Plane { origin: Vec3::ZERO, x: Vec3::X, y: Vec3::Z };
-    let sphere = contour_on(&b, &seen, &Sphere { center: Vec3::ZERO, radius: 6.0 }, &many);
+    let sphere = contour_on(&b, &seen, &Sphere { center: Vec3::ZERO, radius: 6.0 }, &faces, &many);
     assert!(matches!(&sphere, Err(Status::Unmeasurable(why)) if why.contains("more than 128 edges")), "{sphere:?}");
-    let cone = ray_on(&b, Vec3::ZERO, Vec3::Z, Vec3::X, 10.0, &many);
+    let cone = ray_on(&b, Vec3::ZERO, Vec3::Z, Vec3::X, 10.0, &faces, &many);
     assert!(matches!(&cone, Err(Status::Unmeasurable(why)) if why.contains("more than 128 edges")), "{cone:?}");
+}
+
+/// The ball's sphere face copied out of the ball on the boss as a sheet: its rim, the circle
+/// z = -sqrt 11, is a free edge with no face across it, so where the front contour crosses it
+/// nothing says which way the faces go on. The dimension says so, and why, rather than guess.
+#[test]
+fn a_free_edge_across_the_contour_is_refused_with_its_cause() {
+    let sheet = solidcraft_kernel::copy_faces(&ball_on_boss(6.0), &[Vec3::new(0.0, 0.0, 6.0)]).unwrap();
+    let (b, faces, rim) = rimmed(&sheet, |c| matches!(c, Curved::Sphere(_)));
+    let seen = Plane { origin: Vec3::ZERO, x: FRONT.0, y: FRONT.1 };
+    let got = contour_on(&b, &seen, &Sphere { center: Vec3::ZERO, radius: 6.0 }, &faces, &rim);
+    let refused = |why: &str| why.contains("without exactly one face across it") && why.ends_with("give a radius another way");
+    assert!(matches!(&got, Err(Status::Unmeasurable(why)) if refused(why)), "{got:?}");
 }
