@@ -150,6 +150,12 @@ pub struct ExtrudeParams {
     /// How far past `to` to go.
     #[serde(default)]
     pub to_offset: Option<LengthExpr>,
+    /// On a Join To Object, leave the body the `to` pick is on as its own body, so the join
+    /// changes only the bodies in `targets`. Needs a Join with `to`. Default false: the body the
+    /// join runs to is taken too.
+    #[serde(default, deserialize_with = "present")]
+    #[schemars(with = "bool")]
+    pub to_body_apart: Option<bool>,
     /// Start at this face or point (From Object). On a flat face at a slant the start follows the
     /// face, and a distance moves it along the extrusion.
     #[serde(default, deserialize_with = "present")]

@@ -229,6 +229,25 @@ fn manual_to_object_accepts_a_parallel_plane_when_thin_extrude_is_on() {
     assert!((solidcraft_engine::extrude_reach(&h.app.session, &commands[0].1).unwrap() - 25.0).abs() < 1e-9);
 }
 
+/// #19671: choosing To Object in the Extent Type selects the To Object field, so the next click
+/// in the view picks the face to run to. The field is already there when the extent was To
+/// Object before, and the choice takes the pick back then too.
+#[test]
+fn choosing_to_object_selects_the_to_object_field() {
+    let mut h = scene_with(false);
+    h.step(&json!({"click": {"handle": "dialog:Extent Type"}})).unwrap();
+    h.step(&json!({"click": {"handle": "dialog:Extent Type:To Object"}})).unwrap();
+    assert_eq!(dialog(&h).active_input().unwrap().label, "To Object");
+    // The profiles take the pick, and choosing To Object again gives it back.
+    let d = h.app.dialog.as_mut().unwrap();
+    d.active = 0;
+    h.app.dialog = Some(d);
+    h.frames(2);
+    h.step(&json!({"click": {"handle": "dialog:Extent Type"}})).unwrap();
+    h.step(&json!({"click": {"handle": "dialog:Extent Type:To Object"}})).unwrap();
+    assert_eq!(dialog(&h).active_input().unwrap().label, "To Object");
+}
+
 /// A snap point (the end of a sketch line, woken by hovering the line) reaches the dialog as a
 /// vertex of no body. To Object and From Object take it as the place to extrude to or from (#17394).
 #[test]
