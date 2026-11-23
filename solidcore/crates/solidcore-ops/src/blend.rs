@@ -1613,7 +1613,7 @@ const NO_COMMENT: &str = "<no comment>";
 /// and their neighbours); with [`Corners::Open`], [`Error::NotSolid`] for a body that is no
 /// closed solid once blended and [`Error::Unsupported`] for a corner patch that is not a disc
 /// between faces outside every patch; the kernel's other refusals; [`Error::Empty`]
-/// and [`Error::NotSolid`] as the result contract gives them.
+/// and [`Error::NotSolidBecause`] as the result contract gives them.
 pub fn blend(
     body: &Body,
     kind: Blend,
@@ -2737,7 +2737,7 @@ pub fn chamfer_sides(
 }
 
 /// [`chamfer_sides`] under `contract`: [`Contract::Proved`] proves the body before and the result
-/// after, and refuses a result it cannot prove ([`Error::NotSolid`]).
+/// after, and refuses a result it cannot prove ([`Error::NotSolidBecause`]).
 ///
 /// # Errors
 /// As [`chamfer_sides`].
@@ -2784,7 +2784,7 @@ pub fn chamfer_sides_ordered(
 }
 
 /// [`chamfer_sides_ordered`] under `contract`: [`Contract::Proved`] proves the body before and the result
-/// after, and refuses a result it cannot prove ([`Error::NotSolid`]).
+/// after, and refuses a result it cannot prove ([`Error::NotSolidBecause`]).
 ///
 /// # Errors
 /// As [`chamfer_sides_ordered`].
@@ -2828,7 +2828,7 @@ pub fn chamfer_sides_facing(
 }
 
 /// [`chamfer_sides_facing`] under `contract`: [`Contract::Proved`] proves the body before and the result
-/// after, and refuses a result it cannot prove ([`Error::NotSolid`]).
+/// after, and refuses a result it cannot prove ([`Error::NotSolidBecause`]).
 ///
 /// # Errors
 /// As [`chamfer_sides_facing`].
@@ -3040,7 +3040,7 @@ pub fn fillet_variable(
 }
 
 /// [`fillet_variable`] under `contract`: [`Contract::Proved`] proves the body before and the result
-/// after, and refuses a result it cannot prove ([`Error::NotSolid`]).
+/// after, and refuses a result it cannot prove ([`Error::NotSolidBecause`]).
 ///
 /// # Errors
 /// As [`fillet_variable`].
@@ -3099,7 +3099,7 @@ pub fn fillet_variable_ordered(
 }
 
 /// [`fillet_variable_ordered`] under `contract`: [`Contract::Proved`] proves the body before and the result
-/// after, and refuses a result it cannot prove ([`Error::NotSolid`]).
+/// after, and refuses a result it cannot prove ([`Error::NotSolidBecause`]).
 ///
 /// # Errors
 /// As [`fillet_variable_ordered`].
@@ -3150,7 +3150,7 @@ pub fn fillet_variable_from(
 }
 
 /// [`fillet_variable_from`] under `contract`: [`Contract::Proved`] proves the body before and the result
-/// after, and refuses a result it cannot prove ([`Error::NotSolid`]).
+/// after, and refuses a result it cannot prove ([`Error::NotSolidBecause`]).
 ///
 /// # Errors
 /// As [`fillet_variable_from`].
