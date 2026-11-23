@@ -1149,7 +1149,7 @@ impl Dialog {
             "solid.sweep" => Dialog::new(Kind::Sweep { operation: usize::from(has_bodies), opts: crate::dialogs_sweep::SweepOpts::default() }, {
                 let [rail, rail2] = crate::dialogs_sweep::rail_inputs();
                 vec![
-                    SelInput::new("Profile", PROFILES, true),
+                    SelInput::new("Profile", PROFILES | PLANAR_FACES, true),
                     SelInput::new("Path", CURVES | EDGES, true),
                     crate::dialogs_sweep::direction_input(),
                     rail,
@@ -6607,10 +6607,26 @@ fn dialog_commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value)>, S
             ("solid.loft", p)
         }
         Kind::Sweep { operation, opts } => {
-            need(0, "a profile")?;
+            need(0, "profiles or a planar face")?;
             need(1, "the path")?;
             let (sketch, idx) = profiles();
-            let mut p = json!({"sketch": sketch, "profiles": idx, "operation": OPS.get(*operation).copied().unwrap_or("new")});
+            // A planar body face is the profile, as in Extrude and Revolve; a profile wins when
+            // both are picked.
+            let face = sketch
+                .is_null()
+                .then(|| {
+                    sels(d, 0).iter().find_map(|x| match x {
+                        Sel::Face { body, point, .. } => Some((body.clone(), *point)),
+                        _ => None,
+                    })
+                })
+                .flatten();
+            let mut p = match face {
+                Some((body, point)) => {
+                    json!({"face": pt(point), "face_body": body, "operation": OPS.get(*operation).copied().unwrap_or("new")})
+                }
+                None => json!({"sketch": sketch, "profiles": idx, "operation": OPS.get(*operation).copied().unwrap_or("new")}),
+            };
             // The path is a chain of a body's edges or the curves of a sketch (#2216).
             if let Some((body, edges)) = crate::dialogs_sweep::edge_path(sels(d, 1))? {
                 p["path_body"] = json!(body);
