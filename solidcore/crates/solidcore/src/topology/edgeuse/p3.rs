@@ -475,9 +475,9 @@ pub(crate) fn fit_tolerance(k: &Kernel, b: &mut Brep, e: EdgeId) -> Result<f64> 
 /// Not upstream (#18294): a face that is a blend kept as its definition is dropped onto
 /// as its definition S, also inside a caller's
 /// [`crate::surface::procedural_blend::NetScope`], since a projection is solved on S
-/// (`docs/generic-blend.md` §2.3). The net lies up to its bound off S, so an edge
-/// ending on the face's boundary drops past the net's and its UV curve came back
-/// shorter than the edge.
+/// (`docs/generic-blend.md` §2.3). The net lies up to its bound off S, so on the net an
+/// edge ending on the face's boundary can drop past the net's, and its UV curve comes
+/// back shorter than the edge.
 ///
 /// # Errors
 ///

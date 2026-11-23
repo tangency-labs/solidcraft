@@ -876,8 +876,8 @@ impl FilletSession<'_> {
     /// (`SmTol::GetApproxTol3d`, its solvers' and its merge's), so a face it rolls on that
     /// is a blend by its definition evaluates as its certified net wherever the net's
     /// bound is within that tolerance ([`NetScope::within`]); a step that asks for more
-    /// (a station of a definition) takes S. The steps it runs, [`Self::create_corners`] and
-    /// [`Self::do_filleting`], open the same scope when they are called one by one.
+    /// (a station of a definition) takes S. [`Self::do_filleting`], called on its own after
+    /// [`Self::create_corners`] as solidcore-ops does, opens the same scope.
     pub fn do_fillet(&mut self, k: &mut Kernel) -> Result<()> {
         crate::profile::profile_scope!(k, "blend::session::do_fillet");
         let tolerance = self.net_tolerance(k);
@@ -885,8 +885,9 @@ impl FilletSession<'_> {
     }
 
     /// The tolerance the fillet is built to, the target's approximation tolerance
-    /// (`SmTol::GetApproxTol3d`): the [`NetScope`] [`Self::do_fillet`] and its steps run in.
-    pub(crate) fn net_tolerance(&self, k: &Kernel) -> f64 {
+    /// (`SmTol::GetApproxTol3d`): the [`NetScope`] [`Self::do_fillet`] and
+    /// [`Self::do_filleting`] run in.
+    fn net_tolerance(&self, k: &Kernel) -> f64 {
         approx_tol3d(k, 0.5 * self.objects.target.tolerance())
     }
 

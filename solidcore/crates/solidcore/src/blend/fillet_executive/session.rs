@@ -2285,9 +2285,7 @@ impl<'target> FilletSession<'target> {
         self.typed_unblendable(k, prepared)
     }
 
-    /// Create and retain the actual corners in native executive order, in
-    /// [`Self::do_fillet`]'s [`crate::surface::procedural_blend::NetScope`] (the target's
-    /// approximation tolerance, [`Self::net_tolerance`]) also when called on its own.
+    /// Create and retain the actual corners in native executive order.
     ///
     /// # Errors
     /// A missing pending entry, undefined native null-vertex access, a failed factory
@@ -2298,7 +2296,6 @@ impl<'target> FilletSession<'target> {
         error_info: Option<&mut ErrorInfo<FilletObject>>,
     ) -> Result<()> {
         crate::profile::profile_scope!(k, "blend::session::create_corners");
-        let _scope = crate::surface::procedural_blend::NetScope::within(k, self.net_tolerance(k));
         // solvers loaded since the last sync (`SetFilletParameters`) read the handler
         // during the corners' traces
         self.sync_self_intersection_handler();
