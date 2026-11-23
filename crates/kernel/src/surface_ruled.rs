@@ -26,7 +26,7 @@ use std::collections::HashMap;
 use solidcore_record::Vec3;
 use solidcore_record::brep::{self as b, Brep};
 use solidcraft_geom::brep::eval::SurfaceEval;
-use solidcraft_geom::bspline::{CurveN, HPoint, NurbsSurface};
+use solidcraft_geom::bspline::{CurveN, HPoint, NurbsSurface, Side as KnotSide, local_basis};
 
 use crate::body::Body;
 use crate::history::FaceOrigin;
@@ -553,7 +553,13 @@ impl Sampled {
 //   ([`end_directions`]);
 // - joints [`W_JOIN`]: at a joint where the chain runs on smoothly and the strips share their
 //   side, the first and second derivatives (by the edges' arc length) the same on both sides, in
-//   one solve along the chain: the neighbour's far edge is matched in tangent and curvature.
+//   one solve along the chain: the neighbour's far edge is matched in tangent and curvature;
+// - knots inside an edge: an edge's curve may repeat a knot to its degree and still run on
+//   smoothly there (a loft's run at each section, an arc at each quarter turn), and a curve on
+//   its knots is free to turn a corner at that knot ([`smooth_breaks`]). The far curve's first
+//   derivative by the edge's arc length is held the same on both sides exactly (a condition of
+//   the solve, [`Normal::hold`]), so the far curve has no corner where its edge has none and the
+//   strip is one smooth face; its second derivative is matched with [`W_JOIN`], as at a joint.
 
 /// Weight of the curve passing the rulings' ends.
 const W_CLOSE: f64 = 1.0;
@@ -600,6 +606,74 @@ fn rational_basis(c: &CurveN<4>, t: f64) -> Option<Vec<(usize, [f64; 3])>> {
     )
 }
 
+/// [`rational_basis`] from one side of `t`: the limit from before it ([`KnotSide::Left`]) or from
+/// after it ([`KnotSide::Right`]). The two differ at a knot repeated to the curve's degree, where
+/// the curve's spline space allows a corner.
+fn rational_basis_from(c: &CurveN<4>, t: f64, side: KnotSide) -> Option<Vec<(usize, [f64; 3])>> {
+    let mut alive: Vec<(usize, [f64; 3], f64)> = Vec::new();
+    for (i, h) in c.ctrl.iter().enumerate() {
+        let d = local_basis(c.knots.get(i..=i + c.degree + 1)?, t, side, 2);
+        let n: [f64; 3] = std::array::from_fn(|k| d.get(k).copied().unwrap_or(0.0));
+        if n.iter().any(|v| *v != 0.0) {
+            alive.push((i, n, h[3]));
+        }
+    }
+    let weight = |k: usize| alive.iter().map(|(_, n, w)| n[k] * w).sum::<f64>();
+    let (w0, w1, w2) = (weight(0), weight(1), weight(2));
+    if !(w0.abs() > 1e-300) {
+        return None;
+    }
+    Some(
+        alive
+            .iter()
+            .map(|&(i, n, w)| {
+                let r = n[0] * w / w0;
+                let r1 = (n[1] * w - r * w1) / w0;
+                let r2 = (n[2] * w - 2.0 * r1 * w1 - r * w2) / w0;
+                (i, [r, r1, r2])
+            })
+            .collect(),
+    )
+}
+
+/// A knot inside an edge's curve, repeated to the curve's degree, at which the curve itself runs
+/// on smoothly: the rational basis just before and just after it ([`rational_basis_from`]) and
+/// the curve's speed (by its parameter) on each side.
+struct Break {
+    before: Vec<(usize, [f64; 3])>,
+    after: Vec<(usize, [f64; 3])>,
+    speed: [f64; 2],
+}
+
+/// The [`Break`]s of `c`: its interior knots repeated to its degree or more (a loft's run has one
+/// at every section, an arc's rational quadratic one at every quarter turn) where its two
+/// one-sided tangents agree, as the tangents of two edges do at a smooth joint of the chain. A
+/// curve on `c`'s knots is free to turn a corner at such a knot though `c` does not.
+fn smooth_breaks(c: &CurveN<4>) -> Vec<Break> {
+    let [t0, t1] = range(c);
+    let mut out = Vec::new();
+    let mut last = f64::NAN;
+    for &t in &c.knots {
+        if !(t > t0 && t < t1) || t == last {
+            continue;
+        }
+        last = t;
+        if c.knots.iter().filter(|k| **k == t).count() < c.degree {
+            continue;
+        }
+        let (Some(before), Some(after)) = (rational_basis_from(c, t, KnotSide::Left), rational_basis_from(c, t, KnotSide::Right)) else { continue };
+        let derivative = |basis: &[(usize, [f64; 3])]| {
+            basis.iter().fold(Vec3::ZERO, |sum, (i, r)| c.ctrl.get(*i).map_or(sum, |h| sum + Vec3::new(h[0] / h[3], h[1] / h[3], h[2] / h[3]) * r[1]))
+        };
+        let (d0, d1) = (derivative(&before), derivative(&after));
+        let (s0, s1) = (d0.len(), d1.len());
+        if s0 > 1e-12 && s1 > 1e-12 && d0.dot(d1) > (1e-3f64).cos() * s0 * s1 {
+            out.push(Break { before, after, speed: [s0, s1] });
+        }
+    }
+    out
+}
+
 /// One strip's far curve in the solve: its edge's NURBS and readings, its corners, and its interior
 /// control points: given (fixed) or unknowns starting at `index` in the solve's vector.
 struct Far<'a> {
@@ -640,16 +714,41 @@ impl Far<'_> {
     }
 }
 
-/// A least-squares system over `m` unknown points: the normal equations, built row by row.
+/// A least-squares system over `m` unknown points: the normal equations, built row by row, and
+/// the conditions the solution holds exactly ([`Normal::hold`]).
 struct Normal {
     m: usize,
     a: Vec<f64>,
     b: Vec<[f64; 3]>,
+    /// Each held condition: its coefficients of the unknowns and its right-hand side.
+    held: Vec<(Vec<(usize, f64)>, Vec3)>,
 }
 
 impl Normal {
     fn new(m: usize) -> Normal {
-        Normal { m, a: vec![0.0; m * m], b: vec![[0.0; 3]; m] }
+        Normal { m, a: vec![0.0; m * m], b: vec![[0.0; 3]; m], held: Vec::new() }
+    }
+
+    /// The condition `Σ coefficient × point = target`, held exactly (a Lagrange multiplier in the
+    /// solve) where [`Normal::row`] only weighs it: fixed points move to the target's side. A
+    /// condition on fixed points alone is not the solve's to hold and is left out.
+    fn hold(&mut self, terms: &[(std::result::Result<usize, Vec3>, f64)], target: Vec3) {
+        let mut rhs = target;
+        let mut unknown: Vec<(usize, f64)> = Vec::with_capacity(terms.len());
+        for (slot, c) in terms {
+            match slot {
+                Ok(i) => match unknown.iter_mut().find(|(j, _)| j == i) {
+                    Some((_, sum)) => *sum += *c,
+                    None => unknown.push((*i, *c)),
+                },
+                Err(p) => rhs -= *p * *c,
+            }
+        }
+        // Scaled to coefficients of size 1, like the rows it is solved with.
+        let scale = unknown.iter().map(|(_, c)| c.abs()).fold(0.0, f64::max);
+        if scale > 0.0 {
+            self.held.push((unknown.into_iter().map(|(i, c)| (i, c / scale)).collect(), rhs * (1.0 / scale)));
+        }
     }
 
     /// The row `Σ coefficient × point = target`, with weight `w` (its residual squared, times w):
@@ -677,8 +776,31 @@ impl Normal {
         }
     }
 
-    /// The unknowns (Gaussian elimination with partial pivoting).
+    /// The unknowns (Gaussian elimination with partial pivoting). With held conditions the system
+    /// solved is the normal equations bordered by them, one multiplier each: the least-squares
+    /// solution among the points that meet every condition.
     fn solve(mut self) -> Result<Vec<Vec3>> {
+        let free = self.m;
+        if !self.held.is_empty() {
+            let m = free + self.held.len();
+            let mut a = vec![0.0; m * m];
+            for r in 0..free {
+                for c in 0..free {
+                    a[r * m + c] = self.a[r * free + c];
+                }
+            }
+            for (k, (terms, rhs)) in std::mem::take(&mut self.held).into_iter().enumerate() {
+                for (i, c) in terms {
+                    if i < free {
+                        a[(free + k) * m + i] = c;
+                        a[i * m + free + k] = c;
+                    }
+                }
+                self.b.push([rhs.x, rhs.y, rhs.z]);
+            }
+            self.a = a;
+            self.m = m;
+        }
         let m = self.m;
         let fail = || KernelError::Failed("ruled surface: the far curve's system is singular".into());
         for c in 0..m {
@@ -717,7 +839,7 @@ impl Normal {
             }
             x[r] = s.map(|v| v / self.a[r * m + r]);
         }
-        x.into_iter().map(|[a, b, c]| Vec3::new(a, b, c)).map(|p| if p.is_finite() { Ok(p) } else { Err(fail()) }).collect()
+        x.into_iter().take(free).map(|[a, b, c]| Vec3::new(a, b, c)).map(|p| if p.is_finite() { Ok(p) } else { Err(fail()) }).collect()
     }
 }
 
@@ -768,6 +890,24 @@ fn far_curves(fars: &[Option<Far>], exact: &[Option<CurveN<4>>], smooth: &[bool]
             let reach = far.a.dist(far.b) / length;
             sys.row(&terms(t0, 1, 1.0)?, d0 * (s0 * reach), W_TANGENT * length * length);
             sys.row(&terms(t1, 1, 1.0)?, d1 * (s1 * reach), W_TANGENT * length * length);
+        }
+        // Inside the edge, where it runs on smoothly over a knot repeated to its degree: the far
+        // curve's first derivative by the edge's arc length is the same on both sides, exactly,
+        // and its second, weighted as at a joint.
+        for br in smooth_breaks(c) {
+            for order in 1..=2usize {
+                let mut row: Vec<(std::result::Result<usize, Vec3>, f64)> = Vec::new();
+                for (basis, speed, sign) in [(&br.before, br.speed[0], 1.0), (&br.after, br.speed[1], -1.0)] {
+                    for (i, r) in basis {
+                        row.push((far.slot(*i)?, r[order] * sign / speed.powi(order as i32)));
+                    }
+                }
+                if order == 1 {
+                    sys.hold(&row, Vec3::ZERO);
+                } else {
+                    sys.row(&row, Vec3::ZERO, W_JOIN);
+                }
+            }
         }
     }
     // Joints: the first and second derivatives by arc length agree across a smooth shared joint.
@@ -1583,6 +1723,71 @@ mod tests {
         assert!(rose > 0.1, "the middle rose {rose}");
         let (_, d) = s.nearest_edge(mid, tol).unwrap().unwrap();
         assert!(d > 0.5 * rose, "the default strip has an edge {d} from the moved middle (it rose {rose})");
+    }
+
+    /// A skin lofted through three sections, one face. Its edge along the run, through the
+    /// sections' last stations, is one curve whose knot at the middle section is repeated to the
+    /// curve's degree (the loft's spans are Béziers), and the curve is smooth there. The skin's
+    /// normal turns along that edge, so a strip off it is ruled to a far curve of its own, on the
+    /// edge's knots. That far curve is as smooth as the edge at the repeated knot: its two
+    /// one-sided tangents there are parallel, in the ratio of the edge's own. So the strip is one
+    /// valid face, along the skin's normal and continuing the skin alike.
+    ///
+    /// Two skins: quarter circles of radii 120, 142 and 115 at x = 0, 300 and 600, whose edge
+    /// (x, r, 0) lies in the plane z = 0 with the skin's normal in it; and arcs of ellipses
+    /// (half axes 120 × 100, 142 × 130, 115 × 90, to the angle 1.2), whose edge lies in no plane.
+    #[test]
+    fn a_far_curve_is_smooth_where_its_edge_repeats_a_knot() {
+        let at = |x: f64, [ry, rz]: [f64; 2], a: f64| Vec3::new(x, ry * a.sin(), rz * a.cos());
+        // One-sided tangents of a curve at its parameter `t`: just before and just after.
+        let sides = |c: &CurveN<4>, t: f64| -> (Vec3, Vec3) {
+            let [t0, t1] = range(c);
+            let h = 1e-9 * (t1 - t0);
+            let tan = |t: f64| point_tangent(c, (t - t0) / (t1 - t0)).unwrap().1;
+            (tan(t - h), tan(t + h))
+        };
+        let skins = [([[120.0; 2], [142.0; 2], [115.0; 2]], std::f64::consts::FRAC_PI_2), ([[120.0, 100.0], [142.0, 130.0], [115.0, 90.0]], 1.2)];
+        for (radii, reach) in skins {
+            let sections: Vec<Vec<crate::Frame>> = radii
+                .iter()
+                .zip([0.0, 300.0, 600.0])
+                .map(|(r, x)| {
+                    (0..9)
+                        .map(|k| crate::Frame { p: at(x, *r, reach * f64::from(k) / 8.0), leave: Vec3::X, bend: Vec3::ZERO, bend_change: Vec3::ZERO })
+                        .collect()
+                })
+                .collect();
+            let skin = crate::loft_blend(&sections, [crate::bridge::Continuity::G0; 2], [0.0; 2], 9).unwrap();
+            assert!(skin.is_surface() && skin.face_count() == 1);
+            let (edge, on_skin) = ([at(300.0, radii[1], reach)], at(300.0, radii[1], reach / 2.0));
+            for mode in [RuledMode::Normal, RuledMode::Tangent] {
+                let r = ruled(mode, 20.0, on_skin);
+                let plan = planned(&skin, &edge, &r, &[]).unwrap();
+                let [strip] = plan.strips.as_slice() else { panic!("one strip: {}", plan.strips.len()) };
+                assert_eq!(plan.free, [true], "{mode:?} to {reach}: the rulings turn along the edge");
+                let [t0, t1] = range(&strip.base);
+                let repeated: Vec<f64> = strip
+                    .base
+                    .knots
+                    .iter()
+                    .copied()
+                    .filter(|k| *k > t0 && *k < t1)
+                    .filter(|k| strip.base.knots.iter().filter(|x| *x == k).count() >= strip.base.degree)
+                    .collect();
+                assert!(!repeated.is_empty(), "{mode:?} to {reach}: the edge repeats a knot at the middle section: {:?}", strip.base.knots);
+                for t in repeated {
+                    let (before, after) = sides(&strip.base, t);
+                    assert!(before.cross(after).len() <= 1e-6 * before.len() * after.len(), "{mode:?} to {reach}: the edge is smooth at {t}");
+                    let (far_before, far_after) = sides(&strip.top, t);
+                    let kink = far_before.cross(far_after).len() / (far_before.len() * far_after.len());
+                    assert!(kink <= 1e-6 && far_before.dot(far_after) > 0.0, "{mode:?} to {reach}: the far curve turns by {kink} rad at {t}");
+                    let (edge_ratio, far_ratio) = (before.len() / after.len(), far_before.len() / far_after.len());
+                    assert!(rel(far_ratio, edge_ratio) <= 1e-6, "{mode:?} to {reach}: the far curve's speeds at {t}: {far_ratio} vs {edge_ratio}");
+                }
+                let s = ruled_surface(&skin, &edge, &r).unwrap();
+                assert!(s.is_surface() && s.face_count() == 1, "{mode:?} to {reach}");
+            }
+        }
     }
 
     /// Each strip is made in place of the edge it stands on; a corner face in place of the two

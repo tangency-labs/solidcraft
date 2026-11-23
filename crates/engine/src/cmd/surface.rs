@@ -1465,6 +1465,42 @@ mod tests {
         assert!((area(&cold, "Draft") - area(&s, "Draft")).abs() < 1e-9);
     }
 
+    /// A lip off the long edge of a skin lofted through three 3D sketch curves (arcs of ellipses
+    /// at x = 0, 300 and 600), 20 wide, along the skin's normal and continuing the skin. The
+    /// skin's run repeats a knot at the middle curve, and the lip's far edge crosses it without a
+    /// corner, so each lip is one valid face. A lip's rulings are straight and 20 long: its two
+    /// near corners are the ends of the skin's edge, and each far corner is 20 from one of them.
+    #[test]
+    fn ruled_surface_off_a_lofted_skin() {
+        let mut s = Session::default();
+        run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Sections"}));
+        run(&mut s, "sketch.options", json!({"sketch_3d": true}));
+        let at = |x: f64, [ry, rz]: [f64; 2], k: u32| [x, ry * (0.3 * f64::from(k)).sin(), rz * (0.3 * f64::from(k)).cos()];
+        let radii = [[120.0, 100.0], [142.0, 130.0], [115.0, 90.0]];
+        let mut sections = Vec::new();
+        for (r, x) in radii.iter().zip([0.0, 300.0, 600.0]) {
+            let points: Vec<[f64; 3]> = (0..=4).map(|k| at(x, *r, k)).collect();
+            let wire = run(&mut s, "sketch.spline3d", json!({"points": points}))["curves"][0].as_str().unwrap().to_string();
+            sections.push(json!({"sketch": "Sections", "curves": [wire]}));
+        }
+        run(&mut s, "sketch.finish", json!({}));
+        run(&mut s, "surface.loft", json!({"sections": sections, "body_name": "Skin"}));
+        let (edge, on_skin) = (at(300.0, radii[1], 4), at(300.0, radii[1], 2));
+        let ends = [at(0.0, radii[0], 4), at(600.0, radii[2], 4)];
+        for (mode, name) in [("normal", "Lip"), ("tangent", "Run")] {
+            run(&mut s, "surface.ruled", json!({"body": "Skin", "edges": [edge], "distance": 20, "mode": mode, "face": on_skin, "body_name": name}));
+            let st = s.world_state().unwrap();
+            let lip = &st.body(name).unwrap().body;
+            assert!(lip.is_surface() && lip.face_count() == 1, "{mode}");
+            let corners: Vec<[f64; 3]> = lip.record().vertices.iter().map(|v| v.point).collect();
+            assert_eq!(corners.len(), 4, "{mode}: {corners:?}");
+            let to_end = |p: &[f64; 3]| ends.iter().map(|e| (0..3).map(|i| (p[i] - e[i]).powi(2)).sum::<f64>().sqrt()).fold(f64::INFINITY, f64::min);
+            let (near, far): (Vec<f64>, Vec<f64>) = corners.iter().map(to_end).partition(|d| *d < 10.0);
+            assert!(near.len() == 2 && near.iter().all(|d| *d < 1e-6), "{mode}: {corners:?}");
+            assert!(far.len() == 2 && far.iter().all(|d| (d - 20.0).abs() < 1e-6), "{mode}: {far:?}");
+        }
+    }
+
     /// A 40 × 20 × 2 plate with three holes of radius 2 through it at x = 10, 20, 30 on y = 10.
     fn plate_with_three_holes(s: &mut Session) {
         run(s, "solid.box", json!({"length": 40, "width": 20, "height": 2, "body_name": "Plate"}));
