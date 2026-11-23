@@ -920,7 +920,7 @@ impl core::fmt::Debug for Origin {
 #[non_exhaustive]
 pub struct Failure {
     /// The solidcore path of the failing stage (e.g.
-    /// `"offset::offset_executive::p2::refuse_folding_offset"`).
+    /// `"offset::offset_executive::p2::refuse_singular_or_folding_offset"`).
     pub operation: &'static str,
     /// What failed: the cause, typed, with the numbers the check computed.
     pub reason: Reason,
