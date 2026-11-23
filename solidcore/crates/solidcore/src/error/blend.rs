@@ -68,8 +68,8 @@
 //! | [`BlendFailure::PassedOn`]             | the status of the stage passed on |
 //! | [`BlendFailure::NotCertified`]         | `SM_ERR`                          |
 //! | [`BlendFailure::SectionNotProved`], [`BlendFailure::SectionDegenerate`], [`BlendFailure::SectionUnsupported`], [`BlendFailure::RadiusLawNotPositive`], [`BlendFailure::SectionInputInvalid`] | `SM_ERR` |
-//! | [`BlendFailure::WeldNotBuilt`]         | `SM_ERR`                          |
 //! | [`BlendFailure::Solver`]               | its cause's ([`SolverFailure`]: `SM_ERR`, or `SM_ERR_NULL_POINTER` for a missing input of the caller's, a centre line with no B-spline form, a surface cache not built, a side surface that misses its end plane and a side edge not on the rail's face) |
+//! | [`BlendFailure::WeldNotBuilt`]         | `SM_ERR`                          |
 //!
 //! **The phrase causes** ([`BlendFailure::Failed`] to [`BlendFailure::PassedOn`]) are the
 //! shape the blend sites were converted to before the record, some of them refusals not yet
@@ -575,14 +575,14 @@ pub enum BlendFailure {
     /// station): a check on the caller's input ([`ErrorKind::InvalidInput`]), status
     /// `SM_ERR`.
     SectionInputInvalid(SectionInput),
-    /// A weld bead the kernel does not build yet (#15129, [`crate::blend::weld_bead`]), for
-    /// the gap named: not a fact of the geometry and not a defect, so no size is named. Its
-    /// class is [`ErrorKind::Unsupported`]. Not upstream.
-    WeldNotBuilt(WeldGap),
     /// A failure of the fillet solver (`crate::blend::fillet_solver`): its class and status
     /// are the cause's ([`SolverFailure::class`], status `SM_ERR` unless the cause says
     /// otherwise). Typed, so not a phrase cause ([`BlendFailure::is_phrase`]).
     Solver(SolverFailure),
+    /// A weld bead the kernel does not build yet (#15129, [`crate::blend::weld_bead`]), for
+    /// the gap named: not a fact of the geometry and not a defect, so no size is named. Its
+    /// class is [`ErrorKind::Unsupported`]. Not upstream.
+    WeldNotBuilt(WeldGap),
 }
 
 /// Why the fillet solver (`crate::blend::fillet_solver`) fails ([`BlendFailure::Solver`]).
@@ -3606,8 +3606,8 @@ mod tests {
             BlendFailure::SectionUnsupported(_) => (64, None),
             BlendFailure::RadiusLawNotPositive { .. } => (65, None),
             BlendFailure::SectionInputInvalid(_) => (66, None),
-            BlendFailure::WeldNotBuilt(_) => (67, None),
-            BlendFailure::Solver(_) => (68, None),
+            BlendFailure::Solver(_) => (67, None),
+            BlendFailure::WeldNotBuilt(_) => (68, None),
             BlendFailure::Trace(_) => (69, None),
         }
     }
