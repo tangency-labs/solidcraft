@@ -3671,9 +3671,9 @@ fn rollback_batch_does_not_retry_a_tab_switch_refused_by_a_newer_app() {
 }
 
 #[test]
-fn bridged_rollback_batch_refuses_unknown_commands_before_sequential_execution() {
+fn bridged_rollback_batch_checks_command_ids_before_sequential_execution() {
     let large_text = "x".repeat(solidcraft_engine::MAX_LINE / 2);
-    let oversized = json!([
+    let mut oversized = json!([
         {"command": "parameters.import", "params": {"text": large_text}},
         {"command": "parameters.import", "params": {"text": large_text}},
         {"command": "view.future_tab"},
@@ -3689,6 +3689,12 @@ fn bridged_rollback_batch_refuses_unknown_commands_before_sequential_execution()
         assert_eq!(body["not_run"], json!([0, 1, 2]), "{body}");
         assert!(body["failed"]["error"].as_str().is_some_and(|e| e.contains("rollback: false")), "{body}");
     }
+    oversized[2]["command"] = json!("view.next_tab");
+    let (b, body, is_error) = recorded_batch(Err("unknown method `engine.batch`".into()), json!({"commands": oversized}));
+    assert!(crate::Backend::has_ui(&b) && is_error && b.calls.is_empty(), "{body}");
+    assert_eq!(body["completed"], 0, "{body}");
+    assert!(body["failed"]["error"].as_str().is_some_and(|e| e.contains("active design tab")), "{body}");
+
     let (b, body, is_error) = recorded_batch(Err("unknown method `engine.batch`".into()), json!({"commands": steps, "rollback": false}));
     assert!(!is_error, "{body}");
     assert_eq!(methods(&b), ["engine.batch", "engine.execute", "engine.execute", "engine.execute"]);
