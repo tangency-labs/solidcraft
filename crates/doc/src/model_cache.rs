@@ -1164,6 +1164,11 @@ impl Model {
             }
             results.push(result);
         }
+        // The retained-outline notes as the model is now, whatever the file kept (an older one
+        // has none; a sketch may have been renamed since).
+        for (f, r) in doc.features.iter().zip(results.iter_mut()).filter(|(_, r)| !r.skipped && !r.unkept) {
+            r.warning = crate::eval::with_retained_notes(doc, r.warning.take(), f, &r.state);
+        }
         let mut model = Model { results, param_errors, import_digests, context: ctx, frame_bodies, validation, heal_off: !heal, ..Model::default() };
         let unkept = model.results.iter().filter(|r| r.unkept).count();
         // A pose-only feature's fingerprint leaves its pose out, so its saved result may be from
@@ -1202,7 +1207,7 @@ impl Model {
                     CachedEval {
                         error: None,
                         error_code: None,
-                        warning: r.warning.clone(),
+                        warning: crate::eval::without_retained_notes(r.warning.clone()),
                         import_report: r.import_report.clone(),
                         repair: r.repair.clone(),
                         lost_projections: None,
