@@ -174,7 +174,6 @@
 //! | [`TopologyFailure::TestVectorZero`] | `SM_ERR` |
 //! | [`TopologyFailure::TooFewEdgeuses`] | `SM_ERR` |
 //! | [`TopologyFailure::TooManyOutputSlots`] | `SM_ERR_OUT_OF_MEMORY` |
-//! | [`TopologyFailure::TooManyTangentFaces`] | `SM_ERR` |
 //! | [`TopologyFailure::TrimBoundaryNotBuilt`] | `SM_ERR` |
 //! | [`TopologyFailure::TrimCurveOffEnd`] | `SM_ERR` |
 //! | [`TopologyFailure::UnknownShellType`] | `SM_ERR` |
@@ -815,9 +814,6 @@ pub enum TopologyFailure {
         /// A number of slots below this fits.
         fits_below: u64,
     },
-    /// The corner calculation handles a vertex where up to three tangent faces meet, and this
-    /// vertex has more.
-    TooManyTangentFaces,
     /// The face's oriented trim boundary could not be built; the builder's error is kept as the
     /// cause.
     TrimBoundaryNotBuilt,
@@ -1073,7 +1069,6 @@ impl TopologyFailure {
             | Self::SurfaceNotTransformable { .. }
             | Self::TestVectorZero
             | Self::TooFewEdgeuses { .. }
-            | Self::TooManyTangentFaces
             | Self::TrimBoundaryNotBuilt
             | Self::TrimCurveOffEnd { .. }
             | Self::UnknownShellType { .. }
@@ -1296,7 +1291,6 @@ impl TopologyFailure {
             | Self::SurfaceDiscontinuous
             | Self::SurfaceNotTransformable { .. }
             | Self::SurfaceWithoutNurbs { .. }
-            | Self::TooManyTangentFaces
             | Self::UnorientedLoopsOnNonG1Surface
             | Self::VertexLoopInSharedFace
             | Self::WireEndSqueezed => ErrorKind::Unsupported,
@@ -1675,7 +1669,6 @@ impl core::fmt::Display for TopologyFailure {
                 f,
                 "{asked} curve output slots were asked for; fewer than {fits_below} fit"
             ),
-            Self::TooManyTangentFaces => f.write_str("the vertex has more than three faces"),
             Self::TrimBoundaryNotBuilt => {
                 f.write_str("the face's trim boundary could not be built")
             }
@@ -2527,11 +2520,6 @@ mod tests {
                 TopologyFailure::DegenerateUvDomain,
                 SM_ERR,
                 ErrorKind::InvalidInput,
-            ),
-            (
-                TopologyFailure::TooManyTangentFaces,
-                SM_ERR,
-                ErrorKind::Unsupported,
             ),
             (
                 TopologyFailure::LoopTooLong { limit: 5 },
