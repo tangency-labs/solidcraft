@@ -15,12 +15,14 @@
 //! | [`SurfaceFailure::OffSurface`]     | `SM_ERR_NOT_WITHIN_TOLERANCE`  |
 //! | [`SurfaceFailure::Defect`]         | `SM_ERR` (or the site's, through `with_status`) |
 //! | the named causes of the surface solvers, [`SurfaceFailure::SolverWithout`] to [`SurfaceFailure::NothingLifted`] | the status of the phrase each replaced (`comparison_status`), or the site's through `with_status` |
-//! | the named causes of the volume surfaces and the implicit checks, from [`SurfaceFailure::TooFewKnots`] on | `SM_ERR`, except [`SurfaceFailure::NoNurb`]: `SM_ERR_NULL_POINTER` (a site that reported `SM_ERR` keeps it through `with_status`) |
+//! | the named causes of the volume surfaces and the implicit checks, [`SurfaceFailure::TooFewKnots`] to [`SurfaceFailure::CallFailed`] | `SM_ERR`, except [`SurfaceFailure::NoNurb`]: `SM_ERR_NULL_POINTER` (a site that reported `SM_ERR` keeps it through `with_status`) |
 //! | [`SurfaceFailure::NoNurb`], [`SurfaceFailure::InputNotGiven`], [`SurfaceFailure::TrimmedCacheHasNoFace`], [`SurfaceFailure::SurfaceCacheHasNoTree`], [`SurfaceFailure::CurvesNotCached`], [`SurfaceFailure::FaceHasNoSurface`], [`SurfaceFailure::EdgeuseHasNoTrimCurve`], [`SurfaceFailure::NodeHasNoSurface`] | `SM_ERR_NULL_POINTER` (class [`ErrorKind::InvalidInput`]) |
 //! | [`SurfaceFailure::SurfaceNotBSplineKind`], [`SurfaceFailure::CurveNotBSplineKind`] | `SM_ERR_NULL_POINTER` (class [`ErrorKind::Unsupported`]) |
 //! | [`SurfaceFailure::SurfaceCacheNotBuilt`], [`SurfaceFailure::SurfaceCacheTreeNotBuilt`], [`SurfaceFailure::CurveCacheNotBuilt`], [`SurfaceFailure::CurveCacheTreeNotBuilt`] | `SM_ERR_NULL_POINTER` (class [`ErrorKind::Failed`]; defect-ness follows the cause) |
 //! | [`SurfaceFailure::NormalsCancel`]  | `SM_ERR_INVALID_INPUT` (class [`ErrorKind::Degenerate`]) |
 //! | [`SurfaceFailure::DisjointFaceDomain`] | `SM_ERR_INVALID_INPUT` (class [`ErrorKind::InvalidInput`]) |
+//! | [`SurfaceFailure::ScaleNotUniform`], [`SurfaceFailure::CurveWithoutNurb`], [`SurfaceFailure::BallDefinitionUnreadable`], [`SurfaceFailure::PointOnAxis`], [`SurfaceFailure::IsoCircleUndefined`], [`SurfaceFailure::ExtensionNotMadeInBracket`] | `SM_ERR` |
+//! | [`SurfaceFailure::NoInputStream`] | `SM_ERR_NULL_POINTER` (or the site's, through `with_status`) |
 //! | every other named cause            | `SM_ERR`, with the class its doc names |
 //!
 //! [`SurfaceFailure::Defect`] is a failure reviewed at its site as the kernel's fault, with its
@@ -411,6 +413,29 @@ pub enum SurfaceFailure {
     /// The caller's node has no surface to subdivide
     /// ([`ErrorKind::InvalidInput`], `SM_ERR_NULL_POINTER`).
     NodeHasNoSurface,
+    /// The scale given is not uniform (or, where the routine says so, not positive, or zero
+    /// or not finite): an analytic surface takes only a uniform scale that keeps it a
+    /// surface. [`ErrorKind::InvalidInput`].
+    ScaleNotUniform,
+    /// The database reader given has no input stream to read from.
+    /// [`ErrorKind::InvalidInput`].
+    NoInputStream,
+    /// A ball patch's definition (its sphere's centre and radius) could not be read from
+    /// the file's record. [`ErrorKind::InvalidInput`].
+    BallDefinitionUnreadable,
+    /// A point the construction takes a direction from the analytic's axis through lies on
+    /// that axis (a pole, an apex, or every row of the side collapsed onto it), or its
+    /// distance from the axis is not finite. Class `failed`.
+    PointOnAxis,
+    /// The three points of the source's iso across the side that orient its circle (its
+    /// far end, its halfway point and its point on the side) are collinear or not finite,
+    /// so they give no plane. Class `failed`.
+    IsoCircleUndefined,
+    /// An extension asked inside the solve's bracket could not be made (a weight that is not
+    /// positive, a half turn on the analytic path, or its points, its world net or its bound
+    /// not finite), though the bracket's upper end was made (whether an extension can be made
+    /// is not monotone in the ask). Class `failed`.
+    ExtensionNotMadeInBracket,
 }
 
 /// An input of a surface routine that its caller did not give
@@ -496,7 +521,8 @@ impl SurfaceFailure {
             | Self::CurvesNotCached
             | Self::FaceHasNoSurface
             | Self::EdgeuseHasNoTrimCurve
-            | Self::NodeHasNoSurface => SM_ERR_NULL_POINTER,
+            | Self::NodeHasNoSurface
+            | Self::NoInputStream => SM_ERR_NULL_POINTER,
             Self::InvalidValue(_)
             | Self::LineDirectionZero
             | Self::NormalsCancel
@@ -507,8 +533,9 @@ impl SurfaceFailure {
         }
     }
 
-    /// The failure's stable [`ErrorKind`]: the kind of the status it replaced
-    /// ([`ErrorKind::Failed`], [`ErrorKind::Missing`], [`ErrorKind::InvalidInput`],
+    /// The failure's stable [`ErrorKind`]: [`ErrorKind::InvalidInput`] for a check of the
+    /// caller's argument, surface, curve or file, otherwise the kind of the status it
+    /// replaced ([`ErrorKind::Failed`], [`ErrorKind::Missing`], [`ErrorKind::InvalidInput`],
     /// [`ErrorKind::OutsideDomain`], [`ErrorKind::NotWithinTolerance`]).
     /// [`SurfaceFailure::Defect`] is [`ErrorKind::StageFailed`], a defect. Each named
     /// cause has the class its doc names.
@@ -544,7 +571,10 @@ impl SurfaceFailure {
             | Self::AltCachesFull
             | Self::NodeNotSurfaceNode
             | Self::NodeHasChildren
-            | Self::NodeHasNoSurface => ErrorKind::InvalidInput,
+            | Self::NodeHasNoSurface
+            | Self::ScaleNotUniform
+            | Self::NoInputStream
+            | Self::BallDefinitionUnreadable => ErrorKind::InvalidInput,
             Self::BoxOutsideBendHalfSpace { .. }
             | Self::BoxOutsideZeroPeriod { .. }
             | Self::PointOutsideVolumeDomain { .. }
@@ -818,6 +848,18 @@ impl core::fmt::Display for SurfaceFailure {
             Self::NodeNotSurfaceNode => f.write_str("the node is not a surface node"),
             Self::NodeHasChildren => f.write_str("the node already has children"),
             Self::NodeHasNoSurface => f.write_str("the node has no surface"),
+            Self::ScaleNotUniform => f.write_str("an analytic surface takes only a uniform scale"),
+            Self::NoInputStream => f.write_str("the database has no input stream"),
+            Self::BallDefinitionUnreadable => {
+                f.write_str("the ball patch's definition could not be read")
+            }
+            Self::PointOnAxis => f.write_str("a point the construction turns about is on the axis"),
+            Self::IsoCircleUndefined => {
+                f.write_str("the source's iso across the side orients no circle")
+            }
+            Self::ExtensionNotMadeInBracket => f.write_str(
+                "an extension asked inside the solve's bracket could not be made, though its upper end was made",
+            ),
         }
     }
 }
@@ -1286,6 +1328,72 @@ mod tests {
         }
     }
 
+    /// The named causes of the surface extensions and the ball patch keep the status of the
+    /// phrase causes they replaced (a site whose status differs from the cause's own keeps
+    /// it through `with_status`), with the kind their condition is: the caller's input, or a
+    /// failure of the geometry.
+    #[test]
+    fn the_named_extension_causes_keep_the_status_they_replaced() {
+        use crate::error::ErrorKind as K;
+        let cases = [
+            (
+                SurfaceFailure::ScaleNotUniform,
+                None,
+                SM_ERR,
+                K::InvalidInput,
+            ),
+            (
+                SurfaceFailure::NoNurb,
+                Some(SM_ERR),
+                SM_ERR,
+                K::InvalidInput,
+            ),
+            (
+                SurfaceFailure::CurveWithoutNurb,
+                None,
+                SM_ERR,
+                K::InvalidInput,
+            ),
+            (
+                SurfaceFailure::NoInputStream,
+                None,
+                SM_ERR_NULL_POINTER,
+                K::InvalidInput,
+            ),
+            (
+                SurfaceFailure::BallDefinitionUnreadable,
+                None,
+                SM_ERR,
+                K::InvalidInput,
+            ),
+            (SurfaceFailure::PointOnAxis, None, SM_ERR, K::Failed),
+            (SurfaceFailure::IsoCircleUndefined, None, SM_ERR, K::Failed),
+            (
+                SurfaceFailure::ExtensionNotMadeInBracket,
+                None,
+                SM_ERR,
+                K::Failed,
+            ),
+        ];
+        for (failure, status, code, kind) in cases {
+            let mut f = Failure::new("surface::op", failure);
+            if let Some(s) = status {
+                f = f.with_status(s);
+            }
+            let e = f.into_error();
+            assert_eq!(e.sm_status(), Some(code), "{failure:?}");
+            assert_eq!(e.upstream_status(), Some(code), "{failure:?}");
+            assert_eq!(super::super::upstream_status(&e), Some(code), "{failure:?}");
+            assert_eq!(e.kind(), kind, "{failure:?}");
+            assert_eq!(e.surface_failure(), Some(&failure));
+            assert!(!e.is_defect(), "{failure:?}");
+        }
+        assert_eq!(
+            SurfaceFailure::NoNurb.comparison_status(),
+            SM_ERR_NULL_POINTER
+        );
+    }
+
     /// A reviewed defect is of class 127 with the status of the phrase cause it replaces,
     /// and says why.
     #[test]
@@ -1435,22 +1543,15 @@ mod tests {
         };
         #[rustfmt::skip] // one file per line, so conversions in parallel merge cleanly
         const PINNED: &[(&str, usize)] = &[
-            ("solidcore/src/surface/ball_patch.rs", 8),
             ("solidcore/src/surface/cone/p1.rs", 12),
             ("solidcore/src/surface/cone/p2.rs", 14),
             ("solidcore/src/surface/cone/p3.rs", 3),
-            ("solidcore/src/surface/extend.rs", 2),
-            ("solidcore/src/surface/extend/analytic.rs", 25),
-            ("solidcore/src/surface/extend/ball.rs", 16),
-            ("solidcore/src/surface/extend/blend.rs", 6),
-            ("solidcore/src/surface/extend/sides.rs", 2),
             ("solidcore/src/surface/offset_surface.rs", 27),
             ("solidcore/src/surface/plane/p1.rs", 3),
             ("solidcore/src/surface/plane/p2.rs", 9),
             ("solidcore/src/surface/procedural_blend.rs", 9),
             ("solidcore/src/surface/procedural_blend/convert.rs", 13),
             ("solidcore/src/surface/procedural_blend/offset.rs", 5),
-            ("solidcore/src/surface/side.rs", 7),
             ("solidcore/src/surface/sphere.rs", 16),
             ("solidcore/src/surface/surf_of_extrusion/p1.rs", 16),
             ("solidcore/src/surface/surf_of_extrusion/p2.rs", 13),
