@@ -40,6 +40,7 @@
 //! | [`BlendFailure::EaseNotBuilt`] | its stop's kind ([`EaseStop`]): [`ErrorKind::NotFound`] (2), [`ErrorKind::Degenerate`] (3), [`ErrorKind::Unsupported`] (5) or [`ErrorKind::OutsideDomain`] (8) |
 //! | [`BlendFailure::EaseGeometryNotBSpline`] | [`ErrorKind::Unsupported`] (5) |
 //! | [`BlendFailure::ArcLengthNotConverged`] | [`ErrorKind::NotConverged`] (4) |
+//! | [`BlendFailure::WeldNotBuilt`]         | [`ErrorKind::Unsupported`] (5): neither defect nor refusal |
 //! | the phrase causes ([`BlendFailure::Failed`], [`BlendFailure::Missing`], ...) | their status's kind, as before the record; neither defect nor refusal |
 //!
 //! **Statuses.** Each failure also records, for difftest and the goldens only, the status
@@ -65,6 +66,7 @@
 //! | [`BlendFailure::PassedOn`]             | the status of the stage passed on |
 //! | [`BlendFailure::NotCertified`]         | `SM_ERR`                          |
 //! | [`BlendFailure::SectionNotProved`], [`BlendFailure::SectionDegenerate`], [`BlendFailure::SectionUnsupported`], [`BlendFailure::RadiusLawNotPositive`], [`BlendFailure::SectionInputInvalid`] | `SM_ERR` |
+//! | [`BlendFailure::WeldNotBuilt`]         | `SM_ERR`                          |
 //!
 //! **The phrase causes** ([`BlendFailure::Failed`] to [`BlendFailure::PassedOn`]) are the
 //! shape the blend sites were converted to before the record, some of them refusals not yet
@@ -243,7 +245,8 @@ pub enum BlendFailure {
         minimum: f64,
     },
     /// The crossing's Hermite fit still has spans farther than a tenth of the tolerance
-    /// from the exact curve when its station cap or its 20 refinement passes ran out.
+    /// from the exact curve when its station cap or its 20 refinement passes ran out, or
+    /// when a pass found no point to split any of them at.
     /// Not within tolerance ([`ErrorKind::NotWithinTolerance`]); status `SM_ERR`.
     PlaneCurveFitCap {
         /// The stations held when fitting stopped.
@@ -581,6 +584,10 @@ pub enum BlendFailure {
     /// station): a check on the caller's input ([`ErrorKind::InvalidInput`]), status
     /// `SM_ERR`.
     SectionInputInvalid(SectionInput),
+    /// A weld bead the kernel does not build yet (#15129, [`crate::blend::weld_bead`]), for
+    /// the gap named: not a fact of the geometry and not a defect, so no size is named. Its
+    /// class is [`ErrorKind::Unsupported`]. Not upstream.
+    WeldNotBuilt(WeldGap),
 }
 
 /// What the exact round at a radius law's corner looked for and did not find
@@ -1036,6 +1043,24 @@ impl BandInput {
     }
 }
 
+/// What a weld bead the kernel does not build yet needs ([`BlendFailure::WeldNotBuilt`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum WeldGap {
+    /// Beads that meet at a vertex need a corner piece (#17916); the failure's site names the
+    /// vertex.
+    BeadsMeetAtVertex,
+    /// A joint that is not a straight edge between two planes: only the exact planar bead is
+    /// built so far; the bead on any joint (the foot blend) comes with its certificate
+    /// (#18028). The failure's site names the edge.
+    CurvedJoint,
+    /// A bead whose toe on one face is obtuse (its second leg at most its first times the
+    /// cosine of the angle between the faces, or the other way round): the exact planar
+    /// bead's surface is read through the chamfer's ball, which such legs fold. The failure's
+    /// site names the edge.
+    ObtuseToe,
+}
+
 /// The class of a blend larger than its faces allow, for `reason`: one of the blend's
 /// refusal classes 101 to 124 (the cliff overflow's own refusals grouped by what decides
 /// them), [`ErrorKind::TangentContinuationEnd`] (128) or [`ErrorKind::OverflowKeepsNothing`]
@@ -1082,6 +1107,8 @@ pub const fn no_room_class(reason: NoRoomReason) -> ErrorKind {
         R::EndAtSeamVertex => ErrorKind::EndAtSeamVertex,
         R::TangentContinuationEndUnsupported => ErrorKind::TangentContinuationEnd,
         R::OverflowKeepsNothing => ErrorKind::OverflowKeepsNothing,
+        // a weld bead larger than its faces take: the error names the size that builds
+        R::LegPastFace | R::NoToeAtLeg | R::BeadCutsFace => ErrorKind::FilletTooLarge,
     }
 }
 
@@ -1201,6 +1228,7 @@ impl BlendFailure {
             | Self::PlaneCurveStepVanished { .. }
             | Self::PlaneCurveFitCap { .. }
             | Self::NotCertified { .. }
+            | Self::WeldNotBuilt(_)
             | Self::LawIntervalEmpty
             | Self::ExactBlendAxisCannotPlaceEdge { .. }
             | Self::LawHasNoValue
@@ -1299,7 +1327,8 @@ impl BlendFailure {
             | Self::SequenceCurveNotBSpline { .. }
             | Self::FilletCrossesItself { .. }
             | Self::SectionUnsupported(_)
-            | Self::EaseGeometryNotBSpline(_) => ErrorKind::Unsupported,
+            | Self::EaseGeometryNotBSpline(_)
+            | Self::WeldNotBuilt(_) => ErrorKind::Unsupported,
             Self::ArcLengthNotConverged { .. } => ErrorKind::NotConverged,
             Self::BandInputMissing(_)
             | Self::CliffInputMissing { .. }
@@ -1408,7 +1437,8 @@ impl BlendFailure {
             | Self::SectionUnsupported(_)
             | Self::RadiusLawNotPositive { .. }
             | Self::SectionInputInvalid(_)
-            | Self::NotCertified { .. } => false,
+            | Self::NotCertified { .. }
+            | Self::WeldNotBuilt(_) => false,
             Self::Failed(_)
             | Self::Missing(_)
             | Self::InvalidValue(_)
@@ -1498,7 +1528,8 @@ impl BlendFailure {
             | Self::SectionUnsupported(_)
             | Self::RadiusLawNotPositive { .. }
             | Self::SectionInputInvalid(_)
-            | Self::NotCertified { .. } => true,
+            | Self::NotCertified { .. }
+            | Self::WeldNotBuilt(_) => true,
         }
     }
 }
@@ -1768,6 +1799,21 @@ impl core::fmt::Display for BlendFailure {
             | Self::NotWithinTolerance(what)
             | Self::PassedOn { what, .. } => f.write_str(what),
             Self::Missing(what) => write!(f, "{what} is missing"),
+            Self::WeldNotBuilt(WeldGap::BeadsMeetAtVertex) => write!(
+                f,
+                "{}: weld beads that meet at a vertex are not built yet (their corner, #17916)",
+                self.class()
+            ),
+            Self::WeldNotBuilt(WeldGap::CurvedJoint) => write!(
+                f,
+                "{}: a weld bead is built only along a straight edge between two planes so far",
+                self.class()
+            ),
+            Self::WeldNotBuilt(WeldGap::ObtuseToe) => write!(
+                f,
+                "{}: a weld bead with an obtuse toe (one leg at most the other's cosine of the angle between the faces) is not built yet",
+                self.class()
+            ),
             Self::BandInputMissing(input) => write!(f, "{} is missing", input.what()),
             Self::CliffInputMissing { face, input } => {
                 write!(f, "cliff face {face:?} is missing its {}", input.what())
@@ -2188,6 +2234,32 @@ mod tests {
             (
                 BlendFailure::NoRoom(R::OverflowKeepsNothing),
                 ErrorKind::OverflowKeepsNothing,
+            ),
+            // a weld bead's (#15129): too large, naming the size that builds
+            (
+                BlendFailure::NoRoom(R::LegPastFace),
+                ErrorKind::FilletTooLarge,
+            ),
+            (
+                BlendFailure::NoRoom(R::NoToeAtLeg),
+                ErrorKind::FilletTooLarge,
+            ),
+            (
+                BlendFailure::NoRoom(R::BeadCutsFace),
+                ErrorKind::FilletTooLarge,
+            ),
+            // a weld bead not built yet: neither a defect nor a refusal
+            (
+                BlendFailure::WeldNotBuilt(WeldGap::BeadsMeetAtVertex),
+                ErrorKind::Unsupported,
+            ),
+            (
+                BlendFailure::WeldNotBuilt(WeldGap::CurvedJoint),
+                ErrorKind::Unsupported,
+            ),
+            (
+                BlendFailure::WeldNotBuilt(WeldGap::ObtuseToe),
+                ErrorKind::Unsupported,
             ),
             (
                 BlendFailure::StationDidNotConverge {
@@ -3030,6 +3102,7 @@ mod tests {
             BlendFailure::SectionUnsupported(_) => (64, None),
             BlendFailure::RadiusLawNotPositive { .. } => (65, None),
             BlendFailure::SectionInputInvalid(_) => (66, None),
+            BlendFailure::WeldNotBuilt(_) => (67, None),
         }
     }
 
@@ -3117,6 +3190,7 @@ mod tests {
                 halvings: 0,
                 stations: 0,
             },
+            BlendFailure::WeldNotBuilt(WeldGap::BeadsMeetAtVertex),
             BlendFailure::Failed("x"),
             BlendFailure::Missing("x"),
             BlendFailure::InvalidValue("x"),

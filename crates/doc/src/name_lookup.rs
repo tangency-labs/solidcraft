@@ -672,7 +672,7 @@ fn exactly(level: Match) -> bool {
 }
 
 /// How far from an edge a picked point may lie and still be on it.
-fn pick_reach(b: &ModelBody) -> f64 {
+pub(crate) fn pick_reach(b: &ModelBody) -> f64 {
     (b.body.size() * 2e-3).max(1e-3)
 }
 
