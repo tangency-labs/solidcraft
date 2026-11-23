@@ -331,6 +331,7 @@ pub(crate) fn describe<H: PluginHost + 'static>(
         folder_bytes: 0,
         folder_files: BTreeSet::new(),
         staged: BTreeMap::new(),
+        created_dirs: Vec::new(),
         clock: false,
         forms: false,
         limits: store_limits(limits, 10_000),

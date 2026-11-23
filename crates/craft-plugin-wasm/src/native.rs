@@ -193,6 +193,9 @@ struct State<H> {
     folder_bytes: u64,
     folder_files: BTreeSet<(String, PathBuf)>,
     staged: BTreeMap<(String, PathBuf), PendingWrite>,
+    /// Folders `write-file` made inside a grant for a staged file, in the order they were made.
+    /// A run that does not publish removes the ones still empty.
+    created_dirs: Vec<(String, PathBuf)>,
     clock: bool,
     forms: bool,
     limits: StoreLimits,
@@ -264,6 +267,12 @@ impl<H: PluginHost> State<H> {
                 let _ = folder.dir.remove_file(pending.temporary);
             }
         }
+        // Newest first, so a folder's sub-folders go before it; a folder that now holds anything stays.
+        for (grant, dir) in std::mem::take(&mut self.created_dirs).into_iter().rev() {
+            if let Some(folder) = self.folders.get(&grant) {
+                let _ = folder.dir.remove_dir(dir);
+            }
+        }
     }
     fn publish_writes(&mut self) -> Result<()> {
         let mut writes: Vec<_> = self.staged.iter().collect();
@@ -274,6 +283,8 @@ impl<H: PluginHost> State<H> {
                 permission: format!("files.write:{grant}: publication failed after app commit; files may have changed: {error}"),
             })?;
         }
+        // The published files now live in the folders made for them.
+        self.created_dirs.clear();
         Ok(())
     }
 }
@@ -513,9 +524,25 @@ impl<H: PluginHost> files::Host for State<H> {
         if data.len() > MAX_JSON_BYTES {
             return Err(self.fail(limit("file write size")));
         }
+        let mut created = Vec::new();
         let write = (|| -> std::io::Result<PathBuf> {
             let folder = self.folders.get(&grant).ok_or_else(|| std::io::Error::other("grant disappeared"))?;
             let parent = path.parent().filter(|p| !p.as_os_str().is_empty()).unwrap_or_else(|| Path::new("."));
+            // A file in a sub-folder that does not exist yet gets that folder, inside the grant
+            // (#20493). Each step was checked above: plain names, no links, the whole path allowed.
+            let mut prefix = PathBuf::new();
+            for component in parent.components().filter(|c| matches!(c, PathComponent::Normal(_))) {
+                prefix.push(component);
+                match folder.dir.symlink_metadata(&prefix) {
+                    Ok(metadata) if metadata.is_dir() => {}
+                    Ok(_) => return Err(std::io::Error::other(format!("{} is a file, not a folder", prefix.display()))),
+                    Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                        folder.dir.create_dir(&prefix)?;
+                        created.push(prefix.clone());
+                    }
+                    Err(error) => return Err(error),
+                }
+            }
             let temp = parent.join(format!(".craft-plugin-{}-{}", std::process::id(), NEXT_FILE.fetch_add(1, Ordering::Relaxed)));
             let mut options = OpenOptions::new();
             options.write(true).create_new(true);
@@ -530,7 +557,15 @@ impl<H: PluginHost> files::Host for State<H> {
             }
             result.map(|()| temp)
         })();
-        let temporary = write.map_err(|e| self.fail(HostError::PermissionDenied { permission: format!("files.write:{grant}: {e}") }))?;
+        self.created_dirs.extend(created.into_iter().map(|dir| (grant.clone(), dir)));
+        // Only a refusal by the system is a denied permission; anything else is about this path.
+        let temporary = write.map_err(|e| {
+            self.fail(if e.kind() == std::io::ErrorKind::PermissionDenied {
+                HostError::PermissionDenied { permission: format!("files.write:{grant}: {e}") }
+            } else {
+                HostError::InvalidInput { field: "path".into(), reason: format!("files.write:{grant}: {e}") }
+            })
+        })?;
         if let Some(previous) = self.staged.insert((grant.clone(), path), PendingWrite { temporary, order: self.calls })
             && let Some(folder) = self.folders.get(&grant)
         {
@@ -773,8 +808,11 @@ fn refuse_links(dir: &Dir, path: &Path) -> std::io::Result<()> {
             Ok(metadata) if metadata.file_type().is_symlink() => {
                 return Err(std::io::Error::other(format!("{} is a link; links are not followed", prefix.display())));
             }
+            // Nothing lies past a plain file, so no link can either: the caller reports a file
+            // where a folder should be as a wrong path, not as a refused permission (#20493).
+            Ok(metadata) if !metadata.is_dir() => return Ok(()),
             Ok(_) => {}
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+            Err(error) if matches!(error.kind(), std::io::ErrorKind::NotFound | std::io::ErrorKind::NotADirectory) => return Ok(()),
             Err(error) => return Err(error),
         }
     }
@@ -1083,6 +1121,7 @@ fn execute<H: PluginHost + 'static>(
         folder_bytes: 0,
         folder_files: BTreeSet::new(),
         staged: BTreeMap::new(),
+        created_dirs: Vec::new(),
         clock: runtime.permissions.clock,
         forms: forms && !dialog,
         failed: None,
@@ -1641,6 +1680,7 @@ fn run_import_or_dialog<H: PluginHost + 'static>(
         folder_bytes: 0,
         folder_files: BTreeSet::new(),
         staged: BTreeMap::new(),
+        created_dirs: Vec::new(),
         clock: runtime.permissions.clock,
         forms: false,
         failed: None,
@@ -1793,6 +1833,7 @@ pub(super) fn run_export<H: PluginHost + 'static>(
         folder_bytes: 0,
         folder_files: BTreeSet::new(),
         staged: BTreeMap::new(),
+        created_dirs: Vec::new(),
         clock: runtime.permissions.clock,
         forms: false,
         failed: None,

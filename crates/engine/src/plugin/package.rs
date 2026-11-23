@@ -116,6 +116,8 @@ pub fn remove(s: &mut Session, id: &str, remove_user_data: bool) -> Result<Remov
         return Err(invalid("installed package must be a directory, not a symlink"));
     }
     check_remove_tree(&path)?;
+    // The delete and the approvals' update are one write: none overlaps an install's.
+    let _write = install::write_lock();
     // Refuse an out-of-scope settings deletion before taking back approvals or removing files.
     let settings = if remove_user_data {
         let settings = s.plugin_state.user_settings_dir().ok_or_else(|| invalid("no user settings folder is available"))?;

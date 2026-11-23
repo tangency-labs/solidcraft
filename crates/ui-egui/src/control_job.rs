@@ -192,6 +192,13 @@ fn reading(req: &ControlRequest) -> Option<(&'static str, Value)> {
     }
 }
 
+/// An `engine.execute` of `document.list`, in any spelling the engine takes: it only reads which
+/// designs are open, so it answers while a file loads or a save is written.
+pub(crate) fn lists_designs(req: &ControlRequest) -> bool {
+    matches!(req.method.as_str(), "engine.execute" | "command")
+        && executed(&req.params).and_then(|(command, _)| spec_id(command)) == Some("document.list")
+}
+
 /// Requests that change the design: they wait while one computes.
 pub(crate) fn changes_the_design(method: &str) -> bool {
     matches!(
