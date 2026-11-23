@@ -33,7 +33,9 @@
 //! reasons where the two files share the link); a missing B-rep, a face of the input with
 //! no surface, a shell selection naming no face of the body and a shell wall below twice
 //! the tolerance are the caller's input; an inset that leaves no cavity, an extended
-//! offset's face that collapses or meets itself, and a trim past the extension are named.
+//! offset's face that collapses or meets itself, and a trim past the extension are named;
+//! the static offset's failed solid offset is [`OffsetFailure::OffsetNotBuilt`], whose kept
+//! cause decides its class.
 //! Offset/member inputs are mutable so existing queries can populate lazy UV trim
 //! geometry in the same arena; this adds no constructive capability or topology copy.
 //! Not upstream or the fork (WR-705): the two API entry points run the tolerance update on their result.
@@ -78,7 +80,7 @@ use crate::boolean::merge::p4::{
 };
 use crate::error::offset::OffsetFailure;
 use crate::error::{
-    EntityRef, Failure, Result, SolidError, SM_ERR_INVALID_INPUT, SM_ERR_NULL_POINTER,
+    EntityRef, Failure, Result, SolidError, SM_ERR, SM_ERR_INVALID_INPUT, SM_ERR_NULL_POINTER,
 };
 use crate::geom::a_object::BooleanOperation;
 use crate::geom::attribute::AttributeStore;
@@ -2758,14 +2760,17 @@ fn kept_by_make_manifold(kernel: &mut Kernel, b: &Brep) -> Result<Option<Kept>> 
 }
 
 /// `OffsetBrep`'s `SER(SM_ERR)` after a failed `DoSolidOffset`: the status is `SM_ERR`,
-/// and the offset's own error is kept as its cause (#2615, #2511).
+/// and the offset's own error is kept as its cause (#2615, #2511), which decides its class
+/// ([`OffsetFailure::OffsetNotBuilt`], the guide's rule 6).
 fn collapse_offset_status<T>(result: Result<T>) -> Result<T> {
     result.map_err(|error| {
         // a cancel (#2136, #2372) is no offset failure: it is returned as it is
         if error.is_unported_or_cancelled() {
             error
         } else {
-            SolidError::failed_after(OP_OFFSET, "the offset could not be built", error)
+            Failure::new(OP_OFFSET, OffsetFailure::OffsetNotBuilt)
+                .caused_by(error)
+                .into_error()
         }
     })
 }

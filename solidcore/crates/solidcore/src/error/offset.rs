@@ -45,7 +45,7 @@
 //! | [`OffsetFailure::EdgeOffsetsUnpaired`], [`OffsetFailure::GapEndWithoutEdge`], [`OffsetFailure::FaceuseNotGiven`], [`OffsetFailure::SelfIntersectionWithoutUvCurve`] | `SM_ERR_NULL_POINTER` (`offset_executive::p1`) |
 //! | [`OffsetFailure::BrepNotGiven`] | `SM_ERR_NULL_POINTER`, or the site's through `with_status` (`offset_executive::p2`) |
 //! | [`OffsetFailure::ShellLeavesNoCavity`], [`OffsetFailure::ShellWallUnresolved`], [`OffsetFailure::ShellFaceNotOfBody`] | `SM_ERR_INVALID_INPUT` (`offset_executive::p2`) |
-//! | [`OffsetFailure::ExtendedFaceCollapses`], [`OffsetFailure::ExtendedFaceMeetsItself`], [`OffsetFailure::TrimPastExtension`] | `SM_ERR` (`offset_executive::p2`) |
+//! | [`OffsetFailure::ExtendedFaceCollapses`], [`OffsetFailure::ExtendedFaceMeetsItself`], [`OffsetFailure::TrimPastExtension`], [`OffsetFailure::OffsetNotBuilt`] | `SM_ERR` (`offset_executive::p2`) |
 //!
 //! A stage of an offset routine that fails with no reason the kernel names is an
 //! [`OffsetFailure::StageFailed`], a defect ([`ErrorKind::StageFailed`], #15034), keeping the
@@ -598,6 +598,11 @@ pub enum OffsetFailure {
     /// outside both its offset surface's domain and the extension's (by more than
     /// `SM_EFF_ZERO`): the face is trimmed on neither surface.
     TrimPastExtension,
+    /// The static offset's solid offset failed (`OffsetBrep`'s `SER(SM_ERR)` after
+    /// `DoSolidOffset`). [`ErrorKind::Failed`], neither a defect nor a refusal on its own: the
+    /// offset's error is kept as the cause and decides ([`crate::SolidError::is_defect`],
+    /// [`crate::SolidError::is_refusal`]).
+    OffsetNotBuilt,
 }
 
 /// What a local operation's or a solid offset's built body fails ([`OffsetFailure::Unsound`]).
@@ -778,6 +783,7 @@ impl OffsetFailure {
             | Self::ShellWallUnresolved { .. }
             | Self::ShellFaceNotOfBody { .. }
             | Self::TrimPastExtension
+            | Self::OffsetNotBuilt
             | Self::ExactCurveUncut
             | Self::TangentEndOffCurve
             | Self::TangentBranchUncertified
@@ -829,6 +835,7 @@ impl OffsetFailure {
                 | Self::ExtendedFaceCollapses { .. }
                 | Self::ExtendedFaceMeetsItself { .. }
                 | Self::TrimPastExtension
+                | Self::OffsetNotBuilt
         ) || self.is_named_at_a_status_site()
     }
 
@@ -945,7 +952,8 @@ impl OffsetFailure {
             | Self::ShellFaceNotOfBody { .. }
             | Self::ExtendedFaceCollapses { .. }
             | Self::ExtendedFaceMeetsItself { .. }
-            | Self::TrimPastExtension => false,
+            | Self::TrimPastExtension
+            | Self::OffsetNotBuilt => false,
             Self::Failed(_) | Self::Missing(_) | Self::InvalidValue(_) | Self::Inconsistent(_) => {
                 true
             }
@@ -1029,7 +1037,8 @@ impl OffsetFailure {
             | Self::ShellFaceNotOfBody { .. }
             | Self::ExtendedFaceCollapses { .. }
             | Self::ExtendedFaceMeetsItself { .. }
-            | Self::TrimPastExtension => false,
+            | Self::TrimPastExtension
+            | Self::OffsetNotBuilt => false,
         }
     }
 
@@ -1079,7 +1088,8 @@ impl OffsetFailure {
             | Self::GapCornerBlendNotMade { .. }
             | Self::ExtendedFaceCollapses { .. }
             | Self::ExtendedFaceMeetsItself { .. }
-            | Self::TrimPastExtension => SM_ERR,
+            | Self::TrimPastExtension
+            | Self::OffsetNotBuilt => SM_ERR,
             Self::Missing(_)
             | Self::BlendRailWithoutSupport { .. }
             | Self::FollowedBlendIncomplete
@@ -1165,7 +1175,8 @@ impl OffsetFailure {
             // failed, which decides (`SolidError::is_defect`, `is_refusal`)
             Self::FaceDomainUnresolved
             | Self::VertexArcsNotOneSphere
-            | Self::GapCornerBlendNotMade { .. } => ErrorKind::Failed,
+            | Self::GapCornerBlendNotMade { .. }
+            | Self::OffsetNotBuilt => ErrorKind::Failed,
             Self::DistanceUnresolved { .. }
             | Self::ToleranceUnresolved { .. }
             | Self::FollowedBlendIncomplete
@@ -1661,6 +1672,7 @@ impl core::fmt::Display for OffsetFailure {
                 "an extended offset face's trim reaches past both its offset surface's domain \
                  and the extension's",
             ),
+            Self::OffsetNotBuilt => f.write_str("the offset could not be built"),
         }
     }
 }
@@ -2294,6 +2306,8 @@ mod tests {
                 false,
             ),
             (O::TrimPastExtension, ErrorKind::Unsupported, false, false),
+            // its cause decides
+            (O::OffsetNotBuilt, ErrorKind::Failed, false, false),
         ];
         let row = |o: &O| -> usize {
             match o {
@@ -2368,6 +2382,7 @@ mod tests {
                 O::ExtendedFaceCollapses { .. } => 68,
                 O::ExtendedFaceMeetsItself { .. } => 69,
                 O::TrimPastExtension => 70,
+                O::OffsetNotBuilt => 71,
             }
         };
         for (i, (o, class, phrase, defect)) in pinned.iter().enumerate() {
@@ -2550,6 +2565,7 @@ mod tests {
                 Some(EntityRef::Face(face)),
             ),
             (OffsetFailure::TrimPastExtension, SM_ERR, None),
+            (OffsetFailure::OffsetNotBuilt, SM_ERR, None),
         ];
         for (cause, status, entity) in samples {
             assert!(cause.replaces_upstream_status(), "{cause:?}");
