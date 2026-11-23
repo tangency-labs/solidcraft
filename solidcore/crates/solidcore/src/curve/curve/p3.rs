@@ -470,9 +470,9 @@ fn area_normal_into(k: &Kernel, curves: &[Curve], normal: &mut Vec3) -> Result<(
 /// `sqrt 2 gamma_4 |d| |e| < 6 u |d| |e|`). The plane is answered only when `c` unitizes
 /// (`|c| >= SM_EFF_ZERO`, the area's own bound), its direction is certain
 /// ([`direction_is_certain`], within `delta = 2 E / (|c| - E) + 8 u <= SM_EFF_ZERO_RAD`)
-/// and the triangle is not flat to the kernel's angular zero
-/// (`|c| > SM_EFF_ZERO_RAD |d| |e|`: samples within that angle of a line are collinear,
-/// as the plane test below counts them). For a planar chain every triangle of samples
+/// and some sample `P` is off the line `P0 Pf` by more than the kernel's angular zero
+/// as seen from the first (`|d x (P - P0)| > SM_EFF_ZERO_RAD |d| |P - P0|`: samples all
+/// within that angle of a line are collinear, as the plane test below counts them). For a planar chain every triangle of samples
 /// has this plane's normal.
 ///
 /// Its sense is that of the area vector `area` (within `area_error`) when its component
@@ -503,16 +503,18 @@ fn open_chain_plane_normal(samples: &[Point3], area: Vec3, area_error: f64) -> O
         }
     }
     let (mut c, mut e) = (Vec3::ZERO, Vec3::ZERO);
+    let mut off_line = false;
     for &p in samples {
         let v = p - first;
         let w = d.cross(v);
         if w.length_squared() > c.length_squared() {
             (c, e) = (w, v);
         }
+        off_line |= w.length() > EFF_ZERO_RAD * d.length() * v.length();
     }
     let error = 8.0 * UNIT_ROUNDOFF * d.length() * e.length();
     let length = c.length();
-    if !direction_is_certain(length, error) || length <= EFF_ZERO_RAD * d.length() * e.length() {
+    if !direction_is_certain(length, error) || !off_line {
         return None;
     }
     let n = c.unitize().ok()?;
@@ -2928,7 +2930,7 @@ mod tests {
     }
 
     /// A certain area decides even when its fan vectors are nearly parallel (#21291
-    /// review): the chain far along X encloses -1.000002e-3 about Z, certain under the
+    /// review): the chain far along X encloses -1.000002e-3 about Z, certain in sense under the
     /// componentwise rounding bound (2e-8) though not under `(N + 8) u S` (1e-2); its
     /// turns point the other way. A long thin closed rectangle (1000 by 1e-5 in 40000
     /// segments) has a certain area 0.02 the same way and answers +Z, as main did.
@@ -2972,6 +2974,18 @@ mod tests {
         assert_eq!(n, Vec3::Z);
         assert!(matches!(e, Some(SolidError::InvalidInput { .. })), "{e:?}");
         assert_eq!(compute_crvs_normal(&k, &z(1e-5)).unwrap(), -Vec3::Z);
+        // a chain whose widest triangle is flat to 1.5e-6 but which kinks by 1e-3 near
+        // its start spans a plane, so it is answered: its area cancels and its turn sum
+        // (about 1e-6 of a weight 0.75) is below the angular zero, so its first turn
+        // (-1e-3 rad, at the kink) decides, -Z
+        let kinked = polyline(&[
+            [0.0, 0.0, 0.0],
+            [1e-3, 1e-6, 0.0],
+            [1.0, -1.5e-6, 0.0],
+            [1.5, 1.2485e-6, 0.0],
+            [2.0, 0.0, 0.0],
+        ]);
+        assert_eq!(compute_crvs_normal(&k, &kinked).unwrap(), -Vec3::Z);
     }
 
     /// Finite samples so large that their area vector overflows (1e155 and 1e80 squares)
