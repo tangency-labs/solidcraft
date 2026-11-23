@@ -913,6 +913,21 @@ impl Document {
                     out.push(ParamUser::Feature { feature: f.id, name: f.name.clone(), input: "Text".into() });
                 }
             }
+            if let FeatureKind::CapturePosition { joints, .. } = &f.kind {
+                for cj in joints {
+                    let joint = self.assembly.joints.iter().find(|j| j.id == cj.joint);
+                    let jname = joint.map(|j| j.name.clone()).unwrap_or_else(|| cj.joint.to_string());
+                    let dofs = joint.map(|j| j.kind.dofs()).unwrap_or(&[]);
+                    for (idx, e) in cj.exprs.iter().enumerate() {
+                        if let Some(e) = e.as_deref()
+                            && expr::references(e).iter().any(|r| r == name)
+                        {
+                            let dof = dofs.get(idx).copied().unwrap_or("value");
+                            out.push(ParamUser::Feature { feature: f.id, name: f.name.clone(), input: format!("{jname} ({dof})") });
+                        }
+                    }
+                }
+            }
         }
         for (joint, input, e) in self.assembly.exprs() {
             if expr::references(e).iter().any(|r| r == name) {
@@ -1085,6 +1100,15 @@ impl Document {
                     }
                 }
             }
+            if let FeatureKind::CapturePosition { joints, .. } = &mut f.kind {
+                for e in joints.iter_mut().flat_map(|cj| cj.exprs.iter_mut()).flatten() {
+                    let r = expr::rename_reference(e, old, new);
+                    if r != *e {
+                        *e = r;
+                        n += 1;
+                    }
+                }
+            }
         }
         if self.favorites.remove(old) {
             self.favorites.insert(new.to_string());
@@ -1205,6 +1229,9 @@ impl Document {
             names.extend(sketch.patterns.iter().filter_map(|p| p.count_expression.as_deref()).flat_map(expr::references));
             names.extend(sketch.text_word_exprs().into_iter().flat_map(|e| crate::text_params::references(e)));
         }
+        if let FeatureKind::CapturePosition { joints, .. } = &f.kind {
+            names.extend(joints.iter().flat_map(|cj| cj.exprs.iter().flatten()).flat_map(|e| expr::references(e)));
+        }
         // Sheet metal and plastic features rebuild when their rules' parameters change (#4420).
         if f.kind.is_sheet() {
             names.extend(rules.sheet.iter().cloned());
@@ -1253,6 +1280,9 @@ impl Document {
                 hit |= sketch.patterns.iter().flat_map(|p| p.expressions.values()).any(|e| expr::references(e).iter().any(|r| affected.contains(r)));
                 hit |= sketch.text_exprs().iter().any(|(_, e)| expr::references(e).iter().any(|r| affected.contains(r)));
                 hit |= sketch.text_word_exprs().iter().any(|e| crate::text_params::references(e).iter().any(|r| affected.contains(r)));
+            }
+            if let FeatureKind::CapturePosition { joints, .. } = &f.kind {
+                hit |= joints.iter().flat_map(|cj| cj.exprs.iter().flatten()).any(|e| expr::references(e).iter().any(|r| affected.contains(r)));
             }
             if hit {
                 out.push(f.id);

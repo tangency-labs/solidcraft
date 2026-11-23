@@ -514,15 +514,30 @@ fn resolve_uncached(
                 "X" => (Vec3::ZERO, Vec3::X),
                 "Y" => (Vec3::ZERO, Vec3::Y),
                 "Z" => (Vec3::ZERO, Vec3::Z),
-                _ => match crate::construct::DatumRef::parse_key(name) {
-                    // The origin axis of a component (#15086), where that component now stands.
-                    Some(datum) => match crate::construct::resolve_datum_in(doc, &datum, 0)? {
-                        crate::construct::ConstructGeom::Axis { origin, dir } => (origin, dir),
-                        _ => return Err(lost(&format!("axis {name}"))),
-                    },
-                    // A construction axis, by name (#9324), where the timeline so far puts it.
-                    None => crate::eval::construction_axis_in(Some(doc), st, name, 0)?,
-                },
+                _ => {
+                    let (author, frame_mat) = frame.copied().unwrap_or((0, crate::IDENTITY));
+                    match crate::construct::DatumRef::parse_key(name) {
+                        // The origin axis of a component (#15086), where that component now stands,
+                        // in the sketch's frame.
+                        Some(datum) => {
+                            let resolved = crate::construct::resolve_datum(doc, &datum)?;
+                            let geom = if frame.is_some() {
+                                let inverse = crate::mat_inverse(&frame_mat)
+                                    .ok_or_else(|| DocError::Invalid("the sketch's frame cannot be inverted".into()))?;
+                                resolved.placed(&inverse)
+                            } else {
+                                resolved
+                            };
+                            match geom {
+                                crate::construct::ConstructGeom::Axis { origin, dir } => (origin, dir),
+                                _ => return Err(lost(&format!("axis {name}"))),
+                            }
+                        }
+                        // A construction axis, by name (#9324), where the timeline so far puts it,
+                        // in the sketch's frame.
+                        None => crate::eval::construction_axis_in_frame(doc, st, name, author, &frame_mat)?,
+                    }
+                }
             };
             let o = plane.to_local(o);
             let d2 = Vec2::new(d.dot(plane.x), d.dot(plane.y));

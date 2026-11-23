@@ -349,6 +349,7 @@ pub(crate) fn icon_of(k: &FeatureKind) -> &'static str {
         FeatureKind::Draft { .. } => "draft",
         FeatureKind::Split { .. } => "split",
         FeatureKind::Move { .. } => "move",
+        FeatureKind::CapturePosition { .. } => "capture",
         FeatureKind::Import { .. } | FeatureKind::MeshImport { .. } | FeatureKind::MeshConvert { .. } => "import",
         FeatureKind::MeshReduce { .. } => "mesh_reduce",
         FeatureKind::BodyTransfer { .. } => "move",
@@ -752,7 +753,11 @@ pub(crate) fn feature_tooltip(
 ) -> StatusTip {
     // The type as a user reads it, translated, without the programmatic `Feature` suffix: a
     // user sees "Fillet", not "FilletFeature".
-    let kind = solidcraft_ui_text::tr_label(ty.strip_suffix("Feature").unwrap_or(ty));
+    let kind_name = match ty.strip_suffix("Feature").unwrap_or(ty) {
+        "CapturePosition" => "Capture Position",
+        other => other,
+    };
+    let kind = solidcraft_ui_text::tr_label(kind_name);
     let mut lines = Vec::new();
     // Greyed out says only "not shown": say why (#8100).
     if rolled {
@@ -2075,6 +2080,28 @@ mod tests {
             },
         };
         assert_eq!(super::icon_of(&feature), solidcraft_engine::find_command("solid.pattern.path").unwrap().icon);
+    }
+
+    #[test]
+    fn capture_position_history_icon_and_tooltip_translate() {
+        crate::i18n::install();
+        use solidcraft_engine::doc::FeatureKind;
+        let feature = FeatureKind::CapturePosition { moves: Vec::new(), joints: Vec::new() };
+        let cmd = solidcraft_engine::find_command("component.capture_position").unwrap();
+        let icon = super::icon_of(&feature);
+        assert_eq!(icon, "capture");
+        assert_eq!(icon, cmd.icon);
+        assert!(!crate::icon_svg::resolve(icon).placeholder);
+
+        let _en = solidcraft_ui_text::scope("en");
+        let en_tip = super::feature_tooltip("CapturePosition1", "CapturePositionFeature", None, false, None);
+        assert!(en_tip.head.contains("Capture Position"), "en head: {:?}", en_tip.head);
+        assert!(!en_tip.head.contains("CapturePositionFeature"), "en head: {:?}", en_tip.head);
+
+        let _ja = solidcraft_ui_text::scope("ja");
+        let ja_tip = super::feature_tooltip("CapturePosition1", "CapturePositionFeature", None, false, None);
+        let ja_expected = solidcraft_ui_text::Locale::for_language("ja").text("cmd.component_capture_position");
+        assert!(ja_tip.head.contains(ja_expected), "ja head: {:?}, expected: {ja_expected}", ja_tip.head);
     }
 
     fn two_boxes(left: bool) -> Harness {
@@ -4797,5 +4824,73 @@ mod tests {
             assert_eq!(h.app.viewport.hover_feature, None, "left={left}");
             assert_eq!(super::from_view(&h.app), [None, None], "left={left}");
         }
+    }
+
+    #[test]
+    fn left_docked_capture_position_double_click_and_context_menu_actions() {
+        let mut h = Harness::new();
+        h.app.home.open = false;
+        h.app.ui.show_timeline = true;
+        h.app.run("view.history_layout", json!({"dock": "left"})).unwrap();
+        let occ = h.app.run("component.create", json!({"name": "PartA", "grounded": false})).unwrap()["occurrence"].as_u64().unwrap();
+        h.app.run("solid.box", json!({"length": 10, "width": 10, "height": 10, "body_name": "BoxA"})).unwrap();
+        h.app.run("component.activate", json!({"component": "root"})).unwrap();
+        h.app.run("occurrence.move", json!({"occurrence": occ, "translate": [20, 0, 0], "capture": false})).unwrap();
+        h.app.run("component.capture_position", json!({})).unwrap();
+        h.frames(3);
+
+        // Double-click CapturePosition1 in the left-docked timeline -> opens CapturePosition dialog.
+        h.step(&json!({"click": {"handle": "timeline:CapturePosition1"}, "double": true})).unwrap();
+        h.frames(2);
+        assert!(matches!(h.app.dialog.as_ref().map(|d| &d.kind), Some(crate::dialogs::Kind::CapturePosition(_))));
+        h.step(&json!({"key": "Escape"})).unwrap();
+        h.frames(2);
+        assert!(h.app.dialog.is_none());
+
+        // Right-click menu picks: Suppress Feature -> Unsuppress Feature -> Roll History Marker Here -> Go to End -> Delete.
+        h.step(&json!({"click": {"handle": "timeline:CapturePosition1"}, "button": "right"})).unwrap();
+        h.step(&json!({"widget": "Suppress Feature"})).unwrap();
+        h.settle();
+        assert!(h.app.session.doc.find_feature("CapturePosition1").unwrap().suppressed);
+
+        h.step(&json!({"click": {"handle": "timeline:CapturePosition1"}, "button": "right"})).unwrap();
+        h.step(&json!({"widget": "Unsuppress Feature"})).unwrap();
+        h.settle();
+        assert!(!h.app.session.doc.find_feature("CapturePosition1").unwrap().suppressed);
+
+        h.step(&json!({"click": {"handle": "timeline:Box1"}, "button": "right"})).unwrap();
+        h.step(&json!({"widget": "Roll Back Here"})).unwrap();
+        h.settle();
+        assert_eq!(h.app.session.doc.marker, Some(1));
+
+        h.step(&json!({"click": {"handle": "timeline:CapturePosition1"}, "button": "right"})).unwrap();
+        h.step(&json!({"widget": "Roll Back Here"})).unwrap();
+        h.settle();
+        assert!(matches!(h.app.session.doc.marker, None | Some(2)), "{:?}", h.app.session.doc.marker);
+
+        h.step(&json!({"click": {"handle": "timeline:CapturePosition1"}, "button": "right"})).unwrap();
+        h.step(&json!({"widget": "Delete"})).unwrap();
+        h.settle();
+        assert!(h.app.session.doc.find_feature("CapturePosition1").is_none());
+    }
+
+    #[test]
+    fn capture_position_in_active_subcomponent_appears_in_bottom_timeline() {
+        let mut h = Harness::new();
+        h.app.home.open = false;
+        h.app.ui.show_timeline = true;
+        h.app.run("view.history_layout", json!({"dock": "bottom"})).unwrap();
+        let frame_comp = h.app.run("component.create", json!({"name": "frame", "grounded": true})).unwrap()["component"].as_u64().unwrap();
+        let child_occ = h.app.run("component.create", json!({"name": "frame_z", "parent": frame_comp, "grounded": false})).unwrap()["occurrence"]
+            .as_u64()
+            .unwrap();
+        h.app.run("solid.box", json!({"length": 10, "width": 10, "height": 10, "body_name": "BoxZ"})).unwrap();
+        h.app.run("component.activate", json!({"component": frame_comp})).unwrap();
+        h.app.run("occurrence.move", json!({"occurrence": child_occ, "translate": [20, 0, 0], "capture": false})).unwrap();
+        h.app.run("component.capture_position", json!({})).unwrap();
+        let cp = h.app.session.doc.find_feature("CapturePosition1").expect("CapturePosition1 created");
+        assert_eq!(cp.component, frame_comp, "CapturePosition belongs to active subcomponent");
+        let names = shown(&mut h);
+        assert!(names.contains(&"timeline:CapturePosition1".to_string()), "CapturePosition1 visible in active subcomponent timeline: {names:?}");
     }
 }

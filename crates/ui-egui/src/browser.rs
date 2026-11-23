@@ -3926,7 +3926,7 @@ pub fn save_as_question(name: &str, extension: &str) -> String {
 /// Yes while components were moved without capturing their positions, except for the commands
 /// that capture, revert or keep moving.
 pub fn needs_capture(app: &SolveApp, what: &str) -> bool {
-    !app.session.pending_moves.is_empty()
+    app.session.has_uncaptured_positions()
         && !matches!(
             what,
             "component.capture_position"
@@ -3934,6 +3934,11 @@ pub fn needs_capture(app: &SolveApp, what: &str) -> bool {
                 | "occurrence.move"
                 | "occurrence.align"
                 | "occurrence.drag"
+                | "joint.drive"
+                | "joint.reach"
+                | "joint.gear"
+                | "joint.screw"
+                | "joint.rack_pinion"
                 | "edit.undo"
                 | "edit.redo"
         )

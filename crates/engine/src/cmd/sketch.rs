@@ -1538,6 +1538,9 @@ fn entry_point(s: &Session) -> SketchEntry {
         undo_top: s.undo.last().map(|snap| snap.doc.clone()),
         restore_marker: None,
         pending_moves: s.pending_moves.clone(),
+        pending_move_records: s.pending_move_records.clone(),
+        pending_joint_bases: s.pending_joint_bases.clone(),
+        last_capture_state: s.last_capture_state.clone(),
         visibility: s.visibility.clone(),
     }
 }
@@ -1705,7 +1708,11 @@ fn finish_edit_history(s: &mut Session, entry: &SketchEntry, marker: Option<usiz
     let mut after = (*s.doc).clone();
     after.marker = marker.filter(|m| *m < after.features.len());
     let section = s.undo.get(start..).unwrap_or_default().iter().find_map(|snap| snap.section.clone()).filter(|was| *was != s.section_state());
-    let changed = before != after || entry.pending_moves != s.pending_moves || entry.visibility != s.visibility || section.is_some();
+    let changed = before != after
+        || entry.pending_moves != s.pending_moves
+        || entry.pending_move_records != s.pending_move_records
+        || entry.visibility != s.visibility
+        || section.is_some();
     s.undo.truncate(start);
     if changed {
         s.undo.push(Snapshot {
@@ -1716,6 +1723,9 @@ fn finish_edit_history(s: &mut Session, entry: &SketchEntry, marker: Option<usiz
             sketch_restore_marker: None,
             active_sheet_sketch: s.active_sheet_sketch.clone(),
             pending_moves: entry.pending_moves.clone(),
+            pending_move_records: entry.pending_move_records.clone(),
+            pending_joint_bases: entry.pending_joint_bases.clone(),
+            last_capture_state: entry.last_capture_state.clone(),
             visibility: entry.visibility.clone(),
             part: None,
             section,

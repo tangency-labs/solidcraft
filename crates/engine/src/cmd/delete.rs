@@ -363,7 +363,7 @@ fn apply(s: &mut Session, p: &Value) -> Result<Value> {
             let gone = s.doc_mut().remove_occurrences(&std::collections::BTreeSet::from([o.id]));
             s.visibility.hidden_joints.retain(|h| !gone.contains(h));
             joints.extend(gone);
-            s.pending_moves.remove(&o.id);
+            s.clear_pending_move(o.id);
             done = true;
         } else {
             components.push(o.component);

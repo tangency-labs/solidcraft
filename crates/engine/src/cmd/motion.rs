@@ -1087,8 +1087,39 @@ fn play(s: &mut Session, p: &Value) -> Result<Value> {
     let m = s.doc.assembly.studies.get(i).cloned().ok_or_else(|| bad(cmd, "study"))?;
     let step = p.get("step").and_then(Value::as_f64).filter(|x| x.is_finite()).ok_or_else(|| bad(cmd, "`step` must be a number"))?;
     let want = values_at(s, &m, step.clamp(0.0, f64::from(m.steps)));
+    let given = keyed(&m);
+    let before_vals: Vec<(u64, Vec<f64>, Vec<Option<String>>)> = s
+        .doc
+        .assembly
+        .joints
+        .iter()
+        .filter(|j| j.kind != JointKind::Rigid && (j.captured.is_none() || j.base_values.is_none()))
+        .map(|j| (j.id, j.values.clone(), crate::normalize_joint_exprs(&j.exprs.values, j.kind.dofs().len())))
+        .collect();
     let before = positions(s);
-    let (out, sol) = drive_with_contact(s, &want, &keyed(&m))?;
+    let driven_exprs: Vec<(u64, usize)> = given.iter().copied().filter(|(id, idx)| want.iter().any(|(w, q)| *w == *id && *idx < q.len())).collect();
+    if !driven_exprs.is_empty()
+        && s.doc.assembly.joints.iter().any(|j| driven_exprs.iter().any(|&(id, idx)| id == j.id && j.exprs.value(idx).is_some()))
+    {
+        let doc = s.doc_mut();
+        for (id, idx) in driven_exprs {
+            if let Some(j) = doc.assembly.joints.iter_mut().find(|j| j.id == id) {
+                j.exprs.set_value(idx, None);
+            }
+        }
+    }
+    let (out, sol) = drive_with_contact(s, &want, &given)?;
+    let mut pending = std::mem::take(&mut s.pending_joint_bases);
+    for (jid, old_vals, old_exprs) in before_vals {
+        if let Some(j) = s.doc.assembly.joints.iter().find(|j| j.id == jid) {
+            let dofs = j.kind.dofs().len();
+            let cur_exprs = crate::normalize_joint_exprs(&j.exprs.values, dofs);
+            if j.values != old_vals || cur_exprs != old_exprs {
+                pending.entry(jid).or_insert((old_vals, old_exprs));
+            }
+        }
+    }
+    s.pending_joint_bases = pending;
     let drive = drive_report(cmd, out)?;
     let after = positions(s);
     let moved: Vec<&(String, Mat)> = moved(&before, &after).collect();
@@ -1200,7 +1231,7 @@ fn traced_point(s: &Session, p: &Value, cmd: &str) -> Result<(Vec<u64>, Vec3)> {
     };
     let at = p.get("point").and_then(vec3).filter(|v| v.len() < 1e7).ok_or_else(|| bad(cmd, "`point` must be [x, y, z], a world point"))?;
     let mut t = s.scratch();
-    t.pending_moves.clear();
+    t.clear_pending_moves();
     let local = solidcraft_doc::mat_inverse(&path_world(&t, &path, cmd)?)
         .map(|m| solidcraft_doc::apply_point(&m, at))
         .ok_or_else(|| bad(cmd, "the occurrence's placement is not invertible"))?;
@@ -1221,7 +1252,7 @@ fn sample_trace(s: &Session, p: &Value, cmd: &str) -> Result<(Vec<Vec3>, TraceRu
     let mut t = s.scratch();
     // Traced from where the parts are placed: moves only shown (an exploded view, a move not
     // captured yet) are not where the joints are solved.
-    t.pending_moves.clear();
+    t.clear_pending_moves();
     let world = |t: &Session| path_world(t, &path, cmd);
     let (default, given, plan) = motion_plan(s, p, cmd)?;
     let n = sample_count(p, default.min(MAX_TRACE), MAX_TRACE, cmd)?;
@@ -1503,7 +1534,7 @@ fn explode_create(s: &mut Session, p: &Value) -> Result<Value> {
 fn explode_show(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "explode.show";
     if p.get("view").is_none_or(|v| v.is_null() || v.as_str().is_some_and(|x| x.eq_ignore_ascii_case("none"))) {
-        s.pending_moves.clear();
+        s.clear_pending_moves();
         s.exploded.clear();
         s.revision += 1;
         return typed_reply(cmd, ExplodeShown { view: None, name: None, param_warnings: Vec::new() });
@@ -1517,6 +1548,7 @@ fn explode_show(s: &mut Session, p: &Value) -> Result<Value> {
     // Shown only: `exploded` marks these as the view's, so the design's placements leave them out.
     s.exploded.clone_from(&moves);
     s.pending_moves = moves;
+    s.pending_move_records.clear();
     s.revision += 1;
     typed_reply(cmd, ExplodeShown { view: Some(v.id), name: Some(v.name), param_warnings: Vec::new() })
 }

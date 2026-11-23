@@ -509,6 +509,23 @@ impl crate::Feature {
                     }
                 }
             }
+            K::CapturePosition { moves, joints } => {
+                for m in moves {
+                    if let Some(&mapped) = occurrences.get(&m.occurrence) {
+                        m.occurrence = mapped;
+                    }
+                    if let Some(path) = &mut m.path {
+                        for id in path {
+                            if let Some(&mapped) = occurrences.get(id) {
+                                *id = mapped;
+                            }
+                        }
+                    }
+                }
+                for e in joints.iter_mut().flat_map(|j| j.exprs.iter_mut()).flatten() {
+                    *e = clone_expression(e, parameters);
+                }
+            }
             _ => {}
         }
         Ok(())

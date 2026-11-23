@@ -1947,6 +1947,7 @@ fn redefine_sketch(s: &mut Session, p: &Value) -> Result<Value> {
     trial.refresh();
     s.doc = trial.doc;
     s.pending_moves = trial.pending_moves;
+    s.pending_move_records = trial.pending_move_records;
 
     let attachment = s.doc.feature(id).and_then(|feature| match &feature.kind {
         FeatureKind::Sketch { plane, .. } => {

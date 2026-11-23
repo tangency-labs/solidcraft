@@ -2644,7 +2644,57 @@ pub enum FeatureKind {
         #[serde(default, skip_serializing_if = "std::ops::Not::not")]
         patch_holes: bool,
     },
+    /// Occurrence position changes and non-rigid joint values recorded in the timeline (`component.capture_position`).
+    CapturePosition {
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        moves: Vec<CapturedOccurrenceMove>,
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        joints: Vec<CapturedJoint>,
+    },
 }
+
+fn zero_translate() -> [Expr; 3] {
+    ["0".into(), "0".into(), "0".into()]
+}
+
+/// One occurrence's captured position change inside [`FeatureKind::CapturePosition`].
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, solidcraft_derive::Walk)]
+pub struct CapturedOccurrenceMove {
+    pub occurrence: u64,
+    #[serde(default, skip_serializing_if = "crate::MoveSpace::is_local")]
+    pub space: crate::MoveSpace,
+    #[serde(default = "zero_translate")]
+    #[walk(length = ["X distance", "Y distance", "Z distance"])]
+    pub translate: [Expr; 3],
+    #[serde(default, skip_serializing_if = "Option::is_none", with = "opt_point_expr")]
+    #[walk(placement)]
+    pub origin: Option<PointExpr>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub rotate_axis: Option<[f64; 3]>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[walk(angle = "Angle")]
+    pub angle: Option<Expr>,
+    /// Pure rigid rotation (`col 3 == [0, 0, 0, 1]`) combined with `translate` for moves from
+    /// `matrix`, `to`, `to_matrix`, `occurrence.align`, or `occurrence.drag`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub rotation: Option<crate::Mat>,
+    /// Optional placement path (used for nested occurrences in `MoveSpace::World` when an ancestor
+    /// is instanced).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub path: Option<Vec<u64>>,
+}
+
+/// One non-rigid joint's captured DOF values inside [`FeatureKind::CapturePosition`].
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct CapturedJoint {
+    pub joint: u64,
+    #[serde(default)]
+    pub values: Vec<f64>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub exprs: Vec<Option<String>>,
+}
+
+impl crate::walk::Walk for CapturedJoint {}
 
 /// A fillet corner set back: the vertex at `vertex`, where every edge is rounded, has its corner
 /// patch start `distance` along each of its edges from the vertex, the rounds running whole up to
@@ -3684,6 +3734,7 @@ impl FeatureKind {
             FeatureKind::MeshConvert { .. } => "MeshConvertFeature",
             FeatureKind::MeshReduce { .. } => "MeshReduceFeature",
             FeatureKind::Repair { .. } => "RepairFeature",
+            FeatureKind::CapturePosition { .. } => "CapturePositionFeature",
         }
     }
 
@@ -3777,6 +3828,7 @@ impl FeatureKind {
             FeatureKind::MeshReduce { .. } => "mesh_reduce",
             FeatureKind::MeshImport { .. } => "mesh_import",
             FeatureKind::Repair { .. } => "repair",
+            FeatureKind::CapturePosition { .. } => "capture_position",
         }
     }
 
@@ -3869,6 +3921,7 @@ impl FeatureKind {
             "MeshConvertFeature" => "mesh_convert",
             "MeshReduceFeature" => "mesh_reduce",
             "RepairFeature" => "repair",
+            "CapturePositionFeature" => "capture_position",
             _ => return None,
         })
     }
@@ -3965,6 +4018,7 @@ impl FeatureKind {
             FeatureKind::MeshConvert { .. } => "ConvertMesh",
             FeatureKind::MeshReduce { .. } => "ReduceMesh",
             FeatureKind::Repair { .. } => "Repair",
+            FeatureKind::CapturePosition { .. } => "CapturePosition",
         }
     }
 }
@@ -5615,6 +5669,9 @@ impl Document {
             if let FeatureKind::Sketch { sketch, .. } = &f.kind {
                 used.extend(sketch.dimension_params().into_iter().cloned());
                 used.extend(sketch.text_exprs().into_iter().flat_map(|(_, e)| expr::references(e)));
+            }
+            if let FeatureKind::CapturePosition { joints, .. } = &f.kind {
+                used.extend(joints.iter().flat_map(|cj| cj.exprs.iter().flatten()).flat_map(|e| expr::references(e)));
             }
         }
         for p in &self.params {

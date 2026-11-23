@@ -155,6 +155,116 @@ fn is_text(s: &Session, name: &str, unit: Option<&str>) -> bool {
     s.doc.text_param(name).is_some() || unit.is_some_and(solidcraft_doc::text_params::is_text_unit)
 }
 
+fn pending_move_users(s: &Session, name: &str) -> Vec<solidcraft_doc::ParamUser> {
+    let uses = |e: &str| expr::references(e).iter().any(|r| r == name);
+    let mut by_occ: std::collections::BTreeMap<u64, std::collections::BTreeSet<&'static str>> = std::collections::BTreeMap::new();
+    for r in &s.pending_move_records {
+        let inputs = by_occ.entry(r.occurrence).or_default();
+        for (label, e) in ["translate x", "translate y", "translate z"].into_iter().zip(&r.step.translate) {
+            if uses(e) {
+                inputs.insert(label);
+            }
+        }
+        if let Some(origin) = &r.step.origin {
+            for (label, e) in ["origin x", "origin y", "origin z"].into_iter().zip(origin) {
+                if uses(e) {
+                    inputs.insert(label);
+                }
+            }
+        }
+        if let Some(angle) = &r.step.angle
+            && uses(angle)
+        {
+            inputs.insert("angle");
+        }
+    }
+    by_occ
+        .into_iter()
+        .flat_map(|(id, inputs)| {
+            let occ_name = s.doc.occurrences.iter().find(|o| o.id == id).map(|o| o.name.clone()).unwrap_or_else(|| id.to_string());
+            inputs.into_iter().map(move |input| solidcraft_doc::ParamUser::Occurrence {
+                occurrence: id,
+                name: occ_name.clone(),
+                input: input.to_string(),
+            })
+        })
+        .collect()
+}
+
+fn pending_joint_base_users(s: &Session, name: &str) -> Vec<solidcraft_doc::ParamUser> {
+    let uses = |e: &str| expr::references(e).iter().any(|r| r == name);
+    let mut out = Vec::new();
+    for (&jid, (_, exprs)) in &s.pending_joint_bases {
+        let joint = s.doc.assembly.joints.iter().find(|j| j.id == jid);
+        let jname = joint.map(|j| j.name.clone()).unwrap_or_else(|| jid.to_string());
+        let dofs = joint.map(|j| j.kind.dofs()).unwrap_or(&[]);
+        for (i, e) in exprs.iter().enumerate() {
+            if let Some(e) = e.as_deref()
+                && joint.is_none_or(|j| j.exprs.value(i) != Some(e))
+                && uses(e)
+            {
+                let dof = dofs.get(i).copied().unwrap_or("value");
+                out.push(solidcraft_doc::ParamUser::Joint { joint: jid, name: jname.clone(), input: format!("{dof} (before capture)") });
+            }
+        }
+    }
+    out
+}
+
+fn check_pending_move_delete(s: &Session, name: &str, cmd: &str) -> Result<()> {
+    let mut users = pending_move_users(s, name);
+    users.extend(pending_joint_base_users(s, name));
+    if !users.is_empty() {
+        let list: Vec<String> = users.iter().map(solidcraft_doc::ParamUser::describe).collect();
+        return Err(bad(cmd, format!("`{name}` is used by {}", list.join(", "))));
+    }
+    Ok(())
+}
+
+fn rename_pending_joint_bases(s: &mut Session, old: &str, new: &str) -> usize {
+    let mut n = 0;
+    for (_, exprs) in s.pending_joint_bases.values_mut() {
+        for slot in exprs.iter_mut().flatten() {
+            let updated = expr::rename_reference(slot, old, new);
+            if updated != *slot {
+                *slot = updated;
+                n += 1;
+            }
+        }
+    }
+    n
+}
+
+fn rename_pending_move_records(s: &mut Session, old: &str, new: &str) -> usize {
+    let mut n = 0;
+    for r in &mut s.pending_move_records {
+        for e in &mut r.step.translate {
+            let updated = expr::rename_reference(e, old, new);
+            if updated != *e {
+                *e = updated.into();
+                n += 1;
+            }
+        }
+        if let Some(origin) = &mut r.step.origin {
+            for e in origin {
+                let updated = expr::rename_reference(e, old, new);
+                if updated != *e {
+                    *e = updated.into();
+                    n += 1;
+                }
+            }
+        }
+        if let Some(angle) = &mut r.step.angle {
+            let updated = expr::rename_reference(angle, old, new);
+            if updated != *angle {
+                *angle = updated.into();
+                n += 1;
+            }
+        }
+    }
+    n
+}
+
 fn change_param(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "parameters.change";
     let solved = s.solved_sketches();
@@ -162,6 +272,7 @@ fn change_param(s: &mut Session, p: &Value) -> Result<Value> {
         return change_many(s, changes, &solved);
     }
     if let Some(n) = str_(p, "delete") {
+        check_pending_move_delete(s, n.trim(), cmd)?;
         s.doc_mut().remove_param(n.trim())?;
         s.settle_value_edit(&solved)?;
         return reply(cmd, ParamChanged { body: ParamChangedBody::Deleted { deleted: n.trim().to_string() }, param_warnings: Vec::new() });
@@ -170,7 +281,9 @@ fn change_param(s: &mut Session, p: &Value) -> Result<Value> {
     let mut renamed: Option<ParamRename> = None;
     let mut changed_through: Option<String> = None;
     if let Some(new) = str_(p, "new_name") {
-        let n = s.doc_mut().rename_param(&name, new)?;
+        let mut n = s.doc_mut().rename_param(&name, new)?;
+        n += rename_pending_move_records(s, &name, new.trim());
+        n += rename_pending_joint_bases(s, &name, new.trim());
         renamed = Some(ParamRename { from: name, to: new.trim().to_string(), references_updated: n });
         name = new.trim().to_string();
     }
@@ -204,7 +317,9 @@ fn change_param(s: &mut Session, p: &Value) -> Result<Value> {
             if known(s, &new) {
                 return Err(bad(cmd, format!("there is already a parameter `{new}`: type `{new}` to use it, or change it in Parameters")));
             }
-            let n = s.doc_mut().rename_param(&name, &new)?;
+            let mut n = s.doc_mut().rename_param(&name, &new)?;
+            n += rename_pending_move_records(s, &name, &new);
+            n += rename_pending_joint_bases(s, &name, &new);
             renamed = Some(ParamRename { from: name, to: new.clone(), references_updated: n });
             name = new;
         }
@@ -535,7 +650,9 @@ fn rename(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "parameters.rename";
     let name = param_name(cmd, p)?.to_string();
     let new = str_(p, "new_name").ok_or_else(|| bad(cmd, "`new_name` is required"))?;
-    let references_updated = s.doc_mut().rename_param(&name, new)?;
+    let mut references_updated = s.doc_mut().rename_param(&name, new)?;
+    references_updated += rename_pending_move_records(s, &name, new.trim());
+    references_updated += rename_pending_joint_bases(s, &name, new.trim());
     reply(cmd, ParamRenamed { from: name, to: new.trim().to_string(), references_updated, param_warnings: Vec::new() })
 }
 
@@ -543,6 +660,7 @@ fn delete(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "parameters.delete";
     let name = param_name(cmd, p)?.to_string();
     let solved = s.solved_sketches();
+    check_pending_move_delete(s, &name, cmd)?;
     s.doc_mut().remove_param(&name)?;
     s.settle_value_edit(&solved)?;
     reply(cmd, ParamDeleted { deleted: name, param_warnings: Vec::new() })
@@ -583,7 +701,9 @@ fn users(s: &mut Session, p: &Value) -> Result<Value> {
     if !known(s, name) {
         return Err(bad(cmd, format!("no parameter `{name}`")));
     }
-    let users = s.doc.param_users(name);
+    let mut users = s.doc.param_users(name);
+    users.extend(pending_move_users(s, name));
+    users.extend(pending_joint_base_users(s, name));
     let users = users.into_iter().map(ParameterUser::from).collect();
     let drives = s
         .doc

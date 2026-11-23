@@ -239,6 +239,8 @@ surface_trim_mutual
   moves: keep[0], keep[1], keep[2], keep_with[0][0], keep_with[0][1], keep_with[0][2], keep_with[1][0], keep_with[1][1], keep_with[1][2], plane.axis_dir[0], plane.axis_dir[1], plane.axis_origin[0], plane.axis_origin[1], plane.axis_origin[2]
 move
   moves: rotate_axis[1], rotate_axis[2]
+capture_position
+  placement: capture.ox, capture.oy, capture.oz
 import
 mesh_convert
 mesh_reduce
