@@ -238,6 +238,7 @@ fn panel_host() -> SolidCraftHost {
         evaluation: None,
         forms: Vec::new(),
         form_source: None,
+        messages: Vec::new(),
     }
 }
 
