@@ -1104,6 +1104,9 @@ pub(crate) struct Marks {
     /// The object each mark draws, by index: what is hovered or selected is drawn in the accent
     /// colour, as a sketch draws its hovered and selected dimensions and curves.
     owners: Vec<u64>,
+    /// Whether each mark, by index, is a detail view's callout: its outline and letter, drawn on the
+    /// parent view. It belongs to the parent's place on the sheet, so dragging the detail leaves it.
+    on_parent: Vec<bool>,
     /// Why the sheet is drawn coarser than asked, or not at all.
     error: Option<String>,
 }
@@ -1146,12 +1149,14 @@ impl Marks {
         let mut tol = tolerance;
         for _ in 0..8 {
             match if detail { marks(scene, tol) } else { marks_owned_detail(scene, tol, false) } {
-                Ok((marks, owners)) => {
+                Ok((marks, owners, on_parent)) => {
                     let error = (tol != tolerance).then(|| solidcraft_ui_text::tr("ui.sheet_page.coarse").to_owned());
-                    return Marks { generation, tolerance, detail, marks, owners, error };
+                    return Marks { generation, tolerance, detail, marks, owners, on_parent, error };
                 }
                 Err(Fault::TooMany) => tol *= 8.0,
-                Err(Fault::Invalid(why)) => return Marks { generation, tolerance, detail, marks: Vec::new(), owners: Vec::new(), error: Some(why) },
+                Err(Fault::Invalid(why)) => {
+                    return Marks { generation, tolerance, detail, marks: Vec::new(), owners: Vec::new(), on_parent: Vec::new(), error: Some(why) };
+                }
             }
         }
         Marks {
@@ -1160,12 +1165,13 @@ impl Marks {
             detail,
             marks: Vec::new(),
             owners: Vec::new(),
+            on_parent: Vec::new(),
             error: Some(solidcraft_ui_text::tr("ui.sheet_page.coarse").to_owned()),
         }
     }
 
     fn paint(&self, painter: &egui::Painter, at: &OnScreen, visible: Aabb2, ink: Color32, ppp: f32, pictures: &PictureTextures) {
-        self.paint_some(painter, at, visible, ink, ppp, pictures, None);
+        self.paint_some(painter, at, visible, ink, ppp, pictures, None, false);
     }
 
     /// The marks of the objects in `lit` again, over the sheet, in `accent`: a hovered or selected
@@ -1181,7 +1187,23 @@ impl Marks {
         lit: &[u64],
         accent: Color32,
     ) {
-        self.paint_some(painter, at, visible, accent, ppp, pictures, Some(lit));
+        self.paint_some(painter, at, visible, accent, ppp, pictures, Some(lit), false);
+    }
+
+    /// The marks of the objects in `moving` in `accent`, as a drag shows them where they go: a detail
+    /// view's callout on its parent is left out, since it stays where the parent is drawn.
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn paint_moving(
+        &self,
+        painter: &egui::Painter,
+        at: &OnScreen,
+        visible: Aabb2,
+        ppp: f32,
+        pictures: &PictureTextures,
+        moving: &[u64],
+        accent: Color32,
+    ) {
+        self.paint_some(painter, at, visible, accent, ppp, pictures, Some(moving), true);
     }
 
     /// Every mark, or with `only` the marks of those objects, in `ink`.
@@ -1195,10 +1217,14 @@ impl Marks {
         ppp: f32,
         pictures: &PictureTextures,
         only: Option<&[u64]>,
+        skip_callouts: bool,
     ) {
         let hair = 1.0 / ppp.max(0.1);
         let mut mesh = egui::Mesh::default();
         for (index, mark) in self.marks.iter().enumerate() {
+            if skip_callouts && self.on_parent.get(index).copied().unwrap_or(false) {
+                continue;
+            }
             if let Some(only) = only
                 && !self.owners.get(index).is_some_and(|owner| only.contains(owner))
             {
@@ -1467,20 +1493,21 @@ enum Fault {
 }
 
 /// Every mark of `scene`'s groups, in paint order, cut to their clips as every writer reads them.
-fn marks(scene: &Scene, tol: f64) -> Result<(Vec<Mark>, Vec<u64>), Fault> {
+fn marks(scene: &Scene, tol: f64) -> Result<(Vec<Mark>, Vec<u64>, Vec<bool>), Fault> {
     marks_owned_detail(scene, tol, true)
 }
 
 #[cfg(test)]
 fn marks_detail(scene: &Scene, tol: f64, detail: bool) -> Result<Vec<Mark>, Fault> {
-    marks_owned_detail(scene, tol, detail).map(|(marks, _)| marks)
+    marks_owned_detail(scene, tol, detail).map(|(marks, _, _)| marks)
 }
 
-fn marks_owned_detail(scene: &Scene, tol: f64, detail: bool) -> Result<(Vec<Mark>, Vec<u64>), Fault> {
+fn marks_owned_detail(scene: &Scene, tol: f64, detail: bool) -> Result<(Vec<Mark>, Vec<u64>, Vec<bool>), Fault> {
     let prepared = scene.prepare().map_err(|e| Fault::Invalid(e.to_string()))?;
     let mut budget = MAX_POINTS;
     let mut out = Vec::new();
     let mut owners = Vec::new();
+    let mut on_parent = Vec::new();
     let sheet = Aabb2 { min: Vec2::ZERO, max: scene.size_mm };
     // `prepare` checked there is one clip an object.
     let clips: HashMap<u64, Clip> = scene.clips.iter().copied().collect();
@@ -1490,6 +1517,8 @@ fn marks_owned_detail(scene: &Scene, tol: f64, detail: bool) -> Result<(Vec<Mark
         }
         // Pixels aren't geometry: `prepare` leaves a picture whole and each writer cuts it to the clip.
         let clip = clips.get(&group.object).copied();
+        // A detail view's callout on its parent is the one label group that strokes an outline.
+        let callout = group.kind == ObjectKind::ViewLabel && group.items.iter().any(|item| matches!(item, Item::Stroke { .. }));
         for item in &group.items {
             match item {
                 Item::Stroke { path, closed, width_mm, pattern } => {
@@ -1532,9 +1561,10 @@ fn marks_owned_detail(scene: &Scene, tol: f64, detail: bool) -> Result<(Vec<Mark
                 }
             }
             owners.resize(out.len(), group.object);
+            on_parent.resize(out.len(), callout);
         }
     }
-    Ok((out, owners))
+    Ok((out, owners, on_parent))
 }
 
 fn bounds_of(points: &[Vec2]) -> Aabb2 {
