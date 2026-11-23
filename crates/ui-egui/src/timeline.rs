@@ -42,7 +42,9 @@ pub(crate) fn affected_bodies_menu(app: &mut SolveApp, ui: &mut egui::Ui, id: u6
                 ui.strong(solidcraft_ui_text::tr(label));
                 for body in bodies {
                     let label = match body.component_name {
-                        Some(component) => solidcraft_ui_text::format("timeline.effects.body_component", &[("body", &body.name), ("component", &component)]),
+                        Some(component) => {
+                            solidcraft_ui_text::format("timeline.effects.body_component", &[("body", &body.name), ("component", &component)])
+                        }
                         None => body.name.clone(),
                     };
                     let available = !body.selectable_bodies.is_empty();
