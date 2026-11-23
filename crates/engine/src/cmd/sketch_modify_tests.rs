@@ -2501,6 +2501,51 @@ fn text_takes_a_font_and_edit_text_keeps_or_changes_it() {
 }
 
 #[test]
+fn a_relative_font_path_is_read_from_the_design_folder_not_the_working_folder() {
+    // The repository's BIZ UDPGothic "I" is 17.6385 mm² at 10 mm; the built-in "I" is 13.5557 mm² (see the font test above).
+    let source = concat!(env!("CARGO_MANIFEST_DIR"), "/../../assets/fonts/biz-udp-gothic/BIZUDPGothic-Regular.ttf");
+    let dir = std::env::temp_dir().join(format!("solidcraft-text-font-folder-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(dir.join("fonts")).unwrap();
+    std::fs::copy(source, dir.join("fonts/Bold.ttf")).unwrap();
+    let design = dir.join("text.json").to_string_lossy().into_owned();
+    let near = |s: &Session, id: u64, want: f64| {
+        let a: Vec<f64> = s.model.state().sketch(id).unwrap().profiles.iter().map(|p| p.area).collect();
+        assert!(a.len() == 1 && (a[0] - want).abs() < 1e-3, "{a:?} against {want}");
+    };
+    // The test's working folder has no `fonts/Bold.ttf`: the path can only be found from the design's folder.
+    let mut s = Session::default();
+    run(&mut s, "file.save_as", json!({"path": design}));
+    run(&mut s, "sketch.create", json!({"plane": "XY"}));
+    let id = s.active_sketch.unwrap();
+    run(&mut s, "sketch.text", json!({"text": "I", "at": [0, 0], "height": 10, "font": "fonts/Bold.ttf"}));
+    near(&s, id, 17.6385);
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "file.save", json!({"path": design, "cache": false}));
+    // A `.json` design is saved as plain JSON (a `.sc` one is a container), so the text can be read. The file keeps the path as it was typed, so the folder with its fonts moves as one.
+    let saved = std::fs::read_to_string(&design).unwrap();
+    assert!(saved.contains("\"fonts/Bold.ttf\""), "{saved}");
+    // Opened again, from wherever the program runs, the text is still set in that font.
+    let mut reopened = Session::default();
+    run(&mut reopened, "doc.open", json!({"path": design}));
+    near(&reopened, id, 17.6385);
+    let source = reopened.doc.sketch(id).unwrap().links.iter().find_map(|l| match &l.source {
+        LinkSource::Text { font, .. } => font.clone(),
+        _ => None,
+    });
+    assert!(source.is_some_and(|f| std::path::Path::new(&f).is_absolute() && f.ends_with("Bold.ttf")));
+    // A font file that is not there keeps the built-in font and its warning. The same design in a folder
+    // without `fonts/Bold.ttf` (a font file read once stays in memory, so the file is not removed in place).
+    let bare = dir.join("bare");
+    let copied = std::fs::create_dir_all(&bare).and_then(|()| std::fs::copy(&design, bare.join("text.json")));
+    assert!(copied.is_ok());
+    let mut again = Session::default();
+    run(&mut again, "doc.open", json!({"path": bare.join("text.json").to_string_lossy()}));
+    near(&again, id, 13.5557);
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
 fn blend_curve_joins_tangentially() {
     let mut s = new_sketch();
     let a = ids(&run(&mut s, "sketch.line", json!({"points": [[0, 0], [10, 0]]}))["curves"])[0].clone();

@@ -553,7 +553,8 @@ fn set_edge_curve(brep: &mut Brep, e: EdgeId, curve: Option<Curve>) -> Result<()
 ///
 /// # Errors
 /// Those of the intersection (with no curve that leaves `far` against `along_n`,
-/// [`crate::error::blend::BlendFailure::StageFailed`]) and of the reversal.
+/// [`crate::error::blend::BlendFailure::SrfSrfHeadingNotFollowed`], an empty search) and of
+/// the reversal.
 pub(crate) fn turned_back_arc(
     k: &Kernel,
     ends: [Point3; 2],
@@ -1991,17 +1992,12 @@ impl FilletBrep {
         // Past a tangent side edge (`make_nx1_corner_topology`), the extended edge
         // bounds the end face and a face that is not the side face this edge runs in:
         // its extension is where that side face meets the end face's extension
-        // (tangency-labs/smlib@d5ebcb3, WR-457).
+        // (tangency-labs/smlib@d5ebcb3, WR-457). The end face is the one the corner's topology
+        // picked: the fork takes the edge's first face with an extended surface, which is the
+        // other face where another corner of the session ends on it (#17605).
         if let Some(side) = self.fillet_edge(e)?.original_face() {
             if !faces.contains(&side) {
-                let mut end_face = None;
-                for &f in &faces {
-                    if extended_surface(the_corner, f)?.is_some() {
-                        end_face = Some(f);
-                        break;
-                    }
-                }
-                let end_face = end_face.ok_or_else(|| missing(OP_EXT_EDGE))?;
+                let end_face = the_corner.end_face.ok_or_else(|| missing(OP_EXT_EDGE))?;
                 faces = vec![side, end_face];
             }
         }

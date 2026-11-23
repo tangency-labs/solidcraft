@@ -26,6 +26,29 @@ fn primitives_keep_their_analytic_volume() {
     assert!(solid && (got - 28.0 * PI).abs() <= 1e-6 * 28.0 * PI, "tilted cylinder: SMLib volume {got}, manifold {solid}");
 }
 
+/// Numbering an operand for a mirror or boolean works from its trusted import even at
+/// a cylinder seam, where a canonical export can start its edge walk elsewhere.
+#[test]
+fn numbering_a_cylinder_operand_needs_no_geometry_export() {
+    use solidcraft_smlib::trace::{Event, Run};
+
+    let cylinder = cylinder(v(1., 2., 3.), Vec3::Z, 5., 10.).unwrap();
+    let trace = Run::new();
+    let (copy, order) = trace.within(|| super::smlib_body_ordered(&cylinder)).unwrap();
+    let events = trace.take();
+    assert_eq!(events.iter().filter(|e| matches!(e, Event::Call { op: "copy", .. })).count(), 1);
+    assert!(!events.iter().any(|e| matches!(e, Event::Export { .. })));
+
+    // Independently walk the copy's topology through its export and compare every index.
+    let measured = super::numbering(cylinder.record(), &copy).unwrap();
+    let known = order.unwrap();
+    let index = |to: &[usize], i: usize| if to.is_empty() { i } else { to[i] };
+    for (a, b, n) in [(&known.faces, &measured.faces, cylinder.face_count()), (&known.edges, &measured.edges, cylinder.edge_count())] {
+        assert!((0..n).all(|i| index(a, i) == index(b, i)));
+    }
+    assert_eq!(known.pieces, measured.pieces);
+}
+
 /// Truck holds spheres and tori as revolutions (`PlacedRevolution`): SMLib gets them as its
 /// analytic sphere and torus, faces turned over where the revolution's normal points inward.
 #[test]
