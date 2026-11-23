@@ -741,9 +741,9 @@ fn fillet_fitted(
         // of #4282 (a cube with a hole through each axis, a 2 mm round of every edge) those ten
         // blends of the forty-one edges took 77 s, fifteen times the blend that failed, and they
         // found nothing: the round fails at any radius there. The refusal is reported as the
-        // kernel stated it.
+        // kernel stated it, less a size it names that no round can have ([`without_unusable_fit`]).
         Err(kernel::KernelError::TooLarge(why)) if fit == crate::FilletFit::Exact && kernel::named_fit(&why).is_none() => {
-            Err(kernel::KernelError::TooLarge(why))
+            Err(kernel::KernelError::TooLarge(without_unusable_fit(&why)))
         }
         Err(kernel::KernelError::TooLarge(why)) if fit == crate::FilletFit::Exact => Err({
             let hint = kernel::named_fit(&why);
@@ -878,7 +878,7 @@ fn with_largest_fit(
     search: impl FnOnce() -> std::result::Result<kernel::FitSearch, kernel::KernelError>,
 ) -> kernel::KernelError {
     if EVAL_VALIDATION.get() == kernel::Validation::Off {
-        return kernel::KernelError::TooLarge(why);
+        return kernel::KernelError::TooLarge(without_unusable_fit(&why));
     }
     match search() {
         Ok(kernel::FitSearch { found: Some((largest, _)), .. }) if kernel::names_largest_fit(&why) => {
@@ -901,6 +901,13 @@ fn with_largest_fit(
             kernel::KernelError::TooLarge(format!("{}; a smaller {size} fails otherwise: {e}", kernel::without_fit_note(&why)))
         }
     }
+}
+
+/// `why` without the largest size that fits it names when that size is not one a blend can
+/// have ([`kernel::named_fit`] takes none from it): solidcore can refuse a round as too large
+/// and name 0 mm as the largest that fits, which no round is. `why` itself otherwise.
+fn without_unusable_fit(why: &str) -> String {
+    if kernel::names_largest_fit(why) && kernel::named_fit(why).is_none() { kernel::without_fit_note(why) } else { why.to_owned() }
 }
 
 /// The warning of a fillet whose radius `asked` was reduced to `used` (per edge).
@@ -2369,7 +2376,12 @@ fn replayed_sources<'a>(doc: &'a Document, features: &[crate::FeatureId]) -> Vec
         if out.iter().any(|x| x.id == g.id) {
             continue;
         }
-        if let FeatureKind::Pattern { features, bodies, .. } | FeatureKind::Mirror { features, bodies, .. } = &g.kind
+        if let FeatureKind::Pattern { features, bodies, components, .. } = &g.kind
+            && bodies.is_empty()
+            && components.is_empty()
+        {
+            todo.extend(features.iter().copied());
+        } else if let FeatureKind::Mirror { features, bodies, .. } = &g.kind
             && bodies.is_empty()
         {
             todo.extend(features.iter().copied());
@@ -4541,7 +4553,7 @@ impl Model {
                         }
                     }
                     track_altered_sheets(&state, &mut next, f, &mut warning);
-                    note_join_apart(&state, &next, f, &mut warning);
+                    note_join_apart(doc, &state, &next, f, &mut warning);
                     note_cut_cavity(&state, &next, f, &mut warning);
                 }
                 // What it cut from a sheet made from surfaces goes into the sheet's records (see
@@ -4579,8 +4591,12 @@ impl Model {
                             _ => Vec::new(),
                         };
                         // Copies made through a pattern or mirror among the sources come after (#395).
+                        // A Pattern of components places occurrences in reconcile, not here (#12116).
                         let mats = match &f.kind {
-                            FeatureKind::Pattern { features, bodies, .. } | FeatureKind::Mirror { features, bodies, .. } if bodies.is_empty() => {
+                            FeatureKind::Pattern { features, bodies, components, .. } if bodies.is_empty() && components.is_empty() => {
+                                copy_instances(doc, &vals, &state, features, &mats).unwrap_or(mats)
+                            }
+                            FeatureKind::Mirror { features, bodies, .. } if bodies.is_empty() => {
                                 copy_instances(doc, &vals, &state, features, &mats).unwrap_or(mats)
                             }
                             _ => mats,
@@ -4675,6 +4691,7 @@ impl Model {
                 back = Some(refused);
                 continue 'pass;
             }
+            // Main's evaluate loop ends the pass here; Pattern-of-components reconcile runs from Session::refresh.
             break;
         }
         self.placement_local = self.placement_local && out.iter().all(|r| !r.skipped && !r.stale && !r.unkept && r.error.is_none());
@@ -4945,6 +4962,20 @@ mod largest_fit_tests {
         let e = with_largest_fit(WHY.into(), "radius", || Err(kernel::KernelError::Failed("the corner".into()))).to_string();
         assert!(!e.contains("that fits is"), "{e}");
         assert!(e.contains("a smaller radius fails otherwise: "), "{e}");
+    }
+
+    /// A refusal naming 0 mm as the largest radius that fits names no size at all: the clause is
+    /// dropped, and the rest of the refusal is kept. A size a round can have stays.
+    #[test]
+    fn a_fit_of_zero_is_not_named() {
+        let why = "the fillet is larger than the faces beside its edges allow, at the edge at (0.099, 25.193, 20.000): \
+                   the rolling ball does not fit a face it rolls on; the largest radius that fits is 0 mm";
+        let e = without_unusable_fit(why);
+        assert!(!e.contains("that fits is"), "{e}");
+        assert!(e.ends_with("the rolling ball does not fit a face it rolls on"), "{e}");
+        assert_eq!(without_unusable_fit(WHY), WHY);
+        let plain = "the fillet is larger than the faces beside its edges allow";
+        assert_eq!(without_unusable_fit(plain), plain);
     }
 }
 
@@ -5288,8 +5319,12 @@ fn track_altered_sheets(before: &ModelState, after: &mut ModelState, f: &Feature
 /// separate piece (see `apply_traced`): a valid body in several pieces, but rarely what was meant
 /// when Join was left on by mistake. Says so when a feature's Join leaves the bodies it changed
 /// in more pieces than they had (#4434). Combine joins the bodies it is given, apart or not.
-fn note_join_apart(before: &ModelState, after: &ModelState, f: &Feature, warning: &mut Option<String>) {
-    if feature_operation(f) != Some(Operation::Join) {
+fn note_join_apart(doc: &Document, before: &ModelState, after: &ModelState, f: &Feature, warning: &mut Option<String>) {
+    let mirrored_join = matches!(&f.kind, FeatureKind::Mirror { features, bodies, .. }
+    if bodies.is_empty() && features.iter().filter_map(|id| doc.feature(id.0)).any(|source| {
+        !source.suppressed && matches!(source.kind, FeatureKind::Extrude { operation: Operation::Join, .. })
+    }));
+    if feature_operation(f) != Some(Operation::Join) && !mirrored_join {
         return;
     }
     for (name, n) in join_pieces_added(before, after) {
@@ -9142,7 +9177,20 @@ fn feature_tools_with_constructor(
             Ok(vec![crate::lineage::ProfileRoles::swept(Some(ss), Some(r)).tool(body, None)])
         }
         FeatureKind::Coil {
-            base, axis, diameter, pitch, turns, section_size, section, position, start_angle, clockwise, sketch, profiles, ..
+            base,
+            axis,
+            diameter,
+            pitch,
+            turns,
+            section_size,
+            section,
+            position,
+            start_angle,
+            clockwise,
+            end_cut,
+            sketch,
+            profiles,
+            ..
         } => {
             let base = &point(vals, base)?;
             let k = axis.normalized().ok_or_else(|| DocError::Invalid("coil axis".into()))?;
@@ -9153,10 +9201,12 @@ fn feature_tools_with_constructor(
                     || section_size.is_some()
                     || start_angle.is_some()
                     || !matches!(section, crate::CoilSection::Circular)
-                    || *position != 0)
+                    || *position != 0
+                    || !matches!(end_cut, crate::CoilEndCut::Axial))
             {
                 return Err(DocError::Invalid(
-                    "a coil with a `sketch` cannot also set `diameter`, `section_size`, `section`, `section_position` or `start_angle`".into(),
+                    "a coil with a `sketch` cannot also set `diameter`, `section_size`, `section`, `section_position`, `start_angle` or `end_cut`"
+                        .into(),
                 ));
             }
             if sketch.is_none() && !matches!(profiles, ProfileSel::All) {
@@ -9194,7 +9244,19 @@ fn feature_tools_with_constructor(
             let x0 = if k.cross(Vec3::X).len() > 1e-6 { (Vec3::X - k * k.dot(Vec3::X)).normalized() } else { Some(k.any_perp()) };
             let x0 = x0.ok_or_else(|| DocError::Invalid("coil axis".into()))?;
             let x = x0 * a0.cos() + k.cross(x0) * a0.sin();
-            let plane = Plane { origin: *base, x, y: k };
+            let axis = if *clockwise { k * -1.0 } else { k };
+            // A left-handed coil turns about −axis and climbs along +axis: mirror the pitch.
+            let pitch = if *clockwise { -p } else { p };
+            // Square ends: the section lies across the helix's tangent at the start, and the screw
+            // motion keeps it so, out to the other end.
+            let y = match end_cut {
+                crate::CoilEndCut::Axial => k,
+                crate::CoilEndCut::Square => {
+                    let t = (axis.cross(x) * (std::f64::consts::TAU * r) + axis * pitch).normalized();
+                    t.and_then(|t| (k - t * k.dot(t)).normalized()).ok_or_else(|| DocError::Invalid("coil axis".into()))?
+                }
+            };
+            let plane = Plane { origin: *base, x, y };
             let c = Vec2::new(r, 0.0);
             let outer = match section {
                 crate::CoilSection::Circular => solidcore_record::Loop2::circle(c, s / 2.0),
@@ -9204,9 +9266,6 @@ fn feature_tools_with_constructor(
                 }
             };
             let region = Region2 { outer, holes: Vec::new() };
-            let axis = if *clockwise { k * -1.0 } else { k };
-            // A left-handed coil turns about −axis and climbs along +axis: mirror the pitch.
-            let pitch = if *clockwise { -p } else { p };
             let coil = Traced::unnamed(kernel::sweep_helix(&plane, &region, *base, axis, pitch, n)?);
             Ok(vec![coil.with_recipe(tool_recipe(doc, f, vals))])
         }
@@ -10257,6 +10316,98 @@ pub fn pattern_matrices(doc: &Document, st: &ModelState, p: &crate::PatternKind)
     pattern_transforms(doc, &vals, st, 0, p)
 }
 
+/// Keep each Pattern of components' occurrences in step with its count and spacing (#12116):
+/// add or remove copies when the count changes, update transforms when the source or spacing
+/// moves, and drop copies of a suppressed or rolled-back Pattern. Surviving copies keep their
+/// occurrence ids.
+pub fn reconcile_component_patterns(doc: &mut Document, st: &ModelState) -> Result<()> {
+    let marker = doc.marker.unwrap_or(doc.features.len());
+    let (vals, _) = doc.param_values();
+    // Snapshot what each Pattern of components wants, then mutate. Features after the marker
+    // are rolled back: their copies go, like bodies of a rolled-back Pattern.
+    let plans: Vec<(u64, bool, Vec<u64>, crate::PatternKind, u64)> = doc
+        .features
+        .iter()
+        .enumerate()
+        .filter_map(|(i, f)| match &f.kind {
+            FeatureKind::Pattern { pattern, components, .. } if !components.is_empty() => {
+                Some((f.id, f.suppressed || i >= marker, components.clone(), pattern.clone(), f.component))
+            }
+            _ => None,
+        })
+        .collect();
+    for (feature_id, inactive, components, pattern, feature_component) in plans {
+        if inactive {
+            clear_pattern_occurrences(doc, feature_id)?;
+            continue;
+        }
+        let mats = pattern_transforms(doc, &vals, st, feature_component, &pattern)?;
+        let mut made = Vec::with_capacity(components.len().saturating_mul(mats.len()));
+        let previous = match &doc.feature(feature_id).map(|f| &f.kind) {
+            Some(FeatureKind::Pattern { occurrences, .. }) => occurrences.clone(),
+            _ => Vec::new(),
+        };
+        // Occurrences are stored per component, then per matrix. Shrink/grow each component's
+        // block on its own so survivors keep their ids when the count changes.
+        let old_per = match components.len() {
+            0 => 0,
+            n => previous.len() / n,
+        };
+        let mut leftover = std::collections::BTreeSet::new();
+        for (ci, component) in components.into_iter().enumerate() {
+            let src = doc.occurrence_of(component).cloned().ok_or_else(|| DocError::Unknown(format!("component {component}")))?;
+            // The first placement is the pattern's seed; keep it by id so later adds of this
+            // reconcile do not change which occurrence we read as the source.
+            let seed = src.id;
+            let src = doc.occurrences.iter().find(|o| o.id == seed).cloned().unwrap_or(src);
+            let start = ci.saturating_mul(old_per);
+            let block = previous.get(start..start.saturating_add(old_per)).unwrap_or(&[]);
+            let mut old = block.iter().copied();
+            for m in &mats {
+                let transform = crate::mat_mul(m, &src.transform);
+                match old.next() {
+                    Some(id) if doc.occurrences.iter().any(|o| o.id == id && o.component == component) => {
+                        if let Some(o) = doc.occurrences.iter_mut().find(|o| o.id == id) {
+                            o.parent = src.parent;
+                            o.transform = transform;
+                        }
+                        made.push(id);
+                    }
+                    Some(id) => {
+                        leftover.insert(id);
+                        made.push(doc.add_occurrence(component, src.parent, transform)?);
+                    }
+                    None => {
+                        made.push(doc.add_occurrence(component, src.parent, transform)?);
+                    }
+                }
+            }
+            leftover.extend(old);
+        }
+        if !leftover.is_empty() {
+            doc.remove_occurrences(&leftover);
+        }
+        if let Some(FeatureKind::Pattern { occurrences, .. }) = doc.feature_mut(feature_id).map(|f| &mut f.kind) {
+            *occurrences = made;
+        }
+    }
+    Ok(())
+}
+
+fn clear_pattern_occurrences(doc: &mut Document, feature_id: u64) -> Result<()> {
+    let Some(FeatureKind::Pattern { occurrences, .. }) = doc.feature(feature_id).map(|f| &f.kind) else {
+        return Ok(());
+    };
+    let gone: std::collections::BTreeSet<u64> = occurrences.iter().copied().collect();
+    if !gone.is_empty() {
+        doc.remove_occurrences(&gone);
+    }
+    if let Some(FeatureKind::Pattern { occurrences, .. }) = doc.feature_mut(feature_id).map(|f| &mut f.kind) {
+        occurrences.clear();
+    }
+    Ok(())
+}
+
 fn pattern_transforms(doc: &Document, vals: &BTreeMap<String, Value>, st: &ModelState, component: u64, p: &crate::PatternKind) -> Result<Vec<Mat>> {
     let count = |e: &str| -> Result<usize> {
         let n = expr::eval_count(e, vals)?;
@@ -10288,7 +10439,7 @@ fn pattern_transforms(doc: &Document, vals: &BTreeMap<String, Value>, st: &Model
                 }
             }
         }
-        crate::PatternKind::Path { path_sketch, path, count: c, spacing, extent, flip, orient } => {
+        crate::PatternKind::Path { path_sketch, path, count: c, spacing, extent, flip, orient, start, start_fraction, follow_frame } => {
             let n = count(c)?;
             let d = val(vals, spacing, Kind::Length)?;
             let ps = st.sketch(path_sketch.0).ok_or_else(|| DocError::Unknown(format!("path sketch {path_sketch}")))?;
@@ -10301,25 +10452,58 @@ fn pattern_transforms(doc: &Document, vals: &BTreeMap<String, Value>, st: &Model
             }
             let total: f64 = segs.iter().map(seg_len).sum();
             let step = if *extent { if n > 1 { d / (n - 1) as f64 } else { 0.0 } } else { d };
-            if (step * (n - 1) as f64).abs() > total * (1.0 + 1e-5) + 1e-6 {
+            // Where the original sits along the path: the start point, a distance or a fraction
+            // of the path's length (so it keeps its place as the path changes).
+            let from = match (start_fraction, start) {
+                (Some(f), _) => {
+                    let f = val(vals, f, Kind::Unitless)?;
+                    if !(0.0..=1.0).contains(&f) {
+                        return Err(DocError::Invalid("the start point must be 0…1 of the path's length".into()));
+                    }
+                    Some(f * total)
+                }
+                (None, Some(s)) => {
+                    let s = val(vals, s, Kind::Length)?;
+                    if !s.is_finite() || s < -1e-6 || s > total * (1.0 + 1e-5) + 1e-6 {
+                        return Err(DocError::Invalid(format!("the start point must lie on the path (0…{total:.3} mm)")));
+                    }
+                    Some(s.clamp(0.0, total))
+                }
+                (None, None) => None,
+            };
+            let last = from.unwrap_or(0.0) + step * n.saturating_sub(1) as f64;
+            // Without a start point, as before: the copies' span must fit the path.
+            let past_end = match from {
+                None => (step * n.saturating_sub(1) as f64).abs() > total * (1.0 + 1e-5) + 1e-6,
+                Some(_) => !last.is_finite() || last > total * (1.0 + 1e-5) + 1e-6,
+            };
+            if past_end {
                 return Err(DocError::Invalid(format!("the instances run past the end of the path ({total:.3} mm long)")));
             }
+            if from.is_some() && last < -1e-6 {
+                return Err(DocError::Invalid(format!("the instances run past the start of the path ({total:.3} mm long)")));
+            }
+            let from = from.unwrap_or(0.0);
             let normal = ps.plane.normal();
-            let (p0, t0) = path_at(&segs, 0.0);
+            let (p0, r0) = path_station(&segs, from, normal);
             for i in 1..n {
-                let (pk, tk) = path_at(&segs, step * i as f64);
-                let mut m = if *orient {
-                    // Signed turn of the tangent about the sketch normal.
-                    let ang = t0.cross(tk).dot(normal).atan2(t0.dot(tk));
-                    rotation(p0, normal, ang)
-                } else {
-                    translation(Vec3::ZERO)
-                };
-                let dv = pk - p0;
-                m[3][0] += dv.x;
-                m[3][1] += dv.y;
-                m[3][2] += dv.z;
-                out.push(m);
+                let at = from + step * i as f64;
+                let (pk, rk) = path_station(&segs, at, normal);
+                out.push(match (*orient, *follow_frame) {
+                    (false, _) => translation(pk - p0),
+                    (true, true) => frame_to_frame(p0, &r0, pk, &rk),
+                    // A pattern saved before the frame: the signed turn of the tangent about the
+                    // sketch's normal only.
+                    (true, false) => {
+                        let (t0, tk) = (path_tangent(&segs, from), path_tangent(&segs, at));
+                        let mut m = rotation(p0, normal, t0.cross(tk).dot(normal).atan2(t0.dot(tk)));
+                        let dv = pk - p0;
+                        m[3][0] += dv.x;
+                        m[3][1] += dv.y;
+                        m[3][2] += dv.z;
+                        m
+                    }
+                });
             }
         }
         crate::PatternKind::Circular { origin, axis, count: c, angle, alignment, reversed, axis_ref, axis_feature } => {
@@ -10396,17 +10580,91 @@ fn reverse_seg(s: &kernel::PathSeg) -> kernel::PathSeg {
     s.reversed()
 }
 
-/// Point and tangent at arc length `d` along a chain (clamped to its ends).
-fn path_at(segs: &[kernel::PathSeg], d: f64) -> (Vec3, Vec3) {
+/// Where a chain is `d` mm along (clamped to its ends), and how it has turned to get there from
+/// its start: a rotation-minimising frame, the turn of each arc about its own axis and, at each
+/// joint, the least turn from one segment's direction to the next one's. The frame turns with
+/// the tangent and never rolls about it, as a swept profile does, so on a 3D path a copy keeps
+/// the relation to the path that the original has; on a planar path it is the turn about the
+/// sketch's normal. `normal` (the sketch's) is the axis of a half turn where the path doubles
+/// back on itself. A segment with no length (a point repeated where a spline is sampled) has no
+/// direction: it turns nothing, and the next segment turns from the last one that had one.
+fn path_station(segs: &[kernel::PathSeg], d: f64, normal: Vec3) -> (Vec3, crate::Mat) {
+    let mut r = crate::IDENTITY;
+    let mut left = d.max(0.0);
+    let mut came_along: Option<Vec3> = None;
+    for (i, s) in segs.iter().enumerate() {
+        let l = seg_len(s);
+        let last = left <= l + 1e-9 || i + 1 == segs.len();
+        if l <= solidcraft_geom::EPS {
+            if last {
+                return (s.end(), r);
+            }
+            left -= l;
+            continue;
+        }
+        let (_, t_in) = seg_at(s, 0.0);
+        if let Some(t) = came_along {
+            r = crate::mat_mul(&least_turn(t, t_in, normal), &r);
+        }
+        let along = if last { left.min(l) } else { l };
+        if let kernel::PathSeg::Arc { a, center, axis, angle } = *s {
+            let radius = (a - center).len().max(1e-12);
+            let turn = along.copysign(angle) / radius;
+            r = crate::mat_mul(&rotation(Vec3::ZERO, axis.normalized().unwrap_or(Vec3::Z), turn), &r);
+        }
+        let (p, t) = seg_at(s, along);
+        if last {
+            return (p, r);
+        }
+        came_along = Some(t);
+        left -= l;
+    }
+    (Vec3::ZERO, r)
+}
+
+/// The tangent `d` mm along a chain (clamped to its ends).
+fn path_tangent(segs: &[kernel::PathSeg], d: f64) -> Vec3 {
     let mut left = d.max(0.0);
     for (i, s) in segs.iter().enumerate() {
         let l = seg_len(s);
         if left <= l + 1e-9 || i + 1 == segs.len() {
-            return seg_at(s, left.min(l));
+            return seg_at(s, left.min(l)).1;
         }
         left -= l;
     }
-    (Vec3::ZERO, Vec3::X)
+    Vec3::X
+}
+
+/// The least rotation that turns unit direction `a` onto `b`; a half turn about `normal` (or
+/// any line square to `a`) when they are opposite.
+fn least_turn(a: Vec3, b: Vec3, normal: Vec3) -> crate::Mat {
+    let axis = a.cross(b);
+    let (sin, cos) = (axis.len(), a.dot(b));
+    if sin > 1e-12 {
+        return rotation(Vec3::ZERO, axis, sin.atan2(cos));
+    }
+    if cos >= 0.0 {
+        return crate::IDENTITY;
+    }
+    let square = |k: Vec3| k.cross(a).len() > 0.5;
+    let k = [normal, Vec3::Z, Vec3::X].into_iter().find(|k| square(*k)).unwrap_or(Vec3::Y);
+    rotation(Vec3::ZERO, k, std::f64::consts::PI)
+}
+
+/// The placement that carries a body from the path's frame `r0` at `p0` to its frame `rk` at
+/// `pk`, keeping the body's relation to the path.
+fn frame_to_frame(p0: Vec3, r0: &crate::Mat, pk: Vec3, rk: &crate::Mat) -> crate::Mat {
+    // The frames are rotations, so r0's inverse is its transpose.
+    let mut back = crate::IDENTITY;
+    for (c, col) in back.iter_mut().enumerate().take(3) {
+        for (row, cell) in col.iter_mut().enumerate().take(3) {
+            *cell = r0[row][c];
+        }
+    }
+    let mut m = crate::mat_mul(rk, &back);
+    let moved = pk - crate::apply_vector(&m, p0);
+    m[3] = [moved.x, moved.y, moved.z, 1.0];
+    m
 }
 
 /// The bodies a hole cuts: those its feature names, else its component's and its own (as
@@ -10795,7 +11053,7 @@ fn source_label(doc: &Document, id: FeatureId) -> String {
 /// or mirror of bodies (its copies are bodies, which a pattern or mirror of features can't take).
 fn copied_features(doc: &Document, vals: &BTreeMap<String, Value>, st: &ModelState, src: &Feature) -> Result<Option<(Vec<FeatureId>, Vec<Mat>)>> {
     match &src.kind {
-        FeatureKind::Pattern { features, pattern, bodies, .. } if bodies.is_empty() => {
+        FeatureKind::Pattern { features, pattern, bodies, components, .. } if bodies.is_empty() && components.is_empty() => {
             Ok(Some((features.clone(), pattern_transforms(doc, vals, st, src.component, pattern)?)))
         }
         FeatureKind::Mirror { features, plane, bodies, .. } if bodies.is_empty() => {
@@ -13076,7 +13334,12 @@ fn eval_feature_kind(
             }
             Ok(())
         }
-        FeatureKind::Pattern { features, pattern, bodies, placements } => {
+        FeatureKind::Pattern { features, pattern, bodies, placements, components, .. } => {
+            // Component placements are reconciled on the document after evaluation (#12116).
+            if !components.is_empty() {
+                let _ = pattern_transforms(doc, vals, st, f.component, pattern)?;
+                return Ok(());
+            }
             let mats = pattern_transforms(doc, vals, st, f.component, pattern)?;
             if bodies.is_empty() {
                 return replay(doc, vals, f, st, features, &mats, warning);
@@ -15616,6 +15879,13 @@ mod named_face_lookup_tests {
     }
 
     #[test]
+    fn planar_normal_at_evaluates_exact_brep_plane() {
+        let b = solidcraft_kernel::box_solid(Vec3::ZERO, Vec3::new(10.0, 10.0, 10.0)).unwrap();
+        let n = more::planar_normal_at(&b, Vec3::new(5.0, 5.0, 10.0));
+        assert_eq!(n, Some(Vec3::Z));
+    }
+
+    #[test]
     fn body_at_picks_nearest_body_using_exact_bounds() {
         let st = parts(3);
         let hit = body_at(&st, &None, &[Vec3::new(22.0, 5.0, 5.0)]).unwrap();
@@ -15662,5 +15932,33 @@ mod kept_refused_tests {
         assert!(matches!(&internal, kernel::KernelError::Internal(m) if m == "body `Box1`: SMLib copy: boom"), "{internal:?}");
         let refused = kept_refused("Box1", &kernel::KernelError::Failed("refused".into()), &inputs);
         assert!(matches!(refused, kernel::KernelError::Failed(_)), "{refused:?}");
+    }
+}
+
+#[cfg(test)]
+mod path_station_tests {
+    use super::*;
+
+    /// A point repeated in a path (a flattened spline samples one twice) leaves a segment with no
+    /// length and no direction. The frame along the path is the one it has without that
+    /// segment: it does not turn through a made-up direction at the repeat, which would roll
+    /// every copy after it. Repeats at the path's ends keep the stations clamped to its ends.
+    #[test]
+    fn a_repeated_point_does_not_turn_the_path_frame() {
+        let line = |a: Vec3, b: Vec3| kernel::PathSeg::Line { a, b };
+        let (a, b, c) = (Vec3::ZERO, Vec3::new(0.0, 10.0, 0.0), Vec3::new(5.0, 10.0, 5.0));
+        let clean = [line(a, b), line(b, c)];
+        let repeated = [line(a, a), line(a, b), line(b, b), line(b, c), line(c, c)];
+        let total = 10.0 + 50f64.sqrt();
+        for d in [0.0, 5.0, 10.0, 12.0, total, total + 1.0] {
+            let (p, r) = path_station(&clean, d, Vec3::Z);
+            let (q, s) = path_station(&repeated, d, Vec3::Z);
+            assert!(p.dist(q) < 1e-12, "at {d}: {p:?} vs {q:?}");
+            for (row, other) in r.iter().zip(&s) {
+                for (x, y) in row.iter().zip(other) {
+                    assert!((x - y).abs() < 1e-12, "at {d}: {r:?} vs {s:?}");
+                }
+            }
+        }
     }
 }

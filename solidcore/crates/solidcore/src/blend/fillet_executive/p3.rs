@@ -3615,6 +3615,81 @@ impl<O: ClassObject + SolutionObject + Ord> FilletExecutive<O> {
         self.note_open_fit(access, size.is_some(), limit, kind, solver)
     }
 
+    /// Not the fork's (#15767): a constant round whose rail rolled over a smooth edge of its
+    /// face partway along and could not be rolled (the rollover recovery failed, `failed`) is
+    /// refused as larger than its faces where it is: where its radius exceeds the largest at
+    /// which its rails stay on their own faces, rolling over no edge
+    /// ([`Self::note_fit_on_its_faces`], `LargestSizeOnItsFaces`), which it names, as the
+    /// refusal before the rollover named it. Any other failure, or one of a blend within that
+    /// size, stays the solver's failure.
+    ///
+    /// # Errors
+    /// The refusal, or `failed`; those of the sizing.
+    fn refuse_rollover_past_its_fit(
+        &mut self,
+        k: &mut Kernel,
+        access: &mut impl BrepCreationAccess<O>,
+        failed: SolidError,
+    ) -> Result<()> {
+        // `classify_solver_rails` notes a rollover failure as the solver's edge problem with
+        // status 7 on that solver's edge
+        let edge = match self.error.edge {
+            Some(edge)
+                if !failed.is_cancelled()
+                    && self.error.code == FilletErrorType::EdgeProblem as i32
+                    && self.error.status == 7 =>
+            {
+                edge
+            }
+            _ => return Err(failed),
+        };
+        let mut index = 0;
+        while let Some(solver) = self.solvers.get(index).copied() {
+            index += 1;
+            if access.geometry_edge(solver)? != edge {
+                continue;
+            }
+            let Some(fit) = access.creation_solver_fit(solver)? else {
+                break;
+            };
+            let Some([d0, d1]) = fit.offsets else {
+                break;
+            };
+            let Some((limit, FitKind::Radius)) =
+                access.creation_largest_size_on_its_faces(k, solver, None)?
+            else {
+                break;
+            };
+            // a ball: both offsets its radius; within the edge's tolerance of the bound, the
+            // blend is at it, not past it
+            let radius = smos_max(d0.abs(), d1.abs());
+            // a NaN radius or bound refuses nothing: the failure stays the solver's
+            if radius.partial_cmp(&(limit + fit.tolerance)) != Some(std::cmp::Ordering::Greater) {
+                break;
+            }
+            let (code, status, comment) = (
+                self.error.code,
+                self.error.status,
+                self.error.comment.clone(),
+            );
+            self.note_open_fit(access, true, limit, FitKind::Radius, solver)?;
+            if self.fit_radius < 0.0 {
+                // nothing noted: the failure stays the solver's
+                self.error.code = code;
+                self.error.status = status;
+                self.error.comment = comment;
+                break;
+            }
+            let refused = self.record_no_room(
+                NoRoomReason::RailLeavesFace,
+                "Fillet Error: a rail rolled over a smooth edge of its face leaves the face beyond (the blend is larger than the faces allow)",
+            );
+            self.error.edge = Some(edge);
+            return refused;
+        }
+        Err(failed)
+    }
+
     /// Refuse blends whose bands on a face they share overlap, away from any corner that
     /// trims them (not upstream; opt-in `fixes.fillet_refuse_overlapping_bands`, WR-542:
     /// the fork's tangency-labs/smlib@c0d74ee, `SmFilletExecutive::BandsClearOtherRails`,
@@ -4669,7 +4744,9 @@ impl<O: ClassObject + SolutionObject + Ord> FilletExecutive<O> {
         self.ease_set_back_sections(k, access)?;
         self.calculate_corner_edges(k, access)?;
         self.trim_solver_rails(k, access)?;
-        self.classify_solver_rails(k, access)?;
+        if let Err(failed) = self.classify_solver_rails(k, access) {
+            return self.refuse_rollover_past_its_fit(k, access, failed);
+        }
         let fillet = self.build_fillet_faces(k, access)?;
         self.stitch_fillet_faces(k, access, fillet)?;
         if let Some(output) = error_out {

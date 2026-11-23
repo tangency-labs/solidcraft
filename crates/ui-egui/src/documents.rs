@@ -3039,10 +3039,9 @@ pub fn tabs(app: &mut SolveApp, ui: &mut egui::Ui, r: Rect, x0: f32, x1: f32) {
             Some((tab, count, zone))
         })
         .collect();
-    let hovered = ui
-        .ctx()
-        .data(|data| data.get_temp::<usize>(tab_strip_id(ui.ctx().viewport_id()).with("view_hover")))
-        .and_then(|view| strip_view_id(app, view));
+    // The id outside `data`: a context lock taken inside another can freeze the window (#21091).
+    let hover_id = tab_strip_id(ui.ctx().viewport_id()).with("view_hover");
+    let hovered = ui.ctx().data(|data| data.get_temp::<usize>(hover_id)).and_then(|view| strip_view_id(app, view));
     crate::view_window_drag::hover(app, ui.ctx(), hovered);
     let drag_continues = !app.file_load_holds() && actions.iter().any(|action| matches!(action, crate::app_bar::TabAction::DockView { .. }));
     crate::view_window_drag::record(app, ui.ctx(), drop_zones, drag_continues);
@@ -3454,7 +3453,8 @@ pub(crate) fn uses_file(app: &SolveApp, path: &str) -> bool {
 /// The last measured width of a pop-out's complete view strip, before labels collapse.
 /// Until the first layout, reserve all available space for the views.
 pub(crate) fn preferred_tab_width(ctx: &egui::Context) -> f32 {
-    ctx.data(|data| data.get_temp::<f32>(tab_strip_id(ctx.viewport_id()).with("preferred_width"))).unwrap_or(f32::INFINITY)
+    let id = tab_strip_id(ctx.viewport_id()).with("preferred_width");
+    ctx.data(|data| data.get_temp::<f32>(id)).unwrap_or(f32::INFINITY)
 }
 
 /// Where SolidCraft's document tab strip keeps its state.

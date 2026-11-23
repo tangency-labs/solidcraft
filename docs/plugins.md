@@ -1169,7 +1169,14 @@ Only an importer may say `open`.
 - **Failures.** A failure fails that one import, named with the plugin and the file ("Sample
   could not open bracket.smp: ...", or "Sample does not support bracket.smp: ..." for
   `unsupported`), and the next one gets a fresh instance. The compiled component stays in memory, so the next file opens
-  without compiling again; nothing compiled is written to disk.
+  without compiling again.
+- **Compiled plugins are kept.** A plugin compiles once per version: SolidCraft keeps the compiled
+  code with Wasmtime's compilation cache in the `plugin-compile` folder of its per-user cache folder
+  (`%LOCALAPPDATA%\SolidCraft\plugin-compile`, `~/Library/Caches/SolidCraft/plugin-compile`, or
+  `~/.cache/solidcraft/plugin-compile`), never in the plugin's or a design's folder. It is safe to
+  delete: the next session compiles again. A changed plugin, SolidCraft version or setting gets its own
+  entry; a damaged entry is compiled again, and a folder that can't be written only means compiling
+  each session. The folder holds machine code SolidCraft runs, so it is as trusted as the app itself.
 - **Limits.** An importer's component may be up to 64 MiB, its deadline up to 10 minutes, and its
   `stack_kib` up to 64 MiB (a command may ask for at most 1 MiB). Its fuel has to fit the user's ceiling in Preferences › Plugins, and
   its memory too unless the user approved more at install. Build it for `wasm32-unknown-unknown` and wrap it with
