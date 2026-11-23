@@ -549,7 +549,7 @@ pub(crate) fn occurrence_id(s: &Session, v: Option<&Value>, cmd: &str) -> Result
     if key == "0" || key.eq_ignore_ascii_case("root") {
         return Ok(0);
     }
-    if let Some(o) = s.doc.occurrences.iter().find(|o| o.id.to_string() == key || o.name == key) {
+    if let Some(o) = s.doc.active_occurrences().find(|o| o.id.to_string() == key || o.name == key) {
         return Ok(o.id);
     }
     // A component name: its first occurrence.
@@ -1563,7 +1563,11 @@ fn rigid_group(s: &mut Session, p: &Value) -> Result<Value> {
 fn drive(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "joint.drive";
     let id = joint_id(s, p.get("joint"), cmd)?;
-    let kind = s.doc.assembly.joints.iter().find(|j| j.id == id).map(|j| j.kind).ok_or_else(|| bad(cmd, "joint"))?;
+    let joint = s.doc.assembly.joints.iter().find(|j| j.id == id).ok_or_else(|| bad(cmd, "joint"))?;
+    if joint.uses_any_occurrence(&s.doc.inactive_pattern_occurrences()) {
+        return Err(bad(cmd, "the joint refers to an inactive pattern occurrence"));
+    }
+    let kind = joint.kind;
     if kind == JointKind::Rigid {
         return Err(bad(cmd, "a rigid joint does not move: joint.edit can make it revolute (turns), slider (slides) or cylindrical (both)"));
     }
@@ -1596,7 +1600,6 @@ fn drive(s: &mut Session, p: &Value) -> Result<Value> {
         Some(Value::Array(a)) => a.len(),
         _ => 1,
     };
-    let joint = s.doc.assembly.joints.iter().find(|j| j.id == id).ok_or_else(|| bad(cmd, "joint"))?;
     if index.is_none() {
         for (i, v) in q.iter_mut().enumerate().skip(given) {
             *v = joint.values.get(i).copied().unwrap_or(*v);

@@ -2240,14 +2240,16 @@ impl Session {
     }
 
     /// Solve the joints, unless nothing they read changed since this session last solved them:
-    /// the model is the one that solve read and the design is as the solve left it, apart from
-    /// its features (the joints read those only through the model). A command that refreshes on
+    /// the model is the one that solve read and the design is as the solve left it, including
+    /// which component patterns are active. A command that refreshes on
     /// its own (a parameter change) is refreshed again after it, and that second solve would
     /// find every occurrence where it is.
     fn solve_joints(&mut self) -> Option<solidcraft_doc::joints::Solution> {
         let state = self.model.state();
         let settled = self.joints_settled.as_ref().is_some_and(|(doc, model)| {
-            std::sync::Weak::as_ptr(model) == Arc::as_ptr(&state) && (Arc::ptr_eq(doc, &self.doc) || same_but_features(doc, &self.doc))
+            std::sync::Weak::as_ptr(model) == Arc::as_ptr(&state)
+                && (Arc::ptr_eq(doc, &self.doc)
+                    || (same_but_features(doc, &self.doc) && doc.inactive_pattern_occurrences() == self.doc.inactive_pattern_occurrences()))
         });
         if settled {
             return None;

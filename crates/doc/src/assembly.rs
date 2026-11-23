@@ -532,6 +532,32 @@ pub(crate) fn transform_through<'a>(component: u64, first: impl Fn(u64) -> Optio
 }
 
 impl Document {
+    /// The occurrences of inactive component patterns. They remain in the design so their
+    /// identity and assembly references survive suppression and history rollback.
+    pub fn inactive_pattern_occurrences(&self) -> std::collections::BTreeSet<u64> {
+        if self.occurrences.is_empty() {
+            return std::collections::BTreeSet::new();
+        }
+        let marker = self.marker.unwrap_or(self.features.len());
+        self.features
+            .iter()
+            .enumerate()
+            .filter(|(index, feature)| *index >= marker || feature.suppressed)
+            .filter_map(|(_, feature)| match &feature.kind {
+                crate::FeatureKind::Pattern { occurrences, .. } => Some(occurrences),
+                _ => None,
+            })
+            .flatten()
+            .copied()
+            .collect()
+    }
+
+    /// Occurrences available at the current history position, in document order.
+    pub fn active_occurrences(&self) -> impl Iterator<Item = &Occurrence> {
+        let inactive = self.inactive_pattern_occurrences();
+        self.occurrences.iter().filter(move |o| !inactive.contains(&o.id))
+    }
+
     /// The first occurrence of a component (its placement for authoring).
     pub fn occurrence_of(&self, component: u64) -> Option<&crate::Occurrence> {
         self.occurrences.iter().find(|o| o.component == component)
@@ -605,8 +631,20 @@ impl Document {
     }
 
     /// One placement: the component the occurrence `path` from the root leads to (the root for
-    /// an empty path) and its world transform. `None` when the path no longer exists.
+    /// an empty path) and its world transform. `None` when the path does not currently place it.
     pub fn path_placement(&self, path: &[u64]) -> Option<(u64, Mat)> {
+        if !path.is_empty() {
+            let inactive = self.inactive_pattern_occurrences();
+            if path.iter().any(|id| inactive.contains(id)) {
+                return None;
+            }
+        }
+        self.stored_path_placement(path)
+    }
+
+    /// A stored placement, including a temporarily inactive pattern copy, for references
+    /// that should survive history rollback.
+    pub fn stored_path_placement(&self, path: &[u64]) -> Option<(u64, Mat)> {
         if path.len() > MAX_PLACEMENT_DEPTH + 1 {
             return None;
         }
@@ -656,7 +694,7 @@ impl Document {
     /// holds may have occurrences it never walked; the walk is whole when none does.
     pub fn placements_complete(&self) -> bool {
         let mut children = std::collections::HashMap::<u64, usize>::new();
-        for o in &self.occurrences {
+        for o in self.active_occurrences() {
             *children.entry(o.parent).or_default() += 1;
         }
         let walk = self.placements();
@@ -670,7 +708,7 @@ impl Document {
     /// for totals that must cover all of it (physical properties).
     pub fn placements_below(&self, component: u64, path: &[u64], world: Mat) -> crate::Result<Vec<(u64, Vec<u64>, Mat)>> {
         let mut children: std::collections::HashMap<u64, Vec<&Occurrence>> = std::collections::HashMap::new();
-        for o in &self.occurrences {
+        for o in self.active_occurrences() {
             children.entry(o.parent).or_default().push(o);
         }
         let mut out = vec![(component, path.to_vec(), world)];

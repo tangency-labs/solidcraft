@@ -626,6 +626,11 @@ pub struct Joint {
 }
 
 impl Joint {
+    /// Whether either side of the joint refers to one of these occurrences.
+    pub fn uses_any_occurrence(&self, occurrences: &BTreeSet<u64>) -> bool {
+        !occurrences.is_empty() && self.a.occurrences().chain(self.b.occurrences()).any(|o| occurrences.contains(&o))
+    }
+
     /// Whether its values start where its parts are when it is made or changed, so B moves no
     /// further than the joint needs: a relation, or any joint made as an assembly constraint.
     pub fn starts_where_it_is(&self) -> bool {
@@ -2659,6 +2664,8 @@ pub fn solve_holding(doc: &Document, st: &ModelState, held: &Held) -> Solution {
 /// solves still close and check every loop, respect held values and limits, and report errors;
 /// they leave `Solution::dof` empty rather than returning the spanning tree's approximate count.
 pub fn solve_holding_with_analysis(doc: &Document, st: &ModelState, held: &Held, analysis: Analysis) -> Solution {
+    let active = doc.active_assembly();
+    let doc = &*active;
     let asm = &doc.assembly;
     let mut sol = Solution::default();
     let mut vals = joint_values(asm);

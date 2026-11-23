@@ -674,9 +674,13 @@ impl Document {
         if path.len() > 64 || self.occurrences.len() > 100_000 {
             return Err(DocError::Invalid("the placement path exceeds work limits".into()));
         }
+        if path.is_empty() {
+            return Ok(crate::IDENTITY);
+        }
         let mut frame = crate::IDENTITY;
         let mut component = 0;
         let mut seen = std::collections::BTreeSet::new();
+        let inactive = self.inactive_pattern_occurrences();
         for id in path {
             if *id == 0 || !seen.insert(*id) {
                 return Err(DocError::Invalid("invalid placement path".into()));
@@ -684,7 +688,7 @@ impl Document {
             let occurrence = self
                 .occurrences
                 .iter()
-                .find(|o| o.id == *id && o.parent == component)
+                .find(|o| o.id == *id && o.parent == component && !inactive.contains(id))
                 .ok_or_else(|| DocError::Invalid("the placement no longer exists".into()))?;
             frame = crate::mat_mul(&frame, &occurrence.transform);
             component = occurrence.component;

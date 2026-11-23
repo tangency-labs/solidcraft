@@ -633,6 +633,8 @@ pub fn urdf(doc: &Document, st: &ModelState, stem: &str, options: &UrdfOptions) 
     if options.mesh_prefix.chars().any(unwritable) {
         return Err(IoError::Invalid("`mesh_prefix` has a character XML cannot hold".into()));
     }
+    let active = doc.active_assembly();
+    let doc = &*active;
     let mut names = Names::default();
     let mut out = UrdfPackage { xml: String::new(), meshes: Vec::new(), model: UrdfModel::default(), warnings: Vec::new() };
     let base = names.take("base_link");

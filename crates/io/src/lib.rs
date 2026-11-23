@@ -1693,7 +1693,7 @@ pub fn step_assembly(doc: &Document, local: &ModelState, name: &str) -> Result<V
         let Some(p) = index.get(&comp).and_then(|i| products.get_mut(*i)) else { continue };
         p.bodies.push(ExportBody { name: b.name.clone(), body: framed.as_ref().unwrap_or(&b.body), color: b.body.color() });
     }
-    for o in &doc.occurrences {
+    for o in doc.active_occurrences() {
         let (Some(&parent), Some(&child)) = (index.get(&o.parent), index.get(&o.component)) else { continue };
         if let Some(p) = products.get_mut(parent) {
             p.children.push((child, o.transform, o.name.clone()));

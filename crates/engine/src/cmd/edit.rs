@@ -2713,6 +2713,19 @@ fn redefine(s: &mut Session, p: &Value) -> Result<Value> {
     }?;
     let made = r.get("feature").and_then(Value::as_u64).ok_or_else(|| bad(cmd, format!("`{cid}` did not make a feature")))?;
     let mut new = trial.doc.feature(made).cloned().ok_or_else(|| bad(cmd, format!("`{cid}` did not make a feature")))?;
+    if let FeatureKind::Pattern { components, occurrences, .. } = &old.kind
+        && !occurrences.is_empty()
+    {
+        let removed = match &mut new.kind {
+            FeatureKind::Pattern { components: after, occurrences: copies, .. } if after == components => {
+                // The constructor built a temporary pattern. Rebuild the edited feature with
+                // its original placements so a spacing or count edit keeps its surviving ids.
+                std::mem::replace(copies, occurrences.clone())
+            }
+            _ => occurrences.clone(),
+        };
+        trial.doc_mut().remove_occurrences(&removed.into_iter().collect());
+    }
     if let (FeatureKind::Emboss { face: Some(before), .. }, FeatureKind::Emboss { face: Some(after), .. }) = (&old.kind, &mut new.kind)
         && before.body == after.body
         && before.path == after.path
