@@ -1094,23 +1094,15 @@ impl Body {
         }
     }
 
-    /// The first face of `self` met by the ray from `origin` along `dir`, as `(distance, face_index)`.
+    /// The first face of `self` met by the ray from `origin` along `dir`, as `(distance, face_index)`
+    /// ([`Self::fire_ray`]: a ray through an edge or vertex takes the face it enters).
     pub fn raycast_face(&self, origin: Vec3, dir: Vec3) -> Option<(f64, usize)> {
-        let form = self.ops_body()?;
-        let (ops, order) = &*form;
-        let hit = ops.face_hit_by_ray(order, [origin.x, origin.y, origin.z], [dir.x, dir.y, dir.z]).ok()??;
-        Some((hit.distance, hit.face))
+        self.fire_ray(origin, dir).ok().flatten().map(|hit| (hit.depth, hit.face))
     }
 
-    /// Whether `p` lies inside or on the boundary of `self` (for a B-rep body).
+    /// Whether `p` lies inside or on the boundary of `self` ([`Self::classify_point`]).
     pub fn contains(&self, p: Vec3) -> bool {
-        let Some(form) = self.ops_body() else {
-            return false;
-        };
-        let Ok(mut res) = form.0.classify_points(&[[p.x, p.y, p.z]]) else {
-            return false;
-        };
-        matches!(res.pop().and_then(std::result::Result::ok), Some(solidcore_ops::PointClass::Inside | solidcore_ops::PointClass::OnBoundary))
+        matches!(self.classify_point(p), Ok(PointClass::Inside | PointClass::OnBoundary))
     }
 
     /// The face of `self` nearest `p` and its exact distance, or `None` for a mesh body or empty body.
