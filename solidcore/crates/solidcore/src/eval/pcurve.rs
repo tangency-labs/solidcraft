@@ -493,7 +493,13 @@ pub fn boundary_covers(
         return Ok(None);
     };
     check_boundary_net(n)?;
-    if uses.len() != 4 {
+    // A side collapsed to a point has no edge (a corner patch of a rounded cube is a net with
+    // one such side): the face's uses are the other sides, each once.
+    let Some(collapsed) = collapsed_sides(n) else {
+        return Ok(None);
+    };
+    let flat = collapsed.iter().filter(|c| **c).count();
+    if flat > 1 || uses.len() != 4 - flat {
         return Ok(None);
     }
     if let Some(b) = domain {
@@ -508,7 +514,7 @@ pub fn boundary_covers(
             return Ok(None);
         }
     }
-    let (mut edges, mut sides, mut gaps) = (Vec::new(), [false; 4], Vec::new());
+    let (mut edges, mut sides, mut gaps) = (Vec::new(), collapsed, Vec::new());
     for u in uses {
         if edges.contains(&u.edge) {
             return Ok(None);
@@ -533,6 +539,32 @@ pub fn boundary_covers(
         gaps.push(gap);
     }
     Ok(Some(gaps))
+}
+
+/// Which of a clamped patch's four natural sides (in [`boundary_of`]'s order: the u-curve at
+/// the start of v, at its end, the v-curve at the start of u, at its end) is a single point,
+/// every control point of it at one position within 10⁻⁹ (1 + the patch's size) of the first.
+/// `None` for a patch that is not clamped.
+fn collapsed_sides(n: &Nurbs) -> Option<[bool; 4]> {
+    let nl = n.nl_surface()?;
+    let [[u0, u1], [v0, v1]] = patch_box(nl)?;
+    let sides = [
+        (Direction::U, v0),
+        (Direction::U, v1),
+        (Direction::V, u0),
+        (Direction::V, u1),
+    ];
+    let mut out = [false; 4];
+    for (flat, (dir, at)) in out.iter_mut().zip(sides) {
+        let iso = extract_iso_crv(nl, at, dir).ok()?;
+        let pts: Vec<Vec3> = iso.cpts().iter().map(point_of).collect::<Option<_>>()?;
+        let first = *pts.first()?;
+        let size = pts.iter().fold(0.0_f64, |m, p| {
+            m.max(p.x.abs()).max(p.y.abs()).max(p.z.abs())
+        });
+        *flat = pts.iter().all(|p| p.dist(first) <= 1e-9 * (1.0 + size));
+    }
+    Some(out)
 }
 
 /// How far outside a parameter range of a box a parameter is still inside it, as
@@ -564,8 +596,8 @@ fn boundary_of(
     face: Option<[[f64; 2]; 2]>,
 ) -> Option<BoundaryIso> {
     // A periodic direction has no boundary to be the edge of (its two ends are one curve, and
-    // the loop's pcurves run round it), a rational patch no polynomial control net.
-    if n.closed().iter().any(|c| *c) || n.ctrl().iter().any(|h| h[3] != 1.0) {
+    // the loop's pcurves run round it).
+    if n.closed().iter().any(|c| *c) {
         return None;
     }
     if n.count().iter().any(|c| *c > MAX_BOUNDARY_POINTS) {
@@ -589,8 +621,8 @@ fn boundary_of(
         (Direction::V, u1, [u1, v0], [u1, v1]),
     ];
     let (e0, e1) = (
-        point_of(edge.cpts().first()?),
-        point_of(edge.cpts().last()?),
+        point_of(edge.cpts().first()?)?,
+        point_of(edge.cpts().last()?)?,
     );
     let mut best: Option<BoundaryIso> = None;
     for (side, (dir, at, a, b)) in sides.into_iter().enumerate() {
@@ -601,14 +633,23 @@ fn boundary_of(
         let Ok(iso) = extract_iso_crv(nl, at, dir) else {
             continue;
         };
-        let (i0, i1) = (point_of(iso.cpts().first()?), point_of(iso.cpts().last()?));
+        let iso = unit_weighted(iso);
+        let (i0, i1) = (
+            point_of(iso.cpts().first()?)?,
+            point_of(iso.cpts().last()?)?,
+        );
         for reversed in [false, true] {
             // Ends first: a boundary whose ends are not the edge's is not proved.
             let (s, e) = if reversed { (i1, i0) } else { (i0, i1) };
             if !(s.dist(e0) <= cap && e.dist(e1) <= cap) {
                 continue;
             }
-            let Some(gap) = boundary_gap_of(&edge, moved, &iso, reversed, [t0, t1]) else {
+            let proved = if edge.is_rational() || iso.is_rational() {
+                rational_gap_of(&edge, &iso, reversed, [t0, t1])
+            } else {
+                boundary_gap_of(&edge, moved, &iso, reversed, [t0, t1])
+            };
+            let Some(gap) = proved else {
                 continue;
             };
             if gap <= cap && best.as_ref().is_none_or(|b| gap < b.gap) {
@@ -627,8 +668,31 @@ fn boundary_of(
     best
 }
 
-fn point_of(p: &CPoint) -> Vec3 {
-    Vec3::new(p.x, p.y, p.z)
+/// A curve whose weights are all exactly 1 as the polynomial curve it is (the weighted
+/// coordinates are the coordinates, so nothing is computed): the boundary of a rational patch
+/// along a direction in which it is not rational is such a curve.
+fn unit_weighted(c: NlCurve) -> NlCurve {
+    if !(c.is_rational() && c.cpts().iter().all(|p| p.w == 1.0)) {
+        return c;
+    }
+    let pw = c
+        .cpts()
+        .iter()
+        .map(|p| CPoint::new(p.x, p.y, p.z, NOW))
+        .collect();
+    NlCurve::new(pw, c.degree(), c.knots().to_vec()).unwrap_or(c)
+}
+
+/// A control point's Cartesian position: its weighted coordinates over its weight where it has
+/// one (which must be positive and finite).
+fn point_of(p: &CPoint) -> Option<Vec3> {
+    if p.w == NOW {
+        return Some(Vec3::new(p.x, p.y, p.z));
+    }
+    if !(p.w.is_finite() && p.w > 0.0) {
+        return None;
+    }
+    Some(Vec3::new(p.x / p.w, p.y / p.w, p.z / p.w))
 }
 
 /// The edge's curve as a polynomial NLib curve over exactly `[t0, t1]`, and the most (mm) that
@@ -650,6 +714,21 @@ fn point_of(p: &CPoint) -> Vec3 {
 /// plus the absolute error of an underflowed product, `2⁻¹⁰⁷⁴` a coordinate, taken as four
 /// subnormal steps.
 fn edge_form(curve: &Curve, [t0, t1]: [f64; 2]) -> Option<(NlCurve, f64)> {
+    // A rational spline is its own too: its homogeneous coefficients are the NLib curve's.
+    if let Curve::RationalSpline { knots, homogeneous } = curve {
+        if homogeneous.len() > MAX_BOUNDARY_POINTS {
+            return None;
+        }
+        let degree = knots.len().checked_sub(homogeneous.len() + 1)?;
+        if degree == 0 || knots.first() != Some(&t0) || knots.last() != Some(&t1) {
+            return None;
+        }
+        let pw = homogeneous
+            .iter()
+            .map(|&[x, y, z, w]| CPoint::new(x, y, z, w))
+            .collect();
+        return Some((NlCurve::new(pw, degree, knots.clone()).ok()?, 0.0));
+    }
     let (knots, points, moved) = match curve {
         Curve::Line { start, end } => {
             let at = |t: f64| -> [f64; 3] {
@@ -846,9 +925,28 @@ fn boundary_gap_of(
     [t0, t1]: [f64; 2],
 ) -> Option<f64> {
     let k = iso.knots();
+    let knots = mapped_knots(k, reversed, [t0, t1])?;
+    let span = t1 - t0;
+    let pw: Vec<CPoint> = if reversed {
+        iso.cpts().iter().rev().copied().collect()
+    } else {
+        iso.cpts().to_vec()
+    };
+    let p = iso.degree();
+    let placed = NlCurve::new(pw, p, knots).ok()?;
+    let certified = certified_distance(edge, &placed).ok()?;
+    let delta = gamma(7) * (t0.abs().max(t1.abs()) + span) + 4.0 * f64::from_bits(1);
+    let shifted = knot_shift_bound(placed.cpts(), placed.knots(), p, delta)?;
+    let bound = (certified + shifted + moved) * (1.0 + gamma(8));
+    bound.is_finite().then_some(bound)
+}
+
+/// The knots `k` of an iso-curve mapped affinely onto `[t0, t1]` (reversed where the edge runs
+/// the other way), as [`boundary_gap_of`] describes: the ends exactly, every other knot
+/// `fl(t₀ + fl(r) · fl(t₁ − t₀))` put inside `[t₀, t₁]`.
+fn mapped_knots(k: &[f64], reversed: bool, [t0, t1]: [f64; 2]) -> Option<Vec<f64>> {
     let (a, b) = (*k.first()?, *k.last()?);
     let span = t1 - t0;
-    // The ends are the interval's own, so both curves share one domain exactly.
     let map = |x: f64| {
         if x == a {
             if reversed {
@@ -872,22 +970,65 @@ fn boundary_gap_of(
             (t0 + r * span).max(t0).min(t1)
         }
     };
-    let knots: Vec<f64> = if reversed {
+    Some(if reversed {
         k.iter().rev().map(|x| map(*x)).collect()
     } else {
         k.iter().map(|x| map(*x)).collect()
-    };
-    let pw: Vec<CPoint> = if reversed {
-        iso.cpts().iter().rev().copied().collect()
+    })
+}
+
+/// The proved gap of a rational edge from a rational boundary curve of the patch, for the one
+/// case in which it is simple: the same degree, the same knots as the iso-curve's mapped onto the
+/// edge's interval (bit for bit, so no knot moves), and the same weights, bit for bit. `None`
+/// for anything else, which the caller leaves to the kernel.
+///
+/// Claim: the edge is within the returned bound of the boundary curve at every parameter, as
+/// the real curves of the records.
+///
+/// Proof. On one knot vector with one set of weights `w_i > 0` both curves are `Σ R_i(t) X_i`
+/// with `R_i = N_i w_i / Σ_j N_j w_j`, the same functions for both. They are non-negative and sum
+/// to 1 on the domain (`N_i` are, and `w_i > 0`), so the difference `Σ R_i (E_i − B_i)` is a
+/// convex combination of the differences of the Cartesian control points and its length is at
+/// most the largest `|E_i − B_i|`. The computed points are quotients `fl(x / w)` (relative error
+/// at most `u` a coordinate), their differences each round once more, and the norm is
+/// [`norm_up`]: the coordinates of a difference are off by at most `4 u S` with `S` the largest
+/// coordinate of either set, and the norm of three such by at most `4 √3 u S ≤ 8 u S ≤ 4 γ₂ S`.
+/// The bound adds `8 γ₂ S` (twice that, with room) to the largest computed norm and rounds the
+/// sum up by `γ₈`.
+fn rational_gap_of(
+    edge: &NlCurve,
+    iso: &NlCurve,
+    reversed: bool,
+    interval: [f64; 2],
+) -> Option<f64> {
+    if !(edge.is_rational() && iso.is_rational())
+        || edge.degree() != iso.degree()
+        || edge.cpts().len() != iso.cpts().len()
+    {
+        return None;
+    }
+    let knots = mapped_knots(iso.knots(), reversed, interval)?;
+    if knots.len() != edge.knots().len() || knots.iter().zip(edge.knots()).any(|(a, b)| a != b) {
+        return None;
+    }
+    let theirs: Vec<&CPoint> = if reversed {
+        iso.cpts().iter().rev().collect()
     } else {
-        iso.cpts().to_vec()
+        iso.cpts().iter().collect()
     };
-    let p = iso.degree();
-    let placed = NlCurve::new(pw, p, knots).ok()?;
-    let certified = certified_distance(edge, &placed).ok()?;
-    let delta = gamma(7) * (t0.abs().max(t1.abs()) + span) + 4.0 * f64::from_bits(1);
-    let shifted = knot_shift_bound(placed.cpts(), placed.knots(), p, delta)?;
-    let bound = (certified + shifted + moved) * (1.0 + gamma(8));
+    let (mut largest, mut size) = (0.0_f64, 0.0_f64);
+    for (e, b) in edge.cpts().iter().zip(theirs) {
+        if e.w != b.w {
+            return None;
+        }
+        let (pe, pb) = (point_of(e)?, point_of(b)?);
+        let d = norm_up(pe.x - pb.x, pe.y - pb.y, pe.z - pb.z)?;
+        largest = largest.max(d);
+        for x in [pe.x, pe.y, pe.z, pb.x, pb.y, pb.z] {
+            size = size.max(x.abs());
+        }
+    }
+    let bound = (largest + 8.0 * gamma(2) * size) * (1.0 + gamma(8));
     bound.is_finite().then_some(bound)
 }
 

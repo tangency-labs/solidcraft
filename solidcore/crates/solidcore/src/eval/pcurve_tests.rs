@@ -2523,12 +2523,22 @@ fn what_is_not_a_whole_boundary_curve_of_a_polynomial_patch_has_no_proof() {
             vec![[10., 0., 0., 1.], [20., 20., 4., 2.]],
         ],
     };
+    // Its side with weights (1, 2) is a rational curve, no polynomial edge's; its side with
+    // weights (1, 1) is a polynomial one, and is proved.
     none(
         &rational,
-        &boundary_edge(2., [0., 0.], [1., 0.], 0.),
-        "a rational patch",
+        &boundary_edge(2., [1., 0.], [1., 1.], 0.),
+        "a rational boundary against a polynomial edge",
     );
-    // A rational edge, a circle, a polyline: not a polynomial spline.
+    assert!(boundary_iso(
+        &rational,
+        &boundary_edge(2., [0., 0.], [1., 0.], 0.),
+        whole,
+        cap
+    )
+    .unwrap()
+    .is_some());
+    // A rational edge on a polynomial patch, a polyline: no boundary of it.
     for edge in [
         Curve::RationalSpline {
             knots: vec![0., 0., 1., 1.],
@@ -3278,6 +3288,139 @@ fn an_edge_far_off_the_boundary_for_rounding_is_no_boundary() {
     );
     assert_eq!(
         boundary_covered(&surface, &edge, [0., 1.], 0.01, SURFACE_GAP_MARGIN, 1.0).unwrap(),
+        None
+    );
+}
+
+/// A rounded cube's edge strip and corner patch, as a STEP exporter writes them: rational
+/// quadratic conics of middle weight `W`, the edge curves their own records `off` mm off.
+const CONIC_W: f64 = 2.0 / 3.0;
+
+fn homogeneous(p: [f64; 3], w: f64) -> [f64; 4] {
+    [p[0] * w, p[1] * w, p[2] * w, w]
+}
+
+/// A conic of weights (1, `CONIC_W`, 1) through `a` and `b` with middle control point `m`.
+fn conic(a: [f64; 3], m: [f64; 3], b: [f64; 3]) -> Curve {
+    Curve::RationalSpline {
+        knots: vec![0., 0., 0., 1., 1., 1.],
+        homogeneous: vec![
+            homogeneous(a, 1.0),
+            homogeneous(m, CONIC_W),
+            homogeneous(b, 1.0),
+        ],
+    }
+}
+
+/// The strip along z of a rounded edge (radius 3, z from 3 to 17): u across the conic, v along z.
+fn conic_strip() -> Surface {
+    let rows = [([3., 0.], 1.0), ([0., 0.], CONIC_W), ([0., 3.], 1.0)];
+    Surface::RationalSpline {
+        u_knots: vec![0., 0., 0., 1., 1., 1.],
+        v_knots: vec![0., 0., 1., 1.],
+        homogeneous: rows
+            .iter()
+            .map(|([x, y], w)| {
+                vec![
+                    homogeneous([*x, *y, 3.], *w),
+                    homogeneous([*x, *y, 17.], *w),
+                ]
+            })
+            .collect(),
+    }
+}
+
+fn line(a: [f64; 3], b: [f64; 3]) -> Curve {
+    Curve::Line { start: a, end: b }
+}
+
+/// The corner patch at the origin: a biquadratic net with its u = 0 side collapsed to a point.
+fn conic_corner() -> Surface {
+    let net = [
+        [[3., 0., 3.], [3., 0., 3.], [3., 0., 3.]],
+        [[0., 0., 3.], [0.75, 0.75, 0.75], [3., 0., 0.]],
+        [[0., 3., 3.], [0., 3., 0.], [3., 3., 0.]],
+    ];
+    let w = [1.0, CONIC_W, 1.0];
+    Surface::RationalSpline {
+        u_knots: vec![0., 0., 0., 1., 1., 1.],
+        v_knots: vec![0., 0., 0., 1., 1., 1.],
+        homogeneous: net
+            .iter()
+            .zip(w)
+            .map(|(row, wi)| {
+                row.iter()
+                    .zip(w)
+                    .map(|(p, wj)| homogeneous(*p, wi * wj))
+                    .collect()
+            })
+            .collect(),
+    }
+}
+
+fn uses_with(edges: &[(Curve, [f64; 2])]) -> Vec<EdgeUse<'_>> {
+    uses_of(edges, &[20, 21, 22, 23][..edges.len()])
+}
+
+/// A rational patch's boundary is proved where the edge has the patch's own knots and weights
+/// (a conic edge a few micrometres off, and the straight sides along its v direction, which is
+/// not rational), and a face with one side collapsed to a point is the whole patch on its other
+/// three. A different weight, a different knot, or an edge on the collapsed side is not proved.
+#[test]
+fn a_rational_patchs_boundary_is_proved_where_the_edge_has_its_knots_and_weights() {
+    let off = 3e-5;
+    let strip = conic_strip();
+    let edges = vec![
+        (conic([3., 0., 3.], [0., off, 3.], [0., 3., 3.]), [0., 1.]),
+        (
+            conic([3., 0., 17.], [0., off, 17.], [0., 3., 17.]),
+            [0., 1.],
+        ),
+        (line([3., 0., 3.], [3., 0., 17.]), [0., 1.]),
+        (line([0., 3., 3.], [0., 3., 17.]), [0., 1.]),
+    ];
+    let gaps = boundary_covers(&strip, &uses_with(&edges), None, SURFACE_GAP_MARGIN, 1.0)
+        .unwrap()
+        .expect("the strip's four sides");
+    assert_eq!(gaps.len(), 4);
+    assert!((off..off + 1e-9).contains(&gaps[0]), "{gaps:?}");
+    assert!(gaps[2] < 1e-9, "{gaps:?}");
+    // The same edge with another middle weight is a different curve: no proof.
+    let mut other = edges.clone();
+    other[0].0 = Curve::RationalSpline {
+        knots: vec![0., 0., 0., 1., 1., 1.],
+        homogeneous: vec![
+            homogeneous([3., 0., 3.], 1.0),
+            homogeneous([0., off, 3.], 0.7),
+            homogeneous([0., 3., 3.], 1.0),
+        ],
+    };
+    assert_eq!(
+        boundary_covers(&strip, &uses_with(&other), None, SURFACE_GAP_MARGIN, 1.0).unwrap(),
+        None
+    );
+    // The corner patch: three edges and a collapsed side.
+    let corner = conic_corner();
+    let edges = vec![
+        (conic([3., 0., 3.], [0., off, 3.], [0., 3., 3.]), [0., 1.]),
+        (conic([0., 3., 3.], [0., 3., 0.], [3., 3., 0.]), [0., 1.]),
+        (conic([3., 3., 0.], [3., 0., 0.], [3., 0., 3.]), [0., 1.]),
+    ];
+    let gaps = boundary_covers(&corner, &uses_with(&edges), None, SURFACE_GAP_MARGIN, 1.0)
+        .unwrap()
+        .expect("the corner's three sides");
+    assert_eq!(gaps.len(), 3);
+    assert!(gaps.iter().all(|g| *g < 1e-4), "{gaps:?}");
+    // Four uses of a patch with a collapsed side, or two, are not the whole patch.
+    assert_eq!(
+        boundary_covers(
+            &corner,
+            &uses_with(&edges[..2]),
+            None,
+            SURFACE_GAP_MARGIN,
+            1.0
+        )
+        .unwrap(),
         None
     );
 }

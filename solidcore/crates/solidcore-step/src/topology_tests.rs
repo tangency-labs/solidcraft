@@ -4666,3 +4666,38 @@ fn a_patch_that_does_not_qualify_is_read_as_before() {
     assert!(read_solids_with(&proved, &kernel).failures.is_empty());
     assert_eq!(kernel.0.load(std::sync::atomic::Ordering::Relaxed), 0);
 }
+
+/// A pcurve kernel that must not be asked: it counts its calls and refuses them.
+struct RefusedTrims(std::sync::atomic::AtomicUsize);
+
+impl Trims for RefusedTrims {
+    fn trims(&self, _: &TrimFace<'_>) -> std::result::Result<Vec<Vec<Curve2>>, String> {
+        self.0.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        Err("the pcurve kernel was asked".into())
+    }
+}
+
+/// A 20 mm cube whose 12 edges and 8 corners are rounded with conics (rho 0.4, radius 3 mm): 6
+/// planes, 12 rational quadratic strips and 8 corner patches (a biquadratic net with one side
+/// collapsed to a point). Its 48 edges are curves of their own, the conic ones 30 nm off the
+/// boundary of the patch they bound, and the file carries no pcurves. Every face is read in
+/// closed form: the planes' own, and the strips' and corners' as the straight lines along their
+/// boundary curves, with the kernel never asked. (Before rational patches had the proof, 20
+/// of the 26 faces went to the kernel, 1.4 to 4 s in all.)
+#[test]
+fn a_cube_with_conic_rounded_edges_and_corners_is_read_without_the_pcurve_kernel() {
+    let ex = p21::parse(include_str!("../tests/fixtures/rounded-cube-conic-corners.step")).unwrap();
+    let trims = RefusedTrims(std::sync::atomic::AtomicUsize::new(0));
+    let read = read_solids_with(&ex, &trims);
+    assert!(read.failures.is_empty(), "{:?}", read.failures);
+    assert_eq!(read.solids.len(), 1);
+    let s = &read.solids[0];
+    assert!(!s.sheet);
+    assert_eq!(s.brep.faces.len(), 26);
+    assert_eq!(s.brep.edges.len(), 48);
+    assert_eq!(trims.0.load(std::sync::atomic::Ordering::Relaxed), 0, "the kernel was asked");
+    // The edges the proof covered hold their gap: raised past 30 nm, and still within a micrometre.
+    let raised = s.brep.edges.iter().filter(|e| e.tolerance > 3e-5).count();
+    assert!(raised >= 24, "{raised} edges raised");
+    assert!(s.brep.edges.iter().all(|e| e.tolerance < 1e-3));
+}

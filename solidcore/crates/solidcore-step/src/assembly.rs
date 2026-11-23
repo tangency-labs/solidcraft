@@ -514,7 +514,7 @@ impl<'t> Assembly<'t> {
         // gap the edge does not have (2.9 mm on Poppy Humanoid's leg shells, whose edges lie within
         // 0.003 mm), widening tolerances past what SMLib takes. A spline face's gaps are measured
         // on the pcurves its kernel makes (`raise_edges`).
-        if matches!(surface, BSurface::Spline { .. }) {
+        if matches!(surface, BSurface::Spline { .. } | BSurface::RationalSpline { .. }) {
             return self.measure_boundary_edges(surface, edge_loops, domain, loop_count);
         }
         if !matches!(
@@ -573,7 +573,7 @@ impl<'t> Assembly<'t> {
         domain: Option<[[f64; 2]; 2]>,
         loop_count: usize,
     ) -> R<()> {
-        if loop_count != 1 || edge_loops.len() != 1 || edge_loops.first().map(Vec::len) != Some(4) {
+        if loop_count != 1 || edge_loops.len() != 1 || !matches!(edge_loops.first().map(Vec::len), Some(3 | 4)) {
             return Ok(());
         }
         // As `exact_pcurves` takes it: within the larger of the face's and the edge's.
