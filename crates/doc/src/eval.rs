@@ -3642,6 +3642,20 @@ fn placement_digest(doc: &Document, f: &Feature, st: Option<&ModelState>) -> u64
             frame = doc.feature(sketch.0).map(|s| doc.component_transform(s.component));
             reads.drawn_targets(st, f);
         }
+        FeatureKind::FramePlate { plane, .. } => {
+            if let Some(anchor) = crate::face_anchor::plane_face_anchor(plane) {
+                match anchor.author_frame(doc, f.component) {
+                    Ok(m) => frame = Some(m),
+                    Err(e) => e.to_string().hash(&mut h),
+                }
+                if anchor.path.is_empty() {
+                    reads.components.insert(anchor.component);
+                } else {
+                    reads.paths.push(anchor.path.clone());
+                }
+                reads.placed_body(st, &anchor.target.body);
+            }
+        }
         FeatureKind::Sketch { plane, sketch } => {
             match crate::face_anchor::plane_face_anchor(plane) {
                 // Read in the frame of the placement it was drawn in, its face through the
@@ -13451,7 +13465,7 @@ fn eval_feature_kind(
                     };
                 }
                 let Some(mut cell) = acc else {
-                    return Err(DocError::Invalid(format!("the point {p:?} is outside every tool: no enclosed cell there")));
+                    return Err(DocError::Invalid(format!("the point {} is outside every tool: no enclosed cell there", p.0)));
                 };
                 for (b, _) in tb.iter().zip(&inside).filter(|(_, i)| !**i) {
                     let cut = kernel::boolean(&cell.body, &b.body, BoolOp::Cut)?.ok_or_else(|| DocError::Invalid("a cell came out empty".into()))?;
@@ -13473,7 +13487,7 @@ fn eval_feature_kind(
             let mut picked: Vec<usize> = Vec::new();
             for p in faces {
                 let fi = crate::appearance::face_index_at(&mb, p.0)
-                    .ok_or_else(|| DocError::Invalid(format!("Split Face: no face of {} at {p:?}", mb.name)))?;
+                    .ok_or_else(|| DocError::Invalid(format!("Split Face: no face of {} at {}", mb.name, p.0)))?;
                 if !picked.contains(&fi) {
                     picked.push(fi);
                 }
@@ -14054,7 +14068,7 @@ fn eval_feature_kind(
             let mut picked: Vec<usize> = Vec::new();
             for p in faces {
                 let fi = crate::appearance::face_index_at(&mb, p.0)
-                    .ok_or_else(|| DocError::Invalid(format!("Delete Face: no face of {} at {p:?}", mb.name)))?;
+                    .ok_or_else(|| DocError::Invalid(format!("Delete Face: no face of {} at {}", mb.name, p.0)))?;
                 if !picked.contains(&fi) {
                     picked.push(fi);
                 }
@@ -14070,6 +14084,7 @@ fn eval_feature_kind(
         FeatureKind::FrameEndCap { .. } => crate::end_cap::evaluate(doc, vals, f, st),
         FeatureKind::FrameMemberTurn { .. } => frame_member::check_turn(doc, vals, f, st),
         FeatureKind::FrameMember { .. } => frame_member::evaluate(doc, vals, f, st),
+        FeatureKind::FramePlate { .. } => crate::frame_plate::evaluate(doc, vals, f, st),
         FeatureKind::BoundingSolid { bodies, margin, contents, margins } => {
             let m = val(vals, margin, Kind::Length)?;
             let side = |i: usize| margins.as_ref().and_then(|ms| ms.get(i)).map_or(Ok(m), |e| val(vals, e, Kind::Length));
