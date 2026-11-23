@@ -358,6 +358,17 @@ sense are proved in rounded interval arithmetic or refused (`DraftRefusal`). The
 or cone with a `DraftDefinition` (bound 0, re-certified by `lies_on`), applied by the local
 operation (`solidcore-ops/src/offset.rs`, `draft`).
 
+**A draft into another shell.** A cone or cylinder drafted about the pull sweeps, at each height h
+above its hinge circle, the points whose ψ = atan t − atan((ρ − r0) / h) lies between 0 and the
+lean (`largest_clear_angle`, `offset/draft.rs`). A cavity's wall (or another lump) bounded by cones,
+cylinders and planes about the same axis, on one side of the neutral plane and within the face's
+heights, is first reached at a vertex, so the least |ψ| of its vertices is the largest angle that
+keeps a wall. A draft at or past it is refused before the local operation as
+`OffsetFailure::DraftClosesWall` naming that angle (ops' `OffsetRefusal::DraftClosesWall`), in
+place of a body whose faces cross. "About the same axis" holds to the body's tolerance over the shell's
+extent; a shell of another kind, or one holding a face the same call drafts, is left to the local
+operation's check.
+
 ## 7. Shell and thicken
 
 A shell is the solid offset [5] combined with the original by a boolean [6].

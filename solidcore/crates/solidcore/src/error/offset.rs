@@ -24,6 +24,7 @@
 //! | [`OffsetFailure::FacesApart`]          | `SM_ERR` (solidcore-native)               |
 //! | [`OffsetFailure::PastSide`]            | `SM_ERR` (#18564, solidcore-native)       |
 //! | [`OffsetFailure::FaceCloses`]          | `SM_ERR` (#19904, solidcore-native)       |
+//! | [`OffsetFailure::DraftClosesWall`]     | `SM_ERR` (#20767, solidcore-native)       |
 //! | [`OffsetFailure::ReachUncertified`]    | `SM_ERR` (solidcore-native)               |
 //! | [`OffsetFailure::LoopGapUncertified`]  | `SM_ERR` (solidcore-native)               |
 //! | [`OffsetFailure::Unsound`]             | `SM_ERR` (solidcore-native)               |
@@ -253,6 +254,20 @@ pub enum OffsetFailure {
         /// The faces across its two edges, of the operation's input.
         beside: [FaceId; 2],
         /// How far the faces could move before it closes.
+        largest: f64,
+    },
+    /// A draft of `face`, a cone or cylinder about the pull, would carry its drafted cone
+    /// into another shell of the body (a cavity's wall, or another lump), first at `wall`,
+    /// a face of that shell: the wall between them would close, and the faces cross.
+    /// `largest` is the largest draft angle that keeps a wall, radians
+    /// ([`crate::offset::draft::largest_clear_angle`], #20767). Refused before anything
+    /// changes.
+    DraftClosesWall {
+        /// The drafted face, of the operation's input.
+        face: FaceId,
+        /// The face of the other shell the drafted cone reaches first.
+        wall: FaceId,
+        /// The largest draft angle that keeps a wall, radians.
         largest: f64,
     },
     /// In a local operation, a surface beside an edge or at a vertex of `face` moves, and
@@ -639,6 +654,7 @@ impl OffsetFailure {
             | Self::FacesApart { face }
             | Self::PastSide { face, .. }
             | Self::FaceCloses { face, .. }
+            | Self::DraftClosesWall { face, .. }
             | Self::ReachUncertified { face }
             | Self::BlendSectionNotFound { face }
             | Self::FaceHasNoSurface { face }
@@ -783,6 +799,7 @@ impl OffsetFailure {
             | Self::FacesApart { .. }
             | Self::PastSide { .. }
             | Self::FaceCloses { .. }
+            | Self::DraftClosesWall { .. }
             | Self::ReachUncertified { .. }
             | Self::LoopGapUncertified { .. }
             | Self::Unsound { .. }
@@ -861,6 +878,7 @@ impl OffsetFailure {
             | Self::FacesApart { .. }
             | Self::PastSide { .. }
             | Self::FaceCloses { .. }
+            | Self::DraftClosesWall { .. }
             | Self::ReachUncertified { .. }
             | Self::LoopGapUncertified { .. }
             | Self::Unsound { .. }
@@ -909,6 +927,7 @@ impl OffsetFailure {
             | Self::FacesApart { .. }
             | Self::PastSide { .. }
             | Self::FaceCloses { .. }
+            | Self::DraftClosesWall { .. }
             | Self::ReachUncertified { .. }
             | Self::ExactCurveUncut
             | Self::TangentEndOffCurve
@@ -977,6 +996,7 @@ impl OffsetFailure {
             | Self::FacesApart { .. }
             | Self::PastSide { .. }
             | Self::FaceCloses { .. }
+            | Self::DraftClosesWall { .. }
             | Self::ReachUncertified { .. }
             | Self::ExactCurveUncut
             | Self::TangentEndOffCurve
@@ -1259,6 +1279,19 @@ impl core::fmt::Display for OffsetFailure {
                 face.index(),
                 beside[0].index(),
                 beside[1].index()
+            ),
+            Self::DraftClosesWall {
+                face,
+                wall,
+                largest,
+            } => write!(
+                f,
+                "drafted, face {} reaches face {} of another shell of the body, closing the \
+                 wall between them: the largest draft angle that keeps a wall is {largest} \
+                 radians ({} degrees)",
+                face.index(),
+                wall.index(),
+                largest.to_degrees()
             ),
             Self::ReachUncertified { face } => write!(
                 f,
@@ -2004,6 +2037,16 @@ mod tests {
                 false,
                 false,
             ),
+            (
+                O::DraftClosesWall {
+                    face,
+                    wall: face,
+                    largest: 0.04,
+                },
+                ErrorKind::Unsupported,
+                false,
+                false,
+            ),
         ];
         let row = |o: &O| -> usize {
             match o {
@@ -2065,6 +2108,7 @@ mod tests {
                 O::VertexArcsNotOneSphere => 55,
                 O::UnnamedFaceHasNoSurface => 56,
                 O::FaceCloses { .. } => 57,
+                O::DraftClosesWall { .. } => 58,
             }
         };
         for (i, (o, class, phrase, defect)) in pinned.iter().enumerate() {
@@ -2074,12 +2118,13 @@ mod tests {
             assert_eq!(o.is_defect(), *defect, "{o:?}");
             // what replaced a bare status is a phrase, a stage failure built on purpose, or a
             // cause named at a site that returned a status (the rows from 26 on: TE-O-18, TE-O-19;
-            // not `FaceCloses`, a refusal of its own raised where no status was returned)
+            // not `FaceCloses` or `DraftClosesWall`, refusals of their own raised where no
+            // status was returned)
             assert_eq!(
                 o.replaces_upstream_status(),
                 *phrase
                     || matches!(o, O::StageFailed | O::Defect { .. })
-                    || (i >= 26 && !matches!(o, O::FaceCloses { .. })),
+                    || (i >= 26 && !matches!(o, O::FaceCloses { .. } | O::DraftClosesWall { .. })),
                 "{o:?}"
             );
         }
