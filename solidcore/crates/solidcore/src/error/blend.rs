@@ -40,9 +40,10 @@
 //! | [`BlendFailure::CornerRefused`], [`BlendFailure::ExecutiveStepFailed`], [`BlendFailure::EdgeSplitDeclined`] | [`ErrorKind::Failed`] (6): neither defect nor refusal, so a kept cause decides |
 //! | [`BlendFailure::CrossingInputMissing`] | [`ErrorKind::Missing`]: neither defect nor refusal |
 //! | [`BlendFailure::CrossingNotFinite`]    | [`ErrorKind::StageFailed`] (127)              |
-//! | [`BlendFailure::EaseInputMissing`] | [`ErrorKind::Missing`]: neither defect nor refusal |
+//! | [`BlendFailure::EaseInputMissing`], [`BlendFailure::OverflowInputMissing`] | [`ErrorKind::Missing`]: neither defect nor refusal |
 //! | [`BlendFailure::EaseNotBuilt`] | its stop's kind ([`EaseStop`]): [`ErrorKind::NotFound`] (2), [`ErrorKind::Degenerate`] (3), [`ErrorKind::Unsupported`] (5) or [`ErrorKind::OutsideDomain`] (8) |
-//! | [`BlendFailure::EaseGeometryNotBSpline`] | [`ErrorKind::Unsupported`] (5) |
+//! | [`BlendFailure::EaseGeometryNotBSpline`], [`BlendFailure::ExtensionEndOnTwoSideLines`] | [`ErrorKind::Unsupported`] (5) |
+//! | [`BlendFailure::OverflowPointDoesNotDrop`], [`BlendFailure::NoBlendedEdgeNearExtension`] | [`ErrorKind::NotFound`] (2) |
 //! | [`BlendFailure::WeldNotBuilt`]         | [`ErrorKind::Unsupported`] (5): neither defect nor refusal |
 //! | the phrase causes ([`BlendFailure::Failed`], [`BlendFailure::Missing`], ...) | their status's kind, as before the record; neither defect nor refusal |
 //!
@@ -59,8 +60,8 @@
 //! | [`BlendFailure::ArcLengthNotConverged`] | `SM_ERR_NOT_CONVERGING`          |
 //! | [`BlendFailure::CornerShapeNotBuilt`]  | the shape's ([`CornerShape::upstream_status`]) |
 //! | [`BlendFailure::Failed`], [`BlendFailure::LawIntervalEmpty`], [`BlendFailure::LawHasNoValue`], [`BlendFailure::FilletCrossesItself`], [`BlendFailure::CornerRefused`], [`BlendFailure::ExecutiveStepFailed`], [`BlendFailure::EdgeSplitDeclined`], [`BlendFailure::ExactBlendAxisCannotPlaceEdge`] | `SM_ERR` |
-//! | [`BlendFailure::EaseNotBuilt`] | `SM_ERR` |
-//! | [`BlendFailure::Missing`], [`BlendFailure::BandInputMissing`], [`BlendFailure::VariableRadiusLawsNotGiven`], [`BlendFailure::BevelVertexNotFilleted`], [`BlendFailure::EdgeWithoutCurve`], [`BlendFailure::SequenceCurveNotBSpline`], [`BlendFailure::LawCornerNotFound`], [`BlendFailure::EdgeUseWithoutEdge`], [`BlendFailure::BoundSurfaceRemoved`], [`BlendFailure::CornerPatchFaceNotFound`], [`BlendFailure::EaseInputMissing`], [`BlendFailure::EaseGeometryNotBSpline`] | `SM_ERR_NULL_POINTER` |
+//! | [`BlendFailure::EaseNotBuilt`], [`BlendFailure::OverflowPointDoesNotDrop`], [`BlendFailure::ExtensionEndOnTwoSideLines`], [`BlendFailure::NoBlendedEdgeNearExtension`] | `SM_ERR` |
+//! | [`BlendFailure::Missing`], [`BlendFailure::BandInputMissing`], [`BlendFailure::VariableRadiusLawsNotGiven`], [`BlendFailure::BevelVertexNotFilleted`], [`BlendFailure::EdgeWithoutCurve`], [`BlendFailure::SequenceCurveNotBSpline`], [`BlendFailure::LawCornerNotFound`], [`BlendFailure::EdgeUseWithoutEdge`], [`BlendFailure::BoundSurfaceRemoved`], [`BlendFailure::CornerPatchFaceNotFound`], [`BlendFailure::EaseInputMissing`], [`BlendFailure::EaseGeometryNotBSpline`], [`BlendFailure::OverflowInputMissing`] | `SM_ERR_NULL_POINTER` |
 //! | [`BlendFailure::InvalidValue`], the fillet executive's other checks of the caller's arguments | `SM_ERR_INVALID_INPUT` |
 //! | [`BlendFailure::CrossingNotFinite`]    | `SM_ERR`                          |
 //! | [`BlendFailure::CrossingInputMissing`] | `SM_ERR_NULL_POINTER` |
@@ -479,6 +480,27 @@ pub enum BlendFailure {
     /// A kind the ease does not build on ([`ErrorKind::Unsupported`]); status
     /// `SM_ERR_NULL_POINTER` (upstream `NER` of the cast).
     EaseGeometryNotBSpline(EaseGeometry),
+    /// A face or edge a blend's overflow reads lacks the input named (a face's surface, an
+    /// edge's curve or one of its vertices). The overflows' helpers, which the trims at
+    /// creases and the kept features share, read the caller's body and the sheet the
+    /// executive built alike, so the failure names no entity, and the cause
+    /// names what is missing and leaves the blame open, as [`BlendFailure::CliffInputMissing`]
+    /// does: status `SM_ERR_NULL_POINTER` (upstream `NER`) and the kind of that status
+    /// ([`ErrorKind::Missing`]), neither a defect nor a refusal.
+    OverflowInputMissing(OverflowInput),
+    /// A point of the cliff overflow does not drop onto the geometry named
+    /// ([`OverflowDrop`]): the closest-point search found no foot (within ten tolerances, for
+    /// an edge's curve). An empty search ([`ErrorKind::NotFound`]); status `SM_ERR`.
+    OverflowPointDoesNotDrop(OverflowDrop),
+    /// The end of a kept rail's run past a face's boundary lies on the lines of two side
+    /// edges of the face (straight edges that are not blended), and the extension joins the
+    /// end to one side line only. A construction the overflow
+    /// does not build ([`ErrorKind::Unsupported`]); status `SM_ERR`.
+    ExtensionEndOnTwoSideLines,
+    /// No blended edge's curve takes the drop of the middle of an extension's chain, so the
+    /// side the blend takes off from is not known. An empty search ([`ErrorKind::NotFound`]);
+    /// status `SM_ERR`.
+    NoBlendedEdgeNearExtension,
     /// The routine could not continue, as the phrase says (for example "the fillet's law
     /// has no value at the base"). Upstream `return SE(SM_ERR)`. A phrase cause
     /// ([`BlendFailure::is_phrase`]).
@@ -1833,6 +1855,64 @@ impl EaseGeometry {
     }
 }
 
+/// What a face or edge a blend's overflow reads lacks ([`BlendFailure::OverflowInputMissing`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum OverflowInput {
+    /// A face's surface.
+    FaceSurface,
+    /// An edge's curve.
+    EdgeCurve,
+    /// An edge's start vertex.
+    EdgeStartVertex,
+    /// An edge's end vertex.
+    EdgeEndVertex,
+    /// An edge's vertex at its other end from a vertex on it.
+    EdgeOtherVertex,
+}
+
+impl OverflowInput {
+    const fn what(self) -> &'static str {
+        match self {
+            Self::FaceSurface => "a face a blend's overflow reads has no surface",
+            Self::EdgeCurve => "an edge a blend's overflow reads has no curve",
+            Self::EdgeStartVertex => "an edge a blend's overflow reads has no start vertex",
+            Self::EdgeEndVertex => "an edge a blend's overflow reads has no end vertex",
+            Self::EdgeOtherVertex => {
+                "an edge a blend's overflow walks has no vertex at its other end"
+            }
+        }
+    }
+}
+
+/// What a point of the cliff overflow does not drop onto
+/// ([`BlendFailure::OverflowPointDoesNotDrop`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum OverflowDrop {
+    /// An end of a piece of the body's edge an extension runs along, onto the edge's curve
+    /// (within ten tolerances).
+    EdgePieceEndOntoEdge,
+    /// The middle of the filleted edge, onto a fillet face cut at an open end.
+    EdgeMiddleOntoFilletFace,
+    /// A sample of a closing face's loop, onto the face's surface.
+    LoopSampleOntoSurface,
+}
+
+impl OverflowDrop {
+    const fn what(self) -> &'static str {
+        match self {
+            Self::EdgePieceEndOntoEdge => "an end of an edge's piece does not drop onto the edge",
+            Self::EdgeMiddleOntoFilletFace => {
+                "the filleted edge's middle does not drop onto a fillet face cut at an open end"
+            }
+            Self::LoopSampleOntoSurface => {
+                "a sample of a closing face's loop does not drop onto its surface"
+            }
+        }
+    }
+}
+
 /// Which input of the planar-band contact query is missing ([`BlendFailure::BandInputMissing`]).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[non_exhaustive]
@@ -2116,6 +2196,9 @@ impl BlendFailure {
             | Self::SectionUnsupported(_)
             | Self::RadiusLawNotPositive { .. }
             | Self::SectionInputInvalid(_)
+            | Self::OverflowPointDoesNotDrop(_)
+            | Self::ExtensionEndOnTwoSideLines
+            | Self::NoBlendedEdgeNearExtension
             | Self::Failed(_) => SM_ERR,
             Self::Missing(_)
             | Self::BandInputMissing(_)
@@ -2127,6 +2210,7 @@ impl BlendFailure {
             | Self::CrossingInputMissing(_)
             | Self::EaseInputMissing(_)
             | Self::EaseGeometryNotBSpline(_)
+            | Self::OverflowInputMissing(_)
             | Self::VariableRadiusLawsNotGiven
             | Self::BevelVertexNotFilleted
             | Self::EdgeWithoutCurve
@@ -2232,6 +2316,7 @@ impl BlendFailure {
             | Self::SetBackFootNotUnique { .. }
             | Self::MateFaceSurfaceNotBSpline { .. }
             | Self::InterpolantDropsToCurves { .. }
+            | Self::ExtensionEndOnTwoSideLines
             | Self::WeldNotBuilt(_) => ErrorKind::Unsupported,
             Self::ArcLengthNotConverged { .. }
             | Self::RailCrossingNotConverged { .. }
@@ -2239,8 +2324,12 @@ impl BlendFailure {
             Self::BandInputMissing(_)
             | Self::CliffInputMissing { .. }
             | Self::EaseInputMissing(_)
+            | Self::OverflowInputMissing(_)
             | Self::CrossingInputMissing(_) => ErrorKind::Missing,
             Self::EaseNotBuilt(stop) => stop.class(),
+            Self::OverflowPointDoesNotDrop(_) | Self::NoBlendedEdgeNearExtension => {
+                ErrorKind::NotFound
+            }
             Self::NoEdgesGiven
             | Self::SizeBelowResolution { .. }
             | Self::PerEdgeListLength { .. }
@@ -2356,6 +2445,10 @@ impl BlendFailure {
             | Self::EaseInputMissing(_)
             | Self::EaseNotBuilt(_)
             | Self::EaseGeometryNotBSpline(_)
+            | Self::OverflowInputMissing(_)
+            | Self::OverflowPointDoesNotDrop(_)
+            | Self::ExtensionEndOnTwoSideLines
+            | Self::NoBlendedEdgeNearExtension
             | Self::Failed(_)
             | Self::Missing(_)
             | Self::InvalidValue(_)
@@ -2661,6 +2754,21 @@ impl core::fmt::Display for BlendFailure {
             Self::EaseGeometryNotBSpline(geometry) => {
                 write!(f, "{}: {}", self.class(), geometry.what())
             }
+            Self::OverflowInputMissing(input) => write!(f, "{}: {}", self.class(), input.what()),
+            Self::OverflowPointDoesNotDrop(drop) => {
+                write!(f, "{}: {}", self.class(), drop.what())
+            }
+            Self::ExtensionEndOnTwoSideLines => write!(
+                f,
+                "{}: the end of a rail's run past a face's boundary lies on the lines of two of \
+                 the face's side edges",
+                self.class()
+            ),
+            Self::NoBlendedEdgeNearExtension => write!(
+                f,
+                "{}: no blended edge takes the drop of the middle of an extension's chain",
+                self.class()
+            ),
             Self::Failed(what)
             | Self::InvalidValue(what)
             | Self::BadIntersections(what)
@@ -4225,6 +4333,65 @@ mod tests {
         assert_eq!(
             BlendFailure::EaseNotBuilt(EaseStop::EasePastEdgeEnd).to_string(),
             "outside_domain: the setback plus the ease runs past the end of the filleted edge"
+        );
+    }
+
+    /// #19825: each cause the overflows name is no phrase, replaces the status it
+    /// keeps, has its class (a missing input is `Missing`, neither a defect nor a refusal:
+    /// the overflow's helpers read the caller's body and the executive's sheet alike), and
+    /// is worded with its class.
+    #[test]
+    fn the_cliff_overflow_causes_keep_their_status_and_class() {
+        let mut rows = Vec::new();
+        for input in [
+            OverflowInput::FaceSurface,
+            OverflowInput::EdgeCurve,
+            OverflowInput::EdgeStartVertex,
+            OverflowInput::EdgeEndVertex,
+            OverflowInput::EdgeOtherVertex,
+        ] {
+            rows.push((
+                BlendFailure::OverflowInputMissing(input),
+                ErrorKind::Missing,
+                SM_ERR_NULL_POINTER,
+            ));
+        }
+        for drop in [
+            OverflowDrop::EdgePieceEndOntoEdge,
+            OverflowDrop::EdgeMiddleOntoFilletFace,
+            OverflowDrop::LoopSampleOntoSurface,
+        ] {
+            rows.push((
+                BlendFailure::OverflowPointDoesNotDrop(drop),
+                ErrorKind::NotFound,
+                SM_ERR,
+            ));
+        }
+        rows.push((
+            BlendFailure::ExtensionEndOnTwoSideLines,
+            ErrorKind::Unsupported,
+            SM_ERR,
+        ));
+        rows.push((
+            BlendFailure::NoBlendedEdgeNearExtension,
+            ErrorKind::NotFound,
+            SM_ERR,
+        ));
+        for (cause, class, status) in rows {
+            assert!(!cause.is_phrase(), "{cause:?}");
+            assert!(cause.replaces_upstream_status(), "{cause:?}");
+            assert_eq!(cause.class(), class, "{cause:?}");
+            assert_eq!(cause.comparison_status(), status, "{cause:?}");
+            let text = cause.to_string();
+            assert!(text.starts_with(&format!("{class}: ")), "{text}");
+            let error = SolidError::blend("blend::op", cause);
+            assert_eq!(error.kind(), class, "{error:?}");
+            assert_eq!(error.upstream_status(), Some(status), "{error:?}");
+            assert!(!error.is_defect(), "{error:?}");
+        }
+        assert_eq!(
+            BlendFailure::OverflowInputMissing(OverflowInput::FaceSurface).to_string(),
+            "missing: a face a blend's overflow reads has no surface"
         );
     }
 
