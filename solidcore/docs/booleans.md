@@ -894,7 +894,7 @@ A reviewer can check each of these on a change to the boolean.
 - Definitions carried through face splits and copies (§7), tested on a round.
 - The ops entry points with the result contract (`solidcore-ops/src/boolean.rs`).
 - The rig: 130 boolean cases in `solidcore/tests/kernel_cases/booleans/`, two listed in
-  `known_failing.json` (the two 3012 sliver cases: the kernel absorbs the 1e-4 wide faces, so it
+  `kernel_cases_known_failing/` (the two 3012 sliver cases: the kernel absorbs the 1e-4 wide faces, so it
   returns 8 faces, 18 edges and 12 vertices instead of 10, 24 and 16; #15669).
 - No opt-in fixes are left for the cases in §5, §6 and §8. Always on: the operand's exact trims on
   a face B gives to A (WR-361), the union's solid-leak refusal (WR-619), a boolean
