@@ -601,6 +601,415 @@ fn right_click_opens_the_shared_menu_on_what_is_under_the_pointer() {
     h.call("ui.menu", json!({"close": true}));
 }
 
+/// The plate sheet with a revision table whose outline's top left is at (60, 120) mm, and `rows`
+/// revision rows described "First" and "Second": the harness and the table's id.
+fn sheet_with_revision_table(rows: usize) -> (Harness, u64) {
+    use solidcraft_engine::doc::drawing::table::Place;
+    let (mut h, _) = plate_sheet();
+    let set = json!({"place": serde_json::to_value(Place::At([60.0, 120.0])).unwrap()});
+    let added = h.app.run("drawing.table.add", json!({"sheet": "Sheet 1", "kind": "revision", "set": set})).unwrap();
+    for description in ["First", "Second"].into_iter().take(rows) {
+        h.app.run("drawing.revision.add", json!({"set": {"description": description}})).unwrap();
+    }
+    settle(&mut h);
+    (h, solidcraft_engine::doc::ids::decode(added["table"].as_str().unwrap()).unwrap())
+}
+
+/// The drawing's revision rows as (description, designer, hidden), and their ids as the grid keys
+/// them.
+fn revision_rows(h: &Harness) -> (Vec<(String, String, bool)>, Vec<String>) {
+    let drawing = h.app.session.drawing("drawing.inspect").unwrap();
+    let rows = drawing.revisions.rows();
+    (
+        rows.iter().map(|r| (r.description.clone(), r.designer.clone(), r.hidden)).collect(),
+        rows.iter().map(|r| solidcraft_engine::doc::ids::encode(r.id)).collect(),
+    )
+}
+
+/// The revision table's window is drawn: its grid's add-row control is on screen.
+fn revision_page_open() -> bool {
+    crate::scenario::handle_at("dialog:table:drawing_revision_rows:add").is_some()
+}
+
+/// The plate sheet with a parts list whose outline's top left is at (230, 120) mm: the harness and
+/// the table's id.
+fn sheet_with_parts_list() -> (Harness, u64) {
+    use solidcraft_engine::doc::drawing::table::Place;
+    let (mut h, _) = plate_sheet();
+    let set = json!({"place": serde_json::to_value(Place::At([230.0, 120.0])).unwrap()});
+    let added = h.app.run("drawing.table.add", json!({"sheet": "Sheet 1", "kind": "parts_list", "set": set})).unwrap();
+    settle(&mut h);
+    (h, solidcraft_engine::doc::ids::decode(added["table"].as_str().unwrap()).unwrap())
+}
+
+/// The table window shows a parts list: the parts list's own rows (its Heading row) are on screen
+/// and the right panel, where they were drawn before, is closed.
+fn parts_list_window_open(h: &Harness) -> bool {
+    !crate::drawing_workspace::inspector_visible(&h.app) && crate::scenario::handle_at("dialog:row:Heading").is_some()
+}
+
+/// Where a click on the revision grid's `handle` lands as a user's would: the middle of the part of
+/// it inside the grid's viewport.
+fn on_revision_grid(handle: &str) -> [f32; 2] {
+    let rect = crate::scenario::rect_of(handle).expect("the grid's handle");
+    let viewport = crate::scenario::rect_of("dialog:table:drawing_revision_rows:viewport").expect("the grid's viewport");
+    let seen = rect.intersect(viewport);
+    assert!(seen.is_positive(), "{handle} is in view: {rect:?} in {viewport:?}");
+    [seen.center().x, seen.center().y]
+}
+
+/// A double-click on a revision table opens its window. Its add-row control adds
+/// the next revision, a cell typed and committed with Enter edits it, and Remove deletes a row:
+/// one undo step each, and each Undo takes one back.
+#[test]
+fn a_revision_tables_page_adds_edits_and_removes_rows_one_undo_step_each() {
+    let (mut h, _) = sheet_with_revision_table(1);
+    let screen = |x: f64, y: f64| {
+        let paper = crate::scenario::rect_of("sheet:paper").unwrap();
+        [paper.left() + paper.width() * x as f32 / 420.0, paper.bottom() - paper.height() * y as f32 / 297.0]
+    };
+    h.step(&json!({"click": screen(63.0, 110.0), "double": true})).unwrap();
+    h.frames(4);
+    assert!(revision_page_open(), "the double-click opens its window");
+    let undo = h.app.session.undo.len();
+
+    h.step(&json!({"click": on_revision_grid("dialog:table:drawing_revision_rows:add")})).unwrap();
+    h.frames(3);
+    let (rows, keys) = revision_rows(&h);
+    assert_eq!(rows.len(), 2, "a row added");
+    assert_eq!(h.app.session.undo.len(), undo + 1);
+
+    let description = format!("grid:drawing_revision_rows:{}:description", keys[0]);
+    h.run(&json!([{"click": on_revision_grid(&description)}, {"key": "A", "cmd": true}, {"text": "First issue"}, {"key": "Enter"}])).unwrap();
+    h.frames(3);
+    assert_eq!(revision_rows(&h).0[0].0, "First issue");
+    assert_eq!(h.app.session.undo.len(), undo + 2);
+
+    h.step(&json!({"click": {"handle": format!("drawing:revision:remove:{}", keys[1])}})).unwrap();
+    h.frames(3);
+    assert_eq!(revision_rows(&h).0.len(), 1, "the second row removed");
+    assert_eq!(h.app.session.undo.len(), undo + 3);
+
+    for (left, first) in [(2, "First issue"), (2, "First"), (1, "First")] {
+        h.app.run("edit.undo", json!({})).unwrap();
+        h.frames(2);
+        let rows = revision_rows(&h).0;
+        assert_eq!((rows.len(), rows[0].0.as_str()), (left, first), "each Undo takes one step back");
+    }
+}
+
+/// A double-click on a parts list on the sheet opens its options in the table window, as the
+/// revision table's does: the sheet's double-click asks `page_for`, like the revision table's above.
+#[test]
+fn a_double_click_on_a_parts_list_on_the_sheet_opens_its_options() {
+    let (mut h, _) = sheet_with_parts_list();
+    // In its first row, below the heading, as the revision table's test clicks its own.
+    let paper = crate::scenario::rect_of("sheet:paper").unwrap();
+    let at = [paper.left() + paper.width() * 233.0 / 420.0, paper.bottom() - paper.height() * 110.0 / 297.0];
+    assert!(!parts_list_window_open(&h));
+
+    h.step(&json!({"click": at, "double": true})).unwrap();
+    h.frames(4);
+    assert!(parts_list_window_open(&h), "the double-click opens the parts list's options in the table window");
+    assert!(h.widget("Parts List").is_some() && !revision_page_open(), "the window is the parts list's");
+}
+
+/// A parts list's Browser row and the sheet menu's Edit open its options in the table window, not the
+/// right panel, and Esc closes it. The window keeps to the app window it opened in (#20937), as the
+/// revision table's does: the host is one for both.
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn a_parts_lists_browser_row_and_the_sheet_menu_open_the_table_window() {
+    let (mut h, table) = sheet_with_parts_list();
+    let id = solidcraft_engine::doc::ids::encode(table);
+    let row = crate::scenario::handles("drawing:browser:").into_iter().find(|(name, _)| name.ends_with(&format!(":table:{id}")));
+    let (_, at) = row.expect("the parts list's Browser row");
+    h.step(&json!({"click": [at.x, at.y], "double": true})).unwrap();
+    h.frames(4);
+    assert!(parts_list_window_open(&h), "the Browser row opens the window");
+    h.step(&json!({"key": "Escape"})).unwrap();
+    h.frames(2);
+    assert!(!parts_list_window_open(&h), "Esc closes it");
+
+    let windows = other_windows(&mut h);
+    crate::drawing_workspace::edit(&mut h.app, table, egui::pos2(-1.0, -1.0));
+    h.frames(4);
+    assert!(parts_list_window_open(&h), "the menu's Edit opens it, in the main window");
+    let title = h.app.tr("ui.drawing_panel.parts_list").to_owned();
+    for window in windows {
+        let (_, drawn) = paint_window(&mut h, window, &title);
+        assert!(!drawn, "window {window} draws no copy of it");
+    }
+    h.frames(2);
+    assert!(parts_list_window_open(&h), "and it is still open in the main window");
+}
+
+/// A block pasted over two rows' Description and Designer is one undo step, and one Undo takes
+/// both rows back. A two-line revision is refused by the record's rule: nothing changes, and the
+/// status line says why.
+#[test]
+fn a_pasted_block_of_revision_rows_is_one_undo_step() {
+    let (mut h, table) = sheet_with_revision_table(2);
+    crate::drawing_workspace::edit_object(&mut h.app, "revision_table", table);
+    h.frames(4);
+    let state = crate::ui_kit::Grid::state_of("drawing_revision_rows");
+    let keys = revision_rows(&h).1;
+    // Shown comes first: Description is column 2.
+    crate::ui_kit::Grid::select(&h.ctx, state, &keys[0], 0, 2);
+    h.frames(3);
+    let undo = h.app.session.undo.len();
+    h.app.synthetic.push(egui::Event::Paste("Rework\tAna\r\nTolerances\tBo\r\n".into()));
+    h.frames(3);
+    let rows = revision_rows(&h).0;
+    assert_eq!((rows[0].0.as_str(), rows[0].1.as_str()), ("Rework", "Ana"));
+    assert_eq!((rows[1].0.as_str(), rows[1].1.as_str()), ("Tolerances", "Bo"));
+    assert_eq!(h.app.session.undo.len(), undo + 1, "one paste, one undo step");
+    h.app.run("edit.undo", json!({})).unwrap();
+    h.frames(2);
+    let descriptions: Vec<String> = revision_rows(&h).0.into_iter().map(|r| r.0).collect();
+    assert_eq!(descriptions, ["First", "Second"], "one Undo takes both back");
+
+    // Revision is column 1: a two-line revision breaks the record's rule.
+    crate::ui_kit::Grid::select(&h.ctx, state, &keys[0], 0, 1);
+    h.frames(3);
+    let undo = h.app.session.undo.len();
+    h.app.synthetic.push(egui::Event::Paste("\"A\nB\"\r\n".into()));
+    h.frames(3);
+    assert_eq!(h.app.session.undo.len(), undo, "nothing changes");
+    assert!(!h.app.session.drawing("drawing.inspect").unwrap().revisions.rows()[0].revision.contains('\n'));
+    let status = h.app.status.as_ref().map(|(text, _, error)| (text.clone(), *error));
+    assert!(status.as_ref().is_some_and(|(text, error)| *error && text.contains("one line")), "{status:?}");
+}
+
+/// The Browser's revision table row and the sheet menu's Edit open its window, showing the revision
+/// table (a parts list opens in the same window), and Esc closes it. Shown off hides the row from the table on paper, and its box shows it again.
+/// During a cell edit, Esc cancels the edit first, and with a range of cells it collapses the range:
+/// the window stays open.
+#[test]
+fn the_browsers_revision_table_row_and_the_sheet_menu_open_its_page() {
+    let (mut h, table) = sheet_with_revision_table(1);
+    let id = solidcraft_engine::doc::ids::encode(table);
+    let row = crate::scenario::handles("drawing:browser:").into_iter().find(|(name, _)| name.ends_with(&format!(":table:{id}")));
+    let (_, at) = row.expect("the table's Browser row");
+    h.step(&json!({"click": [at.x, at.y], "double": true})).unwrap();
+    h.frames(4);
+    assert!(revision_page_open(), "the Browser row opens its window");
+    h.step(&json!({"key": "Escape"})).unwrap();
+    h.frames(2);
+    assert!(!revision_page_open(), "Esc closes it");
+    crate::drawing_workspace::edit(&mut h.app, table, egui::pos2(-1.0, -1.0));
+    h.frames(4);
+    assert!(revision_page_open() && !parts_list_window_open(&h), "the menu's Edit opens it too, showing the revision table");
+
+    let key = revision_rows(&h).1[0].clone();
+    // Shown is column 0. Its handle is the whole cell and its box a small target at the cell's left, so the
+    // grid's own keys toggle it: the cursor on the cell, then Space.
+    crate::ui_kit::Grid::select(&h.ctx, crate::ui_kit::Grid::state_of("drawing_revision_rows"), &key, 0, 0);
+    h.frames(2);
+    h.step(&json!({"key": "Space"})).unwrap();
+    h.frames(3);
+    assert!(revision_rows(&h).0[0].2, "Shown off hides the row");
+    let drawing = h.app.session.drawing("drawing.inspect").unwrap().clone();
+    assert!(drawing.revisions.table_rows(None).is_empty(), "the table on paper leaves it out");
+    // The mouse too: a click on the box itself, which the kit checkbox draws at the cell's left edge, its
+    // square centred half its side in (`ui_kit::checks`), shows the row again.
+    let cell = crate::scenario::rect_of(&format!("grid:drawing_revision_rows:{key}:shown")).expect("the Shown cell");
+    let viewport = crate::scenario::rect_of("dialog:table:drawing_revision_rows:viewport").expect("the grid's viewport");
+    let at = egui::pos2(cell.left() + solidcraft_theme::Tokens::get().space_14 / 2.0, cell.center().y);
+    assert!(viewport.contains(at), "the box is in view: {at:?} in {viewport:?}");
+    h.step(&json!({"click": [at.x, at.y]})).unwrap();
+    h.frames(3);
+    assert!(!revision_rows(&h).0[0].2, "a click on Shown's box shows the row again");
+
+    // Esc goes to the innermost thing open: during a cell edit it cancels only the edit, and the
+    // window stays; the next Esc closes the window.
+    let before = revision_rows(&h).0[0].0.clone();
+    let description = format!("grid:drawing_revision_rows:{key}:description");
+    h.run(&json!([{"click": on_revision_grid(&description)}, {"key": "A", "cmd": true}, {"text": "Not kept"}, {"key": "Escape"}])).unwrap();
+    h.frames(3);
+    assert_eq!(revision_rows(&h).0[0].0, before, "Esc cancels the cell edit");
+    assert!(revision_page_open(), "and the window stays open");
+    // A range of cells too: Esc collapses it to the cursor first, and the window stays.
+    let grid = crate::ui_kit::Grid::state_of("drawing_revision_rows");
+    h.step(&json!({"key": "ArrowRight", "shift": true})).unwrap();
+    h.frames(2);
+    let range = crate::ui_kit::Grid::selection(&h.ctx, grid);
+    assert!(range.is_some_and(|(_, _, left, right)| left != right), "Shift+Right makes a range: {range:?}");
+    h.step(&json!({"key": "Escape"})).unwrap();
+    h.frames(2);
+    let range = crate::ui_kit::Grid::selection(&h.ctx, grid);
+    assert!(range.is_some_and(|(_, _, left, right)| left == right), "Esc collapses the range: {range:?}");
+    assert!(revision_page_open(), "and the window stays open again");
+    h.step(&json!({"key": "Escape"})).unwrap();
+    h.frames(2);
+    assert!(!revision_page_open(), "the next Esc closes it");
+}
+
+/// Row controls at the edges, texts in the middle, nothing cut off: Shown is the first column, the
+/// five texts follow, and the row's Remove comes last. The window is as wide as its grid, so every
+/// column is in view.
+#[test]
+fn a_revision_tables_window_shows_every_column_with_its_row_controls_at_the_edges() {
+    use solidcraft_engine::geom::revision::Field;
+    let (mut h, table) = sheet_with_revision_table(1);
+    crate::drawing_workspace::edit_object(&mut h.app, "revision_table", table);
+    h.frames(6);
+    let key = revision_rows(&h).1[0].clone();
+    let viewport = crate::scenario::rect_of("dialog:table:drawing_revision_rows:viewport").expect("the grid's viewport");
+    let content = crate::scenario::count_of("dialog:table:drawing_revision_rows:content_width").expect("the grid's width") as f32;
+    assert!(content <= viewport.width() + 1.0, "every column in view: {content} in {}", viewport.width());
+
+    let cell = |column: &str| crate::scenario::rect_of(&format!("grid:drawing_revision_rows:{key}:{column}")).expect(column);
+    let (shown, remove) = (cell("shown"), crate::scenario::handle_at(&format!("drawing:revision:remove:{key}")).expect("Remove"));
+    let texts: Vec<egui::Rect> = Field::ALL.iter().map(|field| cell(field.key())).collect();
+    assert!(texts.windows(2).all(|pair| pair[0].right() <= pair[1].left()), "the texts in their order: {texts:?}");
+    assert!(shown.right() <= texts[0].left(), "Shown first");
+    assert!(texts[4].right() <= remove.x, "Remove last");
+    assert!(viewport.contains(shown.center()) && viewport.contains(remove), "both edges in view");
+}
+
+/// A table's window belongs to the window it opened in, as the Add Sheet card does (#20937). Another
+/// window showing the sheet draws no second copy, and asks no Esc for its cell edit; a window showing
+/// a model does not close it. (The design it opened in keeps it: a design's drawing state goes with
+/// it, `documents::DocView`.)
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn a_revision_tables_window_stays_in_the_window_it_opened_in() {
+    let (mut h, table) = sheet_with_revision_table(1);
+    let windows = other_windows(&mut h);
+    crate::drawing_workspace::edit(&mut h.app, table, egui::pos2(-1.0, -1.0));
+    h.frames(4);
+    assert!(revision_page_open(), "the window opens in the main window");
+    let description = format!("grid:drawing_revision_rows:{}:description", revision_rows(&h).1[0]);
+    h.step(&json!({"click": on_revision_grid(&description)})).unwrap();
+    h.frames(2);
+    assert!(crate::drawing_workspace::table_window::editing(&h.app, &h.ctx), "a cell edit is open in it");
+    // A child window paints as the app paints it: with its own view's workspace on the ribbon.
+    let title = h.app.tr("ui.drawing_panel.revision_table").to_owned();
+    for window in windows {
+        let (editing, drawn) = paint_window(&mut h, window, &title);
+        assert!(!editing, "window {window} has no cell edit for Esc to cancel");
+        assert!(!drawn, "window {window} draws no copy of it");
+    }
+    h.frames(2);
+    assert!(revision_page_open(), "and it is still open in the main window");
+}
+
+/// A Sheet view of the plate's drawing and a Model view, each moved into a window of its own, with
+/// the main window focused again in the Drawing workspace: the two windows.
+#[cfg(not(target_arch = "wasm32"))]
+fn other_windows(h: &mut Harness) -> Vec<solidcraft_views::WindowId> {
+    use solidcraft_views::ViewKind;
+    let root = h.app.docs.views.active().id;
+    let drawing = h.app.session.drawing("drawing.inspect").unwrap();
+    let subject = crate::sheet_views::subject(drawing.id, drawing.sheets[0].id);
+    let mut windows = Vec::new();
+    for view in [
+        crate::documents::view_open(&mut h.app, ViewKind::Sheet, Some(subject), false),
+        crate::documents::view_open(&mut h.app, ViewKind::Model, None, false),
+    ] {
+        h.app.run("tab.view.move_to_window", json!({"view": view})).unwrap();
+        windows.push(h.app.docs.views.window_of(view).unwrap());
+    }
+    crate::view_windows::focus_view(&mut h.app, root, Some(0)).unwrap();
+    crate::sketch_view::sync(&mut h.app).unwrap();
+    crate::drawing_workspace::enter(&mut h.app, true).unwrap();
+    windows
+}
+
+/// App window `window` painted as the app paints it, with its own view's workspace on the ribbon:
+/// whether it has a table window's cell edit for Esc to cancel, and whether it draws `title`.
+#[cfg(not(target_arch = "wasm32"))]
+fn paint_window(h: &mut Harness, window: solidcraft_views::WindowId, title: &str) -> (bool, bool) {
+    let ctx = h.ctx.clone();
+    let (output, editing) = crate::view_windows::with_strip(&mut h.app, Some(window), |app| {
+        let tab = std::mem::replace(&mut app.ui.tab, crate::documents::view_workspace(app.docs.views.active().kind).into());
+        let editing = crate::drawing_workspace::table_window::editing(app, &ctx);
+        let screen = Rect::from_min_size(Pos2::ZERO, vec2(1400.0, 900.0));
+        let output = ctx.run_ui(egui::RawInput { screen_rect: Some(screen), focused: true, ..Default::default() }, |_ui| {
+            crate::drawing_workspace::show_add_sheet(app, &ctx)
+        });
+        app.ui.tab = tab;
+        Ok((output, editing))
+    })
+    .unwrap();
+    h.output = output.platform_output;
+    h.shapes = output.shapes;
+    (editing, h.widget(title).is_some())
+}
+
+/// The revision window gives Description the width the other texts leave. An empty table opens with
+/// room to type a description. With a long one, each other text column is as wide as its heading or
+/// its text, and Description shows the whole description. A row ends with Remove alone: a revision is
+/// issued by command (`drawing.revise`), not from the window. With the description emptied, the room
+/// left goes to Description alone; beside long names, it keeps its room to type in.
+#[test]
+fn the_revision_window_gives_description_the_room_left() {
+    use solidcraft_engine::geom::revision::Field;
+    let t = solidcraft_theme::Tokens::get();
+    let (mut h, table) = sheet_with_revision_table(0);
+    let heading = |h: &Harness, field: Field| {
+        let drawing = h.app.session.drawing("drawing.inspect").unwrap();
+        let columns = &drawing.tables.by_id(table).unwrap().table.columns;
+        columns.iter().find(|c| c.name == field.key()).map_or(field.key().to_owned(), |c| c.heading.clone())
+    };
+    crate::drawing_workspace::edit_object(&mut h.app, "revision_table", table);
+    h.frames(6);
+    let header = |h: &Harness, field: Field| {
+        crate::scenario::rect_of(&format!("dialog:column:drawing_revision_rows:{}", heading(h, field))).expect("the column's heading")
+    };
+    let empty = header(&h, Field::Description).width();
+    assert!(empty >= t.form_card_width - 1.0, "an empty table's Description has room to type in: {empty}");
+
+    let long = "Added two mounting holes; material changed to 6082 aluminium";
+    h.app.run("drawing.revision.add", json!({"set": {"description": long}})).unwrap();
+    h.frames(6);
+    let key = revision_rows(&h).1[0].clone();
+    let measure = |h: &Harness, text: &str, font: egui::FontId| {
+        h.ctx.fonts_mut(|f| f.layout_no_wrap(text.to_owned(), font, egui::Color32::WHITE).size().x.ceil())
+    };
+    let mono = egui::FontId::monospace(t.font_label);
+    let cell = |field: Field| {
+        let column = field.key();
+        crate::scenario::rect_of(&format!("grid:drawing_revision_rows:{key}:{column}")).expect(column)
+    };
+    let description = cell(Field::Description).width();
+    assert!(description >= measure(&h, long, mono.clone()) + 2.0 * t.form_inset - 1.0, "the whole description shows: {description}");
+    // A text column other than Description is as wide as its heading or its text, whichever is wider.
+    let content = |h: &Harness, field: Field| {
+        let row = h.app.session.drawing("drawing.inspect").unwrap().revisions.rows()[0].clone();
+        let text = row.field(field.key()).unwrap_or_default().to_owned();
+        let label = measure(h, solidcraft_ui_text::tr_label(&heading(h, field)), egui::FontId::proportional(t.font_label));
+        label.max(measure(h, &text, mono.clone()) + 2.0 * t.form_inset)
+    };
+    for field in Field::ALL.into_iter().filter(|field| *field != Field::Description) {
+        let content = content(&h, field);
+        let width = cell(field).width();
+        assert!(width <= content + 2.0, "{} is as wide as its content ({content}), not {width}", field.key());
+        assert!(width < description, "Description is the widest text");
+    }
+
+    assert!(crate::scenario::handle_at(&format!("drawing:revision:remove:{key}")).is_some(), "the row's Remove");
+    let issue = crate::scenario::handles("drawing:revision:issue:");
+    assert!(issue.is_empty(), "no Issue button: {issue:?}");
+
+    // The description emptied: the window keeps its width, and Description alone takes the room
+    // the other columns leave, each of them still as wide as its heading or its text.
+    h.app.run("drawing.revision.edit", json!({"row": key, "set": {"description": ""}})).unwrap();
+    h.frames(6);
+    for field in Field::ALL.into_iter().filter(|field| *field != Field::Description) {
+        let content = content(&h, field);
+        let width = cell(field).width();
+        assert!(width <= content + 2.0, "{} stays as wide as its content ({content}), not {width}", field.key());
+    }
+    // Long names beside it: the window grows, and Description keeps its room to type in.
+    let name = "Alexandra Featherstonehaugh-Ramsey";
+    h.app.run("drawing.revision.edit", json!({"row": key, "set": {"designer": name, "checker": name}})).unwrap();
+    h.frames(6);
+    let description = cell(Field::Description).width();
+    assert!(description >= t.form_card_width - 1.0, "Description keeps room to type in beside long names: {description}");
+}
+
 /// A double-click on a dimension or a note edits its text where it is, in the box a sketch
 /// dimension's value is typed in: Enter changes it in one undo step, Esc leaves it, and the
 /// number typed back (or nothing) shows the measured number again.

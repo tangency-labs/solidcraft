@@ -2944,7 +2944,9 @@ fn shortcuts_focused(app: &mut SolveApp, ctx: &egui::Context) {
         || crate::dialogs_save_mesh::popup_open(ctx)
         || crate::hole_presets::name_prompt_open(ctx, app.dialog.as_ref())
         || crate::personal_sheet_rules::name_prompt_open(ctx, app.dialog.as_ref());
-    let inline_editor = crate::dim_view::editing();
+    // An inline editor, or a cell edit in a drawing table's window, owns the keyboard. egui takes
+    // the focus from a field when Esc arrives, so the grid's own edit is asked, not the focus.
+    let inline_editor = crate::dim_view::editing() || crate::drawing_workspace::table_window::editing(app, ctx);
     if !popup_owner
         && app.viewport_status.open_key.is_some()
         && crate::ui_kit::details_field_owned_escape(ctx)

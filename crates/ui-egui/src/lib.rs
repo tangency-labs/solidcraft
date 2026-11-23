@@ -1650,6 +1650,33 @@ impl SolveApp {
         self
     }
 
+    /// Run `steps` as one gesture: all of them or none, and one undo step for all. A refused step
+    /// takes back the ones before it; afterwards only the design before the first step stays in the
+    /// undo history, so one Undo takes the whole paste or fill back.
+    pub(crate) fn run_as_one(&mut self, steps: &[(&str, Value)]) -> Result<(), String> {
+        let before = self.session.doc.clone();
+        let undo = self.session.undo.len();
+        for (index, (command, params)) in steps.iter().enumerate() {
+            if let Err(error) = self.run(command, params.clone()) {
+                if index > 0 {
+                    while self.session.undo.len() > undo && !std::sync::Arc::ptr_eq(&self.session.doc, &before) {
+                        if self.run("edit.undo", json!({})).is_err() {
+                            break;
+                        }
+                    }
+                    self.session.redo.clear();
+                }
+                return Err(error);
+            }
+        }
+        if steps.len() > 1
+            && let Some(first) = self.session.undo.iter().rposition(|s| std::sync::Arc::ptr_eq(&s.doc, &before))
+        {
+            self.session.undo.truncate(first + 1);
+        }
+        Ok(())
+    }
+
     /// Run a command programmatically (JSON parameters, no dialogs).
     pub fn run(&mut self, id: &str, mut params: Value) -> Result<Value, String> {
         // The rules below name registered ids; a command spelled in another case is the same

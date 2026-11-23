@@ -960,7 +960,7 @@ fn apply_grid(app: &mut SolveApp, ctx: &egui::Context, d: &mut ParamsDialog, row
     }
     let ran = match all.as_slice() {
         [("parameters.change", params)] => change(app, d, params.clone()),
-        _ => run_as_one(app, &all),
+        _ => app.run_as_one(&all),
     };
     match ran {
         Ok(()) => {
@@ -1004,33 +1004,6 @@ fn change(app: &mut SolveApp, d: &mut ParamsDialog, params: Value) -> Result<(),
     app.run_heavy("parameters.change", params)?;
     if app.computing_since().is_some() || !app.deferred_queue.is_empty() {
         d.applying.extend(applying);
-    }
-    Ok(())
-}
-
-/// Run `steps` as one gesture: all of them or none, and one undo step for all. A refused step
-/// takes back the ones before it; afterwards only the design before the first step stays in the
-/// undo history, so one Undo takes the whole paste or fill back.
-fn run_as_one(app: &mut SolveApp, steps: &[(&str, Value)]) -> Result<(), String> {
-    let before = app.session.doc.clone();
-    let undo = app.session.undo.len();
-    for (index, (command, params)) in steps.iter().enumerate() {
-        if let Err(error) = app.run(command, params.clone()) {
-            if index > 0 {
-                while app.session.undo.len() > undo && !Arc::ptr_eq(&app.session.doc, &before) {
-                    if app.run("edit.undo", json!({})).is_err() {
-                        break;
-                    }
-                }
-                app.session.redo.clear();
-            }
-            return Err(error);
-        }
-    }
-    if steps.len() > 1
-        && let Some(first) = app.session.undo.iter().rposition(|s| Arc::ptr_eq(&s.doc, &before))
-    {
-        app.session.undo.truncate(first + 1);
     }
     Ok(())
 }

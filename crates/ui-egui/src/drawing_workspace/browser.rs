@@ -15,7 +15,7 @@ use crate::ui_kit::{
     browser::{Event, Node, NodeMenu, RowOut, Rows},
 };
 
-use super::{active_sheet, edit_object, open_sheet_menu, select_sheet};
+use super::{active_sheet, edit_object, open_sheet_menu, page_for, select_sheet};
 
 pub(crate) fn show(app: &mut SolveApp, rows: &mut Rows<'_>) {
     let t = Tokens::get();
@@ -167,15 +167,12 @@ fn show_objects(app: &mut SolveApp, rows: &mut Rows<'_>, drawing: &Drawing, shee
     ] {
         for (index, object) in ids.into_iter().enumerate() {
             let table_kind = (kind == "table").then(|| drawing.tables.by_id(object)).flatten().map(|table| &table.kind);
-            let (label, editor) = match table_kind {
-                Some(table::Kind::PartsList(_)) => (app.tr("ui.drawing_browser_parts_list").to_string(), Some("parts_list")),
-                Some(table::Kind::Revision) => (app.tr("ui.drawing_browser_revision_table").to_string(), None),
-                None => {
-                    let msg = format!("ui.drawing_browser_{kind}");
-                    let label = solidcraft_ui_text::format(&msg, &[("number", &(index + 1).to_string())]);
-                    (label, matches!(kind, "dimension" | "note").then_some(kind))
-                }
+            let label = match table_kind {
+                Some(table::Kind::PartsList(_)) => app.tr("ui.drawing_browser_parts_list").to_string(),
+                Some(table::Kind::Revision) => app.tr("ui.drawing_browser_revision_table").to_string(),
+                None => solidcraft_ui_text::format(&format!("ui.drawing_browser_{kind}"), &[("number", &(index + 1).to_string())]),
             };
+            let editor = matches!(kind, "table" | "dimension" | "note").then(|| page_for(drawing, object)).flatten();
             let hit = row(
                 rows,
                 &format!("{key}:{kind}:{}", encode(object)),

@@ -302,6 +302,12 @@ impl Table<'_> {
         self.widths.iter().sum::<f32>() + Tokens::get().space_8 * (self.widths.len().saturating_sub(1) + 2) as f32
     }
 
+    /// How much wider the columns are than the table's visible part: 0 when they all fit. A host
+    /// that can grow (a resizable panel) can grow by this much to show every column.
+    pub fn overflow(&self) -> f32 {
+        (self.width() - self.view_width).max(0.0)
+    }
+
     /// A selectable row with independently interactive cells and actions.
     pub fn row(&mut self, ui: &mut Ui, key: &str, selected: bool, add: impl FnOnce(&mut TableRow<'_>)) -> Response {
         self.row_visible(ui, key, selected, true, add)
