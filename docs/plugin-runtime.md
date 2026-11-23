@@ -98,8 +98,11 @@ grants with the requested access. The caller's file scope is checked against eac
 path on every read and write; hidden paths require explicit authorization. Declaring a folder
 name does not itself grant access. Reading a file that does not exist returns `invalid-input`
 (field `path`, reason "no such file") without failing the run, so an entry can create its file
-on first use. Writes use temporary sibling files, and reads in the same call
-see their staged content. Targets are replaced only after successful guest execution and app
+on first use. A write into a sub-folder that does not exist yet makes that folder inside the
+grant; if the run does not publish, the folders it made are removed again while still empty.
+Only a refusal by the system is reported as `permission-denied`; another write failure, such as a
+file where a folder should be, is `invalid-input` for `path`. Writes use temporary sibling files,
+and reads in the same call see their staged content. Targets are replaced only after successful guest execution and app
 transaction commit. A trap, refusal, cancellation or failed app commit removes staged files
 without replacing targets. If publication fails after app commit, the error reports that files
 may have changed; publication of several files is not atomic. `clock.now`
@@ -167,7 +170,7 @@ reads and writes its own folder through the `storage.*` commands (see
 number in millimetres (default 0.05). It returns `body`, its owning `component`,
 `frame: "component-local-mm"`, `positions: [[x,y,z], ...]` and `triangles: [[i,j,k], ...]`. Indices are
 zero-based. The mesh is of the evaluated body, rather than only the original import's vertices.
-The command refuses more than 8192 vertices or 16384 triangles. A plugin's host-call result must
+Corners at exactly the same position are handed over once and shared by their triangles (no position moves), so a mesh body that stores three corners per triangle counts its distinct points. The command refuses more than 8192 vertices or 16384 triangles after that, naming the counts. A plugin's host-call result must
 also fit the JSON byte limit; a smaller mesh can still exceed that limit and be refused.
 No reconstruction, fitting, sewing, mesh replacement or conversion algorithm is part of this API.
 

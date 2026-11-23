@@ -49,6 +49,11 @@ macro_rules! layout_preferences {
             drawing_panel_width: f32 = 320.0, PAGE_LAYOUT, accept(240.0..=560.0);
             /// Drawing sheet strip placement; independent of Design's feature history.
             drawing_sheet_dock: String = "top".into(), PAGE_LAYOUT;
+            /// With several features selected, an entry of a feature's menu (History bar, vertical
+            /// History, Browser) acts on all of them or cannot be used. Off: the menus as they were, where
+            /// Edit, Rename, Suppress, Roll back, Find and Copy Message act on the right-clicked feature
+            /// alone.
+            feature_menus_act_on_selection: bool = true, PAGE_LAYOUT;
             /// While a file opens, is inserted or its links are read again, the design waits for it
             /// behind a card with the file's progress and Cancel, as it always did. Off (the default): the
             /// operation is a row of the operations panel and the design stays usable meanwhile.

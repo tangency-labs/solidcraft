@@ -188,6 +188,8 @@ mod motion_simulate;
 mod notes;
 mod parts;
 mod plugin;
+#[cfg(test)]
+pub(crate) use plugin::shared_corners as plugin_shared_corners;
 mod plugin_storage;
 mod point_cloud;
 mod point_cloud_deviation;
