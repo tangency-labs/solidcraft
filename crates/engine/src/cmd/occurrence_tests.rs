@@ -2909,3 +2909,34 @@ fn skeleton_refuses_solid_bodies_and_set_kind_checks() {
     run(&mut s, "component.set_kind", json!({"component": empty, "kind": "normal"}));
     assert!(!s.doc.is_skeleton(empty));
 }
+
+/// A component that owns a body only through the older `body_components` assignment (no solid
+/// feature of its own) still holds a solid: it cannot become a skeleton, and the refusal leaves
+/// the design as it was.
+#[test]
+fn set_kind_refuses_a_skeleton_for_a_component_owning_a_body_by_assignment() {
+    let mut s = Session::default();
+    let (part, _) = created(&mut s, "Part");
+    s.doc_mut().body_components.insert("Legacy".into(), part);
+    let before = s.doc.clone();
+    let e = s.execute("component.set_kind", &json!({"component": part, "kind": "skeleton"})).unwrap_err().to_string();
+    assert!(e.contains("not supported yet") && e.contains("skeleton"), "{e}");
+    assert_eq!(s.doc, before);
+    assert!(!s.doc.is_skeleton(part));
+}
+
+/// `timeline.add` of a solid feature into a skeleton component is refused, and the design is
+/// left as it was.
+#[test]
+fn timeline_add_refuses_a_solid_feature_in_a_skeleton() {
+    let mut source = Session::default();
+    run(&mut source, "solid.box", json!({"length": 10, "width": 10, "height": 10}));
+    let mut solid = serde_json::to_value(source.doc.features.last().unwrap()).unwrap();
+    let mut s = Session::default();
+    let skeleton = run(&mut s, "component.create_skeleton", json!({}))["component"].as_u64().unwrap();
+    solid["component"] = json!(skeleton);
+    let before = s.doc.clone();
+    let e = s.execute("timeline.add", &json!({"feature": solid})).unwrap_err().to_string();
+    assert!(e.contains("not supported yet") && e.contains("skeleton"), "{e}");
+    assert_eq!(s.doc, before);
+}
