@@ -230,6 +230,7 @@ fn offset_refused(
         OffsetFailure::ExactCurveUncut => OffsetRefusal::ExactCurveUncut,
         OffsetFailure::FacesApart { .. } => OffsetRefusal::FacesApart,
         OffsetFailure::PastSide { largest, .. } => OffsetRefusal::PastSide { largest },
+        OffsetFailure::FaceCloses { largest, .. } => OffsetRefusal::FaceCloses { largest },
         OffsetFailure::ReachUncertified { .. } => OffsetRefusal::ReachUncertified,
         OffsetFailure::LoopGapUncertified { .. } => OffsetRefusal::LoopGapUncertified,
         OffsetFailure::Unsound { what } => match unsound(what, index) {

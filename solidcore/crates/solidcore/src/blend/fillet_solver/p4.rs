@@ -4483,9 +4483,11 @@ mod tests_c6 {
         assert!(!e.is_unported());
         assert_eq!(
             e,
-            SolidError::blend_failed(
+            SolidError::blend_solver(
                 "blend::fillet_solver::p1",
-                "the base solver sets up no offset values"
+                crate::error::blend::SolverFailure::BaseSolverMethod(
+                    crate::error::blend::BaseSolverMethod::SetupOffsetValues
+                )
             )
         );
     }
