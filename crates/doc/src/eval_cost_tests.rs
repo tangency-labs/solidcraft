@@ -1717,22 +1717,41 @@ fn the_first_edit_after_opening_keeps_the_features_of_other_bodies() {
     assert!(model.results.iter().all(|r| r.error.is_none()), "{:?}", model.results.iter().find(|r| r.error.is_some()));
     let rounded = volume(&model, "B");
     assert!(rounded < 2000.0 - 1.0, "{rounded}");
-    let reopened = Model::adopt(&doc, &model.saved(&doc).unwrap()).unwrap();
+    let saved = model.saved(&doc).unwrap();
+    let reopened = Model::adopt(&doc, &saved).unwrap();
+    // The same file with the round's body keyed otherwise (saved by a version that keyed it
+    // another way): what the round changed is not taken back, the round is evaluated again.
+    let mut other_key = model.saved(&doc).unwrap();
+    // B as the round left it: the deepest of its records (a body keeps the feature that made it).
+    let rounded_b = other_key.records["model_bodies"]
+        .as_array_mut()
+        .unwrap()
+        .iter_mut()
+        .filter(|b| b["name"] == "B")
+        .max_by_key(|b| b["depth"].as_u64())
+        .unwrap();
+    assert_eq!(rounded_b["depth"], 3, "{rounded_b}");
+    rounded_b["key"] = serde_json::json!("deadbeef");
+    let rekeyed = Model::adopt(&doc, &other_key).unwrap();
     let a = doc.features.first().unwrap().id;
     if let FeatureKind::Box { length, .. } = &mut doc.feature_mut(a).unwrap().kind {
         *length = "25".into();
     }
-    let mut after = Vec::new();
-    for mut model in [model, reopened] {
-        let work = counted(|| model.evaluate(&doc));
-        assert_eq!(model.last_recomputed, 1, "only block A is evaluated again: {work:?}");
-        assert_eq!(work.blends, 0, "{work:?}");
-        assert!((volume(&model, "A") - 2500.0).abs() < 1e-6, "{}", volume(&model, "A"));
-        assert!((volume(&model, "B") - rounded).abs() < 1e-9, "{} then {rounded}", volume(&model, "B"));
+    let bodies = |model: &Model| {
         let st = model.state();
-        after.push(st.bodies.iter().map(|b| (b.name.clone(), b.key, crate::naming::face_names(b))).collect::<Vec<_>>());
+        st.bodies.iter().map(|b| (b.name.clone(), b.key, crate::naming::face_names(b))).collect::<Vec<_>>()
+    };
+    let mut fresh = Model::new();
+    fresh.evaluate(&doc);
+    let rebuilt = bodies(&fresh);
+    for (what, mut model, evaluated) in [("in the session", model, 1), ("opened", reopened, 1), ("opened, keyed otherwise", rekeyed, 2)] {
+        let work = counted(|| model.evaluate(&doc));
+        assert_eq!(model.last_recomputed, evaluated, "{what}: {work:?}");
+        assert_eq!(work.blends, evaluated - 1, "{what}: {work:?}");
+        assert!((volume(&model, "A") - 2500.0).abs() < 1e-6, "{what}: {}", volume(&model, "A"));
+        assert!((volume(&model, "B") - rounded).abs() < 1e-9, "{what}: {} then {rounded}", volume(&model, "B"));
+        assert_eq!(bodies(&model), rebuilt, "{what}: the same bodies, keys and face names as the design evaluated afresh");
     }
-    assert_eq!(after[0], after[1], "the opened design evaluates to the same bodies, keys and face names");
 }
 
 /// `comps` parts, each with `bodies` boxes, `sketches` sketches and `taps` taps, placed `copies`

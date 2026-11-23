@@ -1353,9 +1353,7 @@ impl ModelState {
                     b.bytes = if x.bytes > 0 { x.bytes } else { b.body.retained_bytes() };
                 }
                 None => {
-                    let mut h = std::collections::hash_map::DefaultHasher::new();
-                    (key, &b.name).hash(&mut h);
-                    let stamped = h.finish();
+                    let stamped = made_body_key(key, &b.name);
                     // A body a saved model kept, given back by what its feature read
                     // ([`Model::adopt`]), was stamped with this key when it was made: it keeps the
                     // names it was saved with, as the whole state taken back does, since its record
@@ -1396,6 +1394,14 @@ impl ModelState {
             self.sketch_keys.insert(feature, h.finish());
         }
     }
+}
+
+/// The key [`ModelState::stamp`] gives body `name` that a feature evaluated with cache key `key`
+/// made or changed.
+fn made_body_key(key: u64, name: &str) -> u64 {
+    let mut h = std::collections::hash_map::DefaultHasher::new();
+    (key, name).hash(&mut h);
+    h.finish()
 }
 
 /// Evaluation results by cache key, shared by a model and its copies (previews, scratch
