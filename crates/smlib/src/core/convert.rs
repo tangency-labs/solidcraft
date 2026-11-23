@@ -2310,8 +2310,14 @@ fn flat_to_brep_data(k: &Kernel, f: &In<'_>, s: &Shape) -> Result<BrepData> {
             i_cone += usize::from(ty == SURFACE_CONE_I);
             i_torus += usize::from(ty == SURFACE_TORUS_I);
             let nurbs = bspline_surface_3d(f, &mut nurbs_cursor)?;
-            analytic_of_nurbs(k, &nurbs, ty, xsect)?
-                .ok_or_else(|| Error::Solidcore(format!("flat arrays: face {i}: a NURBS form that is not its analytic surface")))?
+            match analytic_of_nurbs(k, &nurbs, ty, xsect)? {
+                Some(analytic) => analytic,
+                // A cone whose ends are closer along its axis than SMLib names a cone (a shoulder
+                // a few ten-thousandths of a millimetre deep) is its NURBS form, exactly: the face
+                // keeps that, on the range and trims it already carries.
+                None if ty == SURFACE_CONE_I => Surface::from(nurbs),
+                None => return Err(Error::Solidcore(format!("flat arrays: face {i}: a NURBS form that is not its analytic surface"))),
+            }
         } else if ty == SURFACE_SPHERE_I {
             let j = i_sphere;
             i_sphere += 1;
