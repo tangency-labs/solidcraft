@@ -290,6 +290,7 @@ fn relief(x: r::Relief) -> k::Relief {
     match x {
         r::Relief::None => k::Relief::None,
         r::Relief::Notch => k::Relief::Notch,
+        r::Relief::Outline => k::Relief::Outline,
         r::Relief::Slot { width, depth } => k::Relief::Slot { width, depth },
         r::Relief::Tear { normal, offset } => k::Relief::Tear {
             normal: vec3(normal),
@@ -302,6 +303,7 @@ fn record_relief(x: k::Relief) -> r::Relief {
     match x {
         k::Relief::None => r::Relief::None,
         k::Relief::Notch => r::Relief::Notch,
+        k::Relief::Outline => r::Relief::Outline,
         k::Relief::Slot { width, depth } => r::Relief::Slot { width, depth },
         k::Relief::Tear { normal, offset } => r::Relief::Tear {
             normal: record_vec3(normal),

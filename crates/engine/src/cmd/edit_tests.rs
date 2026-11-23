@@ -1303,6 +1303,21 @@ fn counted_body_names_stay_when_the_timeline_changes() {
     assert_eq!(bodies(&s), named(&[("Body2", "B"), ("Body3", "C"), ("Body4", "E")]));
 }
 
+/// Once every feature is deleted no body keeps a number, so the next body is `Body1` again, in a
+/// design that was saved and opened in between (#20922).
+#[test]
+fn deleting_every_body_feature_starts_body_names_again_at_body1() {
+    let mut s = Session::default();
+    for (name, x) in [("A", 0), ("B", 20)] {
+        run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 5, "corner": [x, 0, 0], "name": name}));
+    }
+    let mut s = Session::opened_at(solidcraft_doc::Document::from_json(&s.doc.to_json()).unwrap(), None, None);
+    run(&mut s, "timeline.delete", json!({"features": ["A", "B"]}));
+    run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 5, "name": "C"}));
+    let names: Vec<String> = s.model.state().bodies.iter().map(|b| b.name.clone()).collect();
+    assert_eq!(names, vec!["Body1".to_string()]);
+}
+
 /// A design saved before body names were pinned, and saved rolled back, is pinned as it opens
 /// for the features after the marker too (#14008): a body made at the marker does not take the
 /// number of a later body, so the later bodies keep the names they were saved with and a combine

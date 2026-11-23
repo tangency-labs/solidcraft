@@ -9,7 +9,7 @@ use solidcraft_geom::prelude::*;
 use std::collections::BTreeMap;
 
 use solidcore_record::Vec2;
-use solidcraft_sketch::{EquationCurve, MAX_COORD, MAX_EQUATION_TEXT, MAX_SPLINE_POINTS, Sketch, VariableUnit, fit_beziers_mode};
+use solidcraft_sketch::{EquationCurve, MAX_COORD, MAX_EQUATION_TEXT, MAX_SPLINE_POINTS, Sketch, VariableUnit, bezier_distance, fit_beziers_mode};
 
 use crate::expr::{self, Defaults, Kind, Value};
 use crate::{DocError, Result};
@@ -180,25 +180,6 @@ fn check_samples(points: &[Vec2], closed: bool) -> Result<()> {
 }
 
 /// Distance from `q` to the cubic Bézier `b`, sampled finely.
-fn bezier_distance(b: &[Vec2; 4], q: Vec2) -> f64 {
-    const STEPS: usize = 32;
-    let at = |t: f64| {
-        let s = 1.0 - t;
-        b[0] * (s * s * s) + b[1] * (3.0 * t * s * s) + b[2] * (3.0 * t * t * s) + b[3] * (t * t * t)
-    };
-    let mut best = f64::INFINITY;
-    let mut prev = at(0.0);
-    for i in 1..=STEPS {
-        let next = at(i as f64 / STEPS as f64);
-        let d = next - prev;
-        let l2 = d.len2();
-        let t = if l2 > 0.0 { ((q - prev).dot(d) / l2).clamp(0.0, 1.0) } else { 0.0 };
-        best = best.min(q.dist(prev + d * t));
-        prev = next;
-    }
-    best
-}
-
 /// How far the spline through `points` strays from the formulas: the largest distance from the
 /// formulas' points a quarter, a half and three quarters of the way between two samples to the
 /// spline's piece between them.
