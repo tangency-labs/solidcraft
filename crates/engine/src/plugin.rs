@@ -28,6 +28,13 @@ pub fn configure_process_plugins(plugins: Option<PathBuf>, keep_grants: bool) ->
     }
     PROCESS_PLUGINS.set((plugins, keep_grants)).map_err(|_| error("the process plugins folder is already configured"))
 }
+/// Keeps compiled plugin components between sessions in the `plugin-compile` folder of the per-user
+/// cache folder ([`crate::recovery::cache_dir`]), so a large importer compiles once per version
+/// rather than at the first file of every session. Call it once at startup, before any plugin runs.
+pub fn configure_compile_cache() {
+    #[cfg(all(feature = "plugins", any(target_arch = "x86_64", target_arch = "aarch64")))]
+    craft_plugin_wasm::set_compile_cache_dir(crate::recovery::cache_dir().map(|dir| dir.join("plugin-compile")));
+}
 pub fn configure_process_host_limits(limits: HostLimits) -> Result<()> {
     limits.validate()?;
     PROCESS_HOST_LIMITS.set(limits).map_err(|_| error("process plugin host limits are already configured"))
@@ -194,6 +201,9 @@ pub fn parse_manifest(text: &[u8], folder: &str) -> Result<Manifest> {
                 "runtime.permissions.command_groups",
                 format!("unknown command group `{group}`; SolidCraft has {}", COMMAND_GROUPS.join(", ")),
             ));
+        }
+        if runtime.is_exporter() {
+            export::refuse_unreadable(runtime)?;
         }
         let storage = manifest.capabilities.iter().any(|capability| capability.starts_with("storage@"));
         for command in &runtime.commands {
@@ -491,9 +501,12 @@ fn run_package(session: &mut Session, package: Package, entry: &str, params: &se
         let value = result?;
         if !std::sync::Arc::ptr_eq(&session.doc, &host.session.doc)
             || session.active_sketch != host.session.active_sketch
+            || session.sketching_view != host.session.sketching_view
+            || !host.session.sketch_finish_events.is_empty()
+            || host.session.edit_start_sequence != 0
             || session.pending_moves != host.session.pending_moves
         {
-            session.accept_computed(host.session);
+            session.accept_computed(host.session)?;
         } else {
             session.plugin_state.link_changes = host.session.plugin_state.link_changes;
             std::sync::Arc::make_mut(&mut session.plugin_state.link_reads).extend(host.session.plugin_state.link_reads.iter().copied());
@@ -519,6 +532,7 @@ fn run_package(session: &mut Session, package: Package, entry: &str, params: &se
 
 pub mod check;
 mod events;
+mod export;
 pub use events::{LinkChange, design_changed, design_notifications};
 pub(crate) use events::{record_changed_link_reads, record_link_change, record_link_reads};
 mod form;
@@ -533,7 +547,8 @@ pub mod storage;
 #[cfg(not(target_arch = "wasm32"))]
 pub use package::{remove, store_grants, validate_grants};
 
-pub use import::{Importer, describe as describe_importers, import_file, importer_for, importers, open_filters};
+pub use export::{describe as describe_exporters, export_file, exporter_for, exporters};
+pub use import::{FormatSlot, Importer, describe as describe_importers, format_slots, import_file, importer_for, importers, open_filters};
 pub use messages::PluginFailure;
 #[cfg(test)]
 mod tests;
@@ -577,6 +592,18 @@ impl SolidCraftHost {
     }
 }
 
+/// A storage call's error as the plugin gets it: the host's own (a permission, a limit) as it is,
+/// a bad name or range as invalid input it can act on, anything else as the call failing.
+fn storage_error(call: &str, error: crate::EngineError) -> HostError {
+    if let Some(host) = error.host_error() {
+        return host.clone();
+    }
+    match error {
+        crate::EngineError::BadParams { .. } => HostError::InvalidInput { field: call.into(), reason: error.to_string() },
+        error => HostError::CommandFailed { command: call.into(), reason: error.to_string() },
+    }
+}
+
 /// The commands an importer may run on its own design to check it: they read the model, and
 /// `timeline.roll_to` moves only that private session's marker.
 pub const EVALUATE_COMMANDS: &[&str] = &["document.inspect", "inspect.measure", "model.edges", "model.faces", "timeline.roll_to"];
@@ -608,6 +635,21 @@ impl PluginHost for SolidCraftHost {
     }
     fn evaluate_close(&mut self) {
         self.evaluation = None;
+    }
+    fn storage_put_blob(&mut self, name: &str, data: &[u8], cache: bool, append: bool) -> craft_plugin::Result<u64> {
+        let s = self
+            .transaction
+            .as_mut()
+            .ok_or_else(|| HostError::CommandFailed { command: "storage.put-blob".into(), reason: "no active transaction".into() })?;
+        storage::write_blob(s, name, data, cache, append).map_err(|e| storage_error("storage.put-blob", e))
+    }
+    fn storage_get_blob(&mut self, plugin: Option<&str>, name: &str, offset: u64, len: u32) -> craft_plugin::Result<Vec<u8>> {
+        let s = self.transaction.as_ref().unwrap_or(&self.session);
+        storage::read_blob(s, plugin, name, offset, len).map(|read| read.data).map_err(|e| storage_error("storage.get-blob", e))
+    }
+    fn storage_get_document(&mut self, plugin: Option<&str>, offset: u64, len: u32) -> craft_plugin::Result<Vec<u8>> {
+        let s = self.transaction.as_ref().unwrap_or(&self.session);
+        storage::read_document(s, plugin, offset, len).map(|(data, _)| data).map_err(|e| storage_error("storage.get-document", e))
     }
     fn command_catalog(&self) -> Vec<CommandSchema> {
         crate::command_specs()
@@ -655,6 +697,7 @@ impl PluginHost for SolidCraftHost {
             _ => Default::default(),
         };
         let s = self.transaction.as_mut().ok_or_else(|| HostError::CommandFailed { command: name.into(), reason: "no active transaction".into() })?;
+        let finish_sequence = s.sketch_finish_sequence;
         let camera_before = s.camera;
         let before = s.doc.clone();
         let previous: BTreeMap<_, _> = s.model.results.iter().map(|r| (r.id, r.error.clone())).collect();
@@ -670,6 +713,9 @@ impl PluginHost for SolidCraftHost {
             return Err(HostError::CommandFailed { command: name.into(), reason: failed.error.clone().unwrap_or_default() });
         }
         let camera_after = s.camera;
+        for event in s.sketch_finish_events.iter().filter(|event| event.sequence > finish_sequence && event.domain == crate::SketchDomain::Model) {
+            self.sketch_exits.push(Some(event.sketch));
+        }
         if matches!(name, "sketch.finish" | "sketch.cancel") {
             self.sketch_exits.push(reply.get("sketch").and_then(Value::as_u64));
         }
@@ -691,9 +737,14 @@ impl PluginHost for SolidCraftHost {
         // Session::execute(plugin.run) owns the one outer undo step.
         if !std::sync::Arc::ptr_eq(&self.session.doc, &computed.doc)
             || self.session.active_sketch != computed.active_sketch
+            || self.session.sketching_view != computed.sketching_view
+            || !computed.sketch_finish_events.is_empty()
+            || computed.edit_start_sequence != 0
             || self.session.pending_moves != computed.pending_moves
         {
-            self.session.accept_computed(computed);
+            self.session
+                .accept_computed(computed)
+                .map_err(|error| HostError::InvalidInput { field: "transaction".into(), reason: error.to_string() })?;
         } else {
             self.session.plugin_state.link_changes = computed.plugin_state.link_changes;
             std::sync::Arc::make_mut(&mut self.session.plugin_state.link_reads).extend(computed.plugin_state.link_reads.iter().copied());
@@ -792,7 +843,8 @@ pub fn resolve_call(s: &Session, id: &str, params: &Value) -> Result<Option<Valu
 }
 
 /// `engine.describe` of an installed, enabled plugin's entry: a command entry as the
-/// `<plugin>.<entry>` command, an importer as the tool that opens its files; each with the
+/// `<plugin>.<entry>` command, an importer as the tool that opens its files, or an exporter as
+/// the tool that writes the open design; each with the
 /// schema `tools/list` gives it. Read with the app's authority, whatever the caller's folders.
 pub fn describe_entry(s: &Session, id: &str) -> Result<Option<Value>> {
     tools::describe(s, id)

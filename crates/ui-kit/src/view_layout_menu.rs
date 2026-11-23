@@ -41,6 +41,9 @@ pub struct LayoutText {
     pub equal: String,
     pub reset: String,
     pub clean: String,
+    pub save: String,
+    pub saved: String,
+    pub manage: String,
 }
 
 pub struct LayoutMenu {
@@ -53,6 +56,8 @@ pub struct LayoutMenu {
     pub can_link: bool,
     pub clean: bool,
     pub windows: Vec<LayoutWindow>,
+    pub saved: Vec<String>,
+    pub matching_saved: Option<String>,
 }
 
 pub struct LayoutWindow {
@@ -79,6 +84,7 @@ pub(crate) struct MenuOut {
 enum Flyout {
     Fill,
     Detach,
+    Saved,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -102,7 +108,7 @@ pub(crate) fn keep_open(action: &str) -> bool {
         || matches!(action, "layout.single" | "layout.side_by_side" | "layout.stacked" | "layout.large_and_two" | "layout.grid")
 }
 
-fn action(ui: &mut Ui, id: &str, label: &str, icon: &str, shortcut: &str, checked: Option<bool>) -> Response {
+fn action<'a>(ui: &mut Ui, id: &'a str, label: &'a str, icon: impl Into<crate::Icon<'a>>, shortcut: &'a str, checked: Option<bool>) -> Response {
     let mut row = MenuItem::new(id, label, icon);
     row.shortcut = shortcut;
     row.checked = checked;
@@ -113,7 +119,15 @@ fn action(ui: &mut Ui, id: &str, label: &str, icon: &str, shortcut: &str, checke
     response
 }
 
-fn flyout_row(ui: &mut Ui, id: &str, label: &str, icon: &str, value: &str, target: Flyout, open: &mut Option<Flyout>) -> Response {
+fn flyout_row<'a>(
+    ui: &mut Ui,
+    id: &'a str,
+    label: &'a str,
+    icon: impl Into<crate::Icon<'a>>,
+    value: &'a str,
+    target: Flyout,
+    open: &mut Option<Flyout>,
+) -> Response {
     let mut row = MenuItem::new(id, label, icon);
     row.shortcut = value;
     row.submenu = true;
@@ -290,6 +304,27 @@ fn detach_action(ui: &mut Ui, data: &LayoutMenu, focus_first: bool) -> Option<St
     chosen
 }
 
+fn saved_action(ui: &mut Ui, data: &LayoutMenu, focus_first: bool) -> Option<String> {
+    Menu::heading(ui, &data.text.saved);
+    let mut picked = None;
+    for (index, name) in data.saved.iter().enumerate() {
+        let id = format!("layout.saved.{name}");
+        let checked = data.matching_saved.as_ref() == Some(name);
+        let response = action(ui, &id, name, "", "", Some(checked));
+        if focus_first && (checked || index == 0) {
+            response.request_focus();
+        }
+        if response.clicked() {
+            picked = Some(id);
+        }
+    }
+    Menu::separator(ui);
+    if action(ui, "layout.manage", &data.text.manage, "", "", None).clicked() {
+        picked = Some("layout.manage".into());
+    }
+    picked
+}
+
 pub(crate) fn show(ui: &mut Ui, strip: &TabStrip, data: &LayoutMenu, opened: u64) -> MenuOut {
     let flags = sections(data);
     let id = strip.id.with(("layout_menu", opened));
@@ -332,16 +367,25 @@ pub(crate) fn show(ui: &mut Ui, strip: &TabStrip, data: &LayoutMenu, opened: u64
     if action(ui, "layout.clean", &data.text.clean, "", "F11", Some(data.clean)).clicked() {
         picked = Some("layout.clean".into());
     }
+    Menu::separator(ui);
+    let glyph = |p: &egui::Painter, rect, opacity| paint_view_glyph(p, rect, "tiles", Tokens::get().text_dim.gamma_multiply(opacity));
+    let icon = crate::Icon::Paint(&glyph);
+    if action(ui, "layout.save_view", &data.text.save, icon, "", None).clicked() {
+        picked = Some("layout.save_view".into());
+    }
+    let saved_row = (!data.saved.is_empty()).then(|| flyout_row(ui, "layout.saved", &data.text.saved, icon, "", Flyout::Saved, &mut open));
     let mut submenu = None;
     if let Some((flyout, anchor)) = open.and_then(|flyout| match flyout {
         Flyout::Fill => Some((flyout, &fill_row)),
         Flyout::Detach => detach_row.as_ref().map(|row| (flyout, row)),
+        Flyout::Saved => saved_row.as_ref().map(|row| (flyout, row)),
     }) {
         let child = Menu::submenu(ui.ctx(), id.with("flyout_area"), anchor.rect, FLYOUT_WIDTH, false, |ui| {
             let focus_first = old_open != open;
             match flyout {
                 Flyout::Fill => fill_action(ui, strip, data, &fills, focus_first),
                 Flyout::Detach => detach_action(ui, data, focus_first),
+                Flyout::Saved => saved_action(ui, data, focus_first),
             }
         });
         submenu = Some(child.response.rect);

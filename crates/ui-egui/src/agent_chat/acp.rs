@@ -242,16 +242,28 @@ the chat, and each message allows a limited number of changes."
     };
 }
 
+/// How drawings are made: part of every session's note.
+macro_rules! drawing_note {
+    () => {
+        " On a drawing, make section views and their section lines with `drawing.view.section`, and dimensions with \
+`drawing.dimension.add` or `drawing.dimension.from_model`, never with free sketch lines or text notes: those do not move with their \
+view, cannot be selected as section lines or dimensions, and do not update the model. If a drawing object has no command, say so \
+and explain the limitation instead of drawing an imitation."
+    };
+}
+
 /// What every session is told about where it is. An agent with no route for it in
 /// [`session_new_params`] doesn't get it.
-pub const SYSTEM_NOTE: &str = concat!(design_note!(), " Don't use shell or file tools: work through the SolidCraft tools. Keep answers short.");
+pub const SYSTEM_NOTE: &str =
+    concat!(design_note!(), " Don't use shell or file tools: work through the SolidCraft tools.", drawing_note!(), " Keep answers short.");
 
 /// The note when the user lets the agent use the computer (`agent_computer_access`).
 pub const SYSTEM_NOTE_COMPUTER: &str = concat!(
     design_note!(),
     " The user has also given you this computer: your own shell, file and web tools are on, and SolidCraft's file \
-commands reach any folder. Change the open design only through the SolidCraft tools, never by editing its file. \
-Keep answers short."
+commands reach any folder. Change the open design only through the SolidCraft tools, never by editing its file.",
+    drawing_note!(),
+    " Keep answers short."
 );
 
 /// The most of the user's custom instructions (#8220) a session gets, in characters: the
@@ -769,6 +781,17 @@ mod tests {
         // their server, e.g. `mcp__solidcraft-app__batch`).
         assert!(BRIDGE_NAME.contains("solidcraft"));
         assert!(is_bridge_tool(&format!("mcp__{BRIDGE_NAME}__batch"), Some("other")));
+    }
+
+    /// #20731: the note sends drawing work to the real commands and says to explain a limitation
+    /// rather than imitate a section line or a dimension with free lines or text.
+    #[test]
+    fn the_note_names_the_drawing_commands_and_forbids_imitations() {
+        for name in ["drawing.view.section", "drawing.dimension.add", "drawing.dimension.from_model"] {
+            assert!(SYSTEM_NOTE.contains(name), "{name}");
+        }
+        assert!(SYSTEM_NOTE.contains("never with free sketch lines or text notes"));
+        assert!(SYSTEM_NOTE.contains("explain the limitation instead of drawing an imitation"));
     }
 
     /// Only the whole name of a tool of the chat's own server counts, whatever else a title holds.

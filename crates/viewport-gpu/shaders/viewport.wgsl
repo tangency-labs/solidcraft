@@ -2,7 +2,7 @@
 struct U {
     vp: mat4x4<f32>,
     back: vec4<f32>,   // xyz = toward the eye, w = 1 for linear output
-    screen: vec4<f32>, // viewport width, height (px), unused, silhouettes on (1)
+    screen: vec4<f32>, // viewport width, height (px), one past the last motion slot that moves (0: none), silhouettes on (1)
     clip: array<vec4<f32>, 6>, // section planes: normal, d each, the first ones (zero normal: unused)
     cap: vec4<f32>,    // colour of the inside of cut bodies
     ana: vec4<f32>,    // surface analysis: mode (1 zebra, 2 draft, 3 curvature, 6 values), parameter
@@ -15,7 +15,7 @@ struct U {
     // blocked; curvature flat, middle, tight
     ana_c: array<vec4<f32>, 8>,
     ana_f: vec4<f32>,  // x = 1: stripe the negative draft and blocked faces
-    depth: vec4<f32>,  // x = 1: reversed depth (1 near, 0 far); y, z: the faces' push (`FACE_BIAS`)
+    depth: vec4<f32>,  // x = 1: reversed depth (1 near, 0 far); y, z: the faces' push (`FACE_BIAS`); w: the first motion slot that moves
     // Where the drawn geometry is moved in the world: identity, or a dragged component's move
     // from where its scene was built (`MovingLayer`)
     model: mat4x4<f32>,
@@ -42,6 +42,19 @@ fn turned(n: vec3<f32>) -> vec3<f32> {
 
 fn reversed() -> bool {
     return u.depth.x > 0.5;
+}
+
+/// The depth steps a pipeline's surfaces are pushed away from the eye (negative: toward it) with
+/// reversed depth, each 2⁻²³ of the vertex's own depth (`face_push` in view.rs). The GPU's
+/// constant bias in a float buffer counts steps at the triangle's largest depth instead, so a
+/// long triangle (one cut by the near plane, which is then 1) went back by a share of the depth
+/// range where it was near the eye: millimetres, and a face behind it showed through (#21024).
+override FACE_PUSH: f32 = 0.0;
+
+/// Clip position `c` pushed by [`FACE_PUSH`]: its depth scaled, so every point of a triangle
+/// goes back by steps of its own depth (as `pushed` does for a depth a shader writes).
+fn face_pushed(c: vec4<f32>) -> vec4<f32> {
+    return vec4<f32>(c.xy, c.z * (1.0 - FACE_PUSH * 1.1920929e-7), c.w);
 }
 
 /// Clip-space depth measured the usual way (0 at the near plane, w at the far one), whichever
@@ -84,6 +97,54 @@ fn palette_entry(i: u32) -> vec2<u32> {
     return textureLoad(pal, vec2<i32>(i32(i & 2047u), i32(i >> 11u)), 0).xy;
 }
 
+// The rigid motions bodies are drawn moved by (`motions.rs`): three texels a slot, the rows of
+// the motion less the identity (a zeroed slot moves nothing), 512 slots to a row. A palette
+// entry names its body's slot above the hatch byte of its second word. A texture like the
+// palette, so WebGL2 reads it in the vertex stage too.
+@group(0) @binding(7) var motions: texture_2d<f32>;
+
+/// The motion slot palette entry `e` names when it is one that moves this frame, else 0: only
+/// a slot from `U.depth.w` up to `U.screen.z` has a motion to read, so a frame that moves
+/// nothing, and every body outside that range, reads nothing more than it did.
+fn motion_of(e: vec2<u32>) -> u32 {
+    let m = f32(e.y >> 8u);
+    if (m >= u.screen.z || m < u.depth.w) { return 0u; }
+    return e.y >> 8u;
+}
+
+/// A placement's motion: the slot `s` its own word names, else the one its entry `e` names
+/// (`motion_of`). Copies of a part share their entries, not their motions.
+fn placement_motion(s: u32, e: vec2<u32>) -> u32 {
+    if (s == 0u) { return motion_of(e); }
+    let m = f32(s);
+    if (m >= u.screen.z || m < u.depth.w) { return 0u; }
+    return s;
+}
+
+/// `motion_of` for palette index `c`, for a stage that does not read the entry otherwise.
+fn motion_at(c: u32) -> u32 {
+    if (u.screen.z < 0.5) { return 0u; }
+    return motion_of(palette_entry(c));
+}
+
+/// Row `k` of motion `m`, less the identity.
+fn motion_row(m: u32, k: i32) -> vec4<f32> {
+    return textureLoad(motions, vec2<i32>(i32(m & 511u) * 3 + k, i32(m >> 9u)), 0);
+}
+
+/// A body's point moved by its motion `m`, then placed like the rest of its scene (`placed`).
+fn placed_by(m: u32, p: vec3<f32>) -> vec3<f32> {
+    if (m == 0u) { return placed(p); }
+    let q = vec4<f32>(p, 1.0);
+    return placed(p + vec3<f32>(dot(motion_row(m, 0), q), dot(motion_row(m, 1), q), dot(motion_row(m, 2), q)));
+}
+
+/// A body's direction turned by its motion `m`, then like the rest of its scene (`turned`).
+fn turned_by(m: u32, n: vec3<f32>) -> vec3<f32> {
+    if (m == 0u) { return turned(n); }
+    return turned(n + vec3<f32>(dot(motion_row(m, 0).xyz, n), dot(motion_row(m, 1).xyz, n), dot(motion_row(m, 2).xyz, n)));
+}
+
 // The palette's PBR materials (`Material` in view.rs): for palette row r, texel row 2r holds each
 // entry's linear base colour and a PBR flag, row 2r + 1 its metallic fraction, roughness and IOR.
 @group(0) @binding(2) var pbr_materials: texture_2d<f32>;
@@ -109,13 +170,11 @@ fn palette(i: u32) -> vec4<f32> {
     return unpack_color(palette_entry(i).x);
 }
 
-fn to_linear(c: vec3<f32>) -> vec3<f32> {
-    return select(c, pow((c + vec3<f32>(0.055)) / vec3<f32>(1.055), vec3<f32>(2.4)), c > vec3<f32>(0.04045));
-}
-
+/// A display colour as the target wants it: decoded to linear light for an sRGB target, whose
+/// encoding then gives the same bytes back.
 fn out_color(c: vec4<f32>) -> vec4<f32> {
     if (u.back.w > 0.5) {
-        return vec4<f32>(to_linear(c.rgb), c.a);
+        return vec4<f32>(srgb_decode(c.rgb), c.a);
     }
     return c;
 }
@@ -154,12 +213,13 @@ fn vs_tri_planned(@location(0) local: vec3<f32>, @location(1) n: vec3<f32>, @loc
 /// A triangle vertex at `local` with normal `n` in palette entry `c`, without a value.
 fn tri_vertex(local: vec3<f32>, n: vec3<f32>, c: u32) -> TOut {
     var o: TOut;
-    let p = placed(local);
-    o.pos = u.vp * vec4<f32>(p, 1.0);
-    o.n = turned(n);
     let e = palette_entry(c);
+    let m = motion_of(e);
+    let p = placed_by(m, local);
+    o.pos = face_pushed(u.vp * vec4<f32>(p, 1.0));
+    o.n = turned_by(m, n);
     o.c = unpack_color(e.x);
-    o.h = finish_h(c, e.y);
+    o.h = finish_h(c, e.y & 255u);
     o.wp = p;
     return o;
 }
@@ -176,16 +236,18 @@ fn vs_tri_inst(
     @location(4) r1: vec4<f32>,
     @location(5) r2: vec4<f32>,
     @location(6) c: u32,
+    @location(9) s: u32,
 ) -> TOut {
     let q = vec4<f32>(p, 1.0);
-    let wp = placed(vec3<f32>(dot(r0, q), dot(r1, q), dot(r2, q)));
+    let e = palette_entry(c);
+    let m = placement_motion(s, e);
+    let wp = placed_by(m, vec3<f32>(dot(r0, q), dot(r1, q), dot(r2, q)));
     let pn = vec3<f32>(dot(r0.xyz, n), dot(r1.xyz, n), dot(r2.xyz, n));
     var o: TOut;
-    o.pos = u.vp * vec4<f32>(wp, 1.0);
-    o.n = turned(pn);
-    let e = palette_entry(c);
+    o.pos = face_pushed(u.vp * vec4<f32>(wp, 1.0));
+    o.n = turned_by(m, pn);
     o.c = unpack_color(e.x);
-    o.h = finish_h(c, e.y);
+    o.h = finish_h(c, e.y & 255u);
     o.wp = wp;
     return o;
 }
@@ -210,15 +272,16 @@ fn vs_tri_inst_flat(
     @location(4) r1: vec4<f32>,
     @location(5) r2: vec4<f32>,
     @location(6) c: u32,
+    @location(9) s: u32,
 ) -> FOut {
     let q = vec4<f32>(p, 1.0);
-    let wp = placed(vec3<f32>(dot(r0, q), dot(r1, q), dot(r2, q)));
-    var o: FOut;
-    o.pos = u.vp * vec4<f32>(wp, 1.0);
-    o.rp = wp - u.eye.xyz;
     let e = palette_entry(c);
+    let wp = placed_by(placement_motion(s, e), vec3<f32>(dot(r0, q), dot(r1, q), dot(r2, q)));
+    var o: FOut;
+    o.pos = face_pushed(u.vp * vec4<f32>(wp, 1.0));
+    o.rp = wp - u.eye.xyz;
     o.c = unpack_color(e.x);
-    o.h = finish_h(c, e.y);
+    o.h = finish_h(c, e.y & 255u);
     return o;
 }
 
@@ -825,7 +888,7 @@ fn lit(i: TOut, visibility: f32) -> vec4<f32> {
     return lit_color(i, visibility, i.c, true);
 }
 
-/// sRGB to linear light, exact (the straight segment too, which `to_linear` leaves out).
+/// sRGB to linear light, exact, with the straight segment near black.
 fn srgb_decode(c: vec3<f32>) -> vec3<f32> {
     return select(c / 12.92, pow((c + vec3<f32>(0.055)) / vec3<f32>(1.055), vec3<f32>(2.4)), c > vec3<f32>(0.04045));
 }
@@ -1057,7 +1120,7 @@ fn lifted_z(p: vec3<f32>, c: vec4<f32>, px: f32, half: vec2<f32>) -> f32 {
 
 @vertex
 fn vs_line(@builtin(vertex_index) vi: u32, @location(0) local_a: vec3<f32>, @location(1) local_b: vec3<f32>, @location(2) c: u32, @location(3) wbits: u32) -> LOut {
-    return line_vertex(vi, local_a, local_b, c, wbits);
+    return line_vertex(vi, local_a, local_b, c, wbits, motion_at(c));
 }
 
 /// A scene's own lines drawn again in another colour and width (a whole hovered body's edges,
@@ -1070,12 +1133,14 @@ fn vs_line_lit(@builtin(vertex_index) vi: u32, @location(0) local_a: vec3<f32>, 
     let eighths = style & 127u;
     var w = bitcast<u32>(f32(eighths) / 8.0);
     if ((style & 128u) != 0u) { w = 0x80000000u | (eighths << 24u); }
-    return line_vertex(vi % 6u, local_a, local_b, style >> 8u, w);
+    // Moved with the body whose line it is: the entry it was built with names the motion.
+    return line_vertex(vi % 6u, local_a, local_b, style >> 8u, w, motion_at(c));
 }
 
-fn line_vertex(vi: u32, local_a: vec3<f32>, local_b: vec3<f32>, c: u32, wbits: u32) -> LOut {
-    let a = placed(local_a);
-    let b = placed(local_b);
+/// A line from `local_a` to `local_b` in palette entry `c`, moved by motion `m` (0: none).
+fn line_vertex(vi: u32, local_a: vec3<f32>, local_b: vec3<f32>, c: u32, wbits: u32, m: u32) -> LOut {
+    let a = placed_by(m, local_a);
+    let b = placed_by(m, local_b);
     var pa = a;
     var pb = b;
     var ca = u.vp * vec4<f32>(a, 1.0);
@@ -1122,11 +1187,11 @@ fn line_vertex(vi: u32, local_a: vec3<f32>, local_b: vec3<f32>, c: u32, wbits: u
     var z = base.z;
     if (lifted && base.w > 1e-6) {
         let p = select(pa, pb, t > 0.5);
-        let g = grazing(p, turned(octahedral(wbits & 4095u)), turned(octahedral((wbits >> 12u) & 4095u)));
+        let g = grazing(p, turned_by(m, octahedral(wbits & 4095u)), turned_by(m, octahedral((wbits >> 12u) & 4095u)));
         z = lifted_z(p, base, wd * 0.5 * g + 1.0, half);
     }
     var o: LOut;
-    o.pos = vec4<f32>(base.xy + off / half * base.w, z, base.w);
+    o.pos = face_pushed(vec4<f32>(base.xy + off / half * base.w, z, base.w));
     let col = palette(c);
     o.c = vec4<f32>(col.rgb, col.a * (wa / wd));
     o.wp = select(pa, pb, t > 0.5);

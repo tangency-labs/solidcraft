@@ -53,8 +53,16 @@ use crate::{ControlRequest, SolveApp};
 use backend::{ChatBackend, Event, PermissionOption, PromptPart, ToolStatus};
 use solidcraft_ui_text::{format as trf, tr};
 
-pub(crate) use panel::{finish_shared, owns_keyboard_input, prepare_shared, request_new_chat, shared_content, tool_space};
-pub use panel::{show, tip as panel_tip, toggle, toggle_shortcut};
+pub(crate) use panel::finish_shared;
+pub(crate) use panel::owns_keyboard_input;
+pub(crate) use panel::prepare_shared;
+pub(crate) use panel::request_new_chat;
+pub(crate) use panel::shared_content;
+pub use panel::show;
+pub use panel::tip as panel_tip;
+pub use panel::toggle;
+pub use panel::toggle_shortcut;
+pub(crate) use panel::tool_space;
 
 /// Most entries kept in the conversation; older ones are dropped.
 const MAX_ITEMS: usize = 2000;
@@ -863,6 +871,8 @@ impl AgentChat {
 
     fn stop_backend(&mut self, wait: bool) {
         self.steering = false;
+        // A discarded backend can no longer finish the retired turn.
+        self.discard_end = false;
         // The next agent starts without this one's memory of the design.
         self.seen = None;
         if let Some(mut b) = self.backend.take() {
@@ -1233,6 +1243,28 @@ fn agent_dir(computer: bool) -> std::path::PathBuf {
     let var = if cfg!(windows) { "USERPROFILE" } else { "HOME" };
     let home = std::env::var_os(var).map(std::path::PathBuf::from).filter(|h| h.is_absolute() && h.is_dir());
     home.filter(|_| computer).unwrap_or_else(working_dir)
+}
+
+impl AgentChat {
+    /// Tell the backend the `agent_computer_access` preference when it changed since the backend
+    /// last heard it, so its next session follows it. A backend that was not started by connect
+    /// (a test's, a tab's) keeps the folder it was given until the preference changes.
+    #[cfg(not(target_arch = "wasm32"))]
+    fn push_computer(&mut self, computer: bool) {
+        if self.backend.is_none() {
+            return;
+        }
+        match self.computer_pushed {
+            None => self.computer_pushed = Some(computer),
+            Some(pushed) if pushed != computer => {
+                if let Some(b) = self.backend.as_mut() {
+                    b.set_computer(computer, &agent_dir(computer));
+                }
+                self.computer_pushed = Some(computer);
+            }
+            Some(_) => {}
+        }
+    }
 }
 
 /// Start the agent: the chat's control endpoint for its MCP bridge if needed, the process.
@@ -1881,7 +1913,7 @@ pub fn send_now(app: &mut SolveApp, ctx: &egui::Context) {
 }
 
 /// New chat: stop what runs (as Stop does), clear the conversation and the queue, and start a
-/// fresh session on the same agent (no restart); the agent and its mode stay, the design's undo
+/// fresh session with the selected agent; the agent and its mode stay, the design's undo
 /// history is untouched.
 pub fn new_chat(app: &mut SolveApp) {
     let running = app.agent_chat.state() == State::Busy;
@@ -1910,17 +1942,14 @@ pub fn new_chat(app: &mut SolveApp) {
     chat.stopped = false;
     chat.ended = None;
     chat.seen = None;
-    chat.discard_end = running;
+    chat.discard_end |= running;
     chat.model_revert = None;
     if matches!(chat.state(), State::Ready | State::Busy) {
         chat.restore_mode = Some(chat.mode.clone()).filter(|m| !m.is_empty());
         chat.state = Some(State::Starting);
+        #[cfg(not(target_arch = "wasm32"))]
+        chat.push_computer(computer);
         if let Some(b) = chat.backend.as_mut() {
-            #[cfg(not(target_arch = "wasm32"))]
-            {
-                b.set_computer(computer, &agent_dir(computer));
-                chat.computer_pushed = Some(computer);
-            }
             // Instructions edited since the last session apply from this one on.
             b.set_instructions(&app.preferences.agent_instructions);
             b.new_session();
@@ -2181,8 +2210,8 @@ pub fn answer_permission(app: &mut SolveApp, index: usize, option: Option<&str>)
 /// user is asked.
 fn on_permission(app: &mut SolveApp, key: u64, title: String, kind: Option<&str>, options: Vec<PermissionOption>) {
     let agent = app.agent_chat.running_id.clone();
-    let mode = agents::mode_for(&app.preferences, &agent);
-    let remembered = agents::always_allowed(&app.preferences, &agent, &title);
+    let mode = agents::mode_in_force(app, &agent);
+    let remembered = agents::always_allowed_in_force(app, &agent, &title);
     let why = if acp::is_bridge_tool(&title, kind) {
         Some("ui.ai_auto_ours")
     } else if remembered {
@@ -2352,6 +2381,8 @@ fn pump_tools(app: &mut SolveApp) {
     // A session opened with the computer (`agent_computer_access`) is not confined to the chat's
     // folder: the user let SolidCraft's file commands reach any folder (docs/agent-chat.md).
     let computer = app.agent_chat.backend.as_ref().is_some_and(|b| b.session_computer());
+    // The organization's permissions, when its policy sets them (see `agents::mode_in_force`).
+    let policy_mode = app.policy.locks("ai_permissions").then_some(app.preferences.ai_permissions);
     for mut req in rx.try_iter().take(64) {
         let refuse = |req: ControlRequest, e: String| {
             let _ = req.reply.send(json!({"ok": false, "error": e}));
@@ -2378,9 +2409,9 @@ fn pump_tools(app: &mut SolveApp) {
         }
         let undo_left = undo_len.saturating_sub(turn.start_undo.get::<UndoMark>().map_or(0, |m| m.depth));
         // The permission mode (the agent's own, else the global one) and "always allow" answers.
-        let mode = agents::mode_for(&app.preferences, &app.agent_chat.running_id);
+        let mode = policy_mode.unwrap_or_else(|| agents::mode_for(&app.preferences, &app.agent_chat.running_id));
         let tool = gate::tool_key(&req.method, &req.params);
-        let always = agents::always_allowed(&app.preferences, &app.agent_chat.running_id, &tool);
+        let always = policy_mode.is_none() && agents::always_allowed(&app.preferences, &app.agent_chat.running_id, &tool);
         // Plugin runs, named tools and importers ask in every mode, alone or as a batch step.
         let plugin_run = gate::runs_plugin(&req.method, &req.params) || crate::plugins::runs_plugin_code(&app.session, &req.method, &req.params);
         let judged = gate::request(&req.method, &req.params, undo_left);
@@ -2388,7 +2419,7 @@ fn pump_tools(app: &mut SolveApp) {
         // batch's file steps by their own ids), never by an answer for some other batch.
         let (tool, always) = if matches!(judged, gate::Verdict::Ask(_)) {
             let keys = gate::asking_keys(&req.method, &req.params, undo_left);
-            let always = keys.iter().all(|k| agents::always_allowed(&app.preferences, &app.agent_chat.running_id, k));
+            let always = policy_mode.is_none() && keys.iter().all(|k| agents::always_allowed(&app.preferences, &app.agent_chat.running_id, k));
             (keys.join("\n"), always)
         } else {
             (tool, always)
@@ -2512,21 +2543,7 @@ pub fn poll(app: &mut SolveApp, ctx: &egui::Context) {
     // control channel): the next session follows it in every state, so a login or New chat
     // from NeedsAuth does not open a session on a stale snapshot.
     #[cfg(not(target_arch = "wasm32"))]
-    if app.agent_chat.backend.is_some() {
-        let computer = app.preferences.agent_computer_access;
-        match app.agent_chat.computer_pushed {
-            // A backend that was not started by connect (a test's, a tab's) keeps what it
-            // was given until the preference changes.
-            None => app.agent_chat.computer_pushed = Some(computer),
-            Some(pushed) if pushed != computer => {
-                if let Some(b) = app.agent_chat.backend.as_mut() {
-                    b.set_computer(computer, &agent_dir(computer));
-                }
-                app.agent_chat.computer_pushed = Some(computer);
-            }
-            Some(_) => {}
-        }
-    }
+    app.agent_chat.push_computer(app.preferences.agent_computer_access);
     let events = app.agent_chat.backend.as_mut().map(|b| b.poll()).unwrap_or_default();
     for e in events {
         let ready = matches!(e, Event::Ready { .. });

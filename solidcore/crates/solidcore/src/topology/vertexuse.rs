@@ -88,7 +88,7 @@
 //!   part of this unit.
 
 use crate::error::topology::TopologyFailure;
-use crate::error::{EntityRef, Result, SolidError};
+use crate::error::{EntityRef, Failure, Result, SolidError, SM_ERR_NULL_POINTER};
 use crate::geom::attribute::AttributeStore;
 #[cfg(test)]
 use crate::geom::attribute::ObjectKey;
@@ -150,26 +150,6 @@ pub const fn is_kind_of(t: i64) -> bool {
 
 fn null(reason: &'static str) -> SolidError {
     SolidError::invalid_input(OP, reason)
-}
-
-/// `NER(ptr)` on a null pointer (`SM_ERR_NULL_POINTER`): `what`, which the vertex use
-/// `entity` needs, is missing.
-fn ner(entity: VertexuseId, what: &'static str) -> SolidError {
-    SolidError::topology_at(
-        OP,
-        TopologyFailure::Missing(what),
-        EntityRef::Vertexuse(entity),
-    )
-}
-
-/// `SER(SM_ERR)` / `return SM_ERR`: the vertex use `entity`'s routine could not continue,
-/// as the phrase says.
-fn failed(entity: VertexuseId, what: &'static str) -> SolidError {
-    SolidError::topology_at(
-        OP,
-        TopologyFailure::Failed(what),
-        EntityRef::Vertexuse(entity),
-    )
 }
 
 /// Ignores an ordinary upstream status; unported dependencies, cancellation and
@@ -261,9 +241,23 @@ pub fn compute_t_point(b: &Brep, vu: VertexuseId) -> Result<f64> {
     // for edgeuse type vertexuses
     if !is_edge_vertexuse(b, vu)? {
         // no TPoint to compute
-        return Err(failed(vu, "only an edge vertex use has a curve parameter"));
+        return Err(Failure::new(OP, TopologyFailure::NotAnEdgeVertexUse)
+            .at(EntityRef::Vertexuse(vu))
+            .into_error());
     }
-    let eu = edgeuse(b, vu)?.ok_or_else(|| ner(vu, "the vertex use's edge use"))?;
+    let eu = edgeuse(b, vu)?.ok_or_else(|| {
+        Failure::new(
+            OP,
+            TopologyFailure::Defect {
+                why: "the vertex use is of the edge kind but names no edge use; the \
+                    kernel sets the kind and the edge use together when it puts a \
+                    vertex use at an edge use's start",
+            },
+        )
+        .at(EntityRef::Vertexuse(vu))
+        .with_status(SM_ERR_NULL_POINTER)
+        .into_error()
+    })?;
     let e = eu1::edge(b, eu)?.ok_or_else(|| null("ComputeTPoint: edge use without edge"))?;
     let ivl = b.edge(e)?.interval;
 
@@ -1029,6 +1023,9 @@ fn global_point_solve(
     use crate::intersect::point_class::{PointClassType, PointClassification};
     use crate::query::face::p2::{face_surface_cache, point_classify, PointClassifyOptions};
 
+    // a face without loop uses has no trim boundaries: no test (asked of the face,
+    // not of when its cache was built)
+    let has_loopuses = crate::topology::face::p4::has_loopuses(b, f)?;
     let surface = face_surface(b, f)?.clone_for_evaluation()?;
     let lease = if surface.trim_cache_in_use() {
         None
@@ -1036,6 +1033,7 @@ fn global_point_solve(
         Some(face_surface_cache(k, b, f)?)
     };
     let test_on = point_test
+        && has_loopuses
         && lease.as_ref().is_some_and(|l| {
             l.trimmed && l.cache.base().point_test_enabled && !l.cache.base().face_was_modified
         });
@@ -1203,24 +1201,61 @@ fn uv_point_in<B: SectorBrep>(
         let r = b.vertex(v)?;
         (r.point, r.tolerance)
     };
-    let fu = faceuse(b, vu)?.ok_or_else(|| ner(vu, "the vertex use's face use"))?;
-    let f = b
-        .faceuse(fu)?
-        .face
-        .ok_or_else(|| ner(vu, "the face use's face"))?;
+    // a shell or wire vertex use has no face use: the caller's vertex use is not on a face
+    let fu = faceuse(b, vu)?.ok_or_else(|| {
+        Failure::new(OP, TopologyFailure::VertexUseNotOnFace)
+            .at(EntityRef::Vertexuse(vu))
+            .into_error()
+    })?;
+    let f = b.faceuse(fu)?.face.ok_or_else(|| {
+        Failure::new(
+            OP,
+            TopologyFailure::Defect {
+                why: "the face use the vertex use lies on names no face; the kernel \
+                    makes a face's two face uses with the face and never unlinks \
+                    one from it",
+            },
+        )
+        .at(EntityRef::Vertexuse(vu))
+        .with_status(SM_ERR_NULL_POINTER)
+        .into_error()
+    })?;
     if b.face(f)?.surface.is_none() {
-        return Err(ner(vu, "the face's surface"));
+        return Err(Failure::new(OP, TopologyFailure::FaceWithoutSurface)
+            .at(EntityRef::Vertexuse(vu))
+            .into_error());
     }
     let uv_domain = face_uv_domain(b, f)?;
     let nat_domain = or_give_up!(b.surface(f))?.natural_uv_domain_with_nurb(k)?;
 
     let sol = if is_edge_vertexuse(b, vu)? {
         // Edgeuse locals - thisEdgeuse->StartPt == CWEdgeuse->EndPt (with tolerances)
-        let eu = edgeuse(b, vu)?.ok_or_else(|| ner(vu, "the vertex use's edge use"))?;
-        let prev = b
-            .edgeuse(eu)?
-            .cw
-            .ok_or_else(|| ner(vu, "the edge use's clockwise neighbour"))?;
+        let eu = edgeuse(b, vu)?.ok_or_else(|| {
+            Failure::new(
+                OP,
+                TopologyFailure::Defect {
+                    why: "an edge vertex use whose face use was just read through its \
+                        edge use names no edge use; the face use lookup above returns \
+                        none for one without",
+                },
+            )
+            .at(EntityRef::Vertexuse(vu))
+            .with_status(SM_ERR_NULL_POINTER)
+            .into_error()
+        })?;
+        let prev = b.edgeuse(eu)?.cw.ok_or_else(|| {
+            Failure::new(
+                OP,
+                TopologyFailure::Defect {
+                    why: "the edge use of a face's loop has no clockwise neighbour; the \
+                        kernel links every edge use of a loop into a closed ring, in \
+                        which a lone edge use is its own neighbour",
+                },
+            )
+            .at(EntityRef::Vertexuse(vu))
+            .with_status(SM_ERR_NULL_POINTER)
+            .into_error()
+        })?;
 
         // try quick solution based on this (and prev) Vertexuse->Edgeuse->UVTrimCurve data
         // get this SurfaceUV for ThisEdgeuse start point from UVTrimCurve
@@ -1382,10 +1417,9 @@ fn uv_point_in<B: SectorBrep>(
                 ok_to_make,
             ))?;
             let Some(&first) = sols.first() else {
-                return Err(failed(
-                    vu,
-                    "the vertex does not drop onto the face's surface",
-                ));
+                return Err(Failure::new(OP, TopologyFailure::NoFootOnSurface)
+                    .at(EntityRef::Vertexuse(vu))
+                    .into_error());
             };
 
             // Use UVTrimCurves to choose the right drop point [B678]
@@ -1455,11 +1489,25 @@ fn uv_point_in<B: SectorBrep>(
         }
         // return only solution when just 1, or any solution when many (on a pole or seam)
         sols.first()
-            .ok_or_else(|| failed(vu, "the vertex does not drop onto the face's surface"))?
+            .ok_or_else(|| {
+                Failure::new(OP, TopologyFailure::NoFootOnSurface)
+                    .at(EntityRef::Vertexuse(vu))
+                    .into_error()
+            })?
             .uv
     } else {
         // default case: must be a ShellVertexuse
-        return Err(failed(vu, "a shell vertex use has no face parameters"));
+        return Err(Failure::new(
+            OP,
+            TopologyFailure::Defect {
+                why: "a vertex use with a face use is neither on an edge use nor on \
+                    a loop use; the face use lookup above returns none for a shell \
+                    vertex use and for one of unknown kind, so this branch is \
+                    never taken",
+            },
+        )
+        .at(EntityRef::Vertexuse(vu))
+        .into_error());
     };
 
     Ok(Some(sol))

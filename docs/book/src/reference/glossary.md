@@ -391,7 +391,7 @@ overlap are all multi-trims; `frame.multi_trim` sets how one corner of a frame i
 ### note
 
 Text on a sheet or a view of a drawing, in its fields and its words, that may point at the model
-with a leader. A note on a view moves with the view.
+with a leader. A note on a view moves with the view. Its alignment (left, centre or right, as a title block's) says which end of its text sits at its place, each line standing that way. A note saved before alignments has none: its block is centred and its lines start at the block's left edge, as they always did.
 
 - **In SolidCraft:** `drawing.note.add`, `drawing.note.edit` and `drawing.note.inspect`; a drawing's
   `notes`.
@@ -718,6 +718,8 @@ share a catalogue entry. Each meaning below gets its own term and, in time, its 
 | | how much room a clearance hole leaves around the bolt | clearance fit | the Hole dialog's Fit, `ui.clearance_fit` |
 | Flat | a hole's flat bottom | flat bottom | the Hole dialog's tip |
 | | a hem that lies flat on the sheet | flat hem | the Hem dialog's type |
+| Tab | flat material a sheet metal Tab adds to a panel | tab (sheet metal) | `sheet.tab`, `cmd.sheet_tab` |
+| | a page of the ribbon or of a document strip | tab (ribbon, document) | the ribbon tabs, the document tabs |
 | Round | a round relief or corner shape | round (shape) | relief shapes, plastic rests, ruled surface corners |
 | | a fillet | *fillet* | `solid.fillet` |
 | Normal | a sketch entity that isn't a construction entity | normal (line type) | the sketch palette's line type |
@@ -733,6 +735,12 @@ share a catalogue entry. Each meaning below gets its own term and, in time, its 
 Some translations show the clash today: Japanese and Chinese show a hole's flat bottom with the
 word for "unfold" or "plane", Chinese shows "Round" as "fillet", and Chinese and Russian show the
 Normal line type as "normal vector".
+
+## Mounting plate
+
+A separate, constant-thickness plate attached to a structural member's planar face,
+used as a base plate or bolted end plate. A bolt pattern describes the through holes
+in the plate; creating one does not drill or join the supporting member.
 
 ## Two commands, one label
 

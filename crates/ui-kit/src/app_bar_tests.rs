@@ -1,6 +1,792 @@
 //! The application bar from plain data, no app: what each click returns.
 use super::*;
 
+#[test]
+fn app_bar_cursor_policy_and_done_use_the_shared_native_controls() {
+    assert_eq!(drag_cursor(true), egui::CursorIcon::Grabbing);
+    assert_eq!(drag_cursor(false), if cfg!(target_os = "windows") { egui::CursorIcon::PointingHand } else { egui::CursorIcon::Grab });
+    let ctx = crate::test_support::context();
+    // Exercise the active primary-label palette and its shared contrast correction,
+    // rather than the formerly forced dark-theme ink.
+    let t = Tokens { on_accent: Tokens::light().form_ink, ..Tokens::dark() };
+    let _theme = solidcraft_theme::scoped_panel_tokens(t);
+    let rect = Rect::from_min_size(pos2(20.0, 20.0), vec2(90.0, 32.0));
+    let render = || {
+        crate::test_support::raw_frame(&ctx, egui::RawInput::default(), |ui| {
+            assert_eq!(tray_done(ui, rect, "Done").rect, rect);
+            crate::button_at(ui, "panel_apply_reference", rect.translate(vec2(0.0, 50.0)), "Apply", crate::Button::Primary);
+        })
+    };
+    render();
+    render();
+    let output = render();
+    let mut labels = Vec::new();
+    for clipped in &output.shapes {
+        crate::test_support::each_shape(&clipped.shape, &mut |shape| {
+            if let egui::Shape::Text(text) = shape {
+                let colors: Vec<_> = text
+                    .galley
+                    .job
+                    .sections
+                    .iter()
+                    .filter(|section| !section.byte_range.is_empty())
+                    .map(|section| {
+                        text.override_text_color.unwrap_or(if section.format.color == egui::Color32::PLACEHOLDER {
+                            text.fallback_color
+                        } else {
+                            section.format.color
+                        })
+                    })
+                    .collect();
+                labels.push((text.galley.job.text.clone(), colors));
+            }
+        });
+    }
+    let done = labels.iter().find(|(label, _)| label == "Done").map(|(_, colors)| colors);
+    let apply = labels.iter().find(|(label, _)| label == "Apply").map(|(_, colors)| colors);
+    assert!(done.is_some_and(|colors| !colors.is_empty()), "Done paints a label: {labels:?}");
+    assert_eq!(done, apply, "Done uses the panel primary-label palette including contrast correction");
+}
+
+#[test]
+fn app_bar_minimal_is_exact_and_object_identity_does_not_affect_selection() {
+    use crate::app_bar_items::{ItemId, Layout, Preset, Zone};
+    let defaults = Layout::default_for(["solid.box", "solid.extrude"]);
+    let mut layout = defaults.clone();
+    layout.add_space(Zone::End, None, &defaults);
+    layout.add_separator(Zone::End, None, &defaults);
+    let objects = |layout: &Layout| {
+        layout
+            .items
+            .iter()
+            .filter(|p| matches!(ItemId::parse(&p.id), Some(ItemId::Separator(_) | ItemId::Space(_))))
+            .map(|p| p.id.clone())
+            .collect::<std::collections::BTreeSet<_>>()
+    };
+    let previous = objects(&layout);
+    layout.set_preset(Preset::Minimal, &defaults);
+    assert!(objects(&layout).is_disjoint(&previous));
+    for (zone, expected) in [
+        (Zone::Start, vec!["space", "file", "separator", "save", "undo", "redo", "separator", "space"]),
+        (Zone::End, vec!["space", "help", "settings"]),
+    ] {
+        let rows: Vec<_> =
+            layout.items.iter().filter(|p| p.shown && p.zone == zone).map(|p| p.id.split_once(':').map_or(p.id.as_str(), |(kind, _)| kind)).collect();
+        assert_eq!(rows, expected);
+    }
+    assert!(layout.items.iter().filter(|p| p.id.starts_with("quick:")).all(|p| !p.shown));
+    assert_eq!(layout.preset(&defaults), Preset::Minimal);
+    assert!(!layout.set_shown("file", false, &defaults));
+    let mut renamed = layout.clone();
+    for (n, p) in renamed.items.iter_mut().enumerate() {
+        if let Some((kind @ ("space" | "separator"), _)) = p.id.split_once(':') {
+            p.id = format!("{kind}:{}", n + 100);
+        }
+    }
+    assert_eq!(renamed.preset(&defaults), Preset::Minimal);
+    renamed.add_separator(Zone::End, None, &defaults);
+    assert_eq!(renamed.preset(&defaults), Preset::Custom);
+    let mut extra_space = layout.clone();
+    extra_space.add_space(Zone::End, None, &defaults);
+    assert_eq!(extra_space.preset(&defaults), Preset::Custom);
+    let mut reordered = layout.clone();
+    assert!(reordered.move_step("file", true, &defaults));
+    assert_eq!(reordered.preset(&defaults), Preset::Custom);
+    let previous = objects(&layout);
+    layout.set_preset(Preset::Minimal, &defaults);
+    assert!(objects(&layout).is_disjoint(&previous));
+    assert_eq!(layout.preset(&defaults), Preset::Minimal);
+}
+
+#[test]
+fn app_bar_layout_background_is_quiet_but_assistant_and_focus_keep_full_ink() {
+    let t = Tokens::get();
+    for hovered in [false, true] {
+        let normal = edit_item_background(t, Control::Documents, hovered);
+        for control in [Control::Separator, Control::Space] {
+            assert_eq!(edit_item_background(t, control, hovered), normal.gamma_multiply(0.4));
+        }
+    }
+    let ctx = crate::test_support::context();
+    let rect = Rect::from_min_size(pos2(20.0, 20.0), vec2(ITEM_HEIGHT, ITEM_HEIGHT));
+    let render = |control| {
+        crate::test_support::raw_frame(&ctx, egui::RawInput::default(), |ui| {
+            let response = ui.interact(rect, egui::Id::unique("assistant_ink"), Sense::hover());
+            paint_control(ui, rect, control, &response, 1.0);
+        })
+    };
+    // Kit contexts deliberately have no host icon artwork. The real status mark shares
+    // the base SVG's passive painter, so its token colour verifies that disabling the
+    // interaction did not multiply either mark or icon opacity.
+    let assistant = render(Control::Assistant { state: crate::AssistantEntryState::Ready, open: false });
+    assert!(
+        assistant.shapes.iter().any(|s| matches!(&s.shape, egui::Shape::Circle(c) if c.radius == 4.0 && c.fill == Tokens::get().agent_ok)),
+        "the Assistant painter preserves full-strength token ink"
+    );
+    editing(&ctx, true, None);
+    let line = render(Control::Separator);
+    assert!(
+        line.shapes.iter().any(|s| matches!(&s.shape, egui::Shape::LineSegment { stroke, .. } if stroke.color == Tokens::get().app_bar_text)),
+        "the separator line itself keeps full foreground ink"
+    );
+}
+
+#[test]
+fn app_bar_focus_ring_uses_the_background_geometry_and_theme_accent() {
+    let ctx = crate::test_support::context();
+    let square = Rect::from_min_size(pos2(10.0, 10.0), vec2(ITEM_HEIGHT, ITEM_HEIGHT));
+    for (rect, radius) in [
+        (square, ITEM_RADIUS),
+        (Rect::from_min_size(square.min, vec2(80.0, ITEM_HEIGHT)), ITEM_RADIUS),
+        (Rect::from_min_size(pos2(10.0, 10.0), vec2(90.0, PILL_HEIGHT)), ITEM_PILL_RADIUS),
+        (Rect::from_min_size(pos2(10.0, 10.0), vec2(74.0, 46.0)), 9),
+    ] {
+        assert_eq!(focus_ring_geometry(rect, radius), (rect, radius));
+        let out = crate::test_support::raw_frame(&ctx, egui::RawInput::default(), |ui| paint_focus(ui.painter(), rect, radius));
+        assert!(out.shapes.iter().any(|s| matches!(&s.shape, egui::Shape::Rect(r) if r.rect == rect && r.corner_radius == egui::CornerRadius::same(radius) && r.stroke == Stroke::new(1.5, Tokens::get().accent) && r.stroke_kind == egui::StrokeKind::Middle)));
+    }
+}
+
+#[test]
+fn app_bar_spaces_repeat_sanitize_persist_and_have_eleven_point_slots() {
+    use crate::app_bar_items::{ItemId, Layout, Placement, Preset, Zone as SavedZone};
+    use crate::app_bar_layout::application::{SPACE_WIDTH, spec_with_items};
+    let defaults = Layout::default();
+    let mut saved = defaults.clone();
+    let a = saved.add_space(SavedZone::Start, Some("file"), &defaults).unwrap();
+    let b = saved.add_space(SavedZone::End, None, &defaults).unwrap();
+    assert_ne!(a, b);
+    assert_eq!(ItemId::parse(&a).unwrap().id(), a);
+    assert_eq!(saved.preset(&defaults), Preset::Custom);
+    let spec = spec_with_items((1920.0, 0.0, 0.0), measured_bar(), &saved, &["save", "undo", "redo"], &[], &["donate", "discord"]);
+    let p = layout(&spec);
+    for id in [&a, &b] {
+        let item = index_of(&spec, id);
+        assert_eq!(p.placements[item].unwrap().width, SPACE_WIDTH);
+        assert_eq!(spec.items[item].priority, 0);
+    }
+    assert!(saved.set_shown(&a, false, &defaults));
+    assert!(!saved.items.iter().any(|p| p.id == a));
+    assert_eq!(Layout::from_value(&saved.to_value(), &defaults), saved);
+    for preset in [Preset::Default, Preset::Minimal, Preset::Full, Preset::Compact] {
+        let mut reset = saved.clone();
+        reset.set_preset(preset, &defaults);
+        assert_eq!(reset.items.iter().filter(|p| p.id.starts_with("space:")).count(), if preset == Preset::Minimal { 3 } else { 0 });
+    }
+    saved.items.extend((0..1000).map(|_| Placement { id: b.clone(), zone: SavedZone::End, shown: true }));
+    saved.items.push(Placement { id: "space:NaN".into(), zone: SavedZone::End, shown: true });
+    saved.sanitize(&defaults);
+    assert!(saved.items.len() <= 64);
+    assert_eq!(saved.items.iter().map(|p| &p.id).collect::<std::collections::BTreeSet<_>>().len(), saved.items.len());
+    assert!(saved.items.iter().filter(|p| p.id.starts_with("space:")).all(|p| matches!(ItemId::parse(&p.id), Some(ItemId::Space(_)))));
+}
+
+#[test]
+fn app_bar_old_canonical_quick_layout_loses_only_its_automatic_third_divider() {
+    use crate::app_bar_items::{Layout, Placement, Zone};
+    let defaults = Layout::default_for(["solid.box"]);
+    let mut old = defaults.clone();
+    let at = old.items.iter().position(|p| p.id.starts_with("quick:")).unwrap();
+    old.items.insert(at, Placement { id: "separator:3".into(), zone: Zone::Start, shown: true });
+    let mut value = old.to_value();
+    value["version"] = 1.into();
+    assert_eq!(Layout::from_value(&value, &defaults), defaults);
+    old.items.iter_mut().find(|p| p.id == "home").unwrap().shown = false;
+    let mut value = old.to_value();
+    value["version"] = 1.into();
+    assert_eq!(Layout::from_value(&value, &defaults), old, "custom layout objects are preserved");
+}
+
+/// The kit's own Dark and Light. The look's crate checks its Onyx theme the same way
+/// (`app_bar_edit_palette_reads_on_onyx`), since the theme files are the look's.
+#[test]
+fn app_bar_edit_palette_has_three_distinct_levels_and_readable_foreground() {
+    use solidcraft_theme::contrast_ratio;
+    for (name, t) in [("dark", Tokens::dark()), ("light", Tokens::light())] {
+        let p = edit_palette(t);
+        let a = contrast_ratio(p.card, p.item);
+        let b = contrast_ratio(p.item, p.hover);
+        let foreground = contrast_ratio(t.app_bar_text, p.hover);
+        assert!(a >= 1.25 && b >= 1.25, "{name}: separate levels {a}/{b}");
+        assert!(foreground >= 4.5, "{name}: hovered text remains legible {foreground}");
+        eprintln!("app-bar edit contrast {name}: card/item {a:.2}:1, item/hover {b:.2}:1, foreground/hover {foreground:.2}:1");
+    }
+}
+
+#[test]
+fn app_bar_default_dividers_migrate_once_and_removal_survives_loading() {
+    use crate::app_bar_items::{Layout, Placement, Preset, Zone};
+    let defaults = Layout::default();
+    let ids: Vec<_> = defaults.items.iter().filter(|p| p.zone == Zone::Start).map(|p| p.id.as_str()).collect();
+    assert_eq!(ids, ["documents", "home", "separator:1", "file", "save", "undo", "redo", "separator:2"]);
+    let mut old = defaults.to_value();
+    old.as_object_mut().unwrap().remove("version");
+    old["items"].as_array_mut().unwrap().retain(|p| !p["id"].as_str().unwrap().starts_with("separator:"));
+    assert_eq!(Layout::from_value(&old, &defaults), defaults);
+    old["items"].as_array_mut().unwrap().push(serde_json::json!({"id":"separator:1","zone":"end","shown":true}));
+    let loaded = Layout::from_value(&old, &defaults);
+    assert!(
+        loaded.items.iter().any(|p| p.id == "separator:0" && p.zone == Zone::End),
+        "old tray-created separator survives with a non-colliding identity"
+    );
+    assert!(loaded.items.iter().any(|p| p.id == "separator:1" && p.zone == Zone::Start));
+    let mut edited = defaults.clone();
+    edited.items.push(Placement { id: "future:item".into(), zone: Zone::Start, shown: true });
+    assert!(edited.move_before("separator:1", Zone::End, Some("settings"), &defaults));
+    assert!(edited.set_shown("separator:2", false, &defaults));
+    edited.sanitize(&defaults);
+    assert!(!edited.items.iter().any(|p| p.id == "separator:2"));
+    assert_eq!(Layout::from_value(&edited.to_value(), &defaults), edited);
+    assert_eq!(edited.preset(&defaults), Preset::Custom);
+    edited.set_preset(Preset::Default, &defaults);
+    assert!(edited.items.iter().any(|p| p.id == "separator:2"));
+    for preset in [Preset::Minimal, Preset::Compact] {
+        edited.set_preset(preset, &defaults);
+        assert_eq!(edited.items.iter().filter(|p| p.id.starts_with("separator:")).count(), if preset == Preset::Minimal { 2 } else { 0 });
+        assert_eq!(Layout::from_value(&edited.to_value(), &defaults), edited);
+        assert_eq!(edited.preset(&defaults), preset);
+    }
+}
+
+#[test]
+fn app_bar_shared_control_shapes_have_square_or_pill_height_and_a_common_centre() {
+    let ctx = crate::test_support::context();
+    let _ = crate::test_support::raw_frame(&ctx, egui::RawInput::default(), |_| {});
+    let t = Tokens::get();
+    let pill = Pill {
+        id: "donate",
+        icon: "help",
+        label: "Donate",
+        labelled: true,
+        tip: "",
+        hide_tip: "",
+        name: "Donate",
+        hide_name: "Hide",
+        fill: t.accent,
+        ink: t.on_accent,
+    };
+    for control in [
+        Control::Icon { icon: "save", size: 18.0, enabled: true },
+        Control::Command { icon: "save", enabled: true },
+        Control::File { label: "File", enabled: true, open: false },
+        Control::Version("v1.0"),
+        Control::Documents,
+        Control::Separator,
+        Control::Space,
+        Control::Assistant { state: crate::AssistantEntryState::Quiet, open: false },
+        Control::Report { label: "Report a bug", labelled: true },
+        Control::Report { label: "Report a bug", labelled: false },
+        Control::Pill { data: pill, lift: 0.0, veil: 0.0, focused: false },
+    ] {
+        let pill = matches!(control, Control::Report { .. } | Control::Pill { .. });
+        let expected = if pill { 20.0 } else { 26.0 };
+        assert_eq!(control_size(&ctx, control).y, expected);
+        if icon_control(control) {
+            assert_eq!(control_size(&ctx, control).x, expected);
+        }
+        let painted = item_rect(Rect::from_center_size(pos2(100.0, 17.0), vec2(80.0, 12.0)), control);
+        assert_eq!(painted.height(), expected);
+        if icon_control(control) {
+            assert_eq!(painted.width(), expected);
+        }
+        assert_eq!(painted.center(), pos2(100.0, 17.0));
+        assert_eq!(control_radius(control), if pill { 10 } else { 5 });
+    }
+}
+
+#[test]
+fn app_bar_hover_lift_snaps_converges_and_handles_hostile_elapsed_time() {
+    for (from, to) in [(0.0_f32, -2.0_f32), (-2.0, 0.0)] {
+        let mut previous = from;
+        for tick in 0..=12 {
+            let value = hover_step(from, to, tick as f32 / 100.0);
+            assert!(value >= from.min(to) && value <= from.max(to));
+            assert!((value - to).abs() <= (previous - to).abs());
+            previous = value;
+        }
+        assert_eq!(previous, to);
+    }
+    assert_eq!(hover_step(-1.6, -2.0, 0.0), -2.0);
+    assert_eq!(hover_step(0.0, -2.0, f32::NAN), -2.0);
+    assert_eq!(hover_step(0.0, -2.0, f32::INFINITY), -2.0);
+    assert_eq!(hover_step(f32::NAN, 0.0, 0.1), 0.0);
+}
+
+#[test]
+fn app_bar_hover_paint_keeps_hits_at_rest_and_disables_lift_during_drag() {
+    let ctx = crate::test_support::context();
+    editing(&ctx, true, None);
+    let rest = Rect::from_min_size(pos2(40.0, 10.0), vec2(ITEM_HEIGHT, ITEM_HEIGHT));
+    let render = |time, hover, held| {
+        dragging(&ctx, held);
+        let output = crate::test_support::raw_frame(
+            &ctx,
+            egui::RawInput { time: Some(time), screen_rect: Some(Rect::from_min_size(Pos2::ZERO, vec2(800.0, 400.0))), ..Default::default() },
+            |ui| {
+                let hit = ui.interact(rest, egui::Id::unique("hover_hit"), Sense::hover());
+                paint_hover(ui, "save", rest, ITEM_RADIUS, hover, |ui| {
+                    ui.painter().rect_filled(rest, ITEM_RADIUS, Tokens::get().control_fill);
+                });
+                assert_eq!(hit.rect, rest);
+            },
+        );
+        let body = output
+            .shapes
+            .iter()
+            .find(|s| matches!(&s.shape, egui::Shape::Rect(r) if r.rect == rest && r.fill == Tokens::get().control_fill))
+            .unwrap();
+        (body.transform_after_tessellation * rest.min, output.shapes.len())
+    };
+    let idle = render(0.0, false, false);
+    assert_eq!(idle.0, rest.min);
+    render(0.01, true, false);
+    let hovered = render(0.15, true, false);
+    assert_eq!(hovered.0, rest.min - vec2(0.0, 2.0));
+    assert!(hovered.1 > idle.1, "only hovering adds a faint shadow");
+    let held = render(0.16, true, true);
+    assert_eq!(held.0, rest.min);
+    assert_eq!(held.1, idle.1);
+}
+
+#[test]
+fn app_bar_shared_native_paint_preserves_interaction_visibility_and_clicks() {
+    let ctx = crate::test_support::context();
+    let rest = Rect::from_min_size(pos2(40.0, 10.0), vec2(32.0, 26.0));
+    let id = egui::Id::unique("native_bar_control");
+    let mut clicked = false;
+    for pressed in [None, Some(true), Some(false)] {
+        let mut events = vec![egui::Event::PointerMoved(rest.center())];
+        if let Some(pressed) = pressed {
+            events.push(egui::Event::PointerButton {
+                pos: rest.center(),
+                button: egui::PointerButton::Primary,
+                pressed,
+                modifiers: egui::Modifiers::NONE,
+            });
+        }
+        let output = crate::test_support::raw_frame(
+            &ctx,
+            egui::RawInput { events, screen_rect: Some(Rect::from_min_size(Pos2::ZERO, vec2(800.0, 400.0))), focused: true, ..Default::default() },
+            |ui| {
+                let response = interaction_only(ui, |ui| {
+                    assert!(ui.is_visible());
+                    ui.painter().rect_filled(rest, 4, Tokens::get().warning);
+                    ui.interact(rest, id, Sense::click())
+                });
+                clicked |= response.clicked();
+                assert!(ctx.read_response(id).is_some());
+                paint_control(ui, rest, Control::Documents, &response, 1.0);
+            },
+        );
+        assert!(
+            !output.shapes.iter().any(|s| matches!(&s.shape, egui::Shape::Rect(r) if r.fill == Tokens::get().warning)),
+            "the old paint is discarded, not hidden input"
+        );
+    }
+    assert!(clicked);
+}
+
+#[test]
+fn app_bar_documents_migrate_move_and_hide() {
+    use crate::app_bar_items::{Layout, Zone};
+    let defaults = Layout::default();
+    let mut legacy = defaults.clone();
+    legacy.items.retain(|p| p.id != "documents" && p.id != "file");
+    assert_eq!(Layout::from_value(&legacy.to_value(), &defaults), defaults);
+    let mut saved = defaults.clone();
+    assert!(saved.move_before("documents", Zone::End, Some("settings"), &defaults));
+    assert!(saved.set_shown("documents", false, &defaults));
+    assert_eq!(Layout::from_value(&saved.to_value(), &defaults), saved);
+    assert!(saved.set_shown("documents", true, &defaults));
+    assert_eq!(saved.items.iter().find(|p| p.id == "documents").unwrap().zone, Zone::End);
+}
+
+#[test]
+fn app_bar_separators_repeat_renumber_remove_and_bound_hostile_input() {
+    use crate::app_bar_items::{DragRelease, ItemId, Layout, MAX_ITEMS, Placement, Preset, Zone, drag_release};
+    let defaults = Layout::default();
+    let mut saved = defaults.clone();
+    let first = saved.add_separator(Zone::Start, Some("save"), &defaults).unwrap();
+    let second = saved.add_separator(Zone::End, None, &defaults).unwrap();
+    assert_ne!(first, second);
+    assert!(saved.move_before(&first, Zone::End, Some(&second), &defaults));
+    assert_eq!(drag_release(&first, true, true, false, false), DragRelease::Remove);
+    assert_eq!(drag_release("separator", false, false, true, false), DragRelease::Insert);
+    assert_eq!(drag_release("separator", false, true, false, false), DragRelease::Return);
+    assert!(saved.set_shown(&first, false, &defaults));
+    assert!(!saved.items.iter().any(|p| p.id == first));
+    saved.items.extend((0..1000).map(|_| Placement { id: second.clone(), zone: Zone::Start, shown: true }));
+    saved.items.push(Placement { id: "separator:hostile".into(), zone: Zone::End, shown: true });
+    saved.sanitize(&defaults);
+    assert_eq!(saved.items.len(), MAX_ITEMS);
+    let ids: std::collections::BTreeSet<_> = saved.items.iter().map(|p| &p.id).collect();
+    assert_eq!(ids.len(), saved.items.len());
+    assert!(saved.items.iter().filter(|p| p.id.starts_with("separator:")).all(|p| matches!(ItemId::parse(&p.id), Some(ItemId::Separator(_)))));
+    assert!(saved.add_separator(Zone::End, None, &defaults).is_none());
+    assert_eq!(Layout::from_value(&saved.to_value(), &defaults), saved);
+    let mut malformed = Layout { items: vec![Placement { id: "separator:NaN".into(), zone: Zone::Start, shown: true }] };
+    malformed.sanitize(&defaults);
+    assert!(malformed.items.iter().any(|p| p.id == "separator:0"));
+    for preset in [Preset::Default, Preset::Minimal, Preset::Full, Preset::Compact] {
+        let mut reset = saved.clone();
+        reset.set_preset(preset, &defaults);
+        assert_eq!(reset.items.iter().filter(|p| p.id.starts_with("separator:")).count(), if preset == Preset::Compact { 0 } else { 2 });
+    }
+}
+
+#[test]
+fn app_bar_full_separator_inventory_keeps_file_and_overflows_separators_first() {
+    use crate::app_bar_items::{Layout, Zone};
+    use crate::app_bar_layout::application::spec_with_items;
+    let defaults = Layout::default();
+    let mut saved = defaults.clone();
+    while saved.add_separator(Zone::Start, Some("file"), &defaults).is_some() {}
+    saved.move_before("file", Zone::End, None, &defaults);
+    for width in [480.0, 1280.0, 3840.0] {
+        let spec = spec_with_items((width, 0.0, 138.0), measured_bar(), &saved, &["save", "undo", "redo"], &[], &["donate", "discord"]);
+        let placed = layout(&spec);
+        assert_sound(&spec, &placed);
+        assert!(placed.placements[index_of(&spec, "file")].is_some());
+        if placed.overflow.iter().any(|id| !id.starts_with("separator:")) {
+            assert!(spec.items.iter().zip(&placed.placements).filter(|(item, _)| item.id.starts_with("separator:")).all(|(_, p)| p.is_none()));
+        }
+    }
+}
+
+#[test]
+fn app_bar_preset_selection_is_derived_with_first_match_winning() {
+    use crate::app_bar_items::{Layout, Placement, Preset, Zone};
+    // A hidden default also proves Full independently of the all-shown default's alias.
+    for hidden_default in [false, true] {
+        let mut defaults = Layout::default();
+        defaults.items.iter_mut().find(|p| p.id == "version").unwrap().shown = !hidden_default;
+        for value in [Preset::Default, Preset::Minimal, Preset::Full, Preset::Compact] {
+            let mut current = defaults.clone();
+            current.set_preset(value, &defaults);
+            let expected = if value == Preset::Full && !hidden_default { Preset::Default } else { value };
+            assert_eq!(current.preset(&defaults), expected);
+            current.items.push(Placement { id: "future:item".into(), zone: Zone::End, shown: true });
+            assert_eq!(current.preset(&defaults), expected);
+            let before = current.clone();
+            current.set_preset(Preset::Custom, &defaults);
+            assert_eq!(current, before);
+            assert!(!current.set_shown("file", false, &defaults));
+            assert_eq!(current.preset(&defaults), expected);
+            current.move_before("file", Zone::End, None, &defaults);
+            assert_eq!(current.preset(&defaults), Preset::Custom);
+            current.set_preset(value, &defaults);
+            current.add_separator(Zone::Start, None, &defaults);
+            assert_eq!(current.preset(&defaults), Preset::Custom);
+        }
+    }
+}
+
+#[test]
+fn app_bar_edit_mode_changes_only_separator_widths() {
+    let rig = BarRig::new(1280.0);
+    let snapshot =
+        |out: &BarOut| (out.edit_items.iter().map(|p| (p.id.clone(), p.zone, p.left, p.right, p.locked)).collect::<Vec<_>>(), out.overflow.clone());
+    rig.frame(Vec::new());
+    let before = snapshot(rig.out.borrow().as_ref().unwrap());
+    editing(&rig.ctx, true, None);
+    rig.frame(Vec::new());
+    let after = snapshot(rig.out.borrow().as_ref().unwrap());
+    assert_eq!(before.1, after.1, "everything still fits in this wide case");
+    for normal in &before.0 {
+        if normal.4 {
+            continue;
+        } // Flexible document tabs use the space left after widened separators.
+        let edited = after.0.iter().find(|p| p.0 == normal.0).unwrap();
+        let delta = if normal.0.starts_with("separator:") { 10.0 } else { 0.0 };
+        assert_eq!(edited.3 - edited.2, normal.3 - normal.2 + delta);
+    }
+    assert!(after.0.iter().any(|p| p.0 == "report"));
+    assert!(after.0.iter().any(|p| p.0 == "version"));
+}
+
+#[test]
+fn app_bar_separator_mode_changes_glide_and_resize_still_snaps() {
+    // The bar's helpers and these checks never lock the context inside its own lock: a worker's
+    // repaint between the two reads froze the window (#21091).
+    let ((), nested) = egui::Context::record_nested_locks(separator_mode_changes_glide_and_resize_still_snaps);
+    assert!(nested.is_empty(), "{} nested context locks, the first:\n{}", nested.len(), nested.first().map_or("", String::as_str));
+}
+
+fn separator_mode_changes_glide_and_resize_still_snaps() {
+    let mut rig = BarRig::new(1920.0);
+    let mut style = rig.ctx.global_style().as_ref().clone();
+    style.animation_time = 0.15;
+    rig.ctx.set_global_style(style);
+    let snapshot = |rig: &BarRig| {
+        let out = rig.out.borrow();
+        let item = out.as_ref().unwrap().edit_items.iter().find(|p| p.id == "save").unwrap();
+        let final_rect =
+            Rect::from_min_size(pos2(item.left, (height(editing_active(&rig.ctx)) - ITEM_HEIGHT) / 2.0), vec2(item.right - item.left, ITEM_HEIGHT));
+        // Outside a frame cumulative_frame_nr already points to the next frame, so
+        // inspect the completed paint state rather than calling the in-frame helper.
+        let key = motion_key(&rig.ctx);
+        let painted = rig.ctx.data(|data| data.get_temp::<BarMotion>(key).unwrap().items.get("save").unwrap().drawn);
+        (final_rect, Rect::from_min_size(painted, final_rect.size()))
+    };
+    let separator_gap = |rig: &BarRig| {
+        let out = rig.out.borrow();
+        let items = &out.as_ref().unwrap().edit_items;
+        let painted = |id: &str| {
+            let item = items.iter().find(|p| p.id == id).unwrap();
+            let rect = Rect::from_min_size(
+                pos2(item.left, (height(editing_active(&rig.ctx)) - ITEM_HEIGHT) / 2.0),
+                vec2(item.right - item.left, ITEM_HEIGHT),
+            );
+            let key = motion_key(&rig.ctx);
+            rig.ctx.data(|data| {
+                let state = data.get_temp::<BarMotion>(key).unwrap();
+                let item = state.items.get(id).unwrap();
+                Rect::from_min_size(item.drawn, vec2(if id.starts_with("separator:") { item.drawn_width } else { rect.width() }, rect.height()))
+            })
+        };
+        assert!(painted("separator:1").right() <= painted("file").left(), "a growing or shrinking separator cannot overlap its gliding neighbour");
+    };
+    rig.frame(Vec::new());
+    for active in [true, false] {
+        let previous = snapshot(&rig).1;
+        editing(&rig.ctx, active, None);
+        rig.frame(Vec::new());
+        let (target, initial) = snapshot(&rig);
+        separator_gap(&rig);
+        assert_ne!(target.min, previous.min);
+        assert_eq!(initial.min, previous.min, "mode changes retain the previous painted position");
+        for _ in 0..4 {
+            rig.frame(Vec::new());
+            separator_gap(&rig);
+        }
+        let middle = snapshot(&rig).1;
+        assert!(middle.left() > target.left().min(previous.left()) && middle.left() < target.left().max(previous.left()));
+        for _ in 0..16 {
+            rig.frame(Vec::new());
+            separator_gap(&rig);
+        }
+        assert_eq!(snapshot(&rig).1, target);
+    }
+    editing(&rig.ctx, true, None);
+    rig.width += 100.0;
+    rig.frame(Vec::new());
+    let (target, drawn) = snapshot(&rig);
+    assert_eq!(target, drawn, "a resize cancels the simultaneous edit-mode displacement");
+}
+
+#[test]
+fn app_bar_animated_step_converges_without_overshoot_and_handles_invalid_timing() {
+    for (from, to) in [(0.0, 100.0), (100.0, -100.0)] {
+        let mut previous = from;
+        for tick in 0..=15 {
+            let value = animated_step(from, to, tick as f32 / 100.0, 0.15);
+            assert!(value >= from.min(to) && value <= from.max(to));
+            assert!((value - to).abs() <= (previous - to).abs());
+            previous = value;
+        }
+        assert_eq!(previous, to);
+    }
+    assert_eq!(animated_step(99.6, 100.0, 0.0, 0.15), 100.0);
+    assert_eq!(animated_step(0.0, 100.0, -1.0, 0.15), 0.0);
+    for (dt, duration) in [(f32::NAN, 0.15), (0.01, 0.0), (0.01, f32::NAN), (f32::INFINITY, 0.15)] {
+        assert_eq!(animated_step(0.0, 100.0, dt, duration), 100.0);
+    }
+    assert_eq!(animated_step(f32::NAN, 10.0, 0.01, 0.15), 10.0);
+    assert!(animated_step(10.0, f32::NAN, 0.01, 0.15).is_finite());
+    assert!(animated_step(f32::MAX, -f32::MAX, 0.05, 0.15).is_finite());
+}
+
+#[test]
+fn app_bar_displacement_changes_paint_only_and_skips_resizing_and_appearing_items() {
+    let ctx = crate::test_support::context();
+    let mut style = ctx.global_style().as_ref().clone();
+    style.animation_time = 0.15;
+    ctx.set_global_style(style);
+    let render = |time, x, width, present| {
+        let final_rect = Rect::from_min_size(pos2(x, 5.0), vec2(32.0, 24.0));
+        let mut drawn = final_rect;
+        let output = crate::test_support::raw_frame(
+            &ctx,
+            egui::RawInput { screen_rect: Some(Rect::from_min_size(Pos2::ZERO, vec2(width, 400.0))), time: Some(time), ..Default::default() },
+            |ui| {
+                begin_motion(&ctx, width);
+                if present {
+                    let hit = paint_motion(ui, "save", final_rect, |ui| {
+                        let response = ui.interact(final_rect, egui::Id::unique("motion_hit"), Sense::click());
+                        ui.painter().rect_filled(final_rect, 7, Tokens::get().accent);
+                        response.rect
+                    });
+                    assert_eq!(hit, final_rect, "hit testing retains the layout rectangle");
+                    drawn = drawn_rect(&ctx, "save", final_rect);
+                }
+            },
+        );
+        (drawn, output)
+    };
+    assert_eq!(render(0.0, 10.0, 800.0, true).0.left(), 10.0);
+    assert_eq!(render(0.02, 110.0, 800.0, true).0.left(), 10.0);
+    let (middle, output) = render(0.07, 110.0, 800.0, true);
+    assert!(middle.left() > 10.0 && middle.left() < 110.0);
+    assert!(output.shapes.iter().any(|shape| matches!(&shape.shape, egui::Shape::Rect(rect) if rect.rect.left() == 110.0 && ((shape.transform_after_tessellation * rect.rect.min).x - middle.left()).abs() < 0.01)), "the offset is paint-only and applied after pixel snapping");
+    assert_eq!(render(0.25, 110.0, 800.0, true).0.left(), 110.0);
+    assert_eq!(render(0.26, 210.0, 900.0, true).0.left(), 210.0, "resize snaps");
+    let _ = render(0.27, 210.0, 900.0, false);
+    assert_eq!(render(0.28, 310.0, 900.0, true).0.left(), 310.0, "appearing items snap");
+    let previous = render(0.30, 410.0, 900.0, true).0;
+    assert_eq!(render(0.35, 510.0, 900.0, true).0.min, previous.min, "retargeting starts where the last frame was painted");
+    assert_eq!(render(0.55, 510.0, 900.0, true).0.left(), 510.0);
+    let key = motion_key(&ctx);
+    assert!(!ctx.data(|data| data.get_temp::<BarMotion>(key).unwrap().items.get("save").unwrap().active));
+}
+
+#[test]
+fn app_bar_tray_badges_use_the_shared_tick() {
+    let ctx = crate::test_support::context();
+    let cell = Rect::from_min_size(pos2(100.0, 100.0), vec2(74.0, 46.0));
+    let output = crate::test_support::raw_frame(&ctx, egui::RawInput::default(), |ui| {
+        let badge = tray_badge(ui, cell);
+        assert_eq!(badge.right(), cell.right() + 6.0);
+        assert_eq!(badge.top(), cell.top() - 6.0);
+    });
+    assert!(output.shapes.iter().any(|s| matches!(&s.shape, egui::Shape::Path(p) if p.points.len() == 3 && matches!(p.stroke.color, egui::epaint::ColorMode::Solid(ink) if ink == tray_accent().1))), "the badge paints a tick, not an unresolved icon placeholder");
+}
+
+#[test]
+fn app_bar_file_migrates_moves_but_never_disappears() {
+    use crate::app_bar_items::{Layout, Preset, Zone, can_remove};
+    let defaults = Layout::default();
+    assert_eq!(
+        defaults.items.iter().take(7).map(|p| p.id.as_str()).collect::<Vec<_>>(),
+        ["documents", "home", "separator:1", "file", "save", "undo", "redo"]
+    );
+    let mut legacy = defaults.clone();
+    legacy.items.retain(|p| p.id != "file");
+    assert_eq!(Layout::from_value(&legacy.to_value(), &defaults), defaults);
+    let mut saved = defaults.clone();
+    assert!(saved.move_before("file", Zone::End, Some("settings"), &defaults));
+    assert!(!can_remove("file"));
+    assert!(!saved.set_shown("file", false, &defaults));
+    let file = saved.items.iter_mut().find(|p| p.id == "file").unwrap();
+    file.shown = false;
+    let loaded = Layout::from_value(&saved.to_value(), &defaults);
+    let file = loaded.items.iter().find(|p| p.id == "file").unwrap();
+    assert!(file.shown);
+    assert_eq!(file.zone, Zone::End);
+    for preset in [Preset::Default, Preset::Minimal, Preset::Full, Preset::Compact] {
+        saved.set_preset(preset, &defaults);
+        assert!(saved.items.iter().find(|p| p.id == "file").unwrap().shown);
+    }
+}
+
+#[test]
+fn app_bar_drag_out_and_release_decisions_include_file_spring_back() {
+    use crate::app_bar_items::{DragRelease, drag_out, drag_release, is_drag};
+    assert!(!drag_out(34.0, 34.0));
+    assert!(drag_out(34.1, 34.0));
+    assert!(!drag_out(f32::NAN, 34.0));
+    assert!(!drag_out(100.0, f32::INFINITY));
+    assert!(!is_drag(3.0, 3.0));
+    assert!(is_drag(5.1, 0.0));
+    assert_eq!(drag_release("save", true, true, false, false), DragRelease::Remove);
+    assert_eq!(drag_release("file", true, true, false, false), DragRelease::Return);
+    assert_eq!(drag_release("save", false, true, false, false), DragRelease::Return);
+    assert_eq!(drag_release("file", true, false, true, false), DragRelease::Insert);
+    assert_eq!(drag_release("save", true, false, true, true), DragRelease::Return);
+}
+
+#[test]
+fn app_bar_edit_moves_before_after_and_between_zones() {
+    use crate::app_bar_items::{Layout, Zone};
+    let defaults = Layout::default_for(["solid.box"]);
+    let mut layout = defaults.clone();
+    assert!(layout.move_before("redo", Zone::Start, Some("save"), &defaults));
+    assert_eq!(
+        layout.items.iter().filter(|p| p.zone == Zone::Start).map(|p| p.id.as_str()).collect::<Vec<_>>(),
+        ["documents", "home", "separator:1", "file", "redo", "save", "undo", "quick:solid.box", "separator:2"]
+    );
+    assert!(layout.move_after("redo", "undo", &defaults));
+    assert!(layout.move_before("save", Zone::End, Some("settings"), &defaults));
+    assert_eq!(layout.items.iter().find(|p| p.id == "save").unwrap().zone, Zone::End);
+    assert!(layout.move_before("quick:solid.box", Zone::End, None, &defaults));
+    assert_eq!(layout.items.iter().rfind(|p| p.zone == Zone::End).unwrap().id, "quick:solid.box");
+    assert!(layout.move_step("settings", true, &defaults));
+    assert!(layout.move_step("settings", false, &defaults));
+    assert!(layout.set_shown("undo", false, &defaults));
+    assert!(!layout.set_shown("undo", false, &defaults));
+    assert!(layout.set_shown("undo", true, &defaults));
+    let saved = layout.to_value();
+    assert_eq!(Layout::from_value(&saved, &defaults), layout);
+}
+
+#[test]
+fn app_bar_edit_presets_and_hostile_operations_keep_sanitize_guarantees() {
+    use crate::app_bar_items::{Layout, MAX_ITEMS, Placement, Preset, Zone};
+    let defaults = Layout::default_for(["solid.box"]);
+    let mut layout = defaults.clone();
+    layout.items.extend((0..5000).map(|i| Placement { id: format!("future:{i}"), zone: Zone::End, shown: false }));
+    layout.items.insert(0, Placement { id: "file".into(), zone: Zone::End, shown: false });
+    layout.items.push(Placement { id: "save".into(), zone: Zone::End, shown: false });
+    for id in ["logo", "tabs", "more", "update", "managed", "leading", "captions", "unknown", "", "\n", &"x".repeat(10000)] {
+        assert!(!layout.move_before(id, Zone::End, None, &defaults));
+        assert!(!layout.set_shown(id, false, &defaults));
+        assert!(!layout.move_after("save", id, &defaults));
+    }
+    assert!(layout.items.len() <= MAX_ITEMS);
+    assert_eq!(layout.items.iter().filter(|p| p.id == "save").count(), 1);
+    let clean = layout.clone();
+    assert!(!layout.move_before("save", Zone::Start, Some("settings"), &defaults), "wrong-zone target is stale");
+    assert!(!layout.move_before("save", Zone::Start, Some("file"), &defaults), "File was saved in End");
+    assert_eq!(layout, clean);
+    for preset in [Preset::Minimal, Preset::Full, Preset::Compact, Preset::Default] {
+        layout.set_preset(preset, &defaults);
+        let shown: Vec<_> = layout.items.iter().filter(|p| p.shown).map(|p| p.id.as_str()).collect();
+        match preset {
+            Preset::Minimal => assert_eq!(
+                shown.iter().map(|id| id.split_once(':').map_or(*id, |(kind, _)| kind)).collect::<Vec<_>>(),
+                ["space", "file", "separator", "save", "undo", "redo", "separator", "space", "space", "help", "settings"]
+            ),
+            Preset::Full | Preset::Default | Preset::Custom => assert!(defaults.items.iter().all(|p| shown.contains(&p.id.as_str()))),
+            Preset::Compact => assert!(["donate", "discord", "report", "version"].iter().all(|id| !shown.contains(id))),
+        }
+        assert!(layout.items.iter().any(|p| p.id == "future:0" && !p.shown));
+        let mut sanitized = layout.clone();
+        sanitized.sanitize(&defaults);
+        assert_eq!(layout, sanitized);
+    }
+}
+
+#[test]
+fn app_bar_drop_slots_cross_zones_reject_locked_parts_and_ignore_tiny_drags() {
+    use crate::app_bar_items::{DropItem, Zone, drop_slot, is_drag};
+    let row = |id: &str, zone, left, right, locked| DropItem { id: id.into(), zone, left, right, locked };
+    let items = vec![
+        row("logo", Zone::Start, 0.0, 30.0, true),
+        row("save", Zone::Start, 35.0, 65.0, false),
+        row("undo", Zone::Start, 70.0, 100.0, false),
+        row("tabs", Zone::Start, 110.0, 200.0, true),
+        row("settings", Zone::End, 210.0, 240.0, false),
+        row("help", Zone::End, 245.0, 275.0, false),
+        row("more", Zone::End, 280.0, 310.0, true),
+    ];
+    assert!(!is_drag(2.0, 2.0));
+    assert!(is_drag(3.0, 4.0));
+    assert!(!is_drag(f32::NAN, f32::INFINITY));
+    let before = drop_slot(72.0, 155.0, &items, "save").unwrap();
+    assert_eq!((before.zone, before.before.as_deref(), before.x), (Zone::Start, Some("undo"), 70.0));
+    let across = drop_slot(211.0, 155.0, &items, "save").unwrap();
+    assert_eq!((across.zone, across.before.as_deref(), across.x), (Zone::End, Some("settings"), 210.0));
+    let end = drop_slot(276.0, 155.0, &items, "save").unwrap();
+    assert_eq!((end.zone, end.before, end.x), (Zone::End, None, 275.0));
+    assert_eq!(drop_slot(31.0, 155.0, &items, "file").unwrap().before.as_deref(), Some("save"));
+    assert_eq!(drop_slot(105.0, 155.0, &items, "file").unwrap().before, None);
+    for x in [10.0, 155.0, 295.0, f32::NAN, f32::INFINITY] {
+        assert!(drop_slot(x, 155.0, &items, "save").is_none());
+    }
+    assert!(drop_slot(15.0, f32::NAN, &items, "save").is_none());
+    let empty = drop_slot(250.0, 155.0, &[], "save").unwrap();
+    assert_eq!((empty.zone, empty.before, empty.x), (Zone::End, None, 250.0));
+}
+
 const HANDLES: Handles<'static> = Handles {
     home: &["t:home"],
     home_rect: &["t:home"],
@@ -78,7 +864,7 @@ impl BarRig {
         };
         let mut actions = Vec::new();
         let output = crate::test_support::raw_frame(&self.ctx, input, |ui| {
-            let rect = Rect::from_min_size(Pos2::ZERO, vec2(self.width, HEIGHT));
+            let rect = Rect::from_min_size(Pos2::ZERO, vec2(self.width, height(editing_active(&self.ctx))));
             let out = show(ui, &bar, rect, rect);
             actions = out.actions.clone();
             actions.extend(overflow_menu(ui.ctx(), &out.overflow_items, out.overflow_button));
@@ -118,13 +904,13 @@ fn the_bar_returns_what_was_clicked() {
     let (first, step) = out.quick.expect("room for the quick-access buttons");
     assert!(first > file.right() && step > 0.0);
     assert!(out.tabs_start > first + step, "the tabs follow the quick-access buttons");
-    assert!(out.assistant.is_some_and(|a| a.left() > out.controls_left), "the assistant is in the right cluster");
+    assert!(out.assistant.is_some_and(|a| a.left() == out.controls_left), "the assistant starts the End stack without a special leading gap");
 }
 
 /// At 600 points the name and lower priority End controls yield before Undo and quick access.
 #[test]
 fn a_compact_bar_keeps_only_what_fits() {
-    let rig = BarRig::new(600.0);
+    let rig = BarRig::new(480.0);
     assert!(solidcraft_ui_registry::rect_of("t:save").is_some());
     assert!(solidcraft_ui_registry::rect_of("t:undo").is_some(), "Undo fits after lower priorities give way");
     assert!(rig.out.borrow().as_ref().is_some_and(|out| out.quick.is_some() && out.quick_count == 2));
@@ -148,14 +934,16 @@ fn home_follows_a_long_app_name() {
     assert!(text.right() < home.left(), "the name ends at {}, Home starts at {}", text.right(), home.left());
 }
 
-/// Geometry captured from the pre-layout-engine bar, with crowded rows derived from the
-/// corrected packing rules below. Bits select search, icon-only
+/// Geometry re-captured because spacing was simplified to uniform four-point stacks.
+/// Bits select search, icon-only
 /// report, version, two pills, assistant, five quick buttons, long name and Windows captions.
-/// Five widths cross compact/wide and pill-label thresholds; variants include none, each bit,
+/// Five widths exercise fitting, compression and overflow; variants include none, each bit,
 /// all bits and desktop defaults (28). Pairs cover search with/without pills, report/version,
 /// quick/captions and long-name/quick; crowded mixes (188, 254, 255) cover space pressure.
 #[test]
 fn app_bar_old_show_golden() {
+    let recapture = std::env::var_os("SOLIDCRAFT_RECAPTURE_APP_BAR").as_deref() == Some(std::ffi::OsStr::new("1"));
+    let mut rows = Vec::new();
     let mut case = 0;
 
     for width in [480.0, 640.0, 1000.0, 1280.0, 1920.0] {
@@ -183,7 +971,7 @@ fn app_bar_old_show_golden() {
                             id,
                             icon: "help",
                             label: id,
-                            labelled: width >= PILL_LABEL_MIN,
+                            labelled: true,
                             tip: id,
                             hide_tip: "Hide",
                             name: id,
@@ -243,7 +1031,13 @@ fn app_bar_old_show_golden() {
                 snapshot.push(rect(Some(out.file)));
                 assert!(out.actions.is_empty(), "idle bar returned actions at {width}, variant {bits}: {:?}", out.actions);
             });
-            let mut expected = OLD_BAR_ROWS[case];
+            if recapture {
+                let values: Vec<_> = snapshot.iter().flat_map(|field| std::iter::once(field.len() as i32).chain(field.iter().copied())).collect();
+                rows.push(format!("    &[{}], // {width} / {bits}", values.iter().map(i32::to_string).collect::<Vec<_>>().join(", ")));
+                case += 1;
+                continue;
+            }
+            let mut expected = APP_BAR_ROWS[case];
             for (field, actual) in snapshot.iter().enumerate() {
                 let (&len, rest) = expected.split_first().expect("recorded field length");
                 assert_eq!(actual.len(), len as usize, "width {width}, variant {bits}, field {field}: presence");
@@ -256,6 +1050,16 @@ fn app_bar_old_show_golden() {
             assert!(expected.is_empty(), "width {width}, variant {bits}: unchecked fields");
             case += 1;
         }
+    }
+    assert_eq!(case, 120);
+    if recapture {
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src/app_bar_tests.rs");
+        let source = std::fs::read_to_string(&path).unwrap();
+        let at = source.rfind("const APP_BAR_ROWS: &[&[i32]] = &[").unwrap();
+        let end = at + source.get(at..).unwrap().find("\n];").unwrap() + "\n];".len();
+        let table = format!("const APP_BAR_ROWS: &[&[i32]] = &[\n{}\n];", rows.join("\n"));
+        std::fs::write(path, format!("{}{}{}", &source[..at], table, &source[end..])).unwrap();
+        eprintln!("re-captured {} application-bar golden rows from the uniform application spec", rows.len());
     }
 }
 const TAB_HANDLES: TabHandles<'static> = TabHandles {
@@ -281,7 +1085,7 @@ const VIEW_MENU: [TabMenuRow<'static>; 4] = [
 ];
 const PLUS_MENU: [TabMenuRow<'static>; 4] = [
     TabMenuRow::heading("Open as a view"),
-    TabMenuRow::new("plus_sketch", "Sketch", "").with_icon("sketch", Some(egui::Color32::GREEN)),
+    TabMenuRow::new("plus_render", "Render", "").with_icon("render", Some(egui::Color32::GREEN)),
     TabMenuRow::new("plus_dup", "Duplicate this view", "").with_icon("duplicate", None).separated(),
     TabMenuRow::new("plus_reopen", "Reopen closed view", "Ctrl+Shift+T").with_icon("reopen", None),
 ];
@@ -300,6 +1104,8 @@ const LAYOUT_MENU: [TabMenuRow<'static>; 8] = [
 
 const VIEWS: [ViewTab<'static>; 3] = [
     ViewTab {
+        compass: None,
+        sketch_mode: false,
         name: "Model",
         icon: "model",
         accent: egui::Color32::BLUE,
@@ -313,8 +1119,10 @@ const VIEWS: [ViewTab<'static>; 3] = [
         tip: "Model",
     },
     ViewTab {
-        name: "Sketch 2",
-        icon: "sketch",
+        compass: None,
+        sketch_mode: false,
+        name: "Render 2",
+        icon: "render",
         accent: egui::Color32::GREEN,
         underline: egui::Color32::GREEN,
         state: ViewState::SourceChanged,
@@ -323,9 +1131,11 @@ const VIEWS: [ViewTab<'static>; 3] = [
         window_name: None,
         window_number: None,
         to_window: None,
-        tip: "Sketch 2",
+        tip: "Render 2",
     },
     ViewTab {
+        compass: None,
+        sketch_mode: false,
         name: "Sheet 1",
         icon: "sheet",
         accent: egui::Color32::RED,
@@ -359,6 +1169,7 @@ struct TabsRig {
     pop_out: bool,
     /// The + has a menu.
     plus: bool,
+    plus_rows: &'static [TabMenuRow<'static>],
     /// The name of this view is being typed: its place, and the text and focus the strip edits.
     rename: Option<usize>,
     text: std::cell::RefCell<String>,
@@ -390,6 +1201,7 @@ impl TabsRig {
             layout: None,
             pop_out: false,
             plus,
+            plus_rows: &PLUS_MENU,
             rename: rename.map(|(k, _)| k),
             text: std::cell::RefCell::new(text),
             focused: std::cell::Cell::new(false),
@@ -399,6 +1211,10 @@ impl TabsRig {
     }
 
     fn frame(&self, events: Vec<egui::Event>) -> Vec<TabAction> {
+        self.frame_output(events).0
+    }
+
+    fn frame_output(&self, events: Vec<egui::Event>) -> (Vec<TabAction>, egui::FullOutput) {
         solidcraft_ui_registry::clear_handles();
         self.time.set(self.time.get() + 1.0 / 60.0);
         let input = egui::RawInput {
@@ -454,7 +1270,7 @@ impl TabsRig {
             view_right_row: "vright",
             view_rename_row: "vrename",
             view_rename: self.rename.map(|k| (k, TabRename { text: &mut text, focused: &mut focused, max: 8 })),
-            plus_menu: if self.plus { &PLUS_MENU } else { &[] },
+            plus_menu: if self.plus { self.plus_rows } else { &[] },
             layout_menu: if layout.is_some() { &LAYOUT_MENU } else { &[] },
             view_layout: layout.as_ref(),
             layout_current: "layout.single",
@@ -467,12 +1283,12 @@ impl TabsRig {
         let (x0, x1) = if self.views.is_some() { (20.0, 780.0) } else { (100.0, 700.0) };
         let x1 = self.room.map_or(x1, |room| x0 + room);
         let mut actions = Vec::new();
-        crate::test_support::raw_frame(&self.ctx, input, |ui| {
+        let output = crate::test_support::raw_frame(&self.ctx, input, |ui| {
             actions = tabs(ui, &mut strip, Rect::from_min_size(Pos2::ZERO, vec2(800.0, HEIGHT)), x0, x1);
         });
         *self.text.borrow_mut() = text;
         self.focused.set(focused);
-        actions
+        (actions, output)
     }
 
     fn press(&self, at: Pos2, button: egui::PointerButton) -> Vec<TabAction> {
@@ -489,6 +1305,24 @@ impl TabsRig {
             .map(|r| r.center())
             .or_else(|| solidcraft_ui_registry::handle_at(name))
             .unwrap_or_else(|| panic!("{name} is drawn"))
+    }
+}
+
+#[test]
+fn app_bar_document_and_view_tabs_use_the_shared_hover_and_held_cursors() {
+    for (views, target) in [(None, "t:tab:1"), (Some(true), "t:view:1")] {
+        let rig = TabsRig::with(views);
+        let at = rig.at(target);
+        for _ in 0..2 {
+            let (_, output) = rig.frame_output(vec![egui::Event::PointerMoved(at)]);
+            assert_eq!(output.platform_output.cursor_icon, drag_cursor(false));
+        }
+        let event = |pressed| egui::Event::PointerButton { pos: at, button: egui::PointerButton::Primary, pressed, modifiers: egui::Modifiers::NONE };
+        let (_, held) = rig.frame_output(vec![event(true)]);
+        assert_eq!(held.platform_output.cursor_icon, drag_cursor(true));
+        let (_, dragged) = rig.frame_output(vec![egui::Event::PointerMoved(at + vec2(20.0, 0.0))]);
+        assert_eq!(dragged.platform_output.cursor_icon, drag_cursor(true));
+        rig.frame(vec![event(false)]);
     }
 }
 
@@ -814,6 +1648,28 @@ fn the_view_switcher_lists_every_view() {
     assert_eq!(rig.press(rig.at("t:menu:as_tabs"), egui::PointerButton::Primary), vec![TabAction::SwitcherMenu { id: "as_tabs".into() }]);
 }
 
+/// The first extra view is reachable from a one-view design, including the default switcher preference.
+#[test]
+fn a_single_view_tab_opens_the_add_view_menu_with_either_tab_preference() {
+    for as_tabs in [false, true] {
+        for clear in [false, true] {
+            let mut rig = TabsRig::build(Some(as_tabs), true, None);
+            rig.single_view = true;
+            rig.clear = clear;
+            rig.frame(Vec::new());
+            let plus = solidcraft_ui_registry::rect_of("t:vnew").expect("a single-view design has an add-view button");
+            if !as_tabs || !clear {
+                let close = solidcraft_ui_registry::rect_of("t:close:0").expect("the plain tab retains its close button");
+                assert!(!plus.intersects(close), "add-view and close keep separate hit targets");
+            }
+            assert!(rig.press(plus.center(), egui::PointerButton::Primary).is_empty());
+            rig.frame(Vec::new());
+            rig.frame(Vec::new());
+            assert_eq!(rig.press(rig.at("t:menu:plus_render"), egui::PointerButton::Primary), vec![TabAction::PlusMenu { id: "plus_render".into() }]);
+        }
+    }
+}
+
 /// A click on the + opens its menu and leaves it open: two frames later its rows are drawn under the
 /// +'s left edge, and a row returns its id. A press in the frame that opened the menu is not a press
 /// outside it.
@@ -824,15 +1680,15 @@ fn the_plus_menu_stays_open_after_its_click() {
     rig.press(rig.at("t:vnew"), egui::PointerButton::Primary);
     rig.frame(Vec::new());
     rig.frame(Vec::new());
-    let row = solidcraft_ui_registry::handle_at("t:menu:plus_sketch").expect("the menu's row is drawn");
+    let row = solidcraft_ui_registry::handle_at("t:menu:plus_render").expect("the menu's row is drawn");
     assert!(row.y > HEIGHT && row.x >= plus.left(), "the menu opens under the + at {row:?}");
-    assert_eq!(rig.press(row, egui::PointerButton::Primary), vec![TabAction::PlusMenu { id: "plus_sketch".into() }]);
+    assert_eq!(rig.press(row, egui::PointerButton::Primary), vec![TabAction::PlusMenu { id: "plus_render".into() }]);
     // A press and release in one frame (a click driven by a script) leaves the menu open too.
     let at = rig.at("t:vnew");
     let button = |pressed| egui::Event::PointerButton { pos: at, button: egui::PointerButton::Primary, pressed, modifiers: egui::Modifiers::NONE };
     rig.frame(vec![button(true), button(false)]);
     rig.frame(Vec::new());
-    assert!(solidcraft_ui_registry::handle_at("t:menu:plus_sketch").is_some());
+    assert!(solidcraft_ui_registry::handle_at("t:menu:plus_render").is_some());
 }
 
 /// The + menu's header is drawn but never chosen, every row (with a glyph or without) returns its
@@ -844,13 +1700,73 @@ fn the_plus_menu_has_a_header_icon_rows_and_a_separator() {
     rig.frame(Vec::new());
     rig.frame(Vec::new());
     assert!(solidcraft_ui_registry::handle_at("t:menu:Open as a view").is_none(), "the header is not a row");
-    let (sketch, dup) = (rig.at("t:menu:plus_sketch"), rig.at("t:menu:plus_dup"));
-    assert!(dup.y - sketch.y > 32.0, "a separator sits above Duplicate: {sketch:?} {dup:?}");
+    let (render, dup) = (rig.at("t:menu:plus_render"), rig.at("t:menu:plus_dup"));
+    assert!(dup.y - render.y > 32.0, "a separator sits above Duplicate: {render:?} {dup:?}");
     assert_eq!(rig.press(dup, egui::PointerButton::Primary), vec![TabAction::PlusMenu { id: "plus_dup".into() }]);
     rig.press(rig.at("t:vnew"), egui::PointerButton::Primary);
     rig.frame(Vec::new());
     rig.frame(Vec::new());
     assert_eq!(rig.press(rig.at("t:menu:plus_reopen"), egui::PointerButton::Primary), vec![TabAction::PlusMenu { id: "plus_reopen".into() }]);
+}
+
+const SHEET_PLUS_MENU: [TabMenuRow<'static>; 1] = [TabMenuRow::new("sheet", "Sheet", "")
+    .with_children(&[TabMenuRow::new("sheet.new", "New sheet", ""), TabMenuRow::new("sheet.open:drawing/sheet", "Drawing / Sheet 1", "")])];
+
+#[test]
+fn plus_sheet_submenu_hover_survives_the_gap_and_returns_the_child_action() {
+    let mut rig = TabsRig::build(Some(true), true, None);
+    rig.plus_rows = &SHEET_PLUS_MENU;
+    rig.press(rig.at("t:vnew"), egui::PointerButton::Primary);
+    rig.frame(Vec::new());
+    rig.frame(Vec::new());
+    let parent = rig.at("t:menu:sheet");
+    assert!(rig.frame(vec![egui::Event::PointerMoved(parent)]).is_empty(), "hovering Sheet opens its children without choosing the parent");
+    rig.frame(Vec::new());
+    rig.frame(Vec::new());
+    let parent_rect = solidcraft_ui_registry::rect_of("t:menu:sheet").expect("Sheet parent stays drawn");
+    let child_rect = solidcraft_ui_registry::rect_of("t:menu:sheet.open:drawing/sheet").expect("the existing Sheet child is drawn");
+    let gap_x = if child_rect.left() > parent_rect.right() {
+        (parent_rect.right() + child_rect.left()) * 0.5
+    } else {
+        assert!(child_rect.right() < parent_rect.left(), "the flyout opens beside the parent");
+        (child_rect.right() + parent_rect.left()) * 0.5
+    };
+    let gap = pos2(gap_x, parent_rect.center().y);
+    assert!(rig.frame(vec![egui::Event::PointerMoved(gap)]).is_empty());
+    assert!(solidcraft_ui_registry::rect_of("t:menu:sheet.open:drawing/sheet").is_some(), "crossing the gap keeps the same flyout open");
+    let child = rig.at("t:menu:sheet.open:drawing/sheet");
+    assert_eq!(rig.press(child, egui::PointerButton::Primary), vec![TabAction::PlusMenu { id: "sheet.open:drawing/sheet".into() }]);
+    rig.frame(Vec::new());
+    assert!(solidcraft_ui_registry::rect_of("t:menu:sheet.open:drawing/sheet").is_none(), "choosing a child closes the menu");
+}
+
+#[test]
+fn plus_sheet_submenu_arrow_right_and_enter_choose_the_child_action() {
+    let mut rig = TabsRig::build(Some(true), true, None);
+    rig.plus_rows = &SHEET_PLUS_MENU;
+    rig.press(rig.at("t:vnew"), egui::PointerButton::Primary);
+    rig.frame(Vec::new());
+    rig.frame(Vec::new());
+    rig.frame(vec![egui::Event::PointerGone]);
+    let key = |key, pressed| egui::Event::Key { key, physical_key: None, pressed, repeat: false, modifiers: egui::Modifiers::NONE };
+    let parent_rect = solidcraft_ui_registry::rect_of("t:menu:sheet").expect("Sheet parent is drawn");
+    let focused_rect = || rig.ctx.memory(|m| m.focused()).and_then(|id| rig.ctx.read_response(id)).map(|response| response.rect);
+    for _ in 0..32 {
+        if focused_rect() == Some(parent_rect) {
+            break;
+        }
+        assert!(rig.frame(vec![key(egui::Key::Tab, true)]).is_empty());
+        rig.frame(vec![key(egui::Key::Tab, false)]);
+    }
+    assert_eq!(focused_rect(), Some(parent_rect), "Tab reaches the Sheet row before entering its submenu");
+    assert!(rig.frame(vec![key(egui::Key::ArrowRight, true)]).is_empty());
+    rig.frame(vec![key(egui::Key::ArrowRight, false)]);
+    // read_response reports the previous paint; let the flyout's invisible sizing pass
+    // settle before comparing its focused response with the published visible row.
+    rig.frame(Vec::new());
+    let child_rect = solidcraft_ui_registry::rect_of("t:menu:sheet.new").expect("the first Sheet child is drawn");
+    assert_eq!(focused_rect(), Some(child_rect), "ArrowRight transfers keyboard focus to the first child");
+    assert_eq!(rig.frame(vec![key(egui::Key::Enter, true)]), vec![TabAction::PlusMenu { id: "sheet.new".into() }]);
 }
 
 /// The row builders set only what they say, and the glyphs the menus use exist.
@@ -862,7 +1778,7 @@ fn menu_row_builders_and_glyphs() {
     assert!(head.heading && head.id == "H" && head.label == "H");
     let row = plain.separated().needing_others().with_icon("close", None);
     assert!(row.separator_before && row.needs_others && row.icon == "close");
-    for glyph in ["model", "sketch", "sheet", "render", "animation", "rename", "close", "duplicate", "tiles", "reopen"] {
+    for glyph in ["model", "sheet", "render", "animation", "rename", "close", "duplicate", "tiles", "reopen"] {
         assert!(!glyph_lines(glyph).is_empty(), "{glyph} has strokes");
     }
 }
@@ -888,6 +1804,17 @@ fn a_view_menu_opens_under_its_view_and_turns_off_rows_that_do_not_apply() {
     rig.frame(Vec::new());
     rig.frame(Vec::new());
     assert_eq!(rig.press(rig.at("t:menu:vothers"), egui::PointerButton::Primary), vec![TabAction::ViewMenu { view: 2, id: "vothers".into() }]);
+}
+
+#[test]
+fn shift_f10_opens_the_menu_of_the_focused_view_tab() {
+    let mut rig = TabsRig::with(Some(true));
+    rig.clear = true;
+    rig.frame(Vec::new());
+    rig.press(rig.at("t:view:0"), egui::PointerButton::Primary);
+    rig.frame(vec![egui::Event::Key { key: egui::Key::F10, physical_key: None, pressed: true, repeat: false, modifiers: egui::Modifiers::SHIFT }]);
+    rig.frame(Vec::new());
+    assert!(solidcraft_ui_registry::rect_of("t:menu:vclose").is_some());
 }
 
 #[test]
@@ -1046,6 +1973,113 @@ fn assert_sound(spec: &Spec, placed: &Placed) {
     }
 }
 
+fn assert_edit_cards(spec: &Spec, placed: &Placed) {
+    use crate::app_bar_layout::application::CARD_PADDING;
+    let g = placed.application.as_ref().unwrap();
+    for (zone, card) in [Zone::Start, Zone::End].into_iter().zip(g.cards) {
+        let Some(card) = card else { continue };
+        let slots: Vec<_> = spec
+            .items
+            .iter()
+            .zip(&placed.placements)
+            .filter_map(|(item, slot)| {
+                (!item.locked && item.zone == zone && !matches!(item.id.as_str(), "managed" | "offered")).then_some(slot.as_ref()).flatten()
+            })
+            .collect();
+        let first = slots.iter().map(|p| p.x).fold(f32::INFINITY, f32::min);
+        let last = slots.iter().map(|p| p.right()).fold(f32::NEG_INFINITY, f32::max);
+        assert!(card.left <= first + EPS && first - card.left <= CARD_PADDING + EPS);
+        if first - spec.captions_left >= CARD_PADDING {
+            assert!((first - CARD_PADDING - card.left).abs() <= EPS, "the logo/tabs gap gives the first item full paint padding");
+        } else {
+            // At an impossibly narrow left boundary the engine may omit even the logo.
+            // Paint clips at the traffic-light/screen edge rather than moving File.
+            assert!((card.left - spec.captions_left).abs() <= EPS);
+        }
+        assert!((last + CARD_PADDING - card.right).abs() <= EPS, "{zone:?} has full right padding at width {}: {card:?}, last {last}", spec.width);
+        assert!(card.left >= spec.captions_left - EPS);
+        assert!(card.right <= (spec.width - spec.captions_right).max(spec.captions_left) + EPS);
+        for (item, p) in spec.items.iter().zip(&placed.placements) {
+            if (item.locked || matches!(item.id.as_str(), "managed" | "offered"))
+                && let Some(p) = p
+            {
+                assert!(card.right <= p.x + EPS || p.right() <= card.left + EPS, "card {card:?} overlaps fixed {} {p:?}", item.id);
+            }
+        }
+        if let Some((x, width)) = placed.overflow_button {
+            assert!(card.right <= x + EPS || x + width <= card.left + EPS);
+        }
+    }
+}
+
+#[test]
+fn app_bar_edit_separator_delta_and_paint_cards_stay_between_chrome_at_every_width() {
+    use crate::app_bar_items::{Layout, Zone as SavedZone};
+    use crate::app_bar_layout::application::{EDIT_SEPARATOR_WIDTH, SEPARATOR_WIDTH, SPACE_WIDTH, set_editing, spec_with_items};
+    let defaults = Layout::default_for(["a", "b", "c", "d", "e"]);
+    for mixed in [false, true] {
+        let mut saved = defaults.clone();
+        if mixed {
+            saved.move_before("file", SavedZone::End, Some("version"), &defaults);
+            saved.move_before("separator:1", SavedZone::End, Some("version"), &defaults);
+        }
+        saved.add_space(SavedZone::Start, None, &defaults);
+        saved.add_space(SavedZone::End, None, &defaults);
+        for width in 200..=3840 {
+            let normal = spec_with_items(
+                (width as f32, 78.0, 138.0),
+                measured_bar(),
+                &saved,
+                &["save", "undo", "redo"],
+                &["a", "b", "c", "d", "e"],
+                &["donate", "discord"],
+            );
+            let mut bare = normal.clone();
+            bare.items.retain(|p| !p.id.starts_with("separator:"));
+            let plain = layout(&bare);
+            set_editing(&mut bare, true);
+            let decorated = layout(&bare);
+            assert_eq!(plain.placements, decorated.placements, "paint cards consume no layout space");
+            assert_eq!(plain.overflow, decorated.overflow);
+            assert_eq!(plain.centre, decorated.centre);
+            assert_eq!(plain.overflow_button, decorated.overflow_button);
+            let mut edited = normal.clone();
+            set_editing(&mut edited, true);
+            for (a, b) in normal.items.iter().zip(&edited.items) {
+                if a.id.starts_with("separator:") {
+                    assert_eq!(a.ladder, [SEPARATOR_WIDTH]);
+                    assert_eq!(b.ladder, [EDIT_SEPARATOR_WIDTH]);
+                } else {
+                    assert_eq!(a, b, "other items' fit ladders are identical");
+                    if a.id.starts_with("space:") {
+                        assert_eq!(a.ladder, [SPACE_WIDTH]);
+                    }
+                }
+            }
+            let delta = edited.items.iter().map(|i| i.ladder[0]).sum::<f32>() - normal.items.iter().map(|i| i.ladder[0]).sum::<f32>();
+            assert_eq!(delta, 2.0 * (EDIT_SEPARATOR_WIDTH - SEPARATOR_WIDTH));
+            for spec in [&normal, &edited] {
+                let p = layout(spec);
+                assert_sound(spec, &p);
+                assert_edit_cards(spec, &p);
+                for (item, slot) in spec.items.iter().zip(&p.placements) {
+                    if item.zone == Zone::End
+                        && let Some(slot) = slot
+                    {
+                        assert!(
+                            slot.right() + spec.gap <= spec.width - spec.captions_right + EPS,
+                            "the End stack leaves one gap before window buttons in both modes"
+                        );
+                    }
+                }
+            }
+            set_editing(&mut edited, false);
+            assert_eq!(normal, edited, "leaving edit mode restores the exact spec");
+        }
+    }
+    assert_eq!(height(true), height(false));
+}
+
 /// The default bar never overlaps and stays inside its room at any width, with the caption
 /// buttons on the right (Windows) or the traffic lights on the left (macOS).
 #[test]
@@ -1079,10 +2113,12 @@ fn a_wide_bar_shows_everything_in_todays_order() {
     }
     let (x, w) = placed.centre.expect("the tabs have a place");
     assert!(w > 1000.0, "the tabs take the spare room, got {w}");
-    assert!((x - (108.0 + 32.0 + 24.0 + 62.0 + 3.0 * 34.0)).abs() < EPS, "the tabs start after the file actions, got {x}");
+    let start = spec.items.iter().filter(|i| i.zone == Zone::Start).count();
+    let widths: f32 = spec.items.iter().filter(|i| i.zone == Zone::Start).map(|i| i.ladder[0]).sum();
+    assert!((x - widths - start as f32 * spec.gap).abs() < EPS, "tabs follow the uniform stack: {x}");
     assert_eq!(placed.placements[0].expect("the logo").x, 0.0);
-    let version = placed.placements[index_of(&spec, "version")].expect("the version");
-    assert!((version.right() - (3840.0 - 138.0)).abs() < EPS, "the version ends at the caption buttons");
+    let end = placed.placements.iter().flatten().map(|p| p.right()).fold(0.0_f32, f32::max);
+    assert!((end - (3840.0 - 138.0)).abs() < EPS, "the stack ends at the caption buttons");
 }
 
 /// As the bar narrows the version goes first, then the pills, then the Report a bug label shrinks.
@@ -1109,7 +2145,7 @@ fn items_give_way_in_priority_order() {
     assert!(version_at > pills_at, "the version leaves at {version_at}, the pills at {pills_at}");
     assert!(pills_at > report_label_at, "the pills leave at {pills_at}, the report label at {report_label_at}");
     assert!(report_label_at > 0, "the report label does collapse on a narrow bar");
-    assert_eq!(layout(&default_spec(version_at as f32)).overflow, ["version"], "the version is the first to go");
+    assert_eq!(layout(&default_spec(version_at as f32)).overflow.last().map(String::as_str), Some("version"), "separators yield before the version");
 }
 
 /// Locked items and the tabs' least width are kept at every width where they fit at all.
@@ -1118,7 +2154,7 @@ fn locked_items_and_the_tabs_minimum_are_always_kept() {
     for width in 480..=3840 {
         let spec = default_spec(width as f32);
         let placed = layout(&spec);
-        for item in spec.items.iter().filter(|i| i.locked) {
+        for item in spec.items.iter().filter(|i| i.locked || i.never_overflow) {
             assert!(placed.placements[index_of(&spec, &item.id)].is_some(), "{} is kept at {width}", item.id);
             assert!(!placed.overflow.contains(&item.id));
         }
@@ -1324,56 +2360,47 @@ fn measured_bar() -> crate::app_bar_layout::application::Measurements {
     }
 }
 
-/// Closed-form slot arithmetic: Home follows 108 + (24 + 8), File follows Home + 11,
-/// actions step 34, and the quick group takes 8 + 5 * 34. The end slots total
-/// 60 + 100 + 34 + 34 + 164 + 40 + 84 + 102 before the 138 caption points.
+/// A hand-derived uniform stack: logo 80, square controls 26, dividers 1 and gaps 4.
 #[test]
 fn app_bar_measured_groups_project_their_controls() {
-    use crate::app_bar_layout::application::{Span, spec};
+    use crate::app_bar_layout::application::{GAP, Span, spec};
     let spec = spec(1920.0, 0.0, 138.0, measured_bar());
-    assert_eq!(spec.items.iter().filter(|i| i.id == "quick").count(), 1);
-    assert_eq!(spec.items.iter().filter(|i| i.id == "pills").count(), 1);
-    assert!(spec.items.iter().any(|i| i.id == "tabs" && i.zone == Zone::Centre && i.flexible));
-    let g = layout(&spec).application.expect("application geometry");
-    assert_eq!(g.leading, Some(Span { left: 116.0, right: 140.0 }));
-    assert_eq!(g.home, Span { left: 140.0, right: 172.0 });
-    assert_eq!(g.brand_separator, 180.0);
-    assert_eq!(g.file, Span { left: 183.0, right: 223.0 });
-    assert_eq!(g.actions, vec![Some(240.0), Some(274.0), Some(308.0)]);
-    assert_eq!(g.quick_separator, Some(333.0));
-    assert_eq!(g.quick, Some((350.0, 34.0)));
-    assert_eq!(g.documents_separator, 510.0);
-    assert_eq!(g.tabs_start, 520.0);
-    assert_eq!(g.controls_left, 1164.0);
-    assert_eq!(g.offer, Span { left: 520.0, right: 1348.0 });
-    assert!(g.offer_labeled && g.report_labeled);
-    assert_eq!(g.report, Span { left: 1622.0, right: 1722.0 });
-    assert_eq!(g.help, 1604.0);
-    assert_eq!(g.settings, Span { left: 1554.0, right: 1586.0 });
-    assert_eq!(g.search, Some(Span { left: 1390.0, right: 1550.0 }));
-    assert_eq!(g.assistant, Some(Span { left: 1356.0, right: 1388.0 }));
-    assert_eq!(g.version, Some(Span { left: 1740.0, right: 1770.0 }));
-    assert_eq!(g.pills, vec![Span { left: 1166.0, right: 1211.0 }, Span { left: 1217.0, right: 1262.0 }]);
-    // The offer drawn at its right edge starts at 1348 - 80 = 1268: six points
-    // after the last link pill, with no overlap.
-    assert_eq!(g.offer.right - 80.0 - g.pills.last().expect("last pill").right, 6.0);
+    let placed = layout(&spec);
+    let g = placed.application.as_ref().unwrap();
+    assert_eq!(spec.gap, GAP);
+    assert_eq!(g.leading, Some(Span { left: 84.0, right: 110.0 }));
+    assert_eq!(g.home, Span { left: 114.0, right: 140.0 });
+    assert_eq!(g.file, Span { left: 149.0, right: 189.0 });
+    assert_eq!(g.actions, [Some(206.0), Some(236.0), Some(266.0)]);
+    assert_eq!(g.quick, Some((296.0, 30.0)));
+    assert_eq!(g.tabs_start, 438.0);
+    // The same gap as between items now also precedes the caption buttons.
+    assert_eq!(g.report, Span { left: 1546.0 - GAP, right: 1640.0 - GAP });
+    assert_eq!(g.version, Some(Span { left: 1644.0 - GAP, right: 1698.0 - GAP }));
+    for zone in [Zone::Start, Zone::End] {
+        let slots: Vec<_> = spec.items.iter().zip(&placed.placements).filter(|(i, _)| i.zone == zone).filter_map(|(_, p)| *p).collect();
+        for pair in slots.windows(2) {
+            assert!((pair[1].x - pair[0].right() - GAP).abs() < EPS);
+        }
+    }
 }
 
 /// Reserving transients without link pills must keep the same wide-bar anchors too.
 #[test]
 fn app_bar_wide_transients_keep_the_established_positions_without_links() {
-    use crate::app_bar_layout::application::{Span, spec};
+    use crate::app_bar_layout::application::{GAP, spec};
     let mut m = measured_bar();
     m.pills.clear();
     m.managed = Some(120.0);
-    let p = layout(&spec(1920.0, 0.0, 138.0, m));
+    let spec = spec(1920.0, 0.0, 138.0, m);
+    let p = layout(&spec);
     assert!(p.overflow.is_empty());
-    let g = p.application.expect("geometry");
-    assert!(!g.reserved_offers, "the complete row keeps its original drawing geometry");
-    assert_eq!(g.tabs_start, 520.0);
-    assert_eq!(g.controls_left, 1350.0);
-    assert_eq!(g.offer.right, 1348.0);
-    assert_eq!(g.managed, Some(Span { left: 520.0, right: 1262.0 }));
+    let g = p.application.unwrap();
+    assert!(g.reserved_offers);
+    assert_eq!(g.offer.right, 1920.0 - 138.0 - GAP);
+    assert_eq!(g.managed.unwrap().right + GAP, g.offer.left);
+    assert_eq!(g.offer.right - g.offer.left, 80.0);
+    assert!(g.tabs_end + GAP <= g.managed.unwrap().left);
 }
 
 #[test]
@@ -1382,13 +2409,13 @@ fn app_bar_measured_pills_snap_in_window_coordinates() {
     let mut m = measured_bar();
     m.origin = 17.25;
     m.pixels_per_point = 2.0;
-    m.pills = vec![45.3, 56.7];
-    let g = layout(&spec(1920.0, 78.0, 0.0, m)).application.expect("geometry");
-    for p in g.pills {
-        for edge in [p.left, p.right] {
-            let pixel = (edge + 17.25) * 2.0;
-            assert_eq!(pixel, pixel.round());
-        }
+    m.pills = vec![55.3, 56.7];
+    let spec = spec(1920.0, 78.0, 0.0, m);
+    let p = layout(&spec);
+    let g = p.application.as_ref().unwrap();
+    for (i, span) in g.pills.iter().enumerate() {
+        let slot = p.placements[index_of(&spec, &format!("pill:{i}"))].unwrap();
+        assert_eq!((span.left, span.right), (slot.x, slot.right()), "projection adds no per-pill margins or offsets");
     }
 }
 
@@ -1421,7 +2448,7 @@ fn app_bar_hostile_measurements_are_finite_and_bounded() {
             }
             let g = p.application.expect("geometry");
             assert!(g.actions.len() <= MAX_ITEMS);
-            for x in [g.mark, g.name, g.brand_separator, g.documents_separator, g.tabs_start, g.controls_left, g.help] {
+            for x in [g.mark, g.name, g.tabs_start, g.controls_left, g.help] {
                 assert!(x.is_finite());
             }
             let spans = [Some(g.home), Some(g.file), Some(g.report), Some(g.settings), g.leading, g.search, g.assistant, g.version];
@@ -1438,7 +2465,7 @@ fn app_bar_hostile_measurements_are_finite_and_bounded() {
 fn app_bar_application_never_overlaps_at_any_width() {
     for left in [0.0, 78.0] {
         for quick in [0, 5, 24] {
-            for bits in 0..512 {
+            for bits in 0..1024 {
                 for width in 200..=3840 {
                     let has = |bit| bits & (1 << bit) != 0;
                     let mut m = measured_bar();
@@ -1451,12 +2478,14 @@ fn app_bar_application_never_overlaps_at_any_width() {
                     m.assistant = has(4);
                     m.offered = has(5).then_some(110.0);
                     m.managed = has(8).then_some(160.0);
-                    let spec = crate::app_bar_layout::application::spec(width as f32, left, if has(7) { 138.0 } else { 0.0 }, m);
+                    let mut spec = crate::app_bar_layout::application::spec(width as f32, left, if has(7) { 138.0 } else { 0.0 }, m);
+                    crate::app_bar_layout::application::set_editing(&mut spec, has(9));
                     let placed = layout(&spec);
                     assert_sound(&spec, &placed);
-                    for item in spec.items.iter().filter(|i| i.locked) {
+                    for item in spec.items.iter().filter(|i| i.locked || i.never_overflow) {
                         assert!(!placed.overflow.contains(&item.id), "locked {} at {width}/{bits}/{quick}", item.id);
-                        if spec.width - spec.captions_left - spec.captions_right >= 232.0 {
+                        // The same four-point gap also separates the End stack from chrome.
+                        if spec.width - spec.captions_left - spec.captions_right - spec.gap >= 232.0 {
                             assert!(placed.placements[index_of(&spec, &item.id)].is_some(), "locked {} fits at {width}/{bits}/{quick}", item.id);
                         }
                     }
@@ -1514,7 +2543,9 @@ fn app_bar_more_menu_returns_the_original_action_and_closes() {
     assert!(!rig.ctx.data(|d| d.get_temp::<bool>(egui::Id::unique("sc_appbar_overflow_open")).unwrap_or(false)));
     rig.click("appbar:overflow");
     rig.frame(Vec::new());
-    let at = pos2(240.0, 390.0);
+    // The uniform layout may put more rows in this menu, including at its bottom edge.
+    // Click above the menu rather than assuming a particular number of overflow rows.
+    let at = pos2(2.0, 2.0);
     for pressed in [true, false] {
         rig.frame(vec![
             egui::Event::PointerMoved(at),
@@ -1532,7 +2563,10 @@ mod app_bar_items {
     fn defaults_match_the_actual_drawing_order() {
         let layout = Layout::default_for(["solid.box", "solid.fillet"]);
         let ids = |zone| layout.items.iter().filter(|p| p.zone == zone).map(|p| p.id.as_str()).collect::<Vec<_>>();
-        assert_eq!(ids(Zone::Start), ["home", "save", "undo", "redo", "quick:solid.box", "quick:solid.fillet"]);
+        assert_eq!(
+            ids(Zone::Start),
+            ["documents", "home", "separator:1", "file", "save", "undo", "redo", "quick:solid.box", "quick:solid.fillet", "separator:2"]
+        );
         assert_eq!(ids(Zone::End), ["donate", "discord", "assistant", "search", "settings", "help", "report", "version"]);
         assert!(layout.items.iter().all(|p| p.shown));
         for item in &layout.items {
@@ -1555,7 +2589,7 @@ mod app_bar_items {
         assert_eq!(layout.items.iter().filter(|p| p.id == "save").count(), 1);
         assert!(layout.items.iter().any(|p| p.id == "save" && p.zone == Zone::End && !p.shown));
         assert!(layout.items.iter().any(|p| p.id == "future:item"));
-        assert!(defaults.items.iter().all(|d| layout.items.iter().any(|p| p.id == d.id)));
+        assert!(defaults.items.iter().filter(|d| !d.id.starts_with("separator:")).all(|d| layout.items.iter().any(|p| p.id == d.id)));
         let once = layout.clone();
         layout.sanitize(&defaults);
         assert_eq!(layout, once);
@@ -1571,7 +2605,7 @@ mod app_bar_items {
         );
         layout.sanitize(&defaults);
         assert_eq!(layout.items.len(), 64);
-        assert!(defaults.items.iter().all(|d| layout.items.iter().any(|p| p.id == d.id)));
+        assert!(defaults.items.iter().filter(|d| !d.id.starts_with("separator:")).all(|d| layout.items.iter().any(|p| p.id == d.id)));
         assert!(layout.items.iter().any(|p| p.id == "🦀".repeat(100)));
         assert!(layout.items.iter().all(|p| !p.id.is_empty() && p.id.chars().count() <= 100 && !p.id.chars().any(char::is_control)));
     }
@@ -1587,7 +2621,7 @@ mod app_bar_items {
         for value in [
             json!(null),
             json!([]),
-            json!({"items":[7, {}, {"id":"save","zone":"centre","shown":true}, {"id":"update","zone":"start","shown":false}, {"id":"file","zone":"end","shown":false}]}),
+            json!({"items":[7, {}, {"id":"save","zone":"centre","shown":true}, {"id":"update","zone":"start","shown":false}]}),
         ] {
             assert_eq!(Layout::from_value(&value, &defaults), defaults);
         }
@@ -1616,8 +2650,8 @@ fn app_bar_saved_items_move_hide_and_overflow_independently() {
     saved.items.iter_mut().find(|p| p.id == "version").unwrap().shown = false;
     let minor = spec_with_items((3840.0, 0.0, 0.0), measured_bar(), &saved, &["save", "undo", "redo"], &quick, &["donate", "discord"]);
     assert!(index_of(&minor, "home") < index_of(&minor, "file"));
-    assert!(index_of(&minor, "pill:1") < index_of(&minor, "offered"));
-    assert!(index_of(&minor, "offered") < index_of(&minor, "assistant"));
+    assert!(index_of(&minor, "pill:1") < index_of(&minor, "assistant"));
+    assert!(index_of(&minor, "assistant") < index_of(&minor, "offered"));
     saved.items.reverse();
     for p in &mut saved.items {
         if p.id == "undo" {
@@ -1668,149 +2702,157 @@ fn app_bar_random_sanitized_layouts_never_overlap() {
         saved.items.push(Placement { id: "future:item".into(), zone: SavedZone::End, shown: true });
         saved.items.push(saved.items[0].clone());
         saved.items.remove(random() as usize % saved.items.len());
+        saved.add_separator(SavedZone::Start, None, &defaults);
+        saved.add_separator(SavedZone::End, None, &defaults);
+        saved.add_space(SavedZone::Start, None, &defaults);
+        saved.add_space(SavedZone::End, None, &defaults);
         saved.sanitize(&defaults);
+        assert!(saved.items.iter().any(|p| p.id == "file" && p.shown), "random hide/removal attempts cannot lose File");
         for width in 200..=3840 {
             let mut measurements = measured_bar();
             measurements.managed = Some(130.0);
-            let spec = spec_with_items((width as f32, 78.0, 138.0), measurements, &saved, &["save", "undo", "redo"], &quick, &["donate", "discord"]);
-            let placed = layout(&spec);
-            assert_sound(&spec, &placed);
-            let g = placed.application.unwrap();
-            for (i, x) in &g.quick_slots {
-                let slot = placed.placements[index_of(&spec, &format!("quick:{i}"))].unwrap();
-                assert!(*x - 16.0 >= slot.x - EPS && *x + 16.0 <= slot.right() + EPS);
+            let mut spec =
+                spec_with_items((width as f32, 78.0, 138.0), measurements, &saved, &["save", "undo", "redo"], &quick, &["donate", "discord"]);
+            for editing in [false, true] {
+                crate::app_bar_layout::application::set_editing(&mut spec, editing);
+                let placed = layout(&spec);
+                assert_sound(&spec, &placed);
+                assert_edit_cards(&spec, &placed);
+                let g = placed.application.as_ref().unwrap();
+                for (i, x) in &g.quick_slots {
+                    let slot = placed.placements[index_of(&spec, &format!("quick:{i}"))].unwrap();
+                    assert!(*x - ITEM_HEIGHT / 2.0 >= slot.x - EPS && *x + ITEM_HEIGHT / 2.0 <= slot.right() + EPS);
+                }
             }
         }
     }
 }
 
-// Unchanged rows are literal old-show snapshots. Revised rows are derived from the old
-// measured label widths and packed 34-point actions, 124-point tabs and 32-point More,
-// conceding by priority. See app_bar_application_never_overlaps_at_any_width for the contract.
-// Each case stores field length followed by its millipoint values.
-// Rows follow the width/variant loop order; zero lengths preserve absent rects and centres.
+// Re-captured to give the End stack the same four-point gap before window chrome as
+// between other neighbours. Regenerate with SOLIDCRAFT_RECAPTURE_APP_BAR=1 and the app_bar test
+// filter. Each of the same 120 cases records field lengths and millipoint positions/widths.
 #[rustfmt::skip]
-const OLD_BAR_ROWS: &[&[i32]] = &[
-    &[4, 36000, 1000, 68000, 33000, 2, 52000, 17000, 4, 68000, 4000, 104281, 30000, 2, 86141, 17000, 4, 105281, 1000, 137281, 33000, 2, 121281, 17000, 4, 139281, 1000, 171281, 33000, 2, 155281, 17000, 4, 173281, 1000, 205281, 33000, 2, 189281, 17000, 4, 414000, 1000, 446000, 33000, 2, 430000, 17000, 0, 0, 0, 0, 0, 0, 0, 0, 4, 448000, 4000, 480000, 30000, 2, 464000, 17000, 0, 0, 0, 0, 0, 0, 0, 0, 4, 380000, 1000, 412000, 33000, 2, 396000, 17000, 0, 0, 0, 4, 380000, 4000, 380000, 30000, 1, 0, 2, 206281, 380000, 0, 0, 0, 4, 68000, 4000, 104281, 30000], // 480 / 0
-    &[4, 36000, 1000, 68000, 33000, 2, 52000, 17000, 4, 68000, 4000, 104281, 30000, 2, 86141, 17000, 4, 105281, 1000, 137281, 33000, 2, 121281, 17000, 4, 139281, 1000, 171281, 33000, 2, 155281, 17000, 4, 173281, 1000, 205281, 33000, 2, 189281, 17000, 4, 414000, 1000, 446000, 33000, 2, 430000, 17000, 0, 0, 0, 0, 0, 0, 0, 0, 4, 448000, 4000, 480000, 30000, 2, 464000, 17000, 0, 0, 0, 0, 0, 0, 0, 0, 4, 380000, 1000, 412000, 33000, 2, 396000, 17000, 0, 0, 0, 4, 348000, 4000, 348000, 30000, 1, 0, 2, 206281, 348000, 0, 0, 0, 4, 68000, 4000, 104281, 30000], // 480 / 1
-    &[4, 36000, 1000, 68000, 33000, 2, 52000, 17000, 4, 79000, 4000, 115281, 30000, 2, 97141, 17000, 4, 116281, 1000, 148281, 33000, 2, 132281, 17000, 4, 150281, 1000, 182281, 33000, 2, 166281, 17000, 4, 184281, 1000, 216281, 33000, 2, 200281, 17000, 4, 414000, 1000, 446000, 33000, 2, 430000, 17000, 4, 75500, 7000, 76500, 27000, 0, 0, 0, 0, 0, 0, 0, 4, 448000, 1000, 480000, 33000, 2, 464000, 17000, 0, 0, 0, 0, 0, 0, 0, 0, 4, 380000, 1000, 412000, 33000, 2, 396000, 17000, 0, 0, 0, 4, 380000, 1000, 380000, 33000, 1, 0, 2, 217281, 380000, 0, 0, 0, 4, 79000, 4000, 115281, 30000], // 480 / 2
-    &[4, 36000, 1000, 68000, 33000, 2, 52000, 17000, 4, 68000, 4000, 104281, 30000, 2, 86141, 17000, 4, 105281, 1000, 137281, 33000, 2, 121281, 17000, 4, 139281, 1000, 171281, 33000, 2, 155281, 17000, 4, 173281, 1000, 205281, 33000, 2, 189281, 17000, 4, 414000, 1000, 446000, 33000, 2, 430000, 17000, 0, 0, 0, 0, 0, 0, 0, 0, 4, 448000, 4000, 480000, 30000, 2, 464000, 17000, 0, 0, 0, 0, 0, 0, 0, 0, 4, 380000, 1000, 412000, 33000, 2, 396000, 17000, 0, 0, 0, 4, 348000, 4000, 348000, 30000, 1, 0, 2, 206281, 348000, 0, 0, 0, 4, 68000, 4000, 104281, 30000], // 480 / 4
-    &[4, 36000, 1000, 68000, 33000, 2, 52000, 17000, 4, 68000, 4000, 104281, 30000, 2, 86141, 17000, 4, 105281, 1000, 137281, 33000, 2, 121281, 17000, 4, 139281, 1000, 171281, 33000, 2, 155281, 17000, 4, 173281, 1000, 205281, 33000, 2, 189281, 17000, 4, 414000, 1000, 446000, 33000, 2, 430000, 17000, 0, 0, 0, 0, 0, 0, 0, 0, 4, 448000, 4000, 480000, 30000, 2, 464000, 17000, 0, 0, 0, 0, 0, 0, 0, 0, 4, 380000, 1000, 412000, 33000, 2, 396000, 17000, 0, 0, 0, 4, 348000, 4000, 348000, 30000, 1, 0, 2, 206281, 348000, 0, 0, 0, 4, 68000, 4000, 104281, 30000], // 480 / 8
-    &[4, 36000, 1000, 68000, 33000, 2, 52000, 17000, 4, 68000, 4000, 104281, 30000, 2, 86141, 17000, 4, 105281, 1000, 137281, 33000, 2, 121281, 17000, 4, 139281, 1000, 171281, 33000, 2, 155281, 17000, 4, 173281, 1000, 205281, 33000, 2, 189281, 17000, 4, 414000, 1000, 446000, 33000, 2, 430000, 17000, 0, 0, 0, 0, 0, 0, 0, 0, 4, 448000, 4000, 480000, 30000, 2, 464000, 17000, 0, 0, 0, 0, 0, 0, 0, 0, 4, 380000, 1000, 412000, 33000, 2, 396000, 17000, 0, 0, 0, 4, 340000, 4000, 340000, 30000, 1, 0, 2, 206281, 340000, 0, 4, 346000, 1000, 378000, 33000, 0, 4, 68000, 4000, 104281, 30000], // 480 / 16
-    &[4, 36000, 1000, 68000, 33000, 2, 52000, 17000, 4, 68000, 4000, 104281, 30000, 2, 86141, 17000, 4, 105281, 1000, 137281, 33000, 2, 121281, 17000, 4, 139281, 1000, 171281, 33000, 2, 155281, 17000, 4, 173281, 1000, 205281, 33000, 2, 189281, 17000, 4, 446000, 1000, 478000, 33000, 2, 462000, 17000, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 4, 412000, 1000, 444000, 33000, 2, 428000, 17000, 0, 0, 2, 223281, 34000, 4, 380000, 4000, 380000, 30000, 1, 0, 2, 240281, 380000, 0, 0, 0, 4, 68000, 4000, 104281, 30000], // 480 / 32
-    &[4, 36000, 1000, 68000, 33000, 2, 52000, 17000, 4, 68000, 4000, 104281, 30000, 2, 86141, 17000, 4, 105281, 1000, 137281, 33000, 2, 121281, 17000, 4, 139281, 1000, 171281, 33000, 2, 155281, 17000, 4, 173281, 1000, 205281, 33000, 2, 189281, 17000, 4, 414000, 1000, 446000, 33000, 2, 430000, 17000, 0, 0, 0, 0, 0, 0, 0, 0, 4, 448000, 4000, 480000, 30000, 2, 464000, 17000, 0, 0, 0, 0, 0, 0, 0, 0, 4, 380000, 1000, 412000, 33000, 2, 396000, 17000, 0, 0, 0, 4, 380000, 4000, 380000, 30000, 1, 0, 2, 206281, 380000, 0, 0, 0, 4, 68000, 4000, 104281, 30000], // 480 / 64
-    &[0, 0, 4, 36000, 4000, 72281, 30000, 2, 54141, 17000, 4, 73281, 1000, 105281, 33000, 2, 89281, 17000, 0, 0, 0, 0, 4, 308000, 1000, 340000, 33000, 2, 324000, 17000, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 4, 274000, 1000, 306000, 33000, 2, 290000, 17000, 0, 0, 0, 4, 242000, 4000, 242000, 30000, 1, 0, 2, 106281, 242000, 0, 0, 0, 4, 36000, 4000, 72281, 30000], // 480 / 128
-    &[0, 0, 4, 36000, 4000, 72281, 30000, 2, 54141, 17000, 4, 73281, 1000, 105281, 33000, 2, 89281, 17000, 0, 0, 0, 0, 4, 308000, 1000, 340000, 33000, 2, 324000, 17000, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 4, 274000, 1000, 306000, 33000, 2, 290000, 17000, 0, 0, 0, 4, 242000, 1000, 242000, 33000, 1, 0, 2, 106281, 242000, 0, 0, 0, 4, 36000, 4000, 72281, 30000], // 480 / 255
-    &[4, 36000, 1000, 68000, 33000, 2, 52000, 17000, 4, 68000, 4000, 104281, 30000, 2, 86141, 17000, 4, 105281, 1000, 137281, 33000, 2, 121281, 17000, 4, 139281, 1000, 171281, 33000, 2, 155281, 17000, 4, 173281, 1000, 205281, 33000, 2, 189281, 17000, 4, 446000, 1000, 478000, 33000, 2, 462000, 17000, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 4, 412000, 1000, 444000, 33000, 2, 428000, 17000, 0, 0, 0, 4, 340000, 4000, 340000, 30000, 1, 0, 2, 206281, 340000, 0, 4, 378000, 1000, 410000, 33000, 0, 4, 68000, 4000, 104281, 30000], // 480 / 28
-    &[4, 36000, 1000, 68000, 33000, 2, 52000, 17000, 4, 68000, 4000, 104281, 30000, 2, 86141, 17000, 4, 105281, 1000, 137281, 33000, 2, 121281, 17000, 4, 139281, 1000, 171281, 33000, 2, 155281, 17000, 4, 173281, 1000, 205281, 33000, 2, 189281, 17000, 4, 414000, 1000, 446000, 33000, 2, 430000, 17000, 0, 0, 0, 0, 0, 0, 4, 342000, 4000, 376000, 30000, 2, 359000, 17000, 4, 448000, 1000, 480000, 33000, 2, 464000, 17000, 0, 0, 0, 0, 0, 0, 0, 0, 4, 380000, 1000, 412000, 33000, 2, 396000, 17000, 0, 0, 0, 4, 342000, 1000, 342000, 33000, 1, 0, 2, 206281, 342000, 4, 342000, 4000, 376000, 30000, 0, 0, 4, 68000, 4000, 104281, 30000], // 480 / 3
-    &[4, 36000, 1000, 68000, 33000, 2, 52000, 17000, 4, 68000, 4000, 104281, 30000, 2, 86141, 17000, 4, 105281, 1000, 137281, 33000, 2, 121281, 17000, 4, 139281, 1000, 171281, 33000, 2, 155281, 17000, 4, 173281, 1000, 205281, 33000, 2, 189281, 17000, 4, 414000, 1000, 446000, 33000, 2, 430000, 17000, 0, 0, 0, 0, 0, 0, 0, 0, 4, 448000, 4000, 480000, 30000, 2, 464000, 17000, 0, 0, 0, 0, 0, 0, 0, 0, 4, 380000, 1000, 412000, 33000, 2, 396000, 17000, 0, 0, 0, 4, 348000, 4000, 348000, 30000, 1, 0, 2, 206281, 348000, 0, 0, 0, 4, 68000, 4000, 104281, 30000], // 480 / 5
-    &[4, 36000, 1000, 68000, 33000, 2, 52000, 17000, 4, 68000, 4000, 104281, 30000, 2, 86141, 17000, 4, 105281, 1000, 137281, 33000, 2, 121281, 17000, 4, 139281, 1000, 171281, 33000, 2, 155281, 17000, 4, 173281, 1000, 205281, 33000, 2, 189281, 17000, 4, 414000, 1000, 446000, 33000, 2, 430000, 17000, 0, 0, 0, 0, 0, 0, 0, 0, 4, 448000, 1000, 480000, 33000, 2, 464000, 17000, 0, 0, 0, 0, 0, 0, 0, 0, 4, 380000, 1000, 412000, 33000, 2, 396000, 17000, 0, 0, 0, 4, 348000, 1000, 348000, 33000, 1, 0, 2, 206281, 348000, 0, 0, 0, 4, 68000, 4000, 104281, 30000], // 480 / 6
-    &[4, 36000, 1000, 68000, 33000, 2, 52000, 17000, 4, 68000, 4000, 104281, 30000, 2, 86141, 17000, 4, 105281, 1000, 137281, 33000, 2, 121281, 17000, 4, 139281, 1000, 171281, 33000, 2, 155281, 17000, 4, 173281, 1000, 205281, 33000, 2, 189281, 17000, 4, 414000, 1000, 446000, 33000, 2, 430000, 17000, 0, 0, 0, 0, 0, 0, 0, 0, 4, 448000, 4000, 480000, 30000, 2, 464000, 17000, 0, 0, 0, 0, 0, 0, 0, 0, 4, 380000, 1000, 412000, 33000, 2, 396000, 17000, 0, 0, 0, 4, 348000, 4000, 348000, 30000, 1, 0, 2, 206281, 348000, 0, 0, 0, 4, 68000, 4000, 104281, 30000], // 480 / 9
-    &[4, 36000, 1000, 68000, 33000, 2, 52000, 17000, 4, 68000, 4000, 104281, 30000, 2, 86141, 17000, 4, 105281, 1000, 137281, 33000, 2, 121281, 17000, 4, 139281, 1000, 171281, 33000, 2, 155281, 17000, 4, 173281, 1000, 205281, 33000, 2, 189281, 17000, 4, 446000, 1000, 478000, 33000, 2, 462000, 17000, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 4, 412000, 1000, 444000, 33000, 2, 428000, 17000, 0, 0, 0, 4, 340000, 4000, 340000, 30000, 1, 0, 2, 206281, 340000, 0, 4, 378000, 1000, 410000, 33000, 0, 4, 68000, 4000, 104281, 30000], // 480 / 17
-    &[4, 36000, 1000, 68000, 33000, 2, 52000, 17000, 4, 68000, 4000, 104281, 30000, 2, 86141, 17000, 4, 105281, 1000, 137281, 33000, 2, 121281, 17000, 4, 139281, 1000, 171281, 33000, 2, 155281, 17000, 4, 173281, 1000, 205281, 33000, 2, 189281, 17000, 4, 446000, 1000, 478000, 33000, 2, 462000, 17000, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 4, 412000, 1000, 444000, 33000, 2, 428000, 17000, 0, 0, 0, 4, 340000, 4000, 340000, 30000, 1, 0, 2, 206281, 340000, 0, 4, 378000, 1000, 410000, 33000, 0, 4, 68000, 4000, 104281, 30000], // 480 / 24
-    &[4, 36000, 1000, 68000, 33000, 2, 52000, 17000, 4, 68000, 4000, 104281, 30000, 2, 86141, 17000, 4, 105281, 1000, 137281, 33000, 2, 121281, 17000, 4, 139281, 1000, 171281, 33000, 2, 155281, 17000, 4, 173281, 1000, 205281, 33000, 2, 189281, 17000, 4, 446000, 1000, 478000, 33000, 2, 462000, 17000, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 4, 412000, 1000, 444000, 33000, 2, 428000, 17000, 0, 0, 2, 223281, 34000, 4, 380000, 4000, 380000, 30000, 1, 0, 2, 240281, 380000, 0, 0, 0, 4, 68000, 4000, 104281, 30000], // 480 / 33
-    &[4, 36000, 1000, 68000, 33000, 2, 52000, 17000, 4, 68000, 4000, 104281, 30000, 2, 86141, 17000, 4, 105281, 1000, 137281, 33000, 2, 121281, 17000, 4, 139281, 1000, 171281, 33000, 2, 155281, 17000, 4, 173281, 1000, 205281, 33000, 2, 189281, 17000, 4, 414000, 1000, 446000, 33000, 2, 430000, 17000, 0, 0, 0, 0, 0, 0, 0, 0, 4, 448000, 4000, 480000, 30000, 2, 464000, 17000, 0, 0, 0, 0, 0, 0, 0, 0, 4, 380000, 1000, 412000, 33000, 2, 396000, 17000, 0, 0, 0, 4, 348000, 4000, 348000, 30000, 1, 0, 2, 206281, 348000, 0, 0, 0, 4, 68000, 4000, 104281, 30000], // 480 / 65
-    &[4, 36000, 1000, 68000, 33000, 2, 52000, 17000, 4, 68000, 4000, 104281, 30000, 2, 86141, 17000, 4, 105281, 1000, 137281, 33000, 2, 121281, 17000, 4, 139281, 1000, 171281, 33000, 2, 155281, 17000, 4, 173281, 1000, 205281, 33000, 2, 189281, 17000, 4, 446000, 1000, 478000, 33000, 2, 462000, 17000, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 4, 412000, 1000, 444000, 33000, 2, 428000, 17000, 0, 0, 2, 223281, 34000, 4, 380000, 4000, 380000, 30000, 1, 0, 2, 240281, 380000, 0, 0, 0, 4, 68000, 4000, 104281, 30000], // 480 / 96
-    &[0, 0, 4, 36000, 4000, 72281, 30000, 2, 54141, 17000, 4, 73281, 1000, 105281, 33000, 2, 89281, 17000, 0, 0, 0, 0, 4, 308000, 1000, 340000, 33000, 2, 324000, 17000, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 4, 274000, 1000, 306000, 33000, 2, 290000, 17000, 0, 0, 0, 4, 242000, 4000, 242000, 30000, 1, 0, 2, 106281, 242000, 0, 0, 0, 4, 36000, 4000, 72281, 30000], // 480 / 129
-    &[0, 0, 4, 36000, 4000, 72281, 30000, 2, 54141, 17000, 4, 73281, 1000, 105281, 33000, 2, 89281, 17000, 0, 0, 0, 0, 4, 308000, 1000, 340000, 33000, 2, 324000, 17000, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 4, 274000, 1000, 306000, 33000, 2, 290000, 17000, 0, 0, 0, 4, 242000, 4000, 242000, 30000, 1, 0, 2, 106281, 242000, 0, 0, 0, 4, 36000, 4000, 72281, 30000], // 480 / 160
-    &[0, 0, 4, 36000, 4000, 72281, 30000, 2, 54141, 17000, 4, 73281, 1000, 105281, 33000, 2, 89281, 17000, 0, 0, 0, 0, 4, 308000, 1000, 340000, 33000, 2, 324000, 17000, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 4, 274000, 1000, 306000, 33000, 2, 290000, 17000, 0, 0, 0, 4, 242000, 4000, 242000, 30000, 1, 0, 2, 106281, 242000, 0, 0, 0, 4, 36000, 4000, 72281, 30000], // 480 / 188
-    &[0, 0, 4, 36000, 4000, 72281, 30000, 2, 54141, 17000, 4, 73281, 1000, 105281, 33000, 2, 89281, 17000, 0, 0, 0, 0, 4, 308000, 1000, 340000, 33000, 2, 324000, 17000, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 4, 274000, 1000, 306000, 33000, 2, 290000, 17000, 0, 0, 0, 4, 242000, 1000, 242000, 33000, 1, 0, 2, 106281, 242000, 0, 0, 0, 4, 36000, 4000, 72281, 30000], // 480 / 254
-    &[4, 108000, 1000, 140000, 33000, 2, 124000, 17000, 4, 151000, 4000, 187281, 30000, 2, 169141, 17000, 4, 188281, 1000, 220281, 33000, 2, 204281, 17000, 4, 222281, 1000, 254281, 33000, 2, 238281, 17000, 4, 256281, 1000, 288281, 33000, 2, 272281, 17000, 4, 570000, 1000, 602000, 33000, 2, 586000, 17000, 4, 147500, 7000, 148500, 27000, 0, 0, 0, 4, 295781, 7000, 296781, 27000, 0, 0, 0, 4, 604000, 4000, 632000, 30000, 2, 618000, 17000, 0, 0, 0, 0, 0, 0, 0, 0, 4, 536000, 1000, 568000, 33000, 2, 552000, 17000, 0, 0, 0, 4, 306281, 4000, 494000, 30000, 1, 0, 2, 306281, 496000, 0, 0, 0, 4, 151000, 4000, 187281, 30000], // 640 / 0
-    &[4, 108000, 1000, 140000, 33000, 2, 124000, 17000, 4, 151000, 4000, 187281, 30000, 2, 169141, 17000, 4, 188281, 1000, 220281, 33000, 2, 204281, 17000, 4, 222281, 1000, 254281, 33000, 2, 238281, 17000, 4, 256281, 1000, 288281, 33000, 2, 272281, 17000, 4, 570000, 1000, 602000, 33000, 2, 586000, 17000, 4, 147500, 7000, 148500, 27000, 0, 0, 0, 4, 295781, 7000, 296781, 27000, 0, 4, 498000, 4000, 532000, 30000, 2, 515000, 17000, 4, 604000, 4000, 632000, 30000, 2, 618000, 17000, 0, 0, 0, 0, 0, 0, 0, 0, 4, 536000, 1000, 568000, 33000, 2, 552000, 17000, 0, 0, 0, 4, 306281, 4000, 456000, 30000, 1, 0, 2, 306281, 458000, 4, 498000, 4000, 532000, 30000, 0, 0, 4, 151000, 4000, 187281, 30000], // 640 / 1
-    &[4, 108000, 1000, 140000, 33000, 2, 124000, 17000, 4, 151000, 4000, 187281, 30000, 2, 169141, 17000, 4, 188281, 1000, 220281, 33000, 2, 204281, 17000, 4, 222281, 1000, 254281, 33000, 2, 238281, 17000, 4, 256281, 1000, 288281, 33000, 2, 272281, 17000, 4, 566000, 1000, 598000, 33000, 2, 582000, 17000, 4, 147500, 7000, 148500, 27000, 0, 0, 0, 4, 295781, 7000, 296781, 27000, 0, 0, 0, 4, 600000, 1000, 632000, 33000, 2, 616000, 17000, 0, 0, 0, 0, 0, 0, 0, 0, 4, 532000, 1000, 564000, 33000, 2, 548000, 17000, 0, 0, 0, 4, 306281, 1000, 490000, 33000, 1, 1, 2, 306281, 492000, 0, 0, 0, 4, 151000, 4000, 187281, 30000], // 640 / 2
-    &[4, 108000, 1000, 140000, 33000, 2, 124000, 17000, 4, 151000, 4000, 187281, 30000, 2, 169141, 17000, 4, 188281, 1000, 220281, 33000, 2, 204281, 17000, 4, 222281, 1000, 254281, 33000, 2, 238281, 17000, 4, 256281, 1000, 288281, 33000, 2, 272281, 17000, 4, 518000, 1000, 550000, 33000, 2, 534000, 17000, 4, 147500, 7000, 148500, 27000, 0, 0, 0, 4, 295781, 7000, 296781, 27000, 0, 0, 0, 4, 552000, 4000, 580000, 30000, 2, 566000, 17000, 0, 0, 0, 0, 0, 0, 0, 0, 4, 484000, 1000, 516000, 33000, 2, 500000, 17000, 0, 2, 617797, 17000, 0, 4, 306281, 4000, 442000, 30000, 1, 0, 2, 306281, 444000, 0, 0, 0, 4, 151000, 4000, 187281, 30000], // 640 / 4
-    &[4, 36000, 1000, 68000, 33000, 2, 52000, 17000, 4, 79000, 4000, 115281, 30000, 2, 97141, 17000, 4, 116281, 1000, 148281, 33000, 2, 132281, 17000, 4, 150281, 1000, 182281, 33000, 2, 166281, 17000, 4, 184281, 1000, 216281, 33000, 2, 200281, 17000, 4, 490844, 1000, 522844, 33000, 2, 506844, 17000, 4, 75500, 7000, 76500, 27000, 0, 0, 0, 0, 0, 0, 0, 4, 524844, 4000, 640000, 30000, 2, 582422, 17000, 4, 354844, 5000, 380000, 29000, 2, 367422, 17000, 4, 380000, 9000, 396000, 25000, 2, 388000, 17000, 4, 405844, 5000, 431000, 29000, 2, 418422, 17000, 4, 431000, 9000, 447000, 25000, 2, 439000, 17000, 4, 456844, 1000, 488844, 33000, 2, 472844, 17000, 0, 0, 0, 4, 354844, 4000, 354844, 30000, 1, 0, 2, 217281, 354844, 0, 0, 0, 4, 79000, 4000, 115281, 30000], // 640 / 8
-    &[4, 108000, 1000, 140000, 33000, 2, 124000, 17000, 4, 151000, 4000, 187281, 30000, 2, 169141, 17000, 4, 188281, 1000, 220281, 33000, 2, 204281, 17000, 4, 222281, 1000, 254281, 33000, 2, 238281, 17000, 4, 256281, 1000, 288281, 33000, 2, 272281, 17000, 4, 570000, 1000, 602000, 33000, 2, 586000, 17000, 4, 147500, 7000, 148500, 27000, 0, 0, 0, 4, 295781, 7000, 296781, 27000, 0, 0, 0, 4, 604000, 4000, 632000, 30000, 2, 618000, 17000, 0, 0, 0, 0, 0, 0, 0, 0, 4, 536000, 1000, 568000, 33000, 2, 552000, 17000, 0, 0, 0, 4, 306281, 4000, 494000, 30000, 1, 0, 2, 306281, 496000, 0, 4, 502000, 1000, 534000, 33000, 0, 4, 151000, 4000, 187281, 30000], // 640 / 16
-    &[4, 36000, 1000, 68000, 33000, 2, 52000, 17000, 4, 68000, 4000, 104281, 30000, 2, 86141, 17000, 4, 105281, 1000, 137281, 33000, 2, 121281, 17000, 4, 139281, 1000, 171281, 33000, 2, 155281, 17000, 4, 173281, 1000, 205281, 33000, 2, 189281, 17000, 4, 574000, 1000, 606000, 33000, 2, 590000, 17000, 0, 0, 0, 0, 0, 0, 0, 0, 4, 608000, 4000, 640000, 30000, 2, 624000, 17000, 0, 0, 0, 0, 0, 0, 0, 0, 4, 540000, 1000, 572000, 33000, 2, 556000, 17000, 0, 0, 2, 223281, 34000, 4, 540000, 4000, 540000, 30000, 1, 0, 2, 376281, 540000, 0, 0, 0, 4, 68000, 4000, 104281, 30000], // 640 / 32
-    &[4, 36000, 1000, 68000, 33000, 2, 52000, 17000, 4, 79000, 4000, 115281, 30000, 2, 97141, 17000, 4, 116281, 1000, 148281, 33000, 2, 132281, 17000, 4, 150281, 1000, 182281, 33000, 2, 166281, 17000, 4, 184281, 1000, 216281, 33000, 2, 200281, 17000, 4, 490844, 1000, 522844, 33000, 2, 506844, 17000, 4, 75500, 7000, 76500, 27000, 0, 0, 0, 0, 0, 0, 0, 4, 524844, 4000, 640000, 30000, 2, 582422, 17000, 0, 0, 0, 0, 0, 0, 0, 0, 4, 456844, 1000, 488844, 33000, 2, 472844, 17000, 0, 0, 0, 4, 456844, 4000, 456844, 30000, 1, 0, 2, 217281, 456844, 0, 0, 0, 4, 79000, 4000, 115281, 30000], // 640 / 64
-    &[4, 36000, 1000, 68000, 33000, 2, 52000, 17000, 4, 68000, 4000, 104281, 30000, 2, 86141, 17000, 4, 105281, 1000, 137281, 33000, 2, 121281, 17000, 4, 139281, 1000, 171281, 33000, 2, 155281, 17000, 4, 173281, 1000, 205281, 33000, 2, 189281, 17000, 4, 436000, 1000, 468000, 33000, 2, 452000, 17000, 0, 0, 0, 0, 0, 0, 0, 0, 4, 470000, 4000, 502000, 30000, 2, 486000, 17000, 0, 0, 0, 0, 0, 0, 0, 0, 4, 402000, 1000, 434000, 33000, 2, 418000, 17000, 0, 0, 0, 4, 402000, 4000, 402000, 30000, 1, 0, 2, 206281, 402000, 0, 0, 0, 4, 68000, 4000, 104281, 30000], // 640 / 128
-    &[4, 36000, 1000, 68000, 33000, 2, 52000, 17000, 4, 68000, 4000, 104281, 30000, 2, 86141, 17000, 4, 105281, 1000, 137281, 33000, 2, 121281, 17000, 4, 139281, 1000, 171281, 33000, 2, 155281, 17000, 4, 173281, 1000, 205281, 33000, 2, 189281, 17000, 4, 468000, 1000, 500000, 33000, 2, 484000, 17000, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 4, 434000, 1000, 466000, 33000, 2, 450000, 17000, 0, 0, 2, 223281, 34000, 4, 402000, 1000, 402000, 33000, 1, 0, 2, 274281, 402000, 0, 0, 0, 4, 68000, 4000, 104281, 30000], // 640 / 255
-    &[4, 36000, 1000, 68000, 33000, 2, 52000, 17000, 4, 68000, 4000, 104281, 30000, 2, 86141, 17000, 4, 105281, 1000, 137281, 33000, 2, 121281, 17000, 4, 139281, 1000, 171281, 33000, 2, 155281, 17000, 4, 173281, 1000, 205281, 33000, 2, 189281, 17000, 4, 490844, 1000, 522844, 33000, 2, 506844, 17000, 0, 0, 0, 0, 0, 0, 0, 0, 4, 524844, 4000, 640000, 30000, 2, 582422, 17000, 0, 0, 0, 0, 4, 365844, 5000, 391000, 29000, 2, 378422, 17000, 4, 391000, 9000, 407000, 25000, 2, 399000, 17000, 4, 456844, 1000, 488844, 33000, 2, 472844, 17000, 0, 0, 0, 4, 333844, 4000, 333844, 30000, 1, 0, 2, 206281, 333844, 0, 4, 422844, 1000, 454844, 33000, 0, 4, 68000, 4000, 104281, 30000], // 640 / 28
-    &[4, 108000, 1000, 140000, 33000, 2, 124000, 17000, 4, 151000, 4000, 187281, 30000, 2, 169141, 17000, 4, 188281, 1000, 220281, 33000, 2, 204281, 17000, 4, 222281, 1000, 254281, 33000, 2, 238281, 17000, 4, 256281, 1000, 288281, 33000, 2, 272281, 17000, 4, 566000, 1000, 598000, 33000, 2, 582000, 17000, 4, 147500, 7000, 148500, 27000, 0, 0, 0, 4, 295781, 7000, 296781, 27000, 0, 4, 494000, 4000, 528000, 30000, 2, 511000, 17000, 4, 600000, 1000, 632000, 33000, 2, 616000, 17000, 0, 0, 0, 0, 0, 0, 0, 0, 4, 532000, 1000, 564000, 33000, 2, 548000, 17000, 0, 0, 0, 4, 306281, 1000, 452000, 33000, 1, 1, 2, 306281, 454000, 4, 494000, 4000, 528000, 30000, 0, 0, 4, 151000, 4000, 187281, 30000], // 640 / 3
-    &[4, 36000, 1000, 68000, 33000, 2, 52000, 17000, 4, 68000, 4000, 104281, 30000, 2, 86141, 17000, 4, 105281, 1000, 137281, 33000, 2, 121281, 17000, 4, 139281, 1000, 171281, 33000, 2, 155281, 17000, 4, 173281, 1000, 205281, 33000, 2, 189281, 17000, 4, 490844, 1000, 522844, 33000, 2, 506844, 17000, 0, 0, 0, 0, 0, 0, 4, 418844, 4000, 452844, 30000, 2, 435844, 17000, 4, 524844, 4000, 640000, 30000, 2, 582422, 17000, 0, 0, 0, 0, 0, 0, 0, 0, 4, 456844, 1000, 488844, 33000, 2, 472844, 17000, 0, 0, 0, 4, 386844, 4000, 386844, 30000, 1, 0, 2, 206281, 386844, 4, 418844, 4000, 452844, 30000, 0, 0, 4, 68000, 4000, 104281, 30000], // 640 / 5
-    &[4, 108000, 1000, 140000, 33000, 2, 124000, 17000, 4, 151000, 4000, 187281, 30000, 2, 169141, 17000, 4, 188281, 1000, 220281, 33000, 2, 204281, 17000, 4, 222281, 1000, 254281, 33000, 2, 238281, 17000, 4, 256281, 1000, 288281, 33000, 2, 272281, 17000, 4, 514000, 1000, 546000, 33000, 2, 530000, 17000, 4, 147500, 7000, 148500, 27000, 0, 0, 0, 4, 295781, 7000, 296781, 27000, 0, 0, 0, 4, 548000, 1000, 580000, 33000, 2, 564000, 17000, 0, 0, 0, 0, 0, 0, 0, 0, 4, 480000, 1000, 512000, 33000, 2, 496000, 17000, 0, 2, 617797, 17000, 0, 4, 306281, 1000, 438000, 33000, 1, 1, 2, 306281, 440000, 0, 0, 0, 4, 151000, 4000, 187281, 30000], // 640 / 6
-    &[4, 36000, 1000, 68000, 33000, 2, 52000, 17000, 4, 68000, 4000, 104281, 30000, 2, 86141, 17000, 4, 105281, 1000, 137281, 33000, 2, 121281, 17000, 4, 139281, 1000, 171281, 33000, 2, 155281, 17000, 4, 173281, 1000, 205281, 33000, 2, 189281, 17000, 4, 490844, 1000, 522844, 33000, 2, 506844, 17000, 0, 0, 0, 0, 0, 0, 4, 418844, 4000, 452844, 30000, 2, 435844, 17000, 4, 524844, 4000, 640000, 30000, 2, 582422, 17000, 0, 0, 0, 0, 0, 0, 0, 0, 4, 456844, 1000, 488844, 33000, 2, 472844, 17000, 0, 0, 0, 4, 386844, 4000, 386844, 30000, 1, 0, 2, 206281, 386844, 4, 418844, 4000, 452844, 30000, 0, 0, 4, 68000, 4000, 104281, 30000], // 640 / 9
-    &[4, 108000, 1000, 140000, 33000, 2, 124000, 17000, 4, 151000, 4000, 187281, 30000, 2, 169141, 17000, 4, 188281, 1000, 220281, 33000, 2, 204281, 17000, 4, 222281, 1000, 254281, 33000, 2, 238281, 17000, 4, 256281, 1000, 288281, 33000, 2, 272281, 17000, 4, 570000, 1000, 602000, 33000, 2, 586000, 17000, 4, 147500, 7000, 148500, 27000, 0, 0, 0, 4, 295781, 7000, 296781, 27000, 0, 4, 498000, 4000, 532000, 30000, 2, 515000, 17000, 4, 604000, 4000, 632000, 30000, 2, 618000, 17000, 0, 0, 0, 0, 0, 0, 0, 0, 4, 536000, 1000, 568000, 33000, 2, 552000, 17000, 0, 0, 0, 4, 306281, 4000, 456000, 30000, 1, 0, 2, 306281, 458000, 4, 498000, 4000, 532000, 30000, 4, 464000, 1000, 496000, 33000, 0, 4, 151000, 4000, 187281, 30000], // 640 / 17
-    &[4, 36000, 1000, 68000, 33000, 2, 52000, 17000, 4, 68000, 4000, 104281, 30000, 2, 86141, 17000, 4, 105281, 1000, 137281, 33000, 2, 121281, 17000, 4, 139281, 1000, 171281, 33000, 2, 155281, 17000, 4, 173281, 1000, 205281, 33000, 2, 189281, 17000, 4, 490844, 1000, 522844, 33000, 2, 506844, 17000, 0, 0, 0, 0, 0, 0, 0, 0, 4, 524844, 4000, 640000, 30000, 2, 582422, 17000, 0, 0, 0, 0, 4, 365844, 5000, 391000, 29000, 2, 378422, 17000, 4, 391000, 9000, 407000, 25000, 2, 399000, 17000, 4, 456844, 1000, 488844, 33000, 2, 472844, 17000, 0, 0, 0, 4, 333844, 4000, 333844, 30000, 1, 0, 2, 206281, 333844, 0, 4, 422844, 1000, 454844, 33000, 0, 4, 68000, 4000, 104281, 30000], // 640 / 24
-    &[4, 36000, 1000, 68000, 33000, 2, 52000, 17000, 4, 68000, 4000, 104281, 30000, 2, 86141, 17000, 4, 105281, 1000, 137281, 33000, 2, 121281, 17000, 4, 139281, 1000, 171281, 33000, 2, 155281, 17000, 4, 173281, 1000, 205281, 33000, 2, 189281, 17000, 4, 574000, 1000, 606000, 33000, 2, 590000, 17000, 0, 0, 0, 0, 0, 0, 0, 0, 4, 608000, 4000, 640000, 30000, 2, 624000, 17000, 0, 0, 0, 0, 0, 0, 0, 0, 4, 540000, 1000, 572000, 33000, 2, 556000, 17000, 0, 0, 2, 223281, 34000, 4, 508000, 4000, 508000, 30000, 1, 0, 2, 376281, 508000, 0, 0, 0, 4, 68000, 4000, 104281, 30000], // 640 / 33
-    &[4, 36000, 1000, 68000, 33000, 2, 52000, 17000, 4, 68000, 4000, 104281, 30000, 2, 86141, 17000, 4, 105281, 1000, 137281, 33000, 2, 121281, 17000, 4, 139281, 1000, 171281, 33000, 2, 155281, 17000, 4, 173281, 1000, 205281, 33000, 2, 189281, 17000, 4, 490844, 1000, 522844, 33000, 2, 506844, 17000, 0, 0, 0, 0, 0, 0, 4, 418844, 4000, 452844, 30000, 2, 435844, 17000, 4, 524844, 4000, 640000, 30000, 2, 582422, 17000, 0, 0, 0, 0, 0, 0, 0, 0, 4, 456844, 1000, 488844, 33000, 2, 472844, 17000, 0, 0, 0, 4, 418844, 4000, 418844, 30000, 1, 0, 2, 206281, 418844, 4, 418844, 4000, 452844, 30000, 0, 0, 4, 68000, 4000, 104281, 30000], // 640 / 65
-    &[4, 36000, 1000, 68000, 33000, 2, 52000, 17000, 4, 68000, 4000, 104281, 30000, 2, 86141, 17000, 4, 105281, 1000, 137281, 33000, 2, 121281, 17000, 4, 139281, 1000, 171281, 33000, 2, 155281, 17000, 4, 173281, 1000, 205281, 33000, 2, 189281, 17000, 4, 574000, 1000, 606000, 33000, 2, 590000, 17000, 0, 0, 0, 0, 0, 0, 0, 0, 4, 608000, 4000, 640000, 30000, 2, 624000, 17000, 0, 0, 0, 0, 0, 0, 0, 0, 4, 540000, 1000, 572000, 33000, 2, 556000, 17000, 0, 0, 2, 223281, 34000, 4, 540000, 4000, 540000, 30000, 1, 0, 2, 376281, 540000, 0, 0, 0, 4, 68000, 4000, 104281, 30000], // 640 / 96
-    &[4, 36000, 1000, 68000, 33000, 2, 52000, 17000, 4, 68000, 4000, 104281, 30000, 2, 86141, 17000, 4, 105281, 1000, 137281, 33000, 2, 121281, 17000, 4, 139281, 1000, 171281, 33000, 2, 155281, 17000, 4, 173281, 1000, 205281, 33000, 2, 189281, 17000, 4, 436000, 1000, 468000, 33000, 2, 452000, 17000, 0, 0, 0, 0, 0, 0, 0, 0, 4, 470000, 4000, 502000, 30000, 2, 486000, 17000, 0, 0, 0, 0, 0, 0, 0, 0, 4, 402000, 1000, 434000, 33000, 2, 418000, 17000, 0, 0, 0, 4, 370000, 4000, 370000, 30000, 1, 0, 2, 206281, 370000, 0, 0, 0, 4, 68000, 4000, 104281, 30000], // 640 / 129
-    &[4, 36000, 1000, 68000, 33000, 2, 52000, 17000, 4, 68000, 4000, 104281, 30000, 2, 86141, 17000, 4, 105281, 1000, 137281, 33000, 2, 121281, 17000, 4, 139281, 1000, 171281, 33000, 2, 155281, 17000, 4, 173281, 1000, 205281, 33000, 2, 189281, 17000, 4, 468000, 1000, 500000, 33000, 2, 484000, 17000, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 4, 434000, 1000, 466000, 33000, 2, 450000, 17000, 0, 0, 2, 223281, 34000, 4, 402000, 4000, 402000, 30000, 1, 0, 2, 274281, 402000, 0, 0, 0, 4, 68000, 4000, 104281, 30000], // 640 / 160
-    &[4, 36000, 1000, 68000, 33000, 2, 52000, 17000, 4, 68000, 4000, 104281, 30000, 2, 86141, 17000, 4, 105281, 1000, 137281, 33000, 2, 121281, 17000, 4, 139281, 1000, 171281, 33000, 2, 155281, 17000, 4, 173281, 1000, 205281, 33000, 2, 189281, 17000, 4, 468000, 1000, 500000, 33000, 2, 484000, 17000, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 4, 434000, 1000, 466000, 33000, 2, 450000, 17000, 0, 0, 2, 223281, 34000, 4, 402000, 4000, 402000, 30000, 1, 0, 2, 274281, 402000, 0, 0, 0, 4, 68000, 4000, 104281, 30000], // 640 / 188
-    &[4, 36000, 1000, 68000, 33000, 2, 52000, 17000, 4, 68000, 4000, 104281, 30000, 2, 86141, 17000, 4, 105281, 1000, 137281, 33000, 2, 121281, 17000, 4, 139281, 1000, 171281, 33000, 2, 155281, 17000, 4, 173281, 1000, 205281, 33000, 2, 189281, 17000, 4, 468000, 1000, 500000, 33000, 2, 484000, 17000, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 4, 434000, 1000, 466000, 33000, 2, 450000, 17000, 0, 0, 2, 223281, 34000, 4, 402000, 1000, 402000, 33000, 1, 0, 2, 274281, 402000, 0, 0, 0, 4, 68000, 4000, 104281, 30000], // 640 / 254
-    &[4, 108000, 1000, 140000, 33000, 2, 124000, 17000, 4, 151000, 4000, 187281, 30000, 2, 169141, 17000, 4, 188281, 1000, 220281, 33000, 2, 204281, 17000, 4, 222281, 1000, 254281, 33000, 2, 238281, 17000, 4, 256281, 1000, 288281, 33000, 2, 272281, 17000, 4, 842844, 1000, 874844, 33000, 2, 858844, 17000, 4, 147500, 7000, 148500, 27000, 0, 0, 0, 4, 295781, 7000, 296781, 27000, 0, 0, 0, 4, 876844, 4000, 992000, 30000, 2, 934422, 17000, 0, 0, 0, 0, 0, 0, 0, 0, 4, 808844, 1000, 840844, 33000, 2, 824844, 17000, 0, 0, 0, 4, 306281, 4000, 766844, 30000, 1, 1, 2, 306281, 768844, 0, 0, 0, 4, 151000, 4000, 187281, 30000], // 1000 / 0
-    &[4, 108000, 1000, 140000, 33000, 2, 124000, 17000, 4, 151000, 4000, 187281, 30000, 2, 169141, 17000, 4, 188281, 1000, 220281, 33000, 2, 204281, 17000, 4, 222281, 1000, 254281, 33000, 2, 238281, 17000, 4, 256281, 1000, 288281, 33000, 2, 272281, 17000, 4, 842844, 1000, 874844, 33000, 2, 858844, 17000, 4, 147500, 7000, 148500, 27000, 0, 0, 0, 4, 295781, 7000, 296781, 27000, 0, 4, 621844, 4000, 804844, 30000, 2, 713344, 17000, 4, 876844, 4000, 992000, 30000, 2, 934422, 17000, 0, 0, 0, 0, 0, 0, 0, 0, 4, 808844, 1000, 840844, 33000, 2, 824844, 17000, 0, 0, 0, 4, 306281, 4000, 579844, 30000, 1, 1, 2, 306281, 581844, 4, 621844, 4000, 804844, 30000, 0, 0, 4, 151000, 4000, 187281, 30000], // 1000 / 1
-    &[4, 108000, 1000, 140000, 33000, 2, 124000, 17000, 4, 151000, 4000, 187281, 30000, 2, 169141, 17000, 4, 188281, 1000, 220281, 33000, 2, 204281, 17000, 4, 222281, 1000, 254281, 33000, 2, 238281, 17000, 4, 256281, 1000, 288281, 33000, 2, 272281, 17000, 4, 926000, 1000, 958000, 33000, 2, 942000, 17000, 4, 147500, 7000, 148500, 27000, 0, 0, 0, 4, 295781, 7000, 296781, 27000, 0, 0, 0, 4, 960000, 1000, 992000, 33000, 2, 976000, 17000, 0, 0, 0, 0, 0, 0, 0, 0, 4, 892000, 1000, 924000, 33000, 2, 908000, 17000, 0, 0, 0, 4, 306281, 1000, 850000, 33000, 1, 1, 2, 306281, 852000, 0, 0, 0, 4, 151000, 4000, 187281, 30000], // 1000 / 2
-    &[4, 108000, 1000, 140000, 33000, 2, 124000, 17000, 4, 151000, 4000, 187281, 30000, 2, 169141, 17000, 4, 188281, 1000, 220281, 33000, 2, 204281, 17000, 4, 222281, 1000, 254281, 33000, 2, 238281, 17000, 4, 256281, 1000, 288281, 33000, 2, 272281, 17000, 4, 790844, 1000, 822844, 33000, 2, 806844, 17000, 4, 147500, 7000, 148500, 27000, 0, 0, 0, 4, 295781, 7000, 296781, 27000, 0, 0, 0, 4, 824844, 4000, 940000, 30000, 2, 882422, 17000, 0, 0, 0, 0, 0, 0, 0, 0, 4, 756844, 1000, 788844, 33000, 2, 772844, 17000, 0, 2, 977797, 17000, 0, 4, 306281, 4000, 714844, 30000, 1, 1, 2, 306281, 716844, 0, 0, 0, 4, 151000, 4000, 187281, 30000], // 1000 / 4
-    &[4, 108000, 1000, 140000, 33000, 2, 124000, 17000, 4, 151000, 4000, 187281, 30000, 2, 169141, 17000, 4, 188281, 1000, 220281, 33000, 2, 204281, 17000, 4, 222281, 1000, 254281, 33000, 2, 238281, 17000, 4, 256281, 1000, 288281, 33000, 2, 272281, 17000, 4, 842844, 1000, 874844, 33000, 2, 858844, 17000, 4, 147500, 7000, 148500, 27000, 0, 0, 0, 4, 295781, 7000, 296781, 27000, 0, 0, 0, 4, 876844, 4000, 992000, 30000, 2, 934422, 17000, 4, 669000, 5000, 694000, 29000, 2, 681500, 17000, 4, 694000, 9000, 710000, 25000, 2, 702000, 17000, 4, 720000, 5000, 745000, 29000, 2, 732500, 17000, 4, 745000, 9000, 761000, 25000, 2, 753000, 17000, 4, 808844, 1000, 840844, 33000, 2, 824844, 17000, 0, 0, 0, 4, 306281, 4000, 766844, 30000, 1, 1, 2, 306281, 666844, 0, 0, 0, 4, 151000, 4000, 187281, 30000], // 1000 / 8
-    &[4, 108000, 1000, 140000, 33000, 2, 124000, 17000, 4, 151000, 4000, 187281, 30000, 2, 169141, 17000, 4, 188281, 1000, 220281, 33000, 2, 204281, 17000, 4, 222281, 1000, 254281, 33000, 2, 238281, 17000, 4, 256281, 1000, 288281, 33000, 2, 272281, 17000, 4, 842844, 1000, 874844, 33000, 2, 858844, 17000, 4, 147500, 7000, 148500, 27000, 0, 0, 0, 4, 295781, 7000, 296781, 27000, 0, 0, 0, 4, 876844, 4000, 992000, 30000, 2, 934422, 17000, 0, 0, 0, 0, 0, 0, 0, 0, 4, 808844, 1000, 840844, 33000, 2, 824844, 17000, 0, 0, 0, 4, 306281, 4000, 766844, 30000, 1, 1, 2, 306281, 768844, 0, 4, 774844, 1000, 806844, 33000, 0, 4, 151000, 4000, 187281, 30000], // 1000 / 16
-    &[4, 108000, 1000, 140000, 33000, 2, 124000, 17000, 4, 151000, 4000, 187281, 30000, 2, 169141, 17000, 4, 188281, 1000, 220281, 33000, 2, 204281, 17000, 4, 222281, 1000, 254281, 33000, 2, 238281, 17000, 4, 256281, 1000, 288281, 33000, 2, 272281, 17000, 4, 842844, 1000, 874844, 33000, 2, 858844, 17000, 4, 147500, 7000, 148500, 27000, 0, 4, 296781, 7000, 297781, 27000, 0, 4, 473781, 7000, 474781, 27000, 0, 0, 0, 4, 876844, 4000, 992000, 30000, 2, 934422, 17000, 0, 0, 0, 0, 0, 0, 0, 0, 4, 808844, 1000, 840844, 33000, 2, 824844, 17000, 0, 0, 2, 314281, 34000, 4, 484281, 4000, 766844, 30000, 1, 1, 2, 484281, 768844, 0, 0, 0, 4, 151000, 4000, 187281, 30000], // 1000 / 32
-    &[4, 255750, 1000, 287750, 33000, 2, 271750, 17000, 4, 298750, 4000, 335031, 30000, 2, 316891, 17000, 4, 336031, 1000, 368031, 33000, 2, 352031, 17000, 4, 370031, 1000, 402031, 33000, 2, 386031, 17000, 4, 404031, 1000, 436031, 33000, 2, 420031, 17000, 4, 842844, 1000, 874844, 33000, 2, 858844, 17000, 4, 295250, 7000, 296250, 27000, 0, 0, 0, 4, 443531, 7000, 444531, 27000, 0, 0, 0, 4, 876844, 4000, 992000, 30000, 2, 934422, 17000, 0, 0, 0, 0, 0, 0, 0, 0, 4, 808844, 1000, 840844, 33000, 2, 824844, 17000, 0, 0, 0, 4, 454031, 4000, 766844, 30000, 1, 1, 2, 454031, 768844, 0, 0, 0, 4, 298750, 4000, 335031, 30000], // 1000 / 64
-    &[4, 108000, 1000, 140000, 33000, 2, 124000, 17000, 4, 151000, 4000, 187281, 30000, 2, 169141, 17000, 4, 188281, 1000, 220281, 33000, 2, 204281, 17000, 4, 222281, 1000, 254281, 33000, 2, 238281, 17000, 4, 256281, 1000, 288281, 33000, 2, 272281, 17000, 4, 704844, 1000, 736844, 33000, 2, 720844, 17000, 4, 147500, 7000, 148500, 27000, 0, 0, 0, 4, 295781, 7000, 296781, 27000, 0, 0, 0, 4, 738844, 4000, 854000, 30000, 2, 796422, 17000, 0, 0, 0, 0, 0, 0, 0, 0, 4, 670844, 1000, 702844, 33000, 2, 686844, 17000, 0, 0, 0, 4, 306281, 4000, 628844, 30000, 1, 1, 2, 306281, 630844, 0, 0, 0, 4, 151000, 4000, 187281, 30000], // 1000 / 128
-    &[4, 36000, 1000, 68000, 33000, 2, 52000, 17000, 4, 68000, 4000, 104281, 30000, 2, 86141, 17000, 4, 105281, 1000, 137281, 33000, 2, 121281, 17000, 4, 139281, 1000, 171281, 33000, 2, 155281, 17000, 4, 173281, 1000, 205281, 33000, 2, 189281, 17000, 4, 796000, 1000, 828000, 33000, 2, 812000, 17000, 0, 0, 0, 0, 0, 0, 4, 575000, 4000, 758000, 30000, 2, 666500, 17000, 4, 830000, 1000, 862000, 33000, 2, 846000, 17000, 0, 0, 0, 0, 0, 0, 0, 0, 4, 762000, 1000, 794000, 33000, 2, 778000, 17000, 0, 0, 2, 223281, 34000, 4, 503000, 1000, 503000, 33000, 1, 0, 2, 376281, 503000, 4, 575000, 4000, 758000, 30000, 4, 541000, 1000, 573000, 33000, 0, 4, 68000, 4000, 104281, 30000], // 1000 / 255
-    &[4, 108000, 1000, 140000, 33000, 2, 124000, 17000, 4, 151000, 4000, 187281, 30000, 2, 169141, 17000, 4, 188281, 1000, 220281, 33000, 2, 204281, 17000, 4, 222281, 1000, 254281, 33000, 2, 238281, 17000, 4, 256281, 1000, 288281, 33000, 2, 272281, 17000, 4, 790844, 1000, 822844, 33000, 2, 806844, 17000, 4, 147500, 7000, 148500, 27000, 0, 0, 0, 4, 295781, 7000, 296781, 27000, 0, 0, 0, 4, 824844, 4000, 940000, 30000, 2, 882422, 17000, 4, 617000, 5000, 642000, 29000, 2, 629500, 17000, 4, 642000, 9000, 658000, 25000, 2, 650000, 17000, 4, 668000, 5000, 693000, 29000, 2, 680500, 17000, 4, 693000, 9000, 709000, 25000, 2, 701000, 17000, 4, 756844, 1000, 788844, 33000, 2, 772844, 17000, 0, 2, 977797, 17000, 0, 4, 306281, 4000, 714844, 30000, 1, 1, 2, 306281, 614844, 0, 4, 722844, 1000, 754844, 33000, 0, 4, 151000, 4000, 187281, 30000], // 1000 / 28
-    &[4, 108000, 1000, 140000, 33000, 2, 124000, 17000, 4, 151000, 4000, 187281, 30000, 2, 169141, 17000, 4, 188281, 1000, 220281, 33000, 2, 204281, 17000, 4, 222281, 1000, 254281, 33000, 2, 238281, 17000, 4, 256281, 1000, 288281, 33000, 2, 272281, 17000, 4, 926000, 1000, 958000, 33000, 2, 942000, 17000, 4, 147500, 7000, 148500, 27000, 0, 0, 0, 4, 295781, 7000, 296781, 27000, 0, 4, 705000, 4000, 888000, 30000, 2, 796500, 17000, 4, 960000, 1000, 992000, 33000, 2, 976000, 17000, 0, 0, 0, 0, 0, 0, 0, 0, 4, 892000, 1000, 924000, 33000, 2, 908000, 17000, 0, 0, 0, 4, 306281, 1000, 663000, 33000, 1, 1, 2, 306281, 665000, 4, 705000, 4000, 888000, 30000, 0, 0, 4, 151000, 4000, 187281, 30000], // 1000 / 3
-    &[4, 108000, 1000, 140000, 33000, 2, 124000, 17000, 4, 151000, 4000, 187281, 30000, 2, 169141, 17000, 4, 188281, 1000, 220281, 33000, 2, 204281, 17000, 4, 222281, 1000, 254281, 33000, 2, 238281, 17000, 4, 256281, 1000, 288281, 33000, 2, 272281, 17000, 4, 790844, 1000, 822844, 33000, 2, 806844, 17000, 4, 147500, 7000, 148500, 27000, 0, 0, 0, 4, 295781, 7000, 296781, 27000, 0, 4, 569844, 4000, 752844, 30000, 2, 661344, 17000, 4, 824844, 4000, 940000, 30000, 2, 882422, 17000, 0, 0, 0, 0, 0, 0, 0, 0, 4, 756844, 1000, 788844, 33000, 2, 772844, 17000, 0, 2, 977797, 17000, 0, 4, 306281, 4000, 527844, 30000, 1, 1, 2, 306281, 529844, 4, 569844, 4000, 752844, 30000, 0, 0, 4, 151000, 4000, 187281, 30000], // 1000 / 5
-    &[4, 108000, 1000, 140000, 33000, 2, 124000, 17000, 4, 151000, 4000, 187281, 30000, 2, 169141, 17000, 4, 188281, 1000, 220281, 33000, 2, 204281, 17000, 4, 222281, 1000, 254281, 33000, 2, 238281, 17000, 4, 256281, 1000, 288281, 33000, 2, 272281, 17000, 4, 874000, 1000, 906000, 33000, 2, 890000, 17000, 4, 147500, 7000, 148500, 27000, 0, 0, 0, 4, 295781, 7000, 296781, 27000, 0, 0, 0, 4, 908000, 1000, 940000, 33000, 2, 924000, 17000, 0, 0, 0, 0, 0, 0, 0, 0, 4, 840000, 1000, 872000, 33000, 2, 856000, 17000, 0, 2, 977797, 17000, 0, 4, 306281, 1000, 798000, 33000, 1, 1, 2, 306281, 800000, 0, 0, 0, 4, 151000, 4000, 187281, 30000], // 1000 / 6
-    &[4, 108000, 1000, 140000, 33000, 2, 124000, 17000, 4, 151000, 4000, 187281, 30000, 2, 169141, 17000, 4, 188281, 1000, 220281, 33000, 2, 204281, 17000, 4, 222281, 1000, 254281, 33000, 2, 238281, 17000, 4, 256281, 1000, 288281, 33000, 2, 272281, 17000, 4, 850844, 1000, 882844, 33000, 2, 866844, 17000, 4, 147500, 7000, 148500, 27000, 0, 0, 0, 0, 0, 4, 629844, 4000, 812844, 30000, 2, 721344, 17000, 4, 884844, 4000, 1000000, 30000, 2, 942422, 17000, 4, 527844, 5000, 553000, 29000, 2, 540422, 17000, 4, 553000, 9000, 569000, 25000, 2, 561000, 17000, 4, 578844, 5000, 604000, 29000, 2, 591422, 17000, 4, 604000, 9000, 620000, 25000, 2, 612000, 17000, 4, 816844, 1000, 848844, 33000, 2, 832844, 17000, 0, 0, 0, 4, 527844, 4000, 527844, 30000, 1, 0, 2, 289281, 527844, 4, 629844, 4000, 812844, 30000, 0, 0, 4, 151000, 4000, 187281, 30000], // 1000 / 9
-    &[4, 108000, 1000, 140000, 33000, 2, 124000, 17000, 4, 151000, 4000, 187281, 30000, 2, 169141, 17000, 4, 188281, 1000, 220281, 33000, 2, 204281, 17000, 4, 222281, 1000, 254281, 33000, 2, 238281, 17000, 4, 256281, 1000, 288281, 33000, 2, 272281, 17000, 4, 842844, 1000, 874844, 33000, 2, 858844, 17000, 4, 147500, 7000, 148500, 27000, 0, 0, 0, 4, 295781, 7000, 296781, 27000, 0, 4, 621844, 4000, 804844, 30000, 2, 713344, 17000, 4, 876844, 4000, 992000, 30000, 2, 934422, 17000, 0, 0, 0, 0, 0, 0, 0, 0, 4, 808844, 1000, 840844, 33000, 2, 824844, 17000, 0, 0, 0, 4, 306281, 4000, 579844, 30000, 1, 1, 2, 306281, 581844, 4, 621844, 4000, 804844, 30000, 4, 587844, 1000, 619844, 33000, 0, 4, 151000, 4000, 187281, 30000], // 1000 / 17
-    &[4, 108000, 1000, 140000, 33000, 2, 124000, 17000, 4, 151000, 4000, 187281, 30000, 2, 169141, 17000, 4, 188281, 1000, 220281, 33000, 2, 204281, 17000, 4, 222281, 1000, 254281, 33000, 2, 238281, 17000, 4, 256281, 1000, 288281, 33000, 2, 272281, 17000, 4, 842844, 1000, 874844, 33000, 2, 858844, 17000, 4, 147500, 7000, 148500, 27000, 0, 0, 0, 4, 295781, 7000, 296781, 27000, 0, 0, 0, 4, 876844, 4000, 992000, 30000, 2, 934422, 17000, 4, 669000, 5000, 694000, 29000, 2, 681500, 17000, 4, 694000, 9000, 710000, 25000, 2, 702000, 17000, 4, 720000, 5000, 745000, 29000, 2, 732500, 17000, 4, 745000, 9000, 761000, 25000, 2, 753000, 17000, 4, 808844, 1000, 840844, 33000, 2, 824844, 17000, 0, 0, 0, 4, 306281, 4000, 766844, 30000, 1, 1, 2, 306281, 666844, 0, 4, 774844, 1000, 806844, 33000, 0, 4, 151000, 4000, 187281, 30000], // 1000 / 24
-    &[4, 108000, 1000, 140000, 33000, 2, 124000, 17000, 4, 151000, 4000, 187281, 30000, 2, 169141, 17000, 4, 188281, 1000, 220281, 33000, 2, 204281, 17000, 4, 222281, 1000, 254281, 33000, 2, 238281, 17000, 4, 256281, 1000, 288281, 33000, 2, 272281, 17000, 4, 842844, 1000, 874844, 33000, 2, 858844, 17000, 4, 147500, 7000, 148500, 27000, 0, 4, 296781, 7000, 297781, 27000, 0, 4, 473781, 7000, 474781, 27000, 0, 4, 770844, 4000, 804844, 30000, 2, 787844, 17000, 4, 876844, 4000, 992000, 30000, 2, 934422, 17000, 0, 0, 0, 0, 0, 0, 0, 0, 4, 808844, 1000, 840844, 33000, 2, 824844, 17000, 0, 0, 2, 314281, 34000, 4, 484281, 4000, 728844, 30000, 1, 1, 2, 484281, 730844, 4, 770844, 4000, 804844, 30000, 0, 0, 4, 151000, 4000, 187281, 30000], // 1000 / 33
-    &[4, 255750, 1000, 287750, 33000, 2, 271750, 17000, 4, 298750, 4000, 335031, 30000, 2, 316891, 17000, 4, 336031, 1000, 368031, 33000, 2, 352031, 17000, 4, 370031, 1000, 402031, 33000, 2, 386031, 17000, 4, 404031, 1000, 436031, 33000, 2, 420031, 17000, 4, 842844, 1000, 874844, 33000, 2, 858844, 17000, 4, 295250, 7000, 296250, 27000, 0, 0, 0, 4, 443531, 7000, 444531, 27000, 0, 4, 770844, 4000, 804844, 30000, 2, 787844, 17000, 4, 876844, 4000, 992000, 30000, 2, 934422, 17000, 0, 0, 0, 0, 0, 0, 0, 0, 4, 808844, 1000, 840844, 33000, 2, 824844, 17000, 0, 0, 0, 4, 454031, 4000, 728844, 30000, 1, 1, 2, 454031, 730844, 4, 770844, 4000, 804844, 30000, 0, 0, 4, 298750, 4000, 335031, 30000], // 1000 / 65
-    &[4, 255750, 1000, 287750, 33000, 2, 271750, 17000, 4, 298750, 4000, 335031, 30000, 2, 316891, 17000, 4, 336031, 1000, 368031, 33000, 2, 352031, 17000, 4, 370031, 1000, 402031, 33000, 2, 386031, 17000, 4, 404031, 1000, 436031, 33000, 2, 420031, 17000, 4, 930000, 1000, 962000, 33000, 2, 946000, 17000, 4, 295250, 7000, 296250, 27000, 0, 4, 444531, 7000, 445531, 27000, 0, 4, 621531, 7000, 622531, 27000, 0, 0, 0, 4, 964000, 4000, 992000, 30000, 2, 978000, 17000, 0, 0, 0, 0, 0, 0, 0, 0, 4, 896000, 1000, 928000, 33000, 2, 912000, 17000, 0, 0, 2, 462031, 34000, 4, 632031, 4000, 854000, 30000, 1, 0, 2, 632031, 856000, 0, 0, 0, 4, 298750, 4000, 335031, 30000], // 1000 / 96
-    &[4, 108000, 1000, 140000, 33000, 2, 124000, 17000, 4, 151000, 4000, 187281, 30000, 2, 169141, 17000, 4, 188281, 1000, 220281, 33000, 2, 204281, 17000, 4, 222281, 1000, 254281, 33000, 2, 238281, 17000, 4, 256281, 1000, 288281, 33000, 2, 272281, 17000, 4, 704844, 1000, 736844, 33000, 2, 720844, 17000, 4, 147500, 7000, 148500, 27000, 0, 0, 0, 4, 295781, 7000, 296781, 27000, 0, 4, 632844, 4000, 666844, 30000, 2, 649844, 17000, 4, 738844, 4000, 854000, 30000, 2, 796422, 17000, 0, 0, 0, 0, 0, 0, 0, 0, 4, 670844, 1000, 702844, 33000, 2, 686844, 17000, 0, 0, 0, 4, 306281, 4000, 590844, 30000, 1, 1, 2, 306281, 592844, 4, 632844, 4000, 666844, 30000, 0, 0, 4, 151000, 4000, 187281, 30000], // 1000 / 129
-    &[4, 108000, 1000, 140000, 33000, 2, 124000, 17000, 4, 151000, 4000, 187281, 30000, 2, 169141, 17000, 4, 188281, 1000, 220281, 33000, 2, 204281, 17000, 4, 222281, 1000, 254281, 33000, 2, 238281, 17000, 4, 256281, 1000, 288281, 33000, 2, 272281, 17000, 4, 792000, 1000, 824000, 33000, 2, 808000, 17000, 4, 147500, 7000, 148500, 27000, 0, 4, 296781, 7000, 297781, 27000, 0, 4, 473781, 7000, 474781, 27000, 0, 0, 0, 4, 826000, 4000, 854000, 30000, 2, 840000, 17000, 0, 0, 0, 0, 0, 0, 0, 0, 4, 758000, 1000, 790000, 33000, 2, 774000, 17000, 0, 0, 2, 314281, 34000, 4, 484281, 4000, 716000, 30000, 1, 0, 2, 484281, 718000, 0, 0, 0, 4, 151000, 4000, 187281, 30000], // 1000 / 160
-    &[4, 36000, 1000, 68000, 33000, 2, 52000, 17000, 4, 68000, 4000, 104281, 30000, 2, 86141, 17000, 4, 105281, 1000, 137281, 33000, 2, 121281, 17000, 4, 139281, 1000, 171281, 33000, 2, 155281, 17000, 4, 173281, 1000, 205281, 33000, 2, 189281, 17000, 4, 712844, 1000, 744844, 33000, 2, 728844, 17000, 0, 0, 0, 0, 0, 0, 0, 0, 4, 746844, 4000, 862000, 30000, 2, 804422, 17000, 4, 536844, 5000, 562000, 29000, 2, 549422, 17000, 4, 562000, 9000, 578000, 25000, 2, 570000, 17000, 4, 587844, 5000, 613000, 29000, 2, 600422, 17000, 4, 613000, 9000, 629000, 25000, 2, 621000, 17000, 4, 678844, 1000, 710844, 33000, 2, 694844, 17000, 0, 0, 2, 223281, 34000, 4, 504844, 4000, 504844, 30000, 1, 0, 2, 376281, 504844, 0, 4, 644844, 1000, 676844, 33000, 0, 4, 68000, 4000, 104281, 30000], // 1000 / 188
-    &[4, 36000, 1000, 68000, 33000, 2, 52000, 17000, 4, 79000, 4000, 115281, 30000, 2, 97141, 17000, 4, 116281, 1000, 148281, 33000, 2, 132281, 17000, 4, 150281, 1000, 182281, 33000, 2, 166281, 17000, 4, 184281, 1000, 216281, 33000, 2, 200281, 17000, 4, 736000, 1000, 768000, 33000, 2, 752000, 17000, 4, 75500, 7000, 76500, 27000, 0, 0, 0, 0, 0, 0, 0, 4, 770000, 1000, 802000, 33000, 2, 786000, 17000, 4, 560000, 5000, 585000, 29000, 2, 572500, 17000, 4, 585000, 9000, 601000, 25000, 2, 593000, 17000, 4, 611000, 5000, 636000, 29000, 2, 623500, 17000, 4, 636000, 9000, 652000, 25000, 2, 644000, 17000, 4, 702000, 1000, 734000, 33000, 2, 718000, 17000, 0, 2, 839797, 17000, 2, 234281, 34000, 4, 560000, 1000, 560000, 33000, 1, 0, 2, 387281, 560000, 0, 4, 668000, 1000, 700000, 33000, 0, 4, 79000, 4000, 115281, 30000], // 1000 / 254
-    &[4, 108000, 1000, 140000, 33000, 2, 124000, 17000, 4, 151000, 4000, 187281, 30000, 2, 169141, 17000, 4, 188281, 1000, 220281, 33000, 2, 204281, 17000, 4, 222281, 1000, 254281, 33000, 2, 238281, 17000, 4, 256281, 1000, 288281, 33000, 2, 272281, 17000, 4, 1122844, 1000, 1154844, 33000, 2, 1138844, 17000, 4, 147500, 7000, 148500, 27000, 0, 0, 0, 4, 295781, 7000, 296781, 27000, 0, 0, 0, 4, 1156844, 4000, 1272000, 30000, 2, 1214422, 17000, 0, 0, 0, 0, 0, 0, 0, 0, 4, 1088844, 1000, 1120844, 33000, 2, 1104844, 17000, 0, 0, 0, 4, 306281, 4000, 1046844, 30000, 1, 1, 2, 306281, 1048844, 0, 0, 0, 4, 151000, 4000, 187281, 30000], // 1280 / 0
-    &[4, 108000, 1000, 140000, 33000, 2, 124000, 17000, 4, 151000, 4000, 187281, 30000, 2, 169141, 17000, 4, 188281, 1000, 220281, 33000, 2, 204281, 17000, 4, 222281, 1000, 254281, 33000, 2, 238281, 17000, 4, 256281, 1000, 288281, 33000, 2, 272281, 17000, 4, 1122844, 1000, 1154844, 33000, 2, 1138844, 17000, 4, 147500, 7000, 148500, 27000, 0, 0, 0, 4, 295781, 7000, 296781, 27000, 0, 4, 901844, 4000, 1084844, 30000, 2, 993344, 17000, 4, 1156844, 4000, 1272000, 30000, 2, 1214422, 17000, 0, 0, 0, 0, 0, 0, 0, 0, 4, 1088844, 1000, 1120844, 33000, 2, 1104844, 17000, 0, 0, 0, 4, 306281, 4000, 859844, 30000, 1, 1, 2, 306281, 861844, 4, 901844, 4000, 1084844, 30000, 0, 0, 4, 151000, 4000, 187281, 30000], // 1280 / 1
-    &[4, 108000, 1000, 140000, 33000, 2, 124000, 17000, 4, 151000, 4000, 187281, 30000, 2, 169141, 17000, 4, 188281, 1000, 220281, 33000, 2, 204281, 17000, 4, 222281, 1000, 254281, 33000, 2, 238281, 17000, 4, 256281, 1000, 288281, 33000, 2, 272281, 17000, 4, 1206000, 1000, 1238000, 33000, 2, 1222000, 17000, 4, 147500, 7000, 148500, 27000, 0, 0, 0, 4, 295781, 7000, 296781, 27000, 0, 0, 0, 4, 1240000, 1000, 1272000, 33000, 2, 1256000, 17000, 0, 0, 0, 0, 0, 0, 0, 0, 4, 1172000, 1000, 1204000, 33000, 2, 1188000, 17000, 0, 0, 0, 4, 306281, 1000, 1130000, 33000, 1, 1, 2, 306281, 1132000, 0, 0, 0, 4, 151000, 4000, 187281, 30000], // 1280 / 2
-    &[4, 108000, 1000, 140000, 33000, 2, 124000, 17000, 4, 151000, 4000, 187281, 30000, 2, 169141, 17000, 4, 188281, 1000, 220281, 33000, 2, 204281, 17000, 4, 222281, 1000, 254281, 33000, 2, 238281, 17000, 4, 256281, 1000, 288281, 33000, 2, 272281, 17000, 4, 1070844, 1000, 1102844, 33000, 2, 1086844, 17000, 4, 147500, 7000, 148500, 27000, 0, 0, 0, 4, 295781, 7000, 296781, 27000, 0, 0, 0, 4, 1104844, 4000, 1220000, 30000, 2, 1162422, 17000, 0, 0, 0, 0, 0, 0, 0, 0, 4, 1036844, 1000, 1068844, 33000, 2, 1052844, 17000, 0, 2, 1257797, 17000, 0, 4, 306281, 4000, 994844, 30000, 1, 1, 2, 306281, 996844, 0, 0, 0, 4, 151000, 4000, 187281, 30000], // 1280 / 4
-    &[4, 108000, 1000, 140000, 33000, 2, 124000, 17000, 4, 151000, 4000, 187281, 30000, 2, 169141, 17000, 4, 188281, 1000, 220281, 33000, 2, 204281, 17000, 4, 222281, 1000, 254281, 33000, 2, 238281, 17000, 4, 256281, 1000, 288281, 33000, 2, 272281, 17000, 4, 1122844, 1000, 1154844, 33000, 2, 1138844, 17000, 4, 147500, 7000, 148500, 27000, 0, 0, 0, 4, 295781, 7000, 296781, 27000, 0, 0, 0, 4, 1156844, 4000, 1272000, 30000, 2, 1214422, 17000, 4, 858000, 5000, 928000, 29000, 2, 893000, 17000, 4, 928000, 9000, 944000, 25000, 2, 936000, 17000, 4, 954000, 5000, 1025000, 29000, 2, 989500, 17000, 4, 1025000, 9000, 1041000, 25000, 2, 1033000, 17000, 4, 1088844, 1000, 1120844, 33000, 2, 1104844, 17000, 0, 0, 0, 4, 306281, 4000, 1046844, 30000, 1, 1, 2, 306281, 856531, 0, 0, 0, 4, 151000, 4000, 187281, 30000], // 1280 / 8
-    &[4, 108000, 1000, 140000, 33000, 2, 124000, 17000, 4, 151000, 4000, 187281, 30000, 2, 169141, 17000, 4, 188281, 1000, 220281, 33000, 2, 204281, 17000, 4, 222281, 1000, 254281, 33000, 2, 238281, 17000, 4, 256281, 1000, 288281, 33000, 2, 272281, 17000, 4, 1122844, 1000, 1154844, 33000, 2, 1138844, 17000, 4, 147500, 7000, 148500, 27000, 0, 0, 0, 4, 295781, 7000, 296781, 27000, 0, 0, 0, 4, 1156844, 4000, 1272000, 30000, 2, 1214422, 17000, 0, 0, 0, 0, 0, 0, 0, 0, 4, 1088844, 1000, 1120844, 33000, 2, 1104844, 17000, 0, 0, 0, 4, 306281, 4000, 1046844, 30000, 1, 1, 2, 306281, 1048844, 0, 4, 1054844, 1000, 1086844, 33000, 0, 4, 151000, 4000, 187281, 30000], // 1280 / 16
-    &[4, 108000, 1000, 140000, 33000, 2, 124000, 17000, 4, 151000, 4000, 187281, 30000, 2, 169141, 17000, 4, 188281, 1000, 220281, 33000, 2, 204281, 17000, 4, 222281, 1000, 254281, 33000, 2, 238281, 17000, 4, 256281, 1000, 288281, 33000, 2, 272281, 17000, 4, 1122844, 1000, 1154844, 33000, 2, 1138844, 17000, 4, 147500, 7000, 148500, 27000, 0, 4, 296781, 7000, 297781, 27000, 0, 4, 473781, 7000, 474781, 27000, 0, 0, 0, 4, 1156844, 4000, 1272000, 30000, 2, 1214422, 17000, 0, 0, 0, 0, 0, 0, 0, 0, 4, 1088844, 1000, 1120844, 33000, 2, 1104844, 17000, 0, 0, 2, 314281, 34000, 4, 484281, 4000, 1046844, 30000, 1, 1, 2, 484281, 1048844, 0, 0, 0, 4, 151000, 4000, 187281, 30000], // 1280 / 32
-    &[4, 255750, 1000, 287750, 33000, 2, 271750, 17000, 4, 298750, 4000, 335031, 30000, 2, 316891, 17000, 4, 336031, 1000, 368031, 33000, 2, 352031, 17000, 4, 370031, 1000, 402031, 33000, 2, 386031, 17000, 4, 404031, 1000, 436031, 33000, 2, 420031, 17000, 4, 1122844, 1000, 1154844, 33000, 2, 1138844, 17000, 4, 295250, 7000, 296250, 27000, 0, 0, 0, 4, 443531, 7000, 444531, 27000, 0, 0, 0, 4, 1156844, 4000, 1272000, 30000, 2, 1214422, 17000, 0, 0, 0, 0, 0, 0, 0, 0, 4, 1088844, 1000, 1120844, 33000, 2, 1104844, 17000, 0, 0, 0, 4, 454031, 4000, 1046844, 30000, 1, 1, 2, 454031, 1048844, 0, 0, 0, 4, 298750, 4000, 335031, 30000], // 1280 / 64
-    &[4, 108000, 1000, 140000, 33000, 2, 124000, 17000, 4, 151000, 4000, 187281, 30000, 2, 169141, 17000, 4, 188281, 1000, 220281, 33000, 2, 204281, 17000, 4, 222281, 1000, 254281, 33000, 2, 238281, 17000, 4, 256281, 1000, 288281, 33000, 2, 272281, 17000, 4, 984844, 1000, 1016844, 33000, 2, 1000844, 17000, 4, 147500, 7000, 148500, 27000, 0, 0, 0, 4, 295781, 7000, 296781, 27000, 0, 0, 0, 4, 1018844, 4000, 1134000, 30000, 2, 1076422, 17000, 0, 0, 0, 0, 0, 0, 0, 0, 4, 950844, 1000, 982844, 33000, 2, 966844, 17000, 0, 0, 0, 4, 306281, 4000, 908844, 30000, 1, 1, 2, 306281, 910844, 0, 0, 0, 4, 151000, 4000, 187281, 30000], // 1280 / 128
-    &[4, 36000, 1000, 68000, 33000, 2, 52000, 17000, 4, 79000, 4000, 115281, 30000, 2, 97141, 17000, 4, 116281, 1000, 148281, 33000, 2, 132281, 17000, 4, 150281, 1000, 182281, 33000, 2, 166281, 17000, 4, 184281, 1000, 216281, 33000, 2, 200281, 17000, 4, 1016000, 1000, 1048000, 33000, 2, 1032000, 17000, 4, 75500, 7000, 76500, 27000, 0, 0, 0, 0, 0, 4, 795000, 4000, 978000, 30000, 2, 886500, 17000, 4, 1050000, 1000, 1082000, 33000, 2, 1066000, 17000, 4, 562000, 5000, 632000, 29000, 2, 597000, 17000, 4, 632000, 9000, 648000, 25000, 2, 640000, 17000, 4, 658000, 5000, 729000, 29000, 2, 693500, 17000, 4, 729000, 9000, 745000, 25000, 2, 737000, 17000, 4, 982000, 1000, 1014000, 33000, 2, 998000, 17000, 0, 2, 1119797, 17000, 2, 234281, 34000, 4, 562000, 1000, 562000, 33000, 1, 0, 2, 387281, 562000, 4, 795000, 4000, 978000, 30000, 4, 761000, 1000, 793000, 33000, 0, 4, 79000, 4000, 115281, 30000], // 1280 / 255
-    &[4, 108000, 1000, 140000, 33000, 2, 124000, 17000, 4, 151000, 4000, 187281, 30000, 2, 169141, 17000, 4, 188281, 1000, 220281, 33000, 2, 204281, 17000, 4, 222281, 1000, 254281, 33000, 2, 238281, 17000, 4, 256281, 1000, 288281, 33000, 2, 272281, 17000, 4, 1070844, 1000, 1102844, 33000, 2, 1086844, 17000, 4, 147500, 7000, 148500, 27000, 0, 0, 0, 4, 295781, 7000, 296781, 27000, 0, 0, 0, 4, 1104844, 4000, 1220000, 30000, 2, 1162422, 17000, 4, 806000, 5000, 876000, 29000, 2, 841000, 17000, 4, 876000, 9000, 892000, 25000, 2, 884000, 17000, 4, 902000, 5000, 973000, 29000, 2, 937500, 17000, 4, 973000, 9000, 989000, 25000, 2, 981000, 17000, 4, 1036844, 1000, 1068844, 33000, 2, 1052844, 17000, 0, 2, 1257797, 17000, 0, 4, 306281, 4000, 994844, 30000, 1, 1, 2, 306281, 804531, 0, 4, 1002844, 1000, 1034844, 33000, 0, 4, 151000, 4000, 187281, 30000], // 1280 / 28
-    &[4, 108000, 1000, 140000, 33000, 2, 124000, 17000, 4, 151000, 4000, 187281, 30000, 2, 169141, 17000, 4, 188281, 1000, 220281, 33000, 2, 204281, 17000, 4, 222281, 1000, 254281, 33000, 2, 238281, 17000, 4, 256281, 1000, 288281, 33000, 2, 272281, 17000, 4, 1206000, 1000, 1238000, 33000, 2, 1222000, 17000, 4, 147500, 7000, 148500, 27000, 0, 0, 0, 4, 295781, 7000, 296781, 27000, 0, 4, 985000, 4000, 1168000, 30000, 2, 1076500, 17000, 4, 1240000, 1000, 1272000, 33000, 2, 1256000, 17000, 0, 0, 0, 0, 0, 0, 0, 0, 4, 1172000, 1000, 1204000, 33000, 2, 1188000, 17000, 0, 0, 0, 4, 306281, 1000, 943000, 33000, 1, 1, 2, 306281, 945000, 4, 985000, 4000, 1168000, 30000, 0, 0, 4, 151000, 4000, 187281, 30000], // 1280 / 3
-    &[4, 108000, 1000, 140000, 33000, 2, 124000, 17000, 4, 151000, 4000, 187281, 30000, 2, 169141, 17000, 4, 188281, 1000, 220281, 33000, 2, 204281, 17000, 4, 222281, 1000, 254281, 33000, 2, 238281, 17000, 4, 256281, 1000, 288281, 33000, 2, 272281, 17000, 4, 1070844, 1000, 1102844, 33000, 2, 1086844, 17000, 4, 147500, 7000, 148500, 27000, 0, 0, 0, 4, 295781, 7000, 296781, 27000, 0, 4, 849844, 4000, 1032844, 30000, 2, 941344, 17000, 4, 1104844, 4000, 1220000, 30000, 2, 1162422, 17000, 0, 0, 0, 0, 0, 0, 0, 0, 4, 1036844, 1000, 1068844, 33000, 2, 1052844, 17000, 0, 2, 1257797, 17000, 0, 4, 306281, 4000, 807844, 30000, 1, 1, 2, 306281, 809844, 4, 849844, 4000, 1032844, 30000, 0, 0, 4, 151000, 4000, 187281, 30000], // 1280 / 5
-    &[4, 108000, 1000, 140000, 33000, 2, 124000, 17000, 4, 151000, 4000, 187281, 30000, 2, 169141, 17000, 4, 188281, 1000, 220281, 33000, 2, 204281, 17000, 4, 222281, 1000, 254281, 33000, 2, 238281, 17000, 4, 256281, 1000, 288281, 33000, 2, 272281, 17000, 4, 1154000, 1000, 1186000, 33000, 2, 1170000, 17000, 4, 147500, 7000, 148500, 27000, 0, 0, 0, 4, 295781, 7000, 296781, 27000, 0, 0, 0, 4, 1188000, 1000, 1220000, 33000, 2, 1204000, 17000, 0, 0, 0, 0, 0, 0, 0, 0, 4, 1120000, 1000, 1152000, 33000, 2, 1136000, 17000, 0, 2, 1257797, 17000, 0, 4, 306281, 1000, 1078000, 33000, 1, 1, 2, 306281, 1080000, 0, 0, 0, 4, 151000, 4000, 187281, 30000], // 1280 / 6
-    &[4, 108000, 1000, 140000, 33000, 2, 124000, 17000, 4, 151000, 4000, 187281, 30000, 2, 169141, 17000, 4, 188281, 1000, 220281, 33000, 2, 204281, 17000, 4, 222281, 1000, 254281, 33000, 2, 238281, 17000, 4, 256281, 1000, 288281, 33000, 2, 272281, 17000, 4, 1122844, 1000, 1154844, 33000, 2, 1138844, 17000, 4, 147500, 7000, 148500, 27000, 0, 0, 0, 4, 295781, 7000, 296781, 27000, 0, 4, 901844, 4000, 1084844, 30000, 2, 993344, 17000, 4, 1156844, 4000, 1272000, 30000, 2, 1214422, 17000, 4, 671000, 5000, 741000, 29000, 2, 706000, 17000, 4, 741000, 9000, 757000, 25000, 2, 749000, 17000, 4, 767000, 5000, 838000, 29000, 2, 802500, 17000, 4, 838000, 9000, 854000, 25000, 2, 846000, 17000, 4, 1088844, 1000, 1120844, 33000, 2, 1104844, 17000, 0, 0, 0, 4, 306281, 4000, 859844, 30000, 1, 1, 2, 306281, 669531, 4, 901844, 4000, 1084844, 30000, 0, 0, 4, 151000, 4000, 187281, 30000], // 1280 / 9
-    &[4, 108000, 1000, 140000, 33000, 2, 124000, 17000, 4, 151000, 4000, 187281, 30000, 2, 169141, 17000, 4, 188281, 1000, 220281, 33000, 2, 204281, 17000, 4, 222281, 1000, 254281, 33000, 2, 238281, 17000, 4, 256281, 1000, 288281, 33000, 2, 272281, 17000, 4, 1122844, 1000, 1154844, 33000, 2, 1138844, 17000, 4, 147500, 7000, 148500, 27000, 0, 0, 0, 4, 295781, 7000, 296781, 27000, 0, 4, 901844, 4000, 1084844, 30000, 2, 993344, 17000, 4, 1156844, 4000, 1272000, 30000, 2, 1214422, 17000, 0, 0, 0, 0, 0, 0, 0, 0, 4, 1088844, 1000, 1120844, 33000, 2, 1104844, 17000, 0, 0, 0, 4, 306281, 4000, 859844, 30000, 1, 1, 2, 306281, 861844, 4, 901844, 4000, 1084844, 30000, 4, 867844, 1000, 899844, 33000, 0, 4, 151000, 4000, 187281, 30000], // 1280 / 17
-    &[4, 108000, 1000, 140000, 33000, 2, 124000, 17000, 4, 151000, 4000, 187281, 30000, 2, 169141, 17000, 4, 188281, 1000, 220281, 33000, 2, 204281, 17000, 4, 222281, 1000, 254281, 33000, 2, 238281, 17000, 4, 256281, 1000, 288281, 33000, 2, 272281, 17000, 4, 1122844, 1000, 1154844, 33000, 2, 1138844, 17000, 4, 147500, 7000, 148500, 27000, 0, 0, 0, 4, 295781, 7000, 296781, 27000, 0, 0, 0, 4, 1156844, 4000, 1272000, 30000, 2, 1214422, 17000, 4, 858000, 5000, 928000, 29000, 2, 893000, 17000, 4, 928000, 9000, 944000, 25000, 2, 936000, 17000, 4, 954000, 5000, 1025000, 29000, 2, 989500, 17000, 4, 1025000, 9000, 1041000, 25000, 2, 1033000, 17000, 4, 1088844, 1000, 1120844, 33000, 2, 1104844, 17000, 0, 0, 0, 4, 306281, 4000, 1046844, 30000, 1, 1, 2, 306281, 856531, 0, 4, 1054844, 1000, 1086844, 33000, 0, 4, 151000, 4000, 187281, 30000], // 1280 / 24
-    &[4, 108000, 1000, 140000, 33000, 2, 124000, 17000, 4, 151000, 4000, 187281, 30000, 2, 169141, 17000, 4, 188281, 1000, 220281, 33000, 2, 204281, 17000, 4, 222281, 1000, 254281, 33000, 2, 238281, 17000, 4, 256281, 1000, 288281, 33000, 2, 272281, 17000, 4, 1122844, 1000, 1154844, 33000, 2, 1138844, 17000, 4, 147500, 7000, 148500, 27000, 0, 4, 296781, 7000, 297781, 27000, 0, 4, 473781, 7000, 474781, 27000, 0, 4, 901844, 4000, 1084844, 30000, 2, 993344, 17000, 4, 1156844, 4000, 1272000, 30000, 2, 1214422, 17000, 0, 0, 0, 0, 0, 0, 0, 0, 4, 1088844, 1000, 1120844, 33000, 2, 1104844, 17000, 0, 0, 2, 314281, 34000, 4, 484281, 4000, 859844, 30000, 1, 1, 2, 484281, 861844, 4, 901844, 4000, 1084844, 30000, 0, 0, 4, 151000, 4000, 187281, 30000], // 1280 / 33
-    &[4, 255750, 1000, 287750, 33000, 2, 271750, 17000, 4, 298750, 4000, 335031, 30000, 2, 316891, 17000, 4, 336031, 1000, 368031, 33000, 2, 352031, 17000, 4, 370031, 1000, 402031, 33000, 2, 386031, 17000, 4, 404031, 1000, 436031, 33000, 2, 420031, 17000, 4, 1122844, 1000, 1154844, 33000, 2, 1138844, 17000, 4, 295250, 7000, 296250, 27000, 0, 0, 0, 4, 443531, 7000, 444531, 27000, 0, 4, 901844, 4000, 1084844, 30000, 2, 993344, 17000, 4, 1156844, 4000, 1272000, 30000, 2, 1214422, 17000, 0, 0, 0, 0, 0, 0, 0, 0, 4, 1088844, 1000, 1120844, 33000, 2, 1104844, 17000, 0, 0, 0, 4, 454031, 4000, 859844, 30000, 1, 1, 2, 454031, 861844, 4, 901844, 4000, 1084844, 30000, 0, 0, 4, 298750, 4000, 335031, 30000], // 1280 / 65
-    &[4, 255750, 1000, 287750, 33000, 2, 271750, 17000, 4, 298750, 4000, 335031, 30000, 2, 316891, 17000, 4, 336031, 1000, 368031, 33000, 2, 352031, 17000, 4, 370031, 1000, 402031, 33000, 2, 386031, 17000, 4, 404031, 1000, 436031, 33000, 2, 420031, 17000, 4, 1122844, 1000, 1154844, 33000, 2, 1138844, 17000, 4, 295250, 7000, 296250, 27000, 0, 4, 444531, 7000, 445531, 27000, 0, 4, 621531, 7000, 622531, 27000, 0, 0, 0, 4, 1156844, 4000, 1272000, 30000, 2, 1214422, 17000, 0, 0, 0, 0, 0, 0, 0, 0, 4, 1088844, 1000, 1120844, 33000, 2, 1104844, 17000, 0, 0, 2, 462031, 34000, 4, 632031, 4000, 1046844, 30000, 1, 1, 2, 632031, 1048844, 0, 0, 0, 4, 298750, 4000, 335031, 30000], // 1280 / 96
-    &[4, 108000, 1000, 140000, 33000, 2, 124000, 17000, 4, 151000, 4000, 187281, 30000, 2, 169141, 17000, 4, 188281, 1000, 220281, 33000, 2, 204281, 17000, 4, 222281, 1000, 254281, 33000, 2, 238281, 17000, 4, 256281, 1000, 288281, 33000, 2, 272281, 17000, 4, 984844, 1000, 1016844, 33000, 2, 1000844, 17000, 4, 147500, 7000, 148500, 27000, 0, 0, 0, 4, 295781, 7000, 296781, 27000, 0, 4, 763844, 4000, 946844, 30000, 2, 855344, 17000, 4, 1018844, 4000, 1134000, 30000, 2, 1076422, 17000, 0, 0, 0, 0, 0, 0, 0, 0, 4, 950844, 1000, 982844, 33000, 2, 966844, 17000, 0, 0, 0, 4, 306281, 4000, 721844, 30000, 1, 1, 2, 306281, 723844, 4, 763844, 4000, 946844, 30000, 0, 0, 4, 151000, 4000, 187281, 30000], // 1280 / 129
-    &[4, 108000, 1000, 140000, 33000, 2, 124000, 17000, 4, 151000, 4000, 187281, 30000, 2, 169141, 17000, 4, 188281, 1000, 220281, 33000, 2, 204281, 17000, 4, 222281, 1000, 254281, 33000, 2, 238281, 17000, 4, 256281, 1000, 288281, 33000, 2, 272281, 17000, 4, 984844, 1000, 1016844, 33000, 2, 1000844, 17000, 4, 147500, 7000, 148500, 27000, 0, 4, 296781, 7000, 297781, 27000, 0, 4, 473781, 7000, 474781, 27000, 0, 0, 0, 4, 1018844, 4000, 1134000, 30000, 2, 1076422, 17000, 0, 0, 0, 0, 0, 0, 0, 0, 4, 950844, 1000, 982844, 33000, 2, 966844, 17000, 0, 0, 2, 314281, 34000, 4, 484281, 4000, 908844, 30000, 1, 1, 2, 484281, 910844, 0, 0, 0, 4, 151000, 4000, 187281, 30000], // 1280 / 160
-    &[4, 108000, 1000, 140000, 33000, 2, 124000, 17000, 4, 151000, 4000, 187281, 30000, 2, 169141, 17000, 4, 188281, 1000, 220281, 33000, 2, 204281, 17000, 4, 222281, 1000, 254281, 33000, 2, 238281, 17000, 4, 256281, 1000, 288281, 33000, 2, 272281, 17000, 4, 932844, 1000, 964844, 33000, 2, 948844, 17000, 4, 147500, 7000, 148500, 27000, 0, 0, 0, 0, 0, 0, 0, 4, 966844, 4000, 1082000, 30000, 2, 1024422, 17000, 4, 665844, 5000, 736000, 29000, 2, 700922, 17000, 4, 736000, 9000, 752000, 25000, 2, 744000, 17000, 4, 761844, 5000, 833000, 29000, 2, 797422, 17000, 4, 833000, 9000, 849000, 25000, 2, 841000, 17000, 4, 898844, 1000, 930844, 33000, 2, 914844, 17000, 0, 2, 1119797, 17000, 2, 306281, 34000, 4, 665844, 4000, 665844, 30000, 1, 0, 2, 459281, 665844, 0, 4, 864844, 1000, 896844, 33000, 0, 4, 151000, 4000, 187281, 30000], // 1280 / 188
-    &[4, 255750, 1000, 287750, 33000, 2, 271750, 17000, 4, 298750, 4000, 335031, 30000, 2, 316891, 17000, 4, 336031, 1000, 368031, 33000, 2, 352031, 17000, 4, 370031, 1000, 402031, 33000, 2, 386031, 17000, 4, 404031, 1000, 436031, 33000, 2, 420031, 17000, 4, 1016000, 1000, 1048000, 33000, 2, 1032000, 17000, 4, 295250, 7000, 296250, 27000, 0, 0, 0, 0, 0, 0, 0, 4, 1050000, 1000, 1082000, 33000, 2, 1066000, 17000, 4, 749000, 5000, 819000, 29000, 2, 784000, 17000, 4, 819000, 9000, 835000, 25000, 2, 827000, 17000, 4, 845000, 5000, 916000, 29000, 2, 880500, 17000, 4, 916000, 9000, 932000, 25000, 2, 924000, 17000, 4, 982000, 1000, 1014000, 33000, 2, 998000, 17000, 0, 2, 1119797, 17000, 2, 454031, 34000, 4, 749000, 1000, 749000, 33000, 1, 0, 2, 607031, 749000, 0, 4, 948000, 1000, 980000, 33000, 0, 4, 298750, 4000, 335031, 30000], // 1280 / 254
-    &[4, 108000, 1000, 140000, 33000, 2, 124000, 17000, 4, 151000, 4000, 187281, 30000, 2, 169141, 17000, 4, 188281, 1000, 220281, 33000, 2, 204281, 17000, 4, 222281, 1000, 254281, 33000, 2, 238281, 17000, 4, 256281, 1000, 288281, 33000, 2, 272281, 17000, 4, 1762844, 1000, 1794844, 33000, 2, 1778844, 17000, 4, 147500, 7000, 148500, 27000, 0, 0, 0, 4, 295781, 7000, 296781, 27000, 0, 0, 0, 4, 1796844, 4000, 1912000, 30000, 2, 1854422, 17000, 0, 0, 0, 0, 0, 0, 0, 0, 4, 1728844, 1000, 1760844, 33000, 2, 1744844, 17000, 0, 0, 0, 4, 306281, 4000, 1686844, 30000, 1, 1, 2, 306281, 1688844, 0, 0, 0, 4, 151000, 4000, 187281, 30000], // 1920 / 0
-    &[4, 108000, 1000, 140000, 33000, 2, 124000, 17000, 4, 151000, 4000, 187281, 30000, 2, 169141, 17000, 4, 188281, 1000, 220281, 33000, 2, 204281, 17000, 4, 222281, 1000, 254281, 33000, 2, 238281, 17000, 4, 256281, 1000, 288281, 33000, 2, 272281, 17000, 4, 1762844, 1000, 1794844, 33000, 2, 1778844, 17000, 4, 147500, 7000, 148500, 27000, 0, 0, 0, 4, 295781, 7000, 296781, 27000, 0, 4, 1541844, 4000, 1724844, 30000, 2, 1633344, 17000, 4, 1796844, 4000, 1912000, 30000, 2, 1854422, 17000, 0, 0, 0, 0, 0, 0, 0, 0, 4, 1728844, 1000, 1760844, 33000, 2, 1744844, 17000, 0, 0, 0, 4, 306281, 4000, 1499844, 30000, 1, 1, 2, 306281, 1501844, 4, 1541844, 4000, 1724844, 30000, 0, 0, 4, 151000, 4000, 187281, 30000], // 1920 / 1
-    &[4, 108000, 1000, 140000, 33000, 2, 124000, 17000, 4, 151000, 4000, 187281, 30000, 2, 169141, 17000, 4, 188281, 1000, 220281, 33000, 2, 204281, 17000, 4, 222281, 1000, 254281, 33000, 2, 238281, 17000, 4, 256281, 1000, 288281, 33000, 2, 272281, 17000, 4, 1846000, 1000, 1878000, 33000, 2, 1862000, 17000, 4, 147500, 7000, 148500, 27000, 0, 0, 0, 4, 295781, 7000, 296781, 27000, 0, 0, 0, 4, 1880000, 1000, 1912000, 33000, 2, 1896000, 17000, 0, 0, 0, 0, 0, 0, 0, 0, 4, 1812000, 1000, 1844000, 33000, 2, 1828000, 17000, 0, 0, 0, 4, 306281, 1000, 1770000, 33000, 1, 1, 2, 306281, 1772000, 0, 0, 0, 4, 151000, 4000, 187281, 30000], // 1920 / 2
-    &[4, 108000, 1000, 140000, 33000, 2, 124000, 17000, 4, 151000, 4000, 187281, 30000, 2, 169141, 17000, 4, 188281, 1000, 220281, 33000, 2, 204281, 17000, 4, 222281, 1000, 254281, 33000, 2, 238281, 17000, 4, 256281, 1000, 288281, 33000, 2, 272281, 17000, 4, 1710844, 1000, 1742844, 33000, 2, 1726844, 17000, 4, 147500, 7000, 148500, 27000, 0, 0, 0, 4, 295781, 7000, 296781, 27000, 0, 0, 0, 4, 1744844, 4000, 1860000, 30000, 2, 1802422, 17000, 0, 0, 0, 0, 0, 0, 0, 0, 4, 1676844, 1000, 1708844, 33000, 2, 1692844, 17000, 0, 2, 1897797, 17000, 0, 4, 306281, 4000, 1634844, 30000, 1, 1, 2, 306281, 1636844, 0, 0, 0, 4, 151000, 4000, 187281, 30000], // 1920 / 4
-    &[4, 108000, 1000, 140000, 33000, 2, 124000, 17000, 4, 151000, 4000, 187281, 30000, 2, 169141, 17000, 4, 188281, 1000, 220281, 33000, 2, 204281, 17000, 4, 222281, 1000, 254281, 33000, 2, 238281, 17000, 4, 256281, 1000, 288281, 33000, 2, 272281, 17000, 4, 1762844, 1000, 1794844, 33000, 2, 1778844, 17000, 4, 147500, 7000, 148500, 27000, 0, 0, 0, 4, 295781, 7000, 296781, 27000, 0, 0, 0, 4, 1796844, 4000, 1912000, 30000, 2, 1854422, 17000, 4, 1498000, 5000, 1568000, 29000, 2, 1533000, 17000, 4, 1568000, 9000, 1584000, 25000, 2, 1576000, 17000, 4, 1594000, 5000, 1665000, 29000, 2, 1629500, 17000, 4, 1665000, 9000, 1681000, 25000, 2, 1673000, 17000, 4, 1728844, 1000, 1760844, 33000, 2, 1744844, 17000, 0, 0, 0, 4, 306281, 4000, 1686844, 30000, 1, 1, 2, 306281, 1496531, 0, 0, 0, 4, 151000, 4000, 187281, 30000], // 1920 / 8
-    &[4, 108000, 1000, 140000, 33000, 2, 124000, 17000, 4, 151000, 4000, 187281, 30000, 2, 169141, 17000, 4, 188281, 1000, 220281, 33000, 2, 204281, 17000, 4, 222281, 1000, 254281, 33000, 2, 238281, 17000, 4, 256281, 1000, 288281, 33000, 2, 272281, 17000, 4, 1762844, 1000, 1794844, 33000, 2, 1778844, 17000, 4, 147500, 7000, 148500, 27000, 0, 0, 0, 4, 295781, 7000, 296781, 27000, 0, 0, 0, 4, 1796844, 4000, 1912000, 30000, 2, 1854422, 17000, 0, 0, 0, 0, 0, 0, 0, 0, 4, 1728844, 1000, 1760844, 33000, 2, 1744844, 17000, 0, 0, 0, 4, 306281, 4000, 1686844, 30000, 1, 1, 2, 306281, 1688844, 0, 4, 1694844, 1000, 1726844, 33000, 0, 4, 151000, 4000, 187281, 30000], // 1920 / 16
-    &[4, 108000, 1000, 140000, 33000, 2, 124000, 17000, 4, 151000, 4000, 187281, 30000, 2, 169141, 17000, 4, 188281, 1000, 220281, 33000, 2, 204281, 17000, 4, 222281, 1000, 254281, 33000, 2, 238281, 17000, 4, 256281, 1000, 288281, 33000, 2, 272281, 17000, 4, 1762844, 1000, 1794844, 33000, 2, 1778844, 17000, 4, 147500, 7000, 148500, 27000, 0, 4, 296781, 7000, 297781, 27000, 0, 4, 473781, 7000, 474781, 27000, 0, 0, 0, 4, 1796844, 4000, 1912000, 30000, 2, 1854422, 17000, 0, 0, 0, 0, 0, 0, 0, 0, 4, 1728844, 1000, 1760844, 33000, 2, 1744844, 17000, 0, 0, 2, 314281, 34000, 4, 484281, 4000, 1686844, 30000, 1, 1, 2, 484281, 1688844, 0, 0, 0, 4, 151000, 4000, 187281, 30000], // 1920 / 32
-    &[4, 255750, 1000, 287750, 33000, 2, 271750, 17000, 4, 298750, 4000, 335031, 30000, 2, 316891, 17000, 4, 336031, 1000, 368031, 33000, 2, 352031, 17000, 4, 370031, 1000, 402031, 33000, 2, 386031, 17000, 4, 404031, 1000, 436031, 33000, 2, 420031, 17000, 4, 1762844, 1000, 1794844, 33000, 2, 1778844, 17000, 4, 295250, 7000, 296250, 27000, 0, 0, 0, 4, 443531, 7000, 444531, 27000, 0, 0, 0, 4, 1796844, 4000, 1912000, 30000, 2, 1854422, 17000, 0, 0, 0, 0, 0, 0, 0, 0, 4, 1728844, 1000, 1760844, 33000, 2, 1744844, 17000, 0, 0, 0, 4, 454031, 4000, 1686844, 30000, 1, 1, 2, 454031, 1688844, 0, 0, 0, 4, 298750, 4000, 335031, 30000], // 1920 / 64
-    &[4, 108000, 1000, 140000, 33000, 2, 124000, 17000, 4, 151000, 4000, 187281, 30000, 2, 169141, 17000, 4, 188281, 1000, 220281, 33000, 2, 204281, 17000, 4, 222281, 1000, 254281, 33000, 2, 238281, 17000, 4, 256281, 1000, 288281, 33000, 2, 272281, 17000, 4, 1624844, 1000, 1656844, 33000, 2, 1640844, 17000, 4, 147500, 7000, 148500, 27000, 0, 0, 0, 4, 295781, 7000, 296781, 27000, 0, 0, 0, 4, 1658844, 4000, 1774000, 30000, 2, 1716422, 17000, 0, 0, 0, 0, 0, 0, 0, 0, 4, 1590844, 1000, 1622844, 33000, 2, 1606844, 17000, 0, 0, 0, 4, 306281, 4000, 1548844, 30000, 1, 1, 2, 306281, 1550844, 0, 0, 0, 4, 151000, 4000, 187281, 30000], // 1920 / 128
-    &[4, 255750, 1000, 287750, 33000, 2, 271750, 17000, 4, 298750, 4000, 335031, 30000, 2, 316891, 17000, 4, 336031, 1000, 368031, 33000, 2, 352031, 17000, 4, 370031, 1000, 402031, 33000, 2, 386031, 17000, 4, 404031, 1000, 436031, 33000, 2, 420031, 17000, 4, 1656000, 1000, 1688000, 33000, 2, 1672000, 17000, 4, 295250, 7000, 296250, 27000, 0, 4, 444531, 7000, 445531, 27000, 0, 4, 621531, 7000, 622531, 27000, 0, 4, 1435000, 4000, 1618000, 30000, 2, 1526500, 17000, 4, 1690000, 1000, 1722000, 33000, 2, 1706000, 17000, 4, 1204000, 5000, 1274000, 29000, 2, 1239000, 17000, 4, 1274000, 9000, 1290000, 25000, 2, 1282000, 17000, 4, 1300000, 5000, 1371000, 29000, 2, 1335500, 17000, 4, 1371000, 9000, 1387000, 25000, 2, 1379000, 17000, 4, 1622000, 1000, 1654000, 33000, 2, 1638000, 17000, 0, 2, 1759797, 17000, 2, 462031, 34000, 4, 632031, 1000, 1393000, 33000, 1, 1, 2, 632031, 1202688, 4, 1435000, 4000, 1618000, 30000, 4, 1401000, 1000, 1433000, 33000, 0, 4, 298750, 4000, 335031, 30000], // 1920 / 255
-    &[4, 108000, 1000, 140000, 33000, 2, 124000, 17000, 4, 151000, 4000, 187281, 30000, 2, 169141, 17000, 4, 188281, 1000, 220281, 33000, 2, 204281, 17000, 4, 222281, 1000, 254281, 33000, 2, 238281, 17000, 4, 256281, 1000, 288281, 33000, 2, 272281, 17000, 4, 1710844, 1000, 1742844, 33000, 2, 1726844, 17000, 4, 147500, 7000, 148500, 27000, 0, 0, 0, 4, 295781, 7000, 296781, 27000, 0, 0, 0, 4, 1744844, 4000, 1860000, 30000, 2, 1802422, 17000, 4, 1446000, 5000, 1516000, 29000, 2, 1481000, 17000, 4, 1516000, 9000, 1532000, 25000, 2, 1524000, 17000, 4, 1542000, 5000, 1613000, 29000, 2, 1577500, 17000, 4, 1613000, 9000, 1629000, 25000, 2, 1621000, 17000, 4, 1676844, 1000, 1708844, 33000, 2, 1692844, 17000, 0, 2, 1897797, 17000, 0, 4, 306281, 4000, 1634844, 30000, 1, 1, 2, 306281, 1444531, 0, 4, 1642844, 1000, 1674844, 33000, 0, 4, 151000, 4000, 187281, 30000], // 1920 / 28
-    &[4, 108000, 1000, 140000, 33000, 2, 124000, 17000, 4, 151000, 4000, 187281, 30000, 2, 169141, 17000, 4, 188281, 1000, 220281, 33000, 2, 204281, 17000, 4, 222281, 1000, 254281, 33000, 2, 238281, 17000, 4, 256281, 1000, 288281, 33000, 2, 272281, 17000, 4, 1846000, 1000, 1878000, 33000, 2, 1862000, 17000, 4, 147500, 7000, 148500, 27000, 0, 0, 0, 4, 295781, 7000, 296781, 27000, 0, 4, 1625000, 4000, 1808000, 30000, 2, 1716500, 17000, 4, 1880000, 1000, 1912000, 33000, 2, 1896000, 17000, 0, 0, 0, 0, 0, 0, 0, 0, 4, 1812000, 1000, 1844000, 33000, 2, 1828000, 17000, 0, 0, 0, 4, 306281, 1000, 1583000, 33000, 1, 1, 2, 306281, 1585000, 4, 1625000, 4000, 1808000, 30000, 0, 0, 4, 151000, 4000, 187281, 30000], // 1920 / 3
-    &[4, 108000, 1000, 140000, 33000, 2, 124000, 17000, 4, 151000, 4000, 187281, 30000, 2, 169141, 17000, 4, 188281, 1000, 220281, 33000, 2, 204281, 17000, 4, 222281, 1000, 254281, 33000, 2, 238281, 17000, 4, 256281, 1000, 288281, 33000, 2, 272281, 17000, 4, 1710844, 1000, 1742844, 33000, 2, 1726844, 17000, 4, 147500, 7000, 148500, 27000, 0, 0, 0, 4, 295781, 7000, 296781, 27000, 0, 4, 1489844, 4000, 1672844, 30000, 2, 1581344, 17000, 4, 1744844, 4000, 1860000, 30000, 2, 1802422, 17000, 0, 0, 0, 0, 0, 0, 0, 0, 4, 1676844, 1000, 1708844, 33000, 2, 1692844, 17000, 0, 2, 1897797, 17000, 0, 4, 306281, 4000, 1447844, 30000, 1, 1, 2, 306281, 1449844, 4, 1489844, 4000, 1672844, 30000, 0, 0, 4, 151000, 4000, 187281, 30000], // 1920 / 5
-    &[4, 108000, 1000, 140000, 33000, 2, 124000, 17000, 4, 151000, 4000, 187281, 30000, 2, 169141, 17000, 4, 188281, 1000, 220281, 33000, 2, 204281, 17000, 4, 222281, 1000, 254281, 33000, 2, 238281, 17000, 4, 256281, 1000, 288281, 33000, 2, 272281, 17000, 4, 1794000, 1000, 1826000, 33000, 2, 1810000, 17000, 4, 147500, 7000, 148500, 27000, 0, 0, 0, 4, 295781, 7000, 296781, 27000, 0, 0, 0, 4, 1828000, 1000, 1860000, 33000, 2, 1844000, 17000, 0, 0, 0, 0, 0, 0, 0, 0, 4, 1760000, 1000, 1792000, 33000, 2, 1776000, 17000, 0, 2, 1897797, 17000, 0, 4, 306281, 1000, 1718000, 33000, 1, 1, 2, 306281, 1720000, 0, 0, 0, 4, 151000, 4000, 187281, 30000], // 1920 / 6
-    &[4, 108000, 1000, 140000, 33000, 2, 124000, 17000, 4, 151000, 4000, 187281, 30000, 2, 169141, 17000, 4, 188281, 1000, 220281, 33000, 2, 204281, 17000, 4, 222281, 1000, 254281, 33000, 2, 238281, 17000, 4, 256281, 1000, 288281, 33000, 2, 272281, 17000, 4, 1762844, 1000, 1794844, 33000, 2, 1778844, 17000, 4, 147500, 7000, 148500, 27000, 0, 0, 0, 4, 295781, 7000, 296781, 27000, 0, 4, 1541844, 4000, 1724844, 30000, 2, 1633344, 17000, 4, 1796844, 4000, 1912000, 30000, 2, 1854422, 17000, 4, 1311000, 5000, 1381000, 29000, 2, 1346000, 17000, 4, 1381000, 9000, 1397000, 25000, 2, 1389000, 17000, 4, 1407000, 5000, 1478000, 29000, 2, 1442500, 17000, 4, 1478000, 9000, 1494000, 25000, 2, 1486000, 17000, 4, 1728844, 1000, 1760844, 33000, 2, 1744844, 17000, 0, 0, 0, 4, 306281, 4000, 1499844, 30000, 1, 1, 2, 306281, 1309531, 4, 1541844, 4000, 1724844, 30000, 0, 0, 4, 151000, 4000, 187281, 30000], // 1920 / 9
-    &[4, 108000, 1000, 140000, 33000, 2, 124000, 17000, 4, 151000, 4000, 187281, 30000, 2, 169141, 17000, 4, 188281, 1000, 220281, 33000, 2, 204281, 17000, 4, 222281, 1000, 254281, 33000, 2, 238281, 17000, 4, 256281, 1000, 288281, 33000, 2, 272281, 17000, 4, 1762844, 1000, 1794844, 33000, 2, 1778844, 17000, 4, 147500, 7000, 148500, 27000, 0, 0, 0, 4, 295781, 7000, 296781, 27000, 0, 4, 1541844, 4000, 1724844, 30000, 2, 1633344, 17000, 4, 1796844, 4000, 1912000, 30000, 2, 1854422, 17000, 0, 0, 0, 0, 0, 0, 0, 0, 4, 1728844, 1000, 1760844, 33000, 2, 1744844, 17000, 0, 0, 0, 4, 306281, 4000, 1499844, 30000, 1, 1, 2, 306281, 1501844, 4, 1541844, 4000, 1724844, 30000, 4, 1507844, 1000, 1539844, 33000, 0, 4, 151000, 4000, 187281, 30000], // 1920 / 17
-    &[4, 108000, 1000, 140000, 33000, 2, 124000, 17000, 4, 151000, 4000, 187281, 30000, 2, 169141, 17000, 4, 188281, 1000, 220281, 33000, 2, 204281, 17000, 4, 222281, 1000, 254281, 33000, 2, 238281, 17000, 4, 256281, 1000, 288281, 33000, 2, 272281, 17000, 4, 1762844, 1000, 1794844, 33000, 2, 1778844, 17000, 4, 147500, 7000, 148500, 27000, 0, 0, 0, 4, 295781, 7000, 296781, 27000, 0, 0, 0, 4, 1796844, 4000, 1912000, 30000, 2, 1854422, 17000, 4, 1498000, 5000, 1568000, 29000, 2, 1533000, 17000, 4, 1568000, 9000, 1584000, 25000, 2, 1576000, 17000, 4, 1594000, 5000, 1665000, 29000, 2, 1629500, 17000, 4, 1665000, 9000, 1681000, 25000, 2, 1673000, 17000, 4, 1728844, 1000, 1760844, 33000, 2, 1744844, 17000, 0, 0, 0, 4, 306281, 4000, 1686844, 30000, 1, 1, 2, 306281, 1496531, 0, 4, 1694844, 1000, 1726844, 33000, 0, 4, 151000, 4000, 187281, 30000], // 1920 / 24
-    &[4, 108000, 1000, 140000, 33000, 2, 124000, 17000, 4, 151000, 4000, 187281, 30000, 2, 169141, 17000, 4, 188281, 1000, 220281, 33000, 2, 204281, 17000, 4, 222281, 1000, 254281, 33000, 2, 238281, 17000, 4, 256281, 1000, 288281, 33000, 2, 272281, 17000, 4, 1762844, 1000, 1794844, 33000, 2, 1778844, 17000, 4, 147500, 7000, 148500, 27000, 0, 4, 296781, 7000, 297781, 27000, 0, 4, 473781, 7000, 474781, 27000, 0, 4, 1541844, 4000, 1724844, 30000, 2, 1633344, 17000, 4, 1796844, 4000, 1912000, 30000, 2, 1854422, 17000, 0, 0, 0, 0, 0, 0, 0, 0, 4, 1728844, 1000, 1760844, 33000, 2, 1744844, 17000, 0, 0, 2, 314281, 34000, 4, 484281, 4000, 1499844, 30000, 1, 1, 2, 484281, 1501844, 4, 1541844, 4000, 1724844, 30000, 0, 0, 4, 151000, 4000, 187281, 30000], // 1920 / 33
-    &[4, 255750, 1000, 287750, 33000, 2, 271750, 17000, 4, 298750, 4000, 335031, 30000, 2, 316891, 17000, 4, 336031, 1000, 368031, 33000, 2, 352031, 17000, 4, 370031, 1000, 402031, 33000, 2, 386031, 17000, 4, 404031, 1000, 436031, 33000, 2, 420031, 17000, 4, 1762844, 1000, 1794844, 33000, 2, 1778844, 17000, 4, 295250, 7000, 296250, 27000, 0, 0, 0, 4, 443531, 7000, 444531, 27000, 0, 4, 1541844, 4000, 1724844, 30000, 2, 1633344, 17000, 4, 1796844, 4000, 1912000, 30000, 2, 1854422, 17000, 0, 0, 0, 0, 0, 0, 0, 0, 4, 1728844, 1000, 1760844, 33000, 2, 1744844, 17000, 0, 0, 0, 4, 454031, 4000, 1499844, 30000, 1, 1, 2, 454031, 1501844, 4, 1541844, 4000, 1724844, 30000, 0, 0, 4, 298750, 4000, 335031, 30000], // 1920 / 65
-    &[4, 255750, 1000, 287750, 33000, 2, 271750, 17000, 4, 298750, 4000, 335031, 30000, 2, 316891, 17000, 4, 336031, 1000, 368031, 33000, 2, 352031, 17000, 4, 370031, 1000, 402031, 33000, 2, 386031, 17000, 4, 404031, 1000, 436031, 33000, 2, 420031, 17000, 4, 1762844, 1000, 1794844, 33000, 2, 1778844, 17000, 4, 295250, 7000, 296250, 27000, 0, 4, 444531, 7000, 445531, 27000, 0, 4, 621531, 7000, 622531, 27000, 0, 0, 0, 4, 1796844, 4000, 1912000, 30000, 2, 1854422, 17000, 0, 0, 0, 0, 0, 0, 0, 0, 4, 1728844, 1000, 1760844, 33000, 2, 1744844, 17000, 0, 0, 2, 462031, 34000, 4, 632031, 4000, 1686844, 30000, 1, 1, 2, 632031, 1688844, 0, 0, 0, 4, 298750, 4000, 335031, 30000], // 1920 / 96
-    &[4, 108000, 1000, 140000, 33000, 2, 124000, 17000, 4, 151000, 4000, 187281, 30000, 2, 169141, 17000, 4, 188281, 1000, 220281, 33000, 2, 204281, 17000, 4, 222281, 1000, 254281, 33000, 2, 238281, 17000, 4, 256281, 1000, 288281, 33000, 2, 272281, 17000, 4, 1624844, 1000, 1656844, 33000, 2, 1640844, 17000, 4, 147500, 7000, 148500, 27000, 0, 0, 0, 4, 295781, 7000, 296781, 27000, 0, 4, 1403844, 4000, 1586844, 30000, 2, 1495344, 17000, 4, 1658844, 4000, 1774000, 30000, 2, 1716422, 17000, 0, 0, 0, 0, 0, 0, 0, 0, 4, 1590844, 1000, 1622844, 33000, 2, 1606844, 17000, 0, 0, 0, 4, 306281, 4000, 1361844, 30000, 1, 1, 2, 306281, 1363844, 4, 1403844, 4000, 1586844, 30000, 0, 0, 4, 151000, 4000, 187281, 30000], // 1920 / 129
-    &[4, 108000, 1000, 140000, 33000, 2, 124000, 17000, 4, 151000, 4000, 187281, 30000, 2, 169141, 17000, 4, 188281, 1000, 220281, 33000, 2, 204281, 17000, 4, 222281, 1000, 254281, 33000, 2, 238281, 17000, 4, 256281, 1000, 288281, 33000, 2, 272281, 17000, 4, 1624844, 1000, 1656844, 33000, 2, 1640844, 17000, 4, 147500, 7000, 148500, 27000, 0, 4, 296781, 7000, 297781, 27000, 0, 4, 473781, 7000, 474781, 27000, 0, 0, 0, 4, 1658844, 4000, 1774000, 30000, 2, 1716422, 17000, 0, 0, 0, 0, 0, 0, 0, 0, 4, 1590844, 1000, 1622844, 33000, 2, 1606844, 17000, 0, 0, 2, 314281, 34000, 4, 484281, 4000, 1548844, 30000, 1, 1, 2, 484281, 1550844, 0, 0, 0, 4, 151000, 4000, 187281, 30000], // 1920 / 160
-    &[4, 108000, 1000, 140000, 33000, 2, 124000, 17000, 4, 151000, 4000, 187281, 30000, 2, 169141, 17000, 4, 188281, 1000, 220281, 33000, 2, 204281, 17000, 4, 222281, 1000, 254281, 33000, 2, 238281, 17000, 4, 256281, 1000, 288281, 33000, 2, 272281, 17000, 4, 1572844, 1000, 1604844, 33000, 2, 1588844, 17000, 4, 147500, 7000, 148500, 27000, 0, 4, 296781, 7000, 297781, 27000, 0, 4, 473781, 7000, 474781, 27000, 0, 0, 0, 4, 1606844, 4000, 1722000, 30000, 2, 1664422, 17000, 4, 1308000, 5000, 1378000, 29000, 2, 1343000, 17000, 4, 1378000, 9000, 1394000, 25000, 2, 1386000, 17000, 4, 1404000, 5000, 1475000, 29000, 2, 1439500, 17000, 4, 1475000, 9000, 1491000, 25000, 2, 1483000, 17000, 4, 1538844, 1000, 1570844, 33000, 2, 1554844, 17000, 0, 2, 1759797, 17000, 2, 314281, 34000, 4, 484281, 4000, 1496844, 30000, 1, 1, 2, 484281, 1306531, 0, 4, 1504844, 1000, 1536844, 33000, 0, 4, 151000, 4000, 187281, 30000], // 1920 / 188
-    &[4, 255750, 1000, 287750, 33000, 2, 271750, 17000, 4, 298750, 4000, 335031, 30000, 2, 316891, 17000, 4, 336031, 1000, 368031, 33000, 2, 352031, 17000, 4, 370031, 1000, 402031, 33000, 2, 386031, 17000, 4, 404031, 1000, 436031, 33000, 2, 420031, 17000, 4, 1656000, 1000, 1688000, 33000, 2, 1672000, 17000, 4, 295250, 7000, 296250, 27000, 0, 4, 444531, 7000, 445531, 27000, 0, 4, 621531, 7000, 622531, 27000, 0, 0, 0, 4, 1690000, 1000, 1722000, 33000, 2, 1706000, 17000, 4, 1391000, 5000, 1461000, 29000, 2, 1426000, 17000, 4, 1461000, 9000, 1477000, 25000, 2, 1469000, 17000, 4, 1487000, 5000, 1558000, 29000, 2, 1522500, 17000, 4, 1558000, 9000, 1574000, 25000, 2, 1566000, 17000, 4, 1622000, 1000, 1654000, 33000, 2, 1638000, 17000, 0, 2, 1759797, 17000, 2, 462031, 34000, 4, 632031, 1000, 1580000, 33000, 1, 1, 2, 632031, 1389688, 0, 4, 1588000, 1000, 1620000, 33000, 0, 4, 298750, 4000, 335031, 30000], // 1920 / 254
+const APP_BAR_ROWS: &[&[i32]] = &[
+    &[4, 30000, 4000, 56000, 30000, 2, 43000, 17000, 4, 60000, 4000, 96281, 30000, 2, 78141, 17000, 4, 100281, 4000, 126281, 30000, 2, 113281, 17000, 4, 130281, 4000, 156281, 30000, 2, 143281, 17000, 4, 160281, 4000, 186281, 30000, 2, 173281, 17000, 4, 426000, 4000, 452000, 30000, 2, 439000, 17000, 0, 0, 0, 0, 0, 0, 0, 0, 4, 456000, 7000, 476000, 27000, 2, 466000, 17000, 0, 0, 0, 0, 0, 0, 0, 0, 4, 396000, 4000, 422000, 30000, 2, 409000, 17000, 0, 0, 0, 4, 366000, 7000, 366000, 27000, 1, 0, 2, 190281, 366000, 0, 0, 0, 4, 60000, 4000, 96281, 30000], // 480 / 0
+    &[4, 30000, 4000, 56000, 30000, 2, 43000, 17000, 4, 60000, 4000, 96281, 30000, 2, 78141, 17000, 4, 100281, 4000, 126281, 30000, 2, 113281, 17000, 4, 130281, 4000, 156281, 30000, 2, 143281, 17000, 4, 160281, 4000, 186281, 30000, 2, 173281, 17000, 4, 426000, 4000, 452000, 30000, 2, 439000, 17000, 0, 0, 0, 0, 0, 0, 0, 0, 4, 456000, 7000, 476000, 27000, 2, 466000, 17000, 0, 0, 0, 0, 0, 0, 0, 0, 4, 396000, 4000, 422000, 30000, 2, 409000, 17000, 0, 0, 0, 4, 366000, 7000, 366000, 27000, 1, 0, 2, 190281, 366000, 0, 0, 0, 4, 60000, 4000, 96281, 30000], // 480 / 1
+    &[4, 59313, 4000, 85313, 30000, 2, 72313, 17000, 4, 94313, 4000, 130594, 30000, 2, 112453, 17000, 4, 134594, 4000, 160594, 30000, 2, 147594, 17000, 4, 164594, 4000, 190594, 30000, 2, 177594, 17000, 4, 194594, 4000, 220594, 30000, 2, 207594, 17000, 4, 426000, 4000, 452000, 30000, 2, 439000, 17000, 4, 89313, 9000, 90313, 25000, 0, 0, 0, 4, 224594, 9000, 225594, 25000, 0, 0, 0, 4, 456000, 7000, 476000, 27000, 2, 466000, 17000, 0, 0, 0, 0, 0, 0, 0, 0, 4, 396000, 4000, 422000, 30000, 2, 409000, 17000, 0, 0, 0, 4, 396000, 7000, 396000, 27000, 1, 0, 2, 229594, 396000, 0, 0, 0, 4, 94313, 4000, 130594, 30000], // 480 / 2
+    &[4, 30000, 4000, 56000, 30000, 2, 43000, 17000, 4, 60000, 4000, 96281, 30000, 2, 78141, 17000, 4, 100281, 4000, 126281, 30000, 2, 113281, 17000, 4, 130281, 4000, 156281, 30000, 2, 143281, 17000, 4, 160281, 4000, 186281, 30000, 2, 173281, 17000, 4, 426000, 4000, 452000, 30000, 2, 439000, 17000, 0, 0, 0, 0, 0, 0, 0, 0, 4, 456000, 7000, 476000, 27000, 2, 466000, 17000, 0, 0, 0, 0, 0, 0, 0, 0, 4, 396000, 4000, 422000, 30000, 2, 409000, 17000, 0, 0, 0, 4, 366000, 7000, 366000, 27000, 1, 0, 2, 190281, 366000, 0, 0, 0, 4, 60000, 4000, 96281, 30000], // 480 / 4
+    &[4, 30000, 4000, 56000, 30000, 2, 43000, 17000, 4, 60000, 4000, 96281, 30000, 2, 78141, 17000, 4, 100281, 4000, 126281, 30000, 2, 113281, 17000, 4, 130281, 4000, 156281, 30000, 2, 143281, 17000, 4, 160281, 4000, 186281, 30000, 2, 173281, 17000, 4, 426000, 4000, 452000, 30000, 2, 439000, 17000, 0, 0, 0, 0, 0, 0, 0, 0, 4, 456000, 7000, 476000, 27000, 2, 466000, 17000, 0, 0, 0, 0, 0, 0, 0, 0, 4, 396000, 4000, 422000, 30000, 2, 409000, 17000, 0, 0, 0, 4, 366000, 7000, 366000, 27000, 1, 0, 2, 190281, 366000, 0, 0, 0, 4, 60000, 4000, 96281, 30000], // 480 / 8
+    &[4, 30000, 4000, 56000, 30000, 2, 43000, 17000, 4, 60000, 4000, 96281, 30000, 2, 78141, 17000, 4, 100281, 4000, 126281, 30000, 2, 113281, 17000, 4, 130281, 4000, 156281, 30000, 2, 143281, 17000, 4, 160281, 4000, 186281, 30000, 2, 173281, 17000, 4, 426000, 4000, 452000, 30000, 2, 439000, 17000, 0, 0, 0, 0, 0, 0, 0, 0, 4, 456000, 7000, 476000, 27000, 2, 466000, 17000, 0, 0, 0, 0, 0, 0, 0, 0, 4, 396000, 4000, 422000, 30000, 2, 409000, 17000, 0, 0, 0, 4, 336000, 7000, 336000, 27000, 1, 0, 2, 190281, 336000, 0, 4, 366000, 4000, 392000, 30000, 0, 4, 60000, 4000, 96281, 30000], // 480 / 16
+    &[4, 30000, 4000, 56000, 30000, 2, 43000, 17000, 4, 60000, 4000, 96281, 30000, 2, 78141, 17000, 4, 100281, 4000, 126281, 30000, 2, 113281, 17000, 4, 130281, 4000, 156281, 30000, 2, 143281, 17000, 4, 160281, 4000, 186281, 30000, 2, 173281, 17000, 4, 450000, 4000, 476000, 30000, 2, 463000, 17000, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 4, 420000, 4000, 446000, 30000, 2, 433000, 17000, 0, 0, 2, 203281, 30000, 4, 390000, 7000, 390000, 27000, 1, 0, 2, 250281, 390000, 0, 0, 0, 4, 60000, 4000, 96281, 30000], // 480 / 32
+    &[4, 30000, 4000, 56000, 30000, 2, 43000, 17000, 4, 60000, 4000, 96281, 30000, 2, 78141, 17000, 4, 100281, 4000, 126281, 30000, 2, 113281, 17000, 4, 130281, 4000, 156281, 30000, 2, 143281, 17000, 4, 160281, 4000, 186281, 30000, 2, 173281, 17000, 4, 426000, 4000, 452000, 30000, 2, 439000, 17000, 0, 0, 0, 0, 0, 0, 0, 0, 4, 456000, 7000, 476000, 27000, 2, 466000, 17000, 0, 0, 0, 0, 0, 0, 0, 0, 4, 396000, 4000, 422000, 30000, 2, 409000, 17000, 0, 0, 0, 4, 366000, 7000, 366000, 27000, 1, 0, 2, 190281, 366000, 0, 0, 0, 4, 60000, 4000, 96281, 30000], // 480 / 64
+    &[0, 0, 4, 30000, 4000, 66281, 30000, 2, 48141, 17000, 4, 70281, 4000, 96281, 30000, 2, 83281, 17000, 0, 0, 0, 0, 4, 312000, 4000, 338000, 30000, 2, 325000, 17000, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 4, 282000, 4000, 308000, 30000, 2, 295000, 17000, 0, 0, 0, 4, 252000, 7000, 252000, 27000, 1, 0, 2, 100281, 252000, 0, 0, 0, 4, 30000, 4000, 66281, 30000], // 480 / 128
+    &[0, 0, 4, 30000, 4000, 66281, 30000, 2, 48141, 17000, 4, 70281, 4000, 96281, 30000, 2, 83281, 17000, 0, 0, 0, 0, 4, 312000, 4000, 338000, 30000, 2, 325000, 17000, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 4, 282000, 4000, 308000, 30000, 2, 295000, 17000, 0, 0, 0, 4, 252000, 7000, 252000, 27000, 1, 0, 2, 100281, 252000, 0, 0, 0, 4, 30000, 4000, 66281, 30000], // 480 / 255
+    &[4, 30000, 4000, 56000, 30000, 2, 43000, 17000, 4, 60000, 4000, 96281, 30000, 2, 78141, 17000, 4, 100281, 4000, 126281, 30000, 2, 113281, 17000, 4, 130281, 4000, 156281, 30000, 2, 143281, 17000, 4, 160281, 4000, 186281, 30000, 2, 173281, 17000, 4, 426000, 4000, 452000, 30000, 2, 439000, 17000, 0, 0, 0, 0, 0, 0, 0, 0, 4, 456000, 7000, 476000, 27000, 2, 466000, 17000, 0, 0, 0, 0, 0, 0, 0, 0, 4, 396000, 4000, 422000, 30000, 2, 409000, 17000, 0, 0, 0, 4, 336000, 7000, 336000, 27000, 1, 0, 2, 190281, 336000, 0, 4, 366000, 4000, 392000, 30000, 0, 4, 60000, 4000, 96281, 30000], // 480 / 28
+    &[4, 30000, 4000, 56000, 30000, 2, 43000, 17000, 4, 60000, 4000, 96281, 30000, 2, 78141, 17000, 4, 100281, 4000, 126281, 30000, 2, 113281, 17000, 4, 130281, 4000, 156281, 30000, 2, 143281, 17000, 4, 160281, 4000, 186281, 30000, 2, 173281, 17000, 4, 426000, 4000, 452000, 30000, 2, 439000, 17000, 0, 0, 0, 0, 0, 0, 4, 366000, 4000, 392000, 30000, 2, 379000, 17000, 4, 456000, 7000, 476000, 27000, 2, 466000, 17000, 0, 0, 0, 0, 0, 0, 0, 0, 4, 396000, 4000, 422000, 30000, 2, 409000, 17000, 0, 0, 0, 4, 336000, 7000, 336000, 27000, 1, 0, 2, 190281, 336000, 4, 366000, 4000, 392000, 30000, 0, 0, 4, 60000, 4000, 96281, 30000], // 480 / 3
+    &[4, 30000, 4000, 56000, 30000, 2, 43000, 17000, 4, 60000, 4000, 96281, 30000, 2, 78141, 17000, 4, 100281, 4000, 126281, 30000, 2, 113281, 17000, 4, 130281, 4000, 156281, 30000, 2, 143281, 17000, 4, 160281, 4000, 186281, 30000, 2, 173281, 17000, 4, 426000, 4000, 452000, 30000, 2, 439000, 17000, 0, 0, 0, 0, 0, 0, 0, 0, 4, 456000, 7000, 476000, 27000, 2, 466000, 17000, 0, 0, 0, 0, 0, 0, 0, 0, 4, 396000, 4000, 422000, 30000, 2, 409000, 17000, 0, 0, 0, 4, 366000, 7000, 366000, 27000, 1, 0, 2, 190281, 366000, 0, 0, 0, 4, 60000, 4000, 96281, 30000], // 480 / 5
+    &[4, 30000, 4000, 56000, 30000, 2, 43000, 17000, 4, 65000, 4000, 101281, 30000, 2, 83141, 17000, 4, 105281, 4000, 131281, 30000, 2, 118281, 17000, 4, 135281, 4000, 161281, 30000, 2, 148281, 17000, 4, 165281, 4000, 191281, 30000, 2, 178281, 17000, 4, 377594, 4000, 403594, 30000, 2, 390594, 17000, 4, 60000, 9000, 61000, 25000, 0, 0, 0, 4, 195281, 9000, 196281, 25000, 0, 0, 0, 4, 407594, 7000, 427594, 27000, 2, 417594, 17000, 0, 0, 0, 0, 0, 0, 0, 0, 4, 347594, 4000, 373594, 30000, 2, 360594, 17000, 4, 431594, 4000, 476000, 30000, 2, 453797, 17000, 0, 4, 347594, 7000, 347594, 27000, 1, 0, 2, 200281, 347594, 0, 0, 0, 4, 65000, 4000, 101281, 30000], // 480 / 6
+    &[4, 30000, 4000, 56000, 30000, 2, 43000, 17000, 4, 60000, 4000, 96281, 30000, 2, 78141, 17000, 4, 100281, 4000, 126281, 30000, 2, 113281, 17000, 4, 130281, 4000, 156281, 30000, 2, 143281, 17000, 4, 160281, 4000, 186281, 30000, 2, 173281, 17000, 4, 426000, 4000, 452000, 30000, 2, 439000, 17000, 0, 0, 0, 0, 0, 0, 0, 0, 4, 456000, 7000, 476000, 27000, 2, 466000, 17000, 0, 0, 0, 0, 0, 0, 0, 0, 4, 396000, 4000, 422000, 30000, 2, 409000, 17000, 0, 0, 0, 4, 366000, 7000, 366000, 27000, 1, 0, 2, 190281, 366000, 0, 0, 0, 4, 60000, 4000, 96281, 30000], // 480 / 9
+    &[4, 30000, 4000, 56000, 30000, 2, 43000, 17000, 4, 60000, 4000, 96281, 30000, 2, 78141, 17000, 4, 100281, 4000, 126281, 30000, 2, 113281, 17000, 4, 130281, 4000, 156281, 30000, 2, 143281, 17000, 4, 160281, 4000, 186281, 30000, 2, 173281, 17000, 4, 426000, 4000, 452000, 30000, 2, 439000, 17000, 0, 0, 0, 0, 0, 0, 0, 0, 4, 456000, 7000, 476000, 27000, 2, 466000, 17000, 0, 0, 0, 0, 0, 0, 0, 0, 4, 396000, 4000, 422000, 30000, 2, 409000, 17000, 0, 0, 0, 4, 336000, 7000, 336000, 27000, 1, 0, 2, 190281, 336000, 0, 4, 366000, 4000, 392000, 30000, 0, 4, 60000, 4000, 96281, 30000], // 480 / 17
+    &[4, 30000, 4000, 56000, 30000, 2, 43000, 17000, 4, 60000, 4000, 96281, 30000, 2, 78141, 17000, 4, 100281, 4000, 126281, 30000, 2, 113281, 17000, 4, 130281, 4000, 156281, 30000, 2, 143281, 17000, 4, 160281, 4000, 186281, 30000, 2, 173281, 17000, 4, 426000, 4000, 452000, 30000, 2, 439000, 17000, 0, 0, 0, 0, 0, 0, 0, 0, 4, 456000, 7000, 476000, 27000, 2, 466000, 17000, 0, 0, 0, 0, 0, 0, 0, 0, 4, 396000, 4000, 422000, 30000, 2, 409000, 17000, 0, 0, 0, 4, 336000, 7000, 336000, 27000, 1, 0, 2, 190281, 336000, 0, 4, 366000, 4000, 392000, 30000, 0, 4, 60000, 4000, 96281, 30000], // 480 / 24
+    &[4, 30000, 4000, 56000, 30000, 2, 43000, 17000, 4, 60000, 4000, 96281, 30000, 2, 78141, 17000, 4, 100281, 4000, 126281, 30000, 2, 113281, 17000, 4, 130281, 4000, 156281, 30000, 2, 143281, 17000, 4, 160281, 4000, 186281, 30000, 2, 173281, 17000, 4, 450000, 4000, 476000, 30000, 2, 463000, 17000, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 4, 420000, 4000, 446000, 30000, 2, 433000, 17000, 0, 0, 2, 203281, 30000, 4, 390000, 7000, 390000, 27000, 1, 0, 2, 250281, 390000, 0, 0, 0, 4, 60000, 4000, 96281, 30000], // 480 / 33
+    &[4, 30000, 4000, 56000, 30000, 2, 43000, 17000, 4, 60000, 4000, 96281, 30000, 2, 78141, 17000, 4, 100281, 4000, 126281, 30000, 2, 113281, 17000, 4, 130281, 4000, 156281, 30000, 2, 143281, 17000, 4, 160281, 4000, 186281, 30000, 2, 173281, 17000, 4, 426000, 4000, 452000, 30000, 2, 439000, 17000, 0, 0, 0, 0, 0, 0, 0, 0, 4, 456000, 7000, 476000, 27000, 2, 466000, 17000, 0, 0, 0, 0, 0, 0, 0, 0, 4, 396000, 4000, 422000, 30000, 2, 409000, 17000, 0, 0, 0, 4, 366000, 7000, 366000, 27000, 1, 0, 2, 190281, 366000, 0, 0, 0, 4, 60000, 4000, 96281, 30000], // 480 / 65
+    &[4, 30000, 4000, 56000, 30000, 2, 43000, 17000, 4, 60000, 4000, 96281, 30000, 2, 78141, 17000, 4, 100281, 4000, 126281, 30000, 2, 113281, 17000, 4, 130281, 4000, 156281, 30000, 2, 143281, 17000, 4, 160281, 4000, 186281, 30000, 2, 173281, 17000, 4, 450000, 4000, 476000, 30000, 2, 463000, 17000, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 4, 420000, 4000, 446000, 30000, 2, 433000, 17000, 0, 0, 2, 203281, 30000, 4, 390000, 7000, 390000, 27000, 1, 0, 2, 250281, 390000, 0, 0, 0, 4, 60000, 4000, 96281, 30000], // 480 / 96
+    &[0, 0, 4, 30000, 4000, 66281, 30000, 2, 48141, 17000, 4, 70281, 4000, 96281, 30000, 2, 83281, 17000, 0, 0, 0, 0, 4, 312000, 4000, 338000, 30000, 2, 325000, 17000, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 4, 282000, 4000, 308000, 30000, 2, 295000, 17000, 0, 0, 0, 4, 252000, 7000, 252000, 27000, 1, 0, 2, 100281, 252000, 0, 0, 0, 4, 30000, 4000, 66281, 30000], // 480 / 129
+    &[0, 0, 4, 30000, 4000, 66281, 30000, 2, 48141, 17000, 4, 70281, 4000, 96281, 30000, 2, 83281, 17000, 0, 0, 0, 0, 4, 312000, 4000, 338000, 30000, 2, 325000, 17000, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 4, 282000, 4000, 308000, 30000, 2, 295000, 17000, 0, 0, 0, 4, 252000, 7000, 252000, 27000, 1, 0, 2, 100281, 252000, 0, 0, 0, 4, 30000, 4000, 66281, 30000], // 480 / 160
+    &[0, 0, 4, 30000, 4000, 66281, 30000, 2, 48141, 17000, 4, 70281, 4000, 96281, 30000, 2, 83281, 17000, 0, 0, 0, 0, 4, 312000, 4000, 338000, 30000, 2, 325000, 17000, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 4, 282000, 4000, 308000, 30000, 2, 295000, 17000, 0, 0, 0, 4, 252000, 7000, 252000, 27000, 1, 0, 2, 100281, 252000, 0, 0, 0, 4, 30000, 4000, 66281, 30000], // 480 / 188
+    &[0, 0, 4, 30000, 4000, 66281, 30000, 2, 48141, 17000, 4, 70281, 4000, 96281, 30000, 2, 83281, 17000, 0, 0, 0, 0, 4, 312000, 4000, 338000, 30000, 2, 325000, 17000, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 4, 282000, 4000, 308000, 30000, 2, 295000, 17000, 0, 0, 0, 4, 252000, 7000, 252000, 27000, 1, 0, 2, 100281, 252000, 0, 0, 0, 4, 30000, 4000, 66281, 30000], // 480 / 254
+    &[4, 59313, 4000, 85313, 30000, 2, 72313, 17000, 4, 94313, 4000, 130594, 30000, 2, 112453, 17000, 4, 134594, 4000, 160594, 30000, 2, 147594, 17000, 4, 164594, 4000, 190594, 30000, 2, 177594, 17000, 4, 194594, 4000, 220594, 30000, 2, 207594, 17000, 4, 496844, 4000, 522844, 30000, 2, 509844, 17000, 4, 89313, 9000, 90313, 25000, 0, 0, 0, 4, 224594, 9000, 225594, 25000, 0, 0, 0, 4, 526844, 7000, 636000, 27000, 2, 581422, 17000, 0, 0, 0, 0, 0, 0, 0, 0, 4, 466844, 4000, 492844, 30000, 2, 479844, 17000, 0, 0, 0, 4, 466844, 7000, 466844, 27000, 1, 0, 2, 229594, 466844, 0, 0, 0, 4, 94313, 4000, 130594, 30000], // 640 / 0
+    &[4, 30000, 4000, 56000, 30000, 2, 43000, 17000, 4, 60000, 4000, 96281, 30000, 2, 78141, 17000, 4, 100281, 4000, 126281, 30000, 2, 113281, 17000, 4, 130281, 4000, 156281, 30000, 2, 143281, 17000, 4, 160281, 4000, 186281, 30000, 2, 173281, 17000, 4, 496844, 4000, 522844, 30000, 2, 509844, 17000, 0, 0, 0, 0, 0, 0, 4, 436844, 4000, 462844, 30000, 2, 449844, 17000, 4, 526844, 7000, 636000, 27000, 2, 581422, 17000, 0, 0, 0, 0, 0, 0, 0, 0, 4, 466844, 4000, 492844, 30000, 2, 479844, 17000, 0, 0, 0, 4, 406844, 7000, 406844, 27000, 1, 0, 2, 190281, 406844, 4, 436844, 4000, 462844, 30000, 0, 0, 4, 60000, 4000, 96281, 30000], // 640 / 1
+    &[4, 59313, 4000, 85313, 30000, 2, 72313, 17000, 4, 94313, 4000, 130594, 30000, 2, 112453, 17000, 4, 134594, 4000, 160594, 30000, 2, 147594, 17000, 4, 164594, 4000, 190594, 30000, 2, 177594, 17000, 4, 194594, 4000, 220594, 30000, 2, 207594, 17000, 4, 586000, 4000, 612000, 30000, 2, 599000, 17000, 4, 89313, 9000, 90313, 25000, 0, 0, 0, 4, 224594, 9000, 225594, 25000, 0, 0, 0, 4, 616000, 7000, 636000, 27000, 2, 626000, 17000, 0, 0, 0, 0, 0, 0, 0, 0, 4, 556000, 4000, 582000, 30000, 2, 569000, 17000, 0, 0, 0, 4, 556000, 7000, 556000, 27000, 1, 0, 2, 229594, 556000, 0, 0, 0, 4, 94313, 4000, 130594, 30000], // 640 / 2
+    &[4, 59313, 4000, 85313, 30000, 2, 72313, 17000, 4, 94313, 4000, 130594, 30000, 2, 112453, 17000, 4, 134594, 4000, 160594, 30000, 2, 147594, 17000, 4, 164594, 4000, 190594, 30000, 2, 177594, 17000, 4, 194594, 4000, 220594, 30000, 2, 207594, 17000, 4, 448438, 4000, 474438, 30000, 2, 461438, 17000, 4, 89313, 9000, 90313, 25000, 0, 0, 0, 4, 224594, 9000, 225594, 25000, 0, 0, 0, 4, 478438, 7000, 587594, 27000, 2, 533016, 17000, 0, 0, 0, 0, 0, 0, 0, 0, 4, 418438, 4000, 444438, 30000, 2, 431438, 17000, 4, 591594, 4000, 636000, 30000, 2, 613797, 17000, 0, 4, 418438, 7000, 418438, 27000, 1, 0, 2, 229594, 418438, 0, 0, 0, 4, 94313, 4000, 130594, 30000], // 640 / 4
+    &[4, 30000, 4000, 56000, 30000, 2, 43000, 17000, 4, 60000, 4000, 96281, 30000, 2, 78141, 17000, 4, 100281, 4000, 126281, 30000, 2, 113281, 17000, 4, 130281, 4000, 156281, 30000, 2, 143281, 17000, 4, 160281, 4000, 186281, 30000, 2, 173281, 17000, 4, 496844, 4000, 522844, 30000, 2, 509844, 17000, 0, 0, 0, 0, 0, 0, 0, 0, 4, 526844, 7000, 636000, 27000, 2, 581422, 17000, 0, 0, 0, 0, 4, 370250, 7000, 440844, 27000, 2, 405547, 17000, 4, 440844, 10000, 454844, 24000, 2, 447844, 17000, 4, 466844, 4000, 492844, 30000, 2, 479844, 17000, 0, 0, 0, 4, 340250, 7000, 340250, 27000, 1, 0, 2, 190281, 340250, 0, 0, 0, 4, 60000, 4000, 96281, 30000], // 640 / 8
+    &[4, 59313, 4000, 85313, 30000, 2, 72313, 17000, 4, 94313, 4000, 130594, 30000, 2, 112453, 17000, 4, 134594, 4000, 160594, 30000, 2, 147594, 17000, 4, 164594, 4000, 190594, 30000, 2, 177594, 17000, 4, 194594, 4000, 220594, 30000, 2, 207594, 17000, 4, 496844, 4000, 522844, 30000, 2, 509844, 17000, 4, 89313, 9000, 90313, 25000, 0, 0, 0, 4, 224594, 9000, 225594, 25000, 0, 0, 0, 4, 526844, 7000, 636000, 27000, 2, 581422, 17000, 0, 0, 0, 0, 0, 0, 0, 0, 4, 466844, 4000, 492844, 30000, 2, 479844, 17000, 0, 0, 0, 4, 436844, 7000, 436844, 27000, 1, 0, 2, 229594, 436844, 0, 4, 436844, 4000, 462844, 30000, 0, 4, 94313, 4000, 130594, 30000], // 640 / 16
+    &[4, 30000, 4000, 56000, 30000, 2, 43000, 17000, 4, 60000, 4000, 96281, 30000, 2, 78141, 17000, 4, 100281, 4000, 126281, 30000, 2, 113281, 17000, 4, 130281, 4000, 156281, 30000, 2, 143281, 17000, 4, 160281, 4000, 186281, 30000, 2, 173281, 17000, 4, 586000, 4000, 612000, 30000, 2, 599000, 17000, 0, 0, 0, 0, 0, 0, 0, 0, 4, 616000, 7000, 636000, 27000, 2, 626000, 17000, 0, 0, 0, 0, 0, 0, 0, 0, 4, 556000, 4000, 582000, 30000, 2, 569000, 17000, 0, 0, 2, 203281, 30000, 4, 526000, 7000, 526000, 27000, 1, 0, 2, 340281, 526000, 0, 0, 0, 4, 60000, 4000, 96281, 30000], // 640 / 32
+    &[4, 30000, 4000, 56000, 30000, 2, 43000, 17000, 4, 65000, 4000, 101281, 30000, 2, 83141, 17000, 4, 105281, 4000, 131281, 30000, 2, 118281, 17000, 4, 135281, 4000, 161281, 30000, 2, 148281, 17000, 4, 165281, 4000, 191281, 30000, 2, 178281, 17000, 4, 496844, 4000, 522844, 30000, 2, 509844, 17000, 4, 60000, 9000, 61000, 25000, 0, 0, 0, 4, 195281, 9000, 196281, 25000, 0, 0, 0, 4, 526844, 7000, 636000, 27000, 2, 581422, 17000, 0, 0, 0, 0, 0, 0, 0, 0, 4, 466844, 4000, 492844, 30000, 2, 479844, 17000, 0, 0, 0, 4, 466844, 7000, 466844, 27000, 1, 0, 2, 200281, 466844, 0, 0, 0, 4, 65000, 4000, 101281, 30000], // 640 / 64
+    &[4, 30000, 4000, 56000, 30000, 2, 43000, 17000, 4, 65000, 4000, 101281, 30000, 2, 83141, 17000, 4, 105281, 4000, 131281, 30000, 2, 118281, 17000, 4, 135281, 4000, 161281, 30000, 2, 148281, 17000, 4, 165281, 4000, 191281, 30000, 2, 178281, 17000, 4, 358844, 4000, 384844, 30000, 2, 371844, 17000, 4, 60000, 9000, 61000, 25000, 0, 0, 0, 4, 195281, 9000, 196281, 25000, 0, 0, 0, 4, 388844, 7000, 498000, 27000, 2, 443422, 17000, 0, 0, 0, 0, 0, 0, 0, 0, 4, 328844, 4000, 354844, 30000, 2, 341844, 17000, 0, 0, 0, 4, 328844, 7000, 328844, 27000, 1, 0, 2, 200281, 328844, 0, 0, 0, 4, 65000, 4000, 101281, 30000], // 640 / 128
+    &[4, 30000, 4000, 56000, 30000, 2, 43000, 17000, 4, 60000, 4000, 96281, 30000, 2, 78141, 17000, 4, 100281, 4000, 126281, 30000, 2, 113281, 17000, 4, 130281, 4000, 156281, 30000, 2, 143281, 17000, 4, 160281, 4000, 186281, 30000, 2, 173281, 17000, 4, 472000, 4000, 498000, 30000, 2, 485000, 17000, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 4, 442000, 4000, 468000, 30000, 2, 455000, 17000, 0, 0, 2, 203281, 30000, 4, 412000, 7000, 412000, 27000, 1, 0, 2, 280281, 412000, 0, 0, 0, 4, 60000, 4000, 96281, 30000], // 640 / 255
+    &[4, 30000, 4000, 56000, 30000, 2, 43000, 17000, 4, 60000, 4000, 96281, 30000, 2, 78141, 17000, 4, 100281, 4000, 126281, 30000, 2, 113281, 17000, 4, 130281, 4000, 156281, 30000, 2, 143281, 17000, 4, 160281, 4000, 186281, 30000, 2, 173281, 17000, 4, 496844, 4000, 522844, 30000, 2, 509844, 17000, 0, 0, 0, 0, 0, 0, 0, 0, 4, 526844, 7000, 636000, 27000, 2, 581422, 17000, 0, 0, 0, 0, 4, 384844, 7000, 410844, 27000, 2, 397844, 17000, 4, 410844, 10000, 424844, 24000, 2, 417844, 17000, 4, 466844, 4000, 492844, 30000, 2, 479844, 17000, 0, 0, 0, 4, 354844, 7000, 354844, 27000, 1, 0, 2, 190281, 354844, 0, 4, 436844, 4000, 462844, 30000, 0, 4, 60000, 4000, 96281, 30000], // 640 / 28
+    &[4, 59313, 4000, 85313, 30000, 2, 72313, 17000, 4, 94313, 4000, 130594, 30000, 2, 112453, 17000, 4, 134594, 4000, 160594, 30000, 2, 147594, 17000, 4, 164594, 4000, 190594, 30000, 2, 177594, 17000, 4, 194594, 4000, 220594, 30000, 2, 207594, 17000, 4, 586000, 4000, 612000, 30000, 2, 599000, 17000, 4, 89313, 9000, 90313, 25000, 0, 0, 0, 4, 224594, 9000, 225594, 25000, 0, 4, 369000, 4000, 552000, 30000, 2, 460500, 17000, 4, 616000, 7000, 636000, 27000, 2, 626000, 17000, 0, 0, 0, 0, 0, 0, 0, 0, 4, 556000, 4000, 582000, 30000, 2, 569000, 17000, 0, 0, 0, 4, 369000, 7000, 369000, 27000, 1, 0, 2, 229594, 369000, 4, 369000, 4000, 552000, 30000, 0, 0, 4, 94313, 4000, 130594, 30000], // 640 / 3
+    &[4, 30000, 4000, 56000, 30000, 2, 43000, 17000, 4, 60000, 4000, 96281, 30000, 2, 78141, 17000, 4, 100281, 4000, 126281, 30000, 2, 113281, 17000, 4, 130281, 4000, 156281, 30000, 2, 143281, 17000, 4, 160281, 4000, 186281, 30000, 2, 173281, 17000, 4, 496844, 4000, 522844, 30000, 2, 509844, 17000, 0, 0, 0, 0, 0, 0, 4, 436844, 4000, 462844, 30000, 2, 449844, 17000, 4, 526844, 7000, 636000, 27000, 2, 581422, 17000, 0, 0, 0, 0, 0, 0, 0, 0, 4, 466844, 4000, 492844, 30000, 2, 479844, 17000, 0, 0, 0, 4, 406844, 7000, 406844, 27000, 1, 0, 2, 190281, 406844, 4, 436844, 4000, 462844, 30000, 0, 0, 4, 60000, 4000, 96281, 30000], // 640 / 5
+    &[4, 59313, 4000, 85313, 30000, 2, 72313, 17000, 4, 94313, 4000, 130594, 30000, 2, 112453, 17000, 4, 134594, 4000, 160594, 30000, 2, 147594, 17000, 4, 164594, 4000, 190594, 30000, 2, 177594, 17000, 4, 194594, 4000, 220594, 30000, 2, 207594, 17000, 4, 537594, 4000, 563594, 30000, 2, 550594, 17000, 4, 89313, 9000, 90313, 25000, 0, 0, 0, 4, 224594, 9000, 225594, 25000, 0, 0, 0, 4, 567594, 7000, 587594, 27000, 2, 577594, 17000, 0, 0, 0, 0, 0, 0, 0, 0, 4, 507594, 4000, 533594, 30000, 2, 520594, 17000, 4, 591594, 4000, 636000, 30000, 2, 613797, 17000, 0, 4, 507594, 7000, 507594, 27000, 1, 0, 2, 229594, 507594, 0, 0, 0, 4, 94313, 4000, 130594, 30000], // 640 / 6
+    &[4, 30000, 4000, 56000, 30000, 2, 43000, 17000, 4, 60000, 4000, 96281, 30000, 2, 78141, 17000, 4, 100281, 4000, 126281, 30000, 2, 113281, 17000, 4, 130281, 4000, 156281, 30000, 2, 143281, 17000, 4, 160281, 4000, 186281, 30000, 2, 173281, 17000, 4, 496844, 4000, 522844, 30000, 2, 509844, 17000, 0, 0, 0, 0, 0, 0, 4, 436844, 4000, 462844, 30000, 2, 449844, 17000, 4, 526844, 7000, 636000, 27000, 2, 581422, 17000, 0, 0, 0, 0, 0, 0, 0, 0, 4, 466844, 4000, 492844, 30000, 2, 479844, 17000, 0, 0, 0, 4, 406844, 7000, 406844, 27000, 1, 0, 2, 190281, 406844, 4, 436844, 4000, 462844, 30000, 0, 0, 4, 60000, 4000, 96281, 30000], // 640 / 9
+    &[4, 30000, 4000, 56000, 30000, 2, 43000, 17000, 4, 60000, 4000, 96281, 30000, 2, 78141, 17000, 4, 100281, 4000, 126281, 30000, 2, 113281, 17000, 4, 130281, 4000, 156281, 30000, 2, 143281, 17000, 4, 160281, 4000, 186281, 30000, 2, 173281, 17000, 4, 496844, 4000, 522844, 30000, 2, 509844, 17000, 0, 0, 0, 0, 0, 0, 4, 436844, 4000, 462844, 30000, 2, 449844, 17000, 4, 526844, 7000, 636000, 27000, 2, 581422, 17000, 0, 0, 0, 0, 0, 0, 0, 0, 4, 466844, 4000, 492844, 30000, 2, 479844, 17000, 0, 0, 0, 4, 376844, 7000, 376844, 27000, 1, 0, 2, 190281, 376844, 4, 436844, 4000, 462844, 30000, 4, 406844, 4000, 432844, 30000, 0, 4, 60000, 4000, 96281, 30000], // 640 / 17
+    &[4, 30000, 4000, 56000, 30000, 2, 43000, 17000, 4, 60000, 4000, 96281, 30000, 2, 78141, 17000, 4, 100281, 4000, 126281, 30000, 2, 113281, 17000, 4, 130281, 4000, 156281, 30000, 2, 143281, 17000, 4, 160281, 4000, 186281, 30000, 2, 173281, 17000, 4, 496844, 4000, 522844, 30000, 2, 509844, 17000, 0, 0, 0, 0, 0, 0, 0, 0, 4, 526844, 7000, 636000, 27000, 2, 581422, 17000, 0, 0, 0, 0, 4, 384844, 7000, 410844, 27000, 2, 397844, 17000, 4, 410844, 10000, 424844, 24000, 2, 417844, 17000, 4, 466844, 4000, 492844, 30000, 2, 479844, 17000, 0, 0, 0, 4, 354844, 7000, 354844, 27000, 1, 0, 2, 190281, 354844, 0, 4, 436844, 4000, 462844, 30000, 0, 4, 60000, 4000, 96281, 30000], // 640 / 24
+    &[4, 30000, 4000, 56000, 30000, 2, 43000, 17000, 4, 60000, 4000, 96281, 30000, 2, 78141, 17000, 4, 100281, 4000, 126281, 30000, 2, 113281, 17000, 4, 130281, 4000, 156281, 30000, 2, 143281, 17000, 4, 160281, 4000, 186281, 30000, 2, 173281, 17000, 4, 586000, 4000, 612000, 30000, 2, 599000, 17000, 0, 0, 0, 0, 0, 0, 0, 0, 4, 616000, 7000, 636000, 27000, 2, 626000, 17000, 0, 0, 0, 0, 0, 0, 0, 0, 4, 556000, 4000, 582000, 30000, 2, 569000, 17000, 0, 0, 2, 203281, 30000, 4, 526000, 7000, 526000, 27000, 1, 0, 2, 340281, 526000, 0, 0, 0, 4, 60000, 4000, 96281, 30000], // 640 / 33
+    &[4, 30000, 4000, 56000, 30000, 2, 43000, 17000, 4, 60000, 4000, 96281, 30000, 2, 78141, 17000, 4, 100281, 4000, 126281, 30000, 2, 113281, 17000, 4, 130281, 4000, 156281, 30000, 2, 143281, 17000, 4, 160281, 4000, 186281, 30000, 2, 173281, 17000, 4, 496844, 4000, 522844, 30000, 2, 509844, 17000, 0, 0, 0, 0, 0, 0, 4, 436844, 4000, 462844, 30000, 2, 449844, 17000, 4, 526844, 7000, 636000, 27000, 2, 581422, 17000, 0, 0, 0, 0, 0, 0, 0, 0, 4, 466844, 4000, 492844, 30000, 2, 479844, 17000, 0, 0, 0, 4, 406844, 7000, 406844, 27000, 1, 0, 2, 190281, 406844, 4, 436844, 4000, 462844, 30000, 0, 0, 4, 60000, 4000, 96281, 30000], // 640 / 65
+    &[4, 30000, 4000, 56000, 30000, 2, 43000, 17000, 4, 60000, 4000, 96281, 30000, 2, 78141, 17000, 4, 100281, 4000, 126281, 30000, 2, 113281, 17000, 4, 130281, 4000, 156281, 30000, 2, 143281, 17000, 4, 160281, 4000, 186281, 30000, 2, 173281, 17000, 4, 586000, 4000, 612000, 30000, 2, 599000, 17000, 0, 0, 0, 0, 0, 0, 0, 0, 4, 616000, 7000, 636000, 27000, 2, 626000, 17000, 0, 0, 0, 0, 0, 0, 0, 0, 4, 556000, 4000, 582000, 30000, 2, 569000, 17000, 0, 0, 2, 203281, 30000, 4, 526000, 7000, 526000, 27000, 1, 0, 2, 340281, 526000, 0, 0, 0, 4, 60000, 4000, 96281, 30000], // 640 / 96
+    &[4, 30000, 4000, 56000, 30000, 2, 43000, 17000, 4, 60000, 4000, 96281, 30000, 2, 78141, 17000, 4, 100281, 4000, 126281, 30000, 2, 113281, 17000, 4, 130281, 4000, 156281, 30000, 2, 143281, 17000, 4, 160281, 4000, 186281, 30000, 2, 173281, 17000, 4, 448000, 4000, 474000, 30000, 2, 461000, 17000, 0, 0, 0, 0, 0, 0, 0, 0, 4, 478000, 7000, 498000, 27000, 2, 488000, 17000, 0, 0, 0, 0, 0, 0, 0, 0, 4, 418000, 4000, 444000, 30000, 2, 431000, 17000, 0, 0, 0, 4, 388000, 7000, 388000, 27000, 1, 0, 2, 190281, 388000, 0, 0, 0, 4, 60000, 4000, 96281, 30000], // 640 / 129
+    &[4, 30000, 4000, 56000, 30000, 2, 43000, 17000, 4, 60000, 4000, 96281, 30000, 2, 78141, 17000, 4, 100281, 4000, 126281, 30000, 2, 113281, 17000, 4, 130281, 4000, 156281, 30000, 2, 143281, 17000, 4, 160281, 4000, 186281, 30000, 2, 173281, 17000, 4, 472000, 4000, 498000, 30000, 2, 485000, 17000, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 4, 442000, 4000, 468000, 30000, 2, 455000, 17000, 0, 0, 2, 203281, 30000, 4, 412000, 7000, 412000, 27000, 1, 0, 2, 280281, 412000, 0, 0, 0, 4, 60000, 4000, 96281, 30000], // 640 / 160
+    &[4, 30000, 4000, 56000, 30000, 2, 43000, 17000, 4, 60000, 4000, 96281, 30000, 2, 78141, 17000, 4, 100281, 4000, 126281, 30000, 2, 113281, 17000, 4, 130281, 4000, 156281, 30000, 2, 143281, 17000, 4, 160281, 4000, 186281, 30000, 2, 173281, 17000, 4, 472000, 4000, 498000, 30000, 2, 485000, 17000, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 4, 442000, 4000, 468000, 30000, 2, 455000, 17000, 0, 0, 2, 203281, 30000, 4, 412000, 7000, 412000, 27000, 1, 0, 2, 280281, 412000, 0, 0, 0, 4, 60000, 4000, 96281, 30000], // 640 / 188
+    &[4, 30000, 4000, 56000, 30000, 2, 43000, 17000, 4, 60000, 4000, 96281, 30000, 2, 78141, 17000, 4, 100281, 4000, 126281, 30000, 2, 113281, 17000, 4, 130281, 4000, 156281, 30000, 2, 143281, 17000, 4, 160281, 4000, 186281, 30000, 2, 173281, 17000, 4, 472000, 4000, 498000, 30000, 2, 485000, 17000, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 4, 442000, 4000, 468000, 30000, 2, 455000, 17000, 0, 0, 2, 203281, 30000, 4, 412000, 7000, 412000, 27000, 1, 0, 2, 280281, 412000, 0, 0, 0, 4, 60000, 4000, 96281, 30000], // 640 / 254
+    &[4, 59313, 4000, 85313, 30000, 2, 72313, 17000, 4, 94313, 4000, 130594, 30000, 2, 112453, 17000, 4, 134594, 4000, 160594, 30000, 2, 147594, 17000, 4, 164594, 4000, 190594, 30000, 2, 177594, 17000, 4, 194594, 4000, 220594, 30000, 2, 207594, 17000, 4, 856844, 4000, 882844, 30000, 2, 869844, 17000, 4, 89313, 9000, 90313, 25000, 0, 0, 0, 4, 224594, 9000, 225594, 25000, 0, 0, 0, 4, 886844, 7000, 996000, 27000, 2, 941422, 17000, 0, 0, 0, 0, 0, 0, 0, 0, 4, 826844, 4000, 852844, 30000, 2, 839844, 17000, 0, 0, 0, 4, 826844, 7000, 826844, 27000, 1, 0, 2, 229594, 826844, 0, 0, 0, 4, 94313, 4000, 130594, 30000], // 1000 / 0
+    &[4, 59313, 4000, 85313, 30000, 2, 72313, 17000, 4, 94313, 4000, 130594, 30000, 2, 112453, 17000, 4, 134594, 4000, 160594, 30000, 2, 147594, 17000, 4, 164594, 4000, 190594, 30000, 2, 177594, 17000, 4, 194594, 4000, 220594, 30000, 2, 207594, 17000, 4, 856844, 4000, 882844, 30000, 2, 869844, 17000, 4, 89313, 9000, 90313, 25000, 0, 0, 0, 4, 224594, 9000, 225594, 25000, 0, 4, 639844, 4000, 822844, 30000, 2, 731344, 17000, 4, 886844, 7000, 996000, 27000, 2, 941422, 17000, 0, 0, 0, 0, 0, 0, 0, 0, 4, 826844, 4000, 852844, 30000, 2, 839844, 17000, 0, 0, 0, 4, 639844, 7000, 639844, 27000, 1, 0, 2, 229594, 639844, 4, 639844, 4000, 822844, 30000, 0, 0, 4, 94313, 4000, 130594, 30000], // 1000 / 1
+    &[4, 59313, 4000, 85313, 30000, 2, 72313, 17000, 4, 94313, 4000, 130594, 30000, 2, 112453, 17000, 4, 134594, 4000, 160594, 30000, 2, 147594, 17000, 4, 164594, 4000, 190594, 30000, 2, 177594, 17000, 4, 194594, 4000, 220594, 30000, 2, 207594, 17000, 4, 946000, 4000, 972000, 30000, 2, 959000, 17000, 4, 89313, 9000, 90313, 25000, 0, 0, 0, 4, 224594, 9000, 225594, 25000, 0, 0, 0, 4, 976000, 7000, 996000, 27000, 2, 986000, 17000, 0, 0, 0, 0, 0, 0, 0, 0, 4, 916000, 4000, 942000, 30000, 2, 929000, 17000, 0, 0, 0, 4, 916000, 7000, 916000, 27000, 1, 0, 2, 229594, 916000, 0, 0, 0, 4, 94313, 4000, 130594, 30000], // 1000 / 2
+    &[4, 59313, 4000, 85313, 30000, 2, 72313, 17000, 4, 94313, 4000, 130594, 30000, 2, 112453, 17000, 4, 134594, 4000, 160594, 30000, 2, 147594, 17000, 4, 164594, 4000, 190594, 30000, 2, 177594, 17000, 4, 194594, 4000, 220594, 30000, 2, 207594, 17000, 4, 808438, 4000, 834438, 30000, 2, 821438, 17000, 4, 89313, 9000, 90313, 25000, 0, 0, 0, 4, 224594, 9000, 225594, 25000, 0, 0, 0, 4, 838438, 7000, 947594, 27000, 2, 893016, 17000, 0, 0, 0, 0, 0, 0, 0, 0, 4, 778438, 4000, 804438, 30000, 2, 791438, 17000, 4, 951594, 4000, 996000, 30000, 2, 973797, 17000, 0, 4, 778438, 7000, 778438, 27000, 1, 0, 2, 229594, 778438, 0, 0, 0, 4, 94313, 4000, 130594, 30000], // 1000 / 4
+    &[4, 59313, 4000, 85313, 30000, 2, 72313, 17000, 4, 94313, 4000, 130594, 30000, 2, 112453, 17000, 4, 134594, 4000, 160594, 30000, 2, 147594, 17000, 4, 164594, 4000, 190594, 30000, 2, 177594, 17000, 4, 194594, 4000, 220594, 30000, 2, 207594, 17000, 4, 856844, 4000, 882844, 30000, 2, 869844, 17000, 4, 89313, 9000, 90313, 25000, 0, 0, 0, 4, 224594, 9000, 225594, 25000, 0, 0, 0, 4, 886844, 7000, 996000, 27000, 2, 941422, 17000, 4, 634531, 7000, 704250, 27000, 2, 669391, 17000, 4, 704250, 10000, 718250, 24000, 2, 711250, 17000, 4, 730250, 7000, 800844, 27000, 2, 765547, 17000, 4, 800844, 10000, 814844, 24000, 2, 807844, 17000, 4, 826844, 4000, 852844, 30000, 2, 839844, 17000, 0, 0, 0, 4, 634531, 7000, 634531, 27000, 1, 0, 2, 229594, 634531, 0, 0, 0, 4, 94313, 4000, 130594, 30000], // 1000 / 8
+    &[4, 59313, 4000, 85313, 30000, 2, 72313, 17000, 4, 94313, 4000, 130594, 30000, 2, 112453, 17000, 4, 134594, 4000, 160594, 30000, 2, 147594, 17000, 4, 164594, 4000, 190594, 30000, 2, 177594, 17000, 4, 194594, 4000, 220594, 30000, 2, 207594, 17000, 4, 856844, 4000, 882844, 30000, 2, 869844, 17000, 4, 89313, 9000, 90313, 25000, 0, 0, 0, 4, 224594, 9000, 225594, 25000, 0, 0, 0, 4, 886844, 7000, 996000, 27000, 2, 941422, 17000, 0, 0, 0, 0, 0, 0, 0, 0, 4, 826844, 4000, 852844, 30000, 2, 839844, 17000, 0, 0, 0, 4, 796844, 7000, 796844, 27000, 1, 0, 2, 229594, 796844, 0, 4, 796844, 4000, 822844, 30000, 0, 4, 94313, 4000, 130594, 30000], // 1000 / 16
+    &[4, 59313, 4000, 85313, 30000, 2, 72313, 17000, 4, 94313, 4000, 130594, 30000, 2, 112453, 17000, 4, 134594, 4000, 160594, 30000, 2, 147594, 17000, 4, 164594, 4000, 190594, 30000, 2, 177594, 17000, 4, 194594, 4000, 220594, 30000, 2, 207594, 17000, 4, 856844, 4000, 882844, 30000, 2, 869844, 17000, 4, 89313, 9000, 90313, 25000, 0, 0, 0, 4, 374594, 9000, 375594, 25000, 0, 0, 0, 4, 886844, 7000, 996000, 27000, 2, 941422, 17000, 0, 0, 0, 0, 0, 0, 0, 0, 4, 826844, 4000, 852844, 30000, 2, 839844, 17000, 0, 0, 2, 237594, 30000, 4, 826844, 7000, 826844, 27000, 1, 0, 2, 379594, 826844, 0, 0, 0, 4, 94313, 4000, 130594, 30000], // 1000 / 32
+    &[4, 247750, 4000, 273750, 30000, 2, 260750, 17000, 4, 282750, 4000, 319031, 30000, 2, 300891, 17000, 4, 323031, 4000, 349031, 30000, 2, 336031, 17000, 4, 353031, 4000, 379031, 30000, 2, 366031, 17000, 4, 383031, 4000, 409031, 30000, 2, 396031, 17000, 4, 856844, 4000, 882844, 30000, 2, 869844, 17000, 4, 277750, 9000, 278750, 25000, 0, 0, 0, 4, 413031, 9000, 414031, 25000, 0, 0, 0, 4, 886844, 7000, 996000, 27000, 2, 941422, 17000, 0, 0, 0, 0, 0, 0, 0, 0, 4, 826844, 4000, 852844, 30000, 2, 839844, 17000, 0, 0, 0, 4, 826844, 7000, 826844, 27000, 1, 0, 2, 418031, 826844, 0, 0, 0, 4, 282750, 4000, 319031, 30000], // 1000 / 64
+    &[4, 59313, 4000, 85313, 30000, 2, 72313, 17000, 4, 94313, 4000, 130594, 30000, 2, 112453, 17000, 4, 134594, 4000, 160594, 30000, 2, 147594, 17000, 4, 164594, 4000, 190594, 30000, 2, 177594, 17000, 4, 194594, 4000, 220594, 30000, 2, 207594, 17000, 4, 718844, 4000, 744844, 30000, 2, 731844, 17000, 4, 89313, 9000, 90313, 25000, 0, 0, 0, 4, 224594, 9000, 225594, 25000, 0, 0, 0, 4, 748844, 7000, 858000, 27000, 2, 803422, 17000, 0, 0, 0, 0, 0, 0, 0, 0, 4, 688844, 4000, 714844, 30000, 2, 701844, 17000, 0, 0, 0, 4, 688844, 7000, 688844, 27000, 1, 0, 2, 229594, 688844, 0, 0, 0, 4, 94313, 4000, 130594, 30000], // 1000 / 128
+    &[4, 30000, 4000, 56000, 30000, 2, 43000, 17000, 4, 60000, 4000, 96281, 30000, 2, 78141, 17000, 4, 100281, 4000, 126281, 30000, 2, 113281, 17000, 4, 130281, 4000, 156281, 30000, 2, 143281, 17000, 4, 160281, 4000, 186281, 30000, 2, 173281, 17000, 4, 808000, 4000, 834000, 30000, 2, 821000, 17000, 0, 0, 0, 0, 0, 0, 4, 591000, 4000, 774000, 30000, 2, 682500, 17000, 4, 838000, 7000, 858000, 27000, 2, 848000, 17000, 0, 0, 0, 0, 4, 509000, 7000, 535000, 27000, 2, 522000, 17000, 4, 535000, 10000, 549000, 24000, 2, 542000, 17000, 4, 778000, 4000, 804000, 30000, 2, 791000, 17000, 0, 0, 2, 203281, 30000, 4, 479000, 7000, 479000, 27000, 1, 0, 2, 340281, 479000, 4, 591000, 4000, 774000, 30000, 4, 561000, 4000, 587000, 30000, 0, 4, 60000, 4000, 96281, 30000], // 1000 / 255
+    &[4, 59313, 4000, 85313, 30000, 2, 72313, 17000, 4, 94313, 4000, 130594, 30000, 2, 112453, 17000, 4, 134594, 4000, 160594, 30000, 2, 147594, 17000, 4, 164594, 4000, 190594, 30000, 2, 177594, 17000, 4, 194594, 4000, 220594, 30000, 2, 207594, 17000, 4, 808438, 4000, 834438, 30000, 2, 821438, 17000, 4, 89313, 9000, 90313, 25000, 0, 0, 0, 4, 224594, 9000, 225594, 25000, 0, 0, 0, 4, 838438, 7000, 947594, 27000, 2, 893016, 17000, 4, 556125, 7000, 625844, 27000, 2, 590984, 17000, 4, 625844, 10000, 639844, 24000, 2, 632844, 17000, 4, 651844, 7000, 722438, 27000, 2, 687141, 17000, 4, 722438, 10000, 736438, 24000, 2, 729438, 17000, 4, 778438, 4000, 804438, 30000, 2, 791438, 17000, 4, 951594, 4000, 996000, 30000, 2, 973797, 17000, 0, 4, 556125, 7000, 556125, 27000, 1, 0, 2, 229594, 556125, 0, 4, 748438, 4000, 774438, 30000, 0, 4, 94313, 4000, 130594, 30000], // 1000 / 28
+    &[4, 59313, 4000, 85313, 30000, 2, 72313, 17000, 4, 94313, 4000, 130594, 30000, 2, 112453, 17000, 4, 134594, 4000, 160594, 30000, 2, 147594, 17000, 4, 164594, 4000, 190594, 30000, 2, 177594, 17000, 4, 194594, 4000, 220594, 30000, 2, 207594, 17000, 4, 946000, 4000, 972000, 30000, 2, 959000, 17000, 4, 89313, 9000, 90313, 25000, 0, 0, 0, 4, 224594, 9000, 225594, 25000, 0, 4, 729000, 4000, 912000, 30000, 2, 820500, 17000, 4, 976000, 7000, 996000, 27000, 2, 986000, 17000, 0, 0, 0, 0, 0, 0, 0, 0, 4, 916000, 4000, 942000, 30000, 2, 929000, 17000, 0, 0, 0, 4, 729000, 7000, 729000, 27000, 1, 0, 2, 229594, 729000, 4, 729000, 4000, 912000, 30000, 0, 0, 4, 94313, 4000, 130594, 30000], // 1000 / 3
+    &[4, 59313, 4000, 85313, 30000, 2, 72313, 17000, 4, 94313, 4000, 130594, 30000, 2, 112453, 17000, 4, 134594, 4000, 160594, 30000, 2, 147594, 17000, 4, 164594, 4000, 190594, 30000, 2, 177594, 17000, 4, 194594, 4000, 220594, 30000, 2, 207594, 17000, 4, 808438, 4000, 834438, 30000, 2, 821438, 17000, 4, 89313, 9000, 90313, 25000, 0, 0, 0, 4, 224594, 9000, 225594, 25000, 0, 4, 591438, 4000, 774438, 30000, 2, 682938, 17000, 4, 838438, 7000, 947594, 27000, 2, 893016, 17000, 0, 0, 0, 0, 0, 0, 0, 0, 4, 778438, 4000, 804438, 30000, 2, 791438, 17000, 4, 951594, 4000, 996000, 30000, 2, 973797, 17000, 0, 4, 591438, 7000, 591438, 27000, 1, 0, 2, 229594, 591438, 4, 591438, 4000, 774438, 30000, 0, 0, 4, 94313, 4000, 130594, 30000], // 1000 / 5
+    &[4, 59313, 4000, 85313, 30000, 2, 72313, 17000, 4, 94313, 4000, 130594, 30000, 2, 112453, 17000, 4, 134594, 4000, 160594, 30000, 2, 147594, 17000, 4, 164594, 4000, 190594, 30000, 2, 177594, 17000, 4, 194594, 4000, 220594, 30000, 2, 207594, 17000, 4, 897594, 4000, 923594, 30000, 2, 910594, 17000, 4, 89313, 9000, 90313, 25000, 0, 0, 0, 4, 224594, 9000, 225594, 25000, 0, 0, 0, 4, 927594, 7000, 947594, 27000, 2, 937594, 17000, 0, 0, 0, 0, 0, 0, 0, 0, 4, 867594, 4000, 893594, 30000, 2, 880594, 17000, 4, 951594, 4000, 996000, 30000, 2, 973797, 17000, 0, 4, 867594, 7000, 867594, 27000, 1, 0, 2, 229594, 867594, 0, 0, 0, 4, 94313, 4000, 130594, 30000], // 1000 / 6
+    &[4, 59313, 4000, 85313, 30000, 2, 72313, 17000, 4, 94313, 4000, 130594, 30000, 2, 112453, 17000, 4, 134594, 4000, 160594, 30000, 2, 147594, 17000, 4, 164594, 4000, 190594, 30000, 2, 177594, 17000, 4, 194594, 4000, 220594, 30000, 2, 207594, 17000, 4, 856844, 4000, 882844, 30000, 2, 869844, 17000, 4, 89313, 9000, 90313, 25000, 0, 0, 0, 4, 224594, 9000, 225594, 25000, 0, 4, 639844, 4000, 822844, 30000, 2, 731344, 17000, 4, 886844, 7000, 996000, 27000, 2, 941422, 17000, 4, 447531, 7000, 517250, 27000, 2, 482391, 17000, 4, 517250, 10000, 531250, 24000, 2, 524250, 17000, 4, 543250, 7000, 613844, 27000, 2, 578547, 17000, 4, 613844, 10000, 627844, 24000, 2, 620844, 17000, 4, 826844, 4000, 852844, 30000, 2, 839844, 17000, 0, 0, 0, 4, 447531, 7000, 447531, 27000, 1, 0, 2, 229594, 447531, 4, 639844, 4000, 822844, 30000, 0, 0, 4, 94313, 4000, 130594, 30000], // 1000 / 9
+    &[4, 59313, 4000, 85313, 30000, 2, 72313, 17000, 4, 94313, 4000, 130594, 30000, 2, 112453, 17000, 4, 134594, 4000, 160594, 30000, 2, 147594, 17000, 4, 164594, 4000, 190594, 30000, 2, 177594, 17000, 4, 194594, 4000, 220594, 30000, 2, 207594, 17000, 4, 856844, 4000, 882844, 30000, 2, 869844, 17000, 4, 89313, 9000, 90313, 25000, 0, 0, 0, 4, 224594, 9000, 225594, 25000, 0, 4, 639844, 4000, 822844, 30000, 2, 731344, 17000, 4, 886844, 7000, 996000, 27000, 2, 941422, 17000, 0, 0, 0, 0, 0, 0, 0, 0, 4, 826844, 4000, 852844, 30000, 2, 839844, 17000, 0, 0, 0, 4, 609844, 7000, 609844, 27000, 1, 0, 2, 229594, 609844, 4, 639844, 4000, 822844, 30000, 4, 609844, 4000, 635844, 30000, 0, 4, 94313, 4000, 130594, 30000], // 1000 / 17
+    &[4, 59313, 4000, 85313, 30000, 2, 72313, 17000, 4, 94313, 4000, 130594, 30000, 2, 112453, 17000, 4, 134594, 4000, 160594, 30000, 2, 147594, 17000, 4, 164594, 4000, 190594, 30000, 2, 177594, 17000, 4, 194594, 4000, 220594, 30000, 2, 207594, 17000, 4, 856844, 4000, 882844, 30000, 2, 869844, 17000, 4, 89313, 9000, 90313, 25000, 0, 0, 0, 4, 224594, 9000, 225594, 25000, 0, 0, 0, 4, 886844, 7000, 996000, 27000, 2, 941422, 17000, 4, 604531, 7000, 674250, 27000, 2, 639391, 17000, 4, 674250, 10000, 688250, 24000, 2, 681250, 17000, 4, 700250, 7000, 770844, 27000, 2, 735547, 17000, 4, 770844, 10000, 784844, 24000, 2, 777844, 17000, 4, 826844, 4000, 852844, 30000, 2, 839844, 17000, 0, 0, 0, 4, 604531, 7000, 604531, 27000, 1, 0, 2, 229594, 604531, 0, 4, 796844, 4000, 822844, 30000, 0, 4, 94313, 4000, 130594, 30000], // 1000 / 24
+    &[4, 59313, 4000, 85313, 30000, 2, 72313, 17000, 4, 94313, 4000, 130594, 30000, 2, 112453, 17000, 4, 134594, 4000, 160594, 30000, 2, 147594, 17000, 4, 164594, 4000, 190594, 30000, 2, 177594, 17000, 4, 194594, 4000, 220594, 30000, 2, 207594, 17000, 4, 856844, 4000, 882844, 30000, 2, 869844, 17000, 4, 89313, 9000, 90313, 25000, 0, 0, 0, 4, 374594, 9000, 375594, 25000, 0, 4, 639844, 4000, 822844, 30000, 2, 731344, 17000, 4, 886844, 7000, 996000, 27000, 2, 941422, 17000, 0, 0, 0, 0, 0, 0, 0, 0, 4, 826844, 4000, 852844, 30000, 2, 839844, 17000, 0, 0, 2, 237594, 30000, 4, 639844, 7000, 639844, 27000, 1, 0, 2, 379594, 639844, 4, 639844, 4000, 822844, 30000, 0, 0, 4, 94313, 4000, 130594, 30000], // 1000 / 33
+    &[4, 247750, 4000, 273750, 30000, 2, 260750, 17000, 4, 282750, 4000, 319031, 30000, 2, 300891, 17000, 4, 323031, 4000, 349031, 30000, 2, 336031, 17000, 4, 353031, 4000, 379031, 30000, 2, 366031, 17000, 4, 383031, 4000, 409031, 30000, 2, 396031, 17000, 4, 856844, 4000, 882844, 30000, 2, 869844, 17000, 4, 277750, 9000, 278750, 25000, 0, 0, 0, 4, 413031, 9000, 414031, 25000, 0, 4, 639844, 4000, 822844, 30000, 2, 731344, 17000, 4, 886844, 7000, 996000, 27000, 2, 941422, 17000, 0, 0, 0, 0, 0, 0, 0, 0, 4, 826844, 4000, 852844, 30000, 2, 839844, 17000, 0, 0, 0, 4, 639844, 7000, 639844, 27000, 1, 0, 2, 418031, 639844, 4, 639844, 4000, 822844, 30000, 0, 0, 4, 282750, 4000, 319031, 30000], // 1000 / 65
+    &[4, 247750, 4000, 273750, 30000, 2, 260750, 17000, 4, 282750, 4000, 319031, 30000, 2, 300891, 17000, 4, 323031, 4000, 349031, 30000, 2, 336031, 17000, 4, 353031, 4000, 379031, 30000, 2, 366031, 17000, 4, 383031, 4000, 409031, 30000, 2, 396031, 17000, 4, 856844, 4000, 882844, 30000, 2, 869844, 17000, 4, 277750, 9000, 278750, 25000, 0, 0, 0, 4, 563031, 9000, 564031, 25000, 0, 0, 0, 4, 886844, 7000, 996000, 27000, 2, 941422, 17000, 0, 0, 0, 0, 0, 0, 0, 0, 4, 826844, 4000, 852844, 30000, 2, 839844, 17000, 0, 0, 2, 426031, 30000, 4, 826844, 7000, 826844, 27000, 1, 0, 2, 568031, 826844, 0, 0, 0, 4, 282750, 4000, 319031, 30000], // 1000 / 96
+    &[4, 59313, 4000, 85313, 30000, 2, 72313, 17000, 4, 94313, 4000, 130594, 30000, 2, 112453, 17000, 4, 134594, 4000, 160594, 30000, 2, 147594, 17000, 4, 164594, 4000, 190594, 30000, 2, 177594, 17000, 4, 194594, 4000, 220594, 30000, 2, 207594, 17000, 4, 718844, 4000, 744844, 30000, 2, 731844, 17000, 4, 89313, 9000, 90313, 25000, 0, 0, 0, 4, 224594, 9000, 225594, 25000, 0, 4, 501844, 4000, 684844, 30000, 2, 593344, 17000, 4, 748844, 7000, 858000, 27000, 2, 803422, 17000, 0, 0, 0, 0, 0, 0, 0, 0, 4, 688844, 4000, 714844, 30000, 2, 701844, 17000, 0, 0, 0, 4, 501844, 7000, 501844, 27000, 1, 0, 2, 229594, 501844, 4, 501844, 4000, 684844, 30000, 0, 0, 4, 94313, 4000, 130594, 30000], // 1000 / 129
+    &[4, 59313, 4000, 85313, 30000, 2, 72313, 17000, 4, 94313, 4000, 130594, 30000, 2, 112453, 17000, 4, 134594, 4000, 160594, 30000, 2, 147594, 17000, 4, 164594, 4000, 190594, 30000, 2, 177594, 17000, 4, 194594, 4000, 220594, 30000, 2, 207594, 17000, 4, 718844, 4000, 744844, 30000, 2, 731844, 17000, 4, 89313, 9000, 90313, 25000, 0, 0, 0, 4, 374594, 9000, 375594, 25000, 0, 0, 0, 4, 748844, 7000, 858000, 27000, 2, 803422, 17000, 0, 0, 0, 0, 0, 0, 0, 0, 4, 688844, 4000, 714844, 30000, 2, 701844, 17000, 0, 0, 2, 237594, 30000, 4, 688844, 7000, 688844, 27000, 1, 0, 2, 379594, 688844, 0, 0, 0, 4, 94313, 4000, 130594, 30000], // 1000 / 160
+    &[4, 30000, 4000, 56000, 30000, 2, 43000, 17000, 4, 60000, 4000, 96281, 30000, 2, 78141, 17000, 4, 100281, 4000, 126281, 30000, 2, 113281, 17000, 4, 130281, 4000, 156281, 30000, 2, 143281, 17000, 4, 160281, 4000, 186281, 30000, 2, 173281, 17000, 4, 718844, 4000, 744844, 30000, 2, 731844, 17000, 0, 0, 0, 0, 0, 0, 0, 0, 4, 748844, 7000, 858000, 27000, 2, 803422, 17000, 4, 510250, 7000, 536250, 27000, 2, 523250, 17000, 4, 536250, 10000, 550250, 24000, 2, 543250, 17000, 4, 562250, 7000, 632844, 27000, 2, 597547, 17000, 4, 632844, 10000, 646844, 24000, 2, 639844, 17000, 4, 688844, 4000, 714844, 30000, 2, 701844, 17000, 0, 0, 2, 203281, 30000, 4, 480250, 7000, 480250, 27000, 1, 0, 2, 340281, 480250, 0, 4, 658844, 4000, 684844, 30000, 0, 4, 60000, 4000, 96281, 30000], // 1000 / 188
+    &[4, 30000, 4000, 56000, 30000, 2, 43000, 17000, 4, 65000, 4000, 101281, 30000, 2, 83141, 17000, 4, 105281, 4000, 131281, 30000, 2, 118281, 17000, 4, 135281, 4000, 161281, 30000, 2, 148281, 17000, 4, 165281, 4000, 191281, 30000, 2, 178281, 17000, 4, 759594, 4000, 785594, 30000, 2, 772594, 17000, 4, 60000, 9000, 61000, 25000, 0, 0, 0, 4, 345281, 9000, 346281, 25000, 0, 0, 0, 4, 789594, 7000, 809594, 27000, 2, 799594, 17000, 4, 507281, 7000, 577000, 27000, 2, 542141, 17000, 4, 577000, 10000, 591000, 24000, 2, 584000, 17000, 4, 603000, 7000, 673594, 27000, 2, 638297, 17000, 4, 673594, 10000, 687594, 24000, 2, 680594, 17000, 4, 729594, 4000, 755594, 30000, 2, 742594, 17000, 4, 813594, 4000, 858000, 30000, 2, 835797, 17000, 2, 208281, 30000, 4, 507281, 7000, 507281, 27000, 1, 0, 2, 350281, 507281, 0, 4, 699594, 4000, 725594, 30000, 0, 4, 65000, 4000, 101281, 30000], // 1000 / 254
+    &[4, 59313, 4000, 85313, 30000, 2, 72313, 17000, 4, 94313, 4000, 130594, 30000, 2, 112453, 17000, 4, 134594, 4000, 160594, 30000, 2, 147594, 17000, 4, 164594, 4000, 190594, 30000, 2, 177594, 17000, 4, 194594, 4000, 220594, 30000, 2, 207594, 17000, 4, 1136844, 4000, 1162844, 30000, 2, 1149844, 17000, 4, 89313, 9000, 90313, 25000, 0, 0, 0, 4, 224594, 9000, 225594, 25000, 0, 0, 0, 4, 1166844, 7000, 1276000, 27000, 2, 1221422, 17000, 0, 0, 0, 0, 0, 0, 0, 0, 4, 1106844, 4000, 1132844, 30000, 2, 1119844, 17000, 0, 0, 0, 4, 1106844, 7000, 1106844, 27000, 1, 0, 2, 229594, 1106844, 0, 0, 0, 4, 94313, 4000, 130594, 30000], // 1280 / 0
+    &[4, 59313, 4000, 85313, 30000, 2, 72313, 17000, 4, 94313, 4000, 130594, 30000, 2, 112453, 17000, 4, 134594, 4000, 160594, 30000, 2, 147594, 17000, 4, 164594, 4000, 190594, 30000, 2, 177594, 17000, 4, 194594, 4000, 220594, 30000, 2, 207594, 17000, 4, 1136844, 4000, 1162844, 30000, 2, 1149844, 17000, 4, 89313, 9000, 90313, 25000, 0, 0, 0, 4, 224594, 9000, 225594, 25000, 0, 4, 919844, 4000, 1102844, 30000, 2, 1011344, 17000, 4, 1166844, 7000, 1276000, 27000, 2, 1221422, 17000, 0, 0, 0, 0, 0, 0, 0, 0, 4, 1106844, 4000, 1132844, 30000, 2, 1119844, 17000, 0, 0, 0, 4, 919844, 7000, 919844, 27000, 1, 0, 2, 229594, 919844, 4, 919844, 4000, 1102844, 30000, 0, 0, 4, 94313, 4000, 130594, 30000], // 1280 / 1
+    &[4, 59313, 4000, 85313, 30000, 2, 72313, 17000, 4, 94313, 4000, 130594, 30000, 2, 112453, 17000, 4, 134594, 4000, 160594, 30000, 2, 147594, 17000, 4, 164594, 4000, 190594, 30000, 2, 177594, 17000, 4, 194594, 4000, 220594, 30000, 2, 207594, 17000, 4, 1226000, 4000, 1252000, 30000, 2, 1239000, 17000, 4, 89313, 9000, 90313, 25000, 0, 0, 0, 4, 224594, 9000, 225594, 25000, 0, 0, 0, 4, 1256000, 7000, 1276000, 27000, 2, 1266000, 17000, 0, 0, 0, 0, 0, 0, 0, 0, 4, 1196000, 4000, 1222000, 30000, 2, 1209000, 17000, 0, 0, 0, 4, 1196000, 7000, 1196000, 27000, 1, 0, 2, 229594, 1196000, 0, 0, 0, 4, 94313, 4000, 130594, 30000], // 1280 / 2
+    &[4, 59313, 4000, 85313, 30000, 2, 72313, 17000, 4, 94313, 4000, 130594, 30000, 2, 112453, 17000, 4, 134594, 4000, 160594, 30000, 2, 147594, 17000, 4, 164594, 4000, 190594, 30000, 2, 177594, 17000, 4, 194594, 4000, 220594, 30000, 2, 207594, 17000, 4, 1088438, 4000, 1114438, 30000, 2, 1101438, 17000, 4, 89313, 9000, 90313, 25000, 0, 0, 0, 4, 224594, 9000, 225594, 25000, 0, 0, 0, 4, 1118438, 7000, 1227594, 27000, 2, 1173016, 17000, 0, 0, 0, 0, 0, 0, 0, 0, 4, 1058438, 4000, 1084438, 30000, 2, 1071438, 17000, 4, 1231594, 4000, 1276000, 30000, 2, 1253797, 17000, 0, 4, 1058438, 7000, 1058438, 27000, 1, 0, 2, 229594, 1058438, 0, 0, 0, 4, 94313, 4000, 130594, 30000], // 1280 / 4
+    &[4, 59313, 4000, 85313, 30000, 2, 72313, 17000, 4, 94313, 4000, 130594, 30000, 2, 112453, 17000, 4, 134594, 4000, 160594, 30000, 2, 147594, 17000, 4, 164594, 4000, 190594, 30000, 2, 177594, 17000, 4, 194594, 4000, 220594, 30000, 2, 207594, 17000, 4, 1136844, 4000, 1162844, 30000, 2, 1149844, 17000, 4, 89313, 9000, 90313, 25000, 0, 0, 0, 4, 224594, 9000, 225594, 25000, 0, 0, 0, 4, 1166844, 7000, 1276000, 27000, 2, 1221422, 17000, 4, 914531, 7000, 984250, 27000, 2, 949391, 17000, 4, 984250, 10000, 998250, 24000, 2, 991250, 17000, 4, 1010250, 7000, 1080844, 27000, 2, 1045547, 17000, 4, 1080844, 10000, 1094844, 24000, 2, 1087844, 17000, 4, 1106844, 4000, 1132844, 30000, 2, 1119844, 17000, 0, 0, 0, 4, 914531, 7000, 914531, 27000, 1, 0, 2, 229594, 914531, 0, 0, 0, 4, 94313, 4000, 130594, 30000], // 1280 / 8
+    &[4, 59313, 4000, 85313, 30000, 2, 72313, 17000, 4, 94313, 4000, 130594, 30000, 2, 112453, 17000, 4, 134594, 4000, 160594, 30000, 2, 147594, 17000, 4, 164594, 4000, 190594, 30000, 2, 177594, 17000, 4, 194594, 4000, 220594, 30000, 2, 207594, 17000, 4, 1136844, 4000, 1162844, 30000, 2, 1149844, 17000, 4, 89313, 9000, 90313, 25000, 0, 0, 0, 4, 224594, 9000, 225594, 25000, 0, 0, 0, 4, 1166844, 7000, 1276000, 27000, 2, 1221422, 17000, 0, 0, 0, 0, 0, 0, 0, 0, 4, 1106844, 4000, 1132844, 30000, 2, 1119844, 17000, 0, 0, 0, 4, 1076844, 7000, 1076844, 27000, 1, 0, 2, 229594, 1076844, 0, 4, 1076844, 4000, 1102844, 30000, 0, 4, 94313, 4000, 130594, 30000], // 1280 / 16
+    &[4, 59313, 4000, 85313, 30000, 2, 72313, 17000, 4, 94313, 4000, 130594, 30000, 2, 112453, 17000, 4, 134594, 4000, 160594, 30000, 2, 147594, 17000, 4, 164594, 4000, 190594, 30000, 2, 177594, 17000, 4, 194594, 4000, 220594, 30000, 2, 207594, 17000, 4, 1136844, 4000, 1162844, 30000, 2, 1149844, 17000, 4, 89313, 9000, 90313, 25000, 0, 0, 0, 4, 374594, 9000, 375594, 25000, 0, 0, 0, 4, 1166844, 7000, 1276000, 27000, 2, 1221422, 17000, 0, 0, 0, 0, 0, 0, 0, 0, 4, 1106844, 4000, 1132844, 30000, 2, 1119844, 17000, 0, 0, 2, 237594, 30000, 4, 1106844, 7000, 1106844, 27000, 1, 0, 2, 379594, 1106844, 0, 0, 0, 4, 94313, 4000, 130594, 30000], // 1280 / 32
+    &[4, 247750, 4000, 273750, 30000, 2, 260750, 17000, 4, 282750, 4000, 319031, 30000, 2, 300891, 17000, 4, 323031, 4000, 349031, 30000, 2, 336031, 17000, 4, 353031, 4000, 379031, 30000, 2, 366031, 17000, 4, 383031, 4000, 409031, 30000, 2, 396031, 17000, 4, 1136844, 4000, 1162844, 30000, 2, 1149844, 17000, 4, 277750, 9000, 278750, 25000, 0, 0, 0, 4, 413031, 9000, 414031, 25000, 0, 0, 0, 4, 1166844, 7000, 1276000, 27000, 2, 1221422, 17000, 0, 0, 0, 0, 0, 0, 0, 0, 4, 1106844, 4000, 1132844, 30000, 2, 1119844, 17000, 0, 0, 0, 4, 1106844, 7000, 1106844, 27000, 1, 0, 2, 418031, 1106844, 0, 0, 0, 4, 282750, 4000, 319031, 30000], // 1280 / 64
+    &[4, 59313, 4000, 85313, 30000, 2, 72313, 17000, 4, 94313, 4000, 130594, 30000, 2, 112453, 17000, 4, 134594, 4000, 160594, 30000, 2, 147594, 17000, 4, 164594, 4000, 190594, 30000, 2, 177594, 17000, 4, 194594, 4000, 220594, 30000, 2, 207594, 17000, 4, 998844, 4000, 1024844, 30000, 2, 1011844, 17000, 4, 89313, 9000, 90313, 25000, 0, 0, 0, 4, 224594, 9000, 225594, 25000, 0, 0, 0, 4, 1028844, 7000, 1138000, 27000, 2, 1083422, 17000, 0, 0, 0, 0, 0, 0, 0, 0, 4, 968844, 4000, 994844, 30000, 2, 981844, 17000, 0, 0, 0, 4, 968844, 7000, 968844, 27000, 1, 0, 2, 229594, 968844, 0, 0, 0, 4, 94313, 4000, 130594, 30000], // 1280 / 128
+    &[4, 30000, 4000, 56000, 30000, 2, 43000, 17000, 4, 65000, 4000, 101281, 30000, 2, 83141, 17000, 4, 105281, 4000, 131281, 30000, 2, 118281, 17000, 4, 135281, 4000, 161281, 30000, 2, 148281, 17000, 4, 165281, 4000, 191281, 30000, 2, 178281, 17000, 4, 1039594, 4000, 1065594, 30000, 2, 1052594, 17000, 4, 60000, 9000, 61000, 25000, 0, 0, 0, 4, 345281, 9000, 346281, 25000, 0, 4, 822594, 4000, 1005594, 30000, 2, 914094, 17000, 4, 1069594, 7000, 1089594, 27000, 2, 1079594, 17000, 4, 600281, 7000, 670000, 27000, 2, 635141, 17000, 4, 670000, 10000, 684000, 24000, 2, 677000, 17000, 4, 696000, 7000, 766594, 27000, 2, 731297, 17000, 4, 766594, 10000, 780594, 24000, 2, 773594, 17000, 4, 1009594, 4000, 1035594, 30000, 2, 1022594, 17000, 4, 1093594, 4000, 1138000, 30000, 2, 1115797, 17000, 2, 208281, 30000, 4, 600281, 7000, 600281, 27000, 1, 0, 2, 350281, 600281, 4, 822594, 4000, 1005594, 30000, 4, 792594, 4000, 818594, 30000, 0, 4, 65000, 4000, 101281, 30000], // 1280 / 255
+    &[4, 59313, 4000, 85313, 30000, 2, 72313, 17000, 4, 94313, 4000, 130594, 30000, 2, 112453, 17000, 4, 134594, 4000, 160594, 30000, 2, 147594, 17000, 4, 164594, 4000, 190594, 30000, 2, 177594, 17000, 4, 194594, 4000, 220594, 30000, 2, 207594, 17000, 4, 1088438, 4000, 1114438, 30000, 2, 1101438, 17000, 4, 89313, 9000, 90313, 25000, 0, 0, 0, 4, 224594, 9000, 225594, 25000, 0, 0, 0, 4, 1118438, 7000, 1227594, 27000, 2, 1173016, 17000, 4, 836125, 7000, 905844, 27000, 2, 870984, 17000, 4, 905844, 10000, 919844, 24000, 2, 912844, 17000, 4, 931844, 7000, 1002438, 27000, 2, 967141, 17000, 4, 1002438, 10000, 1016438, 24000, 2, 1009438, 17000, 4, 1058438, 4000, 1084438, 30000, 2, 1071438, 17000, 4, 1231594, 4000, 1276000, 30000, 2, 1253797, 17000, 0, 4, 836125, 7000, 836125, 27000, 1, 0, 2, 229594, 836125, 0, 4, 1028438, 4000, 1054438, 30000, 0, 4, 94313, 4000, 130594, 30000], // 1280 / 28
+    &[4, 59313, 4000, 85313, 30000, 2, 72313, 17000, 4, 94313, 4000, 130594, 30000, 2, 112453, 17000, 4, 134594, 4000, 160594, 30000, 2, 147594, 17000, 4, 164594, 4000, 190594, 30000, 2, 177594, 17000, 4, 194594, 4000, 220594, 30000, 2, 207594, 17000, 4, 1226000, 4000, 1252000, 30000, 2, 1239000, 17000, 4, 89313, 9000, 90313, 25000, 0, 0, 0, 4, 224594, 9000, 225594, 25000, 0, 4, 1009000, 4000, 1192000, 30000, 2, 1100500, 17000, 4, 1256000, 7000, 1276000, 27000, 2, 1266000, 17000, 0, 0, 0, 0, 0, 0, 0, 0, 4, 1196000, 4000, 1222000, 30000, 2, 1209000, 17000, 0, 0, 0, 4, 1009000, 7000, 1009000, 27000, 1, 0, 2, 229594, 1009000, 4, 1009000, 4000, 1192000, 30000, 0, 0, 4, 94313, 4000, 130594, 30000], // 1280 / 3
+    &[4, 59313, 4000, 85313, 30000, 2, 72313, 17000, 4, 94313, 4000, 130594, 30000, 2, 112453, 17000, 4, 134594, 4000, 160594, 30000, 2, 147594, 17000, 4, 164594, 4000, 190594, 30000, 2, 177594, 17000, 4, 194594, 4000, 220594, 30000, 2, 207594, 17000, 4, 1088438, 4000, 1114438, 30000, 2, 1101438, 17000, 4, 89313, 9000, 90313, 25000, 0, 0, 0, 4, 224594, 9000, 225594, 25000, 0, 4, 871438, 4000, 1054438, 30000, 2, 962938, 17000, 4, 1118438, 7000, 1227594, 27000, 2, 1173016, 17000, 0, 0, 0, 0, 0, 0, 0, 0, 4, 1058438, 4000, 1084438, 30000, 2, 1071438, 17000, 4, 1231594, 4000, 1276000, 30000, 2, 1253797, 17000, 0, 4, 871438, 7000, 871438, 27000, 1, 0, 2, 229594, 871438, 4, 871438, 4000, 1054438, 30000, 0, 0, 4, 94313, 4000, 130594, 30000], // 1280 / 5
+    &[4, 59313, 4000, 85313, 30000, 2, 72313, 17000, 4, 94313, 4000, 130594, 30000, 2, 112453, 17000, 4, 134594, 4000, 160594, 30000, 2, 147594, 17000, 4, 164594, 4000, 190594, 30000, 2, 177594, 17000, 4, 194594, 4000, 220594, 30000, 2, 207594, 17000, 4, 1177594, 4000, 1203594, 30000, 2, 1190594, 17000, 4, 89313, 9000, 90313, 25000, 0, 0, 0, 4, 224594, 9000, 225594, 25000, 0, 0, 0, 4, 1207594, 7000, 1227594, 27000, 2, 1217594, 17000, 0, 0, 0, 0, 0, 0, 0, 0, 4, 1147594, 4000, 1173594, 30000, 2, 1160594, 17000, 4, 1231594, 4000, 1276000, 30000, 2, 1253797, 17000, 0, 4, 1147594, 7000, 1147594, 27000, 1, 0, 2, 229594, 1147594, 0, 0, 0, 4, 94313, 4000, 130594, 30000], // 1280 / 6
+    &[4, 59313, 4000, 85313, 30000, 2, 72313, 17000, 4, 94313, 4000, 130594, 30000, 2, 112453, 17000, 4, 134594, 4000, 160594, 30000, 2, 147594, 17000, 4, 164594, 4000, 190594, 30000, 2, 177594, 17000, 4, 194594, 4000, 220594, 30000, 2, 207594, 17000, 4, 1136844, 4000, 1162844, 30000, 2, 1149844, 17000, 4, 89313, 9000, 90313, 25000, 0, 0, 0, 4, 224594, 9000, 225594, 25000, 0, 4, 919844, 4000, 1102844, 30000, 2, 1011344, 17000, 4, 1166844, 7000, 1276000, 27000, 2, 1221422, 17000, 4, 727531, 7000, 797250, 27000, 2, 762391, 17000, 4, 797250, 10000, 811250, 24000, 2, 804250, 17000, 4, 823250, 7000, 893844, 27000, 2, 858547, 17000, 4, 893844, 10000, 907844, 24000, 2, 900844, 17000, 4, 1106844, 4000, 1132844, 30000, 2, 1119844, 17000, 0, 0, 0, 4, 727531, 7000, 727531, 27000, 1, 0, 2, 229594, 727531, 4, 919844, 4000, 1102844, 30000, 0, 0, 4, 94313, 4000, 130594, 30000], // 1280 / 9
+    &[4, 59313, 4000, 85313, 30000, 2, 72313, 17000, 4, 94313, 4000, 130594, 30000, 2, 112453, 17000, 4, 134594, 4000, 160594, 30000, 2, 147594, 17000, 4, 164594, 4000, 190594, 30000, 2, 177594, 17000, 4, 194594, 4000, 220594, 30000, 2, 207594, 17000, 4, 1136844, 4000, 1162844, 30000, 2, 1149844, 17000, 4, 89313, 9000, 90313, 25000, 0, 0, 0, 4, 224594, 9000, 225594, 25000, 0, 4, 919844, 4000, 1102844, 30000, 2, 1011344, 17000, 4, 1166844, 7000, 1276000, 27000, 2, 1221422, 17000, 0, 0, 0, 0, 0, 0, 0, 0, 4, 1106844, 4000, 1132844, 30000, 2, 1119844, 17000, 0, 0, 0, 4, 889844, 7000, 889844, 27000, 1, 0, 2, 229594, 889844, 4, 919844, 4000, 1102844, 30000, 4, 889844, 4000, 915844, 30000, 0, 4, 94313, 4000, 130594, 30000], // 1280 / 17
+    &[4, 59313, 4000, 85313, 30000, 2, 72313, 17000, 4, 94313, 4000, 130594, 30000, 2, 112453, 17000, 4, 134594, 4000, 160594, 30000, 2, 147594, 17000, 4, 164594, 4000, 190594, 30000, 2, 177594, 17000, 4, 194594, 4000, 220594, 30000, 2, 207594, 17000, 4, 1136844, 4000, 1162844, 30000, 2, 1149844, 17000, 4, 89313, 9000, 90313, 25000, 0, 0, 0, 4, 224594, 9000, 225594, 25000, 0, 0, 0, 4, 1166844, 7000, 1276000, 27000, 2, 1221422, 17000, 4, 884531, 7000, 954250, 27000, 2, 919391, 17000, 4, 954250, 10000, 968250, 24000, 2, 961250, 17000, 4, 980250, 7000, 1050844, 27000, 2, 1015547, 17000, 4, 1050844, 10000, 1064844, 24000, 2, 1057844, 17000, 4, 1106844, 4000, 1132844, 30000, 2, 1119844, 17000, 0, 0, 0, 4, 884531, 7000, 884531, 27000, 1, 0, 2, 229594, 884531, 0, 4, 1076844, 4000, 1102844, 30000, 0, 4, 94313, 4000, 130594, 30000], // 1280 / 24
+    &[4, 59313, 4000, 85313, 30000, 2, 72313, 17000, 4, 94313, 4000, 130594, 30000, 2, 112453, 17000, 4, 134594, 4000, 160594, 30000, 2, 147594, 17000, 4, 164594, 4000, 190594, 30000, 2, 177594, 17000, 4, 194594, 4000, 220594, 30000, 2, 207594, 17000, 4, 1136844, 4000, 1162844, 30000, 2, 1149844, 17000, 4, 89313, 9000, 90313, 25000, 0, 0, 0, 4, 374594, 9000, 375594, 25000, 0, 4, 919844, 4000, 1102844, 30000, 2, 1011344, 17000, 4, 1166844, 7000, 1276000, 27000, 2, 1221422, 17000, 0, 0, 0, 0, 0, 0, 0, 0, 4, 1106844, 4000, 1132844, 30000, 2, 1119844, 17000, 0, 0, 2, 237594, 30000, 4, 919844, 7000, 919844, 27000, 1, 0, 2, 379594, 919844, 4, 919844, 4000, 1102844, 30000, 0, 0, 4, 94313, 4000, 130594, 30000], // 1280 / 33
+    &[4, 247750, 4000, 273750, 30000, 2, 260750, 17000, 4, 282750, 4000, 319031, 30000, 2, 300891, 17000, 4, 323031, 4000, 349031, 30000, 2, 336031, 17000, 4, 353031, 4000, 379031, 30000, 2, 366031, 17000, 4, 383031, 4000, 409031, 30000, 2, 396031, 17000, 4, 1136844, 4000, 1162844, 30000, 2, 1149844, 17000, 4, 277750, 9000, 278750, 25000, 0, 0, 0, 4, 413031, 9000, 414031, 25000, 0, 4, 919844, 4000, 1102844, 30000, 2, 1011344, 17000, 4, 1166844, 7000, 1276000, 27000, 2, 1221422, 17000, 0, 0, 0, 0, 0, 0, 0, 0, 4, 1106844, 4000, 1132844, 30000, 2, 1119844, 17000, 0, 0, 0, 4, 919844, 7000, 919844, 27000, 1, 0, 2, 418031, 919844, 4, 919844, 4000, 1102844, 30000, 0, 0, 4, 282750, 4000, 319031, 30000], // 1280 / 65
+    &[4, 247750, 4000, 273750, 30000, 2, 260750, 17000, 4, 282750, 4000, 319031, 30000, 2, 300891, 17000, 4, 323031, 4000, 349031, 30000, 2, 336031, 17000, 4, 353031, 4000, 379031, 30000, 2, 366031, 17000, 4, 383031, 4000, 409031, 30000, 2, 396031, 17000, 4, 1136844, 4000, 1162844, 30000, 2, 1149844, 17000, 4, 277750, 9000, 278750, 25000, 0, 0, 0, 4, 563031, 9000, 564031, 25000, 0, 0, 0, 4, 1166844, 7000, 1276000, 27000, 2, 1221422, 17000, 0, 0, 0, 0, 0, 0, 0, 0, 4, 1106844, 4000, 1132844, 30000, 2, 1119844, 17000, 0, 0, 2, 426031, 30000, 4, 1106844, 7000, 1106844, 27000, 1, 0, 2, 568031, 1106844, 0, 0, 0, 4, 282750, 4000, 319031, 30000], // 1280 / 96
+    &[4, 59313, 4000, 85313, 30000, 2, 72313, 17000, 4, 94313, 4000, 130594, 30000, 2, 112453, 17000, 4, 134594, 4000, 160594, 30000, 2, 147594, 17000, 4, 164594, 4000, 190594, 30000, 2, 177594, 17000, 4, 194594, 4000, 220594, 30000, 2, 207594, 17000, 4, 998844, 4000, 1024844, 30000, 2, 1011844, 17000, 4, 89313, 9000, 90313, 25000, 0, 0, 0, 4, 224594, 9000, 225594, 25000, 0, 4, 781844, 4000, 964844, 30000, 2, 873344, 17000, 4, 1028844, 7000, 1138000, 27000, 2, 1083422, 17000, 0, 0, 0, 0, 0, 0, 0, 0, 4, 968844, 4000, 994844, 30000, 2, 981844, 17000, 0, 0, 0, 4, 781844, 7000, 781844, 27000, 1, 0, 2, 229594, 781844, 4, 781844, 4000, 964844, 30000, 0, 0, 4, 94313, 4000, 130594, 30000], // 1280 / 129
+    &[4, 59313, 4000, 85313, 30000, 2, 72313, 17000, 4, 94313, 4000, 130594, 30000, 2, 112453, 17000, 4, 134594, 4000, 160594, 30000, 2, 147594, 17000, 4, 164594, 4000, 190594, 30000, 2, 177594, 17000, 4, 194594, 4000, 220594, 30000, 2, 207594, 17000, 4, 998844, 4000, 1024844, 30000, 2, 1011844, 17000, 4, 89313, 9000, 90313, 25000, 0, 0, 0, 4, 374594, 9000, 375594, 25000, 0, 0, 0, 4, 1028844, 7000, 1138000, 27000, 2, 1083422, 17000, 0, 0, 0, 0, 0, 0, 0, 0, 4, 968844, 4000, 994844, 30000, 2, 981844, 17000, 0, 0, 2, 237594, 30000, 4, 968844, 7000, 968844, 27000, 1, 0, 2, 379594, 968844, 0, 0, 0, 4, 94313, 4000, 130594, 30000], // 1280 / 160
+    &[4, 59313, 4000, 85313, 30000, 2, 72313, 17000, 4, 94313, 4000, 130594, 30000, 2, 112453, 17000, 4, 134594, 4000, 160594, 30000, 2, 147594, 17000, 4, 164594, 4000, 190594, 30000, 2, 177594, 17000, 4, 194594, 4000, 220594, 30000, 2, 207594, 17000, 4, 950438, 4000, 976438, 30000, 2, 963438, 17000, 4, 89313, 9000, 90313, 25000, 0, 0, 0, 4, 374594, 9000, 375594, 25000, 0, 0, 0, 4, 980438, 7000, 1089594, 27000, 2, 1035016, 17000, 4, 698125, 7000, 767844, 27000, 2, 732984, 17000, 4, 767844, 10000, 781844, 24000, 2, 774844, 17000, 4, 793844, 7000, 864438, 27000, 2, 829141, 17000, 4, 864438, 10000, 878438, 24000, 2, 871438, 17000, 4, 920438, 4000, 946438, 30000, 2, 933438, 17000, 4, 1093594, 4000, 1138000, 30000, 2, 1115797, 17000, 2, 237594, 30000, 4, 698125, 7000, 698125, 27000, 1, 0, 2, 379594, 698125, 0, 4, 890438, 4000, 916438, 30000, 0, 4, 94313, 4000, 130594, 30000], // 1280 / 188
+    &[4, 247750, 4000, 273750, 30000, 2, 260750, 17000, 4, 282750, 4000, 319031, 30000, 2, 300891, 17000, 4, 323031, 4000, 349031, 30000, 2, 336031, 17000, 4, 353031, 4000, 379031, 30000, 2, 366031, 17000, 4, 383031, 4000, 409031, 30000, 2, 396031, 17000, 4, 1039594, 4000, 1065594, 30000, 2, 1052594, 17000, 4, 277750, 9000, 278750, 25000, 0, 0, 0, 4, 563031, 9000, 564031, 25000, 0, 0, 0, 4, 1069594, 7000, 1089594, 27000, 2, 1079594, 17000, 4, 787281, 7000, 857000, 27000, 2, 822141, 17000, 4, 857000, 10000, 871000, 24000, 2, 864000, 17000, 4, 883000, 7000, 953594, 27000, 2, 918297, 17000, 4, 953594, 10000, 967594, 24000, 2, 960594, 17000, 4, 1009594, 4000, 1035594, 30000, 2, 1022594, 17000, 4, 1093594, 4000, 1138000, 30000, 2, 1115797, 17000, 2, 426031, 30000, 4, 787281, 7000, 787281, 27000, 1, 0, 2, 568031, 787281, 0, 4, 979594, 4000, 1005594, 30000, 0, 4, 282750, 4000, 319031, 30000], // 1280 / 254
+    &[4, 59313, 4000, 85313, 30000, 2, 72313, 17000, 4, 94313, 4000, 130594, 30000, 2, 112453, 17000, 4, 134594, 4000, 160594, 30000, 2, 147594, 17000, 4, 164594, 4000, 190594, 30000, 2, 177594, 17000, 4, 194594, 4000, 220594, 30000, 2, 207594, 17000, 4, 1776844, 4000, 1802844, 30000, 2, 1789844, 17000, 4, 89313, 9000, 90313, 25000, 0, 0, 0, 4, 224594, 9000, 225594, 25000, 0, 0, 0, 4, 1806844, 7000, 1916000, 27000, 2, 1861422, 17000, 0, 0, 0, 0, 0, 0, 0, 0, 4, 1746844, 4000, 1772844, 30000, 2, 1759844, 17000, 0, 0, 0, 4, 1746844, 7000, 1746844, 27000, 1, 0, 2, 229594, 1746844, 0, 0, 0, 4, 94313, 4000, 130594, 30000], // 1920 / 0
+    &[4, 59313, 4000, 85313, 30000, 2, 72313, 17000, 4, 94313, 4000, 130594, 30000, 2, 112453, 17000, 4, 134594, 4000, 160594, 30000, 2, 147594, 17000, 4, 164594, 4000, 190594, 30000, 2, 177594, 17000, 4, 194594, 4000, 220594, 30000, 2, 207594, 17000, 4, 1776844, 4000, 1802844, 30000, 2, 1789844, 17000, 4, 89313, 9000, 90313, 25000, 0, 0, 0, 4, 224594, 9000, 225594, 25000, 0, 4, 1559844, 4000, 1742844, 30000, 2, 1651344, 17000, 4, 1806844, 7000, 1916000, 27000, 2, 1861422, 17000, 0, 0, 0, 0, 0, 0, 0, 0, 4, 1746844, 4000, 1772844, 30000, 2, 1759844, 17000, 0, 0, 0, 4, 1559844, 7000, 1559844, 27000, 1, 0, 2, 229594, 1559844, 4, 1559844, 4000, 1742844, 30000, 0, 0, 4, 94313, 4000, 130594, 30000], // 1920 / 1
+    &[4, 59313, 4000, 85313, 30000, 2, 72313, 17000, 4, 94313, 4000, 130594, 30000, 2, 112453, 17000, 4, 134594, 4000, 160594, 30000, 2, 147594, 17000, 4, 164594, 4000, 190594, 30000, 2, 177594, 17000, 4, 194594, 4000, 220594, 30000, 2, 207594, 17000, 4, 1866000, 4000, 1892000, 30000, 2, 1879000, 17000, 4, 89313, 9000, 90313, 25000, 0, 0, 0, 4, 224594, 9000, 225594, 25000, 0, 0, 0, 4, 1896000, 7000, 1916000, 27000, 2, 1906000, 17000, 0, 0, 0, 0, 0, 0, 0, 0, 4, 1836000, 4000, 1862000, 30000, 2, 1849000, 17000, 0, 0, 0, 4, 1836000, 7000, 1836000, 27000, 1, 0, 2, 229594, 1836000, 0, 0, 0, 4, 94313, 4000, 130594, 30000], // 1920 / 2
+    &[4, 59313, 4000, 85313, 30000, 2, 72313, 17000, 4, 94313, 4000, 130594, 30000, 2, 112453, 17000, 4, 134594, 4000, 160594, 30000, 2, 147594, 17000, 4, 164594, 4000, 190594, 30000, 2, 177594, 17000, 4, 194594, 4000, 220594, 30000, 2, 207594, 17000, 4, 1728438, 4000, 1754438, 30000, 2, 1741438, 17000, 4, 89313, 9000, 90313, 25000, 0, 0, 0, 4, 224594, 9000, 225594, 25000, 0, 0, 0, 4, 1758438, 7000, 1867594, 27000, 2, 1813016, 17000, 0, 0, 0, 0, 0, 0, 0, 0, 4, 1698438, 4000, 1724438, 30000, 2, 1711438, 17000, 4, 1871594, 4000, 1916000, 30000, 2, 1893797, 17000, 0, 4, 1698438, 7000, 1698438, 27000, 1, 0, 2, 229594, 1698438, 0, 0, 0, 4, 94313, 4000, 130594, 30000], // 1920 / 4
+    &[4, 59313, 4000, 85313, 30000, 2, 72313, 17000, 4, 94313, 4000, 130594, 30000, 2, 112453, 17000, 4, 134594, 4000, 160594, 30000, 2, 147594, 17000, 4, 164594, 4000, 190594, 30000, 2, 177594, 17000, 4, 194594, 4000, 220594, 30000, 2, 207594, 17000, 4, 1776844, 4000, 1802844, 30000, 2, 1789844, 17000, 4, 89313, 9000, 90313, 25000, 0, 0, 0, 4, 224594, 9000, 225594, 25000, 0, 0, 0, 4, 1806844, 7000, 1916000, 27000, 2, 1861422, 17000, 4, 1554531, 7000, 1624250, 27000, 2, 1589391, 17000, 4, 1624250, 10000, 1638250, 24000, 2, 1631250, 17000, 4, 1650250, 7000, 1720844, 27000, 2, 1685547, 17000, 4, 1720844, 10000, 1734844, 24000, 2, 1727844, 17000, 4, 1746844, 4000, 1772844, 30000, 2, 1759844, 17000, 0, 0, 0, 4, 1554531, 7000, 1554531, 27000, 1, 0, 2, 229594, 1554531, 0, 0, 0, 4, 94313, 4000, 130594, 30000], // 1920 / 8
+    &[4, 59313, 4000, 85313, 30000, 2, 72313, 17000, 4, 94313, 4000, 130594, 30000, 2, 112453, 17000, 4, 134594, 4000, 160594, 30000, 2, 147594, 17000, 4, 164594, 4000, 190594, 30000, 2, 177594, 17000, 4, 194594, 4000, 220594, 30000, 2, 207594, 17000, 4, 1776844, 4000, 1802844, 30000, 2, 1789844, 17000, 4, 89313, 9000, 90313, 25000, 0, 0, 0, 4, 224594, 9000, 225594, 25000, 0, 0, 0, 4, 1806844, 7000, 1916000, 27000, 2, 1861422, 17000, 0, 0, 0, 0, 0, 0, 0, 0, 4, 1746844, 4000, 1772844, 30000, 2, 1759844, 17000, 0, 0, 0, 4, 1716844, 7000, 1716844, 27000, 1, 0, 2, 229594, 1716844, 0, 4, 1716844, 4000, 1742844, 30000, 0, 4, 94313, 4000, 130594, 30000], // 1920 / 16
+    &[4, 59313, 4000, 85313, 30000, 2, 72313, 17000, 4, 94313, 4000, 130594, 30000, 2, 112453, 17000, 4, 134594, 4000, 160594, 30000, 2, 147594, 17000, 4, 164594, 4000, 190594, 30000, 2, 177594, 17000, 4, 194594, 4000, 220594, 30000, 2, 207594, 17000, 4, 1776844, 4000, 1802844, 30000, 2, 1789844, 17000, 4, 89313, 9000, 90313, 25000, 0, 0, 0, 4, 374594, 9000, 375594, 25000, 0, 0, 0, 4, 1806844, 7000, 1916000, 27000, 2, 1861422, 17000, 0, 0, 0, 0, 0, 0, 0, 0, 4, 1746844, 4000, 1772844, 30000, 2, 1759844, 17000, 0, 0, 2, 237594, 30000, 4, 1746844, 7000, 1746844, 27000, 1, 0, 2, 379594, 1746844, 0, 0, 0, 4, 94313, 4000, 130594, 30000], // 1920 / 32
+    &[4, 247750, 4000, 273750, 30000, 2, 260750, 17000, 4, 282750, 4000, 319031, 30000, 2, 300891, 17000, 4, 323031, 4000, 349031, 30000, 2, 336031, 17000, 4, 353031, 4000, 379031, 30000, 2, 366031, 17000, 4, 383031, 4000, 409031, 30000, 2, 396031, 17000, 4, 1776844, 4000, 1802844, 30000, 2, 1789844, 17000, 4, 277750, 9000, 278750, 25000, 0, 0, 0, 4, 413031, 9000, 414031, 25000, 0, 0, 0, 4, 1806844, 7000, 1916000, 27000, 2, 1861422, 17000, 0, 0, 0, 0, 0, 0, 0, 0, 4, 1746844, 4000, 1772844, 30000, 2, 1759844, 17000, 0, 0, 0, 4, 1746844, 7000, 1746844, 27000, 1, 0, 2, 418031, 1746844, 0, 0, 0, 4, 282750, 4000, 319031, 30000], // 1920 / 64
+    &[4, 59313, 4000, 85313, 30000, 2, 72313, 17000, 4, 94313, 4000, 130594, 30000, 2, 112453, 17000, 4, 134594, 4000, 160594, 30000, 2, 147594, 17000, 4, 164594, 4000, 190594, 30000, 2, 177594, 17000, 4, 194594, 4000, 220594, 30000, 2, 207594, 17000, 4, 1638844, 4000, 1664844, 30000, 2, 1651844, 17000, 4, 89313, 9000, 90313, 25000, 0, 0, 0, 4, 224594, 9000, 225594, 25000, 0, 0, 0, 4, 1668844, 7000, 1778000, 27000, 2, 1723422, 17000, 0, 0, 0, 0, 0, 0, 0, 0, 4, 1608844, 4000, 1634844, 30000, 2, 1621844, 17000, 0, 0, 0, 4, 1608844, 7000, 1608844, 27000, 1, 0, 2, 229594, 1608844, 0, 0, 0, 4, 94313, 4000, 130594, 30000], // 1920 / 128
+    &[4, 247750, 4000, 273750, 30000, 2, 260750, 17000, 4, 282750, 4000, 319031, 30000, 2, 300891, 17000, 4, 323031, 4000, 349031, 30000, 2, 336031, 17000, 4, 353031, 4000, 379031, 30000, 2, 366031, 17000, 4, 383031, 4000, 409031, 30000, 2, 396031, 17000, 4, 1679594, 4000, 1705594, 30000, 2, 1692594, 17000, 4, 277750, 9000, 278750, 25000, 0, 0, 0, 4, 563031, 9000, 564031, 25000, 0, 4, 1462594, 4000, 1645594, 30000, 2, 1554094, 17000, 4, 1709594, 7000, 1729594, 27000, 2, 1719594, 17000, 4, 1240281, 7000, 1310000, 27000, 2, 1275141, 17000, 4, 1310000, 10000, 1324000, 24000, 2, 1317000, 17000, 4, 1336000, 7000, 1406594, 27000, 2, 1371297, 17000, 4, 1406594, 10000, 1420594, 24000, 2, 1413594, 17000, 4, 1649594, 4000, 1675594, 30000, 2, 1662594, 17000, 4, 1733594, 4000, 1778000, 30000, 2, 1755797, 17000, 2, 426031, 30000, 4, 1240281, 7000, 1240281, 27000, 1, 0, 2, 568031, 1240281, 4, 1462594, 4000, 1645594, 30000, 4, 1432594, 4000, 1458594, 30000, 0, 4, 282750, 4000, 319031, 30000], // 1920 / 255
+    &[4, 59313, 4000, 85313, 30000, 2, 72313, 17000, 4, 94313, 4000, 130594, 30000, 2, 112453, 17000, 4, 134594, 4000, 160594, 30000, 2, 147594, 17000, 4, 164594, 4000, 190594, 30000, 2, 177594, 17000, 4, 194594, 4000, 220594, 30000, 2, 207594, 17000, 4, 1728438, 4000, 1754438, 30000, 2, 1741438, 17000, 4, 89313, 9000, 90313, 25000, 0, 0, 0, 4, 224594, 9000, 225594, 25000, 0, 0, 0, 4, 1758438, 7000, 1867594, 27000, 2, 1813016, 17000, 4, 1476125, 7000, 1545844, 27000, 2, 1510984, 17000, 4, 1545844, 10000, 1559844, 24000, 2, 1552844, 17000, 4, 1571844, 7000, 1642438, 27000, 2, 1607141, 17000, 4, 1642438, 10000, 1656438, 24000, 2, 1649438, 17000, 4, 1698438, 4000, 1724438, 30000, 2, 1711438, 17000, 4, 1871594, 4000, 1916000, 30000, 2, 1893797, 17000, 0, 4, 1476125, 7000, 1476125, 27000, 1, 0, 2, 229594, 1476125, 0, 4, 1668438, 4000, 1694438, 30000, 0, 4, 94313, 4000, 130594, 30000], // 1920 / 28
+    &[4, 59313, 4000, 85313, 30000, 2, 72313, 17000, 4, 94313, 4000, 130594, 30000, 2, 112453, 17000, 4, 134594, 4000, 160594, 30000, 2, 147594, 17000, 4, 164594, 4000, 190594, 30000, 2, 177594, 17000, 4, 194594, 4000, 220594, 30000, 2, 207594, 17000, 4, 1866000, 4000, 1892000, 30000, 2, 1879000, 17000, 4, 89313, 9000, 90313, 25000, 0, 0, 0, 4, 224594, 9000, 225594, 25000, 0, 4, 1649000, 4000, 1832000, 30000, 2, 1740500, 17000, 4, 1896000, 7000, 1916000, 27000, 2, 1906000, 17000, 0, 0, 0, 0, 0, 0, 0, 0, 4, 1836000, 4000, 1862000, 30000, 2, 1849000, 17000, 0, 0, 0, 4, 1649000, 7000, 1649000, 27000, 1, 0, 2, 229594, 1649000, 4, 1649000, 4000, 1832000, 30000, 0, 0, 4, 94313, 4000, 130594, 30000], // 1920 / 3
+    &[4, 59313, 4000, 85313, 30000, 2, 72313, 17000, 4, 94313, 4000, 130594, 30000, 2, 112453, 17000, 4, 134594, 4000, 160594, 30000, 2, 147594, 17000, 4, 164594, 4000, 190594, 30000, 2, 177594, 17000, 4, 194594, 4000, 220594, 30000, 2, 207594, 17000, 4, 1728438, 4000, 1754438, 30000, 2, 1741438, 17000, 4, 89313, 9000, 90313, 25000, 0, 0, 0, 4, 224594, 9000, 225594, 25000, 0, 4, 1511438, 4000, 1694438, 30000, 2, 1602938, 17000, 4, 1758438, 7000, 1867594, 27000, 2, 1813016, 17000, 0, 0, 0, 0, 0, 0, 0, 0, 4, 1698438, 4000, 1724438, 30000, 2, 1711438, 17000, 4, 1871594, 4000, 1916000, 30000, 2, 1893797, 17000, 0, 4, 1511438, 7000, 1511438, 27000, 1, 0, 2, 229594, 1511438, 4, 1511438, 4000, 1694438, 30000, 0, 0, 4, 94313, 4000, 130594, 30000], // 1920 / 5
+    &[4, 59313, 4000, 85313, 30000, 2, 72313, 17000, 4, 94313, 4000, 130594, 30000, 2, 112453, 17000, 4, 134594, 4000, 160594, 30000, 2, 147594, 17000, 4, 164594, 4000, 190594, 30000, 2, 177594, 17000, 4, 194594, 4000, 220594, 30000, 2, 207594, 17000, 4, 1817594, 4000, 1843594, 30000, 2, 1830594, 17000, 4, 89313, 9000, 90313, 25000, 0, 0, 0, 4, 224594, 9000, 225594, 25000, 0, 0, 0, 4, 1847594, 7000, 1867594, 27000, 2, 1857594, 17000, 0, 0, 0, 0, 0, 0, 0, 0, 4, 1787594, 4000, 1813594, 30000, 2, 1800594, 17000, 4, 1871594, 4000, 1916000, 30000, 2, 1893797, 17000, 0, 4, 1787594, 7000, 1787594, 27000, 1, 0, 2, 229594, 1787594, 0, 0, 0, 4, 94313, 4000, 130594, 30000], // 1920 / 6
+    &[4, 59313, 4000, 85313, 30000, 2, 72313, 17000, 4, 94313, 4000, 130594, 30000, 2, 112453, 17000, 4, 134594, 4000, 160594, 30000, 2, 147594, 17000, 4, 164594, 4000, 190594, 30000, 2, 177594, 17000, 4, 194594, 4000, 220594, 30000, 2, 207594, 17000, 4, 1776844, 4000, 1802844, 30000, 2, 1789844, 17000, 4, 89313, 9000, 90313, 25000, 0, 0, 0, 4, 224594, 9000, 225594, 25000, 0, 4, 1559844, 4000, 1742844, 30000, 2, 1651344, 17000, 4, 1806844, 7000, 1916000, 27000, 2, 1861422, 17000, 4, 1367531, 7000, 1437250, 27000, 2, 1402391, 17000, 4, 1437250, 10000, 1451250, 24000, 2, 1444250, 17000, 4, 1463250, 7000, 1533844, 27000, 2, 1498547, 17000, 4, 1533844, 10000, 1547844, 24000, 2, 1540844, 17000, 4, 1746844, 4000, 1772844, 30000, 2, 1759844, 17000, 0, 0, 0, 4, 1367531, 7000, 1367531, 27000, 1, 0, 2, 229594, 1367531, 4, 1559844, 4000, 1742844, 30000, 0, 0, 4, 94313, 4000, 130594, 30000], // 1920 / 9
+    &[4, 59313, 4000, 85313, 30000, 2, 72313, 17000, 4, 94313, 4000, 130594, 30000, 2, 112453, 17000, 4, 134594, 4000, 160594, 30000, 2, 147594, 17000, 4, 164594, 4000, 190594, 30000, 2, 177594, 17000, 4, 194594, 4000, 220594, 30000, 2, 207594, 17000, 4, 1776844, 4000, 1802844, 30000, 2, 1789844, 17000, 4, 89313, 9000, 90313, 25000, 0, 0, 0, 4, 224594, 9000, 225594, 25000, 0, 4, 1559844, 4000, 1742844, 30000, 2, 1651344, 17000, 4, 1806844, 7000, 1916000, 27000, 2, 1861422, 17000, 0, 0, 0, 0, 0, 0, 0, 0, 4, 1746844, 4000, 1772844, 30000, 2, 1759844, 17000, 0, 0, 0, 4, 1529844, 7000, 1529844, 27000, 1, 0, 2, 229594, 1529844, 4, 1559844, 4000, 1742844, 30000, 4, 1529844, 4000, 1555844, 30000, 0, 4, 94313, 4000, 130594, 30000], // 1920 / 17
+    &[4, 59313, 4000, 85313, 30000, 2, 72313, 17000, 4, 94313, 4000, 130594, 30000, 2, 112453, 17000, 4, 134594, 4000, 160594, 30000, 2, 147594, 17000, 4, 164594, 4000, 190594, 30000, 2, 177594, 17000, 4, 194594, 4000, 220594, 30000, 2, 207594, 17000, 4, 1776844, 4000, 1802844, 30000, 2, 1789844, 17000, 4, 89313, 9000, 90313, 25000, 0, 0, 0, 4, 224594, 9000, 225594, 25000, 0, 0, 0, 4, 1806844, 7000, 1916000, 27000, 2, 1861422, 17000, 4, 1524531, 7000, 1594250, 27000, 2, 1559391, 17000, 4, 1594250, 10000, 1608250, 24000, 2, 1601250, 17000, 4, 1620250, 7000, 1690844, 27000, 2, 1655547, 17000, 4, 1690844, 10000, 1704844, 24000, 2, 1697844, 17000, 4, 1746844, 4000, 1772844, 30000, 2, 1759844, 17000, 0, 0, 0, 4, 1524531, 7000, 1524531, 27000, 1, 0, 2, 229594, 1524531, 0, 4, 1716844, 4000, 1742844, 30000, 0, 4, 94313, 4000, 130594, 30000], // 1920 / 24
+    &[4, 59313, 4000, 85313, 30000, 2, 72313, 17000, 4, 94313, 4000, 130594, 30000, 2, 112453, 17000, 4, 134594, 4000, 160594, 30000, 2, 147594, 17000, 4, 164594, 4000, 190594, 30000, 2, 177594, 17000, 4, 194594, 4000, 220594, 30000, 2, 207594, 17000, 4, 1776844, 4000, 1802844, 30000, 2, 1789844, 17000, 4, 89313, 9000, 90313, 25000, 0, 0, 0, 4, 374594, 9000, 375594, 25000, 0, 4, 1559844, 4000, 1742844, 30000, 2, 1651344, 17000, 4, 1806844, 7000, 1916000, 27000, 2, 1861422, 17000, 0, 0, 0, 0, 0, 0, 0, 0, 4, 1746844, 4000, 1772844, 30000, 2, 1759844, 17000, 0, 0, 2, 237594, 30000, 4, 1559844, 7000, 1559844, 27000, 1, 0, 2, 379594, 1559844, 4, 1559844, 4000, 1742844, 30000, 0, 0, 4, 94313, 4000, 130594, 30000], // 1920 / 33
+    &[4, 247750, 4000, 273750, 30000, 2, 260750, 17000, 4, 282750, 4000, 319031, 30000, 2, 300891, 17000, 4, 323031, 4000, 349031, 30000, 2, 336031, 17000, 4, 353031, 4000, 379031, 30000, 2, 366031, 17000, 4, 383031, 4000, 409031, 30000, 2, 396031, 17000, 4, 1776844, 4000, 1802844, 30000, 2, 1789844, 17000, 4, 277750, 9000, 278750, 25000, 0, 0, 0, 4, 413031, 9000, 414031, 25000, 0, 4, 1559844, 4000, 1742844, 30000, 2, 1651344, 17000, 4, 1806844, 7000, 1916000, 27000, 2, 1861422, 17000, 0, 0, 0, 0, 0, 0, 0, 0, 4, 1746844, 4000, 1772844, 30000, 2, 1759844, 17000, 0, 0, 0, 4, 1559844, 7000, 1559844, 27000, 1, 0, 2, 418031, 1559844, 4, 1559844, 4000, 1742844, 30000, 0, 0, 4, 282750, 4000, 319031, 30000], // 1920 / 65
+    &[4, 247750, 4000, 273750, 30000, 2, 260750, 17000, 4, 282750, 4000, 319031, 30000, 2, 300891, 17000, 4, 323031, 4000, 349031, 30000, 2, 336031, 17000, 4, 353031, 4000, 379031, 30000, 2, 366031, 17000, 4, 383031, 4000, 409031, 30000, 2, 396031, 17000, 4, 1776844, 4000, 1802844, 30000, 2, 1789844, 17000, 4, 277750, 9000, 278750, 25000, 0, 0, 0, 4, 563031, 9000, 564031, 25000, 0, 0, 0, 4, 1806844, 7000, 1916000, 27000, 2, 1861422, 17000, 0, 0, 0, 0, 0, 0, 0, 0, 4, 1746844, 4000, 1772844, 30000, 2, 1759844, 17000, 0, 0, 2, 426031, 30000, 4, 1746844, 7000, 1746844, 27000, 1, 0, 2, 568031, 1746844, 0, 0, 0, 4, 282750, 4000, 319031, 30000], // 1920 / 96
+    &[4, 59313, 4000, 85313, 30000, 2, 72313, 17000, 4, 94313, 4000, 130594, 30000, 2, 112453, 17000, 4, 134594, 4000, 160594, 30000, 2, 147594, 17000, 4, 164594, 4000, 190594, 30000, 2, 177594, 17000, 4, 194594, 4000, 220594, 30000, 2, 207594, 17000, 4, 1638844, 4000, 1664844, 30000, 2, 1651844, 17000, 4, 89313, 9000, 90313, 25000, 0, 0, 0, 4, 224594, 9000, 225594, 25000, 0, 4, 1421844, 4000, 1604844, 30000, 2, 1513344, 17000, 4, 1668844, 7000, 1778000, 27000, 2, 1723422, 17000, 0, 0, 0, 0, 0, 0, 0, 0, 4, 1608844, 4000, 1634844, 30000, 2, 1621844, 17000, 0, 0, 0, 4, 1421844, 7000, 1421844, 27000, 1, 0, 2, 229594, 1421844, 4, 1421844, 4000, 1604844, 30000, 0, 0, 4, 94313, 4000, 130594, 30000], // 1920 / 129
+    &[4, 59313, 4000, 85313, 30000, 2, 72313, 17000, 4, 94313, 4000, 130594, 30000, 2, 112453, 17000, 4, 134594, 4000, 160594, 30000, 2, 147594, 17000, 4, 164594, 4000, 190594, 30000, 2, 177594, 17000, 4, 194594, 4000, 220594, 30000, 2, 207594, 17000, 4, 1638844, 4000, 1664844, 30000, 2, 1651844, 17000, 4, 89313, 9000, 90313, 25000, 0, 0, 0, 4, 374594, 9000, 375594, 25000, 0, 0, 0, 4, 1668844, 7000, 1778000, 27000, 2, 1723422, 17000, 0, 0, 0, 0, 0, 0, 0, 0, 4, 1608844, 4000, 1634844, 30000, 2, 1621844, 17000, 0, 0, 2, 237594, 30000, 4, 1608844, 7000, 1608844, 27000, 1, 0, 2, 379594, 1608844, 0, 0, 0, 4, 94313, 4000, 130594, 30000], // 1920 / 160
+    &[4, 59313, 4000, 85313, 30000, 2, 72313, 17000, 4, 94313, 4000, 130594, 30000, 2, 112453, 17000, 4, 134594, 4000, 160594, 30000, 2, 147594, 17000, 4, 164594, 4000, 190594, 30000, 2, 177594, 17000, 4, 194594, 4000, 220594, 30000, 2, 207594, 17000, 4, 1590438, 4000, 1616438, 30000, 2, 1603438, 17000, 4, 89313, 9000, 90313, 25000, 0, 0, 0, 4, 374594, 9000, 375594, 25000, 0, 0, 0, 4, 1620438, 7000, 1729594, 27000, 2, 1675016, 17000, 4, 1338125, 7000, 1407844, 27000, 2, 1372984, 17000, 4, 1407844, 10000, 1421844, 24000, 2, 1414844, 17000, 4, 1433844, 7000, 1504438, 27000, 2, 1469141, 17000, 4, 1504438, 10000, 1518438, 24000, 2, 1511438, 17000, 4, 1560438, 4000, 1586438, 30000, 2, 1573438, 17000, 4, 1733594, 4000, 1778000, 30000, 2, 1755797, 17000, 2, 237594, 30000, 4, 1338125, 7000, 1338125, 27000, 1, 0, 2, 379594, 1338125, 0, 4, 1530438, 4000, 1556438, 30000, 0, 4, 94313, 4000, 130594, 30000], // 1920 / 188
+    &[4, 247750, 4000, 273750, 30000, 2, 260750, 17000, 4, 282750, 4000, 319031, 30000, 2, 300891, 17000, 4, 323031, 4000, 349031, 30000, 2, 336031, 17000, 4, 353031, 4000, 379031, 30000, 2, 366031, 17000, 4, 383031, 4000, 409031, 30000, 2, 396031, 17000, 4, 1679594, 4000, 1705594, 30000, 2, 1692594, 17000, 4, 277750, 9000, 278750, 25000, 0, 0, 0, 4, 563031, 9000, 564031, 25000, 0, 0, 0, 4, 1709594, 7000, 1729594, 27000, 2, 1719594, 17000, 4, 1427281, 7000, 1497000, 27000, 2, 1462141, 17000, 4, 1497000, 10000, 1511000, 24000, 2, 1504000, 17000, 4, 1523000, 7000, 1593594, 27000, 2, 1558297, 17000, 4, 1593594, 10000, 1607594, 24000, 2, 1600594, 17000, 4, 1649594, 4000, 1675594, 30000, 2, 1662594, 17000, 4, 1733594, 4000, 1778000, 30000, 2, 1755797, 17000, 2, 426031, 30000, 4, 1427281, 7000, 1427281, 27000, 1, 0, 2, 568031, 1427281, 0, 4, 1619594, 4000, 1645594, 30000, 0, 4, 282750, 4000, 319031, 30000], // 1920 / 254
 ];
 
 #[test]
@@ -1823,9 +2865,9 @@ fn clear_view_tabs_distinguish_the_four_placements() {
     assert_eq!(view_look(&card), ViewLook::Card);
     assert_eq!(view_look(&hidden), ViewLook::Hidden);
     assert_eq!(view_look(&elsewhere), ViewLook::Elsewhere);
-    assert_eq!(window_badge(&elsewhere, CollapseStage::Full), "Inspection");
-    assert_eq!(window_badge(&elsewhere, CollapseStage::LayoutGlyph), "Inspection");
-    assert_eq!(window_badge(&elsewhere, CollapseStage::WindowNumber), "3");
+    assert_eq!(window_badge(&elsewhere), "3");
+    assert!(!remote_name_hidden(&elsewhere, CollapseStage::Full));
+    assert!(remote_name_hidden(&elsewhere, CollapseStage::WindowNumber));
 }
 
 #[test]
@@ -1838,12 +2880,10 @@ fn clear_view_tabs_collapse_in_order_with_and_without_another_window() {
             let window_names = if elsewhere { 24.0 } else { 0.0 };
             let icons = focused + icon_tabs + 24.0;
             let window_number = icons + idle_names;
-            let glyph = window_number + window_names;
-            let full = glyph + 40.0;
-            let widths = [full, glyph, window_number, icons, focused + 28.0];
+            let full = window_number + window_names;
+            let widths = [full, window_number, icons, focused + 28.0];
             assert_eq!(collapse_stage(widths, full), CollapseStage::Full);
-            assert_eq!(collapse_stage(widths, full - 0.25), CollapseStage::LayoutGlyph);
-            assert_eq!(collapse_stage(widths, glyph - 0.25), if elsewhere { CollapseStage::WindowNumber } else { CollapseStage::Icons });
+            assert_eq!(collapse_stage(widths, full - 0.25), if elsewhere { CollapseStage::WindowNumber } else { CollapseStage::Icons });
             assert_eq!(collapse_stage(widths, icons - 0.25), CollapseStage::Overflow);
         }
     }
@@ -1858,8 +2898,10 @@ fn elsewhere_view_has_only_a_return_button_on_hover() {
     assert!(solidcraft_ui_registry::rect_of("t:vclose:0").is_some());
     assert!(solidcraft_ui_registry::rect_of("t:vclose:1").is_none());
     assert!(solidcraft_ui_registry::rect_of("t:view:1:return").is_none());
+    assert!(solidcraft_ui_registry::rect_of("t:view:1:window").is_some());
     let elsewhere = rig.at("t:view:1");
     rig.frame(vec![egui::Event::PointerMoved(elsewhere)]);
+    assert!(solidcraft_ui_registry::rect_of("t:view:1:window").is_none());
     assert!(solidcraft_ui_registry::rect_of("t:vclose:1").is_none());
     assert_eq!(rig.press(rig.at("t:view:1:return"), egui::PointerButton::Primary), vec![TabAction::ReturnView(1)]);
 }
@@ -1868,6 +2910,8 @@ fn layout_test_data(visible: usize, window_count: usize) -> crate::view_layout_m
     use crate::view_layout_menu::{LayoutMenu, LayoutText, LayoutView, LayoutWindow};
     LayoutMenu {
         text: LayoutText::default(),
+        saved: Vec::new(),
+        matching_saved: None,
         design: "One".into(),
         window: 0,
         native: true,
@@ -1951,4 +2995,38 @@ fn layout_menu_keeps_glyph_choices_open_and_escape_restores_the_button() {
     assert!(rig.frame(vec![key(egui::Key::Enter)]).is_empty());
     rig.frame(Vec::new());
     assert!(solidcraft_ui_registry::rect_of("layout.side_by_side").is_some());
+}
+
+#[test]
+fn sketch_header_keeps_the_editing_chip_inside_its_control_free_room() {
+    let ctx = crate::test_support::context();
+    for width in [240.0, 100.0, 70.0, 60.0, 42.0, 16.0] {
+        let rect = Rect::from_min_size(pos2(10.0, 10.0), vec2(width, 28.0));
+        let output = crate::test_support::raw_frame(&ctx, egui::RawInput::default(), |ui| {
+            paint_sketch_header(ui.painter(), rect, "Model · Sketch 1", "Editing");
+        });
+        let texts: Vec<_> = crate::test_support::text_shapes(&output).map(|text| text.galley.text().to_string()).collect();
+        if width == 240.0 {
+            assert!(texts.iter().any(|text| text == "Model · Sketch 1"));
+        }
+        if width >= 70.0 {
+            assert!(texts.iter().any(|text| text == "Editing"), "width={width}: the state remains readable");
+        }
+        let chip = output
+            .shapes
+            .iter()
+            .find_map(|shape| match &shape.shape {
+                egui::Shape::Rect(shape) if shape.fill == Tokens::get().chip => Some(shape.rect),
+                _ => None,
+            })
+            .unwrap();
+        assert_eq!(chip.height(), 18.0);
+        assert!(rect.contains_rect(chip), "width={width}: {chip:?} must leave header controls free");
+    }
+    for t in [Tokens::light(), Tokens::dark()] {
+        assert!(
+            solidcraft_theme::contrast_ratio(t.sketch_ink, t.sketch_soft) >= 4.5,
+            "sketch titles follow the theme's small-text contrast policy on their actual header surface"
+        );
+    }
 }
