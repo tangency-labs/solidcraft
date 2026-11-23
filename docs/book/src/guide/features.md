@@ -87,7 +87,8 @@ planes are not targets. Clicking into the **Profiles** box first makes the next 
 again, even off the plane. The extent can still be chosen manually. For a new extrusion without
 start or end offsets or a From Object input, the target also sets the stored distance and
 one-sided direction, so returning to **Distance** keeps that reach. Thin Extrude keeps its
-existing picks. With the setting off, picks only add profiles.
+existing picks, but its **To Object** and **From Object**, once chosen, take a parallel plane as
+the solid Extrude's do. With the setting off, picks only add profiles.
 
 **To Object** and **From Object** also take a point that isn't on the model: hover a sketch line
 or an edge and click one of the points that light up, its ends or its middle (a hole's centre

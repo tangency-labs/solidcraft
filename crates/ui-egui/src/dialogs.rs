@@ -1878,12 +1878,14 @@ impl Dialog {
     /// With automatic To Object enabled and profiles picked, a face or vertex off their plane,
     /// or a parallel plane, is the target rather than another profile. An explicitly active
     /// To Object or From Object input accepts parallel planes regardless of the automatic
-    /// switching preference. A start plane may coincide with the profiles.
+    /// switching preference. A start plane may coincide with the profiles. Thin Extrude keeps its
+    /// picks (no automatic switch), but its active To or From Object takes a parallel plane as a
+    /// solid extrude's does (#21033).
     fn extrude_target(&self, s: &Session, h: &Hit) -> Option<Sel> {
-        let Kind::Extrude { thin: false, smart, .. } = &self.kind else { return None };
+        let Kind::Extrude { thin, smart, .. } = &self.kind else { return None };
         let to_active = self.active_input().is_some_and(|i| i.label == TO_OBJECT);
         let from_active = self.active_input().is_some_and(|i| i.label == FROM_OBJECT);
-        if !to_active && !from_active && (self.active != 0 || !smart.auto_to_object || smart.profiles_chosen) {
+        if !to_active && !from_active && (*thin || self.active != 0 || !smart.auto_to_object || smart.profiles_chosen) {
             return None;
         }
         let reference = profile_plane(s, self.inputs.first()?.items.first()?)?;
@@ -5354,11 +5356,14 @@ fn set_extrude_targets(inputs: &mut Vec<SelInput>, active: &mut usize, extra: &m
     }
 }
 
-/// The plane an extrude's picked profiles lie in: the first pick's sketch plane, or its planar face.
+/// The plane an extrude's picked profiles lie in: the first pick's sketch plane (a profile's or a
+/// thin extrude's curve's), or its planar face.
 fn profile_plane(s: &Session, first: &Sel) -> Option<solidcore_record::Plane> {
     let st = crate::open_meshing::session_world(s);
     match first {
         Sel::Profile { sketch, .. } => st.sketch(*sketch).map(|ss| ss.plane),
+        // A thin extrude's curve: its sketch's plane (no sketch named: the active one's).
+        Sel::SketchCurve { sketch, .. } => st.sketch(sketch.or(s.active_sketch)?).map(|ss| ss.plane),
         Sel::Face { body, index, .. } => st.body(body)?.body.planar_face(*index),
         _ => None,
     }

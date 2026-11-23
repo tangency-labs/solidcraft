@@ -176,6 +176,53 @@ fn thin_extrude_keeps_its_picks() {
     assert!(to_object(dialog(&h)).is_none());
 }
 
+/// With Thin Extrude on, an active To Object takes a parallel construction plane as it does with
+/// Thin off, for a picked profile and for picked curves alone, and OK builds the wall up to it.
+/// The click was ignored with no message, though the command builds a thin extrude to it (#21033).
+#[test]
+fn thin_extrude_to_object_takes_a_parallel_plane() {
+    for automatic in [false, true] {
+        let mut h = scene_with(automatic);
+        h.step(&json!({"widget": "Thin Extrude"})).unwrap();
+        h.frames(2);
+        h.step(&json!({"click": {"handle": "dialog:Extent Type"}})).unwrap();
+        h.step(&json!({"click": {"handle": "dialog:Extent Type:To Object"}})).unwrap();
+        assert_eq!(dialog(&h).active_input().unwrap().label, "To Object");
+        assert!(!click(&mut h, |_| Hit::Plane { name: "YZ".into(), point: Vec3::new(0.0, 5.0, 5.0) }), "a crossing plane is not a target");
+        assert!(click(&mut h, |_| Hit::Plane { name: "Lid".into(), point: Vec3::new(5.0, 5.0, 25.0) }), "automatic={automatic}");
+        assert!(matches!(to_object(dialog(&h)), Some(Sel::Vertex { point, .. }) if (point.z - 25.0).abs() < 1e-9));
+        let commands = apply_commands(&h.app, dialog(&h)).unwrap();
+        assert_eq!(commands[0].1["thin"], json!(true));
+        assert_eq!(commands[0].1["to"], json!([0.0, 0.0, 25.0]));
+        let curves = commands[0].1["curves"].clone();
+
+        // The outline's curves picked instead of the profile: the plane is still a target.
+        let sketch = h.app.session.doc.find_feature("Base").unwrap().id;
+        let picks: Vec<Sel> =
+            curves.as_array().unwrap().iter().map(|c| Sel::SketchCurve { id: c.as_str().unwrap().into(), sketch: Some(sketch) }).collect();
+        assert_eq!(picks.len(), 4);
+        let d = h.app.dialog.as_mut().unwrap();
+        d.inputs[0].items = picks;
+        if let Some(input) = d.inputs.iter_mut().find(|i| i.label == "To Object") {
+            input.items.clear();
+        }
+        h.frames(2);
+        assert!(click(&mut h, |_| Hit::Plane { name: "Under".into(), point: Vec3::ZERO }), "curves, automatic={automatic}");
+        let commands = apply_commands(&h.app, dialog(&h)).unwrap();
+        assert_eq!(commands[0].1["to"], json!([0.0, 0.0, -12.345678]));
+        assert!(click(&mut h, |_| Hit::Plane { name: "Lid".into(), point: Vec3::ZERO }));
+
+        h.step(&json!({"widget": "OK"})).unwrap();
+        h.frames(4);
+        assert!(h.app.dialog.is_none(), "{:?}", h.app.session.log);
+        let state = crate::open_meshing::session_world(&h.app.session);
+        let volume: f64 = state.bodies.iter().filter_map(|b| solidcraft_engine::doc::kernel::measure(&b.body).ok()).map(|m| m.volume).sum();
+        // The box, the cylinder and a 2 mm wall centred on the 10 x 10 outline, 25 mm high.
+        let expected = 8000.0 + std::f64::consts::PI * 25.0 * 30.0 + (12.0 * 12.0 - 8.0 * 8.0) * 25.0;
+        assert!((volume - expected).abs() < 1.0, "{volume}, automatic={automatic}");
+    }
+}
+
 #[test]
 fn target_below_keeps_its_side_and_exact_length() {
     let mut h = scene();
