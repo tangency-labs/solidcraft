@@ -454,9 +454,13 @@ pub use step_in::MAX_VISITS as IMPORT_MAX_VISITS;
 pub use step_in::StepImport;
 pub use step_in::StepNode;
 pub use step_in::StepReading;
+/// The memory a STEP file may need, checked before it is opened to warn about it (#15588).
+pub use step_in::p21::check_memory as step_check_memory;
 /// The largest STEP text the importer parses; `solidcraft_io::limits` keeps it at the limit in force (#13329).
 pub use step_in::p21::max_bytes as step_max_bytes;
+pub use step_in::p21::memory_to_spare as step_memory_to_spare;
 pub use step_in::p21::set_max_bytes as set_step_max_bytes;
+pub use step_in::p21::with_memory_to_spare as step_with_memory_to_spare;
 pub use step_in::records::ImportRecords;
 pub use step_in::records::RecordBody;
 pub use step_in::records::RecordMesh;

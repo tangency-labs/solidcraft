@@ -176,6 +176,7 @@ fn inputs(s: &Session, t: &MotionTrace) -> Result<Value> {
         definition.offset = offset;
         definition.angle = angle;
         definition.values = q;
+        definition.limits = joints::expressed_limits(&params, &definition)?;
         definition.exprs = Default::default();
         let fa = j.offset_frame_a(joints::resolve_origin(&s.doc, &st, &j.a)?);
         let fb = joints::resolve_origin(&s.doc, &st, &j.b)?;
