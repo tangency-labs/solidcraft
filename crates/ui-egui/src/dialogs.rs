@@ -6666,13 +6666,12 @@ fn dialog_commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value)>, S
                 match offset_through_point(d) {
                     Some(point) => {
                         p["through"] = construct_ref(app, point)?;
-                        p["offset"] = Value::Null;
                     }
                     None if !offset.trim().is_empty() => {
                         p["offset"] = json!(offset);
                     }
-                    // Null keeps fill_simple_params from inserting an empty offset expression.
-                    None => p["offset"] = Value::Null,
+                    // Leave offset out when unset; strip any empty default after fill_simple_params.
+                    None => {}
                 }
                 if *direction_only && let Some(pivot) = angle_pivot(d) {
                     p["pivot"] = construct_ref(app, pivot)?;
@@ -6770,16 +6769,14 @@ fn dialog_commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value)>, S
             };
             let mut p = json!({"base": base, "axis": axis, "direction_only": direction_only});
             match angle_through_point(d) {
-                // A null `offset` keeps any descriptor distance out: the plane goes through the point first.
                 Some(point) => {
                     p["through"] = construct_ref(app, point)?;
-                    p["offset"] = Value::Null;
                 }
                 None if !offset.trim().is_empty() => {
                     p["offset"] = json!(offset);
                 }
-                // Explicit null: no offset before the turn (and no empty expression).
-                None => p["offset"] = Value::Null,
+                // Omit when unset: the command must not carry `"offset": null` (#12038 / Native Linux).
+                None => {}
             }
             if *direction_only && let Some(pivot) = angle_pivot(d) {
                 p["pivot"] = construct_ref(app, pivot)?;
@@ -7325,6 +7322,19 @@ fn dialog_commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value)>, S
     };
     let mut params = params;
     d.kind.fill_simple_params(&mut params);
+    // Offset Plane's simple params always include `offset`; for at_angle leave it out when empty.
+    if cmd == "construct.plane.at_angle"
+        && let Value::Object(m) = &mut params
+    {
+        let drop = match m.get("offset") {
+            Some(Value::Null) => true,
+            Some(Value::String(s)) => s.trim().is_empty(),
+            _ => false,
+        };
+        if drop {
+            m.remove("offset");
+        }
+    }
     if let Value::Object(m) = &mut params {
         // A fillet option that doesn't apply with the others is never sent.
         let fillet = matches!(d.kind, Kind::Fillet { chamfer: false, .. });
