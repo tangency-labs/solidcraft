@@ -137,7 +137,7 @@ use crate::geom::context::{
 use crate::geom::extent1d::Extent1d;
 use crate::geom::extent3d::Extent3d;
 use crate::geom::object::{self, NotifyOperation, ObjectRef};
-use crate::geom::tol::{self, SmallTopoType};
+use crate::geom::tol;
 use crate::kernel::Kernel;
 use crate::math::{Point3, Vec3};
 use crate::nurbs::b_spline_curve::BSplineCurve;
@@ -615,7 +615,8 @@ fn destroy_face(b: &mut Brep, env: &mut NotifyEnv<'_>, f: FaceId) -> Result<()> 
 
 /// `SmBrep(dThisModelSizeEstimate, dThisLargeSmallSizeRatio, pOptContextForStack)`: a
 /// new B-rep with the given size estimate and large/small ratio (upstream defaults
-/// [`tol::USE_DEFAULT`]), the context's zone tolerance, editing disabled, and an
+/// [`tol::USE_DEFAULT`], which leave it the kernel context's), the zone tolerance of
+/// that estimate ([`tol::brep_size_zone_tol_3d`]), editing disabled, and an
 /// infinite void region as its only region; the construction is reported to the
 /// context's callbacks (`SmObject::Notify`) under the new B-rep's own kernel identity
 /// (the caller holds no key for it yet: [`topology_ref`] with the serial the kernel
@@ -661,9 +662,11 @@ fn new_brep_in(
     b.set_naming(crate::topology::NamingScheme::Notify);
 
     // When asked (should be extremly rare) set SystemTolerance sizes
-    b.set_this_model_size_estimate(k, model_size_estimate);
-    b.set_this_large_small_size_ratio(k, large_small_size_ratio);
-    *b.tolerance = tol::context_zone_tol_3d(k, Some(&k.context), SmallTopoType::NormalSize);
+    // (on the new B-rep alone: the kernel context keeps what its caller configured,
+    // and is the tolerance of a B-rep made with the default)
+    b.set_this_model_size_estimate(model_size_estimate);
+    b.set_this_large_small_size_ratio(large_small_size_ratio);
+    *b.tolerance = tol::brep_size_zone_tol_3d(k, &b);
 
     // Create infinite region and put into brep's region list
     let r = b.add_region_record(Region::default())?;

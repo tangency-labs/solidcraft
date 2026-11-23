@@ -56,11 +56,7 @@ pub(super) fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
                         crate::scenario::publish_target("prefs:length_decimals", response.rect);
                     });
                     ui.add_space(t.space_6);
-                    let sample = format_length(
-                        12.5 * unit_scale(&app.preferences.default_units).0,
-                        &app.preferences.default_units,
-                        app.preferences.length_decimals,
-                    );
+                    let sample = length_decimals_sample(&app.preferences.default_units, app.preferences.length_decimals);
                     ui_kit::settings_precision_sample(ui, &sample);
                 });
                 ui_kit::row(ui, app.tr("ui.angle_decimals"), |ui| {
@@ -331,4 +327,9 @@ fn origin_plane_names(app: &mut SolveApp, ui: &mut egui::Ui, label_width: f32) {
         let response = setting::browser_hover_shows_origin(app, ui).backing_on_hover_text(app.tr("prefs.browser_hover_shows_origin_help"));
         crate::scenario::publish_target("prefs:browser_hover_shows_origin", response.rect);
     });
+}
+
+/// The Length decimals example: 12.5 in `units` (not 12.5 mm), with `decimals`.
+pub(super) fn length_decimals_sample(units: &str, decimals: u8) -> String {
+    format_length(12.5 / unit_scale(units).0, units, decimals)
 }

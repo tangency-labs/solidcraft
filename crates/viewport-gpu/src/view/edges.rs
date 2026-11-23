@@ -14,7 +14,7 @@
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
-use super::{EDGE_PX, EDGE_SEG_SIZE, INSTANCE_SIZE, InstancedDraw, SharedEdges, Tally};
+use super::{EDGE_SEG_SIZE, INSTANCE_SIZE, InstancedDraw, SharedEdges, Tally};
 
 /// The instanced edge vertex shaders, appended to the viewport's (they draw with its
 /// `line_vertex` and `fs_line`).
@@ -416,12 +416,13 @@ pub(super) struct Pipelines {
 }
 
 /// The edge level each placement in view is drawn from: the coarsest whose deviation stays under
-/// [`EDGE_PX`] at `scale`, the most pixels a millimetre of the placement covers where it is drawn
+/// `px` pixels ([`super::EDGE_PX`], or [`super::EDGE_PX_MOVING`] while the view moves) at `scale`, the
+/// most pixels a millimetre of the placement covers where it is drawn
 /// ([`placement_stretch`](super::placement_stretch)).
-pub(super) fn level_for(e: &SharedEdges, scale: f32) -> u8 {
+pub(super) fn level_for(e: &SharedEdges, scale: f32, px: f32) -> u8 {
     if e.levels.len() < 2 {
         return 0;
     }
-    let level = e.levels.iter().rposition(|(_, tolerance)| *tolerance * scale <= EDGE_PX).unwrap_or(0);
+    let level = e.levels.iter().rposition(|(_, tolerance)| *tolerance * scale <= px).unwrap_or(0);
     u8::try_from(level).unwrap_or(0)
 }

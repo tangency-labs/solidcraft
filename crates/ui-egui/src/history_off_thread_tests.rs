@@ -396,6 +396,13 @@ fn switching_from_a_sketch_to_a_feature_restores_partial_markers_and_sketch_chan
         let history = (h.app.session.undo.len(), h.app.session.redo.len());
         let changed = h.app.session.doc.sketch(sketches[0]).unwrap().clone();
         until_settled(&mut h);
+        for _ in 0..500 {
+            if h.app.dialog.is_some() {
+                break;
+            }
+            h.frames(1);
+            std::thread::sleep(Duration::from_millis(10));
+        }
         assert!(h.app.dialog.is_some());
         h.app.session.selection = vec![solidcraft_engine::Sel::Axis { name: "X".into() }];
         *h.app.session.model.cache.lock().unwrap() = Default::default();
@@ -1259,6 +1266,24 @@ fn a_confirmed_delete_runs_with_what_its_check_kept() {
     let curves = |h: &Harness| h.app.session.model.state().sketch(sk).map(|s| s.sketch.curves.len()).unwrap_or(0);
     assert_eq!(curves(&h), 3, "deleted");
     assert_eq!(kept.len(), built, "the delete built nothing the check had not kept");
+}
+
+/// A check that is not waited for leaves its reply for a later frame, even one that is already
+/// in: the frame finds it there. Read at once and not used, the reply was gone when the frame
+/// looked, and its delete was dropped as one that could not be checked (on a busy machine the
+/// worker is done before the window thread goes on). With a wait, a reply that is in is taken.
+#[test]
+fn a_reply_already_in_is_left_for_the_frame_when_the_check_is_not_waited_for() {
+    let (tx, done) = std::sync::mpsc::channel();
+    tx.send("replies").unwrap();
+    drop(tx);
+    assert_eq!(crate::deferred::reply_within(&done, Duration::ZERO), None, "not taken without a wait");
+    assert_eq!(done.try_recv(), Ok("replies"), "the frame finds the reply");
+    let (tx, done) = std::sync::mpsc::channel();
+    tx.send("replies").unwrap();
+    assert_eq!(crate::deferred::reply_within(&done, Duration::from_millis(150)), Some("replies"), "taken within a wait");
+    let (_tx, done) = std::sync::mpsc::channel::<&str>();
+    assert_eq!(crate::deferred::reply_within(&done, Duration::from_millis(1)), None, "none in time: left computing");
 }
 
 /// A design changed while its delete is checked is checked again before anything is deleted, and

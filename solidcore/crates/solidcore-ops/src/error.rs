@@ -593,6 +593,14 @@ pub enum OffsetRefusal {
         /// How far the face could move and still meet the face beside it.
         largest: f64,
     },
+    /// In a local operation, the face (a band bounded by two faces, such as a narrow ring
+    /// between a countersink's cone and the well below it) closes to nothing as the faces
+    /// move: its two sides would pass over each other and turn it inside out. `largest` is
+    /// how far the faces could move before it closes.
+    FaceCloses {
+        /// How far the faces could move before the face closes.
+        largest: f64,
+    },
     /// How far the surfaces beside an edge or at a vertex of the face must be extended to
     /// meet has no certified bound (a pair or corner of kinds it does not bound yet): refused
     /// before anything changed.
@@ -666,6 +674,11 @@ impl std::fmt::Display for OffsetRefusal {
                 f,
                 "it would move past where the curved face beside it ends; it meets that face \
                  only while it moves less than {largest}"
+            ),
+            OffsetRefusal::FaceCloses { largest } => write!(
+                f,
+                "it closes to nothing between the faces beside it as they move; it stays open \
+                 only while they move less than {largest}"
             ),
             OffsetRefusal::ReachUncertified => {
                 write!(

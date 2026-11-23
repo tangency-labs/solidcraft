@@ -20,14 +20,6 @@ primitive.api_primitives	gen0195	0	v8	invalid-input	-	1.0000000006523193e-5
 primitive.api_primitives	gen0195	0	v9	invalid-input	-	1e-5
 primitive.api_primitives	gen0195	0	v10	invalid-input	-	1e-5
 primitive.api_primitives	gen0195	0	v11	invalid-input	-	1.0000000006523193e-5
-primitive.api_primitives	gen0244	0	v2	rounding-bound	-	1.4011558115998707e-5
-primitive.api_primitives	gen0244	0	v6	rounding-bound	-	1.4011558115998707e-5
-primitive.api_primitives	gen0244	0	v7	rounding-bound	-	1.4011557708736676e-5
-primitive.api_primitives	gen0244	0	v9	rounding-bound	-	1.4011557708736676e-5
-primitive.api_primitives	gen0893	0	v2	rounding-bound	-	1e-5
-primitive.api_primitives	gen0893	0	v6	rounding-bound	-	1.0000000006625653e-5
-primitive.api_primitives	gen0893	0	v7	rounding-bound	-	1.0000000006625653e-5
-primitive.api_primitives	gen0893	0	v9	rounding-bound	-	1e-5
 primitive.api_primitives	gen1157	0	v8	rounding-bound	-	1.4784277855986652e-5
 primitive.api_primitives	gen1157	0	v9	rounding-bound	-	1.4784277855986652e-5
 primitive.api_primitives	gen1157	0	v10	rounding-bound	-	1.4784277986763153e-5
