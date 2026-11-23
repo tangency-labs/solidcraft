@@ -643,6 +643,13 @@ pub enum SolverFailure {
         /// The parameter of the curve the plane is taken on.
         t: f64,
     },
+    /// The solve for the fillet's cross-section point on the plane through a rail's point
+    /// at parameter `t` returned an error: that error is the failure's cause, and decides
+    /// whether it is a defect or a refusal ([`ErrorKind::Failed`]); status `SM_ERR`.
+    CrossSectionPointFailed {
+        /// The parameter of the curve the plane is taken on.
+        t: f64,
+    },
     /// A rail curve's tangent has no length at parameter `t`, so no step along it is
     /// defined there ([`ErrorKind::Degenerate`]).
     RailTangentZero {
@@ -1047,7 +1054,8 @@ impl SolverFailure {
             | Self::FilletGeomWithoutCenterLine { .. }
             | Self::FilletGeomWithoutSolver { .. }
             | Self::RailMateWithoutUvCurve { .. } => ErrorKind::InvalidInput,
-            Self::JacobianNotLoaded
+            Self::CrossSectionPointFailed { .. }
+            | Self::JacobianNotLoaded
             | Self::SupportIntersectionFailed
             | Self::SurfaceCacheNotBuilt => ErrorKind::Failed,
         }
@@ -1075,6 +1083,7 @@ impl SolverFailure {
             | Self::RailNotBSpline { .. }
             | Self::RailMateWithoutUvCurve { .. } => SM_ERR_NULL_POINTER,
             Self::CrossSectionPointNotFound { .. }
+            | Self::CrossSectionPointFailed { .. }
             | Self::RailTangentZero { .. }
             | Self::PiecesTooFarApart { .. }
             | Self::GeneratorBuildsNoSurface
@@ -1125,6 +1134,10 @@ impl core::fmt::Display for SolverFailure {
             Self::CrossSectionPointNotFound { t } => write!(
                 f,
                 "no cross-section point of the fillet was found on the plane at t = {t}"
+            ),
+            Self::CrossSectionPointFailed { t } => write!(
+                f,
+                "the solve for the fillet's cross-section point on the plane at t = {t} failed"
             ),
             Self::RailTangentZero { t } => {
                 write!(f, "the rail's tangent has no length at t = {t}")
@@ -4152,5 +4165,32 @@ mod tests {
             scanned, names,
             "phrase_sites::BLEND must list exactly the phrase variants of BlendFailure"
         );
+    }
+
+    /// The G1-knot loop's catch of `find_fillet_tsect_pnt` is not an empty search: it keeps
+    /// `SM_ERR`, chains the caught error, reads as neither defect nor refusal on its own
+    /// (so an invalid-input cause is not reported as `NotFound`), and a defect cause makes
+    /// it a defect.
+    #[test]
+    fn cross_section_point_failed_passes_its_cause_on() {
+        let wrap = |inner: SolidError| {
+            Failure::new(
+                "blend::op",
+                BlendFailure::Solver(SolverFailure::CrossSectionPointFailed { t: 0.5 }),
+            )
+            .caused_by(inner)
+            .into_error()
+        };
+        let inner = SolidError::blend_solver("blend::inner", SolverFailure::EdgeUseWithoutMate);
+        assert_eq!(inner.kind(), ErrorKind::InvalidInput);
+        let e = wrap(inner.clone());
+        assert_eq!(e.sm_status(), Some(SM_ERR));
+        assert_eq!(e.kind(), ErrorKind::Failed);
+        assert_eq!(e.cause(), Some(&inner));
+        assert!(!e.is_defect() && !e.is_refusal());
+        let inner = SolidError::blend_null_defect("blend::inner", "why");
+        let e = wrap(inner.clone());
+        assert_eq!(e.sm_status(), Some(SM_ERR));
+        assert!(e.is_defect() && inner.is_defect());
     }
 }

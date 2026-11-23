@@ -920,7 +920,7 @@ fn c1_collect_points(
             Err(e) => {
                 return Err(Failure::new(
                     OP,
-                    BlendFailure::Solver(SolverFailure::CrossSectionPointNotFound { t: knot }),
+                    BlendFailure::Solver(SolverFailure::CrossSectionPointFailed { t: knot }),
                 )
                 .caused_by(e)
                 .into_error())
