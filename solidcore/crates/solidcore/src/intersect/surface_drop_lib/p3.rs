@@ -148,7 +148,7 @@ use crate::surface::surface::p1::{map_to_2d_dir, zone_tol_3d, SurfaceSolveContex
 use crate::surface::surface::p2::{
     CreateUvTrimCurvePathType, DropCurveFailArgs, SurfaceKind, UNSURE,
 };
-use crate::surface::surface::p4::{FaceTest, NoObject};
+use crate::surface::surface::p4::FaceTest;
 use crate::surface::surface::p7::approx_derivative_lengths;
 use crate::surface::surface::Surface;
 use crate::surface::surface_point_solve::p2::with_out_of_bounds_enabled;
@@ -346,9 +346,11 @@ impl SeamWrap {
     }
 }
 
-/// Drops a single curve point at `t` onto `surface` near `uv_guess`, staying on the sheet
-/// closest in cyclic UV distance to `uv_guess` (so a closed cylinder/sphere/torus does not
-/// jump to the antipodal normal foot). Returns `None` if no valid normal-line foot is found.
+/// Drops a single curve point at `t` onto `surface` near `uv_guess` using one branch-aware
+/// `Normalize` local solve (also seeded on the opposite wrappable seam boundary when
+/// `uv_guess` lies near a seam), picking the valid normal foot closest in cyclic UV distance
+/// to `uv_guess` so a closed surface stays on the active trace branch. Returns `None` if no
+/// valid normal-line foot is found on that branch.
 #[allow(clippy::too_many_arguments)]
 fn drop_point_near_seam(
     k: &Kernel,
@@ -361,104 +363,10 @@ fn drop_point_near_seam(
     approx_tol_3d: f64,
 ) -> Result<Option<Point2>> {
     let pt_3d = curve.evaluate_point(k, t)?;
-
-    let normal_dev = |uv: Point2| -> Result<(f64, f64)> {
-        let p = surface.evaluate_point(k, uv)?;
-        let n = surface.evaluate_normal(k, uv, Side::Left, Side::Left)?;
-        let (dev, _) = line_point_distance(p, n, pt_3d);
-        Ok((dev, p.distance(pt_3d)))
-    };
-
-    let mut best: Option<(Point2, f64, f64)> = None;
-    let mut consider = |uv: Point2| -> Result<()> {
-        let (dev, dist) = normal_dev(uv)?;
-        let take = match best {
-            None => true,
-            Some((_, best_dev, best_dist)) => {
-                dist < best_dist - approx_tol_3d
-                    || ((dist - best_dist).abs() <= approx_tol_3d && dev < best_dev)
-            }
-        };
-        if take {
-            best = Some((uv, dev, dist));
-        }
-        Ok(())
-    };
-
-    let local_solve = |guess: Point2| -> Result<Option<Point2>> {
-        // `Normalize` solves `(S - P) . S_u = 0, (S - P) . S_v = 0` directly to full
-        // precision (avoiding `Minimize`'s quadratic distance flattening near a seam);
-        // fall back to `Minimize` when `Normalize` does not converge.
-        for op in [SolverOperation::Normalize, SolverOperation::Minimize] {
-            let r = surface.local_point_solve::<ObjectHandle>(k, uv_domain, op, pt_3d, guess)?;
-            if r.found {
-                let s = &r.solution.start;
-                return Ok(Some(Point2::new(
-                    s.parameters.first().copied().unwrap_or(0.0),
-                    s.parameters.get(1).copied().unwrap_or(0.0),
-                )));
-            }
-        }
-        Ok(None)
-    };
-
-    if let Some(uv) = local_solve(uv_guess)? {
-        consider(uv)?;
-
-        // If local solve clamped on a wrappable seam boundary, try the opposite seam side so
-        // points just across the seam converge cleanly without invoking the global solver.
-        let tol_u = EFF_ZERO_SQRT * (1.0 + seam_wrap.nat.x_length());
-        let tol_v = EFF_ZERO_SQRT * (1.0 + seam_wrap.nat.y_length());
-        let mut alt_guess = None;
-        if seam_wrap.u {
-            if (uv.x - seam_wrap.nat.min().x).abs() <= tol_u {
-                alt_guess = Some(Point2::new(seam_wrap.nat.max().x, uv.y));
-            } else if (uv.x - seam_wrap.nat.max().x).abs() <= tol_u {
-                alt_guess = Some(Point2::new(seam_wrap.nat.min().x, uv.y));
-            }
-        }
-        if alt_guess.is_none() && seam_wrap.v {
-            if (uv.y - seam_wrap.nat.min().y).abs() <= tol_v {
-                alt_guess = Some(Point2::new(uv.x, seam_wrap.nat.max().y));
-            } else if (uv.y - seam_wrap.nat.max().y).abs() <= tol_v {
-                alt_guess = Some(Point2::new(uv.x, seam_wrap.nat.min().y));
-            }
-        }
-        if let Some(alt) = alt_guess {
-            if let Some(uv2) = local_solve(alt)? {
-                consider(uv2)?;
-            }
-        }
-    }
-
-    let good_dev_limit = max2(approx_tol_3d * 10.0, EFF_ZERO_SQRT);
-    if let Some((uv, dev, _)) = best {
-        if dev <= good_dev_limit {
-            return Ok(Some(uv));
-        }
-    }
-
-    // Fallback: global Minimize, picking the foot closest in cyclic UV distance to uv_guess.
-    let mut unowned = surface.clone_for_evaluation()?;
-    let _ = unowned.set_owner(None);
-    let sols: SolutionArray<NoObject> = unowned.global_point_solve_point_test_off(
-        k,
-        Some(NoObject),
-        uv_domain,
-        SolverOperation::Minimize,
-        pt_3d,
-        EFF_ZERO,
-        None,
-        SolutionRequested::All,
-    )?;
     let u_len = seam_wrap.nat.x_length();
     let v_len = seam_wrap.nat.y_length();
-    let mut picked: Option<(Point2, f64)> = None;
-    for s in sols.as_slice() {
-        let uv = Point2::new(
-            s.start.parameters.first().copied().unwrap_or(0.0),
-            s.start.parameters.get(1).copied().unwrap_or(0.0),
-        );
+
+    let cyclic_uv_dist = |uv: Point2| {
         let du = (uv.x - uv_guess.x).abs();
         let du = if seam_wrap.u {
             min2(du, (u_len - du).abs())
@@ -471,19 +379,62 @@ fn drop_point_near_seam(
         } else {
             dv
         };
-        let d = du + dv;
-        if picked.is_none_or(|(_, best_d)| d < best_d) {
-            picked = Some((uv, d));
+        du + dv
+    };
+
+    let mut seeds = [Some(uv_guess), None];
+    let tol_u = EFF_ZERO_SQRT * (1.0 + u_len);
+    let tol_v = EFF_ZERO_SQRT * (1.0 + v_len);
+    if seam_wrap.u {
+        if (uv_guess.x - seam_wrap.nat.min().x).abs() <= tol_u {
+            seeds[1] = Some(Point2::new(seam_wrap.nat.max().x, uv_guess.y));
+        } else if (uv_guess.x - seam_wrap.nat.max().x).abs() <= tol_u {
+            seeds[1] = Some(Point2::new(seam_wrap.nat.min().x, uv_guess.y));
         }
     }
-    if let Some((uv, _)) = picked {
-        let (dev, _) = normal_dev(uv)?;
-        let scaled = max2(1.0, pt_3d.distance(surface.evaluate_point(k, uv)?)) * approx_tol_3d;
-        if dev <= max2(scaled * 10.0, good_dev_limit) {
-            return Ok(Some(uv));
+    if seeds[1].is_none() && seam_wrap.v {
+        if (uv_guess.y - seam_wrap.nat.min().y).abs() <= tol_v {
+            seeds[1] = Some(Point2::new(uv_guess.x, seam_wrap.nat.max().y));
+        } else if (uv_guess.y - seam_wrap.nat.max().y).abs() <= tol_v {
+            seeds[1] = Some(Point2::new(uv_guess.x, seam_wrap.nat.min().y));
         }
     }
-    Ok(None)
+
+    let base_dev_limit = max2(approx_tol_3d * 10.0, EFF_ZERO_SQRT);
+    let mut best: Option<(Point2, f64)> = None;
+    for seed in seeds.into_iter().flatten() {
+        let r = surface.local_point_solve::<ObjectHandle>(
+            k,
+            uv_domain,
+            SolverOperation::Normalize,
+            pt_3d,
+            seed,
+        )?;
+        if !r.found {
+            continue;
+        }
+        let s = &r.solution.start;
+        let uv = Point2::new(
+            s.parameters.first().copied().unwrap_or(0.0),
+            s.parameters.get(1).copied().unwrap_or(0.0),
+        );
+        let p = surface.evaluate_point(k, uv)?;
+        let n = surface.evaluate_normal(k, uv, Side::Left, Side::Left)?;
+        let (dev, _) = line_point_distance(p, n, pt_3d);
+        let scaled_limit = max2(
+            max2(1.0, p.distance(pt_3d)) * approx_tol_3d * 10.0,
+            base_dev_limit,
+        );
+        if dev > scaled_limit {
+            continue;
+        }
+        let d = cyclic_uv_dist(uv);
+        if best.is_none_or(|(_, best_d)| d < best_d) {
+            best = Some((uv, d));
+        }
+    }
+
+    Ok(best.map(|(uv, _)| uv))
 }
 
 /// Finds the exact drop point where the dropped curve crosses a closed seam (`axis`, `U` or
@@ -2298,6 +2249,12 @@ impl Surface {
                                     if let Some(last) = knots.last_mut() {
                                         *last = s_interval.max();
                                     }
+                                } else if out.uv_curves.len() > uv_curves_before_trace {
+                                    ctrl_poly.clear();
+                                    knots.clear();
+                                    out.uv_curves.truncate(uv_curves_before_trace);
+                                    max_drop_to_surf = max_drop_to_surf_before_trace;
+                                    max_approx_dev = max_approx_dev_before_trace;
                                 }
                                 abort_trace = true;
                                 break;
@@ -3663,7 +3620,41 @@ mod tests {
             "exiting a non-seam boundary after crossing a seam must abandon atomically"
         );
 
-        // 3. Single-piece `drop_curve_base` keeps its contract of never returning partial-interval
+        // 3. Full cylinder, curve crosses the U seam, reaches the top boundary (z = 40) at a
+        // knot, and exits past z = 40 by less than `approx_tol_3d` (with 3D end gap >> tol):
+        // the short-tail exit allowance must also roll back the pre-seam piece atomically.
+        let short_exit_top = Curve::from(BSplineCurve::from_nurb(
+            NurbCurve::new(
+                vec![
+                    CPoint::new(20.0, -2.0, 30.0, NOW),
+                    CPoint::new(20.0, 2.0, 40.0, NOW),
+                    CPoint::new(20.0, 2.0, 40.0 + 5e-7, NOW),
+                ],
+                1,
+                vec![0.0, 0.0, 0.999_999, 1.0, 1.0],
+            )
+            .unwrap(),
+            3,
+            false,
+        ));
+        let out_short_exit = surface
+            .drop_and_trim_curve::<NoObject>(
+                &k,
+                &full_dom,
+                &short_exit_top,
+                &short_exit_top.natural_interval(),
+                1e-6,
+                true,
+                false,
+                None,
+            )
+            .unwrap();
+        assert!(
+            out_short_exit.uv_curves.is_empty(),
+            "short-tail non-seam exit after crossing a seam must roll back partial pieces"
+        );
+
+        // 4. Single-piece `drop_curve_base` keeps its contract of never returning partial-interval
         // seam-split pieces (callers such as `srf_srf_intersection` expect each UV curve to cover
         // the whole interval).
         let out_base = surface

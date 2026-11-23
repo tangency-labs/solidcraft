@@ -205,6 +205,30 @@ fn curves_crossing_a_closed_cylinders_seam_drop_as_two_pieces_and_cut() {
         dropped_chord.iter().all(|(c, _)| seam_hit(c, 20.0)),
         "both pieces of the chord end on the seam"
     );
+    // The two non-seam endpoints must match the radial projections of [d, -a, 20] and [d, a, 20]
+    // (one each, order-independently), ruling out duplicated single-side pieces.
+    let hyp = d.hypot(a);
+    let want_neg = [r * d / hyp, -r * a / hyp, 20.0];
+    let want_pos = [r * d / hyp, r * a / hyp, 20.0];
+    let near = |p: [f64; 3], q: [f64; 3]| {
+        (p[0] - q[0]).abs() < 1e-5 && (p[1] - q[1]).abs() < 1e-5 && (p[2] - q[2]).abs() < 1e-5
+    };
+    let mut non_seam_ends = Vec::with_capacity(2);
+    for (c, _) in &dropped_chord {
+        let p = points(c);
+        let (a_end, b_end) = (p[0], p[p.len() - 1]);
+        let other = if near(a_end, [r, 0.0, 20.0]) {
+            b_end
+        } else {
+            a_end
+        };
+        non_seam_ends.push(other);
+    }
+    assert!(
+        (near(non_seam_ends[0], want_neg) && near(non_seam_ends[1], want_pos))
+            || (near(non_seam_ends[0], want_pos) && near(non_seam_ends[1], want_neg)),
+        "chord non-seam endpoints must span both sides of seam: got {non_seam_ends:?}, want {want_neg:?} and {want_pos:?}"
+    );
 
     // Slot facing +x across the seam (the repro of issue #20836): two straight sides at
     // y = +-3 and two semicircular ends about (20, 0, 12) and (20, 0, 28).
