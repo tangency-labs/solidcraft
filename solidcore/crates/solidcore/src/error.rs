@@ -618,6 +618,13 @@ impl TargetEdge {
         }
     }
 
+    /// The edge `edge` of the caller's body, named by an operation that works on that body
+    /// itself (a weld bead's refusal, #15129).
+    #[must_use]
+    pub(crate) const fn of_target(edge: EdgeId) -> Self {
+        Self(edge)
+    }
+
     /// The edge's id in the caller's body.
     #[must_use]
     pub const fn id(self) -> EdgeId {
@@ -654,6 +661,13 @@ impl TargetFace {
     pub const fn id(self) -> FaceId {
         self.0
     }
+
+    /// The face `face` of the caller's body, named by an operation that works on that body
+    /// itself (a weld bead's refusal, #15129).
+    #[must_use]
+    pub(crate) const fn of_target(face: FaceId) -> Self {
+        Self(face)
+    }
 }
 
 impl TargetVertex {
@@ -667,6 +681,13 @@ impl TargetVertex {
             EntityRef::Vertex(v) => Some(Self(v)),
             _ => None,
         }
+    }
+
+    /// The vertex `vertex` of the caller's body, named by an operation that works on that
+    /// body itself (a weld bead's refusal, #15129).
+    #[must_use]
+    pub(crate) const fn of_target(vertex: VertexId) -> Self {
+        Self(vertex)
     }
 
     /// The vertex's id in the caller's body.
@@ -788,6 +809,10 @@ pub enum FitMeasure {
     Wall,
     /// A distance (an extension's, a chamfer's).
     Distance,
+    /// A weld bead's leg (#15129): from the joint line to the toe, straight.
+    Leg,
+    /// A weld bead's sagitta (#15129): how far the arc's middle may stand off the chord.
+    Sagitta,
 }
 
 impl FitMeasure {
@@ -801,6 +826,8 @@ impl FitMeasure {
             Self::Setback => "setback",
             Self::Wall => "wall",
             Self::Distance => "distance",
+            Self::Leg => "leg",
+            Self::Sagitta => "sagitta",
         }
     }
 }
@@ -1097,6 +1124,17 @@ pub enum Reason {
         /// The support net's domain.
         domain: [[f64; 2]; 2],
     },
+    /// An intersection edge whose end is continued to its vertex would leave its faces: the
+    /// continued span, `gap` long at its end, lies up to `bound` (certified) off them,
+    /// past the `tolerance` it must stay within (not upstream, #3062).
+    EdgeOffItsFaces {
+        /// How far the edge's end lay from its vertex.
+        gap: f64,
+        /// The certified bound of the continued span's distance from its faces.
+        bound: f64,
+        /// The tolerance it must stay within.
+        tolerance: f64,
+    },
 }
 
 impl Reason {
@@ -1118,7 +1156,8 @@ impl Reason {
             | Self::Topology(_)
             | Self::Surface(_)
             | Self::Blend(_)
-            | Self::FootPastDomainEnd { .. } => None,
+            | Self::FootPastDomainEnd { .. }
+            | Self::EdgeOffItsFaces { .. } => None,
             Self::Offset(o) => o.entity(),
             Self::Boolean(b) => b.entity(),
         }
@@ -1128,7 +1167,9 @@ impl Reason {
     /// comparison detail).
     pub(crate) fn comparison_status(&self) -> i32 {
         match self {
-            Self::Failed(_) | Self::FootPastDomainEnd { .. } => SM_ERR,
+            Self::Failed(_) | Self::FootPastDomainEnd { .. } | Self::EdgeOffItsFaces { .. } => {
+                SM_ERR
+            }
             Self::Offset(o) => o.comparison_status(),
             Self::Nurbs(n) => n.comparison_status(),
             Self::Boolean(b) => b.comparison_status(),
@@ -1153,6 +1194,7 @@ impl Reason {
         match self {
             Self::Failed(_) => ErrorKind::of_status(status),
             Self::FootPastDomainEnd { .. } => ErrorKind::OutsideDomain,
+            Self::EdgeOffItsFaces { .. } => ErrorKind::NotWithinTolerance,
             Self::Offset(o) => o.kind(),
             Self::Nurbs(n) => n.kind(),
             Self::Boolean(b) => b.kind(),
@@ -1176,6 +1218,14 @@ impl core::fmt::Display for Reason {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         match self {
             Self::Failed(what) => f.write_str(what),
+            Self::EdgeOffItsFaces {
+                gap,
+                bound,
+                tolerance,
+            } => write!(
+                f,
+                "an intersection edge continued {gap:e} to its vertex would lie up to {bound:e} off its faces, past their tolerance {tolerance:e}"
+            ),
             Self::Offset(o) => o.fmt(f),
             Self::Nurbs(n) => n.fmt(f),
             Self::Boolean(b) => b.fmt(f),
@@ -1981,6 +2031,10 @@ impl SolidError {
 
     /// [`SolidError::Failed`] for a stage that failed, as the phrase says, with status
     /// [`SM_ERR`] (upstream `return SE(SM_ERR)`).
+    ///
+    /// No library site builds it any more (the last ones went in #19856); the tests
+    /// keep it to check the phrase causes still on the wire.
+    #[cfg(test)]
     pub(crate) fn stage_failed(operation: &'static str, what: &'static str) -> Self {
         Failure::new(operation, Reason::Failed(what)).into_error()
     }
@@ -1988,6 +2042,10 @@ impl SolidError {
     /// [`SolidError::Failed`] for an entity a stage needs that is not there, as the phrase
     /// says, with status [`SM_ERR_NULL_POINTER`] (upstream `NER(ptr)` on a `NULL`
     /// pointer); its kind is [`ErrorKind::Missing`].
+    ///
+    /// No library site builds it any more (the last ones went in #19856); the tests
+    /// keep it to check the phrase causes still on the wire.
+    #[cfg(test)]
     pub(crate) fn entity_missing(operation: &'static str, what: &'static str) -> Self {
         Failure::new(operation, Reason::Failed(what))
             .with_status(SM_ERR_NULL_POINTER)
@@ -3451,17 +3509,6 @@ pub(crate) mod replaced_upstream_samples {
         };
         #[rustfmt::skip] // one file per line, so conversions in parallel merge cleanly
         const PINNED: &[(&str, usize)] = &[
-            ("solidcore/src/boolean/api_brep.rs", 2),
-            ("solidcore/src/boolean/merge/p1.rs", 17),
-            ("solidcore/src/boolean/merge/p2.rs", 4),
-            ("solidcore/src/boolean/merge/p3.rs", 15),
-            ("solidcore/src/boolean/merge/p4.rs", 5),
-            ("solidcore/src/boolean/merge/p4/arena_pair.rs", 2),
-            ("solidcore/src/boolean/merge/p4/kernel_adapter.rs", 1),
-            ("solidcore/src/boolean/merge/p5.rs", 11),
-            ("solidcore/src/boolean/topology_intersector/p1.rs", 10),
-            ("solidcore/src/boolean/topology_intersector/p2.rs", 4),
-            ("solidcore/src/boolean/topology_intersector/p3.rs", 10),
             ("solidcore/src/offset/offset_executive/p2.rs", 1),
         ];
         assert_pinned("generic phrase-cause sites", &crate_sites(&PHRASES), PINNED);

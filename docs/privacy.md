@@ -15,9 +15,14 @@ Everything else that reaches the network does so only when you ask: sending a
 
 SolidCraft sends anonymous usage statistics so we know how many installations there are, how many
 are used each day, for how long, and which tools and operations people use. They are on unless
-you, your environment or your organization turns them off. The first start shows a notice,
-**SolidCraft shares anonymous usage statistics.**, with **Turn off** and **Details**. Nothing is
-counted before that notice has been shown.
+you, your environment or your organization turns them off, but nothing is counted or sent until
+you agree. The first start shows a notice: **SolidCraft shares anonymous usage statistics to help
+make it better: which tools you use, never your designs.**, with **Settings** (Preferences ›
+Privacy, where the switch is) and **OK**. Only **OK** starts counting; until then the counter
+doesn't run at all and nothing is kept to send later. **Settings** alone is no answer: the notice
+stays. Closed with the ×, it shows again at the next start. Turning sharing off in Preferences
+ends the notice, and nothing is ever counted. Installations of 0.46 see this notice once, and
+count nothing until OK; anyone who had turned sharing off stays off.
 
 ### What is sent
 
@@ -95,9 +100,22 @@ Like any web request, a report passes through Cloudflare's network, and our host
 Railway, keeps request logs that include the sender's IP address for up to 30 days; we don't use
 them.
 
+### Deleting your data
+
+**Preferences › Privacy** shows your installation ID. **Delete my data** asks the server to delete
+every report it holds for that ID, and the app uses a new random ID from then on. The request
+carries only the ID; it is sent in the background, works with statistics turned off, and is tried
+again (once an hour, and at the next start) until the server answers. The server deletes that
+installation's reports and its first-seen date, and answers the same way whether or not it had
+any, so nobody can use it to find out whether an ID exists.
+
+The daily totals are kept: they are counts (how many installations, minutes, runs of each
+command) with no installation ID in them, so they can't be traced back to you. **Reset ID** alone
+starts a new ID without asking the server to delete anything.
+
 ### Turning it off
 
-- **Preferences › Privacy › Share anonymous usage statistics**, or **Turn off** on the notice.
+- **Preferences › Privacy › Share anonymous usage statistics** (**Settings** on the notice opens it). Switching it on there counts as OK.
 - The environment: `DO_NOT_TRACK=1` or `SOLIDCRAFT_NO_TELEMETRY=1` (any value but empty, `0` or
   `false`). Preferences then says it is turned off by the environment, and no notice is shown.
 - Your organization's policy `UsageStatistics` = `0`

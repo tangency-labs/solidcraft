@@ -748,7 +748,11 @@ pub(crate) fn picked_group(app: &SolveApp) -> Option<u64> {
 pub(crate) fn toggle_picked_folder(app: &mut SolveApp) -> bool {
     let Some(pick) = app.tree.picked_folder.as_ref().filter(|pick| pick.current(app)) else { return false };
     let key = pick.key.clone();
-    toggle_folder(app, &key);
+    if key == "origin" {
+        app.set_origin_shown(!app.origin_shown());
+    } else {
+        toggle_folder(app, &key);
+    }
     true
 }
 
@@ -1479,7 +1483,7 @@ pub(crate) fn panel_contents(app: &mut SolveApp, ui: &mut egui::Ui) {
     }
     if !crate::render_workspace::browser_mode(app, ui) {
         crate::edit_in_place::browser_strip(app, ui);
-        browser_rows_hugging(app, ui);
+        browser_rows(app, ui, !holds_compact_history(app));
     }
     if render {
         ui.ctx().data_mut(|data| data.remove::<bool>(egui::Id::unique("sc_compact_tree")));
@@ -1502,10 +1506,32 @@ pub(crate) fn magnifier(app: &mut SolveApp) {
     }
 }
 
+/// In the compact layout with the History shown in the Browser, the Browser is the only side panel
+/// and holds the whole History, so it fills the window's height instead of hugging its rows (#14566).
+/// The panel host still folds it to its header when the user folds it.
+pub(crate) fn holds_compact_history(app: &SolveApp) -> bool {
+    app.ui.layout == crate::ui_kit::LayoutMode::Docked && app.preferences.history_in_browser && !crate::render_workspace::active(app)
+}
+
 fn prepare_model(app: &mut SolveApp) {
     if app.tree.model.as_ref().is_none_or(|model| !model.matches(&app.session)) {
         app.tree.model = Some(model::Model::new(&app.session));
     }
+}
+
+/// Walk the placements once for this model, so [`placed_body_path`] can answer without `&mut`
+/// (the Parts and Components selection modes pick while the view draws).
+pub(crate) fn prepare_body_paths(app: &mut SolveApp) {
+    prepare_model(app);
+    if let Some(model) = app.tree.model.as_mut() {
+        model.body_path(&app.session, "");
+    }
+}
+
+/// The placement a placed body (by its world name) belongs to, after [`prepare_body_paths`]; None
+/// for a body of the top-level design.
+pub(crate) fn placed_body_path(app: &SolveApp, body: &str) -> Option<Vec<u64>> {
+    app.tree.model.as_ref().filter(|model| model.matches(&app.session))?.placed_path(body)
 }
 
 fn model_placement(app: &mut SolveApp, path: &[u64]) -> Option<std::sync::Arc<solidcraft_engine::occurrences::OccurrencePlacement>> {
@@ -1558,12 +1584,13 @@ fn model_feature_indices(app: &SolveApp, component: u64, sketches: bool) -> Vec<
 /// The design's Origin, Bodies and Construction rows as the browser draws them (a click picks
 /// for an open dialog as there), for the design tree over the view while a dialog holds the left
 /// column (`dialog_tree`, #6710).
-fn browser_rows_hugging(app: &mut SolveApp, ui: &mut egui::Ui) {
+/// `shrink_height` hugs the rows; otherwise they take the whole height they're given.
+fn browser_rows(app: &mut SolveApp, ui: &mut egui::Ui, shrink_height: bool) {
     crate::semantic_content::show(
         app,
         ui,
         crate::semantic_content::ContentOwner::BROWSER,
-        crate::semantic_content::ContentRequest::Browser { shrink_height: true },
+        crate::semantic_content::ContentRequest::Browser { shrink_height },
     );
 }
 
@@ -2251,6 +2278,10 @@ fn origin_rows_at(app: &mut SolveApp, rows: &mut Rows<'_>, depth: usize, acts: &
             ..Default::default()
         },
     );
+    if r.clicked && !r.fold {
+        // The clicked Origin row is what V shows or hides, as for a folder (#14554).
+        pick_folder(app, key);
+    }
     if r.fold || r.clicked {
         toggle(app, key, false);
         if component && r.clicked {
@@ -3754,7 +3785,7 @@ pub fn dims_overlay(app: &SolveApp, painter: &egui::Painter, proj: &crate::viewp
     let rect = painter.clip_rect();
     let mut drawn = Vec::new();
     let tk = Tokens::get();
-    let st = crate::open_meshing::session_world(&app.session);
+    let st = crate::open_meshing::still_world(app);
     for id in app
         .session
         .visibility

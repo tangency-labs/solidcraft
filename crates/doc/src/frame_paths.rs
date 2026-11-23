@@ -36,9 +36,14 @@ pub(super) fn uses(st: &ModelState, kind: &FeatureKind) -> Result<bool> {
 /// Path stock has no straight corner/cut model yet. Refuse saved settings too;
 /// none of the ordinary finishing options may silently disappear on this route.
 fn check_options(kind: &FeatureKind) -> Result<()> {
-    let FeatureKind::FrameMember { corner, corners, fit_ends, coped, flip, gap, continuous, pairs, .. } = kind else {
+    let FeatureKind::FrameMember { corner, corners, fit_ends, coped, flip, gap, continuous, pairs, groups, .. } = kind else {
         return Err(DocError::Invalid("not a frame member feature".into()));
     };
+    if !groups.is_empty() {
+        return Err(DocError::Invalid(
+            "not supported yet: curved or continuous members cannot be combined with groups; use separate Frame Members".into(),
+        ));
+    }
     if !corner.is_none() || !corners.is_empty() || *fit_ends || *coped || *flip || gap.is_some() {
         return Err(DocError::Invalid(
             "not supported yet: curved or continuous frame members require corner None, no overrides, Fit Ends, Coped, Flip or gap".into(),

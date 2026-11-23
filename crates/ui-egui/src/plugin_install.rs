@@ -110,11 +110,21 @@ pub(crate) fn permission_lines(plugin: &Value) -> Vec<String> {
         let extensions = opens.iter().map(|e| std::format!(".{e}")).collect::<Vec<_>>().join(", ");
         lines.push(format("plugin_install.opens", &[("extensions", &extensions)]));
     }
+    let writes = list(plugin.get("writes"));
+    if !writes.is_empty() {
+        let extensions = writes.iter().map(|e| std::format!(".{e}")).collect::<Vec<_>>().join(", ");
+        lines.push(format("plugin_install.writes", &[("extensions", &extensions)]));
+    }
     if permissions.and_then(|p| p.get("input_folder")).and_then(Value::as_bool).unwrap_or(false) {
         lines.push(tr("plugin_install.input_folder").to_string());
     }
     if permissions.and_then(|p| p.get("clock")).and_then(Value::as_bool).unwrap_or(false) {
         lines.push(tr("plugin_install.clock").to_string());
+    }
+    for listener in plugin.get("listeners").and_then(Value::as_array).into_iter().flatten() {
+        if let Some(entry) = listener.get("entry").and_then(Value::as_str) {
+            lines.push(format("prefs.plugin_design_listener", &[("entry", entry)]));
+        }
     }
     let commands = list(plugin.get("commands")).len();
     match commands {
@@ -315,7 +325,7 @@ mod tests {
             {"name":"source","read":true,"write":false},
             {"name":"output","read":false,"write":true},
             {"name":"project","read":true,"write":true}
-        ]}});
+        ]},"listeners":[{"entry":"refresh","on":["design.changed"]}]});
         let lines = permission_lines(&plugin);
         assert_eq!(
             lines,
@@ -326,7 +336,8 @@ mod tests {
                 "Inspect, install, remove or run other plugins.",
                 "source (read)",
                 "output (write)",
-                "project (read and write)"
+                "project (read and write)",
+                "Refresh after design changes (refresh); cannot edit, write files or start jobs"
             ]
         );
     }
