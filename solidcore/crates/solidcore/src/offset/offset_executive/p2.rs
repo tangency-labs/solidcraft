@@ -33,9 +33,9 @@
 //! reasons where the two files share the link); a missing B-rep, a face of the input with
 //! no surface, a shell selection naming no face of the body and a shell wall below twice
 //! the tolerance are the caller's input; an inset that leaves no cavity, an extended
-//! offset's face that collapses or meets itself, and a trim past the extension are named;
-//! the static offset's failed solid offset is [`OffsetFailure::OffsetNotBuilt`], whose kept
-//! cause decides its class.
+//! offset's face that collapses or meets itself, and a trim past the extension are named.
+//! `collapse_offset_status` keeps its generic cause: it hides the executive's reason from
+//! solidcore-ops, which passes the kernel's status there (`docs/offset-and-shell.md` §4.2).
 //! Offset/member inputs are mutable so existing queries can populate lazy UV trim
 //! geometry in the same arena; this adds no constructive capability or topology copy.
 //! Not upstream or the fork (WR-705): the two API entry points run the tolerance update on their result.
@@ -877,7 +877,8 @@ impl OffsetExecutive {
                 for &edgeuse in &offset_edgeuses {
                     kernel.check_cancelled(OP_SOLID)?;
                     marked.insert(edgeuse);
-                    let mut radial = present(eu::radial(original, edgeuse)?, OP_SOLID, EU_NO_RADIAL)?;
+                    let mut radial =
+                        present(eu::radial(original, edgeuse)?, OP_SOLID, EU_NO_RADIAL)?;
                     if marked.contains(&radial) {
                         continue;
                     }
@@ -1056,8 +1057,11 @@ impl OffsetExecutive {
                     let (Some(across), Some(offset_edgeuse), Some(offset_across)) =
                         (across, offset_edgeuse, offset_across)
                     else {
-                        unbridged =
-                            unbridged.or(Some(present(eu::face(original, radial)?, OP_EXTENDED, EU_NO_FACE)?));
+                        unbridged = unbridged.or(Some(present(
+                            eu::face(original, radial)?,
+                            OP_EXTENDED,
+                            EU_NO_FACE,
+                        )?));
                         continue;
                     };
                     let mut stores = NotificationStores {
@@ -1079,14 +1083,25 @@ impl OffsetExecutive {
                             notifications.result_key_of,
                         ))?;
                     if mated.is_none() {
-                        unbridged =
-                            unbridged.or(Some(present(eu::face(original, radial)?, OP_EXTENDED, EU_NO_FACE)?));
+                        unbridged = unbridged.or(Some(present(
+                            eu::face(original, radial)?,
+                            OP_EXTENDED,
+                            EU_NO_FACE,
+                        )?));
                         continue;
                     }
                     marked.insert(edgeuse);
-                    marked.insert(present(eu::mate(original, edgeuse)?, OP_EXTENDED, EU_NO_MATE)?);
+                    marked.insert(present(
+                        eu::mate(original, edgeuse)?,
+                        OP_EXTENDED,
+                        EU_NO_MATE,
+                    )?);
                     marked.insert(across);
-                    marked.insert(present(eu::mate(original, across)?, OP_EXTENDED, EU_NO_MATE)?);
+                    marked.insert(present(
+                        eu::mate(original, across)?,
+                        OP_EXTENDED,
+                        EU_NO_MATE,
+                    )?);
                 }
             }
             // On an inset shell with selected open faces (`shell_faces`), a tangent
@@ -1118,7 +1133,8 @@ impl OffsetExecutive {
             if self.extend_convex_edges() {
                 for &edgeuse in &mapped {
                     kernel.check_cancelled(OP_EXTENDED)?;
-                    let radial = present(eu::radial(original, edgeuse)?, OP_EXTENDED, EU_NO_RADIAL)?;
+                    let radial =
+                        present(eu::radial(original, edgeuse)?, OP_EXTENDED, EU_NO_RADIAL)?;
                     // (WR-346: mated across it above)
                     if self.radial_face_collapsed(original, radial)? {
                         continue;
@@ -1150,9 +1166,17 @@ impl OffsetExecutive {
                             notifications,
                         )?;
                         marked.insert(radial);
-                        marked.insert(present(eu::mate(original, radial)?, OP_EXTENDED, EU_NO_MATE)?);
+                        marked.insert(present(
+                            eu::mate(original, radial)?,
+                            OP_EXTENDED,
+                            EU_NO_MATE,
+                        )?);
                         marked.insert(edgeuse);
-                        marked.insert(present(eu::mate(original, edgeuse)?, OP_EXTENDED, EU_NO_MATE)?);
+                        marked.insert(present(
+                            eu::mate(original, edgeuse)?,
+                            OP_EXTENDED,
+                            EU_NO_MATE,
+                        )?);
                     }
                 }
             }
@@ -1160,7 +1184,8 @@ impl OffsetExecutive {
             let mut deferred_shell_tangents = Vec::new();
             for &edgeuse in &mapped {
                 kernel.check_cancelled(OP_EXTENDED)?;
-                let mut radial = present(eu::radial(original, edgeuse)?, OP_EXTENDED, EU_NO_RADIAL)?;
+                let mut radial =
+                    present(eu::radial(original, edgeuse)?, OP_EXTENDED, EU_NO_RADIAL)?;
                 // (WR-346: mated across it above)
                 if self.radial_face_collapsed(original, radial)? {
                     continue;
@@ -1228,8 +1253,11 @@ impl OffsetExecutive {
                         continue;
                     }
                     if !self.squeeze_collapsed_end_edge(kernel, edgeuse, notifications)? {
-                        unbridged =
-                            unbridged.or(Some(present(eu::face(original, radial)?, OP_EXTENDED, EU_NO_FACE)?));
+                        unbridged = unbridged.or(Some(present(
+                            eu::face(original, radial)?,
+                            OP_EXTENDED,
+                            EU_NO_FACE,
+                        )?));
                     }
                 }
                 if let Some(face) = unbridged {
@@ -2760,17 +2788,14 @@ fn kept_by_make_manifold(kernel: &mut Kernel, b: &Brep) -> Result<Option<Kept>> 
 }
 
 /// `OffsetBrep`'s `SER(SM_ERR)` after a failed `DoSolidOffset`: the status is `SM_ERR`,
-/// and the offset's own error is kept as its cause (#2615, #2511), which decides its class
-/// ([`OffsetFailure::OffsetNotBuilt`], the guide's rule 6).
+/// and the offset's own error is kept as its cause (#2615, #2511).
 fn collapse_offset_status<T>(result: Result<T>) -> Result<T> {
     result.map_err(|error| {
         // a cancel (#2136, #2372) is no offset failure: it is returned as it is
         if error.is_unported_or_cancelled() {
             error
         } else {
-            Failure::new(OP_OFFSET, OffsetFailure::OffsetNotBuilt)
-                .caused_by(error)
-                .into_error()
+            SolidError::failed_after(OP_OFFSET, "the offset could not be built", error)
         }
     })
 }
@@ -6578,6 +6603,18 @@ mod tests {
             "an operand of the shell's difference is not there",
         );
         defect(difference(Some(source_brep()), true), "which holds none");
+        // squeezing a collapsed face's end edge out of an offset B-rep that is not there
+        let mut kernel = Kernel::default();
+        let original = source_brep();
+        let mut fixture = NotificationFixture::new(&original);
+        let mut exec = executive();
+        let edgeuse = EdgeuseId::from_index(0);
+        exec.relate_edgeuses(edgeuse, EdgeuseId::from_index(1));
+        defect(
+            exec.squeeze_collapsed_end_edge(&mut kernel, edgeuse, &mut fixture.context())
+                .unwrap_err(),
+            "the offset B-rep is not there",
+        );
         // a wall of a thickened sheet without its surface
         let mut kernel = Kernel::default();
         let (mut brep, face) = one_face(false);
@@ -6586,29 +6623,6 @@ mod tests {
             put_planar_face_on_its_plane(&mut kernel, &mut brep, face, &mut fixture.context())
                 .unwrap_err(),
             "has no surface",
-        );
-    }
-
-    /// TE-O-18 part 6 (#19851): the static offset's failed solid offset is a named offset
-    /// cause with `SM_ERR` that keeps the offset's error, which decides its class (the
-    /// conversion guide, rule 6); a cancel passes as it is.
-    #[test]
-    fn a_failed_solid_offset_is_named_and_keeps_its_cause() {
-        let inner = SolidError::sm_err("test::inner");
-        let e = collapse_offset_status::<()>(Err(inner.clone())).unwrap_err();
-        assert!(e.offset_failure().is_some(), "{e}");
-        assert_eq!(e.sm_status(), Some(SM_ERR));
-        assert_eq!(e.cause(), Some(&inner));
-        assert!(!e.is_defect(), "{e}");
-        let defect = Failure::new("test::inner", OffsetFailure::Defect { why: "a step" })
-            .into_error();
-        let e = collapse_offset_status::<()>(Err(defect)).unwrap_err();
-        assert!(e.offset_failure().is_some(), "{e}");
-        assert!(e.is_defect(), "the defect it keeps decides: {e}");
-        let cancelled = SolidError::Cancelled { operation: "test::inner" };
-        assert_eq!(
-            collapse_offset_status::<()>(Err(cancelled.clone())),
-            Err(cancelled)
         );
     }
 }

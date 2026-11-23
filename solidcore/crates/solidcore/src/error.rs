@@ -2019,10 +2019,6 @@ impl SolidError {
 
     /// [`SolidError::Failed`] for a stage whose failure upstream reports as a generic
     /// `SER(SM_ERR)`: status [`SM_ERR`], keeping `cause`, the stage's error (#2511).
-    ///
-    /// No library site builds it any more (the last one went in TE-O-18, #19851); the tests
-    /// keep it to check the phrase causes still on the wire.
-    #[cfg(test)]
     pub(crate) fn failed_after(
         operation: &'static str,
         what: &'static str,
@@ -3512,7 +3508,9 @@ pub(crate) mod replaced_upstream_samples {
             wrappers: Wrappers::Phrase,
         };
         #[rustfmt::skip] // one file per line, so conversions in parallel merge cleanly
-        const PINNED: &[(&str, usize)] = &[];
+        const PINNED: &[(&str, usize)] = &[
+            ("solidcore/src/offset/offset_executive/p2.rs", 1),
+        ];
         assert_pinned("generic phrase-cause sites", &crate_sites(&PHRASES), PINNED);
     }
 }
