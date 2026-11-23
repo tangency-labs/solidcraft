@@ -275,7 +275,7 @@ pub(super) fn eval(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, 
             } else {
                 for p in faces {
                     let fi =
-                        crate::appearance::face_index_at(&mb, p.0).ok_or_else(|| DocError::Invalid(format!("Fair: no face of {body} at {p:?}")))?;
+                        crate::appearance::face_index_at(&mb, p.0).ok_or_else(|| DocError::Invalid(format!("Fair: no face of {body} at {}", p.0)))?;
                     if !picked.contains(&fi) {
                         picked.push(fi);
                     }
@@ -521,7 +521,7 @@ pub(super) fn eval(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, 
             let mut picked: Vec<usize> = Vec::new();
             for p in &picks {
                 let fi =
-                    crate::appearance::face_index_at(&mb, *p).ok_or_else(|| DocError::Invalid(format!("Offset: no face of {} at {p:?}", mb.name)))?;
+                    crate::appearance::face_index_at(&mb, *p).ok_or_else(|| DocError::Invalid(format!("Offset: no face of {} at {p}", mb.name)))?;
                 if !picked.contains(&fi) {
                     picked.push(fi);
                 }
