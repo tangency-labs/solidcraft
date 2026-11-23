@@ -336,11 +336,11 @@ crates/solidcore/src/blend/fillet_geom/surface_plane_curve.rs	surface_plane_curv
 crates/solidcore/src/blend/fillet_geom/surface_plane_curve.rs	surface_plane_curve	windows	2	proven	windows(2)	constant non-zero size
 crates/solidcore/src/blend/fillet_geom/surface_plane_curve.rs	surface_plane_curve	with_capacity	1	open	Vec::with_capacity(st.len())	
 crates/solidcore/src/blend/fillet_geom/surface_plane_curve.rs	surface_plane_curve	with_capacity	2	open	Vec::with_capacity(st.len() + off.len())	
-crates/solidcore/src/blend/fillet_geom/tangent_end_rib.rs	tangent_end_rib	Vec::insert	1	open	insert(at, 0.5 * (t0 + t1))	
-crates/solidcore/src/blend/fillet_geom/tangent_end_rib.rs	tangent_end_rib	Vec::insert	2	open	insert(at, alpha)	
-crates/solidcore/src/blend/fillet_geom/tangent_end_rib.rs	tangent_end_rib	Vec::insert	3	open	insert(at, uv)	
-crates/solidcore/src/blend/fillet_geom/tangent_end_rib.rs	tangent_end_rib	Vec::insert	4	open	insert(at, exact)	
-crates/solidcore/src/blend/fillet_geom/tangent_end_rib.rs	tangent_end_rib	int-rem	1	proven	order % 2	constant non-zero divisor
+crates/solidcore/src/blend/fillet_geom/tangent_end_rib.rs	rib_of	Vec::insert	1	open	insert(at, 0.5 * (t0 + t1))	
+crates/solidcore/src/blend/fillet_geom/tangent_end_rib.rs	rib_of	Vec::insert	2	open	insert(at, alpha)	
+crates/solidcore/src/blend/fillet_geom/tangent_end_rib.rs	rib_of	Vec::insert	3	open	insert(at, uv)	
+crates/solidcore/src/blend/fillet_geom/tangent_end_rib.rs	rib_of	Vec::insert	4	open	insert(at, exact)	
+crates/solidcore/src/blend/fillet_geom/tangent_end_rib.rs	rib_of	int-rem	1	proven	order % 2	constant non-zero divisor
 crates/solidcore/src/blend/fillet_intersector.rs	FilletIntersector::equalise_spans	Vec::insert	1	proven	insert(j + 1, split_knot)	j + 1 < knots.len() by the loop condition
 crates/solidcore/src/blend/fillet_intersector.rs	FilletIntersector::equalise_spans	Vec::insert	2	proven	insert(j + 1, mid_pnt)	pnts.get(j + 1) succeeded just above, so j + 1 < pnts.len()
 crates/solidcore/src/blend/fillet_intersector.rs	FilletIntersector::build_flush_geometry	windows	1	proven	windows(2)	constant non-zero size
@@ -1142,16 +1142,16 @@ crates/solidcore/src/topology/face/p1.rs	move_seam_notified	int-rem	1	open	1 % c
 crates/solidcore/src/topology/face/p1.rs	move_seam_notified	int-rem	2	open	(jj + 1) % cnt	
 crates/solidcore/src/topology/face/p1.rs	move_seam_notified	int-rem	3	open	(max_indx + 1) % cnt	
 crates/solidcore/src/topology/face/p1.rs	split_at_seam_merges	rotate	1	open	rotate_left(at)	
-crates/solidcore/src/topology/face/p2.rs	points_in_face	int-div	1	open	point_count / trim_curve_cnt	
-crates/solidcore/src/topology/face/p2.rs	points_in_face	int-div	2	open	point_count / trim_curve_cnt	
-crates/solidcore/src/topology/face/p2.rs	points_in_face	int-div	3	open	point_count / trim_curve_cnt	
-crates/solidcore/src/topology/face/p2.rs	points_in_face	int-div	4	proven	trim_curve_cnt / 2	constant non-zero divisor
-crates/solidcore/src/topology/face/p2.rs	points_in_face	int-div	5	proven	ii / 2	constant non-zero divisor
-crates/solidcore/src/topology/face/p2.rs	points_in_face	int-div	6	open	div_ceil(2)	
-crates/solidcore/src/topology/face/p2.rs	points_in_face	int-div	7	open	point_count / n_classes	
-crates/solidcore/src/topology/face/p2.rs	points_in_face	int-div	8	open	point_count / n_classes	
-crates/solidcore/src/topology/face/p2.rs	points_in_face	int-div	9	open	point_count / n_classes	
-crates/solidcore/src/topology/face/p2.rs	points_in_face	int-rem	1	proven	ii % 2	constant non-zero divisor
+crates/solidcore/src/topology/face/p2.rs	points_in_face_drawing	int-div	1	open	point_count / trim_curve_cnt	
+crates/solidcore/src/topology/face/p2.rs	points_in_face_drawing	int-div	2	open	point_count / trim_curve_cnt	
+crates/solidcore/src/topology/face/p2.rs	points_in_face_drawing	int-div	3	open	point_count / trim_curve_cnt	
+crates/solidcore/src/topology/face/p2.rs	points_in_face_drawing	int-div	4	proven	trim_curve_cnt / 2	constant non-zero divisor
+crates/solidcore/src/topology/face/p2.rs	points_in_face_drawing	int-div	5	proven	ii / 2	constant non-zero divisor
+crates/solidcore/src/topology/face/p2.rs	points_in_face_drawing	int-div	6	open	div_ceil(2)	
+crates/solidcore/src/topology/face/p2.rs	points_in_face_drawing	int-div	7	open	point_count / n_classes	
+crates/solidcore/src/topology/face/p2.rs	points_in_face_drawing	int-div	8	open	point_count / n_classes	
+crates/solidcore/src/topology/face/p2.rs	points_in_face_drawing	int-div	9	open	point_count / n_classes	
+crates/solidcore/src/topology/face/p2.rs	points_in_face_drawing	int-rem	1	proven	ii % 2	constant non-zero divisor
 crates/solidcore/src/topology/face/p2.rs	remove_suspect_split_at_seam_uv_trim_curves	step_by	1	proven	step_by(2)	constant non-zero step
 crates/solidcore/src/topology/face/p2.rs	trim_curve_breaks	windows	1	proven	windows(2)	constant non-zero size
 crates/solidcore/src/topology/face/p3.rs	is_degenerate	split_at	1	open	split_at_mut(jj)	
