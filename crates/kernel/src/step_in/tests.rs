@@ -5742,8 +5742,26 @@ fn hair_step_with_a_lifted_corner() -> Body {
 /// own check, which the heal used to run again (1, now 0): 2, was 3. The heal kept is the same
 /// either way: given the import's check or running its own, the heal decides on the same check
 /// of the same body.
+///
+/// The profilers counts are process-wide, so another tests checks running at the same time
+/// would be counted too: under a parallel `cargo test` the test runs again alone in a child
+/// process and passes when that child does (nextest already gives each test its own process).
 #[test]
 fn the_heal_of_an_imported_part_reuses_the_imports_check_of_it() {
+    const TEST: &str = "step_in::tests::the_heal_of_an_imported_part_reuses_the_imports_check_of_it";
+    const CHILD: &str = "SOLIDCRAFT_KERNEL_HEAL_REUSE_CHILD";
+    if std::env::var_os("NEXTEST_EXECUTION_MODE").is_none() && std::env::var_os(CHILD).is_none() {
+        let output = std::process::Command::new(std::env::current_exe().unwrap())
+            .args(["--exact", TEST, "--nocapture", "--test-threads=1"])
+            .env(CHILD, "1")
+            .output()
+            .unwrap();
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert!(output.status.success(), "{}\n{stdout}\n{stderr}", output.status);
+        assert!(stdout.contains("test result: ok. 1 passed; 0 failed;"), "the child must run the test: {stdout}");
+        return;
+    }
     let part = hair_step_with_a_lifted_corner();
     let own = crate::validation::failing_check(&part).unwrap().expect("the part fails the check");
     let kinds = |c: &crate::CheckFailure| c.tests.iter().map(|t| t.name.clone()).collect::<std::collections::BTreeSet<_>>();
