@@ -1673,8 +1673,9 @@ impl Body {
         self.mesh_plan_shared(t).map(std::sync::Arc::unwrap_or_clone)
     }
 
-    /// [`Body::mesh_plan`], shared: a body keeping its plans ([`Body::keeping_plans`]) gives the
-    /// plan it made at `t` before, the same allocation, rather than planning again.
+    /// [`Body::mesh_plan`], shared: a body keeping its display plan ([`Body::keeping_plans`])
+    /// gives the plan it made at [`display_tolerance`] before, the same allocation, rather than
+    /// planning again. A plan at any other tolerance is made each time, as before.
     pub fn mesh_plan_shared(&self, t: &MeshTolerance) -> Result<std::sync::Arc<solidcraft_geom::tess::TessPlan>> {
         self.mesh_plan_shared_untimed(t)
     }
@@ -1682,7 +1683,11 @@ impl Body {
     fn mesh_plan_shared_untimed(&self, t: &MeshTolerance) -> Result<std::sync::Arc<solidcraft_geom::tess::TessPlan>> {
         let plan = || crate::profile::timed(crate::profile::Kind::Tessellate, "mesh_plan", || self.mesh_plan_untimed(t));
         match self.memo().and_then(|memo| memo.plans.as_ref()) {
-            Some(plans) if !self.is_mesh() && self.display_of.is_none() => remembered(plans, t, plan),
+            // Only the display plan: other qualities' plans and the coarse check's are made for
+            // their moment and not kept for the part's whole life.
+            Some(plans) if !self.is_mesh() && self.display_of.is_none() && t.key() == display_tolerance(self.size()).key() => {
+                remembered(plans, t, plan)
+            }
             _ => plan().map(std::sync::Arc::new),
         }
     }
@@ -1750,7 +1755,7 @@ impl Body {
         }
     }
 
-    /// A copy of this body that keeps the plans made of it ([`Body::mesh_plan_shared`]) for
+    /// A copy of this body that keeps its display plan ([`Body::mesh_plan_shared`]) for
     /// reuse, for as long as the copy (or a clone of it) lives: an imported part's check plans
     /// it at display tolerance ([`Body::unmeshed_display_faces`]), and its display mesh and the
     /// viewport's plan take that plan rather than planning the part twice more.

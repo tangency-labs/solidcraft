@@ -776,6 +776,10 @@ fn an_imported_part_is_planned_once_for_its_check_and_its_display() {
     assert_eq!(a.positions, b.positions);
     assert_eq!(a.triangles, b.triangles);
     assert_eq!(part.unmeshed_display_faces(), 0);
+    // A plan at any other tolerance (another quality, the coarse check's) is not kept.
+    part.mesh_plan_shared(&crate::MeshTolerance::chord(t.chord * 3.0)).unwrap();
+    part.unmeshed_faces();
+    assert_eq!(kept(part), Some(1), "only the display plan is kept");
 }
 
 #[test]
