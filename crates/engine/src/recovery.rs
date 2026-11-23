@@ -243,7 +243,7 @@ pub fn attach_draft(session: &mut Session, expected: &Document, bytes: &[u8]) ->
     let (form, base_dirty) = Draft::restore(session, bytes)?;
     session.active_component = form.authoring_component;
     session.active_occurrence_path = form.authoring_path.clone();
-    session.forms_prototype = Some(form);
+    session.forms_prototype = Some(Box::new(form));
     if base_dirty {
         session.mark_unsaved();
     }
@@ -260,7 +260,7 @@ pub(crate) fn restore_validating(doc: Document, draft: Option<&[u8]>, path: Opti
         let (form, dirty) = Draft::restore(&session, bytes)?;
         session.active_component = form.authoring_component;
         session.active_occurrence_path = form.authoring_path.clone();
-        session.forms_prototype = Some(form);
+        session.forms_prototype = Some(Box::new(form));
         dirty
     } else {
         true

@@ -111,7 +111,7 @@ impl FormTransformStamp {
 /// current draft source but shares its immutable display and history storage.
 pub struct FormTransformJob {
     source: FormTransformStamp,
-    form: Form,
+    form: Box<Form>,
     space: FormTargetSpace,
     params: Value,
     derived_edit_tolerance: Option<f64>,
@@ -122,7 +122,7 @@ pub struct FormTransformJob {
 /// be accepted; it cannot replace the live document, model or selection.
 pub struct PreparedFormTransform {
     source: FormTransformStamp,
-    form: Option<Form>,
+    form: Option<Box<Form>>,
     space: FormTargetSpace,
     params: Value,
     reply: Value,

@@ -90,7 +90,7 @@ pub(super) fn import(s: &mut Session, p: &Value) -> Result<Value> {
     if let Some(current) = &mut s.forms_prototype {
         current.replace_import(next);
     } else {
-        s.forms_prototype = Some(next);
+        s.forms_prototype = Some(Box::new(next));
     }
     serde_json::to_value(params::BlendReply { path: args.path, objects: summaries(&objects), rejected, active: true, bytes: None, surface: None })
         .map_err(error)

@@ -590,7 +590,7 @@ mod tests {
                     hierarchy: None,
                 };
                 let mut app = SolveApp::new(Default::default(), Default::default());
-                app.session.forms_prototype = Some(solidcraft_engine::forms_prototype::Form::from_definition(definition, 1, None).unwrap());
+                app.session.forms_prototype = Some(Box::new(solidcraft_engine::forms_prototype::Form::from_definition(definition, 1, None).unwrap()));
                 if ui_default_tolerance {
                     super::super::opened(&mut app);
                     assert_eq!(super::super::controls::tolerance(&app), Some(app.preferences.forms_cad_tolerance));

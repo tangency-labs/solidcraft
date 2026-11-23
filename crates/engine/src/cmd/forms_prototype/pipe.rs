@@ -160,7 +160,7 @@ pub(super) fn create(s: &mut Session, p: &Value) -> Result<Value> {
         form.authoring_component = s.active_component;
         form.pipe_segments = built.segments;
         form.authoring_path = s.active_occurrence_path.clone();
-        s.forms_prototype = Some(form);
+        s.forms_prototype = Some(Box::new(form));
     }
     Ok(s.forms_prototype.as_ref().map_or_else(|| json!({"active":false}), |f| f.inspect()))
 }

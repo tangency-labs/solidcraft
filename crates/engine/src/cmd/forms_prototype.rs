@@ -181,7 +181,7 @@ fn form(s: &mut Session) -> Result<&mut crate::forms_prototype::Form> {
     Ok(f)
 }
 fn raw_form(s: &mut Session) -> Result<&mut crate::forms_prototype::Form> {
-    s.forms_prototype.as_mut().ok_or_else(|| EngineError::Other("create a Form first".into()))
+    s.forms_prototype.as_deref_mut().ok_or_else(|| EngineError::Other("create a Form first".into()))
 }
 fn tool_begin(s: &mut Session, _: &Value) -> Result<Value> {
     let f = raw_form(s)?;
@@ -202,7 +202,7 @@ fn tool_preview(s: &mut Session, p: &Value) -> Result<Value> {
     let repairing_match = source.repair.is_some() && source.matching.is_some();
     let repairing_surface = source.repair.is_some() && source.profile.is_some();
     let mut scratch = s.scratch();
-    scratch.forms_prototype = Some(source.as_ref().clone());
+    scratch.forms_prototype = Some(Box::new(source.as_ref().clone()));
     type Preview = (&'static str, bool, fn(&mut Session, &Value) -> Result<Value>);
     let operations: [Preview; 7] = [
         ("pipe", args.pipe.is_some(), pipe::create),
@@ -303,7 +303,7 @@ fn create(s: &mut Session, p: &Value) -> Result<Value> {
     if let Some(current) = &mut s.forms_prototype {
         current.replace_primitive(f);
     } else {
-        s.forms_prototype = Some(f);
+        s.forms_prototype = Some(Box::new(f));
     }
     Ok(s.forms_prototype.as_ref().map_or_else(|| json!({"active":false}), |f| f.inspect()))
 }
@@ -392,7 +392,7 @@ fn surface_with_mode(s: &mut Session, p: &Value, retained: bool) -> Result<Value
         let mut form = crate::forms_prototype::Form::from_definition(definition, 2, None)?;
         form.authoring_component = s.active_component;
         form.authoring_path = s.active_occurrence_path.clone();
-        s.forms_prototype = Some(form);
+        s.forms_prototype = Some(Box::new(form));
     }
     Ok(s.forms_prototype.as_ref().map_or_else(|| json!({"active":false}), |f| f.inspect()))
 }
@@ -1161,7 +1161,7 @@ fn edit_with_mode(s: &mut Session, p: &Value, retained: bool) -> Result<Value> {
     form.authoring_component = authoring_component;
     form.authoring_path = authoring_path;
     let reply = if let Some(error) = repair_error { json!({"feature":args.feature,"error":error,"form":form.inspect()}) } else { form.inspect() };
-    s.forms_prototype = Some(form);
+    s.forms_prototype = Some(Box::new(form));
     Ok(reply)
 }
 fn set(s: &mut Session, p: &Value) -> Result<Value> {
@@ -1572,8 +1572,9 @@ mod tests {
         s.execute("form.prototype.create", &json!({"primitive":"face","segments":[2,2,1],"levels":0})).unwrap();
         s.execute("form.prototype.refine", &json!({"faces":[0],"counts":[2,2]})).unwrap();
         let staged = s.forms_prototype.as_ref().unwrap().definition();
-        s.forms_prototype =
-            Some(crate::forms_prototype::Form::from_import(vec![("Active".into(), staged.clone(), 0), ("Staged".into(), staged, 0)]).unwrap());
+        s.forms_prototype = Some(Box::new(
+            crate::forms_prototype::Form::from_import(vec![("Active".into(), staged.clone(), 0), ("Staged".into(), staged, 0)]).unwrap(),
+        ));
         s.execute("form.prototype.finish_options", &json!({"tolerance":"0.02 mm"})).unwrap();
         let input = crate::forms_prototype::validation::Input::capture(&s).unwrap();
         let before = crate::recovery::capture_bytes(&s).unwrap();
@@ -1744,7 +1745,7 @@ mod tests {
         let mut second = first.clone();
         second.placement.origin = Vec3::new(20., 0., 0.);
         staged.forms_prototype =
-            Some(crate::forms_prototype::Form::from_import(vec![("First".into(), first, 2), ("Second".into(), second, 2)]).unwrap());
+            Some(Box::new(crate::forms_prototype::Form::from_import(vec![("First".into(), first, 2), ("Second".into(), second, 2)]).unwrap()));
         export(&mut staged, &path, 2);
         staged.execute("form.prototype.close", &json!({})).unwrap();
         staged.execute("solid.box", &json!({"corner":[30,40,50],"length":10,"width":20,"height":30,"operation":"new"})).unwrap();
@@ -2256,7 +2257,7 @@ mod tests {
             assert_eq!(recovered.repair, marker);
             assert!(!recovered.has_tool_preview());
             let mut recovered_session = s.scratch();
-            recovered_session.forms_prototype = Some(recovered);
+            recovered_session.forms_prototype = Some(Box::new(recovered));
             assert!(recovered_session.execute("form.prototype.commit", &json!({})).is_err());
             s.execute("form.prototype.tool.cancel", &json!({})).unwrap();
             assert_eq!(s.forms_prototype.as_ref().unwrap().definition(), source);
@@ -3005,7 +3006,7 @@ mod tests {
                 faces: vec![(0..sides).collect()],
                 ..Default::default()
             };
-            s.forms_prototype = Some(crate::forms_prototype::Form::from_definition(definition, 1, None).unwrap());
+            s.forms_prototype = Some(Box::new(crate::forms_prototype::Form::from_definition(definition, 1, None).unwrap()));
             let mut edge = [0, 1];
             for step in 1..=2 {
                 let before = s.forms_prototype.as_ref().unwrap().definition();
@@ -3479,7 +3480,7 @@ mod tests {
         };
 
         let mut s = Session::new(Document::new("Refined Unweld"));
-        s.forms_prototype = Some(crate::forms_prototype::Form::from_definition(source, 2, None).unwrap());
+        s.forms_prototype = Some(Box::new(crate::forms_prototype::Form::from_definition(source, 2, None).unwrap()));
         let first = s.execute("form.prototype.commit", &json!({"name":"Original","tolerance":0.05})).unwrap()["feature"].as_u64().unwrap();
         assert_eq!(s.model.state().bodies.len(), 1);
         assert!(!s.model.state().bodies[0].body.is_surface());
@@ -3615,7 +3616,7 @@ mod tests {
                 profile: None,
                 matching: None,
             };
-            s.forms_prototype = Some(crate::forms_prototype::Form::from_definition(definition, 2, None).unwrap());
+            s.forms_prototype = Some(Box::new(crate::forms_prototype::Form::from_definition(definition, 2, None).unwrap()));
             s.execute("form.prototype.commit", &json!({"name": if lower {"Lower"} else {"Upper"}, "tolerance": 0.05})).unwrap()["feature"]
                 .as_u64()
                 .unwrap()
@@ -4179,7 +4180,7 @@ mod tests {
             matching: None,
         };
         let mut s = Session {
-            forms_prototype: Some(crate::forms_prototype::Form::from_definition(definition.clone(), 1, None).unwrap()),
+            forms_prototype: Some(Box::new(crate::forms_prototype::Form::from_definition(definition.clone(), 1, None).unwrap())),
             ..Default::default()
         };
         s.execute("form.prototype.topology", &json!({"tool":"bridge","vertices":seeds})).unwrap();
@@ -4544,8 +4545,10 @@ mod tests {
             profile: None,
             symmetry: None,
         };
-        let mut s =
-            Session { forms_prototype: Some(crate::forms_prototype::Form::from_definition(before.clone(), 1, None).unwrap()), ..Default::default() };
+        let mut s = Session {
+            forms_prototype: Some(Box::new(crate::forms_prototype::Form::from_definition(before.clone(), 1, None).unwrap())),
+            ..Default::default()
+        };
         assert!(s.forms_prototype.as_ref().unwrap().surface.vertices[path[1]].z < 8.0);
         let sharp = json!({"tool":"crease","edges":[seam],"distance":10});
         let applied = s.execute("form.prototype.topology", &sharp).unwrap();
@@ -4784,8 +4787,10 @@ mod tests {
             }
             s.execute("form.prototype.insert_loop", &json!({"edge":seed,"fraction":0.3})).unwrap();
             let a = s.forms_prototype.as_ref().unwrap().definition();
-            let mut reversed =
-                Session { forms_prototype: Some(crate::forms_prototype::Form::from_definition(before, 0, None).unwrap()), ..Default::default() };
+            let mut reversed = Session {
+                forms_prototype: Some(Box::new(crate::forms_prototype::Form::from_definition(before, 0, None).unwrap())),
+                ..Default::default()
+            };
             reversed.execute("form.prototype.insert_loop", &json!({"edge":[seed[1],seed[0]],"fraction":0.7})).unwrap();
             let b = reversed.forms_prototype.as_ref().unwrap().definition();
             assert_eq!(a.hierarchy.as_ref().unwrap().leaves, b.hierarchy.as_ref().unwrap().leaves);
@@ -4841,7 +4846,7 @@ mod tests {
         };
         definition.hierarchy = Some(Hierarchy::new(cage.clone()).unwrap());
         definition.cage = cage;
-        s.forms_prototype = Some(crate::forms_prototype::Form::from_definition(definition, 0, None).unwrap());
+        s.forms_prototype = Some(Box::new(crate::forms_prototype::Form::from_definition(definition, 0, None).unwrap()));
         let before = s.forms_prototype.as_ref().unwrap().inspect();
         let recovery = crate::recovery::capture_bytes(&s).unwrap();
         let refusal = s.execute("form.prototype.insert_loop", &json!({"edge":[0,1]})).unwrap_err();
@@ -4926,7 +4931,7 @@ mod tests {
             *point = Vec3::new(coordinates[0], coordinates[1], coordinates[2]);
         }
         definition.hierarchy = Some(Hierarchy::new(definition.cage.clone()).unwrap());
-        s.forms_prototype = Some(crate::forms_prototype::Form::from_definition(definition, 0, None).unwrap());
+        s.forms_prototype = Some(Box::new(crate::forms_prototype::Form::from_definition(definition, 0, None).unwrap()));
         s.execute("form.prototype.symmetry", &json!({"axis":axis})).unwrap();
         if nested {
             for level in 1..=2 {
@@ -5048,7 +5053,7 @@ mod tests {
                 s.execute("form.prototype.create", &json!({"primitive":"box","size":10,"segments":[1,1,1],"levels":0})).unwrap();
                 let mut definition = s.forms_prototype.as_ref().unwrap().definition();
                 definition.hierarchy = Some(crate::geom::subdivision::hierarchy::Hierarchy::new(definition.cage.clone()).unwrap());
-                s.forms_prototype = Some(crate::forms_prototype::Form::from_definition(definition, 0, None).unwrap());
+                s.forms_prototype = Some(Box::new(crate::forms_prototype::Form::from_definition(definition, 0, None).unwrap()));
                 s.execute("form.prototype.symmetry", &json!({"axis":0})).unwrap();
             }
             let f = s.forms_prototype.as_ref().unwrap();
@@ -5098,7 +5103,7 @@ mod tests {
         }
         definition.symmetry = Some(crate::geom::subdivision::symmetry::Symmetry::new(&definition.cage, 0).unwrap());
         definition.hierarchy = Some(crate::geom::subdivision::hierarchy::Hierarchy::new(definition.cage.clone()).unwrap());
-        s.forms_prototype = Some(crate::forms_prototype::Form::from_definition(definition, 0, None).unwrap());
+        s.forms_prototype = Some(Box::new(crate::forms_prototype::Form::from_definition(definition, 0, None).unwrap()));
         let f = s.forms_prototype.as_ref().unwrap();
         let face = &f.logical.faces[0];
         let seed = [face[0], face[1]];
@@ -5191,7 +5196,7 @@ mod tests {
         definition.symmetry = Some(crate::geom::subdivision::symmetry::Symmetry::new(&cage, 0).unwrap());
         definition.hierarchy = Some(Hierarchy::new(cage.clone()).unwrap());
         definition.cage = cage;
-        s.forms_prototype = Some(crate::forms_prototype::Form::from_definition(definition, 0, None).unwrap());
+        s.forms_prototype = Some(Box::new(crate::forms_prototype::Form::from_definition(definition, 0, None).unwrap()));
         let before = s.forms_prototype.as_ref().unwrap().inspect();
         let recovery = crate::recovery::capture_bytes(&s).unwrap();
         let refusal = s.execute("form.prototype.insert_loop", &json!({"edge":[0,1],"fraction":0.3})).unwrap_err();
@@ -5597,7 +5602,7 @@ mod tests {
             hierarchy: None,
             placement: Default::default(),
         };
-        s.forms_prototype = Some(crate::forms_prototype::Form::from_definition(definition, 0, None).unwrap());
+        s.forms_prototype = Some(Box::new(crate::forms_prototype::Form::from_definition(definition, 0, None).unwrap()));
         s.execute("form.prototype.match", &json!({"body":"RoundSupport","face":top,"edge":[ring[0],ring[1]],"order":order})).unwrap();
         if order == 2 {
             let f = s.forms_prototype.as_ref().unwrap();

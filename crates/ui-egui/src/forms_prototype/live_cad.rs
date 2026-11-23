@@ -967,7 +967,7 @@ mod tests {
                 hierarchy: None,
             };
             let mut app = SolveApp::new(Default::default(), Default::default());
-            app.session.forms_prototype = Some(solidcraft_engine::forms_prototype::Form::from_definition(definition, 1, None).unwrap());
+            app.session.forms_prototype = Some(Box::new(solidcraft_engine::forms_prototype::Form::from_definition(definition, 1, None).unwrap()));
             super::super::opened(&mut app);
             assert_eq!(controls::tolerance(&app), Some(app.preferences.forms_cad_tolerance));
             assert!(matches!(Query::capture(&app), Err(CaptureError::FormNotReady)));

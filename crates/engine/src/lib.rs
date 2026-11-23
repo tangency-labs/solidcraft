@@ -699,7 +699,7 @@ impl ComputedCommands {
     /// Read-only Forms feedback from this exact, still-unaccepted transaction.
     /// Displaying it does not change the source design or its recovery journal.
     pub fn form_preview(&self) -> Option<&forms_prototype::Form> {
-        self.computed.forms_prototype.as_ref()
+        self.computed.forms_prototype.as_deref()
     }
 
     /// Exact logical seam IDs from this still-unaccepted Form Insert Loop.
@@ -795,8 +795,8 @@ pub type EasyPrintUpload = Arc<dyn Fn(&str, Vec<u8>) -> std::result::Result<(), 
 type MadeBodies = std::collections::HashMap<u64, (std::sync::Weak<ModelState>, Vec<String>)>;
 
 pub struct Session {
-    /// Local Forms experiment, separate from the CAD document and its history.
-    pub forms_prototype: Option<forms_prototype::Form>,
+    /// Active Forms draft. Idle sessions and their UI snapshots only reserve a pointer.
+    pub forms_prototype: Option<Box<forms_prototype::Form>>,
     pub doc: Arc<Document>,
     pub model: Model,
     pub undo: Vec<Snapshot>,
@@ -1085,7 +1085,7 @@ pub(crate) struct Checkpoint {
     pub document_id: String,
     pub doc: Arc<Document>,
     // Absent until a Form command needs to preserve this checkpoint's editor.
-    form: Option<Arc<Option<forms_prototype::Form>>>,
+    form: Option<Arc<Option<Box<forms_prototype::Form>>>>,
     pub active_sketch: Option<u64>,
     pub sketching_view: Option<u64>,
     /// Temporary editor position to finalize if its former view has since closed.
@@ -3242,13 +3242,13 @@ impl Session {
         self.store_form_at_checkpoints(self.forms_prototype.clone());
     }
 
-    fn remember_form_at_checkpoints_from(&mut self, form: &Option<forms_prototype::Form>) {
+    fn remember_form_at_checkpoints_from(&mut self, form: &Option<Box<forms_prototype::Form>>) {
         if self.checkpoints.last().is_some_and(|checkpoint| checkpoint.form.is_none()) {
             self.store_form_at_checkpoints(form.clone());
         }
     }
 
-    fn store_form_at_checkpoints(&mut self, form: Option<forms_prototype::Form>) {
+    fn store_form_at_checkpoints(&mut self, form: Option<Box<forms_prototype::Form>>) {
         let form = Arc::new(form);
         for checkpoint in self.checkpoints.iter_mut().rev().take_while(|checkpoint| checkpoint.form.is_none()) {
             checkpoint.form = Some(form.clone());
