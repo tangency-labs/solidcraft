@@ -1623,6 +1623,33 @@ pub struct IsoBoundaryCurves {
     pub curves: [Curve; 4],
 }
 
+/// The two modes a solve on a surface cache runs in. A solve starts from the values
+/// the cache was built with ([`SurfaceCache::solve_modes`]); a caller that needs other
+/// values for its own solve gives them to that solve instead of writing them into the
+/// cache, so the cache keeps its built values.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct SolveModes {
+    /// `m_bPointTestEnabled`: keep only solutions inside the trim boundaries.
+    pub point_test_enabled: bool,
+    /// `m_bProcessBoundaryCurves`: local solvers also look on the boundary curves.
+    pub process_boundary_curves: bool,
+}
+
+impl SolveModes {
+    /// The modes of a solve on `cache`: `chosen` when the caller chose them for its
+    /// solve, else the cache's built values.
+    #[must_use]
+    pub const fn of<O>(cache: &SurfaceCache<O>, chosen: Option<Self>) -> Self {
+        match chosen {
+            Some(modes) => modes,
+            None => Self {
+                point_test_enabled: cache.point_test_enabled,
+                process_boundary_curves: cache.process_boundary_curves,
+            },
+        }
+    }
+}
+
 /// The Bezier decomposition of a surface (`SmSurfaceCache`). `O` is the caller's
 /// object handle type of the decomposition [`Tree`].
 #[derive(Debug)]
@@ -2278,6 +2305,12 @@ impl<O: Copy + PartialEq> SurfaceCache<O> {
         self.process_boundary_curves
     }
 
+    /// The modes a solve on this cache starts from: the values it was built with.
+    #[must_use]
+    pub const fn solve_modes(&self) -> SolveModes {
+        SolveModes::of(self, None)
+    }
+
     /// The number of patches (`GetPatchCount`).
     #[must_use]
     pub fn patch_count(&self) -> usize {
@@ -2333,7 +2366,16 @@ impl<O: Copy + PartialEq> SurfaceCache<O> {
     /// A trimmed cache with testing enabled cannot fall back to its rectangle:
     /// it reports a missing face or an unported operation-scoped classifier.
     pub fn point_test(&self, uv_point: Point2) -> Result<bool> {
-        if !self.point_test_enabled || (self.trimmed_dispatch && self.face_was_modified) {
+        self.point_test_under(self.solve_modes(), uv_point)
+    }
+
+    /// [`Self::point_test`] in a solve running in `modes`.
+    ///
+    /// # Errors
+    ///
+    /// As [`Self::point_test`].
+    pub fn point_test_under(&self, modes: SolveModes, uv_point: Point2) -> Result<bool> {
+        if !modes.point_test_enabled || (self.trimmed_dispatch && self.face_was_modified) {
             return Ok(true);
         }
         if self.trimmed_dispatch {
@@ -2356,10 +2398,26 @@ impl<O: Copy + PartialEq> SurfaceCache<O> {
         opt_tol: Option<f64>,
         queries: Option<&dyn crate::surface::surface_cache::face_context::FaceQueries<O>>,
     ) -> Result<(bool, Option<O>)> {
+        self.point_test_with_under(k, self.solve_modes(), uv_point, opt_tol, queries)
+    }
+
+    /// [`Self::point_test_with`] in a solve running in `modes`.
+    ///
+    /// # Errors
+    ///
+    /// As [`Self::point_test_with`].
+    pub fn point_test_with_under(
+        &self,
+        k: &Kernel,
+        modes: SolveModes,
+        uv_point: Point2,
+        opt_tol: Option<f64>,
+        queries: Option<&dyn crate::surface::surface_cache::face_context::FaceQueries<O>>,
+    ) -> Result<(bool, Option<O>)> {
         if !self.trimmed_dispatch {
-            return Ok((self.point_test(uv_point)?, None));
+            return Ok((self.point_test_under(modes, uv_point)?, None));
         }
-        if !self.point_test_enabled || self.face_was_modified {
+        if !modes.point_test_enabled || self.face_was_modified {
             return Ok((true, None));
         }
         let face = self
@@ -3735,6 +3793,40 @@ mod tests {
             Some(first[3])
         );
         assert!(c.patch_at(2, 0, 2, 2).is_err());
+    }
+
+    /// A solve's modes override the cache's for its point test without changing the
+    /// cache's stored flags; `None` is the cache's own.
+    #[test]
+    fn solve_modes_override_the_point_test_and_leave_the_flags() {
+        let mut c = bilinear_cache();
+        c.point_test_enabled = true;
+        let built = c.solve_modes();
+        assert_eq!(
+            built,
+            SolveModes {
+                point_test_enabled: true,
+                process_boundary_curves: c.process_boundary_curves(),
+            }
+        );
+        let off = SolveModes {
+            point_test_enabled: false,
+            ..built
+        };
+        let outside = Point2::new(5.0, 5.0);
+        assert!(!c.point_test(outside).unwrap());
+        assert!(c.point_test_under(off, outside).unwrap());
+        let k = Kernel::default();
+        assert!(
+            c.point_test_with_under(&k, off, outside, None, None)
+                .unwrap()
+                .0
+        );
+        assert!(!c.point_test_with(&k, outside, None, None).unwrap().0);
+        assert_eq!(SolveModes::of(&c, Some(off)), off);
+        assert_eq!(SolveModes::of(&c, None), built);
+        assert_eq!(c.solve_modes(), built);
+        assert!(c.point_test_enabled);
     }
 
     #[test]

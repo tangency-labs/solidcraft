@@ -308,7 +308,7 @@ use crate::surface::surface::p3::SingularitiesMemo;
 use crate::surface::surface::p6::ContinuityMemo;
 use crate::surface::surface::p8::BoundaryMemo;
 use crate::surface::surface::p8::FaceSolveCache;
-use crate::surface::surface_cache::p1::SurfaceCache;
+use crate::surface::surface_cache::p1::{SolveModes, SurfaceCache};
 use crate::surface::torus::Torus;
 use crate::surface::trim_srf_cache::TrimSrfCache;
 use crate::topology::database_io::DatabaseReader;
@@ -7726,6 +7726,9 @@ pub struct LsiGlobalSolver<'t, 's, O> {
     /// The cache holding the patches of the surface tree's nodes, read by the leaf
     /// solve (part 10; upstream reaches it through the node's tree owner).
     pub surface_cache: Option<&'s SurfaceCache<O>>,
+    /// The modes the caller chose for this solve; `None` runs in the surface cache's
+    /// built modes ([`SolveModes::of`]).
+    pub modes: Option<SolveModes>,
     /// Prepared face classification shared with other caches in this operation.
     pub face_queries: Option<&'s dyn crate::surface::surface_cache::face_context::FaceQueries<O>>,
     /// The point test of the face's trimmed cache when the cache is one
@@ -7746,6 +7749,7 @@ impl<O: std::fmt::Debug> std::fmt::Debug for LsiGlobalSolver<'_, '_, O> {
             .field("ray_fire", &self.ray_fire)
             .field("distance_tolerance", &self.distance_tolerance)
             .field("surface_cache", &self.surface_cache)
+            .field("modes", &self.modes)
             .field("face_cache", &self.face_cache.is_some())
             .field("face_queries", &self.face_queries.is_some())
             .finish_non_exhaustive()
@@ -8881,6 +8885,7 @@ mod tests {
             ray_fire: false,
             distance_tolerance: 1e-6,
             surface_cache: None,
+            modes: None,
             face_queries: None,
             face_cache: None,
             kernel: &Kernel::default(),
