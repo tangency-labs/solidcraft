@@ -1369,7 +1369,7 @@ impl ConstantDistanceFs {
             return Err(SolidError::blend_trace(
                 OP,
                 TraceFailure::RailPointsDiverged {
-                    gap: value.abs().sqrt(),
+                    gap: diff1.length(),
                     distance: self.distance,
                 },
             ));

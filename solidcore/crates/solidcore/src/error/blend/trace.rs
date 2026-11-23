@@ -143,8 +143,9 @@ pub enum TraceFailure {
         dot: Option<f64>,
     },
     /// The chamfer solver's rail points are `gap` apart, more than ten times its distance
-    /// `distance`: the Newton step has run away from the solution
-    /// ([`ErrorKind::NotConverged`]).
+    /// `distance` (the check measures `sqrt(|gap^2 - distance^2|)` against `10 distance`):
+    /// the Newton step has run away from the solution. A solve that stops with its numbers,
+    /// a defect ([`ErrorKind::StationDidNotConverge`]).
     RailPointsDiverged {
         /// The distance between the rail points.
         gap: f64,
@@ -182,7 +183,7 @@ impl TraceFailure {
             | Self::SmoothedCurveMissing
             | Self::EdgeFacesTangent { .. }
             | Self::RailKnotsNotRefinable { .. } => ErrorKind::InvalidInput,
-            Self::RailPointsDiverged { .. } => ErrorKind::NotConverged,
+            Self::RailPointsDiverged { .. } => ErrorKind::StationDidNotConverge,
             Self::ZoneEndsCoincide { .. }
             | Self::ZoneFootAtPole
             | Self::ChordTooShort { .. }
@@ -372,6 +373,18 @@ mod tests {
             let b = e.blend_failure().unwrap();
             assert!(!b.is_phrase() && b.replaces_upstream_status(), "{cause:?}");
         }
+        // A solve that stops with its numbers is a defect (failure-codes guide §6 rule 3),
+        // and keeps the site's SM_ERR.
+        let e = SolidError::blend_trace(
+            "blend::op",
+            TraceFailure::RailPointsDiverged {
+                gap: 11.0,
+                distance: 1.0,
+            },
+        );
+        assert_eq!(e.kind(), ErrorKind::StationDidNotConverge);
+        assert_eq!(e.sm_status(), Some(SM_ERR));
+        assert!(e.is_defect());
         let d = SolidError::blend_null_defect("blend::op", "why");
         assert!(d.is_defect());
         assert_eq!(d.sm_status(), Some(SM_ERR_NULL_POINTER));
