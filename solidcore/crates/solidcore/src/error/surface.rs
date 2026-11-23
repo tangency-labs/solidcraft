@@ -1339,7 +1339,7 @@ mod tests {
             ("solidcore/src/surface/surface/p6.rs", 22),
             ("solidcore/src/surface/surface/p7.rs", 21),
             ("solidcore/src/surface/surface_cache/face_context.rs", 1),
-            ("solidcore/src/surface/surface_cache/p1.rs", 17),
+            ("solidcore/src/surface/surface_cache/p1.rs", 15),
             ("solidcore/src/surface/surface_cache/p2.rs", 5),
             ("solidcore/src/surface/surface_cache/p3.rs", 1),
             ("solidcore/src/surface/surface_point_solve/p1.rs", 5),
