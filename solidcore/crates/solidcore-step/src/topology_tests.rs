@@ -3159,6 +3159,34 @@ fn pcurves_past_a_quarter_line_the_form_ends_on_are_put_on_the_form() {
     }
 }
 
+#[test]
+fn pcurves_a_few_microns_past_the_height_a_cone_form_ends_at_are_put_on_the_form() {
+    // A cone face of half angle 60 degrees over heights 1 to 4: its form ends where the domain
+    // does. A line pcurve fitted 0.4 tol below the bottom (a height that moves the surface by
+    // 0.8 tol along the cone's line) is put on it; one 0.6 tol above the top (1.2 tol) is not.
+    let half_angle = std::f64::consts::FRAC_PI_3;
+    let label = BSurface::Cone {
+        frame: Frame { origin: [1.0, 2.0, 3.0], x_axis: [1.0, 0.0, 0.0], y_axis: [0.0, 1.0, 0.0] },
+        radius_at_origin: 5.0,
+        half_angle,
+    };
+    let tol = 1e-3;
+    let domain = [[0.2, 1.0], [1.0, 4.0]];
+    let (f, _) = crate::kernel::form::surface_within(&label, domain, tol).unwrap();
+    let ranges = solidcore_ops::label::surface_natural(&f);
+    assert!(matches!(ranges.get(1), Some(Natural::Range(a, b)) if *a == 1.0 && *b == 4.0), "{ranges:?}");
+    let u = crate::kernel::form::param(0.5);
+    let line = |v0: f64, v1: f64| Curve2::Spline { knots: vec![0.0, 0.0, 1.0, 1.0], points: vec![[u, v0], [u, v1]] };
+    let mut pcs = vec![vec![line(1.0 - 0.4 * tol, 2.0)], vec![line(3.0, 4.0 + 0.6 * tol)]];
+    assert_eq!(onto_form(&f, &label, domain, tol, &mut pcs), 1, "only the end within the tolerance moves");
+    assert_eq!(pcs[0][0], line(1.0, 2.0));
+    assert_eq!(pcs[1][0], line(3.0, 4.0 + 0.6 * tol));
+    // The move is the surface's distance between the two heights, within the tolerance.
+    let on = SurfaceEval::new(&f).unwrap();
+    let gap = on.point([u, 1.0]).unwrap().dist(on.point([u, 1.0 - 0.4 * tol]).unwrap());
+    assert!(gap <= tol && (gap - 0.8 * tol).abs() < 1e-9, "{gap}");
+}
+
 /// A kernel making the missing pcurves as SMLib makes some: each a straight line in (u, v)
 /// between the true parameters of its edge's ends on the face's NURBS form, with no regard for
 /// the form's range (a cylinder face; the angle unwrapped to the turn the face's domain is on).
@@ -3206,14 +3234,16 @@ impl Trims for Projected {
 /// A quarter-cylinder wedge (radius 0.2 mm, height 5 mm, 0 to 100 degrees about +z) whose straight
 /// edge runs from 1.9 um before the x axis to 1.9 um past it, 0.6 um outside the cylinder, in a
 /// file of uncertainty 2e-3 mm: the face's extent ends within that of the x axis, so its form
-/// starts there, while the pcurve its kernel projects for the skewed edge starts before it.
-/// Every pcurve of the record lies in its face's domain, as SMLib's check asks
-/// (`SmBrep::ValidatePointers` tests 70 and 71, "Edge endpoints within face domain").
+/// starts there, while the skewed edge starts before it. Off the form cut short at the x axis by
+/// more than half the tolerance, the edge takes its closed form on the form not cut short (its
+/// kernel is not asked), and that pcurve is put on the form's range: every pcurve of the record
+/// lies in its face's domain, as SMLib's check asks (`SmBrep::ValidatePointers` tests 70 and 71,
+/// "Edge endpoints within face domain").
 #[test]
-fn a_projected_pcurve_past_the_quarter_line_a_face_form_ends_on_stays_in_the_face_domain() {
+fn a_skewed_edge_past_the_quarter_line_a_face_form_ends_on_stays_in_the_face_domain() {
     let (r, h, q): (f64, f64, f64) = (0.2, 5.0, 100f64.to_radians());
     // The edge 1.9 um either side of the x axis at the rim, and 0.6 um outside the cylinder: more
-    // than half the tolerance off any line on the form, so its pcurve is the kernel's.
+    // than half the tolerance off any line on the form cut short at the x axis.
     let (eps, rl) = (1.9e-3 / r, r + 0.6e-3);
     let mut w = W::default();
     let v = |w: &mut W, p: V| (w.vertex(p), p);
@@ -3256,7 +3286,7 @@ fn a_projected_pcurve_past_the_quarter_line_a_face_form_ends_on_stays_in_the_fac
     let kernel = Projected(std::sync::atomic::AtomicUsize::new(0));
     let read = read_solids_with(&w.file_with_uncertainty(&[solid], 2e-3), &kernel);
     assert!(read.failures.is_empty(), "{:?}", read.failures);
-    assert!(kernel.0.load(std::sync::atomic::Ordering::Relaxed) > 0, "the skewed edge's pcurve is the kernel's");
+    assert_eq!(kernel.0.load(std::sync::atomic::Ordering::Relaxed), 0, "the skewed edge's pcurve is its closed form");
     let b = &read.solids[0].brep;
     assert_eq!(counts(b), [2, 1, 5, 9, 6]);
     for (i, f) in b.faces.iter().enumerate() {

@@ -9,6 +9,10 @@
 #![forbid(unsafe_code)]
 
 mod airfoil;
+#[cfg(all(test, not(target_arch = "wasm32")))]
+#[allow(dead_code)]
+#[path = "../build.rs"]
+mod build_script;
 pub mod catalog;
 mod design;
 pub mod design_lock;

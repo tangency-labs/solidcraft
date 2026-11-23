@@ -64,6 +64,7 @@
 //! - **Recursion.** None here; nested curves are bounded by [`read_curve_from_db`].
 
 use crate::curve::curve::Curve;
+use crate::error::topology::TopologyFailure;
 use crate::error::{EntityRef, Result, SolidError};
 use crate::geom::attribute::{ids, Attribute, AttributeHandle, AttributeStore, Behavior, TagData};
 use crate::geom::object::ObjectRef;
@@ -136,7 +137,7 @@ pub struct PartEnv<'a> {
 /// `*rDB.GetInStreamPtr()` (upstream dereferences `NULL` without a stream).
 fn stream(db: &mut DatabaseReader) -> Result<&mut InputStream> {
     db.in_stream_mut()
-        .ok_or_else(|| SolidError::topology_missing(OP_PART, "the database's input stream"))
+        .ok_or_else(|| SolidError::topology(OP_PART, TopologyFailure::NoInputStream))
 }
 
 /// `fin.getline(sBuff, MAXSIZE)`.

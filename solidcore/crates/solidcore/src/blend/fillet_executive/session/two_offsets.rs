@@ -15,9 +15,8 @@
 //! ball of radius the distance (#2793's rig cases). No recursion.
 
 use super::{FilletBody, FilletObject, FilletSession, FilletSurfaceGenerator};
-use crate::blend::blend_refusal::{chains_among, BlendRefusal};
+use crate::blend::blend_refusal::{chains_among, setback_below_resolution, BlendRefusal};
 use crate::blend::chamfer_side::widest_wedge_bound;
-use crate::blend::fillet_executive::p1::is_radius_supported;
 use crate::blend::fillet_executive::p2::FilletParametersAccess;
 use crate::blend::fillet_solver::p5::is_knife_edge;
 use crate::surface::procedural_blend::chamfer::{ChamferDefinition, ChamferSize};
@@ -127,24 +126,6 @@ fn refused_size(id: EdgeId, size: ChamferSize, wedge: f64) -> SolidError {
             .error(OP_ALONG, crate::error::SM_ERR_INVALID_INPUT)
         }
         _ => size_invalid(id),
-    }
-}
-
-/// [`BlendFailure::SizeBelowResolution`](crate::error::blend::BlendFailure::SizeBelowResolution)
-/// at edge `id` for the first of a chamfer's `setbacks` below the smallest size a fillet
-/// builds on a body of `tolerance` ([`is_radius_supported`]): the check of a size given as a
-/// distance, made also on a setback computed from an angle.
-fn below_resolution(id: EdgeId, setbacks: [f64; 2], tolerance: f64) -> Result<()> {
-    match setbacks
-        .into_iter()
-        .find(|&s| !is_radius_supported(s, tolerance))
-    {
-        None => Ok(()),
-        Some(size) => Err(SolidError::blend_at(
-            "blend::fillet_executive::session::prepare_chamfers_along",
-            crate::error::blend::BlendFailure::SizeBelowResolution { size, tolerance },
-            EntityRef::Edge(id),
-        )),
     }
 }
 
@@ -571,7 +552,7 @@ impl FilletSession<'_> {
                 if !(d == d2 && d.is_finite() && d > 0.0) {
                     return Err(size_invalid(id));
                 }
-                below_resolution(id, [d, d2], self.objects.target.tolerance())?;
+                setback_below_resolution(OP_ALONG, id, [d, d2], self.objects.target.tolerance())?;
                 first.push(d);
                 second.push(d);
                 chamfers.push(None);
@@ -598,7 +579,12 @@ impl FilletSession<'_> {
             // below the body's tolerance) puts the rail on the edge within tolerance, a
             // sliver, refused as such a distance is; before the swap, so either face the
             // first size is along names it alike
-            below_resolution(id, asked.setbacks(), self.objects.target.tolerance())?;
+            setback_below_resolution(
+                OP_ALONG,
+                id,
+                asked.setbacks(),
+                self.objects.target.tolerance(),
+            )?;
             let chamfer = if on_second {
                 let size = match asked.size {
                     ChamferSize::Distances(_) | ChamferSize::DistanceAngle { .. } => {
