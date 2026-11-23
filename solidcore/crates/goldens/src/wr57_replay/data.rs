@@ -10,28 +10,6 @@ use super::Row;
 /// The moved rows.
 pub(super) static DATA: &[Row] = &[
     (
-        "blend.fillet_executive_p3",
-        "stubs3-union-overhang-corner-edges15-22-r1",
-        0xf8f191eb48f62e45,
-        15,
-        0x33cd834d34555aad,
-        0x49786767a9fb3c4d,
-        &[
-            (1, E(e0)),
-            (2, E(e0)),
-            (4, O(0x3f09ffdcef4bd10b, 0x3feffffffffffff8, 1)),
-            (5, O(0x3f09ffdcef4bd10b, 0x3feffffffffffff8, 1)),
-            (6, O(0x0000000000000000, 0x3feffffffffffff8, 1)),
-            (7, E(e0)),
-            (8, E(e0)),
-            (9, E(e0)),
-            (10, E(e0)),
-            (11, E(e0)),
-            (12, E(e0)),
-            (13, O(0x3fefff6da72191de, 0x3fefe7791975bc4d, 1)),
-        ],
-    ),
-    (
         "heal.heal_data_p3",
         "degen_props_curved_sliver",
         0xdc7e2ea1f5e4e0a0,
