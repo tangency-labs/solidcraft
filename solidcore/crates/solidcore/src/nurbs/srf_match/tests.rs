@@ -92,6 +92,112 @@ fn a_curvature_jump_is_taken_out_at_g2() {
     assert!(m.moved[2] > 0.0, "{:?}", m.moved);
 }
 
+/// Two sheets meeting along a parabolic arc. The shared normal turns through a right angle;
+/// both sheets leave the boundary vertically, and `bulge` sets the target's curvature across it.
+fn turning_normal_sheets(bulge: f64) -> (Surface, Surface) {
+    let arc = [[10.0, 0.0], [10.0, 10.0], [0.0, 10.0]];
+    let r = |scale: f64, z: f64| arc.map(|[x, y]| [scale * x, scale * y, z]);
+    let sheet = bezier(&[&r(1.0, 0.0), &r(1.0, 5.0), &r(1.2, 10.0)]);
+    let target = bezier(&[&r(bulge, -10.0), &r(1.0, -5.0), &r(1.0, 0.0)]);
+    (sheet, target)
+}
+
+/// The G2 correction is normal at each station, even when those normals turn. Check zero and
+/// nonzero target curvature directly from the derivatives, independently of the seam report.
+#[test]
+fn a_g2_match_holds_curvature_when_the_target_normal_turns() {
+    for bulge in [1.0, 1.4] {
+        let (sheet, target) = turning_normal_sheets(bulge);
+        for blend in [0.0, 0.5, 1.0] {
+            let m = match_boundary(
+                &sheet,
+                Boundary::Left,
+                &target,
+                Boundary::Right,
+                MatchOrder::G2,
+                rows(3, blend),
+            )
+            .unwrap();
+            assert!(m.before.curvature > 0.04, "{:?}", m.before);
+            assert!(m.after.gap < 1e-9, "{:?}", m.after);
+            assert!(m.after.angle < 1e-9, "{:?}", m.after);
+            assert!(m.after.curvature < 1e-9, "{:?}", m.after);
+            assert!(m.moved[0] < 1e-12 && m.moved[1] < 1e-12, "{:?}", m.moved);
+            assert!(m.moved[2] > 0.0, "{:?}", m.moved);
+            for v in [0.0, 0.5, 1.0] {
+                let side = side_at(v, 1.0);
+                let d = m
+                    .surface
+                    .derivs(0.0, v, Side::Left, side, false, 2, 1)
+                    .unwrap();
+                let t = target
+                    .derivs(1.0, v, Side::Right, side, false, 2, 1)
+                    .unwrap();
+                let n = t[1][0].cross(t[0][1]).unitize().unwrap();
+                // Both across-seam directions are vertical, so their normal curvatures are
+                // directly n . S_uu / |S_u|^2, with no change of tangent coordinates.
+                let got = n.dot(d[2][0]) / d[1][0].length_squared();
+                let want = n.dot(t[2][0]) / t[1][0].length_squared();
+                assert!(
+                    (got - want).abs() < 1e-9,
+                    "v={v}, bulge={bulge}: {got} != {want}"
+                );
+                // Refinement protects the opposite boundary's position and tangent.
+                let far = m
+                    .surface
+                    .derivs(1.0, v, Side::Right, side, false, 1, 0)
+                    .unwrap();
+                let old = sheet
+                    .derivs(1.0, v, Side::Right, side, false, 1, 0)
+                    .unwrap();
+                assert!((far[0][0] - old[0][0]).length() < 1e-9);
+                assert!((far[1][0] - old[1][0]).length() < 1e-9);
+            }
+        }
+    }
+}
+
+/// Boundary turning, reversed target parameterisation and inserted knots keep the same G2
+/// constraint. The inserted knots add stations away from the Bezier example's midpoint.
+#[test]
+fn a_turning_normal_g2_match_holds_on_every_side_and_at_refined_stations() {
+    let (sheet, target) = turning_normal_sheets(1.4);
+    let sheet = insert_knots(&sheet, &[0.2, 0.7], Direction::V).unwrap();
+    let target = reverse_u(&target).unwrap();
+    let sides = [
+        Boundary::Left,
+        Boundary::Right,
+        Boundary::Bottom,
+        Boundary::Top,
+    ];
+    for side in sides {
+        let sheet = from_left(sheet.clone(), side).unwrap();
+        for target_side in sides {
+            for reversed in [false, true] {
+                let mut target = target.clone();
+                if reversed {
+                    target.swap_uv();
+                    target = reverse_u(&target).unwrap();
+                    target.swap_uv();
+                }
+                let target = from_left(target, target_side).unwrap();
+                let m = match_boundary(
+                    &sheet,
+                    side,
+                    &target,
+                    target_side,
+                    MatchOrder::G2,
+                    rows(3, 0.5),
+                )
+                .unwrap();
+                assert!(m.after.gap < 1e-9, "{:?}", m.after);
+                assert!(m.after.angle < 1e-9, "{:?}", m.after);
+                assert!(m.after.curvature < 1e-9, "{:?}", m.after);
+            }
+        }
+    }
+}
+
 /// The flat sheet 1 above its neighbour's edge, matched at G0: with one row only the edge row
 /// moves; with three and a blend of a half the next rows follow by a half and a quarter.
 #[test]

@@ -20,6 +20,9 @@ pub struct Draft {
     pub label: String,
     pub error: Option<String>,
     pub author_path: Option<Vec<u64>>,
+    /// The plane or face picked in the view that the Plane field last took (#12540): a new pick
+    /// fills the field, one that was already selected when the panel opened does not.
+    taken: Option<Sel>,
 }
 
 impl Draft {
@@ -31,7 +34,7 @@ impl Draft {
             _ if feature.component == app.session.active_component => app.session.active_occurrence_path.clone(),
             _ => None,
         });
-        Self { sketch, candidate: None, label: String::new(), error: None, author_path }
+        Self { sketch, candidate: None, label: String::new(), error: None, author_path, taken: picked_plane(app) }
     }
 
     fn choose(&mut self, plane: Value, label: String) {
@@ -91,6 +94,37 @@ fn fixed_plane(plane: Plane) -> Value {
     json!({"origin":plane.origin,"x_dir":plane.x,"y_dir":plane.y})
 }
 
+/// A successful explicit pick is new even when it selects the same plane or face again.
+pub(crate) fn selection_picked(app: &mut SolveApp) {
+    if let Some(draft) = app.tree.redefine_draft.as_mut() {
+        draft.taken = None;
+    }
+}
+
+/// The selected item the Plane field can take: the first selected face, as the field always
+/// took, else the first origin or construction plane.
+fn picked_plane(app: &SolveApp) -> Option<Sel> {
+    let selection = &app.session.selection;
+    selection
+        .iter()
+        .find(|item| matches!(item, Sel::Face { .. }))
+        .or_else(|| selection.iter().find(|item| matches!(item, Sel::Plane { .. })))
+        .cloned()
+}
+
+/// What `sketch.redefine` gets for a picked face or plane, with the field's label.
+fn pick(app: &SolveApp, selection: &Sel) -> Option<(Value, String)> {
+    match selection {
+        Sel::Face { .. } => Some((face_plane(app, selection)?, face_label(app, selection))),
+        Sel::Plane { name } => {
+            let known = Plane::named(name).is_some()
+                || app.session.doc.find_feature(name).is_some_and(|feature| matches!(feature.kind, FeatureKind::ConstructionPlane { .. }));
+            known.then(|| (json!(name), app.preferences.origin_plane_names.label(name).to_owned()))
+        }
+        _ => None,
+    }
+}
+
 pub fn face_plane(app: &SolveApp, selection: &Sel) -> Option<Value> {
     match selection {
         Sel::Face { body, index, point } => {
@@ -109,7 +143,7 @@ pub(crate) fn plane_description(doc: &solidcraft_engine::doc::Document, plane: &
         let base = |b: &PlaneRef| if depth < 8 { describe(doc, b, depth + 1) } else { solidcraft_ui_text::tr("sketch_panel.plane_fixed").to_owned() };
         match plane {
             PlaneRef::Origin { name } => solidcraft_ui_text::format("sketch_panel.plane_origin", &[("plane", name)]),
-            PlaneRef::Construction { feature } => {
+            PlaneRef::Construction { feature, .. } => {
                 doc.feature(feature.0).map(|f| f.name.clone()).unwrap_or_else(|| solidcraft_ui_text::tr("sketch_panel.plane_fixed").to_owned())
             }
             PlaneRef::Offset { base: b, distance } => {
@@ -158,6 +192,14 @@ pub fn panel(app: &mut SolveApp, ctx: &egui::Context) {
     let status = attachment(app, sketch);
     let name = app.session.doc.feature(sketch).map(|feature| feature.name.as_str()).unwrap_or("Sketch");
     let selected = app.session.selection.iter().find(|selection| matches!(selection, Sel::Face { .. })).cloned();
+    // A face or plane picked in the view while the panel is open fills the Plane field (#12540).
+    let picked = picked_plane(app);
+    if picked != draft.taken {
+        draft.taken.clone_from(&picked);
+        if let Some((plane, label)) = picked.as_ref().and_then(|selection| pick(app, selection)) {
+            draft.choose(plane, label);
+        }
+    }
     let mut apply = false;
     let mut cancel = false;
     let t = Tokens::get();
@@ -174,7 +216,7 @@ pub fn panel(app: &mut SolveApp, ctx: &egui::Context) {
     let anchor = crate::frame::offset_anchor(docked, moved, drag_bounds, side);
     let frame = ui_kit::Panel::feature_frame(ctx, app.ui.layout, side);
     let spec = solidcraft_engine::find_command("sketch.redefine");
-    let command = spec.as_ref().map_or("", |s| solidcraft_ui_text::tr_label(s.label));
+    let command = spec.as_ref().map_or("", |s| solidcraft_ui_text::tr_command(s.id, s.label));
     let title = solidcraft_ui_text::format("sketch_panel.redefine_title", &[("command", command), ("name", name)]);
     let panel = ui_kit::Panel::new(&title, egui::Id::unique("sc_redefine"), anchor, drag_bounds, side, frame);
     let mut painted = false;
@@ -226,10 +268,6 @@ pub fn panel(app: &mut SolveApp, ctx: &egui::Context) {
                         ui.label(solidcraft_ui_text::tr_label("Legacy face attachment. Rebinding to a certified face creates an exact attachment."));
                         *plane
                     }
-                    FaceAttachmentStatus::Sheet { plane } => {
-                        ui.label(solidcraft_ui_text::tr("sketch_panel.sheet_attachment"));
-                        *plane
-                    }
                     FaceAttachmentStatus::Fixed { plane } => {
                         // Name the plane it's on now: an origin or construction plane (#5103).
                         if let Some(FeatureKind::Sketch { plane: on, .. }) = app.session.doc.feature(sketch).map(|f| &f.kind) {
@@ -266,10 +304,9 @@ pub fn panel(app: &mut SolveApp, ctx: &egui::Context) {
                             "Choose a new plane. Sketch geometry and dimensions stay unchanged in its two-dimensional coordinates.",
                         ))
                         .clicked()
-                        && let Some(selection) = &selected
-                        && let Some(plane) = face_plane(app, selection)
+                        && let Some((plane, label)) = picked.as_ref().and_then(|selection| pick(app, selection))
                     {
-                        draft.choose(plane, face_label(app, selection));
+                        draft.choose(plane, label);
                     }
                 });
                 ui.horizontal_wrapped(|ui| {

@@ -32,13 +32,13 @@ pub const SECRET_ID: &str = "tickets.solidcraft.io";
 pub struct Call(Receiver<Reply>);
 
 impl Call {
-    fn start(http: &Http, request: HttpRequest) -> Self {
+    pub(crate) fn start(http: &Http, request: HttpRequest) -> Self {
         let (tx, rx) = std::sync::mpsc::channel();
         http(request, tx);
         Self(rx)
     }
     /// The answer once it came.
-    fn poll(&self) -> Option<Reply> {
+    pub(crate) fn poll(&self) -> Option<Reply> {
         match self.0.try_recv() {
             Ok(r) => Some(r),
             Err(TryRecvError::Empty) => None,
@@ -58,6 +58,21 @@ enum Step {
     Finish(usize),
 }
 
+/// A failed request's phase and attachment. Include the file as well as the HTTP path:
+/// /api/uploads has no file name, and a timed-out request otherwise gives no clue which
+/// attachment the app was sending (#17932).
+fn step_context(step: Step, files: &[payload::File], missing: &std::collections::VecDeque<usize>) -> String {
+    let file =
+        |i: usize| files.get(i).map_or("attachment", |file| file.name.as_str()).chars().filter(|c| !c.is_control()).take(100).collect::<String>();
+    match step {
+        Step::Draft => "create report draft".into(),
+        Step::Open(i) => format!("start upload of {}", file(i)),
+        Step::Resume(i) => format!("resume upload of {}", file(i)),
+        Step::Chunk(i) => format!("upload part {} of {}", missing.front().copied().unwrap_or(1), file(i)),
+        Step::Finish(i) => format!("complete upload of {}", file(i)),
+    }
+}
+
 pub struct Sending {
     pub report: payload::Outgoing,
     /// Its queue folder, when it came from the queue.
@@ -74,6 +89,10 @@ pub struct Sending {
     /// Times an upload was resumed or started again (parts missing, a hash mismatch): a few, then
     /// the report fails rather than going round for ever.
     redo: u8,
+    /// The current step went unanswered once and is being sent again.
+    again: bool,
+    /// The current request's method and path (`PUT /api/uploads/up1/parts/1`), for the log.
+    asked: String,
 }
 
 /// How the last report went.
@@ -204,6 +223,8 @@ fn start(app: &mut SolveApp, mut report: payload::Outgoing, folder: Option<PathB
         total,
         draft: None,
         redo: 0,
+        again: false,
+        asked: String::new(),
     });
 }
 
@@ -294,7 +315,14 @@ fn tick_send(app: &mut SolveApp) {
     };
     let token = s.draft.as_ref().map(|d| d.upload_token.clone()).unwrap_or_default();
     let Some(call) = s.call.take() else {
-        s.call = Some(Call::start(&http, request(&s, &token)));
+        let r = request(&s, &token);
+        s.asked = format!(
+            "{} ({} {})",
+            step_context(s.step, &s.report.files, &s.missing),
+            r.method,
+            r.url.strip_prefix(&api::server()).unwrap_or_default(),
+        );
+        s.call = Some(Call::start(&http, r));
         app.tickets.sending = Some(s);
         return;
     };
@@ -307,6 +335,7 @@ fn tick_send(app: &mut SolveApp) {
     // match starts again. A few times at most.
     if let (Step::Finish(i), Ok((status @ (409 | 422), _))) = (s.step, &reply) {
         s.redo = s.redo.saturating_add(1);
+        s.again = false;
         if s.redo > 3 {
             fail(app, &s, format!("the server did not take an attachment after several tries (HTTP {status})"));
             return;
@@ -324,7 +353,17 @@ fn tick_send(app: &mut SolveApp) {
     }
     let value = match api::answer(reply) {
         Ok(v) => v,
-        Err(api::Failure::Offline(why)) => return keep_for_later(app, s, why),
+        // No answer: the same step once more on a new connection, then the report waits.
+        Err(api::Failure::Offline(why)) if !s.again => {
+            log(app, format!("no answer to {} ({why}); trying once more", s.asked));
+            s.again = true;
+            app.tickets.sending = Some(s);
+            return;
+        }
+        Err(api::Failure::Offline(why)) => {
+            let why = format!("{why} (at {})", s.asked);
+            return keep_for_later(app, s, why);
+        }
         // A draft's upload token gone stale: the draft expired.
         Err(api::Failure::SignedOut) => return fail(app, &s, "the report's draft expired on the server (HTTP 401)".into()),
         Err(api::Failure::Refused(e)) => return fail(app, &s, e),
@@ -379,6 +418,7 @@ fn tick_send(app: &mut SolveApp) {
             next_file(&s.report, i + 1)
         }
     };
+    s.again = false;
     match step {
         Some(step) => {
             s.step = step;
@@ -420,5 +460,41 @@ fn request(s: &Sending, token: &str) -> HttpRequest {
             api::upload_part(token, &upload(i), n, part(s, i, n))
         }
         Step::Finish(i) => api::finish_upload(token, &upload(i)),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Each offline request reports the phase and the file it was working on. File names
+    /// may contain control characters: these must not introduce extra log lines.
+    #[test]
+    fn timeout_step_context_names_the_phase_and_attachment() {
+        let files = [
+            payload::File {
+                name: "log.txt".into(),
+                content_type: "text/plain".into(),
+                kind: "log".into(),
+                bytes: vec![1],
+                upload: None,
+                done: false,
+            },
+            payload::File {
+                name: "screenshot\n.png".into(),
+                content_type: "image/png".into(),
+                kind: "screenshot".into(),
+                bytes: vec![2],
+                upload: None,
+                done: false,
+            },
+        ];
+        let parts = std::collections::VecDeque::from([3]);
+        assert_eq!(step_context(Step::Draft, &files, &parts), "create report draft");
+        assert_eq!(step_context(Step::Open(0), &files, &parts), "start upload of log.txt");
+        assert_eq!(step_context(Step::Resume(1), &files, &parts), "resume upload of screenshot.png");
+        assert_eq!(step_context(Step::Chunk(1), &files, &parts), "upload part 3 of screenshot.png");
+        assert_eq!(step_context(Step::Finish(1), &files, &parts), "complete upload of screenshot.png");
+        assert_eq!(step_context(Step::Open(5), &files, &parts), "start upload of attachment");
     }
 }

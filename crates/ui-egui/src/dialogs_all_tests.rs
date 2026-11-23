@@ -326,6 +326,25 @@ fn end_cap_dialog_remembers_its_sizes() {
     );
 }
 
+/// Frame Member remembers its values, but opens with Ghost Frame Members unticked and no tubes
+/// picked for Remove Tube (#15705).
+#[test]
+fn frame_member_dialog_recalls_values_but_not_ghosting_or_picked_tubes() {
+    let mut h = Harness::new();
+    h.app.preferences.remember_dialog_values = true;
+    let mut d = Dialog::for_command(&h.app, "frame.member").unwrap();
+    let Kind::Frame(m) = &mut d.kind else { panic!("not the Frame Member dialog") };
+    m.mirror = true;
+    m.ghost = true;
+    m.picked_tubes = vec!["pair1".into()];
+    remember(&mut h.app, &d);
+    let recalled = Dialog::for_command(&h.app, "frame.member").unwrap();
+    let Kind::Frame(m) = &recalled.kind else { panic!("not the Frame Member dialog") };
+    assert!(m.mirror, "values are remembered");
+    assert!(!m.ghost, "unticked whenever the dialog opens");
+    assert!(m.picked_tubes.is_empty());
+}
+
 #[test]
 fn command_dialog_remembers_option_fields() {
     let mut h = Harness::new();
@@ -832,6 +851,17 @@ form_case!(offset_faces, "solid.offset_face", ["Distance"]);
 form_case!(section, "inspect.section", ["Distance"]);
 form_case!(move_copy, "solid.move", ["Move Type", "X Distance", "Y Distance", "Z Distance", "X Angle", "Y Angle", "Z Angle"]);
 form_case!(rib, "solid.rib", ["Direction", "Thickness", "Depth"]);
+
+/// Extend ends is opt-in (#13019): a new Rib or Web starts with it off, so it builds as before
+/// unless it is ticked.
+#[test]
+fn a_new_rib_starts_with_extend_ends_off() {
+    let h = Harness::new();
+    for command in ["solid.rib", "solid.web"] {
+        let d = Dialog::for_command(&h.app, command).unwrap();
+        assert!(matches!(&d.kind, Kind::Rib { extend: false, .. }), "{command}");
+    }
+}
 form_case!(web, "solid.web", ["Direction", "Thickness", "Depth"]);
 form_case!(emboss, "solid.emboss", ["Depth", "Type"]);
 form_case!(replace_face, "solid.replace_face", []);
@@ -920,6 +950,7 @@ form_case!(fold, "sheet.fold", ["Bend Line Position", "Angle", "Bend Radius"]);
 form_case!(unfold, "sheet.unfold", []);
 form_case!(refold, "sheet.refold", []);
 form_case!(sheet_convert, "sheet.convert", ["Rule"]);
+form_case!(sheet_recognize, "sheet.recognize", ["Rule", "New Rule"]);
 form_case!(boss, "plastic.boss", ["Diameter", "Height", "Hole Diameter", "Hole Depth"]);
 form_case!(lip, "plastic.lip", ["Type", "Rim Edge", "Width", "Height"]);
 form_case!(snap_fit, "plastic.snap_fit", ["Catch Direction", "Length", "Thickness", "Width", "Catch Depth", "Catch Length"]);
@@ -1504,6 +1535,27 @@ fn coil_from_a_profile_hides_the_primitive_section() {
     assert!(p.get("operation").is_some(), "{p}");
 }
 
+/// A square-ended coil edited onto a sketch profile is accepted: the profile's plane is the
+/// section, so the end cut it kept from the coil is not sent (#20737).
+#[test]
+fn a_square_ended_coil_edited_onto_a_profile_is_accepted() {
+    let mut h = Harness::new();
+    h.app.run("sketch.create", json!({"plane": "YZ", "name": "Section"})).unwrap();
+    h.app.run("sketch.rectangle.two_point", json!({"p0": [10, -0.5], "p1": [11, 0.5]})).unwrap();
+    h.app.run("sketch.finish", json!({})).unwrap();
+    let sketch = crate::open_meshing::session_world(&h.app.session).sketches[0].feature;
+    let made = h.app.run("solid.coil", json!({"diameter": 40, "revolutions": 3, "pitch": 8, "section_size": 2, "end_cut": "square"})).unwrap();
+    let feature = made["feature"].as_u64().unwrap();
+    let mut d = for_feature(&h.app, feature, None).unwrap();
+    assert_eq!(d.extra.get("end_cut"), Some(&json!("square")), "the edit keeps the end cut");
+    d.inputs[0].items = vec![Sel::Profile { sketch, index: 0 }];
+    for (command, params) in apply_commands(&h.app, &d).unwrap() {
+        h.app.run(&command, params.clone()).unwrap_or_else(|e| panic!("{command} {params}: {e}"));
+    }
+    let kind = &h.app.session.doc.feature(feature).unwrap().kind;
+    assert!(matches!(kind, FeatureKind::Coil { sketch: Some(_), .. }), "{kind:?}");
+}
+
 /// The Revolutions field steps by whole turns like the other counts (#7481).
 #[test]
 fn coil_revolutions_arrows_step_whole_turns() {
@@ -1549,6 +1601,162 @@ fn coil_revolutions_arrows_step_whole_turns() {
     assert_eq!(sent(&h), json!("turns + 1"));
 }
 
+fn chamfer_paste_fixture() -> Harness {
+    let mut h = Harness::new();
+    h.app.home.open = false;
+    h.app.preferences.nav = "blender".into();
+    h.call("ui.view", json!({"view":"front"}));
+    h.step(&json!({"start":"solid.chamfer"})).unwrap();
+    h.frames(4);
+    h.step(&json!({"click":{"handle":"dialog:Distance"}})).unwrap();
+    h.step(&json!({"key":"A","cmd":true})).unwrap();
+    h.step(&json!({"text":"12 mm"})).unwrap();
+    h.step(&json!({"key":"A","cmd":true})).unwrap();
+    assert!(h.ctx.text_edit_focused(), "the distance editor has keyboard focus");
+    assert_eq!(chamfer_distance(&h), "12 mm");
+    h
+}
+
+fn chamfer_distance(h: &Harness) -> &str {
+    let Kind::Fillet { radius, chamfer: true, .. } = &h.app.dialog.as_ref().unwrap().kind else { panic!("Chamfer dialog") };
+    radius
+}
+
+fn middle_at(pos: egui::Pos2, pressed: bool) -> egui::Event {
+    egui::Event::PointerButton { pos, button: egui::PointerButton::Middle, pressed, modifiers: egui::Modifiers::NONE }
+}
+
+fn chamfer_viewport_point(h: &Harness) -> egui::Pos2 {
+    let at = h.app.viewport.layout.as_ref().unwrap().drawable.center() - egui::vec2(80.0, 80.0);
+    assert!(!crate::shell::covered(&h.app, at));
+    at
+}
+
+/// #20299: a browser Paste targets the focused field; native PRIMARY paste carries its position.
+/// Both belong to navigation when the middle press starts in the viewport, even if it ends on a field.
+#[test]
+fn viewport_middle_orbit_does_not_paste_into_chamfer_distance() {
+    for native in [false, true] {
+        for release_on_field in [false, true] {
+            let mut h = chamfer_paste_fixture();
+            let at = chamfer_viewport_point(&h);
+            let paste = |pos| {
+                if native { egui::Event::MiddleClickPaste { pos, text: "731 mm".into() } } else { egui::Event::Paste("731 mm".into()) }
+            };
+            let before = h.app.cam;
+            h.frame_with(vec![egui::Event::PointerMoved(at), middle_at(at, true), paste(at)]);
+            assert_eq!(chamfer_distance(&h), "12 mm", "press must not paste");
+            let moved = at + egui::vec2(40.0, 20.0);
+            let mut events = vec![egui::Event::PointerMoved(moved)];
+            if native {
+                events.push(paste(moved));
+            }
+            h.frame_with(events);
+            assert_eq!(chamfer_distance(&h), "12 mm", "drag must not paste");
+            let mut expected = before;
+            expected.orbit(40.0, 20.0);
+            assert!((h.app.cam.yaw - expected.yaw).abs() < 1e-6, "the middle drag orbits");
+            assert!((h.app.cam.pitch - expected.pitch).abs() < 1e-6, "the middle drag orbits");
+            let end = if release_on_field { scenario::handle_at("dialog:Distance").unwrap() } else { moved };
+            h.frame_with(vec![egui::Event::PointerMoved(end), middle_at(end, false), paste(end)]);
+            assert_eq!(chamfer_distance(&h), "12 mm", "release must not paste, including over the field");
+            // Once navigation ends, ordinary keyboard paste still replaces selected text.
+            h.step(&json!({"click":{"handle":"dialog:Distance"}})).unwrap();
+            h.step(&json!({"key":"A","cmd":true})).unwrap();
+            h.frame_with(vec![egui::Event::Paste("27 mm".into())]);
+            assert_eq!(chamfer_distance(&h), "27 mm");
+        }
+    }
+}
+
+#[test]
+fn viewport_middle_click_does_not_paste_into_chamfer_distance() {
+    for single_frame in [false, true] {
+        let mut h = chamfer_paste_fixture();
+        let at = chamfer_viewport_point(&h);
+        let mut events = vec![egui::Event::PointerMoved(at), middle_at(at, true)];
+        if !single_frame {
+            h.frame_with(std::mem::take(&mut events));
+        }
+        events.extend([middle_at(at, false), egui::Event::Paste("731 mm".into())]);
+        // A modifier pressed after PRIMARY paste must not reclassify that earlier paste.
+        events.push(egui::Event::ModifiersChanged(egui::Modifiers::CTRL | egui::Modifiers::COMMAND));
+        h.frame_with(events);
+        assert_eq!(chamfer_distance(&h), "12 mm", "a stationary click also belongs to navigation");
+    }
+}
+
+#[test]
+fn middle_click_on_chamfer_distance_keeps_primary_selection_paste() {
+    let mut h = chamfer_paste_fixture();
+    let editor = h.ctx.memory(|m| m.focused()).unwrap();
+    // Click beyond the short value's text so PRIMARY insertion has a known cursor position.
+    let at = h.ctx.read_response(editor).unwrap().rect.right_center() - egui::vec2(4.0, 0.0);
+    let viewport = chamfer_viewport_point(&h);
+    let before = h.app.cam;
+    // Two clicks can arrive in one slow frame. Only the viewport click's paste is consumed.
+    h.frame_with(vec![
+        egui::Event::PointerMoved(viewport),
+        middle_at(viewport, true),
+        middle_at(viewport, false),
+        egui::Event::Paste("999".into()),
+        egui::Event::PointerMoved(at),
+        middle_at(at, true),
+        egui::Event::MiddleClickPaste { pos: at, text: "731".into() },
+    ]);
+    h.frame_with(vec![middle_at(at, false)]);
+    assert_eq!(chamfer_distance(&h), "12 mm731", "only PRIMARY text is inserted at the end of the field");
+    assert_eq!(h.app.cam.yaw, before.yaw);
+    assert_eq!(h.app.cam.pitch, before.pitch);
+    assert_eq!(h.app.cam.target, before.target);
+}
+
+#[test]
+fn keyboard_paste_into_chamfer_distance_works_during_middle_orbit() {
+    for modifiers in [egui::Modifiers::CTRL | egui::Modifiers::COMMAND, egui::Modifiers::MAC_CMD | egui::Modifiers::COMMAND] {
+        for browser in [false, true] {
+            for release in [false, true] {
+                let mut h = chamfer_paste_fixture();
+                let at = chamfer_viewport_point(&h);
+                let before = h.app.cam;
+                h.frame_with(vec![egui::Event::PointerMoved(at), middle_at(at, true)]);
+                h.frame_with(vec![egui::Event::PointerMoved(at + egui::vec2(40.0, 20.0))]);
+                assert!(h.ctx.input(|i| i.pointer.button_down(egui::PointerButton::Middle)));
+                assert!(h.ctx.text_edit_focused());
+                let before_paste = h.app.cam;
+                if !browser {
+                    // Ctrl/Cmd can have been held since an earlier frame. Native sends no V key.
+                    h.frame_with(vec![egui::Event::ModifiersChanged(modifiers)]);
+                }
+                let next = at + egui::vec2(50.0, 20.0);
+                let mut events = vec![egui::Event::PointerMoved(next)];
+                if release {
+                    events.push(middle_at(next, false));
+                }
+                if browser {
+                    // Browser keydown precedes the DOM paste event, possibly with keyup between.
+                    events.push(egui::Event::ModifiersChanged(modifiers));
+                    events.push(egui::Event::Key { key: egui::Key::V, physical_key: None, pressed: true, repeat: false, modifiers });
+                    events.push(egui::Event::Key { key: egui::Key::V, physical_key: None, pressed: false, repeat: false, modifiers });
+                    events.push(egui::Event::ModifiersChanged(egui::Modifiers::NONE));
+                }
+                // Native Ctrl/Cmd+V delivers only Paste, with no V key event.
+                events.push(egui::Event::Paste("27 mm".into()));
+                events.push(egui::Event::ModifiersChanged(egui::Modifiers::NONE));
+                h.frame_with(events);
+                assert_eq!(chamfer_distance(&h), "27 mm", "keyboard paste works (browser: {browser}, release: {release})");
+                assert_ne!(h.app.cam.yaw, before.yaw, "the middle drag still orbits");
+                assert_ne!(h.app.cam.pitch, before.pitch, "the middle drag still orbits");
+                if !release {
+                    assert!(h.ctx.input(|i| i.pointer.button_down(egui::PointerButton::Middle)));
+                    assert_ne!(h.app.cam.yaw, before_paste.yaw, "the orbit continues in the keyboard-paste frame");
+                    h.frame_with(vec![middle_at(next, false)]);
+                }
+            }
+        }
+    }
+}
+
 fn extrude_focus_fixture() -> Harness {
     let mut h = Harness::new();
     h.app.home.open = false;
@@ -1560,6 +1768,85 @@ fn extrude_focus_fixture() -> Harness {
     h.step(&json!({"start":"solid.extrude"})).unwrap();
     h.frames(8);
     h
+}
+
+fn extrude_control_focused(h: &Harness, target: &str) -> bool {
+    let focused = h.ctx.memory(|m| m.focused()).and_then(|id| h.ctx.read_response(id));
+    focused.zip(scenario::handle_at(target)).is_some_and(|(response, at)| response.interact_rect.contains(at))
+}
+
+/// Move focus through the real dialog controls, as a keyboard user does.
+fn tab_to_extrude_control(h: &mut Harness, target: &str, shift: bool) {
+    for _ in 0..32 {
+        h.step(&json!({"key": "Tab", "shift": shift})).unwrap();
+        if extrude_control_focused(h, target) {
+            return;
+        }
+    }
+    panic!("{}Tab did not reach {target}; focus is {:?}", if shift { "Shift+" } else { "" }, h.ctx.memory(|m| m.focused()));
+}
+
+fn extrude_dialog_with_typed_distance() -> Harness {
+    let mut h = extrude_focus_fixture();
+    assert_eq!(h.call("ui.prefs", json!({"value_boxes_in_view": false}))["ok"], true);
+    if h.app.dialog.as_ref().unwrap().items().is_empty() {
+        h.step(&json!({"click": {"world": [15, 10, 0]}})).unwrap();
+    }
+    assert_eq!(h.app.dialog.as_ref().unwrap().items().len(), 1);
+    crate::test_support::click(&mut h, "dialog:Distance");
+    h.step(&json!({"key": "A", "cmd": true})).unwrap();
+    h.step(&json!({"text": "30 mm"})).unwrap();
+    assert!(matches!(&h.app.dialog.as_ref().unwrap().kind, Kind::Extrude { distance, direction: 0, .. } if distance == "30 mm"));
+    h
+}
+
+#[test]
+fn extrude_dialog_keyboard_selects_symmetric_and_applies() {
+    let mut h = extrude_dialog_with_typed_distance();
+    let direction = "dialog:Direction";
+    let options = ["dialog:Direction:One Side", "dialog:Direction:Two Sides", "dialog:Direction:Symmetric"];
+    tab_to_extrude_control(&mut h, direction, true);
+    h.step(&json!({"key": "Space"})).unwrap();
+    assert!(scenario::handle_at(options[0]).is_some(), "Space on Direction opens its choices");
+
+    h.step(&json!({"key": "ArrowDown"})).unwrap();
+    assert!(extrude_control_focused(&h, options[0]), "Arrow Down enters the open menu");
+    h.step(&json!({"key": "Enter"})).unwrap();
+    assert!(h.app.dialog.is_some(), "Enter on a menu choice must leave Extrude open");
+    assert!(scenario::handle_at(options[0]).is_none(), "Reselecting the current choice closes the popup");
+    assert!(extrude_control_focused(&h, direction), "Direction regains focus after Enter");
+
+    h.step(&json!({"key": "Space"})).unwrap();
+    for option in options {
+        h.step(&json!({"key": "ArrowDown"})).unwrap();
+        assert!(extrude_control_focused(&h, option), "Arrow Down should focus {option}");
+    }
+    h.step(&json!({"key": "Space"})).unwrap();
+    assert!(matches!(&h.app.dialog.as_ref().unwrap().kind, Kind::Extrude { distance, direction: 2, .. } if distance == "30 mm"));
+    assert!(scenario::handle_at(options[2]).is_none(), "Selecting Symmetric closes the popup");
+    assert!(extrude_control_focused(&h, direction), "Direction regains focus after Space");
+
+    tab_to_extrude_control(&mut h, "dialog:Distance", false);
+    h.step(&json!({"key": "Enter"})).unwrap();
+    h.settle();
+    assert!(h.app.dialog.is_none(), "Enter from Distance applies Extrude");
+    let bounds = solidcraft_engine::view::bounds(&h.app.session).unwrap();
+    assert!((bounds.min.z + 15.0).abs() < 1e-7 && (bounds.max.z - 15.0).abs() < 1e-7, "{bounds:?}");
+}
+
+#[test]
+fn extrude_dialog_keyboard_reverses_and_applies() {
+    let mut h = extrude_dialog_with_typed_distance();
+    tab_to_extrude_control(&mut h, "dialog:Reverse Direction", false);
+    h.step(&json!({"key": "Space"})).unwrap();
+    assert!(matches!(&h.app.dialog.as_ref().unwrap().kind, Kind::Extrude { distance, direction: 1, .. } if distance == "30 mm"));
+
+    tab_to_extrude_control(&mut h, "dialog:Distance", true);
+    h.step(&json!({"key": "Enter"})).unwrap();
+    h.settle();
+    assert!(h.app.dialog.is_none(), "Enter from Distance applies Extrude");
+    let bounds = solidcraft_engine::view::bounds(&h.app.session).unwrap();
+    assert!((bounds.min.z + 30.0).abs() < 1e-7 && bounds.max.z.abs() < 1e-7, "{bounds:?}");
 }
 
 #[test]
@@ -1967,4 +2254,101 @@ fn dialog_sketch_selection_labels_translate_and_keep_identifiers() {
     }
     let missing = Sel::Profile { sketch: 999, index: 0 };
     assert_eq!(selection_label(&h.app.session, h.app.preferences.origin_plane_names, &d, &d.inputs[0], &missing), "Sketch999 · profile 1");
+}
+
+/// A pattern of every body of a component placed twice: the dialog sees that the bodies make up
+/// both placements whole, and offers them as Components. Switched, the pattern places each again
+/// (`occurrences`) instead of copying every body. A selection missing one body of a placement
+/// gets no offer.
+#[test]
+fn a_pattern_of_whole_components_bodies_offers_and_places_the_components() {
+    let mut h = Harness::new();
+    let comp = h.app.run("component.create", json!({"name": "Bracket"})).unwrap()["component"].as_u64().unwrap();
+    h.app.run("solid.box", json!({"length": 30, "width": 20, "height": 4, "body_name": "Base"})).unwrap();
+    h.app.run("solid.box", json!({"length": 4, "width": 20, "height": 20, "body_name": "Upright"})).unwrap();
+    h.app.run("component.activate", json!({"component": "root"})).unwrap();
+    let first = h.app.session.doc.occurrence_of(comp).unwrap().id;
+    let second = h.app.run("occurrence.copy", json!({"component": comp, "translate": [50, 0, 0]})).unwrap()["occurrence"].as_u64().unwrap();
+    let world: Vec<String> = crate::open_meshing::session_world(&h.app.session).bodies.iter().map(|b| b.name.clone()).collect();
+    assert_eq!(world.len(), 4, "{world:?}");
+    let bodies: Vec<Sel> = world.iter().map(|name| Sel::Body { name: name.clone() }).collect();
+
+    let whole = crate::pattern_components::whole_placements(&h.app.session, &bodies);
+    assert_eq!(whole, vec![vec![first], vec![second]]);
+    assert!(crate::pattern_components::whole_placements(&h.app.session, &bodies[1..]).is_empty(), "a placement missing a body is not whole");
+
+    h.app.session.selection = bodies.clone();
+    h.app.start("solid.pattern.rectangular");
+    h.frames(4);
+    let offered = |h: &Harness| h.app.dialog.as_ref().unwrap().whole_components.as_ref().map(|c| (c.revision, c.placements.clone()));
+    assert_eq!(offered(&h), Some((h.app.session.revision, whole.clone())));
+    // Activating a component changes what a pick takes (the design is the same), so the offer is
+    // worked out again for it.
+    for active in [json!({"component": comp, "occurrence": first}), json!({"component": "root"})] {
+        let doc = h.app.session.doc.clone();
+        h.app.run("component.activate", active).unwrap();
+        assert!(std::sync::Arc::ptr_eq(&doc, &h.app.session.doc));
+        h.frames(2);
+        let now = crate::pattern_components::whole_placements(&h.app.session, &bodies);
+        assert_eq!(offered(&h), Some((h.app.session.revision, now)));
+    }
+    // Each Object Type keeps its own objects: Bodies by way of Features to Components gives the
+    // bodies' placements, not the bodies, and Features picked are kept past Bodies and Components.
+    let placements = vec![Sel::Occurrence { path: vec![first] }, Sel::Occurrence { path: vec![second] }];
+    let feature = vec![Sel::Feature { id: 1 }];
+    mirror_object_type(&mut h, "Features");
+    assert!(h.app.dialog.as_ref().unwrap().inputs[0].items.is_empty());
+    mirror_object_type(&mut h, "Components");
+    assert_eq!(h.app.dialog.as_ref().unwrap().inputs[0].items, placements);
+    mirror_object_type(&mut h, "Features");
+    h.app.dialog.as_mut().unwrap().inputs[0].items.clone_from(&feature);
+    mirror_object_type(&mut h, "Bodies");
+    assert_eq!(h.app.dialog.as_ref().unwrap().inputs[0].items, bodies);
+    mirror_object_type(&mut h, "Components");
+    assert_eq!(h.app.dialog.as_ref().unwrap().inputs[0].items, placements);
+    mirror_object_type(&mut h, "Features");
+    assert_eq!(h.app.dialog.as_ref().unwrap().inputs[0].items, feature);
+    // Components picked by hand outlast a trip to Bodies that leaves the bodies as they came
+    // back, or empties them; bodies picked anew there become their placements.
+    let items = |h: &Harness| h.app.dialog.as_ref().unwrap().inputs[0].items.clone();
+    let narrowed = vec![Sel::Occurrence { path: vec![first] }];
+    mirror_object_type(&mut h, "Components");
+    h.app.dialog.as_mut().unwrap().inputs[0].items.clone_from(&narrowed);
+    mirror_object_type(&mut h, "Bodies");
+    assert_eq!(items(&h), bodies);
+    mirror_object_type(&mut h, "Components");
+    assert_eq!(items(&h), narrowed, "Bodies left as they came back");
+    mirror_object_type(&mut h, "Bodies");
+    h.app.dialog.as_mut().unwrap().inputs[0].items.clear();
+    mirror_object_type(&mut h, "Components");
+    assert_eq!(items(&h), narrowed, "Bodies emptied");
+    mirror_object_type(&mut h, "Bodies");
+    assert!(items(&h).is_empty());
+    let picked = vec![bodies[3].clone()];
+    h.app.dialog.as_mut().unwrap().inputs[0].items.clone_from(&picked);
+    mirror_object_type(&mut h, "Components");
+    let placed = crate::pattern_components::as_placements(&h.app.session, &picked);
+    assert_eq!(placed.len(), 1);
+    assert_ne!(placed, narrowed, "the body picked is in the other placement");
+    assert_eq!(items(&h), placed, "Bodies picked anew");
+    h.app.dialog.as_mut().unwrap().inputs[0].items.clone_from(&placements);
+    mirror_object_type(&mut h, "Features");
+    assert_eq!(items(&h), feature);
+    mirror_object_type(&mut h, "Components");
+    {
+        let d = h.app.dialog.as_mut().unwrap();
+        assert_eq!(d.inputs[0].label, "Components");
+        assert_eq!(d.inputs[0].items, vec![Sel::Occurrence { path: vec![first] }, Sel::Occurrence { path: vec![second] }]);
+        d.inputs[1].items = vec![Sel::Axis { name: "Y".into() }];
+    }
+    let commands = apply_commands(&h.app, h.app.dialog.as_ref().unwrap()).unwrap();
+    assert_eq!(commands[0].0, "solid.pattern.rectangular");
+    assert_eq!(commands[0].1["occurrences"], json!([[first], [second]]));
+    let occurrences = h.app.session.doc.occurrences.len();
+    for (command, params) in commands {
+        h.app.run(&command, params).unwrap();
+    }
+    // Two more placements of each (a quantity of 3), and no new bodies.
+    assert_eq!(h.app.session.doc.occurrences.len(), occurrences + 4);
+    assert_eq!(h.app.session.model.state().bodies.len(), 2);
 }

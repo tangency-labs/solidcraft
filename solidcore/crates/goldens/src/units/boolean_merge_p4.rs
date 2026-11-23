@@ -316,6 +316,7 @@ impl UnitDiff for Runner {
                 .chain(state.other_components.iter_mut())
             {
                 canonical_loop_starts(b)?;
+                crate::trim_hook::observe(b);
             }
         }
         match result {

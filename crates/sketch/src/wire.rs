@@ -230,7 +230,7 @@ fn clean_wires(wires: &[Vec<Vec3>]) -> Result<Vec<Vec<Vec3>>> {
     wires.iter().map(|w| clean(w).ok_or_else(|| SketchError::Invalid("3D linked curve points out of range or coincident".into()))).collect()
 }
 
-fn drawn_polyline(fit: &[Vec3]) -> Result<Vec<Vec3>> {
+pub(crate) fn drawn_polyline(fit: &[Vec3]) -> Result<Vec<Vec3>> {
     if fit.is_empty() || fit.len() > MAX_FIT_POINTS {
         return Err(SketchError::Invalid(format!("a 3D curve needs 1 to {MAX_FIT_POINTS} points")));
     }
@@ -320,12 +320,15 @@ impl Sketch {
         let id = if geom.is_empty() {
             let id = self.fresh("j")?;
             self.links.push(Link {
+                sketch_placements: Vec::new(),
                 id: id.clone(),
                 kind,
                 source,
                 face_name: None,
                 edge_name: None,
                 vertex_name: None,
+                curve_edges: Vec::new(),
+                profile_boundary: Vec::new(),
                 auto_face: false,
                 lost: false,
                 name_dropped: false,
@@ -417,26 +420,41 @@ impl Sketch {
     /// Move a fit point of a drawn 3D curve, and every other drawn point at the same place
     /// (curves drawn end to end stay joined). Returns how many points moved.
     pub fn move_drawn_point(&mut self, wire: &str, index: usize, to: Vec3) -> Result<usize> {
-        if !in_range3(to) {
-            return Err(SketchError::Invalid("3D point out of range".into()));
+        self.move_drawn_points(&[(wire.to_string(), index, to)])
+    }
+
+    /// [`Sketch::move_drawn_point`] for several points at once: every place is read before any
+    /// point moves, and a place picked more than once moves once, to its first target.
+    pub fn move_drawn_points(&mut self, moves: &[(String, usize, Vec3)]) -> Result<usize> {
+        let mut targets: Vec<(WireSpace, Vec3, Vec3)> = Vec::new();
+        for (wire, index, to) in moves {
+            if !in_range3(*to) {
+                return Err(SketchError::Invalid("3D point out of range".into()));
+            }
+            let w = self.wire_index(wire).ok_or_else(|| SketchError::Unknown(wire.clone()))?;
+            let space = self
+                .wires
+                .get(w)
+                .filter(|w| w.link.is_none())
+                .map(|w| w.space)
+                .ok_or_else(|| SketchError::Invalid("linked 3D geometry cannot be moved".into()))?;
+            let from =
+                self.wires.get(w).and_then(|w| w.fit.get(*index)).copied().ok_or_else(|| SketchError::Unknown(format!("{wire} point {index}")))?;
+            if !targets.iter().any(|(sp, f, _)| *sp == space && f.dist(from) < 1e-9) {
+                targets.push((space, from, *to));
+            }
         }
-        let w = self.wire_index(wire).ok_or_else(|| SketchError::Unknown(wire.into()))?;
-        let space = self
-            .wires
-            .get(w)
-            .filter(|w| w.link.is_none())
-            .map(|w| w.space)
-            .ok_or_else(|| SketchError::Invalid("linked 3D geometry cannot be moved".into()))?;
-        let from = self.wires.get(w).and_then(|w| w.fit.get(index)).copied().ok_or_else(|| SketchError::Unknown(format!("{wire} point {index}")))?;
         let mut n = 0;
         let mut changes = Vec::new();
-        for (index, w) in self.wires.iter().enumerate().filter(|(_, w)| !w.fit.is_empty() && w.link.is_none() && w.space == space) {
+        for (index, w) in self.wires.iter().enumerate().filter(|(_, w)| !w.fit.is_empty() && w.link.is_none()) {
             let mut fit = w.fit.clone();
             let mut changed = false;
-            for p in fit.iter_mut().filter(|p| p.dist(from) < 1e-9) {
-                *p = to;
-                changed = true;
-                n += 1;
+            for p in fit.iter_mut() {
+                if let Some((_, _, to)) = targets.iter().find(|(sp, f, _)| *sp == w.space && p.dist(*f) < 1e-9) {
+                    *p = *to;
+                    changed = true;
+                    n += 1;
+                }
             }
             if changed {
                 // An exact arc keeps its analytic form: re-derive it from its three defining
@@ -468,6 +486,7 @@ impl Sketch {
     /// Remove wires by id.
     pub fn remove_wires(&mut self, ids: &[String]) {
         self.wires.retain(|w| !ids.contains(&w.id));
+        self.prune_wire_constraints();
         self.prune_links();
     }
 }

@@ -64,7 +64,8 @@
 //!   transform without maps of its own.
 //! - **Contexts** and `bCalcGeometric` (unused by the ported simple maps) are dropped.
 
-use crate::error::{ignore_status, ignored, Result, SolidError};
+use crate::error::surface::SurfaceFailure;
+use crate::error::{ignore_status, ignored, Failure, Result, SolidError};
 use crate::geom::extent1d::{Extent1d, ExtentNd};
 use crate::geom::extent3d::Extent3d;
 use crate::geom::geom_utility::p2::ContinuityType;
@@ -93,7 +94,6 @@ use super::p1::{
 const OP_BOX: &str = "surface::volume::p2::Volume::evaluate_bounding_box";
 const OP_MAP_BOX: &str = "surface::volume::p2::Volume::map_pseudo_box";
 const OP_INV: &str = "surface::volume::p2::Volume::inv_evaluate_point";
-const OP_SOLVE: &str = "surface::volume::p2::Volume::global_point_solve";
 const OP_READ: &str = "surface::volume::p2::Volume::read_from_db";
 const OP_WRITE: &str = "surface::volume::p2::Volume::write_to_db";
 
@@ -346,9 +346,9 @@ impl Volume {
 
         // check input - ParamBox must be maintained within Natural ParamDomain
         if !self.is_box_in_param_domain(k, param_box, true)? {
-            return Err(SolidError::surface_failed(
+            return Err(SolidError::surface(
                 OP_BOX,
-                "the parameter box is outside the parameter domain",
+                SurfaceFailure::BoxOutsideParamDomain,
             ));
         }
 
@@ -511,9 +511,9 @@ impl Volume {
         if !trim_to_legal_param_space
             && !self.is_pseudo_box_in_in_space_domain(k, in_space_pseudo_box, true)?
         {
-            return Err(SolidError::surface_failed(
+            return Err(SolidError::surface(
                 OP_MAP_BOX,
-                "the pseudo box maps outside the in-space domain",
+                SurfaceFailure::PseudoBoxOutsideDomain,
             ));
         }
 
@@ -659,9 +659,17 @@ impl Volume {
                 param_pseudo_box,
                 proj_box,
                 proj_pseudo_box,
+                // `evaluate_point_written` of a transform, with its dropped error kept as
+                // the cause (it retries only a twist, an unbend or a bend)
                 |p| {
-                    self.evaluate_point_written(p, true)?.ok_or_else(|| {
-                        SolidError::surface_failed(OP_BOX, "the point could not be evaluated")
+                    self.evaluate_point(p, true).map_err(|e| {
+                        if e.is_unported_or_cancelled() {
+                            e
+                        } else {
+                            Failure::new(OP_BOX, SurfaceFailure::CallFailed)
+                                .caused_by(e)
+                                .into_error()
+                        }
                     })
                 },
             ),
@@ -904,7 +912,6 @@ impl Volume {
             non_zero_tangents,
             do_zero_sampling: true,
             with_compounding,
-            ..EvalOptions::default()
         };
         // sMat[2][2][2]
         let m = self.evaluate(param_point, 1, &opts)?;
@@ -1215,13 +1222,8 @@ impl Volume {
                 };
                 let r =
                     next.inv_map_point(k, out_point, None, next_in_pseudo_box.as_ref(), true)?;
-                // quit when mapping back to 1st OutSpace fails
-                if !r.success {
-                    return Err(SolidError::surface_failed(
-                        OP_SOLVE,
-                        "mapping back to the first out-space failed",
-                    ));
-                }
+                // upstream quits when mapping back to the 1st out-space fails;
+                // `inv_map_point` returns `success` true on every `Ok` (as upstream)
                 r.points
             }
             None => vec![out_point],
@@ -1501,9 +1503,9 @@ impl Volume {
             UNBEND_VOLUME_TYPE => UnbendVolume::read_from_db(db, version),
             TWIST_VOLUME_TYPE => TwistVolume::read_from_db(db, version),
             VOLUME_TYPE => Err(unsupported("SmVolume_TYPE without a volume to fill")),
-            _ => Err(SolidError::surface_failed(
+            _ => Err(SolidError::surface(
                 OP_READ,
-                "the volume type is unknown",
+                SurfaceFailure::UnknownVolumeType { volume_type },
             )),
         }
     }
@@ -1580,9 +1582,9 @@ impl Volume {
                 })
             }
             VolumeKind::BSpline(_) => {
-                return Err(SolidError::surface_failed(
+                return Err(SolidError::surface(
                     OP_WRITE,
-                    "a B-spline volume cannot be written",
+                    SurfaceFailure::BSplineVolumeUnsupported,
                 ))
             }
             VolumeKind::Transform(t) => t.write_rows_to_db(db),

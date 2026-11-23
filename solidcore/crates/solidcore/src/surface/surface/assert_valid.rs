@@ -64,6 +64,9 @@
 //!   solution found (`no_tangent_along`).
 //! - **Warnings.** `SmBSplineSurface::AssertValid`'s repeated-end-control-point
 //!   check only issues a `WARN`, so `HasRepeatedEndControlPoints` is not run.
+//! - **Interior poles (WR-788).** Both knot walks decide from the active control
+//!   points. Upstream's U-only Greville check can lie off the knot line and miss
+//!   an iso span whose control points coincide exactly.
 //! - **Undefined behaviour.** Index arithmetic of `HasInternalPole` that leaves the
 //!   control net (unclamped knot vectors), the first/last polar angle of an empty
 //!   table, missing iso boundaries and a continuity output `CalculateContinuities`
@@ -95,8 +98,8 @@
 //!   (`labels::CURVE_BOUNDED_SURFACE`, UB-273). With no report list,
 //!   failed boundary checks return false normally, as upstream. At levels 0..2,
 //!   the inherited base continuity test reads an unwritten output: this class uses
-//!   the generic failing `GetKnots`. The existing continuity guard returns
-//!   `InvalidInput`; `LEVEL_GIVEN` skips that base call and is defined.
+//!   the generic failing `GetKnots`. Continuities that cannot be computed fail test 4
+//!   (WR-663, as the fork); `LEVEL_GIVEN` skips that base call.
 //! - **Wrapping surfaces.** `SmOffsetSurface` and `SmSrfInVolume` are in the `wrapped`
 //!   submodule (its own deviations); the latter calls `Volume::assert_valid`.
 //! - **Face context.** Upstream's solves reach a face-owned surface's face through the
@@ -598,20 +601,15 @@ fn assert_test_surface1(k: &Kernel, s: &Surface) -> Result<(bool, f64, f64)> {
 
 /// `sm_AssertTestSurface4`: at least G1 across every knot in both directions.
 fn assert_test_surface4(k: &Kernel, s: &Surface) -> Result<bool> {
-    // Surface continuities across U and V knots (statuses ignored: a failed call
-    // leaves the minimum it had reached)
-    // (with the opt-in fix continuities that cannot be computed fail the test, WR-663,
+    // Surface continuities across U and V knots
+    // (continuities that cannot be computed fail the test, as the fork does, WR-663,
     // tangency-labs/smlib 21dcf69: `None`)
-    let fails = k.fixes.query_statuses_pass_on;
     let cont = |dir| -> Result<Option<ContinuityType>> {
         let mut reached = None;
         match s.calculate_continuities_reached(k, dir, &mut reached) {
             Ok((c, _)) => Ok(Some(c)),
             Err(e) if e.is_unported_or_cancelled() => Err(e),
-            Err(_) if fails => Ok(None),
-            Err(_) => reached.map(Some).ok_or_else(|| {
-                invalid("continuity output never written (upstream reads it uninitialised)")
-            }),
+            Err(_) => Ok(None),
         }
     };
     let Some(cont_u) = cont(SurfParamType::U)? else {
@@ -666,14 +664,13 @@ fn assert_test_surface6(k: &Kernel, s: &Surface) -> Result<bool> {
         }
 
         // Get iso parameter boundaries
-        // (a failed CreateIsoBoundaries leaves the curves uninitialised upstream)
-        // (with the opt-in fix boundaries that cannot be built or compared fail the
-        // test, WR-663, tangency-labs/smlib 21dcf69)
-        let fails = k.fixes.query_statuses_pass_on;
+        // (a failed CreateIsoBoundaries leaves the curves uninitialised upstream;
+        // boundaries that cannot be built or compared fail the test, as the fork does,
+        // WR-663, tangency-labs/smlib 21dcf69)
         let (crv1, crv2) = match s.create_iso_boundaries(k, dir, a_tol) {
             Ok(Some(c)) => c,
             Err(e) if e.is_unported_or_cancelled() => return Err(e),
-            Err(_) if fails => return Ok(false),
+            Err(_) => return Ok(false),
             _ => {
                 return Err(invalid(
                     "no iso boundaries (upstream reads uninitialised curves)",
@@ -706,7 +703,7 @@ fn assert_test_surface6(k: &Kernel, s: &Surface) -> Result<bool> {
             ],
         ) {
             Ok(f) => f,
-            Err(e) if fails && !e.is_unported_or_cancelled() => return Ok(false),
+            Err(e) if !e.is_unported_or_cancelled() => return Ok(false),
             Err(e) => return Err(e),
         };
 
@@ -891,14 +888,10 @@ fn count(v: usize) -> Result<i64> {
     i64::try_from(v).map_err(|_| invalid("count out of range"))
 }
 
-fn index(v: i64) -> Result<usize> {
-    usize::try_from(v).map_err(|_| invalid("index before the start of the net"))
-}
-
 /// `SmBSplineSurface::HasInternalPole`: some interior knot line has a patch boundary
 /// span whose control points all lie within `tol` (`<= 0`: `SM_ZONE_TOL_3D`) of one
-/// another (for the u lines, also a singularity, `IsSingularity` of `s` at a Greville
-/// point; the v lines have no such check, as upstream). `false` without NURB.
+/// reference point. Coincident active control points prove that the iso span
+/// collapses; no singularity query away from the knot is needed. `false` without NURB.
 ///
 /// At each interior knot it tests the rows whose basis functions are nonzero at the
 /// knot, starting at the row through the knot, where upstream moves one row further for
@@ -909,9 +902,9 @@ fn index(v: i64) -> Result<usize> {
 ///
 /// # Errors
 ///
-/// Those of the knot, Greville and singularity queries; [`SolidError::InvalidInput`]
+/// Those of the knot and control-net queries; [`SolidError::InvalidInput`]
 /// where upstream's index arithmetic leaves the control net.
-pub fn has_internal_pole(k: &Kernel, s: &Surface, b: &BSplineSurface, tol: f64) -> Result<bool> {
+pub fn has_internal_pole(_k: &Kernel, _s: &Surface, b: &BSplineSurface, tol: f64) -> Result<bool> {
     // init return
     let mut rtn = false;
 
@@ -1013,18 +1006,6 @@ pub fn has_internal_pole(k: &Kernel, s: &Surface, b: &BSplineSurface, tol: f64) 
                 kk -= 1;
             }
 
-            // These tests don't guarantee a singularity: check the point.  [B597]
-            if test {
-                // Get uv for the first control point tested.
-                let uv = Point2::new(
-                    b.greville_abscissa(SurfParamType::U, index(cp_index_u + row_cnt_u - 1)?)?,
-                    b.greville_abscissa(SurfParamType::V, index(cp_index_v + degree_v)?)?,
-                );
-                if !s.is_singularity(k, uv, tolerance, false)?.singular {
-                    test = false;
-                }
-            }
-
             // remember when patch is degenerate
             rtn |= test;
             jj += 1;
@@ -1097,10 +1078,6 @@ pub fn has_internal_pole(k: &Kernel, s: &Surface, b: &BSplineSurface, tol: f64) 
                 }
                 kk -= 1;
             }
-
-            // As upstream, no singularity check here (the U walk's [B597] check evaluates
-            // at a Greville point off the knot line when row_cnt > 1, so it misses real
-            // poles; see WR-788)
 
             // remember when patch is degenerate
             rtn |= test;
@@ -3172,11 +3149,18 @@ mod tests {
 
     /// #17056 review: rows 1 and 2 collapsed to one point `P` make the iso line at the
     /// simple v knot 0.5 the point `(N_1 + N_2)(0.5) P = P`, a pole, and the V walk finds
-    /// it. A singularity check at the U walk's Greville point (v = greville(2) = 0.75, off
-    /// the knot line) would reject it, so the V walk keeps upstream's (none).
+    /// it. A singularity check at v = greville(2) = 0.75, off the knot line, would
+    /// reject it despite the coincident active control points.
     #[test]
     fn a_collapsed_span_at_a_simple_v_knot_is_a_pole() {
         assert!(simple_knot(false, collapse_simple_knot_rows));
+    }
+
+    /// At the simple U knot, only rows 1 and 2 contribute, so the whole iso line
+    /// equals their common point. The Greville parameter 0.75 is off that knot.
+    #[test]
+    fn a_collapsed_span_at_a_simple_u_knot_is_a_pole() {
+        assert!(simple_knot(true, collapse_simple_knot_rows));
     }
 
     /// The #17056 review case: degree 2 by 4, one clamped span by the double knot 0.5
@@ -3803,7 +3787,7 @@ mod curve_bounded_tests {
     }
 
     #[test]
-    fn curve_bounded_given_is_defined_and_base_continuity_is_guarded() {
+    fn curve_bounded_given_is_defined_and_base_continuity_fails_test_4() {
         let k = Kernel::default();
         let surface = wrap(wrap(plane(1.0), vec![], vec![]), vec![], vec![]);
         let mut list = AssertArray::new();
@@ -3812,14 +3796,13 @@ mod curve_bounded_tests {
             .unwrap());
         assert!(list.is_empty());
         assert!(!list.last_add());
+        // The inherited base check reaches `sm_AssertTestSurface4`, whose
+        // `CalculateContinuities` fails here (a curve-bounded surface's generic `GetKnots`
+        // fails) without writing its output. Upstream reads that output uninitialised;
+        // the fork fails test 4 instead (tangency-labs/smlib 21dcf69, WR-663), so the
+        // surface is reported invalid.
         for level in [0, 1, 2] {
-            assert!(matches!(
-                surface.assert_valid(&k, None, level, ObjectKey(1)),
-                Err(SolidError::InvalidInput {
-                    reason: "continuity output never written (upstream reads it uninitialised)",
-                    ..
-                })
-            ));
+            assert!(!surface.assert_valid(&k, None, level, ObjectKey(1)).unwrap());
         }
     }
 
