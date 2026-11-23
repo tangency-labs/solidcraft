@@ -12255,13 +12255,16 @@ fn trim_to_body(tools: Vec<Traced>, target: &ModelBody, dist_to_start: impl Fn(V
 /// face's extended surface and says whether its section lies wholly on the face. When every
 /// tool's does, those pieces (the one that starts at `start`, whether that lies in air or inside
 /// the target's material) are the result; otherwise the tool is trimmed to the target body
-/// ([`trim_to_body`], as a profile only partly over the face always was), refused when a piece
-/// still has its end cap at `far`.
-fn trim_to_face(tools: Vec<Traced>, target: &ModelBody, face: usize, plane: &Plane, start: f64, far: f64) -> Result<Vec<Traced>> {
+/// ([`trim_to_body`], as a profile only partly over the face always was). Where a piece still
+/// has its end cap at `far`, part of the profile lies beyond the face's edges: the tools then end
+/// at the face's surface extended past them ([`trim_to_offset_face`] with no offset), refused
+/// when a piece still runs out to `far`. `near` is a point on the face (the To pick).
+#[allow(clippy::too_many_arguments)]
+fn trim_to_face(tools: Vec<Traced>, target: &ModelBody, face: usize, near: Vec3, plane: &Plane, start: f64, far: f64) -> Result<Vec<Traced>> {
     let mut out = Vec::new();
     let mut on_face = true;
     for t in &tools {
-        let Some(parts) = kernel::face_split_if_on_face(&t.body, &target.body, face, plane, start, far)? else {
+        let Some(parts) = kernel::face_split_if_on_face(&t.body, &target.body, face, near, plane, start, far)? else {
             on_face = false;
             break;
         };
@@ -12281,7 +12284,16 @@ fn trim_to_face(tools: Vec<Traced>, target: &ModelBody, face: usize, plane: &Pla
                 let planed = trim_to_plane(tools, &face_plane, plane, start, far)?;
                 return trim_to_body(planed, target, from_start);
             }
-            return Err(DocError::Invalid("the profile reaches past the To face".into()));
+            // A curved face: the tools end at its surface extended past those edges, as a To
+            // offset ends them at its offset surface (#20389).
+            let travel = if far > start { n } else { n * -1.0 };
+            // Its refusals speak of an offset this extent does not have: refused as before.
+            let past = || DocError::Invalid("the profile reaches past the To face".into());
+            let surfaced = trim_to_offset_face(tools, target, face, near, travel, 0.0, from_start).map_err(|_| past())?;
+            if surfaced.iter().any(|t| kernel::has_cap_at(&t.body, plane, far, far - start)) {
+                return Err(past());
+            }
+            return Ok(surfaced);
         }
         return Ok(trimmed);
     }
@@ -12308,8 +12320,8 @@ fn trim_to_offset_face(
 ) -> Result<Vec<Traced>> {
     let target_traced = target.traced();
     let sheet = offset_sheet(target, face, near, travel, offset)?;
-    let tool = kernel::SplitTool::Face { body: &sheet, face: 0 };
-    let split = tools.iter().map(|t| kernel::split_body(&t.body, &tool)).collect::<std::result::Result<Vec<_>, _>>().map_err(|e| {
+    // Split where each tool crosses the sheet the way it does at the pick (#20389).
+    let split = tools.iter().map(|t| kernel::split_at_facing_side(&t.body, &sheet, 0, near, travel)).collect::<std::result::Result<Vec<_>, _>>().map_err(|e| {
         DocError::Invalid(format!(
             "not supported yet: To Object with an offset from this face: the extent cannot be cut by its offset surface ({e}); use a Distance, or an offset of 0"
         ))
@@ -12350,7 +12362,7 @@ fn trim_to_curved_face(
     far: f64,
 ) -> Result<Vec<Traced>> {
     if to_offset.abs() <= 1e-9 {
-        return trim_to_face(tools, target, face, plane, start, far);
+        return trim_to_face(tools, target, face, to, plane, start, far);
     }
     let n = plane.normal();
     let travel = if far > start { n } else { n * -1.0 };
