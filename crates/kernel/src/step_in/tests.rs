@@ -5876,6 +5876,7 @@ fn the_checks_heal_a_shared_import_once_they_end() {
             source_item: 7,
             face_origin: (0..8).collect(),
             name: "Hair".into(),
+            common_face_name: None,
             body: hair.clone(),
             color: None,
             path: Vec::new(),
