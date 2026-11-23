@@ -1893,6 +1893,10 @@ pub enum FeatureKind {
         body: Option<BodyName>,
         #[serde(default, skip_serializing_if = "std::ops::Not::not")]
         refold: bool,
+        /// Unfold: a point on the flat panel that stays where it is, so the flat lies in its
+        /// plane (default: where the sheet's flat lies, its largest flat panel's plane).
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        fixed: Option<Position>,
     },
     /// Convert to sheet metal, of picked faces (#6748): the sheet is the faces picked at `face` and
     /// `faces`, and every face a bend joins to them, each a panel of the rule's thickness, however

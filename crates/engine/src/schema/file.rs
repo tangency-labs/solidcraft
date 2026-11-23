@@ -228,6 +228,12 @@ pub struct ExportParams {
     /// `file.export_stl` has it; refused for the other formats. Default: false. Not read for URDF.
     #[serde(default)]
     pub lay_on_print_faces: Option<bool>,
+    /// GLB only: true writes each component occurrence as a node named after it, holding its
+    /// part's bodies in the part's frame, so a viewer can move each part on its own; false writes
+    /// every body directly under the root in world coordinates, named as the model names it (as
+    /// SolidCraft 0.40 did). Default: true. Not read for the other formats.
+    #[serde(default)]
+    pub hierarchy: Option<bool>,
     /// ASCII STL (`stla`) only: `face` writes one named solid for each B-rep face, as
     /// `file.export_stl` has it; refused for the other formats. Default: body.
     #[serde(default)]
@@ -314,6 +320,7 @@ impl<'de> Deserialize<'de> for ExportParams {
             velocity: None,
             images: None,
             lay_on_print_faces: None,
+            hierarchy: None,
             solids: None,
             name: None,
             is_static: None,
@@ -394,6 +401,12 @@ impl<'de> Deserialize<'de> for ExportParams {
             Some(Value::Bool(true)) if matches!(format, Format::StlBinary | Format::StlAscii | Format::ThreeMf | Format::ThreeMfTagged) => Some(true),
             Some(Value::Bool(true)) => return Err(refuse("`lay_on_print_faces` is for STL and 3MF: other formats are not printed")),
             Some(_) => return Err(refuse("`lay_on_print_faces` must be true or false")),
+        };
+        out.hierarchy = match m.get("hierarchy") {
+            _ if format != Format::Glb => None,
+            None | Some(Value::Null) => None,
+            Some(Value::Bool(b)) => Some(*b),
+            Some(_) => return Err(refuse("`hierarchy` must be true or false")),
         };
         Ok(out)
     }

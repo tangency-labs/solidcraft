@@ -1542,7 +1542,7 @@ pub fn failure(e: &SolidError) -> Option<Error> {
 
 /// [`failure`] for a failure of the session `s`, where a step of the session failed: the
 /// kernel's statement followed by what the session noted of that step ([`noted`]), so two
-/// failures the kernel states alike ("the fillet body is not built") say which step failed
+/// failures the kernel states alike ("a step of the fillet executive failed") say which step failed
 /// and why. A session that noted nothing gives [`failure`]'s; `None` as [`failure`].
 #[must_use]
 pub fn session_failure(s: &FilletSession<'_>, e: &SolidError) -> Option<Error> {
