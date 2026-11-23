@@ -302,13 +302,15 @@ pub(super) fn eval(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, 
             Ok(())
         }
         FeatureKind::SurfaceExtrude { sketch, profiles, curves, extent } => {
-            let ss = sketch_in_feature_frame(
+            let ss = constructor_profile_in_frame(
                 doc,
                 st.sketch(sketch.0).ok_or_else(|| DocError::Unknown(format!("sketch {sketch} (it must come earlier in the timeline)")))?,
-                f.component,
+                f,
             )?;
-            if extent.through_all || extent.taper.is_some() || extent.to.is_some() || extent.from.is_some() {
-                return Err(DocError::Invalid("not supported yet: a surface extrude through all, to or from an object, or with a taper".into()));
+            if extent.through_all || extent.taper.is_some() || extent.to.is_some() || extent.from.is_some() || extent.symmetric_offset {
+                return Err(DocError::Invalid(
+                    "not supported yet: a surface extrude through all, to or from an object, with a taper, or with symmetric offset".into(),
+                ));
             }
             let d = val(vals, &extent.distance, Kind::Length)?;
             let off = extent.start_offset.as_deref().map(|e| val(vals, e, Kind::Length)).transpose()?.unwrap_or(0.0);
@@ -319,10 +321,10 @@ pub(super) fn eval(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, 
             Ok(())
         }
         FeatureKind::SurfaceRevolve { sketch, profiles, curves, axis, angle, angle2, symmetric } => {
-            let ss = sketch_in_feature_frame(
+            let ss = constructor_profile_in_frame(
                 doc,
                 st.sketch(sketch.0).ok_or_else(|| DocError::Unknown(format!("sketch {sketch} (it must come earlier in the timeline)")))?,
-                f.component,
+                f,
             )?;
             let (o, d) = revolve_axis(
                 Some(doc),
@@ -333,6 +335,9 @@ pub(super) fn eval(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, 
                 &*super::axis_state(doc, st, f.component, axis)?,
                 &|name| construction_axis_in(Some(doc), st, name, f.component),
                 &|owner, curve| {
+                    if owner == sketch.0 {
+                        return sketch_line_world(&ss, curve);
+                    }
                     let solved =
                         st.sketch(owner).ok_or_else(|| DocError::Unknown(format!("sketch {owner} (it must come earlier in the timeline)")))?;
                     sketch_line_world(&sketch_in_feature_frame(doc, solved, f.component)?, curve)
@@ -396,6 +401,7 @@ pub(super) fn eval(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, 
             scale,
             rails,
             rail_fit,
+            spline_as_samples,
         } => {
             let ss = st.sketch(sketch.0).ok_or_else(|| DocError::Unknown(format!("sketch {sketch} (it must come earlier in the timeline)")))?;
             // The path is a chain of a body's edges (#2216) or the curves of a sketch.
@@ -429,15 +435,19 @@ pub(super) fn eval(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, 
             // The path runs on from the end nearest the middle of the curves.
             let pts: Vec<Vec2> = chains.iter().flatten().flat_map(|s| s.polyline(1e-2)).collect();
             let start = ss.plane.to_world(pts.iter().fold(Vec2::default(), |a, p| a + *p) * (1.0 / pts.len().max(1) as f64));
-            let body = match path_points(ps, path, start)? {
+            let body = match path_points(&curves_in(ps, path), start)? {
                 Some(path) => {
                     let pts = path.points();
                     let rails = crate::eval::rail_polylines(doc, st, rails, f.component, pts.first().copied().unwrap_or(start))?;
                     let ctl = crate::eval::sweep_control(vals, orientation, twist, scale, rails, *rail_fit)?;
-                    kernel::sweep_sheet_points_with(&ss.plane, &chains, &pts, &ctl)?
+                    if *spline_as_samples {
+                        kernel::sweep_sheet_points_with(&ss.plane, &chains, &pts, &ctl)?
+                    } else {
+                        kernel::sweep_sheet_point_path_with(&ss.plane, &chains, &path, &ctl)?
+                    }
                 }
                 None => {
-                    let segs = path_segments_at(ps, path, start, Some(&ss.plane))?;
+                    let segs = path_segments_at(&curves_in(ps, path), start, Some(&ss.plane))?;
                     let path_start = segs.first().map_or(start, kernel::PathSeg::start);
                     let rails = crate::eval::rail_polylines(doc, st, rails, f.component, path_start)?;
                     let ctl = crate::eval::sweep_control(vals, orientation, twist, scale, rails, *rail_fit)?;
@@ -673,7 +683,7 @@ fn network_sources(
             let raw = st.sketch(sk.0).ok_or_else(|| DocError::Unknown(format!("sketch {sk} (it must come earlier in the timeline)")))?;
             // 3D sketch curves are followed through their points; planar ones exactly.
             let mapped = path_in_frame(doc, raw, f.component)?;
-            match path_points(&mapped, &c.curves, Vec3::new(f64::NAN, f64::NAN, f64::NAN))? {
+            match path_points(&curves_in(mapped.as_ref(), &c.curves), Vec3::new(f64::NAN, f64::NAN, f64::NAN))? {
                 Some(path) => NetSource::Points(path.points()),
                 None => {
                     let ss = sketch_in_feature_frame(doc, raw, f.component)?;
@@ -920,7 +930,7 @@ fn loft_blend(
                 return Err(one_chain());
             }
             let mapped = path_in_frame(doc, raw, f.component)?;
-            path_points(&mapped, &sec.curves, Vec3::new(f64::NAN, f64::NAN, f64::NAN))?.ok_or_else(one_chain)?.points()
+            path_points(&curves_in(mapped.as_ref(), &sec.curves), Vec3::new(f64::NAN, f64::NAN, f64::NAN))?.ok_or_else(one_chain)?.points()
         } else {
             let ss = sketch_in_feature_frame(doc, raw, f.component)?;
             let profiles = match (&sec.profiles, sec.curves.is_empty()) {

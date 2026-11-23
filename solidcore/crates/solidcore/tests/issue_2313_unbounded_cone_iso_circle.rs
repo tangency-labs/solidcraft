@@ -7,9 +7,10 @@
 //!   runs the cone from its apex (above the origin) upwards, so no circle comes back for a
 //!   point below the apex.
 //!
-//! With `Kernel::fixes.cone_unbounded_parameterized_as_nurb` the circle through a point on
-//! the cone lies on the cone at the point's axial height, to 1e-9 relative, whether or not
-//! `cone_iso_circle_at_axial_height` (WR-704) is on. Bounded cones are unchanged by the flag.
+//! The port (the flags `cone_unbounded_parameterized_as_nurb` and
+//! `cone_iso_circle_at_axial_height` until their retirement) parameterises unbounded cones as
+//! their NURB: the circle through a point on the cone lies on the cone at the point's axial
+//! height, to 1e-9 relative, bounded or unbounded.
 #![allow(
     clippy::unwrap_used,
     clippy::expect_used,
@@ -25,11 +26,8 @@ use solidcore::Kernel;
 const TOL: f64 = 1e-3;
 const REL: f64 = 1e-9;
 
-fn kernel(fix: bool, axial: bool) -> Kernel {
-    let mut k = Kernel::default();
-    k.fixes.cone_unbounded_parameterized_as_nurb = fix;
-    k.fixes.cone_iso_circle_at_axial_height = axial;
-    k
+fn kernel() -> Kernel {
+    Kernel::default()
 }
 
 /// The issue's placement (origin, Z axis) and a tilted, offset one.
@@ -89,28 +87,25 @@ fn assert_on_cone_at(
     }
 }
 
-/// Every pair of flags, inside out or not, swapped or not, on both placements.
+/// Inside out or not, swapped or not, on both placements.
 fn each_cone(
-    fix: bool,
     height: Option<f64>,
     bot: f64,
     semi: f64,
     mut f: impl FnMut(&Kernel, &Axis2Placement, &Cone, String),
 ) {
-    for axial in [false, true] {
-        let k = kernel(fix, axial);
-        for (n, pl) in placements().iter().enumerate() {
-            for inside_out in [false, true] {
-                for swap in [false, true] {
-                    let cone = Cone::create_canonical_with_semi_angle(
-                        &k, pl, bot, semi, height, swap, inside_out,
-                    )
-                    .unwrap();
-                    let what = format!(
-                        "bot {bot} semi {semi} height {height:?} placement {n} inside_out {inside_out} swap {swap} axial {axial}"
-                    );
-                    f(&k, pl, &cone, what);
-                }
+    let k = kernel();
+    for (n, pl) in placements().iter().enumerate() {
+        for inside_out in [false, true] {
+            for swap in [false, true] {
+                let cone = Cone::create_canonical_with_semi_angle(
+                    &k, pl, bot, semi, height, swap, inside_out,
+                )
+                .unwrap();
+                let what = format!(
+                    "bot {bot} semi {semi} height {height:?} placement {n} inside_out {inside_out} swap {swap}"
+                );
+                f(&k, pl, &cone, what);
             }
         }
     }
@@ -144,7 +139,7 @@ fn unbounded_cone_iso_circles_at_the_points_height() {
         (3.0, -40.0),
         (1.0, 80.0),
     ] {
-        each_cone(true, None, bot, semi, |k, pl, cone, what| {
+        each_cone(None, bot, semi, |k, pl, cone, what| {
             for h in unbounded_heights(bot, semi) {
                 let p = point_at(pl, cone, h);
                 let c = cone.create_iso_circle_from_point(k, p, TOL).unwrap();
@@ -156,65 +151,67 @@ fn unbounded_cone_iso_circles_at_the_points_height() {
 }
 
 #[test]
-fn bounded_cone_iso_circles_at_the_points_height_either_way() {
-    for fix in [false, true] {
-        for (bot, semi, height) in [
-            (1.0, 10.0, 2.0),
-            (2.0, -15.0, 3.0),
-            (1.0, 45.0, 1.0),
-            (2.0, -20.0, 5.0),
-        ] {
-            each_cone(fix, Some(height), bot, semi, |k, pl, cone, what| {
-                for h in [0.0, 1e-3, 0.5 * height, height - 1e-3, height] {
-                    let p = point_at(pl, cone, h);
-                    let c = cone.create_iso_circle_from_point(k, p, TOL).unwrap();
-                    let c =
-                        c.unwrap_or_else(|| panic!("{what} fix {fix}: no circle at height {h}"));
-                    assert_on_cone_at(k, pl, cone, &c, h, p, &format!("{what} fix {fix} h {h}"));
-                }
-            });
-        }
+fn bounded_cone_iso_circles_at_the_points_height() {
+    for (bot, semi, height) in [
+        (1.0, 10.0, 2.0),
+        (2.0, -15.0, 3.0),
+        (1.0, 45.0, 1.0),
+        (2.0, -20.0, 5.0),
+    ] {
+        each_cone(Some(height), bot, semi, |k, pl, cone, what| {
+            for h in [0.0, 1e-3, 0.5 * height, height - 1e-3, height] {
+                let p = point_at(pl, cone, h);
+                let c = cone.create_iso_circle_from_point(k, p, TOL).unwrap();
+                let c = c.unwrap_or_else(|| panic!("{what}: no circle at height {h}"));
+                assert_on_cone_at(k, pl, cone, &c, h, p, &format!("{what} h {h}"));
+            }
+        });
     }
 }
 
-/// Upstream behaviour with the flag off (the pinned C++ gives the same, `surface.cone_p1`
-/// fixtures `issue_2313.json`): the issue's circles.
+/// The issue's trigger: the point `(0.6 r, 0.8 r, 1)`, `r` the cone's radius at height 1.
+/// Upstream's circle on the inside-out cone (base radius 1, semi-angle 10) is at height
+/// 1234562.33 (the pinned C++, `surface.cone_p1` fixtures `issue_2313.json`), and on the
+/// cone of semi-angle -15 (base radius 2) there is none. The circle through the point is at
+/// height 1 with radius `1 + tan 10° = 1.17633` and `2 - tan 15° = sqrt 3`.
 #[test]
-fn flag_off_keeps_upstreams_circles() {
+fn issue_trigger_circles_are_through_the_point() {
     let pl = &placements()[0];
-    for axial in [false, true] {
-        let k = kernel(false, axial);
-        let cone =
-            Cone::create_canonical_with_semi_angle(&k, pl, 1.0, 10.0, None, false, true).unwrap();
+    let k = kernel();
+    let check = |cone: &Cone, r: f64, what: &str| {
         let c = cone
-            .create_iso_circle_from_point(&k, point_at(pl, &cone, 1.0), TOL)
+            .create_iso_circle_from_point(&k, point_at(pl, cone, 1.0), TOL)
             .unwrap()
-            .unwrap();
-        let z = c.evaluate_point(&k, c.natural_interval().min()).unwrap().z;
-        assert!(
-            (z - 1_234_562.33).abs() < 0.01,
-            "axial {axial}: inside-out circle at {z}"
-        );
-        for inside_out in [false, true] {
-            let cone =
-                Cone::create_canonical_with_semi_angle(&k, pl, 2.0, -15.0, None, false, inside_out)
-                    .unwrap();
-            let c = cone
-                .create_iso_circle_from_point(&k, point_at(pl, &cone, 1.0), TOL)
-                .unwrap();
-            assert!(
-                c.is_none(),
-                "axial {axial} inside_out {inside_out}: a circle"
-            );
+            .unwrap_or_else(|| panic!("{what}: no circle"));
+        let ivl = c.natural_interval();
+        for i in 0..4 {
+            let t = ivl.min() + f64::from(i) / 4.0 * (ivl.max() - ivl.min());
+            let q = c.evaluate_point(&k, t).unwrap();
+            assert!(close(q.z, 1.0, 1.0), "{what}: circle at height {}", q.z);
+            let qr = (q.x * q.x + q.y * q.y).sqrt();
+            assert!(close(qr, r, 1.0), "{what}: circle radius {qr}, want {r}");
         }
+    };
+    let cone =
+        Cone::create_canonical_with_semi_angle(&k, pl, 1.0, 10.0, None, false, true).unwrap();
+    check(&cone, 1.0 + 10f64.to_radians().tan(), "inside out, semi 10");
+    for inside_out in [false, true] {
+        let cone =
+            Cone::create_canonical_with_semi_angle(&k, pl, 2.0, -15.0, None, false, inside_out)
+                .unwrap();
+        check(
+            &cone,
+            2.0 - 15f64.to_radians().tan(),
+            &format!("semi -15, inside out {inside_out}"),
+        );
     }
 }
 
-/// With the flag, the negative-angle unbounded cone runs from -infinity to its apex above
+/// The negative-angle unbounded cone runs from -infinity to its apex above
 /// the origin, and its NURB-parameter points agree with its NURB's iso curves inside out.
 #[test]
 fn unbounded_cone_domain_and_nurb_points_agree() {
-    let k = kernel(true, false);
+    let k = kernel();
     let pl = &placements()[0];
     let cone =
         Cone::create_canonical_with_semi_angle(&k, pl, 2.0, -15.0, None, false, false).unwrap();
@@ -244,5 +241,81 @@ fn unbounded_cone_domain_and_nurb_points_agree() {
             .unwrap();
         let p = cone.evaluate_point(&k, nurb_uv).unwrap();
         assert!(close(p.z, 1.0, 1.0), "semi {semi}: NURB point at {p:?}");
+    }
+}
+
+/// `Cone::create_canonical` with `height <= 0` makes the infinite cone of `top_radius` as the
+/// semi-angle; for `bot 1, top -20, height -1` (#18194) that is the cone of radius
+/// `1 + tan(-20 deg) h`. Before WR-713's fix its generator stayed parallel to the axis, so
+/// the net was the radius-1 cylinder while the definition said the cone.
+///
+/// Shown by construction, nothing sampled: the canonical data are the inputs exactly; the
+/// domain runs from `-SM_INFINITE_PARAMETER` to the apex `1 / tan(20 deg)`; the NURB form
+/// lies on the cone's implicit equation ([`lies_on`]: every Bernstein coefficient of every
+/// Bézier patch, to the rounding of computing it) and not on the radius-1 cylinder; and with
+/// positive weights every control point is at or below the apex, so the rational net (inside
+/// the convex hull of its control points) is on the cone's lower nappe, the one its domain
+/// names.
+#[test]
+fn create_canonical_negative_semi_angle_net_is_its_cone() {
+    use solidcore::math::INFINITE_PARAMETER;
+    use solidcore::nurbs::math::NOW;
+    use solidcore::surface::implicit::{lies_on, Implicit};
+
+    let k = kernel();
+    let t = (-20f64).to_radians().tan();
+    let apex = -1.0 / t;
+    for (n, pl) in placements().iter().enumerate() {
+        for inside_out in [false, true] {
+            for swap in [false, true] {
+                let what = format!("placement {n}, inside out {inside_out}, swap {swap}");
+                let cone = Cone::create_canonical(&k, pl, 1.0, -20.0, -1.0, swap, inside_out)
+                    .unwrap_or_else(|e| panic!("{what}: {e:?}"));
+                assert_eq!(cone.base_radius(), 1.0, "{what}");
+                assert_eq!(cone.semi_angle_deg(), -20.0, "{what}");
+                assert_eq!(cone.bot_height(), -INFINITE_PARAMETER, "{what}");
+                assert!(
+                    close(cone.top_height(), apex, 1.0),
+                    "{what}: top {}",
+                    cone.top_height()
+                );
+
+                let on = |tan_angle: f64| Implicit::Cone {
+                    origin: pl.origin(),
+                    axis: pl.z_axis(),
+                    radius: 1.0,
+                    tan_angle,
+                };
+                let form = cone.rev().base();
+                assert!(lies_on(form, &on(t)).unwrap(), "{what}: net off its cone");
+                assert!(
+                    !lies_on(form, &on(0.0)).unwrap(),
+                    "{what}: net on the radius-1 cylinder"
+                );
+
+                let nurb = form.gw_nurb().expect("the cone's NURB");
+                let pts: Vec<(Vec3, f64)> = nurb
+                    .rows()
+                    .flatten()
+                    .map(|c| {
+                        let w = if c.w == NOW { 1.0 } else { c.w };
+                        (Vec3::new(c.x / w, c.y / w, c.z / w), w)
+                    })
+                    .collect();
+                let size = pts
+                    .iter()
+                    .map(|(p, _)| p.x.abs().max(p.y.abs()).max(p.z.abs()))
+                    .fold(0.0, f64::max);
+                let round = 64.0 * f64::EPSILON * size;
+                for (p, w) in &pts {
+                    assert!(*w > 0.0, "{what}: weight {w}");
+                    let h = (*p - pl.origin()).dot(pl.z_axis());
+                    assert!(
+                        h <= apex + round,
+                        "{what}: control point at {h}, apex {apex}"
+                    );
+                }
+            }
+        }
     }
 }

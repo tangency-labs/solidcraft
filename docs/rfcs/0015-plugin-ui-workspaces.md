@@ -259,6 +259,7 @@ interface ui-provider {
 | Docking | Through the shared panel host (#15184, `panel_runtime`), as a registered kind. Its allowed zones come from the manifest. It can't use `PinOuter` or Fill height, and placement memory is saved per workspace like built-in panels. |
 | Permissions | None beyond the plugin being enabled. Declaring a panel is listed on the approval screen. |
 | Limits | 8 panels per plugin. 512 widgets per layout. 1 MiB of data per panel. Tables and trees scroll virtually, up to 100,000 rows. Charts: 8 series, 20,000 points. |
+| Design-changed listeners (phase 3) | A panel can name entries that re-run when the design changes, so a read-only check refreshes its list as the user works. Declared in the manifest, for example `"listeners": [{"entry": "refresh", "on": ["design.changed"]}]`, and listed on the approval screen. Read-only: a listener entry may call only read commands and update its own panel with `ui.set-data`; it never edits the design or writes files. It runs only while the plugin's panel or workspace is open, never in the background. Debounced: one call per finished batch of changes, at most the rate of `control.subscribe`'s `design.changed` (about 10 a second), and changes that finish while a call is still running are folded together, not queued: when that call returns, the host makes one more call if anything changed meanwhile, so the panel always ends on the latest design. A failing listener never fails the edit that triggered it; its error shows in its own panel. The first version carries a plain "the design changed" signal and no hooks on other user actions; typed events can come later from comparing document snapshots. Asked for in [#1221 (2026-10-19)](https://github.com/tangency-labs/solidcraft/issues/1221#issuecomment-6278997181), a parameter change re-running a slice, and [#1221 (2026-11-17)](https://github.com/tangency-labs/solidcraft/issues/1221#issuecomment-6962128558), a release check whose list shrinks as problems are fixed. |
 
 ## 2. Workspaces
 
@@ -519,7 +520,7 @@ An independent plugin, `manufacture`, built outside the repo. It asks only for `
 | When | What |
 |---|---|
 | Phase 2 (with importers and exporters) | File format slots (section 4). Per-design plugin data with the missing-plugin fallback (section 5). Long jobs in the operations panel (section 6). Panels with forms, buttons, lists and tables, docked in the shared host (section 1). The `craft:plugin` rename and `buffers`. Web: the same declarations drawn by the web build. |
-| Phase 3 | Workspaces (section 2). Viewport overlays with picking, timeline and scrubber (section 3). Trees and charts. A reference Manufacturing plugin outside the repo, used as the end-to-end test. |
+| Phase 3 | Workspaces (section 2). Viewport overlays with picking, timeline and scrubber (section 3). Trees and charts. Design-changed listeners for open panels (section 1). A reference Manufacturing plugin outside the repo, used as the end-to-end test. |
 | Later | Plugin icons (if agreed), Monty or Rhai on the same surface, and a per-plugin network permission. Parametric plugin features stay in their own phase, as in RFC 0002. |
 
 Phase 1 ([#15112](https://github.com/tangency-labs/solidcraft/pull/15112), led by @raykholo) targets `command-plugin` and is unchanged apart from the package name.

@@ -19,8 +19,12 @@
 //! | [`vertex_get_point`] | `SmApiVertexGetPoint` |
 //! | [`edge_plane_crossings`] | not upstream: where an edge, over its own interval, meets a plane |
 //! | [`edge_crossing_on_face`] | not upstream: where a curve meets an edge, solved on one of the edge's faces |
+//! | [`vertex_on_edge`] | not upstream: whether a vertex lies on an edge within the two's tolerances |
 //! | [`closest_to_members`], [`edge_curve_copy`] | not upstream: `ShapeCurveSolve`/`ShapePointSolve` minimum of a curve or point against faces and edges |
+//! | [`closest_between_faces`] | not upstream: selected-shape minimum on trimmed faces and their boundaries |
 //! | [`point_distance`], [`vertex_distance`], [`edge_face_gap_samples`], [`edgeuse_face_frame`] | not upstream: certified distances (the last on `SmCrvSrfGapFunction`'s samples) |
+//! | [`FacePointCandidates`] | not upstream: cached kernel face boxes for narrowing point queries |
+//! | [`face_normal_at_point`], [`face_parameters_at_point`], [`face_normal_at_uv`] | not upstream: trimmed-face membership and the normal in the chosen use's sense |
 //! | [`box_max_distance_to_point`] | not upstream: [`Extent3d::max_distance_to_point`] of a box given by two corners |
 //! | `count_contained_samples`, `edge_piece_points`, `point_in_solid`, `target_curve_crossings` (private) | `sm_CountContainedSamples`, `sm_PointInSolid`, its `BrepCurveSolve` |
 //! | `solution_point` (private) | `SmSolution::GetPoint` |
@@ -50,7 +54,12 @@ use crate::curve::curve::Curve;
 use crate::error::{ignored, EntityRef, Result, SolidError};
 use crate::geom::attribute::ObjectKey;
 use crate::geom::extent1d::Extent1d;
+use crate::geom::extent2d::Extent2d;
 use crate::geom::extent3d::Extent3d;
+use crate::geom::geom_utility::p1::{
+    circle_coplanar_circle_intersect_in_contact, segment_point_distance, CircleCircle,
+};
+use crate::geom::geom_utility::p2::segment_segment_intersect;
 use crate::geom::global_solver::{SolutionRequested, SolverOperation};
 use crate::geom::object::{BrepStore, FaceKey, ObjectRef, Shape, ShapeMember};
 use crate::geom::solution_array::{
@@ -63,7 +72,7 @@ use crate::intersect::point_class::{PointClassType, PointClassification};
 use crate::intersect::topology_solver::p1::{CurveRef, TopologyObjects, TopologySolver};
 use crate::intersect::topology_solver::p2::TopologySolveOptions;
 use crate::kernel::Kernel;
-use crate::math::{Point2, Point3, Vec3, EFF_ZERO};
+use crate::math::{Point2, Point3, Vec2, Vec3, EFF_ZERO};
 use crate::nurbs::b_spline_curve::BoundingBoxRequest;
 use crate::nurbs::b_spline_surface_n_lib::p2::OrientType;
 use crate::nurbs::math::MODEL_TOL;
@@ -1021,13 +1030,13 @@ pub enum Probe<'c> {
     Point(Point3),
 }
 
-/// The closest points of a [`Probe`] and some faces and edges of a B-rep
-/// ([`closest_to_members`]).
+/// The closest points of selected exact geometry ([`closest_to_members`],
+/// [`closest_between_faces`]).
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct MembersClosest {
     /// The distance the solver reached between the two points.
     pub distance: f64,
-    /// The point of the probe: on its curve, within its interval, or the point itself.
+    /// The point of the probe, or the first set of trimmed faces.
     pub on_probe: Point3,
     /// The point of the faces (as they are trimmed) and edges (over their intervals).
     pub on_members: Point3,
@@ -1113,6 +1122,56 @@ pub fn closest_to_members(
     }
     Ok(MembersClosest {
         distance: solution.start.solution_value,
+        on_probe,
+        on_members,
+    })
+}
+
+/// The minimum distance between two sets of trimmed faces of one B-rep, including their
+/// boundary edges and vertices. Both witnesses are evaluated on the exact geometry named by
+/// the topology solver's solution; no tessellation supplies a point or limits the search.
+///
+/// # Errors
+/// Those of shape construction and the topology solver; [`SolidError::query_failed`] when
+/// there is no solution or either witness does not evaluate to a finite point.
+pub fn closest_between_faces(
+    k: &mut Kernel,
+    brep: &mut Brep,
+    id: BrepId,
+    first: &[FaceId],
+    second: &[FaceId],
+) -> Result<MembersClosest> {
+    let first: Vec<FaceKey> = first.iter().map(|f| (id, *f)).collect();
+    let second: Vec<FaceKey> = second.iter().map(|f| (id, *f)).collect();
+    let first = Shape::new(k, &(id, &*brep), &[], &first, &[], &[])?;
+    let second = Shape::new(k, &(id, &*brep), &[], &second, &[], &[])?;
+    let query = qbrep::BrepQuery::of_brep(brep);
+    let identity = query.effective_identity();
+    let objects = qbrep::LiveBrepObjects::new(brep, &identity, None)?;
+    let solutions = TopologySolver::shape_shape_solve(
+        k,
+        &objects,
+        &first,
+        &second,
+        solve_options(k, SolutionRequested::Single),
+    )?;
+    let solution = solutions
+        .as_slice()
+        .first()
+        .ok_or_else(|| SolidError::query_failed(OP, "no closest points were found"))?;
+    let on_probe = solution_point(k, &objects, solution, 0)?;
+    let on_members = solution_point(k, &objects, solution, 1)?;
+    let distance = solution.start.solution_value;
+    let evaluated =
+        |p: Point3| !p.is_undef() && p.x.is_finite() && p.y.is_finite() && p.z.is_finite();
+    if !(distance.is_finite() && distance >= 0.0 && evaluated(on_probe) && evaluated(on_members)) {
+        return Err(SolidError::query_failed(
+            OP,
+            "a closest point does not evaluate",
+        ));
+    }
+    Ok(MembersClosest {
+        distance,
         on_probe,
         on_members,
     })
@@ -1323,6 +1382,23 @@ pub fn edge_closest_point(
         },
         parameter: result.parameter,
     })
+}
+
+/// Whether vertex `v` lies on edge `e`: its point within the vertex's and the edge's
+/// tolerances together of the edge's curve, over the edge's interval (the exact distance of
+/// [`edge_closest_point`]). A point that does not drop onto the edge is not on it.
+///
+/// # Errors
+///
+/// Those of the vertex's and the edge's point and tolerance, and the evaluation errors of
+/// [`edge_closest_point`].
+pub fn vertex_on_edge(k: &Kernel, brep: &Brep, v: VertexId, e: EdgeId) -> Result<bool> {
+    let point = crate::topology::vertex::point(brep, v)?;
+    let Some(near) = crate::query::edge::closest_point(k, brep, e, point)? else {
+        return Ok(false);
+    };
+    let reach = crate::topology::vertex::tolerance(brep, v)? + edge::tolerance(brep, e)?;
+    Ok(near.distance <= reach)
 }
 
 /// One end of a [`PlaneCrossing`]: where it is on the edge.
@@ -1646,6 +1722,389 @@ pub fn point_distance(a: Point3, b: Point3) -> Result<Distance> {
     })
 }
 
+/// A point set's arithmetic centroid and mean Euclidean distance from that centroid.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct PointSetSummary {
+    /// The arithmetic mean of the input points.
+    pub centroid: Point2,
+    /// The arithmetic mean of each point's distance from `centroid`.
+    pub mean_distance: f64,
+}
+
+/// The arithmetic centroid and mean radial distance of a non-empty point set.
+///
+/// # Errors
+/// [`SolidError::InvalidInput`] for an empty set, a non-finite point, or a non-finite
+/// intermediate or result.
+pub fn point_set_summary(points: &[Point2]) -> Result<PointSetSummary> {
+    if points.is_empty() {
+        return Err(SolidError::invalid_input(OP, "empty point set"));
+    }
+    if points.iter().any(|p| !p.x.is_finite() || !p.y.is_finite()) {
+        return Err(SolidError::invalid_input(OP, "non-finite point"));
+    }
+
+    let (mut x, mut y) = (0.0, 0.0);
+    for point in points {
+        x += point.x;
+        y += point.y;
+        if !x.is_finite() || !y.is_finite() {
+            return Err(SolidError::invalid_input(OP, "point centroid overflows"));
+        }
+    }
+    let count = points.len() as f64;
+    let centroid = Point2::new(x / count, y / count);
+    if !centroid.x.is_finite() || !centroid.y.is_finite() {
+        return Err(SolidError::invalid_input(
+            OP,
+            "point centroid is not finite",
+        ));
+    }
+
+    let mut total_distance = 0.0;
+    for point in points {
+        let distance = point.distance(centroid);
+        if !distance.is_finite() {
+            return Err(SolidError::invalid_input(OP, "point distance overflows"));
+        }
+        total_distance += distance;
+        if !total_distance.is_finite() {
+            return Err(SolidError::invalid_input(
+                OP,
+                "mean point distance overflows",
+            ));
+        }
+    }
+    let mean_distance = total_distance / count;
+    if !mean_distance.is_finite() {
+        return Err(SolidError::invalid_input(
+            OP,
+            "mean point distance is not finite",
+        ));
+    }
+    Ok(PointSetSummary {
+        centroid,
+        mean_distance,
+    })
+}
+
+/// The vector from point `from` to point `to`.
+///
+/// # Errors
+/// [`SolidError::InvalidInput`] for a non-finite input or a displacement that overflows.
+pub fn point_displacement(from: Point2, to: Point2) -> Result<Vec2> {
+    if !from.x.is_finite() || !from.y.is_finite() || !to.x.is_finite() || !to.y.is_finite() {
+        return Err(SolidError::invalid_input(OP, "non-finite point"));
+    }
+    let displacement = to - from;
+    if !displacement.x.is_finite() || !displacement.y.is_finite() {
+        return Err(SolidError::invalid_input(
+            OP,
+            "point displacement overflows",
+        ));
+    }
+    Ok(displacement)
+}
+
+/// Point and unit tangent sampled along a curve at a requested arc length
+/// ([`curve_point_at_arc_length`]).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct CurveArcSample {
+    /// Kernel parameter of the sampled point.
+    pub parameter: f64,
+    /// Point on the curve at `parameter`.
+    pub point: Point3,
+    /// Unit tangent at `parameter`, when the derivative is non-zero and finite.
+    pub tangent: Option<Vec3>,
+    /// `true` when the requested arc length reached past the end of the interval.
+    pub past_end: bool,
+}
+
+/// Exact arc length of `curve` over `interval` using [`Curve::length`].
+///
+/// # Errors
+/// [`SolidError::InvalidInput`] for non-finite or decreasing interval endpoints, or those of
+/// [`Curve::length`].
+pub fn curve_arc_length(k: &Kernel, curve: &Curve, interval: &Extent1d) -> Result<f64> {
+    let (lo, hi) = (interval.min(), interval.max());
+    if !(lo.is_finite() && hi.is_finite() && lo <= hi) {
+        return Err(SolidError::invalid_input(OP, "invalid curve interval"));
+    }
+    curve.length(k, interval, 1e-9)
+}
+
+/// Sample `curve` over `interval` at `distance` arc length from its start (or from its end when
+/// `from_end` is `true`), using [`Curve::find_parameter_at_arc_length`] and [`Curve::evaluate`].
+///
+/// # Errors
+/// [`SolidError::InvalidInput`] for non-finite inputs or negative `distance`, or those of
+/// [`Curve::find_parameter_at_arc_length`] and [`Curve::evaluate`].
+pub fn curve_point_at_arc_length(
+    k: &Kernel,
+    curve: &Curve,
+    interval: &Extent1d,
+    from_end: bool,
+    distance: f64,
+) -> Result<CurveArcSample> {
+    let (lo, hi) = (interval.min(), interval.max());
+    if !(lo.is_finite() && hi.is_finite() && lo <= hi && distance.is_finite() && distance >= 0.0) {
+        return Err(SolidError::invalid_input(
+            OP,
+            "invalid arc-length sample input",
+        ));
+    }
+    let start_param = if from_end { hi } else { lo };
+    let (param, past_end) = if distance == 0.0 || (hi - lo).abs() <= EFF_ZERO {
+        (start_param, distance > 0.0)
+    } else {
+        let signed = if from_end { -distance } else { distance };
+        let res = curve.find_parameter_at_arc_length(k, start_param, signed)?;
+        let clamped = res.end_param.max(lo).min(hi);
+        let past = res.past_end || res.end_param < lo - EFF_ZERO || res.end_param > hi + EFF_ZERO;
+        (clamped, past)
+    };
+    let derivs = curve.evaluate(k, param, 1, from_end, false)?;
+    let pt = derivs
+        .first()
+        .copied()
+        .ok_or_else(|| SolidError::invalid_input(OP, "curve evaluation returned no point"))?;
+    let tangent = derivs.get(1).copied().and_then(|d| {
+        let len = d.length();
+        (len > EFF_ZERO && len.is_finite()).then_some(d * (1.0 / len))
+    });
+    Ok(CurveArcSample {
+        parameter: param,
+        point: pt,
+        tangent,
+        past_end,
+    })
+}
+
+/// Measure `curve`'s total arc length over `interval` and sample it at each fraction in
+/// `fractions` (clamped to `[0, 1]`).
+///
+/// # Errors
+/// [`SolidError::InvalidInput`] for invalid interval endpoints or non-finite fractions, or those
+/// of [`curve_arc_length`] and [`curve_point_at_arc_length`].
+pub fn curve_samples_at_fractions(
+    k: &Kernel,
+    curve: &Curve,
+    interval: &Extent1d,
+    fractions: &[f64],
+) -> Result<(f64, Vec<CurveArcSample>)> {
+    if fractions.iter().any(|f| !f.is_finite()) {
+        return Err(SolidError::invalid_input(OP, "non-finite sample fraction"));
+    }
+    let total = curve_arc_length(k, curve, interval)?;
+    let mut out = Vec::new();
+    for &f in fractions {
+        let dist = total * f.clamp(0.0, 1.0);
+        out.push(curve_point_at_arc_length(k, curve, interval, false, dist)?);
+    }
+    Ok((total, out))
+}
+
+fn finite_point2(p: Point2) -> bool {
+    p.x.is_finite() && p.y.is_finite()
+}
+
+fn lift_2d(p: Point2) -> Point3 {
+    Point3::new(p.x, p.y, 0.0)
+}
+
+fn extent_of_polyline_2d(points: &[Point2]) -> Result<Option<Extent2d>> {
+    for &p in points {
+        if !finite_point2(p) {
+            return Err(SolidError::invalid_input(OP, "non-finite polyline point"));
+        }
+    }
+    if points.is_empty() {
+        return Ok(None);
+    }
+    let mut ext = Extent2d::new();
+    for &p in points {
+        ext.add_point(p);
+    }
+    Ok(Some(ext))
+}
+
+/// Axis-aligned bounding box `(min, max)` of a 2D polyline via [`Extent2d`].
+///
+/// # Errors
+/// [`SolidError::InvalidInput`] for a non-finite coordinate.
+pub fn polyline_2d_bounds(points: &[Point2]) -> Result<Option<(Point2, Point2)>> {
+    Ok(extent_of_polyline_2d(points)?.map(|ext| (ext.min(), ext.max())))
+}
+
+/// Distance and closest point from `point` to a 2D polyline via [`segment_point_distance`].
+///
+/// # Errors
+/// [`SolidError::InvalidInput`] for non-finite inputs.
+pub fn polyline_2d_closest_point(
+    point: Point2,
+    points: &[Point2],
+) -> Result<Option<(f64, Point2)>> {
+    if !finite_point2(point) {
+        return Err(SolidError::invalid_input(OP, "non-finite query point"));
+    }
+    for &p in points {
+        if !finite_point2(p) {
+            return Err(SolidError::invalid_input(OP, "non-finite polyline point"));
+        }
+    }
+    let p3 = lift_2d(point);
+    let mut best: Option<(f64, Point2)> = None;
+    for (&seg_a, &seg_b) in points.iter().zip(points.iter().skip(1)) {
+        let (d, t) = segment_point_distance(lift_2d(seg_a), lift_2d(seg_b), p3);
+        let proj = seg_a + (seg_b - seg_a) * t;
+        if best.is_none_or(|(bd, _)| d < bd) {
+            best = Some((d, proj));
+        }
+    }
+    Ok(best.or_else(|| points.first().map(|&q| (point.distance(q), q))))
+}
+
+/// Intersection point of two 2D line segments via [`segment_segment_intersect`].
+///
+/// # Errors
+/// [`SolidError::InvalidInput`] for non-finite inputs or negative tolerance, or those of
+/// [`segment_segment_intersect`].
+pub fn segment_2d_intersection(
+    a1: Point2,
+    a2: Point2,
+    b1: Point2,
+    b2: Point2,
+    tol: f64,
+) -> Result<Option<Point2>> {
+    if !(finite_point2(a1)
+        && finite_point2(a2)
+        && finite_point2(b1)
+        && finite_point2(b2)
+        && tol.is_finite()
+        && tol >= 0.0)
+    {
+        return Err(SolidError::invalid_input(
+            OP,
+            "invalid segment intersection input",
+        ));
+    }
+    let hits = segment_segment_intersect(lift_2d(a1), lift_2d(a2), lift_2d(b1), lift_2d(b2), tol)?;
+    Ok(hits.first().map(|p| Point2::new(p.x, p.y)))
+}
+
+/// All segment-segment intersections between two 2D polylines via [`Extent2d`] culling and
+/// [`segment_segment_intersect`].
+///
+/// # Errors
+/// [`SolidError::InvalidInput`] for non-finite inputs or negative tolerance, or those of
+/// [`segment_segment_intersect`].
+pub fn polyline_2d_crossings(a: &[Point2], b: &[Point2], tol: f64) -> Result<Vec<Point2>> {
+    if !(tol.is_finite() && tol >= 0.0) {
+        return Err(SolidError::invalid_input(
+            OP,
+            "invalid polyline crossing tolerance",
+        ));
+    }
+    let Some(ext_a) = extent_of_polyline_2d(a)? else {
+        return Ok(Vec::new());
+    };
+    let Some(ext_b) = extent_of_polyline_2d(b)? else {
+        return Ok(Vec::new());
+    };
+    if a.len() < 2 || b.len() < 2 || ext_a.are_disjoint(&ext_b, tol) {
+        return Ok(Vec::new());
+    }
+    let mut out = Vec::new();
+    for (&a0, &a1) in a.iter().zip(a.iter().skip(1)) {
+        let seg_ext = Extent2d::from_points(a0, a1);
+        if seg_ext.are_disjoint(&ext_b, tol) {
+            continue;
+        }
+        for (&b0, &b1) in b.iter().zip(b.iter().skip(1)) {
+            let other_ext = Extent2d::from_points(b0, b1);
+            if seg_ext.are_disjoint(&other_ext, tol) {
+                continue;
+            }
+            let hits =
+                segment_segment_intersect(lift_2d(a0), lift_2d(a1), lift_2d(b0), lift_2d(b1), tol)?;
+            if let Some(p) = hits.first() {
+                out.push(Point2::new(p.x, p.y));
+            }
+        }
+    }
+    Ok(out)
+}
+
+/// Analytic 2D tangent contact point between segment `[a, b]` and circle `(center, radius)` via
+/// [`segment_point_distance`].
+///
+/// # Errors
+/// [`SolidError::InvalidInput`] for non-finite inputs or negative radius/tolerance.
+pub fn tangent_contact_line_circle_2d(
+    a: Point2,
+    b: Point2,
+    center: Point2,
+    radius: f64,
+    tol: f64,
+) -> Result<Option<Point2>> {
+    if !(finite_point2(a)
+        && finite_point2(b)
+        && finite_point2(center)
+        && radius.is_finite()
+        && radius >= 0.0
+        && tol.is_finite()
+        && tol >= 0.0)
+    {
+        return Err(SolidError::invalid_input(
+            OP,
+            "invalid line-circle tangent input",
+        ));
+    }
+    let (d, t) = segment_point_distance(lift_2d(a), lift_2d(b), lift_2d(center));
+    Ok(((d - radius).abs() <= tol).then(|| a + (b - a) * t))
+}
+
+/// Analytic 2D tangent contact point between two circles `(c1, r1)` and `(c2, r2)` via
+/// [`circle_coplanar_circle_intersect_in_contact`].
+///
+/// # Errors
+/// [`SolidError::InvalidInput`] for non-finite inputs or negative radii/tolerance, or those of
+/// [`circle_coplanar_circle_intersect_in_contact`].
+pub fn tangent_contact_circle_circle_2d(
+    c1: Point2,
+    r1: f64,
+    c2: Point2,
+    r2: f64,
+    tol: f64,
+) -> Result<Option<Point2>> {
+    if !(finite_point2(c1)
+        && finite_point2(c2)
+        && r1.is_finite()
+        && r1 >= 0.0
+        && r2.is_finite()
+        && r2 >= 0.0
+        && tol.is_finite()
+        && tol >= 0.0)
+    {
+        return Err(SolidError::invalid_input(
+            OP,
+            "invalid circle-circle tangent input",
+        ));
+    }
+    match circle_coplanar_circle_intersect_in_contact(
+        Vec3::Z,
+        lift_2d(c1),
+        r1,
+        lift_2d(c2),
+        r2,
+        tol,
+        tol,
+    )? {
+        CircleCircle::Tangent(p) => Ok(Some(Point2::new(p.x, p.y))),
+        CircleCircle::None | CircleCircle::Crossing(..) | CircleCircle::Coincident => Ok(None),
+    }
+}
+
 /// The largest distance from `point` to a point of the box with opposite corners `a`
 /// and `b`: to its farthest corner ([`Extent3d::max_distance_to_point`]; not upstream).
 ///
@@ -1706,6 +2165,27 @@ pub fn edgeuse_face_frame(
 ) -> Result<EdgeuseFaceFrame> {
     let f = eu::face(brep, eu)?
         .ok_or_else(|| SolidError::invalid_input(OP, "edge use bounds no face"))?;
+    let at = evaluate_binormal(k, brep, eu, parameter, false, &BinormalOptions::default())?;
+    Ok(EdgeuseFaceFrame {
+        uv: at.uv,
+        normal: face_normal_at_uv(k, brep, f, at.uv, faceuse)?,
+    })
+}
+
+/// A face's unit normal at its surface parameters, in the chosen face use's sense.
+///
+/// # Errors
+///
+/// [`SolidError::InvalidInput`] for a use of another face, a missing surface or a zero
+/// normal; [`SolidError::Unsupported`] for an unknown face-use orientation; those of
+/// surface evaluation and [`crate::query::normal::certify`].
+pub fn face_normal_at_uv(
+    k: &Kernel,
+    brep: &Brep,
+    f: FaceId,
+    uv: Point2,
+    faceuse: FaceuseId,
+) -> Result<UnitVector> {
     let use_ = brep.faceuse(faceuse)?;
     if use_.face != Some(f) {
         return Err(SolidError::invalid_input(OP, "a faceuse of another face"));
@@ -1717,24 +2197,156 @@ pub fn edgeuse_face_frame(
             return Err(SolidError::Unsupported {
                 operation: OP,
                 reason: "a faceuse whose orientation is unknown has no proved sense",
-            })
+            });
         }
     };
-    let at = evaluate_binormal(k, brep, eu, parameter, false, &BinormalOptions::default())?;
     let surface = brep
         .face(f)?
         .surface
         .as_ref()
         .ok_or_else(|| SolidError::invalid_input(OP, "face without a surface"))?;
-    let n = qbrep::evaluate_surface_normal(k, Some(surface), at.uv)?;
+    let n = qbrep::evaluate_surface_normal(k, Some(surface), uv)?;
     let len = n.length();
     if !(len > 0.0 && len.is_finite()) {
         return Err(SolidError::invalid_input(OP, "zero normal"));
     }
-    Ok(EdgeuseFaceFrame {
-        uv: at.uv,
-        normal: certify_normal(k, surface, at.uv, n * (sign / len), sense)?,
-    })
+    certify_normal(k, surface, uv, n * (sign / len), sense)
+}
+
+/// Cached kernel face boxes for narrowing point queries in the supplied face order.
+/// A box hit is only a candidate: callers still test the face's exact trimmed area.
+/// The cache is valid while the faces' geometry and topology stay unchanged.
+#[derive(Debug, Default)]
+pub struct FacePointCandidates {
+    bounds: Vec<(usize, FaceId, Extent3d)>,
+}
+
+impl FacePointCandidates {
+    /// Build each face's kernel box once, or just `selected`'s box when given.
+    /// Indices refer to the supplied `faces` order, including when it differs from
+    /// the B-rep's native face order. The default cache contains no faces.
+    ///
+    /// # Errors
+    ///
+    /// [`SolidError::InvalidInput`] for a selected index past `faces`; those of
+    /// [`face_bounding_box`].
+    pub fn new(k: &Kernel, brep: &Brep, faces: &[FaceId], selected: Option<usize>) -> Result<Self> {
+        if selected.is_some_and(|i| i >= faces.len()) {
+            return Err(SolidError::invalid_input(
+                OP,
+                "selected face index is out of range",
+            ));
+        }
+        let mut bounds = Vec::new();
+        for (index, &face) in faces.iter().enumerate() {
+            if selected.is_some_and(|i| i != index) {
+                continue;
+            }
+            bounds.push((index, face, face_bounding_box(k, brep, face, false)?));
+        }
+        Ok(Self { bounds })
+    }
+
+    /// Faces whose boxes contain `point` within `tolerance`, in supplied face order.
+    /// `selected` restricts the result to that cached index; an uncached index gives
+    /// no candidates. No face boxes or B-rep snapshots are rebuilt per point.
+    ///
+    /// # Errors
+    ///
+    /// [`SolidError::InvalidInput`] for a non-finite point or a tolerance that is
+    /// not finite and non-negative.
+    pub fn at_point(
+        &self,
+        point: Point3,
+        tolerance: f64,
+        selected: Option<usize>,
+    ) -> Result<impl Iterator<Item = (usize, FaceId)> + '_> {
+        if point.is_undef() || !(tolerance.is_finite() && tolerance >= 0.0) {
+            return Err(SolidError::invalid_input(
+                OP,
+                "point and non-negative tolerance must be finite",
+            ));
+        }
+        Ok(self
+            .bounds
+            .iter()
+            .filter(move |(index, _, bounds)| {
+                selected.is_none_or(|i| i == *index) && bounds.contains_point(point, tolerance)
+            })
+            .map(|(index, face, _)| (*index, *face)))
+    }
+}
+
+/// The unit normal at `point` on the trimmed face `f`, within `tolerance`,
+/// in the sense of `faceuse`; `None` when the point is off that face. The existing
+/// point/face classifier supplies the surface parameters, including at edges.
+///
+/// # Errors
+///
+/// Those of [`crate::query::face::p1::point_3d_classify_at`] and
+/// [`edgeuse_face_frame`] (a singular normal or an unproved face-use sense).
+pub fn face_normal_at_point(
+    k: &Kernel,
+    brep: &mut Brep,
+    f: FaceId,
+    point: Point3,
+    tolerance: f64,
+    faceuse: FaceuseId,
+) -> Result<Option<UnitVector>> {
+    let Some(uv) = face_parameters_at_point(k, brep, f, point, tolerance)? else {
+        return Ok(None);
+    };
+    face_normal_at_uv(k, brep, f, uv, faceuse).map(Some)
+}
+
+/// Surface parameters of `point` on trimmed face `f` within `tolerance`, or `None`
+/// off the face. Shares [`face_normal_at_point`]'s membership test so a caller can
+/// establish membership before choosing a material-side face use.
+///
+/// # Errors
+///
+/// [`SolidError::InvalidInput`] for a non-finite point or a tolerance that is not
+/// finite and positive; those of [`crate::query::face::p1::point_3d_classify_at`]
+/// and surface evaluation.
+pub fn face_parameters_at_point(
+    k: &Kernel,
+    brep: &mut Brep,
+    f: FaceId,
+    point: Point3,
+    tolerance: f64,
+) -> Result<Option<Point2>> {
+    if point.is_undef() || !(tolerance.is_finite() && tolerance > 0.0) {
+        return Err(SolidError::invalid_input(
+            OP,
+            "point and positive tolerance must be finite",
+        ));
+    }
+    let mut pc = PointClassification::new(tolerance);
+    let Some(uv) = crate::query::face::p1::point_3d_classify_at(
+        k,
+        brep,
+        f,
+        point,
+        tolerance,
+        true,
+        &mut pc,
+        crate::query::face::p1::Point3dClassifyOptions::default(),
+    )?
+    else {
+        return Ok(None);
+    };
+    if !matches!(
+        pc.point_class(),
+        PointClassType::Face | PointClassType::Edge | PointClassType::Vertex
+    ) {
+        return Ok(None);
+    }
+    let surface = face::surface(brep, f)?
+        .ok_or_else(|| SolidError::invalid_input(OP, "face without a surface"))?;
+    if point.distance(surface.evaluate_point(k, uv)?) > tolerance {
+        return Ok(None);
+    }
+    Ok(Some(uv))
 }
 
 /// [`edgeuse_face_frame`] of face `f`'s use of edge `e`, at the middle of the edge's
@@ -1932,6 +2544,43 @@ mod tests {
     use crate::nurbs::math::CPoint;
     use crate::nurbs::srf_basic::Surface as NlSurface;
 
+    /// Opposite faces of a 1 × 2 × 3 block are 3 apart. Adjacent faces meet on their
+    /// shared boundary; reversing the selected sets preserves the distance and ownership.
+    #[test]
+    fn closest_between_faces_respects_selected_faces_and_their_boundaries() {
+        let mut k = Kernel::default();
+        let mut b =
+            crate::primitive::api_primitives::create_box(&mut k, Point3::ZERO, 1.0, 2.0, 3.0)
+                .unwrap();
+        let faces = get_faces(&b).unwrap();
+        let at_z = |z: f64| {
+            *faces
+                .iter()
+                .find(|&&f| {
+                    let box_ = face_bounding_box(&k, &b, f, true).unwrap();
+                    (box_.min().z - z).abs() <= 1e-9 && (box_.max().z - z).abs() <= 1e-9
+                })
+                .unwrap()
+        };
+        let (bottom, top) = (at_z(0.0), at_z(3.0));
+        let side = *faces.iter().find(|&&f| f != bottom && f != top).unwrap();
+        let id = BrepId::from_index(0);
+        for (first, second, distance) in [(bottom, top, 3.0), (top, bottom, 3.0), (top, side, 0.0)]
+        {
+            let c = closest_between_faces(&mut k, &mut b, id, &[first], &[second]).unwrap();
+            assert!((c.distance - distance).abs() <= 1e-9, "{c:?}");
+            assert!(
+                (c.on_probe.distance(c.on_members) - distance).abs() <= 1e-9,
+                "{c:?}"
+            );
+            for (f, p) in [(first, c.on_probe), (second, c.on_members)] {
+                let near =
+                    closest_to_members(&mut k, &mut b, id, &[f], &[], Probe::Point(p)).unwrap();
+                assert!(near.distance <= 1e-9, "{c:?}: {near:?}");
+            }
+        }
+    }
+
     /// Both call sites of [`faces_closest_distances_within`] read a kernel status as no answer
     /// about that one pair, and keep every other pair's answer. The status paths are not
     /// reachable from geometry these tests can build, so the step is made to fail
@@ -2118,6 +2767,81 @@ mod tests {
     }
 
     #[test]
+    fn point_set_summary_uses_the_arithmetic_mean_radius() {
+        let points = [
+            Point2::new(0.0, 0.0),
+            Point2::new(6.0, 0.0),
+            Point2::new(0.0, 6.0),
+        ];
+        let summary = point_set_summary(&points).unwrap();
+        assert_eq!(summary.centroid, Point2::new(2.0, 2.0));
+        let expected = (2.0 * 2.0_f64.sqrt() + 4.0 * 5.0_f64.sqrt()) / 3.0;
+        assert!((summary.mean_distance - expected).abs() <= 2.0 * f64::EPSILON * expected);
+        assert_ne!(
+            summary.mean_distance, 4.0,
+            "the RMS radius is not the mean radius"
+        );
+
+        let moved = [
+            Point2::new(0.0, 0.0),
+            Point2::new(6.0, 0.0),
+            Point2::new(0.0, 12.0),
+        ];
+        let moved_summary = point_set_summary(&moved).unwrap();
+        assert_eq!(moved_summary.centroid, Point2::new(2.0, 4.0));
+        let moved_expected =
+            (2.0 * 5.0_f64.sqrt() + 4.0 * 2.0_f64.sqrt() + 2.0 * 17.0_f64.sqrt()) / 3.0;
+        assert!(
+            (moved_summary.mean_distance - moved_expected).abs()
+                <= 2.0 * f64::EPSILON * moved_expected
+        );
+    }
+
+    #[test]
+    fn point_set_summary_accepts_single_and_duplicate_points() {
+        let one = Point2::new(3.0, -4.0);
+        assert_eq!(
+            point_set_summary(&[one]).unwrap(),
+            PointSetSummary {
+                centroid: one,
+                mean_distance: 0.0,
+            }
+        );
+        assert_eq!(
+            point_set_summary(&[one, one, one]).unwrap(),
+            PointSetSummary {
+                centroid: one,
+                mean_distance: 0.0,
+            }
+        );
+    }
+
+    #[test]
+    fn point_set_summary_refuses_empty_non_finite_and_overflowing_sets() {
+        assert!(point_set_summary(&[]).is_err());
+        assert!(point_set_summary(&[Point2::new(f64::NAN, 0.0)]).is_err());
+        assert!(point_set_summary(&[Point2::new(0.0, f64::INFINITY)]).is_err());
+        assert!(
+            point_set_summary(&[Point2::new(f64::MAX, 0.0), Point2::new(f64::MAX, 0.0),]).is_err()
+        );
+        assert!(
+            point_set_summary(&[Point2::new(-f64::MAX, 0.0), Point2::new(f64::MAX, 0.0),]).is_err()
+        );
+    }
+
+    #[test]
+    fn point_displacement_is_from_first_point_to_second_and_refuses_bad_values() {
+        assert_eq!(
+            point_displacement(Point2::new(2.0, 2.0), Point2::new(5.0, 6.0)).unwrap(),
+            Vec2::new(3.0, 4.0)
+        );
+        assert!(point_displacement(Point2::new(f64::NAN, 0.0), Point2::ZERO).is_err());
+        assert!(
+            point_displacement(Point2::new(-f64::MAX, 0.0), Point2::new(f64::MAX, 0.0),).is_err()
+        );
+    }
+
+    #[test]
     fn vertex_distance_is_the_point_distance_to_the_vertex() {
         let mut k = Kernel::default();
         let b = crate::primitive::api_primitives::create_box(&mut k, Point3::ZERO, 1.0, 2.0, 3.0)
@@ -2249,6 +2973,117 @@ mod tests {
         assert!(surface_bound(&k, &s, p, Point2::new(0.5, 0.5))
             .unwrap()
             .is_some());
+    }
+
+    #[test]
+    fn face_point_candidates_preserve_order_tolerance_and_selection() {
+        let mut k = Kernel::default();
+        let b = crate::primitive::api_primitives::create_box(&mut k, Point3::ZERO, 1.0, 2.0, 3.0)
+            .unwrap();
+        let mut faces = get_faces(&b).unwrap();
+        faces.reverse();
+        let candidates = FacePointCandidates::new(&k, &b, &faces, None).unwrap();
+        let p = Point3::new(0.0, 1.0, 1.5);
+        let on = candidates
+            .at_point(p, 0.0, None)
+            .unwrap()
+            .collect::<Vec<_>>();
+        // Only the x=0 face's box contains the middle of that face. The other five
+        // boxes are confined to the planes x=1, y=0, y=2, z=0 and z=3.
+        assert_eq!(on.len(), 1);
+        let (index, face) = on[0];
+        assert_eq!(faces[index], face);
+        // Kernel boxes already include their own face/edge tolerance bands. Test
+        // the requested extra tolerance from the actual cached box's lower bound.
+        let bounds = face_bounding_box(&k, &b, face, false).unwrap();
+        let near = Point3::new(bounds.min().x - 0.5e-6, 1.0, 1.5);
+        assert_eq!(
+            candidates
+                .at_point(near, 1e-6, None)
+                .unwrap()
+                .collect::<Vec<_>>(),
+            on
+        );
+        assert!(candidates
+            .at_point(near, 0.0, None)
+            .unwrap()
+            .next()
+            .is_none());
+        for p in [Point3::new(-1.0, 1.0, 1.5), Point3::new(0.5, 1.0, 1.5)] {
+            assert!(candidates.at_point(p, 0.0, None).unwrap().next().is_none());
+        }
+        // The middle of the edge x=y=0 lies in two face boxes. Cache filtering
+        // retains their supplied order and a selected index chooses either one.
+        let edge = Point3::new(0.0, 0.0, 1.5);
+        let incident = candidates
+            .at_point(edge, 0.0, None)
+            .unwrap()
+            .collect::<Vec<_>>();
+        assert_eq!(incident.len(), 2);
+        assert!(incident[0].0 < incident[1].0);
+        for (index, face) in incident {
+            assert_eq!(
+                candidates
+                    .at_point(edge, 0.0, Some(index))
+                    .unwrap()
+                    .collect::<Vec<_>>(),
+                [(index, face)]
+            );
+            let selected = FacePointCandidates::new(&k, &b, &faces, Some(index)).unwrap();
+            assert_eq!(
+                selected
+                    .at_point(edge, 0.0, None)
+                    .unwrap()
+                    .collect::<Vec<_>>(),
+                [(index, face)]
+            );
+        }
+        assert!(FacePointCandidates::new(&k, &b, &faces, Some(faces.len())).is_err());
+        assert!(candidates
+            .at_point(Point3::new(f64::NAN, 0.0, 0.0), 0.0, None)
+            .is_err());
+        assert!(candidates.at_point(p, -1.0, None).is_err());
+        assert!(candidates.at_point(p, f64::INFINITY, None).is_err());
+        assert!(FacePointCandidates::default()
+            .at_point(p, 0.0, None)
+            .unwrap()
+            .next()
+            .is_none());
+    }
+
+    #[test]
+    fn point_normals_use_trim_and_the_chosen_face_sense() {
+        let mut k = Kernel::default();
+        let mut b =
+            crate::primitive::api_primitives::create_box(&mut k, Point3::ZERO, 1.0, 2.0, 3.0)
+                .unwrap();
+        let p = Point3::new(0.0, 1.0, 1.5);
+        let mut found = 0;
+        for f in get_faces(&b).unwrap() {
+            let (a, c) = face::faceuses(&b, f).unwrap();
+            let (a, c) = (a.unwrap(), c.unwrap());
+            if let Some(n) = face_normal_at_point(&k, &mut b, f, p, 1e-6, a).unwrap() {
+                let reversed = face_normal_at_point(&k, &mut b, f, p, 1e-6, c)
+                    .unwrap()
+                    .unwrap();
+                // The x=0 plane's unit normal has only an x component. Turning the
+                // chosen face use reverses it, regardless of the surface's parameters.
+                assert_eq!(n.value.x.abs(), 1.0);
+                assert_eq!((n.value.y, n.value.z), (0.0, 0.0));
+                assert_eq!(n.value, -reversed.value);
+                assert!(n.bound < 1e-12);
+                let off_trim = Point3::new(0.0, 3.0, 1.5);
+                assert_eq!(
+                    face_normal_at_point(&k, &mut b, f, off_trim, 1e-6, a).unwrap(),
+                    None
+                );
+                assert!(face_normal_at_point(&k, &mut b, f, p, -1.0, a).is_err());
+                let nonfinite = Point3::new(f64::NAN, 1.0, 1.5);
+                assert!(face_normal_at_point(&k, &mut b, f, nonfinite, 1e-6, a).is_err());
+                found += 1;
+            }
+        }
+        assert_eq!(found, 1);
     }
 
     #[test]
@@ -2994,5 +3829,191 @@ mod tests {
             matches!(refused, Err(SolidError::NotFound { .. })),
             "{refused:?}"
         );
+    }
+
+    #[test]
+    fn curve_arc_length_and_point_at_arc_length_work_on_lines_arcs_and_polylines() {
+        let k = Kernel::default();
+        // Straight line of length 10 along +X
+        let line = Curve::from(
+            crate::primitive::api_curves::create_line_segment(
+                Point3::new(0.0, 0.0, 0.0),
+                Point3::new(10.0, 0.0, 0.0),
+            )
+            .unwrap(),
+        );
+        let ivl = line.natural_interval();
+        let len = curve_arc_length(&k, &line, &ivl).unwrap();
+        assert!((len - 10.0).abs() < 1e-9, "{len}");
+        let s = curve_point_at_arc_length(&k, &line, &ivl, false, 3.0).unwrap();
+        assert!(!s.past_end);
+        assert!(s.point.distance(Point3::new(3.0, 0.0, 0.0)) < 1e-9);
+        assert!(s.tangent.unwrap().distance(Vec3::X) < 1e-9);
+        let from_end = curve_point_at_arc_length(&k, &line, &ivl, true, 2.5).unwrap();
+        assert!(!from_end.past_end);
+        assert!(from_end.point.distance(Point3::new(7.5, 0.0, 0.0)) < 1e-9);
+
+        // Quarter circle of radius 4: arc length = 2*pi, halfway is at 45 degrees.
+        let arc_record = crate::eval::Curve::Circle {
+            frame: crate::eval::Frame {
+                origin: [0.0, 0.0, 0.0],
+                x_axis: [1.0, 0.0, 0.0],
+                y_axis: [0.0, 1.0, 0.0],
+            },
+            radius: 4.0,
+        };
+        let made_arc = crate::curve::from_parameters::from_parameters(
+            &k,
+            &arc_record,
+            [0.0, core::f64::consts::FRAC_PI_2],
+        )
+        .unwrap();
+        let arc_len = curve_arc_length(&k, &made_arc.curve, &made_arc.interval).unwrap();
+        assert!(
+            (arc_len - 2.0 * core::f64::consts::PI).abs() < 1e-6,
+            "{arc_len}"
+        );
+        let mid_arc = curve_point_at_arc_length(
+            &k,
+            &made_arc.curve,
+            &made_arc.interval,
+            false,
+            arc_len * 0.5,
+        )
+        .unwrap();
+        let want = Point3::new(
+            4.0 * core::f64::consts::FRAC_1_SQRT_2,
+            4.0 * core::f64::consts::FRAC_1_SQRT_2,
+            0.0,
+        );
+        assert!(mid_arc.point.distance(want) < 1e-5, "{:?}", mid_arc.point);
+
+        // Right-angle polyline of total length 3 + 4 = 7.
+        let poly_record = crate::eval::Curve::Polyline {
+            points: vec![[0.0, 0.0, 0.0], [3.0, 0.0, 0.0], [3.0, 4.0, 0.0]],
+        };
+        let made_poly =
+            crate::curve::from_parameters::from_parameters(&k, &poly_record, [0.0, 2.0]).unwrap();
+        let poly_len = curve_arc_length(&k, &made_poly.curve, &made_poly.interval).unwrap();
+        assert!((poly_len - 7.0).abs() < 1e-9, "{poly_len}");
+        let p5 = curve_point_at_arc_length(&k, &made_poly.curve, &made_poly.interval, false, 5.0)
+            .unwrap();
+        assert!(
+            p5.point.distance(Point3::new(3.0, 2.0, 0.0)) < 1e-6,
+            "{:?}",
+            p5.point
+        );
+        assert!(p5.tangent.unwrap().distance(Vec3::Y) < 1e-6);
+
+        // Invalid inputs are refused cleanly.
+        assert!(curve_point_at_arc_length(&k, &line, &ivl, false, -1.0).is_err());
+        assert!(curve_point_at_arc_length(&k, &line, &ivl, false, f64::NAN).is_err());
+    }
+
+    #[test]
+    fn polyline_2d_queries_and_tangent_contacts_match_exact_geometry() {
+        let poly = [
+            Point2::new(0.0, 0.0),
+            Point2::new(10.0, 0.0),
+            Point2::new(10.0, 10.0),
+        ];
+        assert_eq!(
+            polyline_2d_bounds(&poly).unwrap(),
+            Some((Point2::new(0.0, 0.0), Point2::new(10.0, 10.0)))
+        );
+        assert_eq!(polyline_2d_bounds(&[]).unwrap(), None);
+        assert!(polyline_2d_bounds(&[Point2::new(f64::NAN, 0.0)]).is_err());
+
+        let (d, closest) = polyline_2d_closest_point(Point2::new(4.0, 3.0), &poly)
+            .unwrap()
+            .unwrap();
+        assert!((d - 3.0).abs() < 1e-12 && closest.distance(Point2::new(4.0, 0.0)) < 1e-12);
+        assert!(polyline_2d_closest_point(Point2::new(f64::INFINITY, 0.0), &poly).is_err());
+
+        let hit = segment_2d_intersection(
+            Point2::new(0.0, 0.0),
+            Point2::new(10.0, 10.0),
+            Point2::new(0.0, 10.0),
+            Point2::new(10.0, 0.0),
+            1e-6,
+        )
+        .unwrap()
+        .unwrap();
+        assert!(hit.distance(Point2::new(5.0, 5.0)) < 1e-9);
+        assert!(segment_2d_intersection(
+            Point2::new(0.0, 0.0),
+            Point2::new(10.0, 0.0),
+            Point2::new(0.0, 5.0),
+            Point2::new(10.0, 5.0),
+            1e-6,
+        )
+        .unwrap()
+        .is_none());
+
+        let cross = [
+            Point2::new(5.0, -2.0),
+            Point2::new(5.0, 6.0),
+            Point2::new(12.0, 6.0),
+        ];
+        let hits = polyline_2d_crossings(&poly, &cross, 1e-6).unwrap();
+        assert_eq!(hits.len(), 2, "{hits:?}");
+        assert!(hits
+            .iter()
+            .any(|p| p.distance(Point2::new(5.0, 0.0)) < 1e-9));
+        assert!(hits
+            .iter()
+            .any(|p| p.distance(Point2::new(10.0, 6.0)) < 1e-9));
+
+        // Line tangent to circle (0, 5), r = 5 along y = 0.
+        let lc = tangent_contact_line_circle_2d(
+            Point2::new(-10.0, 0.0),
+            Point2::new(10.0, 0.0),
+            Point2::new(0.0, 5.0),
+            5.0,
+            1e-6,
+        )
+        .unwrap()
+        .unwrap();
+        assert!(lc.distance(Point2::new(0.0, 0.0)) < 1e-9);
+        assert!(tangent_contact_line_circle_2d(
+            Point2::new(-10.0, 0.0),
+            Point2::new(10.0, 0.0),
+            Point2::new(0.0, 6.0),
+            5.0,
+            1e-6,
+        )
+        .unwrap()
+        .is_none());
+
+        // Externally and internally tangent circles.
+        let ext = tangent_contact_circle_circle_2d(
+            Point2::new(0.0, 0.0),
+            3.0,
+            Point2::new(8.0, 0.0),
+            5.0,
+            1e-6,
+        )
+        .unwrap()
+        .unwrap();
+        assert!(ext.distance(Point2::new(3.0, 0.0)) < 1e-9);
+        let int = tangent_contact_circle_circle_2d(
+            Point2::new(0.0, 0.0),
+            10.0,
+            Point2::new(6.0, 0.0),
+            4.0,
+            1e-6,
+        )
+        .unwrap()
+        .unwrap();
+        assert!(int.distance(Point2::new(10.0, 0.0)) < 1e-9);
+        assert!(tangent_contact_circle_circle_2d(
+            Point2::new(0.0, 0.0),
+            3.0,
+            Point2::new(4.0, 0.0),
+            3.0,
+            1e-6,
+        )
+        .unwrap()
+        .is_none());
     }
 }

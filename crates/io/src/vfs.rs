@@ -59,6 +59,13 @@ mod imp {
             std::path::Path::new(path).exists()
         }
     }
+    /// The path with links and `.`/`..` resolved, for telling whether two paths name one file.
+    /// It opens the path: on Windows a network path connects to its host, so a path a design
+    /// names goes through [`design_path_refusal`] first. No agent scope applies (it reads nothing).
+    pub fn canonicalize(path: &str) -> Result<std::path::PathBuf> {
+        touched();
+        std::fs::canonicalize(path)
+    }
     /// Whether the path names a regular file the caller may access.
     pub fn is_file(path: &str) -> bool {
         check(path).is_ok() && {
@@ -74,6 +81,13 @@ mod imp {
     /// A folder and the folders above it, where missing.
     pub fn create_dir_all(path: &str) -> Result<()> {
         check(path)?;
+        touched();
+        std::fs::create_dir_all(path)
+    }
+    /// A new folder and any missing folders above it, authorized as a new destination
+    /// ([`check_new`]): its parents need not exist yet, but those that do must be in scope.
+    pub fn create_new_dir_all(path: &str) -> Result<()> {
+        check_new(path)?;
         touched();
         std::fs::create_dir_all(path)
     }
@@ -148,6 +162,10 @@ mod imp {
     }
     /// Files are keyed by their whole path here: a folder needs no making.
     pub fn create_dir_all(_path: &str) -> Result<()> {
+        Ok(())
+    }
+    /// As [`create_dir_all`]: nothing to make.
+    pub fn create_new_dir_all(_path: &str) -> Result<()> {
         Ok(())
     }
     pub fn insert(path: &str, bytes: Vec<u8>) {

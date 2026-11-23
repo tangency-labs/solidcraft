@@ -6,17 +6,27 @@
 //! second. An application that keeps its operands copies them first ([`Body::copy`]). While a
 //! failure callback is installed, the operands are written before the call (`run_taking`), so a
 //! failure reports them as they came in.
+//!
+//! **What a solid's result must be** is the caller's choice ([`Contract`], every family's). By default a
+//! boolean tests its operands and its result for closure only ([`Contract::Closed`]): solid
+//! operands (closed, manifold) must give a closed result, and nothing is proved, so a boolean
+//! costs the boolean. [`Contract::Proved`] (the `_with` calls) also proves each operand and
+//! the result valid and facing out, refuses a result it cannot prove, and keeps the proof on
+//! the result for the next proved operation that takes it (#14830).
 
 use solidcore::boolean::api_brep::{self as sm, Boolean2dOutcome};
 use solidcore::boolean::merge::MergeOptions;
+use solidcore::boolean::operand_tolerances::matched_tolerances;
 use solidcore::geom::a_object::BooleanOperation;
 use solidcore::kernel::Kernel;
 use solidcore::primitive::primitive_creation::p1::Boolean2d;
+use solidcore::topology::brep::p3::brep_copy;
 use solidcore::topology::brep::validation::update_tolerances_after_boolean;
 use solidcore::Brep;
 use solidcore::Result as KernelResult;
 
-use crate::body::{finish_proved, Body, Expect, Outward, Proof};
+use crate::body::{finish_under, Body, Contract, Expect, Outward, Proof};
+use crate::measure::{locate_points, Located};
 use crate::session::run_taking;
 use crate::{Error, Result};
 
@@ -40,19 +50,19 @@ enum Done {
 }
 
 impl crate::session::Answer for Done {
-    fn refusal(&self) -> Option<String> {
+    fn refusal(&self) -> Option<Error> {
         match self {
-            Done::Refused(e) => Some(e.to_string()),
+            Done::Refused(e) => Some(e.clone()),
             _ => None,
         }
     }
 }
 
-/// The result contract of a boolean ([`finish_proved`]): faces left, and a solid in gives a
-/// solid out, solids touching along an edge or at a vertex allowed; the result keeps the proof
-/// its solid test made, for the next operation that takes it as an operand.
-fn finished(k: &mut Kernel, r: Brep, expect: Expect) -> KernelResult<Done> {
-    Ok(match finish_proved(k, r, expect.touching())? {
+/// The result contract of a boolean under `contract` ([`finish_under`]), solids touching along
+/// an edge or at a vertex allowed; under [`Contract::Proved`] the result keeps the proof its
+/// solid test made, for the next operation that takes it as an operand.
+fn finished(k: &mut Kernel, r: Brep, expect: Expect, contract: Contract) -> KernelResult<Done> {
+    Ok(match finish_under(k, r, expect.touching(), contract)? {
         Ok((b, outward)) => Done::Body(Box::new(b), outward),
         Err(Error::Empty) => Done::Empty,
         Err(e) => Done::Refused(e),
@@ -70,14 +80,17 @@ fn after_boolean(k: &mut Kernel, r: &mut Brep) -> KernelResult<()> {
     update_tolerances_after_boolean(k, r).map(|_| ())
 }
 
-/// What the operands make a boolean's result: a solid when every operand is one. Each comes
-/// with the proof its body held ([`Body::take_held`]), taken where it stands
-/// ([`Expect::of_held`]): an operand a previous operation proved, unchanged since, is not
-/// proved again (#14830).
-fn expect_of(k: &mut Kernel, operands: &mut [(Brep, Proof)]) -> KernelResult<Expect> {
+/// What the operands make a boolean's result: a solid when every operand is one under
+/// `contract` ([`Expect::under`]). Each comes with the proof its body held
+/// ([`Body::take_held`]), which [`Contract::Proved`] takes where it stands.
+fn expect_of(
+    k: &mut Kernel,
+    operands: &mut [(Brep, Proof)],
+    contract: Contract,
+) -> KernelResult<Expect> {
     let mut all = true;
     for (b, proof) in operands.iter_mut() {
-        all &= Expect::of_held(k, b, std::mem::take(proof))? != Expect::FACES;
+        all &= Expect::under(k, b, std::mem::take(proof), contract)? != Expect::FACES;
     }
     Ok(if all { Expect::SOLID } else { Expect::FACES })
 }
@@ -124,54 +137,123 @@ fn result(d: Done, empty: Result<Option<Body>>) -> Result<Option<Body>> {
     }
 }
 
-/// `a` op `b` (`SmApiBoolean`): `None` when the result is empty, [`Error::NotSolid`] when solid
-/// operands give a body that is not closed (solids touching along an edge or at a vertex are
-/// closed).
+/// `a` op `b` (`SmApiBoolean`) under [`Contract::Closed`]: `None` when the result is empty,
+/// [`Error::NotSolid`] when solid operands give a body that is not closed (solids touching
+/// along an edge or at a vertex are closed). An empty difference or intersection of solids is
+/// [`Error::EmptyRefuted`] where a vertex of an operand shows the result holds material.
 ///
 /// # Errors
-/// [`Error::NotSolid`]; the kernel's error.
+/// [`Error::NotSolid`]; [`Error::EmptyRefuted`]; the kernel's error.
 pub fn boolean(a: Body, b: Body, op: BooleanOp) -> Result<Option<Body>> {
+    boolean_with(a, b, op, Contract::Closed)
+}
+
+/// [`boolean`] under `contract`.
+///
+/// # Errors
+/// As [`boolean`]; under [`Contract::Proved`], [`Error::NotSolid`] too for a result of proved
+/// solids that is not proved valid and facing out.
+pub fn boolean_with(a: Body, b: Body, op: BooleanOp, contract: Contract) -> Result<Option<Body>> {
     let both = [a, b];
     usable("SmApiBoolean", &both)?;
     let d = run_taking("SmApiBoolean", &operands(&both), |k| {
         let [a, b] = &both;
         let mut operands = [take(a), take(b)];
-        let expect = expect_of(k, &mut operands)?;
-        let [(ca, _), (cb, _)] = operands;
+        let expect = expect_of(k, &mut operands, contract)?;
+        let [(mut ca, _), (mut cb, _)] = operands;
+        matched_tolerances(k, &mut ca, &mut cb)?;
+        let witnesses = Witnesses::of(k, &ca, &cb, op, expect)?;
         let mut r = sm::boolean(k, ca, cb, operation(op))?.result;
         after_boolean(k, &mut r)?;
-        finished(k, r, expect)
+        Ok(match finished(k, r, expect, contract)? {
+            Done::Empty => witnesses.refute(k),
+            d => d,
+        })
     })?;
     result(d, Ok(None))
 }
 
-/// The union of `bodies`, pairwise level by level (an odd one carried to the next level as it
-/// is), each union `SmApiBoolean`'s, with solids touching along edges or at vertices allowed.
-/// Each pairwise result gets [`after_boolean`]'s update as it is made, as smlib's boolean gives
-/// it, so a later level unions repaired operands; a single body makes no union and is untouched.
+/// Each operand's vertices with a copy of the other operand, which the boolean consumes, and
+/// the side of it (material or void) on which a vertex proves the result is not empty.
+struct Witnesses(Vec<(Vec<[f64; 3]>, Brep, bool)>);
+
+impl Witnesses {
+    fn of(k: &mut Kernel, a: &Brep, b: &Brep, op: BooleanOp, expect: Expect) -> KernelResult<Self> {
+        if !expect.solid() {
+            return Ok(Self(Vec::new()));
+        }
+        let pairs: &[(&Brep, &Brep, bool)] = match op {
+            BooleanOp::Union => &[],
+            BooleanOp::Subtract => &[(a, b, false)],
+            BooleanOp::Intersect => &[(a, b, true), (b, a, true)],
+        };
+        let mut held = Vec::new();
+        for &(from, against, material) in pairs {
+            held.push((vertices(from)?, brep_copy(k, against)?, material));
+        }
+        Ok(Self(held))
+    }
+
+    fn refute(self, k: &Kernel) -> Done {
+        for (points, against, material) in &self.0 {
+            let located = locate_points(k, against, points);
+            let on_its_side = |l: &std::result::Result<Located, _>| matches!(l, Ok(Located::InRegion { material: Some(m), .. }) if m == material);
+            if let Some((&at, _)) = points.iter().zip(located).find(|(_, l)| on_its_side(l)) {
+                return Done::Refused(Error::EmptyRefuted { at });
+            }
+        }
+        Done::Empty
+    }
+}
+
+fn vertices(b: &Brep) -> KernelResult<Vec<[f64; 3]>> {
+    b.vertex_list()
+        .iter()
+        .map(|&v| b.vertex(v).map(|v| [v.point.x, v.point.y, v.point.z]))
+        .collect()
+}
+
+/// The union of `bodies` under [`Contract::Closed`], pairwise level by level (an odd one
+/// carried to the next level as it is), each union `SmApiBoolean`'s, with solids touching along
+/// edges or at vertices allowed. No tolerance is updated between the pairwise unions or after
+/// the last; a single body makes no union and is untouched.
 ///
 /// # Errors
 /// [`Error::Argument`] for no body; [`Error::Empty`] for an empty result; [`Error::NotSolid`];
 /// the kernel's error.
+pub fn union_all(bodies: Vec<Body>) -> Result<Body> {
+    union_all_with(bodies, Contract::Closed)
+}
+
+/// [`union_all`] under `contract`. Under [`Contract::Proved`] each pairwise result gets
+/// [`after_boolean`]'s update as it is made, so a later level unions repaired operands.
+///
+/// # Errors
+/// As [`union_all`]; under [`Contract::Proved`], [`Error::NotSolid`] too for a result of proved
+/// solids that is not proved valid and facing out.
 // The operands are consumed: their bodies are taken out under the kernel's lock.
 #[allow(clippy::needless_pass_by_value)]
-pub fn union_all(bodies: Vec<Body>) -> Result<Body> {
+pub fn union_all_with(bodies: Vec<Body>, contract: Contract) -> Result<Body> {
     if bodies.is_empty() {
         return Err(Error::Argument);
     }
     usable("union_all", &bodies)?;
     let d = run_taking("union_all", &operands(&bodies), |k| {
         let mut held: Vec<(Brep, Proof)> = bodies.iter().map(take).collect();
-        let expect = expect_of(k, &mut held)?;
+        let expect = expect_of(k, &mut held, contract)?;
         let mut level: Vec<Brep> = held.into_iter().map(|(b, _)| b).collect();
         while level.len() > 1 {
             let mut next = Vec::new();
             let mut it = level.into_iter();
             while let Some(a) = it.next() {
                 match it.next() {
-                    Some(b) => {
+                    Some(mut b) => {
+                        let mut a = a;
+                        matched_tolerances(k, &mut a, &mut b)?;
                         let mut r = sm::boolean(k, a, b, BooleanOperation::Union)?.result;
-                        after_boolean(k, &mut r)?;
+                        if contract == Contract::Proved {
+                            after_boolean(k, &mut r)?;
+                        }
                         next.push(r);
                     }
                     None => next.push(a),
@@ -180,7 +262,7 @@ pub fn union_all(bodies: Vec<Body>) -> Result<Body> {
             level = next;
         }
         match level.pop() {
-            Some(r) => finished(k, r, expect),
+            Some(r) => finished(k, r, expect, contract),
             None => Ok(Done::Empty),
         }
     })?;
@@ -207,7 +289,7 @@ pub fn boolean2d(a: Body, b: Body, op: BooleanOp) -> Result<Option<Body>> {
             BooleanOp::Intersect => Boolean2d::Intersection,
         };
         match sm::boolean_2d(k, ca, cb, kind)? {
-            Boolean2dOutcome::Result(r) => finished(k, r, Expect::FACES),
+            Boolean2dOutcome::Result(r) => finished(k, r, Expect::FACES, Contract::Closed),
             Boolean2dOutcome::Unassigned { .. } => Ok(Done::Empty),
         }
     })?;
@@ -224,31 +306,49 @@ fn counts(b: &Brep) -> [usize; 3] {
 }
 
 /// `tool`'s edges imprinted on `body` (`SmApiBooleanWithOptions(SM_BO_IMPRINT)`: cookie cutter
-/// off, imprinting on, post-process off, imprint-and-classify off, keep other on), with the
-/// result contract ([`finish_proved`]: faces left, a solid in gives a solid out), and whether the
-/// imprint changed `body`'s topology (a face cut, an edge split: its face, edge or vertex
-/// count moved). When it changed nothing the body comes back as the kernel left it, never
-/// dropped.
+/// off, imprinting on, post-process off, imprint-and-classify off, keep other on) under
+/// [`Contract::Closed`]: the result needs only faces left, and the imprint changed `body` when
+/// its face count moved (a face cut). When it changed nothing the body comes back as the
+/// kernel left it, never dropped.
 ///
 /// # Errors
-/// [`Error::Empty`] for an empty result; [`Error::NotSolid`] when a solid body comes out not
-/// closed; the kernel's error.
+/// [`Error::Empty`] for an empty result; the kernel's error.
 pub fn imprint(body: Body, tool: Body) -> Result<(Body, bool)> {
+    imprint_with(body, tool, Contract::Closed)
+}
+
+/// [`imprint`] under `contract`. Under [`Contract::Proved`] the result has the result contract
+/// ([`finish_proved`]: a proved solid in gives a proved solid out), and the imprint changed
+/// `body` when its face, edge or vertex count moved (a face cut, an edge split).
+///
+/// # Errors
+/// As [`imprint`]; under [`Contract::Proved`], [`Error::NotSolid`] when a solid body comes out
+/// not proved a solid.
+pub fn imprint_with(body: Body, tool: Body, contract: Contract) -> Result<(Body, bool)> {
     let both = [body, tool];
     usable("SmApiBooleanWithOptions", &both)?;
     let mut before = [0; 3];
     let d = run_taking("SmApiBooleanWithOptions", &operands(&both), |k| {
         let [body, tool] = &both;
-        let ((mut a, proof), (t, _)) = (take(body), take(tool));
+        let ((mut a, proof), (mut t, _)) = (take(body), take(tool));
         before = counts(&a);
-        let expect = Expect::of_held(k, &mut a, proof)?;
+        // an imprint under the default contract needs only faces left of its result
+        let expect = match contract {
+            Contract::Closed => Expect::FACES,
+            Contract::Proved => Expect::under(k, &mut a, proof, contract)?,
+        };
+        matched_tolerances(k, &mut a, &mut t)?;
         let options = MergeOptions::new(false, true, false, false, true);
         let r = sm::boolean_with_options(k, a, t, BooleanOperation::Imprint, options)?.result;
-        finished(k, r, expect)
+        finished(k, r, expect, contract)
     })?;
     match d {
         Done::Body(b, outward) => {
-            let changed = counts(&b) != before;
+            let after = counts(&b);
+            let changed = match contract {
+                Contract::Closed => after[0] != before[0],
+                Contract::Proved => after != before,
+            };
             Ok((Body::held(*b, outward), changed))
         }
         Done::Empty => Err(Error::Empty),

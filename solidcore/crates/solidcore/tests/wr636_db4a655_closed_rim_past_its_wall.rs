@@ -3,8 +3,8 @@
 //! wall went on, then cut by the face beyond. The disc R13 x 2 with its top rim rounded
 //! R2.5 (solidcraft#190): the round's rail on the wall lies 0.5 below the disc's bottom,
 //! past the cylinder's domain, so the wall is continued as itself, the rail is one closed
-//! edge (one circle), and the removal region closes on the band of the continued wall
-//! between the rail and the blended rim.
+//! edge (one circle), and the round is trimmed at its crease with the disc's bottom (WR-695;
+//! the fork closed a removal region on the band of the continued wall and subtracted it).
 //!
 //! Expected (the fork's capi test `closed_rims_blended_past_their_walls`, the rig's
 //! analytic answer): the disc pi 338 less the round's spandrel of revolution,

@@ -318,6 +318,8 @@ pub const OPENAI_PRESETS: &[ApiPreset] = &[
     ApiPreset { name: "DeepSeek", base_url: "https://api.deepseek.com" },
     ApiPreset { name: "Qwen", base_url: "https://dashscope-intl.aliyuncs.com/compatible-mode/v1" },
     ApiPreset { name: "Cheaper Inference", base_url: "https://api.cheaperinference.com/v1" },
+    // UnoRouter serves OpenAI-compatible chat completions and GET /v1/models (#17068).
+    ApiPreset { name: "UnoRouter", base_url: "https://api.unorouter.com/v1" },
     ApiPreset { name: "OpenRouter", base_url: "https://openrouter.ai/api/v1" },
 ];
 
@@ -511,6 +513,12 @@ mod tests {
             && p.base_url == "https://generativelanguage.googleapis.com/v1beta/openai"
             && key_safe_for(p.base_url)));
         assert!(presets(Protocol::OpenAi).iter().any(|p| p.name == "Cheaper Inference" && key_safe_for(p.base_url)));
+        assert!(
+            presets(Protocol::OpenAi)
+                .iter()
+                .any(|p| p.name == "UnoRouter" && p.base_url == "https://api.unorouter.com/v1" && key_safe_for(p.base_url))
+        );
+        assert!(!presets(Protocol::Anthropic).iter().any(|p| p.name == "UnoRouter"), "this preset uses OpenAI-compatible chat completions");
         assert!(presets(Protocol::Anthropic).iter().any(|p| p.base_url == "https://api.anthropic.com/v1"));
         for name in ["DeepSeek", "Qwen"] {
             assert!(presets(Protocol::OpenAi).iter().any(|p| p.name == name), "OpenAI-compatible preset for {name}");

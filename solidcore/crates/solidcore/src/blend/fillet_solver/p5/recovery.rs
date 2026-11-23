@@ -8,7 +8,7 @@
 //! | `Recovery::split_rail` | calls [`super::super::p1::split_rail`] |
 //! | `Recovery::support_edge` | calls [`super::super::p1::compute_support_edge`] |
 //! | `Recovery::retraced_end`, `Recovery::end_sections`, `RecoveryOps::end_vertex`, `RecoveryOps::recalc_through` | none (#2406: a rollover's piece traced again up to an End at a smooth vertex) |
-//! | `Recovery::keeps_round` (private) | none (#2406, with `fillet_round_as_definition`: the piece before a tangent rollover keeps its round by its definition) |
+//! | `Recovery::keeps_round` (private) | none (#2406: the piece before a tangent rollover keeps its round by its definition) |
 //!
 //! Deviations: missing callees have typed call boundaries in `RecoveryOps`;
 //! their callers, mutations, cleanup and continuation are fully represented.
@@ -37,6 +37,7 @@ use crate::blend::fillet_geom::p5::FilletEdgeContext;
 use crate::blend::fillet_solver::p1::{FilletSolverOffsetsData, OffsetSurfaceSlot};
 use crate::curve::curve::p1::GlobalPointSolveOptions;
 use crate::curve::curve::Curve;
+use crate::error::blend::CrossingInput;
 use crate::geom::global_solver::{SolutionRequested, SolverOperation};
 use crate::intersect::surface_intersector::p1::TsectPnt;
 use crate::math::{Point3, Vec3, EFF_ZERO_SQRT};
@@ -134,6 +135,10 @@ pub(super) trait RecoveryOps {
             Some(EntityRef::Edge(e)) => Some(e),
             _ => None,
         };
+        let tolerance = c
+            .solver
+            .rollover_tolerance(c.k, c.target)?
+            .min(tangency_tolerance);
         let r = crate::blend::fillet_solver::p2::find_rollover_side_edge(
             c.k,
             c.fillets,
@@ -143,7 +148,7 @@ pub(super) trait RecoveryOps {
             original_uv_curve,
             original_surface,
             convex,
-            tangency_tolerance,
+            tolerance,
             &edge_of,
             &mut io,
         );
@@ -196,12 +201,23 @@ pub(super) trait RecoveryOps {
             c.solver, c.k, c.target, c.fillets, vertex, geom, which, rail, side, guess,
         )
     }
-    fn tangent(&mut self, c: &mut Recovery<'_>, side: EdgeId) -> Result<bool> {
-        super::super::p1::test_manifold_tangent_rollover(
+    fn tangent(&mut self, c: &mut Recovery<'_>, side: EdgeId, point: Point3) -> Result<bool> {
+        let tolerance = c.solver.rollover_tolerance(c.k, c.target)?;
+        let curve = edge::curve(c.target, side)?.ok_or_else(|| {
+            SolidError::blend_crossing_input_missing(OP, CrossingInput::SideEdgeCurve)
+        })?;
+        let (parameter, _) = super::super::p3::drop_param(
             c.k,
-            c.target,
-            side,
-            c.solver.solver().tangency_tolerance,
+            curve,
+            &edge::interval(c.target, side)?,
+            point,
+            false,
+        )?
+        .ok_or_else(|| {
+            SolidError::blend_crossing_input_missing(OP, CrossingInput::CrossingOnSideEdge)
+        })?;
+        super::super::p1::test_manifold_tangent_rollover_at(
+            c.k, c.target, side, parameter, tolerance,
         )
         .map(|r| r.0)
     }
@@ -471,7 +487,7 @@ impl Recovery<'_> {
         let start = self.start(rail)?;
         required(edge::other_vertex(self.fillets.brep(), rail, Some(start))?)
     }
-    /// Not upstream (#2406; with `fixes.fillet_round_as_definition`):
+    /// Not upstream (#2406):
     /// whether geometry `geom`, a piece of the rollover that ends where a rail rolls over
     /// a tangent edge (`hits`) and is not the last, keeps its round. Its ball rolls on the
     /// same two faces as before (its offsets unchanged, `geom_type` the default), and its
@@ -494,12 +510,7 @@ impl Recovery<'_> {
         hits: &[SideHit; 2],
         saved: &FilletSolverOffsetsData,
     ) -> Result<bool> {
-        let fixes = &self.k.fixes;
-        if !fixes.fillet_round_as_definition
-            || last
-            || geom_type != FilletGeomType::Default
-            || !hits.iter().any(|h| h.tangent)
-        {
+        if last || geom_type != FilletGeomType::Default || !hits.iter().any(|h| h.tangent) {
             return Ok(false);
         }
         for which in 0..2 {
@@ -937,10 +948,7 @@ impl Recovery<'_> {
                         // Bare Copy: upstream ignores its status but uses its output.
                         let (copy, status) = ops.copy_offset(self.k, &orig.surface);
                         // fork 66b02de passes this on (SER)
-                        ignored(crate::error::passed_on(
-                            status,
-                            self.k.fixes.fillet_statuses_pass_on,
-                        )?)?;
+                        status?;
                         if let Some(copy) = copy {
                             self.fillets
                                 .geom_mut(required(new_geom)?)?
@@ -995,7 +1003,7 @@ impl Recovery<'_> {
                         return Err(SolidError::blend_missing(OP, "the rail vertex's side edge"));
                     };
                     let guess = self.fillets.vertex_point(vertex)?;
-                    if ops.tangent(self, side)? {
+                    if ops.tangent(self, side, guess)? {
                         ops.rail_x_edge(
                             self,
                             vertex,

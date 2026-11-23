@@ -1,0 +1,1 @@
+snaps a feature's point by the display mesh

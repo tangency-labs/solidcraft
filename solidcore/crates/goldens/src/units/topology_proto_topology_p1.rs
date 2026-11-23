@@ -3319,8 +3319,11 @@ fn run_proto(
                 let pt = rd.vec();
                 match d {
                     Some(d) if !skip => {
+                        // (no absorbed hull here, so the move never fails)
                         if let Some(x) = r.mgr.vertex_def_mut(d) {
-                            x.set_position(pt);
+                            if x.set_position(k, pt).is_err() {
+                                skip = true;
+                            }
                         }
                     }
                     _ => skip = true,
@@ -6828,9 +6831,19 @@ fn edge_cases() -> Vec<(String, Value)> {
     ));
     // proto: the life cycle on lines and a circle at three scales
     for (name, s) in [("unit", 1.0), ("huge", 1e5), ("tiny", 1e-5)] {
+        // Line::bounded normalizes the direction; scale sets the length over [0, 1].
+        let scaled_line = |p, v| {
+            ObjIn::Curve(CurveIn::Line(LineIn {
+                p,
+                v,
+                domain: [0.0, 1.0],
+                scale: s,
+                inside_out: false,
+            }))
+        };
         let objects = vec![
-            ObjIn::Curve(line([0.0, 0.0, 0.0], [s, 0.0, 0.0], [0.0, 1.0])),
-            ObjIn::Curve(line([0.0, 1e-7 * s, 0.0], [s, 0.0, 0.0], [0.0, 1.0])),
+            scaled_line([0.0, 0.0, 0.0], [1.0, 0.0, 0.0]),
+            scaled_line([0.0, 1e-7 * s, 0.0], [1.0, 0.0, 0.0]),
             ObjIn::Curve(CurveIn::Conic(ConicIn {
                 center: [0.0, 0.0, 0.0],
                 x: [1.0, 0.0, 0.0],
@@ -6845,7 +6858,7 @@ fn edge_cases() -> Vec<(String, Value)> {
                 n: [0.0, 0.0, 1.0],
             },
             ObjIn::Vertex,
-            ObjIn::Curve(line([0.0, 0.0, 0.0], [0.0, s, 0.0], [0.0, 1.0])),
+            scaled_line([0.0, 0.0, 0.0], [0.0, 1.0, 0.0]),
             ObjIn::Edge(5),
             ObjIn::Face(3),
             ObjIn::Region,
@@ -7540,6 +7553,50 @@ impl super::topology_brep_p5::transform_certificate::Certified for Runner {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn proto_lifecycle_curves_scale_with_their_positions() {
+        let cases = edge_cases();
+        let curves = |name: &str| {
+            let (_, input) = cases.iter().find(|(case, _)| case == name).unwrap();
+            let Script::Proto { objects, .. } = serde_json::from_value(input.clone()).unwrap()
+            else {
+                panic!("{name} is not a proto script");
+            };
+            objects
+                .iter()
+                .enumerate()
+                .filter_map(|(index, object)| match object {
+                    ObjIn::Curve(curve) => Some((index, build_curve(curve).unwrap())),
+                    _ => None,
+                })
+                .collect::<Vec<_>>()
+        };
+        let unit = curves("edge_proto_unit");
+        assert_eq!(unit.len(), 4);
+        let k = Kernel::default();
+        for (name, scale) in [("edge_proto_huge", 1e5), ("edge_proto_tiny", 1e-5)] {
+            let scaled = curves(name);
+            assert_eq!(scaled.len(), unit.len());
+            for ((index, curve), (unit_index, unit_curve)) in scaled.iter().zip(&unit) {
+                assert_eq!(index, unit_index);
+                let domain = unit_curve.natural_interval();
+                assert_eq!(curve.natural_interval(), domain);
+                for fraction in [0.0, 0.25, 0.5, 1.0] {
+                    let t = domain.min() + fraction * domain.length();
+                    let expected = unit_curve.evaluate(&k, t, 1, false, false).unwrap();
+                    let actual = curve.evaluate(&k, t, 1, false, false).unwrap();
+                    for (order, (actual, expected)) in actual.iter().zip(&expected).enumerate() {
+                        let expected = *expected * scale;
+                        assert!(
+                            actual.distance(expected) <= 1e-12 * scale,
+                            "{name} curve {index}, t={t}, derivative {order}: {actual:?} != {expected:?}"
+                        );
+                    }
+                }
+            }
+        }
+    }
 
     /// The p1 rows whose transforms scale the tolerances (WR-507 / WR-508 closed form).
     const SCALED_P1: [&str; 23] = [

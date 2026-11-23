@@ -203,6 +203,34 @@ mod tests {
         assert_eq!(stated(&text), vec![own]);
     }
 
+    /// Each body comes back as accurate as it was written, whatever is beside it: a box written
+    /// beside a box whose edge may lie 0.3 mm off its faces was read back at 0.3 mm (the file
+    /// stated one uncertainty, the loosest), and so was every body of an Insert Design beside
+    /// one loose body. The bodies come back in the order they were written, with their names.
+    #[test]
+    fn each_body_reads_back_at_its_own_tolerance_in_order() {
+        let bx = crate::box_solid(Vec3::ZERO, Vec3::new(10.0, 20.0, 5.0)).unwrap();
+        let own = bx.record().tolerance;
+        let mut record = crate::box_solid(Vec3::new(30.0, 0.0, 0.0), Vec3::new(10.0, 20.0, 5.0)).unwrap().record().clone();
+        record.edges.first_mut().unwrap().tolerance = 0.3;
+        let loose = crate::Body::from_record(record).unwrap();
+        let far = crate::box_solid(Vec3::new(60.0, 0.0, 0.0), Vec3::new(10.0, 20.0, 5.0)).unwrap();
+        let named = |name: &str, body| ExportBody { name: name.into(), body, color: None };
+        let text = step_export_bodies(&[named("First", &bx), named("Loose", &loose), named("Last", &far)], &StepHeader::default()).unwrap();
+        let read = crate::step_import(&text).unwrap();
+        let names: Vec<&str> = read.bodies.iter().map(|b| b.name.as_str()).collect();
+        assert_eq!(names, ["First", "Loose", "Last"], "{:?}", read.warnings);
+        for b in &read.bodies {
+            let r = b.body.record();
+            let most = r.edges.iter().map(|e| e.tolerance).chain([r.tolerance]).fold(0.0, f64::max);
+            if b.name == "Loose" {
+                assert!(most >= 0.3, "{}: {most}", b.name);
+            } else {
+                assert!(most <= own, "{} read at {most}, written at {own}", b.name);
+            }
+        }
+    }
+
     #[test]
     fn assembly_names_colours_round_trip() {
         use crate::{box_solid, cylinder, measure, step_import, step_validate};

@@ -56,11 +56,10 @@ const DEPTH: f64 = 20.0;
 const EDGE: f64 = 20.0;
 const BLOCK: f64 = (40.0 * 10.0 + 20.0 * 2.0) * DEPTH;
 
-/// The cliff overflow's flags and the trim at creases, as SolidCraft runs them.
+/// The cliff overflow's flags, as SolidCraft runs them (the trim at creases is unconditional).
 fn kernel() -> Kernel {
     let mut k = Kernel::default();
     k.fixes.fillet_trace_reaches_rails = true;
-    k.fixes.fillet_overflow_trim_at_creases = true;
     k
 }
 
@@ -403,4 +402,107 @@ fn a_concave_round_whose_face_runs_on_past_the_end_face_builds() {
         .unwrap()
         .lines();
     assert!(lines.is_empty(), "check_brep: {lines:?}");
+}
+
+/// The part of #17780: a prism whose section is a circle of radius 12.5 about the y axis cut
+/// by the chord at z = -7.5, swept 20 along y, with a block 12 wide and 3.5 high standing 5 out
+/// of its front cap (y = 0) on the chord's middle, its underside flush with the chord's face.
+/// The cap is F and the arc's cylinder G, one face whose own domain is the arc. The cap's chord
+/// edge from the arc's end V = (-10, 0, -7.5) runs to P = (-6, 0, -7.5), where the block's wall
+/// rises. A round of radius r on the arc has its rail on F on the circle of radius 12.5 - r,
+/// which meets the chord's line past P, under the block, once 12.5 - r is below |P| =
+/// sqrt(92.25): such a round is refused naming that radius.
+fn d_with_block(k: &mut Kernel) -> Brep {
+    let frame = Axis2Placement::new(
+        Point3::ZERO,
+        Vec3::new(1.0, 0.0, 0.0),
+        Vec3::new(0.0, 0.0, 1.0),
+    );
+    let end = (0.6_f64).asin().to_degrees();
+    let arc = Ellipse::create_canonical_circle(
+        k,
+        &frame,
+        12.5,
+        Some(&Extent1d::from_min_max(-end, 180.0 + end)),
+        None,
+    )
+    .unwrap();
+    let chord =
+        create_line_segment(Vec3::new(-10.0, 0.0, -7.5), Vec3::new(10.0, 0.0, -7.5)).unwrap();
+    let cs = [Curve::from(arc), Curve::from(chord)];
+    let refs: Vec<Option<&Curve>> = cs.iter().map(Some).collect();
+    let d = create_linear_sweep(k, &refs, Vec3::new(0.0, 1.0, 0.0), DEPTH, true).unwrap();
+    let block = create_box(k, Point3::new(-6.0, -5.0, -7.5), 12.0, 5.0, 3.5).unwrap();
+    boolean_union(k, d, block).unwrap()
+}
+
+fn round_d_with_block(r: f64) -> Outcome {
+    // as SolidCraft runs it: the swept arc a cylinder, the round's offset surfaces continued
+    // as themselves (so the rail past V is the exact circle on F)
+    let mut k = kernel();
+    k.fixes.linear_sweep_arc_is_cylinder = true;
+    k.fixes.offset_extension_from_base = true;
+    k.fixes.offset_extension_as_itself = true;
+    let mut b = d_with_block(&mut k);
+    let top = Point3::new(0.0, 0.0, 12.5);
+    let e = b
+        .edges()
+        .ids()
+        .find(|&e| {
+            let ivl = edge::interval(&b, e).unwrap();
+            let c = edge::curve(&b, e).unwrap().unwrap();
+            [ivl.min(), ivl.mid(), ivl.max()].iter().all(|&t| {
+                let p = c.evaluate_point(&k, t).unwrap();
+                p.y.abs() < 1e-9 && (p.x.hypot(p.z) - 12.5).abs() < 1e-9
+            }) && c.evaluate_point(&k, ivl.mid()).unwrap().distance(top) < 1e-6
+        })
+        .expect("the arc on the front cap");
+    let mut session = FilletSession::new(&mut k, &mut b).unwrap();
+    session
+        .prepare_constant_radius_edges(&mut k, &[e], r, 1, 1, 1.0)
+        .unwrap();
+    let result = session.do_fillet(&mut k);
+    let info = session.error_info().clone();
+    drop(session);
+    match result {
+        Ok(()) => {
+            assert!(
+                is_manifold_solid(&b).unwrap(),
+                "r {r}: not a manifold solid"
+            );
+            b.use_arena_naming().unwrap();
+            let lines = check_brep(&mut k, &mut b, CheckLevel::Level2)
+                .unwrap()
+                .lines();
+            assert!(lines.is_empty(), "r {r}: check_brep: {lines:?}");
+            Outcome::Built(0.0)
+        }
+        Err(_) => Outcome::Refused(info.comment),
+    }
+}
+
+/// #17780: the ball touching F at P and touching G is measured to G's cylinder, not to G's
+/// face, whose own domain ends at V: there the centre's foot stopped at V, the ball came out
+/// larger than the round's, and the End, finding a rail past P that did not reach P, failed as
+/// "Corner Edge Computation Failure" instead of naming the radius that fits.
+#[test]
+fn a_round_on_an_arc_running_under_a_block_names_the_radius_that_fits() {
+    let fits = 12.5 - 92.25_f64.sqrt();
+    assert!(
+        matches!(round_d_with_block(2.5), Outcome::Built(_)),
+        "2.5 stays short of P and builds"
+    );
+    let Outcome::Refused(comment) = round_d_with_block(3.0) else {
+        panic!("3 runs past P under the block: built");
+    };
+    let named = comment
+        .split("a radius below ")
+        .nth(1)
+        .and_then(|s| s.split_whitespace().next())
+        .and_then(|s| s.parse::<f64>().ok())
+        .unwrap_or_else(|| panic!("no fitting radius named: {comment}"));
+    assert!(
+        (named - fits).abs() < 1e-5,
+        "named {named}, closed form {fits}: {comment}"
+    );
 }
