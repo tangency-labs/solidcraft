@@ -183,7 +183,11 @@ impl<'a> FaceTrims<'a> {
             }
         }
         cuts.sort_by(f64::total_cmp);
-        intervals.extend(cuts.chunks_exact(2).map(|p| (p[0], p[1])));
+        let (pairs, leftover) = cuts.as_chunks::<2>();
+        if !leftover.is_empty() {
+            return Err(KernelError::Invalid("iso curve: trim loop has an unpaired crossing".into()));
+        }
+        intervals.extend(pairs.iter().map(|&[a, b]| (a, b)));
         intervals.sort_by(|a, b| a.0.total_cmp(&b.0));
         let mut ranges: Vec<(f64, f64)> = Vec::new();
         for (a, b) in intervals {
