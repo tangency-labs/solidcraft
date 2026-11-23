@@ -210,6 +210,11 @@ const EXACT: f64 = 1e-9;
 /// The largest tolerance (mm) a pcurve is asked at, whether it is the face's, an edge record's own
 /// ([`each_pcurve`]) or one covered for a proved boundary gap ([`boundary_covered`]).
 const MAX_EDGE_TOLERANCE: f64 = 1e3;
+/// The most (mm) a recorded edge may lie off a patch's boundary curve and still be read as that
+/// boundary: exporter rounding (the reference files are 2e-5 to 7.5e-5 mm off), not a different
+/// curve. A straight edge across a patch whose boundary is a quadratic 0.016 mm away is another
+/// curve, and gets the kernel's pcurve.
+const BOUNDARY_GAP_CAP: f64 = 1e-3;
 /// An edge's tolerance over its largest distance from a face's surface: a pcurve is accepted
 /// within half its edge's tolerance ([`pcurves_within`]), as SMLib's zone tolerance is half the
 /// record's, so a tolerance that covers a gap goes past twice it.
@@ -367,7 +372,7 @@ fn check_boundary_net(n: &Nurbs) -> Result<()> {
 /// The importer raises an edge's tolerance to cover the gap `margin` times (`covered`, never
 /// lowered from `tolerance`, the largest of the face's and the edge's) before it asks for pcurves,
 /// and asks within `covered`: this is the one question of both. The bound is [`boundary_iso`]'s
-/// within `max_tolerance / margin`, and the answer is `Some` only where `covered` is within
+/// within `max_tolerance / margin` (and 10⁻³ mm, [`BOUNDARY_GAP_CAP`]), and the answer is `Some` only where `covered` is within
 /// `max_tolerance` (and within the most an edge's tolerance is ever honoured at, 10³ mm, as
 /// [`pcurves`] reads it) and the line, taken at `covered` exactly as `exact_pcurves` takes it (the
 /// proof again within half of it, then the lift checked against the edge), is accepted: a
@@ -392,7 +397,16 @@ pub fn boundary_covered(
     if let SurfaceEval::Eval(EvalSurface::Nurbs(n), _) = &on.surface {
         check_boundary_net(n)?;
     }
-    Ok(covered_on(&on, curve, interval, tolerance, margin, max_tolerance)?.map(|(gap, _)| gap))
+    Ok(covered_on(
+        &on,
+        curve,
+        interval,
+        tolerance,
+        margin,
+        max_tolerance,
+        BOUNDARY_GAP_CAP,
+    )?
+    .map(|(gap, _)| gap))
 }
 
 #[allow(clippy::neg_cmp_op_on_partial_ord)] // NaN-refusing
@@ -417,9 +431,10 @@ fn covered_on(
     tolerance: f64,
     margin: f64,
     max_tolerance: f64,
+    gap_cap: f64,
 ) -> Result<Option<(f64, usize)>> {
     let [t0, t1] = interval;
-    let cap = max_tolerance / margin;
+    let cap = (max_tolerance / margin).min(gap_cap);
     #[allow(clippy::neg_cmp_op_on_partial_ord)] // NaN-refusing
     if !(t0.is_finite() && t1.is_finite() && t0 < t1 && cap.is_finite() && cap > 0.0) {
         return Err(Error::Invalid(format!(
@@ -455,7 +470,7 @@ fn covered_on(
 ///
 /// The surface is checked and prepared once for the face's uses. The honest limit: with no
 /// `domain` a face of four uses on the four natural sides is read as the whole patch, and a
-/// sliver face whose trim lies within the proof cap of a natural side cannot be told apart from
+/// sliver face whose trim lies within the proof cap (10⁻³ mm) of a natural side cannot be told apart from
 /// exporter rounding.
 ///
 /// # Errors
@@ -499,8 +514,15 @@ pub fn boundary_covers(
             return Ok(None);
         }
         edges.push(u.edge);
-        let Some((gap, side)) =
-            covered_on(&on, u.curve, u.interval, u.tolerance, margin, max_tolerance)?
+        let Some((gap, side)) = covered_on(
+            &on,
+            u.curve,
+            u.interval,
+            u.tolerance,
+            margin,
+            max_tolerance,
+            BOUNDARY_GAP_CAP,
+        )?
         else {
             return Ok(None);
         };
@@ -757,7 +779,7 @@ fn knot_shift_bound(points: &[CPoint], knots: &[f64], degree: usize, delta: f64)
         weight.push(step * share);
     }
     let legs = weight.len();
-    let mut prefix = Vec::with_capacity(legs + 1);
+    let mut prefix = Vec::new();
     prefix.push(0.0_f64);
     for (i, w) in weight.iter().enumerate() {
         prefix.push(prefix.get(i)? + w);

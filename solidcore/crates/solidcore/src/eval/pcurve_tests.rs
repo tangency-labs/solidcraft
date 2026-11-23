@@ -3092,12 +3092,12 @@ fn a_long_cubic_patch_boundary_is_proved_on_an_interval_of_its_own() {
 fn a_boundary_gap_is_covered_only_where_the_closed_form_takes_the_line() {
     let surface = twisted(2.);
     let (face, margin, most) = (1e-6, SURFACE_GAP_MARGIN, 1.0);
-    for off in [0.0, 2e-5, 7.5e-5, 1e-3, 0.3] {
+    for off in [0.0, 2e-5, 7.5e-5, 1e-3, 0.016, 0.3] {
         for (from, to) in SIDES {
             for reversed in [false, true] {
                 let (a, b) = if reversed { (to, from) } else { (from, to) };
                 let edge = boundary_edge(2., a, b, off);
-                let proved = boundary_iso(&surface, &edge, [0., 1.], most / margin).unwrap();
+                let proved = boundary_iso(&surface, &edge, [0., 1.], BOUNDARY_GAP_CAP).unwrap();
                 let covered =
                     boundary_covered(&surface, &edge, [0., 1.], face, margin, most).unwrap();
                 assert_eq!(covered, proved.as_ref().map(|p| p.gap), "{off} {a:?} {b:?}");
@@ -3228,9 +3228,24 @@ fn metres_edge(off: f64) -> (Surface, Curve) {
 #[test]
 fn a_boundary_is_not_covered_at_a_tolerance_past_what_an_edge_is_honoured_at() {
     let (most, margin) = (2e3, 1.0);
+    // The metre-scale gaps here are far past the exporter-rounding cap, so the ceiling is asked
+    // with that cap lifted to what the tolerance alone allows.
+    let wide = |surface: &Surface, edge: &Curve, tolerance: f64, margin: f64, most: f64| {
+        covered_on(
+            &On::new(surface).unwrap(),
+            edge,
+            [0., 1.],
+            tolerance,
+            margin,
+            most,
+            f64::INFINITY,
+        )
+        .unwrap()
+        .map(|(gap, _)| gap)
+    };
     // An edge 400 mm off a patch 10 m across, covered at 900 mm: within the ceiling, and taken.
     let (surface, near) = metres_edge(400.0);
-    let found = boundary_covered(&surface, &near, [0., 1.], 900.0, margin, most).unwrap();
+    let found = wide(&surface, &near, 900.0, margin, most);
     assert!(
         found.is_some_and(|g| (400.0..401.0).contains(&g)),
         "{found:?}"
@@ -3241,22 +3256,29 @@ fn a_boundary_is_not_covered_at_a_tolerance_past_what_an_edge_is_honoured_at() {
     assert!(boundary_iso(&surface, &far, [0., 1.], most)
         .unwrap()
         .is_some());
-    assert_eq!(
-        boundary_covered(&surface, &far, [0., 1.], 3000.0, margin, 4e3).unwrap(),
-        None
-    );
+    assert_eq!(wide(&surface, &far, 3000.0, margin, 4e3), None);
     // The same edge at the ceiling itself is covered.
     assert!(
-        boundary_covered(&surface, &far, [0., 1.], 1000.0, margin, 4e3)
-            .unwrap()
-            .is_none(),
+        wide(&surface, &far, 1000.0, margin, 4e3).is_none(),
         "half of 1000 mm is under the 1200 mm gap"
     );
     let (surface, mid) = metres_edge(450.0);
-    assert!(
-        boundary_covered(&surface, &mid, [0., 1.], 1000.0, margin, 4e3)
-            .unwrap()
-            .is_some()
+    assert!(wide(&surface, &mid, 1000.0, margin, 4e3).is_some());
+}
+
+/// An edge 16 µm off a patch's boundary is another curve, not exporter rounding: no proof, no
+/// cover, however large the tolerance the file allows.
+#[test]
+fn an_edge_far_off_the_boundary_for_rounding_is_no_boundary() {
+    let surface = twisted(2.);
+    let edge = boundary_edge(2., [0., 0.], [1., 0.], 0.016);
+    assert_eq!(
+        boundary_iso(&surface, &edge, [0., 1.], BOUNDARY_GAP_CAP).unwrap(),
+        None
+    );
+    assert_eq!(
+        boundary_covered(&surface, &edge, [0., 1.], 0.01, SURFACE_GAP_MARGIN, 1.0).unwrap(),
+        None
     );
 }
 
@@ -3315,6 +3337,7 @@ fn a_side_outside_the_faces_box_is_no_boundary_of_it() {
             1e-6,
             SURFACE_GAP_MARGIN,
             1.0,
+            BOUNDARY_GAP_CAP,
         )
         .unwrap()
     };
