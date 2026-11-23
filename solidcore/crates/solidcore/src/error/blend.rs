@@ -24,7 +24,7 @@
 //! `upstream_status`); it never decides the type. The status a cause gives unless its
 //! site says otherwise is named in its doc.
 //!
-//! **The phrase causes** (the nine `phrase_causes!` lists, [`BlendFailure::Failed`] first) are the
+//! **The phrase causes** (the nine causes `phrase_causes!` lists, [`BlendFailure::Failed`] first) are the
 //! shape the blend sites were converted to before the record, some of them refusals not yet
 //! moved onto it. Each keeps the kind of its status, as before the record, and reads as
 //! neither a defect nor a refusal ([`BlendFailure::is_phrase`]); its phrase stays in its
@@ -1228,17 +1228,6 @@ impl core::fmt::Display for BlendFailure {
                 what.what()
             ),
             Self::SectionUnsupported(limit) => match limit {
-                SectionLimit::FaceNotNurbs => write!(
-                    f,
-                    "{}: a face is not a NURBS surface: its section of order 2 and up cannot be built or certified",
-                    self.class()
-                ),
-                SectionLimit::DegreeBelowOne => {
-                    write!(f, "{}: a curve or face is of degree 0", self.class())
-                }
-                SectionLimit::FaceWeightNotPositive => {
-                    write!(f, "{}: a face's weights are not positive", self.class())
-                }
                 SectionLimit::CurveWeightNotPositive => {
                     write!(f, "{}: a curve's weights are not positive", self.class())
                 }
@@ -1247,6 +1236,17 @@ impl core::fmt::Display for BlendFailure {
                     "{}: only a round of one radius between NURBS faces is certified by its definition",
                     self.class()
                 ),
+                SectionLimit::DegreeBelowOne => {
+                    write!(f, "{}: a curve or face is of degree 0", self.class())
+                }
+                SectionLimit::FaceNotNurbs => write!(
+                    f,
+                    "{}: a face is not a NURBS surface: its section of order 2 and up cannot be built or certified",
+                    self.class()
+                ),
+                SectionLimit::FaceWeightNotPositive => {
+                    write!(f, "{}: a face's weights are not positive", self.class())
+                }
                 SectionLimit::OrderPastSeries { order, most } => write!(
                     f,
                     "{}: the order {order} is past the most the series hold ({most})",
@@ -2661,8 +2661,7 @@ mod tests {
     }
 
     /// The causes (every enum of this module and of `error/blend/`) and every match on their
-    /// variants (`match self` and `match reason`, but for one with a `_` arm) are kept in name
-    /// order, one arm per pattern, so changes that each add a cause or its arms touch
+    /// variants (but for one with a `_` arm) are kept in name order, one arm per pattern, so changes that each add a cause or its arms touch
     /// different lines. Names compare as bytes.
     #[test]
     fn the_causes_and_the_arms_of_their_matches_stay_sorted_by_name() {
@@ -2673,8 +2672,18 @@ mod tests {
                 .unwrap_or(text.len());
             &text[..end]
         }
+        let blend = include_str!("blend.rs");
+        let modules: Vec<String> = blend
+            .lines()
+            .filter_map(|l| {
+                Some(format!(
+                    "blend/{}.rs",
+                    l.strip_prefix("mod ")?.strip_suffix(';')?
+                ))
+            })
+            .collect();
         let files = [
-            ("blend.rs", include_str!("blend.rs")),
+            ("blend.rs", blend),
             ("blend/band.rs", include_str!("blend/band.rs")),
             ("blend/cliff.rs", include_str!("blend/cliff.rs")),
             ("blend/corner.rs", include_str!("blend/corner.rs")),
@@ -2688,28 +2697,47 @@ mod tests {
             ("blend/solver.rs", include_str!("blend/solver.rs")),
             ("blend/weld.rs", include_str!("blend/weld.rs")),
         ];
+        let listed: Vec<&str> = files.iter().skip(1).map(|(file, _)| *file).collect();
+        assert_eq!(
+            listed, modules,
+            "every `error/blend/` module is listed here, in order"
+        );
         let mut enums = 0;
         let mut matches = 0;
         for (file, src) in files {
-            let lines: Vec<&str> = src.lines().collect();
+            // the library code: the tests' own matches are not causes
+            let lines: Vec<&str> = src.lines().take_while(|l| *l != "mod tests {").collect();
             for (i, line) in lines.iter().enumerate() {
                 let t = line.trim_start();
                 let indent = line.len() - t.len();
                 let is_enum = t.starts_with("pub enum ") && t.ends_with(" {");
-                let is_match = t == "match self {" || t == "match reason {";
+                let is_match =
+                    t.ends_with(" {") && (t.starts_with("match ") || t.contains("=> match "));
                 if !is_enum && !is_match {
                     continue;
                 }
                 let pad = " ".repeat(indent + 4);
                 let close = format!("{}}}", " ".repeat(indent));
+                let close_arm = format!("{close},");
                 let mut names = Vec::new();
                 let mut wildcard = false;
-                for l in lines[i + 1..].iter().take_while(|l| **l != close) {
+                for l in lines[i + 1..]
+                    .iter()
+                    .take_while(|l| **l != close && **l != close_arm)
+                {
                     let Some(rest) = l.strip_prefix(pad.as_str()) else {
                         continue;
                     };
                     assert!(
                         !(is_match && rest.starts_with("| ")),
+                        "{file}:{}: one arm per pattern, not `|` groups: {l}",
+                        i + 1
+                    );
+                    let pattern = rest.split("=>").next().unwrap_or_default();
+                    assert!(
+                        !(is_match
+                            && rest.starts_with(char::is_alphabetic)
+                            && pattern.contains(" | ")),
                         "{file}:{}: one arm per pattern, not `|` groups: {l}",
                         i + 1
                     );
@@ -2727,10 +2755,9 @@ mod tests {
                         names.push(name);
                     }
                 }
-                if wildcard {
+                if wildcard || names.is_empty() {
                     continue;
                 }
-                assert!(!names.is_empty(), "{file}:{}: no variants found", i + 1);
                 for w in names.windows(2) {
                     assert!(
                         w[0] < w[1] || (is_match && w[0] == w[1]),
@@ -2748,7 +2775,7 @@ mod tests {
             }
         }
         assert!(
-            enums >= 20 && matches >= 23,
+            enums >= 20 && matches >= 24,
             "{enums} enums and {matches} matches checked"
         );
     }
