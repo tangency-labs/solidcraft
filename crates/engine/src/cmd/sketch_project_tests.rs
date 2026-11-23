@@ -2755,7 +2755,7 @@ fn a_saved_offset_of_a_shelled_major_arc_reopens_with_its_sources() {
     use solidcraft_doc::{Document, FeatureKind, ProfileSel, WholeProfileBoundary};
     use solidcraft_sketch::{CurveKind, LinkKind, LinkSource, OffsetChain};
 
-    // The shelled arc of more than half a turn (through 55) does not reopen yet: #TBD.
+    // The shelled arc of more than half a turn (through 55) does not reopen yet: #21018.
     for through in [25.0_f64] {
         for spline in [false, true] {
             let (mut s, id, mut legacy, inner) = saved_shelled_cap_projection(through, spline);
