@@ -825,6 +825,8 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
         // A file waiting for its unit is asked on this page too (#15598): its Escape gives the
         // question up, and does not close the page behind it.
         && app.mesh_units.is_none()
+        // The recovery banner's Discard all asks on this page too: Escape cancels that question.
+        && !app.recovery_discard_all
         && ui.input_mut(|input| input.consume_key(egui::Modifiers::NONE, egui::Key::Escape))
     {
         app.home.open = false;
@@ -2066,6 +2068,14 @@ mod tests {
         h.frames(3);
         assert!(!h.app.recovery_discard_all);
         assert_eq!(h.app.recoverable.len(), 2, "Cancel keeps every design");
+        // Escape answers the question, and does not close File view behind it.
+        click_file(&mut h, "home:recovery:discard");
+        assert!(h.app.recovery_discard_all);
+        h.step(&serde_json::json!({"key": "Escape"})).unwrap();
+        h.frames(3);
+        assert!(!h.app.recovery_discard_all, "Escape cancels Discard all");
+        assert!(h.app.home.open, "Escape leaves File view open");
+        assert_eq!(h.app.recoverable.len(), 2);
         click_file(&mut h, "home:recovery:close");
         assert!(h.app.home.recovery_banner_hidden);
         assert!(crate::scenario::handle_at("home:recovery:recover").is_none(), "the banner is gone");
