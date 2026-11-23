@@ -302,12 +302,23 @@ pub(crate) struct Shortcut {
     pub replace: bool,
 }
 
-/// The two workspaces.
+/// The workspaces.
 #[derive(Clone, Copy, Debug, Deserialize, PartialEq)]
 #[serde(rename_all = "lowercase")]
 pub(crate) enum Workspace {
     Design,
     Render,
+    Drawing,
+}
+
+impl Workspace {
+    pub(crate) fn as_str(self) -> &'static str {
+        match self {
+            Workspace::Design => "design",
+            Workspace::Render => "render",
+            Workspace::Drawing => "drawing",
+        }
+    }
 }
 
 /// `ui.workspace {workspace?}`: without one, the workspace shown.
@@ -428,6 +439,8 @@ pub(crate) struct Action {
 /// `app.quit {force?}`.
 #[derive(Deserialize)]
 pub(crate) struct Quit {
+    #[serde(default = "yes")]
+    pub ask: bool,
     #[serde(default)]
     pub force: bool,
 }

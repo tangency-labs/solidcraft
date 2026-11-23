@@ -8,7 +8,7 @@
 //! only a lone round both of whose ends are section ends, so with the rim picked too the
 //! fillet was refused (`FilletErrorType::NoRoom`, 1001 in `cliff_overflow`). With WR-706 the
 //! section-ended round is trimmed at its creases and sewn in with the rim's round
-//! (`fillet_overflow_trim_at_creases`, WR-695).
+//! (WR-695, once `fillet_overflow_trim_at_creases`).
 //!
 //! Expected values are closed form, not the fork's: at tangency-labs/smlib 5e8c9c1 the fork
 //! leaves the corner arc unrounded (rim alone, corner alone and both remove 7.95867347,
@@ -60,11 +60,16 @@ const RIM: [f64; 3] = [0.0, -25.0, 2.0];
 /// A point on the R2 corner arc at x > 0.
 const CORNER: [f64; 3] = [3.414_213_56, 32.525_324_7, 2.0];
 /// What the rim's round removes alone (#2176's `the_neighbours_keep_their_rounds`, which
-/// pins the fork's 7.958672926831696: 18e96f1 and 63c7962, `SmApiFilletEdges` r 0.5).
+/// pinned the fork's 7.958672926831696 until #16735: 18e96f1 and 63c7962,
+/// `SmApiFilletEdges` r 0.5).
 const RIM_REMOVED: f64 = 7.958_672_926_831_696;
-/// What the rim's round removes alone here: 4.5e-11 more than the fork's
-/// [`RIM_REMOVED`], the solidcore-native exact spine.
-const RIM_MEASURED: f64 = 7.958_672_926_877_170_5;
+/// What the rim's round removes alone here, as #2176's test pins it: 1.5e-8 less than the
+/// fork's [`RIM_REMOVED`], which (as this with Runge-Kutta trim pieces before #16735,
+/// 7.9586729268771705) includes the volume integrator's leak through the round's tolerant edges. #2176's test checks the move
+/// is within that leak's bound and independent of the origin. Since the trim pieces integrate
+/// by Gauss-Kronrod (#14460) it is 1.5e-8 less (forced to accuracy 1e-12 Gauss-Kronrod gives it
+/// to 4.6e-13); with Runge-Kutta trim pieces it was 7.958672912139264, 3.0e-10 more.
+const RIM_MEASURED: f64 = 7.958_672_911_836_402;
 
 /// Every opt-in fix on (as in the issue).
 fn kernel() -> Kernel {
@@ -192,9 +197,8 @@ fn corner_arc_and_rim_round_together() {
 #[test]
 fn each_edge_alone_is_unchanged() {
     let (rim, faces) = removed(&[RIM]).unwrap();
-    assert!((rim - RIM_REMOVED).abs() <= 1e-9, "rim {rim}");
-    // pinned at the value measured here, 4.5e-11 more than the fork's `RIM_REMOVED`
-    // (the solidcore-native exact spine)
+    // pinned at the value measured here (`RIM_MEASURED`); it was within 1e-9 of the fork's
+    // `RIM_REMOVED` until the integrator stopped leaking through tolerant edges (#16735)
     assert!((rim - RIM_MEASURED).abs() <= 1e-12, "rim {rim}");
     assert_eq!(faces, 9);
     let (corner, faces) = removed(&[CORNER]).unwrap();

@@ -3,8 +3,8 @@
 //!
 //! Port of the SolidCraft fork's `SmRingFilletRemoval` (tangency-labs/smlib 52bfef0,
 //! `SmFilletRemoval.cpp` / `.h`, and `SmBrep::JoinShellsAtVertex`, `SmBrep.cpp`), as
-//! amended by 661f79c. WR-605; used by [`super::delete_fillet_face`] only with
-//! `Kernel::fixes.fillet_removal_takes_ring_fillets`.
+//! amended by 661f79c. WR-605; used by [`super::delete_fillet_face`] for every ring
+//! fillet (formerly only with `Kernel::fixes.fillet_removal_takes_ring_fillets`).
 //!
 //! | Rust                                    | Fork                                           |
 //! |-----------------------------------------|------------------------------------------------|
@@ -33,23 +33,32 @@
 //! - No recursion.
 
 use super::{
-    bspline_part, bspline_part_with_nurb, glue_edges, ner, null, own_edge_curve, set_vertex_point,
-    sm_err, OP,
+    bspline_part, bspline_part_with_nurb, glue_edges, ner, null, own_edge_curve, refused,
+    set_vertex_point, stage_failed, OP,
 };
 use crate::curve::curve::p8::CurveIntersectOptions;
-use crate::curve::curve::Curve;
+use crate::curve::curve::{Curve, CurveKind};
+use crate::error::blend::RemovalRefusal as R;
 use crate::error::{ignore_status, Result, SolidError};
+use crate::geom::extent1d::Extent1d;
 use crate::geom::extent2d::Extent2d;
 use crate::geom::geom_utility::p2::ContinuityType;
 use crate::geom::global_solver::SolverOperation;
 use crate::geom::object::NotifyOperation;
+use crate::geom::solution_array::SolutionType;
 use crate::geom::vector2d::Point2;
 use crate::kernel::Kernel;
 use crate::math::{max2, Point3, BIG_DOUBLE, EFF_ZERO, PI};
 use crate::nurbs::b_spline_curve_n_lib::TrimMode;
+use crate::nurbs::b_spline_surface::p1::SurfParamType;
 use crate::nurbs::b_spline_surface::BSplineSurface;
 use crate::nurbs::b_spline_surface_n_lib::p2::OrientType;
+use crate::surface::extend::Continuity;
+use crate::surface::side::BoxSide;
+use crate::surface::surface::exact_pieces::certified_lift;
+use crate::surface::surface::p2::SurfaceKind;
 use crate::surface::surface::p4::NoObject;
+use crate::surface::surface::Surface;
 use crate::topology::brep::p2::{self as brep_p2, NotifyArg};
 use crate::topology::brep::p3::{self as brep_p3, with_kernel_callbacks, DeleteFaceOptions};
 use crate::topology::edge::{self, SetCurveOptions};
@@ -71,9 +80,9 @@ use crate::topology::{shell, vertex, Brep, EdgeId, EdgeuseId, FaceId, VertexId};
 ///
 /// The sharp edge is the surface/surface intersection of the two tangent faces'
 /// surfaces within their natural domains, the closed curve nearest to the rails.
-/// Nothing is continued past a surface's domain, and an edge past its curve only along
-/// a line: otherwise [`RingFilletRemoval::remove_face`] fails with
-/// [`RingFilletRemoval::not_exact`]. Everything is computed before the B-rep changes.
+/// A seam that ends before the sharp edge is continued along its line or, for a circular
+/// isoparametric seam, along the supporting surface within its natural domain. Everything
+/// is computed before the B-rep changes.
 #[derive(Debug, Clone)]
 pub struct RingFilletRemoval {
     /// `m_pFaceToDelete`.
@@ -94,7 +103,7 @@ pub struct RingFilletRemoval {
     side_at_high: [bool; 2],
     /// `m_aSideParams`: where each side edge reaches the new vertex, on its curve.
     side_params: [f64; 2],
-    /// `m_aSideCurves`: a side edge's line continued to the new vertex (`None`: its
+    /// `m_aSideCurves`: a side edge's curve continued to the new vertex (`None`: its
     /// curve reaches it).
     side_curves: [Option<Curve>; 2],
     /// `m_aSideUVs[side][k]`: the side edge's UV trims run on to the new vertex.
@@ -121,6 +130,209 @@ fn edge_faces(b: &Brep, e: EdgeId) -> Result<Vec<FaceId>> {
 /// `SM_DEG2RAD`.
 fn deg_to_rad(deg: f64) -> f64 {
     deg * (PI / 180.0)
+}
+
+fn is_circle(curve: &Curve) -> bool {
+    matches!(curve.kind(), CurveKind::Ellipse(ellipse) if ellipse.is_circle())
+}
+
+/// An owned affine seam UV supplies the correspondence between a circular isocurve
+/// and the original edge. The two sides of a periodic seam can have different fixed UVs.
+struct SeamIso {
+    curve: Curve,
+    fixed_axis: SurfParamType,
+    v0: f64,
+    v1: f64,
+    uv_interval: Extent1d,
+}
+
+impl SeamIso {
+    fn from_trim(k: &Kernel, surface: &Surface, trim: &Curve, tol: f64) -> Result<Option<Self>> {
+        let Some(part) = bspline_part_with_nurb(trim)? else {
+            return Ok(None);
+        };
+        // Equal homogeneous weights cancel exactly, including on STEP/record splines.
+        if part.degree()? != 1
+            || part.number_control_points()? != 2
+            || (part.is_rational()?
+                && !matches!(part.control_points()?, [a, b] if a.w.is_finite() && a.w != 0.0 && a.w == b.w))
+        {
+            return Ok(None);
+        }
+        let ends = part.ends()?;
+        let (start, end) = (ends.start, ends.end);
+        let domain = surface.natural_uv_domain_with_nurb(k)?;
+        let (fixed_axis, fixed, fixed_span, v0, v1, varying) = if start.x == end.x {
+            (
+                SurfParamType::U,
+                start.x,
+                domain.u_interval(),
+                start.y,
+                end.y,
+                domain.v_interval(),
+            )
+        } else if start.y == end.y {
+            (
+                SurfParamType::V,
+                start.y,
+                domain.v_interval(),
+                start.x,
+                end.x,
+                domain.u_interval(),
+            )
+        } else {
+            return Ok(None);
+        };
+        if v0 == v1
+            || !(v1 - v0).is_finite()
+            || !fixed.is_finite()
+            || !fixed_span.contains_value(fixed, 0.0)
+        {
+            return Ok(None);
+        }
+        let curve = surface
+            .create_iso_parametric_curve(k, fixed_axis, fixed, tol, None, false)?
+            .curve;
+        if !is_circle(&curve) || curve.natural_interval() != varying {
+            return Ok(None);
+        }
+        Ok(Some(Self {
+            curve,
+            fixed_axis,
+            v0,
+            v1,
+            uv_interval: part.natural_interval(),
+        }))
+    }
+
+    fn edge_parameter(&self, v: f64) -> f64 {
+        self.uv_interval
+            .evaluate((v - self.v0) / (self.v1 - self.v0))
+    }
+
+    /// The arc missing from this end of a meridian or tube circle, measured on the
+    /// circle from its natural boundary in the direction of the selected edge end.
+    fn missing_arc(
+        &self,
+        k: &Kernel,
+        point: Point3,
+        at_high: bool,
+        tol: f64,
+    ) -> Result<Option<(BoxSide, f64)>> {
+        let varying = self.curve.natural_interval();
+        let drop = self.curve.drop_point(
+            k,
+            &varying,
+            point,
+            None,
+            tol,
+            None,
+            SolverOperation::Minimize,
+        )?;
+        if !drop.success {
+            return Err(stage_failed());
+        }
+        if drop.distance <= tol {
+            return Ok(None);
+        }
+        let high = at_high == (self.v1 > self.v0);
+        let t = if high { varying.max() } else { varying.min() };
+        let evaluated = self.curve.evaluate(k, t, 1, high, true)?;
+        let [start, derivative, ..] = evaluated.as_slice() else {
+            return Err(stage_failed());
+        };
+        let CurveKind::Ellipse(circle) = self.curve.kind() else {
+            return Err(stage_failed());
+        };
+        let center = circle.position().origin();
+        let radius = circle.radius();
+        let radial = (*start - center).unitize()?;
+        let forward = if high { *derivative } else { -*derivative }.unitize()?;
+        let target = point - center;
+        if (target.length() - radius).abs() > tol || target.dot(radial.cross(forward)).abs() > tol {
+            return Err(refused(R::SeamTrimMissesNewVertex));
+        }
+        let angle = target.dot(forward).atan2(target.dot(radial));
+        if angle <= 0.0 || !angle.is_finite() {
+            return Err(refused(R::SeamTrimMissesNewVertex));
+        }
+        let side = match (self.fixed_axis == SurfParamType::U, high) {
+            (true, false) => BoxSide::VMin,
+            (true, true) => BoxSide::VMax,
+            (false, false) => BoxSide::UMin,
+            (false, true) => BoxSide::UMax,
+        };
+        // Include the requested vertex in the search interval. Its eventual distance
+        // and the entire new pair of pcurves are checked at the original tolerance.
+        Ok(Some((side, radius * angle + tol)))
+    }
+}
+
+/// Replacing geometry invalidates the face's edge uses. The extension kept the old
+/// parameters, so each existing pcurve, including either side of a seam, still applies.
+fn install_extended_surface(
+    k: &mut Kernel,
+    b: &mut Brep,
+    f: FaceId,
+    surface: Surface,
+) -> Result<()> {
+    let domain = crate::topology::face::p2::uv_domain(b, f)?;
+    let mut trims = Vec::new();
+    for eu in crate::topology::face::p4::upward_edgeuses(b, f, false, None)? {
+        if let (Some(trim), Some(owner)) = eu1::uv_trim_curve(b, eu)? {
+            trims.push((owner, trim.clone_for_evaluation()?));
+        }
+    }
+    let owner = b.owner_identity(crate::error::EntityRef::Face(f));
+    with_kernel_callbacks(k, b, |k, b, env| {
+        brep_p2::replace_surface(
+            k,
+            b,
+            env,
+            f,
+            surface,
+            owner,
+            brep_p2::OldSurface::Delete,
+            false,
+        )
+    })?;
+    crate::topology::face::p2::set_uv_domain(b, f, &domain)?;
+    for (eu, trim) in trims {
+        eu1::set_uv_trim_curve(b, eu, UvTrimCurveArg::New(Box::new(trim)), 0.0, true, None)?;
+    }
+    Ok(())
+}
+
+/// Continue a straight seam along its end span, using the rail gap to bound the search.
+pub(super) fn extend_line_seam(
+    k: &Kernel,
+    curve: &Curve,
+    at_high: bool,
+    reach: f64,
+    tol: f64,
+) -> Result<Curve> {
+    let ivl = curve.natural_interval();
+    let end = if at_high { ivl.max() } else { ivl.min() };
+    let pv = curve.evaluate(k, end, 1, true, false)?;
+    let [_, d1, ..] = pv.as_slice() else {
+        return Err(null("short evaluation"));
+    };
+    let speed = d1.length();
+    if speed.is_nan() || speed <= EFF_ZERO {
+        return Err(stage_failed());
+    }
+    let reach_param = (reach + 10.0 * tol) / speed;
+    let far = if at_high {
+        end + reach_param
+    } else {
+        end - reach_param
+    };
+    let part = ner(bspline_part_with_nurb(curve)?)?;
+    Ok(Curve::from(ner(part.create_extended_curve(
+        far,
+        ContinuityType::CInfinity,
+        true,
+    )?)?))
 }
 
 impl RingFilletRemoval {
@@ -243,7 +455,7 @@ impl RingFilletRemoval {
         let tangency_tol_deg = 2.0; // as SmFilletRemoval::CollectFilletTopology
         let fil_face = ner(self.face_to_delete)?;
         if !Self::is_ring(k, b, Some(fil_face), tangency_tol_deg)? {
-            return Err(sm_err());
+            return Err(refused(R::NotARing));
         }
 
         let edges = crate::topology::face::p4::edges(b, fil_face, None, false, None)?;
@@ -255,10 +467,10 @@ impl RingFilletRemoval {
                 continue;
             }
             let [f0, f1] = faces.as_slice() else {
-                return Err(sm_err());
+                return Err(refused(R::EdgeNotBetweenTwoFaces));
             };
             if rail > 1 {
-                return Err(sm_err());
+                return Err(refused(R::MoreThanTwoRails));
             }
             let other = if *f0 == fil_face { *f1 } else { *f0 };
             *self.rails.get_mut(rail).ok_or_else(|| null("rail index"))? = Some(e);
@@ -273,13 +485,13 @@ impl RingFilletRemoval {
             || self.tan_faces[0] == Some(fil_face)
             || self.tan_faces[1] == Some(fil_face)
         {
-            return Err(sm_err());
+            return Err(refused(R::RailsNotBetweenTwoFaces));
         }
         for ii in 0..2 {
             let surface = crate::topology::face::p2::surface(b, self.tan_face(ii)?)?;
             match surface {
                 Some(s) if s.is_kind_of(BSplineSurface::TYPE)? => {}
-                _ => return Err(sm_err()),
+                _ => return Err(refused(R::TangentFaceNotBSpline)),
             }
             let v = ner(edge::start_vertex(b, self.rail(ii)?)?)?;
             *self
@@ -295,7 +507,7 @@ impl RingFilletRemoval {
             if !((v0 == self.vertices[0] && v1 == self.vertices[1])
                 || (v0 == self.vertices[1] && v1 == self.vertices[0]))
             {
-                return Err(sm_err());
+                return Err(refused(R::SeamDoesNotJoinRails));
             }
         }
 
@@ -314,7 +526,7 @@ impl RingFilletRemoval {
                     || faces.first() != Some(&tan_face)
                     || edge::is_closed(b, e)?
                 {
-                    return Err(sm_err());
+                    return Err(refused(R::RailVertexHasOtherEdges));
                 }
                 let at_high = edge::start_vertex(b, e)? != Some(v);
                 *self
@@ -339,12 +551,16 @@ impl RingFilletRemoval {
     fn intersect_tangent_surfaces(&mut self, k: &Kernel, b: &mut Brep) -> Result<()> {
         let tol = self.tol_3d;
         let ssi = {
-            let surf0 = ner(crate::topology::face::p2::surface(b, self.tan_face(0)?)?)?;
-            let surf1 = ner(crate::topology::face::p2::surface(b, self.tan_face(1)?)?)?;
+            // (not upstream, #18575) copies without their faces (the copy constructor resets
+            // the owner): the sharp edge lies where the fillet was, off both faces, so the
+            // solve is of the untrimmed surfaces, and a face-owned surface's cache made
+            // without its face is not ported
+            let surf0 = ner(crate::topology::face::p2::surface(b, self.tan_face(0)?)?)?.clone();
+            let surf1 = ner(crate::topology::face::p2::surface(b, self.tan_face(1)?)?)?.clone();
             surf0.global_surface_intersect(
                 k,
                 &surf0.natural_uv_domain_with_nurb(k)?,
-                surf1,
+                &surf1,
                 &surf1.natural_uv_domain_with_nurb(k)?,
                 [true, true],
                 Some(tol / 4.0),
@@ -380,7 +596,7 @@ impl RingFilletRemoval {
                     SolverOperation::Minimize,
                 )?;
                 if !d.success {
-                    return Err(sm_err());
+                    return Err(stage_failed());
                 }
                 chord = max2(chord, d.distance);
             }
@@ -390,6 +606,8 @@ impl RingFilletRemoval {
         // The closed curve every rail sample lies within reach of, the nearest.
         let mut found = curves_3d.len();
         let mut best = BIG_DOUBLE;
+        // a drop that stopped proves nothing about the distance (#15034 rule 5)
+        let mut undecided = false;
         for (cc, c) in curves_3d.iter().enumerate() {
             let Some(c) = c else {
                 continue;
@@ -415,6 +633,7 @@ impl RingFilletRemoval {
                     worst = if d.success {
                         max2(worst, d.distance)
                     } else {
+                        undecided = true;
                         BIG_DOUBLE
                     };
                 }
@@ -425,10 +644,9 @@ impl RingFilletRemoval {
             }
         }
         let Some(mut sharp) = curves_3d.get_mut(found).and_then(Option::take) else {
-            // The surfaces don't meet near the fillet within their domains: the sharp
-            // edge would lie on a continuation of one of them.
-            self.not_exact = true;
-            return Err(sm_err());
+            // (an undecided drop proves no inexactness)
+            self.not_exact = !undecided;
+            return Err(no_sharp_curve(undecided));
         };
         if bspline_part(&sharp).is_none() {
             return Err(SolidError::blend_missing(
@@ -457,7 +675,7 @@ impl RingFilletRemoval {
                 SolverOperation::Minimize,
             )?;
             if !d.success {
-                return Err(sm_err());
+                return Err(stage_failed());
             }
             // (SmBSplineCurve's default: exact tangents)
             let qv = sharp.evaluate(k, d.parameter, 1, true, false)?;
@@ -480,7 +698,7 @@ impl RingFilletRemoval {
             let Some(side) = self.side_edge(ii) else {
                 continue;
             };
-            let mut side_curve = ner(edge::curve(b, side)?)?.clone();
+            let side_curve = ner(edge::curve(b, side)?)?.clone();
             if bspline_part(&side_curve).is_none() {
                 return Err(SolidError::blend_missing(
                     OP,
@@ -497,75 +715,63 @@ impl RingFilletRemoval {
                 &none,
             )?;
             if solutions.is_empty() {
-                // The seam's curve stops short of the sharp edge (the fillet trimmed it):
-                // a line runs on along itself (its end span continued, the same line),
-                // anything else would have to be continued past its curve.
-                if !side_curve.is_linear(k, tol, false)?.linear {
-                    self.not_exact = true;
-                    return Err(sm_err());
-                }
-                let side_ivl = side_curve.natural_interval();
-                let at_high = self.side_at_high(ii)?;
-                let end = if at_high {
-                    side_ivl.max()
+                let linear = side_curve.is_linear(k, tol, false)?.linear;
+                let (longer, search) = if linear {
+                    let longer =
+                        extend_line_seam(k, &side_curve, self.side_at_high(ii)?, reach, tol)?;
+                    let search = longer.natural_interval();
+                    (longer, search)
+                } else if is_circle(&side_curve) {
+                    Self::extend_circular_seam(
+                        k,
+                        b,
+                        self.tan_face(ii)?,
+                        side,
+                        self.side_at_high(ii)?,
+                        tol,
+                    )?
                 } else {
-                    side_ivl.min()
+                    return Err(curved_seam_without_crossing());
                 };
-                // (SmBSplineCurve's default: exact tangents)
-                let pv = side_curve.evaluate(k, end, 1, true, false)?;
-                let [_, d1, ..] = pv.as_slice() else {
-                    return Err(null("short evaluation"));
-                };
-                let speed = d1.length();
-                // (`!(dSpeed > SM_EFF_ZERO)`: a NaN speed fails too)
-                if speed.is_nan() || speed <= EFF_ZERO {
-                    return Err(sm_err());
+                solutions = sharp.global_curve_intersect(k, &ivl, &longer, &search, tol, &none)?;
+                if solutions.is_empty() {
+                    // the global intersector finding no crossing is no proof that the curve
+                    // misses the sharp edge (#15034 rule 5)
+                    return Err(stage_failed());
                 }
-                let reach_param = (reach + 10.0 * tol) / speed;
-                let far = if at_high {
-                    end + reach_param
-                } else {
-                    end - reach_param
-                };
-                let part = ner(bspline_part_with_nurb(&side_curve)?)?;
-                let longer = Curve::from(ner(part.create_extended_curve(
-                    far,
-                    ContinuityType::CInfinity,
-                    true,
-                )?)?);
+                if !linear
+                    && solutions
+                        .as_slice()
+                        .iter()
+                        .any(|s| s.solution_type == SolutionType::RangeOfValues)
+                {
+                    return Err(refused(R::SeamCrossesSharpEdgeTwice));
+                }
                 *self
                     .side_curves
                     .get_mut(ii)
-                    .ok_or_else(|| null("side index"))? = Some(longer.clone());
-                side_curve = longer;
-                solutions = sharp.global_curve_intersect(
-                    k,
-                    &ivl,
-                    &side_curve,
-                    &side_curve.natural_interval(),
-                    tol,
-                    &none,
-                )?;
-                if solutions.is_empty() {
-                    return Err(sm_err());
-                }
+                    .ok_or_else(|| null("side index"))? = Some(longer);
             }
             // One crossing (a closed curve starting there meets it at both its ends).
-            let first = solutions.get(0).ok_or_else(sm_err)?;
+            let Some(first) = solutions.get(0) else {
+                return Err(stage_failed());
+            };
             let (first_t, first_side_t) = (first.start.parameters[0], first.start.parameters[1]);
             let at = sharp.evaluate_point(k, first_t)?;
             for kk in 1..solutions.len() {
-                let s = solutions.get(kk).ok_or_else(sm_err)?;
+                let Some(s) = solutions.get(kk) else {
+                    return Err(stage_failed());
+                };
                 let other = sharp.evaluate_point(k, s.start.parameters[0])?;
                 if other.distance(at) > tol {
-                    return Err(sm_err());
+                    return Err(refused(R::SeamCrossesSharpEdgeTwice));
                 }
             }
             if have_vertex {
                 // Both tangent faces have a seam there: they must cross the sharp edge
                 // together.
                 if at.distance(self.new_vertex) > tol {
-                    return Err(sm_err());
+                    return Err(refused(R::SeamsCrossApart));
                 }
             } else {
                 self.new_vertex = at;
@@ -592,8 +798,8 @@ impl RingFilletRemoval {
                     "the sharp curve's B-spline form",
                 ));
             }
-            let mut after_ivl = crate::geom::extent1d::Extent1d::from_min_max(start_at, ivl.max());
-            let mut before_ivl = crate::geom::extent1d::Extent1d::from_min_max(ivl.min(), start_at);
+            let mut after_ivl = Extent1d::from_min_max(start_at, ivl.max());
+            let mut before_ivl = Extent1d::from_min_max(ivl.min(), start_at);
             sharp.trim(k, &mut after_ivl, TrimMode::Notify)?;
             before.trim(k, &mut before_ivl, TrimMode::Notify)?;
             crate::blend::fillet_corner::p3::join_with_gap(
@@ -607,6 +813,138 @@ impl RingFilletRemoval {
         }
         self.new_edge_curve = Some(sharp);
         Ok(())
+    }
+
+    /// A STEP sphere may end exactly at the fillet rail. Continue its meridian (or
+    /// a torus's tube) without moving any of the face's existing UV parameters.
+    pub(super) fn extend_circular_support(
+        k: &mut Kernel,
+        b: &mut Brep,
+        side: EdgeId,
+        ends: [Option<Point3>; 2],
+        tol: f64,
+    ) -> Result<()> {
+        if !edge::curve(b, side)?.is_some_and(is_circle) {
+            return Ok(());
+        }
+        let edge_uses = b.edge(side)?.edgeuses.clone();
+        for f in edge_faces(b, side)? {
+            let tol = tol
+                .min(crate::topology::face::p2::tolerance(b, f)?)
+                .min(edge::tolerance(b, side)?);
+            for (at_high, point) in [false, true].into_iter().zip(ends) {
+                let Some(point) = point else { continue };
+                let surface = ner(crate::topology::face::p2::surface(b, f)?)?;
+                let swap = match surface.kind() {
+                    SurfaceKind::Sphere(s) => s.base().swap_uv(),
+                    SurfaceKind::Torus(t) => t.base().swap_uv(),
+                    _ => break,
+                };
+                let mut extension = None;
+                for &eu in &edge_uses {
+                    if eu1::face(b, eu)? != Some(f) {
+                        continue;
+                    }
+                    if let Some(trim) = eu1::uv_trim_curve_pointer(b, eu)? {
+                        if let Some(iso) = SeamIso::from_trim(k, surface, trim, tol)? {
+                            extension = iso.missing_arc(k, point, at_high, tol)?;
+                            break;
+                        }
+                    }
+                }
+                let Some((side, distance)) = extension else {
+                    continue;
+                };
+                // Every meridian or tube has the same radius as the one measured at
+                // the middle of the domain by the parameter-preserving extender.
+                if side.is_u() != swap {
+                    return Err(curved_seam_without_crossing());
+                }
+                let grown = surface.extended_sides_keeping_parameters(
+                    k,
+                    &[side],
+                    Continuity::Natural,
+                    distance,
+                )?;
+                let deviation = grown.source + grown.extension;
+                if !deviation.is_finite() || deviation > tol {
+                    return Err(stage_failed());
+                }
+                let SurfaceKind::BSpline(net) = grown.surface.kind() else {
+                    return Err(stage_failed());
+                };
+                // Analytic recognition keeps the certified extended net, its knots
+                // and its UVs; rebuilding the canonical sphere would change the old UVs.
+                let continued = match surface.kind() {
+                    SurfaceKind::Sphere(_) => {
+                        crate::surface::sphere::Sphere::is_nurb_surface_sphere(k, net, 1.0)?
+                            .map(Surface::from)
+                    }
+                    SurfaceKind::Torus(_) => {
+                        crate::surface::torus::Torus::is_nurb_surface_torus(k, net, 1.0)?
+                            .map(Surface::from)
+                    }
+                    _ => None,
+                }
+                .ok_or_else(stage_failed)?;
+                install_extended_surface(k, b, f, continued)?;
+            }
+        }
+        Ok(())
+    }
+
+    /// Lift the seam's affine UV line on its support, keeping the edge's parameter.
+    /// Search only beyond the end at the fillet and within the support's natural domain.
+    pub(super) fn extend_circular_seam(
+        k: &Kernel,
+        b: &Brep,
+        face: FaceId,
+        side: EdgeId,
+        at_high: bool,
+        tol: f64,
+    ) -> Result<(Curve, Extent1d)> {
+        let surface = ner(crate::topology::face::p2::surface(b, face)?)?;
+        if !matches!(
+            surface.kind(),
+            SurfaceKind::Sphere(_) | SurfaceKind::Torus(_)
+        ) {
+            return Err(curved_seam_without_crossing());
+        }
+        let edge_ivl = edge::interval(b, side)?;
+        for &eu in &b.edge(side)?.edgeuses {
+            if eu1::face(b, eu)? != Some(face) {
+                continue;
+            }
+            let (uv, owner) = eu1::uv_trim_curve(b, eu)?;
+            let Some(uv) = uv.filter(|_| owner == Some(eu)) else {
+                continue;
+            };
+            let Some(iso) = SeamIso::from_trim(k, surface, uv, tol)? else {
+                continue;
+            };
+            let varying = iso.curve.natural_interval();
+            let ta = iso.edge_parameter(varying.min());
+            let tb = iso.edge_parameter(varying.max());
+            if !ta.is_finite() || !tb.is_finite() {
+                return Err(stage_failed());
+            }
+            let extended = Extent1d::from_min_max(ta, tb);
+            let search = if at_high {
+                Extent1d::from_raw(edge_ivl.max(), extended.max())
+            } else {
+                Extent1d::from_raw(extended.min(), edge_ivl.min())
+            };
+            if search.length() <= 0.0 || !edge_ivl.is_contained_by(&extended, 0.0) {
+                continue;
+            }
+            let mut arc = iso.curve;
+            if iso.v1 < iso.v0 {
+                arc.reverse_parameterization(k, &varying)?;
+            }
+            arc.edit_parameterization_exactly(k, &extended)?;
+            return Ok((arc, search));
+        }
+        Err(curved_seam_without_crossing())
     }
 
     /// `FindSideEdgeExtension(lWhichSide)`: a tangent face's seam at a rail's vertex runs
@@ -627,6 +965,29 @@ impl RingFilletRemoval {
             .get(which_side)
             .ok_or_else(|| null("side index"))?;
 
+        let at_high = self.side_at_high(which_side)?;
+        let circular = self
+            .side_curves
+            .get_mut(which_side)
+            .and_then(Option::as_mut)
+            .filter(|arc| is_circle(arc));
+        let seam_ivl = if let Some(arc) = circular {
+            let old = edge::interval(b, side)?;
+            let mut span = if at_high {
+                Extent1d::from_min_max(old.min(), new_t)
+            } else {
+                Extent1d::from_min_max(new_t, old.max())
+            };
+            let intended = span;
+            arc.trim(k, &mut span, TrimMode::Notify)?;
+            if span != intended {
+                arc.edit_parameterization_exactly(k, &intended)?;
+            }
+            Some(intended)
+        } else {
+            None
+        };
+
         let uses = b.edge(side)?.edgeuses.clone();
         let mut pair = 0usize;
         for eu in uses {
@@ -638,7 +999,7 @@ impl RingFilletRemoval {
                 continue;
             }
             if pair > 1 {
-                return Err(sm_err());
+                return Err(refused(R::SeamHasMoreThanTwoTrims));
             }
             let extended = if uv.natural_interval().contains_value(new_t, 0.0) {
                 if bspline_part(uv).is_none() {
@@ -659,6 +1020,16 @@ impl RingFilletRemoval {
 
             // It must reach the face's surface at the new vertex.
             let uv_at = extended.evaluate_point(k, new_t)?;
+            let at = surf.evaluate_point(k, Point2::new(uv_at.x, uv_at.y))?;
+            if at.distance(self.new_vertex) > tol {
+                return Err(refused(R::SeamTrimMissesNewVertex));
+            }
+            if let Some(span) = seam_ivl {
+                // Both sides of the seam must lift to the same 3D edge over its entire trim.
+                let arc = ner(self.side_curves.get(which_side).and_then(Option::as_ref))?;
+                let seam_tol = tol.min(edge::tolerance(b, side)?);
+                certified_lift(k, surf, &extended, arc, span, seam_tol)?;
+            }
             let slot = self
                 .side_uvs
                 .get_mut(which_side)
@@ -671,14 +1042,9 @@ impl RingFilletRemoval {
                 .and_then(|s| s.get_mut(pair))
                 .ok_or_else(|| null("side index"))? = Some(eu);
             pair += 1;
-
-            let at = surf.evaluate_point(k, Point2::new(uv_at.x, uv_at.y))?;
-            if at.distance(self.new_vertex) > tol {
-                return Err(sm_err());
-            }
         }
         if pair == 0 {
-            return Err(sm_err());
+            return Err(refused(R::SeamHasNoOwnTrim));
         }
         Ok(())
     }
@@ -724,8 +1090,8 @@ impl RingFilletRemoval {
                 ignore_status(side_ivl.set_min_max(side_param, side_ivl.max()))?;
             }
             if let Some(curve) = self.side_curves.get_mut(ii).and_then(Option::take) {
-                // Its line continued (the old part keeps its parameters); its UV trims go
-                // with the old curve and are replaced below.
+                // Its curve continued (the old part keeps its parameters); its UV trims
+                // go with the old curve and are replaced below.
                 install_curve(k, b, side, Some(curve))?;
             }
             edge::set_interval(b, side, &side_ivl)?;
@@ -850,7 +1216,7 @@ fn install_curve(k: &mut Kernel, b: &mut Brep, e: EdgeId, curve: Option<Curve>) 
 pub fn join_shells_at_vertex(k: &mut Kernel, b: &mut Brep, v: Option<VertexId>) -> Result<()> {
     let v = ner(v)?;
     if !b.editing_enabled() {
-        return Err(sm_err());
+        return Err(stage_failed());
     }
 
     let mut shells: Vec<Option<crate::topology::ShellId>> =
@@ -880,4 +1246,57 @@ pub fn join_shells_at_vertex(k: &mut Kernel, b: &mut Brep, v: Option<VertexId>) 
         }
     }
     Ok(())
+}
+
+/// A curved seam with no crossing and no proved continuation: a stage failure. The global
+/// intersector finding no crossing proves nothing about the seam stopping short, so nothing
+/// is proved inexact either (#15034 rule 5).
+#[track_caller]
+fn curved_seam_without_crossing() -> SolidError {
+    stage_failed()
+}
+
+/// Why no candidate curve is the sharp edge: a stage failure when a drop onto a candidate
+/// stopped (`undecided`), which proves nothing about it (#15034 rule 5); otherwise
+/// [`R::TangentSurfacesDoNotMeet`]: the surfaces don't meet near the fillet within their
+/// domains, so the sharp edge would lie on a continuation of one of them.
+#[track_caller]
+fn no_sharp_curve(undecided: bool) -> SolidError {
+    if undecided {
+        stage_failed()
+    } else {
+        refused(R::TangentSurfacesDoNotMeet)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::error::blend::BlendFailure;
+
+    /// A drop onto a candidate curve that stopped proves nothing: no sharp curve is then a
+    /// stage failure, never the refusal (#15034 rule 5).
+    #[test]
+    fn no_sharp_curve_is_refused_only_when_every_drop_converged() {
+        let undecided = no_sharp_curve(true);
+        assert_eq!(undecided.blend_failure(), Some(&BlendFailure::StageFailed));
+        assert!(undecided.is_defect() && !undecided.is_refusal());
+        let refused = no_sharp_curve(false);
+        assert_eq!(
+            refused.blend_failure(),
+            Some(&BlendFailure::RemovalRefused(R::TangentSurfacesDoNotMeet))
+        );
+        assert!(refused.is_refusal() && !refused.is_defect());
+        assert_eq!(undecided.upstream_status(), refused.upstream_status());
+    }
+
+    /// A curved seam with no crossing found is not proved to stop short of the sharp edge:
+    /// a stage failure, never a refusal.
+    #[test]
+    fn a_curved_seam_without_a_crossing_is_a_stage_failure() {
+        let e = curved_seam_without_crossing();
+        assert_eq!(e.blend_failure(), Some(&BlendFailure::StageFailed));
+        assert!(e.is_defect() && !e.is_refusal());
+        assert_eq!(e.upstream_status(), Some(crate::error::SM_ERR));
+    }
 }

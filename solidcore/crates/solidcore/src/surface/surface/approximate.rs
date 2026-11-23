@@ -66,7 +66,8 @@
 
 use std::borrow::Cow;
 
-use crate::error::{ignore_or_pass_on, ignored_or_pass_on, Result, SolidError};
+use crate::error::surface::SurfaceFailure;
+use crate::error::{Result, SolidError};
 use crate::geom::extent1d::Extent1d;
 use crate::geom::extent2d::Extent2d;
 use crate::geom::vector2d::Point2;
@@ -115,8 +116,7 @@ pub struct ApproximatedSurface {
     /// `rpNewBSplineSurface`: the approximating surface with the fewest subdivisions
     /// within the tolerance; `None` after a failure, which only
     /// [`Surface::approximate_surface_ignoring_status`] returns as a result (the
-    /// finest allowed subdivision still out of the tolerance, among others), and when
-    /// the copy of `just_copy_b_splines` fails with `query_statuses_pass_on` off.
+    /// finest allowed subdivision still out of the tolerance, among others).
     pub surface: Option<Surface>,
     /// `dAchievedTol`: the largest sampled distance of the last test (`0` for a copied
     /// B-spline, `-1` when nothing was tested).
@@ -218,13 +218,12 @@ impl Surface {
 
         // init output
         *achieved_tol = -1.0;
-        // with the opt-in fix the statuses SMLib drops here are passed on
+        // the statuses SMLib drops here are passed on, as the fork does
         // (WR-663; tangency-labs/smlib 21dcf69)
-        let pass = k.fixes.query_statuses_pass_on;
 
         // low work - when asked, just copy BSplines
         if just_copy_b_splines && self.is_kind_of(B_SPLINE_SURFACE_TYPE)? {
-            let surface = ignored_or_pass_on(self.copy(k), pass)?;
+            let surface = Some(self.copy(k)?);
             *achieved_tol = 0.0;
             return Ok(surface);
         }
@@ -283,10 +282,6 @@ impl Surface {
             ControlPointForm::NonRational
         };
 
-        // Nurb locals: upstream's arrays live across the iterations, so a failed
-        // `GetKnots` (no NURB) leaves the previous round's knots
-        let mut u_knots: Vec<f64> = Vec::new();
-        let mut v_knots: Vec<f64> = Vec::new();
         let mut more_knots: Vec<f64> = Vec::new();
 
         let mut testing_u_dir = false; // We'll toggle this each big iteration.
@@ -304,18 +299,20 @@ impl Surface {
 
             // no work - high degree surfaces
             if u_deg > 3 || v_deg > 3 {
-                return Err(SolidError::surface_failed(
+                return Err(SolidError::surface(
                     OP,
-                    "the surface's degree is above cubic",
+                    SurfaceFailure::Defect {
+                        why: "the approximation's surface is above cubic, but its starter is at most cubic, every pass elevates it to cubic and knot insertion keeps the degree",
+                    },
                 ));
             }
 
-            // elevate surface degrees to 3 (statuses ignored)
+            // elevate surface degrees to 3 (statuses passed on, fork 21dcf69)
             if u_deg < 3 {
-                ignored_or_pass_on(approx_surf.degree_elevate(SurfParamType::U, 3), pass)?;
+                approx_surf.degree_elevate(SurfParamType::U, 3)?;
             }
             if v_deg < 3 {
-                ignored_or_pass_on(approx_surf.degree_elevate(SurfParamType::V, 3), pass)?;
+                approx_surf.degree_elevate(SurfParamType::V, 3)?;
             }
 
             u_deg = approx_surf.degree(SurfParamType::U);
@@ -345,18 +342,9 @@ impl Surface {
                 }
             }
 
-            // get knots of the subdivided surface (statuses ignored: without NURB the
-            // arrays keep their values)
-            if let Some((knots, _mult)) =
-                ignored_or_pass_on(approx_surf.knots(SurfParamType::U, None), pass)?
-            {
-                u_knots = knots;
-            }
-            if let Some((knots, _mult)) =
-                ignored_or_pass_on(approx_surf.knots(SurfParamType::V, None), pass)?
-            {
-                v_knots = knots;
-            }
+            // get knots of the subdivided surface (statuses passed on, fork 21dcf69)
+            let (mut u_knots, _) = approx_surf.knots(SurfParamType::U, None)?;
+            let (mut v_knots, _) = approx_surf.knots(SurfParamType::V, None)?;
 
             // For each surface patch, compute the cubic Bezier approximation from the
             // actual surface and copy those control Points into new approx surface.
@@ -380,16 +368,15 @@ impl Surface {
                             if u_min + iub >= num_ctrl_u || v_min + ivb >= num_ctrl_v {
                                 // WR-573: an error, where upstream returns SM_SUCCESS
                                 // without surface
-                                return Err(SolidError::surface_failed(
+                                return Err(SolidError::surface(
                                     OP,
-                                    "a Bezier starter index is past the control net",
+                                    SurfaceFailure::Defect {
+                                        why: "a Bezier starter index is past the control net, but the inner knots were raised to full multiplicity (WR-573), so the net has three points per span and one more",
+                                    },
                                 ));
                             }
-                            // (the point read is overwritten; statuses ignored)
-                            let _ = ignored_or_pass_on(
-                                approx_surf.control_point(form, u_min + iub, v_min + ivb),
-                                pass,
-                            )?;
+                            // (the point read is overwritten; statuses passed on)
+                            let _ = approx_surf.control_point(form, u_min + iub, v_min + ivb)?;
                             let weight = 1.0;
                             let p = cb
                                 .points
@@ -397,20 +384,19 @@ impl Surface {
                                 .and_then(|row| row.get(iub))
                                 .copied()
                                 .ok_or_else(|| {
-                                    SolidError::surface_failed(
+                                    SolidError::surface(
                                         OP,
-                                        "a Bezier starter control point is missing",
+                                        SurfaceFailure::Defect {
+                                            why: "a Bezier starter control point is missing from its 4 x 4 patch, which is read at indices 0 to 3 only",
+                                        },
                                     )
                                 })?;
-                            ignored_or_pass_on(
-                                approx_surf.set_control_point(
-                                    form,
-                                    u_min + iub,
-                                    v_min + ivb,
-                                    p,
-                                    weight,
-                                ),
-                                pass,
+                            approx_surf.set_control_point(
+                                form,
+                                u_min + iub,
+                                v_min + ivb,
+                                p,
+                                weight,
                             )?;
                         }
                     }
@@ -426,16 +412,8 @@ impl Surface {
             // WR-726: whether any row or column of this pass has failed
             let mut pass_failed = false;
 
-            if let Some((knots, _)) =
-                ignored_or_pass_on(approx_surf.knots(SurfParamType::U, None), pass)?
-            {
-                u_knots = knots;
-            }
-            if let Some((knots, _)) =
-                ignored_or_pass_on(approx_surf.knots(SurfParamType::V, None), pass)?
-            {
-                v_knots = knots;
-            }
+            (u_knots, _) = approx_surf.knots(SurfParamType::U, None)?;
+            (v_knots, _) = approx_surf.knots(SurfParamType::V, None)?;
 
             let mut ivl_inner = Extent1d::new();
             let mut ivl_outer = Extent1d::new();
@@ -458,7 +436,7 @@ impl Surface {
                     continue;
                 };
                 // (knots ascend: the status is ignored, as upstream)
-                ignore_or_pass_on(ivl_outer.set_min_max(o0, o1), pass)?;
+                ivl_outer.set_min_max(o0, o1)?;
 
                 // for every 'outer' dir sample point
                 for jj in 1..=num_between {
@@ -469,7 +447,7 @@ impl Surface {
                         let &[i0, i1] = inner_span else {
                             continue;
                         };
-                        ignore_or_pass_on(ivl_inner.set_min_max(i0, i1), pass)?;
+                        ivl_inner.set_min_max(i0, i1)?;
 
                         // for every 'inner' dir sample point
                         for kk in 1..=num_between {
@@ -527,10 +505,7 @@ impl Surface {
             // or column only)
             if !pass_failed {
                 // Remove excess knots: the result does not have to be piecewise Bezier.
-                ignored_or_pass_on(
-                    approx_surf.remove_knots(approx_tol_3d, true, true, None, None),
-                    pass,
-                )?;
+                approx_surf.remove_knots(approx_tol_3d, true, true, None, None)?;
 
                 // all done
                 return Ok(Some(Surface::from(approx_surf)));
@@ -540,9 +515,11 @@ impl Surface {
             // subdivide again
             if more_knots.is_empty() {
                 // Can't happen? Infinite loop if it did.
-                return Err(SolidError::surface_failed(
+                return Err(SolidError::surface(
                     OP,
-                    "no knots are left to subdivide at",
+                    SurfaceFailure::Defect {
+                        why: "a pass outside the tolerance left no knots to subdivide at, but every failed row pushes a knot of full multiplicity",
+                    },
                 ));
             }
             let param = if testing_u_dir {
@@ -554,9 +531,12 @@ impl Surface {
         } // end iter lSubD
 
         // arrive here when approximation failed to converge
-        Err(SolidError::surface_failed(
+        Err(SolidError::surface(
             OP,
-            "the approximation did not converge",
+            SurfaceFailure::ApproximationNotConverged {
+                achieved: *achieved_tol,
+                tolerance: approx_tol_3d,
+            },
         ))
     }
 
@@ -705,9 +685,11 @@ impl Surface {
                         SurfaceKind::Torus(s) => s.base().base(),
                         SurfaceKind::SurfOfRevolution(s) => s.base(),
                         _ => {
-                            return Err(SolidError::surface_failed(
+                            return Err(SolidError::surface(
                                 OP_ROOT,
-                                "the revolved surface kind has no generator",
+                                SurfaceFailure::Defect {
+                                    why: "the revolved surface's NURB-backed kind is not a revolved kind, but it is the kind matched as revolved just above",
+                                },
                             ));
                         }
                     };
@@ -743,7 +725,7 @@ impl BSplineSurface {
         let sur_p = self
             .nurb
             .as_ref()
-            .ok_or_else(|| SolidError::surface_missing(OP, "the surface's NURB"))?;
+            .ok_or_else(|| SolidError::surface(OP, SurfaceFailure::NoNurb))?;
         let sur = elevate_degree(sur_p, increm, dir).map_err(SolidError::nurbs_routine(OP))?;
 
         // place output sur in a temporary and swap the NURBs
@@ -768,7 +750,7 @@ impl BSplineSurface {
         let sur_p = self
             .nurb
             .as_ref()
-            .ok_or_else(|| SolidError::surface_missing(OP, "the surface's NURB"))?;
+            .ok_or_else(|| SolidError::surface(OP, SurfaceFailure::NoNurb))?;
 
         // Make sur with the union of surP target knot vector and the new knots
         let sur = insert_knots(sur_p, new_knots, dir).map_err(SolidError::nurbs_routine(OP))?;
@@ -801,7 +783,7 @@ impl BSplineSurface {
         let sur_p = self
             .nurb
             .as_ref()
-            .ok_or_else(|| SolidError::surface_missing(OP, "the surface's NURB"))?;
+            .ok_or_else(|| SolidError::surface(OP, SurfaceFailure::NoNurb))?;
         let sur =
             insert_knot(sur_p, new_knot, count, dir).map_err(SolidError::nurbs_routine(OP))?;
 
@@ -839,7 +821,7 @@ impl BSplineSurface {
         let sur_p = self
             .nurb
             .as_ref()
-            .ok_or_else(|| SolidError::surface_missing(OP, "the surface's NURB"))?;
+            .ok_or_else(|| SolidError::surface(OP, SurfaceFailure::NoNurb))?;
         let sur = if kept_u_knots.is_some() || kept_v_knots.is_some() {
             remove_knots_constrained(sur_p, kept_u_knots, kept_v_knots, approx_tol_3d, dir)
         } else {
@@ -1020,9 +1002,12 @@ mod tests {
         assert!(r.surface.is_none());
         assert_eq!(
             r.failure,
-            Some(SolidError::surface_failed(
+            Some(SolidError::surface(
                 OP_APPROX,
-                "the approximation did not converge"
+                SurfaceFailure::ApproximationNotConverged {
+                    achieved: r.achieved_tol,
+                    tolerance: tol,
+                }
             ))
         );
         assert!(r.achieved_tol > tol, "{}", r.achieved_tol);

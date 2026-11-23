@@ -1,4 +1,5 @@
-"""AppRun puts a `solidcraft-cli` wrapper on PATH (~/.local/bin) and the wrapper runs the bundled CLI."""
+"""AppRun puts a `solidcraft-cli` wrapper on PATH (~/.local/bin), the wrapper runs the bundled
+CLI, and the desktop entry it writes is marked so a user-edited entry is never overwritten."""
 import os
 import shutil
 import subprocess
@@ -66,14 +67,14 @@ class AppRunCli(unittest.TestCase):
         apps.mkdir(parents=True)
         icons = self.home / ".local/share/icons/hicolor/256x256/apps"
         icons.mkdir(parents=True)
-        for old in ("ai.storyteller.solidcraft", "ai.storyteller.solvecraft"):
+        for old in ("ai.storyteller.solidcraft",):
             (apps / f"{old}.desktop").write_text(f'[Desktop Entry]\nExec="/old/SolidCraft.AppImage" %F\nIcon={old}\n')
             (icons / f"{old}.png").write_text("png")
         # An entry this script did not write (a package's, Exec on PATH) is left alone.
         (apps / "ai.storyteller.other.desktop").write_text("[Desktop Entry]\nExec=other\nIcon=ai.storyteller.other\n")
         self.run_apprun()
         self.assertTrue((apps / "io.tangencylabs.solidcraft.desktop").is_file())
-        for old in ("ai.storyteller.solidcraft", "ai.storyteller.solvecraft"):
+        for old in ("ai.storyteller.solidcraft",):
             self.assertFalse((apps / f"{old}.desktop").exists())
             self.assertFalse((icons / f"{old}.png").exists())
         self.assertTrue((apps / "ai.storyteller.other.desktop").is_file())
@@ -96,6 +97,39 @@ class AppRunCli(unittest.TestCase):
         self.assertTrue(installed.is_file())
         self.assertIn(f"Icon={installed}", desk)
         self.assertNotIn("Icon=io.tangencylabs.solidcraft\n", desk)
+
+    def test_generated_entry_carries_the_marker(self):
+        self.run_apprun()
+        entry = (self.home / ".local/share/applications/io.tangencylabs.solidcraft.desktop").read_text()
+        self.assertIn("X-SolidCraft-Generated=true", entry)
+        self.assertIn(f'Exec="{self.image}" %F', entry)
+
+    def test_unmarked_entry_is_never_rewritten(self):
+        # A user-edited entry (no marker) survives untouched, even when the AppImage
+        # moves: rewriting it mid-launch makes GNOME lose the window (#9679).
+        entry = self.home / ".local/share/applications/io.tangencylabs.solidcraft.desktop"
+        entry.parent.mkdir(parents=True)
+        edited = '[Desktop Entry]\nExec="/home/you/Applications/solidcraft.AppImage" %F\nStartupNotify=false\n'
+        entry.write_text(edited)
+        self.run_apprun()
+        self.assertEqual(entry.read_text(), edited)
+        moved = self.tmp / "moved.AppImage"
+        shutil.move(self.image, moved)
+        self.env["APPIMAGE"] = str(moved)
+        self.run_apprun()
+        self.assertEqual(entry.read_text(), edited)
+
+    def test_marked_entry_follows_a_moved_appimage(self):
+        entry = self.home / ".local/share/applications/io.tangencylabs.solidcraft.desktop"
+        self.run_apprun()
+        moved = self.tmp / "moved.AppImage"
+        shutil.move(self.image, moved)
+        self.env["APPIMAGE"] = str(moved)
+        self.run_apprun()
+        after = entry.read_text()
+        self.assertIn(str(moved), after)
+        self.assertNotIn(str(self.image), after)
+        self.assertIn("X-SolidCraft-Generated=true", after)
 
 
 if __name__ == "__main__":

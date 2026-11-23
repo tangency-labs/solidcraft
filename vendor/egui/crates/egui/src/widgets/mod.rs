@@ -1,0 +1,174 @@
+//! Widgets are pieces of GUI such as [`Label`], [`Button`], [`Slider`] etc.
+//!
+//! Example widget uses:
+//! * `ui.add(Label::new("Text").text_color(color::red));`
+//! * `if ui.add(Button::new("Click me")).clicked() { … }`
+
+use crate::{Response, Ui};
+
+/// A dynamically dispatched [`Widget`].
+///
+/// [`Widget`] is not dyn compatible because [`Widget::ui`] takes `self` by value.
+/// This alias uses a closure, which implements [`Widget`].
+pub type BoxedWidget<'a> = Box<dyn FnOnce(&mut Ui) -> Response + 'a>;
+
+mod button;
+mod checkbox;
+pub mod color_picker;
+pub(crate) mod drag_value;
+mod hyperlink;
+mod image;
+mod label;
+mod progress_bar;
+mod radio_button;
+mod range_slider;
+mod separator;
+mod slider;
+mod slider_core;
+pub(crate) use slider_core::accesskit_set_value_request;
+mod spinner;
+pub mod text_edit;
+mod value_format;
+
+pub use self::{
+    button::Button,
+    checkbox::Checkbox,
+    drag_value::DragValue,
+    hyperlink::{Hyperlink, Link},
+    image::{
+        FrameDurations, Image, ImageFit, ImageOptions, ImageSize, ImageSource,
+        decode_animated_image_uri, has_gif_magic_header, has_webp_header, paint_texture_at,
+    },
+    label::Label,
+    progress_bar::ProgressBar,
+    radio_button::RadioButton,
+    range_slider::RangeSlider,
+    separator::Separator,
+    slider::{Slider, SliderClamping, SliderOrientation},
+    slider_core::{DragValueSettings, SliderSpec},
+    spinner::Spinner,
+    text_edit::{
+        CompletionOutput, CompletionPopup, CompletionQuery, Suggestion, TextBuffer, TextEdit,
+    },
+    value_format::{NumFormatter, NumParser, ValueFormat},
+};
+
+// ----------------------------------------------------------------------------
+
+/// Anything implementing Widget can be added to a [`Ui`] with [`Ui::add`].
+///
+/// [`Button`], [`Label`], [`Slider`], etc all implement the [`Widget`] trait.
+///
+/// You only need to implement `Widget` if you care about being able to do `ui.add(your_widget);`.
+///
+/// Note that the widgets ([`Button`], [`TextEdit`] etc) are
+/// [builders](https://doc.rust-lang.org/1.0.0/style/ownership/builders.html),
+/// and not objects that hold state.
+///
+/// Tip: you can `impl Widget for &mut YourThing { }`.
+///
+/// `|ui: &mut Ui| -> Response { … }` also implements [`Widget`].
+#[must_use = "You should put this widget in a ui with `ui.add(widget);`"]
+pub trait Widget {
+    /// Allocate space, interact, paint, and return a [`Response`].
+    ///
+    /// Note that this consumes `self`.
+    /// This is because most widgets ([`Button`], [`TextEdit`] etc) are
+    /// [builders](https://doc.rust-lang.org/1.0.0/style/ownership/builders.html)
+    ///
+    /// Tip: you can `impl Widget for &mut YourObject { }`.
+    fn ui(self, ui: &mut Ui) -> Response;
+
+    /// Box this widget for dynamic dispatch.
+    #[inline]
+    fn boxed<'a>(self) -> BoxedWidget<'a>
+    where
+        Self: Sized + 'a,
+    {
+        Box::new(move |ui: &mut Ui| ui.add(self))
+    }
+}
+
+#[test]
+fn widgets_can_be_boxed() {
+    let _: BoxedWidget<'static> = Button::new("boxed").boxed();
+}
+
+/// This enables functions that return `impl Widget`, so that you can
+/// create a widget by just returning a lambda from a function.
+///
+/// For instance: `ui.add(slider_vec2(&mut vec2));` with:
+///
+/// ```
+/// pub fn slider_vec2(value: &mut egui::Vec2) -> impl egui::Widget + '_ {
+///    move |ui: &mut egui::Ui| {
+///        ui.horizontal(|ui| {
+///            ui.add(egui::Slider::new(&mut value.x, 0.0..=1.0).text("x"));
+///            ui.add(egui::Slider::new(&mut value.y, 0.0..=1.0).text("y"));
+///        })
+///        .response
+///    }
+/// }
+/// ```
+impl<F> Widget for F
+where
+    F: FnOnce(&mut Ui) -> Response,
+{
+    fn ui(self, ui: &mut Ui) -> Response {
+        self(ui)
+    }
+}
+
+/// Helper so that you can do e.g. `TextEdit::State::load`.
+pub trait WidgetWithState {
+    type State;
+}
+
+// ----------------------------------------------------------------------------
+
+/// Show a button to reset a value to its default.
+/// The button is only enabled if the value does not already have its original value.
+///
+/// The `text` could be something like "Reset foo".
+pub fn reset_button<T: Default + PartialEq>(ui: &mut Ui, value: &mut T, text: &str) {
+    reset_button_with(ui, value, text, T::default());
+}
+
+/// Show a button to reset a value to its default.
+/// The button is only enabled if the value does not already have its original value.
+///
+/// The `text` could be something like "Reset foo".
+pub fn reset_button_with<T: PartialEq>(ui: &mut Ui, value: &mut T, text: &str, reset_value: T) {
+    if ui
+        .add_enabled(*value != reset_value, Button::new(text))
+        .clicked()
+    {
+        *value = reset_value;
+    }
+}
+
+// ----------------------------------------------------------------------------
+
+/// Show a small button to switch to/from dark/light mode (globally).
+///
+/// This does not allow switching back to following the system theme,
+/// which is why [`global_theme_preference_buttons`] is preferred.
+#[deprecated = "Use `global_theme_preference_buttons` instead: it also covers following the system theme"]
+pub fn global_theme_preference_switch(ui: &mut Ui) {
+    if let Some(new_theme) = ui.ctx().theme().small_toggle_button(ui) {
+        ui.ctx().set_theme(new_theme);
+    }
+}
+
+/// Show a row of buttons for changing the theme of the whole app.
+///
+/// There is one button for each [`crate::ThemePreference`]:
+/// dark mode, light mode, and following the system theme.
+/// The button of the current preference is highlighted.
+///
+/// Each button is a small icon, so this fits in a top bar.
+pub fn global_theme_preference_buttons(ui: &mut Ui) {
+    let mut theme_preference = ui.options(|opt| opt.theme_preference);
+    theme_preference.buttons(ui);
+    ui.ctx().set_theme(theme_preference);
+}

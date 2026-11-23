@@ -16,8 +16,9 @@ fn corpus() -> Vec<PathBuf> {
     v
 }
 
-/// Designs with components or joints, which scripts do not support yet.
-const ASSEMBLIES: [&str; 2] = ["components-arm", "joints-hinge"];
+// The corpus's assembly designs (`components-arm`, `joints-hinge`) take the
+// same path as the plain ones: components, occurrences and joints are part of
+// the script's contract and come back with the rest.
 
 fn bodies(s: &mut Session) -> Vec<(String, f64, f64, Value)> {
     let m = s.execute("inspect.measure", &json!({})).unwrap();
@@ -57,13 +58,8 @@ fn corpus_designs_replay_from_their_scripts() {
         s.execute("doc.open", &json!({"path": p.to_string_lossy()})).unwrap();
         let r = match s.execute("timeline.export_script", &json!({})) {
             Ok(r) => r,
-            Err(e) => {
-                assert!(ASSEMBLIES.contains(&name.as_str()), "{name}: {e}");
-                assert!(e.to_string().contains("not supported yet"), "{name}: {e}");
-                continue;
-            }
+            Err(e) => panic!("{name}: the script exports every corpus design now: {e}"),
         };
-        assert!(!ASSEMBLIES.contains(&name.as_str()), "{name} has components: the script should refuse it");
         // Through text, as a script file would carry it.
         let script: Value = serde_json::from_str(&r["script"].to_string()).unwrap();
         let mut t = Session::default();
@@ -78,6 +74,15 @@ fn corpus_designs_replay_from_their_scripts() {
         assert_eq!(t.doc.user_materials, s.doc.user_materials, "{name}: user materials");
         assert_eq!(t.doc.favorites, s.doc.favorites, "{name}: favourites");
         assert_eq!(t.doc.param_comments, s.doc.param_comments, "{name}: comments");
+        // The assembly state: components and occurrences keep their ids (the
+        // replay replays every allocation-bearing step at its original id
+        // position), and the placements the joints solved to hold — the joints
+        // themselves are compared where the app's own tests compare them
+        // (their face, end and x references are re-derived at creation).
+        assert_eq!(t.doc.components, s.doc.components, "{name}: components");
+        assert_eq!(t.doc.occurrences, s.doc.occurrences, "{name}: occurrences");
+        assert_eq!(t.doc.parts, s.doc.parts, "{name}: standard parts");
+        assert_eq!(t.doc.links, s.doc.links, "{name}: linked designs");
         assert_eq!(errors(&t), errors(&s), "{name}: feature results");
         assert_eq!(bodies(&mut t), bodies(&mut s), "{name}: bodies");
         replayed += 1;

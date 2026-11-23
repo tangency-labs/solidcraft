@@ -50,8 +50,8 @@ const ANTHROPIC_VERSION: &str = "2023-06-01";
 /// The connection test's own timeout: it asks for a token or two, not a whole answer.
 const TEST_TIMEOUT_S: u64 = 60;
 
-/// Tools the model is not offered.
-const HIDDEN_TOOLS: &[&str] = &["crash_reports"];
+/// Tools the Assistant gate refuses, so the model must not be offered them.
+const HIDDEN_TOOLS: &[&str] = &["agent_cursor", "crash_reports", "documents", "preferences", "quit_app"];
 
 /// Chat counter for OpenCode Go session IDs, next to the wall clock below.
 static GO_SESSION_COUNTER: AtomicU64 = AtomicU64::new(1);
@@ -67,15 +67,6 @@ fn new_session_id() -> String {
     let n = GO_SESSION_COUNTER.fetch_add(1, Ordering::Relaxed);
     let t = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_nanos()).unwrap_or(0);
     format!("solidcraft-{t:x}-{n:x}-{:x}", std::process::id())
-}
-
-/// Whether `base_url` is an OpenCode Go endpoint: model requests to all of them
-/// carry `x-opencode-session` (the `zen/go` gateway and the per-model
-/// `inference/go/...` endpoints alike). The model list and connection test are
-/// plain GETs and send none.
-fn is_opencode_go(base_url: &str) -> bool {
-    let u = base_url.trim().to_ascii_lowercase();
-    u.starts_with("https://opencode.ai/") && u.contains("/go")
 }
 
 /// Which wire protocol one OpenCode Go model speaks. Go exposes one endpoint per
@@ -181,8 +172,8 @@ fn go_anthropic_tools(tools: &[Value]) -> Vec<Value> {
         .collect()
 }
 
-/// OpenAI function tools as Responses API tools for Go's Responses endpoints.
-fn go_responses_tools(tools: &[Value]) -> Vec<Value> {
+/// OpenAI function tools as Responses API tools.
+fn responses_tools(tools: &[Value]) -> Vec<Value> {
     tools
         .iter()
         .filter_map(|t| {
@@ -349,7 +340,7 @@ fn go_anthropic_messages(history: &[Value]) -> Vec<Value> {
 /// OpenAI-style history as Responses API input items, with the system note
 /// first (no history clone: the note is pushed, not prepended as a message).
 /// Assistant history takes `output_text` parts: `input_text` is rejected there.
-fn go_responses_input(system: &str, history: &[Value]) -> Vec<Value> {
+fn responses_input(system: &str, history: &[Value]) -> Vec<Value> {
     let mut out: Vec<Value> = Vec::new();
     out.push(json!({"type": "message", "role": "system", "content": [{"type": "input_text", "text": system}]}));
     for m in history {
@@ -382,6 +373,10 @@ fn go_responses_input(system: &str, history: &[Value]) -> Vec<Value> {
                 _ => {}
             },
             "assistant" => {
+                if let Some(items) = m.get("responses_output").and_then(Value::as_array) {
+                    out.extend(items.iter().cloned());
+                    continue;
+                }
                 if let Some(t) = m.get("content").and_then(Value::as_str).filter(|t| !t.is_empty()) {
                     out.push(json!({"type": "message", "role": "assistant", "content": [{"type": "output_text", "text": t}]}));
                 }
@@ -573,6 +568,82 @@ fn go_responses_reply(body: &Value) -> Reply {
     acc.into_reply()
 }
 
+fn responses_url(base: &str) -> String {
+    format!("{}/responses", base.trim_end_matches('/'))
+}
+
+fn responses_body(model: &str, input: Value, effort: Option<&str>) -> Value {
+    let mut body = json!({"model": model, "input": input, "store": false, "include": ["reasoning.encrypted_content"]});
+    if let Some(effort) = effort {
+        body["reasoning"] = json!({"effort": effort});
+    }
+    body
+}
+
+/// Retain native output items in their original order for the next stateless request.
+fn responses_reply(body: &Value) -> Result<Reply, String> {
+    let invalid = || solidcraft_ui_text::tr("ui.ai_invalid_responses_reply").to_string();
+    let complete = match body.get("status").and_then(Value::as_str) {
+        Some("completed") => true,
+        Some("incomplete") => false,
+        Some("failed") => return Err(http_error(200, body)),
+        _ => return Err(invalid()),
+    };
+    let mut stop = if complete {
+        ""
+    } else {
+        match body.pointer("/incomplete_details/reason").and_then(Value::as_str) {
+            Some("max_output_tokens") => "max_tokens",
+            reason => stop_reason(reason),
+        }
+    };
+    let items = body.get("output").and_then(Value::as_array).ok_or_else(invalid)?;
+    // After a cutoff, replay the reasoning before the last retained message. Trailing reasoning
+    // may belong to a tool call that was cut off.
+    let reasoning_end = if complete { items.len() } else { items.iter().rposition(|item| item["type"] == "message").unwrap_or(0) };
+    let mut text = Vec::new();
+    let mut calls: Vec<Call> = Vec::new();
+    let mut kept = Vec::new();
+    for (index, item) in items.iter().enumerate() {
+        match item.get("type").and_then(Value::as_str) {
+            Some("message") => {
+                if let Some(parts) = item.get("content").and_then(Value::as_array) {
+                    for part in parts {
+                        let field = match part.get("type").and_then(Value::as_str) {
+                            Some("output_text") => "text",
+                            Some("refusal") => {
+                                stop = "refusal";
+                                "refusal"
+                            }
+                            _ => continue,
+                        };
+                        if let Some(t) = part.get(field).and_then(Value::as_str).filter(|t| !t.trim().is_empty()) {
+                            text.push((false, t.to_string()));
+                        }
+                    }
+                }
+                kept.push(item.clone());
+            }
+            Some("reasoning") if index < reasoning_end => kept.push(item.clone()),
+            Some("function_call") if complete && calls.len() < 32 => {
+                let id = item.get("call_id").and_then(Value::as_str).filter(|id| !id.is_empty()).ok_or_else(invalid)?;
+                let name = item.get("name").and_then(Value::as_str).filter(|name| !name.is_empty()).ok_or_else(invalid)?;
+                if calls.iter().any(|call| call.id == id) {
+                    return Err(invalid());
+                }
+                calls.push(Call { id: id.to_string(), name: name.to_string(), arguments: tool_arguments(item.get("arguments")) });
+                kept.push(item.clone());
+            }
+            _ => {}
+        }
+    }
+    if stop == "refusal" {
+        calls.clear();
+        kept.retain(|item| item["type"] != "function_call");
+    }
+    Ok(Reply { text, calls, assistant: json!({"role": "assistant", "responses_output": kept}), stop })
+}
+
 /// An Anthropic messages answer as the tool loop's Reply (history stays OpenAI-shaped).
 fn go_messages_reply(body: &Value) -> Reply {
     let mut acc = GoCallAccum::default();
@@ -651,6 +722,7 @@ pub struct ApiConfig {
     /// provider's own default applies. A set value wins over the `none` retry (#3817): that
     /// retry only runs when no effort was chosen.
     pub reasoning_effort: String,
+    pub openai_responses: bool,
 }
 
 enum Cmd {
@@ -905,6 +977,15 @@ impl Worker {
         if let Some(m) = &self.mcp {
             m.send(&json!({"jsonrpc": "2.0", "method": "notifications/initialized"}));
         }
+        self.refresh_tools()
+    }
+
+    /// Lists the tools again, so a plugin installed, enabled or removed since the last turn is
+    /// offered (or no longer offered) from the next turn on. Both lists change together.
+    fn refresh_tools(&mut self) -> Result<(), String> {
+        if self.mcp.is_none() {
+            return Ok(());
+        }
         let list = self.mcp_call("tools/list", json!({}))?;
         self.tools = match self.cfg.protocol {
             Protocol::OpenAi => openai_tools(&list),
@@ -915,6 +996,8 @@ impl Worker {
     }
 
     fn turn(&mut self, parts: Vec<PromptPart>) {
+        // A failed refresh keeps the previous listing: the turn still runs with the tools it had.
+        let _ = self.refresh_tools();
         self.history.push(user_message(self.cfg.protocol, &parts));
         let dropped = drop_old_views(&mut self.history, MAX_HISTORY_IMAGES);
         let trimmed = self.trim_history();
@@ -979,7 +1062,9 @@ impl Worker {
                 } else if !self.tool_names.iter().any(|n| n == &c.name) {
                     (format!("unknown tool `{}`", c.name), true)
                 } else {
-                    match self.mcp_call("tools/call", json!({"name": c.name, "arguments": args})) {
+                    // A plugin tool goes back by its MCP name, and through the same approval
+                    // gate as every other call: the app asks before it runs.
+                    match self.mcp_call("tools/call", json!({"name": mcp_tool_name(&c.name), "arguments": args})) {
                         Ok(r) => tool_text(&r),
                         Err(e) => (e, true),
                     }
@@ -1027,8 +1112,12 @@ impl Worker {
 
     fn request(&self) -> Result<Reply, String> {
         // OpenCode Go serves one protocol per model family behind a single base URL.
-        if self.cfg.protocol == Protocol::OpenAi && is_opencode_go(&self.cfg.base_url) {
+        if self.cfg.protocol == Protocol::OpenAi && super::agents::is_opencode_go(&self.cfg.base_url) {
             return self.go_request();
+        }
+        if self.uses_responses() {
+            let (status, response) = self.post(&self.responses_body())?;
+            return if status == 200 { responses_reply(&response) } else { Err(http_error(status, &response)) };
         }
         let mut body = self.body();
         let (status, v) = self.post(&body)?;
@@ -1132,7 +1221,7 @@ impl Worker {
             return None;
         }
         Some(match protocol {
-            GoProtocol::Responses => Value::Array(go_responses_tools(&self.tools)),
+            GoProtocol::Responses => Value::Array(responses_tools(&self.tools)),
             GoProtocol::Messages => Value::Array(go_anthropic_tools(&self.tools)),
             GoProtocol::Gemini => json!([{"functionDeclarations": go_gemini_tools(&self.tools)}]),
             GoProtocol::Chat => Value::Array(self.tools.clone()),
@@ -1146,7 +1235,7 @@ impl Worker {
         match protocol {
             GoProtocol::Chat => self.body(),
             GoProtocol::Responses => {
-                let mut body = json!({"model": self.cfg.model, "input": go_responses_input(&self.note, &self.history)});
+                let mut body = json!({"model": self.cfg.model, "input": responses_input(&self.note, &self.history)});
                 if let Some(tools) = self.go_tools(protocol) {
                     body["tools"] = tools;
                 }
@@ -1183,6 +1272,29 @@ impl Worker {
             GoProtocol::Messages => go_messages_reply(body),
             GoProtocol::Gemini => go_gemini_reply(body),
         }
+    }
+
+    fn responses_body(&self) -> Value {
+        let mut input = responses_input(&self.note, &self.history);
+        for item in &mut input {
+            if item["role"] == "user"
+                && let Some(parts) = item["content"].as_array_mut()
+            {
+                for part in parts.iter_mut().filter(|p| p["type"] == "input_image") {
+                    part["detail"] = json!("auto");
+                }
+            }
+        }
+        let mut body = responses_body(&self.cfg.model, Value::Array(input), self.reasoning_effort());
+        if !self.tools.is_empty() {
+            let mut tools = responses_tools(&self.tools);
+            for tool in &mut tools {
+                // MCP schemas may have optional properties. Responses defaults to strict schemas.
+                tool["strict"] = json!(false);
+            }
+            body["tools"] = Value::Array(tools);
+        }
+        body
     }
 
     /// The request body in the endpoint's shape: the system note is a message for OpenAI and a
@@ -1227,9 +1339,14 @@ impl Worker {
         self.send(req)
     }
 
+    fn uses_responses(&self) -> bool {
+        self.cfg.protocol == Protocol::OpenAi && self.cfg.openai_responses
+    }
+
     fn post(&self, body: &Value) -> Result<(u16, Value), String> {
         let mut headers = vec![("Content-Type".to_string(), "application/json".to_string())];
         let url = match self.cfg.protocol {
+            Protocol::OpenAi if self.uses_responses() => responses_url(&self.cfg.base_url),
             Protocol::OpenAi => format!("{}/chat/completions", self.cfg.base_url),
             Protocol::Anthropic => {
                 headers.push(("anthropic-version".to_string(), ANTHROPIC_VERSION.to_string()));
@@ -1573,8 +1690,8 @@ pub fn openai_tools(list: &Value) -> Vec<Value> {
             a.iter()
                 .take(128)
                 .filter_map(|t| {
-                    let name = t.get("name")?.as_str()?;
-                    if HIDDEN_TOOLS.contains(&name) {
+                    let name = api_tool_name(t.get("name")?.as_str()?)?;
+                    if HIDDEN_TOOLS.contains(&name.as_str()) {
                         return None;
                     }
                     let params = t.get("inputSchema").cloned().filter(Value::is_object).unwrap_or(json!({"type": "object", "properties": {}}));
@@ -1597,8 +1714,8 @@ pub fn anthropic_tools(list: &Value) -> Vec<Value> {
             a.iter()
                 .take(128)
                 .filter_map(|t| {
-                    let name = t.get("name")?.as_str()?;
-                    if HIDDEN_TOOLS.contains(&name) {
+                    let name = api_tool_name(t.get("name")?.as_str()?)?;
+                    if HIDDEN_TOOLS.contains(&name.as_str()) {
                         return None;
                     }
                     let schema = t.get("inputSchema").cloned().filter(Value::is_object).unwrap_or(json!({"type": "object", "properties": {}}));
@@ -1621,12 +1738,31 @@ fn tool_names(list: &Value) -> Vec<String> {
             a.iter()
                 .take(128)
                 .filter_map(|t| {
-                    let name = t.get("name")?.as_str()?;
-                    (!HIDDEN_TOOLS.contains(&name)).then(|| name.to_string())
+                    let name = api_tool_name(t.get("name")?.as_str()?)?;
+                    (!HIDDEN_TOOLS.contains(&name.as_str())).then_some(name)
                 })
                 .collect()
         })
         .unwrap_or_default()
+}
+
+/// A tool's name as the model APIs take it (letters, digits, `_` and `-`, at most 64): a plugin
+/// tool's `<plugin>.<entry>` is offered as `<plugin>__<entry>` (plugin and entry ids never hold
+/// `_`). A name that still does not fit is not offered.
+fn api_tool_name(name: &str) -> Option<String> {
+    let api = name.replacen('.', "__", 1);
+    (!api.is_empty() && api.len() <= 64 && api.bytes().all(|c| c.is_ascii_alphanumeric() || c == b'_' || c == b'-')).then_some(api)
+}
+
+/// The MCP name of the tool the model called by its API name: `<plugin>__<entry>` is the plugin
+/// tool `<plugin>.<entry>`; any other name is the same in both.
+fn mcp_tool_name(api: &str) -> String {
+    match api.split_once("__") {
+        Some((plugin, entry)) if solidcraft_engine::plugin::valid_id(plugin) && solidcraft_engine::plugin::valid_id(entry) => {
+            format!("{plugin}.{entry}")
+        }
+        _ => api.to_string(),
+    }
 }
 
 /// `{base}/v1/{path}`, whether the user's base URL ends in `/v1` or in the endpoint root the
@@ -1795,15 +1931,53 @@ pub fn test_endpoint(http: &HttpFn, base_url: &str, key: Option<&str>, model: &s
     ))
 }
 
+/// Test the Responses path itself with the configured model and reasoning effort.
+pub fn test_responses_endpoint(
+    http: &HttpFn,
+    base_url: &str,
+    key: Option<&str>,
+    model: &str,
+    allow_insecure_http: bool,
+    effort: &str,
+) -> Result<String, String> {
+    let model = model.trim();
+    if model.is_empty() {
+        return Err(solidcraft_ui_text::tr("ui.ai_need_model").to_string());
+    }
+    let mut headers = vec![("Content-Type".into(), "application/json".into())];
+    if let Some(key) = key {
+        if !super::agents::key_allowed_for(base_url, allow_insecure_http) {
+            return Err(solidcraft_ui_text::tr("ui.ai_key_needs_https").to_string());
+        }
+        headers.push(("Authorization".into(), format!("Bearer {key}")));
+    }
+    let effort = effort.trim();
+    let mut body = responses_body(model, json!("Reply OK."), (!effort.is_empty()).then_some(effort));
+    body["max_output_tokens"] = json!(64);
+    let req =
+        HttpRequest { method: "POST", url: responses_url(base_url), headers, body: Some(body.to_string().into_bytes()), timeout_s: TEST_TIMEOUT_S };
+    let (status, bytes) = http(&req)?;
+    let value = serde_json::from_slice(&bytes).unwrap_or(Value::Null);
+    if status != 200 {
+        return Err(http_error(status, &value));
+    }
+    responses_reply(&value)?;
+    Ok(solidcraft_ui_text::format("ui.ai_test_answered", &[("model", model)]))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
-    fn mcp_tools_become_function_tools_without_crash_reports() {
+    fn mcp_tools_become_function_tools_without_external_app_tools() {
         let list = json!({"tools": [
             {"name": "batch", "description": "Run commands", "inputSchema": {"type": "object", "properties": {"commands": {"type": "array"}}}},
             {"name": "crash_reports", "description": "x", "inputSchema": {"type": "object"}},
+            {"name": "documents", "inputSchema": {"type": "object"}},
+            {"name": "quit_app", "inputSchema": {"type": "object"}},
+            {"name": "preferences", "inputSchema": {"type": "object"}},
+            {"name": "agent_cursor", "inputSchema": {"type": "object"}},
             {"name": "measure"},
         ]});
         let t = openai_tools(&list);
@@ -1929,6 +2103,7 @@ mod tests {
             http,
             request_timeout_s: 300,
             reasoning_effort: String::new(),
+            openai_responses: false,
         };
         let ctx = StartContext { cwd: std::env::temp_dir(), bridge: None, tools: None, wake: Box::new(|| {}) };
         let mut b = ApiBackend::start(cfg, ctx).unwrap();
@@ -1981,6 +2156,7 @@ mod tests {
             http,
             request_timeout_s: 300,
             reasoning_effort: String::new(),
+            openai_responses: false,
         };
         let ctx = StartContext { cwd: std::env::temp_dir(), bridge: None, tools: None, wake: Box::new(|| {}) };
         let mut b = ApiBackend::start(cfg, ctx).unwrap();
@@ -2037,6 +2213,7 @@ mod tests {
             http,
             request_timeout_s: 300,
             reasoning_effort: String::new(),
+            openai_responses: false,
         };
         let ctx = StartContext { cwd: std::env::temp_dir(), bridge: None, tools: None, wake: Box::new(|| {}) };
         let mut b = ApiBackend::start(cfg, ctx).unwrap();
@@ -2089,6 +2266,7 @@ mod tests {
             http,
             request_timeout_s: 300,
             reasoning_effort: String::new(),
+            openai_responses: false,
         };
         let ctx = StartContext { cwd: std::env::temp_dir(), bridge: None, tools: None, wake: Box::new(|| {}) };
         let mut b = ApiBackend::start(cfg, ctx).unwrap();
@@ -2175,6 +2353,7 @@ mod tests {
             http,
             request_timeout_s: 300,
             reasoning_effort: String::new(),
+            openai_responses: false,
         }
     }
 
@@ -2250,6 +2429,7 @@ mod tests {
             http,
             request_timeout_s: 300,
             reasoning_effort: String::new(),
+            openai_responses: false,
         };
         let mut b = ApiBackend::start(cfg, go_ctx()).unwrap();
         b.prompt(&[PromptPart::Text("hi".into())]);
@@ -2440,7 +2620,7 @@ mod tests {
         assert_eq!(roles, ["user", "assistant", "user"], "{messages:?}");
         assert_eq!(messages[2]["content"].as_array().unwrap().len(), 2, "both tool answers in one message");
         assert_eq!(messages[1]["content"][1]["type"], "tool_use");
-        let input = go_responses_input("sys", &history);
+        let input = responses_input("sys", &history);
         assert_eq!(input[0]["type"], "message");
         assert!(input.iter().any(|i| i["type"] == "function_call"), "{input:?}");
         assert!(input.iter().any(|i| i["type"] == "function_call_output" && i["output"] == "1mm"), "{input:?}");
@@ -2570,6 +2750,7 @@ mod tests {
             http,
             request_timeout_s: 300,
             reasoning_effort: String::new(),
+            openai_responses: false,
         };
         let mut b = ApiBackend::start(cfg, go_ctx()).unwrap();
         b.prompt(&[PromptPart::Text("hi".into())]);
@@ -2624,6 +2805,7 @@ mod tests {
             http,
             request_timeout_s: 300,
             reasoning_effort: String::new(),
+            openai_responses: false,
         };
         let ctx = StartContext { cwd: std::env::temp_dir(), bridge: None, tools: None, wake: Box::new(|| {}) };
         let mut b = ApiBackend::start(cfg, ctx).unwrap();
@@ -2727,6 +2909,7 @@ mod tests {
             http,
             request_timeout_s: 300,
             reasoning_effort: String::new(),
+            openai_responses: false,
         };
         let ctx = StartContext { cwd: std::env::temp_dir(), bridge: None, tools: None, wake: Box::new(|| {}) };
         let mut b = ApiBackend::start(cfg, ctx).unwrap();
@@ -2769,6 +2952,7 @@ mod tests {
             http: http.clone(),
             request_timeout_s: 300,
             reasoning_effort: String::new(),
+            openai_responses: false,
         };
         let context = || StartContext { cwd: std::env::temp_dir(), bridge: None, tools: None, wake: Box::new(|| {}) };
         assert!(ApiBackend::start(config(false, Protocol::OpenAi), context()).is_err());
@@ -2813,6 +2997,7 @@ mod tests {
             http,
             request_timeout_s: 300,
             reasoning_effort: effort.to_string(),
+            openai_responses: false,
         };
         let (events, _rx) = channel();
         let w = Worker {
@@ -2831,6 +3016,111 @@ mod tests {
             no_reasoning: Default::default(),
         };
         (w, seen)
+    }
+
+    #[test]
+    fn native_responses_replays_reasoning_and_tool_results_in_order() {
+        let reasoning = json!({"type": "reasoning", "id": "rs_1", "summary": [], "encrypted_content": "opaque"});
+        let call = json!({"type": "function_call", "id": "fc_1", "call_id": "call_1", "name": "measure", "arguments": "{}"});
+        let (mut worker, _) = scripted_worker_effort(Vec::new(), "medium");
+        let answers = std::sync::Mutex::new(vec![
+            json!({"status": "completed", "output": [{"type": "message", "role": "assistant", "content": [{"type": "output_text", "text": "Done"}]}]}),
+            json!({"status": "completed", "output": [reasoning, call]}),
+        ]);
+        let seen = Arc::new(std::sync::Mutex::new(Vec::new()));
+        let log = seen.clone();
+        worker.cfg.openai_responses = true;
+        worker.cfg.base_url = "https://api.openai.com/v1".into();
+        worker.cfg.http = Arc::new(move |request| {
+            log.lock().unwrap().push(request.clone());
+            Ok((200, answers.lock().unwrap().pop().unwrap().to_string().into_bytes()))
+        });
+        let (events, rx) = channel();
+        worker.events = events;
+        worker.history.clear();
+        worker.turn(vec![PromptPart::Text("Measure it".into()), PromptPart::Image { mime: "image/png".into(), base64: "AA==".into() }]);
+        let sent = seen.lock().unwrap();
+        assert_eq!(sent.len(), 2);
+        let bodies: Vec<Value> = sent.iter().map(|r| serde_json::from_slice(r.body.as_deref().unwrap()).unwrap()).collect();
+        for (request, body) in sent.iter().zip(&bodies) {
+            assert_eq!(request.url, "https://api.openai.com/v1/responses");
+            assert_eq!(request.method, "POST");
+            assert!(request.headers.iter().any(|(name, value)| name == "Authorization" && value == "Bearer sk-secret"));
+            assert_eq!(body["reasoning"]["effort"], "medium");
+            assert_eq!(body["store"], false);
+            assert_eq!(body["include"], json!(["reasoning.encrypted_content"]));
+            assert_eq!(body["tools"][0]["name"], "measure");
+            assert_eq!(body["tools"][0]["strict"], false);
+            assert!(body.get("messages").is_none() && body.get("reasoning_effort").is_none());
+        }
+        assert_eq!(bodies[0]["input"][1]["content"][1], json!({"type": "input_image", "image_url": "data:image/png;base64,AA==", "detail": "auto"}));
+        assert_eq!(bodies[1]["input"][2], reasoning);
+        assert_eq!(bodies[1]["input"][3], call);
+        assert_eq!(
+            bodies[1]["input"][4],
+            json!({"type": "function_call_output", "call_id": "call_1", "output": "no SolidCraft tools in this session"})
+        );
+        let events: Vec<_> = rx.try_iter().collect();
+        assert!(events.iter().any(|event| matches!(event, Event::Text { text, .. } if text == "Done")));
+        assert!(matches!(events.last(), Some(Event::TurnEnded { reason }) if reason.is_empty()));
+    }
+
+    #[test]
+    fn incomplete_responses_do_not_dispatch_function_calls() {
+        let reply = responses_reply(&json!({
+            "status": "incomplete",
+            "incomplete_details": {"reason": "max_output_tokens"},
+            "output": [
+                {"type": "reasoning", "id": "rs_1", "summary": [], "encrypted_content": "opaque"},
+                {"type": "function_call", "call_id": "call_1", "name": "measure", "arguments": "{"}
+            ]
+        }));
+        let reply = reply.unwrap();
+        assert_eq!(reply.stop, "max_tokens");
+        assert!(reply.calls.is_empty());
+        assert_eq!(reply.assistant["responses_output"], json!([]));
+        assert!(responses_reply(&json!({"status": "completed"})).is_err());
+    }
+
+    #[test]
+    fn incomplete_responses_replay_reasoning_before_retained_messages() {
+        let reasoning = |id| json!({"type": "reasoning", "id": id, "summary": [], "encrypted_content": "opaque"});
+        let message =
+            |status, text| json!({"type": "message", "role": "assistant", "status": status, "content": [{"type": "output_text", "text": text}]});
+        let first = message("completed", "Starting the measurement.");
+        let partial = message("incomplete", "The volume is");
+        let reply = responses_reply(&json!({
+            "status": "incomplete",
+            "incomplete_details": {"reason": "max_output_tokens"},
+            "output": [
+                reasoning("rs_1"),
+                first,
+                reasoning("rs_2"),
+                partial,
+                reasoning("rs_3"),
+                {"type": "function_call", "call_id": "call_1", "name": "measure", "arguments": "{"}
+            ]
+        }))
+        .unwrap();
+        assert_eq!(reply.stop, "max_tokens");
+        assert!(reply.calls.is_empty());
+        assert_eq!(reply.text.last(), Some(&(false, "The volume is".to_string())));
+        let next_input = responses_input("system", &[reply.assistant]);
+        assert_eq!(next_input[1..], [reasoning("rs_1"), first, reasoning("rs_2"), partial]);
+    }
+
+    #[test]
+    fn the_responses_connection_test_posts_to_the_selected_protocol() {
+        let http: HttpFn = Arc::new(|request| {
+            assert_eq!(request.url, "https://api.openai.com/v1/responses");
+            assert_eq!(request.method, "POST");
+            let body: Value = serde_json::from_slice(request.body.as_deref().unwrap()).unwrap();
+            assert_eq!(body["model"], "m");
+            assert_eq!(body["reasoning"]["effort"], "medium");
+            Ok((200, br#"{"status":"completed","output":[]}"#.to_vec()))
+        });
+        assert!(test_responses_endpoint(&http, "https://api.openai.com/v1/", Some("k"), "m", false, "medium").is_ok());
+        assert!(test_responses_endpoint(&http, "http://10.0.0.2/v1", Some("k"), "m", false, "medium").is_err());
     }
 
     fn refusal() -> (u16, Value) {
@@ -2897,10 +3187,31 @@ mod tests {
     }
 
     #[test]
-    fn mcp_tools_become_anthropic_tools_without_crash_reports() {
+    fn plugin_tools_reach_the_model_under_api_names_and_go_back_under_their_own() {
+        let list = json!({"tools": [
+            {"name": "measure"},
+            {"name": "gears.make", "description": "Plugin tool", "inputSchema": {"type": "object"}, "plugin": {"id": "gears"}},
+            {"name": "bad name"},
+        ]});
+        assert_eq!(tool_names(&list), ["measure", "gears__make"]);
+        assert_eq!(anthropic_tools(&list)[1]["name"], "gears__make");
+        assert_eq!(openai_tools(&list)[1]["function"]["name"], "gears__make");
+        assert_eq!(mcp_tool_name("gears__make"), "gears.make");
+        assert_eq!(mcp_tool_name("measure"), "measure");
+        assert_eq!(mcp_tool_name("skill_reference"), "skill_reference");
+        let long = format!("{}.{}", "a".repeat(40), "b".repeat(40));
+        assert_eq!(api_tool_name(&long), None, "a name past 64 characters is left out, never sent");
+    }
+
+    #[test]
+    fn mcp_tools_become_anthropic_tools_without_external_app_tools() {
         let list = json!({"tools": [
             {"name": "batch", "description": "Run commands", "inputSchema": {"type": "object", "properties": {"commands": {"type": "array"}}}},
             {"name": "crash_reports", "description": "x", "inputSchema": {"type": "object"}},
+            {"name": "documents", "inputSchema": {"type": "object"}},
+            {"name": "quit_app", "inputSchema": {"type": "object"}},
+            {"name": "preferences", "inputSchema": {"type": "object"}},
+            {"name": "agent_cursor", "inputSchema": {"type": "object"}},
             {"name": "measure"},
         ]});
         let t = anthropic_tools(&list);
@@ -2980,6 +3291,7 @@ mod tests {
             http,
             request_timeout_s: 300,
             reasoning_effort: String::new(),
+            openai_responses: false,
         };
         let ctx = StartContext { cwd: std::env::temp_dir(), bridge: None, tools: None, wake: Box::new(|| {}) };
         let mut b = ApiBackend::start(cfg, ctx).unwrap();
@@ -3031,6 +3343,7 @@ mod tests {
             http,
             request_timeout_s: 300,
             reasoning_effort: String::new(),
+            openai_responses: false,
         };
         let ctx = StartContext { cwd: std::env::temp_dir(), bridge: None, tools: None, wake: Box::new(|| {}) };
         let mut b = ApiBackend::start(cfg, ctx).unwrap();
@@ -3083,6 +3396,7 @@ mod tests {
             http,
             request_timeout_s: 300,
             reasoning_effort: String::new(),
+            openai_responses: false,
         };
         let ctx = StartContext { cwd: std::env::temp_dir(), bridge: None, tools: None, wake: Box::new(|| {}) };
         let mut b = ApiBackend::start(cfg, ctx).unwrap();

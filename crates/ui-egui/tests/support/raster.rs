@@ -23,6 +23,11 @@ pub fn paint_at(h: &mut Harness, textures: &mut HashMap<TextureId, ColorImage>, 
             h.app.ui(ui);
         },
     );
+    collect_textures(textures, &mut out);
+    out
+}
+
+pub fn collect_textures(textures: &mut HashMap<TextureId, ColorImage>, out: &mut egui::FullOutput) {
     for (id, deltas) in &out.textures_delta.set {
         for delta in deltas {
             let egui::ImageData::Color(image) = &delta.image;
@@ -40,7 +45,6 @@ pub fn paint_at(h: &mut Harness, textures: &mut HashMap<TextureId, ColorImage>, 
         }
     }
     out.textures_delta.clear();
-    out
 }
 
 pub fn raster(h: &mut Harness, textures: &HashMap<TextureId, ColorImage>, out: egui::FullOutput) -> image::RgbaImage {

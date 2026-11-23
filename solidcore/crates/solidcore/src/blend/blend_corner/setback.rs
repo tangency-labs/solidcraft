@@ -163,7 +163,7 @@ pub struct SetbackCorner {
     /// `m_bSetBackOpen` (the fork's ef57570, smlib#125): an open G1 corner, its spring
     /// curves made in closed form ([`build_setback_fill`]), no fill and no patches.
     pub open: bool,
-    /// Not the fork (#2488, with `fillet_round_as_definition`): the fill's definition, which
+    /// Not the fork (#2488): the fill's definition, which
     /// its patches keep.
     pub definition: Option<Arc<SetbackFill>>,
 }
@@ -292,6 +292,12 @@ pub fn asked_setback_not_built(corner: &FilletCorner) -> bool {
 /// The refusal's comment for [`asked_setback_not_built`].
 pub const SETBACK_NOT_BUILT: &str =
     "Fillet Error: a setback is asked for at a corner that builds none (neither the blend corner's Setback nor an N x N corner), so it would not be built";
+
+/// The refusal's comment for a setback with an ease set on a made corner that is the Setback
+/// beside a curved face, whose fill is G1 only ([`classify_setback`]): built without the ease
+/// it would not be the setback asked.
+pub const SETBACK_EASE_NOT_BUILT: &str =
+    "Fillet Error: a setback with an ease is asked for at a setback corner beside a curved face, whose fill is G1 only, so it would not be built as asked";
 
 /// The setback asked at `vertex`: its fill's ([`set_back_fill_of`]), else the setback set on
 /// its corner ([`FilletCorner::set_back_dist`]); `0` for none.
@@ -2914,7 +2920,7 @@ pub fn build_setback_fill<S: SetbackSolvers>(
         Vec::new()
     };
     let definition = match worst {
-        Some(worst) if k.fixes.fillet_round_as_definition => Some(keep_definition(
+        Some(worst) => Some(keep_definition(
             k,
             &planes.planes,
             &rounds,
@@ -3069,7 +3075,7 @@ fn one_weight_polynomial(curve: &mut BSplineCurve) -> Result<()> {
     curve.make_non_rational()
 }
 
-/// Not the fork (#2488, with `fillet_round_as_definition`): the fill's definition
+/// Not the fork (#2488): the fill's definition
 /// ([`SetbackFill`]: the faces' planes, the rounds at their end sections, the rule's order
 /// and tolerance, the corner's convexity and its containment), certified at once: the rule
 /// run again from the definition makes this fill, number for number, with its
