@@ -14,13 +14,14 @@
 # boolean.api_brep: main's file with torus_guard_major_2x_eff_zero recording the constructor's refusal of its torus, whose tube crosses its axis (#20227): ints.record [] -> [2]
 # primitive.api_primitives: main's file with the 40 spheres of negative radius refused, each `{"rec":[1007.0]}` (#20227); the 14 of them that had rows (gen0244, gen0416, gen0419, gen0585, gen0598, gen0621, gen0769, gen0790, gen0893, gen0897, gen0957, gen1094, gen1206, gen1252) lose their rows, and gen0244's and gen0893's `rounding-bound` entries leave the open list, since a refused case has no body
 # blend.fillet_executive_p3, blend.fillet_geom_p2: main's files with the plane crossing's refit (tangency-labs/solidcraft#20237): p2's eight generated cases fitted with other stations, p3's four law-cube cases one result-geometry value 1e-9 to 3e-9 off, and the two law-box edge-map cases' lines with the lowered tolerances their rows hold
+# blend.fillet_executive_p1, topology.edge, topology.face_p3: main's files with the rows whose gap-cache flags go from 1 to 0 where edge::set_interval now clears the gaps of the old interval (#20939): 3, 43 and 20 rows, no other value moved
 # topology.brep_p1: main's file with the 141 SetSize rows whose kernel-context columns keep the defaults (50, 1e-5, 1000) after a B-rep size setter, which no longer writes the context (tangency-labs/solidcraft#20938)
 blend.feature_executive	2a4bd65805caa498
 blend.fillet_corner_p1	b2b709c01153c4b4
 blend.fillet_corner_p2	6d62684209753123
 blend.fillet_corner_p3	41ff3e1d687449c4
 blend.fillet_custom_solver	d5a7b6227772dc0a
-blend.fillet_executive_p1	86854330a700f392
+blend.fillet_executive_p1	29550c0f9b47966c
 blend.fillet_executive_p2	68a6e765f600c883
 blend.fillet_executive_p3	2b5734a9005efba1
 blend.fillet_geom_p1	82c1f975f967a59d
@@ -279,13 +280,13 @@ topology.brep_p9	d9233137f377380a
 topology.brep_planar_section	a976f4fa434ae901
 topology.brep_validation	29cd4704562201a9
 topology.database_io	262a4cfd7e00c533
-topology.edge	90c4e2112d651d63
+topology.edge	96413b54eba12702
 topology.edgeuse_p1	8d285f9e2eb6f32d
 topology.edgeuse_p2	4b628e0b414efcc0
 topology.edgeuse_p3	7c0b8d580d2a7b12
 topology.face_p1	eae7279ae1704f4d
 topology.face_p2	3d9f19f33644771c
-topology.face_p3	b770f477c080b1ed
+topology.face_p3	697a7ba93736218b
 topology.face_p4	539b264456215c71
 topology.loopuse	a5205f3ad278e686
 topology.part_file	059f0c49211cb6c3
