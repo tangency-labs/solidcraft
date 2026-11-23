@@ -38,6 +38,22 @@ const STRAIGHT_TOL: f64 = 1e-3;
 /// `<its name> · <the other's>`. An error about a piece names it by its line and the tube it starts past
 /// ([`pieces_by_line`]).
 pub(super) fn evaluate(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, st: &mut ModelState) -> Result<()> {
+    if frame::groups_joined(&f.kind) {
+        // One frame, its corners finished across its groups: each member named as its group names it.
+        frame::check_group_options(&f.kind)?;
+        let FeatureKind::FrameMember { profile, names, .. } = &f.kind else {
+            return Err(DocError::Invalid("not a frame member feature".into()));
+        };
+        let (ids, _) = member_parts(st, &f.kind)?;
+        let default = profile_regions(vals, st, profile)?.1;
+        let bases = group_bases(&f.kind, &default, ids.len());
+        let pinned = ids.iter().cloned().zip(group_member_names(st, &ids, &bases, names)).collect::<BTreeMap<_, _>>();
+        let mut joint = f.clone();
+        if let FeatureKind::FrameMember { names, .. } = &mut joint.kind {
+            names.extend(pinned);
+        }
+        return built(doc, vals, &joint, st, 0).map_err(|e| pieces_by_line(st, f, e));
+    }
     if let Some(groups) = frame::group_features(f)? {
         let FeatureKind::FrameMember { profile, names, .. } = &f.kind else {
             return Err(DocError::Invalid("not a frame member feature".into()));
@@ -86,7 +102,7 @@ fn built(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, st: &mut M
     let FeatureKind::FrameMember { body_name, names, corner, flip, corners, fit_ends, gap, .. } = &f.kind else {
         return Err(DocError::Invalid("not a frame member feature".into()));
     };
-    let Layout { segments, regions, description, at, turn, sketch_x, drawn, planes, turns, centre } = layout(doc, vals, f, st)?;
+    let Layout { segments, regions, description, at, turn, sketch_x, drawn, planes, turns, centre, placing } = layout(doc, vals, f, st)?;
     if corners.iter().flat_map(|c| &c.members).any(|m| m.feature.as_ref().is_some_and(|n| *n != f.name)) {
         return Err(DocError::Invalid("not supported yet: a corner with a member of another frame".into()));
     }
@@ -119,9 +135,8 @@ fn built(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, st: &mut M
         }
     }
     // Each member's Rotate turn (#15070), by its line: a piece of a turned line turns with it.
-    let own: Vec<f64> = lines.iter().map(|l| turns.get(l).copied().unwrap_or(0.0)).collect();
-    let ats: Vec<Vec2> = own.iter().map(|t| turned_at(at, centre, *t)).collect();
-    let (axes, plain) = section_axes(&segments, &planes, plan.as_ref(), turn, &own)?;
+    let (ats, group_turns, own) = member_placing(&lines, &placing, (at, turn), &turns, centre);
+    let (axes, plain) = section_axes(&segments, &planes, plan.as_ref(), &group_turns, &own)?;
     let (placed, unreversed) = (placer(&axes, &ats), unreversed_placer(&plain, &ats));
     // Fit Ends to Earlier Frames (None never fits): the earlier Frame Members' tubes and their copies, as cutting
     // tools, and this frame's own tubes laid before each free end (ruling A14), whether or not an earlier one exists.
@@ -1225,7 +1240,7 @@ fn section_axes(
     segments: &[(String, Vec3, Vec3)],
     planes: &[MemberPlane],
     plan: Option<&Plan>,
-    turn: f64,
+    turn: &[f64],
     own: &[f64],
 ) -> Result<(Vec<Axes>, Vec<Option<Axes>>)> {
     let mut ups: Vec<Option<Vec3>> = vec![None; segments.len()];
@@ -1247,8 +1262,8 @@ fn section_axes(
     for (m, (id, a, b)) in segments.iter().enumerate() {
         let reversed = reverse.get(m).copied().unwrap_or(false);
         let up = ups.get(m).copied().flatten();
-        // A Rotate step (#15070) turns the member further.
-        let turn = turn + own.get(m).copied().unwrap_or(0.0).rem_euclid(TAU);
+        // Its group's turn, and a Rotate step (#15070) turns the member further.
+        let turn = turn.get(m).copied().unwrap_or(0.0) + own.get(m).copied().unwrap_or(0.0).rem_euclid(TAU);
         let lined = up.and_then(|up| frame::group_axes(if reversed { *a - *b } else { *b - *a }, up, turn));
         plain.push(up.filter(|_| reversed && lined.is_some()).and_then(|up| frame::group_axes(*b - *a, up, turn)));
         axes.push(lined.or_else(|| frame::member_axes(*b - *a, turn)).ok_or_else(|| DocError::Invalid(format!("line `{id}` has no length")))?);
@@ -1817,50 +1832,91 @@ struct Layout {
     planes: Vec<MemberPlane>,
     turns: BTreeMap<String, f64>,
     centre: Vec2,
+    /// In a frame of several groups, each line's profile point on it and turn about it: its
+    /// group's. Empty for one group, whose `at` and `turn` every member takes.
+    placing: BTreeMap<String, (Vec2, f64)>,
+}
+
+/// Each member's profile point on its line, its group's turn and its Rotate turn (#15070), by its
+/// line (`lines`; a piece's, its line's): `placing`'s, else the feature's `at` and `turn`, the point
+/// moved by the Rotate turn about `centre` ([`turned_at`]).
+fn member_placing(
+    lines: &[String],
+    placing: &BTreeMap<String, (Vec2, f64)>,
+    (at, turn): (Vec2, f64),
+    turns: &BTreeMap<String, f64>,
+    centre: Vec2,
+) -> (Vec<Vec2>, Vec<f64>, Vec<f64>) {
+    let mut out = (Vec::with_capacity(lines.len()), Vec::with_capacity(lines.len()), Vec::with_capacity(lines.len()));
+    for l in lines {
+        let (a, t) = placing.get(l).copied().unwrap_or((at, turn));
+        let own = turns.get(l).copied().unwrap_or(0.0);
+        out.0.push(turned_at(a, centre, own));
+        out.1.push(t);
+        out.2.push(own);
+    }
+    out
 }
 
 fn layout(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, st: &ModelState) -> Result<Layout> {
-    if matches!(&f.kind, FeatureKind::FrameMember { groups, .. } if !groups.is_empty()) {
-        return Err(DocError::Invalid("not supported yet: joint layout across frame member groups".into()));
-    }
-    let FeatureKind::FrameMember { profile, anchor, locate, angle, mirror, corner, .. } = &f.kind else {
+    let FeatureKind::FrameMember { profile, corner, .. } = &f.kind else {
         return Err(DocError::Invalid("not a frame member feature".into()));
     };
+    let groups = frame::member_groups(&f.kind);
+    if groups.len() > 1 {
+        frame::check_group_options(&f.kind)?;
+    }
+    let first = groups.first().cloned().unwrap_or_default();
     let (segments, sketch_x, drawn, planes) = segments(doc, vals, f, st)?;
     let (mut regions, description, origin) = profile_regions(vals, st, profile)?;
-    if *mirror {
+    // Several groups share one section: they agree on Mirror ([`frame::check_group_options`]).
+    let mirror = first.mirror;
+    if mirror {
         regions = regions.iter().map(frame::mirrored).collect();
     }
-    let at = match locate {
-        Some([x, y]) => {
-            // A design file is hostile input: the command checks the point, a file may not.
-            if !(x.is_finite() && y.is_finite() && x.abs() <= frame::MAX_PROFILE_SIZE && y.abs() <= frame::MAX_PROFILE_SIZE) {
-                return Err(DocError::Invalid(format!("frame member `locate` must be two finite lengths within {} mm", frame::MAX_PROFILE_SIZE)));
+    // A group's profile point on its lines and its turn about them.
+    let place = |g: &frame::MemberGroup| -> Result<(Vec2, f64)> {
+        let at = match g.locate {
+            Some([x, y]) => {
+                // A design file is hostile input: the command checks the point, a file may not.
+                if !(x.is_finite() && y.is_finite() && x.abs() <= frame::MAX_PROFILE_SIZE && y.abs() <= frame::MAX_PROFILE_SIZE) {
+                    return Err(DocError::Invalid(format!("frame member `locate` must be two finite lengths within {} mm", frame::MAX_PROFILE_SIZE)));
+                }
+                // `locate` is the profile point that sits on the line, measured from the profile's
+                // own origin (`Profile::origin`). The built-in region is centred on its bounding
+                // box, so that origin moves when the section's size changes, and the located point
+                // moves with it: the member stays attached at the same point of its section.
+                let p = origin + Vec2::new(x, y);
+                if mirror { Vec2::new(-p.x, p.y) } else { p }
             }
-            // `locate` is the profile point that sits on the line, measured from the profile's
-            // own origin (`Profile::origin`). The built-in region is centred on its bounding
-            // box, so that origin moves when the section's size changes, and the located point
-            // moves with it: the member stays attached at the same point of its section.
-            let p = origin + Vec2::new(*x, *y);
-            if *mirror { Vec2::new(-p.x, p.y) } else { p }
+            None => frame::anchor_point(&regions, g.anchor),
+        };
+        let turn = match &g.angle {
+            Some(e) => val(vals, e, Kind::Angle)?,
+            None => 0.0,
+        };
+        Ok((at, turn))
+    };
+    let (at, turn) = place(&first)?;
+    let mut placing = BTreeMap::new();
+    if groups.len() > 1 {
+        for g in &groups {
+            let p = place(g)?;
+            placing.extend(g.lines.iter().map(|l| (l.clone(), p)));
         }
-        None => frame::anchor_point(&regions, *anchor),
-    };
-    let turn = match angle {
-        Some(e) => val(vals, e, Kind::Angle)?,
-        None => 0.0,
-    };
+    }
     if *corner == CornerType::Auto {
         // A full circle is one arc, and its tube's one wall has its seam where the arc starts. Unmirrored and
         // unturned that is the section's +x, the inside of an outline Auto lays anticlockwise; Mirror or a turn
         // carries it round, to the outside on a mirror or a half turn, where each through tube's flat end touches
         // the tube fitted to it along that tube's outer side. SMLib's check refuses the fit there ("Face Near
-        // missing Seam"), so under Auto every circle keeps its seam on the section's +x as placed (#4003).
+        // missing Seam"), so under Auto every circle keeps its seam on the section's +x as placed (#4003). Groups
+        // share one section: it keeps the first group's.
         regions = regions.iter().map(|r| seamed(r, -turn)).collect();
     }
     let turns = member_turns(doc, vals, FeatureId(f.id)).into_iter().map(|(line, (_, a))| (line, a)).collect();
     let centre = frame::anchor_point(&regions, frame::Anchor::Center);
-    Ok(Layout { segments, regions, description, at, turn, sketch_x, drawn, planes, turns, centre })
+    Ok(Layout { segments, regions, description, at, turn, sketch_x, drawn, planes, turns, centre, placing })
 }
 
 /// The profile point on the line of a member a Rotate step turns `t` (radians) further (#15070): the profile turns
@@ -1967,7 +2023,9 @@ pub(crate) fn member_section(
     st: &ModelState,
     line: &str,
 ) -> Result<(Plane, f64, Region2, [bool; 2])> {
-    if let Some(groups) = frame::group_features(f)? {
+    if !frame::groups_joined(&f.kind)
+        && let Some(groups) = frame::group_features(f)?
+    {
         let group = groups
             .into_iter()
             .find(|g| {
@@ -1980,15 +2038,14 @@ pub(crate) fn member_section(
     let FeatureKind::FrameMember { corner, corners, gap, .. } = &f.kind else {
         return Err(DocError::Invalid("not a frame member feature".into()));
     };
-    let Layout { segments, regions, at, turn, sketch_x, drawn, planes, turns, centre, .. } = layout(doc, vals, f, st)?;
+    let Layout { segments, regions, at, turn, sketch_x, drawn, planes, turns, centre, placing, .. } = layout(doc, vals, f, st)?;
     let gap = gap_value(vals, gap.as_ref(), "`gap`")?;
     let corners = &overrides(*corner, (&segments, &planes, &drawn, sketch_x), corners, Some((vals, gap)))?;
     let (plan, crossing) = plans(*corner, &segments, &planes, corners, &drawn)?;
     let overlaps = overlap_overrides(*corner, &segments, &planes, corners);
-    // Each member's Rotate turn (#15070), by its line, as [`built`] turns it.
-    let own: Vec<f64> =
-        member_lines_of(&segments, plan.as_ref().or(crossing.as_ref())).iter().map(|l| turns.get(l).copied().unwrap_or(0.0)).collect();
-    let ats: Vec<Vec2> = own.iter().map(|t| turned_at(at, centre, *t)).collect();
+    // Each member's placing and Rotate turn (#15070), by its line, as [`built`] turns it.
+    let lines = member_lines_of(&segments, plan.as_ref().or(crossing.as_ref()));
+    let (ats, group_turns, own) = member_placing(&lines, &placing, (at, turn), &turns, centre);
     let (segments, planes, drawn) = pieced(segments, planes, drawn, plan.as_ref().or(crossing.as_ref()))?;
     // A piece split off where another tube overlaps it (`L>X`) lies along L, never from L's start: its ends at the cuts
     // lie inside L, so only L's end may be open.
@@ -1998,7 +2055,7 @@ pub(crate) fn member_section(
         None => (overlap_parent(&ids, line).and_then(|l| ids.iter().position(|id| id == l)), true),
     };
     let m = m.ok_or_else(|| DocError::Unknown(format!("line `{line}` of the member feature")))?;
-    let (axes, _) = section_axes(&segments, &planes, plan.as_ref(), turn, &own)?;
+    let (axes, _) = section_axes(&segments, &planes, plan.as_ref(), &group_turns, &own)?;
     let (x, y) = axes.get(m).copied().ok_or_else(|| DocError::Invalid(format!("line `{line}` has no length")))?;
     let (a, b) = segments.get(m).map(|s| (s.1, s.2)).ok_or_else(|| DocError::Unknown(format!("line `{line}` of the member feature")))?;
     let placed = placer(&axes, &ats);
@@ -2026,7 +2083,9 @@ pub(crate) fn member_section(
 /// The point member `line` of `f` turns about, halfway along it: the centre of the profile's
 /// bounding box, which a Rotate step's turn leaves where it is ([`turned_at`]).
 pub(crate) fn member_pivot(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, st: &ModelState, line: &str) -> Result<Vec3> {
-    if let Some(groups) = frame::group_features(f)? {
+    if !frame::groups_joined(&f.kind)
+        && let Some(groups) = frame::group_features(f)?
+    {
         let group = groups
             .into_iter()
             .find(|g| {
@@ -2039,14 +2098,17 @@ pub(crate) fn member_pivot(doc: &Document, vals: &BTreeMap<String, Value>, f: &F
     let FeatureKind::FrameMember { corner, corners, gap, .. } = &f.kind else {
         return Err(DocError::Invalid("not a frame member feature".into()));
     };
-    let Layout { segments, at, turn, sketch_x, drawn, planes, centre, .. } = layout(doc, vals, f, st)?;
+    let Layout { segments, at, turn, sketch_x, drawn, planes, centre, placing, .. } = layout(doc, vals, f, st)?;
     let gap = gap_value(vals, gap.as_ref(), "`gap`")?;
     let corners = &overrides(*corner, (&segments, &planes, &drawn, sketch_x), corners, Some((vals, gap)))?;
     let (plan, crossing) = plans(*corner, &segments, &planes, corners, &drawn)?;
+    let lines = member_lines_of(&segments, plan.as_ref().or(crossing.as_ref()));
+    let (ats, group_turns, _) = member_placing(&lines, &placing, (at, turn), &BTreeMap::new(), centre);
     let (segments, planes, _) = pieced(segments, planes, drawn, plan.as_ref().or(crossing.as_ref()))?;
     let unknown = || DocError::Unknown(format!("line `{line}` of the member feature"));
     let m = segments.iter().position(|s| s.0 == line).ok_or_else(unknown)?;
-    let (axes, _) = section_axes(&segments, &planes, plan.as_ref(), turn, &vec![0.0; segments.len()])?;
+    let at = ats.get(m).copied().unwrap_or(at);
+    let (axes, _) = section_axes(&segments, &planes, plan.as_ref(), &group_turns, &vec![0.0; segments.len()])?;
     let (x, y) = axes.get(m).copied().ok_or_else(|| DocError::Invalid(format!("line `{line}` has no length")))?;
     let (a, b) = segments.get(m).map(|s| (s.1, s.2)).ok_or_else(unknown)?;
     Ok(a + x * (centre.x - at.x) + y * (centre.y - at.y) + (b - a) * 0.5)

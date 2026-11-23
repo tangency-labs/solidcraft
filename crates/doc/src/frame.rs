@@ -989,9 +989,18 @@ pub fn member_groups(kind: &crate::FeatureKind) -> Vec<MemberGroup> {
     }
 }
 
-/// Check the combinations this first grouped placement model can represent. Flat Frame Members
-/// retain every Auto/corner/pair option; a grouped frame is independent straight sketch lines.
-/// Refuse an unsupported combination rather than dropping a saved finishing or path setting.
+/// Whether grouped frame member `kind` is built as one frame, its corners finished across its
+/// groups: it has groups and a corner type or corner overrides. A grouped frame with neither builds
+/// each group on its own ([`group_features`]), as it always has.
+pub fn groups_joined(kind: &crate::FeatureKind) -> bool {
+    matches!(kind, crate::FeatureKind::FrameMember { groups, corner, corners, .. } if !groups.is_empty() && (!corner.is_none() || !corners.is_empty()))
+}
+
+/// Check the combinations grouped placement can represent. Flat Frame Members retain every
+/// Auto/corner/pair option; a grouped frame is straight sketch lines, its corners finished across
+/// its groups when it has a corner type or overrides ([`groups_joined`]): then its groups share one
+/// section, so they must agree on Mirror (turn a group instead). Refuse an unsupported combination
+/// rather than dropping a saved finishing or path setting.
 pub fn check_group_options(kind: &crate::FeatureKind) -> crate::Result<()> {
     let crate::FeatureKind::FrameMember {
         groups,
@@ -1024,11 +1033,14 @@ pub fn check_group_options(kind: &crate::FeatureKind) -> crate::Result<()> {
     if !pairs.is_empty() {
         return Err(invalid("not supported yet: frame member groups with point pairs; use a separate Frame Member for pairs"));
     }
-    if !corner.is_none() || !corners.is_empty() {
-        return Err(invalid("not supported yet: frame member groups with joined corners; use corner none without corner overrides"));
+    let joined = !corner.is_none() || !corners.is_empty();
+    if joined && groups.iter().any(|g| g.mirror != groups.first().is_some_and(|f| f.mirror)) {
+        return Err(invalid(
+            "not supported yet: corners between mirrored and unmirrored frame member groups; turn the group with `angle` instead of mirroring it",
+        ));
     }
-    if *flip || *fit_ends || *coped || gap.is_some() {
-        return Err(invalid("not supported yet: frame member groups with flip, fit_ends, coped or gap; use separate Frame Members for finishing"));
+    if !joined && (*flip || *fit_ends || *coped || gap.is_some()) {
+        return Err(invalid("frame member groups take flip, fit_ends, coped and gap only with a corner type or corner overrides"));
     }
     if !lines.is_empty() || !anchor.is_origin() || locate.is_some() || angle.is_some() || *mirror || body_name.is_some() {
         return Err(invalid("frame member groups keep lines and placement inside each group, not beside groups"));

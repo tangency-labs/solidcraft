@@ -2915,7 +2915,7 @@ fn removing_the_shown_group_keeps_its_neighbours_values() {
 }
 
 #[test]
-fn adding_groups_refuses_joined_corners_without_resetting_flat_frame_controls() {
+fn groups_send_the_frames_corners_and_finishing_once() {
     let mut app = frame_app();
     let lines = frame_lines(&app);
     let mut d = dialog_on(&mut app, &lines[..1]);
@@ -2924,18 +2924,16 @@ fn adding_groups_refuses_joined_corners_without_resetting_flat_frame_controls() 
     m.coped = true;
     m.gap = "2 mm".into();
     m.add_group(&mut d.inputs);
-    let err = apply_commands(&app, &d).unwrap_err();
-    assert!(err.contains("not supported yet: frame member groups with joined corners"), "{err}");
-    let Kind::Frame(m) = &mut d.kind else { panic!("not a frame member") };
-    assert_eq!(m.corner, corner_type("auto"));
-    assert!(m.coped);
-    assert_eq!(m.gap, "2 mm");
-    m.remove_group(&mut d.inputs);
+    m.angle = "90 deg".into();
+    d.inputs[0].items = vec![Sel::ExternalSketchCurve { sketch: sketch_id(&app, "Frame"), id: lines[1].clone() }];
     let commands = apply_commands(&app, &d).unwrap();
     let p = &commands[0].1;
-    assert!(p.get("groups").is_none());
+    assert_eq!(p["groups"].as_array().map(Vec::len), Some(2), "{p}");
+    assert!(p["groups"].as_array().unwrap().iter().all(|g| g.get("corner").is_none() && g.get("gap").is_none()), "{p}");
     assert_eq!(p["corner"], "auto");
     assert_eq!(p["coped"], true);
     assert_eq!(p["gap"], "2 mm");
     assert_eq!(p["fit_ends"], true);
+    run_all(&mut app, commands);
+    assert_eq!(body_names(&app).len(), 2);
 }

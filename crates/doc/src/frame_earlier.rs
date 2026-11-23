@@ -46,8 +46,8 @@ use solidcraft_kernel::{self as kernel, PointClass};
 
 use super::super::{ModelState, mirror_matrix, pattern_transforms, point, val};
 use super::{
-    Axes, CutEnd, Layout, Reach, copes, frame_ends, frame_member_id, gap_value, layout, member_line_ids, member_lines_of, member_tool, members_at,
-    overlap_overrides, overlap_parent, overrides, pieced, placer, plans, section_axes, section_reach, turned_at,
+    Axes, CutEnd, Layout, Reach, copes, frame_ends, frame_member_id, gap_value, layout, member_line_ids, member_lines_of, member_placing,
+    member_tool, members_at, overlap_overrides, overlap_parent, overrides, pieced, placer, plans, section_axes, section_reach,
 };
 use crate::expr::{Kind, Value};
 use crate::frame::MAX_MEMBERS;
@@ -324,7 +324,9 @@ struct Members {
 
 impl Members {
     fn of(doc: &Document, vals: &BTreeMap<String, Value>, g: &Feature, st: &ModelState, (coped, gap): (bool, f64)) -> Result<Members> {
-        if let Some(features) = crate::frame::group_features(g)? {
+        if !crate::frame::groups_joined(&g.kind)
+            && let Some(features) = crate::frame::group_features(g)?
+        {
             let groups = features.iter().map(|f| Self::of(doc, vals, f, st, (coped, gap))).collect::<Result<Vec<_>>>()?;
             let segments = groups.iter().flat_map(|g| g.segments.iter().cloned()).collect();
             let points = groups.iter().flat_map(|g| g.points.iter().copied()).collect();
@@ -344,7 +346,7 @@ impl Members {
         let FeatureKind::FrameMember { corner, corners, gap: own_gap, .. } = &g.kind else {
             return Err(DocError::Invalid("not a frame member feature".into()));
         };
-        let Layout { segments, regions, at, turn, sketch_x, drawn, planes, turns, centre, .. } = layout(doc, vals, g, st)?;
+        let Layout { segments, regions, at, turn, sketch_x, drawn, planes, turns, centre, placing, .. } = layout(doc, vals, g, st)?;
         let own_gap = gap_value(vals, own_gap.as_ref(), "`gap`")?;
         let corners = &overrides(*corner, (&segments, &planes, &drawn, sketch_x), corners, Some((vals, own_gap)))?;
         // ponytail: an earlier frame's corner or chain corner that its own Fit Ends left Free is cut here as jointed
@@ -354,11 +356,10 @@ impl Members {
         let overlaps = overlap_overrides(*corner, &segments, &planes, corners);
         // Where crossings cut its lines its members are their pieces, as `member_line_ids` lists them.
         // Its members turned by its Rotate steps (#15070), as it built them.
-        let own: Vec<f64> =
-            member_lines_of(&segments, plan.as_ref().or(crossing.as_ref())).iter().map(|l| turns.get(l).copied().unwrap_or(0.0)).collect();
-        let ats: Vec<Vec2> = own.iter().map(|t| turned_at(at, centre, *t)).collect();
+        let lines = member_lines_of(&segments, plan.as_ref().or(crossing.as_ref()));
+        let (ats, group_turns, own) = member_placing(&lines, &placing, (at, turn), &turns, centre);
         let (segments, planes, drawn) = pieced(segments, planes, drawn, plan.as_ref().or(crossing.as_ref()))?;
-        let (axes, _) = section_axes(&segments, &planes, plan.as_ref(), turn, &own)?;
+        let (axes, _) = section_axes(&segments, &planes, plan.as_ref(), &group_turns, &own)?;
         let inside = regions.first().map(|r| r.interior_point()).ok_or_else(|| DocError::Invalid("the member profile has no area".into()))?;
         let (ends, points) = {
             let placed = placer(&axes, &ats);
