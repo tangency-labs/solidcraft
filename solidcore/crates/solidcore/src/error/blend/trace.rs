@@ -74,6 +74,16 @@ pub enum TraceFailure {
         /// The cosine measured, where the check measures one.
         dot: Option<f64>,
     },
+    /// At a joint of a law-cornered round's pieces, the joined surface's weight `joined`
+    /// and the next piece's `piece` at an end of the joint are not both positive with a
+    /// finite ratio, so the piece cannot be put on the joined surface's homogeneous scale
+    /// ([`ErrorKind::Unsupported`]).
+    JointWeightNotPositive {
+        /// The joined surface's weight at the joint's end.
+        joined: f64,
+        /// The piece's weight at the joint's end.
+        piece: f64,
+    },
     /// The law corners' classification was given no end parameter for the corner after
     /// piece `piece`: its `ends` hold fewer parameters than there are pieces. The
     /// caller's input ([`ErrorKind::InvalidInput`]); status `SM_ERR`.
@@ -188,6 +198,7 @@ impl TraceFailure {
             Self::CrossSectionsIncompatible { .. } => ErrorKind::InvalidInput,
             Self::CurveNotExtendable => ErrorKind::Unsupported,
             Self::EdgeFacesTangent { .. } => ErrorKind::InvalidInput,
+            Self::JointWeightNotPositive { .. } => ErrorKind::Unsupported,
             Self::LawCornerEndMissing { .. } => ErrorKind::InvalidInput,
             Self::NoSingleSurfaceFoot { .. } => ErrorKind::NotFound,
             Self::RailKnotsNotRefinable { .. } => ErrorKind::InvalidInput,
@@ -223,6 +234,7 @@ impl TraceFailure {
             Self::CrossSectionsIncompatible { .. } => SM_ERR,
             Self::CurveNotExtendable => SM_ERR,
             Self::EdgeFacesTangent { .. } => SM_ERR,
+            Self::JointWeightNotPositive { .. } => SM_ERR,
             Self::LawCornerEndMissing { .. } => SM_ERR,
             Self::NoSingleSurfaceFoot { .. } => SM_ERR,
             Self::RailKnotsNotRefinable { .. } => SM_ERR,
@@ -280,6 +292,11 @@ impl core::fmt::Display for TraceFailure {
             Self::EdgeFacesTangent { dot: None } => {
                 f.write_str("the edge is smooth or has no sector to fillet")
             }
+            Self::JointWeightNotPositive { joined, piece } => write!(
+                f,
+                "the weights at a joint of the round's pieces, {joined} and {piece}, are not \
+                 both positive with a finite ratio"
+            ),
             Self::LawCornerEndMissing { piece } => {
                 write!(f, "the law corner after piece {piece} has no end parameter")
             }
