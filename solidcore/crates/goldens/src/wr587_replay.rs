@@ -39,6 +39,7 @@
 )] // test
 
 use std::collections::BTreeMap;
+use std::fmt::Write as _;
 use std::sync::{Arc, Mutex};
 
 use serde_json::Value;
@@ -505,9 +506,11 @@ fn every_moved_row_moved_only_through_the_loop_normal() {
     let tally = tally.lock().unwrap();
     let mut got = String::new();
     for (unit, (n, certs, moves)) in tally.iter() {
-        got.push_str(&format!(
-            "{unit}: {n} rows; calls certified {certs:?}; moves {moves:?}\n"
-        ));
+        writeln!(
+            got,
+            "{unit}: {n} rows; calls certified {certs:?}; moves {moves:?}"
+        )
+        .unwrap();
     }
     eprint!("{got}");
     assert_eq!(got, EXPECTED);
