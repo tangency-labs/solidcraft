@@ -1328,7 +1328,14 @@ fn a_placement_that_scales_a_part_is_checked_as_placed() {
 /// A check job for `body`, as the reader makes one (part `name`, `times` instances).
 fn check_job(body: &Body, name: &str, times: usize) -> checks::Job {
     let n = body.face_count();
-    let source = Arc::new(parallel::Part { body: body.clone(), closed: true, file_faces: n, face_origin: (0..n as u64).collect(), refused: None });
+    let source = Arc::new(parallel::Part {
+        body: body.clone(),
+        closed: true,
+        file_faces: n,
+        face_origin: (0..n as u64).collect(),
+        refused: None,
+        split_edges: 0,
+    });
     checks::Job {
         item: 101,
         part: name.into(),
@@ -1346,7 +1353,14 @@ fn check_job(body: &Body, name: &str, times: usize) -> checks::Job {
 /// first instance.
 fn part_jobs(body: &Body, placements: &[M4]) -> (Vec<checks::Job>, checks::Heals) {
     let n = body.face_count();
-    let part = Arc::new(parallel::Part { body: body.clone(), closed: true, file_faces: n, face_origin: (0..n as u64).collect(), refused: None });
+    let part = Arc::new(parallel::Part {
+        body: body.clone(),
+        closed: true,
+        file_faces: n,
+        face_origin: (0..n as u64).collect(),
+        refused: None,
+        split_edges: 0,
+    });
     let mut jobs: Vec<checks::Job> = Vec::new();
     let mut of: HashMap<Option<[u64; 16]>, usize> = HashMap::new();
     for m in placements {
@@ -3400,6 +3414,133 @@ fn extruded_ellipse_patch_crossing_profile_seam_stays_trimmed() {
     }
 }
 
+/// A surface model of planar rectangular sheets standing on the z axis from (0,0,0) to (0,0,10),
+/// one per `(x, y)` direction, all sharing the one `EDGE_CURVE` along the axis.
+fn sheets_on_one_edge(directions: &[[f64; 2]]) -> String {
+    let mut out = String::from(
+        "ISO-10303-21;\nHEADER;\nFILE_DESCRIPTION((''),'2;1');\nFILE_NAME('t','',(''),(''),'','hand','');\nFILE_SCHEMA(('AUTOMOTIVE_DESIGN { 1 0 10303 214 1 1 1 1 }'));\nENDSEC;\nDATA;\n\
+#1=CARTESIAN_POINT('',(0.,0.,0.));#2=CARTESIAN_POINT('',(0.,0.,10.));#3=VERTEX_POINT('',#1);#4=VERTEX_POINT('',#2);\n\
+#5=DIRECTION('',(0.,0.,1.));#6=VECTOR('',#5,1.);#7=LINE('',#1,#6);#8=EDGE_CURVE('',#3,#4,#7,.T.);#9=ORIENTED_EDGE('',*,*,#8,.T.);\n",
+    );
+    let mut faces = Vec::new();
+    let mut id = 10;
+    for [dx, dy] in directions {
+        let (a, b, c, d) = (id, id + 1, id + 2, id + 3);
+        // Far corners (top, bottom), their vertices, and the three edges round the shared one.
+        out += &format!("#{a}=CARTESIAN_POINT('',({},{},10.));#{b}=CARTESIAN_POINT('',({},{},0.));\n", dx * 10.0, dy * 10.0, dx * 10.0, dy * 10.0);
+        out += &format!("#{c}=VERTEX_POINT('',#{a});#{d}=VERTEX_POINT('',#{b});\n");
+        let dir = id + 4;
+        out += &format!("#{dir}=DIRECTION('',({dx:.1},{dy:.1},0.));#{}=VECTOR('',#{dir},1.);#{}=LINE('',#2,#{});\n", dir + 1, dir + 2, dir + 1);
+        out += &format!("#{}=DIRECTION('',(0.,0.,-1.));#{}=VECTOR('',#{},1.);#{}=LINE('',#{a},#{});\n", dir + 3, dir + 4, dir + 3, dir + 5, dir + 4);
+        out += &format!(
+            "#{}=DIRECTION('',({:.1},{:.1},0.));#{}=VECTOR('',#{},1.);#{}=LINE('',#{b},#{});\n",
+            dir + 6,
+            -dx,
+            -dy,
+            dir + 7,
+            dir + 6,
+            dir + 8,
+            dir + 7
+        );
+        let e = dir + 9;
+        out += &format!(
+            "#{e}=EDGE_CURVE('',#4,#{c},#{},.T.);#{}=EDGE_CURVE('',#{c},#{d},#{},.T.);#{}=EDGE_CURVE('',#{d},#3,#{},.T.);\n",
+            dir + 2,
+            e + 1,
+            dir + 5,
+            e + 2,
+            dir + 8
+        );
+        let o = e + 3;
+        out += &format!(
+            "#{o}=ORIENTED_EDGE('',*,*,#{e},.T.);#{}=ORIENTED_EDGE('',*,*,#{},.T.);#{}=ORIENTED_EDGE('',*,*,#{},.T.);\n",
+            o + 1,
+            e + 1,
+            o + 2,
+            e + 2
+        );
+        // The loop runs up the shared edge, out, down and back, so its normal is (-dy, dx, 0).
+        let (nx, ny) = (-dy, *dx);
+        out += &format!(
+            "#{}=EDGE_LOOP('',(#9,#{o},#{},#{}));#{}=FACE_OUTER_BOUND('',#{},.T.);\n#{}=DIRECTION('',({nx:.1},{ny:.1},0.));#{}=AXIS2_PLACEMENT_3D('',#1,#{},#{dir});#{}=PLANE('',#{});\n",
+            o + 3,
+            o + 1,
+            o + 2,
+            o + 4,
+            o + 3,
+            o + 5,
+            o + 6,
+            o + 5,
+            o + 7,
+            o + 6
+        );
+        out += &format!("#{}=ADVANCED_FACE('',(#{}),#{},.T.);\n", o + 8, o + 4, o + 7);
+        faces.push(format!("#{}", o + 8));
+        id = o + 9;
+    }
+    out += &format!(
+        "#{id}=OPEN_SHELL('',({}));#{}=SHELL_BASED_SURFACE_MODEL('Sheets',(#{id}));\n#{}=SHAPE_REPRESENTATION('',(#{}),$);\nENDSEC;\nEND-ISO-10303-21;\n",
+        faces.join(","),
+        id + 1,
+        id + 2,
+        id + 1
+    );
+    out
+}
+
+/// Sheets standing on one edge, three of them (a "T"): the edge has three face uses, which an
+/// open body may have, so the model is one open body with every face, not refused.
+#[test]
+fn a_surface_model_with_an_edge_of_three_faces_imports_as_one_open_body() {
+    let imp = step_import(&sheets_on_one_edge(&[[1.0, 0.0], [-1.0, 0.0], [0.0, 1.0]])).unwrap();
+    assert_eq!(imp.bodies.len(), 1, "{:?}", imp.warnings);
+    let body = &imp.bodies[0].body;
+    assert!(!imp.bodies[0].closed);
+    assert_eq!(body.face_count(), 3);
+    // Nine outer edges and the shared one, and the third use on a copy of its own: eleven.
+    assert_eq!(body.edge_count(), 11);
+    // The axial edges: the first two uses keep the edge, the third has the copy to itself, with
+    // the same curve and the same vertices.
+    let record = body.record();
+    let mut uses = vec![0usize; record.edges.len()];
+    for face in &record.faces {
+        for l in &face.loops {
+            if let solidcore_record::brep::Loop::Edges { edges } = l {
+                for u in edges {
+                    uses[u.edge as usize] += 1;
+                }
+            }
+        }
+    }
+    let axial: Vec<usize> = (0..record.edges.len())
+        .filter(|&i| {
+            let e = &record.edges[i];
+            e.vertices.iter().all(|&v| {
+                let p = record.vertices[v as usize].point;
+                p[0].abs() < 1e-9 && p[1].abs() < 1e-9
+            })
+        })
+        .collect();
+    assert_eq!(axial.len(), 2, "{axial:?}");
+    let mut counts: Vec<usize> = axial.iter().map(|&i| uses[i]).collect();
+    counts.sort_unstable();
+    assert_eq!(counts, [1, 2]);
+    assert_eq!(record.edges[axial[0]].curve, record.edges[axial[1]].curve);
+    assert_eq!(record.edges[axial[0]].vertices, record.edges[axial[1]].vertices);
+    // One original edge was split, once.
+    assert_eq!(imp.report.split_edges, 1);
+}
+
+/// Two sheets sharing an edge, as before.
+#[test]
+fn a_surface_model_with_an_edge_of_two_faces_still_imports_as_one_open_body() {
+    let imp = step_import(&sheets_on_one_edge(&[[1.0, 0.0], [0.0, 1.0]])).unwrap();
+    assert_eq!(imp.bodies.len(), 1, "{:?}", imp.warnings);
+    assert!(!imp.bodies[0].closed);
+    assert_eq!(imp.bodies[0].body.face_count(), 2);
+    assert_eq!(imp.report.split_edges, 0);
+}
+
 /// Parts of known shape from the step-conformance corpus (`tests/step-conformance`, generated
 /// from formulas by https://github.com/dan335/step-conformance at 96f30bb, CC0 1.0):
 /// each reads back with its exact volume (from the generator's own profile), its box and its
@@ -5351,7 +5492,7 @@ fn an_imported_part_whose_check_fails_is_healed_where_it_is_read() {
     let faces = body.face_count();
     assert_eq!(faces, 8);
     let origin: Vec<u64> = (100..100 + faces as u64).collect();
-    let part = Part { body, closed: true, file_faces: faces, face_origin: origin.clone(), refused: None };
+    let part = Part { body, closed: true, file_faces: faces, face_origin: origin.clone(), refused: None, split_edges: 0 };
     let read = heal(&part, 7, None);
     assert_eq!(part.body.record(), &source, "the part read stays as it was");
     let Healed::Kept(part, note, check, face_source) = read else { panic!("kept") };
@@ -5391,7 +5532,7 @@ fn an_imported_part_whose_check_fails_is_healed_where_it_is_read() {
     // a part whose check passes is left as it is, with no note
     let clean = hair_step_body(3e-3, 1e-3);
     assert_eq!(crate::validation::failing_check(&clean).unwrap(), None);
-    let part = Part { body: clean, closed: true, file_faces: 8, face_origin: origin.clone(), refused: None };
+    let part = Part { body: clean, closed: true, file_faces: 8, face_origin: origin.clone(), refused: None, split_edges: 0 };
     assert!(matches!(heal(&part, 7, None), Healed::NotKept));
 }
 
@@ -5503,7 +5644,7 @@ fn a_stopped_heal_changes_nothing() {
     let stop = solidcraft_smlib::stop::Stop::new();
     stop.stop();
     assert_eq!(stop.within(|| crate::heal_tolerance_defects(&hair)).err(), Some(KernelError::Heal(crate::HealFailure::Stopped)));
-    let part = Part { closed: true, file_faces: 8, face_origin: (0..8).collect(), refused: None, body: hair.clone() };
+    let part = Part { closed: true, file_faces: 8, face_origin: (0..8).collect(), refused: None, split_edges: 0, body: hair.clone() };
     assert!(matches!(stop.within(|| heal(&part, 7, None)), Healed::Stopped));
     assert_eq!(part.body.record(), &source);
     // In the import's checks: a stopped run heals nothing and says it was stopped.
@@ -5735,6 +5876,7 @@ fn the_checks_heal_a_shared_import_once_they_end() {
             source_item: 7,
             face_origin: (0..8).collect(),
             name: "Hair".into(),
+            common_face_name: None,
             body: hair.clone(),
             color: None,
             path: Vec::new(),
@@ -5926,6 +6068,94 @@ fn a_cap_whose_rim_is_one_closed_edge_measures_its_whole_volume() {
     let text = e.solid(&[cap, base]);
     // The hemisphere: 2 pi R^3 / 3.
     assert_closed_solid(&text, 2, 2.0 * std::f64::consts::PI * 100.0_f64.powi(3) / 3.0);
+}
+
+/// #20514: a thin tube (rings 0.1 mm wide) whose circles are each one closed edge, the inner top
+/// circle's vertex on the far side. The two circles of a ring are told apart by size, and a
+/// coarse polygon of the outer one came out smaller than one of the inner, so a ring was read as
+/// its own hole and its face turned over: the volume was right and the area short by both rings.
+#[test]
+fn a_thin_ring_with_a_far_side_vertex_keeps_both_rings_in_its_area() {
+    thin_ring(15.5, 15.4, false);
+}
+
+/// The same tube 3.1 m across with rings 0.05 mm wide, its inner circles written as two arcs
+/// each: a polygon of a fixed number of chords per edge misses a one-edge circle by four times
+/// what it misses a two-arc circle by, more than the ring's whole area here, so loops must be
+/// compared on areas with the sampling error taken out, not on finer polygons.
+#[test]
+fn a_wide_thin_ring_whose_inner_circles_are_two_arcs_keeps_both_rings_in_its_area() {
+    thin_ring(1550.0, 1549.95, true);
+}
+
+/// A thin tube of height 10 between radii `ro` and `ri`, imported and measured whole. Each outer
+/// circle is one closed edge; each inner circle is one closed edge (the top one's vertex on the far
+/// side), or two arcs when `split_inner`.
+fn thin_ring(ro: f64, ri: f64, split_inner: bool) {
+    let h = 10.0_f64;
+    let mut w = Entities::default();
+    // A circle at height `z` of radius `r` as its edges in order: one closed edge with its vertex at
+    // `x` on the x axis, or two arcs from `x` to `-x` and back.
+    let circle = |w: &mut Entities, z: f64, r: f64, x: f64, split: bool| -> Vec<usize> {
+        let a = w.axis([0.0, 0.0, z], [0.0, 0.0, 1.0], [1.0, 0.0, 0.0]);
+        let c = w.add(format!("CIRCLE('',#{a},{r:?})"));
+        let v = w.vertex([x, 0.0, z]);
+        if split {
+            let u = w.vertex([-x, 0.0, z]);
+            vec![w.add(format!("EDGE_CURVE('',#{v},#{u},#{c},.T.)")), w.add(format!("EDGE_CURVE('',#{u},#{v},#{c},.T.)"))]
+        } else {
+            vec![w.add(format!("EDGE_CURVE('',#{v},#{v},#{c},.T.)"))]
+        }
+    };
+    let bottom_outer = circle(&mut w, 0.0, ro, ro, false);
+    let top_outer = circle(&mut w, h, ro, ro, false);
+    let bottom_inner = circle(&mut w, 0.0, ri, ri, split_inner);
+    let top_inner = circle(&mut w, h, ri, -ri, split_inner);
+    // A face of several bounds: `(edges in order, orientation, outer)`; a bound used against its
+    // edges' direction runs them backwards.
+    let face = |w: &mut Entities, bounds: &[(&Vec<usize>, bool, bool)], surface: usize, same_sense: bool| {
+        let mut ids = Vec::new();
+        for &(edges, o, outer) in bounds {
+            let ordered: Vec<usize> = if o { edges.clone() } else { edges.iter().rev().copied().collect() };
+            let oes: Vec<String> =
+                ordered.iter().map(|e| format!("#{}", w.add(format!("ORIENTED_EDGE('',*,*,#{e},.{}.)", if o { "T" } else { "F" })))).collect();
+            let l = w.add(format!("EDGE_LOOP('',({}))", oes.join(",")));
+            let kind = if outer { "FACE_OUTER_BOUND" } else { "FACE_BOUND" };
+            ids.push(format!("#{}", w.add(format!("{kind}('',#{l},.T.)"))));
+        }
+        w.add(format!("ADVANCED_FACE('',({}),#{surface},.{}.)", ids.join(","), if same_sense { "T" } else { "F" }))
+    };
+    let plane_top = {
+        let a = w.axis([0.0, 0.0, h], [0.0, 0.0, 1.0], [1.0, 0.0, 0.0]);
+        w.add(format!("PLANE('',#{a})"))
+    };
+    let plane_bottom = {
+        let a = w.axis([0.0, 0.0, 0.0], [0.0, 0.0, 1.0], [1.0, 0.0, 0.0]);
+        w.add(format!("PLANE('',#{a})"))
+    };
+    let cyl_outer = {
+        let a = w.axis([0.0, 0.0, 0.0], [0.0, 0.0, 1.0], [1.0, 0.0, 0.0]);
+        w.add(format!("CYLINDRICAL_SURFACE('',#{a},{ro:?})"))
+    };
+    let cyl_inner = {
+        let a = w.axis([0.0, 0.0, 0.0], [0.0, 0.0, 1.0], [1.0, 0.0, 0.0]);
+        w.add(format!("CYLINDRICAL_SURFACE('',#{a},{ri:?})"))
+    };
+    let top = face(&mut w, &[(&top_outer, true, true), (&top_inner, false, false)], plane_top, true);
+    let bottom = face(&mut w, &[(&bottom_outer, false, true), (&bottom_inner, true, false)], plane_bottom, false);
+    let outside = face(&mut w, &[(&bottom_outer, true, false), (&top_outer, false, false)], cyl_outer, true);
+    let inside = face(&mut w, &[(&bottom_inner, false, false), (&top_inner, true, false)], cyl_inner, false);
+    let text = w.solid(&[top, bottom, outside, inside]);
+    let pi = std::f64::consts::PI;
+    let imp = step_import(&text).unwrap();
+    assert_eq!(imp.bodies.len(), 1, "{:?}", imp.warnings);
+    assert!(imp.bodies[0].closed && imp.bodies[0].refused.is_none(), "{:?}", imp.warnings);
+    assert!(!imp.warnings.iter().any(|w| w.contains("turned over")), "{:?}", imp.warnings);
+    let m = measure(&imp.bodies[0].body).unwrap();
+    assert!(rel(m.volume, pi * (ro * ro - ri * ri) * h) < 1e-4, "volume {}", m.volume);
+    // The two walls, and a ring at each end.
+    let area = 2.0 * pi * (ro + ri) * h + 2.0 * pi * (ro * ro - ri * ri);
+    assert!(rel(m.area, area) < 1e-4, "area {} vs {area}", m.area);
 }
 
 #[test]

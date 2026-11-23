@@ -28,7 +28,13 @@ pub mod prepared;
 mod progressive;
 pub mod punctual;
 pub mod reflection;
-pub use bvh::{BuildLimits, BuildProgress, Bvh, BvhBuilder, MAX_DEPTH, MAX_MEMORY_BYTES, MAX_TRIANGLES};
+pub use bvh::BuildLimits;
+pub use bvh::BuildProgress;
+pub use bvh::Bvh;
+pub use bvh::BvhBuilder;
+pub use bvh::MAX_DEPTH;
+pub use bvh::MAX_MEMORY_BYTES;
+pub use bvh::MAX_TRIANGLES;
 
 /// Finite coordinate admission, not a CAD accuracy guarantee.
 pub const MAX_COORDINATE_MM: f64 = 1e12;
