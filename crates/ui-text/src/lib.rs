@@ -278,6 +278,28 @@ impl Locale {
         self.text(label)
     }
 
+    /// A command's label in this language, from the command's own entry: `cmd.<id>`, or
+    /// `cmd.<id with its dots as underscores>` as most entries are named. Several entries
+    /// can share one English text ("Export" is the Export command, the start page's button
+    /// and two of Preferences'), and [`Self::label`] cannot tell which is meant.
+    ///
+    /// `label` is the English text the caller has for the command. The own entry is taken
+    /// only where its English text is that label: a label a command shows in place of its
+    /// own, an id that is no command's and a language without the own entry are translated
+    /// as any label is ([`Self::label`]).
+    pub fn command<'a>(self, id: &str, label: &'a str) -> &'a str {
+        let english = english().messages();
+        for key in [format!("cmd.{id}"), format!("cmd.{}", id.replace('.', "_"))] {
+            if english.get(&key).is_some_and(|text| text == label) {
+                if let Some(text) = self.0.shown().get(&key) {
+                    return text;
+                }
+                break;
+            }
+        }
+        self.label(label)
+    }
+
     pub fn format(self, id: &str, args: &[(&str, &str)]) -> String {
         interpolate(self.text(id), args)
     }
@@ -378,6 +400,11 @@ pub fn tr(id: &str) -> &str {
 
 pub fn tr_label(label: &str) -> &str {
     if RESOLVED_LABELS.with(Cell::get) { label } else { locale().label(label) }
+}
+
+/// The label of the command `id` in this thread's language ([`Locale::command`]).
+pub fn tr_command<'a>(id: &str, label: &'a str) -> &'a str {
+    if RESOLVED_LABELS.with(Cell::get) { label } else { locale().command(id, label) }
 }
 
 /// Every English catalog entry `(id, text)`, for Preferences search to match a translation

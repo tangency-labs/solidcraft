@@ -417,7 +417,11 @@ fn take_refresh(app: &mut SolveApp) {
         }
     }
     let language = solidcraft_ui_text::Locale::for_language(&app.preferences.language);
-    app.set_status(language.format("ui.command_done", &[("command", language.label(crate::command_label("component.update_links")))]), false);
+    app.set_status(
+        language
+            .format("ui.command_done", &[("command", language.command("component.update_links", crate::command_label("component.update_links")))]),
+        false,
+    );
 }
 
 /// Finish Edit from the window (its button, the back button): a part with changes is saved

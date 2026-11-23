@@ -682,6 +682,91 @@ fn the_healer_keeps_a_vertex_tolerance_that_covers_its_gaps() {
     }
 }
 
+/// The healer covers a vertex's gaps past Test #82's ratio limit only where the check accepts
+/// the cover. The body is a 10 mm square plate of thickness `t`, every edge and vertex at 1e-3
+/// and the body at 1e-5 (Test #82's limit 1000 x 1e-5 = 1e-2), with the corner (10, 0, 0) moved
+/// 5e-3 up off its three edges and the bottom. Covering twice that gap with the gap gain takes
+/// the corner to 1.1 x 2 x 5e-3 = 1.1e-2, past the limit, where Test #82 keeps a vertex only if
+/// its ball reaches no face or edge it does not bound. In a plate 1 thick the ball is clear and
+/// the corner takes the cover. In a plate 1.2e-2 thick the top is 1.2e-2 - 5e-3 = 7e-3 from the
+/// corner, inside the ball: the cover would fail Test #82 (pointers invalid), so the corner keeps
+/// the formula's 1.1 x 5e-3 - 1e-5 = 5.49e-3, under the limit and clear of the top, and the body
+/// is a valid solid (its gap is left to the level 2 gap tests, as before the cover).
+#[test]
+fn the_healer_covers_a_vertex_gap_past_the_limit_only_where_its_ball_is_clear() {
+    let gap = 5e-3;
+    for (t, clear) in [(1.0, true), (1.2e-2, false)] {
+        let corners = [
+            [0.0, 0.0, 0.0],
+            [10.0, 0.0, 0.0],
+            [10.0, 10.0, 0.0],
+            [0.0, 10.0, 0.0],
+            [0.0, 0.0, t],
+            [10.0, 0.0, t],
+            [10.0, 10.0, t],
+            [0.0, 10.0, t],
+        ];
+        let cycles: [&[usize]; 6] = [
+            &[0, 3, 2, 1], // bottom
+            &[4, 5, 6, 7], // top
+            &[0, 1, 5, 4], // front
+            &[2, 3, 7, 6], // back
+            &[1, 2, 6, 5], // right
+            &[0, 4, 7, 3], // left
+        ];
+        let mut r = polyhedron(&corners, &cycles, 1e-3, 1e-5);
+        let corner = r
+            .vertices
+            .iter()
+            .position(|v| v.point == [10.0, 0.0, 0.0])
+            .unwrap();
+        r.vertices[corner].point = [10.0, 0.0, gap];
+        let mut k = kernel();
+        let (mut b, order) = to_kernel(&mut k, &r, false).unwrap();
+        order_is_total(&order, &r, &b);
+        // as `check_solid`: no pointer report fails, `AssertValid` passes, the body faces out
+        let c = check_brep(&mut k, &mut b, CheckLevel::Level0).unwrap();
+        let refused: Vec<_> = c
+            .pointer_reports
+            .reports()
+            .iter()
+            .filter(|r| !r.ok)
+            .map(|r| r.format_log_message())
+            .collect();
+        assert!(refused.is_empty(), "thickness {t}: {refused:?}");
+        assert!(
+            solidcore::topology::brep::outward_solid_failure(&mut k, &mut b)
+                .unwrap()
+                .is_none(),
+            "thickness {t}"
+        );
+        let healed = solidcore::topology::vertex::tolerance(&b, order.vertices[corner]).unwrap();
+        let cover = 2.0 * solidcore::geom::tol::gap_gain(&k) * gap;
+        let limit = 1000.0 * b.tolerance();
+        assert!(
+            cover > limit && cover < 2.0 * limit,
+            "{cover} against {limit}"
+        );
+        if clear {
+            assert!(
+                (healed - cover).abs() <= 4.0 * f64::EPSILON * cover,
+                "thickness {t}: {healed} against {cover}"
+            );
+        } else {
+            // the formula's `gain * gap - def` term (def the body's 1e-5): 1.1 x 5e-3 - 1e-5
+            let formula = solidcore::geom::tol::gap_gain(&k) * gap - b.tolerance();
+            assert!(
+                (healed - formula).abs() <= 4.0 * f64::EPSILON * formula,
+                "thickness {t}: {healed} against {formula}"
+            );
+            assert!(
+                healed < limit && healed < t - gap,
+                "thickness {t}: {healed}"
+            );
+        }
+    }
+}
+
 /// A body goes to the record, validates, comes back to the kernel as the same body (counts,
 /// volume, valid) and gives the same record again. Returns the record and the body back.
 fn round_trip(k: &mut Kernel, name: &str, b: &mut Brep) -> (Record, Brep) {

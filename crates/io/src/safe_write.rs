@@ -57,8 +57,16 @@ fn write_synced(path: &Path, bytes: &[u8], report: bool, like: Option<&fs::Permi
     let written = {
         let mut f = options.open(path)?;
         // Unix: exactly the old mode (the umask may have narrowed it), through the open handle.
+        // A filesystem that refuses chmod (such as SMB/CIFS without unix extensions or a gvfs
+        // mount) returns EPERM (1) or ENOTSUP/EOPNOTSUPP: best-effort keeps the save working (#20552).
         #[cfg(unix)]
-        let kept = like.map_or(Ok(()), |p| f.set_permissions(p.clone()));
+        let kept = like.map_or(Ok(()), |p| match set_file_permissions(&f, p) {
+            Err(e) if refused_by_the_drive(&e) => {
+                log::debug!("ignoring permission copy refused by filesystem: {e}");
+                Ok(())
+            }
+            r => r,
+        });
         #[cfg(not(unix))]
         let kept = Ok(());
         let mut done = 0usize;
@@ -81,6 +89,15 @@ fn write_synced(path: &Path, bytes: &[u8], report: bool, like: Option<&fs::Permi
         let _ = fs::remove_file(path);
     }
     written
+}
+
+#[cfg(unix)]
+fn set_file_permissions(f: &fs::File, p: &fs::Permissions) -> std::io::Result<()> {
+    #[cfg(test)]
+    if tests::CHMOD_REFUSED.with(std::cell::Cell::get) {
+        return Err(std::io::Error::from_raw_os_error(1));
+    }
+    f.set_permissions(p.clone())
 }
 
 /// Flush a written file to the disk. On Apple systems `sync_all` asks the drive itself to flush
@@ -144,9 +161,23 @@ fn resolve_links(path: &Path) -> std::io::Result<PathBuf> {
 /// file is written. An error fails the save, which then replaces nothing.
 fn keep_permissions(old: &Option<fs::Permissions>, new: &Path) -> std::io::Result<()> {
     match old {
-        Some(p) if cfg!(not(unix)) => fs::set_permissions(new, p.clone()),
+        Some(p) if cfg!(not(unix)) => match set_path_permissions(new, p) {
+            Err(e) if refused_by_the_drive(&e) => {
+                log::debug!("ignoring permission copy refused by filesystem: {e}");
+                Ok(())
+            }
+            r => r,
+        },
         _ => Ok(()),
     }
+}
+
+fn set_path_permissions(p: &Path, perms: &fs::Permissions) -> std::io::Result<()> {
+    #[cfg(test)]
+    if tests::CHMOD_REFUSED.with(std::cell::Cell::get) {
+        return Err(std::io::Error::from_raw_os_error(1));
+    }
+    fs::set_permissions(p, perms.clone())
 }
 
 // Retrying only the already-synced atomic rename avoids rewriting a large image
@@ -464,6 +495,8 @@ mod tests {
         /// This thread's saves find hard links refused ([`link_backup`]), as on a FAT drive: the
         /// backup is copied, exactly as it is there.
         pub(super) static LINKS_REFUSED: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+        /// This thread's permission sets fail with EPERM, as on an SMB or gvfs mount without unix extensions (#20552).
+        pub(super) static CHMOD_REFUSED: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
         /// This thread's no-replace renames ([`create_atomic`]) fail this many times in a row, with
         /// this error, before the drive is asked: as on a drive that takes neither the rename nor a
         /// hard link, or while another program holds the new file. Set with [`fail_no_replace`].
@@ -1160,6 +1193,23 @@ mod tests {
             assert_eq!(mode(&target), 0o600);
             assert_eq!(mode(&backup_path(&target)), 0o600);
             let _ = fs::remove_dir_all(&d);
+        }
+
+        /// When saving over an existing design on a filesystem that refuses chmod
+        /// (such as SMB/CIFS without unix extensions or a gvfs mount, returning EPERM or
+        /// ENOTSUP), the save succeeds and writes the file rather than failing (#20552).
+        #[test]
+        fn a_save_succeeds_where_the_filesystem_refuses_chmod() -> std::io::Result<()> {
+            CHMOD_REFUSED.with(|r| r.set(true));
+            let d = dir("chmod-refused");
+            let p = d.join("a.solidcraft");
+            write_atomic(&p, b"one", false)?;
+            let result = write_atomic(&p, b"two", true);
+            CHMOD_REFUSED.with(|r| r.set(false));
+            assert!(result.is_ok(), "save failed: {result:?}");
+            assert_eq!(fs::read(&p)?, b"two");
+            let _ = fs::remove_dir_all(&d);
+            Ok(())
         }
     }
 }

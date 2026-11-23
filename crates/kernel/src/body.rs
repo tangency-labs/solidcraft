@@ -1096,11 +1096,54 @@ impl Body {
 
     /// The face of `self` nearest `p` and its exact distance, or `None` for a mesh body or empty body.
     pub fn nearest_face(&self, p: Vec3) -> Option<(f64, usize)> {
-        let form = self.ops_body()?;
-        let (ops, order) = &*form;
         let reach = self.size().max(1.0) * 100.0;
-        let dists = ops.face_distances_within(order, &[[p.x, p.y, p.z]], reach).ok()?;
-        dists.into_iter().enumerate().filter_map(|(f, row)| Some((row.first().copied().flatten()?, f))).min_by(|a, b| a.0.total_cmp(&b.0))
+        self.nearest_face_query(p, reach).ok().flatten()
+    }
+
+    /// The face holding `p` within the body's modelling tolerance. Distances are to the exact
+    /// trimmed faces, including their circular rims, never to display triangles. At a shared
+    /// edge the nearest face wins, with record order breaking an exact tie. A point away from
+    /// every face (or a mesh body) holds no B-rep face.
+    pub fn face_at_point(&self, p: Vec3) -> Result<Option<usize>> {
+        let tolerance = self.record.tolerance;
+        Ok(self.nearest_face_query(p, tolerance)?.filter(|(d, _)| *d <= tolerance).map(|(_, face)| face))
+    }
+
+    /// The face nearest `p` by exact trimmed-face distance, provided it lies within `reach`.
+    /// This is for a pick that must keep an older, wider reach: the exact distance only
+    /// chooses between the faces near a rim, so a point near a curved face's display triangle
+    /// still finds that face. A mesh body holds no B-rep face.
+    pub fn face_within(&self, p: Vec3, reach: f64) -> Result<Option<usize>> {
+        Ok(self.nearest_face_query(p, reach)?.filter(|(d, _)| *d <= reach).map(|(_, face)| face))
+    }
+
+    fn nearest_face_query(&self, p: Vec3, reach: f64) -> Result<Option<(f64, usize)>> {
+        let Some(form) = self.ops_body() else { return Ok(None) };
+        let (ops, order) = &*form;
+        let dists = ops.face_distances_within(order, &[[p.x, p.y, p.z]], reach).map_err(|e| KernelError::Failed(format!("face at point: {e}")))?;
+        Ok(dists.into_iter().enumerate().filter_map(|(f, row)| Some((row.first().copied().flatten()?, f))).min_by(|a, b| a.0.total_cmp(&b.0)))
+    }
+
+    /// Exact polyline samples for each non-seam edge bordering `face` of `self`.
+    pub fn face_edge_polylines(&self, face: usize) -> Vec<Vec<Vec3>> {
+        if self.is_mesh() {
+            return Vec::new();
+        }
+        let Some(f) = self.record.faces.get(face) else {
+            return Vec::new();
+        };
+        let chord = (self.size() * 1e-3).max(1e-4);
+        let mut out = Vec::new();
+        for l in &f.loops {
+            let brep::Loop::Edges { edges } = l else { continue };
+            for ue in edges {
+                let Some(e) = self.record.edges.get(ue.edge as usize) else { continue };
+                if let Ok(pts) = edge_points(e, chord) {
+                    out.push(pts);
+                }
+            }
+        }
+        out
     }
 
     /// Certify the two caps of a body built by [`crate::cylinder`]. Its wall stays uncertified.
@@ -1523,19 +1566,41 @@ impl Body {
     /// The body's volume: measured with exact mass properties via SMLib for B-rep bodies,
     /// or from mesh triangles for mesh bodies.
     pub fn volume_at(&self, _tol: f64) -> Option<f64> {
+        self.measured_volume().ok()
+    }
+
+    /// The body's volume as [`crate::measure_mass`] measures it, measured once and kept with the
+    /// record ([`Body::volume`]): its clones, and every later caller, read it back. The validity
+    /// check and Convert Mesh's volume check each integrated the same body's mass properties
+    /// again, most of a conversion's time (#18458).
+    pub(crate) fn measured_volume(&self) -> Result<f64> {
         if let Some(cell) = &self.volume
             && let Ok(cached) = cell.lock()
             && let Some((_, volume)) = *cached
         {
-            return Some(volume);
+            return Ok(volume);
         }
-        let volume = crate::measure(self).ok()?.volume;
+        let volume = crate::measure_mass(self)?.volume;
         if let Some(cell) = &self.volume
             && let Ok(mut slot) = cell.lock()
         {
             *slot = Some((0, volume));
         }
-        Some(volume)
+        Ok(volume)
+    }
+
+    /// The volume a check of this body compares: a faceted solid's exactly
+    /// ([`solidcore_ops::faceted_volume`]: every face flat, every edge straight, closed shells),
+    /// else [`Body::measured_volume`]. The validity check and Convert Mesh's volume check, which
+    /// a faceted solid passes or fails by its volume's sign and size, integrated its mass
+    /// properties for it: about 2 s for a mesh of 4,000 triangles (#18458).
+    pub(crate) fn validated_volume(&self) -> Result<f64> {
+        if self.mesh.is_none()
+            && let Ok(Some(volume)) = solidcore_ops::faceted_volume(self.record())
+        {
+            return Ok(volume);
+        }
+        self.measured_volume()
     }
 
     /// Rough heap footprint, for the evaluation cache's byte budget: the B-rep topology is what
@@ -1796,7 +1861,7 @@ impl Body {
     /// Edges `indices` (record edge indices) as planar curves in `plane`'s coordinates:
     /// lines, circular arcs and splines with their own knots and weights. An edge must lie
     /// in a plane parallel to `plane`, except a cylinder's rim read along its axis
-    /// ([`Body::projected_on_cylinder`]). Nonparallel curves, unreadable edges and mesh
+    /// ([`Body::cylinder_edge_projection`]). Nonparallel curves, unreadable edges and mesh
     /// bodies return `None`; drawing measurements must not measure a flattened image.
     pub fn planar_edges(&self, plane: &solidcore_record::Plane, indices: &[usize]) -> Vec<Option<Vec<crate::PlanarPiece>>> {
         if self.is_mesh() {
@@ -1816,17 +1881,23 @@ impl Body {
     }
 
     /// The circle or arc of a cylinder bounded by this edge, viewed along its axis.
-    /// Uses the body's existing tolerance and the kernel's monotone-turn certificate.
+    /// Uses the body's existing tolerance and the kernel's monotone-turn certificate, then the
+    /// kernel's certified circular reading of the native curve.
     pub fn cylinder_edge_projection(&self, plane: &solidcore_record::Plane, edge: usize) -> Option<Vec<crate::PlanarPiece>> {
         if self.is_mesh() {
             return None;
         }
         let tol = self.planar_edges_tolerance();
-        if solidcore_ops::spline_projection::has_parallel_projection(&self.record, plane, edge, tol) {
-            return None;
+        if !solidcore_ops::spline_projection::has_parallel_projection(&self.record, plane, edge, tol) {
+            // An edge on a cylinder whose axis is the view, such as an intersection curve held
+            // only approximately: its image is that cylinder's circle (sampled, then proved by
+            // the turn).
+            let faces = crate::history::faces_of(self.record.edges.get(edge)?);
+            return self.projected_on_cylinder(plane, edge, &faces, tol).map(|segs| segs.into_iter().map(crate::PlanarPiece::Seg).collect());
         }
-        let faces = crate::history::faces_of(self.record.edges.get(edge)?);
-        self.projected_on_cylinder(plane, edge, &faces, tol).map(|segs| segs.into_iter().map(crate::PlanarPiece::Seg).collect())
+        // A planar rim readable in the view: the kernel's certified circular reading of the
+        // complete native curve, which finds a shelled wall's marched rim as its circle (#20280).
+        solidcore_ops::spline_projection::cylinder_edge_projection(&self.record, plane, edge, tol)
     }
 
     /// Edge `edge` projected on `plane` as the arc it covers of the circle of a cylinder it
@@ -1972,7 +2043,7 @@ impl Body {
     /// it an odd number of times.
     pub fn classify_point(&self, p: Vec3) -> Result<PointClass> {
         if !(p.x.is_finite() && p.y.is_finite() && p.z.is_finite()) {
-            return Err(KernelError::Invalid(format!("point classification: the point {p:?} is not finite")));
+            return Err(KernelError::Invalid(format!("point classification: the point {p} is not finite")));
         }
         if let Some(m) = &self.mesh {
             let mesh = m.to_mesh();
@@ -2054,7 +2125,7 @@ impl Body {
     /// point's own solve). The first point that cannot be classified fails them all.
     pub fn classify_points(&self, points: &[Vec3]) -> Result<Vec<PointClass>> {
         if let Some(p) = points.iter().find(|p| !(p.x.is_finite() && p.y.is_finite() && p.z.is_finite())) {
-            return Err(KernelError::Invalid(format!("point classification: the point {p:?} is not finite")));
+            return Err(KernelError::Invalid(format!("point classification: the point {p} is not finite")));
         }
         if self.mesh.is_some() || points.len() < 2 {
             return points.iter().map(|&p| self.classify_point(p)).collect();
@@ -2074,9 +2145,10 @@ impl Body {
     /// faces that turns most toward the ray.
     pub fn fire_ray(&self, origin: Vec3, dir: Vec3) -> Result<Option<RayPick>> {
         let finite = |v: Vec3| v.x.is_finite() && v.y.is_finite() && v.z.is_finite();
-        let d = dir.normalized().filter(|d| finite(origin) && finite(*d)).ok_or_else(|| {
-            KernelError::Invalid(format!("ray: the origin {origin:?} and direction {dir:?} must be finite, the direction not zero"))
-        })?;
+        let d = dir
+            .normalized()
+            .filter(|d| finite(origin) && finite(*d))
+            .ok_or_else(|| KernelError::Invalid(format!("ray: the origin {origin} and direction {dir} must be finite, the direction not zero")))?;
         if let Some(m) = &self.mesh {
             return Ok(crate::meshbody::mesh_ray(m, origin, d).map(|(t, normal)| RayPick {
                 face: 0,
@@ -2145,9 +2217,9 @@ impl Body {
         if missing > 0 {
             out.push(format!("{missing} face(s) don't mesh"));
         }
-        match crate::measure(self) {
-            Ok(m) if m.volume.is_finite() && m.volume > 0.0 => {}
-            Ok(m) => out.push(format!("volume {}", m.volume)),
+        match self.validated_volume() {
+            Ok(volume) if volume.is_finite() && volume > 0.0 => {}
+            Ok(volume) => out.push(format!("volume {volume}")),
             Err(e) => out.push(format!("no measure: {e}")),
         }
         out

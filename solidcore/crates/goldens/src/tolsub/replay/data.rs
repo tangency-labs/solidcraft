@@ -11,6 +11,10 @@
 //! `stubs4-delete-edge-bottle-e8-r0.1`'s main hash is of #18918's run: its near-knot rail
 //! trim (WR-664) moves a rail's cut onto the rail's nearby knot, which moves the row apart
 //! from the tolerances; its substitutions are unchanged.
+//!
+//! The `blend.fillet_executive_p3` hashes are of those lines without the
+//! `fillet_point_step` key, which recorded the retired step latch (#18916); every other
+//! value is the line's.
 
 use super::Row;
 
@@ -33,7 +37,7 @@ pub(super) static DATA: &[Row] = &[
     (
         "blend.fillet_executive_p3",
         "piecewise-file-corner_box-edge0",
-        0xe443add3fa92c4bf,
+        0x3d11c37fc8eba092,
         1,
         &[
             (0, false, 13, 0x3ef24cf88f997039, 0x3ee4f8b588e368f1),
@@ -44,7 +48,7 @@ pub(super) static DATA: &[Row] = &[
     (
         "blend.fillet_executive_p3",
         "source-file-corner_box-edge0",
-        0xf6992c2473993f9d,
+        0x6cf65b69487de7be,
         1,
         &[
             (0, false, 13, 0x3ef24cf88f997039, 0x3ee4f8b588e368f1),
@@ -55,7 +59,7 @@ pub(super) static DATA: &[Row] = &[
     (
         "blend.fillet_executive_p3",
         "source-file-corner_box-edge4",
-        0xa9b12d27ccc7ed4f,
+        0xbb90331c10940a16,
         1,
         &[
             (0, false, 13, 0x3ef24cf88f997039, 0x3ee4f8b588e368f1),
@@ -66,7 +70,7 @@ pub(super) static DATA: &[Row] = &[
     (
         "blend.fillet_executive_p3",
         "source-file-corner_box-edge8",
-        0x76374314a6fa1589,
+        0xff8d3a2e514354f0,
         1,
         &[
             (0, false, 13, 0x3ef24cf88f997039, 0x3ee4f8b588e368f1),
@@ -77,7 +81,7 @@ pub(super) static DATA: &[Row] = &[
     (
         "blend.fillet_executive_p3",
         "source-file-corner_box-edge9",
-        0x90a6e72e76603f32,
+        0xf9e3198772fc70f7,
         1,
         &[
             (0, false, 13, 0x3ef24cf88f997039, 0x3ee4f8b588e368f1),
@@ -88,7 +92,7 @@ pub(super) static DATA: &[Row] = &[
     (
         "blend.fillet_executive_p3",
         "stubs4-case_ext-e1-r0.5",
-        0x6593798e22a13fbf,
+        0xbc8aab1728b9583c,
         1,
         &[
             (0, false, 0, 0x3f116f51cdf8887c, 0x3f0da07639b836bc),
@@ -98,7 +102,7 @@ pub(super) static DATA: &[Row] = &[
     (
         "blend.fillet_executive_p3",
         "stubs4-case_int-e1-r0.5",
-        0x3a040a12fed99cda,
+        0x18f56c6fb1d96ce5,
         1,
         &[
             (0, false, 0, 0x3f116f51cdf8887c, 0x3f0da07639b836bc),
@@ -108,126 +112,126 @@ pub(super) static DATA: &[Row] = &[
     (
         "blend.fillet_executive_p3",
         "stubs4-degenerate-bottle-e0-r0.5",
-        0x2b3eba4d87b2088b,
+        0x37d18ac6f97ee046,
         1,
         &[(0, true, 22, 0x3f1b2f0e3ddd5a4b, 0x3f13243fefa92b3a)],
     ),
     (
         "blend.fillet_executive_p3",
         "stubs4-degenerate-bottle-e10-r0.5",
-        0x069f4b055f4dce56,
+        0xd25d69a485b4246b,
         1,
         &[(0, true, 22, 0x3f1b2f0e3ddd5a4b, 0x3f13243fefa92b3a)],
     ),
     (
         "blend.fillet_executive_p3",
         "stubs4-degenerate-bottle-e13-r0.5",
-        0x377572a24e3cbb49,
+        0x8568db83e7a86700,
         1,
         &[(0, true, 22, 0x3f1b2f0e3ddd5a4b, 0x3f13243fefa92b3a)],
     ),
     (
         "blend.fillet_executive_p3",
         "stubs4-degenerate-bottle-e2-r0.5",
-        0xbe487ce95cacb05f,
+        0x28018c4ca786ddca,
         1,
         &[(0, true, 22, 0x3f1b2f0e3ddd5a4b, 0x3f13243fefa92b3a)],
     ),
     (
         "blend.fillet_executive_p3",
         "stubs4-delete-edge-bottle-e16-r0.5",
-        0xdc5057a5f4a8c951,
+        0x713288d6abe63862,
         1,
         &[(0, true, 22, 0x3f1b2f0e3ddd5a4b, 0x3f13243fefa92b3a)],
     ),
     (
         "blend.fillet_executive_p3",
         "stubs4-delete-edge-bottle-e19-r0.5",
-        0x785803ebcbada559,
+        0xdd045b0cbbbe4894,
         1,
         &[(0, true, 22, 0x3f1b2f0e3ddd5a4b, 0x3f13243fefa92b3a)],
     ),
     (
         "blend.fillet_executive_p3",
         "stubs4-delete-edge-bottle-e27-r0.5",
-        0x204c4332528d0932,
+        0xbb177cd64dfae3eb,
         1,
         &[(0, true, 22, 0x3f1b2f0e3ddd5a4b, 0x3f13243fefa92b3a)],
     ),
     (
         "blend.fillet_executive_p3",
         "stubs4-delete-edge-bottle-e27-r2.0",
-        0xe461d7063a8b188b,
+        0xf3cce34c3c28453e,
         1,
         &[(0, true, 22, 0x3f1b2f0e3ddd5a4b, 0x3f13243fefa92b3a)],
     ),
     (
         "blend.fillet_executive_p3",
         "stubs4-delete-edge-bottle-e29-r2.0",
-        0xad4cf00e6aa49cde,
+        0xe7777aee79de15c9,
         1,
         &[(0, true, 22, 0x3f1b2f0e3ddd5a4b, 0x3f13243fefa92b3a)],
     ),
     (
         "blend.fillet_executive_p3",
         "stubs4-delete-edge-bottle-e30-r0.1",
-        0xfd4b4c41b15a0a04,
+        0xa092edeabf8d25f7,
         1,
         &[(0, true, 22, 0x3f1b2f0e3ddd5a4b, 0x3f13243fefa92b3a)],
     ),
     (
         "blend.fillet_executive_p3",
         "stubs4-delete-edge-bottle-e30-r2.0",
-        0x863d33c6d0e4d8f3,
+        0x02e56e8fe9177d14,
         1,
         &[(0, true, 22, 0x3f1b2f0e3ddd5a4b, 0x3f13243fefa92b3a)],
     ),
     (
         "blend.fillet_executive_p3",
         "stubs4-delete-edge-bottle-e32-r0.1",
-        0xad919117208d863d,
+        0xcc13a5dc4bf30c28,
         1,
         &[(0, true, 22, 0x3f1b2f0e3ddd5a4b, 0x3f13243fefa92b3a)],
     ),
     (
         "blend.fillet_executive_p3",
         "stubs4-delete-edge-bottle-e32-r2.0",
-        0x087acd20a7add494,
+        0x17a8abeb532eee35,
         1,
         &[(0, true, 22, 0x3f1b2f0e3ddd5a4b, 0x3f13243fefa92b3a)],
     ),
     (
         "blend.fillet_executive_p3",
         "stubs4-delete-edge-bottle-e4-r0.5",
-        0x5292049c78d818df,
+        0x52ca0ab742a5c442,
         1,
         &[(0, true, 22, 0x3f1b2f0e3ddd5a4b, 0x3f13243fefa92b3a)],
     ),
     (
         "blend.fillet_executive_p3",
         "stubs4-delete-edge-bottle-e6-r0.5",
-        0x0e6b8563d999c792,
+        0xfaecc9602acb0ad7,
         1,
         &[(0, true, 22, 0x3f1b2f0e3ddd5a4b, 0x3f13243fefa92b3a)],
     ),
     (
         "blend.fillet_executive_p3",
         "stubs4-delete-edge-bottle-e7-r0.1",
-        0x2ab9d1fc119e5997,
+        0x4ad42447462bde64,
         1,
         &[(0, true, 22, 0x3f1b2f0e3ddd5a4b, 0x3f13243fefa92b3a)],
     ),
     (
         "blend.fillet_executive_p3",
         "stubs4-delete-edge-bottle-e8-r0.5",
-        0x5bbdc75f38f31b45,
+        0xe6e40da475843b5e,
         1,
         &[(0, true, 22, 0x3f1b2f0e3ddd5a4b, 0x3f13243fefa92b3a)],
     ),
     (
         "blend.fillet_executive_p3",
         "stubs4-open_shell-e0-r0.5",
-        0x9e9928dbaa061677,
+        0x4f939ffba0f36a2a,
         1,
         &[
             (0, false, 1, 0x3eea3799c0cc6c9e, 0x3ee4f8b588e368f1),
@@ -246,7 +250,7 @@ pub(super) static DATA: &[Row] = &[
     (
         "blend.fillet_executive_p3",
         "stubs4-open_shell-e5-r0.5",
-        0x334a4ac3e43d998c,
+        0xf1151325b79875b9,
         1,
         &[
             (0, false, 1, 0x3eea3799c0cc6c9e, 0x3ee4f8b588e368f1),
@@ -265,7 +269,7 @@ pub(super) static DATA: &[Row] = &[
     (
         "blend.fillet_executive_p3",
         "stubs4-shell_fillet2-e1-r0.5",
-        0x7c1d91b0338daf3e,
+        0x729672b198a851e3,
         1,
         &[
             (0, false, 0, 0x3f1b7eb5011f4ccd, 0x3f18df9e5002dfaf),
@@ -277,14 +281,14 @@ pub(super) static DATA: &[Row] = &[
     (
         "blend.fillet_executive_p3",
         "sweep4-bottle-e29-r0.1",
-        0xd146cdf57ddda186,
+        0x460b7429c1bddbe1,
         1,
         &[(0, true, 22, 0x3f1b2f0e3ddd5a4b, 0x3f13243fefa92b3a)],
     ),
     (
         "blend.fillet_executive_p3",
         "sweep5-bottle-e29-r1.0",
-        0x070e04ad5b72beb7,
+        0x931030ea3c0f9fd4,
         1,
         &[(0, true, 22, 0x3f1b2f0e3ddd5a4b, 0x3f13243fefa92b3a)],
     ),
@@ -2040,7 +2044,7 @@ pub(super) static DATA: &[Row] = &[
     (
         "corpus.parity",
         "Solids__revolution_mold.smb",
-        0xd982fdcebefb778d,
+        0x48eacf7c0f3dedff,
         3,
         &[
             (0, false, 26, 0x3f1aaa861a91e08a, 0x3f180b6f6975736c),
@@ -3622,17 +3626,6 @@ pub(super) static DATA: &[Row] = &[
     ),
     (
         "topology.face_p3",
-        "own_reader_open_shell_uv_trim_f0_rebuild",
-        0xc06c78171c27cc18,
-        1,
-        &[
-            (0, false, 17, 0x3f0169496d9400b7, 0x3efa4fff2e7e0c33),
-            (0, true, 12, 0x3f0169496d9400b7, 0x3efa4fff2e7e0c33),
-            (0, true, 14, 0x3f1169496d69328f, 0x3f0fb68913522a08),
-        ],
-    ),
-    (
-        "topology.face_p3",
         "own_reader_open_shell_uv_trim_f1",
         0x405d41ec54756fcc,
         1,
@@ -3671,17 +3664,6 @@ pub(super) static DATA: &[Row] = &[
     ),
     (
         "topology.face_p3",
-        "own_reader_open_shell_uv_trim_f10_rebuild",
-        0x285f1807418e2ad0,
-        1,
-        &[
-            (0, false, 17, 0x3f0169496d9400b7, 0x3efa4fff2e7e0c33),
-            (0, true, 12, 0x3f0169496d9400b7, 0x3efa4fff2e7e0c33),
-            (0, true, 14, 0x3f1169496d69328f, 0x3f0fb68913522a08),
-        ],
-    ),
-    (
-        "topology.face_p3",
         "own_reader_open_shell_uv_trim_f11",
         0xd501370bd4c02fc3,
         1,
@@ -3697,28 +3679,6 @@ pub(super) static DATA: &[Row] = &[
             (0, true, 6, 0x3f0ec492ac6b2c44, 0x3f0986654a325208),
             (0, true, 12, 0x3f0169496d9400b7, 0x3ef8563816b64cf6),
             (0, true, 14, 0x3f1169496d69328f, 0x3ef8563816b64cf6),
-        ],
-    ),
-    (
-        "topology.face_p3",
-        "own_reader_open_shell_uv_trim_f11_rebuild",
-        0xb0d87884af486924,
-        1,
-        &[
-            (0, false, 17, 0x3f0169496d9400b7, 0x3efa4fff2e7e0c33),
-            (0, true, 12, 0x3f0169496d9400b7, 0x3efa4fff2e7e0c33),
-            (0, true, 14, 0x3f1169496d69328f, 0x3f0fb68913522a08),
-        ],
-    ),
-    (
-        "topology.face_p3",
-        "own_reader_open_shell_uv_trim_f1_rebuild",
-        0x9bf80f40fae1c543,
-        1,
-        &[
-            (0, false, 17, 0x3f0169496d9400b7, 0x3efa4fff2e7e0c33),
-            (0, true, 12, 0x3f0169496d9400b7, 0x3efa4fff2e7e0c33),
-            (0, true, 14, 0x3f1169496d69328f, 0x3f0fb68913522a08),
         ],
     ),
     (
@@ -3742,17 +3702,6 @@ pub(super) static DATA: &[Row] = &[
     ),
     (
         "topology.face_p3",
-        "own_reader_open_shell_uv_trim_f2_rebuild",
-        0xaafe2826d275b1fb,
-        1,
-        &[
-            (0, false, 17, 0x3f0169496d9400b7, 0x3efa4fff2e7e0c33),
-            (0, true, 12, 0x3f0169496d9400b7, 0x3efa4fff2e7e0c33),
-            (0, true, 14, 0x3f1169496d69328f, 0x3f0fb68913522a08),
-        ],
-    ),
-    (
-        "topology.face_p3",
         "own_reader_open_shell_uv_trim_f3",
         0xb155434b38aaf670,
         1,
@@ -3768,17 +3717,6 @@ pub(super) static DATA: &[Row] = &[
             (0, true, 6, 0x3f0ec492ac6b2c44, 0x3f0986654a325208),
             (0, true, 12, 0x3f0169496d9400b7, 0x3ef8563816b64cf6),
             (0, true, 14, 0x3f1169496d69328f, 0x3ef8563816b64cf6),
-        ],
-    ),
-    (
-        "topology.face_p3",
-        "own_reader_open_shell_uv_trim_f3_rebuild",
-        0xab5e6a69b6a9156c,
-        1,
-        &[
-            (0, false, 17, 0x3f0169496d9400b7, 0x3efa4fff2e7e0c33),
-            (0, true, 12, 0x3f0169496d9400b7, 0x3efa4fff2e7e0c33),
-            (0, true, 14, 0x3f1169496d69328f, 0x3f0fb68913522a08),
         ],
     ),
     (
@@ -3802,17 +3740,6 @@ pub(super) static DATA: &[Row] = &[
     ),
     (
         "topology.face_p3",
-        "own_reader_open_shell_uv_trim_f4_rebuild",
-        0xb13e8b8c2ed8175e,
-        1,
-        &[
-            (0, false, 17, 0x3f0169496d9400b7, 0x3efa4fff2e7e0c33),
-            (0, true, 12, 0x3f0169496d9400b7, 0x3efa4fff2e7e0c33),
-            (0, true, 14, 0x3f1169496d69328f, 0x3f0fb68913522a08),
-        ],
-    ),
-    (
-        "topology.face_p3",
         "own_reader_open_shell_uv_trim_f5",
         0x19d4ef8f2fa1fd36,
         1,
@@ -3828,17 +3755,6 @@ pub(super) static DATA: &[Row] = &[
             (0, true, 6, 0x3f0ec492ac6b2c44, 0x3f0986654a325208),
             (0, true, 12, 0x3f0169496d9400b7, 0x3ef8563816b64cf6),
             (0, true, 14, 0x3f1169496d69328f, 0x3ef8563816b64cf6),
-        ],
-    ),
-    (
-        "topology.face_p3",
-        "own_reader_open_shell_uv_trim_f5_rebuild",
-        0xe6369a58135f5b47,
-        1,
-        &[
-            (0, false, 17, 0x3f0169496d9400b7, 0x3efa4fff2e7e0c33),
-            (0, true, 12, 0x3f0169496d9400b7, 0x3efa4fff2e7e0c33),
-            (0, true, 14, 0x3f1169496d69328f, 0x3f0fb68913522a08),
         ],
     ),
     (
@@ -3862,17 +3778,6 @@ pub(super) static DATA: &[Row] = &[
     ),
     (
         "topology.face_p3",
-        "own_reader_open_shell_uv_trim_f6_rebuild",
-        0xb6ca2358bbad6ab6,
-        1,
-        &[
-            (0, false, 17, 0x3f0169496d9400b7, 0x3efa4fff2e7e0c33),
-            (0, true, 12, 0x3f0169496d9400b7, 0x3efa4fff2e7e0c33),
-            (0, true, 14, 0x3f1169496d69328f, 0x3f0fb68913522a08),
-        ],
-    ),
-    (
-        "topology.face_p3",
         "own_reader_open_shell_uv_trim_f7",
         0xd24c4dae142512d2,
         1,
@@ -3888,17 +3793,6 @@ pub(super) static DATA: &[Row] = &[
             (0, true, 6, 0x3f0ec492ac6b2c44, 0x3f0986654a325208),
             (0, true, 12, 0x3f0169496d9400b7, 0x3ef8563816b64cf6),
             (0, true, 14, 0x3f1169496d69328f, 0x3ef8563816b64cf6),
-        ],
-    ),
-    (
-        "topology.face_p3",
-        "own_reader_open_shell_uv_trim_f7_rebuild",
-        0x8d6d0b81ccd05a0d,
-        1,
-        &[
-            (0, false, 17, 0x3f0169496d9400b7, 0x3efa4fff2e7e0c33),
-            (0, true, 12, 0x3f0169496d9400b7, 0x3efa4fff2e7e0c33),
-            (0, true, 14, 0x3f1169496d69328f, 0x3f0fb68913522a08),
         ],
     ),
     (
@@ -3922,17 +3816,6 @@ pub(super) static DATA: &[Row] = &[
     ),
     (
         "topology.face_p3",
-        "own_reader_open_shell_uv_trim_f8_rebuild",
-        0xd1f4f25b02d4635a,
-        1,
-        &[
-            (0, false, 17, 0x3f0169496d9400b7, 0x3efa4fff2e7e0c33),
-            (0, true, 12, 0x3f0169496d9400b7, 0x3efa4fff2e7e0c33),
-            (0, true, 14, 0x3f1169496d69328f, 0x3f0fb68913522a08),
-        ],
-    ),
-    (
-        "topology.face_p3",
         "own_reader_open_shell_uv_trim_f9",
         0xbe697d11a37d1c9e,
         1,
@@ -3948,17 +3831,6 @@ pub(super) static DATA: &[Row] = &[
             (0, true, 6, 0x3f0ec492ac6b2c44, 0x3f0986654a325208),
             (0, true, 12, 0x3f0169496d9400b7, 0x3ef8563816b64cf6),
             (0, true, 14, 0x3f1169496d69328f, 0x3ef8563816b64cf6),
-        ],
-    ),
-    (
-        "topology.face_p3",
-        "own_reader_open_shell_uv_trim_f9_rebuild",
-        0x717a742fb7348ca2,
-        1,
-        &[
-            (0, false, 17, 0x3f0169496d9400b7, 0x3efa4fff2e7e0c33),
-            (0, true, 12, 0x3f0169496d9400b7, 0x3efa4fff2e7e0c33),
-            (0, true, 14, 0x3f1169496d69328f, 0x3f0fb68913522a08),
         ],
     ),
 ];
