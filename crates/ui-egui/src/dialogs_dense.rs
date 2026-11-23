@@ -48,7 +48,7 @@ pub(super) fn command(kind: &Kind) -> Option<&'static str> {
         Kind::Construct { command, .. } => Some(command),
         Kind::ConstructAuto { command, .. } => Some(command),
         Kind::PathPlane { .. } => Some("construct.plane.along_path"),
-        Kind::Split => Some("solid.split_body"),
+        Kind::Split { .. } => Some("solid.split_body"),
         Kind::DeleteFaces => Some("face.delete"),
         Kind::Move { .. } => Some("solid.move"),
         Kind::Thread { .. } => Some("solid.thread"),
@@ -635,6 +635,9 @@ pub(super) fn rows(app: &mut SolveApp, ctx: &egui::Context, d: &mut Dialog, ui: 
                 choice_row(ui, "Chamfer Type", "ch_type", ctype, &CHAMFER_TYPES);
             }
             enter |= expr_row_positive(ui, if *chamfer { if *ctype == 0 { "Distance" } else { "Distance 1" } } else { "Radius" }, radius);
+            // A chamfer of two distances: the row the keyboard is in is the distance its arrow and
+            // the canvas box follow.
+            let mut editing = ui_kit::last_value_field(ctx).filter(|id| ctx.memory(|m| m.has_focus(*id))).map(|_| 0usize);
             let mut rtype = fillet_type(&d.extra);
             if !*chamfer {
                 form_row(ui, "Type", |ui| {
@@ -654,6 +657,10 @@ pub(super) fn rows(app: &mut SolveApp, ctx: &egui::Context, d: &mut Dialog, ui: 
             }
             if *chamfer && *ctype == 1 {
                 enter |= expr_row_positive(ui, "Distance 2", distance2);
+                editing = ui_kit::last_value_field(ctx).filter(|id| ctx.memory(|m| m.has_focus(*id))).map(|_| 1usize).or(editing);
+            }
+            if let Some(k) = editing.filter(|_| *chamfer && *ctype == 1) {
+                crate::canvas::note_chamfer_editing(&mut d.extra, k);
             }
             if *chamfer && *ctype == 2 {
                 enter |= expr_row(ui, "Angle", angle);
@@ -1004,6 +1011,20 @@ fn additional_rows(app: &mut SolveApp, d: &mut Dialog, ui: &mut egui::Ui) -> boo
             const PIVOT: Accept = selection::VERTICES | selection::POINTS | selection::CONSTRUCTION_POINTS;
             set_object_accepting(&mut d.inputs, &mut d.active, "Pivot", PIVOT, *direction_only);
         }
+        // A face tool cuts with that face extended, with the picked faces as they are, or with
+        // the whole surface body (#9305). The choice shows once a face is the tool.
+        Kind::Split { sheet } => {
+            let face_tool = d.inputs.get(1).and_then(|inp| inp.items.first()).is_some_and(|sel| matches!(sel, Sel::Face { .. }));
+            if face_tool {
+                let options = SPLIT_SHEETS.map(solidcraft_ui_text::tr);
+                choice_row(ui, solidcraft_ui_text::tr("ui.split_body.cut_with"), "split_sheet", sheet, &options);
+            }
+            let more = face_tool && *sheet == 1;
+            set_object_accepting(&mut d.inputs, &mut d.active, SPLIT_TOOL_FACES, FACES, more);
+            if let Some(inp) = d.inputs.iter_mut().find(|inp| inp.label == SPLIT_TOOL_FACES) {
+                inp.multi = true;
+            }
+        }
         // The angle turns the plane from its reference, so it shows once one is picked.
         Kind::TangentPlane { angle } => {
             if d.inputs.get(1).is_some_and(|inp| !inp.items.is_empty()) {
@@ -1019,13 +1040,7 @@ fn additional_rows(app: &mut SolveApp, d: &mut Dialog, ui: &mut egui::Ui) -> boo
         Kind::Construct { t: Some(t), .. } => {
             form_row(ui, "Position (0 to 1)", |ui| enter |= field(ui, t));
         }
-        Kind::Split
-        | Kind::ReplaceFace
-        | Kind::Remove
-        | Kind::Midplane
-        | Kind::ChatContext
-        | Kind::PluginPick { .. }
-        | Kind::Construct { t: None, .. } => {}
+        Kind::ReplaceFace | Kind::Remove | Kind::Midplane | Kind::ChatContext | Kind::PluginPick { .. } | Kind::Construct { t: None, .. } => {}
         Kind::Rib { thickness, depth, flip, normal, extend, .. } => {
             form_row(ui, "Direction", |ui| {
                 let mut i = usize::from(*normal);
@@ -1099,9 +1114,33 @@ fn additional_rows(app: &mut SolveApp, d: &mut Dialog, ui: &mut egui::Ui) -> boo
             choice_row(ui, "Operation", "bf_op", operation, &OP_LABELS);
             extra_options(ui, "boundary_options", &mut d.extra, &[("Remove Tools", "remove_tools")]);
         }
-        Kind::PathPattern { count, spacing } => {
+        Kind::PathPattern { count, spacing, start, fraction } => {
             enter |= quantity_row(ui, &app.session.doc, "Quantity", count);
             enter |= expr_row(ui, if d.extra.contains_key("distance") { "Distance" } else { "Spacing" }, spacing);
+            // Where along the path the original sits: a distance, or a fraction of the path's
+            // length that keeps its place as the path changes. Empty: the path's start.
+            form_row(ui, "pattern.start_point", |ui| {
+                let mut i = usize::from(*fraction);
+                if ui_kit::segmented(ui, &mut i, &["pattern.start_distance", "pattern.start_fraction"], Default::default()) && (i == 1) != *fraction {
+                    *fraction = i == 1;
+                    start.clear();
+                }
+            });
+            // Both labels about as wide as the dialog's others: switching keeps the label column
+            // where it is, so the rows don't shift and Start point's choice stays two buttons.
+            enter |= hint_row(ui, if *fraction { "  Position" } else { "  Distance" }, start, "0");
+            // Identical: copies keep the original's orientation; Path direction: they turn with
+            // the path, keeping the original's relation to it.
+            form_row(ui, "Orientation", |ui| {
+                extra_choice(
+                    ui,
+                    &mut d.extra,
+                    "pp_orientation",
+                    "orientation",
+                    &[("pattern.orientation_identical", "identical"), ("pattern.orientation_path", "path")],
+                );
+            });
+            extra_options(ui, "feature_options", &mut d.extra, &[("Flip direction", "flip")]);
         }
         Kind::Pipe { diameter, wall, operation } => {
             enter |= expr_row(ui, "Diameter", diameter);
@@ -1159,6 +1198,7 @@ fn additional_rows(app: &mut SolveApp, d: &mut Dialog, ui: &mut egui::Ui) -> boo
         }
         k @ Kind::Move { .. } => {
             enter |= crate::dialogs_move::rows(ui, k);
+            crate::dialogs_move::kept_axis_note(ui, &d.inputs, &d.extra);
             if shared {
                 ui_kit::text(
                     ui,

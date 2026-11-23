@@ -25,9 +25,19 @@ pub mod sweeps;
 pub mod trace;
 pub mod trim;
 
-pub use check::{CheckLevel, CheckReport};
-pub use measure::{MEASURE_ACCURACY, MassProperties, PointClass};
-pub use ops::{Blend, BooleanOp, ChamferSecond, Hole, HoleEdge, MAX_POINTS, MAX_UNION_BREPS, Turn};
+pub use check::CheckLevel;
+pub use check::CheckReport;
+pub use measure::MEASURE_ACCURACY;
+pub use measure::MassProperties;
+pub use measure::PointClass;
+pub use ops::Blend;
+pub use ops::BooleanOp;
+pub use ops::ChamferSecond;
+pub use ops::Hole;
+pub use ops::HoleEdge;
+pub use ops::MAX_POINTS;
+pub use ops::MAX_UNION_BREPS;
+pub use ops::Turn;
 
 /// Why an SMLib call failed.
 #[derive(Clone, Debug, PartialEq)]
@@ -133,7 +143,8 @@ pub enum Error {
 
 /// Why a blend has no room, and what the largest size that builds a refused blend sizes
 /// ([`Error::TooLarge`]): ops' own, as its refusal gives them.
-pub use solidcore_ops::{FitKind, RoomReason};
+pub use solidcore_ops::FitKind;
+pub use solidcore_ops::RoomReason;
 
 impl std::fmt::Display for Error {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
