@@ -442,6 +442,7 @@ fn mass_size_shells_and_failures_come_when_asked() {
             width: "1".into(),
             height: "1".into(),
             operation: Operation::NewBody,
+            centred: false,
         },
         None,
     )

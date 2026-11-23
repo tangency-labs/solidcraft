@@ -261,7 +261,9 @@ fn is_spline(s: &RecordSurface) -> bool {
         | RecordSurface::Sphere { .. }
         | RecordSurface::Torus { .. }
         | RecordSurface::BallPatch { .. }
-        | RecordSurface::PlacedRevolution { .. } => false,
+        | RecordSurface::PlacedRevolution { .. }
+        // A blend's face holds its certified net as its NURBS form.
+        | RecordSurface::Blend { .. } => false,
     }
 }
 

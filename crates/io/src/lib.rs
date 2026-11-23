@@ -1631,7 +1631,8 @@ pub struct TaggedMesh {
     pub faces: u32,
 }
 
-/// [`TaggedMesh`] of a body at chord tolerance `tolerance` (mm, finite and above zero).
+/// [`TaggedMesh`] of a body at chord tolerance `tolerance` (mm, finite and above zero): at the
+/// export's chord ([`MeshQuality::spec`]) the tagged 3MF export's own mesh.
 pub fn tagged_mesh(body: &solidcraft_kernel::Body, tolerance: f64) -> Result<TaggedMesh> {
     Ok(tagged_mesh_with_edges(body, tolerance)?.0)
 }
@@ -1642,7 +1643,9 @@ pub fn tagged_mesh_with_edges(body: &solidcraft_kernel::Body, tolerance: f64) ->
     if !(tolerance.is_finite() && tolerance > 0.0) {
         return Err(IoError::Invalid(format!("chord tolerance {tolerance} is not a positive number")));
     }
-    let m = body.mesh(&solidcraft_kernel::MeshTolerance::chord(tolerance))?;
+    // The mesh path the exports take ([`export_mesh_noted`]), so at the export's chord this is
+    // the tagged 3MF's mesh.
+    let (m, _) = body.export_mesh(&solidcraft_kernel::MeshSpec::chord(tolerance))?;
     // Weld with each triangle's own index as its tag: the pieces of a split triangle keep it,
     // and its face follows from it.
     let n = u32::try_from(m.triangles.len()).map_err(|_| IoError::Invalid("mesh too large".into()))?;

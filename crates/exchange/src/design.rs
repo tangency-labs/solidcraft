@@ -170,6 +170,9 @@ impl Design {
                             body: solidcraft_doc::BodyName(body.0.clone()),
                             plane: solidcraft_doc::PlaneRef::Custom { plane: cut_plane },
                             tool: None,
+                            tool_plane: false,
+                            tool_sheet: solidcraft_doc::SplitSheet::default(),
+                            tool_faces: Vec::new(),
                             sketch: None,
                             line: None,
                         };
@@ -193,6 +196,7 @@ impl Design {
                         plane: solidcraft_doc::PlaneRef::Custom { plane: cut_plane },
                         tool: None,
                         sketch: None,
+                        loops: false,
                     };
                     let id = doc.add_feature(kind, Some(name)).map_err(|e| Error::Invalid(format!("split_face `{name}`: {e}")))?;
                     (vec![FeatureId(id)], vec![body.clone()])

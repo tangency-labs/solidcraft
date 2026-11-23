@@ -579,8 +579,7 @@ fn positional_index(args: &[String]) -> Option<usize> {
         if a.starts_with("--") {
             i += if matches!(
                 a.as_str(),
-                "--quiet" | "--results" | "--timings" | "--profile" | "--allow-errors" | "--no-grid" | "--no-axes" | "--script-relative"
-                    | "--record"
+                "--quiet" | "--results" | "--timings" | "--profile" | "--allow-errors" | "--no-grid" | "--no-axes" | "--script-relative" | "--record"
             ) {
                 1
             } else {
@@ -1072,7 +1071,7 @@ fn cmd_export_snapshot(args: &[String]) -> Result<(), String> {
         &["--record"],
         true,
     )?;
-    let path = positional(args).ok_or_else(|| command_usage("export-snapshot"))?;
+    let path = positional(args).ok_or_else(|| command_usage("export-snapshot", &[]))?;
     let out = flag(args, "--out").ok_or("export-snapshot: --out FILE is required")?;
     let bytes = solidcraft_engine::io::vfs::read(path, solidcraft_engine::io::limits::max_design_bytes())
         .map_err(|e| format!("{path}: {}", solidcraft_engine::io::limits::explain(solidcraft_engine::io::limits::Kind::Design, e)))?;

@@ -20,6 +20,7 @@ pub fn box_doc(length: &str) -> Document {
             width: "10".into(),
             height: "5".into(),
             operation: Operation::NewBody,
+            centred: false,
         },
         None,
     )
@@ -37,6 +38,7 @@ pub fn holed_doc() -> Document {
             width: "20".into(),
             height: "10".into(),
             operation: Operation::NewBody,
+            centred: false,
         },
         None,
     )

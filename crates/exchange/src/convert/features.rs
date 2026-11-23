@@ -224,7 +224,7 @@ pub(crate) fn features(doc: &Document, state: &ModelState, bodies: &[Body]) -> V
                 },
                 DocKind::Mirror { plane, bodies: copied, .. } => FeatureKind::Mirror {
                     bodies: names(&plain(copied)),
-                    transform: doc.resolve_plane_in(&vals, plane, 0, Some(state)).ok().and_then(|p| mirror(p.origin, p.normal())),
+                    transform: doc.resolve_plane_in(&vals, plane, 0, 0, Some(state)).ok().and_then(|p| mirror(p.origin, p.normal())),
                 },
                 _ => FeatureKind::Other,
             };
