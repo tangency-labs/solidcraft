@@ -4354,7 +4354,7 @@ fn picked_side(app: &SolveApp, d: &Dialog, first: &Sel) -> Option<usize> {
 }
 
 /// Discard an editor whose target was removed, before its preview can draw again. Show the sketch
-/// of the Extrude, Revolve, sheet metal base or contour flange, or Hole at sketch
+/// of the Extrude, Revolve, sheet metal base, contour flange or tab, or Hole at sketch
 /// points the open dialog edits, or the sketch an Extrude or Revolve ended on its way to opening
 /// (#14128), and only while it is open: whichever way the dialog closed (OK, Cancel, another
 /// tool, another design), the sketch returns to its own visibility.
@@ -4381,6 +4381,7 @@ pub(crate) fn sync_feature_edit(app: &mut SolveApp) {
         | FeatureKind::Revolve { sketch, .. }
         | FeatureKind::SheetBase { sketch, .. }
         | FeatureKind::SheetContour { sketch, .. }
+        | FeatureKind::SheetTab { sketch, .. }
         | FeatureKind::Hole { points: Some(solidcraft_engine::doc::SketchPoints { sketch, single: false, .. }), .. } => Some(**sketch),
         _ => None,
     });
@@ -6125,7 +6126,8 @@ pub fn apply_commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value)>
             let original_all = match &feature.kind {
                 FeatureKind::Extrude { sketch, profiles: ProfileSel::All, thin: None, .. }
                 | FeatureKind::Revolve { sketch, profiles: ProfileSel::All, .. }
-                | FeatureKind::Emboss { sketch, profiles: ProfileSel::All, .. } => Some(*sketch),
+                | FeatureKind::Emboss { sketch, profiles: ProfileSel::All, .. }
+                | FeatureKind::SheetTab { sketch, profiles: ProfileSel::All, .. } => Some(*sketch),
                 _ => None,
             };
             // A thin extrude follows curves and takes no profiles: an extrude of every profile
