@@ -2027,7 +2027,8 @@ pub fn run_item(app: &mut SolveApp, item: &Item, at: Pos2) {
                 &format!("{name}.step"),
                 &["step", "stp", "igs", "stl", "3mf", "obj", "glb", "usd", "usda", "usdc", "usdz"],
                 "file.export",
-                json!({"bodies": bodies}),
+                // `hierarchy` is read for GLB only.
+                json!({"bodies": bodies, "hierarchy": app.preferences.glb_export_hierarchy}),
             );
         }
         "ui.findBrowser" => {
