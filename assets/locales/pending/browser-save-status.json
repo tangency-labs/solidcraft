@@ -1,0 +1,10 @@
+{
+  "en": {
+    "ui.browser_save_in_progress": "A save is already in progress for this design.",
+    "ui.browser_saved_earlier": "Saved {path}. Newer changes are still unsaved."
+  },
+  "ja": {
+    "ui.browser_save_in_progress": "このデザインは現在保存中です。",
+    "ui.browser_saved_earlier": "{path} に保存しました。保存開始後の変更はまだ保存されていません。"
+  }
+}

@@ -537,6 +537,8 @@ pub struct Services {
     /// the picker's first filter (`&[]`: designs, CAD files and meshes, #1801).
     pub pick_open: Option<Box<dyn Fn(&[&str]) -> FilePickerFuture>>,
     pub pick_save: Option<Box<dyn Fn(&str, &[&str]) -> FilePickerFuture>>,
+    /// A browser persists prepared design bytes and acknowledges them after the write ends.
+    pub persist_design: Option<save_job::PersistDesign>,
     /// Open a dialog for one file of a kind (its name, its extensions): on macOS a dialog allows
     /// only the types it names, so the agent chat's files need a dialog of their own. `None`: the
     /// Open dialog.
@@ -719,6 +721,8 @@ pub struct SolveApp {
     pub(crate) import_report: Option<import_report::Shown>,
     /// A Save or Save As being written on a worker (see [`save_job`]).
     saving: Option<save_job::Saving>,
+    host_saves: Vec<save_job::HostSaving>,
+    host_save_left_dirty: std::collections::HashSet<u64>,
     /// A signature check running on a worker (see [`verify_job`]).
     verifying: Option<verify_job::Verifying>,
     /// A drawing view being drawn on a worker (see [`drawing_jobs`]).
@@ -1116,6 +1120,8 @@ impl SolveApp {
             plugin_install: Default::default(),
             import_report: None,
             saving: None,
+            host_saves: Vec::new(),
+            host_save_left_dirty: Default::default(),
             verifying: None,
             drawing_job: None,
             viewport: viewport::ViewportState::default(),
@@ -4829,6 +4835,10 @@ impl SolveApp {
             ctx.request_repaint();
             return;
         };
+        if control::host_save(self, &req) {
+            ctx.request_repaint();
+            return;
+        }
         let reply = req.reply.clone();
         match control::handle(self, ctx, &req) {
             control::Outcome::Done(v) => {

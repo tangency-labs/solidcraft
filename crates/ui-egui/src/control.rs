@@ -265,6 +265,11 @@ fn command(step: &Value) -> Option<&str> {
     step.get("command").or_else(|| step.get("id")).and_then(Value::as_str)
 }
 
+fn save_command(step: &Value) -> Option<&'static str> {
+    let id = solidcraft_engine::find_command(command(step)?)?.id;
+    matches!(id, "file.save" | "file.save_as").then_some(id)
+}
+
 /// A batch step's parameters: missing or null is no parameters.
 fn step_params(step: &Value) -> Value {
     step.get("params").cloned().filter(|p| !p.is_null()).unwrap_or(json!({}))
@@ -331,6 +336,9 @@ fn batch(app: &mut SolveApp, q: params::Batch) -> Outcome {
     let steps = &q.commands;
     if steps.len() > MAX_BATCH {
         return err(format!("engine.batch: commands must be an array of at most {MAX_BATCH} steps"));
+    }
+    if app.services.persist_design.is_some() && steps.iter().any(|step| save_command(step).is_some()) {
+        return err("send file.save or file.save_as as a standalone command to wait for browser storage");
     }
     let panels = steps.iter().filter(|step| command(step).is_some_and(solidcraft_engine::panels::commands::is_command)).count();
     if panels > 0 {
@@ -441,6 +449,9 @@ fn script(app: &mut SolveApp, p: &Value) -> Outcome {
         Ok(steps) => steps,
         Err(e) => return err(e),
     };
+    if app.services.persist_design.is_some() && steps.iter().any(|step| save_command(step).is_some()) {
+        return err("send file.save or file.save_as as a standalone command to wait for browser storage");
+    }
     if let Some(c) = steps.iter().find_map(switches_design) {
         return err(format!("engine.script unavailable: {c} switches to another design (send it on its own)"));
     }
@@ -550,6 +561,26 @@ pub fn handle(app: &mut SolveApp, ctx: &egui::Context, req: &ControlRequest) -> 
     #[cfg(feature = "usage-stats")]
     let _source = solidcraft_engine::usage::from(solidcraft_engine::usage::Source::Agent);
     crate::agent_chat::with_tool_request(app, req.chat_turn.as_ref(), |app| handle_request(app, ctx, req))
+}
+
+/// Save commands sent to a browser answer after the same host write as the toolbar.
+pub(crate) fn host_save(app: &mut SolveApp, req: &ControlRequest) -> bool {
+    if app.services.persist_design.is_none() || !matches!(req.method.as_str(), "engine.execute" | "command") {
+        return false;
+    }
+    let Some(id) = save_command(&req.params) else { return false };
+    let start = |app: &mut SolveApp| {
+        let scope = request_scope(app, &req.params)?;
+        let level = request_param_check(&req.method, &req.params)?;
+        let execute: params::Execute = params::parse(&req.params)?;
+        vfs::scoped(scope, || crate::save_job::start_host(app, id, execute.params(), Some(req.reply.clone()), level))
+    };
+    if let Err(e) = start(app)
+        && let Outcome::Done(reply) = err(e)
+    {
+        let _ = req.reply.send(reply);
+    }
+    true
 }
 
 fn handle_request(app: &mut SolveApp, ctx: &egui::Context, req: &ControlRequest) -> Outcome {

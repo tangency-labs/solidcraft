@@ -38,6 +38,10 @@ the API with the page's browser permissions. File paths refer to the browser's v
 system, not arbitrary files on the user's computer. Native-only operations remain subject to
 the browser host's limitations; this API does not grant desktop filesystem or window access.
 
+Call `file.save` and `file.save_as` with standalone `solidcraft.execute` requests. For a file in
+browser storage or on the computer, the promise settles after the host finishes writing.
+Explicit virtual paths such as `/upload/` stay in memory for the current page.
+
 ## A host page that keeps the designs
 
 `?embed=editor` runs the app as an editing embed: the ribbon, browser, timeline and properties,

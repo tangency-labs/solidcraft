@@ -42,6 +42,16 @@ use crate::{EngineError, Result, Session, store_link_names};
 const INSERT_MESH_CONTRACT: TypedContract<InsertMeshParams> = TypedContract::new();
 const INSERT_STEP_CONTRACT: TypedContract<InsertStepParams> = TypedContract::new();
 
+struct HostSave {
+    uid: u64,
+    bytes: Option<Vec<u8>>,
+}
+
+thread_local! {
+    // The browser's host persists the prepared save after the engine has encoded it.
+    static HOST_SAVE: std::cell::RefCell<Option<HostSave>> = const { std::cell::RefCell::new(None) };
+}
+
 pub static COMMANDS: &[CommandSpec] = &[
     CommandSpec::new("file.new", "New Design", crate::checked!("file.new", new_doc))
         .any_part()
@@ -2012,7 +2022,10 @@ fn write_bytes(
     }
     // Atomic, keeping the version being replaced as `<file>.bak`; a watched save reports how far
     // the write is and stops on Cancel until the file is replaced.
-    solidcraft_io::write_atomic(std::path::Path::new(path), &bytes, true).map_err(|e| EngineError::Other(format!("{path}: {e}")))?;
+    let host_save = HOST_SAVE.with(|slot| slot.borrow().as_ref().is_some_and(|save| save.uid == s.uid));
+    if !host_save {
+        solidcraft_io::write_atomic(std::path::Path::new(path), &bytes, true).map_err(|e| EngineError::Other(format!("{path}: {e}")))?;
+    }
     s.path = Some(path.to_string());
     s.disk = solidcraft_io::design_lock::stamp(path);
     s.read_only = false;
@@ -2048,14 +2061,26 @@ fn write_bytes(
         }
         out.kept_format = Some(s.doc.format.clone());
         if !lost.is_empty() {
-            out.warnings.get_or_insert_with(Vec::new).extend(lost.iter().map(|what| format!("Not kept: {what}. The previous file is `{path}.bak`.")));
+            out.warnings.get_or_insert_with(Vec::new).extend(
+                lost.iter().map(|what| {
+                    if host_save { format!("Not kept: {what}.") } else { format!("Not kept: {what}. The previous file is `{path}.bak`.") }
+                }),
+            );
             out.not_kept = Some(lost);
         }
     }
     if !notes.is_empty() {
         out.warnings.get_or_insert_with(Vec::new).extend(notes);
     }
-    serde_json::to_value(out).map_err(|e| bad("file.save", e.to_string()))
+    let reply = serde_json::to_value(out).map_err(|e| bad("file.save", e.to_string()))?;
+    if host_save {
+        HOST_SAVE.with(|slot| {
+            if let Some(save) = slot.borrow_mut().as_mut() {
+                save.bytes = Some(bytes);
+            }
+        });
+    }
+    Ok(reply)
 }
 
 /// Write the container with one GnuPG-signed provenance record appended to the session's chain.
@@ -2183,6 +2208,35 @@ fn hex(bytes: &[u8]) -> String {
 }
 
 impl Session {
+    /// Prepare a Save on a scratch session. The caller persists the bytes and only then adopts
+    /// this session's saved state. No file is published while preparing.
+    pub fn prepare_host_save(&mut self, command: &str, params: &Value) -> Result<(Value, Vec<u8>)> {
+        if !self.is_copy || !matches!(command, "file.save" | "file.save_as") {
+            return Err(bad(command, "a host save requires a scratch session and a save command"));
+        }
+        let started = HOST_SAVE.with(|slot| {
+            let mut slot = slot.borrow_mut();
+            if slot.is_some() {
+                return false;
+            }
+            *slot = Some(HostSave { uid: self.uid, bytes: None });
+            true
+        });
+        if !started {
+            return Err(bad(command, "a host save is already preparing"));
+        }
+        struct ClearHostSave;
+        impl Drop for ClearHostSave {
+            fn drop(&mut self) {
+                HOST_SAVE.with(|slot| slot.replace(None));
+            }
+        }
+        let _scope = ClearHostSave;
+        let result = self.execute(command, params)?;
+        let bytes = HOST_SAVE.with(|slot| slot.borrow_mut().as_mut().and_then(|save| save.bytes.take()));
+        Ok((result, bytes.ok_or_else(|| bad(command, "no design bytes were prepared"))?))
+    }
+
     /// Open a design with its file location, resolving component links before history keeps
     /// them. Absolute in-memory targets survive Save As, undo, redo and recovery unchanged.
     pub fn opened_at(doc: Document, saved: Option<&solidcraft_doc::SavedModel>, path: Option<&str>) -> Self {
@@ -2311,7 +2365,16 @@ impl Session {
     /// one's: a change made here while the save was written is not in the file, so it stays
     /// unsaved (#6003).
     pub fn adopt_save(&mut self, done: &Session) {
-        if done.doc.name != self.doc.name {
+        self.adopt_save_state(done, true);
+    }
+
+    /// Apply a host save while allowing edits made after it began to stay unsaved.
+    pub fn adopt_host_save(&mut self, done: &Session, original_name: &str) {
+        self.adopt_save_state(done, self.doc.name == original_name);
+    }
+
+    fn adopt_save_state(&mut self, done: &Session, adopt_name: bool) {
+        if adopt_name && done.doc.name != self.doc.name {
             let (from, to) = (self.doc.name.clone(), done.doc.name.clone());
             rename_design(self, &from, &to);
         }
@@ -4153,6 +4216,29 @@ mod tests {
         assert_eq!(direct.doc.name, "Bracket");
         assert_eq!(adopted.undo.iter().map(|u| u.doc.name.clone()).collect::<Vec<_>>(), vec!["Bracket copy".to_string(); adopted.undo.len()]);
         assert_eq!(solidcraft_io::read_design(&std::fs::read(&b).unwrap()).unwrap(), *adopted.doc);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn preparing_a_host_save_leaves_the_existing_file_and_backup_alone() {
+        let dir = std::env::temp_dir().join(format!("solidcraft-prepare-host-save-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("Bracket.sc");
+        let mut s = Session::default();
+        s.execute("solid.box", &json!({"length": 10, "width": 10, "height": 10})).unwrap();
+        s.execute("file.save_as", &json!({"path": path})).unwrap();
+        let old = std::fs::read(&path).unwrap();
+        s.execute("solid.sphere", &json!({"diameter": 5})).unwrap();
+        let mut copy = s.scratch();
+        copy.path.clone_from(&s.path);
+        assert!(copy.prepare_host_save("file.save", &json!({"format": "other"})).is_err());
+        let (_, bytes) = copy.prepare_host_save("file.save", &json!({})).unwrap();
+        assert_eq!(solidcraft_io::read_design(&bytes).unwrap().features.len(), 2);
+        assert!(s.is_dirty() && std::fs::read(&path).unwrap() == old);
+        let backup = solidcraft_io::safe_write::backup_path(&path);
+        assert!(!backup.exists());
+        s.execute("file.save", &json!({})).unwrap();
+        assert_eq!(std::fs::read(&backup).unwrap(), old, "the native save still writes its backup");
         let _ = std::fs::remove_dir_all(&dir);
     }
 

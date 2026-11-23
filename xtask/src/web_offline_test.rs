@@ -396,7 +396,33 @@ const API_TEST: &str = r#"(async () => {
     await app.execute('file.save', {path: '/upload/linked-part.sc'});
     await app.execute('file.new');
     const linked = await app.execute('component.insert_design', {path: '/upload/linked-part.sc'});
+    // The browser's persistence promise controls when Save can acknowledge this revision.
+    const handle = FileSystemFileHandle.prototype;
+    const createWritable = handle.createWritable;
+    let reached, release;
+    const writing = new Promise(resolve => { reached = resolve; });
+    const fail = new Promise(resolve => { release = resolve; });
+    handle.createWritable = function (...args) {
+        if (this.name !== 'linked-assembly.sc') return createWritable.apply(this, args);
+        reached();
+        return fail.then(() => { throw new Error('test OPFS write failed'); });
+    };
+    try {
+        const saving = rejects(() => app.execute('file.save', {path: '/opfs/linked-assembly.sc'}), 'test OPFS write failed');
+        await writing;
+        check((await app.request('document.export')).dirty, 'pending OPFS save leaves the design unsaved');
+        release();
+        await saving;
+        check((await app.request('document.export')).dirty, 'failed OPFS save leaves the design unsaved');
+    } finally {
+        release();
+        handle.createWritable = createWritable;
+    }
     await app.execute('file.save', {path: '/opfs/linked-assembly.sc'});
+    const dir = await navigator.storage.getDirectory();
+    const savedHandle = await dir.getFileHandle('linked-assembly.sc');
+    check((await savedHandle.getFile()).size > 0, 'successful save is already readable in OPFS');
+    check(!(await app.request('document.export')).dirty, 'successful OPFS save acknowledges its design');
     const links = await app.execute('component.links');
     check(links.links[0].found === true, 'linked part is found in browser storage');
     check(links.links[0].path === '../upload/linked-part.sc', 'assembly stores a relative link');
