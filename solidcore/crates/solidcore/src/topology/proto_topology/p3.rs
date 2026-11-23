@@ -2086,7 +2086,22 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
                 let sols = {
                     let c1 = curve_of(&*geometry, h1)?;
                     let c2 = curve_of(&*geometry, h2)?;
-                    // Read the edge zones with rounding at their trimmed curves' scale.
+                    // Prior merges can raise edge zones. Bound this new shared-interval
+                    // search by each owning B-rep's zone, as in find_edge_proved_along.
+                    let manager_zone = self.tolerance(k);
+                    let [search_zone1, search_zone2] = [(edge1, edge_tol1), (edge2, edge_tol2)]
+                        .map(|(edge, edge_zone)| {
+                            let body_zone = geometry
+                                .topology_entity(edge)
+                                .map_or(manager_zone, |(brep, _)| brep.tolerance());
+                            // Unknown zones stay unknown through the cap and floor.
+                            if edge_zone.is_nan() || body_zone.is_nan() || manager_zone.is_nan() {
+                                f64::NAN
+                            } else {
+                                edge_zone.min(body_zone).max(manager_zone)
+                            }
+                        });
+                    // Include rounding at the trimmed curves' scale.
                     // An unavailable box contributes zero extra rounding, as in the checker.
                     let req = BoundingBoxRequest {
                         normal: true,
@@ -2107,7 +2122,7 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
                             }
                         }
                     }
-                    let coincidence_tol = coincidence_reach_3d(k, edge_tol1, edge_tol2, size);
+                    let coincidence_tol = coincidence_reach_3d(k, search_zone1, search_zone2, size);
                     ignore_soft(passed_on(
                         c1.global_coincidence_checker::<CurveHandle>(
                             k,

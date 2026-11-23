@@ -400,10 +400,12 @@ The sites move to the rule one at a time (§10, "The coincidence rule in migrati
   vertices: within the larger tolerance, not the band of both.
 - When two source edges produce overlapping proto edges, `resolve_overlapping_proto_edges`
   (`topology/proto_topology/p3.rs`) compares their curves over the trimmed intervals.
-  It uses `coincidence_reach_3d` with both edge tolerances and accounts for rounding at the
-  scale of the trimmed curves. This keeps a shared boundary when the manager's approximation
-  tolerance is smaller than the gap. Both faces then classify the first edge's curve with
-  its own zone tolerance, using the manager's tolerance as a lower bound.
+  For this search, each edge's zone is capped at its owning B-rep's tolerance, with the
+  manager's effective tolerance as a floor and as the bound for an unresolved owner.
+  Earlier vertex merges can raise an edge's zone, so those raises must not decide a new
+  shared interval. `coincidence_reach_3d` includes model contact and rounding at the trimmed
+  curves' scale. Both faces then classify the first edge's curve with its true zone
+  tolerance, using the manager's tolerance as a lower bound.
 - The ordinary curve/edge classifier can prove an entire curve clear of a boundary even
   inside the intersection search band. The semi-axis radii bound every point on an ellipse.
   Projecting a positive-weight B-spline's control hull onto the normal of an ellipse's
