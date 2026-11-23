@@ -21,7 +21,7 @@
 //! | [`SurfaceFailure::BlendCurveNotBSpline`], [`SurfaceFailure::BlendDefinitionUnreadable`], [`SurfaceFailure::NetNotCertified`], [`SurfaceFailure::CurveDimensionTooLarge`], [`SurfaceFailure::NoBSplineForm`], [`SurfaceFailure::DoesNotContinueAsItself`], [`SurfaceFailure::OffsetNestedTooDeep`], [`SurfaceFailure::NoNormal`], [`SurfaceFailure::InvertedPointOffOffset`], [`SurfaceFailure::ExtensionTowardFailed`], [`SurfaceFailure::RevolutionArcOutOfRange`], [`SurfaceFailure::ExtensionSpanNotPositive`], [`SurfaceFailure::ExtensionSpansPastBound`], [`SurfaceFailure::AsItselfNetUnexpected`], [`SurfaceFailure::RevolutionAxisDegenerate`], [`SurfaceFailure::GeneratorCircleUndefined`], [`SurfaceFailure::AsItselfWeightNotPositive`], [`SurfaceFailure::RotationSenseUndefined`], [`SurfaceFailure::NoNonsingularStepoff`] | `SM_ERR` |
 //! | [`SurfaceFailure::RecordDoesNotRebuild`] | `SM_ERR_INVALID_INPUT` |
 //! | [`SurfaceFailure::SurfaceNotBSplineKind`] | `SM_ERR_NULL_POINTER` (class [`ErrorKind::Unsupported`]) |
-//! | the named causes of the analytic and swept surfaces, from [`SurfaceFailure::OperationNotTaken`] on | the status of the phrase each replaced (`comparison_status`), or the site's through `with_status` |
+//! | the other named causes, from [`SurfaceFailure::ScaleNotUniform`] on | the status of the phrase each replaced (`comparison_status`), or the site's through `with_status` |
 //!
 //! [`SurfaceFailure::Defect`] is a failure reviewed at its site as the kernel's fault, with its
 //! reason: a defect ([`ErrorKind::StageFailed`], class 127). The phrase causes are sites
@@ -334,6 +334,35 @@ pub enum SurfaceFailure {
     /// or not finite): an analytic surface takes only a uniform scale that keeps it a
     /// surface. [`ErrorKind::InvalidInput`].
     ScaleNotUniform,
+    /// The surface's NURB form could not be made (the make's failure is the cause, where it
+    /// gave one). Class `failed`; whether it is a defect or a refusal is its cause's
+    /// ([`crate::SolidError::is_defect`] follows the chain).
+    NurbNotMade,
+    /// The radius given is not above the kernel's zero. [`ErrorKind::InvalidInput`].
+    RadiusNotPositive,
+    /// The swept surface given has no generator curve (an empty surface whose data was
+    /// never read or set). [`ErrorKind::InvalidInput`].
+    SurfaceWithoutGenerator,
+    /// The NURB is not of the analytic kind the routine tests it for or rebuilds from it
+    /// (an edited NURB that is no longer its surface's kind, or a NURB recognised as one):
+    /// `check` says which test it failed. [`ErrorKind::Unsupported`].
+    NurbNotAnalytic {
+        /// The test of the analytic kind the NURB failed.
+        check: AnalyticCheck,
+    },
+    /// The generator circle of the radius and placement given could not be made (the
+    /// circle's failure, such as a radius not above the kernel's zero, is the cause).
+    /// Status `SM_ERR_NULL_POINTER` (upstream's null circle); class `failed`, and whether it
+    /// is a defect or a refusal is its cause's.
+    GeneratorNotMade,
+    /// The point is the centre of a sphere no larger than the tolerance: it lies on the
+    /// sphere within the tolerance, but no direction from the centre gives it parameters.
+    /// Class `failed`.
+    CentreHasNoParameters,
+    /// The cone given lies within the kernel's zero of its axis at the middle of its
+    /// straight boundary line, so that line and the axis span no plane (a cone too thin
+    /// there to intersect). [`ErrorKind::InvalidInput`].
+    ConeBoundaryOnAxis,
     /// The database reader given has no input stream to read from.
     /// [`ErrorKind::InvalidInput`].
     NoInputStream,
@@ -376,18 +405,9 @@ pub enum SurfaceFailure {
     /// kernel's zero squared, or not finite. A uniform scale so small or so large takes the
     /// plane outside what the kernel resolves. [`ErrorKind::Degenerate`].
     PlaneTangentUnmeasurable,
-    /// The surface's NURB form could not be made (the make's failure is the cause, where it
-    /// gave one). Class `failed`; whether it is a defect or a refusal is its cause's
-    /// ([`crate::SolidError::is_defect`] follows the chain).
-    NurbNotMade,
     /// The evaluation of the surface's NURB form failed (its error is the cause). Class
     /// `failed`; whether it is a defect or a refusal is its cause's.
     NurbEvaluationFailed,
-    /// The radius given is not above the kernel's zero. [`ErrorKind::InvalidInput`].
-    RadiusNotPositive,
-    /// The swept surface given has no generator curve (an empty surface whose data was
-    /// never read or set). [`ErrorKind::InvalidInput`].
-    SurfaceWithoutGenerator,
     /// The domain given reaches past the cone's apex, where its radius would be negative.
     /// [`ErrorKind::OutsideDomain`].
     DomainPastApex,
@@ -409,13 +429,6 @@ pub enum SurfaceFailure {
     /// The lean's slope or neutral height is NaN or infinite, or the radius law they give
     /// overflows at a control point of the net. [`ErrorKind::InvalidInput`].
     LeanNotFinite,
-    /// The NURB is not of the analytic kind the routine tests it for or rebuilds from it
-    /// (an edited NURB that is no longer its surface's kind, or a NURB recognised as one):
-    /// `check` says which test it failed. [`ErrorKind::Unsupported`].
-    NurbNotAnalytic {
-        /// The test of the analytic kind the NURB failed.
-        check: AnalyticCheck,
-    },
     /// The point given, moved onto the plane of the generator (along the extrusion, or
     /// about the axis), meets no point of the generator curve: the inversion's search
     /// found none, so the point is not on the surface. Class `failed`.
@@ -464,6 +477,15 @@ pub enum SurfaceFailure {
 pub enum AnalyticCheck {
     /// Its degrees and rationality are not the kind's (a cone's are 1 by 2, rational).
     DegreeAndRationality,
+    /// Its iso curves are not the kind's circles: those one way on parallel planes and
+    /// those the other way with a common centre (a sphere's, its meridians at most a half
+    /// turn) or on planes through a common line (a torus's).
+    IsoCirclesNotOfKind,
+    /// A meridian at an end of its sweep has no control point off the axis on the side of
+    /// the fitted sweep, so the sweep has no start or end direction.
+    MeridianOnAxis,
+    /// Its generator circle, built from its first iso curve, is degenerate.
+    GeneratorDegenerate,
     /// Its iso curves at the two ends are not circular arcs.
     EndsNotCircular,
     /// Its end arcs' start or end angles differ by more than the tolerance.
@@ -488,7 +510,7 @@ pub enum AnalyticCheck {
     /// Every iso curve tested for a circle is degenerate.
     IsoCurvesDegenerate,
     /// Its iso curve to become the generator is degenerate.
-    GeneratorDegenerate,
+    GeneratorIsoDegenerate,
     /// Its iso curve to become the generator is not planar.
     GeneratorNotPlanar,
     /// The plane of its iso curve to become the generator does not hold the circles' axis.
@@ -499,6 +521,11 @@ impl core::fmt::Display for AnalyticCheck {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         f.write_str(match self {
             Self::DegreeAndRationality => "its degrees or rationality are not the kind's",
+            Self::IsoCirclesNotOfKind => "its iso curves are not the kind's circles",
+            Self::MeridianOnAxis => {
+                "a meridian at an end of its sweep has no control point off the axis on its side"
+            }
+            Self::GeneratorDegenerate => "its generator circle is degenerate",
             Self::EndsNotCircular => "its end iso curves are not circular",
             Self::EndArcsTwisted => "its end arcs' angles differ by more than the tolerance",
             Self::HeightDegenerate => "its height is degenerate",
@@ -513,7 +540,7 @@ impl core::fmt::Display for AnalyticCheck {
             Self::NetOffCylinder => "its moved net is not on the mean-radius cylinder",
             Self::NoCircularDirection => "neither direction's iso curves are coaxial circles",
             Self::IsoCurvesDegenerate => "every iso curve tested for a circle is degenerate",
-            Self::GeneratorDegenerate => "its generator iso curve is degenerate",
+            Self::GeneratorIsoDegenerate => "its generator iso curve is degenerate",
             Self::GeneratorNotPlanar => "its generator iso curve is not planar",
             Self::GeneratorOffAxisPlane => "its generator iso curve is not in a plane of the axis",
         })
@@ -553,9 +580,10 @@ impl SurfaceFailure {
             | Self::SolverWithout { .. }
             | Self::SolveCacheNotMade
             | Self::NoNurb
+            | Self::SurfaceWithoutGenerator
+            | Self::GeneratorNotMade
             | Self::NoInputStream
             | Self::SurfaceNotBSplineKind
-            | Self::SurfaceWithoutGenerator
             | Self::NoPolarConverter => SM_ERR_NULL_POINTER,
             Self::InvalidValue(_)
             | Self::LineDirectionZero
@@ -592,6 +620,9 @@ impl SurfaceFailure {
             | Self::CurveWithoutNurb
             | Self::CurveWithoutControlPoints
             | Self::ScaleNotUniform
+            | Self::RadiusNotPositive
+            | Self::SurfaceWithoutGenerator
+            | Self::ConeBoundaryOnAxis
             | Self::NoInputStream
             | Self::BallDefinitionUnreadable
             | Self::BlendCurveNotBSpline
@@ -601,8 +632,6 @@ impl SurfaceFailure {
             | Self::DoesNotContinueAsItself
             | Self::OffsetNestedTooDeep
             | Self::OperationNotTaken
-            | Self::RadiusNotPositive
-            | Self::SurfaceWithoutGenerator
             | Self::DegenerateIsoCurve
             | Self::LeanNotFinite
             | Self::ToleranceNotADistance
@@ -621,10 +650,10 @@ impl SurfaceFailure {
             | Self::DerivativeCombinationUnsupported { .. }
             | Self::PlainVolume
             | Self::BSplineVolumeUnsupported
+            | Self::NurbNotAnalytic { .. }
             | Self::SurfaceNotBSplineKind
             | Self::NoBSplineForm
             | Self::NotACylinder
-            | Self::NurbNotAnalytic { .. }
             | Self::GeneratorNotPerpendicular
             | Self::PolarConversionImpossible
             | Self::GeneratorNotPlanar => ErrorKind::Unsupported,
@@ -649,6 +678,8 @@ impl SurfaceFailure {
             | Self::NoVolumeInverse
             | Self::CallFailed
             | Self::NurbNotMade
+            | Self::GeneratorNotMade
+            | Self::CentreHasNoParameters
             | Self::NurbEvaluationFailed
             | Self::NoPolarConverter
             | Self::AngleNotMeasured
@@ -801,6 +832,19 @@ impl core::fmt::Display for SurfaceFailure {
                 f.write_str("the analytic plane's bounding canvas is not finite")
             }
             Self::ScaleNotUniform => f.write_str("an analytic surface takes only a uniform scale"),
+            Self::NurbNotMade => f.write_str("the surface's NURB form could not be made"),
+            Self::RadiusNotPositive => f.write_str("the radius is not positive"),
+            Self::SurfaceWithoutGenerator => f.write_str("the surface has no generator curve"),
+            Self::NurbNotAnalytic { check } => {
+                write!(f, "the NURB is not of the analytic kind: {check}")
+            }
+            Self::GeneratorNotMade => f.write_str("the generator circle could not be made"),
+            Self::CentreHasNoParameters => f.write_str(
+                "the point is the centre of a sphere within the tolerance and has no parameters",
+            ),
+            Self::ConeBoundaryOnAxis => {
+                f.write_str("the cone is on its axis at the middle of its boundary line")
+            }
             Self::NoInputStream => f.write_str("the database has no input stream"),
             Self::BallDefinitionUnreadable => {
                 f.write_str("the ball patch's definition could not be read")
@@ -830,12 +874,9 @@ impl core::fmt::Display for SurfaceFailure {
             Self::PlaneTangentUnmeasurable => {
                 f.write_str("the transformed plane's tangents are outside what the kernel resolves")
             }
-            Self::NurbNotMade => f.write_str("the surface's NURB form could not be made"),
             Self::NurbEvaluationFailed => {
                 f.write_str("the evaluation of the surface's NURB form failed")
             }
-            Self::RadiusNotPositive => f.write_str("the radius is not positive"),
-            Self::SurfaceWithoutGenerator => f.write_str("the surface has no generator curve"),
             Self::DomainPastApex => f.write_str("the domain reaches past the apex"),
             Self::DegenerateIsoCurve => f.write_str("the iso curve has zero length"),
             Self::NoPolarConverter => {
@@ -849,9 +890,6 @@ impl core::fmt::Display for SurfaceFailure {
             }
             Self::LeanNotFinite => {
                 f.write_str("the lean's slope, neutral height or radius is not finite")
-            }
-            Self::NurbNotAnalytic { check } => {
-                write!(f, "the NURB is not of the analytic kind: {check}")
             }
             Self::PointNotOnGenerator => f.write_str("the point is not on the generator curve"),
             Self::GeneratorNotPerpendicular => {
@@ -1294,7 +1332,7 @@ mod tests {
     /// (which most goldens units read) is unchanged; their class says whose the failure is,
     /// and a cause chained under one decides whether it is a defect.
     #[test]
-    fn the_named_causes_keep_their_status_and_say_their_class() {
+    fn the_analytic_and_swept_causes_keep_their_status_and_say_their_class() {
         let op = "surface::op";
         let cases = [
             (
@@ -1566,6 +1604,95 @@ mod tests {
         assert_eq!(missing.surface_failure(), Some(&defect));
     }
 
+    /// Each named cause keeps the status of the phrase it replaced and says its class; it
+    /// is neither a defect nor a refusal by itself.
+    #[test]
+    fn the_named_causes_keep_their_status_and_say_their_class() {
+        let op = "surface::op";
+        let analytic = |check| SurfaceFailure::NurbNotAnalytic { check };
+        let cases = [
+            (
+                SurfaceFailure::ScaleNotUniform,
+                SM_ERR,
+                ErrorKind::InvalidInput,
+            ),
+            (
+                SurfaceFailure::NoNurb,
+                SM_ERR_NULL_POINTER,
+                ErrorKind::InvalidInput,
+            ),
+            (SurfaceFailure::NurbNotMade, SM_ERR, ErrorKind::Failed),
+            (
+                SurfaceFailure::RadiusNotPositive,
+                SM_ERR,
+                ErrorKind::InvalidInput,
+            ),
+            (
+                SurfaceFailure::SurfaceWithoutGenerator,
+                SM_ERR_NULL_POINTER,
+                ErrorKind::InvalidInput,
+            ),
+            (
+                SurfaceFailure::DerivativeOrderTooHigh { max: 3 },
+                SM_ERR,
+                ErrorKind::InvalidInput,
+            ),
+            (
+                analytic(AnalyticCheck::DegreeAndRationality),
+                SM_ERR,
+                ErrorKind::Unsupported,
+            ),
+            (
+                analytic(AnalyticCheck::IsoCirclesNotOfKind),
+                SM_ERR,
+                ErrorKind::Unsupported,
+            ),
+            (
+                analytic(AnalyticCheck::MeridianOnAxis),
+                SM_ERR,
+                ErrorKind::Unsupported,
+            ),
+            (
+                analytic(AnalyticCheck::GeneratorDegenerate),
+                SM_ERR,
+                ErrorKind::Unsupported,
+            ),
+            (
+                SurfaceFailure::GeneratorNotMade,
+                SM_ERR_NULL_POINTER,
+                ErrorKind::Failed,
+            ),
+            (
+                SurfaceFailure::CentreHasNoParameters,
+                SM_ERR,
+                ErrorKind::Failed,
+            ),
+            (
+                SurfaceFailure::ConeBoundaryOnAxis,
+                SM_ERR,
+                ErrorKind::InvalidInput,
+            ),
+        ];
+        for (failure, status, kind) in cases {
+            let e = SolidError::surface(op, failure);
+            assert_eq!(e.sm_status(), Some(status), "{failure:?}");
+            assert_eq!(e.upstream_status(), Some(status), "{failure:?}");
+            assert_eq!(e.kind(), kind, "{failure:?}");
+            assert_eq!(e.operation(), op);
+            assert_eq!(e.surface_failure(), Some(&failure));
+            assert!(!e.is_defect() && !e.is_refusal(), "{failure:?}");
+        }
+        // a NURB that could not be made keeps the site's status and chains the make's error
+        let made = SolidError::surface(op, SurfaceFailure::RadiusNotPositive);
+        let e = SolidError::surface_nurb_not_made(op, SM_ERR_NULL_POINTER, Err(made.clone()));
+        assert_eq!(e.upstream_status(), Some(SM_ERR_NULL_POINTER));
+        assert_eq!(e.surface_failure(), Some(&SurfaceFailure::NurbNotMade));
+        assert_eq!(e.cause(), Some(&made));
+        let e = SolidError::surface_nurb_not_made(op, SM_ERR, Ok(()));
+        assert_eq!(e.upstream_status(), Some(SM_ERR));
+        assert!(e.cause().is_none());
+    }
+
     /// The sites that build a surface phrase cause only fall:
     /// per file, in the library code of `solidcore` and `solidcore-ops`, as
     /// [`super::super::site_scan`] counts them. A PR that converts sites lowers its
@@ -1596,7 +1723,6 @@ mod tests {
         #[rustfmt::skip] // one file per line, so conversions in parallel merge cleanly
         const PINNED: &[(&str, usize)] = &[
             ("solidcore/src/surface/cone/p3.rs", 3),
-            ("solidcore/src/surface/sphere.rs", 16),
             ("solidcore/src/surface/surface/approximate.rs", 10),
             ("solidcore/src/surface/surface/p1.rs", 8),
             ("solidcore/src/surface/surface/p2.rs", 21),
@@ -1611,7 +1737,6 @@ mod tests {
             ("solidcore/src/surface/surface_cache/p3.rs", 1),
             ("solidcore/src/surface/surface_point_solve/p1.rs", 5),
             ("solidcore/src/surface/surface_point_solve/p2.rs", 8),
-            ("solidcore/src/surface/torus.rs", 15),
             ("solidcore/src/surface/trim_srf_cache.rs", 4),
         ];
         assert_pinned("surface phrase-cause sites", &crate_sites(&PHRASES), PINNED);
