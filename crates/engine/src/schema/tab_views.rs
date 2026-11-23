@@ -93,7 +93,7 @@ impl From<solidcraft_views::Placement> for TabViewPlacement {
     }
 }
 
-/// `tab.view.layout`: show the Model and Render views of the design together.
+/// `tab.view.layout`: show Model, Sheet and Render views of the design together.
 #[derive(Debug, Deserialize, JsonSchema)]
 #[schemars(deny_unknown_fields)]
 pub struct TabViewLayoutParams {
@@ -170,7 +170,9 @@ pub struct TabViewOpenParams {
     /// What the view shows. Default: the kind of the view that is active now.
     #[serde(default)]
     pub kind: Option<TabViewKind>,
-    /// The sheet the view shows (its id, at most 256 bytes); none for the other kinds.
+    /// Sheet subject: encoded drawing id / encoded sheet id (at most 256 bytes).
+    /// A legacy bare sheet id is accepted when its drawing is unambiguous.
+    /// None selects the current drawing's first sheet; unused for other kinds.
     #[serde(default)]
     pub subject: Option<String>,
     /// True shows a view that already has this kind and subject instead of opening another.

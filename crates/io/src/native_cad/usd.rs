@@ -458,12 +458,12 @@ impl<'a> Reader<'a> {
                 self.cut_off = true;
                 return;
             }
-            self.plan.places.push(PlanPlace { slot, parent, transform: local });
+            self.plan.places.push(PlanPlace { slot, parent, transform: local, name: None });
             return;
         }
         let slot = self.plan.slots.len();
         self.plan.slots.push(label.clone());
-        self.plan.places.push(PlanPlace { slot, parent, transform: local });
+        self.plan.places.push(PlanPlace { slot, parent, transform: local, name: None });
         self.keys.insert(key, slot);
         if let Some(d) = definition {
             for b in &d.bodies {
