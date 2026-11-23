@@ -4152,6 +4152,8 @@ impl Renderer {
             )
         };
         let pbr = || {
+            let (instanced_depth, push) = split_push(opaque());
+            let push = face_push(push);
             (
                 pipeline("sc_pbr", "vs_pbr", "fs_pbr", pbr_layout(), opaque(), None),
                 pipeline("sc_pbr_palette", "vs_pbr_palette", "fs_pbr", tri_layout(), opaque(), None),
@@ -4162,10 +4164,10 @@ impl Renderer {
                         module: &module,
                         entry_point: Some("vs_pbr_inst"),
                         buffers: &[Some(shared_layout()), Some(instance_layout())],
-                        compilation_options: Default::default(),
+                        compilation_options: push_options(&push),
                     },
                     primitive: wgpu::PrimitiveState { topology: wgpu::PrimitiveTopology::TriangleList, ..Default::default() },
-                    depth_stencil: opaque(),
+                    depth_stencil: instanced_depth,
                     multisample: wgpu::MultisampleState { count: t.samples.max(1), mask: !0, alpha_to_coverage_enabled: false },
                     fragment: Some(wgpu::FragmentState {
                         module: &module,
@@ -7972,29 +7974,42 @@ mod glass_tests {
             return;
         }
         let format = wgpu::TextureFormat::Rgba8Unorm;
-        let mut renderer = Renderer::new(&device, GpuTarget { format, depth: Some(depth), samples: 1, tess: false, oit: false, edges: false }, None);
         // Looking along -z from the origin, the near plane at 1 µm as `Camera::clip_bounds` puts
         // it when the model reaches past the eye.
         let (near, far) = (0.001f32, 1000.0f32);
         let (a, b) = (-far / (far - near), -far * near / (far - near));
-        let mut sc = GpuScene::default();
-        let (green, red) = (sc.color([0, 200, 0, 255]), sc.color([200, 0, 0, 255]));
-        // A floor at y = -1 running from ahead of the eye to behind it, and another 0.1% further
-        // along the view (y = -1.001) that stays ahead of it.
-        for p in [[-4.0, -1.0, -6.0], [4.0, -1.0, -6.0], [0.0, -1.0, 5.0]] {
-            sc.tri(p, [0.0, 1.0, 0.0], green);
+        let green_surface = solidcraft_viewport::surface::OpaqueSurface::new(Vec3::new(0.1, 0.8, 0.1), 0.0, 0.6, 1.5).unwrap();
+        // The near floor drawn as a plain triangle and as a material (PBR) one: each kind of
+        // opaque face takes the push in its own vertex shader.
+        for pbr in [false, true] {
+            // A renderer of its own: one that drew the first scene keeps it (same frame key).
+            let mut renderer =
+                Renderer::new(&device, GpuTarget { format, depth: Some(depth), samples: 1, tess: false, oit: false, edges: false }, None);
+            let mut sc = GpuScene::default();
+            let (green, red) = (sc.color([0, 200, 0, 255]), sc.color([200, 0, 0, 255]));
+            // A floor at y = -1 running from ahead of the eye to behind it, and another 0.1%
+            // further along the view (y = -1.001) that stays ahead of it.
+            for p in [[-4.0, -1.0, -6.0], [4.0, -1.0, -6.0], [0.0, -1.0, 5.0]] {
+                if pbr {
+                    sc.pbr_tri(p, [0.0, 1.0, 0.0], green_surface);
+                } else {
+                    sc.tri(p, [0.0, 1.0, 0.0], green);
+                }
+            }
+            for p in [[-4.0, -1.001, -6.0], [4.0, -1.001, -6.0], [0.0, -1.001, -0.5]] {
+                sc.tri(p, [0.0, 1.0, 0.0], red);
+            }
+            let mut frame = test_frame(sc, 1.0);
+            frame.view_proj = [[1.0, 0.0, 0.0, 0.0], [0.0, 1.0, 0.0, 0.0], [0.0, 0.0, a, -1.0], [0.0, 0.0, b, 0.0]];
+            frame.eye = [0.0, 0.0, 0.0, 1.0];
+            let img = render_frame(&mut renderer, &device, &queue, &frame, true);
+            // Row 42 of the 64 by 64 picture, its middle column: the floor 3 units ahead.
+            let at = (42 * 64 + 32) * 4;
+            let p = img.get(at..at + 3).unwrap_or_default();
+            // The far floor is red; the near one green (a material floor shades dark here, the
+            // frame giving it no lights) and the background white: no red, and something drawn.
+            assert!(p.len() == 3 && p[0] < 40, "the near floor (pbr: {pbr}) hides the one behind it: {p:?}");
         }
-        for p in [[-4.0, -1.001, -6.0], [4.0, -1.001, -6.0], [0.0, -1.001, -0.5]] {
-            sc.tri(p, [0.0, 1.0, 0.0], red);
-        }
-        let mut frame = test_frame(sc, 1.0);
-        frame.view_proj = [[1.0, 0.0, 0.0, 0.0], [0.0, 1.0, 0.0, 0.0], [0.0, 0.0, a, -1.0], [0.0, 0.0, b, 0.0]];
-        frame.eye = [0.0, 0.0, 0.0, 1.0];
-        let img = render_frame(&mut renderer, &device, &queue, &frame, true);
-        // Row 42 of the 64 by 64 picture, its middle column: the floor 3 units ahead.
-        let at = (42 * 64 + 32) * 4;
-        let p = img.get(at..at + 3).unwrap_or_default();
-        assert!(p.len() == 3 && p[1] > p[0], "the near floor hides the one behind it: {p:?}");
     }
 
     /// A still view shows the picture it drew last: a reused frame (whose filtered picture is
