@@ -125,6 +125,8 @@ pub(crate) fn tile(app: &mut SolveApp, look: Value, drag: bool) -> Result<(), St
     if drag {
         let identity = std::sync::Arc::as_ptr(&app.session.doc) as usize;
         app.render_workspace.view.assign.drag = Some((look, app.session.revision, identity));
+        // A Ctrl-drop paints a part; the drag ends if the design changes, so one walk serves it.
+        crate::browser::prepare_body_paths(app);
         app.render_workspace.view.assign.painting = false;
         app.render_workspace.view.assign.sampling = false;
         Ok(())
@@ -228,7 +230,7 @@ pub(crate) fn candidate(app: &SolveApp, hits: &[Hit], mods: Modifiers) -> Option
             let sel = if mods.shift {
                 Sel::Face { body: body.clone(), index: *index, point: *point }
             } else if mods.ctrl || mods.command {
-                crate::viewport::component_selection(app, body)
+                crate::selection_mode::part_of(app, body)
             } else {
                 return crate::viewport::candidate(app, std::slice::from_ref(hit));
             };

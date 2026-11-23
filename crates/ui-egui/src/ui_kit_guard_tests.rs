@@ -1056,7 +1056,7 @@ mod checkbox_in_use {
                     };
                     appearance.pbr = Some(Default::default());
                     appearance.local.overwrite = true;
-                    app.ui.pick_bodies = true;
+                    app.ui.pick_mode = solidcraft_engine::PickMode::Bodies;
                     if name == "preferences" {
                         // Find the redesigned Layout checkbox by its current visible label.
                         crate::prefs::open_at(&mut app, crate::prefs::PAGE_LAYOUT);

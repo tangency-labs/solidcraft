@@ -49,6 +49,8 @@ static DUTCH: Catalog = Catalog::numbered("nl", "Nederlands", json!("nl"), inclu
 static POLISH: Catalog = Catalog::numbered("pl", "Polski", json!("pl"), include_bytes!(concat!(env!("OUT_DIR"), "/locales/pl.tbl")));
 static PORTUGUESE_BR: Catalog =
     Catalog::numbered("pt-BR", "Português (Brasil)", json!("pt-BR"), include_bytes!(concat!(env!("OUT_DIR"), "/locales/pt-BR.tbl")));
+static PORTUGUESE_PT: Catalog =
+    Catalog::numbered("pt-PT", "Português (Portugal)", json!("pt-PT"), include_bytes!(concat!(env!("OUT_DIR"), "/locales/pt-PT.tbl")));
 static ROMANIAN: Catalog = Catalog::numbered("ro", "Română", json!("ro"), include_bytes!(concat!(env!("OUT_DIR"), "/locales/ro.tbl")));
 static RUSSIAN: Catalog = Catalog::numbered("ru", "Русский", json!("ru"), include_bytes!(concat!(env!("OUT_DIR"), "/locales/ru.tbl")));
 static SERBIAN: Catalog = Catalog::numbered("sr", "Српски", json!("sr"), include_bytes!(concat!(env!("OUT_DIR"), "/locales/sr.tbl")));
@@ -91,6 +93,7 @@ pub const LOCALES: &[&Catalog] = &[
     &DUTCH,
     &POLISH,
     &PORTUGUESE_BR,
+    &PORTUGUESE_PT,
     &ROMANIAN,
     &RUSSIAN,
     &SERBIAN,
@@ -365,6 +368,7 @@ mod tests {
         let failure = PluginFailure {
             plugin: "Dutchman".into(),
             file: Some("cube.f3d".into()),
+            exporting: false,
             error: solidcraft_engine::plugin::HostError::OverCeiling { limit: "memory_mib".into(), requested: 2048, allowed: 128 },
         };
         let _scope = scope("de");
@@ -466,7 +470,7 @@ mod tests {
         assert_eq!(match_system_tags(&tags(&["zh_CN"])), "zh", "underscores normalize");
         assert_eq!(match_system_tags(&tags(&["FR"])), "fr", "case-insensitive");
         assert_eq!(match_system_tags(&tags(&["nl"])), "nl", "bare base tag");
-        assert_eq!(match_system_tags(&tags(&["pt-PT"])), "en", "pt has no catalog: English");
+        assert_eq!(match_system_tags(&tags(&["pt-PT"])), "pt-PT", "exact tag");
         assert_eq!(match_system_tags(&tags(&["xx-YY"])), "en", "unknown: English");
         assert_eq!(match_system_tags(&tags(&[])), "en", "nothing: English");
         assert_eq!(match_system_tags(&tags(&["xx-YY", "de-DE"])), "de", "the first tag that matches wins");
@@ -688,6 +692,7 @@ mod tests {
             curves: vec![curve.into()],
             points: Vec::new(),
             name: "F2:side:l1".into(),
+            from: Vec::new(),
         };
         let lost_error = |n: usize| {
             let links = [("j1", "Tray", "l1"), ("j2", "Cover", "l2"), ("j3", "Tray", "l3"), ("j4", "Tray", "l4")];
@@ -751,6 +756,62 @@ mod tests {
         assert_eq!(uk.text("ui.design_properties.organization"), "Organisation");
         assert_eq!(uk.text("ui.preferences"), english.text("ui.preferences"));
         assert_eq!(english.label("Center X"), "Center X");
+    }
+
+    /// English is in US spelling (#9194, #13470): no message spells a word the British way,
+    /// and English (UK) still reads the ones it changed in British spelling.
+    #[test]
+    fn english_messages_are_in_us_spelling() {
+        install();
+        // Names keep their own spelling: a font's licence and a filament's colour name.
+        let names = ["Ubuntu Font Licence", "ABS - Grey"];
+        let british = [
+            "centre",
+            "centres",
+            "centred",
+            "colour",
+            "colours",
+            "coloured",
+            "moulding",
+            "modelling",
+            "labelled",
+            "behaviour",
+            "cancelled",
+            "towards",
+            "favourite",
+            "licence",
+            "neighbouring",
+            "millimetres",
+            "modelled",
+            "moulded",
+            "cancelling",
+            "aluminium",
+            "summarises",
+            "recolour",
+            "cancellable",
+        ];
+        let mut found = Vec::new();
+        solidcraft_ui_text::each_english_message(|id, text| {
+            let mut rest = text.to_string();
+            for name in names {
+                rest = rest.replace(name, "");
+            }
+            let words = rest.split(|c: char| !c.is_ascii_alphabetic()).map(str::to_ascii_lowercase);
+            if let Some(word) = words.into_iter().find(|w| british.contains(&w.as_str())) {
+                found.push(format!("{id}: {word}"));
+            }
+        });
+        assert!(found.is_empty(), "British spelling in English: {found:#?}");
+        let uk = Locale::for_language("en-GB");
+        assert_eq!(
+            Locale::for_language("en").text("help.sketch.circle.center"),
+            "Draws a circle from its center and its diameter. Use it for holes, bosses and other round features whose center is known."
+        );
+        assert_eq!(
+            uk.text("help.sketch.circle.center"),
+            "Draws a circle from its centre and its diameter. Use it for holes, bosses and other round features whose centre is known."
+        );
+        assert!(uk.text("refused.face_flat").contains("modelling"), "{}", uk.text("refused.face_flat"));
     }
 
     /// A new design's name, `Untitled`, is a default name like `Sketch1`: it shows translated
@@ -915,6 +976,50 @@ mod tests {
     /// escapes and test modules are handled, and calls inside macros count too. UI-kit calls that
     /// translate their label themselves (`row`, imported as `form_row`, and the rest of
     /// `KIT_CALLS`) are read at the same argument positions the kit translates.
+    /// A command's label comes from its own entry, in every language (#20610). The English
+    /// text of a command's label can be the text of other entries too ("Export": the
+    /// command, the start page's button and two of Preferences'; "Ground": the command and
+    /// a render scene's floor), and the label adapter takes one of them by id order, so the
+    /// Spanish Export command read "Exportar perfil". For every command with an entry of
+    /// its own (`cmd.<id>`, or with its dots as underscores) whose English text is the
+    /// command's label, and every language that has that entry, `command` gives that
+    /// entry's text; a command without one, a label shown in a command's place and an id
+    /// that is no command's go by the label as before.
+    #[test]
+    fn a_command_is_labelled_from_its_own_entry_in_every_language() {
+        install();
+        let english = ENGLISH.messages();
+        let own_entry = |id: &str, label: &str| {
+            [format!("cmd.{id}"), format!("cmd.{}", id.replace('.', "_"))].into_iter().find(|key| english.get(key).is_some_and(|text| text == label))
+        };
+        let commands = solidcraft_engine::command_specs();
+        let mut told_apart = Vec::new();
+        for catalog in LOCALES {
+            let locale = Locale::new(catalog);
+            for command in &commands {
+                match own_entry(command.id, command.label).filter(|key| catalog.messages().contains_key(key)) {
+                    Some(key) => {
+                        assert_eq!(locale.command(command.id, command.label), locale.text(&key), "{}: {}", catalog.id, command.id);
+                        if locale.label(command.label) != locale.text(&key) {
+                            told_apart.push((catalog.id, command.id));
+                        }
+                    }
+                    None => assert_eq!(locale.command(command.id, command.label), locale.label(command.label), "{}: {}", catalog.id, command.id),
+                }
+            }
+        }
+        // the reported one, and that it is not the only one
+        assert!(told_apart.contains(&("es", "file.export")), "{told_apart:?}");
+        assert!(told_apart.len() > 100, "{}", told_apart.len());
+        let spanish = Locale::for_language("es");
+        assert_eq!(spanish.command("file.export", "Export"), "Exportar");
+        assert_eq!(spanish.command("occurrence.ground", "Ground"), "Fijar");
+        assert_eq!(spanish.command("file.export", "Preferences"), spanish.label("Preferences"));
+        assert_eq!(spanish.command("no.such_command", "Export"), spanish.label("Export"));
+        let _spanish = scope("es");
+        assert_eq!(solidcraft_ui_text::tr_command("file.export", "Export"), "Exportar");
+    }
+
     #[test]
     fn english_only_render_aliases_do_not_hide_existing_label_translations() {
         install();
@@ -981,11 +1086,8 @@ mod tests {
         let japanese = Locale::for_language("ja");
         assert_eq!(japanese.message(msg!("ui.cancel")), japanese.text("ui.cancel"));
         let _scope = solidcraft_ui_text::scope("ja");
-        assert_eq!(tr!("recovery.days_ago", count = "3"), solidcraft_ui_text::format("recovery.days_ago", &[("count", "3")]));
-        assert_eq!(
-            tr!("recovery.restore_row", when = "today", name = "Plate"),
-            solidcraft_ui_text::format("recovery.restore_row", &[("name", "Plate"), ("when", "today")])
-        );
+        assert_eq!(tr!("recovery.days_ago", count = "3"), tr!("recovery.days_ago", count = "3"));
+        assert_eq!(tr!("recovery.restore_row", when = "today", name = "Plate"), tr!("recovery.restore_row", name = "Plate", when = "today"));
     }
 
     #[test]
@@ -1236,14 +1338,14 @@ mod tests {
         assert_eq!(it.dynamic("4 degrees of freedom"), "4 gradi di libertà");
         assert_eq!(it.given_name("Fillet"), "Fillet");
         assert_eq!(it.label("solid.extrude"), "solid.extrude");
-        assert_eq!(it.format("document.save_changes", &[("name", "Staffa {v2}")]), "Salvare le modifiche a Staffa {v2}?");
+        assert_eq!(tr!(it, "document.save_changes", name = "Staffa {v2}"), "Salvare le modifiche a Staffa {v2}?");
         // The bottom command-line hint retired with that surface. A live save prompt
         // still proves that a substituted value keeps literal JSON braces intact.
         assert_eq!(
-            it.format("document.save_changes", &[("name", "solid.extrude {\"distance\": 20}")]),
+            tr!(it, "document.save_changes", name = "solid.extrude {\"distance\": 20}"),
             "Salvare le modifiche a solid.extrude {\"distance\": 20}?"
         );
-        assert_eq!(it.format("ui.browser_bodies_other", &[("count", "2")]), "2 corpi");
+        assert_eq!(tr!(it, "ui.browser_bodies_other", count = "2"), "2 corpi");
     }
 
     /// Stable IDs and source labels share the same translations. A broken ID must not
@@ -1337,7 +1439,7 @@ mod tests {
         assert_eq!(es.label("Extrude"), "Extruir");
         assert_eq!(es.label("Fillet"), "Redondeo");
         assert_eq!(es.dynamic("Sketch1"), "Boceto1");
-        assert_eq!(es.format("document.save_changes", &[("name", "Pieza")]), "¿Guardar los cambios de Pieza?");
+        assert_eq!(tr!(es, "document.save_changes", name = "Pieza"), "¿Guardar los cambios de Pieza?");
     }
 
     #[test]
@@ -1350,8 +1452,8 @@ mod tests {
         assert_eq!(ko.label("Extrude"), "돌출");
         assert_eq!(ko.label("CREATE SKETCH"), "스케치 만들기");
         assert_eq!(ko.label("NonExistentKey"), "NonExistentKey");
-        assert_eq!(ko.format("document.save_changes", &[("name", "My {design}")]), "My {design}의 변경 사항을 저장하시겠습니까?");
-        assert_eq!(ko.format("dialog.selected_count", &[("count", "2")]), "↖ 2개 선택됨");
+        assert_eq!(tr!(ko, "document.save_changes", name = "My {design}"), "My {design}의 변경 사항을 저장하시겠습니까?");
+        assert_eq!(tr!(ko, "dialog.selected_count", count = "2"), "↖ 2개 선택됨");
         assert_eq!(ko.dynamic("Sketch1"), "스케치1");
         assert_eq!(ko.dynamic("Body2"), "바디2");
         assert_eq!(ko.dynamic("Component12"), "컴포넌트12");
@@ -1371,8 +1473,8 @@ mod tests {
         assert_eq!(ms.text("ui.preferences"), "Tetapan");
         assert_eq!(ms.label("Extrude"), "Semperit");
         assert_eq!(ms.label("CREATE SKETCH"), "CIPTA LAKARAN");
-        assert_eq!(ms.format("document.save_changes", &[("name", "My {design}")]), "Simpan perubahan pada My {design}?");
-        assert_eq!(ms.format("dialog.selected_count", &[("count", "2")]), "↖ 2 dipilih");
+        assert_eq!(tr!(ms, "document.save_changes", name = "My {design}"), "Simpan perubahan pada My {design}?");
+        assert_eq!(tr!(ms, "dialog.selected_count", count = "2"), "↖ 2 dipilih");
         assert_eq!(ms.dynamic("Sketch1"), "Lakaran1");
         assert_eq!(ms.dynamic("Body2"), "Jasad2");
         assert_eq!(ms.dynamic("Component12"), "Komponen12");
@@ -1394,8 +1496,8 @@ mod tests {
         assert_eq!(ru.label("Extrude"), "Выдавливание");
         assert_eq!(ru.label("CREATE SKETCH"), "СОЗДАТЬ ЭСКИЗ");
         assert_eq!(ru.label("NonExistentKey"), "NonExistentKey");
-        assert_eq!(ru.format("document.save_changes", &[("name", "My {design}")]), "Сохранить изменения в My {design}?");
-        assert_eq!(ru.format("dialog.selected_count", &[("count", "2")]), "↖ Выбрано: 2");
+        assert_eq!(tr!(ru, "document.save_changes", name = "My {design}"), "Сохранить изменения в My {design}?");
+        assert_eq!(tr!(ru, "dialog.selected_count", count = "2"), "↖ Выбрано: 2");
         assert_eq!(ru.dynamic("Sketch1"), "Эскиз1");
         assert_eq!(ru.dynamic("Body2"), "Тело2");
         assert_eq!(ru.dynamic("Component12"), "Компонент12");
@@ -1418,8 +1520,8 @@ mod tests {
         assert_eq!(fr.label("CREATE SKETCH"), "CRÉER UNE ESQUISSE");
         assert_eq!(fr.label("NonExistentKey"), "NonExistentKey");
         // French puts a no-break space before the two-part punctuation marks.
-        assert_eq!(fr.format("document.save_changes", &[("name", "My {design}")]), "Enregistrer les modifications de My {design}\u{a0}?");
-        assert_eq!(fr.format("dialog.selected_count", &[("count", "2")]), "↖ 2 sélectionné(s)");
+        assert_eq!(tr!(fr, "document.save_changes", name = "My {design}"), "Enregistrer les modifications de My {design}\u{a0}?");
+        assert_eq!(tr!(fr, "dialog.selected_count", count = "2"), "↖ 2 sélectionné(s)");
         assert_eq!(fr.dynamic("Sketch1"), "Esquisse1");
         assert_eq!(fr.dynamic("Body2"), "Corps2");
         assert_eq!(fr.dynamic("Component12"), "Composant12");
@@ -1437,8 +1539,8 @@ mod tests {
         assert_eq!(tr.name(), "Türkçe");
         assert!(is_supported("tr"));
         assert_eq!(tr.text("ui.preferences"), "Ayarlar");
-        assert_eq!(tr.format("document.save_changes", &[("name", "My {design}")]), "My {design} içindeki değişiklikler kaydedilsin mi?");
-        assert_eq!(tr.format("dialog.selected_count", &[("count", "2")]), "↖ 2 seçildi");
+        assert_eq!(tr!(tr, "document.save_changes", name = "My {design}"), "My {design} içindeki değişiklikler kaydedilsin mi?");
+        assert_eq!(tr!(tr, "dialog.selected_count", count = "2"), "↖ 2 seçildi");
         assert_eq!(tr.label("NonExistentKey"), "NonExistentKey");
     }
 
@@ -1449,8 +1551,22 @@ mod tests {
         assert_eq!(pt.name(), "Português (Brasil)");
         assert!(is_supported("pt-BR"));
         assert_eq!(pt.text("ui.preferences"), "Preferências");
-        assert_eq!(pt.format("document.save_changes", &[("name", "My {design}")]), "Salvar as alterações em My {design}?");
-        assert_eq!(pt.format("dialog.selected_count", &[("count", "2")]), "↖ 2 selecionados");
+        assert_eq!(tr!(pt, "document.save_changes", name = "My {design}"), "Salvar as alterações em My {design}?");
+        assert_eq!(tr!(pt, "dialog.selected_count", count = "2"), "↖ 2 selecionados");
+        assert_eq!(pt.label("NonExistentKey"), "NonExistentKey");
+    }
+
+    #[test]
+    fn european_portuguese_catalog_is_registered_and_translates_keys() {
+        install();
+        let pt = Locale::for_language("pt-PT");
+        assert_eq!(pt.name(), "Português (Portugal)");
+        assert!(is_supported("pt-PT"));
+        assert_eq!(pt.text("ui.preferences"), "Preferências");
+        assert_eq!(pt.text("ui.save"), "Guardar");
+        assert_eq!(pt.text("ui.file"), "Ficheiro");
+        assert_eq!(tr!(pt, "document.save_changes", name = "My {design}"), "Guardar as alterações em My {design}?");
+        assert_eq!(tr!(pt, "dialog.selected_count", count = "2"), "↖ 2 selecionados");
         assert_eq!(pt.label("NonExistentKey"), "NonExistentKey");
     }
 
@@ -1473,7 +1589,7 @@ mod tests {
         assert_eq!(ar.text("ui.new_design"), "جديد تصميم");
         assert_eq!(ar.dynamic("Units: mm"), "mm :الوحدات");
         assert_eq!(ar.dynamic("Sketch1"), "1 رسم");
-        let saved = ar.format("document.save_changes", &[("name", "Bracket")]);
+        let saved = tr!(ar, "document.save_changes", name = "Bracket");
         assert!(saved.starts_with("؟Bracket "), "{saved}");
         let english: Messages = serde_json::from_str(ENGLISH.source).unwrap();
         for id in english.keys() {
@@ -1497,7 +1613,7 @@ mod tests {
         assert_eq!(he.dynamic("Sketch1"), "1סקיצה");
         assert_eq!(he.dynamic("Units: mm"), "mm :יחידות");
         assert_eq!(he.dynamic("Parameters (5)"), "(5) פרמטרים");
-        assert_eq!(he.format("document.save_changes", &[("name", "My {design}")]), "?My {design}ב־ השינויים את לשמור");
+        assert_eq!(tr!(he, "document.save_changes", name = "My {design}"), "?My {design}ב־ השינויים את לשמור");
         assert_eq!(he.given_name("Sketch of bracket"), "Sketch of bracket");
         assert_eq!(he.label("NonExistentKey"), "NonExistentKey");
         // No directional control characters reach egui, which would draw them as boxes.
@@ -1518,8 +1634,8 @@ mod tests {
         assert_eq!(gl.name(), "Galego");
         assert!(is_supported("gl"));
         assert_eq!(gl.text("ui.preferences"), "Preferencias");
-        assert_eq!(gl.format("document.save_changes", &[("name", "My {design}")]), "Gardar os cambios en My {design}?");
-        assert_eq!(gl.format("dialog.selected_count", &[("count", "2")]), "↖ 2 seleccionados");
+        assert_eq!(tr!(gl, "document.save_changes", name = "My {design}"), "Gardar os cambios en My {design}?");
+        assert_eq!(tr!(gl, "dialog.selected_count", count = "2"), "↖ 2 seleccionados");
         assert_eq!(gl.label("Fillet"), "Arredondamento");
         assert_eq!(gl.label("NonExistentKey"), "NonExistentKey");
     }
@@ -1531,8 +1647,8 @@ mod tests {
         assert_eq!(fi.name(), "Suomi");
         assert!(is_supported("fi"));
         assert_eq!(fi.text("ui.preferences"), "Asetukset");
-        assert_eq!(fi.format("document.save_changes", &[("name", "My {design}")]), "Tallennetaanko muutokset tiedostoon My {design}?");
-        assert_eq!(fi.format("dialog.selected_count", &[("count", "2")]), "↖ 2 valittu");
+        assert_eq!(tr!(fi, "document.save_changes", name = "My {design}"), "Tallennetaanko muutokset tiedostoon My {design}?");
+        assert_eq!(tr!(fi, "dialog.selected_count", count = "2"), "↖ 2 valittu");
         assert_eq!(fi.label("Fillet"), "Pyöristys");
         assert_eq!(fi.label("NonExistentKey"), "NonExistentKey");
     }
@@ -1547,8 +1663,8 @@ mod tests {
         assert_eq!(uk.label("Extrude"), "Видавлювання");
         assert_eq!(uk.label("CREATE SKETCH"), "СТВОРИТИ ЕСКІЗ");
         assert_eq!(uk.label("NonExistentKey"), "NonExistentKey");
-        assert_eq!(uk.format("document.save_changes", &[("name", "My {design}")]), "Зберегти зміни в My {design}?");
-        assert_eq!(uk.format("dialog.selected_count", &[("count", "2")]), "↖ Вибрано: 2");
+        assert_eq!(tr!(uk, "document.save_changes", name = "My {design}"), "Зберегти зміни в My {design}?");
+        assert_eq!(tr!(uk, "dialog.selected_count", count = "2"), "↖ Вибрано: 2");
         assert_eq!(uk.dynamic("Sketch1"), "Ескіз1");
         assert_eq!(uk.dynamic("Body2"), "Тіло2");
         assert_eq!(uk.dynamic("Component12"), "Компонент12");
@@ -1569,8 +1685,8 @@ mod tests {
         assert_eq!(vi.label("Extrude"), "Đùn khối");
         assert_eq!(vi.label("CREATE SKETCH"), "TẠO PHÁC THẢO");
         assert_eq!(vi.label("NonExistentKey"), "NonExistentKey");
-        assert_eq!(vi.format("document.save_changes", &[("name", "My {design}")]), "Lưu các thay đổi đối với My {design}?");
-        assert_eq!(vi.format("dialog.selected_count", &[("count", "2")]), "↖ 2 đã chọn");
+        assert_eq!(tr!(vi, "document.save_changes", name = "My {design}"), "Lưu các thay đổi đối với My {design}?");
+        assert_eq!(tr!(vi, "dialog.selected_count", count = "2"), "↖ 2 đã chọn");
         assert_eq!(vi.dynamic("Sketch1"), "Phác thảo1");
         assert_eq!(vi.dynamic("Body2"), "Thân khối2");
         assert_eq!(vi.dynamic("Component12"), "Cụm chi tiết12");
@@ -1603,7 +1719,7 @@ mod tests {
             assert_eq!(locale.text("ui.preferences"), preferences);
             assert_eq!(locale.label("Extrude"), extrude);
             assert_eq!(locale.label("NonExistentKey"), "NonExistentKey");
-            assert_eq!(locale.format("document.save_changes", &[("name", "My {design}")]), save);
+            assert_eq!(tr!(locale, "document.save_changes", name = "My {design}"), save);
             assert_eq!(locale.dynamic("Sketch1"), sketch1);
             assert_eq!(locale.dynamic("Sketch of bracket"), "Sketch of bracket");
         }

@@ -141,8 +141,8 @@ pub trait ChatBackend {
     fn prompt(&mut self, parts: &[PromptPart]);
     /// Stop the message being answered; open permission questions count as cancelled.
     fn cancel(&mut self);
-    /// Start a fresh conversation on the running backend (no restart); [`Event::Ready`] follows.
-    /// A message being answered is cancelled first.
+    /// Release the old conversation and start a fresh one; [`Event::Ready`] follows.
+    /// A message being answered is cancelled first. Process backends may restart their agent.
     fn new_session(&mut self);
     /// The user's custom instructions (#8220), added to the system note of every session that
     /// starts after this call. The panel sets them before the first session and before New chat.

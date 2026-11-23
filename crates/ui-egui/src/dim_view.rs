@@ -211,7 +211,7 @@ impl DimensionDraft {
 /// of its id, and without the `value:` field tag, since the box is the value
 /// ("Sketch Dimension: `mm` is a unit name, so it cannot be a parameter name").
 fn shown_error(id: &str, e: &str) -> String {
-    let label = solidcraft_ui_text::tr_label(crate::command_label(id));
+    let label = solidcraft_ui_text::tr_command(id, crate::command_label(id));
     crate::friendly_error(id, e).replacen(&format!("{label}: value: "), &format!("{label}: "), 1)
 }
 
@@ -1013,14 +1013,17 @@ pub fn show(app: &mut SolveApp, ui: &egui::Ui, painter: &egui::Painter, proj: &P
     // value would leave it (#11584); placing one only measures, so nothing moves.
     let typed = preview_world(app);
     let draft = editor_draft.or_else(|| placing.then(|| placement_preview(app)).flatten());
-    let st = typed.clone().unwrap_or_else(|| crate::open_meshing::session_world(&app.session));
+    let st = typed.clone().unwrap_or_else(|| crate::open_meshing::shown_world(app));
     let Some(ss) = app.session.active_sketch.and_then(|s| st.sketch(s)) else {
         DRAWN.with(|d| d.borrow_mut().clear());
         // Only a finished sketch's dimension edited from the model view stays open, at its text.
         let model = EDIT.with(|e| {
             let mut e = e.borrow_mut();
             let keep = e.as_ref().and_then(|x| x.sketch).is_some_and(|s| app.session.active_sketch.is_none() && st.sketch(s).is_some());
-            if !keep {
+            // A box open on a drawing's sheet belongs to the sheet page, which paints beside a Model
+            // card in the same frame: this view neither closes it nor paints it.
+            let on_sheet = e.as_ref().is_some_and(|x| x.sheet.is_some());
+            if !keep && !on_sheet {
                 *e = None;
             } else if let Some(x) = e.as_mut()
                 && let Some(d) = MODEL.with(|m| m.borrow().iter().find(|d| d.param.as_deref() == Some(x.param.as_str())).cloned())

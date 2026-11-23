@@ -26,6 +26,7 @@ pub struct AppPanelRuntime {
     desktop: Option<super::native::DesktopNativeAdapter>,
     host: Option<WorkspacePanelHost>,
     last_tick_frame: Option<u64>,
+    detached_content: crate::semantic_content::Detached,
     last_error: Option<PanelError>,
     catalogue: Box<dyn commands::LayoutCatalogue>,
     adapters_set: bool,
@@ -46,6 +47,7 @@ impl AppPanelRuntime {
             desktop: None,
             host: None,
             last_tick_frame: None,
+            detached_content: Default::default(),
             last_error: None,
             catalogue: Box::<commands::InMemoryCatalogue>::default(),
             adapters_set: false,
@@ -1134,11 +1136,11 @@ impl crate::SolveApp {
         Ok(())
     }
     pub fn universal_panel_host_enabled(&self) -> bool {
-        !self.view_windows.is_child()
+        (!self.view_windows.is_child() || self.view_windows.painting_panels)
             && (self.panel_content_frame.is_some() || self.panel_runtime.as_ref().is_some_and(|integration| integration.host.is_some()))
     }
     pub fn universal_panel_frame(&self) -> Option<&HostFrame> {
-        if self.view_windows.is_child() {
+        if self.view_windows.is_child() && !self.view_windows.painting_panels {
             return None;
         }
         self.panel_runtime
@@ -1318,6 +1320,125 @@ pub(crate) fn reserve_host_input(app: &mut crate::SolveApp, ctx: &egui::Context)
     if host.wants_escape(&integration.runtime) && crate::ui_kit::Container::reserve_host_escape(ctx) {
         host.request_escape();
         app.esc_handled = true;
+    }
+}
+
+/// State for one detached window. Swap it in only during that viewport's pass;
+/// root paint, focus, layout commands and preference saves keep their own host.
+#[derive(Default)]
+pub(crate) struct PopOutPanels {
+    runtime: Option<AppPanelRuntime>,
+    frame: Option<HostFrame>,
+    seen_layout: Option<u64>,
+    record: Option<serde_json::Value>,
+}
+
+impl PopOutPanels {
+    pub(crate) fn load(&mut self, record: &Option<serde_json::Value>) {
+        if &self.record != record {
+            self.runtime = None;
+            self.frame = None;
+            self.seen_layout = None;
+            self.record.clone_from(record);
+        }
+    }
+
+    pub(crate) fn swap(&mut self, app: &mut crate::SolveApp) {
+        std::mem::swap(&mut self.runtime, &mut app.panel_runtime);
+        std::mem::swap(&mut self.frame, &mut app.panel_content_frame);
+    }
+
+    pub(crate) fn save(&mut self, app: &crate::SolveApp, remembered: &mut Option<serde_json::Value>) {
+        let Some(integration) = &app.panel_runtime else { return };
+        if integration.preferences.as_ref().is_some_and(|settings| settings.pending.is_some()) {
+            return;
+        }
+        let revision = integration.runtime().layout().inspect().revision;
+        if self.seen_layout == Some(revision) {
+            return;
+        }
+        if let Ok(record) = integration.preference_record()
+            && let Some(record) = solidcraft_views::ViewSet::read_panel_layout(&record.value())
+        {
+            *remembered = Some(record.clone());
+            self.record = Some(record);
+            self.seen_layout = Some(revision);
+        }
+    }
+}
+
+pub(crate) fn panel_workspace(app: &crate::SolveApp) -> Option<WorkspaceId> {
+    app.panel_runtime.as_ref().map(|integration| integration.runtime().layout().layout().workspace.clone())
+}
+
+pub(crate) fn prepare_pop_out_panels(
+    app: &mut crate::SolveApp,
+    ui: &egui::Ui,
+    domain: egui::Rect,
+    workspace: Option<&WorkspaceId>,
+    owner: &str,
+    remembered: &Option<serde_json::Value>,
+) -> bool {
+    if !domain.is_finite() || !domain.is_positive() {
+        return false;
+    }
+    let gap = crate::ui_kit::Container::new(ui.ctx(), crate::ui_kit::Surface::Panel).gap();
+    let mut capacity = domain.shrink(gap.min(domain.width().min(domain.height()) / 4.0));
+    let chrome: Vec<_> = app.shell.ribbon_overlay.into_iter().map(logical_rect).collect();
+    if let Some(ribbon) = app.shell.ribbon_overlay {
+        capacity.min.y = ribbon.bottom().clamp(capacity.min.y, capacity.max.y);
+    }
+    let force_opaque = app.services.reduce_transparency.as_ref().and_then(|read| read(true)) == Some(true);
+    let language_direction = crate::i18n::panel_direction(&app.preferences.language);
+    let shortcuts = crate::keymap::panel_shortcuts(app);
+    let result: PanelResult<()> = (|| {
+        if app.panel_runtime.is_none() {
+            super::production::enable_pop_out_production(app, owner, remembered.clone())?;
+        }
+        super::production::sync_production_visibility(app)?;
+        super::production::refresh_production(app)?;
+        let runtime = app.panel_runtime.as_mut().ok_or_else(|| error(Rule::Lifecycle, "detached panel host unavailable"))?;
+        runtime.sync_native_direction(language_direction)?;
+        let frame = ui.ctx().cumulative_frame_nr();
+        if runtime.last_tick_frame != Some(frame) {
+            runtime.tick(&app.session)?;
+            runtime.last_tick_frame = Some(frame);
+        }
+        runtime.set_keyboard_shortcuts(shortcuts);
+        if let Some(host) = &mut runtime.host {
+            host.note_egui_context(ui.ctx(), force_opaque);
+            host.set_gap(gap)?;
+            host.set_live_drag(app.preferences.live_panel_drag_preview);
+        }
+        runtime.prepare_host_in_domain(&app.session, logical_rect(domain), logical_rect(capacity), &chrome)?;
+        if let Some(workspace) = workspace
+            && &runtime.runtime().layout().layout().workspace != workspace
+            && runtime.preferences.as_ref().is_some_and(|settings| settings.pending.is_none())
+        {
+            runtime.command(&app.session, "layout.workspace.select", &serde_json::json!({"workspace": workspace}))?;
+            runtime.prepare_host_in_domain(&app.session, logical_rect(domain), logical_rect(capacity), &chrome)?;
+        }
+        Ok(())
+    })();
+    if let Err(reason) = &result
+        && let Some(runtime) = &mut app.panel_runtime
+    {
+        runtime.last_error = Some(reason.clone());
+    }
+    result.is_ok()
+}
+
+pub(crate) fn paint_pop_out_panels(app: &mut crate::SolveApp, ui: &mut egui::Ui) {
+    if let Some(mut integration) = app.panel_runtime.take() {
+        let mut content = std::mem::take(&mut integration.detached_content);
+        content.show(app, ui, |app, ui| {
+            if let Err(reason) = integration.show_production_host(app, ui) {
+                integration.last_error = Some(reason);
+            }
+        });
+        integration.detached_content = content;
+        app.panel_content_frame = None;
+        app.panel_runtime = Some(integration);
     }
 }
 

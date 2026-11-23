@@ -92,7 +92,7 @@ pub(crate) struct Contents {
 }
 
 pub(crate) fn contents(app: &SolveApp) -> Contents {
-    let st = crate::open_meshing::session_world(&app.session);
+    let st = crate::open_meshing::still_world(app);
     let sketch = app.session.active_sketch.and_then(|id| st.sketch(id));
     let edited = app
         .dialog

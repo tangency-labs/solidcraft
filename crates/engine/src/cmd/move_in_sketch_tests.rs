@@ -1,6 +1,4 @@
-//! `solid.move` moves bodies, so it has nothing to offer the geometry under the cursor while a
-//! sketch is being edited. It is disabled there, with a reason, and comes back once the sketch
-//! is finished.
+//! Move enters a body edit by committing the current sketch first.
 use super::*;
 
 fn cube(s: &mut Session) {
@@ -12,34 +10,25 @@ fn spec() -> &'static crate::cmd::CommandSpec {
 }
 
 #[test]
-fn move_is_disabled_while_a_sketch_is_being_edited_and_says_why() {
+fn move_remains_available_as_an_edit_transition_while_sketching() {
     let mut s = Session::default();
     cube(&mut s);
-    assert!(spec().info(&s).enabled, "Move is enabled with no sketch open");
-
-    s.execute("sketch.create", &json!({"plane": "XY"})).unwrap();
-    let info = spec().info(&s);
-    assert!(!info.enabled, "Move must be disabled while a sketch is being edited");
-    let why = info.disabled_reason.unwrap_or_default();
-    assert!(why.contains("sketch is being edited"), "the reason must name the sketch: {why}");
-    assert!(why.contains("bodies"), "the reason must say what Move acts on: {why}");
-    assert!(why.contains("Finish Sketch"), "the reason must say the way out: {why}");
+    s.execute("sketch.create", &json!({"plane":"XY"})).unwrap();
+    assert!(spec().info(&s).enabled);
+    assert!(spec().starts_edit(&json!({})));
 }
 
 #[test]
-fn running_move_in_a_sketch_is_refused_and_changes_nothing() {
+fn running_move_finishes_the_sketch_then_moves_the_body() {
     let mut s = Session::default();
     cube(&mut s);
-    s.execute("sketch.create", &json!({"plane": "XY"})).unwrap();
-    let features = s.doc.features.len();
-
-    let e = s.execute("solid.move", &json!({"bodies": ["Body1"], "translate": [30, 0, 0]})).unwrap_err();
-    assert!(matches!(e, EngineError::Disabled(ref id, _) if id == "solid.move"), "{e:?}");
-
-    assert_eq!(s.doc.features.len(), features, "a refused command adds no feature");
-    assert!(s.active_sketch.is_some(), "the sketch is still being edited");
+    let sketch = s.execute("sketch.create", &json!({"plane":"XY"})).unwrap()["sketch"].as_u64().unwrap();
+    s.execute("sketch.line", &json!({"points":[[0,0],[5,0]]})).unwrap();
+    let reply = s.execute("solid.move", &json!({"bodies":["Body1"],"translate":[30,0,0]})).unwrap();
+    assert_eq!(reply["finished_sketch"], s.doc.feature(sketch).unwrap().name);
+    assert!(s.active_sketch.is_none());
     let bounds = s.model.state().body("Body1").unwrap().mesh().bounds();
-    assert!(bounds.min.dist(Vec3::ZERO) < 1e-6, "the body did not move: {bounds:?}");
+    assert!(bounds.min.dist(Vec3::new(30.0, 0.0, 0.0)) < 1e-6, "{bounds:?}");
 }
 
 #[test]

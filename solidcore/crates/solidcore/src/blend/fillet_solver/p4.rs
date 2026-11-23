@@ -38,11 +38,11 @@
 //!   `m_dCurveParameter = -SM_BIG_DOUBLE` sort mark, everything `DoPointIntersection`
 //!   writes) goes back to the storage the handle names; `DoPointIntersection` works on
 //!   a snapshot that is written back point by point.
-//! - **Function static.** `ComputePointValues`' `static double sdStaticStep` (set once
-//!   per process by the first finite-difference evaluation) is the
-//!   [`Kernel::fillet_point_step`] latch: per kernel, or per process for kernels that
-//!   share one ([`Kernel::process_fillet_point_step`]). Difftest runners seed it from the
-//!   C++ process's value.
+//! - **Finite-difference step (not upstream, ND-3).** `ComputePointValues` steps by the
+//!   step of the point it evaluates: `1e-3` at a tangent point, `1e-5` otherwise.
+//!   Upstream keeps the step in `static double sdStaticStep`, set once per process by
+//!   the first finite-difference evaluation, so every later blend steps by whatever the
+//!   first one needed.
 //! - **Intersector.** `SmFilletIntersector sFI(*pOffsetSrf1, ..)` traces copies of the
 //!   solver's offset surfaces seen as [`Surface`]s (the intersector borrows its
 //!   surfaces while the solver stays mutable). Upstream they are the solver's own
@@ -95,6 +95,7 @@ use crate::blend::fillet_geom::p3::{NoCorners, SplitCorners};
 use crate::blend::fillet_intersector::{FilletIntersector, StepSolve as StepSolveFlags};
 use crate::blend::fillet_solver::p1::NoExtensionCorners;
 use crate::curve::curve::{Curve, CurveKind};
+use crate::error::blend::BlendFailure;
 use crate::error::{Result, SolidError};
 use crate::geom::extent1d::Extent1d;
 use crate::geom::extent2d::Extent2d;
@@ -105,6 +106,7 @@ use crate::math::{Point3, Vec3};
 use crate::nurbs::b_spline_curve::BSplineCurve;
 use crate::nurbs::knots::Side;
 use crate::surface::surface::p4::NoObject;
+use crate::surface::surface::p5::DropPointOptions;
 use crate::surface::surface::p7::drop_vectors_at;
 use crate::surface::surface::{Surface, SurfaceKind};
 use crate::topology::edgeuse::p1 as eu;
@@ -505,7 +507,7 @@ impl FilletSolver {
     /// points, the centre-line tangent (cross product of the normals, or finite
     /// differences of solver steps for variable offsets and tangent points), the point
     /// type and the UV tangents. `ops` is the solver (its virtuals); the finite
-    /// difference step is the kernel's [`Kernel::fillet_point_step`] latch.
+    /// difference step is the point's own (`1e-3` at a tangent point, `1e-5` otherwise).
     ///
     /// # Errors
     ///
@@ -637,6 +639,20 @@ fn add_fillet_geom(ops: &mut dyn FilletSolverOps, id: FilletGeomId) {
 /// `base0` (`pBaseSrf1->DropVectors(uv, TRUE, TRUE, ..)`) from the binormal's UV
 /// point, evaluated on `GetSurface(0)`. Returns the guess point and the edge-use
 /// tangent (`sTangent`).
+///
+/// Not the fork's: where `base0`'s parameterisation is singular at the binormal's UV point
+/// (`Surface::is_singularity`: a sphere's pole), the step has no first-order image in the
+/// parameters (at a pole the image of a step off it is 0: the guess stays on the pole, and
+/// the section solve seeded there, where the longitude is undetermined, finds no section).
+/// There the step is taken to the surface in 3D, as the point of `base0` nearest the
+/// binormal's point stepped along it, solved from its UV point (as
+/// `FilletBrep::calc_join_section` finds a join's feet, #18826). Elsewhere the step is the
+/// fork's, as it is where the predicate cannot evaluate.
+///
+/// # Errors
+///
+/// [`BlendFailure::Defect`] where the stepped point at a singular point does not drop onto
+/// `base0`; those of the binormal, the drops and the evaluation.
 fn binormal_guess_point(
     ops: &mut dyn FilletSolverOps,
     cx: &mut Cx<'_>,
@@ -654,11 +670,43 @@ fn binormal_guess_point(
     if half {
         bin_vec *= 0.5;
     }
-    let uv_dir = drop_vectors_at(cx.k, base0, b.uv, Side::Left, Side::Left, &[bin_vec])?
-        .first()
-        .copied()
-        .ok_or_else(|| invalid("short drop result"))?;
-    let uv = b.uv + uv_dir;
+    // A predicate that cannot evaluate keeps the fork's step: that is the guess this point had
+    // before the 3D step existed, so a blend that built still builds (propagating the error
+    // would refuse it). The 3D step is taken only where the predicate finds a singularity.
+    let singular = match base0.is_singularity(cx.k, b.uv, crate::math::EFF_ZERO, false) {
+        Ok(sing) => sing.singular,
+        Err(e) if e.is_unported_or_cancelled() => return Err(e),
+        Err(_) => false,
+    };
+    let uv = if singular {
+        let domain = base0.natural_uv_domain_with_nurb(cx.k)?;
+        let dropped = base0.drop_point::<NoObject>(
+            cx.k,
+            b.point + bin_vec,
+            &domain,
+            &DropPointOptions {
+                guess_uv: Some(b.uv),
+                ..DropPointOptions::default()
+            },
+        )?;
+        if !dropped.success {
+            return Err(SolidError::blend(
+                OP,
+                BlendFailure::Defect {
+                    why: "the drop of the binormal's step from a singular point onto the \
+                          face's surface found no nearest point, though the surface's \
+                          natural domain is closed and bounded, so one exists",
+                },
+            ));
+        }
+        dropped.result_uv
+    } else {
+        let uv_dir = drop_vectors_at(cx.k, base0, b.uv, Side::Left, Side::Left, &[bin_vec])?
+            .first()
+            .copied()
+            .ok_or_else(|| invalid("short drop result"))?;
+        b.uv + uv_dir
+    };
     let pnt = offset_evaluate_point(cx.k, ops, 0, uv)?;
     Ok((pnt, b.tangent))
 }
@@ -3814,7 +3862,7 @@ mod tests_c5 {
             matches!(
                 e.failure().map(|f| &f.reason),
                 Some(crate::error::Reason::Topology(
-                    crate::error::topology::TopologyFailure::Missing("the edge use's face use")
+                    crate::error::topology::TopologyFailure::EdgeUseNotOnFace
                 ))
             ),
             "{e:?}"
@@ -3936,7 +3984,7 @@ mod tests_c5 {
 
 /// :3544-3768, the whole body of `ComputePointValues` (see
 /// [`FilletSolver::compute_point_values`]). The step is
-/// `k.latch_fillet_point_step(if tangent { 1.0e-3 } else { 1.0e-5 })`.
+/// `if tangent { 1.0e-3 } else { 1.0e-5 }`, chosen for each point.
 fn c6_compute_point_values(
     ops: &mut dyn FilletSolverOps,
     k: &Kernel,
@@ -3979,17 +4027,12 @@ fn c6_compute_point_values(
         // :3600
         compute_uv_vectors(point)?;
 
-        // :3604 static double sdStaticStep = TANGENT ? 1e-3 : 1e-5 (latched once; with
-        // `fixes.fillet_point_step_per_point` chosen for this point, ND-3)
-        let first = if point.point_type == IntersectionPointType::TangentPoint {
+        // :3604 static double sdStaticStep = TANGENT ? 1e-3 : 1e-5: upstream sets it once
+        // per process; here it is this point's own (ND-3)
+        let mut step = if point.point_type == IntersectionPointType::TangentPoint {
             1.0e-3
         } else {
             1.0e-5
-        };
-        let mut step = if k.fixes.fillet_point_step_per_point {
-            first
-        } else {
-            k.latch_fillet_point_step(first)
         };
 
         // :3615 forward step (StepSolve may shorten `dStep`, passed by reference)
@@ -4234,8 +4277,6 @@ mod tests_c6 {
             assert!((p.uv_curve_pv[0][1].x + dir).abs() < 1e-12);
             assert!(p.uv_curve_pv[0][1].y.abs() < 1e-12);
         }
-        // no finite differences: the step stays unlatched
-        assert_eq!(k.fillet_point_step.get(), None);
     }
 
     #[test]
@@ -4247,7 +4288,6 @@ mod tests_c6 {
         run(&mut fs, &k, 1.0, &mut p, None).unwrap();
         assert_eq!(p.point_type, IntersectionPointType::TangentPoint);
         assert_eq!(p.curve_pv[1], Vec3::new(0.0, 0.0, 0.0));
-        assert_eq!(k.fillet_point_step.get(), None);
     }
 
     #[test]
@@ -4278,12 +4318,10 @@ mod tests_c6 {
         let err = run(&mut fs, &k, 1.0, &mut p, Some(&prev)).unwrap_err();
         assert_eq!(err.upstream_status(), Some(1001), "{err:?}");
         assert_eq!(p.curve_pv[1], Vec3::new(0.0, 1.0, 0.0));
-        // the tangent point latches the larger step
-        assert_eq!(k.fillet_point_step.get(), Some(1.0e-3));
     }
 
     #[test]
-    fn variable_radius_crossing_latches_small_step() {
+    fn variable_radius_crossing_reaches_step_solve() {
         let k = Kernel::default();
         let (a, b) = (xy(0.0), xz());
         let mut fs = Variable(solver(&k, &a, &b));
@@ -4291,13 +4329,6 @@ mod tests_c6 {
         // StepSolve rejects the test solver's Jacobian size
         let err = run(&mut fs, &k, 1.0, &mut p, None).unwrap_err();
         assert!(matches!(err, SolidError::InvalidInput { .. }), "{err:?}");
-        assert_eq!(k.fillet_point_step.get(), Some(1.0e-5));
-        // an already latched step is kept
-        let k2 = Kernel::default();
-        k2.fillet_point_step.set(Some(7.0e-4));
-        let mut p = TsectPnt::new();
-        let _ = run(&mut fs, &k2, 1.0, &mut p, None);
-        assert_eq!(k2.fillet_point_step.get(), Some(7.0e-4));
     }
 
     /// `Variable` that records the finite-difference solves' first guesses
@@ -4387,41 +4418,48 @@ mod tests_c6 {
         assert!((retry / first - 100.0).abs() < 1.0e-6, "{}", retry / first);
     }
 
-    /// #1173 (ND-3): the first finite-difference guess lies one step from the point. With the
-    /// fix that step is the point's own whatever an earlier blend latched; without it the
-    /// latched step is used. The latch itself is neither read nor written with the fix.
+    /// #1173 (ND-3): the first finite-difference guess lies one step from the point, and
+    /// the step is the point's own: `1e-3` at a tangent point, `1e-5` at a crossing,
+    /// whichever points the same kernel evaluated before. One kernel evaluates a crossing,
+    /// a tangent point, then each again, and a second kernel the other order: every
+    /// crossing steps alike and every tangent point steps alike, a hundred times further.
     #[test]
-    fn per_point_step_ignores_the_latch_with_the_fix() {
-        let (a, b) = (xy(0.0), xy(1.0));
+    fn the_step_is_the_points_own_whatever_the_kernel_evaluated_before() {
+        let (floor, wall, lid) = (xy(0.0), xz(), xy(1.0));
         let mut prev = TsectPnt::new();
         *prev.crv_deriv_mut() = Vec3::new(0.0, 3.0, 0.0);
-        // distance of the first guess from the point's uv, for the fix on/off and a latch
-        let first_guess = |fixed: bool, latched: Option<f64>| {
-            let mut k = Kernel::default();
-            k.fixes.fillet_point_step_per_point = fixed;
-            k.fillet_point_step.set(latched);
+        // distance of the first guess from the point's uv: a tangent point (the floor
+        // against the lid) or a crossing (the floor against the wall)
+        let first_guess = |k: &Kernel, tangent: bool| {
+            let (other, previous) = if tangent {
+                (&lid, Some(&prev))
+            } else {
+                (&wall, None)
+            };
             let mut ops = Probe {
-                inner: Variable(solver(&k, &a, &b)),
+                inner: Variable(solver(k, &floor, other)),
                 guesses: Vec::new(),
             };
-            let _ = run(&mut ops, &k, 1.0, &mut TsectPnt::new(), Some(&prev));
-            assert_eq!(
-                k.fillet_point_step.get(),
-                if fixed {
-                    latched
-                } else {
-                    latched.or(Some(1.0e-3))
-                }
-            );
+            let mut p = TsectPnt::new();
+            let _ = run(&mut ops, k, 1.0, &mut p, previous);
+            assert_eq!(p.point_type == IntersectionPointType::TangentPoint, tangent);
             let g = ops.guesses.first().expect("a finite-difference solve ran");
             (g[0] - 0.5).hypot(g[1] - 0.25)
         };
-        let (fresh, preset) = (first_guess(true, None), first_guess(true, Some(1.0e-5)));
-        assert!(fresh > 0.0);
-        assert_eq!(fresh, preset);
-        // without the fix the preset latch changes the step
-        assert!(first_guess(false, Some(1.0e-5)) < fresh / 10.0);
-        assert_eq!(first_guess(false, None), fresh);
+        let k = Kernel::default();
+        let crossing = first_guess(&k, false);
+        let tangent = first_guess(&k, true);
+        assert!(crossing > 0.0 && crossing < 1.0e-4, "{crossing}");
+        assert!(
+            (tangent / crossing - 100.0).abs() < 1.0e-6,
+            "{tangent} {crossing}"
+        );
+        assert_eq!(first_guess(&k, false), crossing);
+        assert_eq!(first_guess(&k, true), tangent);
+        // the other order, on a kernel of its own
+        let k = Kernel::default();
+        assert_eq!(first_guess(&k, true), tangent);
+        assert_eq!(first_guess(&k, false), crossing);
     }
 
     #[test]
@@ -4435,9 +4473,11 @@ mod tests_c6 {
         assert!(!e.is_unported());
         assert_eq!(
             e,
-            SolidError::blend_failed(
+            SolidError::blend_solver(
                 "blend::fillet_solver::p1",
-                "the base solver sets up no offset values"
+                crate::error::blend::SolverFailure::BaseSolverMethod(
+                    crate::error::blend::BaseSolverMethod::SetupOffsetValues
+                )
             )
         );
     }

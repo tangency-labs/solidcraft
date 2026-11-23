@@ -227,7 +227,7 @@ pub fn search(app: &SolveApp, q: &str) -> Vec<Row> {
             let (home_tab, home_panel) = crate::workspace::destination(c).unwrap_or(("", ""));
             let info = crate::render_workspace::interactive_command_info(app, c);
             let (label, tab, panel) = (
-                solidcraft_ui_text::tr_label(info.label),
+                solidcraft_ui_text::tr_command(c.id, info.label),
                 solidcraft_ui_text::tr_label(crate::workspace::tab_label(home_tab)),
                 solidcraft_ui_text::tr_label(home_panel),
             );
@@ -339,7 +339,7 @@ fn closest(query: &str) -> Option<&'static str> {
     command_specs()
         .into_iter()
         .map(|c| {
-            let label = solidcraft_ui_text::tr_label(c.label);
+            let label = solidcraft_ui_text::tr_command(c.id, c.label);
             let mut prev: Vec<_> = (0..=q.len()).collect();
             for (j, ch) in label.to_lowercase().chars().take(128).enumerate() {
                 let mut next = vec![j + 1];
@@ -1005,10 +1005,7 @@ mod tests {
         assert!(typed("solid.box {}").unwrap().1.is_ok());
         assert!(typed("not.a.command {}").unwrap().1.unwrap_err().contains("no command"));
         let expected = serde_json::from_str::<Value>(r#"{"length": }"#).unwrap_err();
-        assert_eq!(
-            typed(r#"solid.box {"length": }"#).unwrap().1.unwrap_err(),
-            solidcraft_ui_text::format("shortcut.json_error", &[("error", &expected.to_string())])
-        );
+        assert_eq!(typed(r#"solid.box {"length": }"#).unwrap().1.unwrap_err(), tr!("shortcut.json_error", error = &expected.to_string()));
         let mut h = crate::scenario::Harness::new();
         h.app.home.open = false;
         h.call("ui.palette", json!({"text": r#"solid.box {"length": }"#}));

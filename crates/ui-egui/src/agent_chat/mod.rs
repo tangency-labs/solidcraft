@@ -769,7 +769,7 @@ impl AgentChat {
                 let _language = solidcraft_ui_text::scope(language);
                 let _ = tx.send(job());
             })
-            .map_err(|e| trf("ui.agent_chat_file_error", &[("name", &name), ("error", &e.to_string())]))?;
+            .map_err(|e| tr!("ui.agent_chat_file_error", name = &name, error = &e.to_string()))?;
         let id = self.next_file_id();
         self.loading.push(Loading { id, name: name.clone(), what: Reading::File(rx) });
         Ok(name)
@@ -846,7 +846,7 @@ impl AgentChat {
     }
     /// Say that the agent refused a model, and in its words why.
     fn model_refused(&mut self, model: &str, error: &str) {
-        let text = trf("ui.agent_chat_model_rejected", &[("model", model), ("error", error)]);
+        let text = tr!("ui.agent_chat_model_rejected", model = model, error = error);
         self.notice(text.chars().take(MODELS_NOTE_CAP).collect::<String>(), true);
     }
     fn notice(&mut self, text: impl Into<String>, error: bool) {
@@ -859,6 +859,8 @@ impl AgentChat {
 
     fn stop_backend(&mut self, wait: bool) {
         self.steering = false;
+        // A discarded backend can no longer finish the retired turn.
+        self.discard_end = false;
         // The next agent starts without this one's memory of the design.
         self.seen = None;
         if let Some(mut b) = self.backend.take() {
@@ -1024,8 +1026,7 @@ impl AgentChat {
             }
             // Formatted here: the listing's thread has no language of its own.
             Event::ModelsNote(error) => {
-                self.models_note =
-                    error.map(|error| trf("ui.agent_chat_models_failed", &[("error", &error)]).chars().take(MODELS_NOTE_CAP).collect());
+                self.models_note = error.map(|error| tr!("ui.agent_chat_models_failed", error = &error).chars().take(MODELS_NOTE_CAP).collect());
             }
             Event::ModelRejected(message) => {
                 let refused = self.model.clone();
@@ -1184,7 +1185,7 @@ pub(crate) fn assistant_tip(app: &SolveApp, mark: AssistantMark) -> String {
         AssistantMark::Busy => tr!("ui.agent_chat_state_busy").to_string(),
         AssistantMark::NeedsAuth => tr!("ui.agent_chat_state_auth").to_string(),
         AssistantMark::Stopped => tr!("ui.agent_chat_state_exited").to_string(),
-        AssistantMark::Waiting(count) => trf("ui.assistant_waiting", &[("count", &count.to_string())]),
+        AssistantMark::Waiting(count) => tr!("ui.assistant_waiting", count = &count.to_string()),
         AssistantMark::NoDesign => tr!("ui.agent_chat_state_no_design").to_string(),
     };
     let name = match crate::keymap::display_for(app, "ui.assistant") {
@@ -1239,7 +1240,7 @@ pub fn connect(app: &mut SolveApp, ctx: &egui::Context) {
         match app.services.secrets.as_ref().map(|s| s.get(&entry.id)) {
             Some(Ok(k)) => k,
             Some(Err(e)) => {
-                app.agent_chat.notice(trf("ui.ai_keychain_error", &[("error", &e)]), true);
+                app.agent_chat.notice(tr!("ui.ai_keychain_error", error = &e), true);
                 app.agent_chat.state = Some(State::Failed);
                 return;
             }
@@ -1326,7 +1327,7 @@ pub fn connect(app: &mut SolveApp, ctx: &egui::Context) {
             chat.agent.clear();
         }
         Err(e) => {
-            chat.notice(trf("ui.agent_chat_failed_start", &[("error", &e)]), true);
+            chat.notice(tr!("ui.agent_chat_failed_start", error = &e), true);
             chat.state = Some(State::Failed);
         }
     }
@@ -1364,7 +1365,7 @@ fn connect_at_start(app: &mut SolveApp, ctx: &egui::Context) {
     let last = app.preferences.agent_last.clone();
     if !last.is_empty() {
         if !agents::entries(app).iter().any(|e| e.id == last) {
-            app.agent_chat.notice(trf("ui.agent_chat_last_missing", &[("agent", &last)]), true);
+            app.agent_chat.notice(tr!("ui.agent_chat_last_missing", agent = &last), true);
             app.agent_chat.state = Some(State::Failed);
             return;
         }
@@ -1836,7 +1837,7 @@ fn send_queue(app: &mut SolveApp, ctx: &egui::Context, interrupted: bool) {
     if files.len() > attach::MAX_FILES {
         let left: Vec<String> = files.split_off(attach::MAX_FILES).into_iter().map(|f| f.name).collect();
         let max = attach::MAX_FILES.to_string();
-        chat.notice(trf("ui.agent_chat_files_left_out", &[("max", &max), ("files", &left.join(", "))]), true);
+        chat.notice(tr!("ui.agent_chat_files_left_out", max = &max, files = &left.join(", ")), true);
     }
     let text = texts.join("\n\n");
     let text: String = text.chars().take(MAX_PROMPT).collect();
@@ -1859,7 +1860,7 @@ pub fn send_now(app: &mut SolveApp, ctx: &egui::Context) {
 }
 
 /// New chat: stop what runs (as Stop does), clear the conversation and the queue, and start a
-/// fresh session on the same agent (no restart); the agent and its mode stay, the design's undo
+/// fresh session with the selected agent; the agent and its mode stay, the design's undo
 /// history is untouched.
 pub fn new_chat(app: &mut SolveApp) {
     let running = app.agent_chat.state() == State::Busy;
@@ -1886,7 +1887,7 @@ pub fn new_chat(app: &mut SolveApp) {
     chat.stopped = false;
     chat.ended = None;
     chat.seen = None;
-    chat.discard_end = running;
+    chat.discard_end |= running;
     chat.model_revert = None;
     if matches!(chat.state(), State::Ready | State::Busy) {
         chat.restore_mode = Some(chat.mode.clone()).filter(|m| !m.is_empty());
@@ -1992,12 +1993,12 @@ fn start_turn_with(app: &mut SolveApp, text: String, image: bool, at: Option<usi
 /// file is imported into the design at once, as its own component, and the message says so.
 pub fn attach_path(app: &mut SolveApp, path: &str) -> std::result::Result<String, String> {
     if app.agent_chat.files() >= attach::MAX_FILES {
-        return Err(trf("ui.agent_chat_files_max", &[("max", &attach::MAX_FILES.to_string())]));
+        return Err(tr!("ui.agent_chat_files_max", max = &attach::MAX_FILES.to_string()));
     }
     let p = std::path::Path::new(path);
     let file = if attach::kind(p) == attach::Kind::Cad {
         if !p.is_file() {
-            return Err(trf("ui.agent_chat_file_not_a_file", &[("name", path)]));
+            return Err(tr!("ui.agent_chat_file_not_a_file", name = path));
         }
         // Imported now, as a dropped file is; it joins the message once the import is in, so the
         // agent is told it was added only when it was. A full queue is refused at once.
@@ -2005,7 +2006,7 @@ pub fn attach_path(app: &mut SolveApp, path: &str) -> std::result::Result<String
         let (tx, rx) = std::sync::mpsc::channel();
         let mut request = crate::file_load::Request::new(path, crate::file_load::Kind::Insert);
         request.reply = Some(tx);
-        crate::file_load::begin_request(app, request).map_err(|e| trf("ui.agent_chat_import_failed", &[("name", &name), ("error", &e)]))?;
+        crate::file_load::begin_request(app, request).map_err(|e| tr!("ui.agent_chat_import_failed", name = &name, error = &e))?;
         return Ok(app.agent_chat.importing(name, rx));
     } else {
         // A picture is decoded and a PDF read off the window thread: a large one takes long enough
@@ -2014,7 +2015,7 @@ pub fn attach_path(app: &mut SolveApp, path: &str) -> std::result::Result<String
         if matches!(attach::kind(p), attach::Kind::Picture | attach::Kind::Pdf) {
             // A missing file is said at once; reading and decoding wait for the worker.
             if !p.is_file() {
-                return Err(trf("ui.agent_chat_file_not_a_file", &[("name", &attach::name_of(p))]));
+                return Err(tr!("ui.agent_chat_file_not_a_file", name = &attach::name_of(p)));
             }
             let path = p.to_path_buf();
             return app.agent_chat.load(attach::name_of(p), move || attach::read(&path));
@@ -2027,7 +2028,7 @@ pub fn attach_path(app: &mut SolveApp, path: &str) -> std::result::Result<String
 /// Add a picture from the clipboard (RGBA rows, as the system gives them) to the next message.
 pub fn attach_rgba(app: &mut SolveApp, width: usize, height: usize, rgba: &[u8]) -> std::result::Result<String, String> {
     if app.agent_chat.files() >= attach::MAX_FILES {
-        return Err(trf("ui.agent_chat_files_max", &[("max", &attach::MAX_FILES.to_string())]));
+        return Err(tr!("ui.agent_chat_files_max", max = &attach::MAX_FILES.to_string()));
     }
     let n = app.agent_chat.pasted + 1;
     let name = format!("pasted picture {n}.png");
@@ -2171,7 +2172,7 @@ fn on_permission(app: &mut SolveApp, key: u64, title: String, kind: Option<&str>
             if let Some(b) = app.agent_chat.backend.as_mut() {
                 b.answer_permission(key, Some(&option));
             }
-            app.agent_chat.push(Item::Notice { text: trf("ui.ai_auto_allowed", &[("title", &title), ("why", tr_by_id(why))]), error: false });
+            app.agent_chat.push(Item::Notice { text: tr!("ui.ai_auto_allowed", title = &title, why = tr_by_id(why)), error: false });
         }
         _ => app.agent_chat.push(Item::Permission { key, title, options, answer: None }),
     }
@@ -2260,7 +2261,7 @@ fn merge_turn(undo: &mut Vec<solidcraft_engine::Snapshot>, turn: &Turn) -> usize
     let (Some(start_doc), Some(start)) = (turn.start.get::<solidcraft_engine::doc::Document>(), turn.start_undo.get::<UndoMark>()) else {
         return 0;
     };
-    merge_undo(undo, &start_doc, &start, &trf("ui.agent_chat_undo_label", &[("message", &turn.label)]))
+    merge_undo(undo, &start_doc, &start, &tr!("ui.agent_chat_undo_label", message = &turn.label))
 }
 
 /// Merge the undo steps made since `start_doc` (with the history at `start`) into one, labelled
@@ -2375,7 +2376,7 @@ fn pump_tools(app: &mut SolveApp) {
                         turn.limit_told = true;
                         refuse(req, format!("the limit of {limit} changes for one message is reached: tell the user what is left to do"));
                         if first {
-                            app.agent_chat.notice(trf("ui.agent_chat_limit", &[("limit", &limit.to_string())]), false);
+                            app.agent_chat.notice(tr!("ui.agent_chat_limit", limit = &limit.to_string()), false);
                         }
                         continue;
                     }
@@ -2391,7 +2392,7 @@ fn pump_tools(app: &mut SolveApp) {
                 chat.held.push(Held { id, req, since: crate::now_ms() });
             }
             gate::Verdict::Refuse(e) => {
-                app.agent_chat.notice(trf("ui.agent_chat_refused", &[("reason", &e)]), false);
+                app.agent_chat.notice(tr!("ui.agent_chat_refused", reason = &e), false);
                 refuse(req, e);
             }
             // A mistyped id: the agent hears what the engine would have said, and nothing runs.
@@ -2420,16 +2421,16 @@ pub(crate) fn take_loaded(app: &mut SolveApp, ctx: &egui::Context) {
             Reading::File(rx) => match rx.try_recv() {
                 Ok(read) => Some(read),
                 Err(TryRecvError::Empty) => None,
-                Err(TryRecvError::Disconnected) => Some(Err(trf("ui.agent_chat_file_error", &[("name", &name), ("error", "stopped")]))),
+                Err(TryRecvError::Disconnected) => Some(Err(tr!("ui.agent_chat_file_error", name = &name, error = "stopped"))),
             },
             Reading::Import(rx) => match rx.try_recv() {
                 Ok(answer) if answer["ok"].as_bool() == Some(true) => Some(Ok(attach::Attachment::imported(name))),
                 Ok(answer) => {
                     let why = answer["error"].as_str().unwrap_or_default().to_string();
-                    Some(Err(trf("ui.agent_chat_import_failed", &[("name", &name), ("error", &why)])))
+                    Some(Err(tr!("ui.agent_chat_import_failed", name = &name, error = &why)))
                 }
                 Err(TryRecvError::Empty) => None,
-                Err(TryRecvError::Disconnected) => Some(Err(trf("ui.agent_chat_import_failed", &[("name", &name), ("error", "stopped")]))),
+                Err(TryRecvError::Disconnected) => Some(Err(tr!("ui.agent_chat_import_failed", name = &name, error = "stopped"))),
             },
         };
         match done {
