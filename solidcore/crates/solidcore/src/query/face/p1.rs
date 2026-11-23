@@ -48,6 +48,7 @@
 use crate::curve::crv_on_surf::CrvOnSurf;
 use crate::curve::curve::{Curve, CurveKind};
 use crate::error::ignored;
+use crate::error::query::QueryFailure;
 use crate::geom::certified::{above, gamma};
 use crate::geom::extent1d::Extent1d;
 use crate::geom::extent3d::Extent3d;
@@ -752,7 +753,7 @@ pub fn calculate_shell_bounding_box(
 /// # Errors
 ///
 /// `SM_ERR`
-/// ([`QueryFailure::Failed`](crate::error::query::QueryFailure::Failed)) for a region without shells; those of the shell
+/// ([`QueryFailure::RegionWithoutShells`]) for a region without shells; those of the shell
 /// boxes. `output` then holds the union of the shells before the failing one.
 pub fn calculate_region_bounding_box_into(
     k: &mut Kernel,
@@ -765,9 +766,9 @@ pub fn calculate_region_bounding_box_into(
 
     let shells = b.region(id)?.get_shells(None, |_, _| Ok(false))?;
     if shells.is_empty() {
-        return Err(SolidError::query_failed(
+        return Err(SolidError::query(
             OP_REGION_BOX,
-            "the region has no shells",
+            QueryFailure::RegionWithoutShells,
         ));
     }
     let mut this_box = Extent3d::new();
@@ -1259,7 +1260,7 @@ pub fn edge_curve_on_classify(
     curve: &Curve,
     opts: &EdgeCurveOnOptions,
 ) -> Result<CurveOnClassification> {
-    let edge = edge.ok_or_else(|| SolidError::query_missing(OP_EDGE_CURVE, "the edge"))?;
+    let edge = edge.ok_or_else(|| SolidError::query(OP_EDGE_CURVE, QueryFailure::NoEdgeGiven))?;
 
     // init outputs
     let mut out = CurveOnClassification::default();
@@ -1401,6 +1402,7 @@ mod tests {
         let mut out = Extent3d::from_point(Vec3::new(1., 2., 3.));
         let e = calculate_region_bounding_box_into(&mut k, &b, r, false, &mut out).unwrap_err();
         assert_eq!(e.upstream_status(), Some(crate::error::SM_ERR), "{e:?}");
+        assert_eq!(e.query_failure(), Some(&QueryFailure::RegionWithoutShells));
         assert_eq!(out, Extent3d::new());
     }
 
