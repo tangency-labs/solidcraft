@@ -369,7 +369,7 @@ mod tests {
         // A drag on the design's tab belongs to the tab: it never moves the window.
         let tab = crate::scenario::handle_at("tab:design:0").expect("the design's tab");
         for round in 1..=2 {
-            let cmds = w.gesture_os_keeps_release(&[tab, tab + vec2(4.0, 12.0), tab + vec2(8.0, 30.0)]);
+            let cmds = w.gesture(&[tab, tab + vec2(4.0, 12.0), tab + vec2(8.0, 30.0)]); // no OS move starts, so the release arrives
             assert_eq!(starts(&cmds), 0, "tab drag {round}: {cmds:?}");
             w.time += 1.0;
         }
