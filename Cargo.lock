@@ -6357,6 +6357,7 @@ dependencies = [
  "solidcraft-profile",
  "solidcraft-sketch",
  "solidcraft-testkit",
+ "sysinfo",
  "tempfile",
  "thiserror 2.0.21",
  "tiny-skia",

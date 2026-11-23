@@ -2115,6 +2115,12 @@ fn a_pattern_replays_every_grouped_thread_pick_on_its_named_body() {
                     alignment2: Default::default(),
                     reversed: false,
                     reversed2: false,
+                    distance1: Default::default(),
+                    distance2: Default::default(),
+                    extent1: None,
+                    extent2: None,
+                    copy_at_end1: false,
+                    copy_at_end2: false,
                 },
                 bodies: Vec::new(),
                 placements: Vec::new(),
@@ -2165,6 +2171,12 @@ fn a_patterned_modelled_thread_reuses_its_final_check() {
                     alignment2: Default::default(),
                     reversed: false,
                     reversed2: false,
+                    distance1: Default::default(),
+                    distance2: Default::default(),
+                    extent1: None,
+                    extent2: None,
+                    copy_at_end1: false,
+                    copy_at_end2: false,
                 },
                 bodies: Vec::new(),
                 placements: Vec::new(),
@@ -3884,6 +3896,34 @@ fn a_save_while_an_import_is_checked_keeps_no_model_and_does_not_wait() {
     assert_eq!(feature["warning"], serde_json::json!(crate::eval::import_warning(&["fails SMLib's check"])));
     assert_eq!(feature["import_report"]["issues"][0]["detail"], "fails SMLib's check", "kept with what the check found");
     assert_eq!(saved.records, model.saved(&doc).unwrap().records, "as a save that waited keeps it");
+}
+
+/// #20633: a window is woken once when an import's check of its parts ends, and not at all while
+/// it runs, so an untouched window draws nothing for the minutes a large import's check takes.
+#[test]
+fn a_window_is_woken_once_when_an_imports_check_ends() {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    let doc = placed_imports(1);
+    let mut model = Model::new();
+    model.evaluate(&doc);
+    let import = doc.features[0].id;
+    let end = model.running_import_check_for_tests(import);
+    assert!(model.checking_imports());
+    let woke = Arc::new(AtomicUsize::new(0));
+    let w = woke.clone();
+    model.on_import_checks_end(Arc::new(move || {
+        w.fetch_add(1, Ordering::SeqCst);
+    }));
+    assert_eq!(woke.load(Ordering::SeqCst), 0, "nothing while the check runs");
+    end(Vec::new());
+    assert_eq!(woke.load(Ordering::SeqCst), 1, "the end of the check wakes the window once");
+    assert!(!model.checking_imports());
+    // A model whose checks have all ended wakes nothing: the result is already in.
+    let w = woke.clone();
+    model.on_import_checks_end(Arc::new(move || {
+        w.fetch_add(1, Ordering::SeqCst);
+    }));
+    assert_eq!(woke.load(Ordering::SeqCst), 1, "no check is running, so nothing is woken");
 }
 
 /// The tolerance heal preference is part of an import's and a Repair's fingerprint, and of no
