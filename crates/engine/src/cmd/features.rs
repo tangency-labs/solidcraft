@@ -2954,7 +2954,9 @@ pub(crate) fn axis_line_object(o: &Value) -> std::result::Result<(Vec3, Vec3), &
     Ok((origin, dir))
 }
 
-/// A pattern feature, or for `components`, new occurrences of them at each placement.
+/// A pattern feature, or for `components`, a Pattern that places them again as occurrences.
+/// Named components keep a managed Pattern so count changes rebuild placements (#12116). Path
+/// occurrences stay one-shot beside the picked placement (main).
 fn finish_pattern(
     s: &mut Session,
     p: &Value,
@@ -2966,33 +2968,65 @@ fn finish_pattern(
     let paths = pattern_occurrences(p, "pattern (components)")?;
     if comps.is_empty() && paths.is_empty() {
         let copied = bodies.clone();
-        let reply = add_feature(s, p, FeatureKind::Pattern { features, pattern, bodies: bodies.into_iter().map(BodyName).collect(), placements })?;
+        let reply = add_feature(
+            s,
+            p,
+            FeatureKind::Pattern {
+                features,
+                pattern,
+                bodies: bodies.into_iter().map(BodyName).collect(),
+                placements,
+                components: Vec::new(),
+                occurrences: Vec::new(),
+            },
+        )?;
         // The pattern is added either way: when it made no copies (the feature failed to
         // evaluate) or an uneven number of them, there is nothing to tell the copies apart by
-        // and they keep no look, as before.
+        // and they keep no look, as before. (Appearance copy from main.)
         if !copied.is_empty() {
             let _ = copy_keeps_appearance(s, &reply, &copied, "pattern");
         }
         return Ok(reply);
     }
     let cmd = "pattern (components)";
-    let mats = solidcraft_doc::pattern_matrices(&s.doc, &s.model.state(), &pattern)?;
-    let mut made = Vec::new();
-    for c in &comps {
-        let id = s
-            .doc
-            .resolve_component(c)
-            .map_err(|error| bad(cmd, error.to_string()))?
-            .filter(|id| *id != 0)
-            .ok_or_else(|| bad(cmd, format!("no component `{c}`")))?;
-        let src = s.doc.occurrence_of(id).cloned().ok_or_else(|| bad(cmd, format!("component `{c}` has no occurrence")))?;
-        for m in &mats {
-            made.push(s.doc_mut().add_occurrence(id, src.parent, solidcraft_doc::mat_mul(m, &src.transform))?);
+    if !comps.is_empty() {
+        let mut components = Vec::new();
+        for c in &comps {
+            // resolve_component (main): ambiguous names error; keep managed Pattern path (#12116).
+            let id = s
+                .doc
+                .resolve_component(c)
+                .map_err(|error| bad(cmd, error.to_string()))?
+                .filter(|id| *id != 0)
+                .ok_or_else(|| bad(cmd, format!("no component `{c}`")))?;
+            if s.doc.occurrence_of(id).is_none() {
+                return Err(bad(cmd, format!("component `{c}` has no occurrence")));
+            }
+            components.push(id);
         }
+        // Keep the count/spacing expressions as a Pattern feature so a parameter change rebuilds
+        // the placements (#12116). Session::refresh reconciles the occurrences afterwards.
+        let mut reply = add_feature(
+            s,
+            p,
+            FeatureKind::Pattern { features, pattern, bodies: Vec::new(), placements: Vec::new(), components, occurrences: Vec::new() },
+        )?;
+        let made = s
+            .doc
+            .feature(reply["feature"].as_u64().unwrap_or(0))
+            .and_then(|f| match &f.kind {
+                FeatureKind::Pattern { occurrences, .. } => Some(occurrences.clone()),
+                _ => None,
+            })
+            .unwrap_or_default();
+        reply["occurrences"] = json!(made);
+        return Ok(reply);
     }
     // A placement picked by its path is placed again beside itself, in the component holding it,
     // moved as the pattern moves it in the world: so a part placed several times, or inside a
     // subassembly, is patterned from the placement picked, not from its first one.
+    let mats = solidcraft_doc::pattern_matrices(&s.doc, &s.model.state(), &pattern)?;
+    let mut made = Vec::new();
     shown_as_placed(s, paths.iter().map(|path| (format!("{path:?}"), path.as_slice())), cmd)?;
     for path in &paths {
         let lost = || bad(cmd, format!("no placement {path:?}"));
