@@ -204,6 +204,7 @@ pub(crate) fn fields<'a>(doc: &Document, kind: &'a mut crate::dialogs::Kind) -> 
             Sm::Rules { values, .. } => values.iter_mut().enumerate().filter(|(i, _)| *i != 1).map(|(_, value)| value).collect(),
             _ => vec![],
         },
+        D::WoodEdgeProfile(r) => vec![&mut r.radius, &mut r.width, &mut r.depth, &mut r.step, &mut r.fillet],
         D::Plastic(k) => match k {
             Pl::Boss { diameter, height, hole_diameter, hole_depth, fillet, rib_thickness, rib_length, rib_offset, .. } => {
                 vec![diameter, height, hole_diameter, hole_depth, fillet, rib_thickness, rib_length, rib_offset]

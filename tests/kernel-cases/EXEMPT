@@ -566,6 +566,7 @@ view.toolbar_reset_all            toolbar preferences: crates/ui-egui/src/toolba
 view.top                          the view: camera, layout, display
 view.visual_style                 the view: camera, layout, display
 window.options.use_as_default     copies pop-out presentation settings to preferences; no geometry
+wood.edge_profile                 router edge shapes: crates/engine/src/cmd/wood_edge_profile_tests.rs
 
 # Commands that make or change geometry and have no case yet. This section only shrinks: the
 # pull request that gives one a case in solidcore's corpus or a test moves its line to the section

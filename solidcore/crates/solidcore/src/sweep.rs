@@ -10,6 +10,7 @@ pub mod api_brep;
 pub mod api_surfaces;
 pub mod cornered;
 pub mod directed;
+pub mod edge_section;
 pub mod extrude;
 pub mod loft_rails;
 pub mod loft_sections;
