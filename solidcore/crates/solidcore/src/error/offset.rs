@@ -1473,14 +1473,6 @@ impl crate::SolidError {
             .into_error()
     }
 
-    /// [`crate::SolidError::Failed`] for something an offset routine needs that is not
-    /// there, as the phrase says, with status [`SM_ERR_NULL_POINTER`] (upstream `NER(ptr)`
-    /// on a `NULL` pointer).
-    #[must_use]
-    pub(crate) fn offset_missing(operation: &'static str, what: &'static str) -> Self {
-        Self::offset(operation, OffsetFailure::Missing(what))
-    }
-
     /// The offset failure behind this error, for a [`crate::SolidError::Failed`] with a
     /// [`Reason::Offset`].
     #[must_use]
@@ -1504,7 +1496,7 @@ mod tests {
     /// operation, and answer as the status did; their class is their own (a defect's is
     /// [`ErrorKind::StageFailed`]), and so is their entity (the input face a cause names, where
     /// the stage failure named none). A sample of each converted file
-    /// (`offset_executive/{cavity,reach,step_gaps}`, `draft`).
+    /// (`offset_executive/{crossing_loops,cavity,reach,step_gaps}`, `draft`).
     #[test]
     fn offset_failures_keep_the_status_of_the_upstream_they_replace() {
         let face = FaceId::from_index(3);
@@ -1512,10 +1504,22 @@ mod tests {
         // (the operation, the failure, the status kept, its class)
         let samples = [
             (
+                "offset::offset_executive::crossing_loops::resolve_crossing_loops",
+                defect,
+                Some(SM_ERR_ASSERT_FAILURE),
+                ErrorKind::StageFailed,
+            ),
+            (
                 "offset::offset_executive::cavity::is_cavity_region",
                 defect,
                 Some(SM_ERR_NULL_POINTER),
                 ErrorKind::StageFailed,
+            ),
+            (
+                "offset::offset_executive::crossing_loops::resolve_crossing_loops",
+                OffsetFailure::FaceHasNoSurface { face },
+                None,
+                ErrorKind::InvalidInput,
             ),
             (
                 "offset::draft",
@@ -1566,6 +1570,8 @@ mod tests {
             ),
         ];
         let statuses = [
+            SM_ERR_ASSERT_FAILURE,
+            SM_ERR_NULL_POINTER,
             SM_ERR_NULL_POINTER,
             SM_ERR_INVALID_INPUT,
             SM_ERR_INVALID_INPUT,
@@ -1619,10 +1625,6 @@ mod tests {
             .to_string(),
             "offset::op: the gap search of an offset face's loops closes one gap per pass and \
              reached its limit of 64 passes before a pass found no gap (face 3)"
-        );
-        assert_eq!(
-            SolidError::offset_missing("offset::op", "the face's surface").to_string(),
-            "offset::op: the face's surface is missing"
         );
         // a refusal replaced no status and does not answer as one
         let folds = SolidError::offset(
@@ -2302,9 +2304,7 @@ mod tests {
             wrappers: Wrappers::Phrase,
         };
         #[rustfmt::skip] // one file per line, so conversions in parallel merge cleanly
-        const PINNED: &[(&str, usize)] = &[
-            ("solidcore/src/offset/offset_executive/crossing_loops.rs", 5),
-        ];
+        const PINNED: &[(&str, usize)] = &[];
         assert_pinned("offset phrase-cause sites", &crate_sites(&PHRASES), PINNED);
     }
 }
