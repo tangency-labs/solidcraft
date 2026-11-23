@@ -331,8 +331,12 @@ struct Pair {
 /// circle, a sine, cosine and arcsine (one rounding each, correctly rounded to within an
 /// ulp), on coordinates at most `size`; their error is far below `slack = gamma(32) size`.
 /// The foot (`s = 0`) takes `asin(0) = 0` exactly, so its gap has no more roundings than
-/// any other step's and the same allowance covers it. Crossings are detected at
-/// `contact - slack`, so rounding can only turn a step into `None`.
+/// any other step's and the same allowance covers it. Past the contact tolerance means
+/// past it as `within_contact_tol` reads it, both for the crossing and for the gaps at
+/// `sigma`: that is the reading the Boolean that made the faces tangent along the edge
+/// used, so a dip of the tolerance itself, or past it by no more than the rounding of
+/// copies, is a touch here too and not a crossing (#21104: a cylinder sunk exactly 1e-5
+/// into a box face was built tangent and then read as crossing it).
 fn choose_step(
     sections: &[Section],
     pairs: &[Pair],
@@ -368,7 +372,7 @@ fn choose_step(
     for &sigma in &candidates {
         for &(x, y) in &crossing {
             let (lo, hi) = extremes(x, y, 0.0, sigma)?;
-            if hi > contact - slack && lo < -(contact - slack) {
+            if !within_contact_tol(hi, contact, size) && !within_contact_tol(-lo, contact, size) {
                 return None;
             }
         }
@@ -762,7 +766,8 @@ mod tests {
     #[test]
     fn a_plane_within_the_contact_tolerance_of_a_cylinder_is_read_past_its_band() {
         let v = L + 2.0 * gamma(32) * 1.4;
-        for d in [0.0, 1e-6, 5e-6, 9e-6] {
+        // `L` itself is a touch by the contact rule (#21104).
+        for d in [0.0, 1e-6, 5e-6, 9e-6, L] {
             let want = ((1.0 + v) * (1.0 + v) - (1.0 - d) * (1.0 - d))
                 .sqrt()
                 .max((2.0 * (d + v)).sqrt());
@@ -776,10 +781,11 @@ mod tests {
 
     /// Past the contact tolerance the faces lie apart on one side at the first step and
     /// on the other side farther out: they cross, so the reading stays at the first step,
-    /// where the plane reads inside the cylinder.
+    /// where the plane reads inside the cylinder. `L + 1e-12` is past the tolerance by
+    /// more than the contact rule's rounding allowance (`gamma(32) 1.4`, about 5e-15).
     #[test]
     fn a_plane_dipping_past_the_contact_tolerance_keeps_the_first_step() {
-        for d in [1.1e-5, 2e-5, 3.5e-5, 4e-5] {
+        for d in [L + 1e-12, 1.1e-5, 2e-5, 3.5e-5, 4e-5] {
             assert_eq!(step(d), None, "d {d:e}");
         }
     }

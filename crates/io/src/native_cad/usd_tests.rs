@@ -337,7 +337,7 @@ fn one_cylinder() -> (Document, Model) {
     doc.add_feature(
         FeatureKind::Cylinder {
             base: point_expr(Vec3::ZERO),
-            axis: solidcraft_doc::Dir(Vec3::Z),
+            axis: solidcraft_doc::dir_expr(Vec3::Z),
             radius: "5".into(),
             height: "20".into(),
             operation: Operation::NewBody,

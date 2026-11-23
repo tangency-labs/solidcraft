@@ -173,6 +173,7 @@ flat	false
 fold	false
 folder	false
 frame_member	false
+frame_plate	false
 gear	false
 graph	false
 grid	false
@@ -314,6 +315,7 @@ settings_profile	false
 shaft_spline	false
 sheet	false
 sheet_rules	false
+sheet_tab	false
 shell	false
 shield	false
 silhouette	false
