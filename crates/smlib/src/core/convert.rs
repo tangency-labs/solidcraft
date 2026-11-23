@@ -1828,8 +1828,10 @@ fn compress_knots(knots: &[f64]) -> (Vec<f64>, Vec<usize>) {
 }
 
 /// `smu_CreateSmBSplineCurve_FromArrays`: a curve of `dim` 2 or 3; an unclamped knot vector goes
-/// through `SmBSplineCurve::CreateCanonical`, which clamps it.
+/// through `SmBSplineCurve::CreateCanonical`, which clamps it. Curves whose weights are all 1 are
+/// built polynomial (`w = NOW`, matching `SmBSplineCurve::CreateCanonical`).
 fn bspline_curve_from_arrays(points: &[Point3], weights: &[f64], knots: &[f64], degree: usize, dim: u64) -> Result<BSplineCurve> {
+    let rational = weights.iter().any(|&w| w != 1.0);
     if !is_clamped(knots, degree) {
         let (unique, mults) = compress_knots(knots);
         let data = CanonicalData {
@@ -1840,15 +1842,23 @@ fn bspline_curve_from_arrays(points: &[Point3], weights: &[f64], knots: &[f64], 
             knot_multiplicities: &mults,
             knots: &unique,
             knot_type: KnotType::Unspecified,
-            weights: Some(weights),
+            weights: rational.then_some(weights),
             trim: None,
         };
         return BSplineCurve::create_canonical(&data).map_err(sc("SmBSplineCurve::CreateCanonical"));
     }
     let mut pw = Vec::with_capacity(points.len());
     for (p, &w) in points.iter().zip(weights) {
-        let z = if dim == 3 { if w == 1.0 { p.z } else { w * p.z } } else { NOZ };
-        pw.push(if w == 1.0 { CPoint::new(p.x, p.y, z, 1.0) } else { CPoint::new(w * p.x, w * p.y, z, w) });
+        if !rational {
+            let z = if dim == 3 { p.z } else { NOZ };
+            pw.push(CPoint::new(p.x, p.y, z, NOW));
+        } else if w == 1.0 {
+            let z = if dim == 3 { p.z } else { NOZ };
+            pw.push(CPoint::new(p.x, p.y, z, 1.0));
+        } else {
+            let z = if dim == 3 { w * p.z } else { NOZ };
+            pw.push(CPoint::new(w * p.x, w * p.y, z, w));
+        }
     }
     let nurb = NurbCurve::new(pw, degree, knots.to_vec()).map_err(sc("sm_AllocateNurbCurve"))?;
     let mut c = BSplineCurve::new(dim);
@@ -2673,4 +2683,35 @@ fn put_enclosing_shells_first(k: &mut Kernel, b: &mut Brep) -> Result<bool> {
         proven &= established;
     }
     Ok(proven)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Clamped polynomial B-spline curves (all weights 1, as flat arrays carry every non-rational
+    /// edge curve and UV trim) import with `w = NOW`, matching `SmBSplineCurve::CreateCanonical`;
+    /// rational curves keep every homogeneous weight (#20422).
+    #[test]
+    fn clamped_polynomial_bspline_curves_import_as_non_rational() {
+        let pts3 = [Point3::new(0.0, 0.0, 0.0), Point3::new(1.0, 2.0, 0.0), Point3::new(2.0, 0.0, 1.0)];
+        let clamped = [0.0, 0.0, 0.0, 1.0, 1.0, 1.0];
+        let poly3 = bspline_curve_from_arrays(&pts3, &[1.0; 3], &clamped, 2, 3).unwrap();
+        let nurb = poly3.gw_nurb().unwrap();
+        assert!(nurb.cpts().iter().all(|p| p.w == NOW), "{:?}", nurb.cpts());
+
+        let unclamped = [-1.0, 0.0, 1.0, 2.0, 3.0, 4.0];
+        let poly_unclamped = bspline_curve_from_arrays(&pts3, &[1.0; 3], &unclamped, 2, 3).unwrap();
+        assert!(poly_unclamped.gw_nurb().unwrap().cpts().iter().all(|p| p.w == NOW));
+
+        let pts2 = [Point3::new(0.0, 0.0, 0.0), Point3::new(1.0, 2.0, 0.0)];
+        let poly2 = bspline_curve_from_arrays(&pts2, &[1.0, 1.0], &[0.0, 0.0, 1.0, 1.0], 1, 2).unwrap();
+        assert!(poly2.gw_nurb().unwrap().cpts().iter().all(|p| p.w == NOW && p.z == NOZ));
+
+        let w = std::f64::consts::FRAC_1_SQRT_2;
+        let arc = [Point3::new(1.0, 0.0, 0.0), Point3::new(1.0, 1.0, 0.0), Point3::new(0.0, 1.0, 0.0)];
+        let rat = bspline_curve_from_arrays(&arc, &[1.0, w, 1.0], &clamped, 2, 3).unwrap();
+        let got: Vec<[f64; 4]> = rat.gw_nurb().unwrap().cpts().iter().map(|p| [p.x, p.y, p.z, p.w]).collect();
+        assert_eq!(got, vec![[1.0, 0.0, 0.0, 1.0], [w, w, 0.0, w], [0.0, 1.0, 0.0, 1.0]]);
+    }
 }
