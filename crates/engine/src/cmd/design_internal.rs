@@ -90,8 +90,20 @@ pub(crate) fn unpack(doc: &Document, design: &str) -> Unpacked {
         }
         match stamps.holds(name, bytes.as_bytes(), || super::design_stamps::digest(bytes.as_bytes())) {
             Some(true) => {}
+            // A work file a power cut left cut short while it was unpacked (the start of the
+            // stored part and no more, or nothing but zeros) is no one's work: it is unpacked
+            // again, not offered for recovery.
+            Some(false) if std::fs::read(&file).is_ok_and(|found| cut_short(&found, bytes.as_bytes())) => {
+                match write_unpacked(&file, bytes.as_bytes()) {
+                    Ok(()) => {
+                        stamps.record(name, &super::design_stamps::digest(bytes.as_bytes()));
+                        done.written.push(name.clone());
+                    }
+                    Err(why) => done.failed.push(format!("{name}: {why}")),
+                }
+            }
             Some(false) => done.differ.push(name.clone()),
-            None if !file.exists() => match write(&file, bytes.as_bytes()) {
+            None if !file.exists() => match write_unpacked(&file, bytes.as_bytes()) {
                 Ok(()) => {
                     stamps.record(name, &super::design_stamps::digest(bytes.as_bytes()));
                     done.written.push(name.clone());
@@ -124,6 +136,41 @@ static HIDE: std::sync::OnceLock<fn(&Path)> = std::sync::OnceLock::new();
 /// attribute. The engine has no platform code, so without this the folder is only named.
 pub fn set_work_folder_hider(hide: fn(&Path)) {
     let _ = HIDE.set(hide);
+}
+
+/// Whether `found`, a work file's bytes, is `stored` cut short: an unpacking that a power cut
+/// stopped after the file was named and before its bytes reached the disk.
+fn cut_short(found: &[u8], stored: &[u8]) -> bool {
+    found.len() <= stored.len() && found != stored && (stored.starts_with(found) || found.iter().all(|byte| *byte == 0))
+}
+
+/// What ends the temporary name a work file is unpacked under ([`write_unpacked`]).
+const UNPACKING: &str = ".unpacking";
+
+/// Write the work file `file` while a design is unpacked: the whole file under a temporary name,
+/// then renamed, so the name never holds part of a file while the app runs. Unlike [`write`]
+/// nothing is flushed to the disk and the folder is not searched for old temporary files: with
+/// thousands of parts those two steps, once for each file, were most of the time an open took.
+/// The file is a copy of what the design's file holds, so one a power cut leaves cut short is
+/// unpacked again by the next open ([`unpack`]).
+fn write_unpacked(file: &Path, bytes: &[u8]) -> Result<(), String> {
+    let shown = file.to_string_lossy();
+    solidcraft_io::vfs::check_new(&shown).map_err(|e| e.to_string())?;
+    let (Some(folder), Some(name)) = (file.parent(), file.file_name()) else { return Err(format!("{shown}: not a file in a folder")) };
+    if !folder.exists() {
+        std::fs::create_dir_all(folder).map_err(|e| format!("{}: {e}", folder.display()))?;
+        if let Some(hide) = HIDE.get() {
+            hide(folder);
+        }
+    }
+    let mut temporary = std::ffi::OsString::from(".~");
+    temporary.push(name);
+    temporary.push(UNPACKING);
+    let temporary = folder.join(temporary);
+    std::fs::write(&temporary, bytes).and_then(|()| std::fs::rename(&temporary, file)).map_err(|e| {
+        let _ = std::fs::remove_file(&temporary);
+        format!("{shown}: {e}")
+    })
 }
 
 /// Write the work file `file`, making its folder. A file already there is replaced.
@@ -216,6 +263,11 @@ pub fn tidy_work_folder(design: &str) -> usize {
     let mut removed = 0;
     for entry in entries.flatten() {
         let name = entry.file_name().to_string_lossy().to_lowercase();
+        // A temporary file an unpacking left behind when the app was stopped part way.
+        if name.starts_with(".~") && name.ends_with(UNPACKING) {
+            let _ = std::fs::remove_file(entry.path());
+            continue;
+        }
         let Some(stored) = held.get(&name) else { continue };
         let file = entry.path();
         if std::fs::read(&file).is_ok_and(|bytes| bytes == *stored) && std::fs::remove_file(&file).is_ok() {
@@ -360,6 +412,17 @@ mod tests {
         let again = unpack(&doc, &design);
         assert_eq!(again, Unpacked { written: vec![], differ: vec!["Top.scprt".into()], failed: vec![] });
         assert_eq!(std::fs::read(&top).unwrap(), b"top, edited");
+        // A work file a power cut left cut short, or all zeros, is no one's work: unpacked again.
+        for left in [&b"to"[..], &b""[..], &b"   "[..]] {
+            std::fs::write(&top, left).unwrap();
+            let again = unpack(&doc, &design);
+            assert_eq!(again, Unpacked { written: vec!["Top.scprt".into()], differ: vec![], failed: vec![] }, "{left:?}");
+            assert_eq!(std::fs::read(&top).unwrap(), b"top");
+        }
+        // Unpacking leaves no temporary file behind.
+        let names: Vec<String> =
+            std::fs::read_dir(top.parent().unwrap()).unwrap().flatten().map(|e| e.file_name().to_string_lossy().into_owned()).collect();
+        assert!(names.iter().all(|name| !name.ends_with(UNPACKING)), "{names:?}");
         let _ = std::fs::remove_dir_all(dir);
     }
 
