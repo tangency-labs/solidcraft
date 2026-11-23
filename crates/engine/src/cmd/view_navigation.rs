@@ -6,7 +6,13 @@ use solidcraft_viewport::{Camera, StandardView};
 use super::CommandSpec;
 use crate::params::{bad, num, req_vec2, req_vec3, vec3};
 use crate::schema::view_navigation::{
-    AmbientOcclusionParams, AmbientOcclusionResult, CameraReply, DisplayToggleParams, DisplayToggleResult, FitHomeParams, FitHomeResult, GraphicsPreset, GraphicsPresetParams, GraphicsPresetResult, HistoryDock, HistoryLayoutParams, HistoryLayoutResult, LayoutMode, LayoutParams, LayoutResult, NavigateParams, NavigateResult, NavigationBarParams, NavigationBarResult, NavigationTool, NavigatorParams, NormalToParams, PerspectiveParams, PerspectiveResult, PresetQuality, RenderBrowser, RenderFocus, RenderLive, RenderPanelVisibilityParams, RenderPanelVisibilityResult, RenderSelect, RenderStageParams, RenderStageResult, RibbonTabsOnly, RibbonTabsOnlyParams, StandardViewParams, TabStep, TabStepParams, ToolParams, ToolResult, ToolbarResetAll, ToolbarResetAllParams, VisualStyle, VisualStyleParams, VisualStyleResult, ZoomTool,
+    AmbientOcclusionParams, AmbientOcclusionResult, CameraReply, DisplayToggleParams, DisplayToggleResult, FitHomeParams, FitHomeResult,
+    GraphicsPreset, GraphicsPresetParams, GraphicsPresetResult, HistoryDock, HistoryLayoutParams, HistoryLayoutResult, LayoutMode, LayoutParams,
+    LayoutResult, NavigateParams, NavigateResult, NavigationBarParams, NavigationBarResult, NavigationTool, NavigatorParams, NormalToParams,
+    PerspectiveParams, PerspectiveResult, PresetQuality, RenderBrowser, RenderFocus, RenderLive, RenderPanelVisibilityParams,
+    RenderPanelVisibilityResult, RenderSelect, RenderStageParams, RenderStageResult, RibbonTabsOnly, RibbonTabsOnlyParams, StandardViewParams,
+    TabStep, TabStepParams, ToolParams, ToolResult, ToolbarResetAll, ToolbarResetAllParams, VisualStyle, VisualStyleParams, VisualStyleResult,
+    ZoomTool,
 };
 use crate::schema::{TypedContract, output_schema_for};
 use crate::{Result, Sel, Session};
