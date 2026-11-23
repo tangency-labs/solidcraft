@@ -365,7 +365,7 @@ impl Bernstein2 {
     /// The value at `(u, v)` (de Casteljau).
     #[must_use]
     pub fn eval(&self, u: f64, v: f64) -> f64 {
-        let mut scratch = Vec::with_capacity(self.dv.max(self.du) + 1);
+        let mut scratch = Vec::new();
         let column: Vec<f64> = self.rows().map(|r| eval_1d(r, v, &mut scratch)).collect();
         eval_1d(&column, u, &mut scratch)
     }
