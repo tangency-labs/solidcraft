@@ -157,6 +157,7 @@
 //! | [`TopologyFailure::VertexusesOnDifferentFaces`] | `SM_ERR` |
 //! | [`TopologyFailure::UnknownShellType`] | `SM_ERR` |
 //! | [`TopologyFailure::VertexWithoutUses`] | `SM_ERR_NULL_POINTER` |
+//! | [`TopologyFailure::FaceWithoutUses`] | `SM_ERR_NULL_POINTER` |
 //! | [`TopologyFailure::LoopRecordWithoutEdgeuse`] | `SM_ERR` |
 //! | [`TopologyFailure::NoEdgeToAimAt`] | `SM_ERR` |
 //! | [`TopologyFailure::RayFoundNoRegion`] | `SM_ERR` |
@@ -718,6 +719,9 @@ pub enum TopologyFailure {
     /// A vertex of the caller's data that a single-vertex loop record names has no vertex use.
     /// [`ErrorKind::InvalidInput`].
     VertexWithoutUses,
+    /// The face the caller gave has no face use, so no loop can be put on it.
+    /// [`ErrorKind::InvalidInput`].
+    FaceWithoutUses,
     /// A loop record of the caller's data names no edge use that was built.
     /// [`ErrorKind::InvalidInput`].
     LoopRecordWithoutEdgeuse,
@@ -727,12 +731,18 @@ pub enum TopologyFailure {
     NoEdgeToAimAt,
     /// No ray toward the B-rep's edges found the region it starts in. Class `failed`.
     RayFoundNoRegion,
-    /// The plane through the curves could not be made; the error that stopped it is the cause.
-    /// Class `failed`; whether it is a defect or a refusal is its cause's.
-    NoPlaneThroughCurves,
-    /// The face could not be made; the error that stopped it is the cause. Class `failed`;
-    /// whether it is a defect or a refusal is its cause's.
-    FaceNotMade,
+    /// The plane through the curves could not be made; the error that stopped it is the cause,
+    /// and its class is the cause's.
+    NoPlaneThroughCurves {
+        /// The class of the error that stopped it, the cause.
+        class: ErrorKind,
+    },
+    /// The face could not be made; the error that stopped it is the cause, and its class is
+    /// the cause's.
+    FaceNotMade {
+        /// The class of the error that stopped it, the cause.
+        class: ErrorKind,
+    },
     /// A closed loop of the caller's curves split no new face off. Class `failed`.
     LoopSplitNoFace,
     /// A loop of the caller's curves split a face off before the loop closed. Class `failed`.
@@ -887,8 +897,8 @@ impl TopologyFailure {
             | Self::LoopRecordWithoutEdgeuse
             | Self::NoEdgeToAimAt
             | Self::RayFoundNoRegion
-            | Self::NoPlaneThroughCurves
-            | Self::FaceNotMade
+            | Self::NoPlaneThroughCurves { .. }
+            | Self::FaceNotMade { .. }
             | Self::LoopSplitNoFace
             | Self::LoopSplitFaceEarly
             | Self::EdgeNotSplit => SM_ERR,
@@ -922,7 +932,8 @@ impl TopologyFailure {
             | Self::NoInputStream
             | Self::AttributeSlotEmpty
             | Self::CurveSlotEmpty
-            | Self::VertexWithoutUses => SM_ERR_NULL_POINTER,
+            | Self::VertexWithoutUses
+            | Self::FaceWithoutUses => SM_ERR_NULL_POINTER,
             Self::InvalidValue(_)
             | Self::NoBrepGiven
             | Self::NoTrimmedBSpline
@@ -1038,6 +1049,7 @@ impl TopologyFailure {
             | Self::VertexusesOnDifferentFaces
             | Self::UnknownShellType { .. }
             | Self::VertexWithoutUses
+            | Self::FaceWithoutUses
             | Self::LoopRecordWithoutEdgeuse => ErrorKind::InvalidInput,
             Self::CurveNotBSpline { .. }
             | Self::SurfaceWithoutNurbs { .. }
@@ -1067,6 +1079,7 @@ impl TopologyFailure {
             | Self::CurvesNotJoined
             | Self::FaceStitchFailed
             | Self::BlendRecordNotProved => ErrorKind::Failed,
+            Self::NoPlaneThroughCurves { class } | Self::FaceNotMade { class } => *class,
             _ => ErrorKind::of_status(self.comparison_status()),
         }
     }
@@ -1392,13 +1405,14 @@ impl core::fmt::Display for TopologyFailure {
                 write!(f, "a shell record has the unknown type {shell_type}")
             }
             Self::VertexWithoutUses => f.write_str("a vertex of a vertex loop has no vertex use"),
+            Self::FaceWithoutUses => f.write_str("the face has no face use"),
             Self::LoopRecordWithoutEdgeuse => f.write_str("a loop record names no built edge use"),
             Self::NoEdgeToAimAt => f.write_str("there is no edge to aim the ray at"),
             Self::RayFoundNoRegion => f.write_str("no ray toward the edges found the region"),
-            Self::NoPlaneThroughCurves => {
+            Self::NoPlaneThroughCurves { .. } => {
                 f.write_str("the plane through the curves could not be made")
             }
-            Self::FaceNotMade => f.write_str("the face could not be made"),
+            Self::FaceNotMade { .. } => f.write_str("the face could not be made"),
             Self::LoopSplitNoFace => f.write_str("the closed loop split off no new face"),
             Self::LoopSplitFaceEarly => f.write_str("a face was split off before its loop closed"),
             Self::EdgeNotSplit => f.write_str("the edge could not be split"),
@@ -2314,14 +2328,32 @@ mod tests {
                 K::InvalidInput,
             ),
             (
+                TopologyFailure::FaceWithoutUses,
+                SM_ERR_NULL_POINTER,
+                K::InvalidInput,
+            ),
+            (
                 TopologyFailure::LoopRecordWithoutEdgeuse,
                 SM_ERR,
                 K::InvalidInput,
             ),
             (TopologyFailure::NoEdgeToAimAt, SM_ERR, K::Unsupported),
             (TopologyFailure::RayFoundNoRegion, SM_ERR, K::Failed),
-            (TopologyFailure::NoPlaneThroughCurves, SM_ERR, K::Failed),
-            (TopologyFailure::FaceNotMade, SM_ERR, K::Failed),
+            // the class is the cause's
+            (
+                TopologyFailure::NoPlaneThroughCurves {
+                    class: K::Unsupported,
+                },
+                SM_ERR,
+                K::Unsupported,
+            ),
+            (
+                TopologyFailure::FaceNotMade {
+                    class: K::InvalidInput,
+                },
+                SM_ERR,
+                K::InvalidInput,
+            ),
             (TopologyFailure::LoopSplitNoFace, SM_ERR, K::Failed),
             (TopologyFailure::LoopSplitFaceEarly, SM_ERR, K::Failed),
             (TopologyFailure::EdgeNotSplit, SM_ERR, K::Failed),

@@ -738,6 +738,16 @@ pub fn make_vertex_loop(
 ) -> Result<(LoopId, VertexId)> {
     b.face(face)?;
     face_notify(b, face, env, NotifyOperation::PreEdit)?;
+    // the caller's face as supplied: checked before any record is made, so a face without
+    // face uses leaves the B-rep as it was
+    let fu1 = crate::topology::face::p2::upward_faceuse(b, face)?
+        .ok_or_else(|| failure(TopologyFailure::FaceWithoutUses))?;
+    let fu2 = b.faceuse(fu1)?.mate.ok_or_else(|| {
+        defect(
+            "a face use has no mate, though the kernel makes face uses in mated pairs",
+            SM_ERR_NULL_POINTER,
+        )
+    })?;
     let loop_ = b.add_loop_record(Loop {
         face,
         edges: Vec::new(),
@@ -766,19 +776,6 @@ pub fn make_vertex_loop(
         b.vertexuse_mut(vu)?.vertex = Some(vertex);
     }
     ignore_status(set_vertex_point(b, vertex, point, env))?;
-    let fu1 = crate::topology::face::p2::upward_faceuse(b, face)?.ok_or_else(|| {
-        defect(
-            "the face has no upward face use, though the kernel makes every face with its two \
-             face uses",
-            SM_ERR_NULL_POINTER,
-        )
-    })?;
-    let fu2 = b.faceuse(fu1)?.mate.ok_or_else(|| {
-        defect(
-            "a face use has no mate, though the kernel makes face uses in mated pairs",
-            SM_ERR_NULL_POINTER,
-        )
-    })?;
     b.loop_mut(loop_)?.loopuse = Some(lu1);
     for (lu, mate, fu, vu) in [(lu1, lu2, fu1, vu1), (lu2, lu1, fu2, vu2)] {
         *b.loopuse_mut(lu)? = Loopuse {
@@ -4305,5 +4302,47 @@ mod tests {
         assert!(new_face_outer_box(&k, &b, side, side, false)
             .unwrap()
             .is_none());
+    }
+
+    /// A face the caller gives without face uses is the caller's input, not a kernel
+    /// defect, and is refused before any record is made (review of #21110).
+    #[test]
+    fn a_vertex_loop_on_a_face_without_face_uses_is_invalid_input() {
+        let mut k = Kernel::default();
+        let mut b =
+            crate::primitive::api_primitives::create_box(&mut k, Point3::ZERO, 1.0, 1.0, 1.0)
+                .unwrap();
+        b.set_editing_enabled(true);
+        let shell = b.shells().ids().next().unwrap();
+        let face = b
+            .add_face_record(crate::topology::Face::new(shell))
+            .unwrap();
+        let counts = |b: &Brep| {
+            [
+                b.loops().len(),
+                b.loopuses().len(),
+                b.vertices().len(),
+                b.vertexuses().len(),
+            ]
+        };
+        let before = counts(&b);
+        let mut records = crate::topology::topology::NotifyRecords::new();
+        let mut attributes = crate::geom::attribute::AttributeStore::default();
+        let mut env = edge::NotifyEnv {
+            records: &mut records,
+            attributes: &mut attributes,
+            context: None,
+            key_of: &crate::topology::loopuse::notify_ref,
+        };
+        let e = make_vertex_loop(&mut b, face, Point3::ZERO, OrientType::Opposite, &mut env)
+            .unwrap_err();
+        assert_eq!(
+            e.topology_failure(),
+            Some(&TopologyFailure::FaceWithoutUses)
+        );
+        assert_eq!(e.kind(), crate::error::ErrorKind::InvalidInput);
+        assert_eq!(e.upstream_status(), Some(SM_ERR_NULL_POINTER));
+        assert_eq!(e.operation(), OP);
+        assert_eq!(counts(&b), before);
     }
 }

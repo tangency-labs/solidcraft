@@ -76,7 +76,7 @@ use crate::curve::curve::Curve;
 use crate::curve::line::Line;
 use crate::error::topology::TopologyFailure;
 use crate::error::{
-    ignore_status, ignored, EntityRef, Failure, Result, SolidError, SM_ERR_NULL_POINTER,
+    ignore_status, ignored, EntityRef, ErrorKind, Failure, Result, SolidError, SM_ERR_NULL_POINTER,
 };
 use crate::geom::extent1d::Extent1d;
 use crate::geom::extent2d::Extent2d;
@@ -166,14 +166,15 @@ fn with_editing<R>(b: &mut Brep, f: impl FnOnce(&mut Brep) -> Result<R>) -> Resu
     r
 }
 
-/// `SER(SM_ERR)` after a failed call: `cause`, with the call's error as its cause and
-/// status `SM_ERR`; [`SolidError::Unported`] goes through.
-fn caused(cause: TopologyFailure) -> impl Fn(SolidError) -> SolidError {
+/// `SER(SM_ERR)` after a failed call: the cause `cause` builds from the class of the call's
+/// error, with that error as its cause and status `SM_ERR`, so the failure takes its class
+/// from the error it caught; [`SolidError::Unported`] goes through.
+fn caused(cause: fn(ErrorKind) -> TopologyFailure) -> impl Fn(SolidError) -> SolidError {
     move |e| {
         if e.is_unported_or_cancelled() {
             e
         } else {
-            Failure::new(OP, cause).caused_by(e).into_error()
+            Failure::new(OP, cause(e.kind())).caused_by(e).into_error()
         }
     }
 }
@@ -196,7 +197,7 @@ fn defect(why: &'static str, status: i32) -> SolidError {
 fn plane_failed(e: SolidError) -> SolidError {
     match e {
         SolidError::InvalidInput { .. } | SolidError::PortInvariant { .. } => e,
-        other => caused(TopologyFailure::NoPlaneThroughCurves)(other),
+        other => caused(|class| TopologyFailure::NoPlaneThroughCurves { class })(other),
     }
 }
 
@@ -281,7 +282,7 @@ pub fn create_face_in_region_from_surface(
             fenv.this_face,
             fenv.env,
         )
-        .map_err(caused(TopologyFailure::FaceNotMade))?;
+        .map_err(caused(|class| TopologyFailure::FaceNotMade { class }))?;
 
         // set m_bRectangularTrim = TRUE
         let face = made
@@ -1606,22 +1607,62 @@ mod tests {
             });
             let e = r.unwrap_err();
             assert_eq!(code(&e), Some(SM_ERR));
-            // the plane's failure is kept as the cause
+            // the plane's failure is kept as the cause, and gives the class
+            let cause = e.cause().expect("the plane's failure is the cause");
             assert_eq!(
                 e.topology_failure(),
-                Some(&TopologyFailure::NoPlaneThroughCurves)
+                Some(&TopologyFailure::NoPlaneThroughCurves {
+                    class: cause.kind()
+                })
             );
-            assert!(e.cause().is_some(), "{e:?}");
+            assert_eq!(e.kind(), cause.kind());
             let (r, _) = with_brep(|k, b, fenv| {
                 create_planar_faces_with_3d_curves(k, b, None, &curves, 1e-6, fenv)
             });
             let e = r.unwrap_err();
             assert_eq!(code(&e), Some(SM_ERR));
+            let cause = e.cause().expect("the plane's failure is the cause");
             assert_eq!(
                 e.topology_failure(),
-                Some(&TopologyFailure::NoPlaneThroughCurves)
+                Some(&TopologyFailure::NoPlaneThroughCurves {
+                    class: cause.kind()
+                })
             );
-            assert!(e.cause().is_some(), "{e:?}");
+            assert_eq!(e.kind(), cause.kind());
+        }
+    }
+
+    /// A failure that chains a caught error takes its class from it and keeps `SM_ERR`
+    /// (`docs/failure-codes-and-reproduction.md` rule 6; review of #21110): an
+    /// unsupported or invalid-input error caught by the plane or the face construction is
+    /// reported as unsupported or invalid input, not as `failed`.
+    #[test]
+    fn a_caught_error_gives_the_plane_and_face_failures_their_class() {
+        let unsupported = SolidError::topology("caught", TopologyFailure::NoEdgeToAimAt);
+        assert_eq!(unsupported.kind(), ErrorKind::Unsupported);
+        let e = plane_failed(unsupported.clone());
+        assert_eq!(
+            e.topology_failure(),
+            Some(&TopologyFailure::NoPlaneThroughCurves {
+                class: ErrorKind::Unsupported
+            })
+        );
+        assert_eq!(e.kind(), ErrorKind::Unsupported);
+        assert_eq!(code(&e), Some(SM_ERR));
+        assert_eq!(e.cause(), Some(&unsupported));
+
+        let invalid = SolidError::topology("caught", TopologyFailure::NotASheet);
+        for caught in [unsupported, invalid] {
+            let e = caused(|class| TopologyFailure::FaceNotMade { class })(caught.clone());
+            assert_eq!(
+                e.topology_failure(),
+                Some(&TopologyFailure::FaceNotMade {
+                    class: caught.kind()
+                })
+            );
+            assert_eq!(e.kind(), caught.kind(), "{caught:?}");
+            assert_eq!(code(&e), Some(SM_ERR));
+            assert_eq!(e.cause(), Some(&caught));
         }
     }
 

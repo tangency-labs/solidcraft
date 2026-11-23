@@ -1692,16 +1692,19 @@ mod tests {
                             "box {s:e}: {e:?}"
                         );
                     } else {
+                        // the face construction's failure is kept as the cause, and gives
+                        // the class
+                        let cause = e.cause().expect("the face construction's failure");
                         assert_eq!(
                             e.topology_failure(),
-                            Some(&crate::error::topology::TopologyFailure::FaceNotMade),
+                            Some(&crate::error::topology::TopologyFailure::FaceNotMade {
+                                class: cause.kind()
+                            }),
                             "box {s:e}"
                         );
                         assert_eq!(e.operation(), "topology::brep::p8", "box {s:e}");
                         assert_eq!(e.upstream_status(), Some(crate::error::SM_ERR), "box {s:e}");
-                        assert_eq!(e.kind(), crate::error::ErrorKind::Failed, "box {s:e}");
-                        // the face construction's failure is kept as the cause
-                        assert!(e.cause().is_some(), "box {s:e}: {e:?}");
+                        assert_eq!(e.kind(), cause.kind(), "box {s:e}");
                     }
                 }
             }
