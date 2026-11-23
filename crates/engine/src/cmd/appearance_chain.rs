@@ -7,6 +7,7 @@ use serde_json::{Value, json};
 use solidcraft_doc::appearance::{AppearanceScope, AppearanceTarget, Look};
 
 use crate::params::bad;
+use crate::schema::appearance::AppearanceReplaceResult;
 use crate::{Result, Session};
 
 const MAX_TARGETS: usize = 10_000;
@@ -149,5 +150,5 @@ pub(super) fn replace(s: &mut Session, p: &Value) -> Result<Value> {
     } else {
         0
     };
-    Ok(json!({"count": count}))
+    serde_json::to_value(AppearanceReplaceResult { count, param_warnings: Vec::new() }).map_err(|e| bad(cmd, e.to_string()))
 }

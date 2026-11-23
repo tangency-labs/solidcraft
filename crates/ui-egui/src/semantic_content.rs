@@ -104,6 +104,44 @@ pub(crate) struct Frame {
     finalized: bool,
 }
 
+/// A pop-out Browser has its own frame and pointer captures while sharing the design tree.
+#[derive(Default)]
+pub(crate) struct Detached {
+    frame: Frame,
+    eye: Option<EyeCapture>,
+    row: Option<RowCapture>,
+}
+
+impl Detached {
+    pub(crate) fn show(&mut self, app: &mut SolveApp, ui: &mut Ui, draw: impl FnOnce(&mut SolveApp, &mut Ui)) {
+        let ctx = ui.ctx().clone();
+        let published = PUBLISHED.with(|outputs| std::mem::take(&mut *outputs.borrow_mut()));
+        self.swap(app, &ctx);
+        begin(app, &ctx);
+        draw(app, ui);
+        finalize(app, &ctx);
+        self.swap(app, &ctx);
+        PUBLISHED.with(|outputs| *outputs.borrow_mut() = published);
+    }
+
+    fn swap(&mut self, app: &mut SolveApp, ctx: &egui::Context) {
+        std::mem::swap(&mut self.frame, &mut app.tree.content);
+        ctx.data_mut(|data| {
+            exchange_capture(data, capture_id(), &mut self.eye);
+            exchange_capture(data, row_capture_id(), &mut self.row);
+        });
+    }
+}
+
+fn exchange_capture<T: Copy + Send + Sync + 'static>(data: &mut egui::util::IdTypeMap, id: egui::Id, retained: &mut Option<T>) {
+    let current = data.get_temp::<T>(id);
+    if let Some(retained) = std::mem::replace(retained, current) {
+        data.insert_temp(id, retained);
+    } else {
+        data.remove::<T>(id);
+    }
+}
+
 impl Frame {
     pub(crate) fn owner(&self, owner: ContentOwner) -> Option<&OwnerState> {
         self.owners.get(&owner)

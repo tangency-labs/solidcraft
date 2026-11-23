@@ -410,7 +410,7 @@ impl RecoveryOps for Script {
     fn trim_rails(&mut self, _: &mut Recovery<'_>, _: FilletGeomId) -> Result<()> {
         self.call("trim")
     }
-    fn tangent(&mut self, _: &mut Recovery<'_>, _: EdgeId) -> Result<bool> {
+    fn tangent(&mut self, _: &mut Recovery<'_>, _: EdgeId, _: Point3) -> Result<bool> {
         self.call("tangent")?;
         Ok(true)
     }
@@ -1099,10 +1099,14 @@ fn rollover_topology_split_preserves_actual_solver_id_and_partial_edits() {
     let err = Missing.topology_split(&mut f.context(), id).unwrap_err();
     // a stage failure (#15034) that keeps the bare `Upstream`'s status (#13790)
     assert_eq!(
-        (err.operation(), err.blend_failure(), err.upstream_status()),
+        (
+            err.operation(),
+            err.kind() == crate::error::ErrorKind::StageFailed && err.is_defect(),
+            err.upstream_status()
+        ),
         (
             "blend::fillet_geom::p5::FilletBrep::make_rail_edgeuse",
-            Some(&crate::error::blend::BlendFailure::StageFailed),
+            true,
             Some(crate::error::SM_ERR_NULL_POINTER)
         ),
         "{err:?}"
@@ -1124,10 +1128,14 @@ fn rollover_recalc_uses_the_real_solver_and_reports_missing_edge_curve() {
         .recalc(&mut f.context(), id, false, Some(Vec3::Y))
         .unwrap_err();
     assert_eq!(
-        (err.operation(), err.blend_failure(), err.upstream_status()),
+        (
+            err.operation(),
+            err.kind() == crate::error::ErrorKind::StageFailed && err.is_defect(),
+            err.upstream_status()
+        ),
         (
             "blend::fillet_geom::p3::FilletBrep::re_calc_fillet_geom",
-            Some(&crate::error::blend::BlendFailure::StageFailed),
+            true,
             Some(crate::error::SM_ERR_NULL_POINTER)
         ),
         "{err:?}"
@@ -1165,9 +1173,9 @@ fn landed_p3_refinement_is_a_noop_without_small_intervals_and_restores_errors() 
         .unwrap_err();
     assert_eq!(
         error,
-        SolidError::blend_failed(
+        SolidError::blend_solver(
             "blend::fillet_solver::p3::refine_rail_curve_classification",
-            "a small classification interval could not be removed"
+            crate::error::blend::SolverFailure::ShortIntervalsNotRemoved { count: 1 }
         )
     );
     let cc = f.fb.fillet_edge(rail).unwrap().curve_class().unwrap();
@@ -1190,9 +1198,9 @@ fn landed_p3_rail_intersection_reports_the_actual_missing_face_use() {
         .unwrap_err();
     assert_eq!(
         error,
-        SolidError::blend_missing(
+        SolidError::blend_solver(
             "blend::fillet_solver::p3::calc_rail_x_edge",
-            "the side edge's edge use on the rail's face"
+            crate::error::blend::SolverFailure::SideEdgeNotOnRailFace
         )
     );
     assert!(f.owners.notifications.is_empty());

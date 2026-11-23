@@ -25,7 +25,10 @@ use crate::{BooleanOp, Error};
 const TIMEOUT: Duration = Duration::from_secs(300);
 
 /// Stress corpus S0790 (#18802): a frustum with two blind holes, one separated from its
-/// top rim by 0.00002 mm, shelled inward by 1.2 mm. A refusal must keep its named cause.
+/// top rim by 0.00002 mm, shelled inward by 1.2 mm. A refusal must keep its named cause. The
+/// rim hole's edge comes within the two edges' tolerances of the rim on the seam at (10, 0, 50),
+/// so the top's outline touches itself there and the shell is refused as such (#18568), with
+/// the kernel's failure kept whole after it.
 #[test]
 fn shell_of_a_drilled_frustum_keeps_its_failure_reason() {
     let error = timed("S0790", || {
@@ -37,9 +40,10 @@ fn shell_of_a_drilled_frustum_keeps_its_failure_reason() {
         shell(&drilled, &[], TOL, -1.2).expect_err("the shell is currently refused")
     });
     let words = error.to_string();
-    assert!(matches!(error, Error::Refused(_) | Error::Solidcore(_)) && !words.contains("upstream status"), "{words}");
-    assert!(words.contains("stage_failed") && words.contains("; caused by "), "{words}");
-    assert!(words.contains("the joined offset edge could not be split at the gap bridge joint"), "{words}");
+    let Error::OutlineTouches { at, .. } = &error else { panic!("{words}") };
+    assert!((at[0] - 10.0).abs() < 1e-4 && at[1].abs() < 1e-4 && (at[2] - 50.0).abs() < 1e-4, "at {at:?}");
+    assert!(!words.contains("upstream status"), "{words}");
+    assert!(words.contains("an offset edge could not be split where a loop gap or a step corner needs it"), "{words}");
     eprintln!("{words}");
 }
 
