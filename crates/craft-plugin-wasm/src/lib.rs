@@ -19,6 +19,24 @@ impl Default for RuntimeOptions {
     }
 }
 
+/// Keeps compiled components in `dir` between sessions, with Wasmtime's own compilation cache, so
+/// a large plugin compiles once rather than in every session. Trusted app configuration: the folder
+/// is the app's per-user cache, never a plugin's or a project's. Set it once, before the first
+/// call; `None`, or never calling this, keeps compiled code in memory only. Returns `false` when
+/// it was already set. Anyone who can write to `dir` can change the machine code a plugin call
+/// runs, so it must be a folder only the user can write.
+pub fn set_compile_cache_dir(dir: Option<PathBuf>) -> bool {
+    #[cfg(any(target_arch = "x86_64", target_arch = "aarch64"))]
+    {
+        native::set_compile_cache_dir(dir)
+    }
+    #[cfg(not(any(target_arch = "x86_64", target_arch = "aarch64")))]
+    {
+        let _ = dir;
+        false
+    }
+}
+
 /// Runs with an owned host because Wasmtime store data must be `'static`.
 /// Returns the host on success and failure, after committing or rolling back.
 pub fn run<H: PluginHost + 'static>(host: H, manifest: &Manifest, component: &[u8], entry: &str, params: &Value) -> (H, Result<Value>) {
@@ -67,8 +85,8 @@ pub fn dialog_fields<H: PluginHost + 'static>(
 /// Checks `component` against `manifest` the way a call would, without running any of its code:
 /// the runtime declaration, the component's size, that it is a component (not a core module) that
 /// compiles, imports nothing but this host's interfaces at its version (never WASI or the network),
-/// and exports the entry interface of its world (`command-plugin`, or `importer-plugin` for an
-/// importer). The error names what is wrong; `plugin check` adds how to fix it.
+/// and exports the interfaces of its world (`command-plugin`, `panel-plugin`, or
+/// `importer-plugin`). The error names what is wrong; `plugin check` adds how to fix it.
 pub fn check_component(manifest: &Manifest, component: &[u8]) -> Result<()> {
     #[cfg(any(target_arch = "x86_64", target_arch = "aarch64"))]
     {
@@ -116,6 +134,41 @@ pub fn run_import<H: PluginHost + 'static>(
     #[cfg(not(any(target_arch = "x86_64", target_arch = "aarch64")))]
     {
         let _ = (manifest, component, entry, options, request);
+        (host, Err(craft_plugin::HostError::Trap { reason: "component execution requires an x86-64 or AArch64 native build".into() }))
+    }
+}
+
+/// Read and validate a panel plugin's static declarations with command and file authority disabled.
+/// The caller retains the host on failure as well as success.
+pub fn describe_ui<H: PluginHost + 'static>(host: H, manifest: &Manifest, component: &[u8]) -> (H, Result<craft_plugin::ui::Declarations>) {
+    #[cfg(any(target_arch = "x86_64", target_arch = "aarch64"))]
+    {
+        native::ui::describe(host, manifest, component, RuntimeOptions::default())
+    }
+    #[cfg(not(any(target_arch = "x86_64", target_arch = "aarch64")))]
+    {
+        let _ = (manifest, component);
+        (host, Err(craft_plugin::HostError::Trap { reason: "component execution requires an x86-64 or AArch64 native build".into() }))
+    }
+}
+
+/// Deliver a validated panel action and execute its declared entry in one ordinary command transaction.
+/// `params` obeys the entry's usual command schema; the typed event is delivered separately.
+pub fn run_ui_event<H: PluginHost + 'static>(
+    host: H,
+    manifest: &Manifest,
+    component: &[u8],
+    entry: &str,
+    params: &Value,
+    event: &craft_plugin::ui::UiEvent,
+) -> (H, Result<Value>) {
+    #[cfg(any(target_arch = "x86_64", target_arch = "aarch64"))]
+    {
+        native::run_call(host, manifest, component, entry, params, Some(event), RuntimeOptions::default())
+    }
+    #[cfg(not(any(target_arch = "x86_64", target_arch = "aarch64")))]
+    {
+        let _ = (manifest, component, entry, params, event);
         (host, Err(craft_plugin::HostError::Trap { reason: "component execution requires an x86-64 or AArch64 native build".into() }))
     }
 }
