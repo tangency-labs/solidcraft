@@ -27,6 +27,10 @@ impl NodalArc {
     /// higher-order contact or both ends at the node, [`ErrorKind::NotFound`] where no
     /// finite regular arc passed the checks.
     #[must_use]
+    #[allow(
+        clippy::match_same_arms,
+        reason = "one arm per variant, sorted by name, so causes added in parallel touch disjoint lines"
+    )]
     pub const fn class(self) -> ErrorKind {
         match self {
             Self::BothEndsAtNode => ErrorKind::Degenerate,
@@ -56,6 +60,10 @@ impl SectionShape {
     /// [`ErrorKind::Degenerate`] for lines or a point, [`ErrorKind::Unsupported`] where no
     /// quadratic form remains.
     #[must_use]
+    #[allow(
+        clippy::match_same_arms,
+        reason = "one arm per variant, sorted by name, so causes added in parallel touch disjoint lines"
+    )]
     pub const fn class(self) -> ErrorKind {
         match self {
             Self::Empty => ErrorKind::NotFound,
