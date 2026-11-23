@@ -407,8 +407,8 @@ line, start Line and click an endpoint on each source sketch; each endpoint uses
 plane, even when that plane differs from the active sketch. These snaps capture positions;
 they do not create associative links to the source points.
 New 3D geometry follows its sketch's component placement, including the selected occurrence
-and pending position changes. Click a drawn fit point or control point to show its move triad;
-its arrows move along world X, Y and Z. Scripts also supply world coordinates to `sketch.line3d`,
+and pending position changes. Click a drawn fit point to show its move triad; its arrows move
+along world X, Y and Z. Scripts also supply world coordinates to `sketch.line3d`,
 `sketch.arc3d`, `sketch.spline3d`, `sketch.spline3d.control_point`, `sketch.point3d` and
 `sketch.move3d`. Activate the desired occurrence before
 editing an explicit sketch belonging to a component with multiple placements.

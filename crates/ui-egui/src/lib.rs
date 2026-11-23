@@ -1692,8 +1692,20 @@ impl SolveApp {
         if solidcraft_engine::panels::commands::is_command(id) {
             return self.run_panel_command(id, &params).map_err(solidcraft_engine::panels::commands::error_text);
         }
+        // Reading which designs are open is no file operation: it answers while one runs.
+        if id == "document.list" {
+            return documents::command(self, id, &params);
+        }
         if self.file_load_holds() || self.file_picker.is_some() || self.saving.is_some() {
             return Err("a file operation is in progress".into());
+        }
+        // The window has the design tabs, which the engine does not: it shows the design asked for.
+        if id == "document.activate" {
+            return documents::command(self, id, &params);
+        }
+        // `new_tab`: the design opens in a tab of its own and the active one stays as it was.
+        if matches!(id, "file.new" | "doc.open") && documents::take_new_tab(&mut params) {
+            return documents::run_in_new_tab(self, id, params);
         }
         // The editor's own marker moves come through here, so only Undo, Redo and Play close it.
         if matches!(id, "edit.undo" | "edit.redo" | "timeline.play") {
@@ -1791,7 +1803,8 @@ impl SolveApp {
         if self.session.revision != revision {
             timeline::stop_playback(self);
         }
-        let selection_changed = self.session.selection != selected_before || matches!(id, "select.set" | "select.clear" | "select.same_look");
+        let selection_changed =
+            self.session.selection != selected_before || matches!(id, "select.set" | "select.clear" | "select.same_look" | "select.invert");
         if done.is_ok() && selection_changed {
             self.tree.clear_folder_pick();
             if id == "select.set" {
@@ -1878,6 +1891,22 @@ impl SolveApp {
                         self.set_status(format!("imported with {} warning(s): {}", w.len(), w.first().and_then(Value::as_str).unwrap_or("")), false);
                     }
                 }
+                "mesh.reduce" => {
+                    if let (Some(original), Some(target), Some(achieved)) = (
+                        v.get("original_triangles").and_then(Value::as_u64),
+                        v.get("target_triangles").and_then(Value::as_u64),
+                        v.get("achieved_triangles").and_then(Value::as_u64),
+                    ) {
+                        let key = if achieved > target { "ui.mesh_reduce_shortfall" } else { "ui.mesh_reduce_result" };
+                        self.set_status(
+                            solidcraft_ui_text::Locale::for_language(&self.preferences.language).format(
+                                key,
+                                &[("original", &original.to_string()), ("target", &target.to_string()), ("achieved", &achieved.to_string())],
+                            ),
+                            false,
+                        );
+                    }
+                }
                 "view.fit" | "view.home" => self.frame_view(id == "view.home"),
                 "view.tool" => {
                     self.viewport.nav = match v.get("tool").and_then(Value::as_str) {
@@ -1893,6 +1922,16 @@ impl SolveApp {
                         self.viewport.nav = Some(viewport::NavMode::Zoom);
                     } else if active {
                         self.viewport.nav = None;
+                    }
+                }
+                mode_id if navigation::toggle_mode(mode_id).is_some() => {
+                    let mode = navigation::toggle_mode(mode_id);
+                    let active = self.viewport.nav_toggle == mode;
+                    if v.get("on").and_then(Value::as_bool).unwrap_or(!active) {
+                        self.viewport.nav_toggle = mode;
+                    } else if active {
+                        self.viewport.nav_toggle = None;
+                        self.viewport.nav_toggle_at = None;
                     }
                 }
                 "view.spin" => {
@@ -2605,6 +2644,9 @@ impl SolveApp {
             "view.fit"
                 | "view.home"
                 | "view.tool.zoom"
+                | "view.pan_mode"
+                | "view.orbit_mode"
+                | "view.zoom_mode"
                 | "view.spin"
                 | "view.grid"
                 | "view.ground_shadow"
@@ -2913,12 +2955,19 @@ impl SolveApp {
             }
             let empty = sel.is_empty();
             self.start("solid.extrude");
+            let mut press_pull_panel = false;
             if let Some(d) = &mut self.dialog {
                 // Opened by Press Pull, so the dialog says so, whatever was picked (#11705).
                 d.press_pull = true;
                 if empty && let Some(input) = d.inputs.first_mut() {
                     input.accept |= selection::FACES | selection::EDGES;
                 }
+                press_pull_panel = true;
+            }
+            // The panel is the Extrude one, but Press Pull is the command that runs: the ribbon
+            // shows Press Pull as the running command, and Repeat repeats it (#14359).
+            if press_pull_panel && let Some(spec) = solidcraft_engine::find_command("solid.press_pull") {
+                self.last_command = Some((spec.id.to_string(), spec.label.to_string()));
             }
             return;
         }
@@ -3260,6 +3309,7 @@ impl SolveApp {
                         FeatureKind::Import { .. } => language.text("ui.feature_kind.import"),
                         FeatureKind::MeshImport { .. } => language.text("ui.feature_kind.mesh_import"),
                         FeatureKind::MeshConvert { .. } => language.text("ui.feature_kind.mesh_convert"),
+                        FeatureKind::MeshReduce { .. } => language.text("ui.feature_kind.mesh_reduce"),
                         FeatureKind::Repair { .. } => language.text("ui.feature_kind.repair"),
                         FeatureKind::Align { .. } => language.text("ui.feature_kind.align"),
                         FeatureKind::BodyTransfer { .. } => language.text("ui.feature_kind.body_transfer"),
@@ -4811,7 +4861,7 @@ impl SolveApp {
                 }
                 continue;
             }
-            if (waits && control_job::changes_the_design(&req.method))
+            if (waits && control_job::changes_the_design(&req.method) && !control_job::lists_designs(&req))
                 || (self.file_picker_busy() && matches!(req.method.as_str(), "ui.file" | "ui.home"))
                 // A screenshot shows the whole design: it waits until an opened one is meshed.
                 || (open_meshing::active(self) && req.method == "ui.screenshot")
