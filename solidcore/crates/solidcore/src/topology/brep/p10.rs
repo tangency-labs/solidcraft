@@ -3767,7 +3767,7 @@ mod tests {
         assert_eq!(status.sm_status(), Some(crate::error::SM_ERR));
         assert!(matches!(
             status.topology_failure(),
-            Some(crate::error::topology::TopologyFailure::Defect { .. })
+            Some(TopologyFailure::Defect { .. })
         ));
         assert!(p1::find_side_of_curve(&k, &narrow, on_curve, Vec3::Z, 1e-6).is_err());
         assert_eq!(side_vote(&k, &narrow, on_curve, Vec3::Z, 1e-6), Ok(None));

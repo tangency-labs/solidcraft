@@ -37,6 +37,7 @@
 //! | [`TopologyFailure::TestVectorZero`] | `SM_ERR` |
 //! | [`TopologyFailure::SurfaceCacheNotMade`] | `SM_ERR_NULL_POINTER` |
 //! | [`TopologyFailure::CurveNotApproximated`] | `SM_ERR_NULL_POINTER` |
+//! | [`TopologyFailure::EdgeuseWithoutEdge`] | `SM_ERR_INVALID_INPUT` |
 //! | [`TopologyFailure::GatheredBothSides`] | `SM_ERR_ASSERT_FAILURE` |
 //! | [`TopologyFailure::EdgeNotDeletable`] | `SM_ERR` |
 //! | [`TopologyFailure::InnerLoopsOnBothSides`] | `SM_ERR` |
@@ -334,6 +335,9 @@ pub enum TopologyFailure {
     /// approximation's failure is the cause). Class `failed`; whether it is a defect or a
     /// refusal is its cause's ([`crate::SolidError::is_defect`] follows the chain).
     CurveNotApproximated,
+    /// An edge use the caller gave has no edge. B-rep links are not checked on the way in,
+    /// so this is the caller's body. [`ErrorKind::InvalidInput`].
+    EdgeuseWithoutEdge,
     /// Gathering the face uses connected to one side of a face reached more face uses than
     /// faces remain to be oriented (upstream's "Nonorientable Brep" assert): the body is not
     /// orientable, or it is an open sheet the closed-solid orientation does not take. Class
@@ -1032,6 +1036,7 @@ impl TopologyFailure {
             Self::InvalidValue(_)
             | Self::NoBrepGiven
             | Self::NoTrimmedBSpline
+            | Self::EdgeuseWithoutEdge
             | Self::EdgeUseNotInLoop
             | Self::NewPrimaryNotOnEdge
             | Self::NotFourEdgeUses { .. }
@@ -1149,7 +1154,8 @@ impl TopologyFailure {
             | Self::UnknownShellType { .. }
             | Self::VertexWithoutUses
             | Self::FaceWithoutUses
-            | Self::LoopRecordWithoutEdgeuse => ErrorKind::InvalidInput,
+            | Self::LoopRecordWithoutEdgeuse
+            | Self::EdgeuseWithoutEdge => ErrorKind::InvalidInput,
             Self::EdgeNotManifold
             | Self::CurveNotBSpline { .. }
             | Self::SurfaceWithoutNurbs { .. }
@@ -1277,6 +1283,7 @@ impl core::fmt::Display for TopologyFailure {
             Self::CurveNotApproximated => {
                 f.write_str("the edge's curve could not be made a B-spline")
             }
+            Self::EdgeuseWithoutEdge => f.write_str("an edge use has no edge"),
             Self::GatheredBothSides => {
                 f.write_str("more face uses are connected than faces remain to be oriented")
             }
@@ -1834,6 +1841,11 @@ mod tests {
                 TopologyFailure::CurveNotApproximated,
                 SM_ERR_NULL_POINTER,
                 K::Failed,
+            ),
+            (
+                TopologyFailure::EdgeuseWithoutEdge,
+                SM_ERR_INVALID_INPUT,
+                K::InvalidInput,
             ),
             (
                 TopologyFailure::GatheredBothSides,
