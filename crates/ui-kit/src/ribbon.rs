@@ -977,6 +977,8 @@ pub struct TabHandles<'a> {
     pub add: &'a str,
     /// Each action button after the search field.
     pub action: &'a str,
+    /// The selected tab's highlight as painted, sliding or at rest (a rect).
+    pub highlight: &'a str,
 }
 
 /// One tab.
@@ -1019,14 +1021,18 @@ pub struct Tabs<'a> {
     /// The row's bottom edge as a 2 px line in this colour (a contextual tab is selected), or
     /// the quiet separator.
     pub underline: Option<Color32>,
+    /// How the selected tab's highlight moves to a newly selected tab (a zero duration: at once).
+    pub slide: crate::SlidingHighlight,
     pub handles: TabHandles<'a>,
 }
 
 /// What the user chose on the tab row this frame.
 #[derive(Clone, Debug, PartialEq)]
 pub enum TabAction {
-    /// Tab `index` was clicked; `already`: it was the selected one.
+    /// Tab `index` was clicked (or Enter or Space pressed on it); `already`: it was the selected one.
     Select { index: usize, already: bool },
+    /// The keyboard moved the selection to tab `index` (Left, Right, Home or End on a focused tab).
+    Step { index: usize },
     /// A tab's menu, at `at`.
     Menu { at: Pos2 },
     /// The + button, at `rect`: open (or close) the app's menu from it.
@@ -1063,6 +1069,48 @@ pub fn tab_style(t: &Tokens, accent: TabAccent, contextual: bool, active: bool, 
         (false, false) => (idle, t.text, Color32::TRANSPARENT),
     };
     TabStyle { fill, ink, outline }
+}
+
+/// How much of `tab` the sliding highlight covers (0..=1): a label takes the selected ink as the
+/// highlight passes over it.
+pub fn highlight_cover(tab: Rect, highlight: Rect) -> f32 {
+    let overlap = (tab.right().min(highlight.right()) - tab.left().max(highlight.left())).max(0.0);
+    if tab.width() > 0.0 && overlap.is_finite() { (overlap / tab.width()).clamp(0.0, 1.0) } else { 0.0 }
+}
+
+/// With a tab focused (Tab reaches the row), Left and Right step to the previous and next tab,
+/// wrapping at the ends, and Home and End to the first and last; the focus follows. `ids` are the
+/// tabs' widget ids in order. Returns the tab stepped to. Enter and Space need nothing here: they
+/// click the focused tab.
+fn tab_keys(ui: &egui::Ui, ids: &[egui::Id]) -> Option<usize> {
+    let at = ids.iter().position(|id| ui.memory(|m| m.has_focus(*id)))?;
+    let n = ids.len();
+    let (left, right, home, end) = ui.input_mut(|i| {
+        (
+            i.consume_key(egui::Modifiers::NONE, egui::Key::ArrowLeft),
+            i.consume_key(egui::Modifiers::NONE, egui::Key::ArrowRight),
+            i.consume_key(egui::Modifiers::NONE, egui::Key::Home),
+            i.consume_key(egui::Modifiers::NONE, egui::Key::End),
+        )
+    });
+    let next = if home {
+        0
+    } else if end {
+        n.checked_sub(1)?
+    } else if left {
+        (at + n - 1) % n
+    } else if right {
+        (at + 1) % n
+    } else {
+        return None;
+    };
+    let id = *ids.get(next)?;
+    ui.memory_mut(|m| {
+        m.request_focus(id);
+        // Instead of egui's own move of the focus to whatever lies in the arrow's direction.
+        m.move_focus(egui::FocusDirection::None);
+    });
+    Some(next)
 }
 
 /// The width of a tab or tab-row button labelled `label`.
@@ -1128,6 +1176,11 @@ pub fn tabs(ui: &mut egui::Ui, row_data: &Tabs, row: Rect) -> TabsOut {
             .show(ui, |ui| {
                 let (all, _) = ui.allocate_exact_size(vec2(tabs_width, TAB_ROW_HEIGHT), Sense::hover());
                 let mut x = all.left();
+                // Each tab's widget id, for the keys, and its rect and pointer or keyboard state,
+                // painted once clicks and keys have settled which tab is selected this pass.
+                let mut ids = Vec::with_capacity(row_data.tabs.len());
+                let mut drawn: Vec<(Rect, bool, bool)> = Vec::with_capacity(row_data.tabs.len());
+                let mut selected = row_data.tabs.iter().position(|tab| tab.id == row_data.active);
                 for (index, (tab, width)) in row_data.tabs.iter().zip(widths).enumerate() {
                     if tab.contextual {
                         x += 6.0;
@@ -1137,11 +1190,12 @@ pub fn tabs(ui: &mut egui::Ui, row_data: &Tabs, row: Rect) -> TabsOut {
                     if active && changed {
                         ui.scroll_to_rect(tr, Some(egui::Align::Center));
                     }
-                    let response = ui.interact(tr, ui.scope_id().with(("tab", tab.id)), Sense::click());
-                    response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, true, tab.label));
-                    let style = tab_style(&t, tab.accent, tab.contextual, active, response.hovered());
-                    ui.painter().rect(tr, corner, style.fill, Stroke::new(1.0, style.outline), egui::StrokeKind::Inside);
-                    text(ui, tr.center(), tab.label, t.font_button, style.ink, active || tab.contextual);
+                    let id = ui.scope_id().with(("tab", tab.id));
+                    ids.push(id);
+                    let response = ui.interact(tr, id, Sense::click());
+                    // Announced as a tab with its selected state.
+                    response.widget_info(|| egui::WidgetInfo::selected(egui::Role::Tab, true, active, tab.label));
+                    drawn.push((tr, response.hovered(), response.has_focus()));
                     if ui.clip_rect().contains(tr.center()) {
                         solidcraft_ui_registry::publish_target(&handle(h.tab, tab.id), tr);
                         solidcraft_ui_registry::publish_rect(&handle(h.tab_rect, tab.id), tr);
@@ -1150,12 +1204,43 @@ pub fn tabs(ui: &mut egui::Ui, row_data: &Tabs, row: Rect) -> TabsOut {
                         }
                     }
                     if response.clicked() {
+                        selected = Some(index);
                         actions.push(TabAction::Select { index, already: active });
                     }
                     if response.secondary_clicked() {
                         actions.push(TabAction::Menu { at: response.interact_pointer_pos().unwrap_or(tr.left_bottom()) });
                     }
                     x += width + 2.0;
+                }
+                if let Some(index) = tab_keys(ui, &ids) {
+                    selected = Some(index);
+                    actions.push(TabAction::Step { index });
+                }
+                // Each unselected tab's own fill: hover (or keyboard focus, lit as the pointer
+                // lights it) and the outline that marks an unselected contextual tab.
+                for (index, (tab, (tr, hovered, focused))) in row_data.tabs.iter().zip(&drawn).enumerate() {
+                    if selected != Some(index) {
+                        let style = tab_style(&t, tab.accent, tab.contextual, false, *hovered || *focused);
+                        ui.painter().rect(*tr, corner, style.fill, Stroke::new(1.0, style.outline), egui::StrokeKind::Inside);
+                    }
+                }
+                // The selected tab's highlight, sliding from the tab it was on, over the fills and
+                // under the labels.
+                let highlight = selected.and_then(|index| Some((row_data.tabs.get(index)?, drawn.get(index)?.0))).map(|(tab, tr)| {
+                    let fill = tab_style(&t, tab.accent, tab.contextual, true, false).fill;
+                    let shown = row_data.slide.show(ui.ctx(), ui.scope_id().with("tab_highlight"), tab.id, tr, fill);
+                    ui.painter().rect_filled(shown.rect, corner, shown.fill);
+                    solidcraft_ui_registry::publish_rect(h.highlight, shown.rect);
+                    shown.rect
+                });
+                for (index, (tab, (tr, _, focused))) in row_data.tabs.iter().zip(&drawn).enumerate() {
+                    let off = tab_style(&t, tab.accent, tab.contextual, false, false).ink;
+                    let on = tab_style(&t, tab.accent, tab.contextual, true, false).ink;
+                    let cover = highlight.map_or(0.0, |h| highlight_cover(*tr, h));
+                    text(ui, tr.center(), tab.label, t.font_button, off.lerp_to_gamma(on, cover), selected == Some(index) || tab.contextual);
+                    if *focused {
+                        crate::app_bar::paint_focus(ui.painter(), *tr, corner);
+                    }
                 }
                 if let Some(tip) = row_data.add {
                     let pr = Rect::from_min_size(pos2(x, all.top() + inset), vec2(add_size, add_size));

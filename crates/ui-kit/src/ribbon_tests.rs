@@ -312,7 +312,8 @@ fn a_group_that_does_not_fit_is_in_the_more_menu() {
     assert_eq!(rig.click(rig.at("t:more_row:b.off")), Vec::new(), "a disabled row runs nothing");
 }
 
-const TAB_HANDLES: TabHandles<'static> = TabHandles { tab: "t:tab:", tab_rect: "t:tab_rect:", add: "t:add", action: "t:action:" };
+const TAB_HANDLES: TabHandles<'static> =
+    TabHandles { tab: "t:tab:", tab_rect: "t:tab_rect:", add: "t:add", action: "t:action:", highlight: "t:highlight" };
 
 /// A tab row with three tabs (the last contextual, under an alias), the + button and two buttons
 /// after the search field, one of them not ready.
@@ -320,6 +321,16 @@ struct TabsRig {
     ctx: egui::Context,
     time: std::cell::Cell<f64>,
     width: f32,
+    /// The selected tab's id, which the app would set from the row's actions.
+    active: std::cell::Cell<&'static str>,
+    slide: crate::SlidingHighlight,
+    /// The shapes the last frame painted.
+    shapes: std::cell::RefCell<Vec<egui::epaint::ClippedShape>>,
+    /// The accessibility events the last frame sent.
+    events: std::cell::RefCell<Vec<egui::output::OutputEvent>>,
+    /// Whether the rig selects what the row's actions ask for, as the app does (else the first
+    /// tab stays selected).
+    follow: bool,
 }
 
 impl TabsRig {
@@ -328,7 +339,20 @@ impl TabsRig {
     }
 
     fn with_width(width: f32) -> TabsRig {
-        let rig = TabsRig { ctx: crate::test_support::context(), time: std::cell::Cell::new(0.0), width };
+        TabsRig { follow: false, ..TabsRig::with_slide(width, crate::SlidingHighlight::new(0.0)) }
+    }
+
+    fn with_slide(width: f32, slide: crate::SlidingHighlight) -> TabsRig {
+        let rig = TabsRig {
+            ctx: crate::test_support::context(),
+            time: std::cell::Cell::new(0.0),
+            width,
+            active: std::cell::Cell::new("ONE"),
+            slide,
+            shapes: Default::default(),
+            events: Default::default(),
+            follow: true,
+        };
         rig.frame(Vec::new());
         rig
     }
@@ -351,20 +375,50 @@ impl TabsRig {
                 Tab { id: "TWO", label: "Two", accent, contextual: false, aliases: &[] },
                 Tab { id: "EDIT", label: "Edit", accent, contextual: true, aliases: &["OLD"] },
             ],
-            active: "ONE",
+            active: self.active.get(),
             add: Some("Tabs"),
             menu_open_from: &|_| false,
             search_width: 120.0,
             buttons: vec![TabButton { id: "go", label: "Go", ready: Ok(()) }, TabButton { id: "stop", label: "Stop", ready: Err("Nothing runs") }],
             floating: false,
             underline: None,
+            slide: self.slide,
             handles: TAB_HANDLES,
         };
         let mut actions = Vec::new();
-        crate::test_support::raw_frame(&self.ctx, input, |ui| {
+        let output = crate::test_support::raw_frame(&self.ctx, input, |ui| {
             actions = tabs(ui, &row, Rect::from_min_size(egui::Pos2::ZERO, vec2(self.width, TAB_ROW_HEIGHT))).actions;
         });
+        *self.shapes.borrow_mut() = output.shapes;
+        *self.events.borrow_mut() = output.platform_output.events;
+        // As the app does: a click or a key selects the tab.
+        let ids = ["ONE", "TWO", "EDIT"];
+        for action in actions.iter().filter(|_| self.follow) {
+            if let TabAction::Select { index, .. } | TabAction::Step { index } = action {
+                self.active.set(ids[*index]);
+            }
+        }
         actions
+    }
+
+    /// One frame with `key` pressed and one with it released; the actions of both.
+    fn key(&self, key: egui::Key) -> Vec<TabAction> {
+        let event = |pressed| egui::Event::Key { key, physical_key: None, pressed, repeat: false, modifiers: egui::Modifiers::NONE };
+        let mut actions = self.frame(vec![event(true)]);
+        actions.extend(self.frame(vec![event(false)]));
+        actions
+    }
+
+    /// The fill the last frame painted exactly over `rect`, the most opaque if several.
+    fn fill_at(&self, rect: Rect) -> Option<Color32> {
+        self.shapes
+            .borrow()
+            .iter()
+            .filter_map(|c| match &c.shape {
+                egui::Shape::Rect(r) if r.rect == rect && r.fill != Color32::TRANSPARENT => Some(r.fill),
+                _ => None,
+            })
+            .max_by_key(|fill| fill.a())
     }
 
     fn press(&self, at: egui::Pos2, button: egui::PointerButton) -> Vec<TabAction> {
@@ -422,6 +476,108 @@ fn the_mouse_wheel_scrolls_tabs_that_do_not_fit_the_row() {
         rig.frame(Vec::new());
     }
     assert!(solidcraft_ui_registry::rect_of("t:tab_rect:EDIT").is_some(), "the wheel brought the last tab into view");
+}
+
+/// A new selection slides the highlight from the tab it was on, only toward the new tab, dimmed
+/// on the way, and lands on it at full strength; the labels it is not over keep their own ink.
+#[test]
+fn the_selected_tab_highlight_slides_dimmed_to_a_new_tab_and_lands_at_full_strength() {
+    let rig = TabsRig::with_slide(900.0, crate::SlidingHighlight::default());
+    let one = solidcraft_ui_registry::rect_of("t:tab_rect:ONE").expect("the first tab is drawn");
+    let edit = solidcraft_ui_registry::rect_of("t:tab_rect:EDIT").expect("the contextual tab is drawn");
+    let full =
+        tab_style(&Tokens::get(), solidcraft_theme::TabAccent::for_ramp(&Tokens::get(), solidcraft_theme::AccentRamp::Main), true, true, false).fill;
+    assert_eq!(solidcraft_ui_registry::rect_of("t:highlight"), Some(one), "at rest on the selected tab");
+    rig.active.set("EDIT");
+    let mut lefts = Vec::new();
+    let mut dimmed = false;
+    for _ in 0..10 {
+        rig.frame(Vec::new());
+        let at = solidcraft_ui_registry::rect_of("t:highlight").expect("the highlight is published");
+        assert!(at.left() >= one.left() - 0.01 && at.right() <= edit.right() + 0.01, "between the two tabs: {at:?}");
+        dimmed |= rig.fill_at(at).is_some_and(|fill| fill.a() < full.a());
+        lefts.push(at.left());
+    }
+    assert!(lefts.windows(2).all(|w| w[0] <= w[1]), "only toward the new tab: {lefts:?}");
+    assert!(lefts.iter().any(|x| *x > one.left() && *x < edit.left()), "it passes the tab between: {lefts:?}");
+    assert!(dimmed, "it dims while it travels");
+    for _ in 0..20 {
+        rig.frame(Vec::new());
+    }
+    assert_eq!(solidcraft_ui_registry::rect_of("t:highlight"), Some(edit), "landed on the new tab");
+    assert_eq!(rig.fill_at(edit), Some(full), "at full strength");
+    assert_eq!(highlight_cover(one, edit), 0.0);
+    assert_eq!(highlight_cover(edit, edit), 1.0);
+    assert_eq!(highlight_cover(Rect::NOTHING, edit), 0.0, "an empty tab is never covered");
+}
+
+/// With no motion the highlight jumps: the first frame after a click already shows it on the
+/// new tab at full strength.
+#[test]
+fn without_motion_the_highlight_jumps_to_the_clicked_tab() {
+    let rig = TabsRig::new();
+    rig.click("t:tab_rect:TWO");
+    let two = solidcraft_ui_registry::rect_of("t:tab_rect:TWO").expect("the second tab is drawn");
+    assert_eq!(rig.active.get(), "TWO");
+    assert_eq!(solidcraft_ui_registry::rect_of("t:highlight"), Some(two));
+}
+
+/// The keyboard: Tab reaches the tabs, each announced as a tab with its selected state; Left and
+/// Right step along them, wrapping, Home and End go to the ends, and the focus follows. Enter
+/// selects a tab Tab moved the focus to, as a click does.
+#[test]
+fn the_keyboard_reaches_the_tabs_and_the_arrows_home_and_end_step_along_them() {
+    let rig = TabsRig::with_slide(900.0, crate::SlidingHighlight::new(0.0));
+    let focused_tab = |rig: &TabsRig| {
+        rig.events.borrow().iter().find_map(|e| match e {
+            egui::output::OutputEvent::FocusGained(info) if info.role == egui::Role::Tab => Some((info.label.clone(), info.selected)),
+            _ => None,
+        })
+    };
+    let mut reached = None;
+    for _ in 0..20 {
+        let event = |pressed| egui::Event::Key { key: egui::Key::Tab, physical_key: None, pressed, repeat: false, modifiers: egui::Modifiers::NONE };
+        rig.frame(vec![event(true)]);
+        reached = focused_tab(&rig);
+        rig.frame(vec![event(false)]);
+        if reached.is_some() {
+            break;
+        }
+    }
+    assert_eq!(reached, Some((Some("One".to_string()), Some(true))), "Tab reaches the first tab, announced as selected");
+    let step = |rig: &TabsRig, key| rig.key(key).into_iter().filter(|a| matches!(a, TabAction::Step { .. })).collect::<Vec<_>>();
+    assert_eq!(step(&rig, egui::Key::ArrowRight), vec![TabAction::Step { index: 1 }], "Right steps to the next tab");
+    assert_eq!(step(&rig, egui::Key::ArrowRight), vec![TabAction::Step { index: 2 }], "the focus followed, so Right keeps going");
+    assert_eq!(step(&rig, egui::Key::ArrowRight), vec![TabAction::Step { index: 0 }], "and wraps to the first");
+    assert_eq!(step(&rig, egui::Key::ArrowLeft), vec![TabAction::Step { index: 2 }], "Left wraps to the last");
+    assert_eq!(step(&rig, egui::Key::Home), vec![TabAction::Step { index: 0 }]);
+    assert_eq!(step(&rig, egui::Key::End), vec![TabAction::Step { index: 2 }]);
+    assert_eq!(rig.active.get(), "EDIT");
+    // The focused tab wears the app's focus ring.
+    let edit = solidcraft_ui_registry::rect_of("t:tab_rect:EDIT").expect("the contextual tab is drawn");
+    let ring = rig
+        .shapes
+        .borrow()
+        .iter()
+        .any(|c| matches!(&c.shape, egui::Shape::Rect(r) if r.rect == edit && r.stroke.color == Tokens::get().accent && r.stroke.width == 1.5));
+    assert!(ring, "the focused tab is ringed");
+    // Shift+Tab moves the focus back along the row without selecting; Enter then selects.
+    let back = |pressed| egui::Event::Key { key: egui::Key::Tab, physical_key: None, pressed, repeat: false, modifiers: egui::Modifiers::SHIFT };
+    rig.frame(vec![back(true)]);
+    // egui announces the focus the frame after it moves.
+    rig.frame(vec![back(false)]);
+    assert_eq!(focused_tab(&rig), Some((Some("Two".to_string()), Some(false))));
+    assert_eq!(rig.active.get(), "EDIT", "moving the focus does not select");
+    let enter = rig.key(egui::Key::Enter);
+    assert!(enter.contains(&TabAction::Select { index: 1, already: false }), "Enter selects the focused tab: {enter:?}");
+    // Without the focus on a tab, the keys are left for the rest of the app.
+    rig.ctx.memory_mut(|m| m.stop_text_input());
+    rig.ctx.memory_mut(|m| {
+        if let Some(id) = m.focused() {
+            m.surrender_focus(id)
+        }
+    });
+    assert!(step(&rig, egui::Key::ArrowRight).is_empty(), "the arrows step only while a tab has the focus");
 }
 
 use egui::{Event, RawInput};

@@ -131,6 +131,9 @@ macro_rules! layout_preferences {
             /// blinks there, and a running command that sits in a drop-down marks its section label. Off
             /// by default: the ribbon stays as it was.
             ribbon_reveal: bool = false, PAGE_LAYOUT;
+            /// Changing ribbon tabs slides the tab highlight to the new tab and cross-fades the panels
+            /// (`ui_kit::SlidingHighlight`, `ui_kit::CrossFade`). Off: both swap at once, as before.
+            ribbon_motion: bool = true, PAGE_LAYOUT;
             /// Fold the ribbon to its tab row, so the view has the room its panels took (#10112). A tab's
             /// click shows its panels over the view until a command starts or the pointer leaves them.
             /// Off by default: the whole ribbon shows. `view.ribbon_tabs_only` switches it.
