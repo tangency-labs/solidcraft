@@ -568,64 +568,108 @@ impl LineNet {
     }
 }
 
-/// Whether the net closes exactly in u (`in_u`, else in v): its knots clamped at both ends
-/// in that direction (so its first and last rows of control points are its edges there),
-/// and those two rows one point at each place as homogeneous points ([`one_point`]).
+/// Whether the net closes exactly in u (`in_u`, else in v): at least two rows of control
+/// points in that direction, as many knots there as rows plus the degree plus one, each end
+/// knot of multiplicity exactly the degree plus one (so its first and last rows are its
+/// edges there: with a greater one the end row's basis function vanishes and the edge is the
+/// next row), and those two rows one homogeneous row up to one common factor λ, weights
+/// included. The edge at the first row is `Σ N_k a_k` and the one at the last `Σ N_k b_k`
+/// (projected), one curve for every parameter when `b_k = λ a_k` for one `λ > 0` and every
+/// `k` (sufficient, not necessary: rows sharing a polynomial factor make one curve too, and
+/// are not shown); equal as Cartesian points place by place, each with its own weight ratio,
+/// they are two curves (rows `(0, 0, 0)`, `(1, 1, 0)`, `(2, 0, 0)` of weights 1, 1, 1 and 1,
+/// 2, 1 meet at the ends and part between). With `λ = b_0w / a_0w` taken implicitly, the
+/// test is `b_kc a_0w = a_kc b_0w` for every `k` and `c ∈ {x, y, z, w}`, each product
+/// compared exactly ([`equal_products`], no division), and every weight of both rows
+/// positive.
 fn closes_exactly(net: &Nurbs, in_u: bool) -> bool {
     let (knots, degree) = if in_u {
         (&net.u, net.p)
     } else {
         (&net.v, net.q)
     };
-    let clamped =
-        |end: Option<&[f64]>| end.is_some_and(|e| e.windows(2).all(|w| w.first() == w.last()));
-    let len = knots.len();
-    let ends = clamped(knots.get(..=degree))
-        && clamped(len.checked_sub(degree + 1).and_then(|i| knots.get(i..)));
-    let point = |i: usize, j: usize| -> Option<[f64; 4]> {
-        let k = i.checked_mul(net.nv)?.checked_add(j)?.checked_mul(4)?;
-        let x = net.pw.get(k..k.checked_add(4)?)?;
-        Some([*x.first()?, *x.get(1)?, *x.get(2)?, *x.get(3)?])
-    };
     let (count, across) = if in_u {
         (net.nv, net.nu)
     } else {
         (net.nu, net.nv)
     };
-    let Some(last) = across.checked_sub(1) else {
+    let len = knots.len();
+    let Some(order) = degree.checked_add(1) else {
         return false;
     };
-    ends && (0..count).all(|k| {
-        let (a, b) = if in_u {
+    let counted = across.checked_add(order) == Some(len);
+    // each end knot `order` times exactly: the first `order` knots one value and the next
+    // greater, the last `order` one value and the one before them less
+    let ends = || -> Option<bool> {
+        let first = knots.first()?;
+        let tail = len.checked_sub(order)?;
+        let last = knots.last()?;
+        let head = knots.get(..order)?.iter().all(|k| k == first);
+        let back = knots.get(tail..)?.iter().all(|k| k == last);
+        let after = knots.get(order)?;
+        let before = knots.get(tail.checked_sub(1)?)?;
+        Some(head && back && after > first && before < last)
+    };
+    let point = |i: usize, j: usize| -> Option<[f64; 4]> {
+        let k = i.checked_mul(net.nv)?.checked_add(j)?.checked_mul(4)?;
+        let x = net.pw.get(k..k.checked_add(4)?)?;
+        Some([*x.first()?, *x.get(1)?, *x.get(2)?, *x.get(3)?])
+    };
+    // (with one row the first and last are one: no seam is shown)
+    if count == 0 || across < 2 || !counted || ends() != Some(true) {
+        return false;
+    }
+    let last = across - 1;
+    let row = |k: usize| {
+        if in_u {
             (point(0, k), point(last, k))
         } else {
             (point(k, 0), point(k, last))
-        };
-        a.zip(b).is_some_and(|(a, b)| one_point(a, b))
+        }
+    };
+    let (Some(a0), Some(b0)) = row(0) else {
+        return false;
+    };
+    let [.., a0w] = a0;
+    let [.., b0w] = b0;
+    (0..count).all(|k| match row(k) {
+        (Some(a), Some(b)) => {
+            let [.., aw] = a;
+            let [.., bw] = b;
+            aw > 0.0
+                && bw > 0.0
+                && a.iter()
+                    .zip(&b)
+                    .all(|(&ac, &bc)| equal_products(bc, a0w, ac, b0w))
+        }
+        _ => false,
     })
 }
 
-/// Whether the homogeneous points `a` and `b` (`(x w, y w, z w, w)`) are one point exactly:
-/// positive weights, and `a_i b_w = b_i a_w` in each coordinate, compared as the rounded
-/// product and its error, each exact by a fused multiply-add (no division, whose rounded
-/// quotients may agree for points that differ). A product too small for its error to be
-/// exact is not shown.
-fn one_point(a: [f64; 4], b: [f64; 4]) -> bool {
-    let [ax, ay, az, aw] = a;
-    let [bx, by, bz, bw] = b;
-    let product = |x: f64, y: f64| {
-        let p = x * y;
-        let exact = p.is_finite() && (p == 0.0 || p.abs() >= 1.0e-280);
-        exact.then(|| (p, x.mul_add(y, -p)))
+/// Whether `x y = z w` exactly: each product as its rounded value and its error, the error
+/// exact by a fused multiply-add (Ogita, Rump and Oishi, "Accurate sum and dot product",
+/// SIAM J. Sci. Comput. 26 (2005), `TwoProduct`), so that equal pairs are equal products
+/// and the converse also holds. The error of `x y` is representable when the product is at
+/// least `2⁻⁹⁶⁸` (≈ 4·10⁻²⁹²), so a product of magnitude below `10⁻²⁸⁰` that is not
+/// exactly 0 is not shown; a product rounding to 0 is exact only when a factor is 0 (an
+/// underflow rounds both the product and its error to 0, as `5·10⁻³²⁴ × 0.4` does). A
+/// product not finite is not shown (NaN fails every comparison), and one rounding down to a
+/// finite `f64::MAX` keeps an exact remainder. `−0.0` and `0.0` are one value here.
+fn equal_products(x: f64, y: f64, z: f64, w: f64) -> bool {
+    let product = |a: f64, b: f64| {
+        let p = a * b;
+        let exact = p.is_finite()
+            && if p == 0.0 {
+                a == 0.0 || b == 0.0
+            } else {
+                p.abs() >= 1.0e-280
+            };
+        exact.then(|| (p, a.mul_add(b, -p)))
     };
-    aw > 0.0
-        && bw > 0.0
-        && [(ax, bx), (ay, by), (az, bz)].iter().all(|&(p, q)| {
-            match (product(p, bw), product(q, aw)) {
-                (Some(l), Some(r)) => l == r,
-                _ => false,
-            }
-        })
+    match (product(x, y), product(z, w)) {
+        (Some(l), Some(r)) => l == r,
+        _ => false,
+    }
 }
 
 /// The knots of `knots` (degree `degree`) strictly inside `range` whose multiplicity is at
@@ -6501,5 +6545,83 @@ mod tests {
         assert!(!covered_by_leaves(u, v, &holed));
         let corner = [leaf(0.0, 0.5, 0.0, 1.0), leaf(0.5, 1.0, 0.0, 0.85)];
         assert!(!covered_by_leaves(u, v, &corner));
+    }
+
+    /// A net of `rows` (each a row of homogeneous points `(x w, y w, z w, w)` along v, the
+    /// rows along u) on clamped knots of degrees `rows − 1` and `points − 1`, no interior knot.
+    fn net_of(rows: &[Vec<[f64; 4]>]) -> Nurbs {
+        let (nu, nv) = (rows.len(), rows[0].len());
+        let knots = |n: usize| {
+            let mut k = vec![0.0; n];
+            k.extend(vec![1.0; n]);
+            k
+        };
+        Nurbs {
+            p: nu - 1,
+            q: nv - 1,
+            nu,
+            nv,
+            u: knots(nu),
+            v: knots(nv),
+            pw: rows.iter().flatten().flatten().copied().collect(),
+        }
+    }
+
+    /// The exact closure test reads the two edge rows as one homogeneous row up to one
+    /// common factor (answer10, defect 1), and a product that underflows to 0 is not exact
+    /// (defect 2). Rows `(0, 0, 0)`, `(1, 1, 0)`, `(2, 0, 0)` of weights 1, 1, 1 and 1, 2, 1
+    /// are one Cartesian point at each place, but the edges they make are two curves: at
+    /// v = ½ the first is `(1, ½, 0)` (`(0 + 2·1 + 2)/4`, `(0 + 2·1 + 0)/4`) and the second
+    /// `(1, ⅔, 0)` (`(0 + 2·2 + 2)/6`, `(0 + 2·2 + 0)/6`): no closure. The second row
+    /// scaled by λ = 2 as a homogeneous row (not bitwise equal) is one curve: closure. One
+    /// row is compared with itself: no closure. With `a_x = 5·10⁻³²⁴` (the least subnormal)
+    /// against `b_x = 0` and `b_w = 0.4`, `a_x b_w` rounds to 0 with its error, while the
+    /// exact product is not 0: no closure; with `a_x = 0` the rows are one up to λ = 0.4.
+    #[test]
+    fn the_net_closes_only_on_one_homogeneous_row_up_to_a_factor() {
+        let h = |[x, y, z]: [f64; 3], w: f64| [x * w, y * w, z * w, w];
+        let (p0, p1, p2) = ([0.0, 0.0, 0.0], [1.0, 1.0, 0.0], [2.0, 0.0, 0.0]);
+        let first = vec![h(p0, 1.0), h(p1, 1.0), h(p2, 1.0)];
+        let weighted = vec![h(p0, 1.0), h(p1, 2.0), h(p2, 1.0)];
+        assert!(!closes_exactly(
+            &net_of(&[first.clone(), weighted.clone()]),
+            true
+        ));
+        // (the same rows read in v: across each row the first and last points differ)
+        assert!(!closes_exactly(
+            &net_of(&[first.clone(), weighted.clone()]),
+            false
+        ));
+        let scaled: Vec<[f64; 4]> = weighted.iter().map(|p| p.map(|c| 2.0 * c)).collect();
+        assert!(closes_exactly(&net_of(&[weighted.clone(), scaled]), true));
+        assert!(closes_exactly(
+            &net_of(&[first.clone(), first.clone()]),
+            true
+        ));
+        assert!(!closes_exactly(&net_of(std::slice::from_ref(&first)), true));
+        // (a start knot of multiplicity the degree plus two: the first row's basis function
+        // vanishes, the edge there is the second row, and no closure is shown on the first)
+        let mut extra = net_of(&[first.clone(), weighted.clone(), first.clone()]);
+        extra.u = vec![0.0, 0.0, 0.0, 1.0, 1.0];
+        extra.p = 1;
+        assert!(!closes_exactly(&extra, true));
+        let mut clamped = extra.clone();
+        clamped.u = vec![0.0, 0.0, 0.5, 1.0, 1.0];
+        assert!(closes_exactly(&clamped, true));
+        let tiny = 5.0e-324;
+        let under = |ax: f64| {
+            net_of(&[
+                vec![[ax, 0.0, 0.0, 1.0], [1.0, 0.0, 0.0, 1.0]],
+                vec![[0.0, 0.0, 0.0, 0.4], [0.4, 0.0, 0.0, 0.4]],
+            ])
+        };
+        assert_eq!(tiny * 0.4, 0.0);
+        assert!(!closes_exactly(&under(tiny), true));
+        assert!(closes_exactly(&under(0.0), true));
+        assert!(!equal_products(tiny, 0.4, 0.0, 1.0));
+        assert!(equal_products(0.0, 0.4, 0.0, 1.0));
+        assert!(equal_products(-0.0, 0.4, 0.0, 1.0));
+        assert!(!equal_products(f64::NAN, 1.0, f64::NAN, 1.0));
+        assert!(!equal_products(f64::INFINITY, 1.0, f64::INFINITY, 1.0));
     }
 }
