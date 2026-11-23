@@ -846,6 +846,11 @@ fn viewport_items(app: &SolveApp) -> Vec<Item> {
     // resolved to a sketch curve therefore replaces any face in the selection with that curve.
     // The menu then follows the pick.
     let solid = has(|s| matches!(s, Sel::Face { .. } | Sel::Edge { .. } | Sel::Vertex { .. } | Sel::Body { .. }));
+    // Faces, edges or bodies selected: the others of their kind can be selected instead (#18107).
+    if has(|s| matches!(s, Sel::Face { .. } | Sel::Edge { .. } | Sel::Body { .. })) {
+        v.push(cmd(app, "select.invert", "Invert Selection"));
+        v.push(Item::sep());
+    }
     if let Some(sketch) = sel_sketch(app).filter(|_| !solid) {
         v.extend(sketch_items(app, sketch));
     } else if has(|s| matches!(s, Sel::Face { .. })) {
@@ -2048,13 +2053,20 @@ pub fn run_item(app: &mut SolveApp, item: &Item, at: Pos2) {
         "ui.export" => {
             let body = bodies.first().map(String::as_str);
             let name = crate::export_name::offered(app, body, body.unwrap_or(&app.session.doc.name));
-            app.pick_save_command(
-                &format!("{name}.step"),
-                &["step", "stp", "igs", "stl", "3mf", "obj", "glb", "usd", "usda", "usdc", "usdz"],
-                "file.export",
-                // `hierarchy` is read for GLB only.
-                json!({"bodies": bodies, "hierarchy": app.preferences.glb_export_hierarchy}),
-            );
+            // cadmpeg's Rhino writer needs a temporary file, which the browser has not.
+            let formats: Vec<&str> = ["step", "stp", "igs", "stl", "3mf", "obj", "glb", "usd", "usda", "usdc", "usdz", "3dm"]
+                .into_iter()
+                .filter(|f| *f != "3dm" || !cfg!(target_arch = "wasm32"))
+                .collect();
+            let bodies = bodies.clone();
+            app.pick_save(&format!("{name}.step"), &formats, move |app, path| {
+                let Some(path) = path else { return };
+                let mut params = json!({"bodies": bodies, "path": path, "hierarchy": app.preferences.glb_export_hierarchy});
+                crate::toolbar::with_export_writer(app, &path, &mut params);
+                if let Ok(result) = app.run("file.export", params) {
+                    crate::toolbar::exported(app, &path, &result);
+                }
+            });
         }
         "ui.findBrowser" => {
             if let Some(b) = p.get("body").and_then(Value::as_str) {
@@ -3666,6 +3678,24 @@ mod tests {
         let menu = items(&h.app, &Target::Viewport);
         assert!(menu.iter().any(|i| i.id == "sketch.toggle_driven"));
         assert!(!menu.iter().any(|i| i.id == "sketch.toggle_diameter"), "a length is no radius");
+    }
+
+    /// #18107: with faces, edges or bodies selected, the view's menu offers Invert Selection, and
+    /// running it selects the other faces of the body; with nothing selected it is not offered.
+    #[test]
+    fn the_view_menu_inverts_a_face_selection() {
+        let mut h = crate::scenario::Harness::new();
+        h.app.run("solid.box", json!({"length":10,"width":10,"height":10,"body_name":"A"})).unwrap();
+        h.app.session.selection.clear();
+        assert!(!items(&h.app, &Target::Viewport).iter().any(|i| i.id == "select.invert"), "nothing to invert");
+        h.app.run("select.set", json!({"items":[{"type":"face","body":"A","index":0}]})).unwrap();
+        let menu = items(&h.app, &Target::Viewport);
+        let item = menu.iter().find(|i| i.id == "select.invert").expect("faces offer Invert Selection");
+        assert!(item.enabled);
+        run_item(&mut h.app, item, egui::pos2(0.0, 0.0));
+        let faces: Vec<usize> =
+            h.app.session.selection.iter().filter_map(|s| if let Sel::Face { index, .. } = s { Some(*index) } else { None }).collect();
+        assert_eq!(faces, [1, 2, 3, 4, 5]);
     }
 
     /// #20660: a point's distance from a construction line offers Toggle Radius / Diameter; the
