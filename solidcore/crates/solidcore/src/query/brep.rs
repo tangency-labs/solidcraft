@@ -92,6 +92,7 @@ pub use ray::{
 
 use core::cell::OnceCell;
 
+use crate::error::query::QueryFailure;
 use crate::error::{native_failure, EntityRef, Result, SolidError};
 use crate::geom::attribute::{Attribute, AttributeValue, Behavior};
 use crate::geom::extent3d::Extent3d;
@@ -911,7 +912,7 @@ impl<'a> BrepQuery<'a> {
             if let Some(sol) = solutions.get(0) {
                 // Just grab the first one -- we asked for Single.
                 let object = sol.objects[0].ok_or_else(|| {
-                    SolidError::query_missing(OP_CLASSIFY, "the object the ray solution hit")
+                    crate::error::Failure::new(OP_CLASSIFY, QueryFailure::Defect { why: "the B-rep point solve fills the first object slot of each solution it returns" }).with_status(crate::error::SM_ERR_NULL_POINTER).into_error()
                 })?;
                 pc.load_from_intersection(
                     point_zone_tol_3d,
@@ -979,9 +980,8 @@ impl<'a> BrepQuery<'a> {
             }
         }
 
-        let region = region.ok_or_else(|| {
-            SolidError::query_failed(OP_CLASSIFY, "no ray fired from the point found its region")
-        })?;
+        let region =
+            region.ok_or_else(|| SolidError::query(OP_CLASSIFY, QueryFailure::RegionNotFound))?;
 
         // load output
         pc.set_class_object(PointClassType::Region, Some(EntityRef::Region(region)));

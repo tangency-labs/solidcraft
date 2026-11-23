@@ -1042,6 +1042,38 @@ pub fn extent(
     reach: f64,
 ) -> Result<Option<[[f64; 2]; 2]>, EvalError> {
     let mut refused = None;
+    // On a cylinder or cone the box depends on which loop is placed first: a hole across the
+    // seam, placed before the loop that goes round the axis, pulls the box a turn to the wrong
+    // side (a tie between two placements of a turn each). The loops are taken widest first, so
+    // the order a file lists a face's bounds in does not change the box.
+    if loops.len() > 1 && matches!(label, Surface::Cylinder { .. } | Surface::Cone { .. }) {
+        let widths: Vec<f64> = loops
+            .iter()
+            .map(|l| {
+                // The raw box: a circle round the axis at one height has no height but a turn's width.
+                let mut ignored = None;
+                extent_raw(label, std::slice::from_ref(l), reach, &mut ignored)
+                    .map_or(0.0, |(lo, hi)| (hi[0] - lo[0]).max(0.0))
+            })
+            .collect();
+        let mut order: Vec<usize> = (0..loops.len()).collect();
+        order.sort_by(|a, b| {
+            let (wa, wb) = (
+                widths.get(*a).copied().unwrap_or(0.0),
+                widths.get(*b).copied().unwrap_or(0.0),
+            );
+            wb.total_cmp(&wa)
+        });
+        let ordered: Vec<Vec<(&Curve, [f64; 2], bool)>> = order
+            .iter()
+            .filter_map(|i| loops.get(*i).cloned())
+            .collect();
+        let out = extent_in(label, &ordered, reach, &mut refused);
+        return match refused {
+            Some(e) => Err(e),
+            None => Ok(out),
+        };
+    }
     let out = extent_in(label, loops, reach, &mut refused);
     match refused {
         Some(e) => Err(e),
@@ -1056,6 +1088,18 @@ fn extent_in(
     reach: f64,
     refused: &mut Option<EvalError>,
 ) -> Option<[[f64; 2]; 2]> {
+    let (lo, hi) = extent_raw(label, loops, reach, refused)?;
+    (lo[0] < hi[0] && lo[1] < hi[1]).then_some([[lo[0], hi[0]], [lo[1], hi[1]]])
+}
+
+/// [`extent_in`]'s box as corners `(lo, hi)`, before it is checked to have room in both
+/// directions: a full circle at one height is a turn wide and no height.
+fn extent_raw(
+    label: &Surface,
+    loops: &[Vec<(&Curve, [f64; 2], bool)>],
+    reach: f64,
+    refused: &mut Option<EvalError>,
+) -> Option<([f64; 2], [f64; 2])> {
     let eval = SurfaceEval::new(label).ok()?;
     let period = eval.domain().period;
     let (mut lo, mut hi) = ([f64::INFINITY; 2], [f64::NEG_INFINITY; 2]);
@@ -1423,7 +1467,7 @@ fn extent_in(
             };
         }
     }
-    (lo[0] < hi[0] && lo[1] < hi[1]).then_some([[lo[0], hi[0]], [lo[1], hi[1]]])
+    Some((lo, hi))
 }
 
 /// The whole periods a loop's points after a pole are moved by: `a` the last point before it,

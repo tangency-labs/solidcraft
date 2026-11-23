@@ -231,3 +231,97 @@ fn the_reader_option_chooses_the_step_route_or_the_records() {
         let _ = std::fs::remove_dir_all(&dir);
     }
 }
+
+/// Two separate 10 × 20 × 30 mm boxes, the second 100 mm along x, as manifold solid B-reps
+/// (186) in an IGES file, as SolidCraft's IGES export writes them: two solids, 12000 mm³
+/// together, spanning 0..110 × 0..20 × 0..30.
+fn two_boxes_iges() -> Vec<u8> {
+    use solidcore_record::Vec3;
+    let a = crate::kernel::box_solid(Vec3::ZERO, Vec3::new(10.0, 20.0, 30.0)).unwrap();
+    let b = crate::kernel::box_solid(Vec3::new(100.0, 0.0, 0.0), Vec3::new(110.0, 20.0, 30.0)).unwrap();
+    let bodies = [
+        crate::kernel::ExportBody { name: "A".into(), body: &a, color: None },
+        crate::kernel::ExportBody { name: "B".into(), body: &b, color: None },
+    ];
+    crate::kernel::iges_export_bodies(&bodies, &Default::default()).unwrap().into_bytes()
+}
+
+/// `reader` chooses how an IGES file is read, as for a STEP file: by default (`solidcraft`)
+/// SolidCraft's IGES reader restates it as STEP and the Import feature keeps that STEP text;
+/// `cadmpeg` decodes it with cadmpeg's IGES decoder straight into records, with no STEP text.
+/// Both bring the two boxes, through `file.insert_step` and `doc.open`.
+#[test]
+fn the_reader_option_chooses_the_iges_reader() {
+    let (dir, path) = file("rdig", "boxes.igs", &two_boxes_iges());
+    for (reader, records) in [(None, false), (Some("solidcraft"), false), (Some("cadmpeg"), true)] {
+        for cmd in ["file.insert_step", "doc.open"] {
+            let mut s = Session::default();
+            let mut p = json!({"path": path});
+            if let Some(reader) = reader {
+                p["reader"] = json!(reader);
+            }
+            run(&mut s, cmd, p);
+            let import = s.doc.features.iter().find_map(|f| match &f.kind {
+                crate::doc::FeatureKind::Import { step, records, .. } => Some((step.is_empty(), records.is_some())),
+                _ => None,
+            });
+            assert_eq!(import, Some((records, records)), "{cmd} reader={reader:?}");
+            assert_eq!(s.model.state().bodies.len(), 2, "{cmd} reader={reader:?}");
+            assert!((volume(&mut s) - 12000.0).abs() < 1e-3, "{cmd} reader={reader:?}");
+            let (lo, hi) = extent(&s);
+            assert!(near(lo, [0.0, 0.0, 0.0]) && near(hi, [110.0, 20.0, 30.0]), "{cmd} reader={reader:?}: {lo:?} {hi:?}");
+        }
+    }
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// The program a STEP or IGES file names is read the same with either reader, so the window makes
+/// the same stand-up offer: the reply's `system`, and `exporter` and `exporter_up`, which say a
+/// SolidWorks file has Y up and SolidCraft's own Z up (another program says nothing). STEP: the
+/// FILE_NAME preprocessor version and originating system, or FILE_DESCRIPTION, written here; IGES:
+/// the global section's native system ID (field 5), written over SolidCraft's at the same width.
+#[test]
+fn either_reader_names_the_program_and_its_up_axis() {
+    let dir = std::env::temp_dir().join(format!("solidcraft-native-cad-producer-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let step = dir.join("box.step");
+    let mut source = Session::default();
+    run(&mut source, "solid.box", json!({"length": 10, "width": 40, "height": 5}));
+    run(&mut source, "file.export", json!({"path": step.to_string_lossy()}));
+    let text = std::fs::read_to_string(&step).unwrap();
+    let (named, described) = ("'SolidCraft','SolidCraft'", "FILE_DESCRIPTION((");
+    assert!(text.contains(named) && text.contains(described), "{text}");
+    let iges = String::from_utf8(two_boxes_iges()).unwrap();
+    let native = "10HSolidCraft,19H";
+    assert!(iges.contains(native), "{iges}");
+    let mut files = Vec::new();
+    for (preprocessor, system, description, want) in [
+        ("SolidCraft", "SolidCraft", "", ("SolidCraft", Some(("z", "SolidCraft")))),
+        ("SwSTEP 2.0", "SolidWorks 2021", "", ("SolidWorks 2021", Some(("y", "SolidWorks")))),
+        ("Example CAD", "Example CAD", "SolidWorks export", ("Example CAD", Some(("y", "SolidWorks")))),
+        ("Example CAD", "Example CAD", "", ("Example CAD", None)),
+    ] {
+        let header = text.replacen(named, &format!("'{preprocessor}','{system}'"), 1);
+        let header = if description.is_empty() { header } else { header.replacen(described, &format!("{described}'{description}',"), 1) };
+        files.push(("step", header, want));
+    }
+    for (system, want) in [
+        ("SolidCraft", ("SolidCraft", Some(("z", "SolidCraft")))),
+        ("SolidWorks", ("SolidWorks", Some(("y", "SolidWorks")))),
+        ("ExampleCAD", ("ExampleCAD", None)),
+    ] {
+        files.push(("igs", iges.replacen(native, &format!("10H{system},19H"), 1), want));
+    }
+    for (k, (ext, contents, (system, up))) in files.into_iter().enumerate() {
+        let path = dir.join(format!("part{k}.{ext}"));
+        std::fs::write(&path, contents).unwrap();
+        for reader in ["solidcraft", "cadmpeg"] {
+            for cmd in ["file.insert_step", "doc.open"] {
+                let r = run(&mut Session::default(), cmd, json!({"path": path.to_string_lossy(), "reader": reader}));
+                let got = r["exporter_up"].as_str().zip(r["exporter"].as_str());
+                assert_eq!((r["system"].as_str(), got), (Some(system), up), "part{k}.{ext} {cmd} reader={reader}: {r}");
+            }
+        }
+    }
+    let _ = std::fs::remove_dir_all(&dir);
+}

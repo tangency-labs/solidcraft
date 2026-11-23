@@ -74,14 +74,32 @@ use solidcore_record::Vec3;
 use solidcraft_doc::drawing::Owner;
 use solidcraft_doc::{Document, Model, ModelState};
 
+pub use cmd::Addition;
+pub use cmd::CommandInfo;
+pub use cmd::CommandSpec;
+pub use cmd::FromSelection;
+pub use cmd::LinkProblem;
+pub use cmd::LinkState;
+pub use cmd::OpenSteps;
+pub use cmd::addition;
+pub use cmd::auto_operation;
+pub use cmd::command_specs;
+pub use cmd::dimension_roles;
 pub use cmd::drawing_export::print_pdf;
-pub use cmd::settings::{MAX_PROFILE_NAME, profile_name};
+pub use cmd::extrude_reach;
+pub use cmd::find_command;
+pub use cmd::normalize_command_id;
+pub use cmd::resolve_design_links;
+pub use cmd::settings::MAX_PROFILE_NAME;
+pub use cmd::settings::profile_name;
+pub use cmd::shown_scope;
 pub use cmd::sketch_selection;
-pub use cmd::{
-    Addition, CommandInfo, CommandSpec, FromSelection, LinkProblem, LinkState, OpenSteps, addition, auto_operation, command_specs, dimension_roles,
-    extrude_reach, find_command, normalize_command_id, resolve_design_links, shown_scope, standard_view, use_import_cache_dir,
-};
-pub use edit_start::{EditStart, RefreshedSketchModel, SketchDomain, SketchFinishEvent};
+pub use cmd::standard_view;
+pub use cmd::use_import_cache_dir;
+pub use edit_start::EditStart;
+pub use edit_start::RefreshedSketchModel;
+pub use edit_start::SketchDomain;
+pub use edit_start::SketchFinishEvent;
 pub use solidcraft_doc as doc;
 pub use solidcraft_doc::Visibility;
 pub use solidcraft_geom as geom;
@@ -91,7 +109,8 @@ pub use solidcraft_kernel as kernel;
 pub use solidcraft_profile as profile;
 pub use solidcraft_render as render;
 pub use solidcraft_sketch as sketch;
-pub use view_context::{ViewContext, ViewDescriptor};
+pub use view_context::ViewContext;
+pub use view_context::ViewDescriptor;
 
 /// Longest accepted request line on the JSON-lines channels (MCP over stdio and the control
 /// server over loopback), so both refuse runaway input at the same size.
@@ -1475,7 +1494,13 @@ impl Session {
         let single_surface_analysis = self.single_surface_analysis;
         let disabled_plugins = self.disabled_plugins.clone();
         let plugin_limits = self.plugin_limits;
-        let plugin_state = self.plugin_state.clone();
+        let mut plugin_state = self.plugin_state.clone();
+        for package in plugin_state.panels.values_mut() {
+            for data in package.data.values_mut() {
+                *data = Default::default();
+            }
+        }
+        plugin_state.ui_caller = None;
         let param_check = self.param_check;
         let easyprint_upload = self.easyprint_upload.take();
         let keep_print_faces = self.keep_print_faces;
@@ -2772,6 +2797,23 @@ impl Session {
             return self.execute("plugin.run", &call);
         }
         let spec = find_command(id).ok_or_else(|| EngineError::UnknownCommand(id.to_string()))?;
+        self.execute_spec(spec, params)
+    }
+
+    fn execute_spec(&mut self, spec: &cmd::CommandSpec, params: &Value) -> Result<Value> {
+        // Plugin data is transient view state, so it stays out of undo snapshots.
+        // Restore it for every command error, including failures after guest publication.
+        let plugin_panels_before = (spec.id == "plugin.run").then(|| self.plugin_state.panels.clone());
+        let result = self.execute_spec_inner(spec, params);
+        if result.is_err()
+            && let Some(panels) = plugin_panels_before
+        {
+            self.plugin_state.panels = panels;
+        }
+        result
+    }
+
+    fn execute_spec_inner(&mut self, spec: &cmd::CommandSpec, params: &Value) -> Result<Value> {
         if panels::commands::is_command(spec.id) {
             // Layout is application state. Even a missing capability must not
             // clear live links, map picks, snapshot, evaluate or refresh a design.
@@ -3543,6 +3585,11 @@ impl Session {
                 }
             }
         }
+        // A model worker that did not update panels must keep newer view state on
+        // the window (including data merged into a frame or a panel the user closed).
+        if prepared.computed.plugin_state.panels != prepared.source.plugin_state.panels {
+            self.plugin_state.panels.clone_from(&prepared.computed.plugin_state.panels);
+        }
         // Disk checks and no-op source reads may finish after a newer live observation.
         // Merge only entries whose source observation is still current in the live session.
         let observations: Vec<_> = prepared
@@ -3805,6 +3852,17 @@ impl Session {
             self.echo(message);
         }
         Ok(())
+    }
+
+    /// Read a primary origin for the Joint dialog without modifying the session.
+    pub fn joint_origin_for_alignment(&self, params: &serde_json::Value) -> Result<doc::joints::JointOrigin> {
+        cmd::joints::origin_param(self, Some(params), "joint.create")
+    }
+
+    /// Validate a secondary selection through the command resolver without authoring it.
+    pub fn joint_alignment_frame(&self, origin: doc::joints::JointOrigin, alignment: &serde_json::Value) -> Result<doc::Mat> {
+        let origin = cmd::joints::alignment_param(self, origin, Some(alignment), "joint.create")?;
+        doc::joints::resolve_origin(&self.doc, &self.model.state(), &origin).map_err(Into::into)
     }
 
     /// Live preview: run `commands` (id, parameters) on a scratch copy and return the model
