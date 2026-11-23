@@ -3612,6 +3612,33 @@ mod tests {
         );
     }
 
+    /// The G1-knot loop's catch of `find_fillet_tsect_pnt` is not an empty search: it keeps
+    /// `SM_ERR`, chains the caught error, reads as neither defect nor refusal on its own
+    /// (so an invalid-input cause is not reported as `NotFound`), and a defect cause makes
+    /// it a defect.
+    #[test]
+    fn cross_section_point_failed_passes_its_cause_on() {
+        let wrap = |inner: SolidError| {
+            Failure::new(
+                "blend::op",
+                BlendFailure::Solver(SolverFailure::CrossSectionPointFailed { t: 0.5 }),
+            )
+            .caused_by(inner)
+            .into_error()
+        };
+        let inner = SolidError::blend_solver("blend::inner", SolverFailure::EdgeUseWithoutMate);
+        assert_eq!(inner.kind(), ErrorKind::InvalidInput);
+        let e = wrap(inner.clone());
+        assert_eq!(e.sm_status(), Some(SM_ERR));
+        assert_eq!(e.kind(), ErrorKind::Failed);
+        assert_eq!(e.cause(), Some(&inner));
+        assert!(!e.is_defect() && !e.is_refusal());
+        let inner = SolidError::blend_null_defect("blend::inner", "why");
+        let e = wrap(inner.clone());
+        assert_eq!(e.sm_status(), Some(SM_ERR));
+        assert!(e.is_defect() && inner.is_defect());
+    }
+
     /// The causes (every enum of this module and of `error/blend/`) and every match on their
     /// variants (but for one with a `_` arm) are kept in name order, one arm per pattern, so changes that each add a cause or its arms touch
     /// different lines. Names compare as bytes.
