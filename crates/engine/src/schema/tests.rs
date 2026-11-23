@@ -1334,7 +1334,10 @@ fn sketch_edit_contracts_validate_markers_before_changing_the_session() {
 #[test]
 fn step_and_component_link_schema_keys_and_replies() {
     use super::{component_link::*, insert_step::InsertStepParams};
-    assert_keys(input_schema_for::<InsertStepParams>(), &["envelope", "flatten", "folder", "history", "link", "matrix", "name", "names", "path", "reader", "tolerance", "up"]);
+    assert_keys(
+        input_schema_for::<InsertStepParams>(),
+        &["envelope", "flatten", "folder", "history", "link", "matrix", "name", "names", "path", "reader", "tolerance", "up"],
+    );
     assert_keys(input_schema_for::<UpdateLinksParams>(), &["component", "components"]);
     assert_keys(input_schema_for::<BreakLinkParams>(), &["component"]);
     assert_keys(input_schema_for::<LinksParams>(), &[]);
