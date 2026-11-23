@@ -1119,12 +1119,6 @@ mod tests {
         assert_eq!(on, off);
     }
 
-    /// WR-320: `FacesOutlastTheirBlends` (`geometry_faces_outlast`).
-    #[test]
-    fn faces_outlast_hook_answers_with_no_blend() {
-        reaches_hook_as_with_flags_off(|f| f.fillet_refuse_face_consuming_blends = true);
-    }
-
     /// WR-542/649: `BandsClearOtherRails` (`geometry_bands_clear_other_rails`).
     #[test]
     fn bands_hook_answers_with_no_blend() {

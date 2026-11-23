@@ -848,6 +848,13 @@ impl Cone {
                 CircleCircle::Crossing(p, q) => vec![p, q],
                 CircleCircle::Coincident => return Ok(true),
             };
+            // Axes within EFF_ZERO_SQRT are parallel here, but a move along `axis` leaves `other`
+            // by that angle times the move, past `zero` (#15727): test on `other`'s generator.
+            let other_along = if axis.dot(other_axis) < 0.0 {
+                -other_axis
+            } else {
+                other_axis
+            };
             for point in points {
                 let line_point = point + (min - param) * axis;
                 // Upstream tests the bottom end of the line, which lies outside a face
@@ -856,9 +863,10 @@ impl Cone {
                 // WR-259). The middle of the clipped line lies within both faces' axial
                 // ranges (to the tolerance); the inversions below decide the rest.
                 let test_point = line_point + 0.5 * (max - min) * axis;
+                let other_test_point = point + ((min - param) + 0.5 * (max - min)) * other_along;
                 let zero = EFF_ZERO * (1.0 + line_point.max_dimension());
                 let inv = intersection_inversion(self, k, test_point, zero)?;
-                let other_inv = intersection_inversion(other, k, test_point, zero)?;
+                let other_inv = intersection_inversion(other, k, other_test_point, zero)?;
                 let (Some(inv), Some(other_inv)) = (inv, other_inv) else {
                     continue;
                 };
@@ -1359,6 +1367,35 @@ mod tests {
         let k = Kernel::default();
         let a = cylinder(&k, Vec3::new(6.0, 0.0, -1.0), false, false, false);
         let b = cylinder(&k, Vec3::new(3.0, 5.196, -1.0), false, false, false);
+        let da = axial_domain(&k, &a, 1.0, 11.0);
+        let db = b.rev().base().natural_uv_domain();
+        for (a, da, b, db) in [(&a, da, &b, db), (&b, db, &a, da)] {
+            let (more, out) = a.intersect_with_cone(&k, &da, b, &db, Some(1e-7)).unwrap();
+            assert!(!more);
+            assert_axial_lines(&out, [a, b], 2, 0.0, 10.0);
+            assert_eq!(out.curve_types, vec![TsectCurveType::Crossing; 2]);
+        }
+    }
+
+    /// tangency-labs/solidcraft#15727: with one axis 5e-12 rad off, the holes of the issue711 test
+    /// still cross in both lines, in either order; both were dropped and the cut came back empty.
+    #[test]
+    fn cylinders_a_hair_off_parallel_keep_both_crossing_lines() {
+        let k = Kernel::default();
+        let a = cylinder(&k, Vec3::new(6.0, 0.0, -1.0), false, false, false);
+        let mut b = Cone::new_cylinder_bounded(
+            Vec3::new(3.0, 5.196, -1.0),
+            Vec3::new(1.0, 0.0, -5e-12),
+            Vec3::Y,
+            5.0,
+            0.0,
+            360.0,
+            12.0,
+            false,
+            false,
+            false,
+        );
+        b.make_nurb(&k).unwrap();
         let da = axial_domain(&k, &a, 1.0, 11.0);
         let db = b.rev().base().natural_uv_domain();
         for (a, da, b, db) in [(&a, da, &b, db), (&b, db, &a, da)] {

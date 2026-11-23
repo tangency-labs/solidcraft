@@ -44,7 +44,7 @@ const BEND_TABLE_CONTRACT: TypedContract<BendTableParams> = TypedContract::new()
 const EXPORT_DXF_CONTRACT: TypedContract<ExportDxfParams> = TypedContract::new();
 
 pub static COMMANDS: &[CommandSpec] = &[
-    CommandSpec::new("sheet.flange", "Flange", crate::checked!("sheet.flange", flange))
+    CommandSpec::new("sheet.flange", "Flange", crate::checked!("sheet.flange", flange)).begins_edit()
         .at("SHEET METAL", "CREATE")
         .icon("flange")
         .contract(&FLANGE_CONTRACT)
@@ -66,7 +66,7 @@ pub static COMMANDS: &[CommandSpec] = &[
          Thickness, K-factor and bend radius come from the rule (sheet.manage_rules); passing them here is refused, \
          and so is the corner relief on a base or contour flange",
     ),
-    CommandSpec::new("sheet.path_flange", "Path Flange", crate::checked!("sheet.path_flange", path_flange))
+    CommandSpec::new("sheet.path_flange", "Path Flange", crate::checked!("sheet.path_flange", path_flange)).begins_edit()
         .at("SHEET METAL", "CREATE")
         .icon("path_flange")
         .contract(&PATH_FLANGE_CONTRACT)
@@ -76,7 +76,7 @@ pub static COMMANDS: &[CommandSpec] = &[
          that edge, from the edge out (each line one flange as long as the line, to the outer face from the virtual sharp; each \
          corner one bend, turning the way the lines turn); radius? (default: rule); body?. One feature, one body",
     ),
-    CommandSpec::new("sheet.perforate", "Perforate", crate::checked!("sheet.perforate", perforate))
+    CommandSpec::new("sheet.perforate", "Perforate", crate::checked!("sheet.perforate", perforate)).begins_edit()
         .at("SHEET METAL", "CREATE")
         .icon("perforate")
         .contract(&PERFORATE_CONTRACT)
@@ -84,13 +84,13 @@ pub static COMMANDS: &[CommandSpec] = &[
         .params(
         "diameter, pitch: expr; margin?: expr (clear of edges, cut-outs, bends and the outline; default: the diameter); pattern?: staggered (60°, default) | square; body?; sketch? + profiles? (the outline: closed profiles of a sketch on a face of the sheet; holes only inside them, out of their inner loops) - a perforation field over the whole flat sheet or inside the outline: holes in the flat pattern (perforations), the DXF (layer PERFORATION) and the measured volume, not cut into the B-rep (#732)",
     ),
-    CommandSpec::new("sheet.hem", "Hem", crate::checked!("sheet.hem", hem))
+    CommandSpec::new("sheet.hem", "Hem", crate::checked!("sheet.hem", hem)).begins_edit()
         .at("SHEET METAL", "CREATE")
         .icon("hem")
         .contract(&HEM_CONTRACT)
         .output(output_schema_for::<FeatureResult>)
         .params("edges: [[x,y,z] on sheet edges]; length (to the outer face); gap? (between the leg and the face it folds over, twice the bend's inner radius; default: rule); flip?; body?"),
-    CommandSpec::new("sheet.fold", "Fold", crate::checked!("sheet.fold", fold))
+    CommandSpec::new("sheet.fold", "Fold", crate::checked!("sheet.fold", fold)).begins_edit()
         .at("SHEET METAL", "CREATE")
         .icon("fold")
         .contract(&FOLD_CONTRACT)
@@ -101,19 +101,19 @@ pub static COMMANDS: &[CommandSpec] = &[
          stays?: left|right (the side of the line as drawn that stays, seen from the sheet's surface) or fixed?: [x,y,z] on the sheet, on that side \
          (default: the side with more of the sheet joined to it; decided once, as the fold is made, and kept); flip? (fold the other way); body?",
     ),
-    CommandSpec::new("sheet.unfold", "Unfold", crate::checked!("sheet.unfold", unfold))
+    CommandSpec::new("sheet.unfold", "Unfold", crate::checked!("sheet.unfold", unfold)).begins_edit()
         .at("SHEET METAL", "MODIFY")
         .icon("unfold")
         .contract(&UNFOLD_CONTRACT)
         .output(output_schema_for::<FeatureResult>)
         .params("body? (default: the last sheet body) — all bends"),
-    CommandSpec::new("sheet.refold", "Refold", crate::checked!("sheet.refold", refold))
+    CommandSpec::new("sheet.refold", "Refold", crate::checked!("sheet.refold", refold)).begins_edit()
         .at("SHEET METAL", "MODIFY")
         .icon("refold")
         .contract(&UNFOLD_CONTRACT)
         .output(output_schema_for::<FeatureResult>)
         .params("body? (default: the last unfolded sheet)"),
-    CommandSpec::new("sheet.convert", "Convert to Sheet Metal", crate::checked!("sheet.convert", convert))
+    CommandSpec::new("sheet.convert", "Convert to Sheet Metal", crate::checked!("sheet.convert", convert)).begins_edit()
         .at("SHEET METAL", "CREATE")
         .icon("convert_sheet")
         .contract(&CONVERT_CONTRACT)
@@ -131,7 +131,7 @@ pub static COMMANDS: &[CommandSpec] = &[
              them; direction?: inside (default) | outside (the side of the faces the material lies on). The body becomes the \
              folded sheet, and sheet.flat_pattern shows its flat",
         ),
-    CommandSpec::new("sheet.recognize", "Recognize Sheet Metal", crate::checked!("sheet.recognize", recognize))
+    CommandSpec::new("sheet.recognize", "Recognize Sheet Metal", crate::checked!("sheet.recognize", recognize)).begins_edit()
         .at("SHEET METAL", "CREATE")
         .icon("convert_sheet")
         .contract(&RECOGNIZE_CONTRACT)

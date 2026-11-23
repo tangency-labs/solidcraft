@@ -389,6 +389,7 @@ unfold	false
 update	false
 warning	false
 web	false
+window_other	false
 ws_design	false
 ws_drawing	false
 ws_render	false
