@@ -17,6 +17,7 @@
 //!   application grouping the edges of a curvature-continuous blend.
 //! - [`tangent_chain`]: the edges a blend of some edges runs on into tangentially, on the
 //!   kernel's measures.
+//! - [`delete_fillet_chain`]: a set of adjacent fillet faces removed together, on a copy.
 //!
 //! The kernel's session is driven as the C API's `round_edges` drove SMLib's executive:
 //! the turn, parameters, the set-back vertices, the corners (setbacks set, a chamfer's
@@ -81,6 +82,89 @@ use crate::{Error, FitKind, Result, RoomReason, Unblendable};
 
 mod room;
 pub use room::{band_room, BandRoom, EndRoom, Room};
+
+/// A fillet chain removed from a copy, with the input record entities that survive the edit.
+#[derive(Debug)]
+pub struct RemovedFilletChain {
+    /// The rebuilt body's record, in canonical order.
+    pub record: solidcore_record::brep::Brep,
+    /// Each result face's input record index. Removing a chain never creates a face.
+    pub face_sources: Vec<usize>,
+    /// Each result edge's input record index when its kernel identity has one unambiguous source.
+    pub edge_sources: Vec<Option<usize>>,
+}
+
+/// Remove the selected chain as one edit. `faces` names faces in the input record's `order`.
+/// An empty or single-index selection gives `None` before index validation. A larger
+/// selection gives `None` if the kernel does not recognize a fillet chain. The edit uses a copy.
+///
+/// # Errors
+/// [`Error::Argument`] for an invalid or repeated index in a selection of two or more.
+/// Copying, removal, the solid check and record conversion can also return errors.
+pub fn delete_fillet_chain(
+    body: &Body,
+    order: &crate::Order,
+    faces: &[usize],
+) -> Result<Option<RemovedFilletChain>> {
+    if faces.len() < 2 {
+        return Ok(None);
+    }
+    let (copy, input) = body.copy_with_order(order)?;
+    let selected = each_once(&input.faces, faces)?;
+    let mut brep = copy.into_inner();
+    let made = crate::session::run_on("delete_fillet_chain", &[("brep", body)], |k| {
+        let expect = Expect::under(k, &mut brep, Proof::default(), Contract::Closed)?;
+        let editing = brep.editing_enabled();
+        brep.set_editing_enabled(true);
+        let removed =
+            solidcore::blend::fillet_removal::delete_fillet_faces(k, &mut brep, &selected, None);
+        brep.set_editing_enabled(editing);
+        match removed {
+            Ok(()) => Ok(finish_under(k, brep, expect, Contract::Closed)?.map(|(b, _)| Some(b))),
+            Err(e) if e.kind() == solidcore::error::ErrorKind::NotARemovableFillet => Ok(Ok(None)),
+            Err(e) => match failure(&e) {
+                Some(why) => Ok(Err(crate::session::noted(&e, why))),
+                None => Err(e),
+            },
+        }
+    })??;
+    let Some(made) = made else { return Ok(None) };
+    let (record, output) = Body::new(made).to_record()?;
+    // Both orders describe the very same copy, before and after the edit. Only the selected
+    // faces may have gone; every remaining face must be one that was there before.
+    let mut originals = input.record_faces();
+    for face in selected {
+        originals.remove(&face);
+    }
+    let face_sources = output
+        .faces
+        .iter()
+        .map(|f| originals.remove(f).map(|i| i as usize))
+        .collect::<Option<Vec<_>>>()
+        .ok_or(Error::Exception)?;
+    if !originals.is_empty() {
+        return Err(Error::Exception);
+    }
+    // More than one record edge can represent one kernel edge where solids touch. Its
+    // identity alone cannot tell which piece survived in the output record.
+    let mut edges = HashMap::new();
+    for (i, edge) in input.edges.iter().enumerate() {
+        edges
+            .entry(*edge)
+            .and_modify(|source| *source = None)
+            .or_insert(Some(i));
+    }
+    let edge_sources = output
+        .edges
+        .iter()
+        .map(|e| edges.get(e).copied().flatten())
+        .collect();
+    Ok(Some(RemovedFilletChain {
+        record,
+        face_sources,
+        edge_sources,
+    }))
+}
 
 /// The largest size, setback or radius the operations take.
 pub const MAX_SIZE: f64 = 1e6;

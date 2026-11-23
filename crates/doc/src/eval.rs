@@ -741,9 +741,9 @@ fn fillet_fitted(
         // of #4282 (a cube with a hole through each axis, a 2 mm round of every edge) those ten
         // blends of the forty-one edges took 77 s, fifteen times the blend that failed, and they
         // found nothing: the round fails at any radius there. The refusal is reported as the
-        // kernel stated it.
+        // kernel stated it, less a size it names that no round can have ([`without_unusable_fit`]).
         Err(kernel::KernelError::TooLarge(why)) if fit == crate::FilletFit::Exact && kernel::named_fit(&why).is_none() => {
-            Err(kernel::KernelError::TooLarge(why))
+            Err(kernel::KernelError::TooLarge(without_unusable_fit(&why)))
         }
         Err(kernel::KernelError::TooLarge(why)) if fit == crate::FilletFit::Exact => Err({
             let hint = kernel::named_fit(&why);
@@ -878,7 +878,7 @@ fn with_largest_fit(
     search: impl FnOnce() -> std::result::Result<kernel::FitSearch, kernel::KernelError>,
 ) -> kernel::KernelError {
     if EVAL_VALIDATION.get() == kernel::Validation::Off {
-        return kernel::KernelError::TooLarge(why);
+        return kernel::KernelError::TooLarge(without_unusable_fit(&why));
     }
     match search() {
         Ok(kernel::FitSearch { found: Some((largest, _)), .. }) if kernel::names_largest_fit(&why) => {
@@ -901,6 +901,13 @@ fn with_largest_fit(
             kernel::KernelError::TooLarge(format!("{}; a smaller {size} fails otherwise: {e}", kernel::without_fit_note(&why)))
         }
     }
+}
+
+/// `why` without the largest size that fits it names when that size is not one a blend can
+/// have ([`kernel::named_fit`] takes none from it): solidcore can refuse a round as too large
+/// and name 0 mm as the largest that fits, which no round is. `why` itself otherwise.
+fn without_unusable_fit(why: &str) -> String {
+    if kernel::names_largest_fit(why) && kernel::named_fit(why).is_none() { kernel::without_fit_note(why) } else { why.to_owned() }
 }
 
 /// The warning of a fillet whose radius `asked` was reduced to `used` (per edge).
@@ -4945,6 +4952,20 @@ mod largest_fit_tests {
         let e = with_largest_fit(WHY.into(), "radius", || Err(kernel::KernelError::Failed("the corner".into()))).to_string();
         assert!(!e.contains("that fits is"), "{e}");
         assert!(e.contains("a smaller radius fails otherwise: "), "{e}");
+    }
+
+    /// A refusal naming 0 mm as the largest radius that fits names no size at all: the clause is
+    /// dropped, and the rest of the refusal is kept. A size a round can have stays.
+    #[test]
+    fn a_fit_of_zero_is_not_named() {
+        let why = "the fillet is larger than the faces beside its edges allow, at the edge at (0.099, 25.193, 20.000): \
+                   the rolling ball does not fit a face it rolls on; the largest radius that fits is 0 mm";
+        let e = without_unusable_fit(why);
+        assert!(!e.contains("that fits is"), "{e}");
+        assert!(e.ends_with("the rolling ball does not fit a face it rolls on"), "{e}");
+        assert_eq!(without_unusable_fit(WHY), WHY);
+        let plain = "the fillet is larger than the faces beside its edges allow";
+        assert_eq!(without_unusable_fit(plain), plain);
     }
 }
 

@@ -8,7 +8,8 @@
 //!   body another call holds on that body's own lock. A call that holds two bodies at once
 //!   locks them in one order ([`Body::lock_pair`]), so calls on the same bodies in other orders
 //!   never wait on each other for good. Every call starts from the state a fresh kernel has
-//!   ([`start_clean`]: its random draws from the default seed, no blend station remembered),
+//!   ([`start_clean`]: no blend station remembered; the kernel holds no position in a random
+//!   sequence, each sampling call draws from the start of the seed's),
 //!   so its result does not depend on the calls before it or on the kernel it is handed. At most
 //!   [`most_idle`] kernels wait between calls, however many once ran side by side. A kernel
 //!   holds no global state and a body's identities are valid only in the kernel that issued
@@ -50,7 +51,7 @@ use std::panic::{catch_unwind, resume_unwind, AssertUnwindSafe};
 use std::sync::{Arc, Mutex, OnceLock, PoisonError};
 
 use solidcore::blend::fillet_section::definition::StationMemo;
-use solidcore::kernel::{CancelToken, Kernel, KernelOptions, Rng, UpstreamFixes};
+use solidcore::kernel::{CancelToken, Kernel, KernelOptions, UpstreamFixes};
 use solidcore::topology::brep::p3::brep_copy;
 use solidcore::{Brep, SolidError};
 
@@ -228,13 +229,12 @@ fn take() -> Kernel {
 }
 
 /// A call starts from the state a fresh kernel has, whatever kernel it was handed and whatever
-/// ran on it before: its random draws start from the default seed, and the stations the blend
+/// ran on it before: it holds no position in a random sequence, and the stations the blend
 /// definitions solved last are forgotten. A call's result is then the same after any history
 /// and on any kernel of the pool, so calls side by side on several threads give what they give
 /// one after another. (The kernel's other caches never change a result, only its speed, and
 /// stay.)
 fn start_clean(k: &mut Kernel) {
-    k.rng = Rng::new(KernelOptions::default().seed);
     *k.blend_station_memo.borrow_mut() = StationMemo::default();
 }
 

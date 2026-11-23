@@ -56,11 +56,11 @@ fn key(namespace: u32, other: bool, kind: u64, index: u32) -> ObjectKey {
 }
 
 // Cache construction takes only &Kernel; preserve the caller's settings and
-// RNG state for that read-only work rather than evaluating under defaults.
+// seed for that read-only work rather than evaluating under defaults.
 fn cache_kernel(k: &Kernel, context: &Context) -> Kernel {
     Kernel {
         tolerances: k.tolerances,
-        rng: k.rng.clone(),
+        seed: k.seed,
         caches: crate::kernel::Caches {
             prove_lazy_trim_raise: k.caches.prove_lazy_trim_raise,
             ..crate::kernel::Caches::default()
