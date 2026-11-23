@@ -2389,13 +2389,15 @@ fn angle_pivot_point(app: &SolveApp, d: &Dialog) -> Option<Vec3> {
 }
 
 /// Plane at Angle: the handle that turns the plane about its axis (#17290). It stands on the
-/// edge of the square the preview draws, so the plane turns as the handle is dragged, and the
-/// angle box beside it follows; the box stays for typing an exact value.
+/// edge of the square the preview draws, so the plane turns as the handle is dragged. The angle
+/// box stays where it was, beside the plane, for typing an exact value.
 fn draw_angle_plane(app: &SolveApp, ui: &mut egui::Ui, painter: &egui::Painter, proj: &Proj, d: &mut Dialog, bs: Pos2, focus: bool) {
     let turn = angle_plane_turn(app, d);
     let Kind::AnglePlane { angle, .. } = &mut d.kind else { return };
     let before = angle.clone();
-    let mut box_at = bs + vec2(16.0, -30.0);
+    // The angle box stays where it has always been, beside the base anchor: the handle is
+    // added beside it, not in place of it (#17290).
+    let box_at = bs + vec2(16.0, -30.0);
     if let Some(turn) = turn {
         // The circle the handle rides, so the sweep the plane makes is seen.
         let points: Vec<Pos2> = (0..=48)
@@ -2407,7 +2409,7 @@ fn draw_angle_plane(app: &SolveApp, ui: &mut egui::Ui, painter: &egui::Painter, 
         if points.len() > 1 {
             painter.add(egui::Shape::line(points, Stroke::new(1.0, Tokens::get().origin_plane_edge.linear_multiply(0.35))));
         }
-        if let Some(end) = rotation_handle(
+        rotation_handle(
             ui,
             painter,
             proj,
@@ -2422,9 +2424,7 @@ fn draw_angle_plane(app: &SolveApp, ui: &mut egui::Ui, painter: &egui::Painter, 
             (-std::f64::consts::TAU, std::f64::consts::TAU),
             "angle_plane",
             angle,
-        ) {
-            box_at = end + vec2(14.0, -12.0);
-        }
+        );
     }
     let dragging = *angle != before;
     value_box(ui, "Angle", angle, box_at, focus || dragging, box_place(app, proj));

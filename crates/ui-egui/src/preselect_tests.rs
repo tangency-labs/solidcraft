@@ -3822,7 +3822,8 @@ fn plane_at_angle_drags_the_preview_handle() {
     }
     let planes = solidcraft_engine::view::construction_planes(&h.app.session);
     let plane = &planes.last().unwrap().2;
-    assert!(plane.normal().cross(-Vec3::Y).len() < 1e-6, "the plane stands turned: {plane:?}");
+    let normal = plane.normal();
+    assert!(normal.x.abs() < 1e-6 && (normal.y + 1.0).abs() < 1e-6 && normal.z.abs() < 1e-6, "the plane stands turned: {plane:?}");
 }
 
 /// #2474, #2494: every construct tool asks for what it needs. Started from the toolbar with
