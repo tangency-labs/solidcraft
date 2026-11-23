@@ -502,7 +502,7 @@ fn run_case(
         // Cases never read or overwrite the user's settings, including an environment override.
         let settings = work.join("settings");
         std::fs::create_dir_all(&settings).map_err(|e| format!("{}: {e}", settings.display()))?;
-        s.plugin_state.user_settings_dir = Some(settings);
+        s.plugin_state.user.user_settings_dir = Some(settings);
         let installed_path = installed.to_string_lossy().into_owned();
         let approval = s.execute("plugin.inspect", &json!({"path": installed_path})).map_err(|e| e.to_string())?["approval"]
             .as_str()
