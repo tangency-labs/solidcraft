@@ -553,7 +553,8 @@ fn set_edge_curve(brep: &mut Brep, e: EdgeId, curve: Option<Curve>) -> Result<()
 ///
 /// # Errors
 /// Those of the intersection (with no curve that leaves `far` against `along_n`,
-/// [`crate::error::blend::BlendFailure::StageFailed`]) and of the reversal.
+/// [`crate::error::blend::BlendFailure::SrfSrfHeadingNotFollowed`], an empty search) and of
+/// the reversal.
 pub(crate) fn turned_back_arc(
     k: &Kernel,
     ends: [Point3; 2],
@@ -1449,9 +1450,61 @@ impl FilletBrep {
             self.set_uv(mate, uv.uv_curve1)?;
             let g2 = g2.ok_or_else(|| missing(OP_CROSS))?;
             self.geom_mut(g2)?.add_side_fillet_edgeuse(mate);
+        } else if g2.is_none() {
+            self.rolled_piece_side_curve(k, mate, g1, start_fv, end_fv, resolve)?;
         }
 
         Ok(())
+    }
+
+    /// Not upstream (#15767): the side curve on a tangent roll-over's rolled piece of
+    /// the cross section that `SmFilletGeom::TopologySplit` put between it and the piece
+    /// after it. The split gives the section's mate use no fillet geometry (its
+    /// "Do NOT add this line" warning), so the step above never drops the section onto
+    /// the rolled piece, and that use reads its primary's UV curve, which lies on the
+    /// other piece's surface. The rolled piece is traced again on the faces it rolls
+    /// onto, so its surface is parametrised differently: its face then caps the section
+    /// with iso lines of its own domain instead of using the shared edge, and that cap
+    /// can run along the domain boundary away from the section (#20757). The section is
+    /// dropped onto the rolled piece's surface as the step above drops it onto `g2`'s.
+    fn rolled_piece_side_curve<'solver>(
+        &mut self,
+        k: &Kernel,
+        mate: EdgeuseId,
+        g1: Option<FilletGeomId>,
+        start_fv: VertexId,
+        end_fv: VertexId,
+        resolve: &impl Fn(FilletSolverId) -> Result<&'solver FilletSolver>,
+    ) -> Result<()> {
+        let rolled = self.geoms().iter().enumerate().find_map(|(i, g)| {
+            (g.fillet_geom_type() == FilletGeomType::TangentRollover && g.side_eus.contains(&mate))
+                .then(|| u32::try_from(i).ok().map(FilletGeomId))
+                .flatten()
+        });
+        let Some(rolled) = rolled.filter(|&r| Some(r) != g1) else {
+            return Ok(());
+        };
+        let Some(surface) = self
+            .geom(rolled)?
+            .fillet_surface(None)?
+            .map(exact_surface)
+            .transpose()?
+        else {
+            return Ok(());
+        };
+        // `TopologySplit` gives the rolled piece the split solver; a geometry without one is
+        // only a caller's (`add_geom`, `set_fillet_geom_type` are public)
+        let solver = self
+            .geom(rolled)?
+            .fillet_solver()
+            .ok_or(SolidError::invalid_input(
+                OP_CROSS,
+                "a tangent roll-over's rolled piece has no fillet solver",
+            ))?;
+        let tol = resolve(solver)?.approx_tol_3d;
+        let uv =
+            super::p4::create_uv_curve(k, self, start_fv, end_fv, false, &surface, 50.0 * tol)?;
+        self.set_uv(mate, uv.uv_curve1)
     }
 
     /// `SmFilletEdge::CalcFilletIntSideFace(crContext, pCorner)`: the side curve of
@@ -1939,17 +1992,12 @@ impl FilletBrep {
         // Past a tangent side edge (`make_nx1_corner_topology`), the extended edge
         // bounds the end face and a face that is not the side face this edge runs in:
         // its extension is where that side face meets the end face's extension
-        // (tangency-labs/smlib@d5ebcb3, WR-457).
+        // (tangency-labs/smlib@d5ebcb3, WR-457). The end face is the one the corner's topology
+        // picked: the fork takes the edge's first face with an extended surface, which is the
+        // other face where another corner of the session ends on it (#17605).
         if let Some(side) = self.fillet_edge(e)?.original_face() {
             if !faces.contains(&side) {
-                let mut end_face = None;
-                for &f in &faces {
-                    if extended_surface(the_corner, f)?.is_some() {
-                        end_face = Some(f);
-                        break;
-                    }
-                }
-                let end_face = end_face.ok_or_else(|| missing(OP_EXT_EDGE))?;
+                let end_face = the_corner.end_face.ok_or_else(|| missing(OP_EXT_EDGE))?;
                 faces = vec![side, end_face];
             }
         }

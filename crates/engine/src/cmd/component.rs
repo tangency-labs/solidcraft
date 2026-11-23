@@ -1291,6 +1291,16 @@ pub fn to_active_frame(s: &Session, kind: &mut FeatureKind) {
     if s.active_component == 0 || crate::frames::mapped() {
         return;
     }
+    to_active_frame_geometry(s, kind);
+}
+
+/// The active component's frame from world coordinates, for a command whose picks `frames` maps
+/// but whose other geometry is still in the world: a sweep's path on a body's edges and the
+/// direction its profile follows.
+pub fn to_active_frame_geometry(s: &Session, kind: &mut FeatureKind) {
+    if s.active_component == 0 {
+        return;
+    }
     let m = s.active_component_frame();
     if solidcraft_doc::is_identity(&m) {
         return;

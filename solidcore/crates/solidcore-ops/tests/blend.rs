@@ -20,7 +20,7 @@ use std::f64::consts::PI;
 use std::io::Read as _;
 
 use solidcore::blend::definition_check::surface_kind_name;
-use solidcore::boolean::api_brep::{boolean_difference, boolean_union};
+use solidcore::boolean::api_brep::{boolean_difference, boolean_intersection, boolean_union};
 use solidcore::geom::attribute::{AttributeStore, ObjectKey};
 use solidcore::kernel::Kernel;
 use solidcore::primitive::api_primitives::{create_box, create_cylinder};
@@ -3855,12 +3855,13 @@ fn a_session_failure_says_what_its_session_noted() {
     let e = s.do_filleting(&mut k, None).unwrap_err();
     assert_eq!(
         blend::failure(&e).unwrap().to_string(),
-        "the blend failed (status 1001): the fillet body has no faces"
+        "the blend failed (status 1001): failed: a step of the fillet executive failed (the \
+         error info says which)"
     );
     assert_eq!(
         blend::session_failure(&s, &e).unwrap().to_string(),
-        "the blend failed (status 1001): the fillet body has no faces: Fillet Surface \
-         Computation Failure: no fillet faces were made"
+        "the blend failed (status 1001): failed: a step of the fillet executive failed (the \
+         error info says which): Fillet Surface Computation Failure: no fillet faces were made"
     );
 }
 
@@ -5834,7 +5835,7 @@ fn capsule_section(plane: f64, round: f64, ball: bool) -> (f64, f64) {
 const HALF_CAPSULE: f64 = 0.5 * PI * 25.0 * 10.0 + 2.0 * PI * 125.0 / 3.0;
 
 /// An unequal chamfer of the half capsule's whole outline, the first size along the cut face,
-/// was refused ("the chamfer size", status 1007). The chain is measured at its narrowest
+/// was refused (then reported as "the chamfer size", status 1007). The chain is measured at its narrowest
 /// wedge, a right angle all round, and lifted to where unequal sizes do not fold, from each
 /// edge's widest wedge, which is bounded by its faces' normals enclosed along it. On a quarter
 /// arc that ends at a sphere's pole the normal `S_u x S_v` vanishes there, so the piece of the
@@ -6235,4 +6236,72 @@ fn a_round_ends_on_a_side_a_hair_off_its_cylinders_tangent_plane() {
         let (v, want) = (b.volume(1e-10).unwrap(), tangent_box_round_volume(d));
         assert!(rel(v, want) < 1e-9, "{d:e}: {v} {want}");
     }
+}
+
+/// SolidCraft #19967, case 1: the 13 x 24 x 9 block from x = -1 inside the cylinder of radius
+/// R = 81.25 about the line x = R, y = 4, which alone bounds it towards x = 0 (no face of the
+/// block touches it); the cylinder's edge on the floor (z = 0) chamfered 2, which
+/// makes a cone of half-angle 45 degrees, rho = R - 2 + z about that line, then the edge
+/// between the end wall y = 24 and that cone chamfered 0.5. The second chamfer's ruled surface
+/// is exact but very uneven in speed across its rulings (its rails' weights differ about
+/// 58-fold), and the crossing of its end with the floor was not fitted (`sm_SurfacePlaneCurve`
+/// ran out of its 20 passes).
+///
+/// Expected: a valid body and one face made; the chamfered edge runs between two vertices where
+/// three faces meet, so the chamfer adds a face, three edges and two vertices: (8, 18, 12) after
+/// (7, 15, 10). The volume it takes off is its cross-section, the triangle of legs d = 0.5 at
+/// the dihedral angle alpha between the wall and the cone, times the length of the edge, the
+/// hyperbola x = R - sqrt((R - 2 + z)^2 - 400) on y = 24 for z in [0, 2]. The cone's
+/// outward normal has y-component 20 / rho / sqrt 2 there (0.174 to 0.179), so sin alpha is
+/// 0.984 within 1e-3 and the triangle is 0.123; the edge is 2.875 long within 1e-3. The ends
+/// cut the prism obliquely: the floor and the cylinder meet the edge at 44 to 46 degrees, and
+/// the triangle's centroid lies d sqrt 2 / 3 < 0.24 from the edge, so each end moves the
+/// prism's length at the centroid by less than 0.24 / sin 44 degrees = 0.35; the faces' radii
+/// (80 and more against d) move the triangle by under 1 %. So the volume taken off lies in
+/// 0.123 * (2.875 -/+ 0.7) * (1 -/+ 0.01), within [0.264, 0.445].
+#[test]
+fn a_chamfer_between_a_wall_and_a_cone_an_earlier_chamfer_made_builds() {
+    all_fixes();
+    let r = 81.25_f64;
+    let b = built(|k| {
+        let block = create_box(
+            k,
+            solidcore::math::Point3::new(-1.0, 0.0, 0.0),
+            13.0,
+            24.0,
+            9.0,
+        )?;
+        let cyl = create_cylinder(k, solidcore::math::Point3::new(r, 4.0, -1.0), r, 11.0)?;
+        boolean_intersection(k, block, cyl)
+    });
+    // on the floor, the cylinder at y = 12
+    let floor_edge = edge_at(&b, [r - (r * r - 64.0).sqrt(), 12.0, 0.0]);
+    blend(
+        &b,
+        Blend::Chamfer,
+        &[floor_edge],
+        &[2.0],
+        &[],
+        Corners::Filled,
+    )
+    .unwrap();
+    assert_eq!(b.counts().unwrap(), [7, 15, 10]);
+    let before = b.volume(1e-10).unwrap();
+    // on the wall y = 24, the cone at z = 1 (rho = R - 1)
+    let wall_edge = edge_at(&b, [r - ((r - 1.0).powi(2) - 400.0).sqrt(), 24.0, 1.0]);
+    let made = blend(
+        &b,
+        Blend::Chamfer,
+        &[wall_edge],
+        &[0.5],
+        &[],
+        Corners::Filled,
+    )
+    .unwrap();
+    assert_eq!(made.made.len(), 1);
+    let report = b.check(CheckLevel::All).unwrap();
+    assert!(report.is_valid(), "{report}");
+    assert_eq!(b.counts().unwrap(), [8, 18, 12]);
+    let off = before - b.volume(1e-10).unwrap();
+    assert!((0.264..=0.445).contains(&off), "the chamfer took off {off}");
 }
