@@ -5280,7 +5280,7 @@ mod tests {
     fn open_takes_a_tab_place_and_refuses_anything_but_a_whole_number() {
         let dir = name_dir("open-tab");
         let path = dir.join("bracket.solidcraft");
-        std::fs::write(&path, solidcraft_io::write_design(&Document::new("Bracket"))).unwrap();
+        std::fs::write(&path, solidcraft_io::write_design(&Document::new("Bracket")).unwrap()).unwrap();
         // Headless there are no tabs: the place is checked and the design opens as without it.
         for tab in [json!(0), json!(3), json!(u64::MAX), Value::Null] {
             let mut s = Session::default();
