@@ -287,7 +287,7 @@ fn dialog_hook_uses_its_own_fuel_ceiling_and_stops_memory_growth() {
         &bytes,
         "make",
         &json!({}),
-        craft_plugin::HostLimits { max_fuel: 77, max_memory_mib: 1 },
+        craft_plugin::HostLimits { max_fuel: 77, max_memory_mib: 1, ..craft_plugin::HostLimits::default() },
     );
     assert_eq!(result.unwrap_err(), HostError::Exhausted { limit: "fuel".into(), allowed: 77 });
     let bytes = dialog_component("0.2.0", "i32.const 10000 memory.grow drop", "{}");
