@@ -769,10 +769,10 @@ impl SolveApp {
             let current = match job.work {
                 Work::Answer { inspection: Some((uid, version)) } if uid == self.session.uid => {
                     let key = (uid, id.to_owned());
-                    if self.plugin_inspection_versions.get(&key).is_some_and(|latest| *latest > version) {
+                    if self.plugins.inspection_versions.get(&key).is_some_and(|latest| *latest > version) {
                         false
                     } else {
-                        self.plugin_inspection_versions.insert(key, version);
+                        self.plugins.inspection_versions.insert(key, version);
                         true
                     }
                 }
