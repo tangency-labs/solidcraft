@@ -24,11 +24,15 @@
 )]
 
 use solidcore::blend::fillet_executive::session::FilletSession;
-use solidcore::blend::weld_bead::{beads_apart, span_lengths};
+use solidcore::blend::weld_bead::{
+    bead_body as weld_bead_body, beads_apart, span_lengths, BeadEnd,
+};
+use solidcore::boolean::api_brep::boolean_union;
 use solidcore::curve::curve::Curve;
 use solidcore::error::blend::{BlendFailure, WeldGap};
 use solidcore::error::{ErrorKind, Reason, SolidError};
 use solidcore::geom::attribute::{AttributeStore, ObjectKey};
+use solidcore::geom::axis2_placement::Axis2Placement;
 use solidcore::kernel::{Kernel, KernelOptions, UpstreamFixes};
 use solidcore::mass::integrator::properties::{brep_volume, PropertyAttributes};
 use solidcore::math::{Point3, Vec3};
@@ -53,6 +57,9 @@ use solidcore::topology::topology::NotifyRecords;
 use solidcore::topology::{Brep, EdgeId, EdgeuseId, FaceId};
 use solidcore::EntityRef;
 use std::f64::consts::{FRAC_PI_2, FRAC_PI_3, PI};
+
+/// Square ends at both ends of a span.
+const SQUARE: [BeadEnd; 2] = [BeadEnd::Square; 2];
 
 /// The setbacks of every case (mm).
 const SETBACK: f64 = 5.0;
@@ -802,6 +809,141 @@ fn the_bead_face_is_the_chord_with_its_sagitta() {
     }
 }
 
+/// One span of the bead along `edge` of `b` at the square corner's setbacks with `ends` at
+/// both of its ends: tapered and rounded ends are the planar sweep cut at its ends
+/// ([`weld_bead_body`] straight between two planes).
+fn shaped_span(
+    k: &mut Kernel,
+    b: &mut Brep,
+    edge: EdgeId,
+    h: f64,
+    span: (f64, f64),
+    ends: BeadEnd,
+) -> solidcore::error::Result<Brep> {
+    weld_bead_body(
+        k,
+        b,
+        &[edge],
+        &[ChamferSize::Distances([SETBACK; 2])],
+        h,
+        &[],
+        &BeadSpan::along(&[span]).unwrap(),
+        [ends; 2],
+    )
+}
+
+/// The bead face of a tapered or rounded span keeps the chord's exact definition with its
+/// sagitta, as the bead apart's does.
+#[test]
+fn a_shaped_span_keeps_the_chord_with_its_sagitta() {
+    for (alpha, h) in [(FRAC_PI_2, 1.0), (FRAC_PI_3, -1.0), (FRAC_PI_2, 3.0)] {
+        let mut k = kernel();
+        let (mut b, at) = corner(&mut k, alpha);
+        let edge = pick(&k, &b, at);
+        for ends in [BeadEnd::Taper, BeadEnd::Round] {
+            let piece = shaped_span(&mut k, &mut b, edge, h, (0.1, 0.4), ends).unwrap();
+            let face = bead_face(&piece);
+            let Some(BlendRef::Exact { round, .. }) = face.procedural_blend() else {
+                panic!("{alpha} {h} {ends:?}: a span's bead face is exact");
+            };
+            assert_eq!(round.sagitta(), h, "{alpha} {h} {ends:?}");
+        }
+    }
+}
+
+/// The section's first moment about the edge along the bead's middle direction `up` (to the
+/// chord's middle), `integral of rho dA`, by hand: the triangle's area times its centroid's
+/// height, plus (convex) or less (concave) the circular segment's, whose centroid lies `4 R
+/// sin^3(Theta / 2) / (3 (Theta - sin Theta))` from the circle's centre towards the apex.
+fn section_moment(alpha: f64, h: f64) -> f64 {
+    let (s, c) = alpha.sin_cos();
+    let f1 = Point3::new(SETBACK, 0.0, 0.0);
+    let f2 = Point3::new(SETBACK * c, SETBACK * s, 0.0);
+    let middle = f1 + (f2 - f1) * 0.5;
+    let up = (middle - Point3::new(0.0, 0.0, 0.0)) * (1.0 / middle.length());
+    let triangle = 0.5 * SETBACK * SETBACK * s;
+    let mut moment = triangle * (f1.dot(up) + f2.dot(up)) / 3.0;
+    let arc = BeadArc::new(f1, f2, Vec3::new(0.0, 0.0, 1.0), middle, h).unwrap();
+    let t = arc.turn;
+    let segment = 0.5 * arc.radius * arc.radius * (t - t.sin());
+    let reach = 4.0 * arc.radius * (t / 2.0).sin().powi(3) / (3.0 * (t - t.sin()));
+    let apex = arc.point(t / 2.0);
+    let towards = (apex - arc.centre) * (1.0 / arc.radius);
+    moment += h.signum() * segment * (arc.centre + towards * reach).dot(up);
+    moment
+}
+
+/// A tapered span ends in 45-degree ramps: every point of the section at height rho along the
+/// bead's middle direction is cut back rho from each end, so the span keeps `A L - 2 integral
+/// of rho dA` exactly; convex, concave and overhanging, at 60 and 90 degrees.
+#[test]
+fn a_tapered_span_ends_in_45_degree_ramps() {
+    let spans = BeadSpan::along(&[(0.1, 0.4), (0.6, 0.95)]).unwrap();
+    for (alpha, h) in [(FRAC_PI_2, 1.0), (FRAC_PI_3, -1.0), (FRAC_PI_2, 3.0)] {
+        let mut k = kernel();
+        let (mut b, at) = corner(&mut k, alpha);
+        let edge = pick(&k, &b, at);
+        let (bead, _) = bead_section(alpha, h, 0.0);
+        let moment = section_moment(alpha, h);
+        for span in &spans {
+            let mut piece = shaped_span(
+                &mut k,
+                &mut b,
+                edge,
+                h,
+                (span.from, span.to),
+                BeadEnd::Taper,
+            )
+            .unwrap();
+            let want = bead.section_area() * LENGTH * span.share() - 2.0 * moment;
+            let got = volume(&k, &mut piece);
+            assert!(
+                ((got - want) / want).abs() <= 1e-6,
+                "{alpha} {h} {span:?}: {got} against {want}"
+            );
+        }
+    }
+}
+
+/// A rounded span is shorter than its square one by less than two bead reaches' worth of
+/// section and longer than the span less those reaches; a span too short for its ends is
+/// refused.
+#[test]
+fn a_rounded_span_ends_within_a_reach_and_short_spans_are_refused() {
+    let spans = BeadSpan::along(&[(0.1, 0.5)]).unwrap();
+    for (alpha, h) in [(FRAC_PI_2, 1.0), (FRAC_PI_3, -1.0), (FRAC_PI_2, 3.0)] {
+        let mut k = kernel();
+        let (mut b, at) = corner(&mut k, alpha);
+        let edge = pick(&k, &b, at);
+        let span = spans.first().unwrap();
+        let mut piece = shaped_span(
+            &mut k,
+            &mut b,
+            edge,
+            h,
+            (span.from, span.to),
+            BeadEnd::Round,
+        )
+        .unwrap();
+        let (bead, _) = bead_section(alpha, h, 0.0);
+        let full = bead.section_area() * LENGTH * 0.4;
+        let got = volume(&k, &mut piece);
+        let reach = 1.05 * (SETBACK + 2.0 * h.abs());
+        assert!(got < full, "{alpha} {h}: {got} not under {full}");
+        assert!(
+            got > bead.section_area() * (LENGTH * 0.4 - 2.0 * reach),
+            "{alpha} {h}: {got} cut by more than two reaches"
+        );
+    }
+    let mut k = kernel();
+    let (mut b, at) = corner(&mut k, FRAC_PI_2);
+    let edge = pick(&k, &b, at);
+    for ends in [BeadEnd::Taper, BeadEnd::Round] {
+        let r = shaped_span(&mut k, &mut b, edge, 1.0, (0.5, 0.52), ends);
+        assert!(r.is_err(), "{ends:?}: a 2 mm span was built");
+    }
+}
+
 /// A point of a rational quadratic Bezier piece at `t`.
 fn rational_quadratic(p: [Point3; 3], w: [f64; 3], t: f64) -> Point3 {
     let b = [(1.0 - t) * (1.0 - t), 2.0 * t * (1.0 - t), t * t];
@@ -969,7 +1111,13 @@ fn a_bead_apart_past_its_sagitta_bound_is_refused_with_the_bound() {
     let fit = err.fit().unwrap();
     assert_eq!(fit.measure, FitMeasure::Sagitta, "{err}");
     let want = 50.0_f64.sqrt() / 2.0 * (3.0 * PI / 8.0).tan();
-    assert!((fit.size - want).abs() < 1e-9, "{} {want}", fit.size);
+    // the bound is checked at the bead's stations: never past the closed form, and within a
+    // millionth of it
+    assert!(
+        fit.size <= want && want - fit.size < 1e-6,
+        "{} {want}",
+        fit.size
+    );
     assert!(
         beads_apart(
             &mut k,
@@ -1007,10 +1155,11 @@ fn equal_legs_come_back_from_their_throat() {
     assert!((equal_legs_for_throat(3.0, FRAC_PI_2, 0.5) - 3.0 * 2f64.sqrt()).abs() <= 1e-12);
 }
 
-// ---- the refusals and the part left as it was ----
+// ---- the weld's bead body (`weld_bead::bead_body`, on the foot blend) ----
 //
-// A weld never changes the part it lies on: its file is the same byte for byte before and
-// after, built or refused. Every refusal comes before any bead is built.
+// `bead_body` builds the bead's own faces on the foot blend, on flat and curved faces alike,
+// and closes them into a body of its own. The part is never changed: its file is the same byte
+// for byte before and after, built or refused.
 
 /// No failure of the whole-body check (`SmBrep::AssertValid`, level 2).
 fn assert_sound(k: &mut Kernel, b: &mut Brep, what: &str) {
@@ -1019,6 +1168,976 @@ fn assert_sound(k: &mut Kernel, b: &mut Brep, what: &str) {
     let fails: Vec<String> = c.failures().map(|r| format!("{r:?}")).collect();
     assert!(fails.is_empty(), "{what}: {fails:?}");
 }
+
+/// Between planes the weld's bead body is the bead's section along the edge (the chamfer's
+/// triangle at h = 0): convex, concave and overhanging its toe, at 60, 90 and 120 degrees. It
+/// is a sound body of 5 faces that saves, and the corner's file is unchanged.
+#[test]
+fn a_weld_bead_body_is_its_section_along_the_edge() {
+    for (adeg, h) in [
+        (90.0_f64, 0.0),
+        (90.0, 1.0),
+        (90.0, -1.0),
+        (90.0, 3.0),
+        (60.0, 1.0),
+        (60.0, -1.0),
+        (120.0, 2.6),
+    ] {
+        let alpha = adeg.to_radians();
+        let mut k = kernel();
+        let (mut b, at) = corner(&mut k, alpha);
+        let edge = pick(&k, &b, at);
+        let before = smb(&k, &b);
+        let size = ChamferSize::Distances([SETBACK; 2]);
+        let mut body =
+            weld_bead_body(&mut k, &mut b, &[edge], &[size], h, &[], &[], SQUARE).unwrap();
+        assert!(smb(&k, &b) == before, "{adeg} {h}: the corner changed");
+        let area = if h == 0.0 {
+            0.5 * SETBACK * SETBACK * alpha.sin()
+        } else {
+            bead_section(alpha, h, 0.0).0.section_area()
+        };
+        let want = area * LENGTH;
+        let got = volume(&k, &mut body);
+        assert!(
+            ((got - want) / want).abs() <= 1e-6,
+            "{adeg} {h}: {got} against {want}"
+        );
+        assert_eq!(body.face_list().len(), 5, "{adeg} {h}");
+        assert_sound(&mut k, &mut body, "the bead body");
+        assert!(!smb(&k, &body).is_empty());
+    }
+}
+
+/// Two beads that meet at a vertex are refused before anything is built, naming the vertex,
+/// and the corner's file is unchanged.
+#[test]
+fn beads_that_meet_at_a_vertex_are_refused_naming_it() {
+    let mut k = kernel();
+    let (mut b, at) = corner(&mut k, FRAC_PI_2);
+    let first = pick(&k, &b, at);
+    let (start, _) = edge::start_end_vertices(&b, first).unwrap();
+    let start = start.unwrap();
+    let second = b
+        .edge_list()
+        .iter()
+        .copied()
+        .find(|&e| {
+            let (s, t) = edge::start_end_vertices(&b, e).unwrap();
+            e != first && (s == Some(start) || t == Some(start))
+        })
+        .unwrap();
+    let before = smb(&k, &b);
+    let size = ChamferSize::Distances([SETBACK; 2]);
+    let err = weld_bead_body(
+        &mut k,
+        &mut b,
+        &[first, second],
+        &[size; 2],
+        1.0,
+        &[],
+        &[],
+        SQUARE,
+    )
+    .err()
+    .unwrap();
+    let named = err
+        .site()
+        .and_then(|s| s.vertex)
+        .map(solidcore::error::TargetVertex::id);
+    assert_eq!(named, Some(start), "{err:?}");
+    assert!(smb(&k, &b) == before, "the corner changed");
+}
+
+/// A round tube: its base centre, unit axis, radius and length.
+#[derive(Clone, Copy)]
+struct Tube {
+    o: Point3,
+    d: Vec3,
+    r: f64,
+    len: f64,
+}
+
+impl Tube {
+    /// How far `p` is from the tube's cylinder.
+    fn off(&self, p: Point3) -> f64 {
+        let v = p - self.o;
+        ((v - self.d * v.dot(self.d)).length() - self.r).abs()
+    }
+}
+
+/// The tubes united, and their joint lines: the edges lying on two of them.
+fn tubes(k: &mut Kernel, tubes: &[Tube]) -> (Brep, Vec<EdgeId>) {
+    let body = |k: &mut Kernel, t: Tube| {
+        let mut c = create_cylinder(k, Point3::new(0.0, 0.0, 0.0), t.r, t.len).unwrap();
+        let helper = if t.d.z.abs() < 0.9 {
+            Vec3::new(0.0, 0.0, 1.0)
+        } else {
+            Vec3::new(1.0, 0.0, 0.0)
+        };
+        let x = helper.cross(t.d).unitize().unwrap();
+        let pl = Axis2Placement::new(t.o, x, t.d.cross(x));
+        solidcore::topology::brep::p5::transform(k, &mut c, &pl, None, false).unwrap();
+        c
+    };
+    let mut b = body(k, tubes[0]);
+    for &t in &tubes[1..] {
+        let c = body(k, t);
+        b = boolean_union(k, b, c).unwrap();
+    }
+    let joints = b
+        .edge_list()
+        .iter()
+        .copied()
+        .filter(|&e| {
+            let ivl = edge::interval(&b, e).unwrap();
+            let curve = edge::curve(&b, e).unwrap().unwrap();
+            let m = curve
+                .evaluate(k, 0.5 * (ivl.min() + ivl.max()), 0, true, false)
+                .unwrap()[0];
+            tubes.iter().filter(|t| t.off(m) < 1e-5).count() >= 2
+        })
+        .collect();
+    (b, joints)
+}
+
+/// A main tube of diameter 40 along z, and a branch of diameter `2 r` from its axis along `d`.
+fn branch_on_main(r: f64, d: Vec3) -> [Tube; 2] {
+    [
+        Tube {
+            o: Point3::new(0.0, 0.0, -60.0),
+            d: Vec3::new(0.0, 0.0, 1.0),
+            r: 20.0,
+            len: 120.0,
+        },
+        Tube {
+            o: Point3::new(0.0, 0.0, 0.0),
+            d,
+            r,
+            len: 60.0,
+        },
+    ]
+}
+
+/// Round a branch tube where it meets a main tube (a T-joint, diameter 20 on 40) the weld's
+/// flat bead with 4 mm legs is a sound body of 12 faces (4 segments: the bead face and a strip
+/// on each tube), of 526.83 mm3 (against 526.847 mm3 by independent slices of its true
+/// section times the step of its centroid along the joint), and the tubes' file is unchanged.
+#[test]
+fn a_bead_body_runs_round_a_tube_joint() {
+    let mut k = kernel();
+    let (mut part, joints) = tubes(&mut k, &branch_on_main(10.0, Vec3::new(1.0, 0.0, 0.0)));
+    assert_eq!(joints.len(), 1);
+    let before = smb(&k, &part);
+    let size = ChamferSize::Distances([4.0; 2]);
+    let mut body =
+        weld_bead_body(&mut k, &mut part, &joints, &[size], 0.0, &[], &[], SQUARE).unwrap();
+    assert!(smb(&k, &part) == before, "the tubes changed");
+    assert_eq!(body.face_list().len(), 12);
+    assert_sound(&mut k, &mut body, "the bead round the joint");
+    let got = volume_to(&k, &mut body, 1e-5);
+    assert!((got - 526.83).abs() <= 0.05, "{got}");
+}
+
+/// Two branches whose joint lines cross: their beads meet at vertices, so they are refused,
+/// and the tubes' file is unchanged.
+#[test]
+fn beads_on_crossing_joint_lines_are_refused_and_leave_the_tubes() {
+    let mut k = kernel();
+    let [main, x] = branch_on_main(15.0, Vec3::new(1.0, 0.0, 0.0));
+    let [_, y] = branch_on_main(15.0, Vec3::new(0.0, 1.0, 0.0));
+    let (mut part, joints) = tubes(&mut k, &[main, x, y]);
+    assert!(joints.len() > 2);
+    let before = smb(&k, &part);
+    let sizes = vec![ChamferSize::Distances([4.0; 2]); joints.len()];
+    let err = weld_bead_body(&mut k, &mut part, &joints, &sizes, 0.0, &[], &[], SQUARE)
+        .err()
+        .unwrap();
+    assert!(err.site().is_some_and(|s| s.vertex.is_some()), "{err:?}");
+    assert!(smb(&k, &part) == before, "the tubes changed");
+}
+
+/// Round the same T-joint a convex and a concave bead are sound bodies of 12 faces, the
+/// convex one larger and the concave one smaller than the chord's, and the tubes' file is
+/// unchanged. Each of the 4 bead faces' sections is the arc: along the joint, also between the
+/// net's stations, its middle stands the sagitta off the middle of the chord between its toes.
+#[test]
+fn a_convex_and_a_concave_bead_run_round_a_tube_joint() {
+    let size = ChamferSize::Distances([4.0; 2]);
+    let build = |k: &mut Kernel, h: f64| {
+        let (mut part, joints) = tubes(k, &branch_on_main(10.0, Vec3::new(1.0, 0.0, 0.0)));
+        let before = smb(k, &part);
+        let body = weld_bead_body(k, &mut part, &joints, &[size], h, &[], &[], SQUARE).unwrap();
+        assert!(smb(k, &part) == before, "h {h}: the tubes changed");
+        body
+    };
+    let mut k = kernel();
+    let mut flat = build(&mut k, 0.0);
+    let chord = volume_to(&k, &mut flat, 1e-5);
+    for h in [1.0_f64, -0.2] {
+        let mut body = build(&mut k, h);
+        assert_eq!(body.face_list().len(), 12, "h {h}");
+        assert_sound(&mut k, &mut body, "the bead round the joint");
+        let got = volume_to(&k, &mut body, 1e-5);
+        assert!(
+            (got - chord) * h > 0.0,
+            "h {h}: {got} against the chord's {chord}"
+        );
+        // the bead face: the one on neither tube
+        let on_tube = |p: Point3| {
+            branch_on_main(10.0, Vec3::new(1.0, 0.0, 0.0))
+                .iter()
+                .any(|t| t.off(p) < 1e-3)
+        };
+        let mut checked = 0;
+        for &f in body.face_list() {
+            let surface = solidcore::topology::face::p2::surface(&body, f)
+                .unwrap()
+                .unwrap();
+            let dom = solidcore::topology::face::p2::uv_domain(&body, f).unwrap();
+            let raw = |x: f64, y: f64| {
+                let uv = solidcore::math::Point2::new(
+                    dom.min().x + x * (dom.max().x - dom.min().x),
+                    dom.min().y + y * (dom.max().y - dom.min().y),
+                );
+                surface.evaluate_point(&k, uv).unwrap()
+            };
+            if on_tube(raw(0.37, 0.5)) {
+                continue;
+            }
+            // across the bead: the parameter whose ends lie on the tubes (orienting the solid
+            // may have swapped the face's parameters)
+            let swapped = !(on_tube(raw(0.37, 0.0)) && on_tube(raw(0.37, 1.0)));
+            let at = |u: f64, v: f64| if swapped { raw(v, u) } else { raw(u, v) };
+            for i in 0..40 {
+                let u = (f64::from(i) + 0.37) / 40.0;
+                let (a, m, b) = (at(u, 0.0), at(u, 0.5), at(u, 1.0));
+                let rise = m.distance(a + (b - a) * 0.5);
+                let tol = solidcore::blend::foot_blend::WELD_FIT_TOLERANCE;
+                assert!((rise - h.abs()).abs() <= tol, "h {h} u {u}: rise {rise}");
+            }
+            checked += 1;
+        }
+        assert_eq!(checked, 4, "h {h}: four bead faces");
+    }
+}
+
+/// A concave bead whose arc would cut into a tube somewhere along the joint is refused, and
+/// the tubes' file is unchanged.
+#[test]
+fn a_concave_bead_that_cuts_into_a_tube_is_refused() {
+    let mut k = kernel();
+    let (mut part, joints) = tubes(&mut k, &branch_on_main(10.0, Vec3::new(1.0, 0.0, 0.0)));
+    let before = smb(&k, &part);
+    let size = ChamferSize::Distances([4.0; 2]);
+    let r = weld_bead_body(&mut k, &mut part, &joints, &[size], -1.3, &[], &[], SQUARE);
+    assert!(r.is_err());
+    assert!(smb(&k, &part) == before, "the tubes changed");
+}
+
+// ---- the foot blend: feet at the legs' distances (jyviko's definition) ----
+//
+// At each station of the joint edge each foot lies on its face, in the plane square to the
+// edge through the root, at its leg's distance from the root: what a leg gauge measures.
+
+/// Between planes at 60, 90 and 120 degrees, equal and unequal legs: at each station each
+/// foot is at its leg from the root, square to the edge, and the two legs open at the planes'
+/// angle (each foot on its own face's side). The corner's file is unchanged.
+#[test]
+fn a_foot_blend_puts_each_foot_at_its_leg_between_planes() {
+    use solidcore::blend::foot_blend::FootBlend;
+    for adeg in [60.0_f64, 90.0, 120.0] {
+        for legs in [[5.0, 5.0], [4.0, 8.0]] {
+            let alpha = adeg.to_radians();
+            let mut k = kernel();
+            let (mut b, at) = corner(&mut k, alpha);
+            let edge = pick(&k, &b, at);
+            let before = smb(&k, &b);
+            let blend = FootBlend::of_edge(&k, &mut b, edge, None).unwrap();
+            let (lo, hi) = (blend.interval.min(), blend.interval.max());
+            for f in [0.0, 0.3, 1.0] {
+                let s = blend.station(&k, lo + f * (hi - lo), legs, None).unwrap();
+                let w = [s.feet[0] - s.root, s.feet[1] - s.root];
+                for (i, w) in w.iter().enumerate() {
+                    assert!(
+                        (w.length() - legs[i]).abs() <= 1e-9,
+                        "{adeg} {legs:?}: leg {i} {}",
+                        w.length()
+                    );
+                    assert!(
+                        w.dot(s.tangent).abs() <= 1e-9,
+                        "{adeg}: not square to the edge"
+                    );
+                }
+                let opening = w[0].cross(w[1]).length().atan2(w[0].dot(w[1]));
+                assert!(
+                    (opening - alpha).abs() <= 1e-9,
+                    "{adeg}: legs open at {}",
+                    opening.to_degrees()
+                );
+            }
+            assert!(smb(&k, &b) == before, "{adeg}: the corner changed");
+        }
+    }
+}
+
+/// Round a branch tube on a main tube (T, diameter 20 on 40) the legs hold at every station:
+/// each foot at 4 mm from the root to rounding, square to the joint, on its own tube (the two
+/// feet on different tubes). A chamfer's constant offsets give legs from 3.1 to 6.9 mm here.
+#[test]
+fn a_foot_blend_keeps_its_legs_round_a_tube_joint() {
+    use solidcore::blend::foot_blend::FootBlend;
+    let joint = branch_on_main(10.0, Vec3::new(1.0, 0.0, 0.0));
+    let mut k = kernel();
+    let (mut part, joints) = tubes(&mut k, &joint);
+    let before = smb(&k, &part);
+    let blend = FootBlend::of_edge(&k, &mut part, joints[0], None).unwrap();
+    let (lo, hi) = (blend.interval.min(), blend.interval.max());
+    let mut worst = 0.0_f64;
+    for i in 0..200 {
+        let t = lo + (hi - lo) * (f64::from(i) + 0.5) / 200.0;
+        let s = blend.station(&k, t, [4.0, 4.0], None).unwrap();
+        let mut on = Vec::new();
+        for foot in s.feet {
+            let w = foot - s.root;
+            worst = worst.max((w.length() - 4.0).abs());
+            assert!(
+                w.dot(s.tangent).abs() <= 1e-9,
+                "t {t}: not square to the joint"
+            );
+            let tube = joint.iter().position(|tb| tb.off(foot) <= 1e-9);
+            assert!(tube.is_some(), "t {t}: a foot off both tubes");
+            on.push(tube);
+        }
+        assert_ne!(on[0], on[1], "t {t}: both feet on one tube");
+    }
+    assert!(worst <= 1e-9, "a leg off by {worst}");
+    assert!(smb(&k, &part) == before, "the tubes changed");
+}
+
+/// The foot blend's section face between planes (equal and unequal legs, chord, convex and
+/// concave): along the edge its sides are the feet and its middle stands the sagitta off the
+/// chord's middle, to the weld's fit tolerance (0.01 mm); between planes at 90 degrees with 5 mm legs a
+/// concave bead past 1.4645 mm is refused.
+#[test]
+fn a_foot_blend_section_face_runs_from_foot_to_foot_between_planes() {
+    use solidcore::blend::foot_blend::{FootBlend, WELD_FIT_TOLERANCE};
+    let tol = WELD_FIT_TOLERANCE;
+    for (legs, h) in [
+        ([5.0, 5.0], 0.0),
+        ([5.0, 5.0], 1.0),
+        ([4.0, 8.0], 1.5),
+        ([5.0, 5.0], -1.0),
+    ] {
+        let mut k = kernel();
+        let (mut b, at) = corner(&mut k, FRAC_PI_2);
+        let edge = pick(&k, &b, at);
+        let blend = FootBlend::of_edge(&k, &mut b, edge, None).unwrap();
+        let face = blend.section_face(&k, legs, h, tol).unwrap();
+        let (lo, hi) = (blend.interval.min(), blend.interval.max());
+        for i in 0..23 {
+            let t = lo + (hi - lo) * (f64::from(i) + 0.37) / 23.0;
+            let s = blend.station(&k, t, legs, None).unwrap();
+            let p = |v: f64| {
+                face.evaluate_point(&k, solidcore::math::Point2::new(t, v))
+                    .unwrap()
+            };
+            assert!(
+                p(0.0).distance(s.feet[0]) <= tol && p(1.0).distance(s.feet[1]) <= tol,
+                "{legs:?} {h}: feet"
+            );
+            let rise = p(0.5).distance(s.feet[0] + (s.feet[1] - s.feet[0]) * 0.5);
+            assert!((rise - h.abs()).abs() <= tol, "{legs:?} {h}: rise {rise}");
+        }
+    }
+    let mut k = kernel();
+    let (mut b, at) = corner(&mut k, FRAC_PI_2);
+    let edge = pick(&k, &b, at);
+    let blend = FootBlend::of_edge(&k, &mut b, edge, None).unwrap();
+    assert!(blend.section_face(&k, [5.0, 5.0], -1.46, tol).is_ok());
+    assert!(blend.section_face(&k, [5.0, 5.0], -1.47, tol).is_err());
+}
+
+/// Round the tube T-joint the foot blend's section face holds its legs: along the joint its
+/// sides are the feet at 4 mm from the root and its middle stands the sagitta off the chord,
+/// convex and concave, to the weld's fit tolerance (0.01 mm).
+#[test]
+fn a_foot_blend_section_face_runs_round_a_tube_joint() {
+    use solidcore::blend::foot_blend::{FootBlend, WELD_FIT_TOLERANCE};
+    let tol = WELD_FIT_TOLERANCE;
+    let mut k = kernel();
+    let (mut part, joints) = tubes(&mut k, &branch_on_main(10.0, Vec3::new(1.0, 0.0, 0.0)));
+    let before = smb(&k, &part);
+    let blend = FootBlend::of_edge(&k, &mut part, joints[0], None).unwrap();
+    for h in [0.0, 1.0, -0.2] {
+        let face = blend.section_face(&k, [4.0, 4.0], h, tol).unwrap();
+        let (lo, hi) = (blend.interval.min(), blend.interval.max());
+        for i in 0..61 {
+            let t = lo + (hi - lo) * (f64::from(i) + 0.37) / 61.0;
+            let s = blend.station(&k, t, [4.0, 4.0], None).unwrap();
+            let p = |v: f64| {
+                face.evaluate_point(&k, solidcore::math::Point2::new(t, v))
+                    .unwrap()
+            };
+            for (v, foot) in [(0.0, s.feet[0]), (1.0, s.feet[1])] {
+                assert!(
+                    p(v).distance(foot) <= tol,
+                    "h {h} t {t}: foot off by {}",
+                    p(v).distance(foot)
+                );
+                assert!(
+                    ((p(v) - s.root).length() - 4.0).abs() <= tol,
+                    "h {h} t {t}: leg"
+                );
+            }
+            let rise = p(0.5).distance(s.feet[0] + (s.feet[1] - s.feet[0]) * 0.5);
+            assert!((rise - h.abs()).abs() <= tol, "h {h} t {t}: rise {rise}");
+        }
+    }
+    assert!(smb(&k, &part) == before, "the tubes changed");
+}
+
+/// The foot blend's bead body between planes: the bead's section along the edge (chord,
+/// convex, concave; equal and unequal legs; 60, 90 and 120 degrees), a sound solid of 5 faces
+/// that saves, and the corner's file unchanged.
+#[test]
+fn a_foot_blend_body_is_its_section_along_the_edge() {
+    use solidcore::blend::foot_blend::{FootBlend, WELD_FIT_TOLERANCE};
+    for (adeg, legs, h) in [
+        (90.0_f64, [5.0, 5.0], 0.0),
+        (90.0, [5.0, 5.0], 1.0),
+        (90.0, [5.0, 5.0], -1.0),
+        (90.0, [4.0, 8.0], 0.0),
+        (60.0, [5.0, 5.0], 1.0),
+        (120.0, [5.0, 5.0], -1.0),
+    ] {
+        let alpha = adeg.to_radians();
+        let mut k = kernel();
+        let (mut b, at) = corner(&mut k, alpha);
+        let edge = pick(&k, &b, at);
+        let before = smb(&k, &b);
+        let blend = FootBlend::of_edge(&k, &mut b, edge, None).unwrap();
+        let mut body = blend.body(&mut k, legs, h, WELD_FIT_TOLERANCE).unwrap();
+        assert!(
+            smb(&k, &b) == before,
+            "{adeg} {legs:?} {h}: the corner changed"
+        );
+        // the chord's triangle, plus or minus the circular segment over the chord
+        let triangle = 0.5 * legs[0] * legs[1] * alpha.sin();
+        let chord =
+            (legs[0] * legs[0] + legs[1] * legs[1] - 2.0 * legs[0] * legs[1] * alpha.cos()).sqrt();
+        let segment = if h == 0.0 {
+            0.0
+        } else {
+            let r = (chord * chord / 4.0 + h * h) / (2.0 * h.abs());
+            let half = (chord / (2.0 * r)).asin();
+            r * r * (half - half.sin() * half.cos())
+        };
+        let want = (triangle + h.signum() * segment) * LENGTH;
+        let got = volume(&k, &mut body);
+        assert!(
+            ((got - want) / want).abs() <= 1e-6,
+            "{adeg} {legs:?} {h}: {got} against {want}"
+        );
+        assert_eq!(body.face_list().len(), 5, "{adeg} {legs:?} {h}");
+        assert_sound(&mut k, &mut body, "the foot blend's bead");
+        assert!(!smb(&k, &body).is_empty());
+    }
+}
+
+/// Round the tube T-joint the foot blend's bead body (chord, convex, concave) is a sound
+/// solid with its legs at 4 mm, the convex one larger and the concave one smaller than the
+/// chord's, and the tubes' file is unchanged.
+#[test]
+fn a_foot_blend_body_runs_round_a_tube_joint() {
+    use solidcore::blend::foot_blend::{FootBlend, WELD_FIT_TOLERANCE};
+    let mut k = kernel();
+    let (mut part, joints) = tubes(&mut k, &branch_on_main(10.0, Vec3::new(1.0, 0.0, 0.0)));
+    let before = smb(&k, &part);
+    let blend = FootBlend::of_edge(&k, &mut part, joints[0], None).unwrap();
+    let mut volumes = Vec::new();
+    for h in [0.0, 1.0, -0.2] {
+        let mut body = blend
+            .body(&mut k, [4.0, 4.0], h, WELD_FIT_TOLERANCE)
+            .unwrap();
+        assert_sound(&mut k, &mut body, "the bead round the joint");
+        volumes.push(volume_to(&k, &mut body, 1e-5));
+    }
+    assert!(smb(&k, &part) == before, "the tubes changed");
+    assert!(
+        volumes[1] > volumes[0] && volumes[2] < volumes[0],
+        "{volumes:?}"
+    );
+    // the chord's body, against slices of its true section (root, along each tube to its
+    // foot, the chord) times the step of their centroid along the joint: 526.83 mm3
+    assert!((volumes[0] - 526.83).abs() <= 0.05, "{volumes:?}");
+}
+
+// ---- the foot blend's definition and record (#15129, the stacked record PR) ----
+
+/// The section faces of `body` that keep a foot blend's definition, with their surfaces.
+fn foot_faces(body: &Brep) -> Vec<(FaceId, solidcore::surface::surface::Surface)> {
+    body.face_list()
+        .iter()
+        .filter_map(|&f| {
+            let s = body.face(f).ok()?.surface.clone()?;
+            matches!(s.procedural_blend(), Some(BlendRef::FootBlend { .. })).then_some((f, s))
+        })
+        .collect()
+}
+
+/// Each section face of a weld bead keeps the foot blend's definition: its legs, sagitta,
+/// spans and ends as asked, its bound the fit tolerance, and it re-checks against its net.
+/// Between planes (chord, convex, concave) and round the T-joint (four faces). Written as its
+/// record, read back and rebuilt, it is the same face; the rebuild reads no part (the part is
+/// dropped first).
+#[test]
+fn a_bead_face_keeps_the_foot_blend_and_rebuilds_from_its_record() {
+    use solidcore::blend::foot_blend::WELD_FIT_TOLERANCE;
+    use solidcore::surface::procedural_blend::convert::{foot_blend_rebuild, foot_blend_to_record};
+    use solidcore::surface::procedural_blend::record::FootBlendRecord;
+    let mut cases: Vec<(String, Brep, usize, f64, [f64; 2])> = Vec::new();
+    for h in [0.0, 1.0, -1.0] {
+        let mut k = kernel();
+        let (mut b, at) = corner(&mut k, FRAC_PI_2);
+        let edge = pick(&k, &b, at);
+        let size = ChamferSize::Distances([4.0, 6.0]);
+        let body = weld_bead_body(&mut k, &mut b, &[edge], &[size], h, &[], &[], SQUARE).unwrap();
+        drop(b);
+        cases.push((format!("plates h {h}"), body, 1, h, [4.0, 6.0]));
+    }
+    {
+        let mut k = kernel();
+        let (mut part, joints) = tubes(&mut k, &branch_on_main(10.0, Vec3::new(1.0, 0.0, 0.0)));
+        let size = ChamferSize::Distances([4.0; 2]);
+        let body =
+            weld_bead_body(&mut k, &mut part, &joints, &[size], 1.0, &[], &[], SQUARE).unwrap();
+        drop(part);
+        cases.push(("tubes h 1".into(), body, 4, 1.0, [4.0; 2]));
+    }
+    let k = kernel();
+    for (what, body, faces, h, legs) in cases {
+        let found = foot_faces(&body);
+        assert_eq!(found.len(), faces, "{what}");
+        for (_, s) in found {
+            let blend = s.procedural_blend().unwrap();
+            assert_eq!(blend.order(), 0, "{what}");
+            assert_eq!(blend.bound(), WELD_FIT_TOLERANCE, "{what}");
+            // (the face names no support: a foot blend's stay where the bead was made)
+            assert!(blend.support(0).is_none() && blend.support(1).is_none());
+            let def = blend.foot_blend().unwrap();
+            assert!(def.support(0).is_some() && def.support(1).is_some());
+            assert_eq!(def.legs(), legs, "{what}");
+            assert_eq!(def.sagitta(), h, "{what}");
+            assert_eq!(def.spans().len(), 1, "{what}");
+            assert_eq!(def.ends(), SQUARE, "{what}");
+            assert_eq!(blend.recertify(&k).unwrap(), WELD_FIT_TOLERANCE, "{what}");
+            let rec = foot_blend_to_record(&k, &s).unwrap();
+            let json = serde_json::to_string(&rec).unwrap();
+            let back: FootBlendRecord = serde_json::from_str(&json).unwrap();
+            assert_eq!(back, rec, "{what}");
+            let rebuilt = foot_blend_rebuild(&k, &back).unwrap();
+            let again = rebuilt.procedural_blend().unwrap().foot_blend().unwrap();
+            assert_eq!(again.legs(), legs, "{what}");
+            assert_eq!(again.sagitta(), h, "{what}");
+        }
+    }
+}
+
+/// A foot blend's record whose numbers were changed is refused when rebuilt: a leg, the
+/// sagitta, a side, the face's piece of the leader (its net is not the definition's then);
+/// and records the structural check refuses: a side that is not +1 or -1, a leg that is not
+/// positive, a piece outside the spans, a tolerance that is not positive.
+#[test]
+fn a_changed_foot_blend_record_is_refused() {
+    use solidcore::surface::procedural_blend::convert::{foot_blend_rebuild, foot_blend_to_record};
+    use solidcore::surface::procedural_blend::record::FootBlendRecord;
+    type Change = (&'static str, fn(&mut FootBlendRecord));
+    let mut k = kernel();
+    let (mut b, at) = corner(&mut k, FRAC_PI_2);
+    let edge = pick(&k, &b, at);
+    let size = ChamferSize::Distances([5.0; 2]);
+    let body = weld_bead_body(&mut k, &mut b, &[edge], &[size], 1.0, &[], &[], SQUARE).unwrap();
+    let (_, s) = foot_faces(&body).remove(0);
+    let rec = foot_blend_to_record(&k, &s).unwrap();
+    assert!(foot_blend_rebuild(&k, &rec).is_ok());
+    let changes: [Change; 8] = [
+        ("a leg", |r| r.legs[0] *= 1.01),
+        ("the sagitta", |r| r.sagitta *= 1.1),
+        ("a side", |r| r.sides[1] = -r.sides[1]),
+        ("the piece", |r| {
+            let [a, b] = r.interval;
+            r.interval = [a, a + 0.5 * (b - a)];
+        }),
+        ("a side not a sign", |r| r.sides[0] = 0.5),
+        ("a leg not positive", |r| r.legs[1] = -1.0),
+        ("a piece outside the spans", |r| {
+            r.spans = vec![[-3.0, -2.0]];
+        }),
+        ("the tolerance", |r| r.tol = 0.0),
+    ];
+    for (what, change) in changes {
+        let mut off = rec.clone();
+        change(&mut off);
+        assert!(foot_blend_rebuild(&k, &off).is_err(), "{what} rebuilt");
+    }
+}
+
+/// A toe past its face is refused before anything is built, naming the face, with the
+/// largest leg on that side whose toe stays on it (each face here runs 40 mm from the
+/// corner's edge); that leg builds. The corner's file is unchanged.
+#[test]
+fn a_toe_past_its_face_is_refused_with_the_leg_that_fits() {
+    use solidcore::error::{ErrorKind, FitMeasure};
+    let mut k = kernel();
+    let (mut b, at) = corner(&mut k, FRAC_PI_2);
+    let edge = pick(&k, &b, at);
+    let before = smb(&k, &b);
+    let size = ChamferSize::Distances([45.0, 5.0]);
+    let err = weld_bead_body(&mut k, &mut b, &[edge], &[size], 0.0, &[], &[], SQUARE)
+        .err()
+        .unwrap();
+    assert!(smb(&k, &b) == before, "the corner changed");
+    assert_eq!(err.kind(), ErrorKind::FilletTooLarge, "{err}");
+    let fit = err.fit().unwrap();
+    assert_eq!(fit.measure, FitMeasure::Leg, "{err}");
+    assert!(fit.size > 39.9 && fit.size <= 40.0 + 1e-6, "{err}");
+    assert!(err.site().is_some_and(|s| s.face.is_some()), "{err:?}");
+    let size = ChamferSize::Distances([fit.size, 5.0]);
+    assert!(
+        weld_bead_body(&mut k, &mut b, &[edge], &[size], 0.0, &[], &[], SQUARE).is_ok(),
+        "the leg that fits builds"
+    );
+    assert!(smb(&k, &b) == before, "the corner changed");
+}
+
+/// A sagitta past its bound is refused with the bound: between planes at 90 degrees with 5 mm
+/// legs the concave bound is (c / 2) tan(22.5 degrees) = 1.4645, the sagitta that fits a hair
+/// below it, which builds. Round the T-joint a concave bead too deep names a depth that fits,
+/// and a bead a tenth shallower than it builds. Neither part changes.
+#[test]
+fn a_sagitta_past_its_bound_is_refused_with_the_sagitta_that_fits() {
+    use solidcore::error::{ErrorKind, FitMeasure};
+    let mut k = kernel();
+    let (mut b, at) = corner(&mut k, FRAC_PI_2);
+    let edge = pick(&k, &b, at);
+    let before = smb(&k, &b);
+    let size = ChamferSize::Distances([5.0; 2]);
+    let err = weld_bead_body(&mut k, &mut b, &[edge], &[size], -1.47, &[], &[], SQUARE)
+        .err()
+        .unwrap();
+    assert_eq!(err.kind(), ErrorKind::FilletTooLarge, "{err}");
+    let fit = err.fit().unwrap();
+    assert_eq!(fit.measure, FitMeasure::Sagitta, "{err}");
+    let bound = 5.0 * 2f64.sqrt() / 2.0 * (PI / 8.0).tan();
+    assert!((fit.size - bound).abs() <= 1e-6, "{err}: against {bound}");
+    assert!(weld_bead_body(
+        &mut k,
+        &mut b,
+        &[edge],
+        &[size],
+        -fit.size,
+        &[],
+        &[],
+        SQUARE
+    )
+    .is_ok());
+    assert!(smb(&k, &b) == before, "the corner changed");
+
+    let (mut part, joints) = tubes(&mut k, &branch_on_main(10.0, Vec3::new(1.0, 0.0, 0.0)));
+    let before = smb(&k, &part);
+    let size = ChamferSize::Distances([4.0; 2]);
+    let err = weld_bead_body(&mut k, &mut part, &joints, &[size], -1.3, &[], &[], SQUARE)
+        .err()
+        .unwrap();
+    assert_eq!(err.kind(), ErrorKind::FilletTooLarge, "{err}");
+    let fit = err.fit().unwrap();
+    assert_eq!(fit.measure, FitMeasure::Sagitta, "{err}");
+    assert!(fit.size > 0.2 && fit.size < 1.3, "{err}");
+    assert!(weld_bead_body(
+        &mut k,
+        &mut part,
+        &joints,
+        &[size],
+        -0.9 * fit.size,
+        &[],
+        &[],
+        SQUARE
+    )
+    .is_ok());
+    assert!(smb(&k, &part) == before, "the tubes changed");
+}
+
+/// Two spans round the T-joint (a stitch): one body of two lumps, each span its section face,
+/// a strip on each tube and two square end caps (10 faces), sound; each section face keeps
+/// both spans and the square ends in its definition; the tubes are unchanged.
+#[test]
+fn spans_round_a_tube_joint_are_one_body_of_lumps() {
+    let mut k = kernel();
+    let (mut part, joints) = tubes(&mut k, &branch_on_main(10.0, Vec3::new(1.0, 0.0, 0.0)));
+    let before = smb(&k, &part);
+    let size = ChamferSize::Distances([4.0; 2]);
+    let spans = BeadSpan::along(&[(0.1, 0.4), (0.6, 0.9)]).unwrap();
+    let mut body = weld_bead_body(
+        &mut k,
+        &mut part,
+        &joints,
+        &[size],
+        1.0,
+        &[],
+        &spans,
+        SQUARE,
+    )
+    .unwrap();
+    assert!(smb(&k, &part) == before, "the tubes changed");
+    assert_eq!(body.face_list().len(), 10);
+    assert_sound(&mut k, &mut body, "two spans round the joint");
+    let found = foot_faces(&body);
+    assert_eq!(found.len(), 2);
+    for (_, s) in found {
+        let def = s.procedural_blend().unwrap().foot_blend().unwrap();
+        assert_eq!(def.spans().len(), 2);
+        let [a, b] = def.interval();
+        assert!(def.spans().iter().any(|[s, t]| *s <= a && b <= *t));
+    }
+    // the stitch is less than the whole bead, and more than the spans' share of it
+    let mut whole =
+        weld_bead_body(&mut k, &mut part, &joints, &[size], 1.0, &[], &[], SQUARE).unwrap();
+    let (got, all) = (
+        volume_to(&k, &mut body, 1e-5),
+        volume_to(&k, &mut whole, 1e-5),
+    );
+    assert!(got < all && got > 0.4 * all, "{got} of {all}");
+}
+
+/// Tapered and rounded ends: between planes with a sagitta the bead is the planar sweep cut at
+/// its ends, one body of a lump per span (here a taper at each start and a round at each
+/// end); a flat bead's (sagitta 0) between the same planes, and those on the T-joint, are not
+/// built yet: typed refusals naming the edge, each saying what is missing. Neither part
+/// changes.
+#[test]
+fn shaped_ends_are_built_between_planes_and_refused_round_a_tube() {
+    use solidcore::error::ErrorKind;
+    let mut k = kernel();
+    let (mut b, at) = corner(&mut k, FRAC_PI_2);
+    let edge = pick(&k, &b, at);
+    let before = smb(&k, &b);
+    let size = ChamferSize::Distances([SETBACK; 2]);
+    let spans = BeadSpan::along(&[(0.1, 0.4), (0.6, 0.95)]).unwrap();
+    let ends = [BeadEnd::Taper, BeadEnd::Round];
+    let mut body =
+        weld_bead_body(&mut k, &mut b, &[edge], &[size], 1.0, &[], &spans, ends).unwrap();
+    assert!(smb(&k, &b) == before, "the corner changed");
+    assert_sound(&mut k, &mut body, "shaped spans between planes");
+    // the same spans ended square: the section along the spans' shares of the edge
+    let share: f64 = spans.iter().map(BeadSpan::share).sum();
+    let square = bead_section(FRAC_PI_2, 1.0, 0.0).0.section_area() * LENGTH * share;
+    let got = volume(&k, &mut body);
+    assert!(got < square && got > 0.8 * square, "{got} against {square}");
+    let err = weld_bead_body(&mut k, &mut b, &[edge], &[size], 0.0, &[], &spans, ends)
+        .err()
+        .unwrap();
+    assert_eq!(err.kind(), ErrorKind::Unsupported, "{err}");
+    assert!(err.to_string().contains("flat bead"), "{err}");
+    assert!(err.site().is_some_and(|s| s.edge.is_some()), "{err:?}");
+    assert!(smb(&k, &b) == before, "the corner changed");
+
+    let (mut part, joints) = tubes(&mut k, &branch_on_main(10.0, Vec3::new(1.0, 0.0, 0.0)));
+    let before = smb(&k, &part);
+    let size = ChamferSize::Distances([4.0; 2]);
+    let err = weld_bead_body(&mut k, &mut part, &joints, &[size], 1.0, &[], &spans, ends)
+        .err()
+        .unwrap();
+    assert_eq!(err.kind(), ErrorKind::Unsupported, "{err}");
+    assert!(err.to_string().contains("between two planes"), "{err}");
+    assert!(err.site().is_some_and(|s| s.edge.is_some()), "{err:?}");
+    assert!(smb(&k, &part) == before, "the tubes changed");
+}
+
+/// A moved bead keeps its motion: each section face's surface turned, moved and scaled by 2
+/// still re-checks against its definition (the motion replayed on the rebuilt net), and names
+/// no support (its supports stay where the bead was made, as a section blend's has none). A
+/// scale that is not uniform is refused: the legs would no longer be the net's.
+#[test]
+fn a_moved_bead_keeps_its_motion_and_a_scale_not_uniform_is_refused() {
+    let mut k = kernel();
+    let (mut b, at) = corner(&mut k, FRAC_PI_2);
+    let edge = pick(&k, &b, at);
+    let size = ChamferSize::Distances([SETBACK; 2]);
+    let body = weld_bead_body(&mut k, &mut b, &[edge], &[size], 1.0, &[], &[], SQUARE).unwrap();
+    let mut turn = Axis2Placement::IDENTITY;
+    turn.rotate_about_axis(0.7, Vec3::new(1.0, 2.0, 2.0) * (1.0 / 3.0));
+    turn.translate(Vec3::new(5.0, -3.0, 7.0));
+    let found = foot_faces(&body);
+    assert!(!found.is_empty());
+    for (_, made) in found {
+        let mut moved = made.clone();
+        moved
+            .transform(&k, &turn, Some(Vec3::new(2.0, 2.0, 2.0)))
+            .unwrap();
+        let def = moved.procedural_blend().unwrap();
+        assert!(def.support(0).is_none() && def.support(1).is_none());
+        assert!(def.foot_blend().is_some_and(|d| d.support(0).is_some()));
+        assert!(
+            def.recertify(&k).is_ok(),
+            "a moved face is no longer its definition's"
+        );
+        let mut stretched = made.clone();
+        let r = stretched.transform(&k, &turn, Some(Vec3::new(1.0, 2.0, 1.0)));
+        assert!(r.is_err(), "a scale that is not uniform moved a weld bead");
+    }
+}
+
+/// A toe on its face's surface but off the face, in a notch cut out of one arm (x from 30 mm,
+/// z from 40 to 60 mm), is refused before anything is built, naming that face, with the
+/// largest leg on its side whose toes stay on it: 30 mm, which builds. The part is unchanged.
+#[test]
+fn a_toe_in_a_notch_of_its_face_is_refused_with_the_leg_that_fits() {
+    use solidcore::boolean::api_brep::boolean_difference;
+    use solidcore::error::{ErrorKind, FitMeasure};
+    use solidcore::primitive::api_primitives::create_box;
+    let mut k = kernel();
+    let (b, at) = corner(&mut k, FRAC_PI_2);
+    let notch = create_box(&mut k, Point3::new(30.0, -12.0, 40.0), 15.0, 13.0, 20.0).unwrap();
+    let mut b = boolean_difference(&mut k, b, notch).unwrap();
+    let edge = pick(&k, &b, at);
+    let before = smb(&k, &b);
+    let size = ChamferSize::Distances([35.0, 35.0]);
+    let err = weld_bead_body(&mut k, &mut b, &[edge], &[size], 0.0, &[], &[], SQUARE)
+        .err()
+        .unwrap();
+    assert!(smb(&k, &b) == before, "the part changed");
+    assert_eq!(err.kind(), ErrorKind::FilletTooLarge, "{err}");
+    let fit = err.fit().unwrap();
+    assert_eq!(fit.measure, FitMeasure::Leg, "{err}");
+    assert!(fit.size > 29.9 && fit.size <= 30.0 + 1e-3, "{err}");
+    assert!(err.site().is_some_and(|s| s.face.is_some()), "{err:?}");
+    assert!(format!("{err:?}").contains("LegPastFace"), "{err:?}");
+    let fits = ChamferSize::Distances([fit.size, fit.size]);
+    assert!(weld_bead_body(&mut k, &mut b, &[edge], &[fits], 0.0, &[], &[], SQUARE).is_ok());
+    assert!(smb(&k, &b) == before, "the part changed");
+}
+
+// ---- the feet proved between the stations (the certificate, step 1) ----
+
+/// Between planes at 60, 90 and 120 degrees (equal and unequal legs) and round the tube
+/// T-joint, every span between the section face's stations is proved: for each support, one
+/// foot in a box about the stations' feet for every point of the span (Krawczyk), the
+/// stations' own feet in it. The pieces cover every span; the T-joint's count is printed.
+#[test]
+fn the_feet_are_proved_between_the_stations() {
+    use solidcore::blend::foot_blend::{FootBlend, WELD_FIT_TOLERANCE};
+    for adeg in [60.0_f64, 90.0, 120.0] {
+        for legs in [[5.0, 5.0], [4.0, 8.0]] {
+            let mut k = kernel();
+            let (mut b, at) = corner(&mut k, adeg.to_radians());
+            let edge = pick(&k, &b, at);
+            let blend = FootBlend::of_edge(&k, &mut b, edge, None).unwrap();
+            for h in [0.0, 1.0] {
+                let proof = blend
+                    .prove_section(&k, legs, h, WELD_FIT_TOLERANCE)
+                    .unwrap();
+                assert!(proof.pieces >= 3, "{adeg} {legs:?} {h}: {proof:?}");
+            }
+        }
+    }
+    let mut k = kernel();
+    let (mut part, joints) = tubes(&mut k, &branch_on_main(10.0, Vec3::new(1.0, 0.0, 0.0)));
+    let blend = FootBlend::of_edge(&k, &mut part, joints[0], None).unwrap();
+    let started = std::time::Instant::now();
+    let proof = blend
+        .prove_section(&k, [4.0, 4.0], 1.0, WELD_FIT_TOLERANCE)
+        .unwrap();
+    println!(
+        "T-joint, legs 4, h 1: {} pieces, {} halvings, section face and proof {:?}",
+        proof.pieces,
+        proof.halvings,
+        started.elapsed()
+    );
+    assert!(proof.pieces >= 94, "{proof:?}");
+}
+
+/// The proof is not empty: stations whose last foot was moved onto the other branch (across
+/// the edge, on the plane's continuation) are not proved, a typed failure, not a pass.
+#[test]
+fn a_foot_on_the_other_branch_is_not_proved() {
+    use solidcore::blend::foot_blend::FootBlend;
+    use solidcore::error::blend::BlendFailure;
+    let mut k = kernel();
+    let (mut b, at) = corner(&mut k, FRAC_PI_2);
+    let edge = pick(&k, &b, at);
+    let blend = FootBlend::of_edge(&k, &mut b, edge, None).unwrap();
+    let (lo, hi) = (blend.interval.min(), blend.interval.max());
+    let legs = [5.0, 5.0];
+    let mut stations = Vec::new();
+    for f in [0.0, 0.25, 0.5] {
+        let near = stations.last();
+        stations.push(blend.station(&k, lo + f * (hi - lo), legs, near).unwrap());
+    }
+    assert!(blend.prove_feet(&k, legs, &stations).is_ok());
+    let last = stations.last_mut().unwrap();
+    last.feet[0] = last.root - (last.feet[0] - last.root);
+    let err = blend.prove_feet(&k, legs, &stations).err().unwrap();
+    assert!(
+        matches!(
+            err.blend_failure(),
+            Some(BlendFailure::NotCertified { .. } | BlendFailure::NoRoom(_))
+        ),
+        "{err:?}"
+    );
+}
+
+/// An L of walls standing on a floor plate, joined by booleans: the floor [-60, 60]^2 x
+/// [-10, 0], walls x in [0, 50], y in [0, 10] and x in [0, 10], y in [0, 50], 40 high. The
+/// booleans leave some of its edge uses without their uv curves (saved as none), which the
+/// kernel makes on demand when a point is classified on a face. The bead along a wall ends
+/// where the wall does, so its last toes lie on the wall face's boundary.
+fn walls_on_a_floor(k: &mut Kernel) -> Brep {
+    use solidcore::boolean::api_brep::boolean_union;
+    use solidcore::primitive::api_primitives::create_box;
+    let floor = create_box(k, Point3::new(-60.0, -60.0, -10.0), 120.0, 120.0, 10.0).unwrap();
+    let a = create_box(k, Point3::new(0.0, 0.0, 0.0), 50.0, 10.0, 40.0).unwrap();
+    let b = create_box(k, Point3::new(0.0, 0.0, 0.0), 10.0, 50.0, 40.0).unwrap();
+    let walls = boolean_union(k, a, b).unwrap();
+    boolean_union(k, floor, walls).unwrap()
+}
+
+/// The toes are checked on their faces by reading the part only: a part saved without some
+/// edge uses' uv curves (the walls on a floor: the classification would make them in the
+/// part) keeps its file byte for byte, whether its bead is built or refused for a toe past
+/// its face (the wall runs 40 mm up from the joint here, so the refusal names 40 mm). Toes on
+/// a face's boundary (the bead's last station, where the wall ends) count as on the face.
+#[test]
+fn a_part_without_some_uv_curves_is_only_read() {
+    use solidcore::error::{ErrorKind, FitMeasure};
+    let mut k = kernel();
+    let mut part = walls_on_a_floor(&mut k);
+    let before = smb(&k, &part);
+    let without = String::from_utf8_lossy(&before).contains(" 9999999 ");
+    assert!(
+        without,
+        "every edge use of the walls has its uv curve: the test checks nothing"
+    );
+    let edge = pick(&k, &part, [20.0, 0.0, 0.0]);
+    let size = ChamferSize::Distances([SETBACK; 2]);
+    for h in [0.0, 1.0] {
+        let mut body =
+            weld_bead_body(&mut k, &mut part, &[edge], &[size], h, &[], &[], SQUARE).unwrap();
+        assert_sound(&mut k, &mut body, &format!("the bead on the walls, h {h}"));
+        assert!(smb(&k, &part) == before, "h {h}: the walls changed");
+    }
+    let size = ChamferSize::Distances([45.0; 2]);
+    let err = weld_bead_body(&mut k, &mut part, &[edge], &[size], 0.0, &[], &[], SQUARE)
+        .err()
+        .unwrap();
+    assert!(smb(&k, &part) == before, "the walls changed");
+    assert_eq!(err.kind(), ErrorKind::FilletTooLarge, "{err}");
+    let fit = err.fit().unwrap();
+    assert_eq!(fit.measure, FitMeasure::Leg, "{err}");
+    assert!(fit.size > 39.0 && fit.size <= 40.0 + 1e-6, "{err}");
+}
+
+// ---- the exact bead's refusals and the part left as it was ----
 
 /// `err` is the refusal of a bead not built yet for `gap` (class `Unsupported`).
 fn assert_not_built(err: &SolidError, gap: WeldGap) {
@@ -1135,7 +2254,7 @@ fn unequal_legs_run_their_first_leg_along_the_face_picked() {
 /// Two beads that meet at a vertex are refused before anything is built, as a bead not built
 /// yet naming the vertex, and the corner's file is unchanged.
 #[test]
-fn beads_that_meet_at_a_vertex_are_refused_naming_it() {
+fn beads_apart_that_meet_at_a_vertex_are_refused_naming_it() {
     let mut k = kernel();
     let (mut b, at) = corner(&mut k, FRAC_PI_2);
     let first = pick(&k, &b, at);
@@ -1192,7 +2311,23 @@ fn an_outside_or_a_tangent_edge_is_refused() {
         "outside: {err:?}"
     );
     assert!(smb(&k, &b) == before, "outside: the corner changed");
-    // a tangent edge: a block whose bottom is two faces of y = 0 meeting at x = 10
+    let (mut block, tangent) = tangent_block(&mut k);
+    assert_eq!(
+        edge::faces(&block, tangent, None).unwrap().len(),
+        2,
+        "the tangent edge lies between two faces"
+    );
+    let before = smb(&k, &block);
+    let err = beads_apart(&mut k, &mut block, &[tangent], &[size], 1.0, &[]).unwrap_err();
+    assert!(
+        matches!(err, SolidError::InvalidInput { .. }),
+        "tangent: {err:?}"
+    );
+    assert!(smb(&k, &block) == before, "tangent: the block changed");
+}
+
+/// A block whose bottom is two faces of y = 0 meeting at x = 10, and that tangent edge.
+fn tangent_block(k: &mut Kernel) -> (Brep, EdgeId) {
     let points = [
         (0.0, 0.0),
         (10.0, 0.0),
@@ -1210,21 +2345,33 @@ fn an_outside_or_a_tangent_edge_is_refused() {
         })
         .collect();
     let refs: Vec<Option<&Curve>> = curves.iter().map(Some).collect();
-    let mut block =
-        create_linear_sweep(&mut k, &refs, Vec3::new(0.0, 0.0, 1.0), LENGTH, true).unwrap();
-    let tangent = pick(&k, &block, [10.0, 0.0, LENGTH / 2.0]);
-    assert_eq!(
-        edge::faces(&block, tangent, None).unwrap().len(),
-        2,
-        "the tangent edge lies between two faces"
-    );
-    let before = smb(&k, &block);
-    let err = beads_apart(&mut k, &mut block, &[tangent], &[size], 1.0, &[]).unwrap_err();
-    assert!(
-        matches!(err, SolidError::InvalidInput { .. }),
-        "tangent: {err:?}"
-    );
-    assert!(smb(&k, &block) == before, "tangent: the block changed");
+    let block = create_linear_sweep(k, &refs, Vec3::new(0.0, 0.0, 1.0), LENGTH, true).unwrap();
+    let tangent = pick(k, &block, [10.0, 0.0, LENGTH / 2.0]);
+    (block, tangent)
+}
+
+/// The bead's body, made through the foot blend, is refused on an outside and on a tangent
+/// edge for the same reason as the bead apart, and the part's file is unchanged.
+#[test]
+fn a_bead_body_on_an_outside_or_a_tangent_edge_is_refused() {
+    let mut k = kernel();
+    let size = ChamferSize::Distances([SETBACK; 2]);
+    let (mut b, _) = corner(&mut k, FRAC_PI_2);
+    let outside = pick(&k, &b, [40.0, 0.0, LENGTH / 2.0]);
+    let (mut block, tangent) = tangent_block(&mut k);
+    for (name, part, e) in [
+        ("outside", &mut b, outside),
+        ("tangent", &mut block, tangent),
+    ] {
+        let before = smb(&k, part);
+        let err = weld_bead_body(&mut k, part, &[e], &[size], 1.0, &[], &[], SQUARE).unwrap_err();
+        assert!(
+            matches!(err, SolidError::InvalidInput { .. })
+                && err.to_string().contains("inside corner"),
+            "{name}: {err:?}"
+        );
+        assert!(smb(&k, part) == before, "{name}: the part changed");
+    }
 }
 
 /// A joint that is not a straight edge between two planes (the circle where a cylinder meets

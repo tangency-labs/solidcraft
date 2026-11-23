@@ -1734,9 +1734,15 @@ pub enum WeldGap {
     /// Beads that meet at a vertex need a corner piece (#17916); the failure's site names the
     /// vertex.
     BeadsMeetAtVertex,
-    /// A joint that is not a straight edge between two planes: only the exact planar bead is
-    /// built so far; the bead on any joint (the foot blend) comes with its certificate
-    /// (#18028). The failure's site names the edge.
+    /// A tapered or rounded end of a bead on a joint that is not straight between two planes:
+    /// only the planar sweep cuts those ends so far; the foot blend ends square.
+    EndShapeOnCurvedJoint,
+    /// A tapered or rounded end of a flat bead (sagitta 0): the planar sweep that cuts those
+    /// ends takes only a bead with a sagitta so far, even straight between two planes.
+    EndShapeOfFlatBead,
+    /// A joint that is not a straight edge between two planes for the exact planar bead
+    /// ([`crate::blend::weld_bead::beads_apart`]); the bead on any joint is the foot blend's
+    /// ([`crate::blend::weld_bead::bead_body`]). The failure's site names the edge.
     CurvedJoint,
     /// A bead whose toe on one face is obtuse (its second leg at most its first times the
     /// cosine of the angle between the faces, or the other way round): the exact planar
@@ -2490,9 +2496,19 @@ impl core::fmt::Display for BlendFailure {
                 "{}: weld beads that meet at a vertex are not built yet (their corner, #17916)",
                 self.class()
             ),
+            Self::WeldNotBuilt(WeldGap::EndShapeOnCurvedJoint) => write!(
+                f,
+                "{}: a tapered or rounded bead end is built only straight between two planes so far",
+                self.class()
+            ),
+            Self::WeldNotBuilt(WeldGap::EndShapeOfFlatBead) => write!(
+                f,
+                "{}: a tapered or rounded end of a flat bead (sagitta 0) is not built yet; give the bead a sagitta",
+                self.class()
+            ),
             Self::WeldNotBuilt(WeldGap::CurvedJoint) => write!(
                 f,
-                "{}: a weld bead is built only along a straight edge between two planes so far",
+                "{}: the exact weld bead is built only along a straight edge between two planes; the bead body builds on any joint",
                 self.class()
             ),
             Self::WeldNotBuilt(WeldGap::ObtuseToe) => write!(
@@ -2963,6 +2979,14 @@ mod tests {
             // a weld bead not built yet: neither a defect nor a refusal
             (
                 BlendFailure::WeldNotBuilt(WeldGap::BeadsMeetAtVertex),
+                ErrorKind::Unsupported,
+            ),
+            (
+                BlendFailure::WeldNotBuilt(WeldGap::EndShapeOnCurvedJoint),
+                ErrorKind::Unsupported,
+            ),
+            (
+                BlendFailure::WeldNotBuilt(WeldGap::EndShapeOfFlatBead),
                 ErrorKind::Unsupported,
             ),
             (
