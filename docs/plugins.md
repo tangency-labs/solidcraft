@@ -421,6 +421,27 @@ reports missing picks beside their fields, and asks the person to review and App
 If the design changes while a worker computes, atomic command acceptance rejects its result.
 No stale result can overwrite the current design.
 
+### Shared field definitions
+
+When several entries ask for the same field, define it once under `$defs` and point to it with
+`{"$ref": "#/$defs/<name>"}`. The `$defs` can sit at the top of the manifest, where every entry
+can use it, or in one entry's `input_schema`, where it wins over a top-level definition of the
+same name. Keys beside a `$ref` replace the definition's own, so an entry can keep the shared choices
+with its own `default` or `description`:
+
+```json
+"$defs": {"units": {"type": "string", "title": "Units", "enum": ["mm", "in"], "default": "mm"}},
+"runtime": {"entries": [
+  {"name": "box", "input_schema": {"type": "object", "properties": {"units": {"$ref": "#/$defs/units"}}}},
+  {"name": "lid", "input_schema": {"type": "object", "properties": {"units": {"$ref": "#/$defs/units", "default": "in"}}}}
+]}
+```
+
+The app inlines every `$ref` once, when it loads the manifest, so dialogs, tools, conditions and
+input checks see the full field. Only these local names are followed. An unknown name, a definition
+that refers back to itself, or nesting too deep to expand refuses the manifest. The 64 KiB cap
+applies to `plugin.json` as written.
+
 ### Conditional fields, choices and defaults
 
 Command dialogs evaluate declarative conditions on sibling scalar properties. Changing a field
