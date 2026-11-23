@@ -145,10 +145,7 @@ pub fn create_plane_from_bbox(
         Ok(Some(plane)) => Ok(Some(Surface::from(plane))),
         Ok(None) => Err(SolidError::topology(
             OP_PLANE,
-            TopologyFailure::Defect {
-                why: "the bilinear surface through the four corners is not a plane, though \
-                      the corners are built in one plane",
-            },
+            TopologyFailure::SectionPlaneNotMade,
         )),
         Err(e) if e.is_unported_or_cancelled() => Err(e),
         // (an `SER` inside reads as `TRUE` and leaves no plane)

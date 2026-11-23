@@ -174,6 +174,7 @@
 //! | [`TopologyFailure::EdgeEndOffVertex`] | `SM_ERR` |
 //! | [`TopologyFailure::MatrixNotDecomposed`] | `SM_ERR` |
 //! | [`TopologyFailure::MergedGroupNotOneFace`] | `SM_ERR` |
+//! | [`TopologyFailure::SectionPlaneNotMade`] | `SM_ERR` |
 //!
 //! A named cause keeps the status of the phrase it replaced, unless its site overrides it
 //! through `with_status`.
@@ -790,6 +791,9 @@ pub enum TopologyFailure {
     /// A group of faces the merge joined across removed edges left other than one face. Class
     /// `failed`.
     MergedGroupNotOneFace,
+    /// The four corners spanned around the box's section on the plane make no plane: they
+    /// collapse for a box of no size, or round together far from the origin. Class `failed`.
+    SectionPlaneNotMade,
 }
 
 /// What a B-rep constructor call works in ([`TopologyFailure::ConstructorNotOpen`],
@@ -943,7 +947,8 @@ impl TopologyFailure {
             | Self::CurveNotOwnedByEdge
             | Self::EdgeEndOffVertex { .. }
             | Self::MatrixNotDecomposed
-            | Self::MergedGroupNotOneFace => SM_ERR,
+            | Self::MergedGroupNotOneFace
+            | Self::SectionPlaneNotMade => SM_ERR,
             // upstream's `TRUE`: the repair's note, not an error status
             Self::SheetReoriented => 1,
             Self::Missing(_)
@@ -1486,6 +1491,9 @@ impl core::fmt::Display for TopologyFailure {
             }
             Self::MergedGroupNotOneFace => {
                 f.write_str("merged faces that do not leave exactly one face")
+            }
+            Self::SectionPlaneNotMade => {
+                f.write_str("the corners around the box's section make no plane")
             }
         }
     }
@@ -2461,6 +2469,7 @@ mod tests {
             ),
             (TopologyFailure::MatrixNotDecomposed, SM_ERR, K::Failed),
             (TopologyFailure::MergedGroupNotOneFace, SM_ERR, K::Failed),
+            (TopologyFailure::SectionPlaneNotMade, SM_ERR, K::Failed),
         ];
         for (failure, status, kind) in cases {
             let e = SolidError::topology(op, failure);
