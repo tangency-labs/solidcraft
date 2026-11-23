@@ -155,8 +155,10 @@
 //! line parameter hulls, whether it reaches an end of the line's own interval, whether it
 //! lies in or touches a leaf at the limit, a leaf not run or a stretch nothing searched, and
 //! the certified roots in it. Each is undecided until the typing of components. The solve's
-//! [`side_record`] ([`SideRecord`], owned by its solution array) is not run when no leaf's
-//! pass ran, complete when no component is left and every cull has its strip, and undecided
+//! [`side_record`] ([`SideRecord`], owned by its solution array) is not run when no solved
+//! leaf's pass ran, whatever the strips found (the strips are then not enclosed), or, with
+//! every leaf culled, when no strip ran; complete when no component is left and every cull
+//! has its strip; and undecided
 //! otherwise, over each component's line parameters and over the whole line's interval
 //! where a cull's strip could not be placed. Nothing reads the records yet.
 //!
@@ -1885,19 +1887,24 @@ fn facing(b: &PlacedBox, leaves: &[SearchedLeaf], sides: &[LeafSides]) -> Touche
     touches
 }
 
-/// The side record of a solve (module docs, "Components"): not run when no searched leaf's
-/// pass ran; otherwise undecided over every component's line parameters (each undecided
-/// until the typing of components) and over the whole of the line's own interval `span`
-/// where a cull's strip could not be placed (`unplaced`: nothing has enclosed it) or the
-/// components passed their bounds; complete only with none of these. A strip's boxes it
-/// left undecided are in the components, over their own line parameters.
+/// The side record of a solve (module docs, "Components"): not run when the solve has a
+/// leaf the traversal solved and no such leaf's pass ran, whatever its culled strips found
+/// (the solutions are then the guesses' alone, and a strip's boxes undecided around a leaf
+/// not run narrow nothing), or when it has none and no strip ran; otherwise undecided over
+/// every component's line parameters (each undecided until the typing of components) and
+/// over the whole of the line's own interval `span` where a cull's strip could not be
+/// placed (`unplaced`: nothing has enclosed it) or the components passed their bounds;
+/// complete only with none of these. A strip's boxes it left undecided are in the
+/// components, over their own line parameters. A leaf whose pass ran beside leaves not run
+/// leaves the record undecided: a finished one may have added certified roots, so the
+/// solutions are no longer the guesses' alone.
 pub(crate) fn side_record(
     leaves: &[SearchedLeaf],
     components: &Components,
     unplaced: bool,
     span: [f64; 2],
 ) -> SideRecord {
-    if !leaves.is_empty() && leaves.iter().all(|l| l.stop == Stop::NotRun) {
+    if leaves_not_run(leaves) {
         return SideRecord::NotRun;
     }
     let [s0, s1] = span;
@@ -1918,6 +1925,19 @@ pub(crate) fn side_record(
         SideRecord::Complete
     } else {
         SideRecord::undecided(spans)
+    }
+}
+
+/// Whether the side record of a solve over `leaves` is not run ([`side_record`]): the
+/// passes of the leaves the traversal solved (not the culled strips) all did not run, or,
+/// with no such leaf (every leaf culled), there are strips and none of them ran. (`all` over
+/// no leaves is true, hence the second case's own test.)
+pub(crate) fn leaves_not_run(leaves: &[SearchedLeaf]) -> bool {
+    let mut solved = leaves.iter().filter(|l| !l.strip).peekable();
+    if solved.peek().is_some() {
+        solved.all(|l| l.stop == Stop::NotRun)
+    } else {
+        !leaves.is_empty() && leaves.iter().all(|l| l.stop == Stop::NotRun)
     }
 }
 
@@ -3596,6 +3616,70 @@ mod tests {
         assert!(c.list[0].touches.not_run);
         assert_eq!(
             side_record(&leaves, &c, false, span),
+            SideRecord::Undecided(vec![span])
+        );
+        // (a leaf whose pass stopped at its limit beside one not run: undecided too)
+        let leaves = [leaf(Stop::AtLimit), leaf(Stop::NotRun)];
+        let c = components(&leaves, &leaf_sides(&[domain, domain], &domain), span);
+        assert_eq!(
+            side_record(&leaves, &c, false, span),
+            SideRecord::Undecided(vec![span])
+        );
+
+        // every solved leaf not run: not run, whatever its strips found (a strip that
+        // finished with a box kept, one with none, one at its limit) and with a cull unplaced
+        let strip = |stop, floor: Vec<FloorBox>| SearchedLeaf {
+            strip: true,
+            ..leaf_of(domain, stop, Some(floor))
+        };
+        let kept = vec![FloorBox {
+            t: Some(Ivl::new(0.4, 0.6)),
+            ..rec(FloorKind::Culled, [0.2, 0.3], [0.2, 0.3])
+        }];
+        let leaves = [
+            leaf(Stop::NotRun),
+            strip(Stop::Finished, kept.clone()),
+            strip(Stop::Finished, Vec::new()),
+            strip(Stop::AtLimit, kept.clone()),
+        ];
+        let sides = leaf_sides(&[domain; 4], &domain);
+        let c = components(&leaves, &sides, span);
+        assert!(!c.list.is_empty());
+        for unplaced in [false, true] {
+            assert_eq!(side_record(&leaves, &c, unplaced, span), SideRecord::NotRun);
+        }
+
+        // no solved leaf (every leaf culled): the strips decide
+        let only = |strips: &[SearchedLeaf], unplaced: bool| {
+            let sides = leaf_sides(&vec![domain; strips.len()], &domain);
+            side_record(strips, &components(strips, &sides, span), unplaced, span)
+        };
+        assert_eq!(
+            only(&[strip(Stop::Finished, Vec::new())], false),
+            SideRecord::Complete
+        );
+        assert_eq!(
+            only(&[strip(Stop::Finished, Vec::new())], true),
+            SideRecord::Undecided(vec![span])
+        );
+        let SideRecord::Undecided(spans) = only(&[strip(Stop::AtLimit, kept.clone())], false)
+        else {
+            panic!("a strip's kept box is undecided");
+        };
+        assert_eq!(spans, vec![[0.4, 0.6]]);
+        assert_eq!(
+            only(&[strip(Stop::NotRun, Vec::new())], false),
+            SideRecord::NotRun
+        );
+        // (a strip not run beside one that ran is nothing known: undecided over the line)
+        assert_eq!(
+            only(
+                &[
+                    strip(Stop::NotRun, Vec::new()),
+                    strip(Stop::Finished, Vec::new())
+                ],
+                false
+            ),
             SideRecord::Undecided(vec![span])
         );
     }

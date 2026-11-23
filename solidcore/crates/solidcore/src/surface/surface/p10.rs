@@ -1053,6 +1053,13 @@ impl<'t, 's, O: SolutionObject + 't> LsiGlobalSolver<'t, 's, O> {
                 strip: false,
             });
         }
+        if certified_line::leaves_not_run(&searched) {
+            // every solved leaf's pass did not run: the record is not run whatever the
+            // strips would find, so they are not enclosed (nothing but the counters would
+            // read them)
+            k.work_counters.add_line_solve(0, false);
+            return Ok(SideRecord::NotRun);
+        }
         for strip in &kept.strips {
             if over_budget {
                 // (past the bound nothing is read of a strip: the components are not built)
