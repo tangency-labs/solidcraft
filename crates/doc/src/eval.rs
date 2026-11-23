@@ -1355,8 +1355,14 @@ impl ModelState {
                 None => {
                     let mut h = std::collections::hash_map::DefaultHasher::new();
                     (key, &b.name).hash(&mut h);
-                    b.key = h.finish();
-                    if !matches!(f.kind, FeatureKind::BodyTransfer { .. }) {
+                    let stamped = h.finish();
+                    // A body a saved model kept, given back by what its feature read
+                    // ([`Model::adopt`]), was stamped with this key when it was made: it keeps the
+                    // names it was saved with, as the whole state taken back does, since its record
+                    // holds no lineage to trace them from again.
+                    let saved = b.key == stamped && b.lineage().is_none() && b.names.is_saved();
+                    b.key = stamped;
+                    if !saved && !matches!(f.kind, FeatureKind::BodyTransfer { .. }) {
                         b.names = crate::naming::NameCell::traced(Some(origin.clone()), b.lineage());
                     }
                     // Faces split on purpose stay split through later features (for export).

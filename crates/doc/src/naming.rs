@@ -50,6 +50,8 @@ pub struct NameCell {
     /// How deep the chain of features that named it is, for names taken from a saved model
     /// (which has no origin): see [`NameCell::depth`].
     saved_depth: Option<usize>,
+    /// Whether the names came from a saved model, with nothing to work them out from again.
+    saved: bool,
 }
 
 impl NameCell {
@@ -58,7 +60,7 @@ impl NameCell {
     }
     /// Names of a body made by `origin`'s feature, following `lineage` where it is known.
     pub(crate) fn traced(origin: Option<Arc<NamingOrigin>>, lineage: Option<Arc<Lineage>>) -> Self {
-        NameCell { origin, cached_construction: None, lineage, names: Arc::new(OnceLock::new()), copy_of: None, saved_depth: None }
+        NameCell { origin, cached_construction: None, lineage, names: Arc::new(OnceLock::new()), copy_of: None, saved_depth: None, saved: false }
     }
     /// Names already known, taken as they are.
     pub fn known(names: Arc<Vec<String>>) -> Self {
@@ -78,6 +80,7 @@ impl NameCell {
     pub(crate) fn saved(names: Arc<Names>, depth: Option<usize>) -> Self {
         let mut cell = Self::shared(names);
         cell.saved_depth = depth;
+        cell.saved = true;
         cell
     }
     /// How deep the chain of features that named the body is (`None`: not made by a feature).
@@ -99,7 +102,7 @@ impl NameCell {
     fn shared(names: Arc<Names>) -> Self {
         let cell = OnceLock::new();
         let _ = cell.set(names);
-        NameCell { origin: None, cached_construction: None, lineage: None, names: Arc::new(cell), copy_of: None, saved_depth: None }
+        NameCell { origin: None, cached_construction: None, lineage: None, names: Arc::new(cell), copy_of: None, saved_depth: None, saved: false }
     }
 }
 
@@ -113,6 +116,10 @@ enum NamingAncestor {
     Copy(Arc<ModelBody>),
 }
 impl NameCell {
+    /// Whether these are names a saved model kept ([`NameCell::saved`]), not worked out here.
+    pub(crate) fn is_saved(&self) -> bool {
+        self.saved
+    }
     fn detach_ancestors(&mut self, pending: &mut Vec<NamingAncestor>) {
         if let Some(origin) = self.origin.take().and_then(Arc::into_inner) {
             pending.push(NamingAncestor::State(origin.before));

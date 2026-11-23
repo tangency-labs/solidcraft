@@ -1690,6 +1690,51 @@ fn a_mirror_of_a_round_with_nothing_placed_measures_no_box() {
     assert_eq!(work.tight_boxes, 0, "{work:?}");
 }
 
+/// The first edit after a design opens from its saved model evaluates only what the edit
+/// changes, as every later edit does: a block changed leaves the other block and its round as
+/// they were. The saved model gave only each feature's whole result, so the first edit after
+/// opening evaluated every feature after it, the features of other bodies and parts included.
+#[test]
+fn the_first_edit_after_opening_keeps_the_features_of_other_bodies() {
+    let mut doc = Document::new("blocks");
+    block(&mut doc, "A", Vec3::new(-10.0, -5.0, 0.0), [20.0, 10.0, 10.0]);
+    block(&mut doc, "B", Vec3::new(-10.0, 20.0, 0.0), [20.0, 10.0, 10.0]);
+    let kind = FeatureKind::Fillet {
+        edges: vec![Position(Vec3::new(10.0, 25.0, 10.0))],
+        radius: "2".into(),
+        body: Some("B".into()),
+        style: Default::default(),
+        fit: Default::default(),
+        corner: Default::default(),
+        setbacks: Vec::new(),
+        turn: Default::default(),
+        tangent_chain: false,
+        edge_radii: Vec::new(),
+    };
+    doc.add_feature(kind, None).unwrap();
+    let mut model = Model::new();
+    model.evaluate(&doc);
+    assert!(model.results.iter().all(|r| r.error.is_none()), "{:?}", model.results.iter().find(|r| r.error.is_some()));
+    let rounded = volume(&model, "B");
+    assert!(rounded < 2000.0 - 1.0, "{rounded}");
+    let reopened = Model::adopt(&doc, &model.saved(&doc).unwrap()).unwrap();
+    let a = doc.features.first().unwrap().id;
+    if let FeatureKind::Box { length, .. } = &mut doc.feature_mut(a).unwrap().kind {
+        *length = "25".into();
+    }
+    let mut after = Vec::new();
+    for mut model in [model, reopened] {
+        let work = counted(|| model.evaluate(&doc));
+        assert_eq!(model.last_recomputed, 1, "only block A is evaluated again: {work:?}");
+        assert_eq!(work.blends, 0, "{work:?}");
+        assert!((volume(&model, "A") - 2500.0).abs() < 1e-6, "{}", volume(&model, "A"));
+        assert!((volume(&model, "B") - rounded).abs() < 1e-9, "{} then {rounded}", volume(&model, "B"));
+        let st = model.state();
+        after.push(st.bodies.iter().map(|b| (b.name.clone(), b.key, crate::naming::face_names(b))).collect::<Vec<_>>());
+    }
+    assert_eq!(after[0], after[1], "the opened design evaluates to the same bodies, keys and face names");
+}
+
 /// `comps` parts, each with `bodies` boxes, `sketches` sketches and `taps` taps, placed `copies`
 /// times: a design and its state, made without evaluating it.
 fn placed_parts(comps: usize, bodies: usize, sketches: usize, taps: usize, copies: usize) -> (Document, ModelState) {
