@@ -128,7 +128,7 @@ use crate::geom::tol::{are_same, are_same_to_tol};
 use crate::geom::tree::NodeData;
 use crate::geom::vector3d::{Point3, Vec3};
 use crate::kernel::Kernel;
-use crate::math::{max2, BIG_DOUBLE, EFF_ZERO, EFF_ZERO_SQ, EFF_ZERO_SQRT, PI};
+use crate::math::{max2, BIG_DOUBLE, EFF_ZERO, EFF_ZERO_RAD, EFF_ZERO_SQ, EFF_ZERO_SQRT, PI};
 use crate::nurbs::b_spline_curve::{ControlPointForm, ProjectionType};
 
 const OP_NORMAL: &str = "curve::curve::p3::compute_crvs_normal";
@@ -339,10 +339,33 @@ fn crvs_normal_into(k: &Kernel, curves: &[Curve], normal: &mut Vec3) -> Result<(
     area_normal_into(k, curves, normal)
 }
 
+/// The unit roundoff of `f64`.
+const UNIT_ROUNDOFF: f64 = f64::EPSILON / 2.0;
+
+/// Whether a vector computed within `error` of an exact one certainly has that one's
+/// direction to within the kernel's angular zero (`SM_EFF_ZERO_RAD`): the unit vectors of
+/// two vectors `error` apart differ by at most `2 error / (|v| - error)`, and `Unitize`
+/// rounds by a few `u` more.
+fn direction_is_certain(length: f64, error: f64) -> bool {
+    length > error && 2.0 * error / (length - error) + 8.0 * UNIT_ROUNDOFF <= EFF_ZERO_RAD
+}
+
 /// [`crvs_normal_into`]'s computation.
+///
+/// The fan sum `A` is within `E = (N + 8) u S` of the exact fan area vector of the
+/// samples (`S` the sum of `|a| |b|` over its `N` terms `a x b`): each term, from two
+/// rounded differences, is within `sqrt 2 gamma_4 |a| |b| < 6 u |a| |b|` of its exact
+/// value, and summing `N` vectors adds at most `gamma_(N-1)` of the sum of their lengths
+/// (the factor 1.01 covers the rounding of `S` and of the `gamma`s). `A` is the answer
+/// when its direction is certain ([`direction_is_certain`]). Otherwise its direction may be
+/// rounding: an open chain that certainly spans a plane answers that plane's normal
+/// ([`open_chain_plane_normal`]); any other chain keeps upstream's `Unitize` of `A` (its
+/// direction, or a refusal below `SM_EFF_ZERO`).
 fn area_normal_into(k: &Kernel, curves: &[Curve], normal: &mut Vec3) -> Result<()> {
     *normal = Vec3::ZERO;
     let mut samples: Vec<Point3> = Vec::new();
+    let mut magnitude = 0.0;
+    let mut terms = 0.0;
     for curve in curves {
         let domain = curve.natural_interval();
         if curve.is_linear(k, EFF_ZERO, false)?.linear && curves.len() == 1 {
@@ -360,53 +383,65 @@ fn area_normal_into(k: &Kernel, curves: &[Curve], normal: &mut Vec3) -> Result<(
             let point =
                 curve.evaluate_point(k, domain.evaluate(f64::from(j) / f64::from(count)))?;
             if let (Some(&origin), Some(&previous)) = (samples.first(), samples.last()) {
-                *normal += (previous - origin).cross(point - origin);
+                let (a, b) = (previous - origin, point - origin);
+                *normal += a.cross(b);
+                magnitude += a.length() * b.length();
+                terms += 1.0;
             }
             samples.push(point);
         }
     }
     // a sample that is not finite has no normal (`Unitize` would pass a NaN on)
-    if !normal.length_squared().is_finite() {
+    if !(normal.length_squared() + magnitude).is_finite() {
         *normal = Vec3::Z;
         return Err(SolidError::invalid_input(
             OP_NORMAL,
             "loop normal of a curve with a point that is not finite",
         ));
     }
-    if normal.unitize().is_err() {
+    let error = (terms + 8.0) * UNIT_ROUNDOFF * magnitude * 1.01;
+    let area = normal.length();
+    if area < EFF_ZERO || !direction_is_certain(area, error) {
         if let Some(plane) = open_chain_plane_normal(&samples) {
             *normal = plane;
             return Ok(());
         }
     }
-    // SER(crCrvsNormal.Unitize()): SM_ERR_INVALID_INPUT for a zero area
+    // SER(crCrvsNormal.Unitize()): SM_ERR_INVALID_INPUT for an area below SM_EFF_ZERO;
+    // above it, a closed or non-planar chain keeps its area's direction (upstream's
+    // `Unitize`), the best the samples give when no plane is certain
     unitize_written(normal, |_| {
         SolidError::invalid_input(OP_NORMAL, "zero area loop normal")
     })
 }
 
 /// The normal of the plane an OPEN chain of `samples` spans, for a chain whose area
-/// vector (closed by its chord) is too short to unitize: its turns can cancel exactly,
-/// as `(0,0)-(1,1)-(2,-2)-(2,0)` does, though the chain spans a plane. `None` for a
-/// closed chain (its last sample `approx_eq` its first, upstream's test for a closed
-/// loop: a closed loop enclosing no area has no winding, so no orientation), and for
-/// samples that do not certainly span a plane.
+/// vector (closed by its chord) is zero or of no certain direction: its area can cancel
+/// exactly, as `(0,0)-(1,1)-(2,-2)-(2,0)`'s does, though the chain spans a plane. `None`
+/// for a closed chain (its last sample `approx_eq` its first, upstream's test for a
+/// closed loop: a closed loop enclosing no area has no winding, so no orientation), and
+/// for samples that do not certainly span a plane or do not all lie in it (within the
+/// kernel's angular zero, or the plane's own uncertainty if larger, of `|p - P0|`).
 ///
 /// The plane is that of the widest triangle `P0 Pf Pg`: `Pf` the sample farthest from
-/// the first, `Pg` the one farthest from the line `P0 Pf`, `c = (Pf - P0) x (Pg - P0)`.
-/// The rounded `c` is within `E = 8 u |d| |e|` of the exact one (`d`, `e` the two rounded
-/// differences: each component `d_j e_l - d_l e_j` rounds at most four times on the
-/// exact samples, `gamma_4 (|d_j e_l| + |d_l e_j|)`, whose norm is at most
-/// `sqrt 2 gamma_4 |d| |e| < 6 u |d| |e|`). So `|c| > E` certifies that the samples are
-/// not collinear. `c` must also unitize (`|c| >= SM_EFF_ZERO`), the bound the area
-/// vector itself is held to. For a planar chain every triangle of samples has this
-/// plane's normal.
+/// the first, `Pg` the one farthest from the line `P0 Pf`, `c = d x e` with
+/// `d = Pf - P0`, `e = Pg - P0`. The rounded `c` is within `E = 8 u |d| |e|` of the exact
+/// one (each component `d_j e_l - d_l e_j` of rounded differences is within
+/// `gamma_4 (|d_j e_l| + |d_l e_j|)` of it, whose norm is at most
+/// `sqrt 2 gamma_4 |d| |e| < 6 u |d| |e|`). The plane is answered only when `c` unitizes
+/// (`|c| >= SM_EFF_ZERO`, the area's own bound) and its direction is certain
+/// ([`direction_is_certain`], within `delta = 2 E / (|c| - E) + 8 u`). For a planar chain
+/// every triangle of samples has this plane's normal.
 ///
 /// Its sense is that of the chain's turns (upstream's `ComputeCrvsNormal`: the sum of
-/// the cross products of consecutive nonzero chords) along `c`, so a chain that turns
-/// clockwise more than counter-clockwise about the normal gets the normal its turns
-/// give. When the turns cancel exactly along `c` (a symmetric S), it is the sense of the
-/// first turn along `c` that is not zero; with none, `None`.
+/// the cross products of consecutive nonzero chords `p`, `q`) along `n`. A turn
+/// `n . (p x q)` is within `e_k = (9 u + delta) |p| |q|` of the exact one along the exact
+/// normal, and their sum within `(N u + delta + 9 u) T` (`T` the sum of `|p| |q|`, 1.01
+/// covering the rest). The chain's own turns are no better than its points: a symmetric S
+/// placed far from the origin is no longer exactly symmetric once its points are rounded,
+/// so a turn, and the sum, below the kernel's angular zero (`SM_EFF_ZERO_RAD`, as a
+/// fraction of `|p| |q|` or `T`) counts as none. When the sum is none (a symmetric S),
+/// the sense is that of the first turn that is not; with none, `None`.
 fn open_chain_plane_normal(samples: &[Point3]) -> Option<Vec3> {
     let (&first, &last) = (samples.first()?, samples.last()?);
     if first.approx_eq(last) {
@@ -427,13 +462,27 @@ fn open_chain_plane_normal(samples: &[Point3]) -> Option<Vec3> {
             (c, e) = (w, v);
         }
     }
-    let rounding = 8.0 * (f64::EPSILON / 2.0) * d.length() * e.length();
-    if c.length() <= rounding {
+    let error = 8.0 * UNIT_ROUNDOFF * d.length() * e.length();
+    let length = c.length();
+    if !direction_is_certain(length, error) {
         return None;
     }
     let n = c.unitize().ok()?;
+    let delta = 2.0 * error / (length - error) + 8.0 * UNIT_ROUNDOFF;
+    // every sample lies in the plane (to the kernel's angular zero, as seen from the first)
+    let off_plane = delta.max(EFF_ZERO_RAD) * 1.01;
+    if samples
+        .iter()
+        .any(|&p| n.dot(p - first).abs() > off_plane * (p - first).length())
+    {
+        return None;
+    }
+    // (a turn within the kernel's angular zero of none is none)
+    let per_turn = ((9.0 * UNIT_ROUNDOFF + delta) * 1.01).max(EFF_ZERO_RAD);
     let mut turns = 0.0;
-    let mut first_turn = 0.0;
+    let mut weight = 0.0;
+    let mut count = 0.0;
+    let mut first_turn = None;
     let mut previous: Option<Vec3> = None;
     for w in samples.windows(2) {
         let (Some(&a), Some(&b)) = (w.first(), w.get(1)) else {
@@ -445,20 +494,26 @@ fn open_chain_plane_normal(samples: &[Point3]) -> Option<Vec3> {
         }
         if let Some(prev) = previous {
             let turn = n.dot(prev.cross(chord));
+            let size = prev.length() * chord.length();
             turns += turn;
-            if first_turn == 0.0 {
-                first_turn = turn;
+            weight += size;
+            count += 1.0;
+            if first_turn.is_none() && turn.abs() > per_turn * size {
+                first_turn = Some(turn);
             }
         }
         previous = Some(chord);
     }
-    let sense = if turns != 0.0 { turns } else { first_turn };
+    let sum_error = (count * UNIT_ROUNDOFF * 1.01 + per_turn) * weight;
+    let sense = if turns.abs() > sum_error {
+        turns
+    } else {
+        first_turn?
+    };
     if sense > 0.0 {
         Some(n)
-    } else if sense < 0.0 {
-        Some(-n)
     } else {
-        None
+        Some(-n)
     }
 }
 
@@ -2687,6 +2742,37 @@ mod tests {
         assert_eq!(compute_crvs_normal(&k, &s).unwrap(), Vec3::Z);
     }
 
+    /// The chains above in a tilted plane, offset and scaled (#21291 review): rounding
+    /// leaves the chord-closed area of the Z path above `SM_EFF_ZERO` at large scales, but
+    /// it is not certainly a direction, so the answer is still the plane's normal in the
+    /// sense of the turns; the symmetric S's turns cancel only within rounding, so its
+    /// sense is still its first turn's.
+    #[test]
+    fn tilted_chains_of_cancelling_area_answer_their_plane_at_every_scale() {
+        let k = Kernel::default();
+        let u = Vec3::new(0.3_f64.cos(), 0.3_f64.sin(), 0.0);
+        let v = Vec3::new(
+            -0.3_f64.sin() * 0.7_f64.cos(),
+            0.3_f64.cos() * 0.7_f64.cos(),
+            0.7_f64.sin(),
+        );
+        let plane = u.cross(v).unitize().unwrap();
+        for scale in [1.0, 10.0, 100.0, 1e3, 1e4] {
+            let off = Vec3::new(123.456, 7.89, -3.21) * scale;
+            let map = |pts: &[[f64; 2]]| -> Vec<[f64; 3]> {
+                pts.iter()
+                    .map(|p| (off + (u * p[0] + v * p[1]) * scale).to_array())
+                    .collect()
+            };
+            let z = polyline(&map(&[[0.0, 0.0], [1.0, 1.0], [2.0, -2.0], [2.0, 0.0]]));
+            let n = compute_crvs_normal(&k, &z).unwrap();
+            assert!((n + plane).length() < 1e-9, "Z path at {scale}: {n:?}");
+            let s = polyline(&map(&[[0.0, 0.0], [1.0, 0.0], [1.0, 1.0], [2.0, 1.0]]));
+            let n = compute_crvs_normal(&k, &s).unwrap();
+            assert!((n - plane).length() < 1e-9, "S at {scale}: {n:?}");
+        }
+    }
+
     /// A chain that does not span a plane, or a closed loop that encloses no area (no
     /// winding, so no sense), still has no normal: `SM_ERR_INVALID_INPUT` with
     /// `(0, 0, 1)` written.
@@ -2704,11 +2790,12 @@ mod tests {
             [3.0, 0.0, 0.0],
             [2.0, 0.0, 0.0]
         ])));
-        // a line and its reverse, out of the XY plane
+        // collinear and open, out of the XY plane, turning back over itself
         assert!(refused(&polyline(&[
             [0.0, 1.0, 2.0],
             [1.0, 3.0, 5.0],
-            [0.0, 1.0, 2.0]
+            [3.0, 7.0, 11.0],
+            [2.0, 5.0, 8.0],
         ])));
         // a closed bowtie: its two lobes cancel
         assert!(refused(&polyline(&[

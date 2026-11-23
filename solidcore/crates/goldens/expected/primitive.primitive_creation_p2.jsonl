@@ -262,8 +262,8 @@
 {"case":"half_circle_and_its_chord","deferred":null,"error":null,"ints":{},"topology":null,"values":{"record":[0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,1.0]}}
 {"case":"hang35_full_torus_1e-5","deferred":null,"error":null,"ints":{},"topology":null,"values":{"record":[0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0]}}
 {"case":"hang35_near_full_sphere_1e-5","deferred":null,"error":null,"ints":{},"topology":null,"values":{"record":[0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0]}}
-{"case":"line_and_reverse_chained_apart_normal_computed","deferred":null,"error":null,"ints":{},"topology":null,"values":{"record":[1007.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0]}}
-{"case":"line_and_reverse_joined_reversed_normal_computed_start_cap","deferred":null,"error":null,"ints":{},"topology":null,"values":{"record":[1007.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0]}}
+{"case":"line_and_reverse_chained_apart_normal_computed","deferred":null,"error":null,"ints":{},"topology":null,"values":{"record":[1007.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,1.0]}}
+{"case":"line_and_reverse_joined_reversed_normal_computed_start_cap","deferred":null,"error":null,"ints":{},"topology":null,"values":{"record":[1007.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,-1.0]}}
 {"case":"line_back_2_5e-5_off_the_last_mid_start_cap","deferred":null,"error":null,"ints":{},"topology":null,"values":{"record":[1007.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,1.0]}}
 {"case":"partial_cone_axis_below_tolerance","deferred":null,"error":null,"ints":{},"topology":null,"values":{"record":[1001.0,1.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0]}}
 {"case":"partial_cone_zero_height","deferred":null,"error":null,"ints":{},"topology":null,"values":{"record":[1001.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0]}}
