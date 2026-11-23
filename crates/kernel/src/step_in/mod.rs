@@ -206,6 +206,10 @@ pub struct ImportReport {
     /// [`ImportIssue::paths`] entry is that root. Otherwise each root is a product below it.
     #[serde(default)]
     pub single_root: bool,
+    /// Edges that more than two faces of a surface model use, each counted once: the first two
+    /// uses keep it and every further use has a copy of its own, so the model is one open body.
+    #[serde(default)]
+    pub split_edges: usize,
     /// SMLib's check of the parts, which may still be running after the import
     /// ([`step_import_shared`]): what it finds follows `issues` ([`Self::current`]). Not saved:
     /// a saved report holds what the checks found in `issues` ([`Self::settled`]).
@@ -238,7 +242,14 @@ impl ImportReport {
     fn with_checks(&self, found: &[ImportIssue]) -> ImportReport {
         let mut issues = self.issues.clone();
         issues.extend(found.iter().cloned());
-        ImportReport { parts: self.parts, solids: self.solids, issues, single_root: self.single_root, checks: ImportChecks::default() }
+        ImportReport {
+            parts: self.parts,
+            solids: self.solids,
+            issues,
+            single_root: self.single_root,
+            split_edges: self.split_edges,
+            checks: ImportChecks::default(),
+        }
     }
 }
 
@@ -454,6 +465,8 @@ struct Reader {
     visits: usize,
     /// Items whose meshing was checked.
     unmeshed_checked: HashSet<u64>,
+    /// Edges split for sheet faces ([`ImportReport::split_edges`]), over the parts read.
+    split_edges: usize,
     /// Items sent into SMLib as an operation would send them, to say which need repair: each
     /// once per class of the placements of its instances ([`check_class`]).
     modelling_checked: HashSet<(u64, Option<[u64; 16]>)>,
@@ -512,6 +525,7 @@ impl Reader {
             node_placed: HashSet::new(),
             visits: 0,
             unmeshed_checked: HashSet::new(),
+            split_edges: 0,
             modelling_checked: HashSet::new(),
             check_jobs: Vec::new(),
             check_of: HashMap::new(),
@@ -1103,6 +1117,7 @@ impl Reader {
                 Ok(parallel::Made { body, missing, part, read }) => {
                     // What the read of the item found, reported once.
                     if let Some(failed) = read {
+                        self.split_edges += part.split_edges;
                         let label = self.label(item);
                         if let Some(why) = &part.refused {
                             self.note(IssueKind::ImportedAsSurfaces, Some(item), 0, format!("{label}: imported as surfaces: {why}"));
@@ -1250,7 +1265,7 @@ impl Reader {
                 detail: detail.clone(),
             })
             .collect();
-        ImportReport { parts, solids, issues, single_root, checks: ImportChecks::default() }
+        ImportReport { parts, solids, issues, single_root, split_edges: self.split_edges, checks: ImportChecks::default() }
     }
 
     /// Planned-solid indices (a node's `bodies` after the walk) as body indices and the STEP
