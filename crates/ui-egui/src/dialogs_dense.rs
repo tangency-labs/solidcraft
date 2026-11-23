@@ -434,6 +434,7 @@ pub(super) fn rows(app: &mut SolveApp, ctx: &egui::Context, d: &mut Dialog, ui: 
         input_rows_range(d, ui, &app.session, app.preferences.origin_plane_names, 0..2);
     } else {
         input_rows(d, ui, &app.session, app.preferences.origin_plane_names);
+        crate::command_sketch::offer_row(app, d, ui);
     }
     d.sync_material(&app.session);
     // The Hole dialog's dropdowns preview each choice on a copy of the form as it stands.
@@ -749,7 +750,7 @@ pub(super) fn rows(app: &mut SolveApp, ctx: &egui::Context, d: &mut Dialog, ui: 
                 feature_pattern_alignment_row(ui, &mut d.extra, 0);
             }
         }
-        Kind::Hole { kind, opts, cb_diameter, cb_depth, .. } => {
+        Kind::Hole { kind, opts, cb_diameter, cb_depth, cs_diameter, cs_angle, .. } => {
             let doc = &app.session.doc;
             let eval = |e: &str, k| doc.eval(e, k).ok();
             // Each option shows the hole it makes while hovered (dialogs_hole::preview).
@@ -790,9 +791,12 @@ pub(super) fn rows(app: &mut SolveApp, ctx: &egui::Context, d: &mut Dialog, ui: 
             // A clearance hole for a bolt: its size and fit set the diameter (ISO 273).
             if opts.clearance {
                 enter |= crate::dialogs_hole::clearance_rows(ui, opts);
-                // A counterbore for a cap screw: its head sets the counterbore (#12321).
-                if *kind == 1 {
-                    crate::dialogs_hole::head_row(ui, opts, cb_diameter, cb_depth);
+                // A counterbore for a cap screw, a countersink for a countersunk one: the screw's
+                // head sets the recess (#12321, #17728).
+                match *kind {
+                    1 => crate::dialogs_hole::head_row(ui, opts, 1, cb_diameter, cb_depth),
+                    2 => crate::dialogs_hole::head_row(ui, opts, 2, cs_diameter, cs_angle),
+                    _ => {}
                 }
             }
             if opts.tapped {

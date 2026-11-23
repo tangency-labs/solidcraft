@@ -6070,6 +6070,309 @@ fn a_cap_whose_rim_is_one_closed_edge_measures_its_whole_volume() {
     assert_closed_solid(&text, 2, 2.0 * std::f64::consts::PI * 100.0_f64.powi(3) / 3.0);
 }
 
+type P3 = [f64; 3];
+
+fn cross3(a: P3, b: P3) -> P3 {
+    [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]]
+}
+
+/// The knots of a clamped cubic spline of `n` control points, its spans equal over `[a, b]`.
+fn clamped_knots(n: usize, a: f64, b: f64) -> Vec<f64> {
+    let spans = n - 3;
+    let mut knots = vec![a; 4];
+    knots.extend((1..spans).map(|i| a + (b - a) * i as f64 / spans as f64));
+    knots.extend([b; 4]);
+    knots
+}
+
+/// The cubic B-spline basis function `i` of the knots `k` at `t`, the last knot included.
+fn spline_basis(k: &[f64], i: usize, p: usize, t: f64) -> f64 {
+    if p == 0 {
+        let last = k[k.len() - 1];
+        let inside = (k[i] <= t && t < k[i + 1]) || (t == last && k[i] < t && t == k[i + 1] && k[i + 1] == last);
+        return if inside { 1.0 } else { 0.0 };
+    }
+    let mut v = 0.0;
+    let d = k[i + p] - k[i];
+    if d > 0.0 {
+        v += (t - k[i]) / d * spline_basis(k, i, p - 1, t);
+    }
+    let d = k[i + p + 1] - k[i + 1];
+    if d > 0.0 {
+        v += (k[i + p + 1] - t) / d * spline_basis(k, i + 1, p - 1, t);
+    }
+    v
+}
+
+/// The control points of the cubic spline on `knots` that passes through `through` at the knots'
+/// Greville abscissae (the average of three knots in a row), one per control point.
+fn spline_through(knots: &[f64], through: impl Fn(f64) -> P3) -> Vec<P3> {
+    let n = knots.len() - 4;
+    let at: Vec<f64> = (0..n).map(|i| (knots[i + 1] + knots[i + 2] + knots[i + 3]) / 3.0).collect();
+    let basis: Vec<Vec<f64>> = at.iter().map(|&t| (0..n).map(|i| spline_basis(knots, i, 3, t)).collect()).collect();
+    let rhs: Vec<P3> = at.iter().map(|&t| through(t)).collect();
+    solve_points(basis, rhs)
+}
+
+/// `a x = b` for points, by elimination with the largest pivot of the column.
+fn solve_points(mut a: Vec<Vec<f64>>, mut b: Vec<P3>) -> Vec<P3> {
+    for c in 0..a.len() {
+        let p = (c + 1..a.len()).fold(c, |best, r| if a[r][c].abs() > a[best][c].abs() { r } else { best });
+        a.swap(c, p);
+        b.swap(c, p);
+        let d = a[c][c];
+        a[c].iter_mut().for_each(|x| *x /= d);
+        b[c].iter_mut().for_each(|x| *x /= d);
+        let (pivot_row, pivot_point) = (a[c].clone(), b[c]);
+        for (r, (row, point)) in a.iter_mut().zip(b.iter_mut()).enumerate() {
+            if r != c && row[c] != 0.0 {
+                let f = row[c];
+                row.iter_mut().zip(&pivot_row).for_each(|(x, y)| *x -= f * y);
+                point.iter_mut().zip(&pivot_point).for_each(|(x, y)| *x -= f * y);
+            }
+        }
+    }
+    b
+}
+
+/// A spline edge's `B_SPLINE_CURVE_WITH_KNOTS`, its points written first.
+fn spline_curve(w: &mut Entities, points: &[P3], knots: &[f64]) -> usize {
+    let ids: Vec<String> = points.iter().map(|p| format!("#{}", w.add(format!("CARTESIAN_POINT('',({:?},{:?},{:?}))", p[0], p[1], p[2])))).collect();
+    let (distinct, mults) = distinct_knots(knots);
+    let list = |v: Vec<String>| v.join(",");
+    w.add(format!(
+        "B_SPLINE_CURVE_WITH_KNOTS('',3,({}),.UNSPECIFIED.,.F.,.F.,({}),({}),.UNSPECIFIED.)",
+        ids.join(","),
+        list(mults.iter().map(|m| m.to_string()).collect()),
+        list(distinct.iter().map(|k| format!("{k:?}")).collect())
+    ))
+}
+
+/// The knots without repeats, and how often each came.
+fn distinct_knots(knots: &[f64]) -> (Vec<f64>, Vec<usize>) {
+    let (mut distinct, mut mults): (Vec<f64>, Vec<usize>) = (Vec::new(), Vec::new());
+    for &k in knots {
+        if distinct.last() == Some(&k) {
+            if let Some(m) = mults.last_mut() {
+                *m += 1;
+            }
+        } else {
+            distinct.push(k);
+            mults.push(1);
+        }
+    }
+    (distinct, mults)
+}
+
+/// The file of a piece of coil spring wire, as a cad system writes one (#20575): a tube of radius
+/// 0.55 mm round two turns of a helix of radius 7.5 mm about the z axis, one closed cubic
+/// B-spline surface of `spans` spans along it (fitted through points on a tube `scale` times the
+/// wire's radius, so a little off its edges when `scale` is not 1), a flat cap square to the wire at
+/// its start, and a flat end `z = const` that cuts the wire where its helix angle is `cut`. The
+/// edges lie on the wire's exact tube: the seam, the cap's circle and the two pieces of the cut.
+fn coil_wire_file(pitch: f64, spans: usize, scale: f64, cut: f64) -> String {
+    use std::f64::consts::PI;
+    const R: f64 = 7.5;
+    const TUBE: f64 = 0.55;
+    let c = pitch / (2.0 * PI);
+    let l = R.hypot(c);
+    let top = 4.0 * PI;
+    // The tangent, the outward normal and the binormal of the helix at the angle `a`.
+    let frame = |a: f64| -> (P3, P3, P3) {
+        let t = [-R * a.sin() / l, R * a.cos() / l, c / l];
+        let n = [a.cos(), a.sin(), 0.0];
+        (t, n, cross3(t, n))
+    };
+    // The point at angle `phi` round the wire's centre line at the helix angle `a`, `rho` out.
+    let tube = |a: f64, phi: f64, rho: f64| -> P3 {
+        let (_, n, b) = frame(a);
+        let h = [R * a.cos(), R * a.sin(), c * a];
+        [0, 1, 2].map(|i| h[i] + (n[i] * phi.cos() + b[i] * phi.sin()) * rho)
+    };
+    // The cut: the plane through the wire's centre line at the helix angle `cut`, where the
+    // wire's tube meets it at helix angle `angle_at(phi)`.
+    let cut_z = c * cut;
+    let angle_at = |phi: f64| (cut_z + TUBE * phi.sin() * R / l) / c;
+    // Its pieces run the other way round the wire from `phi`: `t = -phi`.
+    let cut_point = |t: f64| tube(angle_at(-t), -t, TUBE);
+    let cut_slope = |t: f64| -> P3 {
+        let phi = -t;
+        let a = angle_at(phi);
+        let (tangent, n, b) = frame(a);
+        let da = TUBE * phi.cos() * R / (l * c);
+        let hp = [-R * a.sin(), R * a.cos(), c];
+        let np = [-a.sin(), a.cos(), 0.0];
+        let tp = [-R * a.cos() / l, -R * a.sin() / l, 0.0];
+        let (bc, bd) = (cross3(tp, n), cross3(tangent, np));
+        let bp = [0, 1, 2].map(|i| bc[i] + bd[i]);
+        [0, 1, 2].map(|i| -(hp[i] * da + (n[i] * (-phi.sin()) + b[i] * phi.cos()) * TUBE + (np[i] * phi.cos() + bp[i] * phi.sin()) * (TUBE * da)))
+    };
+    // A piece of the cut over `t` in `[a, b]`: cubic pieces through its points and slopes.
+    let hermite = |a: f64, b: f64, pieces: usize| -> (Vec<P3>, Vec<f64>) {
+        let h = (b - a) / pieces as f64;
+        let mut points = Vec::new();
+        for k in 0..=pieces {
+            let t = a + k as f64 * h;
+            let (p, d) = (cut_point(t), cut_slope(t));
+            let lo = [0, 1, 2].map(|i| p[i] - d[i] * h / 3.0);
+            let hi = [0, 1, 2].map(|i| p[i] + d[i] * h / 3.0);
+            if k == 0 {
+                points.extend([p, hi]);
+            } else if k == pieces {
+                points.extend([lo, p]);
+            } else {
+                points.extend([lo, hi]);
+            }
+        }
+        let mut knots = vec![a; 4];
+        for k in 1..pieces {
+            knots.extend([a + k as f64 * h; 2]);
+        }
+        knots.extend([b; 4]);
+        (points, knots)
+    };
+
+    // The surface: fitted through its Greville points on the tube `scale` times the radius, closed
+    // by making its last row its first.
+    let (nu, nv) = (9, spans + 3);
+    let (ku, kv) = (clamped_knots(nu, -PI, PI), clamped_knots(nv, 0.0, top));
+    let greville = |k: &[f64], n: usize| -> Vec<f64> { (0..n).map(|i| (k[i + 1] + k[i + 2] + k[i + 3]) / 3.0).collect() };
+    let (gu, gv) = (greville(&ku, nu), greville(&kv, nv));
+    let collocation =
+        |k: &[f64], n: usize, at: &[f64]| -> Vec<Vec<f64>> { at.iter().map(|&t| (0..n).map(|i| spline_basis(k, i, 3, t)).collect()).collect() };
+    let (au, av) = (collocation(&ku, nu, &gu), collocation(&kv, nv, &gv));
+    let mut net: Vec<Vec<P3>> = (0..nu).map(|i| (0..nv).map(|j| tube(gv[j], gu[i], TUBE * scale)).collect()).collect();
+    for j in 0..nv {
+        let column = solve_points(au.clone(), net.iter().map(|row| row[j]).collect());
+        for (row, value) in net.iter_mut().zip(column) {
+            row[j] = value;
+        }
+    }
+    for row in net.iter_mut() {
+        *row = solve_points(av.clone(), row.clone());
+    }
+    net[nu - 1] = net[0].clone();
+
+    // The edges.
+    let mut w = Entities::default();
+    let seam_knots = clamped_knots(19, 0.0, cut);
+    let seam_points = spline_through(&seam_knots, |t| tube(t, PI, TUBE));
+    let (piece_a, piece_b) = (hermite(-PI, -0.5 * PI, 8), hermite(-0.5 * PI, PI, 24));
+    let v_seam0 = w.vertex(tube(0.0, PI, TUBE));
+    let v_ring = w.vertex(tube(0.0, 0.0, TUBE));
+    let v_seam1 = w.vertex(tube(cut, PI, TUBE));
+    let v_cut = w.vertex(cut_point(-0.5 * PI));
+    let (tangent, _, _) = frame(0.0);
+    let ring_axis = w.axis([R, 0.0, 0.0], tangent, [1.0, 0.0, 0.0]);
+    let ring = w.add(format!("CIRCLE('',#{ring_axis},{TUBE:?})"));
+    let edge = |w: &mut Entities, from: usize, to: usize, curve: usize| w.add(format!("EDGE_CURVE('',#{from},#{to},#{curve},.T.)"));
+    let e_a = edge(&mut w, v_seam0, v_ring, ring);
+    let e_b = edge(&mut w, v_ring, v_seam0, ring);
+    let seam = spline_curve(&mut w, &seam_points, &seam_knots);
+    let e_seam = edge(&mut w, v_seam0, v_seam1, seam);
+    let curve_a = spline_curve(&mut w, &piece_a.0, &piece_a.1);
+    let curve_b = spline_curve(&mut w, &piece_b.0, &piece_b.1);
+    let e_c1 = edge(&mut w, v_seam1, v_cut, curve_a);
+    let e_c2 = edge(&mut w, v_cut, v_seam1, curve_b);
+
+    // The faces: the wire, the cap and the cut end.
+    let rows: Vec<String> = net
+        .iter()
+        .map(|row| {
+            let ids: Vec<String> =
+                row.iter().map(|p| format!("#{}", w.add(format!("CARTESIAN_POINT('',({:?},{:?},{:?}))", p[0], p[1], p[2])))).collect();
+            format!("({})", ids.join(","))
+        })
+        .collect();
+    let (u_knots, u_mults) = distinct_knots(&ku);
+    let (v_knots, v_mults) = distinct_knots(&kv);
+    let join = |v: Vec<String>| v.join(",");
+    let surface = w.add(format!(
+        "B_SPLINE_SURFACE_WITH_KNOTS('',3,3,({}),.UNSPECIFIED.,.T.,.F.,.F.,({}),({}),({}),({}),.UNSPECIFIED.)",
+        rows.join(","),
+        join(u_mults.iter().map(|m| m.to_string()).collect()),
+        join(v_mults.iter().map(|m| m.to_string()).collect()),
+        join(u_knots.iter().map(|k| format!("{k:?}")).collect()),
+        join(v_knots.iter().map(|k| format!("{k:?}")).collect())
+    ));
+    let wire = w.face(&[(e_a, true), (e_b, true), (e_seam, true), (e_c1, true), (e_c2, true), (e_seam, false)], surface);
+    let cap_axis = w.axis([R, 0.0, 0.0], [-tangent[0], -tangent[1], -tangent[2]], [1.0, 0.0, 0.0]);
+    let cap_plane = w.add(format!("PLANE('',#{cap_axis})"));
+    let cap = w.face(&[(e_b, false), (e_a, false)], cap_plane);
+    let end_axis = w.axis([0.0, 0.0, cut_z], [0.0, 0.0, 1.0], [1.0, 0.0, 0.0]);
+    let end_plane = w.add(format!("PLANE('',#{end_axis})"));
+    let end = w.face(&[(e_c2, false), (e_c1, false)], end_plane);
+    // The file states a distance accuracy of 1e-5 mm, as cad systems do.
+    w.solid(&[end, wire, cap]).replace("LENGTH_MEASURE(1.E-3)", "LENGTH_MEASURE(1.E-5)")
+}
+
+/// #20575: a wire of a coil spring whose B-spline surface lies a little off its edges (as a fitted
+/// surface does) imports in bounded work. Its edges are dropped onto the surface by a walk that
+/// halves a span until the drop is within the tolerance, and for some cuts of the wire a drop
+/// never gets there: the import ran for twenty minutes without returning. Which cuts do is as
+/// fine-grained as the last bits of the file's numbers, so this reads several; each returns, as
+/// a body or as a refusal that says why, and the control (the surface on its edges) is closed and
+/// measures the volume of the wire.
+#[test]
+fn a_coil_spring_wire_with_its_surface_a_little_off_its_edges_imports_in_bounded_work() {
+    // The wire on its own surface is closed and measures about what a tube of its length does
+    // (the fitted surface is a little smaller than the tube).
+    let (pitch, cut) = (3.0_f64, 11.41677050908295_f64);
+    let length = 7.5_f64.hypot(pitch / (2.0 * std::f64::consts::PI)) * cut;
+    let control = step_import(&coil_wire_file(pitch, 16, 1.0, cut)).unwrap();
+    assert_eq!(control.bodies.len(), 1, "{:?}", control.warnings);
+    assert!(control.bodies[0].closed, "{:?}", control.warnings);
+    let volume = measure(&control.bodies[0].body).unwrap().volume;
+    assert!(rel(volume, std::f64::consts::PI * 0.55 * 0.55 * length) < 0.02, "{volume}");
+    // Then the wire closely wound, its surface 0.2 % small, cut at several angles.
+    for cut in [9.0233, 9.2425, 9.2973, 9.0096, 9.1, 9.15, 9.2, 9.25] {
+        let text = coil_wire_file(1.125, 22, 0.998, cut);
+        let imported = step_import(&text);
+        // Returning is the test: a body, or an error that says why.
+        if let Ok(imp) = imported {
+            assert!(imp.bodies.len() <= 1, "{:?}", imp.warnings);
+        }
+    }
+}
+
+/// #20686: the closely wound wire whose surface lies 0.2 % outside its edges, cut by the flat end
+/// at the bottom of its second turn, measures the volume of the wire below that plane, not more
+/// and not less: about 67.7 mm³ (the control with another pitch and cut is a different wire, so
+/// its 81 mm³ is not this one's). The expected volume is the wire's tube integrated below
+/// `z = const`: over the helix angle, the radius and the angle round the wire, with the wire's
+/// own `(R + s cos f) s` measure.
+#[test]
+fn a_coil_spring_wire_with_a_surface_off_its_edges_measures_the_wire_below_its_end_plane() {
+    use std::f64::consts::PI;
+    let (pitch, radius, tube) = (1.125_f64, 7.5_f64, 0.55_f64);
+    let c = pitch / (2.0 * PI);
+    let z_end = 1.7_f64;
+    let (nt, ns, nf) = (800_usize, 16_usize, 48_usize);
+    let mut sum = 0.0;
+    for i in 0..nt {
+        let z0 = c * (i as f64 + 0.5) / nt as f64 * 4.0 * PI;
+        for j in 0..ns {
+            let s = (j as f64 + 0.5) / ns as f64 * tube;
+            for k in 0..nf {
+                let f = (k as f64 + 0.5) / nf as f64 * 2.0 * PI;
+                if z0 + s * f.sin() < z_end {
+                    sum += (radius + s * f.cos()) * s;
+                }
+            }
+        }
+    }
+    let expected = sum * (4.0 * PI / nt as f64) * (tube / ns as f64) * (2.0 * PI / nf as f64);
+    let imported = step_import(&coil_wire_file(pitch, 22, 1.002, z_end / c)).unwrap();
+    assert!(imported.bodies.len() <= 1, "{:?}", imported.warnings);
+    if let Some(body) = imported.bodies.first() {
+        // A body must be the right one (the surface's 0.2 % makes it 0.4 % larger); a refusal
+        // that says why is the other answer.
+        assert!(body.closed, "{:?}", imported.warnings);
+        let volume = measure(&body.body).unwrap().volume;
+        assert!(rel(volume, expected) < 0.01, "{volume} against {expected}");
+    }
+}
+
 /// #20534: a bore that touches a flat face along a line, so four faces meet there. The bore's
 /// loop at the line is written either as one edge out and back (a slit) or as two coincident
 /// edges, each shared with the floor on its side. Both pairings are the same closed solid; the
