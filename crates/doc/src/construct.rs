@@ -316,9 +316,9 @@ fn face_of<'a>(st: &'a ModelState, at: Vec3, name: &Option<String>) -> Result<(&
     }
     // A mesh body has no faces to pick: say so, rather than let the pick read as a miss (#11469).
     if let Some(m) = st.bodies.iter().find(|b| lies_on_mesh(b, at)) {
-        return Err(bad(format!("no face at {at:?}: `{}` is a mesh body, which has no faces; use Convert Mesh to make it a solid first", m.name)));
+        return Err(bad(format!("no face at {at}: `{}` is a mesh body, which has no faces; use Convert Mesh to make it a solid first", m.name)));
     }
-    Err(bad(format!("no face at {at:?}")))
+    Err(bad(format!("no face at {at}")))
 }
 
 /// Does `at` lie on the surface of a mesh body, within the pick tolerance? Only mesh bodies:
@@ -361,7 +361,7 @@ fn edge_pick<'a>(st: &'a ModelState, at: Vec3, name: &Option<String>) -> Result<
     }
     match best {
         Some((d, b, i, pts)) if pts.len() >= 2 && d <= 1e-3 + 1e-2 * pts.iter().fold(0.0, |m: f64, p| m.max(p.len())).max(1.0) => Ok((b, i, pts)),
-        _ => Err(bad(format!("no edge at {at:?}"))),
+        _ => Err(bad(format!("no edge at {at}"))),
     }
 }
 
