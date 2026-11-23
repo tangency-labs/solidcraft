@@ -943,11 +943,12 @@ fn align_components_mode_switches_and_aligns_only_selected_instance() {
 }
 form_case!(remove, "solid.remove", []);
 form_case!(path_pattern, "solid.pattern.path", ["Type", "Object Type", "Quantity", "Spacing", "pattern.start_point", "Orientation"]);
-form_case!(pipe, "solid.pipe", ["Diameter", "Type", "Operation"]);
+form_case!(pipe, "solid.pipe", ["Diameter", "Type", "Wall", "Operation"]);
 
-/// #18344: the Pipe window asks for a wall only when the pipe is hollow.
+/// #18344: the Pipe window has a Type row, and the Wall row stays where it was: a thickness typed
+/// in it makes a tube, as it always did, and the Type row says which one the pipe is.
 #[test]
-fn the_pipe_window_shows_a_wall_only_for_a_hollow_pipe() {
+fn the_pipe_window_keeps_its_wall_row_and_says_which_pipe_it_makes() {
     let mut h = fixture();
     let mut d = representative(&h, "solid.pipe");
     let render = |h: &mut Harness, d: &mut Dialog| {
@@ -967,11 +968,32 @@ fn the_pipe_window_shows_a_wall_only_for_a_hollow_pipe() {
         h.output = out.platform_output;
     };
     render(&mut h, &mut d);
-    assert!(scenario::rect_of("dialog:row:Wall").is_none(), "a solid pipe has no wall row");
-    let Kind::Pipe { hollow, .. } = &mut d.kind else { panic!("{:?}", d.kind) };
-    *hollow = 1;
+    assert!(scenario::rect_of("dialog:row:Type").is_some(), "the pipe window has a type row");
+    assert!(scenario::rect_of("dialog:row:Wall").is_some(), "a solid pipe keeps the wall row");
+    {
+        let Kind::Pipe { hollow, .. } = &d.kind else { panic!("{:?}", d.kind) };
+        assert_eq!(*hollow, 0, "a pipe with no wall is a solid rod");
+    }
+    // A thickness in the wall row makes a tube, and the type row says so.
+    {
+        let Kind::Pipe { wall, .. } = &mut d.kind else { panic!("{:?}", d.kind) };
+        *wall = "2 mm".into();
+    }
     render(&mut h, &mut d);
-    assert!(scenario::rect_of("dialog:row:Wall").is_some(), "a hollow pipe has a wall row");
+    {
+        let Kind::Pipe { hollow, .. } = &d.kind else { panic!("{:?}", d.kind) };
+        assert_eq!(*hollow, 1, "a thickness in the wall row makes a tube");
+    }
+    // An empty wall row is a rod again.
+    {
+        let Kind::Pipe { wall, .. } = &mut d.kind else { panic!("{:?}", d.kind) };
+        wall.clear();
+    }
+    render(&mut h, &mut d);
+    {
+        let Kind::Pipe { hollow, .. } = &d.kind else { panic!("{:?}", d.kind) };
+        assert_eq!(*hollow, 0, "an empty wall row is a solid rod");
+    }
 }
 form_case!(stock, "solid.bounding_solid", ["Margin"]);
 form_case!(frame_plate, "frame.plate", ["Shape", "Width", "Height", "Thickness", "Offset", "Bolt Pattern"]);

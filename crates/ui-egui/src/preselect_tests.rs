@@ -4557,7 +4557,8 @@ fn a_pipe_cuts_from_its_window_and_keeps_the_cut_when_edited() {
 }
 
 /// #18344: the Pipe window has a Type row, so a hollow pipe is a choice and not a word in the
-/// Wall field. A solid pipe has no wall; a hollow one has the thickness the window shows.
+/// Wall field. The wall the window holds is the pipe's wall: a thickness typed in it is never
+/// dropped, and a tube without a thickness is refused.
 #[test]
 fn a_pipe_is_hollow_when_its_window_says_so() {
     let mut app = app_with(json!([
@@ -4580,6 +4581,12 @@ fn a_pipe_is_hollow_when_its_window_says_so() {
     let Kind::Pipe { wall, .. } = &mut d.kind else { panic!("{:?}", d.kind) };
     wall.clear();
     assert!(apply_commands(&app, &d).is_err(), "a hollow pipe without a wall");
+    // A thickness the window holds is the pipe's wall, and it is never dropped.
+    let Kind::Pipe { hollow, wall, .. } = &mut d.kind else { panic!("{:?}", d.kind) };
+    *hollow = 0;
+    *wall = "2 mm".into();
+    let cmds = apply_commands(&app, &d).unwrap();
+    assert_eq!(cmds[0].1["wall"], "2 mm", "{:?}", cmds[0].1);
 }
 
 #[test]
