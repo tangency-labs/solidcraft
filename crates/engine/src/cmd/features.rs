@@ -830,6 +830,11 @@ pub(super) fn add_feature_local(s: &mut Session, p: &Value, kind: FeatureKind) -
 /// `add_feature`; `world` is false when `kind` is already in the active component's frame.
 pub(super) fn add_feature_in(s: &mut Session, p: &Value, kind: FeatureKind, world: bool) -> Result<Value> {
     let name = str_(p, "name");
+    if s.doc.is_skeleton(s.active_component) && !kind.is_reference() {
+        return Err(EngineError::Other(
+            "not supported yet: solid features in a skeleton component (it holds sketches and construction geometry only)".into(),
+        ));
+    }
     // What a join makes of pieces that share no face (`Touching`): separate unless asked.
     let touching = match p.get("touching") {
         None | Some(Value::Null) => Touching::Separate,
