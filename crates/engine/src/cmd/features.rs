@@ -322,6 +322,7 @@ fn auto_operation_in(s: &Session, p: &Value, st: &solidcraft_doc::ModelState) ->
     // The body the extrude starts on, when it is in a component inside the active one: it takes
     // part as the active component's own bodies do (#5679).
     let mut started_on = None;
+    let mut hidden_face = None;
     let (base, n) = if let Some(point) = grouped {
         let (mesh, index, distance, name) = super::face::face_at_state(st, point, str_(p, "face_body")).ok().flatten()?;
         if distance > (mesh.bounds().diagonal() * 1e-3).max(1e-3) * 10.0 {
@@ -331,8 +332,11 @@ fn auto_operation_in(s: &Session, p: &Value, st: &solidcraft_doc::ModelState) ->
         started_on = Some(name);
         (point, normal)
     } else {
-        if p.get("face").is_none() {
-            started_on = feature_sketch(s, p, "Extrude").ok().and_then(|sketch| face_body_reached(s, sketch).ok().flatten());
+        if p.get("face").is_none()
+            && let Ok(sketch) = feature_sketch(s, p, "Extrude")
+        {
+            hidden_face = hidden_face_body(s, sketch);
+            started_on = face_body_reached(s, sketch).ok().flatten().filter(|_| hidden_face.is_none());
         }
         extrude_base(s, p)?
     };
@@ -371,6 +375,10 @@ fn auto_operation_in(s: &Session, p: &Value, st: &solidcraft_doc::ModelState) ->
     } else {
         active_scope(s, st)
     };
+    // The hidden body the sketch is on is never probed: a Join or Cut that names no body leaves it alone.
+    if parts.is_empty() && hidden_face.is_some() {
+        bodies.retain(|b| shown_solid(s, b));
+    }
     if parts.is_empty()
         && let Some(body) = started_on.as_deref().and_then(|name| st.body(name))
         && !bodies.iter().any(|b| b.name == body.name)
@@ -1153,11 +1161,17 @@ fn extrude_from(s: &mut Session, p: &Value, grouped: Option<FaceProfile>) -> Res
         _ if p.get("thin").is_some_and(|v| !v.is_boolean()) => return Err(bad(cmd, "`thin` must be true or false")),
         _ => None,
     };
-    let operation = match str_(p, "operation") {
-        Some(o) if o.eq_ignore_ascii_case("auto") => {
-            Operation::parse(auto_operation_in(s, p, &s.model.state()).unwrap_or("new")).unwrap_or(Operation::NewBody)
+    let auto = str_(p, "operation").is_some_and(|o| o.eq_ignore_ascii_case("auto"));
+    let named = !string_list(cmd, p, "targets")?.is_empty() || !string_list(cmd, p, "participants")?.is_empty();
+    // Auto leaves the hidden body the sketch is on alone, as its probe does.
+    let auto_hidden = if auto && face_body.is_none() && !named { hidden_face_body(s, sketch) } else { None };
+    let operation = if auto {
+        match Operation::parse(auto_operation_in(s, p, &s.model.state()).unwrap_or("new")).unwrap_or(Operation::NewBody) {
+            Operation::Join if auto_hidden.is_some() => Operation::NewBody,
+            o => o,
         }
-        _ => operation(p, cmd)?,
+    } else {
+        operation(p, cmd)?
     };
     let mut targets = string_list(cmd, p, "targets")?;
     let mut p = std::borrow::Cow::Borrowed(p);
@@ -1170,8 +1184,18 @@ fn extrude_from(s: &mut Session, p: &Value, grouped: Option<FaceProfile>) -> Res
         // Store the resolved target so recomputes and reopening keep the same scope.
         targets.extend(match face_body {
             Some(body) => Some(body),
-            None => face_body_reached(s, sketch)?,
+            None => shown_face_body(s, sketch, cmd)?,
         });
+    } else if let Some(hidden) = auto_hidden.filter(|_| operation == Operation::Cut) {
+        let st = s.model.state();
+        let shown: Vec<String> = active_scope(s, &st).into_iter().filter(|b| b.name != hidden && shown_solid(s, b)).map(|b| b.name.clone()).collect();
+        if shown.is_empty() {
+            return Err(bad(
+                cmd,
+                format!("no visible body to cut: `{hidden}`, the body this sketch is on, is hidden; show it, or choose participants"),
+            ));
+        }
+        p.to_mut()["participants"] = json!(shown);
     } else if let Some(parts) = cut_scope(s, &p, operation, sketch, face_body, cmd)? {
         p.to_mut()["participants"] = json!(parts);
     }
@@ -1295,6 +1319,17 @@ fn face_body_reached(s: &Session, sketch: u64) -> Result<Option<String>> {
     if !s.doc.component_within(component, s.active_component) {
         return Ok(None);
     }
+    body_reachable(s, &body.name, &anchor.path)?;
+    Ok(Some(body.name.clone()))
+}
+
+/// Refuses a join or cut into `body_name` that can't be made in its component: its bodies come
+/// from a linked design file, or `path` (the placement picked; empty for none) is not the first
+/// placement of a component placed more than once.
+fn body_reachable(s: &Session, body_name: &str, path: &[u64]) -> Result<()> {
+    let st = s.model.state();
+    let Some(body) = st.body(body_name) else { return Ok(()) };
+    let component = s.doc.model_body_component(body);
     let name = |c: u64| s.doc.components.iter().find(|x| x.id == c).map_or_else(|| format!("component {c}"), |x| x.name.clone());
     let mut c = component;
     for _ in 0..1000 {
@@ -1313,7 +1348,7 @@ fn face_body_reached(s: &Session, sketch: u64) -> Result<Option<String>> {
             None => break,
         }
     }
-    if !anchor.path.is_empty() && anchor.path != s.doc.first_path(component) {
+    if !path.is_empty() && path != s.doc.first_path(component) {
         return Err(EngineError::Other(format!(
             "`{}` is in {}, which is placed more than once, and the sketch is on another placement than the first: activate that placement of {} to cut or join it there",
             body.name,
@@ -1321,7 +1356,7 @@ fn face_body_reached(s: &Session, sketch: u64) -> Result<Option<String>> {
             name(component)
         )));
     }
-    Ok(Some(body.name.clone()))
+    Ok(())
 }
 
 /// A hole's face points, named on the bodies it drills where one of theirs holds the point
@@ -1350,15 +1385,32 @@ fn sketch_face_body(s: &Session, sketch: u64) -> Option<String> {
     active_scope(s, &st).into_iter().find(|b| b.name == anchor.target.body).map(|b| b.name.clone())
 }
 
+/// The body `sketch` is on when it or its placement is hidden.
+fn hidden_face_body(s: &Session, sketch: u64) -> Option<String> {
+    face_body_reached(s, sketch).ok().flatten().filter(|b| !s.body_visible(b))
+}
+
+/// [`face_body_reached`] as a Join's default target, refused when that body or its placement is
+/// hidden: a hidden body is left alone (#1988, #14476).
+fn shown_face_body(s: &Session, sketch: u64, cmd: &str) -> Result<Option<String>> {
+    match face_body_reached(s, sketch)? {
+        Some(body) if !s.body_visible(&body) => Err(bad(
+            cmd,
+            format!("no visible body to join: `{body}`, the body this sketch is on, is hidden; show it, choose explicit targets, or use New Body"),
+        )),
+        reached => Ok(reached),
+    }
+}
+
 /// The bodies a Join named none for: the body whose face a profile sketch is on (the first
 /// sketch that is on one), as for an extrude, also in a component inside the active one, moved
-/// or turned (#5679; refused as [`face_body_reached`] says). Explicit `targets` or
+/// or turned (#5679; refused as [`shown_face_body`] says). Explicit `targets` or
 /// `participants` keep theirs.
 fn face_join_targets(s: &Session, p: &Value, operation: Operation, sketches: &[u64], cmd: &str) -> Result<Vec<BodyName>> {
     let mut targets = string_list(cmd, p, "targets")?;
     if operation == Operation::Join && targets.is_empty() && string_list(cmd, p, "participants")?.is_empty() {
         for sketch in sketches {
-            if let Some(body) = face_body_reached(s, *sketch)? {
+            if let Some(body) = shown_face_body(s, *sketch, cmd)? {
                 targets.push(body);
                 break;
             }
@@ -1378,7 +1430,11 @@ pub fn shown_scope(s: &Session) -> Option<Vec<String>> {
     if scope.iter().all(|b| s.body_visible(&b.name)) {
         return None;
     }
-    Some(scope.into_iter().filter(|b| s.body_visible(&b.name) && !b.is_surface()).map(|b| b.name.clone()).collect())
+    Some(scope.into_iter().filter(|b| shown_solid(s, b)).map(|b| b.name.clone()).collect())
+}
+
+fn shown_solid(s: &Session, b: &solidcraft_doc::ModelBody) -> bool {
+    s.body_visible(&b.name) && !b.is_surface()
 }
 
 /// The bodies a feature of the active component works on when it names none: the component's
@@ -1570,8 +1626,17 @@ fn revolve(s: &mut Session, p: &Value) -> Result<Value> {
     };
     let operation = operation(p, cmd)?;
     let mut targets = face_join_targets(s, p, operation, &[sketch], cmd)?;
+    let unnamed = targets.is_empty() && string_list(cmd, p, "participants")?.is_empty();
+    if let Some(body) = face_body.as_deref().filter(|_| unnamed && operation != Operation::NewBody) {
+        // A cut changes the picked body only inside the active component (`cut_scope`).
+        let st = s.model.state();
+        let inside = st.body(body).is_some_and(|b| s.doc.component_within(s.doc.model_body_component(b), s.active_component));
+        if operation == Operation::Join || inside {
+            body_reachable(s, body, &[])?;
+        }
+    }
     // A fixed plane keeps no attachment to the face, so its body is the one picked.
-    if targets.is_empty() && operation == Operation::Join && string_list(cmd, p, "participants")?.is_empty() {
+    if unnamed && operation == Operation::Join {
         targets.extend(face_body.clone().map(BodyName));
     }
     // From a profile on a body's face in a component inside the active one, a cut changes that

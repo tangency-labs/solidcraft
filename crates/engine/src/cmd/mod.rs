@@ -87,12 +87,12 @@ pub(crate) use features_more::{MAX_SKETCH_ID, SidePoint, SketchFrameId, axes_mas
 pub(crate) use file::import::realign_imports;
 pub(crate) use file::mesh_crease_angle;
 pub use file::open_steps::OpenSteps;
-pub use file::runs_plugin_importer;
 pub use file::use_import_cache_dir;
 pub(crate) use file::{GEOMETRY_MESSAGE, NAMES_MESSAGE, READER_MESSAGE, UP_MESSAGE, names_form, up_form, usable_path};
+pub use file::{runs_plugin_exporter, runs_plugin_importer};
 pub(crate) use inspect::color_param;
 pub use join_pieces::{Addition, addition};
-pub use joints::{MAX_REACH_JOINTS, reach_from, reach_preview};
+pub use joints::{MAX_REACH_JOINTS, posed_joints, reach_from, reach_preview};
 pub use parts::part_length_label;
 pub use sketch::dimension_roles;
 pub(crate) use sketch::face::face_pick_form;
@@ -406,7 +406,10 @@ impl CommandSpec {
     /// Whether the command can run in `s` now: on the part open, and enabled. The one check
     /// running a command, running it inside another and listing it make.
     pub fn allowed(&self, s: &Session) -> std::result::Result<(), String> {
-        if s.active_sheet_sketch.is_some() && matches!(self.id, "drawing.create" | "drawing.open" | "drawing.close" | "drawing.delete") {
+        if let Some(entry) = &s.active_sheet_sketch
+            && matches!(self.id, "drawing.create" | "drawing.open" | "drawing.close" | "drawing.delete")
+            && !(entry.view.is_some() && matches!(self.id, "drawing.open" | "drawing.close"))
+        {
             return Err("finish or cancel the sheet sketch before switching drawings".into());
         }
         // Nothing a drawing does holds the model's commands: an open drawing, or a sheet sketch
@@ -491,7 +494,7 @@ pub fn in_sketch(s: &Session) -> std::result::Result<(), String> {
     }
 }
 
-/// Lifecycle actions address the one active edit independently of the focused receiver.
+/// Lifecycle actions address the one active edit even when its owning tile is not focused.
 pub fn has_sketch_edit(s: &Session) -> std::result::Result<(), String> {
     if s.active_sketch.is_some() || s.active_sheet_sketch.is_some() { Ok(()) } else { in_sketch(s) }
 }
@@ -640,12 +643,15 @@ pub fn normalize_command_id(id: &str) -> Option<&str> {
 /// The end of an unknown command's error: up to three ids like `id`. Alternative verbs in
 /// the same namespace (`note.create` → `note.add`) come first. Otherwise, ids a few
 /// letters away (`solid.extrud` → `solid.extrude`) come before ids that end in the same word
-/// (`file.open` → `doc.open`). Empty when nothing is close.
+/// (`file.open` → `doc.open`). The command an MCP tool of that name stands for comes first
+/// (`set_parameter` → `parameters.change`). Empty when nothing is close.
 pub(crate) fn did_you_mean(id: &str) -> String {
     let id = id.to_ascii_lowercase();
     if id.len() > 64 {
         return String::new();
     }
+    let tool_name = id.replace(['-', ' '], "_");
+    let tool = crate::agent_tools::tool_command(&tool_name);
     let last = |s: &str| s.rsplit('.').next().unwrap_or(s).to_string();
     let near = (id.chars().count() / 4).max(2);
     let mut found: Vec<(bool, bool, usize, &str)> = command_specs()
@@ -656,7 +662,11 @@ pub(crate) fn did_you_mean(id: &str) -> String {
             (alternative || d <= near || last(&id) == last(c.id)).then_some((!alternative, d > near, d, c.id))
         })
         .collect();
+    if let Some(c) = tool {
+        found.push((false, false, 0, c));
+    }
     found.sort();
+    found.dedup_by_key(|(_, _, _, c)| *c);
     let ids: Vec<String> = found.iter().take(3).map(|(_, _, _, c)| format!("`{c}`")).collect();
     match ids.as_slice() {
         [] => String::new(),

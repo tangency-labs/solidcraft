@@ -75,7 +75,7 @@ fn table(id: &str) -> &'static [(&'static str, K)] {
         "solid.cylinder" | "solid.torus" | "solid.cone" => &[("base", Make), ("center", Make), ("axis", Dir)],
         "solid.coil" => &[("base", Make), ("center", Make), ("axis", Axis)],
         "solid.fillet" | "solid.chamfer" => &[("edges", Picks), ("body", Body)],
-        "solid.hole" => &[("position", Pick), ("direction", Dir), ("body", Body)],
+        "solid.hole" => &[("position", Pick), ("references", Picks), ("direction", Dir), ("body", Body)],
         "solid.scale" => &[("origin", Make), ("bodies", Body)],
         "solid.offset_face" | "solid.shell" | "face.delete" => &[("faces", Picks), ("body", Body)],
         "solid.thread" => &[("face", Pick), ("faces", Picks), ("from", Pick), ("up_to", Plane)],

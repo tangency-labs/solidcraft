@@ -759,6 +759,28 @@ pub struct AppearanceReplaceResult {
     pub param_warnings: Vec<String>,
 }
 
+/// `appearance.paste` takes the targets of `appearance.assign` and no look of its own: it applies
+/// what `appearance.copy` put in the session's look clipboard. Naming a look here (`appearance`,
+/// `color`, `opacity`, `name` or `pbr`) is refused rather than dropped in silence, and the reply is
+/// the same object `appearance.assign` answers with.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[schemars(deny_unknown_fields)]
+pub struct AppearancePasteParams {
+    /// Bodies, by name (a placed copy's name, `KB (K:2)`, means the body it shows).
+    #[serde(default)]
+    pub bodies: Option<StringList>,
+    /// Faces, by a point on each, at most 10000.
+    #[serde(default)]
+    pub faces: Option<FaceSpots>,
+    /// The body the `faces` points are on, for points that don't name one. Default: the
+    /// nearest body with a face there.
+    #[serde(default)]
+    pub body: Option<String>,
+    /// Components, by name or id, or a placement's name (`K:2`).
+    #[serde(default)]
+    pub components: Option<StringList>,
+}
+
 #[cfg(test)]
 #[path = "appearance_tests.rs"]
 mod tests;
