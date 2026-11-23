@@ -4288,3 +4288,62 @@ fn a_rational_curve_that_resolves_its_edges_keeps_its_knots() {
     assert_eq!(scale, 2f64.powi(scale.log2().round() as i32), "{scale}");
     assert!(scaled.iter().zip(&fast).all(|(s, f)| *s == f * scale), "{scaled:?}");
 }
+
+/// `text` with the reference direction of every conical surface's placement turned about its axis by `angle`.
+fn cone_frames_turned(text: &str, angle: f64) -> String {
+    let refs = |s: &str| -> Vec<u64> {
+        s.split_once('=')
+            .map_or("", |(_, r)| r)
+            .split('#')
+            .skip(1)
+            .filter_map(|t| t.split(|c: char| !c.is_ascii_digit()).next()?.parse().ok())
+            .collect()
+    };
+    let lines: std::collections::HashMap<u64, &str> = text
+        .lines()
+        .filter_map(|l| {
+            let (id, _) = l.strip_prefix('#')?.split_once('=')?;
+            Some((id.trim().parse().ok()?, l))
+        })
+        .collect();
+    let numbers = |l: &str| -> Vec<f64> {
+        l.rsplit_once(",(").map_or(vec![], |(_, r)| r.trim_end_matches([')', ';']).split(',').filter_map(|x| x.trim().parse().ok()).collect())
+    };
+    let mut out = text.to_string();
+    for l in lines.values().filter(|l| l.contains("=CONICAL_SURFACE(")) {
+        let placement = refs(l)[0];
+        let [_, z, x] = refs(lines[&placement])[..] else { panic!("placement {placement}") };
+        let (zd, xd) = (numbers(lines[&z]), numbers(lines[&x]));
+        let y = [zd[1] * xd[2] - zd[2] * xd[1], zd[2] * xd[0] - zd[0] * xd[2], zd[0] * xd[1] - zd[1] * xd[0]];
+        let t: [f64; 3] = std::array::from_fn(|i| xd[i] * angle.cos() + y[i] * angle.sin());
+        out = out.replace(lines[&x], &format!("#{x}=DIRECTION('',({:?},{:?},{:?}));", t[0], t[1], t[2]));
+    }
+    out
+}
+
+/// solidcore#3253: a whole-turn cone face whose seam lies a hair (well within the face's
+/// tolerance, far beyond rounding) beside a quarter line kept its form starting on that
+/// line, a quarter away from the seam, and the block read back without its stepped hole.
+#[test]
+fn whole_turn_cone_faces_close_on_their_seam_beside_a_quarter_line() {
+    let text = include_str!("../tests/fixtures/stepped_tapered_hole.step");
+    let slope = 4.0_f64.to_radians().tan();
+    let frustum = |r: f64, h: f64| std::f64::consts::PI * h * (r * r + r * (r + h * slope) + (r + h * slope).powi(2)) / 3.0;
+    let exact = 9.0 * 24.0 * 18.0 - frustum(1.35, 5.0) - frustum(2.65, 3.5);
+    let wrong: Vec<String> = [0.0, 1e-12, -1e-12, 1e-7, 1e-6, 1e-5, -1e-6, -1e-5]
+        .into_iter()
+        .filter_map(|angle| {
+            let ex = p21::parse(&cone_frames_turned(text, angle)).unwrap();
+            let s = one_solid(&ex);
+            let volume = solidcore_ops::body::Body::from_record(&s.brep, false)
+                .map_err(|e| format!("{e:?}"))
+                .and_then(|(body, _)| body.mass_properties(1e-6).map_err(|e| format!("{e:?}")))
+                .map(|m| m.volume);
+            match volume {
+                Ok(v) if (v - exact).abs() < 1e-6 * exact => None,
+                other => Some(format!("frames turned {angle:e}: {other:?} vs {exact}")),
+            }
+        })
+        .collect();
+    assert!(wrong.is_empty(), "{wrong:#?}");
+}
