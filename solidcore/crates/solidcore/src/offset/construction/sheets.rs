@@ -1209,64 +1209,98 @@ pub fn proved_singular(
     }))
 }
 
-/// The principal curvatures (signed along the NURB normal) of a patch at `(s, t)`.
-fn principal_curvatures(patch: &Patch, s: f64, t: f64) -> Option<(f64, f64)> {
-    let p = eval3(&patch.p, s, t);
-    let pu = eval3(&deriv_u3(&patch.p), s, t);
-    let pv = eval3(&deriv_v3(&patch.p), s, t);
-    let puu = eval3(&deriv_u3(&deriv_u3(&patch.p)), s, t);
-    let puv = eval3(&deriv_v3(&deriv_u3(&patch.p)), s, t);
-    let pvv = eval3(&deriv_v3(&deriv_v3(&patch.p)), s, t);
-    let (w, au, av, l2, m2, n2) = match &patch.w {
-        None => (1.0, pu, pv, puu, puv, pvv),
-        Some(w) => {
-            let wv = w.eval(s, t);
-            let (wu, wvd) = (w.deriv_u().eval(s, t), w.deriv_v().eval(s, t));
-            let wuu = w.deriv_u().deriv_u().eval(s, t);
-            let wuv = w.deriv_u().deriv_v().eval(s, t);
-            let wvv = w.deriv_v().deriv_v().eval(s, t);
-            (
-                wv,
-                pu * wv - p * wu,
-                pv * wv - p * wvd,
-                puu * wv - p * wuu,
-                puv * wv - p * wuv,
-                pvv * wv - p * wvv,
-            )
-        }
-    };
-    let ax = au.cross(av);
-    let x = ax.length();
-    if !positive(x) {
-        return None;
-    }
-    let (e, f, g) = (au.dot(au), au.dot(av), av.dot(av));
-    let (l, m, n) = (l2.dot(ax), m2.dot(ax), n2.dot(ax));
-    // lambda^2 X^2 - lambda H + K = 0, kappa = w^2 lambda / X
-    let h = e * n + g * l - 2.0 * f * m;
-    let k = l * n - m * m;
-    let a = x * x;
-    let disc = (h * h - 4.0 * a * k).max(0.0).sqrt();
-    let scale = w * w / x;
-    Some((
-        scale * (h - disc) / (2.0 * a),
-        scale * (h + disc) / (2.0 * a),
-    ))
+/// A patch's derivative nets up to second order, built once and evaluated at many
+/// `(s, t)`: the wall search samples each patch at 81 points, and one at up to 240 more.
+struct Derivatives {
+    p: Bernstein3,
+    pu: Bernstein3,
+    pv: Bernstein3,
+    puu: Bernstein3,
+    puv: Bernstein3,
+    pvv: Bernstein3,
+    /// `w` and its partials `wu, wv, wuu, wuv, wvv`; `None` for a non-rational patch.
+    w: Option<[Bernstein2; 6]>,
 }
 
-/// The radius `1 / k` of the largest curvature `k` on the side `side` (the sign of the
-/// distance) of the patch at `(s, t)`; infinite where it bends away or the normal vanishes.
-fn wall(patch: &Patch, side: f64, s: f64, t: f64) -> f64 {
-    match principal_curvatures(patch, s, t) {
-        Some((k1, k2)) => {
-            let k = (k1 * side).max(k2 * side);
-            if k > 0.0 {
-                1.0 / k
-            } else {
-                f64::INFINITY
-            }
+impl Derivatives {
+    fn of(patch: &Patch) -> Self {
+        let pu = deriv_u3(&patch.p);
+        let pv = deriv_v3(&patch.p);
+        Self {
+            p: patch.p.clone(),
+            puu: deriv_u3(&pu),
+            puv: deriv_v3(&pu),
+            pvv: deriv_v3(&pv),
+            pu,
+            pv,
+            w: patch.w.as_ref().map(|w| {
+                let wu = w.deriv_u();
+                let wv = w.deriv_v();
+                let (wuu, wuv, wvv) = (wu.deriv_u(), wu.deriv_v(), wv.deriv_v());
+                [w.clone(), wu, wv, wuu, wuv, wvv]
+            }),
         }
-        None => f64::INFINITY,
+    }
+
+    /// The principal curvatures (signed along the NURB normal) of the patch at `(s, t)`.
+    fn principal_curvatures(&self, s: f64, t: f64) -> Option<(f64, f64)> {
+        let p = eval3(&self.p, s, t);
+        let pu = eval3(&self.pu, s, t);
+        let pv = eval3(&self.pv, s, t);
+        let puu = eval3(&self.puu, s, t);
+        let puv = eval3(&self.puv, s, t);
+        let pvv = eval3(&self.pvv, s, t);
+        let (w, au, av, l2, m2, n2) = match &self.w {
+            None => (1.0, pu, pv, puu, puv, pvv),
+            Some([w, wu_net, wv_net, wuu_net, wuv_net, wvv_net]) => {
+                let wv = w.eval(s, t);
+                let (wu, wvd) = (wu_net.eval(s, t), wv_net.eval(s, t));
+                let wuu = wuu_net.eval(s, t);
+                let wuv = wuv_net.eval(s, t);
+                let wvv = wvv_net.eval(s, t);
+                (
+                    wv,
+                    pu * wv - p * wu,
+                    pv * wv - p * wvd,
+                    puu * wv - p * wuu,
+                    puv * wv - p * wuv,
+                    pvv * wv - p * wvv,
+                )
+            }
+        };
+        let ax = au.cross(av);
+        let x = ax.length();
+        if !positive(x) {
+            return None;
+        }
+        let (e, f, g) = (au.dot(au), au.dot(av), av.dot(av));
+        let (l, m, n) = (l2.dot(ax), m2.dot(ax), n2.dot(ax));
+        // lambda^2 X^2 - lambda H + K = 0, kappa = w^2 lambda / X
+        let h = e * n + g * l - 2.0 * f * m;
+        let k = l * n - m * m;
+        let a = x * x;
+        let disc = (h * h - 4.0 * a * k).max(0.0).sqrt();
+        let scale = w * w / x;
+        Some((
+            scale * (h - disc) / (2.0 * a),
+            scale * (h + disc) / (2.0 * a),
+        ))
+    }
+
+    /// The radius `1 / k` of the largest curvature `k` on the side `side` (the sign of the
+    /// distance) at `(s, t)`; infinite where it bends away or the normal vanishes.
+    fn wall(&self, side: f64, s: f64, t: f64) -> f64 {
+        match self.principal_curvatures(s, t) {
+            Some((k1, k2)) => {
+                let k = (k1 * side).max(k2 * side);
+                if k > 0.0 {
+                    1.0 / k
+                } else {
+                    f64::INFINITY
+                }
+            }
+            None => f64::INFINITY,
+        }
     }
 }
 
@@ -1274,26 +1308,31 @@ fn wall(patch: &Patch, side: f64, s: f64, t: f64) -> f64 {
 /// grid per patch, then a pattern search about the smallest sample. A point where the
 /// normal vanishes says nothing of the curvature; infinite where no sample bends that way.
 fn largest_wall(region: &[Patch], side: f64) -> Result<f64> {
-    let mut best = (f64::INFINITY, 0usize, 0.5, 0.5);
-    for (i, patch) in region.iter().enumerate() {
+    let mut best: Option<(f64, Derivatives, f64, f64)> = None;
+    for patch in region {
+        let nets = Derivatives::of(patch);
+        let mut here = (f64::INFINITY, 0.5, 0.5);
         for a in 0..=8 {
             for c in 0..=8 {
                 let (s, t) = (f64::from(a) / 8.0, f64::from(c) / 8.0);
-                let r = wall(patch, side, s, t);
-                if r < best.0 {
-                    best = (r, i, s, t);
+                let r = nets.wall(side, s, t);
+                if r < here.0 {
+                    here = (r, s, t);
                 }
             }
         }
+        let smallest = best.as_ref().map_or(f64::INFINITY, |b| b.0);
+        if best.is_none() || here.0 < smallest {
+            best = Some((here.0, nets, here.1, here.2));
+        }
     }
-    let (mut r, i, mut s, mut t) = best;
-    let patch = region.get(i).ok_or_else(|| invalid("no patch"))?;
+    let (mut r, nets, mut s, mut t) = best.ok_or_else(|| invalid("no patch"))?;
     let mut step = 1.0 / 16.0;
     for _ in 0..60 {
         let mut moved = false;
         for (ds, dt) in [(step, 0.0), (-step, 0.0), (0.0, step), (0.0, -step)] {
             let (s2, t2) = ((s + ds).clamp(0.0, 1.0), (t + dt).clamp(0.0, 1.0));
-            let r2 = wall(patch, side, s2, t2);
+            let r2 = nets.wall(side, s2, t2);
             if r2 < r {
                 (r, s, t, moved) = (r2, s2, t2, true);
             }

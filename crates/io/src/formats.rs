@@ -164,7 +164,7 @@ const KICAD_IMPORT: &[OptionSpec] = &[
     OptionSpec {
         param: "copper",
         label: "Copper (traces, vias, zones, pads)",
-        kind: OptionKind::Choice { choices: &[("none", "None"), ("overlay", "Overlay on the board"), ("mesh", "Modelled")], default: 0 },
+        kind: OptionKind::Choice { choices: &[("none", "None"), ("overlay", "Overlay on the board"), ("mesh", "Modeled")], default: 0 },
     },
     OptionSpec { param: "silkscreen", label: "Include silkscreen", kind: OptionKind::Bool { default: true } },
     OptionSpec { param: "representation", label: "Board", kind: OptionKind::Choice { choices: &[("brep", "Solid"), ("mesh", "Mesh")], default: 0 } },

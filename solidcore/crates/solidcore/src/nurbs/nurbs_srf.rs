@@ -1139,7 +1139,7 @@ pub fn is_nsrf_degenerate(sur: &Surface, tol3d: f64) -> Result<bool> {
 /// `None`, meaning no certified box, when `sur` is not clamped, a weight is not positive
 /// and finite, a coordinate is not finite, a knot vector is not finite, non-decreasing and
 /// sized for the net, the rectangle is not finite, is empty in u or v or reaches outside
-/// the natural domain, or a split fails.
+/// the natural domain, a knot-span subtraction is not finite, or a split fails.
 ///
 /// Not upstream.
 #[must_use]
@@ -1154,7 +1154,12 @@ pub fn srf_piece_box(sur: &Surface, u: (f64, f64), v: (f64, f64)) -> Option<Exte
     let (u_first, u_last) = (*u_knots.first()?, *u_knots.last()?);
     let (v_first, v_last) = (*v_knots.first()?, *v_knots.last()?);
     let inside = |(lo, hi): (f64, f64), first: f64, last: f64| {
-        lo.is_finite() && hi.is_finite() && first <= lo && lo <= hi && hi <= last
+        lo.is_finite()
+            && hi.is_finite()
+            && (last - first).is_finite()
+            && first <= lo
+            && lo <= hi
+            && hi <= last
     };
     if !inside(u, u_first, u_last) || !inside(v, v_first, v_last) {
         return None;

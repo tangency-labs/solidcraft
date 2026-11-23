@@ -146,7 +146,7 @@ fn fix_for(field: &str) -> String {
         "runtime.commands" => {
             "List exact command ids from `solidcraft-cli commands`; a command that reaches past the open design also needs its group in runtime.permissions.command_groups. An importer lists none."
         }
-        "runtime.entries" => "Declare 1 to 32 entries with distinct lowercase names, all commands or all importers.",
+        "runtime.entries" => "Declare 1 to 32 entries with distinct lowercase names, all commands, all importers or all exporters.",
         "runtime.entries.slots" => {
             "Give each entry at most 16 slots, each {\"kind\": \"menu\" or \"ribbon\", \"name\": \"...\"} with a name of at most 80 characters."
         }
@@ -176,7 +176,7 @@ fn fix_for(field: &str) -> String {
     };
     if field == "capabilities" {
         return format!(
-            "List the capabilities the plugin uses: \"commands@0.2\" for a command plugin, \"formats@0.2\" for an importer (with \"evaluate@0.2\" to check its result). This SolidCraft serves {}, and still runs plugins built for 0.1.",
+            "List the capabilities the plugin uses: \"commands@0.2\" for a command plugin, \"formats@0.2\" for an importer (with \"evaluate@0.2\" to check its result) or an exporter. This SolidCraft serves {}, and still runs plugins built for 0.1.",
             served()
         );
     }
@@ -250,10 +250,10 @@ fn component_fix(reason: &str) -> String {
     }
     if reason.contains("import") {
         return format!(
-            "Import only the interfaces of the plugin's world, from {API}: world command-plugin for a command plugin, world importer-plugin for an importer. Generate the bindings from this SolidCraft's crates/craft-plugin/wit/plugin.wit."
+            "Import only the interfaces of the plugin's world, from {API}: world command-plugin for a command plugin, world importer-plugin for an importer, world exporter-plugin for an exporter. Generate the bindings from this SolidCraft's crates/craft-plugin/wit/plugin.wit."
         );
     }
-    "Export the world's interface: `entry` for a command plugin (world command-plugin), `importer` for an importer (world importer-plugin), generated from crates/craft-plugin/wit/plugin.wit.".into()
+    "Export the world's interface: `entry` for a command plugin (world command-plugin), `importer` for an importer (world importer-plugin), `formats-provider` for an exporter (world exporter-plugin), generated from crates/craft-plugin/wit/plugin.wit.".into()
 }
 
 /// The problem an [`InstallError`] stands for.
@@ -291,6 +291,14 @@ pub fn check(session: &Session, path: &str) -> CheckResult {
             return result;
         }
     };
+    for warning in package.swatch_warnings() {
+        result.problems.push(problem(
+            Severity::Warning,
+            craft_plugin::swatches::KEY,
+            warning,
+            "Use a package PNG or JPEG of at most 64 KiB and 256 × 256 pixels.",
+        ));
+    }
     let manifest = &package.manifest;
     result.id = Some(manifest.id.clone());
     result.name = Some(manifest.name.clone());
@@ -318,7 +326,16 @@ pub fn check(session: &Session, path: &str) -> CheckResult {
         result.ok = true;
         return result;
     };
-    result.kind = Some(if runtime.is_importer() { "importer" } else { "command" }.into());
+    result.kind = Some(
+        if runtime.is_importer() {
+            "importer"
+        } else if runtime.is_exporter() {
+            "exporter"
+        } else {
+            "command"
+        }
+        .into(),
+    );
     result.entries = runtime.entries.clone();
     let ceilings = session.plugin_limits;
     if runtime.limits.fuel > ceilings.max_fuel {

@@ -205,12 +205,13 @@ pub fn transform_matrix(body: &Body, m: [[f64; 4]; 4]) -> Result<Body> {
         return placed.with_history(history, &[body]);
     }
     let sources = body.transformed_sources(m)?;
+    let splits = body.transformed_split_lines(&m);
     // A rigid motion the record is sure to move exactly by: moved when first read, so a part
     // placed many times keeps one record until a placement's own geometry is needed.
     if let Some(motion) = Rigid::of_matrix(&m)
         && let Some(lazy) = body.moved_lazily(motion, m)
     {
-        return Ok(lazy.with_face_sources(sources).inherit_regularization_protection(body));
+        return Ok(lazy.with_face_sources(sources).with_split_lines(splits).inherit_regularization_protection(body));
     }
     let exact = match Rigid::of_matrix(&m) {
         // (a body with a blend by its definition is moved by the kernel, the definition with it)
@@ -246,7 +247,7 @@ pub fn transform_matrix(body: &Body, m: [[f64; 4]; 4]) -> Result<Body> {
             (placed, sources, paint)
         }
     };
-    Ok(placed.with_color(body.color()).with_paint(paint).with_face_sources(sources).inherit_regularization_protection(body))
+    Ok(placed.with_color(body.color()).with_paint(paint).with_face_sources(sources).with_split_lines(splits).inherit_regularization_protection(body))
 }
 
 /// The face of the operand that face `f` of a moved body is, by the move's history.

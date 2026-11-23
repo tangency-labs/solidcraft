@@ -48,6 +48,8 @@ mod single_instance;
 #[cfg(any(target_os = "windows", target_os = "linux", target_os = "macos"))]
 mod space_mouse;
 mod startup;
+#[cfg(unix)]
+mod system_quit;
 #[cfg(any(target_os = "windows", test))]
 mod window_fit;
 
@@ -247,6 +249,13 @@ impl eframe::App for App {
             if self.window_frames == 2 && !self.take_focus_unwanted {
                 ctx.send_viewport_cmd(egui::ViewportCommand::Focus);
             }
+        }
+        // The system asked the app to stop (shutdown, SIGTERM): close as a forced quit does,
+        // keeping unsaved changes for recovery, since nobody is there to answer "save changes?".
+        // Before the starting page returns, so a signal during the setup closes the app too.
+        #[cfg(unix)]
+        if system_quit::requested() {
+            self.solve.quit_requested = true;
         }
         // The window shows with its first frame: the starting page, before the slow setup.
         let mut setup = std::mem::take(&mut self.setup);
@@ -519,6 +528,9 @@ impl Drop for App {
     /// `on_exit`, it read `app.ron` while the old process was still writing it, found it
     /// unreadable and moved it aside, resetting every setting (#9044).
     fn drop(&mut self) {
+        // A successor started below with design files would otherwise hand them back to this
+        // closing window and end (#19340).
+        single_instance::stop();
         if let Some(gpu) = &self.gpu
             && let Some(lost_at) = gpu.lost_at
         {
@@ -1061,13 +1073,13 @@ fn tickets_http(r: solidcraft_ui_egui::agent_chat::backend::HttpRequest, done: s
     drop(spawned);
 }
 
-/// Posts a usage statistics report on a worker thread, to the one endpoint only
-/// (`usage_stats::ENDPOINT`); anything else is refused. The answer comes on `done`.
+/// Sends a usage statistics request on a worker thread, to its endpoints only
+/// (`usage_stats::allowed_url`); anything else is refused. The answer comes on `done`.
 #[cfg(feature = "usage-stats")]
 fn usage_http(r: solidcraft_ui_egui::agent_chat::backend::HttpRequest, done: std::sync::mpsc::Sender<solidcraft_ui_egui::tickets::Reply>) {
     let spawned = std::thread::Builder::new().name("usage-stats-http".into()).spawn(move || {
         let reply =
-            if r.url == solidcraft_ui_egui::usage_stats::ENDPOINT { tickets_call(&r) } else { Err("not the usage statistics endpoint".into()) };
+            if solidcraft_ui_egui::usage_stats::allowed_url(&r.url) { tickets_call(&r) } else { Err("not the usage statistics endpoint".into()) };
         let _ = done.send(reply);
     });
     drop(spawned);
@@ -1671,6 +1683,7 @@ fn main() -> eframe::Result {
             }
             // The administrator's policy holds in safe mode too.
             app.policy = solidcraft_ui_egui::policy::load();
+            solidcraft_ui_egui::policy::enforce(&mut app);
             #[cfg(feature = "usage-stats")]
             app.load_usage_stats(cc.storage.and_then(|s| s.get_string(solidcraft_ui_egui::usage_stats::STORAGE_KEY)).as_deref());
             if let Some(path) = &theme_file
@@ -1768,6 +1781,14 @@ fn main() -> eframe::Result {
             } else {
                 files
             };
+            // A shutdown or restart closes the app cleanly instead of killing it (#7345).
+            #[cfg(unix)]
+            {
+                let ctx = cc.egui_ctx.clone();
+                if let Err(error) = system_quit::install(move || ctx.request_repaint()) {
+                    log::warn!("shutdown signals: {error}");
+                }
+            }
             let nav_bridge = nav_bridge::NavBridge::start(&cc.egui_ctx);
             // The rest is slow on some computers: it runs after the window shows, a step a frame,
             // behind the starting page (#1210).

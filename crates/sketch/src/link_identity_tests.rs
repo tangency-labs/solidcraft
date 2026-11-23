@@ -300,6 +300,36 @@ fn touching_or_crossed_face_boundaries_refuse_without_retargeting_ids() {
 }
 
 #[test]
+fn face_with_two_inner_loops_meeting_at_one_corner_projects_and_refreshes() {
+    // A plate with a block and a pad joined on it: the pad's corner meets the block's corner
+    // (#20619). Both footprints are inner loops that share one vertex.
+    let rect = |x0: f64, y0: f64, x1: f64, y1: f64| {
+        let p = [Vec2::new(x0, y0), Vec2::new(x1, y0), Vec2::new(x1, y1), Vec2::new(x0, y1)];
+        (0..4).map(|i| LinkGeom::Line(p[i], p[(i + 1) % 4])).collect::<Vec<_>>()
+    };
+    let touching = |pad_x: f64| -> Vec<LinkGeom> {
+        let mut g = rect(0.0, 0.0, 50.0, 40.0);
+        g.extend(rect(15.0, 10.0, 30.0, 25.0));
+        g.extend(rect(pad_x, 25.0, pad_x + 6.0, 31.0));
+        g
+    };
+    let mut sk = Sketch::new();
+    let link = sk.add_link(LinkKind::Project, face(), &touching(30.0)).unwrap();
+    assert_eq!(sk.link_curves(&link).len(), 12);
+    // The corner is one shared point: 11 points, not 12.
+    assert_eq!(sk.link_points(&link).len(), 11);
+    // Re-reading the same face is not refused and keeps the link current.
+    assert!(!sk.update_link(&link, &touching(30.0)).unwrap());
+    assert!(!sk.link(&link).unwrap().lost);
+    // A pad that overlaps the block instead of touching it still refuses.
+    let saved = sk.clone();
+    assert!(sk.update_link(&link, &touching(29.0)).is_err());
+    assert_eq!(sk.points, saved.points);
+    assert_eq!(sk.curves, saved.curves);
+    assert!(sk.link(&link).unwrap().lost);
+}
+
+#[test]
 fn resized_rounded_rim_retains_inner_outer_roles_with_shared_arc_centres() {
     let rounded = |x: f64, y: f64, r: f64| {
         let centres = [Vec2::new(x - r, -y + r), Vec2::new(x - r, y - r), Vec2::new(-x + r, y - r), Vec2::new(-x + r, -y + r)];
@@ -510,6 +540,7 @@ fn edge_on_face_saved_as_a_line_pair_keeps_the_line_an_offset_follows() {
         edge_name: None,
         vertex_name: None,
         curve_edges: Vec::new(),
+        profile_boundary: Vec::new(),
         auto_face: false,
         lost: false,
         name_dropped: false,
