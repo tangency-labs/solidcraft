@@ -72,6 +72,7 @@ mod weld;
 pub use band::BandInput;
 pub use cliff::CliffInput;
 pub use corner::CornerInput;
+pub use corner::CornerPatchMiss;
 pub use corner::CornerShape;
 pub use corner::CornerStep;
 pub use corner::MixedStep;
@@ -225,6 +226,10 @@ pub enum BlendFailure {
         /// The surface's index among the corner's patch surfaces.
         surface: usize,
     },
+    /// A fillet corner's surface, patch or face that the corner does not make: the miss
+    /// named. Its class and status are the miss's ([`CornerPatchMiss::class`],
+    /// [`CornerPatchMiss::upstream_status`]).
+    CornerPatchNotMade(CornerPatchMiss),
     /// The drop of a degenerate corner's vertex onto one of its blend's base surfaces found
     /// `solutions` points, not one, and the side of a periodic seam the face's trim lies on
     /// does not pick one of them: no single foot to end the rails at. An empty search
@@ -409,6 +414,14 @@ pub enum BlendFailure {
     /// status here, so its kind is [`ErrorKind::InvalidInput`]. A phrase cause
     /// ([`BlendFailure::is_phrase`]); an argument check is [`crate::SolidError::InvalidInput`].
     InvalidValue(&'static str),
+    /// A curve of kind `kind` that a blend joins end to end with another
+    /// (`SmBSplineCurve::JoinWith`: a fillet corner's edge curves, a removed fillet's edge
+    /// curves) has no B-spline part to join. Unsupported ([`ErrorKind::Unsupported`]); status
+    /// `SM_ERR_NULL_POINTER` (upstream `NER` of the cast).
+    JoinCurveNotBSpline {
+        /// The curve's kind.
+        kind: &'static str,
+    },
     /// A round kept round a feature standing in its band (the fork's `KeepFeaturesInBands`)
     /// is not built ([`KeepStop`] says why, and gives the kind). The executive notes the
     /// refusal in its error info as well; status `SM_ERR`.
@@ -741,6 +754,16 @@ pub enum BlendFailure {
 }
 
 impl BlendFailure {
+    /// The entity the failure names, if any: the entity of a
+    /// [`BlendFailure::CornerInputInvalid`] where its step has one.
+    #[must_use]
+    pub const fn entity(&self) -> Option<EntityRef> {
+        match self {
+            Self::CornerInputInvalid { entity, .. } => *entity,
+            _ => None,
+        }
+    }
+
     /// The status the C++ reports for the failure unless its site says otherwise (a
     /// comparison detail).
     #[allow(
@@ -762,6 +785,7 @@ impl BlendFailure {
             Self::ClosedCliffWouldNotSplit { .. } => SM_ERR,
             Self::CornerInputInvalid { input, .. } => input.upstream_status(),
             Self::CornerPatchFaceNotFound { .. } => SM_ERR_NULL_POINTER,
+            Self::CornerPatchNotMade(miss) => miss.upstream_status(),
             Self::CornerPointDropUnresolved { .. } => SM_ERR,
             Self::CornerRefused => SM_ERR,
             Self::CornerShapeNotBuilt(shape) => shape.upstream_status(),
@@ -790,6 +814,7 @@ impl BlendFailure {
             Self::GnSectionInvalid { .. } => SM_ERR_INVALID_INPUT,
             Self::Inconsistent(_) => SM_ERR_ASSERT_FAILURE,
             Self::InvalidValue(_) => SM_ERR_INVALID_INPUT,
+            Self::JoinCurveNotBSpline { .. } => SM_ERR_NULL_POINTER,
             Self::KeptFeatureNotBuilt(_) => SM_ERR,
             Self::LawCornerNotFound { .. } => SM_ERR_NULL_POINTER,
             Self::LawHasNoValue => SM_ERR,
@@ -863,6 +888,7 @@ impl BlendFailure {
             Self::ClosedCliffWouldNotSplit { .. } => ErrorKind::Failed,
             Self::CornerInputInvalid { .. } => ErrorKind::InvalidInput,
             Self::CornerPatchFaceNotFound { .. } => ErrorKind::NotFound,
+            Self::CornerPatchNotMade(miss) => miss.class(),
             Self::CornerPointDropUnresolved { .. } => ErrorKind::NotFound,
             Self::CornerRefused => ErrorKind::Failed,
             Self::CornerShapeNotBuilt(_) => ErrorKind::Unsupported,
@@ -891,6 +917,7 @@ impl BlendFailure {
             Self::GnSectionInvalid { .. } => ErrorKind::InvalidInput,
             Self::Inconsistent(_) => ErrorKind::of_status(self.comparison_status()),
             Self::InvalidValue(_) => ErrorKind::of_status(self.comparison_status()),
+            Self::JoinCurveNotBSpline { .. } => ErrorKind::Unsupported,
             Self::KeptFeatureNotBuilt(stop) => stop.class(),
             Self::LawCornerNotFound { .. } => ErrorKind::NotFound,
             Self::LawHasNoValue => ErrorKind::Unsupported,
@@ -977,6 +1004,7 @@ impl BlendFailure {
             Self::ClosedCliffWouldNotSplit { .. } => true,
             Self::CornerInputInvalid { .. } => true,
             Self::CornerPatchFaceNotFound { .. } => true,
+            Self::CornerPatchNotMade(_) => true,
             Self::CornerPointDropUnresolved { .. } => true,
             Self::CornerRefused => true,
             Self::CornerShapeNotBuilt(_) => true,
@@ -1005,6 +1033,7 @@ impl BlendFailure {
             Self::GnSectionInvalid { .. } => true,
             Self::Inconsistent(_) => true,
             Self::InvalidValue(_) => true,
+            Self::JoinCurveNotBSpline { .. } => true,
             Self::KeptFeatureNotBuilt(_) => true,
             Self::LawCornerNotFound { .. } => true,
             Self::LawHasNoValue => true,
@@ -1120,6 +1149,8 @@ impl core::fmt::Display for BlendFailure {
                 "{}: corner patch surface {surface} has no face in the intermediate body",
                 self.class()
             ),
+            Self::CornerPatchNotMade(miss) => write!(f, "{}: {miss:?}", self.class()),
+            // (the entity is the failure's site, which the failure prints)
             Self::CornerPointDropUnresolved { solutions } => write!(
                 f,
                 "{}: the corner's vertex drops onto the surface at {solutions} points, not one",
@@ -1226,6 +1257,11 @@ impl core::fmt::Display for BlendFailure {
             ),
             Self::Inconsistent(what) => write!(f, "a consistency check failed: {what}"),
             Self::InvalidValue(what) => f.write_str(what),
+            Self::JoinCurveNotBSpline { kind } => write!(
+                f,
+                "{}: a {kind} curve to join end to end has no B-spline part",
+                self.class()
+            ),
             Self::KeptFeatureNotBuilt(stop) => write!(f, "{}: {}", self.class(), stop.what()),
             Self::LawCornerNotFound { corner, what } => write!(
                 f,
@@ -1520,6 +1556,7 @@ impl crate::SolidError {
     /// [`crate::SolidError::Failed`] for a value a blend routine is given or computes with
     /// that is not usable, as the phrase says, with status [`SM_ERR_INVALID_INPUT`]
     /// (upstream `return(SM_ERR_INVALID_INPUT)`): a phrase cause.
+    #[cfg(test)]
     #[must_use]
     #[track_caller]
     pub(crate) fn blend_invalid_value(operation: &'static str, what: &'static str) -> Self {
@@ -1964,6 +2001,7 @@ mod tests {
             (S::SideEdgeNotBesideBlend, SM_ERR_NULL_POINTER),
             (S::EndSideEdgesShareNoFace, SM_ERR),
             (S::EdgeNotBetweenTwoFaces, SM_ERR),
+            (S::SeamCapEndFaceNotExtended, SM_ERR),
         ];
         for (shape, status) in shapes {
             let cause = BlendFailure::CornerShapeNotBuilt(shape);
@@ -1987,6 +2025,156 @@ mod tests {
         assert_eq!(e.kind(), ErrorKind::NotFound);
         assert_eq!(e.upstream_status(), Some(SM_ERR));
         assert!(!e.is_defect());
+    }
+
+    #[test]
+    fn a_corner_patch_not_made_takes_its_misss_class_and_status() {
+        use CornerPatchMiss as M;
+        use ErrorKind as K;
+        let misses = [
+            (M::VariableRadiusNotFourSides, K::Unsupported, SM_ERR),
+            (
+                M::VariableRadiusWithoutInterpolation,
+                K::Unsupported,
+                SM_ERR,
+            ),
+            (M::VariableRadiusSideNotCrossSection, K::Unsupported, SM_ERR),
+            (M::VariableRadiusGeneratorsDiffer, K::Unsupported, SM_ERR),
+            (M::VariableRadiusBlendCurvesDiffer, K::Unsupported, SM_ERR),
+            (
+                M::CrossSectionWithoutCentreLine,
+                K::Unsupported,
+                SM_ERR_NULL_POINTER,
+            ),
+            (M::CentreLineFootNotUnique, K::NotFound, SM_ERR),
+            (M::CrossSectionRadiusVaries, K::Unsupported, SM_ERR),
+            (
+                M::CrossSectionEndsAligned,
+                K::Degenerate,
+                SM_ERR_INVALID_INPUT,
+            ),
+            (M::OppositeEdgeNotCrossSection, K::Unsupported, SM_ERR),
+            (M::RailNotNamedByItsGeometry, K::Unsupported, SM_ERR),
+            (M::NoRailAtInterpolationStart, K::NotFound, SM_ERR),
+            (M::OppositeFootNotUnique, K::NotFound, SM_ERR),
+            (M::OppositeEndsNotAcrossFillet, K::Unsupported, SM_ERR),
+            (
+                M::OppositeNormalVanished,
+                K::Degenerate,
+                SM_ERR_INVALID_INPUT,
+            ),
+            (M::LinearOppositeFillet, K::Unsupported, SM_ERR),
+            (M::OppositeRadiusNotLarger, K::Unsupported, SM_ERR),
+            (M::VariableRadiusReSolveFailed, K::Failed, SM_ERR),
+            (M::RailRailCurveCrossesCorner, K::Unsupported, SM_ERR),
+            (M::RailLeavesOppositeFillet, K::Unsupported, SM_ERR),
+            (
+                M::CurveNotBSpline { kind: "offset" },
+                K::Unsupported,
+                SM_ERR,
+            ),
+            (
+                M::TooFewBoundaryCurves { curves: 3 },
+                K::Unsupported,
+                SM_ERR,
+            ),
+            (M::FaceNotMade, K::Failed, SM_ERR),
+            (
+                M::MixedCornerNotFourEdges { edges: 3 },
+                K::Unsupported,
+                SM_ERR,
+            ),
+            (
+                M::ExtendedEdgeDropNotOneCurve { curves: 2 },
+                K::NotFound,
+                SM_ERR,
+            ),
+            (M::GapPatchNotFourEdges { edges: 3 }, K::Unsupported, SM_ERR),
+        ];
+        for (miss, kind, status) in misses {
+            let cause = BlendFailure::CornerPatchNotMade(miss);
+            assert!(!cause.is_phrase() && cause.replaces_upstream_status());
+            let e = SolidError::blend("blend::fillet_corner", cause);
+            assert_eq!(e.kind(), kind, "{miss:?}");
+            assert_eq!(e.upstream_status(), Some(status), "{miss:?}");
+            assert!(!e.is_defect() && !e.is_refusal(), "{miss:?}");
+        }
+        assert_eq!(
+            SolidError::blend(
+                "blend::op",
+                BlendFailure::CornerPatchNotMade(M::TooFewBoundaryCurves { curves: 3 })
+            )
+            .to_string(),
+            "blend::op: unsupported: TooFewBoundaryCurves { curves: 3 }"
+        );
+    }
+
+    /// A corner step's check of the corner a caller gives it is invalid input, never a
+    /// defect, with the status of the site it replaces and the entity it names.
+    #[test]
+    fn a_corner_input_invalid_is_invalid_input_with_its_sites_status() {
+        use crate::blend::fillet_corner::p3::FilletCornerKind;
+        use CornerInput as I;
+        let inputs = [
+            (
+                I::FilletedEdgeUsesNotGiven {
+                    kind: FilletCornerKind::NByTwo,
+                },
+                SM_ERR_NULL_POINTER,
+            ),
+            (
+                I::FilletedEdgeUsesNotTwo {
+                    kind: FilletCornerKind::NByTwo,
+                    given: 1,
+                },
+                SM_ERR,
+            ),
+            (I::NoRailXEdgeUseVertex, SM_ERR_NULL_POINTER),
+            (I::VertexNotRailXRail, SM_ERR),
+            (I::EdgeUseWithoutFilletGeometry, SM_ERR_NULL_POINTER),
+            (I::EdgeWithoutCurve, SM_ERR_NULL_POINTER),
+            (I::MixedCornerWithoutOnEdgeEdge, SM_ERR_NULL_POINTER),
+            (I::MixedCornerWithoutOnExtendedEdgeEdge, SM_ERR_NULL_POINTER),
+            (I::MixedCornerEdgesDoNotMeet, SM_ERR),
+            (I::MixedCornerVertexNotInCorner, SM_ERR),
+        ];
+        for (input, status) in inputs {
+            let cause = BlendFailure::CornerInputInvalid {
+                input,
+                entity: None,
+            };
+            assert!(!cause.is_phrase() && cause.replaces_upstream_status());
+            let e = SolidError::blend("blend::fillet_corner", cause);
+            assert_eq!(e.kind(), ErrorKind::InvalidInput, "{input:?}");
+            assert_eq!(e.upstream_status(), Some(status), "{input:?}");
+            assert!(!e.is_defect(), "{input:?}");
+            assert_eq!(e.entity(), None, "{input:?}");
+        }
+        // the failure takes the entity from the cause, with no `at` of its own
+        let at = EntityRef::Edge(crate::topology::EdgeId::from_index(3));
+        let e = SolidError::blend(
+            "blend::op",
+            BlendFailure::CornerInputInvalid {
+                input: I::EdgeWithoutCurve,
+                entity: Some(at),
+            },
+        );
+        assert_eq!(e.entity(), Some(at));
+        assert_eq!(
+            e.to_string(),
+            "blend::op: invalid_input: the fillet corner given: EdgeWithoutCurve (edge 3)"
+        );
+        // the links other routines read too are the fillet set-up's, with its statuses
+        let link = BlendFailure::FilletSetUpInvalid(FilletSetUp::PrimaryEdgeUse);
+        assert!(!link.is_phrase() && link.replaces_upstream_status());
+        let e = SolidError::blend("blend::op", link);
+        assert_eq!(e.kind(), ErrorKind::InvalidInput);
+        assert_eq!(e.upstream_status(), Some(SM_ERR_NULL_POINTER));
+        assert!(!e.is_defect());
+        assert_eq!(
+            e.to_string(),
+            "blend::op: invalid_input: a fillet edge has no primary edge use"
+        );
     }
 
     #[test]
@@ -2614,6 +2802,11 @@ mod tests {
             (BlendFailure::LawHasNoValue, ErrorKind::Unsupported, SM_ERR),
             (
                 BlendFailure::SequenceCurveNotBSpline { kind: "offset" },
+                ErrorKind::Unsupported,
+                SM_ERR_NULL_POINTER,
+            ),
+            (
+                BlendFailure::JoinCurveNotBSpline { kind: "offset" },
                 ErrorKind::Unsupported,
                 SM_ERR_NULL_POINTER,
             ),
