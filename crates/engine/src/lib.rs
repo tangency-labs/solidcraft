@@ -2179,6 +2179,19 @@ impl Session {
         if self.model.evaluate_shared(&self.doc) {
             self.evaluations = self.evaluations.saturating_add(1);
         }
+        // Component Pattern features keep their count/spacing expressions; place their copies
+        // after the model rebuild so a parameter change updates the placements (#12116).
+        // Only a design with such a Pattern is touched, and only when the placements change: the
+        // live document stays the same document otherwise (undo, checkpoints and Save rely on it).
+        let patterns_components =
+            self.doc.features.iter().any(|f| matches!(&f.kind, solidcraft_doc::FeatureKind::Pattern { components, .. } if !components.is_empty()));
+        if patterns_components {
+            let state = self.model.state();
+            let mut doc = (*self.doc).clone();
+            if solidcraft_doc::reconcile_component_patterns(&mut doc, &state).is_ok() && doc != *self.doc {
+                *self.doc_mut() = doc;
+            }
+        }
         self.revision += 1;
         self.prune_occurrence_state();
         // Looked at only when what the groups can name has changed, not on every refresh.
