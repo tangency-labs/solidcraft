@@ -2092,18 +2092,14 @@ impl FilletBrep {
         // Past a tangent side edge (`make_nx1_corner_topology`), the extended edge
         // bounds the end face and a face that is not the side face this edge runs in:
         // its extension is where that side face meets the end face's extension
-        // (tangency-labs/smlib@d5ebcb3, WR-457).
+        // (tangency-labs/smlib@d5ebcb3, WR-457). The end face is the one the corner's topology
+        // picked: the fork takes the edge's first face with an extended surface, which is the
+        // other face where another corner of the session ends on it (#17605).
         if let Some(side) = self.fillet_edge(e)?.original_face() {
             if !faces.contains(&side) {
-                let mut end_face = None;
-                for &f in &faces {
-                    if extended_surface(the_corner, f)?.is_some() {
-                        end_face = Some(f);
-                        break;
-                    }
-                }
-                let end_face =
-                    end_face.ok_or_else(|| broken_link(OP_EXT_EDGE, NO_EXTENDED_END_FACE))?;
+                let end_face = the_corner
+                    .end_face
+                    .ok_or_else(|| broken_link(OP_EXT_EDGE, NO_EXTENDED_END_FACE))?;
                 faces = vec![side, end_face];
             }
         }
@@ -3899,9 +3895,9 @@ const END_FACE_NO_SURFACE: &str = "the face the end rib is cut on has no surface
 /// Why an extended edge has no original edge.
 const FE_NO_ORIGINAL_EDGE: &str = "the fillet edge has no original edge, though the kernel sets \
      one on every fillet edge it makes along an edge of the body";
-/// Why no face has an extended surface.
-const NO_EXTENDED_END_FACE: &str = "no face of the original edge has an extended surface, \
-     though past a tangent side edge the corner extends the end face this edge bounds";
+/// Why the corner names no end face.
+const NO_EXTENDED_END_FACE: &str = "the corner names no end face, though past a tangent side \
+     edge its topology picks the end face this edge bounds and extends it";
 /// Why a face of the extended edge has no surface.
 const EXTENDED_FACE_NO_SURFACE: &str = "a face of the extended edge has no surface, though the \
      edge's curve was made where its faces' surfaces meet";
