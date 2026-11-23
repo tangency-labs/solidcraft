@@ -7,6 +7,7 @@
 //! |------|----------|
 //! | `tangent_directions` | none: the directions test 9 reads round such an edge |
 //! | `Section`, `choose_step` (private) | none: the faces' sections square to the edge and the certified step |
+//! | `clearance`, `boundary_clearance` (private) | none: the ball round the edge point no other boundary enters |
 //!
 //! Deviations: not upstream. WR-540 reads every face of an edge with tangent sectors at
 //! its point 20 edge tolerances into the face. Two faces tangent along the edge that dip
@@ -24,13 +25,14 @@
 //! the edge point included); the steps stay
 //! inside a ball round
 //! the edge point that no other boundary of the faces enters. Every other edge, and every
-//! edge where one of those conditions fails, keeps WR-540's reading. No recursion, and a
+//! edge where one of those conditions fails or reading the faces' other boundaries fails,
+//! keeps WR-540's reading. No recursion, and a
 //! fixed amount of work per edge use.
 
 use std::cmp::Ordering;
 
 use crate::curve::curve::CurveKind;
-use crate::error::Result;
+use crate::error::{ignored, Result};
 use crate::geom::extent3d::Extent3d;
 use crate::geom::tol::{contact_tol_3d, within_contact_tol};
 use crate::geom::vector2d::Vec2;
@@ -519,18 +521,47 @@ fn section(
 /// other edges of `faces` of the distance from `p` to the edge's certified box less
 /// the edge's tolerance, and over the vertices of those edges and of `e` of the
 /// distance less the vertex's tolerance. `None` where an edge has no curve or no
-/// certified box.
+/// certified box, or where reading those boundaries or `e`'s vertices fails
+/// ([`boundary_clearance`]).
+///
+/// # Errors
+///
+/// The unported, cancelled and preparation errors [`ignored`] passes on.
 fn clearance(k: &Kernel, b: &Brep, e: EdgeId, p: Point3, faces: &[FaceId]) -> Result<Option<f64>> {
+    // The edge check of `e` never reads the faces' other edges or their vertices on
+    // WR-540's reading, nor `e`'s vertex records beyond the ones it looks up itself, so
+    // a failure here is inconclusive and keeps that reading. Their own checks (the face,
+    // loop, edge and vertex checks of the same run) read them as before, so no fault is
+    // hidden from the run.
+    Ok(ignored(boundary_clearance(k, b, e, p, faces))?.flatten())
+}
+
+/// Lowers `free` to the distance from `p` of each vertex of `edge` less its tolerance.
+fn vertex_clearance(b: &Brep, edge: EdgeId, p: Point3, free: &mut f64) -> Result<()> {
+    for v in tedge::vertices(b, edge, None)?.into_iter().flatten() {
+        let v = b.vertex(v)?;
+        *free = free.min(v.point.distance(p) - v.tolerance);
+    }
+    Ok(())
+}
+
+/// [`clearance`] over `e`'s vertices and the edges of `faces` other than `e` and their
+/// vertices: `None` where an edge has no curve or no certified box.
+///
+/// # Errors
+///
+/// Those of the loop walks, the lookups and the boxes, which [`clearance`] reads as
+/// inconclusive.
+fn boundary_clearance(
+    k: &Kernel,
+    b: &Brep,
+    e: EdgeId,
+    p: Point3,
+    faces: &[FaceId],
+) -> Result<Option<f64>> {
     let at = Extent3d::from_points(p, p);
     let mut free = f64::INFINITY;
-    let vertex_free = |b: &Brep, edge: EdgeId, free: &mut f64| -> Result<()> {
-        for v in tedge::vertices(b, edge, None)?.into_iter().flatten() {
-            let v = b.vertex(v)?;
-            *free = free.min(v.point.distance(p) - v.tolerance);
-        }
-        Ok(())
-    };
-    vertex_free(b, e, &mut free)?;
+    vertex_clearance(b, e, p, &mut free)?;
     for &f in faces {
         for edge in tface::p4::edges(b, f, None, false, None)? {
             if edge == e {
@@ -544,7 +575,7 @@ fn clearance(k: &Kernel, b: &Brep, e: EdgeId, p: Point3, faces: &[FaceId]) -> Re
                 return Ok(None);
             };
             free = free.min(at.min_distance(&bx) - tedge::tolerance(b, edge)?);
-            vertex_free(b, edge, &mut free)?;
+            vertex_clearance(b, edge, p, &mut free)?;
         }
     }
     Ok(Some(free))
@@ -555,11 +586,15 @@ fn clearance(k: &Kernel, b: &Brep, e: EdgeId, p: Point3, faces: &[FaceId]) -> Re
 /// step [`choose_step`] certifies, square to the edge. `None` keeps WR-540's reading: the
 /// edge is not a line, a face is not a plane or a cylinder along it, `sectors` (each
 /// sector's two edge uses and whether they leave the edge tangent) does not cover every
-/// edge use, a face's boundary comes within the step, or no step is certified.
+/// edge use, a face's boundary comes within the step, reading the faces' other
+/// boundaries or `e`'s vertices fails, a binormal fails, or no step is certified.
 ///
 /// # Errors
 ///
-/// Those of the topology lookups, the binormals and the boxes.
+/// Those of the lookups of `e`, its edge uses and their faces, and of the evaluation of
+/// `e`'s curve at `t`: the edge check's own reading makes the same lookups and
+/// evaluation and passes their errors on. And the unported, cancelled and preparation
+/// errors [`ignored`] passes on.
 pub(super) fn tangent_directions(
     k: &Kernel,
     b: &mut Brep,
@@ -613,7 +648,7 @@ pub(super) fn tangent_directions(
             let Some(f) = eu1::face(b, eu)? else {
                 return Ok(None);
             };
-            let Some(bn) = crate::error::ignored(evaluate_binormal(
+            let Some(bn) = ignored(evaluate_binormal(
                 k,
                 b,
                 eu,
@@ -919,5 +954,74 @@ mod tests {
         assert!(cylinder.gap(plane.point(sigma)) > L);
         assert!(plane.gap(cylinder.point(sigma)) < -L);
         assert!(cross(plane.point(sigma), cylinder.point(sigma)) > 0.0);
+    }
+
+    /// The sectors `radial_order` walks round `e` at `t`, with its tie test.
+    fn walk(k: &Kernel, b: &mut Brep, e: EdgeId, t: f64) -> Vec<(EdgeuseId, EdgeuseId, bool)> {
+        let tie_dot = (crate::geom::tol::ANG_TOL_DEG * PI / 180.0).cos();
+        let options = BinormalOptions::default();
+        let target = eu1::primary_edgeuse(b, e).unwrap().unwrap();
+        let uses = b.edge(e).unwrap().edgeuses.len();
+        let mut out = Vec::new();
+        let mut eu = target;
+        while let Some(rad) = eu1::radial(b, eu).unwrap() {
+            let b0 = evaluate_binormal(k, b, eu, t, true, &options).unwrap();
+            let b1 = evaluate_binormal(k, b, rad, t, true, &options).unwrap();
+            let (u0, u1) = (
+                b0.binormal.unitize().unwrap(),
+                b1.binormal.unitize().unwrap(),
+            );
+            out.push((eu, rad, u0.dot(u1) > tie_dot));
+            match eu1::mate(b, rad).unwrap() {
+                Some(next) if next != target && out.len() < uses => eu = next,
+                _ => break,
+            }
+        }
+        out
+    }
+
+    /// #20695 follow-up: the step reads the boxes of the faces' other edges, which the
+    /// edge check never read before it. A box that cannot be computed (a neighbouring
+    /// edge's B-spline curve without NURB data, whose bounding box fails) is
+    /// inconclusive: the directions are `None`, so test 9 keeps WR-540's reading at 20
+    /// edge tolerances, instead of the edge check failing with the box's error. The body
+    /// is the #18639 union (a box face 5e-6 inside a cylinder of radius 1), whose step
+    /// is certified while the neighbour is intact.
+    #[test]
+    fn a_neighbouring_edge_whose_box_fails_keeps_the_first_step() {
+        use crate::boolean::api_brep::boolean_union;
+        use crate::curve::curve::Curve;
+        use crate::nurbs::b_spline_curve::BSplineCurve;
+        use crate::primitive::api_primitives::{create_box, create_cylinder};
+
+        let mut k = Kernel::default();
+        let cylinder = create_cylinder(&mut k, Point3::new(0.0, 0.0, 0.0), 1.0, 1.0).unwrap();
+        let block = create_box(&mut k, Point3::new(1.0 - 5e-6, -0.5, 0.0), 1.0, 1.0, 1.0).unwrap();
+        let mut u = boolean_union(&mut k, cylinder, block).unwrap();
+        let line = u
+            .edges()
+            .ids()
+            .find(|&e| u.edge(e).unwrap().edgeuses.len() == 8)
+            .unwrap();
+        let t = u.edge(line).unwrap().interval.evaluate(0.456);
+        let tol = tedge::tolerance(&u, line).unwrap();
+        let sectors = walk(&k, &mut u, line, t);
+        assert!(sectors.iter().any(|s| s.2), "{sectors:?}");
+        let intact = tangent_directions(&k, &mut u, line, t, tol, &sectors).unwrap();
+        assert_eq!(intact.map(|d| d.len()), Some(8));
+
+        let face = eu1::face(&u, sectors[0].0).unwrap().unwrap();
+        let other = tface::p4::edges(&u, face, None, false, None)
+            .unwrap()
+            .into_iter()
+            .find(|&x| x != line)
+            .unwrap();
+        u.edge_mut(other).unwrap().curve = Some(Curve::from(BSplineCurve::default()));
+        let rec = u.edge(other).unwrap();
+        let curve = rec.curve.as_ref().unwrap();
+        assert!(curve.certified_bounding_box(&k, &rec.interval).is_err());
+        assert!(tangent_directions(&k, &mut u, line, t, tol, &sectors)
+            .unwrap()
+            .is_none());
     }
 }
