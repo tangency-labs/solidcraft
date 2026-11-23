@@ -185,7 +185,8 @@ const OP_VR: &str = "blend::fillet_standard_solver::p1::VariableRadiusFs";
 const ONE_DERIVATIVE: &str =
     "an evaluation asked for one derivative returns the point and the derivative";
 /// Why a surface evaluation asked for first partials has them.
-const FIRST_PARTIALS: &str = "a surface evaluation asked for first partials returns them";
+pub(super) const FIRST_PARTIALS: &str =
+    "a surface evaluation asked for first partials returns them";
 /// Why the circular generator's first pass has an arc to tweak or mirror: both of its
 /// branches (approximated and exact arcs) build one before.
 const FIRST_PASS_ARC: &str = "the first pass builds an arc for every section it keeps";

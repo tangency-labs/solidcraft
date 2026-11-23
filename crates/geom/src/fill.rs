@@ -775,11 +775,6 @@ impl Band {
     fn get(&self, r: usize, s: usize) -> f64 {
         self.index(r, s).and_then(|i| self.a.get(i)).copied().unwrap_or(0.0)
     }
-    fn set(&mut self, r: usize, s: usize, v: f64) {
-        if let Some(x) = self.index(r, s).and_then(|i| self.a.get_mut(i)) {
-            *x = v;
-        }
-    }
     /// Add `v` at `(r, s)` with `r ≤ s` (the lower half is the same by symmetry: callers adding
     /// a full outer product reach each stored entry once through `r ≤ s`).
     pub(crate) fn add(&mut self, r: usize, s: usize, v: f64) {
@@ -792,38 +787,14 @@ impl Band {
     /// Solve `A·x = b` by banded Cholesky factorisation `A = Uᵀ·U`; an error when `A` is not
     /// positive definite.
     pub(crate) fn solve(self, b: Vec<f64>) -> SplineResult<Vec<f64>> {
-        self.factor()?.substitute(b)
+        self.factor_rows()?.substitute(b)
     }
 
-    /// The Cholesky factor `U` of `A = Uᵀ·U`, in place; an error when `A` is not positive
-    /// definite.
-    pub(crate) fn factor(mut self) -> SplineResult<Band> {
-        let (n, bw) = (self.n, self.bw);
-        for r in 0..n {
-            let mut d = self.get(r, r);
-            for k in r.saturating_sub(bw)..r {
-                let u = self.get(k, r);
-                d -= u * u;
-            }
-            if !(d > 0.0) {
-                return invalid("the fit's equations are singular");
-            }
-            let d = d.sqrt();
-            self.set(r, r, d);
-            for s in r + 1..(r + bw + 1).min(n) {
-                let mut v = self.get(r, s);
-                for k in s.saturating_sub(bw)..r {
-                    v -= self.get(k, r) * self.get(k, s);
-                }
-                self.set(r, s, v / d);
-            }
-        }
-        Ok(self)
-    }
-
-    /// [`Band::factor`] by rows: once row `r` of `U` is known, the rows below it within the band
-    /// are updated from it at once (right-looking), which walks memory row by row instead of down
-    /// columns. The same factor, to rounding; what the general fill, whose bands are wide, uses.
+    /// The Cholesky factor `U` of `A = Uᵀ·U`, in place, by rows: once row `r` of `U` is known,
+    /// the rows below it within the band are updated from it at once (right-looking), which walks
+    /// memory row by row instead of down columns. Each entry takes the same subtractions in the
+    /// same order as a column-by-column factor would, so the factor is that one's, bit for bit.
+    /// An error when `A` is not positive definite.
     pub(crate) fn factor_rows(mut self) -> SplineResult<Band> {
         let (n, bw) = (self.n, self.bw);
         let w = bw + 1;
@@ -857,7 +828,7 @@ impl Band {
         Ok(self)
     }
 
-    /// Solve `Uᵀ·U·x = b` with a factor from [`Band::factor`].
+    /// Solve `Uᵀ·U·x = b` with a factor from [`Band::factor_rows`].
     pub(crate) fn substitute(&self, mut b: Vec<f64>) -> SplineResult<Vec<f64>> {
         let (n, bw) = (self.n, self.bw);
         // Uᵀ·y = b, then U·x = y.

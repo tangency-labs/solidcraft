@@ -5059,6 +5059,10 @@ mod tests {
             Ok(1e-5)
         }
 
+        fn face_has_loopuses(&self, _face: NoObject) -> Result<bool> {
+            Ok(true)
+        }
+
         fn face_point_classify(
             &self,
             _k: &Kernel,

@@ -235,7 +235,7 @@ impl PanelView {
         let current = agents::current(app);
         let permission_agent =
             if app.agent_chat.state().running() { Some(app.agent_chat.running_id.clone()) } else { current.as_ref().map(|e| e.id.clone()) };
-        let permission = permission_agent.as_deref().map_or(app.preferences.ai_permissions, |id| agents::mode_for(&app.preferences, id));
+        let permission = permission_agent.as_deref().map_or(app.preferences.ai_permissions, |id| agents::mode_in_force(app, id));
         PanelView {
             shown: shown(app),
             document: app.session.doc.name.clone(),
@@ -1304,16 +1304,20 @@ fn composer(chat: &mut AgentChat, view: &PanelView, ui: &mut egui::Ui, state: St
 fn transcript_body(chat: &mut AgentChat, view: &PanelView, ui: &mut egui::Ui) -> f32 {
     // Select All and Copy of the whole conversation, read before its labels see the keys.
     super::select_all::handle(chat, ui.ctx());
+    let margin = Tokens::get().space_12 as i8;
+    let height = ui.available_height();
+    // The height inside the margins, less a point so rounding never shows a scroll bar.
+    let room = (height - 2.0 * f32::from(margin) - 1.0).max(0.0);
     let conversation = egui::ScrollArea::vertical()
         .id_salt("sc_agent_chat_scroll")
         .min_scrolled_height(0.0)
-        .max_height(ui.available_height())
+        .max_height(height)
         .auto_shrink([false, false])
         .stick_to_bottom(true)
         .show(ui, |ui| {
-            egui::Frame::NONE.inner_margin(egui::Margin::same(Tokens::get().space_12 as i8)).show(ui, |ui| {
+            egui::Frame::NONE.inner_margin(egui::Margin::same(margin)).show(ui, |ui| {
                 ui.spacing_mut().item_spacing.y = Tokens::get().space_10;
-                conversation(chat, view, ui);
+                conversation(chat, view, ui, room);
             });
             // Last, so the scroll goes to this area and not to one nested in the conversation.
             scroll_while_selecting(ui);
@@ -2009,8 +2013,9 @@ fn scroll_while_selecting(ui: &egui::Ui) {
     ui.scroll_with_delta_animation(vec2(0.0, -step), egui::style::ScrollAnimation::none());
 }
 
+/// The conversation, in `room` points of height before it scrolls.
 #[cfg(not(target_arch = "wasm32"))]
-fn conversation(chat: &mut AgentChat, view: &PanelView, ui: &mut egui::Ui) {
+fn conversation(chat: &mut AgentChat, view: &PanelView, ui: &mut egui::Ui, room: f32) {
     let t = Tokens::get();
     let mut answer: Option<(usize, Option<String>)> = None;
     // Allow (true), Deny (false), Always allow (None).
@@ -2369,10 +2374,7 @@ fn conversation(chat: &mut AgentChat, view: &PanelView, ui: &mut egui::Ui) {
                 }
             });
         } else {
-            ui_kit::assistant_prose(ui, |ui| {
-                ui.label(RichText::new(tr("ui.agent_chat_intro")).color(t.text_dim));
-                ui.label(RichText::new(tr("ui.agent_chat_privacy")).color(t.text_dim).size(t.font_small));
-            });
+            new_chat_intro(ui, room);
         }
     }
     if let Some((n, text)) = edit_done {
@@ -2407,6 +2409,33 @@ fn conversation(chat: &mut AgentChat, view: &PanelView, ui: &mut egui::Ui) {
     }
     if let Some(n) = undo {
         chat.actions.push(PanelAction::UndoChanges(n));
+    }
+}
+
+/// A new chat's short introduction and the hint to type in the message box, at the bottom of the
+/// conversation's `room` so they sit just above the message box (#11256). The space above them
+/// comes from their height the frame before; a frame that measures a new height is laid out
+/// again, so they never show in the wrong place. Taller than the room, the conversation keeps its
+/// bottom in view, so the hint stays just above the message box and the start scrolls up.
+#[cfg(not(target_arch = "wasm32"))]
+fn new_chat_intro(ui: &mut egui::Ui, room: f32) {
+    let t = Tokens::get();
+    let id = ui.scope_id().with("sc_agent_chat_intro_height");
+    let known = ui.data(|data| data.get_temp::<f32>(id));
+    ui.add_space(known.map_or(0.0, |height| (room - height).max(0.0)));
+    let intro = ui_kit::assistant_prose(ui, |ui| {
+        ui.vertical(|ui| {
+            ui.label(RichText::new(tr("ui.agent_chat_intro_short")).color(t.text_dim));
+            ui.label(RichText::new(tr("ui.agent_chat_privacy")).color(t.text_dim).size(t.font_small));
+            ui.label(tr("ui.agent_chat_hint"));
+        })
+        .response
+        .rect
+    });
+    solidcraft_ui_registry::publish_rect("agent_chat:intro", intro);
+    if known.is_none_or(|height| (height - intro.height()).abs() > 0.5) {
+        ui.data_mut(|data| data.insert_temp(id, intro.height()));
+        ui.ctx().request_discard("Assistant intro measured");
     }
 }
 
@@ -3257,7 +3286,7 @@ mod tests {
             let view = PanelView::of(&mut app, &ctx);
             let mut output = ctx.run_ui(input, |ui| {
                 ui.set_width(width);
-                ui_kit::scope(ui, |ui| conversation(&mut app.agent_chat, &view, ui));
+                ui_kit::scope(ui, |ui| conversation(&mut app.agent_chat, &view, ui, 720.0));
             });
             output.textures_delta.clear();
             for id in ["reject", "remember", "once", "custom"] {
@@ -3316,5 +3345,61 @@ mod tests {
                 assert!(!a.shrink(0.5).intersects(b.shrink(0.5)), "picker overlap: {a:?} {b:?}");
             }
         }
+    }
+
+    /// Draws a new chat with one agent in a panel of `size`, a few frames as the app does, and
+    /// returns the texts drawn in the last one.
+    fn new_chat_texts(size: egui::Vec2) -> Vec<String> {
+        let ctx = crate::fonts::test_context();
+        let mut app = SolveApp::new(solidcraft_engine::Session::default(), crate::Services::default());
+        app.preferences.agents.push(agents::AgentConfig { id: "plate".into(), name: "Plate agent".into(), ..Default::default() });
+        app.agent_chat.detection = Some(discover::Detection::default());
+        app.agent_chat.picking = Some(false);
+        app.agent_chat.state = Some(State::Ready);
+        let input = egui::RawInput { screen_rect: Some(Rect::from_min_size(egui::Pos2::ZERO, size)), ..Default::default() };
+        let mut texts = Vec::new();
+        for _ in 0..3 {
+            solidcraft_ui_registry::clear_handles();
+            let mut output = ctx.run_ui(input.clone(), |ui| {
+                let mut prefs = AgentPanelPrefs::read(&app.preferences);
+                let view = PanelView::of(&mut app, ui.ctx());
+                header(&mut app.agent_chat, ui, &mut prefs);
+                desktop_body(&mut app.agent_chat, &view, ui, Flow::Tall, &prefs);
+            });
+            texts = crate::test_support::text_shapes(&output).map(|text| text.galley.text().to_string()).collect();
+            output.textures_delta.clear();
+        }
+        texts
+    }
+
+    /// A new chat's short introduction and the hint to type sit just above the message box, not
+    /// at the top of an empty panel (#11256).
+    #[test]
+    fn a_new_chat_introduces_itself_just_above_the_message_box() {
+        let texts = new_chat_texts(vec2(440.0, 720.0));
+        for id in ["ui.agent_chat_intro_short", "ui.agent_chat_privacy", "ui.agent_chat_hint"] {
+            assert!(texts.iter().any(|text| text == tr(id)), "{id} is drawn: {texts:?}");
+        }
+        assert!(!texts.iter().any(|text| text == tr("ui.agent_chat_intro")), "the long introduction is not");
+        let intro = solidcraft_ui_registry::rect_of("agent_chat:intro").expect("the introduction is drawn");
+        let conversation = solidcraft_ui_registry::rect_of("agent_chat:conversation").expect("the conversation is drawn");
+        let composer = solidcraft_ui_registry::rect_of("agent_chat:composer_box").expect("the message box is drawn");
+        let t = Tokens::get();
+        assert!(intro.top() > conversation.top() + 100.0, "the introduction is not at the top: {intro:?} in {conversation:?}");
+        assert!(intro.bottom() <= conversation.bottom(), "the introduction is not cut off: {intro:?} in {conversation:?}");
+        let gap = composer.top() - intro.bottom();
+        assert!((0.0..=t.space_12 * 3.0).contains(&gap), "the hint sits just above the message box: {gap} between {intro:?} and {composer:?}");
+    }
+
+    /// In a panel too short for the short introduction, the hint to type stays in view just above
+    /// the message box and the start of the introduction scrolls up.
+    #[test]
+    fn a_new_chat_introduction_taller_than_the_panel_keeps_the_hint_in_view() {
+        new_chat_texts(vec2(300.0, 260.0));
+        let intro = solidcraft_ui_registry::rect_of("agent_chat:intro").expect("the introduction is drawn");
+        let conversation = solidcraft_ui_registry::rect_of("agent_chat:conversation").expect("the conversation is drawn");
+        assert!(intro.height() > conversation.height(), "the introduction is taller than the conversation: {intro:?} in {conversation:?}");
+        assert!(intro.bottom() <= conversation.bottom(), "the hint is not cut off: {intro:?} in {conversation:?}");
+        assert!(intro.bottom() > conversation.top(), "the hint is not scrolled out of view: {intro:?} in {conversation:?}");
     }
 }

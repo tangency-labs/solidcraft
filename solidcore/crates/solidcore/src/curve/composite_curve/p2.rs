@@ -81,6 +81,7 @@ use crate::curve::curve::p7::PropertyAnalysisOptions;
 use crate::curve::curve::p8::CurveIntersectOptions;
 use crate::curve::curve_cache::CurveCache;
 use crate::curve::offset_curve::OffsetCurve;
+use crate::error::curve::CurveFailure;
 use crate::error::{ignored, Result, SolidError};
 use crate::geom::attribute::{self, ObjectKey};
 use crate::geom::extent1d::{Extent1d, ExtentPointType};
@@ -1023,9 +1024,9 @@ impl CompositeCurve {
                 2 => OffsetDirection::RightHandSide,
                 3 => OffsetDirection::BothSides,
                 _ => {
-                    return Err(SolidError::curve_failed(
+                    return Err(SolidError::curve(
                         OP_OFFSETS,
-                        "the offset direction is not 1, 2 or 3",
+                        CurveFailure::OffsetDirectionUnknown { direction: dir },
                     ))
                 }
             };
@@ -1169,10 +1170,7 @@ impl CompositeCurve {
         }
 
         if offsets.is_empty() {
-            return Err(SolidError::curve_failed(
-                OP_OFFSETS,
-                "no offset curve was made",
-            ));
+            return Err(SolidError::curve(OP_OFFSETS, CurveFailure::NoOffsetCurve));
         }
 
         // If we are not trimming then we are done here.
@@ -1623,10 +1621,26 @@ mod tests {
             offset_distance: 0.1,
             match_parameterization: false,
         };
-        assert!(matches!(
-            CompositeCurve::create_offsets_of_many_curves(&k, &[&sq], &[4], &p),
-            Err(e) if crate::error::upstream_status(&e).is_some()
-        ));
+        let Err(err) = CompositeCurve::create_offsets_of_many_curves(&k, &[&sq], &[4], &p) else {
+            panic!("direction 4: an offset was made");
+        };
+        assert_eq!(
+            err.curve_failure(),
+            Some(&CurveFailure::OffsetDirectionUnknown { direction: 4 })
+        );
+        assert_eq!(
+            crate::error::upstream_status(&err),
+            Some(crate::error::SM_ERR)
+        );
+        // no curves: no offset is made
+        let Err(err) = CompositeCurve::create_offsets_of_many_curves(&k, &[], &[], &p) else {
+            panic!("no curves: an offset was made");
+        };
+        assert_eq!(err.curve_failure(), Some(&CurveFailure::NoOffsetCurve));
+        assert_eq!(
+            crate::error::upstream_status(&err),
+            Some(crate::error::SM_ERR)
+        );
         assert!(matches!(
             CompositeCurve::create_offsets_of_many_curves(&k, &[&sq], &[], &p),
             Err(SolidError::InvalidInput { .. })
