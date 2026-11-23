@@ -755,6 +755,33 @@ fn parallel_curved_import_keeps_face_colours_and_exact_display_meshes() {
     }
 }
 
+/// An imported part's check plans it at display tolerance and keeps that plan, so its display
+/// mesh (and the viewport's plan at Normal quality) take it rather than planning the part twice
+/// more: a 50 000-face plate planned for 5 s each time. The mesh is the one a fresh plan gives.
+#[test]
+fn an_imported_part_is_planned_once_for_its_check_and_its_display() {
+    let b = fillet(&box_solid(Vec3::ZERO, Vec3::new(30.0, 20.0, 10.0)).unwrap(), &[Vec3::new(15.0, 0.0, 10.0)], 3.0).unwrap();
+    let text = step_export(&[&b], "rounded block").unwrap();
+    let imp = step_import(&text).unwrap();
+    let part = &imp.bodies[0].body;
+    let kept = |b: &Body| b.memo().and_then(|m| m.plans.as_ref()).map(|p| p.lock().unwrap().len());
+    assert_eq!(kept(part), Some(1), "the check's plan is kept");
+    let t = crate::display_tolerance(part.size());
+    let plan = part.mesh_plan_shared(&t).unwrap();
+    assert!(std::sync::Arc::ptr_eq(&plan, &part.clone().mesh_plan_shared(&t).unwrap()), "clones share it");
+    assert_eq!(kept(part), Some(1), "and nothing was planned again");
+    let fresh = Body::from_record(part.record().clone()).unwrap();
+    assert_eq!(kept(&fresh), None);
+    let (a, b) = (part.mesh(&t).unwrap(), fresh.mesh(&t).unwrap());
+    assert_eq!(a.positions, b.positions);
+    assert_eq!(a.triangles, b.triangles);
+    assert_eq!(part.unmeshed_display_faces(), 0);
+    // A plan at any other tolerance (another quality, the coarse check's) is not kept.
+    part.mesh_plan_shared(&crate::MeshTolerance::chord(t.chord * 3.0)).unwrap();
+    part.unmeshed_faces();
+    assert_eq!(kept(part), Some(1), "only the display plan is kept");
+}
+
 #[test]
 fn parallel_import_does_not_prepare_past_body_budget_with_duplicates_or_mapped_items() {
     let text = format!(
