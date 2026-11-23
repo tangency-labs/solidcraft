@@ -39,7 +39,7 @@ pub static COMMANDS: &[CommandSpec] = &[CommandSpec::new(IMPORT, "Import Drawing
     .contract(&IMPORT_CONTRACT)
     .output(output_schema_for::<ImportResult>)
     .params(
-        "file: an .svg file, another program's sheet format; path?: the .json template to write (needed unless dry_run); dry_run?: true to answer without writing → {path?, sheet: {size_mm, standard?, orientation}, strokes, texts, fields: [{name, text}], skipped?: [{kind, count}], approximated?: [{kind, count}], dry_run}. The file's page becomes the template's one sheet (a standard size when within 2 mm, else its own), with no SolidCraft border or title block: its line work and text are the sheet's format, drawn under the views as they are. Texts marked as fields (data-field, or freecad:editable) are listed and kept as fixed text. drawing.create and drawing.template.apply take the file written. Changes nothing in the design.",
+        "file: an .svg file, another program's sheet format; path?: the .scdwg template to write (needed unless dry_run; a .json name gets the .scdwg file beside it, with the same name); dry_run?: true to answer without writing → {path?, renamed_from?, sheet: {size_mm, standard?, orientation}, strokes, texts, fields: [{name, text}], skipped?: [{kind, count}], approximated?: [{kind, count}], dry_run}. The file's page becomes the template's one sheet (a standard size when within 2 mm, else its own), with no SolidCraft border or title block: its line work and text are the sheet's format, drawn under the views as they are. Texts marked as fields (data-field, or freecad:editable) are listed and kept as fixed text. drawing.create and drawing.template.apply take the file written. Changes nothing in the design.",
     )];
 
 fn import(_s: &mut Session, p: &Value) -> Result<Value> {
@@ -48,12 +48,18 @@ fn import(_s: &mut Session, p: &Value) -> Result<Value> {
     if !svg(&request.file) {
         return Err(bad(IMPORT, "`file` is an .svg file: save the other program's sheet format as SVG (a DXF can be turned into one)"));
     }
-    let json = |path: &str| path.len() <= MAX_PATH_BYTES && Path::new(path).extension().is_some_and(|e| e.eq_ignore_ascii_case("json"));
-    let path = match (&request.path, request.dry_run) {
-        (Some(path), _) if !json(path) => return Err(bad(IMPORT, "`path` must be a .json file")),
-        (None, false) => return Err(bad(IMPORT, "`path` names the .json template to write (or give dry_run)")),
+    let json = |path: &str| Path::new(path).extension().is_some_and(|e| e.eq_ignore_ascii_case("json"));
+    let template_path = |path: &str| path.len() <= MAX_PATH_BYTES && (json(path) || solidcraft_io::is_drawing_path(path));
+    let asked = match (&request.path, request.dry_run) {
+        (Some(path), _) if !template_path(path) => return Err(bad(IMPORT, "`path` must be a .scdwg file")),
+        (None, false) => return Err(bad(IMPORT, "`path` names the .scdwg template to write (or give dry_run)")),
         (path, _) => path.clone(),
     };
+    // A template is one container file (#19918): a .json name, as templates had, gets the container
+    // beside it with the same stem, as drawing.template.save does; the reply names both.
+    let path = asked.as_deref().map(|asked| {
+        if json(asked) { Path::new(asked).with_extension(solidcraft_io::DRAWING_EXT).to_string_lossy().into_owned() } else { asked.to_string() }
+    });
     let bytes =
         solidcraft_io::vfs::read(&request.file, solidcraft_io::MAX_DRAWING_BYTES).map_err(|e| bad(IMPORT, format!("{}: {e}", request.file)))?;
     let text = solidcraft_io::decode_svg(&bytes).map_err(|e| bad(IMPORT, format!("{}: {e}", request.file)))?;
@@ -70,11 +76,15 @@ fn import(_s: &mut Session, p: &Value) -> Result<Value> {
     let made = made(&request.file, paper, format)?;
     let (strokes, texts) = made.sheets.first().map_or((0, 0), |sheet| (sheet.format.strokes.len(), sheet.format.texts.len()));
     if let (Some(path), false) = (&path, request.dry_run) {
-        let written = made.to_json().map_err(|e| bad(IMPORT, e.to_string()))?;
+        let written = solidcraft_io::write_drawing_container(&made).map_err(|e| bad(IMPORT, e.to_string()))?;
+        if written.len() > solidcraft_io::MAX_DESIGN_BYTES {
+            return Err(bad(IMPORT, format!("the template is over {} MiB, more than a template file may be", solidcraft_io::MAX_DESIGN_BYTES >> 20)));
+        }
         solidcraft_io::vfs::check(path).map_err(|e| EngineError::Other(e.to_string()))?;
-        solidcraft_io::write_atomic(Path::new(path), written.as_bytes(), false).map_err(|e| EngineError::Other(e.to_string()))?;
+        solidcraft_io::write_atomic(Path::new(path), &written, false).map_err(|e| EngineError::Other(e.to_string()))?;
     }
     let reply = ImportResult {
+        renamed_from: asked.filter(|asked| !request.dry_run && path.as_deref() != Some(asked.as_str())),
         path: path.filter(|_| !request.dry_run),
         sheet: ImportedSheet {
             size_mm: [size_mm.x, size_mm.y],

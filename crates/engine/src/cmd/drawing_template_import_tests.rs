@@ -33,7 +33,7 @@ fn refused(s: &mut Session, p: Value) -> String {
 #[test]
 fn an_svg_sheet_format_becomes_a_template() {
     let folder = Folder::new("drawing-template-import");
-    let (file, path) = (folder.path("acme-a4.svg"), folder.path("acme-a4.json"));
+    let (file, path) = (folder.path("acme-a4.svg"), folder.path("acme-a4.scdwg"));
     std::fs::write(&file, A4_FORMAT).unwrap();
     let mut s = Session::default();
     run(&mut s, "solid.box", json!({"length": 40, "width": 20, "height": 10}));
@@ -45,6 +45,12 @@ fn an_svg_sheet_format_becomes_a_template() {
     assert_eq!(reply["sheet"], json!({"size_mm": [297.0, 210.0], "standard": "a4", "orientation": "landscape"}));
     assert_eq!((reply["strokes"].as_u64(), reply["texts"].as_u64()), (Some(7), Some(3)), "4 frame sides, 2 lines, 1 circle: {reply}");
     assert_eq!(reply["fields"], json!([{"name": "title", "text": "Bracket"}, {"name": "drawing_number", "text": "D-0001"}]));
+    assert!(reply.get("renamed_from").is_none() && std::fs::read(&path).unwrap().starts_with(b"PK"), "one .scdwg container: {reply}");
+    // A .json name, as templates had, gets the .scdwg file beside it (#19918), as drawing.template.save does.
+    let old = folder.path("acme-old.json");
+    let beside = run(&mut s, IMPORT, json!({"file": file, "path": old}));
+    assert_eq!((beside["path"].as_str(), beside["renamed_from"].as_str()), (Some(folder.path("acme-old.scdwg").as_str()), Some(old.as_str())));
+    assert!(!std::path::Path::new(&old).exists(), "nothing at the .json name");
     // A drawing from the file: the page's top-left frame corner is 10 mm in from the sheet's top left.
     run(&mut s, "drawing.create", json!({"template": path}));
     let d = s.drawing("test").unwrap().clone();
@@ -93,7 +99,7 @@ fn a_bad_import_is_refused() {
     let good = folder.path("good.svg");
     std::fs::write(&good, A4_FORMAT).unwrap();
     assert!(refused(&mut s, json!({"file": good})).contains("`path`"));
-    assert!(refused(&mut s, json!({"file": good, "path": folder.path("t.txt")})).contains(".json"));
+    assert!(refused(&mut s, json!({"file": good, "path": folder.path("t.txt")})).contains(".scdwg"));
     let broken = folder.path("broken.svg");
     std::fs::write(&broken, r#"<svg xmlns="http://www.w3.org/2000/svg" width="1e400mm" height="10mm"><line x1="0" y1="0" x2="1" y2="1"/></svg>"#)
         .unwrap();

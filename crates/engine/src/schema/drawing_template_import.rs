@@ -10,7 +10,8 @@ use serde::{Deserialize, Serialize};
 pub struct ImportParams {
     /// The SVG file to read, at most 4096 bytes long.
     pub file: String,
-    /// The .json template file to write (none with `dry_run`).
+    /// The .scdwg template file to write (none with `dry_run`). A .json name, as templates had,
+    /// gets the .scdwg file beside it with the same name.
     #[serde(default)]
     pub path: Option<String>,
     /// Answer what the template would hold without writing it.
@@ -24,6 +25,9 @@ pub struct ImportResult {
     /// The file written; none for a dry run.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub path: Option<String>,
+    /// The .json path asked for, when the .scdwg file went beside it instead.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub renamed_from: Option<String>,
     /// The paper the template's sheet takes.
     pub sheet: ImportedSheet,
     /// How many strokes of line work its sheet format draws.
