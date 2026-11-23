@@ -1142,16 +1142,16 @@ crates/solidcore/src/topology/face/p1.rs	move_seam_notified	int-rem	1	open	1 % c
 crates/solidcore/src/topology/face/p1.rs	move_seam_notified	int-rem	2	open	(jj + 1) % cnt	
 crates/solidcore/src/topology/face/p1.rs	move_seam_notified	int-rem	3	open	(max_indx + 1) % cnt	
 crates/solidcore/src/topology/face/p1.rs	split_at_seam_merges	rotate	1	open	rotate_left(at)	
-crates/solidcore/src/topology/face/p2.rs	points_in_face	int-div	1	open	point_count / trim_curve_cnt	
-crates/solidcore/src/topology/face/p2.rs	points_in_face	int-div	2	open	point_count / trim_curve_cnt	
-crates/solidcore/src/topology/face/p2.rs	points_in_face	int-div	3	open	point_count / trim_curve_cnt	
-crates/solidcore/src/topology/face/p2.rs	points_in_face	int-div	4	proven	trim_curve_cnt / 2	constant non-zero divisor
-crates/solidcore/src/topology/face/p2.rs	points_in_face	int-div	5	proven	ii / 2	constant non-zero divisor
-crates/solidcore/src/topology/face/p2.rs	points_in_face	int-div	6	open	div_ceil(2)	
-crates/solidcore/src/topology/face/p2.rs	points_in_face	int-div	7	open	point_count / n_classes	
-crates/solidcore/src/topology/face/p2.rs	points_in_face	int-div	8	open	point_count / n_classes	
-crates/solidcore/src/topology/face/p2.rs	points_in_face	int-div	9	open	point_count / n_classes	
-crates/solidcore/src/topology/face/p2.rs	points_in_face	int-rem	1	proven	ii % 2	constant non-zero divisor
+crates/solidcore/src/topology/face/p2.rs	points_in_face_drawing	int-div	1	open	point_count / trim_curve_cnt	
+crates/solidcore/src/topology/face/p2.rs	points_in_face_drawing	int-div	2	open	point_count / trim_curve_cnt	
+crates/solidcore/src/topology/face/p2.rs	points_in_face_drawing	int-div	3	open	point_count / trim_curve_cnt	
+crates/solidcore/src/topology/face/p2.rs	points_in_face_drawing	int-div	4	proven	trim_curve_cnt / 2	constant non-zero divisor
+crates/solidcore/src/topology/face/p2.rs	points_in_face_drawing	int-div	5	proven	ii / 2	constant non-zero divisor
+crates/solidcore/src/topology/face/p2.rs	points_in_face_drawing	int-div	6	open	div_ceil(2)	
+crates/solidcore/src/topology/face/p2.rs	points_in_face_drawing	int-div	7	open	point_count / n_classes	
+crates/solidcore/src/topology/face/p2.rs	points_in_face_drawing	int-div	8	open	point_count / n_classes	
+crates/solidcore/src/topology/face/p2.rs	points_in_face_drawing	int-div	9	open	point_count / n_classes	
+crates/solidcore/src/topology/face/p2.rs	points_in_face_drawing	int-rem	1	proven	ii % 2	constant non-zero divisor
 crates/solidcore/src/topology/face/p2.rs	remove_suspect_split_at_seam_uv_trim_curves	step_by	1	proven	step_by(2)	constant non-zero step
 crates/solidcore/src/topology/face/p2.rs	trim_curve_breaks	windows	1	proven	windows(2)	constant non-zero size
 crates/solidcore/src/topology/face/p3.rs	is_degenerate	split_at	1	open	split_at_mut(jj)	
