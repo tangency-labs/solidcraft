@@ -7,7 +7,6 @@
 use egui::{Pos2, Stroke, vec2};
 use serde_json::{Value, json};
 use solidcore_record::Vec2;
-use solidcraft_engine::doc::canvas::Canvas;
 use solidcraft_engine::geom::prelude::*;
 
 use crate::SolveApp;
@@ -217,7 +216,7 @@ pub(crate) fn click(app: &mut SolveApp, proj: &Proj, screen: Pos2) -> bool {
     // frame: a trace click is read there, as `canvas.to_sketch` reads its point.
     let anchored = c.anchor.as_ref().filter(|_| panel.trace).and_then(|a| {
         let frame = doc.canvas_anchor_frame(&c, a, &state).ok()?;
-        Some((state.sketch(a.sketch)?.plane.clone(), frame))
+        Some((state.sketch(a.sketch)?.plane, frame))
     });
     let (plane, corners) = match anchored {
         Some(found) => found,
