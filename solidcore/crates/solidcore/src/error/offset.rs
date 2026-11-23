@@ -573,12 +573,15 @@ pub enum OffsetFailure {
         /// The selection's position in the list given.
         index: usize,
     },
-    /// The offset surface of `face` collapses (onto its spine or past it: a round offset by
-    /// its radius) in an extended offset, which builds every face it offsets (only an inset
-    /// that extends convex edges leaves such a face out and mates its neighbours across it).
+    /// The offset surface of `face`, offset by `distance`, collapses (onto its spine or past
+    /// it: a round offset by its radius or more) in an extended offset, which builds every
+    /// face it offsets (only an inset that extends convex edges leaves such a face out and
+    /// mates its neighbours across it). The collapse test that finds it gives no radius.
     ExtendedFaceCollapses {
         /// The face, of the operation's input.
         face: FaceId,
+        /// The offset distance asked for (as the executive holds it).
+        distance: f64,
     },
     /// The offset surface of `face` meets itself along `curves` curves, more than the
     /// `limit` an extended offset takes (none where it merges its results, else five where
@@ -727,7 +730,7 @@ impl OffsetFailure {
             | Self::FaceHasNoSurface { face }
             | Self::FaceHasNoOuterFaceuse { face }
             | Self::SelfIntersectionWithoutUvCurve { face }
-            | Self::ExtendedFaceCollapses { face }
+            | Self::ExtendedFaceCollapses { face, .. }
             | Self::ExtendedFaceMeetsItself { face, .. }
             | Self::MoveCollapses { face, .. } => Some(EntityRef::Face(face)),
             Self::WallsTouch { face, .. }
@@ -1644,9 +1647,10 @@ impl core::fmt::Display for OffsetFailure {
                 "invalid input: the shell's face selection {index} names no face of the body \
                  it was given"
             ),
-            Self::ExtendedFaceCollapses { .. } => f.write_str(
-                "the face's offset surface collapses, and the extended offset builds every face \
-                 it offsets",
+            Self::ExtendedFaceCollapses { distance, .. } => write!(
+                f,
+                "the face's offset surface collapses at the distance {distance}, and the \
+                 extended offset builds every face it offsets"
             ),
             Self::ExtendedFaceMeetsItself { curves, limit, .. } => write!(
                 f,
@@ -2271,7 +2275,10 @@ mod tests {
                 false,
             ),
             (
-                O::ExtendedFaceCollapses { face },
+                O::ExtendedFaceCollapses {
+                    face,
+                    distance: 0.5,
+                },
                 ErrorKind::OffsetCollapses,
                 false,
                 false,
@@ -2526,7 +2533,10 @@ mod tests {
                 None,
             ),
             (
-                OffsetFailure::ExtendedFaceCollapses { face },
+                OffsetFailure::ExtendedFaceCollapses {
+                    face,
+                    distance: 0.5,
+                },
                 SM_ERR,
                 Some(EntityRef::Face(face)),
             ),

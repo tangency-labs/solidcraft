@@ -1823,7 +1823,10 @@ impl OffsetExecutive {
             return if extended {
                 Err(failed(
                     OP_EXTENDED,
-                    OffsetFailure::ExtendedFaceCollapses { face },
+                    OffsetFailure::ExtendedFaceCollapses {
+                        face,
+                        distance: self.offset_distance(),
+                    },
                 ))
             } else {
                 Ok(true)
@@ -6333,6 +6336,42 @@ mod tests {
             SM_ERR_INVALID_INPUT,
         );
         named(
+            api_shell_brep_full(
+                &mut kernel,
+                None,
+                ShellOptions::default(),
+                &[],
+                &COPY_IDS,
+                &mut fixture.context(),
+            )
+            .unwrap_err(),
+            OffsetFailure::BrepNotGiven,
+            ErrorKind::InvalidInput,
+            SM_ERR_INVALID_INPUT,
+        );
+        // a face of the input with no surface, copied as a shell face
+        let (mut bare, bare_face) = one_face(false);
+        for extended in [false, true] {
+            let mut exec = executive();
+            exec.set_extend_convex_edges(extended);
+            exec.set_shell_faces(&[bare_face]);
+            let mut notifications = NotificationFixture::new(&bare);
+            let e = exec
+                .do_solid_offset(
+                    &mut kernel,
+                    Some(&mut bare),
+                    SolidOffsetOptions::default(),
+                    &mut notifications.context(),
+                )
+                .unwrap_err();
+            named(
+                e,
+                OffsetFailure::FaceHasNoSurface { face: bare_face },
+                ErrorKind::InvalidInput,
+                SM_ERR_NULL_POINTER,
+            );
+        }
+        named(
             executive()
                 .do_solid_offset(
                     &mut kernel,
@@ -6373,7 +6412,10 @@ mod tests {
             named(
                 exec.skip_offset_face_geometry(face, true, false, 0)
                     .unwrap_err(),
-                OffsetFailure::ExtendedFaceCollapses { face },
+                OffsetFailure::ExtendedFaceCollapses {
+                    face,
+                    distance: exec.offset_distance(),
+                },
                 ErrorKind::OffsetCollapses,
                 SM_ERR,
             );
@@ -6430,6 +6472,14 @@ mod tests {
                 .extend_result_faces_prefix(&mut kernel, MarkType::Mark, &mut fixture.context())
                 .unwrap_err(),
             "the offset B-rep is not there",
+        );
+        // an offset face without its surface, in the extension step
+        let mut exec = executive();
+        exec.set_offset_brep(one_face(false).0);
+        defect(
+            exec.extend_result_faces_prefix(&mut kernel, MarkType::Mark, &mut fixture.context())
+                .unwrap_err(),
+            "an offset face has no surface",
         );
         // the face's links, each cut once
         let faceuse = brep.face(face).unwrap().faceuse.unwrap();
