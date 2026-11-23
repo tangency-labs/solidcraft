@@ -1725,6 +1725,9 @@ pub enum FeatureKind {
         /// Turn the other way (left-handed).
         #[serde(default, skip_serializing_if = "std::ops::Not::not")]
         clockwise: bool,
+        /// Where the wire ends; axial when absent.
+        #[serde(default, skip_serializing_if = "CoilEndCut::is_axial")]
+        end_cut: CoilEndCut,
         #[serde(default)]
         operation: Operation,
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -2991,6 +2994,21 @@ pub enum CoilSection {
     #[default]
     Circular,
     Square,
+}
+
+/// Where a coil's wire ends: in a plane through the axis, or square to the wire.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum CoilEndCut {
+    #[default]
+    Axial,
+    Square,
+}
+
+impl CoilEndCut {
+    fn is_axial(&self) -> bool {
+        *self == Self::Axial
+    }
 }
 
 fn is_zero_i8(v: &i8) -> bool {

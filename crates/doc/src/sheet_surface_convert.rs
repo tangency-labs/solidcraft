@@ -4209,9 +4209,15 @@ impl SurfaceSheet {
     /// `body` with the sheet's recesses cut from it, each from its panel where `frames` put it.
     fn recessed(&self, mut body: Body, frames: &[Option<Rigid3>]) -> Result<Body> {
         let t = self.sheet.thickness;
-        // Past the face it opens from, a hair, so that no face of the cut lies on the sheet's.
-        let margin = t * 1e-3;
         for r in &self.recesses {
+            // Past the face it opens from, a hair, so that no face of the cut lies on the sheet's:
+            // a thousandth of the thickness clear of both bodies' tolerances. Within the larger of
+            // them two places are one, and the tool's corners, as far off the sheet's edges as the
+            // hair, must stay off their balls: twice the body's tolerance covers the tool's own,
+            // made at the kernel's (2e-5), no larger. A sheet's body is held to a millionth of
+            // its size (1.02e-3 for a 1000 x 200 plate), past a thousandth of a 1 mm thickness
+            // (#20769).
+            let margin = t * 1e-3 + 2.0 * body.record().tolerance;
             let frame = frames.get(r.panel).copied().flatten().ok_or_else(|| DocError::Invalid("a recessed panel has no place".into()))?;
             let plane = Plane::new(frame.shift, frame.x, frame.y).ok_or_else(|| DocError::Invalid("a recessed panel has no plane".into()))?;
             let (from, to) = if r.far { (t - r.depth, t + margin) } else { (-margin, r.depth) };
