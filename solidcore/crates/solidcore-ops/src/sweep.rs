@@ -32,9 +32,12 @@ use solidcore::heal::stitch::p1::api_stitch_into_solid;
 use solidcore::kernel::Kernel;
 use solidcore::math::Transform;
 use solidcore::nurbs::b_spline_curve::{BSplineCurve, BSplineCurveForm, CanonicalData, KnotType};
+use solidcore::nurbs::b_spline_surface::BSplineSurface;
+use solidcore::nurbs::b_spline_surface_n_lib::p2::SkinnedSurfaceOptions;
 use solidcore::primitive::primitive_creation::SweepOptions;
 use solidcore::prism::profile as kp;
 use solidcore::surface::surface::p4::NoObject;
+use solidcore::surface::surface::Surface;
 use solidcore::sweep::api_brep::{
     create_curve_sweep_with_placements, create_linear_sweep, create_rotational_sweep,
     CornerRefusal as KRefusal, OffsetCornerType, TaperExtrude,
@@ -55,7 +58,8 @@ use solidcore::topology::brep::p3::new_brep;
 use solidcore::topology::brep::p4::stitch_faces;
 use solidcore::topology::brep::p5::{stitch_and_orient, StitchAndOrientOptions};
 use solidcore::topology::brep::p8::{
-    create_planar_face_with_3d_curves, create_planar_faces_with_3d_curves, FaceBuildEnv,
+    create_face_from_surface, create_planar_face_with_3d_curves,
+    create_planar_faces_with_3d_curves, FaceBuildEnv,
 };
 use solidcore::topology::brep::planar_section::{PlanarSectionOptions, SectionOutputs};
 use solidcore::topology::{Brep, FaceId};
@@ -1304,6 +1308,134 @@ pub fn loft_to_point(section: &[Curve], apex: [f64; 3]) -> Result<Body> {
                     .copied()
                     .unwrap_or(p);
                 face(b, fenv, &[p, q, top])?;
+            }
+            Ok(())
+        });
+        if let Err(e) = built {
+            return Ok(Err(e));
+        }
+        if let Err(e) = stitch_and_orient(k, &mut b, &StitchAndOrientOptions::default()) {
+            return Ok(Err(status(e)));
+        }
+        b.refresh_cached_topology();
+        finish(k, b, Expect::SOLID)
+    })
+}
+
+/// A loft from the planar first of `sections` (one closed loop of curves, in order) through the
+/// rest, its stations (each as many curves as the first, need not be planar), to `apex` (off the
+/// first's plane): the base on the first section's curves, and on each of its curves one wall
+/// skinned (cubic across, or as high as the rows allow) through that curve, the stations' curves
+/// in its column, and the curve shrunk onto the apex (the wall's pole), one face over the
+/// surface's whole box; stitched and oriented. `params` places each row along the loft, the
+/// sections' then the apex's (increasing, from 0 at the first section to 1 at the apex): every
+/// wall is skinned at those parameters, so neighbouring walls, whose curves share their ends,
+/// meet on the same boundary curves. They do as long as, at each corner, the weights of the two
+/// curves that meet there keep one ratio through the rows, as rows moved from one profile (its
+/// weights kept) do; walls that do not meet leave no solid, and the call is refused. A loft to a
+/// point that follows guide rails gives the stations and where they lie.
+///
+/// # Errors
+/// [`Error::Argument`] for fewer than two sections or more than [`MAX_STATIONS`], sections of
+/// different counts, parameters that are not one a row increasing from 0 to 1, a curve list
+/// refused, a first section that is not one closed loop, or an apex not proved off its plane;
+/// the kernel's status; [`Error::Empty`], [`Error::NotSolid`].
+pub fn loft_to_point_through(
+    sections: &[Vec<Curve>],
+    apex: [f64; 3],
+    params: &[f64],
+) -> Result<Body> {
+    if !coord_ok(&apex) || !(2..=MAX_STATIONS).contains(&sections.len()) {
+        return Err(Error::Argument);
+    }
+    if params.len() != sections.len() + 1
+        || params.first() != Some(&0.0)
+        || params.last() != Some(&1.0)
+        || params.windows(2).any(|w| !matches!(w, [a, b] if a < b))
+    {
+        return Err(Error::Argument);
+    }
+    let n = sections.first().map_or(0, Vec::len);
+    if n == 0
+        || sections.iter().any(|s| s.len() != n)
+        || sections.len().saturating_mul(n) > MAX_STATION_CURVES
+    {
+        return Err(Error::Argument);
+    }
+    making("loft_to_point_through", |k| {
+        let mut rows = Vec::with_capacity(sections.len() + 1);
+        for s in sections {
+            let made = parsed!(parse(k, s));
+            let mut row = Vec::with_capacity(n);
+            for c in &made.curves {
+                let Some(b) = bspline(c)? else {
+                    return Ok(Err(Error::Argument));
+                };
+                row.push(b);
+            }
+            rows.push((made.curves, row));
+        }
+        let Some((base, base_splines)) = rows.first() else {
+            return Ok(Err(Error::Argument));
+        };
+        if !path::closed_loop(k, base, 1e-6)?.is_yes() {
+            return Ok(Err(Error::Argument));
+        }
+        let top: Point3 = v3(apex);
+        match path::point_off_plane_of(k, base, top, 1e-9) {
+            Ok(v) if v.is_yes() => {}
+            _ => return Ok(Err(Error::Argument)),
+        }
+        // The apex row: each base curve with every control point on the apex (its own weights
+        // and knots).
+        let mut tip = Vec::with_capacity(n);
+        for b in base_splines {
+            let c = b.canonical()?;
+            let at_apex = vec![top; c.control_points.len()];
+            let data = CanonicalData {
+                dim: 3,
+                degree: c.degree,
+                control_points: &at_apex,
+                form: BSplineCurveForm::Unspecified,
+                knot_multiplicities: &c.knot_multiplicities,
+                knots: &c.knots,
+                knot_type: KnotType::Unspecified,
+                weights: (!c.weights.is_empty()).then_some(c.weights.as_slice()),
+                trim: None,
+            };
+            tip.push(BSplineCurve::create_canonical(&data)?);
+        }
+        let mut columns: Vec<Vec<BSplineCurve>> = vec![Vec::with_capacity(rows.len() + 1); n];
+        for (_, row) in &rows {
+            for (column, b) in columns.iter_mut().zip(row) {
+                column.push(b.clone());
+            }
+        }
+        for (column, b) in columns.iter_mut().zip(tip) {
+            column.push(b);
+        }
+        let degree = (params.len() - 1).min(3);
+        let mut b = new_brep(k, USE_DEFAULT, USE_DEFAULT)?;
+        let region = b.infinite_region();
+        let tol = 1e-6;
+        let built = build_faces(&mut b, |b, fenv| -> Out<()> {
+            called(create_planar_face_with_3d_curves(
+                k, b, region, base, tol, fenv,
+            ))?;
+            for column in &columns {
+                let wall = called(BSplineSurface::create_skinned_surface(
+                    k,
+                    column,
+                    SkinnedSurfaceOptions {
+                        deriv_surfs: Some([None, None]),
+                        degree,
+                        section_params: Some(params),
+                        ..Default::default()
+                    },
+                ))?;
+                let surface = Surface::from(wall);
+                let domain = called(surface.natural_uv_domain_with_nurb(k))?;
+                called(create_face_from_surface(k, b, Some(surface), &domain, fenv))?;
             }
             Ok(())
         });

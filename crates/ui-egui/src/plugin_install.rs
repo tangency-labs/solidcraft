@@ -153,6 +153,11 @@ pub(crate) fn permission_lines(plugin: &Value) -> Vec<String> {
     if permissions.and_then(|p| p.get("clock")).and_then(Value::as_bool).unwrap_or(false) {
         lines.push(tr("plugin_install.clock").to_string());
     }
+    for panel in plugin.get("panels").and_then(Value::as_array).into_iter().flatten() {
+        if let Some(title) = panel.get("title").and_then(Value::as_str) {
+            lines.push(format("plugin_install.panel", &[("title", title)]));
+        }
+    }
     for listener in plugin.get("listeners").and_then(Value::as_array).into_iter().flatten() {
         if let Some(entry) = listener.get("entry").and_then(Value::as_str) {
             lines.push(format("prefs.plugin_design_listener", &[("entry", entry)]));
