@@ -2019,6 +2019,63 @@ mod tests {
         }
     }
 
+    /// Every analytic kind a sheet face of revolution holds (a cone, a sphere's zone, a torus's
+    /// zone) turns over: turned, the face trims, and its offset by d and thickening by t are
+    /// the unturned face's by −d and −t (its side is the other one, its surface the same)
+    /// (#13640). None of them refuses its turn.
+    #[test]
+    fn turned_faces_of_revolution_offset_and_thicken_the_other_way() {
+        use std::f64::consts::PI;
+        let revolved = |seg: Seg2| revolve_sheet(&Plane::XZ, &[vec![seg]], Vec2::new(0.0, 0.0), Vec2::new(0.0, 1.0), 0.0, PI).unwrap();
+        let sheets = [
+            ("cone", revolved(Seg2::Line { a: Vec2::new(2.0, 0.0), b: Vec2::new(6.0, 8.0) })),
+            ("sphere zone", revolved(Seg2::Arc { center: Vec2::new(0.0, 0.0), radius: 5.0, start: -1.0, sweep: 2.0 })),
+            ("torus zone", revolved(Seg2::Arc { center: Vec2::new(10.0, 0.0), radius: 2.0, start: 0.0, sweep: 2.0 })),
+        ];
+        let cut = crate::SplitTool::Plane(Plane::new(Vec3::new(0.5, 0.0, 0.0), Vec3::Y, Vec3::Z).unwrap());
+        for (name, s) in &sheets {
+            let all: Vec<usize> = (0..s.face_count()).collect();
+            let turned = reverse_faces(s, &[]).unwrap_or_else(|e| panic!("{name}: {e}"));
+            trim(&turned, &cut, Vec3::new(4.0, 0.1, 1.0)).unwrap_or_else(|e| panic!("{name}: {e}"));
+            let area = |b: &Body, d: f64| measure(&crate::offset_surface(b, &all, d, 0.01).unwrap()).unwrap().area;
+            let volume = |b: &Body, t: f64| measure(&thicken(b, t, false).unwrap()).unwrap().volume;
+            assert!(rel(area(&turned, 0.5), area(s, -0.5)) < 1e-9, "{name}: {} vs {}", area(&turned, 0.5), area(s, -0.5));
+            assert!(rel(volume(&turned, 0.5), volume(s, -0.5)) < 1e-9, "{name}: {} vs {}", volume(&turned, 0.5), volume(s, -0.5));
+        }
+    }
+
+    /// An L of two walls (30 along x at y = 0, then 20 along y at x = 30, 20 up z) with only the
+    /// first turned over: each face keeps its own side, the first's −y now +y and the second's
+    /// +x as it was, and trimmed at x = 10 the half kept faces so too (#13640). Thickened by 2
+    /// each face grows to its own side, the slabs x 0..30, y 0..2 and x 30..32, y 0..20,
+    /// 1200 + 800 = 2000; where SMLib can't make that, it says so, never giving the slabs of
+    /// one side.
+    #[test]
+    fn a_sheet_turned_in_part_keeps_each_faces_side() {
+        let l =
+            vec![Seg2::Line { a: Vec2::new(0.0, 0.0), b: Vec2::new(30.0, 0.0) }, Seg2::Line { a: Vec2::new(30.0, 0.0), b: Vec2::new(30.0, 20.0) }];
+        let s = extrude_sheet(&Plane::XY, &[l], 0.0, 20.0).unwrap();
+        let sides = |b: &Body| {
+            let mut v: Vec<(i64, Vec3)> =
+                b.faces(0.01).unwrap().iter().map(|f| ((f.centroid.x * 1e3).round() as i64, f.plane_normal.unwrap())).collect();
+            v.sort_by_key(|(x, _)| *x);
+            v
+        };
+        let near = |a: Vec3, b: Vec3| a.dist(b) < 1e-9;
+        let before = sides(&s);
+        let m = reverse_faces(&s, &[Vec3::new(10.0, 0.0, 10.0)]).unwrap();
+        let after = sides(&m);
+        assert!(near(before[0].1, Vec3::new(0.0, -1.0, 0.0)) && near(before[1].1, Vec3::X), "{before:?}");
+        assert!(near(after[0].1, Vec3::Y) && near(after[1].1, Vec3::X), "{after:?}");
+        let cut = crate::SplitTool::Plane(Plane::new(Vec3::new(10.0, 0.0, 0.0), Vec3::Y, Vec3::Z).unwrap());
+        let half = sides(&trim(&m, &cut, Vec3::new(20.0, 0.0, 5.0)).unwrap());
+        assert!(half.len() == 2 && near(half[0].1, Vec3::Y) && near(half[1].1, Vec3::X), "{half:?}");
+        match thicken(&m, 2.0, false) {
+            Ok(b) => assert!(rel(measure(&b).unwrap().volume, 2000.0) < 1e-9, "{}", measure(&b).unwrap().volume),
+            Err(e) => assert!(e.to_string().contains("thicken"), "{e}"),
+        }
+    }
+
     /// A wall (the line y = 0 from x = 0 to 10, swept 10 up z) offset by 2 moves to y = ±2 along
     /// its normal; turned over, the same offset moves it 2 the other way, and so does a half of
     /// it trimmed off at x = 5 after the turn (#13640). Thickened by 1, the turned wall grows on
