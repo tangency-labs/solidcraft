@@ -1,0 +1,121 @@
+{
+ "area": "booleans",
+ "bodies": {
+  "b14": {
+   "keeping_splines": false,
+   "trusted": true
+  },
+  "b17": {
+   "keeping_splines": false,
+   "trusted": true
+  }
+ },
+ "calls": [
+  {
+   "inputs": [
+    "b14"
+   ],
+   "op": "copy",
+   "outputs": [
+    "b15"
+   ],
+   "params": {}
+  },
+  {
+   "inputs": [
+    "b15"
+   ],
+   "op": "copy",
+   "outputs": [
+    "b16"
+   ],
+   "params": {}
+  },
+  {
+   "inputs": [
+    "b17"
+   ],
+   "op": "copy",
+   "outputs": [
+    "b18"
+   ],
+   "params": {}
+  },
+  {
+   "inputs": [
+    "b18"
+   ],
+   "op": "copy",
+   "outputs": [
+    "b19"
+   ],
+   "params": {}
+  },
+  {
+   "inputs": [
+    "b16"
+   ],
+   "op": "tagged",
+   "outputs": [
+    "b20"
+   ],
+   "params": {
+    "operand": 0
+   }
+  },
+  {
+   "inputs": [
+    "b19"
+   ],
+   "op": "tagged",
+   "outputs": [
+    "b21"
+   ],
+   "params": {
+    "operand": 1
+   }
+  },
+  {
+   "inputs": [
+    "b20",
+    "b21"
+   ],
+   "op": "boolean",
+   "outputs": [
+    "b22"
+   ],
+   "params": {
+    "op": "union"
+   }
+  }
+ ],
+ "case": "18828-slanted-foot-flush-with-joined-rounded-plate",
+ "expected": {
+  "body_count": 1,
+  "method": "V = plate + foot - overlap. Plate: 1.6 x (10 x 10.3 - (4 - pi) x 2^2) = 159.3061929830. Foot: the parallelogram's horizontal sides are 1.3689488324 long and 3.2189233612 apart, area 4.4065413768, times 8.2 = 36.1336392900. Overlap: the foot's part with y in [-15.938417685876269, -15.43842] (0.5 deep), where for each x the plate spans z from 2.1 up to 10.3 for |x| <= 3 and up to 8.3 + sqrt(4 - (|x| - 3)^2) over the corner; the double integral over the foot's cross-section in that strip (its sides are straight lines, so the integral is of sqrt over linear limits, evaluated to 30 digits) is 5.5110672323. V = 159.3061929830 + 36.1336392900 - 5.5110672323 = 189.9287650407; one body. Tolerance 1e-6 relative.",
+  "source": "analytic",
+  "sources": [
+   "tangency-labs/solidcraft#18828"
+  ],
+  "tolerance": {
+   "rel": 1e-06
+  },
+  "volume_mm3": 189.92876504068,
+  "what": "a slanted foot (a parallelogram in XY with corners (-4.4254936281927515, -15.938417685876269), (-3.0565447957777483, -15.938417685876269), (-1.5555361814781503, -12.71949432476632), (-2.9244850138931535, -12.71949432476632), extruded from z 2.1 to 10.3) joined to a plate whose top is flush with the foot's top: a rounded rectangle x -5..5, z 0..10.3 with corner radius 2, extruded along y from -15.43842 to -16.43842 and joined with the same outline from -16.43842 to -17.03842 (so one prism 1.6 thick, its vertex tolerances grown to 2.3e-5 by the first join). The foot's top lies in the plate's top plane and crosses the line x = -3 where that plane meets the corner cylinder, and the foot's inner slanted side crosses that line at y = -15.817 inside the plate. The join failed in make_faceuse with 'the related vertex is not an end of the edge use'; the same plate made as one 1.6 thick extrude joined, and the mirrored foot on the right joined."
+ },
+ "expressible": true,
+ "operation_expressible": true,
+ "records": "18828-slanted-foot-flush-with-joined-rounded-plate.bodies.json.gz",
+ "result": [
+  {
+   "body": "Tile",
+   "made": "b22"
+  }
+ ],
+ "sources": [
+  "tangency-labs/solidcraft#18828"
+ ],
+ "ungraded": [],
+ "what": "a slanted foot (a parallelogram in XY with corners (-4.4254936281927515, -15.938417685876269), (-3.0565447957777483, -15.938417685876269), (-1.5555361814781503, -12.71949432476632), (-2.9244850138931535, -12.71949432476632), extruded from z 2.1 to 10.3) joined to a plate whose top is flush with the foot's top: a rounded rectangle x -5..5, z 0..10.3 with corner radius 2, extruded along y from -15.43842 to -16.43842 and joined with the same outline from -16.43842 to -17.03842 (so one prism 1.6 thick, its vertex tolerances grown to 2.3e-5 by the first join). The foot's top lies in the plate's top plane and crosses the line x = -3 where that plane meets the corner cylinder, and the foot's inner slanted side crosses that line at y = -15.817 inside the plate. The join failed in make_faceuse with 'the related vertex is not an end of the edge use'; the same plate made as one 1.6 thick extrude joined, and the mirrored foot on the right joined.",
+ "why_not": []
+}
