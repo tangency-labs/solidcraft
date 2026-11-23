@@ -3584,7 +3584,6 @@ fn plane_at_angle_direction_only_shows_a_pivot_and_applies() {
             "axis": "Y",
             "angle": "90 deg",
             "direction_only": true,
-            "offset": null,
             "pivot": {"vertex": [40.0, 0.0, 0.0]}
         }))
     );

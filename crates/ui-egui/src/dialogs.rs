@@ -6778,8 +6778,8 @@ fn dialog_commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value)>, S
                 None if !offset.trim().is_empty() => {
                     p["offset"] = json!(offset);
                 }
-                // Explicit null: no offset before the turn (and no empty expression).
-                None => p["offset"] = Value::Null,
+                // Unset: no `offset` key at all (Plane at Angle's descriptor fills none in).
+                None => {}
             }
             if *direction_only && let Some(pivot) = angle_pivot(d) {
                 p["pivot"] = construct_ref(app, pivot)?;
