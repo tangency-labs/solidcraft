@@ -1692,7 +1692,8 @@ impl OffsetExecutive {
             for candidate in [*first, *second] {
                 // upstream dereferences a null closest edge or same-oriented edge use. No
                 // closest edge: the vertex near the gap's end has no edge (a vertex loop's)
-                let e = candidate.ok_or_else(|| failed(OffsetFailure::GapEndWithoutEdge))?;
+                let e =
+                    candidate.ok_or_else(|| failed(OffsetFailure::GapEndWithoutEdge { edge }))?;
                 let same = present(edge::same_oriented_edgeuse(brep, e)?, EDGE_NO_SAME_EDGEUSE)?;
                 edgeuses.push(same);
                 let face = eu::face(brep, same)?;
@@ -1715,9 +1716,11 @@ impl OffsetExecutive {
                 // `SER(SM_ERR)` upstream: the blend's error is kept and decides the class (a
                 // defect is passed on, never read as a blend that could not be made)
                 Err(error) => {
-                    return Err(Failure::new(OP, OffsetFailure::GapCornerBlendNotMade)
-                        .caused_by(error)
-                        .into_error())
+                    return Err(
+                        Failure::new(OP, OffsetFailure::GapCornerBlendNotMade { edge })
+                            .caused_by(error)
+                            .into_error(),
+                    )
                 }
             };
 
@@ -2637,7 +2640,8 @@ impl OffsetExecutive {
         let this_face = |face| offset_key_of(EntityRef::Face(face));
         let brep = present(self.offset_brep.as_mut(), NO_OFFSET)?;
         let region = brep.infinite_region();
-        // Only success continues; a failed constructor leaves no face to relate.
+        // Only success continues; a failed constructor leaves no face to relate (upstream
+        // ignores its status), but a defect is passed on, never read as no face.
         // The surface moves into the face constructor and is dropped on failure.
         let mut owners = Vec::new();
         let made = match bp7::make_face_with_curve_owners_at_vertices(
@@ -2656,7 +2660,9 @@ impl OffsetExecutive {
             &mut offset_env(notifications, offset_key_of),
         ) {
             Ok(made) => made,
-            Err(error) if error.is_unported_or_cancelled() => return Err(error),
+            Err(error) if error.is_unported_or_cancelled() || error.is_defect() => {
+                return Err(error)
+            }
             Err(_) => return Ok(Vec::new()),
         };
         let new_face = present(made.face, NO_NEW_FACE)?;
@@ -2680,7 +2686,9 @@ impl OffsetExecutive {
                     list.get(index)
                         .and_then(Option::as_ref)
                         .cloned()
-                        .ok_or_else(|| failed(OffsetFailure::SelfIntersectionWithoutUvCurve))
+                        .ok_or_else(|| {
+                            failed(OffsetFailure::SelfIntersectionWithoutUvCurve { face: face_id })
+                        })
                 };
                 merged.push(SelfIntersectionCurve {
                     curve_3d: curve_3d.clone(),
@@ -5007,6 +5015,8 @@ mod tests {
             )
         });
         assert_eq!(outcome(&r), (ErrorKind::InvalidInput, null, false), "{r:?}");
+        let e = r.unwrap_err();
+        assert_eq!(e.offset_failure(), Some(&OffsetFailure::FaceuseNotGiven));
         let mut original = Brep::new();
         let faceuse = original.add_faceuse_record(Faceuse::default()).unwrap();
         let r = split_env(ObjectKey(0), &[], |env, _| {
@@ -5020,6 +5030,47 @@ mod tests {
             )
         });
         assert_eq!(outcome(&r), (ErrorKind::StageFailed, null, true), "{r:?}");
+        assert!(r.unwrap_err().to_string().contains(FU_NO_FACE));
+        // a face of the input with no surface, met when the normals are compared: the
+        // caller's input, at the face
+        let (face, faceuse) = add_face(&mut original, plane(0.0));
+        original.face_mut(face).unwrap().surface = None;
+        let mut offset = Brep::new();
+        let (offset_face, _) = add_face(&mut offset, plane(1.0));
+        executive.set_offset_brep(offset);
+        let r = split_env(ObjectKey(0), &[], |env, _| {
+            executive.map_edgeuses(
+                &Kernel::default(),
+                &mut original,
+                faceuse,
+                offset_face,
+                env,
+                &loopuse::notify_ref,
+            )
+        });
+        assert_eq!(outcome(&r), (ErrorKind::InvalidInput, null, false), "{r:?}");
+        let e = r.unwrap_err();
+        assert_eq!(
+            e.offset_failure(),
+            Some(&OffsetFailure::FaceHasNoSurface { face })
+        );
+        // ... and an offset face with none: the offset's fault
+        original.face_mut(face).unwrap().surface = Some(plane(0.0));
+        let mut offset = executive.take_offset_brep().unwrap();
+        offset.face_mut(offset_face).unwrap().surface = None;
+        executive.set_offset_brep(offset);
+        let r = split_env(ObjectKey(0), &[], |env, _| {
+            executive.map_edgeuses(
+                &Kernel::default(),
+                &mut original,
+                faceuse,
+                offset_face,
+                env,
+                &loopuse::notify_ref,
+            )
+        });
+        assert_eq!(outcome(&r), (ErrorKind::StageFailed, null, true), "{r:?}");
+        assert!(r.unwrap_err().to_string().contains(OFFSET_FACE_NO_SURFACE));
     }
 
     /// A split the other side's break asks for can be refused (here: editing is off), so
