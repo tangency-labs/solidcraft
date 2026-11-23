@@ -112,7 +112,11 @@ use crate::topology::edgeuse::p3::get_or_create_uv_trim_curve;
 use crate::topology::topology_traverser::Marks;
 use crate::topology::{vertex, vertexuse, Brep, EdgeId, EdgeuseId, FaceId, LoopuseStart, VertexId};
 
+mod chain;
+mod chain_edit;
 pub mod ring;
+
+pub use chain::delete_fillet_faces;
 
 const OP: &str = "blend::fillet_removal";
 
