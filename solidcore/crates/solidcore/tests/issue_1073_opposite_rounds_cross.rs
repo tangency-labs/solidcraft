@@ -14,10 +14,10 @@ mod solidcraft_fixes;
 use solidcore::blend::fillet_executive::api::{
     fillet_edges, fillet_edges_per_edge, variable_radius_fillet,
 };
+use solidcore::blend::fillet_executive::session::FilletSession;
 use solidcore::blend::fillet_executive::{FitKind, NoRoomReason};
 use solidcore::blend::fillet_solver::p1::FilletSurfaceGeneratorType;
-use solidcore::error::blend::BlendFailure;
-use solidcore::error::ErrorKind;
+use solidcore::blend::fillet_standard_solver::p1::FilletLaw;
 use solidcore::math::Point3;
 use solidcore::primitive::api_primitives::create_box;
 use solidcore::topology::brep::p2::is_manifold_solid;
@@ -77,13 +77,15 @@ fn round_with(
 /// A round of the post's vertical edges by one of the public wrappers.
 type Round = Box<dyn FnOnce(&mut Kernel, &mut Brep, &[EdgeId]) -> Result<()>>;
 
-/// The default kernel (no band test) builds the r 3.5 rounds whose rails cross on each 6 mm
-/// face, which leaves no closed manifold solid: the result is refused by the public wrapper
-/// as a failed blend naming no entity, and the post comes back a closed manifold solid with
-/// its six faces. So it is for each wrapper that rounds a solid: one radius, a radius per
-/// edge, and a radius law.
+/// The default kernel refuses the r 3.5 rounds before it edits the post, for each wrapper
+/// that rounds a solid: one radius, a radius per edge, and a radius law. Each round's band
+/// on a 6 mm end face runs from its edge to its rail, r in from the edge, so past r = 3 (half
+/// the face) the two bands on the face overlap: the bands' check (WR-542, no longer a flag)
+/// refuses them as no room, naming 3 for a constant radius, and the post comes back a closed manifold solid with
+/// its six faces. (Before the check ran by default, the kernel built the rounds, whose rails
+/// cross on each end face, and refused the open body it left as a defect, status 1001.)
 #[test]
-fn issue_1073_the_default_kernels_open_body_is_refused() {
+fn issue_1073_the_default_kernels_overlapping_bands_are_refused() {
     let circular = [FilletSurfaceGeneratorType::Circular; 4];
     let wrappers: [(&str, Round); 3] = [
         (
@@ -101,31 +103,54 @@ fn issue_1073_the_default_kernels_open_body_is_refused() {
     ];
     for (name, fillet) in wrappers {
         let (b, result, _) = round_with(false, fillet);
-        let Err(error) = result else {
-            let solid = is_manifold_solid(&b);
-            panic!(
-                "{name} built: {} faces, manifold solid {solid:?}",
-                b.face_list().len()
-            );
-        };
-        // #19823: an open result the construction built instead of refusing is the
-        // kernel's defect (it keeps the status 1001)
-        assert_eq!(error.kind(), ErrorKind::StageFailed, "{name}: {error:?}");
-        assert!(
-            matches!(error.blend_failure(), Some(BlendFailure::Defect { .. })),
-            "{name}: {error:?}"
-        );
-        assert!(error.is_defect(), "{name}: {error:?}");
-        assert_eq!(
-            solidcore::error::upstream_status(&error),
-            Some(1001),
-            "{name}: {error:?}"
-        );
-        assert_eq!(error.operation(), "blend::fillet_executive::api", "{name}");
-        assert_eq!(error.entity(), None, "{name}: {error:?}");
+        match result {
+            Err(SolidError::FilletRefused {
+                reason: Some(NoRoomReason::BandsOverlap),
+                fit,
+                ..
+            }) if name != "variable_radius_fillet" => assert!(
+                (fit.size - 3.0).abs() <= 1e-9 * 3.0,
+                "{name}: fit {}",
+                fit.size
+            ),
+            // a radius law names no one size that fits: refused with the executive's
+            // status (the session's error info notes the overlap, below)
+            Err(error) if name == "variable_radius_fillet" => assert_eq!(
+                solidcore::error::upstream_status(&error),
+                Some(1001),
+                "{name}: {error:?}"
+            ),
+            other => panic!("{name}: expected BandsOverlap, got {other:?}"),
+        }
         assert!(is_manifold_solid(&b).unwrap(), "{name}");
         assert_eq!(b.face_list().len(), 6, "{name}");
     }
+}
+
+/// The radius law's refusal above is the bands' check: the session notes `BandsOverlap`.
+#[test]
+fn issue_1073_the_default_kernels_radius_law_notes_the_overlap() {
+    let (_, result, _) = round_with(false, |k, b, vertical| {
+        let mut session = FilletSession::new(k, b).unwrap();
+        session
+            .prepare_variable_radius_edges(
+                k,
+                vertical,
+                3.5,
+                FilletLaw::linear(3.5, 3.5, None),
+                1,
+                1,
+            )
+            .unwrap();
+        let result = session.do_fillet(k);
+        assert_eq!(
+            session.error_info().no_room_reason(),
+            Some(NoRoomReason::BandsOverlap),
+            "{result:?}"
+        );
+        result
+    });
+    assert!(result.is_err());
 }
 
 #[test]
