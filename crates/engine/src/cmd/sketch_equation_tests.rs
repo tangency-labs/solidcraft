@@ -579,7 +579,6 @@ fn bad_3d_formulas_are_refused_and_change_nothing() {
         json!({"x": "t", "y": "t", "z": "t", "start": 1, "end": 1}),
         json!({"x": "t", "y": "t", "z": "t", "start": 0, "end": "1e12"}),
         json!({"x": "t", "y": "t", "z": "nope", "start": 0, "end": 1}),
-        json!({"x": "t", "y": "t", "z": "", "start": 0, "end": 1}),
         json!({"x": "t", "y": "t", "z": "1e300 * t", "start": 0, "end": 1}),
         json!({"explicit": true, "y": "x", "z": "x", "start": 0, "end": 1}),
         json!({"y": "t", "z": "t", "start": 0, "end": 1}),
@@ -588,6 +587,13 @@ fn bad_3d_formulas_are_refused_and_change_nothing() {
         assert!(s.execute("sketch.equation_curve", &p).is_err(), "{p} should be refused");
         assert_eq!(s.doc.to_json(), before, "{p} changed the design");
     }
+    // An empty z row on a new curve is a plane curve, not a refusal (#12662).
+    let r = run(&mut s, "sketch.equation_curve", json!({"x": "t", "y": "0", "z": "", "start": 0, "end": 1}));
+    let plane = r["curve"].as_str().unwrap().to_string();
+    let f = s.doc.find_feature("S").unwrap().id;
+    let sk = s.doc.sketch(f).unwrap();
+    assert!(sk.curve_index(&plane).is_some() && sk.wire_index(&plane).is_none(), "a plane curve: {sk:?}");
+    assert!(sk.equation_of(&plane).unwrap().z.is_none());
     let r = run(&mut s, "sketch.equation_curve", json!({"x": "t", "y": "t", "z": "t", "start": 0, "end": 1, "tolerance": 0.02}));
     let id = r["curve"].as_str().unwrap().to_string();
     let ok = s.doc.to_json();
