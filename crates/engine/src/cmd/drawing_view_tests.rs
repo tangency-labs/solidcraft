@@ -4285,7 +4285,7 @@ fn bend_lines_are_long_dashes_with_one_and_two_dots_in_every_group() {
 #[test]
 fn a_bend_line_has_its_long_dash_at_its_middle() {
     let mut s = sheet_plate();
-    with_drawing_closed(&mut s, |s| {
+    with_the_model(&mut s, |s| {
         run(s, "sheet.flange", json!({"edges": [[50, 60, 2]], "height": 20, "flip": true}));
     });
     let (id, _) = flat_view(&mut s, json!({"sheet": "Sheet 1", "scale": "1:1"}));
