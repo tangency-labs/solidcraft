@@ -3488,7 +3488,6 @@ pub fn tabs_with_view_drop_zones(ui: &mut egui::Ui, strip: &mut TabStrip, r: Rec
         });
     let selected = strip.selected;
     let kind_of = |i: usize| geom.as_ref().filter(|_| i == selected).map_or(SelectedLayout::Plain, |g| g.kind);
-    let (first, shown, w) = tab_layout(n, strip.selected, x1 - x0 - geom.as_ref().map_or(0.0, |g| (g.width - MIN_TAB).max(0.0)));
     let natural: Vec<f32> = strip
         .tabs
         .iter()
@@ -3510,6 +3509,11 @@ pub fn tabs_with_view_drop_zones(ui: &mut egui::Ui, strip: &mut TabStrip, r: Rec
             (text + 40.0 + badge + plus + chevron + count).clamp(72.0, MAX_FIT)
         })
         .collect();
+    // A folded selected design keeps the room its name, count, + and chevron need, as an expanded
+    // one keeps its pill's.
+    let folded_w = folded(strip, selected).then(|| natural.get(selected).copied()).flatten();
+    let reserved = geom.as_ref().map(|g| g.width).or(folded_w).map_or(0.0, |width| (width - MIN_TAB).max(0.0));
+    let (first, shown, w) = tab_layout(n, strip.selected, x1 - x0 - reserved);
     let fit_all = shown == n && natural.iter().sum::<f32>() <= x1 - x0 - new_tab_width;
     let menu_id = strip.id.with("menu");
     let mut menu: Option<(usize, Pos2)> = ui.ctx().data(|d| d.get_temp(menu_id));
@@ -3533,6 +3537,7 @@ pub fn tabs_with_view_drop_zones(ui: &mut egui::Ui, strip: &mut TabStrip, r: Rec
         .map(|i| match geom.as_ref() {
             Some(g) if i == strip.selected => g.width,
             _ if fit_all => natural.get(i).copied().unwrap_or(w),
+            _ if i == selected => folded_w.map_or(w, |width| width.max(w)),
             _ => w,
         })
         .collect();

@@ -1652,6 +1652,16 @@ fn the_chevron_folds_a_designs_sub_tabs_into_its_tab() {
         assert!(tab.contains_rect(chevron) && plus.right() <= chevron.left() + 0.5 && chevron.right() <= close.left() + 0.5, "between the + and ×");
         assert_eq!(rig.press(chevron.center(), egui::PointerButton::Primary), vec![TabAction::CollapseViews(false)]);
     }
+    // In a narrow strip the folded tab keeps the room for its +, chevron and ×.
+    let mut rig = TabsRig::with(Some(true));
+    rig.room = Some(260.0);
+    rig.collapsed.set(true);
+    rig.frame(Vec::new());
+    let tab = solidcraft_ui_registry::rect_of("t:tab:0").expect("the design's tab");
+    for handle in ["t:vnew", "t:vcollapse", "t:close:0"] {
+        let rect = solidcraft_ui_registry::rect_of(handle).unwrap_or_else(|| panic!("{handle} is drawn"));
+        assert!(tab.contains_rect(rect), "{handle} fits in the folded tab {tab:?}: {rect:?}");
+    }
     let mut rig = TabsRig::with(Some(true));
     rig.pop_out = true;
     rig.frame(Vec::new());
