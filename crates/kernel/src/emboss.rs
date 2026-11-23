@@ -93,7 +93,9 @@ fn profiles_on_flat_faces(body: &Body, rec: &Brep, plane: &Plane, regions: &[Reg
     let normal = plane.normal();
     let tol = (body.size() * 1e-7).max(1e-7);
     let flat: Vec<usize> = (0..rec.faces.len())
-        .filter(|f| matches!(surf_of(rec, *f), Some(Surf::Plane { n, d }) if n.dot(normal).abs() > 1.0 - 1e-9 && (n.dot(plane.origin) - d).abs() <= tol))
+        .filter(
+            |f| matches!(surf_of(rec, *f), Some(Surf::Plane { n, d }) if n.dot(normal).abs() > 1.0 - 1e-9 && (n.dot(plane.origin) - d).abs() <= tol),
+        )
         .collect();
     if flat.is_empty() {
         return Ok(false);
