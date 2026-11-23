@@ -45,7 +45,6 @@ const SOLIDCRAFT_FIXES: &[&str] = &[
     "fillet_knife_edge_rounds",
     "linear_sweep_arc_is_cylinder",
     "fillet_trace_reaches_rails",
-    "curve_loop_normal_from_area",
     "offset_extension_as_itself",
     "fillet_variable_span_follows_fillet",
     "simple_coincidence_crossing_is_point",

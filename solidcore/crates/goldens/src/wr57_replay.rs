@@ -107,6 +107,15 @@ pub(crate) fn with_seam(mut k: Kernel) -> Kernel {
     k
 }
 
+/// Runs `f` with `seam` installed as this thread's seam (also for the WR-587 replay,
+/// [`crate::wr587_replay`]).
+pub(crate) fn with_installed<R>(seam: ReplaySeam, f: impl FnOnce() -> R) -> R {
+    SEAM.with(|s| *s.borrow_mut() = Some(seam));
+    let r = f();
+    SEAM.with(|s| *s.borrow_mut() = None);
+    r
+}
+
 /// Runs `f` with `hook` installed as this thread's seam.
 fn with_hook<R>(hook: impl FnMut(Call<'_>) -> Answer + Send + 'static, f: impl FnOnce() -> R) -> R {
     SEAM.with(|s| *s.borrow_mut() = Some(ReplaySeam::new(Box::new(hook))));

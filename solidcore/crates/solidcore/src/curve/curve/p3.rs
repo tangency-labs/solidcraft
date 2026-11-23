@@ -22,13 +22,12 @@
 //! | `EvalNFunctions for` [`CcTangentIntEnfo`]         | `SmCCTangentIntENFO::Evaluate` (co-ported, unit `curve.curve_p5`) |
 //!
 //! Deviations:
-//! - **Loop normal.** Opt-in `Kernel::fixes.curve_loop_normal_from_area` (WR-587,
-//!   #1776) sums the sampled polygon's area vector instead of weighted turns, so
-//!   reflex corners cannot reverse a planar loop's normal. An open chain closes
-//!   by its chord. As the fork's change (tangency-labs/smlib be45e8d, unchanged to
-//!   eaa998a), a failed point evaluation returns its status and a zero area is
-//!   `SM_ERR_INVALID_INPUT` (`SER(Unitize)`). Default sampling and weighted turns retain
-//!   upstream parity.
+//! - **Loop normal.** `ComputeCrvsNormal` sums the sampled polygon's area vector
+//!   instead of upstream's weighted turns, so reflex corners cannot reverse a planar
+//!   loop's normal (WR-587). An open chain closes by its chord. As the fork's change
+//!   (tangency-labs/smlib be45e8d, unchanged to eaa998a), a failed point evaluation
+//!   returns its status and a zero area is `SM_ERR_INVALID_INPUT` (`SER(Unitize)`).
+//!   The sampling (5 chords per curve, 1 for a two-point curve) is upstream's.
 //! - **Curve kinds.** `ComputeCrvsNormal` and `CrvsFixGaps` cast every curve to
 //!   `SmBSplineCurve`. `ComputeCrvsNormal` only calls virtual members and the
 //!   non-virtual `SmCurve::IsLinear`, so it takes any [`Curve`]. `CrvsFixGaps` calls
@@ -268,21 +267,16 @@ impl<C1: CurveEvaluate + ?Sized, C2: CurveEvaluate + ?Sized> EvalNFunctions
 // ---- ComputeCrvsNormal ------------------------------------------------------------------
 
 /// The unit normal of a (planar) sequence of curves (`SmCurve::ComputeCrvsNormal`):
-/// the sum of the cross products of consecutive chords of 5 samples per curve (1 for
-/// a two-point curve), plus the closing corner when the last sample returns to the
-/// start point. Upstream makes a vanishing sum `(0, 0, 1)`; as the fork, it is the
-/// error of the unitization (tangency-labs/smlib 8311f8e).
-///
-/// With [`Kernel::fixes`]'s `curve_loop_normal_from_area` enabled, the normal is
-/// the sampled polygon's area vector: it follows a concave planar loop's winding,
-/// and an open chain is closed by its chord (WR-587, #1776; the fork's be45e8d).
+/// the sampled polygon's area vector, from 5 chords per curve (1 for a two-point
+/// curve). It follows a concave planar loop's winding, and an open chain is closed by
+/// its chord (WR-587; the fork's be45e8d). Upstream sums the turns between
+/// consecutive chords instead, which a reflex corner can reverse.
 ///
 /// # Errors
 ///
 /// `SM_ERR` for a single linear curve; those of the control point counts and the
-/// point evaluations; that of the unitization for a zero normal (with
-/// `curve_loop_normal_from_area`, `InvalidInput` (`SM_ERR_INVALID_INPUT`) for a zero
-/// area), as the fork's `SER`s return them.
+/// point evaluations; `InvalidInput` (`SM_ERR_INVALID_INPUT`) for a zero area, as the
+/// fork's `SER`s return them.
 pub fn compute_crvs_normal(k: &Kernel, curves: &[Curve]) -> Result<Vec3> {
     let mut normal = Vec3::ZERO;
     crvs_normal_into(k, curves, &mut normal)?;
@@ -310,82 +304,6 @@ pub(crate) fn compute_crvs_normal_written(
     }
 }
 
-/// `ComputeCrvsNormal` writing into `normal` as upstream writes `crCrvsNormal`.
-fn crvs_normal_into(k: &Kernel, curves: &[Curve], normal: &mut Vec3) -> Result<()> {
-    if k.fixes.curve_loop_normal_from_area {
-        return crvs_area_normal_into(k, curves, normal);
-    }
-    // Initialize resulting normal
-    *normal = Vec3::new(0.0, 0.0, 0.0);
-
-    let mut pt2;
-    let mut pt3;
-    let mut vec1;
-    let mut vec2 = Vec3::new(0.0, 0.0, 0.0);
-    let mut start_pt = Vec3::new(0.0, 0.0, 0.0);
-    let mut start_vector = Vec3::new(0.0, 0.0, 0.0);
-    let mut total_points: u64 = 0;
-
-    let num_curves = curves.len();
-    for (ii, crv) in curves.iter().enumerate() {
-        let domain = crv.natural_interval();
-
-        if crv.is_linear(k, EFF_ZERO, false)?.linear && num_curves == 1 {
-            return Err(SolidError::curve(
-                OP_NORMAL,
-                CurveFailure::SingleLinearCurve,
-            ));
-        }
-
-        let mut t = 0.0;
-        pt3 = crv.evaluate_point(k, domain.evaluate(t))?;
-
-        // Keep track of start point in case loop is closed
-        if ii == 0 {
-            start_pt = pt3;
-        }
-
-        total_points += 1;
-        let mut count: u64 = 5;
-        if crv.number_control_points()? == 2 {
-            count = 1;
-        }
-        let t_incr = 1.0 / count as f64;
-
-        for _jj in 0..count {
-            pt2 = pt3;
-            vec1 = vec2;
-
-            pt3 = crv.evaluate_point(k, domain.evaluate(t + t_incr))?;
-
-            total_points += 1;
-            vec2 = pt3 - pt2;
-            t += t_incr;
-            if t > 1.0 {
-                t = 1.0;
-            }
-
-            if total_points < 3 {
-                // Keep track of start vector in case loop is closed
-                start_vector = vec2;
-                continue;
-            }
-
-            *normal += vec1.cross(vec2);
-
-            // If loop is closed and this is the last curve, add the last corner
-            // Is tolerance required?
-            if ii == num_curves - 1 && start_pt.approx_eq(pt3) {
-                *normal += vec2.cross(start_vector);
-            }
-        }
-    }
-
-    // SER(crCrvsNormal.Unitize()) (tangency-labs/smlib 8311f8e): a zero normal is the
-    // call's status, with the normal set to (0, 0, 1) as `Unitize` leaves it
-    unitize_written(normal, |e| e)
-}
-
 /// `SER(crCrvsNormal.Unitize())`: `normal` unitized, or `(0, 0, 1)` (what `Unitize`
 /// writes for a zero vector) and the status, mapped by `status`.
 fn unitize_written(normal: &mut Vec3, status: impl FnOnce(SolidError) -> SolidError) -> Result<()> {
@@ -404,8 +322,20 @@ fn unitize_written(normal: &mut Vec3, status: impl FnOnce(SolidError) -> SolidEr
 /// Twice the sampled polygon's oriented area, summed as a fan from its first
 /// point (the closing chord contributes zero to that fan), then unitized (the fork's
 /// be45e8d: `SER(EvaluatePoint)` and `SER(Unitize)`, so a failed evaluation or a zero
-/// area is the call's status), written into `normal` as [`crvs_normal_into`].
-fn crvs_area_normal_into(k: &Kernel, curves: &[Curve], normal: &mut Vec3) -> Result<()> {
+/// area is the call's status), written into `normal` as upstream writes
+/// `crCrvsNormal`.
+fn crvs_normal_into(k: &Kernel, curves: &[Curve], normal: &mut Vec3) -> Result<()> {
+    // (test-only seam of the WR-587 retirement's replay, feature `wr57-replay`)
+    #[cfg(feature = "wr57-replay")]
+    return crate::surface::surface::replay::wrap_loop_normal(k, curves, normal, |n| {
+        area_normal_into(k, curves, n)
+    });
+    #[cfg(not(feature = "wr57-replay"))]
+    area_normal_into(k, curves, normal)
+}
+
+/// [`crvs_normal_into`]'s computation.
+fn area_normal_into(k: &Kernel, curves: &[Curve], normal: &mut Vec3) -> Result<()> {
     *normal = Vec3::ZERO;
     let mut first: Option<Point3> = None;
     let mut previous = Vec3::ZERO;
@@ -2482,10 +2412,9 @@ mod tests {
                 )
             })
             .collect();
-        let mut k = Kernel::default();
-        assert!(!k.fixes.curve_loop_normal_from_area);
-        assert_eq!(compute_crvs_normal(&k, &curves).unwrap(), -Vec3::Z);
-        k.fixes.curve_loop_normal_from_area = true;
+        // A counter-clockwise plus-shaped loop (four reflex corners) about +Z: its
+        // area vector is +Z, where upstream's weighted turns give -Z.
+        let k = Kernel::default();
         assert_eq!(compute_crvs_normal(&k, &curves).unwrap(), Vec3::Z);
 
         let reversed: Vec<_> = points
@@ -2500,13 +2429,11 @@ mod tests {
             })
             .collect();
         assert_eq!(compute_crvs_normal(&k, &reversed).unwrap(), -Vec3::Z);
-        k.fixes.curve_loop_normal_from_area = false;
-        assert_eq!(compute_crvs_normal(&k, &reversed).unwrap(), Vec3::Z);
     }
 
     #[test]
     fn normal_of_a_planar_loop() {
-        let mut k = Kernel::default();
+        let k = Kernel::default();
         // a counter-clockwise loop in the XY plane made of curved Hermite pieces
         let curves = vec![
             hermite(
@@ -2534,17 +2461,13 @@ mod tests {
                 [0.5, -1.0, 0.0],
             ),
         ];
-        for area_normal in [false, true] {
-            k.fixes.curve_loop_normal_from_area = area_normal;
-            let n = compute_crvs_normal(&k, &curves).unwrap();
-            assert!((n.z - 1.0).abs() < 1e-12, "{n:?}");
-        }
+        let n = compute_crvs_normal(&k, &curves).unwrap();
+        assert!((n.z - 1.0).abs() < 1e-12, "{n:?}");
     }
 
     #[test]
     fn area_normal_closes_an_open_chain_and_uses_its_plane() {
-        let mut k = Kernel::default();
-        k.fixes.curve_loop_normal_from_area = true;
+        let k = Kernel::default();
         // Two chords enclose a triangle in the YZ plane; the closing chord
         // goes back to the first sample without contributing another fan triangle.
         let curves = [
@@ -2556,8 +2479,7 @@ mod tests {
 
     #[test]
     fn area_normal_is_invariant_under_start_point_and_chord_subdivision() {
-        let mut k = Kernel::default();
-        k.fixes.curve_loop_normal_from_area = true;
+        let k = Kernel::default();
         let points = [
             Vec3::new(1e9, -5.0, -35.0),
             Vec3::new(1e9, 5.0, -35.0),
@@ -2594,18 +2516,14 @@ mod tests {
     }
 
     /// The fork's be45e8d (unchanged to eaa998a) unitizes with `SER`: a zero area (no
-    /// curves, or collinear ones) is `SM_ERR_INVALID_INPUT`; the default path's zero
-    /// normal is the unitization's error, as the fork's 8311f8e passes it on (upstream
-    /// makes it `(0, 0, 1)`); a single line is `SM_ERR` on both.
+    /// curves, or collinear ones) is `SM_ERR_INVALID_INPUT` (upstream makes it
+    /// `(0, 0, 1)`); a single line is `SM_ERR`.
     #[test]
     fn area_normal_reports_a_zero_area_and_keeps_the_single_line_error() {
-        let mut k = Kernel::default();
+        let k = Kernel::default();
         let a = line([0.0, 0.0, 0.0], [1.0, 0.0, 0.0], 0.0, 1.0);
         let b = line([1.0, 0.0, 0.0], [1.0, 0.0, 0.0], 0.0, 1.0);
         let collinear = [a.clone(), b];
-        assert!(compute_crvs_normal(&k, &[]).is_err());
-        assert!(compute_crvs_normal(&k, &collinear).is_err());
-        k.fixes.curve_loop_normal_from_area = true;
         let zero_area = |r: Result<Vec3>| matches!(r, Err(SolidError::InvalidInput { .. }));
         assert!(zero_area(compute_crvs_normal(&k, &[])));
         assert!(zero_area(compute_crvs_normal(&k, &collinear)));
@@ -2620,12 +2538,11 @@ mod tests {
 
     /// The fork's be45e8d evaluates its samples with `SER(EvaluatePoint)`: a curve whose
     /// point evaluation fails (a composite curve: `SmCurve::EvaluatePoint`, `SM_ERR`) makes
-    /// the call fail with that status. The default path fails with it too, as the fork's
-    /// 8311f8e passes it on (upstream ignores the status there and keeps the previous
+    /// the call fail with that status (upstream ignores the status and keeps the previous
     /// point).
     #[test]
     fn area_normal_returns_a_failed_point_evaluation() {
-        let mut k = Kernel::default();
+        let k = Kernel::default();
         let segment = line([0.0, 0.0, 0.0], [1.0, 0.0, 0.0], 0.0, 1.0);
         let composite = Curve::from(
             crate::curve::composite_curve::CompositeCurve::with_curves(
@@ -2639,11 +2556,6 @@ mod tests {
         );
         let side = line([1.0, 0.0, 0.0], [0.0, 1.0, 0.0], 0.0, 1.0);
         let curves = [side, composite];
-        assert!(matches!(
-            compute_crvs_normal(&k, &curves),
-            Err(e) if crate::error::upstream_status(&e) == Some(SM_ERR)
-        ));
-        k.fixes.curve_loop_normal_from_area = true;
         assert!(matches!(
             compute_crvs_normal(&k, &curves),
             Err(e) if crate::error::upstream_status(&e) == Some(SM_ERR)
