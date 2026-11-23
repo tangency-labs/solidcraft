@@ -6489,7 +6489,6 @@ mod tests {
     fn moved_preferences_reset_only_on_their_new_page() {
         use super::*;
         let fields = [
-            ("link_step_inserts", json!(false), PAGE_DESIGN),
             ("default_units", json!("ft"), PAGE_DESIGN),
             ("default_projection", json!("first"), PAGE_DESIGN),
             ("length_decimals", json!(5), PAGE_DESIGN),

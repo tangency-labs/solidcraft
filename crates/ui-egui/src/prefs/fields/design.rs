@@ -65,9 +65,6 @@ macro_rules! design_preferences {
             joint_moving_first: bool = false, PAGE_DESIGN => check_id_help("settings.joint_moving_first", "settings.joint_moving_first_help");
             /// Decimals shown for lengths and angles.
             length_decimals: u8 = 2, PAGE_DESIGN;
-            /// Insert STEP keeps its disk source for Update Links and automatic refresh. Off: new
-            /// inserts are independent copies, as before; existing links are left alone.
-            link_step_inserts: bool = true, PAGE_DESIGN => check_id("settings.link_step_inserts");
             /// A saved design's tab and its Browser top row are named after its file, so a Save As or a
             /// renamed file shows (#7267). Off: both show the name stored in the design, as before.
             names_from_file: bool = true, PAGE_DESIGN => check_id("settings.names_from_file");

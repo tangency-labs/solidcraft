@@ -1221,6 +1221,41 @@ mod tests {
         assert!(app.session.log.iter().any(|s| s.contains("check this component's joints")));
         let _ = std::fs::remove_dir_all(folder);
     }
+    /// A saved design's STEP link to a file outside the design's own folder is asked about when
+    /// the tab comes back, and the file is not read meanwhile (the other test uses an unsaved
+    /// design, which has no folder).
+    #[test]
+    fn a_saved_designs_step_link_outside_its_folder_asks_on_tab_return_and_reads_nothing() {
+        let root = std::env::temp_dir().join(format!("solidcraft-step-link-folders-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(root.join("received")).unwrap();
+        std::fs::create_dir_all(root.join("parts")).unwrap();
+        let source = root.join("parts").join("bracket.step");
+        let export = |length: u32| {
+            let mut part = Session::default();
+            part.execute("solid.box", &json!({"length": length, "width": 10, "height": 10})).unwrap();
+            part.execute("file.export", &json!({"path": source})).unwrap();
+        };
+        export(10);
+        let case = root.join("received").join("case.solidcraft");
+        let mut app = SolveApp::new(Session::default(), Default::default());
+        app.run("file.insert_step", json!({"path": source})).unwrap();
+        app.run("file.save", json!({"path": case})).unwrap();
+        assert!(app.session.path.is_some(), "the design is saved");
+        assert!((volume(&app) - 1000.0).abs() < 1e-6, "{}", volume(&app));
+        let folder = root.join("parts").canonicalize().unwrap().to_string_lossy().into_owned();
+        // Away to another tab; the source is replaced there by a longer part.
+        crate::documents::open_tab(&mut app, Session::default()).unwrap();
+        export(30);
+        crate::documents::switch(&mut app, 0);
+        let prompt = app.link_folders_prompt.first().cloned().expect("asked about the folder on tab return");
+        assert_eq!(prompt.folders, std::slice::from_ref(&folder));
+        assert!(app.file_load.idle(), "the file is not read while the question is open");
+        assert!((volume(&app) - 1000.0).abs() < 1e-6, "nothing is read before the answer: {}", volume(&app));
+        assert_eq!(app.session.execute("component.links", &json!({})).unwrap()["links"][0]["changed"], true);
+        let _ = std::fs::remove_dir_all(root);
+    }
+
     #[test]
     fn step_links_refresh_on_tab_return_obey_preferences_and_offer_link_actions() {
         let shot = |app: &mut SolveApp, name: &str| {
@@ -1266,11 +1301,11 @@ mod tests {
         assert!(app.file_load.busy(), "Update Links runs as a background update");
         settle(&mut app);
         shot(&mut app, "step-link-before");
-        app.preferences.link_step_inserts = false;
-        app.run("file.insert_step", json!({"path": source})).unwrap();
-        assert_eq!(app.session.doc.links.len(), 1, "off preserves independent inserts");
-        // Requests from the file picker and control channel use the same preference.
-        let request = crate::file_load::Request::new(source.to_str().unwrap(), crate::file_load::Kind::Insert);
+        app.run("file.insert_step", json!({"path": source, "link": false})).unwrap();
+        assert_eq!(app.session.doc.links.len(), 1, "link: false inserts an independent copy");
+        // A request from the file picker or control channel passes the same option on.
+        let mut request = crate::file_load::Request::new(source.to_str().unwrap(), crate::file_load::Kind::Insert);
+        request.options.insert("link".into(), json!(false));
         crate::file_load::begin_request(&mut app, request).unwrap();
         settle(&mut app);
         assert_eq!(app.session.doc.links.len(), 1);

@@ -521,9 +521,8 @@ the source path relative to its folder. Updates replace the imported bodies in o
 references that still resolve are kept, and references that no longer resolve are reported. Missing
 or corrupt sources keep their previous bodies and are retried next time, without holding up
 other links. The same **Update changed linked designs when a tab comes back** preference controls
-automatic STEP refresh. Turn off **Link inserted STEP files** (`link_step_inserts`) in
-Preferences › Design to keep new inserts as independent copies, or pass `link: false` to
-`file.insert_step`. Older designs keep their unlinked imports. The web app keeps independent
+automatic STEP refresh. Use **Break Link** on the
+component to keep an independent copy, or pass `link: false` to `file.insert_step`. Older designs keep their unlinked imports. The web app keeps independent
 copies because uploaded files have no disk source path.
 
 Linked files from other folders load after you allow them. When an assembly opens, the parts in
