@@ -2581,6 +2581,20 @@ fn raise_band_refuses_a_band_as_wide_as_the_rim_and_one_that_crosses_it_in_part(
     assert!(raise_band(&tube, Vec3::new(-10.0, 0.0, 15.0), 4.0, 2.0, false).is_ok());
 }
 
+/// #11436: a tilted cut leaves a rim of ellipses, which a band cannot follow; the flat rim still takes it.
+#[test]
+fn raise_band_on_a_sloped_rim_of_ellipses_is_refused_as_not_supported_yet() {
+    let ring = Region2 { outer: Loop2::circle(Vec2::ZERO, 30.0), holes: vec![Loop2::circle(Vec2::ZERO, 22.0)] };
+    let ring = extrude(&Plane::XY, &[ring], 0.0, 20.0).unwrap().pop().unwrap();
+    let tilt = 20f64.to_radians();
+    let cut = Plane { origin: Vec3::new(0.0, 0.0, 10.0), x: Vec3::new(tilt.cos(), 0.0, -tilt.sin()), y: Vec3::Y };
+    let sloped = half_space(&ring, &cut, false).unwrap().0.unwrap();
+    let at = Vec3::new(-26.0, 0.0, 10.0 + 26.0 * tilt.tan());
+    let text = raise_band(&sloped, at, 1.5, 3.0, false).unwrap_err().to_string();
+    assert!(text.contains("not supported yet") && text.contains("ellipse"), "{text}");
+    assert!(raise_band(&ring, Vec3::new(-26.0, 0.0, 20.0), 1.5, 3.0, false).is_ok());
+}
+
 #[test]
 fn orientation_mesh_reuses_missing_face_check_at_matching_tolerance() {
     for scale in [0.001, 1.0, 1000.0] {
