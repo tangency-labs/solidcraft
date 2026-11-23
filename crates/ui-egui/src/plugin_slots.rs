@@ -1,8 +1,16 @@
 //! Manifest placements drawn by the host, opening the Plugins menu entry dialog.
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{Receiver, TryRecvError};
 
 use crate::{SolveApp, plugins, ui_kit};
+
+/// How often the folder watcher looks at the plugins' directory ([`start_watch`]): a plugin
+/// dropped in while the app runs appears within about this long, and an idle app draws nothing
+/// meanwhile.
+#[cfg(not(target_arch = "wasm32"))]
+const WATCH_MS: u64 = 2000;
 #[cfg(not(target_arch = "wasm32"))]
 use solidcraft_engine::plugin::UiSlot;
 
@@ -26,9 +34,34 @@ pub(crate) enum Slot {
 #[derive(Default)]
 pub(crate) struct State {
     items: Vec<Item>,
-    scanned: Option<f64>,
+    /// When the plugins' folder was last read, and which folder: another root is read afresh,
+    /// so a design or a test that points the app at its own folder does not wait for a change.
+    scanned: Option<(f64, Option<PathBuf>)>,
     discovery: Option<Receiver<Inventory>>,
     inventory: Option<Inventory>,
+    /// The window, set by the app bar each frame: a finished scan and the folder watcher ask for
+    /// the frame that takes their news through it, so nothing polls while the folder is settled.
+    #[cfg(not(target_arch = "wasm32"))]
+    ctx: Option<egui::Context>,
+    #[cfg(not(target_arch = "wasm32"))]
+    watch: Option<Watch>,
+}
+
+/// A thread that looks at the plugins' directory every [`WATCH_MS`], and asks for a frame only
+/// when what it holds changed: the alternative to rescanning the folder on a timer.
+#[cfg(not(target_arch = "wasm32"))]
+struct Watch {
+    root: Option<PathBuf>,
+    changed: Arc<AtomicBool>,
+    stop: Arc<AtomicBool>,
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+impl Drop for Watch {
+    fn drop(&mut self) {
+        // The thread checks after each sleep; joining would hold the window for up to WATCH_MS.
+        self.stop.store(true, Ordering::Relaxed);
+    }
 }
 
 struct Inventory {
@@ -49,10 +82,16 @@ pub(crate) fn preferences_inventory(app: &mut SolveApp, dir: &Path) -> Vec<plugi
 pub(crate) fn skipped(app: &SolveApp) -> &[plugins::Skipped] {
     app.plugin_slots.inventory.as_ref().map(|inventory| inventory.skipped.as_slice()).unwrap_or_default()
 }
-impl State {
-    pub(crate) fn discovery_pending(&self) -> bool {
-        self.discovery.is_some()
+/// The window the app bar draws into: a finished scan and the folder watcher ask for the frame
+/// that takes their news through it, so nothing polls while the folder is settled.
+pub(crate) fn set_context(app: &mut SolveApp, ctx: &egui::Context) {
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        app.plugin_slots.ctx = Some(ctx.clone());
     }
+    // The web has no threads: nothing to wake, and the plugins are read when the page loads.
+    #[cfg(target_arch = "wasm32")]
+    let _ = (app, ctx);
 }
 /// The ribbon tab a manifest's `ribbon` slot names, when it is one besides Model. Model's Plugins
 /// group already holds every plugin command (and labels it with the slot's name), so a slot that
@@ -116,46 +155,115 @@ fn discovered(app: &mut SolveApp, inventory: Inventory) {
     {
         app.plugin_slots.items = inventory.plugins.iter().flat_map(declared).take(8192).collect();
     }
+    let root = inventory.root.clone();
     app.plugin_slots.inventory = Some(inventory);
+    app.plugin_slots.scanned = Some((crate::now_ms(), root));
 }
 pub(crate) fn refresh(app: &mut SolveApp) {
-    if cfg!(target_arch = "wasm32") {
-        return;
-    }
-    let now = crate::now_ms();
-    if let Some(rx) = &app.plugin_slots.discovery {
-        match rx.try_recv() {
-            Ok(inventory) => {
-                discovered(app, inventory);
-                app.plugin_slots.discovery = None;
-            }
-            Err(TryRecvError::Empty) => return,
-            Err(TryRecvError::Disconnected) => {
-                app.plugin_slots.discovery = None;
+    #[cfg(target_arch = "wasm32")]
+    let _ = app;
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        let root = app.session.plugin_state.plugins_dir();
+        start_watch(app, root.clone(), std::time::Duration::from_millis(WATCH_MS));
+        // A finished scan lands here: the worker asked for this frame once, when it had the result.
+        if let Some(rx) = &app.plugin_slots.discovery {
+            match rx.try_recv() {
+                Ok(inventory) => {
+                    discovered(app, inventory);
+                    app.plugin_slots.discovery = None;
+                }
+                Err(TryRecvError::Empty) => return,
+                Err(TryRecvError::Disconnected) => {
+                    app.plugin_slots.discovery = None;
+                }
             }
         }
+        // This folder was read, and nothing in it changed since: there is nothing to do, and no
+        // frame is asked for (the folder watcher wakes the window when it changes). A different
+        // folder is read afresh.
+        let scanned_here = app.plugin_slots.scanned.as_ref().is_some_and(|(_, at)| *at == root);
+        let changed = app.plugin_slots.watch.as_ref().is_some_and(|w| w.changed.swap(false, Ordering::Relaxed));
+        if scanned_here && !changed {
+            return;
+        }
+        start_scan(app, root);
     }
-    if app.plugin_slots.scanned.is_some_and(|at| now - at < 1000.0) {
-        return;
-    }
-    let root = app.session.plugin_state.plugins_dir();
+}
+
+/// Read the plugins' directory once, on a worker: when it finishes it sends the inventory and
+/// asks for one frame, so the app bar needs no timer while the scan runs.
+#[cfg(not(target_arch = "wasm32"))]
+fn start_scan(app: &mut SolveApp, root: Option<PathBuf>) {
     let inspected = app.session.plugin_state.packages.clone();
+    let ctx = app.plugin_slots.ctx.clone();
     let (tx, rx) = std::sync::mpsc::channel();
-    #[cfg(not(target_arch = "wasm32"))]
-    if std::thread::Builder::new()
-        .name("plugin-discovery".into())
-        .spawn(move || {
-            let (plugins, skipped) = plugins::inventory(root.as_deref(), inspected.values());
-            let _ = tx.send(Inventory { root, plugins, skipped });
-        })
-        .is_err()
-    {
+    let spawned = std::thread::Builder::new().name("plugin-discovery".into()).spawn(move || {
+        let (plugins, skipped) = plugins::inventory(root.as_deref(), inspected.values());
+        let _ = tx.send(Inventory { root, plugins, skipped });
+        if let Some(ctx) = ctx {
+            ctx.request_repaint();
+        }
+    });
+    match spawned {
+        Ok(_) => app.plugin_slots.discovery = Some(rx),
+        // No thread (very unlikely): retry on a later frame rather than leave the menu empty.
+        Err(_) => app.plugin_slots.scanned = None,
+    }
+}
+
+/// Watch the plugins' directory for changes, once per root: a plugin dropped in while the app
+/// runs asks for a frame, which rescans the folder. Nothing is read while it stays the same.
+#[cfg(not(target_arch = "wasm32"))]
+fn start_watch(app: &mut SolveApp, root: Option<PathBuf>, every: std::time::Duration) {
+    let Some(ctx) = app.plugin_slots.ctx.clone() else { return };
+    if app.plugin_slots.watch.as_ref().is_some_and(|w| w.root == root) {
         return;
     }
-    #[cfg(target_arch = "wasm32")]
-    let _ = (root, inspected, tx);
-    app.plugin_slots.discovery = Some(rx);
-    app.plugin_slots.scanned = Some(now);
+    let changed = Arc::new(AtomicBool::new(false));
+    let stop = Arc::new(AtomicBool::new(false));
+    let (flag, halt, watched) = (changed.clone(), stop.clone(), root.clone());
+    let spawned = std::thread::Builder::new().name("plugin-folder".into()).spawn(move || {
+        let mut seen = signature(watched.as_deref());
+        while !halt.load(Ordering::Relaxed) {
+            std::thread::sleep(every);
+            if halt.load(Ordering::Relaxed) {
+                return;
+            }
+            let now = signature(watched.as_deref());
+            if now != seen {
+                seen = now;
+                flag.store(true, Ordering::Relaxed);
+                ctx.request_repaint();
+            }
+        }
+    });
+    // A watcher that cannot start is harmless: the folder is read when the design opens and when
+    // Preferences or the Plugins menu ask, and a restart finds a plugin dropped in meanwhile.
+    if spawned.is_ok() {
+        app.plugin_slots.watch = Some(Watch { root, changed, stop });
+    }
+}
+
+/// What the plugins' directory holds, cheaply: whether it exists, and each entry's name, size and
+/// modification time. A dropped-in, replaced or removed plugin changes it; nothing else does.
+#[cfg(not(target_arch = "wasm32"))]
+fn signature(dir: Option<&Path>) -> u64 {
+    use std::hash::{Hash, Hasher};
+    let mut items: Vec<(String, u64, u128)> = Vec::new();
+    let present = dir.is_some_and(Path::exists);
+    if let Some(entries) = dir.and_then(|dir| std::fs::read_dir(dir).ok()) {
+        for entry in entries.flatten() {
+            let Ok(meta) = entry.metadata() else { continue };
+            let modified = meta.modified().ok().and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok()).map_or(0, |d| d.as_nanos());
+            items.push((entry.file_name().to_string_lossy().into_owned(), meta.len(), modified));
+        }
+    }
+    items.sort();
+    let mut h = std::collections::hash_map::DefaultHasher::new();
+    present.hash(&mut h);
+    items.hash(&mut h);
+    h.finish()
 }
 pub(crate) fn items(app: &SolveApp, slot: Slot) -> Vec<Item> {
     app.plugin_slots
@@ -433,5 +541,94 @@ mod tests {
         std::fs::remove_file(dir.join("plugin.wasm")).unwrap();
         begin(&mut h.app, "helper.report");
         assert!(h.app.plugin_menu.dialogs.is_empty(), "a package the shared reader refuses cannot open a slot dialog");
+    }
+
+    /// The plugins folder's signature: what the folder watcher compares between looks. It holds
+    /// no clock of its own, so a folder that did not change reads the same twice.
+    #[test]
+    fn the_folder_signature_tracks_what_it_holds() {
+        let dir = std::env::temp_dir().join(format!("sc-plugin-watch-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        assert_eq!(signature(Some(&dir)), signature(Some(&dir)), "a missing folder is stable");
+        std::fs::create_dir_all(&dir).unwrap();
+        let empty = signature(Some(&dir));
+        assert_ne!(empty, signature(Some(&dir.join("absent"))), "a folder appearing is a change");
+        assert_eq!(empty, signature(Some(&dir)), "an empty folder is stable");
+        std::fs::write(dir.join("helper.json"), b"{}").unwrap();
+        assert_ne!(empty, signature(Some(&dir)), "a dropped-in plugin is a change");
+        let with_file = signature(Some(&dir));
+        std::fs::write(dir.join("helper.json"), b"{\"id\":\"helper\"}").unwrap();
+        assert_ne!(with_file, signature(Some(&dir)), "a replaced plugin is a change");
+        std::fs::remove_file(dir.join("helper.json")).unwrap();
+        assert_eq!(empty, signature(Some(&dir)), "removing it is a change back");
+        assert_eq!(signature(None), signature(None), "no folder at all is stable");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// A frame with the folder settled starts no scan and asks for no frame; the scan that does
+    /// run asks for exactly one. The app bar no longer polls while discovery has nothing to do.
+    #[test]
+    fn a_settled_folder_asks_for_no_frame_and_a_finished_scan_asks_for_one() {
+        let mut h = crate::scenario::Harness::new();
+        let dir = h.dir.join("installed");
+        std::fs::create_dir_all(&dir).unwrap();
+        h.app.session.plugin_state.plugins_dir = Some(dir);
+        let ctx = egui::Context::default();
+        set_context(&mut h.app, &ctx);
+        let asked = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let count = asked.clone();
+        ctx.set_repaint_observer(move |_| {
+            count.fetch_add(1, Ordering::Relaxed);
+        });
+        invalidate(&mut h.app);
+        refresh(&mut h.app);
+        wait_for_discovery(&mut h.app);
+        wait_until(|| asked.load(Ordering::Relaxed) >= 1);
+        assert_eq!(asked.load(Ordering::Relaxed), 1, "a finished scan asks for exactly one frame");
+        refresh(&mut h.app);
+        assert!(h.app.plugin_slots.discovery.is_none(), "a settled folder starts no scan");
+        assert_eq!(asked.load(Ordering::Relaxed), 1, "and asks for no frame");
+    }
+
+    /// A plugin dropped into the folder wakes the window once, and the next frame reads it: the
+    /// watcher replaces rescanning the folder on a timer, so a quiet folder costs nothing.
+    #[test]
+    fn a_plugin_dropped_into_the_folder_wakes_the_window() {
+        let mut h = crate::scenario::Harness::new();
+        let dir = h.dir.join("installed");
+        std::fs::create_dir_all(&dir).unwrap();
+        h.app.session.plugin_state.plugins_dir = Some(dir.clone());
+        let ctx = egui::Context::default();
+        set_context(&mut h.app, &ctx);
+        let asked = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let count = asked.clone();
+        ctx.set_repaint_observer(move |_| {
+            count.fetch_add(1, Ordering::Relaxed);
+        });
+        // A short look interval, so a dropped-in plugin is seen within the test's patience:
+        // the frame's own `refresh` keeps this watcher (its root is the same).
+        start_watch(&mut h.app, Some(dir.clone()), std::time::Duration::from_millis(10));
+        invalidate(&mut h.app);
+        refresh(&mut h.app);
+        wait_for_discovery(&mut h.app);
+        assert_eq!(asked.load(Ordering::Relaxed), 1, "the first scan asked for its frame");
+        std::thread::sleep(std::time::Duration::from_millis(50));
+        std::fs::create_dir_all(dir.join("helper")).unwrap();
+        wait_until(|| asked.load(Ordering::Relaxed) >= 2);
+        assert!(h.app.plugin_slots.watch.as_ref().is_some_and(|w| w.changed.load(Ordering::Relaxed)), "the change waits for a frame");
+        refresh(&mut h.app);
+        assert!(h.app.plugin_slots.discovery.is_some(), "a changed folder is read again");
+        wait_for_discovery(&mut h.app);
+        assert!(h.app.plugin_slots.watch.as_ref().is_some_and(|w| !w.changed.load(Ordering::Relaxed)), "the change was taken");
+    }
+
+    fn wait_until(mut done: impl FnMut() -> bool) {
+        for _ in 0..400 {
+            if done() {
+                return;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(5));
+        }
+        assert!(done(), "timed out");
     }
 }
