@@ -590,6 +590,56 @@ fn a_point_on_a_midpoint_guide_stays_lined_up_with_the_midpoint() {
     }
 }
 
+/// #20859: a point placed where the guides from two edges' midpoints cross, at a rectangle's
+/// centre, stays plumb with the top edge's midpoint and level with the right edge's, also when
+/// "Snap to where two guides cross" takes the point there first, and not with a free point
+/// that happens to be level or plumb with it. With lining up off, the crossing snap only places
+/// the point, as before.
+#[test]
+fn a_point_where_two_midpoint_guides_cross_stays_lined_up_with_both() {
+    use solidcraft_engine::sketch::ConstraintKind::Midpoint;
+    for (aligning, crossing) in [(true, true), (true, false), (false, true)] {
+        let mut h = lining_up_fixture(&[
+            ("sketch.rectangle.two_point", json!({"p0":[20,10],"p1":[100,50]})),
+            ("sketch.point", json!({"point":[130,30]})),
+            ("sketch.point", json!({"point":[60,75]})),
+        ]);
+        h.app.preferences.sketch_align_points = aligning;
+        h.app.preferences.sketch_recent_snap = crossing;
+        h.app.preferences.sketch_tracking_guides = true;
+        h.call("ui.camera", json!({"target":[60,30,0],"distance":180}));
+        h.frames(2);
+        let undo = h.app.session.undo.len();
+        step(&mut h, json!({"start":"sketch.point"}));
+        step(&mut h, json!({"move":{"sketch":[60,50]}}));
+        step(&mut h, json!({"move":{"sketch":[100,30]}}));
+        step(&mut h, json!({"move":{"sketch":[60.3,30.2]}}));
+        step(&mut h, json!({"click":{"sketch":[60.3,30.2]}}));
+        let case = format!("aligning {aligning}, crossing {crossing}");
+        let Some((_, tied)) = point_and_alignments(&h, [60.0, 30.0]) else {
+            assert!(!aligning && !crossing, "{case}: the point lands on the centre");
+            continue;
+        };
+        if !aligning {
+            assert!(tied.is_empty(), "{case}: no constraint, {tied:?}");
+            continue;
+        }
+        let st = crate::open_meshing::session_world(&h.app.session);
+        let sk = &st.sketch(h.app.session.active_sketch.unwrap()).unwrap().sketch;
+        let at = |id: &str| sk.points.iter().position(|p| p.id == id).map(|i| (i, sk.points[i].pos));
+        let midpoint = |i: usize| sk.constraints.iter().any(|c| matches!(c.kind, Midpoint { p, .. } if p == i));
+        assert_eq!(tied.len(), 2, "{case}: {tied:?}");
+        for (kind, other) in &tied {
+            let (i, pos) = at(other).expect("the tied point is in the sketch");
+            assert!(midpoint(i), "{case}: {kind} ties to an edge's midpoint");
+            let expected = if *kind == "Vertical" { [60.0, 50.0] } else { [100.0, 30.0] };
+            assert!(pos.dist(solidcore_record::Vec2::new(expected[0], expected[1])) < 1e-6, "{case}: {kind} to {pos:?}");
+        }
+        drop(st);
+        assert_eq!(h.app.session.undo.len(), undo + 1, "{case}: the constraints are in the point's undo step");
+    }
+}
+
 /// #7828: a line kept horizontal from its start also lines up under a point above, and the
 /// click keeps both: the line's Horizontal and the end's alignment with that point.
 #[test]

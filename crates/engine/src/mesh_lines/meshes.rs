@@ -127,19 +127,19 @@ fn rigid(m: &Mat) -> bool {
         && (x.cross(y).dot(z) - 1.).abs() < 1e-9
 }
 
-/// The export meshes of the bodies `shown` keeps, at the chord `tolerance`, with what `ask` asks
-/// for. Errors name the command `cmd`; a refusal says what `says` makes of it, and a body the
-/// kernel can't mesh comes back as the kernel's error.
+/// The export meshes of the bodies of `world` that `shown` keeps, at the chord `tolerance`, with
+/// what `ask` asks for. Errors name the command `cmd`; a refusal says what `says` makes of it, and
+/// a body the kernel can't mesh comes back as the kernel's error.
 pub(crate) fn prepare(
     s: &Session,
+    world: &ModelState,
     cmd: &str,
     tolerance: f64,
     ask: Ask,
     shown: impl Fn(&ModelBody) -> bool,
     says: fn(Refused) -> String,
 ) -> Result<Scene> {
-    let world = s.world_state()?;
-    let items = placed(s, &world, shown, cmd)?;
+    let items = placed(s, world, shown, cmd)?;
     let progress = Stage::new("dxf_meshes", items.len());
     let bytes = AtomicUsize::new(0);
     // Each worker answers the kernel's error, or its body's mesh or why it was refused.

@@ -4348,13 +4348,15 @@ impl Model {
                         moved.push((f.id, bodies));
                         reuse = true;
                     }
+                    // Not kept in the cached result: its notes follow the sketches as they are now.
+                    let warning = if c.error.is_none() { with_retained_notes(doc, c.warning, f, &state) } else { c.warning };
                     out.push(FeatureResult {
                         id: f.id,
                         name: f.name.clone(),
                         error: c.error,
                         error_code: c.error_code,
                         internal: false,
-                        warning: c.warning,
+                        warning,
                         import_report: c.import_report,
                         repair: c.repair,
                         lost_projections: c.lost_projections,
@@ -4387,7 +4389,8 @@ impl Model {
                         state = r.state.clone();
                     }
                     reuse &= r.error.is_none();
-                    out.push(FeatureResult { state: state.clone(), unkept: false, ..r.clone() });
+                    let warning = if r.error.is_none() { with_retained_notes(doc, r.warning.clone(), f, &state) } else { r.warning.clone() };
+                    out.push(FeatureResult { state: state.clone(), unkept: false, warning, ..r.clone() });
                     continue;
                 }
                 // Or what it changed when what it reads was as it is now, made again on the rest of the
@@ -4638,6 +4641,8 @@ impl Model {
                     // Held while a check before it, or its own, runs.
                     checks.store(i, entry, &self.cache, &self.kept);
                 }
+                // Not in the cached result: its notes follow the sketches as they are now.
+                let warning = if error.is_none() { with_retained_notes(doc, warning, f, &state) } else { warning };
                 reuse &= error.is_none();
                 if reusing
                     && error.is_none()
@@ -4792,6 +4797,12 @@ impl Model {
                 })
                 .clone();
             r.state = state;
+        }
+        // A note naming the sketch follows its new name.
+        for (r, f) in self.results.iter_mut().zip(&doc.features).skip(at) {
+            if r.error.is_none() && !r.skipped {
+                r.warning = with_retained_notes(doc, r.warning.take(), f, &r.state);
+            }
         }
         self.refingerprint(doc);
         true
@@ -6409,36 +6420,37 @@ pub fn hole_on_surface(st: &ModelState, p: Vec3, dir: Vec3, scope: &[String]) ->
 }
 
 /// [`hole_on_surface`]; with `from_inside` false a position inside a body stays where it is (a
-/// hole from a sketch on an explicit plane starts at that plane, #11538).
+/// hole from a sketch on an explicit plane starts at that plane, #11538). Exact: the body says
+/// whether the position is in it or on it, and the ray along the axis meets its faces' own surfaces
+/// ([`solidcraft_kernel::Body::fire_ray`]). A display mesh's facets lie off a curved face by their
+/// chord: a spot moved onto the facets of a bore (a hole drilled out from a tube's axis) started in
+/// the air short of the bore, and the material between it and the bore was left (#20424).
 fn hole_on_surface_in(st: &ModelState, p: Vec3, dir: Vec3, scope: &[String], from_inside: bool) -> Vec3 {
     let size = st.bodies.iter().map(|b| b.body.size()).fold(1.0, f64::max);
     let eps = size * 1e-6;
     let mut best: Option<Vec3> = None;
     for b in st.bodies.iter().filter(|b| in_hole_scope(scope, b)) {
-        let m = b.mesh();
-        // Every test below casts along the line through `p`: a mesh whose box that line misses
-        // has no triangle to hit, so skip it before scanning its triangles (in an assembly of
-        // hundreds of parts, these scans were most of a hole's time).
-        if !line_meets_box(p, dir, &m.bounds().inflated(eps * 8.0)) {
+        // The ray runs along the line through `p`: a body whose exact box that line misses has
+        // nothing for it to meet (in an assembly of hundreds of parts, most of them).
+        if b.body.exact_bounds().is_ok_and(|bb| !line_meets_box(p, dir, &bb.inflated(eps * 8.0))) {
             continue;
         }
-        // Already on the surface: the drill enters right here.
-        if !b.body.is_mesh() && matches!(b.body.classify_point(p), Ok(kernel::PointClass::OnBoundary)) {
-            return p;
-        }
-        if let Some((t, _)) = m.raycast(p - dir * eps, dir)
-            && t < eps * 4.0
+        let inside = match b.body.classify_point(p) {
+            // Already on the surface: the drill enters right here.
+            Ok(kernel::PointClass::OnBoundary) => return p,
+            Ok(kernel::PointClass::Inside) if !from_inside => return p,
+            Ok(kernel::PointClass::Inside) => true,
+            Ok(kernel::PointClass::Outside) => false,
+            // A body the kernel cannot classify the spot against does not move it.
+            Err(_) => continue,
+        };
+        // Inside, back against the drilling direction to where the drill enters; outside, on
+        // along it to the face it meets.
+        let hit = b.body.fire_ray(p, if inside { -dir } else { dir });
+        if let Ok(Some(h)) = hit
+            && best.is_none_or(|bq| h.point.dist(p) < bq.dist(p))
         {
-            return p;
-        }
-        if !from_inside && m.contains(p) {
-            return p;
-        }
-        let q = if m.contains(p) { m.raycast(p, -dir).map(|(t, _)| p - dir * t) } else { m.raycast(p, dir).map(|(t, _)| p + dir * t) };
-        if let Some(q) = q
-            && best.is_none_or(|bq| q.dist(p) < bq.dist(p))
-        {
-            best = Some(q);
+            best = Some(h.point);
         }
     }
     best.unwrap_or(p)
@@ -7358,9 +7370,8 @@ fn hole_drill_scope(f: &Feature) -> &[String] {
 /// it. When the hole cuts every body, or none, every body counts.
 pub fn hole_start(st: &ModelState, f: &Feature, p: Vec3, dir: Vec3) -> Vec3 {
     let anywhere = hole_on_surface(st, p, dir, &[]);
-    // `hole_on_surface` hands `p` itself back when `p` is on a face's mesh (or meets no body at
-    // all). On a round face, a point between its mesh's vertices lies off the mesh: the B-rep
-    // says whether it is on the face.
+    // `hole_on_surface` hands `p` itself back when `p` is on a body's boundary (or meets no body
+    // at all); the B-rep also says whether it is on a face within the chord tolerance.
     if anywhere == p || on_a_brep_face(st, p) {
         return p;
     }
@@ -9131,7 +9142,20 @@ fn feature_tools_with_constructor(
             Ok(vec![crate::lineage::ProfileRoles::swept(Some(ss), Some(r)).tool(body, None)])
         }
         FeatureKind::Coil {
-            base, axis, diameter, pitch, turns, section_size, section, position, start_angle, clockwise, sketch, profiles, ..
+            base,
+            axis,
+            diameter,
+            pitch,
+            turns,
+            section_size,
+            section,
+            position,
+            start_angle,
+            clockwise,
+            end_cut,
+            sketch,
+            profiles,
+            ..
         } => {
             let base = &point(vals, base)?;
             let k = axis.normalized().ok_or_else(|| DocError::Invalid("coil axis".into()))?;
@@ -9142,10 +9166,12 @@ fn feature_tools_with_constructor(
                     || section_size.is_some()
                     || start_angle.is_some()
                     || !matches!(section, crate::CoilSection::Circular)
-                    || *position != 0)
+                    || *position != 0
+                    || !matches!(end_cut, crate::CoilEndCut::Axial))
             {
                 return Err(DocError::Invalid(
-                    "a coil with a `sketch` cannot also set `diameter`, `section_size`, `section`, `section_position` or `start_angle`".into(),
+                    "a coil with a `sketch` cannot also set `diameter`, `section_size`, `section`, `section_position`, `start_angle` or `end_cut`"
+                        .into(),
                 ));
             }
             if sketch.is_none() && !matches!(profiles, ProfileSel::All) {
@@ -9183,7 +9209,19 @@ fn feature_tools_with_constructor(
             let x0 = if k.cross(Vec3::X).len() > 1e-6 { (Vec3::X - k * k.dot(Vec3::X)).normalized() } else { Some(k.any_perp()) };
             let x0 = x0.ok_or_else(|| DocError::Invalid("coil axis".into()))?;
             let x = x0 * a0.cos() + k.cross(x0) * a0.sin();
-            let plane = Plane { origin: *base, x, y: k };
+            let axis = if *clockwise { k * -1.0 } else { k };
+            // A left-handed coil turns about −axis and climbs along +axis: mirror the pitch.
+            let pitch = if *clockwise { -p } else { p };
+            // Square ends: the section lies across the helix's tangent at the start, and the screw
+            // motion keeps it so, out to the other end.
+            let y = match end_cut {
+                crate::CoilEndCut::Axial => k,
+                crate::CoilEndCut::Square => {
+                    let t = (axis.cross(x) * (std::f64::consts::TAU * r) + axis * pitch).normalized();
+                    t.and_then(|t| (k - t * k.dot(t)).normalized()).ok_or_else(|| DocError::Invalid("coil axis".into()))?
+                }
+            };
+            let plane = Plane { origin: *base, x, y };
             let c = Vec2::new(r, 0.0);
             let outer = match section {
                 crate::CoilSection::Circular => solidcore_record::Loop2::circle(c, s / 2.0),
@@ -9193,9 +9231,6 @@ fn feature_tools_with_constructor(
                 }
             };
             let region = Region2 { outer, holes: Vec::new() };
-            let axis = if *clockwise { k * -1.0 } else { k };
-            // A left-handed coil turns about −axis and climbs along +axis: mirror the pitch.
-            let pitch = if *clockwise { -p } else { p };
             let coil = Traced::unnamed(kernel::sweep_helix(&plane, &region, *base, axis, pitch, n)?);
             Ok(vec![coil.with_recipe(tool_recipe(doc, f, vals))])
         }
@@ -12325,6 +12360,54 @@ fn eval_feature(
         append_warning(warning, note);
     }
     r
+}
+
+/// The start and end of the note a feature built from a sketch with a lost link carries.
+const RETAINED_NOTE_START: &str = "built from Sketch ";
+const RETAINED_NOTE_END: &str = "'s last outline: its projected geometry could not be updated; pick the face again in the sketch";
+
+/// A note for each sketch the feature is built from whose linked outline could not be refreshed
+/// (a link marked lost keeps its last geometry): the feature then follows that old outline, and
+/// says so on its own row, not only on the sketch's. `st` is the state after the feature.
+fn retained_outline_notes(doc: &Document, f: &Feature, st: &ModelState) -> Vec<String> {
+    let mut ids = f.kind.input_sketches();
+    ids.sort_unstable();
+    ids.dedup();
+    ids.into_iter()
+        .filter_map(|id| st.sketch(id))
+        .filter(|ss| ss.sketch.links.iter().any(|l| l.lost))
+        // The sketch's name in the design now: a state restored from before a rename holds the old one.
+        .map(|ss| format!("{RETAINED_NOTE_START}{}{RETAINED_NOTE_END}", doc.feature(ss.feature).map_or(ss.name.as_str(), |k| k.name.as_str())))
+        .collect()
+}
+
+/// `warning` without the retained-outline notes it holds. They are never kept in a cached result,
+/// since they follow the sketches' names and links as they are now.
+pub(crate) fn without_retained_notes(warning: Option<String>) -> Option<String> {
+    let mut s = warning?;
+    while let Some(a) = s.match_indices(RETAINED_NOTE_START).map(|(i, _)| i).find(|&i| i == 0 || s[..i].ends_with("; ")) {
+        let Some(rel) = s[a..].find(RETAINED_NOTE_END) else { break };
+        let b = a + rel + RETAINED_NOTE_END.len();
+        let (from, to) = if a >= 2 {
+            (a - 2, b)
+        } else if s[b..].starts_with("; ") {
+            (a, b + 2)
+        } else {
+            (a, b)
+        };
+        s.replace_range(from..to, "");
+    }
+    (!s.is_empty()).then_some(s)
+}
+
+/// `warning` with the retained-outline notes the feature has now (replacing any it held), read
+/// from `st`, the state after it: a saved model or a rename cannot leave an old one.
+pub(crate) fn with_retained_notes(doc: &Document, warning: Option<String>, f: &Feature, st: &ModelState) -> Option<String> {
+    let mut warning = without_retained_notes(warning);
+    for note in retained_outline_notes(doc, f, st) {
+        append_warning(&mut warning, note);
+    }
+    warning
 }
 
 /// [`eval_feature`] for one kind of feature. `heal` is the tolerance heal preference the
