@@ -1054,6 +1054,66 @@ fn a_newer_drawing_counts_retained_sources_towards_the_edit_limit() {
 }
 
 #[test]
+fn a_newer_drawing_refuses_a_sketch_edit_over_the_combined_entity_budget() {
+    use solidcraft_sketch::{MAX_CONSTRAINTS, MAX_CURVES, MAX_POINTS, Sketch};
+
+    let mut d = bare();
+    d.sketches.push(Arc::new(SheetSketch { id: 1000, owner: Owner::Sheet(d.sheets[0].id), name: "Editable sketch".into(), sketch: Sketch::new() }));
+    let mut saved = file(&d);
+    saved["format"] = json!(DRAWING.format_string(DRAWING.current() + 1));
+    // The readable origin and the unknown sketch entities together use the full budget.
+    let mut remaining = MAX_POINTS + MAX_CURVES + MAX_CONSTRAINTS - d.sketches[0].sketch.points.len();
+    for id in 1001.. {
+        if remaining == 0 {
+            break;
+        }
+        let take = remaining.min(MAX_POINTS);
+        saved["sketches"].as_array_mut().unwrap().push(json!({
+            "id": ids::encode(id), "sketch": {"points": vec![Value::Null; take]}, "future_geometry": true
+        }));
+        remaining -= take;
+    }
+
+    let mut open = read(&saved).unwrap();
+    let before = open.to_json().unwrap();
+    let original = open.sheet_sketch(1000).unwrap().clone();
+    let change = |sketch: &mut Sketch| {
+        sketch.add_point(Vec2::new(3.0, 4.0), Some("extra"))?;
+        Ok(())
+    };
+    let error = open.edit_sheet_sketch(&crate::Document::default(), 1000, change).unwrap_err().to_string();
+    assert!(error.contains("drawing sketch entity limit exceeded"), "{error}");
+    assert!(Arc::ptr_eq(open.sheet_sketch(1000).unwrap(), &original));
+    assert_eq!(open.to_json().unwrap(), before);
+    assert_eq!(Drawing::from_json(&before).unwrap().sketches.len(), 1);
+    let mut candidate = (*original).clone();
+    change(&mut candidate.sketch).unwrap();
+    open.sketches[0] = Arc::new(candidate);
+    assert!(open.validate().unwrap_err().to_string().contains("drawing sketch entity limit exceeded"));
+}
+
+#[test]
+fn a_newer_drawing_refuses_a_fill_edit_over_the_combined_region_budget() {
+    let (doc, id, _) = w38d_record_fixture(false);
+    let d = doc.drawing(id).unwrap();
+    let live_pieces: usize = d.fills[0].last_region.loops().map(|boundary| boundary.segs.len()).sum();
+    let mut saved = file(d);
+    saved["format"] = json!(DRAWING.format_string(DRAWING.current() + 1));
+    saved["fills"].as_array_mut().unwrap().push(json!({
+        "id": ids::encode(1000), "future_fill": true,
+        "last_region": {"outer": {"segs": vec![Value::Null; MAX_FILL_REGION_PIECES - live_pieces]}}
+    }));
+    let mut opened = read(&saved).unwrap();
+    assert_eq!(opened.fills.len(), 1);
+    assert_eq!(Drawing::from_json(&opened.to_json().unwrap()).unwrap().fills.len(), 1);
+    let mut another = (*opened.fills[0]).clone();
+    another.id = 1001;
+    opened.fills.push(Arc::new(another));
+    let error = opened.validate().unwrap_err().to_string();
+    assert!(error.contains("raw retained regions exceed"), "{error}");
+}
+
+#[test]
 fn a_newer_drawing_keeps_an_unreadable_sheet_before_its_surviving_neighbour() {
     let mut saved = file(&bare());
     saved["format"] = json!(DRAWING.format_string(DRAWING.current() + 1));

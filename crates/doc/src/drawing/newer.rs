@@ -274,7 +274,30 @@ impl NewerDrawing {
                 )));
             }
         }
-        Ok(())
+        self.check_sketch_budget(drawing.sketches.iter().map(AsRef::as_ref))?;
+        self.check_fill_budget(drawing.fills.iter().map(AsRef::as_ref))?;
+        self.check_combined("patterns", drawing.patterns.iter().map(AsRef::as_ref))
+    }
+
+    pub(super) fn check_sketch_budget<'a>(&self, records: impl Iterator<Item = &'a SheetSketch>) -> Result<()> {
+        self.check_combined("sketches", records)
+    }
+
+    pub(super) fn check_fill_budget<'a>(&self, records: impl Iterator<Item = &'a SketchFill>) -> Result<()> {
+        self.check_combined("fills", records)
+    }
+
+    /// The reader applies these budgets to the entire file. An edit must leave
+    /// room for the records it will write back alongside the editable ones.
+    fn check_combined<'a, T: Serialize + 'a>(&self, path: &str, records: impl Iterator<Item = &'a T>) -> Result<()> {
+        let Some(retained) = self.elements.get(path) else { return Ok(()) };
+        let live = records.map(serde_json::to_value).collect::<serde_json::Result<Vec<_>>>().map_err(damaged)?;
+        let combined = live.iter().chain(retained.held.iter().map(|(_, record)| &record.value));
+        match path {
+            "sketches" => super::sketch::check_raw_records(combined),
+            "fills" => super::fill::check_raw_fills(combined),
+            _ => super::fill::check_raw_patterns(combined),
+        }
     }
 
     /// Container parts referred to by records this build leaves unread.
@@ -283,19 +306,6 @@ impl NewerDrawing {
     }
 
     pub(super) fn saved_record(&self, mut value: Value) -> Result<SavedValue<'_>> {
-        // Validate combined budgets for lists with limits beyond their number of records.
-        for path in ["sketches", "fills", "patterns"] {
-            if let Some(list) = self.elements.get(path) {
-                let readable = value[path].as_array().cloned().unwrap_or_default();
-                let records = list.weave(readable, |value| value, |record| record.value.clone());
-                let combined = serde_json::json!({(path): records});
-                if path == "sketches" {
-                    super::sketch::check_raw_bounds(&combined)?;
-                } else {
-                    super::fill::check_raw(&combined)?;
-                }
-            }
-        }
         let mut revisions = value.get_mut("revisions").map(Value::take).unwrap_or_else(|| serde_json::json!({"rows": []}));
         let mut saved_revisions = BTreeMap::new();
         let mut restored = BTreeMap::new();

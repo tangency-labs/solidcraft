@@ -3564,11 +3564,18 @@ impl SolveApp {
     /// Tell the user when a newer SolidCraft saved the design or one of its drawings.
     /// The status line carries the first notice, and the messages name what could not be read.
     pub(crate) fn say_newer_file(&mut self) {
-        let notice = |format: u32, reads: u32, changes: &[String]| {
-            if let Some(change) = changes.first().filter(|_| format <= reads) {
-                solidcraft_ui_text::format("document.newer_file_change", &[("format", &format.to_string()), ("change", change)])
-            } else {
-                solidcraft_ui_text::format("document.newer_file", &[("format", &format.to_string()), ("reads", &reads.to_string())])
+        let notice = |format: u32, reads: u32, changes: &[String], drawing: Option<&str>| {
+            let change = changes.first().filter(|_| format <= reads);
+            let format = format.to_string();
+            match (drawing, change) {
+                (None, Some(change)) => solidcraft_ui_text::format("document.newer_file_change", &[("format", &format), ("change", change)]),
+                (None, None) => solidcraft_ui_text::format("document.newer_file", &[("format", &format), ("reads", &reads.to_string())]),
+                (Some(name), Some(change)) => {
+                    solidcraft_ui_text::format("document.newer_drawing_change", &[("drawing", name), ("format", &format), ("change", change)])
+                }
+                (Some(name), None) => {
+                    solidcraft_ui_text::format("document.newer_drawing", &[("drawing", name), ("format", &format), ("reads", &reads.to_string())])
+                }
             }
         };
         let mut status = self.session.doc.newer_file.as_ref().map(|file| {
@@ -3576,16 +3583,15 @@ impl SolveApp {
                 let text = solidcraft_ui_text::format("document.newer_file_not_read", &[("what", what)]);
                 self.messages.push(&text, false, now_ms());
             }
-            notice(file.format, file.reads_up_to, &file.unknown_changes)
+            notice(file.format, file.reads_up_to, &file.unknown_changes, None)
         });
         for drawing in &self.session.doc.drawings {
             let Some(file) = &drawing.newer_file else { continue };
             for what in &file.not_understood {
-                let what = format!("{}: {what}", drawing.name);
-                let text = solidcraft_ui_text::format("document.newer_file_not_read", &[("what", &what)]);
+                let text = solidcraft_ui_text::format("document.newer_drawing_not_read", &[("drawing", &drawing.name), ("what", what)]);
                 self.messages.push(&text, false, now_ms());
             }
-            let text = format!("{}: {}", drawing.name, notice(file.format, file.reads_up_to, &file.unknown_changes));
+            let text = notice(file.format, file.reads_up_to, &file.unknown_changes, Some(&drawing.name));
             if status.is_some() {
                 self.messages.push(&text, false, now_ms());
             } else {

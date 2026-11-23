@@ -98,6 +98,10 @@ pub(super) fn check_raw_bounds(value: &Value) -> Result<()> {
     let Some(records) = value.get("sketches") else { return Ok(()) };
     let records = records.as_array().ok_or_else(|| invalid("sketches must be an array"))?;
     require(records.len() <= MAX_SHEET_SKETCHES, || "too many sheet sketches".into())?;
+    check_raw_records(records)
+}
+
+pub(super) fn check_raw_records<'a>(records: impl IntoIterator<Item = &'a Value>) -> Result<()> {
     let mut total = 0;
     let mut nodes = 0;
     let mut bytes = 0;
@@ -354,11 +358,19 @@ impl Drawing {
         check_payload(&original)?;
         let mut candidate = (*original).clone();
         let out = change(&mut candidate.sketch)?;
-        check_budget(self.sketches.iter().map(|record| if record.id == sketch { &candidate } else { record.as_ref() }))?;
+        let records = || self.sketches.iter().map(|record| if record.id == sketch { &candidate } else { record.as_ref() });
+        check_budget(records())?;
+        if let Some(file) = &self.newer_file {
+            file.check_sketch_budget(records())?;
+        }
         let solved = solve_record(design, self, &original, candidate)?;
         if solved.sketch != original.sketch {
             let next = SheetSketch { sketch: solved.sketch.clone(), ..(*original).clone() };
-            check_budget(self.sketches.iter().map(|record| if record.id == sketch { &next } else { record.as_ref() }))?;
+            let records = || self.sketches.iter().map(|record| if record.id == sketch { &next } else { record.as_ref() });
+            check_budget(records())?;
+            if let Some(file) = &self.newer_file {
+                file.check_sketch_budget(records())?;
+            }
             let slot = self.sketches.iter_mut().find(|record| record.id == sketch).ok_or_else(|| invalid("sheet sketch disappeared"))?;
             *slot = Arc::new(next);
         }
