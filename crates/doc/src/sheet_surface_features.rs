@@ -29,6 +29,23 @@ fn err<T>(msg: impl Into<String>) -> Result<T> {
     Err(DocError::Invalid(msg.into()))
 }
 
+fn corner_tail_message(reason: solidcraft_develop::CornerTailRefusal) -> &'static str {
+    use solidcraft_develop::CornerTailRefusal::*;
+    match reason {
+        NoLength => "the corner has no length",
+        AlongBend => "the corner side runs along its bend",
+        AmbiguousTrim => "the corner's previous side trim is ambiguous",
+        MissingContour => "the corner has no contour",
+        ModifiedTrim => "the corner's previous side trim was modified",
+        CurvedEdgePastTrim => "the edge past the corner's previous trim is not straight",
+        ParallelEdgePastTrim => "the edge past the corner runs along its side",
+        ShortTrim => "the corner's previous side trim no longer reaches past the other flange",
+        ModifiedSide => "the corner's taller side was modified; its trim cannot be changed",
+        AmbiguousSide => "the corner's taller side is ambiguous",
+        CannotSetBack => "the edge past the corner's taller side is not straight",
+    }
+}
+
 fn panel_overlap(first: &[solidcraft_kernel::Body], second: &[solidcraft_kernel::Body]) -> Result<f64> {
     let mut volume = 0.0;
     for left in first {
@@ -481,8 +498,9 @@ impl SurfaceSheet {
             return err("the covering panel is not a side of this corner joint");
         };
         let gap = gap.unwrap_or(self.reliefs.gap);
-        if !(gap.is_finite() && gap >= 0.01) {
-            return err("the corner gap must be at least 0.01 mm");
+        let min_gap = crate::sheet::MIN_CORNER_GAP;
+        if !(gap.is_finite() && gap >= min_gap) {
+            return err(format!("the corner gap must be at least {min_gap} mm"));
         }
         let lap = match kind {
             CornerJoinKind::Butt => Lap::Miter { gap },
@@ -516,7 +534,7 @@ impl SurfaceSheet {
             let target = next.panels.get_mut(panel).ok_or_else(|| DocError::Invalid("the corner panel is no longer present".into()))?;
             target.region =
                 solidcraft_develop::retarget_corner_tail(&target.region, [start, end], anchor.origin, anchor.dir, bend.length, old_cut, new_cut)
-                    .map_err(|reason| DocError::Invalid(reason.into()))?;
+                    .map_err(|reason| DocError::Invalid(corner_tail_message(reason).into()))?;
         }
         let Some(Joint { kind: JointKind::Rip(rip), .. }) = next.joints.get_mut(joint) else {
             return err("the corner joint is no longer present");
@@ -4889,6 +4907,27 @@ mod tests {
         let covering = sheet.add_flange_on(first, first_height, turn, 2.0, "inside", HeightFrom::Outer, true).unwrap();
         let covered = sheet.add_flange_on(second, second_height, turn, 2.0, "inside", HeightFrom::Outer, true).unwrap();
         (sheet, [covering, covered])
+    }
+
+    #[test]
+    fn corner_join_keeps_the_gap_between_folded_slanted_flanges() {
+        use solidcraft_kernel::{DistanceShape, MeshTolerance, body_distance};
+
+        let gap = 0.5;
+        let chord = 1e-3;
+        for (kind, overlap) in [(CornerJoinKind::FullOverlap, None), (CornerJoinKind::PartialOverlap, Some(1.0))] {
+            let (mut sheet, [covering, covered]) = unequal_corner(20.0, 20.0, std::f64::consts::FRAC_PI_4);
+            sheet.set_corner_join([covering, covered], covering, kind, overlap, Some(gap)).unwrap();
+            let solids = sheet.corner_panel_solids(&sheet.develop().unwrap()).unwrap();
+            let first = &solids[sheet.sheet.joints[covering].b.panel][0];
+            let second = &solids[sheet.sheet.joints[covered].b.panel][0];
+            let first_mesh = first.mesh(&MeshTolerance::chord(chord)).unwrap();
+            let second_mesh = second.mesh(&MeshTolerance::chord(chord)).unwrap();
+            let first = DistanceShape::new(first, &first_mesh, chord);
+            let second = DistanceShape::new(second, &second_mesh, chord);
+            let nearest = body_distance(&first, &second, 10.0).unwrap().unwrap();
+            assert!(nearest.exact && (nearest.distance - gap).abs() < 1e-6, "{kind:?}: {nearest:?}");
+        }
     }
 
     #[test]

@@ -811,7 +811,7 @@ fn rip_bands(
                             if shifted <= 0.0 {
                                 return Err(Refusal::Joint {
                                     joint: j,
-                                    why: JointRefusal::OverlapArcRadius { radius: shifted },
+                                    why: JointRefusal::OverlapArcRadius,
                                 });
                             }
                         }

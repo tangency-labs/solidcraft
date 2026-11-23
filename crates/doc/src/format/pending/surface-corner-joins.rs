@@ -1,8 +1,8 @@
 //! Surface-first corner joins record partial or full overlap on a rip's lap.
 //!
 //! A corner is identified by its two bend joints within a build. Saved corner
-//! parameters carry named sheet rims, `<panel>:rim.<rim>:<top|bottom>`, not
-//! kernel edge names, picked points or build-local joint indices. Panel maker
+//! parameters carry central edge names, `<face>|<face>`, not picked points or
+//! build-local joint indices. Panel maker
 //! IDs follow feature copies. Length expressions preserve an
 //! explicit gap or partial overlap; a missing gap uses the rule, and full overlap
 //! follows the current thickness.

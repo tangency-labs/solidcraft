@@ -6,7 +6,7 @@
 //! Deviations: none (no upstream counterpart). No recursion.
 
 /// Why a sheet is not laid out ([`super::develop`]) or folded ([`super::fold`]).
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Refusal {
     /// An anchor, a cut or the call names a panel the sheet does not have.
     NoPanel(usize),
@@ -52,7 +52,7 @@ pub enum PanelRefusal {
 }
 
 /// Why a joint is not laid out.
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum JointRefusal {
     /// An anchor's direction has no length where the layout reads it.
     NoDirection,
@@ -82,10 +82,7 @@ pub enum JointRefusal {
     /// one panel to cover the other at.
     OverlapTurn,
     /// A planar full overlap would collapse or invert a circular edge.
-    OverlapArcRadius {
-        /// The resulting nonpositive radius, in millimetres.
-        radius: f64,
-    },
+    OverlapArcRadius,
     /// A rip's edge that leaves its panel's surface where it is cut back.
     RipOffSurface,
     /// A rip's edge that is not on its panel's outline.
@@ -103,6 +100,33 @@ pub enum JointRefusal {
     OutlineFit,
     /// An anchor with no frame on its panel's surface.
     NoFrame,
+}
+
+/// Why the previous setback of a flange side could not be replaced.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum CornerTailRefusal {
+    /// The shared side has no length.
+    NoLength,
+    /// The side runs along the bend instead of away from it.
+    AlongBend,
+    /// The contour contains multiple candidate trims or too few edges to restore one.
+    AmbiguousTrim,
+    /// The trim has no surrounding outline.
+    MissingContour,
+    /// The old trim no longer matches the outline beside it.
+    ModifiedTrim,
+    /// The edge beyond the old trim is not a line.
+    CurvedEdgePastTrim,
+    /// The edge beyond the old trim runs parallel to the side.
+    ParallelEdgePastTrim,
+    /// The restored side would not reach beyond the other flange.
+    ShortTrim,
+    /// The continuation beyond the shared corner has been changed.
+    ModifiedSide,
+    /// Multiple outline edges could be the taller side.
+    AmbiguousSide,
+    /// The new setback cannot meet the next straight edge without reversing it.
+    CannotSetBack,
 }
 
 /// Which of the sheet's rule values is refused.

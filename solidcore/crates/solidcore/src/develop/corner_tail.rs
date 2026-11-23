@@ -1,11 +1,19 @@
 //! Contour edits past the end of a shared flange corner.
 
 use super::plane::Planar;
+use super::refusal::CornerTailRefusal;
 use crate::math::Vec2;
 use crate::prism::profile::{Loop2, Region2, Seg2};
 
-/// Sets a straight side back by `by` after height `h`, preserving holes.
-/// Returns `None` if the step cannot meet the next straight edge without reversing it.
+/// Sets a straight side back, preserving holes in `region`.
+///
+/// `from` is the side's base in the panel chart, `m` its unit direction,
+/// and `rise` its original length. `h` is the distance from `from` where the
+/// setback begins; `into` is the unit direction into the panel and `by` is
+/// the setback distance.
+///
+/// Returns `None` if the straight side or its straight successor cannot be
+/// found, or the step cannot meet that successor without reversing it.
 pub fn set_back_past(
     region: &Region2,
     from: Vec2,
@@ -83,6 +91,11 @@ fn previous(index: usize, count: usize) -> Option<usize> {
 
 /// Restores a previous corner setback and applies the new setback to the same side.
 ///
+/// `region` is the panel outline and `edge` gives the shared side's endpoints
+/// in its chart. `anchor_origin` and unit `anchor_direction` define the bend
+/// edge from its start, and `bend_length` is the bend's length along that edge.
+/// `old_cut` and `new_cut` are the previous and desired setback distances.
+///
 /// # Errors
 /// The contour cannot be edited unambiguously or with straight edges.
 pub fn retarget_corner_tail(
@@ -93,7 +106,7 @@ pub fn retarget_corner_tail(
     bend_length: f64,
     old_cut: f64,
     new_cut: f64,
-) -> Result<Region2, &'static str> {
+) -> Result<Region2, CornerTailRefusal> {
     let [start, end] = edge;
     let distance = |point: Vec2| anchor_direction.cross(point - anchor_origin).abs();
     let (from, end) = if distance(start) <= distance(end) {
@@ -103,7 +116,7 @@ pub fn retarget_corner_tail(
     };
     let direction = (end - from)
         .normalized()
-        .ok_or("the corner has no length")?;
+        .ok_or(CornerTailRefusal::NoLength)?;
     let along = if (from - anchor_origin).dot(anchor_direction) < bend_length / 2.0 {
         anchor_direction
     } else {
@@ -111,7 +124,7 @@ pub fn retarget_corner_tail(
     };
     let into = (along - direction * along.dot(direction))
         .normalized()
-        .ok_or("the corner side runs along its bend")?;
+        .ok_or(CornerTailRefusal::AlongBend)?;
     let rise_axis = if along.perp().dot(direction) > 0.0 {
         along.perp()
     } else {
@@ -128,11 +141,11 @@ fn replace_setback(
     rise_axis: Vec2,
     old_cut: f64,
     new_cut: f64,
-) -> Result<Region2, &'static str> {
+) -> Result<Region2, CornerTailRefusal> {
     let height = from.dist(end);
     let direction = (end - from)
         .normalized()
-        .ok_or("the corner has no length")?;
+        .ok_or(CornerTailRefusal::NoLength)?;
     let tolerance = height.max(1.0) * 1e-9;
     let same = |first: Vec2, second: Vec2| first.dist(second) <= tolerance;
     let old_end = end + into * old_cut;
@@ -150,10 +163,10 @@ fn replace_setback(
             });
         if let Some((step, forward)) = steps.next() {
             if steps.next().is_some() || region.outer.segs.len() < 4 {
-                return Err("the corner's previous side trim is ambiguous");
+                return Err(CornerTailRefusal::AmbiguousTrim);
             }
             let count = region.outer.segs.len();
-            let start = previous(step, count).ok_or("the corner has no contour")?;
+            let start = previous(step, count).ok_or(CornerTailRefusal::MissingContour)?;
             let mut segments: Vec<_> = region
                 .outer
                 .segs
@@ -174,7 +187,7 @@ fn replace_setback(
                 }),
             ) = (segments.first().copied(), segments.get(2).copied())
             else {
-                return Err("the corner's previous side trim was modified");
+                return Err(CornerTailRefusal::ModifiedTrim);
             };
             let (top, connected) = if forward {
                 (
@@ -193,24 +206,22 @@ fn replace_setback(
                 b: past_end,
             }) = segments.get(past).copied()
             else {
-                return Err("the edge past the corner's previous trim is not straight");
+                return Err(CornerTailRefusal::CurvedEdgePastTrim);
             };
             if !connected
                 || !same(if forward { past_start } else { past_end }, top)
                 || direction.cross(top - old_end).abs() > tolerance
                 || (top - old_end).dot(direction) <= tolerance
             {
-                return Err("the corner's previous side trim was modified");
+                return Err(CornerTailRefusal::ModifiedTrim);
             }
             let past_dir = past_end - past_start;
             let cross = direction.cross(past_dir);
             let original_top = (cross.abs() > 1e-12)
                 .then(|| from + direction * ((past_start - from).cross(past_dir) / cross))
-                .ok_or("the edge past the corner runs along its side")?;
+                .ok_or(CornerTailRefusal::ParallelEdgePastTrim)?;
             if (original_top - from).dot(direction) <= height + tolerance {
-                return Err(
-                    "the corner's previous side trim no longer reaches past the other flange",
-                );
+                return Err(CornerTailRefusal::ShortTrim);
             }
             if let Some(segment) = segments.get_mut(past) {
                 *segment = if forward {
@@ -264,18 +275,18 @@ fn replace_setback(
                     || (same(finish, tip) && (start - tip).dot(rise_axis) > tolerance)
             })
         }) {
-            return Err("the corner's taller side was modified; its trim cannot be changed");
+            return Err(CornerTailRefusal::ModifiedSide);
         }
         return Ok(restored);
     };
     if sides.next().is_some() {
-        return Err("the corner's taller side is ambiguous");
+        return Err(CornerTailRefusal::AmbiguousSide);
     }
     if new_cut.abs() <= 1e-12 {
         return Ok(restored);
     }
     set_back_past(&restored, from, direction, rise, height, into, new_cut)
-        .ok_or("the edge past the corner's taller side is not straight")
+        .ok_or(CornerTailRefusal::CannotSetBack)
 }
 
 #[cfg(test)]
@@ -323,9 +334,15 @@ mod tests {
             ),
         ] {
             let mut panel = region(&points);
-            assert_eq!(run(&panel).is_err(), refused);
+            assert_eq!(
+                run(&panel).err(),
+                refused.then_some(CornerTailRefusal::ModifiedSide)
+            );
             panel.outer = panel.outer.reversed();
-            assert_eq!(run(&panel).is_err(), refused);
+            assert_eq!(
+                run(&panel).err(),
+                refused.then_some(CornerTailRefusal::ModifiedSide)
+            );
         }
     }
 }

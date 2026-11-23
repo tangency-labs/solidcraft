@@ -90,7 +90,7 @@ pub use flat::{Development, EdgeFrom, FlatPanel, Mismatch, Trim, Zone};
 pub use fold::{fold, Bent, Fold};
 pub use holes::{note_beside, same_circle, Circle};
 pub use layout::{crossings, curve_through, develop};
-pub use refusal::{JointRefusal, PanelRefusal, Refusal, RuleRefusal};
+pub use refusal::{CornerTailRefusal, JointRefusal, PanelRefusal, Refusal, RuleRefusal};
 pub use rigid::{Rigid2, Rigid3};
 pub use sheet::{
     Anchor, Bend, Corner, CornerRelief, Cut, Datum, Joint, JointKind, Lap, Panel, Relief, Rip,

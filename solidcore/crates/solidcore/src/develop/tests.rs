@@ -1267,8 +1267,8 @@ fn a_mitered_rip_keeps_both_panels_off_the_plane_between_them() {
 /// `amount` past the other's near face, the covered one to `gap` short of the covering one's. At
 /// a square corner toward the material those are T - amount and T + gap; away from it the
 /// covering panel runs on `amount` past the edge (a cut below 0) and the covered one stops `gap`
-/// short. At any other turn they are those over its sine, the thickness leaning over the edge by
-/// its cosine. Either panel may be the one that covers.
+/// short. At an obtuse turn the offset to the facing plane is divided by the sine, with the
+/// thickness leaning over the edge by its cosine. Either panel may be the one that covers.
 #[test]
 fn a_lapped_rip_covers_one_panel_with_the_other() {
     let (amount, gap) = (1.0, 0.5);
@@ -1277,8 +1277,6 @@ fn a_lapped_rip_covers_one_panel_with_the_other() {
     for (turn, covering, covered) in [
         (FRAC_PI_2, T - amount, T + gap),
         (-FRAC_PI_2, -amount, gap),
-        (angle, (T - amount) / sin, (T + gap) / sin),
-        (-angle, (T * cos - amount) / sin, (T * cos + gap) / sin),
         (
             PI - angle,
             (T * (1.0 + cos) - amount) / sin,
@@ -1302,6 +1300,47 @@ fn a_lapped_rip_covers_one_panel_with_the_other() {
                 (got.0 - want.0).abs() < 1e-9 && (got.1 - want.1).abs() < 1e-9,
                 "{turn}: {got:?}, not {want:?}"
             );
+        }
+    }
+}
+
+#[test]
+fn an_acute_overlap_keeps_the_requested_gap_between_the_cut_walls() {
+    fn point_to_wall(point: Vec2, base: Vec2, normal: Vec2) -> f64 {
+        let depth = (point - base).dot(normal).clamp(0.0, 1.0);
+        point.dist(base + normal * depth)
+    }
+
+    let gap = 0.5;
+    for angle in [10.0_f64, 41.4, 60.0, 75.5, 89.99] {
+        for turn in [angle.to_radians(), -angle.to_radians()] {
+            let (sin, cos) = turn.sin_cos();
+            let normal_a = Vec2::new(1.0, 0.0);
+            let normal_b = Vec2::new(cos, -sin);
+            for amount in [None, Some(0.5), Some(0.1)] {
+                for covering_a in [true, false] {
+                    let (cut_a, cut_b) = Lap::Overlap {
+                        covering_a,
+                        amount,
+                        gap,
+                    }
+                    .cuts(turn, 1.0);
+                    let base_a = Vec2::new(0.0, -cut_a);
+                    let base_b = Vec2::new(sin, cos) * cut_b;
+                    let distance = point_to_wall(base_a, base_b, normal_b)
+                        .min(point_to_wall(base_a + normal_a, base_b, normal_b))
+                        .min(point_to_wall(base_b, base_a, normal_a))
+                        .min(point_to_wall(base_b + normal_b, base_a, normal_a));
+                    assert!(
+                        (distance - gap).abs() < 1e-9,
+                        "{turn}, {amount:?}, {covering_a}: {distance}"
+                    );
+                    let expected_cover =
+                        (if turn > 0.0 { 1.0 } else { cos } - amount.unwrap_or(1.0)) / sin.abs();
+                    let actual_cover = if covering_a { cut_a } else { cut_b };
+                    assert!((actual_cover - expected_cover).abs() < 1e-9);
+                }
+            }
         }
     }
 }
@@ -1535,7 +1574,10 @@ fn full_overlap_rejects_a_collapsed_exact_arc_and_mixed_turns() {
     let mut sheet = half_round_sheet(true, lap);
     assert!(matches!(
         develop(&sheet, &[(0, Rigid2::IDENTITY)]),
-        Err(Refusal::Joint { joint: 0, why: JointRefusal::OverlapArcRadius { radius } }) if radius < 0.0
+        Err(Refusal::Joint {
+            joint: 0,
+            why: JointRefusal::OverlapArcRadius
+        })
     ));
     let JointKind::Rip(rip) = &mut sheet.joints[0].kind else {
         panic!("expected rip")

@@ -330,8 +330,23 @@ impl Lap {
                 let (sin, cos) = turn.sin_cos();
                 let face = if turn > 0.0 { thickness } else { 0.0 };
                 let slope = (turn.signum() * thickness * cos).min(0.0);
-                let covering = (face - slope - amount.unwrap_or(thickness)) / sin.abs();
-                let covered = (face - slope + gap) / sin.abs();
+                let amount = amount.unwrap_or(thickness);
+                let across = sin.abs();
+                let covering = (face - slope - amount) / across;
+                let covered = if cos > LAP_ALONG_TOL && across > LAP_ALONG_TOL {
+                    let beyond = (thickness * cos - amount).max(0.0);
+                    let offset = beyond.min(gap * across);
+                    let inward = (beyond - offset) / cos;
+                    let depth = if turn > 0.0 {
+                        thickness - inward
+                    } else {
+                        inward
+                    };
+                    let reach = gap * (1.0 - (offset / gap).powi(2)).max(0.0).sqrt();
+                    -covering * cos + depth * sin + reach
+                } else {
+                    (face - slope + gap) / across
+                };
                 if covering_a {
                     (covering, covered)
                 } else {

@@ -56,6 +56,7 @@ pub use solidcraft_kernel::develop::BeadAgainst;
 pub use solidcraft_kernel::develop::BeadRefusal;
 pub use solidcraft_kernel::develop::Bent;
 pub use solidcraft_kernel::develop::ContourRefusal;
+pub use solidcraft_kernel::develop::CornerTailRefusal;
 pub use solidcraft_kernel::develop::Fold;
 pub use solidcraft_kernel::develop::MIN_BEAD_RADIUS;
 pub use solidcraft_kernel::develop::bead_against;
@@ -136,7 +137,7 @@ fn joint_words(why: JointRefusal) -> &'static str {
         JointRefusal::RipLap => "a rip cuts 0 or more from each side",
         JointRefusal::OverlapRange => "an overlap has a gap of more than 0 and covers more than 0 and at most the sheet's thickness",
         JointRefusal::OverlapTurn => "an overlap needs a corner between 0 and 180 degrees",
-        JointRefusal::OverlapArcRadius { .. } => "a full overlap would collapse or invert a circular edge",
+        JointRefusal::OverlapArcRadius => "a full overlap would collapse or invert a circular edge",
         JointRefusal::RipOffSurface => "a rip's edge leaves its panel's surface",
         JointRefusal::RipOffOutline => "a rip's edge is not on its panel's outline",
         JointRefusal::RipAgainstOutline => "a rip's edge runs against its panel's outline",
