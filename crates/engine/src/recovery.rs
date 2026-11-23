@@ -346,7 +346,7 @@ impl Autosaver {
     /// [`Self::tick`] has taken its outcome.
     pub fn caught_up(&self, s: &Session) -> bool {
         self.writing.is_none()
-            && self.last.as_ref().is_some_and(|(doc, visibility)| (Arc::ptr_eq(doc, &s.doc) || **doc == *s.doc) && *visibility == s.visibility)
+            && self.last.as_ref().is_some_and(|(doc, visibility)| (Arc::ptr_eq(doc, &s.doc) || **doc == *s.doc) && *visibility == *s.saved_view())
     }
 
     /// Autosave when the interval has passed, or right away after a big operation. The design
@@ -405,14 +405,14 @@ impl Autosaver {
             crate::crash::rebased(s, s.path.as_deref().map(Path::new), false);
             return None;
         }
-        if self.last.as_ref().is_some_and(|(l, v)| (Arc::ptr_eq(l, &s.doc) || **l == *s.doc) && *v == s.visibility) {
+        if self.last.as_ref().is_some_and(|(l, v)| (Arc::ptr_eq(l, &s.doc) || **l == *s.doc) && *v == *s.saved_view()) {
             return None;
         }
         Some(Snapshot {
             dir: self.dir.clone(),
             id: self.id.clone(),
             doc: s.doc.clone(),
-            visibility: s.visibility.clone(),
+            visibility: s.saved_view().into_owned(),
             dimension_values: s.dimension_values.clone(),
             path: s.path.clone(),
         })

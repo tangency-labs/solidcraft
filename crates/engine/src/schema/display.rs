@@ -111,3 +111,40 @@ pub struct DisplayListResult {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub param_warnings: Vec<String>,
 }
+
+/// Leave the top isolation layer (`browser.visibility` with `isolate` adds one): what was shown
+/// before it comes back exactly, and so does whatever was hidden by hand while it was active.
+/// One undo step. Does nothing when not isolated.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[schemars(deny_unknown_fields)]
+pub struct DisplayUnisolateParams {}
+
+/// What `display.unisolate` returns.
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct DisplayUnisolated {
+    /// Whether a layer was left (false: the design was not isolated).
+    pub left: bool,
+    /// How many layers are still active.
+    pub level: usize,
+    /// In the warn parameter-check mode: what the call's parameters got wrong.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub param_warnings: Vec<String>,
+}
+
+/// Leave every isolation layer: the view from before the first isolation comes back exactly.
+/// One undo step. Does nothing when not isolated.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[schemars(deny_unknown_fields)]
+pub struct DisplayUnisolateAllParams {}
+
+/// What `display.unisolate_all` returns.
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct DisplayUnisolatedAll {
+    /// Whether any layer was left (false: the design was not isolated).
+    pub left: bool,
+    /// How many layers are active: 0.
+    pub level: usize,
+    /// In the warn parameter-check mode: what the call's parameters got wrong.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub param_warnings: Vec<String>,
+}

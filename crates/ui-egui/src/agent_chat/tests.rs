@@ -591,6 +591,7 @@ fn merging_finds_the_turns_start_when_the_history_was_trimmed() {
         pending_moves: Default::default(),
         part: None,
         visibility: Default::default(),
+        isolation: Vec::new(),
         section: None,
     };
     let docs: Vec<_> = (0..6).map(doc).collect();

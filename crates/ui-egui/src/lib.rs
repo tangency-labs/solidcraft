@@ -248,6 +248,7 @@ mod file_load_ui_tests;
 #[cfg(test)]
 mod fillet_spline_handle_tests;
 pub(crate) mod import_report;
+pub(crate) mod isolation_banner;
 pub mod mouse_gesture;
 use solidcraft_ui_kit::nav_bar;
 pub(crate) mod navigation;
@@ -4693,6 +4694,7 @@ impl SolveApp {
         // A file's import options are asked on Home too, where Open and Import start.
         import_options::show(self, ui.ctx());
         open_meshing::show(self, ui.ctx());
+        isolation_banner::show(self, ui.ctx());
         documents::prompt(self, ui.ctx());
         open_elsewhere::show(self, ui.ctx());
         network_prompt::show(self, ui.ctx());

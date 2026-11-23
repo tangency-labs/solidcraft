@@ -1,6 +1,10 @@
 //! Display state commands: save what is shown (and how it looks) under a name, apply, rename,
 //! delete and list them. They are saved with the design (see `crate::display_state`).
 //!
+//! Isolating (`browser.visibility` with `isolate`) stacks layers; `display.unisolate` and
+//! `display.unisolate_all` leave them. The layers are view state, never saved with the design, and
+//! go through undo with the visibility they belong to (see `crate::display_state`).
+//!
 //! Applying is an undo step like hiding or showing (`browser.visibility`): what is hidden is part
 //! of the session's undo snapshot, so one undo puts back the visibility and the looks together.
 
@@ -12,7 +16,7 @@ use solidcraft_doc::display_state::NamedDisplayState;
 use crate::params::{bad, str_};
 use crate::schema::display::{
     DisplayApplied, DisplayApplyParams, DisplayDeleteParams, DisplayDeleted, DisplayListParams, DisplayListResult, DisplayRenameParams,
-    DisplayRenamed, DisplaySaveParams, DisplaySaved,
+    DisplayRenamed, DisplaySaveParams, DisplaySaved, DisplayUnisolateAllParams, DisplayUnisolateParams, DisplayUnisolated, DisplayUnisolatedAll,
 };
 use crate::schema::{TypedContract, output_schema_for};
 use crate::{Result, Session};
@@ -22,18 +26,34 @@ const APPLY_CONTRACT: TypedContract<DisplayApplyParams> = TypedContract::new();
 const RENAME_CONTRACT: TypedContract<DisplayRenameParams> = TypedContract::new();
 const DELETE_CONTRACT: TypedContract<DisplayDeleteParams> = TypedContract::new();
 const LIST_CONTRACT: TypedContract<DisplayListParams> = TypedContract::new();
+const UNISOLATE_CONTRACT: TypedContract<DisplayUnisolateParams> = TypedContract::new();
+const UNISOLATE_ALL_CONTRACT: TypedContract<DisplayUnisolateAllParams> = TypedContract::new();
 
 fn reply(cmd: &str, reply: impl serde::Serialize) -> Result<Value> {
     serde_json::to_value(reply).map_err(|e| bad(cmd, e.to_string()))
 }
 
 pub static COMMANDS: &[CommandSpec] = &[
+    CommandSpec::new("display.unisolate", "Exit Isolation", crate::checked!("display.unisolate", unisolate))
+        .icon("eye")
+        .contract(&UNISOLATE_CONTRACT)
+        .output(output_schema_for::<DisplayUnisolated>)
+        .params(
+        "none; leaves the top isolation layer: what was shown before it comes back exactly, parts hidden by hand while it was active included. Does nothing when not isolated. Undone like browser.visibility, in one step",
+    ),
+    CommandSpec::new("display.unisolate_all", "Exit All Isolations", crate::checked!("display.unisolate_all", unisolate_all))
+        .icon("eye")
+        .contract(&UNISOLATE_ALL_CONTRACT)
+        .output(output_schema_for::<DisplayUnisolatedAll>)
+        .params(
+        "none; leaves every isolation layer: the view from before the first isolation comes back exactly. Does nothing when not isolated. Undone like browser.visibility, in one step",
+    ),
     CommandSpec::new("display.save", "New Display State", crate::checked!("display.save", save))
         .icon("list")
         .contract(&SAVE_CONTRACT)
         .output(output_schema_for::<DisplaySaved>)
         .params(
-        "name? (replaces the state of that name, keeping its place in the list). Saves what is shown now and how the bodies look (colours, appearances); the camera is not stored, Named Views do that",
+        "name? (replaces the state of that name, keeping its place in the list). Saves what is shown now and how the bodies look (colours, appearances), the isolated view included while isolated; the camera is not stored, Named Views do that",
     ),
     CommandSpec::new("display.apply", "Apply Display State", crate::checked!("display.apply", apply))
         .icon("list")
@@ -59,6 +79,16 @@ pub static COMMANDS: &[CommandSpec] = &[
         .output(output_schema_for::<DisplayListResult>)
         .doc_only(),
 ];
+
+fn unisolate(s: &mut Session, _p: &Value) -> Result<Value> {
+    let left = s.unisolate();
+    reply("display.unisolate", DisplayUnisolated { left, level: s.isolation_depth(), param_warnings: Vec::new() })
+}
+
+fn unisolate_all(s: &mut Session, _p: &Value) -> Result<Value> {
+    let left = s.unisolate_all();
+    reply("display.unisolate_all", DisplayUnisolatedAll { left, level: s.isolation_depth(), param_warnings: Vec::new() })
+}
 
 fn state_index(s: &Session, p: &Value, cmd: &str) -> Result<usize> {
     let k = str_(p, "state").ok_or_else(|| bad(cmd, "`state` must be a display state name"))?;
