@@ -950,48 +950,34 @@ form_case!(pipe, "solid.pipe", ["Diameter", "Type", "Wall", "Operation"]);
 #[test]
 fn the_pipe_window_keeps_its_wall_row_and_says_which_pipe_it_makes() {
     let mut h = fixture();
-    let mut d = representative(&h, "solid.pipe");
-    let render = |h: &mut Harness, d: &mut Dialog| {
-        scenario::clear_handles();
-        let mut out = h.ctx.run_ui(
-            egui::RawInput { screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, vec2(320.0, 1600.0))), ..Default::default() },
-            |ui| {
-                ui.set_width(264.0);
-                ui_kit::scope(ui, |ui| {
-                    ui_kit::header(ui, "pipe", tr("Pipe"), || {});
-                    rows(&mut h.app, &h.ctx, d, ui);
-                    ui_kit::footer(ui, "OK", "Cancel", true, ui_kit::Footer::default());
-                });
-            },
-        );
-        out.textures_delta.clear();
-        h.output = out.platform_output;
-    };
-    render(&mut h, &mut d);
+    h.app.home.open = false;
+    let d = representative(&h, "solid.pipe");
+    h.app.dialog = Some(d);
+    h.frames(2);
+    // The Wall row is there for a solid pipe, as it was before the Type row.
     assert!(scenario::rect_of("dialog:row:Type").is_some(), "the pipe window has a type row");
     assert!(scenario::rect_of("dialog:row:Wall").is_some(), "a solid pipe keeps the wall row");
     {
-        let Kind::Pipe { hollow, .. } = &d.kind else { panic!("{:?}", d.kind) };
+        let Kind::Pipe { hollow, .. } = &h.app.dialog.as_ref().unwrap().kind else { panic!("no pipe") };
         assert_eq!(*hollow, 0, "a pipe with no wall is a solid rod");
     }
-    // A thickness in the wall row makes a tube, and the type row says so.
+    // A thickness typed in the wall row makes a tube, and the type row says so.
+    h.step(&json!({"click": {"handle": "dialog:Wall"}})).unwrap();
+    h.step(&json!({"text": "2 mm"})).unwrap();
+    h.frames(2);
     {
-        let Kind::Pipe { wall, .. } = &mut d.kind else { panic!("{:?}", d.kind) };
-        *wall = "2 mm".into();
-    }
-    render(&mut h, &mut d);
-    {
-        let Kind::Pipe { hollow, .. } = &d.kind else { panic!("{:?}", d.kind) };
+        let Kind::Pipe { hollow, wall, .. } = &h.app.dialog.as_ref().unwrap().kind else { panic!("no pipe") };
+        assert_eq!(wall, "2 mm", "the wall row holds the thickness that was typed in it");
         assert_eq!(*hollow, 1, "a thickness in the wall row makes a tube");
     }
     // An empty wall row is a rod again.
-    {
-        let Kind::Pipe { wall, .. } = &mut d.kind else { panic!("{:?}", d.kind) };
-        wall.clear();
+    for _ in 0..4 {
+        h.step(&json!({"key": "Backspace"})).unwrap();
     }
-    render(&mut h, &mut d);
+    h.frames(2);
     {
-        let Kind::Pipe { hollow, .. } = &d.kind else { panic!("{:?}", d.kind) };
+        let Kind::Pipe { hollow, wall, .. } = &h.app.dialog.as_ref().unwrap().kind else { panic!("no pipe") };
+        assert_eq!(wall, "", "the wall row is empty again");
         assert_eq!(*hollow, 0, "an empty wall row is a solid rod");
     }
 }

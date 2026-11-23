@@ -7030,13 +7030,12 @@ fn dialog_commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value)>, S
             let path = sels(d, 0).curve_ids();
             let sketch = picks_sketch(app, sels(d, 0), None).ok_or("the path curves must be in one sketch")?;
             let mut p = json!({"path_sketch": sketch, "path": path});
-            // A hollow pipe is a tube: it has a wall, and a solid rod has none (#18344).
-            if *hollow == 1 {
-                if wall.trim().is_empty() {
-                    return Err("type a wall thickness for a hollow pipe".into());
-                }
-                p["wall"] = json!(wall);
+            // A pipe is a solid rod or a hollow tube (#18344). A tube needs a wall, and the wall the
+            // window holds is the pipe's wall: a thickness typed in it is never dropped.
+            if *hollow == 1 && wall.trim().is_empty() {
+                return Err("type a wall thickness for a hollow pipe".into());
             }
+            put(&mut p, &[("wall", wall)]);
             ("solid.pipe", p)
         }
         Kind::Stock { .. } => {

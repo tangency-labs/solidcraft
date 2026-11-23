@@ -11,6 +11,12 @@
     "ui.pipe_wall_thickness": "يجب أن يكون الجدار سماكة، مثل 2 mm",
     "ui.solid": "مصمت"
   },
+  "de": {
+    "ui.hollow": "Hohl",
+    "ui.pipe_wall_needed": "geben Sie die Wandstärke für ein Hohlrohr ein",
+    "ui.pipe_wall_thickness": "die Wand muss eine Stärke sein, zum Beispiel 2 mm",
+    "ui.solid": "Voll"
+  },
   "he": {
     "ui.hollow": "חלול",
     "ui.pipe_wall_needed": "הקלד עובי קיר לצינור החלול",
@@ -22,6 +28,12 @@
     "ui.pipe_wall_needed": "中空パイプの肉厚を入力してください",
     "ui.pipe_wall_thickness": "肉厚は厚みの値（例：2 mm）で入力してください",
     "ui.solid": "中実"
+  },
+  "ko": {
+    "ui.hollow": "중공",
+    "ui.pipe_wall_needed": "중공 파이프의 벽 두께를 입력하십시오",
+    "ui.pipe_wall_thickness": "벽은 두께여야 합니다, 예를 들어 2 mm",
+    "ui.solid": "속실"
   },
   "vi": {
     "ui.hollow": "rỗng",
