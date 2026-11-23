@@ -6583,4 +6583,27 @@ mod tests {
             "has no surface",
         );
     }
+
+    /// TE-O-18 part 6 (#19851): the static offset's failed solid offset is a named offset
+    /// cause with `SM_ERR` that keeps the offset's error, which decides its class (the
+    /// conversion guide, rule 6); a cancel passes as it is.
+    #[test]
+    fn a_failed_solid_offset_is_named_and_keeps_its_cause() {
+        let inner = SolidError::sm_err("test::inner");
+        let e = collapse_offset_status::<()>(Err(inner.clone())).unwrap_err();
+        assert!(e.offset_failure().is_some(), "{e}");
+        assert_eq!(e.sm_status(), Some(SM_ERR));
+        assert_eq!(e.cause(), Some(&inner));
+        assert!(!e.is_defect(), "{e}");
+        let defect = Failure::new("test::inner", OffsetFailure::Defect { why: "a step" })
+            .into_error();
+        let e = collapse_offset_status::<()>(Err(defect)).unwrap_err();
+        assert!(e.offset_failure().is_some(), "{e}");
+        assert!(e.is_defect(), "the defect it keeps decides: {e}");
+        let cancelled = SolidError::Cancelled { operation: "test::inner" };
+        assert_eq!(
+            collapse_offset_status::<()>(Err(cancelled.clone())),
+            Err(cancelled)
+        );
+    }
 }
