@@ -83,8 +83,8 @@
 //! seam among it: nothing wraps across the seam, which loses answers there, never a
 //! contact), the solve's `(u, v)` domain, an interior knot line of multiplicity at least
 //! the degree (the net below `C¹` in parameter there, a crease not proved `G¹`), or a
-//! stretch of the leaf's border facing a leaf the traversal culled ([`LeafSides`]: a cull
-//! is a slab or sphere test of boxes, no proof, and nothing has enclosed that strip). A
+//! stretch of the leaf's border that no searched leaf or culled strip covers
+//! ([`LeafSides`]: a leaf outside the face, which gets no distance verdict). A
 //! line passing within the tolerance just beyond such a border, with no root on either
 //! side, leaves only boxes with no root about it; their record is what keeps that contact.
 //! A box that is no edge and has no root needs a neighbour's record for its contact. A box
@@ -93,59 +93,88 @@
 //!
 //! **The exclusion phase.** After a finished pass (only there: the records of a leaf say
 //! that a box is excluded by distance by its absence, which an unfinished leaf does not
-//! prove), a phase with its own budget ([`MAX_EXCLUSION_BOXES`] enclosures) works on the
-//! boxes with no root, plain and edge. Soundness rests on one invariant: nothing leaves the
-//! records without a proof that the surface over it is farther than the tolerance from the
-//! line. A box with no root holds no root, so keeping it never loses a contact.
+//! prove), a phase with its own budget ([`MAX_EXCLUSION_BOXES`] enclosures) cuts the boxes
+//! with no root, plain and edge, as step 3 cuts, down to their floor (a direction is not cut
+//! once its image is within half the tolerance), and drops each piece its enclosure proves
+//! farther than the tolerance (step 1). Pieces of a regular box with no root are regular and
+//! hold no root. Soundness rests on one invariant: nothing leaves the records without a
+//! proof that the surface over it is farther than the tolerance from the line; a box with
+//! no root holds no root, so keeping it never loses a contact. Running out of the budget
+//! keeps what the phase has not decided; it never makes the leaf stop at the limit.
 //!
-//! 1. Each is cut as step 3 cuts, down to its floor (a direction is not cut once its image
-//!    is within half the tolerance), and a piece is dropped once its enclosure proves it
-//!    farther than the tolerance (step 1). Pieces of a regular box with no root are
-//!    regular and hold no root.
-//! 2. A connected set of plain boxes with no root (regular, no side on a border or crease)
-//!    whose every touching box is excluded by distance is dropped whole. Every point of the
-//!    set lies in a box with `q < 1`, so `[S_u S_v −D]` is nonsingular there; no shared side
-//!    lies on a crease, so the gap `g` to the line is `C¹` on the set, and `g > 0` (no
-//!    root). An interior critical point of `g` would make `S − L(t)` orthogonal to `S_u`,
-//!    `S_v` and `D`, which is impossible; so the least `g` over the set lies on its border,
-//!    and every border point lies in a closed box proved farther than the tolerance. A set
-//!    touching the leaf's border is kept: the boxes across it are another leaf's.
-//! 3. An edge box (regular too, so its least gap lies on its border) is dropped when each
-//!    of its sides on a boundary (the surface's, the solve's, a culled leaf's) is shown
-//!    farther than the tolerance by an enclosure of that side alone, and each of its other
-//!    sides, crease or plain, faces boxes excluded by distance (and not the leaf's border).
+//! **Culled strips.** The traversal culls a leaf by the line's distance or parameter (its
+//! box grown by the tolerance, its pseudo box, the overlap of the two, a ray's start, the
+//! line's interval) and prunes a subtree by its sphere bound: slab and sphere tests of
+//! rounded boxes, no proof. The domain of each (met with the solve's) is a strip that
+//! [`enclose_strip`] runs step 1 on, halving in a work list with its own budget
+//! ([`MAX_STRIP_BOXES`] enclosures): a box is excluded by distance, excluded by t (a record),
+//! or kept undecided ([`FloorKind::Culled`], with its line parameters, the whole line where
+//! they cannot be enclosed) at the floor's size or where it cannot be enclosed; out of the
+//! budget, the boxes left to visit are kept undecided and the strip stops at its limit. A
+//! strip records every box it does not exclude by distance, as a pass does, so it reads as a
+//! searched leaf with no roots: one all excluded by distance proves that no contact is
+//! there. A leaf outside the face (its trim classification) gets no distance verdict and no
+//! strip: a stretch of a leaf's border facing it is a boundary.
 //!
-//! A box dropped in 2 or 3 is proved farther than the tolerance and counts as excluded for
-//! the others. Running out of the budget keeps what the phase has not decided; it never
-//! makes the leaf stop at the limit. A box left at the floor is untouched: the argument
-//! needs a regular box.
+//! **The drop.** After every leaf's pass and every strip, one step over the whole solve
+//! ([`drop_fenced`]) drops sets of boxes with no root proved farther than the tolerance.
+//! Below, a box is *excluded* when no record holds it in a leaf or strip whose pass finished
+//! or stopped at its limit and whose records the solve kept: such a pass records every box
+//! it did not exclude by distance. A box excluded by t is a record and does not count (`g`,
+//! the gap to the infinite line, is not bounded by a t verdict). A set `R` of regular boxes
+//! with no root, plain or edge, is dropped whole when
 //!
-//! **Components.** After the traversal, the kept boxes of every searched leaf (left, edge,
-//! plain with no root, root, unshown, unvisited; not those excluded by t) and the whole
-//! domain of every leaf whose pass did not run make the solve's [`components`]: boxes join
-//! where their closed `(u, v)` boxes meet (across leaf borders too; not across a seam) and
-//! their line parameters overlap. A component records its boxes, its `(u, v)` and line
-//! parameter hulls, whether it reaches an end of the line's own interval, whether it lies
-//! in or touches a leaf at the limit, a leaf not run or a culled leaf, and the certified
-//! roots in it. Each is undecided until the typing of components. The solve's
+//! 1. every boundary side of a member (the surface's, the solve's, a stretch facing nothing
+//!    searched) is shown farther than the tolerance by an enclosure of that side;
+//! 2. every crease side of a member is shown farther by its own enclosure, or lies in closed
+//!    excluded boxes (no other member meets it, and what lies across it is read as below);
+//! 3. every other point of `R`'s outer border lies in a closed excluded box: no record but a
+//!    member meets a member, corners included, and every leaf across a member's side on its
+//!    leaf's border is read as above (a leaf whose pass did not run, or whose records were
+//!    not kept, proves nothing, and keeps the set).
+//!
+//! `R` is compact, so `g` has a least value over it, at some `p`. On a boundary or crease
+//! side, 1 or 2 gives `g(p) > tol`, and on `R`'s outer border 3 does. Otherwise every box
+//! about `p` is a member, so regular, and `S` is `C¹` there (step 0 cuts at every knot, and a
+//! side that is no crease has knot multiplicity below the degree, for a rational net too);
+//! `g > 0`, since no member holds a root; so `p` would be a critical point of `g`, with
+//! `S − L(t)` orthogonal to `S_u`, `S_v` and `D`, which a regular box rules out. The sets are
+//! the connected sets of such records (closed boxes meeting, across leaf borders too), each
+//! taken whole, so no set touches another and none waits for another to drop: the release
+//! order is a single round, decided on the records as they were before any drop, so no leaf
+//! drops by reading the final records of a leaf that reads its own. A seam is a boundary
+//! side (nothing wraps across it). The side enclosures have their own budget
+//! ([`MAX_DROP_ENCLOSURES`]); past it, a set not yet shown is kept. A box left at the floor
+//! is never a member: the argument needs a regular box.
+//!
+//! **Components.** After the drop, the kept boxes of every searched leaf and strip (left,
+//! edge, plain with no root, root, unshown, unvisited, culled; not those excluded by t) and
+//! the whole domain of every leaf whose pass did not run make the solve's [`components`]:
+//! boxes join where their closed `(u, v)` boxes meet (across leaf borders too; not across a
+//! seam) and their line parameters overlap. A component records its boxes, its `(u, v)` and
+//! line parameter hulls, whether it reaches an end of the line's own interval, whether it
+//! lies in or touches a leaf at the limit, a leaf not run or a stretch nothing searched, and
+//! the certified roots in it. Each is undecided until the typing of components. The solve's
 //! [`side_record`] ([`SideRecord`], owned by its solution array) is not run when no leaf's
-//! pass ran, complete when no component and no cull is left, and undecided otherwise, over
-//! each component's line parameters and over the whole line's interval where a leaf was
-//! culled. Nothing reads the records yet.
+//! pass ran, complete when no component is left and every cull has its strip, and undecided
+//! otherwise, over each component's line parameters and over the whole line's interval
+//! where a cull's strip could not be placed. Nothing reads the records yet.
 //!
 //! | Rust | Upstream |
 //! |------|----------|
-//! | [`LineNet`], [`isolate`], [`PassLine`], [`CertifiedRoot`], [`Isolation`], [`Stop`], [`FloorBox`], [`FloorKind`], [`Exclusion`], [`LeafSides`], [`leaf_sides`], [`SearchedLeaf`], [`components`], [`Components`], [`Component`], [`side_record`] | (not upstream) |
+//! | [`LineNet`], [`isolate`], [`PassLine`], [`CertifiedRoot`], [`Isolation`], [`Stop`], [`FloorBox`], [`FloorKind`], [`Exclusion`], [`LeafSides`], [`leaf_sides`], [`enclose_strip`], [`SearchedLeaf`], [`drop_fenced`], [`Drops`], [`components`], [`Components`], [`Component`], [`side_record`] | (not upstream) |
 //!
 //! Deviations: none (no upstream counterpart). Bounds: no recursion (work lists); a box is
 //! halved until its middle is one of its ends; at most [`MAX_SCRATCH_BOXES`] boxes a leaf,
 //! past which the pass stops for that leaf and reports what it has certified (each root
 //! stands on its own proof), and at most [`MAX_EXCLUSION_BOXES`] enclosures in its
 //! exclusion phase, so a leaf's records are at most the two together and the boxes left to
-//! visit; at most [`crate::geom::krawczyk::KRAWCZYK_STEPS`] Krawczyk steps a box; at most
-//! [`MAX_MEETING_TESTS`] pairs of boxes tested in one sweep and [`MAX_SOLVE_BOXES`] boxes
-//! in one solve's components, past which the components are not built and the whole line
-//! is undecided.
+//! visit; at most [`MAX_STRIP_BOXES`] enclosures a strip; at most
+//! [`crate::geom::krawczyk::KRAWCZYK_STEPS`] Krawczyk steps a box; at most
+//! [`MAX_MEETING_TESTS`] pairs of boxes tested in one sweep, [`MAX_SOLVE_BOXES`] boxes in
+//! one solve's drop and components, past which nothing is dropped, the components are not
+//! built and the whole line is undecided, and [`MAX_DROP_ENCLOSURES`] side enclosures in
+//! one solve's drop.
 
 #![allow(clippy::neg_cmp_op_on_partial_ord)] // NaN-refusing tests
 
@@ -178,6 +207,14 @@ pub(crate) const MAX_EXCLUSION_BOXES: usize = MAX_SCRATCH_BOXES;
 /// over the kernel's goldens and cases is recorded with the pull request that set this,
 /// and the bound is several times that. Past it the pass stops for the leaf.
 pub(crate) const MAX_SCRATCH_BOXES: usize = 1 << 12;
+
+/// The most enclosures one culled strip makes (module docs, "Culled strips"): a leaf's own
+/// bound, since a strip is a leaf, or a subtree of leaves, the traversal culled.
+pub(crate) const MAX_STRIP_BOXES: usize = MAX_SCRATCH_BOXES;
+
+/// The most side enclosures one solve's drop makes (module docs, "The drop"): one for each
+/// of the most records the drop reads.
+pub(crate) const MAX_DROP_ENCLOSURES: usize = MAX_SOLVE_BOXES;
 
 /// Three intervals: a vector's components, or a box in `(u, v, t)`.
 type I3 = [Ivl; 3];
@@ -239,15 +276,15 @@ impl LineNet {
     /// `b.u.hi`, v = `b.v.lo`, v = `b.v.hi`: a boundary (the knots' range, a periodic seam
     /// among them since nothing wraps across it; the solve's `(u, v)` domain `solve`, on it
     /// or past it, as a leaf is trimmed to it but a leaf within a rounding of it is kept
-    /// whole; a stretch of the leaf's border that faces a leaf the traversal culled), a
+    /// whole; a stretch of the leaf's border that no searched leaf or strip covers), a
     /// crease knot line (step 0 cuts boxes exactly there), or neither.
     fn side_kinds(&self, solve: &Extent2d, sides: &LeafSides, b: Scratch) -> [SideKind; 4] {
         let [[u0, u1], [v0, v1]] = self.range;
         let [cu, cv] = &self.creases;
         let (lo, hi) = (solve.min(), solve.max());
-        let culled = sides.faces_culled(b);
-        let kind = |boundary: bool, crease: bool, culled: bool| {
-            if boundary || culled {
+        let unsearched = sides.faces_unsearched(b);
+        let kind = |boundary: bool, crease: bool, unsearched: bool| {
+            if boundary || unsearched {
                 SideKind::Boundary
             } else if crease {
                 SideKind::Crease
@@ -257,7 +294,7 @@ impl LineNet {
         };
         let on_u = |x: f64| x <= u0 || x >= u1 || x <= lo.x || x >= hi.x;
         let on_v = |y: f64| y <= v0 || y >= v1 || y <= lo.y || y >= hi.y;
-        let [c0, c1, c2, c3] = culled;
+        let [c0, c1, c2, c3] = unsearched;
         [
             kind(on_u(b.u.lo), cu.contains(&b.u.lo), c0),
             kind(on_u(b.u.hi), cu.contains(&b.u.hi), c1),
@@ -310,6 +347,18 @@ impl LineNet {
         out.iter().flatten().all(|x| x.is_finite()).then_some(out)
     }
 
+    /// `S − about` over the box, enclosed, without its partials; `None` as
+    /// [`LineNet::over`].
+    fn value_over(&self, u: Ivl, v: Ivl, about: [f64; 3]) -> Option<I3> {
+        if !self.holds(u, v) {
+            return None;
+        }
+        let p =
+            nurbs_partials_over_box_about(&self.net, u.lo, u.hi, v.lo, v.hi, 0, 0, about).ok()?;
+        let out = i3(p.at(0, 0));
+        out.iter().all(|x| x.is_finite()).then_some(out)
+    }
+
     /// `S − about` at the point `(u, v)`, enclosed.
     fn at(&self, u: f64, v: f64, about: [f64; 3]) -> Option<I3> {
         let (u, v) = (Ivl::from(u), Ivl::from(v));
@@ -344,8 +393,8 @@ fn creases(knots: &[f64], degree: usize, [lo, hi]: [f64; 2]) -> Vec<f64> {
 /// What a side of a box lies on ([`LineNet::side_kinds`]).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum SideKind {
-    /// The surface's or the solve's boundary, or a stretch of the leaf's border facing a
-    /// culled leaf: nothing across it was searched.
+    /// The surface's or the solve's boundary, or a stretch of the leaf's border that no
+    /// searched leaf or strip covers: nothing across it was searched.
     Boundary,
     /// A crease knot line (the net below `C¹` in parameter across it).
     Crease,
@@ -353,11 +402,11 @@ enum SideKind {
     Plain,
 }
 
-/// What lies across the four sides of one searched leaf's domain (module docs, "What the
-/// pass decided"): for each side, the other searched leaves across it and the stretch of
-/// it each covers. A stretch of a side inside the solve's domain that no searched leaf
-/// covers faces a leaf the traversal culled, whose strip nothing has enclosed: a box side
-/// on it counts as a boundary.
+/// What lies across the four sides of one searched leaf's (or culled strip's) domain
+/// (module docs, "What the pass decided"): for each side, the other searched leaves and
+/// strips across it and the stretch of it each covers. A stretch of a side inside the
+/// solve's domain that none covers faces a leaf outside the face, which gets no distance
+/// verdict: a box side on it counts as a boundary.
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct LeafSides {
     /// The leaf's domain, `[[u0, u1], [v0, v1]]`.
@@ -382,8 +431,8 @@ impl LeafSides {
 
     /// For each side of the box `b` (in the order of [`LineNet::side_kinds`]): whether it
     /// lies on the leaf's border inside the solve's domain and some of it faces no other
-    /// searched leaf.
-    fn faces_culled(&self, b: Scratch) -> [bool; 4] {
+    /// searched leaf or strip.
+    fn faces_unsearched(&self, b: Scratch) -> [bool; 4] {
         let ranges = side_ranges(b);
         core::array::from_fn(|s| {
             let on = self.on_side(b, s);
@@ -403,11 +452,6 @@ impl LeafSides {
             2 => b.v.lo <= v0,
             _ => b.v.hi >= v1,
         }
-    }
-
-    /// Whether the box `b` meets the leaf's border.
-    fn touches_border(&self, b: Scratch) -> bool {
-        (0..4).any(|s| self.on_side(b, s))
     }
 
     /// The leaves across the side `s` of the box `b` (on the leaf's border there) that
@@ -496,7 +540,9 @@ pub(crate) fn leaf_sides(domains: &[Extent2d], solve: &Extent2d) -> Vec<LeafSide
                     } else {
                         ([a0, a1], [u0, u1])
                     };
-                    if j != i && b0 <= o1 && b1 >= o0 {
+                    // (a domain with no area covers no stretch: nothing was searched there)
+                    let area = a0 < a1 && c0 < c1;
+                    if j != i && area && b0 <= o1 && b1 >= o0 {
                         slot.push((j, [b0, b1]));
                     }
                 }
@@ -736,6 +782,9 @@ pub(crate) enum FloorKind {
     Unshown { unique: [Ivl; 2] },
     /// Not visited: the pass stopped at [`MAX_SCRATCH_BOXES`] first.
     Unvisited,
+    /// A box of a culled strip ([`enclose_strip`]) that step 1 did not exclude: at the
+    /// floor's size, not to be enclosed, or still to visit when the strip's budget ran out.
+    Culled,
 }
 
 /// A box the pass did not exclude by distance, as it decided it.
@@ -768,7 +817,8 @@ pub(crate) struct Isolation {
     /// How the pass ended.
     pub stop: Stop,
     /// Every box not excluded by distance, in the order decided, then the boxes still to
-    /// visit at the limit; after a finished pass, what its exclusion phase kept.
+    /// visit at the limit; after a finished pass, what its exclusion phase kept (the solve's
+    /// drop, [`drop_fenced`], comes after every leaf's pass).
     pub floor: Vec<FloorBox>,
     /// What the exclusion phase did (module docs, "The exclusion phase").
     pub exclusion: Exclusion,
@@ -779,18 +829,13 @@ pub(crate) struct Isolation {
 pub(crate) struct Exclusion {
     /// Whether it ran: only after a finished root pass.
     pub ran: bool,
-    /// The enclosures it made, of boxes and of sides: at most its budget.
+    /// The enclosures it made: at most its budget.
     pub boxes: usize,
     /// Whether it stopped at its budget with work left. What it had not decided is kept;
     /// the root pass stays finished.
     pub out_of_budget: bool,
     /// Pieces of boxes with no root it proved farther than the tolerance.
     pub excluded: usize,
-    /// Boxes with no root it dropped in connected sets whose every touching box is
-    /// proved farther than the tolerance.
-    pub dropped_no_root: usize,
-    /// Edge boxes it dropped.
-    pub dropped_edge: usize,
 }
 
 /// What Krawczyk's test says of a regular box.
@@ -956,6 +1001,130 @@ fn isolate_within(
     Ok(out)
 }
 
+/// Step 1 of the pass over a culled strip, the `(u, v)` box `domain` (module docs, "Culled
+/// strips"): every box excluded by distance, recorded as excluded by t, or kept undecided
+/// ([`FloorKind::Culled`]). The strip has no roots and no exclusion phase; it is
+/// [`Stop::Finished`] when every box was decided or kept at the floor, [`Stop::AtLimit`]
+/// when its budget ran out (the boxes left to visit kept undecided, with their line
+/// parameters), and [`Stop::NotRun`] where nothing can be proved of the line or the domain.
+///
+/// # Errors
+///
+/// A cancel.
+pub(crate) fn enclose_strip(
+    net: &LineNet,
+    line: &PassLine,
+    domain: &Extent2d,
+    cancel: Option<&CancelToken>,
+) -> Result<Isolation> {
+    enclose_strip_within(net, line, domain, cancel, MAX_STRIP_BOXES)
+}
+
+/// [`enclose_strip`] with the budget `budget`.
+fn enclose_strip_within(
+    net: &LineNet,
+    line: &PassLine,
+    domain: &Extent2d,
+    cancel: Option<&CancelToken>,
+    budget: usize,
+) -> Result<Isolation> {
+    let mut out = Isolation::default();
+    let [s0, s1] = line.span;
+    let Some(line) = ScratchLine::of(line, &Extent1d::from_min_max(s0, s1)) else {
+        return Ok(out);
+    };
+    let (lo, hi) = (domain.min(), domain.max());
+    let (u, v) = (Ivl::new(lo.x, hi.x), Ivl::new(lo.y, hi.y));
+    if !net.holds(u, v) {
+        return Ok(out);
+    }
+    let culled = |b: Scratch, t: Option<Ivl>| FloorBox {
+        u: b.u,
+        v: b.v,
+        t,
+        kind: FloorKind::Culled,
+    };
+    let mut work = vec![Scratch { u, v }];
+    out.stop = Stop::Finished;
+    while let Some(b) = work.pop() {
+        if out.boxes >= budget {
+            out.stop = Stop::AtLimit;
+            work.push(b);
+            // each with its line parameters (the whole line where they cannot be enclosed)
+            out.floor.extend(work.iter().map(|&w| {
+                let t = enclosed(net, &line, w.u, w.v)
+                    .map(|e| line.feet(&e.r).1)
+                    .filter(|feet| feet.is_finite())
+                    .unwrap_or_else(Ivl::whole);
+                culled(w, Some(t))
+            }));
+            break;
+        }
+        if out.boxes % 64 == 0 {
+            if let Some(token) = cancel {
+                token.check(OP)?;
+            }
+        }
+        out.boxes += 1;
+        // a box that cannot be enclosed is halved across its wider side
+        let wider = |t: Option<Ivl>| {
+            let split_u = b.u.hi - b.u.lo >= b.v.hi - b.v.lo;
+            halves(b, split_u, if split_u { b.u.mid() } else { b.v.mid() }, t)
+        };
+        // (step 1 reads the surface's points alone: their partials only where it halves)
+        let Some(r) = enclosed_value(net, &line, b.u, b.v) else {
+            match wider(None) {
+                Visit::Halve(first, second) => {
+                    work.push(second);
+                    work.push(first);
+                }
+                _ => out.floor.push(culled(b, None)),
+            }
+            continue;
+        };
+        if line.farther(&r) {
+            continue;
+        }
+        let (_, feet) = line.feet(&r);
+        if !feet.is_finite() {
+            out.floor.push(culled(b, None));
+            continue;
+        }
+        if feet.hi < s0 || feet.lo > s1 {
+            out.floor.push(FloorBox {
+                u: b.u,
+                v: b.v,
+                t: Some(feet),
+                kind: FloorKind::ExcludedByT,
+            });
+            continue;
+        }
+        // halved as step 4 halves, down to the floor of step 3 (across its wider side where
+        // its partials cannot be enclosed)
+        let halved = match enclosed(net, &line, b.u, b.v) {
+            Some(e) => cuts(&line, b, &e.s_u, &e.s_v)
+                .filter(|c| c.cut_u || c.cut_v)
+                .map(|c| {
+                    halves(
+                        b,
+                        c.split_u,
+                        if c.split_u { b.u.mid() } else { b.v.mid() },
+                        Some(feet),
+                    )
+                }),
+            None => Some(wider(Some(feet))),
+        };
+        match halved {
+            Some(Visit::Halve(first, second)) => {
+                work.push(second);
+                work.push(first);
+            }
+            _ => out.floor.push(culled(b, Some(feet))),
+        }
+    }
+    Ok(out)
+}
+
 /// The exclusion phase of one leaf (module docs, "The exclusion phase").
 struct Exclude<'a> {
     net: &'a LineNet,
@@ -985,7 +1154,7 @@ impl Exclude<'_> {
     }
 
     /// The phase over the records `floor` of a finished root pass: the boxes with no root
-    /// cut down to the floor, then what is proved farther than the tolerance dropped.
+    /// cut down to the floor, each piece proved farther than the tolerance dropped.
     fn run(&mut self, floor: &mut Vec<FloorBox>) -> Result<()> {
         let (todo, mut kept): (Vec<FloorBox>, Vec<FloorBox>) = std::mem::take(floor)
             .into_iter()
@@ -1007,12 +1176,7 @@ impl Exclude<'_> {
                 }
             }
         }
-        let dropped = self.dropped(&kept)?;
-        *floor = kept
-            .into_iter()
-            .zip(dropped)
-            .filter_map(|(r, gone)| (!gone).then_some(r))
-            .collect();
+        *floor = kept;
         Ok(())
     }
 
@@ -1084,166 +1248,6 @@ impl Exclude<'_> {
             ),
             _ => Cut::Kept(piece),
         }
-    }
-
-    /// Which of the records `recs` are proved farther than the tolerance (module docs,
-    /// "The exclusion phase"), each as `true`. A box the records do not hold is excluded
-    /// by distance, which the records of a finished leaf say by absence, and a box dropped
-    /// here counts as excluded for the others.
-    fn dropped(&mut self, recs: &[FloorBox]) -> Result<Vec<bool>> {
-        let n = recs.len();
-        let mut dropped = vec![false; n];
-        let rects: Vec<[Ivl; 2]> = recs.iter().map(|r| [r.u, r.v]).collect();
-        let mut near: Vec<Vec<usize>> = vec![Vec::new(); n];
-        let within = meeting_pairs(&rects, |i, j| {
-            if let Some(list) = near.get_mut(i) {
-                list.push(j);
-            }
-            if let Some(list) = near.get_mut(j) {
-                list.push(i);
-            }
-        });
-        if !within {
-            self.done.out_of_budget = true;
-            return Ok(dropped);
-        }
-        let kind = |i: usize| recs.get(i).map(|r| r.kind);
-        let scratch = |i: usize| recs.get(i).map(|r| Scratch { u: r.u, v: r.v });
-        // the connected sets of plain boxes with no root, each named by its least box
-        let mut parent: Vec<usize> = (0..n).collect();
-        for (i, list) in near.iter().enumerate() {
-            for &j in list {
-                if kind(i) == Some(FloorKind::NoRoot) && kind(j) == Some(FloorKind::NoRoot) {
-                    join(&mut parent, i, j);
-                }
-            }
-        }
-        let set: Vec<usize> = (0..n).map(|i| root_of(&mut parent, i)).collect();
-        let unit = |j: usize| match kind(j) {
-            Some(FloorKind::NoRoot) => set.get(j).copied(),
-            Some(FloorKind::Edge) => Some(j),
-            _ => None,
-        };
-        // what keeps each set or edge box (a unit): a box that can never be dropped, or the
-        // units it waits for
-        let mut blocked = vec![false; n];
-        let mut waits: Vec<Vec<usize>> = vec![Vec::new(); n];
-        for i in 0..n {
-            let (Some(k), Some(b), Some(list)) = (kind(i), scratch(i), near.get(i)) else {
-                continue;
-            };
-            match k {
-                FloorKind::NoRoot => {
-                    let own = set.get(i).copied().unwrap_or(i);
-                    // the lemma reads the boxes that touch the set: across the leaf's border
-                    // they are another leaf's, which these records do not tell
-                    let mut stop = self.sides.touches_border(b);
-                    let mut wait = Vec::new();
-                    for &j in list {
-                        match (kind(j), unit(j)) {
-                            (Some(FloorKind::NoRoot), _) => {}
-                            (_, Some(w)) => wait.push(w),
-                            _ => stop = true,
-                        }
-                    }
-                    if let (Some(flag), Some(slot)) = (blocked.get_mut(own), waits.get_mut(own)) {
-                        *flag |= stop;
-                        slot.extend(wait);
-                    }
-                }
-                FloorKind::Edge => {
-                    let kinds = self.net.side_kinds(&self.line.solve_domain, self.sides, b);
-                    let mut stop = false;
-                    let mut wait = Vec::new();
-                    for (s, &side_kind) in kinds.iter().enumerate() {
-                        if side_kind == SideKind::Boundary {
-                            continue;
-                        }
-                        // a crease or plain side faces boxes the records tell only inside the
-                        // leaf
-                        if self.sides.on_side(b, s) {
-                            stop = true;
-                            break;
-                        }
-                        let side = side_of(b, s);
-                        for &j in list {
-                            let meets = scratch(j).is_some_and(|o| boxes_meet(o, side));
-                            match (meets, unit(j)) {
-                                (false, _) => {}
-                                (true, Some(w)) => wait.push(w),
-                                (true, None) => stop = true,
-                            }
-                        }
-                    }
-                    // the boundary sides are shown farther than the tolerance by an
-                    // enclosure of the side itself
-                    for (s, &side_kind) in kinds.iter().enumerate() {
-                        if stop {
-                            break;
-                        }
-                        if side_kind == SideKind::Boundary {
-                            let side = side_of(b, s);
-                            stop = !(self.spend()?
-                                && enclosed(self.net, self.line, side.u, side.v)
-                                    .is_some_and(|e| self.line.farther(&e.r)));
-                        }
-                    }
-                    if let (Some(flag), Some(slot)) = (blocked.get_mut(i), waits.get_mut(i)) {
-                        *flag |= stop;
-                        slot.extend(wait);
-                    }
-                }
-                _ => {}
-            }
-        }
-        // drop every unit that waits for nothing, and pass it on
-        let mut waiting = vec![0_usize; n];
-        let mut waited_by: Vec<Vec<usize>> = vec![Vec::new(); n];
-        for (u, list) in waits.iter_mut().enumerate() {
-            list.sort_unstable();
-            list.dedup();
-            list.retain(|&w| w != u);
-            if let Some(count) = waiting.get_mut(u) {
-                *count = list.len();
-            }
-            for &w in list.iter() {
-                if let Some(by) = waited_by.get_mut(w) {
-                    by.push(u);
-                }
-            }
-        }
-        let is_unit = |u: usize| unit(u) == Some(u);
-        let mut ready: Vec<usize> = (0..n)
-            .filter(|&u| {
-                is_unit(u) && !blocked.get(u).copied().unwrap_or(true) && waiting.get(u) == Some(&0)
-            })
-            .rev()
-            .collect();
-        let mut gone_units = vec![false; n];
-        while let Some(u) = ready.pop() {
-            if let Some(g) = gone_units.get_mut(u) {
-                *g = true;
-            }
-            for &w in waited_by.get(u).into_iter().flatten() {
-                if let Some(count) = waiting.get_mut(w) {
-                    *count = count.saturating_sub(1);
-                    if *count == 0 && !blocked.get(w).copied().unwrap_or(true) {
-                        ready.push(w);
-                    }
-                }
-            }
-        }
-        for (i, slot) in dropped.iter_mut().enumerate() {
-            let gone = unit(i).is_some_and(|u| gone_units.get(u) == Some(&true));
-            if gone {
-                *slot = true;
-                match kind(i) {
-                    Some(FloorKind::Edge) => self.done.dropped_edge += 1,
-                    _ => self.done.dropped_no_root += 1,
-                }
-            }
-        }
-        Ok(dropped)
     }
 }
 
@@ -1353,10 +1357,243 @@ pub(crate) struct SearchedLeaf {
     pub domain: Extent2d,
     /// How its pass ended.
     pub stop: Stop,
-    /// What its pass kept ([`Isolation::floor`]).
-    pub floor: Vec<FloorBox>,
+    /// What its pass kept ([`Isolation::floor`]); `None` where the solve did not keep it
+    /// (past [`MAX_SOLVE_BOXES`]): nothing is then known of the leaf's boxes, and no box is
+    /// read as excluded there for having no record.
+    pub floor: Option<Vec<FloorBox>>,
     /// Its certified roots ([`Isolation::roots`]).
     pub roots: Vec<CertifiedRoot>,
+    /// Whether it is a culled strip ([`enclose_strip`]) rather than a leaf the traversal
+    /// solved.
+    pub strip: bool,
+}
+
+impl SearchedLeaf {
+    /// Whether a box of this leaf that no record holds is excluded by distance (module docs,
+    /// "The drop"): its pass finished, or stopped at its limit with the boxes it had still
+    /// to visit recorded, and its records are kept. A pass that did not run proves nothing.
+    fn reads_absence(&self) -> bool {
+        self.floor.is_some() && matches!(self.stop, Stop::Finished | Stop::AtLimit)
+    }
+}
+
+/// What a solve's drop did (module docs, "The drop").
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub(crate) struct Drops {
+    /// The side enclosures it made: at most its budget.
+    pub enclosures: usize,
+    /// Whether it stopped at its budget (a set it had not shown farther is kept) or did not
+    /// run past its bounds on boxes or on the pairs it tests.
+    pub out_of_budget: bool,
+    /// Plain boxes with no root it dropped.
+    pub no_root: usize,
+    /// Edge boxes it dropped.
+    pub edge: usize,
+    /// Of the boxes it dropped, those in sets that read another leaf's records: a set over
+    /// more than one leaf, or with a member's side on its leaf's border read across it.
+    pub across: usize,
+}
+
+/// The solve's drop (module docs, "The drop"): drops from the records of `leaves` (every
+/// searched leaf and culled strip of one solve, `sides` what lies across each) every
+/// connected set of regular boxes with no root, plain or edge, whose least gap to `line` is
+/// shown farther than the tolerance by its boundary and crease sides and by the excluded
+/// boxes around it. Decided on the records as they are, then applied at once; nothing runs
+/// where a leaf's records are not kept and its boxes are past [`MAX_SOLVE_BOXES`], and at
+/// most `budget` side enclosures are made.
+///
+/// # Errors
+///
+/// A cancel.
+pub(crate) fn drop_fenced(
+    net: &LineNet,
+    line: &PassLine,
+    leaves: &mut [SearchedLeaf],
+    sides: &[LeafSides],
+    cancel: Option<&CancelToken>,
+    budget: usize,
+) -> Result<Drops> {
+    let mut done = Drops::default();
+    let [s0, s1] = line.span;
+    let Some(scratch) = ScratchLine::of(line, &Extent1d::from_min_max(s0, s1)) else {
+        return Ok(done);
+    };
+    let gone = {
+        let view: &[SearchedLeaf] = leaves;
+        // every record of every leaf whose records are kept, in leaf order
+        let mut recs: Vec<(usize, FloorBox)> = Vec::new();
+        for (l, leaf) in view.iter().enumerate() {
+            if let Some(floor) = &leaf.floor {
+                recs.extend(floor.iter().map(|&r| (l, r)));
+                if recs.len() > MAX_SOLVE_BOXES {
+                    done.out_of_budget = true;
+                    return Ok(done);
+                }
+            }
+        }
+        let n = recs.len();
+        let member = |i: usize| {
+            recs.get(i)
+                .is_some_and(|(_, r)| matches!(r.kind, FloorKind::NoRoot | FloorKind::Edge))
+        };
+        let scratch_of = |i: usize| recs.get(i).map(|(_, r)| Scratch { u: r.u, v: r.v });
+        let rects: Vec<[Ivl; 2]> = recs.iter().map(|(_, r)| [r.u, r.v]).collect();
+        let mut near: Vec<Vec<usize>> = vec![Vec::new(); n];
+        let within = meeting_pairs(&rects, |i, j| {
+            if let Some(list) = near.get_mut(i) {
+                list.push(j);
+            }
+            if let Some(list) = near.get_mut(j) {
+                list.push(i);
+            }
+        });
+        if !within {
+            done.out_of_budget = true;
+            return Ok(done);
+        }
+        // the connected sets of boxes with no root, each named by its least box
+        let mut parent: Vec<usize> = (0..n).collect();
+        for (i, list) in near.iter().enumerate() {
+            for &j in list {
+                if member(i) && member(j) {
+                    join(&mut parent, i, j);
+                }
+            }
+        }
+        let set: Vec<usize> = (0..n).map(|i| root_of(&mut parent, i)).collect();
+        let readable = |l: usize| view.get(l).is_some_and(SearchedLeaf::reads_absence);
+        // what keeps each set (conditions 2 and 3 as far as the records tell them), whether
+        // it reads across a leaf's border, and the sides it must show farther (1 and 2)
+        let mut blocked = vec![false; n];
+        let mut across = vec![false; n];
+        let mut needs: Vec<Vec<Scratch>> = vec![Vec::new(); n];
+        for i in 0..n {
+            let (Some(&(l, _)), Some(b)) = (recs.get(i), scratch_of(i)) else {
+                continue;
+            };
+            if !member(i) {
+                continue;
+            }
+            let own = set.get(i).copied().unwrap_or(i);
+            let list = near.get(i).map_or(&[][..], Vec::as_slice);
+            let mut stop = !readable(l);
+            let mut reads = false;
+            let mut want: Vec<Scratch> = Vec::new();
+            for &j in list {
+                if !member(j) {
+                    // a record that is not a member: never excluded (one excluded by t
+                    // among them)
+                    stop = true;
+                } else if recs.get(j).is_some_and(|&(m, _)| m != l) {
+                    reads = true;
+                }
+            }
+            if let Some(own_sides) = sides.get(l) {
+                let kinds = net.side_kinds(&line.solve_domain, own_sides, b);
+                for (s, &kind) in kinds.iter().enumerate() {
+                    let side = side_of(b, s);
+                    let on_border = own_sides.on_side(b, s);
+                    // (a side that is no boundary and lies on the leaf's border is covered by
+                    // the leaves across it)
+                    let across_read = || own_sides.leaves_across(b, s).all(readable);
+                    match kind {
+                        SideKind::Boundary => want.push(side),
+                        SideKind::Crease => {
+                            let alone = !list.iter().any(|&j| {
+                                member(j) && scratch_of(j).is_some_and(|o| boxes_meet(o, side))
+                            });
+                            if alone && (!on_border || across_read()) {
+                                reads |= on_border;
+                            } else {
+                                want.push(side);
+                            }
+                        }
+                        SideKind::Plain => {
+                            if on_border {
+                                if across_read() {
+                                    reads = true;
+                                } else {
+                                    stop = true;
+                                }
+                            }
+                        }
+                    }
+                }
+            } else {
+                stop = true;
+            }
+            if let Some(flag) = blocked.get_mut(own) {
+                *flag |= stop;
+            }
+            if let Some(flag) = across.get_mut(own) {
+                *flag |= reads;
+            }
+            if let Some(slot) = needs.get_mut(own) {
+                slot.extend(want);
+            }
+        }
+        // the sides of each set not kept by the above, shown farther by their own
+        // enclosures, the sets in the order of their least box
+        for i in 0..n {
+            if !member(i) || set.get(i) != Some(&i) || blocked.get(i) != Some(&false) {
+                continue;
+            }
+            let mut shown = true;
+            for side in needs.get(i).map_or(&[][..], Vec::as_slice) {
+                if done.enclosures >= budget {
+                    done.out_of_budget = true;
+                    shown = false;
+                    break;
+                }
+                if done.enclosures % 64 == 0 {
+                    if let Some(token) = cancel {
+                        token.check(OP)?;
+                    }
+                }
+                done.enclosures += 1;
+                let farther = enclosed_value(net, &scratch, side.u, side.v)
+                    .is_some_and(|r| scratch.farther(&r));
+                if !farther {
+                    shown = false;
+                    break;
+                }
+            }
+            if let Some(flag) = blocked.get_mut(i) {
+                *flag = !shown;
+            }
+        }
+        let gone: Vec<bool> = (0..n)
+            .map(|i| {
+                member(i)
+                    && set
+                        .get(i)
+                        .is_some_and(|&own| blocked.get(own) == Some(&false))
+            })
+            .collect();
+        for (i, &g) in gone.iter().enumerate() {
+            if !g {
+                continue;
+            }
+            match recs.get(i).map(|(_, r)| r.kind) {
+                Some(FloorKind::Edge) => done.edge += 1,
+                _ => done.no_root += 1,
+            }
+            if set
+                .get(i)
+                .is_some_and(|&own| across.get(own) == Some(&true))
+            {
+                done.across += 1;
+            }
+        }
+        gone
+    };
+    let mut gone = gone.into_iter();
+    for leaf in leaves.iter_mut() {
+        if let Some(floor) = &mut leaf.floor {
+            floor.retain(|_| !gone.next().unwrap_or(false));
+        }
+    }
+    Ok(done)
 }
 
 /// What a box of a component is.
@@ -1400,6 +1637,8 @@ pub(crate) struct Holds {
     pub unvisited: usize,
     /// Leaves whose pass did not run.
     pub not_run: usize,
+    /// Boxes of a culled strip that step 1 did not exclude.
+    pub culled: usize,
 }
 
 /// What a component lies in or touches that no pass decided.
@@ -1409,8 +1648,9 @@ pub(crate) struct Touches {
     pub unfinished: bool,
     /// A leaf whose pass did not run.
     pub not_run: bool,
-    /// A stretch of a leaf's border facing a culled leaf.
-    pub culled: bool,
+    /// A stretch of a leaf's border that no searched leaf or strip covers (a leaf outside the
+    /// face: [`LeafSides`]).
+    pub unsearched: bool,
 }
 
 /// A connected part of what the passes of a solve did not prove farther than the
@@ -1449,8 +1689,9 @@ pub(crate) struct Components {
     pub over_budget: bool,
 }
 
-/// The most boxes a solve's components hold (sixteen leaves' worth at a leaf's bounds);
-/// past it the components are not built ([`Components::over_budget`]).
+/// The most boxes a solve's drop reads and its components hold (sixteen leaves' worth at a
+/// leaf's bounds); past it nothing is dropped and the components are not built
+/// ([`Components::over_budget`]).
 pub(crate) const MAX_SOLVE_BOXES: usize = 1 << 16;
 
 impl Components {
@@ -1464,10 +1705,11 @@ impl Components {
 }
 
 /// The components of a solve over the whole surface: the kept boxes of every searched leaf
-/// (`leaves`, with `sides` what lies across each), and the whole domain of each leaf whose
-/// pass did not run, joined where their closed `(u, v)` boxes meet and their line
-/// parameters overlap. Boxes excluded by t are not in them. `span` is the line's own
+/// and culled strip (`leaves`, with `sides` what lies across each), and the whole domain of
+/// each leaf whose pass did not run, joined where their closed `(u, v)` boxes meet and their
+/// line parameters overlap. Boxes excluded by t are not in them. `span` is the line's own
 /// interval. Deterministic: the boxes are sorted, and a component is named by its first.
+/// Not built ([`Components::over_budget`]) where a leaf's records were not kept.
 pub(crate) fn components(
     leaves: &[SearchedLeaf],
     sides: &[LeafSides],
@@ -1485,7 +1727,14 @@ pub(crate) fn components(
                 part: Part::NotRunLeaf,
             });
         }
-        for r in &leaf.floor {
+        let Some(floor) = &leaf.floor else {
+            // (records not kept: nothing is known of the components)
+            if leaf.stop == Stop::NotRun {
+                continue;
+            }
+            return Components::over_budget();
+        };
+        for r in floor {
             if r.kind != FloorKind::ExcludedByT {
                 out.boxes.push(PlacedBox {
                     leaf: l,
@@ -1566,7 +1815,7 @@ pub(crate) fn components(
         comp.reaches_end = comp.t.lo <= s0 || comp.t.hi >= s1;
         comp.touches.unfinished |= flags.unfinished;
         comp.touches.not_run |= flags.not_run;
-        comp.touches.culled |= flags.culled;
+        comp.touches.unsearched |= flags.unsearched;
         let h = &mut comp.holds;
         let count = match b.part {
             Part::NotRunLeaf => Some(&mut h.not_run),
@@ -1576,6 +1825,7 @@ pub(crate) fn components(
             Part::Floor(FloorKind::Root { .. }) => Some(&mut h.root),
             Part::Floor(FloorKind::Unshown { .. }) => Some(&mut h.unshown),
             Part::Floor(FloorKind::Unvisited) => Some(&mut h.unvisited),
+            Part::Floor(FloorKind::Culled) => Some(&mut h.culled),
             // (never placed)
             Part::Floor(FloorKind::ExcludedByT) => None,
         };
@@ -1610,19 +1860,19 @@ pub(crate) fn components(
 
 /// What the box `b` of a component touches across its leaf's border: a leaf whose pass
 /// stopped at its limit (or `b` lies in one), a leaf whose pass did not run (or `b` is
-/// one), and a stretch facing a culled leaf.
+/// one), and a stretch that no searched leaf or strip covers.
 fn facing(b: &PlacedBox, leaves: &[SearchedLeaf], sides: &[LeafSides]) -> Touches {
     let own = leaves.get(b.leaf).map(|l| l.stop);
     let mut touches = Touches {
         unfinished: own == Some(Stop::AtLimit),
         not_run: b.part == Part::NotRunLeaf,
-        culled: false,
+        unsearched: false,
     };
     let Some(leaf_sides) = sides.get(b.leaf) else {
         return touches;
     };
     let s = Scratch { u: b.u, v: b.v };
-    touches.culled = leaf_sides.faces_culled(s).iter().any(|&c| c);
+    touches.unsearched = leaf_sides.faces_unsearched(s).iter().any(|&c| c);
     for side in 0..4 {
         for j in leaf_sides.leaves_across(s, side) {
             match leaves.get(j).map(|l| l.stop) {
@@ -1638,12 +1888,13 @@ fn facing(b: &PlacedBox, leaves: &[SearchedLeaf], sides: &[LeafSides]) -> Touche
 /// The side record of a solve (module docs, "Components"): not run when no searched leaf's
 /// pass ran; otherwise undecided over every component's line parameters (each undecided
 /// until the typing of components) and over the whole of the line's own interval `span`
-/// where a leaf was culled (`culled`: its strip is not enclosed) or the components passed
-/// their bounds; complete only with none of these.
+/// where a cull's strip could not be placed (`unplaced`: nothing has enclosed it) or the
+/// components passed their bounds; complete only with none of these. A strip's boxes it
+/// left undecided are in the components, over their own line parameters.
 pub(crate) fn side_record(
     leaves: &[SearchedLeaf],
     components: &Components,
-    culled: bool,
+    unplaced: bool,
     span: [f64; 2],
 ) -> SideRecord {
     if !leaves.is_empty() && leaves.iter().all(|l| l.stop == Stop::NotRun) {
@@ -1651,7 +1902,7 @@ pub(crate) fn side_record(
     }
     let [s0, s1] = span;
     let mut spans: Vec<[f64; 2]> = Vec::new();
-    if culled || components.over_budget {
+    if unplaced || components.over_budget {
         spans.push(span);
     }
     for c in &components.list {
@@ -1721,6 +1972,18 @@ fn enclosed(net: &LineNet, line: &ScratchLine, u: Ivl, v: Ivl) -> Option<Enclose
         s_u,
         s_v,
     })
+}
+
+/// `S − P` over the box `[u, v]`, enclosed about the surface's point at its middle as
+/// [`enclosed`] encloses it, without the partials (what step 1 reads); `None` where the net
+/// refuses it.
+fn enclosed_value(net: &LineNet, line: &ScratchLine, u: Ivl, v: Ivl) -> Option<I3> {
+    let s_mid = net.at(u.mid(), v.mid(), line.p)?;
+    let [m0, m1, m2] = mids(&s_mid);
+    let [p0, p1, p2] = line.p;
+    let about = [p0 + m0, p1 + m1, p2 + m2];
+    let s = net.value_over(u, v, about)?;
+    Some(line.off_the_start(&s, about))
 }
 
 /// How the floor of step 3 sees a box: whether each direction is still cut (its image
@@ -2130,7 +2393,7 @@ mod tests {
     }
 
     /// The pass over the whole of `s`, the line's own interval `span` and the leaf's
-    /// `[t0, t1]`.
+    /// `[t0, t1]`, with the solve's drop over that one leaf after it.
     fn pass_in(
         k: &Kernel,
         s: &Surface,
@@ -2150,15 +2413,18 @@ mod tests {
             solve_domain: domain,
             tol,
         };
-        isolate(
-            &net,
-            &line,
-            &domain,
-            &interval,
-            &LeafSides::whole_solve(&domain),
-            None,
-        )
-        .unwrap()
+        let sides = LeafSides::whole_solve(&domain);
+        let mut found = isolate(&net, &line, &domain, &interval, &sides, None).unwrap();
+        let mut leaf = [SearchedLeaf {
+            domain,
+            stop: found.stop,
+            floor: Some(std::mem::take(&mut found.floor)),
+            roots: Vec::new(),
+            strip: false,
+        }];
+        drop_fenced(&net, &line, &mut leaf, &[sides], None, MAX_DROP_ENCLOSURES).unwrap();
+        found.floor = leaf[0].floor.take().unwrap();
+        found
     }
 
     /// The line parameters of the certified roots, in order.
@@ -2618,9 +2884,43 @@ mod tests {
         }
     }
 
-    /// The exclusion phase of a leaf over `domain` (the cylinder's whole domain the solve's),
-    /// on the records `recs`, with the line through `p` along `d` and a budget of
-    /// `budget` enclosures: the records it keeps, and what it did.
+    /// A searched leaf over `domain`, its pass ended at `stop`, with the records `floor`.
+    fn leaf_of(domain: Extent2d, stop: Stop, floor: Option<Vec<FloorBox>>) -> SearchedLeaf {
+        SearchedLeaf {
+            domain,
+            stop,
+            floor,
+            roots: Vec::new(),
+            strip: false,
+        }
+    }
+
+    /// The solve's drop over `leaves` (leaves of a solve over the cylinder's whole domain),
+    /// with the line through `p` along `d` and a budget of `budget` side enclosures.
+    fn drop_over(
+        k: &Kernel,
+        p: Vec3,
+        d: Vec3,
+        leaves: &mut [SearchedLeaf],
+        budget: usize,
+    ) -> Drops {
+        let s = cylinder(k);
+        let net = LineNet::of(k, &s).unwrap().unwrap();
+        let solve = s.natural_uv_domain_with_nurb(k).unwrap();
+        let line = PassLine {
+            point: p,
+            vector: d,
+            span: [0.0, 1.0],
+            solve_domain: solve,
+            tol: TOL,
+        };
+        let doms: Vec<Extent2d> = leaves.iter().map(|l| l.domain).collect();
+        let sides = leaf_sides(&doms, &solve);
+        drop_fenced(&net, &line, leaves, &sides, None, budget).unwrap()
+    }
+
+    /// The solve's drop over one finished leaf over `domain` holding the records `recs`:
+    /// the records it keeps, and what it did.
     fn excluded(
         k: &Kernel,
         p: Vec3,
@@ -2628,32 +2928,10 @@ mod tests {
         domain: Extent2d,
         recs: Vec<FloorBox>,
         budget: usize,
-    ) -> (Vec<FloorBox>, Exclusion) {
-        let s = cylinder(k);
-        let net = LineNet::of(k, &s).unwrap().unwrap();
-        let solve = s.natural_uv_domain_with_nurb(k).unwrap();
-        let pass_line = PassLine {
-            point: p,
-            vector: d,
-            span: [0.0, 1.0],
-            solve_domain: solve,
-            tol: TOL,
-        };
-        let line = ScratchLine::of(&pass_line, &Extent1d::from_min_max(0.0, 1.0)).unwrap();
-        let sides = leaf_sides(&[domain], &solve);
-        let mut phase = Exclude {
-            net: &net,
-            line: &line,
-            sides: &sides[0],
-            budget,
-            cancel: None,
-            done: Exclusion::default(),
-        };
-        let mut floor = recs;
-        let dropped = phase.dropped(&floor).unwrap();
-        let mut gone = dropped.into_iter();
-        floor.retain(|_| !gone.next().unwrap());
-        (floor, phase.done)
+    ) -> (Vec<FloorBox>, Drops) {
+        let mut leaves = [leaf_of(domain, Stop::Finished, Some(recs))];
+        let done = drop_over(k, p, d, &mut leaves, budget);
+        (leaves[0].floor.take().unwrap(), done)
     }
 
     /// A record of `kind` over `[u0, u1] × [v0, v1]`, its line parameters `[0, 1]`.
@@ -2666,12 +2944,12 @@ mod tests {
         }
     }
 
-    /// The lemma: a connected set of plain boxes with no root (regular, no side on a border
-    /// or crease) whose every touching box is excluded by distance has its least gap on
-    /// its border, so it is dropped whole. A set beside a box that may hold the contact (a
-    /// box left at the floor), beside an edge box on a crease whose crease side faces such
-    /// a box, beside an edge box on the solve's border within the tolerance, or touching
-    /// the leaf's border (what touches it there is another leaf's) is kept.
+    /// A connected set of plain boxes with no root whose every touching box is excluded by
+    /// distance has its least gap on its border, so it is dropped whole. A set beside a box
+    /// that may hold the contact (a box left at the floor), beside an edge box whose crease
+    /// side faces such a box, or beside an edge box on the solve's border within the
+    /// tolerance is kept. A set touching the border of a leaf with nothing searched across
+    /// it has a boundary side there, which an enclosure shows farther: it is dropped.
     #[test]
     fn a_set_with_no_root_fenced_by_excluded_boxes_is_dropped() {
         let k = Kernel::default();
@@ -2689,21 +2967,22 @@ mod tests {
                 rec(FloorKind::NoRoot, [1.1, 1.2], [0.5, 0.6]),
             ]
         };
-        let (kept, done) = excluded(&k, p, d, whole, set(), MAX_EXCLUSION_BOXES);
+        let (kept, done) = excluded(&k, p, d, whole, set(), MAX_DROP_ENCLOSURES);
         assert!(kept.is_empty(), "{kept:?}");
-        assert_eq!(done.dropped_no_root, 3);
+        assert_eq!(done.no_root, 3);
+        assert_eq!(done.across, 0);
 
         // beside a box left at the floor
         let mut recs = set();
         recs.push(rec(FloorKind::Left, [1.2, 1.3], [0.4, 0.5]));
-        let (kept, _) = excluded(&k, p, d, whole, recs, MAX_EXCLUSION_BOXES);
+        let (kept, _) = excluded(&k, p, d, whole, recs, MAX_DROP_ENCLOSURES);
         assert_eq!(kept.len(), 4, "{kept:?}");
 
         // beside an edge box on the crease u = π/2, whose crease side faces a box left
         let mut recs = set();
         recs.push(rec(FloorKind::Edge, [1.2, q], [0.5, 0.6]));
         recs.push(rec(FloorKind::Left, [q, 1.7], [0.5, 0.6]));
-        let (kept, _) = excluded(&k, p, d, whole, recs, MAX_EXCLUSION_BOXES);
+        let (kept, _) = excluded(&k, p, d, whole, recs, MAX_DROP_ENCLOSURES);
         assert_eq!(kept.len(), 5, "{kept:?}");
 
         // beside an edge box on the top rim where the line passes within the tolerance of
@@ -2713,13 +2992,15 @@ mod tests {
             rec(FloorKind::NoRoot, [3.0, 3.1], [0.85, 0.95]),
             rec(FloorKind::Edge, [3.1, pi], [0.9, 1.0]),
         ];
-        let (kept, _) = excluded(&k, p, d, whole, recs, MAX_EXCLUSION_BOXES);
+        let (kept, _) = excluded(&k, p, d, whole, recs, MAX_DROP_ENCLOSURES);
         assert_eq!(kept.len(), 2, "{kept:?}");
 
-        // touching the border of a leaf that is not the whole solve
+        // touching the border of a leaf with nothing searched across it: the side on u = 1
+        // is a boundary side, about one from the line
         let leaf = Extent2d::from_bounds(1.0, 0.0, 2.0, 1.0);
-        let (kept, _) = excluded(&k, p, d, leaf, set(), MAX_EXCLUSION_BOXES);
-        assert_eq!(kept.len(), 3, "{kept:?}");
+        let (kept, done) = excluded(&k, p, d, leaf, set(), MAX_DROP_ENCLOSURES);
+        assert!(kept.is_empty(), "{kept:?}");
+        assert!(done.enclosures > 0);
     }
 
     /// An edge box alone is dropped when its side on the solve's border (the top rim) is
@@ -2740,21 +3021,21 @@ mod tests {
             d,
             whole,
             edge(),
-            MAX_EXCLUSION_BOXES,
+            MAX_DROP_ENCLOSURES,
         );
         assert!(kept.is_empty(), "{kept:?}");
-        assert_eq!(done.dropped_edge, 1);
-        assert!(done.boxes > 0);
+        assert_eq!(done.edge, 1);
+        assert!(done.enclosures > 0);
         let (kept, done) = excluded(
             &k,
             Vec3::new(-2.0, 0.0, 1.0 + 0.5 * TOL),
             d,
             whole,
             edge(),
-            MAX_EXCLUSION_BOXES,
+            MAX_DROP_ENCLOSURES,
         );
         assert_eq!(kept, edge());
-        assert_eq!(done.dropped_edge, 0);
+        assert_eq!(done.edge, 0);
         // with no budget left for the enclosure of its side, it is kept too
         let (kept, done) = excluded(
             &k,
@@ -2766,6 +3047,204 @@ mod tests {
         );
         assert_eq!(kept, edge());
         assert!(done.out_of_budget);
+    }
+
+    /// A set of plain and edge boxes with no root is one set: a plain box beside an edge box
+    /// on the top rim and the crease at u = π, and a second edge box across that crease
+    /// (two edge boxes side by side, which the rule for one edge box at a time kept, each
+    /// waiting for the other). With the line three tolerances above the rim, every
+    /// boundary and crease side is shown farther and every other side faces boxes excluded
+    /// by distance: all three are dropped, and so are the two edge boxes alone. With the
+    /// line half a tolerance above the rim, the rim at u = π is within the tolerance, and
+    /// the whole set is kept.
+    #[test]
+    fn a_set_of_plain_and_edge_boxes_is_dropped_whole() {
+        let k = Kernel::default();
+        let whole = cylinder(&k).natural_uv_domain_with_nurb(&k).unwrap();
+        // the crease at u = π, the knot between the second and third quarter arcs
+        let c = LineNet::of(&k, &cylinder(&k)).unwrap().unwrap().creases[0][1];
+        let d = Vec3::new(4.0, 0.0, 0.0);
+        let edges = || {
+            vec![
+                rec(FloorKind::Edge, [3.1, c], [0.9, 1.0]),
+                rec(FloorKind::Edge, [c, 3.2], [0.9, 1.0]),
+            ]
+        };
+        let set = || {
+            let mut recs = edges();
+            recs.insert(0, rec(FloorKind::NoRoot, [3.0, 3.1], [0.85, 0.95]));
+            recs
+        };
+        let far = Vec3::new(-2.0, 0.0, 1.0 + 3.0 * TOL);
+        let (kept, done) = excluded(&k, far, d, whole, set(), MAX_DROP_ENCLOSURES);
+        assert!(kept.is_empty(), "{kept:?}");
+        assert_eq!((done.no_root, done.edge, done.across), (1, 2, 0));
+        let (kept, done) = excluded(&k, far, d, whole, edges(), MAX_DROP_ENCLOSURES);
+        assert!(kept.is_empty(), "{kept:?}");
+        assert_eq!(done.edge, 2);
+
+        let near = Vec3::new(-2.0, 0.0, 1.0 + 0.5 * TOL);
+        let (kept, done) = excluded(&k, near, d, whole, set(), MAX_DROP_ENCLOSURES);
+        assert_eq!(kept, set());
+        assert_eq!(done.no_root + done.edge, 0);
+    }
+
+    /// A crease side shared by two members is shown farther by its own enclosure or keeps
+    /// the set: a line along y half a tolerance outside the cylinder's crease at u = π
+    /// (x = −1) at height 0.5 passes within the tolerance of that knot line, and the two
+    /// edge boxes on either side of it are kept; three tolerances outside it, both are
+    /// dropped.
+    #[test]
+    fn a_crease_side_within_the_tolerance_keeps_its_set() {
+        let k = Kernel::default();
+        let whole = cylinder(&k).natural_uv_domain_with_nurb(&k).unwrap();
+        let c = LineNet::of(&k, &cylinder(&k)).unwrap().unwrap().creases[0][1];
+        let pair = || {
+            vec![
+                rec(FloorKind::Edge, [c - 0.05, c], [0.45, 0.55]),
+                rec(FloorKind::Edge, [c, c + 0.05], [0.45, 0.55]),
+            ]
+        };
+        let d = Vec3::new(0.0, 2.0, 0.0);
+        let at = |h: f64| Vec3::new(-1.0 - h * TOL, -1.0, 0.5);
+        let (kept, done) = excluded(&k, at(0.5), d, whole, pair(), MAX_DROP_ENCLOSURES);
+        assert_eq!(kept, pair());
+        assert_eq!(done.edge, 0);
+        let (kept, done) = excluded(&k, at(3.0), d, whole, pair(), MAX_DROP_ENCLOSURES);
+        assert!(kept.is_empty(), "{kept:?}");
+        assert_eq!(done.edge, 2);
+    }
+
+    /// A crease side no other member meets, with nothing but boxes excluded by distance
+    /// across it, lies in closed excluded boxes and needs no enclosure: an edge box beside
+    /// the crease at u = π half a tolerance from the line (the line of the test above) is
+    /// dropped with no side enclosed, alone in the solve, and across a finished leaf with no
+    /// record. Across a leaf whose pass did not run, the side must be enclosed, which fails,
+    /// and the box is kept; and a box left at the floor that touches it only at a corner
+    /// keeps it too.
+    #[test]
+    fn a_crease_side_alone_reads_the_boxes_across_it() {
+        let k = Kernel::default();
+        let whole = cylinder(&k).natural_uv_domain_with_nurb(&k).unwrap();
+        let c = LineNet::of(&k, &cylinder(&k)).unwrap().unwrap().creases[0][1];
+        let edge = || vec![rec(FloorKind::Edge, [c - 0.05, c], [0.45, 0.55])];
+        let (p, d) = (
+            Vec3::new(-1.0 - 0.5 * TOL, -1.0, 0.5),
+            Vec3::new(0.0, 2.0, 0.0),
+        );
+        let (kept, done) = excluded(&k, p, d, whole, edge(), MAX_DROP_ENCLOSURES);
+        assert!(kept.is_empty(), "{kept:?}");
+        assert_eq!((done.edge, done.enclosures), (1, 0));
+
+        let (a, b) = (
+            Extent2d::from_bounds(1.0, 0.0, c, 1.0),
+            Extent2d::from_bounds(c, 0.0, 4.0, 1.0),
+        );
+        let run = |across: SearchedLeaf| {
+            let mut leaves = [leaf_of(a, Stop::Finished, Some(edge())), across];
+            let done = drop_over(&k, p, d, &mut leaves, MAX_DROP_ENCLOSURES);
+            (leaves[0].floor.clone().unwrap(), done)
+        };
+        let (kept, done) = run(leaf_of(b, Stop::Finished, Some(Vec::new())));
+        assert!(kept.is_empty(), "{kept:?}");
+        assert_eq!((done.edge, done.across, done.enclosures), (1, 1, 0));
+        let (kept, done) = run(leaf_of(b, Stop::NotRun, Some(Vec::new())));
+        assert_eq!(kept, edge());
+        assert_eq!(done.enclosures, 1);
+
+        let mut recs = edge();
+        recs.push(rec(FloorKind::Left, [c, c + 0.05], [0.55, 0.6]));
+        let (kept, _) = excluded(&k, p, d, whole, recs.clone(), MAX_DROP_ENCLOSURES);
+        assert_eq!(kept, recs);
+    }
+
+    /// A box excluded by t is a record, and no proof of the gap to the line: a set it
+    /// touches is kept.
+    #[test]
+    fn boxes_excluded_by_t_do_not_fence_a_set() {
+        let k = Kernel::default();
+        let whole = cylinder(&k).natural_uv_domain_with_nurb(&k).unwrap();
+        let (p, d) = (
+            Vec3::new(-2.0, 0.0, 1.0 + 0.5 * TOL),
+            Vec3::new(4.0, 0.0, 0.0),
+        );
+        let recs = vec![
+            rec(FloorKind::NoRoot, [1.0, 1.1], [0.4, 0.5]),
+            rec(FloorKind::NoRoot, [1.1, 1.2], [0.4, 0.5]),
+            FloorBox {
+                t: Some(Ivl::new(2.0, 3.0)),
+                ..rec(FloorKind::ExcludedByT, [1.2, 1.3], [0.4, 0.5])
+            },
+        ];
+        let (kept, done) = excluded(&k, p, d, whole, recs.clone(), MAX_DROP_ENCLOSURES);
+        assert_eq!(kept, recs);
+        assert_eq!(done.no_root, 0);
+    }
+
+    /// A set on a leaf's border reads the leaf across it: across a finished leaf (or one at
+    /// its limit, or a culled strip) with no record touching it, its every touching box is
+    /// excluded, and it is dropped; across a leaf whose pass did not run, a leaf whose
+    /// records the solve did not keep (no record there is then no proof), or a record that
+    /// is not excluded, it is kept. A leaf whose records were not kept also leaves the
+    /// components unbuilt.
+    #[test]
+    fn a_set_on_a_leaf_border_reads_the_leaf_across() {
+        let k = Kernel::default();
+        let (p, d) = (
+            Vec3::new(-2.0, 0.0, 1.0 + 0.5 * TOL),
+            Vec3::new(4.0, 0.0, 0.0),
+        );
+        let (a, b) = (
+            Extent2d::from_bounds(0.0, 0.0, 1.0, 1.0),
+            Extent2d::from_bounds(1.0, 0.0, 2.0, 1.0),
+        );
+        let set = || {
+            vec![
+                rec(FloorKind::NoRoot, [1.0, 1.1], [0.4, 0.5]),
+                rec(FloorKind::NoRoot, [1.1, 1.2], [0.4, 0.5]),
+                rec(FloorKind::NoRoot, [1.1, 1.2], [0.5, 0.6]),
+            ]
+        };
+        let run = |across: SearchedLeaf| {
+            let mut leaves = [across, leaf_of(b, Stop::Finished, Some(set()))];
+            let done = drop_over(&k, p, d, &mut leaves, MAX_DROP_ENCLOSURES);
+            (leaves[1].floor.clone().unwrap(), done)
+        };
+        for stop in [Stop::Finished, Stop::AtLimit] {
+            let (kept, done) = run(leaf_of(a, stop, Some(Vec::new())));
+            assert!(kept.is_empty(), "{stop:?}: {kept:?}");
+            assert_eq!((done.no_root, done.across), (3, 3), "{stop:?}");
+            // (the side on u = 1 is read across, not enclosed)
+            assert_eq!(done.enclosures, 0, "{stop:?}");
+        }
+        let strip = SearchedLeaf {
+            strip: true,
+            ..leaf_of(a, Stop::Finished, Some(Vec::new()))
+        };
+        let (kept, _) = run(strip);
+        assert!(kept.is_empty(), "{kept:?}");
+
+        let (kept, done) = run(leaf_of(a, Stop::NotRun, Some(Vec::new())));
+        assert_eq!(kept, set());
+        assert_eq!(done.no_root, 0);
+        let (kept, done) = run(leaf_of(a, Stop::Finished, None));
+        assert_eq!(kept, set());
+        assert_eq!(done.no_root, 0);
+        let left = vec![rec(FloorKind::Left, [0.9, 1.0], [0.4, 0.5])];
+        let (kept, _) = run(leaf_of(a, Stop::Finished, Some(left)));
+        assert_eq!(kept, set());
+
+        let leaves = [
+            leaf_of(a, Stop::Finished, None),
+            leaf_of(b, Stop::Finished, Some(set())),
+        ];
+        let whole = cylinder(&k).natural_uv_domain_with_nurb(&k).unwrap();
+        let c = components(&leaves, &leaf_sides(&[a, b], &whole), [0.0, 1.0]);
+        assert!(c.over_budget);
+        assert_eq!(
+            side_record(&leaves, &c, false, [0.0, 1.0]),
+            SideRecord::Undecided(vec![[0.0, 1.0]])
+        );
     }
 
     /// A line tangent to the cylinder leaves boxes with no root about the contact, which
@@ -2868,7 +3347,7 @@ mod tests {
     }
 
     /// The passes of `doms` (leaves of the solve over the surface's whole domain) on the line
-    /// `p + t d`, `t` in `[0, 1]`, and their components.
+    /// `p + t d`, `t` in `[0, 1]`, the solve's drop over them, and their components.
     fn components_of(
         k: &Kernel,
         s: &Surface,
@@ -2888,7 +3367,7 @@ mod tests {
         };
         let sides = leaf_sides(doms, &solve);
         let interval = Extent1d::from_min_max(0.0, 1.0);
-        let leaves: Vec<SearchedLeaf> = doms
+        let mut leaves: Vec<SearchedLeaf> = doms
             .iter()
             .zip(&sides)
             .map(|(dom, own)| {
@@ -2896,11 +3375,13 @@ mod tests {
                 SearchedLeaf {
                     domain: *dom,
                     stop: f.stop,
-                    floor: f.floor,
+                    floor: Some(f.floor),
                     roots: f.roots,
+                    strip: false,
                 }
             })
             .collect();
+        drop_fenced(&net, &line, &mut leaves, &sides, None, MAX_DROP_ENCLOSURES).unwrap();
         let c = components(&leaves, &sides, [0.0, 1.0]);
         (leaves, c)
     }
@@ -2909,8 +3390,9 @@ mod tests {
     /// net) misses it near t = 0.5, with no root. Split into two leaves at that quadrant,
     /// the boxes it leaves on both sides are one component across the two leaves, holding
     /// boxes left at the floor, its line parameters about 0.5, and nothing undecided
-    /// around it but itself. With the second leaf culled, the boxes on the quadrant face
-    /// it: they are edge boxes, and the component touches a culled leaf.
+    /// around it but itself. With the second leaf not searched (as a leaf outside the face,
+    /// which no strip covers), the boxes on the quadrant face it: they are edge boxes, and
+    /// the component touches a stretch nothing searched.
     #[test]
     fn components_join_across_leaf_borders() {
         let k = Kernel::default();
@@ -2944,8 +3426,9 @@ mod tests {
 
         let (leaves, c) = components_of(&k, &s, p, d, TOL, &doms[..1]);
         assert_eq!(c.list.len(), 1, "{:?}", c.list);
-        assert!(c.list[0].touches.culled);
-        let mut on_quadrant = leaves[0].floor.iter().filter(|r| r.u.hi == q);
+        assert!(c.list[0].touches.unsearched);
+        let floor = leaves[0].floor.clone().unwrap();
+        let mut on_quadrant = floor.iter().filter(|r| r.u.hi == q);
         assert!(on_quadrant.clone().count() > 0);
         assert!(on_quadrant.all(|r| matches!(r.kind, FloorKind::Edge | FloorKind::Left)));
     }
@@ -2977,18 +3460,112 @@ mod tests {
         assert!(one.t.lo <= 0.5 && 0.5 <= one.t.hi, "{:?}", one.t);
     }
 
-    /// The side record: not run when no leaf's pass ran; complete with no component and no
-    /// cull; undecided over each component's line parameters, and over the whole of the
-    /// line's interval with a culled leaf.
+    /// A culled strip the line passes farther than the tolerance from is excluded by
+    /// distance whole: the quarter of the cylinder from u = π to 3π/2 (x and y below 0) and
+    /// the line across the cylinder at y = 1 + 2 tol, at least 1 from it. The strip finishes
+    /// with no record, and as a searched leaf with no record it leaves the side record
+    /// complete.
+    #[test]
+    fn a_culled_strip_excluded_by_distance_reads_as_searched() {
+        let k = Kernel::default();
+        let s = cylinder(&k);
+        let net = LineNet::of(&k, &s).unwrap().unwrap();
+        let whole = s.natural_uv_domain_with_nurb(&k).unwrap();
+        let (c1, c2) = (net.creases[0][1], net.creases[0][2]);
+        let quarter = Extent2d::from_bounds(c1, 0.0, c2, 1.0);
+        let (p, d) = across(1.0 + 2.0 * TOL);
+        let line = PassLine {
+            point: p,
+            vector: d,
+            span: [0.0, 1.0],
+            solve_domain: whole,
+            tol: TOL,
+        };
+        let found = enclose_strip(&net, &line, &quarter, None).unwrap();
+        assert_eq!(found.stop, Stop::Finished);
+        assert!(found.floor.is_empty(), "{:?}", found.floor);
+        assert!(found.roots.is_empty());
+        let leaves = [SearchedLeaf {
+            strip: true,
+            ..leaf_of(quarter, found.stop, Some(found.floor))
+        }];
+        let c = components(&leaves, &leaf_sides(&[quarter], &whole), [0.0, 1.0]);
+        assert!(c.list.is_empty());
+        assert_eq!(
+            side_record(&leaves, &c, false, [0.0, 1.0]),
+            SideRecord::Complete
+        );
+    }
+
+    /// A culled strip that runs out of its budget keeps what it left undecided with its line
+    /// parameters: the quarter of the cylinder from u = 0 to π/2 (x and y above 0), whose
+    /// feet on the line across the cylinder at y = 0.5 lie in t = (x + 1) / 2, [0.5, 1],
+    /// with the line's own interval [−1, 2]. Stopped after three enclosures, it is at its
+    /// limit, every box it kept is undecided with its line parameters, and the side record
+    /// is undecided only inside the line parameters of the quarter's enclosure (about
+    /// [0.5, 1], widened by the tolerance and the enclosure), not over the whole line.
+    /// With its whole budget it finishes, keeping only boxes about the crossing at
+    /// x = √0.75, t = (1 + √0.75) / 2.
+    #[test]
+    fn a_culled_strip_out_of_budget_is_undecided_over_its_boxes_only() {
+        let k = Kernel::default();
+        let s = cylinder(&k);
+        let net = LineNet::of(&k, &s).unwrap().unwrap();
+        let whole = s.natural_uv_domain_with_nurb(&k).unwrap();
+        let quarter = Extent2d::from_bounds(0.0, 0.0, net.creases[0][0], 1.0);
+        let (p, d) = across(0.5);
+        let span = [-1.0, 2.0];
+        let line = PassLine {
+            point: p,
+            vector: d,
+            span,
+            solve_domain: whole,
+            tol: TOL,
+        };
+        let found = enclose_strip_within(&net, &line, &quarter, None, 3).unwrap();
+        assert_eq!(found.stop, Stop::AtLimit);
+        assert_eq!(found.boxes, 3);
+        assert!(!found.floor.is_empty());
+        assert!(found
+            .floor
+            .iter()
+            .all(|r| r.kind == FloorKind::Culled && r.t.is_some()));
+        let leaves = [SearchedLeaf {
+            strip: true,
+            ..leaf_of(quarter, found.stop, Some(found.floor))
+        }];
+        let c = components(&leaves, &leaf_sides(&[quarter], &whole), span);
+        let record = side_record(&leaves, &c, false, span);
+        let SideRecord::Undecided(spans) = &record else {
+            panic!("{record:?}");
+        };
+        // (inside the line parameters of the quarter's own enclosure, which lie inside the
+        // line's interval)
+        let scratch = ScratchLine::of(&line, &Extent1d::from_min_max(-1.0, 2.0)).unwrap();
+        let (u, v) = (Ivl::new(0.0, net.creases[0][0]), Ivl::new(0.0, 1.0));
+        let (_, feet) = scratch.feet(&enclosed(&net, &scratch, u, v).unwrap().r);
+        assert!(feet.lo > -1.0 && feet.hi < 2.0, "{feet:?}");
+        for &[lo, hi] in spans {
+            assert!(lo >= feet.lo && hi <= feet.hi, "{spans:?} {feet:?}");
+        }
+
+        let done = enclose_strip(&net, &line, &quarter, None).unwrap();
+        assert_eq!(done.stop, Stop::Finished);
+        assert!(!done.floor.is_empty());
+        let at = (1.0 + 0.75_f64.sqrt()) / 2.0;
+        for r in &done.floor {
+            assert_eq!(r.kind, FloorKind::Culled, "{r:?}");
+            assert!(r.t.is_some_and(|t| (t.mid() - at).abs() < 1.0e-2), "{r:?}");
+        }
+    }
+
+    /// The side record: not run when no leaf's pass ran; complete with no component and
+    /// every cull's strip placed; undecided over each component's line parameters, and over
+    /// the whole of the line's interval with a cull whose strip could not be placed.
     #[test]
     fn the_side_record_has_three_states() {
         let domain = Extent2d::from_bounds(0.0, 0.0, 1.0, 1.0);
-        let leaf = |stop| SearchedLeaf {
-            domain,
-            stop,
-            floor: Vec::new(),
-            roots: Vec::new(),
-        };
+        let leaf = |stop| leaf_of(domain, stop, Some(Vec::new()));
         let span = [0.0, 1.0];
         let none = Components::default();
         assert_eq!(

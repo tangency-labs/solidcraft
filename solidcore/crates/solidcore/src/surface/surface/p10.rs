@@ -60,10 +60,12 @@
 //!   [`super::certified_line::isolate`] ([`CertifiedLsi::certified_pass`]), and every
 //!   certified crossing that no solution of the whole solve already stands for is added.
 //!   Nothing is removed, and no solution a guess found is solved again. The traversal also
-//!   counts the leaves and subtrees it culls by the line's distance or parameter, and the
-//!   pass returns the solve's side record ([`crate::geom::solution_array::SideRecord`])
-//!   from the components of what the leaves' passes kept
-//!   ([`super::certified_line::components`]); nothing reads it yet.
+//!   keeps the domain of each leaf and subtree it culls by the line's distance or
+//!   parameter, which [`super::certified_line::enclose_strip`] encloses, and the pass
+//!   returns the solve's side record ([`crate::geom::solution_array::SideRecord`]) from the
+//!   components of what the leaves' passes and the strips kept, after the solve's drop
+//!   ([`super::certified_line::drop_fenced`], [`super::certified_line::components`]);
+//!   nothing reads it yet.
 
 use super::certified_line;
 use super::p1::{is_node_valid, is_surface_cache_owner, surface_to_evaluate};
@@ -326,29 +328,46 @@ struct CertifiedLeaf<O> {
 }
 
 /// What the traversal of a solve with the certified pass keeps (not upstream): the leaves
-/// whose guesses ran, and how many leaves and subtrees it culled by the line's distance or
-/// parameter (a slab or sphere test of boxes, no proof: their strips are not enclosed).
-/// A leaf outside the face or the solve's domain is no cull here: no hit there counts.
+/// whose guesses ran, and the strips of the leaves and subtrees it culled by the line's
+/// distance or parameter (a slab or sphere test of boxes, no proof), each the culled
+/// domain met with the solve's, for [`certified_line::enclose_strip`]. A leaf outside the
+/// face or the solve's domain is no cull here: no hit there counts.
 #[derive(Debug, Clone, PartialEq)]
 struct Kept<O> {
     leaves: Vec<CertifiedLeaf<O>>,
-    culled: usize,
+    /// The culled strips.
+    strips: Vec<Extent2d>,
+    /// Culls whose domain could not be placed (a subtree's node with no domain in the
+    /// cache): nothing encloses them, and the whole line is undecided.
+    unplaced: usize,
 }
 
 impl<O> Default for Kept<O> {
     fn default() -> Self {
         Self {
             leaves: Vec::new(),
-            culled: 0,
+            strips: Vec::new(),
+            unplaced: 0,
         }
     }
 }
 
-/// Counts one cull of `keep` (when kept).
-fn count_cull<O>(keep: &mut Option<&mut Kept<O>>) {
+/// Keeps the culled leaf `domain` (already met with the solve's) as a strip of `keep`
+/// (when kept).
+fn keep_strip<O>(keep: &mut Option<&mut Kept<O>>, domain: Extent2d) {
     if let Some(kept) = keep.as_deref_mut() {
-        kept.culled = kept.culled.saturating_add(1);
+        kept.strips.push(domain);
     }
+}
+
+/// Where a culled subtree's strip lies (not upstream).
+enum CullStrip {
+    /// Its node's domain met with the solve's.
+    At(Extent2d),
+    /// Outside the solve's domain, or a sliver of it, as a leaf there is: no cull.
+    Outside,
+    /// Its node has no domain in the cache.
+    Unplaced,
 }
 
 /// Read-only state of one leaf solve.
@@ -458,8 +477,8 @@ impl<'t, 's, O: SolutionObject + 't> LsiGlobalSolver<'t, 's, O> {
     }
 
     /// [`LsiGlobalSolver::local_solve_branch`], the leaf pushed to `keep` (when given)
-    /// as its guesses start: the leaves [`CertifiedLsi::certified_pass`] searches; and a
-    /// leaf culled by the line's distance or parameter counted there.
+    /// as its guesses start: the leaves [`CertifiedLsi::certified_pass`] searches; and the
+    /// domain of a leaf culled by the line's distance or parameter kept there as a strip.
     #[allow(clippy::too_many_lines)]
     fn local_solve_branch_keeping(
         &mut self,
@@ -560,7 +579,7 @@ impl<'t, 's, O: SolutionObject + 't> LsiGlobalSolver<'t, 's, O> {
             box_hit(&Ok(bbox.intersect_line(self.line_point, self.line_vector)?))
         else {
             // no work - no BBox intersection
-            count_cull(&mut keep);
+            keep_strip(&mut keep, uv_domain);
             return Ok(false);
         };
 
@@ -569,13 +588,13 @@ impl<'t, 's, O: SolutionObject + 't> LsiGlobalSolver<'t, 's, O> {
             pseudo_box.intersect_line(self.line_point, self.line_vector)?
         )) else {
             // no work - no Pseudo intersection
-            count_cull(&mut keep);
+            keep_strip(&mut keep, uv_domain);
             return Ok(false);
         };
 
         // no work - BBox/Pseudo intersection segments don't overlap
         if max2(bbox_enter, pseudo_enter) > min2(bbox_exit, pseudo_exit) {
-            count_cull(&mut keep);
+            keep_strip(&mut keep, uv_domain);
             return Ok(false);
         }
 
@@ -591,7 +610,7 @@ impl<'t, 's, O: SolutionObject + 't> LsiGlobalSolver<'t, 's, O> {
             bound_ivl = match bound_ivl.intersect(line_ivl) {
                 Ok(i) => i,
                 Err(e) if !e.is_unported_or_cancelled() => {
-                    count_cull(&mut keep);
+                    keep_strip(&mut keep, uv_domain);
                     return Ok(false);
                 }
                 Err(_) => Extent1d::new(),
@@ -601,7 +620,7 @@ impl<'t, 's, O: SolutionObject + 't> LsiGlobalSolver<'t, 's, O> {
         // when firing rays only look at positive line parameters
         if self.ray_fire && bound_ivl.max() <= 0.0 {
             // no work - ray casting and no positive intersection segment
-            count_cull(&mut keep);
+            keep_strip(&mut keep, uv_domain);
             return Ok(false);
         }
 
@@ -643,7 +662,7 @@ impl<'t, 's, O: SolutionObject + 't> LsiGlobalSolver<'t, 's, O> {
         // no work - if given, m_cpLineInterval doesn't overlap sBoxIvl
         if let Some(line_ivl) = &self.line_interval {
             if line_ivl.are_disjoint(&bound_ivl, 0.0) {
-                count_cull(&mut keep);
+                keep_strip(&mut keep, uv_domain);
                 return Ok(false);
             }
         }
@@ -879,6 +898,32 @@ impl<'t, 's, O: SolutionObject + 't> LsiGlobalSolver<'t, 's, O> {
         Ok(false)
     }
 
+    /// Where the strip of the subtree `branch` lies, pruned by its sphere bound (not
+    /// upstream): its surface node's domain trimmed to the solve's as a leaf's is (kept whole
+    /// within a rounding of it), outside it where a leaf there would have no work.
+    fn branch_strip(&self, branch: &Branch) -> CullStrip {
+        let (Some(cache), Some(id)) = (self.surface_cache, branch.first().copied().flatten())
+        else {
+            return CullStrip::Unplaced;
+        };
+        let Ok(aux) = cache.aux(id) else {
+            return CullStrip::Unplaced;
+        };
+        let domain = aux.uv_domain;
+        if domain.are_disjoint(&self.uv_domain, 0.0) {
+            return CullStrip::Outside;
+        }
+        if domain.is_contained_by(&self.uv_domain, EFF_ZERO) {
+            return CullStrip::At(domain);
+        }
+        match domain.intersect(&self.uv_domain) {
+            Ok(d) if !are_same(d.max().x, d.min().x) && !are_same(d.max().y, d.min().y) => {
+                CullStrip::At(d)
+            }
+            _ => CullStrip::Outside,
+        }
+    }
+
     /// Whether a solution of the solve so far stands for the certified `root`, whose
     /// line parameter is `t`: a point solution within `reach` (the tolerance) of it along
     /// the line, or in the `(u, v)` box the root is the only one in (a regular box holds
@@ -945,10 +990,16 @@ impl<'t, 's, O: SolutionObject + 't> LsiGlobalSolver<'t, 's, O> {
             tol,
         };
         let leaves = &kept.leaves;
-        let domains: Vec<Extent2d> = leaves.iter().map(|job| job.domain).collect();
+        // the leaves and the culled strips: what lies across each one's sides
+        let domains: Vec<Extent2d> = leaves
+            .iter()
+            .map(|job| job.domain)
+            .chain(kept.strips.iter().copied())
+            .collect();
         let sides = certified_line::leaf_sides(&domains, &self.uv_domain);
         let mut searched: Vec<certified_line::SearchedLeaf> = Vec::new();
-        // the records the components read, bounded (`certified_line::MAX_SOLVE_BOXES`)
+        // the records the drop and the components read, bounded
+        // (`certified_line::MAX_SOLVE_BOXES`)
         let mut records = 0_usize;
         let mut over_budget = false;
         for (job, job_sides) in leaves.iter().zip(&sides) {
@@ -996,19 +1047,55 @@ impl<'t, 's, O: SolutionObject + 't> LsiGlobalSolver<'t, 's, O> {
             searched.push(certified_line::SearchedLeaf {
                 domain: job.domain,
                 stop: found.stop,
-                // (past the bound the records are not kept: the components are not built)
-                floor: if over_budget { Vec::new() } else { found.floor },
+                // (past the bound the records are not kept, and never read as absence)
+                floor: (!over_budget).then_some(found.floor),
                 roots: found.roots,
+                strip: false,
+            });
+        }
+        for strip in &kept.strips {
+            if over_budget {
+                // (past the bound nothing is read of a strip: the components are not built)
+                searched.push(certified_line::SearchedLeaf {
+                    domain: *strip,
+                    stop: certified_line::Stop::NotRun,
+                    floor: None,
+                    roots: Vec::new(),
+                    strip: true,
+                });
+                continue;
+            }
+            let found =
+                certified_line::enclose_strip(net, &line, strip, self.base.cancel.as_ref())?;
+            k.work_counters
+                .add_line_strip(u64::try_from(found.boxes).unwrap_or(u64::MAX), found.stop);
+            records = records.saturating_add(found.floor.len());
+            over_budget |= records > certified_line::MAX_SOLVE_BOXES;
+            searched.push(certified_line::SearchedLeaf {
+                domain: *strip,
+                stop: found.stop,
+                floor: (!over_budget).then_some(found.floor),
+                roots: Vec::new(),
+                strip: true,
             });
         }
         let components = if over_budget {
             certified_line::Components::over_budget()
         } else {
+            let drops = certified_line::drop_fenced(
+                net,
+                &line,
+                &mut searched,
+                &sides,
+                self.base.cancel.as_ref(),
+                certified_line::MAX_DROP_ENCLOSURES,
+            )?;
+            k.work_counters.add_line_drops(&drops);
             certified_line::components(&searched, &sides, span)
         };
         let at_limit = searched
             .iter()
-            .any(|l| l.stop == certified_line::Stop::AtLimit);
+            .any(|l| !l.strip && l.stop == certified_line::Stop::AtLimit);
         k.work_counters.add_line_solve(
             u64::try_from(components.list.len()).unwrap_or(u64::MAX),
             at_limit,
@@ -1016,7 +1103,7 @@ impl<'t, 's, O: SolutionObject + 't> LsiGlobalSolver<'t, 's, O> {
         Ok(certified_line::side_record(
             &searched,
             &components,
-            kept.culled > 0,
+            kept.unplaced > 0,
             span,
         ))
     }
@@ -1257,9 +1344,13 @@ impl<'t, O: SolutionObject + 't> GlobalSolve<'t, O> for CertifiedLsi<'t, '_, O> 
 
     fn branch_may_contain_answers(&mut self, branch: &Branch) -> Result<bool> {
         let may = self.solver.may_contain_answers(branch)?;
-        // (a subtree pruned by its sphere bound is a cull: no proof)
+        // (a subtree pruned by its sphere bound is a cull: no proof; its strip is enclosed)
         if !may && self.net.is_some() {
-            self.kept.culled = self.kept.culled.saturating_add(1);
+            match self.solver.branch_strip(branch) {
+                CullStrip::At(domain) => self.kept.strips.push(domain),
+                CullStrip::Outside => {}
+                CullStrip::Unplaced => self.kept.unplaced = self.kept.unplaced.saturating_add(1),
+            }
         }
         Ok(may)
     }
@@ -2314,6 +2405,35 @@ mod tests {
         assert!(k.work_counters.line_leaves_at_limit() > 0);
         assert!(k.work_counters.line_leaves_finished() > 0);
         assert_eq!(k.work_counters.line_leaves_not_run(), 0);
+    }
+
+    /// A line along z inside the torus's hole, 24 from its axis (1 inside its inner
+    /// equator), passes no nearer than 1 to the surface. The traversal culls by the line's
+    /// distance every leaf and subtree whose box the line misses: a slab or sphere test,
+    /// which made the side record undecided over the whole line until the culled strips were
+    /// enclosed. Each strip is now excluded by distance, and the record is complete.
+    #[test]
+    fn a_solve_whose_culled_strips_are_excluded_is_complete() {
+        let k = Kernel::default();
+        let s = torus(&k);
+        let domain = s.natural_uv_domain_with_nurb(&k).unwrap();
+        k.work_counters.reset();
+        let sols = s
+            .base_global_line_intersect::<H>(
+                &k,
+                H(0),
+                &domain,
+                Vec3::new(0.0, 24.0, -10.0),
+                Vec3::new(0.0, 0.0, 20.0),
+                None,
+                false,
+                1.0e-6,
+            )
+            .unwrap();
+        assert_eq!(sols.len(), 0);
+        assert!(k.work_counters.line_strips() > 0);
+        assert_eq!(k.work_counters.line_strips_at_limit(), 0);
+        assert_eq!(sols.side_record(), &SideRecord::Complete);
     }
 
     /// The side record a solve returns is in the line's own parameter: the solver runs on

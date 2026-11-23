@@ -213,6 +213,12 @@ pub struct WorkCounters {
     line_solves: Cell<u64>,
     line_solves_at_limit: Cell<u64>,
     line_components: Cell<u64>,
+    line_strips: Cell<u64>,
+    line_strip_boxes: Cell<u64>,
+    line_strips_at_limit: Cell<u64>,
+    line_drop_enclosures: Cell<u64>,
+    line_boxes_dropped: Cell<u64>,
+    line_boxes_dropped_across: Cell<u64>,
 }
 
 impl WorkCounters {
@@ -451,6 +457,48 @@ impl WorkCounters {
         self.line_components.get()
     }
 
+    /// Culled strips the certified line pass enclosed: leaves and subtrees the traversal
+    /// culled by the line's distance or parameter (`certified_line`, "Culled strips"). Not
+    /// the fork's.
+    #[must_use]
+    pub fn line_strips(&self) -> u64 {
+        self.line_strips.get()
+    }
+
+    /// Enclosures the culled strips made, over all strips. Not the fork's.
+    #[must_use]
+    pub fn line_strip_boxes(&self) -> u64 {
+        self.line_strip_boxes.get()
+    }
+
+    /// Culled strips that ran out of their budget, keeping what they left undecided. Not the
+    /// fork's.
+    #[must_use]
+    pub fn line_strips_at_limit(&self) -> u64 {
+        self.line_strips_at_limit.get()
+    }
+
+    /// Side enclosures the solves' drops made (`certified_line`, "The drop"). Not the
+    /// fork's.
+    #[must_use]
+    pub fn line_drop_enclosures(&self) -> u64 {
+        self.line_drop_enclosures.get()
+    }
+
+    /// Boxes with no root the solves' drops proved farther than the tolerance and dropped.
+    /// Not the fork's.
+    #[must_use]
+    pub fn line_boxes_dropped(&self) -> u64 {
+        self.line_boxes_dropped.get()
+    }
+
+    /// Of [`WorkCounters::line_boxes_dropped`], those in sets that read another leaf's
+    /// records across a leaf's border. Not the fork's.
+    #[must_use]
+    pub fn line_boxes_dropped_across(&self) -> u64 {
+        self.line_boxes_dropped_across.get()
+    }
+
     /// Curved intersection pieces classified as running along a face edge
     /// (`CurveClassification::classify_edge_interval`, WR-305): each one certified within the
     /// intersection tolerance of it as a whole (`curve_runs_along`, or the worst-first bound of
@@ -521,6 +569,12 @@ impl WorkCounters {
         self.line_solves.set(0);
         self.line_solves_at_limit.set(0);
         self.line_components.set(0);
+        self.line_strips.set(0);
+        self.line_strip_boxes.set(0);
+        self.line_strips_at_limit.set(0);
+        self.line_drop_enclosures.set(0);
+        self.line_boxes_dropped.set(0);
+        self.line_boxes_dropped_across.set(0);
         self.curved_edge_runs.set(0);
         self.blends_recertified.set(0);
         self.vertex_drops.set(0);
@@ -674,6 +728,44 @@ impl WorkCounters {
             self.line_exclusions_out_of_budget
                 .set(self.line_exclusions_out_of_budget.get().saturating_add(1));
         }
+    }
+
+    /// Counts one culled strip: the enclosures it made, and whether it ran out of its
+    /// budget.
+    pub(crate) fn add_line_strip(
+        &self,
+        boxes: u64,
+        stop: crate::surface::surface::certified_line::Stop,
+    ) {
+        use crate::surface::surface::certified_line::Stop;
+        self.line_strips
+            .set(self.line_strips.get().saturating_add(1));
+        self.line_strip_boxes
+            .set(self.line_strip_boxes.get().saturating_add(boxes));
+        if stop == Stop::AtLimit {
+            self.line_strips_at_limit
+                .set(self.line_strips_at_limit.get().saturating_add(1));
+        }
+    }
+
+    /// Counts one solve's drop: its side enclosures and the boxes it dropped.
+    pub(crate) fn add_line_drops(&self, drops: &crate::surface::surface::certified_line::Drops) {
+        let n = |x: usize| u64::try_from(x).unwrap_or(u64::MAX);
+        self.line_drop_enclosures.set(
+            self.line_drop_enclosures
+                .get()
+                .saturating_add(n(drops.enclosures)),
+        );
+        self.line_boxes_dropped.set(
+            self.line_boxes_dropped
+                .get()
+                .saturating_add(n(drops.no_root.saturating_add(drops.edge))),
+        );
+        self.line_boxes_dropped_across.set(
+            self.line_boxes_dropped_across
+                .get()
+                .saturating_add(n(drops.across)),
+        );
     }
 
     /// Counts one solve the certified line pass searched: its components, and whether a
