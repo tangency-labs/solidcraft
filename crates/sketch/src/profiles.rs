@@ -1161,41 +1161,81 @@ impl ProfileOrder {
 /// For each profile number `k` in `order`, its index into `profiles`, the profiles of `sk` as
 /// [`find_profiles`] gives them; `None` past the profiles, or where a profile of the other
 /// numbering has no match. [`ProfileOrder::ExactCrossings`] searches the sketch again with the
-/// older corners (cached like any search) and matches each profile found to the one with the
-/// same outer curves and holes nearest to its centroid.
+/// older corners and matches each profile found to the one with the same outer curves and number
+/// of holes (the distance between centroids plus the difference in area only breaks ties among
+/// those); the result is kept once per sketch, by a fingerprint of all its curves.
 pub fn profiles_in_order(sk: &Sketch, profiles: &[Profile], order: ProfileOrder) -> Vec<Option<usize>> {
     match order {
         ProfileOrder::Current => (0..profiles.len()).map(Some).collect(),
         ProfileOrder::ExactCrossings => {
-            let older = search_with(sk, MAX_EDGES, true, true, ArcCorner::Intersection).profiles;
-            let key = |p: &Profile| {
-                let mut ids = p.outer_curves.clone();
-                ids.sort();
-                (ids, p.region.holes.len())
-            };
-            let mut by_key: std::collections::HashMap<(Vec<String>, usize), Vec<usize>> = std::collections::HashMap::new();
-            for (i, p) in profiles.iter().enumerate() {
-                by_key.entry(key(p)).or_default().push(i);
+            // Kept once per sketch: every evaluation of every pick in the older numbering asks.
+            let all: Vec<usize> = (0..sk.curves.len()).collect();
+            let key = fingerprint(sk, &all, MAX_EDGES) ^ 0x1916_3000_0000_0000_0000_0000_0000_0002;
+            if let Some(hit) = numbering_cache::get(key).filter(|n| n.len() == profiles.len()) {
+                return hit.as_ref().clone();
             }
-            let mut taken = vec![false; profiles.len()];
-            older
-                .iter()
-                .map(|o| {
-                    let best = by_key
-                        .get(&key(o))
-                        .into_iter()
-                        .flatten()
-                        .filter(|i| !taken.get(**i).copied().unwrap_or(true))
-                        .filter_map(|&i| profiles.get(i).map(|p| (i, p.centroid.dist(o.centroid) + (p.area - o.area).abs())))
-                        .min_by(|a, b| a.1.total_cmp(&b.1))
-                        .map(|(i, _)| i);
-                    if let Some(slot) = best.and_then(|i| taken.get_mut(i)) {
-                        *slot = true;
-                    }
-                    best
-                })
-                .collect()
+            let numbered = older_numbering(sk, profiles);
+            numbering_cache::put(key, &numbered);
+            numbered
         }
+    }
+}
+
+/// The older numbering's search and match ([`profiles_in_order`]), uncached.
+fn older_numbering(sk: &Sketch, profiles: &[Profile]) -> Vec<Option<usize>> {
+    let older = search_with(sk, MAX_EDGES, true, true, ArcCorner::Intersection).profiles;
+    let key = |p: &Profile| {
+        let mut ids = p.outer_curves.clone();
+        ids.sort();
+        (ids, p.region.holes.len())
+    };
+    let mut by_key: std::collections::HashMap<(Vec<String>, usize), Vec<usize>> = std::collections::HashMap::new();
+    for (i, p) in profiles.iter().enumerate() {
+        by_key.entry(key(p)).or_default().push(i);
+    }
+    let mut taken = vec![false; profiles.len()];
+    older
+        .iter()
+        .map(|o| {
+            let best = by_key
+                .get(&key(o))
+                .into_iter()
+                .flatten()
+                .filter(|i| !taken.get(**i).copied().unwrap_or(true))
+                .filter_map(|&i| profiles.get(i).map(|p| (i, p.centroid.dist(o.centroid) + (p.area - o.area).abs())))
+                .min_by(|a, b| a.1.total_cmp(&b.1))
+                .map(|(i, _)| i);
+            if let Some(slot) = best.and_then(|i| taken.get_mut(i)) {
+                *slot = true;
+            }
+            best
+        })
+        .collect()
+}
+
+/// [`profiles_in_order`]'s older numberings by a fingerprint of the whole sketch, bounded like
+/// the island cache.
+mod numbering_cache {
+    use std::collections::HashMap;
+    use std::sync::{Arc, Mutex, OnceLock};
+
+    const MAX_ENTRIES: usize = 256;
+
+    fn cache() -> &'static Mutex<HashMap<u128, Arc<Vec<Option<usize>>>>> {
+        static CACHE: OnceLock<Mutex<HashMap<u128, Arc<Vec<Option<usize>>>>>> = OnceLock::new();
+        CACHE.get_or_init(Mutex::default)
+    }
+
+    pub(super) fn get(key: u128) -> Option<Arc<Vec<Option<usize>>>> {
+        cache().lock().ok()?.get(&key).cloned()
+    }
+
+    pub(super) fn put(key: u128, numbered: &[Option<usize>]) {
+        let Ok(mut c) = cache().lock() else { return };
+        if c.len() >= MAX_ENTRIES {
+            c.clear();
+        }
+        c.insert(key, Arc::new(numbered.to_vec()));
     }
 }
 
