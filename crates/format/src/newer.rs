@@ -12,7 +12,8 @@
 //! saved ([`NewerFile::restore_into`]), as they came. What can't be put back because the file was
 //! changed around it is what `restore_into` returns.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap, HashSet};
+use std::fmt;
 use std::sync::Arc;
 
 use serde_json::{Map, Value, json};
@@ -21,6 +22,15 @@ use crate::Newer;
 
 /// The most sections left out one at a time to find the one a file can't be read with.
 const MAX_SECTION_TRIES: usize = 64;
+
+/// The most bytes of the lines that name the fields a comparison keeps, and of those that name what
+/// couldn't go back on saving. A line names a field by its path (`components[Part 1].colour`), with
+/// every name and key on the way whole. A real design's lines take far less. Most are under 100
+/// bytes, and a line through a face whose name has 1 MiB (the longest face name a design reads
+/// back) fits 15 times. Past it the rest are counted in one more line (`12 more fields`), so a
+/// file of huge names or of millions of fields can't make naming them ask for more memory than
+/// this.
+const NAMED_BYTES: usize = 16 << 20;
 
 /// What the file says and holds that this build doesn't read.
 #[derive(Clone, Debug, Default, PartialEq)]
@@ -155,23 +165,26 @@ impl NewerFile {
     /// read of it (`known`, its typed record written out): what `known` lacks is kept and named.
     /// An object whose `type` is `placeholder_tag` (an element the app kept whole) and the fields
     /// in `container_only` (what a container adds beside the file's own) are not compared; nor
-    /// are the top level's `format` and `format_pending`.
+    /// are the top level's `format` and `format_pending`. The fields are named while their lines
+    /// fit in [`NAMED_BYTES`], and the rest are counted.
     pub fn compare(&mut self, file: &Value, known: &Value, placeholder_tag: &str, container_only: &[&str]) {
-        let mut paths = Vec::new();
-        self.kept = vanished(file, known, "", &mut paths, placeholder_tag, container_only);
-        self.not_understood.extend(paths);
+        let mut walk = Compare::new(placeholder_tag, container_only);
+        self.kept = vanished(file, known, &TOP, &mut walk);
+        self.not_understood.extend(walk.named.lines("field", "fields"));
         for section in &mut self.sections {
             section.empty = known.get(&section.key).cloned();
         }
     }
 
     /// Write back what was kept of the file into `value`, the file as this build writes it.
-    /// Returns what couldn't go back, because the file was changed around it.
+    /// Returns what couldn't go back, because the file was changed around it, named while the
+    /// lines fit in [`NAMED_BYTES`] and then counted.
     pub fn restore_into(&self, value: &mut Value) -> Vec<String> {
-        let mut lost = Vec::new();
+        let mut put = Restore::default();
         if let Some(kept) = &self.kept {
-            apply(kept, value, "", &mut lost);
+            apply(kept, value, &TOP, &mut put);
         }
+        let mut lost = put.named.lines("field or element", "fields or elements");
         if let Some(top) = value.as_object_mut() {
             for section in &self.sections {
                 if top.get(&section.key) == section.empty.as_ref() {
@@ -180,11 +193,25 @@ impl NewerFile {
                     lost.push(format!("section `{}`, replaced by what was edited here", section.key));
                 }
             }
+            // The names in each list that elements go back into, made the first time and grown with
+            // each element put back, so the list isn't looked through again for each element.
+            let mut names: HashMap<&str, HashSet<Value>> = HashMap::new();
             for (key, element) in &self.elements {
                 let name = element.get("name");
-                match top.entry(key.clone()).or_insert_with(|| json!([])) {
-                    Value::Array(list) if name.is_none() || !list.iter().any(|x| x.get("name") == name) => list.push(element.clone()),
-                    _ => lost.push(format!("`{key}` element {}, replaced by what was made here", name.and_then(Value::as_str).unwrap_or("unnamed"))),
+                let back = match top.entry(key.clone()).or_insert_with(|| json!([])) {
+                    Value::Array(list) => {
+                        let taken = names.entry(key.as_str()).or_insert_with(|| list.iter().filter_map(|x| x.get("name")).cloned().collect());
+                        // One whose name the list has already stays out.
+                        let free = name.is_none_or(|name| taken.insert(name.clone()));
+                        if free {
+                            list.push(element.clone());
+                        }
+                        free
+                    }
+                    _ => false,
+                };
+                if !back {
+                    lost.push(format!("`{key}` element {}, replaced by what was made here", name.and_then(Value::as_str).unwrap_or("unnamed")));
                 }
             }
         }
@@ -284,28 +311,42 @@ pub fn looks_default(v: &Value) -> bool {
     }
 }
 
-/// What `raw` has that `known`, what was read of it, doesn't. `paths` gets those fields' names.
-fn vanished(raw: &Value, known: &Value, path: &str, paths: &mut Vec<String>, placeholder_tag: &str, container_only: &[&str]) -> Option<Kept> {
+/// A comparison of a file with what was read of it ([`NewerFile::compare`]).
+struct Compare<'c> {
+    placeholder_tag: &'c str,
+    container_only: &'c [&'c str],
+    named: Named,
+    lists: Lists,
+}
+
+impl<'c> Compare<'c> {
+    fn new(placeholder_tag: &'c str, container_only: &'c [&'c str]) -> Compare<'c> {
+        Compare { placeholder_tag, container_only, named: Named::default(), lists: Lists::default() }
+    }
+}
+
+/// What `raw` has that `known`, what was read of it, doesn't. `walk` names those fields.
+fn vanished(raw: &Value, known: &Value, path: &Path<'_>, walk: &mut Compare<'_>) -> Option<Kept> {
     match (raw, known) {
         (Value::Object(raw), Value::Object(known)) => {
-            if known.get("type").and_then(Value::as_str) == Some(placeholder_tag) {
+            if known.get("type").and_then(Value::as_str) == Some(walk.placeholder_tag) {
                 return None;
             }
             let mut kept = BTreeMap::new();
             for (key, value) in raw {
-                if container_only.contains(&key.as_str()) || (path.is_empty() && matches!(key.as_str(), "format" | "format_pending")) {
+                if walk.container_only.contains(&key.as_str()) || (path.blank && matches!(key.as_str(), "format" | "format_pending")) {
                     continue;
                 }
-                let inner = if path.is_empty() { key.clone() } else { format!("{path}.{key}") };
+                let inner = path.then(Step::Key(key));
                 match known.get(key) {
                     None => {
                         if !looks_default(value) {
-                            paths.push(format!("field `{inner}`"));
+                            walk.named.add(format_args!("field `{inner}`"));
                         }
                         kept.insert(key.clone(), Kept::Field(value.clone()));
                     }
                     Some(known) => {
-                        if let Some(k) = vanished(value, known, &inner, paths, placeholder_tag, container_only) {
+                        if let Some(k) = vanished(value, known, &inner, walk) {
                             kept.insert(key.clone(), k);
                         }
                     }
@@ -314,19 +355,26 @@ fn vanished(raw: &Value, known: &Value, path: &str, paths: &mut Vec<String>, pla
             (!kept.is_empty()).then_some(Kept::Fields(kept))
         }
         (Value::Array(raw), Value::Array(known)) => {
+            // Nothing to look for, or nothing to find it in, so nothing is kept.
+            if raw.is_empty() || known.is_empty() {
+                return None;
+            }
+            // Taken when an element looks for its partner by id or name ([`Lists::find`]).
+            let mut partners = None;
             let mut items = Vec::new();
             for (at, element) in raw.iter().enumerate() {
                 let anchor = anchor_of(element).unwrap_or(Anchor::Index { at, of: raw.len() });
-                let Some(partner) = find(known, &anchor) else { continue };
-                let label = match (element.get("name").and_then(Value::as_str), &anchor) {
-                    (Some(name), _) => format!("{path}[{name}]"),
-                    (None, Anchor::Id(id)) => format!("{path}[{id}]"),
-                    _ => format!("{path}[{at}]"),
+                let Some(partner) = walk.lists.find(&mut partners, known, &anchor).and_then(|place| known.get(place)) else { continue };
+                let step = match (element.get("name").and_then(Value::as_str), &anchor) {
+                    (Some(name), _) => Step::Name(name),
+                    (None, Anchor::Id(id)) => Step::Id(*id),
+                    _ => Step::At(at),
                 };
-                if let Some(k) = vanished(element, partner, &label, paths, placeholder_tag, container_only) {
+                if let Some(k) = vanished(element, partner, &path.then(step), walk) {
                     items.push((anchor, k));
                 }
             }
+            walk.lists.keep(known, partners);
             (!items.is_empty()).then_some(Kept::Items(items))
         }
         _ => None,
@@ -340,58 +388,254 @@ fn anchor_of(element: &Value) -> Option<Anchor> {
     element.get("name").and_then(Value::as_str).map(|name| Anchor::Name(name.to_string()))
 }
 
-fn find<'a>(list: &'a [Value], anchor: &Anchor) -> Option<&'a Value> {
-    match anchor {
-        Anchor::Id(id) => list.iter().find(|x| x.get("id").and_then(Value::as_u64) == Some(*id)),
-        Anchor::Name(name) => list.iter().find(|x| x.get("name").and_then(Value::as_str) == Some(name)),
-        Anchor::Index { at, of } => (list.len() == *of).then(|| list.get(*at)).flatten(),
+/// Where in a list the first element with each id, and the first with each name, is. [`Lists`]
+/// makes it the first time an element looks in a long list by id or name, so the list isn't
+/// looked through from the start for each element that looks for its partner there.
+struct Partners {
+    ids: HashMap<u64, usize>,
+    names: HashMap<String, usize>,
+}
+
+impl Partners {
+    fn of(list: &[Value]) -> Partners {
+        let mut partners = Partners { ids: HashMap::new(), names: HashMap::new() };
+        for (at, element) in list.iter().enumerate() {
+            partners.add(at, element.get("id").and_then(Value::as_u64), element.get("name").and_then(Value::as_str));
+        }
+        partners
+    }
+
+    /// Count `id` and `name`, which the element at `at` has, where no element before it has them.
+    fn add(&mut self, at: usize, id: Option<u64>, name: Option<&str>) {
+        if let Some(id) = id {
+            self.ids.entry(id).and_modify(|first| *first = (*first).min(at)).or_insert(at);
+        }
+        if let Some(name) = name {
+            match self.names.get_mut(name) {
+                Some(first) => *first = (*first).min(at),
+                None => {
+                    self.names.insert(name.to_string(), at);
+                }
+            }
+        }
     }
 }
 
-fn find_mut<'a>(list: &'a mut [Value], anchor: &Anchor) -> Option<&'a mut Value> {
-    match anchor {
-        Anchor::Id(id) => list.iter_mut().find(|x| x.get("id").and_then(Value::as_u64) == Some(*id)),
-        Anchor::Name(name) => list.iter_mut().find(|x| x.get("name").and_then(Value::as_str) == Some(name)),
-        Anchor::Index { at, of } => (list.len() == *of).then(|| list.get_mut(*at)).flatten(),
+/// A list this long or shorter is looked through for an id or a name, as before lists were
+/// indexed, and gets no index. That costs each element looking at most this many comparisons, and
+/// saves an index and a place in the store for each of the many short lists a design holds, whose
+/// index would take about as much room as the list.
+const SEARCHED_LEN: usize = 16;
+
+/// The [`Partners`] of each long list looked in by id or name, made the first time and kept for
+/// the next, by where the list's first element is. Comparing changes nothing, and putting kept
+/// fields back only adds fields to elements, so no list's elements move or are dropped while they
+/// are used, and that tells the lists apart. A list that many elements share as their partner
+/// (they repeat one id or name) is then indexed once, not once for each of them. A list no element
+/// looks in by id or name, such as a list of numbers, and a list of at most [`SEARCHED_LEN`]
+/// elements are neither indexed nor stored.
+#[derive(Default)]
+struct Lists {
+    partners: HashMap<*const Value, Partners>,
+    /// How many lists were indexed.
+    #[cfg(test)]
+    indexed: usize,
+}
+
+impl Lists {
+    /// Where in `list` the element `anchor` names is. That is the first element with its id, or
+    /// the first with its name, or the one at its place while the list keeps its length. A place
+    /// needs only the list's length, and a short list is looked through. In a longer one an id or
+    /// a name takes the list's partners into `partners` the first time, from the store or made, to
+    /// be given back with [`Lists::keep`].
+    fn find(&mut self, partners: &mut Option<Partners>, list: &[Value], anchor: &Anchor) -> Option<usize> {
+        match anchor {
+            Anchor::Index { at, of } => (list.len() == *of && *at < list.len()).then_some(*at),
+            Anchor::Id(id) if list.len() <= SEARCHED_LEN => list.iter().position(|x| x.get("id").and_then(Value::as_u64) == Some(*id)),
+            Anchor::Name(name) if list.len() <= SEARCHED_LEN => {
+                list.iter().position(|x| x.get("name").and_then(Value::as_str) == Some(name.as_str()))
+            }
+            Anchor::Id(id) => partners.get_or_insert_with(|| self.take(list)).ids.get(id).copied(),
+            Anchor::Name(name) => partners.get_or_insert_with(|| self.take(list)).names.get(name).copied(),
+        }
+    }
+
+    /// The partners of `list`, out of the store until [`Lists::keep`] gives them back.
+    fn take(&mut self, list: &[Value]) -> Partners {
+        if let Some(partners) = list.first().and_then(|first| self.partners.remove(&std::ptr::from_ref(first))) {
+            return partners;
+        }
+        #[cfg(test)]
+        {
+            self.indexed += 1;
+        }
+        Partners::of(list)
+    }
+
+    /// Give back the partners of `list` taken while it was looked in, if any were.
+    fn keep(&mut self, list: &[Value], partners: Option<Partners>) {
+        if let (Some(first), Some(partners)) = (list.first(), partners) {
+            self.partners.insert(std::ptr::from_ref(first), partners);
+        }
     }
 }
 
-/// Put the kept fields back. An element that is gone was deleted here, its fields with it; one
-/// whose place can't be told any more, and a field whose record is gone, go into `lost`.
-fn apply(kept: &Kept, value: &mut Value, path: &str, lost: &mut Vec<String>) {
+/// Where a value is in the file (`components[Part 1].colour`), as the path it goes on from and its
+/// last step. It borrows its keys and names, so going a level down copies nothing, and it is
+/// written out only for a line that names it.
+#[derive(Clone, Copy)]
+struct Path<'a> {
+    last: Option<(&'a Path<'a>, Step<'a>)>,
+    /// Whether it is written as nothing (the top, or empty keys only), so a key after it takes no
+    /// dot.
+    blank: bool,
+}
+
+/// The top of the file.
+const TOP: Path<'static> = Path { last: None, blank: true };
+
+/// One step down a [`Path`]. A key, or an element of a list by its name, its id or its place.
+#[derive(Clone, Copy)]
+enum Step<'a> {
+    Key(&'a str),
+    Name(&'a str),
+    Id(u64),
+    At(usize),
+}
+
+impl<'a> Path<'a> {
+    fn then(&'a self, step: Step<'a>) -> Path<'a> {
+        Path { last: Some((self, step)), blank: self.blank && matches!(step, Step::Key("")) }
+    }
+}
+
+impl fmt::Display for Path<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let Some((up, step)) = self.last else { return Ok(()) };
+        fmt::Display::fmt(up, f)?;
+        match step {
+            Step::Key(key) if up.blank => f.write_str(key),
+            Step::Key(key) => write!(f, ".{key}"),
+            Step::Name(name) => write!(f, "[{name}]"),
+            Step::Id(id) => write!(f, "[{id}]"),
+            Step::At(at) => write!(f, "[{at}]"),
+        }
+    }
+}
+
+/// Lines that name fields (or elements that couldn't go back), while they fit in [`NAMED_BYTES`]
+/// together, and how many more there were.
+#[derive(Default)]
+struct Named {
+    lines: Vec<String>,
+    bytes: usize,
+    more: usize,
+}
+
+impl Named {
+    /// Name a field with `line`, or count it when it doesn't fit after the lines before it, and
+    /// count every field after that one too. A line that doesn't fit is written no further than
+    /// the room left, so a huge name in it isn't copied.
+    fn add(&mut self, line: fmt::Arguments<'_>) {
+        if self.more == 0 {
+            let mut room = Room { text: String::new(), left: NAMED_BYTES.saturating_sub(self.bytes) };
+            if fmt::Write::write_fmt(&mut room, line).is_ok() {
+                self.bytes = self.bytes.saturating_add(room.text.len());
+                self.lines.push(room.text);
+                return;
+            }
+        }
+        self.more = self.more.saturating_add(1);
+    }
+
+    /// The lines, and after them how many more there were (`1 more field`, `12 more fields`).
+    fn lines(mut self, one: &str, many: &str) -> Vec<String> {
+        match self.more {
+            0 => {}
+            1 => self.lines.push(format!("1 more {one}")),
+            more => self.lines.push(format!("{more} more {many}")),
+        }
+        self.lines
+    }
+}
+
+/// Text written up to a number of bytes. A piece that would pass them is refused, not copied.
+struct Room {
+    text: String,
+    left: usize,
+}
+
+impl fmt::Write for Room {
+    fn write_str(&mut self, piece: &str) -> fmt::Result {
+        self.left = self.left.checked_sub(piece.len()).ok_or(fmt::Error)?;
+        self.text.push_str(piece);
+        Ok(())
+    }
+}
+
+/// Putting what was kept back into the file as this build writes it ([`NewerFile::restore_into`]).
+#[derive(Default)]
+struct Restore {
+    named: Named,
+    lists: Lists,
+}
+
+/// Put the kept fields back. An element that is gone was deleted here, its fields with it. One
+/// whose place can't be told any more, and a field whose record is gone, are named by `put`.
+fn apply(kept: &Kept, value: &mut Value, path: &Path<'_>, put: &mut Restore) {
     match kept {
         Kept::Field(_) => {}
         Kept::Fields(fields) => {
             let Some(object) = value.as_object_mut() else {
-                lost.push(format!("field `{path}`"));
+                put.named.add(format_args!("field `{path}`"));
                 return;
             };
             for (key, sub) in fields {
-                let inner = if path.is_empty() { key.clone() } else { format!("{path}.{key}") };
+                let inner = path.then(Step::Key(key));
                 match (sub, object.get_mut(key)) {
                     (Kept::Field(v), None) => {
                         object.insert(key.clone(), v.clone());
                     }
                     (Kept::Field(_), Some(_)) => {}
-                    (sub, Some(inner_value)) => apply(sub, inner_value, &inner, lost),
+                    (sub, Some(inner_value)) => apply(sub, inner_value, &inner, put),
                     // The list it was in is empty and not written: its elements were deleted.
                     (Kept::Items(_), None) => {}
-                    (_, None) => lost.push(format!("field `{inner}`")),
+                    (_, None) => put.named.add(format_args!("field `{inner}`")),
                 }
             }
         }
         Kept::Items(items) => {
             let Some(list) = value.as_array_mut() else {
-                lost.push(format!("field `{path}`"));
+                put.named.add(format_args!("field `{path}`"));
                 return;
             };
+            // Taken when an element looks for its partner by id or name ([`Lists::find`]).
+            let mut partners = None;
             for (anchor, sub) in items {
-                match (find_mut(list, anchor), anchor) {
-                    (Some(element), _) => apply(sub, element, path, lost),
-                    (None, Anchor::Index { at, .. }) => lost.push(format!("element {at} of `{path}`")),
+                let found = match put.lists.find(&mut partners, list, anchor) {
+                    Some(place) => list.get_mut(place).map(|element| (place, element)),
+                    None => None,
+                };
+                match (found, anchor) {
+                    (Some((place, element)), _) => {
+                        // Fields only go back where the element has none, so it can gain an id or
+                        // a name but never change one.
+                        let (had_id, had_name) = (element.get("id").is_some(), element.get("name").is_some());
+                        apply(sub, element, path, put);
+                        // A name put back here is found by the elements after it, as it was when
+                        // each of them looked through the list. A short list is looked through
+                        // still, and a long one's index learns it.
+                        let id = element.get("id").filter(|_| !had_id).and_then(Value::as_u64);
+                        let name = element.get("name").filter(|_| !had_name).and_then(Value::as_str).map(str::to_owned);
+                        if list.len() > SEARCHED_LEN && (id.is_some() || name.is_some()) {
+                            partners.get_or_insert_with(|| put.lists.take(list)).add(place, id, name.as_deref());
+                        }
+                    }
+                    (None, Anchor::Index { at, .. }) => put.named.add(format_args!("element {at} of `{path}`")),
                     (None, _) => {}
                 }
             }
+            put.lists.keep(list, partners);
         }
     }
 }
