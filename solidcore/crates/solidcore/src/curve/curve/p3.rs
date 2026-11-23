@@ -26,8 +26,10 @@
 //!   instead of upstream's weighted turns, so reflex corners cannot reverse a planar
 //!   loop's normal (WR-587). An open chain closes by its chord. As the fork's change
 //!   (tangency-labs/smlib be45e8d, unchanged to eaa998a), a failed point evaluation
-//!   returns its status and a zero area is `SM_ERR_INVALID_INPUT` (`SER(Unitize)`).
-//!   The sampling (5 chords per curve, 1 for a two-point curve) is upstream's.
+//!   returns its status and a zero area is `SM_ERR_INVALID_INPUT` (`SER(Unitize)`),
+//!   except that an open chain whose chord-closed area cancels but which spans a plane
+//!   answers that plane's normal, in the sense of its turns. A sample that is not
+//!   finite is `SM_ERR_INVALID_INPUT` (upstream would unitize a NaN). The sampling (5 chords per curve, 1 for a two-point curve) is upstream's.
 //! - **Curve kinds.** `ComputeCrvsNormal` and `CrvsFixGaps` cast every curve to
 //!   `SmBSplineCurve`. `ComputeCrvsNormal` only calls virtual members and the
 //!   non-virtual `SmCurve::IsLinear`, so it takes any [`Curve`]. `CrvsFixGaps` calls
@@ -270,13 +272,16 @@ impl<C1: CurveEvaluate + ?Sized, C2: CurveEvaluate + ?Sized> EvalNFunctions
 /// the sampled polygon's area vector, from 5 chords per curve (1 for a two-point
 /// curve). It follows a concave planar loop's winding, and an open chain is closed by
 /// its chord (WR-587; the fork's be45e8d). Upstream sums the turns between
-/// consecutive chords instead, which a reflex corner can reverse.
+/// consecutive chords instead, which a reflex corner can reverse. An open chain whose
+/// chord-closed area cancels (too short to unitize) but which certainly spans a plane
+/// answers that plane's normal, in the sense of its turns (`open_chain_plane_normal`).
 ///
 /// # Errors
 ///
 /// `SM_ERR` for a single linear curve; those of the control point counts and the
-/// point evaluations; `InvalidInput` (`SM_ERR_INVALID_INPUT`) for a zero area, as the
-/// fork's `SER`s return them.
+/// point evaluations; `InvalidInput` (`SM_ERR_INVALID_INPUT`) for a zero area (a closed
+/// loop enclosing no area, or samples that do not certainly span a plane) or a sample
+/// that is not finite, as the fork's `SER`s return them.
 pub fn compute_crvs_normal(k: &Kernel, curves: &[Curve]) -> Result<Vec3> {
     let mut normal = Vec3::ZERO;
     crvs_normal_into(k, curves, &mut normal)?;
@@ -337,8 +342,7 @@ fn crvs_normal_into(k: &Kernel, curves: &[Curve], normal: &mut Vec3) -> Result<(
 /// [`crvs_normal_into`]'s computation.
 fn area_normal_into(k: &Kernel, curves: &[Curve], normal: &mut Vec3) -> Result<()> {
     *normal = Vec3::ZERO;
-    let mut first: Option<Point3> = None;
-    let mut previous = Vec3::ZERO;
+    let mut samples: Vec<Point3> = Vec::new();
     for curve in curves {
         let domain = curve.natural_interval();
         if curve.is_linear(k, EFF_ZERO, false)?.linear && curves.len() == 1 {
@@ -355,18 +359,107 @@ fn area_normal_into(k: &Kernel, curves: &[Curve], normal: &mut Vec3) -> Result<(
         for j in 0..=count {
             let point =
                 curve.evaluate_point(k, domain.evaluate(f64::from(j) / f64::from(count)))?;
-            if let Some(origin) = first {
+            if let (Some(&origin), Some(&previous)) = (samples.first(), samples.last()) {
                 *normal += (previous - origin).cross(point - origin);
-            } else {
-                first = Some(point);
             }
-            previous = point;
+            samples.push(point);
+        }
+    }
+    // a sample that is not finite has no normal (`Unitize` would pass a NaN on)
+    if !normal.length_squared().is_finite() {
+        *normal = Vec3::Z;
+        return Err(SolidError::invalid_input(
+            OP_NORMAL,
+            "loop normal of a curve with a point that is not finite",
+        ));
+    }
+    if normal.unitize().is_err() {
+        if let Some(plane) = open_chain_plane_normal(&samples) {
+            *normal = plane;
+            return Ok(());
         }
     }
     // SER(crCrvsNormal.Unitize()): SM_ERR_INVALID_INPUT for a zero area
     unitize_written(normal, |_| {
         SolidError::invalid_input(OP_NORMAL, "zero area loop normal")
     })
+}
+
+/// The normal of the plane an OPEN chain of `samples` spans, for a chain whose area
+/// vector (closed by its chord) is too short to unitize: its turns can cancel exactly,
+/// as `(0,0)-(1,1)-(2,-2)-(2,0)` does, though the chain spans a plane. `None` for a
+/// closed chain (its last sample `approx_eq` its first, upstream's test for a closed
+/// loop: a closed loop enclosing no area has no winding, so no orientation), and for
+/// samples that do not certainly span a plane.
+///
+/// The plane is that of the widest triangle `P0 Pf Pg`: `Pf` the sample farthest from
+/// the first, `Pg` the one farthest from the line `P0 Pf`, `c = (Pf - P0) x (Pg - P0)`.
+/// The rounded `c` is within `E = 8 u |d| |e|` of the exact one (`d`, `e` the two rounded
+/// differences: each component `d_j e_l - d_l e_j` rounds at most four times on the
+/// exact samples, `gamma_4 (|d_j e_l| + |d_l e_j|)`, whose norm is at most
+/// `sqrt 2 gamma_4 |d| |e| < 6 u |d| |e|`). So `|c| > E` certifies that the samples are
+/// not collinear. `c` must also unitize (`|c| >= SM_EFF_ZERO`), the bound the area
+/// vector itself is held to. For a planar chain every triangle of samples has this
+/// plane's normal.
+///
+/// Its sense is that of the chain's turns (upstream's `ComputeCrvsNormal`: the sum of
+/// the cross products of consecutive nonzero chords) along `c`, so a chain that turns
+/// clockwise more than counter-clockwise about the normal gets the normal its turns
+/// give. When the turns cancel exactly along `c` (a symmetric S), it is the sense of the
+/// first turn along `c` that is not zero; with none, `None`.
+fn open_chain_plane_normal(samples: &[Point3]) -> Option<Vec3> {
+    let (&first, &last) = (samples.first()?, samples.last()?);
+    if first.approx_eq(last) {
+        return None;
+    }
+    let mut d = Vec3::ZERO;
+    for &p in samples {
+        let v = p - first;
+        if v.length_squared() > d.length_squared() {
+            d = v;
+        }
+    }
+    let (mut c, mut e) = (Vec3::ZERO, Vec3::ZERO);
+    for &p in samples {
+        let v = p - first;
+        let w = d.cross(v);
+        if w.length_squared() > c.length_squared() {
+            (c, e) = (w, v);
+        }
+    }
+    let rounding = 8.0 * (f64::EPSILON / 2.0) * d.length() * e.length();
+    if c.length() <= rounding {
+        return None;
+    }
+    let n = c.unitize().ok()?;
+    let mut turns = 0.0;
+    let mut first_turn = 0.0;
+    let mut previous: Option<Vec3> = None;
+    for w in samples.windows(2) {
+        let (Some(&a), Some(&b)) = (w.first(), w.get(1)) else {
+            continue;
+        };
+        let chord = b - a;
+        if chord == Vec3::ZERO {
+            continue;
+        }
+        if let Some(prev) = previous {
+            let turn = n.dot(prev.cross(chord));
+            turns += turn;
+            if first_turn == 0.0 {
+                first_turn = turn;
+            }
+        }
+        previous = Some(chord);
+    }
+    let sense = if turns != 0.0 { turns } else { first_turn };
+    if sense > 0.0 {
+        Some(n)
+    } else if sense < 0.0 {
+        Some(-n)
+    } else {
+        None
+    }
 }
 
 // ---- CrvsFixGaps ------------------------------------------------------------------------
@@ -2534,6 +2627,125 @@ mod tests {
         );
         assert_eq!(single.upstream_status(), Some(SM_ERR));
         assert!(single.is_status_answer());
+    }
+
+    /// Straight B-spline segments through `points` in turn (two control points each, so
+    /// their samples are the points themselves).
+    fn polyline(points: &[[f64; 3]]) -> Vec<Curve> {
+        points
+            .windows(2)
+            .map(|w| {
+                Curve::from(
+                    crate::nurbs::b_spline_curve::p1::BSplineCurve::create_line_segment(
+                        3,
+                        Vec3::from_array(w[0]),
+                        Vec3::from_array(w[1]),
+                    )
+                    .unwrap(),
+                )
+            })
+            .collect()
+    }
+
+    /// An open planar chain whose chord-closed area cancels exactly still spans its
+    /// plane (#21291 review): the answer is that plane's normal in the sense of the
+    /// chain's turns (here -2 about Z, so -Z, upstream's weighted-turns answer), not a
+    /// refusal. The same chain in the XZ plane answers its plane's normal, +Y (its turns
+    /// are +2 about Y).
+    #[test]
+    fn open_chain_of_cancelling_area_answers_its_plane() {
+        let k = Kernel::default();
+        let z = polyline(&[
+            [0.0, 0.0, 0.0],
+            [1.0, 1.0, 0.0],
+            [2.0, -2.0, 0.0],
+            [2.0, 0.0, 0.0],
+        ]);
+        assert_eq!(compute_crvs_normal(&k, &z).unwrap(), -Vec3::Z);
+        let xz = polyline(&[
+            [0.0, 0.0, 0.0],
+            [1.0, 0.0, 1.0],
+            [2.0, 0.0, -2.0],
+            [2.0, 0.0, 0.0],
+        ]);
+        assert_eq!(compute_crvs_normal(&k, &xz).unwrap(), Vec3::Y);
+        // reversed, the chain turns the other way: +Z
+        let back = polyline(&[
+            [2.0, 0.0, 0.0],
+            [2.0, -2.0, 0.0],
+            [1.0, 1.0, 0.0],
+            [0.0, 0.0, 0.0],
+        ]);
+        assert_eq!(compute_crvs_normal(&k, &back).unwrap(), Vec3::Z);
+        // a symmetric S (turns +1 and -1, area 0): the sense of its first turn, +Z
+        let s = polyline(&[
+            [0.0, 0.0, 0.0],
+            [1.0, 0.0, 0.0],
+            [1.0, 1.0, 0.0],
+            [2.0, 1.0, 0.0],
+        ]);
+        assert_eq!(compute_crvs_normal(&k, &s).unwrap(), Vec3::Z);
+    }
+
+    /// A chain that does not span a plane, or a closed loop that encloses no area (no
+    /// winding, so no sense), still has no normal: `SM_ERR_INVALID_INPUT` with
+    /// `(0, 0, 1)` written.
+    #[test]
+    fn collinear_chain_and_closed_loop_of_no_area_still_refuse() {
+        let k = Kernel::default();
+        let refused = |curves: &[Curve]| {
+            let (n, e) = compute_crvs_normal_written(&k, curves).unwrap();
+            n == Vec3::Z && matches!(e, Some(SolidError::InvalidInput { .. }))
+        };
+        // collinear, with a turn back over itself
+        assert!(refused(&polyline(&[
+            [0.0, 0.0, 0.0],
+            [1.0, 0.0, 0.0],
+            [3.0, 0.0, 0.0],
+            [2.0, 0.0, 0.0]
+        ])));
+        // a line and its reverse, out of the XY plane
+        assert!(refused(&polyline(&[
+            [0.0, 1.0, 2.0],
+            [1.0, 3.0, 5.0],
+            [0.0, 1.0, 2.0]
+        ])));
+        // a closed bowtie: its two lobes cancel
+        assert!(refused(&polyline(&[
+            [0.0, 0.0, 0.0],
+            [1.0, 1.0, 0.0],
+            [1.0, 0.0, 0.0],
+            [0.0, 1.0, 0.0],
+            [0.0, 0.0, 0.0],
+        ])));
+        // a chain spanning a plane below the area bound SM_EFF_ZERO
+        assert!(refused(&polyline(&[
+            [0.0, 0.0, 0.0],
+            [1e-7, 1e-7, 0.0],
+            [2e-7, -2e-7, 0.0],
+            [2e-7, 0.0, 0.0]
+        ])));
+    }
+
+    /// A sample that is not finite has no normal: `SM_ERR_INVALID_INPUT` with `(0, 0, 1)`
+    /// written, not a NaN normal (#21291 review).
+    #[test]
+    fn loop_normal_of_a_point_that_is_not_finite_refuses() {
+        let k = Kernel::default();
+        let seg = |a: [f64; 3], b: [f64; 3]| {
+            let d = Vec3::from_array(b) - Vec3::from_array(a);
+            line(a, d.to_array(), 0.0, d.length())
+        };
+        for bad in [f64::NAN, f64::INFINITY] {
+            let curves = [
+                seg([0.0, 0.0, 0.0], [1.0, 0.0, 0.0]),
+                seg([1.0, 0.0, 0.0], [bad, 1.0, 0.0]),
+                seg([bad, 1.0, 0.0], [0.0, 0.0, 0.0]),
+            ];
+            let (n, e) = compute_crvs_normal_written(&k, &curves).unwrap();
+            assert_eq!(n, Vec3::Z);
+            assert!(matches!(e, Some(SolidError::InvalidInput { .. })), "{e:?}");
+        }
     }
 
     /// The fork's be45e8d evaluates its samples with `SER(EvaluatePoint)`: a curve whose
