@@ -561,7 +561,8 @@ pub enum SurfaceFailure {
     /// [`ErrorKind::OutsideDomain`].
     DomainPastApex,
     /// The iso curve asked for has zero length (its parameter range on the surface is
-    /// degenerate). [`ErrorKind::InvalidInput`].
+    /// degenerate), or both sweep circles the polar converter's rebuild tries are
+    /// degenerate (status `SM_ERR`). [`ErrorKind::InvalidInput`].
     DegenerateIsoCurve,
     /// The surface of revolution has no polar converter circle (its NURB form was never
     /// made or read, or both sweep iso curves were degenerate when it was, which the make
@@ -587,6 +588,36 @@ pub enum SurfaceFailure {
     /// The line through the point along the extrusion crosses the generator nowhere, so no
     /// directrix runs through the point. Class `failed`.
     DirectrixNotFound,
+    /// The on-axis tolerance given is not a finite, non-negative distance.
+    /// [`ErrorKind::InvalidInput`].
+    ToleranceNotADistance,
+    /// The generator given lies on the axis of revolution, so it sweeps no surface.
+    /// [`ErrorKind::InvalidInput`].
+    GeneratorOnAxis,
+    /// The generator parameter given is outside the generator's natural interval.
+    /// [`ErrorKind::OutsideDomain`].
+    ParameterOutsideGenerator,
+    /// The angle from the surface's start direction to the plane's direction about the
+    /// axis could not be measured (the measure's error is the cause). Class `failed`.
+    AngleNotMeasured,
+    /// The point given is farther from the surface than the tolerance: an analytic
+    /// inversion's answer (status `SM_ERR_NOT_WITHIN_TOLERANCE`, the SolidCraft fork's).
+    PointOffSurface,
+    /// The point given lies outside the sweep of the surface of revolution (its angle about
+    /// the axis is outside the surface's angle interval): an inversion's answer; the fast
+    /// drop reports it with `SM_ERR`, and its callers then run the general solver.
+    /// [`ErrorKind::OutsideDomain`].
+    PointOutsideSweep,
+    /// The surface of revolution's polar converter is not set up (its NURB was never
+    /// made, or the sweep circle has no exact conversion table), which the routine's
+    /// closed form needs. [`ErrorKind::Unsupported`].
+    PolarConversionImpossible,
+    /// The generator of the surface of revolution is not planar, which the routine's
+    /// closed form needs. [`ErrorKind::Unsupported`].
+    GeneratorNotPlanar,
+    /// The inversion of a point onto an iso curve of the surface failed (its error is the
+    /// cause). Class `failed`; whether it is a defect or a refusal is its cause's.
+    CurveInversionFailed,
 }
 
 /// An input of a surface routine that its caller did not give
@@ -660,6 +691,17 @@ pub enum AnalyticCheck {
     /// Moved onto the mean-radius cylinder, its net is not on that cylinder (its end
     /// circles are turned against each other or off the axis).
     NetOffCylinder,
+    /// Neither direction of its iso curves is a family of coaxial circles in parallel
+    /// planes with a planar generator.
+    NoCircularDirection,
+    /// Every iso curve tested for a circle is degenerate.
+    IsoCurvesDegenerate,
+    /// Its iso curve to become the generator is degenerate.
+    GeneratorIsoDegenerate,
+    /// Its iso curve to become the generator is not planar.
+    GeneratorNotPlanar,
+    /// The plane of its iso curve to become the generator does not hold the circles' axis.
+    GeneratorOffAxisPlane,
 }
 
 impl core::fmt::Display for AnalyticCheck {
@@ -683,6 +725,11 @@ impl core::fmt::Display for AnalyticCheck {
                 "its net has no positive radius at a control point on the mean-radius cylinder"
             }
             Self::NetOffCylinder => "its moved net is not on the mean-radius cylinder",
+            Self::NoCircularDirection => "neither direction's iso curves are coaxial circles",
+            Self::IsoCurvesDegenerate => "every iso curve tested for a circle is degenerate",
+            Self::GeneratorIsoDegenerate => "its generator iso curve is degenerate",
+            Self::GeneratorNotPlanar => "its generator iso curve is not planar",
+            Self::GeneratorOffAxisPlane => "its generator iso curve is not in a plane of the axis",
         })
     }
 }
@@ -744,8 +791,8 @@ impl SurfaceFailure {
             | Self::RecordDoesNotRebuild
             | Self::DomainPastApex
             | Self::DegenerateIsoCurve => SM_ERR_INVALID_INPUT,
-            Self::OutsideDomain(_) => SM_ERR_OUTSIDE_OF_DOMAIN,
-            Self::OffSurface(_) => SM_ERR_NOT_WITHIN_TOLERANCE,
+            Self::OutsideDomain(_) | Self::PointOutsideSweep => SM_ERR_OUTSIDE_OF_DOMAIN,
+            Self::OffSurface(_) | Self::PointOffSurface => SM_ERR_NOT_WITHIN_TOLERANCE,
             Self::PlanesLineNearlySingular => SM_ERR_WARNING,
             _ => SM_ERR,
         }
@@ -804,7 +851,9 @@ impl SurfaceFailure {
             | Self::OffsetNestedTooDeep
             | Self::OperationNotTaken
             | Self::DegenerateIsoCurve
-            | Self::LeanNotFinite => ErrorKind::InvalidInput,
+            | Self::LeanNotFinite
+            | Self::ToleranceNotADistance
+            | Self::GeneratorOnAxis => ErrorKind::InvalidInput,
             Self::BoxOutsideBendHalfSpace { .. }
             | Self::BoxOutsideZeroPeriod { .. }
             | Self::PointOutsideVolumeDomain { .. }
@@ -813,7 +862,9 @@ impl SurfaceFailure {
             | Self::PseudoBoxOutsideDomain
             | Self::ZeroStepOutsideDomain
             | Self::TrimDomainOutside
-            | Self::DomainPastApex => ErrorKind::OutsideDomain,
+            | Self::DomainPastApex
+            | Self::PointOutsideSweep
+            | Self::ParameterOutsideGenerator => ErrorKind::OutsideDomain,
             Self::IsoCurveKindNotLiftable
             | Self::DerivativeCombinationUnsupported { .. }
             | Self::PlainVolume
@@ -829,7 +880,9 @@ impl SurfaceFailure {
             | Self::UnsupportedSolverOperation
             | Self::NoBSplineForm
             | Self::NotACylinder
-            | Self::GeneratorNotPerpendicular => ErrorKind::Unsupported,
+            | Self::GeneratorNotPerpendicular
+            | Self::PolarConversionImpossible
+            | Self::GeneratorNotPlanar => ErrorKind::Unsupported,
             Self::PointInBendSingularity
             | Self::ZeroVolumeTangent { .. }
             | Self::ZeroLengthTangent
@@ -869,7 +922,9 @@ impl SurfaceFailure {
             | Self::GeneratorNotMade
             | Self::CentreHasNoParameters
             | Self::NurbEvaluationFailed
-            | Self::NoPolarConverter => ErrorKind::Failed,
+            | Self::NoPolarConverter
+            | Self::AngleNotMeasured
+            | Self::CurveInversionFailed => ErrorKind::Failed,
             Self::NoRoughGuess => ErrorKind::NotFound,
             _ => ErrorKind::of_status(self.comparison_status()),
         }
@@ -1178,6 +1233,25 @@ impl core::fmt::Display for SurfaceFailure {
             }
             Self::DirectrixNotFound => {
                 f.write_str("no directrix of the extrusion runs through the point")
+            }
+            Self::ToleranceNotADistance => {
+                f.write_str("the on-axis tolerance is not a finite, non-negative distance")
+            }
+            Self::GeneratorOnAxis => f.write_str("the generator line lies on the axis"),
+            Self::ParameterOutsideGenerator => {
+                f.write_str("the generator parameter is outside the generator's interval")
+            }
+            Self::AngleNotMeasured => {
+                f.write_str("the angle to the plane's direction could not be measured")
+            }
+            Self::PointOffSurface => f.write_str("the point is off the surface"),
+            Self::PointOutsideSweep => f.write_str("the point is outside the sweep"),
+            Self::PolarConversionImpossible => {
+                f.write_str("the surface of revolution has no polar conversion")
+            }
+            Self::GeneratorNotPlanar => f.write_str("the generator is not planar"),
+            Self::CurveInversionFailed => {
+                f.write_str("the inversion of a point onto an iso curve failed")
             }
         }
     }
@@ -1830,6 +1904,47 @@ mod tests {
                 ErrorKind::Unsupported,
             ),
             (SurfaceFailure::DirectrixNotFound, SM_ERR, ErrorKind::Failed),
+            (
+                SurfaceFailure::ToleranceNotADistance,
+                SM_ERR,
+                ErrorKind::InvalidInput,
+            ),
+            (
+                SurfaceFailure::GeneratorOnAxis,
+                SM_ERR,
+                ErrorKind::InvalidInput,
+            ),
+            (
+                SurfaceFailure::ParameterOutsideGenerator,
+                SM_ERR,
+                ErrorKind::OutsideDomain,
+            ),
+            (SurfaceFailure::AngleNotMeasured, SM_ERR, ErrorKind::Failed),
+            (
+                SurfaceFailure::PointOffSurface,
+                SM_ERR_NOT_WITHIN_TOLERANCE,
+                ErrorKind::NotWithinTolerance,
+            ),
+            (
+                SurfaceFailure::PointOutsideSweep,
+                SM_ERR_OUTSIDE_OF_DOMAIN,
+                ErrorKind::OutsideDomain,
+            ),
+            (
+                SurfaceFailure::PolarConversionImpossible,
+                SM_ERR,
+                ErrorKind::Unsupported,
+            ),
+            (
+                SurfaceFailure::GeneratorNotPlanar,
+                SM_ERR,
+                ErrorKind::Unsupported,
+            ),
+            (
+                SurfaceFailure::CurveInversionFailed,
+                SM_ERR,
+                ErrorKind::Failed,
+            ),
         ];
         for (failure, status, kind) in cases {
             let e = SolidError::surface(op, failure);
@@ -2170,9 +2285,6 @@ mod tests {
         #[rustfmt::skip] // one file per line, so conversions in parallel merge cleanly
         const PINNED: &[(&str, usize)] = &[
             ("solidcore/src/surface/cone/p3.rs", 3),
-            ("solidcore/src/surface/surf_of_revolution/p1.rs", 10),
-            ("solidcore/src/surface/surf_of_revolution/p2.rs", 6),
-            ("solidcore/src/surface/surf_of_revolution/p3.rs", 21),
             ("solidcore/src/surface/surface/p2.rs", 21),
         ];
         assert_pinned("surface phrase-cause sites", &crate_sites(&PHRASES), PINNED);
