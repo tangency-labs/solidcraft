@@ -435,10 +435,10 @@ fn mate_flush_and_distance_place_a_part_and_follow_the_panel() {
     assert_eq!(s.doc.assembly.joints.last().unwrap().constraint, None);
 }
 
-/// A mate moves the part only across the gap: a bracket flat above the panel drops straight onto
-/// it, not turned and not slid.
+/// A mate makes the two faces coincident: a bracket flat above the panel drops onto it, its
+/// bottom face on the panel's top face, not turned.
 #[test]
-fn a_mate_moves_the_part_only_across_the_gap() {
+fn a_mate_drops_the_bracket_onto_the_panel() {
     let mut s = Session::default();
     run(&mut s, "component.create", json!({"name": "Plate"}));
     run(&mut s, "solid.box", json!({"length": 100, "width": 100, "height": 10, "corner": [0, 0, 0]}));
@@ -458,14 +458,16 @@ fn a_mate_moves_the_part_only_across_the_gap() {
     );
     assert!(clean(&r), "{r}");
     assert_eq!(dof_of(&r, &s, "Block"), Some(3), "{r}");
+    // The block's bottom face on the plate's top face, the two faces' centres together: the
+    // block's corners 10 mm along x and 40 mm down from where they were.
     for c in corners {
         let got = place(&s, "Block", c);
-        assert!(near(got, c - Vec3::new(0.0, 0.0, 40.0), 1e-6), "{c:?}: {got:?}");
+        assert!(near(got, c + Vec3::new(10.0, 0.0, -40.0), 1e-6), "{c:?}: {got:?}");
     }
     // A gap: 5 mm above the plate.
     let r = run(&mut s, "joint.edit", json!({"joint": "Mate1", "offset": 5}));
     assert!(clean(&r), "{r}");
-    assert!(near(place(&s, "Block", corners[0]), Vec3::new(30.0, 40.0, 15.0), 1e-6));
+    assert!(near(place(&s, "Block", corners[0]), Vec3::new(40.0, 40.0, 15.0), 1e-6));
 }
 
 /// A mate makes the two faces coincident: the block's bottom face lands on the plate's top face

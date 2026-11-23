@@ -7,7 +7,7 @@
 //! A relation is made where the parts are: its values start as the nearest that meet it, so B
 //! moves no further than the relation needs.
 
-use super::{Joint, component_bodies, component_of, least_squares, link_of, occurrence_world, resolve_origin};
+use super::{Constraint, Joint, Snap, component_bodies, component_of, least_squares, link_of, occurrence_world, resolve_origin};
 use crate::{Document, IDENTITY, Mat, ModelState, mat_inverse, mat_mul};
 
 /// Starting turns tried for each angle value: the nearest values may lie a half turn away.
@@ -61,14 +61,36 @@ pub fn relation_values(doc: &Document, st: &ModelState, j: &Joint) -> Option<Vec
         }
     }
     // Angles within a half turn of 0.
-    best.map(|(_, mut q)| {
+    let mut q = best.map(|(_, mut q)| {
         for i in &angles {
             if let Some(v) = q.get_mut(*i) {
                 *v = (*v + std::f64::consts::PI).rem_euclid(std::f64::consts::TAU) - std::f64::consts::PI;
             }
         }
         q
-    })
+    })?;
+    // A mate's faces are coincident: the two faces meet, so the lateral offsets start at zero
+    // and the faces' centres come together, as the Planar joint puts them. The other rules and
+    // the relations keep the parts where they are (#14939).
+    if mate_of_faces(j) {
+        for (i, name) in j.kind.dofs().iter().enumerate() {
+            if matches!(*name, "x" | "y")
+                && let Some(v) = q.get_mut(i)
+            {
+                *v = 0.0;
+            }
+        }
+    }
+    Some(q)
+}
+
+/// A mate between two planar faces: the rule then makes them coincident, so the faces' centres
+/// meet and the faces touch. A datum side has no face centre to meet, so the part keeps its
+/// place on the datum.
+fn mate_of_faces(j: &Joint) -> bool {
+    j.constraint == Some(Constraint::Mate)
+        && matches!(j.a.snap, Snap::FaceCenter { .. })
+        && matches!(j.b.snap, Snap::FaceCenter { .. })
 }
 
 #[cfg(test)]
