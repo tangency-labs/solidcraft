@@ -1314,6 +1314,45 @@ mod tests {
         assert!(reader.provenance_chain().is_none(), "a chain that cannot validate must not be appended to");
     }
 
+    /// A design read from memory with its model gives no model when the container is signed (the
+    /// signature does not cover the cache), and the model when it is not.
+    #[test]
+    fn a_signed_container_read_from_memory_gives_no_model() {
+        let mut doc = Document::new("Plate");
+        doc.add_feature(
+            solidcraft_doc::FeatureKind::Box {
+                corner: solidcraft_doc::point_expr(solidcore_record::Vec3::ZERO),
+                length: "10".into(),
+                width: "20".into(),
+                height: "5".into(),
+                operation: solidcraft_doc::Operation::NewBody,
+                centred: false,
+            },
+            None,
+        )
+        .unwrap();
+        let mut model = solidcraft_doc::Model::new();
+        model.evaluate(&doc);
+        let saved = model.saved(&doc).unwrap();
+        let unsigned = crate::write_design_container_with_cache(&doc, crate::DesignCompression::Fast, None, Some(&saved)).unwrap();
+        assert!(crate::read_design_with_model(&unsigned).unwrap().1.is_some(), "an unsigned design keeps its model");
+        let signer = TestSigner::new(7);
+        let chain = ProvenanceChain::default();
+        let signed = crate::write_design_container_with_provenance(
+            &doc,
+            crate::DesignCompression::Fast,
+            None,
+            Some(&saved),
+            None,
+            &save(Some(SignatureSource::Cose(&signer)), &chain, None, None),
+        )
+        .unwrap();
+        assert!(crate::DesignContainerReader::new(Cursor::new(&signed[..])).unwrap().has_model_cache(), "the signed file keeps the cache");
+        let (read, model) = crate::read_design_with_model(&signed).unwrap();
+        assert!(model.is_none(), "a signed design is evaluated from its timeline");
+        assert_eq!(read.name, "Plate");
+    }
+
     #[test]
     fn a_signed_container_reports_its_provenance_entry_without_reading_it() {
         let path = std::env::temp_dir().join(format!("solidcraft-signed-entry-{}.sc", std::process::id()));
@@ -1323,6 +1362,31 @@ mod tests {
         let unsigned = std::env::temp_dir().join(format!("solidcraft-unsigned-entry-{}.sc", std::process::id()));
         std::fs::write(&unsigned, write_design_container(&Document::new("Plate")).unwrap()).unwrap();
         assert!(!crate::has_design_provenance(&unsigned.to_string_lossy()));
+        let _ = std::fs::remove_file(&unsigned);
+    }
+
+    /// Reading a design for opening gives its document, model, signature presence, provenance
+    /// records and signature check from one reading: a signed file gives no model, its records and
+    /// (when asked) its check, which matches the check of the file on its own.
+    #[test]
+    fn reading_a_design_once_gives_its_model_signature_records_and_check() {
+        let path = std::env::temp_dir().join(format!("solidcraft-read-once-signed-{}.sc", std::process::id()));
+        let bytes = signed(&Document::new("Plate"), &TestSigner::new(7), &ProvenanceChain::default());
+        std::fs::write(&path, &bytes).unwrap();
+        let shown = path.to_string_lossy().into_owned();
+        let file = crate::read_design_file_once(&shown, None::<fn(crate::DesignPreview)>, true).unwrap();
+        assert!(file.signed && file.model.is_none(), "a signed file is evaluated from its timeline");
+        assert_eq!(file.doc.name, "Plate");
+        assert_eq!(file.chain, crate::read_design_provenance_chain(&bytes));
+        assert_eq!(file.report, report(&bytes), "the check is the check of these bytes");
+        assert!(file.report.is_some());
+        let quiet = crate::read_design_file_once(&shown, None::<fn(crate::DesignPreview)>, false).unwrap();
+        assert!(quiet.signed && quiet.report.is_none(), "no check unless asked");
+        let _ = std::fs::remove_file(&path);
+        let unsigned = std::env::temp_dir().join(format!("solidcraft-read-once-unsigned-{}.sc", std::process::id()));
+        std::fs::write(&unsigned, write_design_container(&Document::new("Plate")).unwrap()).unwrap();
+        let file = crate::read_design_file_once(&unsigned.to_string_lossy(), None::<fn(crate::DesignPreview)>, true).unwrap();
+        assert!(!file.signed && file.chain.is_none() && file.report.is_none());
         let _ = std::fs::remove_file(&unsigned);
     }
 
@@ -1504,7 +1568,7 @@ mod tests {
         let id = drawing.allocate_id(&mut ids).unwrap();
         drawing.sources.push(Source { id, path: None });
         doc.drawings.push(std::sync::Arc::new(drawing));
-        doc.plugin_data.insert("demo/state.bin".into(), solidcraft_doc::canvas::base64_encode(b"state").into());
+        doc.plugin_data.insert("demo/state.bin".into(), b"state".into());
         let bytes = signed(&doc, &TestSigner::new(7), &ProvenanceChain::default());
         assert_eq!(report(&bytes).unwrap().status, ProvenanceStatus::Valid);
         let entries = read_entries(&bytes);

@@ -237,11 +237,15 @@ fn designs_survive_mutation() {
     survives("design container", &mutations(&container, false, 0xde5), usize::MAX, |b| {
         let _ = crate::read_design_preview(b);
         let _ = crate::read_design_thumbnail(b);
+        let _ = crate::design_text(b);
         crate::read_design(b).ok().map(|d| d.features.len())
     });
-    let json = crate::write_design(&doc);
+    let json = crate::write_design(&doc).unwrap();
     assert!(crate::read_design(&json).is_ok());
-    survives("design JSON", &mutations(&json, true, 0xde6), usize::MAX, |b| crate::read_design(b).ok().map(|d| d.features.len()));
+    survives("design JSON", &mutations(&json, true, 0xde6), usize::MAX, |b| {
+        let _ = crate::design_text(b);
+        crate::read_design(b).ok().map(|d| d.features.len())
+    });
 }
 
 /// A design with two drawings, each drawing it and another design's file, as a container and as
@@ -269,7 +273,7 @@ fn designs_with_drawings_survive_mutation() {
     survives("design container with drawings", &mutations(&container, false, 0xd4b), MAX_DRAWINGS, |b| {
         crate::read_design(b).ok().map(|d| d.drawings.len())
     });
-    let json = crate::write_design(&doc);
+    let json = crate::write_design(&doc).unwrap();
     assert_eq!(crate::read_design(&json).unwrap().drawings, doc.drawings);
     survives("design JSON with drawings", &mutations(&json, true, 0xd4c), MAX_DRAWINGS, |b| crate::read_design(b).ok().map(|d| d.drawings.len()));
 }
@@ -408,7 +412,7 @@ fn paper_scenes_survive_mutation_into_pdf() {
     ];
     let scene = Scene::new(p(420.0, 297.0), vec![Group { object: 7, kind: ObjectKind::DrawingBorder, items }]);
     let json = serde_json::to_vec(&scene).unwrap();
-    let options = crate::paper::PdfOptions { layers: true, title: Some("Sheet 1".into()), output_time: Some(1_761_436_800) };
+    let options = crate::paper::PdfOptions { layers: true, title: Some("Sheet 1".into()), output_time: Some(1_761_436_800), actual_size: false };
     let write = |b: &[u8]| -> Option<usize> {
         let scene: Scene = serde_json::from_slice(b).ok()?;
         crate::paper::paper_pdf(&scene.prepare().ok()?, &options).ok().map(|(bytes, _)| bytes.len())

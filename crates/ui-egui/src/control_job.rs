@@ -266,8 +266,7 @@ impl ControlJob {
 pub(crate) const MAX_NEXT_SHOWN: usize = 12;
 
 fn label(app: &SolveApp, command: &str) -> String {
-    let language = solidcraft_ui_text::Locale::for_language(&app.preferences.language);
-    language.label(solidcraft_engine::find_command(command).map_or(command, |c| c.label)).to_string()
+    crate::agent_label::name_in(solidcraft_ui_text::Locale::for_language(&app.preferences.language), command)
 }
 
 /// Run `f` on a worker thread (with the request's folder scope, stopping early once `progress`
@@ -529,6 +528,19 @@ impl SolveApp {
                 "engine.execute" | "command" => executed(&r.params).map(|(c, _)| c),
                 _ => r.params.get("commands").and_then(Value::as_array).and_then(|s| s.first()).and_then(crate::control::batch_step_command),
             };
+            let is_batch = matches!(r.method.as_str(), "engine.batch" | "engine.script");
+            let steps: Vec<String> = if is_batch {
+                let all = r.params.get("commands").and_then(Value::as_array);
+                all.into_iter().flatten().take(4).filter_map(crate::control::batch_step_command).map(|c| label(self, c)).collect()
+            } else {
+                Vec::new()
+            };
+            if steps.len() > 1 {
+                let count = r.params.get("commands").and_then(Value::as_array).map_or(0, Vec::len);
+                let names = if count > steps.len() { steps[..3.min(steps.len())].iter().cloned().chain(["…".into()]).collect() } else { steps };
+                let language = solidcraft_ui_text::Locale::for_language(&self.preferences.language);
+                return (r.serial, crate::agent_label::batch_in(language, &names));
+            }
             (r.serial, label(self, first.unwrap_or(&r.method)))
         })
         .collect()
@@ -598,7 +610,10 @@ impl SolveApp {
             if crate::control_params::parse::<crate::control_params::Execute>(&req.params).is_err() {
                 return Some(req);
             }
+            // Frame discovery must not add inert panel state after the worker's source snapshot.
+            solidcraft_engine::plugin::sync_panels(&mut self.session);
             let mut copy = self.session.scratch();
+            copy.plugin_forms_interactive = crate::plugin_menu::take_interactive_run(self, req.serial);
             if let Some(level) = level {
                 copy.param_check = level;
             }
@@ -735,6 +750,9 @@ impl SolveApp {
     /// An export's or a reading's reply, from its copy, with the echo an export leaves when it
     /// runs here.
     fn answered(&mut self, job: ControlJob, reply: Option<Value>) {
+        // What the copy evaluated to answer is done with: its bodies let go of their kernel
+        // forms now, not at this session's next command (#19629).
+        self.session.release_left();
         if job.req.refuse_cancelled_chat() {
             return;
         }
@@ -753,10 +771,10 @@ impl SolveApp {
             let current = match job.work {
                 Work::Answer { inspection: Some((uid, version)) } if uid == self.session.uid => {
                     let key = (uid, id.to_owned());
-                    if self.plugin_inspection_versions.get(&key).is_some_and(|latest| *latest > version) {
+                    if self.plugins.inspection_versions.get(&key).is_some_and(|latest| *latest > version) {
                         false
                     } else {
-                        self.plugin_inspection_versions.insert(key, version);
+                        self.plugins.inspection_versions.insert(key, version);
                         true
                     }
                 }
@@ -826,6 +844,7 @@ impl SolveApp {
                 let _ = job.req.reply.send(stopped_reply(&job.label, true));
                 return;
             }
+            let mut stale_revision = None;
             let result = if self.file_load_holds()
                 || self.file_picker.is_some()
                 || disabled != &self.preferences.disabled_plugins
@@ -852,7 +871,14 @@ impl SolveApp {
                         } else {
                             self.session.redo = redo;
                         }
-                        replies.map_err(|_| self.tr("ui.plugin_context_changed").to_string())
+                        replies.map_err(|error| {
+                            if let Some(solidcraft_engine::plugin::HostError::StaleRevision { expected, actual }) = error.host_error() {
+                                stale_revision = Some((expected.clone(), actual.clone()));
+                                error.to_string()
+                            } else {
+                                self.tr("ui.plugin_context_changed").to_string()
+                            }
+                        })
                     })
                     .and_then(|replies| replies.into_iter().last().map(|(_, reply)| reply).ok_or_else(|| self.tr("ui.plugin_no_result").to_string()))
             };
@@ -866,14 +892,25 @@ impl SolveApp {
                 crate::render_workspace::apply_command(self, "plugin.run", &reply)?;
                 // After the new geometry is in the live session, including a run that did not
                 // change the document. `accept_computed` does not copy the camera.
-                self.apply_plugin_view(&reply);
+                self.apply_plugin_view(&reply, None);
                 Ok(reply)
             });
             let result = self.command_completed("plugin.run", result);
             let mut reply = match result {
                 Ok(result) => json!({"ok":true,"result":result}),
-                Err(error) => json!({"ok":false,"error":error}),
+                Err(error) => {
+                    let mut reply = json!({"ok":false,"error":error});
+                    if let Some((expected, actual)) = stale_revision {
+                        reply["kind"] = json!("stale_revision");
+                        reply["expected"] = json!(expected);
+                        reply["actual"] = json!(actual);
+                    }
+                    reply
+                }
             };
+            if let Some(reason) = reply.get("error").and_then(Value::as_str).and_then(solidcraft_engine::plugin::structured_tool_error) {
+                reply["plugin_error"] = reason;
+            }
             if let Some(level) = level {
                 reply["param_check"] = json!(level.name());
             }
@@ -952,12 +989,16 @@ impl SolveApp {
     }
 
     /// Move the camera the way the matching button does, for the last view command the plugin called.
-    fn apply_plugin_view(&mut self, reply: &Value) {
+    pub(crate) fn apply_plugin_view(&mut self, reply: &Value, preview_bounds: Option<solidcraft_engine::geom::Aabb3>) {
         let Some(kind) = reply.get("view").and_then(|view| view.get("kind")).and_then(Value::as_str) else { return };
         match kind {
             "fit" | "home" => {
-                let id = if kind == "home" { "view.home" } else { "view.fit" };
-                let _ = self.command_completed(id, Ok(json!({})));
+                if let Some(bounds) = preview_bounds {
+                    self.frame_view_bounds(kind == "home", Some(bounds));
+                } else {
+                    let id = if kind == "home" { "view.home" } else { "view.fit" };
+                    let _ = self.command_completed(id, Ok(json!({})));
+                }
             }
             "camera" => {
                 let Some(value) = reply.pointer("/view/camera").filter(|value| !value.is_null()) else { return };

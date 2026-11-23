@@ -436,6 +436,41 @@ fn an_old_extrude_kept_on_its_flat_start_shows_the_arrow_at_that_level() {
     assert!((base.z - min_z).abs() < 1e-6, "displayed start {} geometry start {min_z}", base.z);
 }
 
+/// With To Object, the arrow starts where the build does (#18825). A square on the plane x 3,
+/// past the end of a slot whose wall slants across X (x = 4 (y + 11) / 7), extruded From that
+/// wall To the block's side: alone, the extrude starts on the wall's plane under the square's
+/// middle, x 4 (9 / 7); with Two Sides it starts at the From pick's level, x 20 / 7, as the build
+/// does, and the arrow follows it there.
+#[test]
+fn the_arrow_from_a_slanted_face_with_to_starts_where_the_build_does() {
+    for (two_sides, start_x) in [(false, 36.0 / 7.0), (true, 20.0 / 7.0)] {
+        let mut h = Harness::new();
+        h.app.run("solid.box", json!({"corner":[-10,-10,0],"length":20,"width":20,"height":10,"body_name":"Block"})).unwrap();
+        h.app.run("sketch.create", json!({"plane":"XY","name":"SlotSketch"})).unwrap();
+        h.app.run("sketch.line", json!({"closed":true,"points":[[0,-11],[2,-11],[6,-4],[4,-4]]})).unwrap();
+        h.app.run("sketch.finish", json!({})).unwrap();
+        h.app.run("solid.extrude", json!({"sketch":"SlotSketch","distance":20,"operation":"cut","name":"Slot"})).unwrap();
+        h.app.run("sketch.create", json!({"plane":"YZ","offset":3,"name":"Across"})).unwrap();
+        h.app.run("sketch.rectangle.two_point", json!({"p0":[-3,4],"p1":[-1,6]})).unwrap();
+        h.app.run("sketch.finish", json!({})).unwrap();
+        let mut p = json!({"sketch":"Across","from":[20.0 / 7.0, -6, 5],"to":[10, 5, 5],"operation":"new","name":"Depth","body_name":"Fill"});
+        if two_sides {
+            p["distance2"] = json!(3);
+        }
+        h.app.run("solid.extrude", p).unwrap();
+        h.frames(4);
+        // Where the body starts under the square's middle (y -2, z 5): a ray along +X first
+        // meets it there, 3 mm before the start with Two Sides.
+        let mesh = h.app.session.world_state().unwrap().body("Fill").unwrap().mesh();
+        let (t, _) = mesh.raycast(solidcore_record::Vec3::new(-20.0, -2.0, 5.0), solidcore_record::Vec3::new(1.0, 0.0, 0.0)).unwrap();
+        let built = -20.0 + t + if two_sides { 3.0 } else { 0.0 };
+        assert!((built - start_x).abs() < 1e-6, "two sides {two_sides}: the build starts at x {built}");
+        open(&mut h);
+        let base = crate::canvas::anchor(&h.app, h.app.dialog.as_ref().unwrap()).unwrap().0;
+        assert!((base.x - start_x).abs() < 1e-6, "two sides {two_sides}: the arrow starts at x {} where the build starts at {start_x}", base.x);
+    }
+}
+
 #[test]
 fn rotated_second_occurrence_keeps_saved_from_and_to_points_exact() {
     let mut h = Harness::new();
@@ -1441,4 +1476,18 @@ fn removing_an_earlier_input_keeps_the_active_one() {
     // The active input itself going leaves the input after it active, as before.
     crate::dialogs::set_object_accepting(&mut inputs, &mut active, "From Object", FACES | VERTICES, false);
     assert_eq!(inputs[active].label, "Target Bodies");
+}
+
+#[test]
+fn editing_symmetric_extrude_toggles_symmetric_offset() {
+    let mut h = make(json!({"direction": "symmetric", "start_offset": "4 mm"}));
+    assert!(!extent(&h).symmetric_offset);
+    open(&mut h);
+    h.frames(2);
+    assert!(crate::scenario::handle_at("dialog:Symmetric Offset").is_some());
+    h.step(&json!({"click":{"handle":"dialog:Symmetric Offset"}})).unwrap();
+    h.frames(2);
+    h.step(&json!({"widget":"OK"})).unwrap();
+    assert!(h.app.dialog.is_none());
+    assert!(extent(&h).symmetric_offset);
 }

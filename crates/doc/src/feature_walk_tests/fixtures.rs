@@ -103,6 +103,11 @@ pub(super) fn fixtures() -> Vec<(&'static str, Value)> {
         ("shell", json!({"type": "shell", "faces": [o], "thickness": "shell.thickness"})),
         ("draft", json!({"type": "draft", "faces": [o], "angle": "draft.angle", "neutral": plane("draft_neutral"), "pull": [0, 0, 1]})),
         ("construction_plane", json!({"type": "construction_plane", "plane": plane("cplane")})),
+        (
+            "construction_plane_square_to_line",
+            json!({"type": "construction_plane", "plane": {"type": "square_to_line",
+                "line": {"type": "edge", "at": [1.0, 2.0, 3.0]}, "point": {"type": "point", "p": [4.0, 5.0, 6.0]}}}),
+        ),
         ("split", json!({"type": "split", "body": "B", "plane": plane("split")})),
         ("split_line", json!({"type": "split", "body": "B", "plane": plane("split_line")})),
         (
@@ -126,12 +131,17 @@ pub(super) fn fixtures() -> Vec<(&'static str, Value)> {
         (
             "frame_member",
             json!({"type": "frame_member", "path_sketch": 1, "lines": ["l1"],
-                "profile": {"source": "library", "profile": {"kind": "rect_tube", "width": 40, "height": 40, "wall": 3}}, "angle": "frame_member.angle"}),
+                "profile": {"source": "library", "profile": {"kind": "rect_tube", "width": 40, "height": 40, "wall": 3}}, "angle": "frame_member.angle",
+                "pairs": [{"id": "pair1", "a": {"type": "construct_point", "name": "CP"}, "b": {"type": "vertex", "at": o}}], "next_pair": 2}),
         ),
         (
             "frame_member_sketch",
             json!({"type": "frame_member", "path_sketch": 1, "profile": {"source": "sketch", "sketch": 2, "profiles": {"type": "all"}},
                 "anchor": "bottom_left", "mirror": true}),
+        ),
+        (
+            "frame_plate",
+            json!({"type":"frame_plate","member":{"feature":7,"line":"line1"},"plane":plane("plate"),"shape":{"shape":"rectangle","width":"plate.width","height":"plate.height"},"holes":{"pattern":"circle","diameter":"plate.hole","pitch_diameter":"plate.pitch","count":6,"angle":"plate.hole_angle"},"thickness":"plate.thickness","offset":"plate.offset","x_offset":"plate.x","y_offset":"plate.y","angle":"plate.angle"}),
         ),
         ("emboss", json!({"type": "emboss", "sketch": 1, "profiles": {"type": "all"}, "depth": "emboss.depth"})),
         ("rib", json!({"type": "rib", "sketch": 1, "curves": ["l1"], "thickness": "rib.thickness", "depth": "rib.depth"})),
@@ -168,6 +178,7 @@ pub(super) fn fixtures() -> Vec<(&'static str, Value)> {
             json!({"type": "sheet_fold", "a": o, "b": [1, 0, 0], "angle": "fold.angle", "radius": "fold.radius", "position": "centerline"}),
         ),
         ("sheet_path", json!({"type": "sheet_path", "edge": o, "sketch": 1, "curves": ["l1"], "radius": "path.radius"})),
+        ("sheet_tab", json!({"type": "sheet_tab", "sketch": 1, "profiles": {"type": "all"}})),
         ("sheet_unfold", json!({"type": "sheet_unfold"})),
         ("sheet_convert", json!({"type": "sheet_convert", "body": "B", "face": o, "engrave": [o]})),
         ("sheet_surface_convert", json!({"type": "sheet_surface_convert", "body": "B", "skip": [o], "engrave": [o]})),
@@ -264,8 +275,8 @@ pub(super) fn with_refs(name: &str, mut v: Value) -> Value {
     let extra = match name {
         "extrude" | "extrude_thin" | "revolve" | "sweep" | "sweep_options" | "pipe" | "coil" | "cell_grid" | "thicken" => json!({"targets": ["B"]}),
         "fillet_constant" | "fillet_chord" | "fillet_curvature" | "fillet_variable" | "fillet_spline" | "chamfer" | "shell" | "draft"
-        | "offset_face" | "delete_face" | "replace_face" | "sheet_flange" | "sheet_hem" | "sheet_perforate" | "sheet_path" | "sheet_unfold"
-        | "boss" | "lip" | "snap_fit" | "rest" | "surface_offset" => {
+        | "offset_face" | "delete_face" | "replace_face" | "sheet_flange" | "sheet_hem" | "sheet_perforate" | "sheet_path" | "sheet_tab"
+        | "sheet_unfold" | "boss" | "lip" | "snap_fit" | "rest" | "surface_offset" => {
             json!({"body": "B"})
         }
         "combine" => json!({"target": "B", "tools": ["B"]}),

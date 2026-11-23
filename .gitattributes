@@ -7,6 +7,9 @@
 # The plugin test fixture is read with include_str! and patched with multi-line excerpts written
 # as Rust strings (always LF), so a CRLF checkout must not change it (#17299).
 *.wat text eol=lf
+# A kernel test compares this STEP file, read with include_str!, with the block it builds as a Rust
+# string (always LF), so a CRLF checkout must not change it.
+/tests/step-regressions/block_edge_off_its_face.step text eol=lf
 # solidcore's build.rs turns each UpstreamFixes flag file into that field's doc, so a CRLF
 # checkout must not change it.
 solidcore/crates/solidcore/src/kernel/fixes/*.md text eol=lf

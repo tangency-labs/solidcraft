@@ -275,8 +275,8 @@ mod tests {
         png.extend(400u32.to_be_bytes());
         png.extend(200u32.to_be_bytes());
         png.extend([8, 6, 0, 0, 0, 0, 0, 0, 0]);
-        let data = solidcraft_engine::doc::canvas::base64_encode(&png);
-        h.app.run("canvas.insert", json!({"data": data, "plane": "XY", "width": 80})).unwrap()["canvas"].as_u64().unwrap()
+        let data = crate::scenario::image_file(&png);
+        h.app.run("canvas.insert", json!({"path": data, "plane": "XY", "width": 80})).unwrap()["canvas"].as_u64().unwrap()
     }
 
     #[test]

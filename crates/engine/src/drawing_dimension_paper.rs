@@ -52,18 +52,24 @@ pub(crate) struct Text {
 }
 
 impl Text {
-    /// `text` in the drawing's `lettering`, its capitals `cap_mm` high.
-    pub(crate) fn set(text: Option<&str>, cap_mm: f64, lettering: &PaperFonts) -> Text {
+    /// `text` in the drawing's `lettering`, its capitals `cap_mm` high, its lines standing by
+    /// `style`'s alignment in a box that starts at 0 along the baseline.
+    pub(crate) fn set(text: Option<&str>, cap_mm: f64, lettering: &PaperFonts, style: &TextStyle) -> Text {
         let unset = |why, pending| Text { runs: Vec::new(), fonts: Vec::new(), half: Vec2::new(0.0, cap_mm * 0.5), why, pending };
-        match text.map(|text| Outcome::from(lettering.text(text, Vec2::ZERO, cap_mm, 0.0, &TextStyle::default()))) {
+        match text.map(|text| Outcome::from(lettering.text(text, Vec2::ZERO, cap_mm, 0.0, style))) {
             None | Some(Outcome::Set(None)) => unset(None, false),
             Some(Outcome::Pending) => unset(None, true),
             Some(Outcome::Refused(why)) => unset(Some(why), false),
-            Some(Outcome::Set(Some((runs, fonts)))) => {
-                let width = runs.iter().map(TextRun::reach).fold(0.0, f64::max);
+            Some(Outcome::Set(Some((mut runs, fonts)))) => {
+                // A centred or right line starts before the anchor: the box is moved to start at 0.
+                let start = runs.iter().map(|run| run.origin.x).fold(0.0, f64::min);
+                let end = runs.iter().map(|run| run.origin.x + run.reach()).fold(0.0, f64::max);
+                for run in &mut runs {
+                    run.origin.x -= start;
+                }
                 // Its lines stand below the first one's baseline.
                 let below = runs.iter().map(|run| -run.origin.y).fold(0.0, f64::max);
-                Text { runs, fonts, half: Vec2::new(width, cap_mm + below) * 0.5, why: None, pending: false }
+                Text { runs, fonts, half: Vec2::new(end - start, cap_mm + below) * 0.5, why: None, pending: false }
             }
         }
     }
@@ -114,7 +120,7 @@ pub fn paper_group(dimension: &Dimension, resolved: &Resolved, frame: &ViewFrame
     let mut arrows = Vec::new();
     let (mut texts, mut fonts, mut why, mut pending) = (Vec::new(), Vec::new(), None, false);
     let mut laid = Layout::default();
-    let set = |text: Option<&str>| Text::set(text, TEXT_MM, lettering);
+    let set = |text: Option<&str>| Text::set(text, TEXT_MM, lettering, &TextStyle::default());
     for piece in pieces(dimension, resolved, &on, &set)? {
         let layout = dim_layout_sized(&piece.frame, piece.at, &SIZES, piece.text.half, [None, None]);
         if !piece.text.runs.is_empty() {
@@ -242,7 +248,7 @@ pub(crate) fn dragged(
     let (offset, place) = (dimension.offset_mm, dimension.text);
     // The text's half size, which a linear one's lift above its line depends on.
     let half = || {
-        let text = Text::set(resolved.text.as_deref(), TEXT_MM, lettering);
+        let text = Text::set(resolved.text.as_deref(), TEXT_MM, lettering, &TextStyle::default());
         if text.pending { Err(NotDragged::TextWaits) } else { Ok(text.half) }
     };
     match (&dimension.kind, on.as_slice(), drag) {

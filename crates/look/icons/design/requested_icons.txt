@@ -125,7 +125,6 @@ drawing_model_dimensions	false
 drawing_note	false
 drawing_parts_list	false
 drawing_parts_renumber	false
-drawing_print	false
 drawing_replace_model	false
 drawing_revision	false
 drawing_revision_table	false
@@ -174,6 +173,7 @@ flat	false
 fold	false
 folder	false
 frame_member	false
+frame_plate	false
 gear	false
 graph	false
 grid	false
@@ -224,6 +224,7 @@ panel_dock_bottom	false
 panel_dock_left	false
 panel_dock_right	false
 panel_float	false
+panel_popout	false
 panel_reset_height	false
 params	false
 paste	false
@@ -241,6 +242,7 @@ plane_auto	false
 plane_axis_point	false
 plane_midplane	false
 plane_perpendicular	false
+plane_square_to_line	false
 plane_tangent	false
 plane_three_points	false
 plane_two_edges	false
@@ -279,6 +281,7 @@ reach	false
 rect	false
 rect3	false
 rect_center	false
+rect_edge_center	false
 rect_rounded	false
 redo	false
 refold	false
@@ -300,11 +303,18 @@ scale	false
 screw	false
 section	false
 select	false
+select_bodies	false
+select_components	false
+select_faces_edges	false
+select_features	false
+select_parts	false
+select_sketch	false
 send	false
 settings	false
 settings_profile	false
 sheet	false
 sheet_rules	false
+sheet_tab	false
 shell	false
 shield	false
 silhouette	false
@@ -381,6 +391,7 @@ unfold	false
 update	false
 warning	false
 web	false
+window_other	false
 ws_design	false
 ws_drawing	false
 ws_render	false

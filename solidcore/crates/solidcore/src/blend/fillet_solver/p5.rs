@@ -83,6 +83,15 @@ pub trait RailClassificationContext {
         face: crate::topology::FaceId,
         class: &mut CurveClassification<FilletClassObject>,
     ) -> Result<()>;
+    /// The planar cliff closing this rim at the blend's joined endpoint.
+    fn continued_cliff(
+        &self,
+        _vertex: crate::topology::VertexId,
+        _rim: EdgeId,
+    ) -> Option<crate::topology::FaceId> {
+        None
+    }
+
     /// Actual corner kind.
     ///
     /// # Errors
@@ -760,5 +769,16 @@ mod tests {
             rails_fit::crossing_end(&[], jets, at(9.5), Vec3::X, true),
             None
         );
+    }
+
+    /// The radial sector test at a crossing refuses a non-finite dot product, which a
+    /// negated convex check would classify as concave and so as material-bounding.
+    #[test]
+    fn a_non_finite_radial_sector_dot_is_refused_not_concave() {
+        assert_eq!(rails_fit::concave_from_dots(0.5, 0.5).ok(), Some(false));
+        assert_eq!(rails_fit::concave_from_dots(-0.5, 0.5).ok(), Some(true));
+        assert!(rails_fit::concave_from_dots(f64::NAN, 0.5).is_err());
+        assert!(rails_fit::concave_from_dots(0.5, f64::NAN).is_err());
+        assert!(rails_fit::concave_from_dots(f64::INFINITY, 0.5).is_err());
     }
 }

@@ -1123,13 +1123,12 @@ fn a_design_with_a_missing_plugins_data_opens_and_names_the_plugin() {
     app.session.plugin_state.plugins_dir = Some(dir.join("plugins"));
     let mut design = Session::default();
     design.execute("solid.box", &json!({"length": 2, "width": 3, "height": 4})).unwrap();
-    let b64 = solidcraft_engine::doc::canvas::base64_encode;
-    let meta = b64(br#"{"plugin":"manufacture","name":"Manufacture","plugin_version":"1.4","format":3}"#);
+    let meta = br#"{"plugin":"manufacture","name":"Manufacture","plugin_version":"1.4","format":3}"#;
     let data = design.doc_mut();
     data.plugin_data.insert("manufacture/meta.json".into(), meta.into());
-    data.plugin_data.insert("manufacture/data.json".into(), b64(br#"{"setups":[]}"#).into());
-    let path = dir.join("with-data.json");
-    std::fs::write(&path, design.doc.to_json()).unwrap();
+    data.plugin_data.insert("manufacture/data.json".into(), br#"{"setups":[]}"#.into());
+    let path = dir.join("with-data.sc");
+    std::fs::write(&path, solidcraft_engine::io::write_design_container(&design.doc).unwrap()).unwrap();
 
     app.open_path(&path.to_string_lossy());
 
@@ -1505,6 +1504,28 @@ fn a_waiting_stand_up_offer_follows_the_preferences_when_it_is_made() {
     w.app.preferences.stand_up_unknown = crate::prefs::StandUpUnknown::Off;
     opened(&mut w);
     assert!(w.app.stand_up_later.is_none() && w.app.stand_up.is_none(), "no estimate for an offer that won't be made");
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// A scenario's `settle` waits for the stand-up estimate too, not only for the open's meshing:
+/// on a busy machine the estimate's thread can finish frames after the meshing, and a test that
+/// read the offer then found none (`tests/stand_up_offer.rs`, under full CI load).
+#[test]
+fn settle_waits_for_the_stand_up_estimate_after_the_bodies_are_meshed() {
+    let dir = scratch("stand-up-settle");
+    let path = dir.join("on_its_back.step").to_string_lossy().to_string();
+    let mut src = Session::default();
+    src.execute("solid.box", &json!({"length": 10, "width": 5, "height": 40})).unwrap();
+    src.execute("file.export", &json!({"path": path})).unwrap();
+    let text = std::fs::read_to_string(&path).unwrap();
+    std::fs::write(&path, text.replace("'SolidCraft','SolidCraft'", "'SolidCraft','Example CAD'")).unwrap();
+    let mut h = crate::scenario::Harness::new();
+    // Still running for more frames than `settle` ran once the meshing was done.
+    crate::stand_up::hold_estimate(30);
+    h.app.open_path_async(&path);
+    h.settle();
+    assert!(h.app.stand_up_later.is_none(), "settled with the estimate still being made");
+    assert!(h.app.stand_up.is_some() && h.app.stand_up_note, "the note is offered once settled");
     let _ = std::fs::remove_dir_all(&dir);
 }
 

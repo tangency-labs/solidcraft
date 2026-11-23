@@ -131,10 +131,10 @@ fn urdf_writes_decals_as_textured_visuals() {
     run(&mut s, "component.activate", json!({"component": "B"}));
     let mut png = Vec::new();
     image::codecs::png::PngEncoder::new(&mut png).write_image(&[200u8; 4 * 8], 4, 2, image::ExtendedColorType::Rgba8).unwrap();
-    let png = solidcraft_doc::canvas::base64_encode(&png);
-    run(&mut s, "canvas.decal", json!({"data": png, "face": [25, 5, 10], "width": 8, "name": "Logo"}));
-    run(&mut s, "canvas.insert", json!({"data": png, "plane": "XY", "width": 8, "name": "Tag"}));
-    run(&mut s, "canvas.insert", json!({"data": png, "plane": "XY", "width": 8, "name": "Hidden"}));
+    let png = crate::tests::image_file(&png);
+    run(&mut s, "canvas.decal", json!({"path": png, "face": [25, 5, 10], "width": 8, "name": "Logo"}));
+    run(&mut s, "canvas.insert", json!({"path": png, "plane": "XY", "width": 8, "name": "Tag"}));
+    run(&mut s, "canvas.insert", json!({"path": png, "plane": "XY", "width": 8, "name": "Hidden"}));
     run(&mut s, "canvas.edit", json!({"canvas": "Hidden", "visible": false}));
     // Asked for the usual way, the export writes no picture, as before.
     let plain = temp("decal-plain");

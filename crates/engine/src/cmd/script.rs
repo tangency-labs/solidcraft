@@ -960,6 +960,8 @@ fn joint_origin_arg(origin: &solidcraft_doc::joints::JointOrigin, doc: &Document
             XRef::Dir(d) => json!(dir(*d)),
             XRef::Face { face, pick: None } => json!(face),
             XRef::Face { pick: Some(p), .. } => json!({"face": world(*p)}),
+            XRef::Reference { reference, reverse } => json!({"reference":reference,"reverse":reverse}),
+            XRef::Planar { planar_face, reverse } => json!({"planar_face":planar_face,"reverse":reverse}),
         }
     };
     match &origin.snap {

@@ -259,10 +259,22 @@ fn ladder_012_variable_round_runs_on_into_the_upright_round() {
 /// the box's top back edge r5, the top right edge r3 alone (it runs
 /// on at y = 35 into the r5 round's end arc), then the upright (60, 40) r2 with its tangent
 /// chain, up the arc and along the seam. The case's invariants: 11 faces, one valid body;
-/// SolidCraft's golden (8ddce9016): 24 edges, 15 vertices, 47589.770467. Capped (#2364):
-/// 25 edges, 16 vertices, 47591.482.
-/// The golden's volume is 47589.770999 since a round is fitted as finely as its edge is known
-/// (its edges at 4e-5, not 1.6e-4), which moves the closure of tolerant gaps (#16735) by 5.3e-4.
+/// SolidCraft's golden (8ddce9016): 24 edges, 15 vertices. Capped (#2364): 25 edges,
+/// 16 vertices, 47591.482. The volume is the rolling-ball volume (#18166; each piece by
+/// piecewise Gauss-Kronrod quadrature split at every boundary change, within 1e-11):
+///
+/// ```text
+/// 48000 - (1 - pi/4)(25*60 + 9*35 + 4*15)
+///       - 4.293342478629   r3 run-on
+///       - 1.608436379598   end arc (Pappus)
+///       - 1.158579441504   end arc under the r3 cut
+///       - 0.790151961430   r3/r5 seam
+///       = 47589.771046109
+/// ```
+///
+/// It replaces SolidCraft's measured 47589.770467, which is 1.2e-8 off it, and the
+/// 47589.770999 measured once a round is fitted as finely as its edge is known (#16735),
+/// 1.0e-9 off it.
 #[test]
 fn ladder_021_round_runs_on_into_the_earlier_round() {
     let mut k = solidcraft_kernel();
@@ -279,7 +291,7 @@ fn ladder_021_round_runs_on_into_the_earlier_round() {
     blend(&mut k, &mut b, Kind::Round, &chain, 2.0).unwrap();
     let (counts, v) = measured(&mut k, &mut b);
     assert_eq!(counts, (11, 24, 15));
-    assert_rel(v, 47_589.770_999, 1e-8, "021");
+    assert_rel(v, 47_589.771_046, 1e-8, "021");
 }
 
 /// fillets/1207-fillet-box-end-edge-into-unblended-round-partial-chain, also SolidCraft's

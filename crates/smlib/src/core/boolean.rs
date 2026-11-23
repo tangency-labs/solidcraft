@@ -47,6 +47,9 @@ fn copies(bodies: &[&Body]) -> Result<Vec<Body>> {
 /// body that is not closed (solids touching along an edge or at a vertex are closed).
 pub(crate) fn boolean(a: &Body, b: &Body, op: BooleanOp) -> Result<Option<Body>> {
     usable("SmApiBoolean", &[a, b])?;
+    if op == BooleanOp::Union {
+        return call::ops_on("SmApiBoolean", &operands(&[a, b]), || ops::union_copies(a, b));
+    }
     let mut c = copies(&[a, b])?.into_iter();
     let (Some(ca), Some(cb)) = (c.next(), c.next()) else { return Err(Error::Argument) };
     call::ops_on("SmApiBoolean", &operands(&[a, b]), || ops::boolean(ca, cb, operation(op)))

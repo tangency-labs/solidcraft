@@ -91,6 +91,17 @@ fn rhino_box_imports_as_a_solid() {
     imports_the_block(bytes, "block.3dm");
 }
 
+#[test]
+fn a_file_name_with_umlauts_names_the_product() {
+    imports_the_block(BLOCK_FCSTD, "Hülse.FCStd");
+    imports_the_block(BLOCK_3DM, "Würfel ä.3dm");
+    let step = "#1=PRODUCT('cadmpeg_model','cadmpeg_model','',(#2));".to_string();
+    assert_eq!(
+        convert::step_route::name_unnamed_products(step, "dir/Hülse Bob's.FCStd"),
+        "#1=PRODUCT('H\\X2\\00FC\\X0\\lse Bob''s','H\\X2\\00FC\\X0\\lse Bob''s','',(#2));"
+    );
+}
+
 /// Only FreeCAD and Rhino contents are read: STEP text, garbage, a bad ZIP and empty input are
 /// refused with a message, as are ACIS, ShapeManager and commercial formats whatever their bytes.
 #[test]
@@ -155,6 +166,35 @@ fn decoding_is_capped() {
     assert_eq!(limits.max_input_bytes, crate::MAX_STEP_BYTES as u64);
     let same = cadmpeg_core::decode::ResourceLimits { max_input_bytes: service.max_input_bytes, ..limits };
     assert_eq!(same, service);
+}
+
+/// A raised "Largest file to open" limit raises every decode cap in proportion, not only the input size.
+#[test]
+fn a_raised_limit_raises_the_decode_caps() {
+    const TEST: &str = "native_cad::tests::a_raised_limit_raises_the_decode_caps";
+    const CHILD: &str = "SOLIDCRAFT_IO_RAISED_LIMIT_CHILD";
+    // The limit is process-wide, so it is raised in a child process of its own.
+    if std::env::var_os(CHILD).is_none() {
+        let output = std::process::Command::new(std::env::current_exe().unwrap())
+            .args(["--exact", TEST, "--nocapture", "--test-threads=1"])
+            .env(CHILD, "1")
+            .output()
+            .unwrap();
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert!(output.status.success(), "{}\n{stdout}\n{stderr}", output.status);
+        assert!(stdout.contains("test result: ok. 1 passed; 0 failed;"), "the child must run the test: {stdout}");
+        return;
+    }
+    crate::limits::set_override(Some(crate::limits::GB)).unwrap();
+    let limits = convert::policy().limits;
+    let service = cadmpeg_core::decode::ResourceLimits::service();
+    assert_eq!(limits.max_input_bytes, crate::limits::GB);
+    assert_eq!(limits.max_retained_bytes, 2 * service.max_retained_bytes);
+    assert_eq!(limits.max_decompressed_bytes_total, 2 * service.max_decompressed_bytes_total);
+    assert_eq!(limits.max_decompressed_bytes_per_expand, 2 * service.max_decompressed_bytes_per_expand);
+    assert_eq!(limits.max_entities, 2 * service.max_entities);
+    assert_eq!(limits.max_recursion_depth, service.max_recursion_depth);
 }
 
 /// A FreeCAD archive whose Document.xml inflates past the per-entry cap (a ZIP bomb, 300 MB of

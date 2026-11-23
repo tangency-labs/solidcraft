@@ -14,7 +14,7 @@ use crate::geom::attribute::ObjectKey;
 use crate::geom::extent1d::Extent1d;
 use crate::geom::global_solver::{SolutionRequested, SolverOperation};
 use crate::geom::solution_array::{ObjectKind, SolutionObject};
-use crate::geom::tol::{xsect_tol3d, zone_tol3d};
+use crate::geom::tol::{within_coincidence_tol, xsect_tol3d, zone_tol3d};
 use crate::intersect::curve_class::{src_zone_tol_3d_of, CurveClassification, CurveInterval};
 use crate::intersect::point_class::{
     object_zone_tol_3d, ClassGeometry, ClassObject, ClassObjectKind, PointClassType,
@@ -24,6 +24,7 @@ use crate::kernel::Kernel;
 use crate::math::{max2, min2, Point2, Point3, Vec3, BIG_DOUBLE, EFF_ZERO};
 use crate::nurbs::math::gamma;
 use crate::query::face::p2 as face_p2;
+use crate::surface::surface::Surface;
 use crate::topology::brep::p2 as brep_p2;
 use crate::topology::edgeuse::p1 as eu1;
 use crate::topology::proto_topology::p2::EXACT_TOL_FACTOR;
@@ -1173,7 +1174,126 @@ fn crossing_stretch_certified<O: ClassObject>(
     Ok(true)
 }
 
+/// The most Newton steps [`common_point`] takes: a bound on the loop; convergence is
+/// checked at each step, never assumed.
+const COMMON_POINT_STEPS: usize = 32;
+
+/// Not upstream (#3062): the value at `x` of the implicit equation of `a` and its gradient
+/// (a plane, a cylinder or cone, a sphere; `None` for a torus, whose equation is quartic).
+fn implicit_value(a: &crate::surface::implicit::Implicit, x: Point3) -> Option<(f64, Vec3)> {
+    use crate::surface::implicit::Implicit;
+    Some(match *a {
+        Implicit::Plane { origin, normal } => ((x - origin).dot(normal), normal),
+        Implicit::Cone {
+            origin,
+            axis,
+            radius,
+            tan_angle,
+        } => {
+            let u = x - origin;
+            let h = u.dot(axis);
+            let radial = u - axis * h;
+            let r = radius + tan_angle * h;
+            let f = radial.dot(radial) - r * r;
+            let g = (radial - axis * (r * tan_angle)) * 2.0;
+            (f, g)
+        }
+        Implicit::Sphere { centre, radius } => {
+            let u = x - centre;
+            (u.dot(u) - radius * radius, u * 2.0)
+        }
+        Implicit::Torus { .. } => return None,
+    })
+}
+
+/// Not upstream (#3062): the common point of three analytic surfaces nearest `start`, by
+/// Newton's method on their implicit equations: `None` where one is not a plane, cylinder,
+/// cone or sphere, the normals do not span space at a step, or it does not converge in
+/// [`COMMON_POINT_STEPS`] steps to within rounding of `start`'s size.
+fn common_point(surfaces: [&Surface; 3], start: Point3) -> Option<Point3> {
+    use crate::surface::implicit::AnalyticSupport;
+    let of = |s: &Surface| AnalyticSupport::of(s).map(|a| a.implicit());
+    let [s0, s1, s2] = surfaces;
+    let eq = [of(s0)?, of(s1)?, of(s2)?];
+    let size = 1.0 + start.max_dimension();
+    let mut x = start;
+    for _ in 0..COMMON_POINT_STEPS {
+        let mut rows = [(0.0, Vec3::ZERO); 3];
+        for (row, a) in rows.iter_mut().zip(&eq) {
+            *row = implicit_value(a, x)?;
+        }
+        let [(f0, g0), (f1, g1), (f2, g2)] = rows;
+        let det = g0.dot(g1.cross(g2));
+        let scale = g0.length() * g1.length() * g2.length();
+        if det.is_nan() || det.abs() <= EFF_ZERO * scale {
+            return None;
+        }
+        // Cramer's rule for g_i . dx = -f_i
+        let dx = (g1.cross(g2) * -f0 + g2.cross(g0) * -f1 + g0.cross(g1) * -f2) / det;
+        x += dx;
+        if dx.length() <= 4.0 * f64::EPSILON * size {
+            return Some(x);
+        }
+    }
+    None
+}
+
 impl<O: ClassObject> VertexDefinition<O> {
+    /// Not upstream (#3062): where this definition is a crossing of an edge of one B-rep
+    /// (between two faces) and a face of the other, all three on planes, cylinders, cones or
+    /// spheres, it is placed at their common point, solved on the surfaces from its
+    /// position: a curve crossing the edge at a grazing angle fixes the crossing along the
+    /// edge only to the tolerance over the angle's sine, and the curves meeting there each
+    /// come within tolerance of the third face at a different point. Moved only within the
+    /// definition's own tolerance. Returns whether it moved.
+    ///
+    /// # Errors
+    ///
+    /// Those of the topology walks.
+    pub fn place_on_three_surfaces(
+        &mut self,
+        k: &Kernel,
+        geometry: &impl ClassGeometry<O>,
+    ) -> Result<bool> {
+        let (edge_pc, face_pc) = match (self.pc1.point_class(), self.pc2.point_class()) {
+            (PointClassType::Edge, PointClassType::Face) => (self.pc1, self.pc2),
+            (PointClassType::Face, PointClassType::Edge) => (self.pc2, self.pc1),
+            _ => return Ok(false),
+        };
+        let (Some(eo), Some(fo)) = (edge_pc.object(), face_pc.object()) else {
+            return Ok(false);
+        };
+        let (Some((eb, EntityRef::Edge(e))), Some((fb, EntityRef::Face(f)))) =
+            (geometry.topology_entity(eo), geometry.topology_entity(fo))
+        else {
+            return Ok(false);
+        };
+        let [a, b] = edge::faces(eb, e, None)?[..] else {
+            return Ok(false);
+        };
+        let (Some(sa), Some(sb), Some(sf)) = (
+            crate::topology::face::p2::surface(eb, a)?,
+            crate::topology::face::p2::surface(eb, b)?,
+            crate::topology::face::p2::surface(fb, f)?,
+        ) else {
+            return Ok(false);
+        };
+        let Some(x) = common_point([sa, sb, sf], self.position) else {
+            return Ok(false);
+        };
+        let moved = x.distance(self.position);
+        if moved.is_nan() || moved > self.tolerance(k) {
+            return Ok(false);
+        }
+        // Already at the common point to rounding: left as it is, bit for bit, so a vertex
+        // the crossing placed exactly is not nudged by the last digits of the solve.
+        if moved <= 8.0 * f64::EPSILON * (1.0 + self.position.max_dimension()) {
+            return Ok(false);
+        }
+        self.position = x;
+        Ok(true)
+    }
+
     /// `SmVertexDefinition(pCtx, cpPC1, cpPC2, rPosition, dTol, dGap, pOwner)`: copies
     /// the classifications and computes their parameters at `position` when unset
     /// (statuses ignored); a non-positive `gap` becomes the distance between the two
@@ -2653,7 +2773,10 @@ impl DeclaredContact {
     }
 
     /// Whether this region and `other` are not proved apart: a lower bound of the distance
-    /// between their segments is within the sum of their radii. The bound is the gap
+    /// between their segments is within the coincidence rule of their radii
+    /// ([`within_coincidence_tol`]: the larger radius, at least the contact tolerance, and
+    /// the rounding of the copies past it; docs/booleans.md, "One point or two"), where
+    /// upstream's intersection tolerance would take their sum. The bound is the gap
     /// between the two segments' projections onto one direction, which no pair of their
     /// points is closer than whatever the direction, with the projections' rounding
     /// (`γ_4` of each point's distance from `other.a` times the direction's length)
@@ -2662,7 +2785,7 @@ impl DeclaredContact {
     /// solve gets wrong (near-parallel segments) gives a smaller bound, never a larger one.
     /// The regions are taken for overlapping in doubt. A NaN is apart.
     #[must_use]
-    pub fn overlaps(&self, other: &Self) -> bool {
+    pub fn overlaps(&self, k: &Kernel, other: &Self) -> bool {
         let (d1, d2, r) = (self.b - self.a, other.b - other.a, self.a - other.a);
         let (a, e, f) = (d1.dot(d1), d2.dot(d2), d2.dot(r));
         let unit = |x: f64| x.clamp(0.0, 1.0);
@@ -2710,8 +2833,10 @@ impl DeclaredContact {
         } else {
             width
         };
-        let reach = (self.radius + other.radius) * (1.0 + gamma(1));
-        !(least.is_nan() || least > reach)
+        let size = [self.a, self.b, other.a, other.b]
+            .iter()
+            .fold(0.0_f64, |m, p| m.max(largest_coordinate(*p)));
+        within_coincidence_tol(k, least, self.radius, other.radius, size)
     }
 
     /// Whether `p` is within the radius of the segment, by an upper bound of its distance:
@@ -2733,6 +2858,13 @@ impl DeclaredContact {
             * (1.0 + gamma(2));
         !(distance.is_nan() || distance > self.radius)
     }
+}
+
+/// The largest magnitude of `p`'s coordinates: the size whose rounding the coincidence rule
+/// allows past its tolerance ([`within_coincidence_tol`]). A NaN coordinate is passed over
+/// (`f64::max`); a NaN distance is apart whatever the size.
+fn largest_coordinate(p: Point3) -> f64 {
+    p.x.abs().max(p.y.abs()).max(p.z.abs())
 }
 
 fn push_store<T>(store: &mut Vec<Option<T>>, item: T) -> Result<u32> {
@@ -3371,7 +3503,7 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
     /// [`VertexDefinition::set_position`], so the tolerance grows to keep every absorbed
     /// hull point covered.
     ///
-    /// With `seam_vertex_stays_on_seam` (not upstream): a definition on a vertex that ends
+    /// Not upstream (#18274): a definition on a vertex that ends
     /// a seam edge ([`vertex::seam_edge`]), or on a seam edge itself, is put onto that seam,
     /// at the seam's point under the position worked out as upstream ([`onto_seam`]). The
     /// seam edge's curve is the seam, an iso line of its face's surface, and its vertex ends
@@ -3423,14 +3555,10 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
         self.pv(v.proto_vertex)?;
         let tol = self.tolerance(k);
 
-        // (`seam_vertex_stays_on_seam`) the seam a definition on a seam's vertex or edge keeps to
-        let seam = if k.fixes.seam_vertex_stays_on_seam {
-            match seam_curve(geometry, &v.pc1)? {
-                Some(c) => Some(c),
-                None => seam_curve(geometry, &v.pc2)?,
-            }
-        } else {
-            None
+        // (#18274) the seam a definition on a seam's vertex or edge keeps to
+        let seam = match seam_curve(geometry, &v.pc1)? {
+            Some(c) => Some(c),
+            None => seam_curve(geometry, &v.pc2)?,
         };
 
         if dist > tol && dist1 + dist2 > EFF_ZERO {
@@ -3664,10 +3792,12 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
         // Placed again by a crossing that fixes it more closely, it moves this
         // ProtoVertex, the average of its VertexDefinitions, with it.
         let old = self.vd(vd)?.position;
-        let moved = self
+        let def = self
             .vertex_def_mut(vd)
-            .ok_or(dangling("vertex definition is deleted"))?
-            .place_by_crossing(k, geometry, pc1, pc2, crossing_sine, curve)?;
+            .ok_or(dangling("vertex definition is deleted"))?;
+        let crossed = def.place_by_crossing(k, geometry, pc1, pc2, crossing_sine, curve)?;
+        // (#3062) and then on its three faces' common point, where it has one
+        let moved = def.place_on_three_surfaces(k, geometry)? || crossed;
         if moved {
             let (new, vd_tol) = {
                 let v = self.vd(vd)?;
@@ -4102,17 +4232,22 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
                 continue;
             }
             let this_dist = face_p2::proto_vertex_distance_to(pv, position);
-            let combined = (pv.tolerance(k) + tolerance) * (1.0 + gamma(1));
-            let excess = this_dist * (1.0 - gamma(4)) - combined;
-            let apart = excess.is_nan() || excess > 0.0;
+            let size = largest_coordinate(pv.position).max(largest_coordinate(position));
+            let apart = !within_coincidence_tol(
+                k,
+                this_dist * (1.0 - gamma(4)),
+                pv.tolerance(k),
+                tolerance,
+                size,
+            );
             // (the proto vertex's own ball, and the regions of the points it holds)
             let own = DeclaredContact::of_point(pv.position, pv.tolerance(k));
             let one_region = || {
-                region.overlaps(&own)
+                region.overlaps(k, &own)
                     || self
                         .regions
                         .iter()
-                        .any(|(of, r)| *of == id && region.overlaps(r))
+                        .any(|(of, r)| *of == id && region.overlaps(k, r))
             };
             if apart
                 && !one_region()
@@ -4204,11 +4339,11 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
                 continue;
             }
             let own = DeclaredContact::of_point(pv.position, pv.tolerance(k));
-            if region.overlaps(&own)
+            if region.overlaps(k, &own)
                 || self
                     .regions
                     .iter()
-                    .any(|(at, r)| *at == id && region.overlaps(r))
+                    .any(|(at, r)| *at == id && region.overlaps(k, r))
             {
                 return Ok(Some(id));
             }
@@ -4763,10 +4898,17 @@ mod tests {
 
     /// Two segments crossing at an angle of 1e-9 (their determinant rounds to zero, and the
     /// closest pair the clamped solve finds is 1e-9 apart) are not proved apart, however
-    /// small the radii; parallel segments 1e-6 apart are, with radii of 1e-7; a NaN is
-    /// apart.
+    /// small the radii. Regions are one place by the coincidence rule
+    /// (`within_coincidence_tol`): within the larger radius, never under the contact
+    /// tolerance (the system zone tolerance, 1e-5 here), and the rounding of the copies
+    /// past it (`γ_32` of the coordinates' size, 1.5: 5.3e-15). Parallel segments 1.5e-5
+    /// apart with radii of 1e-5 are proved apart (upstream's intersection tolerance, the
+    /// radii's sum of 2e-5, took them for one); 0.9e-5 apart they are one. A radius of
+    /// 3e-5 takes in a segment 2.5e-5 off whatever the other's; radii of 1e-7 still reach
+    /// the contact tolerance (0.9e-5 apart: one; 1.1e-5: two). A NaN is apart.
     #[test]
     fn near_parallel_crossing_regions_are_not_proved_apart() {
+        let k = Kernel::default();
         let seg = |a: Point3, b: Point3, radius: f64| DeclaredContact { a, b, radius };
         let one = seg(
             Point3::new(-1.0, 0.0, 0.0),
@@ -4778,20 +4920,70 @@ mod tests {
             Point3::new(1.5, 1e-9, 0.0),
             1e-12,
         );
-        assert!(one.overlaps(&other));
-        assert!(other.overlaps(&one));
-        let parallel = seg(
-            Point3::new(-0.5, 1e-6, 0.0),
-            Point3::new(1.5, 1e-6, 0.0),
-            1e-7,
-        );
-        assert!(!one.overlaps(&parallel));
-        assert!(!parallel.overlaps(&one));
-        let ball = DeclaredContact::of_point(Point3::new(0.3, 2e-7, 0.0), 1e-7);
-        assert!(!one.overlaps(&ball));
-        assert!(DeclaredContact::of_point(Point3::new(0.3, 0.9e-7, 0.0), 1e-7).overlaps(&one));
+        assert!(one.overlaps(&k, &other));
+        assert!(other.overlaps(&k, &one));
+        let at = |off: f64, radius: f64| {
+            seg(
+                Point3::new(-0.5, off, 0.0),
+                Point3::new(1.5, off, 0.0),
+                radius,
+            )
+        };
+        let one = at(0.0, 1e-5);
+        for (off, radius, overlaps) in [
+            (1.5e-5, 1e-5, false),
+            (0.9e-5, 1e-5, true),
+            (2.5e-5, 3e-5, true),
+            (3.1e-5, 3e-5, false),
+        ] {
+            let parallel = at(off, radius);
+            assert_eq!(one.overlaps(&k, &parallel), overlaps, "{off:e} {radius:e}");
+            assert_eq!(parallel.overlaps(&k, &one), overlaps, "{off:e} {radius:e}");
+        }
+        let small = at(0.0, 1e-7);
+        assert!(small.overlaps(&k, &at(0.9e-5, 1e-7)));
+        assert!(!small.overlaps(&k, &at(1.1e-5, 1e-7)));
+        let ball = DeclaredContact::of_point(Point3::new(0.3, 1.5e-5, 0.0), 1e-5);
+        assert!(!one.overlaps(&k, &ball));
+        assert!(DeclaredContact::of_point(Point3::new(0.3, 0.9e-5, 0.0), 1e-5).overlaps(&k, &one));
         let nan = DeclaredContact::of_point(Point3::new(f64::NAN, 0.0, 0.0), 1.0);
-        assert!(!one.overlaps(&nan));
+        assert!(!one.overlaps(&k, &nan));
+    }
+
+    /// Two points are one proto vertex within the larger of their tolerances (the coincidence
+    /// rule), not their sum: with tolerances of 1e-5 (the contact tolerance too), a point
+    /// 1.5e-5 from a proto vertex is past both balls, so it is two points (the sum, 2e-5,
+    /// made them one); 0.9e-5 away it is one. A proto vertex with a tolerance of 2e-5 takes a
+    /// point of tolerance 1e-5 1.5e-5 away (within its own ball); 2.1e-5 away it does not.
+    #[test]
+    fn two_points_are_one_proto_vertex_within_the_larger_tolerance() {
+        let k = Kernel::default();
+        let mut m = manager(&k);
+        let tol = 1e-5;
+        let pv = m.new_proto_vertex(Point3::new(1.0, 2.0, 3.0), tol).unwrap();
+        m.add_proto_vertex(pv);
+        let at = |x: f64| Point3::new(1.0 + x, 2.0, 3.0);
+        assert_eq!(
+            m.find_proto_vertex_within(&k, at(1.5e-5), tol, None)
+                .unwrap(),
+            None
+        );
+        assert_eq!(
+            m.find_proto_vertex_within(&k, at(0.9e-5), tol, None)
+                .unwrap(),
+            Some(pv)
+        );
+        m.proto_vertex_mut(pv).unwrap().set_raw_tolerance(2e-5);
+        assert_eq!(
+            m.find_proto_vertex_within(&k, at(1.5e-5), tol, None)
+                .unwrap(),
+            Some(pv)
+        );
+        assert_eq!(
+            m.find_proto_vertex_within(&k, at(2.1e-5), tol, None)
+                .unwrap(),
+            None
+        );
     }
 
     /// A proto vertex combined into another hands over the uncertainty regions of its

@@ -164,11 +164,14 @@ impl ModelBody {
     /// Indexed geometry underlying `mesh_in_place` for a mesh body without authored shading
     /// normals. A rigid occurrence uses the definition's triangles in the definition's frame.
     pub fn flat_mesh_in_place(&self) -> Option<(&[Vec3], &[[u32; 3]])> {
+        self.flat_mesh_body_in_place()?.triangle_mesh()
+    }
+
+    /// The body's indexed source in the frame of `mesh_in_place`. Clone this to share the
+    /// source with a background worker.
+    pub fn flat_mesh_body_in_place(&self) -> Option<&Body> {
         let body = self.mesh_placement.as_deref().map_or(&self.body, |placed| &placed.body);
-        if !body.triangle_corner_normals()?.is_empty() {
-            return None;
-        }
-        body.triangle_mesh()
+        body.triangle_corner_normals()?.is_empty().then_some(body)
     }
 
     /// Keep the meshes `old` holds when this body is the same shape: a feature evaluated again

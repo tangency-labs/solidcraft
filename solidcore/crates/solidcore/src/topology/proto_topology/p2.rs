@@ -131,6 +131,16 @@
 //!   [`ProtoTopologyManager::create_proto_edge`] trims the 3D curve and its uv curves to the
 //!   one interval none of their trims snaps (`exact_pieces::common_trim_interval`); upstream
 //!   trims them in turn with one interval, and the edge can end past its 3D curve.
+//! - **Not upstream: a proto edge combined the other way keeps its ends** (#18546).
+//!   [`ProtoTopologyManager::combine_proto_edge`] compares `other`'s ends with `pe`'s start
+//!   with start and end with end, as upstream, unless `other` runs from `pe`'s end to its
+//!   start: then no end moves. Upstream moves both ends: it unlists `other` at each, points
+//!   its start at `pe`'s start and its end at `pe`'s end, which no longer list it, and
+//!   lists `pe` there once more. The `RemoveProtoEdge` that follows in
+//!   `SplitIntersectingProtoEdges` then fails at both ends (an overlap running the other
+//!   way); upstream drops that status, `ssi_proto_topology_statuses_pass_on` made it the
+//!   boolean's error. An end that is genuinely another proto vertex still moves as
+//!   upstream.
 //! - `UpdateEdges` trims a definition at the split point; its alternative of splitting
 //!   the proto edge (`SmProtoEdge::Split`) sits behind `static constexpr SmBoolean
 //!   cbiDoSplit = FALSE` and is not ported.
@@ -1271,8 +1281,9 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
     /// (`SmVertex::GetCommonEdges`, `SmEdge::IsConnectedToFace`) and its curve over its
     /// interval and the definition's curve over its interval are proved within the larger of
     /// the face's and the definition's tolerance of each other as wholes
-    /// ([`curve_runs_along`]: a bound on control points, never samples). The first such edge
-    /// is taken.
+    /// ([`curve_runs_along`]: a bound on control points, never samples; for two coplanar
+    /// circle arcs, within that tolerance plus the coordinates' resolution, `√3 ulp` of their
+    /// magnitude, #18065). The first such edge is taken.
     ///
     /// # Errors
     ///
@@ -2544,7 +2555,9 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
     /// tolerance, `other`'s overlapping proto edges, `other`'s ends moved to `pe`'s
     /// (listing `pe` at `pe`'s ends), `other`'s edge definitions added to `pe` (all
     /// of them, from a copy of the list), and `other`'s coincident proto faces moved
-    /// to `pe`.
+    /// to `pe`. An `other` from `pe`'s end to its start, the other way between the same
+    /// two proto vertices, already ends at `pe`'s proto vertices: no end moves (not
+    /// upstream, which compares start with start; see the file's deviations).
     ///
     /// # Errors
     ///
@@ -2575,9 +2588,15 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
         this.set_raw_tolerance(max2(this.raw_tolerance(), o.raw_tolerance()));
         this.append_overlapping_pes(o.overlapping_pes());
 
-        let this_start = this.start_proto_vertex();
-        let other_start = o.start_proto_vertex();
-        if other_start != this_start {
+        let (this_start, this_end) = (this.start_proto_vertex(), this.end_proto_vertex());
+        let (other_start, other_end) = (o.start_proto_vertex(), o.end_proto_vertex());
+        // not upstream: running the other way between `pe`'s two proto vertices, `other`
+        // keeps its ends, where it is listed, and `pe` is not listed there again
+        let backwards = other_start.is_some()
+            && other_end.is_some()
+            && other_start == this_end
+            && other_end == this_start;
+        if other_start != this_start && !backwards {
             self.proto_edge_mut(other)
                 .ok_or(dangling("proto edge is deleted"))?
                 .set_start_proto_vertex(this_start);
@@ -2593,12 +2612,7 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
                 .add_proto_edge(pe);
         }
 
-        let this_end = self
-            .proto_edge(pe)
-            .ok_or(dangling("proto edge is deleted"))?
-            .end_proto_vertex();
-        let other_end = o.end_proto_vertex();
-        if other_end != this_end {
+        if other_end != this_end && !backwards {
             self.proto_edge_mut(other)
                 .ok_or(dangling("proto edge is deleted"))?
                 .set_end_proto_vertex(this_end);
@@ -4524,6 +4538,79 @@ mod tests {
             let other = m.new_proto_edge(&k, Some(v2), Some(v3), ivl).unwrap();
             let r = m.combine_proto_edge(&k, &mut geo, pe, other);
             assert_eq!(r.is_err(), pass_on, "{r:?}");
+        }
+    }
+
+    /// `SplitIntersectingProtoEdges` combines two overlapping proto edges and removes the
+    /// second (#18546). Running the other way between the same two proto vertices, the
+    /// second's ends were moved crosswise onto the first's: unlisted at both, pointed at
+    /// proto vertices that no longer listed it, and the removal that follows failed at
+    /// both, "the proto edge is not listed" with `ssi_proto_topology_statuses_pass_on`.
+    /// Now it keeps its ends, so with either setting the removal succeeds, the second is
+    /// listed nowhere, and the first is listed exactly once at each of its ends, as when
+    /// both run the same way. A second edge that ends at a third proto vertex still has
+    /// that end moved as upstream, and its removal still fails there with the flag.
+    #[test]
+    fn a_proto_edge_combined_into_one_running_either_way_is_removed() {
+        for pass_on in [false, true] {
+            for way in ["same", "backwards", "elsewhere"] {
+                let mut k = Kernel::default();
+                k.fixes.ssi_proto_topology_statuses_pass_on = pass_on;
+                let mut geo = Geo {
+                    curves: vec![line([0.0, 0.0, 0.0], [1.0, 0.0, 0.0])],
+                    ..Geo::default()
+                };
+                let mut m = manager();
+                let ivl = geo.curves[0].natural_interval();
+                let v0 = m
+                    .new_proto_vertex(Point3::new(0.0, 0.0, 0.0), 1e-5)
+                    .unwrap();
+                let v1 = m
+                    .new_proto_vertex(Point3::new(1.0, 0.0, 0.0), 1e-5)
+                    .unwrap();
+                let v2 = m
+                    .new_proto_vertex(Point3::new(2.0, 0.0, 0.0), 1e-5)
+                    .unwrap();
+                let (s, e) = match way {
+                    "same" => (v0, v1),
+                    "backwards" => (v1, v0),
+                    _ => (v0, v2),
+                };
+                let pe = m.new_proto_edge(&k, Some(v0), Some(v1), ivl).unwrap();
+                let other = m.new_proto_edge(&k, Some(s), Some(e), ivl).unwrap();
+                // listed in the manager and once at each end, as `create_proto_edge` lists
+                for (x, ends) in [(pe, [v0, v1]), (other, [s, e])] {
+                    m.add_proto_edge(x);
+                    for v in ends {
+                        m.proto_vertex_mut(v).unwrap().add_proto_edge(x);
+                    }
+                }
+                let what = format!("pass_on {pass_on}, {way}");
+                let count = |m: &ProtoTopologyManager<H>, v, x| {
+                    let listed = m.proto_vertex(v).unwrap().proto_edges();
+                    listed.iter().filter(|&&y| y == x).count()
+                };
+                let ends = |m: &ProtoTopologyManager<H>, x| {
+                    let x = m.proto_edge(x).unwrap();
+                    (x.start_proto_vertex(), x.end_proto_vertex())
+                };
+
+                m.combine_proto_edge(&k, &mut geo, pe, other).unwrap();
+                let r = m.remove_proto_edge(&k, other);
+                assert!(!m.proto_edges().contains(&other), "{what}");
+                assert_eq!(ends(&m, pe), (Some(v0), Some(v1)), "{what}");
+                if way == "elsewhere" {
+                    assert_eq!(ends(&m, other), (Some(v0), Some(v1)), "{what}");
+                    assert_eq!(r.is_err(), pass_on, "{what}: {r:?}");
+                    continue;
+                }
+                assert_eq!(ends(&m, other), (Some(s), Some(e)), "{what}");
+                assert!(r.is_ok(), "{what}: {r:?}");
+                for v in [v0, v1] {
+                    assert_eq!(count(&m, v, other), 0, "{what}: {v:?}");
+                    assert_eq!(count(&m, v, pe), 1, "{what}: {v:?}");
+                }
+            }
         }
     }
 

@@ -10,6 +10,17 @@
 //! | [`BooleanFailure::EntityMissing`]   | `SM_ERR_NULL_POINTER`               |
 //! | [`BooleanFailure::SolidLeaks`]      | `SM_ERR` (WR-619, solidcore-native) |
 //! | [`BooleanFailure::RelateConflict`]  | `SM_ERR`                            |
+//! | [`BooleanFailure::Defect`]          | `SM_ERR` (or the site's, through `with_status`) |
+//! | the named causes, from [`BooleanFailure::FaceWithoutSurface`] on | the status of the phrase each replaced (`comparison_status`) |
+//!
+//! [`BooleanFailure::Defect`] is a failure reviewed at its site as the kernel's fault, with
+//! its reason: a defect ([`ErrorKind::StageFailed`], class 127). A check of the caller's
+//! argument or body (a face without surface, an edge without curve, a tree operator
+//! without operands) is a named cause of class `invalid_input`; it stays a
+//! [`crate::SolidError::Failed`] with its status, so the intersector's handling of
+//! ignored statuses (which passes [`crate::SolidError::InvalidInput`] on) is unchanged.
+//! [`BooleanFailure::StageFailed`] and [`BooleanFailure::EntityMissing`] are sites not yet
+//! converted (the conversion guide: `docs/failure-codes-and-reproduction.md` §6).
 //!
 //! Deviations: not upstream. A stage's failure names the stage ([`BooleanStage`]) and
 //! says in a phrase what went wrong; the handles the stages work on are the
@@ -36,6 +47,16 @@ pub enum BooleanStage {
     CloseLoop,
     /// Resolving surfaces, edges or faces that coincide.
     Coincidence,
+    /// Intersecting the faces of the operands and imprinting the curves on them.
+    Intersect,
+    /// Merging the curve classifications of an intersection into the operands.
+    MergeClassifications,
+    /// Classifying the operands' faces, edges and vertices into the result.
+    Classify,
+    /// Merging the kept topology of the other operand into the primary.
+    Merge,
+    /// Evaluating a Boolean tree or a merge of several B-reps.
+    Tree,
 }
 
 impl core::fmt::Display for BooleanStage {
@@ -46,6 +67,11 @@ impl core::fmt::Display for BooleanStage {
             Self::Split => "splitting edges",
             Self::CloseLoop => "closing an intersection loop",
             Self::Coincidence => "resolving coincident geometry",
+            Self::Intersect => "intersecting the operands' faces",
+            Self::MergeClassifications => "merging the curve classifications",
+            Self::Classify => "classifying the operands into the result",
+            Self::Merge => "merging the other operand into the primary",
+            Self::Tree => "evaluating the Boolean tree",
         })
     }
 }
@@ -64,6 +90,37 @@ impl core::fmt::Display for RelateSide {
         f.write_str(match self {
             Self::Brep => "the B-rep",
             Self::Other => "the other B-rep",
+        })
+    }
+}
+
+/// The step of merging two curve classifications that failed, for a
+/// [`BooleanFailure::ClassificationStepFailed`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum ClassificationStep {
+    /// Fixing up the end points of the B-rep's classification (edge to vertex, short
+    /// intervals merged).
+    FixupFirst,
+    /// Fixing up the end points of the other B-rep's classification.
+    FixupSecond,
+    /// Making the two classifications consistent, interval for interval.
+    Homogenize,
+    /// Removing the short intervals that may be coincident and validating the rest.
+    Cleanup,
+    /// Making each point classified to a related entity classify to its mate on the
+    /// other side.
+    FixupMates,
+}
+
+impl core::fmt::Display for ClassificationStep {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.write_str(match self {
+            Self::FixupFirst => "fixing up the end points of the B-rep's classification",
+            Self::FixupSecond => "fixing up the end points of the other B-rep's classification",
+            Self::Homogenize => "making the two classifications consistent",
+            Self::Cleanup => "removing the short intervals and validating the rest",
+            Self::FixupMates => "making the points classified to related entities agree",
         })
     }
 }
@@ -95,7 +152,8 @@ impl core::fmt::Display for PlacedEntity {
 #[non_exhaustive]
 pub enum BooleanFailure {
     /// A stage could not continue, as the phrase says (for example "a different entity is
-    /// already related to it").
+    /// already related to it"). The form not yet reviewed: new code builds
+    /// [`BooleanFailure::Defect`], a named cause or a refusal instead.
     StageFailed {
         /// The stage.
         stage: BooleanStage,
@@ -146,6 +204,124 @@ pub enum BooleanFailure {
         /// The tolerance that fits: anything below it reaches no vertex it does not bound.
         fits_below: Option<f64>,
     },
+    /// A failure that is the kernel's fault, reviewed at its site, with the written reason:
+    /// `why` names the step of `stage` that failed and why that is the kernel's fault, not
+    /// the geometry's. A defect ([`ErrorKind::StageFailed`]); status `SM_ERR` unless its
+    /// site says otherwise.
+    Defect {
+        /// The stage.
+        stage: BooleanStage,
+        /// The step that failed, and why that is the kernel's fault.
+        why: &'static str,
+    },
+    /// A face of an operand has no surface (the caller's body; class `invalid_input`).
+    FaceWithoutSurface,
+    /// An edge of an operand has no curve (the caller's body; class `invalid_input`).
+    EdgeWithoutCurve,
+    /// The merge was asked to run without its primary or its other B-rep (class
+    /// `invalid_input`).
+    MergeWithoutOperands,
+    /// An operator of the Boolean tree has fewer than two operands before it (the caller's
+    /// tree; class `invalid_input`).
+    TreeOperatorWithoutOperands,
+    /// An operator code of the Boolean tree is none of union (-1) to slice (-6) (the
+    /// caller's tree; class `invalid_input`).
+    UnknownTreeOperator {
+        /// The code.
+        code: i64,
+    },
+    /// An operand of the planar Boolean has no faces, so the Boolean made no result (class
+    /// `invalid_input`).
+    OperandWithoutFaces,
+    /// The caller listed no surfaces to merge (class `invalid_input`).
+    NoSurfacesToMerge,
+    /// A slice was asked with another operand that is not a sheet (class
+    /// `invalid_input`).
+    SliceNeedsSheet,
+    /// The split of an edge at the parameter the intersector picked made no new vertex.
+    /// The intersector picks the parameter after its own interior test, and the split
+    /// refuses it under a different one (the parameter's zero test, then the length to
+    /// the nearer end against the vertex's tolerance), so the two can disagree on valid
+    /// input; the parameter is never the caller's (class `failed`).
+    EdgeNotSplit,
+    /// A Boolean of the tree failed; its error is the cause.
+    TreeBooleanFailed,
+    /// A face use of the other B-rep lies in no region of the primary: the search over the
+    /// primary's regions found none.
+    FaceInNoRegion,
+    /// A shell vertex of one operand classifies to no region of the other: it lies on the
+    /// other's boundary (a face, an edge or a vertex) or the classification found nothing.
+    VertexInNoRegion,
+    /// The radial sector search at a common edge found neither a coincident face use nor a
+    /// radial edge use of the other operand; a failed search is the cause where there is
+    /// one.
+    NoRadialEdgeUse,
+    /// The Boolean of the surface and B-rep lists left nothing: its result has no shell.
+    EmptyResult,
+    /// A registered intersection curve is not a B-spline curve or a conic, so it has no
+    /// B-spline copy for the intersection table (an unsupported curve kind; the curve is
+    /// the intersector's own handle, not an entity of the caller's B-rep).
+    IntersectionCurveNotCopyable,
+    /// A step of merging two curve classifications failed; the step's error is the cause.
+    ClassificationStepFailed {
+        /// The step.
+        step: ClassificationStep,
+    },
+    /// The vertex is already related to a vertex that lies closer than the one asked for,
+    /// so the squeeze keeps the existing relation and refuses the new one.
+    ExistingRelationBetter,
+    /// The new edge made where an edge lies on a face could not be glued to that edge; the
+    /// glue's error is the cause.
+    CoincidenceUnresolved,
+    /// Neither vertex of a related pair that splits a short interval drops onto the
+    /// intersection curve: the distances the drops stopped at.
+    VertexPairNotDropped {
+        /// The distance of the B-rep's vertex from the curve where its drop stopped.
+        brep_gap: f64,
+        /// The distance of the other B-rep's vertex from the curve where its drop stopped.
+        other_gap: f64,
+    },
+    /// The ends of two coincident edges do not pair up: neither assignment of one edge's
+    /// vertices to the other's lies within their tolerances, or both do.
+    CoincidentEdgeEndsDiffer,
+    /// The ends of two coincident edges are each related to a different vertex already.
+    CoincidentEdgeEndMatesConflict,
+    /// Gluing the ends of two coincident edges deleted one of the edges.
+    CoincidentEdgeCollapsed,
+    /// Two edges an intersection interval lies along could not be related, and neither
+    /// could be deleted as an edge between two faces of one surface; the relation's
+    /// refusal is the cause.
+    EdgeRelationNotRepaired,
+    /// A degenerate intersection curve was given with an edge instead of a pair of
+    /// surfaces, a case the merge does not take.
+    DegenerateCurveOnEdges,
+    /// The intersection curve lies along two partly coincident edges that have no common
+    /// sub-interval.
+    NoCommonSubinterval,
+    /// The two entities whose relation is to be removed are not related to each other.
+    NotRelatedPair,
+    /// A vertex an intersection loop ends at, taken to close the loop or a gap, has no
+    /// related vertex in the other B-rep (an earlier closing in the pass, whose failure
+    /// the merge ignores, can have removed its relation).
+    LoopVertexUnrelated,
+    /// The faces split off while two face lists are intersected exceed the port's bound
+    /// on the working face lists (upstream grows them without bound).
+    FaceListLimit {
+        /// The bound on the faces of both lists.
+        limit: usize,
+    },
+    /// The edges split off while two edge lists are intersected exceed the port's bound
+    /// on each working edge list (upstream grows them without bound).
+    EdgeListLimit {
+        /// The bound on the edges of each list.
+        limit: usize,
+    },
+    /// Merging the curves of two coincident faces into each other still changes the
+    /// topology after the port's bound on the passes (upstream repeats without bound).
+    CoincidentFacesNotSettled {
+        /// The bound on the passes.
+        passes: usize,
+    },
 }
 
 impl BooleanFailure {
@@ -157,7 +333,38 @@ impl BooleanFailure {
             Self::StageFailed { .. }
             | Self::EntityMissing { .. }
             | Self::RelateConflict { .. }
-            | Self::MergedVertexReaches { .. } => None,
+            | Self::MergedVertexReaches { .. }
+            | Self::Defect { .. }
+            | Self::FaceWithoutSurface
+            | Self::EdgeWithoutCurve
+            | Self::MergeWithoutOperands
+            | Self::TreeOperatorWithoutOperands
+            | Self::UnknownTreeOperator { .. }
+            | Self::OperandWithoutFaces
+            | Self::NoSurfacesToMerge
+            | Self::SliceNeedsSheet
+            | Self::EdgeNotSplit
+            | Self::TreeBooleanFailed
+            | Self::FaceInNoRegion
+            | Self::VertexInNoRegion
+            | Self::NoRadialEdgeUse
+            | Self::EmptyResult
+            | Self::IntersectionCurveNotCopyable
+            | Self::ClassificationStepFailed { .. }
+            | Self::ExistingRelationBetter
+            | Self::CoincidenceUnresolved
+            | Self::VertexPairNotDropped { .. }
+            | Self::CoincidentEdgeEndsDiffer
+            | Self::CoincidentEdgeEndMatesConflict
+            | Self::CoincidentEdgeCollapsed
+            | Self::EdgeRelationNotRepaired
+            | Self::DegenerateCurveOnEdges
+            | Self::NoCommonSubinterval
+            | Self::NotRelatedPair
+            | Self::LoopVertexUnrelated
+            | Self::FaceListLimit { .. }
+            | Self::EdgeListLimit { .. }
+            | Self::CoincidentFacesNotSettled { .. } => None,
         }
     }
 
@@ -167,20 +374,88 @@ impl BooleanFailure {
             Self::StageFailed { .. }
             | Self::SolidLeaks { .. }
             | Self::RelateConflict { .. }
-            | Self::MergedVertexReaches { .. } => SM_ERR,
-            Self::EntityMissing { .. } => SM_ERR_NULL_POINTER,
+            | Self::MergedVertexReaches { .. }
+            | Self::Defect { .. }
+            | Self::TreeOperatorWithoutOperands
+            | Self::UnknownTreeOperator { .. }
+            | Self::NoSurfacesToMerge
+            | Self::SliceNeedsSheet
+            | Self::EdgeNotSplit
+            | Self::TreeBooleanFailed
+            | Self::FaceInNoRegion
+            | Self::VertexInNoRegion
+            | Self::NoRadialEdgeUse
+            | Self::EmptyResult
+            | Self::IntersectionCurveNotCopyable
+            | Self::ClassificationStepFailed { .. }
+            | Self::ExistingRelationBetter
+            | Self::CoincidenceUnresolved
+            | Self::VertexPairNotDropped { .. }
+            | Self::CoincidentEdgeEndsDiffer
+            | Self::CoincidentEdgeEndMatesConflict
+            | Self::CoincidentEdgeCollapsed
+            | Self::EdgeRelationNotRepaired
+            | Self::DegenerateCurveOnEdges
+            | Self::NoCommonSubinterval
+            | Self::NotRelatedPair
+            | Self::FaceListLimit { .. }
+            | Self::EdgeListLimit { .. }
+            | Self::CoincidentFacesNotSettled { .. } => SM_ERR,
+            Self::EntityMissing { .. }
+            | Self::FaceWithoutSurface
+            | Self::EdgeWithoutCurve
+            | Self::MergeWithoutOperands
+            | Self::OperandWithoutFaces
+            | Self::LoopVertexUnrelated => SM_ERR_NULL_POINTER,
         }
     }
 
-    /// The failure's stable [`ErrorKind`].
+    /// The failure's stable [`ErrorKind`]: [`ErrorKind::StageFailed`] for
+    /// [`BooleanFailure::Defect`], a defect; [`ErrorKind::InvalidInput`] for a check of the
+    /// caller's argument or body; [`ErrorKind::Unsupported`] for a curve kind or case the
+    /// Boolean does not take; [`ErrorKind::NotConverged`] for drops that stopped;
+    /// [`ErrorKind::Missing`] for [`BooleanFailure::EntityMissing`];
+    /// [`ErrorKind::Failed`] otherwise.
     #[must_use]
     pub const fn kind(&self) -> ErrorKind {
         match self {
             Self::StageFailed { .. }
             | Self::SolidLeaks { .. }
             | Self::RelateConflict { .. }
-            | Self::MergedVertexReaches { .. } => ErrorKind::Failed,
+            | Self::MergedVertexReaches { .. }
+            | Self::TreeBooleanFailed
+            | Self::FaceInNoRegion
+            | Self::VertexInNoRegion
+            | Self::NoRadialEdgeUse
+            | Self::EmptyResult
+            | Self::ClassificationStepFailed { .. }
+            | Self::ExistingRelationBetter
+            | Self::CoincidenceUnresolved
+            | Self::CoincidentEdgeEndsDiffer
+            | Self::CoincidentEdgeEndMatesConflict
+            | Self::CoincidentEdgeCollapsed
+            | Self::EdgeRelationNotRepaired
+            | Self::NoCommonSubinterval
+            | Self::NotRelatedPair
+            | Self::LoopVertexUnrelated
+            | Self::EdgeNotSplit => ErrorKind::Failed,
             Self::EntityMissing { .. } => ErrorKind::Missing,
+            Self::Defect { .. } => ErrorKind::StageFailed,
+            Self::FaceWithoutSurface
+            | Self::EdgeWithoutCurve
+            | Self::MergeWithoutOperands
+            | Self::TreeOperatorWithoutOperands
+            | Self::UnknownTreeOperator { .. }
+            | Self::OperandWithoutFaces
+            | Self::NoSurfacesToMerge
+            | Self::SliceNeedsSheet => ErrorKind::InvalidInput,
+            Self::IntersectionCurveNotCopyable
+            | Self::DegenerateCurveOnEdges
+            | Self::FaceListLimit { .. }
+            | Self::EdgeListLimit { .. } => ErrorKind::Unsupported,
+            Self::VertexPairNotDropped { .. } | Self::CoincidentFacesNotSettled { .. } => {
+                ErrorKind::NotConverged
+            }
         }
     }
 }
@@ -189,6 +464,9 @@ impl core::fmt::Display for BooleanFailure {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         match self {
             Self::StageFailed { stage, what } => write!(f, "{stage} failed: {what}"),
+            Self::Defect { stage, why } => {
+                write!(f, "{}: {stage} failed: {why}", ErrorKind::StageFailed)
+            }
             Self::EntityMissing { stage, what } => {
                 write!(f, "{stage} needs {what}, which the B-rep does not have")
             }
@@ -227,11 +505,140 @@ impl core::fmt::Display for BooleanFailure {
                  it would reach lies within its own tolerance of it)",
                 BooleanStage::Imprint
             ),
+            Self::FaceWithoutSurface => f.write_str("a face of an operand has no surface"),
+            Self::EdgeWithoutCurve => f.write_str("an edge of an operand has no curve"),
+            Self::MergeWithoutOperands => {
+                f.write_str("the merge has no primary or no other B-rep to work on")
+            }
+            Self::TreeOperatorWithoutOperands => {
+                f.write_str("an operator of the Boolean tree has fewer than two operands")
+            }
+            Self::UnknownTreeOperator { code } => write!(
+                f,
+                "the Boolean tree's operator code {code} is none of union (-1) to slice (-6)"
+            ),
+            Self::OperandWithoutFaces => f.write_str(
+                "an operand of the planar Boolean has no faces, so it made no result B-rep",
+            ),
+            Self::NoSurfacesToMerge => f.write_str("no surfaces were given to merge"),
+            Self::SliceNeedsSheet => {
+                f.write_str("a slice needs a sheet, and the other B-rep is not one")
+            }
+            Self::EdgeNotSplit => f.write_str(
+                "the edge was not split at the parameter the intersector picked: the split \
+                 finds it at an end of the edge",
+            ),
+            Self::TreeBooleanFailed => f.write_str("a Boolean of the tree failed"),
+            Self::FaceInNoRegion => {
+                f.write_str("a face use of the other B-rep lies in no region of the primary")
+            }
+            Self::VertexInNoRegion => f.write_str(
+                "a shell vertex classifies to no region of the other B-rep: it lies on that \
+                 B-rep's boundary",
+            ),
+            Self::NoRadialEdgeUse => f.write_str(
+                "the radial sector search at a common edge found no face use of the other \
+                 operand",
+            ),
+            Self::EmptyResult => f.write_str("the Boolean left nothing: the result has no shell"),
+            Self::IntersectionCurveNotCopyable => f.write_str(
+                "a registered intersection curve is not a B-spline curve or a conic, so it \
+                 cannot be copied",
+            ),
+            Self::ClassificationStepFailed { step } => {
+                write!(
+                    f,
+                    "{} failed: {step} failed",
+                    BooleanStage::MergeClassifications
+                )
+            }
+            Self::ExistingRelationBetter => f.write_str(
+                "the vertex is already related to a closer vertex, which the squeeze keeps",
+            ),
+            Self::CoincidenceUnresolved => f.write_str(
+                "the coincidence of an edge with a face could not be resolved: the new edge \
+                 did not glue to it",
+            ),
+            Self::VertexPairNotDropped {
+                brep_gap,
+                other_gap,
+            } => write!(
+                f,
+                "neither vertex of the related pair drops onto the curve: the drops stopped \
+                 {brep_gap} and {other_gap} from it"
+            ),
+            Self::CoincidentEdgeEndsDiffer => {
+                f.write_str("the ends of the coincident edges do not pair up")
+            }
+            Self::CoincidentEdgeEndMatesConflict => f.write_str(
+                "the ends of the coincident edges are related to different vertices already",
+            ),
+            Self::CoincidentEdgeCollapsed => {
+                f.write_str("gluing the ends of the coincident edges deleted one of them")
+            }
+            Self::EdgeRelationNotRepaired => f.write_str(
+                "the edges along the intersection could not be related, and neither could be \
+                 deleted",
+            ),
+            Self::DegenerateCurveOnEdges => f.write_str(
+                "a degenerate intersection curve was given with an edge, not a pair of surfaces",
+            ),
+            Self::NoCommonSubinterval => {
+                f.write_str("the partly coincident edges have no common sub-interval")
+            }
+            Self::NotRelatedPair => f.write_str("the two entities are not related to each other"),
+            Self::LoopVertexUnrelated => f.write_str(
+                "the vertex the intersection loop ends at has no related vertex in the other \
+                 B-rep",
+            ),
+            Self::FaceListLimit { limit } => write!(
+                f,
+                "the faces split off exceed the bound of {limit} faces on the face lists"
+            ),
+            Self::EdgeListLimit { limit } => write!(
+                f,
+                "the edges split off exceed the bound of {limit} edges on an edge list"
+            ),
+            Self::CoincidentFacesNotSettled { passes } => write!(
+                f,
+                "the coincident faces still change after {passes} passes of merging their curves"
+            ),
         }
     }
 }
 
 impl crate::SolidError {
+    /// [`crate::SolidError::Failed`] for `failure`, with its status.
+    #[track_caller]
+    pub(crate) fn boolean(operation: &'static str, failure: BooleanFailure) -> Self {
+        super::Failure::new(operation, failure).into_error()
+    }
+
+    /// [`crate::SolidError::Failed`] for a reviewed [`BooleanFailure::Defect`] of `stage`,
+    /// with status [`SM_ERR`].
+    #[track_caller]
+    pub(crate) fn boolean_defect(
+        operation: &'static str,
+        stage: BooleanStage,
+        why: &'static str,
+    ) -> Self {
+        Self::boolean(operation, BooleanFailure::Defect { stage, why })
+    }
+
+    /// [`crate::SolidError::Failed`] for a reviewed [`BooleanFailure::Defect`] of `stage`
+    /// where a thing the kernel built is not there, with status [`SM_ERR_NULL_POINTER`]
+    /// (upstream `NER(ptr)` on a `NULL` pointer).
+    #[track_caller]
+    pub(crate) fn boolean_null_defect(
+        operation: &'static str,
+        stage: BooleanStage,
+        why: &'static str,
+    ) -> Self {
+        super::Failure::new(operation, BooleanFailure::Defect { stage, why })
+            .with_status(SM_ERR_NULL_POINTER)
+            .into_error()
+    }
+
     /// [`crate::SolidError::Failed`] for a Boolean stage that could not continue, with
     /// status [`SM_ERR`] (upstream `return SE(SM_ERR)`).
     pub(crate) fn boolean_stage_failed(
@@ -243,7 +650,10 @@ impl crate::SolidError {
     }
 
     /// [`crate::SolidError::Failed`] for an entity a Boolean stage needs that is not there,
-    /// with status [`SM_ERR_NULL_POINTER`] (upstream `NER(ptr)` on a `NULL` pointer).
+    /// with status [`SM_ERR_NULL_POINTER`] (upstream `NER(ptr)` on a `NULL` pointer). No
+    /// site builds this form any more (#19856); the class tests keep it until the variant
+    /// is retired.
+    #[cfg(test)]
     pub(crate) fn boolean_entity_missing(
         operation: &'static str,
         stage: BooleanStage,
@@ -271,5 +681,146 @@ impl crate::SolidError {
             },
         )
         .into_error()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::SolidError;
+
+    /// A reviewed defect is of class 127 with the stage failure's status, and names its
+    /// stage and why.
+    #[test]
+    fn a_reviewed_defect_is_class_127_with_its_reason() {
+        let why =
+            "the loop the imprint just closed has a free end, which its own walk never leaves";
+        let defect = BooleanFailure::Defect {
+            stage: BooleanStage::CloseLoop,
+            why,
+        };
+        let op = "boolean::op";
+        let e = super::super::Failure::new(op, defect).into_error();
+        super::super::tests::assert_defect(
+            &e,
+            &SolidError::boolean_stage_failed(op, BooleanStage::CloseLoop, "x"),
+            op,
+            SM_ERR,
+            &format!("{op}: stage_failed: closing an intersection loop failed: {why}"),
+        );
+        assert_eq!(e.entity(), None);
+        assert!(matches!(
+            e.failure().map(|f| &f.reason),
+            Some(super::super::Reason::Boolean(b)) if *b == defect
+        ));
+    }
+
+    /// Each named cause of the merge and the topology intersector (#19856) keeps the
+    /// status its site had and has its class; the two defect forms keep theirs.
+    #[test]
+    fn the_merge_causes_keep_their_statuses_and_classes() {
+        use super::super::{ErrorKind as K, SM_ERR_NULL_POINTER as NULL};
+        use BooleanFailure as F;
+        let step = ClassificationStep::Homogenize;
+        let cases = [
+            (F::FaceWithoutSurface, NULL, K::InvalidInput),
+            (F::EdgeWithoutCurve, NULL, K::InvalidInput),
+            (F::MergeWithoutOperands, NULL, K::InvalidInput),
+            (F::OperandWithoutFaces, NULL, K::InvalidInput),
+            (F::TreeOperatorWithoutOperands, SM_ERR, K::InvalidInput),
+            (F::UnknownTreeOperator { code: 9 }, SM_ERR, K::InvalidInput),
+            (F::NoSurfacesToMerge, SM_ERR, K::InvalidInput),
+            (F::SliceNeedsSheet, SM_ERR, K::InvalidInput),
+            (F::EdgeNotSplit, SM_ERR, K::Failed),
+            (F::TreeBooleanFailed, SM_ERR, K::Failed),
+            (F::FaceInNoRegion, SM_ERR, K::Failed),
+            (F::VertexInNoRegion, SM_ERR, K::Failed),
+            (F::NoRadialEdgeUse, SM_ERR, K::Failed),
+            (F::EmptyResult, SM_ERR, K::Failed),
+            (F::ClassificationStepFailed { step }, SM_ERR, K::Failed),
+            (F::ExistingRelationBetter, SM_ERR, K::Failed),
+            (F::CoincidenceUnresolved, SM_ERR, K::Failed),
+            (F::CoincidentEdgeEndsDiffer, SM_ERR, K::Failed),
+            (F::CoincidentEdgeEndMatesConflict, SM_ERR, K::Failed),
+            (F::CoincidentEdgeCollapsed, SM_ERR, K::Failed),
+            (F::EdgeRelationNotRepaired, SM_ERR, K::Failed),
+            (F::NoCommonSubinterval, SM_ERR, K::Failed),
+            (F::NotRelatedPair, SM_ERR, K::Failed),
+            (F::LoopVertexUnrelated, NULL, K::Failed),
+            (F::IntersectionCurveNotCopyable, SM_ERR, K::Unsupported),
+            (F::DegenerateCurveOnEdges, SM_ERR, K::Unsupported),
+            (F::FaceListLimit { limit: 4 }, SM_ERR, K::Unsupported),
+            (F::EdgeListLimit { limit: 4 }, SM_ERR, K::Unsupported),
+            (
+                F::VertexPairNotDropped {
+                    brep_gap: 0.5,
+                    other_gap: 0.25,
+                },
+                SM_ERR,
+                K::NotConverged,
+            ),
+            (
+                F::CoincidentFacesNotSettled { passes: 4 },
+                SM_ERR,
+                K::NotConverged,
+            ),
+        ];
+        for (failure, status, kind) in cases {
+            let e = SolidError::boolean("boolean::op", failure);
+            assert_eq!(e.sm_status(), Some(status), "{failure:?}");
+            assert_eq!(e.kind(), kind, "{failure:?}");
+            assert_eq!(failure.kind(), kind, "{failure:?}");
+            assert!(!e.is_defect(), "{failure:?}");
+            assert_eq!(e.to_string(), format!("boolean::op: {failure}"));
+        }
+        // the numbers a cause carries are in its words
+        let e = SolidError::boolean(
+            "boolean::op",
+            F::VertexPairNotDropped {
+                brep_gap: 0.5,
+                other_gap: 0.25,
+            },
+        );
+        assert!(e.to_string().contains("0.5 and 0.25"), "{e}");
+        assert!(F::ClassificationStepFailed { step }
+            .to_string()
+            .contains(&step.to_string()));
+        // the two defect forms: the stage failure's status, and the null pointer's
+        let why = "a link the kernel keeps is gone";
+        for (e, status) in [
+            (
+                SolidError::boolean_defect("boolean::op", BooleanStage::Merge, why),
+                SM_ERR,
+            ),
+            (
+                SolidError::boolean_null_defect("boolean::op", BooleanStage::Merge, why),
+                NULL,
+            ),
+        ] {
+            assert!(e.is_defect(), "{e:?}");
+            assert_eq!(e.sm_status(), Some(status), "{e:?}");
+            assert!(e.to_string().ends_with(why), "{e}");
+        }
+    }
+
+    /// The sites that build a Boolean phrase cause only fall:
+    /// per file, in the library code of `solidcore` and `solidcore-ops`, as
+    /// [`super::super::site_scan`] counts them. A PR that converts sites lowers its
+    /// files' counts here, and a file at 0 loses its line (the conversion guide:
+    /// `docs/failure-codes-and-reproduction.md` §6).
+    #[test]
+    fn the_boolean_phrase_cause_sites_only_shrink() {
+        use super::super::site_scan::{assert_pinned, crate_sites, Builder, Scan, Wrappers};
+        const PHRASES: Scan = Scan {
+            builders: &[
+                Builder::Variant("BooleanFailure", "EntityMissing"),
+                Builder::Method("boolean_entity_missing", Some(2)),
+            ],
+            wrappers: Wrappers::Phrase,
+        };
+        #[rustfmt::skip] // one file per line, so conversions in parallel merge cleanly
+        const PINNED: &[(&str, usize)] = &[
+        ];
+        assert_pinned("Boolean phrase-cause sites", &crate_sites(&PHRASES), PINNED);
     }
 }

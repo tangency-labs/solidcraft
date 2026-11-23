@@ -14,7 +14,7 @@
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
-use super::{EDGE_PX, EDGE_SEG_SIZE, INSTANCE_SIZE, InstancedDraw, SharedEdges, Tally, placement_stretch};
+use super::{EDGE_SEG_SIZE, INSTANCE_SIZE, InstancedDraw, SharedEdges, Tally};
 
 /// The instanced edge vertex shaders, appended to the viewport's (they draw with its
 /// `line_vertex` and `fs_line`).
@@ -35,39 +35,46 @@ fn edge_moved(r0: vec4<f32>, r1: vec4<f32>, r2: vec4<f32>, p: vec3<f32>) -> vec3
 /// Segment `vertex_index / 6` of the part's shared edges at the instance's placement, in its
 /// edge colour (`EDGE_WIDTH` pixels wide).
 @vertex
-fn vs_edge_inst(@builtin(vertex_index) vi: u32, @location(3) r0: vec4<f32>, @location(4) r1: vec4<f32>, @location(5) r2: vec4<f32>, @location(7) edge: u32, @location(8) hidden: u32) -> LOut {
+fn vs_edge_inst(@builtin(vertex_index) vi: u32, @location(3) r0: vec4<f32>, @location(4) r1: vec4<f32>, @location(5) r2: vec4<f32>, @location(7) edge: u32, @location(8) hidden: u32, @location(9) slot: u32) -> LOut {
     let s = edge_segs[vi / 6u];
-    return line_vertex(vi % 6u, edge_moved(r0, r1, r2, s.a), edge_moved(r0, r1, r2, s.b), edge, bitcast<u32>(1.3));
+    return line_vertex(vi % 6u, edge_moved(r0, r1, r2, s.a), edge_moved(r0, r1, r2, s.b), edge, bitcast<u32>(1.3), edge_motion(slot, edge));
+}
+
+/// The motion an instance's edges are drawn moved by: its own slot, else the one the palette entry
+/// `c` they are drawn in names (only read while something moves).
+fn edge_motion(slot: u32, c: u32) -> u32 {
+    if (u.screen.z < 0.5) { return 0u; }
+    return placement_motion(slot, palette_entry(c));
 }
 
 /// A lit segment (a whole hovered or selected body's edges, drawn again over the model) in
 /// `style`: the palette index from bit 8, a raised line at bit 7, the width in eighths of a pixel
 /// below it (`lit_line_style`, as `vs_line_lit` reads it).
-fn edge_lit(vi: u32, r0: vec4<f32>, r1: vec4<f32>, r2: vec4<f32>, style: u32) -> LOut {
+fn edge_lit(vi: u32, r0: vec4<f32>, r1: vec4<f32>, r2: vec4<f32>, style: u32, slot: u32) -> LOut {
     let s = edge_segs[vi / 6u];
     let eighths = style & 127u;
     var w = bitcast<u32>(f32(eighths) / 8.0);
     if ((style & 128u) != 0u) { w = 0x80000000u | (eighths << 24u); }
-    return line_vertex(vi % 6u, edge_moved(r0, r1, r2, s.a), edge_moved(r0, r1, r2, s.b), style >> 8u, w);
+    return line_vertex(vi % 6u, edge_moved(r0, r1, r2, s.a), edge_moved(r0, r1, r2, s.b), style >> 8u, w, edge_motion(slot, style >> 8u));
 }
 
 /// A lit segment in the instance's first style (the halo, or the hidden edges' style).
 @vertex
-fn vs_edge_inst_lit_a(@builtin(vertex_index) vi: u32, @location(3) r0: vec4<f32>, @location(4) r1: vec4<f32>, @location(5) r2: vec4<f32>, @location(7) a: u32, @location(8) b: u32) -> LOut {
-    return edge_lit(vi, r0, r1, r2, a);
+fn vs_edge_inst_lit_a(@builtin(vertex_index) vi: u32, @location(3) r0: vec4<f32>, @location(4) r1: vec4<f32>, @location(5) r2: vec4<f32>, @location(7) a: u32, @location(8) b: u32, @location(9) slot: u32) -> LOut {
+    return edge_lit(vi, r0, r1, r2, a, slot);
 }
 
 /// A lit segment in the instance's second style (the line over the halo).
 @vertex
-fn vs_edge_inst_lit_b(@builtin(vertex_index) vi: u32, @location(3) r0: vec4<f32>, @location(4) r1: vec4<f32>, @location(5) r2: vec4<f32>, @location(7) a: u32, @location(8) b: u32) -> LOut {
-    return edge_lit(vi, r0, r1, r2, b);
+fn vs_edge_inst_lit_b(@builtin(vertex_index) vi: u32, @location(3) r0: vec4<f32>, @location(4) r1: vec4<f32>, @location(5) r2: vec4<f32>, @location(7) a: u32, @location(8) b: u32, @location(9) slot: u32) -> LOut {
+    return edge_lit(vi, r0, r1, r2, b, slot);
 }
 
 /// The same segment as a hidden edge, in its hidden edge colour (`HIDDEN_EDGE_WIDTH` wide).
 @vertex
-fn vs_edge_inst_hidden(@builtin(vertex_index) vi: u32, @location(3) r0: vec4<f32>, @location(4) r1: vec4<f32>, @location(5) r2: vec4<f32>, @location(7) edge: u32, @location(8) hidden: u32) -> LOut {
+fn vs_edge_inst_hidden(@builtin(vertex_index) vi: u32, @location(3) r0: vec4<f32>, @location(4) r1: vec4<f32>, @location(5) r2: vec4<f32>, @location(7) edge: u32, @location(8) hidden: u32, @location(9) slot: u32) -> LOut {
     let s = edge_segs[vi / 6u];
-    return line_vertex(vi % 6u, edge_moved(r0, r1, r2, s.a), edge_moved(r0, r1, r2, s.b), hidden, bitcast<u32>(1.0));
+    return line_vertex(vi % 6u, edge_moved(r0, r1, r2, s.a), edge_moved(r0, r1, r2, s.b), hidden, bitcast<u32>(1.0), edge_motion(slot, hidden));
 }
 "#;
 
@@ -82,11 +89,11 @@ pub(super) fn supported(device: &wgpu::Device) -> bool {
     device.limits().max_storage_buffers_per_shader_stage > 0 && super::indirect::supported(device)
 }
 
-/// The placements' layout for the edge shaders: their rows and the edge palette indices
-/// ([`INSTANCE_SIZE`]).
+/// The placements' layout for the edge shaders: their rows, the edge palette indices and the
+/// motion slot ([`INSTANCE_SIZE`]).
 pub(super) fn instance_layout() -> wgpu::VertexBufferLayout<'static> {
-    const A: [wgpu::VertexAttribute; 6] =
-        wgpu::vertex_attr_array![3 => Float32x4, 4 => Float32x4, 5 => Float32x4, 6 => Uint32, 7 => Uint32, 8 => Uint32];
+    const A: [wgpu::VertexAttribute; 7] =
+        wgpu::vertex_attr_array![3 => Float32x4, 4 => Float32x4, 5 => Float32x4, 6 => Uint32, 7 => Uint32, 8 => Uint32, 9 => Uint32];
     wgpu::VertexBufferLayout { array_stride: INSTANCE_SIZE as u64, step_mode: wgpu::VertexStepMode::Instance, attributes: &A }
 }
 
@@ -409,13 +416,13 @@ pub(super) struct Pipelines {
 }
 
 /// The edge level each placement in view is drawn from: the coarsest whose deviation stays under
-/// [`EDGE_PX`] where the placement is drawn (`rows`, its box `bounds`, the view `vp` of `size`
-/// pixels), in whichever direction the edges stray ([`placement_stretch`]).
-pub(super) fn level_for(e: &SharedEdges, rows: &[[f32; 4]; 3], bounds: &[[f32; 3]; 2], vp: &[[f32; 4]; 4], size: [f32; 2]) -> u8 {
+/// `px` pixels ([`super::EDGE_PX`], or [`super::EDGE_PX_MOVING`] while the view moves) at `scale`, the
+/// most pixels a millimetre of the placement covers where it is drawn
+/// ([`placement_stretch`](super::placement_stretch)).
+pub(super) fn level_for(e: &SharedEdges, scale: f32, px: f32) -> u8 {
     if e.levels.len() < 2 {
         return 0;
     }
-    let scale = placement_stretch(rows, bounds, vp, size);
-    let level = e.levels.iter().rposition(|(_, tolerance)| *tolerance * scale <= EDGE_PX).unwrap_or(0);
+    let level = e.levels.iter().rposition(|(_, tolerance)| *tolerance * scale <= px).unwrap_or(0);
     u8::try_from(level).unwrap_or(0)
 }

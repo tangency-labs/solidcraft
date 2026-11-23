@@ -55,6 +55,21 @@ pub struct Unpacked {
     pub files: Vec<safe_zip::File>,
 }
 
+impl Unpacked {
+    /// Optional artwork never prevents installation. Uses exactly the bytes being reviewed.
+    pub fn swatch_warnings(&self) -> Vec<String> {
+        let Some(runtime) = &self.manifest.runtime else { return Vec::new() };
+        craft_plugin::swatches::check(&runtime.entries, |path| {
+            let file = self.files.iter().find(|file| file.path == path).ok_or_else(|| "not found in the package".to_string())?;
+            if file.bytes.len() > craft_plugin::swatches::MAX_BYTES {
+                return Err("file is larger than 64 KiB".into());
+            }
+            Ok(file.bytes.clone())
+        })
+        .warnings
+    }
+}
+
 /// Files a desktop zip tool adds that are not part of the plugin.
 fn is_junk(path: &str) -> bool {
     path.starts_with("__MACOSX/") || path.rsplit('/').next().is_some_and(|name| name == ".DS_Store" || name == "Thumbs.db")
@@ -98,6 +113,16 @@ pub fn from_files(files: Vec<safe_zip::File>, archive: String) -> Result<Unpacke
         crate::EngineError::Plugin(e) => InstallError::Manifest(e),
         e => InstallError::Manifest(HostError::InvalidManifest { field: "manifest".into(), reason: e.to_string() }),
     })?;
+    // An install may ask for approval above the user's default, never above this hard ceiling.
+    if let Some(runtime) = &manifest.runtime
+        && runtime.limits.fuel > craft_plugin::MAX_APPROVED_FUEL
+    {
+        return Err(InstallError::Manifest(HostError::OverCeiling {
+            limit: "fuel".into(),
+            requested: runtime.limits.fuel,
+            allowed: craft_plugin::MAX_APPROVED_FUEL,
+        }));
+    }
     if let Some(runtime) = &manifest.runtime
         && !files.iter().any(|f| f.path == runtime.module)
     {

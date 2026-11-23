@@ -13,6 +13,239 @@ pub(super) fn run(s: &mut Session, id: &str, p: Value) -> Value {
     }
 }
 
+fn coderabbit_review_plane_joint() -> (Session, Value) {
+    let mut s = Session::default();
+    run(&mut s, "component.create", json!({"name": "ReviewA", "grounded": true}));
+    run(&mut s, "component.activate", json!({"component": "root"}));
+    run(&mut s, "component.create", json!({"name": "ReviewB", "grounded": false}));
+    run(&mut s, "component.activate", json!({"component": "root"}));
+    let p = json!({"name":"ReviewJoint", "type":"rigid", "angle":0,
+        "a":{"occurrence":"ReviewA", "plane":"XY"}, "b":{"occurrence":"ReviewB", "plane":"XY"}});
+    (s, p)
+}
+
+fn coderabbit_review_saved_x(s: &Session, side: &str) -> Option<solidcraft_doc::joints::XRef> {
+    use solidcraft_doc::joints::Snap;
+    let j = &s.doc.assembly.joints[0];
+    match if side == "a" { &j.a.snap } else { &j.b.snap } {
+        Snap::FaceCenter { x, .. } | Snap::CircleCenter { x, .. } | Snap::Plane { x, .. } | Snap::Axis { x, .. } => x.clone(),
+        _ => None,
+    }
+}
+
+#[test]
+fn coderabbit_review_primary_replacement_retains_alignment_and_validates_it() {
+    use solidcraft_doc::joints::XRef;
+    for (side, occurrence) in [("a", "ReviewA"), ("b", "ReviewB")] {
+        let (mut s, mut p) = coderabbit_review_plane_joint();
+        let alignment_key = format!("{side}_alignment");
+        p[&alignment_key] = json!({"reference":{"type":"origin_axis", "axis":"Y"}});
+        run(&mut s, "joint.create", p);
+        let saved = coderabbit_review_saved_x(&s, side);
+        assert!(matches!(saved, Some(XRef::Reference { .. })));
+        let primary = json!({"occurrence":occurrence, "plane":"XY"});
+        run(&mut s, "joint.edit", json!({"joint":"ReviewJoint", side:primary}));
+        assert_eq!(coderabbit_review_saved_x(&s, side), saved, "omitted {alignment_key} must retain its reference");
+
+        let before = s.doc.clone();
+        let error = s.execute("joint.edit", &json!({"joint":"ReviewJoint", side:{"occurrence":occurrence, "plane":"XZ"}})).unwrap_err();
+        assert!(error.to_string().contains("parallel"), "{error}");
+        assert_eq!(s.doc, before, "invalid replacement must be atomic");
+
+        run(&mut s, "joint.edit", json!({"joint":"ReviewJoint", side:primary, (alignment_key.as_str()):null}));
+        assert!(!matches!(coderabbit_review_saved_x(&s, side), Some(XRef::Reference { .. } | XRef::Planar { .. })));
+        run(&mut s, "joint.edit", json!({"joint":"ReviewJoint", (alignment_key.as_str()):{"reference":{"type":"origin_axis", "axis":"Y"}}}));
+        run(
+            &mut s,
+            "joint.edit",
+            json!({"joint":"ReviewJoint", side:{"occurrence":occurrence,"plane":"XY", "x":{"reference":{"type":"origin_axis","axis":"X"}}}}),
+        );
+        assert!(
+            matches!(coderabbit_review_saved_x(&s, side), Some(XRef::Reference { reference:solidcraft_doc::joints::AlignmentRef::OriginAxis { axis }, .. }) if axis == "X")
+        );
+        run(
+            &mut s,
+            "joint.origin",
+            json!({"name":"ReviewNamed", "occurrence":occurrence, "plane":"XY", "x":{"reference":{"type":"origin_axis","axis":"Y"}}}),
+        );
+        run(&mut s, "joint.edit", json!({"joint":"ReviewJoint", side:"ReviewNamed"}));
+        assert!(
+            matches!(coderabbit_review_saved_x(&s, side), Some(XRef::Reference { reference:solidcraft_doc::joints::AlignmentRef::OriginAxis { axis }, .. }) if axis == "Y")
+        );
+    }
+}
+
+#[test]
+fn coderabbit_review_lateral_offsets_refuse_secondary_alignment_atomically() {
+    for side in ["a", "b"] {
+        for offset in ["offset_x", "offset_y"] {
+            for inline in [false, true] {
+                let (mut s, mut p) = coderabbit_review_plane_joint();
+                p[offset] = json!(10);
+                if inline {
+                    p[side]["x"] = json!({"reference":{"type":"origin_axis", "axis":"Y"}});
+                } else {
+                    p[format!("{side}_alignment")] = json!({"reference":{"type":"origin_axis", "axis":"Y"}});
+                }
+                let before = s.doc.clone();
+                let error = s.execute("joint.create", &p).unwrap_err();
+                assert!(error.to_string().contains("lateral"), "{side} {offset} {inline}: {error}");
+                assert_eq!(s.doc, before);
+            }
+        }
+    }
+    for side in ["a", "b"] {
+        let (mut s, mut p) = coderabbit_review_plane_joint();
+        p["offset_x"] = json!(10);
+        run(&mut s, "joint.create", p);
+        let before = s.doc.clone();
+        let key = format!("{side}_alignment");
+        let error =
+            s.execute("joint.edit", &json!({"joint":"ReviewJoint", (key.as_str()):{"reference":{"type":"origin_axis","axis":"Y"}}})).unwrap_err();
+        assert!(error.to_string().contains("lateral"), "{error}");
+        assert_eq!(s.doc, before);
+        run(&mut s, "joint.edit", json!({"joint":"ReviewJoint", (key.as_str()):null}));
+        run(&mut s, "joint.edit", json!({"joint":"ReviewJoint", "offset_x":0, (key.as_str()):{"reference":{"type":"origin_axis","axis":"Y"}}}));
+        let before = s.doc.clone();
+        assert!(s.execute("joint.edit", &json!({"joint":"ReviewJoint", "offset_y":10})).is_err());
+        assert_eq!(s.doc, before);
+        // Old documents may already contain this unsupported combination: clearing remains possible.
+        s.doc_mut().assembly.joints[0].offset_xy = [10.0, 0.0];
+        run(&mut s, "joint.edit", json!({"joint":"ReviewJoint", (key.as_str()):null}));
+        assert_eq!(s.doc.assembly.joints[0].offset_xy, [10.0, 0.0]);
+    }
+}
+
+#[test]
+fn coderabbit_review_nested_inline_secondary_references_match_side_argument_restrictions() {
+    let mut s = Session::default();
+    let (first, second, header) = board_twice(&mut s);
+    for (parent, point) in [(first, json!([-5, 25, 10])), (second, json!([95, 25, 10]))] {
+        for inline in [false, true] {
+            let mut p = json!({"type":"rigid", "a":{"occurrence":header,"path":[parent,header],"face":point},
+                "b":{"occurrence":"Probe", "plane":"XY"}});
+            let reference = json!({"reference":{"type":"origin_axis","axis":"X"}});
+            if inline {
+                p["a"]["x"] = reference;
+            } else {
+                p["a_alignment"] = reference;
+            }
+            let before = s.doc.clone();
+            let error = s.execute("joint.create", &p).unwrap_err();
+            assert!(error.to_string().contains("nested occurrence paths"), "{inline}: {error}");
+            assert_eq!(s.doc, before);
+        }
+    }
+}
+
+#[test]
+fn secondary_construction_axis_follows_edits_undo_and_uncached_reopen() {
+    use solidcraft_doc::joints::{self, XRef};
+    use solidcraft_doc::{Document, apply_point, apply_vector};
+    let mut s = Session::default();
+    let id = run(
+        &mut s,
+        "construct.axis.two_points",
+        json!({
+            "a": {"point": [0, 0, 0]}, "b": {"point": [1, 0, 0]}, "name": "Clocking",
+        }),
+    )["feature"]
+        .as_u64()
+        .unwrap();
+    let x = json!({"reference": {"type": "construction", "feature": id}});
+    run(&mut s, "joint.origin", json!({"occurrence": 0, "plane": "XY", "x": x, "name": "Seat"}));
+    let made = run(&mut s, "component.create", json!({"name": "Peg", "grounded": false}));
+    let occurrence = made["occurrence"].as_u64().unwrap();
+    run(
+        &mut s,
+        "joint.create",
+        json!({"type": "rigid", "a": {"occurrence": 0, "plane": "XY", "x": x},
+        "b": {"occurrence": occurrence, "plane": "XY"}, "flip": true, "angle": 0}),
+    );
+    let check = |s: &Session, expected: Vec3| {
+        let j = &s.doc.assembly.joints[0];
+        assert!(matches!(j.a.snap, joints::Snap::Plane { x: Some(XRef::Reference { .. }), .. }));
+        let m = joints::resolve_origin(&s.doc, &s.model.state(), &j.a).unwrap();
+        assert_eq!(apply_vector(&m, Vec3::X), expected);
+        assert_eq!(apply_vector(&m, Vec3::Z), Vec3::Z);
+        assert_eq!(apply_point(&m, Vec3::ZERO), Vec3::ZERO);
+        assert_eq!(apply_vector(&joints::occurrence_world(&s.doc, occurrence), Vec3::X), expected);
+    };
+    check(&s, Vec3::X);
+    let joint = s.doc.assembly.joints[0].id;
+    run(&mut s, "joint.edit", json!({"joint": joint, "a": {"occurrence": 0, "plane": "XY", "x": x}}));
+    check(&s, Vec3::X);
+    run(&mut s, "timeline.rename", json!({"feature": id, "name": "Renamed"}));
+    run(
+        &mut s,
+        "timeline.redefine",
+        json!({"feature": id, "command": "construct.axis.two_points",
+        "params": {"a": {"point": [0, 0, 0]}, "b": {"point": [0, 1, 0]}}}),
+    );
+    check(&s, Vec3::Y);
+    run(&mut s, "edit.undo", json!({}));
+    check(&s, Vec3::X);
+    run(&mut s, "edit.redo", json!({}));
+    check(&s, Vec3::Y);
+    let mut reopened = Session::new(Document::from_json(&s.doc.to_json()).unwrap());
+    reopened.refresh();
+    check(&reopened, Vec3::Y);
+    for dir in [[-0.6, 0.8, 0.0], [-0.8, 0.6, 0.0]] {
+        run(
+            &mut reopened,
+            "timeline.redefine",
+            json!({"feature": id, "command": "construct.axis.two_points",
+            "params": {"a": {"point": [0, 0, 0]}, "b": {"point": dir}}}),
+        );
+        check(&reopened, Vec3::new(dir[0], dir[1], dir[2]));
+    }
+    let before = reopened.doc.clone();
+    assert!(reopened.execute("joint.origin", &json!({"occurrence": occurrence, "plane": "XY", "x": x})).is_err());
+    assert_eq!(reopened.doc, before, "cross-component X is refused transactionally");
+}
+
+#[test]
+fn secondary_construction_axis_does_not_disappear_into_circle_point_fallback() {
+    let mut s = Session::default();
+    let before = s.doc.clone();
+    for z in [json!([0, 0, 1]), Value::Null] {
+        let p = json!({"occurrence": 0, "circle": [0, 0, 0], "z": z,
+            "x": {"reference": {"type": "construction", "feature": 999}}, "name": "Bad"});
+        assert!(s.execute("joint.origin", &p).is_err());
+        assert_eq!(s.doc, before, "a missing axis must not leave a point origin");
+    }
+}
+
+#[test]
+fn secondary_construction_axis_is_not_ignored_by_unsupported_origins() {
+    let mut s = Session::default();
+    let x = json!({"reference": {"type": "construction", "feature": 999}});
+    for primary in [
+        json!({"frame": {"origin": [0, 0, 0], "z": [0, 0, 1]}}),
+        json!({"frame": {"origin": [0, 0, 0], "z": [0, 0, 1], "x": [1, 0, 0]}}),
+        json!({"edge": [1, 2, 3], "z": [0, 0, 1]}),
+        json!({"edge": [1, 2, 3]}),
+    ] {
+        let mut p = primary;
+        p["occurrence"] = json!(0);
+        p["x"] = x.clone();
+        let before = s.doc.clone();
+        assert!(s.execute("joint.origin", &p).is_err(), "unsupported primary silently discarded X: {p}");
+        assert_eq!(s.doc, before);
+    }
+}
+
+#[test]
+fn secondary_construction_axis_cannot_hide_inside_a_point_vector() {
+    let mut s = Session::default();
+    let before = s.doc.clone();
+    let p = json!({"occurrence": 0, "point": [0, 0, 0],
+        "x": {"x": 1, "y": 0, "z": 0, "reference": {"type": "construction", "feature": 999}}});
+    assert!(s.execute("joint.origin", &p).is_err());
+    assert_eq!(s.doc, before);
+    run(&mut s, "joint.origin", json!({"occurrence": 0, "point": [0, 0, 0], "x": {"x": 1, "y": 0, "z": 0}}));
+}
+
 pub(super) fn occ(s: &Session, component: &str) -> u64 {
     let c = s.doc.find_component(component).unwrap_or(0);
     s.doc.occurrence_of(c).map(|o| o.id).unwrap_or(0)
@@ -1609,81 +1842,89 @@ fn a_ring_of_links_closes_and_drives() {
     assert!(after.dist(before) > 1.0, "the link did not move: {before:?} to {after:?}");
 }
 
+/// A joint of the folding cube toy: a pin (cylindrical) or the planar joint beside it.
+#[derive(Clone, Copy, PartialEq)]
+pub(super) enum Toy {
+    Pin,
+    Flat,
+}
+
 /// #18880: a folding cube toy, 8 cubes on a ring of 8 hinges, each hinge a plate on two pins, and
 /// on every pin a cylindrical joint (a quarter turn of limits) with a planar joint that keeps the
-/// plate against its cube (the joints of the report's design, at their places). Every pin sits at
-/// one end of its limits, and the toy has two ways to fold: hinges 1 and 8 on one line, or hinges
-/// 4 and 5 on another; the other four hinges can't turn. The loop solver cut each step back to
-/// the limits after solving it, so the pins that could not turn kept the loops open and the drive
-/// stopped a tenth of a degree in. Each fold moves through its pin's whole quarter turn now, and
-/// the hinges off its line stay where they are.
-#[test]
-fn a_ring_of_hinged_cubes_folds_both_ways() {
-    enum Kind {
-        Pin,
-        Flat,
-    }
-    use Kind::{Flat, Pin};
-    // (joint, a, b, world point, z, angle limits from where it is, degrees)
-    #[rustfmt::skip]
-    let joints: [(Kind, &str, &str, [f64; 3], [f64; 3], Option<(f64, f64)>); 32] = [
-        (Pin, "A1", "H1", [-14.955, 10.121, 8.442], [-1.0, 0.0, 0.0], Some((-90.0, 0.0))),
-        (Pin, "H1", "B1", [-1.62, 10.121, 2.346], [1.0, 0.0, 0.0], Some((0.0, 90.0))),
-        (Flat, "A1", "H1", [-14.955, 10.121, 5.394], [-1.0, 0.0, 0.0], None),
-        (Flat, "H1", "B1", [-1.62, 10.121, 2.346], [-1.0, 0.0, 0.0], None),
-        (Pin, "H2", "A1", [-14.701, -2.96, 21.269], [0.0, -1.0, 0.0], Some((0.0, 90.0))),
-        (Flat, "A1", "H2", [-17.749, -2.96, 21.269], [0.0, -1.0, 0.0], None),
-        (Pin, "B2", "H2", [-20.797, 10.375, 21.269], [0.0, 1.0, 0.0], Some((-90.0, 0.0))),
-        (Flat, "B2", "H2", [-17.749, 10.375, 21.269], [0.0, 1.0, 0.0], None),
-        (Flat, "H3", "B1", [-14.701, 10.375, -10.481], [0.0, -1.0, 0.0], None),
-        (Pin, "H3", "B1", [-14.701, 10.375, -10.481], [0.0, 1.0, 0.0], Some((0.0, 90.0))),
-        (Flat, "A2", "H3", [-17.749, 10.375, -10.481], [0.0, 1.0, 0.0], None),
-        (Pin, "A2", "H3", [-20.797, -2.96, -10.481], [0.0, -1.0, 0.0], Some((-90.0, 0.0))),
-        (Flat, "H4", "B2", [-33.624, -2.706, 21.523], [0.0, 0.0, -1.0], None),
-        (Pin, "H4", "B2", [-33.624, -2.706, 21.523], [0.0, 0.0, 1.0], Some((-90.0, 0.0))),
-        (Flat, "H4", "A3", [-39.72, -2.706, 21.523], [0.0, 0.0, -1.0], None),
-        (Pin, "H4", "A3", [-39.72, -2.706, 8.188], [0.0, 0.0, -1.0], Some((-90.0, 0.0))),
-        (Flat, "H5", "A2", [-33.624, -2.706, -10.735], [0.0, 0.0, 1.0], None),
-        (Pin, "H5", "A2", [-33.624, -2.706, 2.6], [0.0, 0.0, 1.0], Some((-90.0, 0.0))),
-        (Flat, "B3", "H5", [-36.672, -2.706, 2.6], [0.0, 0.0, 1.0], None),
-        (Pin, "B3", "H5", [-39.72, -2.706, -10.735], [0.0, 0.0, -1.0], Some((0.0, 90.0))),
-        (Flat, "H6", "B3", [-52.547, 10.375, -10.481], [0.0, -1.0, 0.0], None),
-        (Pin, "H6", "B3", [-52.547, -2.96, -10.481], [0.0, -1.0, 0.0], Some((-90.0, 0.0))),
-        (Flat, "A4", "H6", [-55.595, 10.375, -10.481], [0.0, 1.0, 0.0], None),
-        (Pin, "H6", "A4", [-58.643, -2.96, -10.481], [0.0, -1.0, 0.0], Some((0.0, 90.0))),
-        (Flat, "H7", "A3", [-52.547, 10.375, 21.269], [0.0, -1.0, 0.0], None),
-        (Pin, "H7", "A3", [-52.547, -2.96, 21.269], [0.0, -1.0, 0.0], Some((0.0, 90.0))),
-        (Flat, "B4", "H7", [-55.595, 10.375, 21.269], [0.0, 1.0, 0.0], None),
-        (Pin, "B4", "H7", [-58.643, 10.375, 21.269], [0.0, 1.0, 0.0], Some((-90.0, 0.0))),
-        (Flat, "H8", "B4", [-71.724, 10.121, 8.442], [1.0, 0.0, 0.0], None),
-        (Pin, "H8", "B4", [-58.389, 10.121, 8.442], [1.0, 0.0, 0.0], Some((-90.0, 0.0))),
-        (Flat, "H8", "A4", [-71.724, 10.121, 2.346], [1.0, 0.0, 0.0], None),
-        (Pin, "H8", "A4", [-58.389, 10.121, 2.346], [1.0, 0.0, 0.0], Some((0.0, 90.0))),
-    ];
+/// plate against its cube (the joints of the report's design, at their places; the parts have no
+/// bodies). Joint `Jn` is row n: (kind, a, b, world point, z, angle limits from where it is,
+/// degrees). Every pin sits at one end of its limits; A2 is grounded.
+#[rustfmt::skip]
+pub(super) const CUBE_RING: [(Toy, &str, &str, [f64; 3], [f64; 3], Option<(f64, f64)>); 32] = [
+        (Toy::Pin, "A1", "H1", [-14.955, 10.121, 8.442], [-1.0, 0.0, 0.0], Some((-90.0, 0.0))),
+        (Toy::Pin, "H1", "B1", [-1.62, 10.121, 2.346], [1.0, 0.0, 0.0], Some((0.0, 90.0))),
+        (Toy::Flat, "A1", "H1", [-14.955, 10.121, 5.394], [-1.0, 0.0, 0.0], None),
+        (Toy::Flat, "H1", "B1", [-1.62, 10.121, 2.346], [-1.0, 0.0, 0.0], None),
+        (Toy::Pin, "H2", "A1", [-14.701, -2.96, 21.269], [0.0, -1.0, 0.0], Some((0.0, 90.0))),
+        (Toy::Flat, "A1", "H2", [-17.749, -2.96, 21.269], [0.0, -1.0, 0.0], None),
+        (Toy::Pin, "B2", "H2", [-20.797, 10.375, 21.269], [0.0, 1.0, 0.0], Some((-90.0, 0.0))),
+        (Toy::Flat, "B2", "H2", [-17.749, 10.375, 21.269], [0.0, 1.0, 0.0], None),
+        (Toy::Flat, "H3", "B1", [-14.701, 10.375, -10.481], [0.0, -1.0, 0.0], None),
+        (Toy::Pin, "H3", "B1", [-14.701, 10.375, -10.481], [0.0, 1.0, 0.0], Some((0.0, 90.0))),
+        (Toy::Flat, "A2", "H3", [-17.749, 10.375, -10.481], [0.0, 1.0, 0.0], None),
+        (Toy::Pin, "A2", "H3", [-20.797, -2.96, -10.481], [0.0, -1.0, 0.0], Some((-90.0, 0.0))),
+        (Toy::Flat, "H4", "B2", [-33.624, -2.706, 21.523], [0.0, 0.0, -1.0], None),
+        (Toy::Pin, "H4", "B2", [-33.624, -2.706, 21.523], [0.0, 0.0, 1.0], Some((-90.0, 0.0))),
+        (Toy::Flat, "H4", "A3", [-39.72, -2.706, 21.523], [0.0, 0.0, -1.0], None),
+        (Toy::Pin, "H4", "A3", [-39.72, -2.706, 8.188], [0.0, 0.0, -1.0], Some((-90.0, 0.0))),
+        (Toy::Flat, "H5", "A2", [-33.624, -2.706, -10.735], [0.0, 0.0, 1.0], None),
+        (Toy::Pin, "H5", "A2", [-33.624, -2.706, 2.6], [0.0, 0.0, 1.0], Some((-90.0, 0.0))),
+        (Toy::Flat, "B3", "H5", [-36.672, -2.706, 2.6], [0.0, 0.0, 1.0], None),
+        (Toy::Pin, "B3", "H5", [-39.72, -2.706, -10.735], [0.0, 0.0, -1.0], Some((0.0, 90.0))),
+        (Toy::Flat, "H6", "B3", [-52.547, 10.375, -10.481], [0.0, -1.0, 0.0], None),
+        (Toy::Pin, "H6", "B3", [-52.547, -2.96, -10.481], [0.0, -1.0, 0.0], Some((-90.0, 0.0))),
+        (Toy::Flat, "A4", "H6", [-55.595, 10.375, -10.481], [0.0, 1.0, 0.0], None),
+        (Toy::Pin, "H6", "A4", [-58.643, -2.96, -10.481], [0.0, -1.0, 0.0], Some((0.0, 90.0))),
+        (Toy::Flat, "H7", "A3", [-52.547, 10.375, 21.269], [0.0, -1.0, 0.0], None),
+        (Toy::Pin, "H7", "A3", [-52.547, -2.96, 21.269], [0.0, -1.0, 0.0], Some((0.0, 90.0))),
+        (Toy::Flat, "B4", "H7", [-55.595, 10.375, 21.269], [0.0, 1.0, 0.0], None),
+        (Toy::Pin, "B4", "H7", [-58.643, 10.375, 21.269], [0.0, 1.0, 0.0], Some((-90.0, 0.0))),
+        (Toy::Flat, "H8", "B4", [-71.724, 10.121, 8.442], [1.0, 0.0, 0.0], None),
+        (Toy::Pin, "H8", "B4", [-58.389, 10.121, 8.442], [1.0, 0.0, 0.0], Some((-90.0, 0.0))),
+        (Toy::Flat, "H8", "A4", [-71.724, 10.121, 2.346], [1.0, 0.0, 0.0], None),
+        (Toy::Pin, "H8", "A4", [-58.389, 10.121, 2.346], [1.0, 0.0, 0.0], Some((0.0, 90.0))),
+];
+
+/// The cube toy, built joint by joint, without the joints `without` (row numbers).
+pub(super) fn cube_ring(without: &[usize]) -> Session {
     let mut s = Session::default();
     for part in ["A1", "A2", "A3", "A4", "B1", "B2", "B3", "B4", "H1", "H2", "H3", "H4", "H5", "H6", "H7", "H8"] {
         run(&mut s, "component.create", json!({"name": part, "grounded": part == "A2"}));
         run(&mut s, "component.activate", json!({"component": "root"}));
     }
-    for (n, (kind, a, b, p, z, limits)) in joints.iter().enumerate() {
+    for (n, (kind, a, b, p, z, limits)) in CUBE_RING.iter().enumerate().filter(|(n, _)| !without.contains(n)) {
         let at = json!({"occurrence": a, "point": p, "z": z});
-        let mut params = match kind {
-            Pin => json!({"type": "cylindrical", "a": a, "b": b, "at": at, "name": format!("J{n}")}),
-            Flat => json!({"type": "planar", "a": a, "b": b, "at": at, "name": format!("J{n}")}),
-        };
+        let kind = if *kind == Toy::Pin { "cylindrical" } else { "planar" };
+        let mut params = json!({"type": kind, "a": a, "b": b, "at": at, "name": format!("J{n}")});
         if let Some((lo, hi)) = limits {
             params["limits"] = json!([[lo, hi], null]);
         }
         let r = run(&mut s, "joint.as_built", params);
         assert_eq!(r["conflicts"].as_array().map(Vec::len), Some(0), "J{n}: {r}");
     }
+    s
+}
+
+/// #18880: the cube toy (`CUBE_RING`) has two ways to fold: hinges 1 and 8 on one line, or
+/// hinges 4 and 5 on another; the other four hinges can't turn. The loop solver cut each step
+/// back to the limits after solving it, so the pins that could not turn kept the loops open and
+/// the drive stopped a tenth of a degree in. Each fold moves through its pin's whole quarter turn
+/// now, and the hinges off its line stay where they are.
+#[test]
+fn a_ring_of_hinged_cubes_folds_both_ways() {
+    let mut s = cube_ring(&[]);
     // The pin joints of hinge `h`.
     let pins = |h: usize| -> Vec<String> {
         let plate = format!("H{h}");
-        joints
+        CUBE_RING
             .iter()
             .enumerate()
-            .filter(|(_, (kind, a, b, ..))| matches!(kind, Pin) && (*a == plate || *b == plate))
+            .filter(|(_, (kind, a, b, ..))| *kind == Toy::Pin && (*a == plate || *b == plate))
             .map(|(n, _)| format!("J{n}"))
             .collect()
     };
@@ -2463,7 +2704,7 @@ fn joint_visibility_lookup_cost_by_hidden_joint_count() {
 fn older_designs_show_every_joint_and_new_joints_start_shown() {
     let (dir, path) = temp_design("legacy", "json");
     let mut s = hinged();
-    let mut legacy: Value = serde_json::from_slice(&solidcraft_io::write_design(&s.doc)).unwrap();
+    let mut legacy: Value = serde_json::from_slice(&solidcraft_io::write_design(&s.doc).unwrap()).unwrap();
     legacy["format"] = json!("solidcraft/19");
     legacy["visibility"] =
         json!({"hidden_bodies": [], "hidden_occurrences": [], "hidden_origin": ["XY"], "hidden_sketches": [], "shown_sketches": []});
@@ -2963,6 +3204,23 @@ fn associative_trace_reuses_pose_and_unrelated_edits_but_follows_drive_expressio
     run(&mut s, "motion.trace.edit", json!({"sketch":id,"auto_update":false}));
     run(&mut s, "parameters.change", json!({"name":"travel","expression":"270 deg"}));
     assert_eq!(kept_trace_fit(&s, id), updated, "detaching preserves the curve");
+}
+
+/// A trace whose joint has a limit expression that no longer works out says so, as the solve
+/// does, instead of keeping the curve bounded by the limit's old numbers (#20242).
+#[test]
+fn associative_trace_warns_when_a_limit_expression_stops_working_out() {
+    let (mut s, p0, q0) = four_bar();
+    let mid = (p0 + q0) * 0.5;
+    run(&mut s, "parameters.add", json!({"name":"reach","expression":"120 deg"}));
+    run(&mut s, "joint.limits", json!({"joint":"Crank","min":0,"max":"reach"}));
+    let r =
+        run(&mut s, "motion.trace.keep", json!({"occurrence":"Coupler","point":[mid.x,mid.y,mid.z],"joint":"Crank","from":0,"to":90,"samples":19}));
+    let id = r["sketch"].as_u64().unwrap();
+    let warning = |s: &Session| s.model.results.iter().find(|r| r.id == id).and_then(|r| r.warning.clone()).unwrap_or_default();
+    assert_eq!(warning(&s), "");
+    run(&mut s, "parameters.change", json!({"name":"reach","expression":"-10 deg"}));
+    assert!(warning(&s).contains("minimum comes out above the maximum"), "{}", warning(&s));
 }
 
 #[test]

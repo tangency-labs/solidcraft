@@ -722,12 +722,17 @@ pub(crate) fn decode(mut v: Value, version: u32, applied: Option<&[String]>) -> 
         {
             return Err(DocError::Invalid("damaged design: body transfer owner must match its destination".into()));
         }
+        if let Some(frame) = &feature.profile_frame
+            && !crate::is_placement(frame)
+        {
+            return Err(DocError::Invalid(format!("damaged design: feature `{}` has an invalid profile frame", feature.name)));
+        }
     }
     // Fill in what older designs (and hand-edited files) may lack; a no-op otherwise.
     crate::format_offsets::validate_typed(&d)?;
-    normalise(&mut d)?;
     // `next_id` is trusted by nothing: a hand-edited or generated file may omit it or leave it stale,
     // and the next feature, component or occurrence would then reuse an id that is already taken.
+    // It is repaired before `normalise`, which gives an occurrence to each component that has none.
     let largest =
         d.features.iter().map(|f| f.id).chain(d.components.iter().map(|c| c.id)).chain(d.occurrences.iter().map(|o| o.id)).max().unwrap_or(0);
     let floor = largest.checked_add(1).ok_or_else(|| DocError::Invalid("damaged design: the id space is exhausted".into()))?;
@@ -735,6 +740,7 @@ pub(crate) fn decode(mut v: Value, version: u32, applied: Option<&[String]>) -> 
     // These lists used to allocate independently. Keep their existing identities, but never
     // let a later deletion make them available again after loading an older design.
     d.next_id = d.next_item_id()?;
+    normalise(&mut d)?;
     d.drawings = crate::drawing::in_design(drawings).map_err(|e| DocError::Invalid(format!("damaged design: {e}")))?;
     d.format = format_string(FORMAT);
     d.format_pending = pending_names();
@@ -1327,6 +1333,33 @@ mod tests {
         assert!(validate_versioned_geometry(&damaged).is_err());
         let plane = serde_json::json!({"type":"construction", "feature":7,"placement":scaled});
         assert!(validate_sketch_plane_placement(Some(&plane)).is_err());
+    }
+
+    #[test]
+    fn profile_frame_rejects_damaged_matrix() {
+        let mut doc = Document::new("profile_frame");
+        let id = doc
+            .add_feature(
+                crate::FeatureKind::Box {
+                    corner: ["0".into(), "0".into(), "0".into()],
+                    length: "10 mm".into(),
+                    width: "10 mm".into(),
+                    height: "10 mm".into(),
+                    operation: crate::Operation::NewBody,
+                    centred: false,
+                },
+                Some("Box 1"),
+            )
+            .unwrap();
+        doc.feature_mut(id).unwrap().profile_frame = Some(crate::IDENTITY);
+        let mut valid: Value = serde_json::from_str(&doc.to_json()).unwrap();
+        assert!(read(&valid.to_string()).is_ok());
+
+        let mut scaled = crate::IDENTITY;
+        scaled[0][0] = 2.0;
+        valid["features"][0]["profile_frame"] = serde_json::json!(scaled);
+        let err = read(&valid.to_string()).unwrap_err().to_string();
+        assert!(err.contains("invalid profile frame"), "{err}");
     }
 
     fn older_design_with_anchored_component_sketch() -> (Value, u64) {
@@ -2022,6 +2055,7 @@ mod tests {
                         direction: Direction::Negative,
                         distance2: None,
                         start_offset: None,
+                        symmetric_offset: false,
                         through_all: false,
                         second_follows_first: false,
                         taper: Some("0 deg".into()),
@@ -2675,6 +2709,74 @@ mod tests {
             assert!(back.next_id > largest, "next_id {} after load with {stale:?}", back.next_id);
             let fresh = back.add_component(None, 0).unwrap();
             assert!(fresh > largest, "new component reused id {fresh}");
+        }
+    }
+
+    /// #1017. An import's rigid group takes its id from the shared counter. A design whose saved
+    /// `next_id` is missing or stale must not hand that id out again, in memory or after it opens.
+    #[test]
+    fn a_stale_next_id_never_reuses_a_rigid_group_id() {
+        let mut d = two_components_one_occurrence();
+        let component = d.components[0].id;
+        let members = d.occurrences.iter().map(|o| o.id).collect();
+        let group = d.allocate_id().unwrap();
+        d.assembly.rigid_groups.push(crate::joints::RigidGroup { id: group, name: "Board".into(), component, members });
+        d.next_id = group;
+        assert!(d.next_item_id().unwrap() > group, "next_item_id {} with the group at {group}", d.next_item_id().unwrap());
+        for stale in [None, Some(0), Some(group)] {
+            let json = edited(&d, |v| {
+                let o = v.as_object_mut().unwrap();
+                match stale {
+                    Some(n) => o.insert("next_id".into(), n.into()),
+                    None => o.remove("next_id"),
+                };
+            });
+            let mut back = read(&json).unwrap();
+            assert_eq!(back.assembly.rigid_groups.len(), 1, "the group survives loading with {stale:?}");
+            assert!(back.next_id > group, "next_id {} after load with {stale:?}, group at {group}", back.next_id);
+            let fresh = back.allocate_id().unwrap();
+            assert!(fresh > group, "a new object reused the rigid group's id {fresh} with {stale:?}");
+        }
+    }
+
+    /// Loading gives an occurrence to each component that has none, as an older design may have.
+    /// With a missing or stale saved `next_id`, that occurrence must not take an id the design
+    /// already uses, a rigid group's included, so the counter is repaired before it is made.
+    #[test]
+    fn an_occurrence_made_while_loading_takes_no_id_in_use() {
+        let mut d = two_components_one_occurrence();
+        let (first, second) = (d.components[0].id, d.components[1].id);
+        let members = d.occurrences.iter().filter(|o| o.component == first).map(|o| o.id).collect();
+        let group = d.allocate_id().unwrap();
+        d.assembly.rigid_groups.push(crate::joints::RigidGroup { id: group, name: "Board".into(), component: first, members });
+        for stale in [None, Some(0), Some(1), Some(group)] {
+            let json = edited(&d, |v| {
+                let o = v.as_object_mut().unwrap();
+                match stale {
+                    Some(n) => o.insert("next_id".into(), n.into()),
+                    None => o.remove("next_id"),
+                };
+                // The file leaves out the second component's occurrences, so loading makes one.
+                if let Some(list) = o.get_mut("occurrences").and_then(Value::as_array_mut) {
+                    list.retain(|x| x.get("component").and_then(Value::as_u64) != Some(second));
+                }
+            });
+            let saved: Value = serde_json::from_str(&json).unwrap();
+            let kept = saved["occurrences"].as_array().map_or(0, |l| l.iter().filter(|x| x["component"].as_u64() == Some(second)).count());
+            assert_eq!(kept, 0, "the file holds no occurrence of the second component");
+            let back = read(&json).unwrap();
+            assert!(back.occurrences.iter().any(|x| x.component == second), "loading gave the second component an occurrence with {stale:?}");
+            let mut ids: Vec<u64> = back
+                .components
+                .iter()
+                .map(|c| c.id)
+                .chain(back.occurrences.iter().map(|o| o.id))
+                .chain(back.assembly.rigid_groups.iter().map(|g| g.id))
+                .collect();
+            let all = ids.len();
+            ids.sort_unstable();
+            ids.dedup();
+            assert_eq!(ids.len(), all, "an id is used twice after loading with {stale:?}: {ids:?}");
         }
     }
 

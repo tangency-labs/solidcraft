@@ -276,7 +276,7 @@ pub(super) const EXECUTIVE_P3: &[(&str, usize)] = &[
         "invert: main refuses, this branch answers, proven nearer than the guess",
         8,
     ),
-    ("invert: proven nearer", 240),
+    ("invert: proven nearer", 1),
 ];
 /// Of `heal.heal_data_p3`'s.
 pub(super) const HEAL_DATA_P3: &[(&str, usize)] = &[

@@ -85,6 +85,24 @@ pub struct ExportStlParams {
     /// as it lies in the design.
     #[serde(default)]
     pub lay_on_print_faces: Option<bool>,
+    /// True writes ASCII STL instead of binary. Default: false.
+    #[serde(default)]
+    pub ascii: Option<bool>,
+    /// `body` (the default) writes one solid for the file; `face` writes one `solid <name>` block
+    /// for each B-rep face, named by the face's persistent name, for CFD meshers
+    /// (docs/formats/stl-face-solids.md). `face` needs `ascii: true`.
+    #[serde(default)]
+    pub solids: Option<SolidsParam>,
+}
+
+/// What `solids` splits an STL export into.
+#[derive(Debug, Clone, Copy, Deserialize, JsonSchema)]
+#[serde(rename_all = "lowercase")]
+pub enum SolidsParam {
+    /// One solid for the file, as always.
+    Body,
+    /// One named solid for each B-rep face (ASCII STL only).
+    Face,
 }
 
 /// Export bodies as a 3MF file, whatever the path's extension.
@@ -173,9 +191,15 @@ pub struct ExportParams {
     #[serde(default)]
     pub path: Option<String>,
     /// The format: stl, stla, obj, step, 3mf, 3mf-tagged, glb, urdf, sdf or json, or a file name
-    /// whose extension names it. Default: from the path's extension.
+    /// whose extension names it, or an installed exporter plugin as `plugin_id.entry` (`plugin.list`'s
+    /// `exporters`). Default: from the path's extension; an extension SolidCraft does not write
+    /// goes to the exporter plugin that claims it.
     #[serde(default)]
     pub format: Option<String>,
+    /// An exporter plugin's options, as its slot declares them. Refused for SolidCraft's own
+    /// formats. Default: the slot's defaults.
+    #[serde(default)]
+    pub options: Option<serde_json::Map<String, Value>>,
     /// The bodies to export, by name. Default: every body. Design JSON and URDF export the
     /// complete design, so they refuse a list.
     #[serde(default)]
@@ -204,6 +228,16 @@ pub struct ExportParams {
     /// `file.export_stl` has it; refused for the other formats. Default: false. Not read for URDF.
     #[serde(default)]
     pub lay_on_print_faces: Option<bool>,
+    /// GLB only: true writes each component occurrence as a node named after it, holding its
+    /// part's bodies in the part's frame, so a viewer can move each part on its own; false writes
+    /// every body directly under the root in world coordinates, named as the model names it (as
+    /// SolidCraft 0.40 did). Default: true. Not read for the other formats.
+    #[serde(default)]
+    pub hierarchy: Option<bool>,
+    /// ASCII STL (`stla`) only: `face` writes one named solid for each B-rep face, as
+    /// `file.export_stl` has it; refused for the other formats. Default: body.
+    #[serde(default)]
+    pub solids: Option<SolidsParam>,
     /// SDF only: the model's name. Default: the folder's name.
     #[serde(default)]
     pub name: Option<String>,
@@ -277,6 +311,7 @@ impl<'de> Deserialize<'de> for ExportParams {
         let mut out = ExportParams {
             path: None,
             format: None,
+            options: None,
             bodies: None,
             quality: None,
             objects: None,
@@ -285,6 +320,8 @@ impl<'de> Deserialize<'de> for ExportParams {
             velocity: None,
             images: None,
             lay_on_print_faces: None,
+            hierarchy: None,
+            solids: None,
             name: None,
             is_static: None,
             model_uris: None,
@@ -297,11 +334,28 @@ impl<'de> Deserialize<'de> for ExportParams {
             Some(_) => return Err(refuse::<D::Error>("`path` is required")),
         };
         out.format = text::<D::Error>(&m, "format")?;
+        out.options = match m.get("options") {
+            None | Some(Value::Null) => None,
+            Some(Value::Object(options)) => Some(options.clone()),
+            Some(_) => return Err(refuse("`options` must be an object")),
+        };
         let Some(format) = out.format.as_deref().or(out.path.as_deref()).and_then(|n| Format::from_name(n).ok()) else {
             // The handler refuses a format it does not know before it reads anything else.
             return Ok(out);
         };
         out.bodies = names::<D::Error>(&m)?;
+        // `solids` is checked for every format, so URDF and SDF refuse `face` as binary STL does.
+        out.solids = match m.get("solids") {
+            None | Some(Value::Null) => None,
+            Some(Value::String(v)) if v == "body" => Some(SolidsParam::Body),
+            Some(Value::String(v)) if v == "face" && format == Format::StlAscii => Some(SolidsParam::Face),
+            Some(Value::String(v)) if v == "face" => {
+                return Err(refuse(
+                    "`solids: face` needs ASCII STL (format stla, or ascii: true): binary STL and other formats have no named solids",
+                ));
+            }
+            Some(v) => return Err(refuse(format!("`solids` must be body or face, not {v}"))),
+        };
         if format == Format::Urdf {
             // URDF reads its own keys; `quality` and `objects` are not read.
             out.mesh_prefix = text::<D::Error>(&m, "mesh_prefix")?;
@@ -347,6 +401,12 @@ impl<'de> Deserialize<'de> for ExportParams {
             Some(Value::Bool(true)) if matches!(format, Format::StlBinary | Format::StlAscii | Format::ThreeMf | Format::ThreeMfTagged) => Some(true),
             Some(Value::Bool(true)) => return Err(refuse("`lay_on_print_faces` is for STL and 3MF: other formats are not printed")),
             Some(_) => return Err(refuse("`lay_on_print_faces` must be true or false")),
+        };
+        out.hierarchy = match m.get("hierarchy") {
+            _ if format != Format::Glb => None,
+            None | Some(Value::Null) => None,
+            Some(Value::Bool(b)) => Some(*b),
+            Some(_) => return Err(refuse("`hierarchy` must be true or false")),
         };
         Ok(out)
     }
@@ -1061,6 +1121,8 @@ pub enum FileExportResult {
     File(ExportResult),
     /// URDF.
     Urdf(UrdfExportResult),
+    /// A format an exporter plugin writes.
+    Plugin(crate::schema::plugin::ExportedFile),
     /// A Gazebo model folder (SDF).
     Sdf(SdfExportResult),
 }

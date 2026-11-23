@@ -235,7 +235,15 @@ fn meshed(
     let LineRequest { shows, hidden, reference_hidden, reference_hides_model, tangent_edges, .. } = *request;
     let started = web_time::Instant::now();
     let names: BTreeSet<&str> = shown.bodies.iter().filter_map(|b| shown.body(b)).map(|b| b.name.as_str()).collect();
-    let mut scene = mesh_lines::prepare(s, cmd, model_chord_mm, Ask { tangent_edges, sources: true }, |b| names.contains(b.name.as_str()), refused)?;
+    let mut scene = mesh_lines::prepare(
+        s,
+        &shown.state,
+        cmd,
+        model_chord_mm,
+        Ask { tangent_edges, sources: true },
+        |b| names.contains(b.name.as_str()),
+        refused,
+    )?;
     let prepare_ms = started.elapsed().as_secs_f64() * 1000.;
     if scene.placements.len() != shown.bodies.len() {
         return Err(bad(cmd, ONE_NAME));
@@ -433,7 +441,7 @@ fn one_arc(pieces: &[PlanarPiece]) -> Option<Seg2> {
         if !continues((center, radius, start, sweep), next) {
             return None;
         }
-        sweep += next.3;
+        sweep = joined_sweep(sweep, next.3)?;
     }
     Some(Seg2::Arc { center, radius, start, sweep })
 }
@@ -444,6 +452,19 @@ pub(super) fn continues((center, radius, start, sweep): (Vec2, f64, f64, f64), (
     let on_from_last = (start + sweep - s).rem_euclid(std::f64::consts::TAU);
     let on_from_last = on_from_last.min(std::f64::consts::TAU - on_from_last);
     c.dist(center) <= radius * 1e-9 && (r - radius).abs() <= radius * 1e-9 && on_from_last <= 1e-9
+}
+
+/// The sweep of an arc of `sweep` and the arc of `turn` that [`continues`] it, joined: `None` past a
+/// whole turn. Each joint is only within 1e-9 of the last arc's end, so the rounded sum of the pieces'
+/// sweeps can fall either side of a whole turn when they close the circle; a sum within 1e-9 of one
+/// is the whole turn, exactly ±2π, as a circle's own sweep is (#212).
+pub(super) fn joined_sweep(sweep: f64, turn: f64) -> Option<f64> {
+    let full = std::f64::consts::TAU;
+    let sum = sweep + turn;
+    if (sum.abs() - full).abs() <= 1e-9 {
+        return Some(full.copysign(sum));
+    }
+    (sum.abs() < full).then_some(sum)
 }
 
 /// A placement's turn: its matrix's rotation, bit for bit.

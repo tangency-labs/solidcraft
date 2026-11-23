@@ -50,7 +50,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .contract(&ROW_EDIT_CONTRACT)
         .output(output_schema_for::<ConfigTableReply>)
         .params(
-        "name (a row's name, or its id from config.table); from? (row to copy, by name or id; default current values); values?: {column key: expression, suppression, material name, appearance name or Look object}; rename?; delete?: bool",
+        "name (a row's name, or its id from config.table); from? (row to copy, by name or id; default current values); values?: {column key: expression, suppression, material name, appearance name or Look object}; rename?; index? (move the row to this place, 0 = first); delete?: bool"
     ),
     CommandSpec::new("config.activate", "Activate Configuration", crate::checked!("config.activate", activate))
         .icon("activate")
@@ -86,9 +86,23 @@ pub static COMMANDS: &[CommandSpec] = &[
 ];
 
 fn column_of(s: &Session, p: &Value, cmd: &str) -> Result<Column> {
-    if ["param", "feature", "material", "appearance", "component_appearance", "face_appearance"].iter().filter(|k| p.get(**k).is_some()).count() != 1
-    {
-        return Err(bad(cmd, "give exactly one configuration target"));
+    const TARGETS: &[&str] = &["param", "feature", "material", "appearance", "component_appearance", "face_appearance"];
+    if TARGETS.iter().filter(|k| p.get(**k).is_some()).count() != 1 {
+        let named = TARGETS.iter().map(|k| format!("`{k}`")).collect::<Vec<_>>();
+        let mut message = format!("give exactly one configuration target: {} or {}", named[..named.len() - 1].join(", "), named[named.len() - 1]);
+        // A key that is no target and no other parameter is likely a misspelt one: name it.
+        let unknown: Vec<String> = p
+            .as_object()
+            .into_iter()
+            .flat_map(|o| o.keys())
+            .filter(|k| !TARGETS.contains(&k.as_str()) && *k != "delete")
+            .map(|k| format!("`{k}`"))
+            .collect();
+        if !unknown.is_empty() {
+            let are = if unknown.len() == 1 { "is not a parameter" } else { "are not parameters" };
+            message.push_str(&format!(" ({} {are} of {cmd})", unknown.join(", ")));
+        }
+        return Err(bad(cmd, message));
     }
     if let Some(value) = p.get("component_appearance") {
         let key = value
@@ -324,6 +338,20 @@ fn row(s: &mut Session, p: &Value) -> Result<Value> {
         }
         return show(s, p);
     }
+    if p.get("index").is_some() {
+        // Only moves the row: the others keep their order, and the active row stays active.
+        let i = idx.ok_or_else(|| bad(cmd, format!("no row `{name}` to move")))?;
+        let rows = &mut s.doc_mut().configs.rows;
+        let position = p
+            .get("index")
+            .and_then(Value::as_u64)
+            .and_then(|v| usize::try_from(v).ok())
+            .filter(|v| *v < rows.len())
+            .ok_or_else(|| bad(cmd, "valid index required"))?;
+        let row = rows.remove(i);
+        rows.insert(position, row);
+        return show(s, p);
+    }
     let from = match p.get("from") {
         None | Some(Value::Null) => None,
         Some(given) => Some(RowKey::read(given).ok_or_else(|| bad(cmd, "`from` must be a row's name or id"))?),
@@ -514,8 +542,27 @@ fn activate(s: &mut Session, p: &Value) -> Result<Value> {
 fn activation(s: &mut Session, p: &Value) -> Result<ConfigActivation> {
     let cmd = "config.activate";
     let key = p.get("row").and_then(RowKey::read).ok_or_else(|| bad(cmd, "`row` is required"))?;
+    let target = s.doc.configs.row(key).map(|r| r.id);
+    // The row being left and what it built, kept below for a return to it.
+    // (without what a caller offered it for this command alone)
+    let left = s.doc.configs.active_row().map(|r| r.id).filter(|id| Some(*id) != target).map(|id| {
+        let mut m = s.model.clone();
+        m.unprime();
+        (id, m)
+    });
     let mut trial = s.scratch();
-    let put = put_row(&mut trial, key, cmd)?;
+    // Rows built before (the one activated first): a feature on the same inputs as in one of
+    // them takes its result there, in the trial and in the session's own evaluation (results
+    // taken that way are not cached again). A new row shares most of its features with another.
+    let mut built: Vec<solidcraft_doc::Model> = s.row_models.iter().filter(|(id, _)| Some(*id) == target).map(|(_, m)| m.clone()).collect();
+    built.extend(s.row_models.iter().filter(|(id, _)| Some(*id) != target).map(|(_, m)| m.clone()));
+    let offered = trial.model.primed_count();
+    for m in &built {
+        trial.model.prime_also(m);
+    }
+    let put = put_row(&mut trial, key, cmd);
+    trial.model.unprime_after(offered);
+    let put = put?;
     // The row by its name in what follows, however it was given.
     let r = trial.doc.configs.active.clone().unwrap_or_default();
     if !put.new_errors.is_empty() {
@@ -524,8 +571,20 @@ fn activation(s: &mut Session, p: &Value) -> Result<ConfigActivation> {
     let styles = trial.doc.configuration_style_status(&trial.model.state()).map_err(|error| bad(cmd, format!("configuration `{r}`: {error}")))?;
     let solved = s.solved_sketches();
     s.doc = trial.doc;
-    s.settle_value_edit(&solved)?;
+    let offered = s.model.primed_count();
+    for m in &built {
+        s.model.prime_also(m);
+    }
+    let settled = s.settle_value_edit(&solved);
+    s.model.unprime_after(offered);
+    settled?;
     s.config_baseline = Some((s.document_id.clone(), s.doc.clone()));
+    // The row now active is built in the model itself; the one left is kept, with the one before.
+    s.row_models.retain(|(id, _)| Some(*id) != target && left.as_ref().is_none_or(|(l, _)| l != id));
+    if let Some(left) = left {
+        s.row_models.insert(0, left);
+        s.row_models.truncate(2);
+    }
     let errors: Vec<String> = s.model.results.iter().filter_map(|x| x.error.clone()).collect();
     let trace = put.trace.iter().map(|t| serde_json::to_value(t).map_err(|e| bad(cmd, e.to_string()))).collect::<Result<Vec<_>>>()?;
     Ok(ConfigActivation { table: table(s, cmd)?, errors, trace, styles, preview: None, parameters: None, param_warnings: Vec::new() })
@@ -721,6 +780,106 @@ mod tests {
         run(s, "inspect.measure", json!({}))["total"]["volume_mm3"].as_f64().unwrap_or(f64::NAN)
     }
 
+    /// A mirror of a placed body depends on where the body is shown, which its fingerprint
+    /// leaves out: going back to a row after the body moved mirrors it where it is now, not where
+    /// it was when the row was built.
+    #[test]
+    fn going_back_to_a_row_mirrors_a_placed_body_where_it_is_now() {
+        use solidcraft_geom::MeshGeom as _;
+        let mut s = Session::default();
+        let c = run(&mut s, "component.create", json!({"name": "Arm", "grounded": false}));
+        let occurrence = c["occurrence"].as_u64().unwrap();
+        run(&mut s, "solid.box", json!({"corner": [10, 0, 0], "length": 20, "width": 4, "height": 6, "body_name": "ArmBody"}));
+        run(&mut s, "component.activate", json!({"component": 0}));
+        run(&mut s, "occurrence.move", json!({"occurrence": occurrence, "translate": [30, 50, 0]}));
+        let copy = run(&mut s, "solid.mirror", json!({"bodies": ["ArmBody"], "plane": "YZ"}))["created_bodies"][0].as_str().unwrap().to_string();
+        run(&mut s, "solid.box", json!({"corner": [0, -40, 0], "length": 5, "width": 5, "height": 5, "name": "Extra", "operation": "new"}));
+        run(&mut s, "config.configure", json!({"features": ["Extra"]}));
+        run(&mut s, "config.row", json!({"name": "A"}));
+        run(&mut s, "config.row", json!({"name": "B", "values": {"suppress:Extra": true}}));
+        run(&mut s, "config.activate", json!({"row": "A"}));
+        run(&mut s, "config.activate", json!({"row": "B"}));
+        run(&mut s, "occurrence.move", json!({"occurrence": occurrence, "space": "world", "translate": [0, 200, 0]}));
+        run(&mut s, "config.activate", json!({"row": "A"}));
+        let bounds = |s: &Session, body: &str| s.world_state().unwrap().body(body).unwrap().mesh().bounds();
+        let (arm, mirrored) = (bounds(&s, "ArmBody"), bounds(&s, &copy));
+        assert!((mirrored.min.y - arm.min.y).abs() < 1e-6 && (mirrored.max.x + arm.min.x).abs() < 1e-6, "{arm:?} {mirrored:?}");
+    }
+
+    /// A new row whose features are on the inputs another row built them on takes that row's
+    /// results (a copy of a row with a later feature suppressed shares all the features before).
+    #[test]
+    fn a_new_row_takes_the_results_of_a_row_built_before() {
+        let mut s = Session::default();
+        run(&mut s, "solid.box", json!({"length": 20, "width": 10, "height": 5, "name": "Base"}));
+        run(&mut s, "solid.box", json!({"length": 5, "width": 5, "height": 5, "corner": [2, 2, 5], "name": "Boss"}));
+        run(&mut s, "solid.box", json!({"length": 5, "width": 5, "height": 5, "corner": [30, 0, 0], "operation": "new", "name": "Late"}));
+        run(&mut s, "config.configure", json!({"features": ["Boss", "Late"]}));
+        run(&mut s, "config.row", json!({"name": "With"}));
+        run(&mut s, "config.row", json!({"name": "Without", "values": {"suppress:Boss": true}}));
+        run(&mut s, "config.activate", json!({"row": "With"}));
+        *s.model.cache.lock().unwrap() = solidcraft_doc::EvalCache::with_budget(1);
+        let built: Vec<_> = s.model.results.iter().map(|r| r.state.clone()).collect();
+        run(&mut s, "config.activate", json!({"row": "Without"}));
+        run(&mut s, "config.row", json!({"name": "With, no late box", "from": "With", "values": {"suppress:Late": true}}));
+        run(&mut s, "config.activate", json!({"row": "With, no late box"}));
+        for (r, b) in s.model.results.iter().zip(&built).take(2) {
+            assert!(std::sync::Arc::ptr_eq(&r.state, b), "{} computed again", r.name);
+        }
+        assert!((volume(&mut s) - 1125.0).abs() < 1e-6);
+    }
+
+    /// Going back to a row built before takes that row's results, though the cache dropped them
+    /// (it holds only the last state here, as for a large design): the features it changes are
+    /// not computed again, so each result is the very state the row built.
+    #[test]
+    fn going_back_to_a_row_takes_the_results_it_built() {
+        let mut s = Session::default();
+        run(&mut s, "solid.box", json!({"length": 20, "width": 10, "height": 5, "name": "Base"}));
+        run(&mut s, "solid.box", json!({"length": 5, "width": 5, "height": 5, "corner": [2, 2, 5], "name": "Boss"}));
+        for x in [30, 40, 50] {
+            run(&mut s, "solid.box", json!({"length": 5, "width": 5, "height": 5, "corner": [x, 0, 0], "operation": "new"}));
+        }
+        run(&mut s, "config.configure", json!({"features": ["Boss"]}));
+        run(&mut s, "config.row", json!({"name": "With"}));
+        run(&mut s, "config.row", json!({"name": "Without", "values": {"suppress:Boss": true}}));
+        run(&mut s, "config.activate", json!({"row": "With"}));
+        *s.model.cache.lock().unwrap() = solidcraft_doc::EvalCache::with_budget(1);
+        let built: Vec<_> = s.model.results.iter().map(|r| r.state.clone()).collect();
+        run(&mut s, "config.activate", json!({"row": "Without"}));
+        assert!((volume(&mut s) - (1000.0 + 3.0 * 125.0)).abs() < 1e-6);
+        run(&mut s, "config.activate", json!({"row": "With"}));
+        assert_eq!(s.model.results.len(), built.len());
+        for (r, b) in s.model.results.iter().zip(&built) {
+            assert!(std::sync::Arc::ptr_eq(&r.state, b), "{} computed again", r.name);
+        }
+        assert!((volume(&mut s) - (1125.0 + 3.0 * 125.0)).abs() < 1e-6);
+        // A feature added at the end since the row was left: the features before it still take
+        // what the row built.
+        let without: Vec<_> = s
+            .row_models
+            .iter()
+            .find(|(id, _)| Some(*id) == s.doc.configs.row(solidcraft_doc::config::RowKey::Name("Without")).map(|r| r.id))
+            .map(|(_, m)| m.results.iter().map(|r| r.state.clone()).collect())
+            .unwrap();
+        run(&mut s, "solid.box", json!({"length": 5, "width": 5, "height": 5, "corner": [70, 0, 0], "operation": "new", "name": "Late"}));
+        run(&mut s, "config.activate", json!({"row": "Without"}));
+        for (r, b) in s.model.results.iter().zip(&without) {
+            assert!(std::sync::Arc::ptr_eq(&r.state, b), "{} computed again after a feature was added", r.name);
+        }
+        // Only the last two rows left are kept.
+        for name in ["Third", "Fourth"] {
+            run(&mut s, "config.row", json!({"name": name, "values": {"suppress:Boss": true}}));
+            run(&mut s, "config.activate", json!({"row": name}));
+        }
+        run(&mut s, "config.activate", json!({"row": "Without"}));
+        let names: Vec<_> = s.row_models.iter().map(|(id, _)| s.doc.configs.rows.iter().find(|r| r.id == *id).map(|r| r.name.clone())).collect();
+        assert_eq!(names, [Some("Fourth".to_string()), Some("Third".to_string())]);
+        // Compute All starts again from nothing: it forgets them.
+        run(&mut s, "timeline.compute_all", json!({}));
+        assert!(s.row_models.is_empty());
+    }
+
     /// Rows have fixed ids (#14750): `config.table` lists them, and activate, preview and row take
     /// a row by its id or its name. A rename keeps the id and the active row, a row named after
     /// another's id is still that name, and a new row never takes a deleted row's id.
@@ -845,6 +1004,42 @@ mod tests {
         assert_eq!(replacement, id);
         assert_ne!(s.doc.configs.row_identity(replacement), Some(identity));
         assert!(s.doc.configs.row_identity(replacement).is_some());
+    }
+
+    /// A row moves to the place `index` gives (#17287): the others keep their order, ids and the
+    /// active row stay, and an index off the table, a row that isn't there, or a move together with
+    /// nothing else to do is refused with the table as it was. One undo step.
+    #[test]
+    fn a_row_moves_to_a_place_in_the_table() {
+        let mut s = Session::default();
+        run(&mut s, "parameters.add", json!({"name": "W", "expression": "10 mm"}));
+        run(&mut s, "solid.box", json!({"length": "W", "width": 10, "height": 10}));
+        run(&mut s, "config.configure", json!({"params": ["W"]}));
+        for (name, w) in [("10 mm", "10 mm"), ("12 mm", "12 mm"), ("20 mm", "20 mm"), ("16 mm", "16 mm")] {
+            run(&mut s, "config.row", json!({"name": name, "values": {"W": w}}));
+        }
+        run(&mut s, "config.row", json!({"name": "Default", "delete": true}));
+        run(&mut s, "config.activate", json!({"row": "20 mm"}));
+        let names = |s: &mut Session| -> Vec<String> {
+            run(s, "config.table", json!({}))["rows"]
+                .as_array()
+                .map(|rows| rows.iter().filter_map(|r| r["name"].as_str().map(str::to_string)).collect())
+                .unwrap_or_default()
+        };
+        assert_eq!(names(&mut s), ["10 mm", "12 mm", "20 mm", "16 mm"]);
+        let t = run(&mut s, "config.row", json!({"name": "16 mm", "index": 2}));
+        assert_eq!(names(&mut s), ["10 mm", "12 mm", "16 mm", "20 mm"], "16 mm goes above 20 mm");
+        assert_eq!(t["active"], json!("20 mm"), "the active row stays active");
+        run(&mut s, "config.row", json!({"name": "10 mm", "index": 3}));
+        assert_eq!(names(&mut s), ["12 mm", "16 mm", "20 mm", "10 mm"], "the first row goes last");
+        run(&mut s, "config.row", json!({"name": "10 mm", "index": 0}));
+        assert_eq!(names(&mut s), ["10 mm", "12 mm", "16 mm", "20 mm"]);
+        for p in [json!({"name": "12 mm", "index": 4}), json!({"name": "Nope", "index": 0}), json!({"name": "12 mm", "index": -1})] {
+            assert!(s.execute("config.row", &p).is_err(), "{p}");
+        }
+        assert_eq!(names(&mut s), ["10 mm", "12 mm", "16 mm", "20 mm"], "a refused move changes nothing");
+        run(&mut s, "edit.undo", json!({}));
+        assert_eq!(names(&mut s), ["12 mm", "16 mm", "20 mm", "10 mm"], "one undo step undoes one move");
     }
 
     #[test]

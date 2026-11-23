@@ -1168,10 +1168,7 @@ impl Gap {
         if e.count == 2 {
             Ok((e.point1, e.point2))
         } else {
-            Err(SolidError::heal_failed(
-                OP,
-                "the gap does not have two end points",
-            ))
+            Err(SolidError::heal(OP, HealFailure::GapWithoutTwoEnds))
         }
     }
 
@@ -2268,10 +2265,7 @@ impl<'a> GapFunction<'a> {
 
         // There should always be 1 or more intervals
         if !(end_u > start_u && (this_surface.is_none() || end_v > start_v)) {
-            return Err(SolidError::heal(
-                OP_GF,
-                HealFailure::Inconsistent("the sample domain has no intervals"),
-            ));
+            return Err(SolidError::heal(OP_GF, HealFailure::EmptySampleInterval));
         }
         let ivl_cnt_u = end_u - start_u;
         let ivl_cnt_v = end_v - start_v;
@@ -3130,6 +3124,15 @@ mod tests {
         let (p, q) = Gap::from(g).gap_end_points(&k, &mut b).unwrap();
         assert_eq!(p, Vec3::new(0.0, 0.0, 1e-3));
         assert_eq!(q, Vec3::ZERO);
+        // a gap record that leaves its edge parameter undefined has one end point
+        let open = VertexEdgeGap {
+            edge_t: UNDEF_DOUBLE,
+            ..g
+        };
+        let e = Gap::from(open).gap_end_points(&k, &mut b).unwrap_err();
+        assert_eq!(e.heal_failure(), Some(&HealFailure::GapWithoutTwoEnds));
+        assert_eq!(e.upstream_status(), Some(crate::error::SM_ERR));
+        assert_eq!(e.kind(), crate::error::ErrorKind::InvalidInput);
     }
 
     /// Checks finite append maxima, record order, ties and chained appends.

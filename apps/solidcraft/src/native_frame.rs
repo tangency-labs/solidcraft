@@ -13,7 +13,9 @@
 //! DPI (the same logical size, as winit computes it), so the rect Windows suggests while the
 //! title bar is dragged onto a monitor with another scale is the rect winit then applies: the
 //! window rescales once at the crossing and stays under the pointer, instead of the OS's move
-//! loop and winit disagreeing about a frame the window doesn't have.
+//! loop and winit disagreeing about a frame the window doesn't have. A snapped window leaves the
+//! answer to Windows: it derives the size to restore to from this one, so the snapped size would
+//! replace the size from before the snap (#9336).
 //!
 //! Replacing a window procedure and setting a window class's icon have no safe API, hence the
 //! `unsafe_code` allowance on this module (the app crate denies it; see `native_crash.rs` and
@@ -37,10 +39,12 @@ use windows_sys::Win32::Foundation::{HWND, LPARAM, LRESULT, RECT, SIZE, WPARAM};
 use windows_sys::Win32::Graphics::Gdi::{GetMonitorInfoW, MONITOR_DEFAULTTONEAREST, MONITORINFO, MonitorFromWindow};
 use windows_sys::Win32::System::LibraryLoader::GetModuleHandleW;
 use windows_sys::Win32::UI::HiDpi::{GetDpiForWindow, GetSystemMetricsForDpi};
+use windows_sys::Win32::UI::Shell::{ABE_BOTTOM, ABE_LEFT, ABE_RIGHT, ABE_TOP, ABM_GETAUTOHIDEBAREX, APPBARDATA, SHAppBarMessage};
 use windows_sys::Win32::UI::WindowsAndMessaging::{
-    CallWindowProcW, GCLP_HICON, GCLP_HICONSM, GWL_STYLE, GWLP_WNDPROC, GetClientRect, GetWindowLongPtrW, GetWindowRect, HTBOTTOM, HTBOTTOMLEFT,
-    HTBOTTOMRIGHT, HTLEFT, HTRIGHT, HTTOP, HTTOPLEFT, HTTOPRIGHT, IMAGE_ICON, IsIconic, IsZoomed, LR_DEFAULTCOLOR, LoadImageW, SM_CXICON,
-    SM_CXPADDEDBORDER, SM_CXSIZEFRAME, SM_CXSMICON, SetWindowLongPtrW, WM_GETDPISCALEDSIZE, WM_NCDESTROY, WM_NCHITTEST, WNDPROC, WS_THICKFRAME,
+    CallWindowProcW, GCLP_HICON, GCLP_HICONSM, GWL_STYLE, GWLP_WNDPROC, GetClientRect, GetWindowLongPtrW, GetWindowPlacement, GetWindowRect,
+    HTBOTTOM, HTBOTTOMLEFT, HTBOTTOMRIGHT, HTLEFT, HTRIGHT, HTTOP, HTTOPLEFT, HTTOPRIGHT, IMAGE_ICON, IsIconic, IsZoomed, LR_DEFAULTCOLOR,
+    LoadImageW, NCCALCSIZE_PARAMS, SM_CXICON, SM_CXPADDEDBORDER, SM_CXSIZEFRAME, SM_CXSMICON, SetWindowLongPtrW, WINDOWPLACEMENT,
+    WM_GETDPISCALEDSIZE, WM_NCCALCSIZE, WM_NCDESTROY, WM_NCHITTEST, WNDPROC, WS_THICKFRAME,
 };
 // windows-sys has SetClassLongPtrW only on 64-bit targets; on 32-bit Windows it is SetClassLongW.
 #[cfg(target_pointer_width = "64")]
@@ -157,7 +161,7 @@ unsafe extern "system" fn frame_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lpara
         WM_GETDPISCALEDSIZE => {
             let new_dpi = wparam as u32;
             // SAFETY: for this message lParam points to a SIZE the system reads back.
-            match (resizable(hwnd), client_size(hwnd), unsafe { (lparam as *mut SIZE).as_mut() }) {
+            match (resizable(hwnd) && !snapped(hwnd), client_size(hwnd), unsafe { (lparam as *mut SIZE).as_mut() }) {
                 (true, Some(size), Some(out)) => {
                     // SAFETY: a window handle the system passed in.
                     let old_dpi = unsafe { GetDpiForWindow(hwnd) };
@@ -172,6 +176,18 @@ unsafe extern "system" fn frame_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lpara
                 _ => call_previous(),
             }
         }
+        WM_NCCALCSIZE => {
+            let result = call_previous();
+            // SAFETY: for a nonzero wParam, lParam points to the NCCALCSIZE_PARAMS the system
+            // passed, whose first rect winit has just set (the maximized window's client area).
+            // For a zero wParam lParam is a bare RECT, so no NCCALCSIZE_PARAMS reference is made.
+            if wparam != 0
+                && let Some(params) = unsafe { (lparam as *mut NCCALCSIZE_PARAMS).as_mut() }
+            {
+                leave_auto_hide_taskbar_reachable(hwnd, &mut params.rgrc[0]);
+            }
+            result
+        }
         WM_NCDESTROY => {
             // Hand the window back to winit's procedure for its last message.
             if prev.is_some() {
@@ -184,6 +200,57 @@ unsafe extern "system" fn frame_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lpara
     }
 }
 
+/// A maximized window fills the monitor's work area, which is the whole monitor when the taskbar
+/// auto-hides; Windows then takes it for a fullscreen window and the taskbar never comes back
+/// (#18473). Leave 1 px free at each edge that holds an auto-hide taskbar, as maximized windows
+/// with a frame do, so pointing at that edge shows the bar.
+fn leave_auto_hide_taskbar_reachable(hwnd: HWND, client: &mut RECT) {
+    // SAFETY: plain queries on the window handle the system passed in.
+    let (zoomed, monitor) = unsafe { (IsZoomed(hwnd) != 0, MonitorFromWindow(hwnd, MONITOR_DEFAULTTONEAREST)) };
+    if !zoomed || monitor.is_null() {
+        return;
+    }
+    // SAFETY: `info` has its size set, as GetMonitorInfoW requires.
+    let mut info: MONITORINFO = unsafe { std::mem::zeroed() };
+    info.cbSize = std::mem::size_of::<MONITORINFO>() as u32;
+    // SAFETY: the monitor handle is the one just returned.
+    if unsafe { GetMonitorInfoW(monitor, &mut info) } == 0 {
+        return;
+    }
+    let auto_hide = |edge: u32| {
+        // SAFETY: zeroed APPBARDATA with its size and the queried edge and monitor rect set, as
+        // ABM_GETAUTOHIDEBAREX requires; the call only reads them and returns a window handle.
+        unsafe {
+            let mut data: APPBARDATA = std::mem::zeroed();
+            data.cbSize = std::mem::size_of::<APPBARDATA>() as u32;
+            data.uEdge = edge;
+            data.rc = info.rcMonitor;
+            SHAppBarMessage(ABM_GETAUTOHIDEBAREX, &mut data) != 0
+        }
+    };
+    let edges = AutoHideEdges { left: auto_hide(ABE_LEFT), top: auto_hide(ABE_TOP), right: auto_hide(ABE_RIGHT), bottom: auto_hide(ABE_BOTTOM) };
+    let (l, t, r, b) = shrink_for_auto_hide((client.left, client.top, client.right, client.bottom), edges);
+    *client = RECT { left: l, top: t, right: r, bottom: b };
+}
+
+/// Which edges of a monitor have an auto-hide taskbar.
+#[derive(Clone, Copy, Default, PartialEq, Eq, Debug)]
+struct AutoHideEdges {
+    left: bool,
+    top: bool,
+    right: bool,
+    bottom: bool,
+}
+
+/// A maximized client rect (left, top, right, bottom) with 1 px taken off each edge that has an
+/// auto-hide taskbar. A rect too small to lose the pixel is left as it is.
+fn shrink_for_auto_hide(rect: (i32, i32, i32, i32), edges: AutoHideEdges) -> (i32, i32, i32, i32) {
+    let (l, t, r, b) = rect;
+    let (nl, nt) = (l + i32::from(edges.left), t + i32::from(edges.top));
+    let (nr, nb) = (r - i32::from(edges.right), b - i32::from(edges.bottom));
+    if nr > nl && nb > nt { (nl, nt, nr, nb) } else { rect }
+}
+
 /// The window can be resized by its border now: it has the thick frame (not fullscreen, which
 /// drops it) and is neither maximized nor minimized.
 fn resizable(hwnd: HWND) -> bool {
@@ -192,6 +259,28 @@ fn resizable(hwnd: HWND) -> bool {
         let style = GetWindowLongPtrW(hwnd, GWL_STYLE) as u32;
         style & WS_THICKFRAME != 0 && IsZoomed(hwnd) == 0 && IsIconic(hwnd) == 0
     }
+}
+
+/// The window is snapped (Aero Snap, Win+arrows): it is not the size it will restore to.
+fn snapped(hwnd: HWND) -> bool {
+    let empty = RECT { left: 0, top: 0, right: 0, bottom: 0 };
+    let mut window = empty;
+    // SAFETY: both structs are valid to fill, and WINDOWPLACEMENT has its length set, as
+    // GetWindowPlacement requires.
+    let normal = unsafe {
+        let mut placement: WINDOWPLACEMENT = std::mem::zeroed();
+        placement.length = std::mem::size_of::<WINDOWPLACEMENT>() as u32;
+        if GetWindowPlacement(hwnd, &mut placement) == 0 || GetWindowRect(hwnd, &mut window) == 0 {
+            return false;
+        }
+        placement.rcNormalPosition
+    };
+    differs_in_size(window, normal)
+}
+
+/// Sizes only: the restored rect is in work-area coordinates, the window's in screen coordinates.
+fn differs_in_size(a: RECT, b: RECT) -> bool {
+    (a.right - a.left, a.bottom - a.top) != (b.right - b.left, b.bottom - b.top)
 }
 
 /// The client area's size in pixels (the whole window: winit gives it no frame).
@@ -296,10 +385,37 @@ mod tests {
         assert_eq!(on.change(true), Some(true), "a saved `true` is given at start too");
     }
 
+    /// #18473: a maximized window over an auto-hide taskbar leaves 1 px at that edge only.
+    #[test]
+    fn maximized_window_leaves_one_pixel_at_an_auto_hide_taskbar() {
+        let full = (0, 0, 1920, 1080);
+        assert_eq!(shrink_for_auto_hide(full, AutoHideEdges::default()), full, "no auto-hide taskbar: untouched");
+        let bottom = AutoHideEdges { bottom: true, ..Default::default() };
+        assert_eq!(shrink_for_auto_hide(full, bottom), (0, 0, 1920, 1079));
+        let left = AutoHideEdges { left: true, ..Default::default() };
+        assert_eq!(shrink_for_auto_hide(full, left), (1, 0, 1920, 1080));
+        let top = AutoHideEdges { top: true, ..Default::default() };
+        assert_eq!(shrink_for_auto_hide((-1920, 0, 0, 1080), top), (-1920, 1, 0, 1080), "a monitor left of the primary");
+        let right = AutoHideEdges { right: true, ..Default::default() };
+        assert_eq!(shrink_for_auto_hide(full, right), (0, 0, 1919, 1080));
+        let all = AutoHideEdges { left: true, top: true, right: true, bottom: true };
+        assert_eq!(shrink_for_auto_hide(full, all), (1, 1, 1919, 1079));
+        assert_eq!(shrink_for_auto_hide((0, 0, 1, 1), all), (0, 0, 1, 1), "too small to lose the pixel");
+    }
+
     #[test]
     fn every_direction_has_its_own_hit_code() {
         use egui::ResizeDirection::*;
         let codes: Vec<u32> = [North, South, West, East, NorthWest, NorthEast, SouthWest, SouthEast].into_iter().map(hit_code).collect();
         assert_eq!(codes, vec![HTTOP, HTBOTTOM, HTLEFT, HTRIGHT, HTTOPLEFT, HTTOPRIGHT, HTBOTTOMLEFT, HTBOTTOMRIGHT]);
+    }
+
+    #[test]
+    fn only_a_different_size_counts_as_snapped() {
+        let rect = |left, top, w, h| RECT { left, top, right: left + w, bottom: top + h };
+        // The restored rect is in work-area coordinates, so its position may differ when restored.
+        assert!(!differs_in_size(rect(2187, 133, 1500, 1000), rect(267, 133, 1500, 1000)));
+        assert!(differs_in_size(rect(1920, 0, 1280, 1380), rect(267, 133, 1500, 1000)));
+        assert!(differs_in_size(rect(0, 0, 1500, 1380), rect(0, 0, 1500, 1000)));
     }
 }

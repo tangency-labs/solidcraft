@@ -593,6 +593,45 @@ fn the_window_moves_the_rectangle_and_the_copy_row_leaves_the_original_behind() 
     assert!(xs.iter().any(|x| (x - 50.0).abs() < 1e-6), "the copy's far corner is at x = 50: {xs:?}");
 }
 
+/// #19523: the Move/Copy window showed nothing until OK, so a user could not see where the
+/// picked entities would land before committing the move. The window previews the move: the
+/// entities are drawn where they will be, and the design itself is untouched until OK.
+#[test]
+fn the_move_window_previews_where_the_entities_will_land() {
+    let mut h = Harness::new();
+    h.app.run("sketch.create", json!({"plane": "XY"})).unwrap();
+    // Clear of the sketch origin: a rectangle drawn from the origin keeps a corner tied to it,
+    // and the solver pulls that corner back after the move.
+    let made = h.app.run("sketch.rectangle.two_point", json!({"p0": [10, 10], "p1": [30, 20]})).unwrap();
+    let corners: Vec<String> = made["corners"].as_object().into_iter().flatten().filter_map(|(_, v)| v.as_str().map(str::to_string)).collect();
+    assert_eq!(corners.len(), 4, "{made}");
+    h.settle();
+    let sid = h.app.session.active_sketch.unwrap();
+    h.step(&json!({"start": "sketch.move"})).unwrap();
+    // Read the ids before the dialog is borrowed mutably: `curve_ids` borrows the harness.
+    let picks: Vec<Sel> = curve_ids(&h).iter().map(|id| Sel::SketchCurve { id: id.clone(), sketch: None }).collect();
+    {
+        let d = h.app.dialog.as_mut().unwrap();
+        d.inputs[0].items = picks;
+        d.kind = Kind::SketchModify(Mod::Move { x: "30 mm".into(), y: "0 mm".into(), angle: "0 deg".into(), copy: false });
+    }
+    // The preview runs on a worker: frames until it has drawn the moved entities.
+    h.step(&json!({"until": {"count": {"name": "sketch_preview_curves", "value": 4}}})).unwrap();
+    // The preview draws the rectangle where the move will leave it: 30 mm further along x.
+    let preview = h.app.preview.sketches.first().expect("the move is previewed");
+    let xs: Vec<f64> = preview.sketch.sketch.points.iter().map(|p| p.pos.x).collect();
+    assert!(
+        xs.iter().any(|x| (x - 40.0).abs() < 1e-6) && xs.iter().any(|x| (x - 60.0).abs() < 1e-6),
+        "the preview shows the rectangle 30 mm along x: {xs:?}"
+    );
+    // The design itself is untouched until OK: the rectangle is still where it was drawn.
+    let now = h.app.session.model.state().sketch(sid).unwrap().sketch.clone();
+    assert_eq!(now.curves.len(), 4, "the preview adds no curve");
+    let xs: Vec<f64> = now.points.iter().filter(|p| corners.contains(&p.id)).map(|p| p.pos.x).collect();
+    assert_eq!(xs.len(), 4, "{xs:?}");
+    assert!(xs.iter().all(|x| (*x - 10.0).abs() < 1e-6 || (*x - 30.0).abs() < 1e-6), "the rectangle has not moved: {xs:?}");
+}
+
 #[test]
 fn a_plain_move_takes_the_geometry_with_it() {
     let mut h = Harness::new();

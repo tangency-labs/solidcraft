@@ -9,7 +9,7 @@
 //!
 //! Ignored: run once to (re)generate the file, then put the printed open-face index in
 //! the case's `faces`:
-//! `cargo test -p solidcore --test issue_1528_write_operand -- --ignored --nocapture`.
+//! `cargo test -p solidcore --test offset -- --ignored --nocapture issue_1528_write_operand::`.
 #![allow(
     clippy::unwrap_used,
     clippy::expect_used,

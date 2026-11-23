@@ -279,6 +279,31 @@ fn hostile_inputs_are_errors() {
     assert_untouched(&c, 8000.0, [6, 12, 8]);
 }
 
+/// A cone (Ø6 to Ø1, 10 tall) with a 0.12 mm square pad on its top, turned 45°, whose corner
+/// is `inset` inside the top's rim on the cone's seam, shelled 0.05 inward open at the top
+/// (#18568). 0.00002 in, the join merges the corner with the rim's seam vertex, and the shell
+/// fails; refused as a face whose outline touches itself, at the corner. 0.0001 in, the
+/// corner is its own vertex, and the pad shells.
+#[test]
+fn a_shell_of_a_face_whose_outline_touches_itself_is_refused_as_such() {
+    let padded = |inset: f64| {
+        let cone = Brep::make_cone([0.0; 3], 3.0, 0.5, 10.0).unwrap();
+        let (x, h) = (0.5 - inset, 0.12 / 2f64.sqrt());
+        let diamond = [[x, 0.0, 10.0], [x - h, h, 10.0], [x - 2.0 * h, 0.0, 10.0], [x - h, -h, 10.0]];
+        let sides: Vec<crate::sweeps::Curve> = (0..4).map(|i| crate::sweeps::Curve::Line { start: diamond[i], end: diamond[(i + 1) % 4] }).collect();
+        let pad = Brep::extrude(&sides, [0.0, 0.0, 1.0], 0.12, 0.0, crate::sweeps::DraftCorner::default(), true).unwrap();
+        cone.boolean(&pad, BooleanOp::Union).unwrap().unwrap()
+    };
+    let top = [[0.15, -0.25, 10.0]];
+    match padded(2e-5).shell(&top, 0.01, -0.05).unwrap_err() {
+        Error::OutlineTouches { at, .. } => {
+            assert!((at[0] - 0.5).abs() < 1e-4 && at[1].abs() < 1e-4 && (at[2] - 10.0).abs() < 1e-9, "at {at:?}");
+        }
+        e => panic!("refused as {e}"),
+    }
+    shot(&padded(1e-4).shell(&top, 0.01, -0.05).unwrap(), "shell-pad-clear-of-the-rim");
+}
+
 /// Rig case shell/4711: a 60 x 40 x 10 block with an r3 through hole at (22.5, 7), 4 from the
 /// front face, and a 10 x 10 notch on that edge, shelled 2 inward open at the bottom: the hole's
 /// offset (r5) is tangent to the front's (y = 2), so the walls meet along a line and the offset
@@ -407,6 +432,41 @@ fn chamfers_with_two_setbacks() {
     assert_eq!(c.chamfer_sides(&top, 0.1, 5.0, ChamferSecond::Angle(4.0), [0.0, 0.0, 1.0]).unwrap_err(), Error::Argument);
     assert_eq!(c.chamfer_sides(&top, 0.1, 5.0, ChamferSecond::Distance(2.0), [0.0; 3]).unwrap_err(), Error::Argument);
     assert_eq!(c.chamfer_sides(&top, 0.1, 5.0, ChamferSecond::Distance(-2.0), [0.0, 0.0, 1.0]).unwrap_err(), Error::Argument);
+}
+
+/// A hollow cylinder (Ø3 × 4, walls 0.18) with a Ø0.36 notch centred on its rim, whose wall
+/// touches the void's along a line, keeps its void through an unequal chamfer of the rim
+/// (#18851): the stitch joins the void's walls to the rest at the line's two end vertices
+/// only, and the closed shell's split gave both sides of them to the material, which no
+/// record allows. The chamfered body's record has the regions and shells the notched one's
+/// has (the void with the outside, through the line).
+#[test]
+fn chamfer_of_a_hollow_whose_notch_touches_the_void_keeps_the_void() {
+    let hollow = Brep::make_cylinder([0.0; 3], 1.5, 4.0).unwrap().shell(&[], 0.01, -0.18).unwrap();
+    let notch = Brep::make_cylinder([1.4892009792507173, 0.1796675913978502, 2.5], 0.18, 1.5).unwrap();
+    let before = hollow.boolean(&notch, BooleanOp::Subtract).unwrap().unwrap();
+    let rim = [[0.0, -1.5, 4.0], [1.3104968617406312, 0.1581074804301082, 4.0]];
+    let touching = before.chamfer_sides(&rim, 0.01, 0.3, ChamferSecond::Distance(0.15), [0.0, 0.0, 1.0]).unwrap();
+    shot(&touching, "chamfer_hollow_notch_touching_void");
+    let record = touching.to_native().unwrap();
+    solidcore_ops::record_check::validate(&record).unwrap();
+    let record_before = before.to_native().unwrap();
+    assert_eq!((record.regions.len(), record.shells.len()), (record_before.regions.len(), record_before.shells.len()));
+    // The notched body: the hollow less the notch's lens (Ø0.36 about a point on the Ø3 rim)
+    // over its 1.5 mm.
+    let (big, small, d) = (1.5f64, 0.18f64, 1.5f64);
+    let kite = ((-d + small + big) * (d + small - big) * (d - small + big) * (d + small + big)).sqrt() / 2.0;
+    let lens = small * small * ((d * d + small * small - big * big) / (2.0 * d * small)).acos()
+        + big * big * ((d * d + big * big - small * small) / (2.0 * d * big)).acos()
+        - kite;
+    let solid = std::f64::consts::PI * (big * big * 4.0 - 1.32 * 1.32 * 3.64);
+    assert_close(volume(&before), solid - 1.5 * lens, 1e-9, "notched hollow");
+    // The chamfer takes a 0.3 × 0.15 triangle round the rim: round a plain Ø3 rim that is
+    // 2π · 1.4 · 0.0225 (its centroid a third of 0.3 in); the notch swaps 0.36 mm of the rim
+    // for its own longer arc, within a few percent of that.
+    let ring = 2.0 * std::f64::consts::PI * 1.4 * 0.3 * 0.15 / 2.0;
+    let taken = volume(&before) - volume(&touching);
+    assert!((taken - ring).abs() < 0.05 * ring, "the chamfer took {taken}, a plain rim's {ring}");
 }
 
 #[test]
