@@ -4930,6 +4930,76 @@ mod tests {
         assert_eq!(r.unwrap_err().operation(), OP);
     }
 
+    /// The face-use offset: no face use is the caller's input; a face use of the input with
+    /// no face, met when its edge uses are matched, a defect. Both keep
+    /// `SM_ERR_NULL_POINTER`.
+    #[test]
+    fn the_face_use_offsets_missing_argument_and_links_keep_their_status() {
+        let null = Some(crate::error::SM_ERR_NULL_POINTER);
+        let mut executive = executive();
+        executive.set_offset_brep(Brep::new());
+        let r = split_env(ObjectKey(0), &[], |env, curve_ref| {
+            executive.build_offset_of_faceuse(
+                &mut Kernel::default(),
+                &mut Brep::new(),
+                None,
+                &mut None,
+                &SsiData::default(),
+                env,
+                &loopuse::notify_ref,
+                curve_ref,
+            )
+        });
+        assert_eq!(outcome(&r), (ErrorKind::InvalidInput, null, false), "{r:?}");
+        let mut original = Brep::new();
+        let faceuse = original.add_faceuse_record(Faceuse::default()).unwrap();
+        let r = split_env(ObjectKey(0), &[], |env, _| {
+            executive.map_edgeuses(
+                &Kernel::default(),
+                &mut original,
+                faceuse,
+                FaceId::from_index(0),
+                env,
+                &loopuse::notify_ref,
+            )
+        });
+        assert_eq!(outcome(&r), (ErrorKind::StageFailed, null, true), "{r:?}");
+    }
+
+    /// A split the other side's break asks for can be refused (here: editing is off), so
+    /// one side keeps more pieces than the other. The cap loop's read past the other side's
+    /// list, a null pointer upstream, is named at the input's edge, with
+    /// `SM_ERR_NULL_POINTER`.
+    #[test]
+    fn unpaired_pieces_after_a_refused_split_are_named_at_the_edge() {
+        let mut executive = executive();
+        let mut brep = Brep::new();
+        let first_half = add_use(&mut brep, 0.0, 0.5, 1.0);
+        let second_half = add_use(&mut brep, 0.5, 1.0, 1.0);
+        let whole = wire_use(&mut brep, 0.0, 1.0);
+        let (a, b) = (EdgeuseId::from_index(80), EdgeuseId::from_index(81));
+        executive.relate_edgeuses(a, first_half);
+        executive.relate_edgeuses(a, second_half);
+        executive.relate_edgeuses(b, whole);
+        executive.set_offset_brep(brep);
+        let out = sync(&mut executive, Some(a), Some(b)).unwrap();
+        assert_eq!(out.edgeuses, vec![Some(first_half), Some(second_half)]);
+        assert_eq!(out.other_edgeuses, vec![Some(whole)]);
+        let edge = EdgeId::from_index(9);
+        assert_eq!(paired_other(&out, 0, edge), Ok(Some(whole)));
+        let r = paired_other(&out, 1, edge);
+        assert_eq!(
+            outcome(&r),
+            (
+                ErrorKind::Unsupported,
+                Some(crate::error::SM_ERR_NULL_POINTER),
+                false
+            ),
+            "{r:?}"
+        );
+        assert_eq!(r.unwrap_err().entity(), Some(EntityRef::Edge(edge)));
+    }
+
     /// p1's helpers: a defect keeps the status of the site it replaced and says why; the
     /// trimmed curve the pipe fallback follows is missing for the caller's edge with no
     /// curve, else by a defect; and a call whose status upstream ignores passes a defect on.
