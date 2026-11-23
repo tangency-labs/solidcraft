@@ -2803,6 +2803,12 @@ mod tests {
             (I::NoOtherCornerVertex, SM_ERR_NULL_POINTER),
             (I::EdgeWithoutVertex, SM_ERR_NULL_POINTER),
             (I::SeamCapLoopOpen, SM_ERR),
+            (I::TurnRingWithoutSideEdgeUse, SM_ERR_NULL_POINTER),
+            (I::TurnRoundsShareNoFace, SM_ERR_NULL_POINTER),
+            (
+                I::TurnWithoutTwoBlendedEdgeUses { given: 1 },
+                SM_ERR_NULL_POINTER,
+            ),
         ];
         for (input, status) in inputs {
             let cause = BlendFailure::CornerInputInvalid {
