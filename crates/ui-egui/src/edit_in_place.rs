@@ -117,9 +117,26 @@ impl EditInPlace {
 }
 
 /// A linked component the window edits in place when it is double-clicked: in a saved design
-/// (its links are found from its file) with `double_click_components` on.
+/// (its links are found from its file) with `double_click_components` on. An internal component
+/// (#6892) is never one: a double-click makes it the active component, as for a component made
+/// in the design, and Edit in Place in its menu opens it in its own tab.
 pub(crate) fn edits_on_double_click(app: &SolveApp, component: u64) -> bool {
-    app.preferences.double_click_components && app.session.path.is_some() && app.session.doc.links.contains_key(&component)
+    app.preferences.double_click_components
+        && app.session.path.is_some()
+        && app.session.doc.links.contains_key(&component)
+        && !is_internal(app, component)
+}
+
+/// Whether `component` is an internal component: its part is stored inside this design's file.
+fn is_internal(app: &SolveApp, component: u64) -> bool {
+    app.session.doc.links.get(&component).is_some_and(|link| solidcraft_engine::doc::internal::linked(&link.path).is_some())
+}
+
+/// An internal component (#6892) while the hybrid environment is off: its part has no work file
+/// to open, so it is not offered for editing in place. A component linked to a file of its own
+/// is edited in place in either environment, as before.
+pub(crate) fn internal_off(app: &SolveApp, component: u64) -> bool {
+    !solidcraft_engine::experimental_file_kinds() && is_internal(app, component)
 }
 
 /// A component double-clicked in the browser: a linked one is edited in place (Preferences:
@@ -297,6 +314,9 @@ fn prepare(app: &mut SolveApp, component: u64, path: Option<Vec<u64>>, ask: bool
     let Some(assembly) = app.session.path.clone() else {
         return Err(solidcraft_ui_text::tr("ui.edit_in_place_save_first").to_string());
     };
+    if internal_off(app, component) {
+        return Err(solidcraft_ui_text::tr("ui.edit_in_place_internal_off").to_string());
+    }
     let links = app.session.execute("component.links", &json!({})).map_err(|e| e.to_string())?;
     let Some(link) = links["links"].as_array().into_iter().flatten().find(|l| l["component"].as_u64() == Some(component)).cloned() else {
         return Err(app.tr_label("ui.relink_not_linked").to_string());
@@ -632,15 +652,24 @@ pub(crate) fn draw_context(app: &SolveApp, sc: &mut GpuScene) {
 
 /// Above the browser's rows while a part is edited in place: which assembly it is in (Finish
 /// Editing is on the MODEL tab).
-pub(crate) fn browser_strip(app: &SolveApp, ui: &mut egui::Ui) {
-    let Some(context) = &app.edit_in_place.active else { return };
+pub(crate) fn browser_strip(app: &mut SolveApp, ui: &mut egui::Ui) {
+    let Some(context) = app.edit_in_place.active.clone() else { return };
     let t = Tokens::get();
     let refreshing = app.edit_in_place.refresh.as_ref().is_some_and(|r| crate::documents::same_path(&r.assembly, &context.assembly));
     let key = if refreshing { "ui.edit_in_place_refreshing" } else { "ui.edit_in_place_banner" };
     let text = solidcraft_ui_text::format(key, &[("name", &context.assembly_name)]);
+    // Finish Edit sits at the right of the line, so leaving the part is at hand where the tree is.
+    let mut finish_edit = false;
     ui.horizontal(|ui| {
         ui.add_space(t.space_6);
         crate::ui_kit::text(ui, &text, crate::ui_kit::Text::Hint("edit_in_place"));
+        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+            ui.add_space(t.space_6);
+            let label = solidcraft_ui_text::tr("cmd.component_finish_edit");
+            let button = crate::ui_kit::text_button(ui, label, true);
+            crate::scenario::publish_target("edit_in_place:finish", button.rect);
+            finish_edit = button.clicked();
+        });
     });
     // The assembly's components, dull, with the part being edited lit: the same picture as the
     // 3D view, where the rest of the assembly is faded around the part.
@@ -656,6 +685,9 @@ pub(crate) fn browser_strip(app: &SolveApp, ui: &mut egui::Ui) {
         });
     }
     ui.add_space(t.space_3);
+    if finish_edit {
+        finish(app);
+    }
 }
 
 #[cfg(test)]

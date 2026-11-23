@@ -2,8 +2,8 @@
   "en": {
     "prefs.environment": "Environment",
     "prefs.environment_single": "Single design",
-    "prefs.environment_parts": "Parts and assemblies (experimental)",
-    "prefs.environment_note": "For new files. Single design keeps parts, sheet metal and assemblies together in one .sc file, as before. Parts and assemblies makes each new file a part (.scprt), which may hold sheet metal, or an assembly (.scasm); a file keeps its kind.",
+    "prefs.environment_parts": "Hybrid single design with internal components (experimental)",
+    "prefs.environment_note": "For new files. Single design keeps parts, sheet metal and assemblies together in one .sc file, as before. Hybrid keeps a design as one .sc file and lets it hold its parts inside as internal components, each with its own timeline, unpacked to a hidden folder beside the design while it is open. A new file can also be a part (.scprt), which may hold sheet metal, or an assembly (.scasm); a file keeps its kind.",
     "ui.new_part": "New part",
     "ui.new_assembly": "New assembly",
     "missing_links.title": "Parts not found",
@@ -22,7 +22,8 @@
     "prefs.update_active": "Update active",
     "prefs.update_linked_parts_note": "Live reads a changed part when the assembly opens or its tab comes back. Update active only names it; Update Links brings it in.",
     "linked.changed_since_read": "Changed since this assembly read them: {names}. Update Links brings them in.",
-    "cmd.sheet_parts": "List Sheet Metal Parts"
+    "cmd.sheet_parts": "List Sheet Metal Parts",
+    "ui.edit_in_place_internal_off": "This part is stored inside the design. Turn on the hybrid environment (Preferences › General › Environment) to edit it in place."
   },
   "ar": {
     "prefs.environment": "البيئة",
@@ -47,7 +48,8 @@
     "prefs.update_active": "تحديث النشط",
     "prefs.update_linked_parts_note": "المباشر يقرأ الجزء المتغير عند فتح التجميع أو عودة تبويبه. تحديث النشط يذكره فقط؛ وتحديث الروابط يجلبه.",
     "linked.changed_since_read": "تغيّرت منذ أن قرأها هذا التجميع: {names}. تحديث الروابط يجلبها.",
-    "cmd.sheet_parts": "سرد أجزاء الصفائح المعدنية"
+    "cmd.sheet_parts": "سرد أجزاء الصفائح المعدنية",
+    "ui.edit_in_place_internal_off": "هذا الجزء مخزَّن داخل التصميم. فعِّل البيئة الهجينة (التفضيلات › عام › البيئة) لتحريره في موضعه."
   },
   "de": {
     "prefs.environment": "Umgebung",
@@ -72,7 +74,8 @@
     "prefs.update_active": "Aktive aktualisieren",
     "prefs.update_linked_parts_note": "Live liest ein geändertes Teil, wenn die Baugruppe geöffnet wird oder ihr Tab zurückkommt. Aktive aktualisieren nennt es nur; Verknüpfungen aktualisieren holt es herein.",
     "linked.changed_since_read": "Geändert, seit diese Baugruppe sie gelesen hat: {names}. Verknüpfungen aktualisieren holt sie herein.",
-    "cmd.sheet_parts": "Blechteile auflisten"
+    "cmd.sheet_parts": "Blechteile auflisten",
+    "ui.edit_in_place_internal_off": "Dieses Teil ist in der Konstruktion gespeichert. Aktivieren Sie die Hybrid-Umgebung (Einstellungen › Allgemein › Umgebung), um es an Ort und Stelle zu bearbeiten."
   },
   "he": {
     "prefs.environment": "סביבה",
@@ -97,7 +100,8 @@
     "prefs.update_active": "עדכון פעיל",
     "prefs.update_linked_parts_note": "חי קורא חלק שהשתנה כשהמכלול נפתח או כשהכרטיסייה שלו חוזרת. עדכון פעיל רק מציין אותו; עדכון קישורים מביא אותו.",
     "linked.changed_since_read": "השתנו מאז שהמכלול קרא אותם: {names}. עדכון קישורים מביא אותם.",
-    "cmd.sheet_parts": "רשימת חלקי פח"
+    "cmd.sheet_parts": "רשימת חלקי פח",
+    "ui.edit_in_place_internal_off": "חלק זה שמור בתוך התכן. הפעל את הסביבה ההיברידית (העדפות › כללי › סביבה) כדי לערוך אותו במקומו."
   },
   "ja": {
     "prefs.environment": "環境",
@@ -122,7 +126,8 @@
     "prefs.update_active": "アクティブを更新",
     "prefs.update_linked_parts_note": "ライブでは、アセンブリを開いたときやそのタブに戻ったときに変更された部品を読み込みます。アクティブを更新では名前を示すだけで、リンクを更新で取り込みます。",
     "linked.changed_since_read": "このアセンブリが読み込んだ後に変更されました: {names}。リンクを更新で取り込みます。",
-    "cmd.sheet_parts": "板金部品を一覧表示"
+    "cmd.sheet_parts": "板金部品を一覧表示",
+    "ui.edit_in_place_internal_off": "この部品は設計ファイル内に保存されています。その場で編集するには、ハイブリッド環境（環境設定 › 一般 › 環境）をオンにしてください。"
   },
   "ko": {
     "prefs.environment": "환경",
@@ -147,7 +152,8 @@
     "prefs.update_active": "활성 업데이트",
     "prefs.update_linked_parts_note": "라이브는 어셈블리를 열거나 탭으로 돌아올 때 변경된 부품을 읽습니다. 활성 업데이트는 이름만 알려 주며, 링크 업데이트로 가져옵니다.",
     "linked.changed_since_read": "이 어셈블리가 읽은 뒤 변경됨: {names}. 링크 업데이트로 가져옵니다.",
-    "cmd.sheet_parts": "판금 부품 목록"
+    "cmd.sheet_parts": "판금 부품 목록",
+    "ui.edit_in_place_internal_off": "이 부품은 설계 파일 안에 저장되어 있습니다. 제자리에서 편집하려면 하이브리드 환경(환경설정 › 일반 › 환경)을 켜십시오."
   },
   "vi": {
     "prefs.environment": "Môi trường",
@@ -172,7 +178,8 @@
     "prefs.update_active": "Cập nhật khi yêu cầu",
     "prefs.update_linked_parts_note": "Trực tiếp đọc chi tiết đã thay đổi khi cụm lắp mở ra hoặc thẻ của nó được chọn lại. Cập nhật khi yêu cầu chỉ nêu tên; Cập nhật liên kết sẽ đưa nó vào.",
     "linked.changed_since_read": "Đã thay đổi kể từ khi cụm lắp này đọc chúng: {names}. Cập nhật liên kết sẽ đưa chúng vào.",
-    "cmd.sheet_parts": "Liệt kê chi tiết kim loại tấm"
+    "cmd.sheet_parts": "Liệt kê chi tiết kim loại tấm",
+    "ui.edit_in_place_internal_off": "Chi tiết này được lưu bên trong thiết kế. Hãy bật môi trường lai (Tùy chọn › Chung › Môi trường) để chỉnh sửa tại chỗ."
   },
   "zh": {
     "prefs.environment": "环境",
@@ -197,6 +204,7 @@
     "prefs.update_active": "手动更新",
     "prefs.update_linked_parts_note": "实时会在装配体打开或其标签页返回时读取已更改的零件。手动更新只列出名称；“更新链接”会将其读入。",
     "linked.changed_since_read": "自此装配体读取后已更改：{names}。“更新链接”会将其读入。",
-    "cmd.sheet_parts": "列出钣金零件"
+    "cmd.sheet_parts": "列出钣金零件",
+    "ui.edit_in_place_internal_off": "此零件存储在设计文件内。要就地编辑，请开启混合环境（首选项 › 常规 › 环境）。"
   }
 }

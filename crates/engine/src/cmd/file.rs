@@ -1786,7 +1786,10 @@ fn opened_design(
     // The internal components are unpacked beside it where they are not yet (#6892). A
     // design opened read-only writes nothing and reads them from its file.
     // Nor does a copy (`as_copy`): it leaves the file it came from as it is.
-    let writes = !read_only && !as_copy;
+    // And only in the hybrid environment (the experiment on): a single design environment
+    // makes no work folder, and reads the parts from the file as a read-only open does. A save
+    // there keeps them as the file holds them.
+    let writes = !read_only && !as_copy && super::experimental_file_kinds();
     let unpacked = if writes { super::design_internal::unpack(&s.doc, path) } else { super::design_internal::Unpacked::default() };
     // An unpacked file that differs from the design's file is a recovery component: held as the
     // file has it until `component.restore_recovery` or `component.discard_recovery` settles it.

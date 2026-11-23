@@ -2847,6 +2847,31 @@ pub(crate) fn strip_view_id(app: &SolveApp, index: usize) -> Option<u64> {
     crate::view_windows::strip_views(app).get(index).map(|(_, view)| view.id)
 }
 
+/// The tabs the strip shows, by tab index. A part edited in place (#6892) and the design it
+/// belongs to share one tab: the part's, named "design › part", while the part is shown; the
+/// design's own, when the design is the one shown. Every other tab is shown.
+fn tabs_shown(app: &SolveApp, paths: &[Option<String>], selected: usize) -> Vec<usize> {
+    let n = paths.len();
+    let context = |i: usize| {
+        if i == selected || app.docs.slots.is_empty() {
+            app.edit_in_place.active.as_ref()
+        } else {
+            app.docs.slots.get(i).and_then(Option::as_ref).and_then(|slot| slot.edit_in_place.as_ref())
+        }
+    };
+    let mut hidden = vec![false; n];
+    for part in 0..n {
+        let Some(context) = context(part) else { continue };
+        let owner = (0..n).find(|i| *i != part && paths.get(*i).and_then(Option::as_deref).is_some_and(|path| same_path(path, &context.assembly)));
+        match owner {
+            Some(owner) if owner == selected => hidden[part] = true,
+            Some(owner) => hidden[owner] = true,
+            None => {}
+        }
+    }
+    (0..n).filter(|i| !hidden[*i]).collect()
+}
+
 /// The document tabs in the application bar, from `x0` to `x1` ([`crate::app_bar::tabs`]): click
 /// to switch, × to close, drag to reorder, + for the start page.
 pub fn tabs(app: &mut SolveApp, ui: &mut egui::Ui, r: Rect, x0: f32, x1: f32) {
@@ -2875,6 +2900,10 @@ pub fn tabs(app: &mut SolveApp, ui: &mut egui::Ui, r: Rect, x0: f32, x1: f32) {
         .map(|(((_, dirty), path), security)| tab_place(path.as_deref(), *dirty, security.as_deref()))
         .collect();
     let selected = if child || app.docs.slots.is_empty() { 0 } else { app.docs.active };
+    // A design and the part of it being edited in place share one tab (#6892): the strip is
+    // built from the tabs shown, and what it reports is put back in terms of every tab.
+    let shown: Vec<usize> = if child { vec![0] } else { tabs_shown(app, &paths, selected) };
+    let strip_selected = shown.iter().position(|i| *i == selected).unwrap_or(0);
     let mut rename = app.menu.rename.take();
     let renaming = renaming_tab_state(rename.as_ref());
     crate::view_windows::remember_strip_order(app);
@@ -2990,7 +3019,9 @@ pub fn tabs(app: &mut SolveApp, ui: &mut egui::Ui, r: Rect, x0: f32, x1: f32) {
                 .zip(&places)
                 .zip(&badges)
                 .zip(&view_tabs)
-                .map(|(((((list_name, dirty), name), place), security), views)| crate::app_bar::DocTab {
+                .enumerate()
+                .filter(|(i, _)| shown.contains(i))
+                .map(|(_, (((((list_name, dirty), name), place), security), views))| crate::app_bar::DocTab {
                     name,
                     list_name,
                     dirty: *dirty,
@@ -2999,8 +3030,8 @@ pub fn tabs(app: &mut SolveApp, ui: &mut egui::Ui, r: Rect, x0: f32, x1: f32) {
                     views,
                 })
                 .collect(),
-            selected,
-            shown_selected: (!app.home.open).then_some(selected),
+            selected: strip_selected,
+            shown_selected: (!app.home.open).then_some(strip_selected),
             title_bar: app.custom_titlebar || app.integrated_titlebar,
             double_click_renames: app.preferences.tab_double_click_renames,
             rename: rename.as_mut().filter(|_| renaming).map(|r| crate::app_bar::TabRename {
@@ -3076,8 +3107,27 @@ pub fn tabs(app: &mut SolveApp, ui: &mut egui::Ui, r: Rect, x0: f32, x1: f32) {
         });
         crate::app_bar::tabs_with_view_drop_zones(ui, &mut strip, r, x0, x1)
     };
+    let tab_at = |i: usize| shown.get(i).copied().unwrap_or(i);
+    let actions: Vec<crate::app_bar::TabAction> = actions
+        .into_iter()
+        .map(|action| match action {
+            crate::app_bar::TabAction::Select(i) => crate::app_bar::TabAction::Select(tab_at(i)),
+            crate::app_bar::TabAction::Close(i) => crate::app_bar::TabAction::Close(tab_at(i)),
+            crate::app_bar::TabAction::Menu { tab, id } => crate::app_bar::TabAction::Menu { tab: tab_at(tab), id },
+            crate::app_bar::TabAction::StartRename { tab, rect } => crate::app_bar::TabAction::StartRename { tab: tab_at(tab), rect },
+            // A drop past the last tab shown is a drop past the last tab.
+            crate::app_bar::TabAction::Reorder { from, to } => {
+                crate::app_bar::TabAction::Reorder { from: tab_at(from), to: shown.get(to).copied().unwrap_or(n) }
+            }
+            other => other,
+        })
+        .collect();
     let drop_zones = drop_zones
         .into_iter()
+        .map(|mut zone| {
+            zone.document = tab_at(zone.document);
+            zone
+        })
         .filter_map(|zone| {
             let tab = if child || zone.document == selected { app.docs.current_tab() } else { app.docs.slots.get(zone.document)?.as_ref()?.tab };
             let count = design_views.get(zone.document)?.iter().filter(|(_, _, _, window)| window.is_none()).count();
