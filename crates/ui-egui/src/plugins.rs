@@ -157,17 +157,54 @@ fn check(m: Manifest, folder: &str) -> Result<Plugin, String> {
     })
 }
 
+/// What a listed package's approval hash was worked out from: its manifest's bytes and its
+/// component's size and modification time.
+type ListedKey = (Vec<u8>, Option<(u64, std::time::SystemTime)>);
+
+/// A package's manifest and approval hash, as `read_package` gives them. Listing runs about once a
+/// second while the app bar shows, and hashing a large component each time stalls the view
+/// (#21228): an unchanged manifest and component reuse the hash worked out before.
+fn read_package_listed(dir: &Path, folder: &str) -> Result<(solidcraft_engine::plugin::Manifest, String), String> {
+    static LISTED: std::sync::Mutex<Option<std::collections::HashMap<std::path::PathBuf, (ListedKey, String)>>> = std::sync::Mutex::new(None);
+    let key = || -> Option<(solidcraft_engine::plugin::Manifest, ListedKey)> {
+        let bytes = std::fs::read(dir.join("plugin.json")).ok()?;
+        let manifest = solidcraft_engine::plugin::parse_manifest(&bytes, folder).ok()?;
+        let component = match &manifest.runtime {
+            Some(runtime) => {
+                let meta = std::fs::metadata(dir.join(&runtime.module)).ok()?;
+                Some((meta.len(), meta.modified().ok()?))
+            }
+            None => None,
+        };
+        Some((manifest, (bytes, component)))
+    };
+    let known = key();
+    if let Some((manifest, key)) = &known
+        && let Ok(listed) = LISTED.lock()
+        && let Some((seen, approval)) = listed.as_ref().and_then(|m| m.get(dir))
+        && seen == key
+    {
+        return Ok((manifest.clone(), approval.clone()));
+    }
+    let package = solidcraft_engine::plugin::read_package(&dir.to_string_lossy()).map_err(|e| e.to_string())?;
+    if let Some((_, key)) = known
+        && let Ok(mut listed) = LISTED.lock()
+    {
+        listed.get_or_insert_with(Default::default).insert(dir.to_path_buf(), (key, package.approval.clone()));
+    }
+    Ok((package.manifest, package.approval))
+}
+
 fn read_plugin(dir: &Path, folder: &str) -> Result<(Plugin, bool), String> {
     let path = dir.join("plugin.json");
     let meta = std::fs::symlink_metadata(&path).map_err(|_| "no plugin.json".to_string())?;
     if !meta.is_file() || meta.len() > MAX_MANIFEST_BYTES {
         return Err("plugin.json is missing or larger than 64 KiB".into());
     }
-    let package = solidcraft_engine::plugin::read_package(&dir.to_string_lossy()).map_err(|e| e.to_string())?;
-    let parsed = package.manifest;
+    let (parsed, approval) = read_package_listed(dir, folder)?;
     let mut plugin = check(Manifest { id: parsed.id, name: parsed.name, version: parsed.version, description: parsed.description }, folder)?;
     plugin.path = dir.to_string_lossy().into_owned();
-    plugin.approval = package.approval;
+    plugin.approval = approval;
     let executable = parsed.runtime.is_some();
     if let Some(runtime) = parsed.runtime {
         plugin.entries = runtime.entries;
