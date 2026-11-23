@@ -17,6 +17,134 @@ pub use solidcore::eval::pcurve::{Error, SURFACE_GAP_MARGIN};
 
 type Result<T> = std::result::Result<T, Error>;
 
+/// Why completion of an imported record's periodic seams failed.
+#[derive(Debug)]
+pub enum PeriodicSeamError {
+    /// A surface or pcurve cannot be evaluated.
+    Geometry(Error),
+    /// Conversion of the record or the completed body failed.
+    Conversion(solidcore_convert::brep::Unsupported),
+    /// The kernel's topology edit failed, with its typed cause intact.
+    Topology(solidcore::SolidError),
+    /// Conversion did not keep an input face's index.
+    InputFaceLost(usize),
+    /// A seam edit made a face without reporting which input face it came from.
+    OutputFaceLost(solidcore::FaceId),
+}
+
+impl std::fmt::Display for PeriodicSeamError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Geometry(e) => write!(f, "{e}"),
+            Self::Conversion(e) => write!(f, "{e}"),
+            Self::Topology(e) => write!(f, "{e}"),
+            Self::InputFaceLost(i) => write!(f, "seam completion lost input face {i}"),
+            Self::OutputFaceLost(face) => write!(f, "seam completion lost the origin of {face:?}"),
+        }
+    }
+}
+
+impl std::error::Error for PeriodicSeamError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Self::Geometry(e) => Some(e),
+            Self::Conversion(e) => Some(e),
+            Self::Topology(e) => Some(e),
+            Self::InputFaceLost(_) | Self::OutputFaceLost(_) => None,
+        }
+    }
+}
+
+/// Complete an import's periodic topology after its lifted pcurves are known, before the
+/// record is published. Returns the completed record and each output face's input index;
+/// `None` leaves a record with in-domain trims and complete sectors unchanged. The kernel
+/// removes crossed internal cuts, splits genuine boundaries at the base cut, inserts seams
+/// and translates the pieces.
+///
+/// # Errors
+/// Typed evaluation, conversion and topology failures, including a lost face origin.
+pub fn complete_periodic_seams(
+    record: &solidcore_record::brep::Brep,
+) -> std::result::Result<Option<(solidcore_record::brep::Brep, Vec<usize>)>, PeriodicSeamError> {
+    use solidcore_convert::brep::{to_kernel, to_record};
+    use solidcore_record::brep::Loop;
+    use std::collections::{BTreeMap, BTreeSet};
+
+    let mut targets = Vec::new();
+    for (i, face) in record.faces.iter().enumerate() {
+        let surface = solidcore_convert::surface(face.parameters())
+            .map_err(|e| PeriodicSeamError::Conversion(e.into()))?;
+        let domain = solidcore::eval::SurfaceEval::new(&surface)
+            .map_err(|e| PeriodicSeamError::Geometry(e.into()))?
+            .domain();
+        if domain.period.iter().all(Option::is_none) {
+            continue;
+        }
+        let mut outside = false;
+        let mut seen = BTreeSet::new();
+        let mut internal_seam = false;
+        for l in &face.loops {
+            if let Loop::Edges { edges } = l {
+                for u in edges {
+                    outside |= k::leaves_base_period(domain, &solidcore_convert::curve2(&u.pcurve));
+                    internal_seam |= !seen.insert(u.edge);
+                }
+            }
+        }
+        // An internal seam may have in-domain trims yet leave a 3D vertex sector
+        // crossing the cut. Let the kernel inspect those sectors before taking the
+        // no-edit path; bounds alone do not establish seam validity.
+        if outside || internal_seam {
+            targets.push(i);
+        }
+    }
+    if targets.is_empty() {
+        return Ok(None);
+    }
+    let mut kernel = solidcore::Kernel::default();
+    let (mut body, order) =
+        to_kernel(&mut kernel, record, true).map_err(PeriodicSeamError::Conversion)?;
+    let mut origins: BTreeMap<_, _> = order
+        .faces
+        .iter()
+        .enumerate()
+        .map(|(i, &f)| (f, i))
+        .collect();
+    let mut changed = false;
+    for i in targets {
+        let f = *order
+            .faces
+            .get(i)
+            .ok_or(PeriodicSeamError::InputFaceLost(i))?;
+        let Some(pieces) =
+            solidcore::topology::face::p1::complete_imported_face_seams(&mut kernel, &mut body, f)
+                .map_err(PeriodicSeamError::Topology)?
+        else {
+            continue;
+        };
+        changed = true;
+        for piece in pieces {
+            origins.insert(piece, i);
+        }
+    }
+    if !changed {
+        return Ok(None);
+    }
+    let (completed, order) =
+        to_record(&mut kernel, &mut body).map_err(PeriodicSeamError::Conversion)?;
+    let faces = order
+        .faces
+        .iter()
+        .map(|&f| {
+            origins
+                .get(&f)
+                .copied()
+                .ok_or(PeriodicSeamError::OutputFaceLost(f))
+        })
+        .collect::<std::result::Result<Vec<_>, _>>()?;
+    Ok(Some((completed, faces)))
+}
+
 /// One oriented edge of a loop, as [`pcurves`] reads it: the edge's index (a seam edge, used
 /// twice, is fitted once), its curve record and interval, whether the loop runs along it, the
 /// edge record's own tolerance (its pcurve is fitted to that, never closer than the face's), and

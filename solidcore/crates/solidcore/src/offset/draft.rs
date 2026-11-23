@@ -72,7 +72,7 @@ use crate::surface::implicit::{lies_on, AnalyticSupport, Implicit};
 use crate::surface::surface::{Surface, SurfaceKind};
 use crate::topology::face::p2::outer_faceuse;
 use crate::topology::{Brep, FaceId};
-use crate::{EntityRef, Result, SolidError};
+use crate::{Result, SolidError};
 
 const OP: &str = "offset::draft";
 const OP_RECERTIFY: &str = "offset::draft::DraftDefinition::recertify";
@@ -403,7 +403,7 @@ struct ConeDraft {
 /// # Errors
 ///
 /// Those of reading the net's knots and control points.
-fn net_sense(
+pub(crate) fn net_sense(
     net: &BSplineSurface,
     on_axis: Point3,
     x_axis: Vec3,
@@ -805,15 +805,17 @@ impl DraftDefinition {
     }
 }
 
-/// `SM_ERR_INVALID_INPUT` for face `f` (the capi's status for a face without a surface or
-/// an outer faceuse).
-fn invalid(f: FaceId) -> SolidError {
-    Failure::new(
-        OP,
-        OffsetFailure::InvalidValue("the face has no surface or no outer face use"),
-    )
-    .at(EntityRef::Face(f))
-    .into_error()
+/// The refusal of face `f` of the caller's body, which has no surface or no face use
+/// (`missing_surface`), with the capi's status for it, `SM_ERR_INVALID_INPUT`.
+fn invalid(f: FaceId, missing_surface: bool) -> SolidError {
+    let failure = if missing_surface {
+        OffsetFailure::FaceHasNoSurface { face: f }
+    } else {
+        OffsetFailure::FaceHasNoOuterFaceuse { face: f }
+    };
+    Failure::new(OP, failure)
+        .with_status(crate::error::SM_ERR_INVALID_INPUT)
+        .into_error()
 }
 
 /// The surface face `f` of a solid takes drafted by `draft`, with its definition
@@ -836,7 +838,7 @@ pub fn draft_surface(
     let fu = outer_faceuse(b, f)?;
     let surf = b.face(f)?.surface.as_ref();
     let (Some(surf), Some(fu)) = (surf, fu) else {
-        return Err(invalid(f));
+        return Err(invalid(f, surf.is_none()));
     };
     let outward = b.faceuse(fu)?.orientation == OrientType::Same;
     let mut drafted = match surf.kind_with_nurb(k)? {

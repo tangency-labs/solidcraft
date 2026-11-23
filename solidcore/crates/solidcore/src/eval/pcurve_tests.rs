@@ -1001,6 +1001,48 @@ fn closes_around_the_box(
     }
 }
 
+#[test]
+fn stored_trim_hulls_leaving_a_base_period_request_a_topology_edit() {
+    let surface = Surface::Spline {
+        u_knots: vec![0., 0., 1., 2., 3., 4., 4.],
+        v_knots: vec![0., 0., 3., 3.],
+        points: [[-2., -2.], [2., -2.], [2., 2.], [-2., 2.], [-2., -2.]]
+            .map(|[x, y]| vec![[x, y, 0.], [x, y, 3.]])
+            .to_vec(),
+    };
+    let domain = SurfaceEval::new(&surface).unwrap().domain();
+    let line = |a, b| Curve2::Spline {
+        knots: vec![0., 0., 1., 1.],
+        points: vec![a, b],
+    };
+    for u in [0.0, 4.0] {
+        assert!(!leaves_base_period(domain, &line([u, 0.], [u, 3.])));
+    }
+    assert!(leaves_base_period(domain, &line([3.9, 0.], [4.1, 3.])));
+    assert!(leaves_base_period(domain, &line([-0.1, 0.], [0.1, 3.])));
+    // The analogous cut in v is handled the same way; an open direction is not a seam.
+    let Surface::Spline {
+        u_knots,
+        v_knots,
+        points,
+    } = &surface
+    else {
+        unreachable!()
+    };
+    let transposed = Surface::Spline {
+        u_knots: v_knots.clone(),
+        v_knots: u_knots.clone(),
+        points: (0..2)
+            .map(|j| points.iter().map(|row| row[j]).collect())
+            .collect(),
+    };
+    assert!(leaves_base_period(
+        SurfaceEval::new(&transposed).unwrap().domain(),
+        &line([0., 3.9], [3., 4.1])
+    ));
+    assert!(!leaves_base_period(domain, &line([0., -1.], [4., 4.])));
+}
+
 /// A full-period loop with a small overrun at its cut belongs around the base
 /// period. Shifting its lowest control point inside moved most of it one turn out.
 #[test]

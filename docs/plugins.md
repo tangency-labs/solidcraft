@@ -421,6 +421,27 @@ reports missing picks beside their fields, and asks the person to review and App
 If the design changes while a worker computes, atomic command acceptance rejects its result.
 No stale result can overwrite the current design.
 
+### Shared field definitions
+
+When several entries ask for the same field, define it once under `$defs` and point to it with
+`{"$ref": "#/$defs/<name>"}`. The `$defs` can sit at the top of the manifest, where every entry
+can use it, or in one entry's `input_schema`, where it wins over a top-level definition of the
+same name. Keys beside a `$ref` replace the definition's own, so an entry can keep the shared choices
+with its own `default` or `description`:
+
+```json
+"$defs": {"units": {"type": "string", "title": "Units", "enum": ["mm", "in"], "default": "mm"}},
+"runtime": {"entries": [
+  {"name": "box", "input_schema": {"type": "object", "properties": {"units": {"$ref": "#/$defs/units"}}}},
+  {"name": "lid", "input_schema": {"type": "object", "properties": {"units": {"$ref": "#/$defs/units", "default": "in"}}}}
+]}
+```
+
+The app inlines every `$ref` once, when it loads the manifest, so dialogs, tools, conditions and
+input checks see the full field. Only these local names are followed. An unknown name, a definition
+that refers back to itself, or nesting too deep to expand refuses the manifest. The 64 KiB cap
+applies to `plugin.json` as written.
+
 ### Conditional fields, choices and defaults
 
 Command dialogs evaluate declarative conditions on sibling scalar properties. Changing a field
@@ -725,10 +746,10 @@ The WIT package is `craft:plugin@0.2.0`. Its capability `commands@0.2` runs app 
 reports progress and cancellation, reads named files and a clock, and exports the entry. A plugin's
 `plugin.json` lists what it needs, for example `"capabilities": ["commands@0.2"]`; the host refuses
 an unknown or newer capability when it reads the manifest, with a plain message such as "needs
-commands 0.3; update SolidCraft or the plugin". `formats@0.2` adds importers, `evaluate@0.2`
-lets an importer check its result, and `storage@0.1` keeps data in a design (below). `ui` and
-`viewport` arrive later as their own
-versioned interfaces. While a version is 0.x, a minor version may break the one before it.
+commands 0.3; update SolidCraft or the plugin". `formats@0.2` adds file-format slots: importers and
+exporters; `evaluate@0.2` lets an importer check its result, and `storage@0.1` keeps data in a
+design (below). `ui` and `viewport` arrive later as their own versioned interfaces. While a version
+is 0.x, a minor version may break the one before it.
 
 0.2 added one error, `plugin-error.unsupported(string)`: the input is valid, but this plugin does
 not handle it, such as a file with no solids or a newer version of its format. Use it instead of
@@ -746,8 +767,9 @@ past the open design are grouped (`file`, `doc`, `app`, `plugin`) and refused un
 manifest asks for the group in `permissions.command_groups` and the user grants it.
 File access requires approved folder grants. The reserved `net` permission is
 refused with a typed error. Traps, missing permissions, failed commands, limits
-and invalid manifest fields return structured errors (see Errors below). Phase 2 adds importers (below) and the
-author tools (`plugin check` and `plugin test`, below); exporters and browser execution follow.
+and invalid manifest fields return structured errors (see Errors below). Phase 2 adds importers
+and exporters (below) and the author tools (`plugin check` and `plugin test`, below); browser
+execution follows.
 
 ## Plugins as tools for agents
 
@@ -806,14 +828,15 @@ plugin and importer.
 - `plugin.check` (`solidcraft-cli plugin check <folder|plugin.zip>`) checks a package without
   running it, through the code Install and a call use: the installer's reader and limits, the
   manifest, the permissions (`net` is refused), the limits against the app's ceilings, and the
-  component against its world (`command-plugin` or `importer-plugin`) and this app's WIT version,
+  component against its world (`command-plugin`, `importer-plugin` or `exporter-plugin`) and this app's WIT version,
   with no WASI or network import. Each problem has a severity, the field, what is wrong and how to
   fix it. In a folder, `tests/` and hidden files are left out. It runs no plugin code, installs
   nothing and never opens a dialog.
 - `solidcraft-cli plugin test <folder|plugin.zip> [--json] [--out DIR] [--require-cases]` checks
   the package, installs it into a scratch plugins folder with the app's installer, and runs its
-  test cases, `tests/*.json`, through `plugin.run` and `file.import` with the app's limits. A
-  folder's cases are in its `tests/` folder; a `.zip`'s are the `tests/` folder it holds, so a
+  test cases, `tests/*.json`, through `plugin.run`, `file.import` and `file.export` with the
+  app's limits. An exporter writes into the scratch folder. A folder's cases are in its `tests/`
+  folder; a `.zip`'s are the `tests/` folder it holds, so a
   `.zip` made without one has none. A case names the entry, its parameters or file, the grants
   (default: everything the manifest asks for, stored in the scratch folder's grant store as an
   install stores them, see [Headless use](#headless-use)), and what to expect: an error kind,
@@ -846,7 +869,8 @@ Only an importer may say `open`.
   importer that claims its extension. `file.import` always uses an importer, and `format`
   (`plugin_id.entry`, listed in `plugin.list`'s `importers`) picks one for either command, for
   example for a `.fcstd` file SolidCraft also reads. `options` passes the entry's declared options.
-  Two importers claiming one extension need `format`. File › Open offers the claimed extensions,
+  Two importers claiming one extension need `format`. An entry's optional `label` names its group
+  in the Open dialog (default: the plugin's name), as for an export slot. File › Open offers the claimed extensions,
   and the Plugins menu has each importer's entry: its dialog shows the options, then chooses the file.
 - **The world.** The component implements `importer-plugin`: it exports
   `importer.import-file(entry, file, options)` and imports `source` (the file, read in chunks of at
@@ -888,15 +912,64 @@ Only an importer may say `open`.
 - **Failures.** A failure fails that one import, named with the plugin and the file ("Sample
   could not open bracket.smp: ...", or "Sample does not support bracket.smp: ..." for
   `unsupported`), and the next one gets a fresh instance. The compiled component stays in memory, so the next file opens
-  without compiling again; nothing compiled is written to disk.
+  without compiling again.
+- **Compiled plugins are kept.** A plugin compiles once per version: SolidCraft keeps the compiled
+  code with Wasmtime's compilation cache in the `plugin-compile` folder of its per-user cache folder
+  (`%LOCALAPPDATA%\SolidCraft\plugin-compile`, `~/Library/Caches/SolidCraft/plugin-compile`, or
+  `~/.cache/solidcraft/plugin-compile`), never in the plugin's or a design's folder. It is safe to
+  delete: the next session compiles again. A changed plugin, SolidCraft version or setting gets its own
+  entry; a damaged entry is compiled again, and a folder that can't be written only means compiling
+  each session. The folder holds machine code SolidCraft runs, so it is as trusted as the app itself.
 - **Limits.** An importer's component may be up to 64 MiB, its deadline up to 10 minutes, and its
   `stack_kib` up to 64 MiB (a command may ask for at most 1 MiB). Its fuel has to fit the user's ceiling in Preferences › Plugins, and
   its memory too unless the user approved more at install. Build it for `wasm32-unknown-unknown` and wrap it with
   `wasm-tools component new`: the host links no WASI, so a component that imports any is refused.
 
+## Exporters
+
+An exporter writes the open design as a file of another format. It is an export slot in the sense
+of RFC 0015 §4: its manifest says `"capabilities": ["formats@0.2"]`, and each of its entries has
+`"kind": "exporter"`, the extensions it writes, an optional `label` for the Export list, and its
+options as `input_schema`, drawn as a form before the export. The commands it reads the design with
+are listed in `runtime.commands`:
+
+```json
+{"id": "sample-mesh", "name": "Sample Mesh", "version": "1.0.0", "capabilities": ["formats@0.2"],
+ "runtime": {"module": "sample.wasm", "commands": ["document.inspect", "model.mesh"],
+   "entries": [{"name": "write", "kind": "exporter", "extensions": ["smp"], "label": "Sample mesh",
+                "input_schema": {"type": "object", "properties": {"units": {"type": "string", "enum": ["mm", "in"], "default": "mm"}}}}],
+   "limits": {"fuel": 100000000000, "memory_mib": 512, "deadline_ms": 120000}}}
+```
+
+- **Exporting.** `file.export` writes a file whose extension SolidCraft does not write itself with
+  the installed, enabled exporter that claims it; `format` (`plugin_id.entry`, listed in
+  `plugin.list`'s `exporters`) picks one for any path, and `options` passes the slot's options.
+  Two exporters claiming one extension need `format`. File › Export lists each slot as
+  "Export <label> (.ext)…", and the Plugins menu has it too: its dialog shows the options, then
+  chooses where to save. Neither the command nor a script ever opens a dialog.
+- **The world.** The component implements `exporter-plugin`: it exports
+  `formats-provider.export-file(slot, options)`, which returns the file's bytes (at most 256 MiB),
+  and imports `commands`, `log`, `control` and `clock`. `commands.run` runs only the commands the
+  manifest lists, only those that read the design (`effect: read`) and reach no file or other design;
+  a manifest that lists another is refused when it is read. The commands run on a copy of the open
+  design that is thrown away, so an export never changes the design or its undo history.
+- **Files.** The plugin reaches no file at all: it has no `files` import and may ask for no folder,
+  command group or `input_folder`. The app writes the bytes it returns to the path the user chose
+  (subject to the caller's file scope), in one step through a temporary file beside it, and only
+  when the whole export succeeded. An export that fails, traps, runs out of fuel or is cancelled
+  leaves the folder as it was.
+- **Plugin data.** `"needs_plugin_data": true` marks a slot that will also read the design's own
+  data of its plugin (RFC 0015 §5). The flag is accepted, but exporters do not yet receive plugin
+  data. The export runs without it and its reply carries a warning saying so. The `storage@0.1`
+  capability is available to command plugins (below).
+- **Limits.** As an importer: a component of up to 64 MiB, a deadline of up to 10 minutes and a
+  `stack_kib` of up to 64 MiB, with fuel and memory within the user's ceilings.
+- **One kind per plugin.** A runtime's entries are all commands, all importers or all exporters, so
+  a format that is both read and written ships as two plugins for now.
+
 ## Errors
 
-Every plugin failure starts with the plugin's name, and an importer's with the file's name too.
+Every plugin failure starts with the plugin's name, and an importer's or exporter's with the file's name too.
 Programs get the structured error (`kind` and its fields) from the engine as well as the text. The
 text comes from the message catalog (`plugin_error.*`) in the window's language; the command line
 and MCP give the English.

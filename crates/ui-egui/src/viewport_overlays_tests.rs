@@ -3043,3 +3043,28 @@ fn note_callouts_are_screen_facing_and_follow_the_anchor() {
     h.settle();
     assert!(shot(&h).is_empty());
 }
+
+/// Notes: a long note wraps inside its box. The box was sized from a layout wrapped at
+/// `NOTE_WRAP_WIDTH` while the text was drawn on one line, so a sentence ran out of its box.
+#[test]
+fn a_long_note_wraps_inside_its_box() {
+    let mut h = Harness::new();
+    let text = "This is a test comment to check that a long note is drawn correctly in the viewport";
+    h.app.run("note.add", json!({"anchor": [10.0, 5.0, 20.0], "text": text})).unwrap();
+    h.settle();
+    let proj = display_proj(&h.app);
+    let mut out = Vec::new();
+    draw(&h.ctx, |ui| out = note_callouts(&h.app, ui.painter(), &proj));
+    assert_eq!(out.len(), 1);
+    let note = &out[0];
+    assert!(note.galley.rows.len() > 1, "a sentence wider than the callout wraps");
+    assert!(note.galley.size().x <= NOTE_WRAP_WIDTH + 0.5);
+    // What draw_notes actually paints: the wrapped text, inside the callout box.
+    let output = draw(&h.ctx, |ui| draw_notes(&h.app, ui.painter(), &proj));
+    let texts: Vec<_> = output.shapes.iter().filter_map(|s| if let Shape::Text(t) = &s.shape { Some(t) } else { None }).collect();
+    assert_eq!(texts.len(), 1, "one note, one text shape");
+    let painted = texts[0];
+    assert!(painted.galley.rows.len() > 1, "the painted text wraps");
+    let drawn = Rect::from_min_size(painted.pos, painted.galley.size());
+    assert!(note.text_rect.expand(0.5).contains_rect(drawn), "painted text {drawn:?} inside box {:?}", note.text_rect);
+}
