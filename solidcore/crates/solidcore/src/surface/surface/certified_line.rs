@@ -165,10 +165,34 @@
 //! **Typing** ([`type_components`]). A component is a crossing when the line passes from
 //! one side of the surface to the other across it (an odd number of times), touching when
 //! it leaves on the side it came from, and undecided otherwise. It is undecided whatever
-//! its sides when its line parameters reach an end of the line's own interval (it has no
-//! end there), when it holds or touches a leaf whose pass stopped at its limit or did not
+//! its sides when it holds or touches a leaf whose pass stopped at its limit or did not
 //! run, touches a stretch nothing searched (a trim cull: it may straddle the face's
-//! border), or holds a strip box step 1 did not exclude or a certified root not reported.
+//! border), or holds a strip box step 1 did not exclude or a certified root not reported
+//! whose line parameters are not wholly past the line's own interval.
+//!
+//! **A component reaching an end** of the line's own interval (answer8, Q2) is typed on its
+//! line parameters clipped to that interval ([`type_one`]), the other components' clipped
+//! too for test 2 below: only certified roots whose enclosure's line parameters lie inside
+//! the interval are counted; one wholly past it is not (a point in its unique box is
+//! undecided), one reaching across the end (once narrowed about its root by Krawczyk's
+//! operator about Newton's point, in its unique box: [`tight_root`]) leaves the component
+//! undecided. Each clipped end `E = L(s)` of a component its count, sides or foot decide
+//! must be certified farther than the tolerance from the net over the component: every box
+//! of it whose line parameters hold `s` has `S − E` enclosed longer than the tolerance
+//! ([`end_off_the_net`]; a regular box halved within a budget, a box at the floor enclosed
+//! whole). A box whose line parameters do not hold `s` needs no test: they are its points'
+//! feet widened by the tolerance as a stretch of the line, rounded outward, so every point
+//! of it has its foot more than that from `s`, more than the tolerance from `E` along the
+//! line; a record excluded by t lies wholly past the interval, and a point excluded by
+//! distance or dropped is farther than the tolerance from the whole line; a point of the
+//! net within the tolerance of `E` outside this component lies in another component
+//! reaching the same end, which needs its own certificate. The sides also read `|f(E)|`
+//! above half the tolerance and `ε` (`|f|` is the distance to the complete surface, or to
+//! the cone's profile line, no more, and the net over the hull is within `ε` of it), and
+//! the foot rule the foot's side at `E` apart from 0. An end within the tolerance of the net
+//! (a ray starting on the face) stays undecided ([`Why::ReachesEnd`]), and so does an end
+//! not finite. A point solution past the interval is undecided, and so is one in the unique
+//! box of a root past it, reported or not.
 //! Otherwise:
 //!
 //! - **Every box regular** (no box left at the floor): every exact root of `F` with `(u, v)`
@@ -943,8 +967,11 @@ pub(crate) enum FloorKind {
         enclosure: [Ivl; 3],
     },
     /// Its root, certified but not reported ([`Isolation::unshown`]), the only one in
-    /// `unique`.
-    Unshown { unique: [Ivl; 2] },
+    /// `unique`, and held by `enclosure` (in `(u, v, t)`).
+    Unshown {
+        unique: [Ivl; 2],
+        enclosure: [Ivl; 3],
+    },
     /// Not visited: the pass stopped at [`MAX_SCRATCH_BOXES`] first.
     Unvisited,
     /// A box of a culled strip ([`enclose_strip`]) that step 1 did not exclude: at the
@@ -1127,9 +1154,9 @@ fn isolate_within(
                 }
                 (FloorKind::Root { unique, enclosure }, Some(t))
             }
-            Visit::Unshown(unique, t) => {
+            Visit::Unshown(unique, enclosure, t) => {
                 out.unshown += 1;
-                (FloorKind::Unshown { unique }, Some(t))
+                (FloorKind::Unshown { unique, enclosure }, Some(t))
             }
             Visit::Left(t) => {
                 out.left += 1;
@@ -1850,6 +1877,10 @@ pub(crate) struct Component {
     pub classes: Vec<Vec<[Ivl; 2]>>,
     /// Whether every leaf holding a box of it lies wholly inside the face.
     pub inside: bool,
+    /// Its distinct certified roots whose line parameters lie wholly past the line's own
+    /// interval (a component reaching its end), as [`Component::classes`]: not counted, and
+    /// a point in one's unique box is undecided.
+    pub beyond: Vec<Vec<[Ivl; 2]>>,
 }
 
 /// The components of one solve (module docs, "Components").
@@ -1978,6 +2009,7 @@ pub(crate) fn components(
                 typed: Typed::Untyped,
                 classes: Vec::new(),
                 inside: true,
+                beyond: Vec::new(),
             });
             c
         };
@@ -2668,10 +2700,11 @@ pub(crate) enum Typed {
     Undecided(Why),
 }
 
-/// Why a component is undecided (module docs, "Typing"), in the order the tests run.
+/// Why a component is undecided (module docs, "Typing").
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub(crate) enum Why {
-    /// Its line parameters reach an end of the line's own interval.
+    /// Its line parameters reach an end of the line's own interval, and that end is not
+    /// certified off the net (or not finite), or a certified root reaches across it.
     ReachesEnd,
     /// It holds or touches a leaf whose pass stopped at its limit.
     Unfinished,
@@ -2734,7 +2767,19 @@ pub(crate) fn type_components(
     }
     let [s0, s1] = line.span;
     let scratch = ScratchLine::of(line, &Extent1d::from_min_max(s0, s1));
-    let overlapped = overlapped(&comps.list.iter().map(|c| c.t).collect::<Vec<Ivl>>());
+    // each component's line parameters clipped to the line's own interval (answer8, Q2):
+    // `None` where nothing finite is left
+    let clip = |t: Ivl| {
+        meet(t, Ivl::new(s0, s1))
+            .filter(|x| !(t.lo.is_nan() || t.hi.is_nan()) && x.lo.is_finite() && x.hi.is_finite())
+    };
+    let clipped: Vec<Option<Ivl>> = comps.list.iter().map(|c| clip(c.t)).collect();
+    let overlapped = overlapped(
+        &clipped
+            .iter()
+            .map(|t| t.unwrap_or_else(|| Ivl::new(f64::NAN, f64::NAN)))
+            .collect::<Vec<Ivl>>(),
+    );
     // the net's side bounds, made once for the solve when a side test first reads them (a
     // decomposition that fails gives none: every side test is then undecided)
     let mut bounds: Option<Vec<SideBound>> = None;
@@ -2747,24 +2792,22 @@ pub(crate) fn type_components(
             .iter()
             .filter_map(|&i| comps.boxes.get(i).copied())
             .collect();
-        let classes = root_classes(&boxes);
-        let typed = match (undecided_by_flags(c), &scratch, classes) {
+        let t = clipped.get(ci).copied().flatten();
+        let typed = match (undecided_by_flags(c), &scratch, t) {
             (Some(why), _, _) => Typed::Undecided(why),
             (None, None, _) => Typed::Undecided(Why::NotRun),
-            (None, Some(_), None) => Typed::Undecided(Why::RootsNotTold),
-            (None, Some(scratch), Some(classes)) => {
-                let n = classes.len();
-                c.classes = classes;
-                if c.holds.left == 0 {
-                    by_count(net, line, sides, &boxes, n)
-                } else if net.revolved.is_none() {
-                    let others = overlapped.get(ci).copied().unwrap_or(true);
-                    by_foot(net, scratch, leaves, &boxes, c, others)
-                } else {
-                    let others = overlapped.get(ci).copied().unwrap_or(true);
-                    let bounds = bounds.get_or_insert_with(|| net.side_bounds());
-                    by_sides(net, scratch, leaves, c, others, bounds)
-                }
+            (None, Some(_), None) => Typed::Undecided(Why::ReachesEnd),
+            (None, Some(scratch), Some(t)) => {
+                let others = overlapped.get(ci).copied().unwrap_or(true);
+                type_one(
+                    net,
+                    scratch,
+                    (leaves, sides),
+                    c,
+                    &boxes,
+                    (t, others),
+                    &mut bounds,
+                )
             }
         };
         c.contact = match typed {
@@ -2776,6 +2819,188 @@ pub(crate) fn type_components(
         c.typed = typed;
     }
     Ok(())
+}
+
+/// Types one component not undecided by its flags (module docs, "Typing"), its line
+/// parameters `t` clipped to the line's own interval and `others` whether another
+/// component's (clipped) meet them: its certified roots are split by the interval (those
+/// wholly past it are the component's [`Component::beyond`], one reaching across its end
+/// undecided), a certified root not reported and not wholly past it makes it undecided, and
+/// it is typed by its count, its sides or its foot. A component reaching an end is decided
+/// only with that end certified off the net ([`end_off_the_net`]: by its count; the side
+/// test asks more of the side function there, the foot rule reads the foot's side there).
+#[allow(clippy::too_many_arguments)]
+fn type_one(
+    net: &LineNet,
+    line: &ScratchLine,
+    (leaves, sides): (&[SearchedLeaf], &[LeafSides]),
+    c: &mut Component,
+    boxes: &[PlacedBox],
+    (t, others): (Ivl, bool),
+    bounds: &mut Option<Vec<SideBound>>,
+) -> Typed {
+    let [s0, s1] = line.span;
+    let past = |e: &I3| {
+        let [_, _, et] = *e;
+        et.hi < s0 || et.lo > s1
+    };
+    let within_span = |e: &I3| {
+        let [_, _, et] = *e;
+        et.lo >= s0 && et.hi <= s1
+    };
+    let mut counted: Vec<PlacedBox> = Vec::new();
+    let mut beyond: Vec<PlacedBox> = Vec::new();
+    let mut past_unshown: Vec<Vec<[Ivl; 2]>> = Vec::new();
+    for b in boxes {
+        match b.part {
+            Part::Floor(FloorKind::Root { enclosure, unique }) => {
+                // (an enclosure reaching across the end is narrowed about its root first)
+                let tight = if within_span(&enclosure) || past(&enclosure) {
+                    Some(enclosure)
+                } else {
+                    let point = c
+                        .roots
+                        .iter()
+                        .find(|r| r.unique == unique && r.enclosure == enclosure)
+                        .map_or_else(|| mids(&enclosure), |r| r.point);
+                    tight_root(net, line, point, unique)
+                };
+                match tight {
+                    Some(e) if within_span(&e) => counted.push(*b),
+                    Some(e) if past(&e) => beyond.push(*b),
+                    _ => return Typed::Undecided(Why::ReachesEnd),
+                }
+            }
+            Part::Floor(FloorKind::Unshown { enclosure, .. }) if !past(&enclosure) => {
+                return Typed::Undecided(Why::Unshown);
+            }
+            // (a root past the interval not reported: its unique box, like a reported one's)
+            Part::Floor(FloorKind::Unshown { unique, .. }) => {
+                past_unshown.push(vec![unique]);
+            }
+            _ => counted.push(*b),
+        }
+    }
+    let (Some(classes), Some(far)) = (root_classes(&counted), root_classes(&beyond)) else {
+        return Typed::Undecided(Why::RootsNotTold);
+    };
+    let n = classes.len();
+    c.classes = classes;
+    c.beyond = far;
+    c.beyond.extend(past_unshown);
+    let ends = [c.t.lo <= s0, c.t.hi >= s1];
+    let typed = if c.holds.left == 0 {
+        by_count(net, line, sides, boxes, n)
+    } else if net.revolved.is_none() {
+        by_foot(net, line, leaves, boxes, c, (t, others))
+    } else {
+        let bounds = bounds.get_or_insert_with(|| net.side_bounds());
+        by_sides(net, line, leaves, c, (t, ends, others), bounds)
+    };
+    // every clipped end of a decided component certified farther than the tolerance from
+    // the net over it (a box at the floor straddling the end enclosed whole): an end within
+    // the tolerance of the net stays undecided
+    if matches!(typed, Typed::Count(_) | Typed::Sides | Typed::Foot) {
+        let mut budget = MAX_SIDE_PIECES;
+        let [lo_end, hi_end] = ends;
+        let certified = [(lo_end, t.lo), (hi_end, t.hi)]
+            .iter()
+            .all(|&(clipped, at)| !clipped || end_off_the_net(net, line, boxes, at, &mut budget));
+        if !certified {
+            c.contact = Contact::Undecided;
+            return Typed::Undecided(Why::ReachesEnd);
+        }
+    }
+    typed
+}
+
+/// A box about the certified root at `point` (Newton's, of the root the `(u, v)` box
+/// `unique` holds alone, with any line parameter) proved to hold a root by Krawczyk's
+/// operator about `point` ([`krawczyk_region`], epsilon-inflation): that root, its box
+/// lying in `unique`. `None` where none is shown.
+fn tight_root(net: &LineNet, line: &ScratchLine, point: [f64; 3], unique: [Ivl; 2]) -> Option<I3> {
+    let [pu, pv, _] = point;
+    let [_, s_u, s_v] = net.over(Ivl::from(pu), Ivl::from(pv), line.p)?;
+    let y = inverse_of_columns3(&[mids(&s_u), mids(&s_v), line.d.map(|e| -e)])?;
+    let value = |x: [Ivl; 3]| -> Result<Option<[Ivl; 3]>> {
+        let [u, v, t] = x;
+        Ok(net.over(u, v, line.p).map(|[s, _, _]| less(&s, t, line.d)))
+    };
+    let jacobian = |x: [Ivl; 3]| -> Result<Option<[[Ivl; 3]; 3]>> {
+        let [u, v, _] = x;
+        Ok(net
+            .over(u, v, line.p)
+            .map(|[_, s_u, s_v]| [s_u, s_v, line.d.map(|e| Ivl::from(-e))]))
+    };
+    let (root, _) = krawczyk_region(point, y, &value, &jacobian).ok()??;
+    let [ru, rv, _] = root;
+    let [qu, qv] = unique;
+    (within(ru, qu) && within(rv, qv)).then_some(root)
+}
+
+/// Whether the line's point `E = L(at)` at a clipped end of a component is certified
+/// farther than the tolerance from the net over the component (answer8, Q2): each box of
+/// the component whose line parameters hold `at` has `S − E` enclosed longer than the
+/// tolerance, a regular box halved within `budget` (a box at the floor, not visited or of a
+/// culled strip is enclosed whole). A box whose line parameters do not hold `at` needs no
+/// test: its line parameters are its points' feet widened by the tolerance as a stretch of
+/// the line (`tol / |D|`, rounded up), so every point of it has its foot more than that
+/// from `at`, and lies more than the tolerance from `E` along the line; a point in no box
+/// was excluded by distance, farther than the tolerance from the whole line.
+fn end_off_the_net(
+    net: &LineNet,
+    line: &ScratchLine,
+    boxes: &[PlacedBox],
+    at: f64,
+    budget: &mut usize,
+) -> bool {
+    let [p0, p1, p2] = line.p;
+    let [d0, d1, d2] = line.d;
+    let e = [
+        Ivl::from(p0) + Ivl::from(at) * Ivl::from(d0),
+        Ivl::from(p1) + Ivl::from(at) * Ivl::from(d1),
+        Ivl::from(p2) + Ivl::from(at) * Ivl::from(d2),
+    ];
+    let about = mids(&e);
+    let [a0, a1, a2] = about;
+    let [e0, e1, e2] = e;
+    // `E − about`, enclosed
+    let off = [e0 - Ivl::from(a0), e1 - Ivl::from(a1), e2 - Ivl::from(a2)];
+    let tol2 = (Ivl::from(line.tol) * Ivl::from(line.tol)).hi;
+    for b in boxes.iter().filter(|b| b.t.lo <= at && at <= b.t.hi) {
+        let regular = matches!(
+            b.part,
+            Part::Floor(FloorKind::Edge | FloorKind::NoRoot | FloorKind::Root { .. })
+        );
+        let mut work = vec![(b.u, b.v)];
+        while let Some((u, v)) = work.pop() {
+            let shown = net.value_over(u, v, about).is_some_and(|w| {
+                let [w0, w1, w2] = w;
+                let [o0, o1, o2] = off;
+                length_squared(&[w0 - o0, w1 - o1, w2 - o2]).lo > tol2
+            });
+            if shown {
+                continue;
+            }
+            if !regular || *budget == 0 {
+                return false;
+            }
+            *budget = budget.saturating_sub(1);
+            let split_u = u.hi - u.lo >= v.hi - v.lo;
+            let (x, mid) = if split_u { (u, u.mid()) } else { (v, v.mid()) };
+            if !(mid > x.lo && mid < x.hi) {
+                return false;
+            }
+            if split_u {
+                work.push((Ivl::new(u.lo, mid), v));
+                work.push((Ivl::new(mid, u.hi), v));
+            } else {
+                work.push((u, Ivl::new(v.lo, mid)));
+                work.push((u, Ivl::new(mid, v.hi)));
+            }
+        }
+    }
+    true
 }
 
 /// For each of the closed intervals `hulls`, whether another of them meets it: sorted by
@@ -2808,12 +3033,10 @@ fn overlapped(hulls: &[Ivl]) -> Vec<bool> {
     out
 }
 
-/// What makes a component undecided whatever its sides (answer to the typing's design:
-/// an end of the line, a leaf not decided, a trim cull, a strip box not excluded).
+/// What makes a component undecided whatever its sides (answer to the typing's design: a
+/// leaf not decided, a trim cull, a strip box not excluded).
 fn undecided_by_flags(c: &Component) -> Option<Why> {
-    if c.reaches_end {
-        Some(Why::ReachesEnd)
-    } else if c.touches.unfinished || c.holds.unvisited > 0 {
+    if c.touches.unfinished || c.holds.unvisited > 0 {
         Some(Why::Unfinished)
     } else if c.touches.not_run || c.holds.not_run > 0 {
         Some(Why::NotRun)
@@ -2821,8 +3044,6 @@ fn undecided_by_flags(c: &Component) -> Option<Why> {
         Some(Why::Unsearched)
     } else if c.holds.culled > 0 {
         Some(Why::Culled)
-    } else if c.holds.unshown > 0 {
-        Some(Why::Unshown)
     } else {
         None
     }
@@ -2883,14 +3104,15 @@ fn root_classes(boxes: &[PlacedBox]) -> Option<Vec<Vec<[Ivl; 2]>>> {
 }
 
 /// A component every box of which is regular (no box left at the floor; with the flags
-/// clear, its `boxes` are roots, boxes with no root and edge boxes): every exact root of the
-/// line on the surface over it lies in a root box, each a transversal crossing, so its
-/// parity is the count `roots` of its distinct roots. Undecided when an edge box has a side
+/// clear, its `boxes` are roots, boxes with no root, edge boxes and roots not reported
+/// wholly past the line's own interval): every exact root of the line on the surface over
+/// it within the interval lies in a root box, each a transversal crossing, so its parity is
+/// the count `roots` of its distinct roots within the interval. Undecided when an edge box has a side
 /// on a boundary (the surface's, a seam among them, or the solve's: the contact may lie
 /// past it) or a root's enclosure reaches one (the patch or face across may count it too).
 fn by_count(
     net: &LineNet,
-    line: &PassLine,
+    line: &ScratchLine,
     sides: &[LeafSides],
     boxes: &[PlacedBox],
     roots: usize,
@@ -2932,7 +3154,7 @@ fn by_sides(
     line: &ScratchLine,
     leaves: &[SearchedLeaf],
     c: &mut Component,
-    others: bool,
+    (t, clipped, others): (Ivl, [bool; 2], bool),
     bounds: &[SideBound],
 ) -> Typed {
     let Some(rev) = net.revolved else {
@@ -2945,7 +3167,7 @@ fn by_sides(
         let [d0, d1, d2] = line.d.map(Ivl::from);
         [t * d0 - o0, t * d1 - o1, t * d2 - o2]
     };
-    let ends = [c.t.lo, c.t.hi].map(|t| rev.side(&at(Ivl::from(t))));
+    let ends = [t.lo, t.hi].map(|x| rev.side(&at(Ivl::from(x))));
     // (half the tolerance: the ends are at least the tolerance from the net over the
     // component, and the net is within a quarter of it of the closed form)
     let half = 0.5 * line.tol;
@@ -2965,6 +3187,15 @@ fn by_sides(
         Err(why) => return Typed::Undecided(why),
         Ok(_) => return Typed::Undecided(Why::NotTheNet),
     };
+    // an end clipped to the line's own interval is certified off the net: the side function
+    // there more than half the tolerance and `ε` from 0 (the net over the hull within `ε` of
+    // the complete surface, `|f|` a distance to it, or to the cone's profile line, no more)
+    let margin = (Ivl::from(half) + Ivl::from(eps)).hi;
+    let [lo_clipped, hi_clipped] = clipped;
+    let off = |f: Ivl| f.lo > margin || f.hi < -margin;
+    if (lo_clipped && !off(lo)) || (hi_clipped && !off(hi)) {
+        return Typed::Undecided(Why::ReachesEnd);
+    }
     let mut budget = MAX_SIDE_PIECES;
     if !in_the_chart_domain(net, &rev, c.u, c.v, eps) {
         return Typed::Undecided(Why::OutsideHull);
@@ -2978,7 +3209,7 @@ fn by_sides(
     };
     // every piece of the line between the ends that may meet the net lies strictly in the
     // chart, halving pieces within the budget
-    let mut work = vec![c.t];
+    let mut work = vec![t];
     while let Some(piece) = work.pop() {
         if budget == 0 {
             return Typed::Undecided(Why::Budget);
@@ -3228,7 +3459,7 @@ fn by_foot(
     leaves: &[SearchedLeaf],
     boxes: &[PlacedBox],
     c: &mut Component,
-    others: bool,
+    (t, others): (Ivl, bool),
 ) -> Typed {
     if others {
         return Typed::Undecided(Why::Overlapped);
@@ -3238,8 +3469,9 @@ fn by_foot(
     }
     let mut budget = MAX_FOOT_BOXES;
     let mut start = [c.u.mid(), c.v.mid()];
-    let mut work = vec![c.t];
+    let mut work = vec![t];
     let mut chain: Vec<FootBox> = Vec::new();
+    let whole = t;
     while let Some(t) = work.pop() {
         if budget == 0 {
             return Typed::Undecided(Why::Budget);
@@ -3272,8 +3504,8 @@ fn by_foot(
         return Typed::Undecided(Why::FootNotShown);
     };
     let (Some(lo), Some(hi)) = (
-        foot_side(net, line, first, c.t.lo),
-        foot_side(net, line, last, c.t.hi),
+        foot_side(net, line, first, whole.lo),
+        foot_side(net, line, last, whole.hi),
     ) else {
         return Typed::Undecided(Why::FootNotShown);
     };
@@ -3578,7 +3810,17 @@ fn place(
             gap2.hi < (Ivl::from(scratch.tol) * Ivl::from(scratch.tol)).lo
         })
     });
-    if !shown {
+    let [s0, s1] = line.span;
+    let in_span = t >= s0 && t <= s1;
+    if !(shown && in_span) {
+        return Placing::Undecided;
+    }
+    let past_root = comps
+        .list
+        .iter()
+        .flat_map(|x| x.beyond.iter().flatten())
+        .any(|&q| holds(q, u, v));
+    if past_root {
         return Placing::Undecided;
     }
     let held = comps.boxes.iter().position(|b| {
@@ -3620,7 +3862,7 @@ enum Visit {
     Root(CertifiedRoot, Ivl),
     /// Regular, with its one root certified but not reported ([`Isolation::unshown`]), and
     /// the `(u, v)` box that root is the only one in.
-    Unshown([Ivl; 2], Ivl),
+    Unshown([Ivl; 2], I3, Ivl),
     /// At the floor (step 3), with its line parameters where it was enclosed.
     Left(Option<Ivl>),
     /// Its two halves, the first to visit first.
@@ -3781,7 +4023,7 @@ fn visit(net: &LineNet, line: &ScratchLine, b: Scratch) -> Visit {
             Regular::Root(enclosure, unique) => {
                 return match refined(net, line, enclosure, unique) {
                     Some(root) => Visit::Root(root, feet),
-                    None => Visit::Unshown(unique, feet),
+                    None => Visit::Unshown(unique, enclosure, feet),
                 };
             }
             Regular::Open => {}
@@ -5409,6 +5651,79 @@ mod tests {
         let sides = leaf_sides(doms, &solve);
         type_components(&net, &line, &leaves, &sides, &mut c, None).unwrap();
         (leaves, c)
+    }
+
+    /// [`typed_of`] with the line's own interval `span` (and the leaves' line interval).
+    fn typed_in(k: &Kernel, s: &Surface, p: Vec3, d: Vec3, tol: f64, span: [f64; 2]) -> Components {
+        let net = LineNet::of(k, s).unwrap().unwrap();
+        let solve = s.natural_uv_domain_with_nurb(k).unwrap();
+        let line = PassLine {
+            point: p,
+            vector: d,
+            span,
+            solve_domain: solve,
+            tol,
+        };
+        let doms = [solve];
+        let sides = leaf_sides(&doms, &solve);
+        let [s0, s1] = span;
+        let interval = Extent1d::from_min_max(s0, s1);
+        let mut leaves: Vec<SearchedLeaf> = doms
+            .iter()
+            .zip(&sides)
+            .map(|(dom, own)| {
+                let f = isolate(&net, &line, dom, &interval, own, None).unwrap();
+                SearchedLeaf {
+                    domain: *dom,
+                    stop: f.stop,
+                    floor: Some(f.floor),
+                    roots: f.roots,
+                    strip: false,
+                    inside: true,
+                }
+            })
+            .collect();
+        drop_fenced(&net, &line, &mut leaves, &sides, None, MAX_DROP_ENCLOSURES).unwrap();
+        let mut c = components(&leaves, &sides, span);
+        type_components(&net, &line, &leaves, &sides, &mut c, None).unwrap();
+        c
+    }
+
+    /// A component reaching an end of the line's own interval (answer8, Q2), on the sphere of
+    /// radius 5 about the origin and the secant from (−10, 1, 2) along (20, 0, 0), which
+    /// crosses at `t = (10 ∓ √20) / 20` (0.27639 and 0.72361) at the cosine `√20 / 5 = 0.894`
+    /// to the normal. With the interval ending `10⁻⁶` past the second crossing, the end
+    /// `E` lies `2·10⁻⁵` along the line past it, about `1.8·10⁻⁵` from the sphere, more than
+    /// the tolerance 10⁻⁶: the component reaching the end is a crossing by its count (its
+    /// root's enclosure inside the interval, the end certified off the net). Ending `10⁻¹⁰`
+    /// past it, `E` is within `2·10⁻⁹` of the sphere, and the component reaching the end is
+    /// undecided.
+    #[test]
+    fn a_component_reaching_the_line_s_end_is_typed_with_its_end_certified() {
+        let k = Kernel::default();
+        let s = sphere(&k);
+        let (p, d) = (Vec3::new(-10.0, 1.0, 2.0), Vec3::new(20.0, 0.0, 0.0));
+        let second = (10.0 + 20.0_f64.sqrt()) / 20.0;
+        let c = typed_in(&k, &s, p, d, 1.0e-6, [0.0, second + 1.0e-6]);
+        let at_end: Vec<&Component> = c.list.iter().filter(|x| x.reaches_end).collect();
+        assert_eq!(at_end.len(), 1, "{:?}", c.list);
+        assert_eq!(
+            (at_end[0].contact, at_end[0].typed),
+            (Contact::Crossing, Typed::Count(1)),
+            "{:?}",
+            at_end[0]
+        );
+        let c = typed_in(&k, &s, p, d, 1.0e-6, [0.0, second + 1.0e-10]);
+        let at_end: Vec<&Component> = c.list.iter().filter(|x| x.reaches_end).collect();
+        assert_eq!(at_end.len(), 1, "{:?}", c.list);
+        assert_eq!(
+            at_end[0].typed,
+            Typed::Undecided(Why::ReachesEnd),
+            "{:?}",
+            at_end[0]
+        );
+        // (its root counted: the end, not the root, leaves it undecided)
+        assert_eq!(at_end[0].classes.len(), 1, "{:?}", at_end[0]);
     }
 
     /// The types of the components, in order.
