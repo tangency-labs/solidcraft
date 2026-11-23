@@ -171,6 +171,7 @@ pub const DOCUMENTED: &[&str] = &[
     "sheet.perforate",
     "sheet.recognize",
     "sheet.refold",
+    "sheet.tab",
     "sheet.unfold",
     "sketch.arc.center_point",
     "sketch.arc.tangent",

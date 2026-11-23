@@ -463,6 +463,12 @@ const KEYS_TEST: &str = r#"(async () => {
 const API_TEST: &str = r#"(async () => {
     const app = window.solidcraft;
     const check = (condition, message) => { if (!condition) throw new Error(message); };
+    const waitForUi = async (ready, message) => {
+        const deadline = performance.now() + 120_000;
+        while (!ready(await app.request('ui.inspect'))) {
+            check(performance.now() < deadline, message);
+        }
+    };
     const rejects = async (call, message) => {
         try { await call(); } catch (error) {
             check(error instanceof Error, 'rejections must be Error objects');
@@ -531,14 +537,8 @@ const API_TEST: &str = r#"(async () => {
     await app.request('ui.inspect');
     const [x, y] = await app.request('ui.at', {handle: 'dialog:Export DXF…'});
     await app.request('ui.click', {x, y});
-    // ui.click queues pointer events across frames. Finish the dialog action before file.new
-    // can cancel it; the existing host check still verifies the complete downloaded DXF.
-    const exportDeadline = performance.now() + 240000;
-    let exportUi;
-    do {
-        exportUi = await app.request('ui.inspect');
-    } while (exportUi.dialog && performance.now() < exportDeadline);
-    check(!exportUi.dialog, 'export click closes the dialog before replacing the document');
+    // The click is queued for a later frame. Keep this design until the export has finished.
+    await waitForUi(ui => !ui.dialog && !ui.file_picker_busy && !ui.file_busy, 'view export finishes');
     // Browser files exist only in the VFS: native filesystem metadata cannot find them.
     await app.execute('file.save', {path: '/upload/linked-part.sc'});
     await app.execute('file.new');
@@ -556,12 +556,8 @@ const API_TEST: &str = r#"(async () => {
     }
     check(menu.items?.some(item => item.id === 'ui.openLinkedDesign'), 'occurrence menu offers the source design');
     await app.request('ui.menuPick', {item: 'ui.openLinkedDesign'});
-    // The menu action queues the design's staged load; its reply does not finish that load.
-    const linkedDeadline = performance.now() + 240000;
-    while (performance.now() < linkedDeadline) {
-        const pendingTabs = await app.request('ui.documents');
-        if (pendingTabs.documents.length === 2 && pendingTabs.active === 1) break;
-    }
+    // The menu starts a staged file load; its reply does not mean the source tab is ready.
+    await waitForUi(ui => !ui.file_busy, 'linked source finishes loading');
     const tabs = await app.request('ui.documents');
     check(tabs.documents.length === 2 && tabs.active === 1, 'linked source opens in another tab');
     check((await app.inspect()).bodies[0].name === 'Browser API box', 'source design is active');
