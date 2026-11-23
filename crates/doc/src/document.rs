@@ -385,6 +385,10 @@ pub struct Extent {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[walk(length = "Start offset")]
     pub start_offset: Option<Expr>,
+    /// When symmetric extrude is offset, offset both directions symmetrically away from the sketch
+    /// plane, leaving a clearance gap between the two sides.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub symmetric_offset: bool,
     /// Through all bodies in the direction(s) instead of `distance`.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub through_all: bool,
@@ -1326,6 +1330,15 @@ pub enum FeatureKind {
         /// and section names. Otherwise use the face's extended surface and its sheet.
         #[serde(default, skip_serializing_if = "std::ops::Not::not")]
         tool_plane: bool,
+        /// With `tool`: what of the tool body cuts, its face extended (older designs), the
+        /// picked faces as they are, or the whole body as it is (#9305).
+        #[serde(default, skip_serializing_if = "SplitSheet::is_extended")]
+        tool_sheet: SplitSheet,
+        /// With `tool_sheet` `faces`: points on the tool body's other picked faces, named like
+        /// `tool` so they follow the faces.
+        #[walk(picks_faces)]
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        tool_faces: Vec<Position>,
         /// A straight line of this sketch as the tool (#1552): the plane through it along the
         /// sketch's normal, which follows the sketch.
         #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -1450,9 +1463,12 @@ pub enum FeatureKind {
         angle: Expr,
     },
     /// Structural members (#4003): one body per straight line of a frame sketch (2D sketch lines
-    /// and 3D sketch lines), its cross-section the profile, square to the line from end to end.
+    /// and 3D sketch lines), then one per pair of points (#15705), its cross-section the profile,
+    /// square to the line from end to end.
     FrameMember {
-        path_sketch: SketchId,
+        /// The frame sketch; none: a Frame Member of pairs only.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        path_sketch: Option<SketchId>,
         /// The lines, by curve id; none: every straight line drawn in the sketch (not
         /// construction, not projected or otherwise linked, not of no length).
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -1466,6 +1482,28 @@ pub enum FeatureKind {
         /// when the profile's size changes.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         locate: Option<[f64; 2]>,
+        /// How two members ending at one point are cut (default none: ends square to their lines).
+        #[serde(default, skip_serializing_if = "crate::frame::CornerType::is_none")]
+        corner: crate::frame::CornerType,
+        /// With a butt: the other member runs through.
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        flip: bool,
+        /// Free ends are fitted to the tubes of earlier Frame Members.
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        fit_ends: bool,
+        /// Coped (#17854): under every type but None, each butt joint's butting tube is cut to the other tube's real
+        /// shape (its outline, radii kept, hole filled); mitres stay mitres.
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        coped: bool,
+        /// Corners, crossings and overlaps finished their own way, each named by its members in order (the first runs
+        /// through, or stays whole).
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        corners: Vec<crate::frame::CornerOverride>,
+        /// The weld gap (#17854) left at every welded end: each mitre, butting end and fitted end stands this far off
+        /// the member it meets; through members are never shortened. None: 0.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[walk(length = "Gap")]
+        gap: Option<Expr>,
         /// How far the profile turns about the line (see `frame::member_axes`).
         #[serde(default, skip_serializing_if = "Option::is_none")]
         #[walk(angle = "Rotation")]
@@ -1481,6 +1519,19 @@ pub enum FeatureKind {
         /// come and go (`frame::member_names`).
         #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
         names: std::collections::BTreeMap<String, String>,
+        /// Members between two points, after the lines' members, each found again on every
+        /// evaluation.
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        pairs: Vec<crate::frame::MemberPair>,
+        /// The number the next new pair's id takes (`pair<N>`; 0: 1), so a removed pair's id is
+        /// never given again.
+        #[serde(default, skip_serializing_if = "is_zero_u32")]
+        next_pair: u32,
+        /// Two or more groups of lines, each placed its own way (`frame::MemberGroup`); then they
+        /// stand in for `lines`, `anchor`, `locate`, `angle`, `mirror` and `body_name`, which stay
+        /// unset. None: those fields are the feature's one group (`frame::member_groups`).
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        groups: Vec<crate::frame::MemberGroup>,
     },
     /// Raise or sink profiles on a planar face, or wrap them on a selected cylindrical wall.
     Emboss {
@@ -1674,6 +1725,9 @@ pub enum FeatureKind {
         /// Turn the other way (left-handed).
         #[serde(default, skip_serializing_if = "std::ops::Not::not")]
         clockwise: bool,
+        /// Where the wire ends; axial when absent.
+        #[serde(default, skip_serializing_if = "CoilEndCut::is_axial")]
+        end_cut: CoilEndCut,
         #[serde(default)]
         operation: Operation,
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -2657,6 +2711,25 @@ pub struct TrimCurves {
     pub direction: Option<Dir>,
 }
 
+/// What of the tool body cuts in a Split Body by a face (#9305).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SplitSheet {
+    /// The picked face's surface extended (with its sheet where that does not cut through).
+    #[default]
+    Extended,
+    /// The picked faces exactly as they are, bounded where they end.
+    Faces,
+    /// Every face of the tool body exactly as it is.
+    Body,
+}
+
+impl SplitSheet {
+    pub fn is_extended(&self) -> bool {
+        *self == SplitSheet::Extended
+    }
+}
+
 /// A face picked by a point on it, on a named body.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, solidcraft_derive::Walk)]
 pub struct FaceAt {
@@ -2923,7 +2996,26 @@ pub enum CoilSection {
     Square,
 }
 
+/// Where a coil's wire ends: in a plane through the axis, or square to the wire.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum CoilEndCut {
+    #[default]
+    Axial,
+    Square,
+}
+
+impl CoilEndCut {
+    fn is_axial(&self) -> bool {
+        *self == Self::Axial
+    }
+}
+
 fn is_zero_i8(v: &i8) -> bool {
+    *v == 0
+}
+
+fn is_zero_u32(v: &u32) -> bool {
     *v == 0
 }
 
@@ -4181,6 +4273,7 @@ impl Document {
             .chain(a.contact_sets.iter().map(|c| c.id))
             .chain(a.studies.iter().map(|s| s.id))
             .chain(a.exploded.iter().map(|v| v.id))
+            .chain(a.rigid_groups.iter().map(|g| g.id))
             .chain(self.configs.rows.iter().map(|r| r.id))
             .max()
             .unwrap_or(0);
@@ -4712,6 +4805,12 @@ impl Document {
         let mut d = crate::format::read(s)?;
         if d.features.len() > MAX_FEATURES || d.params.len() > MAX_PARAMS {
             return Err(DocError::Invalid("document too large".into()));
+        }
+        // A test build's Coped corner type is Butt with Coped (#17854).
+        for f in &mut d.features {
+            if let FeatureKind::FrameMember { corner, corners, coped, .. } = &mut f.kind {
+                crate::frame_corners::read_coped(corner, corners, coped);
+            }
         }
         // A design from elsewhere may nest groups too deep, loop, or name things that are gone.
         if let Some((groups, order)) = d.browser_pruned() {
@@ -5638,15 +5737,18 @@ impl Document {
             .is_some_and(|from| sk.points.iter().zip(&from.points).any(|(p, q)| (p.fixed || p.link.is_some()) && p.id == q.id && p.pos != q.pos));
         let mut report = solidcraft_sketch::solve_after_edit_with_analysis(sk, stored, was(sk).as_deref(), first_analysis);
         // Links that moved far (a large change of a size upstream): when the jump fails, or
-        // lands on the mirror image of a side or turn the stored sketch has, walked there in
-        // steps; a turn the walk cannot avoid either is reported as one.
+        // lands on the mirror image of a side or turn the stored sketch has, or turns a line
+        // parallel or square to another end for end, walked there in steps; a side or turn the
+        // walk cannot avoid either is reported as one. A sense is not: the links may run its
+        // line through zero length, which turns it end for end as the only solution.
         if let Some(from) = moved_from.filter(|_| given_moved) {
             let flips = if report.ok() { solidcraft_sketch::flips_from_stored(sk, from) } else { Vec::new() };
             if !report.keeps_orientation() || !flips.is_empty() {
                 match solidcraft_sketch::solve_after_link_move(sk, from, stored, first_analysis) {
                     Some(walked) => report = walked,
                     None => {
-                        for id in flips {
+                        let sides = if flips.is_empty() { Vec::new() } else { solidcraft_sketch::side_flips_from_stored(sk, from) };
+                        for id in sides {
                             if !report.failing.contains(&id) {
                                 report.failing.push(id.clone());
                             }

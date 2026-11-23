@@ -25,6 +25,10 @@ use super::types::{IdOrName, Point3, present};
 #[derive(Debug, Deserialize, JsonSchema)]
 #[schemars(deny_unknown_fields)]
 pub struct EditParams {
+    /// Open Model view to edit in; defaults to the focused or most recent Model view.
+    #[serde(default)]
+    #[schemars(range(min = 1, max = 9007199254740992_u64))]
+    pub view: Option<u64>,
     pub sketch: IdOrName,
     /// A position (or null, the end of the timeline): temporarily roll to this sketch and
     /// restore that position when the edit ends. Left out, a sketch with features after it is
@@ -87,6 +91,7 @@ pub struct ExitParams {
 
 #[derive(Debug, Serialize, JsonSchema)]
 pub struct EditResult {
+    pub sketching_view: u64,
     pub sketch: u64,
     pub name: String,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]

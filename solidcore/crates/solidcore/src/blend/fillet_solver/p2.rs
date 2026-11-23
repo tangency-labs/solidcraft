@@ -3156,7 +3156,7 @@ fn edge_zone_kernel(k: &Kernel, tol: f64) -> Kernel {
         },
         ..crate::kernel::KernelOptions::default()
     });
-    tk.rng = k.rng.clone();
+    tk.seed = k.seed;
     tk.cancel.clone_from(&k.cancel);
     tk.fixes.bspline_trim_preserves_uv_spans = k.fixes.bspline_trim_preserves_uv_spans;
     tk
@@ -3291,8 +3291,13 @@ pub fn find_rollover_side_edge<O: ClassObject>(
 
             // Check whether the side edge we hit is a tangent edge, and whether it's
             // convex.
-            let (tangent, opposite) =
-                test_manifold_tangent_rollover(k, b, side_edge, tangency_tol_rad)?;
+            let (tangent, opposite) = super::p1::test_manifold_tangent_rollover_at(
+                k,
+                b,
+                side_edge,
+                end_pc.t_param(),
+                tangency_tol_rad,
+            )?;
             io.is_tangential_side_edge = tangent;
             io.opposite_normals = opposite;
             let convex_side_edge =
@@ -3433,8 +3438,13 @@ pub fn find_rollover_side_edge<O: ClassObject>(
         let side_edge = edge_object(&ivl.start, edge_of)?;
 
         // Check whether the side edge we hit is tangent, or concave/convex.
-        let (tangent, opposite) =
-            test_manifold_tangent_rollover(k, b, side_edge, tangency_tol_rad)?;
+        let (tangent, opposite) = super::p1::test_manifold_tangent_rollover_at(
+            k,
+            b,
+            side_edge,
+            start_pc.t_param(),
+            tangency_tol_rad,
+        )?;
         io.is_tangential_side_edge = tangent;
         io.opposite_normals = opposite;
         let convex_side_edge =
