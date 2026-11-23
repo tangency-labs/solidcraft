@@ -18,18 +18,21 @@ const PARAMS: &str = "refs: 1-3 refs in any order; with?: {the method's other pa
 
 pub static COMMANDS: &[CommandSpec] = &[
     CommandSpec::new("construct.plane", "Plane", crate::checked!("construct.plane", plane))
+        .begins_edit()
         .at("SOLID", "CONSTRUCT")
         .icon("plane_auto")
         .contract(&CONTRACT)
         .output(output_schema_for::<ConstructAutoResult>)
         .params(PARAMS),
     CommandSpec::new("construct.axis", "Axis", crate::checked!("construct.axis", axis))
+        .begins_edit()
         .at("SOLID", "CONSTRUCT")
         .icon("axis")
         .contract(&CONTRACT)
         .output(output_schema_for::<ConstructAutoResult>)
         .params(PARAMS),
     CommandSpec::new("construct.point", "Point", crate::checked!("construct.point", point))
+        .begins_edit()
         .at("SOLID", "CONSTRUCT")
         .icon("point")
         .contract(&CONTRACT)

@@ -110,6 +110,11 @@ pub(crate) fn permission_lines(plugin: &Value) -> Vec<String> {
         let extensions = opens.iter().map(|e| std::format!(".{e}")).collect::<Vec<_>>().join(", ");
         lines.push(format("plugin_install.opens", &[("extensions", &extensions)]));
     }
+    let writes = list(plugin.get("writes"));
+    if !writes.is_empty() {
+        let extensions = writes.iter().map(|e| std::format!(".{e}")).collect::<Vec<_>>().join(", ");
+        lines.push(format("plugin_install.writes", &[("extensions", &extensions)]));
+    }
     if permissions.and_then(|p| p.get("input_folder")).and_then(Value::as_bool).unwrap_or(false) {
         lines.push(tr("plugin_install.input_folder").to_string());
     }

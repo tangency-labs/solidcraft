@@ -212,6 +212,24 @@ fn a_hole_at_a_slant_in_a_plate_over_a_metre_long_is_cut_as_its_shadow() {
     assert!((exact_volume(&s) - want).abs() < 1e-3 * hole * T, "{} vs {want}", exact_volume(&s));
 }
 
+/// A notch 0.48 square and 0.5 deep cut into the long edge of a base flange 1000 x 200 x 1, from
+/// its top face (#20769): a pocket open at the edge, 0.48 x 0.24 of it on the plate, and the
+/// sheet loses 0.48 · 0.24 · 0.5 = 0.0576 mm³, as a plain plate does.
+#[test]
+fn a_small_notch_cut_into_a_large_base_flanges_edge_is_a_pocket() {
+    let mut s = session();
+    rule(&mut s, "Stock", 1.0, 0.44, 1.0, 0.5);
+    run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Base"}));
+    run(&mut s, "sketch.rectangle.two_point", json!({"p0": [-500, -100], "p1": [500, 100]}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "sheet.flange", json!({"sketch": "Base", "body_name": "Plate"}));
+    let notch = json!({"length": 0.48, "width": 0.48, "height": 0.5, "corner": [-0.24, 99.76, 0.5], "operation": "cut", "targets": ["Plate"]});
+    run(&mut s, "solid.box", notch);
+    let want = 1000.0 * 200.0 * 1.0 - 0.48 * 0.24 * 0.5;
+    assert!((exact_volume(&s) - want).abs() < 1e-9 * want, "{} vs {want}", exact_volume(&s));
+    assert_eq!(pockets(&mut s).len(), 1, "{:?}", pockets(&mut s));
+}
+
 /// A 100 x 60 base flange on XY of the default rule (T 2.5), its metal z 0 to 2.5:
 /// 100 · 60 · 2.5 = 15000 mm³.
 fn default_plate() -> Session {
