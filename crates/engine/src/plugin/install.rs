@@ -113,6 +113,16 @@ pub fn from_files(files: Vec<safe_zip::File>, archive: String) -> Result<Unpacke
         crate::EngineError::Plugin(e) => InstallError::Manifest(e),
         e => InstallError::Manifest(HostError::InvalidManifest { field: "manifest".into(), reason: e.to_string() }),
     })?;
+    // An install may ask for approval above the user's default, never above this hard ceiling.
+    if let Some(runtime) = &manifest.runtime
+        && runtime.limits.fuel > craft_plugin::MAX_APPROVED_FUEL
+    {
+        return Err(InstallError::Manifest(HostError::OverCeiling {
+            limit: "fuel".into(),
+            requested: runtime.limits.fuel,
+            allowed: craft_plugin::MAX_APPROVED_FUEL,
+        }));
+    }
     if let Some(runtime) = &manifest.runtime
         && !files.iter().any(|f| f.path == runtime.module)
     {

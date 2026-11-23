@@ -287,6 +287,22 @@ fn boundaries(curves: &[LCurve], pts: &[Vec2]) -> Option<Vec<Boundary>> {
     Some(out)
 }
 
+/// Whether more than two curves end at one point of the layout: loops of the boundary touch
+/// there (two inner outlines of a face that meet at a corner, #20619).
+pub(super) fn meets_at_corner(curves: &[LCurve], points: usize) -> bool {
+    let mut ends = vec![0usize; points];
+    for curve in curves {
+        if let LCurve::Line(a, b) | LCurve::Arc(_, a, b) = *curve {
+            for p in [a, b] {
+                if let Some(n) = ends.get_mut(p) {
+                    *n += 1;
+                }
+            }
+        }
+    }
+    ends.iter().any(|n| *n > 2)
+}
+
 pub(super) fn valid(curves: &[LCurve], points: &[Vec2]) -> bool {
     boundaries(curves, points).is_some()
 }

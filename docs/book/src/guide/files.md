@@ -49,7 +49,9 @@ Opening a STEP, IGES, FreeCAD or Rhino file creates a design with the file's bod
 inserting one adds them to the current design. Later features build on them. A FreeCAD file's
 sketches and features are rebuilt as SolidCraft features instead, so its dimensions can be edited;
 when one cannot be, its bodies come in as a base feature and a warning says why (Preferences ›
-General › FreeCAD files turns the rebuild off). Mesh bodies render,
+General › FreeCAD files turns the rebuild off). Preferences › General › Import with cadmpeg (off
+by default) reads STEP, IGES, FreeCAD and Rhino files with cadmpeg straight into B-rep instead of
+through SolidCraft's own STEP and IGES readers, to compare the two. Mesh bodies render,
 measure, move and export, but solid features need B-rep bodies.
 
 The stand-up offer for STEP and IGES files remembers your answer for unchanged files; Preferences › Design lets you turn this memory off or forget all remembered answers.
