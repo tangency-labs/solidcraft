@@ -1628,11 +1628,13 @@ pub(crate) mod param_rows_tests {
             vals.get(n).and_then(|v| v.to_kind(k).ok()).map(|x| if k == Kind::Angle { x.to_degrees() } else { x }).map(expr::round_reported)
         };
         let unified = |n: &str| vals.get(n).map(|v| expr::round_reported(expr::reported_value(*v)));
+        let driven = doc.driven_params();
         let mut rows = Vec::new();
         for p in &doc.params {
+            let measured = driven.get(&p.name).filter(|_| p.model);
             rows.push(ParamRow {
                 name: p.name.clone(),
-                expression: p.expr.clone(),
+                expression: measured.map(|d| doc.measured_text(d.value)).unwrap_or_else(|| p.expr.clone()),
                 unit: p.unit.clone(),
                 value: unified(&p.name),
                 display_value: doc.param_display_value(&vals, &p.name).map(expr::round_reported),
@@ -1645,6 +1647,7 @@ pub(crate) mod param_rows_tests {
                 uses: refs.get(&p.name).cloned().unwrap_or_default(),
                 used_by: used_by(&p.name),
                 text: None,
+                driven: measured.is_some(),
             });
         }
         for f in &doc.features {
@@ -1667,6 +1670,7 @@ pub(crate) mod param_rows_tests {
                     uses: refs.get(name).cloned().unwrap_or_default(),
                     used_by: used_by(name),
                     text: None,
+                    driven: false,
                 });
             }
         }
@@ -1699,6 +1703,7 @@ pub(crate) mod param_rows_tests {
                 uses: Vec::new(),
                 used_by: readers.iter().filter_map(|id| doc.feature(*id)).map(|f| format!("Feature:{}", f.name)).collect(),
                 text: Some(p.text.clone()),
+                driven: false,
             });
         }
         rows

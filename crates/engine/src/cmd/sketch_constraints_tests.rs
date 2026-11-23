@@ -2249,6 +2249,33 @@ fn a_dimension_cannot_depend_on_itself_through_a_driven_one() {
     assert!((line_length(&s, "lb") - 10.0).abs() < 1e-6);
 }
 
+/// #5582: a feature that uses a driven dimension of a sketch that failed fails too, naming the
+/// sketch: it never builds from the value the design stored before the failure.
+#[test]
+fn a_feature_using_a_driven_dimension_of_a_failed_sketch_fails_naming_it() {
+    let mut s = Session::default();
+    run(&mut s, "sketch.create", json!({"plane": "XY", "name": "S"}));
+    run(&mut s, "sketch.rectangle.two_point", json!({"p0": [0, 0], "p1": [10, 10]}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.extrude", json!({"sketch": "S", "distance": 5, "name": "Block"}));
+    run(&mut s, "sketch.create", json!({"plane": {"face": [5, 5, 5]}, "name": "Top"}));
+    run(&mut s, "sketch.line", json!({"points": [[0, 0], [6, 0]], "ids": ["lt"], "infer": false}));
+    let driven = run(&mut s, "sketch.dimension", json!({"entities": ["lt.start", "lt.end"], "driven": true}));
+    let name = driven["param"].as_str().expect("a driven dimension has a name").to_string();
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": name.as_str(), "name": "Post"}));
+    assert!(s.model.results.iter().all(|r| r.error.is_none()), "{:?}", s.model.results);
+    // Without the block, the sketch on its face fails, and so does the box that reads its dimension.
+    run(&mut s, "timeline.suppress", json!({"feature": "Block", "suppressed": true}));
+    let error = |feature: &str| {
+        let id = s.doc.features.iter().find(|f| f.name == feature).map(|f| f.id).unwrap();
+        s.model.results.iter().find(|r| r.id == id).and_then(|r| r.error.clone())
+    };
+    assert!(error("Top").is_some(), "the sketch on the suppressed block's face fails");
+    let post = error("Post").expect("the box can't build from the stale value");
+    assert!(post.contains("sketch `Top` failed") && post.contains(&name), "{post}");
+}
+
 /// #5582: a feature that comes before a driven dimension's sketch can't use it (it would read a
 /// value worked out later in the timeline): refused, naming the sketch.
 #[test]

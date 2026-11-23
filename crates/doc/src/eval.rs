@@ -4579,6 +4579,9 @@ impl Model {
                 // A driven dimension of a sketch after it: never cached either (it depends on where
                 // the sketch is in the timeline).
                 let failed_sketch = failed_sketch.or_else(|| driven.as_ref().and_then(|index| index.order_problem(doc, i)));
+                // A driven dimension of a sketch that failed: what it measures is unknown, and the
+                // value the design stored would build the feature from an old measurement.
+                let failed_sketch = failed_sketch.or_else(|| driven.as_ref().and_then(|index| index.failed_source(doc, i, |id| failed.get(&id))));
                 if let Some(e) = failed_sketch {
                     recomputed += 1;
                     reuse = false;

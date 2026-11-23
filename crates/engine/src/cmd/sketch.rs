@@ -4444,13 +4444,18 @@ fn dimension_result(s: &mut Session, p: &Value) -> Result<DimensionResult> {
         let is_angle = k.is_angle();
         if driven {
             // A reference dimension measures. Its parameter is read-only: expressions can use
-            // what it measures (#5582).
+            // what it measures (#5582). On a drawing's sheet it has none: a sheet sketch never
+            // adds to the design's parameters.
             let name = k.name();
-            let pname = doc.new_model_param(
-                &doc.measured_text(if is_angle { solidcraft_doc::expr::Value::angle(cur) } else { solidcraft_doc::expr::Value::length(cur) }),
-                &if is_angle { "deg".to_string() } else { solidcraft_doc::expr::length_unit_or_mm(&doc.units).to_string() },
-            );
-            let id = sk.add_constraint(k, Some(pname.clone()))?;
+            let pname = if on_sheet {
+                String::new()
+            } else {
+                doc.new_model_param(
+                    &doc.measured_text(if is_angle { solidcraft_doc::expr::Value::angle(cur) } else { solidcraft_doc::expr::Value::length(cur) }),
+                    &if is_angle { "deg".to_string() } else { solidcraft_doc::expr::length_unit_or_mm(&doc.units).to_string() },
+                )
+            };
+            let id = sk.add_constraint(k, (!on_sheet).then(|| pname.clone()))?;
             new_id = id.clone();
             place_text(sk, &id, text_at);
             if let Some(c) = sk.constraints.iter_mut().find(|c| c.id == id) {
@@ -4578,7 +4583,7 @@ fn dimension_result(s: &mut Session, p: &Value) -> Result<DimensionResult> {
     if driven {
         return Ok(DimensionResult {
             constraint: None,
-            param: Some(param),
+            param: (!on_sheet).then_some(param),
             driven: Some(true),
             kind: kind_name.to_string(),
             expression: None,

@@ -27,9 +27,11 @@ A **driven** (reference) dimension has a model parameter too. Its value is what 
 measures once its sketch is solved, and nothing can set it: **Parameters** lists it read-only
 in its sketch's group, and double-clicking the dimension shows its name. Any expression can
 use the name, such as `d7 / 2`, and follows the measured value as the sketch changes. A
-feature that comes before the driven dimension's sketch in the timeline can't use it. A
-dimension of the same sketch can, unless the driven dimension measures geometry that this
-dimension moves: then the dimension would depend on itself, and the change is refused.
+feature that comes before the driven dimension's sketch in the timeline can't use it, and a
+feature that uses it fails when its sketch fails. A dimension of the same sketch can, unless
+the driven dimension measures geometry that this dimension moves: then the dimension would
+depend on itself, and the change is refused. The sketch's other expressions (points placed by
+expressions, patterns, texts and equation curves) can't use it.
 
 ## Naming a value as you type it
 

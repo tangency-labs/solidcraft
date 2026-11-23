@@ -101,6 +101,19 @@ impl DrivenIndex {
             "`{later}` is a {MARK} of sketch `{sketch}`, which comes later in the timeline: only features after that sketch can use its value"
         ))
     }
+
+    /// Why feature `at` cannot build when a driven dimension it uses belongs to a sketch that
+    /// failed in this evaluation (`failed` gives the sketch's name and error by feature id): its
+    /// value was not measured, and the one the design stored would be stale.
+    pub fn failed_source<'a>(&self, doc: &Document, at: usize, failed: impl Fn(u64) -> Option<&'a (String, String)>) -> Option<String> {
+        let f = doc.features.get(at)?;
+        let names = param_names(f);
+        self.reached(names.iter().map(String::as_str)).into_iter().find_map(|n| {
+            let d = self.driven.get(&n).filter(|d| d.feature != f.id)?;
+            let (sketch, e) = failed(d.feature)?;
+            Some(format!("sketch `{sketch}` failed: {e} (`{n}` is a {MARK} of it, so it has no value)"))
+        })
+    }
 }
 
 impl Document {
