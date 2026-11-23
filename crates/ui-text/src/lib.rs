@@ -136,29 +136,25 @@ pub fn is_supported(id: &str) -> bool {
 /// resolves through [`system_language`] wherever a catalog is needed.
 pub const SYSTEM: &str = "system";
 
+/// Catalogs that are only used when chosen in the preferences, never from the system's language:
+/// Serbian in Latin script, so a system set to `sr-Latn-RS` keeps the Cyrillic `sr` it always had.
+const CHOSEN_BY_HAND: &[&str] = &["sr-Latn"];
+
 /// Match the system's preferred locale tags against the catalogs: the exact tag first
-/// (`zh-TW`, `pt-BR`, `en-GB`), then the tag's language and script (`sr-Latn-RS` → `sr-Latn`),
-/// then the tag's base language (`zh-CN` → `zh`, `de-AT` → `de`),
+/// (`zh-TW`, `pt-BR`, `en-GB`), then the tag's base language (`zh-CN` → `zh`, `de-AT` → `de`),
 /// then English. A Chinese tag goes by its script or region instead ([`chinese_catalog`]).
 /// Tags come in the system's order of preference; the first one that matches wins.
+/// A catalog in [`CHOSEN_BY_HAND`] is never picked from the system's tags.
 pub fn match_system_tags(tags: &[String]) -> &'static str {
     for tag in tags {
         let tag = tag.replace('_', "-");
         if let Some(catalog) = chinese_catalog(&tag) {
             return catalog;
         }
-        if let Some(catalog) = locales().iter().find(|catalog| catalog.id.eq_ignore_ascii_case(&tag)) {
+        if let Some(catalog) = locales().iter().find(|catalog| catalog.id.eq_ignore_ascii_case(&tag) && !CHOSEN_BY_HAND.contains(&catalog.id)) {
             return catalog.id;
         }
-        let mut parts = tag.split('-');
-        let base = parts.next().unwrap_or(&tag);
-        // A script subtag picks the catalog written in it (`sr-Latn-RS` → `sr-Latn`).
-        if let Some(script) = parts.next().filter(|part| part.len() == 4) {
-            let scripted = format!("{base}-{script}");
-            if let Some(catalog) = locales().iter().find(|catalog| catalog.id.eq_ignore_ascii_case(&scripted)) {
-                return catalog.id;
-            }
-        }
+        let base = tag.split('-').next().unwrap_or(&tag);
         if let Some(catalog) = locales().iter().find(|catalog| catalog.id.eq_ignore_ascii_case(base)) {
             return catalog.id;
         }

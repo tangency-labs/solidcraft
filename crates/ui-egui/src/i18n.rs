@@ -310,12 +310,11 @@ mod tests {
             assert_eq!(match_system_tags(&tags(&[tag])), want, "{tag}");
         }
         // Other languages keep the exact tag, then the base language.
-        // A script given in the tag picks the catalog in that script (Serbian in Latin script).
-        assert_eq!(match_system_tags(&tags(&["sr-Latn-RS"])), "sr-Latn");
-        assert_eq!(match_system_tags(&tags(&["sr_Latn"])), "sr-Latn");
-        assert_eq!(match_system_tags(&tags(&["sr-Cyrl-RS"])), "sr");
-        assert_eq!(match_system_tags(&tags(&["sr-RS"])), "sr");
-        assert_eq!(match_system_tags(&tags(&["bs-Latn-BA"])), "bs", "a script without its own catalog falls back to the base language");
+        // Serbian in Latin script is only used when chosen by hand: every Serbian system tag,
+        // with or without a script, keeps Cyrillic, as before sr-Latn existed.
+        for tag in ["sr-Latn-RS", "sr_Latn", "sr-Latn", "sr-Cyrl-RS", "sr-RS"] {
+            assert_eq!(match_system_tags(&tags(&[tag])), "sr", "{tag}");
+        }
         assert_eq!(match_system_tags(&tags(&["zhx-TW", "de"])), "de", "only zh itself is Chinese");
     }
 
