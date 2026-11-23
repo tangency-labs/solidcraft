@@ -4,7 +4,7 @@ use cap_std::fs::OpenOptionsExt;
 use cap_std::fs::{Dir, OpenOptions};
 use craft_plugin::{
     CommandSchema, Effect, HostError, Limits, LossReport, MAX_EXPORT_FILE_BYTES, MAX_IMPORT_CHUNK_BYTES, MAX_IMPORT_DESIGN_BYTES,
-    MAX_IMPORT_INPUT_BYTES, MAX_JSON_BYTES, Manifest, PluginHost, Result,
+    MAX_IMPORT_INPUT_BYTES, MAX_JOB_CALLS, MAX_JSON_BYTES, Manifest, PluginHost, Result,
 };
 use serde_json::Value;
 use std::collections::{BTreeMap, BTreeSet};
@@ -120,14 +120,14 @@ fn wait_prefix<T>(reply: &mpsc::Receiver<Result<T>>, end: Instant) -> Result<T> 
 fn limit(name: &str) -> HostError {
     HostError::LimitExceeded { limit: name.into() }
 }
-/// The deadline passed. [`with_limits`] fills in the manifest's number.
+/// The deadline passed. [`with_limits`] fills in the enforced deadline.
 fn deadline() -> HostError {
     HostError::Exhausted { limit: "deadline_ms".into(), allowed: 0 }
 }
 /// Fills in the budget a [`deadline`] or other placeholder left out, once the call is over.
-fn with_limits(error: HostError, limits: &Limits) -> HostError {
+fn with_limits(error: HostError, deadline_ms: u64) -> HostError {
     match error {
-        HostError::Exhausted { limit, allowed: 0 } if limit == "deadline_ms" => HostError::Exhausted { limit, allowed: limits.deadline_ms },
+        HostError::Exhausted { limit, allowed: 0 } if limit == "deadline_ms" => HostError::Exhausted { limit, allowed: deadline_ms },
         error => error,
     }
 }
@@ -1063,8 +1063,21 @@ fn run_mode<H: PluginHost + 'static>(
         .iter()
         .any(|c| c.split_once('@').is_some_and(|(name, version)| name == "forms" && craft_plugin::capability_version(version) == Some((0, 1))));
     let user_storage = granted_capabilities.iter().any(|c| c.starts_with("user-storage@"));
-    let (mut state, outcome) =
-        execute(host, runtime, entry, params, event, compiled, commands, (folders, input_folders), granted_capabilities, forms, user_storage, dialog);
+    let (mut state, outcome) = execute(
+        host,
+        runtime,
+        entry,
+        params,
+        event,
+        compiled,
+        commands,
+        (folders, input_folders),
+        options,
+        granted_capabilities,
+        forms,
+        user_storage,
+        dialog,
+    );
     let result = (|| match outcome {
         Ok(value) => match state.host.commit_transaction() {
             Ok(()) => match state.publish_writes() {
@@ -1102,12 +1115,15 @@ fn execute<H: PluginHost + 'static>(
     (engine, component, stack): (Engine, Component, usize),
     (commands, groups, design_tokens): (BTreeMap<String, CommandSchema>, BTreeSet<String>, bool),
     (folders, input_folders): (BTreeMap<String, Folder>, BTreeMap<String, Folder>),
+    options: RuntimeOptions,
     granted_capabilities: Vec<String>,
     forms: bool,
     user_storage: bool,
     dialog: bool,
 ) -> (State<H>, Result<Value>) {
     let limits = &runtime.limits;
+    // A long job runs for its fixed deadline, and reports its progress as often as it likes.
+    let (deadline_ms, max_calls) = if entry.job { (options.job_deadline_ms, MAX_JOB_CALLS) } else { (limits.deadline_ms, MAX_CALLS) };
     let state = State {
         host,
         commands,
@@ -1126,9 +1142,9 @@ fn execute<H: PluginHost + 'static>(
         forms: forms && !dialog,
         failed: None,
         calls: 0,
-        max_calls: MAX_CALLS,
+        max_calls,
         log_bytes: 0,
-        deadline: Instant::now() + Duration::from_millis(limits.deadline_ms),
+        deadline: Instant::now() + Duration::from_millis(deadline_ms),
         limits: store_limits(limits, 10_000),
         import: None,
         panels: None,
@@ -1205,7 +1221,7 @@ fn execute<H: PluginHost + 'static>(
     // Fuel can run out between epoch ticks. If a hook has also crossed its deadline, report
     // the typed timeout even when the fuel trap was the first opportunity to stop it.
     let expired = dialog && Instant::now() >= store.data().deadline;
-    (store.into_data(), outcome.map_err(|error| with_limits(if expired { deadline() } else { error }, limits)))
+    (store.into_data(), outcome.map_err(|error| with_limits(if expired { deadline() } else { error }, deadline_ms)))
 }
 
 fn store_limits(limits: &Limits, table_elements: usize) -> StoreLimits {
@@ -1636,7 +1652,7 @@ fn run_import_or_dialog<H: PluginHost + 'static>(
         };
         let (dir, size, prefix) = if let Some(end) = dialog_deadline {
             let reply = start_prefix_read(PREFIX_READS.get_or_init(|| Arc::new(AtomicUsize::new(0))).clone(), open)?;
-            wait_prefix(&reply, end).map_err(|e| with_limits(e, &runtime.limits))?
+            wait_prefix(&reply, end).map_err(|e| with_limits(e, runtime.limits.deadline_ms))?
         } else {
             open()?
         };
@@ -1764,7 +1780,7 @@ fn run_import_or_dialog<H: PluginHost + 'static>(
         Ok(output) if dialog && user_storage => state.host.rollback_transaction().map(|()| output),
         outcome => outcome,
     };
-    (state.host, outcome.map_err(|error| with_limits(error, limits)))
+    (state.host, outcome.map_err(|error| with_limits(error, limits.deadline_ms)))
 }
 
 /// Runs an export slot in a fresh instance. The plugin reads the design only through the
@@ -1877,7 +1893,7 @@ pub(super) fn run_export<H: PluginHost + 'static>(
     // An export never changes the app: what its commands did is always thrown away.
     let rolled_back = state.host.rollback_transaction();
     let outcome = rolled_back.and(outcome);
-    (state.host, outcome.map_err(|error| with_limits(error, limits)))
+    (state.host, outcome.map_err(|error| with_limits(error, limits.deadline_ms)))
 }
 
 #[cfg(test)]

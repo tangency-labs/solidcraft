@@ -2725,6 +2725,30 @@ mod native {
         assert!(s.doc.plugin_data.contains_key("other/data.json"));
     }
     #[test]
+    fn cancelling_a_long_job_changes_nothing() {
+        let f = Fixture::new("call $box (loop br 0)");
+        let mut m = manifest();
+        m["runtime"]["entries"] = json!([{"name":"make","job":true}]);
+        m["runtime"]["limits"]["fuel"] = json!(u64::MAX / 2);
+        std::fs::write(f.0.join("sample/plugin.json"), m.to_string()).unwrap();
+        let mut s = Session::default();
+        s.plugin_limits.max_fuel = u64::MAX;
+        let before = s.doc.to_json();
+        // Cancelled from the operations panel (its watch), it stops and nothing of it lands. The
+        // job's own deadline is tested in the runtime crate.
+        let progress = std::sync::Arc::new(solidcraft_doc::progress::Progress::default());
+        let stop = progress.clone();
+        let canceller = std::thread::spawn(move || {
+            std::thread::sleep(std::time::Duration::from_millis(300));
+            stop.cancel();
+        });
+        let failure = solidcraft_doc::progress::watch(progress, || f.run(&mut s)).unwrap_err().to_string();
+        canceller.join().unwrap();
+        assert!(failure.contains("cancelled"), "{failure}");
+        assert_eq!((s.doc.to_json(), s.undo.len()), (before, 0));
+    }
+
+    #[test]
     fn named_calls_preserve_input_pass_through() {
         let f = Fixture::new("i32.const 0 i32.const 0 i32.store i32.const 4 local.get 2 i32.store i32.const 8 local.get 3 i32.store");
         let mut m = manifest();
