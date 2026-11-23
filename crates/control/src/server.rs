@@ -685,8 +685,8 @@ impl Drop for Seat {
     }
 }
 
-/// A connection's `control.subscribe` (#6985): its `design.changed` lines, sent from a thread of
-/// their own until the connection ends.
+/// A connection's `control.subscribe` (#6985): its events and `design.changed` lines, sent from a
+/// thread of their own until the connection ends.
 struct Subscription {
     lines: Arc<Lines>,
     stop: Arc<AtomicBool>,
@@ -707,6 +707,7 @@ impl Subscription {
     ) -> Option<(Self, std::io::Result<()>)> {
         let lines = Arc::new(Lines { socket: out.try_clone().ok()?, turn: Mutex::new(()) });
         let stop = Arc::new(AtomicBool::new(false));
+        let from = counted.from();
         let seat = Arc::new(Seat::new(counted));
         let first = lines.turn.lock().unwrap_or_else(PoisonError::into_inner);
         let (l, s, watch_seat) = (lines.clone(), stop.clone(), Arc::clone(&seat));
@@ -714,7 +715,7 @@ impl Subscription {
         // does, so the next failed write to a closed client retires it even while the connection's
         // own thread is slow to see the end of the stream (#7226). The connection's own thread
         // leaves it too, so a closed connection stops counting at once (#8315).
-        std::thread::Builder::new().stack_size(64 * 1024).spawn(move || send_events(watch, event, &l, &s, seen, watch_seat)).ok()?;
+        std::thread::Builder::new().stack_size(64 * 1024).spawn(move || send_events(watch, event, &l, &s, seen, from, watch_seat)).ok()?;
         let sent = send(&mut &lines.socket, reply);
         drop(first);
         Some((Subscription { lines, stop, seat }, sent))
@@ -739,13 +740,25 @@ impl Drop for Subscription {
     }
 }
 
-/// The `design.changed` lines of a subscribed connection, each time the design differs from the
-/// last one it was told of (`seen`), until `stop`. Holds the connection's seat on the watch
-/// (`seat`), which it leaves when the thread ends: on `stop`, or on the first write a closed
-/// client refuses (#7226).
-fn send_events(watch: &DocumentWatch, event: &str, lines: &Lines, stop: &AtomicBool, mut seen: (String, u64), seat: Arc<Seat>) {
-    while !stop.load(Ordering::Relaxed) {
-        let Some(now) = watch.wait(&seen, stop, Duration::from_secs(1)).filter(|now| *now != seen) else { continue };
+/// The events of a subscribed connection, until `stop`. From `cursor` (the subscriber's first
+/// posted event), each round sends `events.dropped` if the connection fell behind the watch's
+/// bound, then the one-off events posted since, in order; then the `design.changed` line if the
+/// design differs from the last one the connection was told of (`seen`), after those events. Holds
+/// the connection's seat on the watch (`seat`), which it leaves when the thread ends: on `stop`, or
+/// on the first write a closed client refuses (#7226).
+fn send_events(watch: &DocumentWatch, event: &str, lines: &Lines, stop: &AtomicBool, mut seen: (String, u64), mut cursor: u64, seat: Arc<Seat>) {
+    'events: while !stop.load(Ordering::Relaxed) {
+        let n = watch.next(&seen, cursor, stop, Duration::from_secs(1));
+        cursor = n.cursor;
+        if n.dropped > 0 && lines.send(&json!({"event": "events.dropped", "params": {"count": n.dropped}})).is_err() {
+            break;
+        }
+        for posted in &n.events {
+            if lines.send(posted).is_err() {
+                break 'events;
+            }
+        }
+        let Some(now) = n.design.filter(|now| *now != seen) else { continue };
         if lines.send(&json!({"event": event, "params": {"document_id": now.0, "revision": now.1}})).is_err() {
             break;
         }
@@ -1377,6 +1390,77 @@ mod tests {
             std::thread::sleep(Duration::from_millis(20));
         }
         assert!(!WATCH.subscribed());
+    }
+
+    /// The one-off events a window posts (`DocumentWatch::post`): a subscribed connection gets them
+    /// in order after the subscribe reply, ahead of the `design.changed` line of the same moment;
+    /// a connection that subscribes later gets none of the events posted before it joined.
+    #[test]
+    fn subscribed_connections_are_sent_posted_events_in_order() {
+        static WATCH: DocumentWatch = DocumentWatch::new();
+        let token = "0123456789abcdef0123456789abcdef";
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = listener.local_addr().unwrap();
+        let (tx, rx) = channel::<ControlRequest>();
+        // The window: a subscribe that asks for it posts an event before its reply, as the app
+        // does when a design opens; the reply names the design as it is now.
+        std::thread::spawn(move || {
+            for req in rx {
+                if req.method == "control.subscribe" {
+                    if req.params.get("post").is_some() {
+                        WATCH.post("design.opened", json!({"document_id": "d-1"}));
+                    }
+                    let (document_id, revision) = WATCH.current().unwrap_or_else(|| ("none".to_string(), 0));
+                    let _ = req.reply.send(json!({"ok": true, "result": {"document_id": document_id, "revision": revision}}));
+                } else {
+                    let _ = req.reply.send(json!({"ok": true, "result": req.method}));
+                }
+            }
+        });
+        WATCH.publish("d-1", 3);
+        let hub = hub(Waits::default(), &WATCH);
+        std::thread::spawn(move || {
+            for stream in listener.incoming().flatten() {
+                let (tx, hub) = (tx.clone(), Arc::clone(&hub));
+                std::thread::spawn(move || hub.serve(stream, token, tx, false));
+            }
+        });
+        let open = || {
+            let s = TcpStream::connect(addr).unwrap();
+            s.set_read_timeout(Some(Duration::from_secs(10))).unwrap();
+            (s.try_clone().unwrap(), BufReader::new(s))
+        };
+        let next = |lines: &mut BufReader<TcpStream>| -> Value {
+            let mut l = String::new();
+            lines.read_line(&mut l).unwrap();
+            serde_json::from_str(&l).unwrap()
+        };
+        let event = |name: &str, params: Value| json!({"event": name, "params": params});
+
+        // The reply comes first; the event the window posted while handling the subscribe after it.
+        let (mut first_out, mut first) = open();
+        writeln!(first_out, "{}", json!({"id": 1, "method": "control.subscribe", "token": token, "params": {"post": true}})).unwrap();
+        assert_eq!(next(&mut first), json!({"id": 1, "ok": true, "result": {"document_id": "d-1", "revision": 3}}));
+        assert_eq!(next(&mut first), event("design.opened", json!({"document_id": "d-1"})), "posted while subscribing: after the reply");
+
+        // Later posts come in order, and an event posted in the same moment as a publish comes
+        // before its `design.changed` line.
+        WATCH.post("step", json!({"n": 1}));
+        WATCH.post("step", json!({"n": 2}));
+        WATCH.publish("d-1", 4);
+        assert_eq!(next(&mut first), event("step", json!({"n": 1})));
+        assert_eq!(next(&mut first), event("step", json!({"n": 2})));
+        assert_eq!(next(&mut first), json!({"event": "design.changed", "params": {"document_id": "d-1", "revision": 4}}));
+
+        // A connection that subscribes now is sent nothing posted before it joined.
+        WATCH.post("earlier", json!({"n": 3}));
+        let (mut second_out, mut second) = open();
+        writeln!(second_out, "{}", json!({"id": 1, "method": "control.subscribe", "token": token})).unwrap();
+        assert_eq!(next(&mut second), json!({"id": 1, "ok": true, "result": {"document_id": "d-1", "revision": 4}}));
+        WATCH.post("later", json!({"n": 4}));
+        assert_eq!(next(&mut second), event("later", json!({"n": 4})), "only what was posted after it joined");
+        assert_eq!(next(&mut first), event("earlier", json!({"n": 3})));
+        assert_eq!(next(&mut first), event("later", json!({"n": 4})));
     }
 
     #[test]
