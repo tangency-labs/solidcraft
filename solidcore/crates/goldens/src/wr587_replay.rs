@@ -178,6 +178,12 @@ pub(crate) enum Cert {
     /// but shorter than `SM_EFF_ZERO` (within the double sum's rounding), where `Unitize`
     /// refuses.
     BelowEffZero,
+    /// `SM_ERR_INVALID_INPUT` with `(0, 0, 1)` written: the exact area vector is within the
+    /// kernel's rounding bound of zero, so it has no direction.
+    WithinRounding,
+    /// Success for a closed loop whose area direction is not certain to `1e-6`: the
+    /// direction of the exact area vector within its (larger) bound.
+    UncertainArea,
     /// Success for an open chain whose area direction is not certain: a unit normal of the
     /// plane every sample lies in (each `|n . (p - p0)|` within `2e-6 |p - p0|`, the kernel's
     /// angular zero and its rounding).
@@ -246,6 +252,7 @@ pub(crate) fn certify(k: &Kernel, curves: &[Curve], own: Answer) -> Cert {
     let o = first.to_array();
     let mut exact = [Exact::default(), Exact::default(), Exact::default()];
     let mut abs = [0.0_f64; 3];
+    let mut s_rule = 0.0_f64;
     // component i of a x b is a[j] b[l] - a[l] b[j]
     let axes = [(1, 2), (2, 0), (0, 1)];
     for w in points.windows(2) {
@@ -255,8 +262,12 @@ pub(crate) fn certify(k: &Kernel, curves: &[Curve], own: Answer) -> Cert {
             exact[i].add_product_of_differences(a[l], o[l], b[j], o[j], -1.0);
             abs[i] += ((a[j] - o[j]) * (b[l] - o[l])).abs() + ((a[l] - o[l]) * (b[j] - o[j])).abs();
         }
+        // the kernel's own rounding bound sums `|a - o| |b - o|`
+        s_rule += (w[0] - *first).length() * (w[1] - *first).length();
     }
     let terms = points.len().saturating_sub(1) as f64;
+    // the kernel's `E`, which decides its refusal of an area within its rounding of zero
+    let e_rule = (terms + 8.0) * u * s_rule * 1.01;
     // (`S` is itself rounded: the factor 1.01 covers that many times over)
     let e_kernel = Vec3::new(abs[0], abs[1], abs[2]).length() * (terms + 8.0) * u * 1.01;
     let est = exact.iter().map(Exact::estimate).collect::<Vec<_>>();
@@ -269,32 +280,46 @@ pub(crate) fn certify(k: &Kernel, curves: &[Curve], own: Answer) -> Cert {
             if exact.iter().all(Exact::is_zero) {
                 return Cert::ZeroArea;
             }
+            if len < EFF_ZERO + e_kernel + e_hat {
+                return Cert::BelowEffZero;
+            }
+            // the kernel refuses a rounded area `|A| <= E` (its `E`, `e_rule`); the exact
+            // one is within `e_kernel + e_hat` of it
             assert!(
-                len < EFF_ZERO + e_kernel + e_hat,
-                "refused a loop whose area vector {len:e} is not below EFF_ZERO"
+                len <= e_rule + e_kernel + e_hat,
+                "refused a loop whose area vector {len:e} is not within its rounding of zero"
             );
-            Cert::BelowEffZero
+            Cert::WithinRounding
         }
         Answer::Normal(n) => {
-            let certain = len + e_kernel + e_hat >= EFF_ZERO
-                && len > e_hat
-                && 2.0 * (e_kernel + e_hat) / (len - e_hat) + 16.0 * f64::EPSILON < 1e-6;
-            if !certain || (n - a / len).length() > 1e-6 {
-                return certify_plane(&points, n);
+            let e = e_kernel + e_hat;
+            let bound = 2.0 * e / (len - e_hat) + 16.0 * f64::EPSILON;
+            if len + e >= EFF_ZERO && len > e_hat && bound < 1e-6 {
+                // the bound certifies a direction, not only a unit vector (any two unit
+                // vectors are within 2 of each other): the answer is within 1e-6 of the
+                // exact area normal, so the sense of every `Reversed` call is certified
+                // (the measured largest is 2.3e-12)
+                let dev = (n - a / len).length();
+                if dev <= bound {
+                    return Cert::AreaNormal;
+                }
+                // the kernel's coarser bound may leave it uncertain: then only the plane
+                // normal on the area's side is allowed
+                assert!(
+                    n.dot(a) > 0.0,
+                    "normal {n:?} is {dev:e} off the area normal {:?} (bound {bound:e})",
+                    a / len
+                );
+                return certify_plane(&points, n, a, e);
             }
+            let (first, last) = (points[0], points[points.len() - 1]);
+            if !first.approx_eq(last) {
+                return certify_plane(&points, n, a, e);
+            }
+            // a closed loop keeps its area's direction, which has one
             assert!(
-                len + e_kernel + e_hat >= EFF_ZERO,
-                "a success below EFF_ZERO"
-            );
-            assert!(len > e_hat, "a success of no certain direction");
-            let bound = 2.0 * (e_kernel + e_hat) / (len - e_hat) + 16.0 * f64::EPSILON;
-            // the bound must certify a direction, not only a unit vector (any two unit
-            // vectors are within 2 of each other): with it below 1e-6 the answer is
-            // within 1e-6 of the exact area normal, so the sense of every `Reversed`
-            // call is certified (the measured largest is 2.3e-12)
-            assert!(
-                bound < 1e-6,
-                "a success whose direction the bound does not certify ({bound:e})"
+                len + e_kernel + e_hat > e_rule && len > e_hat,
+                "a success of no direction"
             );
             let dev = (n - a / len).length();
             assert!(
@@ -302,21 +327,22 @@ pub(crate) fn certify(k: &Kernel, curves: &[Curve], own: Answer) -> Cert {
                 "normal {n:?} is {dev:e} off the area normal {:?} (bound {bound:e})",
                 a / len
             );
-            Cert::AreaNormal
+            Cert::UncertainArea
         }
     }
 }
 
-/// Certifies a success for samples whose area direction is not certain: the chain is open
-/// (its last sample not `approx_eq` its first) and `n` is a unit normal of the plane of
-/// every sample, `|n . (p - p0)| <= 2e-6 |p - p0|` (the kernel's angular zero, 1.75e-6,
-/// and rounding). Its sense is the tie-break the kernel
-/// documents (the chain's turns); it is classed against main's answer by the moves.
-fn certify_plane(points: &[Vec3], n: Vec3) -> Cert {
+/// Certifies a success for an open chain whose area direction is not certain: `n` is a
+/// unit normal of the plane of every sample, `|n . (p - p0)| <= 2e-6 |p - p0|` (the
+/// kernel's angular zero, 1.75e-6, and rounding), on the side of the exact area vector
+/// `a` when `|a . n|` exceeds its error `e` (a few `u` of `|a|` covering `n`'s rounding);
+/// else its sense is the kernel's documented tie-break (the chain's turns), classed
+/// against main's answer by the moves.
+fn certify_plane(points: &[Vec3], n: Vec3, a: Vec3, e: f64) -> Cert {
     let (first, last) = (points[0], points[points.len() - 1]);
     assert!(
         !first.approx_eq(last),
-        "a closed loop of no certain area has no normal"
+        "a closed loop of no certain area has no plane normal"
     );
     assert!(
         (n.length() - 1.0).abs() < 1e-12,
@@ -327,6 +353,13 @@ fn certify_plane(points: &[Vec3], n: Vec3) -> Cert {
         assert!(
             n.dot(d).abs() <= 2e-6 * d.length(),
             "the plane normal {n:?} is not normal to {d:?}"
+        );
+    }
+    let along = n.dot(a);
+    if along.abs() > e + 8.0 * f64::EPSILON * a.length() {
+        assert!(
+            along > 0.0,
+            "the plane normal {n:?} is against the area {a:?}"
         );
     }
     Cert::PlaneNormal
@@ -560,4 +593,62 @@ fn every_moved_row_moved_only_through_the_loop_normal() {
     assert_eq!(got, EXPECTED);
     let total: usize = tally.values().map(|v| v.0).sum();
     assert_eq!(total, rows.values().map(BTreeMap::len).sum::<usize>());
+}
+
+/// The polyline through `points` as line segments (B-splines with two control points).
+fn polyline(points: &[[f64; 3]]) -> Vec<Curve> {
+    points
+        .windows(2)
+        .map(|w| {
+            Curve::from(
+                solidcore::nurbs::b_spline_curve::p1::BSplineCurve::create_line_segment(
+                    3,
+                    Vec3::from_array(w[0]),
+                    Vec3::from_array(w[1]),
+                )
+                .unwrap(),
+            )
+        })
+        .collect()
+}
+
+/// No moved row reaches the plane normal (both rows that did now answer main's normal),
+/// so its certificate is exercised here: the Z path, whose area cancels exactly, at the
+/// origin and tilted, offset and scaled, and the Z path with its end raised (area along
+/// +Z, of no certain direction), certify as plane normals; the reversed answer does not.
+#[test]
+fn plane_normals_of_open_chains_certify() {
+    let k = Kernel::default();
+    let u = Vec3::new(0.3_f64.cos(), 0.3_f64.sin(), 0.0);
+    let v = Vec3::new(
+        -0.3_f64.sin() * 0.7_f64.cos(),
+        0.3_f64.cos() * 0.7_f64.cos(),
+        0.7_f64.sin(),
+    );
+    let mut chains = vec![polyline(&[
+        [0.0, 0.0, 0.0],
+        [1.0, 1.0, 0.0],
+        [2.0, -2.0, 0.0],
+        [2.0, 1e-10, 0.0],
+    ])];
+    for scale in [1.0, 100.0, 1e4] {
+        let off = Vec3::new(123.456, 7.89, -3.21) * scale;
+        let pts: Vec<[f64; 3]> = [[0.0, 0.0], [1.0, 1.0], [2.0, -2.0], [2.0, 0.0]]
+            .iter()
+            .map(|p: &[f64; 2]| (off + (u * p[0] + v * p[1]) * scale).to_array())
+            .collect();
+        chains.push(polyline(&pts));
+    }
+    for curves in &chains {
+        let n = solidcore::curve::curve::p3::compute_crvs_normal(&k, curves).unwrap();
+        assert_eq!(certify(&k, curves, Answer::Normal(n)), Cert::PlaneNormal);
+    }
+    // the raised Z path's area is certainly along +Z: the reversed plane normal fails
+    let reversed = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        certify(&k, &chains[0], Answer::Normal(-Vec3::Z))
+    }));
+    assert!(
+        reversed.is_err(),
+        "a plane normal against the area certifies"
+    );
 }
