@@ -326,6 +326,126 @@ fn ball_through_at(
     Ok(None)
 }
 
+/// Not the fork's (#20314): the radius at which the corner of two constant balls `a` and `b`
+/// that roll on one face, meeting at `corner`, leaves that face: the ball of that radius
+/// touching the face at a point of its boundary (an edge not at the corner, nor blended) and
+/// the other face of each, `a`'s and `b`'s ([`ball_through`] of each through that point,
+/// equal there), the least over the boundary. It is the corner's own contact with the face,
+/// placed on the face's boundary; [`largest_size_on_its_faces`] sizes each rail alone and
+/// skips the side edges at its ends, which this contact runs onto. `None` where the two do not
+/// share a face, or no boundary point holds the two balls as one.
+///
+/// # Errors
+///
+/// Those of [`ball_through`] and the topology lookups.
+pub fn corner_leaves_face(
+    k: &Kernel,
+    target: &Brep,
+    a: &mut SolverObject,
+    b: &mut SolverObject,
+    corner: VertexId,
+) -> Result<Option<f64>> {
+    let faces_of = |s: &SolverObject| -> Result<[Option<FaceId>; 2]> {
+        let mut out = [None, None];
+        for (rail, slot) in out.iter_mut().enumerate() {
+            if let Some(edgeuse) = s.base().edgeuse(rail)? {
+                *slot = eu::face(target, edgeuse)?;
+            }
+        }
+        Ok(out)
+    };
+    let blended_of = |s: &SolverObject| -> Result<Option<EdgeId>> {
+        match s.base().edgeuse(0)? {
+            Some(edgeuse) => eu::edge(target, edgeuse),
+            None => Ok(None),
+        }
+    };
+    let (fa, fb) = (faces_of(a)?, faces_of(b)?);
+    let mut shared = None;
+    for (ra, f) in fa.iter().enumerate() {
+        let Some(f) = f else { continue };
+        if let Some(rb) = fb.iter().position(|g| *g == Some(*f)) {
+            shared = Some((*f, ra, rb));
+            break;
+        }
+    }
+    let Some((face, ra, rb)) = shared else {
+        return Ok(None);
+    };
+    let Some(radius) = a
+        .base()
+        .surface(0)?
+        .map(|s| s.surface.offset_distance().abs())
+    else {
+        return Ok(None);
+    };
+    // the bound is looked for up to twice the blend's own size, as for a rail alone
+    let max = 2.0 * radius;
+    let blended = [blended_of(a)?, blended_of(b)?];
+    let mut found: Option<f64> = None;
+    for e in crate::topology::face::p4::edges(target, face, None, false, None)? {
+        if blended.contains(&Some(e)) {
+            continue;
+        }
+        let p0 = edge::vertex(target, e)?;
+        let p1 = edge::other_vertex(target, e, p0)?;
+        if p0 == Some(corner) || p1 == Some(corner) {
+            continue;
+        }
+        let Some(curve) = edge::evaluation_curve(target, e)? else {
+            continue;
+        };
+        let curve = curve.clone();
+        let ivl = edge::interval(target, e)?;
+        // the two balls through the boundary point at t: their radii's difference and mean
+        let gap =
+            |a: &mut SolverObject, b: &mut SolverObject, t: f64| -> Result<Option<(f64, f64)>> {
+                let q = curve.evaluate_point(k, ivl.evaluate(smos_max(0.0, smos_min(1.0, t))))?;
+                let x = ball_through(k, target, a, ra, q, max, None)?;
+                let y = ball_through(k, target, b, rb, q, max, None)?;
+                Ok(match (x, y) {
+                    (Some((x, _)), Some((y, _))) => Some((x - y, 0.5 * (x + y))),
+                    _ => None,
+                })
+            };
+        let mut previous: Option<(f64, f64)> = None;
+        for j in 0..=STEPS {
+            let t = j as f64 / STEPS as f64;
+            let here = gap(a, b, t)?.map(|(d, _)| (t, d));
+            if let (Some((t0, d0)), Some((t1, d1))) = (previous, here) {
+                if d0 == 0.0 || d0.signum() != d1.signum() {
+                    // bisect the sign change of the difference: there the two balls are one
+                    let (mut lo, mut hi, mut dlo) = (t0, t1, d0);
+                    let mut rho = None;
+                    for _ in 0..60 {
+                        let mid = 0.5 * (lo + hi);
+                        let Some((d, mean)) = gap(a, b, mid)? else {
+                            break;
+                        };
+                        rho = Some(mean);
+                        if d == 0.0 {
+                            break;
+                        }
+                        if d.signum() == dlo.signum() {
+                            lo = mid;
+                            dlo = d;
+                        } else {
+                            hi = mid;
+                        }
+                    }
+                    if let Some(rho) = rho {
+                        if found.is_none_or(|r| rho < r) {
+                            found = Some(rho);
+                        }
+                    }
+                }
+            }
+            previous = here;
+        }
+    }
+    Ok(found)
+}
+
 /// `SmFilletSolver::LargestSizeOnItsFaces(pOnly, ...)`: the largest size at which this
 /// blend's rails stay on the faces it rolls on (`only`: on that face only): the least size
 /// of a ball, or of the solver's two offsets, that touches one face at a point of that
