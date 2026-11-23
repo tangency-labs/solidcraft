@@ -215,3 +215,135 @@ fn a_state_keeps_the_looks_of_a_renamed_body() {
     let looks = s.doc.display_states[0].appearances.as_ref().unwrap();
     assert!(looks.bodies.contains_key("Renamed") && !looks.bodies.contains_key(&n[4]));
 }
+
+/// Four boxes A to D at the root, for Isolate's layers.
+fn boxes() -> Session {
+    let mut s = Session::default();
+    for (i, name) in ["A", "B", "C", "D"].iter().enumerate() {
+        s.execute("solid.box", &json!({"length": 10, "width": 10, "height": 10, "corner": [30 * i, 0, 0], "body_name": name})).unwrap();
+    }
+    s
+}
+
+fn isolate(s: &mut Session, names: &[&str]) {
+    s.execute("browser.visibility", &json!({"items": names, "visible": true, "isolate": true})).unwrap();
+}
+
+fn names(v: &[&str]) -> Vec<String> {
+    v.iter().map(|n| n.to_string()).collect()
+}
+
+/// Isolating again adds a layer; leaving one puts back what was shown before it, parts hidden by
+/// hand while it was active included; leaving all lands in the view from before the first.
+#[test]
+fn isolate_stacks_layers_and_leaving_puts_each_view_back_exactly() {
+    let mut s = boxes();
+    hide(&mut s, &[&"D".to_string()]);
+    isolate(&mut s, &["A", "B"]);
+    assert_eq!((s.isolation_depth(), hidden(&s)), (1, names(&["C", "D"])));
+    // Hidden by hand while the layer is active: it belongs to the layer.
+    hide(&mut s, &[&"A".to_string()]);
+    isolate(&mut s, &["B"]);
+    assert_eq!((s.isolation_depth(), hidden(&s)), (2, names(&["A", "C", "D"])));
+    // The same isolate again hides nothing more: no new layer.
+    isolate(&mut s, &["B"]);
+    assert_eq!(s.isolation_depth(), 2);
+    let r = s.execute("display.unisolate", &json!({})).unwrap();
+    assert_eq!((r["left"].as_bool(), r["level"].as_u64()), (Some(true), Some(1)));
+    assert_eq!(hidden(&s), names(&["A", "C", "D"]));
+    // Leaving all of them: the view from before the first isolation, D hidden by hand included.
+    isolate(&mut s, &["C"]);
+    assert_eq!(s.isolation_depth(), 2);
+    let r = s.execute("display.unisolate_all", &json!({})).unwrap();
+    assert_eq!((r["left"].as_bool(), r["level"].as_u64()), (Some(true), Some(0)));
+    assert_eq!((s.isolation_depth(), hidden(&s)), (0, names(&["D"])));
+    // Not isolated: both commands do nothing, and say so.
+    for cmd in ["display.unisolate", "display.unisolate_all"] {
+        let steps = s.undo.len();
+        assert_eq!(s.execute(cmd, &json!({})).unwrap()["left"], false);
+        assert_eq!((s.undo.len(), hidden(&s)), (steps, names(&["D"])));
+    }
+}
+
+/// Visibility is an undo step, so the layers go back and forth with it: one undo leaves a layer
+/// (or takes back a hide made in it), and one redo isolates again.
+#[test]
+fn undo_and_redo_carry_the_layers_with_the_view() {
+    let mut s = boxes();
+    hide(&mut s, &[&"D".to_string()]);
+    isolate(&mut s, &["A", "B"]);
+    hide(&mut s, &[&"A".to_string()]);
+    isolate(&mut s, &["B"]);
+    let at = |s: &Session| (s.isolation_depth(), hidden(s));
+    assert_eq!(at(&s), (2, names(&["A", "C", "D"])));
+    for expected in [(1, names(&["A", "C", "D"])), (1, names(&["C", "D"])), (0, names(&["D"]))] {
+        s.execute("edit.undo", &json!({})).unwrap();
+        assert_eq!(at(&s), expected);
+    }
+    for expected in [(1, names(&["C", "D"])), (1, names(&["A", "C", "D"])), (2, names(&["A", "C", "D"]))] {
+        s.execute("edit.redo", &json!({})).unwrap();
+        assert_eq!(at(&s), expected);
+    }
+    // Leaving every layer is one step too: undo brings both layers back.
+    s.execute("display.unisolate_all", &json!({})).unwrap();
+    assert_eq!(at(&s), (0, names(&["D"])));
+    s.execute("edit.undo", &json!({})).unwrap();
+    assert_eq!(at(&s), (2, names(&["A", "C", "D"])));
+    // Leaving one layer whose view equals the one it went back to still takes the layer away.
+    s.execute("display.unisolate_all", &json!({})).unwrap();
+    s.execute("browser.visibility", &json!({"folder": "bodies", "visible": true})).unwrap();
+    isolate(&mut s, &["A", "B", "C"]);
+    s.execute("browser.visibility", &json!({"items": ["D"], "visible": true})).unwrap();
+    assert_eq!(at(&s), (1, names(&[])));
+    let steps = s.undo.len();
+    s.execute("display.unisolate", &json!({})).unwrap();
+    assert_eq!(at(&s), (0, names(&[])));
+    assert_eq!(s.undo.len(), steps + 1);
+}
+
+/// The design file, the unsaved-changes test and the recovery copy hold the view from before the
+/// first layer, however the layers came and went; a lock set meanwhile is kept.
+#[test]
+fn the_design_is_saved_as_it_was_before_the_first_layer() {
+    let mut s = boxes();
+    hide(&mut s, &[&"D".to_string()]);
+    s.mark_saved();
+    assert!(!s.is_dirty());
+    isolate(&mut s, &["A", "B"]);
+    isolate(&mut s, &["A"]);
+    assert_eq!(hidden(&s), names(&["B", "C", "D"]));
+    assert!(!s.is_dirty(), "a layer is not an unsaved change");
+    assert_eq!(s.design().visibility.hidden_bodies, names(&["D"]));
+    // A save runs on a scratch copy and is taken up by `adopt_save`.
+    let scratch = s.scratch();
+    assert_eq!(scratch.isolation_depth(), 2);
+    assert_eq!(scratch.design().visibility.hidden_bodies, names(&["D"]));
+    s.visibility.locked_bodies = names(&["B"]);
+    assert_eq!(s.design().visibility.locked_bodies, names(&["B"]));
+    s.visibility.locked_bodies.clear();
+    s.mark_saved();
+    assert!(!s.is_dirty());
+    s.execute("display.unisolate_all", &json!({})).unwrap();
+    assert!(!s.is_dirty(), "back where the file is");
+    // A hide made while isolated is not saved either, whether or not it is undone.
+    isolate(&mut s, &["A", "B"]);
+    hide(&mut s, &[&"A".to_string()]);
+    assert!(!s.is_dirty());
+    assert_eq!(s.design().visibility.hidden_bodies, names(&["D"]));
+}
+
+/// A checkpoint restores the layers it had, and a rename is followed by the views they go back to.
+#[test]
+fn checkpoints_and_renames_follow_the_layers() {
+    let mut s = boxes();
+    let id = s.checkpoint();
+    isolate(&mut s, &["A"]);
+    assert_eq!(s.isolation_depth(), 1);
+    s.restore_checkpoint(id).unwrap();
+    assert_eq!((s.isolation_depth(), hidden(&s)), (0, Vec::<String>::new()));
+    hide(&mut s, &[&"D".to_string()]);
+    isolate(&mut s, &["A"]);
+    s.execute("body.rename", &json!({"body": "D", "name": "Dee"})).unwrap();
+    s.execute("display.unisolate_all", &json!({})).unwrap();
+    assert_eq!(hidden(&s), names(&["Dee"]));
+}

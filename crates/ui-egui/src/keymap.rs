@@ -36,6 +36,10 @@ pub const RESERVED: &[&str] = &[
     "Ctrl+X",
     "Ctrl+V",
     "Ctrl+Shift+V",
+    // Isolate layers (`isolation_banner`).
+    "Ctrl+I",
+    "Ctrl+Shift+I",
+    "Ctrl+Alt+I",
     // View keys (`navigation::view_key`).
     "Left",
     "Right",

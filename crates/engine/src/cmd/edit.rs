@@ -465,6 +465,7 @@ fn go_to(s: &mut Session, snap: Snapshot, cmd: &str) -> Result<Snapshot> {
     s.prune_sheet_sketch_edit();
     s.pending_moves = snap.pending_moves;
     s.visibility = snap.visibility;
+    s.isolation = snap.isolation;
     s.selection.clear();
     // A new document is evaluated by `execute`, and a drawing's change evaluates nothing.
     if display_only {

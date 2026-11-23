@@ -335,6 +335,21 @@ features are computed.
 - **Elsewhere:** folder, group.
 - **For translators:** not a rigid group (a joint) and not a fixed browser *folder*.
 
+### isolation layer
+
+One level of Isolate: everything but the isolated items is hidden until the layer is left.
+
+Layers stack. Leaving a layer puts back exactly what was shown before it, including bodies hidden
+by hand before or while the layer was active. Layers are not saved with the design: a design saved
+while isolated holds the view from before the first layer. Isolating and leaving a layer are undo
+steps, like hiding or showing.
+
+- **In SolidCraft:** `browser.visibility` with `isolate`, `display.unisolate`,
+  `display.unisolate_all`; Ctrl+I, Ctrl+Shift+I, Ctrl+Alt+I; the banner at the top of the viewport.
+- **Don't use:** focus mode, solo, hide others (a one-time hide in the browser).
+- **Elsewhere:** isolate, isolation, local view.
+- **For translators:** not a display state, which is named and saved.
+
 ### item number
 
 The number that names a row of a bill of materials, the one a parts list and a balloon show.
