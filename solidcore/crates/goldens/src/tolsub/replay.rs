@@ -741,7 +741,9 @@ fn record() {
 /// `blend.fillet_executive_p3`'s, which `wr493_rows` proves), with main's row hash
 /// (`goldens` at the PR's base, 4c275ffb7d, MEASURED). The twelve `topology.face_p3`
 /// `_rebuild` rows hold main's row after #18490 moved them (main at 0cfdad69ff: the hash of
-/// main's blessed line, MEASURED equal to this branch's run with the trims put back). The two
+/// main's blessed line, MEASURED equal to this branch's run with the trims put back); the eight
+/// `uv_trim_f2`, `f3`, `f10` and `f11` rows (each with its `_rebuild`) hold main's blessed line
+/// after #20939 cleared their gap-cache flags (main at 1562e5f516). The two
 /// `uv_trim_f6` rows read the file too but do not move with #20179; they are listed so that
 /// the put-back is shown to keep them.
 const CLASSIFIED_READ_ROWS: &[(&str, &str, u64)] = &[
@@ -774,22 +776,22 @@ const CLASSIFIED_READ_ROWS: &[(&str, &str, u64)] = &[
     (
         "topology.face_p3",
         "own_reader_sphere_diff_3cylinders_uv_trim_f10",
-        0x806e4152c2e916fb,
+        0x913d9dc3e316de70,
     ),
     (
         "topology.face_p3",
         "own_reader_sphere_diff_3cylinders_uv_trim_f10_rebuild",
-        0x344817f8e2360100,
+        0x42934528e6779089,
     ),
     (
         "topology.face_p3",
         "own_reader_sphere_diff_3cylinders_uv_trim_f11",
-        0x1f9f8fd6cfb4f544,
+        0x234465c42f5694be,
     ),
     (
         "topology.face_p3",
         "own_reader_sphere_diff_3cylinders_uv_trim_f11_rebuild",
-        0x650d363ee5d8b829,
+        0xdec945d4e624bdce,
     ),
     (
         "topology.face_p3",
@@ -799,22 +801,22 @@ const CLASSIFIED_READ_ROWS: &[(&str, &str, u64)] = &[
     (
         "topology.face_p3",
         "own_reader_sphere_diff_3cylinders_uv_trim_f2",
-        0xf9c467d3b8169a42,
+        0x287ded99c94c1089,
     ),
     (
         "topology.face_p3",
         "own_reader_sphere_diff_3cylinders_uv_trim_f2_rebuild",
-        0x9c0baa5c2cfaf6e7,
+        0x5d8eae594ea92b9c,
     ),
     (
         "topology.face_p3",
         "own_reader_sphere_diff_3cylinders_uv_trim_f3",
-        0xdcba33add398c487,
+        0xd02ee7b36ac19415,
     ),
     (
         "topology.face_p3",
         "own_reader_sphere_diff_3cylinders_uv_trim_f3_rebuild",
-        0xfae79645f70fc936,
+        0xcc8e58869406a559,
     ),
     (
         "topology.face_p3",
