@@ -6526,6 +6526,41 @@ mod tests {
         assert_ne!(super::frame_key(&frame), previous);
     }
 
+    /// No fragment stage reads an invariant position. naga writes one as `invariant gl_FragCoord;`
+    /// on desktop OpenGL, which GLSL before 4.20 refuses on an input: the Radeon HD 6290 and
+    /// HD 7500 drivers then build none of the triangle pipelines and only the overlay draws
+    /// (#11357). The triangle vertex stages keep `invariant gl_Position;` (#9335).
+    #[test]
+    fn the_desktop_gl_fragment_stages_read_no_invariant_position() {
+        use naga::back::glsl;
+        let source = format!("{}\n{}\n{}", super::SHADER, crate::pbr::SOURCE, super::edges::SHADER);
+        let module = naga::front::wgsl::parse_str(&source).unwrap_or_else(|error| panic!("{}", error.emit_to_string(&source)));
+        let info = naga::valid::Validator::new(naga::valid::ValidationFlags::all(), naga::valid::Capabilities::empty()).validate(&module).unwrap();
+        let options = glsl::Options { version: glsl::Version::Desktop(410), ..Default::default() };
+        let (mut fragments, mut invariant_vertices) = (0, Vec::new());
+        for ep in &module.entry_points {
+            if !matches!(ep.stage, naga::ShaderStage::Vertex | naga::ShaderStage::Fragment) {
+                continue;
+            }
+            let pipeline = glsl::PipelineOptions { shader_stage: ep.stage, entry_point: ep.name.clone(), multiview: None };
+            let (module, info) = naga::back::pipeline_constants::process_overrides(&module, &info, Some((ep.stage, &ep.name)), &Default::default())
+                .unwrap_or_else(|e| panic!("{}: {e}", ep.name));
+            let mut out = String::new();
+            glsl::Writer::new(&mut out, &module, &info, &options, &pipeline, naga::proc::BoundsCheckPolicies::default())
+                .and_then(|mut w| w.write())
+                .unwrap_or_else(|e| panic!("{}: {e}", ep.name));
+            if ep.stage == naga::ShaderStage::Fragment {
+                fragments += 1;
+                assert!(!out.contains("invariant gl_FragCoord"), "{} reads an invariant position:\n{out}", ep.name);
+            } else if out.contains("invariant gl_Position;") {
+                invariant_vertices.push(ep.name.as_str());
+            }
+        }
+        assert!(fragments > 20, "{fragments} fragment stages");
+        invariant_vertices.sort_unstable();
+        assert_eq!(invariant_vertices, ["vs_tri", "vs_tri_inst", "vs_tri_inst_flat", "vs_tri_planned"]);
+    }
+
     /// The uniform carries the inverse of the view-projection it carries, just before the planes'
     /// hatch: the ambient occlusion finds a pixel's point in the world from its depth with it.
     #[test]

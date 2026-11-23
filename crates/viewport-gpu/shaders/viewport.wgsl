@@ -179,8 +179,12 @@ fn out_color(c: vec4<f32>) -> vec4<f32> {
     return c;
 }
 
+// The fragment side of a triangle vertex; the vertex stages return `TVert`, the same with the
+// position invariant. A fragment stage reading an invariant position becomes
+// `invariant gl_FragCoord;` on desktop OpenGL, which GLSL before 4.20 refuses on an input
+// (the Radeon HD 6000/7500 drivers then draw no triangle at all, #11357).
 struct TOut {
-    @invariant @builtin(position) pos: vec4<f32>,
+    @builtin(position) pos: vec4<f32>,
     @location(0) n: vec3<f32>,
     @location(1) c: vec4<f32>,
     @location(2) wp: vec3<f32>,
@@ -193,21 +197,37 @@ struct TOut {
     @location(5) @interpolate(flat) hv: u32,
 };
 
+/// `TOut` as the vertex stages return it: the position `@invariant`, so every pass that draws
+/// the same triangle gets the same depth to the last bit (the AO term pass, #9335).
+struct TVert {
+    @invariant @builtin(position) pos: vec4<f32>,
+    @location(0) n: vec3<f32>,
+    @location(1) c: vec4<f32>,
+    @location(2) wp: vec3<f32>,
+    @location(3) @interpolate(flat) h: u32,
+    @location(4) v: f32,
+    @location(5) @interpolate(flat) hv: u32,
+};
+
+fn t_vert(o: TOut) -> TVert {
+    return TVert(o.pos, o.n, o.c, o.wp, o.h, o.v, o.hv);
+}
+
 /// A built triangle's vertex: its value word is an f32's bits, or all ones for none
 /// (`NO_VALUE`).
 @vertex
-fn vs_tri(@location(0) local: vec3<f32>, @location(1) n: vec3<f32>, @location(2) c: u32, @location(3) value: u32) -> TOut {
+fn vs_tri(@location(0) local: vec3<f32>, @location(1) n: vec3<f32>, @location(2) c: u32, @location(3) value: u32) -> TVert {
     var o = tri_vertex(local, n, c);
     let none = value == 0xffffffffu;
     o.v = select(bitcast<f32>(value), 0.0, none);
     o.hv = select(1u, 0u, none);
-    return o;
+    return t_vert(o);
 }
 
 /// A vertex evaluated from a display plan on the GPU (no value).
 @vertex
-fn vs_tri_planned(@location(0) local: vec3<f32>, @location(1) n: vec3<f32>, @location(2) c: u32) -> TOut {
-    return tri_vertex(local, n, c);
+fn vs_tri_planned(@location(0) local: vec3<f32>, @location(1) n: vec3<f32>, @location(2) c: u32) -> TVert {
+    return t_vert(tri_vertex(local, n, c));
 }
 
 /// A triangle vertex at `local` with normal `n` in palette entry `c`, without a value.
@@ -237,7 +257,7 @@ fn vs_tri_inst(
     @location(5) r2: vec4<f32>,
     @location(6) c: u32,
     @location(9) s: u32,
-) -> TOut {
+) -> TVert {
     let q = vec4<f32>(p, 1.0);
     let e = palette_entry(c);
     let m = placement_motion(s, e);
@@ -249,7 +269,7 @@ fn vs_tri_inst(
     o.c = unpack_color(e.x);
     o.h = finish_h(c, e.y & 255u);
     o.wp = wp;
-    return o;
+    return t_vert(o);
 }
 
 /// A flat-shaded placement (`vs_tri_inst_flat`): its vertices are shared between triangles, so
@@ -259,6 +279,14 @@ fn vs_tri_inst(
 /// stores every vertex's outputs: more of them cost more than the triangles' shared vertices
 /// save).
 struct FOut {
+    @builtin(position) pos: vec4<f32>,
+    @location(0) rp: vec3<f32>,
+    @location(1) c: vec4<f32>,
+    @location(2) @interpolate(flat) h: u32,
+};
+
+/// `FOut` as `vs_tri_inst_flat` returns it, the position invariant (see `TVert`).
+struct FVert {
     @invariant @builtin(position) pos: vec4<f32>,
     @location(0) rp: vec3<f32>,
     @location(1) c: vec4<f32>,
@@ -273,11 +301,11 @@ fn vs_tri_inst_flat(
     @location(5) r2: vec4<f32>,
     @location(6) c: u32,
     @location(9) s: u32,
-) -> FOut {
+) -> FVert {
     let q = vec4<f32>(p, 1.0);
     let e = palette_entry(c);
     let wp = placed_by(placement_motion(s, e), vec3<f32>(dot(r0, q), dot(r1, q), dot(r2, q)));
-    var o: FOut;
+    var o: FVert;
     o.pos = face_pushed(u.vp * vec4<f32>(wp, 1.0));
     o.rp = wp - u.eye.xyz;
     o.c = unpack_color(e.x);
