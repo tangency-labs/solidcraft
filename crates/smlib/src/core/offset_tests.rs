@@ -291,6 +291,12 @@ fn case(name: &str) -> Case {
             Op::Draft(Shape::Frustum([0.0; 3], 10.0, 8.0, 20.0), vec![[0.0, 9.0, 10.0]], [0.0; 3], Z, Z, 0.5),
             Expect::Fails(draft_refused("a drafted cone would close within the face")),
         ),
+        // The same cone about the plane z = 150, past its apex at z = 100: its radius there,
+        // 10 - 0.1 * 150 = -5, is not positive.
+        "draft_a_cone_about_a_plane_past_its_apex" => c(
+            Op::Draft(Shape::Frustum([0.0; 3], 10.0, 8.0, 20.0), vec![[0.0, 9.0, 10.0]], [0.0, 0.0, 150.0], Z, Z, 0.1),
+            Expect::Fails(draft_refused("a drafted cone would close within the face")),
+        ),
         _ => panic!("{name}"),
     }
 }
@@ -442,6 +448,7 @@ cases!(
     draft_a_cylinder_across_its_axis,
     draft_a_cylinder_about_a_plane_through_its_axis,
     draft_a_cone_until_it_closes,
+    draft_a_cone_about_a_plane_past_its_apex,
 );
 
 /// A draft the kernel refuses for what the face is, in solidcore-ops' words for the same refusal.
