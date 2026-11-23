@@ -86,7 +86,7 @@ impl JsonSchema for SidePointSchema {
 
 /// A frame of an Align side: a joint origin as `joint.create` takes one, or `{sketch, point|curve}`.
 /// Only for the schema; [`AlignParams`] reads it with [`frame_problem`].
-struct FrameSchema;
+pub(super) struct FrameSchema;
 
 impl JsonSchema for FrameSchema {
     fn schema_name() -> Cow<'static, str> {
@@ -246,7 +246,7 @@ fn plane(m: &Map<String, Value>, key: &str) -> Result<Option<Value>, String> {
 
 /// What is wrong with the frame `v` of `key` (`from_frame`), as the handler says it, marked
 /// whole, or `None`.
-fn frame_problem(v: &Value, key: &str) -> Option<String> {
+pub(super) fn frame_problem(v: &Value, key: &str) -> Option<String> {
     if let Some(sketch) = v.get("sketch") {
         if sketch_key(Some(sketch)).is_none() {
             return Some(whole(format!("`{key}` must be a sketch id or name")));
