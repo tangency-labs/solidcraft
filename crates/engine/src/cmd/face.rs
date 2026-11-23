@@ -296,7 +296,7 @@ type FacePick = (std::sync::Arc<Mesh>, u32, f64, String);
 /// A pick of the running command was resolved against the placed model, so the body under it
 /// wins: a body that only shares its place in the model is not in the way (#419). A named
 /// body still wins over that.
-fn face_at_in(s: &Session, p: Vec3, only: Option<&str>) -> std::result::Result<Option<FacePick>, Vec<String>> {
+pub(super) fn face_at_in(s: &Session, p: Vec3, only: Option<&str>) -> std::result::Result<Option<FacePick>, Vec<String>> {
     let st = s.model.state();
     match (crate::frames::picked(p), only) {
         (Some(names), None) if names.len() > 1 => Err(model_names(&st, &names)),
