@@ -1020,8 +1020,11 @@ pub enum FeatureKind {
         #[serde(with = "point_expr")]
         #[walk(placement)]
         base: PointExpr,
-        #[serde(default = "z_axis")]
-        axis: Dir,
+        /// From the bottom to the top: unitless expressions (#18822), so the cylinder turns as
+        /// the parameters change; plain numbers for a fixed direction. Normalized when evaluated.
+        #[serde(with = "point_expr", default = "z_axis_expr")]
+        #[walk(direction)]
+        axis: DirExpr,
         #[walk(length = "Radius")]
         radius: Expr,
         #[walk(length = "Height")]
@@ -1902,6 +1905,16 @@ pub enum FeatureKind {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         #[walk(length = "Bend radius")]
         radius: Option<Expr>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        body: Option<BodyName>,
+    },
+    /// Tab: the closed profiles of a sketch on a flat face of a sheet (either side, or in a plane
+    /// level with one) join that panel through the sheet's thickness, part of its outline
+    /// (`SurfaceSheet::add_tab`).
+    SheetTab {
+        sketch: SketchId,
+        #[walk(profiles_of = sketch)]
+        profiles: ProfileSel,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         body: Option<BodyName>,
     },
@@ -3216,6 +3229,37 @@ pub fn point_expr(p: Vec3) -> PointExpr {
     [Expr::new(format!("{}", p.x)), Expr::new(format!("{}", p.y)), Expr::new(format!("{}", p.z))]
 }
 
+/// A direction whose components are unitless expressions (`["0", "-sin(t)", "-cos(t)"]`), so it
+/// turns as the parameters change. Saved as a [`PointExpr`] is; normalized when evaluated.
+pub type DirExpr = [Expr; 3];
+
+/// A direction as expressions (plain numbers).
+pub fn dir_expr(d: Vec3) -> DirExpr {
+    point_expr(d)
+}
+
+/// The direction `d` holds when each component is a plain number, normalized; `None` when one
+/// is an expression or it is zero.
+pub fn literal_dir(d: &DirExpr) -> Option<Vec3> {
+    let num = |e: &Expr| e.trim().parse::<f64>().ok().filter(|v| v.is_finite());
+    let [x, y, z] = d;
+    unit_direction(Vec3::new(num(x)?, num(y)?, num(z)?))
+}
+
+/// `v` as a unit direction, however short it is: scaled by its largest component first, so
+/// only a vector that is exactly zero (or not finite) has none (#18822).
+pub fn unit_direction(v: Vec3) -> Option<Vec3> {
+    let m = v.x.abs().max(v.y.abs()).max(v.z.abs());
+    if !(m.is_finite() && m > 0.0) {
+        return None;
+    }
+    Vec3::new(v.x / m, v.y / m, v.z / m).normalized()
+}
+
+fn z_axis_expr() -> DirExpr {
+    dir_expr(Vec3::Z)
+}
+
 /// Stored as `[x, y, z]`: plain numbers as numbers (as points were before they took
 /// expressions, so such designs read and write the same), anything else as a string.
 mod point_expr {
@@ -3286,6 +3330,7 @@ impl FeatureKind {
                 | FeatureKind::SheetPerforate { .. }
                 | FeatureKind::SheetFold { .. }
                 | FeatureKind::SheetPath { .. }
+                | FeatureKind::SheetTab { .. }
                 | FeatureKind::SheetUnfold { .. }
                 | FeatureKind::SheetConvert { .. }
                 | FeatureKind::SheetSurfaceConvert { .. }
@@ -3360,6 +3405,7 @@ impl FeatureKind {
             FeatureKind::SheetPerforate { .. } => "PerforateFeature",
             FeatureKind::SheetFold { .. } => "FoldFeature",
             FeatureKind::SheetPath { .. } => "PathFlangeFeature",
+            FeatureKind::SheetTab { .. } => "TabFeature",
             FeatureKind::SheetUnfold { refold: false, .. } => "UnfoldFeature",
             FeatureKind::SheetUnfold { .. } => "RefoldFeature",
             FeatureKind::SheetConvert { .. } => "ConvertToSheetMetalFeature",
@@ -3447,6 +3493,7 @@ impl FeatureKind {
             FeatureKind::SheetPerforate { .. } => "sheet_perforate",
             FeatureKind::SheetFold { .. } => "sheet_fold",
             FeatureKind::SheetPath { .. } => "sheet_path",
+            FeatureKind::SheetTab { .. } => "sheet_tab",
             FeatureKind::SheetUnfold { .. } => "sheet_unfold",
             FeatureKind::SheetConvert { .. } => "sheet_convert",
             FeatureKind::SheetSurfaceConvert { .. } => "sheet_surface_convert",
@@ -3537,6 +3584,7 @@ impl FeatureKind {
             "PerforateFeature" => "sheet_perforate",
             "FoldFeature" => "sheet_fold",
             "PathFlangeFeature" => "sheet_path",
+            "TabFeature" => "sheet_tab",
             "UnfoldFeature" | "RefoldFeature" => "sheet_unfold",
             "ConvertToSheetMetalFeature" => "sheet_convert",
             "ConvertBodyToSheetMetalFeature" => "sheet_surface_convert",
@@ -3627,6 +3675,7 @@ impl FeatureKind {
             FeatureKind::SheetPerforate { .. } => "Perforate",
             FeatureKind::SheetFold { .. } => "Fold",
             FeatureKind::SheetPath { .. } => "PathFlange",
+            FeatureKind::SheetTab { .. } => "Tab",
             FeatureKind::SheetUnfold { refold: false, .. } => "Unfold",
             FeatureKind::SheetUnfold { .. } => "Refold",
             FeatureKind::SheetConvert { .. } | FeatureKind::SheetSurfaceConvert { .. } => "ConvertToSheetMetal",
