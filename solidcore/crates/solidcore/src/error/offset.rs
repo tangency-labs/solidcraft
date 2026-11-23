@@ -43,6 +43,9 @@
 //! | the other causes of `offset_geometry_creation` ([`OffsetFailure::VertexCurveNotArc`] to [`OffsetFailure::VertexArcsNotOneSphere`]) | `SM_ERR` |
 //! | [`OffsetFailure::OffsetBaseKindUnsupported`], [`OffsetFailure::GapCornerBlendNotMade`] | `SM_ERR` (`offset_executive::p1`) |
 //! | [`OffsetFailure::EdgeOffsetsUnpaired`], [`OffsetFailure::GapEndWithoutEdge`], [`OffsetFailure::FaceuseNotGiven`], [`OffsetFailure::SelfIntersectionWithoutUvCurve`] | `SM_ERR_NULL_POINTER` (`offset_executive::p1`) |
+//! | [`OffsetFailure::BrepNotGiven`] | `SM_ERR_NULL_POINTER`, or the site's through `with_status` (`offset_executive::p2`) |
+//! | [`OffsetFailure::ShellLeavesNoCavity`], [`OffsetFailure::ShellWallUnresolved`], [`OffsetFailure::ShellFaceNotOfBody`] | `SM_ERR_INVALID_INPUT` (`offset_executive::p2`) |
+//! | [`OffsetFailure::ExtendedFaceCollapses`], [`OffsetFailure::ExtendedFaceMeetsItself`], [`OffsetFailure::TrimPastExtension`] | `SM_ERR` (`offset_executive::p2`) |
 //!
 //! A stage of an offset routine that fails with no reason the kernel names is an
 //! [`OffsetFailure::StageFailed`], a defect ([`ErrorKind::StageFailed`], #15034), keeping the
@@ -55,8 +58,8 @@
 //! four phrase causes ([`OffsetFailure::Failed`], [`OffsetFailure::Missing`],
 //! [`OffsetFailure::InvalidValue`], [`OffsetFailure::Inconsistent`]) describe, in a phrase, the failures of offset routines that returned a bare
 //! status ([`OffsetFailure::replaces_upstream_status`]); the failure's `operation` path
-//! says which routine and its entity, where the site named one, which face. The file
-//! with open work elsewhere (`offset_executive/p2`) does not use them yet. The causes
+//! says which routine and its entity, where the site named one, which face.
+//! `offset_executive/p2` does not use them. The causes
 //! named at the sites of `offset_faces`, `offset_geometry_creation` and
 //! `offset_executive/p1` that returned a bare status or an unreviewed stage failure
 //! ([`OffsetFailure::FacesMoveRefused`] and those after it) answer with that status too: they
@@ -545,6 +548,53 @@ pub enum OffsetFailure {
         /// The face, of the operation's input.
         face: FaceId,
     },
+    /// The operation was given no B-rep (a null body: upstream's `NER`, or its native 1007
+    /// at the shell and offset APIs).
+    BrepNotGiven,
+    /// An inward shell of a closed solid by `distance` leaves no offset of it at all: the
+    /// wall is as thick as the solid or thicker, so there is no cavity to take away
+    /// (WR-454). A thinner wall passes.
+    ShellLeavesNoCavity {
+        /// The offset distance asked for (signed, as the shell takes it).
+        distance: f64,
+    },
+    /// The shell's wall `wall` (the offset distance's magnitude) is below `smallest`, twice
+    /// the body's B-rep tolerance: a wall the shell does not resolve. A wall of at least
+    /// `smallest` passes.
+    ShellWallUnresolved {
+        /// The wall asked for.
+        wall: f64,
+        /// The smallest wall the shell resolves.
+        smallest: f64,
+    },
+    /// The shell's face selection at `index` (in the order given) names no face of the body
+    /// it was given: it is empty, of another body, or a face the body does not have.
+    ShellFaceNotOfBody {
+        /// The selection's position in the list given.
+        index: usize,
+    },
+    /// The offset surface of `face` collapses (onto its spine or past it: a round offset by
+    /// its radius) in an extended offset, which builds every face it offsets (only an inset
+    /// that extends convex edges leaves such a face out and mates its neighbours across it).
+    ExtendedFaceCollapses {
+        /// The face, of the operation's input.
+        face: FaceId,
+    },
+    /// The offset surface of `face` meets itself along `curves` curves, more than the
+    /// `limit` an extended offset takes (none where it merges its results, else five where
+    /// it extends convex edges): it trims no offset face along them.
+    ExtendedFaceMeetsItself {
+        /// The face, of the operation's input.
+        face: FaceId,
+        /// The curves along which its offset surface meets itself.
+        curves: usize,
+        /// The most the offset takes.
+        limit: usize,
+    },
+    /// The UV trim curves of an extended offset face, on its extended surface, reach
+    /// outside both its offset surface's domain and the extension's (by more than
+    /// `SM_EFF_ZERO`): the face is trimmed on neither surface.
+    TrimPastExtension,
 }
 
 /// What a local operation's or a solid offset's built body fails ([`OffsetFailure::Unsound`]).
@@ -677,6 +727,8 @@ impl OffsetFailure {
             | Self::FaceHasNoSurface { face }
             | Self::FaceHasNoOuterFaceuse { face }
             | Self::SelfIntersectionWithoutUvCurve { face }
+            | Self::ExtendedFaceCollapses { face }
+            | Self::ExtendedFaceMeetsItself { face, .. }
             | Self::MoveCollapses { face, .. } => Some(EntityRef::Face(face)),
             Self::WallsTouch { face, .. }
             | Self::LoopsCross { face, .. }
@@ -718,6 +770,11 @@ impl OffsetFailure {
             | Self::UnnamedFaceHasNoSurface
             | Self::OffsetBaseKindUnsupported { .. }
             | Self::FaceuseNotGiven
+            | Self::BrepNotGiven
+            | Self::ShellLeavesNoCavity { .. }
+            | Self::ShellWallUnresolved { .. }
+            | Self::ShellFaceNotOfBody { .. }
+            | Self::TrimPastExtension
             | Self::ExactCurveUncut
             | Self::TangentEndOffCurve
             | Self::TangentBranchUncertified
@@ -762,6 +819,13 @@ impl OffsetFailure {
                 | Self::GapCornerBlendNotMade { .. }
                 | Self::FaceuseNotGiven
                 | Self::SelfIntersectionWithoutUvCurve { .. }
+                | Self::BrepNotGiven
+                | Self::ShellLeavesNoCavity { .. }
+                | Self::ShellWallUnresolved { .. }
+                | Self::ShellFaceNotOfBody { .. }
+                | Self::ExtendedFaceCollapses { .. }
+                | Self::ExtendedFaceMeetsItself { .. }
+                | Self::TrimPastExtension
         ) || self.is_named_at_a_status_site()
     }
 
@@ -871,7 +935,14 @@ impl OffsetFailure {
             | Self::GapEndWithoutEdge { .. }
             | Self::GapCornerBlendNotMade { .. }
             | Self::FaceuseNotGiven
-            | Self::SelfIntersectionWithoutUvCurve { .. } => false,
+            | Self::SelfIntersectionWithoutUvCurve { .. }
+            | Self::BrepNotGiven
+            | Self::ShellLeavesNoCavity { .. }
+            | Self::ShellWallUnresolved { .. }
+            | Self::ShellFaceNotOfBody { .. }
+            | Self::ExtendedFaceCollapses { .. }
+            | Self::ExtendedFaceMeetsItself { .. }
+            | Self::TrimPastExtension => false,
             Self::Failed(_) | Self::Missing(_) | Self::InvalidValue(_) | Self::Inconsistent(_) => {
                 true
             }
@@ -948,7 +1019,14 @@ impl OffsetFailure {
             | Self::GapEndWithoutEdge { .. }
             | Self::GapCornerBlendNotMade { .. }
             | Self::FaceuseNotGiven
-            | Self::SelfIntersectionWithoutUvCurve { .. } => false,
+            | Self::SelfIntersectionWithoutUvCurve { .. }
+            | Self::BrepNotGiven
+            | Self::ShellLeavesNoCavity { .. }
+            | Self::ShellWallUnresolved { .. }
+            | Self::ShellFaceNotOfBody { .. }
+            | Self::ExtendedFaceCollapses { .. }
+            | Self::ExtendedFaceMeetsItself { .. }
+            | Self::TrimPastExtension => false,
         }
     }
 
@@ -995,7 +1073,10 @@ impl OffsetFailure {
             | Self::LocalFaceNotListed
             | Self::VertexArcsNotOneSphere
             | Self::OffsetBaseKindUnsupported { .. }
-            | Self::GapCornerBlendNotMade { .. } => SM_ERR,
+            | Self::GapCornerBlendNotMade { .. }
+            | Self::ExtendedFaceCollapses { .. }
+            | Self::ExtendedFaceMeetsItself { .. }
+            | Self::TrimPastExtension => SM_ERR,
             Self::Missing(_)
             | Self::BlendRailWithoutSupport { .. }
             | Self::FollowedBlendIncomplete
@@ -1010,8 +1091,13 @@ impl OffsetFailure {
             | Self::EdgeOffsetsUnpaired { .. }
             | Self::GapEndWithoutEdge { .. }
             | Self::FaceuseNotGiven
-            | Self::SelfIntersectionWithoutUvCurve { .. } => SM_ERR_NULL_POINTER,
-            Self::FaceMoveEmpty { .. } | Self::InvalidValue(_) => SM_ERR_INVALID_INPUT,
+            | Self::SelfIntersectionWithoutUvCurve { .. }
+            | Self::BrepNotGiven => SM_ERR_NULL_POINTER,
+            Self::FaceMoveEmpty { .. }
+            | Self::InvalidValue(_)
+            | Self::ShellLeavesNoCavity { .. }
+            | Self::ShellWallUnresolved { .. }
+            | Self::ShellFaceNotOfBody { .. } => SM_ERR_INVALID_INPUT,
             Self::Inconsistent(_) => SM_ERR_ASSERT_FAILURE,
             Self::WallsTouch { .. } => SM_ERR_OFFSET_WALLS_TOUCH,
             Self::LoopsCross { .. } => SM_ERR_BAD_INTERSECTIONS,
@@ -1027,9 +1113,11 @@ impl OffsetFailure {
     pub const fn kind(&self) -> ErrorKind {
         match self {
             Self::Folds { .. } | Self::NotCertified { .. } => ErrorKind::OffsetFolds,
-            Self::Collapses { .. } | Self::WallsMeetAcross { .. } | Self::MoveCollapses { .. } => {
-                ErrorKind::OffsetCollapses
-            }
+            Self::Collapses { .. }
+            | Self::WallsMeetAcross { .. }
+            | Self::MoveCollapses { .. }
+            | Self::ShellLeavesNoCavity { .. }
+            | Self::ExtendedFaceCollapses { .. } => ErrorKind::OffsetCollapses,
             Self::WallsTouch { .. } => ErrorKind::OffsetWallsTouch,
             Self::LoopsCross { .. } => ErrorKind::OffsetLoopsCross,
             Self::EdgeVanishes { .. } => ErrorKind::OffsetEdgeVanishes,
@@ -1067,7 +1155,9 @@ impl OffsetFailure {
             | Self::OffsetBaseKindUnsupported { .. }
             | Self::EdgeOffsetsUnpaired { .. }
             | Self::GapEndWithoutEdge { .. }
-            | Self::SelfIntersectionWithoutUvCurve { .. } => ErrorKind::Unsupported,
+            | Self::SelfIntersectionWithoutUvCurve { .. }
+            | Self::ExtendedFaceMeetsItself { .. }
+            | Self::TrimPastExtension => ErrorKind::Unsupported,
             // neither a defect nor a refusal: the failure keeps the error of the step that
             // failed, which decides (`SolidError::is_defect`, `is_refusal`)
             Self::FaceDomainUnresolved
@@ -1084,7 +1174,10 @@ impl OffsetFailure {
             | Self::EdgeuseNotGiven
             | Self::LocalFaceNotListed
             | Self::UnnamedFaceHasNoSurface
-            | Self::FaceuseNotGiven => ErrorKind::InvalidInput,
+            | Self::FaceuseNotGiven
+            | Self::BrepNotGiven
+            | Self::ShellWallUnresolved { .. }
+            | Self::ShellFaceNotOfBody { .. } => ErrorKind::InvalidInput,
             Self::StageFailed | Self::Defect { .. } => ErrorKind::StageFailed,
             Self::Failed(_) | Self::Missing(_) | Self::InvalidValue(_) | Self::Inconsistent(_) => {
                 ErrorKind::of_status(self.comparison_status())
@@ -1534,6 +1627,35 @@ impl core::fmt::Display for OffsetFailure {
             Self::SelfIntersectionWithoutUvCurve { .. } => f.write_str(
                 "a curve where the offset surface meets itself has no UV curve on one side, \
                  so the offset face is not cut along it",
+            ),
+            Self::BrepNotGiven => f.write_str("invalid input: the operation was given no B-rep"),
+            Self::ShellLeavesNoCavity { distance } => write!(
+                f,
+                "an inward shell by {distance} leaves no offset of the solid: the wall is as \
+                 thick as the solid or thicker, so there is no cavity"
+            ),
+            Self::ShellWallUnresolved { wall, smallest } => write!(
+                f,
+                "invalid input: the shell's wall {wall:e} is below {smallest:e}, twice the \
+                 body's tolerance"
+            ),
+            Self::ShellFaceNotOfBody { index } => write!(
+                f,
+                "invalid input: the shell's face selection {index} names no face of the body \
+                 it was given"
+            ),
+            Self::ExtendedFaceCollapses { .. } => f.write_str(
+                "the face's offset surface collapses, and the extended offset builds every face \
+                 it offsets",
+            ),
+            Self::ExtendedFaceMeetsItself { curves, limit, .. } => write!(
+                f,
+                "the face's offset surface meets itself along {curves} curves, more than the \
+                 {limit} the extended offset takes"
+            ),
+            Self::TrimPastExtension => f.write_str(
+                "an extended offset face's trim reaches past both its offset surface's domain \
+                 and the extension's",
             ),
         }
     }
@@ -2126,6 +2248,45 @@ mod tests {
                 false,
                 false,
             ),
+            (O::BrepNotGiven, ErrorKind::InvalidInput, false, false),
+            (
+                O::ShellLeavesNoCavity { distance: -5.0 },
+                ErrorKind::OffsetCollapses,
+                false,
+                false,
+            ),
+            (
+                O::ShellWallUnresolved {
+                    wall: 0.1,
+                    smallest: 0.25,
+                },
+                ErrorKind::InvalidInput,
+                false,
+                false,
+            ),
+            (
+                O::ShellFaceNotOfBody { index: 1 },
+                ErrorKind::InvalidInput,
+                false,
+                false,
+            ),
+            (
+                O::ExtendedFaceCollapses { face },
+                ErrorKind::OffsetCollapses,
+                false,
+                false,
+            ),
+            (
+                O::ExtendedFaceMeetsItself {
+                    face,
+                    curves: 6,
+                    limit: 5,
+                },
+                ErrorKind::Unsupported,
+                false,
+                false,
+            ),
+            (O::TrimPastExtension, ErrorKind::Unsupported, false, false),
         ];
         let row = |o: &O| -> usize {
             match o {
@@ -2193,6 +2354,13 @@ mod tests {
                 O::GapCornerBlendNotMade { .. } => 61,
                 O::FaceuseNotGiven => 62,
                 O::SelfIntersectionWithoutUvCurve { .. } => 63,
+                O::BrepNotGiven => 64,
+                O::ShellLeavesNoCavity { .. } => 65,
+                O::ShellWallUnresolved { .. } => 66,
+                O::ShellFaceNotOfBody { .. } => 67,
+                O::ExtendedFaceCollapses { .. } => 68,
+                O::ExtendedFaceMeetsItself { .. } => 69,
+                O::TrimPastExtension => 70,
             }
         };
         for (i, (o, class, phrase, defect)) in pinned.iter().enumerate() {
@@ -2337,6 +2505,41 @@ mod tests {
                 SM_ERR_NULL_POINTER,
                 Some(EntityRef::Face(face)),
             ),
+            // and those of `offset_executive::p2` (TE-O-18)
+            (OffsetFailure::BrepNotGiven, SM_ERR_NULL_POINTER, None),
+            (
+                OffsetFailure::ShellLeavesNoCavity { distance: -5.0 },
+                SM_ERR_INVALID_INPUT,
+                None,
+            ),
+            (
+                OffsetFailure::ShellWallUnresolved {
+                    wall: 0.1,
+                    smallest: 0.25,
+                },
+                SM_ERR_INVALID_INPUT,
+                None,
+            ),
+            (
+                OffsetFailure::ShellFaceNotOfBody { index: 1 },
+                SM_ERR_INVALID_INPUT,
+                None,
+            ),
+            (
+                OffsetFailure::ExtendedFaceCollapses { face },
+                SM_ERR,
+                Some(EntityRef::Face(face)),
+            ),
+            (
+                OffsetFailure::ExtendedFaceMeetsItself {
+                    face,
+                    curves: 6,
+                    limit: 5,
+                },
+                SM_ERR,
+                Some(EntityRef::Face(face)),
+            ),
+            (OffsetFailure::TrimPastExtension, SM_ERR, None),
         ];
         for (cause, status, entity) in samples {
             assert!(cause.replaces_upstream_status(), "{cause:?}");
@@ -2454,7 +2657,7 @@ mod tests {
         super::super::bare_scan::assert_waiting(
             "offset",
             20,
-            &[("offset/offset_executive/p2.rs", 57)],
+            &[("offset/offset_executive/p2.rs", 28)],
         );
     }
 
