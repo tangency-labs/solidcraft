@@ -2210,7 +2210,7 @@
   "dxf.progress.projection": "Projecting geometry (3/5)",
   "dxf.progress.write": "Writing DXF (5/5)",
   "dxf.tolerance": "Curve tolerance",
-  "dxf.tolerance_help": "Visible bodies and shown sketches only. Curves use straight segments. Smaller tolerance gives finer curves and uses more time and memory.",
+  "dxf.tolerance_help": "Visible bodies and shown sketches only. Recognised circles and arcs are written as CIRCLE and ARC; other curves use straight segments. Smaller tolerance gives finer curves and uses more time and memory.",
   "dxf.zero": "Zero point",
   "dxf.zero_help": "Where the drawing's 0,0 is: the point the camera looks at, or the model's origin as seen from the camera (for machining from a part corner).",
   "dxf.zero_origin": "Model origin",
