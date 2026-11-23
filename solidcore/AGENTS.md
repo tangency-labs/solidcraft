@@ -248,7 +248,7 @@ own constructions. The policy (owner, 2026-11-04; supersedes 2026-11-02 and #101
   goldens your fix moves with their justification (§1). Never loosen a tolerance.
 - **Cases with images.** A pull request that makes a kernel case pass, or turns a known failure
   into a correct refusal, updates the case's entry (its expectation, and its `gallery_note` if the
-  gallery needs to say more), its line in `known_failing.json` and its render beside it
+  gallery needs to say more), its file in `kernel_cases_known_failing/` and its render beside it
   (`crates/solidcore/tests/kernel_cases/<area>/<case>.jpg`) in the same change, never a doc: the
   site's case gallery is generated from them. No status changes without a new render. Choose the
   render's view from the case's geometry so it shows the issue (the corner, the seam, the spot

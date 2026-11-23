@@ -88,8 +88,8 @@ The fillet and chamfer cases are shown in the site's case gallery
 ([docs/generic-blend.md §7](docs/generic-blend.md#7-case-gallery)), each with its render and its
 state: passes, refused as expected, or known failing (with its reason). The gallery is generated
 from the cases, so never edit a doc for it. When your change makes a case pass, or fixes a known
-failure, update the case's entry (its expectation, and its `gallery_note` if needed), its line in
-`known_failing.json` **and its image** in the same pull request: a new render of the result
+failure, update the case's entry (its expectation, and its `gallery_note` if needed), its file in
+`kernel_cases_known_failing/` **and its image** in the same pull request: a new render of the result
 (`crates/solidcore/tests/kernel_cases/<area>/<case>.jpg`) whose view shows the case's issue (the
 corner, the seam, the spot refused or fixed), framed close on it, not a fixed angle. Agents: choose
 the view from the case's geometry. A changed status without a new image is not accepted.

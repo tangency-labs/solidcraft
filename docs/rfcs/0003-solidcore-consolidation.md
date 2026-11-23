@@ -73,7 +73,7 @@ Every PR uses the gates below, plus the gate named in its row.
 | Rig | `cargo test -p solidcore-ops --test kernel_cases -- --ignored` and `cargo xtask kernel-cases`: counts unchanged or better, values to their tolerances |
 | Fillet | the Fillet rig workflow unchanged or better |
 | Ladder | `cargo xtask kernel-cases --ladder --gate` unchanged |
-| Known | `tests/KNOWN_FAILING_TESTS` and `kernel_cases/known_failing.json` only shrink |
+| Known | `tests/KNOWN_FAILING_TESTS` and `kernel_cases_known_failing/` only shrink |
 | Ledgers | `solidcore-seam.txt`, `mesh-decisions.txt`, `app-geometry.txt` only shrink; the PR deletes its own lines |
 | Speed | no slower on the job's bake-off corpus, shown as a count (evaluations, subdivisions) with wall time beside it |
 
