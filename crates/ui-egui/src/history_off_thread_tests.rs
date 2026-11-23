@@ -1532,7 +1532,7 @@ fn linked_file_notifications_retry_and_deliver_without_a_design_edit() {
     h.app.session.execute("component.links", &json!({})).unwrap();
     h.app.now = 3.0;
     crate::plugin_events::observe(&mut h.app);
-    assert!(h.app.plugin_events.take_due(3.11).is_none(), "the same observed file is not delivered again");
+    assert!(h.app.plugins.events.take_due(3.11).is_none(), "the same observed file is not delivered again");
     let cached = h.app.session.plugin_state.listener_data["sample.refresh"].clone();
     h.app.session.execute("document.metadata.set", &json!({"key":"description","value":"Unrelated edit"})).unwrap();
     h.app.now = 4.0;
@@ -1581,9 +1581,9 @@ fn design_notifications_retry_a_failed_worker_spawn_after_the_interval() {
         assert_eq!(event, Some(token.clone()));
         None
     });
-    assert!(app.plugin_events.take_due(0.209).is_none());
-    assert_eq!(app.plugin_events.take_due(0.211), Some(Some(token)));
-    assert!(app.plugin_events.take_due(1.0).is_none(), "the failed spawn retains one invalidation");
+    assert!(app.plugins.events.take_due(0.209).is_none());
+    assert_eq!(app.plugins.events.take_due(0.211), Some(Some(token)));
+    assert!(app.plugins.events.take_due(1.0).is_none(), "the failed spawn retains one invalidation");
 }
 
 #[test]
@@ -1605,8 +1605,8 @@ fn design_notifications_retry_a_disconnected_worker_after_the_interval() {
         None
     });
     assert!(!spawned, "a disconnected worker waits before retrying");
-    assert!(app.plugin_events.take_due(0.219).is_none());
-    assert_eq!(app.plugin_events.take_due(0.221), Some(Some(token)));
+    assert!(app.plugins.events.take_due(0.219).is_none());
+    assert_eq!(app.plugins.events.take_due(0.221), Some(Some(token)));
 }
 
 #[test]
@@ -1632,39 +1632,39 @@ fn design_notifications_preserve_a_newer_pending_token_when_a_worker_disconnects
         None
     });
     assert!(!spawned);
-    assert!(app.plugin_events.take_due(0.219).is_none());
-    assert_eq!(app.plugin_events.take_due(0.221), Some(Some(latest)), "a newer invalidation keeps its token and deadline");
+    assert!(app.plugins.events.take_due(0.219).is_none());
+    assert_eq!(app.plugins.events.take_due(0.221), Some(Some(latest)), "a newer invalidation keeps its token and deadline");
 }
 
 #[test]
 fn design_notifications_fire_after_visibility_undo_redo_but_not_failed_history_actions() {
     let mut app = crate::SolveApp::new(solidcraft_engine::Session::default(), Default::default());
     crate::plugin_events::observe(&mut app);
-    app.plugin_events.take_due(0.11);
+    app.plugins.events.take_due(0.11);
     let token = app.session.design_token();
     let initially_hidden = app.session.visibility.hidden_origin.iter().any(|name| name == "XY");
     app.now = 1.0;
     app.run("browser.visibility", json!({"items":["XY"],"visible":initially_hidden})).unwrap();
     assert_eq!(app.session.visibility.hidden_origin.iter().any(|name| name == "XY"), !initially_hidden);
     assert_eq!(app.session.design_token(), token, "display history keeps the design token");
-    assert!(app.plugin_events.take_due(1.11).is_none());
+    assert!(app.plugins.events.take_due(1.11).is_none());
     for (command, time, hidden) in [("edit.undo", 2.0, initially_hidden), ("edit.redo", 3.0, !initially_hidden)] {
         app.now = time;
         app.run(command, json!({})).unwrap();
         assert_eq!(app.session.visibility.hidden_origin.iter().any(|name| name == "XY"), hidden);
         assert_eq!(app.session.design_token(), token);
-        assert!(app.plugin_events.take_due(time + 0.099).is_none());
-        assert_eq!(app.plugin_events.take_due(time + 0.11), Some(Some(token.clone())), "{command}");
+        assert!(app.plugins.events.take_due(time + 0.099).is_none());
+        assert_eq!(app.plugins.events.take_due(time + 0.11), Some(Some(token.clone())), "{command}");
     }
     app.now = 4.0;
     assert!(app.run("edit.redo", json!({})).is_err());
-    assert!(app.plugin_events.take_due(4.11).is_none(), "failed redo emits no invalidation");
+    assert!(app.plugins.events.take_due(4.11).is_none(), "failed redo emits no invalidation");
     app.now = 5.0;
     app.run("edit.undo", json!({})).unwrap();
-    assert_eq!(app.plugin_events.take_due(5.11), Some(Some(token)));
+    assert_eq!(app.plugins.events.take_due(5.11), Some(Some(token)));
     app.now = 6.0;
     assert!(app.run("edit.undo", json!({})).is_err());
-    assert!(app.plugin_events.take_due(6.11).is_none(), "failed undo emits no invalidation");
+    assert!(app.plugins.events.take_due(6.11).is_none(), "failed undo emits no invalidation");
 }
 
 #[test]
@@ -1697,7 +1697,7 @@ fn design_notifications_fire_when_an_unchanged_design_is_reopened_or_switched() 
     app.now = 0.0;
     crate::plugin_events::observe(&mut app);
     let token = app.session.design_token();
-    assert_eq!(app.plugin_events.take_due(0.11), Some(Some(token.clone())));
+    assert_eq!(app.plugins.events.take_due(0.11), Some(Some(token.clone())));
     let authored = app.session.doc.to_json();
     let reopened = solidcraft_engine::Session::opened((*app.session.doc).clone(), None);
     assert_eq!(reopened.doc.to_json(), authored, "opening preserves the complete authored design");
@@ -1710,18 +1710,18 @@ fn design_notifications_fire_when_an_unchanged_design_is_reopened_or_switched() 
     app.now = 1.0;
     crate::plugin_events::observe(&mut app);
     assert!(app.session.plugin_state.listener_data.is_empty(), "the old tab's panel data does not follow it");
-    assert_eq!(app.plugin_events.take_due(1.11), Some(Some(reopened_token)));
+    assert_eq!(app.plugins.events.take_due(1.11), Some(Some(reopened_token)));
     crate::documents::switch(&mut app, 0);
     app.now = 2.0;
     crate::plugin_events::observe(&mut app);
     assert_eq!(app.session.design_token(), token, "switching back restores the original tab's token");
-    assert_eq!(app.plugin_events.take_due(2.11), Some(Some(token)));
+    assert_eq!(app.plugins.events.take_due(2.11), Some(Some(token)));
     // Two switches inside one frame still invalidate once, even though the final context
     // is exactly the one whose last invalidation has already been delivered.
     app.now = 3.0;
     crate::documents::switch(&mut app, 1);
     crate::documents::switch(&mut app, 0);
-    assert_eq!(app.plugin_events.take_due(3.11), Some(Some(app.session.design_token())));
+    assert_eq!(app.plugins.events.take_due(3.11), Some(Some(app.session.design_token())));
 }
 
 #[test]

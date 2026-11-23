@@ -4254,8 +4254,9 @@ fn nothing_on_a_flat_pattern_view_points_at_the_model() {
 }
 
 /// A bend up is ISO 128's long dash and dot (type 04), a bend down its long dash and two dots (type
-/// 05): dashes 20 widths of the narrow line, gaps 3, dots 1, in every line group. In the 0.35 mm group
-/// a bend up is 3.6, 0.54, 0.18, 0.54 mm. Each, narrow, is a stroke the scene takes across an A0 sheet.
+/// 05), with ISO 128-20 Table 3's lengths: long dashes 24 widths of the narrow line, gaps 3, dots 0.5,
+/// in every line group. In the 0.35 mm group a bend up is 4.32, 0.54, 0.09, 0.54 mm. Each, narrow, is a
+/// stroke the scene takes across an A0 sheet.
 #[test]
 fn bend_lines_are_long_dashes_with_one_and_two_dots_in_every_group() {
     use solidcraft_geom::paper::{Dashes, Group, Item, ObjectKind, Scene};
@@ -4263,8 +4264,8 @@ fn bend_lines_are_long_dashes_with_one_and_two_dots_in_every_group() {
     let path = vec![solidcore_record::Seg2::Line { a: Vec2::new(10.0, 10.0), b: Vec2::new(1180.0, 830.0) }];
     for group in groups {
         let d = LineKind::Thin.width_mm(group);
-        assert_eq!(bend_dashes_mm(true, group), vec![20.0 * d, 3.0 * d, d, 3.0 * d], "{group:?}");
-        assert_eq!(bend_dashes_mm(false, group), vec![20.0 * d, 3.0 * d, d, 3.0 * d, d, 3.0 * d], "{group:?}");
+        assert_eq!(bend_dashes_mm(true, group), vec![24.0 * d, 3.0 * d, 0.5 * d, 3.0 * d], "{group:?}");
+        assert_eq!(bend_dashes_mm(false, group), vec![24.0 * d, 3.0 * d, 0.5 * d, 3.0 * d, 0.5 * d, 3.0 * d], "{group:?}");
         let items = [true, false].map(|up| Item::Stroke {
             path: path.clone(),
             closed: false,
@@ -4274,9 +4275,32 @@ fn bend_lines_are_long_dashes_with_one_and_two_dots_in_every_group() {
         let scene = Scene::new(Vec2::new(1189.0, 841.0), vec![Group { object: 1, kind: ObjectKind::View, items: items.to_vec() }]);
         scene.validate().unwrap_or_else(|e| panic!("{group:?}: {e}"));
     }
-    for (got, want) in bend_dashes_mm(true, LineGroup::Mm0_35).iter().zip([3.6, 0.54, 0.18, 0.54]) {
+    for (got, want) in bend_dashes_mm(true, LineGroup::Mm0_35).iter().zip([4.32, 0.54, 0.09, 0.54]) {
         assert!((got - want).abs() < 1e-12, "{got} {want}");
     }
+}
+
+/// Each bend line's chain-line pattern starts so its long dash is centred on the line: at half the
+/// line's length the pattern is halfway along its first, long dash.
+#[test]
+fn a_bend_line_has_its_long_dash_at_its_middle() {
+    let mut s = sheet_plate();
+    with_the_model(&mut s, |s| {
+        run(s, "sheet.flange", json!({"edges": [[50, 60, 2]], "height": 20, "flip": true}));
+    });
+    let (id, _) = flat_view(&mut s, json!({"sheet": "Sheet 1", "scale": "1:1"}));
+    let d = s.drawing("test").unwrap();
+    let built = crate::drawing_scene::build(&s, d, d.view(id).unwrap().sheet).unwrap();
+    let mut bends = 0;
+    for item in built.scene.groups.iter().filter(|g| g.object == id).flat_map(|g| &g.items) {
+        let solidcraft_geom::paper::Item::Stroke { path, pattern: Some(dashes), .. } = item else { continue };
+        let period: f64 = dashes.lengths_mm.iter().sum();
+        let length: f64 = path.iter().map(solidcore_record::Seg2::length).sum();
+        let off = ((dashes.phase_mm + length / 2.0).rem_euclid(period) - dashes.lengths_mm[0] / 2.0).abs();
+        assert!(off.min(period - off) < 1e-9, "a {length} mm bend line: {dashes:?}");
+        bends += 1;
+    }
+    assert_eq!(bends, 2, "one bend line up, one down");
 }
 
 /// A bend up and a bend down are drawn in two line types, ISO 128's long dash and dot and its long

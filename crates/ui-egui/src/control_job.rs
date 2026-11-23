@@ -655,6 +655,8 @@ impl SolveApp {
             if crate::control_params::parse::<crate::control_params::Execute>(&req.params).is_err() {
                 return Some(req);
             }
+            // Frame discovery must not add inert panel state after the worker's source snapshot.
+            solidcraft_engine::plugin::sync_panels(&mut self.session);
             let mut copy = self.session.scratch();
             copy.plugin_forms_interactive = crate::plugin_menu::take_interactive_run(self, req.serial);
             if let Some(level) = level {
@@ -818,10 +820,10 @@ impl SolveApp {
             let current = match job.work {
                 Work::Answer { inspection: Some((uid, version)) } if uid == self.session.uid => {
                     let key = (uid, id.to_owned());
-                    if self.plugin_inspection_versions.get(&key).is_some_and(|latest| *latest > version) {
+                    if self.plugins.inspection_versions.get(&key).is_some_and(|latest| *latest > version) {
                         false
                     } else {
-                        self.plugin_inspection_versions.insert(key, version);
+                        self.plugins.inspection_versions.insert(key, version);
                         true
                     }
                 }
