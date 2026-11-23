@@ -200,6 +200,100 @@ fn picked_occurrences(s: &Session, inputs: &[SelInput], i: usize) -> Vec<u64> {
     out
 }
 
+/// A colliding pair as "A and B collide at steps 3-9, 40" (`motion.interference`'s entry).
+fn collision_text(c: &Value) -> String {
+    let steps: Vec<String> = c["steps"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .map(|r| {
+            let (from, to) = (r[0].as_f64().unwrap_or(0.0).round(), r[1].as_f64().unwrap_or(0.0).round());
+            if from == to { format!("{from}") } else { format!("{from}-{to}") }
+        })
+        .collect();
+    let name = |k: &str| c[k].as_str().unwrap_or_default().to_string();
+    solidcraft_ui_text::format("motion.collision", &[("a", &name("a")), ("b", &name("b")), ("steps", &steps.join(", "))])
+}
+
+/// What a collision check is for: the study and the parts to check.
+struct Check {
+    /// The design has contact sets to check among.
+    sets: bool,
+    /// The picked components.
+    parts: Vec<u64>,
+    /// `motion.interference`'s study and its parts, or none while the study has no keys.
+    check: Option<(Value, Value)>,
+    /// What `check` is, to tell a result for it from one for other picks or another study.
+    key: u64,
+}
+
+/// The collision check the study and its picks ask for. A result kept for other picks or
+/// another study is dropped, in the editor and the compact card alike.
+fn collision_check(app: &SolveApp, a: &mut Analysis, study: &Result<Value, String>, inputs: &[SelInput]) -> Check {
+    // Collisions over the whole study: of the picked components (against the other picks, if
+    // any), else among all components or in the contact sets.
+    // Offered when there is a set to check (suppressed ones don't count).
+    let assembly = &app.session.doc.assembly;
+    let sets = assembly.contact_all || assembly.contact_sets.iter().any(|c| !c.suppressed);
+    a.among = if sets { a.among.min(1) } else { 0 };
+    let (parts, against) = (picked_occurrences(&app.session, inputs, 1), picked_occurrences(&app.session, inputs, 2));
+    let among = if !parts.is_empty() {
+        let mut p = json!({"occurrences": parts});
+        if !against.is_empty() {
+            p["against"] = json!(against);
+        }
+        p
+    } else {
+        json!({"contact_sets": a.among == 1})
+    };
+    let check = study.as_ref().ok().map(|st| (st.clone(), among));
+    let key = key_of(&check);
+    if a.collisions.as_ref().is_some_and(|(k, _)| *k != key) {
+        a.collisions = None;
+    }
+    Check { sets, parts, check, key }
+}
+
+/// "Checked up to step N" when a check stopped before the study's end (`truncated`).
+fn checked_to_row(ui: &mut egui::Ui, v: &Value, t: &Tokens) {
+    if v["truncated"] == true {
+        let to = v["checked_to"].as_f64().map(|x| x.round().to_string()).unwrap_or_default();
+        ui.label(RichText::new(solidcraft_ui_text::format("motion.checked_to", &[("step", &to)])).color(t.warning));
+    }
+}
+
+/// The compact Motion Study's collisions: what the editor's last check found for these picks
+/// and this study, each pair dimmed until the step shown is one where it collides, and how far
+/// the check got when it stopped early. A click shows where they first collide.
+#[allow(clippy::too_many_arguments)]
+pub fn compact_collisions(
+    app: &SolveApp,
+    ui: &mut egui::Ui,
+    a: &mut Analysis,
+    study: &Result<Value, String>,
+    inputs: &[SelInput],
+    step: &mut f64,
+    playing: &mut bool,
+    t: &Tokens,
+) {
+    collision_check(app, a, study, inputs);
+    let Some((_, Ok(v))) = a.collisions.as_ref() else { return };
+    let now = step.round();
+    ui.vertical(|ui| {
+        for (i, c) in v["collisions"].as_array().into_iter().flatten().enumerate() {
+            let here = collision_bands(&json!({"collisions": [c]})).iter().any(|[from, to]| (from.round()..=to.round()).contains(&now));
+            let link = ui.link(RichText::new(collision_text(c)).color(if here { t.error } else { t.text_dim }));
+            crate::scenario::publish_handle(&format!("motion:compact_collision:{i}"), link.rect.center());
+            if link.clicked()
+                && let Some(first) = c["first_step"].as_f64()
+            {
+                (*step, *playing) = (first, false);
+            }
+        }
+        checked_to_row(ui, v, t);
+    });
+}
+
 /// The step ranges where any pair collides, from `motion.interference`'s answer.
 pub fn collision_bands(v: &Value) -> Vec<[f64; 2]> {
     let ranges = v["collisions"].as_array().into_iter().flatten().flat_map(|c| c["steps"].as_array().cloned().unwrap_or_default());
@@ -240,24 +334,7 @@ fn collision_rows(
     // Collisions over the whole study: of the picked components (against the other picks, if
     // any), else among all components or in the contact sets.
     // Offered when there is a set to check (suppressed ones don't count).
-    let assembly = &app.session.doc.assembly;
-    let sets = assembly.contact_all || assembly.contact_sets.iter().any(|c| !c.suppressed);
-    a.among = if sets { a.among.min(1) } else { 0 };
-    let (parts, against) = (picked_occurrences(&app.session, inputs, 1), picked_occurrences(&app.session, inputs, 2));
-    let among = if !parts.is_empty() {
-        let mut p = json!({"occurrences": parts});
-        if !against.is_empty() {
-            p["against"] = json!(against);
-        }
-        p
-    } else {
-        json!({"contact_sets": a.among == 1})
-    };
-    let check = study.as_ref().ok().map(|st| (st.clone(), among));
-    let key = key_of(&check);
-    if a.collisions.as_ref().is_some_and(|(k, _)| *k != key) {
-        a.collisions = None;
-    }
+    let Check { sets, parts, check, key } = collision_check(app, a, study, inputs);
     crate::ui_kit::section(ui, "motion_collisions", "Collisions", true, |ui| {
         ui.horizontal(|ui| {
             if sets && parts.is_empty() {
@@ -288,20 +365,8 @@ fn collision_rows(
                         ui.label(RichText::new(solidcraft_ui_text::tr("motion.no_collisions")).color(t.text_dim));
                     }
                     for (i, c) in hits.iter().enumerate() {
-                        let steps: Vec<String> = c["steps"]
-                            .as_array()
-                            .into_iter()
-                            .flatten()
-                            .map(|r| {
-                                let (from, to) = (r[0].as_f64().unwrap_or(0.0).round(), r[1].as_f64().unwrap_or(0.0).round());
-                                if from == to { format!("{from}") } else { format!("{from}-{to}") }
-                            })
-                            .collect();
-                        let name = |k: &str| c[k].as_str().unwrap_or_default().to_string();
-                        let text =
-                            solidcraft_ui_text::format("motion.collision", &[("a", &name("a")), ("b", &name("b")), ("steps", &steps.join(", "))]);
                         // A click shows where they first collide.
-                        let link = ui.link(RichText::new(text).color(t.error));
+                        let link = ui.link(RichText::new(collision_text(c)).color(t.error));
                         crate::scenario::publish_handle(&format!("motion:collision:{i}"), link.rect.center());
                         if link.clicked()
                             && let Some(first) = c["first_step"].as_f64()
@@ -309,10 +374,7 @@ fn collision_rows(
                             (*step, *playing) = (first, false);
                         }
                     }
-                    if v["truncated"] == true {
-                        let to = v["checked_to"].as_f64().map(|x| x.round().to_string()).unwrap_or_default();
-                        ui.label(RichText::new(solidcraft_ui_text::format("motion.checked_to", &[("step", &to)])).color(t.warning));
-                    }
+                    checked_to_row(ui, v, t);
                 });
             });
         }
@@ -494,5 +556,49 @@ mod tests {
         let found = a.collisions.as_ref().and_then(|(_, r)| r.as_ref().ok()).cloned().unwrap_or_default();
         assert_eq!((&found["collisions"][0]["a"], &found["collisions"][0]["first_step"]), (&json!("A:1"), &json!(11.0)), "{:?}", a.collisions);
         assert_eq!(collision_bands(&found), vec![[11.0, 15.0]]);
+    }
+
+    /// The compact card lists what the editor's check found, says when that check stopped early,
+    /// and drops it once the picks it was for change there (#14069).
+    #[test]
+    fn the_compact_study_shows_the_checks_collisions_for_its_picks_only() {
+        let mut h = crate::scenario::Harness::new();
+        for (name, x) in [("A", 0), ("B", 20)] {
+            h.app.run("component.activate", json!({"component": "root"})).unwrap();
+            h.app.run("component.create", json!({ "name": name })).unwrap();
+            h.app.run("solid.box", json!({"length": 10, "width": 10, "height": 10, "corner": [x, 0, 0]})).unwrap();
+        }
+        h.app.run("component.activate", json!({"component": "root"})).unwrap();
+        h.app.run("occurrence.ground", json!({"occurrence": "A:1", "grounded": true})).unwrap();
+        h.app.run("joint.create", json!({"type": "slider", "a": {"face": [10, 5, 5]}, "b": {"face": [20, 5, 5]}, "name": "Rail"})).unwrap();
+        h.app.run("joint.drive", json!({"joint": "Rail", "value": 10})).unwrap();
+        h.app.run("motion.study", json!({"name": "Push", "steps": 15, "keys": [{"joint": "Rail", "points": [[0, 10], [15, -5]]}]})).unwrap();
+        assert_eq!(h.call("ui.start", json!({"command": "motion.study", "params": {"study": "Push"}}))["ok"], true);
+        h.frames(3);
+        let [bx, by] = h.widget("Check collisions").unwrap();
+        h.step(&json!({"click": [bx, by]})).unwrap();
+        h.frames(2);
+        h.step(&json!({"widget": "Compact"})).unwrap();
+        h.frames(2);
+        assert!(h.widget("A:1 · B:1: steps 11-15").is_some(), "compact lists the check's collision");
+
+        // A check that ran out of budget says how far it got, in the compact card too.
+        if let Some(crate::dialogs::Kind::Motion(crate::dialogs_motion::Mo::MotionStudy { analysis, .. })) =
+            h.app.dialog.as_mut().map(|d| &mut d.kind)
+            && let Some((_, Ok(v))) = analysis.collisions.as_mut()
+        {
+            (v["truncated"], v["checked_to"]) = (json!(true), json!(12.0));
+        }
+        h.frames(2);
+        assert!(h.widget(&solidcraft_ui_text::format("motion.checked_to", &[("step", "12")])).is_some(), "the early stop is said");
+
+        // Other parts picked in the compact card: the check was not for them.
+        let body = h.app.session.doc.body_frames(&h.app.session.model.state()).into_iter().next().map(|b| b.0).unwrap();
+        if let Some(d) = h.app.dialog.as_mut() {
+            d.inputs[1].items = vec![solidcraft_engine::Sel::Body { name: body }];
+        }
+        h.frames(2);
+        assert!(shown(&h).0.collisions.is_none(), "the old check is dropped");
+        assert!(h.widget("A:1 · B:1: steps 11-15").is_none());
     }
 }

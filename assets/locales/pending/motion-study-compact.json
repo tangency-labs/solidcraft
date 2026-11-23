@@ -1,0 +1,56 @@
+{
+  "en": {
+    "motion.compact": "Compact",
+    "motion.compact_help": "Show only the playback controls, so the model stays in view",
+    "motion.show_editor": "Show editor",
+    "motion.show_editor_help": "Show the study's keys, chart and tracks again"
+  },
+  "es": {
+    "motion.compact": "Compacto",
+    "motion.compact_help": "Mostrar solo los controles de reproducción, para que el modelo quede a la vista",
+    "motion.show_editor": "Mostrar editor",
+    "motion.show_editor_help": "Volver a mostrar las claves, el gráfico y las pistas del estudio"
+  },
+  "de": {
+    "motion.compact": "Kompakt",
+    "motion.compact_help": "Nur die Wiedergabesteuerung anzeigen, damit das Modell sichtbar bleibt",
+    "motion.show_editor": "Editor anzeigen",
+    "motion.show_editor_help": "Schlüssel, Diagramm und Spuren der Studie wieder anzeigen"
+  },
+  "ko": {
+    "motion.compact": "간단히",
+    "motion.compact_help": "모델이 보이도록 재생 컨트롤만 표시합니다",
+    "motion.show_editor": "편집기 표시",
+    "motion.show_editor_help": "연구의 키, 차트 및 트랙을 다시 표시합니다"
+  },
+  "ja": {
+    "motion.compact": "コンパクト",
+    "motion.compact_help": "モデルが見えるように、再生コントロールだけを表示します",
+    "motion.show_editor": "エディターを表示",
+    "motion.show_editor_help": "スタディのキー、グラフ、トラックを再び表示します"
+  },
+  "zh": {
+    "motion.compact": "紧凑",
+    "motion.compact_help": "只显示播放控件，让模型保持可见",
+    "motion.show_editor": "显示编辑器",
+    "motion.show_editor_help": "重新显示研究的按键、图表和轨迹"
+  },
+  "ar": {
+    "motion.compact": "مضغوط",
+    "motion.compact_help": "إظهار عناصر التحكم في التشغيل فقط، ليبقى النموذج ظاهرًا",
+    "motion.show_editor": "إظهار المحرر",
+    "motion.show_editor_help": "إظهار مفاتيح الدراسة ومخططها ومساراتها مرة أخرى"
+  },
+  "he": {
+    "motion.compact": "מצומצם",
+    "motion.compact_help": "הצגת פקדי ההפעלה בלבד, כדי שהמודל יישאר גלוי",
+    "motion.show_editor": "הצגת העורך",
+    "motion.show_editor_help": "הצגה מחדש של נקודות המפתח, התרשים והרצועות של חקר התנועה"
+  },
+  "vi": {
+    "motion.compact": "Thu gọn",
+    "motion.compact_help": "Chỉ hiện các nút điều khiển phát, để mô hình luôn trong tầm nhìn",
+    "motion.show_editor": "Hiện trình chỉnh sửa",
+    "motion.show_editor_help": "Hiện lại các khóa, biểu đồ và rãnh của nghiên cứu"
+  }
+}
