@@ -11301,3 +11301,168 @@ fn a_profile_sketch_off_the_flange_or_with_a_loose_loop_is_refused() {
     assert!(e.to_string().contains("must hold one closed profile (holes inside it are fine), not 2"), "{e}");
     assert_eq!(s.doc.to_json(), before);
 }
+
+/// [`profile_on_front`]'s plate with a flange from a 100 x 40 profile on its front edge that holds
+/// a Ø10 hole at (60, 25) and a slot 8 wide from (15, 25) to (35, 25), two lines and two arcs: the
+/// flange's id, and the curves of the hole and the slot.
+fn holed_profile_flange(s: &mut Session) -> (u64, Vec<String>) {
+    profile_on_front(s, &[[0.0, 0.0], [100.0, 0.0], [100.0, 40.0], [0.0, 40.0]], None);
+    run(s, "sketch.edit", json!({"sketch": "Shape"}));
+    let circle = run(s, "sketch.circle.center", json!({"center": [60, 25], "radius": 5}));
+    let slot = run(s, "sketch.slot.center_to_center", json!({"p0": [15, 25], "p1": [35, 25], "width": 8}));
+    run(s, "sketch.finish", json!({}));
+    run(s, "sheet.flange", json!({"edges": [[50, 0, 2.5]], "height": 1, "profile": "Shape"}));
+    let flange = s.doc.features.last().map_or(0, |f| f.id);
+    let curves: Vec<String> =
+        circle["curves"].as_array().into_iter().chain(slot["curves"].as_array()).flatten().filter_map(|c| c.as_str().map(str::to_string)).collect();
+    assert_eq!(curves.len(), 5, "{circle} {slot}");
+    (flange, curves)
+}
+
+/// Each face of the sheet's body: its name (empty for none), whether it is exact, and its centroid.
+fn named_sheet_faces(s: &mut Session) -> Vec<(String, bool, solidcore_record::Vec3)> {
+    let body = s.model.state().bodies.first().map(|b| b.name.clone()).unwrap_or_default();
+    let r = run(s, "model.faces", json!({"body": body}));
+    r["faces"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .map(|f| {
+            let c = &f["centroid"];
+            let at =
+                solidcore_record::Vec3::new(c[0].as_f64().unwrap_or(f64::NAN), c[1].as_f64().unwrap_or(f64::NAN), c[2].as_f64().unwrap_or(f64::NAN));
+            (f["name"].as_str().unwrap_or_default().to_string(), f["exact"].as_bool().unwrap_or(false), at)
+        })
+        .collect()
+}
+
+/// Every named face (`f`), edge (`e`) and vertex (`v`) of the sheet's body, with where it is: a
+/// face's centroid, an edge's middle, a vertex's point.
+fn sheet_names_by_place(s: &mut Session) -> Vec<(char, String, solidcore_record::Vec3)> {
+    let mut all: Vec<(char, String, solidcore_record::Vec3)> =
+        named_sheet_faces(s).into_iter().filter(|f| !f.0.is_empty()).map(|(n, _, at)| ('f', n, at)).collect();
+    let body = s.model.state().bodies.first().map(|b| b.name.clone()).unwrap_or_default();
+    let edges = run(s, "model.edges", json!({"body": body}));
+    for e in edges["edges"].as_array().into_iter().flatten() {
+        let (Some(name), Some(m)) = (e["name"].as_str().filter(|n| !n.is_empty()), e["mid"].as_array()) else { continue };
+        let at = solidcore_record::Vec3::new(m[0].as_f64().unwrap_or(f64::NAN), m[1].as_f64().unwrap_or(f64::NAN), m[2].as_f64().unwrap_or(f64::NAN));
+        all.push(('e', name.to_string(), at));
+    }
+    let state = s.model.state();
+    let b = state.body(&body).unwrap();
+    let points = &b.body.record().vertices;
+    for (name, v) in solidcraft_doc::naming::vertex_names(b).into_iter().zip(points) {
+        if !name.is_empty() {
+            all.push(('v', name, solidcore_record::Vec3::new(v.point[0], v.point[1], v.point[2])));
+        }
+    }
+    all
+}
+
+/// #3516 (#20573 is the base flange's twin): the walls of a profile flange's holes and slots are
+/// named after the curves of its profile sketch, `F<flange>:side:<curve>` (each piece of a wall
+/// numbered along its curve), as a cut's are, never counted among the flange's faces
+/// (`F<flange>:face:<k>`), which renumber when the part is edited. Every face is named exactly.
+#[test]
+fn a_profile_flanges_hole_and_slot_walls_are_named_after_their_profile_curves() {
+    let mut s = Session::default();
+    let (flange, curves) = holed_profile_flange(&mut s);
+    assert!(no_errors_or_warnings(&s), "{:?}", s.model.results);
+    let faces = named_sheet_faces(&mut s);
+    let inexact: Vec<_> = faces.iter().filter(|f| !f.1 || f.0.is_empty()).collect();
+    assert!(inexact.is_empty(), "named from no history: {inexact:?}");
+    // The walls: the faces whose middles lie in the hole or the slot, seen from the front.
+    let small = 1e-6;
+    let in_hole = |p: solidcore_record::Vec3| (p.x - 60.0).hypot(p.z - 25.0) < 5.0 + small;
+    let in_slot = |p: solidcore_record::Vec3| p.x > 11.0 - small && p.x < 39.0 + small && p.z > 21.0 - small && p.z < 29.0 + small;
+    let walls: Vec<&(String, bool, solidcore_record::Vec3)> = faces.iter().filter(|f| in_hole(f.2) || in_slot(f.2)).collect();
+    assert!(walls.len() >= 5, "{faces:?}");
+    let curve_of = |name: &str| {
+        let rest = name.strip_prefix(&format!("F{flange}:side:"))?;
+        Some(rest.split('#').next().unwrap_or(rest).to_string())
+    };
+    for (name, _, at) in &walls {
+        let curve = curve_of(name);
+        assert!(curve.as_ref().is_some_and(|c| curves.contains(c)), "the wall at {at:?} is `{name}`, not after a curve of {curves:?}");
+    }
+    // Each curve of the hole and the slot names a wall, the hole's by its circle.
+    for c in &curves {
+        assert!(walls.iter().any(|w| curve_of(&w.0).as_deref() == Some(c.as_str())), "no wall after `{c}`: {walls:?}");
+    }
+    assert!(walls.iter().filter(|w| in_hole(w.2)).all(|w| curve_of(&w.0).as_deref() == curves.first().map(String::as_str)), "{walls:?}");
+}
+
+/// #3516: an edit upstream of a profile flange's walls renames nothing it did not make: a hole
+/// added to the profile sketch, and a hole cut through the base before the flange. Every face,
+/// edge and vertex the part had keeps its name, compared where each is (a face the hole cuts
+/// into, where its name still names one face).
+#[test]
+fn a_profile_flanges_names_hold_when_holes_are_added_upstream() {
+    for edit in ["profile", "base"] {
+        let mut s = Session::default();
+        let (flange, _) = holed_profile_flange(&mut s);
+        let before = sheet_names_by_place(&mut s);
+        assert!(before.iter().any(|(k, n, _)| *k == 'f' && n.starts_with(&format!("F{flange}:side:"))), "{before:?}");
+        if edit == "profile" {
+            run(&mut s, "sketch.edit", json!({"sketch": "Shape"}));
+            run(&mut s, "sketch.circle.center", json!({"center": [85, 25], "radius": 4}));
+            run(&mut s, "sketch.finish", json!({}));
+        } else {
+            // Before the profile's sketch and the flange.
+            let at = s.doc.features.iter().position(|f| f.name == "Shape").unwrap();
+            run(&mut s, "timeline.rollback", json!({"position": at}));
+            run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Hole"}));
+            run(&mut s, "sketch.circle.center", json!({"center": [50, 30], "radius": 5}));
+            run(&mut s, "sketch.finish", json!({}));
+            run(&mut s, "solid.extrude", json!({"sketch": "Hole", "through_all": true, "operation": "cut", "direction": "symmetric"}));
+            run(&mut s, "timeline.rollback", json!({"position": "end"}));
+        }
+        assert!(no_errors_or_warnings(&s), "{edit}: {:?}", s.model.results);
+        let after = sheet_names_by_place(&mut s);
+        assert!(after.len() > before.len(), "{edit}: the hole adds faces, edges and vertices");
+        let mut renamed = Vec::new();
+        for (kind, name, at) in &before {
+            let now = after.iter().filter(|(k, _, p)| k == kind && p.dist(*at) < 1e-6).map(|(_, n, _)| n.as_str()).collect::<Vec<_>>();
+            // A face the new hole cuts into (the flange's caps, the base's) has moved its middle:
+            // it keeps its name, on one face.
+            let reshaped = *kind == 'f' && now.is_empty() && after.iter().filter(|(k, n, _)| *k == 'f' && n == name).count() == 1;
+            if now != [name.as_str()] && !reshaped {
+                renamed.push(format!("{kind} {name} at {at:?} is now {now:?}"));
+            }
+        }
+        assert!(renamed.is_empty(), "{edit}: {renamed:#?}");
+    }
+}
+
+/// #3516: a construction plane on the straight wall of a profile flange's slot stays on that wall
+/// when holes are added to the profile, one before the slot's wall among the flange's faces: the
+/// wall's name is its curve's, never its place among them.
+#[test]
+fn a_plane_on_a_profile_flanges_slot_wall_stays_on_it_when_the_profile_gains_holes() {
+    use solidcraft_doc::construct::ConstructGeom;
+    let mut s = Session::default();
+    let (flange, _) = holed_profile_flange(&mut s);
+    // The slot's straight wall below its middle, at z = 21.
+    let faces = named_sheet_faces(&mut s);
+    let (name, _, at) =
+        faces.iter().find(|f| (f.2.z - 21.0).abs() < 1e-6 && (f.2.x - 25.0).abs() < 1e-6).cloned().unwrap_or_else(|| panic!("{faces:?}"));
+    assert!(name.starts_with(&format!("F{flange}:side:")), "{name}");
+    run(&mut s, "construct.plane.offset", json!({"base": {"face": [at.x, at.y, at.z]}, "offset": 1, "name": "On Slot"}));
+    let plane = |s: &Session| {
+        let state = s.model.state();
+        match state.construct.iter().find(|c| c.name == "On Slot").map(|c| &c.geom) {
+            Some(ConstructGeom::Plane(p)) => *p,
+            other => panic!("construction plane: {other:?}"),
+        }
+    };
+    let was = plane(&s);
+    assert!((was.normal().z.abs() - 1.0).abs() < 1e-9 && ((was.origin.z - 21.0).abs() - 1.0).abs() < 1e-9, "{was:?}");
+    run(&mut s, "sketch.edit", json!({"sketch": "Shape"}));
+    run(&mut s, "sketch.circle.center", json!({"center": [6, 25], "radius": 3}));
+    run(&mut s, "sketch.circle.center", json!({"center": [85, 25], "radius": 4}));
+    run(&mut s, "sketch.finish", json!({}));
+    assert!(no_errors_or_warnings(&s), "{:?}", s.model.results);
+    let now = plane(&s);
+    assert!(now.origin.dist(was.origin) < 1e-9 && now.normal().dist(was.normal()) < 1e-9, "moved off the slot's wall: {was:?} -> {now:?}");
+    assert!(named_sheet_faces(&mut s).iter().any(|f| f.0 == name && f.2.dist(at) < 1e-6), "`{name}` is no longer the slot's wall");
+}

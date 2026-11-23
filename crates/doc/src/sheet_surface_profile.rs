@@ -60,6 +60,24 @@ struct Side {
     at_start: bool,
 }
 
+/// Where a profile flange's profile sketch lies in the chart of the panel it made: the map that
+/// put its holes there, by which their walls are named after the sketch's curves, as a cut's are
+/// (see [`SurfaceSheet::name_hole`]).
+#[derive(Clone, Copy)]
+pub struct ProfileChart {
+    plane: Plane,
+    back: Rigid3,
+    shift: f64,
+}
+
+impl ProfileChart {
+    /// The point `p` of the sketch (in its plane's coordinates) in the panel's chart.
+    pub fn point(&self, p: Vec2) -> Vec2 {
+        let q = self.back.point(self.plane.to_world(p));
+        Vec2::new(q.x - self.shift, q.y)
+    }
+}
+
 impl SurfaceSheet {
     /// Where a profile sketch for the flange panel `panel` is drawn (#3516), in the body's
     /// coordinates: on the flange's outer face, its origin where the bend starts on its outer
@@ -87,7 +105,8 @@ impl SurfaceSheet {
     /// holes the panel's holes. Nothing of it but its bottom line and its two sides, straight
     /// lines running square to the edge from the bottom line's ends out to the bend's tangent
     /// line or past it, may lie in the bend (see the module's note on leaning sides). The new
-    /// bend's joint; its corners are not closed yet (see [`SurfaceSheet::close_flange_corners`]).
+    /// bend's joint, its corners not closed yet (see [`SurfaceSheet::close_flange_corners`]), and
+    /// where the profile lies in the new panel's chart.
     pub fn profile_flange_on(
         &mut self,
         edge: FreeEdge,
@@ -97,7 +116,7 @@ impl SurfaceSheet {
         radius: f64,
         position: &str,
         flip: bool,
-    ) -> Result<usize> {
+    ) -> Result<(usize, ProfileChart)> {
         let t = self.sheet.thickness;
         let from = HeightFrom::Outer;
         // How far the bend reaches out along the flange from its outer sharp: its tangent line.
@@ -271,6 +290,7 @@ impl SurfaceSheet {
         let bend_len = rbend.length;
         // The profile in the new panel's chart: along the edge to the stretch's start, and out by
         // as far as the anchor lies past the outer sharp.
+        // With `to_frame`, the sketch's point `p` lies at `back(p) - (shift, 0)`: `ProfileChart`.
         let to_chart = |p: Vec2| Vec2::new(p.x - shift, p.y + past);
         let moved = |s: &Seg2| match *s {
             Seg2::Arc { center, radius, start, sweep } => Seg2::Arc { center: to_chart(center), radius, start, sweep },
@@ -293,7 +313,7 @@ impl SurfaceSheet {
             Some(panel) => panel.region = region,
             None => return err("the flange has no panel"),
         }
-        Ok(j)
+        Ok((j, ProfileChart { plane: *plane, back, shift }))
     }
 }
 
@@ -351,7 +371,7 @@ mod tests {
             let edge = s.free_edge_at(Vec3::new(20.0, 0.0, 2.0)).unwrap().unwrap();
             let pts = [Vec2::new(x0, 0.0), Vec2::new(x1, 0.0), Vec2::new(x1, 53.0), Vec2::new(x0, 53.0)];
             let profile = Region2 { outer: Loop2::polygon(&pts).ccw(), holes: Vec::new() };
-            let j = s.profile_flange_on(edge, &plane, &profile, PI / 2.0, 1.0, "inside", false).unwrap();
+            let (j, _) = s.profile_flange_on(edge, &plane, &profile, PI / 2.0, 1.0, "inside", false).unwrap();
             s.close_flange_corners(&[j]).unwrap();
             s.build().unwrap();
             assert!(s.notes.is_empty(), "{what}: {:?}", s.notes);

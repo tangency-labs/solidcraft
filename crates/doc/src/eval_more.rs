@@ -1411,13 +1411,17 @@ pub(super) fn sheet_eval(
             let order = doc.feature_index(f.id).unwrap_or(usize::MAX);
             let mut made = Vec::with_capacity(picks.len());
             let mut square = Vec::with_capacity(picks.len());
+            // A profile's flange: its panel, and where its profile lies in the panel's chart.
+            let mut profile_panel = None;
             for (k, (edge, runs)) in picks.into_iter().enumerate() {
                 // One bend for each run: a split edge's butt where its runs meet. A profile's
                 // flange is one bend on the stretch its bottom line runs along, at the edge's
                 // angle and to its side.
                 let (joints, sides) = match (&outline, runs.first()) {
                     (Some((plane, region)), Some(&(_, _, _, angle, side))) => {
-                        (vec![sk.profile_flange_on(edge, plane, region, angle, rr, position, side).map_err(named(k))?], Vec::new())
+                        let (j, chart) = sk.profile_flange_on(edge, plane, region, angle, rr, position, side).map_err(named(k))?;
+                        profile_panel = sk.sheet.joints.get(j).map(|joint| (joint.b.panel, chart));
+                        (vec![j], Vec::new())
                     }
                     _ => sk.flanges_on(edge, &runs, rr, position, from).map_err(named(k))?,
                 };
@@ -1446,6 +1450,18 @@ pub(super) fn sheet_eval(
             let made: Vec<usize> = made.into_iter().flatten().collect();
             sk.clear_of_neighbours(&made)?;
             tag_panels(&mut sk, Some(&before), n0, f.id, PanelsBy::Bends(&[]));
+            // The profile's holes are its panel's: their walls are named after the profile's
+            // curves, as a cut's are (see `SurfaceSheet::name_hole`), under the flange and the key
+            // its panel has just been given.
+            let drawn = profile.as_ref().and_then(|s| st.sketch(s.0)).zip(outline.as_ref().map(|(_, region)| region));
+            if let (Some((p, chart)), Some((ss, region))) = (profile_panel, drawn)
+                && let Some(panel) = sk.sheet.panels.get(p)
+            {
+                let (key, holes) = (panel.name.clone(), panel.region.holes.clone());
+                for hole in &holes {
+                    sk.name_hole(&key, hole, f.id, ss, std::slice::from_ref(region), &|q| chart.point(q));
+                }
+            }
             if let Some(slot) = st.surface_sheets.get_mut(i) {
                 *slot = sk;
             }

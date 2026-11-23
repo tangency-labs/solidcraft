@@ -74,7 +74,7 @@ engine already has:
 | a bend zone | `F<f>:bend.inner:<rim>`, `F<f>:bend.outer:<rim>`, `F<f>:bend.end0:<rim>`, `bend.end1` |
 | a flange's rim past its bend's end, where a closed corner runs it on | `F<f>:past0:<rim>`, `past1` (`past0` at the joint's anchor origin) when its own feature closed the corner; `F<g>:past0:<bend end>` when a later feature `g` did |
 | a tab's caps (bend material riding with one panel) | `F<f>:tab.top:<rim>`, `tab.bottom` when the bend's own feature made the tab; `F<cut>:tab.top:<bend face on that side>` when a later cut freed it |
-| a hole or cut wall | `F<cut>:side:<curve>`, pieces told apart by the faces that bound them, else `#k` by where each starts along the curve |
+| a hole or cut wall | `F<cut>:side:<curve>`, pieces told apart by the faces that bound them, else `#k` by where each starts along the curve; a profile flange's holes and slots are its own, `F<f>:side:<curve>` after its profile sketch's curves |
 | a relief wall | `F<f>:relief(<edge between the two rims>)`, `<f>` the feature whose build cut it |
 | a converted sheet's faces | the source body's face names, carried |
 
