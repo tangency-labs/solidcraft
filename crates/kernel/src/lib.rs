@@ -314,6 +314,7 @@ pub use emboss::cylinder_emboss_anchor;
 pub use emboss::emboss_anchor;
 pub use emboss::emboss_cylinder;
 pub use emboss::emboss_cylinder_at;
+pub use emboss::emboss_profiles_lie_on_flat_faces;
 pub use emboss::emboss_project_face;
 pub use emboss::has_cylinder_emboss_wall;
 pub use emboss::infer_cylinder_emboss;

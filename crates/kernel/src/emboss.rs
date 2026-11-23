@@ -88,7 +88,16 @@ fn wall_angles(b: &Brep, face: usize, o: Vec3, axis: Vec3, radial: Vec3, tangent
 
 /// Whether every profile's outline lies on flat faces of `body` in the sketch's plane, decided
 /// exactly on those faces' trims ([`Body::point_lies_on_face`]) at the outline's points. Then
-/// the profiles are drawn on the body's face, not on a plane touching a cylinder wall.
+/// the profiles are drawn on the body's face, not on a plane touching a cylinder wall: an emboss
+/// with no face picked raises them from that face instead of looking for a wall to wrap onto,
+/// even where a round beside the face touches the plane (#21195). A picked face is not asked.
+pub fn emboss_profiles_lie_on_flat_faces(body: &Body, plane: &Plane, regions: &[Region2]) -> Result<bool> {
+    if body.is_mesh() {
+        return Ok(false);
+    }
+    guard("emboss flat-face check", || profiles_on_flat_faces(body, &record(body)?, plane, regions))
+}
+
 fn profiles_on_flat_faces(body: &Body, rec: &Brep, plane: &Plane, regions: &[Region2]) -> Result<bool> {
     let normal = plane.normal();
     let tol = (body.size() * 1e-7).max(1e-7);
@@ -397,11 +406,6 @@ pub fn infer_cylinder_emboss(body: &Body, plane: &Plane, regions: &[Region2], de
     guard("cylinder emboss inference", || {
         let rec = record(body)?;
         let tol = (body.size() * 1e-8).max(1e-8);
-        // Profiles drawn on a flat face of the body are raised from that face, even where a
-        // round beside it touches the sketch's plane (#21195).
-        if profiles_on_flat_faces(body, &rec, plane, regions)? {
-            return Ok(None);
-        }
         let mut tangent = false;
         for face in 0..rec.faces.len() {
             if face >= 50_000 {

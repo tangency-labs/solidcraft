@@ -388,6 +388,10 @@ fn infer_emboss_selection(
             solidcraft_doc::apply_vector(&inverse, displayed.plane.y),
         )
         .ok_or_else(|| bad(cmd, "invalid cylinder sketch frame"))?;
+        // Profiles drawn on a flat face of this body are raised from it, not wrapped (#21195).
+        if solidcraft_kernel::emboss_profiles_lie_on_flat_faces(&raw.body, &plane, &regions).map_err(|e| bad(cmd, e.to_string()))? {
+            continue;
+        }
         if let Some((_, at)) =
             solidcraft_kernel::infer_cylinder_emboss(&raw.body, &plane, &regions, if deboss { -d } else { d }).map_err(|e| bad(cmd, e.to_string()))?
         {
