@@ -3513,6 +3513,7 @@ fn clear_offset_roles(b: &mut Brep) -> Result<()> {
 mod tests {
     use super::*;
     use crate::curve::line::Line;
+    use crate::error::ErrorKind;
     use crate::geom::attribute::{AttributeStore, ObjectKey};
     use crate::geom::axis2_placement::Axis2Placement;
     use crate::geom::vector2d::Vec2;
@@ -3881,13 +3882,16 @@ mod tests {
     #[test]
     fn synchronization_null_original_and_empty_maps_do_not_need_a_brep() {
         let mut executive = executive();
-        assert!(matches!(
-            sync(&mut executive, None, None),
-            Err(SolidError::Upstream {
-                code: crate::error::SM_ERR_NULL_POINTER,
-                ..
-            })
-        ));
+        let r = sync(&mut executive, None, None);
+        assert_eq!(
+            outcome(&r),
+            (
+                ErrorKind::InvalidInput,
+                Some(crate::error::SM_ERR_NULL_POINTER),
+                false
+            ),
+            "{r:?}"
+        );
         let a = EdgeuseId::from_index(100);
         assert_eq!(
             sync(&mut executive, Some(a), None).unwrap(),
@@ -4083,15 +4087,18 @@ mod tests {
         assert!(!kernel.context.doing_boolean());
         // A strict interior break splits; the scan then reads the split use's CCW edge
         // use, which this hand-built wire use leaves unlinked (upstream would dereference
-        // NULL), so it stops there with SM_ERR_NULL_POINTER.
+        // NULL), so it stops there: a defect (a B-rep the kernel made links every edge use
+        // of a loop to its neighbours), with SM_ERR_NULL_POINTER.
         let (result, _) = insert(&mut brep, &mut kernel, &[max_break]);
-        assert!(matches!(
-            result,
-            Err(SolidError::Upstream {
-                code: crate::error::SM_ERR_NULL_POINTER,
-                ..
-            })
-        ));
+        assert_eq!(
+            outcome(&result),
+            (
+                ErrorKind::StageFailed,
+                Some(crate::error::SM_ERR_NULL_POINTER),
+                true
+            ),
+            "{result:?}"
+        );
         assert_eq!(brep.edges().len(), edges + 1);
     }
 
@@ -4126,13 +4133,16 @@ mod tests {
         executive.set_offset_brep(brep);
         // The split completes; the unlinked CCW edge use of the hand-built wire use then
         // stops the scan (see break_insertion_skips_boundaries_and_continues_past_refused_splits).
-        assert!(matches!(
-            sync(&mut executive, Some(a), Some(b)),
-            Err(SolidError::Upstream {
-                code: crate::error::SM_ERR_NULL_POINTER,
-                ..
-            })
-        ));
+        let r = sync(&mut executive, Some(a), Some(b));
+        assert_eq!(
+            outcome(&r),
+            (
+                ErrorKind::StageFailed,
+                Some(crate::error::SM_ERR_NULL_POINTER),
+                true
+            ),
+            "{r:?}"
+        );
         assert_eq!(executive.offset_brep().unwrap().edges().len(), 3);
         assert_eq!(executive.offset_edgeuse(a), Some(part));
         assert_eq!(executive.offset_edgeuse(b), Some(whole));
@@ -4684,10 +4694,39 @@ mod tests {
                 key_of: &loopuse::notify_ref,
             },
         );
-        assert!(
-            matches!(status, Err(SolidError::Upstream { code: 1001, .. })),
+        // a kind the routine cannot handle, named, with the status it replaced
+        assert_eq!(
+            outcome(&status),
+            (ErrorKind::Unsupported, Some(crate::error::SM_ERR), false),
             "{status:?}"
         );
+        assert_eq!(status.unwrap_err().operation(), OP);
+    }
+
+    /// The class, the status the goldens read and whether it is a defect, of `r`'s error.
+    fn outcome<T: core::fmt::Debug>(r: &Result<T>) -> (ErrorKind, Option<i32>, bool) {
+        let e = r.as_ref().unwrap_err();
+        (e.kind(), crate::error::upstream_status(e), e.is_defect())
+    }
+
+    /// A missing link of a B-rep (the kernel's fault) is a defect; a missing argument is
+    /// the caller's input. Both keep upstream's `SM_ERR_NULL_POINTER`.
+    #[test]
+    fn missing_links_are_defects_and_missing_arguments_input_with_their_status() {
+        let null = Some(crate::error::SM_ERR_NULL_POINTER);
+        let mut executive = executive();
+        // no edge use to synchronize: the caller's input
+        let r = sync(&mut executive, None, None);
+        assert_eq!(outcome(&r), (ErrorKind::InvalidInput, null, false), "{r:?}");
+        // no vertex to offset: the caller's input
+        let r = executive.build_offset_of_vertex(&Kernel::default(), &Brep::new(), None);
+        assert_eq!(outcome(&r), (ErrorKind::InvalidInput, null, false), "{r:?}");
+        // a mapped edge use with no offset B-rep to read it in: the executive's fault
+        let (a, b) = (EdgeuseId::from_index(80), EdgeuseId::from_index(81));
+        executive.relate_edgeuses(a, b);
+        let r = sync(&mut executive, Some(a), None);
+        assert_eq!(outcome(&r), (ErrorKind::StageFailed, null, true), "{r:?}");
+        assert_eq!(r.unwrap_err().operation(), OP);
     }
 
     #[test]
@@ -4801,14 +4840,18 @@ mod tests {
             Err(SolidError::NotFound { entity: EntityRef::Edgeuse(id), .. }) if id == missing
         ));
         // A missing first edge is checked before even reading the other face.
+        // An edge use with no edge is a defect (the kernel links every edge use to its edge).
         original.edgeuse_mut(first).unwrap().edge = None;
-        assert!(matches!(
-            prepare(&mut exec, &original, first, missing),
-            Err(SolidError::Upstream {
-                code: crate::error::SM_ERR_NULL_POINTER,
-                ..
-            })
-        ));
+        let r = prepare(&mut exec, &original, first, missing);
+        assert_eq!(
+            outcome(&r),
+            (
+                ErrorKind::StageFailed,
+                Some(crate::error::SM_ERR_NULL_POINTER),
+                true
+            ),
+            "{r:?}"
+        );
     }
 
     #[test]
