@@ -1495,6 +1495,25 @@ mod tests {
         assert_eq!(plugins[0].path, path, "Preferences still lists metadata-only inspected packages");
     }
 
+    /// #21228: listing the installed plugins, about once a second, reads and hashes a component
+    /// only when it changed. Same-size bytes written back with the old modification time are not
+    /// read again (the approval stays), and a component of another size is hashed again.
+    #[test]
+    fn listing_plugins_hashes_a_component_only_when_it_changed() {
+        let h = crate::scenario::Harness::new();
+        let installed = h.dir.join("installed");
+        hand_install(&package(&h, "workshop-helper"), &installed, "workshop-helper");
+        let approval = || inventory(Some(&installed), std::iter::empty()).0[0].approval.clone();
+        let first = approval();
+        let component = installed.join("workshop-helper").join("plugin.wasm");
+        let modified = std::fs::metadata(&component).unwrap().modified().unwrap();
+        std::fs::write(&component, b"\0asm\x0d\0\x01\x01").unwrap();
+        std::fs::File::options().write(true).open(&component).unwrap().set_modified(modified).unwrap();
+        assert_eq!(approval(), first, "an unchanged size and time is not read again");
+        std::fs::write(&component, b"\0asm\x0d\0\x01\0\0").unwrap();
+        assert_ne!(approval(), first, "a changed component is hashed again");
+    }
+
     #[test]
     fn ids_and_manifests_refuse_what_would_not_fit_on_the_page() {
         assert!(valid_id("a"));
