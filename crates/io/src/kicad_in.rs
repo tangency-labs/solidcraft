@@ -240,6 +240,9 @@ pub struct KicadPad {
     pub layers: Vec<String>,
     /// `(width, height)` of the drill, if any.
     pub drill: Option<[f64; 2]>,
+    /// How far the pad's copper sits from its position (and its hole), in the pad's own frame:
+    /// `(drill … (offset dx dy))`. The hole stays at `at`.
+    pub offset: [f64; 2],
     pub roundrect_ratio: f64,
 }
 
@@ -2934,7 +2937,8 @@ fn pad_loops(pad: &KicadPad) -> Vec<Vec<[f64; 2]>> {
         _ => vec![[-sx * 0.5, -sy * 0.5], [sx * 0.5, -sy * 0.5], [sx * 0.5, sy * 0.5], [-sx * 0.5, sy * 0.5]],
     };
     for p in &mut points {
-        let [x, y] = turn_in_pad(pad, p[0], p[1]);
+        // The copper's offset from the hole is in the pad's frame, so it turns with the pad.
+        let [x, y] = turn_in_pad(pad, p[0] + pad.offset[0], p[1] + pad.offset[1]);
         p[0] = x + pad.at[0];
         p[1] = y + pad.at[1];
     }
@@ -3186,12 +3190,18 @@ fn parse_pad(expr: &Expr<'_>) -> std::result::Result<KicadPad, String> {
         let second = n.get(1).copied().unwrap_or(first);
         Some([first, if second.is_finite() && second > 0.0 { second } else { first }])
     });
+    // An SMD pad writes `(drill (offset dx dy))` with no drill size: the offset still applies.
+    let offset = field(expr, "drill")
+        .and_then(|drill| field(drill, "offset"))
+        .and_then(numeric_atoms)
+        .and_then(|n| Some([*n.first()?, *n.get(1)?]))
+        .unwrap_or([0.0, 0.0]);
     let roundrect_ratio = field(expr, "roundrect_rratio")
         .and_then(|e| numbers(e, 1).ok())
         .and_then(|n| n.first().copied())
         .filter(|v| v.is_finite() && *v >= 0.0 && *v <= 0.5)
         .unwrap_or(0.0);
-    Ok(KicadPad { at: [x, y, angle], size: [sx, sy], shape, layers, drill, roundrect_ratio })
+    Ok(KicadPad { at: [x, y, angle], size: [sx, sy], shape, layers, drill, offset, roundrect_ratio })
 }
 
 fn numeric_atoms(expr: &Expr<'_>) -> Option<Vec<f64>> {

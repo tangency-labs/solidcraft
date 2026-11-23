@@ -841,6 +841,14 @@ fn axis_origin(s: &Session, v: &Value, cmd: &str) -> Result<JointOrigin> {
 
 /// A joint origin from parameters: a named origin, or a snap given in world coordinates.
 pub(crate) fn origin_param(s: &Session, v: Option<&Value>, cmd: &str) -> Result<JointOrigin> {
+    let origin = read_origin_param(s, v, cmd)?;
+    if persistent_alignment(&origin).is_some() {
+        check_alignment_path(s, &origin, cmd)?;
+    }
+    Ok(origin)
+}
+
+fn read_origin_param(s: &Session, v: Option<&Value>, cmd: &str) -> Result<JointOrigin> {
     let v = v.ok_or_else(|| bad(cmd, "joint origins `a` and `b` are required"))?;
     if let Value::String(name) = v {
         if let Some(o) = s.doc.assembly.origins.iter().find(|o| &o.name == name) {
@@ -885,6 +893,9 @@ fn origin_on_part(s: &Session, v: &Value, cmd: &str) -> Result<JointOrigin> {
         (None, Some(f)) => ("frame", f.get("origin").and_then(vec3).ok_or_else(|| bad(cmd, "`frame` needs origin and z"))?),
         _ => return Err(bad(cmd, "a joint origin needs face, circle, edge, point, plane, axis or frame [x, y, z], or a face's name")),
     };
+    if matches!(what, "edge" | "frame" | "point") && v.get("x").is_some_and(|x| x.get("reference").is_some() || x.get("planar_face").is_some()) {
+        return Err(bad(cmd, "secondary axis alignment requires a face, circle, plane or axis origin"));
+    }
     let occurrence = match v.get("occurrence") {
         Some(o) => occurrence_id(s, Some(o), cmd)?,
         None => occurrence_at(s, world).ok_or_else(|| bad(cmd, "no body there"))?,
@@ -948,6 +959,23 @@ fn origin_on_part(s: &Session, v: &Value, cmd: &str) -> Result<JointOrigin> {
         && let Some(z) = given_z(v, &local_dir, cmd)?
     {
         let at = local(world);
+        if let Snap::CircleCenter { x: Some(x @ (XRef::Reference { .. } | XRef::Planar { .. })), .. } = &o.snap {
+            // This reference cannot become a point or a captured direction during centre recovery.
+            if let Ok(kept) = settle(s, o.clone(), v, cmd)
+                && same_frame(s, &kept, at, z)
+            {
+                return Ok(kept);
+            }
+            let Some(Snap::CircleCenter { pick, face: Some(face), end, .. }) = joints::round_end_at(&s.doc, &st, component, at) else {
+                return Err(bad(cmd, "secondary axis alignment needs a persistent round origin"));
+            };
+            let snap = Snap::CircleCenter { pick, face: Some(face), end, x: Some(x.clone()) };
+            let kept = settle(s, JointOrigin::new(occurrence, snap), v, cmd)?;
+            if !same_frame(s, &kept, at, z) {
+                return Err(bad(cmd, "the round origin does not keep the requested axis and centre"));
+            }
+            return Ok(kept);
+        }
         // The turn the point gave, kept.
         let point = Snap::Point { point: at, z: Some(z), x: None };
         let px = joints::resolve_origin(&s.doc, &st, &JointOrigin::new(occurrence, point.clone())).ok().map(|m| Vec3::new(m[0][0], m[0][1], m[0][2]));
@@ -963,6 +991,7 @@ fn origin_on_part(s: &Session, v: &Value, cmd: &str) -> Result<JointOrigin> {
         let found = by_wall.filter(|o| same_frame(s, o, at, z)).or_else(|| by_centre().filter(|o| same_frame(s, o, at, z)));
         return Ok(found.unwrap_or(JointOrigin::new(occurrence, point)));
     }
+    let secondary_axis = matches!(&o.snap, Snap::CircleCenter { x: Some(XRef::Reference { .. } | XRef::Planar { .. }), .. });
     match settle(s, o, v, cmd) {
         Ok(o) => Ok(o),
         // A circle given by its centre, where no face lies (#393): that end of the cylinder, by
@@ -970,6 +999,7 @@ fn origin_on_part(s: &Session, v: &Value, cmd: &str) -> Result<JointOrigin> {
         Err(e) if what == "circle" => {
             let snap = match joints::round_end_at(&s.doc, &st, component, local(world)) {
                 Some(Snap::CircleCenter { pick, face, end, .. }) => Snap::CircleCenter { pick, face, end, x: x_param(s, v, component, &inv, cmd)? },
+                _ if secondary_axis => return Err(e),
                 _ => circle_centre(s, occurrence, local(world)).ok_or(e)?,
             };
             settle(s, JointOrigin::new(occurrence, snap), v, cmd)
@@ -1080,6 +1110,13 @@ fn x_param(s: &Session, v: &Value, component: u64, inv: &solidcraft_doc::Mat, cm
     match v.get("x") {
         None | Some(Value::Null) => Ok(None),
         Some(Value::String(name)) if !name.is_empty() && name.len() <= MAX_FACE_NAME => named(name),
+        Some(o @ Value::Object(_)) if o.get("reference").is_some() || o.get("planar_face").is_some() => {
+            let x = serde_json::from_value::<XRef>(o.clone()).map_err(|e| bad(cmd, format!("`x`: {e}")))?;
+            if !x.is_finite() {
+                return Err(bad(cmd, "invalid secondary alignment reference"));
+            }
+            Ok(Some(x))
+        }
         Some(o @ Value::Object(_)) => match o.get("face") {
             Some(Value::String(name)) if !name.is_empty() && name.len() <= MAX_FACE_NAME => named(name),
             Some(p) => {
@@ -1475,11 +1512,102 @@ fn new_joint_name(s: &Session, p: &Value, kind: JointKind) -> String {
     })
 }
 
+/// Change only a secondary reference; retain the primary face, round end and occurrence.
+/// `None` leaves it alone, `null` clears it, an object selects a named planar face.
+pub(crate) fn alignment_param(s: &Session, mut origin: JointOrigin, alignment: Option<&Value>, cmd: &str) -> Result<JointOrigin> {
+    let Some(v) = alignment else { return Ok(origin) };
+    crate::schema::joints::AlignmentArg::read(v).map_err(|e| bad(cmd, e))?;
+    let x = if v.is_null() {
+        // Clearing a valid reference keeps the current turn without following that face.
+        // A missing reference can still be cleared and returns to the default frame.
+        joints::resolve_origin(&s.doc, &s.model.state(), &origin).ok().map(|m| XRef::Dir(Vec3::new(m[0][0], m[0][1], m[0][2])))
+    } else {
+        check_alignment_path(s, &origin, cmd)?;
+        let reverse = match v.get("reverse") {
+            None => false,
+            Some(Value::Bool(b)) => *b,
+            _ => return Err(bad(cmd, "alignment reverse must be a boolean")),
+        };
+        if let Some(occ) = v.get("occurrence")
+            && occurrence_id(s, Some(occ), cmd)? != origin.occurrence
+        {
+            return Err(bad(cmd, "alignment must be picked on the origin's occurrence"));
+        }
+        if let Some(reference) = v.get("reference") {
+            if v.get("face").is_some() {
+                return Err(bad(cmd, "select one alignment reference"));
+            }
+            let reference = serde_json::from_value::<joints::AlignmentRef>(reference.clone()).map_err(|e| bad(cmd, e.to_string()))?;
+            Some(XRef::Reference { reference, reverse })
+        } else {
+            let name = v
+                .get("face")
+                .and_then(Value::as_str)
+                .filter(|n| !n.is_empty() && n.len() <= 512)
+                .ok_or_else(|| bad(cmd, "alignment takes a named face or typed persistent reference"))?;
+            Some(XRef::Planar { planar_face: name.into(), reverse })
+        }
+    };
+    match &mut origin.snap {
+        Snap::FaceCenter { x: slot, .. } | Snap::CircleCenter { x: slot, .. } | Snap::Plane { x: slot, .. } | Snap::Axis { x: slot, .. } => *slot = x,
+        _ if v.is_null() => return Ok(origin),
+        _ => return Err(bad(cmd, "secondary alignment needs a face, circle, plane or axis origin")),
+    }
+    let st = s.model.state();
+    joints::resolve_origin(&s.doc, &st, &origin).map_err(|e| bad(cmd, e.to_string()))?;
+    Ok(origin)
+}
+
+fn persistent_alignment(origin: &JointOrigin) -> Option<&XRef> {
+    let x = match &origin.snap {
+        Snap::FaceCenter { x, .. } | Snap::CircleCenter { x, .. } | Snap::Plane { x, .. } | Snap::Axis { x, .. } => x.as_ref(),
+        _ => None,
+    };
+    x.filter(|x| matches!(x, XRef::Reference { .. } | XRef::Planar { .. }))
+}
+
+fn check_alignment_path(s: &Session, origin: &JointOrigin, cmd: &str) -> Result<()> {
+    if !origin.inside.is_empty() || s.doc.occurrences.iter().any(|o| o.id == origin.occurrence && o.parent != 0) {
+        return Err(bad(cmd, "secondary alignment on nested occurrence paths is not supported yet"));
+    }
+    Ok(())
+}
+
+fn check_alignment_offsets(a: &JointOrigin, b: &JointOrigin, offset_xy: [f64; 2], cmd: &str) -> Result<()> {
+    if offset_xy != [0.0; 2] && (persistent_alignment(a).is_some() || persistent_alignment(b).is_some()) {
+        return Err(bad(cmd, "secondary alignment on lateral-offset joint frames is not supported yet"));
+    }
+    Ok(())
+}
+
+fn retain_alignment(
+    s: &Session,
+    replacement: Option<JointOrigin>,
+    saved: &JointOrigin,
+    input: Option<&Value>,
+    cmd: &str,
+) -> Result<Option<JointOrigin>> {
+    let Some(origin) = replacement else { return Ok(None) };
+    if origin.occurrence != saved.occurrence
+        || origin.inside != saved.inside
+        || input.is_some_and(|v| v.is_string() || v.get("x").is_some())
+        || persistent_alignment(&origin).is_some()
+    {
+        return Ok(Some(origin));
+    }
+    let alignment = match persistent_alignment(saved) {
+        Some(XRef::Reference { reference, reverse }) => json!({"reference":reference,"reverse":reverse}),
+        Some(XRef::Planar { planar_face, reverse }) => json!({"face":planar_face,"reverse":reverse}),
+        _ => return Ok(Some(origin)),
+    };
+    alignment_param(s, origin, Some(&alignment), cmd).map(Some)
+}
+
 fn joint(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "joint.create";
     let kind = kind_param(p, cmd)?;
-    let a = origin_param(s, p.get("a"), cmd)?;
-    let b = origin_param(s, p.get("b"), cmd)?;
+    let a = alignment_param(s, origin_param(s, p.get("a"), cmd)?, p.get("a_alignment"), cmd)?;
+    let b = alignment_param(s, origin_param(s, p.get("b"), cmd)?, p.get("b_alignment"), cmd)?;
     let j = new_joint(s, p, kind, a, b, cmd)?;
     add_joint(s, j, p)
 }
@@ -1487,7 +1615,6 @@ fn joint(s: &mut Session, p: &Value) -> Result<Value> {
 /// A joint of `kind` between origins `a` and `b`, with the values, limits, flip, offset, angle and
 /// name `p` gives (as joint.create reads them), not yet added.
 fn new_joint(s: &mut Session, p: &Value, kind: JointKind, a: JointOrigin, b: JointOrigin, cmd: &str) -> Result<Joint> {
-    let id = s.doc_mut().allocate_id()?;
     let name = new_joint_name(s, p, kind);
     let offset = match p.get("offset") {
         Some(v) => value(s, v, false, cmd)?,
@@ -1497,6 +1624,8 @@ fn new_joint(s: &mut Session, p: &Value, kind: JointKind, a: JointOrigin, b: Joi
         p.get("offset_x").map(|v| lateral_value(s, v, cmd)).transpose()?.unwrap_or(0.0),
         p.get("offset_y").map(|v| lateral_value(s, v, cmd)).transpose()?.unwrap_or(0.0),
     ];
+    check_alignment_offsets(&a, &b, offset_xy, cmd)?;
+    let id = s.doc_mut().allocate_id()?;
     let angle = match p.get("angle") {
         Some(v) => Some(value(s, v, true, cmd)?),
         None => None,
@@ -1520,7 +1649,16 @@ fn new_joint(s: &mut Session, p: &Value, kind: JointKind, a: JointOrigin, b: Joi
     };
     // No angle given: B keeps its turn about the joint's axis where a half turn would otherwise
     // come only from how its origin's x was chosen. (An angle relation's angle is its tilt.)
-    if angle.is_none() && !j.kind.is_relation() {
+    let aligned = |origin: &JointOrigin| {
+        matches!(
+            &origin.snap,
+            Snap::FaceCenter { x: Some(XRef::Planar { .. } | XRef::Reference { .. }), .. }
+                | Snap::CircleCenter { x: Some(XRef::Planar { .. } | XRef::Reference { .. }), .. }
+                | Snap::Plane { x: Some(XRef::Planar { .. } | XRef::Reference { .. }), .. }
+                | Snap::Axis { x: Some(XRef::Planar { .. } | XRef::Reference { .. }), .. }
+        )
+    };
+    if angle.is_none() && !j.kind.is_relation() && !aligned(&j.a) && !aligned(&j.b) {
         j.angle = joints::least_turn_angle(&s.doc, &s.model.state(), &j);
     }
     Ok(j)
@@ -2436,6 +2574,23 @@ pub(super) fn edit_joint(s: &mut Session, p: &Value, plain: bool) -> Result<Valu
         check_sides(orig_a, orig_b, cmd)?;
     }
     let saved = s.doc.assembly.joints.iter().find(|j| j.id == id).ok_or_else(|| bad(cmd, "joint"))?;
+    let a = if p.get("a_alignment").is_some() {
+        Some(alignment_param(s, a.clone().unwrap_or_else(|| saved.a.clone()), p.get("a_alignment"), cmd)?)
+    } else {
+        retain_alignment(s, a, &saved.a, p.get("a"), cmd)?
+    };
+    let b = if p.get("b_alignment").is_some() {
+        Some(alignment_param(s, b.clone().unwrap_or_else(|| saved.b.clone()), p.get("b_alignment"), cmd)?)
+    } else {
+        retain_alignment(s, b, &saved.b, p.get("b"), cmd)?
+    };
+    check_alignment_offsets(
+        a.as_ref().unwrap_or(&saved.a),
+        b.as_ref().unwrap_or(&saved.b),
+        [offset_x.unwrap_or(saved.offset_xy[0]), offset_y.unwrap_or(saved.offset_xy[1])],
+        cmd,
+    )?;
+
     if saved.constraint.is_some()
         && kind.is_none_or(|k| k == saved.kind)
         && (offset_x.is_some_and(|x| x != saved.offset_xy[0]) || offset_y.is_some_and(|y| y != saved.offset_xy[1]))
@@ -2513,7 +2668,17 @@ pub(super) fn edit_joint(s: &mut Session, p: &Value, plain: bool) -> Result<Valu
         && p.get("angle").is_none()
         && let Some(j) = s.doc.assembly.joints.iter().find(|j| j.id == id).filter(|j| !j.kind.is_relation() && j.exprs.angle.is_none()).cloned()
     {
-        let turn = joints::least_turn_angle(&s.doc, &s.model.state(), &j);
+        let explicit_alignment = |o: &JointOrigin| {
+            matches!(
+                &o.snap,
+                Snap::FaceCenter { x: Some(XRef::Reference { .. } | XRef::Planar { .. }), .. }
+                    | Snap::CircleCenter { x: Some(XRef::Reference { .. } | XRef::Planar { .. }), .. }
+                    | Snap::Plane { x: Some(XRef::Reference { .. } | XRef::Planar { .. }), .. }
+                    | Snap::Axis { x: Some(XRef::Reference { .. } | XRef::Planar { .. }), .. }
+            )
+        };
+        let turn =
+            if explicit_alignment(&j.a) || explicit_alignment(&j.b) { j.angle } else { joints::least_turn_angle(&s.doc, &s.model.state(), &j) };
         if let Some(j) = s.doc_mut().assembly.joints.iter_mut().find(|j| j.id == id) {
             j.angle = turn;
         }
@@ -2534,7 +2699,18 @@ pub(super) fn edit_joint(s: &mut Session, p: &Value, plain: bool) -> Result<Valu
         && bool_(p, "flip").is_none_or(|f| f == was_flip);
     // Otherwise a relation or a constraint whose type, offset, tilt or flip changes, or whose
     // sides move, starts again from where its parts are.
-    let reseat = !tilt_only
+    // Alignment changes the joint's local basis, not the authored motion coordinates.
+    // The UI also sends unchanged type/offset/flip fields with an alignment edit.
+    let alignment_only = (p.get("a_alignment").is_some() || p.get("b_alignment").is_some())
+        && !sides
+        && kind.is_none_or(|k| k == was_kind)
+        && offset.is_none_or(|o| (o - was_offset).abs() <= 1e-9)
+        && offset_x.is_none_or(|x| (x - was_offset_xy[0]).abs() <= 1e-9)
+        && offset_y.is_none_or(|y| (y - was_offset_xy[1]).abs() <= 1e-9)
+        && angle.is_none()
+        && bool_(p, "flip").is_none_or(|f| f == was_flip);
+    let reseat = !alignment_only
+        && !tilt_only
         && (kind.is_some() || offset.is_some() || offset_x.is_some() || offset_y.is_some() || angle.is_some() || p.get("flip").is_some() || sides);
     if reseat {
         let edited = s.doc.assembly.joints.iter().find(|j| j.id == id).filter(|j| j.starts_where_it_is()).cloned();

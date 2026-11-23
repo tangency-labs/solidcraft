@@ -157,6 +157,7 @@ pub use assembly::apply_vector;
 pub use assembly::capture_sketch_plane_placement;
 pub use assembly::is_identity;
 pub use assembly::is_placement;
+pub use assembly::map_dir_expr;
 pub use assembly::map_plane;
 pub use assembly::map_point_expr;
 pub use assembly::map_vector_expr;

@@ -66,7 +66,7 @@ pub static COMMANDS: &[CommandSpec] = &[
             "folder?: bool for a STEP, IGES, FreeCAD or Rhino file (see file.insert_step); ",
             "reuse_import?: bool (STEP/IGES: reuse an unchanged import from the local saved-model cache, default true; false recomputes without reading or writing the cache; → import_reused: bool, content_sha256: exact source digest); ",
             "history?: features|solids for a FreeCAD file (see file.insert_step); ",
-            "reader?: solidcraft|cadmpeg for a STEP, FreeCAD or Rhino file (see file.insert_step); ",
+            "reader?: solidcraft|cadmpeg for a STEP, IGES, FreeCAD or Rhino file (see file.insert_step); ",
             "geometry?: meshes|exact for an OpenUSD file (see file.insert_mesh); ",
             "for a KiCad PCB: thickness?: board thickness in mm (default from the board); ",
             "components?: bool (default true); ",
@@ -92,7 +92,7 @@ pub static COMMANDS: &[CommandSpec] = &[
             "up?: z|y (default z: the file's axes are kept; y: the file has Y up, so the import's component is turned a quarter turn about X, Y becoming Z → stand_up: its occurrence); ",
             "names?: auto|solid|product|instance (default auto: keep meaningful solid names, replace placeholders with the nearest named product, else instance; solid: the solid's own name; product: the part's name; instance: the occurrence's name, else the product's); ",
             "history?: features|solids for a FreeCAD file (default features: its sketches and the Pad, Pocket, Revolution, Groove, Fillet, Chamfer and primitive features that use them are rebuilt as features in the new component, when every one can be and they build what the file holds → features_added, history: \"features\"; else, or with solids, the file's solids come in as an Import feature, and a warning says why the history was not rebuilt); ",
-            "reader?: solidcraft|cadmpeg for a .step/.stp, FreeCAD or Rhino file (default solidcraft: SolidCraft's own STEP reader, which keeps the STEP text, a FreeCAD or Rhino file's solids restated as STEP by cadmpeg's STEP writer first; cadmpeg: cadmpeg's model read straight into B-rep records, with no STEP text in between, a STEP file decoded by cadmpeg's STEP decoder, to compare the two; `flatten` works with either); ",
+            "reader?: solidcraft|cadmpeg for a .step/.stp, .igs/.iges, FreeCAD or Rhino file (default solidcraft: SolidCraft's own STEP or IGES reader, which keeps the STEP text (an IGES file restated as STEP), a FreeCAD or Rhino file's solids restated as STEP by cadmpeg's STEP writer first; cadmpeg: cadmpeg's model read straight into B-rep records, with no STEP text in between, a STEP or IGES file decoded by cadmpeg's STEP or IGES decoder, to compare the two; `flatten` works with either); ",
             "matrix?: [12 or 16 numbers] (where the new component's occurrence sits in the active component, after `up`: a rigid row-major 3x4 rotation-and-translation or 4x4 matrix, flat or as rows, as occurrence.move takes it, its translation column (entries 4, 8 and 12) numbers or length expressions: one that names a parameter is kept, and the import follows the parameter when it changes (a grounded one stays); a scale, shear or mirror is refused before the file is read); ",
             "tolerance? (see occurrence.move; envelope?: \"box\" (also add the import's envelope, a hidden box around every body it placed, in its component, as solid.bounding_solid with `component` makes it → envelope: the body; inspect.clearance and inspect.interference check it instead of the parts with `envelopes: true`)",
         )),
@@ -400,7 +400,7 @@ pub(crate) fn names_form(v: &Value) -> Option<solidcraft_io::StepNames> {
 
 /// What `reader` says when it is neither reader, as `step_options` and the command schemas have it.
 pub(crate) const READER_MESSAGE: &str =
-    "`reader` must be \"solidcraft\" (SolidCraft's own STEP reader) or \"cadmpeg\" (cadmpeg's model read into records)";
+    "`reader` must be \"solidcraft\" (SolidCraft's own STEP and IGES readers) or \"cadmpeg\" (cadmpeg's model read into records)";
 
 /// What `geometry` says when it is neither choice, as `usd_geometry` and the command schemas have it.
 pub(crate) const GEOMETRY_MESSAGE: &str =
@@ -434,10 +434,10 @@ struct StepOptions {
     /// after their part where the file gives them a placeholder. `false` (the default) keeps the
     /// file's assembly structure.
     flatten: bool,
-    /// `reader: "cadmpeg"`: the file is read by cadmpeg into records, a STEP file by cadmpeg's STEP
-    /// decoder and a FreeCAD or Rhino file's solids straight from cadmpeg's model; `solidcraft`
-    /// (the default) is SolidCraft's own STEP reader (for FreeCAD and Rhino, of the STEP that
-    /// cadmpeg's writer restates them as).
+    /// `reader: "cadmpeg"`: the file is read by cadmpeg into records, a STEP or IGES file by
+    /// cadmpeg's STEP or IGES decoder and a FreeCAD or Rhino file's solids straight from cadmpeg's
+    /// model; `solidcraft` (the default) is SolidCraft's own STEP or IGES reader (for FreeCAD and
+    /// Rhino, of the STEP that cadmpeg's writer restates them as).
     reader: solidcraft_io::StepReader,
 }
 

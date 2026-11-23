@@ -1523,20 +1523,34 @@ fn rational_partial_bound(
                 }
                 finite(near + part)
             };
-            let mut top = 0.0f64;
+            // How far the weights move from one Bézier point to the next, over every row.
+            let mut turns = Vec::new();
+            let mut most_turn = 0.0f64;
             for kk in 0..p {
-                let step = apart(kk, kk + 1)?;
                 let mut turn = 0.0f64;
                 for j in 0..rows.len() {
                     let ((_, _, wa, va), (_, _, wb, vb)) =
                         (at(j, kk).ok_or_else(bad)?, at(j, kk + 1).ok_or_else(bad)?);
                     turn = turn.max((wb - wa).abs() * (1.0 + UNIT) + va + vb);
                 }
+                most_turn = most_turn.max(turn);
+                turns.push(turn);
+            }
+            // The factor `ω_(k+1) / Ω` on the first term is at most `ω_max / ω_min` of the iso-line's
+            // weights `ω_k` (Ω is a convex combination of them), and those differ by at most `p`
+            // steps of `most_turn`, so `ω_max ≤ ω_min + p most_turn ≤ low + p most_turn`. Where the
+            // weights do not change along d (a cylinder's arc, straight along its axis) that is
+            // `low` and the first term is the plain Euclidean step, not `ω⁺ / ω⁻` times it. The
+            // smaller of the two bounds is taken.
+            let heavy = high.min((low + p as f64 * most_turn) * (1.0 + gamma(4)));
+            let mut top = 0.0f64;
+            for (kk, turn) in turns.iter().enumerate() {
+                let step = apart(kk, kk + 1)?;
                 let mut far = 0.0f64;
                 for mm in 0..=p {
                     far = far.max(apart(kk, mm)?);
                 }
-                top = top.max(high * step + turn * far);
+                top = top.max(heavy * step + turn * far);
             }
             // The quotient by the piece's length and the least weight, then the bound's sums
             // and products, rounded up. A positive `top` whose bound is zero or below the normal

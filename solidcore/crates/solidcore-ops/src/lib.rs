@@ -58,6 +58,7 @@ pub mod export_geometry;
 pub mod extend;
 pub mod face_surface;
 pub mod faceted;
+pub mod facing_trough;
 pub mod file;
 pub mod fit_projection;
 pub mod hatch;

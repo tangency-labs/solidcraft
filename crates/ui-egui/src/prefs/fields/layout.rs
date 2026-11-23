@@ -69,6 +69,10 @@ macro_rules! layout_preferences {
             /// Compact history: the browser lists each component's features in history order with the
             /// marker, and neither timeline is shown.
             history_in_browser: bool = false, PAGE_LAYOUT;
+            /// With "History steps by component" on, Last (and Forward onto the last slot) stop just after
+            /// the active component's last feature, as they did before #15974, leaving later features of
+            /// other components rolled back. Off, the default: they go to the end of the design.
+            history_last_stops_at_component: bool = false, PAGE_LAYOUT;
             /// A Play History button in the History controls, between Previous and Next (#3688). Off
             /// gives the four controls History had before; right-clicking the controls toggles it too.
             history_play_button: bool = true, PAGE_LAYOUT;

@@ -2631,6 +2631,60 @@ fn mirror_of_a_thread_threads_the_mirrored_hole() {
     }
 }
 
+/// #21031: a mirror or pattern of a tapped Hole repeats its own thread on each copy: a modelled
+/// thread removes as much from the copy as from the original, and a cosmetic one is listed again.
+#[test]
+fn copies_of_a_tapped_hole_are_threaded() {
+    let copies = [
+        ("solid.mirror", json!({"features": ["Hole1"], "plane": {"origin": [20, 0, 0], "normal": [1, 0, 0]}})),
+        ("solid.pattern.rectangular", json!({"features": ["Hole1"], "dir1": [1, 0, 0], "count1": 2, "spacing1": 20})),
+    ];
+    for modeled in [true, false] {
+        for (copy, params) in &copies {
+            let mut s = Session::default();
+            run(&mut s, "solid.box", json!({"length": 40, "width": 30, "height": 12, "body_name": "Block"}));
+            let block = volume(&mut s);
+            run(&mut s, "solid.hole", json!({"position": [10, 15, 12], "thread": "M4", "depth": 8, "modeled": modeled, "name": "Hole1"}));
+            let one = block - volume(&mut s);
+            let r = run(&mut s, copy, params.clone());
+            assert!(r["error"].is_null(), "{copy}: {r}");
+            if modeled {
+                let both = block - volume(&mut s);
+                assert!(rel(both, 2.0 * one) < 1e-6, "{copy}: the original removes {one} mm³, both {both} mm³");
+            } else {
+                assert_eq!(s.world_state().unwrap().threads.len(), 2, "{copy}: the hole's thread and its copy's");
+            }
+        }
+        // A copy off the part removes no material: it warns, and only the copies that cut are threaded.
+        let mut s = Session::default();
+        run(&mut s, "solid.box", json!({"length": 40, "width": 30, "height": 12, "body_name": "Block"}));
+        let block = volume(&mut s);
+        run(&mut s, "solid.hole", json!({"position": [10, 15, 12], "thread": "M4", "depth": 8, "modeled": modeled, "name": "Hole1"}));
+        let one = block - volume(&mut s);
+        let params = json!({"features": ["Hole1"], "dir1": [1, 0, 0], "count1": 3, "spacing1": 20});
+        let r = run(&mut s, "solid.pattern.rectangular", params);
+        assert!(r["error"].is_null(), "{r}");
+        assert!(r.to_string().contains("1 of 2 cut copies remove no material"), "{r}");
+        if modeled {
+            let all = block - volume(&mut s);
+            assert!(rel(all, 2.0 * one) < 1e-6, "the original removes {one} mm³, all {all} mm³");
+        } else {
+            assert_eq!(s.world_state().unwrap().threads.len(), 2, "the hole's thread and its one cutting copy's");
+        }
+    }
+    // A copy over a 3 mm thick step has a wall shorter than the thread depth: it is drilled, left
+    // unthreaded with a warning, and the pattern still evaluates.
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 40, "width": 30, "height": 12, "body_name": "Block"}));
+    run(&mut s, "solid.box", json!({"length": 20, "width": 30, "height": 9, "corner": [20, 0, 3], "operation": "cut"}));
+    let hole = json!({"position": [10, 15, 12], "thread": "M4", "depth": 10, "thread_depth": 6, "modeled": false, "name": "Hole1"});
+    run(&mut s, "solid.hole", hole);
+    let r = run(&mut s, "solid.pattern.rectangular", json!({"features": ["Hole1"], "dir1": [1, 0, 0], "count1": 2, "spacing1": 20}));
+    assert!(r["error"].is_null(), "{r}");
+    assert!(r.to_string().contains("1 hole copies are not threaded"), "{r}");
+    assert_eq!(s.world_state().unwrap().threads.len(), 1, "only the original hole's thread");
+}
+
 /// #16799: two holes placed from edges, mirrored together. The second hole's edge names mean the
 /// edges of the original body, which the first hole's copy has already cut into.
 #[test]

@@ -126,6 +126,10 @@ fn named_tool_refusals_keep_plugin_file_and_budget_details() {
                 HostError::OverCeiling { limit: "memory_mib".into(), requested: 2048, allowed: 128 },
                 json!({"plugin":"sample","grant":"memory_mib","approve":tools::APPROVE}),
             ),
+            (
+                HostError::OverCeiling { limit: "fuel".into(), requested: MAX_APPROVED_FUEL, allowed: 100_000_000_000 },
+                json!({"plugin":"sample","grant":"fuel","approve":tools::APPROVE}),
+            ),
         ] {
             let failure = PluginFailure { plugin: "Sample".into(), file: file.map(String::from), exporting: false, error };
             let original = failure.text();
@@ -133,16 +137,20 @@ fn named_tool_refusals_keep_plugin_file_and_budget_details() {
             assert!(explained.starts_with(&original), "{explained}");
             assert_eq!(structured_tool_error(&explained), Some(structured), "{explained}");
         }
-        let failure = PluginFailure {
-            plugin: "Sample".into(),
-            file: file.map(String::from),
-            exporting: false,
-            error: HostError::Exhausted { limit: "fuel".into(), allowed: 100000 },
-        };
-        let original = failure.text();
-        let unchanged = explain_named(&session, &manifest, "make", EngineError::PluginFailed(Box::new(failure)));
-        assert!(matches!(unchanged, EngineError::PluginFailed(_)));
-        assert_eq!(unchanged.to_string(), original);
+        for error in [
+            HostError::Exhausted { limit: "fuel".into(), allowed: 100000 },
+            HostError::OverCeiling { limit: "fuel".into(), requested: MAX_APPROVED_FUEL + 1, allowed: 100_000_000_000 },
+        ] {
+            let unchanged = explain_named(&session, &manifest, "make", error.clone().into());
+            assert!(matches!(&unchanged, EngineError::Plugin(actual) if actual == &error));
+            assert!(structured_tool_error(&unchanged.to_string()).is_none());
+            let failure = PluginFailure { plugin: "Sample".into(), file: file.map(String::from), exporting: false, error };
+            let original = failure.text();
+            let unchanged = explain_named(&session, &manifest, "make", EngineError::PluginFailed(Box::new(failure)));
+            assert!(matches!(unchanged, EngineError::PluginFailed(_)));
+            assert_eq!(unchanged.to_string(), original);
+            assert!(structured_tool_error(&unchanged.to_string()).is_none());
+        }
     }
     assert!(matches!(explain_named(&session, &manifest, "make", HostError::Cancelled.into()), EngineError::Plugin(HostError::Cancelled)));
 }
@@ -195,6 +203,154 @@ fn plugin_entries_cannot_shadow_host_commands() {
     let error = parse_manifest(&serde_json::to_vec(&m).unwrap(), "solid").unwrap_err();
     assert!(matches!(error.host_error(), Some(HostError::InvalidManifest { field, .. }) if field == "runtime.entries"), "{error}");
     assert!(error.to_string().contains("solid.box"));
+}
+
+fn panel_manifest() -> Value {
+    let mut m = manifest();
+    m["capabilities"] = json!(["commands@0.2", "ui@0.1"]);
+    m["runtime"]["ui"] = json!({"ui_version":1,"panels":[{
+        "id":"jobs","title":"Jobs","zones":["right"],"layout":{"root":0,"nodes":[{"widget":{"table":{
+            "bind":"/jobs","row_id":"id","columns":[{"key":"name","label":"Operation","unit":null}],
+            "select":"single","on_select":null,"on_edit":"make"
+        }}}]}
+    }],"workspaces":[]});
+    m
+}
+
+fn panel_host() -> SolidCraftHost {
+    let package = Package {
+        manifest: parse_manifest(panel_manifest().to_string().as_bytes(), "sample").unwrap(),
+        approval: "approved".into(),
+        component: Vec::new(),
+    };
+    let mut session = Session::default();
+    panels::register_package(&mut session, &package).unwrap();
+    session.plugin_state.ui_caller = Some("sample".into());
+    SolidCraftHost {
+        session,
+        transaction: None,
+        sketch_exits: Vec::new(),
+        view: None,
+        groups: BTreeSet::new(),
+        file_folders: Vec::new(),
+        file_read_folders: Vec::new(),
+        evaluation: None,
+        forms: Vec::new(),
+        form_source: None,
+    }
+}
+
+#[test]
+fn panel_updates_are_namespaced_transactional_and_merged_once_per_frame() {
+    let mut host = panel_host();
+    let updates = [
+        ui::Datum { path: "/jobs/0/id".into(), value: ui::UiValue::Text("op1".into()) },
+        ui::Datum { path: "/jobs/0/name".into(), value: ui::UiValue::Text("Pocket".into()) },
+    ];
+    assert!(host.ui_set_data("jobs", &updates).is_err(), "updates need an active command transaction");
+    host.begin_transaction().unwrap();
+    assert!(host.ui_set_data("another-plugins-panel", &updates).is_err());
+    host.ui_set_data("jobs", &updates).unwrap();
+    host.commit_transaction().unwrap();
+    assert!(host.session.plugin_panels()[0].data.rows("/jobs").is_empty());
+    host.session.merge_plugin_panel_data();
+    assert_eq!(host.session.plugin_panels()[0].data.rows("/jobs").len(), 1);
+    assert_eq!(host.session.plugin_panels()[0].data.get("/jobs/0/name"), Some(&ui::UiValue::Text("Pocket".into())));
+    host.begin_transaction().unwrap();
+    host.ui_clear_data("jobs").unwrap();
+    host.ui_show_panel("jobs", false).unwrap();
+    host.rollback_transaction().unwrap();
+    host.session.merge_plugin_panel_data();
+    assert_eq!(host.session.plugin_panels()[0].data.rows("/jobs").len(), 1);
+    assert!(host.session.plugin_panels()[0].visible);
+    assert_eq!(host.session.plugin_panels()[0].visibility_revision, 0, "failed commands discard visibility requests");
+    host.begin_transaction().unwrap();
+    host.ui_show_panel("jobs", true).unwrap();
+    host.ui_show_panel("jobs", true).unwrap();
+    host.commit_transaction().unwrap();
+    assert_eq!(host.session.plugin_panels()[0].visibility_revision, 2, "repeated show calls are distinct requests");
+    let mut live = host.session;
+    let prepared = live.scratch().compute_commands(&[("inspect.measure".into(), json!({}))], None).unwrap();
+    panels::show_panel(Some(&mut live), "jobs", false).unwrap();
+    live.accept_commands(prepared).unwrap();
+    assert!(!live.plugin_panels()[0].visible, "a model worker must keep a panel closed meanwhile");
+    live.replace_design(Session::default());
+    assert!(live.plugin_panels()[0].data.rows("/jobs").is_empty(), "panel data belongs to the design that closed");
+    live.disabled_plugins.insert("sample".into());
+    assert!(live.plugin_panels().is_empty());
+}
+
+#[test]
+fn panel_namespace_survives_design_replacement_within_a_component_transaction() {
+    let mut host = panel_host();
+    host.groups.insert("file".into());
+    host.begin_transaction().unwrap();
+    host.ui_set_data("jobs", &[ui::Datum { path: "/old".into(), value: ui::UiValue::Flag(true) }]).unwrap();
+    host.run_command("file.new", &json!({"name":"New part"})).unwrap();
+    host.ui_set_data("jobs", &[ui::Datum { path: "/new".into(), value: ui::UiValue::Flag(true) }]).unwrap();
+    host.ui_show_panel("jobs", false).unwrap();
+    host.commit_transaction().unwrap();
+    host.session.merge_plugin_panel_data();
+    let panel = host.session.plugin_panels().remove(0);
+    assert_eq!(panel.data.get("/old"), None, "data from the closed design is cleared");
+    assert_eq!(panel.data.get("/new"), Some(&ui::UiValue::Flag(true)));
+    assert!(!panel.visible);
+    host.session.replace_design(Session::default());
+    assert_eq!(host.session.plugin_state.ui_caller, None, "a live design switch never keeps a guest call active");
+}
+
+#[test]
+fn panel_outer_cancellation_restores_published_data_and_visibility() {
+    let mut session = panel_host().session;
+    panels::set_data(Some(&mut session), "jobs", &[ui::Datum { path: "/before".into(), value: ui::UiValue::Flag(true) }]).unwrap();
+    session.merge_plugin_panel_data();
+    let before = session.plugin_state.panels.clone();
+    let command = crate::cmd::CommandSpec::new("plugin.run", "Run Plugin", |session, _| {
+        panels::set_data(Some(&mut *session), "jobs", &[ui::Datum { path: "/after".into(), value: ui::UiValue::Flag(true) }])?;
+        panels::show_panel(Some(&mut *session), "jobs", false)?;
+        solidcraft_doc::progress::current().unwrap().cancel();
+        Ok(json!({}))
+    })
+    .icon("play");
+    let progress = std::sync::Arc::new(solidcraft_doc::progress::Progress::default());
+    let result = solidcraft_doc::progress::watch(progress, || session.execute_spec(&command, &json!({})));
+    assert!(matches!(result, Err(EngineError::Cancelled(_))), "{result:?}");
+    assert_eq!(session.plugin_state.panels, before, "the outer cancellation discards data and visibility published by the runtime");
+    session.merge_plugin_panel_data();
+    assert_eq!(session.plugin_panels()[0].data.get("/after"), None);
+}
+
+#[test]
+fn panel_actions_resolve_only_the_declared_entry_and_binding() {
+    let panel_plugin = parse_manifest(panel_manifest().to_string().as_bytes(), "sample").unwrap();
+    let event = json!({"panel":"jobs","event":"edit","path":"/jobs","row":"op1","value":null});
+    let typed_event: ui::UiEvent = serde_json::from_value(event.clone()).unwrap();
+    assert!(panels::event_for(&panel_plugin, "make", Some(&typed_event)).unwrap().is_some());
+    assert!(panels::event_for(&panel_plugin, "delete", Some(&typed_event)).is_err());
+    for change in [json!({"panel":"other"}), json!({"path":"/tools"}), json!({"event":"press"})] {
+        let mut bad = event.clone();
+        for (key, value) in change.as_object().unwrap() {
+            bad[key] = value.clone();
+        }
+        let bad = serde_json::from_value(bad).unwrap();
+        assert!(panels::event_for(&panel_plugin, "make", Some(&bad)).is_err(), "{bad:?}");
+    }
+    assert!(panels::event_for(&panel_plugin, "make", None).unwrap().is_none());
+    let ordinary = parse_manifest(manifest().to_string().as_bytes(), "sample").unwrap();
+    assert!(panels::event_for(&ordinary, "make", None).unwrap().is_none());
+    let refused = panels::event_for(&ordinary, "make", Some(&typed_event)).unwrap_err();
+    assert!(matches!(refused.host_error(), Some(HostError::InvalidInput { field, .. }) if field == "ui_event"));
+}
+
+#[test]
+fn panel_named_calls_keep_the_explicit_event_envelope_separate_from_entry_params() {
+    let mut session = Session::default();
+    session.plugin_state.packages.insert("sample".into(), "sample-folder".into());
+    let event = json!({"panel":"jobs","event":"edit","path":"/jobs","row":"op1","value":null});
+    let params = json!({"panel":"application-domain-panel","event":"rebuild"});
+    let call = resolve_call(&session, "sample.make", &json!({"approval":"reviewed","params":params,"ui_event":event})).unwrap().unwrap();
+    assert_eq!(call["params"], params);
+    assert_eq!(call["ui_event"], event);
 }
 
 #[test]
@@ -567,6 +723,96 @@ mod native {
         assert!(template.contains(original));
         wat::parse_str(template.replacen(original, &format!("      {code}\n"), 1)).unwrap()
     }
+    fn panel_fixture() -> Fixture {
+        let fixture = Fixture::new("call $box");
+        let manifest = json!({"id":"sample","name":"Sample","version":"1","capabilities":["commands@0.2","ui@0.1"],"runtime":{
+            "module":"plugin.wasm","commands":["inspect.measure"],"entries":[{"name":"make","effect":"read"}],
+            "limits":{"fuel":1000000,"memory_mib":2,"deadline_ms":5000},
+            "ui":{"ui_version":1,"panels":[{"id":"jobs","title":"Jobs","zones":["bottom"],"layout":{"root":0,"nodes":[{"widget":{"table":{
+                "bind":"/jobs","row_id":"id","columns":[{"key":"state","label":"state","unit":null}],"select":"single","on_select":"make","on_edit":"make"
+            }}}]}}],"workspaces":[]}
+        }});
+        let (package, version) = API.split_once('@').unwrap();
+        let source = include_str!("../../../craft-plugin-wasm/src/ui_fixture.wat")
+            .replace("__PACKAGE__", package)
+            .replace("__VERSION__", version)
+            .replace("__COMMAND__", "inspect.measure")
+            .replace("__COMMAND_LEN__", "15")
+            .replace("__ARGS__", "{}")
+            .replace("__ARGS_LEN__", "2");
+        std::fs::write(fixture.0.join("sample/plugin.json"), manifest.to_string()).unwrap();
+        std::fs::write(fixture.0.join("sample/plugin.wasm"), wat::parse_str(source).unwrap()).unwrap();
+        fixture
+    }
+    #[test]
+    fn panel_event_shaped_entry_params_remain_ordinary_inputs() {
+        let fixture = panel_fixture();
+        let mut session = Session::default();
+        let approval = session.execute("plugin.inspect", &json!({"path":fixture.path()})).unwrap()["approval"].clone();
+        let event = json!({"panel":"jobs","event":"select","path":"/jobs","row":"op1","value":null});
+        session.execute("sample.make", &json!({"approval":approval,"params":event})).unwrap();
+        session.merge_plugin_panel_data();
+        assert_eq!(
+            session.plugin_panels()[0].data.get("/jobs/0/state"),
+            Some(&ui::UiValue::Text("ready".into())),
+            "ordinary fields never call ui-provider.on-event"
+        );
+        session.execute("sample.make", &json!({"approval":approval,"params":event,"ui_event":event})).unwrap();
+        session.merge_plugin_panel_data();
+        assert_eq!(
+            session.plugin_panels()[0].data.get("/jobs/0/state"),
+            Some(&ui::UiValue::Text("posted".into())),
+            "the explicit envelope delivers on-event before the entry"
+        );
+    }
+    #[test]
+    fn panel_frame_merges_keep_plugin_workers_current_and_grant_changes_stale() {
+        let fixture = panel_fixture();
+        let mut session = Session::default();
+        fixture.run(&mut session).unwrap();
+        let package = read_package(&fixture.path()).unwrap();
+        let request = json!({"path":fixture.path(),"approval":package.approval,"entry":"make"});
+        let prepared = session.scratch().compute_commands(&[("plugin.run".into(), request.clone())], None).unwrap();
+        assert!(session.plugin_panels()[0].data.values().is_empty(), "successful data is pending before the frame");
+        session.merge_plugin_panel_data();
+        assert!(prepared.is_current(&session), "frame adoption changes presentation only");
+        session.accept_commands(prepared).unwrap();
+        assert_eq!(
+            session.plugin_panels()[0].data.get("/jobs/0/state"),
+            Some(&ui::UiValue::Text("ready".into())),
+            "an unchanged worker keeps the merged live frame"
+        );
+        let prepared = session.scratch().compute_commands(&[("plugin.run".into(), request)], None).unwrap();
+        session.plugin_state.grants.insert(
+            "sample".into(),
+            Grants { package_hash: Some(package.approval), command_groups: BTreeSet::from(["file".into()]), ..Default::default() },
+        );
+        assert!(!prepared.is_current(&session), "a real approval change still invalidates plugin work");
+        assert!(session.accept_commands(prepared).is_err());
+    }
+    #[test]
+    fn panel_data_changes_invalidate_computed_plugin_work() {
+        let fixture = panel_fixture();
+        let mut session = Session::default();
+        fixture.run(&mut session).unwrap();
+        let package = read_package(&fixture.path()).unwrap();
+        let request = json!({"path":fixture.path(),"approval":package.approval,"entry":"make"});
+        let prepared = session.scratch().compute_commands(&[("plugin.run".into(), request)], None).unwrap();
+        session
+            .plugin_state
+            .panels
+            .get_mut("sample")
+            .unwrap()
+            .data
+            .get_mut("jobs")
+            .unwrap()
+            .set_data(&[ui::Datum { path: "/jobs/0/state".into(), value: ui::UiValue::Text("newer".into()) }])
+            .unwrap();
+        assert!(!prepared.is_current(&session), "newer logical panel data must not be overwritten by stale plugin work");
+        assert!(session.accept_commands(prepared).is_err());
+        session.merge_plugin_panel_data();
+        assert_eq!(session.plugin_panels()[0].data.get("/jobs/0/state"), Some(&ui::UiValue::Text("newer".into())));
+    }
     fn file_component(write: bool) -> Vec<u8> {
         file_component_path(write, "secret.txt")
     }
@@ -639,7 +885,7 @@ mod native {
         let inspection = s.execute("plugin.inspect", &json!({"path":f.path()})).unwrap();
         assert_eq!(inspection["within_host_limits"], false);
         assert_eq!(inspection["host_limits"]["max_memory_mib"], 128);
-        let refusal = "Sample: it asks for 200000000000 fuel, and plugins may use 100000000000. Raise Max plugin fuel in Preferences › Plugins (in solidcraft-cli, max_fuel in the --plugin-limits file).";
+        let refusal = "Sample: it asks for 200000000000 fuel, and plugins may use 100000000000. Install the plugin again and allow its fuel request, or raise Max plugin fuel in Preferences › Plugins (in solidcraft-cli, max_fuel in the --plugin-limits file).";
         assert_eq!(inspection["limits_error"], refusal);
         let before = s.doc.to_json();
         let error = f.run(&mut s).unwrap_err();
@@ -670,6 +916,34 @@ mod native {
         assert!(f.run(&mut s).is_err());
         assert_eq!(s.doc.to_json(), before);
     }
+    #[test]
+    fn approved_fuel_runs_without_changing_other_plugins_default_limit() {
+        let f = Fixture::new("call $box");
+        let path = f.0.join("sample/plugin.json");
+        let mut m = manifest();
+        let fuel = 10_000_000_000_000_u64;
+        m["runtime"]["limits"]["fuel"] = json!(fuel);
+        std::fs::write(&path, m.to_string()).unwrap();
+        let mut s = Session::default();
+        let installed = f.install(&mut s, json!({"fuel":fuel}));
+        let inspection = s.execute("plugin.inspect", &json!({"path":installed})).unwrap();
+        assert_eq!(inspection["within_host_limits"], true);
+        s.execute("plugin.run", &json!({"path":installed,"approval":inspection["approval"],"entry":"make"})).unwrap();
+        assert_eq!(s.execute("inspect.measure", &json!({})).unwrap()["total"]["volume_mm3"], 24.);
+        m["runtime"]["limits"]["fuel"] = json!(fuel - 1);
+        std::fs::write(Path::new(&installed).join("plugin.json"), m.to_string()).unwrap();
+        let changed = s.execute("plugin.inspect", &json!({"path":installed})).unwrap();
+        assert_eq!(changed["within_host_limits"], false);
+        assert!(s.execute("plugin.run", &json!({"path":installed,"approval":changed["approval"],"entry":"make"})).is_err());
+        // An omitted limits object still uses the manifest's default fuel under Max plugin fuel.
+        m["runtime"].as_object_mut().unwrap().remove("limits");
+        std::fs::write(&path, m.to_string()).unwrap();
+        let installed = f.install(&mut s, json!({}));
+        let approval = read_package(&installed).unwrap().approval;
+        assert_eq!(host_limits_for(&s, "sample", &approval).max_fuel, HostLimits::default().max_fuel);
+        s.execute("plugin.run", &json!({"path":installed,"approval":approval,"entry":"make"})).unwrap();
+    }
+
     #[test]
     fn a_plugin_prepared_under_an_old_host_policy_is_not_adopted() {
         for command in ["plugin.run", "PLUGIN.RUN"] {
@@ -1658,6 +1932,7 @@ mod native {
                         package_hash: Some(read_package(&f.path()).unwrap().approval),
                         command_groups: BTreeSet::new(),
                         folders: s.plugin_state.file_grants.clone(),
+                        fuel: None,
                         memory_mib: None,
                         input_folder: false,
                     },
@@ -1797,7 +2072,7 @@ mod native {
             (|m: &mut Value| m["capabilities"] = json!(["commands@0.3"]), "capabilities"),
             (|m: &mut Value| m["runtime"]["commands"] = json!(["file.export"]), "runtime.commands"),
             (|m: &mut Value| m["runtime"]["limits"]["deadline_ms"] = json!(60_000), "runtime.limits.deadline_ms"),
-            (|m: &mut Value| m["runtime"]["limits"]["fuel"] = json!(200_000_000_000_u64), "runtime.limits.fuel"),
+            (|m: &mut Value| m["runtime"]["limits"]["fuel"] = json!(10_000_000_000_001_u64), "runtime.limits.fuel"),
             (|m: &mut Value| m["runtime"]["module"] = json!("missing.wasm"), "runtime.module"),
             (|m: &mut Value| m["surprise"] = json!(true), "manifest"),
         ] {
@@ -1813,6 +2088,9 @@ mod native {
         m["runtime"]["limits"]["memory_mib"] = json!(512);
         let reply = check(&mut s, &zip(&m, &component));
         assert_eq!((reply["ok"].as_bool(), fields(&reply)), (Some(true), vec![("warning".to_string(), "runtime.limits.memory_mib".to_string())]));
+        m["runtime"]["limits"] = json!({"fuel":10_000_000_000_000_u64,"memory_mib":64,"deadline_ms":5000});
+        let reply = check(&mut s, &zip(&m, &component));
+        assert_eq!((reply["ok"].as_bool(), fields(&reply)), (Some(true), vec![("warning".to_string(), "runtime.limits.fuel".to_string())]));
         // A core module, and a command component declared as an importer, do not link.
         let core = wat::parse_str("(module)").unwrap();
         let reply = check(&mut s, &zip(&manifest(), &core));
@@ -2272,6 +2550,105 @@ fn evaluated_mesh_transfer_refuses_an_oversized_input_without_truncation() {
     let mut s = Session::new(doc);
     let before = s.doc.to_json();
     assert!(s.execute("model.mesh", &json!({"body":"Many"})).unwrap_err().to_string().contains("transfer budget"));
+    assert_eq!(s.doc.to_json(), before);
+}
+
+/// A session holding one mesh body, "Strip": a flat strip of `triangles` triangles, triangle `t`
+/// over the points (k, 0, 0) and (k, 1, 0) numbered `t % period` to `t % period + 2`, each
+/// triangle with three corners of its own, as an STL gives them. Every other triangle writes its
+/// zero coordinates as `-0` (the import writes them as 0, so the body holds one sign).
+fn strip_of_unshared_triangles(triangles: u32, period: u32) -> Session {
+    let point = |k: u32, zero: f64| [f64::from(k / 2), f64::from(k % 2) + zero, zero];
+    let positions: Vec<f64> = (0..triangles)
+        .flat_map(|t| {
+            let (k, zero) = (t % period, if t.is_multiple_of(2) { 0. } else { -0. });
+            [point(k, zero), point(k + 1, zero), point(k + 2, zero)]
+        })
+        .flatten()
+        .collect();
+    let mut doc = solidcraft_doc::Document::default();
+    doc.add_feature(
+        solidcraft_doc::FeatureKind::MeshImport {
+            file: "strip.stl".into(),
+            meshes: vec![solidcraft_doc::MeshData {
+                name: "Strip".into(),
+                positions: positions.into(),
+                triangles: (0..3 * triangles).collect(),
+                color: None,
+                corner_normals: Default::default(),
+            }],
+        },
+        Some("Strip mesh"),
+    )
+    .unwrap();
+    doc.features.last_mut().unwrap().body_names = vec!["Strip".into()];
+    Session::new(doc)
+}
+
+#[test]
+fn evaluated_mesh_transfer_shares_the_corners_of_an_unshared_mesh_body() {
+    // 3000 triangles hand over 9000 corners, past the 8192-vertex budget unshared (#20627); at
+    // 3002 distinct points the body fits
+    let mut s = strip_of_unshared_triangles(3000, 3000);
+    let before = s.doc.to_json();
+    let result = s.execute("model.mesh", &json!({"body":"Strip"})).unwrap();
+    let positions: Vec<[f64; 3]> = serde_json::from_value(result["positions"].clone()).unwrap();
+    let triangles: Vec<[usize; 3]> = serde_json::from_value(result["triangles"].clone()).unwrap();
+    assert_eq!(triangles.len(), 3000);
+    assert_eq!(positions.len(), 3002, "one vertex per distinct point");
+    let mut distinct = positions.iter().map(|p| p.map(|c| (c + 0.).to_bits())).collect::<Vec<_>>();
+    distinct.sort_unstable();
+    distinct.dedup();
+    assert_eq!(distinct.len(), positions.len(), "no point is handed over twice");
+    // every triangle keeps its corners where they were: three consecutive points of the strip
+    // (the body may turn a triangle round, so its corners are compared as a set)
+    let mut corners: Vec<[u64; 3]> = triangles
+        .iter()
+        .map(|tri| {
+            let mut ks = tri.map(|i| {
+                let [x, y, z] = positions[i];
+                assert_eq!(z, 0.);
+                (2. * x + y) as u64
+            });
+            ks.sort_unstable();
+            ks
+        })
+        .collect();
+    corners.sort_unstable();
+    let expected: Vec<[u64; 3]> = (0..3000).map(|k| [k, k + 1, k + 2]).collect();
+    assert_eq!(corners, expected);
+    assert_eq!(s.doc.to_json(), before);
+}
+
+#[test]
+fn shared_corners_count_both_zeros_as_one_point_and_never_share_what_is_not_finite() {
+    // a mesh body arrives with -0 already written as 0, so -0 is tested on the sharing itself: a
+    // tessellation can compute either sign at a point two faces share
+    let corners = [[0., 1., 0.], [-0., 1., -0.], [f64::NAN, 0., 0.], [f64::NAN, 0., 0.], [2., 0., 0.]];
+    let (positions, triangles) = crate::cmd::plugin_shared_corners(corners.into_iter(), &[[0, 1, 4], [2, 3, 4]]).unwrap();
+    assert_eq!(positions.len(), 4, "{positions:?}");
+    assert_eq!(triangles, vec![[0, 0, 3], [1, 2, 3]]);
+    assert_eq!(positions[0], [0., 1., 0.]);
+    assert!(crate::cmd::plugin_shared_corners(corners.into_iter(), &[[0, 1, 5]]).is_err(), "a corner it does not have");
+}
+
+#[test]
+fn evaluated_mesh_transfer_past_the_triangle_budget_names_its_count() {
+    // 16385 triangles over 3002 distinct points: only the triangle limit is passed
+    let mut s = strip_of_unshared_triangles(16385, 3000);
+    let before = s.doc.to_json();
+    let message = s.execute("model.mesh", &json!({"body":"Strip"})).unwrap_err().to_string();
+    assert!(message.contains("transfer budget: 16385 triangles, at most 16384"), "{message}");
+    assert_eq!(s.doc.to_json(), before);
+}
+
+#[test]
+fn evaluated_mesh_transfer_past_the_vertex_budget_after_sharing_is_refused() {
+    // 8200 triangles over 8202 distinct points: past the vertex limit even shared
+    let mut s = strip_of_unshared_triangles(8200, 8200);
+    let before = s.doc.to_json();
+    let message = s.execute("model.mesh", &json!({"body":"Strip"})).unwrap_err().to_string();
+    assert!(message.contains("transfer budget: more than 8192 distinct vertices"), "{message}");
     assert_eq!(s.doc.to_json(), before);
 }
 
@@ -3184,6 +3561,65 @@ mod install_zip {
     }
 
     #[test]
+    fn approved_fuel_is_stored_for_the_exact_package_and_replacement_asks_again() {
+        let (mut s, root) = session("fuel");
+        let fuel = 10_000_000_000_000_u64;
+        let mut m = manifest();
+        m["runtime"]["limits"]["fuel"] = json!(fuel);
+        let path = put(&root, "fuel.zip", &zip(&[("plugin.json", &serde_json::to_vec(&m).unwrap()), ("plugin.wasm", b"inert bytes")]));
+        let dry = s.execute("plugin.install", &json!({"path":path,"dry_run":true})).unwrap();
+        assert_eq!(dry["limits"]["fuel"], fuel);
+        assert_eq!(dry["host_limits"]["max_fuel"], 100_000_000_000_u64);
+        assert!(s.plugin_state.grants.is_empty());
+        for wrong in [json!(fuel - 1), json!(fuel + 1), json!(0), json!(-1), json!("10000000000000")] {
+            assert!(s.execute("plugin.install", &json!({"path":path,"approve":{"fuel":wrong}})).is_err(), "{wrong}");
+            assert!(!root.join("plugins").exists());
+        }
+        s.plugin_state.stored = Some(Default::default());
+        s.execute("plugin.install", &json!({"path":path,"approval":dry["approval"],"approve":{"fuel":fuel}})).unwrap();
+        let installed = root.join("plugins/sample");
+        let approval = read_package(&installed.to_string_lossy()).unwrap().approval;
+        assert_eq!(serde_json::to_value(&s.plugin_state.grants["sample"]).unwrap()["fuel"], fuel);
+        assert_eq!(host_limits_for(&s, "sample", &approval).max_fuel, fuel);
+        assert_eq!(host_limits_for(&s, "other", &approval).max_fuel, s.plugin_limits.max_fuel);
+        assert_eq!(s.plugin_limits.max_fuel, 100_000_000_000);
+        let mut later = Session::default();
+        later.plugin_state.plugins_dir = Some(root.join("plugins"));
+        later.plugin_state.stored = Some(Default::default());
+        later.plugin_state.refresh_stored();
+        assert_eq!(later.execute("plugin.grants", &json!({})).unwrap()["grants"][0]["fuel"], fuel);
+        assert_eq!(host_limits_for(&later, "sample", &approval).max_fuel, fuel);
+        m["runtime"]["limits"]["fuel"] = json!(fuel - 1);
+        std::fs::write(installed.join("plugin.json"), m.to_string()).unwrap();
+        let changed = read_package(&installed.to_string_lossy()).unwrap().approval;
+        assert_ne!(approval, changed);
+        assert_eq!(host_limits_for(&later, "sample", &changed).max_fuel, later.plugin_limits.max_fuel);
+        assert_eq!(later.execute("plugin.grants", &json!({})).unwrap()["grants"][0]["status"], "changed");
+        s.execute("plugin.install", &json!({"path":path,"replace":true})).unwrap();
+        assert_eq!(host_limits_for(&s, "sample", &approval).max_fuel, s.plugin_limits.max_fuel);
+        s.execute("plugin.revoke", &json!({"id":"sample"})).unwrap();
+        assert!(s.execute("plugin.grants", &json!({})).unwrap()["grants"].as_array().unwrap().is_empty());
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn fuel_above_the_hard_ceiling_is_refused_before_installation() {
+        let (mut s, root) = session("fuel-hard-ceiling");
+        let mut m = manifest();
+        let ceiling = 10_000_000_000_000_u64;
+        m["runtime"]["limits"]["fuel"] = json!(ceiling + 1);
+        let path = put(&root, "fuel.zip", &zip(&[("plugin.json", &serde_json::to_vec(&m).unwrap()), ("plugin.wasm", b"inert bytes")]));
+        s.plugin_limits.max_fuel = u64::MAX;
+        for args in [json!({"path":path,"dry_run":true}), json!({"path":path,"approve":{"fuel":ceiling + 1}})] {
+            let error = s.execute("plugin.install", &args).unwrap_err();
+            assert_eq!(error.host_error(), Some(&HostError::OverCeiling { limit: "fuel".into(), requested: ceiling + 1, allowed: ceiling }));
+            assert!(error.to_string().contains(&(ceiling + 1).to_string()) && error.to_string().contains(&ceiling.to_string()));
+            assert!(!root.join("plugins").exists() && s.plugin_state.grants.is_empty());
+        }
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
     fn installs_without_approval_grant_nothing_and_replacement_drops_stale_grants() {
         let (mut s, root) = session("stale");
         let path = requested_package(&root);
@@ -3504,6 +3940,8 @@ mod stored_grants {
             ("unknown.json", record(json!({"command_groups":["file"],"net":true}))),
             ("group.json", record(json!({"command_groups":["everything"]}))),
             ("memory.json", record(json!({"memory_mib":1_000_000}))),
+            ("fuel.json", record(json!({"fuel":10_000_000_000_001_u64}))),
+            ("zero-fuel.json", record(json!({"fuel":0}))),
             ("hash.json", record(json!({"package_hash":"not a hash"}))),
             ("relative.json", record(json!({"folders":[{"name":"out","folder":"out","read":true,"write":true}]}))),
             ("Bad_Id.json", record(json!({}))),

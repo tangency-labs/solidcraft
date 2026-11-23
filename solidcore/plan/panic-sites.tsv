@@ -539,7 +539,7 @@ crates/solidcore/src/heal/face_props.rs	LoopProps::set_props	int-rem	1	proven	se
 crates/solidcore/src/heal/face_props.rs	LoopProps::set_props	int-rem	2	proven	self.seam_crossing_cnt_v % 2	constant non-zero divisor
 crates/solidcore/src/heal/gap.rs	add_unique_get_ordered_index	Vec::insert	1	proven	insert(0, value)	index 0 is never past the end
 crates/solidcore/src/heal/gap.rs	add_unique_get_ordered_index	Vec::insert	2	proven	insert(ii, value)	ii ranges over 1..array.len()
-crates/solidcore/src/heal/gap.rs	samples_per_interval	int-div	1	proven	want / intervals	sample_normalized_values checks end_u > start_u and, for surfaces, end_v > start_v before both calls
+crates/solidcore/src/heal/gap.rs	samples_per_interval	int-div	1	proven	want / intervals	sample_normalized_values skips collapsed directions and checks end > start for every varying direction before either call
 crates/solidcore/src/heal/gap.rs	samples_per_interval	int-rem	1	proven	per % 2	constant non-zero divisor
 crates/solidcore/src/heal/gap.rs	trimmed_span_values	windows	1	proven	windows(2)	constant non-zero size
 crates/solidcore/src/heal/heal_data/p1.rs	brep_regions_from_infinite	rotate	1	proven	rotate_left(at)	at is position() in the same regions Vec

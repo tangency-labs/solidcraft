@@ -241,17 +241,21 @@ fn make_shell_edges_exact(
 /// at the original B-rep's tolerance): the distance reaches a radius of curvature of the face
 /// (a round offset by its radius), so the offset is a line there, neither a face nor inside
 /// out, and building on lifts the faces beside it across it and grows their tolerances into
-/// an unsound body. An offset that folds (the distance passes the radius) is
-/// [`refuse_folding_offset`]'s, which runs after it. A base that is no NURB has nothing to
-/// prove.
-fn refuse_singular_offset(
+/// an unsound body. Then (WR-718, #2350 S1) refuses it when it folds on that box
+/// ([`crate::offset::construction::sheets::certify_regular`]), naming the largest wall that
+/// works. Both rest on one search for the face's least radius on the displaced side
+/// ([`crate::offset::construction::sheets::least_wall`]), made once. A base that is no NURB
+/// has nothing to prove.
+fn refuse_singular_or_folding_offset(
     kernel: &Kernel,
     original: &Brep,
     face: FaceId,
     offset: &crate::surface::offset_surface::OffsetSurface,
     operation: &'static str,
 ) -> Result<()> {
-    use crate::offset::construction::sheets::proved_singular;
+    use crate::offset::construction::sheets::{
+        certify_regular_knowing, check_reach, least_wall, singular_at, Regularity,
+    };
     let Some(nurb) = crate::topology::brep::p3::with_nurb(kernel, offset.base_surface())? else {
         return Ok(());
     };
@@ -261,17 +265,38 @@ fn refuse_singular_offset(
     let domain = crate::topology::face::p2::uv_domain(original, face)?;
     let uv_box = [domain.min.x, domain.max.x, domain.min.y, domain.max.y];
     let distance = offset.offset_distance();
-    match proved_singular(base, distance, Some(uv_box), original.tolerance())? {
-        Some(singular) if singular.collapses => Err(Failure::new(
+    let resolution = original.tolerance();
+    check_reach(distance, resolution)?;
+    let least = least_wall(base, distance, Some(uv_box))?;
+    if let Some(singular) = least.and_then(|radius| singular_at(radius, distance, resolution)) {
+        if singular.collapses {
+            return Err(Failure::new(
+                operation,
+                OffsetFailure::Collapses {
+                    face,
+                    distance,
+                    radius: singular.radius,
+                },
+            )
+            .into_error());
+        }
+    }
+    match certify_regular_knowing(kernel, base, distance, Some(uv_box), least)? {
+        Regularity::Regular => Ok(()),
+        Regularity::Folds { largest } => Err(Failure::new(
             operation,
-            OffsetFailure::Collapses {
+            OffsetFailure::Folds {
                 face,
                 distance,
-                radius: singular.radius,
+                largest,
             },
         )
         .into_error()),
-        _ => Ok(()),
+        Regularity::NotCertified => Err(Failure::new(
+            operation,
+            OffsetFailure::NotCertified { face, distance },
+        )
+        .into_error()),
     }
 }
 
@@ -480,48 +505,6 @@ fn collapsed_face_radius(
         )
     };
     proved().ok().flatten().unwrap_or_else(|| distance.abs())
-}
-
-/// Not upstream (WR-718, #2350 S1): refuses the offset of `face` (whose implicit offset
-/// surface is `offset`) when it folds on the face's parameter box
-/// ([`crate::offset::construction::sheets::certify_regular`]), naming the largest wall
-/// that works.
-fn refuse_folding_offset(
-    kernel: &Kernel,
-    original: &Brep,
-    face: FaceId,
-    offset: &crate::surface::offset_surface::OffsetSurface,
-    operation: &'static str,
-) -> Result<()> {
-    use crate::offset::construction::sheets::{certify_regular, Regularity};
-    let Some(nurb) = crate::topology::brep::p3::with_nurb(kernel, offset.base_surface())? else {
-        return Ok(());
-    };
-    let Some(base) = nurb.gw_nurb() else {
-        return Ok(());
-    };
-    let domain = crate::topology::face::p2::uv_domain(original, face)?;
-    let uv_box = [domain.min.x, domain.max.x, domain.min.y, domain.max.y];
-    match certify_regular(kernel, base, offset.offset_distance(), Some(uv_box))? {
-        Regularity::Regular => Ok(()),
-        Regularity::Folds { largest } => Err(Failure::new(
-            operation,
-            OffsetFailure::Folds {
-                face,
-                distance: offset.offset_distance(),
-                largest,
-            },
-        )
-        .into_error()),
-        Regularity::NotCertified => Err(Failure::new(
-            operation,
-            OffsetFailure::NotCertified {
-                face,
-                distance: offset.offset_distance(),
-            },
-        )
-        .into_error()),
-    }
 }
 
 /// Static offset entry point, with a non-null original and an owned result.
@@ -867,8 +850,8 @@ impl OffsetExecutive {
                             continue;
                         }
                     }
-                    // SE upstream: propagate Unported, ignore other errors.
-                    crate::error::ignore_status(self.mapped_edge_prefix(
+                    // SE upstream: propagate Unported, ignore other errors but a defect.
+                    super::p1::ignored_unless_defect(self.mapped_edge_prefix(
                         kernel,
                         original,
                         edgeuse,
@@ -892,7 +875,7 @@ impl OffsetExecutive {
                             attributes: &mut *notifications.attributes,
                             key_of: notifications.result_key_of,
                         };
-                        crate::error::ignore_status(self.build_side_wall_of_edgeuse_with(
+                        super::p1::ignored_unless_defect(self.build_side_wall_of_edgeuse_with(
                             kernel,
                             original,
                             Some(edgeuse),
@@ -1041,18 +1024,19 @@ impl OffsetExecutive {
                         attributes: &mut *notifications.attributes,
                         key_of: notifications.original_key_of,
                     };
-                    let mated = crate::error::ignored(self.mate_edges_across_with_marked(
-                        kernel,
-                        original,
-                        edgeuse,
-                        across,
-                        offset_edgeuse,
-                        offset_across,
-                        mark_type,
-                        &marked,
-                        &mut stores,
-                        notifications.result_key_of,
-                    ))?;
+                    let mated =
+                        super::p1::ignored_unless_defect(self.mate_edges_across_with_marked(
+                            kernel,
+                            original,
+                            edgeuse,
+                            across,
+                            offset_edgeuse,
+                            offset_across,
+                            mark_type,
+                            &marked,
+                            &mut stores,
+                            notifications.result_key_of,
+                        ))?;
                     if mated.is_none() {
                         unbridged =
                             unbridged.or(Some(required(eu::face(original, radial)?, OP_EXTENDED)?));
@@ -1291,13 +1275,14 @@ impl OffsetExecutive {
                     kernel.check_cancelled(OP_EXTENDED)?;
                     let edge = required(eu::edge(original, edgeuse)?, OP_EXTENDED)?;
                     if eu::edge_is_lamina(original, edge)? {
-                        // SE, not SER, upstream: propagate Unported, ignore other errors.
+                        // SE, not SER, upstream: propagate Unported, ignore other errors but
+                        // a defect.
                         let mut stores = NotificationStores {
                             records: &mut *notifications.records,
                             attributes: &mut *notifications.attributes,
                             key_of: notifications.result_key_of,
                         };
-                        crate::error::ignore_status(self.build_side_wall_of_edgeuse_with(
+                        super::p1::ignored_unless_defect(self.build_side_wall_of_edgeuse_with(
                             kernel,
                             original,
                             Some(edgeuse),
@@ -1732,8 +1717,7 @@ impl OffsetExecutive {
             if let Some(crate::surface::surface::SurfaceKind::OffsetSurface(offset)) =
                 surface.as_ref().map(crate::surface::surface::Surface::kind)
             {
-                refuse_singular_offset(kernel, original, id, offset, operation)?;
-                refuse_folding_offset(kernel, original, id, offset, operation)?;
+                refuse_singular_or_folding_offset(kernel, original, id, offset, operation)?;
             }
         }
         // Not upstream (WR-346, tangency-labs/solidcore#397): an inset face whose offset
