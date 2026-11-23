@@ -59,7 +59,8 @@ impl std::error::Error for PeriodicSeamError {
 /// record is published. Returns the completed record and each output face's input index;
 /// `None` leaves a record with in-domain trims and complete sectors unchanged. The kernel
 /// removes crossed internal cuts, splits genuine boundaries at the base cut, inserts seams
-/// and translates the pieces.
+/// and translates the pieces. A completed record that is no longer valid or no longer agrees
+/// with its own geometry is not returned: `None` keeps the record as it was.
 ///
 /// # Errors
 /// Typed evaluation, conversion and topology failures, including a lost face origin.
@@ -132,6 +133,16 @@ pub fn complete_periodic_seams(
     }
     let (completed, order) =
         to_record(&mut kernel, &mut body).map_err(PeriodicSeamError::Conversion)?;
+    // The kernel moves every trim piece into the base period on its own. Where a loop's
+    // consecutive uses lie either side of the cut with no seam edge between them (a vertex
+    // sits on the cut), the pieces end a whole period apart and the record's geometry no
+    // longer agrees with itself. Such a completion is not published: the record as imported,
+    // whose lifted trims continue one another, stays.
+    if crate::record_check::validate(&completed).is_err()
+        || crate::record_check::agreement(&completed).is_err()
+    {
+        return Ok(None);
+    }
     let faces = order
         .faces
         .iter()
@@ -315,11 +326,31 @@ pub fn folded_pcurve(
         .map(solidcore_convert::record_curve2)
 }
 
+/// The parameters that bracket monotone pieces in both coordinates of a trim curve.
+pub fn monotone_breaks(c: &Curve2) -> crate::Result<Vec<f64>> {
+    check_curve2(c, &mut Budget::input()).map_err(|_| crate::Error::Argument)?;
+    let curve = solidcore_convert::curve2(c);
+    crate::session::run("pcurve::monotone_breaks", |k| {
+        Ok(Ok(curve.monotone_breaks(k)?))
+    })?
+}
+
 /// The point of pcurve `c` at `t` (`None` outside its interval or for a malformed record)
 /// ([`solidcore::eval::pcurve::eval`]).
 #[must_use]
 pub fn eval(c: &Curve2, t: f64) -> Option<[f64; 2]> {
     k::eval(&solidcore_convert::curve2(c), t)
+}
+
+/// The points of `surface` at each of `uvs`, in the surface's own (u, v) (`None` for a surface
+/// that does not convert, or a parameter off it) ([`solidcore::eval::SurfaceEval::point`]).
+#[must_use]
+pub fn surface_points(surface: &Surface, uvs: &[[f64; 2]]) -> Option<Vec<[f64; 3]>> {
+    let kernel = solidcore_convert::surface(surface).ok()?;
+    let eval = solidcore::eval::SurfaceEval::new(&kernel).ok()?;
+    uvs.iter()
+        .map(|uv| eval.point(*uv).map(|p| [p.x, p.y, p.z]))
+        .collect()
 }
 
 /// The point of pcurve `c` at `t` and its first derivative there (`None` outside its interval or
