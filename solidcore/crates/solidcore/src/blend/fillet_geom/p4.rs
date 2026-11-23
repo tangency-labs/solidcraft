@@ -1985,6 +1985,7 @@ impl FilletBrep {
             }
         };
         let mut sf = eu1::face(target, side_eu)?;
+        let mut sf_src = side_eu;
         let radial = eu1::radial(target, side_eu)?.ok_or_else(|| {
             set_up(
                 OP_EXT,
@@ -1993,17 +1994,20 @@ impl FilletBrep {
             )
         })?;
         let mut of = eu1::face(target, radial)?;
+        let mut of_src = radial;
         for kk in 0..2 {
             let eu = fil_solver()?.edgeuse(kk)?.ok_or_else(|| {
                 SolidError::blend_solver(OP_EXT, SolverFailure::SolverEdgeUseMissing { index: kk })
             })?;
             if eu1::face(target, eu)? == sf {
                 core::mem::swap(&mut sf, &mut of);
+                core::mem::swap(&mut sf_src, &mut of_src);
                 break;
             }
         }
         let on_face = of;
-        let side_face = sf.ok_or_else(|| eu_without_face(OP_EXT, side_eu))?;
+        // The error names the edge use whose face is absent (after the swap, the radial).
+        let side_face = sf.ok_or_else(|| eu_without_face(OP_EXT, sf_src))?;
 
         // get face->extendedSurface
         let surface2 = context
