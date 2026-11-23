@@ -355,6 +355,7 @@ render.status                     rendering: images, cameras, stages
 render.surface.import             rendering image resources; crates/engine/src/cmd/render/library_tests.rs::imported_wood_maps_reopen_without_source_and_keep_geometry_history_and_resource_users
 render.texture.list               rendering image resources; crates/engine/src/cmd/render/library_tests.rs::imported_wood_maps_reopen_without_source_and_keep_geometry_history_and_resource_users
 render.texture.remove             rendering image resources; crates/engine/src/cmd/render/library_tests.rs::imported_wood_maps_reopen_without_source_and_keep_geometry_history_and_resource_users
+scan.align                        rigid 3-2-1 scan placement; tested in solidcore/crates/solidcore/src/geom/scan_frame.rs, solidcore/crates/solidcore-ops/src/scan_align.rs, crates/engine/src/cmd/scan_align.rs and crates/ui-egui/src/dialogs_scan_align.rs
 select.all                        the selection
 select.clear                      the selection
 select.filter                     the selection
