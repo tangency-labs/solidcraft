@@ -3879,6 +3879,40 @@ impl Model {
         self.settle_import_checks_under(kernel::heals_tolerance_defects())
     }
 
+    /// Call `wake` once the SMLib check of each import's parts still running ends
+    /// ([`kernel::ImportChecks::on_end`]): a window asks for the frame the result needs when it
+    /// lands, instead of asking [`Self::checking_imports`] every frame while the checks run.
+    /// Every check that ends in the meantime calls it at once; a model with none running wakes
+    /// nothing.
+    pub fn on_import_checks_end(&self, wake: std::sync::Arc<dyn Fn() + Send + Sync>) {
+        for r in &self.results {
+            if let Some(report) = &r.import_report
+                && report.checks.is_running()
+            {
+                report.checks.on_end(wake.clone());
+            }
+        }
+    }
+
+    /// The import `id` has a check still running, which the returned closure ends (tests): what
+    /// [`kernel::ImportChecks::running_for_tests`] is for, on a model a window holds.
+    #[doc(hidden)]
+    pub fn running_import_check_for_tests(&mut self, id: u64) -> impl FnOnce(Vec<kernel::ImportIssue>) + Send + 'static {
+        let (checks, end) = kernel::ImportChecks::running_for_tests();
+        if let Some(r) = self.results.iter_mut().find(|r| r.id == id) {
+            let report = r.import_report.as_deref().cloned().unwrap_or(kernel::ImportReport {
+                parts: 0,
+                solids: 0,
+                issues: Vec::new(),
+                single_root: true,
+                split_edges: 0,
+                checks: checks.clone(),
+            });
+            r.import_report = Some(std::sync::Arc::new(kernel::ImportReport { checks, ..report }));
+        }
+        end
+    }
+
     /// [`Self::settle_import_checks`] with the heal preference given.
     pub(crate) fn settle_import_checks_under(&mut self, heal: bool) -> bool {
         let (found, told) = (&mut self.import_notices, &mut self.told_imports);
