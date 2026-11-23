@@ -73,6 +73,7 @@
 
 use std::collections::BTreeSet;
 
+use crate::error::query::QueryFailure;
 use crate::error::{ignored, EntityRef, Result, SolidError};
 use crate::heal::face_props::{
     ClassifyLoopIo, ClassifyLoopsOut, ContainmentType, FaceProps, HealNotYetFaceType, HealerOpType,
@@ -489,7 +490,7 @@ pub(crate) fn classify_loops_cached<O: LoopObject>(
     if loops.is_empty() {
         *loops = face_p2::loops(b, face, false, None)?;
         if loops.is_empty() {
-            return Err(SolidError::query_failed(OP, "the face has no loops"));
+            return Err(SolidError::query(OP, QueryFailure::FaceWithoutLoops));
         }
     }
 
@@ -851,10 +852,7 @@ pub(crate) fn classify_loops_cached<O: LoopObject>(
 
         let Some(inc_indx) = inc_indx.filter(|_| done_size != 0) else {
             // unexpected empty DoneTouchDirList or invalid lIncIndx
-            return Err(SolidError::query_failed(
-                OP,
-                "the touch-direction list is empty or its index is unset",
-            ));
+            return Err(SolidError::query(OP, QueryFailure::NoLoopTouches));
         };
 
         let mut jj = 0usize;
@@ -1361,7 +1359,7 @@ mod tests {
         let r = classify_loops(&k, &b, f, &mut loops, &mut out, &mut scratch, &mut props);
         assert_eq!(
             r,
-            Err(SolidError::query_failed(OP, "the face has no loops"))
+            Err(SolidError::query(OP, QueryFailure::FaceWithoutLoops))
         );
         assert_eq!(
             r.as_ref().map_err(SolidError::upstream_status),

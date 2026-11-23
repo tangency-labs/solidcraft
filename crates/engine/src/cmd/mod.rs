@@ -94,6 +94,7 @@ pub(crate) use features::EdgeRefForm;
 pub(crate) use features::PLANE_FORMS;
 pub use features::auto_operation;
 pub(crate) use features::axis_dir_form;
+pub(crate) use features::axis_expr_form;
 pub(crate) use features::axis_line_object;
 pub use features::clearance_diameter;
 pub use features::clearance_sizes;
