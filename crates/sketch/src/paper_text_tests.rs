@@ -442,6 +442,28 @@ fn the_windows_lines_wait_for_no_search() {
     assert_eq!(answer.unwrap().lines, waited.lines);
 }
 
+/// When a font worker cannot start, the caller searches the batch itself while it still owns the hold.
+#[test]
+fn an_inline_font_search_returns_while_its_answer_is_held() {
+    use crate::fonts::fallback::{answered, answers, answers_with_worker, gate};
+
+    let folder = Folder::new("held-inline", &["a.ttf"]);
+    let query = |ch| Query::new(&folder.dirs(), Han::Japanese, false, false, ch);
+    let held = '\u{30f9}';
+    let queries = [query(held), query('A')];
+    let face = Some((folder.0.join("a.ttf"), 0));
+    let hold = gate::hold(held);
+
+    let pending = answers_with_worker(&queries, false, || Err(std::io::ErrorKind::WouldBlock.into()));
+    assert_eq!(pending, None);
+    assert_eq!(answers(&queries, false), None);
+    assert_eq!(answers(&queries, true), Some(vec![face.clone(), face.clone()]));
+    assert_eq!(answers(&queries[1..], false), Some(vec![face.clone()]));
+    assert_eq!(answered(&queries[0]), None);
+    drop(hold);
+    assert_eq!(answers(&queries, false), Some(vec![face.clone(), face]));
+}
+
 /// A search that stops part-way (a panic on its thread) leaves nothing waiting: what it held is
 /// answered as a miss, and a character asked for while it ran is searched next, not missed.
 #[test]

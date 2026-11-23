@@ -17,6 +17,7 @@
 //! This is not the launcher of `update::managed_by`, which installs and updates a copy.
 
 use crate::SolveApp;
+use std::collections::BTreeMap;
 
 /// The registry key of the mandatory values, under either hive.
 pub const KEY: &str = r"Software\Policies\SolidCraft";
@@ -30,6 +31,46 @@ pub const CHECK_FOR_UPDATES: &str = "CheckForUpdates";
 /// 0: no anonymous usage statistics, and the person cannot turn them on. 1: allowed, the person
 /// chooses. Locks `usage_statistics` when 0.
 pub const USAGE_STATISTICS: &str = "UsageStatistics";
+
+/// The longest text value read for a setting; anything longer is not a valid choice.
+const MAX_CHOICE: usize = 64;
+
+/// What a setting's policy value may be.
+#[derive(Clone, Copy, Debug, PartialEq)]
+enum Kind {
+    /// A `REG_DWORD`: 0 or 1.
+    Switch,
+    /// A `REG_SZ`: one of [`crate::prefs::UNITS`].
+    Units,
+    /// A `REG_SZ`: `system` or the id of a language SolidCraft has.
+    Language,
+}
+
+/// A preference an organization can set: the policy's value name, the preference's `ui.prefs`
+/// name, and what the value may be.
+pub struct Lock {
+    pub policy: &'static str,
+    pub pref: &'static str,
+    kind: Kind,
+}
+
+/// Every preference a policy can set. Keep `packaging/windows/policies/` in step.
+pub const LOCKS: &[Lock] = &[
+    Lock { policy: CHECK_FOR_UPDATES, pref: "check_updates", kind: Kind::Switch },
+    Lock { policy: "DefaultUnits", pref: "default_units", kind: Kind::Units },
+    Lock { policy: "Language", pref: "language", kind: Kind::Language },
+    Lock { policy: "ReopenDesigns", pref: "reopen_designs", kind: Kind::Switch },
+    Lock { policy: "ShowDiscordButton", pref: "show_discord_button", kind: Kind::Switch },
+    Lock { policy: "ShowDonateButton", pref: "show_donate_button", kind: Kind::Switch },
+];
+
+/// A preference's value, as a policy sets it.
+#[derive(Clone, Debug, PartialEq, serde::Serialize)]
+#[serde(untagged)]
+pub enum Setting {
+    Switch(bool),
+    Text(String),
+}
 
 /// The organization's name, shown as "Managed by {name}". Mandatory only; it locks nothing.
 pub const ORGANIZATION_NAME: &str = "OrganizationName";
@@ -67,9 +108,9 @@ pub enum Value {
 /// One level of policy: each field is `None` until the administrator sets it.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct Layer {
-    /// [`CHECK_FOR_UPDATES`].
-    pub check_for_updates: Option<bool>,
-    /// [`USAGE_STATISTICS`].
+    /// The valid values of [`LOCKS`], by the preference they set.
+    pub settings: BTreeMap<&'static str, Setting>,
+    /// [`USAGE_STATISTICS`]: 0 turns them off and locks the preference; 1 leaves the choice.
     pub usage_statistics: Option<bool>,
     /// [`ORGANIZATION_NAME`], cleaned: one line, no control or direction characters, at most
     /// [`MAX_NAME`] characters, never empty.
@@ -79,14 +120,6 @@ pub struct Layer {
 impl Layer {
     /// The values `get` knows, by name. The value is untrusted: anything unexpected is not set.
     pub fn read(get: &dyn Fn(&str) -> Option<Value>) -> Layer {
-        let switch = |name: &str| match get(name)? {
-            Value::Number(0) => Some(false),
-            Value::Number(1) => Some(true),
-            other => {
-                log::warn!("policy: {name} is {other:?}, expected 0 or 1; ignored");
-                None
-            }
-        };
         let text = |name: &str| match get(name)? {
             Value::Text(text) => clean_name(&text),
             other => {
@@ -94,21 +127,101 @@ impl Layer {
                 None
             }
         };
-        Layer { check_for_updates: switch(CHECK_FOR_UPDATES), usage_statistics: switch(USAGE_STATISTICS), organization: text(ORGANIZATION_NAME) }
+        let settings = LOCKS
+            .iter()
+            .filter_map(|lock| {
+                let value = get(lock.policy)?;
+                let setting = parse(lock.kind, &value);
+                if setting.is_none() {
+                    log::warn!("policy: {} is {value:?}, not a value it takes; ignored", lock.policy);
+                }
+                Some((lock.pref, setting?))
+            })
+            .collect();
+        let usage_statistics = match get(USAGE_STATISTICS) {
+            None => None,
+            Some(value) => {
+                let on = match parse(Kind::Switch, &value) {
+                    Some(Setting::Switch(on)) => Some(on),
+                    _ => None,
+                };
+                if on.is_none() {
+                    log::warn!("policy: {USAGE_STATISTICS} is {value:?}, not a value it takes; ignored");
+                }
+                on
+            }
+        };
+        Layer { settings, usage_statistics, organization: text(ORGANIZATION_NAME) }
+    }
+
+    /// [`CHECK_FOR_UPDATES`]: whether update checks run.
+    pub fn check_for_updates(&self) -> Option<bool> {
+        match self.settings.get("check_updates") {
+            Some(Setting::Switch(on)) => Some(*on),
+            _ => None,
+        }
     }
 
     /// Whether any value is set.
     fn any(&self) -> bool {
-        self.check_for_updates.is_some() || self.usage_statistics.is_some() || self.organization.is_some()
+        !self.settings.is_empty() || self.usage_statistics.is_some() || self.organization.is_some()
     }
 
     /// `self`, with `under` for the values `self` leaves unset.
-    fn or(self, under: Layer) -> Layer {
+    fn or(mut self, under: Layer) -> Layer {
+        for (pref, setting) in under.settings {
+            self.settings.entry(pref).or_insert(setting);
+        }
         Layer {
-            check_for_updates: self.check_for_updates.or(under.check_for_updates),
+            settings: self.settings,
             usage_statistics: self.usage_statistics.or(under.usage_statistics),
             organization: self.organization.or(under.organization),
         }
+    }
+}
+
+/// `value` as `kind` takes it; None when it is not one of the values `kind` takes.
+fn parse(kind: Kind, value: &Value) -> Option<Setting> {
+    match (kind, value) {
+        (Kind::Switch, Value::Number(0)) => Some(Setting::Switch(false)),
+        (Kind::Switch, Value::Number(1)) => Some(Setting::Switch(true)),
+        (Kind::Units, Value::Text(text)) if text.len() <= MAX_CHOICE => {
+            crate::prefs::UNITS.iter().find(|unit| unit.eq_ignore_ascii_case(text.trim())).map(|unit| Setting::Text((*unit).into()))
+        }
+        (Kind::Language, Value::Text(text)) if text.len() <= MAX_CHOICE => {
+            let text = text.trim();
+            if text.eq_ignore_ascii_case(solidcraft_ui_text::SYSTEM) {
+                return Some(Setting::Text(solidcraft_ui_text::SYSTEM.into()));
+            }
+            crate::i18n::LOCALES.iter().find(|locale| locale.id.eq_ignore_ascii_case(text)).map(|locale| Setting::Text(locale.id.into()))
+        }
+        _ => None,
+    }
+}
+
+/// The preference `pref` of `p` (None: not one of [`LOCKS`]).
+fn get(p: &crate::prefs::Prefs, pref: &str) -> Option<Setting> {
+    Some(match pref {
+        "check_updates" => Setting::Switch(p.check_updates),
+        "default_units" => Setting::Text(p.default_units.clone()),
+        "language" => Setting::Text(p.language.clone()),
+        "reopen_designs" => Setting::Switch(p.reopen_designs),
+        "show_discord_button" => Setting::Switch(p.show_discord_button),
+        "show_donate_button" => Setting::Switch(p.show_donate_button),
+        _ => return None,
+    })
+}
+
+/// Set the preference `pref` of `p` to `setting`; a setting of the other kind changes nothing.
+fn set(p: &mut crate::prefs::Prefs, pref: &str, setting: &Setting) {
+    match (pref, setting) {
+        ("check_updates", Setting::Switch(on)) => p.check_updates = *on,
+        ("default_units", Setting::Text(text)) => p.default_units.clone_from(text),
+        ("language", Setting::Text(text)) => p.language.clone_from(text),
+        ("reopen_designs", Setting::Switch(on)) => p.reopen_designs = *on,
+        ("show_discord_button", Setting::Switch(on)) => p.show_discord_button = *on,
+        ("show_donate_button", Setting::Switch(on)) => p.show_donate_button = *on,
+        _ => {}
     }
 }
 
@@ -119,15 +232,19 @@ pub struct Policy {
     pub mandatory: Layer,
     /// Defaults the person may change (not applied yet).
     pub recommended: Layer,
+    /// The person's own value of each preference a mandatory value replaces, kept for when the
+    /// policy goes: it is what is saved.
+    pub own: BTreeMap<&'static str, Setting>,
 }
 
 impl Policy {
     /// The preferences (by their `ui.prefs` names) a mandatory value replaces.
     pub fn locked(&self) -> Vec<&'static str> {
-        let updates = self.mandatory.check_for_updates.map(|_| "check_updates");
-        // Allowed (1) leaves the choice to the person; only off locks it.
+        // UsageStatistics allowed (1) leaves the choice to the person; only off locks it.
         let statistics = (self.mandatory.usage_statistics == Some(false)).then_some("usage_statistics");
-        updates.into_iter().chain(statistics).collect()
+        let mut locked: Vec<&'static str> = self.mandatory.settings.keys().copied().chain(statistics).collect();
+        locked.sort_unstable();
+        locked
     }
 
     /// The administrator set a mandatory value: SolidCraft says it is managed.
@@ -163,12 +280,12 @@ impl Policy {
                 _ => None,
             })
         };
-        Policy { mandatory: layer(Some(&json)), recommended: layer(json.get(RECOMMENDED)) }
+        Policy { mandatory: layer(Some(&json)), recommended: layer(json.get(RECOMMENDED)), own: BTreeMap::new() }
     }
 
     /// `self`, with `under` for the values `self` leaves unset.
     fn or(self, under: Policy) -> Policy {
-        Policy { mandatory: self.mandatory.or(under.mandatory), recommended: self.recommended.or(under.recommended) }
+        Policy { mandatory: self.mandatory.or(under.mandatory), recommended: self.recommended.or(under.recommended), own: self.own }
     }
 }
 
@@ -184,7 +301,96 @@ fn clean_name(text: &str) -> Option<String> {
 
 /// Update checks run at start and once a day: the administrator's answer, else the person's.
 pub fn check_updates(app: &SolveApp) -> bool {
-    app.policy.mandatory.check_for_updates.unwrap_or(app.preferences.check_updates)
+    app.policy.mandatory.check_for_updates().unwrap_or(app.preferences.check_updates)
+}
+
+/// Give each preference a mandatory value sets that value. A preference that differs is the
+/// person's own choice (from the saved file, a reload or a shortcut such as the Donate pill's
+/// Hide): it is kept in [`Policy::own`] for when the policy goes. Cheap; runs every frame.
+pub fn enforce(app: &mut SolveApp) {
+    enforce_keeping(app, false);
+}
+
+/// [`enforce`] after the person's preferences were loaded: every loaded value of a preference the
+/// policy sets is the person's choice, the policy's own value included, so it replaces the kept one.
+pub fn enforce_loaded(app: &mut SolveApp) {
+    let prefs: Vec<_> = app.policy.mandatory.settings.keys().copied().collect();
+    for pref in prefs {
+        if let Some(loaded) = get(&app.preferences, pref) {
+            app.policy.own.insert(pref, loaded);
+        }
+    }
+    enforce_keeping(app, true);
+}
+
+/// [`enforce`] after Restore defaults: the person's kept value stays, the default is not a choice.
+pub fn enforce_after_reset(app: &mut SolveApp) {
+    enforce_keeping(app, true);
+}
+
+fn enforce_keeping(app: &mut SolveApp, keep_own: bool) {
+    if app.policy.mandatory.settings.is_empty() {
+        return;
+    }
+    let mut units = false;
+    for (pref, setting) in app.policy.mandatory.settings.clone() {
+        let Some(current) = get(&app.preferences, pref) else { continue };
+        if current == setting {
+            continue;
+        }
+        if !keep_own {
+            app.policy.own.insert(pref, current);
+        }
+        set(&mut app.preferences, pref, &setting);
+        units |= pref == "default_units";
+    }
+    if units {
+        crate::prefs::default_units_changed(app);
+    }
+}
+
+/// The saved preferences hold the person's own values, not the policy's (`saved` is the object
+/// [`SolveApp::prefs`] writes): removing the policy brings the person's choices back.
+pub fn keep_own(app: &SolveApp, saved: &mut serde_json::Value) {
+    if let Some(prefs) = saved.get_mut("preferences").and_then(serde_json::Value::as_object_mut) {
+        own_values(app, prefs);
+    }
+}
+
+/// Put the person's own value of each preference the policy sets into `prefs` (the stored form,
+/// as `ui.prefs` reports it).
+pub fn own_values(app: &SolveApp, prefs: &mut serde_json::Map<String, serde_json::Value>) {
+    for (pref, own) in &app.policy.own {
+        if let Ok(value) = serde_json::to_value(own) {
+            prefs.insert((*pref).into(), value);
+        }
+    }
+}
+
+/// The values in force of the preferences a mandatory value sets, by `ui.prefs` name.
+pub fn in_force(app: &SolveApp) -> serde_json::Map<String, serde_json::Value> {
+    app.policy.mandatory.settings.iter().filter_map(|(pref, setting)| Some(((*pref).to_string(), serde_json::to_value(setting).ok()?))).collect()
+}
+
+/// `value` for the preference `pref`, which the policy sets, is what `ui.prefs` reports for it:
+/// the person's stored choice (the value in force when the two agree). Sending it back is no change.
+pub fn unchanged(app: &SolveApp, pref: &str, value: &serde_json::Value) -> bool {
+    let stored = app.policy.own.get(pref).cloned().or_else(|| get(&app.preferences, pref));
+    stored.and_then(|stored| serde_json::to_value(stored).ok()).as_ref() == Some(value)
+}
+
+/// `add`, disabled and followed by "Set by your organization" while a mandatory value sets the
+/// preference (`locked`).
+pub fn row<R>(ui: &mut egui::Ui, locked: bool, add: impl FnOnce(&mut egui::Ui) -> R) -> R {
+    if !locked {
+        return add(ui);
+    }
+    ui.horizontal_wrapped(|ui| {
+        let inner = ui.add_enabled_ui(false, add).inner;
+        crate::ui_kit::settings_inline_note(ui, solidcraft_ui_text::tr("policy.set_by_organization"));
+        inner
+    })
+    .inner
 }
 
 // ---- user interface ---------------------------------------------------------------------------
@@ -264,7 +470,7 @@ fn system() -> Policy {
             })
             .fold(Layer::default(), Layer::or)
     };
-    Policy { mandatory: layer(KEY), recommended: layer(&format!(r"{KEY}\{RECOMMENDED}")) }
+    Policy { mandatory: layer(KEY), recommended: layer(&format!(r"{KEY}\{RECOMMENDED}")), own: BTreeMap::new() }
 }
 
 /// The managed preferences of [`MACOS_DOMAIN`]: the computer's, then the user's for the values
@@ -332,40 +538,111 @@ mod tests {
         Layer::read(&|name| values.iter().find(|(n, _)| *n == name).map(|(_, v)| v.clone()))
     }
 
+    fn switch(on: bool) -> Option<Setting> {
+        Some(Setting::Switch(on))
+    }
+
+    fn text(text: &str) -> Option<Setting> {
+        Some(Setting::Text(text.into()))
+    }
+
+    /// The value `policy` gives `pref` in a layer with only that value.
+    fn one(policy: &str, value: Value) -> Option<Setting> {
+        let pref = LOCKS.iter().find(|lock| lock.policy == policy).map(|lock| lock.pref)?;
+        layer(&[(policy, value)]).settings.get(pref).cloned()
+    }
+
     #[test]
     fn a_computer_without_policy_is_unmanaged() {
         assert_eq!(layer(&[]), Layer::default());
         assert_eq!(Policy::default().locked(), Vec::<&str>::new());
-        assert!(!Policy::default().locks("check_updates"));
+        for lock in LOCKS {
+            assert!(!Policy::default().locks(lock.pref));
+        }
         assert_eq!(Policy::from_json(""), Policy::default());
     }
 
     #[test]
-    fn check_for_updates_is_zero_or_one_and_anything_else_is_not_set() {
-        assert_eq!(layer(&[(CHECK_FOR_UPDATES, Value::Number(0))]).check_for_updates, Some(false));
-        assert_eq!(layer(&[(CHECK_FOR_UPDATES, Value::Number(1))]).check_for_updates, Some(true));
-        for hostile in [Value::Number(2), Value::Number(u32::MAX), Value::Text("0".into()), Value::Text("x".repeat(10_000))] {
-            assert_eq!(layer(&[(CHECK_FOR_UPDATES, hostile)]).check_for_updates, None);
+    fn every_lock_names_a_preference_the_app_stores_and_can_set() {
+        let mut p = crate::prefs::Prefs::default();
+        let stored = serde_json::to_value(&p).unwrap_or_default();
+        for lock in LOCKS {
+            assert!(stored.get(lock.pref).is_some(), "{} is not a stored preference", lock.pref);
+            let value = get(&p, lock.pref).unwrap_or_else(|| panic!("{} cannot be read", lock.pref));
+            set(&mut p, lock.pref, &value);
+            assert_eq!(get(&p, lock.pref), Some(value));
+        }
+        let names: Vec<_> = LOCKS.iter().map(|lock| lock.policy).collect();
+        assert!(names.windows(2).all(|w| w[0] < w[1]), "LOCKS stay sorted by policy name");
+    }
+
+    #[test]
+    fn each_switch_is_zero_or_one_and_anything_else_is_not_set() {
+        for policy in [CHECK_FOR_UPDATES, "ReopenDesigns", "ShowDiscordButton", "ShowDonateButton"] {
+            assert_eq!(one(policy, Value::Number(0)), switch(false), "{policy}");
+            assert_eq!(one(policy, Value::Number(1)), switch(true), "{policy}");
+            for hostile in [Value::Number(2), Value::Number(u32::MAX), Value::Text("0".into()), Value::Text("x".repeat(10_000))] {
+                assert_eq!(one(policy, hostile), None, "{policy}");
+            }
         }
         assert_eq!(layer(&[("SomethingElse", Value::Number(0))]), Layer::default());
     }
 
     #[test]
+    fn default_units_take_one_of_the_apps_units_and_anything_else_is_not_set() {
+        for unit in crate::prefs::UNITS {
+            assert_eq!(one("DefaultUnits", Value::Text((*unit).into())), text(unit));
+        }
+        assert_eq!(one("DefaultUnits", Value::Text(" IN ".into())), text("in"), "case and spaces do not matter");
+        for hostile in
+            [Value::Text("inch".into()), Value::Text(String::new()), Value::Text("mm\0".into()), Value::Text("m".repeat(100_000)), Value::Number(1)]
+        {
+            assert_eq!(one("DefaultUnits", hostile), None);
+        }
+    }
+
+    #[test]
+    fn language_takes_system_or_a_language_the_app_has_and_anything_else_is_not_set() {
+        assert_eq!(one("Language", Value::Text("System".into())), text(solidcraft_ui_text::SYSTEM));
+        for locale in crate::i18n::LOCALES {
+            assert_eq!(one("Language", Value::Text(locale.id.to_ascii_uppercase())), text(locale.id), "{}", locale.id);
+        }
+        for hostile in [
+            Value::Text("xx".into()),
+            Value::Text("de\u{202E}".into()),
+            Value::Text(String::new()),
+            Value::Text("d".repeat(100_000)),
+            Value::Number(0),
+        ] {
+            assert_eq!(one("Language", hostile), None);
+        }
+    }
+
+    #[test]
     fn a_mandatory_value_locks_its_preference_and_a_recommended_one_does_not() {
-        let policy = Policy::from_json(r#"{"CheckForUpdates": 0, "Recommended": {"CheckForUpdates": 1}}"#);
-        assert_eq!(policy.mandatory.check_for_updates, Some(false));
-        assert_eq!(policy.recommended.check_for_updates, Some(true));
-        assert_eq!(policy.locked(), ["check_updates"]);
-        let recommended = Policy::from_json(r#"{"Recommended": {"CheckForUpdates": 0}}"#);
-        assert_eq!(recommended.recommended.check_for_updates, Some(false));
+        let policy = Policy::from_json(r#"{"CheckForUpdates": 0, "ShowDonateButton": 0, "Recommended": {"CheckForUpdates": 1}}"#);
+        assert_eq!(policy.mandatory.check_for_updates(), Some(false));
+        assert_eq!(policy.recommended.check_for_updates(), Some(true));
+        assert_eq!(policy.locked(), ["check_updates", "show_donate_button"]);
+        let recommended = Policy::from_json(r#"{"Recommended": {"CheckForUpdates": 0, "Language": "de"}}"#);
+        assert_eq!(recommended.recommended.check_for_updates(), Some(false));
         assert!(!recommended.locks("check_updates"));
+        assert!(!recommended.locks("language"));
     }
 
     #[test]
     fn a_hostile_policy_file_is_no_policy() {
-        for text in
-            ["[]", "null", "{", r#"{"CheckForUpdates": -1}"#, r#"{"CheckForUpdates": 1.5}"#, r#"{"CheckForUpdates": true}"#, r#"{"Recommended": 7}"#]
-        {
+        for text in [
+            "[]",
+            "null",
+            "{",
+            r#"{"CheckForUpdates": -1}"#,
+            r#"{"CheckForUpdates": 1.5}"#,
+            r#"{"CheckForUpdates": true}"#,
+            r#"{"Recommended": 7}"#,
+            r#"{"DefaultUnits": ["mm"]}"#,
+            r#"{"Language": {"id": "de"}}"#,
+        ] {
             assert_eq!(Policy::from_json(text), Policy::default(), "{text}");
         }
     }
@@ -393,7 +670,7 @@ mod tests {
         assert_eq!(named.organization(), Some("ACME"));
         assert_eq!(named.managed_by().as_deref(), Some("Managed by ACME"));
         assert!(named.locked().is_empty(), "a name locks no setting");
-        let unnamed = Policy::from_json(r#"{"CheckForUpdates": 0}"#);
+        let unnamed = Policy::from_json(r#"{"ReopenDesigns": 0}"#);
         assert_eq!(unnamed.managed_by().as_deref(), Some("Managed by your organization"));
         let recommended = Policy::from_json(r#"{"Recommended": {"OrganizationName": "ACME", "CheckForUpdates": 0}}"#);
         assert!(!recommended.managed());
@@ -402,20 +679,142 @@ mod tests {
 
     #[test]
     fn an_invalid_machine_value_leaves_the_users_valid_one() {
-        let machine = layer(&[(CHECK_FOR_UPDATES, Value::Number(2))]);
-        let user = layer(&[(CHECK_FOR_UPDATES, Value::Number(0))]);
-        assert_eq!(machine.or(user).check_for_updates, Some(false));
+        let machine = layer(&[(CHECK_FOR_UPDATES, Value::Number(2)), ("DefaultUnits", Value::Text("parsec".into()))]);
+        let user = layer(&[(CHECK_FOR_UPDATES, Value::Number(0)), ("DefaultUnits", Value::Text("cm".into()))]);
+        let both = machine.or(user);
+        assert_eq!(both.check_for_updates(), Some(false));
+        assert_eq!(both.settings.get("default_units").cloned(), text("cm"));
         let machine = layer(&[(CHECK_FOR_UPDATES, Value::Number(1))]);
-        assert_eq!(machine.or(layer(&[(CHECK_FOR_UPDATES, Value::Number(0))])).check_for_updates, Some(true), "a valid machine value wins");
+        assert_eq!(machine.or(layer(&[(CHECK_FOR_UPDATES, Value::Number(0))])).check_for_updates(), Some(true), "a valid machine value wins");
     }
 
     #[test]
     fn the_registry_wins_over_the_policy_file_value_by_value() {
-        let registry = Policy { mandatory: Layer { check_for_updates: Some(false), ..Layer::default() }, recommended: Layer::default() };
-        let file = Policy::from_json(r#"{"CheckForUpdates": 1, "Recommended": {"CheckForUpdates": 1}}"#);
+        let registry = Policy::from_json(r#"{"CheckForUpdates": 0}"#);
+        let file = Policy::from_json(r#"{"CheckForUpdates": 1, "Language": "de", "Recommended": {"CheckForUpdates": 1}}"#);
         let both = registry.or(file);
-        assert_eq!(both.mandatory.check_for_updates, Some(false));
-        assert_eq!(both.recommended.check_for_updates, Some(true));
+        assert_eq!(both.mandatory.check_for_updates(), Some(false));
+        assert_eq!(both.mandatory.settings.get("language").cloned(), text("de"), "the file still sets what the registry leaves");
+        assert_eq!(both.recommended.check_for_updates(), Some(true));
+    }
+
+    /// The preferences file `app` would save, as JSON.
+    fn saved(app: &SolveApp) -> serde_json::Value {
+        serde_json::from_str::<serde_json::Value>(&app.prefs()).unwrap_or_default()["preferences"].clone()
+    }
+
+    #[test]
+    fn a_policy_sets_its_settings_keeps_each_persons_choice_and_refuses_changes() {
+        use egui::accesskit::{Role, Toggled};
+        use serde_json::json;
+        crate::i18n::install();
+        let mut h = crate::scenario::Harness::new();
+        h.app.home.open = false;
+        let p = &mut h.app.preferences;
+        (p.language, p.default_units, p.reopen_designs, p.show_donate_button, p.show_discord_button) = ("de".into(), "mm".into(), true, true, false);
+        h.app.policy =
+            Policy::from_json(r#"{"Language": "en", "DefaultUnits": "IN", "ReopenDesigns": 0, "ShowDonateButton": 0, "ShowDiscordButton": 1}"#);
+        h.frame();
+        // In force: the organization's values, whatever the person chose.
+        let p = &h.app.preferences;
+        assert_eq!(
+            (p.language.as_str(), p.default_units.as_str(), p.reopen_designs, p.show_donate_button, p.show_discord_button),
+            ("en", "in", false, false, true)
+        );
+        assert_eq!(crate::links::title_bar(&h.app).map(|l| l.id).collect::<Vec<_>>(), ["discord"], "the policy hides Donate and shows Discord");
+        // Saved: the person's own choices, back when the policy goes.
+        let own = json!({"language": "de", "default_units": "mm", "reopen_designs": true, "show_donate_button": true, "show_discord_button": false});
+        for (pref, value) in own.as_object().into_iter().flatten() {
+            assert_eq!(&saved(&h.app)[pref], value, "{pref} is saved as the person chose it");
+        }
+        let mut after = crate::scenario::Harness::new();
+        after.app.load_prefs(&h.app.prefs());
+        assert_eq!(after.app.preferences.default_units, "mm", "without the policy the person's choice is back");
+        assert_eq!(after.app.preferences.language, "de");
+        // Loaded preferences are the person's choice, even one equal to the policy's value.
+        let file = |units: &str, app: &SolveApp| {
+            let mut file = serde_json::from_str::<serde_json::Value>(&app.prefs()).unwrap_or_default();
+            file["preferences"]["default_units"] = json!(units);
+            file.to_string()
+        };
+        let reload = file("in", &h.app);
+        h.app.load_prefs(&reload);
+        assert_eq!(saved(&h.app)["default_units"], json!("in"), "the reloaded choice replaces the kept one");
+        assert_eq!(saved(&h.app)["language"], json!("de"));
+        let reload = file("cm", &h.app);
+        h.app.load_prefs(&reload);
+        assert_eq!(h.app.preferences.default_units, "in", "the policy's value stays in force");
+        assert_eq!(saved(&h.app)["default_units"], json!("cm"));
+        // A load without preferences (another part of the file) keeps the person's choice.
+        h.app.load_prefs(r#"{"dark":false}"#);
+        assert_eq!(saved(&h.app)["default_units"], json!("cm"), "a load without preferences changes no kept choice");
+        assert_eq!(h.app.preferences.default_units, "in");
+        let reload = file("mm", &h.app);
+        h.app.load_prefs(&reload);
+        // The control channel reports the stored choices, the values in force, and refuses a change.
+        let reply = h.call("ui.prefs", json!({"open": "General"}));
+        assert_eq!(reply["result"]["default_units"], json!("mm"), "{reply}");
+        assert_eq!(reply["result"]["policy"]["settings"]["default_units"], json!("in"), "{reply}");
+        assert_eq!(
+            reply["result"]["policy"]["locked"],
+            json!(["default_units", "language", "reopen_designs", "show_discord_button", "show_donate_button"])
+        );
+        // Another value, the value in force included, is refused: only the stored choice goes back.
+        for (pref, value) in
+            [("default_units", json!("cm")), ("default_units", json!("in")), ("language", json!("fr")), ("show_donate_button", json!(false))]
+        {
+            let refused = h.call("ui.prefs", json!({ pref: value }));
+            assert_eq!(refused["ok"], json!(false), "{pref}: {refused}");
+            assert!(refused["error"].as_str().unwrap_or_default().contains("set by your organization's policy"), "{refused}");
+        }
+        assert_eq!(h.call("ui.prefs", json!({"default_units": "mm"}))["ok"], json!(true), "sending back what was read is no change");
+        assert_eq!(h.app.preferences.default_units, "in");
+        // Restore defaults on General keeps the organization's values and the person's choices.
+        assert_eq!(h.call("ui.prefs", json!({"button": "defaults"}))["ok"], json!(true));
+        assert_eq!((h.app.preferences.language.as_str(), h.app.preferences.show_donate_button), ("en", false));
+        assert_eq!(saved(&h.app)["language"], json!("de"));
+        assert_eq!(saved(&h.app)["show_donate_button"], json!(true));
+        // Something else that changes a set preference (here the Discord pill's ×) is undone, and is
+        // the person's new choice.
+        h.app.preferences.show_discord_button = false;
+        h.frame();
+        assert!(h.app.preferences.show_discord_button);
+        // Preferences shows each row greyed out with who set it.
+        let _language = solidcraft_ui_text::scope("en");
+        crate::prefs::reveal_preference(&mut h, "prefs:show_donate_button");
+        let tree = h.output.accesskit_update.as_ref().expect("an accessibility tree");
+        for (label, on) in [("Show Donate button", false), ("Show Discord button", true)] {
+            let boxes: Vec<_> = tree.nodes.iter().filter(|(_, n)| n.role() == Role::CheckBox && n.label() == Some(label)).collect();
+            assert_eq!(boxes.len(), 1, "{label}");
+            assert!(boxes[0].1.is_disabled(), "{label} is locked");
+            assert_eq!(boxes[0].1.toggled(), Some(if on { Toggled::True } else { Toggled::False }), "{label} shows the organization's value");
+        }
+        assert!(h.widget("Set by your organization").is_some(), "the rows say who set them");
+    }
+
+    #[test]
+    fn without_a_policy_nothing_is_enforced_or_kept() {
+        let mut h = crate::scenario::Harness::new();
+        h.app.preferences.default_units = "ft".into();
+        h.app.preferences.show_donate_button = false;
+        h.frame();
+        assert_eq!(h.app.preferences.default_units, "ft");
+        assert!(h.app.policy.own.is_empty());
+        assert_eq!(saved(&h.app)["show_donate_button"], serde_json::json!(false));
+        assert!(h.call("ui.prefs", serde_json::json!({"default_units": "cm"}))["ok"].as_bool().unwrap_or_default());
+    }
+
+    #[test]
+    fn the_templates_offer_every_policy_the_app_reads() {
+        let admx = include_str!("../../../packaging/windows/policies/solidcraft.admx");
+        let adml = include_str!("../../../packaging/windows/policies/en-US/solidcraft.adml");
+        for name in LOCKS.iter().map(|lock| lock.policy).chain([ORGANIZATION_NAME, USAGE_STATISTICS]) {
+            assert!(admx.contains(&format!(r#"valueName="{name}""#)), "{name} is missing from solidcraft.admx");
+            assert!(adml.contains(&format!(r#"<string id="{name}">"#)), "{name} is missing from solidcraft.adml");
+        }
+        for unit in crate::prefs::UNITS {
+            assert!(admx.contains(&format!("<string>{unit}</string>")), "DefaultUnits offers no {unit}");
+        }
     }
 
     #[test]

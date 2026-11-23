@@ -16,6 +16,7 @@ pub(crate) struct State {
     canvases: Vec<DockCanvas>,
     drag: Option<Drag>,
     flight: Option<Flight>,
+    hovered: Option<(egui::ViewportId, u64, u64)>,
 }
 
 struct Drag {
@@ -26,6 +27,7 @@ struct Drag {
     origin: Rect,
     source: DragSource,
     keyboard: Option<usize>,
+    header: bool,
     target: Option<Target>,
     pointer: Pos2,
     screen: Option<Screen>,
@@ -188,6 +190,10 @@ impl Strip {
 }
 
 /// Register the current window's strips before resolving any input in the frame.
+pub(crate) fn active(app: &SolveApp) -> bool {
+    app.view_window_drag.drag.is_some()
+}
+
 pub(crate) fn record(app: &mut SolveApp, ctx: &Context, zones: Vec<(u64, usize, ViewDropZone)>, drag_continues: bool) {
     let viewport = ctx.viewport_id();
     let native = Screen::current(ctx);
@@ -204,7 +210,7 @@ pub(crate) fn record(app: &mut SolveApp, ctx: &Context, zones: Vec<(u64, usize, 
     });
     let screen = native.unwrap_or(Screen { origin: Pos2::ZERO, pixels_per_point: 1.0 });
     state.strips.extend(zones.into_iter().map(|(tab, count, zone)| Strip { viewport, tab, window, screen, zone, count, name: name.clone() }));
-    if state.drag.as_ref().is_some_and(|drag| drag.viewport == viewport && drag.keyboard.is_none() && !drag_continues)
+    if state.drag.as_ref().is_some_and(|drag| drag.viewport == viewport && drag.keyboard.is_none() && !drag.header && !drag_continues)
         && let Some(drag) = state.drag.take()
     {
         cancel(state, ctx, drag);
@@ -225,25 +231,88 @@ pub(crate) fn record(app: &mut SolveApp, ctx: &Context, zones: Vec<(u64, usize, 
     }
 }
 
+pub(crate) fn hover(app: &mut SolveApp, ctx: &Context, view: Option<u64>) {
+    let viewport = ctx.viewport_id();
+    let state = &mut app.view_window_drag;
+    let next = view.map(|view| (viewport, app.docs.current_tab(), view));
+    if (next.is_some() || state.hovered.is_some_and(|(source, _, _)| source == viewport)) && state.hovered != next {
+        state.hovered = next;
+        repaint_viewports(ctx);
+    }
+}
+
+fn repaint_viewports(ctx: &Context) {
+    for viewport in ctx.input(|input| input.raw.viewports.keys().copied().collect::<Vec<_>>()) {
+        ctx.request_repaint_of(viewport);
+    }
+}
+
+pub(crate) fn hovered_view(app: &SolveApp) -> Option<u64> {
+    app.view_window_drag.hovered.filter(|(_, tab, _)| *tab == app.docs.current_tab()).map(|(_, _, view)| view)
+}
+
+pub(crate) fn unanchored(app: &SolveApp, ctx: &Context, view: u64) -> bool {
+    app.view_window_drag
+        .drag
+        .as_ref()
+        .is_some_and(|drag| drag.tab == app.docs.current_tab() && drag.viewport == ctx.viewport_id() && drag.view.id == view)
+}
+
+pub(crate) fn start_header(app: &mut SolveApp, ctx: &Context, view: u64, origin: Rect) {
+    if app.view_window_drag.drag.is_none()
+        && let Some(mut drag) = begin(app, ctx, view, origin, false)
+    {
+        drag.header = true;
+        app.view_window_drag.drag = Some(drag);
+        repaint_viewports(ctx);
+    }
+}
+
 /// Record the canvas after the receiving window has laid out its viewport and panels.
 pub(crate) fn record_canvas(app: &mut SolveApp, ctx: &Context) {
     let viewport = ctx.viewport_id();
+    if let Some((view, origin, last)) = app
+        .view_window_drag
+        .drag
+        .as_ref()
+        .filter(|drag| drag.viewport == viewport && drag.header && drag.tab == app.docs.current_tab())
+        .map(|drag| (drag.view.id, drag.origin, drag.pointer))
+    {
+        let escape = ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Escape));
+        if escape {
+            if let Some(drag) = app.view_window_drag.drag.take() {
+                cancel(&mut app.view_window_drag, ctx, drag);
+            }
+        } else {
+            let (pointer, down) = ctx.input(|i| (i.pointer.interact_pos().unwrap_or(last), i.pointer.primary_down()));
+            route(app, ctx, view, origin, pointer, !down);
+        }
+    }
     let native = Screen::current(ctx);
     let window = app.view_windows.current_window();
-    let canvas = native.map(|screen| {
-        let covers = crate::shell::covered_rects(app);
-        let targets = app.view_window_drag.drag.as_ref().filter(|drag| drag.viewport != viewport && drag.tab == app.docs.current_tab()).map(|drag| {
-            let mut targets = crate::view_tiles::incoming_dock_targets(app, &drag.view, &covers);
-            if drag.source_is_last {
-                for target in &mut targets {
-                    target.blocked = true;
-                    target.label = app.tr("multi_window.last_view").to_owned();
-                }
+    let covers = crate::shell::covered_rects(app);
+    let targets = app.view_window_drag.drag.as_ref().filter(|drag| drag.tab == app.docs.current_tab()).map(|drag| {
+        let mut targets = crate::view_tiles::incoming_dock_targets(app, &drag.view, &covers);
+        if drag.source_is_last && drag.viewport != viewport {
+            for target in &mut targets {
+                target.blocked = true;
+                target.label = app.tr("multi_window.last_view").to_owned();
             }
-            (drag.view.id, targets)
-        });
-        DockCanvas { viewport, tab: app.docs.current_tab(), window, screen, bounds: ctx.viewport_rect(), covers, targets }
+        }
+        (drag.view.id, targets)
     });
+    if let Some((_, targets)) = &targets {
+        let t = Tokens::get();
+        let p = ctx.layer_painter(LayerId::new(Order::Foreground, Id::unique(("parked_view_targets", viewport))));
+        for target in targets.iter().filter(|target| !target.blocked) {
+            if let Some(zone) = target.parked_zone() {
+                let marker = Rect::from_center_size(zone.center(), vec2(24.0, 18.0)).intersect(zone);
+                p.rect(marker, 4, t.accent_soft, Stroke::new(1.0, t.accent), StrokeKind::Inside);
+            }
+        }
+    }
+    let canvas =
+        native.map(|screen| DockCanvas { viewport, tab: app.docs.current_tab(), window, screen, bounds: ctx.viewport_rect(), covers, targets });
     let state = &mut app.view_window_drag;
     ctx.input(|input| {
         state.canvases.retain(|canvas| input.raw.viewports.get(&canvas.viewport).is_some_and(|info| info.minimized != Some(true)));
@@ -269,7 +338,6 @@ pub(crate) fn record_canvas(app: &mut SolveApp, ctx: &Context) {
         let convert = |point| screen.local(source.desktop(point));
         let origin = Rect::from_min_max(convert(drag.origin.min), convert(drag.origin.max));
         let pointer = convert(drag.pointer);
-
         paint_preview(ctx, &drag.view, origin, pointer, Preview::Dock { dock, attraction: *attraction, displaced: None });
     }
 }
@@ -284,6 +352,7 @@ fn begin(app: &SolveApp, ctx: &Context, view: u64, origin: Rect, keyboard: bool)
         origin,
         source: crate::view_windows::drag_source(app, view, ctx.viewport_rect()),
         keyboard: keyboard.then_some(0),
+        header: false,
         target: None,
         pointer: origin.center(),
         screen: Screen::current(ctx),
@@ -339,7 +408,7 @@ fn take_target(app: &SolveApp, ctx: &Context, drag: &Drag, pointer: Pos2) -> Opt
             Some(Target::Dock { dock, attraction, viewport, .. }) if *viewport == drag.viewport && *attraction == 1.0 => Some(dock.placement),
             _ => None,
         };
-        let targets = crate::view_tiles::dock_targets(app, drag.view.id);
+        let targets = crate::view_tiles::incoming_dock_targets(app, &drag.view, &crate::shell::covered_rects(app));
         if let Some((dock, attraction)) = crate::view_tiles::dock_at(&targets, pointer, previous) {
             return Some(Target::Dock { dock: dock.clone(), attraction, viewport: drag.viewport, window: drag.window });
         }
@@ -368,6 +437,9 @@ fn window_target(app: &SolveApp, drag: &Drag, point: Option<Pos2>, display: Opti
 pub(crate) fn route(app: &mut SolveApp, ctx: &Context, view: u64, origin: Rect, pointer: Pos2, released: bool) {
     if !pointer.is_finite() || !ctx.viewport_rect().is_positive() {
         return;
+    }
+    if app.view_window_drag.drag.is_none() {
+        repaint_viewports(ctx);
     }
     let drag = app
         .view_window_drag
@@ -423,12 +495,10 @@ pub(crate) fn keyboard(app: &mut SolveApp, ctx: &Context) {
         .filter(|strip| strip.tab == drag.tab && strip.viewport == drag.viewport)
         .flat_map(|strip| strip.keyboard_slots(from.map(|index| index + 1)).into_iter().map(|slot| strip.destination(app, &drag, slot)))
         .collect::<Vec<_>>();
-    let dock = crate::view_tiles::dock_targets(app, drag.view.id).into_iter().filter(|dock| !dock.blocked).map(|dock| Target::Dock {
-        dock,
-        attraction: 1.0,
-        viewport: drag.viewport,
-        window: drag.window,
-    });
+    let dock = crate::view_tiles::incoming_dock_targets(app, &drag.view, &crate::shell::covered_rects(app))
+        .into_iter()
+        .filter(|dock| !dock.blocked)
+        .map(|dock| Target::Dock { dock, attraction: 1.0, viewport: drag.viewport, window: drag.window });
     let other = strips
         .iter()
         .filter(|strip| strip.tab == drag.tab && strip.viewport != drag.viewport)
@@ -504,6 +574,7 @@ fn update_slot(ctx: &Context, target: Option<&Target>, width: f32) {
 }
 
 fn finish(app: &mut SolveApp, ctx: &Context, mut drag: Drag) {
+    repaint_viewports(ctx);
     update_slot(ctx, drag.target.as_ref(), 0.0);
     let result = match drag.target.take() {
         Some(Target::Strip { slot, blocked: false, .. }) => {
@@ -525,7 +596,7 @@ fn finish(app: &mut SolveApp, ctx: &Context, mut drag: Drag) {
         }
         Some(Target::Dock { dock, attraction, window, .. }) if !dock.blocked && attraction == 1.0 => {
             if window == drag.window {
-                crate::view_tiles::commit_dock(app, drag.view.id, dock.placement)
+                crate::view_tiles::commit_lifted_dock(app, drag.view.id, dock.placement)
             } else {
                 let placement = solidcraft_engine::schema::tab_views::TabViewPlacement::from(dock.placement);
                 app.run("tab.view.move_to_window", serde_json::json!({"view":drag.view.id,"window":window,"placement":placement})).map(|_| ())
@@ -544,12 +615,15 @@ fn finish(app: &mut SolveApp, ctx: &Context, mut drag: Drag) {
 }
 
 fn cancel(state: &mut State, ctx: &Context, drag: Drag) {
+    repaint_viewports(ctx);
     update_slot(ctx, drag.target.as_ref(), 0.0);
     if let Some(target) = &drag.target {
         ctx.request_repaint_of(target.viewport(drag.viewport));
     }
+    // The id outside `data`: a context lock taken inside another can freeze the window (#21091).
+    let morph = morph_id(ctx, drag.view.id);
     if ctx.global_style().animation_time > 0.0
-        && let Some(morph) = ctx.data(|data| data.get_temp::<Morph>(morph_id(ctx, drag.view.id)))
+        && let Some(morph) = ctx.data(|data| data.get_temp::<Morph>(morph))
     {
         state.flight = Some(Flight { view: drag.view, viewport: drag.viewport, from: morph.rect, origin: drag.origin, start: ctx.input(|i| i.time) });
         ctx.request_repaint();
@@ -605,7 +679,6 @@ pub(crate) fn show_native_preview(app: &SolveApp, ctx: &Context) {
         ctx.request_repaint_after(std::time::Duration::from_millis(32));
         return;
     }
-
     let blocked = refusal.is_some();
     let label = refusal.unwrap_or(&window.label);
     let pointer = drag.screen.map(|screen| screen.desktop(drag.pointer));
@@ -630,7 +703,6 @@ pub(crate) fn show_native_preview(app: &SolveApp, ctx: &Context) {
 
 fn draw(app: &SolveApp, ctx: &Context, drag: &Drag) {
     update_slot(ctx, drag.target.as_ref(), drag.origin.width());
-
     if let Some(target) = drag.target.as_ref().filter(|target| target.viewport(drag.viewport) != drag.viewport) {
         ctx.request_repaint_of(target.viewport(drag.viewport));
         return;
@@ -753,7 +825,6 @@ fn paint_flight(ctx: &Context, flight: &Flight) -> bool {
     let phase = 1.0 - (1.0 - linear).powi(3);
     let rect = lerp_rect(flight.from, flight.origin, phase).translate(vec2(0.0, -42.0 * (phase * std::f32::consts::PI).sin()));
     let painter = painter(ctx).with_clip_rect(ctx.viewport_rect());
-
     let style = GhostStyle { form: Form::Card, tilt: 0.0, detail: 1.0 - phase, ink: Tokens::get().border, shadow: true };
     draw_shape(ctx, &painter, &flight.view, rect, style);
     ctx.request_repaint();
@@ -999,10 +1070,8 @@ mod tests {
                     assert!(keyboard_active(&app, ui.ctx()));
                 } else {
                     route(&mut app, ui.ctx(), view, origin, pos2(230.0, 80.0), false);
-                    assert!(
-                        ui.ctx().data(|data| data.get_temp::<Morph>(morph_id(ui.ctx(), view))).is_some(),
-                        "the preview paints in the first drag frame"
-                    );
+                    let morph = morph_id(ui.ctx(), view);
+                    assert!(ui.ctx().data(|data| data.get_temp::<Morph>(morph)).is_some(), "the preview paints in the first drag frame");
                 }
                 assert!(app.view_window_drag.drag.is_some());
             });
@@ -1016,6 +1085,86 @@ mod tests {
             );
             output.drop_without_applying_deltas();
         }
+    }
+
+    #[test]
+    fn a_native_header_drag_lifts_immediately_without_requesting_a_screenshot() {
+        let mut app = SolveApp::new(solidcraft_engine::Session::default(), Default::default());
+        let view = app.docs.views.active().id;
+        app.viewport.rect = Some(Rect::from_min_size(pos2(0.0, 44.0), vec2(800.0, 500.0)));
+        let ctx = Context::default();
+        ctx.set_embed_viewports(false);
+        let title = Rect::from_min_size(pos2(8.0, 44.0), vec2(80.0, 24.0));
+        let output = ctx.run_ui(egui::RawInput::default(), |ui| {
+            start_header(&mut app, ui.ctx(), view, title);
+            assert!(unanchored(&app, ui.ctx(), view), "the view lifts in the same frame");
+        });
+        assert!(
+            output
+                .viewport_output
+                .values()
+                .flat_map(|viewport| &viewport.commands)
+                .all(|command| !matches!(command, egui::ViewportCommand::Screenshot(_))),
+            "dragging must not read back the viewport image"
+        );
+        output.drop_without_applying_deltas();
+    }
+
+    #[test]
+    fn a_header_drag_survives_the_tab_strip_frame() {
+        let mut app = SolveApp::new(solidcraft_engine::Session::default(), Default::default());
+        let view = app.docs.views.active().id;
+        let ctx = Context::default();
+        ctx.set_embed_viewports(true);
+        let title = Rect::from_min_size(pos2(8.0, 44.0), vec2(80.0, 24.0));
+        let _ = ctx.run_ui(egui::RawInput::default(), |ui| {
+            start_header(&mut app, ui.ctx(), view, title);
+            record(&mut app, ui.ctx(), vec![], false);
+            assert!(unanchored(&app, ui.ctx(), view));
+            assert_eq!(app.docs.views.active().id, view);
+        });
+    }
+
+    #[test]
+    fn a_lifted_view_routes_to_the_expanded_neighbors_current_edge() {
+        use solidcraft_views::{Edge, Placement, Preset, ViewKind};
+        let mut app = SolveApp::new(solidcraft_engine::Session::default(), Default::default());
+        app.home.open = false;
+        app.ui.show_browser = false;
+        app.ui.show_timeline = false;
+        let neighbor = app.docs.views.active().id;
+        let view = app.docs.views.open(ViewKind::Model, None, false);
+        app.docs.views.set_layout_padded(Preset::SideBySide);
+        let ctx = Context::default();
+        ctx.set_embed_viewports(true);
+        let screen = Rect::from_min_size(Pos2::ZERO, vec2(1000.0, 740.0));
+        let raw = egui::RawInput { screen_rect: Some(screen), ..Default::default() };
+        let _ = ctx.run_ui(raw, |ui| {
+            let ctx = ui.ctx();
+            app.shell.content = Some(Rect::from_min_max(pos2(0.0, 40.0), screen.max));
+            let origin = Rect::from_min_size(pos2(160.0, 4.0), vec2(90.0, 24.0));
+            let mut drag = begin(&app, ctx, view, origin, false).unwrap();
+            let placement = Placement::Split { target: neighbor, edge: Edge::Right };
+            let current = crate::view_tiles::incoming_dock_targets(&app, &drag.view, &[]);
+            let preview = current.iter().find(|target| target.placement == placement && !target.blocked).unwrap();
+            let pointer = preview.zone.center();
+            let stale = crate::view_tiles::dock_targets(&app, view);
+            assert_ne!(crate::view_tiles::dock_at(&stale, pointer, None).map(|(target, _)| target.placement), Some(placement));
+            let target = take_target(&app, ctx, &drag, pointer).unwrap();
+            let Target::Dock { dock, attraction, .. } = &target else { panic!("expanded neighbor must receive the drop") };
+            assert_eq!(dock.placement, placement);
+            assert_eq!(*attraction, 1.0);
+            assert_eq!(dock.rect, preview.rect);
+            let expected = preview.rect;
+            let bounds = preview.neighbors.iter().fold(preview.rect, |bounds, rect| bounds.union(*rect));
+            drag.target = Some(target);
+            drag.pointer = pointer;
+            finish(&mut app, ctx, drag);
+            let bounds = solidcraft_views::Rect { x: bounds.left(), y: bounds.top(), w: bounds.width(), h: bounds.height() };
+            let committed = app.docs.views.tiles().unwrap().rects(bounds, 12.0);
+            let actual = committed.iter().find(|(id, _)| *id == view).unwrap().1;
+            assert_eq!(Rect::from_min_size(pos2(actual.x, actual.y), vec2(actual.w, actual.h)), expected);
+        });
     }
 
     #[test]

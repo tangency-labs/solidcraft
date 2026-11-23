@@ -51,10 +51,16 @@
 use crate::curve::curve::p1::GlobalPointSolveOptions;
 use crate::curve::curve::p2::BSPLINE_CURVE_TYPE;
 use crate::curve::curve::Curve;
+use crate::error::query::QueryFailure;
 use crate::error::{ignored, EntityRef, Result, SolidError};
 use crate::geom::attribute::ObjectKey;
 use crate::geom::extent1d::Extent1d;
+use crate::geom::extent2d::Extent2d;
 use crate::geom::extent3d::Extent3d;
+use crate::geom::geom_utility::p1::{
+    circle_coplanar_circle_intersect_in_contact, segment_point_distance, CircleCircle,
+};
+use crate::geom::geom_utility::p2::segment_segment_intersect;
 use crate::geom::global_solver::{SolutionRequested, SolverOperation};
 use crate::geom::object::{BrepStore, FaceKey, ObjectRef, Shape, ShapeMember};
 use crate::geom::solution_array::{
@@ -172,7 +178,7 @@ pub fn curve_closest_point(k: &Kernel, curve: &Curve, point: Point3) -> Result<C
         solutions
             .as_slice()
             .first()
-            .ok_or_else(|| SolidError::query_failed(OP, "the curve has no closest point"))?,
+            .ok_or_else(|| SolidError::query(OP, QueryFailure::NoClosestPoint))?,
     )
 }
 
@@ -185,10 +191,7 @@ pub fn curve_closest_point_all(
 ) -> Result<Vec<CurveClosestPoint>> {
     let solutions = curve_solutions(k, curve, point, SolutionRequested::All)?;
     if solutions.is_empty() {
-        return Err(SolidError::query_failed(
-            OP,
-            "the curve has no closest point",
-        ));
+        return Err(SolidError::query(OP, QueryFailure::NoClosestPoint));
     }
     solutions
         .as_slice()
@@ -214,17 +217,10 @@ pub fn surface_closest_point(
             ..DropPointOptions::default()
         },
     )?;
-    if !drop.success || drop.solutions.is_empty() {
-        return Err(SolidError::query_failed(
-            OP,
-            "the point does not drop onto the surface",
-        ));
-    }
+    let (true, Some(mut best)) = (drop.success, drop.solutions.as_slice().first()) else {
+        return Err(SolidError::query(OP, QueryFailure::NoClosestPoint));
+    };
     let tolerance = zone_tol_3d(k, surface)?;
-    let mut best =
-        drop.solutions.as_slice().first().ok_or_else(|| {
-            SolidError::query_failed(OP, "the point does not drop onto the surface")
-        })?;
     for solution in drop.solutions.as_slice().iter().skip(1) {
         if solution.start.solution_value < best.start.solution_value {
             best = solution;
@@ -242,10 +238,7 @@ pub fn surface_closest_point(
         }
     }
     if uvs.is_empty() {
-        return Err(SolidError::query_failed(
-            OP,
-            "no surface solution has a parameter",
-        ));
+        return Err(SolidError::query(OP, QueryFailure::Defect { why: "the best solution's own parameters evaluate to the selected point, so at least they are within the zone tolerance of it" }));
     }
     Ok(SurfaceClosestPoint {
         closest: ClosestPoint {
@@ -284,7 +277,7 @@ fn object_point<O: SolutionObject>(
         let curve = if kind == ObjectKind::Edge {
             objects
                 .edge_curve(object)?
-                .ok_or_else(|| SolidError::query_missing(OP, "the edge's curve"))?
+                .ok_or_else(|| SolidError::query(OP, QueryFailure::EdgeWithoutCurve))?
         } else {
             object
         };
@@ -310,10 +303,7 @@ fn object_point<O: SolutionObject>(
         ))?
         .unwrap_or(Point3::UNDEF));
     }
-    Err(SolidError::query_failed(
-        OP,
-        "the solution's object is not a vertex, curve or edge",
-    ))
+    Err(SolidError::query(OP, QueryFailure::UnsupportedObjectKind))
 }
 
 // SmSolution::GetPoint using the same caller-owned geometry adapter as the solver.
@@ -331,7 +321,7 @@ fn solution_point<O: SolutionObject>(
         .enumerate()
     {
         let object =
-            object.ok_or_else(|| SolidError::query_missing(OP, "the solution's object"))?;
+            object.ok_or_else(|| crate::error::Failure::new(OP, QueryFailure::Defect { why: "the topology solver fills each of the first num_objects object slots of a solution it returns (a solution a caller hands brep_relationship_classify reaches here only under ignored)" }).with_status(crate::error::SM_ERR_NULL_POINTER).into_error())?;
         let kind = object.kind();
         if i == index {
             return object_point(k, objects, object, solution, parameter);
@@ -342,10 +332,7 @@ fn solution_point<O: SolutionObject>(
             _ => 0,
         };
     }
-    Err(SolidError::query_failed(
-        OP,
-        "the solution has no object at the index",
-    ))
+    Err(SolidError::query(OP, QueryFailure::Defect { why: "a solution the topology solver returns names one object per B-rep, face set or probe it was solved on, and every caller asks for the index of one of them (a solution a caller hands brep_relationship_classify reaches here only under ignored)" }))
 }
 
 /// Closest point on a B-rep (`SmApiGetClosestPoint`); the adapter supplies its cache.
@@ -377,7 +364,7 @@ pub fn brep_closest_point<O: SolutionObject>(
     let solution = solutions
         .as_slice()
         .first()
-        .ok_or_else(|| SolidError::query_failed(OP, "the B-rep has no closest point"))?;
+        .ok_or_else(|| SolidError::query(OP, QueryFailure::NoClosestPoint))?;
     Ok(ClosestPoint {
         point: solution_point(k, objects, solution, 0)?,
         distance: solution.start.solution_value,
@@ -400,10 +387,7 @@ pub fn brep_closest_point_all<O: SolutionObject>(
         solve_options(k, SolutionRequested::All),
     )?;
     if solutions.is_empty() {
-        return Err(SolidError::query_failed(
-            OP,
-            "the B-rep has no closest point",
-        ));
+        return Err(SolidError::query(OP, QueryFailure::NoClosestPoint));
     }
     solutions
         .as_slice()
@@ -660,7 +644,7 @@ pub fn brep_relationship_solve<O: SolutionObject>(
         .as_slice()
         .first()
         .copied()
-        .ok_or_else(|| SolidError::query_failed(OP, "the B-reps have no solution"))
+        .ok_or_else(|| SolidError::query(OP, QueryFailure::NoClosestPoint))
 }
 
 /// The containment and touching classification of [`brep_relationship`] after its
@@ -760,7 +744,7 @@ fn brep_faces(brep: &Brep) -> Result<Vec<FaceId>> {
 pub fn get_edges(brep: &Brep) -> Result<Vec<EdgeId>> {
     let edges = brep_edges(brep)?;
     if edges.is_empty() {
-        return Err(SolidError::query_failed(OP, "the B-rep has no edges"));
+        return Err(SolidError::query(OP, QueryFailure::BrepWithoutEdges));
     }
     Ok(edges)
 }
@@ -770,7 +754,7 @@ pub fn get_edges(brep: &Brep) -> Result<Vec<EdgeId>> {
 pub fn get_faces(brep: &Brep) -> Result<Vec<FaceId>> {
     let faces = brep_faces(brep)?;
     if faces.is_empty() {
-        return Err(SolidError::query_failed(OP, "the B-rep has no faces"));
+        return Err(SolidError::query(OP, QueryFailure::BrepWithoutFaces));
     }
     Ok(faces)
 }
@@ -800,10 +784,7 @@ pub fn face_get_boundary_loops(brep: &Brep, id: FaceId) -> Result<BoundaryLoops>
         Vec::new()
     };
     if loops.is_empty() {
-        return Err(SolidError::query_failed(
-            OP,
-            "the face has no boundary loops",
-        ));
+        return Err(SolidError::query(OP, QueryFailure::FaceWithoutLoops));
     }
     for lu in loops {
         let edges = eu::loopuse_edgeuses(brep, lu)?;
@@ -812,12 +793,9 @@ pub fn face_get_boundary_loops(brep: &Brep, id: FaceId) -> Result<BoundaryLoops>
             let edgeuse = brep.edgeuse(edgeuse)?;
             let edge = edgeuse
                 .edge
-                .ok_or_else(|| SolidError::query_failed(OP, "the edge use has no edge"))?;
+                .ok_or_else(|| SolidError::query(OP, QueryFailure::EdgeuseWithoutEdge))?;
             if !matches!(edgeuse.orientation, OrientType::Same | OrientType::Opposite) {
-                return Err(SolidError::query_failed(
-                    OP,
-                    "the edge use's orientation is neither same nor opposite",
-                ));
+                return Err(SolidError::query(OP, QueryFailure::EdgeuseOrientationUnset));
             }
             result.edges.push(edge);
             result.orientations.push(edgeuse.orientation);
@@ -829,7 +807,7 @@ pub fn face_get_boundary_loops(brep: &Brep, id: FaceId) -> Result<BoundaryLoops>
 /// Finds an edge index and parameter (`SmApiFindEdge`); missing match is `SM_ERR`.
 pub fn find_edge(k: &Kernel, brep: &Brep, point: Point3) -> Result<EdgePick> {
     tools::find_edge(k, brep, point)?
-        .ok_or_else(|| SolidError::query_failed(OP, "no edge is at the point"))
+        .ok_or_else(|| SolidError::query(OP, QueryFailure::NoEdgeAtPoint))
 }
 
 /// Finds a face (`SmApiFindFaces`); missing match is `SM_ERR`.
@@ -842,7 +820,7 @@ pub fn find_faces(
     owners: &dyn Fn(ObjectRef) -> Option<ObjectRef>,
 ) -> Result<FaceId> {
     tools::find_face(k, brep, id, point, keys, owners)?
-        .ok_or_else(|| SolidError::query_failed(OP, "no face is at the point"))
+        .ok_or_else(|| SolidError::query(OP, QueryFailure::NoFaceAtPoint))
 }
 
 /// Manifold solid predicate (`SmApiBrepIsManifoldSolid`: `SmBrep::IsManifoldSolid`).
@@ -988,7 +966,7 @@ pub fn face_closest_point_in_shape<O: SolutionObject>(
     let solution = solutions
         .as_slice()
         .first()
-        .ok_or_else(|| SolidError::query_failed(OP, "the face has no closest point"))?;
+        .ok_or_else(|| SolidError::query(OP, QueryFailure::NoClosestPoint))?;
     Ok(ClosestPoint {
         point: solution_point(k, objects, solution, 0)?,
         distance: solution.start.solution_value,
@@ -1000,13 +978,15 @@ pub fn face_closest_point_in_shape<O: SolutionObject>(
 ///
 /// # Errors
 ///
-/// [`SolidError::query_failed`] for an edge without a curve; a dangling edge; those of the copy.
+/// [`QueryFailure::EdgeWithoutCurve`] for an edge without a curve; a dangling edge; those of the
+/// copy.
 pub fn edge_curve_copy(k: &Kernel, brep: &Brep, id: EdgeId) -> Result<(Curve, Extent1d)> {
     let edge = brep.edge(id)?;
-    let curve = edge
-        .curve
-        .as_ref()
-        .ok_or_else(|| SolidError::query_failed(OP, "the edge has no curve"))?;
+    let curve = edge.curve.as_ref().ok_or_else(|| {
+        crate::error::Failure::new(OP, QueryFailure::EdgeWithoutCurve)
+            .with_status(crate::error::SM_ERR)
+            .into_error()
+    })?;
     Ok((curve.copy(k)?, edge.interval))
 }
 
@@ -1048,8 +1028,9 @@ pub struct MembersClosest {
 ///
 /// # Errors
 ///
-/// [`SolidError::query_failed`] when the solve finds no closest points or a point does not
-/// evaluate; those of the shape, the solver and the solution point.
+/// [`QueryFailure::NoClosestPoint`] when the solve finds no closest points,
+/// [`QueryFailure::ClosestPointNotEvaluated`] when a point does not evaluate; those of the
+/// shape, the solver and the solution point.
 pub fn closest_to_members(
     k: &mut Kernel,
     brep: &mut Brep,
@@ -1091,7 +1072,7 @@ pub fn closest_to_members(
     let solution = solutions
         .as_slice()
         .first()
-        .ok_or_else(|| SolidError::query_failed(OP, "no closest points were found"))?;
+        .ok_or_else(|| SolidError::query(OP, QueryFailure::NoClosestPoint))?;
     let on_probe = match probe {
         Probe::Curve { curve, .. } => curve.evaluate_point(k, solution.start.param(0)?)?,
         Probe::Point(point) => point,
@@ -1104,15 +1085,15 @@ pub fn closest_to_members(
         .get(member)
         .copied()
         .flatten()
-        .ok_or_else(|| SolidError::query_failed(OP, "the solution names no member"))?;
+        .ok_or_else(|| SolidError::query(OP, QueryFailure::Defect { why: "a solution of the probe-against-shape solve names the probe's object (a curve probe's) and then the member's, so the member's slot is filled" }))?;
     let first_parameter = member; // the probe curve's one parameter comes first
     let on_members = object_point(k, &objects, object, solution, first_parameter)?;
     let evaluated =
         |p: Point3| !p.is_undef() && p.x.is_finite() && p.y.is_finite() && p.z.is_finite();
     if !(evaluated(on_probe) && evaluated(on_members)) {
-        return Err(SolidError::query_failed(
+        return Err(SolidError::query(
             OP,
-            "a closest point does not evaluate",
+            QueryFailure::ClosestPointNotEvaluated,
         ));
     }
     Ok(MembersClosest {
@@ -1127,8 +1108,9 @@ pub fn closest_to_members(
 /// the topology solver's solution; no tessellation supplies a point or limits the search.
 ///
 /// # Errors
-/// Those of shape construction and the topology solver; [`SolidError::query_failed`] when
-/// there is no solution or either witness does not evaluate to a finite point.
+/// Those of shape construction and the topology solver; [`QueryFailure::NoClosestPoint`] when
+/// there is no solution, [`QueryFailure::ClosestPointNotEvaluated`] when either witness does not
+/// evaluate to a finite point.
 pub fn closest_between_faces(
     k: &mut Kernel,
     brep: &mut Brep,
@@ -1153,16 +1135,16 @@ pub fn closest_between_faces(
     let solution = solutions
         .as_slice()
         .first()
-        .ok_or_else(|| SolidError::query_failed(OP, "no closest points were found"))?;
+        .ok_or_else(|| SolidError::query(OP, QueryFailure::NoClosestPoint))?;
     let on_probe = solution_point(k, &objects, solution, 0)?;
     let on_members = solution_point(k, &objects, solution, 1)?;
     let distance = solution.start.solution_value;
     let evaluated =
         |p: Point3| !p.is_undef() && p.x.is_finite() && p.y.is_finite() && p.z.is_finite();
     if !(distance.is_finite() && distance >= 0.0 && evaluated(on_probe) && evaluated(on_members)) {
-        return Err(SolidError::query_failed(
+        return Err(SolidError::query(
             OP,
-            "a closest point does not evaluate",
+            QueryFailure::ClosestPointNotEvaluated,
         ));
     }
     Ok(MembersClosest {
@@ -1269,7 +1251,7 @@ fn status_is_no_answer<T>(r: Result<T>) -> Result<Option<T>> {
 ///
 /// # Errors
 ///
-/// [`SolidError::query_failed`] for a `reach` that is not finite and at least zero; those of the
+/// [`QueryFailure::InvalidReach`] for a `reach` that is not finite and at least zero; those of the
 /// boxes, the shapes, the solver and the solution point.
 pub fn faces_closest_distances_within(
     k: &mut Kernel,
@@ -1280,10 +1262,7 @@ pub fn faces_closest_distances_within(
     reach: f64,
 ) -> Result<Vec<Vec<Option<f64>>>> {
     if !reach.is_finite() || reach < 0.0 {
-        return Err(SolidError::query_failed(
-            OP,
-            "the reach must be finite and at least zero",
-        ));
+        return Err(SolidError::query(OP, QueryFailure::InvalidReach));
     }
     // The points each face can reach, and that face's shape, while the B-rep is still readable:
     // the solver's objects below hold it for the rest of the pass.
@@ -1352,11 +1331,12 @@ pub fn edge_bounding_box(k: &Kernel, brep: &Brep, edge: EdgeId, tight: bool) -> 
         false,
     )?
     .normal
-    .ok_or_else(|| SolidError::query_failed(OP, "the face has no normal there"))
+    .ok_or_else(|| SolidError::query(OP, QueryFailure::Defect { why: "the edge's bounding box was asked for with its normal box, which the box of every curve kind computes when asked" }))
 }
 
 /// Closest point within an edge interval (`SmApiEdgeClosestPoint`).
-/// A failed drop or absent curve returns `SM_ERR`; evaluation errors propagate.
+/// A failed drop returns `SM_ERR` ([`QueryFailure::NoClosestPoint`]); an absent curve and
+/// evaluation errors propagate.
 pub fn edge_closest_point(
     k: &Kernel,
     brep: &Brep,
@@ -1364,12 +1344,12 @@ pub fn edge_closest_point(
     point: Point3,
 ) -> Result<CurveClosestPoint> {
     let result = crate::query::edge::closest_point(k, brep, id, point)?
-        .ok_or_else(|| SolidError::query_failed(OP, "the point does not drop onto the edge"))?;
+        .ok_or_else(|| SolidError::query(OP, QueryFailure::NoClosestPoint))?;
     let curve = brep
         .edge(id)?
         .curve
         .as_ref()
-        .ok_or_else(|| SolidError::query_failed(OP, "the edge has no curve"))?;
+        .ok_or_else(|| SolidError::query(OP, QueryFailure::Defect { why: "edge::closest_point reads the edge's curve before it finds the foot, so an edge it found one on has a curve" }))?;
     Ok(CurveClosestPoint {
         closest: ClosestPoint {
             point: curve.evaluate_point(k, result.parameter)?,
@@ -1580,7 +1560,7 @@ pub fn edge_crossing_on_face(
     // An edge made without a tolerance is held to the kernel's zero, as in the plane crossing.
     let tol = brep.edge(edge)?.tolerance.max(EFF_ZERO);
     let surface = face::surface(brep, face)?
-        .ok_or_else(|| SolidError::query_missing(OP_CROSSING, "the face's surface"))?
+        .ok_or_else(|| SolidError::query(OP_CROSSING, QueryFailure::FaceWithoutSurface))?
         .clone_for_evaluation()?;
     let domain = face::uv_domain(brep, face)?;
     // The solve's start on the surface: the point nearest the curve's point at `near`, in the
@@ -1595,7 +1575,7 @@ pub fn edge_crossing_on_face(
         }
     }
     let (_, uv) = start.ok_or_else(|| {
-        SolidError::query_failed(OP_CROSSING, "the point does not drop onto the surface")
+        SolidError::query(OP_CROSSING, QueryFailure::Defect { why: "surface_closest_point returns at least the best solution's parameters or fails, so there is a start to choose from" })
     })?;
     let hit = surface
         .local_curve_intersect(k, &domain, curve, interval, tol, uv, near)?
@@ -1609,9 +1589,9 @@ pub fn edge_crossing_on_face(
     if on_edge.closest.distance <= tol {
         Ok(hit.t)
     } else {
-        Err(SolidError::query_failed(
+        Err(SolidError::query(
             OP_CROSSING,
-            "the crossing on the face's surface is off the edge",
+            QueryFailure::CrossingOffEdge,
         ))
     }
 }
@@ -1631,10 +1611,11 @@ pub fn edge_classify_parameter(
     parameter: f64,
 ) -> Result<PointClassType> {
     let e = brep.edge(id)?;
-    let curve = e
-        .curve
-        .as_ref()
-        .ok_or_else(|| SolidError::query_failed(OP, "the edge has no curve"))?;
+    let curve = e.curve.as_ref().ok_or_else(|| {
+        crate::error::Failure::new(OP, QueryFailure::EdgeWithoutCurve)
+            .with_status(crate::error::SM_ERR)
+            .into_error()
+    })?;
     if let Some(point) = ignored(curve.evaluate_point(k, parameter))? {
         for v in [edge::start_vertex(brep, id)?, edge::end_vertex(brep, id)?]
             .into_iter()
@@ -1656,16 +1637,16 @@ pub fn edge_classify_parameter(
 /// Unit tangent (`SmApiEdgeTangent`), evaluating from the left as upstream.
 /// A missing curve, evaluation failure or zero derivative returns an error.
 pub fn edge_tangent(k: &Kernel, brep: &Brep, id: EdgeId, parameter: f64) -> Result<Vec3> {
-    let curve = brep
-        .edge(id)?
-        .curve
-        .as_ref()
-        .ok_or_else(|| SolidError::query_failed(OP, "the edge has no curve"))?;
+    let curve = brep.edge(id)?.curve.as_ref().ok_or_else(|| {
+        crate::error::Failure::new(OP, QueryFailure::EdgeWithoutCurve)
+            .with_status(crate::error::SM_ERR)
+            .into_error()
+    })?;
     let values = curve.evaluate(k, parameter, 1, true, true)?;
     values
         .get(1)
         .copied()
-        .ok_or_else(|| SolidError::query_failed(OP, "the curve has no first derivative there"))?
+        .ok_or_else(|| SolidError::query(OP, QueryFailure::Defect { why: "the curve evaluation, asked for the first derivative, returned fewer, though an evaluation that succeeds returns every order it is asked for" }))?
         .unitize()
 }
 
@@ -1799,6 +1780,305 @@ pub fn point_displacement(from: Point2, to: Point2) -> Result<Vec2> {
         ));
     }
     Ok(displacement)
+}
+
+/// Point and unit tangent sampled along a curve at a requested arc length
+/// ([`curve_point_at_arc_length`]).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct CurveArcSample {
+    /// Kernel parameter of the sampled point.
+    pub parameter: f64,
+    /// Point on the curve at `parameter`.
+    pub point: Point3,
+    /// Unit tangent at `parameter`, when the derivative is non-zero and finite.
+    pub tangent: Option<Vec3>,
+    /// `true` when the requested arc length reached past the end of the interval.
+    pub past_end: bool,
+}
+
+/// Exact arc length of `curve` over `interval` using [`Curve::length`].
+///
+/// # Errors
+/// [`SolidError::InvalidInput`] for non-finite or decreasing interval endpoints, or those of
+/// [`Curve::length`].
+pub fn curve_arc_length(k: &Kernel, curve: &Curve, interval: &Extent1d) -> Result<f64> {
+    let (lo, hi) = (interval.min(), interval.max());
+    if !(lo.is_finite() && hi.is_finite() && lo <= hi) {
+        return Err(SolidError::invalid_input(OP, "invalid curve interval"));
+    }
+    curve.length(k, interval, 1e-9)
+}
+
+/// Sample `curve` over `interval` at `distance` arc length from its start (or from its end when
+/// `from_end` is `true`), using [`Curve::find_parameter_at_arc_length`] and [`Curve::evaluate`].
+///
+/// # Errors
+/// [`SolidError::InvalidInput`] for non-finite inputs or negative `distance`, or those of
+/// [`Curve::find_parameter_at_arc_length`] and [`Curve::evaluate`].
+pub fn curve_point_at_arc_length(
+    k: &Kernel,
+    curve: &Curve,
+    interval: &Extent1d,
+    from_end: bool,
+    distance: f64,
+) -> Result<CurveArcSample> {
+    let (lo, hi) = (interval.min(), interval.max());
+    if !(lo.is_finite() && hi.is_finite() && lo <= hi && distance.is_finite() && distance >= 0.0) {
+        return Err(SolidError::invalid_input(
+            OP,
+            "invalid arc-length sample input",
+        ));
+    }
+    let start_param = if from_end { hi } else { lo };
+    let (param, past_end) = if distance == 0.0 || (hi - lo).abs() <= EFF_ZERO {
+        (start_param, distance > 0.0)
+    } else {
+        let signed = if from_end { -distance } else { distance };
+        let res = curve.find_parameter_at_arc_length(k, start_param, signed)?;
+        let clamped = res.end_param.max(lo).min(hi);
+        let past = res.past_end || res.end_param < lo - EFF_ZERO || res.end_param > hi + EFF_ZERO;
+        (clamped, past)
+    };
+    let derivs = curve.evaluate(k, param, 1, from_end, false)?;
+    let pt = derivs
+        .first()
+        .copied()
+        .ok_or_else(|| SolidError::invalid_input(OP, "curve evaluation returned no point"))?;
+    let tangent = derivs.get(1).copied().and_then(|d| {
+        let len = d.length();
+        (len > EFF_ZERO && len.is_finite()).then_some(d * (1.0 / len))
+    });
+    Ok(CurveArcSample {
+        parameter: param,
+        point: pt,
+        tangent,
+        past_end,
+    })
+}
+
+/// Measure `curve`'s total arc length over `interval` and sample it at each fraction in
+/// `fractions` (clamped to `[0, 1]`).
+///
+/// # Errors
+/// [`SolidError::InvalidInput`] for invalid interval endpoints or non-finite fractions, or those
+/// of [`curve_arc_length`] and [`curve_point_at_arc_length`].
+pub fn curve_samples_at_fractions(
+    k: &Kernel,
+    curve: &Curve,
+    interval: &Extent1d,
+    fractions: &[f64],
+) -> Result<(f64, Vec<CurveArcSample>)> {
+    if fractions.iter().any(|f| !f.is_finite()) {
+        return Err(SolidError::invalid_input(OP, "non-finite sample fraction"));
+    }
+    let total = curve_arc_length(k, curve, interval)?;
+    let mut out = Vec::new();
+    for &f in fractions {
+        let dist = total * f.clamp(0.0, 1.0);
+        out.push(curve_point_at_arc_length(k, curve, interval, false, dist)?);
+    }
+    Ok((total, out))
+}
+
+fn finite_point2(p: Point2) -> bool {
+    p.x.is_finite() && p.y.is_finite()
+}
+
+fn lift_2d(p: Point2) -> Point3 {
+    Point3::new(p.x, p.y, 0.0)
+}
+
+fn extent_of_polyline_2d(points: &[Point2]) -> Result<Option<Extent2d>> {
+    for &p in points {
+        if !finite_point2(p) {
+            return Err(SolidError::invalid_input(OP, "non-finite polyline point"));
+        }
+    }
+    if points.is_empty() {
+        return Ok(None);
+    }
+    let mut ext = Extent2d::new();
+    for &p in points {
+        ext.add_point(p);
+    }
+    Ok(Some(ext))
+}
+
+/// Axis-aligned bounding box `(min, max)` of a 2D polyline via [`Extent2d`].
+///
+/// # Errors
+/// [`SolidError::InvalidInput`] for a non-finite coordinate.
+pub fn polyline_2d_bounds(points: &[Point2]) -> Result<Option<(Point2, Point2)>> {
+    Ok(extent_of_polyline_2d(points)?.map(|ext| (ext.min(), ext.max())))
+}
+
+/// Distance and closest point from `point` to a 2D polyline via [`segment_point_distance`].
+///
+/// # Errors
+/// [`SolidError::InvalidInput`] for non-finite inputs.
+pub fn polyline_2d_closest_point(
+    point: Point2,
+    points: &[Point2],
+) -> Result<Option<(f64, Point2)>> {
+    if !finite_point2(point) {
+        return Err(SolidError::invalid_input(OP, "non-finite query point"));
+    }
+    for &p in points {
+        if !finite_point2(p) {
+            return Err(SolidError::invalid_input(OP, "non-finite polyline point"));
+        }
+    }
+    let p3 = lift_2d(point);
+    let mut best: Option<(f64, Point2)> = None;
+    for (&seg_a, &seg_b) in points.iter().zip(points.iter().skip(1)) {
+        let (d, t) = segment_point_distance(lift_2d(seg_a), lift_2d(seg_b), p3);
+        let proj = seg_a + (seg_b - seg_a) * t;
+        if best.is_none_or(|(bd, _)| d < bd) {
+            best = Some((d, proj));
+        }
+    }
+    Ok(best.or_else(|| points.first().map(|&q| (point.distance(q), q))))
+}
+
+/// Intersection point of two 2D line segments via [`segment_segment_intersect`].
+///
+/// # Errors
+/// [`SolidError::InvalidInput`] for non-finite inputs or negative tolerance, or those of
+/// [`segment_segment_intersect`].
+pub fn segment_2d_intersection(
+    a1: Point2,
+    a2: Point2,
+    b1: Point2,
+    b2: Point2,
+    tol: f64,
+) -> Result<Option<Point2>> {
+    if !(finite_point2(a1)
+        && finite_point2(a2)
+        && finite_point2(b1)
+        && finite_point2(b2)
+        && tol.is_finite()
+        && tol >= 0.0)
+    {
+        return Err(SolidError::invalid_input(
+            OP,
+            "invalid segment intersection input",
+        ));
+    }
+    let hits = segment_segment_intersect(lift_2d(a1), lift_2d(a2), lift_2d(b1), lift_2d(b2), tol)?;
+    Ok(hits.first().map(|p| Point2::new(p.x, p.y)))
+}
+
+/// All segment-segment intersections between two 2D polylines via [`Extent2d`] culling and
+/// [`segment_segment_intersect`].
+///
+/// # Errors
+/// [`SolidError::InvalidInput`] for non-finite inputs or negative tolerance, or those of
+/// [`segment_segment_intersect`].
+pub fn polyline_2d_crossings(a: &[Point2], b: &[Point2], tol: f64) -> Result<Vec<Point2>> {
+    if !(tol.is_finite() && tol >= 0.0) {
+        return Err(SolidError::invalid_input(
+            OP,
+            "invalid polyline crossing tolerance",
+        ));
+    }
+    let Some(ext_a) = extent_of_polyline_2d(a)? else {
+        return Ok(Vec::new());
+    };
+    let Some(ext_b) = extent_of_polyline_2d(b)? else {
+        return Ok(Vec::new());
+    };
+    if a.len() < 2 || b.len() < 2 || ext_a.are_disjoint(&ext_b, tol) {
+        return Ok(Vec::new());
+    }
+    let mut out = Vec::new();
+    for (&a0, &a1) in a.iter().zip(a.iter().skip(1)) {
+        let seg_ext = Extent2d::from_points(a0, a1);
+        if seg_ext.are_disjoint(&ext_b, tol) {
+            continue;
+        }
+        for (&b0, &b1) in b.iter().zip(b.iter().skip(1)) {
+            let other_ext = Extent2d::from_points(b0, b1);
+            if seg_ext.are_disjoint(&other_ext, tol) {
+                continue;
+            }
+            let hits =
+                segment_segment_intersect(lift_2d(a0), lift_2d(a1), lift_2d(b0), lift_2d(b1), tol)?;
+            if let Some(p) = hits.first() {
+                out.push(Point2::new(p.x, p.y));
+            }
+        }
+    }
+    Ok(out)
+}
+
+/// Analytic 2D tangent contact point between segment `[a, b]` and circle `(center, radius)` via
+/// [`segment_point_distance`].
+///
+/// # Errors
+/// [`SolidError::InvalidInput`] for non-finite inputs or negative radius/tolerance.
+pub fn tangent_contact_line_circle_2d(
+    a: Point2,
+    b: Point2,
+    center: Point2,
+    radius: f64,
+    tol: f64,
+) -> Result<Option<Point2>> {
+    if !(finite_point2(a)
+        && finite_point2(b)
+        && finite_point2(center)
+        && radius.is_finite()
+        && radius >= 0.0
+        && tol.is_finite()
+        && tol >= 0.0)
+    {
+        return Err(SolidError::invalid_input(
+            OP,
+            "invalid line-circle tangent input",
+        ));
+    }
+    let (d, t) = segment_point_distance(lift_2d(a), lift_2d(b), lift_2d(center));
+    Ok(((d - radius).abs() <= tol).then(|| a + (b - a) * t))
+}
+
+/// Analytic 2D tangent contact point between two circles `(c1, r1)` and `(c2, r2)` via
+/// [`circle_coplanar_circle_intersect_in_contact`].
+///
+/// # Errors
+/// [`SolidError::InvalidInput`] for non-finite inputs or negative radii/tolerance, or those of
+/// [`circle_coplanar_circle_intersect_in_contact`].
+pub fn tangent_contact_circle_circle_2d(
+    c1: Point2,
+    r1: f64,
+    c2: Point2,
+    r2: f64,
+    tol: f64,
+) -> Result<Option<Point2>> {
+    if !(finite_point2(c1)
+        && finite_point2(c2)
+        && r1.is_finite()
+        && r1 >= 0.0
+        && r2.is_finite()
+        && r2 >= 0.0
+        && tol.is_finite()
+        && tol >= 0.0)
+    {
+        return Err(SolidError::invalid_input(
+            OP,
+            "invalid circle-circle tangent input",
+        ));
+    }
+    match circle_coplanar_circle_intersect_in_contact(
+        Vec3::Z,
+        lift_2d(c1),
+        r1,
+        lift_2d(c2),
+        r2,
+        tol,
+        tol,
+    )? {
+        CircleCircle::Tangent(p) => Ok(Some(Point2::new(p.x, p.y))),
+        CircleCircle::None | CircleCircle::Crossing(..) | CircleCircle::Coincident => Ok(None),
+    }
 }
 
 /// The largest distance from `point` to a point of the box with opposite corners `a`
@@ -2277,6 +2557,54 @@ mod tests {
         }
     }
 
+    /// The caller's argument and body, named at their sites with the status upstream returns:
+    /// a reach that is not a distance, an edge without a curve (`SM_ERR` where upstream checks
+    /// it, the null pointer where it is a missing pointer) and a face without a surface.
+    #[test]
+    fn the_callers_argument_and_body_are_named_with_their_status() {
+        use crate::error::{ErrorKind, SM_ERR, SM_ERR_NULL_POINTER};
+        let named = |e: SolidError, cause: QueryFailure, status: i32| {
+            assert_eq!(e.query_failure(), Some(&cause), "{e}");
+            assert_eq!(e.sm_status(), Some(status), "{e}");
+            assert_eq!(e.kind(), ErrorKind::InvalidInput, "{e}");
+        };
+        let mut k = Kernel::default();
+        let mut b =
+            crate::primitive::api_primitives::create_box(&mut k, Point3::ZERO, 1.0, 2.0, 3.0)
+                .unwrap();
+        let faces = get_faces(&b).unwrap();
+        let id = BrepId::from_index(0);
+        for reach in [-1.0, f64::NAN, f64::INFINITY] {
+            let e =
+                faces_closest_distances_within(&mut k, &mut b, id, &faces, &[], reach).unwrap_err();
+            named(e, QueryFailure::InvalidReach, SM_ERR);
+        }
+        let edge = get_edges(&b).unwrap()[0];
+        let face = faces[0];
+        let (o, x) = (Point3::ZERO, Point3::new(1.0, 0.0, 0.0));
+        let line = Curve::from(crate::primitive::api_curves::create_line_segment(o, x).unwrap());
+        let ivl = line.natural_interval();
+        b.face_mut(face).unwrap().surface = None;
+        let e = edge_crossing_on_face(&k, &b, edge, face, &line, &ivl, 0.5).unwrap_err();
+        named(e, QueryFailure::FaceWithoutSurface, SM_ERR_NULL_POINTER);
+        b.edge_mut(edge).unwrap().curve = None;
+        named(
+            edge_tangent(&k, &b, edge, 0.5).unwrap_err(),
+            QueryFailure::EdgeWithoutCurve,
+            SM_ERR,
+        );
+        named(
+            edge_curve_copy(&k, &b, edge).unwrap_err(),
+            QueryFailure::EdgeWithoutCurve,
+            SM_ERR,
+        );
+        named(
+            edge_classify_parameter(&k, &b, edge, 0.5).unwrap_err(),
+            QueryFailure::EdgeWithoutCurve,
+            SM_ERR,
+        );
+    }
+
     /// Both call sites of [`faces_closest_distances_within`] read a kernel status as no answer
     /// about that one pair, and keep every other pair's answer. The status paths are not
     /// reachable from geometry these tests can build, so the step is made to fail
@@ -2373,7 +2701,7 @@ mod tests {
         for e in [
             SolidError::sm_err("op"),
             SolidError::null_pointer("op"),
-            SolidError::query_failed(OP, "the face has no closest point"),
+            SolidError::query(OP, QueryFailure::NoClosestPoint),
         ] {
             assert!(e.is_status_answer(), "{e:?} should be a status answer");
             assert_eq!(status_is_no_answer::<i32>(Err(e)).unwrap(), None);
@@ -2382,7 +2710,7 @@ mod tests {
         for e in [
             SolidError::cancelled("op"),
             SolidError::unported("SmApiX", "query"),
-            match SolidError::query_failed(OP, "the face has no closest point") {
+            match SolidError::query(OP, QueryFailure::NoClosestPoint) {
                 SolidError::Failed(f) => {
                     (*f).caused_by(SolidError::cancelled("inner")).into_error()
                 }
@@ -2401,13 +2729,13 @@ mod tests {
     fn an_empty_brep_lists_are_typed_failures() {
         use crate::error::query::QueryFailure;
         let b = Brep::new();
-        for (e, what) in [
-            (get_edges(&b).unwrap_err(), "the B-rep has no edges"),
-            (get_faces(&b).unwrap_err(), "the B-rep has no faces"),
+        for (e, cause) in [
+            (get_edges(&b).unwrap_err(), QueryFailure::BrepWithoutEdges),
+            (get_faces(&b).unwrap_err(), QueryFailure::BrepWithoutFaces),
         ] {
             assert_eq!(e.upstream_status(), Some(crate::error::SM_ERR), "{e:?}");
             assert_eq!(e.operation(), OP);
-            assert_eq!(e.query_failure(), Some(&QueryFailure::Failed(what)));
+            assert_eq!(e.query_failure(), Some(&cause));
         }
     }
 
@@ -3505,8 +3833,13 @@ mod tests {
         assert!((t - 0.5).abs() <= 1e-12, "{t}");
         // at y = 1 the line meets x = 1 a whole unit off the edge
         let off = line(Point3::new(0.0, 1.0, 1.5), Point3::new(2.0, 1.0, 1.5));
-        let refused = edge_crossing_on_face(&k, &b, upright, side, &off, &ivl, 0.49);
-        assert!(matches!(refused, Err(SolidError::Failed(_))), "{refused:?}");
+        let refused = edge_crossing_on_face(&k, &b, upright, side, &off, &ivl, 0.49).unwrap_err();
+        assert_eq!(
+            refused.query_failure(),
+            Some(&QueryFailure::CrossingOffEdge),
+            "{refused}"
+        );
+        assert_eq!(refused.sm_status(), Some(crate::error::SM_ERR));
         // in x = 0.5, along z, the line never meets x = 1
         let apart = line(Point3::new(0.5, 0.0, 0.0), Point3::new(0.5, 0.0, 3.0));
         let refused = edge_crossing_on_face(&k, &b, upright, side, &apart, &ivl, 0.5);
@@ -3525,5 +3858,191 @@ mod tests {
             matches!(refused, Err(SolidError::NotFound { .. })),
             "{refused:?}"
         );
+    }
+
+    #[test]
+    fn curve_arc_length_and_point_at_arc_length_work_on_lines_arcs_and_polylines() {
+        let k = Kernel::default();
+        // Straight line of length 10 along +X
+        let line = Curve::from(
+            crate::primitive::api_curves::create_line_segment(
+                Point3::new(0.0, 0.0, 0.0),
+                Point3::new(10.0, 0.0, 0.0),
+            )
+            .unwrap(),
+        );
+        let ivl = line.natural_interval();
+        let len = curve_arc_length(&k, &line, &ivl).unwrap();
+        assert!((len - 10.0).abs() < 1e-9, "{len}");
+        let s = curve_point_at_arc_length(&k, &line, &ivl, false, 3.0).unwrap();
+        assert!(!s.past_end);
+        assert!(s.point.distance(Point3::new(3.0, 0.0, 0.0)) < 1e-9);
+        assert!(s.tangent.unwrap().distance(Vec3::X) < 1e-9);
+        let from_end = curve_point_at_arc_length(&k, &line, &ivl, true, 2.5).unwrap();
+        assert!(!from_end.past_end);
+        assert!(from_end.point.distance(Point3::new(7.5, 0.0, 0.0)) < 1e-9);
+
+        // Quarter circle of radius 4: arc length = 2*pi, halfway is at 45 degrees.
+        let arc_record = crate::eval::Curve::Circle {
+            frame: crate::eval::Frame {
+                origin: [0.0, 0.0, 0.0],
+                x_axis: [1.0, 0.0, 0.0],
+                y_axis: [0.0, 1.0, 0.0],
+            },
+            radius: 4.0,
+        };
+        let made_arc = crate::curve::from_parameters::from_parameters(
+            &k,
+            &arc_record,
+            [0.0, core::f64::consts::FRAC_PI_2],
+        )
+        .unwrap();
+        let arc_len = curve_arc_length(&k, &made_arc.curve, &made_arc.interval).unwrap();
+        assert!(
+            (arc_len - 2.0 * core::f64::consts::PI).abs() < 1e-6,
+            "{arc_len}"
+        );
+        let mid_arc = curve_point_at_arc_length(
+            &k,
+            &made_arc.curve,
+            &made_arc.interval,
+            false,
+            arc_len * 0.5,
+        )
+        .unwrap();
+        let want = Point3::new(
+            4.0 * core::f64::consts::FRAC_1_SQRT_2,
+            4.0 * core::f64::consts::FRAC_1_SQRT_2,
+            0.0,
+        );
+        assert!(mid_arc.point.distance(want) < 1e-5, "{:?}", mid_arc.point);
+
+        // Right-angle polyline of total length 3 + 4 = 7.
+        let poly_record = crate::eval::Curve::Polyline {
+            points: vec![[0.0, 0.0, 0.0], [3.0, 0.0, 0.0], [3.0, 4.0, 0.0]],
+        };
+        let made_poly =
+            crate::curve::from_parameters::from_parameters(&k, &poly_record, [0.0, 2.0]).unwrap();
+        let poly_len = curve_arc_length(&k, &made_poly.curve, &made_poly.interval).unwrap();
+        assert!((poly_len - 7.0).abs() < 1e-9, "{poly_len}");
+        let p5 = curve_point_at_arc_length(&k, &made_poly.curve, &made_poly.interval, false, 5.0)
+            .unwrap();
+        assert!(
+            p5.point.distance(Point3::new(3.0, 2.0, 0.0)) < 1e-6,
+            "{:?}",
+            p5.point
+        );
+        assert!(p5.tangent.unwrap().distance(Vec3::Y) < 1e-6);
+
+        // Invalid inputs are refused cleanly.
+        assert!(curve_point_at_arc_length(&k, &line, &ivl, false, -1.0).is_err());
+        assert!(curve_point_at_arc_length(&k, &line, &ivl, false, f64::NAN).is_err());
+    }
+
+    #[test]
+    fn polyline_2d_queries_and_tangent_contacts_match_exact_geometry() {
+        let poly = [
+            Point2::new(0.0, 0.0),
+            Point2::new(10.0, 0.0),
+            Point2::new(10.0, 10.0),
+        ];
+        assert_eq!(
+            polyline_2d_bounds(&poly).unwrap(),
+            Some((Point2::new(0.0, 0.0), Point2::new(10.0, 10.0)))
+        );
+        assert_eq!(polyline_2d_bounds(&[]).unwrap(), None);
+        assert!(polyline_2d_bounds(&[Point2::new(f64::NAN, 0.0)]).is_err());
+
+        let (d, closest) = polyline_2d_closest_point(Point2::new(4.0, 3.0), &poly)
+            .unwrap()
+            .unwrap();
+        assert!((d - 3.0).abs() < 1e-12 && closest.distance(Point2::new(4.0, 0.0)) < 1e-12);
+        assert!(polyline_2d_closest_point(Point2::new(f64::INFINITY, 0.0), &poly).is_err());
+
+        let hit = segment_2d_intersection(
+            Point2::new(0.0, 0.0),
+            Point2::new(10.0, 10.0),
+            Point2::new(0.0, 10.0),
+            Point2::new(10.0, 0.0),
+            1e-6,
+        )
+        .unwrap()
+        .unwrap();
+        assert!(hit.distance(Point2::new(5.0, 5.0)) < 1e-9);
+        assert!(segment_2d_intersection(
+            Point2::new(0.0, 0.0),
+            Point2::new(10.0, 0.0),
+            Point2::new(0.0, 5.0),
+            Point2::new(10.0, 5.0),
+            1e-6,
+        )
+        .unwrap()
+        .is_none());
+
+        let cross = [
+            Point2::new(5.0, -2.0),
+            Point2::new(5.0, 6.0),
+            Point2::new(12.0, 6.0),
+        ];
+        let hits = polyline_2d_crossings(&poly, &cross, 1e-6).unwrap();
+        assert_eq!(hits.len(), 2, "{hits:?}");
+        assert!(hits
+            .iter()
+            .any(|p| p.distance(Point2::new(5.0, 0.0)) < 1e-9));
+        assert!(hits
+            .iter()
+            .any(|p| p.distance(Point2::new(10.0, 6.0)) < 1e-9));
+
+        // Line tangent to circle (0, 5), r = 5 along y = 0.
+        let lc = tangent_contact_line_circle_2d(
+            Point2::new(-10.0, 0.0),
+            Point2::new(10.0, 0.0),
+            Point2::new(0.0, 5.0),
+            5.0,
+            1e-6,
+        )
+        .unwrap()
+        .unwrap();
+        assert!(lc.distance(Point2::new(0.0, 0.0)) < 1e-9);
+        assert!(tangent_contact_line_circle_2d(
+            Point2::new(-10.0, 0.0),
+            Point2::new(10.0, 0.0),
+            Point2::new(0.0, 6.0),
+            5.0,
+            1e-6,
+        )
+        .unwrap()
+        .is_none());
+
+        // Externally and internally tangent circles.
+        let ext = tangent_contact_circle_circle_2d(
+            Point2::new(0.0, 0.0),
+            3.0,
+            Point2::new(8.0, 0.0),
+            5.0,
+            1e-6,
+        )
+        .unwrap()
+        .unwrap();
+        assert!(ext.distance(Point2::new(3.0, 0.0)) < 1e-9);
+        let int = tangent_contact_circle_circle_2d(
+            Point2::new(0.0, 0.0),
+            10.0,
+            Point2::new(6.0, 0.0),
+            4.0,
+            1e-6,
+        )
+        .unwrap()
+        .unwrap();
+        assert!(int.distance(Point2::new(10.0, 0.0)) < 1e-9);
+        assert!(tangent_contact_circle_circle_2d(
+            Point2::new(0.0, 0.0),
+            3.0,
+            Point2::new(4.0, 0.0),
+            3.0,
+            1e-6,
+        )
+        .unwrap()
+        .is_none());
     }
 }

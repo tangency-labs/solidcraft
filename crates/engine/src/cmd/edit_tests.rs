@@ -1303,6 +1303,21 @@ fn counted_body_names_stay_when_the_timeline_changes() {
     assert_eq!(bodies(&s), named(&[("Body2", "B"), ("Body3", "C"), ("Body4", "E")]));
 }
 
+/// Once every feature is deleted no body keeps a number, so the next body is `Body1` again, in a
+/// design that was saved and opened in between (#20922).
+#[test]
+fn deleting_every_body_feature_starts_body_names_again_at_body1() {
+    let mut s = Session::default();
+    for (name, x) in [("A", 0), ("B", 20)] {
+        run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 5, "corner": [x, 0, 0], "name": name}));
+    }
+    let mut s = Session::opened_at(solidcraft_doc::Document::from_json(&s.doc.to_json()).unwrap(), None, None);
+    run(&mut s, "timeline.delete", json!({"features": ["A", "B"]}));
+    run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 5, "name": "C"}));
+    let names: Vec<String> = s.model.state().bodies.iter().map(|b| b.name.clone()).collect();
+    assert_eq!(names, vec!["Body1".to_string()]);
+}
+
 /// A design saved before body names were pinned, and saved rolled back, is pinned as it opens
 /// for the features after the marker too (#14008): a body made at the marker does not take the
 /// number of a later body, so the later bodies keep the names they were saved with and a combine
@@ -1875,6 +1890,17 @@ fn app_bar_reset_is_registered_and_only_requests_a_ui_reset() {
     assert!(!spec.undoable && !spec.reads_model);
     assert_eq!(spec.tab, "", "palette command, without a ribbon placement");
     assert_eq!(s.execute(spec.id, &json!({})).unwrap(), json!({"reset":true}));
+    assert_eq!((s.doc.to_json(), s.revision, s.undo.len(), s.redo.len()), before);
+}
+
+#[test]
+fn app_bar_customize_validates_without_opening_or_changing_a_design() {
+    let mut s = Session::default();
+    let before = (s.doc.to_json(), s.revision, s.undo.len(), s.redo.len());
+    let spec = crate::find_command("ui.appBarCustomize").unwrap();
+    assert!(spec.info(&s).enabled);
+    assert!(!spec.undoable);
+    assert_eq!(s.execute(spec.id, &json!({})).unwrap(), json!({"available":true}));
     assert_eq!((s.doc.to_json(), s.revision, s.undo.len(), s.redo.len()), before);
 }
 

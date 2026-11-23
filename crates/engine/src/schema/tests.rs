@@ -1300,7 +1300,7 @@ fn plane_names_match_check_plane_name() {
 fn sketch_edit_contracts_validate_markers_before_changing_the_session() {
     use crate::schema::sketch::{CancelResult, EditParams, EditResult, ExitParams, FinishResult};
     use crate::schema::{ParamCheck, input_schema_for, output_schema_for};
-    assert_keys(input_schema_for::<EditParams>(), &["restore_marker", "sketch"]);
+    assert_keys(input_schema_for::<EditParams>(), &["restore_marker", "sketch", "view"]);
     assert_keys(input_schema_for::<ExitParams>(), &["restore_marker"]);
     let mut s = crate::Session::default();
     let run = |s: &mut crate::Session, id: &str, p: serde_json::Value| s.execute(id, &p).unwrap();

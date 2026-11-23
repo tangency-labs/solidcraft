@@ -144,7 +144,7 @@ pub(super) fn reparent_items(s: &mut Session, p: &Value) -> Result<Value> {
     }
     // The steps above are this command's one undo step.
     sc.undo.clear();
-    s.accept_computed(sc);
+    s.accept_computed(sc)?;
     for (old, new) in &followed {
         follow_visibility(s, old, new);
     }

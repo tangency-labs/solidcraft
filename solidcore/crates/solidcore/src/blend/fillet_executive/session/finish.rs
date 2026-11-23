@@ -115,6 +115,13 @@ fn failure(what: &'static str) -> SolidError {
     SolidError::blend_failed(OP, what)
 }
 
+/// The fillet body is not built, or has no faces: a step of the executive failed
+/// ([`BlendFailure::ExecutiveStepFailed`], `FILEXEC_ERR`, `SM_ERR`). The session's error info
+/// says which step and why; the step's own error, where there is one, is kept as the cause.
+fn step_failed() -> SolidError {
+    SolidError::blend(OP, BlendFailure::ExecutiveStepFailed)
+}
+
 /// Ordinary statuses become `None`; deferrals propagate.
 fn ignore<T>(result: Result<T>) -> Result<Option<T>> {
     match result {
@@ -1071,22 +1078,31 @@ impl FilletSession<'_> {
         // setback set on a made corner (SetSetBackDist) that builds none (neither the
         // Setback nor an N x N corner) would be dropped silently, so it is refused, as
         // `create_corners` refuses one asked with SetSetBackFill at such a corner
-        if self
+        // (not the fork, #2933) otherwise a corner at a vertex marked set back is classified
+        // now, where the setback set on it is first read: the Setback where it is one. A corner
+        // that is the Setback already builds the setback set on it (#16408); one beside a
+        // curved face asked an ease, which its G1 fill cannot take, is refused rather than
+        // built without the ask. Both refusals end in the one failure below.
+        let not_built = if self
             .objects
             .corners
             .iter()
             .any(crate::blend::blend_corner::setback::asked_setback_not_built)
         {
+            Some(crate::blend::blend_corner::setback::SETBACK_NOT_BUILT)
+        } else if self.set_back_marked_corners(k)?.is_some() {
+            Some(crate::blend::blend_corner::setback::SETBACK_EASE_NOT_BUILT)
+        } else {
+            None
+        };
+        if let Some(comment) = not_built {
             self.note_refusal(Refusal {
                 code: FilletErrorType::CornerUnsupported,
                 reason: None,
-                comment: crate::blend::blend_corner::setback::SETBACK_NOT_BUILT,
+                comment,
             });
             return Err(failure("an asked setback is not built"));
         }
-        // (not the fork, #2933) a corner at a vertex marked set back is classified now, where
-        // the setback set on it is first read: the Setback where it is one
-        self.set_back_marked_corners(k)?;
         // not the fork's (#3145): setbacks that overlap on an edge, before the trace
         if let Some((vertex, refusal)) = crate::blend::blend_corner::setback::overlapping_setbacks(
             k,
@@ -1135,10 +1151,7 @@ impl FilletSession<'_> {
                 if let Some(output) = error_out.as_deref_mut() {
                     output.assign(&session.executive.error);
                 }
-                return Err(keeping_cause(
-                    failure("the fillet body is not built"),
-                    stage,
-                ));
+                return Err(keeping_cause(step_failed(), stage));
             }
             let faces = session
                 .objects
@@ -1153,7 +1166,7 @@ impl FilletSession<'_> {
                 if let Some(output) = error_out {
                     output.assign(&session.executive.error);
                 }
-                return Err(failure("the fillet body has no faces"));
+                return Err(step_failed());
             }
             session.shrink_fillet_faces(k)?;
             // The fork's NoteRadiusCornerSurfaces (6eecf04): the fillet surfaces that turn at
@@ -1689,14 +1702,12 @@ mod ball_fit_tests {
     }
 
     /// The executive's generic failure (`FILEXEC_ERR`) is a typed failure with the status,
-    /// operation and (no) entity of the bare status it replaced (#13790).
+    /// operation and (no) entity of the bare status it replaced (#13790), the fillet body not
+    /// built a step of the executive failing (#19824).
     #[test]
     fn the_generic_failure_is_typed_with_its_status() {
-        let e = failure("the fillet body is not built");
-        assert_eq!(
-            e.blend_failure(),
-            Some(&BlendFailure::Failed("the fillet body is not built"))
-        );
+        let e = step_failed();
+        assert_eq!(e.blend_failure(), Some(&BlendFailure::ExecutiveStepFailed));
         assert_eq!(e.upstream_status(), Some(1001));
         assert_eq!(e.operation(), OP);
         assert_eq!(e.entity(), None);
@@ -1735,7 +1746,7 @@ mod ball_fit_tests {
         let e = session.do_fillet(&mut k).unwrap_err();
         let info = session.error_info().clone();
         // as before: the session's failure, its status and the corner's note
-        let bare = failure("the fillet body is not built");
+        let bare = step_failed();
         assert_eq!(e.operation(), OP, "{e:?}");
         assert_eq!(e.blend_failure(), bare.blend_failure(), "{e:?}");
         assert_eq!(e.sm_status(), Some(1001), "{e:?}");
@@ -1754,9 +1765,7 @@ mod ball_fit_tests {
         );
         assert_eq!(
             executive.blend_failure(),
-            Some(&BlendFailure::Failed(
-                "a step of the fillet executive failed"
-            ))
+            Some(&BlendFailure::ExecutiveStepFailed)
         );
         assert_eq!(executive.sm_status(), Some(1001));
         let stage = executive.cause().expect("the stage's error is kept");
@@ -1796,13 +1805,13 @@ mod ball_fit_tests {
     /// unsupported apex gives it in `session.rs`), over `root`.
     fn later_failure_over(root: SolidError) -> SolidError {
         let step = keeping_cause(
-            SolidError::blend_failed(
+            SolidError::blend(
                 "blend::fillet_executive::p3",
-                "a step of the fillet executive failed",
+                BlendFailure::ExecutiveStepFailed,
             ),
             root,
         );
-        keeping_cause(failure("the fillet body is not built"), step)
+        keeping_cause(step_failed(), step)
     }
 
     fn a_classification_failure() -> SolidError {
@@ -1852,7 +1861,7 @@ mod ball_fit_tests {
             operation: "topology::edgeuse::p3",
             reason: "EvaluateBinormal: face without surface",
         };
-        let before = keeping_cause(failure("the fillet body is not built"), root);
+        let before = keeping_cause(step_failed(), root);
         let after = rooted_in(
             before.clone(),
             SolidError::blend_missing("blend::blend_corner::setback", "z"),

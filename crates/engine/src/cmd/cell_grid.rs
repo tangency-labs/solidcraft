@@ -62,6 +62,7 @@ const fn help_bytes() -> [u8; HELP_LEN] {
 }
 
 pub static COMMANDS: &[CommandSpec] = &[CommandSpec::new("solid.cell_grid", "Cell Grid", crate::checked!("solid.cell_grid", cell_grid))
+    .begins_edit()
     .icon("perforate")
     .contract(&CELL_GRID_CONTRACT)
     .output(output_schema_for::<FeatureResult>)
