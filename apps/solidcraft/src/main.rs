@@ -1335,6 +1335,8 @@ fn main() -> eframe::Result {
     mark("main");
     // The kernel's fix set, named to solidcore-ops before any call runs on it.
     solidcraft_engine::kernel::start();
+    // A large importer plugin compiles once per version, not at the first file of every session.
+    solidcraft_engine::plugin::configure_compile_cache();
     solidcraft_ui_egui::i18n::install();
     solidcraft_look::install_tables();
     solidcraft_ui_egui::workspace::install_tabs();

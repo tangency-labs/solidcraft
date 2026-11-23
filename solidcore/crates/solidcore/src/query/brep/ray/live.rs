@@ -593,6 +593,9 @@ impl FaceQueries<CacheObject> for LiveSurfaceContext<'_, '_, '_> {
     fn face_zone_tol_3d(&self, face: CacheObject) -> Result<f64> {
         self.0.face_tolerance(face)
     }
+    fn face_has_loopuses(&self, face: CacheObject) -> Result<bool> {
+        self.0.faces.face_has_loopuses(face)
+    }
     fn face_point_classify(
         &self,
         k: &Kernel,
@@ -932,6 +935,13 @@ impl FaceQueries<CacheObject> for BrepFaceServices<'_> {
             .face(id)?
             .tolerance)
     }
+    fn face_has_loopuses(&self, face: CacheObject) -> Result<bool> {
+        let CacheObject::Face(id) = face else {
+            return Err(SolidError::invalid_input(OP, "expected face handle"));
+        };
+        let brep = self.brep.try_borrow().map_err(borrow_conflict)?;
+        crate::topology::face::p4::has_loopuses(&brep, id)
+    }
     fn face_point_classify(
         &self,
         k: &Kernel,
@@ -1035,6 +1045,9 @@ impl SurfaceSolveContext<SideObject> for SidedFaceServices<'_> {
 impl FaceQueries<SideObject> for SidedFaceServices<'_> {
     fn face_zone_tol_3d(&self, face: SideObject) -> Result<f64> {
         self.side(face)?.face_zone_tol_3d(face.1)
+    }
+    fn face_has_loopuses(&self, face: SideObject) -> Result<bool> {
+        self.side(face)?.face_has_loopuses(face.1)
     }
     fn face_point_classify(
         &self,
@@ -1147,6 +1160,9 @@ impl SurfaceSolveContext<CurveFaceObject> for CurveFaceServices<'_, '_> {
 impl FaceQueries<CurveFaceObject> for CurveFaceServices<'_, '_> {
     fn face_zone_tol_3d(&self, face: CurveFaceObject) -> Result<f64> {
         self.0.face_zone_tol_3d(brep_object(face)?)
+    }
+    fn face_has_loopuses(&self, face: CurveFaceObject) -> Result<bool> {
+        self.0.face_has_loopuses(brep_object(face)?)
     }
     fn face_point_classify(
         &self,
