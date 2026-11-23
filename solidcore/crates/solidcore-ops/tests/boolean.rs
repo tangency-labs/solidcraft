@@ -205,7 +205,7 @@ fn the_box_a_face_is_paired_by_holds_the_face() {
         let (mut b, _) = solidcore_convert::brep::to_kernel(&mut k, &record, true).unwrap();
         let faces: Vec<_> = solidcore::topology::brep::p1::faces(&b, None).unwrap();
         for f in faces {
-            // the classifications' trims, as the boolean makes them before it boxes a face
+            // every trim made, so that the narrowing to the trims is what is checked
             for lu in solidcore::topology::face::p4::upward_loopuses(&b, f, false, None).unwrap() {
                 for eu in solidcore::topology::edgeuse::p1::loopuse_edgeuses(&b, lu).unwrap() {
                     let _ = solidcore::topology::edgeuse::p3::get_or_create_uv_trim_curve(
