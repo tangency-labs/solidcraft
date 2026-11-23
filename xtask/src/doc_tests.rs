@@ -38,12 +38,21 @@
 //! It runs no code, so it cannot see doc text a build script copies from a file it reads (a
 //! template), or Rust that a build dependency writes without one of those four crates.
 //!
+//! What it reads is bounded, because the strings it follows are whatever the sources hold (a test
+//! that hands a command `"/dev/zero"` once had it read that device until the machine's memory was
+//! gone). A string a macro is given is looked up only as a relative path, and only where it leads
+//! to a place inside the workspace that is no build output: nothing a checkout builds from lies
+//! anywhere else. Only regular files are read (a device or a pipe has no end), a piece at a
+//! time, so what is not text costs one piece, and never past [`MAX_FILE_BYTES`]. The libraries
+//! are read by as many threads as the machine has processors, not one each.
+//!
 //! Library means what `cargo test --doc` tests: a `lib` or `proc-macro` target, whatever its
 //! `doctest` setting (an explicit `--doc` ignores it).
 
 use std::collections::BTreeSet;
-use std::path::{Path, PathBuf};
+use std::path::{Component, Path, PathBuf};
 use std::process::Command;
+use std::sync::atomic::{AtomicUsize, Ordering};
 
 use proc_macro2::{Delimiter, Group, TokenStream, TokenTree};
 use pulldown_cmark::{CodeBlockKind, Event, Options, Parser, Tag};
@@ -131,15 +140,9 @@ pub fn command(only: Option<&[&str]>, cargo_args: &[&str], test_args: &[&str]) -
         known_packages(&meta, only)?;
     }
     let libraries = libraries(&meta)?;
-    // Every library is read, one thread each, even with `only`: a macro one defines may write docs
-    // in another. A thread that fails leaves its library counted as having doc tests.
-    let read: Vec<(&Library, Vec<FileDocs>)> = std::thread::scope(|scope| {
-        let threads: Vec<_> = libraries.iter().map(|library| (library, scope.spawn(move || read_library(library, include_ignored)))).collect();
-        threads
-            .into_iter()
-            .map(|(library, thread)| (library, thread.join().unwrap_or_else(|_| vec![FileDocs { test: true, ..FileDocs::default() }])))
-            .collect()
-    });
+    let workspace = meta["workspace_root"].as_str().ok_or("cargo metadata: no workspace_root")?;
+    let workspace = std::fs::canonicalize(workspace).map_err(|e| format!("{workspace}: {e}"))?;
+    let read = read_libraries(&libraries, &workspace, include_ignored);
     let crates = libraries.iter().map(|library| library.crate_name.clone()).collect();
     let macros = macros(read.iter().flat_map(|(_, files)| files), crates, dependency_crates(&meta));
     let mut code_writers = None;
@@ -161,6 +164,41 @@ pub fn command(only: Option<&[&str]>, cargo_args: &[&str], test_args: &[&str]) -
     eprintln!("doc tests: {} of {considered} libraries have a code block rustdoc would compile: {}", chosen.len(), chosen.join(", "));
     let all: Vec<&str> = libraries.iter().map(|library| library.name.as_str()).collect();
     Ok(Some((format!("doc tests ({} libraries)", chosen.len()), doc_command(&all, &chosen, cargo_args, test_args))))
+}
+
+/// Every library's docs, in the libraries' order. Every library is read, even with `only`: a macro
+/// one defines may write docs in another. As many threads as the machine has processors take the
+/// libraries one after another, so no more of them are in memory at once than that. A library a
+/// failed thread did not hand back counts as having doc tests.
+fn read_libraries<'a>(libraries: &'a [Library], workspace: &Path, include_ignored: bool) -> Vec<(&'a Library, Vec<FileDocs>)> {
+    let next = AtomicUsize::new(0);
+    let workers = std::thread::available_parallelism().map_or(1, usize::from).min(libraries.len()).max(1);
+    let mut read: Vec<Option<Vec<FileDocs>>> = libraries.iter().map(|_| None).collect();
+    std::thread::scope(|scope| {
+        let threads: Vec<_> = (0..workers)
+            .map(|_| {
+                scope.spawn(|| {
+                    let mut done = Vec::new();
+                    loop {
+                        let index = next.fetch_add(1, Ordering::Relaxed);
+                        let Some(library) = libraries.get(index) else { break };
+                        done.push((index, read_library(library, workspace, include_ignored)));
+                    }
+                    done
+                })
+            })
+            .collect();
+        for (index, files) in threads.into_iter().filter_map(|thread| thread.join().ok()).flatten() {
+            if let Some(slot) = read.get_mut(index) {
+                *slot = Some(files);
+            }
+        }
+    });
+    libraries
+        .iter()
+        .zip(read)
+        .map(|(library, files)| (library, files.unwrap_or_else(|| vec![FileDocs { test: true, ..FileDocs::default() }])))
+        .collect()
 }
 
 /// The names the workspace's packages give the crates they depend on (`serde_json`, or a rename).
@@ -418,7 +456,9 @@ fn fixed_point(set: &mut BTreeSet<String>, more: impl Fn(&BTreeSet<String>) -> V
 /// with what its `#[path]` attributes and `include!("...")` calls bring in, read; a path a macro is
 /// given has what the macro may copy from it read as docs (`named_files_have_doc_test`). What
 /// cannot be read counts as a doc test.
-fn read_library(library: &Library, include_ignored: bool) -> Vec<FileDocs> {
+/// The docs of a library's files, and of what they bring in or name. `workspace` is the
+/// workspace's canonical root: a path a macro is given is not followed out of it.
+fn read_library(library: &Library, workspace: &Path, include_ignored: bool) -> Vec<FileDocs> {
     let doubt = || FileDocs { test: true, ..FileDocs::default() };
     let Ok(dir) = std::fs::canonicalize(&library.dir) else { return vec![doubt()] };
     // Files are listed and joined by their plain paths (a canonical Windows path, `\\?\C:\..`,
@@ -442,7 +482,7 @@ fn read_library(library: &Library, include_ignored: bool) -> Vec<FileDocs> {
     let mut looked_up = BTreeSet::new();
     let mut out = Vec::new();
     while let Some(file) = files.pop() {
-        let mut docs = std::fs::read_to_string(&file).map_or_else(|_| doubt(), |text| file_docs(&text, include_ignored));
+        let mut docs = read_text(&file).map_or_else(|_| doubt(), |text| file_docs(&text, include_ignored));
         let base = file.parent().unwrap_or(&library.dir).to_path_buf();
         let own = base.join(file.file_stem().unwrap_or_default());
         for path in &docs.paths {
@@ -480,13 +520,15 @@ fn read_library(library: &Library, include_ignored: bool) -> Vec<FileDocs> {
             }
         }
         // A macro reads a path relative to the package (`CARGO_MANIFEST_DIR`) or to the file. The
-        // package itself and the directories above it are not what a macro is pointed at.
-        for path in &docs.referenced {
+        // package itself and the directories above it are not what a macro is pointed at, and
+        // neither is anything outside the workspace or in its build output (`may_be_named`).
+        for path in docs.referenced.iter().filter(|path| is_relative(path)) {
             for candidate in [library.dir.join(path), base.join(path)] {
                 if looked_up.insert(candidate.clone())
                     && candidate.exists()
                     && let Ok(canonical) = std::fs::canonicalize(&candidate)
                     && !dir.starts_with(&canonical)
+                    && may_be_named(&canonical, workspace)
                     && named_files_have_doc_test(&canonical, &listed, include_ignored)
                 {
                     docs.test = true;
@@ -496,6 +538,79 @@ fn read_library(library: &Library, include_ignored: bool) -> Vec<FileDocs> {
         out.push(docs);
     }
     out
+}
+
+/// Whether a string a macro is given can be a path it reads relative to the package or the file:
+/// one that neither starts at a root (`/dev/zero`) nor names a drive (`C:\..`, `C:..`).
+fn is_relative(path: &str) -> bool {
+    !matches!(Path::new(path).components().next(), None | Some(Component::RootDir | Component::Prefix(_)))
+}
+
+/// Whether a macro can be pointed at `canonical`: a place inside the workspace (its canonical
+/// root) that is no build output. Nothing a checkout builds from lies outside the workspace, and
+/// what does lie there differs from machine to machine.
+fn may_be_named(canonical: &Path, workspace: &Path) -> bool {
+    canonical.strip_prefix(workspace).is_ok_and(|inside| !inside.components().any(|part| part.as_os_str() == "target"))
+}
+
+/// Most bytes of one file the scan reads. No source or doc file comes near it.
+const MAX_FILE_BYTES: usize = 64 << 20;
+
+/// Why a file's text was not read.
+#[derive(Debug, PartialEq, Eq)]
+enum Unread {
+    /// It is no regular file: a directory, a device, a pipe. A device has no end (`/dev/zero`).
+    NotAFile,
+    /// It is not UTF-8 text.
+    NotText,
+    /// It is longer than the most the scan reads of one file.
+    TooLong,
+    /// The system would not open or read it.
+    Failed,
+}
+
+/// The text of a regular file, at most [`MAX_FILE_BYTES`] of it.
+fn read_text(file: &Path) -> Result<String, Unread> {
+    read_text_up_to(file, MAX_FILE_BYTES)
+}
+
+/// The text of a regular file of at most `most` bytes. It is read a piece at a time, so a file
+/// that is not text costs one piece, and nothing is read past `most`, whatever length the file
+/// reports (a device reports 0).
+fn read_text_up_to(file: &Path, most: usize) -> Result<String, Unread> {
+    use std::io::Read as _;
+    if !std::fs::metadata(file).map_err(|_| Unread::Failed)?.is_file() {
+        return Err(Unread::NotAFile);
+    }
+    let mut source = std::fs::File::open(file).map_err(|_| Unread::Failed)?;
+    let mut bytes = Vec::new();
+    let mut piece = vec![0u8; 64 << 10];
+    // How much of `bytes` is known to be UTF-8.
+    let mut valid = 0;
+    loop {
+        let read = match source.read(&mut piece) {
+            Ok(0) => break,
+            Ok(read) => read,
+            Err(e) if e.kind() == std::io::ErrorKind::Interrupted => continue,
+            Err(_) => return Err(Unread::Failed),
+        };
+        let new = piece.get(..read).unwrap_or_default();
+        if bytes.len() + new.len() > most {
+            return Err(Unread::TooLong);
+        }
+        // Text holds no NUL; what is all zeros would pass as UTF-8.
+        if new.contains(&0) {
+            return Err(Unread::NotText);
+        }
+        bytes.extend_from_slice(new);
+        match std::str::from_utf8(bytes.get(valid..).unwrap_or_default()) {
+            Ok(_) => valid = bytes.len(),
+            // A character cut in two by the end of the piece is whole with the next one.
+            Err(e) if e.error_len().is_none() => valid += e.valid_up_to(),
+            Err(_) => return Err(Unread::NotText),
+        }
+    }
+    String::from_utf8(bytes).map_err(|_| Unread::NotText)
 }
 
 /// The files under `dir` (only .rs ones with `rust_only`), skipping build output; a symbolic link
@@ -532,11 +647,18 @@ fn named_files_have_doc_test(path: &Path, listed: &dyn Fn(&Path) -> bool, includ
 /// Whether what a macro may copy into docs from a file holds a code block rustdoc would compile: a
 /// Rust file's docs (read as the package's own files are); when the macro is given the file by
 /// name (`doctest!("README.md")`), a Markdown file whole and the fenced blocks of any other text;
-/// and the `///` comments of any other file. A Rust file that cannot be read counts; other files
-/// that are not text are skipped.
+/// and the `///` comments of any other file. A Rust file that cannot be read counts, and so does
+/// a file too long to read; other files that are not text are skipped, and what is no regular
+/// file (a device, a pipe) is not opened.
 fn file_has_doc_test(file: &Path, named: bool, include_ignored: bool) -> bool {
     let extension = file.extension().map(|e| e.to_string_lossy().to_ascii_lowercase()).unwrap_or_default();
-    let Ok(text) = std::fs::read_to_string(file) else { return extension == "rs" };
+    let text = match read_text(file) {
+        Ok(text) => text,
+        // A file too long to read may hold anything. Otherwise only a Rust file that does not
+        // read counts: what is no text, or no file (a device, a pipe), holds no docs.
+        Err(Unread::TooLong) => return true,
+        Err(_) => return extension == "rs",
+    };
     let comments = || {
         comment_runs(&text).iter().any(|run| {
             let fragments: Vec<(&str, bool)> = run.iter().map(|line| (*line, true)).collect();
@@ -624,7 +746,7 @@ fn writers_have_doc_test(library: &Library, include_ignored: bool) -> bool {
             files.push(writer.clone());
         }
     }
-    files.iter().any(|file| std::fs::read_to_string(file).map_or(true, |text| source_writes_doc_test(&text, include_ignored)))
+    files.iter().any(|file| read_text(file).map_or(true, |text| source_writes_doc_test(&text, include_ignored)))
 }
 
 /// Whether Rust source that writes code could write a doc test (the module docs say how).
@@ -1346,9 +1468,141 @@ mod tests {
             writers: Vec::new(),
             external_writers: Vec::new(),
         };
-        let found = read_library(&library, false).iter().any(|f| f.test);
+        let workspace = std::fs::canonicalize(&root).unwrap();
+        let found = read_library(&library, &workspace, false).iter().any(|f| f.test);
         std::fs::remove_dir_all(&root).unwrap();
         found
+    }
+
+    /// A scratch directory of this test run's own.
+    fn scratch(name: &str) -> PathBuf {
+        let dir = std::env::temp_dir().join(format!("solidcraft-doc-tests-{name}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    /// Markdown with a block rustdoc would compile.
+    const DOC_WITH_TEST: &str = "A doc.\n\n```\nassert!(true);\n```\n";
+
+    #[test]
+    fn only_a_relative_path_inside_the_workspace_is_looked_up() {
+        // Strings as sources hold them: a device, a system file, and paths a macro may read.
+        for rooted in ["/dev/zero", "/proc/self/status", "/"] {
+            assert!(!is_relative(rooted), "{rooted}");
+        }
+        // A drive or a share is one only where the system has them.
+        if cfg!(windows) {
+            for drive in ["C:\\Windows\\win.ini", "C:notes.md", "\\\\server\\share\\x"] {
+                assert!(!is_relative(drive), "{drive}");
+            }
+        }
+        for relative in ["wit", "../README.md", "docs/guide.md", "./x"] {
+            assert!(is_relative(relative), "{relative}");
+        }
+        assert!(!is_relative(""));
+        // base/ws is the workspace; base/outside lies beside it.
+        let base = scratch("bounds");
+        let write = |path: &str, text: &str| {
+            let path = base.join(path);
+            std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+            std::fs::write(&path, text).unwrap();
+            path
+        };
+        let inside = write("ws/docs/inside.md", DOC_WITH_TEST);
+        let outside = write("outside/outside.md", DOC_WITH_TEST);
+        write("ws/target/doc/built.md", DOC_WITH_TEST);
+        let workspace = std::fs::canonicalize(base.join("ws")).unwrap();
+        let package = base.join("ws").join("package");
+        let found = |source: &str| {
+            write("ws/package/src/lib.rs", source);
+            let library = Library {
+                name: "probe".into(),
+                crate_name: "probe".into(),
+                root: package.join("src").join("lib.rs"),
+                dir: package.clone(),
+                writers: Vec::new(),
+                external_writers: Vec::new(),
+            };
+            read_library(&library, &workspace, false).iter().any(|f| f.test)
+        };
+        // A macro that is not read may copy a file it is given into a doc.
+        assert!(found("m!(\"../docs/inside.md\");\n"), "a relative path inside the workspace is read");
+        assert!(!found("m!(\"../../outside/outside.md\");\n"), "a path that leads out of the workspace is not");
+        assert!(!found("m!(\"../target/doc/built.md\");\n"), "build output is not");
+        // The same files by their absolute paths, as a test may hand a command any path at all.
+        let literal = |path: &Path| path.display().to_string().replace('\\', "/");
+        assert!(!found(&format!("m!(\"{}\");\n", literal(&inside))), "an absolute path is not looked up");
+        assert!(!found(&format!("m!(\"{}\");\n", literal(&outside))));
+        // What a test of hostile paths holds: nothing of it is opened.
+        assert!(!found("fn f() { run(json!({\"path\": \"/dev/zero\"})); run(json!({\"path\": \"../../../../../../../../../../dev/zero\"})); }\n"));
+        std::fs::remove_dir_all(&base).unwrap();
+    }
+
+    #[test]
+    fn only_text_of_a_regular_file_is_read_and_never_past_the_limit() {
+        let dir = scratch("read");
+        let write = |name: &str, bytes: &[u8]| {
+            let path = dir.join(name);
+            std::fs::write(&path, bytes).unwrap();
+            path
+        };
+        assert_eq!(read_text(&write("plain.md", DOC_WITH_TEST.as_bytes())).as_deref(), Ok(DOC_WITH_TEST));
+        assert_eq!(read_text(&write("empty.md", b"")).as_deref(), Ok(""));
+        // A character of several bytes cut in two by the end of a piece is whole with the next.
+        let long = "é".repeat(100_000);
+        assert_eq!(read_text(&write("long.md", long.as_bytes())), Ok(long.clone()));
+        let shifted = format!("a{long}");
+        assert_eq!(read_text(&write("shifted.md", shifted.as_bytes())), Ok(shifted));
+        // What is not text is given up at its first piece.
+        assert_eq!(read_text(&write("zeros.bin", &[0u8; 300_000])), Err(Unread::NotText));
+        assert_eq!(read_text(&write("latin1.txt", b"caf\xe9 au lait")), Err(Unread::NotText));
+        assert_eq!(read_text(&write("cut.txt", b"caf\xc3")), Err(Unread::NotText), "a character cut off by the end of the file");
+        // Nothing is read past the limit, and what is no regular file is not opened.
+        let at_limit = write("limit.txt", &[b'a'; 1000]);
+        assert_eq!(read_text_up_to(&at_limit, 1000).map(|text| text.len()), Ok(1000));
+        assert_eq!(read_text_up_to(&at_limit, 999), Err(Unread::TooLong));
+        assert_eq!(read_text(&dir), Err(Unread::NotAFile));
+        assert_eq!(read_text(&dir.join("missing.txt")), Err(Unread::Failed));
+        if cfg!(unix) {
+            for device in ["/dev/zero", "/dev/null", "/dev/urandom"] {
+                assert_eq!(read_text(Path::new(device)), Err(Unread::NotAFile), "{device}");
+            }
+        }
+        // A file a macro is given: too long to read counts as a doc test, no text does not.
+        assert!(!file_has_doc_test(&dir.join("zeros.bin"), true, false));
+        assert!(file_has_doc_test(&dir.join("plain.md"), true, false));
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn every_library_is_read_whatever_the_number_of_threads() {
+        let dir = scratch("threads");
+        let workspace = std::fs::canonicalize(&dir).unwrap();
+        let libraries: Vec<Library> = (0..40)
+            .map(|i| {
+                let package = dir.join(format!("p{i}"));
+                std::fs::create_dir_all(package.join("src")).unwrap();
+                // Every third library has a doc test.
+                let source = if i % 3 == 0 { "/// ```\n/// assert!(true);\n/// ```\npub fn f() {}\n" } else { "/// Plain.\npub fn f() {}\n" };
+                std::fs::write(package.join("src").join("lib.rs"), source).unwrap();
+                Library {
+                    name: format!("p{i}"),
+                    crate_name: format!("p{i}"),
+                    root: package.join("src").join("lib.rs"),
+                    dir: package,
+                    writers: Vec::new(),
+                    external_writers: Vec::new(),
+                }
+            })
+            .collect();
+        let read = read_libraries(&libraries, &workspace, false);
+        let names: Vec<&str> = read.iter().map(|(library, _)| library.name.as_str()).collect();
+        assert_eq!(names, libraries.iter().map(|library| library.name.as_str()).collect::<Vec<_>>(), "in the libraries' order");
+        for (i, (_, files)) in read.iter().enumerate() {
+            assert_eq!(files.iter().any(|f| f.test), i % 3 == 0, "library {i}");
+        }
+        std::fs::remove_dir_all(&dir).unwrap();
     }
 
     #[test]
