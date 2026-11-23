@@ -32,7 +32,6 @@ const SOLIDCRAFT_FIXES: &[&str] = &[
     "fillet_chamfer_cone_on_arc",
     "proto_vertex_miss_is_false",
     "revolve_analytic_profile_faces",
-    "offset_analytic_mate_edges",
     "uv_trim_corner_end_points_only",
     "bspline_trim_preserves_uv_spans",
     "new_edge_vertex_tolerance_covers_gap",

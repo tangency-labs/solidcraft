@@ -166,10 +166,9 @@
 //!   line as the [`Curve`] itself, so `GetDegree` / `IsLine` / `IsArc` / `Evaluate`
 //!   dispatch on an `SmLine` (or other analytic) centre line as upstream does
 //!   (`SmFilletStandardSolver.cpp:3353-3384`).
-//! - **Opt-in fork fix.** With `Kernel::fixes.offset_analytic_mate_edges` (WR-495),
-//!   `mate_edges` runs the SolidCraft fork's exact-piece swap (tangency-labs/smlib@fddc366
-//!   with @98ab1b0) between the marched intersection and its trimming; off, it is
-//!   upstream's. `exact_piece` counts the whole turns it moves a conic angle by and
+//! - **Exact analytic mates (WR-495).** `mate_edges` runs the SolidCraft fork's
+//!   exact-piece swap (tangency-labs/smlib@fddc366 with @98ab1b0) between the marched
+//!   intersection and its trimming; upstream keeps the marched pieces. `exact_piece` counts the whole turns it moves a conic angle by and
 //!   returns [`SolidError::NotConverged`] past `MAX_EXACT_PIECE_TURNS` (65536), where
 //!   the fork's loop would not end for a non-finite or huge angle.
 //! - **Opt-in fork fix.** With `Kernel::fixes.shell_edges_on_analytics_exact` (WR-545),
@@ -763,7 +762,7 @@ pub trait OffsetExecutive<O> {
         base: O,
     ) -> Result<(O, Extent2d)>;
     /// The margin the analytic copy of `base` is extended by for the exact mate
-    /// (`Kernel::fixes.offset_analytic_mate_edges`): the one its extension
+    /// (WR-495): the one its extension
     /// ([`Self::get_create_extended_surface`]) is made with, so the copy holds every piece
     /// marched on that extension. The default is `upstream`, the fork's five offset
     /// distances (an implementation compared against it keeps it); the executive's
@@ -1749,7 +1748,7 @@ fn smos_min(a: f64, b: f64) -> f64 {
 }
 
 /// The fork's `sm_CreateAnalyticExtension` (tangency-labs/smlib@fddc366 with
-/// @98ab1b0, behind [`crate::kernel::UpstreamFixes::offset_analytic_mate_edges`]): a
+/// @98ab1b0, WR-495): a
 /// plane, cylinder, cone, sphere or torus copied and extended as itself where the
 /// offset's extended surfaces (`GetCreateExtendedSurface`, tangent (G1R) B-spline
 /// extensions) still are that surface: a plane all round, a cylinder or cone along its
@@ -2293,8 +2292,64 @@ fn curve_lies_on(
     Ok(true)
 }
 
-/// The fork's `sm_ExactPiece` (tangency-labs/smlib@fddc366, behind
-/// [`crate::kernel::UpstreamFixes::offset_analytic_mate_edges`]): the exact line or
+/// Whether `c` is a line or a conic, the kinds [`exact_piece`] gives (`IsKindOf(SmLine_TYPE)`
+/// or `IsKindOf(SmEllipse_TYPE)`).
+fn is_exact_kind(c: &Curve) -> bool {
+    matches!(c.kind(), CurveKind::Line(_) | CurveKind::Ellipse(_))
+}
+
+/// Not upstream (#18922): the UV box, on one surface, of the UV curves of the pieces of an
+/// intersection that [`exact_piece`] may replace (neither a line nor a conic): the union of
+/// their certified boxes ([`Curve::certified_bounding_box`]). `None` when there is no such
+/// piece, or a piece has no UV curve or no certified box.
+fn marched_uv_box(k: &Kernel, curves: &[Curve], uv: &[Option<Curve>]) -> Result<Option<Extent2d>> {
+    let mut out: Option<Extent2d> = None;
+    for (c, uv) in curves.iter().zip(uv) {
+        if is_exact_kind(c) {
+            continue;
+        }
+        let Some(uv) = uv else {
+            return Ok(None);
+        };
+        let Some(b) = uv.certified_bounding_box(k, &uv.natural_interval())? else {
+            return Ok(None);
+        };
+        let b = Extent2d::from_points(
+            Point2::new(b.min_at(0), b.min_at(1)),
+            Point2::new(b.max_at(0), b.max_at(1)),
+        );
+        out = Some(match out {
+            Some(o) => o.union(&b),
+            None => b,
+        });
+    }
+    Ok(out)
+}
+
+/// A plane `surface` cut to `domain` (its natural domain is its analytic one): its NURB,
+/// whose box sizes `IntersectWithPlane`'s line, spans `domain` only. Any other surface is
+/// left as it is.
+fn cut_plane_to(k: &Kernel, surface: &mut Surface, domain: &Extent2d) -> Result<()> {
+    if surface.type_code() == PLANE_TYPE {
+        surface.adjust_step_uv_domain(k, domain)?;
+    }
+    Ok(())
+}
+
+/// Not upstream (#18922): where [`exact_piece`]'s candidates are sought on an analytic copy:
+/// the marched pieces' UV box `marched` grown by a quarter of its larger side each way (the
+/// ends of a piece well inside), within the copy's `domain`. A candidate need only run
+/// through a piece's start, middle and end, which lie in `marched`; a line or conic built
+/// over this box is exact to the box's size times the rounding unit, not the domain's.
+/// `None` when the two are apart (no candidate).
+fn exact_search_domain(marched: &Extent2d, domain: &Extent2d) -> Option<Extent2d> {
+    let mut grown = *marched;
+    let reach = 0.25 * marched.max_dimension();
+    grown.expand_absolute(reach);
+    domain.intersect(&grown).ok()
+}
+
+/// The fork's `sm_ExactPiece` (tangency-labs/smlib@fddc366, WR-495): the exact line or
 /// conic of `exact` that `marched` (a marched intersection piece) approximates, as a
 /// copy over the same span: from `marched`'s start point to its end point, the way
 /// round through its middle (all of a closed conic for a closed piece). `None` when no
@@ -6212,8 +6267,8 @@ impl OffsetGeometryCreation {
     /// A disappearing periodic seam instead requires the unique branch incident
     /// to its already mated opposite boundary; midpoint distance does not select it.
     ///
-    /// With [`crate::kernel::UpstreamFixes::offset_analytic_mate_edges`] (the SolidCraft
-    /// fork's tangency-labs/smlib@fddc366 and @98ab1b0), each marched intersection
+    /// Not upstream (WR-495, the SolidCraft fork's tangency-labs/smlib@fddc366 and
+    /// @98ab1b0): each marched intersection
     /// piece that lies on an exact line or conic of analytic copies of the two face
     /// surfaces is first replaced by that curve, with UV curves dropped from it.
     ///
@@ -6369,76 +6424,93 @@ impl OffsetGeometryCreation {
             }
         })?;
 
-        // `Kernel::fixes.offset_analytic_mate_edges` (tangency-labs/smlib@fddc366 and
-        // @98ab1b0, #1453/#1130): two analytic surfaces meet on lines and conics. The
-        // marched intersection of their B-spline extensions gives the pieces (bounded by
-        // the extended domains and seams) and their UV curves; each piece that lies on
-        // both extended surfaces as the exact curve between the same ends (within the
-        // analytic surfaces, not on a tangent extension) is replaced by that curve, its
-        // UV curves dropped from it.
-        if k.fixes.offset_analytic_mate_edges {
-            let upstream = self.offset_distance().abs() * 5.0;
-            let margin1 = executive.analytic_extension_margin(surf1, upstream);
-            let margin2 = executive.analytic_extension_margin(surf2, upstream);
-            let analytic1 = create_analytic_extension(k, surface_of(brep, surf1)?, margin1)?;
-            let analytic2 = create_analytic_extension(k, surface_of(brep, surf2)?, margin2)?;
-            if let (Some(analytic1), Some(analytic2)) = (&analytic1, &analytic2) {
-                if !ssi.curves_3d.is_empty() {
-                    let exact = analytic1.global_surface_intersect(
-                        k,
-                        &analytic1.natural_uv_domain_with_nurb(k)?,
-                        analytic2,
-                        &analytic2.natural_uv_domain_with_nurb(k)?,
-                        use_surface_edges,
-                        Some(ssi_tol),
-                        Some(deg20_rad),
-                    )?;
-                    let tol = brep.brep_tolerance(edge)?;
-                    for ii in 0..ssi.curves_3d.len() {
-                        let marched = ssi.curves_3d.get(ii).ok_or(dangling("curve index"))?;
-                        if marched.is_degenerate(k, EFF_ZERO, None)? {
-                            continue;
-                        }
-                        let Some(piece) = exact_piece(k, marched, &exact.curves_3d, tol)? else {
-                            continue;
+        // Not upstream (WR-495; tangency-labs/smlib@fddc366 and @98ab1b0, #1453/#1130):
+        // two analytic surfaces meet on lines and conics. The marched intersection of
+        // their B-spline extensions gives the pieces (bounded by the extended domains and
+        // seams) and their UV curves; each piece that lies on both extended surfaces as
+        // the exact curve between the same ends (within the analytic surfaces, not on a
+        // tangent extension) is replaced by that curve, its UV curves dropped from it.
+        let upstream = self.offset_distance().abs() * 5.0;
+        let margin1 = executive.analytic_extension_margin(surf1, upstream);
+        let margin2 = executive.analytic_extension_margin(surf2, upstream);
+        let analytic1 = create_analytic_extension(k, surface_of(brep, surf1)?, margin1)?;
+        let analytic2 = create_analytic_extension(k, surface_of(brep, surf2)?, margin2)?;
+        // Not upstream (#18922): the pieces that are already lines or conics (the exact
+        // curves `clip_exact_curves_with_context` cut) keep their curves, and the exact
+        // curves are sought only over the box of the marched pieces' UV curves on each
+        // surface (`exact_search_domain`), a plane's copy cut to that box. A plane's copy
+        // is as large as its surface's domain, which for a face given a new plane is
+        // essentially infinite (`SM_INFINITE_PARAMETER`, 1.2e6): `IntersectWithPlane`
+        // sizes its line by the planes' boxes, and the line's ends, that far along its
+        // unit direction, are off the two planes by that size times the direction's
+        // rounding (3.4e-11 in `a_tilted_box_top_meets_its_sides_at_the_exact_plane_meets`)
+        // where the marched piece is on both to 1e-15.
+        let marched_uv = [
+            marched_uv_box(k, &ssi.curves_3d, &ssi.surface1_uv_curves)?,
+            marched_uv_box(k, &ssi.curves_3d, &ssi.surface2_uv_curves)?,
+        ];
+        if let (Some(mut analytic1), Some(mut analytic2), [Some(box1), Some(box2)]) =
+            (analytic1, analytic2, marched_uv)
+        {
+            let search1 = exact_search_domain(&box1, &analytic1.natural_uv_domain_with_nurb(k)?);
+            let search2 = exact_search_domain(&box2, &analytic2.natural_uv_domain_with_nurb(k)?);
+            if let (Some(search1), Some(search2)) = (search1, search2) {
+                cut_plane_to(k, &mut analytic1, &search1)?;
+                cut_plane_to(k, &mut analytic2, &search2)?;
+                let exact = analytic1.global_surface_intersect(
+                    k,
+                    &search1,
+                    &analytic2,
+                    &search2,
+                    use_surface_edges,
+                    Some(ssi_tol),
+                    Some(deg20_rad),
+                )?;
+                let tol = brep.brep_tolerance(edge)?;
+                for ii in 0..ssi.curves_3d.len() {
+                    let marched = ssi.curves_3d.get(ii).ok_or(dangling("curve index"))?;
+                    if is_exact_kind(marched) || marched.is_degenerate(k, EFF_ZERO, None)? {
+                        continue;
+                    }
+                    let Some(piece) = exact_piece(k, marched, &exact.curves_3d, tol)? else {
+                        continue;
+                    };
+                    let piece = Curve::from(piece);
+                    let mut uv: [Option<Curve>; 2] = [None, None];
+                    for (i_surf, slot) in uv.iter_mut().enumerate() {
+                        let (ext, dom) = if i_surf == 0 {
+                            (&s1, &domain1)
+                        } else {
+                            (other, &domain2)
                         };
-                        let piece = Curve::from(piece);
-                        let mut uv: [Option<Curve>; 2] = [None, None];
-                        for (i_surf, slot) in uv.iter_mut().enumerate() {
-                            let (ext, dom) = if i_surf == 0 {
-                                (&s1, &domain1)
-                            } else {
-                                (other, &domain2)
-                            };
-                            let dropped = ext.drop_curve::<NoObject>(
-                                k,
-                                dom,
-                                &piece,
-                                &piece.natural_interval(),
-                                ssi_tol,
-                                true,
-                                None,
-                                true,
-                            )?;
-                            if dropped.uv_curves.len() == 1 && dropped.max_drop_to_surf <= tol {
-                                *slot = dropped.uv_curves.into_iter().next();
-                            }
+                        let dropped = ext.drop_curve::<NoObject>(
+                            k,
+                            dom,
+                            &piece,
+                            &piece.natural_interval(),
+                            ssi_tol,
+                            true,
+                            None,
+                            true,
+                        )?;
+                        if dropped.uv_curves.len() == 1 && dropped.max_drop_to_surf <= tol {
+                            *slot = dropped.uv_curves.into_iter().next();
                         }
-                        let [Some(uv1), Some(uv2)] = uv else {
-                            // The piece leaves an extended surface where it is a tangent
-                            // (G1R) extension, not the analytic surface: there the marched
-                            // piece is these surfaces' intersection.
-                            continue;
-                        };
-                        if let Some(c) = ssi.curves_3d.get_mut(ii) {
-                            *c = piece;
-                        }
-                        if let Some(c) = ssi.surface1_uv_curves.get_mut(ii) {
-                            *c = Some(uv1);
-                        }
-                        if let Some(c) = ssi.surface2_uv_curves.get_mut(ii) {
-                            *c = Some(uv2);
-                        }
+                    }
+                    let [Some(uv1), Some(uv2)] = uv else {
+                        // The piece leaves an extended surface where it is a tangent
+                        // (G1R) extension, not the analytic surface: there the marched
+                        // piece is these surfaces' intersection.
+                        continue;
+                    };
+                    if let Some(c) = ssi.curves_3d.get_mut(ii) {
+                        *c = piece;
+                    }
+                    if let Some(c) = ssi.surface1_uv_curves.get_mut(ii) {
+                        *c = Some(uv1);
+                    }
+                    if let Some(c) = ssi.surface2_uv_curves.get_mut(ii) {
+                        *c = Some(uv2);
                     }
                 }
             }
