@@ -34,7 +34,9 @@ use crate::blend::fillet_executive::session::ball_regular::{
 };
 use crate::blend::fillet_executive::session::SolverObject;
 use crate::blend::fillet_executive::FitKind;
-use crate::blend::fillet_solver::p1::{test_manifold_tangent_rollover, FilletSolverType};
+use crate::blend::fillet_solver::p1::{
+    test_manifold_tangent_rollover, FilletSolverType, SeamDomain,
+};
 use crate::error::{Result, SolidError};
 use crate::geom::extent2d::Extent2d;
 use crate::geom::global_solver::SolverOperation;
@@ -513,7 +515,8 @@ fn rolls_through(
         return Ok(None); // no single ball
     }
     let contact = (|| -> Result<Option<Point3>> {
-        let Some(pnt) = ball_section_at(k, target, solver, &curve, t, None)? else {
+        let Some(pnt) = ball_section_at(k, target, solver, &curve, t, None, SeamDomain::Wrapped)?
+        else {
             return Ok(None);
         };
         let Some(slot) = solver.base().surface(rail)? else {
@@ -594,7 +597,16 @@ pub fn bands_meet_at(
         let _ = set_ball_radius(this, rho);
         let _ = set_ball_radius(other, rho);
         let result = (|| -> Result<SectionThrough> {
-            let Some(pnt) = ball_section_at(k, target, this, &curve, t, near.as_ref())? else {
+            let Some(pnt) = ball_section_at(
+                k,
+                target,
+                this,
+                &curve,
+                t,
+                near.as_ref(),
+                SeamDomain::Wrapped,
+            )?
+            else {
                 return Ok((None, None));
             };
             let q = this

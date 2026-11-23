@@ -27,8 +27,7 @@
 use solidcore::blend::feature_executive::{FeatureExecutive, KeptFeature, RebuildBrepType};
 use solidcore::error::defeature::DefeatureFailure;
 use solidcore::error::{Reason, SM_ERR};
-use solidcore::geom::attribute::{AttributeStore, ObjectKey};
-use solidcore::geom::object::ObjectRef;
+use solidcore::geom::attribute::AttributeStore;
 use solidcore::mass::enclosure::enclose_volume;
 use solidcore::surface::implicit::AnalyticSupport;
 use solidcore::topology::brep::p1 as bp1;
@@ -55,10 +54,7 @@ fn read(k: &mut Kernel, file: &str) -> Option<Brep> {
     let mut b = Brep::new_with_infinite_region().unwrap();
     let mut records = NotifyRecords::new();
     let mut attributes = AttributeStore::default();
-    let key = |_: EntityRef| ObjectRef {
-        key: ObjectKey(0),
-        type_code: 0,
-    };
+    let key = solidcore::topology::loopuse::notify_ref;
     let mut env = TopologyEnv {
         all_attributes: &[],
         attributes: &mut attributes,
@@ -223,6 +219,21 @@ fn a_feature_per_fillet_of_fillet1019_takes_off_the_bottom_fillet() {
     };
     certify(&mut k, &mut b, Removed::Bottom);
     certify_feature(&mut k, features, Removed::Bottom);
+}
+
+/// The three rounds as one feature, the base rebuilt by extending its surfaces and the
+/// feature from the other B-rep (the goldens' `fillet_group_fillet1019_rb23`): the base is
+/// the plain frustum ([`certify`]: on the bottom, the top and the four walls only, holding
+/// the frustum's volume) and the feature B-rep the three rounds' gaps as one solid
+/// ([`certify_feature`]).
+#[test]
+fn the_three_rounds_of_fillet1019_as_one_feature_leave_the_frustum() {
+    let mut k = Kernel::default();
+    let Some((mut b, features)) = defeatured(&mut k, &[&[3, 6, 8]], &[true]) else {
+        return;
+    };
+    certify(&mut k, &mut b, Removed::All);
+    certify_feature(&mut k, features, Removed::All);
 }
 
 #[test]
@@ -623,6 +634,8 @@ struct Expected {
     without_top: I,
     gap_bottom: I,
     gap_top: I,
+    frustum: I,
+    gap_all: I,
 }
 
 fn expected(m: &Model, n: usize) -> Expected {
@@ -643,6 +656,8 @@ fn expected(m: &Model, n: usize) -> Expected {
         without_top: v_f - v3 - v6 + v36,
         gap_bottom: v3 - v36,
         gap_top: v8 - v68,
+        frustum: v_f,
+        gap_all: v3 + v6 + v8 - v36 - v68,
     }
 }
 
@@ -831,6 +846,8 @@ fn match_supports(k: &Kernel, b: &Brep, named: &[(&'static str, Sup)]) -> Vec<(&
 enum Removed {
     Bottom,
     Top,
+    /// All three rounds, as one feature: the base is the plain frustum.
+    All,
 }
 
 /// The surfaces bound (the faces' bound, [`bound`]) holds for points within `R0` = 50 of the
@@ -986,6 +1003,17 @@ fn certify(k: &mut Kernel, b: &mut Brep, removed: Removed) {
             ],
             e.without_top,
         ),
+        Removed::All => (
+            &[
+                ("bottom", 2),
+                ("top", 2),
+                ("wall x-", 2),
+                ("wall x+", 1),
+                ("wall y-", 2),
+                ("wall y+", 3),
+            ],
+            e.frustum,
+        ),
     };
     let what = format!("{removed:?} base");
     let built_delta = sound_on_model(k, b, &named, names, &what);
@@ -1030,6 +1058,19 @@ fn certify_feature(k: &mut Kernel, features: Vec<Option<Brep>>, removed: Removed
                 ("corner round", 1),
             ],
             e.gap_top,
+        ),
+        Removed::All => (
+            &[
+                ("bottom round", 1),
+                ("top round", 1),
+                ("corner round", 1),
+                ("bottom", 1),
+                ("top", 1),
+                ("wall x-", 1),
+                ("wall y-", 1),
+                ("wall y+", 2),
+            ],
+            e.gap_all,
         ),
     };
     let what = format!("{removed:?} feature");

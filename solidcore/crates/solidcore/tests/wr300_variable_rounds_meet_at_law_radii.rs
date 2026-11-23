@@ -24,6 +24,8 @@
     clippy::indexing_slicing
 )]
 
+#[path = "support/volume_leak.rs"]
+mod volume_leak;
 use solidcore::blend::fillet_executive::api::variable_radius_fillet;
 use solidcore::geom::attribute::{AttributeStore, ObjectKey};
 use solidcore::mass::integrator::properties::{brep_volume, PropertyAttributes};
@@ -340,9 +342,15 @@ fn the_sm_api_case_meets_at_the_laws_closed_forms_on_the_default_kernel() {
 /// corner round's arc (SolidCraft ladder 07-fillets/012). The result's volume and whether it
 /// is a manifold solid, or the executive's error code.
 fn round_into_a_rounded_corner(r0: f64, r1: f64, turned: bool) -> Result<(f64, bool), i32> {
+    use solidcore::topology::brep::p2::is_manifold_solid;
+    let (k, mut b) = rounded_corner(r0, r1, turned)?;
+    Ok((volume(&k, &mut b), is_manifold_solid(&b).unwrap()))
+}
+
+/// [`round_into_a_rounded_corner`]'s kernel and body.
+fn rounded_corner(r0: f64, r1: f64, turned: bool) -> Result<(Kernel, Brep), i32> {
     use solidcore::blend::fillet_executive::session::FilletSession;
     use solidcore::blend::fillet_standard_solver::p1::FilletLaw;
-    use solidcore::topology::brep::p2::is_manifold_solid;
     use solidcore::topology::brep::p5::{stitch_and_orient, StitchAndOrientOptions};
     use solidcore::topology::proto_topology::p1::api_transform::{api_rotate, TransformObject};
     let mut k = Kernel::default();
@@ -403,7 +411,7 @@ fn round_into_a_rounded_corner(r0: f64, r1: f64, turned: bool) -> Result<(f64, b
     };
     result?;
     stitch_and_orient(&mut k, &mut b, &StitchAndOrientOptions::default()).unwrap();
-    Ok((volume(&k, &mut b), is_manifold_solid(&b).unwrap()))
+    Ok((k, b))
 }
 
 /// The retry rail search at a corner that is not calculated as constant radius (the corner
@@ -429,16 +437,23 @@ fn retry_rail_search_holds_the_radius_as_the_first_does() {
         turned.0,
         forward.0
     );
-    // the laws that do not reach the retry, against main's volumes
-    for (r0, r1, main) in [
-        (5.0, 1.0, 47_770.705_747_225_77),
-        (5.0, 2.0, 47_737.958_806_965_48),
+    // the laws that do not reach the retry, against main's volumes (`was`: before
+    // `brep_volume` closed tolerant edges' gaps, #16735). The new values are MEASURED: no
+    // closed form; each move is checked within the old integrator's leak bound, itself a
+    // sampled estimate (the gaps at the closure's grid), not an enclosure
+    for (r0, r1, main, was) in [
+        (5.0, 1.0, 47_770.705_655_919_395, 47_770.705_747_225_77),
+        (5.0, 2.0, 47_737.958_709_705_846, 47_737.958_806_965_48),
     ] {
         let (v, manifold) = round_into_a_rounded_corner(r0, r1, false).unwrap();
         assert!(
             manifold && (v - main).abs() < 1e-9 * main,
-            "{r0} -> {r1}: {v} against {main}"
+            "{r0} -> {r1}: {v:.17} against {main}"
         );
+        if was != main {
+            let (k, mut b) = rounded_corner(r0, r1, false).unwrap();
+            volume_leak::assert_moved_by_the_old_leak(&k, &mut b, was, main, 1e-8);
+        }
     }
 }
 

@@ -453,6 +453,9 @@ fn metric_size(major_diameter: f64, pitch: f64) -> TappedThread {
     }
 }
 
+/// The rule an ISO metric tapped hole's tolerance class follows (ISO 965-1's internal classes).
+const METRIC_CLASS: &str = "an ISO metric tapped hole's class is a grade 4 to 8 and G or H, such as 6H, or a pitch diameter class then a minor diameter class such as 5H6H (ISO 965-1)";
+
 /// How much larger than the tap maker's drill a tapped hole may be drilled: 5%.
 pub const DRILL_ALLOWANCE: f64 = 0.05;
 
@@ -483,6 +486,29 @@ impl TappedThread {
     /// [`DRILL_ALLOWANCE`] over the tap maker's drill.
     pub fn drill_range(&self) -> (f64, f64) {
         (self.minor_diameter().min(self.tap_drill), self.tap_drill * (1.0 + DRILL_ALLOWANCE))
+    }
+
+    /// Whether a tapped hole of this size takes `class` as its tolerance class, as written: ISO 965-1's
+    /// internal classes for ISO metric (a grade 4 to 8 and position G or H, `6H`; a pitch-diameter
+    /// class then a minor-diameter class of the same position and another grade, `5H6H`), ASME
+    /// B1.1's `1B`, `2B` and `3B` for Unified. G (ISO 228-1 gives an internal G thread one
+    /// tolerance), Rp and Rc (ISO 7-1) and NPT (ASME B1.20.1) take none. The error names the rule.
+    pub fn check_class(&self, class: &str) -> Result<(), String> {
+        // A grade and a position: the slice patterns below match two or four bytes only, so a
+        // hostile string is refused by its length, never scanned.
+        let metric = |grade: u8, position: u8| (b'4'..=b'8').contains(&grade) && matches!(position, b'G' | b'H');
+        match self.family {
+            TappedThreadFamily::Metric => match *class.as_bytes() {
+                [g, p] if metric(g, p) => Ok(()),
+                [g1, p1, g2, p2] if metric(g1, p1) && metric(g2, p2) && p1 == p2 && g1 != g2 => Ok(()),
+                _ => Err(METRIC_CLASS.into()),
+            },
+            TappedThreadFamily::Unc | TappedThreadFamily::Unf if matches!(class, "1B" | "2B" | "3B") => Ok(()),
+            TappedThreadFamily::Unc | TappedThreadFamily::Unf => Err("a Unified tapped hole's class is 1B, 2B or 3B (ASME B1.1)".into()),
+            TappedThreadFamily::G | TappedThreadFamily::Rp | TappedThreadFamily::Rc | TappedThreadFamily::Npt => {
+                Err(format!("a {} tapped hole has no tolerance class", self.designation))
+            }
+        }
     }
 
     /// Whether a hole of `diameter` mm can be tapped to this size; the error names the range.
@@ -701,6 +727,39 @@ mod tests {
         assert_eq!(fine.major_diameter, 4.826);
         assert_eq!(fine.pitch, 25.4 / 32.0);
         assert_eq!(fine.tap_drill, 4.0386);
+    }
+
+    /// A tapped hole's tolerance class follows its thread's standard: ISO 965-1's internal classes
+    /// (grade 4 to 8, position G or H; a pitch-diameter class then a different minor-diameter one of
+    /// the same position) for ISO metric, ASME B1.1's 1B, 2B and 3B for Unified, and none for the
+    /// pipe threads, whose internal threads have no class.
+    #[test]
+    fn a_tapped_holes_class_follows_its_threads_standard() {
+        let m8 = parse_tapped_thread("M8").unwrap();
+        for class in ["6H", "5H", "7H", "4H", "8H", "6G", "7G", "5H6H", "4H5H", "7G6G"] {
+            assert_eq!(m8.check_class(class), Ok(()), "{class}");
+        }
+        for class in ["6h", "6g", "9H", "3H", "6E", "H6", "6H6H", "5H6G", "2B", "", "6H ", "66", "6HH"] {
+            let e = m8.check_class(class).unwrap_err();
+            assert!(e.contains("an ISO metric tapped hole's class is"), "{class}: {e}");
+        }
+        assert!(m8.check_class(&"6".repeat(5000)).is_err(), "a hostile length is refused before it is read");
+        for name in ["1/4-20 UNC", "#10-32 UNF"] {
+            let unified = parse_tapped_thread(name).unwrap();
+            for class in ["1B", "2B", "3B"] {
+                assert_eq!(unified.check_class(class), Ok(()), "{name} {class}");
+            }
+            for class in ["2A", "2b", "4B", "6H", "2BB"] {
+                assert!(unified.check_class(class).unwrap_err().contains("a Unified tapped hole's class is 1B, 2B or 3B"), "{name} {class}");
+            }
+        }
+        for name in ["G 1/4", "Rp 1/4", "Rc 1/4", "1/4-18 NPT"] {
+            let pipe = parse_tapped_thread(name).unwrap();
+            for class in ["6H", "2B", "A"] {
+                let e = pipe.check_class(class).unwrap_err();
+                assert!(e.contains(&format!("a {} tapped hole has no tolerance class", pipe.designation)), "{name} {class}: {e}");
+            }
+        }
     }
 
     #[test]

@@ -116,6 +116,7 @@
 use crate::curve::curve::p2::Curve;
 use crate::curve::ellipse::{Ellipse, EllipseOptions};
 use crate::curve::line::Line;
+use crate::error::surface::SurfaceFailure;
 use crate::error::{ignored, Result, SolidError};
 use crate::geom::extent1d::Extent1d;
 use crate::geom::extent2d::Extent2d;
@@ -136,7 +137,7 @@ use crate::surface::cone::Cone;
 use crate::surface::plane::p1::Plane;
 use crate::surface::surface::p2::Surface;
 use crate::surface::volume::p1::{
-    concat_evals_opt_in, is_kind_of as volume_is_kind_of, EvalOptions, Volume, VolumeKind,
+    concat_evals, is_kind_of as volume_is_kind_of, EvalOptions, Volume, VolumeKind,
 };
 use crate::surface::volume::p2::ignore_read;
 use crate::topology::database_io::{DatabaseReader, DatabaseWriter, FileType};
@@ -445,12 +446,7 @@ impl BendVolume {
                 };
                 let next_derivs = next.map(position, n, &map_opts)?;
                 // Concatenate Evaluate(ParamPoint) = Next(Mid(ParamPoint))
-                concat_evals_opt_in(
-                    n,
-                    &d,
-                    &next_derivs,
-                    opts.fixes.volume_lift_third_derivative_terms,
-                )
+                concat_evals(n, &d, &next_derivs)
             }
             _ => Ok(d),
         }
@@ -785,15 +781,19 @@ impl BendVolume {
             || self.bend_neutral_dist.is_nan()
             || self.singularity_tol.is_nan();
         let degenerate_inf_v = v_min == v_max && !v_min.is_finite();
-        if has_nan
-            || degenerate_inf_v
-            || param_box.has_negative_volume()
-            || u_max < self.singularity_tol
-        {
+        let malformed = has_nan || degenerate_inf_v || param_box.has_negative_volume();
+        if malformed || u_max < self.singularity_tol {
             trim_box.init();
-            return Err(SolidError::surface_failed(
+            return Err(SolidError::surface(
                 OP_TRIM,
-                "the box is degenerate or outside the bend's half space",
+                if malformed {
+                    SurfaceFailure::BendBoxMalformed
+                } else {
+                    SurfaceFailure::BoxOutsideBendHalfSpace {
+                        u_max,
+                        limit: self.singularity_tol,
+                    }
+                },
             ));
         }
         if u_min < self.singularity_tol {
@@ -804,9 +804,9 @@ impl BendVolume {
         if half_period == 0.0 {
             if v_max < -EFF_ZERO || v_min > EFF_ZERO {
                 trim_box.init();
-                return Err(SolidError::surface_failed(
+                return Err(SolidError::surface(
                     OP_TRIM,
-                    "the box is outside the bend's zero period",
+                    SurfaceFailure::BoxOutsideZeroPeriod { v_min, v_max },
                 ));
             }
             v_min = 0.0;

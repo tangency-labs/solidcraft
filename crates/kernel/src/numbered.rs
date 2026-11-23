@@ -1,6 +1,7 @@
 //! Profile loops whose segments carry the profile segments they come from, through every way the
-//! builders reshape a loop before building (turning it round, re-seaming a circle, re-splitting
-//! it to match another section). [`FaceOrigin::Profile`](crate::history::FaceOrigin::Profile)
+//! builders reshape a loop before building (turning it round, re-seaming a circle, matching it to
+//! another section, or re-splitting it to match another section when the matching would make
+//! too many segments). [`FaceOrigin::Profile`](crate::history::FaceOrigin::Profile)
 //! numbers are defined here: the segments of the caller's regions in order, each region its outer
 //! loop and then its holes ([`profile_loops`]).
 
@@ -121,6 +122,16 @@ impl NumberedLoop {
             out.split_half(k);
         }
         out
+    }
+
+    /// The loop as matched for a loft (`solidcore_ops::sweep::match_loft_sections`): `segs`, each
+    /// over the numbers of the segments of this loop `from` names.
+    pub(crate) fn matched(&self, segs: Vec<Seg2>, from: &[Vec<usize>]) -> NumberedLoop {
+        let from = from
+            .iter()
+            .map(|ix| if let [i] = ix.as_slice() { self.numbers(*i).to_vec() } else { union(ix.iter().map(|i| self.numbers(*i))) })
+            .collect();
+        NumberedLoop { lp: Loop2 { segs }, from }
     }
 
     /// Each run of lines that `joins` says continue one another as a single line, over what

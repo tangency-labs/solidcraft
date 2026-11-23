@@ -434,9 +434,8 @@ fn two_offset_chamfer_completes_and_matches_the_existing_manual_sequence() {
 
 #[test]
 fn two_offset_chamfers_honor_the_vertex_fan_fix_and_cleanup() {
-    for (per_fan, offset) in [(false, 1.0), (true, 1.0), (true, 30.0)] {
+    for offset in [1.0, 30.0] {
         let mut k = Kernel::default();
-        k.fixes.fillet_corner_per_vertex_fan = per_fan;
         let cube = create_box(&mut k, Point3::new(-10.0, -10.0, -10.0), 20.0, 20.0, 20.0).unwrap();
         let up = create_box(&mut k, Point3::ZERO, 10.0, 10.0, 10.0).unwrap();
         let down = create_box(&mut k, Point3::new(-10.0, -10.0, -10.0), 10.0, 10.0, 10.0).unwrap();
@@ -470,12 +469,9 @@ fn two_offset_chamfers_honor_the_vertex_fan_fix_and_cleanup() {
                 &[FilletSurfaceGenerator::Linear],
             )
             .unwrap();
-        assert_eq!(
-            session.executive().fan_split_points.len(),
-            usize::from(per_fan)
-        );
+        assert_eq!(session.executive().fan_split_points.len(), 1);
         let result = session.do_fillet(&mut k);
-        if per_fan && offset == 1.0 {
+        if offset == 1.0 {
             result.unwrap();
             drop(session);
             body.refresh_cached_topology();
@@ -483,12 +479,8 @@ fn two_offset_chamfers_honor_the_vertex_fan_fix_and_cleanup() {
             assert!((volume - 6010.0).abs() < 6010.0e-9);
         } else {
             assert!(result.is_err());
-            if !per_fan {
-                assert_eq!(session.error_info().code, 3);
-            }
             drop(session);
-            // Failure with the fix enabled joins the split fans again; the
-            // default path keeps the original shared vertex.
+            // A failure joins the split fans again.
             assert_eq!(
                 body.vertices()
                     .iter()

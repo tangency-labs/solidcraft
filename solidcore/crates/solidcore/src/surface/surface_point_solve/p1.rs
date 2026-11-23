@@ -67,6 +67,10 @@
 //!   output first, so the guess is always `0`. The port passes `0` explicitly.
 //! - **Control points.** An index past the control net (upstream reads past the
 //!   array) returns [`SolidError::InvalidInput`].
+//! - **Cell seeds.** [`SurfPtGlobalSolver::with_seed_net`] lets a trimmed blend's
+//!   tight-box search read its cell's control net for guesses (#18809). The
+//!   original surface still answers the objective, local solves and solution seam
+//!   and closure tests.
 //! - Debug-only drawing and `SM_ASSERT`s are compiled out of the release build and
 //!   omitted. `Dump` has no counterpart.
 
@@ -487,6 +491,16 @@ pub struct PolygonTriangleGuess {
 }
 
 impl<'s> SurfPtGlobalSolver<'s> {
+    /// Use `net` only for control-polygon guesses in this solve. Its parameters must
+    /// be the surface's parameters over the solve domain. The objective, derivatives,
+    /// local solves and solution seam and closure tests still use the original
+    /// surface (#18809).
+    #[must_use]
+    pub(crate) fn with_seed_net(mut self, net: &'s BSplineSurface) -> Self {
+        self.base.b_spline = Some(net);
+        self
+    }
+
     /// A global solver (`SmSurfPtGlobalSolver(...)`); the closure is computed on
     /// first use.
     ///
@@ -2140,6 +2154,20 @@ mod tests {
         let uv = g.refine_guess_polygon_leg(0, 0).unwrap();
         assert!((uv.x - 0.25).abs() < 1e-12 && (uv.y - 0.5).abs() < 1e-12);
         assert!(g.refine_guess_polygon_leg(5, 0).is_err());
+
+        // A different seed net may change a guess's distance, but never the
+        // objective's surface: the target remains 2 above z = 0, not z = 1.
+        let seed = BSplineSurface::create_bilinear_surface(
+            Point3::new(0.0, 0.0, 1.0),
+            Point3::new(1.0, 0.0, 1.0),
+            Point3::new(0.0, 1.0, 1.0),
+            Point3::new(1.0, 1.0, 1.0),
+        )
+        .unwrap();
+        let g = g.with_seed_net(&seed);
+        let guess = g.find_polygon_triangle_guess((1, 1)).unwrap();
+        assert!((guess.best_dist - 1.0).abs() < 1e-12);
+        assert!((g.calc_func_val(&k, Point2::new(0.25, 0.75)).unwrap() - 2.0).abs() < 1e-12);
     }
 
     #[test]

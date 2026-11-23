@@ -446,6 +446,8 @@ pub struct Button<'a> {
     pub icon: &'a str,
     pub size: ButtonSize,
     pub enabled: bool,
+    /// A planned tool may open an options panel while keeping its ribbon artwork faded.
+    pub planned: bool,
     pub pressed: bool,
     /// It leaves the mode: never shown pressed.
     pub exit: bool,
@@ -745,7 +747,7 @@ pub fn show(ui: &mut egui::Ui, row: &Row, rect: Rect, more_rows: &mut dyn FnMut(
             let side = if exit { 30.0 } else { 26.0 };
             let icon_rect =
                 Rect::from_center_size(pos2(br.center().x, whole.top() + if labels { 16.0 } else { button_height / 2.0 }), vec2(side, side));
-            crate::icons::paint_icon(&painter, icon_rect, b.icon, if b.enabled { 1.0 } else { 0.35 });
+            crate::icons::paint_icon(&painter, icon_rect, b.icon, if b.enabled && !b.planned { 1.0 } else { 0.35 });
             if !b.app_paints {
                 resp.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, ui.is_enabled() && b.enabled, b.name));
             }
@@ -786,7 +788,7 @@ pub fn show(ui: &mut egui::Ui, row: &Row, rect: Rect, more_rows: &mut dyn FnMut(
                 arrow.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, true, s.name));
                 drawn_button.split = Some(arrow);
             } else if labels {
-                let color = if b.enabled { t.text } else { t.text_dim };
+                let color = if b.enabled && !b.planned { t.text } else { t.text_dim };
                 let galley = button_galley(&painter, b.label, whole.width() - BUTTON_LABEL_PADDING, color);
                 painter.galley(pos2(whole.center().x, label_top(whole, galley.size().y)), galley, t.text);
             }
@@ -1116,6 +1118,8 @@ pub fn tabs(ui: &mut egui::Ui, row_data: &Tabs, row: Rect) -> TabsOut {
     let span = Rect::from_min_max(row.left_top() + vec2(inset, 0.0), pos2(end.max(row.left() + inset), row.bottom()));
     ui.scope_builder(egui::UiBuilder::new().max_rect(span), |ui| {
         ui.set_clip_rect(span);
+        // A plain mouse wheel scrolls the tabs sideways, as it does the History bar's strip (#3356).
+        ui.style_mut().always_scroll_the_only_direction = true;
         egui::ScrollArea::horizontal()
             .id_salt("ribbon_tabs")
             .animated(false)
@@ -1893,6 +1897,9 @@ pub struct DeferredLook {
     pub id: String,
     /// Its effect is on: drawn pressed, its label semibold.
     pub selected: bool,
+    /// With `selected`: the effect stays on after its tool closed, so it is underlined without the
+    /// pressed fill, which would read as the tool still running (#20663).
+    pub kept: bool,
     /// Its tool runs (outlined in the accent) and it keeps a focus ring while focused: the
     /// pressed presentation is on.
     pub running: bool,
@@ -1933,7 +1940,11 @@ pub fn paint_deferred(ui: &egui::Ui, items: Vec<(Deferred, DeferredLook)>, names
         let background = if look.selected {
             count += 1;
             solidcraft_ui_registry::publish_target(&format!("{namespace}:pressed:{}", look.id), paint.rect);
-            crate::persistent_button_shape(ui, &paint.response, paint.rect)
+            if look.kept {
+                egui::Shape::Vec(vec![neutral, crate::persistent_kept_shape(ui, &paint.response, paint.rect)])
+            } else {
+                crate::persistent_button_shape(ui, &paint.response, paint.rect)
+            }
         } else if paint.response.has_focus() && look.focus_ring {
             egui::Shape::Vec(vec![neutral, crate::native_button_focus(ui, &paint.response, paint.rect)])
         } else {

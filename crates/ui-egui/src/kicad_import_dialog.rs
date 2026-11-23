@@ -84,7 +84,7 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
 
                 let copper_label = ui.label(solidcraft_ui_text::tr_label("Copper (traces, vias, zones, pads)"));
                 crate::scenario::publish_rect("kicad:copper_label", copper_label.rect);
-                let modes = [(KicadCopper::None, "None"), (KicadCopper::Overlay, "Overlay on the board"), (KicadCopper::Mesh, "Modelled")];
+                let modes = [(KicadCopper::None, "None"), (KicadCopper::Overlay, "Overlay on the board"), (KicadCopper::Mesh, "Modeled")];
                 let labels: Vec<&str> = modes.iter().map(|(_, label)| *label).collect();
                 let states: Vec<bool> = modes.iter().map(|(mode, _)| dialog.copper == *mode).collect();
                 let targets: Vec<String> = modes.iter().map(|(mode, _)| format!("kicad:copper:{}", mode.as_str())).collect();
@@ -107,7 +107,7 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
                 crate::scenario::publish_handle("kicad:silkscreen", r.rect.center());
                 ui.end_row();
 
-                ui.label(solidcraft_ui_text::tr_label("Board colour"));
+                ui.label(solidcraft_ui_text::tr_label("Board color"));
                 let r = ui.color_edit_button_srgb(&mut dialog.color);
                 crate::scenario::publish_handle("kicad:color", r.rect.center());
                 ui.end_row();
@@ -227,11 +227,11 @@ mod tests {
         // A long switch label is not squeezed into a narrow column.
         let label = crate::scenario::rect_of("kicad:copper_label").expect("the copper label was drawn");
         assert!(label.width() > 150.0, "the copper label is squeezed: {label:?}");
-        for label in ["Include components", "Copper (traces, vias, zones, pads)", "None", "Overlay on the board", "Modelled", "Include silkscreen"] {
+        for label in ["Include components", "Copper (traces, vias, zones, pads)", "None", "Overlay on the board", "Modeled", "Include silkscreen"] {
             assert!(h.widget(label).is_some(), "`{label}` is missing");
         }
         h.frames(4);
-        h.step(&json!({"widget": "Modelled"})).unwrap();
+        h.step(&json!({"widget": "Modeled"})).unwrap();
         h.frames(1);
         h.step(&json!({"click": {"handle": "kicad:silkscreen"}})).unwrap();
         h.frames(1);

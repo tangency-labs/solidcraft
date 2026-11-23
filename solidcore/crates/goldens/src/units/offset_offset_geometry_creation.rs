@@ -833,6 +833,10 @@ impl Two {
     /// trim curves.
     fn put_edge_state(&self, o: &mut Vec<f64>, e: H) -> Result<(), HarnessError> {
         let b = self.brep_r(e).map_err(|e| harness(format!("{e}")))?;
+        // the edge's B-rep as this state shows it, for the tolerance certificate
+        // (`certify::trim_tolerance`)
+        #[cfg(test)]
+        crate::certify::written(b);
         let edge = b.edge(eid(e)).map_err(|e| harness(format!("{e}")))?;
         put_curve(o, edge.curve.as_ref())?;
         o.extend([edge.interval.min(), edge.interval.max(), edge.tolerance]);
@@ -4624,6 +4628,115 @@ mod tests {
                     .unwrap(),
                 tolerance
             );
+        }
+    }
+
+    /// The goldens case `name` of this unit, as the goldens run generates it.
+    fn golden_case(name: &str) -> Inputs {
+        let ctx = CaseContext {
+            root: crate::case::repo_root(),
+            seeds: 16,
+        };
+        let case = Runner
+            .cases(&ctx)
+            .unwrap()
+            .into_iter()
+            .find(|c| c.name == name)
+            .unwrap();
+        case.parse().unwrap()
+    }
+
+    /// Runs the case's script, its last `skip` ops left out: the record and the store.
+    fn run_but_last(i: &Inputs, skip: usize) -> (Vec<f64>, Two, Vec<ROp>) {
+        let mut p = prepare(i).unwrap_or_else(|_| panic!("prepare"));
+        let rest = p.ops.split_off(p.ops.len() - skip);
+        let (o, two) = run_script(i, p).unwrap_or_else(|_| panic!("script"));
+        (o, two, rest)
+    }
+
+    /// WR-673, the two rows that move (`gen0448` on `vase_rev.smb`, its second
+    /// `TrimExtendedEdge`; `gen0723` on `cone.smb`, its first). That op trims an open
+    /// edge whose 3D curve is a closed curve, and
+    /// before the fix the trim was the whole curve: from its natural start (0) to its
+    /// natural end (`main_max`, the value the row recorded). That interval runs from the
+    /// first trim point round the curve back to it ([`is_first_point_again`] holds for
+    /// it), while the base edge's two vertices are apart, more than the 10 x approx tol
+    /// that decides "the same point": the edge's two ends went to one point, the defect.
+    /// Now that second point is passed over and the trim finds none (a bad edge).
+    #[test]
+    fn wr_673_moved_rows_trimmed_an_open_edge_round_to_its_start() {
+        use solidcore::offset::offset_geometry_creation::is_first_point_again;
+        for (name, nth, main_max) in [
+            ("gen0448", 1, 91.52648008973824),
+            ("gen0723", 0, 15.30733729460359),
+        ] {
+            let mut i = golden_case(name);
+            let at = i
+                .ops
+                .iter()
+                .enumerate()
+                .filter(|(_, op)| matches!(op, OpIn::TrimExtendedEdge { .. }))
+                .nth(nth)
+                .unwrap()
+                .0;
+            i.ops.truncate(at + 1);
+            let (_, two, rest) = run_but_last(&i, 1);
+            let [ROp {
+                op: OpIn::TrimExtendedEdge { base, c3, .. },
+            }] = rest.as_slice()
+            else {
+                panic!("{name}: not a TrimExtendedEdge");
+            };
+            let k = Kernel::default();
+            let same_tol = 10.0 * OffsetGeometryCreation::new(i.dist, i.approx).this_approx_tol_3d();
+            let base = triple_to_h(*base).unwrap();
+            let edge = two.edgeuse_edge(base).unwrap().unwrap();
+            assert!(!two.edge_is_closed(edge).unwrap(), "{name}");
+            let v0 = two.edge_vertex(edge).unwrap().unwrap();
+            let v1 = two.edge_other_vertex(edge, v0).unwrap().unwrap();
+            let apart = (two.vertex_point(v0).unwrap() - two.vertex_point(v1).unwrap()).length();
+            assert!(apart > same_tol, "{name}: vertices {apart} apart");
+            let c3 = triple_to_h(*c3).unwrap();
+            assert_eq!(c3.kind, K_EDGE_CURVE, "{name}");
+            let c3 = two.edge_curve_h(c3).unwrap().unwrap();
+            let curve = ClassGeometry::curve(&two, c3).unwrap();
+            let nat = curve.natural_interval();
+            assert_eq!((nat.min(), nat.max()), (0.0, main_max), "{name}");
+            assert!(curve.is_closed(&k, &nat, same_tol).unwrap(), "{name}");
+            assert!(
+                is_first_point_again(&k, curve, nat.min(), nat.max(), same_tol).unwrap(),
+                "{name}"
+            );
+            assert!(
+                is_first_point_again(&k, curve, nat.max(), nat.min(), same_tol).unwrap(),
+                "{name}"
+            );
+            // the script through that op now: the trim finds no second point (status 0, no
+            // interval)
+            let (o, _, _) = run_but_last(&i, 0);
+            assert_eq!(o[o.len() - 3..], [11.0, 0.0, 0.0], "{name}");
+        }
+    }
+
+    /// WR-673 at the call site in `trim_extended_edge_ends`: three goldens rows whose first
+    /// `ExtendTrimEdges` (`gen0051` on `Mouse.smb`, `gen0186` on `box_with_large_fillet.smb`,
+    /// `gen0681` on `Mouse.smb`) succeeds, as before the fix. A guard that passes over every
+    /// point within 10 x approx tol of the first trim point (the fork's) drops their real
+    /// second point and refuses them (`SM_ERR`, measured): only the first point again round
+    /// a closed curve is passed over.
+    #[test]
+    fn wr_673_extend_keeps_a_second_point_near_the_first() {
+        for name in ["gen0051", "gen0186", "gen0681"] {
+            let mut i = golden_case(name);
+            let at = i
+                .ops
+                .iter()
+                .position(|op| matches!(op, OpIn::ExtendTrimEdges { .. }))
+                .unwrap();
+            i.ops.truncate(at + 1);
+            let (before, _, _) = run_but_last(&i, 1);
+            let (o, _, _) = run_but_last(&i, 0);
+            assert_eq!(o[before.len()..before.len() + 2], [12.0, 0.0], "{name}");
         }
     }
 

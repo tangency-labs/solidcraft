@@ -128,3 +128,28 @@ fn a_variable_round_is_refused_where_its_room_runs_out() {
     fillet_variable(&b, e, origin, 1, &[0.0, 0.0, 1.0, 1.0], &[9.0, 0.0]).unwrap();
     assert!(b.volume(1e-8).unwrap() < before);
 }
+
+/// [`fillet_variable_from`] does not refuse a law for its band's room: a round wider than a
+/// face is built over that face's far edge, as the kernel builds any round that overflows
+/// across a cliff. The round of 12 all along the wedge's top front edge, which
+/// [`fillet_variable`] refuses past x = 16 (the test above): where the top is at least 12 wide
+/// (x up to 16) it takes the spandrel (1 - pi/4) r^2 per unit length; past it, where the top
+/// is w = 20 (1 - x / 40) wide, it takes what lies of the spandrel within w: the strip of
+/// width w and height r less the part of the ball's disc over it,
+/// `A(w) = r w - integral over u in [0, w] of sqrt(r^2 - (u - r)^2)`, whose integral over w in
+/// [0, r] is r^3 / 6. With dx = 2 dw: 16 (1 - pi/4) r^2 + r^3 / 3 = 1070.4426315 removed, and
+/// the result is a valid solid facing out.
+#[test]
+fn a_variable_round_from_a_point_is_built_over_the_far_edge_of_a_face_it_is_wider_than() {
+    all_fixes();
+    let b = wedge();
+    let e = edge_at(&b, [20.0, 0.0, 15.0]);
+    let before = b.volume(1e-10).unwrap();
+    let r = 12.0_f64;
+    fillet_variable_from(&b, e, [0.0, 0.0, 15.0], 1, &[0.0, 0.0, 1.0, 1.0], &[r, r]).unwrap();
+    let removed = before - b.volume(1e-10).unwrap();
+    let want = 16.0 * (1.0 - std::f64::consts::FRAC_PI_4) * r * r + r * r * r / 3.0;
+    assert!(rel(removed, want) < 1e-8, "{removed} vs {want}");
+    assert!(b.check(CheckLevel::All).unwrap().is_valid());
+    assert_eq!(b.check_solid(), Ok(()));
+}
