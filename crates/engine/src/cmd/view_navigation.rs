@@ -6,12 +6,12 @@ use solidcraft_viewport::{Camera, StandardView};
 use super::CommandSpec;
 use crate::params::{bad, num, req_vec2, req_vec3, vec3};
 use crate::schema::view_navigation::{
-    AmbientOcclusionParams, AmbientOcclusionResult, CameraReply, DisplayToggleParams, DisplayToggleResult, GraphicsPreset, GraphicsPresetParams,
-    GraphicsPresetResult, HistoryDock, HistoryLayoutParams, HistoryLayoutResult, LayoutMode, LayoutParams, LayoutResult, NavigateParams,
-    NavigateResult, NavigationBarParams, NavigationBarResult, NavigationTool, NavigatorParams, NormalToParams, PerspectiveParams, PerspectiveResult,
-    PresetQuality, RenderBrowser, RenderFocus, RenderLive, RenderPanelVisibilityParams, RenderPanelVisibilityResult, RenderSelect, RibbonTabsOnly,
-    RibbonTabsOnlyParams, StandardViewParams, TabStep, TabStepParams, ToolParams, ToolResult, VisualStyle, VisualStyleParams, VisualStyleResult,
-    ZoomTool,
+    AmbientOcclusionParams, AmbientOcclusionResult, CameraReply, DisplayToggleParams, DisplayToggleResult, FitHomeParams, FitHomeResult,
+    GraphicsPreset, GraphicsPresetParams, GraphicsPresetResult, HistoryDock, HistoryLayoutParams, HistoryLayoutResult, LayoutMode, LayoutParams,
+    LayoutResult, NavigateParams, NavigateResult, NavigationBarParams, NavigationBarResult, NavigationTool, NavigatorParams, NormalToParams,
+    PerspectiveParams, PerspectiveResult, PresetQuality, RenderBrowser, RenderFocus, RenderLive, RenderPanelVisibilityParams,
+    RenderPanelVisibilityResult, RenderSelect, RenderStageParams, RenderStageResult, RibbonTabsOnly, RibbonTabsOnlyParams, StandardViewParams,
+    TabStep, TabStepParams, ToolParams, ToolResult, VisualStyle, VisualStyleParams, VisualStyleResult, ZoomTool,
 };
 use crate::schema::{TypedContract, output_schema_for};
 use crate::{Result, Sel, Session};
@@ -69,10 +69,14 @@ CommandSpec::new("view.status_items", "Viewport Status Items", crate::checked!("
     .icon("list").noundo().doc_only()
     .contract(&STATUS_ITEMS_CONTRACT).output(output_schema_for::<crate::status_items::StatusItems>)
     .params("no parameters → {items}; persistent viewport effects, oldest slot first, with structured settings and executable clear requests; read-only, no model evaluation"),
-CommandSpec::new("view.fit", "Fit", fit)
-    .icon("fit").key("F6").noundo().doc_only().any_part().params("no parameters → frame the active canvas or selection (with a drawing open, its sheet); display only"),
-CommandSpec::new("view.home", "Home View", home)
-    .icon("home").noundo().doc_only().any_part().params("no parameters → home orientation framing the active canvas (with a drawing open, its whole sheet); display only"),
+CommandSpec::new("view.fit", "Fit", crate::checked!("view.fit", fit))
+    .icon("fit").key("F6").noundo().doc_only().any_part()
+    .contract(&FIT_HOME_CONTRACT).output(output_schema_for::<FitHomeResult>)
+    .params("no parameters → frame the active canvas or selection (with a drawing open, its sheet); display only"),
+CommandSpec::new("view.home", "Home View", crate::checked!("view.home", home))
+    .icon("home").noundo().doc_only().any_part()
+    .contract(&FIT_HOME_CONTRACT).output(output_schema_for::<FitHomeResult>)
+    .params("no parameters → home orientation framing the active canvas (with a drawing open, its whole sheet); display only"),
 CommandSpec::new("view.tool", "Navigation Tool", crate::checked!("view.tool", tool))
     .icon("orbit").noundo().doc_only().any_part()
     .contract(&TOOL_CONTRACT).output(output_schema_for::<ToolResult>)
@@ -132,8 +136,9 @@ CommandSpec::new("view.render_select", "Render selection", crate::checked!("view
     .contract(&RENDER_SELECT).output(output_schema_for::<RenderSelect>)
     .icon("select").noundo().doc_only()
     .params("kind: nothing|environment|lighting|light|shot|output|wear|sampling|effects|check; id?: bounded nonempty string for light/shot → validated transient Browser focus; never edits the design or opens a dialog"),
-CommandSpec::new("view.render_stage", "Render Stage", render_stage)
+CommandSpec::new("view.render_stage", "Render Stage", crate::checked!("view.render_stage", render_stage))
     .icon("render_scene").noundo().doc_only()
+    .contract(&RENDER_STAGE_CONTRACT).output(output_schema_for::<RenderStageResult>)
     .params("stage: look|light|frame|output → {stage}; per-document UI state, never edits or evaluates the design; headless validation only"),
 CommandSpec::new("view.shots_strip", "Shots Strip", crate::checked!("view.shots_strip", shots_strip))
     .icon("camera").noundo().doc_only().contract(&RENDER_PANEL_VISIBILITY_CONTRACT).output(output_schema_for::<RenderPanelVisibilityResult>)
@@ -323,6 +328,8 @@ fn view_params(p: &Value, cmd: &str, allowed: &[&str]) -> Result<()> {
     Ok(())
 }
 
+const FIT_HOME_CONTRACT: TypedContract<FitHomeParams> = TypedContract::new();
+
 fn fit(_s: &mut Session, p: &Value) -> Result<Value> {
     view_params(p, "view.fit", &[])?;
     Ok(json!({}))
@@ -464,6 +471,8 @@ fn render_frame(_s: &mut Session, p: &Value) -> Result<Value> {
     }
     serde_json::to_value(request).map_err(|e| bad(cmd, e.to_string()))
 }
+
+const RENDER_STAGE_CONTRACT: TypedContract<RenderStageParams> = TypedContract::new();
 
 fn render_stage(_s: &mut Session, p: &Value) -> Result<Value> {
     #[derive(serde::Deserialize)]
