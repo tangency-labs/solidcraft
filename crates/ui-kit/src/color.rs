@@ -187,7 +187,7 @@ fn color_popover_with_opacity(ui: &mut Ui, rgb: &mut [u8; 3], mut opacity: Optio
                     .backing_on_hover_text(solidcraft_ui_text::tr("color.hex_help"));
                 publish("color:hex", &response);
                 if response.changed()
-                    && let Some((value, alpha)) = parse_hex(&hex.draft)
+                    && let Some((value, alpha)) = solidcraft_color::hex::parse(&hex.draft)
                     && (opacity.is_some() || alpha.is_none_or(|a| a == 255))
                 {
                     accepted_mixed = mixed;
@@ -203,11 +203,7 @@ fn color_popover_with_opacity(ui: &mut Ui, rgb: &mut [u8; 3], mut opacity: Optio
                 }
             });
         } else {
-            let spin = if linear {
-                Spin { max: 1.0, step: 0.01, speed: 0.003, decimals: 3 }
-            } else {
-                Spin { max: 255.0, step: 1.0, speed: 0.5, decimals: 0 }
-            };
+            let spin = Spin::channel(linear);
             ui.columns(3, |columns| {
                 // Named like H, S and V: "R" alone doesn't say red in every language (#10201).
                 for ((ui, channel), (name, tip)) in
@@ -229,18 +225,18 @@ fn color_popover_with_opacity(ui: &mut Ui, rgb: &mut [u8; 3], mut opacity: Optio
         }
         // Only graphical edits convert HSV back to RGB. Typed byte values stay exact.
         let mut graphical_edit = false;
-        // Hue in degrees, saturation and value in percent, of the same gamma HSV the square shows.
-        const HSV: [(&str, &str, f64); 3] = [("H", "color.hue", 360.0), ("S", "color.saturation", 100.0), ("V", "color.value", 100.0)];
-        let mut hsv_fields = [hsv.h, hsv.s, hsv.v].iter().zip(HSV).map(|(v, (_, _, max))| f64::from(*v) * max).collect::<Vec<_>>();
+        // The same gamma HSV the square shows, scaled for the active number format.
+        let hsv_spins = Spin::hsv(hexadecimal, linear);
+        let mut hsv_fields = [hsv.h, hsv.s, hsv.v].iter().zip(hsv_spins).map(|(v, (_, _, spin))| f64::from(*v) * spin.max).collect::<Vec<_>>();
         let mut hsv_edited = false;
         ui.columns(3, |columns| {
-            for ((ui, value), (name, tip, max)) in columns.iter_mut().zip(hsv_fields.iter_mut()).zip(HSV) {
-                hsv_edited |= spin_channel(ui, name, Some(solidcraft_ui_text::tr(tip)), value, Spin { max, step: 1.0, speed: 0.5, decimals: 0 });
+            for ((ui, value), (name, tip, spin)) in columns.iter_mut().zip(hsv_fields.iter_mut()).zip(hsv_spins) {
+                hsv_edited |= spin_channel(ui, name, Some(solidcraft_ui_text::tr(tip)), value, spin);
             }
         });
         if hsv_edited {
             let unit = |at: usize| {
-                let (value, max) = (hsv_fields.get(at).copied().unwrap_or(0.0), HSV.get(at).map_or(1.0, |h| h.2));
+                let (value, max) = (hsv_fields.get(at).copied().unwrap_or(0.0), hsv_spins.get(at).map_or(1.0, |h| h.2.max));
                 if value.is_finite() { (value / max).clamp(0.0, 1.0) as f32 } else { 0.0 }
             };
             (hsv.h, hsv.s, hsv.v) = (unit(0), unit(1), unit(2));
@@ -343,12 +339,12 @@ impl HexEdit {
     }
 
     fn set(&mut self, rgb: [u8; 3], opacity: Option<f64>) {
-        let [r, g, b] = rgb;
-        self.accepted = format!("#{r:02x}{g:02x}{b:02x}");
-        if self.alpha {
+        self.accepted = if self.alpha {
             let a = (opacity.unwrap_or(1.0).clamp(0.0, 1.0) * 255.0).round() as u8;
-            self.accepted.push_str(&format!("{a:02x}"));
-        }
+            solidcraft_color::hex::format_alpha(rgb, a)
+        } else {
+            solidcraft_color::hex::format(rgb)
+        };
         self.draft.clone_from(&self.accepted);
         self.rgb = rgb;
         self.opacity = opacity;
@@ -365,15 +361,6 @@ impl HexEdit {
     }
 }
 
-fn parse_hex(text: &str) -> Option<([u8; 3], Option<u8>)> {
-    let digits = text.strip_prefix('#')?;
-    if !matches!(digits.len(), 6 | 8) || !digits.bytes().all(|b| b.is_ascii_hexdigit()) {
-        return None;
-    }
-    let byte = |at: usize| digits.get(at..at + 2).and_then(|value| u8::from_str_radix(value, 16).ok());
-    Some(([byte(0)?, byte(2)?, byte(4)?], if digits.len() == 8 { Some(byte(6)?) } else { None }))
-}
-
 /// How a channel number edits: its range `0..=max`, the step of its step buttons, the drag
 /// speed and the decimals shown.
 #[derive(Clone, Copy)]
@@ -382,6 +369,25 @@ struct Spin {
     step: f64,
     speed: f64,
     decimals: usize,
+}
+
+impl Spin {
+    const BYTE: Self = Self { max: 255.0, step: 1.0, speed: 0.5, decimals: 0 };
+    const UNIT: Self = Self { max: 1.0, step: 0.01, speed: 0.003, decimals: 3 };
+    const PERCENT: Self = Self { max: 100.0, step: 1.0, speed: 0.5, decimals: 0 };
+    const DEGREES: Self = Self { max: 360.0, step: 1.0, speed: 0.5, decimals: 0 };
+
+    /// R, G and B: bytes in U8, 0 to 1 in F.
+    fn channel(linear: bool) -> Self {
+        if linear { Self::UNIT } else { Self::BYTE }
+    }
+
+    /// H, S and V with their tooltip keys. H is in degrees in every format. S and V follow R, G
+    /// and B; Hex shows no R, G and B numbers, so there S and V are in percent (#10201).
+    fn hsv(hexadecimal: bool, linear: bool) -> [(&'static str, &'static str, Self); 3] {
+        let sv = if hexadecimal { Self::PERCENT } else { Self::channel(linear) };
+        [("H", "color.hue", Self::DEGREES), ("S", "color.saturation", sv), ("V", "color.value", sv)]
+    }
 }
 
 /// One channel of the popover: its name above a drag field (drag, or click and type) and a pair
@@ -526,7 +532,7 @@ fn recent_row(ui: &mut Ui, width: f32) -> Option<[u8; 3]> {
                 stroke,
                 egui::StrokeKind::Inside,
             );
-            let hex = format!("#{r:02x}{g:02x}{b:02x}");
+            let hex = solidcraft_color::hex::format([r, g, b]);
             response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, true, &hex));
             publish(&format!("color:recent:{slot}"), &response);
             let response = response.on_hover_cursor(egui::CursorIcon::PointingHand).backing_on_hover_text(&hex);

@@ -579,7 +579,9 @@ impl TopologyObjects<Obj> for Scene {
 fn status(e: &SolidError) -> f64 {
     match e {
         SolidError::InvalidInput { .. } | SolidError::PortInvariant { .. } => 1007.0,
-        SolidError::Upstream { code, .. } => f64::from(*code),
+        e if solidcore::error::upstream_status(e).is_some() => {
+            f64::from(solidcore::error::upstream_status(e).unwrap_or(-1))
+        }
         _ => -1.0,
     }
 }
@@ -1478,3 +1480,82 @@ impl UnitDiff for Runner {
 /// Generates a bounded tree fixture, seeded independently by the p2 unit id.
 pub(super) fn p2_tree_generate(rng: &mut Rng) -> Option<Value> { serde_json::to_value(gen_trees_case(rng)).ok() }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use solidcore::curve::curve::p8::curves_meet_at_most_once;
+
+    /// WR-647 (#18392): gen2408 moved from a range to one point. Base answered a range
+    /// from `(901.4153, 0.74788)` (the line, then the Hermite curve) to `(1165.5436,
+    /// 0.99919)` at tolerance 100, its ends 45.2 and 42.2 apart. The curves meet inside
+    /// it: the point lies inside the base range, the curves evaluated there are less
+    /// than `1e-12` apart (5.3e-13), no stencil neighbour is nearer, and the library's
+    /// certificate (`curves_meet_at_most_once`) holds that they meet at most once over
+    /// the range. Base's ends are main's `rust()` output at bf685d1b3.
+    #[test]
+    fn wr_647_gen2408_meets_inside_its_base_range() {
+        let ctx = CaseContext {
+            root: crate::case::repo_root(),
+            seeds: 16,
+        };
+        let cases = Runner.cases(&ctx).unwrap();
+        let case = cases.iter().find(|c| c.name == "gen2408").unwrap();
+        let op: OpIn = case.parse().unwrap();
+        let (OpIn::Local { objects, .. } | OpIn::Trees { objects, .. }) = &op else {
+            panic!("gen2408 solves between objects")
+        };
+        let out = rust(&op).unwrap();
+        assert_eq!(out.ints["status"], vec![0]);
+        // calls done, best answer squared, the count, then one record: type, variables,
+        // objects, the two object ids, the value and the two parameters
+        let v = &out.values["out"];
+        assert_eq!(v.len(), 11, "{v:?}");
+        assert_eq!(v[2], 1.0, "{v:?}");
+        assert_eq!(v[3], f64::from(SolutionType::SingleValue as i32), "{v:?}");
+        let k = Kernel::default();
+        let scene = Scene::new(&k, objects).unwrap();
+        let curve = |id: f64| -> &Curve {
+            match &scene.items[id as usize] {
+                Item::Curve(c, _) => c,
+                Item::Edge(c, ..) => match &scene.items[*c] {
+                    Item::Curve(c, _) => c,
+                    _ => panic!("an edge's curve"),
+                },
+                Item::Vertex(..) => panic!("a curve or an edge"),
+            }
+        };
+        let (a, b) = (curve(v[6]), curve(v[7]));
+        let at = |[t, u]: [f64; 2]| (a.evaluate_point(&k, t).unwrap(), b.evaluate_point(&k, u).unwrap());
+        let gap = |p: [f64; 2]| {
+            let (x, y) = at(p);
+            x.distance(y)
+        };
+        let point = [v[9], v[10]];
+        let base = [
+            [901.4153152458349, 0.7478793644522173],
+            [1165.5435565985636, 0.9991896767349652],
+        ];
+        for i in 0..2 {
+            assert!(base[0][i] < point[i] && point[i] < base[1][i], "{point:?}");
+        }
+        let g = gap(point);
+        assert!(g < 1e-12, "{g:e}");
+        assert!(gap(base[0]) > 45.0 && gap(base[1]) > 42.0);
+        // the certificate that this is the curves' only contact over the base range: the
+        // Hermite cubic passes through the line (at about 21 degrees, in space; its
+        // separations at base's ends point to one side), and the cones of their tangents
+        // part (over the range, or over the pieces left near the meeting)
+        assert!(curves_meet_at_most_once(
+            &k,
+            a,
+            (base[0][0], base[1][0]),
+            b,
+            (base[0][1], base[1][1]),
+        ));
+        // a local least distance: no stencil neighbour is nearer
+        for (dt, du) in [(1.0, 0.0), (-1.0, 0.0), (0.0, 1.0), (0.0, -1.0)] {
+            let q = [point[0] + dt * 1e-5, point[1] + du * 1e-8];
+            assert!(gap(q) >= g, "{q:?}: {:e} < {g:e}", gap(q));
+        }
+    }
+}

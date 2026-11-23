@@ -41,7 +41,7 @@
 //!   callers do not read the out-params after an error); the solver state is still
 //!   updated as upstream.
 //! - Status codes: upstream returns either the evaluator's status or `SM_ERR`
-//!   (1001, [`SolidError::Upstream`]) exactly as in C++. A
+//!   (1001, [`GeomFailure`](crate::error::geom::GeomFailure)) exactly as in C++. A
 //!   [`SolidError::Unported`] from the evaluator is always propagated unchanged,
 //!   also where upstream ignores or retries a failed evaluation (so callers that
 //!   reach unported code report "deferred" instead of a different result).
@@ -62,6 +62,7 @@
 //!   clamps each step against the default inside-out `[1e20, -1e20]` interval, replacing
 //!   every step with `+-1.584e19` against the Newton direction.
 
+use crate::error::geom::GeomFailure;
 use crate::error::{ignored, Result, SolidError};
 use crate::geom::extent1d::Extent1d;
 pub use crate::geom::local_solve_nd::TerminationReason;
@@ -69,26 +70,15 @@ use crate::geom::tol::{in_tol, scaled_zero};
 use crate::limits::try_filled;
 use crate::math::{BIG_DOUBLE, EFF_ZERO, EFF_ZERO_SQ, UNDEF_DOUBLE};
 
-// Upstream status `SM_ERR`.
-use crate::error::SM_ERR;
-
 /// Upstream `SM_UNDEF_ULONG`.
 pub const UNDEF_ULONG: u64 = 123456789;
 
 /// `ZEPS` of `SolveByBrent`.
 const ZEPS: f64 = 1.0e-12;
 
-/// `SM_ERR` for `operation`.
-fn sm_err(operation: &'static str) -> SolidError {
-    SolidError::Upstream {
-        operation,
-        code: SM_ERR,
-        entity: None,
-    }
-}
-
-/// Upstream returns `SM_ERR` after a failed evaluation; an `Unported` error is
-/// passed through unchanged.
+/// Upstream returns `SM_ERR` after a failed evaluation: the solver's failure keeps the
+/// evaluator's error as its cause ([`GeomFailure::CallFailed`]); an `Unported` or
+/// `Cancelled` error is passed through unchanged.
 fn eval_failed(e: SolidError, operation: &'static str) -> SolidError {
     if matches!(
         e,
@@ -96,7 +86,7 @@ fn eval_failed(e: SolidError, operation: &'static str) -> SolidError {
     ) {
         e
     } else {
-        sm_err(operation)
+        SolidError::geom_call(operation)(e)
     }
 }
 
@@ -176,7 +166,12 @@ pub trait EvalFunction {
     /// The default (upstream base class) fails with `SM_ERR`.
     fn evaluate(&mut self, t: f64, out: &mut FunctionValue, signal_errors: bool) -> Result<()> {
         let _ = (t, out, signal_errors);
-        Err(sm_err("geom::local_solve1d::EvalFunction::evaluate"))
+        Err(SolidError::geom(
+            "geom::local_solve1d::EvalFunction::evaluate",
+            GeomFailure::Defect {
+                why: "the solver called an EvalFunction that does not implement evaluate; every function the kernel solves implements it",
+            },
+        ))
     }
 }
 
@@ -624,7 +619,14 @@ impl LocalSolve1d {
         }
 
         // Should have returned within the loop.
-        Err(sm_err(OP))
+        Err(SolidError::geom(
+            OP,
+            GeomFailure::BrentDidNotConverge {
+                iterations: self.max_iter,
+                at: x,
+                bracket: [bracket_min, bracket_max],
+            },
+        ))
     }
 
     /// Regula-falsi bisection between `lower_t` (`F < 0`) and `upper_t` (`F > 0`)
@@ -1170,6 +1172,7 @@ impl LocalSolve1d {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::error::SM_ERR;
 
     /// `F(t) = t^2 - 2`, never failing.
     struct Sq;
@@ -1207,7 +1210,7 @@ mod tests {
         fn evaluate(&mut self, t: f64, out: &mut FunctionValue, s: bool) -> Result<()> {
             if t.to_bits() == LAST_GUESS.to_bits() {
                 *out = FunctionValue::default();
-                return Err(sm_err("test: no value here"));
+                return Err(SolidError::sm_err("test: no value here"));
             }
             Cycle.evaluate(t, out, s)
         }
@@ -1220,7 +1223,7 @@ mod tests {
         fn evaluate(&mut self, t: f64, out: &mut FunctionValue, s: bool) -> Result<()> {
             if t.to_bits() == 1f64.to_bits() {
                 *out = FunctionValue::default();
-                return Err(sm_err("test: no value here"));
+                return Err(SolidError::sm_err("test: no value here"));
             }
             Sq.evaluate(t, out, s)
         }
@@ -1344,7 +1347,7 @@ mod tests {
             fn evaluate(&mut self, t: f64, out: &mut FunctionValue, _: bool) -> Result<()> {
                 if [0.25, 0.75, 0.13, 0.38, 0.82, 0.87, 0.01, 0.99].contains(&t) {
                     out.f = self.0;
-                    return Err(sm_err("test: failed interior sample"));
+                    return Err(SolidError::sm_err("test: failed interior sample"));
                 }
                 out.f = t * t + 1.0;
                 out.f_prime = 2.0 * t;
@@ -1381,7 +1384,7 @@ mod tests {
             fn evaluate(&mut self, t: f64, out: &mut FunctionValue, _: bool) -> Result<()> {
                 if t == 0.25 {
                     *out = FunctionValue::default();
-                    return Err(sm_err("test: failed quarter sample"));
+                    return Err(SolidError::sm_err("test: failed quarter sample"));
                 }
                 out.f = (t - 0.75) * (t - 0.75) - 0.01;
                 out.f_prime = 2.0 * (t - 0.75);
@@ -1459,7 +1462,7 @@ mod tests {
         ));
         assert!(matches!(
             s.solve_it(&mut Base, 0.5, 1e-9),
-            Err(SolidError::Upstream { code: 1001, .. })
+            Err(e) if e.upstream_status() == Some(1001)
         ));
         assert_eq!(
             SolverAlgorithm::from_code(2),

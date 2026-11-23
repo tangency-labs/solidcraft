@@ -1,15 +1,14 @@
 //! Public-operation regression for tangency-labs/solidcore#521 / WR-263:
 //! `SmEdgeuse::GetStartPointUVLoopGap` reads endpoints a failed trim evaluation never
-//! set. The opt-in `Kernel::fixes.topology_failed_evaluations_propagate` reports a gap
-//! it cannot measure as `SM_BIG_DOUBLE` instead.
+//! set. The port reports a gap it cannot measure as `SM_BIG_DOUBLE` instead.
 //!
 //! The measurement is through public APIs only: a public box (a trimmed face), a
 //! public record edit of one edge use's UV trim curve (its evaluation fails at an
 //! interior parameter, while its control-point bounding box is defined), the loop's
 //! edge intervals moved so the gap samples that interior parameter, and the public
-//! operation `calculate_uv_domain_from_uv_trim_curves` with `want_max_gap`. The flag
-//! off and on give two different exact `max_uv_loop_gap` values on the same face; the
-//! flag-on value is pinned here, and forcing the flag off makes the test fail.
+//! operation `calculate_uv_domain_from_uv_trim_curves` with `want_max_gap`. Upstream's
+//! `max_uv_loop_gap` measures the unset endpoint (1.0307764064044151); the port's is
+//! `SM_BIG_DOUBLE`.
 
 #![allow(
     clippy::unwrap_used,
@@ -67,9 +66,8 @@ fn malformed_trim() -> Curve {
 }
 
 /// Runs the public operation on a fresh box with the record edits applied.
-fn max_uv_loop_gap(propagate: bool) -> (Extent2d, f64) {
+fn max_uv_loop_gap() -> (Extent2d, f64) {
     let mut k = Kernel::default();
-    k.fixes.topology_failed_evaluations_propagate = propagate;
     let mut b = create_box(&mut k, Point3::new(0.0, 0.0, 0.0), 1.0, 1.0, 1.0).unwrap();
     b.refresh_cached_topology();
     let (f, eus) = trimmed_face(&b);
@@ -100,15 +98,12 @@ fn max_uv_loop_gap(propagate: bool) -> (Extent2d, f64) {
 
 #[test]
 fn wr263_public_uv_domain_gap_propagates_a_failed_trim_endpoint() {
-    let (off_domain, off_gap) = max_uv_loop_gap(false);
-    let (on_domain, on_gap) = max_uv_loop_gap(true);
+    let (domain, gap) = max_uv_loop_gap();
 
-    // Same face, same domain: only the unmeasurable gap differs.
-    assert_eq!(off_domain, Extent2d::from_bounds(0.0, 0.0, 1.0, 1.0));
-    assert_eq!(on_domain, off_domain);
+    // The face's domain is unaffected by the failed trim evaluation.
+    assert_eq!(domain, Extent2d::from_bounds(0.0, 0.0, 1.0, 1.0));
 
-    // Upstream / default: the failed endpoint evaluation's unset value is measured.
-    assert_eq!(off_gap, 1.030_776_406_404_415_1);
-    // WR-263 with the opt-in fix: a gap that cannot be measured.
-    assert_eq!(on_gap, BIG_DOUBLE);
+    // WR-263: a gap that cannot be measured (upstream measures the failed endpoint
+    // evaluation's unset value, 1.0307764064044151).
+    assert_eq!(gap, BIG_DOUBLE);
 }

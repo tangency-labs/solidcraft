@@ -87,7 +87,9 @@ fn entity_id(e: Option<E>) -> i64 {
 }
 fn status(e: &SolidError) -> i64 {
     match e {
-        SolidError::Upstream { code, .. } => i64::from(*code),
+        e if solidcore::error::upstream_status(e).is_some() => {
+            i64::from(solidcore::error::upstream_status(e).unwrap_or(-1))
+        }
         SolidError::InvalidInput { .. } | SolidError::PortInvariant { .. } => 1007,
         e if nlib_number(e).is_some() => 1001,
         SolidError::Failed(_) => e.sm_status().map_or(-1, i64::from),
@@ -1257,10 +1259,11 @@ mod tests {
         model.b.push(Brep::new());
         assert!(model.wire_edges(BrepId::from_index(2))?.is_empty());
         model.b[0].set_infinite_region(None);
-        assert!(matches!(
-            model.infinite_region(b),
-            Err(SolidError::Upstream { code: 1006, .. })
-        ));
+        let missing = model.infinite_region(b);
+        assert!(
+            matches!(&missing, Err(e) if solidcore::error::upstream_status(e) == Some(1006)),
+            "{missing:?}"
+        );
         Ok(())
     }
     #[test]
@@ -1269,10 +1272,7 @@ mod tests {
         let brep = BrepId::from_index(0);
         assert!(matches!(
             model.remove_all_topology(brep),
-            Err(SolidError::Upstream {
-                code: solidcore::error::SM_ERR,
-                ..
-            })
+            Err(ref e) if solidcore::error::upstream_status(e) == Some(solidcore::error::SM_ERR)
         ));
         model.b[0].set_editing_enabled(true);
         // No traversable shell topology: the actual empty cleanup now completes.
@@ -1280,7 +1280,7 @@ mod tests {
         assert!(model.b[0].editing_enabled());
         assert!(matches!(
             model.remove_all_topology(BrepId::from_index(99)),
-            Err(SolidError::Upstream { code: 1006, .. })
+            Err(ref e) if solidcore::error::upstream_status(e) == Some(1006)
         ));
         Ok(())
     }
@@ -1318,7 +1318,7 @@ mod tests {
                 SweepMergeId(0),
                 &mut mates
             ),
-            Err(SolidError::Upstream { code: 1006, .. })
+            Err(ref e) if solidcore::error::upstream_status(e) == Some(1006)
         ));
         Ok(())
     }
@@ -1365,7 +1365,7 @@ mod tests {
         assert_eq!(model.shell_vertices(b)?, vec![vertex.1]);
         assert!(matches!(
             model.shell_vertices(BrepId::from_index(99)),
-            Err(SolidError::Upstream { code: 1006, .. })
+            Err(ref e) if solidcore::error::upstream_status(e) == Some(1006)
         ));
         let face = model.b[0].add_face_record(Face::new(ShellId::from_index(0)))?;
         // This bare face has no upward faceuse. The real PRE_EDIT notification
@@ -1375,11 +1375,7 @@ mod tests {
         assert!(
             matches!(
                 vertex_loop,
-                Err(SolidError::Upstream {
-                    operation: "topology::brep::p9",
-                    code: 1006,
-                    ..
-                })
+                Err(ref e) if e.operation() == "topology::brep::p9" && solidcore::error::upstream_status(e) == Some(1006)
             ),
             "{vertex_loop:?}"
         );
@@ -1404,10 +1400,7 @@ mod tests {
                 OrientType::Same,
                 0.375
             ),
-            Err(SolidError::Upstream {
-                code: solidcore::error::SM_ERR,
-                ..
-            })
+            Err(ref e) if solidcore::error::upstream_status(e) == Some(solidcore::error::SM_ERR)
         ));
         model.b[0].set_editing_enabled(true);
         let uv_line = solidcore::curve::curve::Curve::from(
@@ -1426,11 +1419,7 @@ mod tests {
             ),
             // FindVertexSector (topology.face_p4) finds no sector of a face without
             // face uses, so MakeEdgeInFace's NER(pStartVU) reports a null pointer
-            Err(SolidError::Upstream {
-                operation: solidcore::topology::brep::p5::NO_VERTEX_SECTOR_OP,
-                code: 1006,
-                ..
-            })
+            Err(ref e) if e.operation() == solidcore::topology::brep::p5::NO_VERTEX_SECTOR_OP && solidcore::error::upstream_status(e) == Some(1006)
         ));
         model.b[0].set_editing_enabled(false);
         assert!(!model.has_lamina_edge((b, face))?);
@@ -1441,30 +1430,58 @@ mod tests {
         assert_ne!(model.k.context.current_mark(MarkType::Mark), old_mark);
         assert!(!model.k.context.is_mark_locked(MarkType::Mark));
         model.transform(b, Axis2Placement::default())?;
-        // HCR's scene transform is wired (topology::brep::p5::transform_with_notifications):
-        // the scene is built, then this fixture has no service to retain it in.
+        // HCR must propagate the scene copy's error for the bare face.
         let hcr = model.hcr(b, Axis2Placement::default(), 0.001, 0.1, false, false, true);
         assert!(
             matches!(
                 hcr,
                 Err(SolidError::InvalidInput {
-                    reason: "fixture has no retained HCR service",
-                    ..
+                    operation: "topology::brep::p3",
+                    reason: "face without face use",
                 })
             ),
             "{hcr:?}"
         );
         model.b[0].set_editing_enabled(false);
         model.k.context.set_doing_boolean(false);
-        // query.brep (CalculateBoundingBox) is ported: the stitch now fails later,
-        // in the B-rep merge, and still restores the caller's context.
+        // The stitch's bounding box of this fixture's face without surface fails;
+        // upstream ignores that status and the fork passes it on (WR-658), so the
+        // stitch fails there and still restores the caller's context.
         let stitched = model.stitch(b, &mut TopologySweep::default(), 0.125, false);
         assert!(
-            matches!(stitched, Err(SolidError::Upstream { code: 1006, .. })),
+            matches!(
+                stitched,
+                Err(SolidError::InvalidInput {
+                    operation: "query::face::p1::calculate_bounding_box",
+                    reason: "face without surface",
+                })
+            ),
             "{stitched:?}"
         );
         assert!(!model.b[0].editing_enabled());
         assert!(!model.k.context.doing_boolean());
+        Ok(())
+    }
+
+    #[test]
+    fn hcr_reaches_scene_retention_for_a_complete_body() -> Result<()> {
+        use solidcore::geom::axis2_placement::Axis2Placement;
+        use solidcore::primitive::api_primitives::create_box;
+
+        let mut model = Model::new([1., 0., 0.])?;
+        let b = BrepId::from_index(0);
+        *model.brep_mut(b)? = create_box(&mut model.k, Point3::ZERO, 4., 3., 2.)?;
+        let hcr = model.hcr(b, Axis2Placement::default(), 0.001, 0.1, false, false, true);
+        assert!(
+            matches!(
+                hcr,
+                Err(SolidError::InvalidInput {
+                    operation: "sweep test model",
+                    reason: "fixture has no retained HCR service",
+                })
+            ),
+            "{hcr:?}"
+        );
         Ok(())
     }
 
@@ -1546,16 +1563,15 @@ mod tests {
         let eu = model.b[0].add_edgeuse_record(Edgeuse::default())?;
         let mut point = Point3::new(7., 8., 9.);
         let mut normal = Point3::new(3., 2., 1.);
-        assert!(matches!(
-            model.binormal(
+        assert!(model
+            .binormal(
                 (BrepId::from_index(0), eu),
                 0.5,
                 false,
                 &mut point,
                 &mut normal
-            ),
-            Err(SolidError::Upstream { code: 1007, .. })
-        ));
+            )
+            .is_err_and(|e| solidcore::error::upstream_status(&e) == Some(1007)));
         assert_eq!(point, Point3::new(7., 8., 9.));
         assert_eq!(normal, Point3::new(3., 2., 1.));
         Ok(())

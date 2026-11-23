@@ -54,7 +54,7 @@ pub(super) fn reauthor(s: &mut Session, id: u64, to: u64, cmd: &str) -> Result<(
     let Some(feature) = s.doc_mut().feature_mut(id) else { return Ok(()) };
     let FeatureKind::Sketch { plane, .. } = &mut feature.kind else { return Ok(()) };
     if let (Some(relative), PlaneRef::AtAngle { axis_origin, axis_dir, .. }) = (relative, &mut *plane) {
-        *axis_origin = apply_point(&relative, *axis_origin);
+        solidcraft_doc::map_point_expr(&relative, axis_origin);
         *axis_dir = apply_vector(&relative, *axis_dir);
     }
     let Some(PlaneRef::Face { plane: picked, at, anchor: Some(anchor), .. }) = face_mut(plane) else { return Ok(()) };

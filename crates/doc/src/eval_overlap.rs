@@ -13,7 +13,7 @@ use std::sync::{Arc, Mutex};
 
 use solidcraft_kernel as kernel;
 
-use super::{CachedEval, EvalCache, FeatureResult, KeptSlot, ModelBody, ModelState};
+use super::{CacheEntry, EvalCache, FeatureResult, KeptSlot, ModelBody, ModelState};
 
 /// The evaluation's loop state just before a feature was evaluated: what a refusal of its check
 /// puts back before evaluating it again.
@@ -23,6 +23,8 @@ pub(super) struct Saved {
     pub out_len: usize,
     pub reuse: bool,
     pub prev_fp: u64,
+    /// The features' own inputs so far, without where they are placed (#17310).
+    pub geo: u64,
     pub recomputed: usize,
     pub restored: usize,
     pub poses: HashMap<u64, u64>,
@@ -61,7 +63,7 @@ pub(super) struct Checks {
     most: usize,
     running: VecDeque<Running>,
     /// Cache entries of features evaluated after a check that is still running, in order.
-    held: Vec<(usize, u64, CachedEval)>,
+    held: Vec<(usize, CacheEntry)>,
     /// Features whose check refused their bodies, to fail again as it did.
     refused: HashMap<usize, Failure>,
 }
@@ -86,12 +88,29 @@ impl Checks {
                 .bodies
                 .iter()
                 .filter(|b| !before.bodies.iter().any(|old| old.body.same_shape(&b.body)))
-                .map(|b| (b.name.clone(), kernel::detach_kept(&b.body)))
+                .filter(|b| {
+                    let reused = super::checked_thread_output(&b.body);
+                    #[cfg(test)]
+                    if reused {
+                        super::cost_tests::count(|c| c.reused_checks += 1);
+                    }
+                    !reused
+                })
+                .map(|b| {
+                    #[cfg(test)]
+                    super::cost_tests::count(|c| c.detached_checks += 1);
+                    (b.name.clone(), kernel::detach_kept(&b.body))
+                })
                 .collect()
         })
     }
 
     /// The failure feature `index` ends with, when its check refused it before.
+    /// Whether feature `index`'s check refused its bodies, leaving the failure in place.
+    pub fn refused_at(&self, index: usize) -> Option<&Failure> {
+        self.refused.get(&index)
+    }
+
     pub fn refused(&mut self, index: usize) -> Option<Failure> {
         self.refused.remove(&index)
     }
@@ -125,11 +144,11 @@ impl Checks {
     }
 
     /// Stores the cache entry of feature `index` once no check before it, or of it, is running.
-    pub fn store(&mut self, index: usize, key: u64, entry: CachedEval, cache: &Mutex<EvalCache>, kept: &KeptSlot) {
+    pub fn store(&mut self, index: usize, entry: CacheEntry, cache: &Mutex<EvalCache>, kept: &KeptSlot) {
         if self.running.front().is_some_and(|r| r.index <= index) {
-            self.held.push((index, key, entry));
+            self.held.push((index, entry));
         } else {
-            put(key, entry, cache, kept);
+            entry.put(cache, kept);
         }
     }
 
@@ -150,15 +169,15 @@ impl Checks {
                 // What came after it was evaluated on bodies the check refuses: none of it stands.
                 // The checks still running are left to end on their own.
                 self.running.clear();
-                self.held.retain(|(i, _, _)| *i < r.index);
+                self.held.retain(|(i, _)| *i < r.index);
                 return Some(Refused { index: r.index, saved: r.saved, failure: Failure { error, ..r.failure } });
             }
             let upto = self.running.front().map_or(usize::MAX, |next| next.index);
-            for (i, key, entry) in std::mem::take(&mut self.held) {
+            for (i, entry) in std::mem::take(&mut self.held) {
                 if i < upto {
-                    put(key, entry, cache, kept);
+                    entry.put(cache, kept);
                 } else {
-                    self.held.push((i, key, entry));
+                    self.held.push((i, entry));
                 }
             }
         }
@@ -171,17 +190,9 @@ impl Checks {
     }
 }
 
-fn put(key: u64, entry: CachedEval, cache: &Mutex<EvalCache>, kept: &KeptSlot) {
-    if let Some(k) = &kept.0 {
-        k.put(key, &entry);
-    }
-    if let Ok(mut m) = cache.lock() {
-        m.put(key, entry);
-    }
-}
-
 #[cfg(test)]
 mod tests {
+    use super::super::CachedEval;
     use super::*;
     use kernel::KernelError;
 
@@ -192,6 +203,7 @@ mod tests {
             out_len: 0,
             reuse: false,
             prev_fp: 0,
+            geo: 0,
             recomputed: 0,
             restored: 0,
             poses: HashMap::new(),
@@ -205,12 +217,62 @@ mod tests {
         Failure { error: KernelError::Failed(String::new()), warning: Some("kept".into()), import_report: None, repair: None, ms: 1.0 }
     }
 
-    fn entry() -> CachedEval {
-        CachedEval { error: None, warning: None, import_report: None, repair: None, ms: 0.0, state: Arc::new(ModelState::default()), bytes: 1 }
+    fn entry(key: u64) -> CacheEntry {
+        let whole = CachedEval {
+            error: None,
+            error_code: None,
+            warning: None,
+            import_report: None,
+            repair: None,
+            lost_projections: None,
+            ms: 0.0,
+            state: Arc::new(ModelState::default()),
+        };
+        CacheEntry { key, whole, bytes: 1, change: None }
     }
 
     fn checks() -> Checks {
         Checks { on: true, most: 4, running: VecDeque::new(), held: Vec::new(), refused: HashMap::new() }
+    }
+
+    /// Only an exact checked shape is excluded before detaching can copy its native form.
+    #[test]
+    fn checked_thread_outputs_are_excluded_before_the_native_check_is_detached() {
+        use super::super::{EvalValidationGuard, cost_tests, remember_checked_thread_output};
+        let body = kernel::box_solid(solidcore_record::Vec3::ZERO, solidcore_record::Vec3::new(2.0, 2.0, 2.0)).unwrap();
+        let equal_geometry = kernel::box_solid(solidcore_record::Vec3::ZERO, solidcore_record::Vec3::new(2.0, 2.0, 2.0)).unwrap();
+        let after = ModelState {
+            bodies: vec![ModelBody::new("Checked".into(), body.clone(), 1), ModelBody::new("Other".into(), equal_geometry, 1)],
+            ..ModelState::default()
+        };
+        let _scope = EvalValidationGuard::new(kernel::Validation::EachFeature);
+        kernel::check_kept(&body).unwrap();
+        remember_checked_thread_output("Checked", &body);
+        let mut detached = None;
+        let work = cost_tests::counted(|| detached = checks().detach(&ModelState::default(), &after));
+        let detached = detached.unwrap();
+        assert_eq!(work.detached_checks, 1, "only the other native shape is detached");
+        assert_eq!(work.reused_checks, 1);
+        assert_eq!(detached.len(), 1);
+        assert_eq!(detached[0].0, "Other");
+        assert!(super::super::run_kept(detached, Vec::new()).is_ok(), "the other result still runs its full check");
+    }
+
+    /// Keeping a body's name cannot validate a later output that has another shape record.
+    #[test]
+    fn a_changed_thread_output_still_detaches_its_final_check() {
+        use super::super::{EvalValidationGuard, cost_tests, remember_checked_thread_output};
+        let body = kernel::box_solid(solidcore_record::Vec3::ZERO, solidcore_record::Vec3::new(2.0, 2.0, 2.0)).unwrap();
+        let changed = kernel::box_solid(solidcore_record::Vec3::ZERO, solidcore_record::Vec3::new(3.0, 2.0, 2.0)).unwrap();
+        let after = ModelState { bodies: vec![ModelBody::new("Part".into(), changed, 1)], ..ModelState::default() };
+        let _scope = EvalValidationGuard::new(kernel::Validation::EachFeature);
+        kernel::check_kept(&body).unwrap();
+        remember_checked_thread_output("Part", &body);
+        let mut detached = None;
+        let work = cost_tests::counted(|| detached = checks().detach(&ModelState::default(), &after));
+        assert_eq!(work.detached_checks, 1);
+        assert_eq!(work.reused_checks, 0);
+        assert!(super::super::run_kept(detached.unwrap(), Vec::new()).is_ok());
     }
 
     /// A check that ends after the evaluation went on, with `r`.
@@ -229,10 +291,10 @@ mod tests {
         let (cache, kept) = (Mutex::new(EvalCache::default()), KeptSlot(None));
         let mut c = checks();
         assert!(c.start(0, saved(), failure(), later(Ok(()))).is_ok());
-        c.store(0, 10, entry(), &cache, &kept);
+        c.store(0, entry(10), &cache, &kept);
         assert!(c.start(1, saved(), failure(), later(Err(KernelError::Failed("refused".into())))).is_ok());
-        c.store(1, 11, entry(), &cache, &kept);
-        c.store(2, 12, entry(), &cache, &kept);
+        c.store(1, entry(11), &cache, &kept);
+        c.store(2, entry(12), &cache, &kept);
         assert!(cache.lock().unwrap().is_empty(), "held while the checks run");
         let refused = c.settle(true, &cache, &kept).expect("the second check refuses");
         assert_eq!(refused.index, 1);
@@ -240,7 +302,7 @@ mod tests {
         assert_eq!(refused.failure.warning.as_deref(), Some("kept"));
         {
             let m = cache.lock().unwrap();
-            assert!(m.map.contains_key(&10) && !m.map.contains_key(&11) && !m.map.contains_key(&12));
+            assert!(m.states.map.contains_key(&10) && !m.states.map.contains_key(&11) && !m.states.map.contains_key(&12));
         }
         c.refuse(1, refused.failure);
         assert!(c.refused(1).is_some() && c.refused(1).is_none());
@@ -253,11 +315,11 @@ mod tests {
     fn passed_checks_store_what_waited() {
         let (cache, kept) = (Mutex::new(EvalCache::default()), KeptSlot(None));
         let mut c = checks();
-        c.store(0, 10, entry(), &cache, &kept);
+        c.store(0, entry(10), &cache, &kept);
         assert_eq!(cache.lock().unwrap().len(), 1);
         assert!(c.start(1, saved(), failure(), later(Ok(()))).is_ok());
-        c.store(1, 11, entry(), &cache, &kept);
-        c.store(2, 12, entry(), &cache, &kept);
+        c.store(1, entry(11), &cache, &kept);
+        c.store(2, entry(12), &cache, &kept);
         assert!(c.settle(true, &cache, &kept).is_none());
         assert_eq!(cache.lock().unwrap().len(), 3);
     }

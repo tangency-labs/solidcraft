@@ -31,6 +31,7 @@ use solidcore::geom::attribute::{AttributeStore, ObjectKey};
 use solidcore::geom::extent1d::Extent1d;
 use solidcore::kernel::Kernel;
 use solidcore::surface::face_surface::face_surface;
+use solidcore::surface::procedural_blend::convert::adopt_definitions;
 use solidcore::topology::brep::enclosing::put_enclosing_shells_first;
 use solidcore::topology::brep::p10::{
     heal_made, make_topology_from_data, MakeTopologyOptions, TopologyEnv, HEALER_VERSION,
@@ -93,6 +94,9 @@ pub struct Order {
     pub edges: Vec<EdgeId>,
     /// Record vertex `i`'s kernel vertex.
     pub vertices: Vec<VertexId>,
+    /// Kernel edges [`to_record`] split because only sheet faces use them more than twice, each
+    /// counted once however many copies its further uses were given (0 for [`to_kernel`]).
+    pub split_edges: usize,
 }
 
 /// A kernel edge solids touch along, as [`to_record`] writes it: one record edge per pair of
@@ -288,7 +292,9 @@ fn build(
         faces: b.face_list().to_vec(),
         edges: b.edge_list().to_vec(),
         vertices: b.vertex_list().to_vec(),
+        split_edges: 0,
     };
+    adopt(k, &mut b, record, &order.faces)?;
     if (order.faces.len(), order.edges.len(), order.vertices.len())
         != (
             record.faces.len(),
@@ -309,6 +315,9 @@ fn build(
             && b.vertex_list() == order.vertices.as_slice()
     };
     put_enclosing_shells_first(k, &mut b)?;
+    // the body is assembled field by field, so its cached topology (each face's shell, each
+    // loop's edges) was never derived; rebuilt last, as `Body::from_smb` does before handing out
+    b.refresh_cached_topology();
     Ok((b, kept.then_some(order)))
 }
 
@@ -483,13 +492,20 @@ fn data(k: &Kernel, rec: &r::Brep, bare: &[(u32, u32, u32)]) -> R<BrepData> {
     // Faces, their loops and edgeuses.
     let mut eu = 0u64;
     for (fi, f) in rec.faces.iter().enumerate() {
-        let made = face_surface(
-            k,
-            &crate::surface(&f.surface)?,
-            f.nurbs.as_ref().map(crate::surface).transpose()?.as_ref(),
-            f.domain,
-            &boundary(rec, f)?,
-        )?;
+        // A blend face is built on its net, its NURBS form; its definition is given back once
+        // the body is built ([`adopt`]).
+        let made = match (&f.surface, &f.nurbs) {
+            (r::Surface::Blend { .. }, Some(net)) => {
+                face_surface(k, &crate::surface(net)?, None, f.domain, &[])?
+            }
+            _ => face_surface(
+                k,
+                &crate::surface(&f.surface)?,
+                f.nurbs.as_ref().map(crate::surface).transpose()?.as_ref(),
+                f.domain,
+                &boundary(rec, f)?,
+            )?,
+        };
         let mut fd = FaceData::default();
         fd.zone_tol_3d = zone;
         fd.surface = int(d.surfaces.len())?;
@@ -657,6 +673,26 @@ fn own_tolerances(d: &mut BrepData, rec: &r::Brep, zone: f64) -> R<()> {
     d.zone_tol_3d = least;
     for (fd, t) in d.faces.iter_mut().zip(faces) {
         fd.zone_tol_3d = t;
+    }
+    Ok(())
+}
+
+/// Give the record's blend faces their definitions back on the body built from it: each face's
+/// surface, its net, becomes the blend its definition makes, the net certified against it again
+/// ([`adopt_definitions`]); a net its definition does not certify refuses the record. `faces` are
+/// the body's faces in the record's order.
+fn adopt(k: &Kernel, b: &mut Brep, record: &r::Brep, faces: &[FaceId]) -> R<()> {
+    let mut definitions = Vec::new();
+    for (i, f) in record.faces.iter().enumerate() {
+        if let r::Surface::Blend { definition } = &f.surface {
+            let face = *faces
+                .get(i)
+                .ok_or(Unsupported::Invalid("a face the body does not have"))?;
+            definitions.push((face, crate::blend::blend(definition)));
+        }
+    }
+    if !definitions.is_empty() {
+        adopt_definitions(k, b, &notify_ref, &definitions)?;
     }
     Ok(())
 }

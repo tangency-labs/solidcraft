@@ -296,7 +296,7 @@ fn rust_ray(brep: &solidcore::topology::Brep, input: &RayInput) -> Result<Output
                     return Ok(deferred);
                 }
                 match error {
-                    solidcore::error::SolidError::Upstream { code, .. } => code,
+                    up_err if solidcore::error::upstream_status(&up_err).is_some() => solidcore::error::upstream_status(&up_err).unwrap_or(-1),
                     error => return Err(failure(error)),
                 }
             }
@@ -534,7 +534,6 @@ fn rust_transfer_records(
 ) -> Result<Output, HarnessError> {
     use solidcore::topology::shell::{faceuse_sibling_links, transfer_children, ShellMembers};
     use solidcore::topology::{EdgeId, EdgeuseOwner, VertexuseOwner};
-    use solidcore::SolidError;
     let region = brep
         .infinite_region()
         .ok_or_else(|| failure("fixture has no infinite region"))?;
@@ -631,7 +630,7 @@ fn rust_transfer_records(
         let to = ShellId::from_index(u32::try_from(to).map_err(failure)?);
         pre_status.push(match transfer_children(&mut kernel, brep, from, to, None) {
             Ok(()) => 0,
-            Err(SolidError::Upstream { code, .. }) => i64::from(code),
+            Err(up_err) if solidcore::error::upstream_status(&up_err).is_some() => i64::from(solidcore::error::upstream_status(&up_err).unwrap_or(-1)),
             Err(error) => return Output::unported(&error).ok_or_else(|| failure(error)),
         });
     }
@@ -673,7 +672,7 @@ fn rust_transfer_records(
     let status =
         match transfer_children(&mut kernel, brep, source, recipient, candidates.as_deref()) {
             Ok(()) => 0,
-            Err(SolidError::Upstream { code, .. }) => i64::from(code),
+            Err(up_err) if solidcore::error::upstream_status(&up_err).is_some() => i64::from(solidcore::error::upstream_status(&up_err).unwrap_or(-1)),
             Err(error) => return Output::unported(&error).ok_or_else(|| failure(error)),
         };
     let transfer_marks = mark_delta(&kernel, counters);

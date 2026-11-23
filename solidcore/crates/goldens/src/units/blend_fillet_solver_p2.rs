@@ -43,8 +43,8 @@ use solidcore::blend::fillet_geom::p1::{
     FilletGeomId, FilletGeomType, FilletVertex, FilletVertexType, FilletVertexuse,
 };
 use solidcore::blend::fillet_solver::p1::{
-    FilletExecutiveRef, FilletSolver, FilletSolverOps, FilletSurfaceGenerator,
-    OffsetSurfaceSlot,
+    FilletExecutiveRef, FilletSolver, FilletSolverOps, FilletSurfaceGenerator, OffsetSurfaceSlot,
+    RailUvCurveIntersectEnfo,
 };
 use solidcore::blend::fillet_solver::p2::SolverErrorObject;
 use solidcore::curve::curve::Curve;
@@ -269,8 +269,7 @@ fn check_sizes(i: &Inputs) -> Result<(), HarnessError> {
 fn status(e: &SolidError) -> f64 {
     match e {
         SolidError::InvalidInput { .. } | SolidError::PortInvariant { .. } => 1007.0,
-        SolidError::Upstream { code, .. } => f64::from(*code),
-        _ => -1.0,
+        e => crate::output::blend_status(e).map_or(-1.0, f64::from),
     }
 }
 
@@ -744,6 +743,99 @@ fn fillet_geom_model(
     Ok((fb, g))
 }
 
+/// The replayed solve of a `rail_eu` case (#18325's certificates,
+/// `tests/issue_18325_moved_rows.rs`): the side edge use's UV trim curve and the solve's
+/// parameter boxes as `rail_edgeuse_intersect` sets them up, and the kernel's own residual
+/// `F(x)` (`RailUvCurveIntersectEnfo::evaluate` over the case's solver) at each point of
+/// `xs`; `None` for another op or a B-rep that does not build.
+///
+/// # Errors
+///
+/// A [`HarnessError`] for inputs that do not parse, a source the harness cannot read, or a
+/// failed trim or residual evaluation.
+pub fn rail_eu_scene(
+    case: &crate::Case,
+    xs: &[Vec<f64>],
+) -> Result<Option<RailEuScene>, HarnessError> {
+    let Inputs::RailEu {
+        cfg,
+        surfs,
+        brep,
+        side,
+        rail,
+        ..
+    } = case.parse::<Inputs>()?
+    else {
+        return Ok(None);
+    };
+    let Ok(mut c) = own_case(&brep)? else {
+        return Ok(None);
+    };
+    let err = |e: SolidError| harness(e.to_string());
+    let k = Kernel::default();
+    let side = eu_id(sel(side, n_eu(&c))).ok_or_else(|| harness("side edge use"))?;
+    solidcore::topology::edgeuse::p3::get_or_create_uv_trim_curve(
+        &k,
+        &mut c.brep,
+        side,
+        false,
+        false,
+        true,
+    )
+    .map_err(err)?
+    .status
+    .map_err(err)?;
+    let trim = solidcore::topology::edgeuse::p1::uv_trim_curve(&c.brep, side)
+        .map_err(err)?
+        .0
+        .cloned()
+        .ok_or_else(|| harness("no UV trim curve"))?;
+    let mut fs = solver_of(&cfg, &surfs)?;
+    let base = |fs: &TestSolver, i: usize| -> Result<Surface, HarnessError> {
+        fs.base
+            .surfaces
+            .get(i)
+            .and_then(Option::as_ref)
+            .map(|s| s.surface.base_surface().clone())
+            .ok_or_else(|| harness("no offset surface"))
+    };
+    // as `rail_edgeuse_intersect`: the rail's base domain with the offset extension, the
+    // other base's as the TestSolver's `load_initial_values` reads it
+    let rail_base = base(&fs, rail.min(1))?;
+    let mut rail_domain = rail_base.natural_uv_domain_with_nurb(&k).map_err(err)?;
+    fs.setup_offset_extension(&k, &rail_base, &mut rail_domain)
+        .map_err(err)?;
+    let other_domain = base(&fs, 1 - rail.min(1))?.natural_uv_domain_if_built();
+    let domains = [rail_domain, other_domain];
+    let ivl = trim.natural_interval();
+    let mut residuals = Vec::new();
+    for x in xs {
+        let mut f = vec![0.0; 5 + cfg.extra];
+        let mut e = RailUvCurveIntersectEnfo::new(&trim, ivl, rail, &mut fs);
+        e.evaluate(&k, x, &mut f, None).map_err(err)?;
+        residuals.push(f);
+    }
+    Ok(Some(RailEuScene {
+        trim,
+        interval: ivl,
+        domains,
+        residuals,
+    }))
+}
+
+/// [`rail_eu_scene`]'s result.
+#[derive(Debug)]
+pub struct RailEuScene {
+    /// The side edge use's UV trim curve.
+    pub trim: Curve,
+    /// Its natural interval, the edge parameter's box.
+    pub interval: Extent1d,
+    /// The UV boxes of the rail's and the other offset surface's parameters.
+    pub domains: [Extent2d; 2],
+    /// The kernel's residual `F(x)` at each point asked for.
+    pub residuals: Vec<Vec<f64>>,
+}
+
 fn eu_id(i: i64) -> Option<EdgeuseId> {
     u32::try_from(i).ok().map(EdgeuseId::from_index)
 }
@@ -1004,7 +1096,11 @@ fn rust_run(i: &Inputs, o: &mut Vec<f64>) -> Result<Result<(), SolidError>, Harn
             )?;
             let empty = Brep::new();
             let index = usize::try_from(*index).map_err(|_| harness("index"))?;
-            match fs.base.fillet_corner(&empty, index, &solidcore::blend::fillet_geom::p3::NoCorners) {
+            match fs.base.fillet_corner(
+                &empty,
+                index,
+                &solidcore::blend::fillet_geom::p3::NoCorners,
+            ) {
                 Ok(c) => {
                     o.push(b(c.is_none()));
                     o.push(fs.jacobian_size().unwrap_or(0) as f64);

@@ -387,6 +387,15 @@ impl PanelRuntime {
         self.bindings.insert(kind, binding);
         Ok(())
     }
+    pub(super) fn register_panel(&mut self, spec: PanelSpec, binding: ControllerBinding) -> PanelResult<()> {
+        self.require_live()?;
+        if self.bindings.contains_key(&spec.kind) || self.bindings.len() >= MAX_INSTANCES {
+            return Err(error(Rule::CollectionLimit, "panel controller registration unavailable"));
+        }
+        let kind = spec.kind.clone();
+        self.layout.register_panel(spec)?;
+        self.register(kind, binding)
+    }
     pub fn layout(&self) -> &LayoutService {
         &self.layout
     }
@@ -1295,6 +1304,7 @@ impl PanelRuntime {
                 flow,
                 size_class,
                 focused: interaction.focused.as_ref() == Some(&geometry.instance),
+                preview_geometry: false,
                 direction: self.environment.direction,
                 motion: self.environment.motion,
             };

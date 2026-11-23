@@ -64,6 +64,7 @@
 //!   unit.
 
 use crate::curve::curve::p2::{self as curve_p2, CONIC_TYPE};
+use crate::error::curve::CurveFailure;
 use crate::error::{Result, SolidError};
 use crate::geom::extent1d::Extent1d;
 use crate::geom::geom_utility::p2::ContinuityType;
@@ -450,7 +451,13 @@ impl Conic {
             return Ok(out);
         }
 
-        Err(SolidError::sm_err(OP_EVALUATE))
+        Err(SolidError::curve(
+            OP_EVALUATE,
+            CurveFailure::TooManyDerivatives {
+                asked: num_derivs,
+                most: 2,
+            },
+        ))
     }
 
     /// The point at `param` (`EvaluatePoint`); `z` is 0.
@@ -925,7 +932,15 @@ mod tests {
         let v = e.evaluate(0.0, 2, true).unwrap();
         assert_eq!(v.len(), 3);
         assert_eq!(v[1], Vec3::new(0.0, 2.0, 0.0));
-        assert!(e.evaluate(0.0, 3, false).is_err());
+        let err = e.evaluate(0.0, 3, false).unwrap_err();
+        assert_eq!(
+            err.curve_failure(),
+            Some(&CurveFailure::TooManyDerivatives { asked: 3, most: 2 })
+        );
+        assert_eq!(
+            crate::error::upstream_status(&err),
+            Some(crate::error::SM_ERR)
+        );
         let p = e.evaluate(0.3, 0, false).unwrap();
         assert_eq!(p[0], e.evaluate_point(0.3));
     }

@@ -1,0 +1,264 @@
+{
+  "area": "fillets",
+  "bodies": {
+    "b38": {
+      "keeping_splines": false,
+      "trusted": true
+    }
+  },
+  "calls": [
+    {
+      "inputs": [
+        "b38"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b39"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b39"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b40"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b40"
+      ],
+      "op": "tagged",
+      "outputs": [
+        "b41"
+      ],
+      "params": {
+        "operand": 0
+      }
+    },
+    {
+      "error": "there is no room for it: an offset leaves none inside the body, or a blend is larger than its faces allow",
+      "inputs": [
+        "b41"
+      ],
+      "op": "blend_dropping",
+      "params": {
+        "edges": {
+          "kind": "edge",
+          "picked": [
+            {
+              "at": [
+                [
+                  1.936475578197164,
+                  -8.62135680834962,
+                  6.378643191650378
+                ],
+                [
+                  2.579351122989408,
+                  -10.0,
+                  5.0
+                ]
+              ],
+              "index": 29
+            },
+            {
+              "at": [
+                [
+                  2.156740505721437,
+                  -9.093713775651649,
+                  4.98
+                ],
+                [
+                  2.072216457391037,
+                  -8.912452402893894,
+                  4.98
+                ]
+              ],
+              "index": 48
+            },
+            {
+              "at": [
+                [
+                  1.936475578197164,
+                  -8.62135680834962,
+                  6.378643191650378
+                ],
+                [
+                  1.452353201580983,
+                  -7.583158942753129,
+                  7.240064785777431
+                ]
+              ],
+              "index": 25
+            },
+            {
+              "at": [
+                [
+                  1.3115,
+                  -7.2811,
+                  7.438696885238559
+                ],
+                [
+                  1.452353201580983,
+                  -7.583158942753129,
+                  7.240064785777431
+                ]
+              ],
+              "index": 35
+            }
+          ],
+          "points": [
+            [
+              2.2579133505932862,
+              -9.31067840417481,
+              5.689321595825189
+            ],
+            [
+              2.1144784815562367,
+              -9.00308308927277,
+              4.98
+            ],
+            [
+              1.6944143898890736,
+              -8.102257875551375,
+              6.809353988713904
+            ],
+            [
+              1.3819266007904916,
+              -7.432129471376564,
+              7.3393808355079955
+            ]
+          ],
+          "tolerance": 1.601781059358212
+        },
+        "kind": "chamfer",
+        "sizes": [
+          0.4,
+          0.4,
+          0.4,
+          0.4
+        ],
+        "turn": "mitre"
+      },
+      "refused_as": "no room"
+    }
+  ],
+  "case": "18823-chain-and-wall-window-s1p9-top4p98-d0p4-bands-overlap-refused",
+  "expected": {
+    "method": "The chain's chamfer on the wall: solidcore keeps a chamfer's offsets along a tangent chain, taken at the wedge of its edge between planes (the wall and the slope, 72.612 deg; surface/procedural_blend/chamfer.rs), r = d tan(36.306 deg) off the wall and off the slope, the r1 round or the r3 groove. Its rail on the wall is the foot on the wall of the point standing r off both, solved section by section along the chain (independently, with no kernel output). The window's chamfer is between two planes at 90 deg: it takes the wall from its top edge up to d above it, over the window's 0.2 along the wall, and ends on the window's side walls. On the window's span the chain's rail on the wall comes down to as much as 0.01568 below the top of the window's strip (the largest overlap over the window's span) (z = 4.98+0.4): the two bands overlap on the wall, so the chamfer is refused (main refused it too). SolidCraft names the largest distance that fits.",
+    "outcome": "refused",
+    "source": "analytic",
+    "sources": [
+      "tangency-labs/solidcraft#18823"
+    ],
+    "what": "issue 18823's part (a block with a 45 deg slope, a groove with r1 rounds and a slot slanted 65 deg in plan; see 18823-chamfer-slot-wall-edge-running-on-into-a-round) with a window 0.2 wide, 0.5 tall and 1.0 deep cut square into the slot's inner wall, centred 1.9 along the wall from its back corner (1.3115, -7.2811), its top edge at z = 4.98. A 0.4 chamfer on the wall's top edge, with its tangent chain, and on the window's top edge together."
+  },
+  "expressible": true,
+  "operation_expressible": true,
+  "outcome": {
+    "engine_error": "step 18 (solid.chamfer): not supported yet: the chamfer is larger than the faces beside its edges allow; the largest distance that fits is 0.3934 mm (tangent propagation blended the picked edges' tangent chain with them; with it off, tangent_chain: false, only the picked edges are blended)",
+    "ran": false
+  },
+  "records": "18823-chain-and-wall-window-s1p9-top4p98-d0p4-bands-overlap-refused.bodies.json.gz",
+  "result": [],
+  "rig": {
+    "error": "step 18 (solid.chamfer): not supported yet: the chamfer is larger than the faces beside its edges allow; the largest distance that fits is 0.3934 mm (tangent propagation blended the picked edges' tangent chain with them; with it off, tangent_chain: false, only the picked edges are blended)",
+    "known_failing": null,
+    "measured": null,
+    "refused_with": "step 18 (solid.chamfer): not supported yet: the chamfer is larger than the faces beside its edges allow; the largest distance that fits is 0.3934 mm (tangent propagation blended the picked edges' tangent chain with them; with it off, tangent_chain: false, only the picked edges are blended)",
+    "status": "pass"
+  },
+  "sources": [
+    "tangency-labs/solidcraft#18823"
+  ],
+  "traced_ops": [
+    "extrude",
+    "copy",
+    "revolve",
+    "copy",
+    "copy",
+    "copy",
+    "copy",
+    "tagged",
+    "tagged",
+    "boolean",
+    "copy",
+    "copy",
+    "tagged",
+    "blend_dropping",
+    "extrude",
+    "copy",
+    "copy",
+    "copy",
+    "copy",
+    "tagged",
+    "tagged",
+    "boolean",
+    "extrude",
+    "copy",
+    "copy",
+    "copy",
+    "copy",
+    "tagged",
+    "tagged",
+    "boolean",
+    "copy",
+    "copy",
+    "tagged",
+    "blend_dropping",
+    "copy",
+    "copy",
+    "tagged",
+    "blend_dropping",
+    "copy",
+    "copy",
+    "tagged",
+    "blend_dropping",
+    "copy",
+    "copy",
+    "tagged",
+    "blend_dropping",
+    "copy",
+    "copy",
+    "tagged",
+    "blend_dropping",
+    "copy",
+    "copy",
+    "tagged",
+    "blend_dropping",
+    "copy",
+    "copy",
+    "tagged",
+    "blend_dropping",
+    "copy",
+    "copy",
+    "tagged",
+    "blend_dropping",
+    "copy",
+    "copy",
+    "tagged",
+    "blend_dropping",
+    "copy",
+    "copy",
+    "tagged",
+    "blend_dropping",
+    "copy",
+    "copy",
+    "tagged",
+    "blend_dropping",
+    "copy",
+    "copy",
+    "tagged",
+    "blend_dropping",
+    "copy",
+    "copy",
+    "tagged",
+    "blend_dropping"
+  ],
+  "ungraded": [],
+  "what": "issue 18823's part (a block with a 45 deg slope, a groove with r1 rounds and a slot slanted 65 deg in plan; see 18823-chamfer-slot-wall-edge-running-on-into-a-round) with a window 0.2 wide, 0.5 tall and 1.0 deep cut square into the slot's inner wall, centred 1.9 along the wall from its back corner (1.3115, -7.2811), its top edge at z = 4.98. A 0.4 chamfer on the wall's top edge, with its tangent chain, and on the window's top edge together.",
+  "why_not": []
+}

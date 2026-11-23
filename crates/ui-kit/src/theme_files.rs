@@ -273,7 +273,7 @@ fn radius_slot<'a>(t: &'a mut Tokens, key: &str) -> Option<&'a mut u8> {
 impl ThemeFile {
     /// Shared by import and preference restoration; invalid saved maps are dropped as a unit.
     pub fn set_tabs(&mut self, source: &Value) -> Result<(), String> {
-        self.tabs = parse_tabs(source.get("tabs"))?;
+        self.tabs = parse_tabs(source.get("tabs"), UnknownTabs::Refuse)?;
         Ok(())
     }
 
@@ -419,15 +419,14 @@ pub fn export_icon_palette(palette: Option<Palette>) -> BTreeMap<String, Value> 
     let mut out = BTreeMap::new();
     let Some(palette) = palette else { return out };
     let data = crate::icons::installed().data();
-    let hex = |[r, g, b]: [u8; 3]| format!("#{r:02x}{g:02x}{b:02x}");
     for (name, color) in data.role_names.iter().zip(palette.roles) {
         if let Some(rgb) = color {
-            out.insert((*name).into(), json!(hex(rgb)));
+            out.insert((*name).into(), json!(solidcraft_color::hex::format(rgb)));
         }
     }
     for (name, ramp) in std::iter::once("solid").chain(data.accent_names.iter().copied()).zip(palette.accents) {
         if let Some(colors) = ramp {
-            out.insert(name.into(), json!(colors.map(hex)));
+            out.insert(name.into(), json!(colors.map(solidcraft_color::hex::format)));
         }
     }
     out
@@ -500,19 +499,19 @@ theme_keys! {
         app_bar, toolbar, panel, panel_header, border, text, text_dim, accent, accent_soft, sketch_accent, error, warning,
         icon, timeline, hover, sel_face, sel_edge, sel_edge_rim, hover_edge, hover_edge_halo, sel_profile,
         sel_profile_edge, hover_profile, hover_profile_edge, sel_vertex, origin_plane, origin_plane_edge, origin_plane_hover,
-        origin_point, axis_x, axis_y, axis_z, construction_plane, construction_geom, body, body_edge, manipulator, joint_manipulator, joint_axis,
-        preview_add, preview_new, preview_sketch, preview_cut, cube_face, cube_border, cube_text, cube_hover, viewport_top,
+        origin_point, axis_x, axis_y, axis_z, construction_plane, construction_geom, body, body_edge, isoparm, manipulator, joint_manipulator,
+        joint_axis, preview_add, preview_new, preview_sketch, preview_cut, navigator_face, navigator_border, navigator_text, navigator_hover, viewport_top,
         viewport_bottom, grid, grid_major, body_selected, sketch, sketch_fixed, sketch_halo, sketch_locked, sketch_conflict, dimension, dimension_driven,
         sketch_point, sketch_point_free, dialog_bg, dialog_border, chip, section_cap,
         profile_fill, glyph_bg, glyph_edge, glyph_text, overlay, rubber_band, app_bar_text, app_bar_hover, timeline_item,
         timeline_item_error, timeline_marker, field, box_window, box_crossing, sketch_projected, sketch_lost,
-        sketch_construction, sketch_centerline, bend_up, bend_down, interference, comb_envelope, comb_teeth,
+        sketch_construction, sketch_centerline, bend_up, bend_down, paper_white, paper_ink, paper_blueprint, paper_blueprint_ink, paper_prussian_blue, paper_prussian_blue_ink, paper_dark, paper_dark_ink, interference, comb_envelope, comb_teeth,
         sketch_ink, sketch_soft, surface_fill, surface_ink, surface_soft, mesh_fill, mesh_ink, mesh_soft, form_fill, form_tab_ink, form_soft, sheet_fill, sheet_ink, sheet_soft, render_fill, render_ink, render_soft, tab_on_fill_dark,
         app_bar_separator, surface_accent, mesh_accent, form_accent, render_accent, on_accent, agent_ok, agent_busy, app_bar_hover_subtle,
         app_bar_hover_button, app_bar_hover_strong, app_bar_tab_active,
         form_ink, form_dim, form_primary, form_primary_fill, form_error, form_error_fill, form_success, form_success_fill, dialog_body, dialog_footer, dialog_rule, control_fill, control_border, dialog_label, selected_ink, selected_bg,
     ],
-    many: [continuity, logo, section_hatch],
+    many: [continuity, logo, library_highlights, section_hatch],
     icons: [highlight, agent, marker_halo],
 }
 
@@ -521,21 +520,20 @@ theme_keys! {
 /// `axis_y` and `axis_z`, `triad` over `gizmo` and a file's own `axis_*` keys over both. An
 /// export never writes them.
 const LEGACY_AXES: [&str; 2] = ["gizmo", "triad"];
+/// Colour names older theme files use for the navigator colours: read as the new name, which a
+/// file's own new key wins over. A save writes only the new names.
+const RENAMED_COLORS: [(&str, &str); 4] =
+    [("cube_face", "navigator_face"), ("cube_border", "navigator_border"), ("cube_text", "navigator_text"), ("cube_hover", "navigator_hover")];
 
 /// `#rrggbb` or `#rrggbbaa` (alpha not premultiplied).
 pub fn parse_color(s: &str) -> Option<Color32> {
-    let hex = s.trim().strip_prefix('#')?;
-    if !(hex.len() == 6 || hex.len() == 8) || !hex.bytes().all(|b| b.is_ascii_hexdigit()) {
-        return None;
-    }
-    let byte = |i: usize| hex.get(i..i + 2).and_then(|h| u8::from_str_radix(h, 16).ok());
-    let a = if hex.len() == 8 { byte(6)? } else { 255 };
-    Some(Color32::from_rgba_unmultiplied(byte(0)?, byte(2)?, byte(4)?, a))
+    let ([r, g, b], a) = solidcraft_color::hex::parse(s.trim())?;
+    Some(Color32::from_rgba_unmultiplied(r, g, b, a.unwrap_or(255)))
 }
 
 fn format_color(c: Color32) -> String {
     let [r, g, b, a] = c.to_srgba_unmultiplied();
-    if a == 255 { format!("#{r:02x}{g:02x}{b:02x}") } else { format!("#{r:02x}{g:02x}{b:02x}{a:02x}") }
+    if a == 255 { solidcraft_color::hex::format([r, g, b]) } else { solidcraft_color::hex::format_alpha([r, g, b], a) }
 }
 
 /// The colours a value gives for a slot of `len` colours, or why not.
@@ -575,6 +573,20 @@ pub fn parse(text: &str) -> Result<ThemeFile, String> {
 
 /// [`parse`] for JSON already read (`ui.prefs` `theme_import`).
 pub fn from_value(v: &Value) -> Result<ThemeFile, String> {
+    read_value(v, UnknownTabs::Refuse)
+}
+
+/// What reading a theme does with a `tabs` entry naming a tab the host's table lacks.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum UnknownTabs {
+    /// Refuse the file, naming the entry: a file a user wrote, imported or saved.
+    Refuse,
+    /// Leave the entry out once its surfaces are checked: a built-in file, which is the look's,
+    /// keyed by the look's tab names, and is read under whichever host installed the look.
+    LeaveOut,
+}
+
+fn read_value(v: &Value, unknown: UnknownTabs) -> Result<ThemeFile, String> {
     if v.get("format").and_then(Value::as_str) != Some(FORMAT) {
         return Err(format!("not a theme file: `format` must be \"{FORMAT}\""));
     }
@@ -592,7 +604,7 @@ pub fn from_value(v: &Value) -> Result<ThemeFile, String> {
         Some(value) => value.as_u64().ok_or("`requires` must be a nonnegative integer")?,
     };
     let layer = parse_layer(v)?;
-    let tabs = parse_tabs(v.get("tabs"))?;
+    let tabs = parse_tabs(v.get("tabs"), unknown)?;
     let options = if requires > REQUIREMENTS_LEVEL { Vec::new() } else { parse_options(v.get("options"))? };
     if requires < 2 && options.iter().any(|option| option.effect.is_some()) {
         return Err("option effects require `requires` of at least 2".into());
@@ -613,17 +625,19 @@ pub fn from_value(v: &Value) -> Result<ThemeFile, String> {
     })
 }
 
-/// Keep the accepted vocabulary at the same boundary as the existing accent mapping.
-fn parse_tabs(v: Option<&Value>) -> Result<BTreeMap<String, BTreeMap<String, Value>>, String> {
+/// Keep the accepted vocabulary at the same boundary as the existing accent mapping: the host's
+/// tab table. `unknown` says what a tab the table lacks does.
+fn parse_tabs(v: Option<&Value>, unknown: UnknownTabs) -> Result<BTreeMap<String, BTreeMap<String, Value>>, String> {
     let Some(v) = v else { return Ok(BTreeMap::new()) };
     let tabs = v.as_object().ok_or("`tabs` must be an object")?;
     let known = solidcraft_theme::installed_tabs();
-    if tabs.len() > known.names().len() {
+    if unknown == UnknownTabs::Refuse && tabs.len() > known.names().len() {
         return Err("`tabs` has too many entries".into());
     }
     let mut parsed = BTreeMap::new();
     for (tab, surfaces) in tabs {
-        if !known.contains(tab) {
+        let hosts = known.contains(tab);
+        if !hosts && unknown == UnknownTabs::Refuse {
             return Err(format!("`tabs.{tab}` is not a ribbon tab"));
         }
         let surfaces = surfaces.as_object().ok_or_else(|| format!("`tabs.{tab}` must be an object"))?;
@@ -637,7 +651,9 @@ fn parse_tabs(v: Option<&Value>) -> Result<BTreeMap<String, BTreeMap<String, Val
             }
             values.insert(key.clone(), value.clone());
         }
-        parsed.insert(tab.clone(), values);
+        if hosts {
+            parsed.insert(tab.clone(), values);
+        }
     }
     Ok(parsed)
 }
@@ -652,6 +668,11 @@ fn parse_layer(v: &Value) -> Result<ThemeLayer, String> {
         return Err(format!("`colors` has more than {MAX_COLORS} entries"));
     }
     src.retain(|key, _| !RETIRED_COLORS.contains(&key.as_str()));
+    for (old, new) in RENAMED_COLORS {
+        if let Some(value) = src.remove(old) {
+            src.entry(new).or_insert(value);
+        }
+    }
     let mut probe = Tokens::light();
     let mut bad = Vec::new();
     for (k, c) in &src {
@@ -1093,7 +1114,7 @@ pub fn resolve_for_tab(theme: &ThemeFile, saved: &BTreeMap<String, OptionValue>,
     let mut tab_panel = false;
     if crate::theme_options::tab_settings(theme, &values).0
         && let Some(tab) = tab
-        && let Ok(tabs) = serde_json::to_value(&theme.tabs).map_err(|e| e.to_string()).and_then(|v| parse_tabs(Some(&v)))
+        && let Ok(tabs) = serde_json::to_value(&theme.tabs).map_err(|e| e.to_string()).and_then(|v| parse_tabs(Some(&v), UnknownTabs::Refuse))
         && let Some(surfaces) = tabs.get(tab)
     {
         for (key, value) in surfaces {
@@ -1199,6 +1220,11 @@ pub fn resolve_base(theme: &ThemeFile) -> Tokens {
     // its own (#7244).
     if !theme.colors.contains_key("sketch_conflict") {
         t.sketch_conflict = t.error;
+    }
+    // A surface's isoparms follow the theme's own body and edges unless it sets their colour:
+    // halfway from the edge colour to the body's, about half the edges' contrast.
+    if !theme.colors.contains_key("isoparm") && (theme.colors.contains_key("body") || theme.colors.contains_key("body_edge")) {
+        t.isoparm = t.body_edge.lerp_to_gamma(t.body, 0.5);
     }
     // A file that sets no colours is its base palette, exactly.
     if !theme.colors.is_empty() {
@@ -1367,6 +1393,9 @@ pub fn builtin() -> &'static [ThemeFile] {
     })
 }
 
+/// The host's built-in theme files, checked as a user's file is, except that a `tabs` entry for a
+/// tab the installed tab table lacks is left out: built-ins come with a look, keyed by its tab
+/// names, and every host that installs the look reads them.
 pub fn read_builtin(sources: &[(&str, &str)]) -> Result<Vec<ThemeFile>, String> {
     let mut orders = std::collections::BTreeSet::new();
     let mut ids = std::collections::BTreeSet::new();
@@ -1386,7 +1415,7 @@ pub fn read_builtin(sources: &[(&str, &str)]) -> Result<Vec<ThemeFile>, String> 
         if value.get("provenance").and_then(Value::as_str).is_none_or(|s| s.trim().is_empty()) {
             return Err(format!("theme {id}: missing provenance"));
         }
-        let theme = from_value(&value).map_err(|e| format!("theme {id}: {e}"))?;
+        let theme = read_value(&value, UnknownTabs::LeaveOut).map_err(|e| format!("theme {id}: {e}"))?;
         themes.push((order, ThemeFile { id: id.into(), ..theme }));
     }
     if themes.is_empty() {
@@ -2170,6 +2199,28 @@ mod tests {
         assert!(read_builtin(&[]).is_err());
     }
 
+    /// A built-in file is the look's, its per-tab surfaces keyed by the look's tab names: under a
+    /// host without a tab it names, it loads and that tab's surfaces are left out. A file a user
+    /// imports or saves that names such a tab is still refused, and a built-in's surfaces are
+    /// still checked. The kit's tests install no tab table, so no tab is the host's here.
+    #[test]
+    fn a_builtin_keeps_only_the_hosts_tabs_and_a_users_file_is_still_refused() {
+        let theme = |surfaces: Value| {
+            json!({"format": FORMAT, "name": "Tinted", "base": "dark", "provenance": "Original", "order": 1,
+                "tabs": {"SKETCH": surfaces, "RENDER": {"viewport_top": "#202020"}}})
+        };
+        let good = theme(json!({"panel": "#102030"}));
+        let read = read_builtin(&[("tinted", &good.to_string())]).unwrap();
+        assert_eq!(read.len(), 1);
+        assert!(read[0].tabs.is_empty(), "no tab of the host's is named");
+        assert_eq!(resolve_for_tab(&read[0], &BTreeMap::new(), Some("SKETCH")), resolve(&read[0]));
+        assert!(from_value(&good).unwrap_err().contains("`tabs`"), "a user's file is refused as before");
+        let mut saved = ThemeFile::default();
+        assert!(saved.set_tabs(&good).is_err(), "a saved theme's tabs are read as before");
+        let bad = theme(json!({"panle": "#102030"}));
+        assert!(read_builtin(&[("tinted", &bad.to_string())]).unwrap_err().contains("`tabs.SKETCH.panle` is not a tab surface"));
+    }
+
     #[test]
     fn a_short_file_sets_only_its_colours() {
         let t = parse(r##"{"format":"solidcraft-theme/1","name":"My Theme!","base":"light","colors":{"panel":"#102030","axis_z":"#0000ff80"}}"##)
@@ -2199,6 +2250,21 @@ mod tests {
         assert!(!keys().iter().any(|k| LEGACY_AXES.contains(k)), "an export writes axis_x, axis_y and axis_z only");
         let e = parse(r##"{"format":"solidcraft-theme/1","name":"x","base":"dark","colors":{"gizmo":["#000000"]}}"##).unwrap_err();
         assert!(e.contains("`gizmo` must be a list of 3 colours"), "{e}");
+    }
+
+    #[test]
+    fn older_navigator_colour_keys_read_as_the_new_names() {
+        let file = |colors: &str| {
+            resolve(&parse(&format!(r#"{{"format":"solidcraft-theme/1","name":"Old","base":"dark","colors":{{{colors}}}}}"#)).unwrap())
+        };
+        let old = file(r##""cube_face":"#102030","cube_border":"#112233","cube_text":"#223344","cube_hover":"#334455""##);
+        assert_eq!(old.navigator_face, Color32::from_rgb(0x10, 0x20, 0x30));
+        assert_eq!(old.navigator_border, Color32::from_rgb(0x11, 0x22, 0x33));
+        assert_eq!(old.navigator_text, Color32::from_rgb(0x22, 0x33, 0x44));
+        assert_eq!(old.navigator_hover, Color32::from_rgb(0x33, 0x44, 0x55));
+        let both = file(r##""cube_face":"#102030","navigator_face":"#ffffff""##);
+        assert_eq!(both.navigator_face, Color32::WHITE, "a file's own new key wins");
+        assert!(!keys().iter().any(|k| RENAMED_COLORS.iter().any(|(old, _)| old == k)), "an export writes the new names only");
     }
 
     #[test]
@@ -2243,6 +2309,23 @@ mod tests {
         }
         for c in ["#12345", "#1234567", "#gggggg", "282828", "#2828281"] {
             assert!(parse_color(c).is_none(), "{c}");
+        }
+    }
+
+    /// A theme that sets its own body or edge colours without an isoparm colour gets isoparms
+    /// halfway between them; one that sets none keeps its base's; one that sets it, its own.
+    #[test]
+    fn isoparms_follow_a_themes_body_and_edges_unless_it_sets_them() {
+        for base in [Base::Dark, Base::Light] {
+            let defaults = if base.is_dark() { Tokens::dark() } else { Tokens::light() };
+            let bare = from_value(&json!({"format": FORMAT, "name": "Bare", "base": base})).unwrap();
+            assert_eq!(resolve(&bare).isoparm, defaults.isoparm);
+            let edged =
+                from_value(&json!({"format": FORMAT, "name": "Edged", "base": base, "colors": {"body": "#c0c0c0", "body_edge": "#000000"}})).unwrap();
+            assert_eq!(resolve(&edged).isoparm, Color32::from_rgb(96, 96, 96));
+            let own = from_value(&json!({"format": FORMAT, "name": "Own", "base": base, "colors": {"body_edge": "#000000", "isoparm": "#123456"}}))
+                .unwrap();
+            assert_eq!(resolve(&own).isoparm, Color32::from_rgb(0x12, 0x34, 0x56));
         }
     }
 

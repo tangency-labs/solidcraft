@@ -324,7 +324,7 @@ impl UnitDiff for Runner {
                     }
                     return Ok(output);
                 }
-                if let SolidError::Upstream { code, .. } = error {
+                if let Some(code) = solidcore::error::upstream_status(&error) {
                     status = i64::from(code);
                     if request.op == 2 {
                         body = vec![0, 0, 0];
@@ -560,7 +560,9 @@ impl W {
                 self.d(p.y);
                 self.d(p.z);
             }
-            Err(SolidError::Upstream { code, .. }) => self.i(i64::from(code)),
+            Err(ref e) if solidcore::error::upstream_status(e).is_some() => {
+                self.i(i64::from(solidcore::error::upstream_status(e).unwrap_or(-1)));
+            }
             Err(_) => self.i(-1),
         }
     }
@@ -958,7 +960,9 @@ fn make_faces_rust(i: &Inputs) -> Result<Output, HarnessError> {
         };
         let status = match &attempt.status {
             Ok(()) => 0,
-            Err(SolidError::Upstream { code, .. }) => i64::from(*code),
+            Err(e) if solidcore::error::upstream_status(e).is_some() => {
+                i64::from(solidcore::error::upstream_status(e).unwrap_or(-1))
+            }
             Err(error) => return Err(harness(error)),
         };
         calls.push((status, attempt.face, attempt.shell, attempt.region));

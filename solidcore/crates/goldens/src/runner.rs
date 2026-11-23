@@ -55,6 +55,9 @@ pub fn default_cases<U: UnitDiff + ?Sized>(
 pub struct RunOptions {
     /// Only run cases whose name contains this substring.
     pub filter: Option<String>,
+    /// `--dump-smb`: write the bodies each case measures under this directory
+    /// ([`crate::dump`]).
+    pub dump_smb: Option<std::path::PathBuf>,
 }
 
 fn fnv1a64(s: &str) -> u64 {
@@ -115,7 +118,18 @@ pub fn each_rust_output(
         cases.reverse();
     }
     for case in &cases {
-        f(case, guarded(|| unit.run_rust(case)));
+        // stop only a dump this iteration started: a caller's own `dump::capture` stays
+        let started = if let Some(dir) = &opts.dump_smb {
+            crate::dump::start(dir, unit.id(), &case.name);
+            true
+        } else {
+            false
+        };
+        let out = guarded(|| unit.run_rust(case));
+        if started {
+            crate::dump::stop();
+        }
+        f(case, out);
     }
     Ok(())
 }

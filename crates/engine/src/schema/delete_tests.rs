@@ -18,7 +18,7 @@ fn matches(schema: schemars::Schema, r: &Value) {
 fn schemas_and_the_key_check_agree() {
     assert_keys(
         input_schema_for::<SelectionDeleteParams>(),
-        &["canvases", "components", "dry_run", "items", "joints", "occurrences", "point_clouds"],
+        &["canvases", "components", "contents", "dry_run", "items", "joints", "occurrences", "point_clouds"],
     );
 }
 
@@ -104,6 +104,7 @@ fn the_schema_takes_every_selection_item() {
         Sel::Edge { body: "B".into(), index: 0, point },
         Sel::Face { body: "B".into(), index: 1, point },
         Sel::Feature { id: 4 },
+        Sel::Drawing { drawing: 7, object: 9 },
         Sel::SketchCurve { id: "c1".into(), sketch: None },
         Sel::SketchCurve { id: "c1".into(), sketch: Some(2) },
         Sel::SketchPoint { id: "p1".into() },
@@ -133,6 +134,9 @@ fn the_schema_takes_every_selection_item() {
     takes(json!({"items": "all"}), false);
     takes(json!({"joints": [true]}), false);
     takes(json!({"dry_run": "yes"}), false);
+    takes(json!({"contents": "delete"}), true);
+    takes(json!({"contents": "keep"}), false);
+    takes(json!({"items": [{"type": "drawing", "drawing": 7, "object": 9}]}), false);
     takes(json!({"colour": 1}), false);
 }
 
@@ -186,7 +190,7 @@ fn png() -> String {
     b.extend(400u32.to_be_bytes());
     b.extend(200u32.to_be_bytes());
     b.extend([8, 6, 0, 0, 0, 0, 0, 0, 0]);
-    solidcraft_doc::canvas::base64_encode(&b)
+    crate::tests::image_file(&b)
 }
 
 /// Every form of the command, in warn without warnings: the reply matches the output schema and
@@ -220,7 +224,7 @@ fn replies_match_the_output_schema() {
     assert_eq!(r["bodies"], json!([body]), "{r}");
     assert_eq!(r["skipped"], json!(["the origin planes can't be deleted"]), "{r}");
     // A canvas by id, with the other keys `null`.
-    run(&mut s, "canvas.insert", json!({"data": png()}));
+    run(&mut s, "canvas.insert", json!({"path": png()}));
     let canvas = s.doc.canvases[0].id;
     let r = run(&mut s, "selection.delete", json!({"canvases": [canvas], "items": null, "components": null, "joints": null, "dry_run": false}));
     check(&r);

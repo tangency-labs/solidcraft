@@ -12,7 +12,8 @@
 //! Deviations: the out-param `rCorners` is a return value. Every loop is bounded by the
 //! rails' knots.
 
-use crate::error::{Result, SolidError};
+use crate::error::blend::trace::defect;
+use crate::error::Result;
 use crate::math::{Vec3, EFF_ZERO_SQ, EFF_ZERO_SQRT};
 use crate::nurbs::b_spline_curve::BSplineCurve;
 
@@ -23,7 +24,10 @@ fn pv(c: &BSplineCurve, t: f64, from_left: bool) -> Result<(Vec3, Vec3)> {
     let v = c.evaluate(t, 1, from_left, false)?;
     match *v.as_slice() {
         [p, d, ..] => Ok((p, d)),
-        _ => Err(SolidError::sm_err(OP_CORNERS)),
+        _ => Err(defect(
+            OP_CORNERS,
+            "an evaluation asked for one derivative returns the point and the derivative",
+        )),
     }
 }
 

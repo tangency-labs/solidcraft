@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <title>Issue revision</title>
+  <path d="M11 10L40 10Q43 10 43 13L43 51Q43 54 40 54L11 54Q8 54 8 51L8 13Q8 10 11 10Z" fill="#e2e8ef" stroke="#34465b" stroke-width="2.55" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M16 22L34 22M16 32L32 32" fill="none" stroke="#34465b" stroke-width="2.55" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M29 43L55 43M47 35L55 43L47 51" fill="none" stroke="#236ead" stroke-width="4.25" stroke-linecap="round" stroke-linejoin="round"/>
+</svg>

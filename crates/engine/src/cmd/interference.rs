@@ -1,23 +1,17 @@
 //! Interference (`inspect.interference`): the pairs of bodies that share volume, and how much.
 //!
-//! Pairs are pruned in three steps before anything exact runs. Their boxes first (sort and
-//! sweep), then their display meshes: a mesh lies within its chord tolerance of the faces, so
-//! two meshes farther apart than a margin over both tolerances belong to bodies whose boundaries
-//! don't meet, and unless one body sits inside the other (a point of each face of one tested
-//! against the other's mesh) the pair is clear without a boolean. The pairs left are intersected
-//! exactly and measured, in parallel on desktop (one after another in the browser), the slowest
-//! first, under a time budget: pairs not finished when it runs out are listed as not checked
-//! rather than holding the call. The shared part is measured as `solidcraft_kernel::measure`
-//! measures it (its mass properties alone).
+//! Pairs are pruned before anything exact runs. Their exact boxes first (sort and sweep), then
+//! their exact contact: bodies whose boundaries stay apart and neither encloses the other are
+//! clear without a boolean. The pairs left are intersected exactly and measured, in parallel on
+//! desktop (one after another in the browser), the slowest first, under a time budget: pairs not
+//! finished when it runs out are listed as not checked rather than holding the call. The shared
+//! part is measured as `solidcraft_kernel::measure` measures it (its mass properties alone).
 
-use solidcraft_geom::MeshGeom;
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::sync::Arc;
 
 use serde_json::Value;
-use solidcore_record::Vec3;
-use solidcraft_geom::mesh_distance::TriangleSet;
-use solidcraft_geom::{Aabb3, Mesh};
+use solidcraft_geom::Aabb3;
 use solidcraft_kernel::Body;
 use solidcraft_kernel::profile::KernelTimes;
 
@@ -32,9 +26,6 @@ pub(crate) const MAX_INTERFERENCE_PAIRS: usize = 20_000;
 pub(crate) const DEFAULT_BUDGET_S: f64 = 240.0;
 /// The longest time budget a call may ask for (s).
 const MAX_BUDGET_S: f64 = 86_400.0;
-/// How many chord tolerances apart (of both meshes together) two meshes must be to clear a pair
-/// without intersecting it: twice what the tolerances allow, for meshers that sag a little more.
-const MESH_MARGIN: f64 = 4.0;
 /// Why a mesh body is listed under `unchecked` (here and in `inspect.clearance`).
 pub(super) const MESH_NOT_CHECKED: &str = "mesh body: not checked";
 /// Most pairs listed under `slowest`.
@@ -48,6 +39,12 @@ struct Job {
     names: (String, String),
     /// Faces of one times faces of the other: the slowest pairs start first.
     cost: usize,
+    /// The size a shared volume is measured against: the first body's, or the smaller one's
+    /// when one is an envelope, so a large envelope does not pass a small overlap as clear.
+    size: f64,
+    /// One of the pair is an envelope: a shared volume too small to count is listed as not
+    /// checked rather than cleared, as the parts inside may be smaller than the size it allows.
+    envelope: bool,
 }
 
 /// What an exact check of one pair came to.
@@ -76,47 +73,40 @@ pub(super) fn interference(s: &mut Session, p: &Value) -> Result<Value> {
     };
     let budget = std::time::Duration::from_secs_f64(budget_s);
     let want = string_list(cmd, p, "bodies")?;
+    let use_envelopes = super::envelopes::use_envelopes(p, cmd)?;
     let st = s.world_state()?;
     // A name that is no body is refused, as inspect.clearance refuses it. Dropped, a misspelled
     // body was never checked and the answer read as no interference (#9740).
     if let Some(n) = want.iter().find(|n| st.body(n).is_none()) {
         return Err(bad(cmd, super::no_body(n, st.bodies.iter().map(|b| b.name.as_str()))));
     }
+    // Component envelopes are left out unless named; with `envelopes`, each stands in for the
+    // bodies inside it, a body named inside one meaning it.
+    let envelopes = super::envelopes::Envelopes::of(s, &st);
+    let want: Vec<String> = if use_envelopes { want.iter().map(|n| envelopes.standing_in(n).to_string()).collect() } else { want };
+    let taken = |name: &String| if want.is_empty() { envelopes.by_default(name, use_envelopes) } else { want.contains(name) };
     let (meshes_left, bodies): (Vec<&solidcraft_doc::ModelBody>, Vec<&solidcraft_doc::ModelBody>) =
-        st.bodies.iter().filter(|b| want.is_empty() || want.contains(&b.name)).partition(|b| b.body.is_mesh());
+        st.bodies.iter().filter(|b| taken(&b.name)).partition(|b| b.body.is_mesh());
 
-    // The bodies' display meshes, made once (in parallel) and kept on the bodies: a design open
-    // in the app has them already.
-    let meshes: Vec<Arc<Mesh>> = {
-        let made = solidcraft_kernel::map_with_local_pools(&bodies, usize::MAX, |b| Ok(b.mesh()));
-        made.into_iter().map(|m| m.unwrap_or_default()).collect()
-    };
     // Prune by bounding boxes first (sort and sweep), so the cost follows the pairs that can
     // touch rather than the square of the body count.
-    // Each mesh lies within its chord of the faces, inside a round one: grown by that, the boxes
-    // of bodies a hundredth of a millimetre into each other still meet (an arm's round end into a
-    // rounded rim, its facets clear of the rim's).
-    let chords: Vec<f64> = bodies.iter().map(|b| b.display_tol()).collect();
-    let boxes: Vec<Aabb3> = meshes
-        .iter()
-        .zip(&chords)
-        .map(|(m, &chord)| {
-            let (bx, g) = (m.bounds(), 2.0 * chord);
-            if bx.is_empty() { bx } else { Aabb3 { min: bx.min - Vec3::new(g, g, g), max: bx.max + Vec3::new(g, g, g) } }
-        })
-        .collect();
+    let boxes: Vec<Aabb3> =
+        bodies.iter().map(|b| b.body.exact_bounds().map(|bb| bb.inflated(2.0 * b.body.record().tolerance)).unwrap_or(Aabb3::EMPTY)).collect();
     let (pairs, skipped) = super::joints::overlapping_pairs(&boxes, MAX_INTERFERENCE_PAIRS);
     // Where each body sits (#5963): its occurrence path, for `exclude_pairs` and the reply.
     let paths: HashMap<String, Vec<u64>> = s.doc.body_frames(&s.model.state()).into_iter().map(|(name, _, path, _)| (name, path)).collect();
     let path_of = |name: &str| paths.get(name).map_or(&[][..], Vec::as_slice);
     let excluded = excluded_pairs(s, p, &st, cmd)?;
+    // With `envelopes`, a body named in a pair means the envelope standing in for it.
     let matches = |side: &Side, name: &str| match side {
-        Side::Body(n) => n == name,
+        Side::Body(n) => n == name || (use_envelopes && envelopes.standing_in(n) == name),
         Side::Occurrence(o) => path_of(name).contains(o),
     };
     let left_out = |i: usize, j: usize| {
         let (Some(a), Some(b)) = (bodies.get(i), bodies.get(j)) else { return false };
-        excluded.iter().any(|(x, y)| (matches(x, &a.name) && matches(y, &b.name)) || (matches(x, &b.name) && matches(y, &a.name)))
+        // An envelope around the other body is no finding.
+        envelopes.encloses(&a.name, &b.name)
+            || excluded.iter().any(|(x, y)| (matches(x, &a.name) && matches(y, &b.name)) || (matches(x, &b.name) && matches(y, &a.name)))
     };
     let before = pairs.len();
     let pairs: Vec<(usize, usize)> = pairs.into_iter().filter(|&(i, j)| !left_out(i, j)).collect();
@@ -124,35 +114,16 @@ pub(super) fn interference(s: &mut Session, p: &Value) -> Result<Value> {
     let place = |name: &str| super::motion::part_place(&s.doc, path_of(name));
     let placed = |u: Unchecked| PlacedUnchecked { a_part: place(&u.a), b_part: u.b.as_deref().map(place), unchecked: u };
 
-    // Then by the meshes: pairs whose meshes stay apart (and neither holds the other) are clear.
-    let used: Vec<bool> = {
-        let mut u = vec![false; bodies.len()];
-        for &(i, j) in &pairs {
-            for k in [i, j] {
-                if let Some(x) = u.get_mut(k) {
-                    *x = true;
-                }
-            }
-        }
-        u
-    };
-    let sets: Vec<Option<TriangleSet>> = {
-        let idx: Vec<usize> = (0..bodies.len()).filter(|&i| used.get(i).copied().unwrap_or(false)).collect();
-        let made = solidcraft_kernel::map_with_local_pools(&idx, usize::MAX, |&i| Ok(meshes.get(i).map(|m| TriangleSet::new(m))));
-        let mut out: Vec<Option<TriangleSet>> = std::iter::repeat_with(|| None).take(bodies.len()).collect();
-        for (&i, set) in idx.iter().zip(made) {
-            if let (Some(slot), Ok(set)) = (out.get_mut(i), set) {
-                *slot = set;
-            }
-        }
-        out
-    };
+    // Then prune by contact: pairs whose boundaries stay apart and neither encloses the other
+    // are clear without a boolean.
     let need_exact = solidcraft_kernel::map_with_local_pools(&pairs, usize::MAX, |&(i, j)| {
-        let (Some(Some(sa)), Some(Some(sb)), Some(ma), Some(mb)) = (sets.get(i), sets.get(j), meshes.get(i), meshes.get(j)) else {
+        let (Some(a), Some(b)) = (bodies.get(i), bodies.get(j)) else {
             return Ok(true);
         };
-        let margin = MESH_MARGIN * (chords.get(i).copied().unwrap_or(0.0) + chords.get(j).copied().unwrap_or(0.0));
-        Ok(!meshes_apart(ma, sa, mb, sb, margin))
+        if solidcraft_kernel::apart(&a.body, &b.body).unwrap_or(false) {
+            return Ok(false);
+        }
+        a.body.meets(&b.body)
     });
     let mut jobs = Vec::new();
     let mut cleared = 0usize;
@@ -162,12 +133,15 @@ pub(super) fn interference(s: &mut Session, p: &Value) -> Result<Value> {
             continue;
         }
         let (Some(a), Some(b)) = (bodies.get(i), bodies.get(j)) else { continue };
+        let envelope = envelopes.is_envelope(&a.name) || envelopes.is_envelope(&b.name);
         jobs.push(Job {
             pair: k,
             a: a.body.clone(),
             b: b.body.clone(),
             names: (a.name.clone(), b.name.clone()),
             cost: a.body.face_count().saturating_mul(b.body.face_count()),
+            size: if envelope { a.body.size().min(b.body.size()) } else { a.body.size() },
+            envelope,
         });
     }
     let intersected = jobs.len();
@@ -242,75 +216,15 @@ fn round_ms(ms: f64) -> f64 {
     (ms * 1000.0).round() / 1000.0
 }
 
-/// Are two bodies' meshes farther apart than `margin` with neither body inside the other? Then
-/// their boundaries don't meet (each mesh is within its chord tolerance of its faces, which the
-/// margin covers), so the bodies share no volume. Conservative: an empty mesh, nested boxes or
-/// a point of one inside the other answer no.
-fn meshes_apart(ma: &Mesh, sa: &TriangleSet, mb: &Mesh, sb: &TriangleSet, margin: f64) -> bool {
-    if ma.triangles.is_empty() || mb.triangles.is_empty() || !margin.is_finite() {
-        return false;
-    }
-    if sa.closest(sb, margin).is_some() {
-        return false;
-    }
-    // Apart boundaries: either the bodies are apart, or one holds the other (or a piece of it).
-    let (ba, bb) = (ma.bounds(), mb.bounds());
-    if nested(&ba, &bb) || nested(&bb, &ba) {
-        return false;
-    }
-    !(any_inside(&face_points(ma), mb) || any_inside(&face_points(mb), ma))
-}
-
-/// Is `inner` inside `outer`?
-fn nested(inner: &Aabb3, outer: &Aabb3) -> bool {
-    !inner.is_empty()
-        && outer.min.x <= inner.min.x
-        && outer.min.y <= inner.min.y
-        && outer.min.z <= inner.min.z
-        && inner.max.x <= outer.max.x
-        && inner.max.y <= outer.max.y
-        && inner.max.z <= outer.max.z
-}
-
-/// A corner of each face's first triangle (every piece of a body in several pieces has a face).
-fn face_points(m: &Mesh) -> Vec<Vec3> {
-    let mut seen = HashSet::new();
-    let mut out = Vec::new();
-    for (k, t) in m.triangles.iter().enumerate() {
-        let face = m.tri_face.get(k).copied().unwrap_or(0);
-        if seen.insert(face)
-            && let Some(p) = m.positions.get(t[0] as usize)
-        {
-            out.push(*p);
-        }
-    }
-    out
-}
-
-/// Is any of `points` inside the closed mesh `outer`?
-fn any_inside(points: &[Vec3], outer: &Mesh) -> bool {
-    let b = outer.bounds();
-    let within = |p: &&Vec3| b.min.x <= p.x && p.x <= b.max.x && b.min.y <= p.y && p.y <= b.max.y && b.min.z <= p.z && p.z <= b.max.z;
-    let candidates: Vec<&Vec3> = points.iter().filter(within).collect();
-    match candidates.len() {
-        0 => false,
-        1..=4 => candidates.iter().any(|p| outer.contains(**p)),
-        _ => {
-            let index = outer.inside_index();
-            candidates.iter().any(|p| index.contains(**p))
-        }
-    }
-}
-
 /// The exact check of one pair: the bodies' intersection, measured.
 fn check(job: &Job) -> Done {
     let started = web_time::Instant::now();
-    let (outcome, kernel) = solidcraft_kernel::profile::capture(|| check_pair(&job.a, &job.b, &job.names));
+    let (outcome, kernel) = solidcraft_kernel::profile::capture(|| check_pair(&job.a, &job.b, &job.names, job.size, job.envelope));
     Done { outcome, ms: started.elapsed().as_secs_f64() * 1000.0, kernel }
 }
 
-fn check_pair(a: &Body, b: &Body, (na, nb): &(String, String)) -> Outcome {
-    let threshold = 1e-9 * a.size().max(1.0).powi(3);
+fn check_pair(a: &Body, b: &Body, (na, nb): &(String, String), size: f64, envelope: bool) -> Outcome {
+    let threshold = 1e-9 * size.max(1.0).powi(3);
     // A pair whose shared part can't be worked out is reported, not passed as clear.
     let shared = match solidcraft_kernel::boolean(a, b, solidcraft_kernel::BoolOp::Intersect) {
         Ok(Some(o)) => o,
@@ -330,6 +244,14 @@ fn check_pair(a: &Body, b: &Body, (na, nb): &(String, String)) -> Outcome {
             bbox: OverlapBounds { min: m.bbox.min.into(), max: m.bbox.max.into() },
             center: m.centroid.into(),
         });
+    }
+    // Under the size's noise floor, but an envelope's parts may be far smaller than the envelope:
+    // their overlap could count where the envelopes' does not.
+    if envelope && m.volume > 0.0 {
+        return Outcome::Unchecked(format!(
+            "not checked: the envelopes share {:.3e} mm³, too little to tell from a contact at their size; check the parts inside (envelopes: false)",
+            m.volume
+        ));
     }
     Outcome::Clear
 }

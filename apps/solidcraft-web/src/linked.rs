@@ -1,4 +1,4 @@
-//! Bounded HTTPS or same-origin downloads, handed to the normal design-open command as unsaved copies.
+//! Bounded HTTPS or same-origin downloads, handed to the normal design-open command as clean copies.
 use std::{cell::RefCell, rc::Rc};
 
 use js_sys::{Reflect, Uint8Array};
@@ -85,7 +85,7 @@ impl Download {
         self.opened(app);
     }
 
-    /// The downloaded design is in: it is an unsaved copy under the link's name.
+    /// The downloaded design is in: it is a clean copy under the link's name.
     fn opened(&mut self, app: &mut SolveApp) {
         let Some((rx, _, _)) = &self.opening else { return };
         let (ok, cancelled) = match rx.try_recv() {
@@ -95,9 +95,7 @@ impl Download {
         };
         let Some((_, name, path)) = self.opening.take() else { return };
         if ok && app.session.path.as_deref() == Some(path.as_str()) {
-            app.session.path = None;
-            app.session.doc_mut().name = name;
-            app.session.mark_unsaved();
+            crate::adopt_linked_design(&mut app.session, name);
         } else if !ok && !cancelled {
             app.set_status("Could not open design link: the downloaded file is not a valid SolidCraft design", true);
         }

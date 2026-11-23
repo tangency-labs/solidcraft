@@ -117,7 +117,7 @@ fn setup(i: &Inputs) -> Result<Result<Setup, Output>, HarnessError> {
     if !block_magnitudes_ok(&block) {
         return Err(harness("B-rep value above 1e150 (HANG-29)"));
     }
-    let mut k = Kernel::default();
+    let mut k = crate::runner_kernel();
     let conv = &Conventions::EDGEUSE_GRAPH;
     match build_any(&mut k, &i.brep, i.validate_only, i.init_gaps, conv)? {
         Built::Brep(b) => {
@@ -138,6 +138,20 @@ fn setup(i: &Inputs) -> Result<Result<Setup, Output>, HarnessError> {
     }
 }
 
+/// The scene a case's op runs on: the B-rep exactly as [`Runner`]'s Rust side builds it,
+/// and the selected edge use, before the op; `None` when the build fails or selects no
+/// edge use. For certificate tests that must check a premise on the replayed model
+/// rather than on a dump of it (`tests/issue_18325_moved_rows.rs`).
+///
+/// # Errors
+///
+/// A case that does not parse, or the build's harness error.
+pub fn scene(case: &Case) -> Result<Option<(Brep, EdgeuseId)>, HarnessError> {
+    Ok(setup(&case.parse::<Inputs>()?)?
+        .ok()
+        .map(|s| (s.brep, s.eu)))
+}
+
 /// The output of an op body (after the build status), as both sides build it.
 fn output_of(body: &[f64]) -> Output {
     let first = body.first().copied().unwrap_or(f64::NAN);
@@ -154,13 +168,15 @@ fn output_of(body: &[f64]) -> Output {
 /// The status a failed Rust op reports (`None`: not an upstream status).
 fn status_of(e: &SolidError) -> Option<f64> {
     match e {
-        SolidError::Upstream { code, .. } => Some(f64::from(*code)),
+        up_err if solidcore::error::upstream_status(up_err).is_some() => Some(f64::from(solidcore::error::upstream_status(up_err).unwrap_or(-1))),
         _ => None,
     }
 }
 
 /// The tail every op reports: the edge use's and its mate's state and the edge state.
 fn put_states(k: &Kernel, o: &mut Vec<f64>, b: &Brep, eu: EdgeuseId) -> Result<(), SolidError> {
+    #[cfg(test)]
+    crate::certify::written(b);
     let mate = eu1::mate(b, eu).ok().flatten();
     put_eu_state(k, o, b, Some(eu))?;
     put_eu_state(k, o, b, mate)?;
@@ -220,7 +236,7 @@ fn put_created_lift(
 /// upstream status (unported, null dereference).
 #[allow(clippy::too_many_lines)]
 fn run_rust_op(op: &OpIn, b: &mut Brep, eu: EdgeuseId) -> Result<Vec<f64>, SolidError> {
-    let k = Kernel::default();
+    let k = crate::runner_kernel();
     // a failing upstream status is reported with the state, like the shim
     let finish = |b: &Brep, mut v: Vec<f64>| -> Result<Vec<f64>, SolidError> {
         put_states(&k, &mut v, b, eu)?;

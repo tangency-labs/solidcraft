@@ -1,7 +1,8 @@
 //! A blend refused on its edges or corners, as data ([`BlendRefusal`], carried by
 //! [`crate::SolidError::BlendRefused`]), and the queries the refusals rest on: the tangent
 //! chain of edges ([`tangent_chain`], [`chains_among`]), the edge a blended edge runs on into
-//! ([`continuation`]) and a round too small to change the part ([`round_too_small`]).
+//! ([`continuation`]), a round too small to change the part ([`round_too_small`]) and a
+//! chamfer's or weld bead's setback below the body's resolution ([`setback_below_resolution`]).
 //!
 //! Not upstream (solidcore's). The chain follows the blend corner's own test of an edge
 //! running on tangentially at a vertex ([`continuing_edges`], the fork's
@@ -9,6 +10,8 @@
 //! ([`edge::blend_edgeuse_or_why`]). No recursion.
 
 use crate::blend::blend_corner::end::continuing_edges;
+use crate::blend::fillet_executive::p1::is_radius_supported;
+use crate::error::blend::BlendFailure;
 use crate::math::{rad_to_deg, PI};
 use crate::topology::edgeuse::p1 as eu1;
 use crate::topology::edgeuse::p3::{evaluate_binormal, BinormalOptions};
@@ -63,14 +66,17 @@ pub enum BlendRefusal {
         /// The least radius that rounds it.
         smallest_radius: f64,
     },
-    /// A setback asked at `vertex` that stops short of where the rails of the rounds beside
-    /// one of its edges cross it: `least` from the vertex
-    /// ([`crate::blend::blend_setback::distances`]).
+    /// A setback asked at `vertex` too short for the corner: `least` is the least setback the
+    /// refusing test takes, and `why` says which test refused it and whether a setback of
+    /// `least` builds the corner by it.
     SetbackTooShort {
         /// The corner's vertex.
         vertex: VertexId,
-        /// The least setback: the farthest the rails beside an edge cross it.
+        /// The least setback the refusing test takes ([`SetbackTooShortWhy`] says which and
+        /// how).
         least: f64,
+        /// Which test refused it.
+        why: SetbackTooShortWhy,
     },
     /// A setback asked at `vertex` that does not fit on the corner's edges, or on its rounds
     /// where a far corner cuts them: one below `largest` fits. `why` says which test
@@ -95,6 +101,25 @@ pub enum BlendRefusal {
         /// The bound below which an angle meets the other face: pi less the wedge.
         largest: f64,
     },
+}
+
+/// Which test refused a setback as too short ([`BlendRefusal::SetbackTooShort`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum SetbackTooShortWhy {
+    /// It stops short of where the rails of the rounds beside one of the corner's edges cross
+    /// the edge ([`crate::blend::blend_setback::distances`]). `least` is the farthest they
+    /// cross it from the vertex. A setback of `least` passes this test only: the corner's
+    /// later tests may still refuse it.
+    RailsCross,
+    /// At a Setback corner, its G1 fill is not certified convex at it. `least` is the setback
+    /// at the least scale of it, on a grid of thousandths, at which the fill is certified
+    /// convex; with its ease it lies within the corner's rooms.
+    ConvexFill,
+    /// At a Setback corner beside a curved face, its fill is not certified no more concave
+    /// than its faces at it. `least` is the setback at the least scale of it, on a grid of
+    /// thousandths, at which it is; with its ease it lies within the corner's rooms.
+    ConcaveFill,
 }
 
 /// Which test refused a setback as too long ([`BlendRefusal::SetbackTooLong`]).
@@ -122,6 +147,13 @@ pub enum SetbackTooLongWhy {
     /// `largest` is the largest scale of the asked setbacks that keeps every spring curve on
     /// its face, times the setback.
     SpringLeaves,
+    /// At a Setback corner beside a curved face, the piece it takes out of a face (bounded by
+    /// the face's spring curve, the end sections' traces on the face and its two edges from
+    /// the vertex to their setbacks) holds another edge or loop of the face, or is not shown
+    /// not to (solidcore#2343 (d), condition 2). `largest` is the largest scale of the asked
+    /// setbacks at which every spring curve stays on its face and no piece holds another edge
+    /// of its face, times the setback.
+    PieceHoldsEdge,
 }
 
 impl BlendRefusal {
@@ -371,7 +403,7 @@ pub fn round_too_small(
         }
     }
     // the blend's tangency angle: faces within it are tangent ([`edge::blend_edgeuse`])
-    let tangent = PI / 180.0 * (90.0 - edge::crease_angle(k));
+    let tangent = PI / 180.0 * (90.0 - edge::CREASE_ANGLE);
     let reach = 1.0 / (0.5 * turn).cos() - 1.0;
     if turn <= tangent || !(reach.is_finite() && reach > 0.0) {
         return Ok(None);
@@ -386,4 +418,36 @@ pub fn round_too_small(
         tolerance,
         smallest_radius: tolerance / reach,
     }))
+}
+
+/// [`BlendFailure::SizeBelowResolution`] of `op` at edge `id` for the first of `setbacks`
+/// below the smallest size a fillet builds on a body of `tolerance`
+/// ([`is_radius_supported`]: eight times the tolerance; NaN fails too): a setback is how far
+/// a rail or a toe lies from the edge along its face, whether it was given as a distance or
+/// computed from an angle or a chord, and one that small puts it on the edge within
+/// tolerance, a sliver. Shared by the chamfer's preparation and the weld bead (#21004,
+/// #21138), so a size refused by one is refused alike by the other.
+///
+/// # Errors
+///
+/// That refusal (class `InvalidInput`, status `SM_ERR_INVALID_INPUT`), naming the setback
+/// and the tolerance.
+#[track_caller]
+pub(crate) fn setback_below_resolution(
+    op: &'static str,
+    id: EdgeId,
+    setbacks: [f64; 2],
+    tolerance: f64,
+) -> Result<()> {
+    match setbacks
+        .into_iter()
+        .find(|&s| !is_radius_supported(s, tolerance))
+    {
+        None => Ok(()),
+        Some(size) => Err(SolidError::blend_at(
+            op,
+            BlendFailure::SizeBelowResolution { size, tolerance },
+            EntityRef::Edge(id),
+        )),
+    }
 }

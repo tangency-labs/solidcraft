@@ -1,13 +1,13 @@
-//! The custom view gizmo: the body chosen in [`crate::view_gizmo`] drawn in place of the navigation
-//! cube, made the way the cube is: the same size, each face shaded by how squarely it meets the
-//! eye. Its texture is the cube's face and border colours, the hovered face in the cube's hover
-//! colour and accent (themed), or the body's own appearance with the view's edge colour, the
-//! hovered face lit as the view lights a face under the pointer (modeled); the cube's orbit and roll
-//! arrows and its Home button go around it when the `navigator_arrows` and `navigator_home`
-//! preferences say so. While the Custom View Navigator panel is open it shows the panel's choices.
+//! The custom view gizmo: the body chosen in [`crate::view_gizmo`] drawn in place of the signed
+//! axes, each face shaded by how squarely it meets the eye. Its texture is the theme's navigator
+//! face and border colours, the hovered face in the hover colour and accent (themed), or the
+//! body's own appearance with the view's edge colour, the hovered face lit as the view lights a
+//! face under the pointer (modeled); orbit and roll arrows and a Home button go around it when
+//! the `navigator_arrows` and `navigator_home` preferences say so. While the Custom View Navigator
+//! panel is open it shows the panel's choices.
 //! A click on a face looks straight at it; a drag orbits.
 //!
-//! A concave body cannot be drawn back to front as the cube's six faces are, so the faces go
+//! A concave body cannot be drawn back to front as a box's six faces are, so the faces go
 //! through a small depth-buffered raster (drawn on the CPU, shown as a texture): hidden faces
 //! stay hidden and each sample knows its triangle, so hover and click name the face actually
 //! seen. Edges stay crisp vector lines, cut where the raster says something nearer covers them.
@@ -17,7 +17,7 @@ use crate::view_gizmo::Shape;
 use solidcraft_engine::geom::Mesh;
 use std::sync::{Arc, Mutex};
 
-/// The body's bounding sphere, in the navigation cube's design units: the cube's own (half
+/// The body's bounding sphere, in the navigator's design units: the navigator's own (half
 /// side 40, so its corners lie 40√3 from the centre).
 const RADIUS: f32 = 69.28;
 /// Samples per pixel along each side: smooth silhouettes.
@@ -27,13 +27,13 @@ const MAX_PIXELS: usize = 512;
 /// No triangle.
 const NONE: u32 = u32::MAX;
 
-/// Centre, radius (points) of the disc the body fills, and the cube's design scale.
+/// Centre, radius (points) of the disc the body fills, and the navigator's design scale.
 fn disc(app: &SolveApp, rect: Rect) -> (Pos2, f32, f32) {
-    let scale = axis_rect(app, rect).width() / navigation_cube::DESIGN_SIZE;
+    let scale = axis_rect(app, rect).width() / navigator_controls::DESIGN_SIZE;
     (axis_center(app, rect), scale * RADIUS, scale)
 }
 
-/// A press anywhere on the body's disc orbits, as a press on the cube does.
+/// A press anywhere on the body's disc orbits, as a press on the axes does.
 pub(super) fn drag_origin(app: &SolveApp, rect: Rect, p: Pos2) -> bool {
     let (c, r, _) = disc(app, rect);
     c.distance(p) <= r
@@ -102,7 +102,7 @@ fn raster(mesh: &Mesh, cam: &Camera, side: usize) -> Raster {
     let mut out = Raster { side, depth: vec![f64::NEG_INFINITY; n], tri: vec![NONE; n], shade: vec![0.0; n], edges: Vec::new() };
     let Some(view) = View::new(mesh, cam, side) else { return out };
     let back = view.basis.2;
-    // The cube's shading: a face square to the eye is the full face colour, an edge-on one 72 %.
+    // The face shading: a face square to the eye is the full face colour, an edge-on one 72 %.
     let shade = |n: Vec3| 0.72 + 0.28 * n.dot(back).clamp(0.0, 1.0) as f32;
     let limit = (side - 1) as f64;
     for (i, t) in mesh.triangles.iter().enumerate() {
@@ -208,17 +208,17 @@ struct Look {
     hovered: Option<u32>,
     texture: NavigatorTexture,
     active: bool,
-    /// Cube face, cube hover, the theme's body colour and the view's background.
+    /// Face, hover, the theme's body colour and the view's background.
     colours: [Color32; 4],
     /// How much lighter the view draws a face under the pointer (grey levels; modeled).
     lift: u8,
 }
 
-/// The hovered face's outline: the cube's accent (themed), or the view's mouse-over edge colour
+/// The hovered face's outline: the navigator's accent (themed), or the view's mouse-over edge colour
 /// (modeled).
-fn hover_outline(texture: NavigatorTexture, cube: &Tokens, view: &Tokens) -> Color32 {
+fn hover_outline(texture: NavigatorTexture, look: &Tokens, view: &Tokens) -> Color32 {
     match texture {
-        NavigatorTexture::Themed => cube.accent,
+        NavigatorTexture::Themed => look.accent,
         NavigatorTexture::Modeled => view.hover_edge,
     }
 }
@@ -230,12 +230,12 @@ fn rgb(r: u8, g: u8, b: u8) -> Color32 {
 
 /// The colour face `face` is painted before shading.
 fn face_colour(shape: &Shape, face: Option<u32>, look: &Look) -> Color32 {
-    let [cube_face, hover, body, background] = look.colours;
+    let [navigator_face, hover, body, background] = look.colours;
     let hovered = face.is_some() && face == look.hovered;
     match look.texture {
-        // As on the cube, the hovered target is one flat colour.
+        // As on the axes, the hovered target is one flat colour.
         NavigatorTexture::Themed if hovered => hover,
-        NavigatorTexture::Themed => cube_face,
+        NavigatorTexture::Themed => navigator_face,
         NavigatorTexture::Modeled => {
             let own = shape.colour_of(face).map_or(body, |[r, g, b]| rgb(r, g, b));
             if hovered {
@@ -243,7 +243,7 @@ fn face_colour(shape: &Shape, face: Option<u32>, look: &Look) -> Color32 {
                 let k = look.lift;
                 return rgb(own.r().saturating_add(k), own.g().saturating_add(k), own.b().saturating_add(k));
             }
-            // Idle, it fades into the view as the cube does.
+            // Idle, it fades into the view as the axes does.
             if look.active { own } else { own.lerp_to_gamma(background, 0.55) }
         }
     }
@@ -324,7 +324,7 @@ type Shared = Arc<Mutex<Option<Cache>>>;
 
 /// Draw the custom navigator as `shown` says (the panel's choices while it is open).
 pub(super) fn show(app: &mut SolveApp, ui: &mut egui::Ui, rect: Rect, shown: crate::view_gizmo::Shown) {
-    let Some(shape) = shown.shape else { return navigation_cube::show(app, ui, rect) };
+    let Some(shape) = shown.shape else { return };
     let outer = axis_rect(app, rect);
     if !outer.is_positive() {
         app.viewport.axis_drag = None;
@@ -335,8 +335,8 @@ pub(super) fn show(app: &mut SolveApp, ui: &mut egui::Ui, rect: Rect, shown: cra
     let (c, radius, scale) = disc(app, rect);
     let orbiting = axis_view_orbit(app, ui, rect);
     let active = orbiting || ui.rect_contains_pointer(outer);
-    let t = Tokens::get().navigation_cube(active);
-    crate::scenario::publish_count("navigation_cube:active", f64::from(u8::from(active)));
+    let t = Tokens::get().navigator(active);
+    crate::scenario::publish_count("navigator:active", f64::from(u8::from(active)));
     let ppp = ui.ctx().pixels_per_point();
     let px = ((2.0 * radius * ppp).ceil().max(1.0) as usize).min(MAX_PIXELS);
     let side = px * SS;
@@ -373,7 +373,7 @@ pub(super) fn show(app: &mut SolveApp, ui: &mut egui::Ui, rect: Rect, shown: cra
                 hovered: face,
                 texture,
                 active,
-                colours: [t.cube_face, t.cube_hover, view.body, view.viewport_top],
+                colours: [t.navigator_face, t.navigator_hover, view.body, view.viewport_top],
                 lift: view.hover_face_lift,
             };
             if cache.look != Some(look) || cache.texture.is_none() {
@@ -387,12 +387,12 @@ pub(super) fn show(app: &mut SolveApp, ui: &mut egui::Ui, rect: Rect, shown: cra
             if let Some(tex) = &cache.texture {
                 painter.image(tex.id(), image, Rect::from_min_max(pos2(0.0, 0.0), pos2(1.0, 1.0)), Color32::WHITE);
             }
-            // The body's edges in the cube's border colour; the hovered face's in the accent, on top.
+            // The body's edges in the navigator's border colour; the hovered face's in the accent, on top.
             let of_hovered = |e: usize| face.is_some_and(|f| mesh.edge_faces.get(e).is_some_and(|fs| fs.contains(&f)));
             for lit in [false, true] {
                 for (_, a, b) in cache.raster.edges.iter().filter(|(e, _, _)| of_hovered(*e) == lit) {
                     let edge = match texture {
-                        NavigatorTexture::Themed => t.cube_border,
+                        NavigatorTexture::Themed => t.navigator_border,
                         // Idle, the model's edges fade into the view with its faces.
                         NavigatorTexture::Modeled if active => view.body_edge,
                         NavigatorTexture::Modeled => view.body_edge.lerp_to_gamma(view.viewport_top, 0.55),
@@ -416,14 +416,14 @@ pub(super) fn show(app: &mut SolveApp, ui: &mut egui::Ui, rect: Rect, shown: cra
         if ui.input(|i| i.pointer.primary_clicked())
             && let Some(normal) = shape.face_normal(tri)
         {
-            navigation_cube::navigate(app, None, Some(app.cam.to_frame(normal)));
+            navigator_controls::navigate(app, None, Some(app.cam.to_frame(normal)));
         }
     }
     if shown.arrows {
-        navigation_cube::arrows(app, ui, &painter, c, scale, active, false, t);
+        navigator_controls::arrows(app, ui, &painter, c, scale, active, t);
     }
     if shown.home {
-        navigation_cube::home(app, ui, &painter, c, scale, active, t);
+        navigator_controls::home(app, ui, &painter, c, scale, active, t);
     }
 }
 
@@ -517,26 +517,26 @@ mod tests {
     fn the_rotation_arrows_and_home_follow_their_settings_and_turn_the_view() {
         let mut h = boxed();
         custom(&mut h);
-        assert!(crate::scenario::handle_at("navigation_cube:control:left").is_some(), "arrows by default");
-        assert!(crate::scenario::handle_at("navigation_cube:control:home").is_some(), "Home by default");
+        assert!(crate::scenario::handle_at("navigator:control:left").is_some(), "arrows by default");
+        assert!(crate::scenario::handle_at("navigator:control:home").is_some(), "Home by default");
         h.app.run("view.navigator", json!({"arrows": false, "home": false})).unwrap();
         h.frames(2);
-        assert!(crate::scenario::handle_at("navigation_cube:control:left").is_none(), "arrows off");
-        assert!(crate::scenario::handle_at("navigation_cube:control:home").is_none(), "Home off");
+        assert!(crate::scenario::handle_at("navigator:control:left").is_none(), "arrows off");
+        assert!(crate::scenario::handle_at("navigator:control:home").is_none(), "Home off");
         h.app.run("view.navigator", json!({"arrows": true, "home": true})).unwrap();
         h.frames(2);
-        let p = crate::scenario::handle_at("navigation_cube:control:clockwise").expect("the roll arrows are there");
+        let p = crate::scenario::handle_at("navigator:control:clockwise").expect("the roll arrows are there");
         let camera = h.app.cam;
         h.call("ui.click", json!({"x": p.x, "y": p.y}));
         assert!((h.app.cam.roll - camera.roll - std::f64::consts::FRAC_PI_2).abs() < 1e-6);
-        let p = crate::scenario::handle_at("navigation_cube:control:home").expect("Home is there");
+        let p = crate::scenario::handle_at("navigator:control:home").expect("Home is there");
         h.call("ui.click", json!({"x": p.x, "y": p.y}));
         assert!(h.app.cam.back().dist(Camera::default().back()) < 1e-6, "Home turns to the home view");
-        assert!(crate::scenario::handle_at("navigation_cube:control:fit").is_none(), "Fit stays the cube's");
+        assert!(crate::scenario::handle_at("navigator:control:fit").is_none(), "Fit is not offered");
     }
 
     #[test]
-    fn modeled_texture_paints_the_body_in_its_own_colour_and_themed_in_the_cubes() {
+    fn modeled_texture_paints_the_body_in_its_own_colour_and_themed_in_the_theme_colours() {
         let mut h = boxed();
         let name = body_name(&h);
         let mut shape = Shape::of_body(&h.app.session, &name).unwrap();
@@ -547,11 +547,11 @@ mod tests {
             hovered: None,
             texture,
             active: true,
-            colours: [t.cube_face, t.cube_hover, t.body, t.viewport_top],
+            colours: [t.navigator_face, t.navigator_hover, t.body, t.viewport_top],
             lift: t.hover_face_lift,
         };
-        assert_ne!(t.body_edge, t.cube_border, "the two textures' edges can be told apart");
-        // A hovered face: the cube's hover colours when themed, the view's mouse-over when modeled.
+        assert_ne!(t.body_edge, t.navigator_border, "the two textures' edges can be told apart");
+        // A hovered face: the navigator's hover colours when themed, the view's mouse-over when modeled.
         assert_eq!(hover_outline(NavigatorTexture::Themed, &t, &t), t.accent);
         assert_eq!(hover_outline(NavigatorTexture::Modeled, &t, &t), t.hover_edge);
         assert!(t.hover_face_lift > 0);
@@ -569,8 +569,8 @@ mod tests {
         let red = middle(&compose(&r, &shape, &look(NavigatorTexture::Modeled)));
         assert!(red.r() > red.g() * 3 && red.r() > red.b() * 3, "the body's red: {red:?}");
         let themed = middle(&compose(&r, &shape, &look(NavigatorTexture::Themed)));
-        let shade = f32::from(themed.r()) / f32::from(t.cube_face.r().max(1));
-        assert!((0.7..=1.01).contains(&shade), "the cube's face colour, shaded: {themed:?}");
+        let shade = f32::from(themed.r()) / f32::from(t.navigator_face.r().max(1));
+        assert!((0.7..=1.01).contains(&shade), "the navigator's face colour, shaded: {themed:?}");
         // The gizmo draws without a frame failing in both textures.
         custom(&mut h);
         for texture in ["modeled", "themed"] {
@@ -581,11 +581,11 @@ mod tests {
     }
 
     #[test]
-    fn custom_without_a_body_draws_the_cube() {
+    fn custom_without_a_body_draws_the_signed_axes() {
         let mut h = boxed();
         h.call("ui.prefs", json!({"navigator_style": "custom"}));
         h.frames(2);
-        assert!(crate::scenario::handle_at("navigation_cube:front").is_some() || crate::scenario::handle_at("navigation_cube:top").is_some());
+        assert!(crate::scenario::handle_at("axis_view:z").is_some());
         assert_eq!(crate::scenario::count_of("body_gizmo:faces"), None);
     }
 }

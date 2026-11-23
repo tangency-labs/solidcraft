@@ -87,7 +87,7 @@ A folder `crashes/<YYYYMMDD-HHMMSS>-<signature>/`:
     - `command_panic`: a command hit an internal error; it was caught and the design was left unchanged
     - `kernel_panic_recovered`: the third-party geometry kernel panicked and was caught. This is harmless on the desktop, but it would crash the web build. A panic on a Rayon worker during a command is recorded this way, with that command and design, when the worker was inside the kernel guard or the command fails with a kernel error.
     - `panic`: an internal error outside any command. A Rayon worker panic while no command is running is still this kind, written at once.
-    - `unclean_exit`: a previous session ended without recording a clean exit. It is detected at the next start, which may be days later. Possible causes include an abort, a stack overflow, a segfault, a crash inside a graphics driver, a system shutdown, or the process being forcibly stopped. This kind alone does not identify the cause. When the app died while starting up, the message and `location` name the startup step (see below). On Windows and macOS, a captured native crash also says the exception or signal, the module it happened in and the offset into it.
+    - `unclean_exit`: a previous session ended without recording a clean exit. It is detected at the next start, which may be days later. Possible causes include an abort, a stack overflow, a segfault, a crash inside a graphics driver, a power loss, a system shutdown, or the process being forcibly stopped (SIGKILL, or a second stop signal). On Linux and macOS, once the window has opened, the first SIGTERM (what a shutdown or restart sends), SIGHUP or Ctrl+C in a terminal closes the app as a forced quit does, keeping unsaved designs for recovery, and the session ends cleanly if the close finishes before the system stops the process. A macOS logout's quit event is not handled this way yet. This kind alone does not identify the cause. When the app died while starting up, the message and `location` name the startup step (see below). On Windows and macOS, a captured native crash also says the exception or signal, the module it happened in and the offset into it.
   - `message`, `location` (file:line), `thread`
   - `backtrace`: frames `symbol (file:line)`, without the panic machinery, std internals or the user's home folder
   - `app` (version, commit, build date), `system` (OS, architecture, renderer and GPU), `session.uptime_s`
@@ -97,11 +97,12 @@ A folder `crashes/<YYYYMMDD-HHMMSS>-<signature>/`:
   - `count`: how many matching reports have been recorded; repeats update the existing report.
   - `first_seen`, `last_seen`: UTC timestamps when the report was first and most recently recorded. For `unclean_exit`, these are detection times at a later launch, not the exact times the sessions ended. The session start in `message` may be much earlier; the report does not imply a failure in the currently open design.
   - `notes`: what is missing and why, for example a design too large to copy
-  - `startup_phase`: `{step, ms}` when the app died before it drew its first frame: the step it
-    was in (`window`, `graphics instance`, `window surface`, `adapter request`, `adapter chosen`,
+  - `startup_phase`: `{step, ms}` when the app died before it was up: the step it was in
+    (`window`, `graphics instance`, `window surface`, `adapter request`, `adapter chosen`,
     `device creation`, `egui renderer (shader compile)`, `surface configure`, `app setup`,
-    `viewport pipelines (shader compile)`, `first frame`, `first frame (present)`) and how many
-    milliseconds after launch it began. `system.environment` names the renderer (backend, GPU,
+    `first frame (present)`, which shows the window with its starting page, then the setup run
+    behind that page: `viewport pipelines (shader compile)`, `design`, `recovery`, `first frame`)
+    and how many milliseconds after launch it began. `system.environment` names the renderer (backend, GPU,
     driver) as soon as the adapter is picked, so it is there even when the device never started.
   - `native` (Windows and macOS): what the native crash handler caught: `code`, `name`,
     `address` (of the faulting instruction), `module`, `offset` (into the module), `detail` (for
@@ -133,6 +134,10 @@ Windows) still gets the startup step. Windows can also keep its own dumps of eve
   restarts the journal from the autosaved design. A clean exit deletes it. The journal file
   is locked while its app runs, so at the next start, a journal nobody holds belongs to an
   app that died.
+- **After an update:** a journal of another version whose app had started up, was between
+  commands and left no native crash record is only logged, not reported: an update or an
+  installer closing the app ends it that way. A journal that stopped recording at its size
+  limit is still reported.
 - **A panic** captures its backtrace only the first time its signature is seen. The
   signature is the place plus the message, with numbers ignored.
 - **Limits:**

@@ -35,7 +35,7 @@ pub(crate) fn read(path: &Path, ascii: bool) -> Result<Body> {
         b.refresh_cached_topology();
         Ok(b)
     })?;
-    Ok(Body::new(b))
+    Ok(Body::from_kernel(b))
 }
 
 /// `b` as the contents of a `.smb` file, ASCII or binary.

@@ -1,0 +1,31 @@
+[package]
+name = "solidcore-step"
+description = "STEP (ISO 10303) import and export: Part 42 geometry and topology read from the Part 21 exchange structure into B-rep records, and written back"
+edition = "2024"
+license.workspace = true
+version.workspace = true
+publish = false
+
+# solidcore's hard rules (no unsafe, no unwrap/expect/panic, no unchecked indexing), with the
+# style lints the reader was written under in SolidCraft: the workspace's pedantic set is not on
+# yet, and `!(x > tol)` stays the NaN-refusing idiom.
+[lints.rust]
+unsafe_code = "forbid"
+
+[lints.clippy]
+unwrap_used = "deny"
+expect_used = "deny"
+panic = "deny"
+indexing_slicing = "deny"
+todo = "deny"
+unimplemented = "deny"
+dbg_macro = "deny"
+too_many_arguments = "allow"
+type_complexity = "allow"
+neg_cmp_op_on_partial_ord = "allow"
+
+[dependencies]
+solidcore = { path = "../solidcore" }
+solidcore-convert = { path = "../solidcore-convert" }
+solidcore-ops = { path = "../solidcore-ops" }
+solidcore-record = { path = "../solidcore-record" }

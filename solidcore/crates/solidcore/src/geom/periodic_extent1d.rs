@@ -29,7 +29,7 @@
 //!
 //! Deviations:
 //! - `SmStatus` returns become `Result<()>`: `SM_ERR` is
-//!   `SolidError::Upstream { code: 1001 }`, `SM_ERR_INVALID_INPUT` is
+//!   a [`GeomFailure`](crate::error::geom::GeomFailure) with status 1001, `SM_ERR_INVALID_INPUT` is
 //!   [`SolidError::InvalidInput`]. [`PeriodicExtent1d::add_interval`] leaves the extent
 //!   unchanged on error (as upstream). [`PeriodicExtent1d::set_min_max`] updates the
 //!   extent even when it returns `InvalidInput`, exactly as upstream does.
@@ -47,12 +47,10 @@
 
 use core::cmp::Ordering;
 
+use crate::error::geom::GeomFailure;
 use crate::error::{Result, SolidError};
 use crate::geom::tol::{self, ScaledZero};
 use crate::math::BIG_DOUBLE;
-
-// Upstream `SM_ERR` (generic error status).
-use crate::error::SM_ERR;
 
 /// An interval on the periodic domain `[0, period]` (`SmPeriodicExtent1d`).
 ///
@@ -88,15 +86,6 @@ enum SeamCase {
 fn is_contained(c: f64, a: f64, b: f64) -> bool {
     let tz = tol::scaled_zero2(&a, &b);
     ((a <= c + tz) && (c - tz <= b)) || ((b <= c + tz) && (c - tz <= a))
-}
-
-/// `SM_ERR` from `operation`.
-fn sm_err(operation: &'static str) -> SolidError {
-    SolidError::Upstream {
-        operation,
-        code: SM_ERR,
-        entity: None,
-    }
 }
 
 impl PeriodicExtent1d {
@@ -235,7 +224,7 @@ impl PeriodicExtent1d {
     ///
     /// # Errors
     ///
-    /// `SolidError::Upstream { code: 1001 }` (`SM_ERR`) when `from` or `to` is outside
+    /// a [`GeomFailure`](crate::error::geom::GeomFailure) with status 1001 (`SM_ERR`) when `from` or `to` is outside
     /// `[0, period]`, or when the span is disjoint from the extent (the union is not an
     /// interval). The extent is unchanged then.
     pub fn add_interval(&mut self, from: f64, to: f64, forward: bool) -> Result<()> {
@@ -244,7 +233,14 @@ impl PeriodicExtent1d {
 
         // check input
         if !is_contained(from, 0.0, self.period) || !is_contained(to, 0.0, self.period) {
-            return Err(sm_err(OP));
+            return Err(SolidError::geom(
+                OP,
+                GeomFailure::SpanOutsidePeriod {
+                    from,
+                    to,
+                    period: self.period,
+                },
+            ));
         }
 
         // when forward is false, swap [from to] to make all cases forward
@@ -292,7 +288,13 @@ impl PeriodicExtent1d {
             SeamCase::Neither => {
                 // disjoint cases
                 if (to < self.min - sz) || (from > self.max + sz) {
-                    return Err(sm_err(OP));
+                    return Err(SolidError::geom(
+                        OP,
+                        GeomFailure::Disjoint {
+                            a: [self.min, self.max],
+                            b: [from, to],
+                        },
+                    ));
                 }
                 if from < self.min {
                     self.min = from;
@@ -304,11 +306,20 @@ impl PeriodicExtent1d {
             SeamCase::SpanOnly => {
                 // disjoint case
                 if (from > self.max + sz) && (to < self.min - sz) {
+                    // the extent and the span as the caller gave them (case 2 swapped them)
+                    let (extent, span) = if swapped {
+                        ([from, to], [self.min, self.max])
+                    } else {
+                        ([self.min, self.max], [from, to])
+                    };
                     if swapped {
                         self.min = from;
                         self.max = to;
                     }
-                    return Err(sm_err(OP));
+                    return Err(SolidError::geom(
+                        OP,
+                        GeomFailure::Disjoint { a: extent, b: span },
+                    ));
                 }
                 // full case
                 if (from < self.max + sz) && (to > self.min - sz) {

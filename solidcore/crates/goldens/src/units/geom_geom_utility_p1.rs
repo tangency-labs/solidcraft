@@ -206,7 +206,7 @@ fn lookup(name: &str) -> Result<Op, HarnessError> {
 fn status_code(e: &SolidError) -> Option<f64> {
     match e {
         SolidError::InvalidInput { .. } | SolidError::PortInvariant { .. } => Some(1007.0),
-        SolidError::Upstream { code, .. } => Some(f64::from(*code)),
+        err if solidcore::error::upstream_status(err).is_some() => Some(f64::from(solidcore::error::upstream_status(err).unwrap_or(-1))),
         _ => None,
     }
 }

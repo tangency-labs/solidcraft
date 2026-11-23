@@ -163,7 +163,13 @@ impl Mod {
     pub fn previews(&self) -> bool {
         matches!(
             self,
-            Self::Mirror | Self::PatternRect { .. } | Self::PatternCirc { .. } | Self::Offset { .. } | Self::Corner { .. } | Self::Divide { .. }
+            Self::Mirror
+                | Self::Move { .. }
+                | Self::PatternRect { .. }
+                | Self::PatternCirc { .. }
+                | Self::Offset { .. }
+                | Self::Corner { .. }
+                | Self::Divide { .. }
         )
     }
 
@@ -467,12 +473,38 @@ pub fn double_click_entities(app: &mut SolveApp) -> bool {
     let Some(Hit::SketchCurve { sketch, id, .. }) = app.viewport.hover.clone() else {
         return false;
     };
-    if app.session.active_sketch != Some(sketch) {
-        return false;
-    }
     let Some(dialog) = app.dialog.as_mut() else {
         return false;
     };
+    // Project takes the curves of the other sketches, never the one being edited: the chain
+    // joined to the curve goes into Geometry as one toggle, as for the Entities inputs below.
+    if matches!(dialog.kind, Kind::SketchProject { .. }) {
+        if app.session.active_sketch == Some(sketch) || dialog.active != 0 {
+            return false;
+        }
+        let Ok(v) = app.session.execute("sketch.chain", &json!({ "sketch": sketch, "curve": id })) else {
+            return false;
+        };
+        let Some(input) = dialog.inputs.get_mut(0) else {
+            return false;
+        };
+        let items: Vec<Sel> = v["curves"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .filter_map(|c| c.as_str())
+            .map(|id| Sel::ExternalSketchCurve { sketch, id: id.to_string() })
+            .filter(|s| !input.rejects(s))
+            .collect();
+        if items.is_empty() {
+            return false;
+        }
+        input.toggle(items);
+        return true;
+    }
+    if app.session.active_sketch != Some(sketch) {
+        return false;
+    }
     // Only the commands whose first input is the shared Entities list take a chain here; Offset
     // has its own Chain option, and the corner tools take one corner at a time.
     let entities = matches!(
@@ -790,15 +822,22 @@ pub(crate) fn point_id<'a>(session: &solidcraft_engine::Session, sel: &'a Sel) -
 }
 
 /// The curves and lone points picked in input `i`, as the engine's `entities` list. A profile
-/// pick expands to every curve of its boundary and its holes (#8390).
-pub(crate) fn entity_ids(session: &solidcraft_engine::Session, inputs: &[SelInput], i: usize) -> Vec<String> {
+/// pick expands to the curves of its outline (#8390): a shape drawn inside it is a region of its
+/// own, picked by a click inside that shape, so a click between two nested rectangles takes the
+/// outer one alone (#14496). With the `region_pick_takes_holes` preference on, the pick also
+/// takes the curves of the region's holes, as it did before.
+pub(crate) fn entity_ids(app: &SolveApp, inputs: &[SelInput], i: usize) -> Vec<String> {
+    let session = &app.session;
+    let holes = app.preferences.region_pick_takes_holes;
     let mut out = Vec::new();
     for x in items(inputs, i) {
         match x {
             Sel::SketchCurve { id, .. } => out.push(id.clone()),
             Sel::Profile { sketch, index } => {
-                if let Some(ids) =
-                    crate::open_meshing::session_world(session).sketch(*sketch).and_then(|ss| ss.profiles.get(*index)).map(|p| p.curve_ids())
+                if let Some(ids) = crate::open_meshing::session_world(session)
+                    .sketch(*sketch)
+                    .and_then(|ss| ss.profiles.get(*index))
+                    .map(|p| if holes { p.curve_ids() } else { p.outer_curves.clone() })
                 {
                     out.extend(ids);
                 }
@@ -962,7 +1001,7 @@ pub fn commands(app: &SolveApp, k: &Mod, inputs: &[SelInput], extra: &Map<String
     }
     let (cmd, mut params) = match k {
         Mod::Scale { factor: text } => {
-            let entities = entity_ids(&app.session, inputs, 0);
+            let entities = entity_ids(app, inputs, 0);
             if entities.is_empty() {
                 return Err("Select the sketch curves or points to scale first".into());
             }
@@ -974,7 +1013,7 @@ pub fn commands(app: &SolveApp, k: &Mod, inputs: &[SelInput], extra: &Map<String
             ("sketch.scale", p)
         }
         Mod::Transform { x, y, factor: text, angle, frame } => {
-            let entities = entity_ids(&app.session, inputs, 0);
+            let entities = entity_ids(app, inputs, 0);
             if entities.is_empty() {
                 return Err("Select the sketch curves or points to transform first".into());
             }
@@ -1014,7 +1053,7 @@ pub fn commands(app: &SolveApp, k: &Mod, inputs: &[SelInput], extra: &Map<String
             ("sketch.offset", params)
         }
         Mod::Mirror => {
-            let entities = entity_ids(&app.session, inputs, 0);
+            let entities = entity_ids(app, inputs, 0);
             if entities.is_empty() {
                 return Err("Select the sketch curves or points to mirror first".into());
             }
@@ -1038,7 +1077,7 @@ pub fn commands(app: &SolveApp, k: &Mod, inputs: &[SelInput], extra: &Map<String
             ("sketch.mirror", json!({"entities": entities, "line": line}))
         }
         Mod::Move { x, y, angle, copy } => {
-            let entities = entity_ids(&app.session, inputs, 0);
+            let entities = entity_ids(app, inputs, 0);
             if entities.is_empty() {
                 return Err("Select the sketch curves or points to move first".into());
             }
@@ -1055,7 +1094,7 @@ pub fn commands(app: &SolveApp, k: &Mod, inputs: &[SelInput], extra: &Map<String
             ("sketch.move", p)
         }
         Mod::PatternRect { count, spacing, count2, spacing2, alignment, alignment2, reversed, reversed2 } => {
-            let entities = entity_ids(&app.session, inputs, 0);
+            let entities = entity_ids(app, inputs, 0);
             if entities.is_empty() {
                 return Err("Select the sketch curves or points to pattern first".into());
             }
@@ -1101,7 +1140,7 @@ pub fn commands(app: &SolveApp, k: &Mod, inputs: &[SelInput], extra: &Map<String
             ("sketch.point.divide", json!({"curves": curves, "segments": v.round()}))
         }
         Mod::PatternCirc { count, angle, alignment, reversed } => {
-            let entities = entity_ids(&app.session, inputs, 0);
+            let entities = entity_ids(app, inputs, 0);
             if entities.is_empty() {
                 return Err("Select the sketch curves or points to pattern first".into());
             }

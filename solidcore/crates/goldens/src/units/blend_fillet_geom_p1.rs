@@ -1201,7 +1201,7 @@ fn uv(p: [f64; 2]) -> Point2 {
 pub(crate) fn status(e: &SolidError) -> f64 {
     match e {
         SolidError::InvalidInput { .. } | SolidError::PortInvariant { .. } => 1007.0,
-        SolidError::Upstream { code, .. } => f64::from(*code),
+        err if solidcore::error::upstream_status(err).is_some() => f64::from(solidcore::error::upstream_status(err).unwrap_or(-1)),
         _ => -1.0,
     }
 }
@@ -3557,6 +3557,97 @@ impl UnitDiff for Runner {
 mod tests {
     use super::*;
     use std::collections::BTreeMap;
+
+    /// The trims whose golden moved from a success to a refusal when
+    /// `fillet_statuses_pass_on` and `fillet_trim_status` were removed (WR-661, WR-604).
+    /// Upstream ignored the failed step and returned success with only the components
+    /// trimmed before it. Each case asks for a trim that cannot be made, which this test
+    /// checks against the numbers in the returned error: a parameter outside the curve's
+    /// or surface's domain, two intervals that do not overlap (one may be the empty
+    /// "inside out" extent that main stored as an edge interval), or a zero-width trim.
+    #[test]
+    fn wr661_moved_trims_ask_for_a_trim_that_does_not_exist() {
+        use solidcore::error::geom::GeomFailure;
+        use solidcore::error::nurbs::{BSplineFailure, NurbsFailure};
+        use solidcore::error::Reason;
+        const MOVED: [&str; 24] = [
+            "fb_trim_outside",
+            "fb_trim_point",
+            "gen0139",
+            "gen0185",
+            "gen0245",
+            "gen0438",
+            "gen0476",
+            "gen0829",
+            "gen1351",
+            "gen1440",
+            "gen1452",
+            "gen1477",
+            "gen1609",
+            "gen1626",
+            "gen1647",
+            "gen1709",
+            "trim_disjoint_rail_interval",
+            "trim_disjoint_surface_domain",
+            "trim_failed_center_line",
+            "trim_failed_other1",
+            "trim_failed_other2",
+            "trim_failed_rail0",
+            "trim_failed_rail1",
+            "trim_failed_surface_point",
+        ];
+        for name in MOVED {
+            let case = crate::case::regression_case(&Runner, name);
+            let inputs: Inputs = case.parse().expect("inputs");
+            let Inputs::Fb {
+                model,
+                query: Query::Trim { g, interval },
+            } = &inputs
+            else {
+                panic!("{name}: not a trim");
+            };
+            let mut m = RustModel::build(model).expect("model");
+            let g = m.geom(*g).expect("geometry");
+            let mut ivl = Extent1d::from_min_max(interval[0], interval[1]);
+            let e = m
+                .fb
+                .trim_geom(&m.k, g, &mut ivl)
+                .expect_err("the trim is refused");
+            // The margin by which the request misses must be well beyond any snap
+            // the trims apply (`100 * scaled_zero` on a B-spline, `EFF_ZERO_SQRT` on
+            // a surface iso), relative to the domain's size: a miss of a few ulps
+            // would be a snapping defect, not an impossible request.
+            let beyond_snap = |margin: f64, scale: f64| {
+                let snap = solidcore::math::EFF_ZERO_SQRT * scale.max(1.0);
+                println!("{name}: misses by {margin:e} (snap {snap:e})");
+                assert!(margin > snap, "{name}: misses by only {margin:e}");
+            };
+            match e.failure().map(|f| &f.reason) {
+                Some(Reason::Nurbs(NurbsFailure::BSpline(BSplineFailure::ParameterOutside {
+                    parameter,
+                    lo,
+                    hi,
+                }))) => beyond_snap(
+                    (lo - parameter).max(parameter - hi),
+                    (hi - lo).abs().max(parameter.abs()),
+                ),
+                Some(Reason::Geom(GeomFailure::Disjoint { a, b })) => beyond_snap(
+                    (a[0] - a[1])
+                        .max(b[0] - b[1])
+                        .max(b[0] - a[1])
+                        .max(a[0] - b[1]),
+                    a.iter().chain(b.iter()).fold(0.0_f64, |s, x| s.max(x.abs())),
+                ),
+                _ => {
+                    assert!(
+                        matches!(e, SolidError::InvalidInput { .. }),
+                        "{name}: unexpected refusal {e:?}"
+                    );
+                    assert_eq!(interval[0], interval[1], "{name}: {e:?}");
+                }
+            }
+        }
+    }
 
     /// Runs chosen cases through the Rust side, for memory checking: `cargo test -p
     /// goldens --lib --no-run`, then the test binary under valgrind with `--ignored

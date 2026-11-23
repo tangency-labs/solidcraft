@@ -36,6 +36,14 @@
 //!   never used: two of its points farther apart than `reach` certify it is not collapsed within
 //!   reach, and otherwise the question is refused.
 //!
+//! On the analytic forms ([`SurfaceEval::collapse`](super::SurfaceEval::collapse)) a direction is
+//! collapsed within `reach` only where the surface narrows to a pole: where its circles along
+//! that direction are somewhere wider than `reach`. A form nowhere wider (a cylinder, a sphere's
+//! meridian, a torus's tube, or any of them no more than `reach` across) is thin, not collapsed,
+//! and only an exact pole is one there. Splines and revolutions do not follow that rule yet:
+//! their iso-lines are decided within `reach` as above, so a round written as a B-spline thinner
+//! than `reach` still reads as collapsed where its analytic form does not.
+//!
 //! The iso-line is taken over the spline's whole knot range along `d`, or over `range` when
 //! one is given ([`collapsed_on`]): over a sub-range only the control points of the knot spans
 //! it meets matter (the B-splines not zero on an interval are independent on it), so a face
@@ -53,7 +61,7 @@ use super::spline::{
     MAX_SPLINE_DEGREE,
 };
 use super::vec::VecExt;
-use super::EvalError;
+use super::{Curve2, EvalError};
 use crate::math::Vec3;
 use crate::nurbs::math::{gamma, UNIT};
 
@@ -843,6 +851,1021 @@ pub fn collapse(s: &EvalSurface, uv: [f64; 2], reach: f64) -> Result<Collapse, E
         along(s, uv, 0, reach, None)?,
         along(s, uv, 1, reach, None)?,
     ]))
+}
+
+/// [`collapse`] at `uv`, or, where `uv` is off a spline's knot range (past it by more than the
+/// evaluator's rounding, as a pcurve's end fitted a little beyond the surface is), at the
+/// nearest point of the range with `reach` less `onto_range`'s certified bound `δ`: every
+/// point of an iso-line through `uv` (the surface's end polynomials continued past the range)
+/// lies within `δ / 2` of a point of the one through that nearest point, so a line of diameter
+/// at most `reach − δ` there has one of at most `reach` at `uv` (the triangle inequality), and
+/// a pole answered is a pole within `reach`. A shift not under `reach` (at no reach, any shift)
+/// is refused ([`EvalError::OffRange`], `OffRangeBeyondReach`), never answered; so is a
+/// rational net off both ranges. Parameters on the range, a closed direction (wrapped by whole
+/// periods: the same point), and any other surface go to [`collapse`] unchanged.
+pub fn collapse_near(s: &EvalSurface, uv: [f64; 2], reach: f64) -> Result<Collapse, EvalError> {
+    check(uv, reach)?;
+    let Some((near, shift)) = onto_range(s, uv)? else {
+        return collapse(s, uv, reach);
+    };
+    if !(shift < reach) {
+        return Err(EvalError::OffRange(format!(
+            "OffRangeBeyondReach: ({}, {}) is off the spline's knot range; moving it onto the \
+             range shifts the surface by up to {shift} mm, not under the reach {reach} mm",
+            uv[0], uv[1]
+        )));
+    }
+    // The difference rounded down, so the reach asked is never above reach − δ.
+    collapse(s, near, (reach - shift) * (1.0 - 2.0 * UNIT))
+}
+
+/// Where `uv` is off a polynomial spline's knot range: the nearest point of the range and a
+/// certified bound `δ` on twice the distance a move between them shifts the surface's points,
+/// along either iso-line; `None` on the range.
+///
+/// For a direction `e` that `uv` is off by `o_e`, take the strip of the net over `e`'s end knot
+/// span (the span holding the nearest point) and the whole of the other direction `f`. On it
+/// the partial `∂S/∂e` is the polynomial whose B-spline coefficients are
+/// `p_e (P_(i+1) − P_i) / (t_(i+p_e+1) − t_(i+1))` over the strip's control points, within their
+/// largest length `M_e` (a convex combination of them, in each patch's Bézier form after knot
+/// insertion). Continued past a span of length `h` by `o` at degree `q`, the Bernstein basis
+/// sums in absolute value to `(1 + 2o/h)^q`, so on the strip continued past the range
+/// `|∂S/∂e| ≤ M_e (1 + 2o_e/h_e)^(p_e − 1) (1 + 2o_f/h_f)^(p_f)`, `h_f` the shortest span along
+/// `f`. Every point of an iso-line through `uv` along `f` is then within `o_e` times that of the
+/// line through the nearest point (moving across `e`), and the piece of an iso-line along `e`
+/// past the range within the same of its end; `δ` is twice the sum over the directions, rounded
+/// up. Where a strip has a weight other than the net's first and `uv` is off along one direction
+/// only, the shift is instead bounded on the strip between `uv` and the nearest point along it
+/// and the whole range across ([`rational_partial_bound`]); off both ranges, or with a weight
+/// not positive, it is refused ([`EvalError::OffRange`]).
+fn onto_range(s: &EvalSurface, uv: [f64; 2]) -> Result<Option<([f64; 2], f64)>, EvalError> {
+    let EvalSurface::Nurbs(n) = s else {
+        return Ok(None);
+    };
+    let q = s.wrap(uv);
+    let (deg, knots, count, ctrl) = (n.degree(), n.knots(), n.count(), n.ctrl());
+    let bad = || malformed("knots or a net that do not fit");
+    let none: &[f64] = &[];
+    let kn = |d: usize| knots.get(d).map_or(none, Vec::as_slice);
+    let get = |a: &[usize; 2], d: usize| a.get(d).copied().unwrap_or(0);
+    let mut near = q;
+    let mut off = [0.0f64; 2];
+    for d in 0..2 {
+        let (p, m, k) = (get(&deg, d), get(&count, d), kn(d));
+        let (&lo, &hi) = (k.get(p).ok_or_else(bad)?, k.get(m).ok_or_else(bad)?);
+        let (Some(x), Some(o)) = (near.get_mut(d), off.get_mut(d)) else {
+            return Err(bad());
+        };
+        if onto_knots(k, p, m, *x).is_none() {
+            let t = *x;
+            *x = if t < lo { lo } else { hi };
+            *o = (t - *x).abs() * (1.0 + UNIT);
+        }
+    }
+    if off == [0.0, 0.0] {
+        return Ok(None);
+    }
+    // Each direction's end span at the nearest point (as de Boor takes it): its first control
+    // point index and length, and the direction's shortest span.
+    let mut span = [(0usize, 0.0f64, 0.0f64); 2];
+    for d in 0..2 {
+        let (p, m, k) = (get(&deg, d), get(&count, d), kn(d));
+        let c = onto_knots(k, p, m, near.get(d).copied().unwrap_or(f64::NAN)).ok_or_else(bad)?;
+        let last = m.checked_sub(1).ok_or_else(bad)?;
+        let mut at = p;
+        while at < last && k.get(at + 1).is_some_and(|y| *y <= c) {
+            at += 1;
+        }
+        let h = k.get(at + 1).ok_or_else(bad)? - k.get(at).ok_or_else(bad)?;
+        let shortest = (p..=last)
+            .filter_map(|i| Some(k.get(i + 1)? - k.get(i)?))
+            .filter(|h| *h > 0.0)
+            .fold(f64::INFINITY, f64::min);
+        let spans = h > 0.0 && shortest > 0.0 && shortest.is_finite();
+        if !spans {
+            return Err(bad());
+        }
+        if let Some(slot) = span.get_mut(d) {
+            *slot = (at.checked_sub(p).ok_or_else(bad)?, h, shortest);
+        }
+    }
+    let nu = get(&count, 0);
+    let w0 = ctrl.first().ok_or_else(bad)?[3];
+    let rational = || {
+        EvalError::OffRange(format!(
+            "({}, {}) is off the spline's knot range on a rational net, whose continuation past \
+             the range is not bounded",
+            uv[0], uv[1]
+        ))
+    };
+    // Whether a strip the bound below takes (each overrun direction's end span along it, the
+    // whole range across) has a weight other than the net's first.
+    let mut weighted = false;
+    for e in 0..2 {
+        if off.get(e).copied().unwrap_or(0.0) == 0.0 {
+            continue;
+        }
+        let (p, first) = (get(&deg, e), span.get(e).ok_or_else(bad)?.0);
+        for i in first..=first + p {
+            for j in 0..get(&count, 1 - e) {
+                let (iu, iv) = if e == 0 { (i, j) } else { (j, i) };
+                let at = iv.checked_mul(nu).and_then(|x| x.checked_add(iu));
+                let w = at.and_then(|x| ctrl.get(x)).ok_or_else(bad)?[3];
+                weighted |= w != w0;
+            }
+        }
+    }
+    if weighted {
+        // Off along one direction `e` only, the surface between `uv` and the nearest point moves
+        // by at most `o_e B + 2ε` over the strip between them along `e` and the whole range
+        // across ([`rational_partial_bound`]); twice that, rounded up. Off both ranges the strip
+        // across is off its range too, which the bound does not take: refused, as a pcurve past
+        // both ranges of a rational patch is.
+        let e = match off {
+            [o, 0.0] if o > 0.0 => 0,
+            [0.0, o] if o > 0.0 => 1,
+            _ => return Err(rational()),
+        };
+        let (o, x, t) = (
+            off.get(e).copied().ok_or_else(bad)?,
+            near.get(e).copied().ok_or_else(bad)?,
+            q.get(e).copied().ok_or_else(bad)?,
+        );
+        let along = if t < x { [x - o, x] } else { [x, x + o] };
+        let (pf, mf, kf) = (get(&deg, 1 - e), get(&count, 1 - e), kn(1 - e));
+        let across = [*kf.get(pf).ok_or_else(bad)?, *kf.get(mf).ok_or_else(bad)?];
+        let (bound, eps) = rational_partial_bound(s, e, along, across, f64::INFINITY)?;
+        let delta = 2.0 * (o * bound + 2.0 * eps) * (1.0 + gamma(4));
+        if !delta.is_finite() {
+            return Err(refused("a shift onto the knot range is not finite"));
+        }
+        return Ok(Some((near, delta)));
+    }
+    // Control point `i` along e, `j` across, as a Euclidean point of the one weight w0.
+    let point = |e: usize, i: usize, j: usize| -> Result<Vec3, EvalError> {
+        let (iu, iv) = if e == 0 { (i, j) } else { (j, i) };
+        let c = ctrl
+            .get(
+                iv.checked_mul(nu)
+                    .and_then(|x| x.checked_add(iu))
+                    .ok_or_else(bad)?,
+            )
+            .copied()
+            .ok_or_else(bad)?;
+        let polynomial = c[3] == w0 && w0 > 0.0 && c.iter().all(|x| x.is_finite());
+        if !polynomial {
+            return Err(rational());
+        }
+        Ok(Vec3::new(c[0], c[1], c[2]) * (1.0 / w0))
+    };
+    let grow = |o: f64, h: f64, power: usize| -> f64 {
+        (0..power).fold(1.0, |acc, _| acc * (1.0 + 2.0 * o / h))
+    };
+    let mut shift = 0.0f64;
+    for e in 0..2 {
+        let f = 1 - e;
+        let (o_e, o_f) = (
+            off.get(e).copied().unwrap_or(0.0),
+            off.get(f).copied().unwrap_or(0.0),
+        );
+        let (p, pf, m_f, k) = (get(&deg, e), get(&deg, f), get(&count, f), kn(e));
+        if o_e == 0.0 || p == 0 {
+            continue;
+        }
+        let (Some(&(first, h_e, _)), Some(&(_, _, h_f))) = (span.get(e), span.get(f)) else {
+            return Err(bad());
+        };
+        let mut top = 0.0f64;
+        for a in first..first + p {
+            let step = k.get(a + p + 1).ok_or_else(bad)? - k.get(a + 1).ok_or_else(bad)?;
+            if !(step > 0.0) {
+                return Err(bad());
+            }
+            for b in 0..m_f {
+                let (x, y) = (point(e, a, b)?, point(e, a + 1, b)?);
+                // The difference's length with its rounding on the points' own sizes (each
+                // point's division, the difference, the length).
+                let len = (y - x).len() + gamma(8) * (x.len() + y.len());
+                top = top.max(p as f64 * len / step);
+            }
+        }
+        shift += o_e * top * grow(o_e, h_e, p - 1) * grow(o_f, h_f, pf);
+    }
+    // Twice the bound, rounded up over its few dozen operations (each point's division, the
+    // differences, lengths, quotients, powers and products).
+    let delta = 2.0 * shift * (1.0 + gamma(64));
+    if !delta.is_finite() {
+        return Err(refused("a shift onto the knot range is not finite"));
+    }
+    Ok(Some((near, delta)))
+}
+
+/// A certified bound on `|∂S/∂x_d|` of a polynomial spline over the points whose other
+/// parameter lies in `across` (on its knot range), or past an end of that range `across`
+/// reaches by at most `beyond_across`, and whose `d` parameter is on its knot range or past
+/// either end by at most `beyond`: how far the surface moves per unit of `d` there, so a point
+/// moved along `d` by `o` within that strip (a pcurve's control point a little past the range
+/// put on it) moves the surface by at most `o` times the bound.
+///
+/// On the range `∂S/∂d` at a fixed other parameter is the B-spline whose coefficients are
+/// `p (Q_(i+1) − Q_i) / (t_(i+p+1) − t_(i+1))` over the iso-line's control points `Q_i`, within
+/// their largest length (a convex combination of them). Over a strip the `Q_i` are the net's
+/// columns that are not zero somewhere on it ([`indices`]); at one parameter (`across` a single
+/// value, nothing past it) they are that iso-line's own, by de Boor across (with their
+/// rounding). Past the range the end spans' polynomials continue, the Bernstein basis summing in
+/// absolute value to at most `(1 + 2 beyond / h)^(p − 1)` over the derivative's degree `p − 1`,
+/// `h` the shorter end span ([`onto_range`]), and across to `(1 + 2 beyond_across / h_f)^q` over
+/// the degree `q` across, on the columns of the end span the strip holds. The product is rounded
+/// up. A rational net (any weight other than the first, or not positive), a point of the net
+/// whose Euclidean coordinates are not finite (a tiny weight), `across` off the range, or knots
+/// with an empty span where one is needed is refused: the bound is not decided there.
+pub fn partial_bound(
+    s: &EvalSurface,
+    d: usize,
+    across: [f64; 2],
+    beyond: f64,
+    beyond_across: f64,
+) -> Result<f64, EvalError> {
+    let EvalSurface::Nurbs(n) = s else {
+        return Err(refused("a partial bound of a surface that is not a spline"));
+    };
+    if d > 1 {
+        return Err(past(d));
+    }
+    let distance = |x: f64| x >= 0.0 && x.is_finite();
+    if !(distance(beyond) && distance(beyond_across) && across.iter().all(|x| x.is_finite())) {
+        return Err(malformed(
+            "a strip or a distance past the range that is not finite",
+        ));
+    }
+    let f = 1 - d;
+    let (deg, knots, count, ctrl) = (n.degree(), n.knots(), n.count(), n.ctrl());
+    let bad = || malformed("knots or a net that do not fit");
+    let none: &[f64] = &[];
+    let kn = |x: usize| knots.get(x).map_or(none, Vec::as_slice);
+    let get = |a: &[usize; 2], x: usize| a.get(x).copied().unwrap_or(0);
+    let (p, m, k) = (get(&deg, d), get(&count, d), kn(d));
+    let (q, mf, kf) = (get(&deg, f), get(&count, f), kn(f));
+    let nu = get(&count, 0);
+    let w0 = ctrl.first().ok_or_else(bad)?[3];
+    if !(w0 > 0.0 && ctrl.iter().all(|c| c[3] == w0)) {
+        return Err(refused("a partial bound of a rational net"));
+    }
+    // Control point `i` along d, `j` across, Euclidean (the net's one weight).
+    let point = |i: usize, j: usize| -> Result<Vec3, EvalError> {
+        let (iu, iv) = if d == 0 { (i, j) } else { (j, i) };
+        let c = ctrl
+            .get(
+                iv.checked_mul(nu)
+                    .and_then(|x| x.checked_add(iu))
+                    .ok_or_else(bad)?,
+            )
+            .copied()
+            .ok_or_else(bad)?;
+        if !(c[3] == w0 && w0 > 0.0 && c.iter().all(|x| x.is_finite())) {
+            return Err(refused("a partial bound of a rational net"));
+        }
+        let x = Vec3::new(c[0], c[1], c[2]) * (1.0 / w0);
+        if !(x.x.is_finite() && x.y.is_finite() && x.z.is_finite()) {
+            return Err(refused(
+                "a partial bound of a net whose Euclidean points are not finite",
+            ));
+        }
+        Ok(x)
+    };
+    let (a, b) = (across[0].min(across[1]), across[0].max(across[1]));
+    let (Some(a), Some(b)) = (onto_knots(kf, q, mf, a), onto_knots(kf, q, mf, b)) else {
+        return Err(refused("a strip off the knot range across"));
+    };
+    // Each iso-line's control points along d with their rounding: one line at a single
+    // parameter across, else every column the strip meets.
+    let mut lines: Vec<Vec<(Vec3, f64)>> = Vec::new();
+    if a == b && beyond_across == 0.0 {
+        let mut line = Vec::new();
+        for i in 0..m {
+            let at = |j: usize| point(i, j).ok().map(|x| Hom::exact([x.x, x.y, x.z, 1.0]));
+            let h = de_boor(q, kf, mf, at, a).map_err(|o| off_message(o, [a, b]))?;
+            line.push(h.euclid()?);
+        }
+        lines.push(line);
+    } else {
+        let (first, end, _, _) = indices(q, kf, mf, Some((a, b))).ok_or_else(bad)?;
+        for j in first..=end {
+            lines.push(
+                (0..m)
+                    .map(|i| point(i, j).map(|x| (x, 0.0)))
+                    .collect::<Result<_, _>>()?,
+            );
+        }
+    }
+    let mut top = 0.0f64;
+    for line in &lines {
+        for i in 0..m.saturating_sub(1) {
+            let step = k.get(i + p + 1).ok_or_else(bad)? - k.get(i + 1).ok_or_else(bad)?;
+            if !(step > 0.0) {
+                return Err(bad());
+            }
+            let (Some(&(x, ex)), Some(&(y, ey))) = (line.get(i), line.get(i + 1)) else {
+                return Err(bad());
+            };
+            let len = (y - x).len() + ex + ey + gamma(8) * (x.len() + y.len());
+            top = top.max(p as f64 * len / step);
+        }
+    }
+    // The end spans' continuation past the range along a direction of degree `deg` over
+    // `count` points, by `o`, to the power `power`.
+    let grow = |kk: &[f64], deg: usize, count: usize, o: f64, power: usize| {
+        if !(o > 0.0 && power > 0) {
+            return Ok(1.0);
+        }
+        let (Some(&lo), Some(&lo1), Some(&hi), Some(&hi0)) = (
+            kk.get(deg),
+            kk.get(deg + 1),
+            kk.get(count),
+            kk.get(count.checked_sub(1).ok_or_else(bad)?),
+        ) else {
+            return Err(bad());
+        };
+        let h = (lo1 - lo).min(hi - hi0);
+        if !(h > 0.0) {
+            return Err(bad());
+        }
+        Ok((0..power).fold(1.0, |acc, _| acc * (1.0 + 2.0 * o / h)))
+    };
+    let along = grow(k, p, m, beyond, p.saturating_sub(1))?;
+    let side = grow(kf, q, mf, beyond_across, q)?;
+    let bound = top * along * side * (1.0 + gamma(24));
+    if !bound.is_finite() {
+        return Err(refused("a partial bound that is not finite"));
+    }
+    Ok(bound)
+}
+
+/// The Bézier form over `[x0, x1]` of the piece on knot span `k` of the homogeneous B-spline
+/// of degree `p` on `knots` whose control points are `at(i)`: its `p + 1` points, the `m`-th
+/// the blossom at `x0` taken `p − m` times and at `x1` `m` times (the piece continued past its
+/// span where `[x0, x1]` runs past it), each with its rounding. These are de Boor's levels
+/// with those arguments; a level whose coefficient `α` lies outside [0, 1] grows its inputs by
+/// at most `|1 − α| + |α|`, so the rounding is the inputs' and de Boor's `γ_(12p+4)` of their
+/// largest coordinate ([`de_boor`]), both times the product `G` of the levels' growths.
+fn bezier_piece(
+    p: usize,
+    knots: &[f64],
+    k: usize,
+    at: impl Fn(usize) -> Option<Hom>,
+    [x0, x1]: [f64; 2],
+) -> Result<Vec<Hom>, Off> {
+    if p > MAX_SPLINE_DEGREE {
+        return Err(Off::Malformed);
+    }
+    let first = k.checked_sub(p).ok_or(Off::Malformed)?;
+    let mut input = [Hom::default(); MAX_SPLINE_DEGREE + 1];
+    let (mut ex, mut ew, mut sx, mut sw) = (0.0f64, 0.0f64, 0.0f64, 0.0f64);
+    for (j, slot) in input.iter_mut().take(p + 1).enumerate() {
+        let q = at(first.checked_add(j).ok_or(Off::Malformed)?).ok_or(Off::Malformed)?;
+        ex = ex.max(q.ex);
+        ew = ew.max(q.ew);
+        sx = sx.max(q.h[0].abs()).max(q.h[1].abs()).max(q.h[2].abs());
+        sw = sw.max(q.h[3].abs());
+        *slot = q;
+    }
+    let mut out = Vec::new();
+    for m in 0..=p {
+        let mut d = input;
+        let mut growth = 1.0f64;
+        for r in 1..=p {
+            let x = if r + m <= p { x0 } else { x1 };
+            let mut most = 1.0f64;
+            for j in (r..=p).rev() {
+                let i = first.checked_add(j).ok_or(Off::Malformed)?;
+                let lo = *knots.get(i).ok_or(Off::Malformed)?;
+                let hi_at = i
+                    .checked_add(p + 1)
+                    .and_then(|y| y.checked_sub(r))
+                    .ok_or(Off::Malformed)?;
+                let span = *knots.get(hi_at).ok_or(Off::Malformed)? - lo;
+                if !(span > 0.0) {
+                    return Err(Off::Malformed);
+                }
+                let a = (x - lo) / span;
+                most = most.max((1.0 - a).abs() + a.abs());
+                let prev = d
+                    .get(j.checked_sub(1).ok_or(Off::Malformed)?)
+                    .ok_or(Off::Malformed)?
+                    .h;
+                let cur = d.get_mut(j).ok_or(Off::Malformed)?;
+                for (c, q) in cur.h.iter_mut().zip(prev) {
+                    *c = (1.0 - a) * q + a * *c;
+                }
+            }
+            growth *= most;
+        }
+        // The growth's own products, rounded up.
+        let g = growth * (1.0 + gamma(p + 1));
+        let mut b = *d.get(p).ok_or(Off::Malformed)?;
+        b.ex = g * (ex + gamma(12 * p + 4) * sx);
+        b.ew = g * (ew + gamma(12 * p + 4) * sw);
+        out.push(b);
+    }
+    Ok(out)
+}
+
+/// The finest level [`rational_partial_bound`] cuts a piece at: 2^6 = 64 parts, as a blend's
+/// span is refined to at most level 6 (`docs/definitions-and-certificates.md` §4.5).
+const RATIONAL_BOUND_LEVELS: u32 = 6;
+
+/// A certified bound `B` on `|∂S'/∂x_d|` of a rational spline (positive weights) moved by minus
+/// the middle `c0` of its points' box, over the points whose `d` parameter lies in `along` (on
+/// the knot range, or past an end of it, where the end span's polynomials continue) and whose
+/// other parameter lies in `across`, on its knot range; and a certified bound `ε` on
+/// `|S − c0 − S'|` there, `S'` the surface of the moved net as rounded. So `S` moves by at most
+/// `B |Δx_d| + 2ε` along `d` within the strip, and the rounding in `B` follows the net's size,
+/// not its distance from the origin (as a round is certified in its own frame,
+/// `docs/definitions-and-certificates.md` §4.4).
+///
+/// Along `d`, `along` is cut at the knots; on each piece every row of the net (its control
+/// points along `d` at one index across) is put in Bézier form over the piece
+/// ([`bezier_piece`]): points `b_kj` (`k` along `d`, `j` across) with weights `w_kj` and
+/// Euclidean points `E_kj`. Across, on one knot span only its `q + 1` rows are not zero, and
+/// their B-splines `M_j` sum to 1 there. At a parameter across, the iso-line along `d` over the
+/// piece is the rational Bézier curve of the points `Σ_j M_j b_kj` (blossoms are linear in the
+/// net): weights `ω_k`, Euclidean points `R_k`. Its derivative on a piece of length `L` is
+///
+/// `r' = (p / L) Σ_k β_k [ω_(k+1) (R_(k+1) − R_k) + (ω_(k+1) − ω_k) (R_k − r)] / Ω`,
+///
+/// `β_k` the Bernstein basis of degree `p − 1` (not negative on the piece, summing to 1) and
+/// `Ω = Σ β^p_k ω_k`: the hodograph of a rational Bézier curve (M. S. Floater, "Derivatives of
+/// rational Bézier curves", CAGD 9 (1992)), written about `r`. With positive weights `r` lies
+/// in the hull of the `R_m`, so
+///
+/// `|r'| ≤ (p / L) max_k [ω⁺ |R_(k+1) − R_k| + |ω_(k+1) − ω_k| max_m |R_k − R_m|] / ω⁻`,
+///
+/// `ω⁺` and `ω⁻` the greatest and least `w_kj` (the `ω_k` and `Ω` are convex combinations of
+/// them), `|ω_(k+1) − ω_k| ≤ max_j |w_(k+1)j − w_kj|`. Two of the `R` are rational combinations
+/// with the same coefficients `M_j`, so for any point `c`
+///
+/// `|R_k − R_m| ≤ max_j |E_kj − E_mj| + max_(j,l) |w_kj w_ml − w_kl w_mj| max_j |E_mj − c| / ω⁻²`
+///
+/// (the distance of two rational nets, `docs/definitions-and-certificates.md` §4.2), `c` the
+/// middle of the rows' box. Every quantity carries its rounding (the Bézier points', each
+/// Euclidean point's from its weight, the differences', lengths' and products'), and the bound
+/// is rounded up over its last few dozen operations.
+///
+/// The hulls are those of the piece's points, so a shorter piece gives a tighter bound: each
+/// piece is cut into 2^L equal parts at level `L = 0, 1, …` up to [`RATIONAL_BOUND_LEVELS`],
+/// until the bound is at most `target`, as a blend's span is refined level by level
+/// (`docs/definitions-and-certificates.md` §4.5); a part of no length is skipped (a point of its
+/// neighbours), and a level stops once it cannot improve on the last. Every level's bound
+/// holds; the least found is returned.
+///
+/// Refused where a weight of a piece is not certified positive (past the range a continued
+/// weight can reach zero), where the weights' products, the weights' part of a distance between
+/// the `R` or the bound leave the normal range (underflow) or are not finite (overflow), where
+/// `across` is off its knot range or `along` is empty, and for knots with an empty span where
+/// one is needed or, along `d`, a multiplicity above the degree.
+fn rational_partial_bound(
+    s: &EvalSurface,
+    d: usize,
+    along: [f64; 2],
+    across: [f64; 2],
+    target: f64,
+) -> Result<(f64, f64), EvalError> {
+    let EvalSurface::Nurbs(n) = s else {
+        return Err(refused("a partial bound of a surface that is not a spline"));
+    };
+    if d > 1 {
+        return Err(past(d));
+    }
+    if !(along.iter().chain(&across).all(|x| x.is_finite())
+        && along[0] < along[1]
+        && across[0] <= across[1])
+    {
+        return Err(malformed("a strip that is empty or not finite"));
+    }
+    let f = 1 - d;
+    let (deg, knots, count, ctrl) = (n.degree(), n.knots(), n.count(), n.ctrl());
+    let bad = || malformed("knots or a net that do not fit");
+    let none: &[f64] = &[];
+    let kn = |x: usize| knots.get(x).map_or(none, Vec::as_slice);
+    let get = |a: &[usize; 2], x: usize| a.get(x).copied().unwrap_or(0);
+    let (p, m, k) = (get(&deg, d), get(&count, d), kn(d));
+    let (q, mf, kf) = (get(&deg, f), get(&count, f), kn(f));
+    let nu = get(&count, 0);
+    let (&f_lo, &f_hi) = (kf.get(q).ok_or_else(bad)?, kf.get(mf).ok_or_else(bad)?);
+    if !(f_lo <= across[0] && across[1] <= f_hi) {
+        return Err(refused("a strip off the knot range across"));
+    }
+    // The net moved by minus the middle `c0` of its points' box, rounded, and taken as exact
+    // (`moved`): the bound below is that of its surface S', every rounding in it of the size of
+    // the net, not of its distance from the origin. Each point's move is off by at most `δ`
+    // (the product `w c0` and the difference, over the weight), so `S − c0 − S'`, the rational
+    // spline of those errors with the same weights, is at most `δ` times the sum of its basis'
+    // sizes (`eps` below).
+    let (mut lo, mut hi) = ([f64::INFINITY; 3], [f64::NEG_INFINITY; 3]);
+    for c in ctrl.iter().filter(|c| c[3] > 0.0) {
+        for (e, (l, h)) in lo.iter_mut().zip(hi.iter_mut()).enumerate() {
+            let x = c.get(e).copied().unwrap_or(0.0) / c[3];
+            *l = l.min(x);
+            *h = h.max(x);
+        }
+    }
+    let c0 = [0, 1, 2].map(|e| {
+        let (l, h) = (lo.get(e).copied(), hi.get(e).copied());
+        match (l, h) {
+            (Some(l), Some(h)) if l <= h => 0.5 * (l + h),
+            _ => 0.0,
+        }
+    });
+    let mut delta = 0.0f64;
+    let mut heaviest = 0.0f64;
+    let moved: Vec<[f64; 4]> = ctrl
+        .iter()
+        .map(|c| {
+            let w = c[3];
+            let h = [c[0] - w * c0[0], c[1] - w * c0[1], c[2] - w * c0[2], w];
+            let size = c0.iter().map(|x| x.abs()).fold(0.0, f64::max) * w.abs()
+                + h.iter().take(3).map(|x| x.abs()).fold(0.0, f64::max);
+            delta = delta.max(3f64.sqrt() * gamma(2) * size / w.abs());
+            heaviest = heaviest.max(w.abs());
+            h
+        })
+        .collect();
+    // The net's homogeneous point `i` along d, `j` across, moved.
+    let point = |i: usize, j: usize| -> Option<Hom> {
+        let (iu, iv) = if d == 0 { (i, j) } else { (j, i) };
+        moved
+            .get(iv.checked_mul(nu)?.checked_add(iu)?)
+            .copied()
+            .map(Hom::exact)
+    };
+    // The knot spans (`t ∈ [knots[s], knots[s + 1]]`, not empty) of a direction of degree `deg`
+    // over `count` points that meet `[a, b]`, the first and last taking in what lies past the
+    // range's ends: each with its part of `[a, b]`.
+    let spans = |kk: &[f64], deg: usize, count: usize, [a, b]: [f64; 2]| {
+        let open: Vec<usize> = (deg..count)
+            .filter(|&s| matches!((kk.get(s), kk.get(s + 1)), (Some(x), Some(y)) if x < y))
+            .collect();
+        let (Some(&first), Some(&last)) = (open.first(), open.last()) else {
+            return Err(bad());
+        };
+        let mut out = Vec::new();
+        for &s in &open {
+            let (Some(&x), Some(&y)) = (kk.get(s), kk.get(s + 1)) else {
+                return Err(bad());
+            };
+            let lo = if s == first { a } else { a.max(x) };
+            let hi = if s == last { b } else { b.min(y) };
+            if lo <= hi {
+                out.push((s, [lo, hi]));
+            }
+        }
+        Ok(out)
+    };
+    let windows = spans(kf, q, mf, across)?;
+    // The bound over one piece `[x0, x1]` of knot span `sd` along d, every span across.
+    // With it, the least weight there (a lower bound of the weight over the piece).
+    let on_piece = |sd: usize, piece: [f64; 2]| -> Result<(f64, f64), EvalError> {
+        let length = piece[1] - piece[0];
+        let (mut bound, mut least) = (0.0f64, f64::INFINITY);
+        for &(sf, _) in &windows {
+            // The rows not zero on this span across, each in Bézier form over the piece:
+            // `rows[j][k]` the Euclidean point, its error, its weight and the weight's error.
+            let mut rows: Vec<Vec<(Vec3, f64, f64, f64)>> = Vec::new();
+            for j in sf.checked_sub(q).ok_or_else(bad)?..=sf {
+                let b = bezier_piece(p, k, sd, |i| point(i, j), piece)
+                    .map_err(|o| off_message(o, [piece[0], across[0]]))?;
+                let mut row = Vec::new();
+                for h in b {
+                    if !(h.h[3] > h.ew) {
+                        return Err(refused(&format!(
+                            "a weight {} of a rational net, continued over [{}, {}], is not \
+                             certified positive (its rounding is up to {})",
+                            h.h[3], piece[0], piece[1], h.ew
+                        )));
+                    }
+                    let (e, err) = h.euclid()?;
+                    row.push((e, err, h.h[3], h.ew));
+                }
+                rows.push(row);
+            }
+            let all = || rows.iter().flatten();
+            let low = all()
+                .map(|r| (r.2 - r.3) * (1.0 - gamma(2)))
+                .fold(f64::INFINITY, f64::min);
+            let high = all()
+                .map(|r| (r.2 + r.3) * (1.0 + gamma(2)))
+                .fold(0.0, f64::max);
+            if !(low > 0.0 && high.is_finite()) {
+                return Err(refused("a weight of a rational net that is not positive"));
+            }
+            // Every weight is at least `low`, so with `low * low` normal so are the weights'
+            // products below, and their rounding is the relative one `gamma` counts.
+            if !(low * low >= f64::MIN_POSITIVE) {
+                return Err(refused(
+                    "weights of a rational net whose products underflow",
+                ));
+            }
+            least = least.min(low);
+            let (mut lo, mut hi) = ([f64::INFINITY; 3], [f64::NEG_INFINITY; 3]);
+            for r in all() {
+                for ((l, h), x) in lo.iter_mut().zip(hi.iter_mut()).zip(r.0.to_array()) {
+                    *l = l.min(x);
+                    *h = h.max(x);
+                }
+            }
+            let c = (Vec3::from_array(lo) + Vec3::from_array(hi)) * 0.5;
+            let radius = all()
+                .map(|r| (r.0 - c).len() * (1.0 + gamma(6)) + r.1)
+                .fold(0.0, f64::max);
+            let at = |j: usize, kk: usize| rows.get(j).and_then(|r| r.get(kk)).copied();
+            // |R_a − R_b| over every parameter across this span.
+            // Not finite where the weights' products overflow (∞ − ∞) or the net's points do; a
+            // maximum would drop a NaN, so each term is refused before one sees it.
+            let finite = |x: f64| -> Result<f64, EvalError> {
+                if x.is_finite() {
+                    Ok(x)
+                } else {
+                    Err(refused(
+                        "a distance on a rational net that is not finite (its weights' \
+                         products or its points overflow)",
+                    ))
+                }
+            };
+            let apart = |a: usize, b: usize| -> Result<f64, EvalError> {
+                let (mut near, mut cross) = (0.0f64, 0.0f64);
+                for j in 0..rows.len() {
+                    let ((ea, xa, wa, va), (eb, xb, wb, vb)) =
+                        (at(j, a).ok_or_else(bad)?, at(j, b).ok_or_else(bad)?);
+                    near = near.max(finite((ea - eb).len() * (1.0 + gamma(6)) + xa + xb)?);
+                    for l in 0..rows.len() {
+                        let ((_, _, wal, val), (_, _, wbl, vbl)) =
+                            (at(l, a).ok_or_else(bad)?, at(l, b).ok_or_else(bad)?);
+                        let (x, y) = (wa * wbl, wal * wb);
+                        let e = (x - y).abs()
+                            + gamma(3) * (x.abs() + y.abs())
+                            + va * wbl.abs()
+                            + wa.abs() * vbl
+                            + va * vbl
+                            + val * wb.abs()
+                            + wal.abs() * vb
+                            + val * vb;
+                        cross = cross.max(finite(e)?);
+                    }
+                }
+                // The weights' part, divided first so it does not scale with the weights. Below
+                // the normal range its rounding is not the relative one `gamma` counts, and at
+                // zero it would leave the weights' move out, so it is refused there.
+                let part = finite(cross / (low * low))? * radius;
+                if !(part >= f64::MIN_POSITIVE || radius == 0.0) {
+                    return Err(refused(
+                        "a distance on a rational net whose weights' part underflows",
+                    ));
+                }
+                finite(near + part)
+            };
+            // How far the weights move from one Bézier point to the next, over every row.
+            let mut turns = Vec::new();
+            let mut most_turn = 0.0f64;
+            for kk in 0..p {
+                let mut turn = 0.0f64;
+                for j in 0..rows.len() {
+                    let ((_, _, wa, va), (_, _, wb, vb)) =
+                        (at(j, kk).ok_or_else(bad)?, at(j, kk + 1).ok_or_else(bad)?);
+                    turn = turn.max((wb - wa).abs() * (1.0 + UNIT) + va + vb);
+                }
+                most_turn = most_turn.max(turn);
+                turns.push(turn);
+            }
+            // The factor `ω_(k+1) / Ω` on the first term is at most `ω_max / ω_min` of the iso-line's
+            // weights `ω_k` (Ω is a convex combination of them), and those differ by at most `p`
+            // steps of `most_turn`, so `ω_max ≤ ω_min + p most_turn ≤ low + p most_turn`. Where the
+            // weights do not change along d (a cylinder's arc, straight along its axis) that is
+            // `low` and the first term is the plain Euclidean step, not `ω⁺ / ω⁻` times it. The
+            // smaller of the two bounds is taken.
+            let heavy = high.min((low + p as f64 * most_turn) * (1.0 + gamma(4)));
+            let mut top = 0.0f64;
+            for (kk, turn) in turns.iter().enumerate() {
+                let step = apart(kk, kk + 1)?;
+                let mut far = 0.0f64;
+                for mm in 0..=p {
+                    far = far.max(apart(kk, mm)?);
+                }
+                top = top.max(heavy * step + turn * far);
+            }
+            // The quotient by the piece's length and the least weight, then the bound's sums
+            // and products, rounded up. A positive `top` whose bound is zero or below the normal
+            // range (the piece's length times the least weight overflowed) is refused with it.
+            let b = p as f64 * top / (length * (1.0 - gamma(1)) * low) * (1.0 + gamma(32));
+            if !(b.is_finite() && (b >= f64::MIN_POSITIVE || top == 0.0)) {
+                return Err(refused(
+                    "a partial bound of a rational net that is not finite or not normal",
+                ));
+            }
+            bound = bound.max(b);
+        }
+        Ok((bound, least))
+    };
+    // The bound is taken piece by piece, so the surface must not jump between them: along d no
+    // knot's multiplicity is above the degree (as [`partial_bound`] asks of its steps).
+    for i in 0..m.saturating_sub(1) {
+        let step = k.get(i + p + 1).ok_or_else(bad)? - k.get(i + 1).ok_or_else(bad)?;
+        if !(step > 0.0) {
+            return Err(malformed(
+                "a knot whose multiplicity is above the degree: the surface may jump there",
+            ));
+        }
+    }
+    let pieces = spans(k, p, m, along)?;
+    let (mut bound, mut least) = (f64::INFINITY, f64::INFINITY);
+    'levels: for level in 0..=RATIONAL_BOUND_LEVELS {
+        let cuts = 1usize << level;
+        let mut at_level = 0.0f64;
+        for &(sd, [x0, x1]) in &pieces {
+            let cut = |c: usize| {
+                if c == cuts {
+                    x1
+                } else {
+                    x0 + (x1 - x0) * (c as f64 / cuts as f64)
+                }
+            };
+            for c in 0..cuts {
+                let (a, b) = (cut(c), cut(c + 1));
+                // A part of no length is a point of its neighbours' closed parts.
+                if !(b > a) {
+                    continue;
+                }
+                let (here, low) = on_piece(sd, [a, b])?;
+                at_level = at_level.max(here);
+                if level == 0 {
+                    least = least.min(low);
+                } else if at_level >= bound {
+                    // This level cannot improve on the last.
+                    continue 'levels;
+                }
+            }
+        }
+        bound = bound.min(at_level);
+        if bound <= target {
+            break;
+        }
+    }
+    // The moved net's error: `δ` times `w⁺ Σ |N_i| / W` over the strip, the B-splines' sizes
+    // summing to 1 on the range and to at most `(1 + 2 o / h)^p` where the strip runs past it
+    // by `o` (`h` the shorter end span, as [`partial_bound`] continues them).
+    let (&lo_d, &hi_d) = (k.get(p).ok_or_else(bad)?, k.get(m).ok_or_else(bad)?);
+    let (&lo1, &hi0) = (
+        k.get(p + 1).ok_or_else(bad)?,
+        k.get(m.checked_sub(1).ok_or_else(bad)?).ok_or_else(bad)?,
+    );
+    let beyond = (lo_d - along[0]).max(along[1] - hi_d).max(0.0) * (1.0 + UNIT);
+    let end = (lo1 - lo_d).min(hi_d - hi0);
+    let grow = if beyond > 0.0 {
+        if !(end > 0.0) {
+            return Err(bad());
+        }
+        (0..p).fold(1.0, |acc, _| acc * (1.0 + 2.0 * beyond / end))
+    } else {
+        1.0
+    };
+    let eps = delta * heaviest * grow / least * (1.0 + gamma(2 * p + 8));
+    if !(bound.is_finite() && eps.is_finite()) {
+        return Err(refused(
+            "a partial bound of a rational net that is not finite",
+        ));
+    }
+    Ok((bound, eps))
+}
+
+/// A certified bound on how far a spline surface moves when a point of the strip `along` × `across`
+/// (`along` on the knot range along `d` or past either end of it, `across` across it) moves along
+/// `d` by at most `o` within the strip. On a polynomial net it is `o` times the [`partial_bound`]
+/// over `across` (past the range across by what it reaches past it) with `d` past its range by
+/// what `along` reaches past it; on a rational net `o B + 2ε` of [`rational_partial_bound`] over
+/// the strip, which takes `across` on its range only. Rounded up.
+///
+/// Refused as those bounds are (a rational strip off its range across, a weight not certified
+/// positive on it, knots that do not fit), for a surface that is not a spline, and for a strip
+/// or a move that is not finite or a move that is negative.
+pub fn strip_shift_bound(
+    s: &EvalSurface,
+    d: usize,
+    along: [f64; 2],
+    across: [f64; 2],
+    o: f64,
+) -> Result<f64, EvalError> {
+    let EvalSurface::Nurbs(n) = s else {
+        return Err(refused("a shift bound of a surface that is not a spline"));
+    };
+    if d > 1 {
+        return Err(past(d));
+    }
+    if !(o >= 0.0
+        && o.is_finite()
+        && along.iter().chain(&across).all(|x| x.is_finite())
+        && along[0] <= along[1]
+        && across[0] <= across[1])
+    {
+        return Err(malformed("a strip or a move that is not finite"));
+    }
+    let range = |e: usize| -> Result<[f64; 2], EvalError> {
+        match s.interval(e) {
+            Some((a, b)) if a <= b && a.is_finite() && b.is_finite() => Ok([a, b]),
+            _ => Err(malformed("knots that do not fit")),
+        }
+    };
+    let past_by =
+        |[a, b]: [f64; 2], [lo, hi]: [f64; 2]| (a - lo).max(hi - b).max(0.0) * (1.0 + UNIT);
+    let (rd, rf) = (range(d)?, range(1 - d)?);
+    let w0 = n.ctrl().first().map_or(0.0, |c| c[3]);
+    let shift = if w0 > 0.0 && n.ctrl().iter().all(|c| c[3] == w0) {
+        let on = [
+            across[0].max(rf[0]).min(rf[1]),
+            across[1].max(rf[0]).min(rf[1]),
+        ];
+        o * partial_bound(s, d, on, past_by(rd, along), past_by(rf, across))?
+    } else {
+        let (bound, eps) = rational_partial_bound(s, d, along, across, f64::INFINITY)?;
+        o * bound + 2.0 * eps
+    };
+    let shift = shift * (1.0 + gamma(4));
+    if shift.is_finite() {
+        Ok(shift)
+    } else {
+        Err(refused("a shift bound that is not finite"))
+    }
+}
+
+/// A pcurve put on a spline's knot range ([`pcurve_onto_knots`]).
+#[derive(Clone, Debug, PartialEq)]
+pub struct OntoKnots {
+    /// The pcurve, its control points on the knot range, its knots and weights unchanged.
+    pub pcurve: Curve2,
+    /// A certified bound on how far the surface's point under the pcurve moves, at any
+    /// parameter, from where the pcurve was to where it is now.
+    pub displacement: f64,
+}
+
+/// A pcurve whose control points run a little past a spline's knot range, put on it: each
+/// control point moved onto the range (along u by at most `o_u`, along v by at most `o_v`, its
+/// overrun past an end along each), with a certified bound on how far that moves the surface
+/// under the pcurve. `Ok(None)` when the control points already lie on the range.
+///
+/// A B-spline is a convex combination of its control points (a rational one with positive
+/// weights too, its weights kept), so the moved pcurve lies on the range and each of its points
+/// `(u, v)` moves to `(u', v')` with `|u − u'| ≤ o_u`, `|v − v'| ≤ o_v`. On a polynomial net,
+/// taken along u first at `v` (on the strip of the moved points' v, or past an end of it by at
+/// most `o_v`), then along v at `u'` (on the moved points' u), the surface moves by at most
+/// `o_u B_u + o_v B_v`, the two [`partial_bound`]s of those strips; past along only one
+/// direction one term remains. On a rational net the pcurve may run past one range only, say
+/// v's: a point moves only where a control point past it counts, so `(u, v)` and `(u, v')` lie
+/// in the strip of the control points within the pcurve's degree of one past the range (their
+/// v and their v put on the range, by their u), and the surface moves by at most `o_v B + 2ε`,
+/// [`rational_partial_bound`] over that strip. The sum, rounded up, is the displacement.
+///
+/// Refused ([`EvalError::Unevaluable`]) where the displacement is above `tolerance`, where no
+/// bound is decided (a surface that is not a spline, a rational net past both of its ranges or
+/// whose weights are not certified positive on the strip, one closed on itself along a
+/// direction, a rational pcurve with a weight that is not positive), and
+/// ([`EvalError::Invalid`]) for control points or a tolerance that are not finite, and for
+/// knots that do not fit their control points (on a rational net, also an inner knot along the
+/// move's direction whose multiplicity is above the degree, where the surface may jump).
+pub fn pcurve_onto_knots(
+    s: &EvalSurface,
+    pc: &Curve2,
+    tolerance: f64,
+) -> Result<Option<OntoKnots>, EvalError> {
+    let no = |why: &str| EvalError::Unevaluable(format!("a pcurve onto the knot range: {why}"));
+    let invalid = |why: &str| EvalError::Invalid(format!("a pcurve onto the knot range: {why}"));
+    let EvalSurface::Nurbs(n) = s else {
+        return Err(no("a surface that is not a spline"));
+    };
+    if !(tolerance >= 0.0 && tolerance.is_finite()) {
+        return Err(invalid("a tolerance that is not finite"));
+    }
+    if n.closed().iter().any(|c| *c) {
+        return Err(no("a spline closed on itself, whose parameter wraps"));
+    }
+    let points: Vec<[f64; 2]> = match pc {
+        Curve2::Spline { points, .. } => points.clone(),
+        Curve2::RationalSpline { homogeneous, .. } => {
+            if !homogeneous.iter().all(|h| h[2] > 0.0 && h[2].is_finite()) {
+                return Err(no("a rational pcurve with a weight that is not positive"));
+            }
+            homogeneous
+                .iter()
+                .map(|h| [h[0] / h[2], h[1] / h[2]])
+                .collect()
+        }
+    };
+    if points.is_empty() || !points.iter().flatten().all(|x| x.is_finite()) {
+        return Err(invalid("control points that are not finite"));
+    }
+    let knot_range = |d: usize| -> Result<[f64; 2], EvalError> {
+        match s.interval(d) {
+            Some((a, b)) if a <= b && a.is_finite() && b.is_finite() => Ok([a, b]),
+            _ => Err(invalid("knots that do not fit")),
+        }
+    };
+    let (ru, rv) = (knot_range(0)?, knot_range(1)?);
+    let clamp = |x: f64, [a, b]: [f64; 2]| x.max(a).min(b);
+    // The overrun past `r`, rounded up (its subtraction).
+    let over = |x: f64, [a, b]: [f64; 2]| (a - x).max(x - b).max(0.0) * (1.0 + UNIT);
+    // Each direction's overrun, and the moved points' hull.
+    let (mut ou, mut ov) = (0.0f64, 0.0f64);
+    let mut hu = [f64::INFINITY, f64::NEG_INFINITY];
+    let mut hv = hu;
+    for &[u, v] in &points {
+        (ou, ov) = (ou.max(over(u, ru)), ov.max(over(v, rv)));
+        let (cu, cv) = (clamp(u, ru), clamp(v, rv));
+        hu = [hu[0].min(cu), hu[1].max(cu)];
+        hv = [hv[0].min(cv), hv[1].max(cv)];
+    }
+    if ou == 0.0 && ov == 0.0 {
+        return Ok(None);
+    }
+    let w0 = n.ctrl().first().map_or(0.0, |c| c[3]);
+    let shift = if w0 > 0.0 && n.ctrl().iter().all(|c| c[3] == w0) {
+        let mut shift = 0.0f64;
+        if ou > 0.0 {
+            shift += ou * partial_bound(s, 0, hv, ou, ov)?;
+        }
+        if ov > 0.0 {
+            shift += ov * partial_bound(s, 1, hu, ov, 0.0)?;
+        }
+        shift
+    } else {
+        if ou > 0.0 && ov > 0.0 {
+            return Err(no("a rational net past both of its knot ranges"));
+        }
+        let (d, o, range, other) = if ou > 0.0 {
+            (0, ou, ru, rv)
+        } else {
+            (1, ov, rv, ru)
+        };
+        let count = match pc {
+            Curve2::Spline { knots, .. } | Curve2::RationalSpline { knots, .. } => knots.len(),
+        };
+        let degree = count
+            .checked_sub(points.len() + 1)
+            .ok_or_else(|| invalid("knots that do not fit its control points"))?;
+        // A point of the pcurve moves only where a control point past the range counts (its
+        // B-spline is not zero there), so between control points within the degree of it: the
+        // strip their parameters and those moved span.
+        let mut along = [f64::INFINITY, f64::NEG_INFINITY];
+        let mut across = along;
+        for (i, c) in points.iter().enumerate() {
+            let at = |c: &[f64; 2]| if d == 0 { (c[0], c[1]) } else { (c[1], c[0]) };
+            if over(at(c).0, range) == 0.0 {
+                continue;
+            }
+            for c in points
+                .iter()
+                .take(i + degree + 1)
+                .skip(i.saturating_sub(degree))
+            {
+                let (x, y) = at(c);
+                let (x0, y0) = (clamp(x, range), clamp(y, other));
+                along = [along[0].min(x).min(x0), along[1].max(x).max(x0)];
+                across = [across[0].min(y0), across[1].max(y0)];
+            }
+        }
+        // The moved net's surface S' moves by at most `o B`; S by that and twice their gap.
+        let (bound, eps) = rational_partial_bound(s, d, along, across, tolerance / o)?;
+        o * bound + 2.0 * eps
+    };
+    let displacement = shift * (1.0 + gamma(4));
+    if !(displacement <= tolerance) {
+        return Err(no(&format!(
+            "the move shifts the surface by up to {displacement} mm, past the tolerance \
+             {tolerance} mm"
+        )));
+    }
+    let onto = |[u, v]: [f64; 2]| [clamp(u, ru), clamp(v, rv)];
+    let pcurve = match pc {
+        Curve2::Spline { knots, points } => Curve2::Spline {
+            knots: knots.clone(),
+            points: points.iter().map(|p| onto(*p)).collect(),
+        },
+        Curve2::RationalSpline { knots, homogeneous } => Curve2::RationalSpline {
+            knots: knots.clone(),
+            homogeneous: homogeneous
+                .iter()
+                .map(|h| {
+                    let (p, w) = ([h[0] / h[2], h[1] / h[2]], h[2]);
+                    let q = onto(p);
+                    if q == p {
+                        *h
+                    } else {
+                        [q[0] * w, q[1] * w, w]
+                    }
+                })
+                .collect(),
+        },
+    };
+    Ok(Some(OntoKnots {
+        pcurve,
+        displacement,
+    }))
 }
 
 #[cfg(test)]

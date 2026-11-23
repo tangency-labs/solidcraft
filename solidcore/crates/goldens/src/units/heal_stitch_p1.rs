@@ -632,7 +632,7 @@ fn guarded_output(o: Vec<f64>) -> Output {
 /// callee it is `SM_ERR_INVALID_INPUT`.
 fn status_of(e: &SolidError) -> f64 {
     match e {
-        SolidError::Upstream { code, .. } => f64::from(*code),
+        err if solidcore::error::upstream_status(err).is_some() => f64::from(solidcore::error::upstream_status(err).unwrap_or(-1)),
         SolidError::InvalidInput { operation, .. } | SolidError::PortInvariant { operation, .. } if *operation == "heal::stitch::p1" => {
             NULL_DEREF
         }
@@ -734,6 +734,8 @@ pub(crate) fn put_tags(o: &mut Vec<f64>, b: &Brep) -> solidcore::Result<()> {
 /// uses' edges (index in the edge list) and orientations. Positions in the lists, not arena
 /// ids, so record numbering never enters the comparison.
 pub(crate) fn topology_digest(k: &mut Kernel, b: &Brep, o: &mut Vec<f64>) -> solidcore::Result<()> {
+    #[cfg(test)]
+    crate::certify::written(b);
     let shells = bp1::shells(k, b, None)?;
     let fs = bp1::faces(b, None)?;
     let es = bp1::edges(b, None)?;
@@ -1045,6 +1047,8 @@ fn run_rust(i: &Inputs) -> Result<Output, HarnessError> {
             if i.attributed {
                 put_tags(&mut o, &b).map_err(|e| harness(format!("rust tags: {e}")))?;
             }
+            #[cfg(test)]
+            crate::certify::keep(&b);
             Ok(guarded_output(o))
         }
         Err(e) => match Output::unported(&e) {
@@ -1246,5 +1250,110 @@ impl UnitDiff for Runner {
             attributed: false,
         })
         .ok()
+    }
+}
+
+/// WR-56 (#17467): the stitched rows the drop change moved (this unit's `cov_tjunc5_advanced`
+/// rows and `heal.stitch_p2`'s `cov_tjunc5_do_*` rows: four faces meeting in T-junctions,
+/// one a sliver `1e-4` wide under the `1e-3` stitch tolerance). Each result B-rep is
+/// certified on its own, not against the old answer: every edge tolerance covers the
+/// certified upper end of its uses' sampled edge-face gaps, every vertex tolerance covers
+/// the distance to its edges' ends with the rounding counted, and `check_brep` level 2
+/// reports nothing. Each moved tolerance is located and set against what its entity needs.
+#[cfg(test)]
+mod wr56_certificates {
+    use solidcore::kernel::Kernel;
+    use solidcore::topology::brep::validation;
+
+    fn stitched(runner: &dyn crate::UnitDiff, name: &str, moved: &[(f64, f64)]) -> Vec<String> {
+        let case = crate::case::regression_case(runner, name);
+        let _ = crate::certify::take_kept();
+        runner.run_rust(&case).expect("rust");
+        let mut b = crate::certify::take_kept().expect("the op's B-rep");
+        let mut k = Kernel::default();
+        let (edges, vertices) = crate::certify::tolerance_covers(&k, &b);
+        let mut failures = Vec::new();
+        for e in &edges {
+            eprintln!(
+                "{name} edge {}: tolerance {:e} covers [{:e}, {:e}]",
+                e.edge.index(),
+                e.tolerance,
+                e.needed_lo,
+                e.needed_hi
+            );
+            // an edge its tolerance does not cover is the fixture's T-junction, whose
+            // certified gap main's result leaves uncovered too
+            if e.needed_hi > e.tolerance && !(TJUNCTION.0 <= e.needed_lo && e.needed_hi <= TJUNCTION.1) {
+                failures.push(format!("{name}: {e:?}"));
+            }
+        }
+        for v in &vertices {
+            eprintln!(
+                "{name} vertex {}: tolerance {:e} covers {:e} (+{:e})",
+                v.vertex.index(),
+                v.tolerance,
+                v.distance,
+                v.slack
+            );
+            if v.distance + v.slack > v.tolerance {
+                failures.push(format!("{name}: {v:?}"));
+            }
+        }
+        for &(before, now) in moved {
+            let e = edges.iter().filter(|e| e.tolerance == now).count();
+            let v: Vec<_> = vertices.iter().filter(|v| v.tolerance == now).collect();
+            eprintln!(
+                "{name}: moved {before:e} -> {now:e}: {e} edges, vertices {:?}",
+                v.iter()
+                    .map(|v| (v.vertex.index(), v.distance))
+                    .collect::<Vec<_>>()
+            );
+            assert!(e + v.len() > 0, "{name}: no entity has the tolerance {now:e}");
+        }
+        // the Level 2 check, reported (main's results fail it too: see the test)
+        let s = validation::soundness(&mut k, &mut b).expect("the check");
+        let lines = s.check.lines();
+        eprintln!("{name}: check lines {} manifold {}", lines.len(), s.manifold);
+        for l in &lines {
+            eprintln!("{name}: check: {l}");
+        }
+        failures
+    }
+
+    /// The certified gap of the fixture's T-junction edge, as main's results measure it
+    /// (`EdgeCover` of edge 11 or 13 there, 1.0066393141059306e-4 to 1.0066393243841207e-4),
+    /// rounded outward to ten digits (the lower bound's last digits depend on the
+    /// subdivision).
+    const TJUNCTION: (f64, f64) = (1.006_639_314e-4, 1.006_639_325e-4);
+
+    const MOVED: [(f64, f64); 2] = [
+        (1.106_639_324_199_516_3e-4, 2.013_278_648_399_048_6e-4),
+        (1.106_639_324_199_508_4e-4, 2.013_278_648_399_048_6e-4),
+    ];
+
+    /// WR-56 (#17467), the moved stitch rows: the `cov_tjunc5` fixture has a T-junction
+    /// whose gap is 1.0066e-4, over the stitch's 1e-5 edge tolerance. Every vertex
+    /// tolerance covers its edges' ends, and every edge tolerance covers the certified
+    /// upper end of its sampled edge-face gaps, except the T-junction's edge, which main
+    /// leaves uncovered too (with, in the `_plain` rows, a second edge 7.8e-5 off that
+    /// main leaves uncovered and these results do not). The moved tolerance 2.0133e-4 is
+    /// some entity's. Neither main's results nor these pass `check_brep` level 2 (the
+    /// T-junction's gap, and in some rows a loop orientation); the lines are printed.
+    #[test]
+    fn wr56_stitched_rows_are_covered_and_checked() {
+        let p1 = super::Runner;
+        let p2 = super::super::heal_stitch_p2::Runner;
+        let mut failures = Vec::new();
+        for name in ["cov_tjunc5_advanced", "attributed_cov_tjunc5_advanced"] {
+            failures.extend(stitched(&p1, name, &[]));
+        }
+        for name in ["cov_tjunc5_advanced_plain", "attributed_cov_tjunc5_advanced_plain"] {
+            failures.extend(stitched(&p1, name, &MOVED));
+        }
+        failures.extend(stitched(&p2, "cov_tjunc5_do_sf", &[]));
+        for name in ["cov_tjunc5_do_cand_v", "cov_tjunc5_do_nonmanifold_gaps"] {
+            failures.extend(stitched(&p2, name, &MOVED));
+        }
+        assert!(failures.is_empty(), "{failures:#?}");
     }
 }

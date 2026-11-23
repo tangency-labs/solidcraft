@@ -1,9 +1,11 @@
 use serde_json::{Value, json};
+use solidcraft_geom::Vec3Geom;
 
 use super::{
-    BodyFeaturesParams, BodyListParams, CommandEntry, CommandsParams, DescribeParams, DocumentInspectParams, DocumentInspectResult,
-    MaterialAssignParams, MaterialAssignResult, MaterialListParams, MaterialListResult, MeasureParams, MeasureResult, ModelBodyFeatures, ModelEdges,
-    ModelFaces, ModelThreads, ModelThreadsParams, SketchInspectParams, SketchInspected,
+    BodyFeaturesParams, BodyListParams, ClassifyPointsParams, ClassifyPointsResult, ColoredComponentsParams, ColoredComponentsResult, CommandEntry,
+    CommandsParams, DescribeParams, DocumentInspectParams, DocumentInspectResult, DocumentRevisionParams, MaterialAssignParams, MaterialAssignResult,
+    MaterialListParams, MaterialListResult, MeasureParams, MeasureResult, ModelBodyFeatures, ModelEdges, ModelFaces, ModelThreads,
+    ModelThreadsParams, RevisionResult, SketchInspectParams, SketchInspected,
 };
 use crate::Session;
 use crate::schema::tests::{assert_keys, assert_strict_keeps_todays_errors, conforms};
@@ -13,8 +15,10 @@ use crate::schema::{ParamCheck, input_schema_for, output_schema_for};
 fn schemas_and_the_key_check_agree() {
     assert_keys(input_schema_for::<DescribeParams>(), &["command"]);
     assert_keys(input_schema_for::<BodyListParams>(), &["body"]);
+    assert_keys(input_schema_for::<ClassifyPointsParams>(), &["body", "face", "points"]);
     assert_keys(input_schema_for::<ModelThreadsParams>(), &[]);
     assert_keys(input_schema_for::<BodyFeaturesParams>(), &["body"]);
+    assert_keys(input_schema_for::<ColoredComponentsParams>(), &["enabled"]);
 }
 
 #[test]
@@ -33,8 +37,8 @@ fn strict_keeps_todays_errors() {
 
 /// #10942: a body's edges and faces and the design's threads reply as their output schemas say,
 /// in Warn without warnings for good calls and with them for a misspelt key. A cylindrical face
-/// carries `cylinder` and a folded sheet's face `sheet_face`; strict refuses a `body` that isn't
-/// text, which the handlers read as no body.
+/// carries `cylinder`, and a folded sheet's faces are named by the model; strict refuses a `body`
+/// that isn't text, which the handlers read as no body.
 #[test]
 fn model_lists_reply_with_their_schemas() {
     let (edges, faces, threads) = (output_schema_for::<ModelEdges>(), output_schema_for::<ModelFaces>(), output_schema_for::<ModelThreads>());
@@ -62,7 +66,11 @@ fn model_lists_reply_with_their_schemas() {
     assert!(r["faces"].as_array().into_iter().flatten().any(|f| f["cylinder"]["radius"].as_f64().is_some_and(|r| (r - 4.0).abs() < 1e-9)), "{r}");
     let r = run(&mut s, "model.faces", json!({"body": sheet}));
     matches(&faces, &r, false);
-    assert!(r["faces"].as_array().into_iter().flatten().any(|f| f["sheet_face"].as_str().is_some_and(|n| n.starts_with("sheet:"))), "{r}");
+    // A sheet's faces are named by the model, after what made each (#7990).
+    assert!(
+        r["faces"].as_array().into_iter().flatten().any(|f| f["name"].as_str().is_some_and(|n| n.starts_with('F') && n.ends_with(":top"))),
+        "{r}"
+    );
     let r = run(&mut s, "model.threads", json!({}));
     matches(&threads, &r, false);
     assert_eq!((r["threads"][0]["designation"].as_str(), r["threads"][0]["hand"].as_str()), (Some("M8"), Some("right")), "{r}");
@@ -99,17 +107,20 @@ fn describe_returns_both_schemas() {
 
 #[test]
 fn inspect_schemas_and_the_key_check_agree() {
-    assert_keys(input_schema_for::<DocumentInspectParams>(), &["measure", "sketch_counts"]);
+    assert_keys(input_schema_for::<DocumentInspectParams>(), &["bodies", "measure", "sketch_counts", "timeline"]);
     assert_keys(input_schema_for::<MeasureParams>(), &["bodies", "items", "names_only"]);
     assert_keys(input_schema_for::<CommandsParams>(), &[]);
     assert_keys(input_schema_for::<MaterialListParams>(), &[]);
     assert_keys(input_schema_for::<MaterialAssignParams>(), &["bodies", "material"]);
     assert_keys(input_schema_for::<SketchInspectParams>(), &["sketch"]);
+    assert_keys(input_schema_for::<DocumentRevisionParams>(), &[]);
 }
 
 #[test]
 fn strict_keeps_todays_errors_of_the_inspect_commands() {
     assert_strict_keeps_todays_errors(&[
+        ("inspect.colored_components", json!({"enabled": "yes"})),
+        ("inspect.colored_components", json!({"enabled": null})),
         ("material.assign", json!({})),
         ("material.assign", json!({"bodies": ["A"]})),
         ("material.assign", json!({"bodies": ["A"], "material": 4})),
@@ -140,6 +151,31 @@ fn strict_keeps_todays_errors_of_the_inspect_commands() {
         ("sketch.inspect", json!({"sketch": "Nope"})),
         ("sketch.inspect", json!({"sketch": 99999})),
     ]);
+}
+
+/// #16752: Component Colors answers the setting it is on. Left out it toggles, `true` and
+/// `false` set it, and every reply matches the published output schema; the colours are a view
+/// setting, so the design is not touched.
+#[test]
+fn colored_components_answers_the_setting_it_is_on() {
+    let mut s = Session { param_check: ParamCheck::Warn, ..Session::default() };
+    let shown = run(&mut s, "inspect.colored_components", json!({}));
+    matches::<ColoredComponentsResult>("inspect.colored_components", &shown, false);
+    assert_eq!(shown["enabled"], true, "{shown}");
+    let hidden = run(&mut s, "inspect.colored_components", json!({}));
+    matches::<ColoredComponentsResult>("inspect.colored_components", &hidden, false);
+    assert_eq!(hidden["enabled"], false, "{hidden}");
+    for (p, want) in [(json!({"enabled": true}), true), (json!({"enabled": false}), false)] {
+        let r = run(&mut s, "inspect.colored_components", p.clone());
+        matches::<ColoredComponentsResult>("inspect.colored_components", &r, false);
+        assert_eq!(r["enabled"], want, "{p}: {r}");
+    }
+    // The handler refuses what is not a boolean itself, with the check off as well.
+    let mut off = Session::default();
+    for p in [json!({"enabled": "yes"}), json!({"enabled": null})] {
+        let e = off.execute("inspect.colored_components", &p).err().map(|e| e.to_string()).unwrap_or_default();
+        assert!(e.contains("enabled must be a boolean"), "{p}: {e}");
+    }
 }
 
 /// Each type reads a key as its handler does: with `items` only `items` is read, without it
@@ -182,6 +218,24 @@ fn the_types_read_each_key_as_the_handler_does() {
     // document.inspect's flags are plain booleans, `null` is left out.
     assert_eq!(issues("document.inspect", json!({"measure": true, "sketch_counts": null})), none);
     assert_eq!(issues("document.inspect", json!({"measure": "yes"})), ["`measure` must be true or false"]);
+    for ok in
+        [json!({"timeline": "summary", "bodies": "names"}), json!({"timeline": false, "bodies": false}), json!({"timeline": true, "bodies": null})]
+    {
+        assert_eq!(issues("document.inspect", ok.clone()), none, "{ok}");
+    }
+    for bad in [json!("full"), json!(1), json!(["Box"])] {
+        assert_eq!(issues("document.inspect", json!({ "timeline": bad.clone() })), ["`timeline` must be true, false or \"summary\""], "{bad}");
+        assert_eq!(issues("document.inspect", json!({ "bodies": bad.clone() })), ["`bodies` must be true, false or \"names\""], "{bad}");
+    }
+    // inspect.colored_components: one optional flag; anything but true or false, `null` included,
+    // is the handler's own message.
+    assert_eq!(issues("inspect.colored_components", json!({})), none);
+    assert_eq!(issues("inspect.colored_components", json!({"enabled": true})), none);
+    assert_eq!(issues("inspect.colored_components", json!({"enabled": false})), none);
+    for bad in [json!(null), json!("yes"), json!(1), json!([])] {
+        assert_eq!(issues("inspect.colored_components", json!({"enabled": bad.clone()})), ["enabled must be a boolean"], "{bad}");
+    }
+    assert_eq!(issues("inspect.colored_components", json!({"on": true})), ["unknown key `on`"]);
     // Neither list command takes a key.
     assert_eq!(issues("engine.commands", json!({"x": 1})), ["unknown key `x`"]);
     assert_eq!(issues("material.list", json!({"x": 1})), ["unknown key `x`"]);
@@ -234,8 +288,30 @@ fn the_schemas_take_what_the_handlers_read() {
             (json!({"sketch": true}), false),
         ],
     );
-    takes(input_schema_for::<DocumentInspectParams>(), &[(json!({"measure": true, "sketch_counts": false}), true), (json!({"measure": 1}), false)]);
+    takes(
+        input_schema_for::<DocumentInspectParams>(),
+        &[
+            (json!({"measure": true, "sketch_counts": false}), true),
+            (json!({"measure": 1}), false),
+            (json!({"timeline": "summary", "bodies": "names"}), true),
+            (json!({"timeline": false, "bodies": true}), true),
+            (json!({"timeline": "names"}), false),
+            (json!({"bodies": ["Block"]}), false),
+        ],
+    );
     takes(input_schema_for::<CommandsParams>(), &[(json!({}), true), (json!({"x": 1}), false)]);
+    takes(input_schema_for::<DocumentRevisionParams>(), &[(json!({}), true), (json!({"x": 1}), false)]);
+    takes(
+        input_schema_for::<ColoredComponentsParams>(),
+        &[
+            (json!({}), true),
+            (json!({"enabled": true}), true),
+            (json!({"enabled": false}), true),
+            (json!({"enabled": null}), false),
+            (json!({"enabled": "yes"}), false),
+            (json!({"on": true}), false),
+        ],
+    );
 }
 
 fn run(s: &mut Session, id: &str, p: Value) -> Value {
@@ -323,6 +399,100 @@ fn document_inspect_replies_match_its_schema() {
     let r = run(&mut s, "document.inspect", json!({}));
     matches::<DocumentInspectResult>("document.inspect", &r, false);
     assert!(r["bodies"].as_array().is_some_and(|b| b.iter().any(|b| b["removed_later"] == true)), "{r}");
+}
+
+/// `timeline` and `bodies` make a large design's reply small (#14162): a summary row has only
+/// what the feature is and the states it has, `"names"` lists only body names and measures
+/// nothing, `false` leaves either out. The default reply is as it was; a bad value is refused
+/// by the handler too, with the check off.
+#[test]
+fn document_inspect_gives_a_short_timeline_and_body_names_when_asked() {
+    let mut s = Session { param_check: ParamCheck::Warn, ..Session::default() };
+    design(&mut s);
+    // A feature that fails: a box whose length goes to zero.
+    run(&mut s, "parameters.change", json!({"name": "t", "expression": "5 mm"}));
+    run(&mut s, "solid.box", json!({"length": "t", "width": 5, "height": 5, "corner": [80, 0, 0], "body_name": "Broken"}));
+    run(&mut s, "parameters.change", json!({"name": "t", "expression": "0 mm"}));
+    let keys = |row: &Value| -> Vec<String> {
+        let mut k: Vec<String> = row.as_object().map(|o| o.keys().cloned().collect()).unwrap_or_default();
+        k.sort();
+        k
+    };
+    let full = run(&mut s, "document.inspect", json!({"measure": true}));
+    for row in full["timeline"].as_array().unwrap() {
+        assert_eq!(keys(row), ["error", "id", "ms", "name", "rolled_back", "suppressed", "type", "warning"], "the default row: {row}");
+    }
+    assert_eq!(run(&mut s, "document.inspect", json!({"measure": true, "timeline": true, "bodies": true})), full);
+    let failing = full["timeline"].as_array().unwrap().iter().filter(|f| !f["error"].is_null()).count();
+    assert_eq!(failing, 1, "the zero-length box fails: {full}");
+
+    let short = run(&mut s, "document.inspect", json!({"measure": true, "timeline": "summary", "bodies": "names"}));
+    matches::<DocumentInspectResult>("document.inspect", &short, false);
+    let rows = short["timeline"].as_array().unwrap();
+    assert_eq!(rows.len(), full["timeline"].as_array().unwrap().len(), "{short}");
+    for (row, was) in rows.iter().zip(full["timeline"].as_array().unwrap()) {
+        let mut want = vec!["id", "name", "type"];
+        if !was["error"].is_null() {
+            want.push("error");
+        }
+        if !was["warning"].is_null() {
+            want.push("warning");
+        }
+        want.sort();
+        assert_eq!(keys(row), want, "{row} from {was}");
+        assert_eq!(
+            (&row["id"], &row["name"], &row["type"], &row.get("error")),
+            (&was["id"], &was["name"], &was["type"], &was.get("error").filter(|e| !e.is_null()))
+        );
+    }
+    let names: Vec<&Value> = full["bodies"].as_array().unwrap().iter().map(|b| &b["name"]).collect();
+    assert_eq!(short["bodies"].as_array().unwrap().iter().collect::<Vec<_>>(), names, "names only, nothing measured: {short}");
+    let size = |r: &Value| r["timeline"].to_string().len() + r["bodies"].to_string().len();
+    assert!(size(&short) * 3 < size(&full), "timeline and bodies: {} vs {} bytes", size(&short), size(&full));
+    // Everything else is as it was.
+    for key in ["params", "sketches", "undo", "marker", "selection"] {
+        assert_eq!(short[key], full[key], "{key}");
+    }
+
+    let none = run(&mut s, "document.inspect", json!({"timeline": false, "bodies": false}));
+    matches::<DocumentInspectResult>("document.inspect", &none, false);
+    assert!(none.get("timeline").is_none() && none.get("bodies").is_none(), "{none}");
+    assert_eq!(none["params"], full["params"]);
+
+    // A rolled-back or suppressed feature says so in its summary row.
+    run(&mut s, "timeline.roll_to", json!({"feature": "Shapes"}));
+    let rolled = run(&mut s, "document.inspect", json!({"timeline": "summary"}));
+    assert!(rolled["timeline"].as_array().unwrap().iter().any(|f| f["rolled_back"] == true), "{rolled}");
+    assert!(rolled["timeline"].as_array().unwrap().iter().all(|f| f.get("rolled_back").is_none_or(|r| r == true)), "{rolled}");
+
+    // The handler refuses a bad value itself (with the check off as well).
+    let mut off = Session { param_check: ParamCheck::Off, ..Session::default() };
+    for (p, want) in [
+        (json!({"timeline": "full"}), "`timeline` must be true, false or \"summary\""),
+        (json!({"bodies": ["Block"]}), "`bodies` must be true, false or \"names\""),
+    ] {
+        let e = off.execute("document.inspect", &p).err().map(|e| e.to_string()).unwrap_or_default();
+        assert!(e.contains(want), "{p}: {e}");
+    }
+}
+
+/// #16740: `document.revision` answers the design's id and the revision its contents were last
+/// seen under: the same pair while nothing changes, the same id and another number after an
+/// edit, and a reply that matches the published output schema in both cases.
+#[test]
+fn document_revision_replies_match_its_schema() {
+    let mut s = Session { param_check: ParamCheck::Warn, ..Session::default() };
+    let first = run(&mut s, "document.revision", json!({}));
+    matches::<RevisionResult>("document.revision", &first, false);
+    assert!(first["document_id"].as_str().is_some_and(|id| !id.is_empty()), "{first}");
+    assert!(first["revision"].is_number(), "{first}");
+    let again = run(&mut s, "document.revision", json!({}));
+    assert_eq!(again, first, "the same design answers the same revision twice: {first} {again}");
+    run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10}));
+    let after = run(&mut s, "document.revision", json!({}));
+    matches::<RevisionResult>("document.revision", &after, false);
+    assert_eq!(after["document_id"], first["document_id"], "{first} {after}");
+    assert_ne!(after["revision"], first["revision"], "{first} {after}");
 }
 
 /// `inspect.measure` in each form: bodies (with sheet metal and a material), names only, one
@@ -415,6 +585,63 @@ fn sketch_inspect_replies_match_its_schema() {
     }
 }
 
+#[test]
+fn sketch_inspect_world_plane_follows_occurrence_context() {
+    use solidcraft_geom::prelude::*;
+
+    let mut s = Session { param_check: ParamCheck::Warn, ..Session::default() };
+    let parent = run(&mut s, "component.create", json!({"name": "Assembly", "grounded": false}));
+    let leaf = run(&mut s, "component.create", json!({"name": "Carrier", "grounded": false}));
+    let sketch = run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Mount"}))["sketch"].clone();
+    run(&mut s, "sketch.circle.center", json!({"center": [10, 20], "radius": 1, "id": "mount"}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "occurrence.move", json!({"occurrence": leaf["occurrence"], "translate": [5, 0, 0]}));
+    let copy = run(&mut s, "occurrence.copy", json!({"component": parent["component"], "parent": 0}));
+    run(
+        &mut s,
+        "occurrence.move",
+        json!({"occurrence": copy["occurrence"], "to_matrix": [[0, 0, 1, 100], [0, 1, 0, 50], [-1, 0, 0, 30]], "capture": false}),
+    );
+    let local = json!({"origin": [0.0, 0.0, 0.0], "x_dir": [1.0, 0.0, 0.0], "y_dir": [0.0, 1.0, 0.0]});
+    for (activation, origin, x_dir, normal, center) in [
+        (
+            json!({"component": leaf["component"], "occurrence": leaf["occurrence"], "path": [copy["occurrence"], leaf["occurrence"]]}),
+            [100.0, 50.0, 25.0],
+            [0.0, 0.0, -1.0],
+            [1.0, 0.0, 0.0],
+            [100.0, 70.0, 15.0],
+        ),
+        (json!({"component": leaf["component"]}), [5.0, 0.0, 0.0], [1.0, 0.0, 0.0], [0.0, 0.0, 1.0], [15.0, 20.0, 0.0]),
+        // Inspecting another component's repeated sketch uses its first placement too.
+        (json!({"component": 0}), [5.0, 0.0, 0.0], [1.0, 0.0, 0.0], [0.0, 0.0, 1.0], [15.0, 20.0, 0.0]),
+    ] {
+        run(&mut s, "component.activate", activation);
+        let context = (s.active_component, s.active_occurrence_path.clone(), s.active_sketch, s.revision, s.pending_moves.clone());
+        let doc = s.doc.clone();
+        let model = s.model.state();
+        let inspected = run(&mut s, "sketch.inspect", json!({"sketch": sketch}));
+        assert_eq!(
+            (s.active_component, s.active_occurrence_path.clone(), s.active_sketch, s.revision, s.pending_moves.clone()),
+            context,
+            "inspection leaves authoring context and pending moves unchanged"
+        );
+        assert!(std::sync::Arc::ptr_eq(&s.doc, &doc), "inspection does not change the document");
+        assert!(std::sync::Arc::ptr_eq(&s.model.state(), &model), "inspection does not rebuild the model");
+        matches::<SketchInspected>("sketch.inspect", &inspected, false);
+        assert_eq!(inspected["plane"], local, "the evaluated plane keeps its component-local frame");
+        assert_eq!(inspected["world_plane"], json!({"origin": origin, "x_dir": x_dir, "y_dir": [0.0, 1.0, 0.0]}));
+        let plane: solidcore_record::Plane = serde_json::from_value(inspected["world_plane"].clone()).unwrap();
+        assert_eq!(<[f64; 3]>::from(plane.normal()), normal);
+        let point = inspected["points"].as_array().unwrap().iter().find(|p| p["id"] == "mount.center").unwrap();
+        assert_eq!(point["world"], json!(center));
+        assert_eq!(<[f64; 3]>::from(plane.to_world(solidcore_record::Vec2::new(10.0, 20.0))), center);
+        let schema = output_schema_for::<SketchInspected>();
+        let mut missing = inspected.clone();
+        missing.as_object_mut().unwrap().remove("world_plane");
+        assert!(!conforms(schema.as_value(), schema.as_value(), &missing), "world_plane must always be present");
+    }
+}
+
 /// `material.assign` (a name, a list, the default material) and `material.list` (built-in
 /// materials and the design's, with and without a look) in Warn without warnings.
 #[test]
@@ -473,6 +700,8 @@ fn a_misspelt_key_is_reported_in_warn() {
         "inspect.measure" => output_schema_for::<MeasureResult>(),
         "material.assign" => output_schema_for::<MaterialAssignResult>(),
         "material.list" => output_schema_for::<MaterialListResult>(),
+        "document.revision" => output_schema_for::<RevisionResult>(),
+        "inspect.colored_components" => output_schema_for::<ColoredComponentsResult>(),
         _ => output_schema_for::<SketchInspected>(),
     };
     for (id, p, suggestion) in [
@@ -482,6 +711,8 @@ fn a_misspelt_key_is_reported_in_warn() {
         ("inspect.measure", json!({"name_only": true}), "names_only"),
         ("material.assign", json!({"bodies": ["Block"], "materal": "Steel", "material": "Steel"}), "material"),
         ("material.list", json!({"materials": true}), ""),
+        ("document.revision", json!({"revison": 1}), ""),
+        ("inspect.colored_components", json!({"enable": true}), "enabled"),
         ("sketch.inspect", json!({"sketch": shapes, "sketchs": 1}), "sketch"),
     ] {
         let r = run(&mut s, id, p.clone());
@@ -493,8 +724,8 @@ fn a_misspelt_key_is_reported_in_warn() {
     }
 }
 
-/// Shapes the real designs above don't reach: a body whose measurement failed (a sheet metal
-/// one carries its corrected counts) and the null coordinates of two planes that meet.
+/// Shapes the real designs above don't reach: a body whose measurement failed with a partial
+/// count, and the null coordinates of two planes that meet.
 #[test]
 fn rare_reply_shapes_serialize_as_before_and_match_the_schema() {
     use super::{BodyFailure, BodyMeasurement, BodyOutcome, Measured, MeasuredItems};
@@ -552,4 +783,100 @@ fn body_features_list_what_built_each_body() {
     let warned = run(&mut s, "model.body_features", json!({"bdy": "A"}));
     assert!(warned.get("param_warnings").is_some(), "{warned}");
     assert!(s.execute("model.body_features", &json!({"body": "Nope"})).is_err());
+}
+
+/// A 40 mm cube with a radius-3 through bore and a radius-4 boss: a hole is void,
+/// its wall points toward its axis, and the boss wall points away from its axis.
+#[test]
+fn classify_points_reads_material_and_outward_normals_without_editing() {
+    let mut s = Session { param_check: ParamCheck::Warn, ..Session::default() };
+    run(&mut s, "solid.box", json!({"length":40, "width":40, "height":40, "body_name":"Block"}));
+    run(&mut s, "solid.cylinder", json!({"radius":3, "height":40, "base":[10,20,0], "operation":"cut", "targets":["Block"]}));
+    run(&mut s, "solid.cylinder", json!({"radius":4, "height":10, "base":[28,20,40], "operation":"join", "targets":["Block"]}));
+    let before = s.doc.clone();
+    let revision = s.design_token();
+    let id = "inspect.classify_points";
+    let r = run(&mut s, id, json!({"body":"Block", "points":[[5,5,5], [50,5,5], [10,20,20], [28,20,45], [10,23,20], [28,24,45]]}));
+    matches::<ClassifyPointsResult>(id, &r, false);
+    assert_eq!(r["body"], "Block");
+    assert_eq!(r["results"].as_array().unwrap().len(), 6);
+    for (i, class) in ["inside", "outside", "outside", "inside", "on", "on"].into_iter().enumerate() {
+        assert_eq!(r["results"][i]["class"], class, "{r}");
+    }
+    let faces = run(&mut s, "model.faces", json!({"body":"Block"}));
+    for (i, expected) in [(4, [0., -1., 0.]), (5, [0., 1., 0.])] {
+        let row = &r["results"][i];
+        let n = crate::params::vec3(&row["normal"]).unwrap();
+        let want = solidcore_record::Vec3::from(expected);
+        assert!((n - want).len() < 1e-9, "{row}");
+        assert!((n.len() - 1.0).abs() < 1e-12, "{row}");
+        assert!(faces["faces"].as_array().unwrap().iter().any(|f| f["name"] == row["face"]), "{row}");
+    }
+    for face in [r["results"][4]["face"].clone(), json!({"point":[10,23,25]})] {
+        let selected = run(&mut s, id, json!({"body":"Block", "points":[[10,23,20]], "face":face}));
+        matches::<ClassifyPointsResult>(id, &selected, false);
+        assert_eq!(selected["results"][0], r["results"][4]);
+    }
+    let warned = run(&mut s, id, json!({"body":"Block", "points":[[5,5,5]], "poins":[]}));
+    matches::<ClassifyPointsResult>(id, &warned, true);
+    assert_eq!(s.doc, before);
+    assert_eq!(s.design_token(), revision);
+}
+
+/// The body's tolerance defines `on`; a face's trim excludes its hole, and an edge's
+/// two normals can be requested by selecting either adjacent face.
+#[test]
+fn classify_points_honours_tolerance_trim_and_face_selection() {
+    let mut s = Session { param_check: ParamCheck::Strict, ..Session::default() };
+    run(&mut s, "solid.box", json!({"length":10, "width":10, "height":10, "body_name":"Block"}));
+    run(&mut s, "solid.hole", json!({"position":[5,5,10], "diameter":2}));
+    let tolerance = s.model.state().body("Block").unwrap().body.record().tolerance;
+    let id = "inspect.classify_points";
+    let r = run(
+        &mut s,
+        id,
+        json!({"body":"Block", "points":[[-tolerance*0.25,2,5], [tolerance*0.25,2,5], [-tolerance*1000.,2,5], [tolerance*1000.,2,5], [5,5,10]]}),
+    );
+    matches::<ClassifyPointsResult>(id, &r, false);
+    for (i, class) in ["on", "on", "outside", "inside", "outside"].into_iter().enumerate() {
+        assert_eq!(r["results"][i]["class"], class, "{r}");
+    }
+    for (face, expected) in [([0, 2, 5], [-1., 0., 0.]), ([2, 0, 5], [0., -1., 0.])] {
+        let edge = run(&mut s, id, json!({"body":"Block", "points":[[0,0,5]], "face":face}));
+        matches::<ClassifyPointsResult>(id, &edge, false);
+        let normal = crate::params::vec3(&edge["results"][0]["normal"]).unwrap();
+        assert!((normal - solidcore_record::Vec3::from(expected)).len() < 1e-12, "{edge}");
+    }
+    // The top plane extends over the hole; its trimmed face does not.
+    assert!(s.execute(id, &json!({"body":"Block", "points":[[6,5,5]], "face":[2,2,10]})).is_err());
+    assert!(s.execute(id, &json!({"body":"Block", "points":[[2,2,10]], "face":[5,5,10]})).is_err());
+}
+
+#[test]
+fn classify_points_refuses_hostile_inputs_in_every_check_mode() {
+    let schema = input_schema_for::<ClassifyPointsParams>();
+    assert_eq!(schema.as_value()["properties"]["points"]["maxItems"], 256);
+    let bad = [
+        json!({}),
+        json!({"body":5, "points":[[0,0,0]]}),
+        json!({"body":"Block", "points":null}),
+        json!({"body":"Block", "points":[]}),
+        json!({"body":"Block", "points":vec![[0,0,0]; 257]}),
+        json!({"body":"Block", "points":[[0,0]]}),
+        json!({"body":"Block", "points":[[0,"x",0]]}),
+        json!({"body":"Block", "points":[[1e100,0,0]]}),
+        json!({"body":"Block", "points":[[0,0,0]], "face":null}),
+        json!({"body":"Block", "points":[[0,0,0]], "face":{}}),
+        json!({"body":"Block", "points":[[0,0,0]], "face":"missing"}),
+    ];
+    for mode in ParamCheck::ALL {
+        let mut s = Session { param_check: mode, ..Session::default() };
+        run(&mut s, "solid.box", json!({"length":10, "width":10, "height":10, "body_name":"Block"}));
+        let before = s.doc.clone();
+        for params in &bad {
+            let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| s.execute("inspect.classify_points", params)));
+            assert!(result.is_ok_and(|r| matches!(r, Err(crate::EngineError::BadParams { .. }))), "{mode:?}: {params}");
+        }
+        assert_eq!(s.doc, before);
+    }
 }

@@ -1,9 +1,8 @@
 //! tangency-labs/solidcore#417 (WR-422): a round as wide as the corner round it runs round
 //! is centred on that round's axis, where the offset faces collapse, so the rail points
-//! carry no angle and the torus could turn the long way round.
-//! `fixes.fillet_torus_center_on_axis` turns them into the half-planes through the edge's
-//! ends. The case is the fork's capi test: a 297 x 100 x 60 block with its vertical edges
-//! rounded R5, then its top rim R5.
+//! carry no angle and the torus could turn the long way round. The solver turns them into
+//! the half-planes through the edge's ends. The case is the fork's capi test: a
+//! 297 x 100 x 60 block with its vertical edges rounded R5, then its top rim R5.
 #![allow(
     clippy::unwrap_used,
     clippy::expect_used,
@@ -48,9 +47,8 @@ fn edges_where(k: &Kernel, b: &Brep, keep: impl Fn(Point3) -> bool) -> Vec<EdgeI
 
 /// The block's volume after its corners are rounded, after its top rim is rounded, and the
 /// rim round's result.
-fn rounded_block(fix: bool) -> (f64, f64, solidcore::Result<()>) {
+fn rounded_block() -> (f64, f64, solidcore::Result<()>) {
     let mut k = Kernel::default();
-    k.fixes.fillet_torus_center_on_axis = fix;
     let mut block = create_box(&mut k, Point3::new(0.0, 0.0, 0.0), 297.0, 100.0, 60.0).unwrap();
     let corners = edges_where(&k, &block, |m| (m.z - 30.0).abs() < 1e-6);
     fillet_edges(&mut k, &mut block, &corners, 5.0, 1, 1, 1.0).unwrap();
@@ -61,19 +59,15 @@ fn rounded_block(fix: bool) -> (f64, f64, solidcore::Result<()>) {
 }
 
 #[test]
-fn the_top_rim_round_turns_the_right_way_round_the_corners_with_the_fix() {
+fn the_top_rim_round_turns_the_right_way_round_the_corners() {
     // each straight edge loses (1 - pi/4) 25 along 287 or 90, each corner the square
     // 5 x 5 less the quarter disc, turned a quarter about the axis: (pi/2) (62.5 - 125/3)
     let removed = 754.0 * 25.0 * (1.0 - PI / 4.0) + 4.0 * (PI / 2.0) * (62.5 - 125.0 / 3.0);
 
-    let (rounded, after, r) = rounded_block(true);
+    let (rounded, after, r) = rounded_block();
     r.unwrap();
     assert!(
         (after - (rounded - removed)).abs() < 1e-7 * rounded,
         "{rounded} {after}"
     );
-
-    // upstream: the torus turns the long way round and the rollover test fails
-    let (_, _, r) = rounded_block(false);
-    assert!(r.is_err(), "upstream should fail: {r:?}");
 }

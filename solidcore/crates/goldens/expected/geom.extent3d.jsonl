@@ -1,6 +1,6 @@
 {"format":1,"unit":"geom.extent3d"}
 {"case":"circumscribe_axis_aligned","deferred":null,"error":null,"ints":{},"topology":null,"values":{"extent":[0.0,2.0,4.0,1.0,3.0,5.0]}}
-{"case":"circumscribe_permuted_negated","deferred":null,"error":null,"ints":{},"topology":null,"values":{"extent":[-3.0,4.0,0.0,-2.0,5.0,1.0]}}
+{"case":"circumscribe_permuted_negated","deferred":null,"error":null,"ints":{},"topology":null,"values":{"extent":[4.0,-1.0,2.0,5.0,-0.0,3.0]}}
 {"case":"circumscribe_rotated","deferred":null,"error":null,"ints":{},"topology":null,"values":{"extent":[-1.6,0.0,-1.0,0.6,2.0,1.0]}}
 {"case":"circumscribe_rotated_unbounded","deferred":null,"error":null,"ints":{},"topology":null,"values":{"extent":[-1234567.0,-1234567.0,-1234567.0,1234567.0,1234567.0,1234567.0]}}
 {"case":"edge_approx_bounded_center_1.0","deferred":null,"error":null,"ints":{},"topology":null,"values":{"approx":[0.0,0.0,0.0,1.0,1.0,1.0],"expanded":[0.0,0.0,0.0,1.0,1.0,1.0]}}
