@@ -3908,14 +3908,16 @@ mod tests_c5 {
         f.run().unwrap();
 
         // a blends geometry: CalcBlendingGeom (the fixture's geometry has no
-        // GetFilletSolver(): NER)
+        // GetFilletSolver(): NER). The geometry is in the caller's fillet B-rep, so the
+        // missing solver link is the caller's set-up (#19811): InvalidInput, not a
+        // defect, status kept
         let mut f = Fixture::new();
         f.add_geom(FilletGeomType::Blends);
         let e = f.run().unwrap_err();
         assert_eq!(
             (
                 e.operation(),
-                e.kind() == crate::error::ErrorKind::StageFailed && e.is_defect(),
+                e.kind() == crate::error::ErrorKind::InvalidInput && !e.is_defect(),
                 e.upstream_status()
             ),
             (
