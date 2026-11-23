@@ -1,0 +1,17 @@
+[package]
+name = "solidcraft-vr"
+description = "SolidCraft's VR viewer: the model in the room, what the controllers do to it, and what is drawn for them, independent of the headset's API and the renderer"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish = false
+
+[lints]
+workspace = true
+
+[dependencies]
+# The room's maths (poses, matrices, the placed model) and the controllers' input (no headset needed)
+solidcraft-xr = { workspace = true }
+# The controllers' models the VR software hands out: core glTF, pictures as PNG
+gltf = { workspace = true, features = ["utils"] }
+image = { workspace = true }

@@ -235,6 +235,29 @@ pub fn pick_command(app: &mut SolveApp, p: &Value) -> Result<Value, String> {
     }))
 }
 
+/// The body the world ray `o + d·t` (`d` of length 1) stops at, as the mouse would pick it:
+/// hidden, ghosted and previewed bodies are passed through, and so is what the `section`'s planes
+/// cut away, while their cut caps stop the ray (no planes: nothing is cut). The body's name, `t`
+/// and the point hit.
+pub(crate) fn nearest_body(app: &SolveApp, o: Vec3, d: Vec3, section: &[SectionPlane]) -> Option<(String, f64, Vec3)> {
+    let raw = Value::Null;
+    let input = Input { raw: &raw, pixel: None, o, d };
+    let st = crate::open_meshing::shown_world(app);
+    let bounds = crate::viewport::body_bounds(app, &st);
+    let active_bodies = crate::viewport::active_body_names(app);
+    let replaced: &[String] = app.preview.effective_replaced();
+    let mut cands = face_candidates(app, &st, &bounds, &input, &active_bodies, replaced, false);
+    cands.sort_by(|a, b| a.t.total_cmp(&b.t));
+    let kept = cands.into_iter().find(|c| section_keeps(section, c.point));
+    let cap = section_cap(app, &st, &bounds, &input, section, kept.as_ref().map(|c| c.t), false, replaced, &active_bodies);
+    match (kept, cap) {
+        (Some(c), Some(cap)) if cap.t < c.t => Some((cap.body, cap.t, o + d * cap.t)),
+        (Some(c), _) => Some((c.body, c.t, c.point)),
+        (None, Some(cap)) => Some((cap.body, cap.t, o + d * cap.t)),
+        (None, None) => None,
+    }
+}
+
 /// The nearest face of every pickable body along the ray, nearest first. Bodies the
 /// viewport hides, ghosts (unless asked for) or stands in for with a preview are skipped,
 /// exactly as the mouse picker skips them.

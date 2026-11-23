@@ -234,7 +234,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .noundo()
         .contract(&EXPLODE_SHOW_CONTRACT)
         .output(output_schema_for::<ExplodeShown>)
-        .params("view: id|name (or none: back to the assembled placement) — shown only; the design keeps its placements"),
+        .params("view: id|name (or none: back to the assembled placement), or spread: number (every top-level part moved away from the middle, nothing saved) — shown only; the design keeps its placements"),
     CommandSpec::new("explode.list", "List Exploded Views", crate::checked!("explode.list", explode_list))
         .icon("list")
         .noundo()
@@ -1502,7 +1502,18 @@ fn explode_create(s: &mut Session, p: &Value) -> Result<Value> {
 
 fn explode_show(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "explode.show";
-    if p.get("view").is_none_or(|v| v.is_null() || v.as_str().is_some_and(|x| x.eq_ignore_ascii_case("none"))) {
+    let no_view = p.get("view").is_none_or(|v| v.is_null() || v.as_str().is_some_and(|x| x.eq_ignore_ascii_case("none")));
+    if let Some(spread) = p.get("spread").filter(|v| !v.is_null()) {
+        if !no_view {
+            return Err(bad(cmd, "give `view` or `spread`, not both"));
+        }
+        let spread = spread
+            .as_f64()
+            .filter(|x| x.is_finite() && *x > 0.0 && *x <= 100.0)
+            .ok_or_else(|| bad(cmd, "`spread` must be a number above 0, up to 100"))?;
+        return explode_spread(s, spread);
+    }
+    if no_view {
         s.pending_moves.clear();
         s.exploded.clear();
         s.revision += 1;
@@ -1521,10 +1532,33 @@ fn explode_show(s: &mut Session, p: &Value) -> Result<Value> {
     typed_reply(cmd, ExplodeShown { view: Some(v.id), name: Some(v.name), param_warnings: Vec::new() })
 }
 
-/// Whether the pending moves are an exploded view shown (`explode.show`), which places the
-/// occurrences only while it is shown: not a move to capture or save (#9736).
+/// `explode.show` with `spread`: every top-level occurrence moved away from the middle of them all
+/// by `spread` times its distance from it (what a new exploded view starts from), shown only:
+/// nothing is added to the design.
+fn explode_spread(s: &mut Session, spread: f64) -> Result<Value> {
+    let cmd = "explode.show";
+    let c = centres(s);
+    if c.len() < 2 {
+        return Err(bad(cmd, "an exploded view needs two or more occurrences"));
+    }
+    let mid = c.iter().fold(Vec3::ZERO, |a, (_, p)| a + *p) * (1.0 / c.len() as f64);
+    let view = ExplodedView { id: 0, name: String::new(), moves: c.iter().map(|(o, p)| (*o, (*p - mid) * spread)).collect() };
+    let moves = exploded_at(&explode_moves(s, &view), 1.0);
+    if !moves.values().all(solidcraft_doc::is_placement) {
+        return Err(bad(cmd, "the spread moves an occurrence out of range"));
+    }
+    s.exploded.clone_from(&moves);
+    s.pending_moves = moves;
+    s.revision += 1;
+    typed_reply(cmd, ExplodeShown { view: None, name: None, param_warnings: Vec::new() })
+}
+
+/// Whether the pending moves are an exploded view shown (`explode.show`, a saved view or a
+/// spread), which places the occurrences only while it is shown: not a move to capture or save
+/// (#9736).
 pub(crate) fn shows_exploded_view(s: &Session) -> bool {
-    s.doc.assembly.exploded.iter().any(|v| exploded_at(&explode_moves(s, v), 1.0) == s.pending_moves)
+    (!s.pending_moves.is_empty() && s.exploded == s.pending_moves)
+        || s.doc.assembly.exploded.iter().any(|v| exploded_at(&explode_moves(s, v), 1.0) == s.pending_moves)
 }
 
 /// What exploded view `v` moves: (occurrence, its placement, the translation the view adds). Moves

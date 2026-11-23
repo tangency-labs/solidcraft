@@ -841,6 +841,35 @@ pub struct ExplodeShowParams {
     /// placement; `null` and the text `none` (in any case) mean the same.
     #[serde(default)]
     pub view: Option<ViewRef>,
+    /// Instead of a saved view: every top-level occurrence moved away from the middle of them all
+    /// by this many times its distance from it (above 0, up to 100), as a new exploded view starts.
+    /// Shown only; nothing is added to the design. Not with `view`.
+    #[serde(default, deserialize_with = "explode_spread")]
+    #[schemars(schema_with = "explode_spread_schema")]
+    pub spread: Option<f64>,
+}
+
+/// `spread`: a number above 0 and up to 100, with the handler's message for anything else;
+/// `null` is no spread.
+fn explode_spread<'de, D: Deserializer<'de>>(d: D) -> Result<Option<f64>, D::Error> {
+    match Value::deserialize(d)? {
+        Value::Null => Ok(None),
+        v => v
+            .as_f64()
+            .filter(|x| x.is_finite() && *x > 0.0 && *x <= 100.0)
+            .map(Some)
+            .ok_or_else(|| D::Error::custom(whole("`spread` must be a number above 0, up to 100"))),
+    }
+}
+
+/// The schema of [`explode_spread`]: a number above 0 and up to 100, or `null`.
+fn explode_spread_schema(_: &mut SchemaGenerator) -> Schema {
+    json_schema!({
+        "description": "Instead of a saved view: every top-level occurrence moved away from the middle of them all by this many times its distance from it (above 0, up to 100). Shown only; nothing is added to the design. Not with `view`; `null` is no spread.",
+        "type": ["number", "null"],
+        "exclusiveMinimum": 0,
+        "maximum": 100
+    })
 }
 
 /// List the design's exploded views. Nothing is changed.

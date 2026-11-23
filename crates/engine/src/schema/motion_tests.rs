@@ -24,7 +24,7 @@ fn schemas_and_the_key_check_agree() {
     assert_keys(input_schema_for::<MotionListParams>(), &[]);
     assert_keys(input_schema_for::<MotionStudyDeleteParams>(), &["study"]);
     assert_keys(input_schema_for::<ExplodeCreateParams>(), &["moves", "name", "scale"]);
-    assert_keys(input_schema_for::<ExplodeShowParams>(), &["view"]);
+    assert_keys(input_schema_for::<ExplodeShowParams>(), &["spread", "view"]);
     assert_keys(input_schema_for::<ExplodeListParams>(), &[]);
     assert_keys(input_schema_for::<ExplodeDeleteParams>(), &["view"]);
 }
@@ -368,6 +368,14 @@ fn the_exploded_view_types_read_the_keys_as_the_handlers_do() {
         (json!({"view": 4}), true),
         (json!({"view": true}), false),
         (json!({"view": ["Apart"]}), false),
+        // A spread instead of a saved view: above 0, up to 100; `null` is none.
+        (json!({"spread": 1.5}), true),
+        (json!({"spread": 100}), true),
+        (json!({"spread": null}), true),
+        (json!({"spread": 0}), false),
+        (json!({"spread": -2}), false),
+        (json!({"spread": 101}), false),
+        (json!({"spread": "far"}), false),
     ] {
         ok("explode.show", p.clone(), takes);
         schema_takes(input_schema_for::<ExplodeShowParams>(), p, takes);
