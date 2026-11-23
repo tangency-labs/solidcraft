@@ -1025,7 +1025,12 @@ impl<'t, O: SolutionObject + 't> CsGlobalSolver<'t, '_, O> {
         let patch = &view.patch;
 
         // If the classification of the node is outside then we can quit here
-        if !is_node_valid(surface_tree.owner(), cache, &surface_node)? {
+        if !is_node_valid(
+            surface_tree.owner(),
+            cache,
+            cache.solve_modes(),
+            &surface_node,
+        )? {
             return Ok(false);
         }
 
@@ -1114,6 +1119,7 @@ impl<'t, O: SolutionObject + 't> CsGlobalSolver<'t, '_, O> {
                         k,
                         surface_tree.owner(),
                         cache,
+                        cache.solve_modes(),
                         h.uv,
                         None,
                         self.face_queries,
@@ -1200,6 +1206,7 @@ impl<'t, O: SolutionObject + 't> CsGlobalSolver<'t, '_, O> {
                 k,
                 surface_tree.owner(),
                 cache,
+                cache.solve_modes(),
                 uv_found,
                 None,
                 self.face_queries,
@@ -1455,10 +1462,10 @@ impl<'t, O: SolutionObject + 't> SsGlobalSolver<'t, '_, O> {
         let view2 = patch_view(OP_SS, tree2, cache2, id2)?;
 
         // If the classification of the node is outside then we can quit here
-        if !is_node_valid(tree1.owner(), cache1, &node1)? {
+        if !is_node_valid(tree1.owner(), cache1, cache1.solve_modes(), &node1)? {
             return Ok(false);
         }
-        if !is_node_valid(tree2.owner(), cache2, &node2)? {
+        if !is_node_valid(tree2.owner(), cache2, cache2.solve_modes(), &node2)? {
             return Ok(false);
         }
 
@@ -1542,6 +1549,7 @@ impl<'t, O: SolutionObject + 't> SsGlobalSolver<'t, '_, O> {
                         k,
                         tree1.owner(),
                         cache1,
+                        cache1.solve_modes(),
                         x.uv,
                         None,
                         self.face_queries,
@@ -1549,6 +1557,7 @@ impl<'t, O: SolutionObject + 't> SsGlobalSolver<'t, '_, O> {
                         k,
                         tree2.owner(),
                         cache2,
+                        cache2.solve_modes(),
                         x.other_uv,
                         None,
                         self.face_queries,
@@ -1668,6 +1677,7 @@ impl<'t, O: SolutionObject + 't> SsGlobalSolver<'t, '_, O> {
                 k,
                 tree1.owner(),
                 cache1,
+                cache1.solve_modes(),
                 uv1,
                 None,
                 self.face_queries,
@@ -1675,6 +1685,7 @@ impl<'t, O: SolutionObject + 't> SsGlobalSolver<'t, '_, O> {
                 k,
                 tree2.owner(),
                 cache2,
+                cache2.solve_modes(),
                 uv2,
                 None,
                 self.face_queries,

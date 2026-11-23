@@ -1498,7 +1498,7 @@ fn path_pattern_editor_restores_sources_path_expressions_and_options() {
             h.frames(8);
             assert!(!h.app.ui.palette_open, "Edit Feature must open the existing pattern dialog");
             let d = h.app.dialog.as_mut().expect("path pattern editor");
-            assert!(matches!(&d.kind, Kind::PathPattern { count, spacing } if count == "copies" && spacing == "pitch"));
+            assert!(matches!(&d.kind, Kind::PathPattern { count, spacing, .. } if count == "copies" && spacing == "pitch"));
             assert_eq!(d.inputs[0].accept, if as_features { crate::selection::FEATURES } else { crate::selection::BODIES });
             assert_eq!(d.inputs[0].items, if as_features { vec![Sel::Feature { id: seed }] } else { vec![Sel::Body { name: "Pin".into() }] });
             assert_eq!(
@@ -1530,7 +1530,7 @@ fn path_pattern_editor_applies_in_place_cancels_and_undoes() {
             h.step(&json!({"call":"ui.editFeature","params":{"feature":"Copies"}})).unwrap();
             h.frames(8);
             let d = h.app.dialog.as_mut().expect("path pattern editor");
-            let Kind::PathPattern { count, spacing } = &mut d.kind else { panic!("path pattern") };
+            let Kind::PathPattern { count, spacing, .. } = &mut d.kind else { panic!("path pattern") };
             *count = "5".into();
             *spacing = "12 mm".into();
             h.frames(4);
@@ -3442,6 +3442,11 @@ fn patch_dialog_takes_continuity_and_points_and_brings_them_back() {
     }
     let (id, p) = apply_commands(&app, &d).unwrap().remove(0);
     assert_eq!((id.as_str(), &p["continuity"], &p["points"]), ("surface.patch", &json!("g1"), &json!([[0.0, 0.0, 36.0]])), "{p}");
+    // A snap point (on no body: an edge's middle, a face's centre) passes through as a point too.
+    assert_ne!(d.inputs[1].accept & crate::selection::SNAP_POINTS, 0, "Pass through takes snap points");
+    let mut snapped = d.clone();
+    snapped.inputs[1].items = vec![Sel::Vertex { body: String::new(), point: Vec3::new(0.0, 0.0, 36.0) }];
+    assert_eq!(apply_commands(&app, &snapped).unwrap()[0].1["points"], json!([[0.0, 0.0, 36.0]]));
     app.session.execute(&id, &p).unwrap();
     let top = app.session.model.state().bodies.last().unwrap().mesh().bounds().max.z;
     assert!(top > 35.9, "the cap reaches the point: {top}");

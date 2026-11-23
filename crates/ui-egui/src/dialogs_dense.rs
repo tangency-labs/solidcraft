@@ -635,6 +635,9 @@ pub(super) fn rows(app: &mut SolveApp, ctx: &egui::Context, d: &mut Dialog, ui: 
                 choice_row(ui, "Chamfer Type", "ch_type", ctype, &CHAMFER_TYPES);
             }
             enter |= expr_row_positive(ui, if *chamfer { if *ctype == 0 { "Distance" } else { "Distance 1" } } else { "Radius" }, radius);
+            // A chamfer of two distances: the row the keyboard is in is the distance its arrow and
+            // the canvas box follow.
+            let mut editing = ui_kit::last_value_field(ctx).filter(|id| ctx.memory(|m| m.has_focus(*id))).map(|_| 0usize);
             let mut rtype = fillet_type(&d.extra);
             if !*chamfer {
                 form_row(ui, "Type", |ui| {
@@ -654,6 +657,10 @@ pub(super) fn rows(app: &mut SolveApp, ctx: &egui::Context, d: &mut Dialog, ui: 
             }
             if *chamfer && *ctype == 1 {
                 enter |= expr_row_positive(ui, "Distance 2", distance2);
+                editing = ui_kit::last_value_field(ctx).filter(|id| ctx.memory(|m| m.has_focus(*id))).map(|_| 1usize).or(editing);
+            }
+            if let Some(k) = editing.filter(|_| *chamfer && *ctype == 1) {
+                crate::canvas::note_chamfer_editing(&mut d.extra, k);
             }
             if *chamfer && *ctype == 2 {
                 enter |= expr_row(ui, "Angle", angle);
@@ -1107,9 +1114,33 @@ fn additional_rows(app: &mut SolveApp, d: &mut Dialog, ui: &mut egui::Ui) -> boo
             choice_row(ui, "Operation", "bf_op", operation, &OP_LABELS);
             extra_options(ui, "boundary_options", &mut d.extra, &[("Remove Tools", "remove_tools")]);
         }
-        Kind::PathPattern { count, spacing } => {
+        Kind::PathPattern { count, spacing, start, fraction } => {
             enter |= quantity_row(ui, &app.session.doc, "Quantity", count);
             enter |= expr_row(ui, if d.extra.contains_key("distance") { "Distance" } else { "Spacing" }, spacing);
+            // Where along the path the original sits: a distance, or a fraction of the path's
+            // length that keeps its place as the path changes. Empty: the path's start.
+            form_row(ui, "pattern.start_point", |ui| {
+                let mut i = usize::from(*fraction);
+                if ui_kit::segmented(ui, &mut i, &["pattern.start_distance", "pattern.start_fraction"], Default::default()) && (i == 1) != *fraction {
+                    *fraction = i == 1;
+                    start.clear();
+                }
+            });
+            // Both labels about as wide as the dialog's others: switching keeps the label column
+            // where it is, so the rows don't shift and Start point's choice stays two buttons.
+            enter |= hint_row(ui, if *fraction { "  Position" } else { "  Distance" }, start, "0");
+            // Identical: copies keep the original's orientation; Path direction: they turn with
+            // the path, keeping the original's relation to it.
+            form_row(ui, "Orientation", |ui| {
+                extra_choice(
+                    ui,
+                    &mut d.extra,
+                    "pp_orientation",
+                    "orientation",
+                    &[("pattern.orientation_identical", "identical"), ("pattern.orientation_path", "path")],
+                );
+            });
+            extra_options(ui, "feature_options", &mut d.extra, &[("Flip direction", "flip")]);
         }
         Kind::Pipe { diameter, wall, operation } => {
             enter |= expr_row(ui, "Diameter", diameter);
