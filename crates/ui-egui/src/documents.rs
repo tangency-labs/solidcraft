@@ -3190,7 +3190,7 @@ pub fn take_file_drops(app: &mut SolveApp, ctx: &egui::Context) {
         return;
     }
     let pointer = ctx.input(|i| i.pointer.latest_pos());
-    let Some(at) = crate::app_bar::file_drop_place(ctx, tab_strip_id(), pointer) else { return };
+    let Some(at) = crate::app_bar::file_drop_place(ctx, tab_strip_id(ctx.viewport_id()), pointer) else { return };
     let files = ctx.input_mut(|i| std::mem::take(&mut i.raw.dropped_files));
     open_files_at(app, files.iter().map(|f| f.path().to_string_lossy().to_string()), at);
 }
@@ -5042,7 +5042,7 @@ mod tests {
             let (a, b) = (at(&mut h, "tab:design:0"), at(&mut h, "tab:design:1"));
             egui::pos2((a.x + b.x) / 2.0, a.y)
         };
-        let place = |h: &crate::scenario::Harness, p: egui::Pos2| crate::app_bar::file_drop_place(&h.ctx, tab_strip_id(), Some(p));
+        let place = |h: &crate::scenario::Harness, p: egui::Pos2| crate::app_bar::file_drop_place(&h.ctx, tab_strip_id(h.ctx.viewport_id()), Some(p));
         let hovered = || vec![egui::HoveredFile { path: Some(tetra.clone()), mime: String::new() }];
         crate::scenario::clear_handles();
         h.drag_files(between, hovered(), Vec::new());
@@ -5099,12 +5099,12 @@ mod tests {
         h.frames(3);
         let [x, y] = h.at(&json!({"handle": "tab:design:0"})).unwrap();
         let on_bar = egui::pos2(x as f32, y as f32);
-        assert!(crate::app_bar::file_drop_place(&h.ctx, tab_strip_id(), Some(on_bar)).is_some());
+        assert!(crate::app_bar::file_drop_place(&h.ctx, tab_strip_id(h.ctx.viewport_id()), Some(on_bar)).is_some());
         // Passes in which nothing draws the bar.
         for _ in 0..3 {
             let _ = h.ctx.run_ui(Default::default(), |_| {});
         }
-        assert_eq!(crate::app_bar::file_drop_place(&h.ctx, tab_strip_id(), Some(on_bar)), None);
+        assert_eq!(crate::app_bar::file_drop_place(&h.ctx, tab_strip_id(h.ctx.viewport_id()), Some(on_bar)), None);
     }
 
     /// `doc.open`'s `tab` over the control channel opens the file in a new tab at that place;
