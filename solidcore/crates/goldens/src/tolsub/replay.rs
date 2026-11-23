@@ -750,11 +750,10 @@ fn record() {
 /// main's blessed line, MEASURED equal to this branch's run with the trims put back); the eight
 /// `uv_trim_f2`, `f3`, `f10` and `f11` rows (each with its `_rebuild`) hold main's blessed line
 /// after #20939 cleared their gap-cache flags (main at 1562e5f516). `topology.brep_p10`'s
-/// `gen0026` (drop_uv 2, healer on) holds its put-back run after WR-732's retirement
-/// (#18934): the healer makes the dropped trims again while the body is edited, now
-/// against the faces' current trims, which moves 62 of the row's doubles by up to 1.7e-8
-/// against main's put-back run (MEASURED at e97d2814d7); the classified trims' put-back is
-/// the same as before. The two
+/// `gen0026` (`drop_uv` 2, healer on) holds its put-back run after WR-732's retirement
+/// (#18934), which moves 62 of the row's doubles by up to 1.7e-8 against main's put-back
+/// run (MEASURED at e97d2814d7) apart from the classified trims, whose put-back is the
+/// same as before. The two
 /// `uv_trim_f6` rows read the file too but do not move with #20179; they are listed so that
 /// the put-back is shown to keep them.
 const CLASSIFIED_READ_ROWS: &[(&str, &str, u64)] = &[
