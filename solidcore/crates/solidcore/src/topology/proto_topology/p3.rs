@@ -142,7 +142,7 @@ use crate::curve::curve::p2::Curve;
 use crate::curve::curve::p6::is_measurable_box;
 use crate::curve::curve::p8::CurveIntersectOptions;
 use crate::curve::curve::CurveKind;
-use crate::error::{ignored, passed_on, EntityRef, Result, SolidError};
+use crate::error::{passed_on, EntityRef, Result, SolidError};
 use crate::geom::extent1d::Extent1d;
 use crate::geom::geom_utility::p1::{circle_coplanar_circle_intersect_in_contact, CircleCircle};
 use crate::geom::global_solver::SolverOperation;
@@ -2109,10 +2109,8 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
                     };
                     let mut size = 0.0;
                     for (curve, interval) in [(c1, &ivl1), (c2, &ivl2)] {
-                        if let Some(bounds) =
-                            ignored(curve.calculate_bounding_box(k, interval, req, true))?
-                                .and_then(|boxes| boxes.normal)
-                        {
+                        let boxes = curve.calculate_bounding_box(k, interval, req, true);
+                        if let Some(bounds) = crate::error::ignored(boxes)?.and_then(|b| b.normal) {
                             if bounds.is_defined()
                                 && bounds.is_bounded()
                                 && !bounds.has_negative_volume()
