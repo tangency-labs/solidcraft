@@ -1,0 +1,1 @@
+takes sample points per face from mesh triangles

@@ -44,6 +44,21 @@ fn clicked_browser_folders_toggle_visibility_with_v() {
     }
 }
 
+/// #14554: V on the Origin row of the Browser shows or hides the whole Origin, as it does for a folder.
+#[test]
+fn v_on_the_clicked_origin_row_hides_the_origin() {
+    let mut h = Harness::new();
+    h.app.home.open = false;
+    h.app.run("solid.box", json!({"length":10,"width":10,"height":10,"operation":"new_body","body_name":"One"})).unwrap();
+    h.settle();
+    assert!(h.app.origin_shown());
+    h.step(&json!({"click":{"handle":"row:Origin"}})).unwrap();
+    h.step(&json!({"key":"V"})).unwrap();
+    assert!(!h.app.origin_shown(), "V hides the Origin picked in the Browser");
+    h.step(&json!({"key":"V"})).unwrap();
+    assert!(h.app.origin_shown(), "V shows it again");
+}
+
 /// #10526: New Group from the root's context menu in a design with no bodies yet makes a group
 /// the Browser shows, and a body made later can be dropped into it.
 #[test]
@@ -465,6 +480,39 @@ fn browser_card_shrinks_and_scrolls_without_covering_history() {
     h.app.tree.collapsed.insert("c0".into());
     h.settle();
     assert!(rect_of("browser:card").unwrap().height() < short.height());
+}
+
+/// In the compact layout, a Browser holding the History fills the window's height; the floating layout,
+/// a folded Browser and a Browser beside a bottom History still hug their rows (#14566).
+#[test]
+fn compact_browser_holding_the_history_fills_the_window_height() {
+    let mut h = Harness::new();
+    h.call("ui.resize", json!({"width":1400,"height":900}));
+    h.app.run("view.history_layout", json!({"dock":"browser"})).unwrap();
+    h.settle();
+    assert!(h.app.preferences.history_in_browser);
+    let floating = rect_of("browser:card").unwrap();
+    let viewport = h.app.viewport.rect.unwrap();
+    assert!(floating.bottom() < viewport.bottom() - 100.0, "the floating card still hugs its rows: {floating:?} in {viewport:?}");
+
+    h.call("ui.set", json!({"layout":"docked"}));
+    h.settle();
+    let compact = rect_of("browser:card").unwrap();
+    assert!(compact.height() > floating.height() + 100.0, "{compact:?} {floating:?}");
+    let foot = viewport.bottom() - compact.bottom();
+    assert!((-0.5..=SHELL_GAP + 0.5).contains(&foot), "{compact:?} reaches the window's foot {viewport:?}");
+
+    set_browser_collapsed(&mut h, true);
+    h.settle();
+    let folded = rect_of("browser:card").unwrap();
+    assert!(folded.height() < floating.height(), "a folded Browser keeps only its header: {folded:?}");
+    set_browser_collapsed(&mut h, false);
+    h.settle();
+    assert_eq!(rect_of("browser:card").unwrap(), compact, "unfolded, it fills the column again");
+
+    h.app.run("view.history_layout", json!({"dock":"bottom"})).unwrap();
+    h.settle();
+    assert!(rect_of("browser:card").unwrap().height() < compact.height() - 100.0, "History at the bottom: the Browser hugs its rows again");
 }
 
 #[test]

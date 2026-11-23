@@ -3,8 +3,8 @@
 //!
 //! `SetProps_Stage3` evaluates the new faces the heal's seam splits make. On the flat
 //! cylinder below (radius 1, height `1e-9`) that evaluation fails for the new side
-//! face: `SmFace::ClassifyLoops` returns `SM_ERR` (1001) because the face it is handed
-//! has no loops to classify. SMLib (and so the default kernel) drops that status and
+//! face: `SmFace::ClassifyLoops` returns `SM_ERR` (1001) because loop 0's V-seam walk
+//! meets one odd crossing and no `Out`/`In` entry (measured, #18342). SMLib (and so the default kernel) drops that status and
 //! reads the empty classification as `SM_ERR_NOTYET_HEAL_FACE` (1040) from the missing
 //! loop tree root, and `Cache_FaceProps_Stage3` quarantines the face. solidcore reports
 //! the classification status itself (WR-268), so the quarantine does not happen: the face stays a target and `Fix_SplitFaceAtSeams` runs on it, which

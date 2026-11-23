@@ -4,11 +4,10 @@
 //! `SmLine` and `SmEllipse` are `SmBSplineCurve`s that hold their NURB, so the split of a line
 //! returns its one copy. The port builds a line's and a conic's NURB lazily. The split took
 //! a copy of the curve's bare B-spline base, which had none, and `make_nurb` refused it (1001).
-//! The fork passes that status on (tangency-labs/smlib c8f6a31, WR-662), so with
-//! `Kernel::fixes.sweep_statuses_pass_on`, SolidCraft's preset, these sweeps failed. Without
-//! the flag the status was dropped and the curve stayed whole.
+//! The fork passes that status on (tangency-labs/smlib c8f6a31, WR-662), so these sweeps
+//! failed (tangency-labs/solidcraft#15829). That is the only path since #14246 batch S5.
 //!
-//! Each sweep below builds the same body with the flag off and on.
+//! Each sweep below builds.
 
 #![allow(
     clippy::unwrap_used,
@@ -26,13 +25,14 @@ use solidcore::math::Point3;
 use solidcore::nurbs::b_spline_curve::BSplineCurve;
 use solidcore::nurbs::crv_basic::Curve as NurbCurve;
 use solidcore::nurbs::math::CPoint;
-use solidcore::sweep::api_brep::{create_linear_sweep, create_rotational_sweep};
+use solidcore::primitive::primitive_creation::SweepOptions;
+use solidcore::sweep::api_brep::{
+    create_curve_sweep, create_linear_sweep, create_rotational_sweep,
+};
 use solidcore::{Brep, Kernel, Vec3};
 
-fn kernel(pass_on: bool) -> Kernel {
-    let mut k = Kernel::default();
-    k.fixes.sweep_statuses_pass_on = pass_on;
-    k
+fn kernel() -> Kernel {
+    Kernel::default()
 }
 
 fn line(a: Vec3, b: Vec3) -> Curve {
@@ -71,23 +71,21 @@ fn a_profile_of_lines_and_a_spline_extrudes_with_its_statuses_passed_on() {
     let nurb = NurbCurve::new(points, 3, vec![0.0, 0.0, 0.0, 0.0, 1.0, 1.0, 1.0, 1.0]).unwrap();
     let span = Curve::from(BSplineCurve::from_nurb(nurb, 3, false));
     let (back, front) = (line(point(P3), point(P4)), line(point(P4), point(P0)));
-    for pass_on in [false, true] {
-        let mut k = kernel(pass_on);
-        let mut body = create_linear_sweep(
-            &mut k,
-            &[Some(&span), Some(&back), Some(&front)],
-            Vec3::X,
-            44.0,
-            true,
-        )
-        .unwrap_or_else(|e| panic!("pass_on {pass_on}: {e:?}"));
-        assert_eq!(body.face_list().len(), 5, "pass_on {pass_on}");
-        let v = volume(&k, &mut body);
-        assert!(
-            (v - PRISM_VOLUME).abs() <= 1e-12 * PRISM_VOLUME,
-            "pass_on {pass_on}: volume {v}"
-        );
-    }
+    let mut k = kernel();
+    let mut body = create_linear_sweep(
+        &mut k,
+        &[Some(&span), Some(&back), Some(&front)],
+        Vec3::X,
+        44.0,
+        true,
+    )
+    .unwrap_or_else(|e| panic!("{e:?}"));
+    assert_eq!(body.face_list().len(), 5);
+    let v = volume(&k, &mut body);
+    assert!(
+        (v - PRISM_VOLUME).abs() <= 1e-12 * PRISM_VOLUME,
+        "volume {v}"
+    );
 }
 
 #[test]
@@ -96,52 +94,70 @@ fn two_lines_sweep_to_an_open_sheet_with_their_statuses_passed_on() {
         line(Point3::ZERO, Point3::new(1.0, 0.0, 0.0)),
         line(Point3::new(1.0, 0.0, 0.0), Point3::new(1.0, 1.0, 0.0)),
     ];
-    for pass_on in [false, true] {
-        let mut k = kernel(pass_on);
-        let body = create_linear_sweep(
-            &mut k,
-            &[Some(&lines[0]), Some(&lines[1])],
-            Vec3::Z,
-            1.0,
-            false,
-        )
-        .unwrap_or_else(|e| panic!("pass_on {pass_on}: {e:?}"));
-        assert_eq!(body.face_list().len(), 2, "pass_on {pass_on}");
-    }
+    let mut k = kernel();
+    let body = create_linear_sweep(
+        &mut k,
+        &[Some(&lines[0]), Some(&lines[1])],
+        Vec3::Z,
+        1.0,
+        false,
+    )
+    .unwrap_or_else(|e| panic!("{e:?}"));
+    assert_eq!(body.face_list().len(), 2);
 }
 
 /// A conic (the analytic circle `Ellipse::circle_from_3_points` makes) as a capped profile,
-/// and a line revolved a full turn (`CreateRotationalSweep`'s split): each builds with the
-/// flag off and on.
+/// and a line revolved a full turn (`CreateRotationalSweep`'s split): each builds.
 #[test]
 fn a_circle_extrudes_and_a_line_revolves_with_their_statuses_passed_on() {
-    for pass_on in [false, true] {
-        let mut k = kernel(pass_on);
-        let circle = Curve::from(
-            Ellipse::circle_from_3_points(
-                &k,
-                Point3::new(2.0, 0.0, 0.0),
-                Point3::new(0.0, 2.0, 0.0),
-                Point3::new(-2.0, 0.0, 0.0),
-                3,
-                true,
-            )
-            .unwrap(),
-        );
-        let mut body = create_linear_sweep(&mut k, &[Some(&circle)], Vec3::Z, 3.0, true)
-            .unwrap_or_else(|e| panic!("pass_on {pass_on}, circle: {e:?}"));
-        assert_eq!(body.face_list().len(), 3, "pass_on {pass_on}, circle");
-        let v = volume(&k, &mut body);
-        let want = std::f64::consts::PI * 4.0 * 3.0;
-        assert!(
-            (v - want).abs() <= 1e-9 * want,
-            "pass_on {pass_on}: circle volume {v}"
-        );
+    let mut k = kernel();
+    let circle = Curve::from(
+        Ellipse::circle_from_3_points(
+            &k,
+            Point3::new(2.0, 0.0, 0.0),
+            Point3::new(0.0, 2.0, 0.0),
+            Point3::new(-2.0, 0.0, 0.0),
+            3,
+            true,
+        )
+        .unwrap(),
+    );
+    let mut body = create_linear_sweep(&mut k, &[Some(&circle)], Vec3::Z, 3.0, true)
+        .unwrap_or_else(|e| panic!("circle: {e:?}"));
+    assert_eq!(body.face_list().len(), 3, "circle");
+    let v = volume(&k, &mut body);
+    let want = std::f64::consts::PI * 4.0 * 3.0;
+    assert!((v - want).abs() <= 1e-9 * want, "circle volume {v}");
 
-        let side = line(Point3::new(1.0, 0.0, 0.0), Point3::new(1.0, 0.0, 2.0));
-        let body =
-            create_rotational_sweep(&mut k, &[Some(&side)], Vec3::ZERO, Vec3::Z, 360.0, false)
-                .unwrap_or_else(|e| panic!("pass_on {pass_on}, revolve: {e:?}"));
-        assert!(!body.face_list().is_empty(), "pass_on {pass_on}, revolve");
-    }
+    let side = line(Point3::new(1.0, 0.0, 0.0), Point3::new(1.0, 0.0, 2.0));
+    let body = create_rotational_sweep(&mut k, &[Some(&side)], Vec3::ZERO, Vec3::Z, 360.0, false)
+        .unwrap_or_else(|e| panic!("revolve: {e:?}"));
+    assert!(!body.face_list().is_empty(), "revolve");
+}
+
+/// `CreateCurveSweep`'s split (`prepare_curve_sweep`, PR #18402 review): a unit square of
+/// four lines swept 2 along a straight path, capped, is the 1 x 1 x 2 prism, volume 2.
+#[test]
+fn a_square_of_lines_curve_sweeps_with_its_statuses_passed_on() {
+    let corners = [
+        Point3::ZERO,
+        Point3::new(1.0, 0.0, 0.0),
+        Point3::new(1.0, 1.0, 0.0),
+        Point3::new(0.0, 1.0, 0.0),
+    ];
+    let sides: Vec<Curve> = (0..4)
+        .map(|i| line(corners[i], corners[(i + 1) % 4]))
+        .collect();
+    let profile: Vec<Option<&Curve>> = sides.iter().map(Some).collect();
+    let path = line(Point3::ZERO, Point3::new(0.0, 0.0, 2.0));
+    let options = SweepOptions {
+        cap_ends: true,
+        ..SweepOptions::default()
+    };
+    let mut k = kernel();
+    let mut s = create_curve_sweep(&mut k, &profile, Some(&path), None, None, Some(&options))
+        .unwrap_or_else(|e| panic!("{e:?}"));
+    assert_eq!(s.brep.face_list().len(), 6);
+    let v = volume(&k, &mut s.brep);
+    assert!((v - 2.0).abs() <= 1e-9 * 2.0, "volume {v}");
 }

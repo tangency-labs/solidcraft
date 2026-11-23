@@ -73,7 +73,7 @@ use crate::curve::curve::p2::evaluate_geometric as curve_evaluate_geometric;
 use crate::curve::curve::p3::PointSolveOptions;
 use crate::curve::curve::Curve;
 use crate::curve::iso_curve::IsoCurve;
-use crate::error::surface::SurfaceFailure;
+use crate::error::surface::{SolveInput, SurfaceFailure};
 use crate::error::{ignored, Result, SolidError};
 use crate::geom::extent1d::{Extent1d, ExtentNd, ExtentPointType};
 use crate::geom::extent2d::Extent2d;
@@ -457,9 +457,7 @@ impl Surface {
         norm_sum.unitize().map_err(|_| {
             SolidError::surface(
                 "surface::surface::p5::evaluate_normal_at_singularity",
-                SurfaceFailure::InvalidValue(
-                    "the sum of the normals around the singularity is zero",
-                ),
+                SurfaceFailure::NormalsCancel,
             )
         })
     }
@@ -1202,6 +1200,14 @@ impl Surface {
                         sol = r.solution;
                     }
                     None => success = false,
+                }
+
+                // A converged closest point can still lie beyond an intersection's
+                // distance tolerance. Apply the global solve's bound before either
+                // accepting this foot or keeping it as a moved-foot candidate.
+                if success && op == SolverOperation::Intersect {
+                    let gap = sol.start.solution_value;
+                    success = gap.is_finite() && (0.0..=dist_tol).contains(&gap);
                 }
 
                 // Check whether we think that this solution is ok, i.e., was it a good
@@ -2421,7 +2427,14 @@ fn surface_identical_solutions<O: SolutionObject>(
             || (sol1.solution_type == SolutionType::SingleValue
                 && sol2.solution_type == SolutionType::SingleValue))
     {
-        let surf = surface.ok_or_else(|| SolidError::surface_missing(OP_SING, "the surface"))?;
+        let surf = surface.ok_or_else(|| {
+            SolidError::surface(
+                OP_SING,
+                SurfaceFailure::InputNotGiven {
+                    what: SolveInput::Surface,
+                },
+            )
+        })?;
 
         // At a singularity, the same 3d point can have different uv values.
         let uv1 = Point2::new(sol1.start.param(uv_at)?, sol1.start.param(uv_at + 1)?);
@@ -2722,6 +2735,117 @@ mod tests {
         assert!((r.result_uv.x - c.x).abs() < 1e-9 && (r.result_uv.y - c.y).abs() < 1e-9);
     }
 
+    /// A regular planar spline reaches the generic point-drop path. A guess can help find
+    /// its foot, but an intersection still needs a gap inside the drop's own tolerance.
+    #[test]
+    fn intersect_drop_respects_its_tolerance_with_or_without_a_guess() {
+        use crate::nurbs::b_spline_surface::BSplineSurface;
+        use crate::nurbs::math::{CPoint, NOW};
+        use crate::nurbs::srf_basic::Surface as Net;
+
+        let k = Kernel::default();
+        let rows = [0.0, 1.0]
+            .into_iter()
+            .map(|x| {
+                [0.0, 1.0]
+                    .into_iter()
+                    .map(|y| CPoint::new(x, y, 0.0, NOW))
+                    .collect()
+            })
+            .collect();
+        let knots = vec![0.0, 0.0, 1.0, 1.0];
+        let net = Net::new(rows, 1, 1, knots.clone(), knots).unwrap();
+        let surface = Surface::from(BSplineSurface::from_gw_nurb(&net));
+        let domain = surface.natural_uv_domain_with_nurb(&k).unwrap();
+        let mut failures = Vec::new();
+        for gap in [0.5 * XSECT_TOL_3D, 1.5 * XSECT_TOL_3D] {
+            for (name, point, foot, moved_guess) in [
+                (
+                    "interior",
+                    Vec3::new(0.5, 0.5, gap),
+                    Point2::new(0.5, 0.5),
+                    Point2::new(0.375, 0.5),
+                ),
+                (
+                    "boundary",
+                    Vec3::new(-gap, 0.5, 0.0),
+                    Point2::new(0.0, 0.5),
+                    Point2::new(0.125, 0.5),
+                ),
+            ] {
+                let expected = gap <= XSECT_TOL_3D;
+                // The local solve may find a closest point beyond the intersection tolerance.
+                // Its caller must decide whether that point is an intersection.
+                let local = surface
+                    .local_point_solve::<Obj>(&k, &domain, SolverOperation::Intersect, point, foot)
+                    .unwrap();
+                assert!(local.found, "{name}, {gap:e}: {local:?}");
+                assert!(
+                    (local.solution.start.solution_value - gap).abs() < 1e-12,
+                    "{local:?}"
+                );
+                if name == "boundary" {
+                    assert_eq!(
+                        drop_result_verdict(
+                            &k,
+                            &surface,
+                            &domain,
+                            point,
+                            moved_guess,
+                            &local.solution.start
+                        )
+                        .unwrap(),
+                        DropVerdict::MovedFoot,
+                    );
+                }
+                for guess_uv in [None, Some(foot), Some(moved_guess)] {
+                    let options = DropPointOptions {
+                        guess_uv,
+                        operation: SolverOperation::Intersect,
+                        ..DropPointOptions::default()
+                    };
+                    let answer = surface
+                        .drop_point::<Obj>(&k, point, &domain, &options)
+                        .unwrap();
+                    if answer.success != expected {
+                        failures.push(format!(
+                            "{name}, gap {gap:e}, guess {guess_uv:?}: {answer:?}"
+                        ));
+                    }
+                    if answer.success {
+                        let measured =
+                            point.distance(surface.evaluate_point(&k, answer.result_uv).unwrap());
+                        assert!(
+                            (answer.gap - measured).abs() < 1e-12,
+                            "{answer:?}, actual gap {measured:e}"
+                        );
+                    }
+                }
+                let nearest = surface
+                    .drop_point::<Obj>(
+                        &k,
+                        point,
+                        &domain,
+                        &DropPointOptions {
+                            guess_uv: Some(foot),
+                            operation: SolverOperation::Minimize,
+                            ..DropPointOptions::default()
+                        },
+                    )
+                    .unwrap();
+                assert!(
+                    nearest.success && (nearest.gap - gap).abs() < 1e-12,
+                    "{nearest:?}"
+                );
+            }
+        }
+        assert!(
+            failures.is_empty(),
+            "intersection tolerance disagreed with:\n{}",
+            failures.join("\n")
+        );
+    }
+
     #[test]
     fn filter_keeps_exact_solutions() {
         let k = &Kernel::default();
@@ -2851,22 +2975,25 @@ mod tests {
     /// `Upstream` statuses they replace (a sample).
     #[test]
     fn typed_surface_failures_keep_their_upstream_answers() {
-        use crate::error::surface::SurfaceFailure;
-        let samples: [(&'static str, SurfaceFailure, i32); 2] = [
+        use crate::error::surface::{SolveInput, SurfaceFailure};
+        use crate::error::ErrorKind;
+        let samples: [(&'static str, SurfaceFailure, i32, ErrorKind); 2] = [
             (
                 OP_SING,
-                SurfaceFailure::Missing("the surface"),
+                SurfaceFailure::InputNotGiven {
+                    what: SolveInput::Surface,
+                },
                 crate::error::SM_ERR_NULL_POINTER,
+                ErrorKind::InvalidInput,
             ),
             (
                 "surface::surface::p5::evaluate_normal_at_singularity",
-                SurfaceFailure::InvalidValue(
-                    "the sum of the normals around the singularity is zero",
-                ),
+                SurfaceFailure::NormalsCancel,
                 crate::error::SM_ERR_INVALID_INPUT,
+                ErrorKind::Degenerate,
             ),
         ];
-        for (operation, failure, code) in samples {
+        for (operation, failure, code, kind) in samples {
             let typed = SolidError::surface(operation, failure);
             let before = SolidError::Upstream {
                 operation,
@@ -2875,7 +3002,7 @@ mod tests {
             };
             assert_eq!(typed.sm_status(), before.sm_status(), "{typed:?}");
             assert_eq!(typed.upstream_status(), Some(code), "{typed:?}");
-            assert_eq!(typed.kind(), before.kind(), "{typed:?}");
+            assert_eq!(typed.kind(), kind, "{typed:?}");
             assert_eq!(typed.operation(), before.operation(), "{typed:?}");
             assert_eq!(typed.entity(), None, "{typed:?}");
             assert_eq!(typed.is_port_failure(), before.is_port_failure());

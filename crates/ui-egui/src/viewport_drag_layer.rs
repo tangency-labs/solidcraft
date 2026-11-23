@@ -309,8 +309,14 @@ mod tests {
     }
 
     fn with_gpu(app: &mut SolveApp) {
-        app.viewport.gpu =
-            Some(crate::gpu::GpuTarget { format: egui_wgpu::wgpu::TextureFormat::Rgba8Unorm, depth: None, samples: 1, tess: false, oit: false });
+        app.viewport.gpu = Some(crate::gpu::GpuTarget {
+            format: egui_wgpu::wgpu::TextureFormat::Rgba8Unorm,
+            depth: None,
+            samples: 1,
+            tess: false,
+            oit: false,
+            edges: false,
+        });
     }
 
     /// Whole bodies light by drawing the model's own triangles again, but a drag drawn as a layer
