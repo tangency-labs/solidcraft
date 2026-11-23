@@ -16,8 +16,9 @@
 //! `start_minus_y`, `plus_c_times`) over `feet_tm`'s models (`Ft`), with the faces' partials
 //! and the edge's derivatives from [`super::feet_tm::nurbs_partials_tm`] and
 //! [`super::feet_tm::curve_derivs_tm`]. Those continue one polynomial piece, so a proof
-//! stands only where the whole box the root is unique in lies in the face's piece and the
-//! span in the edge's: elsewhere nothing is proved. Unlike `gn_enclose_tm`, no interval
+//! stands only where the whole box the root is unique in lies in the face's piece (past a
+//! knot line or domain end on the side its piece is continued to: below) and the span in the
+//! edge's: elsewhere nothing is proved. Unlike `gn_enclose_tm`, no interval
 //! enclosure of the root at the middle is checked against the tube: which root the tube holds
 //! is the exclusion's to prove ([`first_crossing`]), not the tube's. The same tube serves the
 //! edge's projection on a support ([`enclose_projection`]) and the chord's five unknowns
@@ -53,17 +54,31 @@
 //! tube lies in K on the section, so its root is that first point. This proves more than "no
 //! nearer root" (monotone or inside, from N to the foot): it is sufficient, not necessary, and
 //! `NotProved` is not "does not fit". The cells are split from a 4 × 8 grid in (a, b), the
-//! longest side relative to K's (s included) first, within a budget of [`CELL_BUDGET`] cells.
+//! longest side relative to K's (s included) first. A sub-span of the span that is not proved
+//! is halved, each half with its own K built from the tubes' models over it, down to
+//! `2^-`[`SUBSPAN_HALVINGS`] of the span; cells and sub-spans share one budget of
+//! [`CELL_BUDGET`] cells.
+//!
+//! **One side of a knot line.** An edge often lies on a knot line of its face or on a domain
+//! end (a hemisphere's rim on the ball's equator, a cylinder's end rim). The face is on one
+//! side of that line; the support the station reads is the face on that side and, past the
+//! line, the face-side polynomial piece continued (as the faces' partials continue the end
+//! span past the knots' range). The projection's tube is taken on that piece
+//! ([`enclose_projection`]'s `sides`), its root allowed on the line or just past it, and the
+//! first-crossing proof reads the continued piece on the line's far side from the foot. The
+//! continued piece agrees with the face on the line, so the support is continuous there.
 //!
 //! Deviations: not the fork's (no counterpart). Every loop has a fixed count (8 tube steps,
 //! 200 steps of the radii's iteration as `gn_enclose_tm`, `NEWTON_STEPS` per point root, the
 //! cells' budget), no recursion: the cells are a work list.
 
-use super::certificate::{curve_derivs_over, nurbs_partials_over_box, NurbsCurve};
+use super::certificate::{
+    curve_derivs_over, knot_cuts, nurbs_partials_over_box, nurbs_partials_over_piece, NurbsCurve,
+};
 use super::feet_tm::{curve_derivs_tm, nurbs_partials_tm, Ft, FEET_TM_N};
 use super::interval::{cmax, round_down, round_up, Ivl};
 use super::series::{v_sub, V3};
-use super::station::{knot, nurbs_partials, solve4, span, Nurbs, Partials};
+use super::station::{knot, nurbs_partials, sided_span, solve4, span, Nurbs, Partials};
 use crate::error::{Result, SolidError};
 use crate::geom::krawczyk::{
     contraction, inverse_of_columns2, inverse_of_columns5, newton, plus_c_times, start_minus_y,
@@ -79,7 +94,7 @@ const IZ: Ivl = Ivl::new(0.0, 0.0);
 const TUBE_STEPS: usize = 8;
 
 /// The most cells the first-crossing proof classifies over one span.
-pub const CELL_BUDGET: usize = 16384;
+pub const CELL_BUDGET: usize = 1 << 16;
 
 /// A system's Jacobian (rows) over a tube, or `None` where an evaluation proves nothing.
 type Jacobian<const N: usize> = Result<Option<[[Ft; N]; N]>>;
@@ -146,6 +161,11 @@ pub struct FootTube {
     pub span: Span,
     /// The setback it was proved at (a foot's), or `None` (the edge's projection).
     pub setback: Option<Ivl>,
+    /// The side of a knot line or domain end the piece was taken on, per parameter: +1 the
+    /// piece after it, −1 the piece before it, 0 the one the root's middle lies in. Past that
+    /// line, on the other side, the piece is continued polynomially (the support's
+    /// continuation there, as the face's own past its domain).
+    pub sides: [i32; 2],
 }
 
 /// The chord's feet and setback enclosed over a span.
@@ -208,6 +228,34 @@ fn model_over(m: &Ft, t: Ivl) -> Ivl {
 
 fn lift(x: f64) -> Ft {
     Ft::constant(Ivl::from(x))
+}
+
+/// The piece a tube is taken on: with `side` 0 the one `x` lies in; with `side` ±1 the piece
+/// after (+1) or before (−1) the knot nearest `x` (a domain end included), so the piece and the
+/// side recorded agree however far within tolerance `x` lies from that knot.
+fn face_side_piece(knots: &[f64], p: usize, n: usize, x: f64, side: i32) -> usize {
+    if side == 0 {
+        return span(knots, p, n, x);
+    }
+    let range = p..=n;
+    let mut nearest = x;
+    let mut best = f64::INFINITY;
+    for i in range {
+        let kn = knot(knots, i as isize);
+        let gap = (kn - x).abs();
+        if gap < best {
+            best = gap;
+            nearest = kn;
+        }
+    }
+    sided_span(knots, p, n, nearest, side)
+}
+
+/// Whether `x` lies in the closed knot span `[u_k, u_{k+1}]`, except on the side the piece is
+/// continued past (`side` +1: below `u_k`; −1: above `u_{k+1}`).
+fn inside_piece(u: &[f64], k: usize, x: Ivl, side: i32) -> bool {
+    let (a, b) = (knot(u, k as isize), knot(u, k as isize + 1));
+    (side > 0 || a <= x.lo) && (side < 0 || x.hi <= b)
 }
 
 /// Whether `[lo, hi]` lies in the closed knot span `[u_k, u_{k+1}]`.
@@ -459,16 +507,17 @@ fn foot_tube(
     rr: [f64; 2],
     p0: [Ft; 2],
     proved_at: (Span, Option<Ivl>),
+    sides: [i32; 2],
 ) -> Result<Option<FootTube>> {
     let unique_box: [Ivl; 2] = core::array::from_fn(|i| {
         let p = p0.get(i).map_or_else(Ivl::whole, Ft::range);
         let r = rr.get(i).copied().unwrap_or(f64::INFINITY);
         p + Ivl::new(-r, r)
     });
+    // inside the piece, or past its boundary only on the side it is continued to
     let [bu, bv] = unique_box;
-    if !(inside_span(&face.u, piece[0], bu.lo, bu.hi)
-        && inside_span(&face.v, piece[1], bv.lo, bv.hi))
-    {
+    let [su, sv] = sides;
+    if !(inside_piece(&face.u, piece[0], bu, su) && inside_piece(&face.v, piece[1], bv, sv)) {
         return Ok(None);
     }
     let Some(p) = face_models(face, piece, x, 0)? else {
@@ -482,6 +531,7 @@ fn foot_tube(
         piece,
         span: proved_at.0,
         setback: proved_at.1,
+        sides,
     }))
 }
 
@@ -496,6 +546,7 @@ fn tube2(
     system: &dyn Fn(&Partials<Ft>) -> Model2System,
     lk: usize,
     setback: Option<Ivl>,
+    sides: [i32; 2],
 ) -> Result<Option<FootTube>> {
     let Some(mid) = root(at.m, x_m)? else {
         return Ok(None);
@@ -510,8 +561,8 @@ fn tube2(
         return Ok(None);
     };
     let piece = [
-        span(&face.u, face.p, face.nu, mid[0]),
-        span(&face.v, face.q, face.nv, mid[1]),
+        face_side_piece(&face.u, face.p, face.nu, mid[0], sides[0]),
+        face_side_piece(&face.v, face.q, face.nv, mid[1], sides[1]),
     ];
     let Some(pz) = face_models(face, piece, p0, lk)? else {
         return Ok(None);
@@ -523,7 +574,7 @@ fn tube2(
     let Some((x, rr)) = tube(p0, &y, &g0, &mut jac)? else {
         return Ok(None);
     };
-    foot_tube(face, piece, x, rr, p0, (at, setback))
+    foot_tube(face, piece, x, rr, p0, (at, setback), sides)
 }
 
 /// The foot at setback `d` on `face` over the span `at`, enclosed (module docs), its point
@@ -577,12 +628,16 @@ pub fn enclose_foot(
         &system,
         1,
         Some(Ivl::from(d)),
+        [0, 0],
     )
 }
 
 /// The edge's projection P(s) on `face` over the span `at` (`(S − C) · S_u = (S − C) · S_v =
 /// 0`), enclosed as a foot is, from `x_m` near it at the middle (the edge's (u, v) on the
-/// support). `None` where nothing is proved.
+/// support). `sides` names, per parameter, the side of a knot line or domain end the edge
+/// lies on that the face is on (+1 after it, −1 before it, 0 none): the piece is taken on that
+/// side and continued polynomially past the line, so the root may lie on the line or just
+/// past it. `None` where nothing is proved.
 ///
 /// # Errors
 ///
@@ -593,6 +648,7 @@ pub fn enclose_projection(
     edge: &NurbsCurve,
     at: Span,
     x_m: [f64; 2],
+    sides: [i32; 2],
 ) -> Result<Option<FootTube>> {
     k.check_cancelled(OP)?;
     if !at.valid() {
@@ -618,7 +674,7 @@ pub fn enclose_projection(
         Ok(Some(projection_point(face, &c, x).1))
     };
     let system = |p: &Partials<Ft>| projection_system(p, &cm);
-    tube2(face, at, x_m, &root, &columns, &system, 2, None)
+    tube2(face, at, x_m, &root, &columns, &system, 2, None, sides)
 }
 
 /// Whether the stations' planes stay clear of the tube's root over the span (module docs):
@@ -666,13 +722,93 @@ struct CellValues {
     sb: V3<Ivl>,
 }
 
-/// The cell's values; `None` where the face or the edge cannot be enclosed there (past its
-/// knots).
+/// The support past the edge's knot line or domain end, as the proof reads it: on the far
+/// side of the line `b = kappa` (away from the face), the face-side piece `piece` continued
+/// polynomially; on the face side, the face itself.
+#[derive(Debug, Clone, Copy)]
+struct Continued {
+    /// The face-side piece `(ku, kv)`.
+    piece: [usize; 2],
+    /// The line's b.
+    kappa: f64,
+    /// Whether the far side is below the line (the face above it).
+    far_below: bool,
+}
+
+/// The partials over a cell's (u, v) box, on the support the proof reads (`cont`).
+fn support_partials(
+    face: &Nurbs,
+    box_uv: [Ivl; 2],
+    ib: usize,
+    cont: Option<Continued>,
+) -> Result<Option<Vec<Partials<Ivl>>>> {
+    let [u, v] = box_uv;
+    let whole = |b: [Ivl; 2]| -> Result<Option<Partials<Ivl>>> {
+        let [u, v] = b;
+        proved(nurbs_partials_over_box(face, u.lo, u.hi, v.lo, v.hi, 1, 0))
+    };
+    let Some(c) = cont else {
+        return Ok(whole([u, v])?.map(|p| vec![p]));
+    };
+    let b = if ib == 0 { u } else { v };
+    let with_b = |nb: Ivl| if ib == 0 { [nb, v] } else { [u, nb] };
+    let (far, near) = if c.far_below {
+        (
+            (b.lo < c.kappa).then(|| Ivl::new(b.lo, b.hi.min(c.kappa))),
+            (b.hi > c.kappa).then(|| Ivl::new(b.lo.max(c.kappa), b.hi)),
+        )
+    } else {
+        (
+            (b.hi > c.kappa).then(|| Ivl::new(b.lo.max(c.kappa), b.hi)),
+            (b.lo < c.kappa).then(|| Ivl::new(b.lo, b.hi.min(c.kappa))),
+        )
+    };
+    let mut out = Vec::new();
+    if let Some(fb) = far {
+        // each of the face's pieces in a, its face-side piece in b continued: the support is
+        // continuous along the line, as the face is
+        let a = if ib == 0 { v } else { u };
+        let (knots, deg, count) = if ib == 0 {
+            (&face.v, face.q, face.nv)
+        } else {
+            (&face.u, face.p, face.nu)
+        };
+        let Some(parts) = proved(knot_cuts(knots, deg, count, a.lo, a.hi, 0))? else {
+            return Ok(None);
+        };
+        for (lo, hi, ka) in parts {
+            let (piece, [fu, fv]) = if ib == 0 {
+                ([c.piece[0], ka], [fb, Ivl::new(lo, hi)])
+            } else {
+                ([ka, c.piece[1]], [Ivl::new(lo, hi), fb])
+            };
+            let [ku, kv] = piece;
+            let Some(p) = proved(nurbs_partials_over_piece(
+                face, ku, kv, fu.lo, fu.hi, fv.lo, fv.hi, 1,
+            ))?
+            else {
+                return Ok(None);
+            };
+            out.push(p);
+        }
+    }
+    if let Some(nb) = near {
+        let Some(p) = whole(with_b(nb))? else {
+            return Ok(None);
+        };
+        out.push(p);
+    }
+    Ok((!out.is_empty()).then_some(out))
+}
+
+/// The cell's values on the support the proof reads; `None` where the face or the edge
+/// cannot be enclosed there (past its knots).
 fn cell_values(
     face: &Nurbs,
     edge: &NurbsCurve,
     cell: &Cell,
     a_is_u: bool,
+    cont: Option<Continued>,
 ) -> Result<Option<CellValues>> {
     let [u, v, s] = *cell;
     let Some(cd) = proved(curve_derivs_over(edge, s, 1, None))? else {
@@ -681,20 +817,39 @@ fn cell_values(
     let (Some(&c0), Some(&c1)) = (cd.first(), cd.get(1)) else {
         return Ok(None);
     };
-    let Some(p) = proved(nurbs_partials_over_box(face, u.lo, u.hi, v.lo, v.hi, 1, 0))? else {
+    let ib = usize::from(a_is_u);
+    let Some(parts) = support_partials(face, [u, v], ib, cont)? else {
         return Ok(None);
     };
-    let g = v_sub(p.at(0, 0), c0);
-    let (su, sv) = (p.at(1, 0), p.at(0, 1));
-    let (sa, sb) = if a_is_u { (su, sv) } else { (sv, su) };
-    let (gu, gv, uc, vc) = (dot_i(g, su), dot_i(g, sv), dot_i(su, c1), dot_i(sv, c1));
-    Ok(Some(CellValues {
-        f2: dot_i(g, c1),
-        f2a: dot_i(sa, c1),
-        dist2: dot_i(g, g),
-        det: gu * vc - gv * uc,
-        sb,
-    }))
+    let mut out: Option<CellValues> = None;
+    for p in &parts {
+        let g = v_sub(p.at(0, 0), c0);
+        let (su, sv) = (p.at(1, 0), p.at(0, 1));
+        let (sa, sb) = if a_is_u { (su, sv) } else { (sv, su) };
+        let (gu, gv, uc, vc) = (dot_i(g, su), dot_i(g, sv), dot_i(su, c1), dot_i(sv, c1));
+        let here = CellValues {
+            f2: dot_i(g, c1),
+            f2a: dot_i(sa, c1),
+            dist2: dot_i(g, g),
+            det: gu * vc - gv * uc,
+            sb,
+        };
+        out = Some(match out {
+            None => here,
+            Some(o) => CellValues {
+                f2: o.f2.hull(here.f2),
+                f2a: o.f2a.hull(here.f2a),
+                dist2: o.dist2.hull(here.dist2),
+                det: o.det.hull(here.det),
+                sb: V3 {
+                    x: o.sb.x.hull(here.sb.x),
+                    y: o.sb.y.hull(here.sb.y),
+                    z: o.sb.z.hull(here.sb.z),
+                },
+            },
+        });
+    }
+    Ok(out)
 }
 
 /// Whether `x` is of the strict sign `sign`.
@@ -771,16 +926,38 @@ fn every_cell(
     Ok(true)
 }
 
+/// The least sub-span the first-crossing proof splits a span into: `2^-SUBSPAN_HALVINGS` of
+/// it (module docs).
+pub const SUBSPAN_HALVINGS: u32 = 8;
+
+/// What the first-crossing proof of one sub-span reads, fixed for the whole span.
+struct Crossing<'a> {
+    face: &'a Nurbs,
+    edge: &'a NurbsCurve,
+    at: Span,
+    foot: &'a FootTube,
+    edge_proj: &'a FootTube,
+    a_is_u: bool,
+    b_in_a: f64,
+    sb_dir: f64,
+    d2: f64,
+    into: V3<Ivl>,
+    cont: Option<Continued>,
+}
+
 /// The first-crossing proof (module docs) for the foot `foot` at the setback `d` (an
 /// interval: the chord's d over its span) on `face`, from the edge's projection `edge_proj`
 /// on the same face, the face on the side of `into` (a vector from the edge into it).
 /// [`Proof::Holds`] where it is proved for every s of the span; [`Proof::NotProved`]
-/// otherwise (never `Fails`: no proof of a nearer root is attempted).
+/// otherwise (never `Fails`: no proof of a nearer root is attempted). A sub-span the proof
+/// does not hold on is halved, down to `2^-`[`SUBSPAN_HALVINGS`] of the span, within the one
+/// budget of [`CELL_BUDGET`] cells, so a span is proved wherever its sub-spans of that length
+/// are.
 ///
 /// # Errors
 ///
 /// A cancel.
-#[allow(clippy::too_many_arguments, clippy::too_many_lines)]
+#[allow(clippy::too_many_arguments)]
 pub fn first_crossing(
     k: &Kernel,
     face: &Nurbs,
@@ -805,7 +982,6 @@ pub fn first_crossing(
     {
         return not;
     }
-    let span_s = at.interval();
     // d's least square, rounded down
     let d2 = (Ivl::from(d.lo) * Ivl::from(d.lo)).lo;
     // the projection is near the edge: inside the ball for every s
@@ -835,10 +1011,7 @@ pub fn first_crossing(
     if !(b_in_a.is_finite() && b_in_a > 0.0) {
         return not;
     }
-    let (ia, ib) = if a_is_u { (0, 1) } else { (1, 0) };
-    let pick = |b: &[Ivl; 2], i: usize| b.get(i).copied().unwrap_or_else(Ivl::whole);
-    let (pa, pb) = (pick(&edge_proj.uv_box, ia), pick(&edge_proj.uv_box, ib));
-    let (fa, fb) = (pick(&foot.unique_box, ia), pick(&foot.unique_box, ib));
+    let ib = usize::from(a_is_u);
     // the side: b runs from the projection toward the foot
     let (pbm, fbm) = (
         pm.get(ib).copied().unwrap_or(f64::NAN),
@@ -847,7 +1020,90 @@ pub fn first_crossing(
     let Some(sb_dir) = sign_of(Ivl::from(fbm - pbm)) else {
         return not;
     };
-    let length = (fbm - pbm).abs();
+    // past the projection's knot line or domain end, the face-side piece continued (only
+    // across b: a side in a, along the edge, is not this proof's)
+    let ia = 1 - ib;
+    if edge_proj.sides.get(ia).copied().unwrap_or(0) != 0 {
+        return not;
+    }
+    let side_b = edge_proj.sides.get(ib).copied().unwrap_or(0);
+    let cont = if side_b == 0 {
+        None
+    } else {
+        let (knots, kb) = if ib == 0 {
+            (&face.u, edge_proj.piece[0])
+        } else {
+            (&face.v, edge_proj.piece[1])
+        };
+        // the line the piece starts (+1) or ends (-1) at, on the far side from the foot
+        let far_below = side_b > 0;
+        if (sb_dir > 0.0) != far_below {
+            return not;
+        }
+        let kappa = if far_below {
+            knot(knots, kb as isize)
+        } else {
+            knot(knots, kb as isize + 1)
+        };
+        Some(Continued {
+            piece: edge_proj.piece,
+            kappa,
+            far_below,
+        })
+    };
+    let c = Crossing {
+        face,
+        edge,
+        at,
+        foot,
+        edge_proj,
+        a_is_u,
+        b_in_a,
+        sb_dir,
+        d2,
+        into: V3 {
+            x: Ivl::from(into[0]),
+            y: Ivl::from(into[1]),
+            z: Ivl::from(into[2]),
+        },
+        cont,
+    };
+    let mut spent = 0usize;
+    let least = 2.0 / f64::from(1u32 << SUBSPAN_HALVINGS);
+    let mut work = vec![Ivl::new(-1.0, 1.0)];
+    while let Some(t) = work.pop() {
+        if crossing_on(k, &c, t, &mut spent)? {
+            continue;
+        }
+        if spent > CELL_BUDGET || width(t) <= least {
+            return not;
+        }
+        let m = 0.5 * (t.lo + t.hi);
+        work.push(Ivl::new(t.lo, m));
+        work.push(Ivl::new(m, t.hi));
+    }
+    Ok(Proof::Holds)
+}
+
+/// The first-crossing proof over the sub-span `t` of `c.at` (in t, inside `[−1, 1]`): its own
+/// corridor K from the tubes' models over `t` (module docs). `false` where it is not proved.
+#[allow(clippy::too_many_lines)]
+fn crossing_on(k: &Kernel, c: &Crossing<'_>, t: Ivl, spent: &mut usize) -> Result<bool> {
+    let (a_is_u, sb_dir) = (c.a_is_u, c.sb_dir);
+    let (ia, ib) = if a_is_u { (0, 1) } else { (1, 0) };
+    // the sub-span's s, rounded outward
+    let span_s = Ivl::from(c.at.m) + Ivl::from(c.at.delta) * t;
+    let span_s = Ivl::new(
+        span_s.lo.max(c.at.interval().lo),
+        span_s.hi.min(c.at.interval().hi),
+    );
+    let over = |m: &[Ft; 2], i: usize| m.get(i).map_or_else(Ivl::whole, |x| model_over(x, t));
+    let (pa, pb) = (over(&c.edge_proj.uv, ia), over(&c.edge_proj.uv, ib));
+    let (fa, fb) = (over(&c.foot.uv, ia), over(&c.foot.uv, ib));
+    let length = (fb.mid() - pb.mid()).abs();
+    if !(length.is_finite() && length > 0.0) {
+        return Ok(false);
+    }
     // the strip N: the projection's b range, widened a little away from the foot
     let eta = 0.02 * length + width(pb);
     let (n_lo, n_hi, b_lo, b_hi) = if sb_dir > 0.0 {
@@ -862,50 +1118,44 @@ pub fn first_crossing(
         fb.hi < n_lo
     };
     if !(beyond && b_lo < b_hi) {
-        return not;
+        return Ok(false);
     }
+    // the foot on the face's side of the line, where the support is the face its tube solved
+    if let Some(cn) = c.cont {
+        let face_side = if cn.far_below {
+            fb.lo >= cn.kappa
+        } else {
+            fb.hi <= cn.kappa
+        };
+        if !face_side {
+            return Ok(false);
+        }
+    }
+    let n = Ivl::new(n_lo, n_hi);
     // the strip at a cell's s: the projection's b there, widened away from the foot by eta
-    let proj_b = edge_proj.uv.get(ib).copied();
+    let proj_b = c.edge_proj.uv.get(ib).copied();
+    let at = c.at;
     let strip_at = |sc: Ivl| -> Option<Ivl> {
         // the cell's t, rounded outward, within the models' [-1, 1]
-        let t = if at.delta > 0.0 {
+        let tc = if at.delta > 0.0 {
             (sc - Ivl::from(at.m)) / Ivl::from(at.delta)
         } else {
             Ivl::from(0.0)
         };
-        let t = Ivl::new(t.lo.max(-1.0), t.hi.min(1.0));
-        let ordered = t.lo <= t.hi;
+        let tc = Ivl::new(tc.lo.max(-1.0), tc.hi.min(1.0));
+        let ordered = tc.lo <= tc.hi;
         if !ordered {
             return None;
         }
-        let b = model_over(&proj_b?, t);
+        let b = model_over(&proj_b?, tc);
         let strip = if sb_dir > 0.0 {
             Ivl::new(b.lo - eta, b.hi)
         } else {
             Ivl::new(b.lo, b.hi + eta)
         };
-        // the hull strip holds every s's strip; within it, the per-cell one is narrower
+        // the sub-span's strip holds every s's; within it, the per-cell one is narrower
         Some(Ivl::new(strip.lo.max(n_lo), strip.hi.min(n_hi)))
     };
-    // within the face's domain in b (the projection is in it)
-    let (b_first, b_last) = if a_is_u {
-        (
-            knot(&face.v, face.q as isize),
-            knot(&face.v, face.nv as isize),
-        )
-    } else {
-        (
-            knot(&face.u, face.p as isize),
-            knot(&face.u, face.nu as isize),
-        )
-    };
-    let (n_lo, n_hi, b_lo, b_hi) = (
-        n_lo.max(b_first),
-        n_hi.min(b_last),
-        b_lo.max(b_first),
-        b_hi.min(b_last),
-    );
-    let n = Ivl::new(n_lo, n_hi);
     let cell_of = |a: Ivl, b: Ivl, s: Ivl| -> Cell {
         if a_is_u {
             [a, b, s]
@@ -913,58 +1163,46 @@ pub fn first_crossing(
             [b, a, s]
         }
     };
+    let values = |cell: &Cell| cell_values(c.face, c.edge, cell, a_is_u, c.cont);
     // the signs: F_2's along a and det J's, at the foot's box
-    let Some(at_foot) = cell_values(face, edge, &cell_of(fa, fb, span_s), a_is_u)? else {
-        return not;
+    let Some(at_foot) = values(&cell_of(fa, fb, span_s))? else {
+        return Ok(false);
     };
     let (Some(sa), Some(sj)) = (sign_of(at_foot.f2a), sign_of(at_foot.det)) else {
-        return not;
-    };
-    let into_i = V3 {
-        x: Ivl::from(into[0]),
-        y: Ivl::from(into[1]),
-        z: Ivl::from(into[2]),
+        return Ok(false);
     };
     let within = |x: Ivl, y: Ivl| y.lo <= x.lo && x.hi <= y.hi;
-    let mut spent = 0usize;
     // K's a range: both boxes and a margin; wider tries where a side does not hold
     for widen in [0.25, 1.0, 4.0] {
-        // (the boxes already hull the span's motion; the margin is the section's wander)
-        let w = widen * length * b_in_a;
+        // (the boxes already hull the sub-span's motion; the margin is the section's wander)
+        let w = widen * length * c.b_in_a;
         let ka = Ivl::new(pa.lo.min(fa.lo) - w, pa.hi.max(fa.hi) + w);
         let kb = Ivl::new(b_lo, b_hi);
         if !(within(fa, ka) && within(fb, kb) && within(pa, ka) && within(pb, n)) {
-            return not;
+            return Ok(false);
         }
         let whole = cell_of(ka, kb, span_s);
         let scale = whole.map(width);
         if !scale.iter().all(|x| x.is_finite() && *x >= 0.0) {
-            return not;
+            return Ok(false);
         }
         let scale = scale.map(|x| if x > 0.0 { x } else { 1.0 });
         // the face's side over N: S_b . into of the sign b runs toward the foot
         let mut side = |cell: &Cell| -> Result<bool> {
-            Ok(cell_values(face, edge, cell, a_is_u)?
-                .is_some_and(|v| of_sign(dot_i(v.sb, into_i), sb_dir)))
+            Ok(values(cell)?.is_some_and(|v| of_sign(dot_i(v.sb, c.into), sb_dir)))
         };
-        if !every_cell(
-            k,
-            vec![cell_of(ka, n, span_s)],
-            &scale,
-            &mut spent,
-            &mut side,
-        )? {
+        if !every_cell(k, vec![cell_of(ka, n, span_s)], &scale, spent, &mut side)? {
             // (a wider K does not change the strip: nothing more to try)
-            return not;
+            return Ok(false);
         }
         // the a-sides: F_2 of sign -sa at K's low a and sa at its high a, for every b and s
         let mut sides_hold = true;
         for (a_side, want) in [(ka.lo, -sa), (ka.hi, sa)] {
             let mut edge_side = |cell: &Cell| -> Result<bool> {
-                Ok(cell_values(face, edge, cell, a_is_u)?.is_some_and(|v| of_sign(v.f2, want)))
+                Ok(values(cell)?.is_some_and(|v| of_sign(v.f2, want)))
             };
             let start = vec![cell_of(Ivl::from(a_side), kb, span_s)];
-            if !every_cell(k, start, &scale, &mut spent, &mut edge_side)? {
+            if !every_cell(k, start, &scale, spent, &mut edge_side)? {
                 sides_hold = false;
                 break;
             }
@@ -992,6 +1230,7 @@ pub fn first_crossing(
                 start.push(cell_of(part(ka, i, 4), part(kb, j, 8), span_s));
             }
         }
+        let d2 = c.d2;
         let mut classified = |cell: &Cell| -> Result<bool> {
             let b = cell.get(ib).copied().unwrap_or_else(Ivl::whole);
             let sc = cell.get(2).copied().unwrap_or_else(Ivl::whole);
@@ -1006,7 +1245,7 @@ pub fn first_crossing(
             } else {
                 b.lo >= strip.hi
             };
-            Ok(cell_values(face, edge, cell, a_is_u)?.is_some_and(|v| {
+            Ok(values(cell)?.is_some_and(|v| {
                 let graph = of_sign(v.f2a, sa);
                 let no_section = v.f2.lo > 0.0 || v.f2.hi < 0.0;
                 let inside = v.dist2.hi < d2;
@@ -1014,10 +1253,9 @@ pub fn first_crossing(
                 graph && (before || no_section || inside || monotone)
             }))
         };
-        let all = every_cell(k, start, &scale, &mut spent, &mut classified)?;
-        return Ok(if all { Proof::Holds } else { Proof::NotProved });
+        return every_cell(k, start, &scale, spent, &mut classified);
     }
-    not
+    Ok(false)
 }
 
 /// The chord `chord` over the span `at` (module docs, five unknowns: both feet's (u, v) and
@@ -1156,8 +1394,24 @@ pub fn enclose_chord(
     let [q1, q2, q3, q4, _] = p0;
     let proved_at = (at, Some(d.range()));
     let (Some(t1), Some(t2)) = (
-        foot_tube(f1, piece[0], [u1, v1], [r1, r2], [q1, q2], proved_at)?,
-        foot_tube(f2, piece[1], [u2, v2], [r3, r4], [q3, q4], proved_at)?,
+        foot_tube(
+            f1,
+            piece[0],
+            [u1, v1],
+            [r1, r2],
+            [q1, q2],
+            proved_at,
+            [0, 0],
+        )?,
+        foot_tube(
+            f2,
+            piece[1],
+            [u2, v2],
+            [r3, r4],
+            [q3, q4],
+            proved_at,
+            [0, 0],
+        )?,
     ) else {
         return Ok(None);
     };
@@ -1180,6 +1434,7 @@ mod tests {
     use crate::nurbs::b_spline_curve::{BSplineCurve, NurbCircleParam};
     use crate::nurbs::b_spline_surface::BSplineSurface;
     use crate::surface::cone::Cone;
+    use crate::surface::plane::Plane;
     use crate::surface::sphere::{Sphere, SphereOptions};
     use crate::surface::surface::Surface;
 
@@ -1255,8 +1510,9 @@ mod tests {
         }
     }
 
-    /// The (u, v) of `p` on `face` (a test's inversion: a grid, then Gauss-Newton).
-    fn uv_of(face: &Nurbs, p: [f64; 3]) -> [f64; 2] {
+    /// The (u, v) of the point of `face` nearest `p` (a test's inversion: a grid, then
+    /// Gauss-Newton; a start only).
+    fn uv_near(face: &Nurbs, p: [f64; 3]) -> [f64; 2] {
         let (u0, u1) = (
             knot(&face.u, face.p as isize),
             knot(&face.u, face.nu as isize),
@@ -1292,6 +1548,12 @@ mod tests {
                 x[1] + inv[1][0] * b[0] + inv[1][1] * b[1],
             ];
         }
+        x
+    }
+
+    /// The (u, v) of `p` on `face`, which `p` lies on.
+    fn uv_of(face: &Nurbs, p: [f64; 3]) -> [f64; 2] {
+        let x = uv_near(face, p);
         let q = f64_v(face_at(face, x, 0).at(0, 0));
         assert!(
             dot3(sub3(q, p), sub3(q, p)).sqrt() < 1e-10,
@@ -1351,7 +1613,7 @@ mod tests {
         let foot = enclose_foot(k, face, edge, d, at, uv_of(face, foot_guess))
             .unwrap()
             .unwrap();
-        let proj = enclose_projection(k, face, edge, at, uv_of(face, c))
+        let proj = enclose_projection(k, face, edge, at, uv_of(face, c), [0, 0])
             .unwrap()
             .unwrap();
         let crossing = crossing(k, edge, &foot, at).unwrap();
@@ -1510,7 +1772,7 @@ mod tests {
         let edge = NurbsCurve::of(&line).unwrap();
         let at = span_of(&edge, 0.1);
         let c = edge_at(&edge, at.m).unwrap().unwrap()[0];
-        let proj = enclose_projection(&k, &cyl, &edge, at, uv_of(&cyl, c))
+        let proj = enclose_projection(&k, &cyl, &edge, at, uv_of(&cyl, c), [0, 0])
             .unwrap()
             .unwrap();
         let into = [0.0, 1.0, 0.0];
@@ -1594,7 +1856,7 @@ mod tests {
             (&bl, &tube.feet[1], [0.0, 0.0, 1.0]),
         ] {
             let cm = edge_at(&edge, at.m).unwrap().unwrap()[0];
-            let proj = enclose_projection(&k, face, &edge, at, uv_of(face, cm))
+            let proj = enclose_projection(&k, face, &edge, at, uv_of(face, cm), [0, 0])
                 .unwrap()
                 .unwrap();
             assert_eq!(
@@ -1602,6 +1864,267 @@ mod tests {
                 Proof::Holds
             );
         }
+    }
+
+    /// The sides a face lies on of the knot lines or domain ends its edge's (u, v) is on: per
+    /// parameter, the sign from the edge toward the foot where the edge is on a knot, else 0
+    /// (what the setback tracer reads off the face's domain).
+    fn sides_for(face: &Nurbs, edge_uv: [f64; 2], foot_uv: [f64; 2]) -> [i32; 2] {
+        let on_knot = |knots: &[f64], x: f64| {
+            knots
+                .iter()
+                .any(|&kn| (kn - x).abs() <= 1e-9 * (1.0 + x.abs()))
+        };
+        let side = |knots: &[f64], i: usize| {
+            if on_knot(knots, edge_uv[i]) {
+                if foot_uv[i] > edge_uv[i] {
+                    1
+                } else {
+                    -1
+                }
+            } else {
+                0
+            }
+        };
+        [side(&face.u, 0), side(&face.v, 1)]
+    }
+
+    /// A body's edges `pick` names (by the edge's point at its first piece's middle), each on
+    /// each of its faces: the foot at `guess`'s setback, from `guess`'s start, on the face's
+    /// side `guess` gives, over a tenth of the edge's first piece. Every proof must hold, and
+    /// the foot is at its setback from the edge in the station's plane.
+    fn every_station_holds(
+        k: &Kernel,
+        body: &crate::topology::Brep,
+        pick: fn([f64; 3]) -> bool,
+        guess: fn([f64; 3], bool) -> ([f64; 3], [f64; 3], f64),
+    ) -> (usize, usize) {
+        let mut proved = 0;
+        let mut on_a_knot = 0;
+        for &e in body.edge_list() {
+            let ed = body.edge(e).unwrap();
+            let Some(bs) = ed.curve.as_ref().unwrap().b_spline_base() else {
+                continue;
+            };
+            let edge = NurbsCurve::of(bs).unwrap();
+            let (a0, a1) = (
+                knot(&edge.u, edge.p as isize),
+                knot(&edge.u, edge.p as isize + 1),
+            );
+            let at = Span {
+                m: 0.5 * (a0 + a1),
+                delta: 0.1 * (a1 - a0),
+            };
+            let [c, c1, _] = edge_at(&edge, at.m).unwrap().unwrap();
+            if !pick(c) {
+                continue;
+            }
+            for f in crate::topology::edge::faces(body, e, None).unwrap() {
+                let surface = body.face(f).unwrap().surface.as_ref().unwrap();
+                let face = Nurbs::of(&as_b_spline(k, surface).unwrap().unwrap()).unwrap();
+                let plane = surface.is_kind_of(Plane::TYPE).unwrap();
+                let (g, into, d) = guess(c, plane);
+                let (xe, xf) = (uv_of(&face, c), uv_near(&face, g));
+                let what = format!("edge {e:?} face {f:?} plane {plane}");
+                let foot = enclose_foot(k, &face, &edge, d, at, xf)
+                    .unwrap()
+                    .expect(&what);
+                let sides = sides_for(&face, xe, xf);
+                let proj = enclose_projection(k, &face, &edge, at, xe, sides)
+                    .unwrap()
+                    .expect(&what);
+                assert_eq!(
+                    crossing(k, &edge, &foot, at).unwrap(),
+                    Proof::Holds,
+                    "{what}"
+                );
+                let first =
+                    first_crossing(k, &face, &edge, Ivl::from(d), at, &foot, &proj, into).unwrap();
+                assert_eq!(first, Proof::Holds, "{what} sides {sides:?}");
+                // the foot's box holds a point at its setback in the station's plane: its
+                // distance and its offset along C' enclose d and 0
+                let p = at_t(foot.point, 0.0);
+                let ci = |x: f64| Ivl::from(x);
+                let g = V3 {
+                    x: p.x - ci(c[0]),
+                    y: p.y - ci(c[1]),
+                    z: p.z - ci(c[2]),
+                };
+                let dist2 = dot_i(g, g);
+                let along = dot_i(
+                    g,
+                    V3 {
+                        x: ci(c1[0]),
+                        y: ci(c1[1]),
+                        z: ci(c1[2]),
+                    },
+                );
+                assert!(dist2.lo <= d * d && d * d <= dist2.hi, "{what}: {dist2:?}");
+                assert!(along.lo <= 0.0 && 0.0 <= along.hi, "{what}: {along:?}");
+                proved += 1;
+                // on a knot line or domain end: proved only one-sided; with no side, not proved
+                if sides != [0, 0] {
+                    on_a_knot += 1;
+                    let blind = enclose_projection(k, &face, &edge, at, xe, [0, 0]).unwrap();
+                    let holds = blind.is_some_and(|pj| {
+                        first_crossing(k, &face, &edge, Ivl::from(d), at, &foot, &pj, into).unwrap()
+                            == Proof::Holds
+                    });
+                    assert!(!holds, "{what}: proved with no side");
+                }
+            }
+        }
+        (proved, on_a_knot)
+    }
+
+    /// The hemisphere of radius 5 as a boolean builds it (a ball cut by a box at z = 0), its
+    /// rim on the ball's knot line v = 1/2 and on the flat: 2 on the flat, 1 on the ball, every
+    /// proof holds; the ball's foot is at radius 4.9, height 3 sqrt(11) / 10.
+    #[test]
+    fn a_boolean_hemisphere_s_rim_on_the_ball_s_knot_line_is_proved() {
+        use crate::boolean::api_brep::boolean_intersection;
+        use crate::primitive::api_primitives::{create_box, create_sphere};
+        let mut k = Kernel::default();
+        for z in [0.0, 1.0] {
+            let ball = create_sphere(&mut k, Point3::ZERO, R).unwrap();
+            let half = create_box(&mut k, Point3::new(-20.0, -20.0, z), 40.0, 40.0, 20.0).unwrap();
+            let cap = boolean_intersection(&mut k, ball, half).unwrap();
+            let rim: fn([f64; 3]) -> bool = if z == 0.0 {
+                |c| c[2].abs() < 1e-9 && (dot3(c, c).sqrt() - R).abs() < 1e-9
+            } else {
+                |c| (c[2] - 1.0).abs() < 1e-9 && (dot3(c, c).sqrt() - R).abs() < 1e-9
+            };
+            let guess: fn([f64; 3], bool) -> ([f64; 3], [f64; 3], f64) = |c, plane| {
+                let rho = (c[0] * c[0] + c[1] * c[1]).sqrt();
+                let r = [c[0] / rho, c[1] / rho, 0.0];
+                if plane {
+                    (
+                        [c[0] - 2.0 * r[0], c[1] - 2.0 * r[1], c[2]],
+                        [-r[0], -r[1], 0.0],
+                        2.0,
+                    )
+                } else {
+                    // up the meridian from the rim: its unit tangent there
+                    let t = [-c[2] / R * r[0], -c[2] / R * r[1], rho / R];
+                    ([c[0] + t[0], c[1] + t[1], c[2] + t[2]], t, 1.0)
+                }
+            };
+            let (n, knots) = every_station_holds(&k, &cap, rim, guess);
+            // the rim's edges, each on the ball and on the flat; at z = 0 the ball's on its knot
+            assert!(n >= 4, "z {z}: {n} stations");
+            if z == 0.0 {
+                assert!(knots >= 2, "z {z}: {knots} on the ball's knot line");
+            }
+        }
+    }
+
+    /// A cylinder of radius 5 and height 10: its end rims lie on the side's domain ends v = 0
+    /// and v = 10. 1 on the caps and 1 along the side: every proof holds.
+    #[test]
+    fn a_cylinder_s_end_rims_on_its_domain_ends_are_proved() {
+        use crate::primitive::api_primitives::create_cylinder;
+        let mut k = Kernel::default();
+        let cyl = create_cylinder(&mut k, Point3::ZERO, R, 10.0).unwrap();
+        let n = every_station_holds(
+            &k,
+            &cyl,
+            |c| {
+                (c[2].abs() < 1e-9 || (c[2] - 10.0).abs() < 1e-9)
+                    && (c[0] * c[0] + c[1] * c[1]).sqrt() > 1.0
+            },
+            |c, plane| {
+                let rho = (c[0] * c[0] + c[1] * c[1]).sqrt();
+                let r = [c[0] / rho, c[1] / rho, 0.0];
+                if plane {
+                    ([c[0] - r[0], c[1] - r[1], c[2]], [-r[0], -r[1], 0.0], 1.0)
+                } else {
+                    let up = if c[2] > 5.0 { -1.0 } else { 1.0 };
+                    ([c[0], c[1], c[2] + up], [0.0, 0.0, up], 1.0)
+                }
+            },
+        );
+        let (n, knots) = n;
+        assert!(n >= 4, "{n} stations");
+        assert!(knots >= 2, "{knots} on the side's domain ends");
+    }
+
+    /// A D-bar: the cylinder of radius 5 cut through its axis by the plane x = 0. Its straight
+    /// edges lie on the side's knot lines (at 90 and 270 degrees). 1 on the flat (toward the
+    /// axis) and 1 round the side (the chord 1 of the circle, at 2 asin(1 / 10) from the edge):
+    /// every proof holds.
+    #[test]
+    fn a_d_bar_s_straight_edge_on_a_knot_line_is_proved() {
+        use crate::boolean::api_brep::boolean_intersection;
+        use crate::primitive::api_primitives::{create_box, create_cylinder};
+        let mut k = Kernel::default();
+        let cyl = create_cylinder(&mut k, Point3::new(0.0, 0.0, -5.0), R, 10.0).unwrap();
+        let half = create_box(&mut k, Point3::new(0.0, -20.0, -20.0), 20.0, 40.0, 40.0).unwrap();
+        let bar = boolean_intersection(&mut k, cyl, half).unwrap();
+        let n = every_station_holds(
+            &k,
+            &bar,
+            |c| c[0].abs() < 1e-9 && (c[1].abs() - R).abs() < 1e-9,
+            |c, plane| {
+                let side = c[1].signum();
+                if plane {
+                    ([0.0, c[1] - side, c[2]], [0.0, -side, 0.0], 1.0)
+                } else {
+                    let th = 2.0 * (0.1_f64).asin();
+                    (
+                        [R * th.sin(), side * R * th.cos(), c[2]],
+                        [1.0, 0.0, 0.0],
+                        1.0,
+                    )
+                }
+            },
+        );
+        let (n, knots) = n;
+        assert!(n >= 4, "{n} stations");
+        assert!(knots >= 2, "{knots} on the side's knot lines");
+    }
+
+    /// The first crossing does not depend on the span's length: on the hemisphere's flat, at a
+    /// tenth, a fifth and a third of the rim's piece, it holds (the proof halves the span into
+    /// sub-spans with their own corridors).
+    #[test]
+    fn the_first_crossing_holds_whatever_the_span_s_length() {
+        let k = Kernel::default();
+        let edge = rim(90.0);
+        let fl = plane();
+        let mut proved = 0;
+        for frac in [0.1, 0.2, 1.0 / 3.0] {
+            let at = span_of(&edge, frac);
+            let (c, r) = radial(&edge, at.m);
+            let Some(foot) = enclose_foot(
+                &k,
+                &fl,
+                &edge,
+                2.0,
+                at,
+                uv_of(&fl, [3.0 * r[0], 3.0 * r[1], 0.0]),
+            )
+            .unwrap() else {
+                continue;
+            };
+            let Some(proj) = enclose_projection(&k, &fl, &edge, at, uv_of(&fl, c), [0, 0]).unwrap()
+            else {
+                continue;
+            };
+            let first = first_crossing(
+                &k,
+                &fl,
+                &edge,
+                Ivl::from(2.0),
+                at,
+                &foot,
+                &proj,
+                [-r[0], -r[1], 0.0],
+            )
+            .unwrap();
+            assert_eq!(first, Proof::Holds, "a span of {frac} of the piece");
+            proved += 1;
+        }
+        assert_eq!(proved, 3, "every span's tubes proved");
     }
 
     /// The 5 x 5 preconditioner inverts.
