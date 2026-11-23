@@ -311,7 +311,7 @@ pub fn on_hover(app: &mut SolveApp, proj: &Proj, pos: Pos2, shift: bool) {
     let alignment = app.tool.as_ref().is_some_and(|t| t.kind == Kind::HorizontalVertical);
     let picked = app.tool.as_ref().is_some_and(|t| t.kind == Kind::HorizontalVertical && !t.point_picks.is_empty());
     let want_middle = alignment && (shift || picked);
-    let hits = want_middle.then(|| pick(app, proj, pos)).unwrap_or_default();
+    let hits = if want_middle { pick(app, proj, pos) } else { Vec::new() };
     let midpoint = if !want_middle {
         None
     } else if shift {
