@@ -150,7 +150,8 @@ pub fn tool_definitions_with(opts: Options) -> Vec<Value> {
              measure (inspect.measure), compare_picture (inspect.compare_picture, numbers only: no overlay PNG), \
              inspect_design (document.inspect), undo, redo, export, save, open, new_design, crash_reports; screenshot, \
              body_topology, batch and pending can't be steps. On an error the steps already run are undone (unless \
-             rollback: false), so the batch is all-or-nothing; the reply names the failing step (index from 0), its error, \
+             rollback: false). Connected to the desktop, a batch with rollback can't open another design or switch design tabs. \
+             The reply names the failing step (index from 0), its error, \
              every result before it, whether the design really went back (rolled_back), the steps whose changes are in the \
              design (applied) and those never sent (not_run). The usual way to build a part: sketch, draw, dimension, \
              finish, extrude, fillet… in one call. A long one (a polyline of hundreds of points) can be written to a JSON \
@@ -1534,6 +1535,9 @@ fn batch(b: &mut dyn Backend, a: &Map<String, Value>, opts: Options) -> Value {
         Ok(e) => e,
         Err(e) => return text_result(&Value::String(e), true, opts),
     };
+    // Discovery can change the backend while the headless session is still empty. Use one
+    // session for preflight, every step, and the final expectation or checkpoint restore.
+    let b = if let Some(active) = b.batch_backend() { active } else { b };
     match batch_run(b, a) {
         (reply, true) => text_result(&reply, true, opts),
         (reply, false) => with_expectation(b, reply, expect, opts),
@@ -1588,13 +1592,16 @@ fn batch_run(b: &mut dyn Backend, a: &Map<String, Value>) -> (Value, bool) {
     let mut mapped: Vec<Value> = Vec::with_capacity(steps.len());
     let mut narrows: Vec<(usize, Narrow)> = Vec::new();
     for (i, step) in steps.iter().enumerate() {
-        // The window goes to another design's tab for these, however the step names them: the
-        // batch's later steps and its rollback would land in the wrong design.
+        // Inspect the canonical command after mapping tool names and execute wrappers. A
+        // desktop checkpoint is local to its tab, so it cannot roll back across a tab change.
         let step_result = batch_step(step).and_then(|(command, params, narrow)| {
             let id = if command.is_empty() { step.get("command").or_else(|| step.get("id")).and_then(Value::as_str).unwrap_or("") } else { &command };
             match solidcraft_engine::find_command(id).map(|spec| spec.id) {
                 Some(c @ ("component.edit_in_place" | "component.finish_edit")) => {
                     Err(format!("`{c}` goes to another design's tab: send it on its own, not in a batch"))
+                }
+                Some(c @ ("view.next_tab" | "view.previous_tab" | "doc.open" | "file.import")) if rollback && b.has_ui() => {
+                    Err(format!("`{c}` can change the active design tab: run it separately or use `rollback: false`"))
                 }
                 _ => Ok((command, params, narrow)),
             }
@@ -1676,6 +1683,10 @@ fn batch_run(b: &mut dyn Backend, a: &Map<String, Value>) -> (Value, bool) {
                     }
                 }
                 return batch_reply(&r, steps.len(), rollback, verbose, &narrow);
+            }
+            // A newer app may know about tab-switching commands this server cannot preflight.
+            Err(e) if rollback && e.starts_with("engine.batch unavailable:") && e.ends_with("switches to another design") => {
+                return (Value::String(e), true);
             }
             // Older apps and the headless session, or the app wants the steps one by one.
             Err(e) if e.starts_with("unknown method") || e.starts_with("engine.batch unavailable") => {}

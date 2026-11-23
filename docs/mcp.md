@@ -494,11 +494,15 @@ reply says `rolled_back: false`, marks the step `still_running` and lists it in 
 will apply when it finishes.
 
 `batch` rollback goes back to an engine checkpoint (`edit.checkpoint`) taken before the first
-step: the design (its drawings too), the active sketch, the drawing open and the undo history
-are restored exactly as they were, however long the history is. Batches that call `file.new` or `doc.open` get the design back,
-not its file path. (An older app without checkpoints falls back to undoing as many steps as
-the batch added to the undo history.) A checkpoint that a step of the batch takes stays after a
-batch that went through; a rollback that goes back uses it up.
+step. It restores the design (including drawings), the active sketch, the open drawing and the
+undo history. A checkpoint that a step takes stays after a successful batch. A rollback uses it
+up. An older app without checkpoints undoes as many steps as the batch added to its undo history.
+
+Connected to the desktop app, rollback applies within one design tab. With rollback enabled,
+the server refuses `open` (`doc.open`), `file.import`, `view.next_tab` and `view.previous_tab`
+before any steps run. Run those commands separately, or use `rollback: false` to keep completed
+steps. A checkpoint restores the design data across `file.new` or a headless `doc.open`,
+while the file path follows the current session.
 
 A long batch, such as a polyline of hundreds of points, can be written to a JSON file and run with
 `path` instead of `commands`, so the steps don't have to go through the chat. The file holds an array

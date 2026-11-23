@@ -1647,6 +1647,32 @@ fn a_failed_batch_with_file_new_restores_the_original_design() {
     assert_eq!(d["name"], name, "{d}");
 }
 
+#[test]
+fn a_failed_headless_batch_can_restore_its_design_after_opening_another() {
+    let folder = solidcraft_engine::io::vfs::temp_dir().join(format!("solidcraft-mcp-batch-open-{}", std::process::id()));
+    std::fs::create_dir_all(&folder).unwrap();
+    let path = folder.join("replacement.sc");
+    solidcraft_engine::Session::default().execute("file.save_as", &json!({"path": path, "overwrite": true})).unwrap();
+
+    let mut s = server();
+    tool(&mut s, "set_parameter", json!({"name": "width", "value": 5}));
+    let before = tool(&mut s, "execute", json!({"command": "parameters.list"}));
+    let r = raw_tool(
+        &mut s,
+        "batch",
+        json!({"commands": [
+            {"command": "open", "params": {"path": path}},
+            {"command": "parameters.delete", "params": {"name": "width"}},
+        ]}),
+    );
+    assert_eq!(r["result"]["isError"], true, "{r}");
+    let body: Value = serde_json::from_str(r["result"]["content"][0]["text"].as_str().unwrap()).unwrap();
+    assert_eq!((&body["failed"]["index"], &body["completed"], &body["rolled_back"]), (&json!(1), &json!(1), &json!(true)), "{body}");
+    assert_eq!(tool(&mut s, "execute", json!({"command": "parameters.list"})), before);
+    drop(s);
+    let _ = std::fs::remove_dir_all(folder);
+}
+
 /// `expect` on a batch: the volume, body count and bounding box the agent computed beforehand
 /// are measured and compared by the server once the batch went through, so no separate
 /// `measure` call and no comparison by hand follow every stage.
@@ -3612,6 +3638,46 @@ fn batch_falls_back_when_the_app_lacks_engine_batch() {
 }
 
 #[test]
+fn bridged_rollback_batch_refuses_commands_that_can_switch_design_tabs() {
+    for (step, command) in [
+        (json!({"command": "view.next_tab"}), "view.next_tab"),
+        (json!({"command": "execute", "params": {"command": " View.Previous_Tab "}}), "view.previous_tab"),
+        (json!({"command": "open", "params": {"path": "another.sc"}}), "doc.open"),
+        (json!({"id": "file.import", "params": {"path": "another.part"}}), "file.import"),
+    ] {
+        let steps = json!([{"command": "parameters.add", "params": {"name": "width", "expression": "5 mm"}}, step]);
+        let unavailable = Err("unknown method `engine.batch`".into());
+        let (b, body, is_error) = recorded_batch(unavailable.clone(), json!({"commands": steps}));
+        assert!(is_error && b.calls.is_empty(), "{body}");
+        assert_eq!((&body["completed"], &body["failed"]["index"], &body["not_run"]), (&json!(0), &json!(1), &json!([0, 1])), "{body}");
+        assert!(body["failed"]["error"].as_str().is_some_and(|e| e.contains(command) && e.contains("active design tab")), "{body}");
+
+        let (b, body, is_error) = recorded_batch(unavailable, json!({"commands": steps, "rollback": false}));
+        assert!(!is_error, "{body}");
+        assert_eq!(methods(&b), ["engine.batch", "engine.execute", "engine.execute"]);
+        assert_eq!(body["results"][1]["ran"].as_str().unwrap().trim().to_ascii_lowercase(), command, "{body}");
+    }
+}
+
+#[test]
+fn rollback_batch_does_not_retry_a_tab_switch_refused_by_a_newer_app() {
+    let e = "engine.batch unavailable: step 1 (view.future_tab) switches to another design";
+    let (b, body, is_error) = recorded_batch(Err(e.into()), json!({"commands": [{"command": "solid.box"}, {"command": "view.future_tab"}]}));
+    assert!(is_error, "{body}");
+    assert_eq!(methods(&b), ["engine.batch"]);
+    assert_eq!(body, e);
+}
+
+#[test]
+fn rollback_batch_can_still_fall_back_for_a_loader_in_the_same_design() {
+    let e = "engine.batch unavailable: step 0 (file.insert_step) loads a file";
+    let (b, body, is_error) = recorded_batch(Err(e.into()), json!({"commands": [{"command": "file.insert_step", "params": {"path": "part.step"}}]}));
+    assert!(!is_error, "{body}");
+    let ran: Vec<_> = b.calls.iter().filter_map(|(_, p)| p["command"].as_str()).collect();
+    assert_eq!(ran, ["edit.checkpoint", "file.insert_step", "edit.restore_checkpoint"]);
+}
+
+#[test]
 fn batch_falls_back_while_the_agent_cursor_is_shown() {
     let (b, body, is_error) =
         recorded_batch(Err("engine.batch unavailable: the agent cursor is shown".into()), json!({"commands": [{"command": "a.one"}]}));
@@ -4631,6 +4697,23 @@ fn auto_session_bridges_to_a_late_app_only_while_empty() {
     let r = raw_tool(&mut s, "inspect_design", json!({}));
     assert!(text(&r).contains("headless session because the SolidCraft app was not found"), "{r}");
     assert!(!s.backend().has_ui());
+}
+
+#[test]
+fn batch_keeps_the_auto_session_it_was_checked_in() {
+    use crate::Backend;
+    let mut ready = false;
+    let mut backend = crate::Auto::new(Headless::default(), Box::new(move || std::mem::replace(&mut ready, true).then_some(1)), None);
+    let r = crate::tools::call_tool(
+        &mut backend,
+        "batch",
+        &json!({"commands": [{"command": "set_parameter", "params": {"name": "width", "value": 5}}], "expect": {"bodies": 0}}),
+    );
+    assert_ne!(r["isError"], true, "{r}");
+    assert!(!backend.has_ui(), "preflight, execution and expectation used the same session");
+    let body: Value = serde_json::from_str(r["content"][0]["text"].as_str().unwrap()).unwrap();
+    assert_eq!(body["results"][0]["name"], "width", "{body}");
+    assert_eq!(body["expectation"]["ok"], true, "{body}");
 }
 
 /// A server with no `Auto` backend (`--headless`, `--in`) adds no notice.
