@@ -2783,9 +2783,6 @@ pub fn complete_imported_face_seams(
     b: &mut Brep,
     f: FaceId,
 ) -> Result<Option<Vec<FaceId>>> {
-    use crate::topology::brep::p1::HealLoopHandle;
-    use crate::topology::brep::p4::{delete_edge, DeleteEnv};
-
     let mut needs_completion = false;
     for eu in super::p4::upward_edgeuses(b, f, false, None)? {
         let trim = get_or_create_uv_trim_curve(k, b, eu)?;
@@ -2801,8 +2798,47 @@ pub fn complete_imported_face_seams(
         return Ok(None);
     }
 
+    if !redundant.is_empty() {
+        // A removed internal seam is only worth removing when the seam classification then
+        // puts a natural one back. When it finds nothing missing (the loops now run round
+        // the period without a cut, their lifted trims continuing one another) nothing
+        // would be inserted, and moving each trim piece into the base period on its own
+        // would leave a loop's consecutive uses a whole period apart. The edit is then
+        // undone and the seam kept, as it was imported.
+        let replaced = b.with_rollback(
+            |b| complete_face_seams_edit(k, b, f, &redundant),
+            |r| matches!(r, Ok((_, true))),
+        )?;
+        if replaced.1 {
+            return Ok(Some(replaced.0));
+        }
+        if !needs_completion {
+            return Ok(None);
+        }
+        // With its seam kept the face's trims may still not be movable one by one into the
+        // base period (a loop continuing across the cut with no edge there): the face is
+        // then left as imported, and the caller's own checks decide about the record.
+        let kept = b.with_rollback(|b| complete_face_seams_edit(k, b, f, &[]), Result::is_ok);
+        return Ok(kept.ok().map(|(faces, _)| faces));
+    }
+    complete_face_seams_edit(k, b, f, &[]).map(|(faces, _)| Some(faces))
+}
+
+/// The edit of [`complete_imported_face_seams`]: delete the `redundant` internal seams,
+/// insert the natural seam where the classification finds one missing or crossed, and
+/// translate every trim piece into the base period. Returns the pieces of `f` and whether a
+/// seam was inserted.
+fn complete_face_seams_edit(
+    k: &mut Kernel,
+    b: &mut Brep,
+    f: FaceId,
+    redundant: &[EdgeId],
+) -> Result<(Vec<FaceId>, bool)> {
+    use crate::topology::brep::p1::HealLoopHandle;
+    use crate::topology::brep::p4::{delete_edge, DeleteEnv};
+
     brep_p3::edit_brep(k, b, |k, b, scope| {
-        for e in redundant {
+        for &e in redundant {
             if b.edge(e).is_err() {
                 continue;
             }
@@ -2817,6 +2853,7 @@ pub fn complete_imported_face_seams(
         )?;
         let mut faces = vec![f];
         let mut seams = Vec::new();
+        let mut inserted = false;
         if check.problem.crossed != SurfParamType::Neither
             || check.problem.missing != SurfParamType::Neither
         {
@@ -2835,12 +2872,17 @@ pub fn complete_imported_face_seams(
             for e in split.edges {
                 store_imported_seam_curve(k, b, e, scope.env)?;
                 seams.push(e);
+                inserted = true;
             }
             for face in split.faces {
                 if !faces.contains(&face) {
                     faces.push(face);
                 }
             }
+        }
+        if !redundant.is_empty() && !inserted {
+            // Nothing replaces the deleted seams: the caller undoes this edit.
+            return Ok((faces, false));
         }
         for &face in &faces {
             for eu in super::p4::upward_edgeuses(b, face, false, None)? {
@@ -2902,7 +2944,7 @@ pub fn complete_imported_face_seams(
                 calculate_uv_domain_from_uv_trim_curves(k, b, face, true, false, false)?.domain;
             fp2::set_uv_domain(b, face, &domain)?;
         }
-        Ok(Some(faces))
+        Ok((faces, inserted))
     })
 }
 

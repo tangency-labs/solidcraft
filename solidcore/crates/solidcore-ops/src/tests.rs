@@ -1179,6 +1179,163 @@ fn periodic_seam_completion_splits_real_boundaries_and_keeps_their_shell() {
     assert!(check.is_valid(), "{check}");
 }
 
+/// #20575: a seam whose pcurve overshoots the base cut by a sliver (a surface fitted a little
+/// off its edges) is marked for replacement. Here deleting it leaves a missing seam the
+/// classification does find, so the natural seam is inserted in its place: the face stays one
+/// face of five edges, a seam used twice, and the completed record is valid and agrees with
+/// itself. (Where deleting it finds nothing missing the seam is kept; see the coil-wire tests
+/// in the kernel's STEP import.)
+#[test]
+fn periodic_seam_completion_replaces_a_seam_that_overshoots_the_cut() {
+    use solidcore_record::brep::{
+        Brep as Record, Curve, Curve2, Edge, EdgeUseRef, Face, Loop, OrientedEdge, OrientedFace,
+        Region, Shell, Surface, Vertex, VERSION,
+    };
+
+    all_fixes();
+    let (r, h, w, over) = (5.0, 3.0, std::f64::consts::FRAC_1_SQRT_2, 5e-5);
+    let ring = [
+        [r, 0.0, 1.0],
+        [r * w, r * w, w],
+        [0.0, r, 1.0],
+        [-r * w, r * w, w],
+        [-r, 0.0, 1.0],
+        [-r * w, -r * w, w],
+        [0.0, -r, 1.0],
+        [r * w, -r * w, w],
+        [r, 0.0, 1.0],
+    ];
+    let surface = Surface::RationalSpline {
+        u_knots: vec![0., 0., 0., 1., 1., 2., 2., 3., 3., 4., 4., 4.],
+        v_knots: vec![0., 0., h, h],
+        homogeneous: ring
+            .iter()
+            .map(|p| vec![[p[0], p[1], 0.0, p[2]], [p[0], p[1], h * p[2], p[2]]])
+            .collect(),
+    };
+    let arc = |from: usize, z: f64| Curve::RationalSpline {
+        knots: [0.0, 0.0, 0.0, 1.0, 1.0, 2.0, 2.0, 2.0]
+            .map(|k| k + 2.0 * (from / 4) as f64)
+            .to_vec(),
+        homogeneous: ring[from..=from + 4]
+            .iter()
+            .map(|p| [p[0], p[1], z * p[2], p[2]])
+            .collect(),
+    };
+    let vertices = [[r, 0.0, 0.0], [-r, 0.0, 0.0], [r, 0.0, h], [-r, 0.0, h]]
+        .map(|point| Vertex {
+            point,
+            tolerance: 1e-3,
+        })
+        .to_vec();
+    let line = |a: usize, b: usize| Curve::Spline {
+        knots: vec![0.0, 0.0, h, h],
+        points: vec![vertices[a].point, vertices[b].point],
+    };
+    // Edges, numbered as the loop meets them: bottom halves 0 and 1, the seam 2, top halves 3
+    // and 4.
+    let curves = [arc(0, 0.0), arc(4, 0.0), line(0, 2), arc(4, h), arc(0, h)];
+    let intervals = [[0.0, 2.0], [2.0, 4.0], [0.0, h], [2.0, 4.0], [0.0, 2.0]];
+    let ends = [[0, 1], [1, 0], [0, 2], [3, 2], [2, 3]];
+    // The loop: the bottom left to right, the seam up (its use at the cut's high copy), the
+    // top right to left, the seam down (its use at the low copy).
+    let uses = [
+        (0, true),
+        (1, true),
+        (2, true),
+        (3, false),
+        (4, false),
+        (2, false),
+    ];
+    let line2 = |a: [f64; 2], b: [f64; 2], interval: [f64; 2]| Curve2::Spline {
+        knots: vec![interval[0], interval[0], interval[1], interval[1]],
+        points: vec![a, b],
+    };
+    let pcurves = [
+        line2([0.0, 0.0], [2.0, 0.0], [0.0, 2.0]),
+        line2([2.0, 0.0], [4.0, 0.0], [2.0, 4.0]),
+        line2([4.0, 0.0], [4.0 + over, h], [0.0, h]),
+        line2([2.0, h], [4.0, h], [2.0, 4.0]),
+        line2([0.0, h], [2.0, h], [0.0, 2.0]),
+        line2([0.0, 0.0], [0.0, h], [0.0, h]),
+    ];
+    let edges = curves
+        .into_iter()
+        .enumerate()
+        .map(|(e, curve)| Edge {
+            curve,
+            nurbs: None,
+            interval: intervals[e],
+            vertices: ends[e],
+            tolerance: 1e-3,
+            uses: uses
+                .iter()
+                .enumerate()
+                .filter(|(_, u)| u.0 == e)
+                .map(|(position, u)| EdgeUseRef {
+                    face: 0,
+                    r#loop: 0,
+                    position: position as u32,
+                    upper: !u.1,
+                })
+                .collect(),
+        })
+        .collect();
+    let boundary = uses
+        .iter()
+        .zip(pcurves)
+        .map(|(u, pcurve)| OrientedEdge {
+            edge: u.0 as u32,
+            forward: u.1,
+            pcurve,
+        })
+        .collect();
+    let source = Record {
+        version: VERSION,
+        tolerance: 1e-6,
+        regions: vec![Region {
+            shells: vec![0],
+            void: false,
+        }],
+        shells: vec![Shell::Faces {
+            faces: vec![OrientedFace {
+                face: 0,
+                forward: true,
+            }],
+            wires: Vec::new(),
+        }],
+        faces: vec![Face {
+            surface,
+            nurbs: None,
+            domain: [[0.0, 4.0], [0.0, h]],
+            loops: vec![Loop::Edges { edges: boundary }],
+        }],
+        edges,
+        vertices,
+    };
+    crate::record_check::validate(&source).unwrap();
+    let mut kernel = solidcore::Kernel::default();
+    let (mut body, order) = solidcore_convert::brep::to_kernel(&mut kernel, &source, true).unwrap();
+    let face = order.faces[0];
+    let pieces =
+        solidcore::topology::face::p1::complete_imported_face_seams(&mut kernel, &mut body, face)
+            .unwrap();
+    assert_eq!(pieces.map(|p| p.len()), Some(1));
+    let (back, _) = solidcore_convert::brep::to_record(&mut kernel, &mut body).unwrap();
+    assert_eq!((back.faces.len(), back.edges.len()), (1, 5));
+    assert!(
+        back.edges.iter().any(|e| e.uses.len() == 2),
+        "the seam is used twice"
+    );
+    crate::record_check::validate(&back).unwrap();
+    crate::record_check::agreement(&back).unwrap();
+    let domain = back.faces[0].domain;
+    assert!(
+        domain[0][0] >= -1e-9 && domain[0][1] <= 4.0 + 1e-9,
+        "{domain:?}"
+    );
+}
+
 /// A record's structure is checked before the kernel sees it: a use's interval outside its
 /// curve's range, a coordinate that is not a number, a circle of no radius, are refused as
 /// invalid records (the kernel's pcurve takes converted, checked values).
