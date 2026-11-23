@@ -42,6 +42,7 @@
 //! | [`OffsetFailure::FaceMoveEmpty`]       | `SM_ERR_INVALID_INPUT` (the face move's)  |
 //! | [`OffsetFailure::EdgeHasNoCurve`], [`OffsetFailure::FaceHasNoSurface`], [`OffsetFailure::FaceHasNoOuterFaceuse`], [`OffsetFailure::VertexNotGiven`], [`OffsetFailure::EdgeuseNotGiven`], [`OffsetFailure::CurveKindUnsupported`], [`OffsetFailure::EdgeuseHasNoUvTrim`], [`OffsetFailure::UnnamedFaceHasNoSurface`] | `SM_ERR_NULL_POINTER`, or the site's through `with_status` |
 //! | the other causes of `offset_geometry_creation` ([`OffsetFailure::VertexCurveNotArc`] to [`OffsetFailure::VertexArcsNotOneSphere`]) | `SM_ERR` |
+//! | [`OffsetFailure::OffsetBaseKindUnsupported`] | `SM_ERR` (`offset_executive::p1`) |
 //!
 //! A stage of an offset routine that fails with no reason the kernel names is an
 //! [`OffsetFailure::StageFailed`], a defect ([`ErrorKind::StageFailed`], #15034), keeping the
@@ -54,11 +55,12 @@
 //! four phrase causes ([`OffsetFailure::Failed`], [`OffsetFailure::Missing`],
 //! [`OffsetFailure::InvalidValue`], [`OffsetFailure::Inconsistent`]) describe, in a phrase, the failures of offset routines that returned a bare
 //! status ([`OffsetFailure::replaces_upstream_status`]); the failure's `operation` path
-//! says which routine and its entity, where the site named one, which face. The files
-//! with open work elsewhere (`offset_executive/{p1,p2}`) do not use them yet. The causes
-//! named at the sites of `offset_faces` and `offset_geometry_creation` that returned a bare
-//! status or an unreviewed stage failure ([`OffsetFailure::FacesMoveRefused`] and those after
-//! it) answer with that status too: they too replaced one.
+//! says which routine and its entity, where the site named one, which face. The file
+//! with open work elsewhere (`offset_executive/p2`) does not use them yet. The causes
+//! named at the sites of `offset_faces`, `offset_geometry_creation` and
+//! `offset_executive/p1` that returned a bare status or an unreviewed stage failure
+//! ([`OffsetFailure::FacesMoveRefused`] and those after it) answer with that status too: they
+//! too replaced one.
 
 use super::{
     EntityRef, ErrorKind, Failure, Reason, SM_ERR, SM_ERR_ASSERT_FAILURE, SM_ERR_BAD_INTERSECTIONS,
@@ -430,7 +432,8 @@ pub enum OffsetFailure {
     /// The vertex offset was given no vertex.
     VertexNotGiven,
     /// The mating of two offset edges was given no edge use for one of the four it takes
-    /// (the two original edge uses and their offsets).
+    /// (the two original edge uses and their offsets), or the synchronization of an edge's
+    /// offsets no original edge use.
     EdgeuseNotGiven,
     /// The curve of an edge is of a kind the routine does not handle: none of the B-spline
     /// curve kinds (B-spline, line, ellipse, hyperbola, parabola) whose B-spline data it
@@ -527,6 +530,13 @@ pub enum OffsetFailure {
     /// no face of the input (a backend whose handles carry no topology entity): the
     /// [`OffsetFailure::FaceHasNoSurface`] of a face it cannot name.
     UnnamedFaceHasNoSurface,
+    /// The base of an implicit offset surface is of a kind with no B-spline form that
+    /// `ReplaceImplicitOffsets` reads (an offset surface: an offset of an offset), so its
+    /// offset is not approximated. `surface_type` is the base's class type.
+    OffsetBaseKindUnsupported {
+        /// The base surface's class type (`GetType`).
+        surface_type: i64,
+    },
 }
 
 /// What a local operation's or a solid offset's built body fails ([`OffsetFailure::Unsound`]).
@@ -695,6 +705,7 @@ impl OffsetFailure {
             | Self::LocalFaceNotListed
             | Self::VertexArcsNotOneSphere
             | Self::UnnamedFaceHasNoSurface
+            | Self::OffsetBaseKindUnsupported { .. }
             | Self::ExactCurveUncut
             | Self::TangentEndOffCurve
             | Self::TangentBranchUncertified
@@ -715,7 +726,8 @@ impl OffsetFailure {
     /// [`OffsetFailure::InvalidValue`], [`OffsetFailure::Inconsistent`],
     /// [`OffsetFailure::StageFailed`], [`OffsetFailure::Defect`]), or a cause named at a site
     /// that returned one ([`OffsetFailure::LoopGapPassLimit`],
-    /// [`OffsetFailure::LoopGapEndsAmbiguous`], [`OffsetFailure::SplitAtEdgeEnd`], and those of
+    /// [`OffsetFailure::LoopGapEndsAmbiguous`], [`OffsetFailure::SplitAtEdgeEnd`],
+    /// [`OffsetFailure::OffsetBaseKindUnsupported`] (`offset_executive::p1`), and those of
     /// [`OffsetFailure::is_named_at_a_status_site`]): it answers with
     /// that status as the `Upstream` it replaced did. The other refusals replaced none.
     #[must_use]
@@ -731,6 +743,7 @@ impl OffsetFailure {
                 | Self::LoopGapPassLimit { .. }
                 | Self::LoopGapEndsAmbiguous { .. }
                 | Self::SplitAtEdgeEnd { .. }
+                | Self::OffsetBaseKindUnsupported { .. }
         ) || self.is_named_at_a_status_site()
     }
 
@@ -835,7 +848,8 @@ impl OffsetFailure {
             | Self::CrossingUndecided
             | Self::LocalFaceNotListed
             | Self::VertexArcsNotOneSphere
-            | Self::UnnamedFaceHasNoSurface => false,
+            | Self::UnnamedFaceHasNoSurface
+            | Self::OffsetBaseKindUnsupported { .. } => false,
             Self::Failed(_) | Self::Missing(_) | Self::InvalidValue(_) | Self::Inconsistent(_) => {
                 true
             }
@@ -912,7 +926,8 @@ impl OffsetFailure {
             | Self::CrossingUndecided
             | Self::LocalFaceNotListed
             | Self::VertexArcsNotOneSphere
-            | Self::UnnamedFaceHasNoSurface => false,
+            | Self::UnnamedFaceHasNoSurface
+            | Self::OffsetBaseKindUnsupported { .. } => false,
         }
     }
 
@@ -958,7 +973,8 @@ impl OffsetFailure {
             | Self::ShellTangentVertexMoveTooFar { .. }
             | Self::CrossingUndecided
             | Self::LocalFaceNotListed
-            | Self::VertexArcsNotOneSphere => SM_ERR,
+            | Self::VertexArcsNotOneSphere
+            | Self::OffsetBaseKindUnsupported { .. } => SM_ERR,
             Self::Missing(_)
             | Self::BlendRailWithoutSupport { .. }
             | Self::FollowedBlendIncomplete
@@ -1020,7 +1036,8 @@ impl OffsetFailure {
             | Self::ShellTangentUvUnmatched
             | Self::ShellTangentVertexMoveTooFar { .. }
             | Self::LaminaEdgeOtherSide
-            | Self::CrossingUndecided => ErrorKind::Unsupported,
+            | Self::CrossingUndecided
+            | Self::OffsetBaseKindUnsupported { .. } => ErrorKind::Unsupported,
             // neither a defect nor a refusal: the failure keeps the error of the step that
             // failed, which decides (`SolidError::is_defect`, `is_refusal`)
             Self::FaceDomainUnresolved | Self::VertexArcsNotOneSphere => ErrorKind::Failed,
@@ -1412,7 +1429,7 @@ impl core::fmt::Display for OffsetFailure {
             Self::VertexNotGiven => f.write_str("invalid input: the vertex offset was given no vertex"),
             Self::EdgeuseNotGiven => f.write_str(
                 "invalid input: the mating of two offset edges was given no edge use for one of \
-                 the four it takes",
+                 the four it takes, or the synchronization of an edge's offsets none",
             ),
             Self::CurveKindUnsupported { curve_type, .. } => write!(
                 f,
@@ -1481,6 +1498,11 @@ impl core::fmt::Display for OffsetFailure {
             ),
             Self::LocalFaceNotListed => f.write_str(
                 "invalid input: the face is not among the faces the local operation was given",
+            ),
+            Self::OffsetBaseKindUnsupported { surface_type } => write!(
+                f,
+                "the base of an offset surface (type {surface_type}) has no B-spline form, which \
+                 the approximation of its offset reads"
             ),
         }
     }
@@ -2047,6 +2069,12 @@ mod tests {
                 false,
                 false,
             ),
+            (
+                O::OffsetBaseKindUnsupported { surface_type: 7 },
+                ErrorKind::Unsupported,
+                false,
+                false,
+            ),
         ];
         let row = |o: &O| -> usize {
             match o {
@@ -2109,6 +2137,7 @@ mod tests {
                 O::UnnamedFaceHasNoSurface => 56,
                 O::FaceCloses { .. } => 57,
                 O::DraftClosesWall { .. } => 58,
+                O::OffsetBaseKindUnsupported { .. } => 59,
             }
         };
         for (i, (o, class, phrase, defect)) in pinned.iter().enumerate() {
@@ -2225,6 +2254,12 @@ mod tests {
             (
                 OffsetFailure::UnnamedFaceHasNoSurface,
                 SM_ERR_NULL_POINTER,
+                None,
+            ),
+            // and that of `offset_executive::p1` (TE-O-18)
+            (
+                OffsetFailure::OffsetBaseKindUnsupported { surface_type: 7 },
+                SM_ERR,
                 None,
             ),
         ];
@@ -2344,7 +2379,7 @@ mod tests {
             "offset",
             20,
             &[
-                ("offset/offset_executive/p1.rs", 79),
+                ("offset/offset_executive/p1.rs", 34),
                 ("offset/offset_executive/p2.rs", 57),
             ],
         );
