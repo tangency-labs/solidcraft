@@ -2973,6 +2973,23 @@ fn associative_trace_reuses_pose_and_unrelated_edits_but_follows_drive_expressio
     assert_eq!(kept_trace_fit(&s, id), updated, "detaching preserves the curve");
 }
 
+/// A trace whose joint has a limit expression that no longer works out says so, as the solve
+/// does, instead of keeping the curve bounded by the limit's old numbers (#20242).
+#[test]
+fn associative_trace_warns_when_a_limit_expression_stops_working_out() {
+    let (mut s, p0, q0) = four_bar();
+    let mid = (p0 + q0) * 0.5;
+    run(&mut s, "parameters.add", json!({"name":"reach","expression":"120 deg"}));
+    run(&mut s, "joint.limits", json!({"joint":"Crank","min":0,"max":"reach"}));
+    let r =
+        run(&mut s, "motion.trace.keep", json!({"occurrence":"Coupler","point":[mid.x,mid.y,mid.z],"joint":"Crank","from":0,"to":90,"samples":19}));
+    let id = r["sketch"].as_u64().unwrap();
+    let warning = |s: &Session| s.model.results.iter().find(|r| r.id == id).and_then(|r| r.warning.clone()).unwrap_or_default();
+    assert_eq!(warning(&s), "");
+    run(&mut s, "parameters.change", json!({"name":"reach","expression":"-10 deg"}));
+    assert!(warning(&s).contains("minimum comes out above the maximum"), "{}", warning(&s));
+}
+
 #[test]
 fn associative_trace_follows_a_study_and_survives_serialization() {
     let (mut s, p0, q0) = four_bar();

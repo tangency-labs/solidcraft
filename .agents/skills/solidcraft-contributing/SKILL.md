@@ -55,9 +55,10 @@ The PR workflow in detail: `.agents/skills/solidcraft-file-pr/SKILL.md` (writing
   (CodeRabbit threads resolved; CI or workflow changes need the owner's approval). The queue runs the
   full suite on each group before it lands on `main`. Never force-push `main`.
 - **Do not push only to catch up with `main`:** every push restarts the whole CI run, and `main`'s own
-  run catches what lands in between. When you push anyway, or GitHub reports a conflict, rebase onto
-  the latest `main` (preferred for your own branch; push it with `--force-with-lease`) or merge `main`
-  in; both are fine. Never force-push a branch someone else works on. Automation that updates your PR
+  run catches what lands in between. When you push anyway, or GitHub reports a conflict, merge `main`
+  in or rebase onto the latest `main`; both are fine. Merging costs less: when the PR already passed
+  and the merge leaves its own change as it was, CI carries the passing run and repeats only the
+  repository checks, while a rebase re-runs the full suite (push one with `--force-with-lease`). Never force-push a branch someone else works on. Automation that updates your PR
   merges `main` into your branch and never force-pushes over your history. Resolve conflicts without
   discarding others' work. Do not re-run CI on an unchanged commit: re-run only a job that runner
   trouble cancelled, with "Re-run failed jobs".
@@ -67,12 +68,22 @@ The PR workflow in detail: `.agents/skills/solidcraft-file-pr/SKILL.md` (writing
   error shape, API, format or schema) gets a design review before later parts are accepted. Drawings
   work targets the `drawings` branch. A UI addition needs full-flow 1280×720 screenshots and a
   small-window check.
-- **Evidence.** For observable CAD, UI or model behaviour (kernel, geometry, assembly and backend
-  changes included), the issue or PR carries real screenshots or a short recording from a small
-  reproduction, preferably before and after, with steps and expected/actual behaviour. Capture it
-  yourself; do not ask a human for evidence you can produce. Diagrams do not replace it. Changes with
-  nothing observable need none. Use a public-safe example, check for private designs, paths and account
-  details, attach the media rather than committing it.
+- **Evidence.** Screenshots go in the PR up front, only in these cases:
+  1. A visible UI change (a new or changed dialog, panel, menu, control, label or layout): before and
+     after, at 1280×720, plus a small-window check for a UI addition.
+  2. A change to what a model looks like (a feature that now builds, or builds differently): one
+     image of the result from a small public-safe reproduction, before and after when there was a
+     before.
+
+  Nothing else needs media: kernel, geometry or backend fixes proven by tests, refactors, tests,
+  documentation, error-message wording (quote the text in the body instead), a rebase or a merge of
+  main, and review fixes that change nothing visible. A recording is optional; when you attach one,
+  add a still image of the key frame, because review tools may not play video. Capture media yourself;
+  do not ask a human for evidence you can produce. Diagrams do not replace it. Check for private
+  designs, paths and account details, and attach the media rather than committing it.
+- **Reviewers ask for media only in those two cases**, and only when the PR has none. Media already in
+  the PR stands through rebases, merges of main and fixes that leave the visible result unchanged;
+  never ask for it again after the fact.
 - **Follow through.** Check the PR's merge status throughout and before handoff. Report the state you
   checked and any conflicts resolved. While the PR is open, keep monitoring it and say clearly that it
   is pending; do not claim it merged without checking.
@@ -258,8 +269,9 @@ sccache is an opt-in tool on your machine. The repository doesn't require it, an
 
 ## 6. Show the result
 
-For visible changes, reproduce the result with a small public-safe example and
-capture actual screenshots or a short recording, preferably before and after.
+For the two cases in "Evidence" above (a visible UI change, or a change to what a
+model looks like), reproduce the result with a small public-safe example and capture
+screenshots, before and after where there was a before. Other changes need no media.
 For model output without a display, run:
 
 ```sh

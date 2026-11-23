@@ -57,6 +57,18 @@ crates to this tree the same way, with
 `[patch.crates-io] egui-wgpu = { path = ".../vendor/egui/crates/egui-wgpu" }` and the same for the others.
 
 SolidCraft changes to egui and eframe:
+- `crates/egui/src/context.rs`, `crates/epaint/src/mutex.rs`: a `Context` read taken on a thread
+  that already holds a read of the same context goes ahead of a waiting writer
+  (`RwLock::read_recursive`). parking_lot holds new readers back behind a waiting writer, so a
+  closure given to `Context::data` that called the context again (`ctx.viewport_id()`) froze the
+  window for good when a worker's `request_repaint` came between the two reads
+  (#21091). The context tracks the locks each thread holds for this.
+  `Context::record_nested_locks` reports nested ones so tests can keep them out; it builds only
+  with the `lock_nesting_report` feature (`crates/egui/Cargo.toml`), which SolidCraft's crates
+  enable from their dev-dependencies. epaint's `RwLock::is_locked_exclusive` lets the egui test
+  see the writer queue. Tests:
+  `a_nested_read_does_not_wait_on_a_waiting_writer` (egui) and
+  `the_window_never_locks_its_context_inside_its_own_lock_while_a_check_runs` (`crates/ui-egui`).
 - `crates/egui/src/data/input/raw_input.rs`, `crates/egui/src/input_state/mod.rs`,
   `crates/eframe/src/epi.rs`, `crates/eframe/src/native/{winit,wgpu,glow}_integration.rs`:
   backport of emilk/egui#8768 (open upstream, against egui's `main`). `RawInput::repaint_on_pointer_move`

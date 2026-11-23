@@ -52,7 +52,7 @@ use crate::nurbs::b_spline_curve::BSplineCurve;
 use crate::nurbs::b_spline_surface::{BSplineSurface, IsoCurveOptions, SurfParamType};
 use crate::nurbs::crv_basic::Curve as NurbCurve;
 use crate::nurbs::math::{CPoint, NOW, NOZ};
-use crate::surface::surface_cache::BezierPatch;
+use crate::surface::surface_cache::{BezierPatch, SolveModes};
 
 const OP: &str = "surface::surface::p9::find_tessellation_splits";
 const MAX_SPLITS: usize = 1_000_000;
@@ -765,17 +765,19 @@ impl<'a, O: SolutionObject + 'a> CsiGlobalSolver<'a, '_, O> {
             solution,
         )? {
             let uv = Point2::new(solution.start.param(1)?, solution.start.param(2)?);
+            let cache = self.surface_cache.ok_or_else(|| {
+                SolidError::surface(
+                    OP,
+                    SurfaceFailure::SolverWithout {
+                        part: SolverPart::SurfaceCache,
+                    },
+                )
+            })?;
             if super::p1::is_point_valid_with(
                 k,
                 self.base.tree(1)?.owner(),
-                self.surface_cache.ok_or_else(|| {
-                    SolidError::surface(
-                        OP,
-                        SurfaceFailure::SolverWithout {
-                            part: SolverPart::SurfaceCache,
-                        },
-                    )
-                })?,
+                cache,
+                SolveModes::of(cache, self.modes),
                 uv,
                 None,
                 self.face_queries,
@@ -831,7 +833,8 @@ impl<'a, O: SolutionObject + 'a> CsiGlobalSolver<'a, '_, O> {
         let u_interval = domain.u_interval();
         let v_interval = domain.v_interval();
         let mut interval = *span.interval();
-        if !super::p1::is_node_valid(self.base.tree(1)?.owner(), cache, &surface_node)? {
+        let modes = SolveModes::of(cache, self.modes);
+        if !super::p1::is_node_valid(self.base.tree(1)?.owner(), cache, modes, &surface_node)? {
             return Ok(false);
         }
         if domain.are_disjoint(&self.uv_domain, 0.0) || self.interval.are_disjoint(&interval, 0.0) {
@@ -1054,6 +1057,7 @@ impl<'a, O: SolutionObject + 'a> CsiGlobalSolver<'a, '_, O> {
                     k,
                     self.base.tree(1)?.owner(),
                     cache,
+                    modes,
                     hit.uv,
                     None,
                     self.face_queries,
@@ -1128,7 +1132,7 @@ impl<'a, O: SolutionObject + 'a> CsiGlobalSolver<'a, '_, O> {
                     }
                 }
             }
-            if !cache.process_boundary_curves {
+            if !modes.process_boundary_curves {
                 continue;
             }
             for (dir, cont, constant, iso_interval) in [
