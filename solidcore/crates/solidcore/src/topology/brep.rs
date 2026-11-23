@@ -86,7 +86,8 @@ pub use p9::{make_vertex_loop, orient_sheet_surfaces, OrientSheetNote};
 ///
 /// A sign the enclosure leaves undecided (its interval still holds 0 when refinement ends:
 /// a gap between faces as large as the volume, or the cell budget spent) is "not a solid" on
-/// purpose: a solid is what is proved one, so ops' `finish` refuses the body as `NotSolid`.
+/// purpose: a solid is what is proved one, so ops' `finish` refuses the body as
+/// `NotSolidBecause(VolumeUndecided)`.
 /// A body the enclosure cannot read at all is an error, not `false`: a face with no NURBS form
 /// (an offset surface, as the offset of a round keeps; a curve-bounded or in-volume surface),
 /// a face without trim loops, or weights not proved positive.
