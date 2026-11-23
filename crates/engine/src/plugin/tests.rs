@@ -1438,6 +1438,46 @@ mod native {
     }
 
     #[test]
+    fn unread_link_notifications_skip_hidden_folders_inside_a_granted_folder() {
+        let f = Fixture::new("i32.const 4 local.get 2 i32.store i32.const 8 local.get 3 i32.store");
+        let grant = f.0.join("grant");
+        let sources = [grant.join(".hidden/part.step"), grant.join("visible/part.step")];
+        for source in &sources {
+            std::fs::create_dir_all(source.parent().unwrap()).unwrap();
+            std::fs::write(source, "part").unwrap();
+        }
+        let mut m = manifest();
+        m["capabilities"] = json!(["commands@0.2", "design@0.1"]);
+        m["runtime"]["commands"] = json!([]);
+        m["runtime"]["entries"] = json!([{"name":"make","effect":"read","input_schema":{"type":"object"}}]);
+        m["runtime"]["listeners"] = json!([{"entry":"make","on":["design.links_changed"]}]);
+        m["runtime"]["permissions"]["files"] = json!([{"name":"project","read":true,"write":false}]);
+        std::fs::write(f.0.join("sample/plugin.json"), m.to_string()).unwrap();
+        let mut s = Session::default();
+        f.install(&mut s, json!({"folders":[{"name":"project","path":grant,"read":true,"write":false}]}));
+        let links: Vec<_> = sources
+            .iter()
+            .zip([1, 2])
+            .map(|(path, component)| LinkChange {
+                component,
+                name: None,
+                path: path.to_string_lossy().into_owned(),
+                read: false,
+                digest: String::new(),
+            })
+            .collect();
+        let token = s.design_token();
+        design_notifications(&mut s, Some(token.clone()), false, &links[..1]);
+        assert!(s.plugin_state.listener_data.is_empty(), "an unread source in a hidden folder is not reported");
+        design_notifications(&mut s, Some(token.clone()), false, &links);
+        assert_eq!(
+            s.plugin_state.listener_data["sample.make"],
+            json!({"design":token,"links":[{"component":2,"name":null,"path":sources[1],"read":false}]})
+        );
+        assert!(s.plugin_state.listener_failures.is_empty(), "{:?}", s.plugin_state.listener_failures);
+    }
+
+    #[test]
     fn prepared_link_checks_preserve_newer_live_observations() {
         let f = Fixture::new("");
         let source = f.0.join("part.sc");

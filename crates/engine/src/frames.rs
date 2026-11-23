@@ -67,6 +67,11 @@ fn table(id: &str) -> &'static [(&'static str, K)] {
             &[("face", Pick), ("faces", Picks), ("face_body", Body), ("from", Make), ("to", Make), ("targets", Body), ("participants", Body)]
         }
         "solid.revolve" => &[("face", Pick), ("axis", Axis), ("to", Make), ("targets", Body), ("participants", Body)],
+        // A sweep profile given as a body face: the face point, in the frame of the body under it.
+        // The sweep's own geometry (its path on a body's edges, the direction its profile follows)
+        // stays in the world, and goes into the active component's frame
+        // (`to_active_frame_geometry`).
+        "solid.sweep" => &[("face", Pick), ("face_body", Body)],
         // Edit Feature of a surface revolve (`map_local`): its `{origin, dir}` axis. A new surface
         // revolve has no entry, so it is taken into the active frame whole (`to_active_frame`),
         // picked edge and face axes too.
