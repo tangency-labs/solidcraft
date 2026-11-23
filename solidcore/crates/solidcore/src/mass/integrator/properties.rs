@@ -3650,4 +3650,132 @@ mod tests {
         assert!(near(r.area, 800.0, 1e-9), "{r:?}");
         assert!(near(r.volume, 1500.0, 1e-9), "{r:?}");
     }
+
+    /// What a measure could change on a B-rep through a shared reference or by making a
+    /// trim: each edge use's UV trim and gap cache, each edge's and face's tolerance, each
+    /// face surface's trim cache slot.
+    fn trims_and_caches(b: &Brep) -> String {
+        use crate::topology::edgeuse::p1 as eu1;
+        let mut out = String::new();
+        for (u, r) in b.edgeuses().iter() {
+            let gap = eu1::is_max_edge_face_gap_init(b, u).unwrap();
+            out += &format!("{u:?} {} {gap}\n", r.uv_trim_curve.is_some());
+        }
+        for e in edges(b).unwrap() {
+            out += &format!("{e:?} {:?}\n", edge::tolerance(b, e).unwrap());
+        }
+        for f in faces(b).unwrap() {
+            let s = crate::topology::face::p2::surface(b, f).unwrap().unwrap();
+            let face = b.face(f).unwrap();
+            out += &format!(
+                "{f:?} {:?} {} {}\n",
+                face.tolerance,
+                s.has_trim_cache(),
+                s.trim_cache_in_use()
+            );
+        }
+        out
+    }
+
+    /// Primitives with plane, cylinder, cone, sphere and torus faces.
+    fn curved_bodies(k: &mut Kernel) -> Vec<Brep> {
+        use crate::primitive::api_primitives as p;
+        vec![
+            p::create_box(k, Point3::new(1.0, -2.0, 3.0), 1.0, 2.0, 3.0).unwrap(),
+            p::create_cylinder(k, Point3::new(0.5, 0.0, -1.0), 2.0, 3.0).unwrap(),
+            p::create_cone(k, Point3::ZERO, 2.0, 1.0, 3.0).unwrap(),
+            p::create_sphere(k, Point3::new(1.0, 2.0, -3.0), 2.0).unwrap(),
+            p::create_torus(k, Point3::new(3.0, 0.0, -1.0), 4.0, 1.0).unwrap(),
+        ]
+    }
+
+    /// On a body whose UV trims exist, each `_prepared` form gives the `&mut` form's
+    /// answer bit for bit (one implementation) and changes nothing on the body.
+    #[test]
+    fn prepared_measures_match_the_mutable_ones_bit_for_bit() {
+        let mut k = Kernel::default();
+        let store = no_attributes();
+        let attrs = PropertyAttributes {
+            store: &store,
+            key_of: &|_| ObjectKey(0),
+        };
+        let requests = [
+            MassPropertyRequest::centroidal(),
+            MassPropertyRequest::api(2.0, Point3::new(0.5, -1.0, 2.0)),
+        ];
+        let abouts = [AreaAbout::FaceMiddle, AreaAbout::Point(Point3::ZERO)];
+        for mut b in curved_bodies(&mut k) {
+            // the trims (and what else a measure makes) made once, as on any measured body
+            estimated(&k, &mut b, &requests[0]).unwrap();
+            crate::topology::brep::p2::create_missing_uv_trim_curves(&k, &mut b).unwrap();
+            assert_eq!(missing_uv_trim(&b, None).unwrap(), None);
+            let before = trims_and_caches(&b);
+            for request in &requests {
+                let read =
+                    brep_mass_properties_estimated_prepared(&k, &b, 1e-8, request, &attrs).unwrap();
+                let mut copy = b.clone_standing_for_self().unwrap();
+                let made =
+                    brep_mass_properties_estimated(&k, &mut copy, 1e-8, request, &attrs).unwrap();
+                assert_eq!(format!("{read:?}"), format!("{made:?}"));
+            }
+            for about in abouts {
+                let read = brep_area_about_prepared(&k, &b, 1e-8, about).unwrap();
+                let mut copy = b.clone_standing_for_self().unwrap();
+                let made = brep_area_about(&k, &mut copy, 1e-8, about).unwrap();
+                assert_eq!(read.to_bits(), made.to_bits());
+            }
+            for f in faces(&b).unwrap() {
+                let mut copy = b.clone_standing_for_self().unwrap();
+                let read = face_area_prepared(&k, &b, f, 1e-8).unwrap();
+                let made = face_area(&k, &mut copy, f, 1e-8).unwrap();
+                assert_eq!(read.to_bits(), made.to_bits());
+                let read = face_centroid_prepared(&k, &b, f, 1e-8).unwrap();
+                let made = face_centroid(&k, &mut copy, f, 1e-8).unwrap();
+                assert_eq!(format!("{read:?}"), format!("{made:?}"));
+            }
+            assert_eq!(trims_and_caches(&b), before, "the body is unchanged");
+        }
+    }
+
+    /// On a body with an edge whose uses have no UV trim, each `_prepared` form makes
+    /// nothing and asks for preparation; [`missing_uv_trim`] names a use of that edge.
+    #[test]
+    fn prepared_measures_ask_for_a_missing_trim() {
+        let mut k = Kernel::default();
+        let store = no_attributes();
+        let attrs = PropertyAttributes {
+            store: &store,
+            key_of: &|_| ObjectKey(0),
+        };
+        for mut b in curved_bodies(&mut k) {
+            crate::topology::brep::p2::create_missing_uv_trim_curves(&k, &mut b).unwrap();
+            let e = *edges(&b).unwrap().first().unwrap();
+            let uses = edge::edgeuses(&b, e, None, None).unwrap();
+            for &u in &uses {
+                b.edgeuse_mut(u).unwrap().uv_trim_curve = None;
+            }
+            let missing = missing_uv_trim(&b, None).unwrap();
+            assert!(missing.is_some_and(|u| uses.contains(&u)), "{missing:?}");
+            let before = trims_and_caches(&b);
+            let request = MassPropertyRequest::centroidal();
+            let asks = |r: Result<()>| matches!(r, Err(SolidError::PreparationRequired { .. }));
+            assert!(asks(
+                brep_mass_properties_estimated_prepared(&k, &b, 1e-8, &request, &attrs).map(|_| ())
+            ));
+            assert!(asks(
+                brep_area_about_prepared(&k, &b, 1e-8, AreaAbout::FaceMiddle).map(|_| ())
+            ));
+            for f in faces(&b).unwrap() {
+                if missing_uv_trim(&b, Some(f)).unwrap().is_none() {
+                    continue;
+                }
+                assert!(asks(face_area_prepared(&k, &b, f, 1e-8).map(|_| ())));
+                assert!(asks(face_centroid_prepared(&k, &b, f, 1e-8).map(|_| ())));
+            }
+            assert_eq!(trims_and_caches(&b), before, "nothing is made");
+            // the `&mut` form still makes the trim and measures
+            estimated(&k, &mut b, &request).unwrap();
+            assert_eq!(missing_uv_trim(&b, None).unwrap(), None);
+        }
+    }
 }
