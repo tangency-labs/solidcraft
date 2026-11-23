@@ -88,9 +88,7 @@ pub fn relation_values(doc: &Document, st: &ModelState, j: &Joint) -> Option<Vec
 /// meet and the faces touch. A datum side has no face centre to meet, so the part keeps its
 /// place on the datum.
 fn mate_of_faces(j: &Joint) -> bool {
-    j.constraint == Some(Constraint::Mate)
-        && matches!(j.a.snap, Snap::FaceCenter { .. })
-        && matches!(j.b.snap, Snap::FaceCenter { .. })
+    j.constraint == Some(Constraint::Mate) && matches!(j.a.snap, Snap::FaceCenter { .. }) && matches!(j.b.snap, Snap::FaceCenter { .. })
 }
 
 #[cfg(test)]
@@ -107,10 +105,7 @@ mod tests {
         let mut doc = Document::new("mate");
         let plate = doc.add_component(Some("Plate"), 0).unwrap();
         let block = doc.add_component(Some("Block"), 0).unwrap();
-        for (component, name, corner) in [
-            (plate, "Plate", ["0", "0", "0"]),
-            (block, "Block", ["130", "40", "40"]),
-        ] {
+        for (component, name, corner) in [(plate, "Plate", ["0", "0", "0"]), (block, "Block", ["130", "40", "40"])] {
             let kind: FeatureKind = serde_json::from_value(serde_json::json!({
                 "type": "box", "corner": corner, "length": "100", "width": "100", "height": "10", "operation": "new_body"
             }))
