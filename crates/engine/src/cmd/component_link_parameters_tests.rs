@@ -464,6 +464,72 @@ fn insert_design_sets_the_values_its_link_passes() {
     let _ = std::fs::remove_dir_all(dir);
 }
 
+/// A plain value needs no parameter in the assembly (#20803): one design inserted twice into a
+/// design with no user parameters, each time at its own size, makes two links that each keep the
+/// value they were given.
+#[test]
+fn a_plain_value_needs_no_parameter_here_and_each_link_keeps_its_own() {
+    let dir = folder("plain");
+    let part = dir.join("block.sc");
+    save_block(&part);
+    let mut s = Session::default();
+    let short = run(&mut s, "component.insert_design", json!({"path": part, "name": "Short", "parameters": {"h": "270 mm"}}));
+    assert_eq!(short["parameters"]["h"], json!({"expression": "270 mm", "value": 270.0}));
+    let long = run(&mut s, "component.insert_design", json!({"path": part, "name": "Long", "parameters": {"h": "510 mm"}, "reuse": false}));
+    assert_eq!(long["parameters"]["h"], json!({"expression": "510 mm", "value": 510.0}));
+    assert!(s.doc.params.iter().all(|p| p.model), "the assembly still has no user parameter");
+    assert_eq!(s.doc.links.len(), 2);
+    let passed: Vec<&str> = s.doc.links.values().map(|l| l.parameter_values["h"].as_str()).collect();
+    assert_eq!(passed, ["270 mm", "510 mm"]);
+    assert!((volume(&mut s) - 10.0 * 20.0 * (270.0 + 510.0)).abs() < 1e-6);
+    // One link's value changes; the other keeps its own.
+    run(&mut s, "component.link_parameters", json!({"component": "Short", "set": {"h": "350 mm"}}));
+    assert!((volume(&mut s) - 10.0 * 20.0 * (350.0 + 510.0)).abs() < 1e-6);
+    // Saved and opened again without the file, both are as they were.
+    let assembly = dir.join("assembly.sc");
+    run(&mut s, "file.save", json!({"path": assembly}));
+    std::fs::remove_file(&part).unwrap();
+    let mut again = Session::default();
+    run(&mut again, "doc.open", json!({"path": assembly}));
+    assert!((volume(&mut again) - 10.0 * 20.0 * (350.0 + 510.0)).abs() < 1e-6);
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+/// A linked design's mesh bodies (#20050) come in with a link that passes values too, once, and
+/// stay through each edit of what it passes.
+#[test]
+fn a_link_that_passes_values_keeps_the_designs_mesh_bodies() {
+    let dir = folder("meshes");
+    let (part, stl) = (dir.join("board.sc"), dir.join("Chip.stl"));
+    std::fs::write(&stl, super::super::tests::tetra_stl()).unwrap();
+    let mut board = Session::default();
+    run(&mut board, "parameters.add", json!({"name": "t", "expression": "2 mm"}));
+    run(&mut board, "solid.box", json!({"length": 10, "width": 20, "height": "t", "body_name": "Board"}));
+    run(&mut board, "file.insert_mesh", json!({"path": stl}));
+    run(&mut board, "file.save", json!({"path": part}));
+    let meshes = |s: &Session| s.model.state().bodies.iter().filter(|b| b.body.is_mesh()).count();
+    let solid = |s: &mut Session| {
+        let measured = run(s, "inspect.measure", json!({}));
+        let board = measured["bodies"].as_array().and_then(|b| b.iter().find(|b| b["name"] == "Board").cloned());
+        board.and_then(|b| b["volume_mm3"].as_f64()).unwrap_or(f64::NAN)
+    };
+    let mut s = Session::default();
+    run(&mut s, "parameters.add", json!({"name": "thick", "expression": "3 mm"}));
+    let made = run(&mut s, "component.insert_design", json!({"path": part, "name": "Board", "parameters": {"t": "thick"}}));
+    let comp = made["component"].as_u64().unwrap();
+    assert_eq!(meshes(&s), 1, "{made}");
+    assert!((solid(&mut s) - 10.0 * 20.0 * 3.0).abs() < 1e-6);
+    let st = s.model.state();
+    assert!(st.bodies.iter().all(|b| s.doc.model_body_component(b) == comp), "the mesh body is in the linked component");
+    run(&mut s, "parameters.change", json!({"name": "thick", "expression": "5 mm"}));
+    assert_eq!(meshes(&s), 1);
+    assert!((solid(&mut s) - 10.0 * 20.0 * 5.0).abs() < 1e-6);
+    run(&mut s, "component.link_parameters", json!({"component": "Board", "set": {"t": "4 mm"}}));
+    assert_eq!(meshes(&s), 1);
+    assert!((solid(&mut s) - 10.0 * 20.0 * 4.0).abs() < 1e-6);
+    let _ = std::fs::remove_dir_all(dir);
+}
+
 /// A design inserted with values brings its images where the design shows them with those
 /// values: a decal on the plate's top comes in at the height the link passes, not the saved one.
 #[test]
