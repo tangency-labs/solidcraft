@@ -143,6 +143,68 @@ fn biarc_spline_draws_from_point_and_tangent_clicks_and_edits_from_its_member_me
 }
 
 #[test]
+fn biarc_hint_refreshes_stay_with_the_sketch_view() {
+    fn painted(h: &Harness, expected: &str) -> bool {
+        let mut found = false;
+        for clipped in &h.shapes {
+            crate::test_support::each_shape(&clipped.shape, &mut |shape| {
+                if let egui::Shape::Text(text) = shape {
+                    found |= text.galley.text() == expected;
+                }
+            });
+        }
+        found
+    }
+
+    let mut h = Harness::new();
+    h.app.home.open = false;
+    h.app.set_origin_shown(false);
+    let owner = h.app.docs.views.active().id;
+    let sibling = crate::documents::view_duplicate(&mut h.app, owner).unwrap();
+    let render = crate::documents::view_open(&mut h.app, solidcraft_views::ViewKind::Render, None, false);
+    assert!(crate::documents::focus_view(&mut h.app, owner));
+    h.app.run("sketch.create", json!({"plane": "XY", "view": owner})).unwrap();
+    h.call("ui.view", json!({"view": "top"}));
+    h.call("ui.camera", json!({"target": [6, 0, 0], "distance": 125}));
+    h.step(&json!({"start": "sketch.spline.biarc"})).unwrap();
+    let sketch = h.app.session.active_sketch;
+    let before = h.app.session.doc.to_json();
+    let undo = h.app.session.undo.len();
+
+    // Every action refreshes the guidance: a pick asks for its tangent, right-click cannot
+    // finish that incomplete pair, and Undo takes back the pending point instead of the sketch.
+    for (action, points, key) in [
+        (json!({"click": {"sketch": [-36, -12]}}), 1, "sketch.biarc.tangent"),
+        (json!({"click": {"sketch": [-36, -12]}, "button": "right"}), 1, "sketch.biarc.tangent"),
+        (json!({"key": "Z", "cmd": true}), 0, "sketch.biarc.point"),
+    ] {
+        h.step(&action).unwrap();
+        assert_eq!(h.app.tool.as_ref().unwrap().pts.len(), points);
+        let hint = h.app.tr(key).to_string();
+        assert_eq!(h.app.status.as_ref().map(|status| status.0.as_str()), Some(hint.as_str()));
+        assert!(h.app.status_is_tool_hint, "{action}: refreshed guidance belongs to the sketch tool");
+        h.frames(2);
+        assert!(painted(&h, &hint), "{action}: the owner shows the refreshed instruction");
+
+        for away in [sibling, render] {
+            assert!(crate::documents::focus_view(&mut h.app, away));
+            h.frames(2);
+            assert!(!crate::workspace::tool_receives_input(&h.app));
+            assert!(!painted(&h, &hint), "{action}: the suspended Biarc tool gives no instruction in view {away}");
+            assert_eq!(h.app.status.as_ref().map(|status| status.0.as_str()), Some(hint.as_str()));
+            assert!(crate::documents::focus_view(&mut h.app, owner));
+            h.frames(2);
+            assert!(crate::workspace::tool_receives_input(&h.app));
+            assert!(painted(&h, &hint), "{action}: returning to the owner resumes its instruction");
+        }
+        assert_eq!(h.app.session.active_sketch, sketch);
+        assert_eq!(h.app.tool.as_ref().map(|tool| (tool.cmd, tool.pts.len())), Some(("sketch.spline.biarc", points)));
+        assert_eq!(h.app.session.doc.to_json(), before, "pending picks and focus changes leave the sketch uncommitted");
+        assert_eq!(h.app.session.undo.len(), undo, "Undo consumed the pending point rather than document history");
+    }
+}
+
+#[test]
 fn biarc_drawing_keeps_fit_point_snaps_and_the_existing_hidden_construction_snaps() {
     use solidcraft_engine::sketch::ConstraintKind;
 

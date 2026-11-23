@@ -51,7 +51,7 @@ fn placements(tool: &Tool) -> impl Iterator<Item = (Vec2, Vec2, Option<&str>)> {
 
 pub(crate) fn place(app: &mut SolveApp, tool: &mut Tool, p: (Vec2, Option<String>)) {
     if tool.pts.len() >= 2 * MAX_BIARC_NODES {
-        app.set_status(tr("sketch.biarc.finish").to_string(), false);
+        app.set_tool_hint(tr("sketch.biarc.finish").to_string());
         return;
     }
     let tangent = needs_tangent(tool);
@@ -60,7 +60,7 @@ pub(crate) fn place(app: &mut SolveApp, tool: &mut Tool, p: (Vec2, Option<String
         return;
     }
     tool.pts.push(if tangent { (p.0, None) } else { p });
-    app.set_status(tr(hint(tool)).to_string(), false);
+    app.set_tool_hint(tr(hint(tool)).to_string());
 }
 
 pub(crate) fn finish(app: &mut SolveApp, tool: &mut Tool) -> bool {
@@ -68,7 +68,7 @@ pub(crate) fn finish(app: &mut SolveApp, tool: &mut Tool) -> bool {
         return false;
     }
     if needs_tangent(tool) || tool.pts.len() < 4 {
-        app.set_status(tr(hint(tool)).to_string(), false);
+        app.set_tool_hint(tr(hint(tool)).to_string());
         return true;
     }
     let nodes: Vec<_> = placements(tool)

@@ -1003,7 +1003,7 @@ pub fn undo_spline_point(app: &mut SolveApp) -> bool {
     crate::sketch_dims::reset(t);
     if t.cmd == crate::sketch_biarc_ui::COMMAND {
         let hint = crate::sketch_biarc_ui::hint(t);
-        app.set_status(tr(hint).to_string(), false);
+        app.set_tool_hint(tr(hint).to_string());
     }
     true
 }
