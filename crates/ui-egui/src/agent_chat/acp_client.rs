@@ -258,7 +258,9 @@ impl AcpBackend {
                 // A question of a session that is not this one belongs to a chat that is over: it
                 // is not asked, but the agent is told it was dismissed, so it waits for nothing.
                 if !session.is_empty() && self.session.as_deref() != Some(session.as_str()) {
-                    self.proc.send(&acp::question_reply(rpc, field.as_deref(), &Answer::Cancel));
+                    if let Some(proc) = &self.proc {
+                        proc.send(&acp::question_reply(rpc, field.as_deref(), &Answer::Cancel));
+                    }
                     return;
                 }
                 self.next_key += 1;
@@ -360,7 +362,9 @@ impl ChatBackend for AcpBackend {
         }
         // The agent's own questions are dismissed the same way.
         for (_, (rpc, field)) in self.questions.drain() {
-            self.proc.send(&acp::question_reply(rpc, field.as_deref(), &Answer::Cancel));
+            if let Some(proc) = &self.proc {
+                proc.send(&acp::question_reply(rpc, field.as_deref(), &Answer::Cancel));
+            }
         }
         if let Some(s) = &self.session {
             self.send(&acp::notification("session/cancel", json!({"sessionId": s})));
@@ -420,8 +424,10 @@ impl ChatBackend for AcpBackend {
     }
 
     fn answer_question(&mut self, key: u64, answer: &Answer) {
-        if let Some((rpc, field)) = self.questions.remove(&key) {
-            self.proc.send(&acp::question_reply(rpc, field.as_deref(), answer));
+        if let Some((rpc, field)) = self.questions.remove(&key)
+            && let Some(proc) = &self.proc
+        {
+            proc.send(&acp::question_reply(rpc, field.as_deref(), answer));
         }
     }
 
