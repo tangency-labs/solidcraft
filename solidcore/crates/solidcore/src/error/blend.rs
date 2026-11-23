@@ -544,10 +544,6 @@ pub enum BlendFailure {
     /// crossing) was not a finite number, so the crossing is neither classed concave nor
     /// convex (#17016). A defect ([`ErrorKind::StageFailed`]), status `SM_ERR`.
     CrossingNotFinite,
-    /// A failure of the fillet solver (`crate::blend::fillet_solver`): its class and status
-    /// are the cause's ([`SolverFailure::class`], status `SM_ERR` unless the cause says
-    /// otherwise). Typed, so not a phrase cause ([`BlendFailure::is_phrase`]).
-    Solver(SolverFailure),
     /// A G^n section's certificate could not prove what it must (a weight or the radius
     /// positive over a box, an enclosure, a bound finite): its
     /// interval enclosures were too wide. Not a fact of the geometry, which a narrower box
@@ -578,6 +574,10 @@ pub enum BlendFailure {
     /// station): a check on the caller's input ([`ErrorKind::InvalidInput`]), status
     /// `SM_ERR`.
     SectionInputInvalid(SectionInput),
+    /// A failure of the fillet solver (`crate::blend::fillet_solver`): its class and status
+    /// are the cause's ([`SolverFailure::class`], status `SM_ERR` unless the cause says
+    /// otherwise). Typed, so not a phrase cause ([`BlendFailure::is_phrase`]).
+    Solver(SolverFailure),
     /// A weld bead the kernel does not build yet (#15129, [`crate::blend::weld_bead`]), for
     /// the gap named: not a fact of the geometry and not a defect, so no size is named. Its
     /// class is [`ErrorKind::Unsupported`]. Not upstream.
@@ -3898,8 +3898,8 @@ mod tests {
             BlendFailure::SectionUnsupported(_) => (64, None),
             BlendFailure::RadiusLawNotPositive { .. } => (65, None),
             BlendFailure::SectionInputInvalid(_) => (66, None),
-            BlendFailure::WeldNotBuilt(_) => (67, None),
-            BlendFailure::Solver(_) => (68, None),
+            BlendFailure::Solver(_) => (67, None),
+            BlendFailure::WeldNotBuilt(_) => (68, None),
             BlendFailure::FilletSetUpInvalid(_) => (69, None),
         }
     }
