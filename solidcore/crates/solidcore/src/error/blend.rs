@@ -99,6 +99,24 @@ use super::{
 use crate::blend::fillet_exact::BlendSpine;
 use crate::blend::fillet_executive::NoRoomReason;
 
+/// The phrase causes, by variant name: the one list [`BlendFailure::is_phrase`] and the
+/// phrase-site scan's test (`phrase_sites::BLEND`) read. It only shrinks, as sites move to
+/// typed causes; a new variant is never a phrase cause, so it needs no line here.
+/// `phrase_causes!(m(args))` expands to `m!(args; Failed, Missing, ...)`.
+macro_rules! phrase_causes {
+    ($then:ident($($args:tt)*)) => {
+        $then!($($args)*; Failed, Missing, InvalidValue, Inconsistent, BadIntersections,
+            NotConverged, OutsideDomain, NotWithinTolerance, PassedOn)
+    };
+}
+
+/// Whether `cause` is one of the variants named.
+macro_rules! matches_phrase_cause {
+    ($cause:expr; $($variant:ident),*) => {
+        matches!($cause, $(BlendFailure::$variant { .. })|*)
+    };
+}
+
 /// Why a blend fails: the cause of the typed blend failure record. Its class is
 /// [`BlendFailure::class`].
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -1885,78 +1903,7 @@ impl BlendFailure {
     /// a typed cause.
     #[must_use]
     pub const fn is_phrase(&self) -> bool {
-        match self {
-            Self::NoRoom(_)
-            | Self::RemovalRefused(_)
-            | Self::StationDidNotConverge { .. }
-            | Self::TrimLoopOpen
-            | Self::TrimLoopDoesNotSeparate
-            | Self::ClosedCliffWouldNotSplit { .. }
-            | Self::StageFailed
-            | Self::Defect { .. }
-            | Self::SkinPastStationCap { .. }
-            | Self::SkinMeasureNotFinite { .. }
-            | Self::BallsNest { .. }
-            | Self::CreasePieceEndUnbuildable { .. }
-            | Self::PlaneCurveTouches { .. }
-            | Self::PlaneCurveEndOff { .. }
-            | Self::PlaneCurveLeavesDomain { .. }
-            | Self::PlaneCurveStepVanished { .. }
-            | Self::PlaneCurveFitCap { .. }
-            | Self::BandInputMissing(_)
-            | Self::CliffInputMissing { .. }
-            | Self::CrossingInputMissing(_)
-            | Self::CrossingNotFinite
-            | Self::Solver(_)
-            | Self::NoEdgesGiven
-            | Self::SizeBelowResolution { .. }
-            | Self::PerEdgeListLength { .. }
-            | Self::ParameterListSizes { .. }
-            | Self::FaceHasNoSurface
-            | Self::NoFirstBody
-            | Self::TargetNotGiven
-            | Self::EdgeNotInTarget { .. }
-            | Self::EdgeNotFilletable { .. }
-            | Self::GnSectionInvalid { .. }
-            | Self::CrossSectionTypeUnknown
-            | Self::RadiusTypeNotForEdges { .. }
-            | Self::VariableRadiusLawsNotGiven
-            | Self::VariableRadiusLawMissing { .. }
-            | Self::BevelVertexNotFilleted
-            | Self::LawIntervalEmpty
-            | Self::ExactBlendAxisCannotPlaceEdge { .. }
-            | Self::EdgeWithoutCurve
-            | Self::LawHasNoValue
-            | Self::SequenceCurveNotBSpline { .. }
-            | Self::FilletCrossesItself { .. }
-            | Self::CornerRefused
-            | Self::ExecutiveStepFailed
-            | Self::EdgeSplitDeclined { .. }
-            | Self::LawCornerNotFound { .. }
-            | Self::EdgeUseWithoutEdge
-            | Self::BoundSurfaceRemoved
-            | Self::CornerPatchFaceNotFound { .. }
-            | Self::EaseInputMissing(_)
-            | Self::EaseNotBuilt(_)
-            | Self::EaseGeometryNotBSpline(_)
-            | Self::ArcLengthNotConverged { .. }
-            | Self::SectionNotProved(_)
-            | Self::SectionDegenerate(_)
-            | Self::SectionUnsupported(_)
-            | Self::RadiusLawNotPositive { .. }
-            | Self::SectionInputInvalid(_)
-            | Self::NotCertified { .. }
-            | Self::WeldNotBuilt(_) => false,
-            Self::Failed(_)
-            | Self::Missing(_)
-            | Self::InvalidValue(_)
-            | Self::Inconsistent(_)
-            | Self::BadIntersections(_)
-            | Self::NotConverged(_)
-            | Self::OutsideDomain(_)
-            | Self::NotWithinTolerance(_)
-            | Self::PassedOn { .. } => true,
-        }
+        phrase_causes!(matches_phrase_cause(self))
     }
 
     /// True when the failure stands in for a bare status its site returned (an
@@ -2996,7 +2943,6 @@ mod tests {
         assert_eq!(cause.class(), class);
         assert!(!cause.is_phrase());
         assert!(cause.replaces_upstream_status());
-        assert_eq!(variant_index_and_phrase_name(&cause).1, None);
         assert_eq!(cause.comparison_status(), SM_ERR);
         let e = SolidError::blend("blend::op", cause);
         assert_eq!(e.kind(), class);
@@ -3559,96 +3505,12 @@ mod tests {
         );
     }
 
-    /// The number of `BlendFailure` variants. Adding a variant means adding an arm to
-    /// `variant_index_and_phrase_name` (the compiler asks for it), with the next index, and
-    /// raising this number; the test below then fails until `causes` holds the new variant.
-    const VARIANTS: usize = 70;
-
-    /// Each variant's distinct index in `0..VARIANTS`, and the variant name of a phrase cause
-    /// (`None` for any other cause). The match has no wildcard, so it is the inventory of
-    /// every variant there is.
-    fn variant_index_and_phrase_name(cause: &BlendFailure) -> (usize, Option<&'static str>) {
-        match cause {
-            BlendFailure::NoRoom(_) => (0, None),
-            BlendFailure::StationDidNotConverge { .. } => (1, None),
-            BlendFailure::TrimLoopOpen => (2, None),
-            BlendFailure::TrimLoopDoesNotSeparate => (3, None),
-            BlendFailure::RemovalRefused(_) => (4, None),
-            BlendFailure::StageFailed => (5, None),
-            BlendFailure::Defect { .. } => (6, None),
-            BlendFailure::SkinPastStationCap { .. } => (7, None),
-            BlendFailure::SkinMeasureNotFinite { .. } => (8, None),
-            BlendFailure::BallsNest { .. } => (9, None),
-            BlendFailure::CreasePieceEndUnbuildable { .. } => (10, None),
-            BlendFailure::BandInputMissing(_) => (11, None),
-            BlendFailure::NotCertified { .. } => (12, None),
-            BlendFailure::Failed(_) => (13, Some("Failed")),
-            BlendFailure::Missing(_) => (14, Some("Missing")),
-            BlendFailure::InvalidValue(_) => (15, Some("InvalidValue")),
-            BlendFailure::Inconsistent(_) => (16, Some("Inconsistent")),
-            BlendFailure::BadIntersections(_) => (17, Some("BadIntersections")),
-            BlendFailure::NotConverged(_) => (18, Some("NotConverged")),
-            BlendFailure::OutsideDomain(_) => (19, Some("OutsideDomain")),
-            BlendFailure::NotWithinTolerance(_) => (20, Some("NotWithinTolerance")),
-            BlendFailure::PassedOn { .. } => (21, Some("PassedOn")),
-            BlendFailure::PlaneCurveTouches { .. } => (22, None),
-            BlendFailure::PlaneCurveEndOff { .. } => (23, None),
-            BlendFailure::PlaneCurveLeavesDomain { .. } => (24, None),
-            BlendFailure::PlaneCurveStepVanished { .. } => (25, None),
-            BlendFailure::PlaneCurveFitCap { .. } => (26, None),
-            BlendFailure::ClosedCliffWouldNotSplit { .. } => (27, None),
-            BlendFailure::CliffInputMissing { .. } => (28, None),
-            BlendFailure::NoEdgesGiven => (29, None),
-            BlendFailure::SizeBelowResolution { .. } => (30, None),
-            BlendFailure::PerEdgeListLength { .. } => (31, None),
-            BlendFailure::ParameterListSizes { .. } => (32, None),
-            BlendFailure::FaceHasNoSurface => (33, None),
-            BlendFailure::NoFirstBody => (34, None),
-            BlendFailure::TargetNotGiven => (35, None),
-            BlendFailure::EdgeNotInTarget { .. } => (36, None),
-            BlendFailure::EdgeNotFilletable { .. } => (37, None),
-            BlendFailure::GnSectionInvalid { .. } => (38, None),
-            BlendFailure::CrossSectionTypeUnknown => (39, None),
-            BlendFailure::RadiusTypeNotForEdges { .. } => (40, None),
-            BlendFailure::VariableRadiusLawsNotGiven => (41, None),
-            BlendFailure::VariableRadiusLawMissing { .. } => (42, None),
-            BlendFailure::BevelVertexNotFilleted => (43, None),
-            BlendFailure::LawIntervalEmpty => (44, None),
-            BlendFailure::ExactBlendAxisCannotPlaceEdge { .. } => (69, None),
-            BlendFailure::EdgeWithoutCurve => (45, None),
-            BlendFailure::LawHasNoValue => (46, None),
-            BlendFailure::SequenceCurveNotBSpline { .. } => (47, None),
-            BlendFailure::FilletCrossesItself { .. } => (48, None),
-            BlendFailure::CornerRefused => (49, None),
-            BlendFailure::ExecutiveStepFailed => (50, None),
-            BlendFailure::EdgeSplitDeclined { .. } => (51, None),
-            BlendFailure::LawCornerNotFound { .. } => (52, None),
-            BlendFailure::EdgeUseWithoutEdge => (53, None),
-            BlendFailure::BoundSurfaceRemoved => (54, None),
-            BlendFailure::CornerPatchFaceNotFound { .. } => (55, None),
-            BlendFailure::CrossingInputMissing(_) => (56, None),
-            BlendFailure::CrossingNotFinite => (57, None),
-            BlendFailure::EaseInputMissing(_) => (58, None),
-            BlendFailure::EaseNotBuilt(_) => (59, None),
-            BlendFailure::EaseGeometryNotBSpline(_) => (60, None),
-            BlendFailure::ArcLengthNotConverged { .. } => (61, None),
-            BlendFailure::SectionNotProved(_) => (62, None),
-            BlendFailure::SectionDegenerate(_) => (63, None),
-            BlendFailure::SectionUnsupported(_) => (64, None),
-            BlendFailure::RadiusLawNotPositive { .. } => (65, None),
-            BlendFailure::SectionInputInvalid(_) => (66, None),
-            BlendFailure::Solver(_) => (67, None),
-            BlendFailure::WeldNotBuilt(_) => (68, None),
-        }
-    }
-
-    /// `causes` holds every variant once, `variant_index_and_phrase_name` names a cause exactly when it is a phrase cause, and the
-    /// `BlendFailure` variants the per-file scan (`phrase_sites::BLEND`) counts are exactly
-    /// those names, so the per-file pins in `error/phrase_sites.rs` see every phrase cause.
+    /// The `BlendFailure` variants the per-file scan (`phrase_sites::BLEND`) counts are
+    /// exactly the phrase causes (`phrase_causes!`, which [`BlendFailure::is_phrase`] is
+    /// built from), so the per-file pins in `error/phrase_sites.rs` see every phrase cause.
     #[test]
     fn the_phrase_scan_lists_exactly_the_phrase_variants() {
         use super::super::site_scan::Builder;
-        use crate::blend::fillet_executive::NoRoomReason as R;
         let scanned: Vec<&str> = super::super::phrase_sites::BLEND
             .builders
             .iter()
@@ -3657,164 +3519,12 @@ mod tests {
                 _ => None,
             })
             .collect();
-        let causes = [
-            BlendFailure::NoRoom(R::BallDoesNotFit),
-            BlendFailure::StationDidNotConverge {
-                s: 0.0,
-                residual: Some(0.0),
-                tolerance: 0.0,
-                step: Some(0.0),
-                iterations: Some(0),
-            },
-            BlendFailure::SkinPastStationCap {
-                asked: 0.0,
-                reached: 0.0,
-                stations: 0,
-                rounds: 0,
-            },
-            BlendFailure::SkinMeasureNotFinite { s: 0.0 },
-            BlendFailure::BallsNest {
-                s: 0.0,
-                rate: 0.0,
-                speed: 0.0,
-            },
-            BlendFailure::CreasePieceEndUnbuildable {
-                kind: "offset",
-                at_end: true,
-                t: 0.0,
-            },
-            BlendFailure::PlaneCurveTouches { u: 0.0, v: 0.0 },
-            BlendFailure::PlaneCurveEndOff {
-                at_end: false,
-                distance: None,
-            },
-            BlendFailure::PlaneCurveLeavesDomain { u: 0.0, v: 0.0 },
-            BlendFailure::PlaneCurveStepVanished {
-                u: 0.0,
-                v: 0.0,
-                step: 0.0,
-                minimum: 0.0,
-            },
-            BlendFailure::PlaneCurveFitCap {
-                stations: 0,
-                passes: 0,
-            },
-            BlendFailure::BandInputMissing(BandInput::SharedFace),
-            BlendFailure::CrossingInputMissing(CrossingInput::SideEdgeCurve),
-            BlendFailure::CrossingNotFinite,
-            BlendFailure::TrimLoopOpen,
-            BlendFailure::TrimLoopDoesNotSeparate,
-            BlendFailure::RemovalRefused(RemovalRefusal::FaceGrowsPastDomain),
-            BlendFailure::ClosedCliffWouldNotSplit {
-                face: crate::topology::FaceId::from_index(0),
-            },
-            BlendFailure::CliffInputMissing {
-                face: crate::topology::FaceId::from_index(0),
-                input: CliffInput::Plane,
-            },
-            BlendFailure::Solver(SolverFailure::JacobianNotLoaded),
-            BlendFailure::StageFailed,
-            BlendFailure::Defect { why: "x" },
-            BlendFailure::SectionNotProved(SectionProof::Enclosure),
-            BlendFailure::SectionDegenerate(SectionDegeneracy::NoLength),
-            BlendFailure::SectionUnsupported(SectionLimit::FaceNotNurbs),
-            BlendFailure::RadiusLawNotPositive {
-                s: 0.0,
-                radius: 0.0,
-            },
-            BlendFailure::SectionInputInvalid(SectionInput::IntervalsDiffer),
-            BlendFailure::NotCertified {
-                halvings: 0,
-                stations: 0,
-            },
-            BlendFailure::WeldNotBuilt(WeldGap::BeadsMeetAtVertex),
-            BlendFailure::Failed("x"),
-            BlendFailure::Missing("x"),
-            BlendFailure::InvalidValue("x"),
-            BlendFailure::Inconsistent("x"),
-            BlendFailure::BadIntersections("x"),
-            BlendFailure::NotConverged("x"),
-            BlendFailure::OutsideDomain("x"),
-            BlendFailure::NotWithinTolerance("x"),
-            BlendFailure::PassedOn {
-                what: "x",
-                status: SM_ERR,
-            },
-            BlendFailure::NoEdgesGiven,
-            BlendFailure::SizeBelowResolution {
-                size: 1e-6,
-                tolerance: 1e-6,
-            },
-            BlendFailure::PerEdgeListLength { edges: 2, given: 1 },
-            BlendFailure::ParameterListSizes {
-                edges: 3,
-                cross_sections: 2,
-                radius_types: 1,
-                radii: 1,
-            },
-            BlendFailure::FaceHasNoSurface,
-            BlendFailure::NoFirstBody,
-            BlendFailure::TargetNotGiven,
-            BlendFailure::EdgeNotInTarget { index: 1 },
-            BlendFailure::EdgeNotFilletable { index: 1 },
-            BlendFailure::GnSectionInvalid {
-                order: 9,
-                thumbweight: 0.5,
-            },
-            BlendFailure::CrossSectionTypeUnknown,
-            BlendFailure::RadiusTypeNotForEdges {
-                index: 0,
-                kind: crate::blend::fillet_solver::p1::FilletSolverType::SurfSurf,
-            },
-            BlendFailure::VariableRadiusLawsNotGiven,
-            BlendFailure::VariableRadiusLawMissing { index: 2 },
-            BlendFailure::BevelVertexNotFilleted,
-            BlendFailure::LawIntervalEmpty,
-            BlendFailure::ExactBlendAxisCannotPlaceEdge {
-                length: 1.0,
-                discriminant: -1.0,
-                crossing: None,
-            },
-            BlendFailure::EdgeWithoutCurve,
-            BlendFailure::LawHasNoValue,
-            BlendFailure::SequenceCurveNotBSpline { kind: "offset" },
-            BlendFailure::FilletCrossesItself {
-                first: 0,
-                second: 1,
-            },
-            BlendFailure::CornerRefused,
-            BlendFailure::ExecutiveStepFailed,
-            BlendFailure::EdgeSplitDeclined { parameter: 0.5 },
-            BlendFailure::LawCornerNotFound {
-                corner: 0,
-                what: LawCornerSearch::Crossing,
-            },
-            BlendFailure::EdgeUseWithoutEdge,
-            BlendFailure::BoundSurfaceRemoved,
-            BlendFailure::CornerPatchFaceNotFound { surface: 1 },
-            BlendFailure::EaseInputMissing(EaseInput::CornerVertex),
-            BlendFailure::EaseNotBuilt(EaseStop::EasePastEdgeEnd),
-            BlendFailure::EaseGeometryNotBSpline(EaseGeometry::RailCurve),
-            BlendFailure::ArcLengthNotConverged {
-                start: 0.0,
-                length: 1.0,
-                stopped_at: 0.5,
-            },
-        ];
-        let mut names = Vec::new();
-        let mut indices = Vec::new();
-        for cause in &causes {
-            let (index, name) = variant_index_and_phrase_name(cause);
-            indices.push(index);
-            assert_eq!(name.is_some(), cause.is_phrase(), "{cause:?}");
-            names.extend(name);
+        macro_rules! names {
+            (; $($variant:ident),*) => {
+                vec![$(stringify!($variant)),*]
+            };
         }
-        indices.sort_unstable();
-        assert_eq!(
-            indices,
-            (0..VARIANTS).collect::<Vec<_>>(),
-            "`causes` must hold each BlendFailure variant exactly once"
-        );
+        let mut names: Vec<&str> = phrase_causes!(names());
         names.sort_unstable();
         let mut scanned = scanned;
         scanned.sort_unstable();

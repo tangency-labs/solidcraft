@@ -99,7 +99,8 @@
 use crate::blend::blend_corner::on_face::{bezier_pieces, pieces_rounding, Hom};
 use crate::blend::fillet_standard_solver::p1::FilletLaw;
 use crate::curve::curve::Curve;
-use crate::error::{passed_on, Result, SolidError};
+use crate::error::intersect::IntersectFailure;
+use crate::error::{passed_on, Failure, Result, SolidError};
 use crate::geom::extent1d::{Extent1d, ExtentPointType};
 use crate::geom::extent2d::Extent2d;
 use crate::geom::extent3d::Extent3d;
@@ -263,6 +264,29 @@ fn at_mut<T>(a: &mut [T; 2], s: SrfIndex) -> &mut T {
     }
 }
 
+/// The cache of surface `i` (0 or 1) among `caches`: the last one when there are fewer
+/// (a self intersection passes one), [`IntersectFailure::NoSurfaceCaches`] for none.
+fn cache_mut<T>(caches: &mut [T], i: usize) -> Result<&mut T> {
+    match caches.split_last_mut() {
+        Some((last, init)) => Ok(init.get_mut(i).unwrap_or(last)),
+        None => Err(SolidError::intersect(
+            OP_FBSP,
+            IntersectFailure::NoSurfaceCaches,
+        )),
+    }
+}
+
+/// As [`cache_mut`], shared.
+fn cache_ref<T>(caches: &[T], i: usize) -> Result<&T> {
+    match caches.split_last() {
+        Some((last, init)) => Ok(init.get(i).unwrap_or(last)),
+        None => Err(SolidError::intersect(
+            OP_FBSP,
+            IntersectFailure::NoSurfaceCaches,
+        )),
+    }
+}
+
 /// `SrfIndex` of `m_cpSurface[i]`.
 const fn srf(i: usize) -> SrfIndex {
     if i == 0 {
@@ -383,10 +407,11 @@ impl SurfaceIntersector<'_> {
         let get = |i: SrfIndex| match surface_cache::<SrfIndex>(k, self.surface(i), Some(i)) {
             Ok(c) => Ok(c),
             Err(e) if e.is_unported_or_cancelled() => Err(e),
-            Err(_) => Err(SolidError::intersect_missing(
-                OP_FBSP,
-                "the surface's cache",
-            )),
+            Err(e) => Err(
+                Failure::new(OP_FBSP, IntersectFailure::SurfaceCacheNotBuilt)
+                    .caused_by(e)
+                    .into_error(),
+            ),
         };
         let mut caches = vec![get(SrfIndex::First)?];
         if !self.doing_self_intersection {
@@ -435,9 +460,9 @@ impl SurfaceIntersector<'_> {
         queries: Option<&dyn FaceQueries<O>>,
     ) -> Result<()> {
         if caches.is_empty() {
-            return Err(SolidError::intersect_missing(
+            return Err(SolidError::intersect(
                 OP_FBSP,
-                "the surfaces' caches",
+                IntersectFailure::NoSurfaceCaches,
             ));
         }
 
@@ -488,10 +513,7 @@ impl SurfaceIntersector<'_> {
 
             // Get thisSurface->3DBoundaryCurves: [0] min u, [1] min v, [2] max u,
             // [3] max v
-            let cache_index = l_srf.min(caches.len() - 1);
-            let cache = caches
-                .get_mut(cache_index)
-                .ok_or_else(|| SolidError::intersect_missing(OP_FBSP, "the surface's cache"))?;
+            let cache = cache_mut(caches, l_srf)?;
             let iso = cache.iso_boundary_curves(k, &domain, self.this_approx_tol_3d / 3.0)?;
 
             // add the intervals of the iso curves (statuses ignored, passed on with
@@ -550,12 +572,7 @@ impl SurfaceIntersector<'_> {
                 } else {
                     // on OtherSurface's cache: upstream's GlobalCurveIntersect fetches
                     // that same cache (smsurf_GetSurfaceCache) and solves on its tree
-                    let other_cache =
-                        caches
-                            .get((1 - l_srf).min(caches.len() - 1))
-                            .ok_or_else(|| {
-                                SolidError::intersect_missing(OP_FBSP, "the other surface's cache")
-                            })?;
+                    let other_cache = cache_ref(caches, 1 - l_srf)?;
                     surface_global_curve_intersect(
                         k,
                         self.surface(other),
@@ -1174,9 +1191,11 @@ impl SurfaceIntersector<'_> {
         if !self.uv_domains[0].contains_point(prev_tsp.uv_pos(s0), EFF_ZERO)
             || !self.uv_domains[1].contains_point(prev_tsp.uv_pos(s1), EFF_ZERO)
         {
-            return Err(SolidError::intersect_failed(
+            let surface =
+                usize::from(self.uv_domains[0].contains_point(prev_tsp.uv_pos(s0), EFF_ZERO));
+            return Err(SolidError::intersect(
                 OP_NEXT,
-                "the previous point lies outside a surface's domain",
+                IntersectFailure::PointOutsideDomain { surface },
             ));
         }
 
