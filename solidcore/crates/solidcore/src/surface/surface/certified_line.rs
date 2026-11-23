@@ -7555,6 +7555,102 @@ mod tests {
         assert!(!c.list[0].at_boundary, "{:?}", c.list[0]);
     }
 
+    /// A crossing beside a seam the net is not proved `C¹` across (answer11, the 8 + 2
+    /// points: a root's carrier, a crossing before the seam join, undecided after it): the
+    /// closed quadratic B-spline ring of [`a_seam_not_proved_c1_takes_no_foot_box_across_it`]
+    /// (seam at `(1, 0)`, `u = 0`; the ring leaves it along +y at the low end and arrives from
+    /// −y at the high end, `x ≤ 1` with equality on the seam only), crossed by lines a hair to
+    /// one side of the seam's meridian (along −x at `y = ε`, `|ε|` from a quarter of the
+    /// tolerance to twice it) and along it (along y at `x = 1 − δ`, two shallow crossings, one
+    /// on each end, beside the line's tangency at the seam, `δ` from a quarter of the tolerance
+    /// to 64 times it). Where the line passes within the tolerance of the seam, the two ends
+    /// join into one component; with boxes left at the floor there (δ up to the tolerance)
+    /// only the foot rule types it, and its foot box would straddle the seam: a crease. The
+    /// invariant, over the sweep: the solution point at each certified root is never typed as
+    /// another contact than a crossing, and where it is undecided its component is undecided
+    /// at that crease (`FootNotShown(Floor(Crease))`). (Measured: across the meridian every
+    /// root is a count's crossing; along it the three closest lines are undecided at the
+    /// crease, the others crossings.)
+    #[test]
+    fn a_crossing_beside_a_crease_seam_is_a_crossing_or_undecided_at_the_crease() {
+        use crate::nurbs::b_spline_surface::BSplineSurface;
+        use crate::nurbs::math::{CPoint, NOW};
+        use crate::nurbs::srf_basic::Surface as NlSurface;
+        let k = Kernel::default();
+        let ring = [
+            [1.0, 0.0],
+            [1.0, 1.0],
+            [-1.0, 1.0],
+            [-1.0, -1.0],
+            [1.0, -1.0],
+            [1.0, 0.0],
+        ];
+        let net = ring
+            .iter()
+            .map(|&[x, y]| vec![CPoint::new(x, y, 0.0, NOW), CPoint::new(x, y, 1.0, NOW)])
+            .collect();
+        let s = Surface::from(BSplineSurface::from_nurb(
+            NlSurface::new(
+                net,
+                2,
+                1,
+                vec![0.0, 0.0, 0.0, 0.1, 0.5, 0.7, 1.0, 1.0, 1.0],
+                vec![0.0, 0.0, 1.0, 1.0],
+            )
+            .unwrap(),
+            false,
+        ));
+        let line_net = LineNet::of(&k, &s).unwrap().unwrap();
+        let whole = s.natural_uv_domain_with_nurb(&k).unwrap();
+        let tol = 1.0e-6;
+        let mut undecided = 0;
+        // across the seam's meridian a hair to one side (along −x at y = ε), and along it
+        // (along y at x = 1 − δ: two shallow crossings, one on each end, beside the tangency
+        // at the seam)
+        let across = [-2.0, -0.5, -0.25, 0.25, 0.5, 2.0]
+            .map(|f| (Vec3::new(2.0, f * tol, 0.5), Vec3::new(-2.0, 0.0, 0.0)));
+        let along = [0.25, 0.5, 1.0, 2.0, 4.0, 16.0, 64.0].map(|f| {
+            (
+                Vec3::new(1.0 - f * tol, -1.0, 0.5),
+                Vec3::new(0.0, 2.0, 0.0),
+            )
+        });
+        for (p, d) in across.into_iter().chain(along) {
+            let line = PassLine {
+                point: p,
+                vector: d,
+                span: [0.0, 1.0],
+                solve_domain: whole,
+                tol,
+            };
+            let (_, c) = typed_of(&k, &s, p, d, tol, &[whole]);
+            for (ci, comp) in c.list.iter().enumerate() {
+                for root in &comp.roots {
+                    let [u, v, t] = root.point;
+                    let at = [SolutionAt::Point([t, u, v])];
+                    let (typed, _) = type_solutions(&line_net, &line, &c, &at, false);
+                    match typed[0].map(|x| x.0) {
+                        Some(Contact::Crossing) => {}
+                        Some(Contact::Undecided) => {
+                            undecided += 1;
+                            assert_eq!(
+                                comp.typed,
+                                Typed::Undecided(Why::FootNotShown(FootWhy::Floor(
+                                    Stretch::Crease
+                                ))),
+                                "{p:?}: {:?}",
+                                c.list[ci]
+                            );
+                        }
+                        other => panic!("{p:?}: {other:?}, {:?}", c.list[ci]),
+                    }
+                }
+            }
+        }
+        // (the case the invariant is about occurs in the sweep)
+        assert!(undecided > 0);
+    }
+
     /// A component around the whole turn holding boxes left at the floor stays undecided
     /// (answer10, Q1, condition 7; answer11, Q3: its sides and foot read a lift): a
     /// cylinder of radius `4·10⁻⁴` and height `2·10⁻³` about z lies within the tolerance
