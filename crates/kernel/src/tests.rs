@@ -1377,6 +1377,35 @@ fn mesh_bodies_move_measure_and_refuse_solid_ops() {
     assert_eq!(hit(&sheet, Vec3::new(2.0, 2.0, -4.0), Vec3::Z), Some((4.0, Vec3::new(0.0, 0.0, -1.0))));
 }
 
+/// `Body::face_line_hit` on the Ø40 × 40 cylinder about +Z, exactly, in closed form.
+/// - A line through the axis meets the side at the same distance both ways, (±20, 0, 20): the tie
+///   goes to the meeting ahead along the direction, whichever way the line points.
+/// - A line lying on the side (a ruling, here at 33° and on the side's seam) is no single place
+///   on it: `None`, not a failure. Each end meets it once, on its rim, at z = 0 and z = 40.
+#[test]
+fn a_line_meets_a_cylinders_face_ahead_on_a_tie_and_not_at_all_along_it() {
+    let b = cylinder(Vec3::ZERO, Vec3::Z, 20.0, 40.0).unwrap();
+    let side = (0..b.face_count()).find(|&f| matches!(face_surface(&b, f), Some(FaceSurface::Cylinder { .. }))).unwrap();
+    let ends: Vec<usize> = (0..b.face_count()).filter(|&f| f != side).collect();
+    assert_eq!(ends.len(), 2);
+    let centre = Vec3::new(0.0, 0.0, 20.0);
+    for (dir, ahead) in [(Vec3::X, Vec3::new(20.0, 0.0, 20.0)), (-Vec3::X, Vec3::new(-20.0, 0.0, 20.0))] {
+        let got = b.face_line_hit(side, centre, dir).unwrap().unwrap();
+        assert!(got.dist(ahead) < 1e-9, "along {dir:?}: {got:?}, not {ahead:?}");
+    }
+    for a in [33f64.to_radians(), crate::build::SEAM_ANGLE] {
+        let rim = Vec3::new(20.0 * a.cos(), 20.0 * a.sin(), 0.0);
+        for (z, dir) in [(30.0, -Vec3::Z), (10.0, Vec3::Z)] {
+            let on = rim + Vec3::new(0.0, 0.0, z);
+            assert_eq!(b.face_line_hit(side, on, dir).unwrap(), None, "at {a} rad, z = {z}");
+            let mut met: Vec<Vec3> = ends.iter().filter_map(|&f| b.face_line_hit(f, on, dir).unwrap()).collect();
+            met.sort_by(|p, q| p.z.total_cmp(&q.z));
+            assert_eq!(met.len(), 2, "at {a} rad, z = {z}: {met:?}");
+            assert!(met[0].dist(rim) < 1e-9 && met[1].dist(rim + Vec3::new(0.0, 0.0, 40.0)) < 1e-9, "at {a} rad, z = {z}: {met:?}");
+        }
+    }
+}
+
 #[test]
 fn concave_fillet() {
     // An L made of a base and a wall (one solid), fillet the inside corner.

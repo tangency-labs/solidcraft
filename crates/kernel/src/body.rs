@@ -2075,6 +2075,41 @@ impl Body {
         })
     }
 
+    /// Where the line through `through` along `direction` meets face `face_index`, of its
+    /// meetings the nearest `through` on either side, decided exactly on the face's surface and
+    /// trim ([`solidcore_ops::Body::face_line_hits`]), no mesh. Meetings as near as each other
+    /// within a hair of the body's size (1e-9 of it, at least 1e-9) are a tie, which goes to the
+    /// one furthest along `direction`: ahead of `through` rather than behind it (a line through a
+    /// cylinder's axis meets its side ahead). A mesh body's triangles are its exact shape (its one
+    /// face; an exact tie goes ahead there too). `None` where the line misses the face or only
+    /// runs along it, for an index out of range and a line that is not usable; `Err` for the
+    /// kernel's failure.
+    pub fn face_line_hit(&self, face_index: usize, through: Vec3, direction: Vec3) -> Result<Option<Vec3>> {
+        let finite = |v: Vec3| v.x.is_finite() && v.y.is_finite() && v.z.is_finite();
+        let Some(d) = direction.normalized().filter(|d| finite(through) && finite(*d)) else { return Ok(None) };
+        if let Some(m) = &self.mesh {
+            return Ok((face_index == 0).then(|| crate::meshbody::mesh_line_hit(m, through, d)).flatten().map(|t| through + d * t));
+        }
+        let Some(form) = self.ops_body() else { return Ok(None) };
+        let (body, order) = &*form;
+        if face_index >= self.record.faces.len() {
+            return Ok(None);
+        }
+        match body.face_line_hits(order, face_index, [through.x, through.y, through.z], [d.x, d.y, d.z]) {
+            Ok(hits) => {
+                let Some(nearest) = hits.iter().map(|h| h.parameter.abs()).min_by(f64::total_cmp) else { return Ok(None) };
+                let tie = (self.size() * 1e-9).max(1e-9);
+                Ok(hits
+                    .into_iter()
+                    .filter(|h| h.parameter.abs() <= nearest + tie)
+                    .max_by(|a, b| a.parameter.total_cmp(&b.parameter))
+                    .map(|h| Vec3::new(h.point[0], h.point[1], h.point[2])))
+            }
+            Err(solidcore_ops::Error::Argument) => Ok(None),
+            Err(e) => Err(KernelError::Failed(format!("line meets face: {e}"))),
+        }
+    }
+
     /// Where face `face_index` lies along `direction` when it is a plane square to it: its level
     /// from `origin` and the face's own tolerance ([`solidcore_ops::Body::face_square_level`]),
     /// exact, no mesh. `None` for a face that is not, a mesh body, an index out of range or a

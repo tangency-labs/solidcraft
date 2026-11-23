@@ -14,7 +14,7 @@
 //! | [`Surface::create_natural_uv_trim_curves`], [`NaturalUvTrimCurves`] | `SmSurface::CreateNaturalUVTrimCurves` |
 //! | [`DerivSurfDefinition::sample_values`], [`SampleOptions`], [`DerivSampleValues`] | `SmDerivSurfDefinition::GetSampleValues` (from a surface boundary curve) |
 //! | [`Surface::local_curve_intersect`], [`CurveIntersection`] | `SmSurface::LocalCurveIntersect` (virtual; not overridden) |
-//! | [`Surface::simple_coincidence_checker`]           | `SmSurface::SimpleCoincidenceChecker` (virtual; not overridden) |
+//! | [`Surface::simple_coincidence_checker`], [`Surface::simple_coincidence_checker_with_context`], [`Surface::simple_coincidence_checker_face_tested`] | `SmSurface::SimpleCoincidenceChecker` (virtual; not overridden) |
 //! | [`Surface::classify_intersecting_range_solution`], [`RangeTangentPoint`] | `SmSurface::ClassifyIntersectingRangeSolution` |
 //! | [`SsGlobalSolver::solutions_identical`]           | `SmSSGlobalSolver::IdenticalSolutions`           |
 //! | [`sc_local_solve`], [`ScLocalSolveNodes`]         | `sm_SCLocalSolve` (static)                       |
@@ -809,6 +809,42 @@ impl Surface {
             objects,
             None,
             None,
+            None,
+        )
+    }
+
+    /// [`Surface::simple_coincidence_checker`] of a face's surface by a caller that holds
+    /// the face but no solve context: the initial global point solve's fast-drop trim test
+    /// (`pFace->PointClassify(uv, tol, TRUE, FALSE, ..)`, upstream reached through the
+    /// surface's `GetFace`) is `classify`, as in [`Surface::global_point_solve_face_tested`],
+    /// instead of the face's trimmed cache the bare surface cannot build. All boxing and
+    /// sample tests are shared.
+    ///
+    /// # Errors
+    /// Those of the coincidence check and of `classify`.
+    #[allow(clippy::too_many_arguments)]
+    pub fn simple_coincidence_checker_face_tested<O: SolutionObject>(
+        &self,
+        k: &Kernel,
+        uv_domain: &Extent2d,
+        curve: &Curve,
+        interval: &Extent1d,
+        tol_3d: f64,
+        partial_coincidence_ok: bool,
+        objects: [Option<O>; 2],
+        classify: &mut dyn FnMut(&Kernel, Point2, f64) -> Result<bool>,
+    ) -> Result<Option<Solution<O>>> {
+        self.simple_coincidence_checker_from(
+            k,
+            uv_domain,
+            curve,
+            interval,
+            tol_3d,
+            partial_coincidence_ok,
+            objects,
+            None,
+            None,
+            Some(classify),
         )
     }
 
@@ -840,6 +876,7 @@ impl Surface {
             objects,
             cache,
             Some(context),
+            None,
         )
     }
 
@@ -855,6 +892,7 @@ impl Surface {
         objects: [Option<O>; 2],
         cache: Option<&crate::surface::surface_cache::SurfaceCache<O>>,
         context: Option<&mut dyn super::p1::SurfaceSolveContext<O>>,
+        face_test: super::p4::FaceTest<'_>,
     ) -> Result<Option<Solution<O>>> {
         // First try boxing (statuses ignored upstream; passed on as the fork does,
         // WR-663, tangency-labs/smlib 21dcf69).
@@ -904,6 +942,22 @@ impl Surface {
                 &mut found,
             )?;
             found.as_slice().iter().map(|s| s.start).collect()
+        } else if let Some(classify) = face_test {
+            self.global_point_solve_face_tested::<NoObject>(
+                k,
+                Some(NoObject),
+                uv_domain,
+                SolverOperation::Minimize,
+                mid_pt0,
+                tol_3d,
+                None,
+                SolutionRequested::Single,
+                Some(classify),
+            )?
+            .as_slice()
+            .iter()
+            .map(|s| s.start)
+            .collect()
         } else {
             global_point_solve_single(k, self, uv_domain, mid_pt0, tol_3d)?
         };

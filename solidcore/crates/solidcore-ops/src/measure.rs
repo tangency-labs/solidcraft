@@ -48,6 +48,7 @@ impl Answer for Vec<Option<f64>> {}
 impl Answer for Vec<Vec<Option<f64>>> {}
 impl Answer for Vec<Result<PointClass>> {}
 impl Answer for Vec<f64> {}
+impl Answer for Vec<solidcore::query::FaceLineHit> {}
 
 /// A planar face square to a direction ([`Body::face_square_level`]).
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -348,6 +349,17 @@ pub struct FaceRayHit {
     pub uv: [f64; 2],
     /// The distance from the ray's origin to the point, along the ray.
     pub distance: f64,
+}
+
+/// A place where a line meets a face ([`Body::face_line_hits`]).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct FaceLineHit {
+    /// The point on the line, at `parameter`.
+    pub point: [f64; 3],
+    /// The face's (u, v) there, as [`crate::face_surface::FaceSurface`] evaluates them.
+    pub uv: [f64; 2],
+    /// The signed distance along the line's unit direction from its given point.
+    pub parameter: f64,
 }
 
 /// An edge's curve over the edge's own interval, copied out of its body ([`Body::edge_curve`]) to
@@ -826,6 +838,42 @@ impl Body {
             uv: [hit.uv.x, hit.uv.y],
             distance: hit.distance,
         }))
+    }
+
+    /// Where the whole line through `through` along `direction` (both ways) meets record face
+    /// `face` within its trim, ordered along the line: the kernel's
+    /// (`solidcore::query::face_line_hits`) on the face's exact surface, whatever its kind
+    /// (plane, cylinder, cone, sphere, torus, B-spline), each place once (a place on a periodic
+    /// surface's seam too). A stretch of the line lying on the face is no single place and is
+    /// left out. The kernel's solve may add UV trim curves to the body, as a point
+    /// classification does.
+    ///
+    /// # Errors
+    /// [`Error::Argument`] for an index past the faces, a coordinate that is not finite or a
+    /// direction of no length; the kernel's refusal of a face without a surface; any other
+    /// kernel error.
+    pub fn face_line_hits(
+        &self,
+        order: &Order,
+        face: usize,
+        through: [f64; 3],
+        direction: [f64; 3],
+    ) -> Result<Vec<FaceLineHit>> {
+        let f = order::face(order, face)?;
+        let (through, direction) = (point(through)?, point(direction)?);
+        // A direction the ray refuses is the caller's, not the kernel's.
+        Ray::new(through, direction).map_err(|_| Error::Argument)?;
+        let hits = with_body("face_line_hits", self, |k, b| {
+            solidcore::query::face_line_hits(k, b, f, through, direction)
+        })?;
+        Ok(hits
+            .into_iter()
+            .map(|h| FaceLineHit {
+                point: array(h.point),
+                uv: [h.uv.x, h.uv.y],
+                parameter: h.parameter,
+            })
+            .collect())
     }
 
     /// Record edge `edge`'s curve over the edge's own interval, copied out of the body to measure
