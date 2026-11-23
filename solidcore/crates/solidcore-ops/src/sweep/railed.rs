@@ -255,7 +255,7 @@ pub fn section_frames(
 ) -> Result<Vec<BlendFrame>> {
     use solidcore::sweep::section_blend::{section_frames as kernel_frames, FrameOptions};
     let arr = |v: Vec3| [v.x, v.y, v.z];
-    crate::session::with_body("section_frames", body, |k, b| {
+    crate::session::read_body("section_frames", body, |k, b| {
         let list = b.edge_list();
         let mut chain = Vec::with_capacity(edges.len());
         for &i in edges {

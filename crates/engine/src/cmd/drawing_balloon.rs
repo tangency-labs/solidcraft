@@ -34,7 +34,7 @@ const REPAIR: &str = "drawing.balloon.repair";
 const REPAIR_CONTRACT: TypedContract<RepairParams> = TypedContract::new();
 
 pub static COMMANDS: &[CommandSpec] = &[
-    CommandSpec::new(ADD, "Add Balloon", crate::checked!("drawing.balloon.add", add))
+    CommandSpec::new(ADD, "Add Balloon", crate::checked!("drawing.balloon.add", add)).begins_edit()
         .icon("new")
         .in_drawing()
         .doc_only()
@@ -48,7 +48,7 @@ pub static COMMANDS: &[CommandSpec] = &[
              (default its sheet's only parts list, else the drawing's) → what drawing.balloon.inspect \
              answers for it. Saved by the edge's name, never the point picked; one on a part its view doesn't draw (its hide or \n             source leaves it out) is refused. One undo step; no model is evaluated.",
         ),
-    CommandSpec::new(EDIT, "Edit Balloon", crate::checked!("drawing.balloon.edit", edit))
+    CommandSpec::new(EDIT, "Edit Balloon", crate::checked!("drawing.balloon.edit", edit)).begins_edit_when(crate::edit_start::changes_editor_fields)
         .icon("edit")
         .in_drawing()
         .doc_only()
@@ -58,7 +58,7 @@ pub static COMMANDS: &[CommandSpec] = &[
             "balloon: its id; set: {at?: [x, y], parts_list?: a table's id, or null to read the only list} → {balloon, changed: [fields]}. What it points at stays: to number another part, add \
              a new one. One undo step, none when nothing changes; no model is evaluated.",
         ),
-    CommandSpec::new(REPAIR, "Repair Balloon", crate::checked!("drawing.balloon.repair", repair))
+    CommandSpec::new(REPAIR, "Repair Balloon", crate::checked!("drawing.balloon.repair", repair)).begins_edit()
         .icon("edit")
         .in_drawing()
         .doc_only()

@@ -3,7 +3,7 @@
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
-use super::types::Point3;
+use super::types::{Point3, StringList};
 
 /// Mark the flat face of a body at a point as the body's print face, or clear it. A slicer
 /// export (`file.send_to_slicer`, `file.save_mesh` with `slicer`, `file.open_in_easyprint`), and an
@@ -34,11 +34,61 @@ pub struct PrintFaceResult {
     pub param_warnings: Vec<String>,
 }
 
+/// Say whether bodies have a print face (`body.print_face`), without changing anything.
+/// Read-only.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[schemars(deny_unknown_fields)]
+pub struct PrintFacesParams {
+    /// The bodies to check: a name or a list of names. Default: every body of the design.
+    #[serde(default)]
+    pub bodies: Option<StringList>,
+}
+
+/// Whether a body has a print face.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum PrintFaceStatus {
+    /// It has a print face, and the face is still there and flat: an export lays the body on it.
+    Set,
+    /// It has no print face: an export writes it as it lies.
+    None,
+    /// It has one, but the face was cut away or is no longer flat: an export writes the body as
+    /// it lies and warns.
+    Lost,
+}
+
+/// One body's print face.
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct BodyPrintFace {
+    /// The body.
+    pub body: String,
+    /// Whether it has a print face.
+    pub status: PrintFaceStatus,
+    /// The persistent name of the face marked as its print face. Absent for `none`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub face: Option<String>,
+    /// For `lost` only: why the face can't be found.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub problem: Option<String>,
+}
+
+/// What `body.print_faces` returns.
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct PrintFacesResult {
+    /// Each body checked, in the order asked for (the design's order by default).
+    pub bodies: Vec<BodyPrintFace>,
+    /// True when at least one body was checked and every one has the status `set`.
+    pub all_set: bool,
+    /// In the warn parameter-check mode: what the call's parameters got wrong.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub param_warnings: Vec<String>,
+}
+
 #[cfg(test)]
 mod tests {
     use serde_json::json;
 
-    use super::PrintFaceParams;
+    use super::{PrintFaceParams, PrintFacesParams};
     use crate::Session;
     use crate::schema::input_schema_for;
     use crate::schema::tests::assert_keys;
@@ -46,6 +96,7 @@ mod tests {
     #[test]
     fn schemas_and_the_key_check_agree() {
         assert_keys(input_schema_for::<PrintFaceParams>(), &["body", "point"]);
+        assert_keys(input_schema_for::<PrintFacesParams>(), &["bodies"]);
     }
 
     #[test]
