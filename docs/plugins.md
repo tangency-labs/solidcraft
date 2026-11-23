@@ -140,8 +140,8 @@ that triggered the notification. Each invocation uses a fresh guest instance.
 Handler results use the existing 1 MiB JSON reply limit; retained panel data is
 limited to 16 MiB in total. Exceeding either limit reports a typed limit error.
 
-Panel support from #19516 is not present here. The host keeps the handler's
-bounded JSON result through a plain function for a future panel adapter.
+A handler of a plugin that declares `ui@0.1` may refresh that plugin's panel data with
+`ui.set-data` (see Docked panels below).
 
 ## Classifying points and reading surface normals
 
@@ -392,8 +392,10 @@ From the application control surface, use:
 }}}
 ```
 
-Plugins-menu entry forms use this same form implementation. The panel work in #19516 is not
-on main yet: its future Edit row action can call the plain opening function or `ui.start` above.
+Plugins-menu entry forms use this same form implementation. A docked panel's table row action
+(`on_edit`, see Docked panels) runs the declared entry as an ordinary command with the typed
+event; it does not open this form itself. To edit a stored operation from a panel, call the plain
+opening function or `ui.start` above.
 An entry that already has an unsubmitted form is refused rather than replacing its values.
 
 Scripts and MCP use explicit parameters to call `<plugin>.<entry>` or `plugin.run`.
@@ -754,9 +756,9 @@ reports progress and cancellation, reads named files and a clock, and exports th
 `plugin.json` lists what it needs, for example `"capabilities": ["commands@0.2"]`; the host refuses
 an unknown or newer capability when it reads the manifest, with a plain message such as "needs
 commands 0.3; update SolidCraft or the plugin". `formats@0.2` adds file-format slots: importers and
-exporters; `evaluate@0.2` lets an importer check its result, and `storage@0.1` keeps data in a
-design (below). `ui` and `viewport` arrive later as their own versioned interfaces. While a version
-is 0.x, a minor version may break the one before it.
+exporters; `evaluate@0.2` lets an importer check its result, `storage@0.1` keeps data in a design
+(below), and `ui@0.1` adds host-drawn docked panels. `viewport` arrives later as its own versioned
+interface. While a version is 0.x, a minor version may break the one before it.
 
 0.2 added one error, `plugin-error.unsupported(string)`: the input is valid, but this plugin does
 not handle it, such as a file with no solids or a newer version of its format. Use it instead of
@@ -766,6 +768,60 @@ bracket.smp: ..." instead of an "invalid" file. Plugins built against 0.1 (`comm
 component's own imports and exports, and serves the frozen 0.1 WIT
 (`crates/craft-plugin/wit-0.1/plugin.wit`) to those. A component that names a version the host does
 not run, or two versions at once, is refused before any of its code runs.
+
+## Docked panels
+
+Add `"ui@0.1"` alongside `"commands@0.2"`, declare `runtime.ui`, and target `panel-plugin` in
+`crates/craft-plugin/wit/plugin.wit`. The `ui` and `ui-provider` records follow
+[RFC 0015 section 1](rfcs/0015-plugin-ui-workspaces.md#1-panels). The manifest declarations are
+listed during installation. The component's `ui-provider.describe` must return those declarations.
+The host owns the controls, theme, docking and plugin badge; plugins ship data and layouts.
+Panels belong to command plugins; the importer world remains separate.
+
+For example, `runtime.ui` can declare a job table whose row action runs the entry `edit`:
+
+```json
+{
+  "ui_version": 1,
+  "panels": [{
+    "id": "jobs", "title": "Jobs", "zones": ["right", "bottom"],
+    "layout": {"root": 0, "nodes": [{"widget": {"table": {
+      "bind": "/jobs", "row_id": "id",
+      "columns": [{"key": "name", "label": "Operation", "unit": null}],
+      "select": "single", "on_select": null, "on_edit": "edit"
+    }}}]}
+  }],
+  "workspaces": []
+}
+```
+
+Every action names an entry in `runtime.entries`. Buttons, toolbar items, list selection,
+table selection or editing, and form changes invoke ordinary `<plugin>.<entry>` commands.
+Panel clicks put the event in the host command envelope's `ui_event` field and pass the same
+event as the entry's `params`. `ui-provider.on-event` receives the typed event in the same
+transaction. For the table above, the event is
+`{"panel":"jobs","event":"edit","path":"/jobs","row":"op1","value":null}`.
+An MCP caller uses `execute` with the same `<plugin>.<entry>` command and an envelope containing
+`approval`, `params` and `ui_event`. Ordinary entry parameters, including fields named `panel`
+and `event`, remain entry data and do not invoke `ui-provider.on-event`. Programmatic calls open
+no forms.
+
+The component updates cells with `ui.set-data`, for example `/jobs/0/id` = `text("op1")` and
+`/jobs/0/name` = `text("Pocket")`. Values are typed scalars, with lengths in mm and angles in
+degrees. Slash paths identify cells; no JSON arrays cross the UI WIT interface. Successful calls
+merge into the panel once per frame. A failing entry discards its updates. `clear-data` replaces
+the panel data with an empty set; `show-panel` requests visibility in the current workspace.
+Calling `show-panel(true)` again reopens a panel the user closed. Closing a panel keeps the
+other workspaces' placements and does not cancel a command already running.
+
+The phase 2 host draws groups, tabs, splits, forms, buttons, toolbars, lists, tables, text,
+progress and empty states. Trees, charts and newer widget versions show a placeholder.
+Panels are transient view state, cleared when a design closes or the plugin is disabled.
+The host remembers placement by plugin id, panel id and dock zones. Code and data updates keep
+that placement. Changing the allowed zones or initial zone opens a new section in a legal dock.
+Limits are eight panels per plugin, 512 widgets per layout, 1 MiB of data per panel and 100,000
+rows. The widget count includes every layout node, toolbar button, form field and table column.
+Lists and tables scroll virtually.
 
 ## Commands and permissions
 
