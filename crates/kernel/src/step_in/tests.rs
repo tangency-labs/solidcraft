@@ -6070,6 +6070,395 @@ fn a_cap_whose_rim_is_one_closed_edge_measures_its_whole_volume() {
     assert_closed_solid(&text, 2, 2.0 * std::f64::consts::PI * 100.0_f64.powi(3) / 3.0);
 }
 
+/// #20534: a bore that touches a flat face along a line, so four faces meet there. The bore's
+/// loop at the line is written either as one edge out and back (a slit) or as two coincident
+/// edges, each shared with the floor on its side. Both pairings are the same closed solid; the
+/// second was refused as a shell with contradictory edge orientations.
+#[test]
+fn a_bore_tangent_to_a_floor_imports_whichever_way_its_line_edges_are_paired() {
+    let (zc, big, small) = (0.5_f64, 8.0_f64, 5.0_f64);
+    let dy = |z: f64| (big * big - (z - zc) * (z - zc)).sqrt();
+    let (top, bottom, mid) = (dy(6.0), dy(-6.0), dy(0.0));
+    let expected = 30.0 * 30.0 * 12.0
+        - std::f64::consts::PI * small * small * 30.0
+        - 10.0 * {
+            // The slot's cross-section inside the block, from its circle's area up to each cut.
+            let seg = |t: f64| 0.5 * (t * (big * big - t * t).sqrt() + big * big * (t / big).asin());
+            2.0 * (seg(6.0 - zc) - seg(-6.0 - zc))
+        };
+    for per_side in [true, false] {
+        let mut w = Entities::default();
+        let vertex = |w: &mut Entities, p: [f64; 3]| (p, w.vertex(p));
+        let c = [
+            vertex(&mut w, [-15.0, 0.0, -6.0]),
+            vertex(&mut w, [-15.0, 0.0, 6.0]),
+            vertex(&mut w, [-15.0, 30.0, -6.0]),
+            vertex(&mut w, [-15.0, 30.0, 6.0]),
+            vertex(&mut w, [15.0, 0.0, -6.0]),
+            vertex(&mut w, [15.0, 0.0, 6.0]),
+            vertex(&mut w, [15.0, 30.0, -6.0]),
+            vertex(&mut w, [15.0, 30.0, 6.0]),
+        ];
+        let (p2, p4, p6, p8, p10, p12, p14, p16) = (c[0], c[1], c[2], c[3], c[4], c[5], c[6], c[7]);
+        let p18 = vertex(&mut w, [5.0, 15.0 - bottom, -6.0]);
+        let p20 = vertex(&mut w, [5.0, 15.0 - top, 6.0]);
+        let p22 = vertex(&mut w, [5.0, 15.0 + bottom, -6.0]);
+        let p24 = vertex(&mut w, [5.0, 15.0 + top, 6.0]);
+        let p26 = vertex(&mut w, [15.0, 15.0 - bottom, -6.0]);
+        let p28 = vertex(&mut w, [15.0, 15.0 - top, 6.0]);
+        let p30 = vertex(&mut w, [15.0, 15.0 + bottom, -6.0]);
+        let p32 = vertex(&mut w, [15.0, 15.0 + top, 6.0]);
+        let p34 = vertex(&mut w, [5.0, 15.0 - mid, 0.0]);
+        let p36 = vertex(&mut w, [5.0, 15.0 + mid, 0.0]);
+        let b0 = vertex(&mut w, [0.0, 0.0, -5.0]);
+        let b30 = vertex(&mut w, [0.0, 30.0, -5.0]);
+        let line = |w: &mut Entities, a: ([f64; 3], usize), b: ([f64; 3], usize)| {
+            let d = [b.0[0] - a.0[0], b.0[1] - a.0[1], b.0[2] - a.0[2]];
+            let len = (d[0] * d[0] + d[1] * d[1] + d[2] * d[2]).sqrt();
+            let p = w.add(format!("CARTESIAN_POINT('',({:?},{:?},{:?}))", a.0[0], a.0[1], a.0[2]));
+            let dir = w.add(format!("DIRECTION('',({:?},{:?},{:?}))", d[0] / len, d[1] / len, d[2] / len));
+            let vec = w.add(format!("VECTOR('',#{dir},{len:?})"));
+            let curve = w.add(format!("LINE('',#{p},#{vec})"));
+            w.add(format!("EDGE_CURVE('',#{},#{},#{curve},.T.)", a.1, b.1))
+        };
+        let arc_axis = |w: &mut Entities, x: f64| {
+            let a = w.axis([x, 15.0, zc], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0]);
+            w.add(format!("CIRCLE('',#{a},{big:?})"))
+        };
+        let (arc5, arc15) = (arc_axis(&mut w, 5.0), arc_axis(&mut w, 15.0));
+        let arc = |w: &mut Entities, a: usize, b: usize, circle: usize| w.add(format!("EDGE_CURVE('',#{a},#{b},#{circle},.T.)"));
+        let bore_circle = |w: &mut Entities, y: f64| {
+            let a = w.axis([0.0, y, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, -1.0]);
+            w.add(format!("CIRCLE('',#{a},{small:?})"))
+        };
+        let (bc0, bc30) = (bore_circle(&mut w, 0.0), bore_circle(&mut w, 30.0));
+        let e65 = line(&mut w, p34, p36);
+        let e70 = line(&mut w, p34, p36);
+        let e75 = line(&mut w, p24, p20);
+        let e81 = arc(&mut w, p36.1, p24.1, arc5);
+        let e82 = arc(&mut w, p20.1, p34.1, arc5);
+        let e94 = line(&mut w, p22, p18);
+        let e100 = arc(&mut w, p34.1, p18.1, arc5);
+        let e101 = arc(&mut w, p22.1, p36.1, arc5);
+        let e113 = line(&mut w, p4, p12);
+        let e118 = line(&mut w, p12, p28);
+        let e123 = line(&mut w, p28, p20);
+        let e128 = line(&mut w, p32, p24);
+        let e133 = line(&mut w, p16, p32);
+        let e138 = line(&mut w, p8, p16);
+        let e143 = line(&mut w, p4, p8);
+        let e164 = line(&mut w, p2, p10);
+        let e169 = line(&mut w, p10, p26);
+        let e174 = line(&mut w, p26, p18);
+        let e179 = line(&mut w, p30, p22);
+        let e184 = line(&mut w, p14, p30);
+        let e189 = line(&mut w, p6, p14);
+        let e194 = line(&mut w, p2, p6);
+        let e215 = line(&mut w, p10, p12);
+        let e221 = arc(&mut w, p28.1, p26.1, arc15);
+        let e233 = line(&mut w, p14, p16);
+        let e239 = arc(&mut w, p30.1, p32.1, arc15);
+        let e251 = line(&mut w, p6, p8);
+        let e256 = line(&mut w, p2, p4);
+        let e280 = arc(&mut w, b0.1, b0.1, bc0);
+        let e296 = arc(&mut w, b30.1, b30.1, bc30);
+        let plane = |w: &mut Entities, o: [f64; 3], z: [f64; 3], x: [f64; 3]| {
+            let a = w.axis(o, z, x);
+            w.add(format!("PLANE('',#{a})"))
+        };
+        let face = |w: &mut Entities, bounds: &[&[(usize, bool)]], surface: usize, sense: bool| {
+            let mut ids = Vec::new();
+            for uses in bounds {
+                let oes: Vec<String> =
+                    uses.iter().map(|&(e, o)| format!("#{}", w.add(format!("ORIENTED_EDGE('',*,*,#{e},.{}.)", if o { "T" } else { "F" })))).collect();
+                let l = w.add(format!("EDGE_LOOP('',({}))", oes.join(",")));
+                ids.push(format!("#{}", w.add(format!("FACE_BOUND('',#{l},.T.)"))));
+            }
+            w.add(format!("ADVANCED_FACE('',({}),#{surface},.{}.)", ids.join(","), if sense { "T" } else { "F" }))
+        };
+        let floor = plane(&mut w, [5.0, 15.0, 0.0], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0]);
+        // The line at the tangent: per side, the upper floor and the bore above it share one edge
+        // and the lower floor and the bore below the other; otherwise the floors share one and the
+        // bore's loop runs out and back on the other.
+        let (upper_edge, lower_edge, bore_loop): (usize, usize, [(usize, bool); 2]) =
+            if per_side { (e65, e70, [(e65, false), (e70, true)]) } else { (e65, e65, [(e70, true), (e70, false)]) };
+        let upper = face(&mut w, &[&[(upper_edge, true), (e81, true), (e75, true), (e82, true)]], floor, true);
+        let lower = face(&mut w, &[&[(lower_edge, false), (e100, true), (e94, false), (e101, true)]], floor, true);
+        let top_plane = plane(&mut w, [0.0, 0.0, 6.0], [0.0, 0.0, 1.0], [1.0, 0.0, 0.0]);
+        let top_face = face(
+            &mut w,
+            &[&[(e113, true), (e118, true), (e123, true), (e75, false), (e128, false), (e133, false), (e138, false), (e143, false)]],
+            top_plane,
+            true,
+        );
+        let bottom_plane = plane(&mut w, [0.0, 0.0, -6.0], [0.0, 0.0, -1.0], [1.0, 0.0, 0.0]);
+        let bottom_face = face(
+            &mut w,
+            &[&[(e194, true), (e189, true), (e184, true), (e179, true), (e94, true), (e174, false), (e169, false), (e164, false)]],
+            bottom_plane,
+            true,
+        );
+        let right = plane(&mut w, [15.0, 0.0, 0.0], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0]);
+        let right_front = face(&mut w, &[&[(e169, true), (e221, false), (e118, false), (e215, false)]], right, true);
+        let right_back_plane = plane(&mut w, [15.0, 30.0, 0.0], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0]);
+        let right_back = face(&mut w, &[&[(e233, true), (e133, true), (e239, false), (e184, false)]], right_back_plane, true);
+        let left_plane = plane(&mut w, [-15.0, 0.0, 0.0], [-1.0, 0.0, 0.0], [0.0, 1.0, 0.0]);
+        let left = face(&mut w, &[&[(e256, true), (e143, true), (e251, false), (e194, false)]], left_plane, true);
+        let front_plane = plane(&mut w, [0.0, 0.0, 0.0], [0.0, -1.0, 0.0], [1.0, 0.0, 0.0]);
+        let front = face(&mut w, &[&[(e164, true), (e215, true), (e113, false), (e256, false)], &[(e280, true)]], front_plane, true);
+        let back_plane = plane(&mut w, [0.0, 30.0, 0.0], [0.0, 1.0, 0.0], [1.0, 0.0, 0.0]);
+        let back = face(&mut w, &[&[(e251, true), (e138, true), (e233, false), (e189, false)], &[(e296, false)]], back_plane, true);
+        let slot_axis = |w: &mut Entities| {
+            let a = w.axis([5.0, 15.0, zc], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0]);
+            w.add(format!("CYLINDRICAL_SURFACE('',#{a},{big:?})"))
+        };
+        let slot_a = slot_axis(&mut w);
+        let wall_a = face(&mut w, &[&[(e101, false), (e179, false), (e239, true), (e128, true), (e81, false)]], slot_a, false);
+        let slot_b = slot_axis(&mut w);
+        let wall_b = face(&mut w, &[&[(e82, false), (e123, false), (e221, true), (e174, true), (e100, false)]], slot_b, false);
+        let bore_axis = w.axis([0.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, -1.0]);
+        let bore_surface = w.add(format!("CYLINDRICAL_SURFACE('',#{bore_axis},{small:?})"));
+        let bore = face(&mut w, &[&[(e280, false)], &bore_loop, &[(e296, true)]], bore_surface, false);
+        let text = w.solid(&[upper, lower, top_face, bottom_face, right_front, right_back, left, front, back, wall_a, wall_b, bore]);
+        let imp = step_import(&text).unwrap();
+        assert_eq!(imp.bodies.len(), 1, "per side {per_side}: {:?}", imp.warnings);
+        let body = &imp.bodies[0];
+        assert!(body.closed && body.refused.is_none(), "per side {per_side}: {:?} {:?}", body.refused, imp.warnings);
+        let m = measure(&body.body).unwrap();
+        assert!(rel(m.volume, expected) < 1e-4, "per side {per_side}: volume {} vs {expected}", m.volume);
+    }
+}
+
+/// #20527: a collar of a cylinder (axis written pointing down, opposite its two boundary circles)
+/// with three pockets cut into it, one across the seam. The order a file lists the cylinder
+/// face's bounds in (the pockets before the circles, or after), and the order of the faces in the
+/// shell, say nothing of the part: every order reads as the same closed solid. Read before the
+/// fix, the pockets first left the cylinder face out (an edge "off the face's surface") or read
+/// a closed solid of the wrong volume.
+#[test]
+fn a_pocketed_cylinder_imports_the_same_whatever_order_its_bounds_are_listed_in() {
+    use std::f64::consts::PI;
+    let (radius, floor, half) = (30.0_f64, 26.0_f64, 4.0_f64.to_radians());
+    let (top, bottom, z_low, z_high) = (-3.0_f64, -12.0_f64, -15.0_f64, 0.0_f64);
+    let build = |bound_order: &[usize], cylinder_first: bool| -> String {
+        let mut e = Entities::default();
+        let ring = |e: &mut Entities, z: f64, r: f64| {
+            let a = e.axis([0.0, 0.0, z], [0.0, 0.0, 1.0], [0.0, 1.0, 0.0]);
+            let c = e.add(format!("CIRCLE('',#{a},{r:?})"));
+            let v = e.vertex([0.0, r, z]);
+            e.add(format!("EDGE_CURVE('',#{v},#{v},#{c},.T.)"))
+        };
+        let bound = |e: &mut Entities, uses: &[(usize, bool)]| -> usize {
+            let oes: Vec<String> =
+                uses.iter().map(|&(x, o)| format!("#{}", e.add(format!("ORIENTED_EDGE('',*,*,#{x},.{}.)", if o { "T" } else { "F" })))).collect();
+            let l = e.add(format!("EDGE_LOOP('',({}))", oes.join(",")));
+            e.add(format!("FACE_BOUND('',#{l},.T.)"))
+        };
+        let face = |e: &mut Entities, bounds: &[usize], surface: usize| -> usize {
+            let list: Vec<String> = bounds.iter().map(|b| format!("#{b}")).collect();
+            e.add(format!("ADVANCED_FACE('',({}),#{surface},.T.)", list.join(",")))
+        };
+        let (c_low, c_high, c_rim) = (ring(&mut e, z_low, radius), ring(&mut e, z_high, radius), ring(&mut e, 4.0, 40.0));
+        let mut faces = Vec::new();
+        // The flat bottom and top, and the cone between the collar's top circle and the rim.
+        let a = e.axis([0.0, 0.0, z_low], [0.0, 0.0, -1.0], [1.0, 0.0, 0.0]);
+        let plane = e.add(format!("PLANE('',#{a})"));
+        let b = bound(&mut e, &[(c_low, false)]);
+        let bottom_face = face(&mut e, &[b], plane);
+        let a = e.axis([0.0, 0.0, 4.0], [0.0, 0.0, 1.0], [1.0, 0.0, 0.0]);
+        let plane = e.add(format!("PLANE('',#{a})"));
+        let b = bound(&mut e, &[(c_rim, true)]);
+        let top_face = face(&mut e, &[b], plane);
+        let a = e.axis([0.0, 0.0, 0.0], [0.0, 0.0, 1.0], [0.0, 1.0, 0.0]);
+        let cone = e.add(format!("CONICAL_SURFACE('',#{a},{radius:?},{:?})", (10.0_f64 / 4.0).atan()));
+        let (b0, b1) = (bound(&mut e, &[(c_high, true)]), bound(&mut e, &[(c_rim, false)]));
+        let cone_face = face(&mut e, &[b0, b1], cone);
+        // Each pocket: its four walls and floor, and its loop on the cylinder.
+        let mut pocket_bounds = Vec::new();
+        for centre in [90.0_f64, 210.0, 330.0] {
+            let phi = centre.to_radians();
+            let (ca, cb) = (phi - half, phi + half);
+            let at = |r: f64, t: f64, z: f64| [r * t.cos(), r * t.sin(), z];
+            let radial = [phi.cos(), phi.sin(), 0.0];
+            // One vertex at each corner of the pocket, shared by the edges that meet there.
+            let corner = |e: &mut Entities, r: f64, t: f64, z: f64| e.vertex(at(r, t, z));
+            let mut vs = std::collections::HashMap::new();
+            for (si, t) in [ca, cb].into_iter().enumerate() {
+                for (ri, r) in [floor, radius].into_iter().enumerate() {
+                    for (zi, z) in [bottom, top].into_iter().enumerate() {
+                        vs.insert((si, ri, zi), corner(&mut e, r, t, z));
+                    }
+                }
+            }
+            let vx = |side: usize, outer: bool, high: bool| vs[&(side, usize::from(outer), usize::from(high))];
+            let arc = |e: &mut Entities, outer: bool, high: bool| {
+                let (r, z) = (if outer { radius } else { floor }, if high { top } else { bottom });
+                let ax = e.axis([0.0, 0.0, z], [0.0, 0.0, 1.0], radial);
+                let c = e.add(format!("CIRCLE('',#{ax},{r:?})"));
+                let (v0, v1) = (vx(0, outer, high), vx(1, outer, high));
+                e.add(format!("EDGE_CURVE('',#{v0},#{v1},#{c},.T.)"))
+            };
+            let line = |e: &mut Entities, from: ([f64; 3], usize), to: ([f64; 3], usize)| {
+                let d = [to.0[0] - from.0[0], to.0[1] - from.0[1], to.0[2] - from.0[2]];
+                let n = (d[0] * d[0] + d[1] * d[1] + d[2] * d[2]).sqrt();
+                let p = e.add(format!("CARTESIAN_POINT('',({:?},{:?},{:?}))", from.0[0], from.0[1], from.0[2]));
+                let dir = e.add(format!("DIRECTION('',({:?},{:?},{:?}))", d[0] / n, d[1] / n, d[2] / n));
+                let v = e.add(format!("VECTOR('',#{dir},1.)"));
+                let l = e.add(format!("LINE('',#{p},#{v})"));
+                e.add(format!("EDGE_CURVE('',#{},#{},#{l},.T.)", from.1, to.1))
+            };
+            let (arc_top, arc_bottom) = (arc(&mut e, true, true), arc(&mut e, true, false));
+            let (floor_top, floor_bottom) = (arc(&mut e, false, true), arc(&mut e, false, false));
+            let p = |side: usize, outer: bool, high: bool| {
+                let t = if side == 0 { ca } else { cb };
+                (at(if outer { radius } else { floor }, t, if high { top } else { bottom }), vx(side, outer, high))
+            };
+            let rise_a = line(&mut e, p(0, true, false), p(0, true, true));
+            let rise_b = line(&mut e, p(1, true, false), p(1, true, true));
+            let floor_rise_a = line(&mut e, p(0, false, false), p(0, false, true));
+            let floor_rise_b = line(&mut e, p(1, false, false), p(1, false, true));
+            let out_bottom_a = line(&mut e, p(0, false, false), p(0, true, false));
+            let out_bottom_b = line(&mut e, p(1, false, false), p(1, true, false));
+            let out_top_a = line(&mut e, p(0, false, true), p(0, true, true));
+            let out_top_b = line(&mut e, p(1, false, true), p(1, true, true));
+            pocket_bounds.push(bound(&mut e, &[(arc_top, true), (rise_b, false), (arc_bottom, false), (rise_a, true)]));
+            let ax = e.axis([0.0, 0.0, 0.0], [0.0, 0.0, 1.0], radial);
+            let s = e.add(format!("CYLINDRICAL_SURFACE('',#{ax},{floor:?})"));
+            let b = bound(&mut e, &[(floor_rise_a, false), (floor_bottom, true), (floor_rise_b, true), (floor_top, false)]);
+            faces.push(face(&mut e, &[b], s));
+            let ax = e.axis(at(radius, phi, bottom), [0.0, 0.0, 1.0], radial);
+            let s = e.add(format!("PLANE('',#{ax})"));
+            let b = bound(&mut e, &[(arc_bottom, true), (out_bottom_b, false), (floor_bottom, false), (out_bottom_a, true)]);
+            faces.push(face(&mut e, &[b], s));
+            let ax = e.axis(at(radius, phi, top), [0.0, 0.0, -1.0], radial);
+            let s = e.add(format!("PLANE('',#{ax})"));
+            let b = bound(&mut e, &[(out_top_a, false), (floor_top, true), (out_top_b, true), (arc_top, false)]);
+            faces.push(face(&mut e, &[b], s));
+            let ax = e.axis(at(radius, ca, bottom), [-ca.sin(), ca.cos(), 0.0], [ca.cos(), ca.sin(), 0.0]);
+            let s = e.add(format!("PLANE('',#{ax})"));
+            let b = bound(&mut e, &[(out_bottom_a, false), (floor_rise_a, true), (out_top_a, true), (rise_a, false)]);
+            faces.push(face(&mut e, &[b], s));
+            let ax = e.axis(at(radius, cb, bottom), [cb.sin(), -cb.cos(), 0.0], [cb.cos(), cb.sin(), 0.0]);
+            let s = e.add(format!("PLANE('',#{ax})"));
+            let b = bound(&mut e, &[(rise_b, true), (out_top_b, false), (floor_rise_b, false), (out_bottom_b, true)]);
+            faces.push(face(&mut e, &[b], s));
+        }
+        // The collar's cylinder, its axis opposite its circles', bounded by the pockets and the
+        // two circles, listed in `bound_order` (0-2 the pockets, 3 and 4 the circles).
+        let (b_low, b_high) = (bound(&mut e, &[(c_low, true)]), bound(&mut e, &[(c_high, false)]));
+        let all = [pocket_bounds[0], pocket_bounds[1], pocket_bounds[2], b_low, b_high];
+        let listed: Vec<usize> = bound_order.iter().map(|&i| all[i]).collect();
+        let ax = e.axis([0.0, 0.0, -7.5], [0.0, 0.0, -1.0], [0.0, 1.0, 0.0]);
+        let s = e.add(format!("CYLINDRICAL_SURFACE('',#{ax},{radius:?})"));
+        let collar = face(&mut e, &listed, s);
+        let mut shell = vec![cone_face, bottom_face, top_face];
+        shell.extend(&faces);
+        if cylinder_first {
+            shell.insert(0, collar);
+        } else {
+            shell.insert(1, collar);
+        }
+        e.solid(&shell)
+    };
+    // The cylinder pi r^2 h and the cone's frustum, less three pockets of
+    // (angle / 2) (R^2 - r^2) (depth).
+    let want = PI * radius * radius * 15.0 + PI * 4.0 / 3.0 * (radius * radius + radius * 40.0 + 40.0 * 40.0)
+        - 3.0 * half * (radius * radius - floor * floor) * (top - bottom);
+    for (order, cylinder_first) in
+        [([0, 1, 2, 3, 4], false), ([3, 4, 0, 1, 2], false), ([0, 1, 2, 3, 4], true), ([0, 1, 2, 4, 3], false), ([1, 3, 0, 4, 2], true)]
+    {
+        assert_closed_solid(&build(&order, cylinder_first), 19, want);
+    }
+}
+
+/// #20514: a thin tube (rings 0.1 mm wide) whose circles are each one closed edge, the inner top
+/// circle's vertex on the far side. The two circles of a ring are told apart by size, and a
+/// coarse polygon of the outer one came out smaller than one of the inner, so a ring was read as
+/// its own hole and its face turned over: the volume was right and the area short by both rings.
+#[test]
+fn a_thin_ring_with_a_far_side_vertex_keeps_both_rings_in_its_area() {
+    thin_ring(15.5, 15.4, false);
+}
+
+/// The same tube 3.1 m across with rings 0.05 mm wide, its inner circles written as two arcs
+/// each: a polygon of a fixed number of chords per edge misses a one-edge circle by four times
+/// what it misses a two-arc circle by, more than the ring's whole area here, so loops must be
+/// compared on areas with the sampling error taken out, not on finer polygons.
+#[test]
+fn a_wide_thin_ring_whose_inner_circles_are_two_arcs_keeps_both_rings_in_its_area() {
+    thin_ring(1550.0, 1549.95, true);
+}
+
+/// A thin tube of height 10 between radii `ro` and `ri`, imported and measured whole. Each outer
+/// circle is one closed edge; each inner circle is one closed edge (the top one's vertex on the far
+/// side), or two arcs when `split_inner`.
+fn thin_ring(ro: f64, ri: f64, split_inner: bool) {
+    let h = 10.0_f64;
+    let mut w = Entities::default();
+    // A circle at height `z` of radius `r` as its edges in order: one closed edge with its vertex at
+    // `x` on the x axis, or two arcs from `x` to `-x` and back.
+    let circle = |w: &mut Entities, z: f64, r: f64, x: f64, split: bool| -> Vec<usize> {
+        let a = w.axis([0.0, 0.0, z], [0.0, 0.0, 1.0], [1.0, 0.0, 0.0]);
+        let c = w.add(format!("CIRCLE('',#{a},{r:?})"));
+        let v = w.vertex([x, 0.0, z]);
+        if split {
+            let u = w.vertex([-x, 0.0, z]);
+            vec![w.add(format!("EDGE_CURVE('',#{v},#{u},#{c},.T.)")), w.add(format!("EDGE_CURVE('',#{u},#{v},#{c},.T.)"))]
+        } else {
+            vec![w.add(format!("EDGE_CURVE('',#{v},#{v},#{c},.T.)"))]
+        }
+    };
+    let bottom_outer = circle(&mut w, 0.0, ro, ro, false);
+    let top_outer = circle(&mut w, h, ro, ro, false);
+    let bottom_inner = circle(&mut w, 0.0, ri, ri, split_inner);
+    let top_inner = circle(&mut w, h, ri, -ri, split_inner);
+    // A face of several bounds: `(edges in order, orientation, outer)`; a bound used against its
+    // edges' direction runs them backwards.
+    let face = |w: &mut Entities, bounds: &[(&Vec<usize>, bool, bool)], surface: usize, same_sense: bool| {
+        let mut ids = Vec::new();
+        for &(edges, o, outer) in bounds {
+            let ordered: Vec<usize> = if o { edges.clone() } else { edges.iter().rev().copied().collect() };
+            let oes: Vec<String> =
+                ordered.iter().map(|e| format!("#{}", w.add(format!("ORIENTED_EDGE('',*,*,#{e},.{}.)", if o { "T" } else { "F" })))).collect();
+            let l = w.add(format!("EDGE_LOOP('',({}))", oes.join(",")));
+            let kind = if outer { "FACE_OUTER_BOUND" } else { "FACE_BOUND" };
+            ids.push(format!("#{}", w.add(format!("{kind}('',#{l},.T.)"))));
+        }
+        w.add(format!("ADVANCED_FACE('',({}),#{surface},.{}.)", ids.join(","), if same_sense { "T" } else { "F" }))
+    };
+    let plane_top = {
+        let a = w.axis([0.0, 0.0, h], [0.0, 0.0, 1.0], [1.0, 0.0, 0.0]);
+        w.add(format!("PLANE('',#{a})"))
+    };
+    let plane_bottom = {
+        let a = w.axis([0.0, 0.0, 0.0], [0.0, 0.0, 1.0], [1.0, 0.0, 0.0]);
+        w.add(format!("PLANE('',#{a})"))
+    };
+    let cyl_outer = {
+        let a = w.axis([0.0, 0.0, 0.0], [0.0, 0.0, 1.0], [1.0, 0.0, 0.0]);
+        w.add(format!("CYLINDRICAL_SURFACE('',#{a},{ro:?})"))
+    };
+    let cyl_inner = {
+        let a = w.axis([0.0, 0.0, 0.0], [0.0, 0.0, 1.0], [1.0, 0.0, 0.0]);
+        w.add(format!("CYLINDRICAL_SURFACE('',#{a},{ri:?})"))
+    };
+    let top = face(&mut w, &[(&top_outer, true, true), (&top_inner, false, false)], plane_top, true);
+    let bottom = face(&mut w, &[(&bottom_outer, false, true), (&bottom_inner, true, false)], plane_bottom, false);
+    let outside = face(&mut w, &[(&bottom_outer, true, false), (&top_outer, false, false)], cyl_outer, true);
+    let inside = face(&mut w, &[(&bottom_inner, false, false), (&top_inner, true, false)], cyl_inner, false);
+    let text = w.solid(&[top, bottom, outside, inside]);
+    let pi = std::f64::consts::PI;
+    let imp = step_import(&text).unwrap();
+    assert_eq!(imp.bodies.len(), 1, "{:?}", imp.warnings);
+    assert!(imp.bodies[0].closed && imp.bodies[0].refused.is_none(), "{:?}", imp.warnings);
+    assert!(!imp.warnings.iter().any(|w| w.contains("turned over")), "{:?}", imp.warnings);
+    let m = measure(&imp.bodies[0].body).unwrap();
+    assert!(rel(m.volume, pi * (ro * ro - ri * ri) * h) < 1e-4, "volume {}", m.volume);
+    // The two walls, and a ring at each end.
+    let area = 2.0 * pi * (ro + ri) * h + 2.0 * pi * (ro * ro - ri * ri);
+    assert!(rel(m.area, area) < 1e-4, "area {} vs {area}", m.area);
+}
+
 #[test]
 fn one_solid_mapped_several_times_in_a_part_comes_in_at_each_placement() {
     // A unit cube in its own representation (#60), placed at x = 0, 30 and 60 by three mapped

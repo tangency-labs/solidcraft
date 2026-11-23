@@ -21,7 +21,9 @@ use solidcore_step::read::R;
 
 use crate::body::Body;
 use crate::{KernelError, Result};
-pub use checks::{HealedBody, ImportChecks, ImportHeals};
+pub use checks::HealedBody;
+pub use checks::ImportChecks;
+pub use checks::ImportHeals;
 use p21::{Entity, Exchange, Param};
 
 /// The representation the file's unlisted topology is read as, under an id the reader keeps for

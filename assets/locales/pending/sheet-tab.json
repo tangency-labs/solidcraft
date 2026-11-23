@@ -1,0 +1,42 @@
+{
+  "ar": {
+    "cmd.sheet_tab": "لسان",
+    "help.sheet.tab": "يضيف قطعة مسطحة من المادة إلى الصفيحة من رسم مغلق على أحد وجوهها المستوية، ملتحمة بتلك اللوحة بسماكة الصفيحة. استخدمه لأذن تثبيت أو عروة أو لسان، حتى على جدار مثني مسبقًا.",
+    "ui.sheet_tab_title": "لسان"
+  },
+  "de": {
+    "cmd.sheet_tab": "Lasche",
+    "help.sheet.tab": "Fügt einem Blech aus einer geschlossenen Skizze auf einer seiner ebenen Flächen ein flaches Stück Material in Blechdicke hinzu, verbunden mit dieser Platte. Für Befestigungslaschen, Ösen oder Zungen, auch an bereits gebogenen Wänden.",
+    "ui.sheet_tab_title": "LASCHE"
+  },
+  "en": {
+    "cmd.sheet_tab": "Tab",
+    "help.sheet.tab": "Adds a flat piece of material to a sheet from a closed sketch on one of its flat faces, joined into that panel through the sheet's thickness. Use it for a mounting ear, a lug or a tongue, also on a wall that is already folded.",
+    "ui.sheet_tab_title": "TAB"
+  },
+  "he": {
+    "cmd.sheet_tab": "לשונית",
+    "help.sheet.tab": "מוסיף חתיכת חומר שטוחה לפח משרטוט סגור על אחת מפאותיו השטוחות, מחוברת ללוח זה בעובי הפח. השתמשו בו לאוזן הרכבה, זיז או לשונית, גם על דופן שכבר כופפה.",
+    "ui.sheet_tab_title": "לשונית"
+  },
+  "ja": {
+    "cmd.sheet_tab": "タブ",
+    "help.sheet.tab": "シートの平らな面に描いた閉じたスケッチから、板厚分の平らな材料をそのパネルに追加し、輪郭に結合します。取付耳、ラグ、差し込み用の舌片などに使い、曲げ済みの壁にも追加できます。",
+    "ui.sheet_tab_title": "タブ"
+  },
+  "ko": {
+    "cmd.sheet_tab": "탭",
+    "help.sheet.tab": "판금의 평평한 면에 그린 닫힌 스케치로 그 패널에 판 두께만큼의 평평한 재료를 추가해 윤곽에 합칩니다. 장착용 귀, 러그, 끼움 혀 등에 쓰며 이미 접힌 벽에도 추가할 수 있습니다.",
+    "ui.sheet_tab_title": "탭"
+  },
+  "vi": {
+    "cmd.sheet_tab": "Thêm tai (Tab)",
+    "help.sheet.tab": "Thêm một miếng vật liệu phẳng vào tấm từ một bản phác thảo kín trên một mặt phẳng của nó, nối liền vào tấm đó với đúng độ dày tấm. Dùng cho tai bắt vít, vấu hoặc lưỡi gài, kể cả trên vách đã uốn.",
+    "ui.sheet_tab_title": "THÊM TAI"
+  },
+  "zh": {
+    "cmd.sheet_tab": "凸片",
+    "help.sheet.tab": "用在钣金平面上绘制的封闭草图，为该面板添加一块与板厚相同的平板材料，并并入其轮廓。用于安装耳、凸耳或插舌，也可加在已折弯的侧壁上。",
+    "ui.sheet_tab_title": "凸片"
+  }
+}
