@@ -15,8 +15,8 @@
 //! | [`PrimitiveFailure::AxisInsideFace`]   | `SM_ERR_AXIS_INSIDE_FACE`     |
 //! | [`PrimitiveFailure::PlaneCannotCover`] | `SM_ERR_INVALID_INPUT`        |
 //! | [`PrimitiveFailure::Defect`]           | `SM_ERR` (or the site's, through `with_status`) |
-//! | [`PrimitiveFailure::EdgeWithoutCurve`], [`PrimitiveFailure::NoCurveGiven`], [`PrimitiveFailure::NoRegion`], [`PrimitiveFailure::TreeLeftNoBrep`] | `SM_ERR_NULL_POINTER` |
-//! | [`PrimitiveFailure::HeightTooSmall`], [`PrimitiveFailure::TreeLeavesMoreBreps`], [`PrimitiveFailure::PathTurnsBack`], [`PrimitiveFailure::SweepDoesNotClose`], [`PrimitiveFailure::SweepEnclosesNoMaterial`], [`PrimitiveFailure::SweepAngleTooSmall`], [`PrimitiveFailure::ConeSideTooShort`], [`PrimitiveFailure::ConeHasNoRadius`], [`PrimitiveFailure::ProfileFrameDegenerate`], [`PrimitiveFailure::TooFewProfiles`], [`PrimitiveFailure::ProfilesDoNotMatch`], [`PrimitiveFailure::ProfileMakesSeveralFaces`], [`PrimitiveFailure::ProfileNotOneComposite`], [`PrimitiveFailure::OffsetMakesNoCurves`], [`PrimitiveFailure::SeamWeightNotPositive`], [`PrimitiveFailure::SeamLeavesSpan`] | `SM_ERR` |
+//! | [`PrimitiveFailure::EdgeWithoutCurve`], [`PrimitiveFailure::NoCurveGiven`], [`PrimitiveFailure::NoRegion`], [`PrimitiveFailure::TreeLeftNoBrep`], [`PrimitiveFailure::MergeOperandMissing`], [`PrimitiveFailure::MergeGaveNoBrep`], [`PrimitiveFailure::PlanarDifferenceEmpty`] | `SM_ERR_NULL_POINTER` |
+//! | [`PrimitiveFailure::HeightTooSmall`], [`PrimitiveFailure::TreeLeavesMoreBreps`], [`PrimitiveFailure::PathTurnsBack`], [`PrimitiveFailure::SweepDoesNotClose`], [`PrimitiveFailure::SweepEnclosesNoMaterial`], [`PrimitiveFailure::SweepAngleTooSmall`], [`PrimitiveFailure::ConeSideTooShort`], [`PrimitiveFailure::ConeHasNoRadius`], [`PrimitiveFailure::ProfileFrameDegenerate`], [`PrimitiveFailure::TooFewProfiles`], [`PrimitiveFailure::ProfilesDoNotMatch`], [`PrimitiveFailure::ProfileMakesSeveralFaces`], [`PrimitiveFailure::ProfileNotOneComposite`], [`PrimitiveFailure::OffsetMakesNoCurves`], [`PrimitiveFailure::SeamWeightNotPositive`], [`PrimitiveFailure::SeamLeavesSpan`], [`PrimitiveFailure::CurvesMakeNoLoop`], [`PrimitiveFailure::OffsetMakesNoSurface`], [`PrimitiveFailure::HelixNotEvaluated`], [`PrimitiveFailure::PolygonSideNotMade`] | `SM_ERR` |
 //!
 //! [`PrimitiveFailure::Defect`] is a failure reviewed at its site as the kernel's fault, with its
 //! reason: a defect ([`ErrorKind::StageFailed`], class 127). The phrase causes are sites
@@ -179,6 +179,33 @@ pub enum PrimitiveFailure {
         /// The piece's parameter across its span, outside 0 to 1.
         tau: f64,
     },
+    /// The caller's curves were ordered, and none of them closes a loop.
+    /// [`ErrorKind::InvalidInput`], status `SM_ERR`.
+    CurvesMakeNoLoop,
+    /// The offset of the caller's surface by the caller's distance collapses, so it makes
+    /// no surface (for example a cone offset past its apex). [`ErrorKind::Degenerate`],
+    /// status `SM_ERR`.
+    OffsetMakesNoSurface,
+    /// The fitted helix could not be evaluated where its deviation is measured (the
+    /// evaluation's error is the cause). Class `failed`, status `SM_ERR`.
+    HelixNotEvaluated,
+    /// A side of the polygon could not be made from its two corners (the line's error is
+    /// the cause, and decides defect or refusal). Class `failed`, status `SM_ERR`.
+    PolygonSideNotMade,
+    /// A merge stage was given no operand on one side (`other` is false for the
+    /// primary): an earlier stage's Boolean consumed it, or the merge released it. Class
+    /// `failed`, status `SM_ERR_NULL_POINTER`.
+    MergeOperandMissing {
+        /// The missing operand is the other (second) one.
+        other: bool,
+    },
+    /// A merge's Boolean returned without a result B-rep. Class `failed`, status
+    /// `SM_ERR_NULL_POINTER`.
+    MergeGaveNoBrep,
+    /// A planar difference had an operand with no faces, so it made no B-rep (the offset
+    /// profile collapsed to nothing). [`ErrorKind::Degenerate`], status
+    /// `SM_ERR_NULL_POINTER`.
+    PlanarDifferenceEmpty,
 }
 
 impl PrimitiveFailure {
@@ -202,12 +229,19 @@ impl PrimitiveFailure {
             | Self::ProfileNotOneComposite { .. }
             | Self::OffsetMakesNoCurves
             | Self::SeamWeightNotPositive { .. }
-            | Self::SeamLeavesSpan { .. } => SM_ERR,
+            | Self::SeamLeavesSpan { .. }
+            | Self::CurvesMakeNoLoop
+            | Self::OffsetMakesNoSurface
+            | Self::HelixNotEvaluated
+            | Self::PolygonSideNotMade => SM_ERR,
             Self::Missing(_)
             | Self::EdgeWithoutCurve
             | Self::NoCurveGiven
             | Self::NoRegion
-            | Self::TreeLeftNoBrep => SM_ERR_NULL_POINTER,
+            | Self::TreeLeftNoBrep
+            | Self::MergeOperandMissing { .. }
+            | Self::MergeGaveNoBrep
+            | Self::PlanarDifferenceEmpty => SM_ERR_NULL_POINTER,
             Self::HelixDeviates { .. } => SM_ERR_NOT_WITHIN_TOLERANCE,
             Self::AxisInsideFace => SM_ERR_AXIS_INSIDE_FACE,
             Self::PlaneCannotCover => SM_ERR_INVALID_INPUT,
@@ -219,7 +253,8 @@ impl PrimitiveFailure {
     /// [`PrimitiveFailure::HelixDeviates`], [`ErrorKind::InvalidInput`] for
     /// [`PrimitiveFailure::PlaneCannotCover`] and the checks of the caller's arguments and
     /// body, [`ErrorKind::Unsupported`] for a path or a sweep the planar-path sweep does not
-    /// take, [`ErrorKind::Failed`] otherwise.
+    /// take, [`ErrorKind::Degenerate`] for a collapsed offset or planar difference,
+    /// [`ErrorKind::Failed`] otherwise.
     /// [`PrimitiveFailure::Defect`] is [`ErrorKind::StageFailed`], a defect.
     #[must_use]
     pub const fn kind(&self) -> ErrorKind {
@@ -237,13 +272,17 @@ impl PrimitiveFailure {
             | Self::TooFewProfiles { .. }
             | Self::ProfilesDoNotMatch { .. }
             | Self::ProfileMakesSeveralFaces { .. }
-            | Self::ProfileNotOneComposite { .. } => ErrorKind::InvalidInput,
+            | Self::ProfileNotOneComposite { .. }
+            | Self::CurvesMakeNoLoop => ErrorKind::InvalidInput,
             Self::PathTurnsBack | Self::SweepDoesNotClose => ErrorKind::Unsupported,
+            Self::OffsetMakesNoSurface | Self::PlanarDifferenceEmpty => ErrorKind::Degenerate,
             Self::TreeLeftNoBrep
             | Self::SweepEnclosesNoMaterial
             | Self::OffsetMakesNoCurves
             | Self::SeamWeightNotPositive { .. }
-            | Self::SeamLeavesSpan { .. } => ErrorKind::Failed,
+            | Self::SeamLeavesSpan { .. }
+            | Self::MergeOperandMissing { .. }
+            | Self::MergeGaveNoBrep => ErrorKind::Failed,
             _ => ErrorKind::of_status(self.comparison_status()),
         }
     }
@@ -316,6 +355,22 @@ impl core::fmt::Display for PrimitiveFailure {
             Self::SeamLeavesSpan { tau } => {
                 write!(f, "a seam piece leaves its span, at {tau} across it")
             }
+            Self::CurvesMakeNoLoop => f.write_str("the curves make no loop"),
+            Self::OffsetMakesNoSurface => {
+                f.write_str("the offset collapses the surface, so it makes no surface")
+            }
+            Self::HelixNotEvaluated => f.write_str("the fitted helix could not be evaluated"),
+            Self::PolygonSideNotMade => f.write_str("a polygon side could not be made"),
+            Self::MergeOperandMissing { other: false } => {
+                f.write_str("the merge stage has no primary operand")
+            }
+            Self::MergeOperandMissing { other: true } => {
+                f.write_str("the merge stage has no other operand")
+            }
+            Self::MergeGaveNoBrep => f.write_str("the merge gave no result B-rep"),
+            Self::PlanarDifferenceEmpty => f.write_str(
+                "the planar difference had an operand with no faces, so it made no B-rep",
+            ),
         }
     }
 }
@@ -343,6 +398,18 @@ impl crate::SolidError {
     #[must_use]
     pub(crate) fn primitive_missing(operation: &'static str, what: &'static str) -> Self {
         Self::primitive(operation, PrimitiveFailure::Missing(what))
+    }
+
+    /// [`crate::SolidError::Failed`] for a reviewed defect of a primitive-creation routine
+    /// ([`PrimitiveFailure::Defect`]), with the status [`SM_ERR_NULL_POINTER`] of the
+    /// `NER` it replaces: `why` names the link of the kernel's own that is missing, and
+    /// why that is the kernel's fault.
+    #[must_use]
+    #[track_caller]
+    pub(crate) fn primitive_broken_link(operation: &'static str, why: &'static str) -> Self {
+        Failure::new(operation, PrimitiveFailure::Defect { why })
+            .with_status(SM_ERR_NULL_POINTER)
+            .into_error()
     }
 
     /// The primitive-creation failure behind this error, for a
@@ -626,6 +693,93 @@ mod tests {
         assert_eq!(e.kind(), K::InvalidInput);
     }
 
+    /// The named causes keep the status of the phrase each replaced, and have their class;
+    /// a caught error stays the cause, and decides defect or refusal.
+    #[test]
+    fn the_named_primitive_causes_keep_their_status_and_have_their_class() {
+        use ErrorKind as K;
+        let op = "primitive::op";
+        let cases = [
+            (
+                PrimitiveFailure::CurvesMakeNoLoop,
+                SM_ERR,
+                K::InvalidInput,
+                "the curves make no loop",
+            ),
+            (
+                PrimitiveFailure::OffsetMakesNoSurface,
+                SM_ERR,
+                K::Degenerate,
+                "the offset collapses the surface, so it makes no surface",
+            ),
+            (
+                PrimitiveFailure::HelixNotEvaluated,
+                SM_ERR,
+                K::Failed,
+                "the fitted helix could not be evaluated",
+            ),
+            (
+                PrimitiveFailure::PolygonSideNotMade,
+                SM_ERR,
+                K::Failed,
+                "a polygon side could not be made",
+            ),
+            (
+                PrimitiveFailure::MergeOperandMissing { other: false },
+                SM_ERR_NULL_POINTER,
+                K::Failed,
+                "the merge stage has no primary operand",
+            ),
+            (
+                PrimitiveFailure::MergeOperandMissing { other: true },
+                SM_ERR_NULL_POINTER,
+                K::Failed,
+                "the merge stage has no other operand",
+            ),
+            (
+                PrimitiveFailure::MergeGaveNoBrep,
+                SM_ERR_NULL_POINTER,
+                K::Failed,
+                "the merge gave no result B-rep",
+            ),
+            (
+                PrimitiveFailure::PlanarDifferenceEmpty,
+                SM_ERR_NULL_POINTER,
+                K::Degenerate,
+                "the planar difference had an operand with no faces, so it made no B-rep",
+            ),
+        ];
+        for (failure, status, kind, message) in cases {
+            let e = SolidError::primitive(op, failure);
+            assert_eq!(e.sm_status(), Some(status), "{failure:?}");
+            assert_eq!(e.upstream_status(), Some(status), "{failure:?}");
+            assert_eq!(super::super::upstream_status(&e), Some(status));
+            assert_eq!(e.kind(), kind, "{failure:?}");
+            assert_eq!(e.primitive_failure(), Some(&failure));
+            assert!(!e.is_defect() && !e.is_refusal(), "{failure:?}");
+            assert_eq!(e.to_string(), format!("{op}: {message}"));
+        }
+        // a caught error stays the cause: it decides defect, and the status stays the site's
+        // (`SM_ERR`), not the cause's (`SM_ERR_NULL_POINTER`)
+        let why = "a step the kernel got wrong";
+        let caught = SolidError::primitive_broken_link(op, why);
+        let e = Failure::new(op, PrimitiveFailure::PolygonSideNotMade)
+            .caused_by(caught)
+            .into_error();
+        assert!(e.is_defect(), "{e}");
+        assert_eq!(e.upstream_status(), Some(SM_ERR));
+        assert_eq!(e.kind(), K::Failed);
+        // a broken link of the kernel's own is a defect keeping `SM_ERR_NULL_POINTER`
+        let link = SolidError::primitive_broken_link(op, why);
+        assert!(link.is_defect(), "{link}");
+        assert_eq!(link.upstream_status(), Some(SM_ERR_NULL_POINTER));
+        assert_eq!(
+            link.primitive_failure(),
+            Some(&PrimitiveFailure::Defect { why })
+        );
+        assert_eq!(link.to_string(), format!("{op}: stage_failed: {why}"));
+    }
+
     /// The sites that build a primitive phrase cause only fall:
     /// per file, in the library code of `solidcore` and `solidcore-ops`, as
     /// [`super::super::site_scan`] counts them. A PR that converts sites lowers its
@@ -645,17 +799,9 @@ mod tests {
         };
         #[rustfmt::skip] // one file per line, so conversions in parallel merge cleanly
         const PINNED: &[(&str, usize)] = &[
-            ("solidcore/src/primitive/api_curve_ops.rs", 1),
-            ("solidcore/src/primitive/api_curves.rs", 4),
             ("solidcore/src/primitive/api_primitives.rs", 2),
-            ("solidcore/src/primitive/api_surface_ops.rs", 1),
-            ("solidcore/src/primitive/primitive_creation/model.rs", 18),
-            ("solidcore/src/primitive/primitive_creation/model/merge.rs", 13),
-            ("solidcore/src/primitive/primitive_creation/p1.rs", 1),
             ("solidcore/src/primitive/primitive_creation/p1/boolean.rs", 5),
-            ("solidcore/src/primitive/primitive_creation/p1/offset_profile.rs", 2),
             ("solidcore/src/primitive/primitive_creation/p1/primitives.rs", 26),
-            ("solidcore/src/primitive/primitive_creation/p3/access.rs", 1),
             ("solidcore/src/primitive/primitive_creation/p3/construct.rs", 7),
             ("solidcore/src/primitive/primitive_creation/p3/geometry.rs", 5),
             ("solidcore/src/primitive/primitive_creation/p3/ruled.rs", 9),
