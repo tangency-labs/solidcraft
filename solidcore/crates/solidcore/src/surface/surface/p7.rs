@@ -2596,7 +2596,7 @@ fn solve_surface_cache_with<O: SolutionObject>(
 /// A port failure is chained too, so the answer is a port failure
 /// (`SolidError::is_port_failure`) and not a status answer: a solidcore-side failure is no
 /// answer of the operation on its input (#1452).
-pub(super) fn chained(op: &'static str, failure: SurfaceFailure, e: SolidError) -> SolidError {
+pub(crate) fn chained(op: &'static str, failure: SurfaceFailure, e: SolidError) -> SolidError {
     Failure::new(op, failure).caused_by(e).into_error()
 }
 

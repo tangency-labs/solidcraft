@@ -787,6 +787,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "cadmpeg-codec-iges"
+version = "0.6.12"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1046e958878d8d52df443b516bb275bb611a2853f5d91369888e8e7bfbc66a66"
+dependencies = [
+ "cadmpeg-core",
+ "cadmpeg-ir",
+ "memchr",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.21",
+ "toml 1.1.8+spec-1.1.0",
+]
+
+[[package]]
 name = "cadmpeg-codec-nx"
 version = "0.6.12"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -927,6 +942,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b101aa07edb4e12a2b0afcf7d5583793ebd45a131422b956a4fd2f7bd22a275a"
 dependencies = [
  "cadmpeg-codec-freecad",
+ "cadmpeg-codec-iges",
  "cadmpeg-codec-nx",
  "cadmpeg-codec-rhino",
  "cadmpeg-codec-step",
@@ -6425,6 +6441,7 @@ dependencies = [
  "solidcraft-viewport",
  "solidcraft-viewport-gpu",
  "tempfile",
+ "wat",
 ]
 
 [[package]]
@@ -6533,6 +6550,7 @@ dependencies = [
  "arboard",
  "egui",
  "egui-wgpu",
+ "flate2",
  "getrandom 0.2.17",
  "image",
  "log",
@@ -6606,6 +6624,7 @@ dependencies = [
 name = "solidcraft-ui-text"
 version = "0.47.0"
 dependencies = [
+ "flate2",
  "log",
  "serde_json",
  "sys-locale",

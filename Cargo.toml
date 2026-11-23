@@ -124,11 +124,12 @@ gltf = { version = "1.4", default-features = false, features = ["names"] }
 gethostname = "1"
 
 # FreeCAD, Rhino, USD and experimental NX import (Apache-2.0, pure Rust; native and browser builds).
+# Optional cadmpeg readers also handle STEP and IGES.
 # Pinned: its IR and codec APIs change between minor versions. Enable only the codecs used here;
 # `step` is the writer we restate through. NX imports geometry, not history.
 cadmpeg-core = "=0.6.12"
 cadmpeg-ir = "=0.6.12"
-cadmpeg-registry = { version = "=0.6.12", default-features = false, features = ["fcstd", "nx", "rhino", "step", "usd"] }
+cadmpeg-registry = { version = "=0.6.12", default-features = false, features = ["fcstd", "iges", "nx", "rhino", "step", "usd"] }
 
 # fonts (sketch text outlines; MIT OR Apache-2.0, pure Rust)
 ttf-parser = { version = "0.25", default-features = false, features = ["std", "variable-fonts"] }
