@@ -824,3 +824,37 @@ fn a_watertight_mesh_keeps_its_volume_and_an_open_mesh_has_none() {
     assert_eq!(r["total"]["open_bodies_skipped"], 1);
     assert!(close(&r["total"]["volume_mm3"], 1000.0 / 6.0, 1e-6), "{r}");
 }
+
+/// The perimeter of an ellipse of semi-axes `a` and `b` by the arithmetic-geometric mean, an exact
+/// method independent of the one measured.
+fn ellipse_perimeter(a: f64, b: f64) -> f64 {
+    let (mut x, mut y) = (a, b);
+    let (mut sum, mut power) = ((a * a - b * b) / 2.0, 0.5);
+    for _ in 0..8 {
+        let c = (x - y) / 2.0;
+        (x, y) = ((x + y) / 2.0, (x * y).sqrt());
+        power *= 2.0;
+        sum += power * c * c;
+    }
+    2.0 * PI * (a * a - sum) / x
+}
+
+/// A sketch ellipse measures its true length, alone and against a circle (#21129): 20 by 10 about
+/// the origin, 35 from the edge of a Ø10 circle at (60, 0); and 7 by 3 on the XZ plane, tilted.
+#[test]
+fn a_sketch_ellipse_measures_its_true_length() {
+    let mut s = Session::default();
+    run(&mut s, "sketch.create", json!({"plane": "XY"}));
+    let e = run(&mut s, "sketch.ellipse", json!({"center": [0, 0], "major": [20, 0], "minor_radius": 10}))["curves"][0].as_str().unwrap().to_string();
+    let c = run(&mut s, "sketch.circle.center", json!({"center": [60, 0], "radius": 5}))["curves"][0].as_str().unwrap().to_string();
+    let r = measure(&mut s, vec![json!({"type": "sketch_curve", "id": e})]);
+    assert!(close(&r["items"][0]["length_mm"], ellipse_perimeter(20.0, 10.0), 1e-6), "{r}");
+    let r = measure(&mut s, vec![json!({"type": "sketch_curve", "id": e}), json!({"type": "sketch_curve", "id": c})]);
+    assert!(close(&r["distance_mm"], 35.0, 1e-6), "{r}");
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "sketch.create", json!({"plane": "XZ"}));
+    let tilted = run(&mut s, "sketch.ellipse", json!({"center": [1, 2], "major": [4.0, 2.0 + 40f64.sqrt()], "minor_radius": 3}));
+    let tilted = tilted["curves"][0].as_str().unwrap().to_string();
+    let r = measure(&mut s, vec![json!({"type": "sketch_curve", "id": tilted})]);
+    assert!(close(&r["items"][0]["length_mm"], ellipse_perimeter(7.0, 3.0), 1e-6), "{r}");
+}
