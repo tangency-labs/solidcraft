@@ -93,7 +93,21 @@ fn schemas_and_the_key_check_agree() {
     assert_keys(input_schema_for::<RemoveParams>(), &["bodies", "body_name", "body_names", "name", "participants"]);
     assert_keys(
         input_schema_for::<EmbossParams>(),
-        &["body_name", "body_names", "depth", "face", "mode", "name", "participants", "profiles", "sketch", "targets"],
+        &[
+            "angle",
+            "body_name",
+            "body_names",
+            "depth",
+            "face",
+            "mode",
+            "name",
+            "offset_x",
+            "offset_y",
+            "participants",
+            "profiles",
+            "sketch",
+            "targets",
+        ],
     );
     assert_keys(
         input_schema_for::<BoundaryFillParams>(),
@@ -264,6 +278,9 @@ fn emboss_contract_keeps_the_handlers_errors() {
             ("solid.emboss", with(&emboss(), "sketch", json!("Nope"))),
             ("solid.emboss", with(&emboss(), "targets", json!(5))),
             ("solid.emboss", with(&emboss(), "profiles", json!(true))),
+            ("solid.emboss", with(&emboss(), "offset_x", json!("2 deg"))),
+            ("solid.emboss", with(&emboss(), "offset_y", json!("nope"))),
+            ("solid.emboss", with(&emboss(), "angle", json!("2 mm"))),
         ],
     );
     assert!(!crate::schema::issues("solid.emboss", &with(&emboss(), "mode", json!(5))).is_empty());
@@ -327,6 +344,9 @@ fn the_schemas_take_what_the_handlers_take() {
             with(&emboss(), "profiles", json!("all")),
             with(&emboss(), "targets", json!(["Sleeve"])),
             with(&emboss(), "face", json!({"x": 0, "y": 10, "z": 7.5})),
+            with(&emboss(), "offset_x", json!(1)),
+            with(&emboss(), "offset_y", json!("2 mm")),
+            with(&emboss(), "angle", json!("10 deg")),
             with(&emboss(), "depth", json!("")),
             with(&emboss(), "mode", json!("glue")),
             with(&emboss(), "face", json!([0, 10])),
