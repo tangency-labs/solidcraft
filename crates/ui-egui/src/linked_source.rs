@@ -1260,4 +1260,19 @@ mod tests {
         assert_eq!(names(&app), ["Plate"]);
         let _ = std::fs::remove_dir_all(folder);
     }
+
+    /// The component menu is a fixed 250 pt column that cuts a long label with an ellipsis, so in
+    /// German "Relink Source (All Instances)…" and "Relink Source and Use Its Names…" must tell
+    /// themselves apart at the start of the label and the new row must fit whole.
+    #[test]
+    fn the_two_relink_rows_differ_at_the_start_in_german() {
+        crate::i18n::install();
+        let _de = solidcraft_ui_text::scope("de");
+        let all = solidcraft_ui_text::tr_command("ui.relinkSource", "Relink Source (All Instances)…");
+        let names = solidcraft_ui_text::tr_command("ui.relinkSourceNames", "Relink Source and Use Its Names…");
+        assert_eq!(names, "Mit Quellnamen neu verknüpfen…");
+        let start = |s: &str| s.chars().take(8).collect::<String>();
+        assert_ne!(start(all), start(names), "{all:?} and {names:?} read alike when cut");
+        assert!(names.chars().count() <= 30, "{names:?} fits the menu column without an ellipsis");
+    }
 }
