@@ -335,10 +335,11 @@ controller and document stay with the panel. The desktop adapter remembers the
 panel's window size and monitor for the current app session and checks that the
 OS created the window before presenting content. On the web, the same action
 places the panel in the shared Floating zone.
-The renderer resolves surface intent through the shared Container, raising its
-fill alpha when canonical text needs more contrast. Captured `paint_alpha` and
-`contrast` report the effective paint and any readable fallback separately from
-declarative intent. Input and occlusion remain reserved regardless of alpha.
+Panels in the workspace use the ribbon's theme fill and backdrop blur. The
+system's Reduce Transparency setting keeps the panels opaque. Explicit opacity
+overrides use the panel contrast check. Captured `paint_alpha` and `contrast`
+report the effective paint and any readable fallback separately from declarative
+intent. Input and occlusion remain reserved regardless of alpha.
 
 ### Keyboard, accessibility and motion
 

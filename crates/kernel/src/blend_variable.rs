@@ -231,7 +231,7 @@ impl EdgeSetup {
     /// The edge of `body` a pick at `at` takes, as the blend takes it.
     fn new(body: &Body, at: Vec3) -> Result<EdgeSetup> {
         let (picked, _) = crate::blend_smlib::picked_edges(body, &[at])?;
-        let edge = *picked.first().ok_or_else(|| KernelError::Invalid(format!("no edge at {at:?}")))?;
+        let edge = *picked.first().ok_or_else(|| KernelError::Invalid(format!("no edge at {at}")))?;
         let rec = Faces::of(body)?;
         if !rec.straight(edge) {
             return Err(unsupported("only straight edges take a variable radius"));
@@ -476,7 +476,8 @@ pub fn fillet_tapered(body: &Body, edges: &[Vec3], radius: f64) -> Result<(Body,
 
 /// Chord-length fillet: each edge rounded so that the blend is `chord` wide across, from contact
 /// to contact at every station (SMLib's constant-chord round), its radius following the face
-/// angle along the edge.
+/// angle along the edge. The chord round of a single concave edge whose contact line runs off
+/// the flat face it rolls on is built by carrying that face on ([`crate::blend::or_carried_on`]).
 pub fn fillet_chord(body: &Body, edges: &[Vec3], chord: f64) -> Result<Body> {
     let _span = solidcraft_profile::span("kernel", "fillet_chord");
     body.require_brep("fillet")?;
@@ -486,7 +487,8 @@ pub fn fillet_chord(body: &Body, edges: &[Vec3], chord: f64) -> Result<Body> {
     if edges.is_empty() || edges.len() > 1000 {
         return Err(KernelError::Invalid("select 1…1000 edges".into()));
     }
-    crate::blend_smlib::fillet_chord(body, edges, chord)
+    let plain = crate::blend_smlib::fillet_chord(body, edges, chord);
+    crate::blend::or_carried_on(plain, body, edges, chord, |carried| crate::blend_smlib::fillet_chord(carried, edges, chord))
 }
 
 #[cfg(test)]
@@ -588,6 +590,15 @@ mod tests {
         let v = measure(&f).unwrap().volume;
         assert!(rel(6000.0 - v, removed) < 1e-4, "{} removed vs {removed}", 6000.0 - v);
         assert_eq!(f.unmeshed_faces(), 0);
+        // At (10-d, y, 30-d) the rolling-ball envelope meets the diagonal when the least
+        // (y-s)^2 + 2(d-r(s))^2 - r(s)^2 over both linear flanks is zero. Sample each
+        // side and their intersection. The great-circle section would be 1.17157 at y=10.
+        for (y, d) in [(5.0, 0.871530), (10.0, 1.162041), (15.0, 0.871530)] {
+            for (offset, class) in [(-0.003, crate::PointClass::Outside), (0.003, crate::PointClass::Inside)] {
+                let inset = d + offset;
+                assert_eq!(f.classify_point(Vec3::new(10.0 - inset, y, 30.0 - inset)).unwrap(), class);
+            }
+        }
     }
 
     /// A radius through a middle point, smooth: the removed volume is the balls' union.

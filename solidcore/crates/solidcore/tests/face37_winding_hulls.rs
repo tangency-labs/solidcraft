@@ -14,8 +14,7 @@
 )] // test helpers
 
 use solidcore::curve::curve::Curve;
-use solidcore::geom::attribute::{AttributeStore, ObjectKey};
-use solidcore::geom::object::ObjectRef;
+use solidcore::geom::attribute::AttributeStore;
 use solidcore::math::{Point3, Vec3};
 use solidcore::primitive::api_curves::{create_circle, create_line_segment};
 use solidcore::sweep::api_brep::create_linear_sweep;
@@ -26,7 +25,7 @@ use solidcore::topology::database_io::FileType;
 use solidcore::topology::face::p4::assert_test_face37;
 use solidcore::topology::topology::NotifyRecords;
 use solidcore::topology::EdgeuseId;
-use solidcore::{Brep, EntityRef, Kernel};
+use solidcore::{Brep, Kernel};
 use std::path::{Path, PathBuf};
 
 /// Reads `bytes` as an ASCII `.smb` and names it by arena identities, as the difftest
@@ -36,10 +35,7 @@ fn read_smb(bytes: Vec<u8>) -> Option<Brep> {
     let mut b = Brep::new_with_infinite_region().ok()?;
     let mut records = NotifyRecords::new();
     let mut attributes = AttributeStore::default();
-    let key = |_: EntityRef| ObjectRef {
-        key: ObjectKey(0),
-        type_code: 0,
-    };
+    let key = solidcore::topology::loopuse::notify_ref;
     let mut env = TopologyEnv {
         all_attributes: &[],
         attributes: &mut attributes,

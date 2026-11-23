@@ -1,11 +1,21 @@
 //! Per-design plugin data: the files a plugin keeps with one design, under `plugins/<plugin-id>/`
-//! in the design container (base64 in a plain JSON design). The design keeps them and saves them
+//! in the design container, held as their bytes ([`Blob`]). The design keeps them and saves them
 //! back byte for byte, whether or not the plugin is installed: a missing plugin never stops a
-//! design opening, and never loses its data. Plugins read and write them in a later capability
-//! (`storage`); until then nothing changes them.
+//! design opening, and never loses its data.
+//!
+//! A plugin with the `storage` capability keeps its data in this layout (RFC 0015, section 5):
+//! - `<plugin-id>/meta.json`: [`Meta`], who wrote the data and in which of the plugin's formats;
+//! - `<plugin-id>/data.json`: the plugin's main document, any JSON;
+//! - `<plugin-id>/blobs/<name>`: files of its own;
+//! - `<plugin-id>/cache/<name>`: files it can make again (a cached toolpath), which may be dropped.
+//!
+//! Only the plugin itself changes them, through the app's `storage.*` commands; anything else in
+//! the folder is kept as it came.
 use std::collections::BTreeMap;
 
-use serde::{Deserialize, Deserializer};
+use serde::{Deserialize, Deserializer, Serialize};
+
+use crate::blob::Blob;
 
 /// The container folder plugin data lives in.
 pub const PREFIX: &str = "plugins/";
@@ -28,9 +38,76 @@ pub fn valid_key(key: &str) -> bool {
         })
 }
 
-/// Reads a design's `plugin_data`, leaving out keys that are not [`valid_key`] and anything past
-/// [`MAX_FILES`], so a hand-edited design still opens.
-pub fn deserialize<'de, D: Deserializer<'de>>(deserializer: D) -> Result<BTreeMap<String, String>, D::Error> {
+/// The plugin's record of its data, `<plugin-id>/meta.json`.
+pub const META: &str = "meta.json";
+/// The plugin's main document, `<plugin-id>/data.json`.
+pub const DATA: &str = "data.json";
+/// The folder of the plugin's own files.
+pub const BLOBS: &str = "blobs/";
+/// The folder of files the plugin can make again.
+pub const CACHE: &str = "cache/";
+
+/// Who wrote a plugin's data and in which of its formats (`<plugin-id>/meta.json`). Read leniently:
+/// a field that is missing or of the wrong kind reads as empty, so a hand-edited file never stops
+/// the design opening.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize)]
+pub struct Meta {
+    pub plugin: String,
+    /// The plugin's name, for the user ("Contains Manufacture data").
+    pub name: String,
+    pub plugin_version: String,
+    /// The data's own format number; 0 when it is not known.
+    pub format: u32,
+}
+
+impl Meta {
+    /// Reads `bytes` as a meta record; `None` when they are not a JSON object.
+    pub fn parse(bytes: &[u8]) -> Option<Self> {
+        let value: serde_json::Value = serde_json::from_slice(bytes).ok()?;
+        let object = value.as_object()?;
+        let text = |key: &str, max: usize| -> String {
+            object
+                .get(key)
+                .and_then(serde_json::Value::as_str)
+                .filter(|t| !t.chars().any(char::is_control))
+                .map(|t| t.chars().take(max).collect())
+                .unwrap_or_default()
+        };
+        let format = object.get("format").and_then(serde_json::Value::as_u64).and_then(|f| u32::try_from(f).ok()).unwrap_or(0);
+        Some(Self { plugin: text("plugin", 64), name: text("name", 80), plugin_version: text("plugin_version", 32), format })
+    }
+}
+
+/// The ids of the plugins that have data in `data`, in order.
+pub fn plugins(data: &BTreeMap<String, Blob>) -> Vec<String> {
+    let mut ids: Vec<String> = data.keys().filter_map(|key| key.split_once('/').map(|(id, _)| id.to_string())).collect();
+    ids.dedup();
+    ids
+}
+
+/// The bytes of one plugin data file, `None` when there is no such file.
+pub fn file<'a>(data: &'a BTreeMap<String, Blob>, id: &str, path: &str) -> Option<&'a [u8]> {
+    data.get(&format!("{id}/{path}")).map(Blob::as_bytes)
+}
+
+/// A plugin's meta record: its `meta.json`, or, when that is missing or unreadable, one naming
+/// only the plugin id, so data written by hand still says which plugin it belongs to.
+pub fn meta(data: &BTreeMap<String, Blob>, id: &str) -> Meta {
+    let mut meta = file(data, id, META).and_then(Meta::parse).unwrap_or_default();
+    meta.plugin = id.to_string();
+    meta
+}
+
+/// Reads the `plugin_data` an older plain JSON design kept, base64 by key, decoding each file once.
+/// Keys that are not [`valid_key`], text that is not base64 and anything past [`MAX_FILES`] are left
+/// out, so a hand-edited design still opens. Nothing writes this field any more: a container keeps
+/// the files as parts of their own.
+pub fn deserialize<'de, D: Deserializer<'de>>(deserializer: D) -> Result<BTreeMap<String, Blob>, D::Error> {
     let all = BTreeMap::<String, String>::deserialize(deserializer)?;
-    Ok(all.into_iter().filter(|(key, _)| valid_key(key)).take(MAX_FILES).collect())
+    Ok(all
+        .into_iter()
+        .filter(|(key, _)| valid_key(key))
+        .filter_map(|(key, text)| crate::blob::from_legacy_text(&text).map(|blob| (key, blob)))
+        .take(MAX_FILES)
+        .collect())
 }

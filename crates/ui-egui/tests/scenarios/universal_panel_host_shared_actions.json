@@ -1,7 +1,7 @@
 [
   {"note":"The opt-in synthetic panels use the actual workspace host and shared move menu."},
   {"call":"ui.resize","params":{"width":1280,"height":800}},
-  {"panel_fixture":{"enabled":true,"preset":"docks"}},
+  {"panel_fixture":{"enabled":true,"preset":"inline"}},
   {"widget":"Panel actions"},
   {"widget":"Floating"},
   {"widget":"Panel actions"},

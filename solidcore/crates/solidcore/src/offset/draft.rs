@@ -50,7 +50,9 @@
 //! draft, the sense of its outer faceuse and the [`Draft`]. It is re-certified by the label
 //! and the derivation: the net's analytic surface is the drafted one's kind, and its NURBS
 //! form lies on both that analytic surface and the one derived from the definition
-//! ([`lies_on`], to the rounding of checking it).
+//! ([`lies_on`], to the rounding of checking it). A radial edit retains the source
+//! frame on its positive neutral circle: fitted end circles supply parameter conventions,
+//! while [`AnalyticSupport::build`] certifies the intended support on the edited form.
 
 use crate::blend::fillet_section::interval::Ivl;
 use crate::blend::fillet_section::station::as_b_spline;
@@ -70,7 +72,7 @@ use crate::surface::implicit::{lies_on, AnalyticSupport, Implicit};
 use crate::surface::surface::{Surface, SurfaceKind};
 use crate::topology::face::p2::outer_faceuse;
 use crate::topology::{Brep, FaceId};
-use crate::{EntityRef, Result, SolidError};
+use crate::{Result, SolidError};
 
 const OP: &str = "offset::draft";
 const OP_RECERTIFY: &str = "offset::draft::DraftDefinition::recertify";
@@ -401,7 +403,7 @@ struct ConeDraft {
 /// # Errors
 ///
 /// Those of reading the net's knots and control points.
-fn net_sense(
+pub(crate) fn net_sense(
     net: &BSplineSurface,
     on_axis: Point3,
     x_axis: Vec3,
@@ -572,7 +574,14 @@ impl Cone {
         };
         let pull = d.along;
         if self.is_cylinder() {
-            return cone_edit(self.lean_cylinder(k, d.turned * d.sense, d.v0));
+            return match cone_edit(self.lean_cylinder(k, d.turned * d.sense, d.v0))? {
+                Ok(cone) => Ok(Ok(self.drafted_on_source_axis(
+                    k,
+                    cone.rev.base().copy(),
+                    d,
+                )?)),
+                Err(refusal) => Ok(Err(refusal)),
+            };
         }
         let mut cone = self.clone();
         let net = cone.base_mut();
@@ -612,7 +621,38 @@ impl Cone {
         if let Err(refusal) = cone_edit(cone.rebuild_step_from_nurb_parameters(k))? {
             return Ok(Err(refusal));
         }
-        Ok(Ok(cone))
+        Ok(Ok(self.drafted_on_source_axis(
+            k,
+            cone.rev.base().copy(),
+            d,
+        )?))
+    }
+
+    /// A radial edit keeps its source axis. End-circle recognition supplies the
+    /// parameter conventions, but its fitted centres must not redefine that axis.
+    /// Use the positive neutral circle as origin and certify both the implicit
+    /// support and its UV parametrisation on the edited form.
+    fn drafted_on_source_axis(
+        &self,
+        k: &Kernel,
+        form: BSplineSurface,
+        d: ConeDraft,
+    ) -> Result<Cone> {
+        let mut placement = self.canonical().origin;
+        placement.set_origin(d.centre);
+        let support = AnalyticSupport::Cone {
+            placement,
+            base_radius: d.r0,
+            semi_angle_deg: (d.sense * d.turned).atan().to_degrees(),
+        };
+        let surface = support.build(k, form)?;
+        match surface.kind() {
+            SurfaceKind::Cone(cone) => Ok((**cone).clone()),
+            _ => Err(SolidError::invalid_input(
+                OP,
+                "a drafted cone keeps its cone kind",
+            )),
+        }
     }
 }
 
@@ -765,15 +805,17 @@ impl DraftDefinition {
     }
 }
 
-/// `SM_ERR_INVALID_INPUT` for face `f` (the capi's status for a face without a surface or
-/// an outer faceuse).
-fn invalid(f: FaceId) -> SolidError {
-    Failure::new(
-        OP,
-        OffsetFailure::InvalidValue("the face has no surface or no outer face use"),
-    )
-    .at(EntityRef::Face(f))
-    .into_error()
+/// The refusal of face `f` of the caller's body, which has no surface or no face use
+/// (`missing_surface`), with the capi's status for it, `SM_ERR_INVALID_INPUT`.
+fn invalid(f: FaceId, missing_surface: bool) -> SolidError {
+    let failure = if missing_surface {
+        OffsetFailure::FaceHasNoSurface { face: f }
+    } else {
+        OffsetFailure::FaceHasNoOuterFaceuse { face: f }
+    };
+    Failure::new(OP, failure)
+        .with_status(crate::error::SM_ERR_INVALID_INPUT)
+        .into_error()
 }
 
 /// The surface face `f` of a solid takes drafted by `draft`, with its definition
@@ -796,7 +838,7 @@ pub fn draft_surface(
     let fu = outer_faceuse(b, f)?;
     let surf = b.face(f)?.surface.as_ref();
     let (Some(surf), Some(fu)) = (surf, fu) else {
-        return Err(invalid(f));
+        return Err(invalid(f, surf.is_none()));
     };
     let outward = b.faceuse(fu)?.orientation == OrientType::Same;
     let mut drafted = match surf.kind_with_nurb(k)? {
@@ -828,6 +870,164 @@ pub fn draft_surface(
     Ok(Ok(drafted))
 }
 
+/// Points tried on each edge of a face by [`drafted_through`], its ends included.
+const THROUGH_POINTS: usize = 17;
+
+/// A face a draft would have to cut through ([`drafted_through`]): the drafted face, the face
+/// it runs into, a point of that face inside the band the draft takes off or adds, and how far
+/// that point lies past the drafted plane.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct DraftedThrough {
+    /// The drafted face.
+    pub drafted: FaceId,
+    /// The face it runs into.
+    pub through: FaceId,
+    /// A point of `through` in the band between the face's plane and its drafted plane.
+    pub at: Point3,
+    /// The point's distance past the drafted plane: the face reaches at least this far in.
+    pub depth: f64,
+}
+
+/// Not upstream: a face of `b` that drafting the plane faces `faces` onto the planes `surfaces`
+/// (in the same order) would cut through. A draft replaces each face by its drafted plane and
+/// extends or trims the faces around it ([`crate::topology::brep::local_operation`]); a face that
+/// meets no drafted face, not even at a vertex, but has a point between a drafted face's plane
+/// and its drafted plane, over the face itself, would be cut through, a change of topology the
+/// draft does not make (a hole whose wall passes within the draft of the side, #19686).
+///
+/// The point is proved, not estimated: it is one of the face's vertices or a point evaluated on
+/// one of its edges' curves, and it lies past each plane by more than the edge's or vertex's
+/// tolerance and the rounding of the comparison. It lies over the drafted face when its foot on
+/// the face's plane is classified inside the face's trimmed area, off its edges and vertices, by
+/// the face's own point classification against its loops
+/// ([`crate::query::face::p1::point_3d_classify_at`]), so a point beside a face that is not a
+/// rectangle (an L, a face with a hole) is not taken for one over it. The classification runs on
+/// `b` in place, its lazy caches as upstream's const query keeps them. A face with no such point
+/// among those tried is not reported; a pair that is not two planes is skipped.
+///
+/// # Errors
+///
+/// Those of reading the faces, edges, vertices and surfaces, of evaluating the curves and of
+/// the point classification.
+pub fn drafted_through(
+    k: &Kernel,
+    b: &mut Brep,
+    faces: &[FaceId],
+    surfaces: &[Surface],
+) -> Result<Option<DraftedThrough>> {
+    use crate::intersect::point_class::{PointClassType, PointClassification};
+    use crate::query::face::p1::{point_3d_classify_at, Point3dClassifyOptions};
+    use crate::topology::face::p4::{edges, vertices};
+    // each drafted plane face: its plane's origin and outward normal, and its drafted plane's
+    let mut bands = Vec::new();
+    for (&f, drafted) in faces.iter().zip(surfaces) {
+        let (Some(surf), Some(fu)) = (b.face(f)?.surface.as_ref(), outer_faceuse(b, f)?) else {
+            continue;
+        };
+        let (SurfaceKind::Plane(plane), SurfaceKind::Plane(tilted)) =
+            (surf.kind_with_nurb(k)?, drafted.kind_with_nurb(k)?)
+        else {
+            continue;
+        };
+        let sense = if b.faceuse(fu)?.orientation == OrientType::Same {
+            1.0
+        } else {
+            -1.0
+        };
+        let (at, tilted_at) = (plane.position(), tilted.position());
+        bands.push((
+            f,
+            at.origin(),
+            at.z_axis() * sense,
+            tilted_at.origin(),
+            tilted_at.z_axis() * sense,
+        ));
+    }
+    if bands.is_empty() {
+        return Ok(None);
+    }
+    // what touches a drafted face: its edges' and vertices' other faces are trimmed or extended
+    let mut near_edges = Vec::new();
+    let mut near_vertices = Vec::new();
+    for &f in faces {
+        near_edges.extend(edges(b, f, None, false, None)?);
+        near_vertices.extend(vertices(b, f, None, false, None)?);
+    }
+    for g in crate::topology::brep::p1::faces(b, None)? {
+        if faces.contains(&g) {
+            continue;
+        }
+        let g_edges = edges(b, g, None, false, None)?;
+        let g_vertices = vertices(b, g, None, false, None)?;
+        if g_edges.iter().any(|e| near_edges.contains(e))
+            || g_vertices.iter().any(|v| near_vertices.contains(v))
+        {
+            continue;
+        }
+        let mut points = Vec::new();
+        for &vx in &g_vertices {
+            let vertex = b.vertex(vx)?;
+            points.push((vertex.point, vertex.tolerance));
+        }
+        for &e in &g_edges {
+            let edge = b.edge(e)?;
+            let Some(curve) = edge.curve.as_ref() else {
+                continue;
+            };
+            let (t0, t1) = (edge.interval.min(), edge.interval.max());
+            if !(t0.is_finite() && t1.is_finite() && t0 <= t1) {
+                continue;
+            }
+            for i in 0..THROUGH_POINTS {
+                let s = i as f64 / (THROUGH_POINTS - 1) as f64;
+                points.push((curve.evaluate_point(k, t0 + (t1 - t0) * s)?, edge.tolerance));
+            }
+        }
+        let mut deepest: Option<DraftedThrough> = None;
+        for &(f, origin, n, hinge, normal) in &bands {
+            for &(q, tol) in &points {
+                let (to_face, to_drafted) = (q - origin, q - hinge);
+                // the comparisons' rounding: a few units in the last place of the largest term
+                let scale = [
+                    q.x, q.y, q.z, origin.x, origin.y, origin.z, hinge.x, hinge.y, hinge.z,
+                ]
+                .iter()
+                .fold(1.0_f64, |m, c| m.max(c.abs()));
+                let margin = tol.max(0.0) + 64.0 * f64::EPSILON * scale;
+                let (a, d) = (n.dot(to_face), normal.dot(to_drafted));
+                let between = (a < -margin && d > margin) || (a > margin && d < -margin);
+                if !between || deepest.is_some_and(|w| d.abs() <= w.depth) {
+                    continue;
+                }
+                // its foot on the face's plane, inside the face's trimmed area
+                let mut pc = PointClassification::new(margin);
+                point_3d_classify_at(
+                    k,
+                    b,
+                    f,
+                    q - n * a,
+                    margin,
+                    true,
+                    &mut pc,
+                    Point3dClassifyOptions::default(),
+                )?;
+                if pc.point_class() == PointClassType::Face {
+                    deepest = Some(DraftedThrough {
+                        drafted: f,
+                        through: g,
+                        at: q,
+                        depth: d.abs(),
+                    });
+                }
+            }
+        }
+        if deepest.is_some() {
+            return Ok(deepest);
+        }
+    }
+    Ok(None)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -837,6 +1037,8 @@ mod tests {
     use crate::topology::brep::p1 as brep_p1;
 
     const THETA: f64 = 5.0 * core::f64::consts::PI / 180.0;
+    /// A draft steep enough to reach past a pocket's floor into the empty pocket behind it.
+    const THIRTY: f64 = 30.0 * core::f64::consts::PI / 180.0;
 
     /// The face of `b` whose tight box is flat at `x = at` (`axis` 0), `y = at` (1) or
     /// `z = at` (2).
@@ -1058,6 +1260,51 @@ mod tests {
         assert!(on(&k, &hole, &cone(THETA.tan())));
     }
 
+    /// Radial drafting preserves the source axis and the angular frame. Re-fitting
+    /// the two end circles can perturb that frame and lose exact coaxiality.
+    #[test]
+    fn a_drafted_cylinder_keeps_its_source_axis() {
+        use crate::geom::expansion as exact;
+        let mut k = Kernel {
+            fixes: crate::kernel::UpstreamFixes::all(),
+            ..Kernel::default()
+        };
+        let b = create_cylinder(&mut k, Point3::ZERO, 10.0, 20.0).unwrap();
+        let f = curved_face(&k, &b);
+        let SurfaceKind::Cone(source) = b.face(f).unwrap().surface.as_ref().unwrap().kind() else {
+            panic!("cylinder")
+        };
+        let frame = source.canonical().origin;
+        for pull in [Vec3::Z, -Vec3::Z] {
+            for degrees in [3.0_f64, 5.0] {
+                let draft = Draft::new(
+                    Point3::new(0.0, 0.0, 10.0),
+                    Vec3::Z,
+                    pull,
+                    degrees.to_radians(),
+                )
+                .unwrap();
+                let s = draft_surface(&k, &b, f, &draft).unwrap().unwrap();
+                let SurfaceKind::Cone(cone) = s.kind() else {
+                    panic!("drafted cone")
+                };
+                let placement = cone.canonical().origin;
+                assert_eq!(placement.x_axis(), frame.x_axis());
+                assert_eq!(placement.y_axis(), frame.y_axis());
+                let axis = frame.x_axis().cross(frame.y_axis());
+                let was = exact::cross(frame.origin(), axis).unwrap();
+                let now = exact::cross(placement.origin(), axis).unwrap();
+                for (a, c) in was.iter().zip(&now) {
+                    assert!(
+                        exact::is_zero(&exact::sub(a, c)),
+                        "pull={pull:?}, angle={degrees}: {placement:?} vs {frame:?}"
+                    );
+                }
+                assert_eq!(s.procedural_blend().unwrap().recertify(&k).unwrap(), 0.0);
+            }
+        }
+    }
+
     /// A frustum r 10 at its base to 8 at its top, 20 tall, drafted 5 degrees about its base:
     /// its generators turn 5 degrees more, radius 10 + z tan(atan(-0.1) - 5 degrees).
     #[test]
@@ -1080,6 +1327,33 @@ mod tests {
             }
         ));
         assert_eq!(s.procedural_blend().unwrap().recertify(&k).unwrap(), 0.0);
+        // Cancelling the source slope gives a zero-angle cone on the same axis;
+        // its analytic label must agree with the cylinder-shaped edited net.
+        let SurfaceKind::Cone(source) = b.face(f).unwrap().surface.as_ref().unwrap().kind() else {
+            panic!("cone")
+        };
+        let cancel = Draft::new(
+            Point3::ZERO,
+            Vec3::Z,
+            Vec3::Z,
+            source.tan_semi_angle().atan(),
+        )
+        .unwrap();
+        let straight = draft_surface(&k, &b, f, &cancel).unwrap().unwrap();
+        assert!(on(
+            &k,
+            &straight,
+            &Implicit::Cone {
+                origin: Point3::ZERO,
+                axis: Vec3::Z,
+                radius: 10.0,
+                tan_angle: 0.0,
+            }
+        ));
+        assert_eq!(
+            straight.procedural_blend().unwrap().recertify(&k).unwrap(),
+            0.0
+        );
     }
 
     #[test]
@@ -1328,5 +1602,73 @@ mod tests {
             off.angle = 2.0 * THETA;
             assert!(draft_rebuild(&k, &off).is_err());
         }
+    }
+
+    /// A 40 x 40 x 20 block with an r = 1 hole through it at (37, 20), 2 from the x = 40 side.
+    /// Drafted 30 degrees inwards about its bottom, that side reaches x = 40 - z tan 30 degrees,
+    /// so the hole's wall, which meets the side nowhere, lies inside the band the draft takes
+    /// off and over the side itself: the draft would cut through it (#19686).
+    #[test]
+    fn a_draft_through_a_hole_near_the_side_is_reported() {
+        use crate::boolean::api_brep::boolean_difference;
+        let mut k = Kernel::default();
+        let block = create_box(&mut k, Point3::ZERO, 40.0, 40.0, 20.0).unwrap();
+        let bore = create_cylinder(&mut k, Point3::new(37.0, 20.0, -1.0), 1.0, 22.0).unwrap();
+        let mut b = boolean_difference(&mut k, block, bore).unwrap();
+        let wall = curved_face(&k, &b);
+        let f = flat_face(&k, &b, 0, 40.0);
+        let steep = Draft::new(Point3::ZERO, Vec3::Z, Vec3::Z, THIRTY).unwrap();
+        let s = draft_surface(&k, &b, f, &steep).unwrap().unwrap();
+        let through = drafted_through(&k, &mut b, &[f], &[s]).unwrap().unwrap();
+        assert_eq!((through.drafted, through.through), (f, wall));
+        // the point is on the wall, behind the side's plane and past the drafted one:
+        // 40 - z tan 30 degrees < x < 40
+        let r = ((through.at.x - 37.0).powi(2) + (through.at.y - 20.0).powi(2)).sqrt();
+        assert!((r - 1.0).abs() < 1e-9, "not on the wall: {:?}", through.at);
+        let reached = 40.0 - through.at.z * THIRTY.tan();
+        assert!(
+            reached < through.at.x && through.at.x < 40.0,
+            "{:?} {}",
+            through.at,
+            reached
+        );
+        assert!(through.depth > 0.0);
+    }
+
+    /// The same block with a pocket cut through the x = 40 side, opening y 15..25, z 5..15 and
+    /// 5 deep, so that side is a rectangle with a rectangular hole in it and the pocket's floor
+    /// is the face at x = 35. The drafted plane does reach past that floor (40 - 15 tan 30
+    /// degrees is 31.3), but every point of the floor meets the side's plane inside the
+    /// pocket's opening, over no part of the side: the drafted face passes through the empty
+    /// pocket and cuts nothing. The box of the side's vertices, which knows only the side's
+    /// outer edges, would name the floor.
+    #[test]
+    fn a_draft_into_the_empty_space_of_a_pocket_is_not_reported() {
+        use crate::boolean::api_brep::boolean_difference;
+        let mut k = Kernel::default();
+        let block = create_box(&mut k, Point3::ZERO, 40.0, 40.0, 20.0).unwrap();
+        let pocket = create_box(&mut k, Point3::new(35.0, 15.0, 5.0), 6.0, 10.0, 10.0).unwrap();
+        let mut b = boolean_difference(&mut k, block, pocket).unwrap();
+        let f = flat_face(&k, &b, 0, 40.0);
+        // the pocket is there, and its floor is a face of its own, meeting the side nowhere
+        let floor = flat_face(&k, &b, 0, 35.0);
+        assert_ne!(floor, f);
+        let steep = Draft::new(Point3::ZERO, Vec3::Z, Vec3::Z, THIRTY).unwrap();
+        let s = draft_surface(&k, &b, f, &steep).unwrap().unwrap();
+        // the drafted plane is the one the case is read against, and it does reach past the floor
+        assert!(on(
+            &k,
+            &s,
+            &Implicit::Plane {
+                origin: Point3::new(40.0, 0.0, 0.0),
+                normal: Vec3::new(THIRTY.cos(), 0.0, THIRTY.sin())
+            }
+        ));
+        let reaches = 40.0 - 15.0 * THIRTY.tan();
+        assert!(
+            reaches < 35.0,
+            "the drafted plane does not reach the floor: {reaches}"
+        );
+        assert_eq!(drafted_through(&k, &mut b, &[f], &[s]).unwrap(), None);
     }
 }

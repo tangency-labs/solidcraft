@@ -28,7 +28,7 @@ fn pbr_encode(c: vec3<f32>) -> vec3<f32> {
 @vertex
 fn vs_pbr(@location(0) p: vec3<f32>, @location(1) n: vec3<f32>, @location(2) base: vec3<f32>, @location(3) parameters: vec3<f32>) -> PbrOut {
     var o: PbrOut;
-    o.pos = u.vp * vec4<f32>(p, 1.0);
+    o.pos = face_pushed(u.vp * vec4<f32>(p, 1.0));
     o.n = n;
     o.base = base;
     o.wp = p;
@@ -63,9 +63,7 @@ fn pbr_brdf(base: vec3<f32>, parameters: vec3<f32>, n: vec3<f32>, v: vec3<f32>, 
     return specular + (vec3<f32>(1.0) - pbr_fresnel(f0, nv, parameters.x, parameters.z)) * (vec3<f32>(1.0) - pbr_fresnel(f0, nl, parameters.x, parameters.z)) * diffuse;
 }
 
-// The palette's PBR materials: for palette row r, texel row 2r holds each entry's linear base
-// colour (and a PBR flag), row 2r + 1 its metallic fraction, roughness and dielectric IOR.
-@group(0) @binding(2) var pbr_materials: texture_2d<f32>;
+// `pbr_materials`, the palette's PBR materials, is declared in viewport.wgsl.
 
 // A placement of a shared smooth mesh whose palette entry names its material (the product
 // preview's instanced PBR parts): moved as `vs_tri_inst` moves it.
@@ -77,13 +75,18 @@ fn vs_pbr_inst(
     @location(4) r1: vec4<f32>,
     @location(5) r2: vec4<f32>,
     @location(6) c: u32,
+    @location(9) s: u32,
 ) -> PbrOut {
     let q = vec4<f32>(p, 1.0);
-    let wp = vec3<f32>(dot(r0, q), dot(r1, q), dot(r2, q));
+    // Moved with its body, like every other placement (`placed_by` in viewport.wgsl): by its own
+    // motion, else its entry's (read only while something moves).
+    var m = 0u;
+    if (u.screen.z >= 0.5) { m = placement_motion(s, palette_entry(c)); }
+    let wp = placed_by(m, vec3<f32>(dot(r0, q), dot(r1, q), dot(r2, q)));
     let at = vec2<u32>(c & 2047u, (c >> 11u) * 2u);
     var o: PbrOut;
-    o.pos = u.vp * vec4<f32>(wp, 1.0);
-    o.n = vec3<f32>(dot(r0.xyz, n), dot(r1.xyz, n), dot(r2.xyz, n));
+    o.pos = face_pushed(u.vp * vec4<f32>(wp, 1.0));
+    o.n = turned_by(m, vec3<f32>(dot(r0.xyz, n), dot(r1.xyz, n), dot(r2.xyz, n)));
     o.base = textureLoad(pbr_materials, at, 0).xyz;
     o.wp = wp;
     let optics = textureLoad(pbr_materials, at + vec2<u32>(0u, 1u), 0);
@@ -96,11 +99,14 @@ fn vs_pbr_inst(
 @vertex
 fn vs_pbr_palette(@location(0) p: vec3<f32>, @location(1) n: vec3<f32>, @location(2) c: u32) -> PbrOut {
     let at = vec2<u32>(c & 2047u, (c >> 11u) * 2u);
+    // Moved with its body, like every other built triangle.
+    let m = motion_at(c);
+    let wp = placed_by(m, p);
     var o: PbrOut;
-    o.pos = u.vp * vec4<f32>(p, 1.0);
-    o.n = n;
+    o.pos = face_pushed(u.vp * vec4<f32>(wp, 1.0));
+    o.n = turned_by(m, n);
     o.base = textureLoad(pbr_materials, at, 0).xyz;
-    o.wp = p;
+    o.wp = wp;
     let optics = textureLoad(pbr_materials, at + vec2<u32>(0u, 1u), 0);
     o.parameters = optics.xyz;
     o.two = optics.w;

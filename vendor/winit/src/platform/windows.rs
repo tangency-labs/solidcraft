@@ -765,3 +765,19 @@ impl IconExtWindows for Icon {
         Ok(Icon { inner: win_icon })
     }
 }
+
+/// SolidCraft: whether dragging a window by its title bar is quiet, for every window of the
+/// process.
+///
+/// While a window is inside Windows' modal move loop (`WM_ENTERSIZEMOVE` … `WM_EXITSIZEMOVE`) and
+/// its size has not changed, `true` makes winit validate `WM_PAINT` without
+/// [`WindowEvent::RedrawRequested`](crate::event::WindowEvent::RedrawRequested) and request one
+/// paint when the loop ends, send [`WindowEvent::Moved`](crate::event::WindowEvent::Moved) once,
+/// with the final position, at the end, and send no relative
+/// [`DeviceEvent::MouseMotion`](crate::event::DeviceEvent::MouseMotion) meanwhile, so an app does
+/// not render once per move step. `false` (the default) is winit's own behaviour: every paint,
+/// every move step and all raw motion are sent. It is read at each message, so a change applies
+/// at once; a paint or a move held back before it is turned off is still sent when the loop ends.
+pub fn set_quiet_window_move(on: bool) {
+    crate::platform_impl::set_quiet_window_move(on);
+}

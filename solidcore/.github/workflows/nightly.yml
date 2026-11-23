@@ -37,7 +37,9 @@ jobs:
       # tiny-scale torus booleans finish under MAX_SOLVE_BRANCHES (geom::global_solver).
       - name: Slow regressions
         if: ${{ !cancelled() }}
-        run: cargo test -p solidcore --release --test max_solve_branches_tiny_torus -- --ignored
+        run: >-
+          cargo test -p solidcore --release --test geometry --
+          --ignored max_solve_branches_tiny_torus::
 
       # Owner-approved (2026-10-27): the SolidCraft whole-corpus harness checks (every
       # case reaches a verdict; every deferral names a plan unit) take minutes even

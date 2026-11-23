@@ -6,7 +6,7 @@
 //! of reference fields with their labels, and the centring and trimming marks.
 //! [`DrawingBorderProfile::validate`] checks a profile on its own, as when one is read, and
 //! [`DrawingBorderProfile::layout`] works it out for one sheet, so a new size regrows it. Nothing
-//! here is frozen geometry, saved in a design or drawn: a writer draws the [`SheetLayout`] later.
+//! here is frozen geometry or saved in a design: [`SheetLayout::paper`] gives a writer what it draws.
 //!
 //! Sheet coordinates are millimetres from the sheet's lower-left corner, x to the right and y up.
 //! The drawing border's line is centred on [`SheetLayout::drawing_border`].
@@ -33,10 +33,10 @@
 use serde::{Deserialize, Serialize};
 
 use crate::Aabb2;
-use crate::paper::MAX_LINE_MM;
 /// The longest side a custom sheet may have, in millimetres: the paper scene's limit.
 pub use crate::paper::MAX_SIDE_MM;
-use solidcore_record::Vec2;
+use crate::paper::{Group, Item, MAX_LINE_MM, ObjectKind};
+use solidcore_record::{Loop2, Region2, Seg2, Vec2};
 
 /// The most fields an equal division may cut each way.
 pub const MAX_EQUAL_FIELDS: u32 = 200;
@@ -363,6 +363,9 @@ impl DrawingBorderProfile {
         let narrowest = self.laid_out_margins().sides().into_iter().fold(f64::INFINITY, f64::min);
         let g = self.grid_border_mm;
         require(g.is_finite() && g >= 0.0 && g <= narrowest, "the grid reference border lies between the sheet border and the drawing border")?;
+        // Its field marks run from the drawing border out to it, so closer than a field's shortest
+        // length they would be slivers drawn on the drawing border's own line.
+        require(g == 0.0 || g >= MIN_FIELD_MM, "the grid reference border lies on the drawing border or at least 1 mm outside it")?;
         if let Some(reach) = self.centring_mark_mm {
             let fits = reach.is_finite() && (0.0..=MAX_SIDE_MM).contains(&reach);
             require(fits, "a centring mark ends on the drawing border or at most 5000 mm inside it")?;
@@ -434,6 +437,50 @@ impl DrawingBorderProfile {
     }
 }
 
+/// ISO 5457's grid line width (the drawings study, section 11.3): the grid reference border and the
+/// marks at its field edges.
+pub const GRID_LINE_MM: f64 = 0.35;
+
+impl SheetLayout {
+    /// What the drawing border draws, as paper groups of kind `drawing_border` for `object`, in this
+    /// order and each left out when it has nothing: the drawing border, closed,
+    /// `drawing_border_line_mm` wide; the grid reference border and a mark at each edge between two
+    /// fields, from the drawing border out to it on every side, [`GRID_LINE_MM`] wide; the centring
+    /// marks in the drawing border's width; the trimming marks, filled. The grid's labels are text,
+    /// which the paper scene doesn't have yet.
+    pub fn paper(&self, object: u64) -> Vec<Group> {
+        let line = |a, b, width_mm| Item::Stroke { path: vec![Seg2::Line { a, b }], closed: false, width_mm, pattern: None };
+        let outline = |r, width_mm| Item::Stroke { path: rectangle(r).segs, closed: true, width_mm, pattern: None };
+        let (d, g) = (self.drawing_border, self.grid_border);
+        let mut grid = Vec::new();
+        // No fields, or a grid reference border on the drawing border: no grid to draw.
+        if !self.columns.is_empty() && g.min.x < d.min.x {
+            grid.push(outline(g, GRID_LINE_MM));
+            // Each field's far edge but the last's: left to right, and top to bottom.
+            for x in self.columns.iter().take(self.columns.len().saturating_sub(1)).map(|f| f.to_mm) {
+                grid.push(line(Vec2::new(x, g.min.y), Vec2::new(x, d.min.y), GRID_LINE_MM));
+                grid.push(line(Vec2::new(x, d.max.y), Vec2::new(x, g.max.y), GRID_LINE_MM));
+            }
+            for y in self.rows.iter().take(self.rows.len().saturating_sub(1)).map(|f| f.from_mm) {
+                grid.push(line(Vec2::new(g.min.x, y), Vec2::new(d.min.x, y), GRID_LINE_MM));
+                grid.push(line(Vec2::new(d.max.x, y), Vec2::new(g.max.x, y), GRID_LINE_MM));
+            }
+        }
+        let centring = self.centring_marks.iter().map(|&[a, b]| line(a, b, self.drawing_border_line_mm)).collect();
+        let trimming = self.trimming_marks.iter().map(|&r| Item::Fill { region: Region2 { outer: rectangle(r), holes: vec![] } }).collect();
+        [vec![outline(d, self.drawing_border_line_mm)], grid, centring, trimming]
+            .into_iter()
+            .filter(|items| !items.is_empty())
+            .map(|items| Group { object, kind: ObjectKind::DrawingBorder, items })
+            .collect()
+    }
+}
+
+/// `r`'s outline, anticlockwise from its lower-left corner.
+fn rectangle(r: Aabb2) -> Loop2 {
+    Loop2::polygon(&[r.min, Vec2::new(r.max.x, r.min.y), r.max, Vec2::new(r.min.x, r.max.y)])
+}
+
 /// The four centring marks: on the sheet's centre lines, from the edges of `start` to `reach`
 /// inside the drawing border, which must not take them past the centre.
 fn centring_marks(start: Aabb2, drawing_border: Aabb2, size: Vec2, reach: f64) -> Result<Vec<[Vec2; 2]>> {
@@ -500,21 +547,40 @@ fn fields(edges: &[f64], label: impl Fn(usize) -> String) -> Vec<Field> {
         .collect()
 }
 
+/// The letters a drawing's views are named by (#13044): views placed apart from their projection
+/// place, and section and auxiliary views, draw them from this one sequence. I, O and Q are skipped
+/// (they read as 1, 0 and O), as detail views' labels skip them.
+pub const VIEW_LETTERS: &[u8] = b"ABCDEFGHJKLMNPRSTUVWXYZ";
+
+/// The `i`th view letter (0 is A): [`VIEW_LETTERS`], then AA, AB and on.
+pub fn view_letter(i: usize) -> Option<String> {
+    letters_from_alphabet(i, VIEW_LETTERS)
+}
+
 /// The row label for row `i` (0 is A): A to Z, then AA, AB and on (without I and O if asked).
 pub fn letters(i: usize, skip_i_and_o: bool) -> String {
     const ALL: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZ";
     const NO_I_O: &[u8] = b"ABCDEFGHJKLMNPQRSTUVWXYZ";
     let alphabet = if skip_i_and_o { NO_I_O } else { ALL };
+    letters_from_alphabet(i, alphabet).unwrap_or_default()
+}
+
+/// The same bijective sequence for a caller's alphabet (zones, details and section labels).
+/// At least two letters keep the work logarithmic even for the largest index.
+pub(crate) fn letters_from_alphabet(i: usize, alphabet: &[u8]) -> Option<String> {
     let base = alphabet.len();
+    if base < 2 {
+        return None;
+    }
     let mut out = Vec::new();
     // Bijective numbering: after the last letter comes AA, not BA.
     let mut n = i.saturating_add(1);
     while n > 0 {
         n -= 1;
-        out.extend(alphabet.get(n % base).map(|&b| char::from(b)));
+        out.push(char::from(*alphabet.get(n % base)?));
         n /= base;
     }
-    out.iter().rev().collect()
+    Some(out.iter().rev().collect())
 }
 
 #[cfg(test)]
