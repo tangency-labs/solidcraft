@@ -288,7 +288,8 @@ pub enum BlendFailure {
     /// ([`ErrorKind::InvalidInput`]); status `SM_ERR_INVALID_INPUT` (`SM_ERR` for the
     /// preview).
     NoEdgesGiven,
-    /// A fillet size (a radius, or a chamfer's distance) is below eight times the body's
+    /// A fillet size (a radius, a chamfer's distance, or a setback a chamfer's angle or
+    /// chord gives at its edge's wedge) is below eight times the body's
     /// tolerance, the smallest the fillet builds. A check of the caller's arguments
     /// ([`ErrorKind::InvalidInput`]); status `SM_ERR_INVALID_INPUT`.
     SizeBelowResolution {
