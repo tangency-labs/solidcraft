@@ -1243,10 +1243,13 @@ impl Sketch {
             | Vertical { l }
             | Length { l, .. }
             | LineAngle { l, .. }
-            | Midpoint { l, .. }
             | Symmetric { l, .. }
             | PointLineDistance { l, .. }
             | LinearDiameter { l, .. } => need_line(l)?,
+            // The middle of a line is its ends' mean; the middle of an arc is halfway along it.
+            Midpoint { l, .. } if !matches!(self.curves.get(l).map(|c| &c.kind), Some(CurveKind::Line { .. } | CurveKind::Arc { .. })) => {
+                return Err(SketchError::WrongKind(name(l), "needs a line or an arc".into()));
+            }
             ArcLength { c, .. } | ArcSweep { c, .. } if !matches!(self.curves.get(c).map(|c| &c.kind), Some(CurveKind::Arc { .. })) => {
                 return Err(SketchError::WrongKind(name(c), "arc length needs an arc".into()));
             }
