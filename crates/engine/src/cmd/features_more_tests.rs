@@ -719,6 +719,28 @@ fn emboss_on_a_face_refuses_a_profile_off_it_and_leaves_the_design() {
 }
 
 #[test]
+fn emboss_with_no_face_raises_a_profile_on_a_flat_top_with_rounded_edges() {
+    // #21195: the rounded top edges are cylinders touching the sketch's plane. A profile within
+    // their reach (here 3 mm from the round's tangent line) was sent to the cylinder wrap and
+    // refused, though it lies on the flat top. It is raised from that face, as with a face picked.
+    for face in [None, Some([0.0, 0.0, 10.0])] {
+        let mut s = Session::default();
+        run(&mut s, "solid.box", json!({"length": 60, "width": 40, "height": 10, "center": [0, 0, 5], "body_name": "Plate"}));
+        run(&mut s, "solid.fillet", json!({"edges": [[0, 20, 10], [0, -20, 10], [30, 0, 10], [-30, 0, 10]], "radius": 2}));
+        run(&mut s, "sketch.create", json!({"plane": {"origin": [0, 0, 10], "x_dir": [1, 0, 0], "y_dir": [0, 1, 0]}, "name": "Label"}));
+        run(&mut s, "sketch.rectangle.two_point", json!({"p0": [-10, -15], "p1": [10, 15]}));
+        run(&mut s, "sketch.finish", json!({}));
+        let before = volume(&mut s);
+        let mut params = json!({"sketch": "Label", "depth": 1});
+        if let Some(f) = face {
+            params["face"] = json!(f);
+        }
+        run(&mut s, "solid.emboss", params);
+        assert!(rel(volume(&mut s) - before, 600.0) < 1e-6, "{face:?}: {}", volume(&mut s) - before);
+    }
+}
+
+#[test]
 fn emboss_face_off_the_part_says_how_far() {
     // #392: a point beside the face was refused with "`face` must identify exactly one target
     // body surface", which didn't say the point was off the face.
