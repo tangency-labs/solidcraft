@@ -1749,25 +1749,30 @@ impl Surface {
                                     "query.face_p2",
                                 )
                             })?;
-                            let mut i = 0;
-                            while i < solutions.len() {
-                                let point = solutions.get_at(i)?;
-                                let uv = Point2::new(point.start.param(0)?, point.start.param(1)?);
-                                // Here upstream removes a candidate on classification
-                                // failure (unlike sm_IsPointValid's keep-on-error).
-                                let good = super::p1::ignore_native_classification(
-                                    queries.face_point_classify_fast_drop(
-                                        k,
-                                        face,
-                                        uv,
-                                        src_zone_tol_3d,
-                                    ),
-                                )?
-                                .is_some_and(|(class, _)| matches!(class, 102..=104));
-                                if good {
-                                    i += 1;
-                                } else {
-                                    solutions.remove_at(i, 1);
+                            // a face without loop uses has no trim boundaries: every
+                            // solution is kept
+                            if queries.face_has_loopuses(face)? {
+                                let mut i = 0;
+                                while i < solutions.len() {
+                                    let point = solutions.get_at(i)?;
+                                    let uv =
+                                        Point2::new(point.start.param(0)?, point.start.param(1)?);
+                                    // Here upstream removes a candidate on classification
+                                    // failure (unlike sm_IsPointValid's keep-on-error).
+                                    let good = super::p1::ignore_native_classification(
+                                        queries.face_point_classify_fast_drop(
+                                            k,
+                                            face,
+                                            uv,
+                                            src_zone_tol_3d,
+                                        ),
+                                    )?
+                                    .is_some_and(|(class, _)| matches!(class, 102..=104));
+                                    if good {
+                                        i += 1;
+                                    } else {
+                                        solutions.remove_at(i, 1);
+                                    }
                                 }
                             }
                         }
@@ -1779,9 +1784,11 @@ impl Surface {
                         // an SmTrimSrfCache (SM_CAST_PTR gives NULL): no test, as
                         // upstream.
                         let cache = get_surface_cache(k, self, None::<NoObject>)?;
+                        // a cache with no face keeps every solution
                         if cache.is_trimmed()
                             && cache.point_test_enabled
                             && !cache.face_was_modified
+                            && cache.face()?.is_some()
                         {
                             // SmFace::PointClassify of a bare face-owned surface: the
                             // classifier is the context's FaceQueries

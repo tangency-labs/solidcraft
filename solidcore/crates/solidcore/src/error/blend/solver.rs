@@ -67,6 +67,26 @@ pub enum SolverFailure {
     /// standalone entry point): the caller's input ([`ErrorKind::InvalidInput`]); status
     /// `SM_ERR_NULL_POINTER`.
     ExtensionCornerMissing,
+    /// The caller's fillet geometry has no rail on side `side`: the caller's solver set-up
+    /// ([`ErrorKind::InvalidInput`]); status `SM_ERR_NULL_POINTER`.
+    FilletGeomWithoutRail {
+        /// The fillet geometry.
+        fillet_geom: crate::blend::fillet_geom::p1::FilletGeomId,
+        /// The rail side, 0 or 1.
+        side: usize,
+    },
+    /// The caller's fillet geometry names no fillet solver: the caller's solver set-up
+    /// ([`ErrorKind::InvalidInput`]); status `SM_ERR_NULL_POINTER`.
+    FilletGeomWithoutSolver {
+        /// The fillet geometry.
+        fillet_geom: crate::blend::fillet_geom::p1::FilletGeomId,
+    },
+    /// The caller's fillet geometry has no fillet surface: the caller's solver set-up
+    /// ([`ErrorKind::InvalidInput`]); status `SM_ERR_NULL_POINTER`.
+    FilletGeomWithoutSurface {
+        /// The fillet geometry.
+        fillet_geom: crate::blend::fillet_geom::p1::FilletGeomId,
+    },
     /// The ball's centre has no foot on face `side`'s quadric: an empty search
     /// ([`ErrorKind::NotFound`]).
     FootNotFound {
@@ -145,6 +165,17 @@ pub enum SolverFailure {
     /// The rail does not cross the side edge from any guess: an empty search
     /// ([`ErrorKind::NotFound`]).
     RailMissesSideEdge,
+    /// Rail `side` of the caller's fillet geometry has a curve not of a B-spline class (a
+    /// rail edge with no curve is [`FilletSetUp::RailCurve`]): a kind the routine cannot
+    /// handle ([`ErrorKind::Unsupported`]); status `SM_ERR_NULL_POINTER`.
+    RailNotBSpline {
+        /// The fillet geometry.
+        fillet_geom: crate::blend::fillet_geom::p1::FilletGeomId,
+        /// The rail side, 0 or 1.
+        side: usize,
+        /// The curve's kind (its type string).
+        kind: &'static str,
+    },
     /// A rail curve's tangent has no length at parameter `t`, so no step along it is
     /// defined there ([`ErrorKind::Degenerate`]).
     RailTangentZero {
@@ -171,6 +202,12 @@ pub enum SolverFailure {
     /// The side surface and the plane through the side curve's end point do not meet in a
     /// curve: an empty search ([`ErrorKind::NotFound`]); status `SM_ERR_NULL_POINTER`.
     SideSurfaceMissesEndPlane,
+    /// The solver was given no edge use `index` of the edge to fillet: the caller's solver
+    /// ([`ErrorKind::InvalidInput`]); status `SM_ERR_NULL_POINTER`.
+    SolverEdgeUseMissing {
+        /// The edge use's index, 0 or 1.
+        index: usize,
+    },
     /// The circular spine has no station in the half-plane through the point (the point is
     /// on the axis, or the offsets' meridians do not cross there): an empty search
     /// ([`ErrorKind::NotFound`]).
@@ -275,6 +312,9 @@ impl SolverFailure {
             Self::EdgeUseWithoutFace => ErrorKind::InvalidInput,
             Self::EdgeUseWithoutMate => ErrorKind::InvalidInput,
             Self::ExtensionCornerMissing => ErrorKind::InvalidInput,
+            Self::FilletGeomWithoutRail { .. } => ErrorKind::InvalidInput,
+            Self::FilletGeomWithoutSolver { .. } => ErrorKind::InvalidInput,
+            Self::FilletGeomWithoutSurface { .. } => ErrorKind::InvalidInput,
             Self::FootNotFound { .. } => ErrorKind::NotFound,
             Self::GeneratorBuildsNoSurface => ErrorKind::Unsupported,
             Self::GnSideInputMissing { .. } => ErrorKind::InvalidInput,
@@ -288,11 +328,13 @@ impl SolverFailure {
             Self::RadiusNotConstant { .. } => ErrorKind::Unsupported,
             Self::RadiusVanishes { .. } => ErrorKind::Degenerate,
             Self::RailMissesSideEdge => ErrorKind::NotFound,
+            Self::RailNotBSpline { .. } => ErrorKind::Unsupported,
             Self::RailTangentZero { .. } => ErrorKind::Degenerate,
             Self::RolloverIntervalNotAtEdge { .. } => ErrorKind::Unsupported,
             Self::ShortIntervalsNotRemoved { .. } => ErrorKind::Unsupported,
             Self::SideEdgeNotOnRailFace => ErrorKind::NotFound,
             Self::SideSurfaceMissesEndPlane => ErrorKind::NotFound,
+            Self::SolverEdgeUseMissing { .. } => ErrorKind::InvalidInput,
             Self::SpineStationNotFound => ErrorKind::NotFound,
             Self::SupportCurveMissesSurface => ErrorKind::NotFound,
             Self::SupportEndOffCurve { .. } => ErrorKind::NotFound,
@@ -326,6 +368,9 @@ impl SolverFailure {
             Self::EdgeUseWithoutFace => SM_ERR_NULL_POINTER,
             Self::EdgeUseWithoutMate => SM_ERR_NULL_POINTER,
             Self::ExtensionCornerMissing => SM_ERR_NULL_POINTER,
+            Self::FilletGeomWithoutRail { .. } => SM_ERR_NULL_POINTER,
+            Self::FilletGeomWithoutSolver { .. } => SM_ERR_NULL_POINTER,
+            Self::FilletGeomWithoutSurface { .. } => SM_ERR_NULL_POINTER,
             Self::FootNotFound { .. } => SM_ERR,
             Self::GeneratorBuildsNoSurface => SM_ERR,
             Self::GnSideInputMissing { .. } => SM_ERR_NULL_POINTER,
@@ -339,11 +384,13 @@ impl SolverFailure {
             Self::RadiusNotConstant { .. } => SM_ERR,
             Self::RadiusVanishes { .. } => SM_ERR,
             Self::RailMissesSideEdge => SM_ERR,
+            Self::RailNotBSpline { .. } => SM_ERR_NULL_POINTER,
             Self::RailTangentZero { .. } => SM_ERR,
             Self::RolloverIntervalNotAtEdge { .. } => SM_ERR,
             Self::ShortIntervalsNotRemoved { .. } => SM_ERR,
             Self::SideEdgeNotOnRailFace => SM_ERR_NULL_POINTER,
             Self::SideSurfaceMissesEndPlane => SM_ERR_NULL_POINTER,
+            Self::SolverEdgeUseMissing { .. } => SM_ERR_NULL_POINTER,
             Self::SpineStationNotFound => SM_ERR,
             Self::SupportCurveMissesSurface => SM_ERR,
             Self::SupportEndOffCurve { .. } => SM_ERR,
@@ -402,6 +449,18 @@ impl core::fmt::Display for SolverFailure {
             Self::ExtensionCornerMissing => {
                 f.write_str("the extension flags need a vertex's corner and no corners were given")
             }
+            Self::FilletGeomWithoutRail { fillet_geom, side } => {
+                write!(
+                    f,
+                    "fillet geometry {fillet_geom:?} has no rail on side {side}"
+                )
+            }
+            Self::FilletGeomWithoutSolver { fillet_geom } => {
+                write!(f, "fillet geometry {fillet_geom:?} names no fillet solver")
+            }
+            Self::FilletGeomWithoutSurface { fillet_geom } => {
+                write!(f, "fillet geometry {fillet_geom:?} has no fillet surface")
+            }
             Self::FootNotFound { side } => {
                 write!(f, "the ball's centre has no foot on face {side}'s quadric")
             }
@@ -446,6 +505,15 @@ impl core::fmt::Display for SolverFailure {
                 )
             }
             Self::RailMissesSideEdge => f.write_str("the rail does not cross the side edge"),
+            Self::RailNotBSpline {
+                fillet_geom,
+                side,
+                kind,
+            } => write!(
+                f,
+                "rail {side} of fillet geometry {fillet_geom:?} has a {kind} curve, not of a \
+                 B-spline class"
+            ),
             Self::RailTangentZero { t } => {
                 write!(f, "the rail's tangent has no length at t = {t}")
             }
@@ -463,6 +531,12 @@ impl core::fmt::Display for SolverFailure {
             Self::SideSurfaceMissesEndPlane => f.write_str(
                 "the side surface and the plane through the side curve's end do not meet",
             ),
+            Self::SolverEdgeUseMissing { index } => {
+                write!(
+                    f,
+                    "the solver has no edge use {index} of the edge to fillet"
+                )
+            }
             Self::SpineStationNotFound => {
                 f.write_str("the circular spine has no station in the point's half-plane")
             }

@@ -83,8 +83,9 @@
 //!   arrays are a function of the surface ([`Surface::continuities`]), which those
 //!   readers ask directly: they get no cache at all, so a read during a Boolean
 //!   operation builds no tree and makes no UV trim curves. No history of the surface's
-//!   caches is kept (the fast-drop face test's state bits still depend on whether the
-//!   face's cache was built: [`SurfaceSolveContext::surface_cache_without_get_tree`]). The rest of the cache (its UV domain, face
+//!   caches is kept (the fast-drop face test asks the face whether to test, not the
+//!   cache's build: [`SurfaceSolveContext::surface_cache_without_get_tree`]). The rest
+//!   of the cache (its UV domain, face
 //!   containment and modified-face state) is rebuilt as before. The debug cache
 //!   counters are not modelled. The owner of a face's surface is an
 //!   [`ObjectRef`] the surface cannot follow to the B-rep: a caller holding the face
@@ -1195,11 +1196,13 @@ pub trait SurfaceSolveContext<O: Copy + PartialEq> {
     /// This surface's cache as `smsurf_GetSurfaceCache` hands it out to a reader that
     /// does not call `GetTree` (the state bits `GlobalPointSolve`'s fast-drop face
     /// test reads). Upstream's factory defers the tree during a Boolean operation, and
-    /// the tree build may change those bits (it turns point testing off on a face
+    /// upstream's tree build changes those bits (it turns point testing off on a face
     /// without UV trim curves), so a context that keeps face caches answers the cache
-    /// without the deferred tree; by default the solve's cache. The bits then depend on
-    /// whether the face's cache was built before, as upstream's and as the live
-    /// readers' (`intersect::point_class`, `topology::vertexuse`) do.
+    /// without the deferred tree; by default the solve's cache. No build writes the
+    /// point test bit here: whether the test runs is asked of the face (its loop uses)
+    /// each time, so the answer does not depend on whether or how the face's cache was
+    /// built before (upstream's does), as for the live readers (`intersect::point_class`,
+    /// `topology::vertexuse`).
     ///
     /// Only those state bits are answered ([`SurfaceCacheState`]), read from a kept
     /// cache in place: the values the cache handed out would read.

@@ -4397,6 +4397,10 @@ impl<O: ClassObject + SolutionObject + Ord, G: IntersectorBrep<O> + ?Sized> Face
         self.with_queries(face, |q| q.face_zone_tol_3d(face))
     }
 
+    fn face_has_loopuses(&self, face: O) -> Result<bool> {
+        self.with_queries(face, |q| q.face_has_loopuses(face))
+    }
+
     fn face_point_classify(
         &self,
         k: &Kernel,
