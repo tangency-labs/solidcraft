@@ -629,7 +629,7 @@ impl Body {
     /// The kernel's error; [`Error::Status`] `SM_ERR_INVALID_INPUT` for no box (not finite, or
     /// its corners out of order).
     pub fn bounds(&self) -> Result<([f64; 3], [f64; 3])> {
-        let x = with_body("bounds", self, |k, b| brep_bounding_box(k, b, true))?;
+        let x = read_body("bounds", self, |k, b| brep_bounding_box(k, b, true))?;
         let (lo, hi) = (array(x.min()), array(x.max()));
         let finite = lo.iter().chain(&hi).all(|v| v.is_finite());
         if !finite || lo.iter().zip(&hi).any(|(a, b)| a > b) {
@@ -653,7 +653,7 @@ impl Body {
         face: usize,
     ) -> Result<Vec<GapSample>> {
         let (e, f) = (order::edge(order, edge)?, order::face(order, face)?);
-        let samples = with_body("edge_face_gap_samples", self, |k, b| {
+        let samples = read_body("edge_face_gap_samples", self, |k, b| {
             edge_face_gap_samples(k, b, e, f)
         })?;
         Ok(samples
@@ -681,7 +681,7 @@ impl Body {
     /// the rule of the mass properties too); the kernel's status.
     pub fn classify_point(&self, p: [f64; 3]) -> Result<PointClass> {
         point(p)?;
-        with_body("classify_point", self, |k, b| {
+        read_body("classify_point", self, |k, b| {
             Ok(point_class(one(locate_points(k, b, &[p]))))
         })?
     }
@@ -698,7 +698,7 @@ impl Body {
         if points.iter().all(|&p| point(p).is_err()) {
             return Ok(points.iter().map(|_| Err(Error::Argument)).collect());
         }
-        with_body("classify_points", self, |k, b| {
+        read_body("classify_points", self, |k, b| {
             Ok(locate_points(k, b, points)
                 .into_iter()
                 .map(point_class)
@@ -711,7 +711,7 @@ impl Body {
     /// # Errors
     /// The kernel's error.
     pub fn is_manifold_solid(&self) -> Result<bool> {
-        with_body("is_manifold_solid", self, |_, b| brep_is_manifold_solid(b))
+        read_body("is_manifold_solid", self, |_, b| brep_is_manifold_solid(b))
     }
 
     /// Whether the body is a closed solid facing out, as an operation's result must be when its
@@ -736,7 +736,7 @@ impl Body {
     /// # Errors
     /// The kernel's error.
     pub fn solid_count(&self) -> Result<usize> {
-        with_body("solid_count", self, |_, b| {
+        read_body("solid_count", self, |_, b| {
             brep_material_census(b).map(|(solids, _voids)| solids)
         })
     }
@@ -754,7 +754,7 @@ impl Body {
         p: [f64; 3],
     ) -> Result<Option<EdgePoint>> {
         let (e, p) = (order::edge(order, edge)?, point(p)?);
-        let c = with_body("edge_closest_point", self, |k, b| {
+        let c = read_body("edge_closest_point", self, |k, b| {
             answer(q::edge_closest_point(k, b, e, p))
         })?;
         Ok(c.map(|c| EdgePoint {
@@ -781,7 +781,7 @@ impl Body {
         direction: [f64; 3],
     ) -> Result<Option<EdgeRayPoint>> {
         let (e, o, d) = (order::edge(order, edge)?, point(origin)?, point(direction)?);
-        let c = with_body("edge_closest_to_ray", self, |k, b| {
+        let c = read_body("edge_closest_to_ray", self, |k, b| {
             solidcore::query::edge::closest_point_to_ray(k, b, e, o, d)
         })?;
         Ok(c.map(|c| EdgeRayPoint {
@@ -1185,7 +1185,7 @@ impl Body {
             .iter()
             .map(|&i| order::face(order, i))
             .collect::<Result<Vec<_>>>()?;
-        with_body("rim_edges", self, |_, b| {
+        read_body("rim_edges", self, |_, b| {
             let rims = match rim_edges(b, &set)? {
                 Ok(rims) => rims,
                 Err(e) => return Ok(Err(e)),
@@ -1235,7 +1235,7 @@ impl Body {
             .collect::<Result<Vec<_>>>()?;
         let (on, normal) = (point(point_on)?, point(normal)?);
         let record = solidcore_convert::curve(outline).map_err(|_| Error::Argument)?;
-        with_body("outline_cuts", self, |k, b| {
+        read_body("outline_cuts", self, |k, b| {
             let made = from_parameters::from_parameters(k, &record, interval)?;
             let rims = match rim_edges(b, &set)? {
                 Ok(rims) => rims,
@@ -1307,7 +1307,7 @@ impl Body {
     /// kernel's refusal of a distance that overflows.
     pub fn vertex_distance(&self, order: &Order, vertex: usize, p: [f64; 3]) -> Result<Distance> {
         let (v, p) = (order::vertex(order, vertex)?, point(p)?);
-        with_body("vertex_distance", self, |_, b| {
+        read_body("vertex_distance", self, |_, b| {
             q::vertex_distance(b, v, p).map(Distance::from)
         })
     }
@@ -1552,7 +1552,7 @@ impl Body {
         else {
             return Ok(None);
         };
-        let tolerance = with_body("face_tolerance", self, |_k, b| {
+        let tolerance = read_body("face_tolerance", self, |_k, b| {
             Ok(Ok::<f64, Error>(face::tolerance(b, f)?))
         })??;
         Ok(Some(SquareFaceLevel { level, tolerance }))
@@ -1567,7 +1567,7 @@ impl Body {
     /// without a curve, an accuracy it refuses).
     pub fn edge_length(&self, order: &Order, edge: usize, relative_accuracy: f64) -> Result<f64> {
         let e = order::edge(order, edge)?;
-        let l = with_body("edge_length", self, |k, b| {
+        let l = read_body("edge_length", self, |k, b| {
             Ok(edge_length(k, b, e, relative_accuracy).map_err(status))
         })??;
         if !l.is_finite() {
@@ -1585,7 +1585,7 @@ impl Body {
     /// without a curve, an evaluation it refuses).
     pub fn edge_middle(&self, order: &Order, edge: usize) -> Result<[f64; 3]> {
         let e = order::edge(order, edge)?;
-        let p = with_body("edge_middle", self, |k, b| {
+        let p = read_body("edge_middle", self, |k, b| {
             let interval = edge::interval(b, e)?;
             let curve = edge::curve(b, e)?
                 .ok_or_else(|| solidcore::SolidError::null_pointer("ops::edge_middle"))?;
