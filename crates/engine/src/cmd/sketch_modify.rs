@@ -2615,7 +2615,7 @@ fn symmetric_corners(sk: &Sketch, corners: &[Value], cmd: &str) -> Vec<Value> {
     let mut named: Vec<usize> = corners.iter().filter_map(|q| corner_point(sk, q)).collect();
     for q in corners {
         let Some(c) = corner_point(sk, q) else { continue };
-        let Ok((la, lb, _, _, _)) = corner(sk, q, cmd) else { continue };
+        let Ok(Corner { la, lb, .. }) = corner(sk, q, cmd) else { continue };
         for (twin, axis) in symmetric_twins(sk, c) {
             if named.contains(&twin) {
                 continue;
