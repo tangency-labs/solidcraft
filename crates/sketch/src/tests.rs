@@ -2958,3 +2958,27 @@ fn circle_just_inside_hexagon_corners_keeps_the_regions() {
         assert_eq!(slivers, expected, "gap {gap}: {:?}", ps.iter().map(|p| p.area).collect::<Vec<_>>());
     }
 }
+
+/// A circle crossing a hexagon's sides a hair from their corners (#20992): a hexagon of apothem
+/// 1 mm and a concentric circle just short of its corners. The sketch has thirteen regions (the
+/// centre, a sliver at each corner and a segment outside each side), and the centre one is found,
+/// as for a circle well inside the corners.
+#[test]
+fn circle_crossing_hexagon_sides_near_the_corners_finds_every_region() {
+    let big = 1.0 / (PI / 6.0).cos();
+    let corners: Vec<Vec2> = (0..6).map(|k| v(big * (k as f64 * PI / 3.0).cos(), big * (k as f64 * PI / 3.0).sin())).collect();
+    for radius in [1.1, 1.1545, 1.15469] {
+        let mut sk = Sketch::new();
+        let pts: Vec<usize> = corners.iter().map(|c| sk.add_point(*c, None).unwrap()).collect();
+        for i in 0..6 {
+            sk.add_line_pts(pts[i], pts[(i + 1) % 6], None).unwrap();
+        }
+        sk.add_circle(v(0.0, 0.0), radius, None, None).unwrap();
+        let ps = find_profiles(&sk);
+        assert_eq!(ps.len(), 13, "radius {radius}: {:?}", ps.iter().map(|p| p.area).collect::<Vec<_>>());
+        assert!(profile_at_point(&ps, v(0.0, 0.0)).is_some(), "radius {radius}: no profile at the centre");
+        let biggest = ps.iter().map(|p| p.area).fold(0.0, f64::max);
+        let centre = profile_at_point(&ps, v(0.0, 0.0)).and_then(|i| ps.get(i)).map(|p| p.area).unwrap_or(0.0);
+        assert!((centre - biggest).abs() < 1e-12, "radius {radius}: the centre region ({centre}) is not the largest ({biggest})");
+    }
+}
