@@ -22,7 +22,12 @@ mod mesh;
 mod refine;
 
 pub use crate::bspline::Dir;
-pub use mesh::{Extension, IndexRect, MAX_GRID_POINTS, MAX_INDEX_LINES, Segment, TMesh};
+pub use mesh::Extension;
+pub use mesh::IndexRect;
+pub use mesh::MAX_GRID_POINTS;
+pub use mesh::MAX_INDEX_LINES;
+pub use mesh::Segment;
+pub use mesh::TMesh;
 pub use refine::Cut;
 
 use crate::bspline::{HPoint, MAX_SPLINE_DEGREE, Side, SplineError, SplineResult, invalid, local_basis, weighted_points};

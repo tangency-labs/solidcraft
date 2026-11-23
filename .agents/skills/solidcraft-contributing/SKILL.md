@@ -55,9 +55,10 @@ The PR workflow in detail: `.agents/skills/solidcraft-file-pr/SKILL.md` (writing
   (CodeRabbit threads resolved; CI or workflow changes need the owner's approval). The queue runs the
   full suite on each group before it lands on `main`. Never force-push `main`.
 - **Do not push only to catch up with `main`:** every push restarts the whole CI run, and `main`'s own
-  run catches what lands in between. When you push anyway, or GitHub reports a conflict, rebase onto
-  the latest `main` (preferred for your own branch; push it with `--force-with-lease`) or merge `main`
-  in; both are fine. Never force-push a branch someone else works on. Automation that updates your PR
+  run catches what lands in between. When you push anyway, or GitHub reports a conflict, merge `main`
+  in or rebase onto the latest `main`; both are fine. Merging costs less: when the PR already passed
+  and the merge leaves its own change as it was, CI carries the passing run and repeats only the
+  repository checks, while a rebase re-runs the full suite (push one with `--force-with-lease`). Never force-push a branch someone else works on. Automation that updates your PR
   merges `main` into your branch and never force-pushes over your history. Resolve conflicts without
   discarding others' work. Do not re-run CI on an unchanged commit: re-run only a job that runner
   trouble cancelled, with "Re-run failed jobs".
