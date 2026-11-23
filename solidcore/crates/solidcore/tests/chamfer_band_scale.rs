@@ -359,6 +359,78 @@ fn an_equal_chamfer_too_large_names_its_radius() {
     assert!((r.named.unwrap() - 1.0).abs() <= 1e-9, "{:?}", r.named);
 }
 
+/// Chamfering the two top long edges of a 30 x `width` x 10 block whose side is at `y0` by
+/// `d` on both sides: the result, the fit named, and (built) the body's volume and the
+/// width of what is left of its top face (0 when the chamfers use it up).
+fn chamfer_block_top(
+    y0: f64,
+    width: f64,
+    d: f64,
+) -> (Result<(), SolidError>, Option<f64>, f64, f64) {
+    let mut k = kernel();
+    let mut b = create_box(&mut k, Point3::new(0.0, y0, 0.0), 30.0, width, 10.0).unwrap();
+    let edges = [
+        pick(&k, &b, [15.0, y0, 10.0]),
+        pick(&k, &b, [15.0, y0 + width, 10.0]),
+    ];
+    let (result, fit) = {
+        let mut s = FilletSession::new(&mut k, &mut b).unwrap();
+        s.prepare_chamfers_along(&k, &edges, &[ChamferSize::Distances([d, d]); 2], &[])
+            .unwrap();
+        s.create_corners(&k, None).unwrap();
+        for corner in s.fillet_corners().unwrap() {
+            s.set_corner_bevel(corner, true).unwrap();
+        }
+        let result = s.do_filleting(&mut k, None);
+        (result, s.fit_size().map(|f| f.size))
+    };
+    if result.is_err() {
+        return (result, fit, 0.0, 0.0);
+    }
+    let store = AttributeStore::new();
+    let key_of = |_| ObjectKey(0);
+    let attrs = PropertyAttributes {
+        store: &store,
+        key_of: &key_of,
+    };
+    let volume = brep_volume(&k, &mut b, 1e-9, &attrs).unwrap();
+    let top = b
+        .faces()
+        .ids()
+        .filter_map(|f| face_bounding_box(&k, &b, f, true).ok())
+        .find(|bx| (bx.min().z - 10.0).abs() < 1e-9 && (bx.max().z - 10.0).abs() < 1e-9)
+        .map_or(0.0, |bx| bx.max().y - bx.min().y);
+    (result, fit, volume, top)
+}
+
+/// #20450: two 1 mm chamfers on a face 2 wide meet exactly in its middle and build. So they
+/// do where that width is 2 only to the rounding of the model's own coordinates: a block
+/// from y = 6.000000000000001 to 8, as a cut leaves an edge, is 1.9999999999999991 wide
+/// there, and the two bands, compared exactly, read as overlapping by 9e-16. That is no
+/// overlap: the block builds with the volume of the exact one, 30 * 2 * 10 less two right
+/// triangles of legs 1 along 30, 570, and its top face is used up. A face narrower than the
+/// two chamfers by more than rounding (1e-9) is still refused, naming the size that fits.
+#[test]
+fn equal_chamfers_that_exactly_use_up_a_face_build_whatever_its_rounding() {
+    for (y0, width) in [
+        (0.0, 2.0_f64),
+        (6.000_000_000_000_001, 1.999_999_999_999_999_1),
+    ] {
+        assert!(
+            (2.0 - width).abs() < 1e-15,
+            "{width}: 2 wide to its rounding"
+        );
+        let (result, _, volume, top) = chamfer_block_top(y0, width, 1.0);
+        assert!(result.is_ok(), "{y0} {width}: {result:?}");
+        assert!((volume - 570.0).abs() <= 1e-9 * 570.0, "{y0}: {volume}");
+        assert!(top <= 1e-9, "{y0}: the top face is {top} wide");
+    }
+    let (result, fit, _, _) = chamfer_block_top(0.0, 2.0 - 1e-9, 1.0);
+    assert!(result.is_err(), "built on a face 1e-9 too narrow");
+    let fit = fit.expect("the refusal names a size");
+    assert!(fit < 1.0 && fit > 0.99, "{fit}");
+}
+
 /// A quadratic-ended outline whose two selected rims approach across a 0.6 mm
 /// terminal strip. The short terminal rim stays sharp, as in #19108.
 fn narrow_curved_tip(distance: f64, angle: f64) -> Run {

@@ -2743,6 +2743,54 @@ fn a_countersinks_cone_moves_into_the_material_over_the_well() {
     b.check_solid().unwrap();
 }
 
+/// Without a ring the countersink's cone (45°) moved δ off the material, toward the axis,
+/// lowers the seat: in the meridian plane the cone `r + z = 5.5` becomes
+/// `r + z = 5.5 - δ√2` and meets the hole r 2 at z = 3.5 - δ√2 and the well r 4 at
+/// z = 1.5 - δ√2, both δ√2 lower, so the cone between them keeps its length 2√2 and closes at
+/// no δ: the hole's wall runs down and the well's is trimmed until the cone reaches the
+/// well's foot, z = -3, at δ = 4.5 / √2 = 3.18. The annulus r 2 to 4 gains a slab δ√2 high,
+/// V + 12 pi δ√2. Past δ = 2 sin 45° = √2 the moved cone's apex, z = 5.5 - δ√2, is below
+/// the hole's old edge at z = 3.5, and the meeting there was sought from the edge on the
+/// cone's other nappe: +1.5 and +2 were refused for a reach with no certified bound (#20935).
+/// Moved 3.5, past the foot, the well's wall between the cone and the block's underside
+/// closes at 4.5 / √2 and is refused, naming it.
+#[test]
+#[allow(clippy::disallowed_methods)] // closed-form oracle, not ops geometry
+fn a_countersinks_cone_moves_off_the_material_past_its_apex_over_the_hole() {
+    all_fixes();
+    for delta in [1.0, 1.4, 1.5, 2.0] {
+        let b = countersunk_block(4.0);
+        let o = order(&b);
+        let cone = countersink_cone(&b, &o, 4.0);
+        offset_faces(&b, &o, &[cone], delta).unwrap();
+        let expected = countersunk_volume(4.0) + 12.0 * PI * delta * 2.0_f64.sqrt();
+        assert!(
+            rel(volume(&b), expected) < 1e-9,
+            "{delta}: {} vs {expected}",
+            volume(&b)
+        );
+        b.check_solid().unwrap();
+    }
+    // past the well's foot the well's wall, between the cone and the block's underside,
+    // closes: refused before anything changes, naming the well and 4.5 / √2
+    let b = countersunk_block(4.0);
+    let o = order(&b);
+    let cone = countersink_cone(&b, &o, 4.0);
+    let well = through(&b, &o, [0.0, 4.0, 0.0]);
+    match offset_faces(&b, &o, &[cone], 3.5) {
+        Err(Error::OffsetRefused {
+            face: named,
+            why: crate::OffsetRefusal::FaceCloses { largest },
+        }) => {
+            assert_eq!(named, Some(well));
+            let room = 4.5 / 2.0_f64.sqrt();
+            assert!((largest - room).abs() < 1e-9, "{largest} vs {room}");
+        }
+        other => panic!("{other:?}"),
+    }
+    assert!(rel(volume(&b), countersunk_volume(4.0)) < 1e-12);
+}
+
 /// With the cone's base r 3.99 a ring 0.01 wide lies at z = 1.5 between the cone (semi-angle
 /// θ, tan θ = 1.99 / 2) and the well r 4 (#19904). Moved into the material by δ, the cone meets
 /// the ring's plane at r = 3.99 + δ / cos θ: the ring closes at δ = 0.01 cos θ, and moved 2
