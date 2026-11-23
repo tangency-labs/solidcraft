@@ -116,6 +116,39 @@ it) is the same with both binaries apart from the per-feature milliseconds: bodi
 areas, centres, bounding boxes, topology counts and warnings. `bench-open` meshes the same
 triangle counts, and the bicycles both binaries save differ only in the document's name.
 
+## STEP assembly of many placed parts: `bench-step` (#2814, 2026-11-23)
+
+The Prusa Core One full assembly (`core_one_assembly.step`, 61 MB, 189 solids placed 561 times) once
+took about an hour to open. It now opens in well under the 2 minutes the issue asks for, but the file
+cannot be committed, so nothing guarded that. `solidcraft-cli bench-step [--parts N] [--instances K]
+[--holes H] [--out part.step] [--generate-only]` writes an assembly of the same shape (default: 189
+distinct drilled blocks with a boss, each placed 3 times, 567 bodies) with the kernel's own STEP
+writer, then opens it as `bench-open <file> --display normal` does and prints the same phases.
+
+Release build, 28-thread Linux laptop (i7-14700HX), load average about 8 from other work, three
+runs of `bench-open` on one generated file (3.0 MB, 567 bodies, 1,191,690 triangles):
+
+| Phase | Time |
+|---|---:|
+| STEP read and conversion (`parse`) | 402-412 ms |
+| Body meshes (`mesh`) | 212-219 ms |
+| Display plans (`display`) | 222-245 ms |
+
+The number that matters is how the phases grow with the placements. 100 parts placed once (100
+bodies) and nine times (900 bodies):
+
+| Placements | `parse` | `mesh` | `display` | Triangles |
+|---:|---:|---:|---:|---:|
+| 100 | 230 ms | 110 ms | 110 ms | 210,194 |
+| 900 | 213 ms | 125 ms | 165 ms | 1,891,746 |
+
+Nine times the placements cost about the same, because a part is read, oriented and meshed once.
+If a change makes the open time follow the placements again (a part read, oriented or meshed once per
+placement), these phases grow with `--instances` and the table above changes shape. Compare runs of
+`bench-step` with each other, not with the Core One: our own writer merges faces per surface, so
+this file opens in under a second where the Core One takes tens of seconds, and its parts are
+simple blocks, not spline-heavy.
+
 ## STEP assemblies: a repeated part is meshed once (2026-10-14)
 
 The reader already converts each B-rep item once and keeps it for the instances that list it

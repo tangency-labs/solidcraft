@@ -8,6 +8,7 @@
 //! solidcraft-cli script <design.sc> [--out script.json]     the design's history as a command script
 //! solidcraft-cli textconv <design.sc|design.json|drawing.scdwg> a design or drawing file as text, for git diff
 //! solidcraft-cli bench-open <design.sc | part.step> [--parse-only] [--save OUT.sc] [--display LEVEL [--edit NAME EXPR]] [--ops script.json] loading timings as JSON lines
+//! solidcraft-cli bench-step [--parts N] [--instances K] [--holes H] [--out F] [--generate-only] a generated STEP assembly (many placed parts), opened
 //! solidcraft-cli bench-agent [--scale F] [--save F] [--script-out F] a ~1,300-body design built command by command, timed
 //! solidcraft-cli bench-assistant --connect 127.0.0.1:PORT [--token T] --base-url URL --model NAME [--tasks 1,2,5] [--repeat N]
 //!                                 [--timeout-s 300] [--json out.json] [--markdown out.md]
@@ -39,6 +40,7 @@
 
 mod bench_agent;
 mod bench_assistant;
+mod bench_step;
 mod check;
 mod crashes;
 mod fuzz;
@@ -85,6 +87,8 @@ const USAGE_TEXTCONV: &str = "  solidcraft-cli textconv <design.sc|design.json|d
 const USAGE_BENCH_OPEN: &str = "  solidcraft-cli bench-open <design.sc | part.step> [--parse-only] [--save OUT.sc] [--display LEVEL [--edit NAME EXPR]] [--ops script.json] [--profile] [--profile-out trace.json]\n      (--profile and --profile-out as for run)\n      (--ops: after opening, run each command of the script and undo it, timing the command, the\n       evaluations it caused and the view it leaves: placing and meshing what changed)\n";
 /// `bench-agent`'s lines in the usage.
 const USAGE_BENCH_AGENT: &str = "  solidcraft-cli bench-agent [--scale F] [--save design.sc] [--script-out script.json]\n";
+/// `bench-step`'s lines in the usage.
+const USAGE_BENCH_STEP: &str = "  solidcraft-cli bench-step [--parts N] [--instances K] [--holes H] [--out part.step] [--generate-only]\n      (writes a STEP assembly of N distinct drilled blocks placed K times each, then opens it as bench-open does; default 189 parts, 3 instances, 4 holes)\n";
 /// `bench-assistant`'s lines in the usage.
 const USAGE_BENCH_ASSISTANT: &str = "  solidcraft-cli bench-assistant --connect 127.0.0.1:PORT [--token T] --base-url URL --model NAME [--tasks 1,2,5] [--repeat N] [--timeout-s 300] [--json out.json] [--markdown out.md]\n";
 /// `snapshot`'s lines in the usage.
@@ -155,6 +159,7 @@ const COMMANDS: &[Command] = &[
     Command { name: "textconv", usage: USAGE_TEXTCONV, listed: true },
     Command { name: "bench-open", usage: USAGE_BENCH_OPEN, listed: true },
     Command { name: "bench-agent", usage: USAGE_BENCH_AGENT, listed: true },
+    Command { name: "bench-step", usage: USAGE_BENCH_STEP, listed: true },
     Command { name: "bench-assistant", usage: USAGE_BENCH_ASSISTANT, listed: true },
     Command { name: "snapshot", usage: USAGE_SNAPSHOT, listed: true },
     Command { name: "render", usage: USAGE_RENDER, listed: true },
@@ -255,6 +260,8 @@ fn main() -> ExitCode {
         Some("bench-open") => cmd_bench_open(&args[1..]),
         // A ~1,300-body design built command by command, as an agent builds one over MCP.
         Some("bench-agent") => bench_agent::run(&args[1..]),
+        // A generated STEP assembly of many placed parts, opened (the Core One shape, #2814).
+        Some("bench-step") => bench_step::run(&args[1..]),
         // The standard Assistant model test (#4851), run against a desktop app over its control channel.
         Some("bench-assistant") => bench_assistant::run(&args[1..]),
         Some("--version" | "-V") => {
