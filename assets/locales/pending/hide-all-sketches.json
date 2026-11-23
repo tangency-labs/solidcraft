@@ -1,0 +1,29 @@
+{
+  "en": {
+    "ui.hide_all_sketches": "Hide All Sketches"
+  },
+  "ar": {
+    "ui.hide_all_sketches": "إخفاء كل الرسومات التخطيطية"
+  },
+  "de": {
+    "ui.hide_all_sketches": "Alle Skizzen ausblenden"
+  },
+  "he": {
+    "ui.hide_all_sketches": "הסתר את כל הסקיצות"
+  },
+  "ja": {
+    "ui.hide_all_sketches": "すべてのスケッチを非表示"
+  },
+  "ko": {
+    "ui.hide_all_sketches": "모든 스케치 숨기기"
+  },
+  "ru": {
+    "ui.hide_all_sketches": "Скрыть все эскизы"
+  },
+  "vi": {
+    "ui.hide_all_sketches": "Ẩn tất cả bản phác thảo"
+  },
+  "zh": {
+    "ui.hide_all_sketches": "隐藏所有草图"
+  }
+}
