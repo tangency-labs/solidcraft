@@ -1055,8 +1055,8 @@ into THIRD-PARTY-LICENSES.txt when `main` regenerates it.
 
 ## FreeCAD, Rhino and OpenUSD library
 
-FreeCAD `.FCStd` and Rhino `.3dm` files are read, OpenUSD files read and written, and STEP and IGES
-files read when "Import with cadmpeg" is chosen, with
+FreeCAD `.FCStd` files are read, Rhino `.3dm` files are read and written, OpenUSD files read and written, and STEP and IGES
+files read and written when that is asked for, with
 [cadmpeg](https://github.com/cadmpeg/cadmpeg) 0.6.12 (Apache-2.0), linked as the crates `cadmpeg-core`,
 `cadmpeg-ir`, `cadmpeg-registry`, `cadmpeg-container`, `cadmpeg-codec-freecad`, `cadmpeg-codec-iges`,
 `cadmpeg-codec-rhino`, `cadmpeg-codec-step`, `cadmpeg-codec-usd` and `cadmpeg-tessellate`
