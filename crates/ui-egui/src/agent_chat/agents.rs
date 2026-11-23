@@ -281,6 +281,18 @@ pub fn mode_for(p: &crate::prefs::Prefs, id: &str) -> Mode {
     p.agent_permissions.get(id).copied().unwrap_or(p.ai_permissions)
 }
 
+/// The permission mode that holds for an agent: the organization's while its policy sets
+/// `ai_permissions` (an agent's own mode doesn't apply then), else [`mode_for`].
+pub fn mode_in_force(app: &crate::SolveApp, id: &str) -> Mode {
+    if app.policy.locks("ai_permissions") { app.preferences.ai_permissions } else { mode_for(&app.preferences, id) }
+}
+
+/// Whether an "always allow" answer lets `agent` use `tool` without asking. None does while the
+/// organization's policy sets `ai_permissions`: the answers are kept for when the policy goes.
+pub fn always_allowed_in_force(app: &crate::SolveApp, agent: &str, tool: &str) -> bool {
+    !app.policy.locks("ai_permissions") && always_allowed(&app.preferences, agent, tool)
+}
+
 /// Whether `tool` is always allowed for `agent`.
 pub fn always_allowed(p: &crate::prefs::Prefs, agent: &str, tool: &str) -> bool {
     p.agent_always_allow.get(agent).is_some_and(|t| t.iter().any(|x| x == tool))
