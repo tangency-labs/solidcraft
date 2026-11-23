@@ -177,9 +177,11 @@ fn two_distances_chamfer_has_an_arrow_along_each_face() {
     for (flip, expected) in [(false, (along_top, along_front)), (true, (along_front, along_top))] {
         h.app.session.selection = vec![edge(&h, top_front)];
         h.app.start("solid.chamfer");
-        // Equal distances keep the arrow along the bisector, and have no second one.
+        // Equal distances: the arrow runs along the face that faces up most (#13527), and there
+        // is no second one.
         let d = h.app.dialog.as_ref().unwrap();
-        assert!(crate::canvas::chamfer_face_dirs(&h.app, d, top_front).is_none());
+        let (t1, _) = crate::canvas::chamfer_face_dirs(&h.app, d, top_front).expect("the first face");
+        assert!(close(t1, along_top), "equal distances: {t1:?}");
         let Some(Kind::Fillet { ctype, flip: f, .. }) = h.app.dialog.as_mut().map(|d| &mut d.kind) else { panic!("a chamfer window") };
         (*ctype, *f) = (1, flip);
         let d = h.app.dialog.as_ref().unwrap();
