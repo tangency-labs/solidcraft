@@ -15,6 +15,7 @@ Add a grid of thin walls from several open sketch lines at once, each filled out
 | Thickness | How thick each wall is. It starts at 2 mm. | 0.080 in for the ribs of a lightened pocket. |
 | Depth | How far each wall fills from the sketch. Empty means to the next face of the part. | Leave it empty to run the walls down to the floor. |
 | Flip | Fill toward the other side of the sketch. | Turn it on if the preview grows away from the part. |
+| Extend ends (In plane only) | Off: each wall ends where its line ends. On: each line's open ends run on to the next face of the part, so a wall can reach the side even when its line stops short of it. A thin side can be skipped, so check the preview. It isn't shown when Direction is Normal. | Turn it on for In plane walls that meet a curved side. |
 
 #### Try it: divide a tray into four
 

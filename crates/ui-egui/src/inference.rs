@@ -273,6 +273,14 @@ pub(crate) enum TrackRef {
     Point(String),
 }
 
+/// Where two remembered references' axes meet ([`Tracking::meeting_of`]), with the point
+/// argument and position of the reference it is plumb with and of the one it is level with.
+pub(crate) struct Meeting {
+    pub at: Vec2,
+    pub plumb: Option<(String, Vec2)>,
+    pub level: Option<(String, Vec2)>,
+}
+
 /// The two most recent hovered references ([`TrackRef`]). Transient, per viewport, never a
 /// constraint. A third hover drops the oldest.
 #[derive(Default)]
@@ -362,24 +370,48 @@ impl Tracking {
     /// Where the horizontal through one reference meets the vertical through the other, when
     /// that point is within a few pixels of the cursor and is not either reference itself.
     pub(crate) fn meeting(&self, sk: &Sketch, plane: &solidcore_record::Plane, proj: &Proj, cursor: egui::Pos2) -> Option<Vec2> {
-        let a = self.anchor.as_ref().and_then(|r| Self::point_of(sk, r))?;
-        let b = self.previous.as_ref().and_then(|r| Self::point_of(sk, r))?;
+        self.meeting_of(sk, plane, proj, cursor).map(|m| m.at)
+    }
+
+    /// [`Self::meeting`] with the references it comes from: the one it is plumb with (same x)
+    /// and the one it is level with (same y), each as the point a constraint can name (#20859).
+    pub(crate) fn meeting_of(&self, sk: &Sketch, plane: &solidcore_record::Plane, proj: &Proj, cursor: egui::Pos2) -> Option<Meeting> {
+        let ra = self.anchor.as_ref()?;
+        let rb = self.previous.as_ref()?;
+        let a = Self::point_of(sk, ra)?;
+        let b = Self::point_of(sk, rb)?;
         if a.dist(b) < 1e-6 {
             return None;
         }
         let to = |p: Vec2| proj.to_screen(plane.to_world(p));
-        let mut best: Option<(f32, Vec2)> = None;
-        for at in [Vec2::new(a.x, b.y), Vec2::new(b.x, a.y)] {
+        let mut best: Option<(f32, Meeting)> = None;
+        // Plumb with the first, level with the second.
+        for ((plumb, px), (level, lx)) in [((ra, a), (rb, b)), ((rb, b), (ra, a))] {
+            let at = Vec2::new(px.x, lx.y);
             if at.dist(a) < 1e-6 || at.dist(b) < 1e-6 {
                 continue;
             }
             let Some(screen) = to(at).filter(|p| proj.rect.contains(*p)) else { continue };
             let distance = cursor.distance(screen);
-            if distance < 8.0 && best.is_none_or(|(d, _)| distance < d) {
-                best = Some((distance, at));
+            if distance < 8.0 && best.as_ref().is_none_or(|(d, _)| distance < *d) {
+                let source = |r: &TrackRef, p: Vec2| Self::target_id(sk, r).map(|id| (id, p));
+                best = Some((distance, Meeting { at, plumb: source(plumb, px), level: source(level, lx) }));
             }
         }
-        best.map(|(_, at)| at)
+        best.map(|(_, m)| m)
+    }
+
+    /// The point argument a constraint takes for `reference`: a line's "mid:<line>" (as the
+    /// midpoint guide's), a circle's or arc's centre point, or the point itself.
+    fn target_id(sk: &Sketch, reference: &TrackRef) -> Option<String> {
+        match reference {
+            TrackRef::Curve(id) => match sk.curves.get(sk.curve_index(id)?)?.kind {
+                CurveKind::Line { .. } => Some(format!("mid:{id}")),
+                CurveKind::Circle { c, .. } | CurveKind::Arc { c, .. } => sk.points.get(c).map(|p| p.id.clone()),
+                _ => None,
+            },
+            TrackRef::Point(id) => Some(id.clone()),
+        }
     }
 
     fn axis_guide(anchor: Vec2, at: Vec2, cursor: egui::Pos2, to: &impl Fn(Vec2) -> Option<egui::Pos2>) -> Option<(Vec2, Vec2)> {

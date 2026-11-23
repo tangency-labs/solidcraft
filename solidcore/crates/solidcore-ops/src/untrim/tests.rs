@@ -187,6 +187,7 @@ fn lists_out_of_id_order_untrim_the_face_asked() {
         g.set_edge_list(edges).unwrap();
     }
     let o = Order {
+        split_edges: 0,
         faces: o.faces.iter().rev().copied().collect(),
         edges: o.edges.iter().rev().copied().collect(),
         vertices: o.vertices.clone(),

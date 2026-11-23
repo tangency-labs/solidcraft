@@ -1622,6 +1622,7 @@ fn rust_static_op(op: &OpIn) -> Result<Run, HarnessError> {
                 ray_fire: *ray,
                 distance_tolerance: *tol,
                 surface_cache: None,
+                modes: None,
                 face_queries: None,
                 face_cache: None,
                 kernel: &k,
