@@ -2,8 +2,8 @@
 //! a release or a wasm build) at WR-469's vertex step in `MakeEdgeInFaceWithVU`
 //! ([`super::make_edge_in_face_with_vu_with_curve_identity`]).
 //!
-//! The step grows each end vertex's tolerance to twice its gap to the new edge's end
-//! (tangency-labs/solidcraft#17985). The goldens crate's substitution replay
+//! The step grows each end vertex's tolerance to twice its gap: the farthest edge end at
+//! the vertex, the new edge's or any other edge's (tangency-labs/solidcraft#17985). The goldens crate's substitution replay
 //! (`wr469_replay`) gives a kernel a [`VertexStepSeam`] ([`Kernel::wr469_replay`]): a hook
 //! that sees each step's vertex, its tolerance before the step and the gap, and gives the
 //! tolerance the step passes to `SetTolerance` (only if larger). Answering the tolerance
@@ -30,7 +30,8 @@ pub struct VertexStep {
     pub vertex: VertexId,
     /// Its tolerance before the step (after `RefreshTolerance(FALSE)`).
     pub before: f64,
-    /// The distance from the new edge's end to the vertex.
+    /// The farthest any edge end at the vertex (the new edge's or another edge's) lies
+    /// from it.
     pub gap: f64,
     /// The tolerance the step passes: twice `gap`.
     pub own: f64,

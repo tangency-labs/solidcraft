@@ -2040,8 +2040,9 @@ pub fn make_edge_in_face_with_vu_with_curve_identity(
     }
     vertex::refresh_tolerance(b, start_vertex, false)?;
     vertex::refresh_tolerance(b, end_vertex, false)?;
-    // Not upstream (WR-469): each vertex's tolerance grows to twice its gap to the new
-    // edge's end, so the end lies within half of it (`AssertValid`).
+    // Not upstream (WR-469): each vertex's tolerance grows to twice the farthest edge end
+    // at it (the new edge's and every other edge's), so each end lies within half of it
+    // (`AssertValid`).
     {
         let record = b.edge(edge_id)?;
         let curve = required(record.curve.as_ref(), "new edge without curve")?;
@@ -2099,7 +2100,8 @@ pub fn make_edge_in_face_with_vu_with_curve_identity(
 ///
 /// # Errors
 ///
-/// [`SolidError::NotFound`] for a dangling id; those of evaluating a curve.
+/// [`SolidError::NotFound`] for a dangling `v`; those of evaluating a curve. An edge at
+/// `v` whose start and end vertices cannot be resolved is skipped, not an error.
 fn farthest_end_gap(k: &Kernel, b: &Brep, v: VertexId) -> Result<f64> {
     let p = vertex::point(b, v)?;
     let mut worst: f64 = 0.0;

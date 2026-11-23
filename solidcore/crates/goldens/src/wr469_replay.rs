@@ -1,8 +1,8 @@
 //! The substitution replay of the `topology.face_p1` rows WR-469's vertex step moved
 //! (tangency-labs/solidcraft#17985).
 //!
-//! `MakeEdgeInFaceWithVU` grows each end vertex's tolerance to twice its gap to the new
-//! edge's end (only if larger). The `wr469-replay` seam (`solidcore`'s
+//! `MakeEdgeInFaceWithVU` grows each end vertex's tolerance to twice its gap, the farthest
+//! edge end at the vertex (the new edge's or any other edge's; only if larger). The `wr469-replay` seam (`solidcore`'s
 //! `topology::brep::p9::replay`, a feature this crate turns on for its tests only) sees each
 //! step's vertex, its tolerance before the step and the gap, and gives the tolerance the
 //! step passes. The seam is the kernel's ([`solidcore::Kernel::wr469_replay`]); the
