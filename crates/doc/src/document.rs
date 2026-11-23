@@ -1542,6 +1542,24 @@ pub enum FeatureKind {
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
         groups: Vec<crate::frame::MemberGroup>,
     },
+    /// A separate mounting or end plate, centred on a persistently identified planar face.
+    FramePlate {
+        plane: PlaneRef,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        member: Option<crate::frame::PlateMember>,
+        shape: crate::frame::PlateShape,
+        holes: crate::frame::PlateHoles,
+        #[walk(length = "Thickness")]
+        thickness: Expr,
+        #[walk(length = "Offset")]
+        offset: Expr,
+        #[walk(length = "X Offset")]
+        x_offset: Expr,
+        #[walk(length = "Y Offset")]
+        y_offset: Expr,
+        #[walk(angle = "Rotation")]
+        angle: Expr,
+    },
     /// Raise or sink profiles on a planar face, or wrap them on a selected cylindrical wall.
     Emboss {
         sketch: SketchId,
@@ -3327,6 +3345,7 @@ impl FeatureKind {
             FeatureKind::FrameEndCap { .. } => "EndCapFeature",
             FeatureKind::FrameMemberTurn { .. } => "MemberTurnFeature",
             FeatureKind::FrameMember { .. } => "FrameMemberFeature",
+            FeatureKind::FramePlate { .. } => "FramePlateFeature",
             FeatureKind::Emboss { .. } => "EmbossFeature",
             FeatureKind::Boss { .. } => "BossFeature",
             FeatureKind::Lip { groove: false, .. } => "LipFeature",
@@ -3414,6 +3433,7 @@ impl FeatureKind {
             FeatureKind::FrameEndCap { .. } => "frame_end_cap",
             FeatureKind::FrameMemberTurn { .. } => "frame_member_turn",
             FeatureKind::FrameMember { .. } => "frame_member",
+            FeatureKind::FramePlate { .. } => "frame_plate",
             FeatureKind::Emboss { .. } => "emboss",
             FeatureKind::Rib { .. } => "rib",
             FeatureKind::ReplaceFace { .. } => "replace_face",
@@ -3503,6 +3523,7 @@ impl FeatureKind {
             "EndCapFeature" => "frame_end_cap",
             "MemberTurnFeature" => "frame_member_turn",
             "FrameMemberFeature" => "frame_member",
+            "FramePlateFeature" => "frame_plate",
             "EmbossFeature" => "emboss",
             "BossFeature" => "boss",
             "LipFeature" | "GrooveFeature" => "lip",
@@ -3591,6 +3612,7 @@ impl FeatureKind {
             FeatureKind::FrameEndCap { .. } => "EndCap",
             FeatureKind::FrameMemberTurn { .. } => "Rotate",
             FeatureKind::FrameMember { .. } => "Member",
+            FeatureKind::FramePlate { .. } => "MountingPlate",
             FeatureKind::Emboss { .. } => "Emboss",
             FeatureKind::Boss { .. } => "Boss",
             FeatureKind::Lip { groove: false, .. } => "Lip",

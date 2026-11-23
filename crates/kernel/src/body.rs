@@ -2043,7 +2043,7 @@ impl Body {
     /// it an odd number of times.
     pub fn classify_point(&self, p: Vec3) -> Result<PointClass> {
         if !(p.x.is_finite() && p.y.is_finite() && p.z.is_finite()) {
-            return Err(KernelError::Invalid(format!("point classification: the point {p:?} is not finite")));
+            return Err(KernelError::Invalid(format!("point classification: the point {p} is not finite")));
         }
         if let Some(m) = &self.mesh {
             let mesh = m.to_mesh();
@@ -2125,7 +2125,7 @@ impl Body {
     /// point's own solve). The first point that cannot be classified fails them all.
     pub fn classify_points(&self, points: &[Vec3]) -> Result<Vec<PointClass>> {
         if let Some(p) = points.iter().find(|p| !(p.x.is_finite() && p.y.is_finite() && p.z.is_finite())) {
-            return Err(KernelError::Invalid(format!("point classification: the point {p:?} is not finite")));
+            return Err(KernelError::Invalid(format!("point classification: the point {p} is not finite")));
         }
         if self.mesh.is_some() || points.len() < 2 {
             return points.iter().map(|&p| self.classify_point(p)).collect();
@@ -2145,9 +2145,10 @@ impl Body {
     /// faces that turns most toward the ray.
     pub fn fire_ray(&self, origin: Vec3, dir: Vec3) -> Result<Option<RayPick>> {
         let finite = |v: Vec3| v.x.is_finite() && v.y.is_finite() && v.z.is_finite();
-        let d = dir.normalized().filter(|d| finite(origin) && finite(*d)).ok_or_else(|| {
-            KernelError::Invalid(format!("ray: the origin {origin:?} and direction {dir:?} must be finite, the direction not zero"))
-        })?;
+        let d = dir
+            .normalized()
+            .filter(|d| finite(origin) && finite(*d))
+            .ok_or_else(|| KernelError::Invalid(format!("ray: the origin {origin} and direction {dir} must be finite, the direction not zero")))?;
         if let Some(m) = &self.mesh {
             return Ok(crate::meshbody::mesh_ray(m, origin, d).map(|(t, normal)| RayPick {
                 face: 0,

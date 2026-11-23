@@ -281,7 +281,7 @@ fn faces_under(b: &Body, at: &[Vec3]) -> Result<Vec<usize>> {
                     out.push(f);
                 }
             }
-            _ => return Err(KernelError::Invalid(format!("no face at {:?}", [p.x, p.y, p.z]))),
+            _ => return Err(KernelError::Invalid(format!("no face at {p}"))),
         }
     }
     Ok(out)
