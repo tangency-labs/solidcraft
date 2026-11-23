@@ -1,4 +1,6 @@
-//! Constraint glyph hit-testing, badge click expansion, and Delete-key removal.
+//! Constraint glyph hit-testing, click/right-click/middle-click actions, detach nudges, and undo/redo flash tracking.
+
+use std::collections::HashSet;
 
 use egui::Pos2;
 use serde_json::json;
@@ -10,8 +12,11 @@ use solidcraft_engine::sketch::{ConstraintKind, Sketch};
 use crate::SolveApp;
 use crate::viewport::{Hit, Proj};
 
-use super::grouping::{CurveRelKind, find_point_cluster, glyph_deletion};
-use super::{OVERLAY, ViewKey};
+use super::grouping::{
+    AnchorKey, CurveRelKind, anchor_groups_with_rel, constraint_entities, find_point_cluster, glyph_constraints, glyph_deletion, glyph_group,
+    poly_point_at_frac,
+};
+use super::{ConstraintFlashGhost, DrawnRelInfo, HISTORY_FLASH_MS, HistoryFlashState, OVERLAY, ViewKey, pattern_icon_for};
 
 fn view_matches(view: Option<ViewKey>) -> bool {
     let Some(v) = view else { return true };
@@ -69,14 +74,34 @@ pub fn clear_clicked_constraint() {
     OVERLAY.with(|cell| cell.borrow_mut().picked_rel = None);
 }
 
+fn rel_at_pos(id: &str, pos: Pos2) -> Option<DrawnRelInfo> {
+    OVERLAY.with(|cell| {
+        let st = cell.borrow();
+        let reach = st.glyph_px * 0.8;
+        st.drawn_rel
+            .iter()
+            .filter(|r| r.id == id && r.center.distance(pos) <= reach)
+            .min_by(|a, b| a.center.distance(pos).total_cmp(&b.center.distance(pos)))
+            .cloned()
+    })
+}
+
+fn point_is_protected_for_nudge(sk: &Sketch, pi: usize) -> bool {
+    pi == 0 || sk.points.get(pi).is_some_and(|pt| pt.fixed || pt.link.is_some() || pt.exprs.is_some())
+}
+
 pub(crate) fn sketch_px_per_mm(plane: &Plane, proj: &Proj) -> Option<f32> {
     let a = proj.to_screen(plane.to_world(Vec2::ZERO))?;
     let b = proj.to_screen(plane.to_world(Vec2::new(1.0, 0.0)))?;
     Some(a.distance(b))
 }
 
+pub(crate) fn detach_distance_mm(px_per_mm: f32) -> f64 {
+    10.0 / px_per_mm.max(1e-3) as f64
+}
+
 pub(crate) fn detach_distance_mm_for_view(plane: &Plane, proj: &Proj) -> f64 {
-    10.0 / sketch_px_per_mm(plane, proj).unwrap_or(1.0).max(1e-3) as f64
+    detach_distance_mm(sketch_px_per_mm(plane, proj).unwrap_or(1.0))
 }
 
 pub(crate) fn selected_detach_curve(app: &SolveApp, sid: u64, sk: &Sketch) -> Option<(String, usize)> {
@@ -90,6 +115,26 @@ pub(crate) fn selected_detach_curve(app: &SolveApp, sid: u64, sk: &Sketch) -> Op
         Sel::SketchMidpoint { id } => sk.curve_index(id).filter(|&ci| !sk.is_linked_curve(ci)).map(|ci| (id.clone(), ci)),
         _ => None,
     })
+}
+
+pub(crate) fn selected_symmetric_point(app: &SolveApp, sk: &Sketch) -> Option<(usize, String, Vec<(String, usize, usize)>)> {
+    if app.tool.is_some() || app.dialog.as_ref().is_some_and(|d| d.wants_picks()) {
+        return None;
+    }
+    let point_id = app.session.selection.iter().rev().find_map(|sel| match sel {
+        Sel::SketchPoint { id } => Some(id.as_str()),
+        _ => None,
+    })?;
+    let pi = sk.resolve_point(point_id)?;
+    let pt_id = sk.points.get(pi)?.id.clone();
+    let syms: Vec<(String, usize, usize)> = glyph_constraints(sk)
+        .filter_map(|c| match c.kind {
+            ConstraintKind::Symmetric { p, q, l } if p == pi => Some((c.id.clone(), l, q)),
+            ConstraintKind::Symmetric { p, q, l } if q == pi => Some((c.id.clone(), l, p)),
+            _ => None,
+        })
+        .collect();
+    if syms.is_empty() { None } else { Some((pi, pt_id, syms)) }
 }
 
 fn point_is_intersection_for_curve(sk: &Sketch, ci: usize, pi: usize) -> bool {
@@ -139,24 +184,100 @@ pub(crate) fn resolve_detach_target(
     })
 }
 
-/// If `pos` is over the simulated coincident break-off glyph, detach that curve from the point.
-pub fn detach_simulated_at(app: &mut SolveApp, view: Option<ViewKey>, pos: Pos2) -> bool {
-    if app.session.active_sketch.is_none() || app.ui.pick_off.iter().any(|x| x == "constraints") || !view_matches(view) {
+fn coincident_nudge_delete(app: &mut SolveApp, id: &str) -> bool {
+    let Some(sid) = active_sketch(app) else { return false };
+    let px_per_mm = OVERLAY.with(|c| c.borrow().last_px_per_mm);
+    let target = {
+        let st = crate::open_meshing::session_world(&app.session);
+        let Some(ss) = st.sketch(sid) else { return false };
+        let sk = &ss.sketch;
+        let Some(ConstraintKind::Coincident { p, q }) = sk.constraints.iter().find(|c| c.id == id).map(|c| &c.kind) else {
+            return false;
+        };
+        let (p, q) = (*p, *q);
+        let sel_ci = selected_detach_curve(app, sid, sk).map(|(_, ci)| ci);
+        let curve_using = |pi: usize| {
+            sel_ci.filter(|&ci| sk.curves.get(ci).is_some_and(|cu| cu.kind.uses(pi))).or_else(|| sk.curves.iter().position(|cu| cu.kind.uses(pi)))
+        };
+        let chosen = if let Some(ci) = sel_ci
+            && sk.curves.get(ci).is_some_and(|cu| cu.kind.uses(q))
+            && !point_is_protected_for_nudge(sk, q)
+        {
+            Some((ci, q))
+        } else if let Some(ci) = sel_ci
+            && sk.curves.get(ci).is_some_and(|cu| cu.kind.uses(p))
+            && !point_is_protected_for_nudge(sk, p)
+        {
+            Some((ci, p))
+        } else if !point_is_protected_for_nudge(sk, q)
+            && let Some(ci) = curve_using(q)
+        {
+            Some((ci, q))
+        } else if !point_is_protected_for_nudge(sk, p)
+            && let Some(ci) = curve_using(p)
+        {
+            Some((ci, p))
+        } else if let Some(ci) = curve_using(q) {
+            Some((ci, q))
+        } else {
+            curve_using(p).map(|ci| (ci, p))
+        };
+        chosen.and_then(|(ci, pi)| Some((sk.curves.get(ci)?.id.clone(), sk.points.get(pi)?.id.clone(), detach_distance_mm(px_per_mm))))
+    };
+    let Some((curve, point, distance)) = target else { return false };
+    app.run("sketch.detach_point", json!({ "curve": curve, "point": point, "distance": distance, "constraint": id })).is_ok()
+}
+
+fn midpoint_downgrade_delete(app: &mut SolveApp, id: &str) -> bool {
+    let Some(sid) = active_sketch(app) else { return false };
+    let (mid_ids, replacements): (Vec<String>, Vec<(String, String)>) = {
+        let st = crate::open_meshing::session_world(&app.session);
+        let Some(ss) = st.sketch(sid) else { return false };
+        let sk = &ss.sketch;
+        if !sk.constraints.iter().any(|c| c.id == id && matches!(c.kind, ConstraintKind::Midpoint { .. })) {
+            return false;
+        }
+        let (mut ids, mut repls) = (Vec::new(), Vec::new());
+        for cid in glyph_group(sk, id) {
+            if let Some(c) = sk.constraints.iter().find(|c| c.id == cid)
+                && let ConstraintKind::Midpoint { p, l } = c.kind
+                && let (Some(pt), Some(cv)) = (sk.points.get(p), sk.curves.get(l))
+            {
+                ids.push(c.id.clone());
+                repls.push((pt.id.clone(), cv.id.clone()));
+            }
+        }
+        (ids, repls)
+    };
+    if mid_ids.is_empty() {
         return false;
     }
-    let hit = OVERLAY.with(|cell| {
-        let mut st = cell.borrow_mut();
-        let preview = st.detach_preview.as_ref()?;
-        if preview.glyph_rect.expand(3.0).contains(pos) {
-            let out = (preview.curve_id.clone(), preview.point_id.clone(), preview.distance_mm);
-            st.detach_preview = None;
-            Some(out)
-        } else {
-            None
-        }
-    });
-    let Some((curve, point, distance)) = hit else { return false };
-    let _ = app.run("sketch.detach_point", json!({ "curve": curve, "point": point, "distance": distance }));
+    let undo_before = app.session.undo.len();
+    if app.run("sketch.delete", json!({ "entities": mid_ids })).is_err() {
+        return false;
+    }
+    for (pt_id, line_id) in replacements {
+        let _ = app.run("sketch.constraint.coincident", json!({ "a": pt_id, "b": line_id }));
+    }
+    app.session.undo.truncate(undo_before + 1);
+    true
+}
+
+fn delete_glyph_by_id(app: &mut SolveApp, id: &str) -> bool {
+    if midpoint_downgrade_delete(app, id) || coincident_nudge_delete(app, id) {
+        return true;
+    }
+    let entities: Vec<String> = active_glyph_deletion(app, id)
+        .into_iter()
+        .filter_map(|s| match s {
+            Sel::SketchConstraint { id } | Sel::SketchPoint { id } => Some(id),
+            _ => None,
+        })
+        .collect();
+    if entities.is_empty() {
+        return false;
+    }
+    let _ = app.run("sketch.delete", json!({ "entities": entities }));
     true
 }
 
@@ -189,17 +310,143 @@ pub fn delete_glyph(app: &mut SolveApp) -> bool {
         delete_rel_group(app, kind, &curve_id, &all_ids);
         return true;
     }
-    let entities: Vec<String> = active_glyph_deletion(app, &id)
-        .into_iter()
-        .filter_map(|s| match s {
-            Sel::SketchConstraint { id } | Sel::SketchPoint { id } => Some(id),
-            _ => None,
-        })
-        .collect();
-    if entities.is_empty() {
+    delete_glyph_by_id(app, &id)
+}
+
+/// Delete the individual constraint glyph under `pos`, if any (never deletes a collapsed group badge).
+pub fn delete_glyph_at(app: &mut SolveApp, view: Option<ViewKey>, pos: Pos2) -> bool {
+    if app.session.active_sketch.is_none() || app.ui.pick_off.iter().any(|x| x == "constraints") || !view_matches(view) {
         return false;
     }
-    let _ = app.run("sketch.delete", json!({ "entities": entities }));
+    let Some(id) = glyph_at(pos) else { return false };
+    OVERLAY.with(|cell| {
+        let mut st = cell.borrow_mut();
+        if st.picked.as_deref() == Some(id.as_str()) {
+            st.picked = None;
+        }
+        if st.picked_rel.as_ref().is_some_and(|(rid, _, _, _)| rid == &id) {
+            st.picked_rel = None;
+        }
+    });
+    if let Some(rel) = rel_at_pos(&id, pos) {
+        delete_rel_group(app, rel.kind, &rel.curve_id, &rel.all_constraint_ids);
+        return true;
+    }
+    delete_glyph_by_id(app, &id)
+}
+
+/// If `pos` is over the simulated coincident break-off glyph, detach that curve from the point.
+pub fn detach_simulated_at(app: &mut SolveApp, view: Option<ViewKey>, pos: Pos2) -> bool {
+    if app.session.active_sketch.is_none() || app.ui.pick_off.iter().any(|x| x == "constraints") || !view_matches(view) {
+        return false;
+    }
+    let hit = OVERLAY.with(|cell| {
+        let mut st = cell.borrow_mut();
+        let preview = st.detach_preview.as_ref()?;
+        if preview.glyph_rect.expand(3.0).contains(pos) {
+            let out = (preview.curve_id.clone(), preview.point_id.clone(), preview.distance_mm);
+            st.detach_preview = None;
+            Some(out)
+        } else {
+            None
+        }
+    });
+    let Some((curve, point, distance)) = hit else { return false };
+    let detach_at = active_sketch(app)
+        .and_then(|sid| app.session.doc.sketch(sid).ok().and_then(|sk| sk.resolve_point(&point).and_then(|pi| sk.point(pi)).map(|at| (sid, at))));
+    if app.run("sketch.detach_point", json!({ "curve": curve, "point": point, "distance": distance })).is_ok()
+        && let Some((sid, at)) = detach_at
+    {
+        let expires_ms = crate::now_ms() + HISTORY_FLASH_MS;
+        OVERLAY.with(|cell| {
+            let fl = &mut cell.borrow_mut().history_flash;
+            if fl.sketch != Some(sid) {
+                *fl = HistoryFlashState::new();
+                fl.sketch = Some(sid);
+            }
+            if !fl.ghosts.iter().any(|g| !g.is_added && g.kind_name == "Coincident" && g.at.dist(at) < 1e-4) {
+                fl.ghosts.push(ConstraintFlashGhost {
+                    id: format!("detach:{curve}:{point}"),
+                    kind_name: "Coincident",
+                    pattern_icon: None,
+                    at,
+                    dir: None,
+                    is_added: false,
+                    expires_ms,
+                });
+            }
+        });
+    }
+    true
+}
+
+/// If `pos` is over one of the simulated per-point Symmetry break-off glyphs, remove only that Symmetry constraint.
+pub fn break_symmetry_at(app: &mut SolveApp, view: Option<ViewKey>, pos: Pos2) -> bool {
+    if app.session.active_sketch.is_none() || app.ui.pick_off.iter().any(|x| x == "constraints") || !view_matches(view) {
+        return false;
+    }
+    let hit = OVERLAY.with(|cell| {
+        let mut st = cell.borrow_mut();
+        let best_idx = st
+            .sym_break_previews
+            .iter()
+            .enumerate()
+            .filter(|(_, p)| p.glyph_rect.expand(3.0).contains(pos))
+            .min_by(|(_, a), (_, b)| a.glyph_rect.center().distance(pos).total_cmp(&b.glyph_rect.center().distance(pos)))
+            .map(|(i, _)| i)?;
+        Some(st.sym_break_previews.swap_remove(best_idx).constraint_id)
+    });
+    let Some(id) = hit else { return false };
+    let _ = app.run("sketch.delete", json!({ "entities": [id] }));
+    true
+}
+
+fn constraint_tool_command(kind: &ConstraintKind) -> Option<&'static str> {
+    use ConstraintKind::*;
+    match kind {
+        Coincident { .. } | PointOnCurve { .. } => Some("sketch.constraint.coincident"),
+        Horizontal { .. } | HorizontalPoints { .. } | Vertical { .. } | VerticalPoints { .. } => Some("sketch.constraint.horizontal_vertical"),
+        Parallel { .. } => Some("sketch.constraint.parallel"),
+        Perpendicular { .. } => Some("sketch.constraint.perpendicular"),
+        Collinear { .. } => Some("sketch.constraint.collinear"),
+        Tangent { .. } => Some("sketch.constraint.tangent"),
+        Equal { .. } => Some("sketch.constraint.equal"),
+        Concentric { .. } => Some("sketch.constraint.concentric"),
+        Midpoint { .. } | PointAlong { .. } => Some("sketch.constraint.midpoint"),
+        Symmetric { .. } => Some("sketch.constraint.symmetry"),
+        Fix { .. } => Some("sketch.constraint.fix"),
+        Smooth { .. } => Some("sketch.constraint.curvature"),
+        _ => None,
+    }
+}
+
+/// If `pos` is over a constraint glyph (or simulated detach/symmetry break-off glyph), activate its tool.
+pub fn activate_tool_at(app: &mut SolveApp, view: Option<ViewKey>, pos: Pos2) -> bool {
+    if app.session.active_sketch.is_none() || app.ui.pick_off.iter().any(|x| x == "constraints") || !view_matches(view) {
+        return false;
+    }
+    let simulated_cmd = OVERLAY.with(|cell| {
+        let st = cell.borrow();
+        if st.detach_preview.as_ref().is_some_and(|d| d.glyph_rect.expand(3.0).contains(pos)) {
+            Some("sketch.constraint.coincident")
+        } else if st.sym_break_previews.iter().any(|s| s.glyph_rect.expand(3.0).contains(pos)) {
+            Some("sketch.constraint.symmetry")
+        } else {
+            None
+        }
+    });
+    let cmd = simulated_cmd.or_else(|| {
+        let id = glyph_at(pos)?;
+        let st = crate::open_meshing::shown_world(app);
+        active_sketch(app)
+            .and_then(|s| st.sketch(s))
+            .and_then(|ss| ss.sketch.constraints.iter().find(|c| c.id == id))
+            .and_then(|c| constraint_tool_command(&c.kind))
+    });
+    let Some(tool_id) = cmd else { return false };
+    clear_clicked_constraint();
+    let _ = app.session.execute("select.clear", &json!({}));
+    app.start(tool_id);
     true
 }
 
@@ -235,4 +482,128 @@ pub fn over_constraint_ui(app: &SolveApp, pos: Pos2) -> bool {
         return false;
     }
     OVERLAY.with(|cell| cell.borrow().hit_rects.iter().any(|r| r.contains(pos))) || glyph_at(pos).is_some() || over_group_badge_or_expanded(pos)
+}
+
+#[derive(Clone, Debug)]
+struct ConstraintSnap {
+    id: String,
+    kind_name: &'static str,
+    pattern_icon: Option<&'static str>,
+    anchors: Vec<(Vec2, Option<Vec2>)>,
+}
+
+pub struct HistoryConstraintSnapshot {
+    sketch: u64,
+    items: Vec<ConstraintSnap>,
+}
+
+/// Snapshot non-dimension constraints of the active sketch before undo/redo or deletion.
+pub fn snapshot_active_constraints(app: &SolveApp) -> Option<HistoryConstraintSnapshot> {
+    let sid = active_sketch(app)?;
+    let sk = app.session.doc.sketch(sid).ok()?;
+    let (groups, rel_groups) = anchor_groups_with_rel(sk);
+    let mut items = Vec::new();
+    for c in &sk.constraints {
+        if c.kind.is_dimension() {
+            continue;
+        }
+        let mut anchors: Vec<(Vec2, Option<Vec2>)> =
+            groups.iter().filter(|g| g.constraint_ids.iter().any(|id| id == &c.id)).map(|g| (g.at, g.dir)).collect();
+        if anchors.is_empty() {
+            for rg in &rel_groups {
+                if rg.constraint_ids.iter().any(|id| id == &c.id) {
+                    for &ci in &rg.curves {
+                        if let Some(g) = groups.iter().find(|g| g.key == AnchorKey::Curve(ci)) {
+                            anchors.push((g.at, g.dir));
+                        }
+                    }
+                }
+            }
+        }
+        if let ConstraintKind::Symmetric { p, q, .. } = c.kind {
+            for pi in [p, q] {
+                if let Some(pt) = sk.point(pi) {
+                    anchors.push((pt, None));
+                }
+            }
+        }
+        if anchors.is_empty() {
+            let (cs, ps) = constraint_entities(&c.kind);
+            for pi in ps {
+                if let Some(pt) = sk.point(pi) {
+                    anchors.push((pt, None));
+                }
+            }
+            for ci in cs {
+                let poly = sk.polyline(ci);
+                if let Some((pt, dir)) = poly_point_at_frac(&poly, 0.5) {
+                    anchors.push((pt, dir));
+                }
+            }
+        }
+        items.push(ConstraintSnap { id: c.id.clone(), kind_name: c.kind.name(), pattern_icon: pattern_icon_for(sk, &c.id), anchors });
+    }
+    Some(HistoryConstraintSnapshot { sketch: sid, items })
+}
+
+/// Diff active sketch constraints after undo/redo or deletion and record green/red flash entries.
+pub fn record_history_constraint_diff(app: &SolveApp, before: HistoryConstraintSnapshot, flash_added: bool) {
+    let Some(sid) = active_sketch(app).filter(|&s| s == before.sketch) else {
+        OVERLAY.with(|c| c.borrow_mut().history_flash = HistoryFlashState::new());
+        return;
+    };
+    let Ok(sk) = app.session.doc.sketch(sid) else { return };
+    let expires_ms = crate::now_ms() + HISTORY_FLASH_MS;
+    let before_ids: HashSet<String> = before.items.iter().map(|i| i.id.clone()).collect();
+    let after_ids: HashSet<String> = sk.constraints.iter().filter(|c| !c.kind.is_dimension()).map(|c| c.id.clone()).collect();
+
+    OVERLAY.with(|cell| {
+        let fl = &mut cell.borrow_mut().history_flash;
+        if fl.sketch != Some(sid) {
+            *fl = HistoryFlashState::new();
+            fl.sketch = Some(sid);
+        }
+        if flash_added {
+            for c in &sk.constraints {
+                if c.kind.is_dimension() || before_ids.contains(c.id.as_str()) {
+                    continue;
+                }
+                fl.added.insert(c.id.clone(), expires_ms);
+                fl.ghosts.retain(|g| !(g.id == c.id && !g.is_added));
+                if let ConstraintKind::Symmetric { p, q, .. } = c.kind {
+                    for pi in [p, q] {
+                        if let Some(pt) = sk.point(pi) {
+                            fl.ghosts.push(ConstraintFlashGhost {
+                                id: c.id.clone(),
+                                kind_name: c.kind.name(),
+                                pattern_icon: None,
+                                at: pt,
+                                dir: None,
+                                is_added: true,
+                                expires_ms,
+                            });
+                        }
+                    }
+                }
+            }
+        }
+        for snap in before.items {
+            if after_ids.contains(snap.id.as_str()) {
+                continue;
+            }
+            fl.added.remove(&snap.id);
+            fl.ghosts.retain(|g| g.id != snap.id);
+            for (at, dir) in snap.anchors {
+                fl.ghosts.push(ConstraintFlashGhost {
+                    id: snap.id.clone(),
+                    kind_name: snap.kind_name,
+                    pattern_icon: snap.pattern_icon,
+                    at,
+                    dir,
+                    is_added: false,
+                    expires_ms,
+                });
+            }
+        }
+    });
 }

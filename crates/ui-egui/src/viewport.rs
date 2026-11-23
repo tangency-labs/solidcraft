@@ -8150,8 +8150,11 @@ fn show_view(app: &mut SolveApp, ui: &mut egui::Ui) {
             if app.tool.is_some() {
                 crate::tools::finish(app);
             } else if app.dialog.is_none() {
-                if crate::sketch_tools::detach_simulated_at(app, Some((ui.ctx().viewport_id(), resp.id)), p) {
-                    // Right-clicking a simulated break-off glyph detaches the curve endpoint immediately.
+                let view_key = Some((ui.ctx().viewport_id(), resp.id));
+                if crate::sketch_tools::detach_simulated_at(app, view_key, p) || crate::sketch_tools::break_symmetry_at(app, view_key, p) {
+                    // Right-clicking a simulated break-off glyph detaches/unmirrors immediately.
+                } else if app.preferences.right_click_deletes_constraint && crate::sketch_tools::delete_glyph_at(app, view_key, p) {
+                    // Right-clicking an individual constraint glyph deletes it directly.
                 } else {
                     crate::context_menu::open(app, p, held_mods);
                 }
@@ -8160,6 +8163,15 @@ fn show_view(app: &mut SolveApp, ui: &mut egui::Ui) {
             } else if app.preferences.right_click_confirms {
                 crate::dialogs::right_click(app);
             }
+        }
+        // Middle-click on a constraint glyph turns on that constraint tool.
+        if resp.clicked_by(egui::PointerButton::Middle)
+            && !held
+            && app.dialog.is_none()
+            && app.tool.as_ref().is_none_or(|t| t.cmd.starts_with("sketch.constraint."))
+            && crate::sketch_tools::activate_tool_at(app, Some((ui.ctx().viewport_id(), resp.id)), p)
+        {
+            app.viewport.middle_clicked = false;
         }
     }
     // Dragging a sketch point of the active sketch moves it; the solver keeps the constraints.

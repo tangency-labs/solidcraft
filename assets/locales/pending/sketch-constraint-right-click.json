@@ -1,0 +1,34 @@
+{
+  "en": {
+    "prefs.right_click_deletes_constraint": "Right-click deletes constraints",
+    "prefs.right_click_deletes_constraint_note": "Delete a constraint glyph when you right-click it instead of opening its context menu."
+  },
+  "ar": {
+    "prefs.right_click_deletes_constraint": "النقر بزر الفأرة الأيمن يحذف القيود",
+    "prefs.right_click_deletes_constraint_note": "حذف رمز القيد عند النقر بزر الفأرة الأيمن بدلًا من فتح قائمة السياق."
+  },
+  "de": {
+    "prefs.right_click_deletes_constraint": "Rechtsklick löscht Bindungen",
+    "prefs.right_click_deletes_constraint_note": "Löscht ein Bindungssymbol beim Rechtsklick direkt, statt das Kontextmenü zu öffnen."
+  },
+  "he": {
+    "prefs.right_click_deletes_constraint": "לחיצה ימנית מוחקת אילוצים",
+    "prefs.right_click_deletes_constraint_note": "מחיקת סמל אילוץ בלחיצה ימנית במקום פתיחת תפריט ההקשר."
+  },
+  "ja": {
+    "prefs.right_click_deletes_constraint": "右クリックで拘束を削除",
+    "prefs.right_click_deletes_constraint_note": "コンテキストメニューを開かずに、右クリックで拘束グリフを削除します。"
+  },
+  "ko": {
+    "prefs.right_click_deletes_constraint": "오른쪽 클릭으로 구속 조건 삭제",
+    "prefs.right_click_deletes_constraint_note": "상황에 맞는 메뉴를 여는 대신 오른쪽 클릭으로 구속 조건 기호를 바로 삭제합니다."
+  },
+  "vi": {
+    "prefs.right_click_deletes_constraint": "Nhấp chuột phải để xóa ràng buộc",
+    "prefs.right_click_deletes_constraint_note": "Xóa biểu tượng ràng buộc khi nhấp chuột phải thay vì mở menu ngữ cảnh."
+  },
+  "zh": {
+    "prefs.right_click_deletes_constraint": "右键单击删除约束",
+    "prefs.right_click_deletes_constraint_note": "右键单击约束符号时直接删除它，而不是打开上下文菜单。"
+  }
+}

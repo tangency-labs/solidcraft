@@ -1,4 +1,4 @@
-//! Rendering pipeline for grouped sketch constraint glyphs, badges, and expanded boxes.
+//! Rendering pipeline for sketch constraint glyphs, badges, expanded boxes, simulated break-offs, and flash ghosts.
 
 use std::collections::{HashMap, HashSet};
 
@@ -13,15 +13,15 @@ use crate::SolveApp;
 use crate::icons::markers::{glyph_icon, glyph_letter};
 use crate::viewport::{Hit, Proj};
 
-use super::actions::{active_sketch, detach_distance_mm_for_view, resolve_detach_target, sketch_px_per_mm};
+use super::actions::{active_sketch, detach_distance_mm_for_view, resolve_detach_target, selected_symmetric_point, sketch_px_per_mm};
 use super::grouping::{
     AnchorKey, ConstraintAnchorGroup, CurveRelGroup, CurveRelKind, anchor_groups_with_rel, constraint_entities, find_point_cluster,
     glyph_constraints, glyph_group, point_cluster_map,
 };
 use super::layout::{PlacementScene, glyph_label_rect, glyph_label_wrap_width, square_grid_dims};
 use super::{
-    BADGE_HOVER_DELAY_SECS, CONSTRAINT_GROUP_NEVER, DetachPreview, DrawnRelInfo, GLYPH, MIN_GLYPH_SPAN_PX, OVERLAY, VC_HOVER_DELAY_SECS, ViewKey,
-    constraint_glyphs_visible_at_scale, glyph_px, pattern_icon_for,
+    BADGE_HOVER_DELAY_SECS, CONSTRAINT_GROUP_NEVER, ConstraintFlashGhost, DetachPreview, DrawnRelInfo, GLYPH, HISTORY_FADE_MS, HistoryFlashState,
+    MIN_GLYPH_SPAN_PX, OVERLAY, SymmetryBreakPreview, VC_HOVER_DELAY_SECS, ViewKey, constraint_glyphs_visible_at_scale, glyph_px, pattern_icon_for,
 };
 
 const MIN_VIEW_NORMAL_COS: f64 = 0.342_020_143_325_668_8;
@@ -84,6 +84,7 @@ struct GlyphMeta<'a> {
     rel: Option<(&'a CurveRelGroup, usize, &'a str)>,
     hovered_rel: Option<(CurveRelKind, usize)>,
     picked_rel: Option<&'a (String, CurveRelKind, String, Vec<String>)>,
+    flash_alpha: Option<f32>,
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -98,7 +99,7 @@ fn paint_glyph_cell(
     scale: f32,
     picked: Option<&str>,
     hovered_at: Option<&(String, Pos2)>,
-    vc_lit: bool,
+    geom_lit: bool,
     meta: &GlyphMeta<'_>,
     drawn: &mut Vec<(String, Pos2)>,
     drawn_rel: &mut Vec<DrawnRelInfo>,
@@ -121,8 +122,10 @@ fn paint_glyph_cell(
     let lit = selected
         || hovered_at.is_some_and(|(hid, pos)| hid == id && pos.distance(center) < 1.0)
         || meta.rel.is_some_and(|(rg, _, _)| meta.hovered_rel == Some((rg.kind, rg.index)))
-        || vc_lit;
-    let col = if failing {
+        || geom_lit;
+    let col = if let Some(alpha) = meta.flash_alpha {
+        tk.agent_ok.gamma_multiply(alpha)
+    } else if failing {
         crate::viewport::Conflict::glyph_colour(app, tk)
     } else if lit {
         tk.accent
@@ -132,8 +135,18 @@ fn paint_glyph_cell(
         tk.glyph_text
     };
     let r = egui::Rect::from_center_size(center, egui::vec2(glyph, glyph));
-    let bg = if lit { tk.accent_soft } else { tk.glyph_bg };
-    let stroke = Stroke::new(1.0, if failing || lit { col } else { tk.glyph_edge });
+    let bg = if let Some(alpha) = meta.flash_alpha {
+        tk.agent_ok.gamma_multiply(0.24 * alpha)
+    } else if lit {
+        tk.accent_soft
+    } else {
+        tk.glyph_bg
+    };
+    let stroke = if let Some(alpha) = meta.flash_alpha {
+        Stroke::new(1.5, tk.agent_ok.gamma_multiply(alpha))
+    } else {
+        Stroke::new(1.0, if failing || lit { col } else { tk.glyph_edge })
+    };
     let rounding = tk.radius_sm.saturating_sub(1);
     painter.rect_filled(r, rounding, bg);
     painter.rect_stroke(r, rounding, stroke, egui::StrokeKind::Inside);
@@ -216,6 +229,47 @@ fn paint_group_badge(
     painter.text(rect.center(), egui::Align2::CENTER_CENTER, label, egui::FontId::proportional(font_size), col);
 }
 
+#[allow(clippy::too_many_arguments)]
+fn paint_accent_icon_badge(
+    painter: &egui::Painter,
+    tk: &solidcraft_theme::Tokens,
+    base: Pos2,
+    rect: egui::Rect,
+    scale: f32,
+    icon_name: &str,
+    lit: bool,
+    draw_leader: bool,
+) {
+    if draw_leader {
+        painter.line_segment([base, rect.center()], Stroke::new(1.0, tk.accent.gamma_multiply(0.8)));
+    }
+    let rounding = tk.radius_sm.saturating_sub(1);
+    painter.rect_filled(rect, rounding, if lit { tk.accent_soft } else { tk.glyph_bg });
+    painter.rect_stroke(rect, rounding, Stroke::new(1.2, tk.accent), egui::StrokeKind::Inside);
+    crate::icons::paint_icon(painter, rect.shrink(2.0 * scale), icon_name, 1.0);
+}
+
+fn collect_history_flash(sid: u64, ctx: &egui::Context) -> (HashMap<String, f32>, Vec<(ConstraintFlashGhost, f32)>) {
+    let now_ms = crate::now_ms();
+    OVERLAY.with(|cell| {
+        let fl = &mut cell.borrow_mut().history_flash;
+        if fl.sketch != Some(sid) {
+            *fl = HistoryFlashState::new();
+            return (HashMap::new(), Vec::new());
+        }
+        fl.added.retain(|_, &mut exp| exp > now_ms);
+        fl.ghosts.retain(|g| g.expires_ms > now_ms);
+        let deleted_alpha = |exp: f64| ((exp - now_ms).max(0.0) / HISTORY_FADE_MS).clamp(0.0, 1.0) as f32;
+        let added = fl.added.keys().map(|id| (id.clone(), 1.0_f32)).collect();
+        let ghosts = fl.ghosts.iter().map(|g| (g.clone(), if g.is_added { 1.0_f32 } else { deleted_alpha(g.expires_ms) })).collect();
+        if !fl.added.is_empty() || !fl.ghosts.is_empty() {
+            let fading = fl.ghosts.iter().any(|g| !g.is_added && g.expires_ms - now_ms <= HISTORY_FADE_MS + 30.0);
+            ctx.request_repaint_after(std::time::Duration::from_millis(if fading { 16 } else { 50 }));
+        }
+        (added, ghosts)
+    })
+}
+
 /// Per-frame constraint glyph layout and rendering entry point.
 pub fn show(app: &SolveApp, painter: &egui::Painter, proj: &Proj, hover: Option<Pos2>, view: ViewKey) {
     let Some(sid) = active_sketch(app) else {
@@ -231,11 +285,17 @@ pub fn show(app: &SolveApp, painter: &egui::Painter, proj: &Proj, hover: Option<
     let scale = glyph / GLYPH;
     OVERLAY.with(|c| c.borrow_mut().glyph_px = glyph);
 
-    if ss.sketch.view.hide_constraints || !visible_at_angle(&ss.plane, &proj.cam) {
+    let (history_added, history_ghosts) = collect_history_flash(sid, painter.ctx());
+    let has_history_flash = !history_added.is_empty() || !history_ghosts.is_empty();
+    let only_flashed = ss.sketch.view.hide_constraints && has_history_flash;
+    if (ss.sketch.view.hide_constraints && !has_history_flash) || !visible_at_angle(&ss.plane, &proj.cam) {
         OVERLAY.with(|c| c.borrow_mut().clear_frame());
         return;
     }
-    if let Some(px) = sketch_px_per_mm(&ss.plane, proj)
+    let px_per_mm = sketch_px_per_mm(&ss.plane, proj);
+    OVERLAY.with(|c| c.borrow_mut().last_px_per_mm = px_per_mm.unwrap_or(1.0));
+    if !has_history_flash
+        && let Some(px) = px_per_mm
         && !constraint_glyphs_visible_at_scale(px, app.preferences.hide_constraint_glyphs_zoomed_out, || sketch_span_px(ss, proj))
     {
         OVERLAY.with(|c| c.borrow_mut().clear_frame());
@@ -353,7 +413,8 @@ pub fn show(app: &SolveApp, painter: &egui::Painter, proj: &Proj, hover: Option<
                 if vc_poc_revealed(p) {
                     vc_revealed_ids.insert(c.id.clone());
                 } else {
-                    let forced = ss.report.failing.contains(&c.id)
+                    let forced = history_added.contains_key(&c.id)
+                        || ss.report.failing.contains(&c.id)
                         || picked.as_deref() == Some(c.id.as_str())
                         || app.session.selection.iter().any(|s| matches!(s, Sel::SketchConstraint { id: x } if x == &c.id));
                     if !forced {
@@ -372,16 +433,35 @@ pub fn show(app: &SolveApp, painter: &egui::Painter, proj: &Proj, hover: Option<
         raw_groups.retain(|g| !g.constraint_ids.is_empty());
     }
 
+    let mut geom_lit_ids: HashSet<String> = vc_revealed_ids;
+    let mut flashed_ids: HashSet<String> = history_added.keys().cloned().collect();
+    for rg in &rel_groups {
+        if rg.constraint_ids.iter().any(|id| geom_lit_ids.contains(id)) {
+            geom_lit_ids.extend(rg.constraint_ids.iter().cloned());
+        }
+        if rg.constraint_ids.iter().any(|cid| history_added.contains_key(cid)) {
+            flashed_ids.extend(rg.constraint_ids.iter().cloned());
+        }
+    }
+
+    let always_visible_ids: HashSet<String> = if only_flashed { flashed_ids.clone() } else { HashSet::new() };
+
     let prev_dirs = OVERLAY.with(|c| c.borrow().prev_anchor_dirs.clone());
     let mut next_dirs: HashMap<AnchorKey, egui::Vec2> = HashMap::new();
     let mut placed_groups: Vec<PlacedGroup> = Vec::new();
-    for group in raw_groups {
+    for mut group in raw_groups {
+        if only_flashed {
+            group.constraint_ids.retain(|id| always_visible_ids.contains(id));
+        }
         if group.constraint_ids.is_empty() {
             continue;
         }
         let Some(base) = proj.to_screen(ss.plane.to_world(group.at)) else { continue };
         let dir_screen = group.dir.and_then(|d| proj.to_screen(ss.plane.to_world(group.at + d)));
-        let grouped = !matches!(group.key, AnchorKey::CurveJoint(..))
+        let has_flashed = group.constraint_ids.iter().any(|id| flashed_ids.contains(id));
+        let grouped = !only_flashed
+            && !has_flashed
+            && !matches!(group.key, AnchorKey::CurveJoint(..))
             && threshold < CONSTRAINT_GROUP_NEVER
             && group.constraint_ids.len() > usize::from(threshold);
         let has_box = !grouped && group.constraint_ids.len() >= 2;
@@ -516,7 +596,23 @@ pub fn show(app: &SolveApp, painter: &egui::Painter, proj: &Proj, hover: Option<
     };
 
     // Highlight affected geometry underneath glyph boxes.
-    if let Some((rg, _, _)) = hovered_vg.and_then(|(_, _, r)| *r) {
+    let hovered_sym_prev = hover.and_then(|h| {
+        OVERLAY.with(|c| {
+            c.borrow()
+                .sym_break_previews
+                .iter()
+                .filter(|p| p.glyph_rect.expand(2.0).contains(h))
+                .min_by(|a, b| a.glyph_rect.center().distance(h).total_cmp(&b.glyph_rect.center().distance(h)))
+                .map(|p| (p.axis_curve, p.other_point))
+        })
+    });
+    if let Some((axis_curve, other_point)) = hovered_sym_prev {
+        let mut budget = solidcraft_engine::render::SamplingBudget::new(32_768, 65_536);
+        crate::tools::paint_curve(&ss.sketch, axis_curve, &ss.plane, painter, proj, Stroke::new(3.0, tk.accent.gamma_multiply(0.7)), &mut budget);
+        if let Some(q) = ss.sketch.point(other_point).and_then(|q| proj.to_screen(ss.plane.to_world(q))) {
+            painter.circle_filled(q, 4.5, tk.accent);
+        }
+    } else if let Some((rg, _, _)) = hovered_vg.and_then(|(_, _, r)| *r) {
         highlight_constraints_entities(ss, painter, proj, &tk, &rg.constraint_ids);
     } else if let Some((id, _)) = &hovered_at {
         highlight_constraints_entities(ss, painter, proj, &tk, &glyph_group(&ss.sketch, id));
@@ -537,6 +633,16 @@ pub fn show(app: &SolveApp, painter: &egui::Painter, proj: &Proj, hover: Option<
 
     let (mut drawn, mut drawn_rel, mut collapsed_badges, mut hit_rects) = (Vec::new(), Vec::new(), Vec::new(), Vec::new());
     let box_rounding = tk.radius_sm + 2;
+    let flash_for = |cid: &str, rel: Option<(&CurveRelGroup, usize, &str)>| -> Option<f32> {
+        history_added.get(cid).copied().or_else(|| {
+            rel.and_then(|(rg, _, _)| {
+                rg.constraint_ids
+                    .iter()
+                    .filter_map(|id| history_added.get(id).copied())
+                    .fold(None, |a: Option<f32>, b| Some(a.map_or(b, |x| x.max(b))))
+            })
+        })
+    };
 
     // Draw non-expanded groups first, then expanded boxes on top.
     for (idx, p) in placed_groups.iter().enumerate() {
@@ -565,7 +671,7 @@ pub fn show(app: &SolveApp, painter: &egui::Painter, proj: &Proj, hover: Option<
                     p.rect.top() + inner_pad + glyph * 0.5 + (k / p.cols) as f32 * (glyph + cell_gap),
                 );
                 let rel = rel_for_cell(p.group.key, cid);
-                let meta = GlyphMeta { rel, hovered_rel, picked_rel: picked_rel.as_ref() };
+                let meta = GlyphMeta { rel, hovered_rel, picked_rel: picked_rel.as_ref(), flash_alpha: flash_for(cid, rel) };
                 paint_glyph_cell(
                     app,
                     ss,
@@ -577,7 +683,7 @@ pub fn show(app: &SolveApp, painter: &egui::Painter, proj: &Proj, hover: Option<
                     scale,
                     picked.as_deref(),
                     hovered_at.as_ref(),
-                    vc_revealed_ids.contains(cid),
+                    geom_lit_ids.contains(cid),
                     &meta,
                     &mut drawn,
                     &mut drawn_rel,
@@ -602,7 +708,7 @@ pub fn show(app: &SolveApp, painter: &egui::Painter, proj: &Proj, hover: Option<
                 eb.rect.top() + eb.pad_px + eb.cell_px * 0.5 + (k / eb.cols) as f32 * (eb.cell_px + eb.gap_px),
             );
             let rel = rel_for_cell(p.group.key, cid);
-            let meta = GlyphMeta { rel, hovered_rel, picked_rel: picked_rel.as_ref() };
+            let meta = GlyphMeta { rel, hovered_rel, picked_rel: picked_rel.as_ref(), flash_alpha: flash_for(cid, rel) };
             paint_glyph_cell(
                 app,
                 ss,
@@ -614,7 +720,7 @@ pub fn show(app: &SolveApp, painter: &egui::Painter, proj: &Proj, hover: Option<
                 eb.cell_px / GLYPH,
                 picked.as_deref(),
                 hovered_at.as_ref(),
-                vc_revealed_ids.contains(cid),
+                geom_lit_ids.contains(cid),
                 &meta,
                 &mut drawn,
                 &mut drawn_rel,
@@ -637,11 +743,7 @@ pub fn show(app: &SolveApp, painter: &egui::Painter, proj: &Proj, hover: Option<
         let glyph_rect = reused.unwrap_or_else(|| scene.place_group(base, None, egui::vec2(glyph, glyph), glyph, None, prev_dir));
         scene.placed.push(glyph_rect);
         let lit = hover.is_some_and(|h| glyph_rect.expand(2.0).contains(h));
-        painter.line_segment([base, glyph_rect.center()], Stroke::new(1.0, tk.accent.gamma_multiply(0.8)));
-        let badge_rounding = tk.radius_sm.saturating_sub(1);
-        painter.rect_filled(glyph_rect, badge_rounding, if lit { tk.accent_soft } else { tk.glyph_bg });
-        painter.rect_stroke(glyph_rect, badge_rounding, Stroke::new(1.2, tk.accent), egui::StrokeKind::Inside);
-        crate::icons::paint_icon(painter, glyph_rect.shrink(2.0 * scale), "c_coincident", 1.0);
+        paint_accent_icon_badge(painter, &tk, base, glyph_rect, scale, "c_coincident", lit, true);
         hit_rects.push(glyph_rect.expand(1.5));
         if lit {
             special_tooltip = Some((glyph_rect, format!("Coincident on {curve_id} (right-click to detach)")));
@@ -650,8 +752,78 @@ pub fn show(app: &SolveApp, painter: &egui::Painter, proj: &Proj, hover: Option<
         Some(DetachPreview { curve_id, point_id, point_rect, glyph_rect, distance_mm })
     });
 
-    // Tooltip chip for hovered break-off glyph or individual constraint glyph (never on collapsed badges).
+    // Simulated per-point symmetry break-off glyphs (one per Symmetric constraint on the selected point).
+    let mut next_sym_breaks: Vec<SymmetryBreakPreview> = Vec::new();
+    if let Some((pi, point_id, syms)) = selected_symmetric_point(app, &ss.sketch)
+        && let Some(base) = ss.sketch.point(pi).and_then(|p| proj.to_screen(ss.plane.to_world(p)))
+    {
+        for (sym_id, axis_curve, other_point) in syms {
+            let prev_dir = OVERLAY.with(|c| {
+                c.borrow()
+                    .sym_break_previews
+                    .iter()
+                    .find(|p| p.point_id == point_id && p.constraint_id == sym_id && p.prev_dir.length_sq() > 0.1)
+                    .map(|p| p.prev_dir)
+            });
+            let glyph_rect = scene.place_group(base, None, egui::vec2(glyph, glyph), glyph, None, prev_dir);
+            scene.placed.push(glyph_rect);
+            next_sym_breaks.push(SymmetryBreakPreview {
+                point_id: point_id.clone(),
+                constraint_id: sym_id,
+                axis_curve,
+                other_point,
+                glyph_rect,
+                prev_dir: (glyph_rect.center() - base).normalized(),
+            });
+        }
+        let hovered_sym_idx = hover.and_then(|h| {
+            next_sym_breaks
+                .iter()
+                .enumerate()
+                .filter(|(_, s)| s.glyph_rect.expand(2.0).contains(h))
+                .min_by(|(_, a), (_, b)| a.glyph_rect.center().distance(h).total_cmp(&b.glyph_rect.center().distance(h)))
+                .map(|(i, _)| i)
+        });
+        for (idx, s) in next_sym_breaks.iter().enumerate() {
+            let lit = hovered_sym_idx == Some(idx);
+            paint_accent_icon_badge(painter, &tk, base, s.glyph_rect, scale, "c_symmetry", lit, true);
+            hit_rects.push(s.glyph_rect.expand(1.5));
+            if lit && special_tooltip.is_none() {
+                let axis_id = ss.sketch.curves.get(s.axis_curve).map_or("axis", |c| c.id.as_str());
+                special_tooltip = Some((s.glyph_rect, format!("Symmetry ({}, axis {axis_id}) (right-click to break)", s.constraint_id)));
+            }
+        }
+    }
+
+    // Undo/Redo & delete flash ghosts (red fading for deleted, solid green for re-created Symmetric points).
     let rounding = tk.radius_sm.saturating_sub(1);
+    for (ghost, alpha) in &history_ghosts {
+        let Some(base) = proj.to_screen(ss.plane.to_world(ghost.at)) else { continue };
+        let dir_screen = ghost.dir.and_then(|d| proj.to_screen(ss.plane.to_world(ghost.at + d)));
+        let r = scene.place_group(base, dir_screen, egui::vec2(glyph, glyph), glyph, None, None);
+        scene.placed.push(r);
+        let base_col = if ghost.is_added { tk.agent_ok } else { tk.error };
+        let col = base_col.gamma_multiply(*alpha);
+        if r.center().distance(base) > glyph * 1.3 {
+            painter.line_segment([base, r.center()], Stroke::new(1.0, col.gamma_multiply(0.75)));
+        }
+        painter.rect_filled(r, rounding, base_col.gamma_multiply(0.24 * *alpha));
+        painter.rect_stroke(r, rounding, Stroke::new(1.5, col), egui::StrokeKind::Inside);
+        match ghost.pattern_icon.or_else(|| glyph_icon(ghost.kind_name)) {
+            Some(icon) => crate::icons::paint_icon(painter, r.shrink(2.0 * scale), icon, f32::from(col.a()) / 255.0),
+            None => {
+                painter.text(
+                    r.center(),
+                    egui::Align2::CENTER_CENTER,
+                    glyph_letter(ghost.kind_name),
+                    egui::FontId::proportional(tk.font_panel * scale),
+                    col,
+                );
+            }
+        }
+    }
+
+    // Tooltip chip for hovered break-off glyph or individual constraint glyph (never on collapsed badges).
     let paint_chip = |h: Pos2, anchor_rect: egui::Rect, label: String| {
         let g = painter.layout(label, egui::FontId::proportional(tk.font_small), tk.text, glyph_label_wrap_width(proj.rect));
         let chip = glyph_label_rect(h, anchor_rect, g.size() + egui::vec2(6.0, 6.0), proj.rect);
@@ -705,6 +877,7 @@ pub fn show(app: &SolveApp, painter: &egui::Painter, proj: &Proj, hover: Option<
         st.collapsed_badges = collapsed_badges;
         st.hit_rects = hit_rects;
         st.detach_preview = next_detach;
+        st.sym_break_previews = next_sym_breaks;
         st.vc_boxes = next_vc_boxes;
         st.prev_anchor_dirs = next_dirs;
         st.published_view = Some(view);

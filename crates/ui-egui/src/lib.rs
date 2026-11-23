@@ -1715,6 +1715,9 @@ impl SolveApp {
         }
         let params = if matches!(id, "render.start" | "render.preflight") { render_workspace::light::filter_request(self, params)? } else { params };
         let selected_before = self.session.selection.clone();
+        let track_constraint_flash =
+            matches!(id, "edit.undo" | "edit.redo" | "sketch.delete" | "selection.delete" | "sketch.unlink_curve_group" | "sketch.detach_point");
+        let history_before = if track_constraint_flash { crate::sketch_tools::snapshot_active_constraints(self) } else { None };
         // File commands may also arrive through shortcuts, scripts, or the control
         // channel. Protect every open tab here, including after asynchronous pickers.
         let removes_open_file = matches!(id, "file.move" | "file.trash")
@@ -1743,7 +1746,14 @@ impl SolveApp {
             }
             reply
         });
-        self.after_command(id, &params, revision, selected_before, r)
+        let out = self.after_command(id, &params, revision, selected_before, r);
+        if let Some(before) = history_before
+            && out.is_ok()
+        {
+            let flash_added = matches!(id, "edit.undo" | "edit.redo");
+            crate::sketch_tools::record_history_constraint_diff(self, before, flash_added);
+        }
+        out
     }
 
     /// Commit already prepared rendering through the same window post-hooks,
